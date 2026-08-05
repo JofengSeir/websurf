@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { DEFAULT_SETTINGS } from './Settings.config.js';
 import type { Settings } from './Settings.types.js';
 

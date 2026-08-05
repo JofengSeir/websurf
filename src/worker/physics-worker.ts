@@ -96,10 +96,10 @@ export class PhysicsWorker {
 
 	/** Stats 回传累加器（秒）。 */
 	private statsAccumulator = 0;
-	/** FPS 计数（帧数 + 时间累加）。 */
+	/** FPS 计数（帧数 + 墙钟窗口；不依赖物理 dt——dt 含 Worker 处理延迟会虚低显示）。 */
 	private fpsFrameCount = 0;
-	private fpsAccumulator = 0;
-	/** 当前 FPS（平滑后）。 */
+	private fpsWallStart = 0;
+	/** 当前 FPS（frame 信号实际处理频率，0.5s 墙钟窗口）。 */
 	private currentFps = 0;
 
 	/** 是否已加载场景（防止 init 之前误处理 frame 信号）。 */
@@ -368,10 +368,10 @@ export class PhysicsWorker {
 		}
 	}
 
-	/** frame 信号：驱动物理循环（阶段二）。 */
-	private handleFrame(msg: FrameSignalMessage): void {
+	/** frame 触发信号：驱动物理循环（阶段二；dt 由 Worker 侧 performance.now() 计算）。 */
+	private handleFrame(_msg: FrameSignalMessage): void {
 		if (!this.sceneReady) return;
-		this.physicsLoop.frame(msg.t);
+		this.physicsLoop.frame();
 	}
 
 	/** input 消息（仅回退模式）：注入输入样本。 */
@@ -595,14 +595,17 @@ export class PhysicsWorker {
 
 	/** 周期性回传 stats 与 game-stats 到主线程（10Hz）。 */
 	private emitStats(dt: number): void {
-		// FPS 计算（指数平滑，始终运行以保证需要时立即可用）
+		// FPS 计算（墙钟窗口 0.5s）：frame 信号实际处理频率。
+		// 不用物理 dt 累加——P0 改造后 dt 来自 Worker 侧 performance.now() 差值，
+		// 包含消息延迟/GC/任务调度抖动，会把显示值压低（改造前 dt 来自主线程帧
+		// 间隔，不受 Worker 抖动影响）。墙钟统计对抖动免疫。
 		this.fpsFrameCount++;
-		this.fpsAccumulator += dt;
-		if (this.fpsAccumulator >= 0.5) {
-			// 0.5 秒更新一次 FPS（避免抖动）
-			this.currentFps = Math.round(this.fpsFrameCount / this.fpsAccumulator);
+		const wallNow = performance.now();
+		if (this.fpsWallStart === 0) this.fpsWallStart = wallNow;
+		if (wallNow - this.fpsWallStart >= 500) {
+			this.currentFps = Math.round((this.fpsFrameCount * 1000) / (wallNow - this.fpsWallStart));
 			this.fpsFrameCount = 0;
-			this.fpsAccumulator = 0;
+			this.fpsWallStart = wallNow;
 		}
 
 		// HUD 不可见时跳过全部 stats/game-stats 发送（减少性能浪费）

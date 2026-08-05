@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { normalize, set } from '../../math/vec3.js';
 import { currentMaxSpeed } from '../CurrentMaxSpeed/CurrentMaxSpeed.js';
 import { DEG2RAD, type MovementContext } from '../MovementContext.js';

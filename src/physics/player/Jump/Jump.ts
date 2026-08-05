@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { addStamina, staminaPenaltyMultiplier } from '../../physics/Stamina/Stamina.js';
 import { currentMaxSpeed } from '../CurrentMaxSpeed/CurrentMaxSpeed.js';
 import type { MovementContext } from '../MovementContext.js';

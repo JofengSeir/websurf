@@ -4,4 +4,6 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 export const ACCELERATE = 10; // sv_accelerate

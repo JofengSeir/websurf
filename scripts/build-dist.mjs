@@ -16,7 +16,7 @@
  * 用法：node scripts/build-dist.mjs
  */
 import { build } from 'esbuild';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -30,6 +30,8 @@ const commonOptions = {
 	minify: true,
 	sourcemap: false,
 	write: false,
+	// 保留 @license 法律注释（@unsurf/cs-movement Apache-2.0 要求，勿移除）
+	legalComments: 'eof',
 	// IIFE 不支持 import.meta.url；用占位符替换（内嵌模式不走 fetch 路径）
 	define: {
 		'import.meta.url': JSON.stringify('about:blank'),
@@ -80,7 +82,18 @@ async function main() {
 	if (!existsSync(distDir)) mkdirSync(distDir, { recursive: true });
 
 	// 4a. 生成 dist/app.js（前缀注入全局变量 + IIFE app 代码）
+	// 头部附上游 @license 声明（@unsurf/cs-movement Apache-2.0 要求保留；
+	// index.ts 未被 bundle 引用，esbuild 不会自动带入，手动附加）
+	const upstreamLicense =
+		'/*!\n' +
+		' * @license\n' +
+		' * @unsurf/cs-movement — Counter-Strike style movement physics\n' +
+		' * Copyright 2026 unsurf\n' +
+		' * SPDX-License-Identifier: Apache-2.0\n' +
+		' * (modified by WebSurf — see NOTICE.cs-movement)\n' +
+		' */\n';
 	const embeddedPreamble =
+		upstreamLicense +
 		`/* WebSurf embedded build — auto-generated, do not edit */\n` +
 		`globalThis.__VBSP_WASM_B64__=${JSON.stringify(wasmBase64)};\n` +
 		`globalThis.__VBSP_WORKER_JS__=${JSON.stringify(workerCode)};\n`;
@@ -98,6 +111,11 @@ async function main() {
 	);
 	writeFileSync(join(distDir, 'index.html'), distHtml);
 	console.log(`      dist/index.html: ${(distHtml.length / 1024).toFixed(0)} KB`);
+
+	// 4c. 附带第三方许可证副本（@unsurf/cs-movement Apache-2.0 要求随分发提供 LICENSE + NOTICE）
+	copyFileSync(join(root, 'src', 'physics', 'LICENSE'), join(distDir, 'LICENSE.cs-movement'));
+	copyFileSync(join(root, 'src', 'physics', 'NOTICE'), join(distDir, 'NOTICE.cs-movement'));
+	console.log('      已附带 LICENSE.cs-movement / NOTICE.cs-movement (Apache-2.0)');
 
 	console.log('\n=== 构建完成 ===');
 	console.log(`总大小: ${(finalAppJs.length / 1024 / 1024).toFixed(2)} MB`);

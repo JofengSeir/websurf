@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 
 // Public surface. The simulation core (vec3, constants, physics/*, player/*,
 // PlayerController.tick) is renderer-agnostic and runs headless in node. The

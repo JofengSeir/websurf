@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 // Tiny mutable vector helpers — plain objects, no allocation in hot paths.
 // Y is up (Source's z maps to y).
 

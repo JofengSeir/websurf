@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 // Per-tick player simulation following Source's CGameMovement pipeline:
 // duck -> ladder -> CheckJumpButton -> Friction/Accelerate (ground) or
 // AirAccelerate (air/surf) -> gravity halves around TryPlayerMove ->

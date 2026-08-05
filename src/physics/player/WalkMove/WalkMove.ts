@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { length2D, lengthSq, set } from '../../math/vec3.js';
 import { getRuntimePhysics } from '../../runtime.js';
 import { accelerate } from '../../physics/Accelerate/Accelerate.js';

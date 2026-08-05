@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 // All values are in Source engine units (1 unit = 1 inch) and match CS:GO's
 // actual gameplay cvars. Axis note: this project uses Three.js Y-up, so
 // Source's vertical `z` axis maps to `y` everywhere here.

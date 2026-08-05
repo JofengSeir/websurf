@@ -3,3 +3,18 @@ Copyright 2026 unsurf
 
 This product includes software developed by unsurf
 (https://github.com/unsurf/cs-movement).
+
+---
+
+Modifications:
+
+This distribution contains modified files derived from @unsurf/cs-movement,
+licensed under the Apache License, Version 2.0. Modified files carry the
+"Modified by WebSurf" notice in their headers (per upstream requirement,
+the @license headers are kept intact).
+
+Files added by WebSurf (not present upstream):
+  - src/physics/param-defs.ts
+  - src/physics/physics-params.ts
+  - src/physics/runtime.ts
+  - src/physics/physics/Collision/brush-grid.ts

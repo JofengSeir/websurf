@@ -11,7 +11,7 @@
 name = "websurf-wasm"
 version = "0.1.0"
 edition = "2021"
-description = "WebSurf WASM core: BSP parsing, GLB export, brush planes export "
+description = "WebSurf WASM core: BSP parsing, GLB export, brush planes export"
 license = "MIT"
 
 [lib]

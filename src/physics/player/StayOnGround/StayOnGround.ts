@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { STANDABLE_NORMAL } from '../../constants.js';
 import { copy, set } from '../../math/vec3.js';
 import { STEP_HEIGHT } from '../StepMove/StepMove.config.js';
