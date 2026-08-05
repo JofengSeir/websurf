@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@physics/*": ["src/physics/*"],
+      "@world/*": ["src/world/*"],
+      "@renderer/*": ["src/renderer/*"],
+      "@input/*": ["src/input/*"],
+      "@worker/*": ["src/worker/*"]
+    }
+  },
+  "include": ["src", "web/vendor"],
+  "exclude": ["node_modules", "pkg", "crates"]
+}

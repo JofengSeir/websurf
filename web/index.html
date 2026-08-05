@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebSurf</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px;
+      color: #d4d4d4;
+      background: #1e1e1e;
+    }
+    button {
+      padding: 3px 10px;
+      font-size: 12px;
+      border: 1px solid #3c3c3c;
+      background: #2d2d2d;
+      color: #d4d4d4;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: #3a3a3a; border-color: #4a90e2; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    input[type="file"] { font-size: 11px; color: #d4d4d4; }
+    input[type="file"]::-webkit-file-upload-button {
+      background: #2d2d2d; color: #d4d4d4; border: 1px solid #3c3c3c;
+      padding: 2px 8px; border-radius: 2px; cursor: pointer;
+    }
+
+    /* === 整体布局 === */
+    #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
+    #topbar {
+      flex: 0 0 32px; height: 32px;
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 8px;
+      background: #252526; border-bottom: 1px solid #3c3c3c;
+    }
+    #topbar .title { font-size: 13px; font-weight: bold; color: #4a90e2; margin-right: 12px; white-space: nowrap; }
+    #topbar .spacer { flex: 1; }
+    #main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+    #sidebar {
+      flex: 0 0 300px; width: 300px;
+      background: #252526; border-right: 1px solid #3c3c3c;
+      overflow-y: auto; overflow-x: hidden;
+      /* 隐藏滚动条（保留滚动能力，视觉整洁） */
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    #sidebar::-webkit-scrollbar { display: none; }
+    /* 紧凑布局：减少面板间距，让内容在无滚动条下尽量完整可见 */
+    #sidebar details { border-bottom: 1px solid #2a2a2a; }
+    #sidebar summary { padding: 5px 8px; }
+    #sidebar .acc-body { padding: 3px 8px 6px 8px; }
+    #sidebar .ctrl-grid { gap: 3px 8px; }
+    #previewArea { flex: 1; position: relative; overflow: hidden; background: #222; min-width: 0; }
+    #preview { width: 100%; height: 100%; display: block; cursor: pointer; }
+
+    /* === 状态栏 === */
+    #status {
+      padding: 6px 8px; font-size: 11px;
+      color: #888; border-bottom: 1px solid #2a2a2a;
+      background: #252526; font-style: italic;
+    }
+    #status.success { color: #4a4; font-weight: bold; font-style: normal; }
+    #status.error { color: #f44; font-weight: bold; font-style: normal; }
+    #error {
+      color: #f44; font-weight: bold;
+      padding: 6px 8px; font-size: 11px;
+      background: #2a1515; border-bottom: 1px solid #3c3c3c;
+    }
+
+    /* === 手风琴（details/summary） === */
+    details {
+      border-bottom: 1px solid #2a2a2a;
+    }
+    summary {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 8px; cursor: pointer;
+      font-size: 12px; font-weight: bold; color: #d4d4d4;
+      user-select: none;
+      list-style: none;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::before {
+      content: "\25B6"; color: #888; font-size: 10px;
+      display: inline-block; width: 12px;
+      transition: transform 0.15s;
+    }
+    details[open] > summary::before { transform: rotate(90deg); }
+    summary:hover { background: #2d2d2d; }
+    .acc-body { padding: 4px 8px 8px 8px; }
+
+    /* === 控件网格 === */
+    .ctrl-grid {
+      display: grid;
+      grid-template-columns: 110px 1fr 50px;
+      gap: 4px 8px;
+      align-items: center;
+      font-size: 12px;
+    }
+    .ctrl-grid label { color: #b0b0b0; }
+    .ctrl-grid input[type="range"] { width: 100%; accent-color: #4a90e2; }
+    .ctrl-grid .val {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #4a90e2;
+      font-weight: bold;
+      font-size: 11px;
+    }
+    .ctrl-grid select {
+      width: 100%; padding: 2px 4px;
+      background: #1e1e1e; color: #d4d4d4;
+      border: 1px solid #3c3c3c; border-radius: 2px;
+      font-size: 11px;
+    }
+    .ctrl-grid input[type="checkbox"] { accent-color: #4a90e2; width: 14px; height: 14px; }
+    .ctrl-full { grid-column: 1 / -1; }
+    .ctrl-checkbox-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 2px 0;
+    }
+    .ctrl-checkbox-row label { color: #d4d4d4; cursor: pointer; }
+    /* 参数数值输入框（允许范围内任意输入，与滑块双向同步） */
+    .param-num {
+      width: 56px;
+      background: #1e1e1e; color: #4a90e2;
+      border: 1px solid #3c3c3c; border-radius: 2px;
+      text-align: right; font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      padding: 1px 3px;
+    }
+    .param-num:focus { outline: none; border-color: #4a90e2; }
+
+    /* === 元数据 KV === */
+    .kv { display: grid; grid-template-columns: 110px 1fr; gap: 2px 8px; font-size: 11px; }
+    .kv-row { display: contents; }
+    .kv .k { color: #888; }
+    .kv .v { color: #d4d4d4; }
+
+    /* === 出生点选择 === */
+    .spawn-select {
+      width: 100%; padding: 2px 4px;
+      background: #1e1e1e; color: #d4d4d4;
+      border: 1px solid #3c3c3c; border-radius: 2px;
+      font-size: 11px;
+      max-height: 200px;
+    }
+
+    /* === 预览区悬浮元素 === */
+    #hud {
+      position: absolute; top: 8px; right: 8px;
+      background: rgba(20, 20, 20, 0.75);
+      color: #ddd; padding: 4px 8px; border-radius: 2px;
+      font-size: 11px; font-family: ui-monospace, Consolas, monospace;
+      pointer-events: none;
+      border: 1px solid #3c3c3c;
+      line-height: 1.5;
+      min-width: 200px;
+      max-width: 400px;
+      white-space: pre;
+    }
+    #hud .label { color: #888; }
+    #hud .v { color: #4a90e2; }
+    /* 中心准星 */
+    #crosshair {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 10;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: rgba(255, 255, 255, 0.7);
+      box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+    }
+    #crosshair::before {
+      width: 2px; height: 12px; top: -6px; left: -1px;
+    }
+    #crosshair::after {
+      width: 12px; height: 2px; top: -1px; left: -6px;
+    }
+    #crosshair.hidden { display: none; }
+    #hints {
+      position: absolute; bottom: 8px; right: 8px;
+      background: rgba(20, 20, 20, 0.75);
+      color: #aaa; padding: 4px 8px; border-radius: 2px;
+      font-size: 11px;
+      pointer-events: none;
+      border: 1px solid #3c3c3c;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- ============ 顶栏 ============ -->
+    <div id="topbar">
+      <span class="title">WebSurf</span>
+      <span class="spacer"></span>
+    </div>
+
+    <!-- ============ 主容器 ============ -->
+    <div id="main">
+      <!-- ===== 侧边栏 ===== -->
+      <div id="sidebar">
+        <div id="status" class="status">正在加载 WASM 模块...</div>
+        <div id="error" class="error" style="display:none;"></div>
+
+        <!-- --- 文件输入 --- -->
+        <details open>
+          <summary>文件输入</summary>
+          <div class="acc-body">
+            <input type="file" id="bspFile" accept=".bsp" />
+          </div>
+        </details>
+
+        <!-- --- 视距与视角 --- -->
+        <details open>
+          <summary>视距与视角</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid">
+              <label>鼠标灵敏度</label>
+              <input type="range" id="mouseSens" min="0.1" max="5.0" step="0.1" value="1.5" />
+              <div class="val" id="mouseSensVal">1.50</div>
+
+              <label>Q/E 旋转速度</label>
+              <input type="range" id="yawBindSpeed" min="0" max="720" step="10" value="210" />
+              <div class="val" id="yawBindSpeedVal">210</div>
+
+              <label>视距上限</label>
+              <input type="range" id="cullDistance" min="1000" max="50000" step="100" value="12800" disabled />
+              <div class="val" id="cullDistanceVal">12800</div>
+
+              <div class="ctrl-checkbox-row ctrl-full" style="margin-top:2px;">
+                <input type="checkbox" id="pvsEnabled" disabled />
+                <label for="pvsEnabled">PVS 剔除</label>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- --- 物理 --- -->
+        <details open>
+          <summary>物理</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid">
+              <label>物理模式</label>
+              <select id="physicsMode" disabled>
+                <option value="physics" selected>HL 物理（重力/碰撞）</option>
+                <option value="noclip">Noclip 自由飞行</option>
+              </select>
+              <div></div>
+
+              <label title="传送触发判定方式">传送触发</label>
+              <div style="display:flex; flex-direction:column; gap:2px;">
+                <label style="font-size:12px; cursor:pointer; color:#d4d4d4; white-space:nowrap;">
+                  <input type="radio" name="teleportTriggerMode" value="start-touch" checked style="margin-right:3px;" />StartTouch 边沿
+                </label>
+                <label style="font-size:12px; cursor:pointer; color:#d4d4d4; white-space:nowrap;">
+                  <input type="radio" name="teleportTriggerMode" value="start-touch-grounded" style="margin-right:3px;" />落地检测
+                </label>
+              </div>
+              <div></div>
+
+              <div class="ctrl-full" style="margin-top:4px;">
+                <button id="respawnBtn" disabled>重生</button>
+              </div>
+            </div>
+
+            <!-- 落地检测：连续落地帧数（仅落地检测模式显示） -->
+            <div id="groundedFramesRow" style="display:none; border-top: 1px solid #2a2d3a; margin-top: 6px; padding-top: 6px;">
+              <div style="font-size: 11px; color: #9098b5; margin-bottom: 4px;">
+                落地检测需连续着地帧数（1=单帧即触发；3-5=过滤瞬时触地；10=严格）
+              </div>
+              <div class="ctrl-grid">
+                <label>连续落地帧数</label>
+                <input type="range" id="groundedFramesRange" min="1" max="30" step="1" value="1" />
+                <div class="val" id="groundedFramesVal">1</div>
+              </div>
+            </div>
+
+            <!-- 碰撞箱体积（物理控制面板） -->
+            <div style="border-top: 1px solid #2a2d3a; margin-top: 6px; padding-top: 6px;">
+              <div style="font-size: 11px; color: #9098b5; margin-bottom: 4px;">
+                碰撞箱体积（CS:S 基准 32×32×72 / 蹲 54，倍率或数值）
+              </div>
+              <div class="ctrl-grid">
+                <label title="按倍率缩放（相对默认体型）">倍率</label>
+                <input type="range" id="hullScale" min="0.5" max="2" step="0.05" value="1" />
+                <div class="val" id="hullScaleVal">1.00×</div>
+
+                <label title="碰撞箱半宽（默认 16 → 32×32 footprint）">半宽</label>
+                <input type="range" id="hullHalfWidth" min="4" max="32" step="1" value="16" />
+                <div class="val"><input type="number" id="hullHalfWidthNum" class="param-num" min="4" max="32" step="any" value="16" /></div>
+
+                <label title="站立碰撞箱高度（CS:S 默认 72）">站高</label>
+                <input type="range" id="hullStandHeight" min="36" max="144" step="1" value="72" />
+                <div class="val"><input type="number" id="hullStandHeightNum" class="param-num" min="36" max="144" step="any" value="72" /></div>
+
+                <label title="蹲下碰撞箱高度（cs-movement fork 默认 54，原版 CS:S 为 36）">蹲高</label>
+                <input type="range" id="hullDuckHeight" min="24" max="108" step="1" value="54" />
+                <div class="val"><input type="number" id="hullDuckHeightNum" class="param-num" min="24" max="108" step="any" value="54" /></div>
+
+                <div class="ctrl-checkbox-row ctrl-full">
+                  <input type="checkbox" id="autoRestoreHull" checked />
+                  <label for="autoRestoreHull" title="体积被改大导致卡住时自动恢复默认体积">卡住自动恢复默认体积</label>
+                </div>
+                <div class="ctrl-full" style="display: flex; gap: 6px; align-items: center; margin-top: 2px;">
+                  <button id="resetHullBtn" style="padding: 2px 8px;">恢复默认体积</button>
+                  <span id="hullSourceBadge" style="font-size: 10px; color: #9098b5;"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 移动/力学参数（动态渲染） -->
+            <div style="border-top: 1px solid #2a2d3a; margin-top: 6px; padding-top: 6px;">
+              <div style="font-size: 11px; color: #9098b5; margin-bottom: 4px;">
+                物理参数（地速 / 重力 / 加速 / 跳跃等，拖动实时生效）
+              </div>
+              <div id="physicsParamList" class="ctrl-grid"></div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2d3a;">
+                <button id="resetAllPhysicsBtn" style="padding: 2px 8px;">恢复全部默认</button>
+                <span style="font-size: 10px; color: #6a6f8a;">
+                  来源：<span style="color:#4a4;">模式默认</span> / <span style="color:#4a90e2;">手动修改</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- --- 出生点 --- -->
+        <details>
+          <summary>出生点</summary>
+          <div class="acc-body">
+            <select id="spawnSelect" class="spawn-select" disabled>
+              <option>（加载 BSP 后填充）</option>
+            </select>
+          </div>
+        </details>
+
+        <!-- --- 自定义传送点 --- -->
+        <details id="customTeleportDetails">
+          <summary>自定义传送点</summary>
+          <div class="acc-body">
+            <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+              <button id="capturePosBtn" disabled title="保存当前玩家位置为传送点">保存当前位置</button>
+              <button id="addTeleportBtn" disabled title="手动输入坐标添加传送点">手动添加</button>
+            </div>
+            <form id="addTeleportForm" style="display:none; flex-direction:column; gap:4px; margin-bottom:6px;">
+              <div style="display:flex; gap:4px;">
+                <input id="tpX" type="number" step="any" placeholder="X" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
+                <input id="tpY" type="number" step="any" placeholder="Y" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
+                <input id="tpZ" type="number" step="any" placeholder="Z" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
+              </div>
+              <input id="tpName" type="text" placeholder="名称（可选）" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
+              <input id="tpYaw" type="number" step="any" placeholder="yaw（可选，留空=保持当前朝向）" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
+              <div style="display:flex; gap:6px; margin-top:2px;">
+                <button type="submit" style="padding:2px 10px;">添加</button>
+                <button type="button" id="tpCancel" style="padding:2px 10px;">取消</button>
+              </div>
+            </form>
+            <div id="customTeleportList" style="font-size: 11px; color: #888;">
+              尚未添加传送点。保存当前位置或手动输入坐标，一键传送。
+            </div>
+          </div>
+        </details>
+
+        <!-- --- 显示设置 --- -->
+        <details open>
+          <summary>显示设置</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid">
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="hudVisible" checked />
+                <label for="hudVisible">显示 HUD 信息</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showCrosshair" checked />
+                <label for="showCrosshair">显示准星</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showSolids" />
+                <label for="showSolids" title="玩家附近碰撞箱线框：地面绿/斜坡黄/墙红">显示实体碰撞箱</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showTriggers" />
+                <label for="showTriggers" title="传送触发区域线框：青=已链接/紫=孤儿/灰=禁用/橙=非玩家">显示触发碰撞箱</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPlaneInfo" />
+                <label for="showPlaneInfo" title="准星对准模型/实体面/触发面时，在 HUD 显示其名称与属性信息">准星信息</label>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- --- 元数据 --- -->
+        <details>
+          <summary>元数据</summary>
+          <div class="acc-body">
+            <div id="metadata" class="kv">尚未解析</div>
+          </div>
+        </details>
+      </div>
+
+      <!-- ===== 预览区 ===== -->
+      <div id="previewArea">
+        <canvas id="preview" tabindex="0"></canvas>
+        <div id="crosshair"></div>
+        <div id="hud">
+          <div id="stats">FPS —  位置 —  速度 —</div>
+          <div id="cullStats">可见 —  PVS —  LOD —</div>
+          <div id="gameStats">计时 —  检查点 —</div>
+          <div id="planeInfo">准星 —</div>
+        </div>
+        <div id="hints">
+          点击画布锁定鼠标 / WASD 移动 / Space 跳跃 / Ctrl 蹲下 / Esc 退出
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 模块脚本 ============ -->
+  <!-- app.js 由 esbuild 从 src/app.ts 打包生成（npm run build:app） -->
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
