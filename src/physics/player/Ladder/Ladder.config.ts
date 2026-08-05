@@ -6,5 +6,5 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-export const LADDER_SPEED = 200; // fixed climb speed
-export const LADDER_JUMP_OFF_SPEED = 270; // push away from ladder on jump
+export const LADDER_SPEED = 200; // 固定攀爬速度
+export const LADDER_JUMP_OFF_SPEED = 270; // 跳跃时推离梯子

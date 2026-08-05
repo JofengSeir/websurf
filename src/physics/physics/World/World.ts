@@ -14,12 +14,11 @@ import type { Brush, LadderVolume, TraceResult } from '../Collision/Collision.ty
 /**
  * 世界碰撞容器。
  *
- * 用均匀网格（BrushGrid）做 broadphase：碰撞体可达 2.7 万个时，
+ * 用均匀网格（BrushGrid）做 broadphase：碰撞体达 2.7 万时，
  * `trace`/`isPositionFree` 只查询扫描体覆盖的 cell，候选集从全量降到数百。
  *
- * 索引**惰性构建** + 长度变化检测：
- * - 生产路径一次性 `solids = [...]` 后只 build 一次；
- * - 测试/运行时直接 `world.solids.push(...)` 也能自动失效重建（长度变化即重建）。
+ * 索引**惰性构建** + 长度变化检测：生产路径一次性 `solids = [...]` 后只 build 一次；
+ * 测试/运行时直接 `world.solids.push(...)` 也会因长度变化自动失效重建。
  */
 export class World {
   solids: Brush[] = [];
@@ -51,7 +50,7 @@ export class World {
     return traceBox(start, end, mins, maxs, candidates);
   }
 
-  /** Can a hull of mins/maxs exist at origin without intersecting the world? */
+  /** mins/maxs 碰撞箱在 origin 处能否不与世界相交。 */
   isPositionFree(origin: Vec3, mins: Vec3, maxs: Vec3): boolean {
     this.ensureGrid();
     const candidates = this.grid.query(
@@ -77,9 +76,7 @@ export class World {
     return null;
   }
 
-  /**
-   * 惰性构建空间索引（引用或长度变化时重建）。
-   */
+  /** 惰性构建空间索引（引用或长度变化时重建）。 */
   private ensureGrid(): void {
     if (this.gridBuiltFor !== this.solids || this.gridBuiltLen !== this.solids.length) {
       this.grid.build(this.solids);

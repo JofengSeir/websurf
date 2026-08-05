@@ -62,15 +62,12 @@ export interface LightingConfig {
 export interface InputConfig {
   sensitivity: number;
   pitchLimit: number; // 度
-  /** Q/E 键 yaw 旋转速度（度/秒，turn bind）。
-   * 按住 Q/E 键时视角水平旋转，滑块控制速度。
-   * 默认 180 度/秒（约 0.5 秒转半圈）。 */
+  /** Q/E 键 yaw 旋转速度（度/秒，turn bind），按住时视角水平旋转。默认 180 度/秒。 */
   yawBindSpeed: number;
 }
 
 export interface HudConfig {
-  /** 是否显示右上角 HUD 信息（stats/cullStats/gameStats/planeInfo）。
-   * 关闭时 Worker 停止 stats 发送和平面射线检测，减少性能浪费。 */
+  /** 显示右上角 HUD（stats/cullStats/gameStats/planeInfo）；关闭时 Worker 停止 stats 发送与平面检测，省性能。 */
   visible: boolean;
   /** 是否显示中心准星。 */
   showCrosshair: boolean;
@@ -83,23 +80,11 @@ export interface DebugConfig {
   showTriggers: boolean;
   /** 准星射线检测（hover 查看模型/实体平面/触发面信息）。 */
   showPlaneInfo: boolean;
-  /**
-   * 传送触发模式。
-   *
-   * - `start-touch`: StartTouch 边沿触发（CS:S 引擎原生行为，默认）
-   * - `start-touch-grounded`: StartTouch + 着地状态（surf 服务器常见行为，
-   *   "空中不传送，落到地面才传送"）
-   */
+  /** 传送触发模式：start-touch（StartTouch 边沿触发，CS:S 原生行为，默认）/
+   * start-touch-grounded（StartTouch + 着地状态，"落地才传送"）。 */
   teleportTriggerMode: 'start-touch' | 'start-touch-grounded';
-  /**
-   * 触发传送所需的连续着地帧数阈值（仅 start-touch-grounded 模式生效）。
-   *
-   * - 1: 单帧落地即触发（最敏感，原始行为）
-   * - 3-5: 过滤 surf 坡道短暂触地（典型 ckSurf 插件近似）
-   * - 10: 严格模式，要求持续约 167ms 落地
-   *
-   * 默认 1，保持与原 start-touch-grounded 行为兼容。
-   */
+  /** 触发传送所需连续着地帧数（仅 start-touch-grounded 生效）：1 单帧触发 /
+   * 3-5 过滤坡道短暂触地 / 10 严格模式。默认 1。 */
   groundedFramesRequired: number;
 }
 
@@ -149,10 +134,10 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     cooldownMs: 600,
   },
   lod: {
-    // PVS 默认开启；判定每帧执行，视角转动时剔除即时响应，显著降低 draw calls。
+    // PVS 默认开启，每帧判定，视角转动时剔除即时响应，显著降低 draw calls
     pvsEnabled: true,
     updateInterval: 1,
-    cullDistance: 12800, // 默认视距上限（加载后由场景计算覆盖，见 lod-manager）
+    cullDistance: 12800, // 默认视距上限（加载后由场景覆盖，见 lod-manager）
   },
   lighting: {
     ambientColor: 0xffffff,

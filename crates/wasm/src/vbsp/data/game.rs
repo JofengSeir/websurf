@@ -49,7 +49,7 @@ impl GameLumpHeader {
                 .get(lump.offset as usize..(lump.offset + compressed_size) as usize)
                 .ok_or_else(|| BspError::GameLumpOutOfBounds(lump.clone()))?;
             let mut output = lzma_decompress_with_header(raw_data, lump.length as usize)?;
-            // some compressed lumps are a bit to small for some reason
+            // 部分压缩 lump 实际略小，补 8 字节填充
             output.extend_from_slice(&[0; 8]);
             Ok(Cow::Owned(output))
         } else {
@@ -138,7 +138,7 @@ pub struct StaticPropLump {
 }
 
 impl StaticPropLump {
-    /// Get the rotation of the prop as quaternion
+    /// 以四元数形式返回道具的旋转
     pub fn rotation(&self) -> Quaternion<f32> {
         self.angles.as_quaternion()
     }
@@ -247,7 +247,7 @@ bitflags! {
     }
 }
 
-// same as StaticPropLump but with derived BinRead
+// 与 StaticPropLump 相同但由派生 BinRead 读取
 #[derive(BinRead)]
 struct StaticPropLumpV10 {
     pub origin: Vector,
@@ -255,7 +255,7 @@ struct StaticPropLumpV10 {
     pub prop_type: u16,
     pub first_leaf: u16,
     pub leaf_count: u16,
-    // pad, not align
+    // pad，而非 align
     #[br(pad_after = 1)]
     pub solid: SolidType,
     pub skin: i32,

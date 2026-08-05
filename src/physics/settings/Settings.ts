@@ -12,7 +12,7 @@ import type { Settings } from './Settings.types.js';
 export type { CrosshairSettings, StaminaSettings, PerfSettings, Settings } from './Settings.types.js';
 export { DEFAULT_SETTINGS } from './Settings.config.js';
 
-// v2: defaults moved to nopre-KZ tuning (airaccelerate 100, takeoff clamp).
+// v2：默认值改为 nopre-KZ 调校（airaccelerate 100、起跳钳制）。
 const STORAGE_KEY = 'hns-movement-sandbox.settings.v2';
 
 export function loadSettings(): Settings {

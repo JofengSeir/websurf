@@ -13,19 +13,19 @@ import { tryPlayerMove } from '../TryPlayerMove/TryPlayerMove.js';
 import { STEP_HEIGHT } from './StepMove.config.js';
 
 /**
- * Source's StepMove: run the move directly, then again with an 18-unit
- * step-up first; keep whichever version travelled farther horizontally.
+ * Source 的 StepMove：先直接移动，再先抬升 18 单位再移动；
+ * 保留水平位移更远的那个结果。
  */
 export function stepMove(ctx: MovementContext, dt: number): void {
   const startOrigin = clone(ctx.origin);
   const startVel = clone(ctx.velocity);
 
-  // Attempt 1: direct.
+  // 尝试 1：直接。
   tryPlayerMove(ctx, dt);
   const downOrigin = clone(ctx.origin);
   const downVel = clone(ctx.velocity);
 
-  // Attempt 2: up, move, down.
+  // 尝试 2：上、移、下。
   copy(ctx.origin, startOrigin);
   copy(ctx.velocity, startVel);
   let tr = ctx.world.trace(
@@ -63,8 +63,7 @@ export function stepMove(ctx: MovementContext, dt: number): void {
     copy(ctx.origin, downOrigin);
     copy(ctx.velocity, downVel);
   } else {
-    // Keep the stepped result but take the direct move's vertical velocity,
-    // as Source does.
+    // 保留抬升结果，但采用直接移动的垂直速度（同 Source）。
     ctx.velocity.y = downVel.y;
   }
 }

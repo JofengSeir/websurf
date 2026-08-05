@@ -17,7 +17,7 @@ impl<'a> BspFile<'a> {
             s: b'S',
             p: b'P',
         };
-        // TODO: Use this to decide on the version to parse it as
+        // TODO: 用此版本号决定按哪个版本解析
         const EXPECTED_VERSION: u32 = 0x14;
 
         let mut cursor = Cursor::new(data);

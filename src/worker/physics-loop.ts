@@ -2,7 +2,7 @@
  * Worker 侧物理循环（渲染搬回主线程后，Worker 只保留密集物理计算）。
  *
  * 对应重构时序图阶段二（Worker 隔离区）：
- * - 收到主线程 `frame` 信号（携带主线程时间戳 t）→ 计算 dt
+ * - 收到主线程 `frame` 信号 → 计算 dt
  * - 从共享内存读取输入（鼠标增量 + 按键位掩码）→ 应用到视角/移动
  * - 固定步长（默认 1/128s，最多 MAX_FIXED_STEPS 步/帧）执行 PlayerController.tick
  * - 结果写入共享内存输出区（加写锁 + seq 版本号），供主线程安全读取 + LERP
@@ -22,7 +22,7 @@ const DEG2RAD = Math.PI / 180;
 const M_YAW = 0.022;
 /** pitch 限位（度）。 */
 const PITCH_CLAMP_DEG = 89;
-/** 默认物理固定步长（64Hz，跟随 config.physics.tickRate；构造时以配置为准）。 */
+/** 默认物理固定步长（64Hz，构造时以 config.physics.tickRate 为准）。 */
 const FIXED_DT = 1 / 64;
 /** 每帧最多固定步数（低帧率保护）。 */
 const MAX_FIXED_STEPS = 10;
@@ -44,18 +44,16 @@ function emptyKeys(): KeyState {
   };
 }
 
-/** noclip 模式临时视角/位置（player 未创建或 noclip 模式使用）。 */
+/** noclip 模式临时视角/位置（player 未创建或 noclip 模式时使用）。 */
 interface NoclipView {
   yaw: number;
   pitch: number;
   pos: { x: number; y: number; z: number };
 }
 
-/**
- * Worker 物理循环。
- */
+/** Worker 物理循环。 */
 export class PhysicsLoop {
-  /** 物理后回调（传送检测/游戏状态/周期 stats，由 Worker 设置）。 */
+  /** 物理后回调（传送检测/游戏状态/周期 stats）。 */
   onAfterPhysics: ((dt: number, didPhysicsTick: boolean) => void) | null = null;
 
   private playerController: PlayerController | null = null;
@@ -72,7 +70,7 @@ export class PhysicsLoop {
     private readonly config: RuntimeConfig,
     private readonly shared: SharedState,
   ) {
-    // 物理固定步长跟随 config.physics.tickRate（默认 64Hz；面板可调 48-128）
+    // 固定步长跟随 config.physics.tickRate（默认 64Hz；面板可调 48-128）
     if (config.physics.tickRate > 0) {
       this.fixedDt = 1 / config.physics.tickRate;
     }
@@ -90,7 +88,7 @@ export class PhysicsLoop {
     if (this.physicsMode === mode) return;
     if (this.playerController) {
       if (mode === 'noclip') {
-        // physics → noclip：noclipView 继承 player（noclip 后视角/位置写入 noclipView）
+        // physics → noclip：noclipView 继承 player
         this.noclipView.yaw = this.playerController.yaw;
         this.noclipView.pitch = this.playerController.pitch;
         this.noclipView.pos = { ...this.playerController.origin };
@@ -122,7 +120,7 @@ export class PhysicsLoop {
     }
   }
 
-  /** 统一设置视角（度）：同时更新 noclipView 与 player（若存在），并立即写一帧输出。 */
+  /** 统一设置视角（度）：更新 noclipView 与 player，并立即写一帧输出。 */
   setView(yawDeg: number, pitchDeg: number): void {
     this.noclipView.yaw = yawDeg;
     this.noclipView.pitch = pitchDeg;
@@ -138,7 +136,7 @@ export class PhysicsLoop {
     this.moveAccumulator = 0;
   }
 
-  /** 立即写一帧共享输出（传送/模式切换/出生等外部变更后调用）。 */
+  /** 立即写一帧共享输出（传送/模式切换/出生后调用）。 */
   writeFrame(): void {
     this.writeFrameInternal();
   }
@@ -148,7 +146,7 @@ export class PhysicsLoop {
     return this.physicsMode;
   }
 
-  /** noclip 模式位置/视角只读（stats / 模式切换 / 传送对齐用）。 */
+  /** noclip 模式位置/视角只读（stats/模式切换/传送对齐用）。 */
   getNoclipState(): { pos: { x: number; y: number; z: number }; yaw: number; pitch: number } {
     return {
       pos: { ...this.noclipView.pos },
@@ -157,7 +155,7 @@ export class PhysicsLoop {
     };
   }
 
-  /** 设置 noclip 位置（传送对齐用，noclip 模式下相机位置权威源在 Worker）。 */
+  /** 设置 noclip 位置（传送对齐用；noclip 模式下位置权威源在 Worker）。 */
   setNoclipPos(pos: { x: number; y: number; z: number }): void {
     this.noclipView.pos = { ...pos };
   }
@@ -168,8 +166,8 @@ export class PhysicsLoop {
    * 收到主线程 frame 触发信号：读共享输入环形缓冲（批量聚合）→
    * 固定步长物理 → 写共享输出。
    *
-   * dt 由 Worker 侧 performance.now() 计算——Worker 与主线程共享同一
-   * performance 时钟源，快照 timeMs 与主线程渲染时刻可比，LERP 插值基准不变。
+   * dt 由 Worker 侧 performance.now() 计算——与主线程同源时钟，
+   * 快照 timeMs 可比，LERP 插值基准不变。
    * M2 Worker 自驱循环落地后，本方法即成为自驱 tick 本体，frame 信号废弃。
    */
   frame(): void {
@@ -177,7 +175,7 @@ export class PhysicsLoop {
     const dt = this.lastFrameT === 0 ? 0 : Math.min((now - this.lastFrameT) / 1000, 0.1);
     this.lastFrameT = now;
 
-    // 读输入（阶段二步骤 6：批量取 [head, tail) 聚合——增量求和保留，防视角跳变）
+    // 读输入：批量取 [head, tail) 聚合（增量求和保留，防视角跳变）
     const input = this.shared.takeInput();
     this.keys = maskToKeys(input.keysMask);
     this.applyMouseDelta(input.dx, input.dy);
@@ -192,7 +190,7 @@ export class PhysicsLoop {
       didPhysicsTick = true;
     }
 
-    // 写共享输出（阶段二步骤 8：临界区写锁保护）
+    // 写共享输出（临界区写锁保护）
     this.writeFrame();
 
     // 物理后回调：传送检测 / 游戏状态 / 周期 stats
@@ -245,8 +243,8 @@ export class PhysicsLoop {
   /**
    * noclip 模式单步移动。
    *
-   * 与原 RenderLoop.noclipStep 等价（原实现用 camera.getWorldDirection /
-   * quaternion；此处直接从 yaw/pitch 构造方向，YXZ 顺序数学一致）：
+   * 与原 RenderLoop.noclipStep 等价（原实现用相机 quaternion；此处直接从
+   * yaw/pitch 构造方向，YXZ 顺序数学一致）：
    *   forward = (−sinYaw·cosPitch, sinPitch, −cosYaw·cosPitch)
    *   right   = (cosYaw, 0, −sinYaw)
    */
@@ -279,7 +277,7 @@ export class PhysicsLoop {
     this.noclipView.pos.z += (fwdZ * forward + rightZ * strafe) * speed;
   }
 
-  /** 应用鼠标增量到当前视角（cs-movement MouseInput.ts 公式忠实复刻）。 */
+  /** 应用鼠标增量到当前视角（cs-movement MouseInput.ts 公式复刻）。 */
   private applyMouseDelta(dx: number, dy: number): void {
     const sens = this.effectiveSensitivity();
     // 写入当前模式视角权威源：physics = player；noclip = noclipView
@@ -316,8 +314,7 @@ export class PhysicsLoop {
 
   /** 从当前 player/noclip 状态写共享内存输出区。 */
   private writeFrameInternal(): void {
-    // 数据源选择：physics 模式 = player（origin 每帧更新）；noclip 模式 = noclipView
-    // （noclipStep 只更新 noclipView.pos，player.origin 不随自由飞行移动）。
+    // 数据源：physics = player；noclip = noclipView（noclipStep 只更新 noclipView.pos）
     const inPhysics = this.physicsMode === 'physics' && this.playerController;
     let pos: { x: number; y: number; z: number };
     let yaw: number;

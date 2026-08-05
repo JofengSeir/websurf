@@ -3,7 +3,7 @@ use crate::vbsp::data::*;
 use itertools::Either;
 
 impl<'a> Handle<'a, Face> {
-    /// Get the texture of the face
+    /// 获取面的纹理
     pub fn texture(&self) -> Handle<'a, TextureInfo> {
         self.bsp
             .textures_info
@@ -15,16 +15,16 @@ impl<'a> Handle<'a, Face> {
             .unwrap()
     }
 
-    /// Get all vertices making up the face
+    /// 获取组成该面的所有顶点
     pub fn vertices(&self) -> impl Iterator<Item = &'a Vertex> + 'a {
         let bsp = self.bsp;
         self.vertex_indexes()
             .map(move |vert_index| bsp.vertices.get(vert_index as usize).unwrap())
     }
 
-    /// Get the vertex indexes of all vertices making up the face
+    /// 获取组成该面的所有顶点索引。
     ///
-    /// The indexes index into the `vertices` field of the bsp file
+    /// 索引指向 bsp 文件的 `vertices` 字段。
     pub fn vertex_indexes(&self) -> impl Iterator<Item = u16> + 'a {
         let bsp = self.bsp;
         (self.data.first_edge..(self.data.first_edge + self.data.num_edges as i32))
@@ -45,7 +45,7 @@ impl<'a> Handle<'a, Face> {
         self.bsp.surface_edges[self.first_edge as usize].direction()
     }
 
-    /// Check if the face is flagged as visible
+    /// 检查面是否标记为可见
     pub fn is_visible(&self) -> bool {
         let texture = self.texture();
         !texture.flags.intersects(
@@ -58,9 +58,9 @@ impl<'a> Handle<'a, Face> {
         )
     }
 
-    /// Triangulate the face
+    /// 对面进行三角剖分。
     ///
-    /// Triangulation only works for faces that can be turned into a triangle fan trivially
+    /// 仅适用于可平凡转换为三角形扇的面。
     pub fn triangulate(&self) -> impl Iterator<Item = [Vector; 3]> + 'a {
         let mut vertices = self.vertices();
 
@@ -78,9 +78,9 @@ impl<'a> Handle<'a, Face> {
         self.bsp.displacement(self.displacement_info as usize)
     }
 
-    /// Get the vertex positions for the face
+    /// 获取面的顶点位置。
     ///
-    /// This either calculates the displacement or normal triangulation depending on the face
+    /// 有 displacement 时计算置换顶点，否则用普通三角剖分。
     pub fn vertex_positions(&self) -> impl Iterator<Item = Vector> + 'a {
         self.displacement()
             .map(|displacement| displacement.triangulated_displaced_vertices())

@@ -7,7 +7,6 @@
  * - 回退模式：SharedState 内部走 postMessage（MsgStateMain）。
  * 其余低频控制（config/resize/teleport/物理面板等）保持 postMessage。
  */
-
 import type { RuntimeConfig } from '../config.js';
 import type { FrameSnapshot } from '../worker/worker-types.js';
 import type { SharedState } from '../worker/shared-state.js';
@@ -18,19 +17,19 @@ export class InputBridge {
     private readonly shared: SharedState,
   ) {}
 
-  /** 发送 init 消息：共享内存（可 null）+ 画布尺寸（渲染在主线程）。 */
+  /** 发送 init：共享内存（可 null）+ 画布尺寸（渲染在主线程）。 */
   sendInit(shared: SharedArrayBuffer | null, width: number, height: number, dpr: number): void {
     this.worker.postMessage({ type: 'init', shared, width, height, dpr });
   }
 
-  /** 发送 BSP 原始字节到 Worker（Worker 内解析；transfer 后主线程 data 被 detach）。 */
+  /** 发送 BSP 原始字节（Worker 内解析；transfer 后主线程 data 被 detach）。 */
   sendLoadBsp(name: string, data: ArrayBuffer): void {
     this.worker.postMessage({ type: 'load-bsp', name, data }, [data]);
   }
 
   // ── 输入通道（共享内存 / 回退）────────────────────────────
 
-  /** 写入鼠标增量 + 按键位掩码（阶段一：极速输入，主线程专属）。 */
+  /** 写入鼠标增量 + 按键位掩码（阶段一：极速输入）。 */
   setInput(dx: number, dy: number, keysMask: number): void {
     this.shared.setInput(dx, dy, keysMask);
   }
@@ -40,12 +39,12 @@ export class InputBridge {
     this.shared.setKeys(keysMask);
   }
 
-  /** 每帧发送 frame 触发信号（无数据负载；物理 dt 由 Worker 侧 performance.now() 计算）。 */
+  /** 每帧发送 frame 触发信号（无数据负载；dt 由 Worker 侧 performance.now() 计算）。 */
   sendFrame(): void {
     this.worker.postMessage({ type: 'frame' });
   }
 
-  /** 安全读取物理快照（阶段三：安全检查 + LERP 插值）。 */
+  /** 安全读取物理快照（安全检查 + LERP 插值）。 */
   readFrame(): FrameSnapshot | null {
     return this.shared.readFrame();
   }
@@ -67,7 +66,7 @@ export class InputBridge {
     this.worker.postMessage({ type: 'config', section, patch });
   }
 
-  /** 发送窗口尺寸变化（Worker 物理无需尺寸，保留协议兼容）。 */
+  /** 发送窗口尺寸变化（Worker 物理无需尺寸，协议兼容）。 */
   sendResize(width: number, height: number): void {
     this.worker.postMessage({ type: 'resize', width, height });
   }
@@ -87,7 +86,7 @@ export class InputBridge {
     this.worker.postMessage({ type: 'teleport-to-pos', pos, yaw });
   }
 
-  /** 请求玩家当前位置（Worker 回传 player-pos 消息）。 */
+  /** 请求玩家当前位置（Worker 回传 player-pos）。 */
   sendGetPlayerPos(): void {
     this.worker.postMessage({ type: 'get-player-pos' });
   }

@@ -51,7 +51,7 @@ export interface GameSnapshot {
  * 判定是否为终点目标。
  *
  * 匹配规则：targetname 以 "end" 结尾，且 "end" 前面是字符串开始或非字母字符
- * （如下划线、空格）。覆盖 BSP 常见命名：`end`、`level_end`、`map_end`、`zone_end`。
+ * （如下划线、空格）。覆盖 BSP 常见命名：`end`、`level_end`、`map_end`、`zone_end`；
  * 不匹配 `endless`（非 end 结尾）、`friend`（end 前是字母）。
  */
 function isEndTarget(name: string): boolean {
@@ -68,7 +68,7 @@ export class GameState {
 	private justDied = false;
 	private checkpoints: Checkpoint[] = [];
 
-	/** 死亡 Y 阈值（场景 min.y - 1000 HU）。由 setDeathThreshold 设置。 */
+	/** 死亡 Y 阈值（场景 min.y - 1000 HU，由 setDeathThreshold 设置）。 */
 	private deathYThreshold = -Infinity;
 
 	/** 初始 spawn（用于无检查点时回退）。 */
@@ -82,7 +82,7 @@ export class GameState {
 		this.deathYThreshold = sceneMinY - 1000;
 	}
 
-	/** 设置初始 spawn（无检查点时回退位置）。 */
+	/** 设置初始 spawn（无检查点时回退）。 */
 	setInitialSpawn(pos: Vec3, yaw: number): void {
 		this.initialSpawn = { pos, yaw };
 	}

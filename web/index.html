@@ -30,7 +30,7 @@
       padding: 2px 8px; border-radius: 2px; cursor: pointer;
     }
 
-    /* === 整体布局 === */
+    /* 整体布局 */
     #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
     #topbar {
       flex: 0 0 32px; height: 32px;
@@ -58,7 +58,7 @@
     #previewArea { flex: 1; position: relative; overflow: hidden; background: #222; min-width: 0; }
     #preview { width: 100%; height: 100%; display: block; cursor: pointer; }
 
-    /* === 状态栏 === */
+    /* 状态栏 */
     #status {
       padding: 6px 8px; font-size: 11px;
       color: #888; border-bottom: 1px solid #2a2a2a;
@@ -72,7 +72,7 @@
       background: #2a1515; border-bottom: 1px solid #3c3c3c;
     }
 
-    /* === 手风琴（details/summary） === */
+    /* 手风琴（details/summary） */
     details {
       border-bottom: 1px solid #2a2a2a;
     }
@@ -93,7 +93,7 @@
     summary:hover { background: #2d2d2d; }
     .acc-body { padding: 4px 8px 8px 8px; }
 
-    /* === 控件网格 === */
+    /* 控件网格 */
     .ctrl-grid {
       display: grid;
       grid-template-columns: 110px 1fr 50px;
@@ -134,13 +134,13 @@
     }
     .param-num:focus { outline: none; border-color: #4a90e2; }
 
-    /* === 元数据 KV === */
+    /* 元数据 KV */
     .kv { display: grid; grid-template-columns: 110px 1fr; gap: 2px 8px; font-size: 11px; }
     .kv-row { display: contents; }
     .kv .k { color: #888; }
     .kv .v { color: #d4d4d4; }
 
-    /* === 出生点选择 === */
+    /* 出生点选择 */
     .spawn-select {
       width: 100%; padding: 2px 4px;
       background: #1e1e1e; color: #d4d4d4;
@@ -149,7 +149,7 @@
       max-height: 200px;
     }
 
-    /* === 预览区悬浮元素 === */
+    /* 预览区悬浮元素 */
     #hud {
       position: absolute; top: 8px; right: 8px;
       background: rgba(20, 20, 20, 0.75);
@@ -195,20 +195,20 @@
 </head>
 <body>
   <div id="app">
-    <!-- ============ 顶栏 ============ -->
+    <!-- 顶栏 -->
     <div id="topbar">
       <span class="title">WebSurf</span>
       <span class="spacer"></span>
     </div>
 
-    <!-- ============ 主容器 ============ -->
+    <!-- 主容器 -->
     <div id="main">
-      <!-- ===== 侧边栏 ===== -->
+      <!-- 侧边栏 -->
       <div id="sidebar">
         <div id="status" class="status">正在加载 WASM 模块...</div>
         <div id="error" class="error" style="display:none;"></div>
 
-        <!-- --- 文件输入 --- -->
+        <!-- 文件输入 -->
         <details open>
           <summary>文件输入</summary>
           <div class="acc-body">
@@ -216,7 +216,7 @@
           </div>
         </details>
 
-        <!-- --- 视距与视角 --- -->
+        <!-- 视距与视角 -->
         <details open>
           <summary>视距与视角</summary>
           <div class="acc-body">
@@ -241,7 +241,7 @@
           </div>
         </details>
 
-        <!-- --- 物理 --- -->
+        <!-- 物理 -->
         <details open>
           <summary>物理</summary>
           <div class="acc-body">
@@ -330,7 +330,7 @@
           </div>
         </details>
 
-        <!-- --- 出生点 --- -->
+        <!-- 出生点 -->
         <details>
           <summary>出生点</summary>
           <div class="acc-body">
@@ -340,7 +340,7 @@
           </div>
         </details>
 
-        <!-- --- 自定义传送点 --- -->
+        <!-- 自定义传送点 -->
         <details id="customTeleportDetails">
           <summary>自定义传送点</summary>
           <div class="acc-body">
@@ -367,7 +367,7 @@
           </div>
         </details>
 
-        <!-- --- 显示设置 --- -->
+        <!-- 显示设置 -->
         <details open>
           <summary>显示设置</summary>
           <div class="acc-body">
@@ -396,7 +396,7 @@
           </div>
         </details>
 
-        <!-- --- 元数据 --- -->
+        <!-- 元数据 -->
         <details>
           <summary>元数据</summary>
           <div class="acc-body">
@@ -405,7 +405,7 @@
         </details>
       </div>
 
-      <!-- ===== 预览区 ===== -->
+      <!-- 预览区 -->
       <div id="previewArea">
         <canvas id="preview" tabindex="0"></canvas>
         <div id="crosshair"></div>
@@ -422,7 +422,7 @@
     </div>
   </div>
 
-  <!-- ============ 模块脚本 ============ -->
+  <!-- 模块脚本 -->
   <!-- app.js 由 esbuild 从 src/app.ts 打包生成（npm run build:app） -->
   <script type="module" src="./app.js"></script>
 </body>

@@ -6,19 +6,17 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-// The shape every extracted movement behavior (Jump, WalkMove, TryPlayerMove,
-// ...) operates on. PlayerController implements this directly — its instance
-// fields ARE the context fields, so passing `this` to a behavior function is
-// free: no wrapper object, no proxying, no per-tick allocation. The scratch
-// vectors (wishDir/moveEnd/tmpA/tmpB) are reused across ticks for the same
-// reason the original monolithic class reused them.
+// 所有抽取出的移动行为（Jump、WalkMove、TryPlayerMove…）操作的对象形状。
+// PlayerController 直接实现它——实例字段即上下文字段，所以把 `this` 传给行为
+// 函数零开销：无包装对象、无代理、无逐 tick 分配。临时向量（wishDir/moveEnd/
+// tmpA/tmpB）跨 tick 复用，原因与原单体类复用的相同。
 
 import type { Vec3 } from '../math/vec3.js';
 import type { LadderVolume } from '../physics/Collision/Collision.types.js';
 import type { World } from '../physics/World/World.js';
 import type { Settings } from '../settings/Settings.js';
 
-/** Shared by every behavior that turns ctx.yaw/pitch (degrees) into a direction vector. */
+/** 各行为把 ctx.yaw/pitch（度）转为方向向量时共用。 */
 export const DEG2RAD = Math.PI / 180;
 
 export interface InputState {
@@ -35,50 +33,50 @@ export interface InputState {
 export interface MovementContext {
   readonly world: World;
   readonly settings: Settings;
-  /** Called on anomalies (unstuck pops, velocity kills). */
+  /** 异常时调用（unstuck 弹出、速度清零）。 */
   readonly log: (msg: string) => void;
 
   origin: Vec3;
   velocity: Vec3;
-  yaw: number; // degrees; 0 looks down -Z
+  yaw: number; // 度；0 时面向 -Z
   pitch: number;
 
   onGround: boolean;
   groundNormal: Vec3;
   ducked: boolean;
-  duckFrac: number; // 0 standing, 1 ducked (drives eye lerp)
+  duckFrac: number; // 0 站立，1 蹲下（驱动视角插值）
   onLadder: LadderVolume | null;
-  /** True while standing on a surf-steep slope (airborne rules, no friction). */
+  /** 站在 surf 陡坡上为 true（按空中规则，无摩擦）。 */
   surfing: boolean;
-  /** True from the moment surfing starts until the next real ground landing. */
+  /** 自 surf 开始至下一次真实落地期间为 true。 */
   surfedSinceGrounded: boolean;
 
-  /** Position snapshot from the start of this tick, for blocked-move detection. */
+  /** 本 tick 开始时的位置快照（用于 blocked-move 检测）。 */
   prevPos: Vec3;
   prevEye: number;
   currEye: number;
-  landPunch: number; // downward view offset from landing, decays each tick
+  landPunch: number; // 落地造成的向下视角偏移，逐 tick 衰减
 
-  /** 0..settings.stamina.max; only meaningful while settings.stamina.enabled. */
+  /** 0..settings.stamina.max；仅 settings.stamina.enabled 时有意义。 */
   stamina: number;
-  /** Quality of the most recent takeoff; only set while settings.perf.enabled. */
+  /** 最近一次起跳的质量；仅 settings.perf.enabled 时设置。 */
   lastHopQuality: 'perfect' | 'normal' | null;
 
   readonly input: InputState;
 
-  oldJump: boolean; // was +jump held last tick (Source's pogo-stick check)
-  ladderCooldown: number; // seconds before ladder can re-grip after jump-off
+  oldJump: boolean; // 上一 tick 是否按住 +jump（Source 的 pogo-stick 检查）
+  ladderCooldown: number; // 跳离梯子后可重新抓住的秒数
   fallVelocity: number;
-  groundTicksSinceLanding: number; // ground-friction ticks elapsed since landing
-  /** True once a real jump (via checkJump) has ever launched this life — gates the perfect-bhop carry. */
+  groundTicksSinceLanding: number; // 落地以来经过的地面摩擦 tick 数
+  /** 本局是否曾由 checkJump 发起过真实跳跃——决定完美连跳继承是否生效。 */
   hasJumpedBefore: boolean;
-  /** Horizontal velocity snapshotted the instant of the last landing; see PerfBonus. */
+  /** 最近一次落地瞬间的水平速度快照；见 PerfBonus。 */
   landingVelocity: Vec3;
   stuckTicks: number;
   blockedTicks: number;
   contactsThisTick: string[];
 
-  // Scratch vectors — reused across ticks to avoid allocation.
+  // 临时向量——跨 tick 复用避免分配。
   readonly wishDir: Vec3;
   readonly moveEnd: Vec3;
   readonly tmpA: Vec3;
@@ -88,8 +86,8 @@ export interface MovementContext {
   readonly maxs: Vec3;
   readonly horizontalSpeed: number;
 
-  // 碰撞箱体型（由 PlayerController.hull 派生，供 Duck.ts 等使用）
-  // —— 与 mins/maxs（当前姿态）不同，这四者是站立/蹲下的静态体型。
+  // 站立/蹲下的静态碰撞箱体型（由 PlayerController.hull 派生，供 Duck.ts 等使用）
+  // —— 与 mins/maxs（当前姿态）不同，这四者是两种姿态的体型。
   readonly standMins: Vec3;
   readonly standMaxs: Vec3;
   readonly duckMins: Vec3;

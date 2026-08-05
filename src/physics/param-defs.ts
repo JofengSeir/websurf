@@ -1,9 +1,8 @@
 /**
  * 物理参数定义表（面板渲染与 Worker 参数管理共用）。
  *
- * 独立文件的原因：主线程 UI（app.ts）与 Worker（physics-params.ts）都需要这份
- * 定义，但它不能引入 PlayerController 等物理实现（避免主线程 bundle 膨胀）。
- *
+ * 独立成文件：主线程 UI（app.ts）与 Worker（physics-params.ts）都需要它，
+ * 但不能引入 PlayerController 等物理实现（避免主线程 bundle 膨胀）。
  * 默认值 = cs-movement/CS:S 基准，见 PHYSICS-CONTROL.md。
  */
 

@@ -5,7 +5,7 @@ title WebSurf dev server
 cd /d "%~dp0"
 
 REM ============================================================
-REM Step 1: WASM build (skip if pkg already exists)
+REM Step 1: WASM 构建（pkg 已存在则跳过）
 REM ============================================================
 
 set "WASM_FILE=%~dp0pkg\websurf_wasm_bg.wasm"
@@ -14,7 +14,7 @@ if exist "%WASM_FILE%" goto :wasm_done
 
 echo [1/3] Building WASM ^(release^)...
 
-REM Redirect env vars to project dir to bypass system TEMP permission issues
+REM 重定向环境变量到项目目录，绕过系统 TEMP 权限问题
 set "CARGO_HOME=%~dp0.cargo-home"
 set "TMP=%~dp0.tmp"
 set "TEMP=%~dp0.tmp"
@@ -24,14 +24,14 @@ if not exist "%CARGO_HOME%" mkdir "%CARGO_HOME%"
 if not exist "%TMP%" mkdir "%TMP%"
 if not exist "%WASM_PACK_CACHE%" mkdir "%WASM_PACK_CACHE%"
 
-REM GNU toolchain self-contained bin (dlltool.exe etc.)
+REM GNU 工具链 self-contained bin（dlltool.exe 等）
 set "PATH=C:\Users\Jofen\.rustup\toolchains\stable-x86_64-pc-windows-gnu\lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained;%PATH%"
 
 echo [1/3] Ensuring wasm-bindgen-cli v0.2.126 is present (auto-install if missing)...
 call "%~dp0scripts\install-wasm-bindgen.cmd" nopause
 if errorlevel 1 goto :wasm_failed
 echo [1/3] wasm-bindgen-cli ready. Building WASM...
-REM Point wasm-pack at the prebuilt CLI so it never falls back to a silent source compile.
+REM 让 wasm-pack 使用预构建 CLI，避免回退到静默源码编译。
 if exist "%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.126\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.126\bin\wasm-bindgen.exe"
 if not defined WASM_BINDGEN if exist "%~dp0.cargo-home\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%~dp0.cargo-home\bin\wasm-bindgen.exe"
 echo [1/3] using WASM_BINDGEN=%WASM_BINDGEN%
@@ -43,7 +43,7 @@ if errorlevel 1 goto :wasm_failed
 if exist "%WASM_FILE%" echo [1/3] WASM ready.
 
 REM ============================================================
-REM Step 2: TypeScript build (worker.js + app.js)
+REM Step 2: TypeScript 构建（worker.js + app.js）
 REM ============================================================
 echo [2/3] Ensuring Node build dependencies are installed (auto npm install if missing)...
 call "%~dp0scripts\ensure-node-deps.cmd" nopause
@@ -53,11 +53,11 @@ call npm run build:ts
 if errorlevel 1 goto :ts_failed
 
 REM ============================================================
-REM Step 3: Start HTTP server + open browser
+REM Step 3: 启动 HTTP 服务器 + 打开浏览器
 REM ============================================================
 echo [3/3] Starting HTTP server...
 
-REM Check if port 8080 is already in use
+REM 检查 8080 端口是否已被占用
 netstat -ano | findstr ":8080 " | findstr "LISTENING" >nul 2>&1
 if errorlevel 1 goto :start_server
 

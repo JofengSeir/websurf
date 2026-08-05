@@ -6,17 +6,16 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-// Provenance (Valve source-sdk-2013, game/shared/gamemovement.cpp): CGameMovement::AirAccelerate
+// 来源（Valve source-sdk-2013, game/shared/gamemovement.cpp）：CGameMovement::AirAccelerate
 
 import type { Vec3 } from '../../math/vec3.js';
 import { AIR_SPEED_CAP } from './AirAccelerate.config.js';
 
 /**
- * Air acceleration — the bhop/surf formula. Note the deliberate asymmetry:
- * `addspeed` uses the 30 u/s capped wishspeed, but `accelspeed` uses the
- * UNCAPPED wishspeed. That is exactly what Source does, and it's why large
- * sv_airaccelerate values give near-instant air control. There is no cap on
- * the resulting velocity, which is what lets strafing exceed maxspeed.
+ * 空气加速——bhop/surf 的核心公式。注意其刻意的不对称：
+ * `addspeed` 用 30 u/s 钳制后的 wishspeed，`accelspeed` 用未钳制的 wishspeed，
+ * 这正是 Source 原版行为，也是大 sv_airaccelerate 能获得近乎瞬时空中控制的原因。
+ * 最终速度无上限，故 strafe 可超过 maxspeed。
  */
 export function airAccelerate(
   vel: Vec3,

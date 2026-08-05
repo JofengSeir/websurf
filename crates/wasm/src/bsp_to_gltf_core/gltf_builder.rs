@@ -16,9 +16,7 @@ use image::{ColorType, DynamicImage, ImageEncoder};
 use std::f32::consts::PI;
 use crate::vbsp::Bsp;
 
-/// 获取或创建材质
-
-/// 从BSP文件中获取或创建材质
+/// 从 BSP 文件中获取或创建材质
 pub fn push_or_get_material_bsp(
     buffer: &mut Vec<u8>,
     gltf: &mut Root,
@@ -60,7 +58,7 @@ fn get_material_index(materials: &[Material], path: &str) -> Option<Index<Materi
         .map(|i| Index::new(i as u32))
 }
 
-/// 推送材质到GLTF
+/// 推送材质到 GLTF
 pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialData) -> Material {
     let texture_index = material
         .texture
@@ -140,7 +138,7 @@ fn get_texture_index(textures: &[Texture], name: &str) -> Option<Index<Texture>>
         .map(|i| Index::new(i as u32))
 }
 
-/// 推送纹理到GLTF
+/// 推送纹理到 GLTF
 fn push_texture(buffer: &mut Vec<u8>, gltf: &mut Root, texture: TextureData) -> Texture {
     let mut image = texture.image;
     if image.color() != ColorType::Rgba8 && image.color() != ColorType::Rgb8 {

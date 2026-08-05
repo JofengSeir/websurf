@@ -1,14 +1,9 @@
 /**
  * WebSurf — 碰撞体可视化
- *
- * 用 LineSegments 显示：
- * 1. 实体碰撞箱：玩家附近 512 HU 半径内的 brush **真实凸包线框**（从 planes
- *    重建不规则几何，非 AABB 方块），三色分类（地面绿/斜坡黄/墙红）。
- *    玩家身处 brush 内部时叠加**半透明实心填充**（明显提示"人在固体内部"）。
- * 2. 传送触发碰撞箱：全部 trigger AABB/凸包线框（青=已链接 / 紫=孤儿 / 灰=禁用 / 橙=非玩家）。
- *
- * 凸包重建：与 Rust `compute_vertices` 同算法（三平面求交 + 内侧验证），
- * 保证 surf 图的 ramp 坡等不规则斜面显示真实形状。
+ * 1. 实体碰撞箱：玩家附近 512 HU 内 brush 真实凸包线框（从 planes 重建，非 AABB），
+ *    三色分类（地面绿/斜坡黄/墙红）；身处 brush 内部时叠加半透明填充。
+ * 2. 传送触发碰撞箱：全部 trigger 凸包/AABB 线框（青=已链接/紫=孤儿/灰=禁用/橙=非玩家）。
+ * 凸包重建与 Rust compute_vertices 同算法（三平面求交 + 内侧验证）。
  */
 
 import * as THREE from 'three';
@@ -102,10 +97,8 @@ function planeIntersect(
 
 /**
  * 从 brush 平面重建凸包顶点。
- *
- * 约定：cs-movement 法线朝外（brush 内部在负侧 dot(n,p)-dist <= 0），
- * 与 Rust `compute_vertices` 一致；对每个三平面组合求交并验证在所有平面内侧。
- * 顶点数 < 4 视为退化（调用方回退 AABB）。
+ * 约定：法线朝外（内部 dot(n,p)-dist <= 0，与 Rust compute_vertices 一致），
+ * 三平面组合求交并验证在所有平面内侧；顶点数 < 4 视为退化（回退 AABB）。
  */
 function computeBrushHull(brush: Brush): [number, number, number][] {
 	const ps = brush.planes;
@@ -371,21 +364,14 @@ export class ColliderDebug {
 		scene.add(this.triggerGroup);
 	}
 
-	/**
-	 * 注入传送触发器列表（场景加载后调用）。
-	 */
+	/** 注入传送触发器列表（场景加载后调用）。 */
 	setTriggers(triggers: readonly TeleportTrigger[]): void {
 		this.triggers = triggers;
 		// 触发下一帧立即重建
 		this.frameCounter = REBUILD_INTERVAL;
 	}
 
-	/**
-	 * 设置显示标志（由 render-loop.applyConfigPatch 调用）。
-	 *
-	 * @param showSolids 显示实体碰撞箱
-	 * @param showTriggers 显示触发碰撞箱
-	 */
+	/** 设置显示标志（showSolids / showTriggers）。 */
 	setDebugFlags(showSolids: boolean, showTriggers: boolean): void {
 		this.showSolids = showSolids;
 		this.showTriggers = showTriggers;
@@ -402,11 +388,10 @@ export class ColliderDebug {
 
 	/**
 	 * 每帧更新。
-	 *
 	 * @param cameraPos 相机世界坐标（眼睛位置）。
-	 * @param colliders 实体碰撞体列表（World.solids + World.ladders，Brush[]）。
-	 * @param config 运行时配置（读取 player/physics 段）。
-	 * @returns 是否重建了线框（调用方据此触发渲染）。
+	 * @param colliders 实体碰撞体（World.solids + ladders）。
+	 * @param config 运行时配置。
+	 * @returns 是否重建线框（据此触发渲染）。
 	 */
 	update(
 		cameraPos: THREE.Vector3,
@@ -489,8 +474,7 @@ export class ColliderDebug {
 
 		for (const { brush } of nearby) {
 			const color = classifyBrush(brush, groundAngleCos, slideAngleCos);
-			// 真实碰撞几何：planes → 凸包线框（斜坡/斜面可见不规则形状）；
-			// 退化（顶点 < 4，如薄片 brush 平面数不足）回退 AABB 直角箱
+			// planes → 凸包线框（斜坡/斜面显示真实形状）；退化（顶点 < 4）回退 AABB
 			const hull = computeBrushHull(brush);
 			if (hull.length >= 4) {
 				pushBrushWireframe(positions, colors, brush, hull, color);

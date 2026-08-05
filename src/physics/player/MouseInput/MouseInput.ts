@@ -9,14 +9,12 @@
 import type { MovementContext } from '../MovementContext.js';
 
 /**
- * Chromium's pointer lock occasionally emits a single bogus huge
- * movementX/Y (notably right after (re)acquiring the lock or on focus
- * glitches), which reads as the view "snapping". Filter: drop the first
- * event after a lock change, and drop isolated spikes that are both
- * large and far out of line with the previous event.
+ * Chromium 的 pointer lock 偶尔会发出一次虚假的巨大 movementX/Y（多在（重新）
+ * 获取锁或焦点异常后），表现为视角"瞬移"。过滤：丢弃锁变化后的首个事件，
+ * 并丢弃既大又远超出上一事件趋势的孤立尖峰。
  *
- * Returns a mousemove handler plus the pointerlockchange hook it needs
- * wired up (both close over the same discard/last-sample state).
+ * 返回 mousemove 处理器及其所需的 pointerlockchange 钩子（两者共享同一
+ * 丢弃/基线采样状态）。
  */
 export function createMouseInputHandlers(ctx: MovementContext): {
   onPointerLockChange: () => void;
@@ -41,9 +39,8 @@ export function createMouseInputHandlers(ctx: MovementContext): {
       const spikeY = Math.abs(dy) > 350 && Math.abs(dy) > 8 * Math.abs(lastDy) + 100;
       if (spikeX || spikeY || Math.abs(dx) > 1200 || Math.abs(dy) > 1200) {
         ctx.log(`mouse snap filtered (dx ${dx}, dy ${dy})`);
-        // Still update the baseline so a fast-but-legitimate turn only
-        // loses this one frame, instead of every subsequent frame being
-        // compared against a stale small lastDx/lastDy and re-triggering.
+        // 仍更新基线：快速但合法的转向只丢这一帧，而不是让后续每帧都拿陈旧
+        // 的小基线对比而反复误触发。
         lastDx = dx;
         lastDy = dy;
         return;

@@ -10,17 +10,13 @@
 /**
  * 均匀网格空间索引（Broadphase）。
  *
- * 地图碰撞体数量可达 2.7 万（surf_nsz_fix：4923 地图 brush + 22017 模型碰撞体），
- * `traceBox` 若每帧线性遍历全部 brush 会造成明显卡顿。本类把 brush 按 AABB
- * 分桶到均匀网格，trace 时只查询扫描体覆盖的 cell，候选集从 2.7 万降到数百。
+ * 地图碰撞体可达 2.7 万（surf_nsz_fix：4923 brush + 22017 模型碰撞体），线性遍历
+ * 会卡顿。按 AABB 分桶到网格后，trace 只查询扫描体覆盖的 cell，候选集降到数百。
  *
- * 设计要点：
- * - **大 brush**（跨 cell 数超过 `BIG_CELL_LIMIT`，如世界地面 8192²）单独存 list，
- *   query 时始终参与——避免大 brush 把成千上万个 cell 都填满，插入/查询爆炸。
- * - **去重**：跨 cell 的 brush 会被多个 cell 引用，用 epoch 计数避免重复返回，
- *   不分配 Set（高频 trace 场景的 GC 压力）。
- * - **正确性**：query 返回的是超集（cell 覆盖 + 大 brush），调用方 `traceBox`
- *   内部还有精确 AABB 过滤兜底，结果与全量遍历完全一致。
+ * - **大 brush**（跨 cell 超 `BIG_CELL_LIMIT`，如 8192² 地面）单独存 list、query
+ *   始终参与，避免填满成千上万个 cell。
+ * - **去重**：跨 cell 的 brush 被多个 cell 引用，用 epoch 计数去重，不分配 Set（避免 GC）。
+ * - **正确性**：query 返回超集，`traceBox` 内部还有精确 AABB 过滤兜底，结果与全量一致。
  */
 import type { Brush } from './Collision.types.js';
 export class BrushGrid {
@@ -97,9 +93,7 @@ export class BrushGrid {
 
   /**
    * 查询与 AABB [min, max] 相交的所有 brush（超集，已去重）。
-   *
-   * 返回的数组为内部复用的临时数组——调用方应立即使用，
-   * 下一次 query 会覆盖其内容。
+   * 返回内部复用数组——调用方应立即使用，下次 query 会覆盖内容。
    */
   query(min: { x: number; y: number; z: number }, max: { x: number; y: number; z: number }): Brush[] {
     this.queryEpoch++;
@@ -112,7 +106,7 @@ export class BrushGrid {
       }
     };
 
-    // 大 brush 始终参与（覆盖范围大，进 cell 会填满网格）
+    // 大 brush 始终参与（进 cell 会填满网格）
     for (let i = 0; i < this.big.length; i++) visit(this.big[i]);
 
     const inv = 1 / this.cellSize;

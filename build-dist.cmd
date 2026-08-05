@@ -9,10 +9,9 @@ echo ============================================================
 echo.
 
 REM ------------------------------------------------------------
-REM Step 1: WASM build (release) - always rebuild so dist embeds the
-REM release wasm.  The wasm32-unknown-unknown target does NOT need the
-REM native GNU binutils (as.exe), so this works even where the native
-REM exporter build fails.
+REM Step 1: WASM 构建（release）——始终重建，确保 dist 内嵌 release wasm。
+REM wasm32-unknown-unknown 目标不需要原生 GNU binutils（as.exe），
+REM 因此在原生导出器构建失败的机器上也能工作。
 REM ------------------------------------------------------------
 set "WASM_FILE=%~dp0pkg\websurf_wasm_bg.wasm"
 
@@ -37,7 +36,7 @@ if errorlevel 1 (
     goto :wasm_failed
 )
 echo [1/3] wasm-bindgen-cli ready. Building WASM...
-REM Point wasm-pack at the prebuilt CLI so it never falls back to a silent source compile.
+REM 让 wasm-pack 使用预构建 CLI，避免回退到静默源码编译。
 if exist "%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.126\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.126\bin\wasm-bindgen.exe"
 if not defined WASM_BINDGEN if exist "%~dp0.cargo-home\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%~dp0.cargo-home\bin\wasm-bindgen.exe"
 echo [1/3] using WASM_BINDGEN=%WASM_BINDGEN%
@@ -52,12 +51,12 @@ if exist "%WASM_FILE%" (
   goto :wasm_failed
 )
 
-REM WASM API contract check: every TS import must exist in wasm-pack exports
+REM WASM API 契约检查：所有 TS 导入必须存在于 wasm-pack 导出中
 call node "%~dp0scripts\check-wasm-api.mjs"
 if errorlevel 1 goto :wasm_api_failed
 
 REM ------------------------------------------------------------
-REM Step 2: TypeScript typecheck + build (worker.js + app.js)
+REM Step 2: TypeScript 类型检查 + 构建（worker.js + app.js）
 REM ------------------------------------------------------------
 echo [2/3] Ensuring Node build dependencies are installed (auto npm install if missing)...
 call "%~dp0scripts\ensure-node-deps.cmd" nopause
@@ -67,14 +66,14 @@ call npm run build:ts
 if errorlevel 1 goto :ts_failed
 
 REM ------------------------------------------------------------
-REM Step 3: Build dist package (embedded WASM + worker Blob URL)
+REM Step 3: 构建 dist 包（内嵌 WASM + worker Blob URL）
 REM ------------------------------------------------------------
 echo [3/3] Building dist package...
 call npm run build:dist
 if errorlevel 1 goto :dist_failed
 
 REM ------------------------------------------------------------
-REM Done - open output folder
+REM 完成 - 打开输出目录
 REM ------------------------------------------------------------
 echo.
 echo Build complete. Output: dist\

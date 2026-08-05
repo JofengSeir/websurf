@@ -1,15 +1,15 @@
 /**
  * 运行时物理参数（物理控制面板的力学参数覆盖层）。
  *
- * cs-movement 原生把重力/加速/摩擦/停止速度/跳跃高度定义为模块级常量
- * （constants.ts / Accelerate.config.ts / Friction.config.ts / Jump.config.ts）。
- * 本模块提供运行时覆盖：默认值 = 各原生常量（CS:S 基准），面板修改通过
- * `setRuntimeParam` 写入，消费方经 `getRuntimePhysics()` 实时读取。
+ * cs-movement 原生把这些力学参数定义为模块级常量（constants.ts /
+ * Accelerate.config.ts / Friction.config.ts / Jump.config.ts）。本模块提供
+ * 运行时覆盖：默认值 = 各原生常量（CS:S 基准），面板经 `setRuntimeParam` 写入，
+ * 消费方经 `getRuntimePhysics()` 实时读取。
  *
- * 与 Settings（PlayerController.settings）的分工：
- * - Settings：cs-movement 已有的可配项（airAccelerate/runSpeed/autobhop/…）
- * - runtime：原本是硬编码常量的力学参数（gravity/accelerate/friction/…）
- * 两者统一由 PhysicsParams 管理器（src/physics/physics-params.ts）暴露给面板。
+ * 与 Settings（PlayerController.settings）的分工：Settings 是 cs-movement 已有
+ * 可配项（airAccelerate/runSpeed/autobhop…）；runtime 是原本硬编码常量的力学
+ * 参数（gravity/accelerate/friction/…）。两者统一由 PhysicsParams 管理器
+ * （src/physics/physics-params.ts）暴露给面板。
  */
 
 /** 可运行时覆盖的力学参数（默认 = CS:S/cs-movement 基准值）。 */

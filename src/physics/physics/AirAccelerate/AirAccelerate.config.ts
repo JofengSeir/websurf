@@ -6,5 +6,5 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-export const AIR_ACCELERATE = 100; // sv_airaccelerate (KZ/HNS-server value; CS:GO default is 12)
-export const AIR_SPEED_CAP = 30; // wishspeed clamp while airborne
+export const AIR_ACCELERATE = 100; // sv_airaccelerate（KZ/HNS 服务器值；CS:GO 默认为 12）
+export const AIR_SPEED_CAP = 30; // 空中 wishspeed 钳制值

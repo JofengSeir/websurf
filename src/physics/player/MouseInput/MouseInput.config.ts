@@ -6,5 +6,5 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-export const M_YAW = 0.022; // deg per count, matches m_yaw/m_pitch
+export const M_YAW = 0.022; // 每 count 度数，对应 m_yaw/m_pitch
 export const PITCH_CLAMP = 89;

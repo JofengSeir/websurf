@@ -14,15 +14,14 @@ import type { MovementContext } from '../MovementContext.js';
 import { MAX_CLIP_PLANES } from './TryPlayerMove.config.js';
 
 function overbounceFor(normal: Vec3): number {
-  // Surf-steep slopes clip with exactly 1.0 so no speed is bled; everything
-  // else (floors, walls, ceilings) uses 1.001.
+  // Surf 陡坡用 1.0 剪裁、完全不损失速度；其余（地面、墙、天花板）用 1.001。
   const ny = normal.y;
   return ny > 0.05 && ny < STANDABLE_NORMAL ? OVERBOUNCE_SURF : OVERBOUNCE_DEFAULT;
 }
 
 /**
- * Source's TryPlayerMove: sweep, clip velocity against every plane touched
- * this tick (creases slide along the shared edge), repeat up to 4 bumps.
+ * Source 的 TryPlayerMove：扫掠，对本 tick 触及的每个平面剪裁速度
+ * （折角沿共享边滑动），最多重复 4 次 bump。
  */
 export function tryPlayerMove(ctx: MovementContext, dt: number): void {
   let timeLeft = dt;
@@ -59,15 +58,14 @@ export function tryPlayerMove(ctx: MovementContext, dt: number): void {
       set(ctx.velocity, 0, 0, 0);
       return;
     }
-    // Zero-fraction bumps re-report the plane we're already resting
-    // against; accumulating the duplicate would make the crease fallback
-    // compute cross(n, n) = 0 and kill all velocity (ramp "sticking").
+    // 零比例 bump 会重复上报已贴靠的平面；累积重复会使折角回退算出 cross(n, n) = 0
+    // 而清零全部速度（斜坡"粘住"）。
     if (!planes.some((p) => dot(p, tr.normal!) > 0.99)) {
       planes.push(clone(tr.normal!));
     }
     if (tr.normal!.y > 0.05 && tr.normal!.y < STANDABLE_NORMAL) ctx.surfing = true;
 
-    // Find a clip of the original velocity that doesn't re-enter any plane.
+    // 找出一种不重新进入任何平面的原速度剪裁。
     let i = 0;
     for (; i < planes.length; i++) {
       copy(ctx.velocity, originalVel);
@@ -83,7 +81,7 @@ export function tryPlayerMove(ctx: MovementContext, dt: number): void {
     }
 
     if (i === planes.length) {
-      // No single plane worked — slide along the crease of the first two.
+      // 单平面剪裁均无效——沿前两个平面的交线滑动。
       if (planes.length !== 2) {
         ctx.log(`tryPlayerMove: cornered by ${planes.length} planes — velocity zeroed`);
         set(ctx.velocity, 0, 0, 0);
@@ -92,8 +90,7 @@ export function tryPlayerMove(ctx: MovementContext, dt: number): void {
       cross(ctx.tmpB, planes[0], planes[1]);
       const creaseLen = normalize(ctx.tmpB);
       if (creaseLen < 1e-6) {
-        // Degenerate (near-parallel planes): fall back to a single clip
-        // rather than zeroing the move.
+        // 退化（近平行平面）：回退为单平面剪裁而非清零移动。
         ctx.log('tryPlayerMove: degenerate crease — single-plane fallback');
         copy(ctx.velocity, originalVel);
         clipVelocity(ctx.velocity, planes[0], overbounceFor(planes[0]));
@@ -102,8 +99,7 @@ export function tryPlayerMove(ctx: MovementContext, dt: number): void {
       }
     }
 
-    // If we've been deflected back on ourselves, stop dead (prevents
-    // oscillating in corners).
+    // 若被反弹回原方向，立即停死（防止在角落振荡）。
     if (dot(ctx.velocity, primalVel) <= 0) {
       set(ctx.velocity, 0, 0, 0);
       return;

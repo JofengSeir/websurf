@@ -1,21 +1,10 @@
 /**
  * WebSurf — 准星射线检测器（hover 查看模型/实体平面/触发面信息）
- *
- * 从相机发射射线，返回最近命中信息：
- * 1. **GLB 模型几何**（mesh）：用 THREE.Raycaster 对 BSP 场景求交，
- *    返回 mesh.name（模型名，如 "crate"、"crate#1"）+ 材质/纹理名。
- * 2. **实体碰撞箱**（solid/ladder brush）：Ray-Convex-Polyhedron 精交，
- *    返回法线/距离/brush 索引/类型。
- * 3. **传送触发器**（trigger AABB）：Ray-AABB + 入口面法线推断，
- *    返回 classname/target/dest 等触发信息。
- *
- * 优先级：mesh 几何 > 碰撞体 > 触发器（场景几何最贴近玩家所见）。
- *
- * 算法：
- * - Ray-AABB broadphase（slab 法）快速剔除不相交的 brush
- * - Ray-Convex-Polyhedron 精交（对每个平面求 t，取 tEnter 最大者作为入口平面）
- *
- * 性能：限频调用（每 6 帧一次，由 render-loop 控制）；maxDistance 8192 HU。
+ * 从相机发射射线，返回最近命中信息，优先级 mesh 几何 > 碰撞体 > 触发器：
+ * 1. GLB 模型 mesh（THREE.Raycaster）：返回 mesh.name + 材质/纹理名
+ * 2. 实体碰撞箱（solid/ladder）：Ray-Convex-Polyhedron 精交，返回法线/距离/索引
+ * 3. 传送触发器（trigger AABB）：Ray-AABB + 入口面法线推断
+ * 性能：每 6 帧限频调用（render-loop 控制），maxDistance 8192 HU。
  */
 
 import * as THREE from 'three';
@@ -30,10 +19,8 @@ const EPS = 0.01;
 
 /**
  * 准星射线检测器。
- *
- * 用法：
- *   const result = inspector.cast(camPos, camDir, scene, solids, ladders, triggers);
- *   if (result) { /* 使用 result.type / result.meshName / result.brushIndex 等 *\/ }
+ * 用法：inspector.cast(camPos, camDir, scene, solids, ladders, triggers)
+ * 返回最近命中信息，或 null。
  */
 export class PlaneInspector {
 	/** 复用向量，避免每帧分配。 */
@@ -43,13 +30,12 @@ export class PlaneInspector {
 
 	/**
 	 * 从相机发射射线，返回最近命中信息。
-	 *
 	 * @param origin 射线起点（相机世界坐标）。
 	 * @param dir 射线方向（已归一化）。
-	 * @param scene BSP 场景（GLB 模型几何，mesh 求交）。
-	 * @param solids solid 碰撞体列表（World.solids）。
-	 * @param ladders ladder 碰撞体列表（World.ladders）。
-	 * @param triggers 传送触发器列表（来自 TeleportManager）。
+	 * @param scene BSP 场景（GLB 模型几何）。
+	 * @param solids solid 碰撞体列表。
+	 * @param ladders ladder 碰撞体列表。
+	 * @param triggers 传送触发器列表。
 	 * @param maxDistance 射线最大距离（HU）。
 	 * @returns 最近命中信息，或 null（未命中）。
 	 */
@@ -74,7 +60,7 @@ export class PlaneInspector {
 			}
 		}
 
-		// 2. Raycast against solids（brushType='solid'）
+		// 2. 对 solids 求交（brushType='solid'）
 		for (let i = 0; i < solids.length; i++) {
 			const brush = solids[i];
 			const hit = this.castBrush(brush, i, 'solid', origin, dir, bestDist);
@@ -84,7 +70,7 @@ export class PlaneInspector {
 			}
 		}
 
-		// 3. Raycast against ladders（brushType='ladder'）
+		// 3. 对 ladders 求交（brushType='ladder'）
 		for (let i = 0; i < ladders.length; i++) {
 			const brush = ladders[i];
 			const hit = this.castBrush(brush, i, 'ladder', origin, dir, bestDist);
@@ -94,7 +80,7 @@ export class PlaneInspector {
 			}
 		}
 
-		// 4. Raycast against triggers（AABB only）
+		// 4. 对 triggers 求交（仅 AABB）
 		for (let i = 0; i < triggers.length; i++) {
 			const trigger = triggers[i];
 			if (!trigger.mins || !trigger.maxs) continue;
@@ -163,15 +149,10 @@ export class PlaneInspector {
 	}
 
 	/**
-	 * Ray-Convex-Polyhedron 求交。
-	 *
-	 * 算法（Source 引擎标准 ray-trace）：
-	 * - 对每个平面求 t = (dist - dot(n, origin)) / dot(n, dir)
-	 * - dot(n, dir) < 0：射线进入 brush（从外向内），tEnter = max(这些 t)
-	 * - dot(n, dir) > 0：射线离开 brush（从内向外），tExit = min(这些 t)
-	 * - dot(n, dir) = 0：平行，若 origin 在该平面外侧则无交
-	 * - 命中条件：tEnter <= tExit 且 tExit > 0
-	 * - 入口平面 = 取得 tEnter 的那个平面
+	 * Ray-Convex-Polyhedron 求交（Source 引擎标准 ray-trace）：
+	 * 对每平面求 t = (dist - dot(n, origin)) / dot(n, dir)；
+	 * dot(n,dir)<0 进入（tEnter=max），>0 离开（tExit=min），=0 平行（origin 在外侧则无交）；
+	 * 命中条件：tEnter <= tExit 且 tExit > 0；入口平面 = 取得 tEnter 的平面。
 	 */
 	private castBrush(
 		brush: Brush,
@@ -358,9 +339,7 @@ interface AabbHit {
 	tmax: number;
 }
 
-/**
- * Ray-AABB 求交（slab 法）。
- */
+/** Ray-AABB 求交（slab 法）。 */
 function rayAABB(
 	origin: THREE.Vector3,
 	dir: THREE.Vector3,

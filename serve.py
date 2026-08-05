@@ -1,7 +1,6 @@
-"""Simple HTTP server with proper MIME types for WebSurf (WASM + BSP + Worker).
+"""WebSurf 开发服务器：为 WASM + BSP + Worker 提供正确 MIME 类型的静态服务。
 
-WebSurf dev server: serves the project root so /web/index.html can load
-/pkg WASM and /web/worker.js with correct MIME types.
+以项目根为根目录，使 /web/index.html 能以正确 MIME 加载 /pkg WASM 与 /web/worker.js。
 """
 import http.server
 import socketserver
@@ -29,7 +28,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # crossOriginIsolated：启用 SharedArrayBuffer（共享内存输入/物理结果通道）
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
-        # 禁止缓存：dev 模式产物无文件名 hash，避免浏览器缓存旧 JS 导致"改动不生效"
+        # 禁止缓存：dev 产物无文件名 hash，避免浏览器缓存旧 JS
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 

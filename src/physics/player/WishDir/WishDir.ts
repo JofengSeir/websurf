@@ -10,7 +10,7 @@ import { normalize, set } from '../../math/vec3.js';
 import { currentMaxSpeed } from '../CurrentMaxSpeed/CurrentMaxSpeed.js';
 import { DEG2RAD, type MovementContext } from '../MovementContext.js';
 
-/** Horizontal wish direction from WASD + yaw, written into ctx.wishDir. Returns wishspeed. */
+/** 由 WASD + yaw 计算水平期望方向，写入 ctx.wishDir；返回 wishspeed。 */
 export function computeWish(ctx: MovementContext): number {
   const fmove = (ctx.input.forward ? 1 : 0) - (ctx.input.back ? 1 : 0);
   const smove = (ctx.input.right ? 1 : 0) - (ctx.input.left ? 1 : 0);

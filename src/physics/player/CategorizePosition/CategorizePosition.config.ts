@@ -6,5 +6,5 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-export const NON_JUMP_VELOCITY = 180; // don't re-ground while moving up faster than this
-export const GROUND_TRACE_DIST = 2; // CategorizePosition trace-down distance
+export const NON_JUMP_VELOCITY = 180; // 上升速度快于此值时不判定落地
+export const GROUND_TRACE_DIST = 2; // CategorizePosition 向下追踪距离

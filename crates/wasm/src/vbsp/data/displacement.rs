@@ -83,8 +83,7 @@ fn read_option_sub_neighbour<R: Read + Seek>(
 ) -> BinResult<Option<DisplacementSubNeighbour>> {
     let neighbour_index = u16::read_options(reader, endian, args)?;
 
-    // for non-connected sub-neighbours, the orientations and spans sometimes contain garbage
-    // so we just skip over it
+    // 非连接的 sub-neighbour 的朝向/跨度数据是垃圾值，直接跳过
     if neighbour_index == u16::MAX {
         reader.seek(SeekFrom::Current(
             size_of::<DisplacementSubNeighbour>() as i64 - 2,
@@ -108,11 +107,11 @@ fn test_neighbour_bytes() {
 #[derive(Debug, Clone, BinRead)]
 pub struct DisplacementSubNeighbour {
     pub neighbour_index: u16,
-    /// Orientation of the neighbour relative to us
+    /// 邻居相对我们的朝向
     pub neighbour_orientation: NeighbourOrientation,
-    /// How the neighbour fits into us
+    /// 邻居如何嵌入我们
     pub span: NeighbourSpan,
-    /// How we fit into our neighbour
+    /// 我们如何嵌入邻居
     #[br(align_after = align_of::<DisplacementSubNeighbour>())]
     pub neighbour_span: NeighbourSpan,
 }

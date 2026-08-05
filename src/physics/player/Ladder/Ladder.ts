@@ -16,9 +16,9 @@ export function checkLadder(ctx: MovementContext): LadderVolume | null {
   if (ctx.ladderCooldown > 0) return null;
   const ladder = ctx.world.ladderAt(ctx.origin, ctx.mins, ctx.maxs);
   if (!ladder) return null;
-  if (ctx.onLadder) return ladder; // already gripping — keep it
+  if (ctx.onLadder) return ladder; // 已在梯上——保持
 
-  // Only grab when airborne, or when deliberately walking into the ladder.
+  // 仅在空中、或主动走向梯子时抓住。
   if (!ctx.onGround) return ladder;
   const yawRad = ctx.yaw * DEG2RAD;
   const facingDot = -Math.sin(yawRad) * -ladder.facing.x + -Math.cos(yawRad) * -ladder.facing.z;
@@ -31,7 +31,7 @@ export function ladderMove(ctx: MovementContext, dt: number, ladder: LadderVolum
   ctx.onGround = false;
   ctx.fallVelocity = 0;
 
-  // Jump off: push away from the ladder face.
+  // 跳离：推离梯面。
   if (ctx.input.jump && !ctx.oldJump) {
     scale(ctx.velocity, ladder.facing, LADDER_JUMP_OFF_SPEED);
     ctx.ladderCooldown = 0.25;
@@ -43,17 +43,15 @@ export function ladderMove(ctx: MovementContext, dt: number, ladder: LadderVolum
   const fmove = (ctx.input.forward ? 1 : 0) - (ctx.input.back ? 1 : 0);
   const smove = (ctx.input.right ? 1 : 0) - (ctx.input.left ? 1 : 0);
 
-  // Full 3D view basis — looking up + forward climbs up, looking down descends.
+  // 完整 3D 视角基——仰视 + 前进向上爬，俯视下降。
   const yawRad = ctx.yaw * DEG2RAD;
   const pitchRad = ctx.pitch * DEG2RAD;
   const cp = Math.cos(pitchRad);
   const fwd = set(ctx.tmpA, -Math.sin(yawRad) * cp, Math.sin(pitchRad), -Math.cos(yawRad) * cp);
   const right = set(ctx.tmpB, Math.cos(yawRad), 0, -Math.sin(yawRad));
 
-  // Each input axis contributes its FULL climb-speed scale — deliberately
-  // not normalized, exactly like Source. This is what makes CS:GO
-  // fastclimb work: aiming diagonally into the ladder and holding
-  // W+strafe stacks both contributions for ~1.41x climb speed.
+  // 每个输入轴贡献其完整的攀爬速度——刻意不归一化，同 Source。这正是 CS:GO
+  // fastclimb 的原理：斜对梯子按 W+横移会叠加两轴贡献，约 1.41 倍攀爬速度。
   const wish = ctx.wishDir;
   set(
     wish,
@@ -66,19 +64,18 @@ export function ladderMove(ctx: MovementContext, dt: number, ladder: LadderVolum
     set(ctx.velocity, 0, 0, 0);
     return;
   }
-  // Cap at the authentic fastclimb maximum (sqrt2 x climb speed).
+  // 限制在真实 fastclimb 上限（√2 × 攀爬速度）。
   const maxWish = LADDER_SPEED * Math.SQRT2;
   if (wlen > maxWish) scale(wish, wish, maxWish / wlen);
 
-  // Split the wish into lateral (along the ladder plane) and into-wall
-  // parts; redirect the into-wall part along the ladder's climb direction.
+  // 将 wish 拆分为沿梯面横向与垂直墙面两部分；垂直部分重定向到攀爬方向。
   const n = ladder.facing;
   const normalVel = dot(wish, n);
   const lateral = set(ctx.tmpA, wish.x - n.x * normalVel, wish.y - n.y * normalVel, wish.z - n.z * normalVel);
 
   const up = set(ctx.tmpB, 0, 1, 0);
-  const along = cross(vec3(), n, up); // horizontal, along the wall
-  const climbDir = cross(vec3(), along, n); // straight up the ladder face
+  const along = cross(vec3(), n, up); // 水平、沿墙方向
+  const climbDir = cross(vec3(), along, n); // 垂直于梯面向上
   normalize(climbDir);
 
   set(

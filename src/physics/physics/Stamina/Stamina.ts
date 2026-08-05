@@ -7,24 +7,17 @@
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
 
-/**
- * Add a stamina cost (jump or landing), clamped to the pool max.
- */
+/** 累加耐力消耗（跳跃或落地），钳制到池上限。 */
 export function addStamina(current: number, cost: number, max: number): number {
   return Math.min(max, current + cost);
 }
 
-/**
- * Recover stamina toward 0 at `recoveryRate` (fraction of max per second).
- */
+/** 按 `recoveryRate`（每秒占 max 的比例）向 0 恢复耐力。 */
 export function recoverStamina(current: number, recoveryRate: number, max: number, dt: number): number {
   return Math.max(0, current - recoveryRate * max * dt);
 }
 
-/**
- * How much a full-ish stamina pool throttles max speed / jump velocity:
- * 1.0 at an empty pool, down to `1 - maxPenalty` at a full one.
- */
+/** 满耐力池对最大速度/起跳速度的抑制：空池 1.0，满池降至 `1 - maxPenalty`。 */
 export function staminaPenaltyMultiplier(current: number, max: number, maxPenalty: number): number {
   if (max <= 0) return 1;
   const frac = Math.min(1, current / max);

@@ -6,14 +6,11 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-// Provenance (Valve source-sdk-2013, game/shared/gamemovement.cpp): CGameMovement::Friction
+// 来源（Valve source-sdk-2013, game/shared/gamemovement.cpp）：CGameMovement::Friction
 
 import type { Vec3 } from '../../math/vec3.js';
 
-/**
- * Ground friction. Only horizontal components bleed speed (y is vertical and
- * is zeroed while grounded anyway).
- */
+/** 地面摩擦。只消耗水平分量（y 为垂直方向，地面时本就归零）。 */
 export function applyFriction(vel: Vec3, friction: number, stopspeed: number, dt: number): void {
   const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
   if (speed < 0.1) return;

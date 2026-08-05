@@ -1,11 +1,9 @@
-//! BSP 到 GLTF 格式的转换库（迁移自 bsp-to-gltf-core 模块并入）。
+//! BSP 到 GLTF 格式的转换库（迁移自 bsp-to-gltf-core 模块并入，核心版）。
+//!
+//! 将 Valve BSP 文件转换为 GLTF 格式，专注导出地图结构本身
+//! （几何结构与材质），不包含地图内置模型。
 //! 保留库 API 结构（WASM 仅用部分路径）。
 #![allow(dead_code)]
-
-//! BSP 到 GLTF 格式的转换库（核心版）
-//! 
-//! 这个库提供了将 Valve BSP 文件转换为 GLTF 格式的功能，专注于导出地图结构，
-//! 不包含地图内置的模型，只导出地图本身的几何结构和材质。
 
 mod convert;
 mod error;

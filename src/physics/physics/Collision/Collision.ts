@@ -6,11 +6,9 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-// Quake/Source-style collision: the world is a set of convex brushes (plane
-// lists), and the player AABB is traced through them by Minkowski-expanding
-// each brush's planes by the box extents, then clipping the movement segment
-// (same scheme as Source's engine trace / Quake 2's CM_ClipBoxToBrush).
-// Pure module — no Three.js imports — so it runs under Vitest in node.
+// Quake/Source 式碰撞：世界由凸 brush（平面列表）构成，玩家 AABB 通过对每个
+// brush 平面做 Minkowski 扩张、再裁剪移动线段来追踪（同 Source engine trace /
+// Quake 2 的 CM_ClipBoxToBrush）。纯模块——不 import Three.js，可在 node 下跑 Vitest。
 
 import { type Vec3, vec3, clone, dot } from '../../math/vec3.js';
 import { DIST_EPSILON } from './Collision.config.js';
@@ -36,10 +34,9 @@ export function brushFromAABB(min: Vec3, max: Vec3): Brush {
 }
 
 /**
- * Oriented box brush from a center, half-extents, and an orthonormal basis
- * (the box's local x/y/z axes in world space). Axis-aligned "bevel" planes
- * from the box's AABB corners are added, as Quake's compiler does, so the
- * plane-expansion trace stays correct near edges of rotated brushes.
+ * 由中心、半尺寸和正交基（局部 x/y/z 轴）构造有向盒子 brush。像 Quake 编译器
+ * 那样补上盒子 AABB 的轴对齐 bevel 平面，使旋转 brush 边缘附近的平面扩张追踪
+ * 保持正确。
  */
 export function brushFromOrientedBox(center: Vec3, halfExtents: Vec3, ax: Vec3, ay: Vec3, az: Vec3): Brush {
   const axes: Array<[Vec3, number]> = [
@@ -55,7 +52,7 @@ export function brushFromOrientedBox(center: Vec3, halfExtents: Vec3, ax: Vec3, 
     planes.push({ normal: vec3(-a.x, -a.y, -a.z), dist: -(d - h) });
   }
 
-  // AABB of the 8 corners.
+  // 8 个角点的 AABB。
   const min = vec3(Infinity, Infinity, Infinity);
   const max = vec3(-Infinity, -Infinity, -Infinity);
   for (let i = 0; i < 8; i++) {
@@ -69,9 +66,8 @@ export function brushFromOrientedBox(center: Vec3, halfExtents: Vec3, ax: Vec3, 
     max.x = Math.max(max.x, cx); max.y = Math.max(max.y, cy); max.z = Math.max(max.z, cz);
   }
 
-  // Bevel planes: the AABB's own faces. They contain the box entirely, so
-  // they don't change the solid — but after Minkowski expansion they prevent
-  // the box trace from snagging false corners on rotated brushes.
+  // Bevel 平面 = AABB 自身各面。它们完全包含盒子、不改变实体，但 Minkowski
+  // 扩张后可防止盒子追踪在旋转 brush 上挂到虚假角点。
   const bevels: Plane[] = [
     { normal: vec3(1, 0, 0), dist: max.x },
     { normal: vec3(-1, 0, 0), dist: -min.x },
@@ -89,7 +85,7 @@ export function brushFromOrientedBox(center: Vec3, halfExtents: Vec3, ax: Vec3, 
 
 // -- Tracing ----------------------------------------------------------------
 
-/** Minkowski expansion: how much a plane's dist grows for a box of mins/maxs. */
+/** Minkowski 扩张：盒子 mins/maxs 使平面 dist 增加的量。 */
 function planeOffset(n: Vec3, mins: Vec3, maxs: Vec3): number {
   return (
     (n.x > 0 ? mins.x : maxs.x) * n.x +
@@ -119,25 +115,22 @@ function clipBoxToBrush(
 
     if (d2 > 0) getOut = true;
     if (d1 > 0) startOut = true;
-    // Skip if starting in front AND not meaningfully approaching. The last
-    // disjunct is the critical robustness guard: a mover resting at exactly
-    // epsilon distance with velocity clipped parallel to the plane produces
-    // d2 a few ulps below d1 (pure float noise in the endpoint dot product).
-    // Without it, that registers as a femto-fraction "hit" on every bump —
-    // pinning the mover in place while gravity pumps its velocity, and
-    // resetting the clip-plane list so crease handling never engages.
+    // 起点在平面前且未明显接近则跳过。最后一项是关键稳健性守卫：物体恰好停在
+    // epsilon 距离、速度与平面平行时，d2 会因端点点积的纯浮点噪声比 d1 小几个 ulp。
+    // 若不跳过，每次碰撞都会记为一个极小的"命中"——把物体钉住（重力持续泵速度）
+    // 并重置 clip 平面列表，使折角处理永不生效。
     if (d1 > 0 && (d2 >= DIST_EPSILON || d2 >= d1 || d1 - d2 < 1e-6)) return;
     if (d1 <= 0 && d2 <= 0) continue;
 
     if (d1 > d2) {
-      // Entering the brush through this plane.
+      // 通过该平面进入 brush。
       const f = (d1 - DIST_EPSILON) / (d1 - d2);
       if (f > enterFrac) {
         enterFrac = f;
         clipPlane = p;
       }
     } else {
-      // Leaving the brush through this plane.
+      // 通过该平面离开 brush。
       const f = (d1 + DIST_EPSILON) / (d1 - d2);
       if (f < leaveFrac) leaveFrac = f;
     }
@@ -164,7 +157,7 @@ export function traceBox(start: Vec3, end: Vec3, mins: Vec3, maxs: Vec3, brushes
     allSolid: false,
   };
 
-  // Broadphase: sweep AABB of the whole move.
+  // 宽阶段：整个移动过程的扫描 AABB。
   const pad = 1;
   const sMinX = Math.min(start.x, end.x) + mins.x - pad;
   const sMinY = Math.min(start.y, end.y) + mins.y - pad;
@@ -184,10 +177,9 @@ export function traceBox(start: Vec3, end: Vec3, mins: Vec3, maxs: Vec3, brushes
     clipBoxToBrush(brush, start, end, mins, maxs, result);
   }
 
-  // Note: startSolid does NOT pin the trace — a start inside one brush still
-  // clips against the others (Quake 2 semantics). Escaping an overlapped
-  // start is the mover's job (PlayerController.checkStuck), because pinning
-  // here freezes the player in place while gravity pumps their velocity.
+  // 注意：startSolid 不钉住追踪——起点在某 brush 内仍会对其它 brush 裁剪
+  // （Quake 2 语义）。脱离重叠起点是移动者的职责（PlayerController.checkStuck），
+  // 否则会在此处钉住玩家、重力持续泵速度。
   if (result.fraction < 1) {
     result.endPos.x = start.x + (end.x - start.x) * result.fraction;
     result.endPos.y = start.y + (end.y - start.y) * result.fraction;
@@ -196,7 +188,7 @@ export function traceBox(start: Vec3, end: Vec3, mins: Vec3, maxs: Vec3, brushes
   return result;
 }
 
-/** True if a box at `origin` overlaps the (convex) volume. */
+/** `origin` 处的盒子是否与（凸）体相交。 */
 export function boxInBrush(origin: Vec3, mins: Vec3, maxs: Vec3, brush: Brush): boolean {
   for (const p of brush.planes) {
     const dist = p.dist - planeOffset(p.normal, mins, maxs);

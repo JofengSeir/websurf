@@ -1,7 +1,6 @@
 //! 转换模块
 
 use gltf_json as json;
-
 use crate::bsp_to_gltf_core::gltf_builder::push_or_get_material_bsp;
 use crate::bsp_to_gltf_core::{ConvertOptions, Error, ExportResult, MissingResource};
 use bytemuck::{Pod, Zeroable};
@@ -14,8 +13,6 @@ use std::borrow::Cow;
 use std::mem::size_of;
 use crate::vbsp::{Bsp, Entity};
 use crate::model_integrator::ModelIntegrator;
-
-/// 导出 BSP 文件为 GLTF 格式
 
 /// 从 BSP 文件导出为 GLTF 格式（仅使用 BSP 文件内的资源）
 pub fn export_bsp(bsp: Bsp, options: ConvertOptions) -> Result<ExportResult, Error> {
@@ -112,17 +109,17 @@ pub fn export_bsp_with_models(bsp: Bsp, options: ConvertOptions, model_integrato
         root.nodes.push(node);
     }
 
-    // 2. 如果提供了模型集成器，直接将模型数据添加到统一结构中
+    // 2. 若提供模型集成器，将模型数据添加到统一结构
     if let Some(integrator) = model_integrator {
         // 直接获取模型数据并添加到统一结构
         if let Err(e) = integrator.add_models_to_gltf(&mut root, &mut buffer) {
-            // 模型处理失败，返回BSP导出结果
+            // 模型处理失败，返回 BSP 导出结果
             eprintln!("警告: 模型处理失败: {:?}", e);
-            // 构建BSP-only结果
+            // 构建 BSP-only 结果
             return build_export_result(root, buffer, missing_resources, texture_collector);
         }
     } else {
-        // 没有模型，构建BSP-only结果
+        // 没有模型，构建 BSP-only 结果
         return build_export_result(root, buffer, missing_resources, texture_collector);
     }
 
@@ -165,10 +162,10 @@ pub fn export_bsp_with_models(bsp: Bsp, options: ConvertOptions, model_integrato
         uri: None,
     });
 
-    // 4. 生成GLB文件
+    // 4. 生成 GLB 文件
     let mut json_string = json::serialize::to_string(&root).expect("Serialization error");
-    
-    // 如果模型集成器启用了光照，添加光照信息
+
+    // 若模型集成器启用了光照，添加光照信息
     if let Some(integrator) = model_integrator {
         if let Ok(modified_json) = integrator.add_lighting_to_gltf_json(&json_string) {
             json_string = modified_json;
@@ -247,7 +244,7 @@ fn build_export_result(
         uri: None,
     });
 
-    // 生成GLB文件
+    // 生成 GLB 文件
     let json_string = json::serialize::to_string(&new_root).expect("Serialization error");
     let mut json_offset = json_string.len() as u32;
     align_to_multiple_of_four(&mut json_offset);
@@ -274,12 +271,11 @@ fn build_export_result(
     })
 }
 
-/// 将模型数据合并到根结构中
+/// 将模型数据合并到根结构中。
 ///
 /// # 保留原因
 ///
-/// 这是早期实现的合并策略之一，当前生产路径使用 [`merge_gltf_structures`]，
-/// 但保留此函数作为：
+/// 早期实现的合并策略之一，当前生产路径使用 [`merge_gltf_structures`]，但保留作：
 ///   - 算法参考（原地修改 vs 构建新根）
 ///   - 性能基准对比（buffer 复用 vs 拷贝）
 ///   - 调试时切换合并实现的备选项
@@ -402,14 +398,13 @@ fn merge_model_into_root(
     root.nodes.extend(model_nodes);
 }
 
-/// 创建新的GLTF结构，提取所有实体并重新组织
+/// 创建新的 GLTF 结构，提取所有实体并重新组织。
 ///
 /// # 保留原因
 ///
-/// 与 [`merge_model_into_root`] 类似，这是另一种合并策略的实现，
-/// 构建全新的根结构而非原地修改。保留以供：
+/// 与 [`merge_model_into_root`] 类似的另一合并策略实现：构建全新根结构而非原地修改。保留作：
 ///   - 算法对比基准测试
-///   - 在出现合并问题时作为回退方案
+///   - 合并出问题时的回退方案
 ///   - 教学参考（不同的索引重映射方式）
 #[allow(dead_code)]
 fn create_new_gltf_structure(
@@ -607,14 +602,14 @@ fn create_new_gltf_structure(
     Ok((new_root, combined_buffer))
 }
 
-/// 改进的GLTF结构合并函数
+/// 改进的 GLTF 结构合并函数。
 ///
 /// # 保留原因
 ///
 /// 第二代合并实现，在 [`create_new_gltf_structure`] 基础上优化了
-/// 缓冲区合并顺序与索引调整。保留以供：
+/// 缓冲区合并顺序与索引调整。保留作：
 ///   - 不同合并策略的 A/B 对比
-///   - 出现退化时回退到该实现
+///   - 退化时回退到该实现
 ///   - 测试新合并算法时的基线参考
 #[allow(dead_code)]
 fn merge_gltf_structures_improved(
@@ -802,12 +797,12 @@ fn merge_gltf_structures_improved(
     Ok((new_root, combined_buffer))
 }
 
-/// 对齐到4的倍数
+/// 对齐到 4 的倍数
 fn align_to_multiple_of_four(n: &mut u32) {
     *n = (*n + 3) & !3;
 }
 
-/// 填充字节向量到4的倍数
+/// 填充字节向量到 4 的倍数
 pub fn pad_byte_vector(vec: &mut Vec<u8>) {
     while vec.len() % 4 != 0 {
         vec.push(0);
@@ -853,8 +848,6 @@ fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Mod
     Ok(models)
 }
 
-/// 推送 BSP 模型到 GLTF
-
 /// 从 BSP 文件推送模型到 GLTF
 fn push_bsp_model_bsp(
     buffer: &mut Vec<u8>,
@@ -867,7 +860,7 @@ fn push_bsp_model_bsp(
     texture_collector: Option<std::rc::Rc<std::cell::RefCell<crate::bsp_to_gltf_core::materials::TextureCollector>>>,
 ) -> Node {
     let mut primitives = Vec::new();
-    // 枚举 face 在 model 中的位置，全局 face 索引 = model.first_face + 位置
+    // 枚举 face 在 model 中的位置，全局 face 索引 = model.first_face + 位置；
     // face_index 写入 extras.faceIndex，供 Worker 端 PVS 遮挡剔除使用
     for (i, face) in model.faces().enumerate() {
         if !face.is_visible() {
@@ -912,8 +905,6 @@ fn push_bsp_model_bsp(
         weights: None,
     }
 }
-
-/// 推送 BSP 面到 GLTF
 
 /// 从 BSP 文件推送面到 GLTF
 fn push_bsp_face_bsp(

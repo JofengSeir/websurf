@@ -10,12 +10,9 @@ import type { PerfSettings } from './PerfBonus.types.js';
 
 export const DEFAULT_PERF_SETTINGS: PerfSettings = {
   enabled: false,
-  maxAirSpeed: 390, // observed nopre chasemod ceiling
+  maxAirSpeed: 390, // 实测 nopre chasemod 上限
 };
 
-// How gradually the ceiling is approached once air speed pushes past
-// maxAirSpeed — not user-tunable (unlike maxAirSpeed itself), same tier as
-// BHOP_MAX_SPEED_FACTOR. Lower = the ceiling bites harder/sooner. Applied
-// every airborne tick in AirMove.ts so a chain can't compound past it via
-// air-strafe gain between hops.
+// 空中速度超过 maxAirSpeed 后逼近上限的渐进程度（不可调，同 BHOP_MAX_SPEED_FACTOR 层级）。
+// 值越低钳制越狠/越早。AirMove.ts 每空中 tick 应用，防止连跳链经 air-strafe 增益累计超过上限。
 export const AIR_SPEED_CEILING_SOFTNESS = 10;

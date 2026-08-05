@@ -26,23 +26,19 @@ export function walkMove(ctx: MovementContext, dt: number): void {
   accelerate(ctx.velocity, ctx.wishDir, wishspeed, accel, dt);
   ctx.velocity.y = 0;
 
-  // "nopre": air-strafe/prestrafe gain (AirMove.ts) is left completely free —
-  // this is where it gets spent instead. Ground speed is a hard ceiling at
-  // the player's current max speed, full stop, the moment they're grounded
-  // and moving under their own power: no "keep whatever you landed with"
-  // exception. That's the point of nopre — you can still build wild speed in
-  // the air for style/tech, you just can't cash it in as a permanent ground
-  // sprint.
+  // "nopre"：空中 strafe/prestrafe 增益（AirMove.ts）完全自由——在这里被花掉。
+  // 一旦落地并自主移动，地速被硬性钳制在当前最大速度，没有"保留落地速度"的
+  // 例外。这就是 nopre 的意义——空中仍可攒速度秀操作，只是不能兑现成永久地速。
   //
-  // 限速判定分两段（chasemod 行为，Source 原版语义）：
-  // - 落地宽限期（groundTicksSinceLanding === 0，落地后的第一个 walkMove tick）
-  //   与无输入时：按 |velocity| 硬钳 —— 空中积累的速度在落地时强制兑现为
-  //   runSpeed（nopre 的本质，测试 3 语义）。
+  // 限速分两段（chasemod 行为，Source 原版语义）：
+  // - 落地首个 walkMove tick（groundTicksSinceLanding === 0）与无输入时：
+  //   按 |velocity| 硬钳——空中积累的速度落地时强制兑现为 runSpeed
+  //   （nopre 的本质，测试 3 语义）。
   // - 已在地面持续移动且有输入（wishspeed > 0）：按 dot(velocity, wishdir)
-  //   投影钳制 —— 同向跑动仍被限制在 cap，但**地面拖拽**（wishdir 与速度
-  //   有夹角，如按住 W 持续转视角）时允许速度到 cap/cosθ 的"稍微突破"
-  //   （CS 原版 Accelerate 的 addspeed = wishspeed - dot 公式的固有结果，
-  //   即用户要求的 chasemod ground-strafe 行为；250 限速本身未解除）。
+  //   投影钳制——同向跑动被限制在 cap，但**地面拖拽**（wishdir 与速度有夹角，
+  //   如按住 W 持续转视角）允许速度到 cap/cosθ 的"轻微突破"（CS 原版
+  //   addspeed = wishspeed - dot 公式的固有结果，即用户要求的 chasemod
+  //   ground-strafe 行为；250 上限本身未解除）。
   if (ctx.settings.noPrestrafe) {
     const cap = currentMaxSpeed(ctx);
     if (wishspeed > 0 && ctx.groundTicksSinceLanding > 0) {

@@ -1,13 +1,7 @@
 /**
  * 灯光管理
- *
- * 管理三类灯光：
- * - 基础环境光：AmbientLight + HemisphereLight + DirectionalLight（球坐标定位）
- * - glTF KHR_lights_punctual 点光源：只保留最近 8 个（WebGL uniform 上限约束）
- *
- * 关键约束（project_memory）：
- * - ≤8 点光源（max_point_lights）
- * - DirectionalLight 位置由球坐标（azimuth/elevation/distance）→ 笛卡尔
+ * 基础灯光：AmbientLight + HemisphereLight + DirectionalLight（球坐标定位）；
+ * glTF KHR_lights_punctual 点光源：最多 8 个（WebGL uniform 上限），按距离取最近。
  */
 
 import * as THREE from 'three';
@@ -38,10 +32,8 @@ const MAX_POINT_LIGHTS = 8;
 const DIR_LIGHT_DISTANCE = 5000;
 
 /**
- * 灯光管理器。
- *
- * 持有基础灯光（Ambient/Hemisphere/Directional）与最多 8 个 PointLight 池。
- * 点光源从 glTF KHR_lights_punctual 提取，按到参考点的距离排序后取最近 8 个。
+ * 灯光管理器：持有基础灯光（Ambient/Hemisphere/Directional）与 8 个 PointLight 池，
+ * 点光源从 glTF KHR_lights_punctual 提取，按距参考点最近 8 个启用。
  */
 export class LightManager {
 	private scene: THREE.Scene | null = null;
@@ -73,7 +65,6 @@ export class LightManager {
 
 	/**
 	 * 初始化基础灯光并加入场景。
-	 *
 	 * @param scene Three.js 场景。
 	 * @param config 运行时配置（读取 lighting 段）。
 	 */
@@ -109,12 +100,8 @@ export class LightManager {
 	}
 
 	/**
-	 * 从 glTF KHR_lights_punctual 提取点光源候选。
-	 *
-	 * 读取 `parser.json.extensions.KHR_lights_punctual.lights` 与节点引用，
-	 * 计算每个点光源的世界坐标，存入候选列表。后续 `updatePointLights(refPos)`
-	 * 按距离取最近 8 个启用。
-	 *
+	 * 从 glTF KHR_lights_punctual 提取点光源候选（世界坐标），
+	 * 后续 updatePointLights(refPos) 按距离取最近 8 个。
 	 * @param gltf GLTF 解析结果。
 	 * @returns 提取的点光源候选数量。
 	 */
@@ -134,8 +121,7 @@ export class LightManager {
 		const lights = ext.lights;
 		const nodes = json.nodes;
 
-		// 构建节点 worldMatrix：glTF scene 根节点 → 递归累积 transform
-		// 为避免重复遍历，先收集所有引用 point light 的节点索引
+		// 遍历引用 point light 的节点，递归累积 transform 得世界坐标
 		const candidates: PointLightCandidate[] = [];
 		for (let i = 0; i < nodes.length; i++) {
 			const node = nodes[i];
@@ -160,8 +146,7 @@ export class LightManager {
 	}
 
 	/**
-	 * 根据参考位置更新点光源池：取最近 8 个候选启用，其余禁用。
-	 *
+	 * 按参考位置更新点光源池：取最近 8 个候选启用，其余禁用。
 	 * @param refPos 参考位置（通常是相机位置）。
 	 */
 	updatePointLights(refPos: THREE.Vector3): void {
@@ -210,9 +195,7 @@ export class LightManager {
 
 	/**
 	 * 更新灯光参数（对应 render-worker.js applyLighting）。
-	 *
-	 * 接受部分 lighting 字段（hex 颜色用 `#rrggbb` 字符串或 number），
-	 * 未提供的字段保持不变。
+	 * 接受部分 lighting 字段（颜色可用 #rrggbb 字符串或 number），未提供的保持不变。
 	 */
 	updateLighting(params: Partial<LightingUpdateParams>): void {
 		if (!this.scene || !this.ambient || !this.hemi || !this.dir) return;
@@ -270,9 +253,7 @@ export class LightManager {
 
 	/**
 	 * 方向光位置更新（球坐标 → 笛卡尔）。
-	 *
-	 * azimuth（方位角，度）+ elevation（仰角，度）+ distance → (x,y,z)。
-	 * DirectionalLight 从 position 朝 target（原点）照射。
+	 * azimuth（方位角）+ elevation（仰角）+ distance → (x,y,z)，从 position 朝 target（原点）照射。
 	 */
 	updateDirPosition(): void {
 		if (!this.dir) return;
@@ -343,10 +324,8 @@ function toColor(input: ColorInput, fallback: THREE.Color | null): THREE.Color {
 }
 
 /**
- * 计算 glTF 节点的世界坐标（递归累积 translation/rotation/scale/matrix）。
- *
- * 简化处理：仅累积 translation 与 matrix（点光源节点通常无旋转/缩放，
- * 且我们只需要位置）。若节点有 matrix，直接用 matrix 的平移分量。
+ * 计算 glTF 节点的世界坐标（递归累积父节点 transform）。
+ * 简化：仅累积 translation 与 matrix（点光源节点通常无旋转/缩放）。
  */
 function computeNodeWorldPosition(
 	json: { nodes?: RawGltfNode[]; scenes?: { nodes?: number[] }[] },

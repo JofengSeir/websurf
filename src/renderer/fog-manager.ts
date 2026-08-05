@@ -1,10 +1,5 @@
 /**
- * 雾管理
- *
- * 基于场景半径与相机到场景中心的距离动态调整线性雾的 near/far。
- *
- * 关键约束（project_memory）：
- * - Fog near/far 值必须基于场景半径和相机距离动态调整
+ * 雾管理：基于场景半径与相机到场景中心的距离动态调整线性雾的 near/far。
  */
 
 import * as THREE from 'three';
@@ -13,13 +8,8 @@ import * as THREE from 'three';
 const DEFAULT_FOG_COLOR = 0x222222;
 
 /**
- * 雾管理器。
- *
- * 使用 THREE.Fog（线性）：
- * - near = max(0, camDist - sceneRadius * 0.5)
- * - far  = camDist + sceneRadius
- *
- * 这样相机在场景中心时 near≈0.5R / far≈R，远处被雾覆盖；
+ * 雾管理器（THREE.Fog 线性）。
+ * near = max(0, camDist - sceneRadius × 0.5)，far = camDist + sceneRadius；
  * 相机远离场景时 near/far 同步外推，避免场景被完全雾化。
  */
 export class FogManager {
@@ -31,7 +21,6 @@ export class FogManager {
 
 	/**
 	 * 初始化雾。
-	 *
 	 * @param scene Three.js 场景。
 	 * @param sceneRadius 场景半径（包围球半径，HU）。
 	 * @param sceneCenter 场景中心（可选，默认原点）。
@@ -55,7 +44,6 @@ export class FogManager {
 
 	/**
 	 * 基于相机位置动态调整 near/far。
-	 *
 	 * @param cameraPos 相机世界坐标。
 	 * @param sceneRadius 当前场景半径（若变化则更新）。
 	 */
@@ -68,8 +56,7 @@ export class FogManager {
 		const R = this.sceneRadius;
 		const camDist = cameraPos.distanceTo(this.sceneCenter);
 
-		// near：相机后方半个场景半径处开始起雾（保证近处清晰）
-		// far：相机前方一个场景半径处完全雾化（远处不可见）
+		// near：相机后方 0.5R 处起雾（近处清晰）；far：相机前方 R 处完全雾化
 		const near = Math.max(0, camDist - R * 0.5);
 		const far = camDist + R;
 

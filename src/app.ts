@@ -1,12 +1,7 @@
 /**
  * WebSurf — 主线程入口
- *
- * 职责：
- * 1. 创建 Worker（OffscreenCanvas + transfer）
- * 2. 监听 .bsp 文件上传 → 发送原始字节 → Worker 内 WASM 解析
- * 3. 绑定键盘 + 鼠标输入（Pointer Lock + 主线程 rAF 输入循环）
- * 4. 绑定 UI 控件（物理模式、灵敏度、视距剔除、重生、spawn 选择、自定义传送点）
- * 5. 接收 Worker 消息（stats/cull-stats/error/scene-ready）更新 UI
+ * 创建 Worker（WASM 解析 .bsp）、绑定键盘/鼠标输入与 UI 控件、
+ * 接收 Worker 消息（stats/error/scene-ready 等）更新 UI。
  */
 
 import type { WasmBspMetadata } from './world/types.js';
@@ -113,14 +108,14 @@ const pointerLock = new PointerLockController();
 
 let worker: Worker | null = null;
 let inputBridge: InputBridge | null = null;
-/** 主线程渲染器（渲染从 Worker 搬回主线程后唯一渲染入口）。 */
+/** 主线程渲染器（唯一渲染入口）。 */
 let rendererMain: RendererMain | null = null;
 let sceneReady = false;
 
-/** 最近一次加载的 BSP 文件名（bsp-metadata 消息不带 name，renderMetadata 需要）。 */
+/** 最近加载的 BSP 文件名（bsp-metadata 消息不含 name）。 */
 let lastLoadedFileName = '';
 
-// 自定义传送点：当前地图名（用于 localStorage 分组）+ 等待 player-pos 回传的标记
+// 自定义传送点：地图名（localStorage 分组）
 let teleportMapName = '';
 /** 保存当前位置后，是否已在等待 Worker 回传 player-pos。 */
 let awaitingPlayerPos = false;
@@ -138,8 +133,8 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	// 0. 共享内存通道（SharedArrayBuffer 需 crossOriginIsolated，dev serve.py 已配 COOP/COEP）
-	//    无 COOP/COEP 时自动回退 postMessage 数据通道（功能等价、延迟更高）。
+	// 0. 共享内存通道（SharedArrayBuffer 需 crossOriginIsolated，dev 已配 COOP/COEP）；
+	//    否则自动回退 postMessage 数据通道（功能等价、延迟更高）。
 	const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
 	let sharedBuffer: SharedArrayBuffer | null = null;
 	if (isolated && typeof SharedArrayBuffer !== 'undefined') {
@@ -150,9 +145,8 @@ async function main(): Promise<void> {
 	}
 
 	// 1. 创建 Worker + 共享状态
-	// Worker 创建：
-	// 内嵌模式（dist）：全局变量 __VBSP_WORKER_JS__ 由构建脚本注入，用 Blob URL 创建（避免 file:// 下 module worker 失败）
-	// 开发模式：从 ./worker.js 加载 ES module worker
+	// dist 内嵌模式：用构建注入的 __VBSP_WORKER_JS__ 建 Blob URL（避免 file:// 下 module worker 失败）；
+	// dev 模式：从 ./worker.js 加载 ES module worker。
 	const embeddedWorker = (globalThis as unknown as { __VBSP_WORKER_JS__?: string }).__VBSP_WORKER_JS__;
 	if (embeddedWorker) {
 		const blob = new Blob([embeddedWorker], { type: 'text/javascript' });
@@ -165,9 +159,8 @@ async function main(): Promise<void> {
 		setError(`Worker error: ${e.message} (${e.filename}:${e.lineno})`);
 	};
 
-	// WASM 模块注入：base64 由构建脚本以全局变量 `__VBSP_WASM_B64__` 形式内嵌主线程（唯一一份），
-	// 此处通过 postMessage 下发给 worker（Blob Worker 读不到主线程 global，无法共享）。
-	// dist 内嵌模式发 wasmB64；dev 模式发 wasmUrl，由 worker fetch。
+	// WASM 注入：dist 模式把内嵌的 __VBSP_WASM_B64__ 通过 postMessage 发给 worker
+	//（Blob Worker 读不到主线程 global）；dev 模式发 wasmUrl，由 worker fetch。
 	const embeddedWasm = (globalThis as unknown as { __VBSP_WASM_B64__?: string }).__VBSP_WASM_B64__;
 	if (embeddedWasm) {
 		worker.postMessage({ type: 'wasm-init', wasmB64: embeddedWasm });
@@ -184,11 +177,11 @@ async function main(): Promise<void> {
 		window.devicePixelRatio,
 	);
 
-	// 2. 主线程渲染器（渲染不再 transfer 到 Worker）
+	// 2. 主线程渲染器
 	rendererMain = new RendererMain(sharedState);
 	rendererMain.onCullStats = updateCullStatsUI;
 	rendererMain.onSceneLoaded = (deathThresholdY) => {
-		// 场景加载后回传死亡阈值给 Worker（死亡判定依赖世界 Y 下限）
+		// 回传死亡阈值给 Worker（死亡判定依赖世界 Y 下限）
 		inputBridge?.sendSetDeathThreshold(deathThresholdY);
 	};
 	rendererMain.init(
@@ -222,11 +215,11 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
 			syncFullConfig();
 			break;
 		case 'bsp-metadata':
-			// Worker 解析后回传元数据 → 渲染 UI（文件名取自模块级 lastLoadedFileName）
+			// 解析后回传元数据 → 渲染 UI（文件名取 lastLoadedFileName）
 			renderMetadata(msg.metadata, lastLoadedFileName);
 			break;
 		case 'parse-progress':
-			// 解析阶段进度 → status 区实时展示（大地图体验改善）
+			// 解析进度 → status 区实时展示
 			setStatus(msg.stage, '');
 			break;
 		case 'spawn-options':
@@ -278,7 +271,7 @@ async function handleSceneData(msg: SceneDataMessage): Promise<void> {
 			`对角线 ${(diag?.diagonal ?? 0).toFixed(0)} HU）`,
 		'success',
 	);
-	// 动态设置视距剔除滑块范围（大地图适配；真实值由主线程 LOD 计算）
+	// 动态设置视距剔除滑块范围（真实值由主线程 LOD 计算）
 	if (dom.cullDistRange && diag) {
 		dom.cullDistRange.min = '1000';
 		dom.cullDistRange.max = String(Math.ceil(diag.maxCull));
@@ -293,12 +286,12 @@ async function handleSceneData(msg: SceneDataMessage): Promise<void> {
 	if (dom.physicsModeSelect) dom.physicsModeSelect.disabled = false;
 	if (dom.respawnBtn) dom.respawnBtn.disabled = false;
 	if (dom.spawnSelect) dom.spawnSelect.disabled = false;
-	// PVS 剔除：默认启用（config.lod.pvsEnabled = true），复选框同步实际状态
+	// PVS 剔除：复选框同步 config.lod.pvsEnabled
 	if (dom.pvsEnabledChk) {
 		dom.pvsEnabledChk.disabled = false;
 		dom.pvsEnabledChk.checked = config.lod.pvsEnabled;
 	}
-	// 自定义传送点：启用按钮 + 刷新列表（地图加载后从 localStorage 恢复）
+	// 自定义传送点：启用按钮 + 从 localStorage 刷新列表
 	if (dom.capturePosBtn) dom.capturePosBtn.disabled = false;
 	if (dom.addTeleportBtn) dom.addTeleportBtn.disabled = false;
 	renderCustomTeleports();
@@ -326,7 +319,7 @@ function updateStatsUI(msg: StatsMessage): void {
 		`FPS ${msg.fps}  位置 ${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}  ` +
 		`速度 ${msg.speed.toFixed(0)}  ${msg.onGround ? '地面' : '空中'}  ` +
 		`cluster ${msg.cluster >= 0 ? msg.cluster : '—'}`;
-	// 准星射线检测信息（主线程渲染器本地计算，随渲染循环限频刷新）
+	// 准星射线检测信息（渲染器本地计算，随渲染循环刷新）
 	if (dom.planeInfoEl) {
 		dom.planeInfoEl.textContent = formatPlaneInfo(rendererMain?.getPlaneInfo() ?? null);
 	}
@@ -434,12 +427,10 @@ function updateGameStatsUI(msg: GameStatsMessage): void {
 // ---------------------------------------------------------------------------
 
 function bindInput(canvas: HTMLCanvasElement): void {
-	// 键盘：绑定到 window（canvas 无 tabindex 不可获焦，绑定到 canvas 会导致 keydown/keyup 永不触发）
+	// 键盘绑定 window（canvas 无 tabindex 无法获焦，绑定 canvas 则 keydown/keyup 永不触发）
 	keyboard.bind(window);
 
-	// 鼠标移动（阶段一：极速输入，主线程专属）：
-	// 过滤（discardNext + 绝对削平，CLAMP@1000）后立即写入共享内存输入区，
-	// 不再经过 8ms 限流批量发送 —— 输入 → 物理延迟降到 ~0（同线程写入）。
+	// 鼠标移动：过滤后立即写入共享内存输入区，不再经 8ms 限流批量发送，输入→物理延迟≈0
 	window.addEventListener('mousemove', (e) => {
 		if (!pointerLock.isLocked()) return;
 		const r = mouseBuffer.process(e.movementX, e.movementY);
@@ -474,7 +465,7 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		wheelJumpPending = true;
 	}, { passive: true });
 
-	// 窗口尺寸变化 → 主线程渲染器 resize（Worker 不再持有渲染/尺寸）
+	// 窗口尺寸变化 → 主线程渲染器 resize
 	window.addEventListener('resize', () => {
 		rendererMain?.resize(canvas.clientWidth, canvas.clientHeight);
 	});
@@ -572,7 +563,7 @@ function bindUI(): void {
 		inputBridge.sendGetPlayerPos();
 	});
 
-	// 自定义传送点：手动添加（展开 X/Y/Z 三个独立输入框，避免单框自由文本误填）
+	// 自定义传送点：手动添加（展开 X/Y/Z 输入框，避免单框自由文本误填）
 	dom.addTeleportBtn?.addEventListener('click', () => {
 		if (!sceneReady || !inputBridge) {
 			setStatus('场景尚未就绪，请先加载地图。', 'error');
@@ -661,7 +652,7 @@ function bindUI(): void {
 		}
 	});
 
-	// HUD 显示开关（关闭时停止 stats 发送 + 平面检测以节省性能）
+	// HUD 开关（关闭时停止 stats 发送 + 平面检测，省性能）
 	dom.hudVisibleChk?.addEventListener('change', (e) => {
 		const visible = (e.target as HTMLInputElement).checked;
 		if (dom.hudEl) dom.hudEl.style.display = visible ? '' : 'none';
@@ -697,8 +688,7 @@ function bindUI(): void {
 		inputBridge?.sendConfig('debug', { groundedFramesRequired: val });
 	});
 
-	// 显示设置：实体碰撞箱 / 触发碰撞箱 / 准星射线检测
-	// （主线程渲染器负责碰撞箱可视化与准星检测，config 同时同步 Worker）
+	// 显示设置：实体/触发碰撞箱、准星射线检测（渲染器负责可视化，config 同步 Worker）
 	dom.showSolidsChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyConfigPatch(config, 'debug', { showSolids: enabled });
@@ -998,7 +988,7 @@ function renderPhysicsSnapshot(msg: PhysicsSnapshotMessage): void {
 				else inputEl.value = String(p.value);
 			}
 		}
-		// 2. 碰撞箱：滑块 + 输入框 + 倍率（若三值与默认×k 一致则显示 k，否则"自定义"）
+		// 2. 碰撞箱：三值同步 + 倍率（与默认×k 一致则显示 k，否则"自定义"）
 		const { halfWidth, standHeight, duckHeight, source, isDefault } = msg.hull;
 		if (dom.hullHalfWidth) dom.hullHalfWidth.value = String(halfWidth);
 		if (dom.hullHalfWidthNum) dom.hullHalfWidthNum.value = String(halfWidth);
@@ -1048,17 +1038,15 @@ function startInputLoop(): void {
 		requestAnimationFrame(tick);
 		if (!inputBridge || !sceneReady) return;
 
-		// 按键位掩码（含滚轮连跳脉冲，wheelJump 一次性置位后清零）。
-		// setKeys 在环形缓冲模式下追加零增量样本——保证按住键不动鼠标时
-		// Worker 每帧仍能刷新按键状态。
+		// 按键位掩码（含滚轮连跳脉冲，置位后清零）；环形缓冲下每帧推送，保证按住键不动鼠标时
+		// Worker 仍能刷新按键状态
 		const keys = keyboard.getState();
 		keys.wheelJump = wheelJumpPending;
 		wheelJumpPending = false;
 		const mask = keysToMask(keys);
 		inputBridge.setKeys(mask);
 
-		// frame 触发信号：无数据负载，物理 dt 由 Worker 侧 performance.now() 计算。
-		// M2 Worker 自驱循环落地后，本行移除（自驱唯一驱动源）。
+		// frame 触发信号（无负载，物理 dt 由 Worker 自算）；M2 Worker 自驱落地后移除
 		inputBridge.sendFrame();
 	};
 	requestAnimationFrame(tick);

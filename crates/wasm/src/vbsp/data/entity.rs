@@ -116,7 +116,6 @@ impl<'a> RawEntity<'a> {
         match vdf_reader::from_str(self.buf) {
             Ok(entity) => Ok(entity),
             Err(VdfError::UnknownVariant(_)) => Ok(Entity::Unknown(self.clone())),
-            // todo
             Err(_) => Err(EntityParseError::NoSuchProperty("unknown serde error")),
         }
     }

@@ -43,7 +43,7 @@ impl<R: BinReaderExt + Read> LumpReader<R> {
         Ok(Entities { entities })
     }
 
-    /// Read a list of items with a fixed size
+    /// 读取固定大小的条目列表
     pub fn read_vec<F, T>(&mut self, mut f: F) -> BspResult<Vec<T>>
     where
         F: FnMut(&mut LumpReader<R>) -> BspResult<T>,
@@ -70,17 +70,8 @@ impl<R: BinReaderExt + Read> LumpReader<R> {
         T::Args<'static>: Default,
         <T as BinRead>::Args<'static>: Clone,
     {
-        // let start = self.inner.stream_position().unwrap() as usize;
+        // 已禁用：校验实际消费字节数 == size_of::<T>()（仅对不含堆分配的类型可靠，待研究）
         let result = self.inner.read_le()?;
-        // let end = self.inner.stream_position().unwrap() as usize;
-        // todo: figure out how to only run this check for types that don't allocate
-        // debug_assert_eq!(
-        //     end - start,
-        //     size_of::<T>(),
-        //     "Incorrect number of bytes consumed while reading a {} ({:#?})",
-        //     type_name::<T>(),
-        //     result
-        // );
         Ok(result)
     }
 
@@ -98,11 +89,10 @@ impl<R: BinReaderExt + Read> LumpReader<R> {
             pas_offsets.push(self.inner.read_le()?);
         }
 
-        // 【修复】vis lump 的 bitofs 是「相对整个 lump 起始(含 numclusters 头)」的偏移
-        // (Source: `map_vis + bitofs[cluster][visType]`)。此前 data 只保留偏移表之后的
-        // 字节, 而 offsets 未减去头长, 导致所有 PVS 行错位读取 (偏差 4 + 8*cluster_count
-        // 字节) —— 行内容错配, 仅密度近似正确。这里回卷到 lump 起点, 保留完整数据,
-        // 使 data[offset] == lump[offset]。
+        // 【修复】vis lump 的 bitofs 是「相对整个 lump 起始（含 numclusters 头）」的偏移
+        // (Source: `map_vis + bitofs[cluster][visType]`)。此前 data 只保留偏移表之后的字节，
+        // 而 offsets 未减去头长，导致所有 PVS 行错位读取（偏差 4 + 8*cluster_count 字节），
+        // 行内容错配。这里回卷到 lump 起点、保留完整数据，使 data[offset] == lump[offset]。
         self.inner.seek(SeekFrom::Start(0))?;
 
         let mut data = Vec::new();
@@ -121,9 +111,9 @@ impl<R: BinReaderExt + Read> LumpReader<R> {
     /// 记录大小**不能只看 lump version**：实测部分 BSP（如 surf_nsz_fix，
     /// v20 + leaves lump version=1）实际写的是 32 字节 dleaf_t 记录，
     /// 而标准 v1 是 56 字节（含 ambient）。统一按 version 解析会把
-    /// node.children 的 leaf 索引映射到错误的表（索引越界/错位）。
+    /// node.children 的 leaf 索引映射到错误的表。
     ///
-    /// 自适应规则：以 BSP 树实际引用的最大 leaf 索引为准——
+    /// 自适应规则：以 BSP 树实际引用的最大 leaf 索引为准 ——
     /// `max_leaf_index < len/56` 说明按 56 字节（v1 记录）可容纳，否则按 32 字节。
     ///
     /// 调用方（Bsp::read）需在读取 nodes 后把 `max_leaf_index` 传入。

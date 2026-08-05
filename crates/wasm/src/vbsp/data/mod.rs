@@ -36,7 +36,7 @@ use std::sync::Mutex;
 use zip::result::ZipError;
 use zip::ZipArchive;
 
-/// Validate that reading the type consumes `size_of::<T>()` bytes
+/// 验证读取该类型恰好消费 `size_of::<T>()` 字节
 #[cfg(test)]
 fn test_read_bytes<T: BinRead>()
 where
@@ -100,26 +100,26 @@ pub struct TextureFlags(u32);
 
 bitflags! {
     impl TextureFlags: u32 {
-        const LIGHT      = 0b0000_0000_0000_0000_0001; // value will hold the light strength
-        const SKY2D      = 0b0000_0000_0000_0000_0010; // don't draw, indicate we should skylight + draw 2d sky but don't draw the 3d skybox
-        const SKY        = 0b0000_0000_0000_0000_0100; // don't draw, but add the skybox
-        const WARP       = 0b0000_0000_0000_0000_1000; // turbulent water warp
-        const TRANS      = 0b0000_0000_0000_0001_0000; // texture is translucent
-        const NOPORTAL   = 0b0000_0000_0000_0010_0000; // the surface can't have a portal placed on it
-        const TRIGGER    = 0b0000_0000_0000_0100_0000; // xbox hack to work around elimination of trigger surfaces
-        const NODRAW     = 0b0000_0000_0000_1000_0000; // don't bother referencing the texture
-        const HINT       = 0b0000_0000_0001_0000_0000; // make a primary bsp splitter
-        const SKIP       = 0b0000_0000_0010_0000_0000; // completely ignore, allowing non-closed brushes
-        const NOLIGHT    = 0b0000_0000_0100_0000_0000; // dont calculate light
-        const BUMPLIGHT  = 0b0000_0000_1000_0000_0000; // calculate thee light maps for the surface for bump mapping
-        const NOSHADOWS  = 0b0000_0001_0000_0000_0000; // don't receive shadows
-        const NODECALS   = 0b0000_0010_0000_0000_0000; // don't receive decals
-        const NOCHOP     = 0b0000_0100_0000_0000_0000; // don't subdivide patches on this surface
-        const HITBOX     = 0b0000_1000_0000_0000_0000; // surface is part of a hitbox
+        const LIGHT      = 0b0000_0000_0000_0000_0001; // 值保存光照强度
+        const SKY2D      = 0b0000_0000_0000_0000_0010; // 不绘制；绘制 2D 天空，不绘制 3D 天空盒
+        const SKY        = 0b0000_0000_0000_0000_0100; // 不绘制，但添加天空盒
+        const WARP       = 0b0000_0000_0000_0000_1000; // 湍流水面扭曲
+        const TRANS      = 0b0000_0000_0000_0001_0000; // 纹理半透明
+        const NOPORTAL   = 0b0000_0000_0000_0010_0000; // 该面不能放置传送门
+        const TRIGGER    = 0b0000_0000_0000_0100_0000; // xbox hack：绕过 trigger 面剔除
+        const NODRAW     = 0b0000_0000_0000_1000_0000; // 不引用纹理（不可见）
+        const HINT       = 0b0000_0000_0001_0000_0000; // 作为主 BSP 分割器
+        const SKIP       = 0b0000_0000_0010_0000_0000; // 完全忽略，允许非闭合 brush
+        const NOLIGHT    = 0b0000_0000_0100_0000_0000; // 不计算光照
+        const BUMPLIGHT  = 0b0000_0000_1000_0000_0000; // 为凹凸贴图计算光照图
+        const NOSHADOWS  = 0b0000_0001_0000_0000_0000; // 不接收阴影
+        const NODECALS   = 0b0000_0010_0000_0000_0000; // 不接收贴花
+        const NOCHOP     = 0b0000_0100_0000_0000_0000; // 不细分该面上的 patch
+        const HITBOX     = 0b0000_1000_0000_0000_0000; // 面属于 hitbox
     }
 }
 
-/// Fixed length, null-terminated string
+/// 定长、以空字符结尾的字符串
 #[derive(Debug, Clone)]
 pub struct FixedString<const LEN: usize>(ArrayString<LEN>);
 
@@ -228,7 +228,7 @@ pub struct Leaf {
     pub contents: i32,
     pub cluster: i16,
     pub area_and_flags: i16,
-    // first 9 bits is area, last 7 bits is flags
+    // 前 9 位是 area，后 7 位是 flags
     pub mins: [i16; 3],
     pub maxs: [i16; 3],
     pub first_leaf_face: u16,
@@ -287,38 +287,38 @@ pub struct BrushFlags(u32);
 
 bitflags! {
     impl BrushFlags: u32 {
-        const EMPTY =       	        0; // 	No contents
-        const SOLID =       	        0x1; // 	an eye is never valid in a solid
-        const WINDOW =      	        0x2; // 	translucent, but not watery (glass)
+        const EMPTY =       	        0; // 	无内容
+        const SOLID =       	        0x1; // 	实体中永远不可能是空
+        const WINDOW =      	        0x2; // 	半透明但不含水（玻璃）
         const AUX =         	        0x4;
-        const GRATE =       	        0x8; // 	alpha-tested "grate" textures. Bullets/sight pass through, but solids don't
+        const GRATE =       	        0x8; // 	alpha 测试的"栅格"纹理；子弹/视线穿过，实体不穿过
         const SLIME =       	        0x10;
         const WATER =       	        0x20;
         const MIST =        	        0x40;
-        const OPAQUE =      	        0x80; // 	block AI line of sight
-        const TESTFOGVOLUME =          0x100; // 	things that cannot be seen through (may be non-solid though)
-        const UNUSED =      	        0x200; // 	unused
-        const UNUSED6 =                0x400; // 	unused
-        const TEAM1 =       	        0x800; // 	per team contents used to differentiate collisions between players and objects on different teams
+        const OPAQUE =      	        0x80; // 	阻挡 AI 视线
+        const TESTFOGVOLUME =          0x100; // 	不可透视（可能非固体）
+        const UNUSED =      	        0x200; // 	未使用
+        const UNUSED6 =                0x400; // 	未使用
+        const TEAM1 =       	        0x800; // 	按队伍区分碰撞
         const TEAM2 =       	        0x1000;
-        const IGNORE_NODRAW_OPAQUE =   0x2000; // 	ignore CONTENTS_OPAQUE on surfaces that have SURF_NODRAW
-        const MOVEABLE =               0x4000; // 	hits entities which are MOVETYPE_PUSH (doors, plats, etc.)
-        const AREAPORTAL =             0x8000; // 	remaining contents are non-visible, and don't eat brushes
+        const IGNORE_NODRAW_OPAQUE =   0x2000; // 	忽略 SURF_NODRAW 面上的 CONTENTS_OPAQUE
+        const MOVEABLE =               0x4000; // 	可碰撞 MOVETYPE_PUSH 实体（门、平台等）
+        const AREAPORTAL =             0x8000; // 	其余内容不可见，不消耗 brush
         const PLAYERCLIP =             0x10000;
         const MONSTERCLIP =            0x20000;
-        const CURRENT_0 =              0x40000; // 	currents can be added to any other contents, and may be mixed
+        const CURRENT_0 =              0x40000; // 	水流可与其他内容叠加
         const CURRENT_90 =             0x80000;
         const CURRENT_180 =            0x100000;
         const CURRENT_270 =            0x200000;
         const CURRENT_UP =             0x400000;
         const CURRENT_DOWN =           0x800000;
-        const ORIGIN =      	        0x1000000; // 	removed before bsping an entity
-        const MONSTER =                0x2000000; // 	should never be on a brush, only in game
+        const ORIGIN =      	        0x1000000; // 	编译 BSP 前移除
+        const MONSTER =                0x2000000; // 	只存在于游戏中，不该出现在 brush 上
         const DEBRIS =      	        0x4000000;
-        const DETAIL =      	        0x8000000; // 	brushes to be added after vis leafs
-        const TRANSLUCENT =            0x10000000; // 	auto set if any surface has trans
+        const DETAIL =      	        0x8000000; // 	vis leaf 之后添加的 brush
+        const TRANSLUCENT =            0x10000000; // 	任一面有 trans 时自动设置
         const LADDER =      	        0x20000000;
-        const HITBOX =      	        0x40000000; // 	use accurate hitboxes on trace
+        const HITBOX =      	        0x40000000; // 	trace 时使用精确 hitbox
     }
 }
 
@@ -441,32 +441,26 @@ impl VisData {
     }
 }
 
-/// Decode one Source-engine RLE-compressed VIS row into a visibility bitmap.
+/// 把 Source 引擎 RLE 压缩的一行 VIS 解码为可见性位图。
 ///
-/// This is the single canonical implementation of Source's `CM_DecompressVis`
-/// (see `docs/VISLEAF-PVS.md`). All PVS paths — the WASM `parse_pvs_data`,
-/// the offline `.bin` exporter, and the deprecated `VisData::visible_clusters`
-/// — must route through this so the decoded visibility matches the engine.
+/// 这是 Source `CM_DecompressVis` 的唯一权威实现（见 `docs/VISLEAF-PVS.md`）。
+/// 所有 PVS 路径 —— WASM `parse_pvs_data`、离线 `.bin` 导出器、已废弃的
+/// `VisData::visible_clusters` —— 都必须经由此处，保证解码与引擎一致。
 ///
-/// # Arguments
-/// - `vis_data`: the raw `VIS` lump bytes.
-/// - `offset`: byte offset of this cluster's PVS row inside `vis_data`.
-/// - `cluster_count`: total number of clusters in the map.
-/// - `_bytes_per_row`: `(cluster_count + 7) / 8`; unused here (the row start is
-///   given by `row_offset`), kept for API symmetry with callers.
-/// - `row_offset`: byte offset where this cluster's row begins inside `pvs_bits`
-///   (normally `source_cluster * bytes_per_row`).
-/// - `pvs_bits`: caller-allocated bitmap for ALL clusters; this writes the
-///   target-cluster bits for the current source cluster. Bit for target `t` is
-///   `pvs_bits[row_offset + t/8]`, bit `t % 8` (LSB-first).
+/// # 参数
+/// - `vis_data`: 原始 `VIS` lump 字节。
+/// - `offset`: 该 cluster 的 PVS 行在 `vis_data` 内的字节偏移。
+/// - `cluster_count`: 地图中 cluster 总数。
+/// - `_bytes_per_row`: `(cluster_count + 7) / 8`；此处未用（行起始由 `row_offset` 给出），仅为保持调用方参数对称。
+/// - `row_offset`: 该 cluster 的行在 `pvs_bits` 中的起始字节（通常 `source_cluster * bytes_per_row`）。
+/// - `pvs_bits`: 调用方分配的、覆盖全部 cluster 的位图；这里写入当前 source cluster 的目标 cluster 位。
+///   目标 `t` 的位在 `pvs_bits[row_offset + t/8]` 的第 `t % 8` 位（LSB 在前）。
 ///
-/// # RLE format (`CM_DecompressVis`)
-/// - Each output **byte** covers 8 clusters.
-/// - Non-zero byte `b`: bit `i` set ⇒ cluster `(cluster_index + i)` visible.
-///   Advance 8 clusters, consume 1 byte.
-/// - Zero byte `0x00`: RLE escape; the **next** byte `n` is the number of
-///   all-zero bytes (each = a group of 8 invisible clusters) to skip.
-///   Advance `n * 8` clusters, consume 2 bytes.  ← the `* 8` is the historical bug.
+/// # RLE 格式（`CM_DecompressVis`）
+/// - 输出**每字节**覆盖 8 个 cluster。
+/// - 非零字节 `b`：第 `i` 位为 1 ⇒ cluster `(cluster_index + i)` 可见。前进 8 个 cluster，消耗 1 字节。
+/// - 零字节 `0x00`：RLE 转义；**下一**字节 `n` 是要跳过的全零字节数（每字节 = 一组 8 个不可见 cluster）。
+///   前进 `n * 8` 个 cluster，消耗 2 字节。  ← `* 8` 是历史 bug 点。
 pub fn decode_pvs_row(
     vis_data: &[u8],
     offset: usize,
@@ -483,19 +477,19 @@ pub fn decode_pvs_row(
     let mut buffer_index: usize = 0;
     while cluster_index < cluster_count {
         if buffer_index >= pvs_buffer.len() {
-            break; // ran out of compressed bytes — leave remaining clusters invisible
+            break; // 压缩字节耗尽，剩余 cluster 保持不可见
         }
         let byte = pvs_buffer[buffer_index];
         if byte == 0 {
-            // RLE escape: next byte = number of *zero bytes* (8-cluster groups) to skip.
+            // RLE 转义：下一字节 = 要跳过的零字节数（每组 = 8 个 cluster）
             if buffer_index + 1 >= pvs_buffer.len() {
                 break;
             }
             let skip_bytes = pvs_buffer[buffer_index + 1] as u32;
-            cluster_index += skip_bytes * 8; // FIX: skip is in units of 8-cluster groups
+            cluster_index += skip_bytes * 8; // 修复：跳过单位是 8-cluster 组
             buffer_index += 2;
         } else {
-            // 8 clusters of visibility encoded as a bitmask.
+            // 8 个 cluster 的可见性按位掩码编码
             for i in 0..8u32 {
                 let bit = 1u8 << i;
                 if (byte & bit) == bit {
@@ -649,7 +643,7 @@ impl FromStr for Angles {
 
 impl Angles {
     fn as_quaternion(&self) -> Quaternion<f32> {
-        // angles are applied in roll, pitch, yaw order
+        // 角度按 roll、pitch、yaw 顺序应用
         Quaternion::from_angle_y(Deg(self.yaw))
             * Quaternion::from_angle_x(Deg(self.pitch))
             * Quaternion::from_angle_z(Deg(self.roll))
@@ -660,17 +654,16 @@ impl Angles {
 mod tests {
     use super::*;
 
-    /// PVS RLE decode: the `0x00` escape's next byte is a count of *zero bytes*
-    /// (each = 8 invisible clusters), not a cluster count. A `skip` of 1 must
-    /// advance 8 clusters, not 1. This is the historical bug (VISLEAF-PVS.md).
+    /// PVS RLE 解码：`0x00` 转义后的下一字节是**零字节**数（每字节 = 8 个不可见 cluster），
+    /// 而非 cluster 数。`skip` 为 1 时必须前进 8 个 cluster，而非 1 —— 这就是历史 bug（VISLEAF-PVS.md）。
     #[test]
     fn decode_pvs_row_rle_skip_is_in_groups_of_8_clusters() {
-        // cluster_count = 24 => bytes_per_row = 3.
-        // Want visible: clusters 0,1,2,3 and 16,17,18,19.
-        // RLE (Source CM_DecompressVis):
-        //   byte0 = 0x0F -> clusters 0..7, bits 0..3 set => 0..3 visible
-        //   byte1 = 0x00, byte2 = 0x01 -> RLE escape: skip 1 zero-byte = 8 clusters (8..15 invisible)
-        //   byte3 = 0x0F -> clusters 16..23, bits 0..3 => 16..19 visible
+        // cluster_count = 24 => bytes_per_row = 3。
+        // 期望可见：clusters 0,1,2,3 与 16,17,18,19。
+        // RLE（Source CM_DecompressVis）：
+        //   byte0 = 0x0F -> clusters 0..7，bit 0..3 置位 => 0..3 可见
+        //   byte1 = 0x00, byte2 = 0x01 -> RLE 转义：跳过 1 个零字节 = 8 个 cluster（8..15 不可见）
+        //   byte3 = 0x0F -> clusters 16..23，bit 0..3 => 16..19 可见
         let vis_data: Vec<u8> = vec![0x0F, 0x00, 0x01, 0x0F];
         let cluster_count = 24u32;
         let bytes_per_row = ((cluster_count as usize) + 7) / 8; // 3

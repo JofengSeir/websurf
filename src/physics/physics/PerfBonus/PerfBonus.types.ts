@@ -8,36 +8,26 @@
 
 
 /**
- * Perfect-bhop velocity carry: a REAL, skill-timed instant rejump (the tick
- * right after landing, manual input only) restores the exact horizontal
- * velocity you landed with, bypassing whatever bhopSpeedClamp or ground
- * friction already reduced it to. Nothing else qualifies:
+ * 完美连跳速度继承：一次真实、技能时机的即时重跳（落地后下一 tick，仅手动输入）
+ * 恢复落地时的精确水平速度，绕过 bhopSpeedClamp / 地面摩擦已削减的值。
+ * 其它情况均不触发：
  *
- *  - `autobhop` never gets the carry, ever. Held-jump autobhop always
- *    re-fires the instant it's able to, regardless of skill — treating that
- *    as a guaranteed "perfect" every hop permanently defeats
- *    bhopSpeedClamp, since the carry would restore whatever you landed
- *    with every single time and the clamp would never get a tick to
- *    actually hold speed down.
- *  - A landing that came off a surf ramp (or the flight immediately after
- *    leaving one, before your next real landing) never counts either —
- *    surf speed isn't something you "cash in" as a perfect bhop.
- *  - Anything later than the very next tick after landing gets nothing —
- *    no partial credit for a near-miss.
+ *  - `autobhop` 永不继承——按住跳的 autobhop 总是尽可能快地重发，与技能无关；
+ *    若把它当"完美"处理，则每次连跳都恢复落地速度，bhopSpeedClamp 永远没机会
+ *    真正压住速度。
+ *  - 来自 surf 斜坡的落地（或离开斜坡后、下次真实落地前的飞行）也不触发——
+ *    surf 速度不是能当完美连跳"兑现"的东西。
+ *  - 晚于落地后下一 tick 的任何起跳不继承——近失不给部分折扣。
  *
- * A miss (any of the above) just leaves the takeoff at whatever
- * `bhopSpeedClamp` already computed.
+ * 未命中时，起跳速度维持 `bhopSpeedClamp` 已算好的值。
  *
- * The carry alone compounds without limit across a chain, which isn't how
- * real chasemod servers feel — players report air speed never exceeding
- * `maxAirSpeed` (unless surfing, a different physics path via ramp
- * geometry). So whenever `enabled`, AirMove.ts squeezes air speed itself
- * through a diminishing-returns curve every airborne tick — not just at the
- * carry — approaching `maxAirSpeed` but never quite reaching it. Surfing
- * (and the flight right after leaving a ramp) is exempt from this squeeze
- * entirely.
+ * 单靠继承会在连跳链上无限叠加，不符合真实 chasemod 服务器的体感——玩家反馈
+ * 空中速度从不超 `maxAirSpeed`（除非 surf，那是经斜坡几何的另一条物理路径）。
+ * 因此 `enabled` 时，AirMove.ts 每空中 tick 将空中速度本身过一遍递减收益曲线
+ * ——不只继承那一刻——逼近 `maxAirSpeed` 但永不达到。Surf（及离开斜坡后的
+ * 飞行）完全豁免此压缩。
  */
 export interface PerfSettings {
   enabled: boolean;
-  maxAirSpeed: number; // asymptotic ceiling perfect-bhop air speed approaches; observed ~390 on nopre chasemod servers
+  maxAirSpeed: number; // 完美连跳空中速度逼近的渐近上限；nopre chasemod 服务器实测约 390
 }

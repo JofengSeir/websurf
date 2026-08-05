@@ -11,7 +11,7 @@ import { copy, set } from '../../math/vec3.js';
 import { STEP_HEIGHT } from '../StepMove/StepMove.config.js';
 import type { MovementContext } from '../MovementContext.js';
 
-/** Keep grounded players glued to walkable slopes (Source's StayOnGround). */
+/** 让地面玩家贴合可站立斜坡（Source 的 StayOnGround）。 */
 export function stayOnGround(ctx: MovementContext): void {
   const tr = ctx.world.trace(
     ctx.origin,

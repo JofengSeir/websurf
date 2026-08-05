@@ -1,11 +1,7 @@
 /**
- * 世界适配层类型定义
- *
- * 这些类型对应 Rust WASM 端 `export_brushes_planes` / `parse_spawn_points` /
- * `parse_teleports` / `parse_pvs_data` 输出的 JSON 结构。
- *
- * 坐标约定：所有坐标已在 Rust 端旋转为 Y-up（`[x,y,z]→[y,z,x]`，det=+1），
- * TS 端不再二次重映射。
+ * 世界适配层类型定义：对应 Rust WASM 端 export_brushes_planes / parse_spawn_points /
+ * parse_teleports / parse_pvs_data 输出的 JSON 结构。
+ * 坐标约定：Rust 端已旋转为 Y-up（[x,y,z]→[y,z,x]，det=+1），TS 端不再二次重映射。
  */
 
 // ---------------------------------------------------------------------------
@@ -94,14 +90,9 @@ export interface WasmTeleportTrigger {
    */
   model_planes?: [number, number, number, number][] | null;
   /**
-   * spawnflags（bitfield）。
-   * - bit 1 (0x01) = Clients
-   * - bit 2 (0x02) = NPCs
-   * - bit 8 (0x08) = PhysicsObjects
-   * - bit 16 (0x10) = Only players
-   * - bit 64 (0x40) = Everything
-   * 默认 1 = Clients。如果不含 Clients bit 且不是 Everything，
-   * 触发器不对玩家生效（checkTeleport 会跳过）。
+   * spawnflags（bitfield）：bit1=Clients、bit2=NPCs、bit8=PhysicsObjects、
+   * bit16=Only players、bit64=Everything；默认 1=Clients。
+   * 不含 Clients 且非 Everything 时触发器不对玩家生效（checkTeleport 跳过）。
    */
   spawnflags: number;
   /** StartDisabled（true=禁用，不会触发传送）。 */
