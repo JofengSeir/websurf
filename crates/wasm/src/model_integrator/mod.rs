@@ -1,72 +1,43 @@
-// 迁移自 model-integrator：作为模块并入。WASM 仅用 from_in_memory 路径，保留磁盘 API 结构。
-#![allow(dead_code)]
-use std::path::Path;
-use std::path::PathBuf;
-use std::fs::File;
-use std::fs::read_dir;
-use std::fs::read;
-use std::io::Write;
-use std::mem;
-use thiserror::Error;
-use gltf;
-use gltf::json as json;
-use gltf::json::{Index, Node, Root, Scene, Buffer};
+//! 模型整合器：把 `.mdl/.vvd/.dx90.vtx` 模型合并进地图 GLB。
+//!
+//! WASM 环境无文件系统，统一走 `from_in_memory` + [`InMemoryResources`] 路径；
+//! 磁盘模式（new-vbsp CLI 时代遗留的 `new()` / `export_map` / 目录遍历等）已清理移除。
 
-use std::borrow::Cow;
 use std::collections::HashMap;
+use std::mem;
+use std::path::Path;
+
+use bytemuck::{Pod, Zeroable};
 use cgmath::{Deg, Quaternion, Rotation3};
+use gltf::json as json;
 use gltf::json::scene::UnitQuaternion;
 use gltf::json::validation::USize64;
-use bytemuck::{Pod, Zeroable};
-use vmdl::Model as VmdlModel;
-use vmdl::Mdl;
-use vmdl::Vtx;
-use vmdl::Vvd;
-use serde::{Deserialize, Serialize};
-use serde_json;
+use gltf::json::{Index, Node, Root};
+use serde::Deserialize;
+use thiserror::Error;
+use vmdl::{Mdl, Model as VmdlModel, Vtx, Vvd};
 
 /// 模型整合错误
 #[derive(Error, Debug)]
 pub enum ModelIntegratorError {
-    #[error("IO 错误: {0}")]
-    Io(#[from] std::io::Error),
-    
     #[error("GLTF 错误: {0}")]
     Gltf(#[from] gltf::Error),
-    
+
     #[error("模型错误: {0}")]
     Model(#[from] vmdl::ModelError),
-    
+
     #[error("JSON 错误: {0}")]
     Json(#[from] serde_json::Error),
-    
+
     #[error("不支持的模型格式: {0}")]
     UnsupportedModelFormat(String),
-    
-    #[error("无效的资源目录: {0}")]
-    InvalidResourceDirectory(String),
 }
 
-/// 导出模型选项
+/// 导出模型选项（WASM 下通常只用默认值）
 #[derive(Debug, Default)]
 pub struct ExportOptions {
-    /// 是否包含纹理
-    pub include_textures: bool,
-    /// 是否优化模型
-    pub optimize: bool,
-    /// 缩放因子
-    pub scale: f32,
-    /// 是否包含光照
+    /// 是否包含光照（light 实体 → KHR_lights_punctual 扩展）
     pub include_lights: bool,
-}
-
-/// 模型导出结果
-#[derive(Debug)]
-pub struct ModelExportResult {
-    /// GLB 数据
-    pub glb: gltf::Glb<'static>,
-    /// 模型元数据
-    pub models: Vec<ModelMetadata>,
 }
 
 /// 内存中的单个模型字节数据（替代磁盘 .mdl/.vvd/.dx90.vtx 三件套）
@@ -94,404 +65,115 @@ pub struct InMemoryResources {
 
 /// 模型整合器
 pub struct ModelIntegrator {
-    resource_dir: PathBuf,
-    in_memory: Option<InMemoryResources>,
+    in_memory: InMemoryResources,
     options: ExportOptions,
 }
 
 impl ModelIntegrator {
-    /// 创建新的模型整合器（磁盘模式，new-vbsp CLI 使用）
-    pub fn new(resource_dir: &Path, options: ExportOptions) -> Self {
-        Self {
-            resource_dir: resource_dir.to_path_buf(),
-            in_memory: None,
-            options,
-        }
-    }
-
     /// 使用内存资源创建整合器（WASM / 无文件系统环境）
     ///
     /// 所有模型/纹理字节由调用方提供；静态道具的位置/朝向由调用方预先填充到 `static_props`。
     pub fn from_in_memory(resources: InMemoryResources, options: ExportOptions) -> Self {
         Self {
-            resource_dir: PathBuf::new(),
-            in_memory: Some(resources),
+            in_memory: resources,
             options,
         }
     }
-    
-    /// 导出整个地图到单个 glTF 文件
-    pub fn export_map(&self, output_path: &Path) -> Result<ModelMetadataList, ModelIntegratorError> {
-        let result = self.export_map_to_memory()?;
-        
-        // 写入 GLB 文件
-        let mut file = File::create(output_path)?;
-        result.glb.to_writer(&mut file)?;
 
-        // 创建模型元数据列表
-        let metadata_list = ModelMetadataList {
-            models: result.models,
-        };
+    /// 将模型合并到现有的 GLTF 结构中（地图 GLB 导出共用）。
+    ///
+    /// 与磁盘模式的区别：直接从调用方提供的内存资源合并模型，不触碰文件系统。
+    pub fn add_models_to_gltf(
+        &self,
+        gltf: &mut Root,
+        buffer: &mut Vec<u8>,
+    ) -> Result<(), ModelIntegratorError> {
+        let resources = &self.in_memory;
 
-        // 导出模型元数据到 JSON 文件
-        let metadata_output_path = output_path.with_extension("json");
-        self.export_model_metadata(&metadata_list, &metadata_output_path)?;
+        for in_mem in &resources.models {
+            // 取文件名用于与 BSP 静态道具字典匹配
+            let model_filename = Path::new(&in_mem.name)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&in_mem.name)
+                .to_string();
 
-        Ok(metadata_list)
-    }
-    
-    /// 导出整个地图到内存中的 GLB 数据
-    pub fn export_map_to_memory(&self) -> Result<ModelExportResult, ModelIntegratorError> {
-        let mut buffer = Vec::new();
-        let mut root = Root::default();
+            // 从内存字节加载模型（单个模型解析失败时跳过，避免整批合并中断）
+            let model = match self.load_model_from_bytes(&in_mem.mdl, &in_mem.vvd, &in_mem.vtx) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("⚠️ 跳过无法解析的模型 {}: {:?}", in_mem.name, e);
+                    continue;
+                }
+            };
+            if model.vertices().is_empty() {
+                continue;
+            }
 
-        // 读取实体数据
-        let entities = self.read_entities()?;
-        // 读取静态模型数据
-        let static_props = self.read_static_props()?;
-        // 读取光照实体数据
-        let light_entities = self.read_light_entities()?;
-        
-        // 处理导出的模型资源
-        let mut nodes = Vec::new();
-        let mut model_metadata = Vec::new();
-        self.process_models(&mut buffer, &mut root, &mut nodes, &mut model_metadata, &entities, &static_props)?;
-        
-        // 处理光照数据
+            // 查找放置信息（**全部**实例；与碰撞体导出共用 resolve_placements）
+            let placements = resolve_placements(&in_mem.name, &resources.entities, &resources.static_props);
+            if placements.is_empty() {
+                // 未被任何静态道具/实体引用 → 不放到世界原点制造垃圾几何
+                continue;
+            }
+
+            // 推送模型几何（同一模型的多个实例共享同一个 mesh，只上传一次顶点）
+            let mesh = self.push_model(buffer, gltf, &model, Path::new(&in_mem.name))?;
+            let mesh_index = gltf.meshes.len() as u32;
+            gltf.meshes.push(mesh);
+
+            for (i, p) in placements.iter().enumerate() {
+                let node = Node {
+                    camera: None,
+                    children: None,
+                    extensions: Default::default(),
+                    extras: Default::default(),
+                    matrix: None,
+                    mesh: Some(Index::new(mesh_index)),
+                    name: Some(if i == 0 {
+                        model_filename.clone()
+                    } else {
+                        format!("{model_filename}#{i}")
+                    }),
+                    rotation: p.rotation.map(UnitQuaternion),
+                    scale: p.scale,
+                    translation: Some(p.translation),
+                    skin: None,
+                    weights: None,
+                };
+                gltf.nodes.push(node);
+            }
+        }
+
+        // 处理光照数据（若启用）
         if self.options.include_lights {
-            self.process_lights(&mut root, &mut nodes, &light_entities)?;
+            let mut light_nodes = Vec::new();
+            self.process_lights(gltf, &mut light_nodes, &resources.light_entities)?;
+            gltf.nodes.extend(light_nodes);
         }
-
-        // 创建根节点
-        let node_indices: Vec<Index<Node>> = nodes.iter().enumerate().map(|(i, _)| Index::new(i as u32)).collect();
-        let root_rotation = Quaternion::<f32>::from_angle_y(Deg(90.0));
-        let root_node = Node {
-            camera: None,
-            children: Some(node_indices),
-            extensions: Default::default(),
-            extras: Default::default(),
-            matrix: None,
-            mesh: None,
-            name: Some("map_root".into()),
-            rotation: Some(UnitQuaternion([
-                root_rotation.v.x,
-                root_rotation.v.y,
-                root_rotation.v.z,
-                root_rotation.s,
-            ])),
-            scale: None,
-            translation: None,
-            skin: None,
-            weights: None,
-        };
-
-        // 添加所有节点和根节点
-        root.nodes.extend(nodes);
-        root.nodes.push(root_node);
-
-        // 创建场景
-        root.scenes = vec![Scene {
-            name: Some("map_scene".into()),
-            extensions: None,
-            extras: Default::default(),
-            nodes: vec![Index::new(root.nodes.len() as u32 - 1)],
-        }];
-
-        // 添加缓冲区
-        root.buffers.push(Buffer {
-            byte_length: USize64(buffer.len() as u64),
-            extensions: Default::default(),
-            extras: Default::default(),
-            name: None,
-            uri: None,
-        });
-
-        // 生成 GLB 文件
-        let glb = self.generate_glb(&root, buffer)?;
-
-        Ok(ModelExportResult {
-            glb,
-            models: model_metadata,
-        })
-    }
-    
-    /// 导出模型元数据到 JSON 文件
-    fn export_model_metadata(&self, metadata_list: &ModelMetadataList, output_path: &Path) -> Result<(), ModelIntegratorError> {
-        let json_string = serde_json::to_string_pretty(metadata_list)?;
-        let mut file = File::create(output_path)?;
-        write!(file, "{}", json_string)?;
-        Ok(())
-    }
-    
-    /// 读取实体数据
-    fn read_entities(&self) -> Result<Vec<Entity>, ModelIntegratorError> {
-        if let Some(res) = &self.in_memory {
-            return Ok(res.entities.clone());
-        }
-        let entities_path = self.resource_dir.join(r"entities\all_entities.json");
-        if !entities_path.exists() {
-            return Ok(Vec::new());
-        }
-        
-        let data = read(entities_path)?;
-        let entity_list: EntityList = serde_json::from_slice(&data)?;
-        
-        Ok(entity_list.entities)
-    }
-    
-    /// 读取静态模型数据
-    fn read_static_props(&self) -> Result<Vec<StaticProp>, ModelIntegratorError> {
-        if let Some(res) = &self.in_memory {
-            return Ok(res.static_props.clone());
-        }
-        let static_props_path = self.resource_dir.join(r"entities\static_props.json");
-        if !static_props_path.exists() {
-            return Ok(Vec::new());
-        }
-        
-        let data = read(static_props_path)?;
-        let static_props_list: StaticPropList = serde_json::from_slice(&data)?;
-        
-        Ok(static_props_list.static_props)
-    }
-    
-    /// 读取光照实体数据
-    fn read_light_entities(&self) -> Result<Vec<Entity>, ModelIntegratorError> {
-        if let Some(res) = &self.in_memory {
-            return Ok(res.light_entities.clone());
-        }
-        let entities_path = self.resource_dir.join(r"entities\all_entities.json");
-        if !entities_path.exists() {
-            return Ok(Vec::new());
-        }
-        
-        let data = read(entities_path)?;
-        let entity_list: EntityList = serde_json::from_slice(&data)?;
-        
-        // 过滤出光照实体
-        let light_entities: Vec<Entity> = entity_list.entities.into_iter()
-            .filter(|entity| {
-                let classname = &entity.properties.classname;
-                classname == "light" || classname == "light_spot" || classname == "light_environment"
-            })
-            .collect();
-        
-        Ok(light_entities)
-    }
-
-    /// 处理导出的模型资源
-    fn process_models(&self, buffer: &mut Vec<u8>, gltf: &mut Root, nodes: &mut Vec<Node>, model_metadata: &mut Vec<ModelMetadata>, entities: &Vec<Entity>, static_props: &Vec<StaticProp>) -> Result<(), ModelIntegratorError> {
-        // 检查模型目录是否存在
-        let models_dir = self.resource_dir.join("models");
-        if !models_dir.exists() {
-            return Err(ModelIntegratorError::InvalidResourceDirectory("模型目录不存在".into()));
-        }
-
-        // 遍历模型目录
-        let mut model_index = 0;
-        self.traverse_models(&models_dir, buffer, gltf, nodes, model_metadata, &mut model_index, entities, static_props)?;
 
         Ok(())
     }
 
-    /// 遍历模型目录
-    fn traverse_models(&self, dir: &Path, buffer: &mut Vec<u8>, gltf: &mut Root, nodes: &mut Vec<Node>, model_metadata: &mut Vec<ModelMetadata>, model_index: &mut usize, entities: &Vec<Entity>, static_props: &Vec<StaticProp>) -> Result<(), ModelIntegratorError> {
-        for entry in read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            
-            if path.is_dir() {
-                // 递归遍历子目录
-                self.traverse_models(&path, buffer, gltf, nodes, model_metadata, model_index, entities, static_props)?;
-            } else if path.extension().map_or(false, |ext| ext == "mdl") {
-                // 处理模型文件
-                if let Some((node, metadata)) = self.process_model_file(&path, buffer, gltf, *model_index, entities, static_props)? {
-                    nodes.push(node);
-                    model_metadata.push(metadata);
-                    *model_index += 1;
-                }
+    /// 为 GLTF JSON 字符串添加光照信息。
+    ///
+    /// 序列化后通过字符串级补丁注入 `KHR_lights_punctual` 扩展（light_spot / light_environment / light）。
+    pub fn add_lighting_to_gltf_json(&self, json_string: &str) -> Result<String, ModelIntegratorError> {
+        if self.options.include_lights {
+            let light_entities = self.read_light_entities();
+            if !light_entities.is_empty() {
+                self.add_lighting_to_json(json_string.to_string(), &light_entities)
+            } else {
+                Ok(json_string.to_string())
             }
+        } else {
+            Ok(json_string.to_string())
         }
-        
-        Ok(())
     }
 
-    /// 处理单个模型文件
-    fn process_model_file(&self, model_path: &Path, buffer: &mut Vec<u8>, gltf: &mut Root, _model_index: usize, entities: &Vec<Entity>, static_props: &Vec<StaticProp>) -> Result<Option<(Node, ModelMetadata)>, ModelIntegratorError> {
-        // 加载模型文件
-        let model = self.load_model(model_path)?;
-        
-        // 检查模型是否有顶点
-        if model.vertices().is_empty() {
-            return Ok(None);
-        }
-        
-        // 推送模型到GLTF
-        let mesh = self.push_model(buffer, gltf, &model, model_path)?;
-        
-        let mesh_index = gltf.meshes.len() as u32;
-        gltf.meshes.push(mesh);
-        
-        // 查找模型的位置、朝向、缩放和类名信息
-        let (translation, rotation, scale, classname) = self.find_model_position_rotation_scale_and_class(model_path, entities, static_props);
-        
-        // 创建节点
-        let node = Node {
-            camera: None,
-            children: None,
-            extensions: Default::default(),
-            extras: Default::default(),
-            matrix: None,
-            mesh: Some(Index::new(mesh_index)),
-            name: Some(model_path.file_stem().unwrap_or_default().to_str().unwrap_or_default().into()),
-            rotation: rotation.map(|rot| UnitQuaternion(rot)),
-            scale: scale,
-            translation: Some(translation),
-            skin: None,
-            weights: None,
-        };
-        
-        // 创建模型元数据
-        let metadata = ModelMetadata {
-            name: model_path.file_stem().unwrap_or_default().to_str().unwrap_or_default().to_string(),
-            path: model_path.to_str().unwrap_or_default().to_string(),
-            position: translation,
-            rotation: rotation,
-            scale: scale,
-            classname,
-        };
-        
-        Ok(Some((node, metadata)))
-    }
-    
-    /// 查找模型的位置信息、朝向、缩放和类名（按模型路径匹配）
-    fn find_model_position_rotation_scale_and_class(&self, model_path: &Path, entities: &Vec<Entity>, static_props: &Vec<StaticProp>) -> ([f32; 3], Option<[f32; 4]>, Option<[f32; 3]>, Option<String>) {
-        let model_filename = model_path.file_name().unwrap_or_default().to_str().unwrap_or_default();
-        self.find_placement(model_filename, entities, static_props)
-    }
-
-    /// 核心匹配逻辑：根据模型文件名在静态道具/实体中查找放置信息
-    fn find_placement(&self, model_filename: &str, entities: &Vec<Entity>, static_props: &Vec<StaticProp>) -> ([f32; 3], Option<[f32; 4]>, Option<[f32; 3]>, Option<String>) {
-        // 遍历静态模型，查找匹配的模型（优先使用静态坐标）
-        for prop in static_props {
-            // 检查静态模型的模型路径是否包含当前模型文件名
-            if prop.model.contains(model_filename) {
-                // 转换位置信息
-                let position = map_coords(prop.origin);
-                
-                // 转换朝向信息
-                let rotation = self.parse_angles(&format!("{} {} {}", prop.angles[0], prop.angles[1], prop.angles[2]));
-                
-                // 静态模型默认缩放为 1.0
-                let scale = Some([1.0, 1.0, 1.0]);
-                
-                // 静态模型的类名默认为 prop_static
-                let classname = Some("prop_static".to_string());
-                
-                return (position, rotation, scale, classname);
-            }
-        }
-        
-        // 遍历实体，查找匹配的模型（如果没有找到静态模型）
-        for entity in entities {
-            if let Some(model_path) = &entity.properties.model {
-                // 检查模型路径是否包含当前模型文件名
-                if model_path.contains(model_filename) {
-                    // 解析位置信息
-                    if let Some(origin) = &entity.properties.origin {
-                        if let Some(position) = self.parse_origin(origin) {
-                            // 解析朝向信息
-                            let rotation = entity.properties.angles.as_ref().and_then(|angles| self.parse_angles(angles));
-                            
-                            // 解析缩放信息
-                            let scale = entity.properties.scale.as_ref().and_then(|scale| self.parse_scale(scale));
-                            
-                            return (position, rotation, scale, Some(entity.properties.classname.clone()));
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 默认位置、朝向、缩放和类名
-        ([0.0, 0.0, 0.0], None, None, None)
-    }
-    
-    /// 解析origin字符串为位置数组
-    fn parse_origin(&self, origin: &str) -> Option<[f32; 3]> {
-        let parts: Vec<&str> = origin.split_whitespace().collect();
-        if parts.len() != 3 {
-            return None;
-        }
-        
-        let x = parts[0].parse::<f32>().ok()?;
-        let y = parts[1].parse::<f32>().ok()?;
-        let z = parts[2].parse::<f32>().ok()?;
-        
-        // 转换坐标系统
-        Some(map_coords([x, y, z]))
-    }
-    
-    /// 解析angles字符串为四元数
-    fn parse_angles(&self, angles: &str) -> Option<[f32; 4]> {
-        let parts: Vec<&str> = angles.split_whitespace().collect();
-        if parts.len() != 3 {
-            return None;
-        }
-        
-        let pitch = parts[0].parse::<f32>().ok()?;
-        let yaw = parts[1].parse::<f32>().ok()?;
-        let roll = parts[2].parse::<f32>().ok()?;
-        
-        // 转换角度为四元数
-        let pitch_quat = Quaternion::<f32>::from_angle_x(Deg(pitch));
-        let yaw_quat = Quaternion::<f32>::from_angle_y(Deg(yaw));
-        let roll_quat = Quaternion::<f32>::from_angle_z(Deg(roll));
-        
-        let final_quat = yaw_quat * pitch_quat * roll_quat;
-        
-        Some([final_quat.v.x, final_quat.v.y, final_quat.v.z, final_quat.s])
-    }
-    
-    /// 解析scale字符串为缩放数组
-    fn parse_scale(&self, scale: &str) -> Option<[f32; 3]> {
-        let parts: Vec<&str> = scale.split_whitespace().collect();
-        
-        // 处理不同格式的缩放值
-        match parts.len() {
-            1 => {
-                // 单个值，应用到所有轴
-                let scale_val = parts[0].parse::<f32>().ok()?;
-                Some([scale_val, scale_val, scale_val])
-            }
-            3 => {
-                // 三个值，分别应用到x, y, z轴
-                let x = parts[0].parse::<f32>().ok()?;
-                let y = parts[1].parse::<f32>().ok()?;
-                let z = parts[2].parse::<f32>().ok()?;
-                Some([x, y, z])
-            }
-            _ => None,
-        }
-    }
-    
-    /// 加载模型文件
-    fn load_model(&self, model_path: &Path) -> Result<VmdlModel, ModelIntegratorError> {
-        // 读取模型文件
-        let mdl_data = read(model_path)?;
-        let mdl = Mdl::read(&mdl_data)?;
-        
-        // 读取顶点数据文件
-        let vvd_path = model_path.with_extension("vvd");
-        let vvd_data = read(vvd_path)?;
-        let vvd = Vvd::read(&vvd_data)?;
-        
-        // 读取顶点索引文件
-        let vtx_path = model_path.with_extension("dx90.vtx");
-        let vtx_data = read(vtx_path)?;
-        let vtx = Vtx::read(&vtx_data)?;
-        
-        Ok(VmdlModel::from_parts(mdl, vtx, vvd))
+    /// 读取光照实体数据（内存路径）
+    fn read_light_entities(&self) -> Vec<Entity> {
+        self.in_memory.light_entities.clone()
     }
 
     /// 从内存字节加载模型（替代磁盘三件套 .mdl/.vvd/.dx90.vtx）
@@ -506,15 +188,15 @@ impl ModelIntegrator {
     fn push_model(&self, buffer: &mut Vec<u8>, gltf: &mut Root, model: &VmdlModel, model_path: &Path) -> Result<json::Mesh, ModelIntegratorError> {
         let accessor_start = gltf.accessors.len() as u32;
         self.push_vertices(buffer, gltf, model);
-        
+
         // 获取第一个皮肤表
         let skin_table = model.skin_tables().next().ok_or(ModelIntegratorError::UnsupportedModelFormat("No skin table found".into()))?;
-        
+
         let mut primitives = Vec::new();
         for mesh in model.meshes() {
             primitives.push(self.push_primitive(buffer, gltf, &mesh, accessor_start, &skin_table)?);
         }
-        
+
         Ok(json::Mesh {
             extensions: Default::default(),
             extras: Default::default(),
@@ -523,24 +205,24 @@ impl ModelIntegrator {
             weights: None,
         })
     }
-    
+
     /// 推送顶点到GLTF
     fn push_vertices(&self, buffer: &mut Vec<u8>, gltf: &mut Root, model: &VmdlModel) {
         let start = buffer.len() as u64;
         let view_start = gltf.buffer_views.len() as u32;
         let vertex_count = model.vertices().len() as u64;
-        
+
         let (min, max) = model.bounding_box();
         let min = map_coords(model.apply_root_transform(min));
         let max = map_coords(model.apply_root_transform(max));
-        
+
         let vertex_data = model
             .vertices()
             .iter()
             .map(|vert| ModelVertex::from(vert, model))
             .flat_map(|vert| bytemuck::cast::<_, [u8; mem::size_of::<ModelVertex>()]>(vert));
         buffer.extend(vertex_data);
-        
+
         let vertex_buffer_view = json::buffer::View {
             buffer: Index::new(0),
             byte_length: USize64(buffer.len() as u64 - start),
@@ -551,9 +233,9 @@ impl ModelIntegrator {
             name: None,
             target: Some(json::validation::Checked::Valid(json::buffer::Target::ArrayBuffer)),
         };
-        
+
         gltf.buffer_views.push(vertex_buffer_view);
-        
+
         let positions = json::Accessor {
             buffer_view: Some(Index::new(view_start)),
             byte_offset: Some(USize64(0)),
@@ -596,25 +278,25 @@ impl ModelIntegrator {
             normalized: false,
             sparse: None,
         };
-        
+
         gltf.accessors.extend([positions, uvs, normals]);
     }
-    
+
     /// 推送图元到GLTF
     fn push_primitive(&self, buffer: &mut Vec<u8>, gltf: &mut Root, mesh: &vmdl::Mesh, vertex_accessor_start: u32, skin: &vmdl::SkinTable) -> Result<json::mesh::Primitive, ModelIntegratorError> {
         let buffer_start = buffer.len() as u64;
         let view_start = gltf.buffer_views.len() as u32;
         let accessor_start = gltf.accessors.len() as u32;
-        
+
         // 推送索引数据
         buffer.extend(
             mesh.vertex_strip_indices()
                 .flatten()
                 .flat_map(|index| (index as u32).to_le_bytes()),
         );
-        
+
         let byte_length = buffer.len() as u64 - buffer_start;
-        
+
         let view = json::buffer::View {
             buffer: Index::new(0),
             byte_length: USize64(byte_length),
@@ -626,7 +308,7 @@ impl ModelIntegrator {
             target: Some(json::validation::Checked::Valid(json::buffer::Target::ElementArrayBuffer)),
         };
         gltf.buffer_views.push(view);
-        
+
         let accessor = json::Accessor {
             buffer_view: Some(Index::new(view_start)),
             byte_offset: Some(USize64(0)),
@@ -642,10 +324,10 @@ impl ModelIntegrator {
             sparse: None,
         };
         gltf.accessors.push(accessor);
-        
+
         // 尝试获取材质信息
         let material_index = self.push_material(buffer, gltf, skin, mesh.material_index());
-        
+
         // 创建图元
         Ok(json::mesh::Primitive {
             attributes: {
@@ -672,16 +354,16 @@ impl ModelIntegrator {
             targets: None,
         })
     }
-    
+
     /// 推送材质到GLTF
     fn push_material(&self, buffer: &mut Vec<u8>, gltf: &mut Root, skin: &vmdl::SkinTable, material_index: i32) -> Option<Index<gltf::json::Material>> {
         // 尝试获取纹理信息
         if let Some(texture_info) = skin.texture_info(material_index) {
             let material_name = texture_info.name.to_string();
-            
+
             // 尝试加载纹理文件
             let texture_index = self.push_texture(buffer, gltf, &material_name);
-            
+
             // 有真实贴图时基色必须为白（否则会给贴图叠加染色）；
             // 无贴图时才回退到「按材质名生成的可区分颜色」。
             let color = if texture_index.is_some() {
@@ -693,8 +375,9 @@ impl ModelIntegrator {
             // 解析内置透明度标注（来自 VMT 的 $translucent / $alphatest / $alpha）
             let alpha_mode = self
                 .in_memory
-                .as_ref()
-                .and_then(|r| r.material_alpha_mode.get(&material_name).copied())
+                .material_alpha_mode
+                .get(&material_name)
+                .copied()
                 .unwrap_or(0u8);
             let (alpha_mode, double_sided, alpha_cutoff) = match alpha_mode {
                 1 => (
@@ -713,7 +396,7 @@ impl ModelIntegrator {
                     None,
                 ),
             };
-            
+
             // 创建材质
             let material = gltf::json::Material {
                 extensions: Default::default(),
@@ -741,7 +424,7 @@ impl ModelIntegrator {
                 alpha_mode,
                 double_sided,
             };
-            
+
             let index = gltf.materials.len() as u32;
             gltf.materials.push(material);
             Some(Index::new(index))
@@ -749,7 +432,7 @@ impl ModelIntegrator {
             None
         }
     }
-    
+
     /// 根据材质名称获取颜色
     fn get_material_color(&self, name: &str) -> gltf::json::material::PbrBaseColorFactor {
         // 根据材质名称生成颜色
@@ -757,108 +440,31 @@ impl ModelIntegrator {
         let r = ((hash & 0xFF0000) >> 16) as f32 / 255.0;
         let g = ((hash & 0x00FF00) >> 8) as f32 / 255.0;
         let b = (hash & 0x0000FF) as f32 / 255.0;
-        
+
         // 确保颜色不会太暗
         let r = r.max(0.3);
         let g = g.max(0.3);
         let b = b.max(0.3);
-        
+
         gltf::json::material::PbrBaseColorFactor([r, g, b, 1.0])
     }
-    
-    /// 递归搜索指定扩展名的纹理文件
-    fn search_texture_with_ext(&self, dir: &Path, texture_name: &str, ext: &str) -> Option<PathBuf> {
-        if let Ok(entries) = read_dir(dir) {
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        if let Some(found) = self.search_texture_with_ext(&path, texture_name, ext) {
-                            return Some(found);
-                        }
-                    } else if path.file_name().unwrap_or_default().to_str() == Some(&format!("{}.{}", texture_name, ext)) {
-                        return Some(path);
-                    }
-                }
-            }
-        }
-        None
-    }
 
-    /// 递归搜索纹理文件并返回 PNG 字节数据。
-    /// 优先查找 `.png` 文件；找不到时回退到同名 `.vtf` 文件，
-    /// 使用 texture-utils 解码为 PNG 字节返回。
-    fn search_texture_data(&self, dir: &Path, texture_name: &str) -> Option<Vec<u8>> {
-        // 1. 先尝试查找 .png 文件
-        if let Some(png_path) = self.search_texture_with_ext(dir, texture_name, "png") {
-            match std::fs::read(&png_path) {
-                Ok(data) => {
-                    println!("✅ 找到纹理文件: {:?}", png_path);
-                    return Some(data);
-                }
-                Err(e) => {
-                    eprintln!("⚠️  读取纹理文件失败: {:?}, 错误: {:?}", png_path, e);
-                }
-            }
-        }
-
-        // 2. 回退到 .vtf 文件，解码为 PNG 字节
-        if let Some(vtf_path) = self.search_texture_with_ext(dir, texture_name, "vtf") {
-            match std::fs::read(&vtf_path) {
-                Ok(vtf_bytes) => {
-                    match self.decode_vtf_to_png(&vtf_bytes) {
-                        Some(png_bytes) => {
-                            println!("✅ 解码 VTF 纹理为 PNG: {:?}", vtf_path);
-                            return Some(png_bytes);
-                        }
-                        None => {
-                            eprintln!("⚠️  VTF 解码失败: {:?}", vtf_path);
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("⚠️  读取 VTF 文件失败: {:?}, 错误: {:?}", vtf_path, e);
-                }
-            }
-        }
-
-        None
-    }
-
-    /// 将 VTF 字节解码为 PNG 字节数据
-    fn decode_vtf_to_png(&self, vtf_bytes: &[u8]) -> Option<Vec<u8>> {
-        let vtf = crate::texture_utils::from_bytes(vtf_bytes).ok()?;
-        let image = vtf.highres_image.decode(0).ok()?;
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        image.write_to(&mut cursor, image::ImageFormat::Png).ok()?;
-        Some(cursor.into_inner())
-    }
-
-    /// 推送纹理到GLTF
+    /// 推送纹理到GLTF（内存纹理优先：WASM / 无文件系统环境下由调用方直接提供 PNG 字节）
     fn push_texture(&self, buffer: &mut Vec<u8>, gltf: &mut Root, texture_name: &str) -> Option<u32> {
-        // 内存纹理优先：WASM / 无文件系统环境下由调用方直接提供 PNG 字节
-        if let Some(res) = &self.in_memory {
-            if let Some(texture_data) = res.textures.get(texture_name) {
-                return self.push_texture_data(buffer, gltf, texture_name, texture_data);
-            }
-            // 也允许以 .png 为键
-            let png_key = format!("{}.png", texture_name);
-            if let Some(texture_data) = res.textures.get(&png_key) {
-                return self.push_texture_data(buffer, gltf, texture_name, texture_data);
-            }
+        if let Some(texture_data) = self.in_memory.textures.get(texture_name) {
+            return self.push_texture_data(buffer, gltf, texture_name, texture_data);
+        }
+        // 也允许以 .png 为键
+        let png_key = format!("{}.png", texture_name);
+        if let Some(texture_data) = self.in_memory.textures.get(&png_key) {
+            return self.push_texture_data(buffer, gltf, texture_name, texture_data);
         }
 
-        // 从纹理目录开始递归搜索（支持 PNG 直接读取与 VTF 回退解码）
-        let textures_dir = self.resource_dir.join("textures");
-        if let Some(texture_data) = self.search_texture_data(&textures_dir, texture_name) {
-            return self.push_texture_data(buffer, gltf, texture_name, &texture_data);
-        }
-
-        println!("⚠️  未找到纹理文件: {:?}", texture_name);
+        eprintln!("⚠️  未找到纹理: {:?}", texture_name);
         None
     }
 
-    /// 将已获取的纹理字节推入 GLTF 缓冲区（磁盘与内存两条路径共用）
+    /// 将已获取的纹理字节推入 GLTF 缓冲区
     fn push_texture_data(&self, buffer: &mut Vec<u8>, gltf: &mut Root, texture_name: &str, texture_data: &[u8]) -> Option<u32> {
         // 推送纹理到缓冲区
         let start = buffer.len() as u64;
@@ -905,21 +511,21 @@ impl ModelIntegrator {
     }
 
     /// 处理光照数据
-    fn process_lights(&self, gltf: &mut Root, nodes: &mut Vec<Node>, light_entities: &Vec<Entity>) -> Result<(), ModelIntegratorError> {
+    fn process_lights(&self, gltf: &mut Root, nodes: &mut Vec<Node>, light_entities: &[Entity]) -> Result<(), ModelIntegratorError> {
         // 添加KHR_lights_punctual扩展到used和required列表
         let extension_name = "KHR_lights_punctual";
-        
+
         if !gltf.extensions_used.contains(&extension_name.to_string()) {
             gltf.extensions_used.push(extension_name.to_string());
         }
         if !gltf.extensions_required.contains(&extension_name.to_string()) {
             gltf.extensions_required.push(extension_name.to_string());
         }
-        
+
         // 为每个光照实体创建对应的节点
         for (i, light_entity) in light_entities.iter().enumerate() {
             if let Some(origin) = &light_entity.properties.origin {
-                if let Some(position) = self.parse_origin(origin) {
+                if let Some(position) = parse_origin_str(origin) {
                     // 创建光照节点
                     let light_node = Node {
                         camera: None,
@@ -935,73 +541,38 @@ impl ModelIntegrator {
                         skin: None,
                         weights: None,
                     };
-                    
+
                     nodes.push(light_node);
                 }
             }
         }
-        
+
         Ok(())
     }
 
-    /// 生成 GLB 文件
-    fn generate_glb(&self, root: &Root, mut buffer: Vec<u8>) -> Result<gltf::Glb<'static>, ModelIntegratorError> {
-        // 序列化 JSON
-        let mut json_string = json::serialize::to_string(root).expect("Serialization error");
-        
-        // 如果需要添加光照，处理光照效果
-        if self.options.include_lights {
-            // 读取光照实体数据
-            let light_entities = self.read_light_entities()?;
-            if !light_entities.is_empty() {
-                // 通过修改 JSON 字符串来添加光照支持
-                json_string = self.add_lighting_to_json(json_string, &light_entities)?;
-            }
-        }
-        
-        let mut json_offset = json_string.len() as u32;
-        self.align_to_multiple_of_four(&mut json_offset);
-
-        // 填充字节向量到4的倍数
-        self.pad_byte_vector(&mut buffer);
-
-        // 创建 GLB 文件
-        let glb = gltf::Glb {
-            header: gltf::binary::Header {
-                magic: *b"glTF",
-                version: 2,
-                length: json_offset + buffer.len() as u32,
-            },
-            bin: Some(Cow::Owned(buffer)),
-            json: Cow::Owned(json_string.into_bytes()),
-        };
-        
-        Ok(glb)
-    }
-    
     /// 为 JSON 字符串添加光照效果
-    fn add_lighting_to_json(&self, json_string: String, light_entities: &Vec<Entity>) -> Result<String, ModelIntegratorError> {
+    fn add_lighting_to_json(&self, json_string: String, light_entities: &[Entity]) -> Result<String, ModelIntegratorError> {
         // 解析 JSON
         let mut json: serde_json::Value = serde_json::from_str(&json_string)?;
-        
+
         // 添加 KHR_lights_punctual 扩展
         let extension_name = "KHR_lights_punctual";
-        
+
         // 确保 extensions 字段存在
         if let serde_json::Value::Object(ref mut obj) = json {
             if !obj.contains_key("extensions") {
                 obj.insert("extensions".to_string(), serde_json::Value::Object(serde_json::Map::new()));
             }
         }
-        
+
         // 创建 lights 数组
         let mut lights = Vec::new();
         let mut light_nodes = Vec::new();
-        
+
         // 为每个光照实体创建光源
         for (i, light_entity) in light_entities.iter().enumerate() {
             if let Some(origin) = &light_entity.properties.origin {
-                if let Some(position) = self.parse_origin(origin) {
+                if let Some(position) = parse_origin_str(origin) {
                     // 解析真实光照参数
                     let (color, brightness) = self.parse_light_color(light_entity);
                     let classname = light_entity.properties.classname.as_str();
@@ -1056,7 +627,7 @@ impl ModelIntegrator {
                 }
             }
         }
-        
+
         // 添加光源到扩展
         if !lights.is_empty() {
             if let serde_json::Value::Object(ref mut obj) = json {
@@ -1066,7 +637,7 @@ impl ModelIntegrator {
                     }));
                 }
             }
-            
+
             // 为光照节点添加光源引用
             if let serde_json::Value::Object(ref mut obj) = json {
                 if let Some(serde_json::Value::Array(nodes)) = obj.get_mut("nodes") {
@@ -1094,7 +665,7 @@ impl ModelIntegrator {
                 }
             }
         }
-        
+
         // 序列化回 JSON 字符串
         let modified_json = serde_json::to_string(&json)?;
         Ok(modified_json)
@@ -1250,270 +821,6 @@ impl ModelIntegrator {
 
         (inner_deg.to_radians(), outer_deg.to_radians())
     }
-
-    /// 将模型添加到现有的 GLTF 结构中
-    pub fn add_models_to_gltf(
-        &self,
-        gltf: &mut Root,
-        buffer: &mut Vec<u8>
-    ) -> Result<(), ModelIntegratorError> {
-        // 内存模式：直接从调用方提供的内存资源合并模型，不触碰文件系统
-        if self.in_memory.is_some() {
-            return self.add_models_to_gltf_from_memory(gltf, buffer);
-        }
-
-        // 磁盘模式（new-vbsp CLI 使用）
-        // 读取实体数据
-        let entities = self.read_entities()?;
-        // 读取静态模型数据
-        let static_props = self.read_static_props()?;
-        // 读取光照实体数据
-        let light_entities = self.read_light_entities()?;
-        
-        // 处理导出的模型资源
-        let mut model_metadata = Vec::new();
-        let mut model_index = 0;
-        
-        // 检查模型目录是否存在
-        let models_dir = self.resource_dir.join("models");
-        if !models_dir.exists() {
-            return Err(ModelIntegratorError::InvalidResourceDirectory("模型目录不存在".into()));
-        }
-
-        // 遍历模型目录
-        self.traverse_models_to_gltf(&models_dir, buffer, gltf, &mut model_metadata, &mut model_index, &entities, &static_props)?;
-        
-        // 处理光照数据
-        if self.options.include_lights {
-            println!("🔄 处理光照数据...");
-            let mut light_nodes = Vec::new();
-            self.process_lights(gltf, &mut light_nodes, &light_entities)?;
-            // 将光照节点添加到 GLTF 结构
-            gltf.nodes.extend(light_nodes);
-        }
-
-        Ok(())
-    }
-
-    /// 内存模式：将调用方提供的内存模型字节直接合并进 GLTF（替代磁盘模型目录遍历）
-    fn add_models_to_gltf_from_memory(
-        &self,
-        gltf: &mut Root,
-        buffer: &mut Vec<u8>,
-    ) -> Result<(), ModelIntegratorError> {
-        let resources = self.in_memory.as_ref().ok_or_else(|| {
-            ModelIntegratorError::InvalidResourceDirectory("未初始化内存资源".into())
-        })?;
-
-        let entities = &resources.entities;
-        let static_props = &resources.static_props;
-        let light_entities = &resources.light_entities;
-
-        for in_mem in &resources.models {
-            // 取文件名用于与 BSP 静态道具字典匹配
-            let model_filename = std::path::Path::new(&in_mem.name)
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or(&in_mem.name)
-                .to_string();
-
-            // 从内存字节加载模型（单个模型解析失败时跳过，避免整批合并中断）
-            let model = match self.load_model_from_bytes(&in_mem.mdl, &in_mem.vvd, &in_mem.vtx) {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("⚠️ 跳过无法解析的模型 {}: {:?}", in_mem.name, e);
-                    continue;
-                }
-            };
-            if model.vertices().is_empty() {
-                continue;
-            }
-
-            // 查找放置信息（**全部**实例；与碰撞体导出共用 resolve_placements）
-            let placements = resolve_placements(&in_mem.name, entities, static_props);
-            if placements.is_empty() {
-                // 未被任何静态道具/实体引用 → 不放到世界原点制造垃圾几何
-                continue;
-            }
-
-            // 推送模型几何（同一模型的多个实例共享同一个 mesh，只上传一次顶点）
-            let mesh = self.push_model(buffer, gltf, &model, std::path::Path::new(&in_mem.name))?;
-            let mesh_index = gltf.meshes.len() as u32;
-            gltf.meshes.push(mesh);
-
-            for (i, p) in placements.iter().enumerate() {
-                let node = Node {
-                    camera: None,
-                    children: None,
-                    extensions: Default::default(),
-                    extras: Default::default(),
-                    matrix: None,
-                    mesh: Some(Index::new(mesh_index)),
-                    name: Some(if i == 0 {
-                        model_filename.clone()
-                    } else {
-                        format!("{model_filename}#{i}")
-                    }),
-                    rotation: p.rotation.map(UnitQuaternion),
-                    scale: p.scale,
-                    translation: Some(p.translation),
-                    skin: None,
-                    weights: None,
-                };
-                gltf.nodes.push(node);
-            }
-        }
-
-        // 处理光照数据（若启用）
-        if self.options.include_lights {
-            let mut light_nodes = Vec::new();
-            self.process_lights(gltf, &mut light_nodes, light_entities)?;
-            gltf.nodes.extend(light_nodes);
-        }
-
-        Ok(())
-    }
-    
-    /// 为 GLTF JSON 字符串添加光照信息
-    pub fn add_lighting_to_gltf_json(&self, json_string: &str) -> Result<String, ModelIntegratorError> {
-        if self.options.include_lights {
-            // 读取光照实体数据
-            let light_entities = self.read_light_entities()?;
-            if !light_entities.is_empty() {
-                // 通过修改 JSON 字符串来添加光照支持
-                self.add_lighting_to_json(json_string.to_string(), &light_entities)
-            } else {
-                Ok(json_string.to_string())
-            }
-        } else {
-            Ok(json_string.to_string())
-        }
-    }
-
-    /// 遍历模型目录并添加到 GLTF 结构
-    fn traverse_models_to_gltf(
-        &self,
-        dir: &Path,
-        buffer: &mut Vec<u8>,
-        gltf: &mut Root,
-        model_metadata: &mut Vec<ModelMetadata>,
-        model_index: &mut usize,
-        entities: &Vec<Entity>,
-        static_props: &Vec<StaticProp>
-    ) -> Result<(), ModelIntegratorError> {
-        for entry in read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            
-            if path.is_dir() {
-                // 递归遍历子目录
-                self.traverse_models_to_gltf(&path, buffer, gltf, model_metadata, model_index, entities, static_props)?;
-            } else if path.extension().map_or(false, |ext| ext == "mdl") {
-                // 处理模型文件
-                if let Some((node, metadata)) = self.process_model_file_to_gltf(&path, buffer, gltf, *model_index, entities, static_props)? {
-                    gltf.nodes.push(node);
-                    model_metadata.push(metadata);
-                    *model_index += 1;
-                }
-            }
-        }
-        
-        Ok(())
-    }
-
-    /// 处理单个模型文件并添加到 GLTF 结构
-    fn process_model_file_to_gltf(
-        &self,
-        model_path: &Path,
-        buffer: &mut Vec<u8>,
-        gltf: &mut Root,
-        _model_index: usize,
-        entities: &Vec<Entity>,
-        static_props: &Vec<StaticProp>
-    ) -> Result<Option<(Node, ModelMetadata)>, ModelIntegratorError> {
-        // 加载模型文件
-        let model = self.load_model(model_path)?;
-        
-        // 检查模型是否有顶点
-        if model.vertices().is_empty() {
-            return Ok(None);
-        }
-        
-        // 推送模型到GLTF
-        let mesh = self.push_model(buffer, gltf, &model, model_path)?;
-        
-        let mesh_index = gltf.meshes.len() as u32;
-        gltf.meshes.push(mesh);
-        
-        // 查找模型的位置、朝向、缩放和类名信息
-        let (translation, rotation, scale, classname) = self.find_model_position_rotation_scale_and_class(model_path, entities, static_props);
-        
-        // 创建节点
-        let node = Node {
-            camera: None,
-            children: None,
-            extensions: Default::default(),
-            extras: Default::default(),
-            matrix: None,
-            mesh: Some(Index::new(mesh_index)),
-            name: Some(model_path.file_stem().unwrap_or_default().to_str().unwrap_or_default().into()),
-            rotation: rotation.map(|rot| UnitQuaternion(rot)),
-            scale: scale,
-            translation: Some(translation),
-            skin: None,
-            weights: None,
-        };
-        
-        // 创建模型元数据
-        let metadata = ModelMetadata {
-            name: model_path.file_stem().unwrap_or_default().to_str().unwrap_or_default().to_string(),
-            path: model_path.to_str().unwrap_or_default().to_string(),
-            position: translation,
-            rotation: rotation,
-            scale: scale,
-            classname,
-        };
-        
-        Ok(Some((node, metadata)))
-    }
-
-    /// 对齐到4的倍数
-    fn align_to_multiple_of_four(&self, n: &mut u32) {
-        *n = (*n + 3) & !3;
-    }
-
-    /// 填充字节向量到4的倍数
-    fn pad_byte_vector(&self, vec: &mut Vec<u8>) {
-        while vec.len() % 4 != 0 {
-            vec.push(0);
-        }
-    }
-}
-
-/// 3D 向量
-#[derive(Debug, Copy, Clone)]
-pub struct Vector {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-impl Vector {
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
-        Self { x, y, z }
-    }
-}
-
-impl From<[f32; 3]> for Vector {
-    fn from(arr: [f32; 3]) -> Self {
-        Self::new(arr[0], arr[1], arr[2])
-    }
-}
-
-impl Into<[f32; 3]> for Vector {
-    fn into(self) -> [f32; 3] {
-        [self.x, self.y, self.z]
-    }
 }
 
 /// 实体属性
@@ -1529,8 +836,6 @@ pub struct EntityProperties {
     pub angles: Option<String>,
     #[serde(rename = "scale")]
     pub scale: Option<String>,
-    #[serde(rename = "skin")]
-    pub skin: Option<String>,
     // 光照相关属性（BSP 中以 _ 前缀的动态键）
     #[serde(rename = "_light")]
     pub light: Option<String>,
@@ -1554,27 +859,13 @@ pub struct Entity {
     pub properties: EntityProperties,
 }
 
-/// 实体列表
-#[derive(Debug, Deserialize)]
-pub struct EntityList {
-    pub entities: Vec<Entity>,
-}
-
 /// 静态模型
 #[derive(Debug, Clone, Deserialize)]
 pub struct StaticProp {
-    pub index: usize,
     pub model: String,
     pub origin: [f32; 3],
     pub angles: [f32; 3],
-    pub skin: i32,
     pub solid: u8,
-}
-
-/// 静态模型列表
-#[derive(Debug, Deserialize)]
-pub struct StaticPropList {
-    pub static_props: Vec<StaticProp>,
 }
 
 /// 单个模型实例的放置信息（坐标已转换到 `map_coords` = `[y,z,x]` 的 Y-up 空间）。
@@ -1589,8 +880,6 @@ pub struct Placement {
     pub rotation: Option<[f32; 4]>,
     /// 节点缩放
     pub scale: Option<[f32; 3]>,
-    /// 来源分类名（`prop_static` 或实体 classname）
-    pub classname: Option<String>,
     /// 静态道具的 `solid`（`SolidType`）字段；`0 = SOLID_NONE` 表示明确无碰撞。
     /// 实体来源时为 `None`。
     pub solid: Option<u8>,
@@ -1634,7 +923,6 @@ pub fn resolve_placements(
         translation: map_coords(prop.origin),
         rotation: Some(angles_to_quat(prop.angles[0], prop.angles[1], prop.angles[2])),
         scale: Some([1.0, 1.0, 1.0]),
-        classname: Some("prop_static".to_string()),
         solid: Some(prop.solid),
     };
 
@@ -1684,7 +972,6 @@ pub fn resolve_placements(
                 .scale
                 .as_ref()
                 .and_then(|s| parse_scale_str(s)),
-            classname: Some(entity.properties.classname.clone()),
             solid: None,
         });
     }
@@ -1734,37 +1021,6 @@ pub fn parse_scale_str(scale: &str) -> Option<[f32; 3]> {
     }
 }
 
-/// 模型元数据
-#[derive(Debug, Serialize)]
-pub struct ModelMetadata {
-    /// 模型名称
-    pub name: String,
-    /// 模型文件路径
-    pub path: String,
-    /// 模型坐标
-    pub position: [f32; 3],
-    /// 模型朝向
-    pub rotation: Option<[f32; 4]>,
-    /// 模型缩放
-    pub scale: Option<[f32; 3]>,
-    /// 模型类名
-    pub classname: Option<String>,
-}
-
-/// 模型元数据列表
-#[derive(Debug, Serialize)]
-pub struct ModelMetadataList {
-    pub models: Vec<ModelMetadata>,
-}
-
-/// BSP 顶点数据
-#[derive(Copy, Clone, Debug, Default, Zeroable, Pod)]
-#[repr(C)]
-pub struct BspVertexData {
-    position: [f32; 3],
-    uv: [f32; 2],
-}
-
 /// 模型顶点
 #[derive(Copy, Clone, Debug, Default, Zeroable, Pod)]
 #[repr(C)]
@@ -1785,7 +1041,7 @@ impl ModelVertex {
     }
 }
 
-/// 映射坐标
+/// 映射坐标（Source Z-up → glTF Y-up）
 pub fn map_coords<C: Into<[f32; 3]>>(vec: C) -> [f32; 3] {
     let vec = vec.into();
     [vec[1], vec[2], vec[0]]

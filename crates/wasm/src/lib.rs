@@ -132,12 +132,10 @@ fn collect_pakfile_models(
     let static_props: Vec<StaticProp> = bsp
         .static_props()
         .enumerate()
-        .map(|(i, prop)| StaticProp {
-            index: i,
+        .map(|(_i, prop)| StaticProp {
             model: prop.model().to_string(),
             origin: [prop.origin.x, prop.origin.y, prop.origin.z],
             angles: prop.angles(),
-            skin: prop.skin,
             solid: prop.solid as u8,
         })
         .collect();
@@ -435,13 +433,11 @@ impl BspProcessor {
 
         // 从 BSP 派生静态道具放置信息（位置/朝向/缩放）
         let mut static_props = Vec::new();
-        for (i, prop) in bsp.static_props().enumerate() {
+        for (_i, prop) in bsp.static_props().enumerate() {
             static_props.push(StaticProp {
-                index: i,
                 model: prop.model().to_string(),
                 origin: [prop.origin.x, prop.origin.y, prop.origin.z],
                 angles: prop.angles(),
-                skin: prop.skin,
                 solid: prop.solid as u8,
             });
         }
