@@ -1,15 +1,14 @@
 /**
  * WebSurf — Worker 入口
  *
- * 在 Worker 上下文中初始化 WASM 模块，然后实例化 `PhysicsWorker`，绑定 `onmessage`。
+ * 初始化 WASM 模块，实例化 `PhysicsWorker`，绑定 `onmessage`。
  *
  * WASM 初始化（消息驱动）：
- * - dist 内嵌模式：主线程把唯一一份 base64 通过 `wasm-init` 消息下发 →
- *   atob → `initSync({module})`（避免 file:// 下 fetch 失败）。
- * - dev 模式：主线程下发 `wasm-init` 携带 `wasmUrl`，本 worker `fetch` 后 `init`。
+ * - dist 内嵌：主线程下发唯一一份 base64（`wasm-init`）→ atob → `initSync({module})`
+ *   （避免 file:// 下 fetch 失败）。
+ * - dev 模式：下发 `wasmUrl`，worker `fetch` 后 `init`。
  *
- * 时序：收到 `wasm-init` 后才启动 WASM 初始化；在此之前到达的任何消息（含 init）
- * 入队缓存，WASM 就绪后按序重放（保持 postMessage 顺序语义）。
+ * 时序：收到 `wasm-init` 才启动初始化；此前到达的消息入队缓存，就绪后按序重放。
  * `init` 消息携带共享内存（SharedArrayBuffer，可 null），到达时创建 PhysicsWorker。
  */
 
@@ -43,7 +42,7 @@ async function startWasm(msg: WasmInitMessage): Promise<void> {
 		throw new Error('wasm-init 消息缺少 wasmB64 / wasmUrl');
 	}
 	wasmReady = true;
-	// 顺序重放初始化前收到的消息（含 init：携带共享内存，创建 PhysicsWorker）
+	// 按序重放此前缓存的消息（含 init：创建 PhysicsWorker）
 	for (const ev of pending) {
 		dispatch(ev);
 	}
@@ -57,7 +56,7 @@ function dispatch(e: MessageEvent): void {
 	if (!worker) {
 		const initMsg = msg as InitMessage;
 		if (initMsg.type !== 'init') {
-			// 理论上首个消息必为 init；异常时降级为无共享内存
+			// 理论首个必为 init；异常时降级为无共享内存
 			worker = new PhysicsWorker(createWorkerSharedState(null));
 		} else {
 			worker = new PhysicsWorker(createWorkerSharedState(initMsg.shared));

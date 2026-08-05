@@ -11,18 +11,17 @@ export const HULL_STAND_HEIGHT = 72;
 export const HULL_DUCK_HEIGHT = 54;
 export const EYE_STAND = 64.09;
 export const EYE_DUCK = 46.04;
-export const DUCK_LERP_TIME = 0.2; // seconds, eye-height transition
+export const DUCK_LERP_TIME = 0.2; // 秒，视角高度过渡
 
 /**
- * 玩家碰撞箱配置（物理控制面板的可调项，基准 = CS:S 默认体型）。
+ * 玩家碰撞箱配置（物理控制面板可调项，基准 = CS:S 默认体型）。
  *
  * 基准数据（Valve Developer Wiki — Dimensions (HL2 & CS:S)）：
- * - 站立碰撞箱：32×32×72 units（mins = ±16 footprint，高 72）
- * - 蹲下碰撞箱：32×32×36 units（cs-movement fork 采用 54，见下）
- * - 视角高度：站立 64、蹲下 ~46（cs-movement 采用 64.09 / 46.04 实测值）
+ * - 站立 32×32×72（footprint ±16，高 72）；蹲下 32×32×36
+ * - 视角高度：站立 64、蹲下 ~46（fork 采用实测值 64.09 / 46.04）
  *
- * 说明：本项目为 cs-movement fork，蹲下高度 54（而非原版 36）是 fork 的既有
- * 行为选择（KZ/surf 社区常见），面板默认值与之一致，可调回 36 匹配原版 CS:S。
+ * 本项目为 cs-movement fork，蹲高 54（而非原版 36）是 fork 的既有行为
+ * （KZ/surf 社区常见），面板默认与其一致，可调回 36 匹配原版 CS:S。
  */
 export interface HullConfig {
   /** 碰撞箱半宽（footprint = halfWidth×2 见方；默认 16 → 32×32）。 */

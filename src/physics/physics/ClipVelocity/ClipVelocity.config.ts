@@ -6,5 +6,5 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-export const OVERBOUNCE_SURF = 1.0; // preserves speed on surf ramps
-export const OVERBOUNCE_DEFAULT = 1.001; // ordinary geometry clipping
+export const OVERBOUNCE_SURF = 1.0; // surf 斜坡上保留速度
+export const OVERBOUNCE_DEFAULT = 1.001; // 普通几何体剪裁

@@ -1,5 +1,5 @@
 // vbsp（crates.io vbsp 0.6.0 本地修复版）：BSP 文件解析模块。
-// 保留完整 BSP 解析语义；WASM 场景下部分字段/方法未被使用，统一允许 dead_code。
+// 保留完整 BSP 解析语义；WASM 场景下部分字段/方法未使用，统一允许 dead_code。
 #![allow(dead_code)]
 
 mod bspfile;
@@ -29,8 +29,8 @@ pub type BspResult<T> = Result<T, BspError>;
 pub struct Leaves {
     /// 原始顺序的 leaves（保持 BSP 文件中的索引顺序）。
     ///
-    /// 【重要】不能对 leaves 本身排序，否则 BSP 树的 `node.children` 中的
-    /// leaf 索引（按位取反）会指向错误的 leaf，导致 `Bsp::leaf_at` 返回错误结果。
+    /// 【重要】不能对 leaves 排序，否则 BSP 树 `node.children` 中的 leaf 索引
+    /// （按位取反）会指向错误的 leaf，导致 `Bsp::leaf_at` 返回错误结果。
     leaves: Vec<Leaf>,
     /// 按 cluster 排序的 leaves 副本，仅供 `clusters()` 迭代器使用。
     sorted_leaves: Vec<Leaf>,
@@ -166,8 +166,8 @@ impl<'a> IntoIterator for &'a mut Leaves {
     }
 }
 
-// TODO: Store all the allocated objects inline to improve cache usage
-/// A parsed bsp file
+// TODO: 将所有已分配对象内联存储以改善缓存利用率
+/// 已解析的 BSP 文件
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Bsp {
@@ -352,22 +352,22 @@ impl Bsp {
             .map(|vert| Handle::new(self, vert))
     }
 
-    /// Get the root node of the bsp
+    /// 获取 bsp 的根节点
     pub fn root_node(&self) -> Handle<'_, Node> {
         self.node(0).unwrap()
     }
 
-    /// Get all models stored in the bsp
+    /// 获取 bsp 中存储的所有模型
     pub fn models(&self) -> impl Iterator<Item = Handle<'_, Model>> {
         self.models.iter().map(move |m| Handle::new(self, m))
     }
 
-    /// Get all models stored in the bsp
+    /// 获取 bsp 中存储的所有模型
     pub fn textures(&self) -> impl Iterator<Item = Handle<'_, TextureInfo>> {
         self.textures_info.iter().map(move |m| Handle::new(self, m))
     }
 
-    /// Find a leaf for a specific position
+    /// 查找指定位置所在 leaf
     pub fn leaf_at(&self, point: Vector) -> Handle<'_, Leaf> {
         let mut current = self.root_node();
 
@@ -399,7 +399,7 @@ impl Bsp {
             .map(|lump| Handle::new(self, lump))
     }
 
-    /// Get all faces stored in the bsp
+    /// 获取 bsp 中存储的所有面
     pub fn original_faces(&self) -> impl Iterator<Item = Handle<'_, Face>> {
         self.faces.iter().map(move |face| Handle::new(self, face))
     }
@@ -583,9 +583,9 @@ mod tests {
     }
 }
 
-/// LZMA decompression with the header used by source
+/// 带 Source 头部的 LZMA 解压
 fn lzma_decompress_with_header(data: &[u8], expected_length: usize) -> Result<Vec<u8>, BspError> {
-    // extra 8 byte because game lumps need some padding for reasons
+    // 多留 8 字节：game lumps 需要一些填充
     let mut output: Vec<u8> = Vec::with_capacity(min(expected_length + 8, 8 * 1024 * 1024));
     let mut cursor = Cursor::new(data);
     if b"LZMA" != &<[u8; 4]>::read(&mut cursor)? {

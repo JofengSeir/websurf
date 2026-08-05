@@ -28,7 +28,7 @@ impl<'a> Handle<'a, DisplacementInfo> {
         self.bsp.face(self.map_face as usize)
     }
 
-    /// Get the positions of the corners of the displaced face
+    /// 获取位移面四个角的位置
     fn corner_positions(&self) -> [Vector; 4] {
         let face = self.face().unwrap();
         let vertices: [_; 4] = face
@@ -39,7 +39,7 @@ impl<'a> Handle<'a, DisplacementInfo> {
             .unwrap();
         let mut corner_positions: [Vector; 4] = vertices.map(|v| v.position);
 
-        // find the corner closest to the start position of the displacement
+        // 找最接近 displacement 起始位置的角点
         let start_index = corner_positions
             .iter()
             .copied()

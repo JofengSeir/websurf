@@ -1,22 +1,9 @@
 /**
  * PVS 可见性管理器
- *
- * 将 WASM `parse_pvs_data` 输出的 JSON 转换为运行时 PVS 管理器。
- * 坐标已在 Rust 端旋转为 Y-up（`[x,y,z]→[y,z,x]`），TS 端不再二次重映射。
- *
- * **职责**：
- * - 维护 BSP 树节点 + 叶子节点（用于 cluster 定位）
- * - 维护预解码的 PVS 位图（Base64 → Uint8Array）
- * - `update(pos)`：通过 BSP 树遍历找到相机所在 leaf → 取其 cluster → 解码可见集
- * - `isVisible(clusterId)`：查询某 cluster 是否在当前可见集内
- * - `getFaceCluster(faceIndex)`：查询 face 所属 cluster
- *
- * **算法**：
- * 1. `findLeaf(pos)`：从根节点开始，递归比较 pos 与分割平面，
- *    进入 front/back 子节点，直到到达 leaf。
- * 2. `decodePvsRow(cluster)`：从 PVS 位图中读取该 cluster 的可见行，
- *    转换为 Set<number>。
- * 3. 仅当 cluster 变化时重新解码可见集（避免每帧重算）。
+ * 将 WASM parse_pvs_data 输出的 JSON 转换为运行时 PVS 管理器（坐标已旋转为 Y-up）。
+ * 职责：维护 BSP 树节点 + 叶子（cluster 定位）、预解码 PVS 位图（Base64 → Uint8Array）、
+ * update(pos) 找相机所在 leaf → 取 cluster → 解码可见集、isVisible(clusterId) 查询、getFaceCluster(faceIndex)。
+ * 算法：findLeaf 递归比较分割平面；decodePvsRow 解码可见行；仅 cluster 变化时重算。
  */
 
 import type { Vec3 } from '../physics/math/vec3.js';
@@ -42,19 +29,9 @@ export interface PvsStats {
 
 /**
  * PVS 可见性管理器。
- *
- * @example
- * ```typescript
- * const wasmJson = await processor.parse_pvs_data();
- * const pvs = new PvsManager(wasmJson);
- *
- * // 在渲染循环中
+ * 用法：const pvs = new PvsManager(wasmJson);
  * pvs.update(camera.position);
- * for (const mesh of meshes) {
- *   const cluster = pvs.getFaceCluster(mesh.userData.faceIndex);
- *   mesh.visible = pvs.isVisible(cluster);
- * }
- * ```
+ * mesh.visible = pvs.isVisible(pvs.getClusterAt(pos));
  */
 export class PvsManager {
   private readonly nodes: WasmPvsNode[];
@@ -91,15 +68,10 @@ export class PvsManager {
 
   /**
    * 通过 BSP 树遍历找到 pos 所在的 leaf 索引。
-   *
-   * 算法：从根节点开始，对每个内部节点：
-   * - 计算 `dot(plane.normal, pos) - plane.dist`
-   * - 若 > 0：pos 在平面前侧 → 进入 children[0]（front）
-   * - 若 <= 0：pos 在平面后侧 → 进入 children[1]（back）
-   * - 子节点为负数表示 leaf：`~children[i]` 取 leaf 索引
-   *
+   * 从根开始：dot(n, pos) - dist > 0 进 children[0]（front），<= 0 进 children[1]（back）；
+   * 负数子节点表示 leaf（~index 取 leaf 索引）。
    * @param pos 世界坐标（Y-up）。
-   * @returns leaf 索引，若遍历失败返回 -1。
+   * @returns leaf 索引，遍历失败返回 -1。
    */
   private findLeaf(pos: Vec3): number {
     if (this.nodes.length === 0) {
@@ -144,10 +116,7 @@ export class PvsManager {
 
   /**
    * 解码指定 cluster 的 PVS 行，返回可见 cluster 集合。
-   *
-   * PVS 位图布局：`pvsBits[cluster * bytesPerRow + (target / 8)]` 的第
-   * `(target % 8)` 位为 1 表示从 `cluster` 可见 `target`。
-   *
+   * 位图布局：pvsBits[cluster * bytesPerRow + target/8] 的第 (target%8) 位为 1 = 可见。
    * @param cluster 源 cluster id。
    * @returns 可见 cluster 集合（包含自身）。
    */
@@ -190,10 +159,7 @@ export class PvsManager {
   // -------------------------------------------------------------------------
 
   /**
-   * 更新 PVS 状态（基于相机位置）。
-   *
-   * 仅当 cluster 变化时重新解码可见集（避免每帧重算）。
-   *
+   * 基于相机位置更新 PVS 状态；仅当 cluster 变化时重解码可见集（避免每帧重算）。
    * @param pos 相机世界坐标（Y-up）。
    * @returns true 表示 cluster 发生变化（需要重新应用可见性）。
    */
@@ -216,8 +182,7 @@ export class PvsManager {
       return false; // cluster 未变，无需重算
     }
 
-    // 激进模式：相机落在固体 leaf（cluster < 0）时保持上次有效可见集，
-    // 而不是清空后全量回退到距离 LOD（穿墙/贴墙瞬间不闪变）。
+    // 激进模式：落在固体 leaf（cluster < 0）时保持上次有效可见集，避免穿墙瞬间闪变；
     // 仅当从未有过有效 cluster 时维持 -1（此时上层会跳过 PVS）。
     if (newCluster < 0) {
       return false;
@@ -229,12 +194,8 @@ export class PvsManager {
   }
 
   /**
-   * 查询世界坐标点所在的 cluster（用于 mesh 包围盒采样定位）。
-   *
-   * 激进剔除的核心：mesh 不再依赖 face → cluster 静态映射
-   * （历史上 faceIndex 从未写入，导致 clusterId 恒为 -1、PVS 永不生效），
-   * 而是按 mesh 包围盒多个采样点定位其覆盖的 cluster 集合。
-   *
+   * 查询世界坐标点所在的 cluster（mesh 包围盒采样定位用）。
+   * 激进剔除核心：不依赖 face → cluster 静态映射，而是按采样点定位覆盖的 cluster 集合。
    * @param pos 世界坐标（Y-up）。
    * @returns cluster id（-1 = 固体/地图外）。
    */
@@ -307,10 +268,7 @@ export class PvsManager {
 // ---------------------------------------------------------------------------
 
 /**
- * 将 Base64 字符串解码为 Uint8Array。
- *
- * 使用浏览器原生 `atob` + 手动字节拷贝（比 TextEncoder 更快）。
- * 在 Worker 环境中 `atob` 可用。
+ * Base64 解码为 Uint8Array（浏览器原生 atob + 手动字节拷贝，比 TextEncoder 快）。
  */
 function base64ToUint8Array(base64: string): Uint8Array {
   const binary = atob(base64);

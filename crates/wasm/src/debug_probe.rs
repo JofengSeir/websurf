@@ -8,7 +8,6 @@
 //! ```text
 //! cargo test --release -p websurf-wasm -- --nocapture probe_ramp
 //! ```
-
 #![allow(clippy::needless_range_loop)]
 
 use crate::model_integrator::map_coords;
@@ -357,9 +356,9 @@ fn newell_normal(v: &[[f32; 3]]) -> [f32; 3] {
     n
 }
 
-/// 由 brush 的真实平面集合（cs-movement 约定：实体 = {x | dot(n,x) ≤ dist}）用蒙特卡洛
-/// 估计「实际实心体积」。bevel 存在时实体 = 整个 AABB 方块；去掉后实体 = 贴合多边形的薄壳，
-/// 二者体积相差巨大，此法可直接量化修复前后差异。
+/// 用蒙特卡洛估计 brush 的「实际实心体积」。
+/// 按 cs-movement 约定（实体 = {x | dot(n,x) ≤ dist}）：bevel 存在时实体 = 整个 AABB 方块；
+/// 去掉后实体 = 贴合多边形的薄壳，二者体积相差巨大，可直接量化修复前后差异。
 fn brush_solid_vol_estimate(b: &pk::BrushOut, m: u32, seed: u64) -> f32 {
     let ext = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]];
     if ext[0] <= 0.0 || ext[1] <= 0.0 || ext[2] <= 0.0 {

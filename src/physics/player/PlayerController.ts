@@ -6,14 +6,12 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-// Per-tick player simulation following Source's CGameMovement pipeline:
-// duck -> ladder -> CheckJumpButton -> Friction/Accelerate (ground) or
-// AirAccelerate (air/surf) -> gravity halves around TryPlayerMove ->
-// CategorizePosition. All state is in Source units, Y-up.
+// 逐 tick 玩家模拟，遵循 Source 的 CGameMovement 管线：duck → ladder →
+// CheckJumpButton → Friction/Accelerate（地面）或 AirAccelerate（空中/surf）→
+// TryPlayerMove 两侧分半重力 → CategorizePosition。状态均为 Source 单位，Y-up。
 //
-// This class IS a MovementContext (see MovementContext.ts) — its fields are
-// passed by reference to each extracted behavior (Jump, WalkMove, ...), so
-// tick() is a thin, ordered sequence of calls with no extra allocation.
+// 本类即 MovementContext（见 MovementContext.ts）——字段按引用传给各抽取行为
+// （Jump、WalkMove…），tick() 是无额外分配的薄调用序列。
 
 import { type Vec3, clone, copy, length2D, set, vec3 } from '../math/vec3.js';
 import { recoverStamina } from '../physics/Stamina/Stamina.js';
@@ -39,9 +37,9 @@ import { checkStuck } from './StuckCheck/StuckCheck.js';
 import { detectBlockedMove } from './BlockedMove/BlockedMove.js';
 import { createMouseInputHandlers } from './MouseInput/MouseInput.js';
 
-/** Optional host hooks. Movement never logs or touches globals on its own. */
+/** 可选宿主钩子。移动逻辑自身不写日志、不触碰全局。 */
 export interface PlayerOptions {
-  /** Called on anomalies (unstuck pops, velocity kills). Default: no-op. */
+  /** 异常时调用（unstuck 弹出、速度清零）。默认空操作。 */
   log?: (msg: string) => void;
   /** 初始碰撞箱体型（默认 DEFAULT_HULL = CS:S 基准 32×32×72 / 蹲 54）。 */
   hull?: Partial<HullConfig>;
@@ -54,31 +52,31 @@ export class PlayerController implements MovementContext {
 
   origin: Vec3;
   velocity = vec3();
-  yaw = 0; // degrees; 0 looks down -Z
+  yaw = 0; // 度；0 时面向 -Z
   pitch = 0;
 
   onGround = false;
   groundNormal = vec3(0, 1, 0);
   ducked = false;
-  duckFrac = 0; // 0 standing, 1 ducked (drives eye lerp)
+  duckFrac = 0; // 0 站立，1 蹲下（驱动视角插值）
   onLadder: LadderVolume | null = null;
 
-  /** True while standing on a surf-steep slope (airborne rules, no friction). */
+  /** 站在 surf 陡坡上为 true（按空中规则，无摩擦）。 */
   surfing = false;
-  /** True from the moment surfing starts until the next real ground landing. */
+  /** 自 surf 开始至下一次真实落地期间为 true。 */
   surfedSinceGrounded = false;
 
-  // Interpolation snapshots (position + eye height per tick).
+  // 插值快照（每 tick 的位置 + 视角高度）。
   prevPos: Vec3;
   currPos: Vec3;
   prevEye = eyeStandFor(DEFAULT_HULL);
   currEye = eyeStandFor(DEFAULT_HULL);
 
-  landPunch = 0; // downward view offset from landing, decays each tick
+  landPunch = 0; // 落地造成的向下视角偏移，逐 tick 衰减
 
-  /** 0..settings.stamina.max; only meaningful while settings.stamina.enabled. */
+  /** 0..settings.stamina.max；仅 settings.stamina.enabled 时有意义。 */
   stamina = 0;
-  /** Quality of the most recent takeoff; only set while settings.perf.enabled. */
+  /** 最近一次起跳的质量；仅 settings.perf.enabled 时设置。 */
   lastHopQuality: 'perfect' | 'normal' | null = null;
 
   readonly input: InputState = {
@@ -92,40 +90,36 @@ export class PlayerController implements MovementContext {
     reset: false,
   };
 
-  oldJump = false; // was +jump held last tick (Source's pogo-stick check)
-  // Space is a real held key — input.jump should track it continuously.
-  // mwheelup/mwheeldown has no keyup of its own and, per Source's own
-  // command-frame batching, each notch is meant to register as exactly one
-  // tick's worth of "+jump" rather than a timed hold — see bindInput()'s
-  // wheel handler and tick()'s consumption of wheelJumpQueued below.
+  oldJump = false; // 上一 tick 是否按住 +jump（Source 的 pogo-stick 检查）
+  // Space 是真实按住键——input.jump 应持续跟踪它。mwheelup/mwheeldown 没有
+  // 自己的 keyup，按 Source 自身的命令帧批处理，每个 notch 应精确记为一个 tick
+  // 的 "+jump" 而非定时按住——见 bindInput() 的 wheel 处理器与 tick() 对
+  // wheelJumpQueued 的消费。
   private keyJumpHeld = false;
   private wheelJumpQueued = false;
-  // Only true once bindInput() has wired up real listeners — tick() must
-  // never touch input.jump on its own otherwise, since tests throughout this
-  // codebase drive it directly (player.input.jump = true) without binding.
+  // bindInput() 挂接真实监听后才为 true——否则 tick() 不得自行改动 input.jump，
+  // 因为本代码库的测试都直接驱动它（player.input.jump = true）而不经绑定。
   private inputBound = false;
-  ladderCooldown = 0; // seconds before ladder can re-grip after jump-off
+  ladderCooldown = 0; // 跳离梯子后可重新抓住的秒数
   fallVelocity = 0;
-  groundTicksSinceLanding = 0; // ground-friction ticks elapsed since landing
-  // Gravity settling you onto the ground you spawned on isn't a jump landing
-  // — this only flips true the moment checkJump actually launches a real
-  // jump, so the perfect-bhop carry can never fire on a jump with no
-  // previous jump to chain from (see Jump.ts).
+  groundTicksSinceLanding = 0; // 落地以来经过的地面摩擦 tick 数
+  // 出生后重力把你沉降到出生地面不算跳跃落地——只有 checkJump 真正发起跳跃
+  // 才置 true，这样完美连跳继承绝不会在没有前一跳可衔接时触发（见 Jump.ts）。
   hasJumpedBefore = false;
-  /** Horizontal velocity snapshotted the instant of the last landing; see PerfBonus. */
+  /** 最近一次落地瞬间的水平速度快照；见 PerfBonus。 */
   landingVelocity = vec3();
   stuckTicks = 0;
   blockedTicks = 0;
   contactsThisTick: string[] = [];
 
-  // Scratch vectors — reused across ticks to avoid allocation.
+  // 临时向量——跨 tick 复用避免分配。
   readonly wishDir = vec3();
   readonly moveEnd = vec3();
   readonly tmpA = vec3();
   readonly tmpB = vec3();
 
-  // Rolling per-tick history for dumpMovementLog(). Not part of
-  // MovementContext — this is PlayerController's own diagnostic API.
+  // 滚动逐 tick 历史（dumpMovementLog 用）。不属于 MovementContext——
+  // 是 PlayerController 自己的诊断 API。
   private tickCount = 0;
   private readonly tickHistory: string[] = [];
   private readonly spawn: Vec3;
@@ -151,9 +145,8 @@ export class PlayerController implements MovementContext {
   }
 
   /**
-   * Rolling record of every simulated tick (position, velocity, inputs,
-   * contact planes), oldest first. Pull it when you want a movement dump —
-   * the library never registers globals to push it anywhere.
+   * 每个模拟 tick 的滚动记录（位置、速度、输入、接触平面），旧在前。
+   * 需要移动转储时取用——库本身不注册全局来推送。
    */
   tickHistoryText(): string {
     return this.tickHistory.join('\n');
@@ -241,32 +234,20 @@ export class PlayerController implements MovementContext {
       if (action) this.input[action] = false;
     });
 
-    // bind "mwheelup" "+jump" / "mwheeldown" "+jump": the standard chasemod
-    // bind, alongside space rather than instead of it. Scrolling the wheel
-    // through one physical motion (bottom notch to top notch) doesn't fire
-    // one 'wheel' event — it fires a rapid burst of a dozen-plus, each one a
-    // genuine, independent +jump/-jump pair. That's the whole mechanism
-    // behind chasemod wheel-bhop: spamming +jump repeatedly gives many
-    // independent chances for one press to land on the exact tick after a
-    // landing and catch a perfect rejump.
+    // 绑定滚轮 "+jump"（chasemod 标准绑定，与空格并列而非替代）。滚一轮物理滚动
+    // 不会只触发一个 wheel 事件——它会连发十几个独立 +jump/-jump 对。这正是
+    // chasemod 滚轮连跳的机制：反复 +jump 给多次独立机会，让某次按压恰好落在
+    // 落地后的精确 tick 上、抓住完美重跳。
     //
-    // A wall-clock timed pulse (tried here previously, twice) can't get this
-    // right: too long a pulse and consecutive notches merge into one
-    // continuous "held" state — which, exactly like holding spacebar down
-    // through a landing, fails the pogo-stick re-press check for real, not
-    // just in this sim; too short and a pulse can lapse between physics
-    // ticks depending on frame timing, silently eating the notch. Neither
-    // duration is really "correct" because milliseconds are the wrong unit
-    // — what actually matters is *ticks*, since that's what checkJump reads.
-    // So: a wheel event just queues a request; tick() consumes it as
-    // exactly one tick's worth of "+jump" and clears it immediately after,
-    // regardless of how much wall-clock time that request sat queued.
-    // Multiple events queued between two ticks (a whole burst arriving
-    // within one rendered frame) collapse into that same single tick's
-    // press — which matches Source's own per-command-frame batching, not a
-    // bug — while a fresh event arriving after the previous one was
-    // consumed re-arms a genuinely new press, so a spam spread across many
-    // ticks gets many independent chances, never one merged hold.
+    // 此前两度尝试的墙上时钟定时脉冲都不可行：脉冲过长，相邻 notch 会合并成
+    // 持续"按住"态——就像按住空格过落地那样，在真实（而非仅本模拟）中失败
+    // pogo-stick 重按检查；过短则脉冲可能在物理 tick 之间流逝，静默吞掉 notch。
+    // 两种时长都不"正确"，因为毫秒是错误单位——真正相关的是 *tick*，因为
+    // checkJump 只读它。因此：wheel 事件只排队请求；tick() 精确消费为一个 tick
+    // 的 "+jump" 并立即清除，无论请求排了多久。两个 tick 之间到达的多个事件
+    // （一帧内整个连发）合并进同一个 tick 的按压——这符合 Source 自身的命令帧
+    // 批处理，而非 bug；而前一请求被消费后到达的新事件会重新武装一次全新按压，
+    // 所以分散在多个 tick 的连发获得多次独立机会，永远不会被合并成一次长按。
     window.addEventListener(
       'wheel',
       (e) => {
@@ -307,9 +288,8 @@ export class PlayerController implements MovementContext {
     copy(this.prevPos, this.currPos);
     this.prevEye = this.currEye;
 
-    // Space stays pressed for as long as it's physically held; a queued
-    // wheel notch is consumed for exactly this one tick and then gone,
-    // whether or not Space is also down — see bindInput()'s wheel handler.
+    // Space 物理按住期间持续为真；排队的滚轮 notch 只在本 tick 消费一次随即清除，
+    // 与 Space 是否同按无关——见 bindInput() 的 wheel 处理器。
     if (this.inputBound) {
       this.input.jump = this.keyJumpHeld || this.wheelJumpQueued;
       this.wheelJumpQueued = false;
@@ -346,12 +326,12 @@ export class PlayerController implements MovementContext {
 
     detectBlockedMove(this);
 
-    // Landing view punch (render-only, optional).
+    // 落地视角震动（仅渲染，可选）。
     this.landPunch *= Math.max(0, 1 - 10 * dt);
     this.oldJump = this.input.jump;
     this.recordTick();
 
-    // Duck eye-height lerp.
+    // 蹲下视角高度插值。
     const target = this.ducked ? 1 : 0;
     const rate = dt / DUCK_LERP_TIME;
     this.duckFrac += Math.sign(target - this.duckFrac) * Math.min(rate, Math.abs(target - this.duckFrac));

@@ -8,13 +8,10 @@
 
 
 /**
- * Squeezes a speed above `ceiling` asymptotically toward it, so a chain
- * gains a little less the further past the ceiling it already is —
- * diminishing returns instead of a hard clamp. Speeds at or below `ceiling`
- * pass through untouched; `softness` controls how gradually the curve
- * approaches the ceiling (the true asymptote sits `softness` units above
- * it, which is deliberate — an exact hard ceiling would just be
- * `bhopSpeedClamp` again).
+ * 将超过 `ceiling` 的速度渐近压缩回 ceiling——超出越多增益越少，
+ * 是递减收益而非硬钳制。速度不高于 `ceiling` 时原样返回；`softness` 控制曲线
+ * 逼近上限的渐进程度（真实渐近线在其上方 `softness` 处——刻意如此，
+ * 精确硬钳制就等同 `bhopSpeedClamp` 了）。
  */
 export function applyAirSpeedCeiling(speed: number, ceiling: number, softness: number): number {
   if (speed <= ceiling) return speed;

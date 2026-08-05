@@ -15,33 +15,28 @@ import type { MovementContext } from '../MovementContext.js';
 import { tryPlayerMove } from '../TryPlayerMove/TryPlayerMove.js';
 import { computeWish } from '../WishDir/WishDir.js';
 
-// noPrestrafe never touches this function: air-strafe/prestrafe gain stays
-// fully unrestricted, whatever that setting is. "nopre" instead means the
-// speed you build that way can't be CASHED IN on the ground — see
-// WalkMove.ts. perf.enabled DOES touch this function (see below) — real
-// bhop-assist chasemod servers cap air speed itself, not just the takeoff.
+// noPrestrafe 不作用于本函数：空中 strafe/prestrafe 增益始终不受该设置限制。
+// "nopre" 意为这些速度不能在地面"兑现"——见 WalkMove.ts。perf.enabled 则作用于
+// 本函数（见下）——真实 bhop-assist chasemod 服务器限制的是空中速度本身，而非仅起跳。
 export function airMove(ctx: MovementContext, dt: number): void {
   const wishspeed = computeWish(ctx);
   airAccelerate(ctx.velocity, ctx.wishDir, wishspeed, ctx.settings.airAccelerate, dt);
 
   const gravity = getRuntimePhysics().gravity; // 面板可调（sv_gravity）
-  ctx.velocity.y -= 0.5 * gravity * dt; // half gravity before the move
+  ctx.velocity.y -= 0.5 * gravity * dt; // 移动前先施加半重力
   tryPlayerMove(ctx, dt);
-  ctx.velocity.y -= 0.5 * gravity * dt; // half gravity after
+  ctx.velocity.y -= 0.5 * gravity * dt; // 移动后再施加半重力
 
   if (ctx.surfing) {
-    // Surfing lets you build as much speed as you want, full stop — and
-    // that stays true for the rest of this flight even after you leave the
-    // ramp, until you actually touch ground again (see Jump.ts, which
-    // clears this the moment a fresh jump launches).
+    // Surf 可任意提速，且本段飞行（离开斜坡后至再次真实落地前）始终成立；
+    // Jump.ts 在新跳跃发起的瞬间清除该标记。
     ctx.surfedSinceGrounded = true;
   }
 
-  // Real bhop-assist servers cap air speed itself around perf.maxAirSpeed,
-  // not just what a perfect-bhop carry restores at takeoff (Jump.ts) —
-  // otherwise air-strafe gain between hops pushes the observed peak well
-  // past the intended ceiling. Surfing (and anything carried from it) is
-  // exempt — it's a different physics path and is supposed to exceed this.
+  // 真实 bhop-assist 服务器把空中速度本身压在 perf.maxAirSpeed 附近，而非仅限制
+  // 完美连跳在起跳时恢复的值（Jump.ts）——否则连跳间的 air-strafe 增益会把观测
+  // 峰值推到远超预期上限。Surf（及从它携带的速度）豁免——它是另一条物理路径，
+  // 本就允许超过此值。
   if (ctx.settings.perf.enabled && !ctx.surfing && !ctx.surfedSinceGrounded) {
     const speed = length2D(ctx.velocity);
     const capped = applyAirSpeedCeiling(speed, ctx.settings.perf.maxAirSpeed, AIR_SPEED_CEILING_SOFTNESS);

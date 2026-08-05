@@ -1,15 +1,9 @@
 /**
  * WebSurf — 主线程渲染器（渲染从 Worker 搬回主线程）
- *
- * 对应重构时序图阶段三（安全检查与视觉渲染）：
- * - 每帧安全读取物理快照：锁占用（Worker 写中）→ 复用上一帧缓存；
- *   锁释放 → 读取 + seq 版本校验
- * - LERP 时间插值：prev/cur 双快照按渲染时刻插值（渲染帧率与物理帧率解耦）
- * - 相机同步 → LOD/PVS 剔除 → 雾/碰撞箱可视化/准星射线 → Draw Call
- *
- * 场景数据由 Worker 一次性传输（GLB 字节 + 碰撞体/PVS/出生点/传送点 JSON），
- * 本类承担：GLTFLoader 建场景、PvsManager/LodManager/FogManager/ColliderDebug/
- * PlaneInspector/TeleportManager（可视化与准星检测）、lightmap 注入。
+ * 每帧安全读取物理快照（锁占用→复用缓存，锁释放→读取+seq 校验）、
+ * LERP 插值（渲染/物理帧率解耦）、相机同步 → LOD/PVS 剔除 → 雾/碰撞箱可视化/准星射线 → Draw Call。
+ * 场景数据由 Worker 一次性传输（GLB + 碰撞体/PVS/出生点/传送点 JSON），
+ * 本类承担 GLTFLoader 建场景及 LOD/PVS/雾/碰撞箱/准星/lightmap 等子管理器。
  */
 
 import * as THREE from 'three';
@@ -35,14 +29,13 @@ import { applyLightmapToMeshes, loadLightmapAtlas } from './lightmap-shader.js';
 const FOV = 75;
 /** 准星射线检测限流（每 N 帧一次）。 */
 const PLANE_INSPECT_INTERVAL = 6;
-/** 近裁剪面下限（HU）：近平面自适应的下限。
- * 贴墙时动态收缩到最近几何距离的 80%（不低于此值）→ 墙面不被近平面裁掉 → 不穿墙。
- * 相机位置完全不动（只改投影矩阵）。 */
+/** 近裁剪面下限（HU）：贴墙时近平面动态收缩到最近几何距离的 80%（不低于此值），
+ * 防近平面裁剪穿墙；相机位置不动，只改投影矩阵。 */
 const CAMERA_NEAR_MIN = 0.05;
-/** 近距几何检测半径（HU）：检测相机周围 N 内是否有渲染几何（贴脸判定）。 */
+/** 近距几何检测半径（HU）：检测相机周围是否有渲染几何（贴脸判定）。 */
 const NEAR_PROBE_DIST = 4;
 
-/** 剔除统计回调（与旧 CullStatsMessage 同构，主线程直接更新 UI）。 */
+/** 剔除统计回调（主线程直接更新 UI）。 */
 export interface CullStatsLike {
   visible: number;
   total: number;
@@ -57,9 +50,7 @@ export interface CullStatsLike {
   };
 }
 
-/**
- * 主线程渲染器。
- */
+/** 主线程渲染器。 */
 export class RendererMain {
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
@@ -93,7 +84,7 @@ export class RendererMain {
   private rafId = 0;
   private running = false;
 
-  // ── LERP 插值状态（阶段三步骤 11）─────────────────────────
+  // ── LERP 插值状态 ─────────────────────────────────────────
   private prevSnap: FrameSnapshot | null = null;
   private curSnap: FrameSnapshot | null = null;
   private lastSeq = -1;
@@ -186,8 +177,7 @@ export class RendererMain {
     this.bspModelScene = scene;
     this.scene.add(scene);
 
-    // 3. 相机 near/far（near 自适应：默认 = maxDim/1000 下限 CAMERA_NEAR_MIN，
-    //    贴墙时由 updateNearPlane 动态收缩，防近平面裁剪穿墙）
+    // 3. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 updateNearPlane 收缩防穿墙）
     const maxDim = Math.max(size.x, size.y, size.z);
     this.defaultNear = Math.max(maxDim / 1000, CAMERA_NEAR_MIN);
     this.camera.near = this.defaultNear;
@@ -216,7 +206,7 @@ export class RendererMain {
     this.fogManager.init(this.scene, radius, center);
     this.fogManager.setColor(this.config.lighting.bgColor);
 
-    // 8. 同步当前 LOD 配置（scene-data 中 maxCull/diagonal 由 Worker 占位，此处校准）
+    // 8. 同步 LOD 配置（scene-data 中 maxCull/diagonal 为占位，此处校准）
     this.config.lod.cullDistance = this.lodManager.cullDistance;
     this.needsRender = true;
 
@@ -264,9 +254,7 @@ export class RendererMain {
     }
 
     // 2. LERP 时间插值 + 相机同步
-    // 2. LERP 时间插值 + 相机同步
-    // 相机位置 = 眼睛（origin + eyeHeight），【完全不做位置修正】——
-    // 防穿墙靠"近平面自适应"：贴墙时动态收缩 near，墙面不被近平面裁掉。
+    // 相机位置 = 眼睛（origin + eyeHeight），不做位置修正——防穿墙靠近平面自适应
     if (this.curSnap) {
       const render = this.interpolate(now);
       const cc = this.cameraController;
@@ -277,9 +265,8 @@ export class RendererMain {
       const camZ = render.pos.z;
       cc.setPosition(camX, camY, camZ);
 
-      // 近平面自适应（每 2 帧）：相机周围 NEAR_PROBE_DIST 内若有渲染几何，
-      // near 收缩到最近距离的 80%（下限 CAMERA_NEAR_MIN）；否则恢复场景默认。
-      // 只改投影矩阵，相机位置/视角零影响。
+      // 近平面自适应（每 2 帧）：NEAR_PROBE_DIST 内有几何则 near 收缩到最近距离 80%，
+      // 否则恢复默认；只改投影矩阵，相机位置/视角零影响。
       this.nearCheckToggle = !this.nearCheckToggle;
       if (this.nearCheckToggle && render.mode === 'physics' && this.bspModelScene) {
         this.updateNearPlane(camX, camY, camZ);
@@ -316,11 +303,9 @@ export class RendererMain {
       this.lastPlaneInfo = null;
     }
 
-    // 7. 渲染：物理快照就绪后每帧无条件渲染 —— 渲染帧率跟随 rAF
-    //    （浏览器 vsync 提供的最高帧率：60/120/144/240Hz，取决于显示器），
-    //    不做任何人为降频/限流。LERP 插值负责物理帧（默认 64Hz）与渲染帧解耦：
-    //    渲染帧率高于物理帧率时中间帧饱和显示最新物理位置。
-    //    needsRender 仅用于初始/强制刷新（加载场景、LOD 变化等）。
+    // 7. 渲染：快照就绪后每帧无条件渲染（帧率跟随 rAF，不降频/限流）。
+    //    LERP 负责物理帧与渲染帧解耦，渲染帧率更高时中间帧饱和显示最新位置。
+    //    needsRender 仅用于强制刷新（加载场景、LOD 变化等）。
     const shouldRender = this.curSnap !== null || this.needsRender;
     if (shouldRender) {
       this.renderer.render(this.scene, this.camera);
@@ -379,15 +364,10 @@ export class RendererMain {
   }
 
   /**
-   * 近平面自适应：检测相机 6 方向（前/后/左/右/上/下，相机局部系）
-   * NEAR_PROBE_DIST 内最近的渲染 mesh 距离，动态设置 camera.near。
-   *
-   * - 贴墙/贴坡（近距几何存在）→ near = max(最近距离 × 0.8, CAMERA_NEAR_MIN)
-   *   —— 墙面落在近平面之外 → 不被裁剪 → 不穿墙（相机位置完全不动，仅改投影）。
-   * - 周围空旷 → near 恢复场景默认（maxDim/1000 下限 CAMERA_NEAR_MIN）。
-   *
-   * 性能：包围球粗筛（只收集距相机 < 2×NEAR_PROBE_DIST + 半径 的 mesh）→
-   * 仅对候选做 6 方向 raycaster（far = NEAR_PROBE_DIST）。每 2 帧一次。
+   * 近平面自适应：检测相机 6 方向（相机局部系）NEAR_PROBE_DIST 内最近的 mesh，动态设置 camera.near。
+   * - 贴墙 → near = max(最近距离 × 0.8, CAMERA_NEAR_MIN)，墙面不被裁剪（相机不动，仅改投影）
+   * - 空旷 → 恢复场景默认
+   * 性能：包围球粗筛候选后做 6 方向 raycaster，每 2 帧一次。
    */
   private updateNearPlane(px: number, py: number, pz: number): void {
     const camera = this.camera;

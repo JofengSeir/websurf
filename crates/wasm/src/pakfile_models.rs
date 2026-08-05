@@ -1,17 +1,17 @@
 //! PAKFILE 内嵌模型的**材质解析**与**碰撞体生成**。
 //!
-//! Source 引擎的 BSP 会把地图用到的 `.mdl/.vvd/.vtx/.vmt/.vtf` 一并打进 PAKFILE lump。
-//! 本模块负责在**无外部游戏资源**的前提下，仅凭 BSP 字节完成两件事：
+//! Source BSP 会把地图用到的 `.mdl/.vvd/.vtx/.vmt/.vtf` 打进 PAKFILE lump。
+//! 本模块在**无外部游戏资源**前提下，仅凭 BSP 字节完成两件事：
 //!
-//! 1. **材质**：解析 `.vmt`（Source KeyValues 文本）取出 `$basetexture` 与透明度标注，
-//!    再从 PAKFILE 找到对应 `.vtf` 解码成 PNG，交给 `model-integrator` 贴到 GLB 材质上。
+//! 1. **材质**：解析 `.vmt`（Source KeyValues 文本）取 `$basetexture` 与透明度标注，
+//!    再找对应 `.vtf` 解码成 PNG，交给 `model-integrator` 贴到 GLB 材质上。
 //! 2. **碰撞体**：把模型的**可见三角网格**逐三角挤出成薄壳 brush（每个三角一个 brush，
-//!    输出与 [`crate::BspProcessor::export_brushes_planes`] 完全同构的 `WasmBrush[]`，
-//!    因此碰撞体与显示几何**逐面一致**（用户要求：「碰撞体积需要与模型显示的一致」）。
+//!    输出与 [`crate::BspProcessor::export_brushes_planes`] 同构的 `WasmBrush[]`，
+//!    碰撞体与显示几何**逐面一致**（用户要求：「碰撞体积需要与模型显示的一致」）。
 //!
 //! ## 透明度的「内置标注」在哪
 //!
-//! Source 的透明度**确实有内置标注**，全部写在材质 `.vmt` 里：
+//! Source 的透明度标注全部写在 `.vmt` 里：
 //!
 //! | VMT 键 | 含义 | 本模块映射 |
 //! |---|---|---|
@@ -20,14 +20,14 @@
 //! | `$alphatest 1` | 二值镂空（铁丝网、树叶） | alpha_mode = 2（Mask） |
 //! | 均未出现 | 不透明 | alpha_mode = 0（Opaque）→ **默认带碰撞** |
 //!
-//! 碰撞门控采用**保守**策略（与用户要求一致：没有标注就默认有碰撞）：
-//! - 只有当模型**所有**材质都是 `Blend`（真半透明）时，才判定为「可穿过」而跳过碰撞；
-//! - `$alphatest` 镂空材质（铁丝网/栅栏）在 Source 里本身就是实体，**保留碰撞**；
-//! - 没有找到 `.vmt`（材质未打包）时按**不透明**处理，即**保留碰撞**。
+//! 碰撞门控采用**保守**策略（没有标注就默认有碰撞）：
+//! - 仅当模型**所有**材质都是 `Blend`（真半透明）时才判定「可穿过」而跳过碰撞；
+//! - `$alphatest` 镂空材质（铁丝网/栅栏）在 Source 里本是实体，**保留碰撞**；
+//! - 未找到 `.vmt`（材质未打包）按**不透明**处理，即**保留碰撞**。
 //!
-//! 另外 `static_prop` lump 自带 `solid`（`SolidType`）字段，其中 `0 = SOLID_NONE`
-//! 是**明确无歧义**的「此道具无碰撞」标注，本模块尊重它；其余取值语义在各版本间
-//! 不完全一致，故不用于门控（一律按有碰撞处理）。
+//! 另外 `static_prop` lump 自带 `solid`（`SolidType`）字段，`0 = SOLID_NONE`
+//! 是**明确无歧义**的「此道具无碰撞」标注，本模块尊重它；其余取值在各版本间
+//! 语义不完全一致，故不用于门控（一律按有碰撞处理）。
 
 use std::collections::HashMap;
 
@@ -46,7 +46,7 @@ pub struct VmtInfo {
     ///
     /// Source 的 `patch` 材质本身不含 `$basetexture`，只写
     /// `include "materials/xxx.vmt"` + 若干 `replace`/`insert` 覆盖项，
-    /// 调用方需要再取一次被引用的 VMT 才能拿到真正的贴图。
+    /// 调用方需再取一次被引用的 VMT 才能拿到真正的贴图。
     pub include: Option<String>,
 }
 
@@ -89,8 +89,8 @@ fn tokenize_kv(line: &str) -> Vec<String> {
 
 /// 解析 `.vmt` 文本，提取 `$basetexture` 与透明度标注。
 ///
-/// 只做**扁平扫描**（不建 KeyValues 树）：VMT 的顶层参数几乎总在根块内，
-/// 而 `Proxies`/`>=DX90` 等子块里出现的同名键取首次命中即可，足够稳健。
+/// 只做**扁平扫描**（不建 KeyValues 树）：VMT 顶层参数几乎总在根块内，
+/// 子块（`Proxies`/`>=DX90`）里的同名键取首次命中即可，足够稳健。
 pub fn parse_vmt(text: &str) -> VmtInfo {
     let mut info = VmtInfo::default();
     let mut translucent = false;
@@ -174,8 +174,8 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
 
 /// PAKFILE 内所有条目的大小写不敏感索引。
 ///
-/// Source 资源路径大小写混乱（编译器写入时保留作者磁盘上的大小写，
-/// 而 MDL 内记录的材质名往往是小写），必须做统一归一化才能可靠命中。
+/// Source 资源路径大小写混乱（编译器保留作者磁盘上的大小写，而 MDL 内记录的
+/// 材质名往往是小写），必须统一归一化才能可靠命中。
 pub struct PakIndex {
     /// `小写完整路径（含扩展名）` → 原始条目名
     by_path: HashMap<String, String>,
@@ -320,8 +320,8 @@ pub fn place_point(
 /// 把一个三角形按「几何法线朝外」的约定压入列表（必要时翻转缠绕）。
 ///
 /// Source 的 VTX 条带缠绕在不同 studiomdl 版本间并不统一，直接拿
-/// `cross(e1, e2)` 判定内外侧并不可靠；而 VVD 的**顶点法线**总是朝向模型外部，
-/// 用它作为基准最稳妥 —— 这直接决定了后续 brush 的内/外侧是否正确。
+/// `cross(e1, e2)` 判定内外侧并不可靠；而 VVD 的**顶点法线**总是指向模型外部，
+/// 用它作为基准最稳妥 —— 这直接决定后续 brush 的内/外侧是否正确。
 pub fn push_oriented_tri(
     out: &mut Vec<[[f32; 3]; 3]>,
     mut tri: [[f32; 3]; 3],
@@ -334,9 +334,9 @@ pub fn push_oriented_tri(
     out.push(tri);
 }
 
-/// 把一个已定向（顶点序 CCW 对应朝外法线）的三角转换成单三角 `ConvexFace`，
-/// 供 `transform_face` + `face_to_brush` 直接处理。用于「以原始三角网格作为碰撞」的路径：
-/// 不再做共面合并，每个三角就是一个薄壳 brush，使碰撞拓扑与显示网格一一对应。
+/// 把已定向（顶点序 CCW 对应朝外法线）的三角转换成单三角 `ConvexFace`，
+/// 供 `transform_face` + `face_to_brush` 处理。「以原始三角网格作为碰撞」的路径
+/// 不做共面合并，每个三角就是一个薄壳 brush，碰撞拓扑与显示网格一一对应。
 pub fn tri_to_face(t: [[f32; 3]; 3]) -> ConvexFace {
     let n = match norm(cross(sub(t[1], t[0]), sub(t[2], t[0]))) {
         Some(n) => n,
@@ -465,11 +465,10 @@ pub fn face_to_brush(verts: &[[f32; 3]], n: [f32; 3], thickness: f32) -> Option<
     });
 
     // 侧面：多边形按 n 右手 CCW 排列时，cross(edge, n) 指向外侧。
-    // 【修复】build_convex_faces 合并共面三角后，部分面的顶点缠绕顺序与面法线
-    // 不匹配，cross(edge, n) 会指向内侧 → 该侧面法线朝内（此前约 22% 的模型
-    // brush 混入 1 个朝内平面，物理上该面可穿透）。这里用多边形质心矫正方向：
-    // 侧面法线必须指向远离质心的一侧（凸多边形质心必在 brush 内部），
-    // 与顶点顺序无关。
+    // 【修复】build_convex_faces 合并共面三角后，部分面的顶点缠绕与面法线不匹配，
+    // cross(edge, n) 会指向内侧 → 该侧面法线朝内（此前约 22% 的模型 brush 混入
+    // 1 个朝内平面，物理上该面可穿透）。这里用多边形质心矫正方向：侧面法线必须
+    // 指向远离质心的一侧（凸多边形质心必在 brush 内部），与顶点顺序无关。
     let k = verts.len();
     let mut cx = 0.0f32;
     let mut cy = 0.0f32;
@@ -534,13 +533,12 @@ pub fn face_to_brush(verts: &[[f32; 3]], n: [f32; 3], thickness: f32) -> Option<
     }
 
     // 注意：不再调用 `push_axis_bevels`。
-    // 该函数在每个面上追加「覆盖该面自身轴对齐 AABB」的 6 个平面，会把一个倾斜/大面的
-    // brush 撑成实心的轴对齐方块。对薄斜坡（如 s2_ramp1）而言，所有面的 AABB 并集 =
-    // 模型整个包围盒，于是碰撞体变成了填满包围盒的实心块，而非贴合表面的薄壳，
-    // 表现为「模型之外出现意外碰撞片」。
+    // 该函数会在每个面上追加「覆盖该面自身轴对齐 AABB」的 6 个平面，把倾斜/大面的
+    // brush 撑成实心轴对齐方块。对薄斜坡（如 s2_ramp1），所有面 AABB 的并集 =
+    // 模型整个包围盒，碰撞体变成填满包围盒的实心块，表现为「模型之外出现意外碰撞片」。
     // 本函数上方的侧面平面（按质心校正方向）已能完整闭合凸多边形 cap，
-    // 因此闭合不再依赖轴对齐 bevel；如需缓解 box trace 棱角挂住，应在模型整体层面
-    // 做小幅度统一外扩，而不是逐面撑到 AABB。
+    // 闭合不再依赖轴对齐 bevel；如需缓解 box trace 棱角挂住，应在模型整体层面
+    // 做小幅统一外扩，而不是逐面撑到 AABB。
     Some(BrushOut {
         planes,
         min,

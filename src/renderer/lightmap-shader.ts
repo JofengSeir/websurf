@@ -1,17 +1,12 @@
 /**
  * RGBExp32 lightmap 解码着色器注入
- *
  * 将 Source 引擎 RGBExp32 编码的光照贴图 atlas 注入到 MeshBasicMaterial。
- *
- * 关键约束（project_memory）：
- * - 使用 MeshBasicMaterial + onBeforeCompile（不用 MeshLambertMaterial）
- * - atlas 纹理名 `__vbsp_lightmap_atlas__`，NoColorSpace + NearestFilter
- * - RGBExp32 解码：`exp = alpha * 255 - 128; rgb * pow(2, exp)`（UNSIGNED）
- * - 应用公式：`finalColor = diffuseColor * pow(decoded_lightmap, 1/2.2)`
- * - 手动双线性采样（4 邻居 + mix）— NearestFilter + raw RGBExp32
- * - r151+ maps TEXCOORD_1 → geometry.attributes.uv1（NOT uv2）；
- *   `MeshBasicMaterial.lightMap` slot 的 `vLightMapUv` varying 由 `uv2` attribute 驱动，
- *   检测 uv1 并复制到 uv2：`geom.setAttribute('uv2', geom.attributes.uv1)`
+ * - MeshBasicMaterial + onBeforeCompile（不用 MeshLambertMaterial）
+ * - atlas 纹理名 __vbsp_lightmap_atlas__，NoColorSpace + NearestFilter
+ * - 解码：exp = alpha * 255 - 128; rgb * pow(2, exp)（UNSIGNED）
+ * - 应用：finalColor = diffuseColor * pow(decoded_lightmap, 1/2.2)
+ * - 手动双线性采样（4 邻居 + mix）
+ * - r151+ 将 TEXCOORD_1 的 uv1 复制到 uv2（lightMap slot 由 uv2 驱动）
  */
 
 import * as THREE from 'three';
@@ -23,13 +18,9 @@ import type { GLTF, GLTFParser } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 /**
  * 解码单个 RGBExp32 样本。
- *
- * atlas 纹理为 RGBA8（NoColorSpace，采样值 [0,1] 为原始字节/255）：
- * - RGB = mantissa（0..1）
- * - A   = exponent 偏移到无符号字节（exp + 128）
- *
- * 解码：`exp = alpha * 255 - 128; rgb * pow(2, exp)`
- * （rgb 已是字节/255，故结果 = byte * pow(2,exp) / 255，与 Source RGBExp32 一致）
+ * atlas 为 RGBA8（NoColorSpace，值 [0,1] = 原始字节/255）：
+ * RGB = mantissa，A = exponent 偏移（exp+128）。
+ * 解码：exp = alpha * 255 - 128; rgb * pow(2, exp)，与 Source RGBExp32 一致。
  */
 const VBSP_DECOMPRESS_LIGHTMAP_SAMPLE = /* glsl */ `
 vec3 vbsp_DecompressLightmapSample(vec4 texel) {
@@ -40,15 +31,10 @@ vec3 vbsp_DecompressLightmapSample(vec4 texel) {
 
 /**
  * 手动双线性采样 + RGBExp32 解码 + 应用 gamma。
- *
- * 由于 atlas 用 NearestFilter（保留 raw RGBExp32 字节，避免硬件线性插值破坏
- * 指数编码），在 shader 中手动采样 4 个最近邻并 mix，每个样本先解码再插值。
- *
- * 应用公式：`pow(decoded, 1/2.2)`（lightmap 从线性空间转到显示 gamma）。
- * 调用方将其乘入 diffuseColor：`finalColor = diffuseColor * result`。
- *
- * atlas 尺寸通过 uniform `vbsp_AtlasSize`（vec2，像素数）传入，避免依赖
- * GLSL ES 3.00 的 textureSize（兼容性更好）。
+ * atlas 用 NearestFilter 保留 raw 字节（避免硬件插值破坏指数编码），
+ * 故在 shader 中手动采样 4 个最近邻，每个样本先解码再 mix。
+ * 应用 pow(decoded, 1/2.2)（线性 → 显示 gamma），调用方乘入 diffuseColor。
+ * atlas 尺寸用 uniform vbsp_AtlasSize 传入，避免依赖 GLSL ES 3.00 textureSize。
  */
 const VBSP_APPLY_LIGHTMAP = /* glsl */ `
 vec3 vbsp_ApplyLightmap(sampler2D atlas, vec2 uv) {
@@ -68,11 +54,8 @@ vec3 vbsp_ApplyLightmap(sampler2D atlas, vec2 uv) {
 }
 `;
 
-// MeshBasicMaterial 在 fragment shader 中内联了 lightmap 处理（不使用 lightmap_fragment chunk）：
-//   vec4 lightMapTexel = texture2D( lightMap, vLightMapUv );
-//   reflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;
-// 我们替换该内联块，改用 vbsp_ApplyLightmap。
-// 同时兼容直接 include <lightmap_fragment> 的材质（理论上 MeshBasicMaterial 不会，但防御性处理）。
+// MeshBasicMaterial 在 fragment shader 内联了 lightmap 采样块，替换为 vbsp_ApplyLightmap；
+// 同时防御性兼容 include <lightmap_fragment> 的材质（理论上 MeshBasicMaterial 不会）。
 const BASIC_INLINE_LIGHTMAP_SRC =
 	'vec4 lightMapTexel = texture2D( lightMap, vLightMapUv );\n\t\treflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;';
 
@@ -89,13 +72,10 @@ const CHUNK_LIGHTMAP_REPLACEMENT =
 
 /**
  * 从 glTF extras.lightmap.textureIndex 异步加载 lightmap atlas 纹理。
- *
- * 约束：NoColorSpace + NearestFilter（保留 raw RGBExp32 字节，手动双线性在 shader 中做）。
- * 纹理名设为 `__vbsp_lightmap_atlas__` 便于外部识别。
- *
+ * 约束：NoColorSpace + NearestFilter（保留 raw 字节，双线性在 shader 中做）。
  * @param parser GLTFParser（gltf.parser）。
  * @param gltf GLTF 解析结果（读取 asset/scene extras 中的 textureIndex）。
- * @returns atlas 纹理；若 glTF 无 lightmap extras 则返回 null。
+ * @returns atlas 纹理；无 lightmap extras 则返回 null。
  */
 export async function loadLightmapAtlas(
 	parser: GLTFParser,
@@ -135,15 +115,9 @@ export async function loadLightmapAtlas(
 // ---------------------------------------------------------------------------
 
 /**
- * 遍历场景中的 mesh，对带 uv1/uv2 的几何体应用 lightmap atlas。
- *
- * 流程：
- * 1. 检测 geometry.attributes.uv1（r151+ TEXCOORD_1 映射），若存在则复制到 uv2
- *    （MeshBasicMaterial.lightMap 的 vLightMapUv varying 由 uv2 驱动）。
- * 2. 用 `MeshBasicMaterial({ map, lightMap, lightMapIntensity: 1 })` 替换原材质
- *    （保留原 map 与 color），onBeforeCompile 注入 RGBExp32 解码 + 手动双线性 shader。
- * 3. 仅处理同时拥有 uv2（或 uv1）的 mesh；无 lightmap UV 的 mesh 跳过。
- *
+ * 对带 uv1/uv2 的 mesh 应用 lightmap atlas：
+ * uv1 存在时复制到 uv2（lightMap slot 由 uv2 驱动），用 MeshBasicMaterial 替换原材质
+ *（保留原 map/color），onBeforeCompile 注入解码 shader；无 lightmap UV 的 mesh 跳过。
  * @param scene Three.js 场景。
  * @param atlasTexture lightmap atlas 纹理（来自 loadLightmapAtlas）。
  * @returns 已应用 lightmap 的 mesh 数量。
@@ -205,20 +179,15 @@ export function applyLightmapToMeshes(
 }
 
 /**
- * 在 MeshBasicMaterial 的 onBeforeCompile 中注入 RGBExp32 解码 + 手动双线性 shader。
- *
- * 注入内容：
- * - 在 `void main()` 之前插入 `vbsp_DecompressLightmapSample` + `vbsp_ApplyLightmap` 函数。
- * - 添加 uniform `vbsp_AtlasSize`（vec2）。
- * - 替换 MeshBasicMaterial 内联的 lightmap texel 采样为 `vbsp_ApplyLightmap(lightMap, vLightMapUv)`。
- * - 兼容 `#include <lightmap_fragment>` chunk（防御性）。
+ * 在 MeshBasicMaterial.onBeforeCompile 注入 RGBExp32 解码 + 手动双线性 shader：
+ * main 前插入两个函数、添加 uniform vbsp_AtlasSize、替换内联 lightmap 采样
+ * 为 vbsp_ApplyLightmap，并防御性兼容 lightmap_fragment chunk。
  */
 function injectLightmapShader(
 	material: THREE.MeshBasicMaterial,
 	atlasSize: THREE.Vector2,
 ): void {
-	// 保留 uniform 值引用：onBeforeCompile 每次重编译都会被调用，
-	// 需要重新设置 uniform（Three.js 不会自动保留自定义 uniform）。
+	// uniform 值需每次重编译重新设置（Three.js 不自动保留自定义 uniform）
 	const uniformValue = { value: atlasSize.clone() };
 	material.onBeforeCompile = (shader) => {
 		shader.uniforms.vbsp_AtlasSize = uniformValue;

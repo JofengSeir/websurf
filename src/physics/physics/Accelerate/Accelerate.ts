@@ -6,14 +6,13 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-// Provenance (Valve source-sdk-2013, game/shared/gamemovement.cpp): CGameMovement::Accelerate
+// 来源（Valve source-sdk-2013, game/shared/gamemovement.cpp）：CGameMovement::Accelerate
 
 import type { Vec3 } from '../../math/vec3.js';
 
 /**
- * Ground acceleration. The `addspeed = wishspeed - dot(vel, wishdir)` term is
- * what caps ground speed at maxspeed: once you're moving at wishspeed in the
- * wish direction no more speed is added.
+ * 地面加速。`addspeed = wishspeed - dot(vel, wishdir)` 决定了地速上限：
+ * 一旦沿 wishdir 方向已达 wishspeed，就不再加速。
  */
 export function accelerate(vel: Vec3, wishdir: Vec3, wishspeed: number, accel: number, dt: number): void {
   const currentspeed = vel.x * wishdir.x + vel.y * wishdir.y + vel.z * wishdir.z;

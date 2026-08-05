@@ -7,10 +7,9 @@
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
 
-// Public surface. The simulation core (vec3, constants, physics/*, player/*,
-// PlayerController.tick) is renderer-agnostic and runs headless in node. The
-// only browser-dependent pieces are PlayerController.bindInput and
-// loadSettings/saveSettings — call those from a DOM environment or not at all.
+// 公共导出面。模拟核心（vec3、constants、physics/*、player/*、PlayerController.tick）
+// 与渲染无关，可在 node 中无头运行。仅 PlayerController.bindInput 与
+// loadSettings/saveSettings 依赖浏览器 DOM——请在 DOM 环境调用或干脆不用。
 
 export * from './math/vec3.js';
 export * from './constants.js';

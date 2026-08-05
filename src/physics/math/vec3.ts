@@ -6,8 +6,7 @@
  */
 // Modified by WebSurf — see src/physics/NOTICE for modification details.
 
-// Tiny mutable vector helpers — plain objects, no allocation in hot paths.
-// Y is up (Source's z maps to y).
+// 轻量可变向量工具——普通对象，热路径零分配。Y 轴朝上（Source 的 z 映射到 y）。
 
 export interface Vec3 {
   x: number;
@@ -80,12 +79,12 @@ export function lengthSq(a: Vec3): number {
   return a.x * a.x + a.y * a.y + a.z * a.z;
 }
 
-/** Horizontal (ground-plane) speed — x/z since y is up. */
+/** 水平（地面平面）速度——y 朝上，故取 x/z。 */
 export function length2D(a: Vec3): number {
   return Math.sqrt(a.x * a.x + a.z * a.z);
 }
 
-/** Normalizes in place; returns the original length. */
+/** 原地归一化；返回原长度。 */
 export function normalize(a: Vec3): number {
   const len = length(a);
   if (len > 0) {

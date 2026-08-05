@@ -17,7 +17,7 @@ function setNotGrounded(ctx: MovementContext): void {
 }
 
 export function categorizePosition(ctx: MovementContext): void {
-  // Moving up faster than this and we can't be "on" anything.
+  // 上升速度快于此值，不可能"站"在任何物体上。
   if (ctx.velocity.y > NON_JUMP_VELOCITY) {
     setNotGrounded(ctx);
     return;
@@ -37,10 +37,8 @@ export function categorizePosition(ctx: MovementContext): void {
     copy(ctx.origin, tr.endPos);
     if (wasAirborne) {
       ctx.groundTicksSinceLanding = 0;
-      // Only y gets clipped by the floor plane's normal this tick — x/z still
-      // hold the actual speed the player landed with. Snapshot it now, before
-      // walkMove's friction gets a chance to bleed it, so a perfect rejump
-      // has something real to carry back to (see PerfBonus).
+      // 本 tick 只有 y 被地面法线裁剪，x/z 仍保留落地时的实际速度。现在快照它，
+      // 赶在 walkMove 的摩擦消耗之前，让完美重跳有真实速度可继承（见 PerfBonus）。
       set(ctx.landingVelocity, ctx.velocity.x, ctx.velocity.y, ctx.velocity.z);
       if (ctx.settings.stamina.enabled) {
         ctx.stamina = addStamina(ctx.stamina, ctx.settings.stamina.landCost, ctx.settings.stamina.max);

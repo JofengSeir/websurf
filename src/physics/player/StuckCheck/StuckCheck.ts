@@ -23,11 +23,9 @@ const DIRS: Array<[number, number, number]> = [
 ];
 
 /**
- * Source-style CheckStuck: if the hull starts a tick overlapping solid
- * (possible where brushes overlap, e.g. Λ ramp ridges), nudge it out to the
- * nearest free spot instead of letting the move pipeline grind against
- * geometry it's inside of. Returns true only when hopelessly wedged (then
- * we also kill velocity so gravity can't pump it while pinned).
+ * Source 风格 CheckStuck：若 hull 在某 tick 开始时与实体重叠（brush 相交处，
+ * 如 Λ 形斜坡脊），就近挤出到空闲位置，而不是让移动管线在内部几何上磨蹭。
+ * 仅彻底卡死时返回 true（此时同时清零速度，防止被钉住时重力泵速度）。
  */
 export function checkStuck(ctx: MovementContext): boolean {
   if (ctx.world.isPositionFree(ctx.origin, ctx.mins, ctx.maxs)) {

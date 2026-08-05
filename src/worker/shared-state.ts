@@ -5,12 +5,11 @@
  * - 阶段一（主线程）：交互参数（鼠标增量 + 按键位掩码 + 时间戳）写入共享内存
  *   输入环形缓冲区（SPSC 无锁：唯一生产者=主线程，唯一消费者=Worker），
  *   积压 ≥ NOTIFY_THRESHOLD 时 Atomics.notify（仅发信号，无数据）；满则覆盖最旧
- *   （消费者跟不上时自动降采样）；再发送轻量 `frame` 触发信号（无数据负载）。
- * - 阶段二（Worker）：收到信号后从环形缓冲批量取输入（排空 [head, tail) 并聚合）→
- *   固定步长物理计算 → 加写锁（Atomics）写入输出区（位置/视角/速度/onGround/mode
- *   + 时间戳 + seq）。
- * - 阶段三（主线程）：渲染循环安全检查（锁占用 → 复用上一帧缓存；释放 →
- *   读取 + seq 校验）→ LERP 插值 → 渲染。
+ *   （消费者跟不上时自动降采样）；再发轻量 `frame` 触发信号。
+ * - 阶段二（Worker）：批量取输入（排空 [head, tail) 聚合）→ 固定步长物理 →
+ *   加写锁（Atomics）写输出区（位置/视角/速度/onGround/mode + 时间戳 + seq）。
+ * - 阶段三（主线程）：安全检查（锁占用 → 复用上一帧缓存；释放 → 读取 + seq 校验）
+ *   → LERP 插值 → 渲染。
  *
  * 双实现：
  * - ShmState：SharedArrayBuffer + Atomics（需 crossOriginIsolated，dev serve.py 已配 COOP/COEP）
@@ -121,7 +120,7 @@ const RING_MASK = RING_CAPACITY - 1;
 
 /**
  * 积压唤醒阈值：生产者写入后 pending = tail - head ≥ 阈值 → Atomics.notify。
- * 浏览器将 mousemove 节流到显示刷新率（60-144Hz），64 槽环几乎不积压；
+ * mousemove 被节流到显示刷新率（60-144Hz），64 槽环几乎不积压；
  * 阈值 8 ≈ 33-66ms 积压（M2 Worker 60Hz 自驱轮询兜底，notify 仅加速）。
  */
 const NOTIFY_THRESHOLD = 8;
@@ -132,10 +131,7 @@ const RING_DYS_BYTE = RING_DXS_BYTE + RING_CAPACITY * 8; // 624
 const RING_TSS_BYTE = RING_DYS_BYTE + RING_CAPACITY * 8; // 1136
 const RING_KEYS_BYTE = RING_TSS_BYTE + RING_CAPACITY * 8; // 1648
 
-/**
- * SharedArrayBuffer 总字节数：
- * Int32 头 32B + Float64 输出 10×8B + 环 dxs/dys/tss 64×8B×3 + 环 keys 64×4B = 1904B
- */
+/** SharedArrayBuffer 总字节数：Int32 头 32B + Float64 输出 10×8B + 环 dxs/dys/tss 64×8B×3 + 环 keys 64×4B = 1904B */
 export const SHARED_BUFFER_SIZE = RING_KEYS_BYTE + RING_CAPACITY * 4;
 
 /** 输入样本结构（Worker takeInput 返回值）。 */
@@ -157,9 +153,7 @@ export interface InputSample {
 
 /**
  * 跨线程状态通道。
- *
- * 主线程侧：setInput / setKeys / readFrame
- * Worker 侧：takeInput / writeFrame
+ * 主线程侧：setInput / setKeys / readFrame；Worker 侧：takeInput / writeFrame。
  */
 export abstract class SharedState {
   /** 是否为共享内存模式（false = postMessage 回退）。 */
@@ -168,14 +162,14 @@ export abstract class SharedState {
   // ── 主线程侧 ──────────────────────────────────────────────
 
   /**
-   * 写入鼠标增量 + 按键位掩码（环形缓冲模式=追加一个样本）。
+   * 写入鼠标增量 + 按键位掩码（环形缓冲模式 = 追加一个样本）。
    * @param ts 样本时间戳（performance.now()）；缺省 = 实现内采集。
    */
   abstract setInput(dx: number, dy: number, keysMask: number, ts?: number): void;
 
   /**
    * 仅更新按键位掩码（无鼠标增量时每帧调用）。
-   * 环形缓冲模式下追加零增量样本（保证按键状态持续刷新）。
+   * 环形缓冲模式下追加零增量样本，保证按键状态持续刷新。
    */
   abstract setKeys(keysMask: number, ts?: number): void;
 
@@ -185,7 +179,7 @@ export abstract class SharedState {
   // ── Worker 侧 ─────────────────────────────────────────────
 
   /**
-   * 读取本帧输入并排空缓冲（环形缓冲模式=批量读 [head, tail) 聚合求和）。
+   * 读取本帧输入并排空缓冲（环形缓冲模式 = 批量读 [head, tail) 聚合求和）。
    * keysMask 为批次内最新样本；无输入时返回缓存按键状态。
    */
   abstract takeInput(): InputSample;
@@ -239,13 +233,13 @@ export class ShmState extends SharedState {
   /**
    * 追加一个输入样本（SPSC：唯一生产者=主线程，无锁）。
    *
-   * 内存序：先写槽数据（普通写）→ 最后 Atomics.store(tail)（release 序），
-   * 消费者 load(tail)（acquire 序）后读槽，必然看到完整样本。
-   * 满则覆盖最旧：写者不读 head 做排空，始终写当前 tail 槽——消费者跟不上时
-   * 自动降采样（丢弃最旧样本，保留最新 64 个）。
+   * 内存序：先写槽数据（普通写）→ 最后 Atomics.store(tail)（release 序）；
+   * 消费者 load(tail)（acquire 序）后读槽，必见完整样本。
+   * 满则覆盖最旧：写者始终写当前 tail 槽，不读 head 排空——消费者跟不上时
+   * 自动降采样（丢弃最旧，保留最新 64 个）。
    *
-   * notify（时序图步骤 6）：store(tail) 后检测积压 pending = tail - head，
-   * ≥ NOTIFY_THRESHOLD → Atomics.notify 仅发信号唤醒等待者（M2 Worker 自驱用）。
+   * notify（时序图步骤 6）：store(tail) 后积压 pending = tail - head ≥ 阈值
+   * → Atomics.notify 仅发信号唤醒等待者（M2 Worker 自驱用）。
    */
   private pushSample(dx: number, dy: number, keysMask: number, ts: number): void {
     const idx = this.tail & RING_MASK;
@@ -255,7 +249,7 @@ export class ShmState extends SharedState {
     this.ringTss[idx] = ts;
     this.tail += 1;
     Atomics.store(this.i32, I_IN_TAIL, this.tail);
-    // 积压检测（读 head 一次，~20ns；仅共享内存模式，回退模式无此路径）
+    // 积压检测（读 head 一次，~20ns）
     if (this.tail - Atomics.load(this.i32, I_IN_HEAD) >= NOTIFY_THRESHOLD) {
       Atomics.notify(this.i32, I_IN_TAIL, 1);
     }
@@ -268,7 +262,7 @@ export class ShmState extends SharedState {
       // 空批次：返回缓存按键状态（增量归零）
       return { dx: 0, dy: 0, keysMask: this.lastKeys, sampleCount: 0 };
     }
-    // 读上限：tail-head > N 的积压场景只读最新 N 个（防回绕重读）
+    // 读上限：积压时只读最新 N 个（防回绕重读）
     const n = Math.min(count, RING_CAPACITY);
     let sumDx = 0;
     let sumDy = 0;
@@ -344,8 +338,8 @@ export class ShmState extends SharedState {
 
 /**
  * 回退实现：无 crossOriginIsolated 时使用。
- * 主线程侧（MsgStateMain）发 input 消息、缓存 Worker 回传的 phys-frame；
- * Worker 侧（MsgStateWorker）从 handleInput 消息读输入、writeFrame 时回传。
+ * MsgStateMain：发 input 消息、缓存 Worker 回传的 phys-frame；
+ * MsgStateWorker：从 handleInput 消息读输入、writeFrame 时回传。
  */
 export class MsgStateMain extends SharedState {
   readonly isShared = false;
@@ -373,7 +367,7 @@ export class MsgStateMain extends SharedState {
     });
   }
 
-  /** 缓存 Worker 回传的物理帧（主线程 handleWorkerMessage 调用）。 */
+  /** 缓存 Worker 回传的物理帧。 */
   setCachedFrame(frame: FrameSnapshot): void {
     this.cached = frame;
   }

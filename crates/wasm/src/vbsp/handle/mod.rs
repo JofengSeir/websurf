@@ -13,10 +13,9 @@ use std::hash::BuildHasher;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
-/// A handle represents a data structure in the bsp file and the bsp file containing it.
+/// 表示 bsp 文件中的某个数据结构及其所属的 bsp 文件。
 ///
-/// Keeping a reference of the bsp file with the data is required since a lot of data types
-/// reference parts from other structures in the bsp file
+/// 必须同时持有数据与 bsp 引用，因为许多数据类型引用了 bsp 中其他结构的数据。
 pub struct Handle<'a, T> {
     bsp: &'a Bsp,
     data: &'a T,
@@ -57,7 +56,7 @@ impl<'a, T> Handle<'a, T> {
 }
 
 impl<'a> Handle<'a, Model> {
-    /// Get all faces that make up the model
+    /// 获取组成该模型的所有面
     pub fn faces(&self) -> impl Iterator<Item = Handle<'a, Face>> {
         let start = self.first_face as usize;
         let end = start + self.face_count as usize;
@@ -74,14 +73,14 @@ impl<'a> Handle<'a, Model> {
 }
 
 impl Handle<'_, Node> {
-    /// Get the plane splitting this node
+    /// 获取分割该节点的平面
     pub fn plane(&self) -> Handle<'_, Plane> {
         self.bsp.plane(self.plane_index as _).unwrap()
     }
 }
 
 impl<'a> Handle<'a, Leaf> {
-    /// Get all other leaves visible from this one
+    /// 获取从此 leaf 可见的所有其他 leaf
     pub fn visible_set(&self) -> Option<impl Iterator<Item = Handle<'a, Leaf>>> {
         let cluster = self.cluster;
         let bsp = self.bsp;
@@ -107,7 +106,7 @@ impl<'a> Handle<'a, Leaf> {
         }
     }
 
-    /// Get all faces in this leaf
+    /// 获取此 leaf 中的所有面
     pub fn faces(&self) -> impl Iterator<Item = Handle<'a, Face>> {
         let start = self.first_leaf_face as usize;
         let end = start + self.leaf_face_count as usize;
@@ -129,7 +128,7 @@ impl<'a> Handle<'a, TextureInfo> {
         self.texture_data().name()
     }
 
-    /// Get a color that is unique but deterministic for this texture
+    /// 获取对该纹理唯一但确定的调试颜色
     pub fn debug_color(&self) -> [u8; 3] {
         self.texture_data().debug_color()
     }
@@ -166,7 +165,7 @@ impl<'a> Handle<'a, TextureData> {
         }
     }
 
-    /// Get a color that is unique but determistic for this texture
+    /// 获取对该纹理唯一但确定的调试颜色
     pub fn debug_color(&self) -> [u8; 3] {
         let mut name_hasher = RandomState::with_seeds(0, 0, 0, 0).build_hasher();
         self.name().hash(&mut name_hasher);

@@ -1,7 +1,7 @@
 //! 模型整合器：把 `.mdl/.vvd/.dx90.vtx` 模型合并进地图 GLB。
 //!
 //! WASM 环境无文件系统，统一走 `from_in_memory` + [`InMemoryResources`] 路径；
-//! 磁盘模式（new-vbsp CLI 时代遗留的 `new()` / `export_map` / 目录遍历等）已清理移除。
+//! 磁盘模式（new-vbsp CLI 遗留的 `new()` / `export_map` / 目录遍历等）已清理移除。
 
 use std::collections::HashMap;
 use std::mem;
@@ -58,8 +58,8 @@ pub struct InMemoryResources {
     pub static_props: Vec<StaticProp>,
     pub textures: HashMap<String, Vec<u8>>,
     pub light_entities: Vec<Entity>,
-    /// 每个材质名称对应的透明度模式：0 = 不透明（默认），1 = 半透明（Blend），2 = 透明测试（Mask）。
-    /// 用于 GLB 导出时设置材质 `alphaMode`，以及碰撞体生成时判断该模型是否"透明可穿过"。
+    /// 材质名 → 透明度模式：0=不透明(默认)，1=半透明(Blend)，2=透明测试(Mask)。
+    /// 用于 GLB 导出的材质 `alphaMode`，以及碰撞体生成时判断"透明可穿过"。
     pub material_alpha_mode: HashMap<String, u8>,
 }
 
@@ -70,9 +70,9 @@ pub struct ModelIntegrator {
 }
 
 impl ModelIntegrator {
-    /// 使用内存资源创建整合器（WASM / 无文件系统环境）
+    /// 使用内存资源创建整合器（WASM / 无文件系统环境）。
     ///
-    /// 所有模型/纹理字节由调用方提供；静态道具的位置/朝向由调用方预先填充到 `static_props`。
+    /// 模型/纹理字节由调用方提供；静态道具位置/朝向由调用方预先填入 `static_props`。
     pub fn from_in_memory(resources: InMemoryResources, options: ExportOptions) -> Self {
         Self {
             in_memory: resources,
@@ -80,9 +80,9 @@ impl ModelIntegrator {
         }
     }
 
-    /// 将模型合并到现有的 GLTF 结构中（地图 GLB 导出共用）。
+    /// 将模型合并到现有 GLTF 结构中（地图 GLB 导出共用）。
     ///
-    /// 与磁盘模式的区别：直接从调用方提供的内存资源合并模型，不触碰文件系统。
+    /// 直接从内存资源合并模型，不触碰文件系统。
     pub fn add_models_to_gltf(
         &self,
         gltf: &mut Root,
@@ -117,7 +117,7 @@ impl ModelIntegrator {
                 continue;
             }
 
-            // 推送模型几何（同一模型的多个实例共享同一个 mesh，只上传一次顶点）
+            // 推送模型几何（同一模型的多个实例共享同一 mesh，只上传一次顶点）
             let mesh = self.push_model(buffer, gltf, &model, Path::new(&in_mem.name))?;
             let mesh_index = gltf.meshes.len() as u32;
             gltf.meshes.push(mesh);
@@ -206,7 +206,7 @@ impl ModelIntegrator {
         })
     }
 
-    /// 推送顶点到GLTF
+    /// 推送顶点到 GLTF
     fn push_vertices(&self, buffer: &mut Vec<u8>, gltf: &mut Root, model: &VmdlModel) {
         let start = buffer.len() as u64;
         let view_start = gltf.buffer_views.len() as u32;
@@ -282,7 +282,7 @@ impl ModelIntegrator {
         gltf.accessors.extend([positions, uvs, normals]);
     }
 
-    /// 推送图元到GLTF
+    /// 推送图元到 GLTF
     fn push_primitive(&self, buffer: &mut Vec<u8>, gltf: &mut Root, mesh: &vmdl::Mesh, vertex_accessor_start: u32, skin: &vmdl::SkinTable) -> Result<json::mesh::Primitive, ModelIntegratorError> {
         let buffer_start = buffer.len() as u64;
         let view_start = gltf.buffer_views.len() as u32;
@@ -355,7 +355,7 @@ impl ModelIntegrator {
         })
     }
 
-    /// 推送材质到GLTF
+    /// 推送材质到 GLTF
     fn push_material(&self, buffer: &mut Vec<u8>, gltf: &mut Root, skin: &vmdl::SkinTable, material_index: i32) -> Option<Index<gltf::json::Material>> {
         // 尝试获取纹理信息
         if let Some(texture_info) = skin.texture_info(material_index) {
@@ -364,7 +364,7 @@ impl ModelIntegrator {
             // 尝试加载纹理文件
             let texture_index = self.push_texture(buffer, gltf, &material_name);
 
-            // 有真实贴图时基色必须为白（否则会给贴图叠加染色）；
+            // 有真实贴图时基色必须为白（否则给贴图叠加染色）；
             // 无贴图时才回退到「按材质名生成的可区分颜色」。
             let color = if texture_index.is_some() {
                 gltf::json::material::PbrBaseColorFactor([1.0, 1.0, 1.0, 1.0])
@@ -672,9 +672,8 @@ impl ModelIntegrator {
     }
 
     /// 解析实体的 `_light` 属性，返回 (归一化 RGB 颜色, brightness)。
-    /// `_light` 格式可能为 `"r g b"` 或 `"r g b brightness"`，
-    /// RGB 值范围 0-255 或 0-1（自动归一化到 0-1）。
-    /// 缺失时返回默认 ([1.0, 1.0, 1.0], 200.0)。
+    /// `_light` 格式为 `"r g b"` 或 `"r g b brightness"`，RGB 范围 0-255 或 0-1
+    /// （自动归一化到 0-1）。缺失时返回默认 ([1.0, 1.0, 1.0], 200.0)。
     fn parse_light_color(&self, entity: &Entity) -> ([f32; 3], f32) {
         let default: ([f32; 3], f32) = ([1.0, 1.0, 1.0], 200.0);
         let light_str = match &entity.properties.light {
@@ -705,9 +704,9 @@ impl ModelIntegrator {
         }
     }
 
-    /// 解析实体的光照方向，用于 spot / directional 光源。
-    /// 优先读取 `angles`（"pitch yaw roll"），其次读取单独的 `pitch` 字段。
-    /// 返回的方向向量已转换到 glTF 坐标系。缺失时返回 None。
+    /// 解析实体的光照方向（spot / directional 用）。
+    /// 优先读 `angles`（"pitch yaw roll"），其次读单独 `pitch` 字段。
+    /// 返回的方向已转换到 glTF 坐标系。缺失时返回 None。
     fn parse_light_direction(&self, entity: &Entity) -> Option<[f32; 3]> {
         let (pitch, yaw) = if let Some(angles) = &entity.properties.angles {
             let parts: Vec<f32> = angles
@@ -742,8 +741,7 @@ impl ModelIntegrator {
     }
 
     /// 从 `_constant_attn` / `_linear_attn` / `_quadratic_attn` 计算有效光照范围。
-    /// 求解衰减公式中光照强度降至亮度水平时的距离：
-    /// `quadratic*d^2 + linear*d + (constant - brightness) = 0` 的正根。
+    /// 求解衰减公式 `quadratic*d^2 + linear*d + (constant - brightness) = 0` 的正根。
     /// 三个衰减参数均缺失时返回默认 500.0。
     fn parse_light_range(&self, entity: &Entity) -> f32 {
         // 三个衰减参数均缺失时使用默认范围
@@ -800,7 +798,7 @@ impl ModelIntegrator {
     }
 
     /// 解析 `_cone` / `_inner_cone` 锥角（度），返回 (innerConeAngle, outerConeAngle) 弧度。
-    /// 缺失时默认 outer=45°, inner=outer*0.5。确保 0 <= inner < outer。
+    /// 缺失时默认 outer=45°, inner=outer*0.5；确保 0 <= inner < outer。
     fn parse_cone_angle(&self, entity: &Entity) -> (f32, f32) {
         let outer_deg = entity
             .properties
@@ -870,7 +868,7 @@ pub struct StaticProp {
 
 /// 单个模型实例的放置信息（坐标已转换到 `map_coords` = `[y,z,x]` 的 Y-up 空间）。
 ///
-/// **GLB 节点与碰撞体 brush 必须由同一份 `Placement` 生成**，否则会出现
+/// **GLB 节点与碰撞体 brush 必须由同一份 `Placement` 生成**，否则会
 /// 「看得到摸不着 / 摸得到看不见」。参见 [`resolve_placements`]。
 #[derive(Debug, Clone)]
 pub struct Placement {
@@ -899,12 +897,11 @@ pub fn angles_to_quat(pitch: f32, yaw: f32, roll: f32) -> [f32; 4] {
 
 /// 解析某个模型在地图中的**全部**放置实例。
 ///
-/// 同一个 `.mdl` 在地图里通常被复用多次（surf 图的斜坡尤其如此），
-/// 因此必须返回全部实例而非首个匹配 —— 旧实现只取首个，导致同一模型
-/// 只显示一份、其余实例凭空消失。
+/// 同一 `.mdl` 在地图中常被复用多次（surf 图斜坡尤其如此），必须返回全部实例
+/// 而非首个匹配 —— 旧实现只取首个，导致同一模型只显示一份、其余实例消失。
 ///
 /// 匹配优先级：
-/// 1. `static_props` 中**完整路径**精确匹配（忽略大小写与 `\`/`/` 差异）——最可靠；
+/// 1. `static_props` **完整路径**精确匹配（忽略大小写与 `\`/`/` 差异）——最可靠；
 /// 2. 回退到**文件名包含**匹配（兼容磁盘模式下只有文件名可用的老路径）；
 /// 3. 再回退到实体（`prop_dynamic` 等）的 `model` 字段匹配。
 pub fn resolve_placements(

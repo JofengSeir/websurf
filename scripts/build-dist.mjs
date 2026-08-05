@@ -1,17 +1,13 @@
 /**
- * 构建最小打包文件到 dist/ 目录。
+ * 构建最小打包文件到 dist/，双击 dist/index.html 即可运行（无需 HTTP 服务器）。
  *
  * 产物：
- *   dist/index.html  — classic script 引用（非 ES module）
- *   dist/app.js      — IIFE 格式，内嵌 WASM(base64, 仅一份) + Worker 代码(Blob URL)
+ *   dist/index.html — classic script 引用（非 ES module）
+ *   dist/app.js     — IIFE 格式，内嵌 WASM(base64) + Worker 代码(Blob URL)
  *
- * 设计：
- * - WASM base64 编码为全局变量 __VBSP_WASM_B64__（唯一一份，主线程持有），运行时：
- *     · 通过 `wasm-init` 消息下发给 worker，worker 据此 initSync（避免 file:// fetch 失败）。
- * - Worker 代码作为全局变量 __VBSP_WORKER_JS__，运行时 Blob URL 创建（避免 file:// module worker 失败）。
- * - app.js 用 IIFE 格式（避免 file:// 下 ES module CORS 限制）
- *
- * 结果：双击 dist/index.html 即可在浏览器中运行，功能完整，无需 HTTP 服务器。
+ * 设计：WASM base64 存于全局 __VBSP_WASM_B64__，经 `wasm-init` 下发给 worker
+ * 做 initSync（避免 file:// fetch 失败）；Worker 代码存于 __VBSP_WORKER_JS__，
+ * 运行时以 Blob URL 创建；app.js 用 IIFE（避免 file:// 下 ES module CORS 限制）。
  *
  * 用法：node scripts/build-dist.mjs
  */
@@ -82,8 +78,8 @@ async function main() {
 	if (!existsSync(distDir)) mkdirSync(distDir, { recursive: true });
 
 	// 4a. 生成 dist/app.js（前缀注入全局变量 + IIFE app 代码）
-	// 头部附上游 @license 声明（@unsurf/cs-movement Apache-2.0 要求保留；
-	// index.ts 未被 bundle 引用，esbuild 不会自动带入，手动附加）
+	// 头部手动附上 @unsurf/cs-movement 的 @license 声明（Apache-2.0 要求保留；
+	// index.ts 未被 bundle 引用，esbuild 不会自动带入）
 	const upstreamLicense =
 		'/*!\n' +
 		' * @license\n' +

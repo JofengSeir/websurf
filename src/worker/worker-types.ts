@@ -1,9 +1,9 @@
 /**
  * 消息协议 — 主线程 ↔ Worker
  *
- * 架构：WASM 在 Worker 内加载并解析 BSP（Phase 1 重构后）；
- * 主线程仅发送原始字节（load-bsp），Worker 回传元数据/出生点/解析进度，
- * 并自行导出 GLB/碰撞体/出生点/PVS 后构建场景 + 物理 + 渲染循环。
+ * WASM 在 Worker 内加载并解析 BSP；主线程仅发送原始字节（load-bsp），
+ * Worker 回传元数据/出生点/解析进度，并自行导出 GLB/碰撞体/出生点/PVS
+ * 后构建场景 + 物理 + 渲染循环。
  */
 
 import type { RuntimeConfig } from '../config.js';
@@ -11,10 +11,7 @@ import type { WasmBspMetadata } from '../world/types.js';
 
 // ── 主线程 → Worker ──────────────────────────────────────────
 
-/**
- * 主线程 → Worker：注入 WASM 模块。
- * dist 内嵌模式用 base64（wasmB64）initSync；dev 模式用 URL（wasmUrl）fetch。
- */
+/** 主线程 → Worker：注入 WASM 模块。dist 内嵌用 base64（wasmB64）initSync；dev 模式用 URL（wasmUrl）fetch。 */
 export interface WasmInitMessage {
   type: 'wasm-init';
   wasmB64?: string;
@@ -41,7 +38,7 @@ export interface LoadBspMessage {
   data: ArrayBuffer;
 }
 
-/** 输入状态消息（主线程 → Worker，仅回退模式 MsgState 使用）。 */
+/** 输入状态消息（仅回退模式 MsgState 使用）。 */
 export interface InputMessage {
   type: 'input';
   keys: KeyState;
@@ -54,7 +51,7 @@ export interface InputMessage {
  *
  * 纯触发信号：输入数据已在共享内存环形缓冲中，物理 dt 由 Worker 侧
  * performance.now() 计算（与主线程同源时钟，LERP 插值基准不变）。
- * M2 Worker 自驱循环落地后，本信号废弃（自驱唯一驱动源）。
+ * M2 Worker 自驱循环落地后，本信号废弃。
  */
 export interface FrameSignalMessage {
   type: 'frame';
@@ -82,31 +79,31 @@ export interface SetPhysicsModeMessage {
   mode: 'noclip' | 'physics';
 }
 
-/** 主线程 → Worker：设置物理参数（物理控制面板）。 */
+/** 设置物理参数（物理控制面板）。 */
 export interface SetPhysicsParamMessage {
   type: 'set-physics-param';
   name: string;
   value: number | boolean;
 }
 
-/** 主线程 → Worker：恢复物理参数到 mode-default（缺省 name = 全部）。 */
+/** 恢复物理参数到 mode-default（缺省 name = 全部）。 */
 export interface ResetPhysicsParamMessage {
   type: 'reset-physics-param';
   name?: string;
 }
 
-/** 主线程 → Worker：设置碰撞箱体型（立即生效）。 */
+/** 设置碰撞箱体型（立即生效）。 */
 export interface SetHullMessage {
   type: 'set-hull';
   hull: { halfWidth: number; standHeight: number; duckHeight: number };
 }
 
-/** 主线程 → Worker：恢复默认碰撞箱。 */
+/** 恢复默认碰撞箱。 */
 export interface ResetHullMessage {
   type: 'reset-hull';
 }
 
-/** 主线程 → Worker：碰撞箱自动恢复开关。 */
+/** 碰撞箱自动恢复开关。 */
 export interface SetAutoRestoreHullMessage {
   type: 'set-auto-restore-hull';
   enabled: boolean;
@@ -136,7 +133,7 @@ export interface GetPlayerPosMessage {
 }
 
 /**
- * 主线程 → Worker：设置掉落死亡阈值（场景加载后由主线程从包围盒算出的 Y 下限）。
+ * 设置掉落死亡阈值（主线程从场景包围盒算出的 Y 下限）。
  * 渲染搬主线程后 Worker 不再持有场景，死亡判定所需的世界 Y 下限由主线程回传。
  */
 export interface SetDeathThresholdMessage {
@@ -167,19 +164,19 @@ export type WorkerMessage =
 
 // ── Worker → 主线程 ──────────────────────────────────────────
 
-/** Worker → 主线程：BSP 元数据。 */
+/** BSP 元数据。 */
 export interface BspMetadataMessage {
   type: 'bsp-metadata';
   metadata: WasmBspMetadata;
 }
 
-/** Worker → 主线程：解析进度（阶段名）。 */
+/** 解析进度（阶段名）。 */
 export interface ParseProgressMessage {
   type: 'parse-progress';
   stage: string;
 }
 
-/** Worker → 主线程：出生点列表。 */
+/** 出生点列表。 */
 export interface SpawnOptionsMessage {
   type: 'spawn-options';
   spawnJson: string;
@@ -192,9 +189,8 @@ export interface ReadyMessage {
 /**
  * Worker → 主线程：场景数据（BSP 解析完成，一次性传输）。
  *
- * 渲染已搬回主线程：GLB 字节 + 碰撞体/出生点/PVS/传送点 JSON 全部传给主线程，
- * 主线程负责 GLTFLoader 建场景、LOD/PVS/准星/碰撞箱可视化。
- * Worker 保留同一份数据构建物理（World/PlayerController/TeleportManager）。
+ * 渲染在主线程：GLB 字节 + 碰撞体/出生点/PVS/传送点 JSON 全传主线程，负责
+ * GLTFLoader 建场景、LOD/PVS/准星/碰撞箱可视化；Worker 保留同份数据构建物理。
  */
 export interface SceneDataMessage {
   type: 'scene-data';
@@ -240,7 +236,7 @@ export interface FrameSnapshot {
   seq: number;
 }
 
-/** Worker → 主线程：物理帧（仅回退模式 MsgState 使用）。 */
+/** 物理帧（仅回退模式 MsgState 使用）。 */
 export interface PhysFrameMessage {
   type: 'phys-frame';
   frame: FrameSnapshot;
@@ -323,7 +319,7 @@ export interface CullStatsMessage {
   };
 }
 
-/** Worker → 主线程：物理参数快照（参数/碰撞箱变更后回传，面板渲染）。 */
+/** 物理参数快照（参数/碰撞箱变更后回传，面板渲染）。 */
 export interface PhysicsSnapshotMessage {
   type: 'physics-snapshot';
   /** 每项仅含 name/value/source；label 等定义在主线程本地 PARAM_DEFS。 */
@@ -338,7 +334,7 @@ export interface PhysicsSnapshotMessage {
   autoRestoreHull: boolean;
 }
 
-/** Worker → 主线程：物理事件通知（自动恢复等）。 */
+/** 物理事件通知（自动恢复等）。 */
 export interface PhysicsEventMessage {
   type: 'physics-event';
   event: 'hull-auto-restored';
@@ -350,7 +346,7 @@ export interface ErrorMessage {
   message: string;
 }
 
-/** Worker → 主线程：玩家当前位置（响应 get-player-pos）。 */
+/** 玩家当前位置（响应 get-player-pos）。 */
 export interface PlayerPosMessage {
   type: 'player-pos';
   pos: [number, number, number];
@@ -358,7 +354,7 @@ export interface PlayerPosMessage {
   pitch: number;
 }
 
-/** Worker → 主线程：游戏状态快照（计时挑战模式）。 */
+/** 游戏状态快照（计时挑战模式）。 */
 export interface GameStatsMessage {
   type: 'game-stats';
   phase: 'idle' | 'running' | 'finished';

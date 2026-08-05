@@ -1,18 +1,17 @@
 /**
  * 物理参数管理器（物理控制面板的数据源与执行层）。
  *
- * 职责：
  * 1. 维护 14 项物理参数的「当前生效值 + 来源」：
- *    - 来源 `mode-default`：cs-movement 基准默认（CS:S 值）
- *    - 来源 `manual`：面板手动修改
- *    - 来源 `map`：预留（未来地图 worldspawn 键值，如 sv_gravity）
- * 2. 参数分两类落点：
- *    - Settings 类（PlayerController.settings）：airAccelerate / runSpeed / autobhop 等
- *    - Runtime 类（src/physics/runtime.ts）：gravity / accelerate / friction / stopSpeed / jumpHeight
+ *    - `mode-default`：cs-movement 基准默认（CS:S 值）
+ *    - `manual`：面板手动修改
+ *    - `map`：预留（未来地图 worldspawn 键值，如 sv_gravity）
+ * 2. 参数分两类落点：Settings 类（PlayerController.settings：airAccelerate/
+ *    runSpeed/autobhop…）与 Runtime 类（gravity/accelerate/friction/stopSpeed/
+ *    jumpHeight，见 src/physics/runtime.ts）。
  * 3. 碰撞箱体型（hull）管理：setHull / resetHull / 自动恢复检测。
  *
- * 该管理器由 Worker（PhysicsWorker）持有；主线程通过
- * set-physics-param / reset-physics-param 消息操作，经 physics-snapshot 回传状态。
+ * 由 Worker（PhysicsWorker）持有；主线程经 set-physics-param / reset-physics-param
+ * 消息操作，经 physics-snapshot 回传状态。
  */
 
 import { type Settings } from './settings/Settings.js';
@@ -121,9 +120,8 @@ export class PhysicsParams {
   }
 
   /**
-   * 自动恢复检测（每帧由 Worker 调用）：
-   * 当 autoRestoreHull 开启、hull 非默认、且玩家持续卡住（stuckTicks 超阈值）时，
-   * 强制恢复默认碰撞箱并返回 true（调用方回传通知）。
+   * 自动恢复检测（每帧由 Worker 调用）：autoRestoreHull 开启、hull 非默认、
+   * 且 stuckTicks 超阈值时，强制恢复默认碰撞箱并返回 true（调用方回传通知）。
    */
   checkAutoRestore(): boolean {
     const p = this.player;

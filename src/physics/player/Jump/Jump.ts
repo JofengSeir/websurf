@@ -14,15 +14,12 @@ import { BHOP_MAX_SPEED_FACTOR, getJumpVelocity } from './Jump.config.js';
 export function checkJump(ctx: MovementContext): void {
   if (!ctx.onGround) return;
   if (!ctx.input.jump) return;
-  // Vanilla behavior: the press must happen on the ground — holding jump
-  // from mid-air does nothing on landing. Autobhop skips that check.
+  // 原版行为：必须在落地时按下——空中按住跳跃落地无效。Autobhop 跳过该检查。
   if (!ctx.settings.autobhop && ctx.oldJump) return;
 
-  // sv_enablebunnyhopping 0: clamp takeoff speed to 1.1 × maxspeed
-  // (Source's PreventBunnyJumping), so hops don't compound speed. A
-  // perfect-bhop carry (below) can restore more than this, but everything
-  // else — a late rejump, autobhop, or a surf-derived landing — is left
-  // exactly here.
+  // sv_enablebunnyhopping 0：起跳速度钳制为 1.1 × maxspeed（Source 的
+  // PreventBunnyJumping），连跳不叠加速度。完美连跳继承（下）可恢复更多，
+  // 其余情况——迟重跳、autobhop、surf 落地——都保持此钳制值。
   if (ctx.settings.bhopSpeedClamp) {
     const maxScaled = currentMaxSpeed(ctx) * BHOP_MAX_SPEED_FACTOR;
     const speed = ctx.horizontalSpeed;
@@ -34,12 +31,9 @@ export function checkJump(ctx: MovementContext): void {
   }
 
   if (ctx.settings.perf.enabled) {
-    // A "perfect bhop" is a REAL, skill-timed instant rejump: manual input
-    // only (autobhop can't have timing skill — it always re-fires the
-    // instant it's able to, so it never qualifies, full stop), the tick
-    // right after landing, and not off a landing that came from surfing
-    // (surf speed isn't something you "cash in" this way). Anything else
-    // gets nothing — no partial credit for a near-miss.
+    // "完美连跳" = 真实、技能时机的即时重跳：仅手动输入（autobhop 不能有技能
+    // 时机——它总是尽量立即重发，所以永远不达标）、落地后下一 tick、且落地
+    // 非来自 surf（surf 速度不能这样"兑现"）。其它情况无任何继承——近失不给折扣。
     const isPerfectBhop =
       !ctx.settings.autobhop &&
       ctx.hasJumpedBefore &&
@@ -63,7 +57,6 @@ export function checkJump(ctx: MovementContext): void {
   ctx.velocity.y = jumpVelocity;
   ctx.onGround = false;
   ctx.hasJumpedBefore = true;
-  // Starting a brand-new flight either way — any surf touch from before
-  // this takeoff is no longer relevant to whatever happens next.
+  // 无论如何都是全新飞行——本次起跳前的任何 surf 接触与之后无关。
   ctx.surfedSinceGrounded = false;
 }

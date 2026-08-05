@@ -1,14 +1,11 @@
 /**
  * WebSurf — 2 级 LOD（近/远）+ 视距剔除 + PVS + hysteresis
- *
- * 关键约束：
- * - 2 级 LOD：近(0)完整渲染，远(2)隐藏（视距剔除），PVS 剔除(-1)直接隐藏
- * - PVS 剔除基于相机所在 cluster 的可见 cluster 集合，仅跨 cluster 边界时重算
- * - LOD update 逻辑必须每帧执行（updateCounter++ 无条件）确保 stats 显示正确
- * - 视距剔除滑块上限应为场景对角线的2倍，默认值为场景对角线的0.5倍
- *
- * 注：原 3 级 LOD 的中级（无 lightmap 降级 shader）已移除——cullDistance 恒远小于
- * midDistance（默认下限 20000 HU），物体在到达中级距离前已被视距剔除，该级永远不生效。
+ * - 近(0)完整渲染，远(2)隐藏，PVS 剔除(-1)直接隐藏
+ * - PVS 基于相机所在 cluster 的可见集，仅跨 cluster 边界时重算
+ * - update 每帧执行（updateCounter++ 无条件）确保 stats 正确
+ * - 剔除滑块上限 = 场景对角线 ×2，默认值 = 对角线 ×0.5
+ * 原 3 级 LOD 的中级（lightmap 降级 shader）已移除：cullDistance 恒小于 midDistance，
+ * 物体在到达中级前已被视距剔除，该级永不生效。
  */
 
 import * as THREE from 'three';
@@ -246,9 +243,8 @@ export class LodManager {
 		const cullDistSq = this.cullDistance * this.cullDistance;
 		const cullHysteresisSq = cullDistSq * CULL_HYSTERESIS * CULL_HYSTERESIS;
 		const pvsActive = pvsManager !== null && pvsManager.enabled && config.lod.pvsEnabled;
-		// PVS 安全保护：当 currentCluster < 0（从未有过有效 cluster，如出生即
-		// 在固体/地图外）时，visibleSet 为空，所有有 cluster 的 mesh 会被错误剔除。
-		// 此时跳过 PVS 判定，全部按距离 LOD 处理。
+		// PVS 安全保护：currentCluster < 0（出生在固体/地图外）时可见集为空，
+		// 有 cluster 的 mesh 会被错误剔除，此时跳过 PVS 判定，全部按距离 LOD 处理。
 		const pvsClusterValid = pvsManager !== null && pvsManager.currentClusterId >= 0;
 
 		let nearCount = 0;
@@ -263,8 +259,7 @@ export class LodManager {
 			const dz = cameraPos.z - item.center.z;
 			const distSq = dx * dx + dy * dy + dz * dz;
 
-			// 1. PVS 判定：mesh 覆盖的 cluster 集合中任意一个可见 → 可见；
-			// 全部不可见 → 隐藏。集合为空（采样全落固体/地图外）→ 跳过。
+			// 1. PVS 判定：覆盖 cluster 任一可见即可见；全不可见则隐藏；集合为空则跳过
 			if (
 				pvsActive &&
 				pvsClusterValid &&
@@ -334,9 +329,7 @@ export class LodManager {
 		this.updateCounter = 999;
 	}
 
-	/**
-	 * 获取当前 LOD 统计。
-	 */
+	/** 获取当前 LOD 统计。 */
 	getStats(): LodStats {
 		return { ...this.stats };
 	}

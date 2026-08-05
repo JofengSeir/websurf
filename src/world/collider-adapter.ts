@@ -1,18 +1,10 @@
 /**
  * 世界适配层：碰撞体反腐败层
- *
- * 将 WASM `export_brushes_planes` 输出的 JSON（`WasmBrush[]`）转换为
- * cs-movement 的原生类型 `Brush[]` / `LadderVolume[]`，填入 `World.solids`
- * 与 `World.ladders`。
- *
- * **坐标约定**：Rust 端已统一旋转为 Y-up（`[x,y,z]→[y,z,x]`，det=+1），
- * TS 端不再二次重映射。
- *
- * **法线朝外约定（关键）**：vbsp 库读取的 BSP 平面数据使用"法线朝内"约定
- * （brush 内部在正侧 `dot(n,p)-dist >= 0`），而 cs-movement 的 `traceBox`
- * 和 `brushFromAABB` 使用"法线朝外"约定（内部在负侧 `dot(n,p)-dist <= 0`）。
- * Rust 端 `export_brushes_planes` 已对每个平面取负 `normal` 和 `dist`，
- * 将法线从朝内翻转为朝外，与 cs-movement 约定一致。TS 端不再二次翻转。
+ * 将 WASM export_brushes_planes 输出的 JSON（WasmBrush[]）转换为
+ * cs-movement 原生类型 Brush[] / LadderVolume[]，填入 World.solids / World.ladders。
+ * 坐标约定：Rust 端已统一旋转为 Y-up（[x,y,z]→[y,z,x]，det=+1），TS 端不再二次重映射。
+ * 法线约定（关键）：vbsp 平面用"法线朝内"（内部 dot(n,p)-dist>=0），cs-movement 用"法线朝外"
+ *（内部 dot(n,p)-dist<=0）；Rust export_brushes_planes 已对每平面取负 normal/dist 翻转，TS 端不再处理。
  */
 
 import type { Vec3 } from '../physics/math/vec3.js';
@@ -58,20 +50,12 @@ export interface NormalCheckReport {
 // ---------------------------------------------------------------------------
 
 /**
- * 计算梯子 brush 的 `facing` 方向（水平、指向墙外）。
- *
- * **算法**：BSP ladder brush 通常是一个薄片几何体，一个面贴墙（背面），
- * 对面是可攀爬面（正面）。`facing` 应为"正面法线的水平分量"。
- *
- * 启发式：
- * 1. 计算所有平面的"水平度"（`sqrt(nx² + nz²)`，越接近 1 越水平）。
- * 2. 选水平度最高的平面作为"正面候选"。
- * 3. 取其法线的水平分量并归一化。
- *
- * **限制**：无法区分正面/背面（两者水平度相同）。由于 ladder brush 通常
- * 贴墙生成，玩家从 brush 外侧接近，第一个候选即可工作。若方向错误，
- * 玩家会朝墙内跳跃——可通过额外的纹理标志或 brush 几何分析改进。
- *
+ * 计算梯子 brush 的 facing 方向（水平、指向墙外）。
+ * 启发式：BSP ladder brush 是薄片体（一面贴墙背面、对面可攀爬），
+ * 1. 计算所有平面水平度（sqrt(nx²+nz²)）；
+ * 2. 选水平度最高者为"正面候选"；
+ * 3. 取其法线水平分量并归一化。
+ * 限制：无法区分正/背面（水平度相同）；方向错误会朝墙内跳，可后续改进。
  * @param planes brush 平面列表（法线已旋转为 Y-up）。
  * @returns 归一化的水平 facing 方向。
  */
@@ -146,19 +130,9 @@ const MIN_PLANES_PER_BRUSH = 4;
 const MIN_AABB_SIZE = 0.001;
 
 /**
- * 将 WASM 输出的 `WasmBrush[]` JSON 转换为 cs-movement 原生类型。
- *
- * @param wasmJson `export_brushes_planes` 返回的 JSON 字符串。
- * @returns `{ solids, ladders, stats }`，分别填入 `World.solids` 与 `World.ladders`。
- *
- * @example
- * ```typescript
- * const filterJson = JSON.stringify({ include_ladder: true, include_solid: true, skip_sky: true });
- * const wasmJson = await processor.export_brushes_planes(filterJson);
- * const { solids, ladders } = adaptBrushes(wasmJson);
- * world.solids = solids;
- * world.ladders = ladders;
- * ```
+ * 将 WASM 输出的 WasmBrush[] JSON 转换为 cs-movement 原生类型。
+ * @param wasmJson export_brushes_planes 返回的 JSON 字符串。
+ * @returns { solids, ladders, stats }，分别填入 World.solids 与 World.ladders。
  */
 export function adaptBrushes(wasmJson: string): AdaptedBrushes {
   const data: WasmBrush[] = JSON.parse(wasmJson);
@@ -238,14 +212,8 @@ export function adaptBrushes(wasmJson: string): AdaptedBrushes {
 
 /**
  * 验证一批 brush 的平面法线是否全部朝外（适应度函数 F2）。
- *
- * **算法**：对每个 brush，计算其 AABB 中心 `c`，然后对每个平面 `p` 检查
- * `dot(p.normal, c) - p.dist <= 0`（中心在平面内侧）。若中心在内侧，
- * 法线朝外；否则法线朝内。
- *
- * **注意**：此检查假设 brush 是凸的且 AABB 中心位于 brush 内部。对于
- * 极端非凸 brush（BSP 不应产生），此检查可能误报。
- *
+ * 对每个 brush 检查 AABB 中心 c 满足 dot(n, c) - dist <= 0（中心在平面内侧 → 法线朝外）。
+ * 假设 brush 为凸且中心在其内部；极端非凸 brush 可能误报。
  * @param brushes 待验证的 brush 列表（solids + ladders）。
  * @returns 验证报告，包含每个 brush 的详细结果。
  */

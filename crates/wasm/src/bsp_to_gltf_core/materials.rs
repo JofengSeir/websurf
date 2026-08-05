@@ -11,10 +11,8 @@ pub struct MaterialData {
     pub name: String,
     /// 材质的源 VMT 文件路径。
     ///
-    /// 当前未参与 glTF 输出，但保留用于：
-    ///   - 调试输出中显示材质来源
-    ///   - 未来扩展：在 glTF extras 中嵌入 VMT 路径供下游工具使用
-    ///   - 资源依赖分析
+    /// 当前未参与 glTF 输出，保留用于调试显示来源、未来在 glTF extras 嵌入、
+    /// 资源依赖分析。
     #[allow(dead_code)]
     pub path: String,
     pub color: [u8; 4],
@@ -157,7 +155,7 @@ fn load_material_bsp(
     bsp: &Bsp,
     options: &ConvertOptions,
 ) -> Result<MaterialData, Error> {
-    // 生成多种可能的VMT文件路径格式
+    // 生成多种可能的 VMT 文件路径格式
     let name = name.trim_end_matches(".vmt");
     let possible_paths = vec![
         // 原始格式
@@ -272,15 +270,15 @@ fn load_material_bsp(
     })
 }
 
-/// 从BSP文件中加载纹理
+/// 从 BSP 文件中加载纹理
 fn load_texture_bsp(
     name: &str,
     bsp: &Bsp,
     options: &ConvertOptions,
 ) -> Result<DynamicImage, Error> {
     let name = name.trim_end_matches(".vtf").trim_start_matches('/');
-    
-    // 生成多种可能的VTF文件路径格式
+
+    // 生成多种可能的 VTF 文件路径格式
     let possible_paths = vec![
         // 原始格式
         format!("materials/{}.vtf", name),

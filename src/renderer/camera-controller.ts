@@ -1,15 +1,8 @@
 /**
- * 相机角度同步器
- *
- * 职责：仅将 yaw/pitch（弧度）同步到 Three.js PerspectiveCamera 的 quaternion。
- * 不处理鼠标输入——鼠标输入由主线程 MouseBuffer（突变检测 + discardNext）过滤后，
- * 通过 input 消息发送到 Worker，由 RenderLoop.applyMouseDelta 直接写入
- * PlayerController.yaw/pitch（度），再由本类同步到相机 quaternion。
- *
- * 关键约束（project_memory）：
- * - pitch clamp ±89°（cs-movement PITCH_CLAMP，防 gimbal lock）
- * - yaw 归一化到 [-π, π]（防 Float32 精度损失）
- * - 从 yaw/pitch 生成 quaternion 时必须使用 'YXZ' 顺序
+ * 相机角度同步器：将 yaw/pitch（弧度）同步到相机 quaternion。
+ * 鼠标输入在主线程过滤后发给 Worker 写入 PlayerController，本类不做输入处理。
+ * 约束：pitch clamp ±89°（防 gimbal lock）、yaw 归一化到 [-π, π]（防精度损失）、
+ * 生成 quaternion 必须用 'YXZ' 顺序。
  */
 
 import * as THREE from 'three';
@@ -43,11 +36,7 @@ export class CameraController {
 		this.pitchLimitRad = ((inputCfg?.pitchLimit ?? 89) * Math.PI) / 180;
 	}
 
-	/**
-	 * 每帧更新：归一化 yaw，clamp pitch，同步相机 quaternion（YXZ）。
-	 *
-	 * @returns 是否发生旋转（与上一帧 yaw/pitch 不同）。
-	 */
+	/** 每帧更新：归一化 yaw、clamp pitch、同步 quaternion（YXZ）。@returns 是否发生旋转。 */
 	update(): boolean {
 		// yaw 归一化到 [-π, π]（atan2 方式，无边界 bug）
 		this.yaw = Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw));
@@ -68,11 +57,8 @@ export class CameraController {
 	}
 
 	/**
-	 * 直接设置 yaw/pitch（弧度）并立即同步 quaternion。
-	 *
-	 * @param yaw yaw（弧度）。
-	 * @param pitch pitch（弧度）。
-	 * @param sync 是否立即同步 quaternion（默认 true，传送/出生时用）。
+	 * 直接设置 yaw/pitch（弧度）并同步 quaternion。
+	 * @param sync 是否立即同步（默认 true，传送/出生时用）。
 	 */
 	setYawPitch(yaw: number, pitch: number, sync = true): void {
 		this.yaw = yaw;

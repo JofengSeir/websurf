@@ -2,9 +2,9 @@
  * WebSurf — Worker 物理协调器（渲染已搬回主线程）
  *
  * 对应重构时序图阶段二（Worker 隔离区）：
- * 1. 接收主线程 `WorkerMessage` 并分发（`frame` 信号驱动物理循环）
+ * 1. 接收并分发主线程 `WorkerMessage`（`frame` 信号驱动物理循环）
  * 2. 持有 `PhysicsLoop`、`World`、`PlayerController`、`TeleportManager`、`GameState`
- * 3. BSP 解析（WASM）后把场景数据（GLB + 碰撞体/PVS/出生点/传送点 JSON）一次性
+ * 3. BSP 解析（WASM）后，场景数据（GLB + 碰撞体/PVS/出生点/传送点 JSON）一次性
  *    transfer 给主线程——渲染由主线程 RendererMain 承担（GLTFLoader/LOD/PVS/准星）
  * 4. 物理结果写共享内存输出区（Atomics 锁 + seq），主线程安全检查 + LERP 后渲染
  */
@@ -51,9 +51,7 @@ const STATS_INTERVAL_SEC = 0.1; // 10 Hz
 
 /**
  * 把两段 `WasmBrush[]` JSON 拼成单个数组。
- *
- * 走**字符串拼接**而不是 `JSON.parse` + `concat` + `stringify`：brush 数组动辄
- * 几十 MB，多一轮解析/序列化在 worker 里是实打实的卡顿。
+ * 用字符串拼接而非 parse/concat/stringify：brush 动辄几十 MB，多一轮解析/序列化在 Worker 里卡顿。
  */
 function mergeBrushJson(a: string, b: string): string {
 	const left = a.trim();
@@ -96,10 +94,10 @@ export class PhysicsWorker {
 
 	/** Stats 回传累加器（秒）。 */
 	private statsAccumulator = 0;
-	/** FPS 计数（帧数 + 墙钟窗口；不依赖物理 dt——dt 含 Worker 处理延迟会虚低显示）。 */
+	/** FPS 计数（帧数 + 墙钟窗口；物理 dt 含 Worker 延迟会虚低）。 */
 	private fpsFrameCount = 0;
 	private fpsWallStart = 0;
-	/** 当前 FPS（frame 信号实际处理频率，0.5s 墙钟窗口）。 */
+	/** 当前 FPS（frame 信号处理频率，0.5s 墙钟窗口）。 */
 	private currentFps = 0;
 
 	/** 是否已加载场景（防止 init 之前误处理 frame 信号）。 */
@@ -225,8 +223,7 @@ export class PhysicsWorker {
 
 	private handleInit(msg: InitMessage): void {
 		try {
-			// init 已在构造器传入 shared（main.ts 创建 PhysicsWorker 时注入）；
-			// 此处仅做一致性校验并上报 ready。
+			// init 已通过构造器传入 shared；此处仅一致性校验并上报 ready。
 			if (this.shared.isShared !== !!msg.shared) {
 				console.warn(
 					`[worker] shared 模式不一致（构造=${this.shared.isShared}, 消息=${!!msg.shared}），以构造为准`,
@@ -269,8 +266,8 @@ export class PhysicsWorker {
 				JSON.stringify(DEFAULT_COLLIDER_FILTER),
 			);
 
-			// PAKFILE 内嵌模型（surf 图的 ramp 坡多为 prop_static）的碰撞体。
-			// 必须在 export_glb_with_pakfile_models 之前调用 —— 后者会消费 BSP。
+			// PAKFILE 内嵌模型（surf 图 ramp 坡多为 prop_static）的碰撞体；
+			// 须在 export_glb_with_pakfile_models 之前导出（后者会消费 BSP）。
 			let brushJson = mapBrushJson;
 			try {
 				const modelBrushJson = processor.export_model_colliders();
@@ -320,7 +317,7 @@ export class PhysicsWorker {
 				(spawnResult.yaw * Math.PI) / 180,
 			);
 
-			// 同步视角到出生点 + 写首帧共享输出（noclip 位置也初始化为出生点）
+			// 同步视角到出生点 + 写首帧共享输出（noclip 位置同步）
 			this.physicsLoop.setNoclipPos({
 				x: spawnResult.spawn.x,
 				y: spawnResult.spawn.y,
@@ -368,7 +365,7 @@ export class PhysicsWorker {
 		}
 	}
 
-	/** frame 触发信号：驱动物理循环（阶段二；dt 由 Worker 侧 performance.now() 计算）。 */
+	/** frame 触发信号：驱动物理循环（dt 由 Worker 侧 performance.now() 计算）。 */
 	private handleFrame(_msg: FrameSignalMessage): void {
 		if (!this.sceneReady) return;
 		this.physicsLoop.frame();
@@ -413,8 +410,8 @@ export class PhysicsWorker {
 	}
 
 	private handleSetPhysicsMode(msg: SetPhysicsModeMessage): void {
-		// 同步 config.physics.mode；PhysicsLoop.setPhysicsMode 内完成
-		// player ↔ noclipView 的双向位置/视角继承（noclip 移动后切回 physics 不丢位置）。
+		// 同步 config.physics.mode；setPhysicsMode 内完成 player ↔ noclipView
+		// 双向位置/视角继承（noclip 移动后切回 physics 不丢位置）。
 		this.config.physics.mode = msg.mode;
 		this.physicsLoop.setPhysicsMode(msg.mode);
 		if (msg.mode === 'physics' && this.player) {
@@ -431,7 +428,7 @@ export class PhysicsWorker {
 	// 物理控制面板
 	// -------------------------------------------------------------------------
 
-	/** 设置物理参数（面板 → 参数管理器 → settings/runtime 立即生效）。 */
+	/** 设置物理参数（面板 → 参数管理器 → 立即生效）。 */
 	private handleSetPhysicsParam(msg: SetPhysicsParamMessage): void {
 		this.physicsParams.setParam(msg.name, msg.value);
 		this.emitPhysicsSnapshot();
@@ -484,8 +481,8 @@ export class PhysicsWorker {
 	}
 
 	/**
-	 * 碰撞箱自动恢复检测（每帧调用）：
-	 * hull 非默认 + 持续卡住（stuckTicks ≥ 48）→ 强制恢复默认体型并通知主线程。
+	 * 碰撞箱自动恢复检测（每帧调用）：hull 非默认 + 持续卡住（stuckTicks ≥ 48）
+	 * → 强制恢复默认体型并通知主线程。
 	 */
 	private checkHullAutoRestore(): void {
 		if (this.physicsParams.checkAutoRestore()) {
@@ -500,7 +497,7 @@ export class PhysicsWorker {
 	}
 
 	private handleTeleport(msg: TeleportMessage): void {
-		// `target` 是 spawn 索引（来自 UI 下拉选择）。切换到该出生点。
+		// target = spawn 索引（来自 UI 下拉选择），切换到该出生点。
 		if (!this.player) return;
 		const sp = this.spawnPoints[msg.target];
 		if (!sp) return;
@@ -509,7 +506,7 @@ export class PhysicsWorker {
 
 	/**
 	 * 传送到任意自定义坐标（自定义传送点面板）。
-	 * yaw 缺省 = 保持当前朝向（仅传送位置，不改变视角方向）。
+	 * yaw 缺省 = 保持当前朝向。
 	 */
 	private handleTeleportToPos(msg: TeleportToPosMessage): void {
 		if (!this.player) return;
@@ -546,10 +543,7 @@ export class PhysicsWorker {
 		});
 	}
 
-	/**
-	 * 应用传送：设置玩家位置 + yaw + 清零速度。
-	 * 保留当前 pitch（玩家的俯仰角不应因传送而重置）。
-	 */
+	/** 应用传送：设置位置 + yaw + 清零速度；保留当前 pitch（俯仰角不随传送重置）。 */
 	private applyTeleport(
 		origin: { x: number; y: number; z: number },
 		yawDeg: number,
@@ -562,11 +556,11 @@ export class PhysicsWorker {
 		this.player.velocity.y = 0;
 		this.player.velocity.z = 0;
 		this.player.onGround = false;
-		// noclip 模式：noclipView 才是位置权威源；同步之（渲染读取共享输出）
+		// noclip 模式：同步位置到 noclipView（位置权威源，渲染读共享输出）
 		if (this.config.physics.mode === 'noclip') {
 			this.physicsLoop.setNoclipPos(origin);
 		}
-		// 保留当前 pitch，仅设置 yaw（传送改变朝向，不改变俯仰角）
+		// 仅设置 yaw，保留当前 pitch
 		this.physicsLoop.setView(yawDeg, this.player.pitch);
 		this.teleport?.resetCooldown();
 		this.physicsLoop.onTeleport();
@@ -579,7 +573,7 @@ export class PhysicsWorker {
 	/** 检测传送触发器，触发时执行传送。 */
 	private checkTeleport(dt: number): void {
 		if (!this.teleport || !this.player) return;
-		// 仅在 physics 模式下检测（noclip 模式不应触发传送）
+		// 仅 physics 模式检测（noclip 不应触发传送）
 		if (this.config.physics.mode !== 'physics') return;
 		// 传递玩家着地状态，用于 start-touch-grounded 模式判定
 		const dest = this.teleport.checkTeleport(this.player.origin, dt, this.player.onGround);
@@ -595,10 +589,8 @@ export class PhysicsWorker {
 
 	/** 周期性回传 stats 与 game-stats 到主线程（10Hz）。 */
 	private emitStats(dt: number): void {
-		// FPS 计算（墙钟窗口 0.5s）：frame 信号实际处理频率。
-		// 不用物理 dt 累加——P0 改造后 dt 来自 Worker 侧 performance.now() 差值，
-		// 包含消息延迟/GC/任务调度抖动，会把显示值压低（改造前 dt 来自主线程帧
-		// 间隔，不受 Worker 抖动影响）。墙钟统计对抖动免疫。
+		// FPS 用墙钟窗口（0.5s）而非物理 dt 累加：dt 含消息延迟/GC/调度抖动，
+		// 会把显示值压低；墙钟统计对抖动免疫。
 		this.fpsFrameCount++;
 		const wallNow = performance.now();
 		if (this.fpsWallStart === 0) this.fpsWallStart = wallNow;
@@ -608,7 +600,7 @@ export class PhysicsWorker {
 			this.fpsWallStart = wallNow;
 		}
 
-		// HUD 不可见时跳过全部 stats/game-stats 发送（减少性能浪费）
+		// HUD 不可见时跳过 stats/game-stats 发送（省性能）
 		if (!this.config.hud.visible) {
 			this.statsAccumulator = 0;
 			return;
@@ -670,7 +662,7 @@ export class PhysicsWorker {
 	// 工具
 	// -------------------------------------------------------------------------
 
-	/** 发送消息到主线程。可选 transfer list（ArrayBuffer 零拷贝）。 */
+	/** 发送消息到主线程（可选 transfer list，ArrayBuffer 零拷贝）。 */
 	private postMessage(msg: MainMessage, transfer?: Transferable[]): void {
 		// 在 Worker 上下文中，postMessage 是全局函数
 		const pm = postMessage as (m: MainMessage, t?: Transferable[]) => void;
@@ -686,7 +678,7 @@ export class PhysicsWorker {
 // 工具函数
 // -------------------------------------------------------------------------
 
-/** 将 Error/unknown 转换为字符串（保留 stack 用于诊断）。 */
+/** Error/unknown → 字符串（保留 stack 诊断用）。 */
 function stringifyError(err: unknown): string {
 	if (err instanceof Error) {
 		return err.stack ?? `${err.name}: ${err.message}`;
