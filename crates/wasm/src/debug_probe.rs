@@ -65,6 +65,52 @@ fn probe_ramp() {
     }
     drop(g);
 
+    // ---------------- 1.5 全模型 strip 类型统计 ----------------
+    // 判断 PAKFILE 内模型以「三角形条带（IS_TRI_STRIP）」还是「三角形列表（IS_TRI_LIST）」
+    // 存储网格 —— 条带模型受 vmdl 条带展开 bug 影响（本项目已 vendor 修复）。
+    {
+        use vmdl::vtx::StripFlags;
+        let mut list_strips = 0usize;
+        let mut strip_strips = 0usize;
+        let mut with_strip_models = 0usize;
+        for name in &entry_names {
+            if !name.to_ascii_lowercase().ends_with(".dx90.vtx") {
+                continue;
+            }
+            let Ok(Some(bytes)) = bsp.pack.get(name) else {
+                continue;
+            };
+            let Ok(vtx) = vmdl::Vtx::read(&bytes) else {
+                continue;
+            };
+            let mut model_has_strip = false;
+            for part in &vtx.body_parts {
+                for model in &part.models {
+                    for lod in &model.lods {
+                        for mesh in &lod.meshes {
+                            for sg in &mesh.strip_groups {
+                                for s in &sg.strips {
+                                    if s.flags.contains(StripFlags::IS_TRI_STRIP) {
+                                        strip_strips += 1;
+                                        model_has_strip = true;
+                                    } else {
+                                        list_strips += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if model_has_strip {
+                with_strip_models += 1;
+            }
+        }
+        println!(
+            "\n== PAKFILE 全部模型 strip 类型统计: list_strips={list_strips} strip_strips={strip_strips} 含条带的模型数={with_strip_models}"
+        );
+    }
+
     let mdl_entry = entry_names
         .iter()
         .find(|n| n.to_ascii_lowercase().contains(TARGET) && n.to_ascii_lowercase().ends_with(".mdl"))
