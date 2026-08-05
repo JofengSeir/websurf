@@ -5,7 +5,7 @@
 //!
 //! 1. **材质**：解析 `.vmt`（Source KeyValues 文本）取出 `$basetexture` 与透明度标注，
 //!    再从 PAKFILE 找到对应 `.vtf` 解码成 PNG，交给 `model-integrator` 贴到 GLB 材质上。
-//! 2. **碰撞体**：把模型的可见三角面合并成**共面凸多边形**，逐面挤出成薄凸壳 brush，
+//! 2. **碰撞体**：把模型的**可见三角网格**逐三角挤出成薄壳 brush（每个三角一个 brush，
 //!    输出与 [`crate::BspProcessor::export_brushes_planes`] 完全同构的 `WasmBrush[]`，
 //!    因此碰撞体与显示几何**逐面一致**（用户要求：「碰撞体积需要与模型显示的一致」）。
 //!
@@ -332,6 +332,20 @@ pub fn push_oriented_tri(
         tri.swap(1, 2);
     }
     out.push(tri);
+}
+
+/// 把一个已定向（顶点序 CCW 对应朝外法线）的三角转换成单三角 `ConvexFace`，
+/// 供 `transform_face` + `face_to_brush` 直接处理。用于「以原始三角网格作为碰撞」的路径：
+/// 不再做共面合并，每个三角就是一个薄壳 brush，使碰撞拓扑与显示网格一一对应。
+pub fn tri_to_face(t: [[f32; 3]; 3]) -> ConvexFace {
+    let n = match norm(cross(sub(t[1], t[0]), sub(t[2], t[0]))) {
+        Some(n) => n,
+        None => [0.0, 0.0, 0.0],
+    };
+    ConvexFace {
+        verts: t.to_vec(),
+        normal: n,
+    }
 }
 
 /// 把**局部空间**的凸面按放置变换搬到世界空间，并重算朝外法线。
@@ -713,7 +727,14 @@ pub fn face_to_brush(verts: &[[f32; 3]], n: [f32; 3], thickness: f32) -> Option<
         return None;
     }
 
-    push_axis_bevels(&mut planes, min, max);
+    // 注意：不再调用 `push_axis_bevels`。
+    // 该函数在每个面上追加「覆盖该面自身轴对齐 AABB」的 6 个平面，会把一个倾斜/大面的
+    // brush 撑成实心的轴对齐方块。对薄斜坡（如 s2_ramp1）而言，所有面的 AABB 并集 =
+    // 模型整个包围盒，于是碰撞体变成了填满包围盒的实心块，而非贴合表面的薄壳，
+    // 表现为「模型之外出现意外碰撞片」。
+    // 本函数上方的侧面平面（按质心校正方向）已能完整闭合凸多边形 cap，
+    // 因此闭合不再依赖轴对齐 bevel；如需缓解 box trace 棱角挂住，应在模型整体层面
+    // 做小幅度统一外扩，而不是逐面撑到 AABB。
     Some(BrushOut {
         planes,
         min,

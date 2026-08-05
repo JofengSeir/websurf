@@ -24,6 +24,10 @@ mod pakfile_models;
 mod texture_utils;
 mod vbsp;
 
+// 诊断探针：仅在 `cargo test` 下编译，复刻 export_model_colliders 管线 dump 中间产物。
+#[cfg(test)]
+mod debug_probe;
+
 // ---------------------------------------------------------------------------
 // 错误处理辅助
 // ---------------------------------------------------------------------------
@@ -42,6 +46,12 @@ fn to_js_err<E: std::fmt::Debug>(e: E, ctx: &str) -> JsValue {
 /// surf 图的 ramp 坡即使有几千个三角，合并后通常也只有几十个面；
 /// 真正会超预算的是树木/雕像这类装饰高模，它们本来也不需要精确碰撞。
 const MAX_FACES_PER_MODEL: usize = 256;
+
+/// 原始三角网格碰撞的路径预算（三角数上限）；超出则回退 OBB 粗碰撞。
+///
+/// 该上限比合并后面数预算（`MAX_FACES_PER_MODEL`）大得多：不做共面合并后，
+/// 每个三角都会生成一个 brush，因此用三角数而非合并后面数来卡护栏。
+const MAX_MODEL_TRIS: usize = 4096;
 
 /// 模型碰撞体的全局 brush 上限（`traceBox` 是线性 broadphase，需要护栏）。
 const MAX_MODEL_BRUSHES: usize = 24_000;
@@ -536,10 +546,12 @@ impl BspProcessor {
     /// 其中 `quat` / `translation` 来自与 GLB 节点**同一份**
     /// [`crate::model_integrator::resolve_placements`]。因此不存在「看得到摸不着」的偏移。
     ///
-    /// 几何本身由「共面三角合并 → 凸多边形 → 沿法线反向挤出薄壳」得到，
+    /// 几何本身由「模型原始三角网格 → 逐三角沿法线反向挤出薄壳」得到，
     /// 逐面贴合显示网格（而不是套一个粗包围盒）——这对 surf 图的 ramp 坡是硬要求。
-    /// 只有当合并后的面数超出预算（`MAX_FACES_PER_MODEL`）时，才回退为有向包围盒
-    /// （OBB）粗碰撞，避免病态模型拖垮 `traceBox` 的线性 broadphase。
+    /// 每个三角生成一个薄壳 brush，使碰撞体与显示用的三角网格拓扑一一对应，
+    /// 不再做共面合并（共面合并会把薄斜坡变成 quad + 边缘 filler 面，造成碰撞外观与显示不一致）。
+    /// 只有当三角数超出预算（`MAX_MODEL_TRIS`）时，才回退为有向包围盒
+    /// （OBB）粗碰撞，避免高模装饰件拖垮 `traceBox` 的线性 broadphase。
     ///
     /// # 透明度门控（用户要求：没有标注就默认有碰撞）
     ///
@@ -644,63 +656,61 @@ impl BspProcessor {
                 continue;
             }
 
-            // ---- 合并共面三角（只在局部空间做一次，所有实例复用）----
-            let faces = pakfile_models::build_convex_faces(&tris, MAX_FACES_PER_MODEL);
-
-            // ---- 逐实例落地成 brush ----
-            match faces {
-                Some(faces) if !faces.is_empty() => {
-                    for p in &placements {
-                        for f in &faces {
-                            let Some((verts, n)) =
-                                pakfile_models::transform_face(f, p.translation, p.rotation, p.scale)
-                            else {
-                                continue;
-                            };
-                            if let Some(b) =
-                                pakfile_models::face_to_brush(&verts, n, COLLIDER_THICKNESS)
-                            {
-                                out.push(b);
+            // ---- 以「模型原始三角网格」直接作为碰撞几何（不做共面合并）----
+            //
+            // 用户要求碰撞体必须与显示用的三角网格逐面一致。原先的 `build_convex_faces`
+            // 会把共面三角合并成凸多边形，使薄斜坡被合并成 quad + 边缘 filler 面，
+            // 表面拓扑与显示网格不再一一对应。改法：每个三角 → 一个沿法线挤出
+            // `COLLIDER_THICKNESS` 的薄壳 brush，逐面精确贴合显示网格。
+            //
+            // 三角数超过预算（高模装饰件）时回退 OBB 粗碰撞（逻辑与下方一致）。
+            if tris.len() > MAX_MODEL_TRIS {
+                // 高模：回退 OBB 粗碰撞
+                let mut lmin = [f32::INFINITY; 3];
+                let mut lmax = [f32::NEG_INFINITY; 3];
+                for t in &tris {
+                    for v in t {
+                        for i in 0..3 {
+                            if v[i] < lmin[i] {
+                                lmin[i] = v[i];
                             }
-                        }
-                        if out.len() >= MAX_MODEL_BRUSHES {
-                            break;
+                            if v[i] > lmax[i] {
+                                lmax[i] = v[i];
+                            }
                         }
                     }
                 }
-                // 面数超预算（高模装饰件）或全部退化 → OBB 粗碰撞兜底
-                _ => {
-                    let mut lmin = [f32::INFINITY; 3];
-                    let mut lmax = [f32::NEG_INFINITY; 3];
+                if !lmin.iter().all(|f| f.is_finite()) {
+                    continue;
+                }
+                for p in &placements {
+                    let (corners, axes) = pakfile_models::placed_obb(
+                        lmin, lmax, p.translation, p.rotation, p.scale,
+                    );
+                    if let Some(b) = pakfile_models::obb_to_brush(&corners, axes) {
+                        out.push(b);
+                    }
+                    if out.len() >= MAX_MODEL_BRUSHES {
+                        break;
+                    }
+                }
+            } else {
+                for p in &placements {
                     for t in &tris {
-                        for v in t {
-                            for i in 0..3 {
-                                if v[i] < lmin[i] {
-                                    lmin[i] = v[i];
-                                }
-                                if v[i] > lmax[i] {
-                                    lmax[i] = v[i];
-                                }
-                            }
-                        }
-                    }
-                    if !lmin.iter().all(|f| f.is_finite()) {
-                        continue;
-                    }
-                    for p in &placements {
-                        let (corners, axes) = pakfile_models::placed_obb(
-                            lmin,
-                            lmax,
-                            p.translation,
-                            p.rotation,
-                            p.scale,
-                        );
-                        if let Some(b) = pakfile_models::obb_to_brush(&corners, axes) {
+                        let face = pakfile_models::tri_to_face(*t);
+                        let Some((verts, n)) = pakfile_models::transform_face(
+                            &face, p.translation, p.rotation, p.scale,
+                        ) else {
+                            continue;
+                        };
+                        if let Some(b) =
+                            pakfile_models::face_to_brush(&verts, n, COLLIDER_THICKNESS)
+                        {
                             out.push(b);
                         }
-                        if out.len() >= MAX_MODEL_BRUSHES {
-                            break;
-                        }
+                    }
+                    if out.len() >= MAX_MODEL_BRUSHES {
+                        break;
                     }
                 }
             }
