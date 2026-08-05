@@ -15,6 +15,7 @@
  */
 
 import type { KeyState } from '../worker/worker-types.js';
+import { KEY_MASK } from '../worker/shared-state.js';
 
 /** KeyboardEvent.code → KeyState 字段映射。 */
 const KEY_MAP: Record<string, keyof KeyState> = {
@@ -93,6 +94,24 @@ export class KeyboardInput {
   /** 返回当前按键状态的浅拷贝。 */
   getState(): KeyState {
     return { ...this.state };
+  }
+
+  /** 返回当前按键位掩码（共享内存输入区写入用）。 */
+  getMask(): number {
+    const s = this.state;
+    let m = 0;
+    if (s.forward) m |= KEY_MASK.forward;
+    if (s.backward) m |= KEY_MASK.backward;
+    if (s.left) m |= KEY_MASK.left;
+    if (s.right) m |= KEY_MASK.right;
+    if (s.jump) m |= KEY_MASK.jump;
+    if (s.duck) m |= KEY_MASK.duck;
+    if (s.sprint) m |= KEY_MASK.sprint;
+    if (s.reset) m |= KEY_MASK.reset;
+    if (s.wheelJump) m |= KEY_MASK.wheelJump;
+    if (s.yawLeft) m |= KEY_MASK.yawLeft;
+    if (s.yawRight) m |= KEY_MASK.yawRight;
+    return m;
   }
 
   /** 清空所有按键状态（Pointer Lock 退出时调用）。 */

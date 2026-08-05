@@ -15,7 +15,7 @@ export interface PhysicsConfig {
   duckScale: number;
   groundAngle: number; // 弧度
   slideAngle: number; // 弧度
-  /** 物理模拟频率（Hz，默认 128；面板可调 64-512）。 */
+  /** 物理模拟频率（Hz，默认 64；面板可调 48-128）。 */
   tickRate: number;
 }
 
@@ -129,7 +129,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     duckScale: 0.34,
     groundAngle: (30 * Math.PI) / 180,
     slideAngle: (70 * Math.PI) / 180,
-    tickRate: 128,
+    tickRate: 64,
   },
   player: {
     radius: 16,

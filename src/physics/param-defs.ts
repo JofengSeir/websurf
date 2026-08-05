@@ -109,7 +109,7 @@ export const PARAM_DEFS: ParamDef[] = [
   {
     name: 'tickRate', label: '模拟频率', unit: 'Hz',
     kind: 'number', default: DEFAULT_SETTINGS.tickRate, min: 48, max: 128, step: 1,
-    description: '物理模拟频率（固定步长 = 1/tickRate 秒）。128=服务器标准；调高更平滑但更吃 CPU，调低跳帧感增强。',
+    description: '物理模拟频率（固定步长 = 1/tickRate 秒）。64=默认；调高更平滑但更吃 CPU，调低跳帧感增强。',
   },
 ];
 

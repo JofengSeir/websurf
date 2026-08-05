@@ -22,5 +22,5 @@ export const CROUCH_SPEED = 85; // ~CROUCH_SPEED_FACTOR of 250
 export const STANDABLE_NORMAL = 0.7; // ground iff normal.y >= 0.7 (~45.57°); steeper = surf
 
 // -- Simulation -------------------------------------------------------------
-export const DEFAULT_TICK_RATE = 128;
+export const DEFAULT_TICK_RATE = 64;
 export const MAX_FRAME_TIME = 0.1; // clamp rAF delta to avoid spiral of death

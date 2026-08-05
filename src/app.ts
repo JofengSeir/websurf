@@ -18,14 +18,16 @@ import { createConfig, applyConfigPatch } from './config.js';
 import type { RuntimeConfig } from './config.js';
 import type {
 	MainMessage,
-	SceneReadyMessage,
+	SceneDataMessage,
 	StatsMessage,
-	CullStatsMessage,
 	GameStatsMessage,
 	PlayerPosMessage,
 	PhysicsSnapshotMessage,
 	PhysicsEventMessage,
+	PlaneInfo,
 } from './worker/worker-types.js';
+import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask } from './worker/shared-state.js';
+import { RendererMain, type CullStatsLike } from './renderer/renderer-main.js';
 import { formatTime } from './game/game-state.js';
 // 物理控制面板：参数定义表（主线程渲染用，不含物理实现依赖）
 import { PARAM_DEFS, type ParamSource } from './physics/param-defs.js';
@@ -111,6 +113,8 @@ const pointerLock = new PointerLockController();
 
 let worker: Worker | null = null;
 let inputBridge: InputBridge | null = null;
+/** 主线程渲染器（渲染从 Worker 搬回主线程后唯一渲染入口）。 */
+let rendererMain: RendererMain | null = null;
 let sceneReady = false;
 
 /** 最近一次加载的 BSP 文件名（bsp-metadata 消息不带 name，renderMetadata 需要）。 */
@@ -123,7 +127,6 @@ let awaitingPlayerPos = false;
 
 // 输入循环状态
 let wheelJumpPending = false;
-let lastInputSent = 0;
 
 // ---------------------------------------------------------------------------
 // 初始化
@@ -135,12 +138,18 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	// 1. 创建 Worker + OffscreenCanvas
-	if (typeof dom.canvas.transferControlToOffscreen !== 'function') {
-		setStatus('浏览器不支持 OffscreenCanvas', 'error');
-		return;
+	// 0. 共享内存通道（SharedArrayBuffer 需 crossOriginIsolated，dev serve.py 已配 COOP/COEP）
+	//    无 COOP/COEP 时自动回退 postMessage 数据通道（功能等价、延迟更高）。
+	const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
+	let sharedBuffer: SharedArrayBuffer | null = null;
+	if (isolated && typeof SharedArrayBuffer !== 'undefined') {
+		sharedBuffer = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
+		console.log('[app] crossOriginIsolated 已启用，使用共享内存输入/物理通道');
+	} else {
+		console.warn('[app] 未启用 crossOriginIsolated，回退 postMessage 输入通道（延迟较高）');
 	}
-	const offscreen = dom.canvas.transferControlToOffscreen();
+
+	// 1. 创建 Worker + 共享状态
 	// Worker 创建：
 	// 内嵌模式（dist）：全局变量 __VBSP_WORKER_JS__ 由构建脚本注入，用 Blob URL 创建（避免 file:// 下 module worker 失败）
 	// 开发模式：从 ./worker.js 加载 ES module worker
@@ -166,19 +175,36 @@ async function main(): Promise<void> {
 		worker.postMessage({ type: 'wasm-init', wasmUrl: '../pkg/websurf_wasm_bg.wasm' });
 	}
 
-	inputBridge = new InputBridge(worker);
+	const sharedState = createMainSharedState(worker, sharedBuffer);
+	inputBridge = new InputBridge(worker, sharedState);
 	inputBridge.sendInit(
-		offscreen,
+		sharedBuffer,
 		dom.canvas.clientWidth,
 		dom.canvas.clientHeight,
 		window.devicePixelRatio,
 	);
 
-	// 2. 绑定输入
+	// 2. 主线程渲染器（渲染不再 transfer 到 Worker）
+	rendererMain = new RendererMain(sharedState);
+	rendererMain.onCullStats = updateCullStatsUI;
+	rendererMain.onSceneLoaded = (deathThresholdY) => {
+		// 场景加载后回传死亡阈值给 Worker（死亡判定依赖世界 Y 下限）
+		inputBridge?.sendSetDeathThreshold(deathThresholdY);
+	};
+	rendererMain.init(
+		dom.canvas,
+		dom.canvas.clientWidth,
+		dom.canvas.clientHeight,
+		window.devicePixelRatio,
+		config,
+	);
+	rendererMain.start();
+
+	// 3. 绑定输入
 	bindInput(dom.canvas);
 	bindUI();
 
-	// 3. 启动输入循环
+	// 4. 启动输入循环（帧信号 + 按键位掩码）
 	startInputLoop();
 }
 
@@ -207,14 +233,15 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
 			// 出生点列表由 Worker 回传
 			renderSpawnOptions(msg.spawnJson);
 			break;
-		case 'scene-ready':
-			handleSceneReady(msg);
+		case 'scene-data':
+			void handleSceneData(msg);
+			break;
+		case 'phys-frame':
+			// 回退模式（MsgState）：缓存 Worker 回传的物理帧
+			inputBridge?.setCachedFrame(msg.frame);
 			break;
 		case 'stats':
 			updateStatsUI(msg);
-			break;
-		case 'cull-stats':
-			updateCullStatsUI(msg);
 			break;
 		case 'game-stats':
 			updateGameStatsUI(msg);
@@ -237,24 +264,30 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
 	}
 }
 
-function handleSceneReady(msg: SceneReadyMessage): void {
+/** 场景数据到达：主线程建场景（GLTFLoader + LOD/PVS）并启用控件。 */
+async function handleSceneData(msg: SceneDataMessage): Promise<void> {
+	if (!rendererMain) {
+		setStatus('渲染器未就绪，无法加载场景。', 'error');
+		return;
+	}
+	const diag = await rendererMain.loadScene(msg);
 	sceneReady = true;
 	setStatus(
-		`场景已加载（GLB ${msg.glbSizeKb} KB，${msg.numBrushes} brushes，` +
+		`场景已加载（GLB ${msg.glbSizeKb} KB，${msg.metadata.numBrushes} brushes，` +
 			`${msg.numSpawnPoints} 出生点，PVS ${msg.hasPvs ? '启用' : '无'}，` +
-			`对角线 ${msg.diagonal.toFixed(0)} HU）`,
+			`对角线 ${(diag?.diagonal ?? 0).toFixed(0)} HU）`,
 		'success',
 	);
-	// 动态设置视距剔除滑块范围（大地图适配）
-	if (dom.cullDistRange) {
+	// 动态设置视距剔除滑块范围（大地图适配；真实值由主线程 LOD 计算）
+	if (dom.cullDistRange && diag) {
 		dom.cullDistRange.min = '1000';
-		dom.cullDistRange.max = String(Math.ceil(msg.maxCull));
+		dom.cullDistRange.max = String(Math.ceil(diag.maxCull));
 		dom.cullDistRange.step = '100';
-		dom.cullDistRange.value = String(msg.defaultCull);
+		dom.cullDistRange.value = String(diag.defaultCull);
 		dom.cullDistRange.disabled = false;
 	}
-	if (dom.cullDistVal) {
-		dom.cullDistVal.textContent = msg.defaultCull.toFixed(0);
+	if (dom.cullDistVal && diag) {
+		dom.cullDistVal.textContent = diag.defaultCull.toFixed(0);
 	}
 	// 启用控件
 	if (dom.physicsModeSelect) dom.physicsModeSelect.disabled = false;
@@ -293,14 +326,14 @@ function updateStatsUI(msg: StatsMessage): void {
 		`FPS ${msg.fps}  位置 ${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}  ` +
 		`速度 ${msg.speed.toFixed(0)}  ${msg.onGround ? '地面' : '空中'}  ` +
 		`cluster ${msg.cluster >= 0 ? msg.cluster : '—'}`;
-	// 准星射线检测信息（模型/实体平面/触发面）
+	// 准星射线检测信息（主线程渲染器本地计算，随渲染循环限频刷新）
 	if (dom.planeInfoEl) {
-		dom.planeInfoEl.textContent = formatPlaneInfo(msg.planeInfo);
+		dom.planeInfoEl.textContent = formatPlaneInfo(rendererMain?.getPlaneInfo() ?? null);
 	}
 }
 
 /** 格式化准星射线检测信息（模型/实体平面/触发面）。 */
-function formatPlaneInfo(info: StatsMessage['planeInfo']): string {
+function formatPlaneInfo(info: PlaneInfo | null): string {
 	if (!info) return '准星 —';
 	const [px, py, pz] = info.point;
 	const dist = info.distance.toFixed(0);
@@ -347,7 +380,7 @@ function formatPlaneInfo(info: StatsMessage['planeInfo']): string {
 	}
 }
 
-function updateCullStatsUI(msg: CullStatsMessage): void {
+function updateCullStatsUI(msg: CullStatsLike): void {
 	if (dom.cullStatsEl) {
 		const p = msg.pvs;
 		dom.cullStatsEl.textContent =
@@ -404,10 +437,15 @@ function bindInput(canvas: HTMLCanvasElement): void {
 	// 键盘：绑定到 window（canvas 无 tabindex 不可获焦，绑定到 canvas 会导致 keydown/keyup 永不触发）
 	keyboard.bind(window);
 
-	// 鼠标移动：累加到 mouseBuffer（Pointer Lock 锁定时才有 movementX/Y）
+	// 鼠标移动（阶段一：极速输入，主线程专属）：
+	// 过滤（discardNext + 绝对削平，CLAMP@1000）后立即写入共享内存输入区，
+	// 不再经过 8ms 限流批量发送 —— 输入 → 物理延迟降到 ~0（同线程写入）。
 	window.addEventListener('mousemove', (e) => {
 		if (!pointerLock.isLocked()) return;
-		mouseBuffer.push(e.movementX, e.movementY);
+		const r = mouseBuffer.process(e.movementX, e.movementY);
+		if (r && inputBridge) {
+			inputBridge.setInput(r.dx, r.dy, keyboard.getMask());
+		}
 	});
 
 	// Pointer Lock：点击 canvas 时请求锁定
@@ -436,10 +474,9 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		wheelJumpPending = true;
 	}, { passive: true });
 
-	// 窗口尺寸变化 → 通知 Worker
+	// 窗口尺寸变化 → 主线程渲染器 resize（Worker 不再持有渲染/尺寸）
 	window.addEventListener('resize', () => {
-		if (!inputBridge) return;
-		inputBridge.sendResize(canvas.clientWidth, canvas.clientHeight);
+		rendererMain?.resize(canvas.clientWidth, canvas.clientHeight);
 	});
 
 	// 失焦时清空键盘状态
@@ -490,10 +527,11 @@ function bindUI(): void {
 		inputBridge?.sendConfig('input', { yawBindSpeed: val });
 	});
 
-	// 视距剔除
+	// 视距剔除（主线程渲染器 LOD 直接生效 + Worker 配置同步）
 	dom.cullDistRange?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
 		if (dom.cullDistVal) dom.cullDistVal.textContent = val.toFixed(0);
+		rendererMain?.setCullDistance(val);
 		inputBridge?.sendSetCullDistance(val);
 	});
 
@@ -659,21 +697,25 @@ function bindUI(): void {
 		inputBridge?.sendConfig('debug', { groundedFramesRequired: val });
 	});
 
-	// 显示设置：实体碰撞箱 / 触发碰撞箱
+	// 显示设置：实体碰撞箱 / 触发碰撞箱 / 准星射线检测
+	// （主线程渲染器负责碰撞箱可视化与准星检测，config 同时同步 Worker）
 	dom.showSolidsChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyConfigPatch(config, 'debug', { showSolids: enabled });
+		rendererMain?.applyConfigPatch('debug', { showSolids: enabled });
 		inputBridge?.sendConfig('debug', { showSolids: enabled });
 	});
 	dom.showTriggersChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyConfigPatch(config, 'debug', { showTriggers: enabled });
+		rendererMain?.applyConfigPatch('debug', { showTriggers: enabled });
 		inputBridge?.sendConfig('debug', { showTriggers: enabled });
 	});
 	// 准星射线检测（hover 查看模型/实体平面/触发面信息）
 	dom.showPlaneInfoChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyConfigPatch(config, 'debug', { showPlaneInfo: enabled });
+		rendererMain?.applyConfigPatch('debug', { showPlaneInfo: enabled });
 		inputBridge?.sendConfig('debug', { showPlaneInfo: enabled });
 	});
 }
@@ -1006,19 +1048,15 @@ function startInputLoop(): void {
 		requestAnimationFrame(tick);
 		if (!inputBridge || !sceneReady) return;
 
-		// 限流到 120Hz（避免淹没 Worker 消息队列）
-		if (now - lastInputSent < 8) return;
-		lastInputSent = now;
-
-		// 取出原始鼠标增量（已由主线程 MouseBuffer discardNext + 削平过滤）
-		const { dx, dy } = mouseBuffer.drain();
-
-		// 同步按键状态 + 滚轮连跳脉冲（chasemod bhop）
+		// 按键位掩码（含滚轮连跳脉冲，wheelJump 一次性置位后清零）
 		const keys = keyboard.getState();
 		keys.wheelJump = wheelJumpPending;
 		wheelJumpPending = false;
+		const mask = keysToMask(keys);
+		inputBridge.setKeys(mask);
 
-		inputBridge.sendInput(keys, dx, dy);
+		// 帧信号：携带主线程时间戳（跨线程物理时间基准，LERP 插值用）
+		inputBridge.sendFrame(now);
 	};
 	requestAnimationFrame(tick);
 }
@@ -1045,6 +1083,8 @@ function syncFullConfig(): void {
 	for (const section of sections) {
 		const patch = config[section] as unknown as Record<string, unknown>;
 		inputBridge.sendConfig(section, patch);
+		// 渲染相关段（lighting/debug/input/lod）同步到主线程渲染器
+		rendererMain?.applyConfigPatch(section, patch);
 	}
 }
 

@@ -26,7 +26,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         # Worker 模块脚本需要正确的 CORS 头才能加载
         self.send_header("Access-Control-Allow-Origin", "*")
+        # crossOriginIsolated：启用 SharedArrayBuffer（共享内存输入/物理结果通道）
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        # 禁止缓存：dev 模式产物无文件名 hash，避免浏览器缓存旧 JS 导致"改动不生效"
+        self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def log_message(self, fmt, *args):

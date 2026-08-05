@@ -1,26 +1,26 @@
 /**
  * 主线程 → Worker 消息桥接。
  *
- * 将输入状态、配置更新、窗口尺寸、重生/传送请求、加载场景等
- * 通过 postMessage 发送到 Worker。消息类型对应 worker-types.ts 的 WorkerMessage。
- *
- * ArrayBuffer 类字段通过 transfer list 零拷贝传递，调用后主线程引用将被 detach。
+ * 输入通道重构（共享内存架构）：
+ * - 共享内存模式：鼠标增量/按键写入 SharedState（SharedArrayBuffer + Atomics），
+ *   每帧仅发轻量 `frame` 信号（携带主线程时间戳）。
+ * - 回退模式：SharedState 内部走 postMessage（MsgStateMain）。
+ * 其余低频控制（config/resize/teleport/物理面板等）保持 postMessage。
  */
 
 import type { RuntimeConfig } from '../config.js';
-import type { KeyState } from '../worker/worker-types.js';
+import type { FrameSnapshot } from '../worker/worker-types.js';
+import type { SharedState } from '../worker/shared-state.js';
 
 export class InputBridge {
-  constructor(private readonly worker: Worker) {}
+  constructor(
+    private readonly worker: Worker,
+    private readonly shared: SharedState,
+  ) {}
 
-  /** 发送 init 消息：传递 OffscreenCanvas 给 Worker。 */
-  sendInit(
-    canvas: OffscreenCanvas,
-    width: number,
-    height: number,
-    dpr: number,
-  ): void {
-    this.worker.postMessage({ type: 'init', canvas, width, height, dpr }, [canvas]);
+  /** 发送 init 消息：共享内存（可 null）+ 画布尺寸（渲染在主线程）。 */
+  sendInit(shared: SharedArrayBuffer | null, width: number, height: number, dpr: number): void {
+    this.worker.postMessage({ type: 'init', shared, width, height, dpr });
   }
 
   /** 发送 BSP 原始字节到 Worker（Worker 内解析；transfer 后主线程 data 被 detach）。 */
@@ -28,10 +28,36 @@ export class InputBridge {
     this.worker.postMessage({ type: 'load-bsp', name, data }, [data]);
   }
 
-  /** 发送输入状态（按键 + 鼠标增量）到 Worker，每帧调用。 */
-  sendInput(keys: KeyState, mouseDx: number, mouseDy: number): void {
-    this.worker.postMessage({ type: 'input', keys, mouseDx, mouseDy });
+  // ── 输入通道（共享内存 / 回退）────────────────────────────
+
+  /** 写入鼠标增量 + 按键位掩码（阶段一：极速输入，主线程专属）。 */
+  setInput(dx: number, dy: number, keysMask: number): void {
+    this.shared.setInput(dx, dy, keysMask);
   }
+
+  /** 仅更新按键位掩码。 */
+  setKeys(keysMask: number): void {
+    this.shared.setKeys(keysMask);
+  }
+
+  /** 每帧发送 frame 信号（阶段一信号：驱动 Worker 物理计算）。 */
+  sendFrame(t: number): void {
+    this.worker.postMessage({ type: 'frame', t });
+  }
+
+  /** 安全读取物理快照（阶段三：安全检查 + LERP 插值）。 */
+  readFrame(): FrameSnapshot | null {
+    return this.shared.readFrame();
+  }
+
+  /** 回退模式：缓存 Worker 回传的物理帧。 */
+  setCachedFrame(frame: FrameSnapshot): void {
+    if ('setCachedFrame' in this.shared) {
+      (this.shared as { setCachedFrame(f: FrameSnapshot): void }).setCachedFrame(frame);
+    }
+  }
+
+  // ── 低频控制消息 ──────────────────────────────────────────
 
   /** 发送配置部分更新。 */
   sendConfig(
@@ -41,7 +67,7 @@ export class InputBridge {
     this.worker.postMessage({ type: 'config', section, patch });
   }
 
-  /** 发送窗口尺寸变化。 */
+  /** 发送窗口尺寸变化（Worker 物理无需尺寸，保留协议兼容）。 */
   sendResize(width: number, height: number): void {
     this.worker.postMessage({ type: 'resize', width, height });
   }
@@ -99,5 +125,10 @@ export class InputBridge {
   /** 设置视距剔除距离。 */
   sendSetCullDistance(value: number): void {
     this.worker.postMessage({ type: 'set-cull-distance', value });
+  }
+
+  /** 设置掉落死亡阈值（主线程场景加载后回传 Worker）。 */
+  sendSetDeathThreshold(value: number): void {
+    this.worker.postMessage({ type: 'set-death-threshold', value });
   }
 }

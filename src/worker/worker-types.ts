@@ -23,7 +23,12 @@ export interface WasmInitMessage {
 
 export interface InitMessage {
   type: 'init';
-  canvas: OffscreenCanvas;
+  /**
+   * 共享内存（SharedArrayBuffer）：
+   * - 非 null（crossOriginIsolated）：输入/物理结果走共享内存 + 原子操作
+   * - null（无 COOP/COEP）：回退 postMessage 数据通道（MsgState）
+   */
+  shared: SharedArrayBuffer | null;
   width: number;
   height: number;
   dpr: number;
@@ -36,12 +41,24 @@ export interface LoadBspMessage {
   data: ArrayBuffer;
 }
 
-/** 输入状态消息（主线程 → Worker，每帧）。 */
+/** 输入状态消息（主线程 → Worker，仅回退模式 MsgState 使用）。 */
 export interface InputMessage {
   type: 'input';
   keys: KeyState;
   mouseDx: number;
   mouseDy: number;
+}
+
+/**
+ * 帧信号（主线程 → Worker，每帧一条，无数据负载）。
+ *
+ * 共享内存模式下仅携带主线程时间戳 t（跨线程物理时间基准，用于 LERP 插值）；
+ * 输入数据已在 SharedArrayBuffer 中。回退模式下该信号仅用于驱动物理循环。
+ */
+export interface FrameSignalMessage {
+  type: 'frame';
+  /** 主线程 performance.now()（ms）——物理循环以此计算 dt，保证与渲染同基准。 */
+  t: number;
 }
 
 /** 配置部分更新消息。 */
@@ -119,11 +136,21 @@ export interface GetPlayerPosMessage {
   type: 'get-player-pos';
 }
 
+/**
+ * 主线程 → Worker：设置掉落死亡阈值（场景加载后由主线程从包围盒算出的 Y 下限）。
+ * 渲染搬主线程后 Worker 不再持有场景，死亡判定所需的世界 Y 下限由主线程回传。
+ */
+export interface SetDeathThresholdMessage {
+  type: 'set-death-threshold';
+  value: number;
+}
+
 export type WorkerMessage =
   | WasmInitMessage
   | InitMessage
   | LoadBspMessage
   | InputMessage
+  | FrameSignalMessage
   | ConfigMessage
   | ResizeMessage
   | RespawnMessage
@@ -136,7 +163,8 @@ export type WorkerMessage =
   | SetCullDistanceMessage
   | TeleportMessage
   | TeleportToPosMessage
-  | GetPlayerPosMessage;
+  | GetPlayerPosMessage
+  | SetDeathThresholdMessage;
 
 // ── Worker → 主线程 ──────────────────────────────────────────
 
@@ -162,15 +190,61 @@ export interface ReadyMessage {
   type: 'ready';
 }
 
-export interface SceneReadyMessage {
-  type: 'scene-ready';
+/**
+ * Worker → 主线程：场景数据（BSP 解析完成，一次性传输）。
+ *
+ * 渲染已搬回主线程：GLB 字节 + 碰撞体/出生点/PVS/传送点 JSON 全部传给主线程，
+ * 主线程负责 GLTFLoader 建场景、LOD/PVS/准星/碰撞箱可视化。
+ * Worker 保留同一份数据构建物理（World/PlayerController/TeleportManager）。
+ */
+export interface SceneDataMessage {
+  type: 'scene-data';
+  /** GLB 字节（transfer 零拷贝）。 */
+  glb: ArrayBuffer;
+  /** 碰撞体 JSON（WASM brushes → 主线程 adaptBrushes 转换）。 */
+  brushJson: string;
+  spawnJson: string;
+  pvsJson: string;
+  teleportJson: string;
+  metadata: {
+    mapName: string;
+    numFaces: number;
+    numVertices: number;
+    numBrushes: number;
+    numModels: number;
+  };
+  /** 初始出生点（Y-up 坐标 + 朝向）。 */
+  spawn: { x: number; y: number; z: number; yawDeg: number };
+  diagonal: number;
+  maxCull: number;
+  defaultCull: number;
   glbSizeKb: number;
-  numBrushes: number;
   numSpawnPoints: number;
   hasPvs: boolean;
-  diagonal: number;
-  defaultCull: number;
-  maxCull: number;
+  /** 死亡阈值（世界最低 Y，用于掉落死亡判定）。 */
+  deathThresholdY: number;
+}
+
+/** 物理帧快照（共享内存输出区 / 回退消息的载荷）。 */
+export interface FrameSnapshot {
+  pos: { x: number; y: number; z: number };
+  yaw: number;
+  pitch: number;
+  vel: { x: number; y: number; z: number };
+  onGround: boolean;
+  mode: 'noclip' | 'physics';
+  /** 眼睛高度（渲染时 pos.y + eyeHeight）。 */
+  eyeHeight: number;
+  /** 快照时间戳（主线程帧信号时间，跨线程同基准，LERP 插值用）。 */
+  timeMs: number;
+  /** 版本号（递增，检测新帧）。 */
+  seq: number;
+}
+
+/** Worker → 主线程：物理帧（仅回退模式 MsgState 使用）。 */
+export interface PhysFrameMessage {
+  type: 'phys-frame';
+  frame: FrameSnapshot;
 }
 
 export interface StatsMessage {
@@ -181,8 +255,6 @@ export interface StatsMessage {
   onGround: boolean;
   cluster: number;
   speed: number;
-  /** 准星射线检测结果（null = 未命中/未启用）。 */
-  planeInfo: PlaneInfo | null;
 }
 
 /** 准星射线检测信息（hover 查看模型/实体平面/触发面）。 */
@@ -304,7 +376,8 @@ export type MainMessage =
   | BspMetadataMessage
   | ParseProgressMessage
   | SpawnOptionsMessage
-  | SceneReadyMessage
+  | SceneDataMessage
+  | PhysFrameMessage
   | StatsMessage
   | CullStatsMessage
   | PhysicsSnapshotMessage
