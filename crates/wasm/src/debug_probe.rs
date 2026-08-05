@@ -242,7 +242,7 @@ fn probe_ramp() {
         mw_max[1] - mw_min[1],
         mw_max[2] - mw_min[2],
     ];
-    let mw_vol = mw_ext[0] * mw_ext[1] * mw_ext[2];
+    let _mw_vol = mw_ext[0] * mw_ext[1] * mw_ext[2];
 
     // ---------------- 9. [新方案] 原始三角网格 → 逐三角薄壳 brush 验证 ----------------
     // 复刻 export_model_colliders 的新路径：跳过 build_convex_faces，每个三角直接
