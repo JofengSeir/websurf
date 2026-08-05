@@ -1,0 +1,44 @@
+"""Simple HTTP server with proper MIME types for WebSurf (WASM + BSP + Worker).
+
+WebSurf dev server: serves the project root so /web/index.html can load
+/pkg WASM and /web/worker.js with correct MIME types.
+"""
+import http.server
+import socketserver
+import os
+import sys
+
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+ROOT = os.path.dirname(os.path.abspath(__file__))
+os.chdir(ROOT)
+
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        ".wasm": "application/wasm",
+        ".bsp": "application/octet-stream",
+        ".js": "text/javascript; charset=utf-8",
+        ".mjs": "text/javascript; charset=utf-8",
+        ".html": "text/html; charset=utf-8",
+    }
+
+    def end_headers(self):
+        # Worker 模块脚本需要正确的 CORS 头才能加载
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        super().end_headers()
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write(f"{self.address_string()} - {fmt % args}\n")
+
+
+with socketserver.TCPServer(("", PORT), Handler) as s:
+    print(f"Serving {ROOT} at http://localhost:{PORT}/")
+    print(f"  App:   http://localhost:{PORT}/web/index.html")
+    print(f"  Quit:  Ctrl+C")
+    sys.stdout.flush()
+    try:
+        s.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down.")

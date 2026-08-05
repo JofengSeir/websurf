@@ -1,0 +1,33 @@
+# ── 构建产物 ──────────────────────────────
+dist/
+pkg/
+web/app.js
+web/worker.js
+
+# ── Rust / Cargo ─────────────────────────
+target/
+.cargo-home/
+.tmp/
+.wasm-pack-cache/
+# Cargo.lock 保留提交（应用项目锁定依赖版本，保证可复现构建）
+
+# ── Node ─────────────────────────────────
+node_modules/
+
+# ── 地图文件 ──────────────────────────────
+# BSP 地图体积大（surf_666.bsp 75MB 超 GitHub 50MB 推荐限制），
+# 不应进入版本库；本地放 maps/ 即可，需要分享时走网盘/直链。
+maps/
+*.bsp
+
+# ── 临时 / 验证产物 ───────────────────────
+.tmp-*
+scripts/verify-*
+scripts/cdp-*
+
+# ── 编辑器 / 系统 ────────────────────────
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
