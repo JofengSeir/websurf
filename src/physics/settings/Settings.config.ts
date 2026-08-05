@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { CROUCH_SPEED, DEFAULT_TICK_RATE, RUN_SPEED, WALK_SPEED } from '../constants.js';
 import { M_YAW } from '../player/MouseInput/MouseInput.config.js';
 import { AIR_ACCELERATE } from '../physics/AirAccelerate/AirAccelerate.config.js';

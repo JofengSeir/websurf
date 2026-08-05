@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 export const HULL_HALF_WIDTH = 16; // 32x32 footprint
 export const HULL_STAND_HEIGHT = 72;
 export const HULL_DUCK_HEIGHT = 54;

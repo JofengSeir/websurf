@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { set, vec3 } from '../../math/vec3.js';
 import type { MovementContext } from '../MovementContext.js';
 import { HULL_DUCK_HEIGHT, HULL_HALF_WIDTH, HULL_STAND_HEIGHT } from './Duck.config.js';

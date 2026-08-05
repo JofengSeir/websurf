@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { lengthSq, set } from '../../math/vec3.js';
 import type { MovementContext } from '../MovementContext.js';
 

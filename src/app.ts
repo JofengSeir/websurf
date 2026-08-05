@@ -1040,23 +1040,26 @@ function onPhysicsEvent(msg: PhysicsEventMessage): void {
 }
 
 // ---------------------------------------------------------------------------
-// 输入循环（主线程 rAF，每帧发送 input 到 Worker）
+// 输入循环（主线程 rAF，每帧推送按键状态 + frame 触发信号到 Worker）
 // ---------------------------------------------------------------------------
 
 function startInputLoop(): void {
-	const tick = (now: number): void => {
+	const tick = (): void => {
 		requestAnimationFrame(tick);
 		if (!inputBridge || !sceneReady) return;
 
-		// 按键位掩码（含滚轮连跳脉冲，wheelJump 一次性置位后清零）
+		// 按键位掩码（含滚轮连跳脉冲，wheelJump 一次性置位后清零）。
+		// setKeys 在环形缓冲模式下追加零增量样本——保证按住键不动鼠标时
+		// Worker 每帧仍能刷新按键状态。
 		const keys = keyboard.getState();
 		keys.wheelJump = wheelJumpPending;
 		wheelJumpPending = false;
 		const mask = keysToMask(keys);
 		inputBridge.setKeys(mask);
 
-		// 帧信号：携带主线程时间戳（跨线程物理时间基准，LERP 插值用）
-		inputBridge.sendFrame(now);
+		// frame 触发信号：无数据负载，物理 dt 由 Worker 侧 performance.now() 计算。
+		// M2 Worker 自驱循环落地后，本行移除（自驱唯一驱动源）。
+		inputBridge.sendFrame();
 	};
 	requestAnimationFrame(tick);
 }

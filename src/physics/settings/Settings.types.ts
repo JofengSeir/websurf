@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import type { StaminaSettings } from '../physics/Stamina/Stamina.types.js';
 import type { PerfSettings } from '../physics/PerfBonus/PerfBonus.types.js';
 

@@ -1,7 +1,7 @@
 # WebSurf 项目技术文档
 
 > **文档类型**：项目工程文档（依据当前源码编写）
-> **编写基准**：2026-08-05
+> **编写基准**：2026-08-06（增量更新：M1 输入环形缓冲；架构章节已对齐 8-05 主线程渲染重构）
 > **一致性原则**：所有描述均对照当前源码核验
 
 ---
@@ -45,7 +45,7 @@
 |---|---|
 | Rust 单一 crate | `crates/wasm` 承载全部 WASM 逻辑：BSP 解析、碰撞体/平面导出、GLB 生成、传送点/PVS 数据解析（以模块组织） |
 | 无 CLI/bin | 纯浏览器端应用，所有 Rust 逻辑编译为 WASM 由 Worker 调用 |
-| TS 模块 | 主线程 `app.ts`（UI/输入/消息）+ Worker（物理/渲染）+ `world`（BSP 世界数据）+ `physics`（CS 移动物理）+ `renderer`（three.js）；**物理控制面板**（参数/碰撞箱调节）、**碰撞箱可视化**（实体凸包线框/触发线框）、**准星射线检测**（模型/实体面/触发面信息） |
+| TS 模块 | 主线程 `app.ts`（UI/输入/消息）+ Worker（物理）+ `world`（BSP 世界数据）+ `physics`（CS 移动物理）+ `renderer`（three.js，主线程渲染）；**物理控制面板**（参数/碰撞箱调节）、**碰撞箱可视化**（实体凸包线框/触发线框）、**准星射线检测**（模型/实体面/触发面信息） |
 | 构建/工具 | `build-dist.cmd`（双击导出 dist）、`start-dev.cmd`（dev 服务器）、`serve.py`、`scripts/`（WASM API 契约检查/构建脚本）、docs |
 
 ---
@@ -56,30 +56,30 @@
 ┌─────────────────────────────────────────────────────────────┐
 │ 主线程 (src/app.ts)                                          │
 │   ├─ BSP 文件 → postMessage(load-bsp 原始字节, transfer)     │
-│   ├─ 输入（Pointer Lock + rAF 120Hz 限流）                    │
+│   ├─ 输入（Pointer Lock + mousemove 过滤 → 环形缓冲写入）      │
+│   ├─ 渲染（Three.js WebGLRenderer：GLB 场景/LOD/PVS/雾/准星） │
 │   ├─ UI 控件（物理模式/灵敏度/视距/PVS/重生/spawn/传送点）     │
 │   └─ 接收 Worker 消息更新 HUD                                 │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ postMessage
-┌───────────────────────────▼─────────────────────────────────┐
+└───────────────┬──────────────────────────┬──────────────────┘
+                │ SharedArrayBuffer        │ postMessage
+                │ 输入环形缓冲 + 物理输出区  │ 低频控制/统计消息
+┌───────────────▼──────────────────────────▼──────────────────┐
 │ Worker (src/worker/main.ts → PhysicsWorker)                  │
 │   ├─ WASM 初始化（wasm-init 消息驱动，base64/URL 两种）        │
-│   ├─ load-bsp：BspProcessor 解析 → 五元组                     │
-│   │    glb / brush / spawn / pvs / teleport                   │
-│   ├─ SceneBuilder → three.js Scene                            │
-│   ├─ World + PlayerController + PvsManager + TeleportManager  │
-│   └─ RenderLoop rAF：物理 tick → LOD/PVS → 渲染               │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ OffscreenCanvas
-                    WebGLRenderer (three.js)
+│   ├─ load-bsp：BspProcessor 解析 → 场景数据一次 transfer      │
+│   │    glb / brush / spawn / pvs / teleport（渲染主线程建场景）│
+│   ├─ World + PlayerController + PvsManager + TeleportManager │
+│   └─ 物理循环：frame 信号驱动 → 环形缓冲批量消费 → 固定步长    │
+│       物理 → 写共享输出（lock + seq）                        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### 2.1 线程边界
 
 | 线程 | 职责 | 关键文件 |
 |---|---|---|
-| 主线程 | UI / 输入采集 / BSP 字节转发 / HUD 渲染 | `src/app.ts`、`src/input/*`、`src/config.ts` |
-| Worker | WASM 解析 / 物理模拟 / 渲染循环 | `src/worker/*`、`src/physics/*`、`src/renderer/*`、`src/world/*` |
+| 主线程 | UI / 输入采集（环形缓冲写入）/ **渲染**（Three.js + GLTFLoader + LOD/PVS）/ 准星检测 / HUD | `src/app.ts`、`src/input/*`、`src/renderer/*`、`src/config.ts` |
+| Worker | WASM 解析 / 物理模拟（固定步长）/ 场景数据导出 | `src/worker/*`、`src/physics/*`、`src/world/*` |
 | WASM | BSP 二进制解析 / GLB 导出 / 碰撞体生成 | `crates/wasm/src` |
 
 ### 2.2 数据流（加载一张地图）
@@ -89,15 +89,49 @@
    `metadata` / `parse_spawn_points` / `parse_teleports` / `parse_pvs_data` /
    `export_brushes_planes`（地图 brush）→ `export_model_colliders`（PAKFILE 模型碰撞体）
    → `export_glb_with_pakfile_models`（含回退纯地图导出）；
-3. `handleLoadScene`：`SceneBuilder.build(glb)` → `adaptBrushes(brushJson)` →
-   `loadSpawnPoints` → `PvsManager` → `TeleportManager` → `PlayerController` → 注入 `RenderLoop`；
-4. 回传 `scene-ready`，主线程启用控件。
+3. Worker 构建物理（World/PlayerController/PVS/Teleport/GameState），场景数据
+   （GLB 字节 + brush/spawn/pvs/teleport JSON）经 `scene-data` 一次 transfer 主线程；
+4. 主线程 `RendererMain.loadScene`：GLTFLoader 建场景 → LOD/PVS/雾/传送点/碰撞体
+   → 回传死亡阈值给 Worker；UI 控件启用。
 
 ### 2.3 坐标系约定
 
 - **BSP 原始坐标**：Z-up；
 - **Rust 导出**：`[x,y,z] → [y,z,x]` 旋转为 **Y-up**（det=+1，正交变换），TS 端不二次映射；
 - **角度**：yaw 在 BSP/Three.js 中均绕 up 轴，值保持一致；传送 yaw 经 `bspYawToCsYaw` 转换（`cs_yaw = (270 - bsp_yaw) % 360`）。
+
+### 2.4 高频输入闭环（共享内存环形缓冲）
+
+输入链路对应"持续性高频输入完整闭环"时序图（步骤 1-13；步骤 14 OffscreenCanvas 渲染为已论证偏离，渲染在主线程）。实现见 `src/worker/shared-state.ts`。
+
+```
+HW(硬件, 平台上限60-144Hz) → Browser(pointermove 节流至刷新率)
+  → Main: MouseBuffer 过滤(discardNext + CLAMP@1000) → pushSample
+      （4 数组写 + Atomics.store tail + 积压检测，≈63ns）
+  → RingBuf(SAB 64槽 SOA: dxs/dys/tss Float64 + keys Int32)
+      ├─ 积压 ≥ 8 → Atomics.notify（仅发信号）       ← 时序图步骤 6
+      ├─ 满 → 覆盖最旧（消费者跟不上自动降采样）      ← 时序图步骤 7
+  → Worker: frame 触发信号 → takeInput 批量读 [head, tail) ← 步骤 8-9
+      → 聚合：sumDx/sumDy + lastKeys + firstTs/lastTs  ← 步骤 10
+        （yaw 增量求和全保留——丢弃中间样本会致快速甩动视角跳变）
+      → 固定步长物理（accumulator 补步）→ 写输出区     ← 步骤 11-13
+  → Main: readFrame（lock + seq 双检查 = 无锁版本号校验语义）→ LERP → 渲染
+```
+
+关键约定：
+
+| 项 | 约定 |
+|---|---|
+| SPSC | 唯一生产者=主线程（mousemove/setKeys），唯一消费者=Worker（takeInput），无锁 |
+| 内存序 | 写者先写槽数据 → `Atomics.store(tail)`（release）；读者 `Atomics.load(tail)`（acquire）→ 读快照 |
+| head/tail | 单调递增 Int32 计数，槽址 `& 63`；读上限 `min(tail-head, 64)` 防回绕重读 |
+| keys 刷新 | `setKeys` 每帧追加零增量样本（按住键不动鼠标时按键状态持续可达） |
+| 时间戳 | 每样本带 `performance.now()`；首末 ts 供诊断（M3 应用） |
+| notify | 唤醒目标 = `I_IN_TAIL`：积压 ≥ 8 → `Atomics.notify`；无唤醒丢失（wait 条件不满足立即返回） |
+| 输出区 | 独立 Float64 区，lock + seq 协议（seqlock），与输入环互不干扰 |
+
+> **M2 预留**：`frame` 信号已去除时间戳（纯触发），Worker 自驱循环
+> （`Atomics.wait(I_IN_TAIL, 16ms)` 被 notify 唤醒或超时兜底）落地后即成为唯一物理驱动源。
 
 ---
 
@@ -121,7 +155,7 @@ websurf
 │   ├── game/               # 计时挑战状态机
 │   ├── input/              # 键盘/鼠标/PointerLock/桥接
 │   ├── physics/            # CS 移动物理（cs-movement）
-│   ├── renderer/           # three.js 渲染（RenderLoop/LOD/光照/雾/相机/lightmap/碰撞箱可视化/准星检测）
+│   ├── renderer/           # three.js 主线程渲染（RendererMain/LOD/光照/雾/相机/lightmap/碰撞箱可视化/准星检测）
 │   ├── worker/             # Worker 入口 + PhysicsWorker + 消息协议
 │   └── world/              # 碰撞体适配/出生点/传送点/PVS/自定义传送点
 ├── web/                    # index.html + vendor(three.js)
@@ -155,14 +189,22 @@ websurf
 > `PhysicsParams` 管理，主线程经 `set-physics-param`/`set-hull` 消息操作，
 > `physics-snapshot` 回传状态渲染面板。
 
-### 4.1 渲染循环（RenderLoop）
+### 4.1 物理循环与渲染（主线程渲染架构）
 
-- 固定步长物理：`tickRate`（默认 128Hz），每帧最多 `MAX_FIXED_STEPS=10` 次；
-- 鼠标输入：`yaw -= dx * (sensitivity * m_yaw)`，pitch clamp ±89°；
-- `needsRender` 标志：空闲帧跳过渲染；
-- LOD/PVS：`lodManager.update` 每帧执行，PVS 剔除由 `pvsManager` 驱动；
+- **Worker 物理循环**（`physics-loop.ts`）：收到 `frame` 触发信号 → 环形缓冲批量
+  取输入（`takeInput` 聚合）→ 固定步长（`tickRate` 默认 64Hz，面板可调 48-128，
+  每信号最多 `MAX_FIXED_STEPS=10` 步）→ 写共享输出；dt 由 Worker 侧
+  `performance.now()` 计算（与主线程同源时钟，LERP 基准不变）；
+- **主线程渲染**（`renderer-main.ts`）：rAF 循环每帧 `readFrame`（锁占用 →
+  复用上一帧缓存；释放 → 读取 + seq 校验）→ 双快照 LERP 时间插值 →
+  相机同步（origin + eyeHeight）→ LOD/PVS 剔除 → 雾/碰撞箱可视化/准星射线 →
+  `renderer.render`。**渲染无任何人为帧率上限**（仅受浏览器 rAF 的 vsync 对齐）；
+- 鼠标输入：`yaw -= dx * (sensitivity * m_yaw)`，pitch clamp ±89°（Worker 侧）；
+- 近平面自适应：贴墙时动态收缩 `camera.near`（防近平面裁剪穿墙，不移动相机）；
 - 传送检测：`TeleportManager.checkTeleport`（start-touch-grounded 模式，支持
-  every-frame / start-touch / start-touch-grounded 三种模式）。
+  every-frame / start-touch / start-touch-grounded 三种模式）；
+- HUD 帧率：`渲染 X fps`（主线程真实 rAF，每 0.5s 统计）+ `Worker Y fps`
+  （帧信号处理频率，墙钟统计——不用物理 dt 累加，避免 Worker 抖动污染显示）。
 
 ---
 
@@ -208,17 +250,21 @@ websurf
 | 消息 | 说明 |
 |---|---|
 | `wasm-init` | 注入 WASM（`wasmB64` 内嵌 / `wasmUrl` dev） |
-| `init` | 传递 OffscreenCanvas + 尺寸 |
+| `init` | 传递共享内存 buffer + 画布尺寸（渲染在主线程，无 OffscreenCanvas） |
 | `load-bsp` | BSP 原始字节（transfer） |
-| `input` | 按键 + 鼠标增量（120Hz） |
+| `input` | 按键 + 鼠标增量（**仅回退模式** MsgState；共享内存模式走环形缓冲） |
+| `frame` | 纯触发信号（无数据负载；物理 dt 由 Worker 侧 `performance.now()` 计算） |
 | `config` | 配置分段 patch |
 | `resize` | 窗口尺寸 |
 | `respawn` | 重生 |
 | `set-physics-mode` | noclip / physics |
+| `set-physics-param` / `reset-physics-param` | 物理面板参数 |
+| `set-hull` / `reset-hull` / `set-auto-restore-hull` | 碰撞箱 |
 | `set-cull-distance` | 视距剔除距离 |
 | `teleport` | 传送到出生点索引 |
 | `teleport-to-pos` | 传送到自定义坐标 |
 | `get-player-pos` | 请求玩家位置 |
+| `set-death-threshold` | 掉落死亡阈值（主线程场景加载后回传） |
 
 ### 6.2 Worker → 主线程
 
@@ -228,10 +274,11 @@ websurf
 | `bsp-metadata` | 地图元数据 |
 | `parse-progress` | 解析阶段进度 |
 | `spawn-options` | 出生点列表 |
-| `scene-ready` | 场景加载完成 |
-| `stats` | FPS/位置/速度/地面状态/cluster + 准星信息（planeInfo，命中模型/实体面/触发面时） |
-| `cull-stats` | LOD/PVS 统计 |
+| `scene-data` | 场景数据一次 transfer（GLB 字节 + brush/spawn/pvs/teleport JSON） |
+| `phys-frame` | 物理帧（**仅回退模式**；共享内存模式走环形缓冲输出区） |
+| `stats` | 渲染/Worker 帧率、位置、速度、地面状态、cluster |
 | `game-stats` | 计时挑战状态 |
+| `physics-snapshot` / `physics-event` | 物理面板状态 / 事件（碰撞箱自动恢复） |
 | `player-pos` | 玩家位置（响应 get-player-pos） |
 | `error` | 错误信息 |
 

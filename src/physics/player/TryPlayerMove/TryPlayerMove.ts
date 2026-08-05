@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { STANDABLE_NORMAL } from '../../constants.js';
 import { clone, copy, cross, dot, lengthSq, normalize, scale, addScaled, set, type Vec3 } from '../../math/vec3.js';
 import { clipVelocity } from '../../physics/ClipVelocity/ClipVelocity.js';

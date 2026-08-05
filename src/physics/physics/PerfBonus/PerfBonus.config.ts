@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import type { PerfSettings } from './PerfBonus.types.js';
 
 export const DEFAULT_PERF_SETTINGS: PerfSettings = {

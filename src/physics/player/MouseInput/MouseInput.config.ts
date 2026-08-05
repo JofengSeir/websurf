@@ -4,5 +4,7 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 export const M_YAW = 0.022; // deg per count, matches m_yaw/m_pitch
 export const PITCH_CLAMP = 89;

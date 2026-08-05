@@ -52,13 +52,12 @@ export interface InputMessage {
 /**
  * 帧信号（主线程 → Worker，每帧一条，无数据负载）。
  *
- * 共享内存模式下仅携带主线程时间戳 t（跨线程物理时间基准，用于 LERP 插值）；
- * 输入数据已在 SharedArrayBuffer 中。回退模式下该信号仅用于驱动物理循环。
+ * 纯触发信号：输入数据已在共享内存环形缓冲中，物理 dt 由 Worker 侧
+ * performance.now() 计算（与主线程同源时钟，LERP 插值基准不变）。
+ * M2 Worker 自驱循环落地后，本信号废弃（自驱唯一驱动源）。
  */
 export interface FrameSignalMessage {
   type: 'frame';
-  /** 主线程 performance.now()（ms）——物理循环以此计算 dt，保证与渲染同基准。 */
-  t: number;
 }
 
 /** 配置部分更新消息。 */

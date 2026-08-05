@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 // The shape every extracted movement behavior (Jump, WalkMove, TryPlayerMove,
 // ...) operates on. PlayerController implements this directly — its instance
 // fields ARE the context fields, so passing `this` to a behavior function is

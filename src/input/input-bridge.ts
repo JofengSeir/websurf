@@ -40,9 +40,9 @@ export class InputBridge {
     this.shared.setKeys(keysMask);
   }
 
-  /** 每帧发送 frame 信号（阶段一信号：驱动 Worker 物理计算）。 */
-  sendFrame(t: number): void {
-    this.worker.postMessage({ type: 'frame', t });
+  /** 每帧发送 frame 触发信号（无数据负载；物理 dt 由 Worker 侧 performance.now() 计算）。 */
+  sendFrame(): void {
+    this.worker.postMessage({ type: 'frame' });
   }
 
   /** 安全读取物理快照（阶段三：安全检查 + LERP 插值）。 */

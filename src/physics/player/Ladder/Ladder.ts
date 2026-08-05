@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 import { cross, dot, length, normalize, scale, set, vec3 } from '../../math/vec3.js';
 import type { LadderVolume } from '../../physics/Collision/Collision.types.js';
 import { DEG2RAD, type MovementContext } from '../MovementContext.js';

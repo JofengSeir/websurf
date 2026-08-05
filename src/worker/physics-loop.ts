@@ -165,15 +165,19 @@ export class PhysicsLoop {
   // ── 帧驱动（阶段二）────────────────────────────────────────
 
   /**
-   * 收到主线程 frame 信号：读共享输入 → 固定步长物理 → 写共享输出。
+   * 收到主线程 frame 触发信号：读共享输入环形缓冲（批量聚合）→
+   * 固定步长物理 → 写共享输出。
    *
-   * @param tMs 主线程 performance.now()（跨线程同基准，写入快照供 LERP）。
+   * dt 由 Worker 侧 performance.now() 计算——Worker 与主线程共享同一
+   * performance 时钟源，快照 timeMs 与主线程渲染时刻可比，LERP 插值基准不变。
+   * M2 Worker 自驱循环落地后，本方法即成为自驱 tick 本体，frame 信号废弃。
    */
-  frame(tMs: number): void {
-    const dt = this.lastFrameT === 0 ? 0 : Math.min((tMs - this.lastFrameT) / 1000, 0.1);
-    this.lastFrameT = tMs;
+  frame(): void {
+    const now = performance.now();
+    const dt = this.lastFrameT === 0 ? 0 : Math.min((now - this.lastFrameT) / 1000, 0.1);
+    this.lastFrameT = now;
 
-    // 读输入（阶段二步骤 6：WASM/物理读取用户指令）
+    // 读输入（阶段二步骤 6：批量取 [head, tail) 聚合——增量求和保留，防视角跳变）
     const input = this.shared.takeInput();
     this.keys = maskToKeys(input.keysMask);
     this.applyMouseDelta(input.dx, input.dy);

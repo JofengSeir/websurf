@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 // Provenance (Valve source-sdk-2013, game/shared/gamemovement.cpp): CGameMovement::ClipVelocity
 
 import type { Vec3 } from '../../math/vec3.js';

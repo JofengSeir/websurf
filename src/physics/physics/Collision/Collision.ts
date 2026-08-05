@@ -4,6 +4,8 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
+// Modified by WebSurf — see src/physics/NOTICE for modification details.
+
 // Quake/Source-style collision: the world is a set of convex brushes (plane
 // lists), and the player AABB is traced through them by Minkowski-expanding
 // each brush's planes by the box extents, then clipping the movement segment

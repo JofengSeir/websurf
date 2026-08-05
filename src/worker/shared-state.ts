@@ -1,11 +1,14 @@
 /**
  * 共享状态层 — 主线程 ↔ Worker 的跨线程数据通道
  *
- * 架构（对应重构时序图）：
- * - 阶段一（主线程）：交互参数（鼠标增量 + 按键位掩码）写入共享内存输入区，
- *   再发送轻量 `frame` 信号（仅携带主线程时间戳）。
- * - 阶段二（Worker）：收到信号后从共享内存读取输入 → 固定步长物理计算 →
- *   加写锁（Atomics）写入输出区（位置/视角/速度/onGround/mode + 时间戳 + seq）。
+ * 架构（对应高频输入闭环时序图）：
+ * - 阶段一（主线程）：交互参数（鼠标增量 + 按键位掩码 + 时间戳）写入共享内存
+ *   输入环形缓冲区（SPSC 无锁：唯一生产者=主线程，唯一消费者=Worker），
+ *   积压 ≥ NOTIFY_THRESHOLD 时 Atomics.notify（仅发信号，无数据）；满则覆盖最旧
+ *   （消费者跟不上时自动降采样）；再发送轻量 `frame` 触发信号（无数据负载）。
+ * - 阶段二（Worker）：收到信号后从环形缓冲批量取输入（排空 [head, tail) 并聚合）→
+ *   固定步长物理计算 → 加写锁（Atomics）写入输出区（位置/视角/速度/onGround/mode
+ *   + 时间戳 + seq）。
  * - 阶段三（主线程）：渲染循环安全检查（锁占用 → 复用上一帧缓存；释放 →
  *   读取 + seq 校验）→ LERP 插值 → 渲染。
  *
@@ -14,8 +17,21 @@
  * - MsgState：postMessage 数据通道回退（无 COOP/COEP 时自动降级，功能等价、延迟更高）
  *
  * 共享内存布局（字节偏移见常量）：
- *   Int32 区：lock / outSeq / inSeq / keysMask / onGround / mode / inDx / inDy
- *   Float64 区（8 字节对齐，index 4 起）：pos.x/y/z / yaw / pitch / vel.x/y/z / timeMs
+ *   Int32 区：lock / outSeq / inHead / inTail（head=消费者推进，tail=生产者推进，
+ *     均单调递增计数，槽址用 & (RING_CAPACITY-1)；满则覆盖最旧——自动降采样）
+ *   Float64 区（8 字节对齐）：pos.x/y/z / yaw / pitch / vel.x/y/z / timeMs / eyeHeight
+ *   Ring 区（SOA 四数组，8 字节对齐）：dxs[64] / dys[64] / tss[64]（Float64）+ keys[64]（Int32）
+ *
+ * 环形缓冲内存序约定（SPSC 无锁）：
+ * - 写者：先写槽数据（普通写）→ 最后 Atomics.store(tail)（release 序）
+ * - 读者：先 Atomics.load(tail)（acquire 序）→ 再批量读 [head, tail) 快照
+ * - 写者只写"当前 tail 槽"，恰在读快照边界之外；读者看到的每槽都是完整写入
+ * - 读上限 min(tail-head, RING_CAPACITY)：tail-head > N 的积压场景防回绕重读
+ *
+ * notify 唤醒协议（M2 Worker 自驱预留）：
+ * - 唤醒目标 = I_IN_TAIL：写者 store(tail) 后积压 ≥ 阈值 → Atomics.notify(I_IN_TAIL, 1)
+ * - 无唤醒丢失：notify 时若无等待者，等待者随后 Atomics.wait 因条件不满足
+ *   （tail ≠ 期望值）立即返回
  */
 
 import type { FrameSnapshot, KeyState } from './worker-types.js';
@@ -81,12 +97,11 @@ export function maskToKeys(mask: number): KeyState {
 /** Int32 区索引（0-7，共 32 字节）。 */
 const I_LOCK = 0; // 输出写锁（1 = Worker 写中）
 const I_OUT_SEQ = 1; // 输出版本号（Worker 写完 ++）
-const I_IN_SEQ = 2; // 输入版本号（主线程写入 ++）
-const I_KEYS = 3; // 按键位掩码
+const I_IN_HEAD = 2; // 输入环形缓冲 head（消费者推进）
+const I_IN_TAIL = 3; // 输入环形缓冲 tail（生产者推进；也是 notify/wait 唤醒目标）
 const I_ONGROUND = 4; // onGround（0/1）
 const I_MODE = 5; // 物理模式（0=noclip 1=physics）
-const I_IN_DX = 6; // 鼠标 dx 累加器（主线程 Atomics.add）
-const I_IN_DY = 7; // 鼠标 dy 累加器
+// 6-7 预留
 
 /** Float64 区索引（index 4 起 = 字节 32，8 字节对齐）。 */
 const F_POS_X = 4;
@@ -100,14 +115,40 @@ const F_VEL_Z = 11;
 const F_TIME = 12;
 const F_EYE_HEIGHT = 13;
 
-/** SharedArrayBuffer 总字节数（Int32 32B + Float64 14×8B = 144B）。 */
-export const SHARED_BUFFER_SIZE = 32 + 14 * 8;
+/** 输入环形缓冲容量（2 的幂，槽址用 & (RING_CAPACITY-1) 免取模）。 */
+const RING_CAPACITY = 64;
+const RING_MASK = RING_CAPACITY - 1;
 
-/** 输入脉冲结构（Worker takeInput 返回值）。 */
+/**
+ * 积压唤醒阈值：生产者写入后 pending = tail - head ≥ 阈值 → Atomics.notify。
+ * 浏览器将 mousemove 节流到显示刷新率（60-144Hz），64 槽环几乎不积压；
+ * 阈值 8 ≈ 33-66ms 积压（M2 Worker 60Hz 自驱轮询兜底，notify 仅加速）。
+ */
+const NOTIFY_THRESHOLD = 8;
+
+/** 环形缓冲字节偏移（Float64 输出区 32+10*8=112 起，全部 8 字节对齐）。 */
+const RING_DXS_BYTE = 32 + 10 * 8; // 112
+const RING_DYS_BYTE = RING_DXS_BYTE + RING_CAPACITY * 8; // 624
+const RING_TSS_BYTE = RING_DYS_BYTE + RING_CAPACITY * 8; // 1136
+const RING_KEYS_BYTE = RING_TSS_BYTE + RING_CAPACITY * 8; // 1648
+
+/**
+ * SharedArrayBuffer 总字节数：
+ * Int32 头 32B + Float64 输出 10×8B + 环 dxs/dys/tss 64×8B×3 + 环 keys 64×4B = 1904B
+ */
+export const SHARED_BUFFER_SIZE = RING_KEYS_BYTE + RING_CAPACITY * 4;
+
+/** 输入样本结构（Worker takeInput 返回值）。 */
 export interface InputSample {
   dx: number;
   dy: number;
   keysMask: number;
+  /** 批量消费扩展（环形缓冲模式）：本帧聚合的样本数（无输入时为 0）。 */
+  sampleCount?: number;
+  /** 本批次首个样本时间戳（performance.now()，ms）。 */
+  firstTs?: number;
+  /** 本批次末个样本时间戳（performance.now()，ms）。 */
+  lastTs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,18 +167,27 @@ export abstract class SharedState {
 
   // ── 主线程侧 ──────────────────────────────────────────────
 
-  /** 写入鼠标增量（累加）与按键位掩码，并标记输入版本。 */
-  abstract setInput(dx: number, dy: number, keysMask: number): void;
+  /**
+   * 写入鼠标增量 + 按键位掩码（环形缓冲模式=追加一个样本）。
+   * @param ts 样本时间戳（performance.now()）；缺省 = 实现内采集。
+   */
+  abstract setInput(dx: number, dy: number, keysMask: number, ts?: number): void;
 
-  /** 仅更新按键位掩码（无鼠标增量时每帧调用）。 */
-  abstract setKeys(keysMask: number): void;
+  /**
+   * 仅更新按键位掩码（无鼠标增量时每帧调用）。
+   * 环形缓冲模式下追加零增量样本（保证按键状态持续刷新）。
+   */
+  abstract setKeys(keysMask: number, ts?: number): void;
 
   /** 安全读取最新物理快照（锁占用/写入中返回 null → 复用上一帧缓存）。 */
   abstract readFrame(): FrameSnapshot | null;
 
   // ── Worker 侧 ─────────────────────────────────────────────
 
-  /** 读取输入并清零增量（keysMask 保留为当前状态）。 */
+  /**
+   * 读取本帧输入并排空缓冲（环形缓冲模式=批量读 [head, tail) 聚合求和）。
+   * keysMask 为批次内最新样本；无输入时返回缓存按键状态。
+   */
   abstract takeInput(): InputSample;
 
   /** 写入物理快照（加写锁保护临界区）。 */
@@ -153,30 +203,98 @@ export class ShmState extends SharedState {
   readonly isShared = true;
   private readonly i32: Int32Array;
   private readonly f64: Float64Array;
+  /** 输入环形缓冲视图（SOA：dxs/dys/tss Float64 + keys Int32）。 */
+  private readonly ringDxs: Float64Array;
+  private readonly ringDys: Float64Array;
+  private readonly ringTss: Float64Array;
+  private readonly ringKeys: Int32Array;
+  /** 生产者 tail（主线程实例本地推进，写共享内存）。 */
+  private tail = 0;
+  /** 消费者 head（Worker 实例本地推进，写共享内存）。 */
+  private head = 0;
+  /** 最近按键位掩码（takeInput 空批次时返回缓存）。 */
+  private lastKeys = 0;
 
   constructor(buffer: SharedArrayBuffer) {
     super();
     this.i32 = new Int32Array(buffer);
     this.f64 = new Float64Array(buffer);
+    this.ringDxs = new Float64Array(buffer, RING_DXS_BYTE, RING_CAPACITY);
+    this.ringDys = new Float64Array(buffer, RING_DYS_BYTE, RING_CAPACITY);
+    this.ringTss = new Float64Array(buffer, RING_TSS_BYTE, RING_CAPACITY);
+    this.ringKeys = new Int32Array(buffer, RING_KEYS_BYTE, RING_CAPACITY);
   }
 
-  setInput(dx: number, dy: number, keysMask: number): void {
-    // 鼠标增量累加（整数 px）：Worker takeInput 时 Atomics.exchange 清零
-    Atomics.add(this.i32, I_IN_DX, Math.trunc(dx));
-    Atomics.add(this.i32, I_IN_DY, Math.trunc(dy));
-    Atomics.store(this.i32, I_KEYS, keysMask);
-    Atomics.add(this.i32, I_IN_SEQ, 1);
+  setInput(dx: number, dy: number, keysMask: number, ts?: number): void {
+    this.lastKeys = keysMask;
+    this.pushSample(dx, dy, keysMask, ts ?? performance.now());
   }
 
-  setKeys(keysMask: number): void {
-    Atomics.store(this.i32, I_KEYS, keysMask);
+  setKeys(keysMask: number, ts?: number): void {
+    this.lastKeys = keysMask;
+    // 零增量样本：保证"按住键不动鼠标"时 Worker 每帧仍能刷新 keys 状态
+    this.pushSample(0, 0, keysMask, ts ?? performance.now());
+  }
+
+  /**
+   * 追加一个输入样本（SPSC：唯一生产者=主线程，无锁）。
+   *
+   * 内存序：先写槽数据（普通写）→ 最后 Atomics.store(tail)（release 序），
+   * 消费者 load(tail)（acquire 序）后读槽，必然看到完整样本。
+   * 满则覆盖最旧：写者不读 head 做排空，始终写当前 tail 槽——消费者跟不上时
+   * 自动降采样（丢弃最旧样本，保留最新 64 个）。
+   *
+   * notify（时序图步骤 6）：store(tail) 后检测积压 pending = tail - head，
+   * ≥ NOTIFY_THRESHOLD → Atomics.notify 仅发信号唤醒等待者（M2 Worker 自驱用）。
+   */
+  private pushSample(dx: number, dy: number, keysMask: number, ts: number): void {
+    const idx = this.tail & RING_MASK;
+    this.ringDxs[idx] = dx;
+    this.ringDys[idx] = dy;
+    this.ringKeys[idx] = keysMask;
+    this.ringTss[idx] = ts;
+    this.tail += 1;
+    Atomics.store(this.i32, I_IN_TAIL, this.tail);
+    // 积压检测（读 head 一次，~20ns；仅共享内存模式，回退模式无此路径）
+    if (this.tail - Atomics.load(this.i32, I_IN_HEAD) >= NOTIFY_THRESHOLD) {
+      Atomics.notify(this.i32, I_IN_TAIL, 1);
+    }
   }
 
   takeInput(): InputSample {
-    const dx = Atomics.exchange(this.i32, I_IN_DX, 0);
-    const dy = Atomics.exchange(this.i32, I_IN_DY, 0);
-    const keysMask = Atomics.load(this.i32, I_KEYS);
-    return { dx, dy, keysMask };
+    const tail = Atomics.load(this.i32, I_IN_TAIL);
+    const count = tail - this.head;
+    if (count <= 0) {
+      // 空批次：返回缓存按键状态（增量归零）
+      return { dx: 0, dy: 0, keysMask: this.lastKeys, sampleCount: 0 };
+    }
+    // 读上限：tail-head > N 的积压场景只读最新 N 个（防回绕重读）
+    const n = Math.min(count, RING_CAPACITY);
+    let sumDx = 0;
+    let sumDy = 0;
+    let keys = this.lastKeys;
+    let firstTs = 0;
+    let lastTs = 0;
+    for (let i = 0; i < n; i++) {
+      const idx = (this.head + i) & RING_MASK;
+      sumDx += this.ringDxs[idx];
+      sumDy += this.ringDys[idx];
+      keys = this.ringKeys[idx];
+      const ts = this.ringTss[idx];
+      if (i === 0) firstTs = ts;
+      lastTs = ts;
+    }
+    this.head += n;
+    Atomics.store(this.i32, I_IN_HEAD, this.head);
+    this.lastKeys = keys;
+    return {
+      dx: sumDx,
+      dy: sumDy,
+      keysMask: keys,
+      sampleCount: n,
+      firstTs,
+      lastTs,
+    };
   }
 
   writeFrame(snap: FrameSnapshot): void {
@@ -237,7 +355,7 @@ export class MsgStateMain extends SharedState {
     super();
   }
 
-  setInput(dx: number, dy: number, keysMask: number): void {
+  setInput(dx: number, dy: number, keysMask: number, _ts?: number): void {
     this.worker.postMessage({
       type: 'input',
       keys: maskToKeys(keysMask),
@@ -246,7 +364,7 @@ export class MsgStateMain extends SharedState {
     });
   }
 
-  setKeys(keysMask: number): void {
+  setKeys(keysMask: number, _ts?: number): void {
     this.worker.postMessage({
       type: 'input',
       keys: maskToKeys(keysMask),
@@ -289,11 +407,11 @@ export class MsgStateWorker extends SharedState {
     this.pending.keysMask = sample.keysMask;
   }
 
-  setInput(_dx: number, _dy: number, _keysMask: number): void {
+  setInput(_dx: number, _dy: number, _keysMask: number, _ts?: number): void {
     // Worker 侧不写输入
   }
 
-  setKeys(_keysMask: number): void {
+  setKeys(_keysMask: number, _ts?: number): void {
     // Worker 侧不写输入
   }
 
