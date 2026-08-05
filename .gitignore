@@ -6,6 +6,7 @@ web/worker.js
 
 # ── Rust / Cargo ─────────────────────────
 target/
+**/target/
 .cargo-home/
 .tmp/
 .wasm-pack-cache/

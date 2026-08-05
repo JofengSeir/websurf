@@ -7,6 +7,12 @@
 members = ["crates/wasm"]
 resolver = "2"
 
+# vmdl 由 crates.io 0.2.0 vendor 到 vendor/vmdl，修复 Source VTX 三角形条带展开算法
+# （原实现奇数位生成退化三角形 + 末尾索引越界 → 模型边角出现杂散"四角面"）。
+# 详见 vendor/vmdl/Cargo.toml 与 vendor/vmdl/src/vtx/mod.rs::Strip::indices。
+[patch.crates-io]
+vmdl = { path = "vendor/vmdl" }
+
 # ============================================================
 # 性能优化配置（WASM 构建需启用 LTO + 优化）
 # ============================================================
