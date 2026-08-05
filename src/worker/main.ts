@@ -10,17 +10,19 @@
  *
  * 时序：收到 `wasm-init` 后才启动 WASM 初始化；在此之前到达的任何消息（含 init）
  * 入队缓存，WASM 就绪后按序重放（保持 postMessage 顺序语义）。
+ * `init` 消息携带共享内存（SharedArrayBuffer，可 null），到达时创建 PhysicsWorker。
  */
 
 /// <reference lib="webworker" />
 
 import { PhysicsWorker } from './physics-worker.js';
+import { createWorkerSharedState } from './shared-state.js';
 import init, { initSync } from '../../pkg/websurf_wasm.js';
-import type { WasmInitMessage } from './worker-types.js';
+import type { WasmInitMessage, InitMessage } from './worker-types.js';
 
 /** 已就绪标志：false 时消息入队。 */
 let worker: PhysicsWorker | null = null;
-let ready = false;
+let wasmReady = false;
 let initStarted = false;
 const pending: MessageEvent[] = [];
 
@@ -40,7 +42,28 @@ async function startWasm(msg: WasmInitMessage): Promise<void> {
 	} else {
 		throw new Error('wasm-init 消息缺少 wasmB64 / wasmUrl');
 	}
-	worker = new PhysicsWorker();
+	wasmReady = true;
+	// 顺序重放初始化前收到的消息（含 init：携带共享内存，创建 PhysicsWorker）
+	for (const ev of pending) {
+		dispatch(ev);
+	}
+	pending.length = 0;
+}
+
+/** 分发消息：首个 init 消息创建 PhysicsWorker（注入共享状态通道）。 */
+function dispatch(e: MessageEvent): void {
+	const msg = e.data as { type?: string } | null;
+	if (!msg || typeof msg !== 'object') return;
+	if (!worker) {
+		const initMsg = msg as InitMessage;
+		if (initMsg.type !== 'init') {
+			// 理论上首个消息必为 init；异常时降级为无共享内存
+			worker = new PhysicsWorker(createWorkerSharedState(null));
+		} else {
+			worker = new PhysicsWorker(createWorkerSharedState(initMsg.shared));
+		}
+	}
+	worker.handleMessage(e as MessageEvent<unknown> as MessageEvent);
 }
 
 self.onmessage = (e: MessageEvent) => {
@@ -52,13 +75,6 @@ self.onmessage = (e: MessageEvent) => {
 			void (async () => {
 				try {
 					await startWasm(msg as WasmInitMessage);
-					ready = true;
-					const w = worker;
-					// 顺序重放初始化前收到的消息（含 init，保持 postMessage 顺序）
-					for (const ev of pending) {
-						w!.handleMessage(ev as MessageEvent<unknown> as MessageEvent);
-					}
-					pending.length = 0;
 				} catch (err) {
 					const text =
 						err instanceof Error
@@ -74,9 +90,9 @@ self.onmessage = (e: MessageEvent) => {
 		}
 		return;
 	}
-	if (!ready) {
+	if (!wasmReady) {
 		pending.push(e);
 		return;
 	}
-	worker!.handleMessage(e as MessageEvent<unknown> as MessageEvent);
+	dispatch(e);
 };

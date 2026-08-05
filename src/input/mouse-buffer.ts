@@ -49,6 +49,29 @@ export class MouseBuffer {
 	private discardNext = false;
 
 	/**
+	 * 处理单个 mousemove 事件（共享内存极速输入链路）。
+	 *
+	 * 不累积：应用 locked / discardNext / 绝对削平过滤后立即返回要发送的
+	 * 增量（null = 被丢弃/未锁定），调用方立刻写入共享内存输入区。
+	 * 消除旧链路（8ms 限流 + 批量化）对输入断续的放大 → 甩动即时连续。
+	 */
+	process(movementX: number, movementY: number): MouseDelta | null {
+		if (!this.locked) return null;
+
+		// discardNext：lock 变化后丢弃首个事件（Pointer Lock 初始跳变）
+		if (this.discardNext) {
+			this.discardNext = false;
+			return null;
+		}
+
+		// 绝对削平：保留移动方向和大部分量级（CLAMP 而非 DISCARD）
+		return {
+			dx: clampDelta(movementX),
+			dy: clampDelta(movementY),
+		};
+	}
+
+	/**
 	 * 累加鼠标移动到 buffer（应用 discardNext + 绝对削平）。
 	 *
 	 * - 非锁定状态下忽略（安全兜底）。

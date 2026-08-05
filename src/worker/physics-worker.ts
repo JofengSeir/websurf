@@ -1,16 +1,15 @@
 /**
- * WebSurf — Worker 物理与渲染协调器
+ * WebSurf — Worker 物理协调器（渲染已搬回主线程）
  *
- * 职责：
- * 1. 接收主线程 `WorkerMessage` 并分发到对应处理器
- * 2. 持有 `RenderLoop`、`World`、`PlayerController`、`PvsManager`、`TeleportManager`
- * 3. 通过 `RenderLoop.onAfterPhysics` 钩子周期性：
- *    - 检测传送触发器（玩家进入 trigger_teleport 区域 → 传送）
- *    - 回传 `stats` / `cull-stats` 消息到主线程
+ * 对应重构时序图阶段二（Worker 隔离区）：
+ * 1. 接收主线程 `WorkerMessage` 并分发（`frame` 信号驱动物理循环）
+ * 2. 持有 `PhysicsLoop`、`World`、`PlayerController`、`TeleportManager`、`GameState`
+ * 3. BSP 解析（WASM）后把场景数据（GLB + 碰撞体/PVS/出生点/传送点 JSON）一次性
+ *    transfer 给主线程——渲染由主线程 RendererMain 承担（GLTFLoader/LOD/PVS/准星）
+ * 4. 物理结果写共享内存输出区（Atomics 锁 + seq），主线程安全检查 + LERP 后渲染
  */
 
-import { RenderLoop } from '../renderer/render-loop.js';
-import { SceneBuilder } from '../renderer/scene-builder.js';
+import { PhysicsLoop } from './physics-loop.js';
 import { World } from '../physics/physics/World/World.js';
 import { PlayerController } from '../physics/player/PlayerController.js';
 import { DEFAULT_SETTINGS } from '../physics/settings/Settings.js';
@@ -26,20 +25,25 @@ import { DEFAULT_COLLIDER_FILTER } from '../world/types.js';
 import type { WasmBspMetadata } from '../world/types.js';
 // 物理控制面板：参数管理器（值 + 来源 + 自动恢复）
 import { PhysicsParams } from '../physics/physics-params.js';
+import {
+  SharedState,
+  keysToMask,
+  type InputSample,
+} from './shared-state.js';
 import type {
-	WorkerMessage,
-	MainMessage,
-	InitMessage,
-	LoadBspMessage,
-	ConfigMessage,
-	SetPhysicsModeMessage,
-	SetPhysicsParamMessage,
-	ResetPhysicsParamMessage,
-	SetHullMessage,
-	SetAutoRestoreHullMessage,
-	SetCullDistanceMessage,
-	TeleportMessage,
-	TeleportToPosMessage,
+  WorkerMessage,
+  MainMessage,
+  InitMessage,
+  LoadBspMessage,
+  ConfigMessage,
+  FrameSignalMessage,
+  SetPhysicsModeMessage,
+  SetPhysicsParamMessage,
+  ResetPhysicsParamMessage,
+  SetHullMessage,
+  SetAutoRestoreHullMessage,
+  TeleportMessage,
+  TeleportToPosMessage,
 } from './worker-types.js';
 
 /** 周期性 stats 回传间隔（秒）。 */
@@ -66,26 +70,29 @@ function mergeBrushJson(a: string, b: string): string {
 }
 
 /**
- * Worker 协调器。
+ * Worker 物理协调器。
  *
  * 生命周期：
- * 1. `init` → 创建 RenderLoop、初始化 WebGLRenderer（OffscreenCanvas）
- * 2. `load-bsp` → Worker 内 WASM 解析 BSP、导出五元组、构建 World/PlayerController/PVS/Teleport
- * 3. `input` / `config` / `resize` / `respawn` / `set-physics-mode` / `set-cull-distance` / `teleport` → 运行时控制
+ * 1. `init` → 创建共享状态通道（SharedArrayBuffer 或回退）+ PhysicsLoop
+ * 2. `load-bsp` → Worker 内 WASM 解析 BSP → 场景数据 transfer 主线程 + 构建物理
+ * 3. `frame` → 物理循环（固定步长 + 写共享输出）
+ * 4. `config` / `respawn` / `set-physics-mode` / `teleport` / 物理面板 → 运行时控制
  */
 export class PhysicsWorker {
-	private readonly renderLoop = new RenderLoop();
+	private readonly physicsLoop: PhysicsLoop;
 	private readonly world = new World();
 	private player: PlayerController | null = null;
 	private pvs: PvsManager | null = null;
 	private teleport: TeleportManager | null = null;
 	private readonly game = new GameState();
-	private sceneBuilder: SceneBuilder | null = null;
 	/** 所有出生点（用于 spawn 索引切换）。 */
 	private spawnPoints: LoadedSpawnPoint[] = [];
 
 	/** 运行时配置（Worker 持有，主线程通过 config 消息 patch）。 */
 	private config: RuntimeConfig = createConfig();
+
+	/** 跨线程状态通道（共享内存 / 回退）。 */
+	private shared: SharedState;
 
 	/** Stats 回传累加器（秒）。 */
 	private statsAccumulator = 0;
@@ -95,20 +102,23 @@ export class PhysicsWorker {
 	/** 当前 FPS（平滑后）。 */
 	private currentFps = 0;
 
-	/** 是否已加载场景（防止 init 之前误处理 input）。 */
+	/** 是否已加载场景（防止 init 之前误处理 frame 信号）。 */
 	private sceneReady = false;
 
 	/** 物理控制面板：参数管理器（值 + 来源 + 碰撞箱自动恢复）。 */
 	private readonly physicsParams = new PhysicsParams();
 
-	constructor() {
-		// tickRate 变更 → 渲染循环物理步长（面板可调）
+	constructor(shared: SharedState) {
+		this.shared = shared;
+		this.physicsLoop = new PhysicsLoop(this.config, shared);
+
+		// tickRate 变更 → 物理循环步长（面板可调）
 		this.physicsParams.onTickRateChange = (rate) => {
-			this.renderLoop.setTickRate(rate);
+			this.physicsLoop.setTickRate(rate);
 		};
 
 		// 注册物理后回调（游戏状态 + 传送检测 + 死亡检测 + stats 回传）
-		this.renderLoop.onAfterPhysics = (dt, didPhysicsTick) => {
+		this.physicsLoop.onAfterPhysics = (dt, didPhysicsTick) => {
 			if (this.sceneReady) {
 				// 1. 玩家移动 → 游戏计时开始
 				if (didPhysicsTick && this.player && this.config.physics.mode === 'physics') {
@@ -152,14 +162,15 @@ export class PhysicsWorker {
 			case 'load-bsp':
 				void this.handleLoadBsp(msg);
 				break;
+			case 'frame':
+				this.handleFrame(msg);
+				break;
 			case 'input':
+				// 仅回退模式（MsgStateWorker）：输入经消息注入
 				this.handleInput(msg);
 				break;
 			case 'config':
 				this.handleConfig(msg);
-				break;
-			case 'resize':
-				this.handleResize(msg);
 				break;
 			case 'respawn':
 				this.handleRespawn();
@@ -182,9 +193,6 @@ export class PhysicsWorker {
 			case 'set-auto-restore-hull':
 				this.handleSetAutoRestoreHull(msg);
 				break;
-			case 'set-cull-distance':
-				this.handleSetCullDistance(msg);
-				break;
 			case 'teleport':
 				this.handleTeleport(msg);
 				break;
@@ -194,6 +202,9 @@ export class PhysicsWorker {
 			case 'get-player-pos':
 				this.handleGetPlayerPos();
 				break;
+			case 'set-death-threshold':
+				this.game.setDeathThreshold(msg.value);
+				break;
 			default:
 				// 未知消息类型：忽略（向前兼容）
 				break;
@@ -202,9 +213,6 @@ export class PhysicsWorker {
 
 	/** 释放所有资源（Worker 关闭时调用）。 */
 	dispose(): void {
-		this.renderLoop.dispose();
-		this.sceneBuilder?.dispose();
-		this.sceneBuilder = null;
 		this.player = null;
 		this.pvs = null;
 		this.teleport = null;
@@ -217,14 +225,13 @@ export class PhysicsWorker {
 
 	private handleInit(msg: InitMessage): void {
 		try {
-			this.renderLoop.init(
-				msg.canvas,
-				msg.width,
-				msg.height,
-				msg.dpr,
-				this.config,
-			);
-			this.renderLoop.start();
+			// init 已在构造器传入 shared（main.ts 创建 PhysicsWorker 时注入）；
+			// 此处仅做一致性校验并上报 ready。
+			if (this.shared.isShared !== !!msg.shared) {
+				console.warn(
+					`[worker] shared 模式不一致（构造=${this.shared.isShared}, 消息=${!!msg.shared}），以构造为准`,
+				);
+			}
 			this.postMessage({ type: 'ready' });
 		} catch (err) {
 			this.postMessage({
@@ -234,7 +241,7 @@ export class PhysicsWorker {
 		}
 	}
 
-	/** Worker 内解析 BSP（一次解析），导出五元组并构建场景。 */
+	/** Worker 内解析 BSP（一次解析），导出场景数据传主线程 + 构建物理。 */
 	private async handleLoadBsp(msg: LoadBspMessage): Promise<void> {
 		try {
 			const bytes = new Uint8Array(msg.data);
@@ -286,8 +293,46 @@ export class PhysicsWorker {
 				glbBytes.byteOffset + glbBytes.byteLength,
 			);
 
-			await this.handleLoadScene({
-				glbBytes: glbBuffer,
+			// 1. 构建物理（World/PlayerController/PVS/Teleport/GameState）
+			const adaptResult = adaptBrushes(brushJson);
+			this.world.solids = adaptResult.solids;
+			this.world.ladders = adaptResult.ladders;
+			console.log(formatAdaptStats(adaptResult.stats));
+
+			const spawnResult = loadSpawnPoints(spawnJson);
+			this.spawnPoints = spawnResult.allSpawnPoints;
+
+			this.pvs = new PvsManager(pvsJson);
+			this.teleport = new TeleportManager(teleportJson);
+
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			this.player = new PlayerController(this.world, settings, spawnResult.spawn, {
+				log: (m: string) => console.log(`[PlayerController] ${m}`),
+			});
+			this.physicsLoop.setPlayerController(this.player);
+			this.physicsParams.attach(this.player, settings);
+			void this.emitPhysicsSnapshot();
+
+			// 游戏状态：初始 spawn（死亡阈值由主线程场景加载后回传）
+			this.game.reset();
+			this.game.setInitialSpawn(
+				{ x: spawnResult.spawn.x, y: spawnResult.spawn.y, z: spawnResult.spawn.z },
+				(spawnResult.yaw * Math.PI) / 180,
+			);
+
+			// 同步视角到出生点 + 写首帧共享输出（noclip 位置也初始化为出生点）
+			this.physicsLoop.setNoclipPos({
+				x: spawnResult.spawn.x,
+				y: spawnResult.spawn.y,
+				z: spawnResult.spawn.z,
+			});
+			this.physicsLoop.setView(spawnResult.yaw, 0);
+			this.sceneReady = true;
+
+			// 2. 场景数据一次性 transfer 主线程（渲染由主线程承担）
+			const sceneData = {
+				type: 'scene-data' as const,
+				glb: glbBuffer,
 				brushJson,
 				spawnJson,
 				pvsJson,
@@ -299,7 +344,22 @@ export class PhysicsWorker {
 					numBrushes: meta.num_brushes,
 					numModels: meta.num_models,
 				},
-			});
+				spawn: {
+					x: spawnResult.spawn.x,
+					y: spawnResult.spawn.y,
+					z: spawnResult.spawn.z,
+					yawDeg: spawnResult.yaw,
+				},
+				// 场景对角线/剔除范围由主线程 GLTFLoader 后计算并校准
+				diagonal: 0,
+				maxCull: 100000,
+				defaultCull: this.config.lod.cullDistance,
+				glbSizeKb: Math.round(glbBuffer.byteLength / 1024),
+				numSpawnPoints: spawnResult.allSpawnPoints.length,
+				hasPvs: this.pvs.enabled,
+				deathThresholdY: 0,
+			};
+			this.postMessage(sceneData, [glbBuffer]);
 		} catch (err) {
 			this.postMessage({
 				type: 'error',
@@ -308,120 +368,29 @@ export class PhysicsWorker {
 		}
 	}
 
-	private async handleLoadScene(payload: {
-		glbBytes: ArrayBuffer;
-		brushJson: string;
-		spawnJson: string;
-		pvsJson: string;
-		teleportJson: string;
-		metadata: { mapName: string; numFaces: number; numVertices: number; numBrushes: number; numModels: number };
-	}): Promise<void> {
-		try {
-			// 1. 解析 GLB → Three.js Scene
-			this.sceneBuilder = new SceneBuilder();
-			const buildResult = await this.sceneBuilder.build(
-				new Uint8Array(payload.glbBytes),
-				this.config,
-			);
+	/** frame 信号：驱动物理循环（阶段二）。 */
+	private handleFrame(msg: FrameSignalMessage): void {
+		if (!this.sceneReady) return;
+		this.physicsLoop.frame(msg.t);
+	}
 
-			// 2. 转换碰撞体（WASM JSON → cs-movement Brush[]）
-			const adaptResult = adaptBrushes(payload.brushJson);
-			this.world.solids = adaptResult.solids;
-			this.world.ladders = adaptResult.ladders;
-			// 实体碰撞箱可视化使用 solids + ladders 合并数组
-			this.renderLoop.setColliders([
-				...adaptResult.solids,
-				...adaptResult.ladders,
-			]);
-			// 准星射线检测需要分开的 solids/ladders 引用（区分 brushType）
-			this.renderLoop.setSolidsLadders(adaptResult.solids, adaptResult.ladders);
-			console.log(formatAdaptStats(adaptResult.stats));
-
-			// 3. 出生点
-			const spawnResult = loadSpawnPoints(payload.spawnJson);
-			this.spawnPoints = spawnResult.allSpawnPoints;
-
-			// 4. PVS
-			this.pvs = new PvsManager(payload.pvsJson);
-			this.renderLoop.setPvsManager(this.pvs);
-
-			// 5. 传送点
-			this.teleport = new TeleportManager(payload.teleportJson);
-			this.renderLoop.setTeleportManager(this.teleport);
-
-			// 6. 玩家控制器（默认 settings：参考 cs-movement DEFAULT_SETTINGS）
-			const settings = structuredClone(DEFAULT_SETTINGS);
-			this.player = new PlayerController(this.world, settings, spawnResult.spawn, {
-				log: (m: string) => console.log(`[PlayerController] ${m}`),
-			});
-			this.renderLoop.setPlayerController(this.player);
-			// 物理控制面板：绑定参数管理器（应用既有覆盖 + 碰撞箱体型）
-			this.physicsParams.attach(this.player, settings);
-			void this.emitPhysicsSnapshot();
-
-			// 7. 注入场景到渲染循环（会触发 LOD/Fog 初始化）
-			this.renderLoop.setScene(
-				buildResult.scene,
-				buildResult.boundingBox,
-				buildResult.diagonal,
-			);
-
-			// 同步 cullDistance 到配置（lod-manager.setup 已根据对角线计算默认值）
-			this.config.lod.cullDistance = this.renderLoop.lodManager.cullDistance;
-
-			// 初始化游戏状态：死亡阈值 + 初始 spawn
-			this.game.reset();
-			this.game.setDeathThreshold(buildResult.boundingBox.min.y);
-			this.game.setInitialSpawn(
-				{ x: spawnResult.spawn.x, y: spawnResult.spawn.y, z: spawnResult.spawn.z },
-				(spawnResult.yaw * Math.PI) / 180,
-			);
-
-			// 同步视角到出生点
-			this.renderLoop.setView(spawnResult.yaw, 0);
-			const cc = this.renderLoop.cameraController;
-			if (cc) {
-				cc.setPosition(
-					spawnResult.spawn.x,
-					spawnResult.spawn.y + this.player.eyeHeight,
-					spawnResult.spawn.z,
-				);
-			}
-
-			this.sceneReady = true;
-			this.renderLoop.requestRender();
-
-			this.postMessage({
-				type: 'scene-ready',
-				glbSizeKb: Math.round(payload.glbBytes.byteLength / 1024),
-				numBrushes: adaptResult.stats.solids + adaptResult.stats.ladders,
-				numSpawnPoints: spawnResult.allSpawnPoints.length,
-				hasPvs: this.pvs.enabled,
-				diagonal: this.renderLoop.lodManager.sceneDiagonal,
-				defaultCull: this.config.lod.cullDistance,
-				maxCull: this.renderLoop.lodManager.maxCullDistance,
-			});
-		} catch (err) {
-			this.postMessage({
-				type: 'error',
-				message: `[load-scene] ${stringifyError(err)}`,
-			});
+	/** input 消息（仅回退模式）：注入输入样本。 */
+	private handleInput(msg: Extract<WorkerMessage, { type: 'input' }>): void {
+		if (!this.sceneReady) return;
+		const sample: InputSample = {
+			dx: msg.mouseDx,
+			dy: msg.mouseDy,
+			keysMask: keysToMask(msg.keys),
+		};
+		if ('setPendingInput' in this.shared) {
+			(this.shared as { setPendingInput(s: InputSample): void }).setPendingInput(sample);
 		}
 	}
 
-	private handleInput(msg: Extract<WorkerMessage, { type: 'input' }>): void {
-		if (!this.sceneReady) return;
-		this.renderLoop.setInput(msg.keys, msg.mouseDx, msg.mouseDy);
-	}
-
 	private handleConfig(msg: ConfigMessage): void {
-		// patch 到本地 config 副本 + 转发到 renderLoop
+		// patch 到本地 config 副本 + 转发到物理循环
 		applyConfigPatch(this.config, msg.section, msg.patch);
-		this.renderLoop.applyConfigPatch(msg.section, msg.patch);
-	}
-
-	private handleResize(msg: Extract<WorkerMessage, { type: 'resize' }>): void {
-		this.renderLoop.resize(msg.width, msg.height);
+		this.physicsLoop.applyConfigPatch(msg.section, msg.patch);
 	}
 
 	private handleRespawn(): void {
@@ -433,44 +402,29 @@ export class PhysicsWorker {
 		} else {
 			this.player.respawn();
 			// 同步视角（player.respawn 不重置 yaw/pitch，保持当前朝向）
-			this.renderLoop.setView(this.player.yaw, this.player.pitch);
-			const cc = this.renderLoop.cameraController;
-			if (cc) {
-				cc.setPosition(
-					this.player.origin.x,
-					this.player.origin.y + this.player.eyeHeight,
-					this.player.origin.z,
-				);
+			this.physicsLoop.setView(this.player.yaw, this.player.pitch);
+			// noclip 模式：位置权威源同步到重生后的 player.origin
+			if (this.config.physics.mode === 'noclip') {
+				this.physicsLoop.setNoclipPos({ ...this.player.origin });
 			}
 			this.teleport?.resetCooldown();
-			this.renderLoop.onTeleport();
+			this.physicsLoop.onTeleport();
 		}
 	}
 
 	private handleSetPhysicsMode(msg: SetPhysicsModeMessage): void {
-		// 同步 config.physics.mode（handleConfig 不再处理 mode 切换）
+		// 同步 config.physics.mode；PhysicsLoop.setPhysicsMode 内完成
+		// player ↔ noclipView 的双向位置/视角继承（noclip 移动后切回 physics 不丢位置）。
 		this.config.physics.mode = msg.mode;
-		this.renderLoop.setPhysicsMode(msg.mode);
+		this.physicsLoop.setPhysicsMode(msg.mode);
 		if (msg.mode === 'physics' && this.player) {
+			// 切回物理模式：清零速度/着地，从 noclip 位置重新开始
 			this.player.velocity.x = 0;
 			this.player.velocity.y = 0;
 			this.player.velocity.z = 0;
 			this.player.onGround = false;
-			// 从当前相机位置对齐玩家 origin
-			const cc = this.renderLoop.cameraController;
-			if (cc) {
-				const p = cc.camera.position;
-				this.player.origin.x = p.x;
-				this.player.origin.y = p.y - this.player.eyeHeight;
-				this.player.origin.z = p.z;
-			}
+			this.physicsLoop.writeFrame();
 		}
-	}
-
-	private handleSetCullDistance(msg: SetCullDistanceMessage): void {
-		this.renderLoop.lodManager.setCullDistance(msg.value);
-		this.config.lod.cullDistance = this.renderLoop.lodManager.cullDistance;
-		this.renderLoop.requestRender();
 	}
 
 	// -------------------------------------------------------------------------
@@ -568,18 +522,14 @@ export class PhysicsWorker {
 
 	/** 回传玩家当前位置（自定义传送点「保存当前位置」用）。 */
 	private handleGetPlayerPos(): void {
-		const cc = this.renderLoop.cameraController;
-		// noclip 模式下相机自由飞行，player.origin 不随移动更新；
-		// 故以相机位置（减去眼睛高度）作为真实玩家位置，yaw/pitch 取当前视角。
+		// 位置权威源：physics 模式 = player.origin；noclip 模式 = noclipView.pos
 		if (this.config.physics.mode === 'noclip') {
-			if (!cc) return;
-			const p = cc.camera.position;
-			const eyeHeight = this.player?.eyeHeight ?? 0;
+			const np = this.physicsLoop.getNoclipState();
 			this.postMessage({
 				type: 'player-pos',
-				pos: [p.x, p.y - eyeHeight, p.z],
-				yaw: this.player?.yaw ?? 0,
-				pitch: this.player?.pitch ?? 0,
+				pos: [np.pos.x, np.pos.y, np.pos.z],
+				yaw: np.yaw,
+				pitch: np.pitch,
 			});
 			return;
 		}
@@ -612,26 +562,18 @@ export class PhysicsWorker {
 		this.player.velocity.y = 0;
 		this.player.velocity.z = 0;
 		this.player.onGround = false;
-		// noclip 模式：相机才是位置权威源；仅改 player.origin 而不同步相机会导致
-		// 传送「只改朝向、位置不动」的假象，必须显式移动相机。
+		// noclip 模式：noclipView 才是位置权威源；同步之（渲染读取共享输出）
 		if (this.config.physics.mode === 'noclip') {
-			const cc = this.renderLoop.cameraController;
-			if (cc) {
-				cc.camera.position.set(
-					origin.x,
-					origin.y + this.player.eyeHeight,
-					origin.z,
-				);
-			}
+			this.physicsLoop.setNoclipPos(origin);
 		}
 		// 保留当前 pitch，仅设置 yaw（传送改变朝向，不改变俯仰角）
-		this.renderLoop.setView(yawDeg, this.player.pitch);
+		this.physicsLoop.setView(yawDeg, this.player.pitch);
 		this.teleport?.resetCooldown();
-		this.renderLoop.onTeleport();
+		this.physicsLoop.onTeleport();
 	}
 
 	// -------------------------------------------------------------------------
-	// 周期性回调（由 RenderLoop.onAfterPhysics 调用）
+	// 周期性回调（由 PhysicsLoop.onAfterPhysics 调用）
 	// -------------------------------------------------------------------------
 
 	/** 检测传送触发器，触发时执行传送。 */
@@ -651,7 +593,7 @@ export class PhysicsWorker {
 		}
 	}
 
-	/** 周期性回传 stats 与 cull-stats 到主线程（10Hz）。 */
+	/** 周期性回传 stats 与 game-stats 到主线程（10Hz）。 */
 	private emitStats(dt: number): void {
 		// FPS 计算（指数平滑，始终运行以保证需要时立即可用）
 		this.fpsFrameCount++;
@@ -663,7 +605,7 @@ export class PhysicsWorker {
 			this.fpsAccumulator = 0;
 		}
 
-		// HUD 不可见时跳过全部 stats/cull-stats/game-stats 发送（减少性能浪费）
+		// HUD 不可见时跳过全部 stats/game-stats 发送（减少性能浪费）
 		if (!this.config.hud.visible) {
 			this.statsAccumulator = 0;
 			return;
@@ -677,59 +619,28 @@ export class PhysicsWorker {
 		this.statsAccumulator = 0;
 
 		const player = this.player;
-		const pvs = this.pvs;
-		const lod = this.renderLoop.lodManager;
-		const cc = this.renderLoop.cameraController;
-		// 准星射线检测结果（限频刷新，由 render-loop 维护）
-		const planeInfo = this.renderLoop.getPlaneInfo();
-
-		// noclip 模式下玩家通过相机自由飞行，player.origin 不随移动更新；
-		// 故 noclip 直接回传相机位置（实时）。physics 模式回传 player.origin（每帧更新）。
+		// 位置权威源：physics = player.origin；noclip = noclipView.pos
 		const inNoclip = this.config.physics.mode === 'noclip';
 		if (player && !inNoclip) {
-			// physics 模式：player.origin 每帧更新，坐标真实
 			this.postMessage({
 				type: 'stats',
 				fps: this.currentFps,
 				pos: [player.origin.x, player.origin.y, player.origin.z],
 				vel: [player.velocity.x, player.velocity.y, player.velocity.z],
 				onGround: player.onGround,
-				cluster: pvs?.currentClusterId ?? -1,
+				cluster: this.pvs?.currentClusterId ?? -1,
 				speed: player.horizontalSpeed,
-				planeInfo,
 			});
-		} else if (cc) {
-			// noclip 模式（player 仍存在但 origin 不更新）或 init 阶段无 player：回传相机位置
-			const p = cc.camera.position;
+		} else {
+			const np = this.physicsLoop.getNoclipState();
 			this.postMessage({
 				type: 'stats',
 				fps: this.currentFps,
-				pos: [p.x, p.y, p.z],
+				pos: [np.pos.x, np.pos.y, np.pos.z],
 				vel: [0, 0, 0],
 				onGround: false,
-				cluster: pvs?.currentClusterId ?? -1,
+				cluster: this.pvs?.currentClusterId ?? -1,
 				speed: 0,
-				planeInfo,
-			});
-		}
-
-		// cull-stats（仅在 LOD 已注册时）
-		if (lod.itemCount > 0) {
-			const lodStats = lod.getStats();
-			const pvsStats = pvs?.getStats();
-			this.postMessage({
-				type: 'cull-stats',
-				visible: lodStats.visible,
-				total: lodStats.total,
-				cullDist: lodStats.cullDistance,
-				pvs: {
-					cluster: pvsStats?.currentCluster ?? -1,
-					visibleClusters: pvsStats?.visibleCount ?? 0,
-					totalClusters: pvsStats?.totalClusters ?? 0,
-					pvsHidden: lodStats.pvsHidden,
-					near: lodStats.near,
-					far: lodStats.far,
-				},
 			});
 		}
 
@@ -756,10 +667,15 @@ export class PhysicsWorker {
 	// 工具
 	// -------------------------------------------------------------------------
 
-	/** 发送消息到主线程。 */
-	private postMessage(msg: MainMessage): void {
+	/** 发送消息到主线程。可选 transfer list（ArrayBuffer 零拷贝）。 */
+	private postMessage(msg: MainMessage, transfer?: Transferable[]): void {
 		// 在 Worker 上下文中，postMessage 是全局函数
-		(postMessage as (msg: MainMessage) => void)(msg);
+		const pm = postMessage as (m: MainMessage, t?: Transferable[]) => void;
+		if (transfer && transfer.length > 0) {
+			pm(msg, transfer);
+		} else {
+			pm(msg);
+		}
 	}
 }
 
