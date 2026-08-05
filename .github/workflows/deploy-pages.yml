@@ -1,0 +1,85 @@
+# WebSurf: 构建并部署到 GitHub Pages
+#
+# 构建链路（与本地 build-dist.cmd 一致）：
+#   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.126 与 Cargo.lock 精确匹配）
+#   2. esbuild 打包 TypeScript（worker + app）
+#   3. scripts/build-dist.mjs 生成自包含 dist/（index.html + app.js，WASM base64 内嵌 + Worker Blob URL）
+#
+# 部署产物为 dist/（相对路径引用，兼容 Pages 的 /<repo>/ 子路径）。
+
+name: Build & Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Install wasm-bindgen-cli 0.2.126 (prebuilt, matches Cargo.lock)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=0.2.126
+          curl -sSL --retry 3 -o /tmp/wbg.tar.gz \
+            "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          tar -xzf /tmp/wbg.tar.gz -C /tmp
+          mkdir -p "$HOME/.cargo/bin"
+          cp "/tmp/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" "$HOME/.cargo/bin/"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build WASM
+        run: npm run build:wasm
+
+      - name: Build TypeScript (typecheck + bundle)
+        run: npm run build:ts
+
+      - name: Build dist package
+        run: npm run build:dist
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
