@@ -253,6 +253,14 @@
               </select>
               <div></div>
 
+              <label title="模型碰撞网格来源；重新加载地图后生效">碰撞来源</label>
+              <select id="colliderSource" disabled>
+                <option value="auto" selected>自动（模型自带优先）</option>
+                <option value="visual">可视模型网格</option>
+                <option value="phy">模型自带碰撞体(.phy)</option>
+              </select>
+              <div style="font-size:11px; color:#9098b5; white-space:nowrap;">重新加载地图生效</div>
+
               <label title="传送触发判定方式">传送触发</label>
               <div style="display:flex; flex-direction:column; gap:2px;">
                 <label style="font-size:12px; cursor:pointer; color:#d4d4d4; white-space:nowrap;">

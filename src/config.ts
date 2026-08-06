@@ -5,6 +5,9 @@
 
 export interface PhysicsConfig {
   mode: 'noclip' | 'physics';
+  /** 模型碰撞网格来源（加载地图时生效，切换后需重新加载）：
+   * auto=模型自带(.phy)优先、visual=可视模型网格、phy=模型自带碰撞体 */
+  colliderSource: 'auto' | 'visual' | 'phy';
   gravity: number;
   jumpSpeed: number;
   maxSpeed: number;
@@ -104,6 +107,7 @@ export interface RuntimeConfig {
 export const DEFAULT_CONFIG: RuntimeConfig = {
   physics: {
     mode: 'physics',
+    colliderSource: 'auto',
     gravity: 800,
     jumpSpeed: 302,
     maxSpeed: 250,

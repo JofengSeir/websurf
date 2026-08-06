@@ -43,6 +43,126 @@ fn aabb_of(pts: impl Iterator<Item = [f32; 3]>) -> ([f32; 3], [f32; 3]) {
 }
 
 #[test]
+fn probe_phy_stats() {
+    // 全量统计 surf_666 的 .phy 覆盖率：解析成功 / 静态可用（bone==0） / modelType 分布。
+    let data = match std::fs::read(BSP_PATH) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("跳过：无法读取 {BSP_PATH}: {e}");
+            return;
+        }
+    };
+    let bsp = crate::vbsp::Bsp::read(&data).expect("BSP 解析失败");
+    let (models, _props, entry_names) = crate::collect_pakfile_models(&bsp).expect("collect");
+    let index = crate::pakfile_models::PakIndex::build(&entry_names);
+
+    let mut has_phy = 0usize;
+    let mut parsed_ok = 0usize;
+    let mut static_ok = 0usize; // bone==0 凸体 > 0
+    let mut total_convex = 0usize;
+    let mut total_tris = 0usize;
+    let mut total_verts = 0usize;
+    let mut modeltype_nonzero = 0usize;
+    let mut sphandled = 0usize;
+    let mut sample: Vec<(String, usize, String)> = Vec::new();
+
+    for m in &models {
+        let phy_name = m.name.replace(".mdl", ".phy");
+        let Ok(Some(phy_bytes)) = bsp.pack.get(&phy_name) else {
+            continue;
+        };
+        has_phy += 1;
+        match crate::phyfile::parse_phy(&phy_bytes) {
+            Ok(solids) => {
+                parsed_ok += 1;
+                let static_convex: usize = solids
+                    .iter()
+                    .map(|s| s.convexes.iter().filter(|c| c.bone_index == 0).count())
+                    .sum();
+                let all_tris: usize = solids
+                    .iter()
+                    .flat_map(|s| s.convexes.iter())
+                    .map(|c| c.indices.len())
+                    .sum();
+                let all_verts: usize = solids
+                    .iter()
+                    .flat_map(|s| s.convexes.iter())
+                    .map(|c| c.vertices.len())
+                    .sum();
+                total_convex += solids.iter().map(|s| s.convexes.len()).sum::<usize>();
+                total_tris += all_tris;
+                total_verts += all_verts;
+                if static_convex > 0 {
+                    static_ok += 1;
+                }
+                let sp = solids
+                    .iter()
+                    .find_map(|s| s.surfaceprop.clone())
+                    .unwrap_or_default();
+                if sample.len() < 6 {
+                    sample.push((
+                        m.name.clone(),
+                        static_convex,
+                        if sp.is_empty() { "?" } else { &sp }.to_string(),
+                    ));
+                }
+            }
+            Err(e) => {
+                if e.to_string().contains("modelType") {
+                    modeltype_nonzero += 1;
+                }
+                sphandled += 1;
+            }
+        }
+    }
+
+    println!(
+        "== .phy 覆盖率: 模型总数={} 有 .phy={} 解析成功={} 静态可用(bone0)={}",
+        models.len(),
+        has_phy,
+        parsed_ok,
+        static_ok
+    );
+    println!(
+        "   总凸体={total_convex} 总三角={total_tris} 总顶点={total_verts} modelType非0跳过={modeltype_nonzero} 其他失败={sphandled}"
+    );
+    for (name, convex, sp) in &sample {
+        println!("   样例: {name} 静态凸体={convex} surfaceprop={sp}");
+    }
+}
+
+#[test]
+fn probe_phy_export() {
+    // 端到端验证 export_model_phy_colliders 输出 JSON（真实 .phy → 世界空间凸包三角）。
+    let data = match std::fs::read(BSP_PATH) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("跳过：无法读取 {BSP_PATH}: {e}");
+            return;
+        }
+    };
+    let proc = crate::BspProcessor::new(&data).expect("BspProcessor::new 失败");
+    let json = proc.export_model_phy_colliders().expect("phy 导出失败");
+    let arr: Vec<serde_json::Value> = serde_json::from_str(&json).expect("JSON 解析失败");
+    println!("== export_model_phy_colliders: {} 个实例", arr.len());
+    let mut total_tris = 0usize;
+    for v in arr.iter().take(4) {
+        let name = v["name"].as_str().unwrap_or("?");
+        let sprop = v["surfaceprop"].as_str().unwrap_or("?");
+        let verts = v["vertices"].as_array().map(|a| a.len()).unwrap_or(0);
+        let tris = v["indices"].as_array().map(|a| a.len()).unwrap_or(0);
+        total_tris += tris;
+        println!("   {name} surfaceprop={sprop} 顶点={verts} 三角={tris}");
+    }
+    println!("   前 4 实例三角合计={total_tris}");
+    assert!(!arr.is_empty(), "应有实例");
+    // 顶点/索引必须为非空数组格式
+    let first = &arr[0];
+    assert!(first["vertices"].as_array().map(|a| !a.is_empty()).unwrap_or(false));
+    assert!(first["indices"].as_array().map(|a| !a.is_empty()).unwrap_or(false));
+}
+
+#[test]
 fn probe_ramp() {
     let data = match std::fs::read(BSP_PATH) {
         Ok(d) => d,

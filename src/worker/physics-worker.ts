@@ -266,14 +266,39 @@ export class PhysicsWorker {
 				JSON.stringify(DEFAULT_COLLIDER_FILTER),
 			);
 
-			// PAKFILE 内嵌模型（surf 图 ramp 坡多为 prop_static）的碰撞体；
-			// 须在 export_glb_with_pakfile_models 之前导出（后者会消费 BSP）。
+			// 模型碰撞体：按「碰撞来源」选项选择 ——
+			//   visual → 可视网格原样三角形（零转化，与显示逐位一致）
+			//   auto / phy → 模型自带物理碰撞体(.phy 凸包，引擎实际碰撞)；auto 在
+			//                无 .phy/空结果时回退可视网格
+			// 任一路径失败回退旧薄壳 brush 方案。
 			let brushJson = mapBrushJson;
+			let triJsonRaw: string | undefined;
+			const colliderSource = this.config.physics.colliderSource ?? 'auto';
 			try {
-				const modelBrushJson = processor.export_model_colliders();
-				brushJson = mergeBrushJson(mapBrushJson, modelBrushJson);
+				if (colliderSource === 'visual') {
+					triJsonRaw = processor.export_model_tri_colliders();
+				} else {
+					triJsonRaw = processor.export_model_phy_colliders();
+					if (
+						colliderSource === 'auto' &&
+						(!triJsonRaw ||
+							(JSON.parse(triJsonRaw) as unknown[]).length === 0)
+					) {
+						triJsonRaw = processor.export_model_tri_colliders();
+					}
+				}
+				this.world.triMeshes = JSON.parse(triJsonRaw);
+				console.log(
+					`[load-bsp] 模型三角形碰撞网格(${colliderSource}): ${this.world.triMeshes.length} 个实例`,
+				);
 			} catch (e) {
-				console.warn('[load-bsp] 模型碰撞体导出失败，仅使用地图 brush:', e);
+				console.warn('[load-bsp] 模型碰撞导出失败，回退薄壳 brush:', e);
+				try {
+					const modelBrushJson = processor.export_model_colliders();
+					brushJson = mergeBrushJson(mapBrushJson, modelBrushJson);
+				} catch (e2) {
+					console.warn('[load-bsp] 模型碰撞体导出失败，仅使用地图 brush:', e2);
+				}
 			}
 
 			stage('导出 GLB（含 PAKFILE 模型）');
@@ -331,6 +356,8 @@ export class PhysicsWorker {
 				type: 'scene-data' as const,
 				glb: glbBuffer,
 				brushJson,
+				triJson:
+					this.world.triMeshes.length > 0 ? triJsonRaw : undefined,
 				spawnJson,
 				pvsJson,
 				teleportJson,

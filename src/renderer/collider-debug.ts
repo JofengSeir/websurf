@@ -7,7 +7,7 @@
  */
 
 import * as THREE from 'three';
-import type { Brush } from '../physics/physics/Collision/Collision.types.js';
+import type { Brush, TriMesh } from '../physics/physics/Collision/Collision.types.js';
 import type { RuntimeConfig } from '../config.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
 
@@ -19,6 +19,8 @@ const DEBUG_Y_EXTENT = 300;
 const MAX_DEBUG_COLLIDERS = 800;
 /** 重建限流（每 N 帧）。 */
 const REBUILD_INTERVAL = 6;
+/** 模型三角形碰撞线框重建限流（每 N 帧；三角形量大，重建更慢）。 */
+const TRI_REBUILD_INTERVAL = 30;
 /** 碰撞体半透明填充不透明度（0-1）。仅相机进入 brush 内部时显示，且颜色淡。 */
 const FILL_OPACITY = 0.09;
 
@@ -342,13 +344,18 @@ export class ColliderDebug {
 	private scene: THREE.Scene | null = null;
 	/** 实体碰撞箱线框组（受 showSolids 控制）。 */
 	private solidGroup: THREE.Group | null = null;
+	/** 模型三角形碰撞网格线框组（受 showSolids 控制）。 */
+	private triGroup: THREE.Group | null = null;
 	/** 触发碰撞箱线框组（受 showTriggers 控制）。 */
 	private triggerGroup: THREE.Group | null = null;
 	private showSolids = false;
 	private showTriggers = false;
 	private frameCounter = 0;
+	private triFrameCounter = 0;
 	/** 传送触发器列表（由 PhysicsWorker 注入）。 */
 	private triggers: readonly TeleportTrigger[] = [];
+	/** 模型三角形碰撞网格（由渲染主线程注入）。 */
+	private triMeshes: TriMesh[] = [];
 
 	/** 初始化调试 Group。 */
 	init(scene: THREE.Scene): void {
@@ -358,10 +365,21 @@ export class ColliderDebug {
 		this.solidGroup.visible = false;
 		scene.add(this.solidGroup);
 
+		this.triGroup = new THREE.Group();
+		this.triGroup.name = '__model_tri_collider_debug__';
+		this.triGroup.visible = false;
+		scene.add(this.triGroup);
+
 		this.triggerGroup = new THREE.Group();
 		this.triggerGroup.name = '__vbsp_trigger_debug__';
 		this.triggerGroup.visible = false;
 		scene.add(this.triggerGroup);
+	}
+
+	/** 注入模型三角形碰撞网格（场景加载后调用）。 */
+	setTriMeshes(meshes: TriMesh[]): void {
+		this.triMeshes = meshes;
+		this.triFrameCounter = TRI_REBUILD_INTERVAL;
 	}
 
 	/** 注入传送触发器列表（场景加载后调用）。 */
@@ -379,11 +397,16 @@ export class ColliderDebug {
 			this.solidGroup.visible = showSolids;
 			if (!showSolids) this.clearGroup(this.solidGroup);
 		}
+		if (this.triGroup) {
+			this.triGroup.visible = showSolids;
+			if (!showSolids) this.clearGroup(this.triGroup);
+		}
 		if (this.triggerGroup) {
 			this.triggerGroup.visible = showTriggers;
 			if (!showTriggers) this.clearGroup(this.triggerGroup);
 		}
 		this.frameCounter = REBUILD_INTERVAL;
+		this.triFrameCounter = TRI_REBUILD_INTERVAL;
 	}
 
 	/**
@@ -407,6 +430,16 @@ export class ColliderDebug {
 			if (this.frameCounter >= REBUILD_INTERVAL) {
 				this.frameCounter = 0;
 				this.rebuildSolids(cameraPos, colliders, config);
+				rebuilt = true;
+			}
+		}
+
+		// 1.5 模型三角形碰撞网格（受 showSolids 控制，独立限流——重建成本高）
+		if (this.showSolids && this.triGroup) {
+			this.triFrameCounter++;
+			if (this.triFrameCounter >= TRI_REBUILD_INTERVAL) {
+				this.triFrameCounter = 0;
+				this.rebuildTriangles(cameraPos);
 				rebuilt = true;
 			}
 		}
@@ -514,6 +547,74 @@ export class ColliderDebug {
 			depthTest: true,
 		});
 		this.solidGroup!.add(new THREE.LineSegments(geom, mat));
+	}
+
+	/**
+	 * 重建模型三角形碰撞网格线框（只显示玩家附近半径内的三角形）。
+	 * 按来源分组着色：可视网格=青色 / 模型自带碰撞体(.phy)=黄色（surfaceprop 存在即 .phy 来源）。
+	 */
+	private rebuildTriangles(cameraPos: THREE.Vector3): void {
+		this.clearGroup(this.triGroup!);
+		if (this.triMeshes.length === 0) return;
+
+		const pos = cameraPos;
+		const radiusSq = DEBUG_RADIUS * DEBUG_RADIUS;
+		/** 附近三角形上限（超限截断，避免拖垮每帧重建）。 */
+		const MAX_TRI_LINES = 12_000;
+
+		const visPos: number[] = []; // 可视网格（青）
+		const phyPos: number[] = []; // 模型自带 .phy（黄）
+		let triCount = 0;
+
+		for (const mesh of this.triMeshes) {
+			if (triCount * 3 >= MAX_TRI_LINES) break;
+			// mesh AABB 距离粗筛（顶点/边界为紧凑数组 `[x,y,z]`；Y-up 水平面 = x/z）
+			const nx = Math.max(mesh.min[0], Math.min(pos.x, mesh.max[0]));
+			const nz = Math.max(mesh.min[2], Math.min(pos.z, mesh.max[2]));
+			const dx = pos.x - nx;
+			const dz = pos.z - nz;
+			if (dx * dx + dz * dz > radiusSq) continue;
+			const target = mesh.surfaceprop !== undefined ? phyPos : visPos;
+
+			for (const [a, b, c] of mesh.indices) {
+				if (triCount * 3 >= MAX_TRI_LINES) break;
+				const va = mesh.vertices[a];
+				const vb = mesh.vertices[b];
+				const vc = mesh.vertices[c];
+				// 三角形 AABB 距离粗筛
+				const tMinX = Math.min(va[0], vb[0], vc[0]);
+				const tMaxX = Math.max(va[0], vb[0], vc[0]);
+				const tMinZ = Math.min(va[2], vb[2], vc[2]);
+				const tMaxZ = Math.max(va[2], vb[2], vc[2]);
+				const cxp = Math.max(tMinX, Math.min(pos.x, tMaxX));
+				const czp = Math.max(tMinZ, Math.min(pos.z, tMaxZ));
+				const dxp = pos.x - cxp;
+				const dzp = pos.z - czp;
+				if (dxp * dxp + dzp * dzp > radiusSq) continue;
+				target.push(va[0], va[1], va[2], vb[0], vb[1], vb[2]);
+				target.push(vb[0], vb[1], vb[2], vc[0], vc[1], vc[2]);
+				target.push(vc[0], vc[1], vc[2], va[0], va[1], va[2]);
+				triCount++;
+			}
+		}
+
+		if (triCount === 0) return;
+		this.addTriLines(visPos, 0x44c8ff); // 青色：可视网格
+		this.addTriLines(phyPos, 0xffb347); // 黄色：模型自带 .phy 碰撞
+	}
+
+	/** 追加一组三角形线框（positions 为 3 顶点 × 3 条边 × 3 分量）。 */
+	private addTriLines(positions: number[], color: number): void {
+		if (positions.length === 0) return;
+		const geom = new THREE.BufferGeometry();
+		geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+		const mat = new THREE.LineBasicMaterial({
+			color,
+			transparent: true,
+			opacity: 0.7,
+			depthTest: true,
+		});
+		this.triGroup!.add(new THREE.LineSegments(geom, mat));
 	}
 
 	/**
