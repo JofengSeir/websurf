@@ -28,7 +28,7 @@
 | 文本段 `solid{index, name, parent, mass, surfaceprop, …}` / `editparams` | ✅ | 直接可用（surfaceprop 是碰撞材质） |
 | 三角形 `triangledata_t`（12+12+7+1 位域 + 3×edge 字段） | ⚠️ 文档未给字节数/对齐 | **官方开源仓库亦无定义（闭源 IVP）→ 参考 Crowbar/SourceIO 或实测** |
 | 凸体寻址（`vertices_offset` 是相对文件还是相对段？） | ⚠️ 含糊 | **同上：官方开源仓库不可见 → 参考开源逆向实现或实测** |
-| 坐标系统（IVP 空间、静态/非静态模型差异） | ⚠️ 文档自注"may differ" | 确认：顶点为模型局部/骨骼空间（米制），世界转换发生在 `CreatePolyObject` 边界（§1.1）；静态/动态差异需实测 |
+| 坐标系统（IVP 空间、静态/非静态模型差异） | ⚠️ 文档自注"may differ" | **已实测定论：PHY 顶点为 IVP 坐标系（Y-up），Source 为 Z-up —— 转换 = y↔z 交换 `(x,z,y)`（79/87 模型暴力搜索验证）**；顶点相对骨骼，非 STATIC_PROP 需再应用 `apply_root_transform` |
 | modelType 各取值含义（box/sphere/mesh…） | ❌ 未列枚举 | **引擎侧未定义（vphysics 私有头）→ 参考开源逆向实现或实测** |
 
 > 结论：**格式可解析、方案可行**。文档给了 70% 的结构定义；剩余 30%（triangledata_t 布局、
@@ -319,8 +319,8 @@ try {
 `TriangleGrid` + `clipBoxToTriangle`，零新增物理代码；box/sphere/cylinder 基础体
 （若 modelType 指示）可三角化后走同一条路，或后续加专用 clip。
 
-**可视化**：`collider-debug.ts` 的 `rebuildTriangles` 增加来源标记
-（`mesh.surfaceprop` 或导出时注入 `source: 'phy'|'visual'`），phy 用黄色线框、visual 用青色，
+**可视化**：`collider-debug.ts` 的 `rebuildTriangles` 按来源分组着色
+（`mesh.surfaceprop` 存在即 .phy 来源），phy 用橙色线框、visual 用紫色，
 一眼区分当前用的哪种碰撞。
 
 ### 3.5 数据流总览
@@ -333,7 +333,7 @@ worker 加载地图
    ├─ phy    → export_model_phy_colliders()  → world.triMeshes（模型自带凸包）
    └─ auto   → phy 优先，空/失败回退 visual
 World.trace → TriangleGrid.query → clipBoxToTriangle（两者共用）
-collider-debug：青色=visual / 黄色=phy
+collider-debug：紫色=visual / 橙色=phy
 ```
 
 ---

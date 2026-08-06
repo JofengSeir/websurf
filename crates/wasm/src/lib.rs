@@ -891,6 +891,10 @@ impl BspProcessor {
             if solids.is_empty() {
                 continue;
             }
+            // 加载模型（供 apply_root_transform 使用，与显示端同一根变换）
+            let Some(model) = load_vmdl(m) else {
+                continue;
+            };
 
             // 收集该模型全部 bone==0 凸体的三角形（局部空间，HU，Z-up）
             let mut local: Vec<[f32; 3]> = Vec::new();
@@ -906,7 +910,18 @@ impl BspProcessor {
                     }
                     let base = local.len() as u32;
                     for v in &c.vertices {
-                        local.push(crate::model_integrator::map_coords(*v));
+                        // 关键：PHY 顶点存的是 **IVP 坐标系**（vphysics 内部，Y-up），
+                        // Source 是 Z-up —— 转换 = y↔z 交换：source = (phy.x, phy.z, phy.y)。
+                        // 实测 79/87 模型统一命中该映射（probe_phy_mapping 暴力搜索）；
+                        // 不转换会表现为「左偏 90°/上下颠倒」。
+                        let ivp2src = [v[0], v[2], v[1]];
+                        // 再施加与显示端相同的根骨骼变换（非 STATIC_PROP 时骨骼 0 带旋转）
+                        let rt = model.apply_root_transform(vmdl::Vector {
+                            x: ivp2src[0],
+                            y: ivp2src[1],
+                            z: ivp2src[2],
+                        });
+                        local.push(crate::model_integrator::map_coords([rt.x, rt.y, rt.z]));
                     }
                     for t in &c.indices {
                         tris.push([base + t[0], base + t[1], base + t[2]]);

@@ -162,6 +162,254 @@ fn probe_phy_export() {
     assert!(first["indices"].as_array().map(|a| !a.is_empty()).unwrap_or(false));
 }
 
+/// 暴力搜索 PHY→显示 的坐标映射：6 置换 × 8 符号 = 48 种，选 AABB 重合度最高的。
+/// 在 **Z-up 原始空间**（均不 map_coords）对比，排除 Y-up 映射干扰。
+#[test]
+fn probe_phy_mapping() {
+    let data = match std::fs::read(BSP_PATH) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("跳过：无法读取 {BSP_PATH}: {e}");
+            return;
+        }
+    };
+    let bsp = crate::vbsp::Bsp::read(&data).expect("BSP 解析失败");
+    let (models, _props, _names) = crate::collect_pakfile_models(&bsp).expect("collect");
+
+    use std::collections::HashMap;
+    let mut map_count: HashMap<(usize, i32), usize> = HashMap::new(); // (perm_idx, sign_bits)
+    let perms = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+
+    for m in &models {
+        let phy_name = m.name.replace(".mdl", ".phy");
+        let Ok(Some(phy_bytes)) = bsp.pack.get(&phy_name) else {
+            continue;
+        };
+        let Ok(solids) = crate::phyfile::parse_phy(&phy_bytes) else {
+            continue;
+        };
+        let Some(model) = crate::load_vmdl(m) else {
+            continue;
+        };
+        // 显示 Z-up AABB（apply_root 后，不 map_coords）
+        let mut dmin = [f32::INFINITY; 3];
+        let mut dmax = [f32::NEG_INFINITY; 3];
+        for v in model.vertices() {
+            let p = model.apply_root_transform(v.position);
+            for i in 0..3 {
+                let c = if i == 0 { p.x } else if i == 1 { p.y } else { p.z };
+                dmin[i] = dmin[i].min(c);
+                dmax[i] = dmax[i].max(c);
+            }
+        }
+        // PHY 顶点（HU，Z-up 原始）
+        let mut phy_pts: Vec<[f32; 3]> = Vec::new();
+        for s in &solids {
+            for c in &s.convexes {
+                if c.bone_index != 0 {
+                    continue;
+                }
+                phy_pts.extend_from_slice(&c.vertices);
+            }
+        }
+        if phy_pts.len() < 4 || !dmin.iter().all(|f| f.is_finite()) {
+            continue;
+        }
+        // 显示尺寸
+        let dsize = [
+            dmax[0] - dmin[0],
+            dmax[1] - dmin[1],
+            dmax[2] - dmin[2],
+        ];
+        if dsize.iter().any(|s| *s <= 0.0) {
+            continue;
+        }
+        // 对每种映射：变换后 AABB 与显示 AABB 各轴重叠比例（按显示尺寸归一）
+        let mut best: Option<(usize, i32, f32)> = None;
+        for (pi, perm) in perms.iter().enumerate() {
+            for sign in 0..8 {
+                let s0 = if sign & 1 == 0 { 1.0 } else { -1.0 };
+                let s1 = if sign & 2 == 0 { 1.0 } else { -1.0 };
+                let s2 = if sign & 4 == 0 { 1.0 } else { -1.0 };
+                let mut mn = [f32::INFINITY; 3];
+                let mut mx = [f32::NEG_INFINITY; 3];
+                for v in &phy_pts {
+                    let t = [s0 * v[perm[0]], s1 * v[perm[1]], s2 * v[perm[2]]];
+                    for i in 0..3 {
+                        mn[i] = mn[i].min(t[i]);
+                        mx[i] = mx[i].max(t[i]);
+                    }
+                }
+                // 计分：尺寸≥显示 55% 的轴按小/大比加分，越多轴对齐分越高
+                let mut score = 0.0;
+                let mut axes = 0;
+                for i in 0..3 {
+                    let tsize = mx[i] - mn[i];
+                    if tsize <= 0.0 {
+                        continue;
+                    }
+                    let big = dsize[i].max(tsize);
+                    let small = dsize[i].min(tsize);
+                    if small / big > 0.55 {
+                        score += small / big;
+                        axes += 1;
+                    }
+                }
+                let score = score / 3.0 + axes as f32 * 0.5;
+                if best.is_none() || score > best.as_ref().unwrap().2 {
+                    best = Some((pi, sign, score));
+                }
+            }
+        }
+        let (pi, sign, score) = best.unwrap();
+        if score > 1.5 {
+            *map_count.entry((pi, sign)).or_insert(0) += 1;
+        }
+    }
+    // 输出分布
+    let mut v: Vec<_> = map_count.into_iter().collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1));
+    println!("== PHY→显示 坐标映射分布（模型数）:");
+    for ((pi, sign), n) in v {
+        let perm = perms[pi];
+        println!(
+            "   perm=[{},{},{}] sign=({:+},{:+},{:+}) × {n}",
+            perm[0],
+            perm[1],
+            perm[2],
+            if sign & 1 == 0 { 1 } else { -1 },
+            if sign & 2 == 0 { 1 } else { -1 },
+            if sign & 4 == 0 { 1 } else { -1 },
+        );
+    }
+}
+
+#[test]
+fn probe_phy_orientation() {
+    // 对比「显示网格局部 AABB」vs「PHY 碰撞局部 AABB」，定位朝向差异（左偏 90° / 上下颠倒）。
+    // 显示：local = map_coords(apply_root_transform(v))；PHY：local = map_coords(phy_vert × HU)。
+    // 若 PHY 与显示同空间，两者 AABB 轴对齐应一致（PHY 为简化凸包，尺寸略小但朝向相同）。
+    let data = match std::fs::read(BSP_PATH) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("跳过：无法读取 {BSP_PATH}: {e}");
+            return;
+        }
+    };
+    let bsp = crate::vbsp::Bsp::read(&data).expect("BSP 解析失败");
+    let (models, _props, _names) = crate::collect_pakfile_models(&bsp).expect("collect");
+
+    let mut bad = 0usize;
+    let mut shown = 0usize;
+    for m in &models {
+        let phy_name = m.name.replace(".mdl", ".phy");
+        let Ok(Some(phy_bytes)) = bsp.pack.get(&phy_name) else {
+            continue;
+        };
+        let Ok(solids) = crate::phyfile::parse_phy(&phy_bytes) else {
+            continue;
+        };
+        let Some(model) = crate::load_vmdl(m) else {
+            continue;
+        };
+        // 显示局部 AABB（与 GLB 顶点同一变换链）
+        let mut dmin = [f32::INFINITY; 3];
+        let mut dmax = [f32::NEG_INFINITY; 3];
+        let mut rmin = [f32::INFINITY; 3];
+        let mut rmax = [f32::NEG_INFINITY; 3];
+        for v in model.vertices() {
+            let raw = map_coords(v.position);
+            let p = map_coords(model.apply_root_transform(v.position));
+            for i in 0..3 {
+                rmin[i] = rmin[i].min(raw[i]);
+                rmax[i] = rmax[i].max(raw[i]);
+                dmin[i] = dmin[i].min(p[i]);
+                dmax[i] = dmax[i].max(p[i]);
+            }
+        }
+        // PHY 局部 AABB（bone==0 凸体，当前导出链路）
+        let mut pmin = [f32::INFINITY; 3];
+        let mut pmax = [f32::NEG_INFINITY; 3];
+        let mut has_bone0 = false;
+        for s in &solids {
+            for c in &s.convexes {
+                if c.bone_index != 0 {
+                    continue;
+                }
+                has_bone0 = true;
+                for v in &c.vertices {
+                    // 修复后链路：IVP→Source 坐标转换（y↔z 交换）+ 根骨骼变换
+                    let ivp2src = [v[0], v[2], v[1]];
+                    let rt = model.apply_root_transform(vmdl::Vector {
+                        x: ivp2src[0],
+                        y: ivp2src[1],
+                        z: ivp2src[2],
+                    });
+                    let p = map_coords([rt.x, rt.y, rt.z]);
+                    for i in 0..3 {
+                        pmin[i] = pmin[i].min(p[i]);
+                        pmax[i] = pmax[i].max(p[i]);
+                    }
+                }
+            }
+        }
+        if !has_bone0 {
+            continue;
+        }
+        // 各轴尺寸
+        let ds = [
+            dmax[0] - dmin[0],
+            dmax[1] - dmin[1],
+            dmax[2] - dmin[2],
+        ];
+        let ps = [
+            pmax[0] - pmin[0],
+            pmax[1] - pmin[1],
+            pmax[2] - pmin[2],
+        ];
+        // 轴一致性：PHY 每根轴的尺寸应≈显示的某根轴（误差 15%）
+        let ok = (0..3).all(|i| {
+            (0..3).any(|j| {
+                let big = ds[j].max(ps[i]);
+                let small = ds[j].min(ps[i]);
+                small > 0.0 && (big - small) / big < 0.15
+            })
+        });
+        if !ok || shown < 6 {
+            println!(
+                "{}{}",
+                if ok { "  ok " } else { "BAD! " },
+                m.name
+            );
+            println!(
+                "     显示 x[{:.0},{:.0}] y[{:.0},{:.0}] z[{:.0},{:.0}] 尺寸({:.0},{:.0},{:.0})",
+                dmin[0], dmax[0], dmin[1], dmax[1], dmin[2], dmax[2], ds[0], ds[1], ds[2]
+            );
+            println!(
+                "     VVD原始 x[{:.0},{:.0}] y[{:.0},{:.0}] z[{:.0},{:.0}] 尺寸({:.0},{:.0},{:.0})",
+                rmin[0], rmax[0], rmin[1], rmax[1], rmin[2], rmax[2],
+                rmax[0] - rmin[0], rmax[1] - rmin[1], rmax[2] - rmin[2]
+            );
+            println!(
+                "     PHY  x[{:.0},{:.0}] y[{:.0},{:.0}] z[{:.0},{:.0}] 尺寸({:.0},{:.0},{:.0})",
+                pmin[0], pmax[0], pmin[1], pmax[1], pmin[2], pmax[2], ps[0], ps[1], ps[2]
+            );
+            shown += 1;
+        }
+        if !ok {
+            bad += 1;
+        }
+    }
+    println!("== 朝向异常模型数: {bad}");
+}
+
 #[test]
 fn probe_ramp() {
     let data = match std::fs::read(BSP_PATH) {

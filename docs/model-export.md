@@ -378,7 +378,7 @@ physics（worker 内）
 renderer（主线程）
   renderer-main.ts: JSON.parse(data.triJson) → colliderDebug.setTriMeshes()
   collider-debug.ts rebuildTriangles(cameraPos)：相机半径 512 + 线框上限 1.2 万，
-    青色 LineSegments 显示模型碰撞 = 显示网格
+    紫色(可视网格)/橙色(.phy) LineSegments 显示模型碰撞（按 surfaceprop 分组着色）
 ```
 
 ---
