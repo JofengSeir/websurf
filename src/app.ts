@@ -54,6 +54,7 @@ const dom = {
 	hudVisibleChk: document.getElementById('hudVisible') as HTMLInputElement | null,
 	showCrosshairChk: document.getElementById('showCrosshair') as HTMLInputElement | null,
 	physicsModeSelect: document.getElementById('physicsMode') as HTMLSelectElement | null,
+	colliderSourceSelect: document.getElementById('colliderSource') as HTMLSelectElement | null,
 	mouseSensRange: document.getElementById('mouseSens') as HTMLInputElement | null,
 	mouseSensVal: document.getElementById('mouseSensVal') as HTMLElement | null,
 	yawBindSpeedRange: document.getElementById('yawBindSpeed') as HTMLInputElement | null,
@@ -284,6 +285,10 @@ async function handleSceneData(msg: SceneDataMessage): Promise<void> {
 	}
 	// 启用控件
 	if (dom.physicsModeSelect) dom.physicsModeSelect.disabled = false;
+	if (dom.colliderSourceSelect) {
+		dom.colliderSourceSelect.disabled = false;
+		dom.colliderSourceSelect.value = config.physics.colliderSource;
+	}
 	if (dom.respawnBtn) dom.respawnBtn.disabled = false;
 	if (dom.spawnSelect) dom.spawnSelect.disabled = false;
 	// PVS 剔除：复选框同步 config.lod.pvsEnabled
@@ -499,6 +504,14 @@ function bindUI(): void {
 		const mode = (e.target as HTMLSelectElement).value as 'noclip' | 'physics';
 		inputBridge?.sendSetPhysicsMode(mode);
 		applyConfigPatch(config, 'physics', { mode });
+	});
+
+	// 碰撞来源（模型碰撞网格：可视网格 vs 模型自带 .phy；重新加载地图后生效）
+	dom.colliderSourceSelect?.addEventListener('change', (e) => {
+		const v = (e.target as HTMLSelectElement).value as 'auto' | 'visual' | 'phy';
+		applyConfigPatch(config, 'physics', { colliderSource: v });
+		inputBridge?.sendConfig('physics', { colliderSource: v });
+		setStatus('碰撞来源已切换，重新加载地图后生效。', '');
 	});
 
 	// 鼠标灵敏度（cs-movement 乘数：有效灵敏度 = sensitivity * m_yaw 0.022 deg/px）

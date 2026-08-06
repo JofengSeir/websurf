@@ -24,6 +24,22 @@ export interface LadderVolume extends Brush {
   facing: Vec3;
 }
 
+/** 紧凑三元组（与 Rust `[f32; 3]` 的 serde_json 序列化一致）：`[x, y, z]`。 */
+export type V3Tuple = [number, number, number];
+
+/** 三角形网格碰撞体（模型可视网格原样导出，不做任何转化）。 */
+export interface TriMesh {
+  /** 世界空间顶点（与 GLB 显示网格逐位一致；紧凑数组 `[x, y, z]`）。 */
+  vertices: V3Tuple[];
+  /** 三角形索引 `[a, b, c]`（引用 vertices）。 */
+  indices: Array<[number, number, number]>;
+  /** AABB（宽阶段用；紧凑数组）。 */
+  min: V3Tuple;
+  max: V3Tuple;
+  /** 仅 .phy 来源（模型自带碰撞体）存在：引擎碰撞材质名（如 `no_decal`/`grass`）。 */
+  surfaceprop?: string;
+}
+
 export interface TraceResult {
   fraction: number; // 移动完成比例 0..1
   endPos: Vec3;

@@ -194,6 +194,11 @@ export class RendererMain {
     this.triggers = [...this.teleportManager.getTriggers()];
     this.colliderDebug.setTriggers(this.triggers);
 
+    // 5.5 模型「可视网格」三角形碰撞（零转化；调试可视化 + 准星检测）
+    if (data.triJson) {
+      this.colliderDebug.setTriMeshes(JSON.parse(data.triJson));
+    }
+
     // 6. 碰撞体（可视化 + 准星检测）
     const adaptResult = adaptBrushes(data.brushJson);
     this.colliders = [...adaptResult.solids, ...adaptResult.ladders];

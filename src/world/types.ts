@@ -8,6 +8,20 @@
 // §7.2 WasmBrush JSON Schema（核心契约）
 // ---------------------------------------------------------------------------
 
+/** WASM 导出的模型「可视网格」三角形碰撞（`export_model_tri_colliders`）。 */
+export interface WasmTriMesh {
+  /** 模型名。 */
+  name: string;
+  /** 世界空间顶点（Y-up，与 GLB 显示网格逐位一致）。 */
+  vertices: [number, number, number][];
+  /** 三角形索引 `[a, b, c]`（引用 vertices）。 */
+  indices: [number, number, number][];
+  /** mesh AABB min。 */
+  min: [number, number, number];
+  /** mesh AABB max。 */
+  max: [number, number, number];
+}
+
 /** WASM 导出的 brush 平面（对应 Rust `WasmBrushPlane`）。 */
 export interface WasmBrushPlane {
   /** 法线 `[x, y, z]`，已在 Rust 端旋转为 Y-up，朝外。 */

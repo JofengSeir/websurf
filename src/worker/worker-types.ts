@@ -198,6 +198,8 @@ export interface SceneDataMessage {
   glb: ArrayBuffer;
   /** 碰撞体 JSON（WASM brushes → 主线程 adaptBrushes 转换）。 */
   brushJson: string;
+  /** 模型「可视网格」三角形碰撞 JSON（零转化；可选，失败时缺省）。 */
+  triJson?: string;
   spawnJson: string;
   pvsJson: string;
   teleportJson: string;

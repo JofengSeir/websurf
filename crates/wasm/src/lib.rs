@@ -19,6 +19,7 @@ use crate::model_integrator::{
 mod bsp_to_gltf_core;
 mod model_integrator;
 mod pakfile_models;
+mod phyfile;
 mod texture_utils;
 mod vbsp;
 
@@ -676,6 +677,284 @@ impl BspProcessor {
         }
 
         serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化模型碰撞体失败"))
+    }
+
+    /// 导出 **PAKFILE 内嵌模型的「可视网格」作为碰撞网格**（世界空间三角形，零转化）。
+    ///
+    /// 与 [`BspProcessor::export_model_colliders`]（逐三角挤出薄壳 brush）不同，
+    /// 本方法**不做任何转化**：不挤出厚度、不共面合并、不凸包、不 OBB 回退 ——
+    /// 输出的三角形与 GLB 显示网格**逐位一致**（顶点 = 同一条变换链
+    /// `map_coords(apply_root_transform(v))` → `place_point`（scale/rot/translation），
+    /// 其中 `quat`/`translation` 来自与 GLB 节点同一份 `resolve_placements`）。
+    ///
+    /// 输出 JSON：`[{ "name", "vertices": [[x,y,z]...], "indices": [[a,b,c]...],
+    /// "min": [...], "max": [...] }]`（每个放置实例一个 mesh，世界坐标 Y-up）。
+    ///
+    /// 透明度门控与碰撞导出一致：真半透明（`$translucent`/`$alpha<1`）材质跳过；
+    /// `static_prop.solid == 0`（SOLID_NONE）实例跳过；无标注默认保留。
+    ///
+    /// # 调用时机
+    /// 只借用 BSP，须在 [`BspProcessor::export_glb_with_pakfile_models`]（消费 BSP）之前调用。
+    pub fn export_model_tri_colliders(&self) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
+
+        let (models, static_props, entry_names) = collect_pakfile_models(bsp)?;
+        if models.is_empty() {
+            return Ok("[]".to_string());
+        }
+
+        let index = pakfile_models::PakIndex::build(&entry_names);
+        let materials = resolve_pakfile_materials(bsp, &models, &index, false);
+
+        let no_entities: Vec<crate::model_integrator::Entity> = Vec::new();
+
+        /// 单个实例的三角形网格（世界空间，与显示逐位一致）。
+        #[derive(serde::Serialize)]
+        struct TriMeshOut {
+            name: String,
+            vertices: Vec<[f32; 3]>,
+            indices: Vec<[u32; 3]>,
+            min: [f32; 3],
+            max: [f32; 3],
+        }
+
+        /// 总三角形护栏（防止超大地图把所有 prop 都展开成百万三角形拖垮 trace）。
+        const MAX_TRI_TOTAL: usize = 200_000;
+
+        let mut out: Vec<TriMeshOut> = Vec::new();
+        let mut tri_total = 0usize;
+
+        for m in &models {
+            if tri_total >= MAX_TRI_TOTAL {
+                break;
+            }
+
+            let placements =
+                crate::model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
+            let placements: Vec<_> = placements
+                .into_iter()
+                .filter(|p| p.solid != Some(0))
+                .collect();
+            if placements.is_empty() {
+                continue;
+            }
+
+            let Some(model) = load_vmdl(m) else { continue };
+
+            // ---- 局部空间顶点（Y-up，与 GLB 顶点同一变换链）----
+            let src = model.vertices();
+            let mut local: Vec<[f32; 3]> = Vec::with_capacity(src.len());
+            for v in src {
+                local.push(crate::model_integrator::map_coords(
+                    model.apply_root_transform(v.position),
+                ));
+            }
+            if local.is_empty() {
+                continue;
+            }
+
+            // ---- 展开三角（vendored vmdl 已修复条带展开），逐 mesh 做透明度门控 ----
+            let skin = model.skin_tables().next();
+            let mut tris: Vec<[u32; 3]> = Vec::new();
+            for mesh in model.meshes() {
+                let alpha = skin
+                    .as_ref()
+                    .and_then(|s| s.texture_info(mesh.material_index()))
+                    .and_then(|t| materials.alpha_modes.get(&t.name).copied())
+                    .unwrap_or(0);
+                if alpha == 1 {
+                    continue; // 真半透明：可穿过
+                }
+                let idx: Vec<usize> = mesh.vertex_strip_indices().flatten().collect();
+                for c in idx.chunks_exact(3) {
+                    let (a, b, d) = (c[0], c[1], c[2]);
+                    if a >= local.len() || b >= local.len() || d >= local.len() {
+                        continue;
+                    }
+                    tris.push([a as u32, b as u32, d as u32]);
+                }
+            }
+            if tris.is_empty() {
+                continue;
+            }
+
+            // ---- 每个放置实例：顶点搬移到世界空间（与 GLB 节点同一变换）----
+            for p in &placements {
+                if tri_total >= MAX_TRI_TOTAL {
+                    break;
+                }
+                let mut verts: Vec<[f32; 3]> = Vec::with_capacity(local.len());
+                for v in &local {
+                    verts.push(pakfile_models::place_point(
+                        *v, p.translation, p.rotation, p.scale,
+                    ));
+                }
+                let mut min = [f32::INFINITY; 3];
+                let mut max = [f32::NEG_INFINITY; 3];
+                for v in &verts {
+                    for i in 0..3 {
+                        if v[i] < min[i] {
+                            min[i] = v[i];
+                        }
+                        if v[i] > max[i] {
+                            max[i] = v[i];
+                        }
+                    }
+                }
+                if !min.iter().all(|f| f.is_finite()) {
+                    continue;
+                }
+                tri_total += tris.len();
+                out.push(TriMeshOut {
+                    name: m.name.clone(),
+                    vertices: verts,
+                    indices: tris.clone(),
+                    min,
+                    max,
+                });
+            }
+        }
+
+        serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化模型三角形碰撞失败"))
+    }
+
+    /// 导出 **PAKFILE 内嵌模型的「自带物理碰撞体」（`.phy`）** 为世界空间凸包三角形。
+    ///
+    /// 与 [`BspProcessor::export_model_tri_colliders`]（可视网格）不同，本方法解析模型
+    /// 自己打包的 vphysics 碰撞体（`.phy`，Source 引擎实际使用的碰撞，凸包分解、更简化）。
+    /// 输出格式与三角形碰撞**同构**（`TriMesh` + `surfaceprop`），前端可复用同一套
+    /// `TriangleGrid` + `clipBoxToTriangle` 消费。
+    ///
+    /// 限制（首版）：
+    /// - 仅支持 `modelType == 0`（IVPCompactSurface 凸包）；MOPP/Ball/Virtual 报错跳过；
+    /// - 仅支持 `bone_index == 0` 的凸体（静态模型；带骨骼的动态模型顶点相对骨骼，
+    ///   需要骨骼变换矩阵，暂跳过）；
+    /// - 顶点米制 → HU（×39.3701），再经 `map_coords`（Z-up→Y-up）+ `place_point` 搬世界空间。
+    ///
+    /// 输出 JSON：`[{ "name", "surfaceprop", "vertices": [[x,y,z]...], "indices": [[a,b,c]...],
+    /// "min": [...], "max": [...] }]`（每个放置实例一个条目）。
+    pub fn export_model_phy_colliders(&self) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
+
+        let (models, static_props, _entry_names) = collect_pakfile_models(bsp)?;
+        if models.is_empty() {
+            return Ok("[]".to_string());
+        }
+
+        let no_entities: Vec<crate::model_integrator::Entity> = Vec::new();
+
+        #[derive(serde::Serialize)]
+        struct TriMeshOut {
+            name: String,
+            surfaceprop: String,
+            vertices: Vec<[f32; 3]>,
+            indices: Vec<[u32; 3]>,
+            min: [f32; 3],
+            max: [f32; 3],
+        }
+
+        const MAX_TRI_TOTAL: usize = 200_000;
+        let mut out: Vec<TriMeshOut> = Vec::new();
+        let mut tri_total = 0usize;
+
+        for m in &models {
+            if tri_total >= MAX_TRI_TOTAL {
+                break;
+            }
+            // 只解析被引用的模型（static_props 匹配）；无 .phy 或解析失败 → 跳过（前端 auto 回退）
+            let placements =
+                crate::model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
+            let placements: Vec<_> = placements
+                .into_iter()
+                .filter(|p| p.solid != Some(0))
+                .collect();
+            if placements.is_empty() {
+                continue;
+            }
+            let phy_name = m.name.replace(".mdl", ".phy");
+            let Ok(Some(phy_bytes)) = bsp.pack.get(&phy_name) else {
+                continue;
+            };
+            let solids = match crate::phyfile::parse_phy(&phy_bytes) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("⚠️ 跳过 PHY 解析失败 {}: {e}", m.name);
+                    continue;
+                }
+            };
+            if solids.is_empty() {
+                continue;
+            }
+
+            // 收集该模型全部 bone==0 凸体的三角形（局部空间，HU，Z-up）
+            let mut local: Vec<[f32; 3]> = Vec::new();
+            let mut tris: Vec<[u32; 3]> = Vec::new();
+            let mut sprop = String::new();
+            for s in &solids {
+                if s.surfaceprop.is_some() && sprop.is_empty() {
+                    sprop = s.surfaceprop.clone().unwrap_or_default();
+                }
+                for c in &s.convexes {
+                    if c.bone_index != 0 {
+                        continue; // 动态骨骼：跳过
+                    }
+                    let base = local.len() as u32;
+                    for v in &c.vertices {
+                        local.push(crate::model_integrator::map_coords(*v));
+                    }
+                    for t in &c.indices {
+                        tris.push([base + t[0], base + t[1], base + t[2]]);
+                    }
+                }
+            }
+            if local.is_empty() || tris.is_empty() {
+                continue;
+            }
+
+            for p in &placements {
+                if tri_total >= MAX_TRI_TOTAL {
+                    break;
+                }
+                let mut verts: Vec<[f32; 3]> = Vec::with_capacity(local.len());
+                for v in &local {
+                    verts.push(pakfile_models::place_point(
+                        *v, p.translation, p.rotation, p.scale,
+                    ));
+                }
+                let mut min = [f32::INFINITY; 3];
+                let mut max = [f32::NEG_INFINITY; 3];
+                for v in &verts {
+                    for i in 0..3 {
+                        if v[i] < min[i] {
+                            min[i] = v[i];
+                        }
+                        if v[i] > max[i] {
+                            max[i] = v[i];
+                        }
+                    }
+                }
+                if !min.iter().all(|f| f.is_finite()) {
+                    continue;
+                }
+                tri_total += tris.len();
+                out.push(TriMeshOut {
+                    name: m.name.clone(),
+                    surfaceprop: sprop.clone(),
+                    vertices: verts,
+                    indices: tris.clone(),
+                    min,
+                    max,
+                });
+            }
+        }
+
+        serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化模型 PHY 碰撞失败"))
     }
 
     /// 检查 BSP 是否仍持有（未被 export_glb 消费）。
