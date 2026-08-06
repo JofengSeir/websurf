@@ -599,8 +599,8 @@ export class ColliderDebug {
 		}
 
 		if (triCount === 0) return;
-		this.addTriLines(visPos, 0x44c8ff); // 青色：可视网格
-		this.addTriLines(phyPos, 0xffb347); // 黄色：模型自带 .phy 碰撞
+		this.addTriLines(visPos, 0xaa66ff); // 紫色：可视模型网格
+		this.addTriLines(phyPos, 0xff8c00); // 橙色：模型自带 .phy 碰撞
 	}
 
 	/** 追加一组三角形线框（positions 为 3 顶点 × 3 条边 × 3 分量）。 */
