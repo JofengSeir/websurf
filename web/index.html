@@ -222,19 +222,19 @@
           <div class="acc-body">
             <div class="ctrl-grid">
               <label>鼠标灵敏度</label>
-              <input type="range" id="mouseSens" min="0.1" max="5.0" step="0.1" value="1.5" />
-              <div class="val" id="mouseSensVal">1.50</div>
+              <input type="range" id="mouseSens" min="0.1" max="5.0" step="0.01" value="1.5" />
+              <div class="val"><input type="number" id="mouseSensNum" class="param-num" min="0.1" max="5" step="0.01" value="1.5" /></div>
 
               <label>Q/E 旋转速度</label>
-              <input type="range" id="yawBindSpeed" min="0" max="720" step="10" value="210" />
-              <div class="val" id="yawBindSpeedVal">210</div>
+              <input type="range" id="yawBindSpeed" min="0" max="720" step="1" value="210" />
+              <div class="val"><input type="number" id="yawBindSpeedNum" class="param-num" min="0" max="720" step="any" value="210" /></div>
 
               <label>视距上限</label>
-              <input type="range" id="cullDistance" min="1000" max="50000" step="100" value="12800" disabled />
-              <div class="val" id="cullDistanceVal">12800</div>
+              <input type="range" id="cullDistance" min="1000" max="50000" step="1" value="12800" />
+              <div class="val"><input type="number" id="cullDistanceNum" class="param-num" min="1000" max="100000" step="any" value="12800" /></div>
 
               <div class="ctrl-checkbox-row ctrl-full" style="margin-top:2px;">
-                <input type="checkbox" id="pvsEnabled" disabled />
+                <input type="checkbox" id="pvsEnabled" checked />
                 <label for="pvsEnabled">PVS 剔除</label>
               </div>
             </div>
@@ -247,14 +247,14 @@
           <div class="acc-body">
             <div class="ctrl-grid">
               <label>物理模式</label>
-              <select id="physicsMode" disabled>
+              <select id="physicsMode">
                 <option value="physics" selected>HL 物理（重力/碰撞）</option>
                 <option value="noclip">Noclip 自由飞行</option>
               </select>
               <div></div>
 
               <label title="模型碰撞网格来源；重新加载地图后生效">碰撞来源</label>
-              <select id="colliderSource" disabled>
+              <select id="colliderSource">
                 <option value="auto" selected>自动（模型自带优先）</option>
                 <option value="visual">可视模型网格</option>
                 <option value="phy">模型自带碰撞体(.phy)</option>
@@ -285,7 +285,7 @@
               <div class="ctrl-grid">
                 <label>连续落地帧数</label>
                 <input type="range" id="groundedFramesRange" min="1" max="30" step="1" value="1" />
-                <div class="val" id="groundedFramesVal">1</div>
+                <div class="val"><input type="number" id="groundedFramesNum" class="param-num" min="1" max="30" step="any" value="1" /></div>
               </div>
             </div>
 
@@ -297,7 +297,7 @@
               <div class="ctrl-grid">
                 <label title="按倍率缩放（相对默认体型）">倍率</label>
                 <input type="range" id="hullScale" min="0.5" max="2" step="0.05" value="1" />
-                <div class="val" id="hullScaleVal">1.00×</div>
+                <div class="val"><input type="number" id="hullScaleNum" class="param-num" min="0.5" max="2" step="any" value="1" /></div>
 
                 <label title="碰撞箱半宽（默认 16 → 32×32 footprint）">半宽</label>
                 <input type="range" id="hullHalfWidth" min="4" max="32" step="1" value="16" />

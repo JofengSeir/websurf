@@ -252,6 +252,8 @@ export interface StatsMessage {
   onGround: boolean;
   cluster: number;
   speed: number;
+  /** 最近一次速度归零的诊断原因（无 = null）。 */
+  zeroCause?: string | null;
 }
 
 /** 准星射线检测信息（hover 查看模型/实体平面/触发面）。 */

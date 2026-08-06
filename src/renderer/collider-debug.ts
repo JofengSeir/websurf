@@ -690,16 +690,27 @@ export class ColliderDebug {
 		}
 	}
 
+	/**
+	 * 清空全部调试组内容（加载新地图时调用；保留 group 与 scene 引用，
+	 * 不清内部状态，避免破坏后续 rebuild）。
+	 */
+	clearAll(): void {
+		if (this.solidGroup) this.clearGroup(this.solidGroup);
+		if (this.triGroup) this.clearGroup(this.triGroup);
+		if (this.triggerGroup) this.clearGroup(this.triggerGroup);
+	}
+
 	/** 释放资源。 */
 	dispose(): void {
-		if (this.solidGroup) this.clearGroup(this.solidGroup);
-		if (this.triggerGroup) this.clearGroup(this.triggerGroup);
+		this.clearAll();
 		if (this.scene) {
 			if (this.solidGroup) this.scene.remove(this.solidGroup);
+			if (this.triGroup) this.scene.remove(this.triGroup);
 			if (this.triggerGroup) this.scene.remove(this.triggerGroup);
 		}
 		this.scene = null;
 		this.solidGroup = null;
+		this.triGroup = null;
 		this.triggerGroup = null;
 	}
 }

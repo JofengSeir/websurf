@@ -652,6 +652,7 @@ export class PhysicsWorker {
 				onGround: player.onGround,
 				cluster: this.pvs?.currentClusterId ?? -1,
 				speed: player.horizontalSpeed,
+				zeroCause: player.zeroCause,
 			});
 		} else {
 			const np = this.physicsLoop.getNoclipState();

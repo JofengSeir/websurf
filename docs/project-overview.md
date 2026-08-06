@@ -101,6 +101,16 @@ vendored 自 `@unsurf/cs-movement`（`src/physics/`，TS 纯函数）：
   每信号最多 10 步）→ 写共享输出；dt 用 Worker 侧 `performance.now()`；
 - 主线程：rAF `readFrame`（锁占用复用上帧缓存）→ LERP → 相机同步 → LOD/PVS → 渲染，
   **无人为帧率上限**；
+- **渲染外推插帧**（dead-reckoning）：物理 64Hz 固定步但快照随渲染频率写入，存在
+  "空快照"（位置不变、时间前进）窗口 + Worker 写帧延迟抖动 → 旧 LERP `alpha` clamp
+  到 1 时画面停等物理，高速滑行呈"停-动-停"微卡顿。修复：`alpha > 1` 时用快照真实
+  速度一阶外推位置（上限 `EXTRAPOLATE_MAX_S = 1/64s` 防跑飞穿墙）；
+  **速度门限** `EXTRAPOLATE_MIN_SPEED = 500`：横向（xz 平面）与竖向（y）速度**均**
+  < 500 时不外推（起步拉地速阶段运动不可预测，退回停等最新快照）；
+- **地图重载内存重置**：`RendererMain.disposeScene()` 递归释放旧 BSP 模型 GPU 资源
+  （geometry/material/纹理 + renderLists/LOD/PVS/碰撞可视化/插值缓存）——`handleBspFile`
+  触发文件输入即调用，`loadScene` 开头防御性调用；`ColliderDebug.clearAll()` 保留
+  scene/group 引用不清内部状态；
 - 鼠标：`yaw -= dx * (sensitivity * m_yaw)`，pitch clamp ±89°；
 - 近平面贴墙自适应收缩（防近平面裁剪穿墙，不移动相机）；
 - 传送检测 `TeleportManager.checkTeleport` 三模式（`debug.teleportTriggerMode` 影响游玩行为）：
@@ -110,7 +120,22 @@ vendored 自 `@unsurf/cs-movement`（`src/physics/`，TS 纯函数）：
   - `every-frame`：每帧检测；
 - HUD：`渲染 X fps`（主线程真实 rAF，每 0.5s 统计）+ `Worker Y fps`
   （帧信号处理频率，墙钟统计——不用物理 dt 累加，避免 Worker 抖动污染显示）；
+  卡坡时显示 `卡因[xxx]`（zeroCause 诊断，见 4.2）；
 - `src/game/`：计时挑战状态机，`game-stats` 消息回传。
+
+### 4.2 斜坡接缝卡零速防护（surf 高速滑行）
+- **撞击后沿法线推开**（`TryPlayerMove` `PUSH_OUT = 0.1`）：贴面滑行（AABB 表面距坡面
+  仅 DIST_EPSILON）时重力每 tick 注入垂直分量 → fraction≈0 微撞击 → origin 不更新 →
+  `blocked×3` 误判归零。推开使下一 tick 有正常"进入距离"，切向滑行不再被 fraction≈0 吞掉；
+- **夹缝滑出**：撞击后检测相对平面（`dot < -0.5`，V 形槽/墙缝特征）→ 不推开（推开是
+  夹缝来回撞墙卡死根源），沿两平面交线滑出，不累积平面继续 bump；
+- **多平面围角宽容化**：≥3 平面优先平均法线剪裁（等效接缝平滑），失败才归零；
+  振荡检测（剪裁后速度反向）不整体归零，保留切向速度；`MAX_CLIP_PLANES` 5→8；
+- **速度骤降诊断**：空中 + 本 tick 有撞击 + 进入速度 >300 + 降幅 >30% →
+  `slowdown-XX%` 记录（不归零，只标记减速来源）；
+- **归零诊断**（zeroCause）：所有归零路径（allSolid/planes≥8/cornered×N/blocked×6/
+  stuck×N）记录原因，经 `stats` 回传，HUD 显示 `卡因[xxx]`；BlockedMove 阈值 3→6
+  （给推开收敛时间）。
 
 ## 5. WASM 层
 
@@ -128,8 +153,8 @@ pakfile_models / phyfile。
 `teleport` / `teleport-to-pos` / `get-player-pos` / `set-death-threshold`。
 
 **Worker → 主线程**：`ready` / `bsp-metadata` / `parse-progress` / `spawn-options` /
-`scene-data`（一次 transfer）/ `phys-frame`（仅回退模式）/ `stats` / `game-stats` /
-`physics-snapshot` / `physics-event` / `player-pos` / `error`。
+`scene-data`（一次 transfer）/ `phys-frame`（仅回退模式）/ `stats`（含 `zeroCause`
+卡坡诊断）/ `game-stats` / `physics-snapshot` / `physics-event` / `player-pos` / `error`。
 
 ## 7. 构建与运行
 
@@ -140,6 +165,13 @@ pakfile_models / phyfile。
 | 手动 | `npm run build:wasm` / `build:ts` / `build:dist` / `dev` |
 
 产物：`dist/index.html` + `dist/app.js`（+ cs-movement LICENSE/NOTICE），双击运行。
+
+> **注意**：`pkg/`（wasm-pack 产物）**不被 git 跟踪**——改 Rust 后必须重建
+> （`npm run build:wasm`），否则运行时 wasm 与 `pkg/websurf_wasm.d.ts` 过期：
+> typecheck 报错，且 `colliderSource`（auto/visual/phy）路径静默回退薄壳 brush。
+> 判断过期：`grep export_model_tri_colliders pkg/websurf_wasm.d.ts`。
+> Windows 下 `os error 5 拒绝访问`（杀毒锁 target 文件）：清 `target/wasm32-unknown-unknown`
+> 后全量重建。
 
 ## 8. 配置项（`src/config.ts` RuntimeConfig）
 

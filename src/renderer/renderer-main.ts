@@ -34,6 +34,18 @@ const PLANE_INSPECT_INTERVAL = 6;
 const CAMERA_NEAR_MIN = 0.05;
 /** 近距几何检测半径（HU）：检测相机周围是否有渲染几何（贴脸判定）。 */
 const NEAR_PROBE_DIST = 4;
+/**
+ * 外推插帧上限（秒）：物理快照过期（alpha>1）时用速度一阶外推填充中间渲染帧。
+ * 上限约一个物理固定步（1/64s）——覆盖 64Hz 物理与高刷渲染之间的空窗，
+ * 同时防止物理真卡时外推跑飞穿墙。
+ */
+const EXTRAPOLATE_MAX_S = 1 / 64;
+/**
+ * 外推插帧最低速度（unit/s）：横向（x/z）与竖向（y）速度**均**低于此值时不外推。
+ * 起步拉地速阶段运动不可预测（加速/转向/起跳），外推会产生误导性位移；
+ * 高速滑行阶段运动方向稳定，外推才可靠。
+ */
+const EXTRAPOLATE_MIN_SPEED = 500;
 
 /** 剔除统计回调（主线程直接更新 UI）。 */
 export interface CullStatsLike {
@@ -146,9 +158,87 @@ export class RendererMain {
     this.needsRender = true;
   }
 
+  /**
+   * 卸载当前地图的全部渲染资源（触发文件输入/加载新地图时调用）。
+   *
+   * three.js 的 `scene.remove()` 只摘除场景图，geometry/material/纹理等
+   * GPU 侧资源不会自动释放——多次加载地图会累积显存与 JS 堆，导致
+   * 帧率逐步下降。本方法递归 dispose 全部 BSP 模型资源，并清空
+   * LOD/PVS/碰撞可视化/插值缓存等子管理器状态。
+   *
+   * 保留：灯光、雾（由 LightManager/FogManager 独立管理，替换式更新）。
+   */
+  disposeScene(): void {
+    // 1. BSP 模型：递归释放 geometry/material/纹理（GPU 真正释放）
+    if (this.scene) {
+      for (let i = this.scene.children.length - 1; i >= 0; i--) {
+        const child = this.scene.children[i];
+        if (child.userData?.isBspModel) {
+          this.disposeObject(child);
+          this.scene.remove(child);
+        }
+      }
+    }
+    this.bspModelScene = null;
+
+    // 2. three.js 渲染列表（GPU 侧 draw-call 缓存）
+    this.renderer?.renderLists?.dispose();
+
+    // 3. 子管理器状态清零
+    this.lodManager.dispose();
+    this.pvsManager = null;
+    this.teleportManager = null;
+    this.colliders = [];
+    this.solids = [];
+    this.ladders = [];
+    this.triggers = [];
+    // 碰撞可视化清空（保留 group/scene 引用，新地图 rebuild 直接复用）
+    this.colliderDebug.clearAll();
+
+    // 4. 插值缓存重置（避免跨地图 LERP 瞬移）+ 强制下一帧重绘
+    this.resetInterpolation();
+    this.needsRender = true;
+  }
+
+  /** 递归释放 Object3D 子树的 geometry/material/纹理（GPU 侧真正释放）。 */
+  private disposeObject(obj: THREE.Object3D): void {
+    obj.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.geometry?.dispose();
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const mat of materials) {
+        if (!mat) continue;
+        // 释放材质引用的纹理（map/lightMap/emissive 等；重复 dispose 幂等安全）
+        for (const key of [
+          'map',
+          'lightMap',
+          'emissiveMap',
+          'normalMap',
+          'roughnessMap',
+          'metalnessMap',
+          'aoMap',
+          'alphaMap',
+          'bumpMap',
+          'specularMap',
+          'envMap',
+        ]) {
+          const tex = (mat as unknown as Record<string, unknown>)[key] as
+            | THREE.Texture
+            | undefined;
+          if (tex?.isTexture) tex.dispose();
+        }
+        mat.dispose();
+      }
+    });
+  }
+
   /** 加载 Worker 传来的场景数据（GLB + PVS + 碰撞体 + 传送点）。 */
   async loadScene(data: SceneDataMessage): Promise<{ diagonal: number; defaultCull: number; maxCull: number } | null> {
     if (!this.scene || !this.camera) return null;
+
+    // 0. 防御：加载前先卸载旧地图资源（正常流程 handleBspFile 已调用）
+    this.disposeScene();
 
     // 1. GLB → Scene（SceneBuilder 逻辑主线程版）
     const gltf = await this.loadGlb(data.glb);
@@ -326,17 +416,53 @@ export class RendererMain {
 
   private lastStatsAt = 0;
 
-  /** LERP：在 prev/cur 双快照间按渲染时刻插值。 */
+  /**
+   * LERP 插值 + 外推插帧（物理面与渲染面解耦的核心）。
+   *
+   * 物理 64Hz 固定步但快照随渲染频率写入，存在"空快照"（位置不变、时间
+   * 前进）窗口；且 Worker 写帧/消息传递有延迟抖动。两因素叠加导致
+   * alpha 间歇性 >1 —— 旧实现 clamp 到 1 停等，画面"停-动-停"微卡顿。
+   *
+   * 修复：alpha > 1 时用快照真实速度一阶外推（dead-reckoning），中间渲染
+   * 帧保持连续运动；外推上限 EXTRAPOLATE_MAX_S（约一物理步），物理新快照
+   * 到达后 LERP 自然接管。yaw/pitch 由输入驱动、外推无意义，保持 cur。
+   */
   private interpolate(now: number): FrameSnapshot {
     const cur = this.curSnap!;
     const prev = this.prevSnap;
     if (!prev || cur.timeMs <= prev.timeMs) return cur;
-    // alpha = (渲染时刻 - 旧帧时间) / (新帧时间 - 旧帧时间) ∈ [0,1]
-    const alpha = THREE.MathUtils.clamp(
-      (now - prev.timeMs) / (cur.timeMs - prev.timeMs),
-      0,
-      1,
-    );
+    // alpha = (渲染时刻 - 旧帧时间) / (新帧时间 - 旧帧时间)；>1 = 物理帧过期
+    const alpha = (now - prev.timeMs) / (cur.timeMs - prev.timeMs);
+
+    if (alpha > 1) {
+      // 低速门限：横向(xz)与竖向(y)速度**均** < 500 时不外推——起步拉地速
+      // 阶段运动不可预测（加速/转向/起跳），外推会产生误导性位移；
+      // 退回最新物理快照位置停等（等价旧实现 clamp 到 1）。
+      // 任一方 ≥ 500（坡上高速滑行等方向稳定阶段）时启用一阶外推。
+      const speedXZ = Math.hypot(cur.vel.x, cur.vel.z);
+      const speedY = Math.abs(cur.vel.y);
+      if (speedXZ < EXTRAPOLATE_MIN_SPEED && speedY < EXTRAPOLATE_MIN_SPEED) {
+        return cur;
+      }
+      // 外推插帧：超过最新物理快照的部分按速度积分（钳制上限防穿墙跑飞）
+      const extSec = Math.min((now - cur.timeMs) / 1000, EXTRAPOLATE_MAX_S);
+      return {
+        pos: {
+          x: cur.pos.x + cur.vel.x * extSec,
+          y: cur.pos.y + cur.vel.y * extSec,
+          z: cur.pos.z + cur.vel.z * extSec,
+        },
+        yaw: cur.yaw,
+        pitch: cur.pitch,
+        vel: { ...cur.vel },
+        onGround: cur.onGround,
+        mode: cur.mode,
+        eyeHeight: cur.eyeHeight,
+        timeMs: now,
+        seq: cur.seq,
+      };
+    }
+
     return {
       pos: {
         x: lerp(prev.pos.x, cur.pos.x, alpha),
@@ -345,7 +471,7 @@ export class RendererMain {
       },
       yaw: lerp(prev.yaw, cur.yaw, alpha),
       pitch: lerp(prev.pitch, cur.pitch, alpha),
-      vel: { x: 0, y: 0, z: 0 },
+      vel: { ...cur.vel },
       onGround: cur.onGround,
       mode: cur.mode,
       eyeHeight: lerp(prev.eyeHeight, cur.eyeHeight, alpha),
