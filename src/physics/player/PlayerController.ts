@@ -111,6 +111,10 @@ export class PlayerController implements MovementContext {
   stuckTicks = 0;
   blockedTicks = 0;
   contactsThisTick: string[] = [];
+  /** 最近一次速度归零/异常减速的诊断原因（HUD 显示；由各归零路径设置）。 */
+  zeroCause: string | null = null;
+  /** 本 tick 开始时的速度（速度骤降诊断用）。 */
+  prevSpeed = 0;
 
   // 临时向量——跨 tick 复用避免分配。
   readonly wishDir = vec3();
@@ -287,6 +291,8 @@ export class PlayerController implements MovementContext {
   tick(dt: number): void {
     copy(this.prevPos, this.currPos);
     this.prevEye = this.currEye;
+    // 记录本 tick 起始速度（速度骤降诊断用；detectBlockedMove 读取）
+    this.prevSpeed = Math.hypot(this.velocity.x, this.velocity.y, this.velocity.z);
 
     // Space 物理按住期间持续为真；排队的滚轮 notch 只在本 tick 消费一次随即清除，
     // 与 Space 是否同按无关——见 bindInput() 的 wheel 处理器。

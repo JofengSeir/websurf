@@ -37,27 +37,27 @@ export interface ParamState extends ParamDef {
 export const PARAM_DEFS: ParamDef[] = [
   {
     name: 'maxSpeed', label: '地速上限', unit: 'u/s',
-    kind: 'number', default: DEFAULT_SETTINGS.runSpeed, min: 50, max: 1000, step: 5,
+    kind: 'number', default: DEFAULT_SETTINGS.runSpeed, min: 50, max: 1000, step: 1,
     description: '地面移动速度上限（sv_maxspeed，对应 runSpeed）。超过后地面加速不再生效；hns 模式下"拉不动地速"即此值被压低的典型表现。',
   },
   {
     name: 'walkSpeed', label: '走路速度', unit: 'u/s',
-    kind: 'number', default: DEFAULT_SETTINGS.walkSpeed, min: 50, max: 400, step: 5,
+    kind: 'number', default: DEFAULT_SETTINGS.walkSpeed, min: 50, max: 400, step: 1,
     description: '按住 Shift 的走路速度（+speed）。',
   },
   {
     name: 'crouchSpeed', label: '蹲走速度', unit: 'u/s',
-    kind: 'number', default: DEFAULT_SETTINGS.crouchSpeed, min: 40, max: 300, step: 5,
+    kind: 'number', default: DEFAULT_SETTINGS.crouchSpeed, min: 40, max: 300, step: 1,
     description: '蹲下移动速度。',
   },
   {
     name: 'airAccelerate', label: '空气加速', unit: '',
-    kind: 'number', default: DEFAULT_SETTINGS.airAccelerate, min: 10, max: 400, step: 5,
+    kind: 'number', default: DEFAULT_SETTINGS.airAccelerate, min: 10, max: 400, step: 1,
     description: '空中转向加速度（sv_airaccelerate）。越高，空中转向/加速越快。',
   },
   {
     name: 'gravity', label: '重力', unit: 'u/s²',
-    kind: 'number', default: DEFAULT_RUNTIME_PHYSICS.gravity, min: 100, max: 2000, step: 10,
+    kind: 'number', default: DEFAULT_RUNTIME_PHYSICS.gravity, min: 100, max: 2000, step: 1,
     description: '重力加速度（sv_gravity）。影响下落速度与跳跃滞空时间。',
   },
   {
@@ -72,7 +72,7 @@ export const PARAM_DEFS: ParamDef[] = [
   },
   {
     name: 'stopSpeed', label: '停止速度', unit: 'u/s',
-    kind: 'number', default: DEFAULT_RUNTIME_PHYSICS.stopSpeed, min: 0, max: 400, step: 5,
+    kind: 'number', default: DEFAULT_RUNTIME_PHYSICS.stopSpeed, min: 0, max: 400, step: 1,
     description: '停止速度（sv_stopspeed）：速度低于此值直接归零。',
   },
   {
@@ -102,7 +102,7 @@ export const PARAM_DEFS: ParamDef[] = [
   },
   {
     name: 'maxAirSpeed', label: '空中限速值', unit: 'u/s',
-    kind: 'number', default: DEFAULT_SETTINGS.perf.maxAirSpeed, min: 200, max: 800, step: 5,
+    kind: 'number', default: DEFAULT_SETTINGS.perf.maxAirSpeed, min: 200, max: 800, step: 1,
     description: '空中速度上限（perf 模式开启后生效，sv_maxairspeed 风格）。',
   },
   {

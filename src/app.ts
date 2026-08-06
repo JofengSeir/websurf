@@ -56,11 +56,11 @@ const dom = {
 	physicsModeSelect: document.getElementById('physicsMode') as HTMLSelectElement | null,
 	colliderSourceSelect: document.getElementById('colliderSource') as HTMLSelectElement | null,
 	mouseSensRange: document.getElementById('mouseSens') as HTMLInputElement | null,
-	mouseSensVal: document.getElementById('mouseSensVal') as HTMLElement | null,
+	mouseSensNum: document.getElementById('mouseSensNum') as HTMLInputElement | null,
 	yawBindSpeedRange: document.getElementById('yawBindSpeed') as HTMLInputElement | null,
-	yawBindSpeedVal: document.getElementById('yawBindSpeedVal') as HTMLElement | null,
+	yawBindSpeedNum: document.getElementById('yawBindSpeedNum') as HTMLInputElement | null,
 	cullDistRange: document.getElementById('cullDistance') as HTMLInputElement | null,
-	cullDistVal: document.getElementById('cullDistanceVal') as HTMLElement | null,
+	cullDistNum: document.getElementById('cullDistanceNum') as HTMLInputElement | null,
 	pvsEnabledChk: document.getElementById('pvsEnabled') as HTMLInputElement | null,
 	respawnBtn: document.getElementById('respawnBtn') as HTMLButtonElement | null,
 	spawnSelect: document.getElementById('spawnSelect') as HTMLSelectElement | null,
@@ -68,7 +68,7 @@ const dom = {
 	triggerModeRadios: document.querySelectorAll('input[name="teleportTriggerMode"]') as NodeListOf<HTMLInputElement>,
 	groundedFramesRow: document.getElementById('groundedFramesRow') as HTMLElement | null,
 	groundedFramesRange: document.getElementById('groundedFramesRange') as HTMLInputElement | null,
-	groundedFramesVal: document.getElementById('groundedFramesVal') as HTMLElement | null,
+	groundedFramesNum: document.getElementById('groundedFramesNum') as HTMLInputElement | null,
 	// 显示设置（显示设置面板）
 	showSolidsChk: document.getElementById('showSolids') as HTMLInputElement | null,
 	showTriggersChk: document.getElementById('showTriggers') as HTMLInputElement | null,
@@ -76,7 +76,7 @@ const dom = {
 	planeInfoEl: document.getElementById('planeInfo') as HTMLElement | null,
 	// 物理控制面板
 	hullScale: document.getElementById('hullScale') as HTMLInputElement | null,
-	hullScaleVal: document.getElementById('hullScaleVal') as HTMLElement | null,
+	hullScaleNum: document.getElementById('hullScaleNum') as HTMLInputElement | null,
 	hullHalfWidth: document.getElementById('hullHalfWidth') as HTMLInputElement | null,
 	hullHalfWidthNum: document.getElementById('hullHalfWidthNum') as HTMLInputElement | null,
 	hullStandHeight: document.getElementById('hullStandHeight') as HTMLInputElement | null,
@@ -198,6 +198,11 @@ async function main(): Promise<void> {
 	bindInput(dom.canvas);
 	bindUI();
 
+	// 3.5 初始化"进入地图前即可设置"的控件（物理模式/碰撞来源/PVS 等与地图加载无关）
+	if (dom.colliderSourceSelect) dom.colliderSourceSelect.value = config.physics.colliderSource;
+	if (dom.pvsEnabledChk) dom.pvsEnabledChk.checked = config.lod.pvsEnabled;
+	if (dom.physicsModeSelect) dom.physicsModeSelect.value = config.physics.mode;
+
 	// 4. 启动输入循环（帧信号 + 按键位掩码）
 	startInputLoop();
 }
@@ -272,28 +277,21 @@ async function handleSceneData(msg: SceneDataMessage): Promise<void> {
 			`对角线 ${(diag?.diagonal ?? 0).toFixed(0)} HU）`,
 		'success',
 	);
-	// 动态设置视距剔除滑块范围（真实值由主线程 LOD 计算）
+	// 动态设置视距剔除滑块范围（真实值由主线程 LOD 计算；控件本身进入地图前已可用）
 	if (dom.cullDistRange && diag) {
 		dom.cullDistRange.min = '1000';
 		dom.cullDistRange.max = String(Math.ceil(diag.maxCull));
-		dom.cullDistRange.step = '100';
 		dom.cullDistRange.value = String(diag.defaultCull);
-		dom.cullDistRange.disabled = false;
 	}
-	if (dom.cullDistVal && diag) {
-		dom.cullDistVal.textContent = diag.defaultCull.toFixed(0);
+	if (dom.cullDistNum && diag) {
+		dom.cullDistNum.max = String(Math.ceil(diag.maxCull));
+		dom.cullDistNum.value = String(diag.defaultCull);
 	}
-	// 启用控件
-	if (dom.physicsModeSelect) dom.physicsModeSelect.disabled = false;
-	if (dom.colliderSourceSelect) {
-		dom.colliderSourceSelect.disabled = false;
-		dom.colliderSourceSelect.value = config.physics.colliderSource;
-	}
+	// 启用控件（进入地图前即可设置的：物理模式/碰撞来源/PVS/视距已在 HTML 初始可用）
 	if (dom.respawnBtn) dom.respawnBtn.disabled = false;
 	if (dom.spawnSelect) dom.spawnSelect.disabled = false;
 	// PVS 剔除：复选框同步 config.lod.pvsEnabled
 	if (dom.pvsEnabledChk) {
-		dom.pvsEnabledChk.disabled = false;
 		dom.pvsEnabledChk.checked = config.lod.pvsEnabled;
 	}
 	// 自定义传送点：启用按钮 + 从 localStorage 刷新列表
@@ -307,8 +305,8 @@ async function handleSceneData(msg: SceneDataMessage): Promise<void> {
 	if (dom.groundedFramesRange) {
 		dom.groundedFramesRange.value = String(config.debug.groundedFramesRequired);
 	}
-	if (dom.groundedFramesVal) {
-		dom.groundedFramesVal.textContent = String(config.debug.groundedFramesRequired);
+	if (dom.groundedFramesNum) {
+		dom.groundedFramesNum.value = String(config.debug.groundedFramesRequired);
 	}
 	updateGroundedFramesVisibility();
 	// 显示设置：同步碰撞箱显示开关 + 准星信息开关
@@ -320,10 +318,15 @@ async function handleSceneData(msg: SceneDataMessage): Promise<void> {
 function updateStatsUI(msg: StatsMessage): void {
 	if (!dom.statsEl) return;
 	const [px, py, pz] = msg.pos;
-	dom.statsEl.textContent =
+	let text =
 		`FPS ${msg.fps}  位置 ${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}  ` +
 		`速度 ${msg.speed.toFixed(0)}  ${msg.onGround ? '地面' : '空中'}  ` +
 		`cluster ${msg.cluster >= 0 ? msg.cluster : '—'}`;
+	// 速度归零诊断（卡坡时显示触发路径，如 cornered×3 / blocked×3 / stuck×N）
+	if (msg.zeroCause) {
+		text += `  卡因[${msg.zeroCause}]`;
+	}
+	dom.statsEl.textContent = text;
 	// 准星射线检测信息（渲染器本地计算，随渲染循环刷新）
 	if (dom.planeInfoEl) {
 		dom.planeInfoEl.textContent = formatPlaneInfo(rendererMain?.getPlaneInfo() ?? null);
@@ -517,16 +520,30 @@ function bindUI(): void {
 	// 鼠标灵敏度（cs-movement 乘数：有效灵敏度 = sensitivity * m_yaw 0.022 deg/px）
 	dom.mouseSensRange?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
-		if (dom.mouseSensVal) dom.mouseSensVal.textContent = val.toFixed(2);
+		if (dom.mouseSensNum && Number.isFinite(val)) dom.mouseSensNum.value = String(val);
 		config.input.sensitivity = val;
 		// sensitivity 通过 config 同步到 Worker 端 player.settings.sensitivity
+		inputBridge?.sendConfig('input', { sensitivity: val });
+	});
+	dom.mouseSensNum?.addEventListener('input', (e) => {
+		const val = parseFloat((e.target as HTMLInputElement).value);
+		if (!Number.isFinite(val)) return;
+		if (dom.mouseSensRange) dom.mouseSensRange.value = String(Math.min(5, Math.max(0.1, val)));
+		config.input.sensitivity = val;
 		inputBridge?.sendConfig('input', { sensitivity: val });
 	});
 
 	// Q/E 键 yaw 旋转速度（turn bind，度/秒）
 	dom.yawBindSpeedRange?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
-		if (dom.yawBindSpeedVal) dom.yawBindSpeedVal.textContent = val.toFixed(0);
+		if (dom.yawBindSpeedNum && Number.isFinite(val)) dom.yawBindSpeedNum.value = String(val);
+		applyConfigPatch(config, 'input', { yawBindSpeed: val });
+		inputBridge?.sendConfig('input', { yawBindSpeed: val });
+	});
+	dom.yawBindSpeedNum?.addEventListener('input', (e) => {
+		const val = parseFloat((e.target as HTMLInputElement).value);
+		if (!Number.isFinite(val)) return;
+		if (dom.yawBindSpeedRange) dom.yawBindSpeedRange.value = String(Math.min(720, Math.max(0, val)));
 		applyConfigPatch(config, 'input', { yawBindSpeed: val });
 		inputBridge?.sendConfig('input', { yawBindSpeed: val });
 	});
@@ -534,7 +551,15 @@ function bindUI(): void {
 	// 视距剔除（主线程渲染器 LOD 直接生效 + Worker 配置同步）
 	dom.cullDistRange?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
-		if (dom.cullDistVal) dom.cullDistVal.textContent = val.toFixed(0);
+		if (dom.cullDistNum && Number.isFinite(val)) dom.cullDistNum.value = String(val);
+		rendererMain?.setCullDistance(val);
+		inputBridge?.sendSetCullDistance(val);
+	});
+	dom.cullDistNum?.addEventListener('input', (e) => {
+		const val = parseFloat((e.target as HTMLInputElement).value);
+		if (!Number.isFinite(val)) return;
+		const max = parseFloat(dom.cullDistRange?.max ?? '100000');
+		if (dom.cullDistRange) dom.cullDistRange.value = String(Math.min(max, Math.max(1000, val)));
 		rendererMain?.setCullDistance(val);
 		inputBridge?.sendSetCullDistance(val);
 	});
@@ -693,10 +718,17 @@ function bindUI(): void {
 			updateGroundedFramesVisibility();
 		});
 	});
-	// 落地检测：连续落地帧数滑块
+	// 落地检测：连续落地帧数滑块 + 输入框
 	dom.groundedFramesRange?.addEventListener('input', (e) => {
 		const val = parseInt((e.target as HTMLInputElement).value, 10);
-		if (dom.groundedFramesVal) dom.groundedFramesVal.textContent = String(val);
+		if (dom.groundedFramesNum && Number.isFinite(val)) dom.groundedFramesNum.value = String(val);
+		applyConfigPatch(config, 'debug', { groundedFramesRequired: val });
+		inputBridge?.sendConfig('debug', { groundedFramesRequired: val });
+	});
+	dom.groundedFramesNum?.addEventListener('input', (e) => {
+		const val = parseInt((e.target as HTMLInputElement).value, 10);
+		if (!Number.isFinite(val)) return;
+		if (dom.groundedFramesRange) dom.groundedFramesRange.value = String(Math.min(30, Math.max(1, val)));
 		applyConfigPatch(config, 'debug', { groundedFramesRequired: val });
 		inputBridge?.sendConfig('debug', { groundedFramesRequired: val });
 	});
@@ -742,6 +774,9 @@ async function handleBspFile(file: File): Promise<void> {
 		setError('Worker 未就绪');
 		return;
 	}
+	// 内存重置：先卸载旧地图的全部渲染资源（GPU geometry/material/纹理 +
+	// LOD/PVS/碰撞可视化/插值缓存），防止多次加载地图累积泄漏导致帧率下降
+	rendererMain?.disposeScene();
 	lastLoadedFileName = file.name;
 	teleportMapName = file.name;
 	awaitingPlayerPos = false;
@@ -922,6 +957,18 @@ function initPhysicsPanel(): void {
 	dom.hullScale?.addEventListener('input', () => {
 		if (panelSuppress) return;
 		const s = Number(dom.hullScale!.value);
+		if (dom.hullScaleNum && Number.isFinite(s)) dom.hullScaleNum.value = String(Math.round(s * 100) / 100);
+		inputBridge?.sendSetHull({
+			halfWidth: Math.round(16 * s),
+			standHeight: Math.round(72 * s),
+			duckHeight: Math.round(54 * s),
+		});
+	});
+	dom.hullScaleNum?.addEventListener('input', () => {
+		if (panelSuppress) return;
+		const s = Number(dom.hullScaleNum!.value);
+		if (!Number.isFinite(s)) return;
+		if (dom.hullScale) dom.hullScale.value = String(Math.min(2, Math.max(0.5, s)));
 		inputBridge?.sendSetHull({
 			halfWidth: Math.round(16 * s),
 			standHeight: Math.round(72 * s),
@@ -978,7 +1025,7 @@ function sendHullFromInputs(): void {
 		standHeight: Number(dom.hullStandHeight?.value ?? 72),
 		duckHeight: Number(dom.hullDuckHeight?.value ?? 54),
 	});
-	if (dom.hullScaleVal) dom.hullScaleVal.textContent = '自定义';
+	if (dom.hullScaleNum) dom.hullScaleNum.value = '1';
 }
 
 /** 渲染物理参数快照（Worker → 主线程；参数值/来源/碰撞箱状态）。 */
@@ -1009,18 +1056,18 @@ function renderPhysicsSnapshot(msg: PhysicsSnapshotMessage): void {
 		if (dom.hullStandHeightNum) dom.hullStandHeightNum.value = String(standHeight);
 		if (dom.hullDuckHeight) dom.hullDuckHeight.value = String(duckHeight);
 		if (dom.hullDuckHeightNum) dom.hullDuckHeightNum.value = String(duckHeight);
-		if (dom.hullScale && dom.hullScaleVal) {
+		if (dom.hullScale && dom.hullScaleNum) {
 			const k = standHeight / 72;
 			const uniform = Math.abs(halfWidth / 16 - k) < 0.02 && Math.abs(duckHeight / 54 - k) < 0.02;
 			if (uniform && !isDefault) {
 				dom.hullScale.value = String(Math.round(k * 20) / 20);
-				dom.hullScaleVal.textContent = `${(Math.round(k * 100) / 100).toFixed(2)}×`;
+				dom.hullScaleNum.value = String(Math.round(k * 100) / 100);
 			} else if (isDefault) {
 				dom.hullScale.value = '1';
-				dom.hullScaleVal.textContent = '1.00×';
+				dom.hullScaleNum.value = '1';
 			} else {
 				dom.hullScale.value = '1';
-				dom.hullScaleVal.textContent = '自定义';
+				dom.hullScaleNum.value = '1';
 			}
 		}
 		// 3. 自动恢复开关 + 来源 badge

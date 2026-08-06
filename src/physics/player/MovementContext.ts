@@ -75,6 +75,14 @@ export interface MovementContext {
   stuckTicks: number;
   blockedTicks: number;
   contactsThisTick: string[];
+  /** 本 tick 开始时的速度标量（速度骤降诊断用；由 PlayerController.tick 记录）。 */
+  prevSpeed?: number;
+  /**
+   * 最近一次速度归零/异常减速的诊断原因（可选；HUD 显示用）。
+   * 由 TryPlayerMove / BlockedMove / StuckCheck 设置，
+   * 格式：`路径名 上下文`（如 `cornered×3 v(0,0,0)`、`slowdown-36% c[...]`）。
+   */
+  zeroCause?: string | null;
 
   // 临时向量——跨 tick 复用避免分配。
   readonly wishDir: Vec3;

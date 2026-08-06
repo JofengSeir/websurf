@@ -57,6 +57,7 @@ export function checkStuck(ctx: MovementContext): boolean {
     );
   }
   ctx.stuckTicks++;
+  ctx.zeroCause = `stuck×${ctx.stuckTicks} @(${ctx.origin.x.toFixed(0)},${ctx.origin.y.toFixed(0)},${ctx.origin.z.toFixed(0)})`;
   set(ctx.velocity, 0, 0, 0);
   return true;
 }
