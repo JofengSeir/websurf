@@ -345,8 +345,8 @@ fn probe_phy_orientation() {
                 }
                 has_bone0 = true;
                 for v in &c.vertices {
-                    // 修复后链路：IVP→Source 坐标转换（y↔z 交换）+ 根骨骼变换
-                    let ivp2src = [v[0], v[2], v[1]];
+                    // 修复后链路：IVP→Source 绕 x 轴 90°（x, z, -y）+ 根骨骼变换
+                    let ivp2src = [v[0], v[2], -v[1]];
                     let rt = model.apply_root_transform(vmdl::Vector {
                         x: ivp2src[0],
                         y: ivp2src[1],

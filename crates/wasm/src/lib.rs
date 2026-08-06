@@ -910,11 +910,11 @@ impl BspProcessor {
                     }
                     let base = local.len() as u32;
                     for v in &c.vertices {
-                        // 关键：PHY 顶点存的是 **IVP 坐标系**（vphysics 内部，Y-up），
-                        // Source 是 Z-up —— 转换 = y↔z 交换：source = (phy.x, phy.z, phy.y)。
-                        // 实测 79/87 模型统一命中该映射（probe_phy_mapping 暴力搜索）；
-                        // 不转换会表现为「左偏 90°/上下颠倒」。
-                        let ivp2src = [v[0], v[2], v[1]];
+                        // 关键：PHY 顶点存的是 **IVP 坐标系**（vphysics 内部，Y-up 左手系），
+                        // Source 是 Z-up 右手系 —— 转换 = **绕 x 轴 90°：source = (x, z, -y)**
+                        // （det=+1 纯旋转；仅 y↔z 交换是 det=-1 镜像，会上下颠倒）。
+                        // 实测 79/87 模型尺寸映射 + 符号验证（probe_phy_mapping/orientation）。
+                        let ivp2src = [v[0], v[2], -v[1]];
                         // 再施加与显示端相同的根骨骼变换（非 STATIC_PROP 时骨骼 0 带旋转）
                         let rt = model.apply_root_transform(vmdl::Vector {
                             x: ivp2src[0],
