@@ -4,8 +4,11 @@
  * 职责：
  * 1. wasm-init：加载 WASM（dist base64 / dev URL），实例化 BspProcessor + PhysWorld
  * 2. load-bsp：Worker 内解析 BSP → 导出 GLB/spawn/pvs 传主线程 + build_world 构建物理世界
- * 3. 60Hz 自驱物理循环：Atomics.wait(16ms 超时兜底) → CAS 消耗输入槽 → wasm tick → 写权威区 + V_A++
+ * 3. 固定步长物理循环：Atomics.wait(16ms 超时兜底) → CAS 消耗输入槽 → wasm tick →
+ *    写权威基本信息（角度/速度/眼高/着地，**位置由主线程预测积分**）
  * 4. config/respawn/teleport/set-death-threshold 消息处理
+ *
+ * 物理不设上限：固定步长累积器不封顶（低帧率时补足全部欠步，不丢物理时间）。
  */
 
 /// <reference lib="webworker" />
@@ -18,8 +21,6 @@ import type { RuntimeConfig } from '../config.js';
 
 /** 固定步长（默认 64Hz；config.tickRate 覆盖）。 */
 let fixedDt = 1 / 64;
-/** 每帧最多固定步数（低帧率保护）。 */
-const MAX_FIXED_STEPS = 10;
 /** 防穿墙：单 tick 输入增量上限（随步长缩放，tickRate 快则每步上限同比缩小）。 */
 const MAX_INPUT_PER_STEP_BASE = 1200; // 每 1/64s 的 yaw 增量上限（度）
 
@@ -33,8 +34,6 @@ let phys: PhysWorld | null = null;
 let shared: ShmState | null = null;
 let config: RuntimeConfig = createConfig();
 let sceneReady = false;
-/** 权威版本号（本地递增用）。 */
-let seqCounter = 0;
 /** FPS 统计。 */
 let fpsCount = 0;
 let fpsWallStart = 0;
@@ -89,6 +88,7 @@ function dispatch(e: MessageEvent): void {
   }
   if (type === 'respawn') {
     phys?.respawn();
+    notifyPosReset();
     return;
   }
   if (type === 'teleport') {
@@ -96,6 +96,7 @@ function dispatch(e: MessageEvent): void {
     const tm = msg as { target?: number };
     if (typeof tm.target === 'number') {
       phys?.teleport_to_spawn(tm.target);
+      notifyPosReset();
     }
     return;
   }
@@ -122,15 +123,13 @@ function runLoop(): void {
       const dt = Math.min((now - lastT) / 1000, 0.1);
       lastT = now;
 
-      // 固定步长推进：累积器模式（144Hz 下 dt≈7ms < fixedDt，累积到整步再推进）
+      // 固定步长推进：累积器模式，不设步数上限（不丢物理时间，防低帧率慢动作）
       acc += dt;
-      let steps = 0;
-      while (acc >= fixedDt && steps < MAX_FIXED_STEPS) {
+      while (acc >= fixedDt) {
         acc -= fixedDt;
         stepPhysics(fixedDt);
-        steps++;
       }
-      // 每帧都写权威快照（steps=0 时物理未推进，也写基准帧供渲染插值）
+      // 每帧都写权威基本信息（steps=0 时物理未推进，也写基准帧供渲染外推）
       writeFrame(now);
       setTimeout(loop, 16);
     } catch (err) {
@@ -156,7 +155,7 @@ function stepPhysics(dt: number): void {
   phys.tick(dt, keys, dx, dy);
 }
 
-/** 写权威状态到 SAB + 递增 V_A。 */
+/** 写权威基本信息（角度/速度/眼高/着地）到 SAB + 递增 V_A。位置由主线程预测积分，不写。 */
 function writeFrame(timeMs: number): void {
   if (!shared || !phys) return;
   const s = phys.state() as {
@@ -165,21 +164,17 @@ function writeFrame(timeMs: number): void {
     velX: number; velY: number; velZ: number;
     onGround: boolean; eyeHeight: number;
   };
-  seqCounter++;
-  const va = shared.writeAuthoritative(
+  void s.posX; void s.posY; void s.posZ; // 位置仅权威侧维护，不同步主线程
+  shared.writeAuthoritative(
     {
-      pos: { x: s.posX, y: s.posY, z: s.posZ },
       yaw: s.yaw,
       pitch: s.pitch,
       vel: { x: s.velX, y: s.velY, z: s.velZ },
-      onGround: s.onGround,
       eyeHeight: s.eyeHeight,
       timeMs,
     },
-    s.eyeHeight,
     s.onGround,
   );
-  void va;
   // FPS 统计（0.5s 墙钟窗口）
   fpsCount++;
   if (fpsWallStart === 0) fpsWallStart = performance.now();
@@ -327,15 +322,6 @@ async function handleLoadBsp(data: ArrayBuffer, _name: string): Promise<void> {
     };
     postMessage(sceneData, [glbBuffer] as never);
 
-    // 世界 JSON 转发（Worker-B 构建预测世界；加载时一次，非 64Hz 热路径）
-    postMessage({
-      type: 'world-json',
-      brushJson,
-      triJson: triJson ?? '[]',
-      teleportJson,
-      spawn: { x: spawn.x, y: spawn.y, z: spawn.z, yawDeg: spawn.yawDeg },
-    } satisfies MainMessage);
-
     sceneReady = true;
     postMessage({ type: 'parse-progress', stage: '物理世界就绪' } as never);
   } catch (err) {
@@ -344,6 +330,22 @@ async function handleLoadBsp(data: ArrayBuffer, _name: string): Promise<void> {
       message: `[load-bsp] ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
     } satisfies MainMessage);
   }
+}
+
+/**
+ * 位置重置事件（respawn/teleport 后回传一次，供主线程预测位置归零）。
+ * 位置平时不同步，仅此类位置突变事件通知。
+ */
+function notifyPosReset(): void {
+  if (!phys) return;
+  const s = phys.state() as {
+    posX: number; posY: number; posZ: number; yaw: number;
+  };
+  postMessage({
+    type: 'player-respawn',
+    pos: [s.posX, s.posY, s.posZ],
+    yawDeg: s.yaw * 180 / Math.PI,
+  } satisfies MainMessage);
 }
 
 /** 面板参数 → wasm set_params（tickRate 单独处理驱动步长）。 */

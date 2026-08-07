@@ -1,15 +1,14 @@
 /**
  * 构建 WebSurf-min dist/（常规多文件打包，非 base64 内嵌单文件）。
  *
- * 背景：物理双 Worker 依赖 SharedArrayBuffer（需 COOP/COEP 头），file:// 双击无法
+ * 背景：权威物理 Worker 依赖 SharedArrayBuffer（需 COOP/COEP 头），file:// 双击无法
  * 启用——dist 本就只能经本地服务器（play.cmd / serve.py）运行，base64 内嵌（为
  * file:// 兜底）不再有意义，改为与 dev（web/）同构的常规打包：
  *
  * 产物：
  *   dist/index.html            — module script 引用 ./app.js
- *   dist/app.js                — esbuild ESM（创建 ./worker.js / ./predictor.js 双 Worker）
+ *   dist/app.js                — esbuild ESM（创建 ./worker.js 权威 Worker）
  *   dist/worker.js             — 权威 Worker（ESM）
- *   dist/predictor.js          — 预测 Worker（ESM）
  *   dist/websurf_wasm_bg.wasm  — WASM 外置文件（worker 内 fetch 相对路径加载）
  *
  * 用法：node scripts/build-dist.mjs
@@ -47,11 +46,10 @@ async function main() {
   if (!existsSync(distDir)) mkdirSync(distDir, { recursive: true });
 
   // 1. esbuild 三产物（ESM）
-  console.log('[1/4] 打包 app / worker / predictor (ESM)...');
+  console.log('[1/4] 打包 app / worker (ESM)...');
   const entries = [
     ['app', join(root, 'src', 'app.ts')],
     ['worker', join(root, 'src', 'worker', 'main.ts')],
-    ['predictor', join(root, 'src', 'worker', 'predictor-main.ts')],
   ];
   for (const [name, entry] of entries) {
     await build({ ...commonOptions, entryPoints: [entry], outfile: join(distDir, name + '.js') });
@@ -72,10 +70,10 @@ async function main() {
 
   // 4. 总览
   console.log('[4/4] 完成');
-  const total = ['app.js', 'worker.js', 'predictor.js', 'websurf_wasm_bg.wasm']
+  const total = ['app.js', 'worker.js', 'websurf_wasm_bg.wasm']
     .reduce((acc, f) => acc + (existsSync(join(distDir, f)) ? readFileSync(join(distDir, f)).length : 0), 0);
   console.log(`\n=== 构建完成 ===`);
-  console.log(`总大小: ${(total / 1024 / 1024).toFixed(2)} MB（5 个文件）`);
+  console.log(`总大小: ${(total / 1024 / 1024).toFixed(2)} MB（4 个文件）`);
   console.log(`\n运行：双击 play.cmd（推荐）或 python serve.py 8137 后访问 /dist/index.html`);
   console.log(`注意：直接双击 dist/index.html（file://）无法启用 SharedArrayBuffer，会显示引导卡片。`);
 }

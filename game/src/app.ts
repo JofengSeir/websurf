@@ -1,14 +1,14 @@
 /**
  * WebSurf-min — 主线程入口。
  *
- * 架构（时序图落地）：
- * - Worker-A（权威物理 60Hz 自驱）：src/worker/main.ts
- * - Worker-B（预测预计算）：src/worker/predictor-main.ts
- * - SAB 三区（输入槽 / 权威 S / 预测 S_pred）+ 三源决策零等待渲染
+ * 架构（2026-08-07 简化）：
+ * - Worker-A（权威物理，固定步长不设上限）：src/worker/main.ts
+ *   只同步角度/速度/眼高/着地（位置不同步）
+ * - 主线程渲染循环内做位置预测（速度积分外推，渲染帧 > 物理帧填补空隙）
  * - ESC 弹出式面板（PanelController）+ 速度面板 8Hz
  */
 
-import { createConfig, buildPhysicsParams } from './config.js';
+import { createConfig } from './config.js';
 import type { RuntimeConfig } from './config.js';
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
@@ -39,7 +39,6 @@ const mouseBuffer = new MouseBuffer();
 const pointerLock = new PointerLockController();
 
 let workerA: Worker | null = null;
-let predictorWorker: Worker | null = null;
 let bridge: InputBridge | null = null;
 let renderer: RendererMain | null = null;
 let panel: PanelController | null = null;
@@ -77,26 +76,20 @@ async function main(): Promise<void> {
   bridge = new InputBridge(workerA, shared);
   bridge.sendInit(sharedBuffer, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio);
 
-  // 2. Worker-B（预测）——独立 Worker 自行初始化 wasm（与 Worker-A 相同协议）
-  predictorWorker = new Worker('./predictor.js', { type: 'module' });
-  predictorWorker.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
-  predictorWorker.postMessage({ type: 'init', shared: sharedBuffer, predDt: 1 / config.physics.tickRate });
-  (globalThis as unknown as { __predictorWorker?: Worker }).__predictorWorker = predictorWorker;
-
-  // 3. 渲染器
+  // 2. 渲染器（预测在主线程渲染循环内进行，无 Worker-B）
   renderer = new RendererMain(shared);
   renderer.onSceneLoaded = (deathY) => bridge?.sendSetDeathThreshold(deathY);
   renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
   renderer.start();
 
-  // 4. 面板
+  // 3. 面板
   panel = new PanelController(
     config,
     bridge,
     () => pointerLock.isLocked(),
   );
 
-  // 5. 输入绑定
+  // 4. 输入绑定
   bindInput();
   startInputLoop();
 }
@@ -203,30 +196,12 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
     case 'scene-data':
       void handleSceneData(msg);
       break;
-    case 'world-json':
-      // 转发 Worker-B：构建预测世界（brush/tri/teleport/spawn，加载时一次）
-      predictorWorker?.postMessage({
-        type: 'build-world',
-        brushJson: msg.brushJson,
-        triJson: msg.triJson,
-        teleportJson: msg.teleportJson,
-        spawnX: msg.spawn.x,
-        spawnY: msg.spawn.y,
-        spawnZ: msg.spawn.z,
-        spawnYaw: msg.spawn.yawDeg,
-      });
-      // 预测世界刚以默认参数构建：立即同步面板当前参数/体型，保证双 Worker 同参
-      predictorWorker?.postMessage({
-        type: 'set-params',
-        params: buildPhysicsParams(config),
-      });
-      predictorWorker?.postMessage({
-        type: 'set-hull',
-        halfWidth: config.player.halfWidth,
-        standHeight: config.player.standHeight,
-        duckHeight: config.player.duckHeight,
-      });
+    case 'player-respawn': {
+      // 位置突变事件（重生/传送）：主线程预测位置归零到权威新位置
+      const r = msg as unknown as { pos: number[]; yawDeg: number };
+      renderer?.setInitialState({ x: r.pos[0], y: r.pos[1], z: r.pos[2], yawDeg: r.yawDeg });
       break;
+    }
     case 'stats':
       break; // HUD 精简：速度面板由主线程 8Hz 采样，不依赖 stats 消息
     case 'error':
@@ -243,6 +218,8 @@ async function handleSceneData(msg: SceneDataMessage): Promise<void> {
     return;
   }
   await renderer.loadScene(msg);
+  // 主线程位置预测起点 = 出生点（权威不同步位置）
+  renderer.setInitialState(msg.spawn);
   sceneReady = true;
   setStatus(
     `场景已加载（GLB ${msg.glbSizeKb} KB，${msg.metadata.numBrushes} brushes，` +
