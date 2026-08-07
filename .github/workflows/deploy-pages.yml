@@ -80,7 +80,7 @@ jobs:
         working-directory: game
         run: npm run build:wasm
 
-      - name: Build game TypeScript (typecheck + bundle: worker/app/predictor)
+      - name: "Build game TypeScript (typecheck + bundle: worker/app/predictor)"
         working-directory: game
         run: npm run build:ts
 
