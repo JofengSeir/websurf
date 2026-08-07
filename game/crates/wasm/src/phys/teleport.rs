@@ -152,10 +152,11 @@ impl TeleportManager {
     /// 每 tick 检测：返回触发目标（若触发），否则 None。
     /// `predict` 模式（Worker-B）不检测传送（预测只填充中间帧，权威每帧校正）。
     ///
-    /// 接触稳定门槛（严格化）：`ground_ticks` 为"接触帧计数"（地面或斜面，
-    /// 法线 y > 0.05，见 categorize_position）——仅当接触持续 ≥ 3 帧后才开始
-    /// 判定是否位于传送平面上；防止跳跃/下落轨迹"穿过"触发面瞬间误触；
-    /// 斜面滑行（surf）持续贴坡同样累计，可正常触发。
+    /// 落地稳定门槛（严格化）：`ground_ticks` 为"落地帧计数"——仅真正落地
+    /// （可站面，法线 y >= STANDABLE_NORMAL，见 categorize_position）才累加；
+    /// 斜面滑行（surfing）不算落地，滑行中 gate 恒不通过 → 不判定传送，避免
+    /// 坡底 trigger 被多点下探命中而误传送。仅当落地持续 ≥ gate_ticks 帧后
+    /// 才开始判定是否位于传送平面上；防止跳跃/下落轨迹"穿过"触发面瞬间误触。
     pub fn check(&mut self, pos: &V3, ground_ticks: u32, gate_ticks: u32, dt: f64, predict: bool) -> Option<TeleportDestination> {
         if predict {
             return None;
@@ -169,7 +170,7 @@ impl TeleportManager {
             return None;
         }
 
-        // 落地稳定门槛：ground_ticks >= 3 才算"站定"
+        // 落地稳定门槛：ground_ticks >= gate_ticks 才算"站定"（gate 默认 1）
         let grounded = ground_ticks >= gate_ticks;
         if grounded && !self.was_grounded {
             // 刚跨过门槛：重置全部 inside，重新从"未触碰"开始边沿跟踪——
@@ -199,8 +200,8 @@ impl TeleportManager {
             if (t.dest_index as usize) >= self.destinations.len() {
                 continue; // 越界防御（dest_by_name 已用数组下标，正常不会触发）
             }
-            // 多点下探（0~48）：覆盖斜面滑行的悬空 gap 与薄片 trigger；
-            // gate（接触 ≥3 帧）兜底防飞行误触
+            // 多点下探（0~48）：覆盖落地瞬间脚底尚未完全贴合的 gap 与薄片 trigger；
+            // gate（落地帧 ≥ gate_ticks）兜底——滑行/飞行中 ground_ticks=0 恒不判定
             let now_inside = probe_inside(pos, t);
             // StartTouch 边沿触发：仅 false→true 跳变
             let should_fire = now_inside && !t.inside;
@@ -226,10 +227,10 @@ impl TeleportManager {
     }
 }
 
-/// trigger 探测深度列表（units）：斜面滑行时玩家脚底悬空坡面 10~40 units（碰撞推移
-/// 无持续吸附），贴坡的薄 trigger（surf_666 大量 h≤8 薄片）用脚底单点检测不到 →
-/// 多点下探覆盖 gap；地面场景脚底本就在 trigger 内（点 0 命中）；空中经过由
-/// gate（接触 ≥3 帧）兜底防误触。
+/// trigger 探测深度列表（units）：落地判定时玩家 origin 已被吸附贴地（GROUND_TRACE_DIST），
+/// 点 0 即脚底、正常情况下已在 trigger 体积内；多下探点覆盖落地瞬间贴合前的微小 gap
+/// 与薄片 trigger（surf_666 大量 h≤8 薄片）。滑行/飞行中不触发任何探测（gate 基于
+/// 落地帧计数，滑行 surfing 不算落地——修复正常滑翔图坡底 trigger 滑行中被下探命中误传）。
 const TRIGGER_PROBES: [f64; 7] = [0.0, 8.0, 16.0, 24.0, 32.0, 40.0, 48.0];
 
 /// 多点探测：任一深度点在 trigger 内即视为 inside（覆盖滑行 gap 与薄片 trigger）。

@@ -148,6 +148,14 @@ surfing 碰撞信号都计，替代仅 on_ground）→ 斜面滑行也能满足�
 （surf_666 实测 283/523 个 trigger 为高度 ≤8 的薄片，单点必 miss）；spawnflags
 显式 0（未配置）不跳过。
 
+**2026-08-08 传送 gate 修正（滑行误触修复）**：上一条的"斜面滑行 surfing 也计入
+接触"导致正常滑翔图**坡底 trigger 误触**——滑行中 gate 通过，多点下探命中坡底
+trigger，人还在坡上滑就被传送回家。修正：`contact_ticks` **仅真正落地累加**
+（可站面 normal.y ≥ 0.7，与 on_ground 同步），斜面滑行（surfing）恒 0 → 滑行中
+gate 不通过、绝不触发传送；只有落地后才开始判定传送平面。回归测试
+`scripts/phys-teleport-gate.mjs`（场景1 贴坡滑行 contactTicks 恒 0 不传送；场景2
+悬空不传送 → 落地后触发）。
+
 ### 2.2 已知技术遗留（代码层面）
 
 | # | 项 | 现状 | 建议 |
