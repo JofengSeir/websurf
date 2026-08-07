@@ -96,6 +96,92 @@ export interface InputSample {
   keysMask: number;
 }
 
+/**
+ * 消息通道回退（MsgState）——无 SharedArrayBuffer 环境（线上静态部署无 COOP/COEP 头）。
+ *
+ * 与 ShmState 同接口（addInput/readAuthoritative/takeInput/writeAuthoritative），
+ * 用 postMessage 消息实现：
+ * - 主线程每帧 addInput → postMessage `input`（增量 + 当前键位；有序不丢）
+ * - Worker onmessage `input` → 累积输入缓冲（takeInput exchange 清空，语义同 SAB）
+ * - Worker 每 tick writeAuthoritative → postMessage `phys-frame`（权威帧 + va）
+ * - 主线程 onmessage `phys-frame` → 缓存最新帧（readAuthoritative 返回）
+ *
+ * 功能等价、性能降级（消息拷贝 vs 共享内存）；本地高性能游玩走 SAB 不受影响。
+ */
+export class MsgState {
+  readonly isShared = false;
+
+  // ── 主线程侧状态 ───────────────────────────────────────────
+  private latest: { frame: AuthFrame; va: number } | null = null;
+  // ── Worker 侧状态 ──────────────────────────────────────────
+  private dxAcc = 0;
+  private dyAcc = 0;
+  private keysMask = 0;
+  private va = 0;
+
+  /** 消息发送目标：主线程侧 = Worker 引用；Worker 侧 = null（用 self.postMessage）。 */
+  private readonly worker: Worker | null;
+
+  constructor(worker: Worker | null) {
+    this.worker = worker;
+  }
+
+  private post(msg: Record<string, unknown>): void {
+    if (this.worker) {
+      this.worker.postMessage(msg);
+    } else {
+      self.postMessage(msg);
+    }
+  }
+
+  // ── 主线程侧 ───────────────────────────────────────────────
+
+  /** 输入 → postMessage `input`（每帧一次；增量累积由 Worker 端缓冲）。 */
+  addInput(dx: number, dy: number, keysMask: number): void {
+    this.post({ type: 'input', dx, dy, keys: keysMask });
+  }
+
+  /** 读最近权威帧（Worker `phys-frame` 消息缓存）。 */
+  readAuthoritative(): { frame: AuthFrame; va: number } | null {
+    return this.latest;
+  }
+
+  /** 主线程接收 `phys-frame`（app.ts onmessage 调用）。 */
+  recvFrame(frame: AuthFrame, va: number): void {
+    this.latest = { frame, va };
+  }
+
+  // ── Worker 侧 ──────────────────────────────────────────────
+
+  /** Worker 接收 `input` 消息（dispatch 调用）：累积 + 键位覆盖（同 SAB 语义）。 */
+  recvInput(dx: number, dy: number, keys: number): void {
+    this.dxAcc += dx;
+    this.dyAcc += dy;
+    this.keysMask = keys; // 无条件覆盖：反映"当前按键状态"，松手即清零
+  }
+
+  /** 消耗输入（清空缓冲 + maxStep 截断，语义同 SAB takeInput）。 */
+  takeInput(maxStep: number): InputSample {
+    const clamp = (v: number): number => Math.max(-maxStep, Math.min(maxStep, v));
+    const dx = clamp(this.dxAcc);
+    const dy = clamp(this.dyAcc);
+    this.dxAcc = 0;
+    this.dyAcc = 0;
+    return { dx, dy, keysMask: this.keysMask };
+  }
+
+  /** Worker 写权威帧 → postMessage `phys-frame`。 */
+  writeAuthoritative(a: Omit<AuthFrame, 'onGround'>, onGround: boolean): number {
+    this.va++;
+    this.post({
+      type: 'phys-frame',
+      va: this.va,
+      frame: { ...a, onGround },
+    });
+    return this.va;
+  }
+}
+
 // ── 共享内存通道 ──────────────────────────────────────────────
 
 export class ShmState {
@@ -199,12 +285,16 @@ export class ShmState {
   }
 }
 
-/** 主线程侧创建（SAB 强制）。 */
-export function createMainSharedState(buffer: SharedArrayBuffer): ShmState {
-  return new ShmState(buffer);
+/** 主线程侧创建：crossOriginIsolated（本地 serve.py COOP/COEP）→ SAB 高性能；
+ * 否则（线上静态部署无 COOP/COEP）→ MsgState postMessage 回退（功能等价，性能降级）。 */
+export function createMainSharedState(
+  buffer: SharedArrayBuffer | null,
+  worker: Worker,
+): ShmState | MsgState {
+  return buffer ? new ShmState(buffer) : new MsgState(worker);
 }
 
-/** Worker 侧创建。 */
-export function createWorkerSharedState(buffer: SharedArrayBuffer): ShmState {
-  return new ShmState(buffer);
+/** Worker 侧创建（init.shared 为 null = MsgState 回退）。 */
+export function createWorkerSharedState(buffer: SharedArrayBuffer | null): ShmState | MsgState {
+  return buffer ? new ShmState(buffer) : new MsgState(null);
 }

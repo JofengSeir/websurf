@@ -14,7 +14,7 @@
 /// <reference lib="webworker" />
 
 import { PhysWorld, default as wasmInit } from '../../pkg/websurf_wasm.js';
-import { createWorkerSharedState, type ShmState } from './shared-state.js';
+import { createWorkerSharedState, type ShmState, type MsgState } from './shared-state.js';
 import type { WorkerMessage } from './worker-types.js';
 import { createConfig, applyConfigPatch } from '../config.js';
 import type { RuntimeConfig } from '../config.js';
@@ -24,7 +24,7 @@ let fixedDt = 1 / 64;
 /** 防穿墙：单 tick 输入增量上限。 */
 const MAX_INPUT_PER_STEP_BASE = 1200; // 每 1/64s 的 yaw 增量上限（度）
 
-let shared: ShmState | null = null;
+let shared: ShmState | MsgState | null = null;
 let phys: PhysWorld | null = null;
 let ready = false;
 let loopStarted = false;
@@ -155,7 +155,16 @@ function dispatch(e: MessageEvent<WorkerMessage | { type: string }>): void {
   const type = msg.type;
   if (type === 'init') {
     const init = msg as { shared?: SharedArrayBuffer | null };
-    if (init.shared) shared = createWorkerSharedState(init.shared);
+    // shared 为 null（线上静态无 COOP/COEP）→ MsgState 消息回退通道
+    shared = createWorkerSharedState(init.shared ?? null);
+    return;
+  }
+  if (type === 'input') {
+    // MsgState 回退：主线程每帧消息输入（SAB 模式无此消息）
+    const d = msg as { dx?: number; dy?: number; keys?: number };
+    if (shared && !shared.isShared) {
+      shared.recvInput(d.dx ?? 0, d.dy ?? 0, d.keys ?? 0);
+    }
     return;
   }
   if (type === 'wasm-init') {

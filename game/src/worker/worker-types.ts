@@ -128,6 +128,29 @@ export interface WorldJsonMessage {
   spawn: { x: number; y: number; z: number; yawDeg: number };
 }
 
+/** 主线程 → Worker：输入消息（MsgState 回退模式；SAB 模式无此消息）。 */
+export interface InputMessage {
+  type: 'input';
+  dx: number;
+  dy: number;
+  keys: number;
+}
+
+/** Worker → 主线程：权威帧消息（MsgState 回退模式；SAB 模式无此消息）。 */
+export interface PhysFrameMessage {
+  type: 'phys-frame';
+  va: number;
+  frame: {
+    pos: { x: number; y: number; z: number };
+    yaw: number;
+    pitch: number;
+    vel: { x: number; y: number; z: number };
+    onGround: boolean;
+    eyeHeight: number;
+    timeMs: number;
+  };
+}
+
 /** Worker → 主线程：权威碰撞事件（落地/撞墙瞬间；低频，位置微调+角度同步用）。 */
 export interface PhysEventMessage {
   type: 'phys-event';
