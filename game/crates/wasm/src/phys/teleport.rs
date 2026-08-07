@@ -59,6 +59,8 @@ pub struct TeleportManager {
     pub triggers: Vec<TeleportTrigger>,
     pub destinations: Vec<TeleportDestination>,
     cooldown: f64,
+    /// 上一帧是否已过落地稳定门槛（用于跨门槛时重置 inside 边沿跟踪）。
+    was_grounded: bool,
 }
 
 impl TeleportManager {
@@ -103,9 +105,13 @@ impl TeleportManager {
                 yaw: bsp_yaw_to_cs_yaw(t.angles[1]),
             });
         }
+        // 注意：值必须是数组下标（enumerate），不能用 d.index——后者是 BSP 实体
+        // 原始编号（可能跳跃/非连续），当数组下标用会越界 → destinations.get 返回
+        // None → 触发但不传送（check 已设 cooldown 但返回 None）。
         let dest_by_name: std::collections::HashMap<&str, usize> = destinations
             .iter()
-            .map(|d| (d.targetname.as_str(), d.index))
+            .enumerate()
+            .map(|(i, d)| (d.targetname.as_str(), i))
             .collect();
 
         let mut triggers = Vec::with_capacity(data.triggers.len());
@@ -139,12 +145,17 @@ impl TeleportManager {
             triggers,
             destinations,
             cooldown: 0.0,
+            was_grounded: false,
         })
     }
 
     /// 每 tick 检测：返回触发目标（若触发），否则 None。
     /// `predict` 模式（Worker-B）不检测传送（预测只填充中间帧，权威每帧校正）。
-    pub fn check(&mut self, pos: &V3, dt: f64, predict: bool) -> Option<TeleportDestination> {
+    ///
+    /// 落地稳定门槛（严格化）：仅当玩家落地（on_ground）持续 ≥ 3 帧后才开始判定
+    /// 是否位于传送平面上——防止跳跃/下落轨迹"穿过"触发面瞬间误触；
+    /// 落地站定在传送平面上才触发。
+    pub fn check(&mut self, pos: &V3, ground_ticks: u32, gate_ticks: u32, dt: f64, predict: bool) -> Option<TeleportDestination> {
         if predict {
             return None;
         }
@@ -154,6 +165,21 @@ impl TeleportManager {
             for t in &mut self.triggers {
                 t.inside = is_in_trigger(pos, t);
             }
+            return None;
+        }
+
+        // 落地稳定门槛：ground_ticks >= 3 才算"站定"
+        let grounded = ground_ticks >= gate_ticks;
+        if grounded && !self.was_grounded {
+            // 刚跨过门槛：重置全部 inside，重新从"未触碰"开始边沿跟踪——
+            // 否则跳跃轨迹穿过触发面时 inside 已被置 true，落地后永不触发
+            for t in &mut self.triggers {
+                t.inside = false;
+            }
+        }
+        self.was_grounded = grounded;
+        if !grounded {
+            // 未站定：不判定（也不污染 inside 状态）
             return None;
         }
 
@@ -167,6 +193,9 @@ impl TeleportManager {
             }
             if t.dest_index < 0 {
                 continue; // 孤儿触发器
+            }
+            if (t.dest_index as usize) >= self.destinations.len() {
+                continue; // 越界防御（dest_by_name 已用数组下标，正常不会触发）
             }
             let now_inside = is_in_trigger(pos, t);
             // StartTouch 边沿触发：仅 false→true 跳变

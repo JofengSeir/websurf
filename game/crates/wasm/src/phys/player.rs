@@ -74,6 +74,8 @@ pub struct PhysParams {
     pub yaw_bind_speed: f64,
     /// noclip 自由视角移动速度（HU/s；默认 800 = 200×4 原行为，sprint 再 ×4）。
     pub noclip_speed: f64,
+    /// 传送触发落地稳定门槛（帧）：落地持续 >= 该值才判定位于传送平面（防穿面误触）。
+    pub teleport_gate_ticks: u32,
     /// 碰撞箱体型。
     pub hull_half_width: f64,
     pub hull_stand_height: f64,
@@ -98,6 +100,7 @@ impl Default for PhysParams {
             sensitivity: 1.5,
             yaw_bind_speed: 210.0,
             noclip_speed: 800.0,
+            teleport_gate_ticks: 3,
             hull_half_width: DEFAULT_HULL_HALF_WIDTH,
             hull_stand_height: DEFAULT_HULL_STAND_HEIGHT,
             hull_duck_height: DEFAULT_HULL_DUCK_HEIGHT,

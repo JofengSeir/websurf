@@ -12,7 +12,6 @@ import type { RuntimeConfig } from '../config.js';
 
 export interface WasmInitMessage {
   type: 'wasm-init';
-  wasmB64?: string;
   wasmUrl?: string;
 }
 

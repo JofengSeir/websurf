@@ -82,7 +82,7 @@ crates/wasm/src/phys/teleport.rs # TeleportManager（start-touch）+ 死亡判�
 | 主线程打包 | esbuild app.ts | ✅ 1,025 KB |
 | Worker-A 打包 | esbuild worker/main.ts | ✅ 39 KB |
 | Worker-B 打包 | esbuild predictor-main.ts | ✅ 27 KB |
-| dist 单文件 | `node scripts/build-dist.mjs` | ✅ 3.1 MB |
+| dist（多文件） | `node scripts/build-dist.mjs`（app/worker/predictor.js + wasm 外置） | ✅ 2.5 MB / 5 文件 |
 
 ### 1.4b 部署与文档布局（2026-08-07）
 
@@ -128,6 +128,14 @@ OK predict: y=99.90 velY=-12.50
 | U3 | **手感验证** | 高速滑行无穿墙/卡停；144Hz 屏权威间隙由预测填充无"停-动-停" | 高 |
 | U4 | **dist 启动方式** | ✅ **已定案（2026-08-07）**：file:// 直接双击**不可行**——Chrome 非跨域隔离环境禁用 `SharedArrayBuffer`（物理双 Worker 硬依赖，COOP/COEP 头无法在 file:// 设置，CDP 实测确认）。交付方案：`game/play.cmd` 一键起本地服务器 + 自动开浏览器（http://localhost:8137/dist/index.html）；file:// 双击时页面显示引导卡片（`#fatalOverlay`）说明原因与两种启动方式。CDP 实测：http 加载 dist 完全可用（SAB✅ / crossOriginIsolated✅ / canvas 初始化✅ / 双 Worker✅） | 中 |
 
+### 2.1b 面板参数全量暴露（2026-08-07）
+
+wasm 可设置参数全部入面板（物理模块）：补 最大速度/走路速度/蹲走速度/停止速度/
+跳跃速度、连跳限速/禁用预加速开关，以及**传送落地触发门槛**（teleport_gate_ticks
+1-20 帧，默认 3）。Rust：PhysParams.teleport_gate_ticks + set_params 支持；
+check 门槛参数化（gate_ticks 由 params 传入）。验证：gate=3 → tick28，
+gate=20 → tick45（晚 17 tick，可调生效）。
+
 ### 2.2 已知技术遗留（代码层面）
 
 | # | 项 | 现状 | 建议 |
@@ -137,6 +145,24 @@ OK predict: y=99.90 velY=-12.50
 | ~~L4~~ | **速度面板 eyeHeight** | ✅ 已修：SAB 权威区/预测区新增 eyeHeight 槽（Int32 定点 ×100），渲染相机 Y = pos.y + eyeHeight；冒烟验证站立 64.09 / 蹲下 62.68 | — |
 | ~~L5~~ | **noclip 速度** | ✅ 已加：PhysParams.noclip_speed（默认 800=200×4）+ set_params 支持 + 面板滑块 200-3000（sprint 再 ×4） | — |
 | L6 | **dev server 残留** | 之前测试的 8090 端口 python 进程仍在运行 | 可忽略或手动关闭 |
+
+**已修复（2026-08-07 传送触发）**：
+- ✅ **dest 索引越界（传送从不执行的根因）**：parse 时 `dest_by_name` 用 `d.index`
+  （BSP 实体原始编号，可能跳跃）当 `destinations` 数组下标 → 越界 → check 触发
+  （cooldown 已设）但 `destinations.get` 返回 None → 从不传送——"触发区域存在但
+  传送无效"的真相。修复：dest_by_name 用 enumerate 数组下标 + check 越界防御。
+  真实 surf_666（523 triggers）实测：tick3 触发传送成功。
+- ✅ TeleportManager::check 落地稳定门槛：ground_ticks_since_landing >= 3 才判定
+  位于传送平面（was_grounded 跨门槛重置 inside——防跳跃轨迹穿面误触）。
+  冒烟测试 9：tick28 触发传送到 (50,0,30)。
+
+**已修复（2026-08-07 物理时间/输入残留，用户报"250 速地面一直滑行"）**：
+- ✅ **keysMask 残留（主因）**：`addInput` 原 `if (keysMask !== 0) store(I_KEYS)`——松手
+  mask=0 不写 → I_KEYS 残留 forward 位 → Worker 认为一直前进 → 看似"无摩擦滑行"
+  （实为松手停不下来）。修复：无条件 store（0 也写）。CDP 实测松手 0.5s 内停
+  （1.2→0，与 node 纯物理 0.48s 一致）；
+- ✅ **runLoop 时间累积器**：原 `acc = dt` 覆盖式丢时间（高刷 dt<fixedDt 时物理停滞/
+  变慢）。修复：累积器 `acc += dt`（标准固定时间步，物理时间守恒）。
 
 **已修复（2026-08-07 输入链路瘫痪，用户报"锁定后动不了"）**：
 - ✅ **runLoop writeFrame 条件 bug（致命）**：`if (steps === 0) writeFrame()` 导致物理推进
@@ -157,6 +183,11 @@ OK predict: y=99.90 velY=-12.50
 - ✅ Worker-A 补消息队列保护（pending + wasmReady + dispatch，对齐主项目 main.ts），
   用户在 wasm 初始化完成前选文件不再报错；
 - ✅ dist/dev 产物验证：无动态 import、initSync 内联、import.meta 无残留。
+- ✅ **2026-08-07 改常规多文件打包**：放弃 base64 单文件（file:// 因无 SAB 本就不可玩，
+  base64 内嵌无意义）→ dist/ = index.html + app.js + worker.js + predictor.js +
+  websurf_wasm_bg.wasm（ESM，与 dev 同构）；app.ts/worker 移除 __VBSP_WASM_B64__ /
+  __VBSP_WORKER_JS__ 分支，wasm 经相对 URL fetch 加载；build:wasm 复制 wasm 至 web/。
+  CDP 实测多文件 dist 全链路正常（SAB/双 Worker/地图加载/WASD 0→250）。
 
 **已修复（2026-08-07 按文档 §3.4/§4.3 落地）**：
 - ✅ **L1 Worker-B 输入竞争**：predictRound 改用只读 `readInput()`（不 exchange），
