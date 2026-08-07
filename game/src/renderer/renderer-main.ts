@@ -1,16 +1,19 @@
 /**
- * 主线程渲染器（最小化版）— 主线程预测渲染。
+ * 主线程渲染器（最小化版）— 客户端预测渲染。
  *
- * 架构（2026-08-07）：预测移入主线程，与渲染同频（rAF）。
- * - 权威 Worker-A 只同步「角度/速度/眼高/着地」基本信息（无位置）
- * - 主线程每帧：按权威速度对位置做积分外推（渲染帧 > 物理帧，填补空隙）；
- *   角度在权威帧间 LERP 插值
+ * 架构（2026-08-07 v4.1）：
+ * - 主线程持 wasm `PhysWorld` 预测实例：每 rAF 调 `predict(dt, keys, dx, dy)`
+ *   做**真实物理模拟**（移动语义 + 碰撞），渲染预测结果（输入零延迟）
+ * - Worker-A 权威物理每帧写全状态到 SAB → 主线程 `set_state` 修正预测基线
+ *   （标准客户端预测：本地模拟即时响应，权威定期纠偏）
+ * - respawn/teleport 位置突变：player-respawn 事件 → set_state 归零
  * - 无 lightmap/雾/碰撞可视化/准星射线。
  */
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { PhysWorld, default as wasmInit } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
 import type { ShmState } from '../worker/shared-state.js';
@@ -33,16 +36,16 @@ export class RendererMain {
   private rafId = 0;
   private running = false;
 
-  // ── 主线程预测状态 ─────────────────────────────────────────
-  /** 主线程积分位置（初始 = 出生点；权威不同步位置）。 */
-  private pos = { x: 0, y: 0, z: 0 };
-  /** 上次权威帧时间戳（角度 LERP 用）。 */
-  private prevAuth: { yaw: number; pitch: number; timeMs: number } | null = null;
-  private curAuth: { yaw: number; pitch: number; timeMs: number } | null = null;
-  /** 最近权威速度/眼高/着地（位置外推用）。 */
-  private vel = { x: 0, y: 0, z: 0 };
-  private eyeHeight = 54;
-  private onGround = false;
+  // ── 客户端预测状态 ─────────────────────────────────────────
+  /** 主线程预测 PhysWorld 实例（每帧 predict 物理模拟）。 */
+  private predPhys: PhysWorld | null = null;
+  /** 预测实例就绪（world-json 构建完成）。 */
+  private predReady = false;
+  /** 待喂给预测实例的输入（app 事件回调累积；预测实例与 SAB 双通道）。 */
+  private pendingDx = 0;
+  private pendingDy = 0;
+  private pendingKeys = 0;
+  /** 上次权威版本号（set_state 修正去重）。 */
   private lastVa = -1;
   /** 渲染帧推进（dt 上限防异常）。 */
   private lastTickMs = 0;
@@ -161,20 +164,76 @@ export class RendererMain {
     }
     this.pvsManager = null;
     this.lodItems.length = 0;
+    this.predPhys = null;
+    this.predReady = false;
+    this.pendingDx = 0;
+    this.pendingDy = 0;
+    this.pendingKeys = 0;
     this.lastVa = -1;
-    this.prevAuth = null;
-    this.curAuth = null;
-    this.vel = { x: 0, y: 0, z: 0 };
-    this.eyeHeight = 54;
-    this.onGround = false;
   }
 
-  /** 设置初始位置/朝向（scene-data 出生点；权威不同步位置，主线程从此积分）。 */
-  setInitialState(spawn: { x: number; y: number; z: number; yawDeg: number }): void {
-    this.pos = { x: spawn.x, y: spawn.y, z: spawn.z };
-    const yawRad = spawn.yawDeg * DEG2RAD;
-    this.prevAuth = { yaw: yawRad, pitch: 0, timeMs: performance.now() };
-    this.curAuth = { yaw: yawRad, pitch: 0, timeMs: performance.now() };
+  // ── 客户端预测：主线程物理模拟实例 ──────────────────────────
+
+  /** 主线程初始化 wasm（与 Worker-A 相同模块；独立实例）。 */
+  async initPrediction(wasmUrl: string): Promise<void> {
+    const resp = await fetch(wasmUrl);
+    const buf = await resp.arrayBuffer();
+    await wasmInit(buf);
+  }
+
+  /** world-json 到达：主线程构建预测 PhysWorld（物理模拟用，含碰撞）。 */
+  buildPredictionWorld(world: {
+    brushJson: string;
+    triJson: string;
+    teleportJson: string;
+    spawn: { x: number; y: number; z: number; yawDeg: number };
+  }): void {
+    const phys = new PhysWorld();
+    phys.build_world(
+      world.brushJson,
+      world.triJson,
+      world.teleportJson,
+      world.spawn.x,
+      world.spawn.y,
+      world.spawn.z,
+      world.spawn.yawDeg,
+    );
+    this.predPhys = phys;
+    this.predReady = true;
+    this.lastVa = -1;
+  }
+
+  /** 预测实例输入（app 事件回调喂入；与 SAB 权威通道并行）。 */
+  feedInput(dx: number, dy: number, keysMask: number): void {
+    this.pendingDx += dx;
+    this.pendingDy += dy;
+    this.pendingKeys = keysMask;
+  }
+
+  /** 权威修正：V_A 变化 → set_state 覆盖预测实例（客户端预测纠偏）。 */
+  private correctFromAuthority(): void {
+    if (!this.predPhys) return;
+    const auth = this.shared.readAuthoritative();
+    if (auth && auth.va !== this.lastVa) {
+      this.lastVa = auth.va;
+      const s = auth.state;
+      this.predPhys.set_state(
+        s.pos.x, s.pos.y, s.pos.z,
+        s.yaw, s.pitch,
+        s.vel.x, s.vel.y, s.vel.z,
+        s.onGround,
+      );
+    }
+  }
+
+  /** 位置突变归零（player-respawn 事件：respawn/teleport/noclip 切换）。 */
+  resetTo(pos: number[], yawDeg: number): void {
+    if (!this.predPhys) return;
+    this.predPhys.set_state(pos[0], pos[1], pos[2], yawDeg, 0, 0, 0, 0, true);
+    // 清待喂输入，防突变后残留方向/跳跃
+    this.pendingDx = 0;
+    this.pendingDy = 0;
+    this.pendingKeys = 0;
   }
 
   private disposeObject(obj: THREE.Object3D): void {
@@ -199,10 +258,24 @@ export class RendererMain {
     this.rafId = requestAnimationFrame(this.boundTick);
     if (!this.renderer || !this.scene || !this.camera) return;
 
-    // 1. 主线程预测：权威角度/速度校准 + 位置速度积分（渲染帧 > 物理帧，填补空隙）
-    this.predict(now);
-    this.camera.rotation.set(this.curPitchRad(), this.curYawRad(), 0, 'YXZ');
-    this.camera.position.set(this.pos.x, this.pos.y + this.eyeHeight, this.pos.z);
+    // 1. 客户端预测：权威修正 → 预测实例物理模拟 → 渲染预测状态
+    this.correctFromAuthority();
+    if (this.predReady && this.predPhys) {
+      const dt = this.lastTickMs === 0 ? 1 / 64 : Math.min((now - this.lastTickMs) / 1000, 0.1);
+      this.lastTickMs = now;
+      // 真实物理模拟（移动语义 + 碰撞），输入即时响应
+      this.predPhys.predict(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
+      this.pendingDx = 0;
+      this.pendingDy = 0;
+      const st = this.predPhys.state() as {
+        posX: number; posY: number; posZ: number;
+        yaw: number; pitch: number;
+        eyeHeight: number;
+      };
+      // Rust 输出角度为度 → 弧度
+      this.camera.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
+      this.camera.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);
+    }
 
     const camPos = this.camera.position;
 
@@ -227,58 +300,6 @@ export class RendererMain {
 
     // 3. 渲染（快照就绪后无条件渲染，帧率跟随 rAF）
     this.renderer.render(this.scene, this.camera);
-  }
-
-  /**
-   * 主线程预测（每渲染帧调用）：
-   * - 权威新帧（V_A 变化）→ 更新速度/眼高/着地，角度插值基线推进（prev←cur, cur←新）
-   * - 位置 = 上次位置 + 权威速度 × 渲染帧 dt（线性积分，无碰撞，接受误差）
-   */
-  private predict(now: number): void {
-    // 渲染帧 dt（上限 0.1s 防异常）
-    const dt = this.lastTickMs === 0 ? 0 : Math.min((now - this.lastTickMs) / 1000, 0.1);
-    this.lastTickMs = now;
-
-    // 读权威基本信息（角度/速度/眼高/着地；Rust 输出为度 → 存弧度）
-    const auth = this.shared.readAuthoritative();
-    if (auth && auth.va !== this.lastVa) {
-      this.lastVa = auth.va;
-      const s = auth.state;
-      if (this.curAuth) this.prevAuth = { ...this.curAuth, timeMs: now };
-      this.curAuth = { yaw: s.yaw * DEG2RAD, pitch: s.pitch * DEG2RAD, timeMs: now };
-      this.vel = s.vel;
-      this.eyeHeight = s.eyeHeight;
-      this.onGround = s.onGround;
-    }
-
-    // 位置外推：pos += vel * dt（权威不同步位置，主线程积分）
-    this.pos.x += this.vel.x * dt;
-    this.pos.y += this.vel.y * dt;
-    this.pos.z += this.vel.z * dt;
-  }
-
-  /** 当前渲染用 yaw（弧度）：权威帧间 LERP。 */
-  private curYawRad(): number {
-    if (!this.prevAuth || !this.curAuth) return this.curAuth?.yaw ?? 0;
-    const span = this.curAuth.timeMs - this.prevAuth.timeMs;
-    const alpha = span > 0 ? Math.min(Math.max((performance.now() - this.prevAuth.timeMs) / span, 0), 1) : 1;
-    return this.lerpAngle(this.prevAuth.yaw, this.curAuth.yaw, alpha);
-  }
-
-  /** 当前渲染用 pitch（弧度）：权威帧间 LERP。 */
-  private curPitchRad(): number {
-    if (!this.prevAuth || !this.curAuth) return this.curAuth?.pitch ?? 0;
-    const span = this.curAuth.timeMs - this.prevAuth.timeMs;
-    const alpha = span > 0 ? Math.min(Math.max((performance.now() - this.prevAuth.timeMs) / span, 0), 1) : 1;
-    return this.prevAuth.pitch + (this.curAuth.pitch - this.prevAuth.pitch) * alpha;
-  }
-
-  /** 最短角距插值。 */
-  private lerpAngle(a: number, b: number, t: number): number {
-    let d = b - a;
-    while (d > Math.PI) d -= Math.PI * 2;
-    while (d < -Math.PI) d += Math.PI * 2;
-    return a + d * t;
   }
 
   resize(width: number, height: number): void {

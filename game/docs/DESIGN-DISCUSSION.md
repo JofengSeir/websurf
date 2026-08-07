@@ -231,3 +231,46 @@ Worker-A（权威物理，唯一 Worker）
 
 - 权威位置低频纠偏（4Hz 覆盖主线程积分误差，防长距离漂移）
 - 主线程预测加简单重力项（`vel.y -= g·dt`）可减少跳跃弧线误差（当前纯线性外推）
+
+---
+
+## G. v4.1 架构修正（2026-08-07）：预测必须物理模拟（客户端预测）
+
+> 用户明确要求：**主线程预测必须做物理模拟**（不是速度积分），权威物理做中途修正。
+> 标准客户端预测模式。时序图 v4.1 已更新（`docs/项目时序图.md`）。
+
+### G.1 修正后的架构
+
+```
+主线程（渲染 + 输入 + 预测物理模拟）
+  ├─ wasm PhysWorld 预测实例（主线程内 init + build_world，与权威同模块独立实例）
+  ├─ 每 rAF：
+  │    1. 读权威（V_A 变化）→ set_state 修正预测基线（位置/角度/速度/着地）
+  │    2. 预测实例 predict(dt, keys, dx, dy) —— 真实物理模拟（移动语义+碰撞）
+  │    3. 渲染预测状态（零输入延迟）
+  ├─ 输入双通道：同一份 dx/dy/keys 同时喂 SAB（权威）与预测实例
+  └─ respawn/teleport：player-respawn 事件 → set_state 归零
+Worker-A（权威物理，唯一 Worker）
+  ├─ 固定步长累积器（无封顶）
+  ├─ wasm tick（完整物理）
+  └─ 写权威**全状态**（含位置）→ 主线程 set_state 修正用
+```
+
+### G.2 相对 v4 的差异
+
+| 项 | v4（速度积分外推） | v4.1（wasm 预测实例） | 理由 |
+|---|---|---|---|
+| 预测方式 | `pos += vel×dt` 线性积分 | `PhysWorld.predict(dt, keys, dx, dy)` 物理模拟（含碰撞） | 用户要求"必须物理模拟"；积分会穿墙/漂移 |
+| 权威同步 | 基本信息（无位置） | **全状态（含位置）** | set_state 修正预测基线需要位置 |
+| 修正机制 | 无（角度 LERP） | 每权威帧 `set_state` 覆盖预测实例 | 客户端预测标准纠偏 |
+| 预测实例 | 无 | 主线程 wasm 第二实例（build_world + set_params/set_hull） | 复用 Worker-B 时代 API（predict/set_state） |
+| 输入 | 仅 SAB | 双通道（SAB + 预测实例缓冲） | 预测实例与权威消费同一输入 |
+
+### G.3 实现要点
+
+- 主线程 wasm 初始化：`fetch wasmUrl → wasmInit`（与 Worker-A 同模块、独立实例）；地图加载时一次
+- 预测实例构建：world-json（brush/tri/teleport/spawn）→ `build_world` → `set_params`/`set_hull` 同步面板参数
+- 每帧时序：**先 set_state 修正 → 再 predict → 渲染**（修正优先，预测从权威基线继续）
+- 角度单位：Rust state() 输出度，渲染时 `× DEG2RAD`（v4 已修，v4.1 保持）
+- 输入双通道：mousemove 事件同时 `bridge.addInput`（SAB）与 `renderer.feedInput`（预测缓冲）；
+  keys 由 rAF 输入循环双喂

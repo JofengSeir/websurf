@@ -1,10 +1,9 @@
 /**
- * 共享状态层 — 权威角度/速度 + 主线程位置预测。
+ * 共享状态层 — 权威全状态（客户端预测修正源）。
  *
- * 架构（2026-08-07）：预测移入主线程渲染循环，删除 Worker-B。
- * - Worker-A（权威物理）固定步长跑完整物理，但只把「角度、速度、眼高、
- *   着地」等基本信息写入 SAB——**位置不同步**（渲染帧通常高于物理帧，
- *   位置由主线程按速度积分外推，接受无碰撞积分误差）
+ * 架构（2026-08-07 v4.1）：主线程持 wasm 预测实例（每帧 predict 物理模拟），
+ * Worker-A 权威 tick 后写**全状态**（含位置）到 SAB，主线程用 set_state 修正
+ * 预测基线（标准客户端预测：本地模拟即时响应，权威定期纠偏）。
  *
  * SAB 布局（512B）：
  *   Int32 控制区（字节 0-63）：
@@ -16,12 +15,12 @@
  *   BigInt64 输入槽（字节 64-127，index 8-9）：
  *     [8] dxAcc  [9] dyAcc  —— BigInt64 原子累加（防溢出，永不 wrap）
  *   BigInt64 权威状态双缓冲（字节 128-415，index 16-33）：
- *     S_A[0] = 16..22（7 值）  S_A[1] = 25..31（7 值）
- *   每状态 7 值：yaw(×1000) pitch(×1000) velX/Y/Z(×100) eyeHeight(×100) + 1 保留
+ *     S_A[0] = 16..24（9 值）  S_A[1] = 25..33（9 值）
+ *   每状态 9 值：posX/Y/Z(×100) yaw(×1000) pitch(×1000) velX/Y/Z(×100) eyeHeight(×100)
  *
  * 读写协议：
  * - Worker-A 写空闲槽 S_A[V_A&1] → release 递增 V_A + gen_A
- * - 主线程读 S_A[(V_A-1)&1]（写者已离开的槽，无撕裂）
+ * - 主线程读 S_A[(V_A-1)&1]（写者已离开的槽，无撕裂）→ set_state 修正预测实例
  */
 
 import type { KeyState } from './worker-types.js';
@@ -67,15 +66,16 @@ const I_A_GROUND = 3;
 const B_DX_ACC = 8;
 const B_DY_ACC = 9;
 
-// BigInt64 权威状态双缓冲基址（每槽 7 值）
+// BigInt64 权威状态双缓冲基址（每槽 9 值）
 const B_A0 = 16;
 const B_A1 = 25;
 
 /** SAB 总字节（512B 布局，实际使用至 416B）。 */
 export const SHARED_BUFFER_SIZE = 512;
 
-/** 权威同步的基本信息（角度/速度/眼高/着地；位置由主线程预测积分）。 */
+/** 权威全状态（客户端预测修正源；含位置）。 */
 export interface AuthState {
+  pos: { x: number; y: number; z: number };
   yaw: number;
   pitch: number;
   vel: { x: number; y: number; z: number };
@@ -118,7 +118,7 @@ export class ShmState {
   }
 
   /**
-   * 读权威基本信息（双缓冲槽 (V_A-1)&1，无撕裂）。
+   * 读权威全状态（双缓冲槽 (V_A-1)&1，无撕裂）。
    * @returns { state, va, gen } 权威状态 + 版本号 + 代际。
    */
   readAuthoritative(): { state: AuthState; va: number; gen: number } | null {
@@ -129,14 +129,19 @@ export class ShmState {
     const base = slot === 0 ? B_A0 : B_A1;
     return {
       state: {
-        yaw: Number(b[base]) / 1000,
-        pitch: Number(b[base + 1]) / 1000,
-        vel: {
-          x: Number(b[base + 2]) / 100,
-          y: Number(b[base + 3]) / 100,
-          z: Number(b[base + 4]) / 100,
+        pos: {
+          x: Number(b[base]) / 100,
+          y: Number(b[base + 1]) / 100,
+          z: Number(b[base + 2]) / 100,
         },
-        eyeHeight: Number(b[base + 5]) / 100,
+        yaw: Number(b[base + 3]) / 1000,
+        pitch: Number(b[base + 4]) / 1000,
+        vel: {
+          x: Number(b[base + 5]) / 100,
+          y: Number(b[base + 6]) / 100,
+          z: Number(b[base + 7]) / 100,
+        },
+        eyeHeight: Number(b[base + 8]) / 100,
         onGround: this.i32[I_A_GROUND] === 1,
         timeMs: 0,
       },
@@ -166,19 +171,22 @@ export class ShmState {
   }
 
   /**
-   * Worker-A 写权威基本信息：写空闲槽 S_A[V_A&1] → release 递增 V_A + gen_A。
-   * 只写角度/速度/眼高/着地——位置由主线程预测积分，不在此同步。
+   * Worker-A 写权威全状态：写空闲槽 S_A[V_A&1] → release 递增 V_A + gen_A。
+   * 全状态（含位置）——主线程预测实例据此 set_state 修正基线。
    */
   writeAuthoritative(a: Omit<AuthState, 'onGround'>, onGround: boolean): number {
     const slot = Atomics.load(this.i32, I_V_A) & 1;
     const base = slot === 0 ? B_A0 : B_A1;
     const b = this.b64;
-    b[base] = BigInt(Math.round(a.yaw * 1000));
-    b[base + 1] = BigInt(Math.round(a.pitch * 1000));
-    b[base + 2] = BigInt(Math.round(a.vel.x * 100));
-    b[base + 3] = BigInt(Math.round(a.vel.y * 100));
-    b[base + 4] = BigInt(Math.round(a.vel.z * 100));
-    b[base + 5] = BigInt(Math.round(a.eyeHeight * 100));
+    b[base] = BigInt(Math.round(a.pos.x * 100));
+    b[base + 1] = BigInt(Math.round(a.pos.y * 100));
+    b[base + 2] = BigInt(Math.round(a.pos.z * 100));
+    b[base + 3] = BigInt(Math.round(a.yaw * 1000));
+    b[base + 4] = BigInt(Math.round(a.pitch * 1000));
+    b[base + 5] = BigInt(Math.round(a.vel.x * 100));
+    b[base + 6] = BigInt(Math.round(a.vel.y * 100));
+    b[base + 7] = BigInt(Math.round(a.vel.z * 100));
+    b[base + 8] = BigInt(Math.round(a.eyeHeight * 100));
     // 状态先于版本号可见（release）
     const va = Atomics.load(this.i32, I_V_A) + 1;
     this.i32[I_A_GROUND] = onGround ? 1 : 0;
@@ -197,3 +205,4 @@ export function createMainSharedState(buffer: SharedArrayBuffer): ShmState {
 export function createWorkerSharedState(buffer: SharedArrayBuffer): ShmState {
   return new ShmState(buffer);
 }
+

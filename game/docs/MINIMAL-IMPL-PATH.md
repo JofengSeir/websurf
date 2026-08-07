@@ -174,24 +174,26 @@ crates/wasm/src/phys/
 API：`build_world()` / `tick(dt, dx, dy, keys)` / `predict(dt, dx, dy, keys)` /
 `respawn()` / `teleport_to()` / `set_death_y()` / **`set_params(json)` / `set_hull(json)`**（新增，面板用）。
 
-### 4.2 单 Worker 世界数据 + 主线程预测
+### 4.2 单 Worker 世界数据 + 主线程预测物理模拟（v4.1）
 
 Worker-A 持 wasm 模块的 `PhysWorld` 实例（BSP bytes 主线程单次转发，Rust 内 build_world 毫秒级）。
-预测在主线程渲染循环内进行（rAF 同频）：
-- 位置：`pos += vel × dt`（权威速度线性积分外推，无碰撞，接受误差）
-- 角度：权威帧间 LERP（最短角距）
-- respawn/teleport：`player-respawn` 消息回传位置归零
+**主线程持第二个 PhysWorld 预测实例**（客户端预测，标准模式）：
+- 预测实例：主线程 init wasm（同模块）+ world-json（brush/tri/teleport/spawn）→ build_world +
+  set_params/set_hull（面板参数同步）
+- 每 rAF：**set_state 权威修正（全状态）→ predict(dt, keys, dx, dy) 物理模拟（含碰撞）→ 渲染**
+- 输入双通道：同一份 dx/dy/keys 同时喂 SAB（权威）与预测实例缓冲
+- respawn/teleport：`player-respawn` 消息回传 → set_state 归零
 
-### 4.3 SAB 布局（v4：权威基本信息，无位置）
+### 4.3 SAB 布局（v4.1：权威全状态，客户端预测修正源）
 
 | 偏移 | 区 | 内容 | 内存序 |
 |---|---|---|---|
 | 0–63 | 控制区 | V_A + gen_A + keys + onGround | release 写 / acquire 读 |
 | 64–127 | 输入槽 | dxAcc/dyAcc（BigInt64 原子累加） | 主线程 add；Worker exchange 消耗 |
-| 128–415 | 权威基本信息双缓冲 | yaw/pitch/vel/eyeHeight（每槽 7 值 ×1000/×100 定点） | Worker-A release 写 + V_A++ |
+| 128–415 | 权威全状态双缓冲 | pos/yaw/pitch/vel/eyeHeight（每槽 9 值定点） | Worker-A release 写 + V_A++ |
 
-主线程渲染帧：V_A 刷新 → 更新角度基线/速度 → 位置积分外推 → 渲染。零等待。
-**速度面板从权威 vel 直接取（4Hz 采样），零消息。**
+主线程渲染帧：V_A 刷新 → set_state 修正预测实例 → predict 物理模拟 → 渲染。零等待。
+**速度面板从预测实例/权威 vel 直接取（4Hz 采样），零消息。**
 
 ---
 
@@ -221,11 +223,12 @@ Worker-A 持 wasm 模块的 `PhysWorld` 实例（BSP bytes 主线程单次转发
 - [ ] noclip 恢复：JS 侧自由视角 + Worker-B 禁用预测（§2.5）；
 - [ ] **验证**：加载提速、手感一致（差分已保证）、noclip↔physics 切换无闪跳。
 
-### Phase 4 — 主线程预测渲染（1 天）
-- [ ] 渲染循环内：读权威基本信息（角度/速度/眼高/着地）→ 位置速度积分外推 + 角度 LERP；
-- [ ] 位置突变事件（respawn/teleport）回传归零；初始位置 = scene-data spawn；
-- [ ] **验证**：144Hz 屏权威帧间无停等/闪跳；角度无错乱（Rust 度为弧度转换正确）；
-      穿墙/漂移在可接受范围（位置无碰撞积分的既定取舍）。
+### Phase 4 — 主线程预测物理模拟（1 天）
+- [ ] 主线程 wasm init + 预测 PhysWorld 实例（world-json → build_world + set_params/set_hull）；
+- [ ] 每 rAF：set_state 权威修正（全状态）→ predict 物理模拟（含碰撞）→ 渲染；
+      输入双通道（SAB + 预测缓冲）；player-respawn 归零；
+- [ ] **验证**：144Hz 屏权威帧间无停等/闪跳；碰撞/移动手感与权威一致
+      （预测 = 同源物理，权威 set_state 每帧纠偏，误差仅帧间一小步）。
 
 ### Phase 5 — WASM 导出瘦身 + 契约收缩（1 天）
 - [ ] lib.rs 删未用导出 + 薄壳常量；删 debug_probe.rs；
