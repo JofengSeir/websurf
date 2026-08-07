@@ -13,6 +13,7 @@
  */
 
 import type { RuntimeConfig } from '../config.js';
+import { buildPhysicsParams } from '../config.js';
 import type { InputBridge } from '../input/input-bridge.js';
 import type { KeyboardInput } from '../input/keyboard.js';
 import {
@@ -191,7 +192,7 @@ export class PanelController {
       }
     });
 
-    // 物理参数滑块 → config → Worker-A
+    // 物理参数滑块 → config → Worker-A（权威）→ 同步 Worker-B（预测）
     // V8/P2：lockTickRate=true 时 tick 频率锁定 64Hz 只读（计时玩法公平性）
     const tickRateEl = document.getElementById('tickRate') as HTMLInputElement | null;
     const tickRateNum = document.getElementById('tickRateNum') as HTMLInputElement | null;
@@ -214,60 +215,74 @@ export class PanelController {
         this.bridge.sendConfig('physics', { tickRate: v });
         // 文档 §2.4：Worker-B 预测子步 dt_pred = 1/tickRate 同步
         this.postToPredictor({ type: 'set-pred-dt', dt: 1 / v });
+        this.pushPhysicsParams();
       });
     }
-    this.bindSlider('gravity', 200, 2000, 10, (v) => {
+    this.bindSlider('gravity', 200, 2000, 1, (v) => {
       this.config.physics.gravity = v;
       this.bridge.sendConfig('physics', { gravity: v });
+      this.pushPhysicsParams();
     });
-    this.bindSlider('accelerate', 1, 30, 0.5, (v) => {
+    this.bindSlider('accelerate', 1, 30, 1, (v) => {
       this.config.physics.accelerate = v;
       this.bridge.sendConfig('physics', { accelerate: v });
+      this.pushPhysicsParams();
     });
     this.bindSlider('airAccel', 1, 200, 1, (v) => {
       this.config.physics.airAccel = v;
       this.bridge.sendConfig('physics', { airAccel: v });
+      this.pushPhysicsParams();
     });
     this.bindSlider('friction', 0, 10, 0.1, (v) => {
       this.config.physics.friction = v;
       this.bridge.sendConfig('physics', { friction: v });
+      this.pushPhysicsParams();
     });
-    this.bindSlider('maxSpeed', 100, 1000, 5, (v) => {
+    this.bindSlider('maxSpeed', 100, 1000, 1, (v) => {
       this.config.physics.maxSpeed = v;
       this.bridge.sendConfig('physics', { maxSpeed: v });
+      this.pushPhysicsParams();
     });
-    this.bindSlider('walkSpeed', 50, 400, 5, (v) => {
+    this.bindSlider('walkSpeed', 50, 400, 1, (v) => {
       this.config.physics.walkSpeed = v;
       this.bridge.sendConfig('physics', { walkSpeed: v });
+      this.pushPhysicsParams();
     });
-    this.bindSlider('crouchSpeed', 30, 300, 5, (v) => {
+    this.bindSlider('crouchSpeed', 30, 300, 1, (v) => {
       this.config.physics.crouchSpeed = v;
       this.bridge.sendConfig('physics', { crouchSpeed: v });
+      this.pushPhysicsParams();
     });
-    this.bindSlider('stopSpeed', 10, 400, 5, (v) => {
+    this.bindSlider('stopSpeed', 10, 400, 1, (v) => {
       this.config.physics.stopSpeed = v;
       this.bridge.sendConfig('physics', { stopSpeed: v });
+      this.pushPhysicsParams();
     });
     this.bindSlider('jumpSpeed', 100, 600, 1, (v) => {
       this.config.physics.jumpSpeed = v;
       this.bridge.sendConfig('physics', { jumpSpeed: v });
+      this.pushPhysicsParams();
     });
     this.bindCheckbox('autobhop', (v) => {
       this.config.physics.autobhop = v;
       this.bridge.sendConfig('physics', { autobhop: v });
+      this.pushPhysicsParams();
     });
     this.bindCheckbox('bhopSpeedClamp', (v) => {
       this.config.physics.bhopSpeedClamp = v;
       this.bridge.sendConfig('physics', { bhopSpeedClamp: v });
+      this.pushPhysicsParams();
     });
     this.bindCheckbox('noPrestrafe', (v) => {
       this.config.physics.noPrestrafe = v;
       this.bridge.sendConfig('physics', { noPrestrafe: v });
+      this.pushPhysicsParams();
     });
     // 传送落地触发门槛（帧）
     this.bindSlider('teleportGateTicks', 1, 20, 1, (v) => {
       this.config.physics.teleportGateTicks = v;
       this.bridge.sendConfig('physics', { teleportGateTicks: v });
+      this.pushPhysicsParams();
     });
 
     // 体型
@@ -297,10 +312,12 @@ export class PanelController {
     this.bindSlider('sensitivity', 0.1, 5.0, 0.01, (v) => {
       this.config.input.sensitivity = v;
       this.bridge.sendConfig('input', { sensitivity: v });
+      this.pushPhysicsParams();
     });
     this.bindSlider('yawBindSpeed', 0, 720, 1, (v) => {
       this.config.input.yawBindSpeed = v;
       this.bridge.sendConfig('input', { yawBindSpeed: v });
+      this.pushPhysicsParams();
     });
 
     // 准星（主线程本地）
@@ -326,9 +343,10 @@ export class PanelController {
     });
 
     // noclip 移动速度（HU/s，200-3000；sprint 再 ×4）
-    this.bindSlider('noclipSpeed', 200, 3000, 10, (v) => {
+    this.bindSlider('noclipSpeed', 200, 3000, 1, (v) => {
       this.config.input.noclipSpeed = v;
       this.bridge.sendConfig('input', { noclipSpeed: v });
+      this.pushPhysicsParams();
     });
 
     // 恢复默认键位
@@ -350,12 +368,27 @@ export class PanelController {
       standHeight: p.standHeight,
       duckHeight: p.duckHeight,
     });
+    // 同步预测世界体型（Worker-B 独立 PhysWorld）
+    this.postToPredictor({
+      type: 'set-hull',
+      halfWidth: p.halfWidth,
+      standHeight: p.standHeight,
+      duckHeight: p.duckHeight,
+    });
   }
 
-  private bindSlider(id: string, min: number, max: number, _step: number, onInput: (v: number) => void): void {
+  /** 全量物理参数同步给 Worker-B（预测世界与权威保持同参）。 */
+  private pushPhysicsParams(): void {
+    this.postToPredictor({ type: 'set-params', params: buildPhysicsParams(this.config) });
+  }
+
+  private bindSlider(id: string, min: number, max: number, step: number, onInput: (v: number) => void): void {
     const el = document.getElementById(id) as HTMLInputElement | null;
     if (!el) return;
     const num = document.getElementById(`${id}Num`) as HTMLInputElement | null;
+    // 步进生效：slider 与数字输入框同步（灵敏度 0.01、数值类 1）
+    el.step = String(step);
+    if (num) num.step = String(step);
     el.addEventListener('input', () => {
       const v = parseFloat(el.value);
       if (num && Number.isFinite(v)) num.value = String(v);

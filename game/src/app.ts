@@ -8,7 +8,7 @@
  * - ESC 弹出式面板（PanelController）+ 速度面板 8Hz
  */
 
-import { createConfig } from './config.js';
+import { createConfig, buildPhysicsParams } from './config.js';
 import type { RuntimeConfig } from './config.js';
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
@@ -214,6 +214,17 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
         spawnY: msg.spawn.y,
         spawnZ: msg.spawn.z,
         spawnYaw: msg.spawn.yawDeg,
+      });
+      // 预测世界刚以默认参数构建：立即同步面板当前参数/体型，保证双 Worker 同参
+      predictorWorker?.postMessage({
+        type: 'set-params',
+        params: buildPhysicsParams(config),
+      });
+      predictorWorker?.postMessage({
+        type: 'set-hull',
+        halfWidth: config.player.halfWidth,
+        standHeight: config.player.standHeight,
+        duckHeight: config.player.duckHeight,
       });
       break;
     case 'stats':
