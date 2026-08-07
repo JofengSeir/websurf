@@ -74,6 +74,11 @@ const dom = {
 	showTriggersChk: document.getElementById('showTriggers') as HTMLInputElement | null,
 	showPlaneInfoChk: document.getElementById('showPlaneInfo') as HTMLInputElement | null,
 	planeInfoEl: document.getElementById('planeInfo') as HTMLElement | null,
+	// 近平面贴墙自适应（实时生效）
+	nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
+	nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
+	nearRatioRange: document.getElementById('nearRatio') as HTMLInputElement | null,
+	nearRatioNum: document.getElementById('nearRatioNum') as HTMLInputElement | null,
 	// 物理控制面板
 	hullScale: document.getElementById('hullScale') as HTMLInputElement | null,
 	hullScaleNum: document.getElementById('hullScaleNum') as HTMLInputElement | null,
@@ -109,6 +114,8 @@ const pointerLock = new PointerLockController();
 
 let worker: Worker | null = null;
 let inputBridge: InputBridge | null = null;
+/** 最近一次出生点传送索引（去重；换地图时重置）。 */
+let lastTeleportIdx = -1;
 /** 主线程渲染器（唯一渲染入口）。 */
 let rendererMain: RendererMain | null = null;
 let sceneReady = false;
@@ -575,12 +582,18 @@ function bindUI(): void {
 		inputBridge?.sendRespawn();
 	});
 
-	// Spawn 选择
+	// Spawn 选择（input + change 双监听：select 重选当前值/部分浏览器只触发
+	// input 不触发 change 时都能响应；lastTeleportIdx 去重防重复传送）
+	const onSpawnPick = (idx: number): void => {
+		if (idx === lastTeleportIdx || Number.isNaN(idx)) return;
+		lastTeleportIdx = idx;
+		inputBridge?.sendTeleport(idx);
+	};
 	dom.spawnSelect?.addEventListener('change', (e) => {
-		const idx = parseInt((e.target as HTMLSelectElement).value, 10);
-		if (!Number.isNaN(idx)) {
-			inputBridge?.sendTeleport(idx);
-		}
+		onSpawnPick(parseInt((e.target as HTMLSelectElement).value, 10));
+	});
+	dom.spawnSelect?.addEventListener('input', (e) => {
+		onSpawnPick(parseInt((e.target as HTMLSelectElement).value, 10));
 	});
 
 	// 自定义传送点：保存当前位置
@@ -753,6 +766,43 @@ function bindUI(): void {
 		rendererMain?.applyConfigPatch('debug', { showPlaneInfo: enabled });
 		inputBridge?.sendConfig('debug', { showPlaneInfo: enabled });
 	});
+
+	// 近平面贴墙自适应参数（滑块 ↔ 输入框双向同步，实时生效）
+	bindNearParamControls();
+}
+
+/** 近平面自适应参数控件：滑块 ↔ 输入框双向同步 + rendererMain 实时生效。 */
+function bindNearParamControls(): void {
+	const bind = (
+		range: HTMLInputElement | null,
+		num: HTMLInputElement | null,
+		apply: (val: number) => void,
+		round: (v: number) => number,
+	): void => {
+		if (!range && !num) return;
+		const onRange = (): void => {
+			if (!range) return;
+			const val = round(parseFloat(range.value));
+			if (num) num.value = String(val);
+			apply(val);
+		};
+		const onNum = (): void => {
+			if (!num) return;
+			const raw = parseFloat(num.value);
+			if (Number.isNaN(raw)) return;
+			const val = round(raw);
+			if (range) range.value = String(val);
+			apply(val);
+		};
+		range?.addEventListener('input', onRange);
+		num?.addEventListener('change', onNum);
+	};
+	bind(dom.nearProbeDistRange, dom.nearProbeDistNum, (v) => {
+		rendererMain?.setNearParams(v, undefined);
+	}, (v) => v);
+	bind(dom.nearRatioRange, dom.nearRatioNum, (v) => {
+		rendererMain?.setNearParams(undefined, v);
+	}, (v) => Math.round(v * 100) / 100);
 }
 
 /** 落地检测模式时显示连续落地帧数滑块，StartTouch 时隐藏。 */
@@ -780,6 +830,8 @@ async function handleBspFile(file: File): Promise<void> {
 	lastLoadedFileName = file.name;
 	teleportMapName = file.name;
 	awaitingPlayerPos = false;
+	// 换地图重置出生点传送去重（新地图选相同索引也应生效）
+	lastTeleportIdx = -1;
 	setStatus(`正在发送 ${file.name} 到 Worker 解析...`, '');
 	if (dom.spawnSelect) dom.spawnSelect.innerHTML = '';
 	// transfer 后主线程不再读取 bytes（已 detach）
@@ -817,6 +869,7 @@ function renderSpawnOptions(spawnJson: string): void {
 		dom.spawnSelect.innerHTML = opts.join('');
 	} catch (err) {
 		console.warn('[app] spawn 解析失败', err);
+		setStatus(`出生点解析失败：${err instanceof Error ? err.message : String(err)}`, 'error');
 	}
 }
 
