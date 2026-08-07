@@ -229,6 +229,15 @@ function dispatch(e: MessageEvent<WorkerMessage | { type: string }>): void {
     phys?.respawn();
     return;
   }
+  if (type === 'set-spawn-points') {
+    // 权威物理出生点列表（spawn 下拉切换用；world-json 只设了初始 spawn，
+    // 缺此列表时 teleport_to_spawn 索引为空 → 静默忽略 → 传送被权威帧拉回）
+    const sm = msg as { json?: string };
+    if (typeof sm.json === 'string' && phys) {
+      phys.set_spawn_points(sm.json);
+    }
+    return;
+  }
   if (type === 'teleport') {
     const tm = msg as { target?: number };
     if (typeof tm.target === 'number') {

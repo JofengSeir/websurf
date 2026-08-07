@@ -31,6 +31,11 @@ const dom = {
   spawnSelect: document.getElementById('spawnSelect') as HTMLSelectElement | null,
   respawnBtn: document.getElementById('respawnBtn') as HTMLButtonElement | null,
   fpsEl: document.getElementById('fps') as HTMLElement | null,
+  // 近平面贴墙自适应（实时生效）
+  nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
+  nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
+  nearRatioRange: document.getElementById('nearRatio') as HTMLInputElement | null,
+  nearRatioNum: document.getElementById('nearRatioNum') as HTMLInputElement | null,
 } as const;
 
 const keyboard = new KeyboardInput(loadKeymap());
@@ -193,11 +198,57 @@ function bindInput(): void {
     await handleLoadBsp(file.name, await file.arrayBuffer());
   });
 
-  dom.respawnBtn?.addEventListener('click', () => renderer?.respawn());
+  dom.respawnBtn?.addEventListener('click', () => bridge?.sendRespawn());
+
+  // Spawn 选择（input + change 双监听：重选当前值/部分浏览器只触发 input 时
+  // 也能响应；去重防重复传送——同步自主项目修复）
+  // 注意：必须走 bridge.sendTeleport（主线程预测物理 + Worker 权威物理双端
+  // 同步）——直接调 renderer.teleportToSpawn 只传主线程，权威帧 >200 兜底
+  // 会把传送点拉回旧位置（"传送初始点出现问题"根因）
+  let lastTeleportIdx = -1;
+  const onSpawnPick = (idx: number): void => {
+    if (idx === lastTeleportIdx || Number.isNaN(idx)) return;
+    lastTeleportIdx = idx;
+    bridge?.sendTeleport(idx);
+  };
   dom.spawnSelect?.addEventListener('change', (e) => {
-    const idx = parseInt((e.target as HTMLSelectElement).value, 10);
-    if (!Number.isNaN(idx)) renderer?.teleportToSpawn(idx);
+    onSpawnPick(parseInt((e.target as HTMLSelectElement).value, 10));
   });
+  dom.spawnSelect?.addEventListener('input', (e) => {
+    onSpawnPick(parseInt((e.target as HTMLSelectElement).value, 10));
+  });
+
+  // 近平面自适应参数（滑块 ↔ 输入框双向同步 + 渲染器实时生效）
+  const bindNearParam = (
+    range: HTMLInputElement | null,
+    num: HTMLInputElement | null,
+    apply: (v: number) => void,
+    round: (v: number) => number,
+  ): void => {
+    if (!range && !num) return;
+    const onRange = (): void => {
+      if (!range) return;
+      const val = round(parseFloat(range.value));
+      if (num) num.value = String(val);
+      apply(val);
+    };
+    const onNum = (): void => {
+      if (!num) return;
+      const raw = parseFloat(num.value);
+      if (Number.isNaN(raw)) return;
+      const val = round(raw);
+      if (range) range.value = String(val);
+      apply(val);
+    };
+    range?.addEventListener('input', onRange);
+    num?.addEventListener('change', onNum);
+  };
+  bindNearParam(dom.nearProbeDistRange, dom.nearProbeDistNum, (v) => {
+    renderer?.setNearParams(v, undefined);
+  }, (v) => v);
+  bindNearParam(dom.nearRatioRange, dom.nearRatioNum, (v) => {
+    renderer?.setNearParams(undefined, v);
+  }, (v) => Math.round(v * 100) / 100);
 }
 
 /** 主线程 rAF 循环：按键 → SAB 输入槽 + 预测实例；渲染已在 RendererMain。 */
@@ -371,10 +422,14 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       teleportJson,
       spawn,
     });
-    // 出生点列表（spawn 下拉切换用）
-    renderer.setSpawnPoints(
-      spawnPoints.map((sp) => [sp.origin[0], sp.origin[1], sp.origin[2], bspYawToCsYaw(sp.angles[1])]),
-    );
+    // 出生点列表（spawn 下拉切换用）：主线程渲染物理 + Worker 权威物理**双端**
+    // 都要设置——否则权威侧 teleport_to_spawn 索引为空静默忽略，权威帧
+    // >200 兜底会把传送点拉回（"一瞬间传送过去又被拉回"根因）
+    const spawnList: Array<[number, number, number, number]> = spawnPoints.map((sp) => [
+      sp.origin[0], sp.origin[1], sp.origin[2], bspYawToCsYaw(sp.angles[1]),
+    ]);
+    renderer.setSpawnPoints(spawnList);
+    fixWorker?.postMessage({ type: 'set-spawn-points', json: JSON.stringify(spawnList) });
     // 双端参数同步（Worker 权威 + 主线程渲染物理；含灵敏度，防操作分叉）
     syncFullConfig();
 

@@ -43,6 +43,27 @@
   `RendererMain.disposeScene()`（递归释放 + renderLists/LOD/PVS/碰撞可视化/插值
   缓存清空），`handleBspFile` 触发文件输入即重置内存，`loadScene` 开头防御调用；
   `ColliderDebug` 新增 `clearAll()`（保留 scene/group 引用），`dispose()` 补 triGroup
+- **贴墙透视（近平面裁剪）**：近平面自适应探测距离 `NEAR_PROBE_DIST` 4 → 32——
+  相机距墙最小距离 = 碰撞箱半宽 16，原射线 far=4 永远探测不到面前的墙，贴墙时
+  near 保持默认大值（大地图 50+）→ 墙被近平面裁剪，透视看到地图外面。已与上游
+  cs-movement 逐项核对（碰撞箱 16/72/54、眼睛 64.09/46.04、DIST_EPSILON、brush
+  碰撞逻辑全一致），物理层无差异，纯渲染层 bug
+  - **垂直墙增强**：探测方向 6 → 10（水平 8 方向：正交 + 4 对角，任意贴墙角度
+    与墙夹角 ≥ 22.5°）、探测距离 32 → **72**、收缩系数默认 **0.3**（near =
+    最近距离 × 0.3，更保守不易裁墙）
+  - **面板可调（实时生效）**：显示设置新增「近平面探测距离」「近平面收缩系数」
+    滑块 + 输入框，`RendererMain.setNearParams()` 下一帧生效，无需重载地图
+
+- **出生点下拉无反应**（select 重选当前值/部分浏览器只触发 input 不触发 change）：
+  input + change 双监听 + 去重（换地图重置去重索引）；解析失败 status 可见提示
+
+- **game/ 双端同步**（websurf-min 预测 + 权威双线架构）：
+  - 近平面自适应全套同步（10 方向探测 + 面板实时可调 + 默认 72/0.3）
+  - spawnSelect/respawnBtn 改走 `bridge.sendTeleport/sendRespawn` 双端同步
+    （此前直接调 renderer 绕过 Worker 权威物理 → 传送被权威帧 >200 兜底拉回）
+  - **`set-spawn-points` 消息**：出生点列表同步到 Worker 权威物理（此前只设
+    预测物理，权威侧 `teleport_to_spawn` 索引为空静默忽略 → "一瞬间传送过去
+    又被拉回"根因）
 
 - **斜坡接缝卡零速**（surf 高速滑行在垂直转横线折角带/密集接缝处速度归零）：
   - `TryPlayerMove` 振荡检测宽容化：剪裁后速度反向不再整体归零，保留沿最后撞击

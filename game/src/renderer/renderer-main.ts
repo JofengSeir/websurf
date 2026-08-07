@@ -76,6 +76,32 @@ export class RendererMain {
   /** 剔除距离（场景加载后校准）。 */
   private cullDistance = 12800;
 
+  // ── 近平面贴墙自适应（防贴墙透视；同步自主项目 renderer-main）─────────
+  /** 近平面收缩探测距离默认（HU）：相机距墙最小距离 = 碰撞箱半宽 16，射线必须
+   * 能覆盖该距离才能探测到面前的墙——原固定 near=maxDim/1000（大地图 50+）
+   * 贴墙时墙被近平面裁剪 → 透视看到地图外面。
+   * 48 = 3×最小贴墙距离：配合 8 个水平探测方向（相邻夹角 45°），任意贴墙
+   * 角度下最近方向与墙面夹角 ≥ 22.5°，斜距 ≤ 16/sin22.5° ≈ 41.8 < 48，
+   * 垂直墙全角度可探测（原 32 + 仅 4 正交方向时斜贴墙掠射角 < 30° 会漏检）。 */
+  private static readonly NEAR_PROBE_DIST_DEFAULT = 72;
+  private static readonly CAMERA_NEAR_MIN = 0.05;
+  /** near 收缩系数默认：near = 最近几何距离 × 此值。 */
+  private static readonly NEAR_RATIO_DEFAULT = 0.3;
+  /** 探测距离（HU）；↑ 更斜掠射也能命中，粗筛候选略增。面板可实时调。 */
+  private nearProbeDist = RendererMain.NEAR_PROBE_DIST_DEFAULT;
+  /** near 收缩系数；↓ 更保守更不易裁墙。面板可实时调。 */
+  private nearRatio = RendererMain.NEAR_RATIO_DEFAULT;
+  private defaultNear = 0.1;
+  private nearCheckToggle = false;
+  private readonly _nearOrigin = new THREE.Vector3();
+  private readonly _nearSphere = new THREE.Sphere();
+  private readonly _nearDirF = new THREE.Vector3();
+  private readonly _nearDirR = new THREE.Vector3();
+  private readonly _nearDirU = new THREE.Vector3();
+  private readonly _nearDirD1 = new THREE.Vector3();
+  private readonly _nearDirD2 = new THREE.Vector3();
+  private readonly _nearRaycaster = new THREE.Raycaster();
+
 
   constructor(private readonly shared: ShmState | MsgState) {}
 
@@ -126,8 +152,9 @@ export class RendererMain {
 
     this.scene.add(scene);
 
-    // 2. 相机 far
-    this.camera.near = Math.max(maxDim / 1000, 0.05);
+    // 2. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 updateNearPlane 收缩）
+    this.defaultNear = Math.max(maxDim / 1000, RendererMain.CAMERA_NEAR_MIN);
+    this.camera.near = this.defaultNear;
     this.camera.far = maxDim * 100;
     this.camera.updateProjectionMatrix();
 
@@ -212,6 +239,95 @@ export class RendererMain {
     this.predStarted = false;
     this.curAuth = null;
     this.lastVa = -1;
+  }
+
+  /**
+   * 近平面自适应（同步自主项目）：检测相机 6 方向（相机局部系）
+   * NEAR_PROBE_DIST 内最近的 mesh，动态设置 camera.near。
+   * - 贴墙 → near = max(最近距离 × 0.8, CAMERA_NEAR_MIN)，墙面不被裁剪
+   * - 空旷 → 恢复场景默认
+   * 性能：包围球粗筛候选后做 6 方向 raycaster，每 2 帧一次。
+   */
+  private updateNearPlane(px: number, py: number, pz: number): void {
+    const camera = this.camera;
+    if (!camera || !this.scene) return;
+    const probe = this.nearProbeDist;
+    this._nearOrigin.set(px, py, pz);
+
+    // 1. 包围球粗筛（BSP 模型子树）
+    const candidates: THREE.Mesh[] = [];
+    for (const root of this.scene.children) {
+      if (!root.userData?.isBspModel) continue;
+      root.traverse((obj) => {
+        if (!(obj as THREE.Mesh).isMesh) return;
+        const mesh = obj as THREE.Mesh;
+        const geom = mesh.geometry as THREE.BufferGeometry | null;
+        if (!geom) return;
+        if (!geom.boundingSphere) geom.computeBoundingSphere();
+        const bs = geom.boundingSphere;
+        if (!bs) return;
+        this._nearSphere.copy(bs).applyMatrix4(mesh.matrixWorld);
+        if (this._nearSphere.center.distanceTo(this._nearOrigin) < probe * 2 + this._nearSphere.radius) {
+          candidates.push(mesh);
+        }
+      });
+    }
+
+    // 2. 相机局部 6 方向 → 水平 8 方向 + 上下（10 条射线）探测最近几何：
+    //    任意贴墙角度下最近方向与墙面夹角 ≥ 22.5°（垂直墙全角度可探测）
+    let minD = Infinity;
+    if (candidates.length > 0) {
+      const q = camera.quaternion;
+      this._nearDirF.set(0, 0, -1).applyQuaternion(q);
+      const right = this._nearDirR.set(1, 0, 0).applyQuaternion(q);
+      const up = this._nearDirU.set(0, 1, 0).applyQuaternion(q);
+      const f = this._nearDirF;
+      const r = right;
+      // 水平对角（单位化）
+      const fr = this._nearDirD1.set(f.x + r.x, f.y + r.y, f.z + r.z).normalize();
+      const fl = this._nearDirD2.set(f.x - r.x, f.y - r.y, f.z - r.z).normalize();
+      const dirs = [
+        f,
+        f.clone().negate(),
+        r,
+        r.clone().negate(),
+        fr,
+        fr.clone().negate(),
+        fl,
+        fl.clone().negate(),
+        up,
+        up.clone().negate(),
+      ];
+      for (const dir of dirs) {
+        this._nearRaycaster.set(this._nearOrigin, dir);
+        this._nearRaycaster.near = 0;
+        this._nearRaycaster.far = probe;
+        const hits = this._nearRaycaster.intersectObjects(candidates, false);
+        if (hits.length > 0 && hits[0].distance < minD) {
+          minD = hits[0].distance;
+        }
+      }
+    }
+
+    // 3. 设定 near（贴墙收缩，空旷恢复默认）
+    const target =
+      isFinite(minD)
+        ? Math.max(minD * this.nearRatio, RendererMain.CAMERA_NEAR_MIN)
+        : this.defaultNear;
+    if (Math.abs(camera.near - target) > 0.001) {
+      camera.near = target;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  /** 实时调整近平面自适应参数（面板调用；下一帧探测即生效）。 */
+  setNearParams(probeDist?: number, ratio?: number): void {
+    if (probeDist !== undefined && probeDist > 0) {
+      this.nearProbeDist = probeDist;
+    }
+    if (ratio !== undefined && ratio > 0 && ratio <= 1) {
+      this.nearRatio = ratio;
+    }
   }
 
   // ── 主线程唯一物理线 ───────────────────────────────────────
@@ -504,6 +620,12 @@ export class RendererMain {
       // Rust 输出角度为度 → 弧度
       this.camera.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
       this.camera.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);
+
+      // 近平面贴墙自适应（每 2 帧）：贴墙收缩 near 防近平面裁剪透视
+      this.nearCheckToggle = !this.nearCheckToggle;
+      if (this.nearCheckToggle) {
+        this.updateNearPlane(st.posX, st.posY + st.eyeHeight, st.posZ);
+      }
     }
 
     const camPos = this.camera.position;
