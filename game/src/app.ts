@@ -1,22 +1,23 @@
 /**
  * WebSurf-min — 主线程入口。
  *
- * 架构（2026-08-07 简化）：
- * - Worker-A（权威物理，固定步长不设上限）：src/worker/main.ts
- *   只同步角度/速度/眼高/着地（位置不同步）
- * - 主线程渲染循环内做位置预测（速度积分外推，渲染帧 > 物理帧填补空隙）
+ * 架构（2026-08-07 v5 定案）：
+ * - **唯一物理渲染主线 = 主线程**：主线程解析 BSP、构建 PhysWorld（世界+碰撞+输入）、
+ *   每帧 tick 推进并渲染，全速无限制
+ * - Worker = 纯速度修正器：无 WASM/无地图/无按键/无碰撞，只读主线程状态槽，
+ *   位置差分算"实际移动速度"写回修正槽；主线程仅在卡墙/异常时校准
  * - ESC 弹出式面板（PanelController）+ 速度面板 8Hz
  */
 
-import { createConfig } from './config.js';
+import { createConfig, buildPhysicsParams } from './config.js';
 import type { RuntimeConfig } from './config.js';
+import { BspProcessor } from '../pkg/websurf_wasm.js';
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { loadKeymap, type BindableAction } from './input/keymap.js';
 import { MouseBuffer } from './input/mouse-buffer.js';
 import { PointerLockController } from './input/pointer-lock.js';
-import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask } from './worker/shared-state.js';
-import type { MainMessage, SceneDataMessage } from './worker/worker-types.js';
+import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from './worker/shared-state.js';
 import { RendererMain } from './renderer/renderer-main.js';
 import { PanelController } from './panel/panel-controller.js';
 
@@ -29,6 +30,7 @@ const dom = {
   statsEl: document.getElementById('stats') as HTMLElement | null,
   spawnSelect: document.getElementById('spawnSelect') as HTMLSelectElement | null,
   respawnBtn: document.getElementById('respawnBtn') as HTMLButtonElement | null,
+  fpsEl: document.getElementById('fps') as HTMLElement | null,
 } as const;
 
 const keyboard = new KeyboardInput(loadKeymap());
@@ -38,7 +40,7 @@ export type { BindableAction };
 const mouseBuffer = new MouseBuffer();
 const pointerLock = new PointerLockController();
 
-let workerA: Worker | null = null;
+let fixWorker: Worker | null = null;
 let bridge: InputBridge | null = null;
 let renderer: RendererMain | null = null;
 let panel: PanelController | null = null;
@@ -46,6 +48,8 @@ let sharedState: ReturnType<typeof createMainSharedState> | null = null;
 let sceneReady = false;
 /** 速度面板 8Hz 门控（0.125s）。 */
 let speedUpdateAt = 0;
+/** 滚轮跳 pending（wheel 事件置位，下一帧消费并清除；与根工程语义一致）。 */
+let wheelJumpPending = false;
 
 async function main(): Promise<void> {
   if (!dom.canvas) {
@@ -66,34 +70,48 @@ async function main(): Promise<void> {
   sharedState = createMainSharedState(sharedBuffer);
   const shared = sharedState;
 
-  // 1. Worker-A（权威）——常规文件 Worker（与 dev 同构；wasm 经相对 URL 加载）
-  workerA = new Worker('./worker.js', { type: 'module' });
-  workerA.onmessage = handleWorkerMessage;
-  workerA.onerror = (e) => setError(`Worker error: ${e.message}`);
-  // WASM 注入：相对 worker.js 的 URL（dist/ 与 web/ 均同目录放置 wasm）
-  workerA.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
+  // 1. 权威帧 Worker（加载地图碰撞、独立 64Hz 权威模拟，输出权威帧供渲染校准）
+  fixWorker = new Worker('./worker.js', { type: 'module' });
+  fixWorker.onerror = (e) => setError(`Worker error: ${e.message}`);
+  fixWorker.onmessage = (e: MessageEvent<{ type?: string }>) => {
+    const msg = e.data;
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'error') {
+      setError((msg as { message?: string }).message ?? 'Worker 错误');
+    } else if (msg.type === 'phys-event') {
+      // 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染）
+      const ev = msg as { kind: 'land' | 'blocked'; pos: number[]; yawDeg: number; pitchDeg: number };
+      renderer?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg);
+    }
+  };
+  fixWorker.postMessage({ type: 'init', shared: sharedBuffer });
+  fixWorker.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
 
-  bridge = new InputBridge(workerA, shared);
-  bridge.sendInit(sharedBuffer, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio);
-
-  // 2. 渲染器（客户端预测：主线程持 wasm 预测实例，每帧物理模拟）
+  // 2. 渲染器 = 主线程唯一物理线（BSP 解析/物理/渲染全在主线程）
   renderer = new RendererMain(shared);
-  renderer.onSceneLoaded = (deathY) => bridge?.sendSetDeathThreshold(deathY);
+  renderer.onSceneLoaded = (deathY) => renderer?.setDeathY(deathY);
   renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
   renderer.start();
-  // 主线程 wasm 初始化（预测实例与 Worker-A 同模块、独立实例）
+  // 主线程 wasm 初始化（BspProcessor + PhysWorld 同模块）
   renderer.initPrediction('./websurf_wasm_bg.wasm').catch((err) => {
     setError(`主线程 WASM 初始化失败: ${err instanceof Error ? err.message : String(err)}`);
   });
 
-  // 3. 面板
+  // 3. 桥（面板 → 双端物理：Worker 权威帧 + 主线程渲染物理，参数同参）
+  bridge = new InputBridge(fixWorker, renderer, config);
+  syncFullConfig();
+
+  // 4. 面板（参数变更实时同步主线程物理）
   panel = new PanelController(
     config,
     bridge,
     () => pointerLock.isLocked(),
+    (params) => renderer?.setPredictionParams(params),
+    (hw, sh, dh) => renderer?.setPredictionHull(hw, sh, dh),
+    (active) => renderer?.setPredictionNoclip(active),
   );
 
-  // 4. 输入绑定
+  // 5. 输入绑定
   bindInput();
   startInputLoop();
 }
@@ -107,18 +125,35 @@ function bindInput(): void {
     const r = mouseBuffer.process(e.movementX, e.movementY);
     if (!r) return;
     const mask = keyboard.getMask();
-    if (bridge) bridge.addInput(r.dx, r.dy, mask); // 权威通道（SAB）
-    renderer?.feedInput(r.dx, r.dy, mask); // 预测实例通道（主线程物理模拟）
+    // 灵敏度输入层应用：物理两端 sensitivity 固定 1，这里乘入角度增量后统一分发
+    // （改灵敏度只改这个系数，双端物理用同一份已缩放输入 → 角度永不因灵敏度分叉）
+    const sens = config.input.sensitivity;
+    const CLAMP = 1000; // 与 MouseBuffer 一致的增量上限（乘灵敏度后可能超限，重新钳制）
+    const dx = Math.max(-CLAMP, Math.min(CLAMP, r.dx * sens));
+    const dy = Math.max(-CLAMP, Math.min(CLAMP, r.dy * sens));
+    renderer?.feedInput(dx, dy, mask); // 主线程渲染物理输入（RendererMain.tick 同写 SAB 权威端）
   });
 
   dom.canvas.addEventListener('click', () => {
     if (!sceneReady || pointerLock.isLocked()) return;
-    void pointerLock.requestLock(dom.canvas!);
+    const p = pointerLock.requestLock(dom.canvas!);
+    if (p instanceof Promise) {
+      p.then((ok) => {
+        if (!ok) setStatus('锁定失败，请再次点击画布（确保焦点在页面内）', 'error');
+      });
+    }
   });
 
   pointerLock.onLockChange((locked) => {
     mouseBuffer.onLockChange(locked);
+    // 按键捕获门控：仅锁定时接受按键；退锁（ESC 打开面板）后忽略面板内按键
+    keyboard.setEnabled(locked);
     keyboard.reset();
+    // 清预测实例残留输入 + 权威 keysMask 归零（防 ESC 前最后输入/按住键残留）
+    renderer?.clearPendingInput();
+    bridge?.addInput(0, 0, 0);
+    // 重锁时清滚轮跳 pending（面板期间滚动不产生跳跃）
+    wheelJumpPending = false;
     // 面板状态机：锁定 → 隐藏；退锁（ESC）→ 弹出
     panel?.updateVisibility(sceneReady);
     if (locked) setStatus('已锁定。WASD 移动，鼠标视角，ESC 打开面板。', '');
@@ -128,7 +163,18 @@ function bindInput(): void {
     if (dom.canvas) renderer?.resize(dom.canvas.clientWidth, dom.canvas.clientHeight);
   });
 
-  window.addEventListener('blur', () => keyboard.reset());
+  window.addEventListener('blur', () => {
+    keyboard.reset();
+    // 页面失焦：立即清权威 keysMask + 预测输入（rAF 可能暂停，防 Worker 继续移动）
+    bridge?.addInput(0, 0, 0);
+    renderer?.clearPendingInput();
+  });
+
+  // 滚轮跳：wheel 事件置位，下一帧并入 jump（Rust apply_input 处理 0x100 位）。
+  // 仅锁定时置位：面板打开时滚动面板不触发跳跃（否则改参数时角色乱跳）
+  window.addEventListener('wheel', () => {
+    if (pointerLock.isLocked()) wheelJumpPending = true;
+  });
 
   // 加载地图按钮 → 触发隐藏 file input
   document.getElementById('loadMapBtn')?.addEventListener('click', () => {
@@ -138,31 +184,53 @@ function bindInput(): void {
   dom.fileInput?.addEventListener('change', async (e) => {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
-    if (!file || !bridge) return;
-    renderer?.disposeScene();
-    sceneReady = false;
-    panel?.updateVisibility(false);
-    setStatus(`正在加载 ${file.name}...`, '');
-    bridge.sendLoadBsp(file.name, await file.arrayBuffer());
+    if (!file || !renderer) return;
     input.value = '';
+    await handleLoadBsp(file.name, await file.arrayBuffer());
   });
 
-  dom.respawnBtn?.addEventListener('click', () => bridge?.sendRespawn());
+  dom.respawnBtn?.addEventListener('click', () => renderer?.respawn());
   dom.spawnSelect?.addEventListener('change', (e) => {
     const idx = parseInt((e.target as HTMLSelectElement).value, 10);
-    if (!Number.isNaN(idx)) bridge?.sendTeleport(idx);
+    if (!Number.isNaN(idx)) renderer?.teleportToSpawn(idx);
   });
 }
 
 /** 主线程 rAF 循环：按键 → SAB 输入槽 + 预测实例；渲染已在 RendererMain。 */
 function startInputLoop(): void {
+  let fpsFrames = 0;
+  let fpsTime = 0;
+  let lastQeMs = 0;
   const tick = (now: number): void => {
     requestAnimationFrame(tick);
+    // FPS 显示（左上角，每秒刷新；不依赖场景就绪）
+    fpsFrames++;
+    if (now - fpsTime >= 1000) {
+      if (dom.fpsEl) dom.fpsEl.textContent = `${fpsFrames} FPS`;
+      fpsFrames = 0;
+      fpsTime = now;
+    }
     if (!bridge || !sceneReady) return;
-    const keys = keyboard.getState();
-    const mask = keysToMask(keys);
-    bridge.addInput(0, 0, mask);
-    renderer?.feedInput(0, 0, mask); // 预测实例按键（鼠标增量已在 mousemove 喂入）
+    // 未锁定（面板打开）时强制输入为 0：面板内按键不进入物理（keyboard 已禁用，
+    // 这里双保险防 ESC 前后按键状态残留）
+    const mask = pointerLock.isLocked() ? keysToMask(keyboard.getState()) : 0;
+    // 滚轮跳：仅锁定时并入本帧输入（消费一次即清）
+    const maskWithWheel = pointerLock.isLocked() && wheelJumpPending ? mask | KEY_MASK.wheelJump : mask;
+    wheelJumpPending = false;
+    // Q/E 转向 → 等效鼠标增量（用户定调：按住时作用到鼠标的量上，但**独立增量**）：
+    // 与真实鼠标同一输入通道（feedInput + SAB 累积，双端消费同源输入 →
+    // 角度天然一致，无 Q/E 分叉）；旋转速度恒 = yawBindSpeed（固定角速度，
+    // **不受灵敏度影响**——qeDx 不乘 sensitivity，物理两端 sensitivity 固定 1）
+    const M_YAW = 0.022; // 与 Rust player.rs M_YAW 一致（度/像素）
+    const dtF = lastQeMs === 0 ? 1 / 144 : Math.min((now - lastQeMs) / 1000, 0.1);
+    lastQeMs = now;
+    let qeDx = 0;
+    if (maskWithWheel & KEY_MASK.yawLeft) qeDx -= (config.input.yawBindSpeed / M_YAW) * dtF;
+    if (maskWithWheel & KEY_MASK.yawRight) qeDx += (config.input.yawBindSpeed / M_YAW) * dtF;
+    if (qeDx !== 0) {
+      qeDx = Math.max(-1000, Math.min(1000, qeDx)); // 上限防异常（yawBind 720 时单帧仅 ~227px，不触发）
+    }
+    renderer?.feedInput(qeDx, 0, maskWithWheel); // 主线程物理按键 + Q/E 等效鼠标量
     // 速度面板 8Hz（0.125s）
     if (now - speedUpdateAt >= 125) {
       speedUpdateAt = now;
@@ -172,12 +240,10 @@ function startInputLoop(): void {
   requestAnimationFrame(tick);
 }
 
-/** 速度面板：从三源决策结果（SAB 权威区）采样，8Hz 低频。纯数字无文字。 */
+/** 速度面板：从主线程唯一物理线采样，8Hz 低频。纯数字无文字。 */
 function updateSpeedHud(): void {
-  if (!sharedState || !dom.statsEl) return;
-  const auth = sharedState.readAuthoritative();
-  if (!auth) return;
-  const v = auth.state.vel;
+  if (!renderer || !dom.statsEl) return;
+  const v = renderer.getCurrentVel();
   const lateral = Math.hypot(v.x, v.z);
   const vertical = Math.abs(v.y);
   const total = Math.hypot(v.x, v.y, v.z);
@@ -191,76 +257,146 @@ function updateSpeedHud(): void {
   dom.statsEl.innerHTML = text;
 }
 
-function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
-  const msg = e.data;
-  if (!msg || typeof msg !== 'object') return;
-  switch (msg.type) {
-    case 'ready':
-      setStatus('Worker 就绪。请加载 .bsp 文件。', 'success');
-      syncFullConfig();
-      break;
-    case 'bsp-metadata':
-      break;
-    case 'scene-data':
-      void handleSceneData(msg);
-      break;
-    case 'world-json':
-      // 主线程构建预测 PhysWorld（客户端预测物理模拟实例）
-      renderer?.buildPredictionWorld({
-        brushJson: msg.brushJson,
-        triJson: msg.triJson,
-        teleportJson: msg.teleportJson,
-        spawn: msg.spawn,
-      });
-      break;
-    case 'player-respawn': {
-      // 位置突变事件（重生/传送/noclip 切换）：预测实例归零到权威新位置
-      const r = msg as unknown as { pos: number[]; yawDeg: number };
-      renderer?.resetTo(r.pos, r.yawDeg);
-      break;
-    }
-    case 'stats':
-      break; // HUD 精简：速度面板由主线程 8Hz 采样，不依赖 stats 消息
-    case 'error':
-      setError(msg.message);
-      break;
-    default:
-      break;
-  }
-}
-
-async function handleSceneData(msg: SceneDataMessage): Promise<void> {
+/**
+ * 主线程加载 BSP（唯一物理线：解析 + 渲染 + 构建物理世界全部在主线程）。
+ * Worker 已不参与地图加载/解析。
+ */
+async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void> {
   if (!renderer) {
     setError('渲染器未就绪');
     return;
   }
-  await renderer.loadScene(msg);
-  sceneReady = true;
-  setStatus(
-    `场景已加载（GLB ${msg.glbSizeKb} KB，${msg.metadata.numBrushes} brushes，` +
-      `${msg.numSpawnPoints} 出生点）`,
-    'success',
-  );
-  // 出生点下拉
-  if (dom.spawnSelect) {
+  renderer.disposeScene();
+  sceneReady = false;
+  panel?.updateVisibility(false);
+  setStatus(`正在加载 ${fileName}（主线程解析 BSP）...`, '');
+  await new Promise((r) => setTimeout(r, 0)); // 让 UI 先更新（解析可能耗时）
+  try {
+    const proc = new BspProcessor(new Uint8Array(bytes));
+    const meta = JSON.parse(proc.metadata()) as {
+      map_name: string; num_faces: number; num_vertices: number;
+      num_brushes: number; num_models: number;
+    };
+
+    // 导出顺序：借用方法（brush/tri/spawn/teleport/pvs）先于消费 BSP 的 export_glb
+    const brushJson = proc.export_brushes_planes(
+      JSON.stringify({
+        include_ladder: true,
+        include_solid: true,
+        min_brush_volume: 0,
+        skip_sky: true,
+        skip_nodraw: false,
+      }),
+    );
+    let triJson: string;
     try {
-      const data = JSON.parse(msg.spawnJson) as {
-        spawn_points: Array<{ classname: string; origin: number[] }>;
-      };
-      dom.spawnSelect.innerHTML = (data.spawn_points ?? [])
+      triJson = proc.export_model_phy_colliders();
+      if ((JSON.parse(triJson) as unknown[]).length === 0) {
+        triJson = proc.export_model_tri_colliders();
+      }
+    } catch {
+      try {
+        triJson = proc.export_model_tri_colliders();
+      } catch {
+        triJson = '[]';
+      }
+    }
+    const spawnJson = proc.parse_spawn_points();
+    const teleportJson = proc.parse_teleports();
+    const pvsJson = proc.parse_pvs_data();
+
+    // spawn 解析（primary 出生点 + 全部列表）
+    const spawnData = JSON.parse(spawnJson) as {
+      spawn_points: Array<{ classname: string; origin: number[]; angles: number[] }>;
+      primary?: number;
+    };
+    const spawnPoints = spawnData.spawn_points ?? [];
+    const primaryIdx = (spawnData.primary ?? 0) >= 0 ? (spawnData.primary ?? 0) : 0;
+    const primary = spawnPoints[primaryIdx] ?? spawnPoints[0];
+    const bspYawToCsYaw = (yaw: number): number => ((270 - yaw) % 360 + 360) % 360;
+    const spawn = primary
+      ? {
+          x: primary.origin[0], y: primary.origin[1], z: primary.origin[2],
+          yawDeg: bspYawToCsYaw(primary.angles[1]),
+        }
+      : { x: 0, y: 100, z: 0, yawDeg: 0 };
+
+    // GLB（消费 BSP，最后调用）
+    let glbBytes: Uint8Array;
+    try {
+      glbBytes = proc.export_glb_with_pakfile_models();
+    } catch {
+      glbBytes = proc.export_glb();
+    }
+    const glbBuffer = glbBytes.buffer.slice(
+      glbBytes.byteOffset,
+      glbBytes.byteOffset + glbBytes.byteLength,
+    );
+
+    // 渲染场景（GLB + PVS + spawn）
+    await renderer.loadScene({
+      type: 'scene-data',
+      glb: glbBuffer,
+      spawnJson,
+      pvsJson,
+      metadata: {
+        mapName: meta.map_name,
+        numFaces: meta.num_faces,
+        numVertices: meta.num_vertices,
+        numBrushes: meta.num_brushes,
+        numModels: meta.num_models,
+      },
+      spawn,
+      glbSizeKb: Math.round(glbBuffer.byteLength / 1024),
+      numSpawnPoints: spawnPoints.length,
+      hasPvs: pvsJson.length > 2,
+    });
+
+    // 主线程物理世界（渲染线）
+    renderer.buildPredictionWorld({
+      brushJson,
+      triJson: triJson ?? '[]',
+      teleportJson,
+      spawn,
+    });
+    // Worker 权威物理世界（地图碰撞；独立 64Hz 权威帧计算）
+    fixWorker?.postMessage({
+      type: 'world-json',
+      brushJson,
+      triJson: triJson ?? '[]',
+      teleportJson,
+      spawn,
+    });
+    // 出生点列表（spawn 下拉切换用）
+    renderer.setSpawnPoints(
+      spawnPoints.map((sp) => [sp.origin[0], sp.origin[1], sp.origin[2], bspYawToCsYaw(sp.angles[1])]),
+    );
+    // 双端参数同步（Worker 权威 + 主线程渲染物理；含灵敏度，防操作分叉）
+    syncFullConfig();
+
+    sceneReady = true;
+    setStatus(
+      `场景已加载（GLB ${Math.round(glbBuffer.byteLength / 1024)} KB，${meta.num_brushes} brushes，` +
+        `${spawnPoints.length} 出生点）`,
+      'success',
+    );
+    // 出生点下拉
+    if (dom.spawnSelect) {
+      dom.spawnSelect.innerHTML = spawnPoints
         .map(
           (sp, i) =>
             `<option value="${i}">${i}: ${sp.classname} (${sp.origin.map((n) => n.toFixed(0)).join(',')})</option>`,
         )
         .join('');
       dom.spawnSelect.disabled = false;
-    } catch {
-      // 忽略
     }
+    if (dom.respawnBtn) dom.respawnBtn.disabled = false;
+    // 面板状态机：场景就绪 → 面板隐藏（等待锁定）
+    panel?.updateVisibility(true);
+  } catch (err) {
+    setError(`BSP 解析失败: ${err instanceof Error ? err.message : String(err)}`);
+    renderer.disposeScene();
   }
-  if (dom.respawnBtn) dom.respawnBtn.disabled = false;
-  // 面板状态机：场景就绪 → 面板隐藏（等待锁定）
-  panel?.updateVisibility(true);
 }
 
 function syncFullConfig(): void {

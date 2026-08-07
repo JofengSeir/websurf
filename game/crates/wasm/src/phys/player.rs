@@ -100,7 +100,7 @@ impl Default for PhysParams {
             sensitivity: 1.5,
             yaw_bind_speed: 210.0,
             noclip_speed: 800.0,
-            teleport_gate_ticks: 3,
+            teleport_gate_ticks: 1,
             hull_half_width: DEFAULT_HULL_HALF_WIDTH,
             hull_stand_height: DEFAULT_HULL_STAND_HEIGHT,
             hull_duck_height: DEFAULT_HULL_DUCK_HEIGHT,
@@ -122,6 +122,9 @@ pub struct InputState {
     pub duck: bool,
     pub walk: bool,
     pub reset: bool,
+    /// Q/E 转向（yaw_bind_speed × dt 旋转；KEY_MASK 0x200/0x400）。
+    pub yaw_left: bool,
+    pub yaw_right: bool,
 }
 
 /// 玩家状态（每 tick 推进；tick 输出由调用方写入 SAB）。
@@ -145,6 +148,9 @@ pub struct Player {
     pub ladder_cooldown: f64,
     pub fall_velocity: f64,
     pub ground_ticks_since_landing: u32,
+    /// 接触帧计数（传送 gate 用）：地面或斜面（法线 y > 0.05）都算接触——
+    /// 斜面滑行（surf 玩法）也应能触发传送，仅 on_ground 会漏掉陡坡。
+    pub contact_ticks: u32,
     pub has_jumped_before: bool,
     pub landing_velocity: V3,
     pub stuck_ticks: u32,
@@ -208,6 +214,7 @@ impl Player {
         self.on_ladder = None;
         self.ducked = false;
         self.ground_ticks_since_landing = 0;
+        self.contact_ticks = 0;
         self.has_jumped_before = false;
         self.surfed_since_grounded = false;
         self.landing_velocity = [0.0, 0.0, 0.0];
@@ -773,6 +780,7 @@ fn categorize_position(world: &mut World, p: &mut Player) {
     // 上升速度快于此值，不可能"站"在任何物体上
     if p.velocity[1] > NON_JUMP_VELOCITY {
         p.on_ground = false;
+        p.contact_ticks = 0; // 上升 = 脱离接触（传送 gate 防跳跃误触）
         return;
     }
     let mins = p.mins();
@@ -783,6 +791,14 @@ fn categorize_position(world: &mut World, p: &mut Player) {
         &mins,
         &maxs,
     );
+    // 接触计数（传送 gate 用）：地面（trace 命中可站面）或斜面滑行（surfing，
+    // try_player_move 碰撞法线 0.05~0.7 置位）都算接触——高速斜面滑行时玩家
+    // 悬于坡面数 units（2 units 探测 miss），只有碰撞信号能持续判定贴坡
+    if (tr.fraction < 1.0 && !tr.start_solid && tr.normal.map_or(false, |n| n[1] > 0.05)) || p.surfing {
+        p.contact_ticks = p.contact_ticks.saturating_add(1);
+    } else {
+        p.contact_ticks = 0;
+    }
     if tr.fraction < 1.0
         && !tr.start_solid
         && tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL)
@@ -952,6 +968,7 @@ pub fn create_player(origin: V3, params: &PhysParams) -> Player {
         ladder_cooldown: 0.0,
         fall_velocity: 0.0,
         ground_ticks_since_landing: 0,
+        contact_ticks: 0,
         has_jumped_before: false,
         landing_velocity: [0.0, 0.0, 0.0],
         stuck_ticks: 0,

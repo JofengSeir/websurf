@@ -1,16 +1,17 @@
-# WebSurf 最小化实现路径 v4（物理下沉 WASM + 主线程位置预测）
+# WebSurf 最小化实现路径 v5（物理下沉 WASM + 唯一物理渲染线 + Worker 权威帧）
 
-> 编制日期：2026-08-07（v4：**删除 Worker-B 预测，预测移入主线程渲染循环**，权威只同步角度/速度）。
+> 编制日期：2026-08-07；**2026-08-08 更新至 v5/v7 定案**。
 > 依据 `docs/project-overview.md`、`docs/bsp-architecture.md`、`docs/bsp-export-status.md`、
-> `docs/项目时序图.md`（v4 版），已对照 `src/`（79 .ts / 11,844 行）、`crates/wasm/src/`（30 .rs）核实。
+> `docs/项目时序图.md`（v7 版），已对照 `game/src/`（14 .ts）、`crates/wasm/src/`（30 .rs）核实。
 >
-> **v4 相对 v3 的变化**（2026-08-07 架构决策）：
-> 1. **删除 Worker-B 预测预计算**——双 Worker 同步复杂且实测易卡；预测改在主线程渲染循环内
->    与渲染同频进行（rAF 内位置速度积分外推 + 角度 LERP）
-> 2. **权威只同步基本信息**——SAB 权威区仅含 yaw/pitch/vel/eyeHeight/onGround，
->    **位置不同步**（渲染帧通常高于物理帧，位置由主线程按速度积分，接受无碰撞误差）
-> 3. **物理不设上限**——固定步长累积器无步数封顶（低帧率不丢物理时间）
-> 4. respawn/teleport 位置突变事件回传一次（player-respawn 消息），主线程预测归零
+> **v7 定案（2026-08-08）**：主线程 = 唯一物理渲染线（BSP 解析 + PhysWorld tick + 渲染，
+> 144Hz 可变 dt）；Worker = 权威帧计算器（wasm 世界 + 独立固定步长权威物理，
+> 步长 1/tickRate 64/128Hz，含地图碰撞）；每帧速度外推校准（只动速度，位置/角度不覆盖）；
+> 灵敏度/Q/E 输入层化（双端同源无分叉）；碰撞事件回传位置微调+角度同步。
+> 详细演进决策见 `DESIGN-DISCUSSION.md` §H。
+>
+> **v4 相对 v3 的变化**（2026-08-07，历史记录）：删除 Worker-B 预测、权威只同步基本信息、
+> 物理不设上限、位置突变事件回传——全部已被 v7 取代（v7 恢复权威全状态同步作为速度校准源）。
 >
 > **v3 相对 v2 的变化**（保留记录）：基本面板保留但不常驻——初始化常驻（必须加载地图）、
 > 锁定后 ESC 弹出、游玩中隐藏。面板收敛为六块：物理参数（含 tickRate）、
@@ -174,26 +175,34 @@ crates/wasm/src/phys/
 API：`build_world()` / `tick(dt, dx, dy, keys)` / `predict(dt, dx, dy, keys)` /
 `respawn()` / `teleport_to()` / `set_death_y()` / **`set_params(json)` / `set_hull(json)`**（新增，面板用）。
 
-### 4.2 单 Worker 世界数据 + 主线程预测物理模拟（v4.1）
+### 4.2 v7 最终架构：主线程唯一物理渲染线 + Worker 权威帧计算器（2026-08-08 定案）
 
-Worker-A 持 wasm 模块的 `PhysWorld` 实例（BSP bytes 主线程单次转发，Rust 内 build_world 毫秒级）。
-**主线程持第二个 PhysWorld 预测实例**（客户端预测，标准模式）：
-- 预测实例：主线程 init wasm（同模块）+ world-json（brush/tri/teleport/spawn）→ build_world +
-  set_params/set_hull（面板参数同步）
-- 每 rAF：**set_state 权威修正（全状态）→ predict(dt, keys, dx, dy) 物理模拟（含碰撞）→ 渲染**
-- 输入双通道：同一份 dx/dy/keys 同时喂 SAB（权威）与预测实例缓冲
-- respawn/teleport：`player-respawn` 消息回传 → set_state 归零
+> v4.1 的"双物理体系互相覆盖"（set_state 修正预测基线）在实测中被推翻，最终架构如下。
+> 演进决策与教训见 `DESIGN-DISCUSSION.md` §H；时序图 v7 见根 `docs/项目时序图.md`。
 
-### 4.3 SAB 布局（v4.1：权威全状态，客户端预测修正源）
+- **主线程 = 唯一物理渲染线**：BspProcessor 解析 + PhysWorld 完整物理（tick，非 predict）+
+  渲染全在主线程（144Hz 可变 dt，全速无限制）——渲染帧永远是主线程物理自己的连续输出
+- **Worker = 权威帧计算器**：wasm + world-json 世界构建（地图碰撞）；独立固定步长权威物理
+  （步长 = 1/tickRate，64/128Hz 可调）；每 tick 消费 SAB 累积输入 → 完整物理 →
+  碰撞事件检测 → 写权威全状态 + V_A++
+- **速度外推校准**：每帧 `set_velocity(vel_A + a×Δt)`（权威速度 + 加速度外推，动态帧距）——
+  校准**只动速度**，位置/角度不覆盖；异常（差 >200）才 set_state 兜底
+- **角度隔离**：渲染角度纯输入驱动（鼠标 + Q/E）；权威仅碰撞事件（land/blocked）时同步角度
+- **输入层参数**：灵敏度乘入角度增量（物理两端 sensitivity 固定 1）；Q/E 生成等效鼠标量
+  （yaw_bind_speed/M_YAW×dt，独立增量不受灵敏度影响）→ 双端消费同源输入，无分叉
+- **碰撞事件回传**：落地上升沿/撞墙检测 → 位置微调（<60）+ 角度同步
+- respawn/teleport：双端同执行 + `player-respawn` 消息回传归零
+
+### 4.3 SAB 布局（v7：权威全状态，速度校准源）
 
 | 偏移 | 区 | 内容 | 内存序 |
 |---|---|---|---|
 | 0–63 | 控制区 | V_A + gen_A + keys + onGround | release 写 / acquire 读 |
 | 64–127 | 输入槽 | dxAcc/dyAcc（BigInt64 原子累加） | 主线程 add；Worker exchange 消耗 |
-| 128–415 | 权威全状态双缓冲 | pos/yaw/pitch/vel/eyeHeight（每槽 9 值定点） | Worker-A release 写 + V_A++ |
+| 128–415 | 权威全状态双缓冲 | pos/yaw/pitch/vel/eyeHeight/timeMs（每槽 10 值定点） | Worker release 写 + V_A++ |
 
-主线程渲染帧：V_A 刷新 → set_state 修正预测实例 → predict 物理模拟 → 渲染。零等待。
-**速度面板从预测实例/权威 vel 直接取（4Hz 采样），零消息。**
+主线程渲染帧：写输入 SAB → 读权威帧（V_A 变化记录 + 加速度）→ 速度外推校准 →
+tick 物理 → 渲染。零等待。**速度面板从主线程物理 vel 直接取（8Hz 采样），零消息。**
 
 ---
 

@@ -1,163 +1,77 @@
 /**
- * Worker-A（权威物理）入口 — 最小化版。
+ * Worker — 权威帧计算器（v7 定案）。
  *
- * 职责：
- * 1. wasm-init：加载 WASM（dist base64 / dev URL），实例化 BspProcessor + PhysWorld
- * 2. load-bsp：Worker 内解析 BSP → 导出 GLB/spawn/pvs 传主线程 + build_world 构建物理世界
- * 3. 固定步长物理循环：Atomics.wait(16ms 超时兜底) → CAS 消耗输入槽 → wasm tick →
- *    写权威基本信息（角度/速度/眼高/着地，**位置由主线程预测积分**）
- * 4. config/respawn/teleport/set-death-threshold 消息处理
- *
- * 物理不设上限：固定步长累积器不封顶（低帧率时补足全部欠步，不丢物理时间）。
+ * 架构（用户核心思想）：
+ * - **Worker 加载地图物理碰撞**（world-json 一次性构建 PhysWorld），
+ *   独立模拟**权威物理线**（固定 64Hz tick，含碰撞/摩擦/重力），
+ *   每 tick 输出**权威帧**（位置/朝向/速度/眼高/着地/时间戳）
+ * - 主线程是渲染预测线（全速物理+渲染），每帧读权威帧，
+ *   用权威速度（考虑中途地图碰撞后的正确速度）外推校准渲染物理
+ * - 输入：主线程写 SAB 输入槽（keys/dx/dy），本 Worker takeInput 消费
+ *   （权威帧模拟需要同输入）；不反写位置，不渲染
  */
 
 /// <reference lib="webworker" />
 
-import { PhysWorld, BspProcessor, default as wasmInit } from '../../pkg/websurf_wasm.js';
+import { PhysWorld, default as wasmInit } from '../../pkg/websurf_wasm.js';
 import { createWorkerSharedState, type ShmState } from './shared-state.js';
-import type { WorkerMessage, MainMessage } from './worker-types.js';
+import type { WorkerMessage } from './worker-types.js';
 import { createConfig, applyConfigPatch } from '../config.js';
 import type { RuntimeConfig } from '../config.js';
 
-/** 固定步长（默认 64Hz；config.tickRate 覆盖）。 */
+/** 权威固定步长（默认 64Hz；config.physics.tickRate 动态覆盖——面板改 tickRate 即时生效）。 */
 let fixedDt = 1 / 64;
-/** 防穿墙：单 tick 输入增量上限（随步长缩放，tickRate 快则每步上限同比缩小）。 */
+/** 防穿墙：单 tick 输入增量上限。 */
 const MAX_INPUT_PER_STEP_BASE = 1200; // 每 1/64s 的 yaw 增量上限（度）
 
-/** WASM 初始化参数（常规打包：wasmUrl 相对 worker.js）。 */
-interface WasmInitPayload {
-  type: 'wasm-init';
-  wasmUrl?: string;
-}
-
-let phys: PhysWorld | null = null;
 let shared: ShmState | null = null;
+let phys: PhysWorld | null = null;
+let ready = false;
+let loopStarted = false;
 let config: RuntimeConfig = createConfig();
-let sceneReady = false;
-/** FPS 统计。 */
-let fpsCount = 0;
-let fpsWallStart = 0;
-/** wasm 初始化状态（对齐主项目：wasm-init 前消息入队，就绪后按序重放）。 */
-let wasmReady = false;
-let initStarted = false;
-const pending: MessageEvent[] = [];
+/** 累积器：真实墙钟 → 固定步长推进（不设上限，低帧率不丢物理时间）。 */
+let acc = 0;
+let lastWall = 0;
 
-/** WASM 初始化（消息驱动）：fetch wasmUrl（相对 worker.js）→ init。 */
-async function startWasm(msg: WasmInitPayload): Promise<void> {
-  // 常规打包：wasm 外置文件，worker 内 fetch 相对自身 URL 加载（dist/ 与 web/ 同构）
-  if (!msg.wasmUrl) {
-    throw new Error('wasm-init 消息缺少 wasmUrl');
-  }
-  const resp = await fetch(msg.wasmUrl);
-  const buf = await resp.arrayBuffer();
-  await wasmInit(buf);
-  wasmReady = true;
-  // 按序重放此前缓存的消息（含 init：创建 shared）
-  for (const ev of pending) dispatch(ev);
-  pending.length = 0;
-  // 启动 60Hz 自驱物理循环
-  runLoop();
-}
-
-/** 分发消息：首个 init 消息注入共享内存。 */
-function dispatch(e: MessageEvent): void {
-  const msg = e.data as { type?: string } | null;
-  if (!msg || typeof msg !== 'object') return;
-  const type = msg.type;
-  if (type === 'init') {
-    const init = msg as { shared: SharedArrayBuffer | null };
-    if (init.shared) shared = createWorkerSharedState(init.shared);
+/** 主循环：墙钟驱动固定步长权威 tick。 */
+function loop(): void {
+  setTimeout(loop, 4); // 250Hz 轮询（> 最大 tick 率，满足固定步长累积）
+  if (!shared || !phys) return;
+  const now = performance.now();
+  if (lastWall === 0) {
+    lastWall = now;
     return;
   }
-  if (type === 'load-bsp') {
-    const lb = msg as { name: string; data: ArrayBuffer };
-    void handleLoadBsp(lb.data, lb.name);
-    return;
-  }
-  if (type === 'config') {
-    const cm = msg as { section: keyof RuntimeConfig; patch: Record<string, unknown> };
-    applyConfigPatch(config, cm.section, cm.patch);
-    if (cm.section === 'physics') {
-      syncParamsToWasm();
-      // noclip 模式切换 → Rust set_noclip（noclip 下禁物理/传送）
-      if (typeof cm.patch.mode === 'string' && phys) {
-        phys.set_noclip(cm.patch.mode === 'noclip');
-      }
-    }
-    return;
-  }
-  if (type === 'respawn') {
-    phys?.respawn();
-    notifyPosReset();
-    return;
-  }
-  if (type === 'teleport') {
-    // 传送到指定出生点索引（spawn 下拉）；Rust 侧按索引查表
-    const tm = msg as { target?: number };
-    if (typeof tm.target === 'number') {
-      phys?.teleport_to_spawn(tm.target);
-      notifyPosReset();
-    }
-    return;
-  }
-  if (type === 'set-death-threshold') {
-    const dm = msg as { value: number };
-    phys?.set_death_y(dm.value);
-    return;
+  acc += (now - lastWall) / 1000;
+  lastWall = now;
+  // 固定步长推进（不设上限：低帧率补足全部欠步）
+  let guard = 0;
+  while (acc >= fixedDt && guard < 64) {
+    acc -= fixedDt;
+    stepPhysics(fixedDt);
+    guard++;
   }
 }
 
-/** 60Hz 自驱循环：Atomics.wait 16ms 超时兜底（notify 仅加速），无需主线程 frame 信号。 */
-function runLoop(): void {
-  let lastT = performance.now();
-  // 固定时间步累积器（防高刷丢时间：dt<fixedDt 时残留累加，物理时间守恒）
-  let acc = 0;
-  const loop = (): void => {
-    try {
-      if (!shared || !sceneReady) {
-        setTimeout(loop, 16);
-        return;
-      }
-      // 热待机：等待 notify 或 16ms 超时（自驱节奏）
-      const now = performance.now();
-      const dt = Math.min((now - lastT) / 1000, 0.1);
-      lastT = now;
-
-      // 固定步长推进：累积器模式，不设步数上限（不丢物理时间，防低帧率慢动作）
-      acc += dt;
-      while (acc >= fixedDt) {
-        acc -= fixedDt;
-        stepPhysics(fixedDt);
-      }
-      // 每帧都写权威基本信息（steps=0 时物理未推进，也写基准帧供渲染外推）
-      writeFrame(now);
-      setTimeout(loop, 16);
-    } catch (err) {
-      // Worker 循环异常上报（避免静默死亡，便于浏览器控制台排查）
-      postMessage({
-        type: 'error',
-        message: `[runLoop] ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
-      } satisfies MainMessage);
-    }
-  };
-  setTimeout(loop, 16);
-}
-
-/** 单个固定步长物理。 */
+/** 单个权威步长：消费输入 → 完整物理 tick（含碰撞）→ 写权威帧。 */
+let prevOnGround = false;
+let prevSpeed = 0;
+let prevOrigin: [number, number, number] | null = null;
 function stepPhysics(dt: number): void {
   if (!shared || !phys) return;
-  // CAS 安全消耗输入（maxStep 防穿墙，随步长缩放）
   const maxStep = (MAX_INPUT_PER_STEP_BASE * dt) / (1 / 64);
   const input = shared.takeInput(maxStep);
-  const keys = input.keysMask;
-  const dx = input.dx;
-  const dy = input.dy;
-  phys.tick(dt, keys, dx, dy);
-}
+  // 碰撞事件检测基准（tick 前）
+  const before = phys.state() as {
+    posX: number; posY: number; posZ: number;
+    velX: number; velY: number; velZ: number;
+    onGround: boolean;
+  };
+  prevOnGround = before.onGround;
+  prevSpeed = Math.hypot(before.velX, before.velY, before.velZ);
+  prevOrigin = [before.posX, before.posY, before.posZ];
 
-/** 写权威全状态（含位置）到 SAB + 递增 V_A。主线程预测实例据此 set_state 修正基线。 */
-function writeFrame(timeMs: number): void {
-  if (!shared || !phys) return;
+  phys.tick(dt, input.keysMask, input.dx, input.dy);
   const s = phys.state() as {
     posX: number; posY: number; posZ: number;
     yaw: number; pitch: number;
@@ -171,246 +85,148 @@ function writeFrame(timeMs: number): void {
       pitch: s.pitch,
       vel: { x: s.velX, y: s.velY, z: s.velZ },
       eyeHeight: s.eyeHeight,
-      timeMs,
+      timeMs: performance.now(),
     },
     s.onGround,
   );
-  // FPS 统计（0.5s 墙钟窗口）
-  fpsCount++;
-  if (fpsWallStart === 0) fpsWallStart = performance.now();
-  if (performance.now() - fpsWallStart >= 500) {
-    const fps = Math.round((fpsCount * 1000) / (performance.now() - fpsWallStart));
-    fpsCount = 0;
-    fpsWallStart = performance.now();
-    if (phys) {
-      const st = phys.state() as {
-        posX: number; posY: number; posZ: number;
-        velX: number; velY: number; velZ: number;
-        onGround: boolean;
-      };
-      const speed = Math.hypot(st.velX, st.velZ);
-      postMessage({
-        type: 'stats',
-        fps,
-        speed,
-        speedY: Math.abs(st.velY),
-        speedTotal: Math.hypot(st.velX, st.velY, st.velZ),
-        onGround: st.onGround,
-      } satisfies MainMessage);
-    }
+
+  // 权威碰撞事件（低频，postMessage 回传主线程做位置微调 + 角度同步）：
+  // - land：onGround 上升沿（权威真实落地点；渲染侧相位差可能差几 units）
+  // - blocked：撞墙/被阻——速度骤降（>250 u/s）且实际位移远小于速度对应位移
+  if (!prevOnGround && s.onGround) {
+    postMessage({
+      type: 'phys-event',
+      kind: 'land',
+      pos: [s.posX, s.posY, s.posZ],
+      yawDeg: s.yaw,
+      pitchDeg: s.pitch,
+      timeMs: performance.now(),
+    } satisfies import('./worker-types.js').MainMessage);
+    return;
+  }
+  const curSpeed = Math.hypot(s.velX, s.velY, s.velZ);
+  const moved = prevOrigin ? Math.hypot(s.posX - prevOrigin[0], s.posY - prevOrigin[1], s.posZ - prevOrigin[2]) : 0;
+  const expectedMove = prevSpeed * dt;
+  if (curSpeed > 80 && prevSpeed - curSpeed > 250 && moved < expectedMove * 0.3) {
+    postMessage({
+      type: 'phys-event',
+      kind: 'blocked',
+      pos: [s.posX, s.posY, s.posZ],
+      yawDeg: s.yaw,
+      pitchDeg: s.pitch,
+      timeMs: performance.now(),
+    } satisfies import('./worker-types.js').MainMessage);
   }
 }
 
-/** load-bsp：解析 + 导出 + 构建物理世界 + scene-data 传主线程。 */
-async function handleLoadBsp(data: ArrayBuffer, _name: string): Promise<void> {
-  try {
-    postMessage({ type: 'parse-progress', stage: 'WASM 解析中' } as never);
-    const bytes = new Uint8Array(data);
-    const processor = new BspProcessor(bytes);
-
-    const meta = JSON.parse(processor.metadata()) as {
-      map_name: string; num_faces: number; num_vertices: number;
-      num_brushes: number; num_models: number;
-    };
-    postMessage({
-      type: 'bsp-metadata',
-      metadata: {
-        map_name: meta.map_name,
-        num_faces: meta.num_faces,
-        num_vertices: meta.num_vertices,
-        num_brushes: meta.num_brushes,
-        num_models: meta.num_models,
-      },
-    } satisfies MainMessage);
-
-    // 导出顺序：借用方法（brush/tri/spawn/teleport/pvs）先于消费 BSP 的 export_glb
-    postMessage({ type: 'parse-progress', stage: '导出碰撞体' } as never);
-    const brushJson = processor.export_brushes_planes(
-      JSON.stringify({
-        include_ladder: true,
-        include_solid: true,
-        min_brush_volume: 0,
-        skip_sky: true,
-        skip_nodraw: false,
-      }),
-    );
-    let triJson: string | undefined;
-    try {
-      triJson = processor.export_model_phy_colliders();
-      if (!triJson || (JSON.parse(triJson) as unknown[]).length === 0) {
-        triJson = processor.export_model_tri_colliders();
-      }
-    } catch {
-      try {
-        triJson = processor.export_model_tri_colliders();
-      } catch {
-        triJson = '[]';
-      }
-    }
-
-    const spawnJson = processor.parse_spawn_points();
-    const teleportJson = processor.parse_teleports();
-    postMessage({ type: 'parse-progress', stage: '导出 PVS' } as never);
-    const pvsJson = processor.parse_pvs_data();
-
-    // spawn 解析（primary 出生点 + 全部列表）
-    const spawnData = JSON.parse(spawnJson) as {
-      spawn_points: Array<{ classname: string; origin: number[]; angles: number[] }>;
-      primary?: number;
-    };
-    const spawnPoints = spawnData.spawn_points ?? [];
-    const primaryIdx = (spawnData.primary ?? 0) >= 0 ? (spawnData.primary ?? 0) : 0;
-    const primary = spawnPoints[primaryIdx] ?? spawnPoints[0];
-    const bspYawToCsYaw = (yaw: number): number => ((270 - yaw) % 360 + 360) % 360;
-    const spawn = primary
-      ? {
-          x: primary.origin[0], y: primary.origin[1], z: primary.origin[2],
-          yawDeg: bspYawToCsYaw(primary.angles[1]),
-        }
-      : { x: 0, y: 100, z: 0, yawDeg: 0 };
-
-    // GLB（消费 BSP，最后调用）
-    postMessage({ type: 'parse-progress', stage: '导出 GLB' } as never);
-    let glbBytes: Uint8Array;
-    try {
-      glbBytes = processor.export_glb_with_pakfile_models();
-    } catch {
-      glbBytes = processor.export_glb();
-    }
-    const glbBuffer = glbBytes.buffer.slice(
-      glbBytes.byteOffset,
-      glbBytes.byteOffset + glbBytes.byteLength,
-    );
-
-    // 构建物理世界（brush/tri/teleport/spawn）
-    phys = new PhysWorld();
-    phys.build_world(
-      brushJson,
-      triJson ?? '[]',
-      teleportJson,
-      spawn.x,
-      spawn.y,
-      spawn.z,
-      spawn.yawDeg,
-    );
-    // 出生点列表（spawn 下拉切换用）：[[x,y,z,yaw], ...]
-    phys.set_spawn_points(
-      JSON.stringify(
-        spawnPoints.map((sp) => [sp.origin[0], sp.origin[1], sp.origin[2], bspYawToCsYaw(sp.angles[1])]),
-      ),
-    );
-    // 同步面板参数
-    syncParamsToWasm();
-
-    // scene-data 一次 transfer（GLB + spawn/pvs 小 JSON，无 brush/tri/teleport 大 JSON）
-    const sceneData = {
-      type: 'scene-data',
-      glb: glbBuffer,
-      spawnJson,
-      pvsJson,
-      metadata: {
-        mapName: meta.map_name,
-        numFaces: meta.num_faces,
-        numVertices: meta.num_vertices,
-        numBrushes: meta.num_brushes,
-        numModels: meta.num_models,
-      },
-      spawn,
-      glbSizeKb: Math.round(glbBuffer.byteLength / 1024),
-      numSpawnPoints: spawnPoints.length,
-      hasPvs: true,
-    };
-    postMessage(sceneData, [glbBuffer] as never);
-
-    // 世界 JSON 转发（主线程构建预测 PhysWorld 实例；加载时一次，非热路径）
-    postMessage({
-      type: 'world-json',
-      brushJson,
-      triJson: triJson ?? '[]',
-      teleportJson,
-      spawn: { x: spawn.x, y: spawn.y, z: spawn.z, yawDeg: spawn.yawDeg },
-    } satisfies MainMessage);
-
-    sceneReady = true;
-    postMessage({ type: 'parse-progress', stage: '物理世界就绪' } as never);
-  } catch (err) {
-    postMessage({
-      type: 'error',
-      message: `[load-bsp] ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
-    } satisfies MainMessage);
-  }
-}
-
-/**
- * 位置重置事件（respawn/teleport 后回传一次，供主线程预测位置归零）。
- * 位置平时不同步，仅此类位置突变事件通知。
- */
-function notifyPosReset(): void {
-  if (!phys) return;
-  const s = phys.state() as {
-    posX: number; posY: number; posZ: number; yaw: number;
-  };
-  postMessage({
-    type: 'player-respawn',
-    pos: [s.posX, s.posY, s.posZ],
-    yawDeg: s.yaw, // Rust yaw 单位为度，直接回传
-  } satisfies MainMessage);
-}
-
-/** 面板参数 → wasm set_params（tickRate 单独处理驱动步长）。 */
+/** 面板参数 → wasm set_params（tickRate 由权威固定 64Hz 驱动）。 */
 function syncParamsToWasm(): void {
   if (!phys) return;
   const p = config.physics;
-  phys.set_params(
-    JSON.stringify({
-      gravity: p.gravity,
-      accelerate: p.accelerate,
-      friction: p.friction,
-      stop_speed: p.stopSpeed,
-      jump_height: p.jumpSpeed * p.jumpSpeed / (2 * p.gravity),
-      air_accelerate: p.airAccel,
-      run_speed: p.maxSpeed,
-      walk_speed: p.walkSpeed,
-      crouch_speed: p.crouchSpeed,
-      autobhop: p.autobhop,
-      bhop_speed_clamp: p.bhopSpeedClamp,
-      no_prestrafe: p.noPrestrafe,
-      sensitivity: config.input.sensitivity,
-      yaw_bind_speed: config.input.yawBindSpeed,
-      noclip_speed: config.input.noclipSpeed,
-      teleport_gate_ticks: p.teleportGateTicks,
-    }),
-  );
+  const params = {
+    gravity: p.gravity,
+    accelerate: p.accelerate,
+    friction: p.friction,
+    stop_speed: p.stopSpeed,
+    jump_height: (p.jumpSpeed * p.jumpSpeed) / (2 * p.gravity),
+    air_accelerate: p.airAccel,
+    run_speed: p.maxSpeed,
+    walk_speed: p.walkSpeed,
+    crouch_speed: p.crouchSpeed,
+    autobhop: p.autobhop,
+    bhop_speed_clamp: p.bhopSpeedClamp,
+    no_prestrafe: p.noPrestrafe,
+    // 灵敏度固定 1：真实灵敏度由主线程输入层应用（mousemove 乘入角度增量），
+    // 与主线程 buildPhysicsParams 一致——双端物理用同一份已缩放输入，角度永不分叉
+    sensitivity: 1,
+    yaw_bind_speed: config.input.yawBindSpeed,
+    noclip_speed: config.input.noclipSpeed,
+    teleport_gate_ticks: p.teleportGateTicks,
+  };
+  phys.set_params(JSON.stringify(params));
   const pl = config.player;
   phys.set_hull(pl.halfWidth, pl.standHeight, pl.duckHeight);
-  fixedDt = 1 / Math.max(p.tickRate, 1);
 }
 
-self.onmessage = (e: MessageEvent<WorkerMessage | { type: string }>) => {
+/** 消息分发。 */
+function dispatch(e: MessageEvent<WorkerMessage | { type: string }>): void {
   const msg = e.data;
   if (!msg || typeof msg !== 'object') return;
-  const type = (msg as { type: string }).type;
-  // wasm-init：触发 WASM 初始化（仅首次；就绪后重放队列并启动物理循环）
+  const type = msg.type;
+  if (type === 'init') {
+    const init = msg as { shared?: SharedArrayBuffer | null };
+    if (init.shared) shared = createWorkerSharedState(init.shared);
+    return;
+  }
   if (type === 'wasm-init') {
-    if (initStarted) return;
-    initStarted = true;
-    void (async () => {
-      try {
-        await startWasm(msg as unknown as WasmInitPayload);
-        postMessage({ type: 'ready' } satisfies MainMessage);
-      } catch (err) {
-        postMessage({
-          type: 'error',
-          message: `[wasm-init] ${err instanceof Error ? err.stack : String(err)}`,
-        } satisfies MainMessage);
+    const m = msg as { wasmUrl?: string };
+    if (!m.wasmUrl) return;
+    fetch(m.wasmUrl)
+      .then((r) => r.arrayBuffer())
+      .then((buf) => wasmInit({ module: buf }))
+      .then(() => {
+        ready = true;
+        if (!loopStarted) {
+          loopStarted = true;
+          loop();
+        }
+      })
+      .catch((err) => postMessage({ type: 'error', message: `Worker wasm 加载失败: ${err}` }));
+    return;
+  }
+  if (type === 'world-json') {
+    const w = msg as unknown as {
+      brushJson: string;
+      triJson: string;
+      teleportJson: string;
+      spawn: { x: number; y: number; z: number; yawDeg: number };
+    };
+    if (!ready) return; // wasm 未就绪则忽略（主线程 init 顺序保证 wasm 先行）
+    const p = new PhysWorld();
+    p.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
+    phys = p;
+    syncParamsToWasm();
+    fixedDt = 1 / config.physics.tickRate; // 面板 tickRate 生效
+    acc = 0;
+    lastWall = 0;
+    return;
+  }
+  if (type === 'config') {
+    const c = msg as { section: keyof RuntimeConfig; patch: Record<string, unknown> };
+    if (!phys) return;
+    // 更新自身 config（v7 隐藏 bug 修复：之前从不应用 patch，权威一直用默认参数，
+    // 面板改任何参数（含灵敏度）双端都分叉）
+    applyConfigPatch(config, c.section, c.patch);
+    // tickRate → 权威固定步长即时生效（面板 64↔128 切换真正改变物理采样率）
+    if (c.section === 'physics' && typeof c.patch.tickRate === 'number') {
+      fixedDt = 1 / config.physics.tickRate;
+      acc = 0; // 清累积器，防新旧步长错配
+    }
+    if (c.section === 'player') {
+      const pl = c.patch as { halfWidth?: number; standHeight?: number; duckHeight?: number };
+      if (pl.halfWidth !== undefined && pl.standHeight !== undefined && pl.duckHeight !== undefined) {
+        phys.set_hull(pl.halfWidth, pl.standHeight, pl.duckHeight);
       }
-    })();
+    } else {
+      syncParamsToWasm();
+    }
+    // noclip 模式：与主线程渲染物理同步
+    if (typeof (c.patch as { mode?: string }).mode === 'string') {
+      phys.set_noclip((c.patch as { mode: string }).mode === 'noclip');
+    }
     return;
   }
-  // wasm 未就绪：消息入队（含 init），就绪后按序重放
-  if (!wasmReady) {
-    pending.push(e);
+  if (type === 'respawn') {
+    phys?.respawn();
     return;
   }
-  dispatch(e);
-};
+  if (type === 'teleport') {
+    const tm = msg as { target?: number };
+    if (typeof tm.target === 'number') {
+      phys?.teleport_to_spawn(tm.target);
+    }
+    return;
+  }
+}
+
+self.onmessage = dispatch;

@@ -1,26 +1,31 @@
 /**
- * 共享状态层 — 权威全状态（客户端预测修正源）。
+ * 共享状态层 — 输入槽（主线程写）+ 权威帧双缓冲（Worker 写）。
  *
- * 架构（2026-08-07 v4.1）：主线程持 wasm 预测实例（每帧 predict 物理模拟），
- * Worker-A 权威 tick 后写**全状态**（含位置）到 SAB，主线程用 set_state 修正
- * 预测基线（标准客户端预测：本地模拟即时响应，权威定期纠偏）。
+ * 架构（2026-08-07 v7 定案，用户核心思想）：
+ * - **Worker = 权威帧计算器**：加载地图（物理碰撞）、独立模拟权威物理线
+ *   （固定 64Hz tick，含碰撞/摩擦/重力），每 tick 输出**权威帧**
+ *   （位置/朝向/速度/眼高/着地/时间戳）
+ * - **主线程 = 渲染预测线**：全速物理+渲染；每帧读权威帧，
+ *   用权威速度（考虑中途地图碰撞后的正确速度）外推校准渲染物理——
+ *   位置不强制同步，速度渐进对齐
+ * - 输入：主线程写 SAB 输入槽（keys/dx/dy），Worker takeInput 消费
+ *   （权威帧模拟需要同输入）
  *
  * SAB 布局（512B）：
  *   Int32 控制区（字节 0-63）：
- *     [0] V_A      权威版本号（Worker-A release 递增；主线程 acquire 读）
- *     [1] gen_A    权威代际（= V_A）
- *     [2] keys     输入位掩码（主线程 store / Worker load）
- *     [3] A_GROUND 权威 onGround（0/1）
- *     [4-15] 保留
+ *     [0] V_A      权威版本号（Worker release 递增；主线程 acquire 读）
+ *     [1] I_KEYS   输入键位掩码（主线程 store / Worker load）
+ *     [2] A_GROUND 权威 onGround（0/1）
+ *     [3-15] 保留
  *   BigInt64 输入槽（字节 64-127，index 8-9）：
- *     [8] dxAcc  [9] dyAcc  —— BigInt64 原子累加（防溢出，永不 wrap）
- *   BigInt64 权威状态双缓冲（字节 128-415，index 16-33）：
- *     S_A[0] = 16..24（9 值）  S_A[1] = 25..33（9 值）
- *   每状态 9 值：posX/Y/Z(×100) yaw(×1000) pitch(×1000) velX/Y/Z(×100) eyeHeight(×100)
+ *     [8] dxAcc  [9] dyAcc —— BigInt64 原子累加（主线程 add / Worker exchange）
+ *   BigInt64 权威帧双缓冲（字节 128-415，index 16-35）：
+ *     S_A[0] = 16..25（10 值）  S_A[1] = 26..35（10 值）
+ *   每帧 10 值：posX/Y/Z(×100) yaw(×1000) pitch(×1000) velX/Y/Z(×100) eyeHeight(×100) timeMs(×1)
  *
  * 读写协议：
- * - Worker-A 写空闲槽 S_A[V_A&1] → release 递增 V_A + gen_A
- * - 主线程读 S_A[(V_A-1)&1]（写者已离开的槽，无撕裂）→ set_state 修正预测实例
+ * - Worker 写空闲槽 S_A[V_A&1] → release 递增 V_A
+ * - 主线程读 S_A[(V_A-1)&1]（写者已离开的槽，无撕裂）
  */
 
 import type { KeyState } from './worker-types.js';
@@ -58,29 +63,29 @@ export function keysToMask(keys: KeyState): number {
 
 // ── SAB 布局 ─────────────────────────────────────────────────
 const I_V_A = 0;
-const I_GEN_A = 1;
-const I_KEYS = 2;
-const I_A_GROUND = 3;
+const I_KEYS = 1;
+const I_A_GROUND = 2;
 
 // BigInt64 输入槽
 const B_DX_ACC = 8;
 const B_DY_ACC = 9;
 
-// BigInt64 权威状态双缓冲基址（每槽 9 值）
+// BigInt64 权威帧双缓冲基址（每帧 10 值）
 const B_A0 = 16;
-const B_A1 = 25;
+const B_A1 = 26;
 
 /** SAB 总字节（512B 布局，实际使用至 416B）。 */
 export const SHARED_BUFFER_SIZE = 512;
 
-/** 权威全状态（客户端预测修正源；含位置）。 */
-export interface AuthState {
+/** 权威帧（Worker 独立物理计算，含碰撞；主线程速度校准源）。 */
+export interface AuthFrame {
   pos: { x: number; y: number; z: number };
   yaw: number;
   pitch: number;
   vel: { x: number; y: number; z: number };
   onGround: boolean;
   eyeHeight: number;
+  /** 权威帧产生时刻（Worker performance.now()，ms）。 */
   timeMs: number;
 }
 
@@ -107,7 +112,7 @@ export class ShmState {
 
   // ── 主线程侧 ───────────────────────────────────────────────
 
-  /** 写入鼠标增量（BigInt64 原子累加）+ 键位。 */
+  /** 写入鼠标增量（BigInt64 原子累加）+ 键位（Worker 权威帧模拟消费）。 */
   addInput(dx: number, dy: number, keysMask: number): void {
     const dxFixed = BigInt(Math.round(dx * 1000));
     const dyFixed = BigInt(Math.round(dy * 1000));
@@ -118,17 +123,17 @@ export class ShmState {
   }
 
   /**
-   * 读权威全状态（双缓冲槽 (V_A-1)&1，无撕裂）。
-   * @returns { state, va, gen } 权威状态 + 版本号 + 代际。
+   * 读权威帧（双缓冲槽 (V_A-1)&1，无撕裂）。
+   * @returns { frame, va } 权威帧 + 版本号；V_A=0（未开始）返回 null。
    */
-  readAuthoritative(): { state: AuthState; va: number; gen: number } | null {
+  readAuthoritative(): { frame: AuthFrame; va: number } | null {
     const va = Atomics.load(this.i32, I_V_A);
     if (va === 0) return null;
     const slot = (va - 1) & 1; // 写者已离开的槽
     const b = this.b64;
     const base = slot === 0 ? B_A0 : B_A1;
     return {
-      state: {
+      frame: {
         pos: {
           x: Number(b[base]) / 100,
           y: Number(b[base + 1]) / 100,
@@ -143,18 +148,17 @@ export class ShmState {
         },
         eyeHeight: Number(b[base + 8]) / 100,
         onGround: this.i32[I_A_GROUND] === 1,
-        timeMs: 0,
+        timeMs: Number(b[base + 9]),
       },
       va,
-      gen: Atomics.load(this.i32, I_GEN_A),
     };
   }
 
-  // ── Worker-A 侧 ────────────────────────────────────────────
+  // ── Worker 侧 ──────────────────────────────────────────────
 
   /**
    * 消耗输入（BigInt64 exchange 清空 + 饱和截断；maxStep 防穿墙）。
-   * 仅 Worker-A 调用。
+   * 仅 Worker 权威帧模拟调用。
    */
   takeInput(maxStep: number): InputSample {
     const dxFixed = Atomics.exchange(this.b64, B_DX_ACC, 0n);
@@ -171,10 +175,9 @@ export class ShmState {
   }
 
   /**
-   * Worker-A 写权威全状态：写空闲槽 S_A[V_A&1] → release 递增 V_A + gen_A。
-   * 全状态（含位置）——主线程预测实例据此 set_state 修正基线。
+   * Worker 写权威帧：写空闲槽 S_A[V_A&1] → release 递增 V_A。
    */
-  writeAuthoritative(a: Omit<AuthState, 'onGround'>, onGround: boolean): number {
+  writeAuthoritative(a: Omit<AuthFrame, 'onGround'>, onGround: boolean): number {
     const slot = Atomics.load(this.i32, I_V_A) & 1;
     const base = slot === 0 ? B_A0 : B_A1;
     const b = this.b64;
@@ -187,11 +190,11 @@ export class ShmState {
     b[base + 6] = BigInt(Math.round(a.vel.y * 100));
     b[base + 7] = BigInt(Math.round(a.vel.z * 100));
     b[base + 8] = BigInt(Math.round(a.eyeHeight * 100));
+    b[base + 9] = BigInt(Math.round(a.timeMs));
     // 状态先于版本号可见（release）
     const va = Atomics.load(this.i32, I_V_A) + 1;
     this.i32[I_A_GROUND] = onGround ? 1 : 0;
     Atomics.store(this.i32, I_V_A, va);
-    Atomics.store(this.i32, I_GEN_A, va);
     return va;
   }
 }
@@ -205,4 +208,3 @@ export function createMainSharedState(buffer: SharedArrayBuffer): ShmState {
 export function createWorkerSharedState(buffer: SharedArrayBuffer): ShmState {
   return new ShmState(buffer);
 }
-

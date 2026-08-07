@@ -1,7 +1,8 @@
 # WebSurf-min 实现状态记录
 
-> 编制日期：2026-08-07。记录 `game/` 独立工程的最小化实现完成情况与未完成部分。
-> 蓝本：`MINIMAL-IMPL-PATH.md`（v3，与本文同目录）。目标架构：根 `docs/项目时序图.md`。
+> 编制日期：2026-08-07；**2026-08-08 复核更新至 v7 最终架构**。
+> 记录 `game/` 独立工程的最小化实现完成情况与未完成部分。
+> 蓝本：`MINIMAL-IMPL-PATH.md`（v3+，与本文同目录）。目标架构：根 `docs/项目时序图.md`（v7）。
 > 所有代码存放于 `game/`，原项目零修改。
 
 ---
@@ -18,40 +19,44 @@
 | scene-data | GLB + 几十 MB JSON | GLB + spawn/pvs 小 JSON | **-95%** |
 | 消息协议 | 25 + 14 | 7 + 5 | — |
 
-### 1.2 架构落地（2026-08-07 v4.1：客户端预测，主线程物理模拟）
+### 1.2 架构落地（2026-08-08 v7：权威帧计算模式，主线程唯一物理渲染线）
 
 ```
-主线程 (src/app.ts + renderer-main.ts)
-  ├─ 输入采集 → SAB 输入槽（BigInt64 原子累加）+ 预测实例输入缓冲（双通道）
-  ├─ wasm PhysWorld 预测实例（init + world-json build_world + set_params/set_hull）
-  ├─ 每 rAF：读权威全状态（V_A 变化）→ set_state 修正预测基线 →
-  │    predict(dt, keys, dx, dy) 物理模拟（含碰撞）→ 渲染
+主线程 (src/app.ts + renderer-main.ts) —— 唯一物理渲染线（144Hz 可变 dt，全速无限制）
+  ├─ BspProcessor 解析 BSP（WASM）→ 场景渲染 + PhysWorld（世界+碰撞+输入）
+  ├─ 输入层预处理：灵敏度乘入角度增量（物理两端 sensitivity 固定 1）；
+  │    Q/E 生成等效鼠标量（yaw_bind_speed/M_YAW×dt，独立增量不受灵敏度影响）
+  ├─ 每 rAF：写输入 SAB（双端同源）→ 读权威帧（V_A 变化记录 curAuth + 加速度）→
+  │    速度外推校准 set_velocity(vel_A + a×Δt)（位置/角度不覆盖）→
+  │    wasm tick（完整物理：碰撞/传送/死亡）→ 渲染（唯一渲染源）
+  ├─ 碰撞事件（land/blocked）回传 → 位置微调 + 角度同步（<60 才调）
   ├─ respawn/teleport 位置突变归零（player-respawn 消息）
-  ├─ ESC 弹出式面板（六分区）+ 速度面板 4Hz
-Worker-A (src/worker/main.ts)
-  ├─ BspProcessor 解析/导出（WASM）
-  ├─ PhysWorld tick（Rust 物理；固定步长累积器无步数封顶）
-  ├─ 自驱循环（Atomics.wait 16ms 兜底）
-  └─ 写权威全状态（含位置）+ V_A++（set_state 修正源）
+  ├─ FPS 显示（左上角）+ 速度面板 8Hz + ESC 面板
+Worker (src/worker/main.ts) —— 权威帧计算器
+  ├─ wasm 加载 + world-json 世界构建（地图碰撞，加载时一次）
+  ├─ 独立权威物理线：固定步长 = 1/tickRate（64/128Hz 可调，累积器无封顶）
+  ├─ 每 tick：takeInput（SAB 累积输入）→ 完整物理 tick（含碰撞/传送/死亡）→
+  │    碰撞事件检测 → 写权威全状态 + V_A++
+  └─ 面板参数经 config 消息应用（applyConfigPatch 更新自身 config，双端同参）
 ```
 
 ### 1.3 文件清单
 
 **TS（14 文件）**：
 ```
-src/app.ts                      # 主入口：单 Worker + 预测渲染 + 面板 + 速度 8Hz
+src/app.ts                      # 主入口：单 Worker + 主线程唯一物理线 + 面板 + FPS + 速度 8Hz
 src/config.ts                   # 收敛配置（physics/input/player/hud）
 src/panel/panel-controller.ts   # ESC 桌面两栏面板（左导航+右设置）+ 按键录制
-src/input/input-bridge.ts       # 消息桥（config/respawn/teleport/death）
+src/input/input-bridge.ts       # 双端桥（面板 → Worker config + 主线程 renderer；tickRate 显式传递）
 src/input/keyboard.ts           # 键盘映射（可配置 keymap）
 src/input/keymap.ts             # 键位配置：默认/持久化/录制标签
 src/input/mouse-buffer.ts       # 鼠标削平（复用原实现）
 src/input/pointer-lock.ts       # Pointer Lock（复用原实现）
-src/worker/main.ts              # Worker-A：wasm-init/load-bsp/自驱循环/消息
-src/worker/shared-state.ts      # SAB 512B：控制区 + 输入槽 + 权威基本信息双缓冲（无位置）
-src/worker/worker-types.ts      # 消息协议 7+5 + KeyState/KEY_MASK
-src/renderer/renderer-main.ts   # GLB + 相机 + LOD/PVS + 主线程预测渲染（积分+LERP）
-src/world/pvs-manager.ts        # PVS 位图剔除（复用原实现）
+src/worker/main.ts              # Worker：wasm-init/world-json/权威帧循环（fixedDt 动态）/碰撞事件
+src/worker/shared-state.ts      # SAB 512B：控制区 + 输入槽 + 权威全状态双缓冲（10 值/槽）
+src/worker/worker-types.ts      # 消息协议 + KeyState/KEY_MASK + phys-event
+src/renderer/renderer-main.ts   # GLB + 相机 + LOD/PVS + 主线程物理线 + 速度外推校准 + 碰撞微调
+src/world/pvs-manager.ts        # PVS 位图剔除（空间采样 cluster，复用原实现）
 src/world/types.ts              # PVS 类型
 src/wasm.d.ts                   # re-export pkg 真实类型
 ```
@@ -133,9 +138,15 @@ OK predict: y=99.90 velY=-12.50
 
 wasm 可设置参数全部入面板（物理模块）：补 最大速度/走路速度/蹲走速度/停止速度/
 跳跃速度、连跳限速/禁用预加速开关，以及**传送落地触发门槛**（teleport_gate_ticks
-1-20 帧，默认 3）。Rust：PhysParams.teleport_gate_ticks + set_params 支持；
-check 门槛参数化（gate_ticks 由 params 传入）。验证：gate=3 → tick28，
-gate=20 → tick45（晚 17 tick，可调生效）。
+1-20 帧，**默认 1**——2026-08-08 由 3 改为 1，斜面传送更灵敏）。Rust：
+PhysParams.teleport_gate_ticks + set_params 支持；check 门槛参数化（gate_ticks 由
+params 传入）。验证：gate=3 → tick28，gate=20 → tick45（晚 17 tick，可调生效）。
+
+**2026-08-08 传送触发检测升级**：接触计数（`contact_ticks`：地面 on_ground 或斜面
+surfing 碰撞信号都计，替代仅 on_ground）→ 斜面滑行也能满足门槛；探测点**多点下探**
+（TRIGGER_PROBES 0~48 每 8，任一在 trigger 内即 inside）→ 覆盖滑行悬空 gap
+（surf_666 实测 283/523 个 trigger 为高度 ≤8 的薄片，单点必 miss）；spawnflags
+显式 0（未配置）不跳过。
 
 ### 2.2 已知技术遗留（代码层面）
 
@@ -200,6 +211,25 @@ gate=20 → tick45（晚 17 tick，可调生效）。
 - ✅ **L1 tickRate → Worker-B**：面板 tickRate 变更同时发 `set-pred-dt`（§2.4）；
 - ✅ **新增 PhysWorld::set_state API**（物理层 9 → 10 API），契约同步更新。
 
+**已修复（2026-08-08 v5→v7 架构演进，用户逐轮调试定案）**：
+- ✅ **v7 权威帧计算模式**：主线程 = 唯一物理渲染线（BSP 解析/物理/渲染全在主线程）；
+  Worker = 权威帧计算器（wasm 世界 + 独立固定步长权威演化，含地图碰撞），输出权威全状态
+- ✅ **速度外推校准**：每帧 `set_velocity(vel_A + a×Δt)`（权威速度 + 加速度外推，动态帧距）；
+  垂直落体实测锯齿 5.536≈理论 5.556
+- ✅ **权威角度隔离**（用户定调）：权威帧不得影响渲染角度（渲染物理纯输入驱动）；
+  仅碰撞事件（phys-event land/blocked）回传时可同步角度（位置差 <60 才调）
+- ✅ **灵敏度输入层应用**：mousemove 乘入角度增量，物理两端 sensitivity 固定 1——
+  改灵敏度不产生双端分叉（结构上不可能）
+- ✅ **Q/E 输入层化**：Rust apply_yaw_bind 删除，改为输入层生成等效鼠标量
+  （yaw_bind_speed/M_YAW×dt，独立增量不受灵敏度影响）；双端消费同源输入 → 无分叉
+- ✅ **tickRate 动态生效**：Worker fixedDt = 1/config.physics.tickRate（config 消息显式
+  传递 tickRate；64↔128 切换真实改变权威采样率）
+- ✅ **Worker config 应用 patch**（v7 隐藏 bug）：applyConfigPatch 更新自身 config，
+  面板改任何参数（含灵敏度）权威端才真正生效
+- ✅ **碰撞事件回传**：落地上升沿/撞墙速度骤降检测 → 位置微调 + 角度同步；
+  修复 `fixWorker.onmessage` 缺失（v5→v7 重构丢失）
+- ✅ **FPS 显示**：左上角 #fps（rAF 每秒计数）
+
 ### 2.3 未实现的扩展点（v3 文档中明确不做的）
 
 | 项 | 判定 |
@@ -213,12 +243,14 @@ gate=20 → tick45（晚 17 tick，可调生效）。
 
 ---
 
-## 3. 设计差异对照（时序图 vs 蓝图 v3 vs 实现现状）
+## 3. 设计差异对照（时序图 vs 蓝图 vs 实现现状）
 
-> 三份文档定位：`docs/项目时序图.md` = 理想架构（双 Worker 三源决策的原型）；
-> `MINIMAL-IMPL-PATH.md`（v3，同目录）= 实现蓝图（物理下沉 + 面板保留的落地路径）；
-> 本文 = 实现现状。下表逐项列出差异与原因。
-> **本文为事实记录；各差异点的讨论/决策见 `DESIGN-DISCUSSION.md`**（含优先级与倾向）。
+> 三份文档定位：`docs/项目时序图.md`（v7 现状）＝ 实际架构；
+> `MINIMAL-IMPL-PATH.md`（v5 蓝图，同目录）＝ 实现路径；本文 ＝ 实现现状。
+> ⚠️ 本节 3.1–3.3 为 **v4.1 时期（双 Worker 三源决策）的历史对照记录**——v5→v7 已演进为
+> "唯一物理渲染线 + Worker 权威帧"（见 §1.2 与 DESIGN-DISCUSSION §H），表中
+> 三源决策/预测区/Worker-B 等条目均已过时，仅保留作演进历史。
+> 本文为事实记录；各差异点的讨论/决策见 `DESIGN-DISCUSSION.md`（含优先级与倾向）。
 
 ### 3.1 一致项（时序图 → 实现逐点落地）
 

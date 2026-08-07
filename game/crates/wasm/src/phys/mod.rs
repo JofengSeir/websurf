@@ -152,14 +152,16 @@ impl PhysWorld {
             .pitch
             .max(-player::PITCH_CLAMP)
             .min(player::PITCH_CLAMP);
-
+        // Q/E 已由 JS 输入层生成等效鼠标量（yaw_bind_speed/M_YAW 像素/秒，与鼠标同通道，
+        // 双端消费同源输入 → 角度天然一致），物理不再内部旋转
         if self.noclip {
             noclip_step(&mut self.player, dt, &self.params);
         } else {
-            // 传送检测（权威才检测；predict 禁用；落地稳定 ≥3 帧才判定位于传送平面）
+            // 传送检测（权威才检测；predict 禁用；接触稳定 ≥3 帧才判定位于传送平面——
+            // 接触 = 地面或斜面（normal.y > 0.05），斜面滑行也能触发）
             if let Some(dest) = self.teleport.check(
                 &self.player.origin,
-                self.player.ground_ticks_since_landing,
+                self.player.contact_ticks,
                 self.params.teleport_gate_ticks,
                 dt,
                 false,
@@ -252,6 +254,20 @@ impl PhysWorld {
         self.player.velocity = [vel_x, vel_y, vel_z];
         self.player.on_ground = on_ground;
         self.player.prev_origin = self.player.origin;
+    }
+
+    /// 只设速度（客户端预测"强制拟合速度"用）：位置/朝向不动，仅覆盖速度。
+    /// 用于权威帧到达时以速度拟合平滑纠偏预测轨迹，避免直接覆盖位置造成跳变。
+    pub fn set_velocity(&mut self, vx: f64, vy: f64, vz: f64) {
+        self.player.velocity = [vx, vy, vz];
+    }
+
+    /// 只设角度（Q/E 转向时序分叉软校准用）：位置/速度不动，仅覆盖 yaw/pitch。
+    /// 双端（权威 64Hz / 渲染 144Hz）对 Q/E 按下/松开检测差半帧 → 每次 ~1.7° 分叉；
+    /// 渲染物理每帧与权威角度差 < 阈值时对齐，消除分叉（> 阈值不动防视角跳变）。
+    pub fn set_yaw_pitch(&mut self, yaw: f64, pitch: f64) {
+        self.player.yaw = yaw;
+        self.player.pitch = pitch;
     }
 
     /// 设置死亡 Y 阈值。
@@ -401,14 +417,24 @@ fn apply_input(p: &mut Player, mask: u32) {
     p.input.back = mask & 0x02 != 0;
     p.input.left = mask & 0x04 != 0;
     p.input.right = mask & 0x08 != 0;
-    p.input.jump = mask & 0x10 != 0;
+    // wheelJump（0x100）并入 jump：滚轮跳与空格跳等价
+    p.input.jump = mask & 0x10 != 0 || mask & 0x100 != 0;
     p.input.duck = mask & 0x20 != 0;
     p.input.walk = mask & 0x40 != 0;
     p.input.reset = mask & 0x80 != 0;
+    p.input.yaw_left = mask & 0x200 != 0;
+    p.input.yaw_right = mask & 0x400 != 0;
 }
 
 /// noclip 自由视角单步（调试/观赏用；JS 侧也可实现，此处提供 Rust 版保持单一物理源）。
 fn noclip_step(p: &mut Player, dt: f64, params: &PhysParams) {
+    // Q/E 转向在 noclip 下同样生效
+    if p.input.yaw_left {
+        p.yaw += params.yaw_bind_speed * dt;
+    }
+    if p.input.yaw_right {
+        p.yaw -= params.yaw_bind_speed * dt;
+    }
     let fmove = (if p.input.forward { 1.0 } else { 0.0 }) - (if p.input.back { 1.0 } else { 0.0 });
     let smove = (if p.input.right { 1.0 } else { 0.0 }) - (if p.input.left { 1.0 } else { 0.0 });
     if fmove == 0.0 && smove == 0.0 {

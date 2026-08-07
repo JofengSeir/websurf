@@ -42,6 +42,8 @@ export class KeyboardInput {
   private state: KeyState = createEmptyKeyState();
   private target: EventTarget | null = null;
   private codeMap: Map<string, BindableAction> = new Map();
+  /** 是否接受按键事件（仅 Pointer Lock 锁定时 true；面板打开时忽略，防污染 WASD）。 */
+  private enabled = false;
 
   constructor(keymap: Record<BindableAction, string[]>) {
     this.codeMap = buildCodeMap(keymap);
@@ -52,7 +54,14 @@ export class KeyboardInput {
     this.codeMap = buildCodeMap(keymap);
   }
 
+  /** 启用/禁用按键捕获（锁定启用；ESC 退锁/面板打开禁用）。 */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) this.reset();
+  }
+
   private handleKeyDown = (e: KeyboardEvent): void => {
+    if (!this.enabled) return;
     const action = this.codeMap.get(e.code);
     if (action) {
       this.state[action] = true;
@@ -62,6 +71,7 @@ export class KeyboardInput {
   };
 
   private handleKeyUp = (e: KeyboardEvent): void => {
+    if (!this.enabled) return;
     const action = this.codeMap.get(e.code);
     if (action) {
       this.state[action] = false;
