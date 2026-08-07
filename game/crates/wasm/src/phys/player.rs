@@ -791,20 +791,18 @@ fn categorize_position(world: &mut World, p: &mut Player) {
         &mins,
         &maxs,
     );
-    // 接触计数（传送 gate 用）：地面（trace 命中可站面）或斜面滑行（surfing，
-    // try_player_move 碰撞法线 0.05~0.7 置位）都算接触——高速斜面滑行时玩家
-    // 悬于坡面数 units（2 units 探测 miss），只有碰撞信号能持续判定贴坡
-    if (tr.fraction < 1.0 && !tr.start_solid && tr.normal.map_or(false, |n| n[1] > 0.05)) || p.surfing {
-        p.contact_ticks = p.contact_ticks.saturating_add(1);
-    } else {
-        p.contact_ticks = 0;
-    }
+    // 接触计数（传送 gate 用）：仅真正落地（可站面，法线 y >= STANDABLE_NORMAL）累加。
+    // 斜面滑行（surfing，try_player_move 碰撞法线 0.05~0.7 置位）不算落地——滑行中
+    // 玩家是空中状态，若计入接触会令传送 gate 通过，坡底 trigger_teleport 被多点
+    // 下探（0~48 units）命中而误传送（正常滑翔图坡底 bug：人还在坡上滑就被判定
+    // 传送回家）。只有真正落地后才开始传送判定。
     if tr.fraction < 1.0
         && !tr.start_solid
         && tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL)
     {
         let was_airborne = !p.on_ground;
         p.on_ground = true;
+        p.contact_ticks = p.contact_ticks.saturating_add(1);
         p.ground_normal = tr.normal.unwrap_or([0.0, 1.0, 0.0]);
         p.origin = tr.end_pos;
         if was_airborne {
@@ -815,6 +813,7 @@ fn categorize_position(world: &mut World, p: &mut Player) {
         p.fall_velocity = 0.0;
     } else {
         p.on_ground = false;
+        p.contact_ticks = 0;
     }
 }
 

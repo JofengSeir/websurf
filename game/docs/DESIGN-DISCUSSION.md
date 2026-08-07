@@ -321,9 +321,12 @@ Worker（权威帧计算器）
    64Hz=192 vs 128Hz=384 验证生效）。
 6. **Worker config 必须应用 patch**：applyConfigPatch 缺失时权威永远用默认值
    （默认 1.5 vs 面板 1.5 巧合掩盖 bug——"一进去就是错的"根因）。
-7. **传送检测多点下探**：斜面滑行脚底悬空坡面 ~20 units（碰撞推移无持续吸附），
-   surf_666 283/523 个 trigger 为 ≤8 units 薄片 → 单点必 miss；TRIGGER_PROBES
-   0~48 多点探测 + 接触计数（on_ground || surfing）+ gate 兜底。
+7. **传送检测多点下探 + 落地门槛**：斜面滑行脚底悬空坡面 ~20 units（碰撞推移无
+   持续吸附），surf_666 283/523 个 trigger 为 ≤8 units 薄片 → 单点必 miss；
+   TRIGGER_PROBES 0~48 多点探测兜底。但**门槛计数仅认真正落地**（contact_ticks
+   与 on_ground 同步，可站面 normal.y ≥ 0.7；surfing 滑行不算）——曾把 surfing
+   也计入导致正常滑翔图坡底 trigger 在滑行中被下探命中误触（人还在坡上滑就被
+   传送回家），2026-08-08 修正为滑行中 gate 恒不通过、只有落地后才判定传送。
 8. **落点检测默认 1 帧**（2026-08-08）：teleportGateTicks 3→1，斜面传送更灵敏。
 
 ### H.4 遗留（已知可接受）
