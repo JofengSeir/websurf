@@ -1,7 +1,7 @@
 # BSP 地图实际导出情况（websurf 项目实现现状）
 
 > 压缩自 `docs/bsp-export.md` + `docs/model-export.md` + `docs/phy-collision.md`，
-> 已对照 `crates/wasm/src/lib.rs`、`src/worker/physics-worker.ts`、`src/config.ts` 等代码核实（2026-08-06）。
+> 已对照 `crates/wasm/src/lib.rs`、`src/worker/physics-worker.ts`、`src/config.ts` 等代码核实（2026-08-07 复核）。
 > BSP 文件格式本身见 `docs/bsp-architecture.md`。
 
 ---
@@ -33,6 +33,7 @@ BSP
 | `parse_entities()` / `parse_spawn_points()` / `parse_teleports()` | 实体 JSON | 否 |
 | `parse_pvs_data()` / 独立 `export_visleaf_pvs()` | PVS/BSP 树 JSON | 否 |
 | `list_pakfile()` / `read_pakfile_file()` / `read_pakfile_scripts()` | PAKFILE 访问 | 否 |
+| `is_alive()` | BSP 是否仍持有（生命周期检查） | — |
 | 独立：`parse_bsp()` / `decode_vtf_to_png()` | 元数据 / PNG | — |
 
 **生命周期约束**：`export_glb*` 会 `take()` 消费 Bsp 实例，其余借用方法必须先于它调用。
@@ -77,7 +78,8 @@ Worker 实际顺序（`physics-worker.ts`，已核实）：
 
 ### 4.1 资源来源
 仅凭 BSP 内嵌 PAKFILE（zip）还原模型，不依赖外部游戏资源。
-surf_666 实测 1500 条目：`.vtx`317 / `.vmt`149 / `.mdl`107 / `.vvd`107 / **`.phy`89** / `.vtf`76 / `.vhv`633（未用）。
+surf_666 实测 1500 条目：`.vtx`317 / `.vmt`149 / `.mdl`107 / `.vvd`107 / **`.phy`89** /
+`.vtf`76 / `.vhv`633（未用）/ `.ppl`20 / `.pcf`1 / `.txt`1（未用）。
 
 `collect_pakfile_models()`：收集 static_props 引用 → 仅提取三件套（`.mdl+.vvd+.dx90.vtx`）齐全
 且被引用的模型 → `InMemoryModel`。
@@ -85,7 +87,7 @@ surf_666 实测 1500 条目：`.vtx`317 / `.vmt`149 / `.mdl`107 / `.vvd`107 / **
 ### 4.2 三件套解析（vendored `vendor/vmdl`）
 - `.mdl`（body_parts/meshes/材质表/骨骼/surface_prop/mass）+ `.vvd`（顶点 48B）+ `.vtx`（条带）；
 - **条带展开修复**：上游 vmdl-0.2.0 公式两处错误（奇位退化三角 + 越界），已 vendor 修复并单测
-  （surf_666 全是 TRI_LIST，修复保证其他条带图正确）；
+  （surf_666 实测 212 个 dx90.vtx、522 条带全是 TRI_LIST，修复保证其他条带图正确）；
 - 关键 API：`meshes()`、`skin_tables()`、`apply_root_transform()`、`surface_prop()`。
 
 ### 4.3 放置解析 `resolve_placements()`
@@ -95,7 +97,7 @@ surf_666 实测 1500 条目：`.vtx`317 / `.vmt`149 / `.mdl`107 / `.vvd`107 / **
 ⚠️ 已知限制：碰撞导出传空实体表，`prop_dynamic` 放置的模型实例**不生成碰撞**（扩展点）。
 
 ### 4.4 显示网格（`add_models_to_gltf`）
-`ModelVertex{ position, uv, normal }`（48B）一次上传、多实例共享 mesh；
+`ModelVertex{ position, uv, normal }`（32B）一次上传、多实例共享 mesh；
 position 经 `map_coords(apply_root_transform(v))`；每 Placement 一个 glTF 节点。
 
 ### 4.5 材质与透明度
@@ -121,18 +123,20 @@ worker 逻辑（已核实）：`visual`→A；`phy/auto`→B（auto 为空回退
 ### 4.7 .phy 解析（`crates/wasm/src/phyfile.rs`，已实现）
 - 布局：`phyheader_t`(16B: size/id/solidCount/checkSum) → 每 solid 表面头
   （新版 compactsurfaceheader "VPHY" / 旧版 legacysurfaceheader）→ 凸体头
-  `convexsolidheader_t`(vertices_offset/bone_index/flags/triangles_count) →
-  顶点 `phyvertex_t`(vec4，**米制 ×39.3701 转 HU**) → 三角形 `triangledata_t`（取 tri_index）→
+  `convexsolidheader_t`（ledge，16B：vertices_offset / bone_index / 保留 / triangles_count(u16)）→
+  顶点 `phyvertex_t`(vec4，**米制 ×39.3701 转 HU**) → 三角形 `triangledata_t`（取 3 条边的
+  start_point_index）→
   文件末尾文本段 `solid{index, surfaceprop}` / `editparams{rootname,totalmass}` /
   `ragdollconstraint`（仅 ragdoll）/ `break`（碎裂 gib，未用）；
-- `triangledata_t` 位域：`tri_index:12 / pierce_index:12 / material_index:7 / is_virtual:1`
-  + 3 组边字段（edge_start_point_index / opposite_index:15 / is_virtual:1），碰撞导出只需
-  每组 tri_index 组成三角形；
+- `triangledata_t`（16B）= 首 u32 位域 `tri_index:12 / pierce_index:12 / material_index:7 /
+  is_virtual:1` + 3 条边各 u32（`start_point_index:16 / opposite_index:15 / is_virtual:1`）；
+  碰撞导出取 3 条边的 `start_point_index` 组成三角形（首 u32 的 tri_index 未用）；
 - **闭源 IVP 背景**：`triangledata_t` 布局 / `vertices_offset` 基准 / `modelType` 枚举在
   Valve 官方开源仓库同样不可见 —— .phy 二进制本体由闭源 IVP/vphysics 库
   （`IPhysicsCollision::VCollideLoad`）解析，引擎侧仅在 `studiobyteswap.cpp ByteswapPHY`
   展开头部、在 `PhysModelCreate → CreatePolyObject` 边界做坐标转换；本项目依据
-  TAServers phyparser 逆向 + Python/Rust 实测交叉验证（surf_666 88/88 解析成功，
+  TAServers phyparser 逆向 + Python/Rust 实测交叉验证（`probe_phy_stats` 实测：
+  static_props 引用模型 104 个、其中 88 个带 .phy，**88/88 解析成功**、
   906 凸体 / 11,878 三角）；
 - **坐标**：PHY 顶点为 IVP 空间（Y-up 左手），转 Source = 绕 x 轴 90° `(x, z, -y)`
   （det=+1 纯旋转；仅 y↔z 交换为镜像会上下颠倒 —— 实测定论，验证须同时比尺寸和符号）；
@@ -181,9 +185,10 @@ physics-worker.ts（load-bsp）
   ├─ export_glb_with_pakfile_models（最后消费 BSP，失败回退纯地图）
   ├─ parse_spawn/teleports/pvs → JSON
   └─ scene-data 一次 transfer 主线程
+Worker 物理 World.trace：brush trace（traceBox）与 clipBoxToTriangle（traceBoxTriEntries）
+取更早命中（fraction 更小者胜）
 主线程 renderer-main.ts
   ├─ GLTFLoader 建场景（extras.faceIndex → PVS 剔除）
-  ├─ trace：brush trace 与 clipBoxToTriangle 取更早命中
   └─ colliderDebug.setTriMeshes（相机半径 512 + 线框上限 1.2 万）
 ```
 

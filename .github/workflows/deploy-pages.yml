@@ -71,10 +71,35 @@ jobs:
       - name: Build dist package
         run: npm run build:dist
 
+      # ── game/ 独立工程（WebSurf-min，尝试游戏化）────────────────
+      - name: Install game dependencies
+        working-directory: game
+        run: npm ci
+
+      - name: Build game WASM
+        working-directory: game
+        run: npm run build:wasm
+
+      - name: Build game TypeScript (typecheck + bundle: worker/app/predictor)
+        working-directory: game
+        run: npm run build:ts
+
+      - name: Build game dist package
+        working-directory: game
+        run: node scripts/build-dist.mjs
+
+      # ── 组装 Pages 部署目录（入口页 + debug/ + game/）───────────
+      - name: Assemble Pages deploy directory
+        run: |
+          mkdir -p deploy/debug deploy/game
+          cp -r dist/. deploy/debug/
+          cp -r game/dist/. deploy/game/
+          cp scripts/pages-index.html deploy/index.html
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: dist
+          path: deploy
 
   deploy:
     needs: build

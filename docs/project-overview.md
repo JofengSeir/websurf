@@ -1,6 +1,6 @@
 # WebSurf 项目文档（压缩版）
 
-> 压缩自 `docs/PROJECT-DOCUMENTATION.md`，已对照源码核实（2026-08-06）。
+> 压缩自 `docs/PROJECT-DOCUMENTATION.md`，已对照源码核实（2026-08-07 复核）。
 > BSP 格式见 `docs/bsp-architecture.md`；导出实现细节见 `docs/bsp-export-status.md`。
 
 ---
@@ -68,7 +68,7 @@ Worker (src/worker → PhysicsWorker)
 ```
 crates/wasm/src/
   lib.rs               # WASM 绑定（BspProcessor 全部导出方法）
-  vbsp/                # BSP 解析（21 lump，Leaves 排序修复）
+  vbsp/                # BSP 解析（读入 26 lump，Leaves 排序修复）
   bsp_to_gltf_core/    # BSP → GLB
   model_integrator/    # MDL 模型整合（放置/网格/材质）
   pakfile_models.rs    # PAKFILE 索引、VMT 解析、薄壳碰撞
@@ -118,8 +118,10 @@ vendored 自 `@unsurf/cs-movement`（`src/physics/`，TS 纯函数）：
   - `start-touch-grounded`：落地检测（空中不传送；面板显示连续落地帧数滑块，
     1=单帧即触发 / 3-5=过滤瞬时触地 / 10=严格）；
   - `every-frame`：每帧检测；
-- HUD：`渲染 X fps`（主线程真实 rAF，每 0.5s 统计）+ `Worker Y fps`
-  （帧信号处理频率，墙钟统计——不用物理 dt 累加，避免 Worker 抖动污染显示）；
+  ⚠️ `every-frame` 模式仅在 `TeleportManager` 层保留（`src/world/teleport-manager.ts`），
+  `config.ts` 的类型联合与 UI radio 未暴露该选项，运行时仅 start-touch 与 start-touch-grounded 可选。
+- HUD：`FPS N`（Worker 帧信号处理频率，0.5s 墙钟窗口统计——不用物理 dt 累加，
+  避免 Worker 抖动污染显示；stats 10Hz 回传）；
   卡坡时显示 `卡因[xxx]`（zeroCause 诊断，见 4.2）；
 - `src/game/`：计时挑战状态机，`game-stats` 消息回传。
 
@@ -149,12 +151,14 @@ pakfile_models / phyfile。
 
 **主线程 → Worker**：`wasm-init` / `init`（SAB + 画布尺寸）/ `load-bsp`（transfer）/
 `input`（仅回退模式）/ `frame`（纯触发）/ `config` / `resize` / `respawn` /
-`set-physics-mode` / `set-physics-param` / `set-hull` 系列 / `set-cull-distance` /
+`set-physics-mode` / `set-physics-param` / `reset-physics-param` / `set-hull` 系列
+（`set-hull` / `reset-hull` / `set-auto-restore-hull`）/ `set-cull-distance` /
 `teleport` / `teleport-to-pos` / `get-player-pos` / `set-death-threshold`。
 
 **Worker → 主线程**：`ready` / `bsp-metadata` / `parse-progress` / `spawn-options` /
 `scene-data`（一次 transfer）/ `phys-frame`（仅回退模式）/ `stats`（含 `zeroCause`
-卡坡诊断）/ `game-stats` / `physics-snapshot` / `physics-event` / `player-pos` / `error`。
+卡坡诊断）/ `cull-stats`（PVS/剔除统计）/ `game-stats` / `physics-snapshot` /
+`physics-event` / `player-pos` / `error`。
 
 ## 7. 构建与运行
 
@@ -177,7 +181,7 @@ pakfile_models / phyfile。
 
 | 分段 | 关键项（默认） |
 |---|---|
-| `physics` | mode(physics) / gravity(800) / jumpSpeed(302) / maxSpeed(250) / friction(4) / accelerate(10) / airAccel(100) / tickRate(128) / **colliderSource(auto)** |
+| `physics` | mode(physics) / gravity(800) / jumpSpeed(302) / maxSpeed(250) / friction(4) / accelerate(10) / airAccel(100) / tickRate(64) / **colliderSource(auto)** |
 | `player` | radius(16) / standHeight(72) / duckHeight(54) / eyeOffset(8) |
 | `movement` / `smoothing` | speed(200) / sprintMultiplier(4)；smoothing.speed(12) |
 | `teleport` | triggerRadius(64) / cooldownMs(600) |

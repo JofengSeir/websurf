@@ -1,0 +1,185 @@
+# 设计差异点讨论（时序图 vs 蓝图 v3 vs 实现现状）
+
+> 编制日期：2026-08-07。本文**仅列差异点供讨论决策**，非最终结论。
+> 参与文档：
+> - `docs/项目时序图.md` — 理想架构原型（双 Worker 三源决策）
+> - `MINIMAL-IMPL-PATH.md`（v3，同目录）— 实现蓝图
+> - `IMPLEMENTATION-STATUS.md` §3（同目录）— 实现现状的事实记录
+>
+> 讨论格式：每项给「差异 / 影响 / 选项 / 我的倾向」四栏。
+> 标注：🔴 需决策 · 🟡 可选优化 · 🟢 已定论（仅存档，无需讨论）
+
+---
+
+## A. 数据通道层（SAB / 输入 / 传输）
+
+### A1 🟢 D1 — SAB 用 Int32 定点而非 Float64
+- **差异**：蓝图/时序图默认 Float64 存 pos/vel/yaw；实现用 Int32 定点（dx/dy×1000、pos/vel×100、yaw/pitch×1000）
+- **影响**：位置精度 0.01 HU、角度 0.001°——远高于肉眼可辨；定点转换每帧一次，开销可忽略
+- **选项**：无（**Atomics 只支持整数 TypedArray**，Float64 无法原子累加，这是硬约束）
+- **结论**：🔴 无讨论空间，仅记录。若担心精度可提定点倍率，但不建议
+
+### A2 🟡 D3 — build_world 是否要做到"真正零 JSON"
+- **差异**：蓝图声称"物理世界 Rust 内直建、零 JSON"；实现跨线程已零大 JSON，但 Worker 内
+  `build_world(brushJson, triJson, teleportJson)` 仍接收导出 JSON 做一次解析
+- **影响**：Worker 内一次 JSON 序列化+解析（几十 MB），仅地图加载时发生（非热路径），
+  实测加载耗时主要在图之外；但要达到蓝图字面承诺需重构 lib.rs 数据通道（Bsp 内存直传 wasm 物理）
+- **选项**：
+  - 维持现状（JSON 在 Worker 内中转）——已够用，加载秒级
+  - 重构 `PhysWorld::build_world_from_bsp(&Bsp)` —— 完全零 JSON，但动 vbsp 内部结构，风险高
+- **倾向**：维持现状。收益（少一次 Worker 内解析）与风险（重构核心解析层）不成比例
+
+### A3 🟢 T1 — 输入消耗用 exchange 而非 CAS 循环
+- **差异**：时序图 Worker-A 用 CAS 循环（`cur→cur-consumed`）；实现用 `Atomics.exchange` 一次性清空+截断
+- **影响**：SPSC（唯一写者主线程、唯一读者 Worker-A）下两者语义等价；exchange 更简单
+- **选项**：无（单读者场景 CAS 循环是过度设计）
+- **结论**：🔴 已定论。若未来 Worker-B 也要消耗输入（当前只读不消耗）才需 CAS
+
+### A4 🟡 T5 — 输入槽无 frameStamp 时间戳
+- **差异**：时序图输入槽含 frameStamp；实现未实现
+- **影响**：时间戳本用于诊断/插值基准；实现渲染由 rAF 驱动、物理由 Worker 自驱，无需它
+- **选项**：维持（省 8 字节/槽）；或补（诊断价值）
+- **倾向**：维持。诊断需求出现时再加
+
+---
+
+## B. Worker 与时钟层
+
+### B1 🔴 T2 — 权威物理频率：60Hz vs 68Hz（可调）
+- **差异**：时序图固定 60Hz；实现默认 68Hz、面板 48-128 可调
+- **影响**：68Hz 是 surf 社区/CS 服务器惯例；可调性带来"玩家改 tick 是否算作弊"的公平性问题
+  （KZ/surf 计时地图中 tick 影响成绩）
+- **选项**：
+  - 保持可调（现状）——调试友好，但计时公平性存疑
+  - 锁定 68Hz 只读——面向游玩公平
+  - 双模式：调试可调 + 游玩锁定
+- **倾向**：短期保持可调（项目还在调试期）；上计时玩法前锁定
+
+### B2 🟡 T3 — Worker-B 基线：主线程推 vs Worker-B 拉
+- **差异**：时序图主线程 release 更新基线到 SAB；实现 Worker-B 主动 acquire 读权威区 + set_state
+- **影响**：实现少一个 SAB 写者（主线程不写基线），读侧同步天然最新；时序图语义是"主线程权威就绪
+  即推基线"更即时，但多一处写者 + 主线程需管理基线槽
+- **选项**：
+  - 维持拉模式（现状）——简洁，基线=权威区同源
+  - 改推模式——严格对齐时序图，但复杂度上升
+- **倾向**：维持拉模式。权威区本身就是"最新权威"，Worker-B 每轮读它就是推模式的等价实现
+
+### B3 🟡 T4 — Worker-A 无 EMA 滤波
+- **差异**：时序图 Worker-A 独立时钟用 EMA 滤波平滑 wall-clock dt；实现直接取原始 dt（限幅 0.1s）
+- **影响**：EMA 平滑的是"自驱循环的调度抖动"；实现用 `Atomics.wait(16ms)` 自驱 + 固定步长
+  （dt 只决定本轮补几个步长），抖动被固定步长吸收，EMA 收益小
+- **选项**：维持；或补 EMA（抖动大时更稳）
+- **倾向**：维持。若实测高刷屏出现物理"呼吸感"（步数抖动）再补
+
+### B4 🟢 T6 / L4 — eyeHeight 未入 SAB
+- **差异**：时序图权威状态含 eyeHeight；实现渲染相机高度 = `pos.y + 0`（未存 eyeHeight）
+- **影响**：**相机高度错误**——站立时应 `pos.y + eyeHeight`（约 +64 HU），当前渲染在脚底
+- **选项**：无争议，**必须修**。SAB 权威区有预留槽（I_A_ONGROUND 旁的冗余 Int32 可换 Float64 定点存 eyeHeight）
+- **结论**：🔴 需决策的是"何时修"——建议随 L4 一起尽快修，这是渲染正确性问题
+
+---
+
+## C. 功能与消息层
+
+### C1 🟡 D2 — noclip 实现在 Rust 侧 vs 蓝图"JS 侧"
+- **差异**：蓝图 §2.5 明确"noclip 逻辑简单留 TS，不进 wasm"；实现放 Rust `noclip_step` + set_noclip
+- **影响**：Rust 侧单一物理源（physics/noclip 同一状态机），但调试功能进了 wasm（每改一次要重编译 wasm）；
+  蓝图意图是"调试代码别污染物理核心"
+- **选项**：
+  - 维持 Rust 侧（现状）——内聚
+  - 迁回 JS 侧——对齐蓝图，但 noclip 状态要在 JS 维护（双状态源风险）
+- **倾向**：维持 Rust 侧。noclip_step 是 20 行纯数学，不构成"污染"；双状态源风险更大
+
+### C2 🟢 D4 — 面板动作统一走 config
+- **差异**：蓝图恢复 `set-physics-mode` 专用消息；实现并入 config（physics.mode 字段）
+- **影响**：消息协议 7+5 更薄；mode 是 config 的一个属性，并入合理
+- **结论**：🔴 已定论，无讨论空间
+
+### C3 🟡 D5 — tickRate 变更是否清累积器
+- **差异**：蓝图要求切换瞬间清 moveAccumulator；实现 runLoop 无累积器（dt 直接限幅）
+- **影响**：实现架构（自驱循环）天然无累积器，蓝图假设的是旧 frame 信号驱动的累积器模型
+- **选项**：无（实现模型已不同，蓝图条目过时）
+- **结论**：🟢 蓝图条目作废，无需讨论
+
+### C4 🔴 L3 — teleport 消息 = respawn（丢 spawn 索引切换）
+- **差异**：蓝图/时序图 teleport 携带出生点索引；实现 `phys.respawn()`（只回初始出生点）
+- **影响**：主线程 spawn 下拉框形同虚设（选任何项都回初始点）；多出生点地图无法定点传送
+- **选项**：
+  - 补 `PhysWorld::teleport_to_spawn(idx)` + Worker-A 按索引处理——补全功能
+  - 移除 spawn 下拉 UI（承认最小化砍掉此功能）
+- **倾向**：补 `teleport_to_spawn(idx)`。Rust 侧加一个索引参数即可，改动小；spawn 下拉已有 UI
+
+### C5 🟡 D6 — wasm-opt=false 是否长期
+- **差异**：实现因本机 NODE_OPTIONS 污染 wasm-opt 而关闭二次优化
+- **影响**：wasm 体积/性能略逊于 wasm-opt 优化后（LTO+opt3 已做大部分）
+- **选项**：维持 false；或 CI/打包机上开启（换干净环境）
+- **倾向**：短期维持；发布前在干净环境验证 wasm-opt 后体积差，若 <10% 可忽略
+
+---
+
+## D. 待办汇总（按优先级）
+
+| 优先级 | 项 | 性质 | 建议 |
+|---|---|---|---|
+| P0 | B4/L4 eyeHeight 入 SAB | 渲染正确性 bug | ✅ **已实施**（SAB A_EYE/P_EYE 槽，冒烟站立 64.09） |
+| P1 | C4/L3 teleport_to_spawn | 功能缺失（UI 已存在） | ✅ **已实施**（set_spawn_points + teleport_to_spawn，冒烟传送 (50,200,30) yaw=90） |
+| P0.5 | B2 基线版本号守卫 | 拉模式无效预测 | ✅ **已实施**（predictRound 写前 compare V_A，不一致丢弃） |
+| P2 | B1/T2 频率锁定 | 公平性 | 上计时玩法前决策 |
+| P3 | A2/D3 零 JSON | 蓝图字面承诺 | 维持现状 |
+| — | 其余（A1/A3/C2/C3/B2/B3/C5） | 已定论/维持 | 无需行动 |
+
+---
+
+## 结论预览（2026-08-07 更新）
+
+- ✅ **已实施**：eyeHeight（P0）、teleport_to_spawn（P1）、基线版本号守卫（B2）
+- **待决策**：tick 频率锁定机制（P2，feature flag 条件编译，决策后动手）
+- **建议维持**：Int32 定点 / exchange / 拉基线 / Rust noclip / config 统一消息 / wasm-opt=false / 零 JSON / EMA / frameStamp
+
+---
+
+## E. 终版时序图审查结论论证（V1-V12，2026-08-07 新增）
+
+> 依据 `docs/项目时序图.md` 终版 + 审查结论表，逐项论证当前实现差距与处置。
+
+### E.1 差距论证
+
+| 编号 | 漏洞/要求 | 当前实现 | 差距 | 处置 |
+|---|---|---|---|---|
+| V1 | 输入提取窗口无上限（不截断 50ms） | `addInput` 每帧无截断累加，rawDt 限幅 0.1s 仅影响步长 | ✅ 已满足（无窗口截断） | 无需改 |
+| V2 | 多字段状态撕裂 → 双缓冲 | 单缓冲权威/预测区 + V_A 版本号 | 🔴 **需实施**（读半程可撕裂） | 双缓冲 S_A[0/1]、S_P[0/1] |
+| V3 | 主线程清零 seq 竞争 → 代际校验 | `clearPrediction()` 主线程 store(seq,0) | 🔴 **需实施**（会覆盖 Worker-B 新预测） | 废弃清零，gen_P==gen_A 校验 |
+| V4 | eyeHeight 未入共享状态 | ✅ 已补（A_EYE/P_EYE 槽） | ✅ 已满足 | 无需改 |
+| V5 | 预测步长僵化 → 动态 | 固定 `predDt = 1/tickRate` | 🔴 **需实施** | min(now-lastPhysicsTime, 16.67ms) |
+| V6 | Int32 输入槽溢出 → BigInt64 | Int32 定点累加 | 🔴 **需实施**（长卡顿 wrap） | BigInt64 原子累加 |
+| V7 | teleport 仅回初始点 | ✅ 已补 teleport_to_spawn | ✅ 已满足 | 无需改 |
+| V8 | tick 频率锁定 | 面板可调 48-128 | 🟡 **需实施**（feature flag） | 锁定 68Hz，调试构建可调 |
+| V9 | 连续预测发散 → 限 3 帧 | 无限制连续用预测 | 🔴 **需实施** | 连续 ≤3 帧，超限回退权威 |
+| V10 | 重复提取输入 | `takeInput` exchange 一次性清空 | ✅ 已满足（SPSC 无双消费） | 无需改 |
+| V11 | EMA 时钟滤波 | 无 EMA | 🟢 暂缓（固定步长已吸收抖动） | 暂缓 |
+| V12 | 零 JSON 地图加载 | Worker 内一次 JSON | 🟢 不行动（收益<风险） | 维持 |
+
+### E.2 需实施清单（本轮）
+
+1. **V2+V3+V6（Task #17）**：SAB 双缓冲（权威/预测各 2 槽）+ gen_A/gen_P 代际 + BigInt64 输入槽（`shared-state.ts` 全量重写）
+2. **V3+V5+V9（Task #18）**：主线程废弃 clearPrediction 改 gen 校验、连续预测 ≤3 帧、Worker-B 动态步长
+3. **V8/P2（Task #19）**：tick 频率 feature flag 锁定（默认锁定 68Hz，调试构建可调）
+
+### E.3 论证结论
+
+- **V1/V4/V7/V10 已满足**（4 项无需改）；**V11 暂缓、V12 不行动**（2 项）
+- **需实施 6 项**：V2/V3/V5/V6/V8/V9——集中在共享层与预测链，是本轮改造主体
+- 终版时序图相较 v3 蓝图的核心升级：**双缓冲消除撕裂 + 代际校验取代主线程清零 + 预测链防滥用**
+
+### E.4 实施结果（2026-08-07）
+
+| 项 | 实施 | 验证 |
+|---|---|---|
+| V2 双缓冲 | S_A[0/1]、S_P[0/1]（readState 按 (va-1)&1 / (seq-1)&1 选槽） | 单测双缓冲翻转 va=2 读最新 |
+| V3 代际校验 | gen_A/gen_P 槽；废弃 clearPrediction（空操作）；主线程 gen_P==gen_A 校验；Worker-B 写前 getGen 守卫 | 单测 gen 匹配、seq=gen1<<16\|5 |
+| V5 动态步长 | predictRound 用 min(now-lastStepTs, 1/64)，2 子步均分 | — |
+| V6 BigInt64 | dx/dy 输入槽 BigInt64 原子累加（修复 BigInt 整除截断：解码用 Number 除） | 单测 12.5×2=25 精确 |
+| V8/P2 tick 锁定 | config.lockTickRate（默认 false）+ 面板禁用 + syncFullConfig 强制 64 | — |
+| V9 连续预测限帧 | decideState continuousPred ≤3，超限回退 S_last 并重置 | — |
+
+修复的坑：**BigInt 除法是整数除法（截断）**——定点解码必须 `Number(bigint)/100` 而非 `Number(bigint/100n)`（否则 eyeHeight 64.09 → 64）。

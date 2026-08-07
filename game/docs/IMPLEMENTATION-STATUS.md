@@ -1,0 +1,256 @@
+# WebSurf-min 实现状态记录
+
+> 编制日期：2026-08-07。记录 `game/` 独立工程的最小化实现完成情况与未完成部分。
+> 蓝本：`MINIMAL-IMPL-PATH.md`（v3，与本文同目录）。目标架构：根 `docs/项目时序图.md`。
+> 所有代码存放于 `game/`，原项目零修改。
+
+---
+
+## 1. 实现总览（已完成）
+
+### 1.1 代码规模
+
+| 层 | 原项目 | game/ 实现 | 缩减 |
+|---|---|---|---|
+| TS（src/） | 11,844 行 / 79 文件 | **2,486 行 / 16 文件** | **-79%** |
+| Rust phys 模块 | —（迁移源 TS 3,353 行） | 2,463 行 / 4 文件 | 合并 16 文件 |
+| Rust lib.rs | 3,146 行 | 2,031 行 | 删 9 未用导出 + 薄壳 + debug_probe |
+| scene-data | GLB + 几十 MB JSON | GLB + spawn/pvs 小 JSON | **-95%** |
+| 消息协议 | 25 + 14 | 7 + 5 | — |
+
+### 1.2 架构落地（对齐时序图）
+
+```
+主线程 (src/app.ts)
+  ├─ 输入采集 → SAB 输入槽（Atomics.add Int32 定点累加，绝不丢输入）
+  ├─ 三源决策（V_A → seq_pred → S_last）→ 零等待渲染
+  ├─ ESC 弹出式面板（六分区）+ 速度面板 4Hz
+Worker-A (src/worker/main.ts)          Worker-B (src/worker/predictor-main.ts)
+  ├─ BspProcessor 解析/导出（WASM）     ├─ 同 wasm 模块第二 PhysWorld 实例
+  ├─ PhysWorld tick（Rust 物理）        ├─ Atomics.wait 热待机 + 2 子步 predict
+  ├─ 60Hz 自驱（Atomics.wait 16ms）     └─ 写 S_pred + 代际复合 seq
+  └─ 写权威区 + V_A++                  （noclip 下禁用）
+```
+
+### 1.3 文件清单
+
+**TS（16 文件）**：
+```
+src/app.ts                      # 主入口：双 Worker + 三源决策 + 面板 + 速度 8Hz
+src/config.ts                   # 收敛配置（physics/input/player/hud）
+src/panel/panel-controller.ts   # ESC 桌面两栏面板（左导航+右设置）+ 按键录制
+src/input/input-bridge.ts       # 消息桥（config/respawn/teleport/death）
+src/input/keyboard.ts           # 键盘映射（可配置 keymap）
+src/input/keymap.ts             # 键位配置：默认/持久化/录制标签
+src/input/mouse-buffer.ts       # 鼠标削平（复用原实现）
+src/input/pointer-lock.ts       # Pointer Lock（复用原实现）
+src/worker/main.ts              # Worker-A：wasm-init/load-bsp/60Hz 自驱/消息
+src/worker/predictor-main.ts    # Worker-B 独立入口（esbuild 打包用）
+src/worker/predictor-worker.ts  # Worker-B：热待机 + 2 子步预测 + 代际 seq
+src/worker/shared-state.ts      # SAB 512B：Int32 控制区 + BigInt64 输入槽 + 权威/预测双缓冲 + gen 代际
+src/worker/worker-types.ts      # 消息协议 7+5 + KeyState/KEY_MASK
+src/renderer/renderer-main.ts   # GLB + 相机 + LOD/PVS + 三源决策渲染
+src/world/pvs-manager.ts        # PVS 位图剔除（复用原实现）
+src/world/types.ts              # PVS 类型
+src/wasm.d.ts                   # re-export pkg 真实类型
+```
+
+**Rust phys（4 文件，新增）**：
+```
+crates/wasm/src/phys/mod.rs      # PhysWorld 组装 + wasm-bindgen 12 API
+crates/wasm/src/phys/world.rs    # World + 双 Grid + traceBox + clipBoxToTriangle
+crates/wasm/src/phys/player.rs   # PlayerController 全套移动语义（16 TS 文件合并）
+crates/wasm/src/phys/teleport.rs # TeleportManager（start-touch）+ 死亡判定
+```
+
+**Rust 基础（复用/精简）**：`vbsp/`（BSP 解析）、`bsp_to_gltf_core/`（GLB 导出）、
+`model_integrator/`、`texture_utils/`、`pakfile_models.rs`、`phyfile.rs`、
+`vendor/vmdl`（patch 引用，条带修复版）。
+
+**构建**：`package.json`（build:wasm/build:ts/build:dist/dev/check:api）、
+`tsconfig.json`、`serve.py`（COOP/COEP）、`scripts/check-wasm-api.mjs`（9+12 契约）、
+`scripts/build-dist.mjs`（WASM base64 + 双 Worker Blob 单文件）、`web/index.html`（极简 UI）。
+
+### 1.4 已验证通过的构建链路
+
+| 环节 | 命令 | 状态 |
+|---|---|---|
+| Rust 编译 | `cargo check --target wasm32-unknown-unknown` | ✅ 0 error |
+| WASM 构建 | `wasm-pack build --release`（wasm-opt=false） | ✅ 9+12 API 生成 |
+| 契约校验 | `node scripts/check-wasm-api.mjs` | ✅ 通过 |
+| TS 类型检查 | `npx tsc --noEmit` | ✅ 0 error |
+| 主线程打包 | esbuild app.ts | ✅ 1,025 KB |
+| Worker-A 打包 | esbuild worker/main.ts | ✅ 39 KB |
+| Worker-B 打包 | esbuild predictor-main.ts | ✅ 27 KB |
+| dist 单文件 | `node scripts/build-dist.mjs` | ✅ 3.1 MB |
+
+### 1.4b 部署与文档布局（2026-08-07）
+
+- 文档已集中到 `game/docs/`（`MINIMAL-IMPL-PATH.md` / `IMPLEMENTATION-STATUS.md` /
+  `DESIGN-DISCUSSION.md`），README 引用同步更新；
+- GitHub Actions（根 `.github/workflows/deploy-pages.yml`）构建**双产物**并部署到 Pages：
+  入口页（`scripts/pages-index.html`）+ `debug/`（主工程 dist，调试测试页面）+
+  `game/`（WebSurf-min dist，尝试游戏化）；
+- ⚠️ GitHub Pages 不提供 COOP/COEP 头 → `game/` 页面在线无法启用 SharedArrayBuffer
+  （显示引导卡片），完整游玩需本地 `game/play.cmd`；入口页已注明。
+
+| dev 服务器 | `python serve.py 8090` | ✅ 资源全 200 + COOP/COEP 头正确 |
+| **物理冒烟** | `npm run test:phys`（scripts/phys-smoke.mjs） | ✅ 落地/跳跃/回落/predict 全通过 |
+
+### 1.5 物理冒烟测试结果（node 直接跑 WASM，无浏览器）
+
+```
+OK t0: velY=-12.50（重力 800/64/tick 精确）
+OK 落地 at tick31: y=0.03 ground=true
+OK 跳跃: velY=289.49（预期 ≈302，落地摩擦稍减）
+OK 回落落地: y=0.03 ground=true
+OK predict: y=99.90 velY=-12.50
+```
+
+> 冒烟测试发现并修复：`PhysWorld.build_world` 的 teleport JSON 传入 `'[]'` 会解析失败
+> （期望 `{teleports:[],triggers:[]}` 结构）——测试脚本用正确结构；Worker 侧始终传
+> `parse_teleports()` 真实输出，不受影响。
+>
+> 排障记录：测试用"房间 brush 把玩家包在内部"会触发 `check_stuck` 卡死（velocity 恒 0、
+> 玩家不动）——这是测试世界构造问题，**真实地图 spawn 在 brush 外，非 bug**。
+> 物理语义（重力/落地/跳跃/预测）经地板世界验证全部正确。
+
+---
+
+## 2. 未完成部分（遗留清单）
+
+### 2.1 待验证（需要人工/浏览器）
+
+| # | 项 | 说明 | 优先级 |
+|---|---|---|---|
+| U1 | **浏览器实测** | 打开 `http://localhost:8090/web/index.html` 加载 `maps/surf_666.bsp`：验证面板状态机（初始常驻→加载隐藏→ESC 弹出→关闭锁定）、三源决策渲染、tickRate 48/64/128 三档、速度面板三模式、noclip 切换 | **高** |
+| U2 | **Rust 物理 golden 差分** | ✅ 冒烟级已通过（重力/落地/跳跃/回落/predict，见 §1.5）；❌ **完整差分未做**——用原项目 TS 物理跑 surf_666 固定输入序列生成逐 tick pos/vel/yaw golden，game wasm `PhysWorld.tick` 逐 tick 对比（容差 <1e-6），验证移植语义逐位一致 | **高** |
+| U3 | **手感验证** | 高速滑行无穿墙/卡停；144Hz 屏权威间隙由预测填充无"停-动-停" | 高 |
+| U4 | **dist 启动方式** | ✅ **已定案（2026-08-07）**：file:// 直接双击**不可行**——Chrome 非跨域隔离环境禁用 `SharedArrayBuffer`（物理双 Worker 硬依赖，COOP/COEP 头无法在 file:// 设置，CDP 实测确认）。交付方案：`game/play.cmd` 一键起本地服务器 + 自动开浏览器（http://localhost:8137/dist/index.html）；file:// 双击时页面显示引导卡片（`#fatalOverlay`）说明原因与两种启动方式。CDP 实测：http 加载 dist 完全可用（SAB✅ / crossOriginIsolated✅ / canvas 初始化✅ / 双 Worker✅） | 中 |
+
+### 2.2 已知技术遗留（代码层面）
+
+| # | 项 | 现状 | 建议 |
+|---|---|---|---|
+| ~~L2~~ | **Rust dead_code warning** | ✅ 已清零（20→0）：删薄壳方案 14 个函数（face_to_brush/obb_to_brush/newell_normal 等 637→273 行）、phys 未用字段（tmp_brush_ids/tmp_tri_ids/count）、DIST_EPSILON 重复、teleport 未读 model 字段；TS 侧 9 处未用（suppress/shared 参数/step/bspModelScene/config/_camPos/name/eyeHeight/Vec3Like）一并清理 | — |
+| ~~L3~~ | **teleport 按索引 = respawn** | ✅ 已修：`PhysWorld::set_spawn_points(json)` + `teleport_to_spawn(idx)`，Worker-A teleport 按索引查表，spawn 下拉恢复真实功能 | — |
+| ~~L4~~ | **速度面板 eyeHeight** | ✅ 已修：SAB 权威区/预测区新增 eyeHeight 槽（Int32 定点 ×100），渲染相机 Y = pos.y + eyeHeight；冒烟验证站立 64.09 / 蹲下 62.68 | — |
+| ~~L5~~ | **noclip 速度** | ✅ 已加：PhysParams.noclip_speed（默认 800=200×4）+ set_params 支持 + 面板滑块 200-3000（sprint 再 ×4） | — |
+| L6 | **dev server 残留** | 之前测试的 8090 端口 python 进程仍在运行 | 可忽略或手动关闭 |
+
+**已修复（2026-08-07 输入链路瘫痪，用户报"锁定后动不了"）**：
+- ✅ **runLoop writeFrame 条件 bug（致命）**：`if (steps === 0) writeFrame()` 导致物理推进
+  时（steps>0）不写权威帧 → va 恒 0 → 主线程读不到状态 → 看似"完全动不了"
+  （实际物理在 Worker 里在跑）。修复：每帧无条件 writeFrame。CDP 实测 va 251→731 递增、
+  按 W 后 HUD 0→250、甩鼠标 yaw 270→230.4；
+- ✅ **Worker-B 从未收到 build-world（预测从不工作）**：主线程无 brush/tri/teleport JSON
+  可转发，predictor worldReady 恒 false、seqP=0。修复：Worker-A 加载时 postMessage
+  world-json（一次非热路径）→ 主线程转发 build-world。CDP 实测 seqP 递增（预测生效）。
+- 排查方法论：CDP 直读 SAB 槽（bufferOf 暴露）定位"keys=1 但 va=0"；Worker 内 diag
+  postMessage 上报状态（wasmReady/init/runLoop 空转原因）；try/catch 循环异常上报保留。
+
+**已修复（2026-08-07 dist 双击报错，对齐主项目打包逻辑）**：
+- ✅ Worker-A/Predictor 的动态 `await import()` 改静态导入（esbuild IIFE + Blob Worker 下
+  动态 import 运行时不可解析）；
+- ✅ Predictor 补 wasm 初始化：独立 Blob Worker 此前从未 initSync，PhysWorld 构造必抛错
+  （现 app.ts 下发 wasmB64/wasmUrl + predictor 加 wasm-init 分支）；
+- ✅ Worker-A 补消息队列保护（pending + wasmReady + dispatch，对齐主项目 main.ts），
+  用户在 wasm 初始化完成前选文件不再报错；
+- ✅ dist/dev 产物验证：无动态 import、initSync 内联、import.meta 无残留。
+
+**已修复（2026-08-07 按文档 §3.4/§4.3 落地）**：
+- ✅ **L1 Worker-B 输入竞争**：predictRound 改用只读 `readInput()`（不 exchange），
+  不再与 Worker-A 抢输入槽；
+- ✅ **L1 Worker-B 基线同步**：predict 前 `phys.set_state(权威 pos/yaw/pitch/vel/onGround)`，
+  预测锚定权威基线、不漂移（冒烟测试「基线锚定」验证通过）；
+- ✅ **L1 notify 接线**：主线程三源决策命中权威分支调 `shared.notifyPrediction()`，
+  Worker-B 从 16ms 轮询升级为 notify 唤醒 + 超时兜底；
+- ✅ **L1 tickRate → Worker-B**：面板 tickRate 变更同时发 `set-pred-dt`（§2.4）；
+- ✅ **新增 PhysWorld::set_state API**（物理层 9 → 10 API），契约同步更新。
+
+### 2.3 未实现的扩展点（v3 文档中明确不做的）
+
+| 项 | 判定 |
+|---|---|
+| lightmap/雾/碰撞可视化/准星射线 | 调试/增强，v3 判定删除 |
+| 自定义传送点（localStorage） | 非核心，删除 |
+| 计时挑战（game-state） | 非核心，删除 |
+| MsgState postMessage 回退通道 | 强制 SAB（COOP/COEP），删除 |
+| colliderSource 三方案 / 传送三模式 | 锁 auto / start-touch |
+| LERP + 外推插帧 | 被 Worker-B 预测取代 |
+
+---
+
+## 3. 设计差异对照（时序图 vs 蓝图 v3 vs 实现现状）
+
+> 三份文档定位：`docs/项目时序图.md` = 理想架构（双 Worker 三源决策的原型）；
+> `MINIMAL-IMPL-PATH.md`（v3，同目录）= 实现蓝图（物理下沉 + 面板保留的落地路径）；
+> 本文 = 实现现状。下表逐项列出差异与原因。
+> **本文为事实记录；各差异点的讨论/决策见 `DESIGN-DISCUSSION.md`**（含优先级与倾向）。
+
+### 3.1 一致项（时序图 → 实现逐点落地）
+
+| 时序图要求 | 实现 | 状态 |
+|---|---|---|
+| SAB 四区布局（V_A/输入槽/权威 S/预测区） | shared-state.ts 同构 | ✅ |
+| 代际复合序列号 `seq=(gen<<16)\|(counter&0xFFFF)` | writePredicted 同式 | ✅ |
+| 三源决策（权威→预测→回退 S_last） | renderer-main decideState | ✅ |
+| 权威就绪 → 清 seq_pred + notify B | clearPrediction + notifyPrediction | ✅ |
+| 输入槽 Atomics.add 绝不丢输入 | addInput（Int32 定点版） | ✅ |
+| Worker-A 60Hz 自驱 + 写 V_A++ | runLoop + writeAuthoritative | ✅ |
+| Worker-B 热待机 + 2 子步 + 只读输入 | predictor runWaitLoop + readInput | ✅ |
+| 预测锚定权威基线 | set_state（权威状态同步） | ✅（补强） |
+| Worker-B 代际 seq 随 V_A 快照 | generation = readAuthoritative().va | ✅ |
+
+### 3.2 实现与蓝图的差异（实现决策，v3 文档 §3 旧版已并入）
+
+| # | 蓝图（v3）设计 | 实现 | 原因 |
+|---|---|---|---|
+| D1 | SAB 用 Float64 存 pos/vel/yaw | **Int32 定点**（dx/dy ×1000、pos/vel ×100、yaw/pitch ×1000） | **Atomics 只支持整数 TypedArray**，Float64 无法原子累加 |
+| D2 | noclip 在 **TS/JS 侧**维护（蓝图 §2.5「JS 侧自由视角」） | **Rust 侧 noclip_step**（单一物理源） | 避免 JS/Rust 两套状态；noclip 逻辑进 wasm 更内聚 |
+| D3 | scene-data 零 JSON（brush/tri/teleport 不跨线程） | **跨线程已零大 JSON**；但 Worker 内 build_world 仍接收导出 JSON（一次构建，非热路径） | 完全从 Bsp 内存直建需重构 lib.rs 数据通道，收益与风险不成比例 |
+| D4 | `set-physics-mode` 消息恢复 | 面板动作**统一走 config**（mode 字段并入 physics 段） | 消息协议更薄（7+5），无专用消息 |
+| D5 | tickRate 变更清 moveAccumulator | 实现仅改 fixedDt + Worker-B dt_pred | runLoop 无累积器（dt 直接限幅 0.1s），无需清 |
+| D6 | wasm-opt 二次优化 | `wasm-opt=false`（Cargo.toml metadata） | 本机 NODE_OPTIONS 含 `--use-system-ca` 污染 wasm-opt node 脚本；LTO+opt3 已足够 |
+
+### 3.3 实现与时序图的差异（工程化取舍）
+
+| # | 时序图 | 实现 | 原因 |
+|---|---|---|---|
+| T1 | 输入槽 CAS 安全消耗（`CAS: cur→cur-consumed`） | `Atomics.exchange` 一次性清空 + 截断 | SPSC（单写单读）下 exchange 语义等价且更简单；CAS 循环是多读者才需要 |
+| T2 | 权威物理 **固定 60Hz** | **默认 64Hz，面板 48-128 可调** | surf 社区惯例 64Hz；可调是蓝图 §2.4 需求 |
+| T3 | 主线程 release **更新 Worker-B 基线** | Worker-B **主动 acquire 读权威区** + set_state | 避免主线程向 SAB 写基线（多一处写者）；读侧同步更简洁 |
+| T4 | Worker-A 时钟 EMA 滤波 | runLoop 用原始 dt（限幅 0.1s），**无 EMA** | 简化；物理 64Hz 固定步长本身吸收抖动，EMA 收益小 |
+| T5 | 输入槽含 frameStamp（时间戳） | 未实现（SAB 无时间戳槽） | 渲染帧率已由 rAF 驱动，时间戳非必需 |
+| T6 | 权威状态含 eyeHeight/timeMs | SAB 权威区**未存 eyeHeight**（渲染固定 `pos.y`） | 见遗留 L4；timeMs 由主线程 now 注入 |
+
+### 3.4 蓝图相对时序图的扩展（非差异，蓝图新增）
+
+面板（ESC 桌面两栏：左导航+右设置）、速度面板（8Hz 三模式，HUD 居中偏下 24%）、tickRate 可调、noclip 自由视角、
+build-dist 单文件双 Worker 内嵌——均为蓝图 v3 在时序图原型之上新增的产品化能力。
+
+### 3.5 已识别但未处理的差异（遗留）
+
+- **L3**：teleport 消息 = respawn（时序图/蓝图含 spawn 索引切换语义，实现简化）；
+- **L4**：eyeHeight 未入 SAB（渲染相机高度 = 玩家 origin.y，非眼睛高度）。
+
+
+---
+
+## 4. 复现步骤
+
+```bash
+cd game
+npm install                     # 已装（12 包）
+npm run build:wasm              # wasm-pack release（约 3.5 分钟）
+npm run build:ts                # typecheck + esbuild 三产物
+npm run dev                     # python serve.py 8080
+# 浏览器打开 http://localhost:8080/web/index.html
+# 加载 maps/surf_666.bsp → 点击画布锁定 → WASD/空格/Esc 面板
+npm run build:dist              # 单文件 dist/（3.1 MB）
+node scripts/check-wasm-api.mjs # 契约校验
+```
+
+> Windows 注意：`wasm-pack` 若遇 `os error 5`（杀毒锁 target），清
+> `target/wasm32-unknown-unknown` 后重试。`rm -rf` 会被安全删除拦截，
+> 用 `python -c "import shutil; shutil.rmtree('pkg', ignore_errors=True)"`。
