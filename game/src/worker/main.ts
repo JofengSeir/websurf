@@ -344,7 +344,7 @@ function notifyPosReset(): void {
   postMessage({
     type: 'player-respawn',
     pos: [s.posX, s.posY, s.posZ],
-    yawDeg: s.yaw * 180 / Math.PI,
+    yawDeg: s.yaw, // Rust yaw 单位为度，直接回传
   } satisfies MainMessage);
 }
 
