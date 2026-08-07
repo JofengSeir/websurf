@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebSurf-min</title>
+  <style>
+    /* ── 基础 ─────────────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+      font-size: 13px; color: #e8e8e8; background: #0f1115;
+    }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; width: 100%; height: 100%; background: #0f1115; }
+
+    /* 隐藏文件选择控件：加载地图按钮统一触发 click（样式由 #loadMapBtn 承担） */
+    #bspFile { display: none; }
+
+    /* ── 状态提示（右上角胶囊）────────────────────── */
+    #status, #error {
+      position: absolute; top: 14px; right: 14px; z-index: 5;
+      font-size: 12px; padding: 6px 12px; border-radius: 999px;
+      background: rgba(15,17,21,0.78); border: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(8px);
+    }
+    #status.success { color: #4ade80; border-color: rgba(74,222,128,0.35); }
+    #status.error { color: #f87171; border-color: rgba(248,113,113,0.35); }
+    #error { display: none; color: #f87171; top: 90px; }
+
+    /* ── 速度 HUD（横向居中，距底部 24%）────────────── */
+    #hud { position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%);
+      z-index: 4; text-align: center; pointer-events: none;
+      font-variant-numeric: tabular-nums; }
+    #stats {
+      font-size: 18px; font-weight: 600; letter-spacing: 0.5px;
+      color: #ffffff;
+      text-shadow: 0 0 12px rgba(94,129,244,0.55), 0 2px 6px rgba(0,0,0,0.6);
+      transition: color 0.15s;
+    }
+    #stats .vsep { color: #9aa3b2; margin: 0 6px; font-weight: 400; }
+
+    /* ── 准星 ─────────────────────────────────────────── */
+    #crosshair {
+      position: absolute; left: 50%; top: 50%; z-index: 4;
+      width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
+      background: rgba(74,222,128,0.9); border-radius: 50%;
+      box-shadow: 0 0 6px rgba(74,222,128,0.5);
+    }
+    #crosshair.hidden { display: none; }
+
+    /* ── 面板：桌面两栏（左导航 + 右设置）────────────── */
+    #panel {
+      position: absolute; inset: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(8,10,14,0.55);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+    #panel .win {
+      width: 720px; max-width: 92vw; height: 560px; max-height: 84vh;
+      display: flex;
+      border-radius: 16px; overflow: hidden;
+      background: linear-gradient(165deg, rgba(26,30,40,0.97), rgba(16,19,27,0.99));
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+    /* 左侧导航 */
+    #panel .nav {
+      flex: 0 0 170px; display: flex; flex-direction: column;
+      padding: 18px 10px;
+      background: rgba(255,255,255,0.03);
+      border-right: 1px solid rgba(255,255,255,0.06);
+    }
+    #panel .nav h2 {
+      font-size: 15px; font-weight: 600; padding: 2px 12px 14px;
+      color: #e2e8f0;
+    }
+    #panel .nav .mod {
+      display: flex; align-items: center; gap: 9px;
+      padding: 9px 12px; margin: 1px 0;
+      font-size: 13px; color: #9aa3b2;
+      border-radius: 9px; cursor: pointer; user-select: none;
+      transition: background 0.12s, color 0.12s;
+    }
+    #panel .nav .mod:hover { background: rgba(255,255,255,0.06); color: #c8ccd4; }
+    #panel .nav .mod.active {
+      background: linear-gradient(135deg, rgba(94,129,244,0.22), rgba(139,92,246,0.18));
+      color: #e2e8f0; font-weight: 500;
+    }
+    #panel .nav .mod .ic { font-size: 15px; width: 20px; text-align: center; opacity: 0.85; }
+    #panel .nav .footer { margin-top: auto; padding: 10px 12px; }
+    #panel .nav .footer button {
+      width: 100%; padding: 8px; font-size: 12px; font-weight: 500;
+      background: linear-gradient(135deg, #5e81f4, #8b5cf6);
+      border: none; color: #fff; border-radius: 9px; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(94,129,244,0.3);
+    }
+    #panel .nav .footer button:hover { filter: brightness(1.1); }
+
+    /* 通用模块：全宽渐变加载地图按钮 */
+    #panel .map-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; margin: 2px 0 6px; padding: 12px 12px;
+      font-size: 14px; font-weight: 600; text-align: center;
+      background: linear-gradient(135deg, #5e81f4, #8b5cf6);
+      border: none; color: #fff; border-radius: 11px; cursor: pointer;
+      box-shadow: 0 4px 16px rgba(94,129,244,0.35);
+      transition: filter 0.15s, transform 0.1s, box-shadow 0.15s;
+    }
+    #panel .map-btn:hover { filter: brightness(1.12); box-shadow: 0 6px 22px rgba(94,129,244,0.5); }
+    #panel .map-btn:active { transform: scale(0.98); }
+    #panel .map-btn:disabled { opacity: 0.5; cursor: default; filter: none; }
+    #panel .map-btn .ic { font-size: 16px; }
+
+    /* 右侧内容 */
+    #panel .body { flex: 1; overflow-y: auto; padding: 20px 24px; scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.15) transparent; }
+    #panel .body::-webkit-scrollbar { width: 6px; }
+    #panel .body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+
+    #panel .mod-pane { display: none; }
+    #panel .mod-pane.active { display: block; animation: paneIn 0.16s ease; }
+    @keyframes paneIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    #panel .pane-title { font-size: 15px; font-weight: 600; color: #e2e8f0; margin-bottom: 4px; }
+    #panel .pane-desc { font-size: 12px; color: #6b7280; margin-bottom: 14px; }
+
+    #panel h4 {
+      margin: 18px 0 8px; font-size: 11px; font-weight: 600;
+      color: #5e81f4; letter-spacing: 1.1px; text-transform: uppercase;
+      display: flex; align-items: center; gap: 8px;
+    }
+    #panel h4::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,0.07); }
+
+    /* 滑块行 */
+    #panel .row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 7px 10px; margin: 2px 0; border-radius: 10px;
+      transition: background 0.15s;
+    }
+    #panel .row:hover { background: rgba(255,255,255,0.04); }
+    #panel .row label { flex: 0 0 120px; font-size: 13px; color: #c8ccd4; }
+
+    #panel input[type="range"] {
+      flex: 1; -webkit-appearance: none; appearance: none; height: 4px;
+      border-radius: 2px; background: rgba(255,255,255,0.12); outline: none; cursor: pointer;
+    }
+    #panel input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+      background: linear-gradient(135deg, #5e81f4, #8b5cf6);
+      border: 2px solid #fff; box-shadow: 0 0 8px rgba(94,129,244,0.5); cursor: pointer;
+    }
+    #panel input[type="range"]::-moz-range-thumb {
+      width: 13px; height: 13px; border-radius: 50%;
+      background: linear-gradient(135deg, #5e81f4, #8b5cf6);
+      border: 2px solid #fff; cursor: pointer;
+    }
+    #panel input[type="range"]:disabled::-webkit-slider-thumb { background: #4b5563; box-shadow: none; }
+    #panel .val { flex: 0 0 70px; }
+    #panel .val input {
+      width: 100%; text-align: right; font-size: 13px; color: #e2e8f0;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px; padding: 4px 8px; outline: none;
+      transition: border-color 0.15s;
+    }
+    #panel .val input:focus { border-color: rgba(94,129,244,0.6); }
+
+    /* 开关 */
+    #panel input[type="checkbox"] {
+      appearance: none; -webkit-appearance: none;
+      width: 38px; height: 21px; border-radius: 999px;
+      background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.1);
+      position: relative; cursor: pointer; transition: background 0.2s;
+    }
+    #panel input[type="checkbox"]::after {
+      content: ""; position: absolute; top: 2px; left: 2px;
+      width: 15px; height: 15px; border-radius: 50%; background: #cbd5e1;
+      transition: transform 0.2s, background 0.2s;
+    }
+    #panel input[type="checkbox"]:checked { background: linear-gradient(135deg, #5e81f4, #8b5cf6); border-color: transparent; }
+    #panel input[type="checkbox"]:checked::after { transform: translateX(17px); background: #fff; }
+
+    #panel select {
+      flex: 1; font-size: 13px; color: #e2e8f0;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px; padding: 6px 10px; outline: none; cursor: pointer;
+    }
+    #panel button.small {
+      font-size: 12px; color: #c8ccd4; padding: 5px 12px;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px; cursor: pointer; transition: all 0.15s;
+    }
+    #panel button.small:hover { background: rgba(255,255,255,0.12); }
+    #panel button.small.active { border-color: rgba(94,129,244,0.7); color: #5e81f4; background: rgba(94,129,244,0.12); }
+
+    /* 按键模块 */
+    #panel .key-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 10px; margin: 2px 0; border-radius: 10px;
+      transition: background 0.15s;
+    }
+    #panel .key-row:hover { background: rgba(255,255,255,0.04); }
+    #panel .key-row .kname { flex: 0 0 120px; font-size: 13px; color: #c8ccd4; }
+    #panel .key-row .kkeys { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    #panel .key-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; color: #e2e8f0; padding: 3px 9px;
+      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 7px; cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    #panel .key-chip:hover { border-color: rgba(94,129,244,0.6); background: rgba(94,129,244,0.1); }
+    #panel .key-chip.recording { border-color: #f59e0b; background: rgba(245,158,11,0.15); animation: recPulse 1s infinite; }
+    @keyframes recPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); } 50% { box-shadow: 0 0 0 5px rgba(245,158,11,0); } }
+    #panel .key-chip .x { color: #f87171; font-size: 11px; padding: 0 1px; }
+    #panel .key-chip .x:hover { color: #fff; }
+    #panel .key-add {
+      font-size: 12px; color: #9aa3b2; padding: 3px 10px;
+      background: transparent; border: 1px dashed rgba(255,255,255,0.2);
+      border-radius: 7px; cursor: pointer;
+    }
+    #panel .key-add:hover { border-color: rgba(94,129,244,0.6); color: #c8ccd4; }
+    #panel .key-rec-hint {
+      font-size: 12px; color: #f59e0b; padding: 8px 10px;
+      background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2);
+      border-radius: 9px; margin-bottom: 6px;
+    }
+
+    #panel .hint { margin-top: 16px; font-size: 11px; color: #6b7280; line-height: 1.7; }
+    #panel .hint kbd {
+      font-family: inherit; font-size: 10px; color: #9aa3b2;
+      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 4px; padding: 1px 5px; margin: 0 1px;
+    }
+
+    /* 致命错误覆盖层（file:// 双击无 SAB 时显示） */
+    #fatalOverlay {
+      display: none; position: fixed; inset: 0; z-index: 9999;
+      background: rgba(8,10,18,0.82); backdrop-filter: blur(8px);
+      align-items: center; justify-content: center; flex-direction: column;
+      color: #e8ecf4; font-family: "Segoe UI", system-ui, sans-serif; text-align: center;
+    }
+    #fatalOverlay.show { display: flex; }
+    #fatalOverlay .card {
+      max-width: 560px; margin: 0 24px; padding: 34px 38px; border-radius: 20px;
+      background: linear-gradient(160deg, #1b2033, #141826);
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
+    }
+    #fatalOverlay h2 {
+      margin: 0 0 14px; font-size: 22px; font-weight: 600;
+      background: linear-gradient(135deg, #ff8a80, #ff5c7a);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    #fatalOverlay .reason { font-size: 14px; line-height: 1.7; color: #aab3c8; margin-bottom: 18px; }
+    #fatalOverlay .reason code {
+      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 6px; padding: 1px 7px; font-family: Consolas, monospace; color: #7fb3ff;
+    }
+    #fatalOverlay .steps { text-align: left; font-size: 13.5px; line-height: 2; color: #c6cede; }
+    #fatalOverlay .steps b { color: #7ee0a3; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <canvas id="preview"></canvas>
+
+  <div id="status">正在加载 WASM 模块...</div>
+  <div id="error"></div>
+
+  <div id="crosshair"></div>
+  <div id="hud"><div id="stats">0</div></div>
+
+  <!-- ESC 控制面板：桌面两栏 -->
+  <div id="panel">
+    <div class="win">
+      <!-- 左侧模块导航 -->
+      <div class="nav">
+        <h2>控制面板</h2>
+        <div class="mod active" data-mod="general"><span class="ic">🏠</span>通用</div>
+        <div class="mod" data-mod="physics"><span class="ic">⚙</span>物理</div>
+        <div class="mod" data-mod="hull"><span class="ic">▣</span>体型</div>
+        <div class="mod" data-mod="keys"><span class="ic">⌨</span>按键</div>
+        <div class="mod" data-mod="look"><span class="ic">◎</span>操作</div>
+        <div class="mod" data-mod="display"><span class="ic">◉</span>显示</div>
+        <div class="mod" data-mod="view"><span class="ic">↗</span>视角</div>
+        <div class="footer">
+          <button id="panelClose">关闭</button>
+        </div>
+      </div>
+
+      <!-- 右侧设置 -->
+      <div class="body">
+        <!-- 通用：地图加载 / 重生 -->
+        <div class="mod-pane active" data-pane="general">
+          <div class="pane-title">通用</div>
+          <div class="pane-desc">加载 .bsp 地图、出生点与重生</div>
+          <input type="file" id="bspFile" accept=".bsp" />
+          <button id="loadMapBtn" class="map-btn"><span class="ic">🗺️</span>加载地图</button>
+          <h4>出生点</h4>
+          <div class="row"><label>重生</label>
+            <button class="small" id="respawnBtn" disabled>重生</button></div>
+          <div class="row"><label>出生点</label>
+            <select id="spawnSelect" disabled></select></div>
+        </div>
+
+        <!-- 物理 -->
+        <div class="mod-pane" data-pane="physics">
+          <div class="pane-title">物理参数</div>
+          <div class="pane-desc">权威物理 64Hz · Worker-B 预测联动 · 面板可调（计时玩法锁定）</div>
+          <h4>基础</h4>
+          <div class="row"><label>tickRate (Hz)</label>
+            <input type="range" id="tickRate" min="48" max="128" step="1" value="64" />
+            <div class="val"><input id="tickRateNum" type="number" value="64" /></div></div>
+          <div class="row"><label>重力</label>
+            <input type="range" id="gravity" min="200" max="2000" step="10" value="800" />
+            <div class="val"><input id="gravityNum" type="number" value="800" /></div></div>
+          <h4>移动</h4>
+          <div class="row"><label>地面加速</label>
+            <input type="range" id="accelerate" min="1" max="30" step="0.5" value="10" />
+            <div class="val"><input id="accelerateNum" type="number" value="10" /></div></div>
+          <div class="row"><label>空气加速</label>
+            <input type="range" id="airAccel" min="1" max="200" step="1" value="100" />
+            <div class="val"><input id="airAccelNum" type="number" value="100" /></div></div>
+          <div class="row"><label>摩擦</label>
+            <input type="range" id="friction" min="0" max="10" step="0.1" value="4" />
+            <div class="val"><input id="frictionNum" type="number" value="4" /></div></div>
+          <h4>行为</h4>
+          <div class="row"><label>自动连跳</label>
+            <input type="checkbox" id="autobhop" checked /></div>
+        </div>
+
+        <!-- 体型 -->
+        <div class="mod-pane" data-pane="hull">
+          <div class="pane-title">人物体型</div>
+          <div class="pane-desc">碰撞箱尺寸（CS:S 基准：32×32×72 / 蹲 54）</div>
+          <h4>碰撞箱</h4>
+          <div class="row"><label>半宽</label>
+            <input type="range" id="hullHalfWidth" min="4" max="32" step="1" value="16" />
+            <div class="val"><input id="hullHalfWidthNum" type="number" value="16" /></div></div>
+          <div class="row"><label>站高</label>
+            <input type="range" id="hullStandHeight" min="36" max="144" step="1" value="72" />
+            <div class="val"><input id="hullStandHeightNum" type="number" value="72" /></div></div>
+          <div class="row"><label>蹲高</label>
+            <input type="range" id="hullDuckHeight" min="24" max="108" step="1" value="54" />
+            <div class="val"><input id="hullDuckHeightNum" type="number" value="54" /></div></div>
+          <div class="row"><label></label><button class="small" id="hullReset">恢复默认</button></div>
+        </div>
+
+        <!-- 按键 -->
+        <div class="mod-pane" data-pane="keys">
+          <div class="pane-title">自定义按键</div>
+          <div class="pane-desc">点击键位重新录制 · 悬停键位点 ✕ 删除 · localStorage 持久化</div>
+          <div id="keyRecHint" class="key-rec-hint" style="display:none">按下一个键来绑定…（Esc 取消）</div>
+          <div id="keyList"></div>
+          <div style="margin-top:12px">
+            <button class="small" id="keyReset">恢复默认键位</button>
+          </div>
+        </div>
+
+        <!-- 操作 -->
+        <div class="mod-pane" data-pane="look">
+          <div class="pane-title">操作</div>
+          <div class="pane-desc">鼠标与视角</div>
+          <h4>鼠标</h4>
+          <div class="row"><label>灵敏度</label>
+            <input type="range" id="sensitivity" min="0.1" max="5" step="0.01" value="1.5" />
+            <div class="val"><input id="sensitivityNum" type="number" value="1.5" /></div></div>
+          <h4>键盘视角</h4>
+          <div class="row"><label>Q/E 旋转 (°/s)</label>
+            <input type="range" id="yawBindSpeed" min="0" max="720" step="1" value="210" />
+            <div class="val"><input id="yawBindSpeedNum" type="number" value="210" /></div></div>
+        </div>
+
+        <!-- 显示 -->
+        <div class="mod-pane" data-pane="display">
+          <div class="pane-title">显示</div>
+          <div class="pane-desc">准星与速度面板</div>
+          <h4>准星</h4>
+          <div class="row"><label>显示准星</label>
+            <input type="checkbox" id="showCrosshair" checked /></div>
+          <h4>速度面板</h4>
+          <div class="row"><label>模式</label>
+            <select id="speedMode">
+              <option value="lateral" selected>横向速度</option>
+              <option value="lateral-vertical">横向 + 竖向</option>
+              <option value="total">综合速度</option>
+            </select></div>
+        </div>
+
+        <!-- 视角 -->
+        <div class="mod-pane" data-pane="view">
+          <div class="pane-title">视角</div>
+          <div class="pane-desc">自由视角（noclip）</div>
+          <h4>自由视角</h4>
+          <div class="row"><label>切换</label>
+            <button class="small" id="noclipToggle">自由视角</button></div>
+          <div class="row"><label>移动速度</label>
+            <input type="range" id="noclipSpeed" min="200" max="3000" step="10" value="800" />
+            <div class="val"><input id="noclipSpeedNum" type="number" value="800" /></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 致命错误覆盖层：双击 file:// 缺少 SharedArrayBuffer 时显示 -->
+<div id="fatalOverlay">
+  <div class="card">
+    <h2>无法启动</h2>
+    <div class="reason">
+      当前以 <code>file://</code> 方式打开，浏览器禁用了 <code>SharedArrayBuffer</code>
+      （物理引擎双 Worker 需要 COOP/COEP 跨域隔离头），因此游戏未能初始化。
+    </div>
+    <div class="steps">
+      <b>方法一（推荐）：</b>双击 <code>play.cmd</code> 一键启动，将自动打开本页面<br />
+      <b>方法二：</b>命令行运行 <code>python serve.py 8137</code>，
+      然后访问 <code>http://localhost:8137/dist/index.html</code><br />
+      <b>开发模式：</b><code>python serve.py 8090</code> →
+      <code>http://localhost:8090/web/index.html</code>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

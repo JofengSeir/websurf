@@ -1,0 +1,12 @@
+# ── game 独立工程构建产物 ────────────────
+# esbuild / wasm-pack / cargo 产物，不应进入版本库（用 build-dist.cmd 重建）
+dist/
+pkg/
+target/
+web/app.js
+web/worker.js
+web/predictor.js
+
+# ── 临时 / 调试 ─────────────────────────
+scripts/_*.mjs
+_testmaps/

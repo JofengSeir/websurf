@@ -1,6 +1,6 @@
 # BSP 地图架构（Source 引擎 v20 格式解析）
 
-> 压缩自 `docs/bsp-format.md`，已对照 `crates/wasm/src/vbsp/` 代码核实（2026-08-06）。
+> 压缩自 `docs/bsp-format.md`，已对照 `crates/wasm/src/vbsp/` 代码核实（2026-08-07 复核）。
 > 本文讲「BSP 文件本身长什么样」；项目实际导出消费见 `docs/bsp-export-status.md`。
 
 ---
@@ -57,7 +57,7 @@ struct dplane_t { Vector normal; float dist; int type; };  // 20B
 - `dtexdata_t`（32B）：reflectivity + `nameStringTableID`（→ StringTable → StringData 材质路径）+ 宽高（width/height/view_width/view_height）；
 - `texinfo_t`（72B）：贴图 s/t 基向量 `textureVecs[2]`（Vector4×2）+ 光照基向量 `lightmapVecs[2]` + `flags`（SURF_*）+ `texdata` 索引；
 - `TextureDataStringTable` = int32 偏移数组 → `TextureDataStringData` 连续字符串；
-- 完整 `SURF_*` 标志：`LIGHT 0x1 / SKY2D 0x2 / SKY 0x4 / WARP 0x8 / TRANSPARENT 0x10 /
+- 完整 `SURF_*` 标志：`LIGHT 0x1 / SKY2D 0x2 / SKY 0x4 / WARP 0x8 / TRANS 0x10 /
   NOPORTAL 0x20 / TRIGGER 0x40 / NODRAW 0x80 / HINT 0x100 / SKIP 0x200 / NOLIGHT 0x400 /
   BUMPLIGHT 0x800 / NOSHADOWS 0x1000 / NODECALS 0x2000 / NOCHOP 0x4000 / HITBOX 0x8000`。
 
@@ -71,18 +71,20 @@ struct dplane_t { Vector normal; float dist; int type; };  // 20B
 
 ### 3.6 BSP 树（#5/#10）
 ```c
-struct dnode_t {  // 24B
-    int planenum; short children[2];   // ≥0=node，<0=leaf（~index）
-    short mins[3], maxs[3]; unsigned short firstface, numfaces; short area;
+struct dnode_t {  // 32B
+    int planenum; int children[2];   // ≥0=node，<0=leaf（~index，即 -leaf-1）
+    short mins[3], maxs[3]; unsigned short firstface, numfaces; short area, padding;
 };
-struct dleaf_t {  // 56B（v19+）
-    int contents;        // CONTENTS_*；-1 = 固体 leaf
-    short cluster, area, flags;
+struct dleaf_t {  // 32B（lump v0）/ 56B（lump v1，尾部 +24B ambient lighting cube）
+    int contents;        // CONTENTS_*；固体 leaf 的 cluster == -1
+    short cluster; short area:9, flags:7;   // area/flags 位域打包在同一 i16
     short mins[3], maxs[3];
     unsigned short firstleafface, numleaffaces, firstleafbrush, numleafbrushes;
     short leafWaterDataID;
 };
 ```
+> leaf 记录长度由 **lump version** 决定（v0=32B / v1=56B），与 BSP 版本无关；
+> vbsp `read_leaves` 按 lump 长度 + 最大 leaf 索引自适应两种布局。
 
 ### 3.7 Faces（#7/#27）
 `dface_t`（56B，v19+ 含 smoothingGroups）：planenum / side（1=平面翻转）/ onnode /
@@ -91,7 +93,7 @@ dispinfo（-1 普通面）/ surfaceFogVolumeID / styles[4] / lightofs（→Light
 lightmaptexturemins[2] / lightmaptexturesizeinluxels[2] / origFace / numPrims / firstPrimID。
 
 ### 3.8 Models（#14）— 子模型
-`dmodel_t`（40B）：mins/maxs/origin/headnode/firstface+numfaces。
+`dmodel_t`（48B）：mins/maxs/origin/headnode/firstface+numfaces。
 `models[0]` = world；实体 brush 模型由实体 `"model" "*N"` 引用 `models[N]`。
 
 ### 3.9 碰撞 brush（#18/#19）
@@ -105,7 +107,10 @@ contents 含 SOLID/WINDOW/GRATE/LADDER 等 CONTENTS_* 标志。
 `ddispinfo_t`（176B）：startPosition / dispVertStart / dispTriStart / power（2-4 →
 网格 (2^power+1)²）/ minTess / smoothingAngle / contents / mapFace +
 edgeNeighbours[4]（每边 2 子邻接）/ cornerNeighbours[4] / allowedVerts[10]；
-`ddispvert_t`（20B）= vec + dist + alpha；`ddisptri_t` = 3×u16 顶点索引（#48 为新版位置）。
+`ddispvert_t`（20B）= vec + dist + alpha；
+`ddisptri_t`（#48，CS:GO 新增）= **逐位移三角 1 字节标志位**
+（SURFACE 0x1 / WALKABLE 0x2 / BUILDABLE 0x4 / SURFPROP1 0x8 / SURFPROP2 0x10），
+**不是顶点索引**——位移三角索引由 (2^power+1)² 网格规则展开，无需存储。
 
 ### 3.10a Areas / AreaPortals（#20/#21）
 `darea_t{ int numareaportals, firstareaportal }`；
@@ -143,18 +148,21 @@ edgeNeighbours[4]（每边 2 子邻接）/ cornerNeighbours[4] / allowedVerts[10
 | 实体/几何 | Entities、Planes、Vertices、Edges、SurfaceEdges、Faces、OriginalFaces、Models、TextureData/Info/String* | — |
 | 树/PVS | Nodes、Leaves、Visibility、LeafFaces、LeafBrushes | Occlusion(9)、Areas/Portals(20-25) |
 | 碰撞 | Brushes、BrushSides | PhysDisplacements(28)、**PhysCollide(29)** |
-| 地形 | DisplacementInfo、DisplacementVertices | DispLightmap*(32/34) |
+| 地形 | DisplacementInfo、DisplacementVertices、DisplacementTriangles(48，读入未用) | DispLightmap*(32/34) |
 | 资源 | GameLump(头/sprp)、PakFile | XzipPakFile(57) |
 | 光照/贴花 | （读入未用：VertexNormals 30/31） | Lighting(8)、WorldLights(15)、Cubemaps(42)、Overlays(45)、Primitives(37-39)、HDR 系(51-56) |
 
-**统计：解析 21 个核心 lump**；未利用的主要是光照系、Portal 系、内嵌物理、贴花系、CS:GO 新增。
+**统计：`Bsp::read` 共读入 26 个 lump**（上表 ✅ 列全部），其中 3 个读入未用
+（VertexNormals 30/31、DisplacementTriangles 48），其余 23 个参与导出；
+未读入的主要是光照系、Portal 系、内嵌物理、贴花系、CS:GO 新增。
 
 ## 5. 版本差异要点
 
 1. lump #22-25 / #49 / #51-52 有版本别名，须按 BSP version + 游戏判断；
 2. CS:GO+ 的 LZMA 压缩 lump 与 XzipPakFile；
 3. StaticProp V4→V13+ 字段递增，须按 GameLump version 分支（vbsp 已处理常见版本）；
-4. v19 起 `dface_t` 固定 56B；`DisplacementTriangles`(#48) 为新版位移三角索引位置。
+4. v19 起 `dface_t` 固定 56B（含 smoothingGroups）；`DisplacementTriangles`(#48) 为
+   CS:GO 新增的逐位移三角标志位 lump（非三角索引）。
 
 ## 6. 参考
 

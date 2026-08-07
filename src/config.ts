@@ -65,7 +65,7 @@ export interface LightingConfig {
 export interface InputConfig {
   sensitivity: number;
   pitchLimit: number; // 度
-  /** Q/E 键 yaw 旋转速度（度/秒，turn bind），按住时视角水平旋转。默认 180 度/秒。 */
+  /** Q/E 键 yaw 旋转速度（度/秒，turn bind），按住时视角水平旋转。默认 210 度/秒。 */
   yawBindSpeed: number;
 }
 
