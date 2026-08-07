@@ -22,21 +22,23 @@
 
 ```
 主线程 (src/app.ts)
-  ├─ 输入采集 → SAB 输入槽（Atomics.add Int32 定点累加，绝不丢输入）
-  ├─ 三源决策（V_A → seq_pred → S_last）→ 零等待渲染
+  ├─ 输入采集 → SAB 输入槽（Atomics.add BigInt64 定点累加，绝不丢输入）
+  ├─ 预测渲染循环（rAF 无上限）：读权威基本信息（角度/速度/眼高/着地）→
+  │    位置速度积分外推（pos += vel×dt）+ 角度权威帧间 LERP → 渲染
+  ├─ respawn/teleport 位置突变事件归零（player-respawn 消息）
   ├─ ESC 弹出式面板（六分区）+ 速度面板 4Hz
-Worker-A (src/worker/main.ts)          Worker-B (src/worker/predictor-main.ts)
-  ├─ BspProcessor 解析/导出（WASM）     ├─ 同 wasm 模块第二 PhysWorld 实例
-  ├─ PhysWorld tick（Rust 物理）        ├─ Atomics.wait 热待机 + 2 子步 predict
-  ├─ 60Hz 自驱（Atomics.wait 16ms）     └─ 写 S_pred + 代际复合 seq
-  └─ 写权威区 + V_A++                  （noclip 下禁用）
+Worker-A (src/worker/main.ts)
+  ├─ BspProcessor 解析/导出（WASM）
+  ├─ PhysWorld tick（Rust 物理；固定步长累积器无步数封顶）
+  ├─ 自驱循环（Atomics.wait 16ms 兜底）
+  └─ 写权威基本信息（角度/速度/眼高/着地）+ V_A++（位置不同步）
 ```
 
 ### 1.3 文件清单
 
-**TS（16 文件）**：
+**TS（14 文件）**：
 ```
-src/app.ts                      # 主入口：双 Worker + 三源决策 + 面板 + 速度 8Hz
+src/app.ts                      # 主入口：单 Worker + 预测渲染 + 面板 + 速度 8Hz
 src/config.ts                   # 收敛配置（physics/input/player/hud）
 src/panel/panel-controller.ts   # ESC 桌面两栏面板（左导航+右设置）+ 按键录制
 src/input/input-bridge.ts       # 消息桥（config/respawn/teleport/death）
@@ -44,12 +46,10 @@ src/input/keyboard.ts           # 键盘映射（可配置 keymap）
 src/input/keymap.ts             # 键位配置：默认/持久化/录制标签
 src/input/mouse-buffer.ts       # 鼠标削平（复用原实现）
 src/input/pointer-lock.ts       # Pointer Lock（复用原实现）
-src/worker/main.ts              # Worker-A：wasm-init/load-bsp/60Hz 自驱/消息
-src/worker/predictor-main.ts    # Worker-B 独立入口（esbuild 打包用）
-src/worker/predictor-worker.ts  # Worker-B：热待机 + 2 子步预测 + 代际 seq
-src/worker/shared-state.ts      # SAB 512B：Int32 控制区 + BigInt64 输入槽 + 权威/预测双缓冲 + gen 代际
+src/worker/main.ts              # Worker-A：wasm-init/load-bsp/自驱循环/消息
+src/worker/shared-state.ts      # SAB 512B：控制区 + 输入槽 + 权威基本信息双缓冲（无位置）
 src/worker/worker-types.ts      # 消息协议 7+5 + KeyState/KEY_MASK
-src/renderer/renderer-main.ts   # GLB + 相机 + LOD/PVS + 三源决策渲染
+src/renderer/renderer-main.ts   # GLB + 相机 + LOD/PVS + 主线程预测渲染（积分+LERP）
 src/world/pvs-manager.ts        # PVS 位图剔除（复用原实现）
 src/world/types.ts              # PVS 类型
 src/wasm.d.ts                   # re-export pkg 真实类型
@@ -69,7 +69,7 @@ crates/wasm/src/phys/teleport.rs # TeleportManager（start-touch）+ 死亡判�
 
 **构建**：`package.json`（build:wasm/build:ts/build:dist/dev/check:api）、
 `tsconfig.json`、`serve.py`（COOP/COEP）、`scripts/check-wasm-api.mjs`（9+12 契约）、
-`scripts/build-dist.mjs`（WASM base64 + 双 Worker Blob 单文件）、`web/index.html`（极简 UI）。
+`scripts/build-dist.mjs`（app/worker.js + wasm 外置多文件）、`web/index.html`（极简 UI）。
 
 ### 1.4 已验证通过的构建链路
 
@@ -79,10 +79,10 @@ crates/wasm/src/phys/teleport.rs # TeleportManager（start-touch）+ 死亡判�
 | WASM 构建 | `wasm-pack build --release`（wasm-opt=false） | ✅ 9+12 API 生成 |
 | 契约校验 | `node scripts/check-wasm-api.mjs` | ✅ 通过 |
 | TS 类型检查 | `npx tsc --noEmit` | ✅ 0 error |
-| 主线程打包 | esbuild app.ts | ✅ 1,025 KB |
+| 主线程打包 | esbuild app.ts | ✅ 1,010 KB |
 | Worker-A 打包 | esbuild worker/main.ts | ✅ 39 KB |
-| Worker-B 打包 | esbuild predictor-main.ts | ✅ 27 KB |
-| dist（多文件） | `node scripts/build-dist.mjs`（app/worker/predictor.js + wasm 外置） | ✅ 2.5 MB / 5 文件 |
+| ~~Worker-B 打包~~ | ~~esbuild predictor-main.ts~~ | 🗑 已删除（v4 架构） |
+| dist（多文件） | `node scripts/build-dist.mjs`（app/worker.js + wasm 外置） | ✅ 2.45 MB / 4 文件 |
 
 ### 1.4b 部署与文档布局（2026-08-07）
 
@@ -123,7 +123,7 @@ OK predict: y=99.90 velY=-12.50
 
 | # | 项 | 说明 | 优先级 |
 |---|---|---|---|
-| U1 | **浏览器实测** | 打开 `http://localhost:8090/web/index.html` 加载 `maps/surf_666.bsp`：验证面板状态机（初始常驻→加载隐藏→ESC 弹出→关闭锁定）、三源决策渲染、tickRate 48/64/128 三档、速度面板三模式、noclip 切换 | **高** |
+| U1 | **浏览器实测** | 打开 `http://localhost:8090/web/index.html` 加载 `maps/surf_666.bsp`：验证面板状态机（初始常驻→加载隐藏→ESC 弹出→关闭锁定）、主线程预测渲染（位置积分 + 角度 LERP）、tickRate 48/64/128 三档、速度面板三模式、noclip 切换 | **高** |
 | U2 | **Rust 物理 golden 差分** | ✅ 冒烟级已通过（重力/落地/跳跃/回落/predict，见 §1.5）；❌ **完整差分未做**——用原项目 TS 物理跑 surf_666 固定输入序列生成逐 tick pos/vel/yaw golden，game wasm `PhysWorld.tick` 逐 tick 对比（容差 <1e-6），验证移植语义逐位一致 | **高** |
 | U3 | **手感验证** | 高速滑行无穿墙/卡停；144Hz 屏权威间隙由预测填充无"停-动-停" | 高 |
 | U4 | **dist 启动方式** | ✅ **已定案（2026-08-07）**：file:// 直接双击**不可行**——Chrome 非跨域隔离环境禁用 `SharedArrayBuffer`（物理双 Worker 硬依赖，COOP/COEP 头无法在 file:// 设置，CDP 实测确认）。交付方案：`game/play.cmd` 一键起本地服务器 + 自动开浏览器（http://localhost:8137/dist/index.html）；file:// 双击时页面显示引导卡片（`#fatalOverlay`）说明原因与两种启动方式。CDP 实测：http 加载 dist 完全可用（SAB✅ / crossOriginIsolated✅ / canvas 初始化✅ / 双 Worker✅） | 中 |

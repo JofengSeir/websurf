@@ -239,13 +239,13 @@ export class RendererMain {
     const dt = this.lastTickMs === 0 ? 0 : Math.min((now - this.lastTickMs) / 1000, 0.1);
     this.lastTickMs = now;
 
-    // 读权威基本信息（角度/速度/眼高/着地）
+    // 读权威基本信息（角度/速度/眼高/着地；Rust 输出为度 → 存弧度）
     const auth = this.shared.readAuthoritative();
     if (auth && auth.va !== this.lastVa) {
       this.lastVa = auth.va;
       const s = auth.state;
       if (this.curAuth) this.prevAuth = { ...this.curAuth, timeMs: now };
-      this.curAuth = { yaw: s.yaw, pitch: s.pitch, timeMs: now };
+      this.curAuth = { yaw: s.yaw * DEG2RAD, pitch: s.pitch * DEG2RAD, timeMs: now };
       this.vel = s.vel;
       this.eyeHeight = s.eyeHeight;
       this.onGround = s.onGround;

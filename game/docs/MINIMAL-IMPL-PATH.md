@@ -1,13 +1,20 @@
-# WebSurf 最小化实现路径 v3（物理下沉 WASM + ESC 弹出式基本面板）
+# WebSurf 最小化实现路径 v4（物理下沉 WASM + 主线程位置预测）
 
-> 编制日期：2026-08-07（v3：整合 v2 物理下沉评审 + 面板保留评审）。
+> 编制日期：2026-08-07（v4：**删除 Worker-B 预测，预测移入主线程渲染循环**，权威只同步角度/速度）。
 > 依据 `docs/project-overview.md`、`docs/bsp-architecture.md`、`docs/bsp-export-status.md`、
-> `docs/项目时序图.md`，已对照 `src/`（79 .ts / 11,844 行）、`crates/wasm/src/`（30 .rs）核实。
+> `docs/项目时序图.md`（v4 版），已对照 `src/`（79 .ts / 11,844 行）、`crates/wasm/src/`（30 .rs）核实。
 >
-> **v3 相对 v2 的变化**：基本面板**保留但不常驻**——初始化常驻（必须加载地图）、
-> 锁定后 ESC 弹出、游玩中隐藏。面板收敛为六块：物理参数（含 tickRate，联动 Worker-A/B）、
+> **v4 相对 v3 的变化**（2026-08-07 架构决策）：
+> 1. **删除 Worker-B 预测预计算**——双 Worker 同步复杂且实测易卡；预测改在主线程渲染循环内
+>    与渲染同频进行（rAF 内位置速度积分外推 + 角度 LERP）
+> 2. **权威只同步基本信息**——SAB 权威区仅含 yaw/pitch/vel/eyeHeight/onGround，
+>    **位置不同步**（渲染帧通常高于物理帧，位置由主线程按速度积分，接受无碰撞误差）
+> 3. **物理不设上限**——固定步长累积器无步数封顶（低帧率不丢物理时间）
+> 4. respawn/teleport 位置突变事件回传一次（player-respawn 消息），主线程预测归零
+>
+> **v3 相对 v2 的变化**（保留记录）：基本面板保留但不常驻——初始化常驻（必须加载地图）、
+> 锁定后 ESC 弹出、游玩中隐藏。面板收敛为六块：物理参数（含 tickRate）、
 > 人物体型、操作（灵敏度/Q-E）、准星、速度面板（0.25s 低频）、自由视角切换。
-> 其余 v2 结论（物理栈下沉 WASM、通讯效率决策、scene-data -95%）不变。
 >
 > **本文为设计蓝图**。实现后的三方差异对照（时序图 / 蓝图 / 实现现状）见
 > `IMPLEMENTATION-STATUS.md` §3——其中 D1-D6 为本蓝图在实现时的偏离
@@ -58,7 +65,7 @@ scene-data 从「GLB + 几十 MB JSON」瘦身为「GLB + spawn/pvs 小 JSON」�
 
 | 分区 | 控件 | 走线 | 备注 |
 |---|---|---|---|
-| **物理** | tickRate 滑块 48–128（默认 64） | config → Worker-A（驱动步长）+ **Worker-B（预测子步适配）** | v3 重点，见 2.4 |
+| **物理** | tickRate 滑块 48–128（默认 64） | config → Worker-A（驱动步长） | 见 2.4 |
 | | autobhop 开关 | config → wasm `set_params` | surf 核心玩法 |
 | | gravity / jumpSpeed / accelerate / airAccel / friction（5 个数值滑块） | config → wasm `set_params` | 手感核心，来源 badge 简化版（默认/手动） |
 | **体型** | hull 半宽 / 站高 / 蹲高 + 一键恢复 | config → wasm `set_hull` | 恢复默认按钮 |
@@ -83,31 +90,27 @@ scene-data 从「GLB + 几十 MB JSON」瘦身为「GLB + spawn/pvs 小 JSON」�
   - 综合：`|v| = sqrt(v.x²+v.y²+v.z²)`（含竖向的合速度）
 - 显示位置：HUD 角落（与 FPS/位置同区），面板内切换模式即时生效（主线程本地状态）。
 
-### 2.4 tickRate 变更的 Worker-A/B 时序适配（v3 关键）
+### 2.4 tickRate 变更的时序适配（v4 简化）
 
-时序图要求权威物理固定节奏 + Worker-B 预测为其服务。tickRate 可调后：
+权威物理固定步长，tickRate 可调后：
 
 ```
 面板 tickRate 48–128
   └─ config 消息 → Worker-A：fixedDt = 1/tickRate（JS 驱动层更新，wasm tick 只吃 dt，不感知速率）
-  └─ config 消息 → Worker-B：预测子步 dt_pred = 1/tickRate（2 子步各推一个权威步长）
   └─ Worker-A 防穿墙上限随步长缩放：MAX_INPUT_PER_STEP ∝ dt（快 tick 每步输入上限同比缩小）
-  └─ Worker-A 时钟：EMA 滤波保持（平滑墙钟抖动），固定步长由 tickRate 决定
-  └─ 切换瞬间：清 moveAccumulator + 清 V_A 抖动窗口 + 主线程清 seq_pred（防新旧节奏错配）
+  └─ 渲染侧位置预测使用权威速度（单位 u/s），与 tickRate 无关，无需适配
 ```
 
-> 关键点：**tickRate 只影响"步长"，不影响三源决策协议**——权威区/预测区/SAB 布局、
-> 代际复合序列号、清零语义全部不变。Worker-A 的 EMA 时钟与 tickRate 解耦
-> （EMA 平滑的是 wall-clock dt，固定步长是 1/tickRate）。
+> 关键点：**tickRate 只影响"步长"**——渲染预测（位置积分 + 角度 LERP）与步长解耦，
+> 权威速度本身已是每秒单位，任何 tickRate 下外推一致。
 
-### 2.5 自由视角（noclip）在双 Worker 架构下的处理
+### 2.5 自由视角（noclip）的处理
 
 ```
 noclip 模式（调试/观赏用）：
-  - Worker-A：JS 侧维护 noclipView（yaw/pitch/pos），每 tick 自算位移，写 SAB 权威区
-    （不经 wasm tick——noclip 无碰撞，纯 TS 几行，避免给 wasm 加调试分支）
-  - Worker-B：noclip 下【禁用预测】——自由视角无碰撞、运动不可预测，预测无意义
-  - 模式切换（noclip ↔ physics）：清 V_A + 清 seq_pred + 主线程回退一帧（防闪跳）
+  - Worker-A：Rust noclip_step（无碰撞，20 行纯数学），与 physics 同一状态机
+  - 主线程预测：noclip 下位置同样按权威速度积分（noclip 速度由面板可调）
+  - 模式切换（noclip ↔ physics）：respawn 语义 → player-respawn 事件回传位置归零
   - 双向继承：physics→noclip 继承位置朝向；noclip→physics 从当前位置重新起跑（清速度着地）
 ```
 
@@ -171,22 +174,24 @@ crates/wasm/src/phys/
 API：`build_world()` / `tick(dt, dx, dy, keys)` / `predict(dt, dx, dy, keys)` /
 `respawn()` / `teleport_to()` / `set_death_y()` / **`set_params(json)` / `set_hull(json)`**（新增，面板用）。
 
-### 4.2 双 Worker 世界数据
+### 4.2 单 Worker 世界数据 + 主线程预测
 
-Worker-A / Worker-B 各持同一 wasm 模块的独立 `PhysWorld` 实例（BSP bytes 主线程单次转发，
-Rust 内 build_world 毫秒级）。Worker-B 热待机 + 2 子步 predict + 代际复合序列号，同时序图。
+Worker-A 持 wasm 模块的 `PhysWorld` 实例（BSP bytes 主线程单次转发，Rust 内 build_world 毫秒级）。
+预测在主线程渲染循环内进行（rAF 同频）：
+- 位置：`pos += vel × dt`（权威速度线性积分外推，无碰撞，接受误差）
+- 角度：权威帧间 LERP（最短角距）
+- respawn/teleport：`player-respawn` 消息回传位置归零
 
-### 4.3 SAB 布局与三源决策（不变）
+### 4.3 SAB 布局（v4：权威基本信息，无位置）
 
 | 偏移 | 区 | 内容 | 内存序 |
 |---|---|---|---|
-| 0–63 | V_A | 权威版本号 + 脏标志 | release 写 / acquire 读 |
-| 64–127 | 输入槽 | dxAcc/dyAcc/keys/frameStamp | 主线程 add；Worker CAS 消耗 |
-| 128–191 | 权威状态 S | pos/yaw/pitch/vel/onGround/eyeHeight/timeMs | Worker-A release 写 + V_A++ |
-| 192–255 | 预测区 | S_pred + seq_pred（(gen<<16)\|counter） | Worker-B release 写；主线程清零 |
+| 0–63 | 控制区 | V_A + gen_A + keys + onGround | release 写 / acquire 读 |
+| 64–127 | 输入槽 | dxAcc/dyAcc（BigInt64 原子累加） | 主线程 add；Worker exchange 消耗 |
+| 128–415 | 权威基本信息双缓冲 | yaw/pitch/vel/eyeHeight（每槽 7 值 ×1000/×100 定点） | Worker-A release 写 + V_A++ |
 
-主线程三源决策：权威就绪→S_new+清 seq_pred+notify B；预测新→S_pred；否则 S_last。零等待渲染。
-**速度面板从 S_used.vel 直接取（4Hz 采样），零消息。**
+主线程渲染帧：V_A 刷新 → 更新角度基线/速度 → 位置积分外推 → 渲染。零等待。
+**速度面板从权威 vel 直接取（4Hz 采样），零消息。**
 
 ---
 
@@ -216,11 +221,11 @@ Rust 内 build_world 毫秒级）。Worker-B 热待机 + 2 子步 predict + 代�
 - [ ] noclip 恢复：JS 侧自由视角 + Worker-B 禁用预测（§2.5）；
 - [ ] **验证**：加载提速、手感一致（差分已保证）、noclip↔physics 切换无闪跳。
 
-### Phase 4 — Worker-B 预测 + 三源决策（1–2 天）
-- [ ] predictor-worker.ts：同模块第二实例 + 2 子步 predict + 代际复合 seq；
-- [ ] app.ts 双 Worker（dev ESM / dist Blob，`__VBSP_PREDICTOR_JS__`）；
-- [ ] 完整三源决策 + 预测清零 + 基线 notify；
-- [ ] **验证**：144Hz 屏权威间隙由预测填充；tickRate 48/64/128 三档手感与预测均正常。
+### Phase 4 — 主线程预测渲染（1 天）
+- [ ] 渲染循环内：读权威基本信息（角度/速度/眼高/着地）→ 位置速度积分外推 + 角度 LERP；
+- [ ] 位置突变事件（respawn/teleport）回传归零；初始位置 = scene-data spawn；
+- [ ] **验证**：144Hz 屏权威帧间无停等/闪跳；角度无错乱（Rust 度为弧度转换正确）；
+      穿墙/漂移在可接受范围（位置无碰撞积分的既定取舍）。
 
 ### Phase 5 — WASM 导出瘦身 + 契约收缩（1 天）
 - [ ] lib.rs 删未用导出 + 薄壳常量；删 debug_probe.rs；
@@ -236,18 +241,17 @@ Rust 内 build_world 毫秒级）。Worker-B 热待机 + 2 子步 predict + 代�
 ## 6. 目标文件结构（v3）
 
 ```
-src/                                          # ≈ 23 文件 ≈ 4,300 行
-  app.ts                    # ~520：面板状态机 + 三源决策渲染循环 + 速度面板 4Hz
+src/                                          # ≈ 22 文件 ≈ 4,100 行
+  app.ts                    # ~520：面板状态机 + 预测渲染循环 + 速度面板 4Hz
   config.ts                 # ~90：收敛段（physics/tickRate/input/hud 精简）
-  panel/                    # panel-controller.ts（显示状态机 + 六分区绑定，~250，新增）
+  panel/                    # panel-controller.ts（显示状态机 + 六分区绑定，~250）
   input/                    # pointer-lock / keyboard / mouse-buffer / input-bridge（~530）
-  worker/                   # main.ts / physics-worker.ts / predictor-worker.ts(新)
-                            # shared-state.ts（SAB 三区）/ worker-types.ts（~160）
-  renderer/                 # renderer-main.ts / camera-controller.ts / lod-manager.ts
+  worker/                   # main.ts（权威物理）/ shared-state.ts（SAB 双区）/ worker-types.ts
+  renderer/                 # renderer-main.ts（主线程预测 + LERP）/ camera-controller.ts / lod-manager.ts
   world/                    # pvs-manager.ts / types.ts
 crates/wasm/src/
-  lib.rs                    # 导出 9 API + phys 9 API
-  phys/                     # mod.rs / world.rs / player.rs / teleport.rs（新增 ≈2,000）
+  lib.rs                    # 导出 9 API + phys 12 API
+  phys/                     # mod.rs / world.rs / player.rs / teleport.rs（≈2,000）
   vbsp/ bsp_to_gltf_core/ model_integrator/ pakfile_models.rs phyfile.rs texture_utils/
 web/index.html              # 极简：加载区 + canvas + ESC 面板覆盖层 + 极简 HUD
 ```
