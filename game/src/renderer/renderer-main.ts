@@ -1,12 +1,11 @@
 /**
- * 主线程渲染器（最小化版）— 三源决策零等待渲染。
+ * 主线程渲染器（最小化版）— 主线程预测渲染。
  *
- * 每帧：
- * 1. 三源决策：权威就绪（V_A 变化）→ S_new（并清预测 seq）；否则预测新 → S_pred；否则 S_last
- * 2. 相机同步（pos + eyeHeight）
- * 3. LOD/PVS 剔除 → 渲染
- *
- * 无 LERP/外推（被 Worker-B 预测取代）；无 lightmap/雾/碰撞可视化/准星射线。
+ * 架构（2026-08-07）：预测移入主线程，与渲染同频（rAF）。
+ * - 权威 Worker-A 只同步「角度/速度/眼高/着地」基本信息（无位置）
+ * - 主线程每帧：按权威速度对位置做积分外推（渲染帧 > 物理帧，填补空隙）；
+ *   角度在权威帧间 LERP 插值
+ * - 无 lightmap/雾/碰撞可视化/准星射线。
  */
 
 import * as THREE from 'three';
@@ -14,7 +13,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
-import type { ShmState, PhysState } from '../worker/shared-state.js';
+import type { ShmState } from '../worker/shared-state.js';
 import { PvsManager } from '../world/pvs-manager.js';
 
 const FOV = 75;
@@ -34,14 +33,19 @@ export class RendererMain {
   private rafId = 0;
   private running = false;
 
-  // ── 三源决策状态 ───────────────────────────────────────────
+  // ── 主线程预测状态 ─────────────────────────────────────────
+  /** 主线程积分位置（初始 = 出生点；权威不同步位置）。 */
+  private pos = { x: 0, y: 0, z: 0 };
+  /** 上次权威帧时间戳（角度 LERP 用）。 */
+  private prevAuth: { yaw: number; pitch: number; timeMs: number } | null = null;
+  private curAuth: { yaw: number; pitch: number; timeMs: number } | null = null;
+  /** 最近权威速度/眼高/着地（位置外推用）。 */
+  private vel = { x: 0, y: 0, z: 0 };
+  private eyeHeight = 54;
+  private onGround = false;
   private lastVa = -1;
-  private lastSeqPred = 0;
-  private lastState: PhysState | null = null;
-  /** 当前权威代际（V3 预测代际校验基准）。 */
-  private curGen = 0;
-  /** 连续消费预测帧数（V9 防发散，≤3）。 */
-  private continuousPred = 0;
+  /** 渲染帧推进（dt 上限防异常）。 */
+  private lastTickMs = 0;
   /** mesh → { center, radius }（LOD 用）。 */
   private lodItems: Array<{ mesh: THREE.Mesh; center: THREE.Vector3; radius: number; cluster: number }> = [];
   /** 剔除距离（场景加载后校准）。 */
@@ -158,10 +162,19 @@ export class RendererMain {
     this.pvsManager = null;
     this.lodItems.length = 0;
     this.lastVa = -1;
-    this.lastSeqPred = 0;
-    this.lastState = null;
-    this.curGen = 0;
-    this.continuousPred = 0;
+    this.prevAuth = null;
+    this.curAuth = null;
+    this.vel = { x: 0, y: 0, z: 0 };
+    this.eyeHeight = 54;
+    this.onGround = false;
+  }
+
+  /** 设置初始位置/朝向（scene-data 出生点；权威不同步位置，主线程从此积分）。 */
+  setInitialState(spawn: { x: number; y: number; z: number; yawDeg: number }): void {
+    this.pos = { x: spawn.x, y: spawn.y, z: spawn.z };
+    const yawRad = spawn.yawDeg * DEG2RAD;
+    this.prevAuth = { yaw: yawRad, pitch: 0, timeMs: performance.now() };
+    this.curAuth = { yaw: yawRad, pitch: 0, timeMs: performance.now() };
   }
 
   private disposeObject(obj: THREE.Object3D): void {
@@ -186,12 +199,10 @@ export class RendererMain {
     this.rafId = requestAnimationFrame(this.boundTick);
     if (!this.renderer || !this.scene || !this.camera) return;
 
-    // 1. 三源决策
-    const state = this.decideState(now);
-    if (state) {
-      this.camera.rotation.set(state.pitch * DEG2RAD, state.yaw * DEG2RAD, 0, 'YXZ');
-      this.camera.position.set(state.pos.x, state.pos.y + state.eyeHeight, state.pos.z);
-    }
+    // 1. 主线程预测：权威角度/速度校准 + 位置速度积分（渲染帧 > 物理帧，填补空隙）
+    this.predict(now);
+    this.camera.rotation.set(this.curPitchRad(), this.curYawRad(), 0, 'YXZ');
+    this.camera.position.set(this.pos.x, this.pos.y + this.eyeHeight, this.pos.z);
 
     const camPos = this.camera.position;
 
@@ -219,41 +230,55 @@ export class RendererMain {
   }
 
   /**
-   * 三源决策（时序图）：
-   * - V_A 已刷新 → 权威 S_new，清预测 seq，更新本地记录
-   * - 否则预测 seq 有效且新 → S_pred
-   * - 否则回退 S_last
+   * 主线程预测（每渲染帧调用）：
+   * - 权威新帧（V_A 变化）→ 更新速度/眼高/着地，角度插值基线推进（prev←cur, cur←新）
+   * - 位置 = 上次位置 + 权威速度 × 渲染帧 dt（线性积分，无碰撞，接受误差）
    */
-  /**
-   * 三源决策（终版，对齐审查 V2/V3/V9）：
-   * - V_A 已刷新 → 权威 S_new（双缓冲 (V_A-1)&1 无撕裂），重置连续预测计数
-   * - 否则 → 预测：仅当 gen_P == 当前 gen_A（代际校验，V3）且连续预测 ≤ 3 帧（V9）
-   * - 否则 → 回退 S_last
-   */
-  private decideState(now: number): PhysState | null {
+  private predict(now: number): void {
+    // 渲染帧 dt（上限 0.1s 防异常）
+    const dt = this.lastTickMs === 0 ? 0 : Math.min((now - this.lastTickMs) / 1000, 0.1);
+    this.lastTickMs = now;
+
+    // 读权威基本信息（角度/速度/眼高/着地）
     const auth = this.shared.readAuthoritative();
     if (auth && auth.va !== this.lastVa) {
       this.lastVa = auth.va;
-      this.curGen = auth.gen;
-      this.continuousPred = 0; // V9：权威就绪重置连续预测计数
-      this.lastSeqPred = 0;
-      this.lastState = { ...auth.state, timeMs: now };
-      // 权威就绪 → notify Worker-B（时序图：更新基线 + notify，不操作预测序列号）
-      this.shared.notifyPrediction();
-      return this.lastState;
+      const s = auth.state;
+      if (this.curAuth) this.prevAuth = { ...this.curAuth, timeMs: now };
+      this.curAuth = { yaw: s.yaw, pitch: s.pitch, timeMs: now };
+      this.vel = s.vel;
+      this.eyeHeight = s.eyeHeight;
+      this.onGround = s.onGround;
     }
-    // 路径 B：尝试消费预测（代际校验 V3 + 连续预测限帧 V9）
-    this.continuousPred++;
-    const pred = this.shared.readPredicted();
-    const genOk = pred && pred.gen === this.curGen; // V3：仅接受当前代际的预测
-    if (pred && pred.seq !== 0 && pred.seq > this.lastSeqPred && genOk && this.continuousPred <= 3) {
-      this.lastSeqPred = pred.seq;
-      this.lastState = { ...pred.state, timeMs: now };
-      return this.lastState;
-    }
-    // 预测无效/代际不匹配/连续超限 → 回退 S_last 并重置连续计数（V9）
-    this.continuousPred = 0;
-    return this.lastState;
+
+    // 位置外推：pos += vel * dt（权威不同步位置，主线程积分）
+    this.pos.x += this.vel.x * dt;
+    this.pos.y += this.vel.y * dt;
+    this.pos.z += this.vel.z * dt;
+  }
+
+  /** 当前渲染用 yaw（弧度）：权威帧间 LERP。 */
+  private curYawRad(): number {
+    if (!this.prevAuth || !this.curAuth) return this.curAuth?.yaw ?? 0;
+    const span = this.curAuth.timeMs - this.prevAuth.timeMs;
+    const alpha = span > 0 ? Math.min(Math.max((performance.now() - this.prevAuth.timeMs) / span, 0), 1) : 1;
+    return this.lerpAngle(this.prevAuth.yaw, this.curAuth.yaw, alpha);
+  }
+
+  /** 当前渲染用 pitch（弧度）：权威帧间 LERP。 */
+  private curPitchRad(): number {
+    if (!this.prevAuth || !this.curAuth) return this.curAuth?.pitch ?? 0;
+    const span = this.curAuth.timeMs - this.prevAuth.timeMs;
+    const alpha = span > 0 ? Math.min(Math.max((performance.now() - this.prevAuth.timeMs) / span, 0), 1) : 1;
+    return this.prevAuth.pitch + (this.curAuth.pitch - this.prevAuth.pitch) * alpha;
+  }
+
+  /** 最短角距插值。 */
+  private lerpAngle(a: number, b: number, t: number): number {
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return a + d * t;
   }
 
   resize(width: number, height: number): void {

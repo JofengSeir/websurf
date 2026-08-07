@@ -110,26 +110,3 @@ export function applyConfigPatch(
   if (!target || typeof target !== 'object') return;
   Object.assign(target, patch);
 }
-
-/** 构造 Rust `set_params` 兼容的全量参数对象（Worker-A 权威与 Worker-B 预测共用）。 */
-export function buildPhysicsParams(config: RuntimeConfig): Record<string, unknown> {
-  const p = config.physics;
-  return {
-    gravity: p.gravity,
-    accelerate: p.accelerate,
-    friction: p.friction,
-    stop_speed: p.stopSpeed,
-    jump_height: (p.jumpSpeed * p.jumpSpeed) / (2 * p.gravity),
-    air_accelerate: p.airAccel,
-    run_speed: p.maxSpeed,
-    walk_speed: p.walkSpeed,
-    crouch_speed: p.crouchSpeed,
-    autobhop: p.autobhop,
-    bhop_speed_clamp: p.bhopSpeedClamp,
-    no_prestrafe: p.noPrestrafe,
-    sensitivity: config.input.sensitivity,
-    yaw_bind_speed: config.input.yawBindSpeed,
-    noclip_speed: config.input.noclipSpeed,
-    teleport_gate_ticks: p.teleportGateTicks,
-  };
-}

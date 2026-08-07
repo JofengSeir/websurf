@@ -1,31 +1,27 @@
 /**
- * 共享状态层（终版）— 对齐 `docs/项目时序图.md` 终版审查结论。
+ * 共享状态层 — 权威角度/速度 + 主线程位置预测。
+ *
+ * 架构（2026-08-07）：预测移入主线程渲染循环，删除 Worker-B。
+ * - Worker-A（权威物理）固定步长跑完整物理，但只把「角度、速度、眼高、
+ *   着地」等基本信息写入 SAB——**位置不同步**（渲染帧通常高于物理帧，
+ *   位置由主线程按速度积分外推，接受无碰撞积分误差）
  *
  * SAB 布局（512B）：
  *   Int32 控制区（字节 0-63）：
- *     [0]  V_A      权威版本号（Worker-A release 递增；主线程 acquire 读）
- *     [1]  gen_A    权威代际（Worker-A 每帧写 = V_A 高位，供预测代际校验）
- *     [2]  seq_P    预测序列号（代际复合 (gen<<16)|counter；Worker-B 写）
- *     [3]  gen_P    预测代际（Worker-B 发布时 = gen_A 快照）
- *     [4]  keys     输入位掩码（主线程 store / Worker load）
- *     [5]  A_GROUND 权威 onGround（0/1）
- *     [6]  P_GROUND 预测 onGround（0/1）
- *     [7-15] 保留
- *   BigInt64 输入槽（字节 64-127，index 8-15）：
- *     [8] dxAcc  [9] dyAcc  —— BigInt64 原子累加（V6 防溢出，永不 wrap）
- *   BigInt64 状态双缓冲（字节 128-415，index 16-51）：
- *     S_A[0] = 16..24（9 值）  S_A[1] = 25..33（9 值）   权威双缓冲（V2 防撕裂）
- *     S_P[0] = 34..42（9 值）  S_P[1] = 43..51（9 值）   预测双缓冲
- *   每状态 9 值：posX/Y/Z(×100) yaw(×1000) pitch(×1000) velX/Y/Z(×100) eyeHeight(×100)
+ *     [0] V_A      权威版本号（Worker-A release 递增；主线程 acquire 读）
+ *     [1] gen_A    权威代际（= V_A）
+ *     [2] keys     输入位掩码（主线程 store / Worker load）
+ *     [3] A_GROUND 权威 onGround（0/1）
+ *     [4-15] 保留
+ *   BigInt64 输入槽（字节 64-127，index 8-9）：
+ *     [8] dxAcc  [9] dyAcc  —— BigInt64 原子累加（防溢出，永不 wrap）
+ *   BigInt64 权威状态双缓冲（字节 128-415，index 16-33）：
+ *     S_A[0] = 16..22（7 值）  S_A[1] = 25..31（7 值）
+ *   每状态 7 值：yaw(×1000) pitch(×1000) velX/Y/Z(×100) eyeHeight(×100) + 1 保留
  *
- * 版本号 → 双缓冲槽选择：
- * - 权威：Worker-A 写 S_A[V_A&1]，V_A++；主线程读 S_A[(V_A-1)&1]（写者已离开的槽）
- * - 预测：Worker-B 写 S_P[seq&1]，seq_P++；主线程读 S_P[(seq-1)&1]
- *
- * 代际校验（V3，废弃主线程清零）：
- * - Worker-B 发布预测携带 gen_P = gen_A 快照
- * - 主线程仅接受 gen_P == 当前 gen_A 的预测；不匹配 → 回退权威（不操作序列号）
- * - 主线程不再 store(seq_P, 0)（避免覆盖 Worker-B 新预测的竞争）
+ * 读写协议：
+ * - Worker-A 写空闲槽 S_A[V_A&1] → release 递增 V_A + gen_A
+ * - 主线程读 S_A[(V_A-1)&1]（写者已离开的槽，无撕裂）
  */
 
 import type { KeyState } from './worker-types.js';
@@ -62,31 +58,24 @@ export function keysToMask(keys: KeyState): number {
 }
 
 // ── SAB 布局 ─────────────────────────────────────────────────
-// Int32 控制区
 const I_V_A = 0;
 const I_GEN_A = 1;
-const I_SEQ_P = 2;
-const I_GEN_P = 3;
-const I_KEYS = 4;
-const I_A_GROUND = 5;
-const I_P_GROUND = 6;
+const I_KEYS = 2;
+const I_A_GROUND = 3;
 
-// BigInt64 输入槽（index 8-9）
+// BigInt64 输入槽
 const B_DX_ACC = 8;
 const B_DY_ACC = 9;
 
-// BigInt64 状态双缓冲基址
-const B_A0 = 16; // 权威 S_A[0]
-const B_A1 = 25; // 权威 S_A[1]
-const B_P0 = 34; // 预测 S_P[0]
-const B_P1 = 43; // 预测 S_P[1]
+// BigInt64 权威状态双缓冲基址（每槽 7 值）
+const B_A0 = 16;
+const B_A1 = 25;
 
-/** SAB 总字节（512B，双缓冲 + BigInt64 输入）。 */
+/** SAB 总字节（512B 布局，实际使用至 416B）。 */
 export const SHARED_BUFFER_SIZE = 512;
 
-/** 状态快照（主线程三源决策产物）。 */
-export interface PhysState {
-  pos: { x: number; y: number; z: number };
+/** 权威同步的基本信息（角度/速度/眼高/着地；位置由主线程预测积分）。 */
+export interface AuthState {
   yaw: number;
   pitch: number;
   vel: { x: number; y: number; z: number };
@@ -116,87 +105,43 @@ export class ShmState {
     this.b64 = new BigInt64Array(buffer);
   }
 
-  /** 暴露底层 SAB（Worker-B 热待机 Atomics.wait 用）。 */
-  bufferOf(): SharedArrayBuffer {
-    return this.buffer;
-  }
-
-  /** notify 预测唤醒（主线程权威就绪后调用；目标 = V_A 槽）。 */
-  notifyPrediction(): void {
-    Atomics.notify(this.i32, I_V_A, 1);
-  }
-
   // ── 主线程侧 ───────────────────────────────────────────────
 
-  /** 写入鼠标增量（BigInt64 原子累加，V6 永不溢出）+ 键位。 */
+  /** 写入鼠标增量（BigInt64 原子累加）+ 键位。 */
   addInput(dx: number, dy: number, keysMask: number): void {
     const dxFixed = BigInt(Math.round(dx * 1000));
     const dyFixed = BigInt(Math.round(dy * 1000));
     if (dxFixed !== 0n) Atomics.add(this.b64, B_DX_ACC, dxFixed);
     if (dyFixed !== 0n) Atomics.add(this.b64, B_DY_ACC, dyFixed);
-    // 无条件写 keysMask（0 也写）：反映"当前按键状态"，松手即清零，
-    // 避免残留旧位导致 Worker 一直前进（松手停不下来）
+    // 无条件写 keysMask（0 也写）：反映"当前按键状态"，松手即清零
     Atomics.store(this.i32, I_KEYS, keysMask);
   }
 
   /**
-   * 三源决策路径 A：读权威（双缓冲槽 (V_A-1)&1，V2 无撕裂）。
+   * 读权威基本信息（双缓冲槽 (V_A-1)&1，无撕裂）。
    * @returns { state, va, gen } 权威状态 + 版本号 + 代际。
    */
-  readAuthoritative(): { state: PhysState; va: number; gen: number } | null {
+  readAuthoritative(): { state: AuthState; va: number; gen: number } | null {
     const va = Atomics.load(this.i32, I_V_A);
     if (va === 0) return null;
     const slot = (va - 1) & 1; // 写者已离开的槽
-    const state = this.readState(slot === 0 ? B_A0 : B_A1, slot === 0 ? I_A_GROUND : I_A_GROUND);
-    return { state, va, gen: Atomics.load(this.i32, I_GEN_A) };
-  }
-
-  /**
-   * 三源决策路径 B：读预测（双缓冲槽 (seq-1)&1，V2 无撕裂）。
-   * @returns { state, seq, gen } 预测状态 + 序列号 + 预测代际。
-   */
-  readPredicted(): { state: PhysState; seq: number; gen: number } | null {
-    const seq = Atomics.load(this.i32, I_SEQ_P);
-    if (seq === 0) return null;
-    const slot = (seq - 1) & 1;
-    const state = this.readState(slot === 0 ? B_P0 : B_P1, I_P_GROUND);
-    return { state, seq, gen: Atomics.load(this.i32, I_GEN_P) };
-  }
-
-  /** 当前权威代际（V3：主线程校验预测 gen_P == gen_A 用）。 */
-  getGen(): number {
-    return Atomics.load(this.i32, I_GEN_A);
-  }
-
-  /**
-   * 废弃（V3）：不再由主线程清零预测序列号——改为代际校验。
-   * 保留方法仅为兼容调用点，内部无操作。
-   * @deprecated 代际校验已取代清零，调用处应改用 getGen() 校验。
-   */
-  clearPrediction(): void {
-    // V3 修复：主线程清零会与 Worker-B 写新预测竞争，废弃。
-  }
-
-  private readState(base: number, groundIdx: number): PhysState {
     const b = this.b64;
-    const i = this.i32;
-    // 注意：BigInt 除法是整数除法（截断），定点解码必须用 Number 转换后除
+    const base = slot === 0 ? B_A0 : B_A1;
     return {
-      pos: {
-        x: Number(b[base]) / 100,
-        y: Number(b[base + 1]) / 100,
-        z: Number(b[base + 2]) / 100,
+      state: {
+        yaw: Number(b[base]) / 1000,
+        pitch: Number(b[base + 1]) / 1000,
+        vel: {
+          x: Number(b[base + 2]) / 100,
+          y: Number(b[base + 3]) / 100,
+          z: Number(b[base + 4]) / 100,
+        },
+        eyeHeight: Number(b[base + 5]) / 100,
+        onGround: this.i32[I_A_GROUND] === 1,
+        timeMs: 0,
       },
-      yaw: Number(b[base + 3]) / 1000,
-      pitch: Number(b[base + 4]) / 1000,
-      vel: {
-        x: Number(b[base + 5]) / 100,
-        y: Number(b[base + 6]) / 100,
-        z: Number(b[base + 7]) / 100,
-      },
-      onGround: i[groundIdx] === 1,
-      eyeHeight: Number(b[base + 8]) / 100,
-      timeMs: 0,
+      va,
+      gen: Atomics.load(this.i32, I_GEN_A),
     };
   }
 
@@ -221,74 +166,25 @@ export class ShmState {
   }
 
   /**
-   * 只读输入（Worker-B 预测用）——不 exchange，绝不与 Worker-A 抢输入。
+   * Worker-A 写权威基本信息：写空闲槽 S_A[V_A&1] → release 递增 V_A + gen_A。
+   * 只写角度/速度/眼高/着地——位置由主线程预测积分，不在此同步。
    */
-  readInput(): InputSample {
-    const dxFixed = Atomics.load(this.b64, B_DX_ACC);
-    const dyFixed = Atomics.load(this.b64, B_DY_ACC);
-    return {
-      dx: Number(dxFixed) / 1000,
-      dy: Number(dyFixed) / 1000,
-      keysMask: Atomics.load(this.i32, I_KEYS),
-    };
-  }
-
-  /**
-   * Worker-A 写权威：写空闲槽 S_A[V_A&1] → release 递增 V_A + gen_A。
-   * V2：主线程按 (V_A-1)&1 读另一槽，绝对完整。
-   */
-  writeAuthoritative(s: PhysState, eyeHeight: number, onGround: boolean): number {
+  writeAuthoritative(a: Omit<AuthState, 'onGround'>, onGround: boolean): number {
     const slot = Atomics.load(this.i32, I_V_A) & 1;
     const base = slot === 0 ? B_A0 : B_A1;
     const b = this.b64;
-    b[base] = BigInt(Math.round(s.pos.x * 100));
-    b[base + 1] = BigInt(Math.round(s.pos.y * 100));
-    b[base + 2] = BigInt(Math.round(s.pos.z * 100));
-    b[base + 3] = BigInt(Math.round(s.yaw * 1000));
-    b[base + 4] = BigInt(Math.round(s.pitch * 1000));
-    b[base + 5] = BigInt(Math.round(s.vel.x * 100));
-    b[base + 6] = BigInt(Math.round(s.vel.y * 100));
-    b[base + 7] = BigInt(Math.round(s.vel.z * 100));
-    b[base + 8] = BigInt(Math.round(eyeHeight * 100));
-    this.i32[I_A_GROUND] = onGround ? 1 : 0;
+    b[base] = BigInt(Math.round(a.yaw * 1000));
+    b[base + 1] = BigInt(Math.round(a.pitch * 1000));
+    b[base + 2] = BigInt(Math.round(a.vel.x * 100));
+    b[base + 3] = BigInt(Math.round(a.vel.y * 100));
+    b[base + 4] = BigInt(Math.round(a.vel.z * 100));
+    b[base + 5] = BigInt(Math.round(a.eyeHeight * 100));
     // 状态先于版本号可见（release）
     const va = Atomics.load(this.i32, I_V_A) + 1;
+    this.i32[I_A_GROUND] = onGround ? 1 : 0;
     Atomics.store(this.i32, I_V_A, va);
     Atomics.store(this.i32, I_GEN_A, va);
     return va;
-  }
-
-  // ── Worker-B 侧 ────────────────────────────────────────────
-
-  /**
-   * Worker-B 写预测：写空闲槽 S_P[seq&1] → release 递增 seq_P + 写 gen_P。
-   * V3：gen_P 携带预测基于的权威代际，主线程据此校验。
-   */
-  writePredicted(s: PhysState, genA: number, counter: number): number {
-    const seq = Atomics.load(this.i32, I_SEQ_P);
-    const slot = seq & 1;
-    const base = slot === 0 ? B_P0 : B_P1;
-    const b = this.b64;
-    b[base] = BigInt(Math.round(s.pos.x * 100));
-    b[base + 1] = BigInt(Math.round(s.pos.y * 100));
-    b[base + 2] = BigInt(Math.round(s.pos.z * 100));
-    b[base + 3] = BigInt(Math.round(s.yaw * 1000));
-    b[base + 4] = BigInt(Math.round(s.pitch * 1000));
-    b[base + 5] = BigInt(Math.round(s.vel.x * 100));
-    b[base + 6] = BigInt(Math.round(s.vel.y * 100));
-    b[base + 7] = BigInt(Math.round(s.vel.z * 100));
-    b[base + 8] = BigInt(Math.round(s.eyeHeight * 100));
-    this.i32[I_P_GROUND] = s.onGround ? 1 : 0;
-    // 代际复合序列号 + 预测代际（V3）
-    const newSeq = ((genA & 0xffff) << 16) | (counter & 0xffff);
-    Atomics.store(this.i32, I_SEQ_P, newSeq);
-    Atomics.store(this.i32, I_GEN_P, genA);
-    return newSeq;
-  }
-
-  /** 读当前权威版本号（Worker-B 基线快照用）。 */
-  getVa(): number {
-    return Atomics.load(this.i32, I_V_A);
   }
 }
 

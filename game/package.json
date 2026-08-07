@@ -9,13 +9,12 @@
     "typecheck": "tsc --noEmit",
     "build:worker": "esbuild src/worker/main.ts --bundle --outfile=web/worker.js --format=esm --target=es2022",
     "build:app": "esbuild src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022",
-    "build:ts": "npm run typecheck && npm run build:worker && npm run build:app && npm run build:predictor",
+    "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
     "build:dist": "node scripts/build-dist.mjs",
     "build": "npm run build:wasm && npm run build:ts",
     "dev": "python serve.py 8080",
     "check:api": "node scripts/check-wasm-api.mjs",
-    "test:phys": "node scripts/phys-smoke.mjs",
-    "build:predictor": "esbuild src/worker/predictor-main.ts --bundle --outfile=web/predictor.js --format=esm --target=es2022"
+    "test:phys": "node scripts/phys-smoke.mjs"
   },
   "dependencies": {
     "three": "^0.165.0"

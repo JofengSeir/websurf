@@ -112,13 +112,11 @@ export interface ErrorMessage {
   message: string;
 }
 
-/** Worker-A → 主线程：世界 JSON（Worker-B 构建预测世界用；加载时一次，非热路径）。 */
-export interface WorldJsonMessage {
-  type: 'world-json';
-  brushJson: string;
-  triJson: string;
-  teleportJson: string;
-  spawn: { x: number; y: number; z: number; yawDeg: number };
+/** Worker-A → 主线程：位置重置事件（respawn/teleport；位置平时不同步，仅突变时通知）。 */
+export interface PlayerRespawnMessage {
+  type: 'player-respawn';
+  pos: number[];
+  yawDeg: number;
 }
 
 export type MainMessage =
@@ -127,7 +125,7 @@ export type MainMessage =
   | SceneDataMessage
   | StatsMessage
   | ErrorMessage
-  | WorldJsonMessage;
+  | PlayerRespawnMessage;
 
 // ── 输入状态（共享内存 keys 位掩码，与 Rust KEY_MASK 一致）─────
 
