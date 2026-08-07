@@ -195,6 +195,21 @@ self.onmessage = (e: MessageEvent) => {
       predDt = d.dt;
       break;
     }
+    case 'set-params': {
+      // 面板参数同步：预测世界与权威世界保持同一套物理参数
+      const p = msg as unknown as { params: Record<string, unknown> };
+      try {
+        phys?.set_params(JSON.stringify(p.params ?? {}));
+      } catch (err) {
+        console.error('[predictor] set_params 失败:', err);
+      }
+      break;
+    }
+    case 'set-hull': {
+      const h = msg as unknown as { halfWidth: number; standHeight: number; duckHeight: number };
+      phys?.set_hull(h.halfWidth, h.standHeight, h.duckHeight);
+      break;
+    }
     case 'set-enabled': {
       const d = msg as unknown as { enabled: boolean };
       disabled = !d.enabled;
