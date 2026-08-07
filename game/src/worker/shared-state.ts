@@ -134,7 +134,9 @@ export class ShmState {
     const dyFixed = BigInt(Math.round(dy * 1000));
     if (dxFixed !== 0n) Atomics.add(this.b64, B_DX_ACC, dxFixed);
     if (dyFixed !== 0n) Atomics.add(this.b64, B_DY_ACC, dyFixed);
-    if (keysMask !== 0) Atomics.store(this.i32, I_KEYS, keysMask);
+    // 无条件写 keysMask（0 也写）：反映"当前按键状态"，松手即清零，
+    // 避免残留旧位导致 Worker 一直前进（松手停不下来）
+    Atomics.store(this.i32, I_KEYS, keysMask);
   }
 
   /**

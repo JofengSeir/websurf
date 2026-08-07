@@ -327,9 +327,34 @@
           <div class="row"><label>摩擦</label>
             <input type="range" id="friction" min="0" max="10" step="0.1" value="4" />
             <div class="val"><input id="frictionNum" type="number" value="4" /></div></div>
+          <div class="row"><label>最大速度</label>
+            <input type="range" id="maxSpeed" min="100" max="1000" step="5" value="250" />
+            <div class="val"><input id="maxSpeedNum" type="number" value="250" /></div></div>
+          <div class="row"><label>走路速度</label>
+            <input type="range" id="walkSpeed" min="50" max="400" step="5" value="130" />
+            <div class="val"><input id="walkSpeedNum" type="number" value="130" /></div></div>
+          <div class="row"><label>蹲走速度</label>
+            <input type="range" id="crouchSpeed" min="30" max="300" step="5" value="85" />
+            <div class="val"><input id="crouchSpeedNum" type="number" value="85" /></div></div>
+          <div class="row"><label>停止速度</label>
+            <input type="range" id="stopSpeed" min="10" max="400" step="5" value="100" />
+            <div class="val"><input id="stopSpeedNum" type="number" value="100" /></div></div>
+          <h4>跳跃</h4>
+          <div class="row"><label>跳跃速度</label>
+            <input type="range" id="jumpSpeed" min="100" max="600" step="1" value="302" />
+            <div class="val"><input id="jumpSpeedNum" type="number" value="302" /></div></div>
           <h4>行为</h4>
           <div class="row"><label>自动连跳</label>
             <input type="checkbox" id="autobhop" checked /></div>
+          <div class="row"><label>连跳限速</label>
+            <input type="checkbox" id="bhopSpeedClamp" checked /></div>
+          <div class="row"><label>禁用预加速</label>
+            <input type="checkbox" id="noPrestrafe" checked /></div>
+          <h4>传送</h4>
+          <div class="row"><label>落地触发门槛</label>
+            <input type="range" id="teleportGateTicks" min="1" max="20" step="1" value="3" />
+            <div class="val"><input id="teleportGateTicksNum" type="number" value="3" /></div></div>
+          <div class="hint">传送门槛：落地稳定 ≥N 帧后才判定位于传送平面（防跳跃穿面误触）。</div>
         </div>
 
         <!-- 体型 -->

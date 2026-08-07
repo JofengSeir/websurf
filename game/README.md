@@ -40,12 +40,16 @@ npm run build:wasm   # wasm-pack release（wasm-opt=false：本机 NODE_OPTIONS 
 npm run build:ts     # typecheck + esbuild（app/worker/predictor 三产物）
 node scripts/check-wasm-api.mjs  # 契约校验（导出 9 + 物理 12 API）
 npm run test:phys                # Rust 物理冒烟（node 跑 WASM：落地/跳跃/预测/基线锚定/teleport）
-npm run build:dist   # 单文件 dist/（WASM base64 + 双 Worker Blob 内嵌）
+npm run build:dist   # 常规多文件 dist/（index.html + app.js + worker.js + predictor.js + wasm）
 ```
 
 **一键脚本**：
-- `build-dist.cmd`（双击）：wasm → 契约 → typecheck → dist，全分支 pause 防闪退
+- `build-dist.cmd`（双击）：wasm → 契约 → typecheck → dist（多文件），全分支 pause 防闪退
 - `play.cmd`（双击即玩）：起本地服务器（COOP/COEP 头）→ 自动打开 `dist/index.html`
+
+> dist 为**常规多文件打包**（无 base64 内嵌）：wasm 外置 + 双 Worker 独立文件 + ESM，
+> 与 dev（web/）同构——因物理双 Worker 依赖 SharedArrayBuffer 本就必须经 HTTP 服务器
+> 运行（file:// 双击显示引导卡片），单文件内嵌无意义。
 
 ## 运行
 

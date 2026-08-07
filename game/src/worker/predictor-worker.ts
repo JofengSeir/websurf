@@ -10,7 +10,7 @@
 
 /// <reference lib="webworker" />
 
-import { PhysWorld, initSync, default as wasmInit } from '../../pkg/websurf_wasm.js';
+import { PhysWorld, default as wasmInit } from '../../pkg/websurf_wasm.js';
 import { createWorkerSharedState, type ShmState } from './shared-state.js';
 
 /** 预测固定步长（跟随权威 tickRate；主线程经消息更新）。 */
@@ -28,20 +28,15 @@ let worldReady = false;
 let wasmReady = false;
 let disabled = false; // noclip 模式禁用预测
 
-/** WASM 初始化（与 Worker-A 相同模式：dist base64 → initSync；dev URL → fetch + init）。 */
-async function startWasm(msg: { wasmB64?: string; wasmUrl?: string }): Promise<void> {
-  if (msg.wasmB64) {
-    const bin = atob(msg.wasmB64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    initSync({ module: bytes.buffer });
-  } else if (msg.wasmUrl) {
-    const resp = await fetch(msg.wasmUrl);
-    const buf = await resp.arrayBuffer();
-    await wasmInit(buf);
-  } else {
-    throw new Error('wasm-init 消息缺少 wasmB64 / wasmUrl');
+/** WASM 初始化（与 Worker-A 相同模式：fetch wasmUrl → init）。 */
+async function startWasm(msg: { wasmUrl?: string }): Promise<void> {
+  // 常规打包：wasm 外置文件，fetch 相对自身 URL（dist/ 与 web/ 同构）
+  if (!msg.wasmUrl) {
+    throw new Error('wasm-init 消息缺少 wasmUrl');
   }
+  const resp = await fetch(msg.wasmUrl);
+  const buf = await resp.arrayBuffer();
+  await wasmInit(buf);
   wasmReady = true;
 }
 
@@ -168,7 +163,7 @@ self.onmessage = (e: MessageEvent) => {
     case 'wasm-init': {
       void (async () => {
         try {
-          await startWasm(msg as unknown as { wasmB64?: string; wasmUrl?: string });
+          await startWasm(msg as unknown as { wasmUrl?: string });
           // wasm 就绪 + shared 就绪 → 启动热待机预测循环
           if (shared) runWaitLoop();
         } catch (err) {

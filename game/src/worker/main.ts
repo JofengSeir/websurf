@@ -10,7 +10,7 @@
 
 /// <reference lib="webworker" />
 
-import { PhysWorld, BspProcessor, initSync, default as wasmInit } from '../../pkg/websurf_wasm.js';
+import { PhysWorld, BspProcessor, default as wasmInit } from '../../pkg/websurf_wasm.js';
 import { createWorkerSharedState, type ShmState } from './shared-state.js';
 import type { WorkerMessage, MainMessage } from './worker-types.js';
 import { createConfig, applyConfigPatch } from '../config.js';
@@ -23,10 +23,9 @@ const MAX_FIXED_STEPS = 10;
 /** 防穿墙：单 tick 输入增量上限（随步长缩放，tickRate 快则每步上限同比缩小）。 */
 const MAX_INPUT_PER_STEP_BASE = 1200; // 每 1/64s 的 yaw 增量上限（度）
 
-/** WASM 初始化参数。 */
+/** WASM 初始化参数（常规打包：wasmUrl 相对 worker.js）。 */
 interface WasmInitPayload {
   type: 'wasm-init';
-  wasmB64?: string;
   wasmUrl?: string;
 }
 
@@ -44,21 +43,15 @@ let wasmReady = false;
 let initStarted = false;
 const pending: MessageEvent[] = [];
 
-/** WASM 初始化（消息驱动）。dist 内嵌 base64 → initSync；dev 模式 URL → fetch + init。 */
+/** WASM 初始化（消息驱动）：fetch wasmUrl（相对 worker.js）→ init。 */
 async function startWasm(msg: WasmInitPayload): Promise<void> {
-  if (msg.wasmB64) {
-    const bin = atob(msg.wasmB64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    // 静态导入的 initSync：esbuild IIFE 打包 + Blob Worker 下动态 import() 不可用
-    initSync({ module: bytes.buffer });
-  } else if (msg.wasmUrl) {
-    const resp = await fetch(msg.wasmUrl);
-    const buf = await resp.arrayBuffer();
-    await wasmInit(buf);
-  } else {
-    throw new Error('wasm-init 消息缺少 wasmB64 / wasmUrl');
+  // 常规打包：wasm 外置文件，worker 内 fetch 相对自身 URL 加载（dist/ 与 web/ 同构）
+  if (!msg.wasmUrl) {
+    throw new Error('wasm-init 消息缺少 wasmUrl');
   }
+  const resp = await fetch(msg.wasmUrl);
+  const buf = await resp.arrayBuffer();
+  await wasmInit(buf);
   wasmReady = true;
   // 按序重放此前缓存的消息（含 init：创建 shared）
   for (const ev of pending) dispatch(ev);
@@ -116,6 +109,8 @@ function dispatch(e: MessageEvent): void {
 /** 60Hz 自驱循环：Atomics.wait 16ms 超时兜底（notify 仅加速），无需主线程 frame 信号。 */
 function runLoop(): void {
   let lastT = performance.now();
+  // 固定时间步累积器（防高刷丢时间：dt<fixedDt 时残留累加，物理时间守恒）
+  let acc = 0;
   const loop = (): void => {
     try {
       if (!shared || !sceneReady) {
@@ -127,8 +122,8 @@ function runLoop(): void {
       const dt = Math.min((now - lastT) / 1000, 0.1);
       lastT = now;
 
-      // 固定步长推进
-      let acc = dt;
+      // 固定步长推进：累积器模式（144Hz 下 dt≈7ms < fixedDt，累积到整步再推进）
+      acc += dt;
       let steps = 0;
       while (acc >= fixedDt && steps < MAX_FIXED_STEPS) {
         acc -= fixedDt;
@@ -364,10 +359,15 @@ function syncParamsToWasm(): void {
       jump_height: p.jumpSpeed * p.jumpSpeed / (2 * p.gravity),
       air_accelerate: p.airAccel,
       run_speed: p.maxSpeed,
+      walk_speed: p.walkSpeed,
+      crouch_speed: p.crouchSpeed,
       autobhop: p.autobhop,
+      bhop_speed_clamp: p.bhopSpeedClamp,
+      no_prestrafe: p.noPrestrafe,
       sensitivity: config.input.sensitivity,
       yaw_bind_speed: config.input.yawBindSpeed,
       noclip_speed: config.input.noclipSpeed,
+      teleport_gate_ticks: p.teleportGateTicks,
     }),
   );
   const pl = config.player;

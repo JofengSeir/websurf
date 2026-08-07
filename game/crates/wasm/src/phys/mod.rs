@@ -156,8 +156,14 @@ impl PhysWorld {
         if self.noclip {
             noclip_step(&mut self.player, dt, &self.params);
         } else {
-            // 传送检测（权威才检测；predict 禁用）
-            if let Some(dest) = self.teleport.check(&self.player.origin, dt, false) {
+            // 传送检测（权威才检测；predict 禁用；落地稳定 ≥3 帧才判定位于传送平面）
+            if let Some(dest) = self.teleport.check(
+                &self.player.origin,
+                self.player.ground_ticks_since_landing,
+                self.params.teleport_gate_ticks,
+                dt,
+                false,
+            ) {
                 self.apply_teleport(&dest.origin, dest.yaw);
                 self.teleport.on_teleported();
                 self.teleport.reset_cooldown();
@@ -273,6 +279,7 @@ impl PhysWorld {
             sensitivity: Option<f64>,
             yaw_bind_speed: Option<f64>,
             noclip_speed: Option<f64>,
+            teleport_gate_ticks: Option<u32>,
         }
         let p: Patch = serde_json::from_str(json).map_err(|e| to_js_err(e, "set_params"))?;
         if let Some(v) = p.gravity {
@@ -319,6 +326,9 @@ impl PhysWorld {
         }
         if let Some(v) = p.noclip_speed {
             self.params.noclip_speed = v;
+        }
+        if let Some(v) = p.teleport_gate_ticks {
+            self.params.teleport_gate_ticks = v;
         }
         Ok(())
     }

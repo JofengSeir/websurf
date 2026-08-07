@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../pkg",
+    "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../pkg && node -e \"require('fs').copyFileSync('pkg/websurf_wasm_bg.wasm','web/websurf_wasm_bg.wasm')\"",
     "typecheck": "tsc --noEmit",
     "build:worker": "esbuild src/worker/main.ts --bundle --outfile=web/worker.js --format=esm --target=es2022",
     "build:app": "esbuild src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022",

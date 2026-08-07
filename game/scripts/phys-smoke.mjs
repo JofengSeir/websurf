@@ -142,4 +142,35 @@ if (Math.abs(t1.posX - 50) > 0.01 || Math.abs(t1.posY - 200) > 0.01 || Math.abs(
 }
 console.log('OK teleport_to_spawn(1): pos=(' + t1.posX.toFixed(0) + ',' + t1.posY.toFixed(0) + ',' + t1.posZ.toFixed(0) + ') yaw=' + t1.yaw.toFixed(0));
 
+// 9. 触发传送（落地稳定 ≥3 帧后判定位于传送平面）：
+//    spawn 高空 (0,60,0) → 下落 → 落地在 trigger 区域（x∈[-10,10], z∈[-10,10], y∈[0,4]）
+//    → 站定 3 帧后应传送到 destination (50,0,30)
+const tg = new PhysWorld();
+tg.build_world(brushJson, '[]', JSON.stringify({
+  teleports: [{ index: 0, targetname: 'tp_dest', origin: [50, 0, 30], angles: [0, 90, 0] }],
+  triggers: [{
+    index: 0, classname: 'trigger_teleport', target: 'tp_dest', origin: [0, 0, 0],
+    model_mins: [-10, 0, -10], model_maxs: [10, 4, 10], spawnflags: 1,
+  }],
+}), 0, 60, 0, 0);
+let tgPos = null;
+let teleportedAt = -1;
+for (let i = 0; i < 60; i++) {
+  tgPos = tg.tick(1 / 64, 0, 0, 0);
+  if (Math.abs(tgPos.posX - 50) < 1 && Math.abs(tgPos.posZ - 30) < 1) {
+    teleportedAt = i;
+    break;
+  }
+}
+if (teleportedAt < 0) {
+  console.error('FAIL: 触发传送未生效 pos=(' + tgPos.posX.toFixed(1) + ',' + tgPos.posY.toFixed(1) + ',' + tgPos.posZ.toFixed(1) + ')');
+  process.exit(1);
+}
+// 落地约 tick 5-8（y=60 自由落体），传送应在落地后 >3 tick 触发（严格化门槛）
+if (teleportedAt < 9) {
+  console.error('FAIL: 传送触发过早 tick=' + teleportedAt + '（落地门槛未生效？）');
+  process.exit(1);
+}
+console.log('OK 触发传送: tick' + teleportedAt + ' → (' + tgPos.posX.toFixed(0) + ',' + tgPos.posY.toFixed(0) + ',' + tgPos.posZ.toFixed(0) + ')（落地站定后触发）');
+
 console.log('\n=== 物理冒烟测试全部通过 ===');

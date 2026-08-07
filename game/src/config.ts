@@ -15,6 +15,16 @@ export interface PhysicsConfig {
   airAccel: number;
   stopSpeed: number;
   autobhop: boolean;
+  /** 走路速度（HU/s，默认 130）。 */
+  walkSpeed: number;
+  /** 蹲走速度（HU/s，默认 85）。 */
+  crouchSpeed: number;
+  /** bhop 速度钳制（连跳不超 maxSpeed，默认 true）。 */
+  bhopSpeedClamp: boolean;
+  /** nopre：禁用预加速（落地速度硬钳到 runSpeed，默认 true）。 */
+  noPrestrafe: boolean;
+  /** 传送触发落地稳定门槛（帧，默认 3）：落地持续 >= 该值才判定位于传送平面。 */
+  teleportGateTicks: number;
 }
 
 export interface InputConfig {
@@ -64,6 +74,11 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     airAccel: 100,
     stopSpeed: 100,
     autobhop: true,
+    walkSpeed: 130,
+    crouchSpeed: 85,
+    bhopSpeedClamp: true,
+    noPrestrafe: true,
+    teleportGateTicks: 3,
   },
   input: {
     sensitivity: 1.5,

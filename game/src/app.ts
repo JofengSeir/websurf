@@ -67,36 +67,19 @@ async function main(): Promise<void> {
   sharedState = createMainSharedState(sharedBuffer);
   const shared = sharedState;
 
-  // 1. Worker-A（权威）
-  const embeddedWorker = (globalThis as unknown as { __VBSP_WORKER_JS__?: string }).__VBSP_WORKER_JS__;
-  workerA = embeddedWorker
-    ? new Worker(URL.createObjectURL(new Blob([embeddedWorker], { type: 'text/javascript' })))
-    : new Worker('./worker.js', { type: 'module' });
+  // 1. Worker-A（权威）——常规文件 Worker（与 dev 同构；wasm 经相对 URL 加载）
+  workerA = new Worker('./worker.js', { type: 'module' });
   workerA.onmessage = handleWorkerMessage;
   workerA.onerror = (e) => setError(`Worker error: ${e.message}`);
-
-  // WASM 注入
-  const embeddedWasm = (globalThis as unknown as { __VBSP_WASM_B64__?: string }).__VBSP_WASM_B64__;
-  workerA.postMessage(
-    embeddedWasm
-      ? { type: 'wasm-init', wasmB64: embeddedWasm }
-      : { type: 'wasm-init', wasmUrl: '../pkg/websurf_wasm_bg.wasm' },
-  );
+  // WASM 注入：相对 worker.js 的 URL（dist/ 与 web/ 均同目录放置 wasm）
+  workerA.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
 
   bridge = new InputBridge(workerA, shared);
   bridge.sendInit(sharedBuffer, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio);
 
-  // 2. Worker-B（预测）
-  const embeddedPredictor = (globalThis as unknown as { __VBSP_PREDICTOR_JS__?: string }).__VBSP_PREDICTOR_JS__;
-  predictorWorker = embeddedPredictor
-    ? new Worker(URL.createObjectURL(new Blob([embeddedPredictor], { type: 'text/javascript' })))
-    : new Worker('./predictor.js', { type: 'module' });
-  // WASM 注入：predictor 是独立 Worker，必须自行初始化 wasm（与 Worker-A 相同协议）
-  predictorWorker.postMessage(
-    embeddedWasm
-      ? { type: 'wasm-init', wasmB64: embeddedWasm }
-      : { type: 'wasm-init', wasmUrl: '../pkg/websurf_wasm_bg.wasm' },
-  );
+  // 2. Worker-B（预测）——独立 Worker 自行初始化 wasm（与 Worker-A 相同协议）
+  predictorWorker = new Worker('./predictor.js', { type: 'module' });
+  predictorWorker.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
   predictorWorker.postMessage({ type: 'init', shared: sharedBuffer, predDt: 1 / config.physics.tickRate });
   (globalThis as unknown as { __predictorWorker?: Worker }).__predictorWorker = predictorWorker;
 

@@ -232,9 +232,42 @@ export class PanelController {
       this.config.physics.friction = v;
       this.bridge.sendConfig('physics', { friction: v });
     });
+    this.bindSlider('maxSpeed', 100, 1000, 5, (v) => {
+      this.config.physics.maxSpeed = v;
+      this.bridge.sendConfig('physics', { maxSpeed: v });
+    });
+    this.bindSlider('walkSpeed', 50, 400, 5, (v) => {
+      this.config.physics.walkSpeed = v;
+      this.bridge.sendConfig('physics', { walkSpeed: v });
+    });
+    this.bindSlider('crouchSpeed', 30, 300, 5, (v) => {
+      this.config.physics.crouchSpeed = v;
+      this.bridge.sendConfig('physics', { crouchSpeed: v });
+    });
+    this.bindSlider('stopSpeed', 10, 400, 5, (v) => {
+      this.config.physics.stopSpeed = v;
+      this.bridge.sendConfig('physics', { stopSpeed: v });
+    });
+    this.bindSlider('jumpSpeed', 100, 600, 1, (v) => {
+      this.config.physics.jumpSpeed = v;
+      this.bridge.sendConfig('physics', { jumpSpeed: v });
+    });
     this.bindCheckbox('autobhop', (v) => {
       this.config.physics.autobhop = v;
       this.bridge.sendConfig('physics', { autobhop: v });
+    });
+    this.bindCheckbox('bhopSpeedClamp', (v) => {
+      this.config.physics.bhopSpeedClamp = v;
+      this.bridge.sendConfig('physics', { bhopSpeedClamp: v });
+    });
+    this.bindCheckbox('noPrestrafe', (v) => {
+      this.config.physics.noPrestrafe = v;
+      this.bridge.sendConfig('physics', { noPrestrafe: v });
+    });
+    // 传送落地触发门槛（帧）
+    this.bindSlider('teleportGateTicks', 1, 20, 1, (v) => {
+      this.config.physics.teleportGateTicks = v;
+      this.bridge.sendConfig('physics', { teleportGateTicks: v });
     });
 
     // 体型
