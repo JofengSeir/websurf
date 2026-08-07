@@ -20,12 +20,15 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  # 不要用 "pages"：与 GitHub 内部 "pages build and deployment" 并发组同名，
+  # 会导致内部构建出现时本 workflow 被 cancel-in-progress 取消（8-06 实测两次）。
+  group: "pages-deploy-websurf"
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
