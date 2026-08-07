@@ -57,20 +57,16 @@ async function main(): Promise<void> {
     return;
   }
 
-  // 0. SAB（crossOriginIsolated 强制：file:// 双击无法满足，需本地服务器）
+  // 0. 通道选择：crossOriginIsolated（本地 serve.py COOP/COEP）→ SAB 高性能；
+  //    否则（线上静态部署无 COOP/COEP）→ MsgState postMessage 回退（功能等价可玩）
   const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
-  if (!isolated || typeof SharedArrayBuffer === 'undefined') {
-    // 无隔离环境：显示引导卡片（双击 dist 常见），不再静默退出
-    const overlay = document.getElementById('fatalOverlay') as HTMLElement | null;
-    if (overlay) overlay.classList.add('show');
-    setStatus('需要 HTTP 服务器（file:// 无 SharedArrayBuffer）— 请双击 play.cmd', 'error');
-    return;
+  const canSab = isolated && typeof SharedArrayBuffer !== 'undefined';
+  if (!canSab) {
+    setStatus('兼容模式（无 SharedArrayBuffer）：功能可用，性能降级', '');
   }
-  const sharedBuffer = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
-  sharedState = createMainSharedState(sharedBuffer);
-  const shared = sharedState;
+  const sharedBuffer = canSab ? new SharedArrayBuffer(SHARED_BUFFER_SIZE) : null;
 
-  // 1. 权威帧 Worker（加载地图碰撞、独立 64Hz 权威模拟，输出权威帧供渲染校准）
+  // 1. 权威帧 Worker（加载地图碰撞、独立固定步长权威模拟，输出权威帧供渲染校准）
   fixWorker = new Worker('./worker.js', { type: 'module' });
   fixWorker.onerror = (e) => setError(`Worker error: ${e.message}`);
   fixWorker.onmessage = (e: MessageEvent<{ type?: string }>) => {
@@ -82,10 +78,18 @@ async function main(): Promise<void> {
       // 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染）
       const ev = msg as { kind: 'land' | 'blocked'; pos: number[]; yawDeg: number; pitchDeg: number };
       renderer?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg);
+    } else if (msg.type === 'phys-frame') {
+      // MsgState 回退：Worker 权威帧消息 → 缓存（readAuthoritative 读取）
+      const f = msg as { va: number; frame: { pos: { x: number; y: number; z: number }; yaw: number; pitch: number; vel: { x: number; y: number; z: number }; onGround: boolean; eyeHeight: number; timeMs: number } };
+      (sharedState as { recvFrame?: (frame: unknown, va: number) => void })?.recvFrame?.(f.frame, f.va);
     }
   };
   fixWorker.postMessage({ type: 'init', shared: sharedBuffer });
   fixWorker.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
+
+  // 通道创建（SAB / MsgState 同接口）
+  sharedState = createMainSharedState(sharedBuffer, fixWorker);
+  const shared = sharedState;
 
   // 2. 渲染器 = 主线程唯一物理线（BSP 解析/物理/渲染全在主线程）
   renderer = new RendererMain(shared);

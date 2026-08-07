@@ -16,7 +16,7 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PhysWorld, default as wasmInit } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
-import type { ShmState } from '../worker/shared-state.js';
+import type { ShmState, MsgState } from '../worker/shared-state.js';
 import { PvsManager } from '../world/pvs-manager.js';
 
 const FOV = 75;
@@ -77,7 +77,7 @@ export class RendererMain {
   private cullDistance = 12800;
 
 
-  constructor(private readonly shared: ShmState) {}
+  constructor(private readonly shared: ShmState | MsgState) {}
 
   onSceneLoaded: ((deathThresholdY: number) => void) | null = null;
 
