@@ -155,7 +155,7 @@ function stepPhysics(dt: number): void {
   phys.tick(dt, keys, dx, dy);
 }
 
-/** 写权威基本信息（角度/速度/眼高/着地）到 SAB + 递增 V_A。位置由主线程预测积分，不写。 */
+/** 写权威全状态（含位置）到 SAB + 递增 V_A。主线程预测实例据此 set_state 修正基线。 */
 function writeFrame(timeMs: number): void {
   if (!shared || !phys) return;
   const s = phys.state() as {
@@ -164,9 +164,9 @@ function writeFrame(timeMs: number): void {
     velX: number; velY: number; velZ: number;
     onGround: boolean; eyeHeight: number;
   };
-  void s.posX; void s.posY; void s.posZ; // 位置仅权威侧维护，不同步主线程
   shared.writeAuthoritative(
     {
+      pos: { x: s.posX, y: s.posY, z: s.posZ },
       yaw: s.yaw,
       pitch: s.pitch,
       vel: { x: s.velX, y: s.velY, z: s.velZ },
@@ -321,6 +321,15 @@ async function handleLoadBsp(data: ArrayBuffer, _name: string): Promise<void> {
       hasPvs: true,
     };
     postMessage(sceneData, [glbBuffer] as never);
+
+    // 世界 JSON 转发（主线程构建预测 PhysWorld 实例；加载时一次，非热路径）
+    postMessage({
+      type: 'world-json',
+      brushJson,
+      triJson: triJson ?? '[]',
+      teleportJson,
+      spawn: { x: spawn.x, y: spawn.y, z: spawn.z, yawDeg: spawn.yawDeg },
+    } satisfies MainMessage);
 
     sceneReady = true;
     postMessage({ type: 'parse-progress', stage: '物理世界就绪' } as never);

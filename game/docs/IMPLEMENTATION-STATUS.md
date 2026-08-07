@@ -18,20 +18,21 @@
 | scene-data | GLB + 几十 MB JSON | GLB + spawn/pvs 小 JSON | **-95%** |
 | 消息协议 | 25 + 14 | 7 + 5 | — |
 
-### 1.2 架构落地（对齐时序图）
+### 1.2 架构落地（2026-08-07 v4.1：客户端预测，主线程物理模拟）
 
 ```
-主线程 (src/app.ts)
-  ├─ 输入采集 → SAB 输入槽（Atomics.add BigInt64 定点累加，绝不丢输入）
-  ├─ 预测渲染循环（rAF 无上限）：读权威基本信息（角度/速度/眼高/着地）→
-  │    位置速度积分外推（pos += vel×dt）+ 角度权威帧间 LERP → 渲染
-  ├─ respawn/teleport 位置突变事件归零（player-respawn 消息）
+主线程 (src/app.ts + renderer-main.ts)
+  ├─ 输入采集 → SAB 输入槽（BigInt64 原子累加）+ 预测实例输入缓冲（双通道）
+  ├─ wasm PhysWorld 预测实例（init + world-json build_world + set_params/set_hull）
+  ├─ 每 rAF：读权威全状态（V_A 变化）→ set_state 修正预测基线 →
+  │    predict(dt, keys, dx, dy) 物理模拟（含碰撞）→ 渲染
+  ├─ respawn/teleport 位置突变归零（player-respawn 消息）
   ├─ ESC 弹出式面板（六分区）+ 速度面板 4Hz
 Worker-A (src/worker/main.ts)
   ├─ BspProcessor 解析/导出（WASM）
   ├─ PhysWorld tick（Rust 物理；固定步长累积器无步数封顶）
   ├─ 自驱循环（Atomics.wait 16ms 兜底）
-  └─ 写权威基本信息（角度/速度/眼高/着地）+ V_A++（位置不同步）
+  └─ 写权威全状态（含位置）+ V_A++（set_state 修正源）
 ```
 
 ### 1.3 文件清单

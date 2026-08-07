@@ -76,11 +76,15 @@ async function main(): Promise<void> {
   bridge = new InputBridge(workerA, shared);
   bridge.sendInit(sharedBuffer, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio);
 
-  // 2. 渲染器（预测在主线程渲染循环内进行，无 Worker-B）
+  // 2. 渲染器（客户端预测：主线程持 wasm 预测实例，每帧物理模拟）
   renderer = new RendererMain(shared);
   renderer.onSceneLoaded = (deathY) => bridge?.sendSetDeathThreshold(deathY);
   renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
   renderer.start();
+  // 主线程 wasm 初始化（预测实例与 Worker-A 同模块、独立实例）
+  renderer.initPrediction('./websurf_wasm_bg.wasm').catch((err) => {
+    setError(`主线程 WASM 初始化失败: ${err instanceof Error ? err.message : String(err)}`);
+  });
 
   // 3. 面板
   panel = new PanelController(
@@ -101,7 +105,10 @@ function bindInput(): void {
   window.addEventListener('mousemove', (e) => {
     if (!pointerLock.isLocked()) return;
     const r = mouseBuffer.process(e.movementX, e.movementY);
-    if (r && bridge) bridge.addInput(r.dx, r.dy, keyboard.getMask());
+    if (!r) return;
+    const mask = keyboard.getMask();
+    if (bridge) bridge.addInput(r.dx, r.dy, mask); // 权威通道（SAB）
+    renderer?.feedInput(r.dx, r.dy, mask); // 预测实例通道（主线程物理模拟）
   });
 
   dom.canvas.addEventListener('click', () => {
@@ -147,7 +154,7 @@ function bindInput(): void {
   });
 }
 
-/** 主线程 rAF 循环：按键 → SAB 输入槽；三源决策渲染已在 RendererMain。 */
+/** 主线程 rAF 循环：按键 → SAB 输入槽 + 预测实例；渲染已在 RendererMain。 */
 function startInputLoop(): void {
   const tick = (now: number): void => {
     requestAnimationFrame(tick);
@@ -155,6 +162,7 @@ function startInputLoop(): void {
     const keys = keyboard.getState();
     const mask = keysToMask(keys);
     bridge.addInput(0, 0, mask);
+    renderer?.feedInput(0, 0, mask); // 预测实例按键（鼠标增量已在 mousemove 喂入）
     // 速度面板 8Hz（0.125s）
     if (now - speedUpdateAt >= 125) {
       speedUpdateAt = now;
@@ -196,10 +204,19 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
     case 'scene-data':
       void handleSceneData(msg);
       break;
+    case 'world-json':
+      // 主线程构建预测 PhysWorld（客户端预测物理模拟实例）
+      renderer?.buildPredictionWorld({
+        brushJson: msg.brushJson,
+        triJson: msg.triJson,
+        teleportJson: msg.teleportJson,
+        spawn: msg.spawn,
+      });
+      break;
     case 'player-respawn': {
-      // 位置突变事件（重生/传送）：主线程预测位置归零到权威新位置
+      // 位置突变事件（重生/传送/noclip 切换）：预测实例归零到权威新位置
       const r = msg as unknown as { pos: number[]; yawDeg: number };
-      renderer?.setInitialState({ x: r.pos[0], y: r.pos[1], z: r.pos[2], yawDeg: r.yawDeg });
+      renderer?.resetTo(r.pos, r.yawDeg);
       break;
     }
     case 'stats':
@@ -218,8 +235,6 @@ async function handleSceneData(msg: SceneDataMessage): Promise<void> {
     return;
   }
   await renderer.loadScene(msg);
-  // 主线程位置预测起点 = 出生点（权威不同步位置）
-  renderer.setInitialState(msg.spawn);
   sceneReady = true;
   setStatus(
     `场景已加载（GLB ${msg.glbSizeKb} KB，${msg.metadata.numBrushes} brushes，` +
