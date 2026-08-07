@@ -152,9 +152,10 @@ impl TeleportManager {
     /// 每 tick 检测：返回触发目标（若触发），否则 None。
     /// `predict` 模式（Worker-B）不检测传送（预测只填充中间帧，权威每帧校正）。
     ///
-    /// 落地稳定门槛（严格化）：仅当玩家落地（on_ground）持续 ≥ 3 帧后才开始判定
-    /// 是否位于传送平面上——防止跳跃/下落轨迹"穿过"触发面瞬间误触；
-    /// 落地站定在传送平面上才触发。
+    /// 接触稳定门槛（严格化）：`ground_ticks` 为"接触帧计数"（地面或斜面，
+    /// 法线 y > 0.05，见 categorize_position）——仅当接触持续 ≥ 3 帧后才开始
+    /// 判定是否位于传送平面上；防止跳跃/下落轨迹"穿过"触发面瞬间误触；
+    /// 斜面滑行（surf）持续贴坡同样累计，可正常触发。
     pub fn check(&mut self, pos: &V3, ground_ticks: u32, gate_ticks: u32, dt: f64, predict: bool) -> Option<TeleportDestination> {
         if predict {
             return None;
@@ -163,7 +164,7 @@ impl TeleportManager {
             self.cooldown -= dt;
             // 冷却期间仍需更新 inside 状态，否则冷却结束后误触发 start-touch
             for t in &mut self.triggers {
-                t.inside = is_in_trigger(pos, t);
+                t.inside = probe_inside(pos, t); // 同主判定（多点下探）
             }
             return None;
         }
@@ -187,8 +188,9 @@ impl TeleportManager {
             if t.start_disabled {
                 continue;
             }
-            // 跳过非玩家触发器（spawnflags 不含 Clients 0x01 且非 Everything 0x40）
-            if (t.spawnflags & 0x01) == 0 && (t.spawnflags & 0x40) == 0 {
+            // 跳过非玩家触发器（spawnflags 不含 Clients 0x01 且非 Everything 0x40）；
+            // **显式 0 不跳过**——BSP 实体未配置 spawnflags 时导出为 0，应视为默认全客户端
+            if t.spawnflags != 0 && (t.spawnflags & 0x01) == 0 && (t.spawnflags & 0x40) == 0 {
                 continue;
             }
             if t.dest_index < 0 {
@@ -197,7 +199,9 @@ impl TeleportManager {
             if (t.dest_index as usize) >= self.destinations.len() {
                 continue; // 越界防御（dest_by_name 已用数组下标，正常不会触发）
             }
-            let now_inside = is_in_trigger(pos, t);
+            // 多点下探（0~48）：覆盖斜面滑行的悬空 gap 与薄片 trigger；
+            // gate（接触 ≥3 帧）兜底防飞行误触
+            let now_inside = probe_inside(pos, t);
             // StartTouch 边沿触发：仅 false→true 跳变
             let should_fire = now_inside && !t.inside;
             t.inside = now_inside;
@@ -220,6 +224,24 @@ impl TeleportManager {
     pub fn reset_cooldown(&mut self) {
         self.cooldown = 0.0;
     }
+}
+
+/// trigger 探测深度列表（units）：斜面滑行时玩家脚底悬空坡面 10~40 units（碰撞推移
+/// 无持续吸附），贴坡的薄 trigger（surf_666 大量 h≤8 薄片）用脚底单点检测不到 →
+/// 多点下探覆盖 gap；地面场景脚底本就在 trigger 内（点 0 命中）；空中经过由
+/// gate（接触 ≥3 帧）兜底防误触。
+const TRIGGER_PROBES: [f64; 7] = [0.0, 8.0, 16.0, 24.0, 32.0, 40.0, 48.0];
+
+/// 多点探测：任一深度点在 trigger 内即视为 inside（覆盖滑行 gap 与薄片 trigger）。
+fn probe_inside(pos: &V3, t: &TeleportTrigger) -> bool {
+    for drop in TRIGGER_PROBES {
+        let mut probe = *pos;
+        probe[1] -= drop;
+        if is_in_trigger(&probe, t) {
+            return true;
+        }
+    }
+    false
 }
 
 /// 玩家是否在 trigger 区域内：凸包平面精确判定 > AABB > 球形回退。

@@ -18,6 +18,16 @@
     /* 隐藏文件选择控件：加载地图按钮统一触发 click（样式由 #loadMapBtn 承担） */
     #bspFile { display: none; }
 
+    /* ── FPS（左上角）────────────────────────────────────── */
+    #fps {
+      position: absolute; top: 14px; left: 14px; z-index: 5;
+      font-size: 12px; padding: 4px 10px; border-radius: 8px;
+      background: rgba(15,17,21,0.78); border: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(8px);
+      color: #9fe8b5; font-variant-numeric: tabular-nums;
+      pointer-events: none;
+    }
+
     /* ── 状态提示（右上角胶囊）────────────────────── */
     #status, #error {
       position: absolute; top: 14px; right: 14px; z-index: 5;
@@ -272,6 +282,9 @@
 
   <div id="crosshair"></div>
   <div id="hud"><div id="stats">0</div></div>
+
+  <!-- FPS 显示（左上角） -->
+  <div id="fps">--</div>
 
   <!-- ESC 控制面板：桌面两栏 -->
   <div id="panel">

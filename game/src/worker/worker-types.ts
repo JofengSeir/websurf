@@ -128,6 +128,17 @@ export interface WorldJsonMessage {
   spawn: { x: number; y: number; z: number; yawDeg: number };
 }
 
+/** Worker → 主线程：权威碰撞事件（落地/撞墙瞬间；低频，位置微调+角度同步用）。 */
+export interface PhysEventMessage {
+  type: 'phys-event';
+  kind: 'land' | 'blocked';
+  pos: number[];
+  /** 权威碰撞瞬间朝向（度；权威仅在碰撞判断时可影响渲染角度）。 */
+  yawDeg: number;
+  pitchDeg: number;
+  timeMs: number;
+}
+
 export type MainMessage =
   | ReadyMessage
   | BspMetadataMessage
@@ -135,7 +146,8 @@ export type MainMessage =
   | StatsMessage
   | ErrorMessage
   | PlayerRespawnMessage
-  | WorldJsonMessage;
+  | WorldJsonMessage
+  | PhysEventMessage;
 
 // ── 输入状态（共享内存 keys 位掩码，与 Rust KEY_MASK 一致）─────
 

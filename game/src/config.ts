@@ -78,7 +78,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     crouchSpeed: 85,
     bhopSpeedClamp: true,
     noPrestrafe: true,
-    teleportGateTicks: 3,
+    teleportGateTicks: 1,
   },
   input: {
     sensitivity: 1.5,
@@ -109,4 +109,29 @@ export function applyConfigPatch(
   const target = config[section];
   if (!target || typeof target !== 'object') return;
   Object.assign(target, patch);
+}
+
+/** 构造 Rust `set_params` 兼容的全量参数对象（权威 Worker 与主线程预测实例共用）。 */
+export function buildPhysicsParams(config: RuntimeConfig): Record<string, unknown> {
+  const p = config.physics;
+  return {
+    gravity: p.gravity,
+    accelerate: p.accelerate,
+    friction: p.friction,
+    stop_speed: p.stopSpeed,
+    jump_height: (p.jumpSpeed * p.jumpSpeed) / (2 * p.gravity),
+    air_accelerate: p.airAccel,
+    run_speed: p.maxSpeed,
+    walk_speed: p.walkSpeed,
+    crouch_speed: p.crouchSpeed,
+    autobhop: p.autobhop,
+    bhop_speed_clamp: p.bhopSpeedClamp,
+    no_prestrafe: p.noPrestrafe,
+    // 灵敏度固定 1：真实灵敏度由主线程输入层应用（mousemove 时乘入角度增量），
+    // 双端物理（权威 Worker + 主线程渲染）用同一份已缩放输入 → 改灵敏度不产生双端分叉
+    sensitivity: 1,
+    yaw_bind_speed: config.input.yawBindSpeed,
+    noclip_speed: config.input.noclipSpeed,
+    teleport_gate_ticks: p.teleportGateTicks,
+  };
 }
