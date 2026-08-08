@@ -66,7 +66,7 @@ src/wasm.d.ts                   # re-export pkg 真实类型
 crates/wasm/src/phys/mod.rs      # PhysWorld 组装 + wasm-bindgen 12 API
 crates/wasm/src/phys/world.rs    # World + 双 Grid + traceBox + clipBoxToTriangle
 crates/wasm/src/phys/player.rs   # PlayerController 全套移动语义（16 TS 文件合并）
-crates/wasm/src/phys/teleport.rs # TeleportManager（start-touch）+ 死亡判定
+crates/wasm/src/phys/teleport.rs # TeleportManager（StartTouch 边沿 + 落地脚底检测）+ 死亡判定
 ```
 
 **Rust 基础（复用/精简）**：`vbsp/`（BSP 解析）、`bsp_to_gltf_core/`（GLB 导出）、
@@ -155,6 +155,35 @@ trigger，人还在坡上滑就被传送回家。修正：`contact_ticks` **仅�
 gate 不通过、绝不触发传送；只有落地后才开始判定传送平面。回归测试
 `scripts/phys-teleport-gate.mjs`（场景1 贴坡滑行 contactTicks 恒 0 不传送；场景2
 悬空不传送 → 落地后触发）。
+
+**2026-08-08 晚 传送最终语义（用户三连澄清定案）**：
+- **A. StartTouch 外→内边沿**：任何状态（空中/滑行/落地）从 trigger 体积外跨入
+  （false→true 跳变）即传送（CS:S 原生；主项目 start-touch 同）
+- **B. 落地脚底检测**：刚落地（ground_ticks 0→≥1 上升沿，`was_landed` 跟踪）且
+  脚底探测范围内有传送区域 → 传送。**注意不是**"传送区域内落地才传送"（停留
+  语义）——解决与斜面重合/位置相差不大的 trigger 不触发（玩家从区域内部起飞
+  再落地，StartTouch 无边沿可走）
+- 探测深度 `TRIGGER_PROBES` 最终 **[0, 24]**（0 即脚底、24 给深度容差，覆盖
+  斜面重合/薄片 trigger；StartTouch inside 判定加深可能高处误置，由落地检测 B
+  兜底不丢）；gate/contact_ticks 门槛已移除（参数保留兼容）
+- 验证：phys-smoke 传送触发 tick24 → tick19（探测更深更早）
+
+**2026-08-08 晚 兜底同步反转（渲染主线 → 权威）**：原"位置差 >200 无条件权威
+覆盖渲染"。反转方向——**渲染主线（144Hz 预测物理）精度更高，大偏差时渲染状态
+反向同步权威**（Worker `phys.set_state` + `resetInput` 清输入增量，键位保留），
+触发三条件 OR：① dist > 500 强制同步（不看朝向）；② dist > 300 且 yaw 最小角差
+≤3° 且水平转动方向相同（`prevRenderYaw/prevAuthYaw` 转向符号）；③ dist ≤ 300
+但 yaw 偏差 > 45°（视角大幅分叉）。**250ms 冷却**（`SYNC_COOLDOWN_MS`）防抖；
+**撤回机制**：同步在途再次大幅分叉（>500 或 yaw>45°）→ 以权威为准回滚渲染
+（撤销"渲染为准"推错方向）。通道：`renderer.onSyncRenderState` 回调 →
+`sync-render-state` 消息 → Worker。set-spawn-points 消息同步出生点列表到权威。
+
+**2026-08-08 晚 面板/准星/参数**：
+- **面板偏好持久化**：`vbsp:panelPrefs`（physics 全参/体型/操作/显示/视角），
+  构造加载 → 控件回写 → 双端推送（sendAllPrefs）；bindSlider/bindCheckbox 自动保存
+- **准星风格化**：CSS 变量驱动 4 线 + 中心点，颜色/线长/粗细/间隙/描边/中心点
+  面板可调，即时生效 + 持久化
+- **sv_airaccelerate 100 → 150**（game Rust `AIR_ACCELERATE` + config + 面板）
 
 ### 2.2 已知技术遗留（代码层面）
 

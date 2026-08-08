@@ -94,7 +94,10 @@ vendored 自 `@unsurf/cs-movement`（`src/physics/`，TS 纯函数）：
   （地速/重力/加速/摩擦/自动连跳/模拟频率等，来源徽标区分 默认/手动）+
   碰撞箱体积调节（倍率/半宽/站高/蹲高 + 卡住自动恢复）；Worker 侧 `PhysicsParams` 管理，
   主线程经 `set-physics-param`/`set-hull` 消息操作，`physics-snapshot` 回传渲染面板，
-  `physics-event` 上报碰撞箱自动恢复事件。
+  `physics-event` 上报碰撞箱自动恢复事件；
+- **面板偏好持久化**（`vbsp:uiPrefs`）：input / hud（含准星风格）/ debug（碰撞箱
+  可视化/传送触发模式/落地帧数）/ lod（PVS/视距）/ player 碰撞箱，刷新自动恢复
+  （物理参数由 Settings 独立持久化）；
 
 ### 4.1 循环与渲染
 - Worker：frame 信号 → takeInput 聚合 → 固定步长（tickRate 默认 64Hz，可调 48-128，
@@ -112,7 +115,11 @@ vendored 自 `@unsurf/cs-movement`（`src/physics/`，TS 纯函数）：
   触发文件输入即调用，`loadScene` 开头防御性调用；`ColliderDebug.clearAll()` 保留
   scene/group 引用不清内部状态；
 - 鼠标：`yaw -= dx * (sensitivity * m_yaw)`，pitch clamp ±89°；
-- 近平面贴墙自适应收缩（防近平面裁剪穿墙，不移动相机）；
+- 近平面贴墙自适应收缩（防近平面裁剪穿墙，不移动相机）：**6 方向探测**
+  （4 水平正交 + 上下 2），距离 **100**、收缩系数 **0.3**（near = 最近距离 ×
+  0.3），面板「显示设置」实时可调（`setNearParams`），探测每 2 帧一次；
+- 准星**风格化自定义**（显示设置面板）：颜色 / 线长 / 粗细 / 中心间隙 / 描边 /
+  中心点，CSS 变量驱动（4 线 + 点），即时生效 + `vbsp:uiPrefs` 持久化；
 - 传送检测 `TeleportManager.checkTeleport` 三模式（`debug.teleportTriggerMode` 影响游玩行为）：
   - `start-touch`（**默认**）：StartTouch 边沿触发（CS:S 引擎原生行为，外→内才触发）；
   - `start-touch-grounded`：落地检测（空中不传送；面板显示连续落地帧数滑块，
@@ -181,7 +188,7 @@ pakfile_models / phyfile。
 
 | 分段 | 关键项（默认） |
 |---|---|
-| `physics` | mode(physics) / gravity(800) / jumpSpeed(302) / maxSpeed(250) / friction(4) / accelerate(10) / airAccel(100) / tickRate(64) / **colliderSource(auto)** |
+| `physics` | mode(physics) / gravity(800) / jumpSpeed(302) / maxSpeed(250) / friction(4) / accelerate(10) / airAccel(**150**) / tickRate(64) / **colliderSource(auto)** |
 | `player` | radius(16) / standHeight(72) / duckHeight(54) / eyeOffset(8) |
 | `movement` / `smoothing` | speed(200) / sprintMultiplier(4)；smoothing.speed(12) |
 | `teleport` | triggerRadius(64) / cooldownMs(600) |

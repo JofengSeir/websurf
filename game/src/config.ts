@@ -42,10 +42,28 @@ export interface PlayerConfig {
   duckHeight: number;
 }
 
+/** 准星风格化配置（面板可调，localStorage 持久化）。 */
+export interface CrosshairConfig {
+  /** 准星颜色（CSS hex）。 */
+  color: string;
+  /** 线条长度（px）。 */
+  size: number;
+  /** 线条粗细（px）。 */
+  thickness: number;
+  /** 中心间隙（px）。 */
+  gap: number;
+  /** 黑色描边（深色背景下更清晰）。 */
+  outline: boolean;
+  /** 中心点。 */
+  dot: boolean;
+}
+
 export interface HudConfig {
   showCrosshair: boolean;
   /** 速度面板模式：'lateral' 横向 / 'lateral-vertical' 横+竖 / 'total' 综合。 */
   speedMode: 'lateral' | 'lateral-vertical' | 'total';
+  /** 准星风格（见 CrosshairConfig）。 */
+  crosshair: CrosshairConfig;
 }
 
 export interface RuntimeConfig {
@@ -71,7 +89,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     maxSpeed: 250,
     friction: 4,
     accelerate: 10,
-    airAccel: 100,
+    airAccel: 150,
     stopSpeed: 100,
     autobhop: true,
     walkSpeed: 130,
@@ -94,6 +112,14 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   hud: {
     showCrosshair: true,
     speedMode: 'lateral',
+    crosshair: {
+      color: '#4ade80',
+      size: 6,
+      thickness: 2,
+      gap: 4,
+      outline: true,
+      dot: false,
+    },
   },
 };
 

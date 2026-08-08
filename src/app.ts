@@ -53,6 +53,16 @@ const dom = {
 	crosshairEl: document.getElementById('crosshair') as HTMLElement | null,
 	hudVisibleChk: document.getElementById('hudVisible') as HTMLInputElement | null,
 	showCrosshairChk: document.getElementById('showCrosshair') as HTMLInputElement | null,
+	// 准星风格化
+	chColor: document.getElementById('chColor') as HTMLInputElement | null,
+	chSizeRange: document.getElementById('chSize') as HTMLInputElement | null,
+	chSizeNum: document.getElementById('chSizeNum') as HTMLInputElement | null,
+	chThicknessRange: document.getElementById('chThickness') as HTMLInputElement | null,
+	chThicknessNum: document.getElementById('chThicknessNum') as HTMLInputElement | null,
+	chGapRange: document.getElementById('chGap') as HTMLInputElement | null,
+	chGapNum: document.getElementById('chGapNum') as HTMLInputElement | null,
+	chOutlineChk: document.getElementById('chOutline') as HTMLInputElement | null,
+	chDotChk: document.getElementById('chDot') as HTMLInputElement | null,
 	physicsModeSelect: document.getElementById('physicsMode') as HTMLSelectElement | null,
 	colliderSourceSelect: document.getElementById('colliderSource') as HTMLSelectElement | null,
 	mouseSensRange: document.getElementById('mouseSens') as HTMLInputElement | null,
@@ -203,6 +213,11 @@ async function main(): Promise<void> {
 
 	// 3. 绑定输入
 	bindInput(dom.canvas);
+	// 3.2 面板偏好持久化：加载（config 合并 + 控件同步 + 准星应用 + 双端发送）
+	loadUiPrefs();
+	syncPrefsControls();
+	applyCrosshairStyle();
+	sendPrefsToWorker();
 	bindUI();
 
 	// 3.5 初始化"进入地图前即可设置"的控件（物理模式/碰撞来源/PVS 等与地图加载无关）
@@ -495,6 +510,111 @@ function bindInput(canvas: HTMLCanvasElement): void {
 // UI 控件绑定
 // ---------------------------------------------------------------------------
 
+/** 面板偏好持久化键（input/hud/debug/lod/player 子集；物理参数由 Settings 另管）。 */
+const UI_PREFS_KEY = 'vbsp:uiPrefs';
+
+/** 收集面板可调偏好（config 子集，序列化用）。 */
+function collectUiPrefs(): Record<string, unknown> {
+	return {
+		input: { ...config.input },
+		hud: { ...config.hud, crosshair: { ...config.hud.crosshair } },
+		debug: { ...config.debug },
+		lod: { ...config.lod },
+		player: { ...config.player },
+	};
+}
+
+/** 保存面板偏好到 localStorage。 */
+function saveUiPrefs(): void {
+	try {
+		localStorage.setItem(UI_PREFS_KEY, JSON.stringify(collectUiPrefs()));
+	} catch (err) {
+		console.warn('[app] UI 偏好保存失败:', err);
+	}
+}
+
+/** 加载面板偏好 → 合并到 config + 控件同步 + 双端发送。 */
+function loadUiPrefs(): void {
+	try {
+		const raw = localStorage.getItem(UI_PREFS_KEY);
+		if (!raw) return;
+		const prefs = JSON.parse(raw) as Record<string, unknown>;
+		const merge = (section: keyof RuntimeConfig, patch: unknown): void => {
+			if (!patch || typeof patch !== 'object') return;
+			applyConfigPatch(config, section, patch as Record<string, unknown>);
+		};
+		merge('input', prefs.input);
+		merge('hud', prefs.hud);
+		merge('debug', prefs.debug);
+		merge('lod', prefs.lod);
+		merge('player', prefs.player);
+	} catch (err) {
+		console.warn('[app] UI 偏好加载失败:', err);
+	}
+}
+
+/** 应用准星风格到 DOM（CSS 变量 + 可见性 + 描边/中心点）。 */
+function applyCrosshairStyle(): void {
+	const el = dom.crosshairEl;
+	if (!el) return;
+	const c = config.hud.crosshair;
+	const s = el.style;
+	s.setProperty('--ch-color', c.color);
+	s.setProperty('--ch-size', `${c.size}px`);
+	s.setProperty('--ch-thickness', `${c.thickness}px`);
+	s.setProperty('--ch-gap', `${c.gap}px`);
+	el.classList.toggle('hidden', !config.hud.showCrosshair);
+	el.querySelectorAll('.ch-line').forEach((line) => {
+		line.classList.toggle('outline', c.outline);
+	});
+	const dot = el.querySelector('.ch-dot') as HTMLElement | null;
+	if (dot) dot.style.display = c.dot ? 'block' : 'none';
+}
+
+/** 按 config 当前值回写面板控件（持久化加载后同步显示）。 */
+function syncPrefsControls(): void {
+	const setNum = (id: string, val: number): void => {
+		const el = document.getElementById(id) as HTMLInputElement | null;
+		if (el) el.value = String(val);
+	};
+	const setChk = (id: string, val: boolean): void => {
+		const el = document.getElementById(id) as HTMLInputElement | null;
+		if (el) el.checked = val;
+	};
+	setNum('mouseSens', config.input.sensitivity);
+	setNum('yawBindSpeed', config.input.yawBindSpeed);
+	setNum('cullDistance', config.lod.cullDistance);
+	setChk('pvsEnabled', config.lod.pvsEnabled);
+	setChk('showSolids', config.debug.showSolids);
+	setChk('showTriggers', config.debug.showTriggers);
+	setChk('showPlaneInfo', config.debug.showPlaneInfo);
+	if (dom.hudVisibleChk) dom.hudVisibleChk.checked = config.hud.visible;
+	if (dom.showCrosshairChk) dom.showCrosshairChk.checked = config.hud.showCrosshair;
+	if (dom.chColor) dom.chColor.value = config.hud.crosshair.color;
+	setNum('chSize', config.hud.crosshair.size);
+	setNum('chThickness', config.hud.crosshair.thickness);
+	setNum('chGap', config.hud.crosshair.gap);
+	if (dom.chOutlineChk) dom.chOutlineChk.checked = config.hud.crosshair.outline;
+	if (dom.chDotChk) dom.chDotChk.checked = config.hud.crosshair.dot;
+	dom.triggerModeRadios.forEach((radio) => {
+		radio.checked = radio.value === config.debug.teleportTriggerMode;
+	});
+	if (dom.groundedFramesRange) dom.groundedFramesRange.value = String(config.debug.groundedFramesRequired);
+	if (dom.groundedFramesNum) dom.groundedFramesNum.value = String(config.debug.groundedFramesRequired);
+	// HUD 可见性即时应用
+	if (dom.hudEl) dom.hudEl.style.display = config.hud.visible ? '' : 'none';
+}
+
+/** 持久化加载后向 Worker 推送各段配置。 */
+function sendPrefsToWorker(): void {
+	if (!inputBridge) return;
+	inputBridge.sendConfig('input', { ...config.input });
+	inputBridge.sendConfig('hud', { ...config.hud });
+	inputBridge.sendConfig('debug', { ...config.debug });
+	inputBridge.sendConfig('lod', { ...config.lod });
+	inputBridge.sendConfig('player', { ...config.player });
+}
+
 function bindUI(): void {
 	// 物理控制面板：参数行初始化（值由 physics-snapshot 回填）
 	initPhysicsPanel();
@@ -531,6 +651,7 @@ function bindUI(): void {
 		config.input.sensitivity = val;
 		// sensitivity 通过 config 同步到 Worker 端 player.settings.sensitivity
 		inputBridge?.sendConfig('input', { sensitivity: val });
+		saveUiPrefs();
 	});
 	dom.mouseSensNum?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
@@ -538,6 +659,7 @@ function bindUI(): void {
 		if (dom.mouseSensRange) dom.mouseSensRange.value = String(Math.min(5, Math.max(0.1, val)));
 		config.input.sensitivity = val;
 		inputBridge?.sendConfig('input', { sensitivity: val });
+		saveUiPrefs();
 	});
 
 	// Q/E 键 yaw 旋转速度（turn bind，度/秒）
@@ -546,6 +668,7 @@ function bindUI(): void {
 		if (dom.yawBindSpeedNum && Number.isFinite(val)) dom.yawBindSpeedNum.value = String(val);
 		applyConfigPatch(config, 'input', { yawBindSpeed: val });
 		inputBridge?.sendConfig('input', { yawBindSpeed: val });
+		saveUiPrefs();
 	});
 	dom.yawBindSpeedNum?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
@@ -553,28 +676,35 @@ function bindUI(): void {
 		if (dom.yawBindSpeedRange) dom.yawBindSpeedRange.value = String(Math.min(720, Math.max(0, val)));
 		applyConfigPatch(config, 'input', { yawBindSpeed: val });
 		inputBridge?.sendConfig('input', { yawBindSpeed: val });
+		saveUiPrefs();
 	});
 
 	// 视距剔除（主线程渲染器 LOD 直接生效 + Worker 配置同步）
 	dom.cullDistRange?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
 		if (dom.cullDistNum && Number.isFinite(val)) dom.cullDistNum.value = String(val);
+		applyConfigPatch(config, 'lod', { cullDistance: val });
 		rendererMain?.setCullDistance(val);
 		inputBridge?.sendSetCullDistance(val);
+		saveUiPrefs();
 	});
 	dom.cullDistNum?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
 		if (!Number.isFinite(val)) return;
 		const max = parseFloat(dom.cullDistRange?.max ?? '100000');
 		if (dom.cullDistRange) dom.cullDistRange.value = String(Math.min(max, Math.max(1000, val)));
+		applyConfigPatch(config, 'lod', { cullDistance: val });
 		rendererMain?.setCullDistance(val);
 		inputBridge?.sendSetCullDistance(val);
+		saveUiPrefs();
 	});
 
 	// PVS 开关
 	dom.pvsEnabledChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
+		applyConfigPatch(config, 'lod', { pvsEnabled: enabled });
 		inputBridge?.sendConfig('lod', { pvsEnabled: enabled });
+		saveUiPrefs();
 	});
 
 	// 重生
@@ -709,6 +839,7 @@ function bindUI(): void {
 		if (dom.hudEl) dom.hudEl.style.display = visible ? '' : 'none';
 		applyConfigPatch(config, 'hud', { visible });
 		inputBridge?.sendConfig('hud', { visible });
+		saveUiPrefs();
 	});
 
 	// 准星开关
@@ -719,6 +850,58 @@ function bindUI(): void {
 		}
 		applyConfigPatch(config, 'hud', { showCrosshair: visible });
 		inputBridge?.sendConfig('hud', { showCrosshair: visible });
+		saveUiPrefs();
+	});
+
+	// 准星风格化（滑块 ↔ 输入框双向 + 变更即应用 + 持久化）
+	const bindCh = (
+		range: HTMLInputElement | null,
+		num: HTMLInputElement | null,
+		apply: (v: number) => void,
+	): void => {
+		const onRange = (): void => {
+			if (!range) return;
+			const v = parseFloat(range.value);
+			if (num) num.value = String(v);
+			apply(v);
+		};
+		const onNum = (): void => {
+			if (!num) return;
+			const v = parseFloat(num.value);
+			if (Number.isNaN(v)) return;
+			if (range) range.value = String(v);
+			apply(v);
+		};
+		range?.addEventListener('input', onRange);
+		num?.addEventListener('change', onNum);
+	};
+	const applyCh = (): void => {
+		applyCrosshairStyle();
+		saveUiPrefs();
+	};
+	dom.chColor?.addEventListener('input', () => {
+		applyConfigPatch(config, 'hud', { crosshair: { ...config.hud.crosshair, color: dom.chColor!.value } });
+		applyCh();
+	});
+	bindCh(dom.chSizeRange, dom.chSizeNum, (v) => {
+		applyConfigPatch(config, 'hud', { crosshair: { ...config.hud.crosshair, size: v } });
+		applyCh();
+	});
+	bindCh(dom.chThicknessRange, dom.chThicknessNum, (v) => {
+		applyConfigPatch(config, 'hud', { crosshair: { ...config.hud.crosshair, thickness: v } });
+		applyCh();
+	});
+	bindCh(dom.chGapRange, dom.chGapNum, (v) => {
+		applyConfigPatch(config, 'hud', { crosshair: { ...config.hud.crosshair, gap: v } });
+		applyCh();
+	});
+	dom.chOutlineChk?.addEventListener('change', (e) => {
+		applyConfigPatch(config, 'hud', { crosshair: { ...config.hud.crosshair, outline: (e.target as HTMLInputElement).checked } });
+		applyCh();
+	});
+	dom.chDotChk?.addEventListener('change', (e) => {
+		applyConfigPatch(config, 'hud', { crosshair: { ...config.hud.crosshair, dot: (e.target as HTMLInputElement).checked } });
+		applyCh();
 	});
 
 	// 传送触发模式（物理面板）：StartTouch / 落地检测
@@ -729,6 +912,7 @@ function bindUI(): void {
 			applyConfigPatch(config, 'debug', { teleportTriggerMode: mode });
 			inputBridge?.sendConfig('debug', { teleportTriggerMode: mode });
 			updateGroundedFramesVisibility();
+			saveUiPrefs();
 		});
 	});
 	// 落地检测：连续落地帧数滑块 + 输入框
@@ -737,6 +921,7 @@ function bindUI(): void {
 		if (dom.groundedFramesNum && Number.isFinite(val)) dom.groundedFramesNum.value = String(val);
 		applyConfigPatch(config, 'debug', { groundedFramesRequired: val });
 		inputBridge?.sendConfig('debug', { groundedFramesRequired: val });
+		saveUiPrefs();
 	});
 	dom.groundedFramesNum?.addEventListener('input', (e) => {
 		const val = parseInt((e.target as HTMLInputElement).value, 10);
@@ -744,6 +929,7 @@ function bindUI(): void {
 		if (dom.groundedFramesRange) dom.groundedFramesRange.value = String(Math.min(30, Math.max(1, val)));
 		applyConfigPatch(config, 'debug', { groundedFramesRequired: val });
 		inputBridge?.sendConfig('debug', { groundedFramesRequired: val });
+		saveUiPrefs();
 	});
 
 	// 显示设置：实体/触发碰撞箱、准星射线检测（渲染器负责可视化，config 同步 Worker）
@@ -752,12 +938,14 @@ function bindUI(): void {
 		applyConfigPatch(config, 'debug', { showSolids: enabled });
 		rendererMain?.applyConfigPatch('debug', { showSolids: enabled });
 		inputBridge?.sendConfig('debug', { showSolids: enabled });
+		saveUiPrefs();
 	});
 	dom.showTriggersChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyConfigPatch(config, 'debug', { showTriggers: enabled });
 		rendererMain?.applyConfigPatch('debug', { showTriggers: enabled });
 		inputBridge?.sendConfig('debug', { showTriggers: enabled });
+		saveUiPrefs();
 	});
 	// 准星射线检测（hover 查看模型/实体平面/触发面信息）
 	dom.showPlaneInfoChk?.addEventListener('change', (e) => {
@@ -765,6 +953,7 @@ function bindUI(): void {
 		applyConfigPatch(config, 'debug', { showPlaneInfo: enabled });
 		rendererMain?.applyConfigPatch('debug', { showPlaneInfo: enabled });
 		inputBridge?.sendConfig('debug', { showPlaneInfo: enabled });
+		saveUiPrefs();
 	});
 
 	// 近平面贴墙自适应参数（滑块 ↔ 输入框双向同步，实时生效）

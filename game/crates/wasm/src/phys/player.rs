@@ -19,7 +19,7 @@ pub const RUN_SPEED: f64 = 250.0;
 pub const WALK_SPEED: f64 = 130.0;
 pub const CROUCH_SPEED: f64 = 85.0;
 
-pub const AIR_ACCELERATE: f64 = 100.0;
+pub const AIR_ACCELERATE: f64 = 150.0;
 pub const AIR_SPEED_CAP: f64 = 30.0;
 
 pub const OVERBOUNCE_SURF: f64 = 1.0;

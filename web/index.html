@@ -164,24 +164,51 @@
     }
     #hud .label { color: #888; }
     #hud .v { color: #4a90e2; }
-    /* 中心准星 */
+    /* 中心准星（风格化：CSS 变量驱动，面板可调） */
     #crosshair {
-      position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
+      position: absolute; left: 50%; top: 50%;
+      --ch-color: #4ade80;
+      --ch-size: 6px;
+      --ch-thickness: 2px;
+      --ch-gap: 4px;
       pointer-events: none;
       z-index: 10;
     }
-    #crosshair::before, #crosshair::after {
-      content: ''; position: absolute; background: rgba(255, 255, 255, 0.7);
-      box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
-    }
-    #crosshair::before {
-      width: 2px; height: 12px; top: -6px; left: -1px;
-    }
-    #crosshair::after {
-      width: 12px; height: 2px; top: -1px; left: -6px;
-    }
     #crosshair.hidden { display: none; }
+    #crosshair .ch-line {
+      position: absolute;
+      background: var(--ch-color);
+    }
+    #crosshair .ch-line.outline {
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.85);
+    }
+    #crosshair .ch-t {
+      left: 50%; bottom: calc(50% + var(--ch-gap));
+      width: var(--ch-thickness); height: var(--ch-size);
+      margin-left: calc(var(--ch-thickness) / -2);
+    }
+    #crosshair .ch-b {
+      left: 50%; top: calc(50% + var(--ch-gap));
+      width: var(--ch-thickness); height: var(--ch-size);
+      margin-left: calc(var(--ch-thickness) / -2);
+    }
+    #crosshair .ch-l {
+      top: 50%; right: calc(50% + var(--ch-gap));
+      height: var(--ch-thickness); width: var(--ch-size);
+      margin-top: calc(var(--ch-thickness) / -2);
+    }
+    #crosshair .ch-r {
+      top: 50%; left: calc(50% + var(--ch-gap));
+      height: var(--ch-thickness); width: var(--ch-size);
+      margin-top: calc(var(--ch-thickness) / -2);
+    }
+    #crosshair .ch-dot {
+      position: absolute; left: 50%; top: 50%;
+      width: calc(var(--ch-thickness) * 2.5); height: calc(var(--ch-thickness) * 2.5);
+      margin: calc(var(--ch-thickness) * -1.25) 0 0 calc(var(--ch-thickness) * -1.25);
+      background: var(--ch-color); border-radius: 50%;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.85);
+    }
     #hints {
       position: absolute; bottom: 8px; right: 8px;
       background: rgba(20, 20, 20, 0.75);
@@ -388,6 +415,26 @@
                 <input type="checkbox" id="showCrosshair" checked />
                 <label for="showCrosshair">显示准星</label>
               </div>
+              <label title="准星颜色">准星颜色</label>
+              <input type="color" id="chColor" value="#4ade80" />
+              <div></div>
+              <label title="准星线长（px）">准星线长</label>
+              <input type="range" id="chSize" min="1" max="20" step="1" value="6" />
+              <div class="val"><input type="number" id="chSizeNum" class="param-num" min="1" max="20" step="any" value="6" /></div>
+              <label title="准星粗细（px）">准星粗细</label>
+              <input type="range" id="chThickness" min="1" max="8" step="1" value="2" />
+              <div class="val"><input type="number" id="chThicknessNum" class="param-num" min="1" max="8" step="any" value="2" /></div>
+              <label title="准星中心间隙（px）">中心间隙</label>
+              <input type="range" id="chGap" min="0" max="16" step="1" value="4" />
+              <div class="val"><input type="number" id="chGapNum" class="param-num" min="0" max="16" step="any" value="4" /></div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="chOutline" checked />
+                <label for="chOutline" title="黑色描边，深色背景下更清晰">描边</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="chDot" />
+                <label for="chDot" title="中心圆点">中心点</label>
+              </div>
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showSolids" />
                 <label for="showSolids" title="玩家附近碰撞箱线框：地面绿/斜坡黄/墙红">显示实体碰撞箱</label>
@@ -401,8 +448,8 @@
                 <label for="showPlaneInfo" title="准星对准模型/实体面/触发面时，在 HUD 显示其名称与属性信息">准星信息</label>
               </div>
               <label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到（防透视），性能开销略增">近平面探测距离</label>
-              <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="72" />
-              <div class="val"><input type="number" id="nearProbeDistNum" class="param-num" min="16" max="128" step="any" value="72" /></div>
+              <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />
+              <div class="val"><input type="number" id="nearProbeDistNum" class="param-num" min="16" max="128" step="any" value="100" /></div>
               <label title="贴墙时 near = 最近几何距离 × 此系数：越小越不易裁墙（更保守），远处深度精度略降">近平面收缩系数</label>
               <input type="range" id="nearRatio" min="0.1" max="1" step="0.01" value="0.3" />
               <div class="val"><input type="number" id="nearRatioNum" class="param-num" min="0.1" max="1" step="any" value="0.3" /></div>
@@ -422,7 +469,13 @@
       <!-- 预览区 -->
       <div id="previewArea">
         <canvas id="preview" tabindex="0"></canvas>
-        <div id="crosshair"></div>
+        <div id="crosshair">
+          <div class="ch-line ch-t"></div>
+          <div class="ch-line ch-b"></div>
+          <div class="ch-line ch-l"></div>
+          <div class="ch-line ch-r"></div>
+          <div class="ch-dot"></div>
+        </div>
         <div id="hud">
           <div id="stats">FPS —  位置 —  速度 —</div>
           <div id="cullStats">可见 —  PVS —  LOD —</div>
