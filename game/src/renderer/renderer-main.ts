@@ -67,6 +67,9 @@ export class RendererMain {
   /** 上一权威速度/时刻（算权威加速度用）。 */
   private prevAuthVel: { x: number; y: number; z: number } | null = null;
   private prevAuthTimeMs = 0;
+  /** 上次记录时的渲染物理 yaw / 权威 yaw（水平转动方向判断用）。 */
+  private prevRenderYaw = 0;
+  private prevAuthYaw = 0;
   /** 主线程渲染物理是否已用首个权威帧校准起点。 */
   private predStarted = false;
   /** 渲染帧推进（dt 上限防异常）。 */
@@ -417,8 +420,13 @@ export class RendererMain {
    * Worker 是权威帧计算器（加载地图碰撞、独立 64Hz 模拟）；本方法仅记录
    * 权威帧（速度供外推校准、位置/角度供异常兜底）：
    * - 首次权威帧（或重载后）：主线程渲染物理 set_state(权威帧) 作为起点（仅一次）
-   * - 异常兜底：位置差 > 200（暂停恢复/传送残留等极端异常）→ set_state 对齐
-   *   （防崩溃安全网；正常运行不触发，不属"强行同步位置"）
+   * - 异常兜底（用户定调 2026-08-08）：
+   *   - 位置差 > 500 → **强制**对齐权威帧（绝对异常，不看朝向）
+   *   - 位置差 > 300 **且** 水平朝向一致 → 对齐权威帧：
+   *     ① yaw 最小角差 ≤ ±3°（归一化，防 350° vs 0° 误判为 350°）
+   *     ② 水平转动方向相同（本权威帧间隔内渲染 yaw 与权威 yaw 的
+   *        转向符号一致；静止 sign=0 视为兼容）——方向反了说明渲染物理
+   *        可能已跑飞/输入错乱，对齐会放大错误，交给速度校准慢慢拉回
    * - 速度校准由 calibrateVelocity 在每个渲染帧执行（外推，位置不覆盖）
    */
   private correctFromAuthority(): void {
@@ -441,16 +449,45 @@ export class RendererMain {
     if (!this.predStarted) {
       this.predStarted = true;
       this.predPhys.set_state(f.pos.x, f.pos.y, f.pos.z, f.yaw, f.pitch, f.vel.x, f.vel.y, f.vel.z, f.onGround);
+      this.prevRenderYaw = f.yaw;
+      this.prevAuthYaw = f.yaw;
       return;
     }
-    // 异常兜底：位置差 > 200 → 渲染物理对齐（暂停恢复/传送残留等极端场景；正常不触发）
-    const st = this.predPhys.state() as { posX: number; posY: number; posZ: number };
+
+    // 异常兜底：距离 + 朝向一致性判据（用户定调）
+    const st = this.predPhys.state() as { posX: number; posY: number; posZ: number; yaw: number };
     const dist = Math.hypot(st.posX - f.pos.x, st.posY - f.pos.y, st.posZ - f.pos.z);
-    if (dist > 200) {
+
+    // 水平转动方向（本权威帧间隔内；正负 = 转向，0 = 静止）
+    const renderTurn = Math.sign(this.normalizeAngleDeg(st.yaw - this.prevRenderYaw));
+    const authTurn = Math.sign(this.normalizeAngleDeg(f.yaw - this.prevAuthYaw));
+    this.prevRenderYaw = st.yaw;
+    this.prevAuthYaw = f.yaw;
+
+    // ① 绝对异常：> 500 强制对齐
+    if (dist > 500) {
       this.predPhys.set_state(f.pos.x, f.pos.y, f.pos.z, f.yaw, f.pitch, f.vel.x, f.vel.y, f.vel.z, f.onGround);
+      this.prevRenderYaw = f.yaw;
       this.pendingDx = 0;
       this.pendingDy = 0;
+      return;
     }
+    // ② 距离 > 300 且朝向一致（yaw 最小角差 ≤ 3° + 转动方向相同）→ 对齐
+    if (dist > 300) {
+      const yawDiff = Math.abs(this.normalizeAngleDeg(st.yaw - f.yaw));
+      const sameTurn = renderTurn === 0 || authTurn === 0 || renderTurn === authTurn;
+      if (yawDiff <= 3 && sameTurn) {
+        this.predPhys.set_state(f.pos.x, f.pos.y, f.pos.z, f.yaw, f.pitch, f.vel.x, f.vel.y, f.vel.z, f.onGround);
+        this.prevRenderYaw = f.yaw;
+        this.pendingDx = 0;
+        this.pendingDy = 0;
+      }
+    }
+  }
+
+  /** 角度归一化到 (-180, 180]：最小角差/旋转方向判断用（350° vs 0° → 10°）。 */
+  private normalizeAngleDeg(a: number): number {
+    return ((a + 180) % 360 + 360) % 360 - 180;
   }
 
   /** 权威加速度 = 两权威帧速度差 / 帧间隔（u/s²）；首帧/间隔异常 → 0。 */
@@ -513,6 +550,8 @@ export class RendererMain {
     this.pendingKeys = 0;
     this.prevAuthVel = null;
     this.prevAuthTimeMs = 0;
+    this.prevRenderYaw = 0;
+    this.prevAuthYaw = 0;
     this.predStarted = false;
     this.curAuth = null;
     this.lastVa = -1;
