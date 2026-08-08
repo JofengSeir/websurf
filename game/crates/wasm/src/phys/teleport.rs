@@ -53,14 +53,14 @@ pub struct TeleportTrigger {
     pub inside: bool,
 }
 
-/// 传送管理器（start-touch 模式）。
+/// 传送管理器（start-touch + 落地脚底检测）。
 #[derive(Clone, Debug, Default)]
 pub struct TeleportManager {
     pub triggers: Vec<TeleportTrigger>,
     pub destinations: Vec<TeleportDestination>,
     cooldown: f64,
-    /// 上一帧是否已过落地稳定门槛（用于跨门槛时重置 inside 边沿跟踪）。
-    was_grounded: bool,
+    /// 上一 tick 是否着地（落地边沿检测用：0→≥1 的上升沿 = 刚落地）。
+    was_landed: bool,
 }
 
 impl TeleportManager {
@@ -145,19 +145,24 @@ impl TeleportManager {
             triggers,
             destinations,
             cooldown: 0.0,
-            was_grounded: false,
+            was_landed: false,
         })
     }
 
     /// 每 tick 检测：返回触发目标（若触发），否则 None。
     /// `predict` 模式（Worker-B）不检测传送（预测只填充中间帧，权威每帧校正）。
     ///
-    /// 落地稳定门槛（严格化）：`ground_ticks` 为"落地帧计数"——仅真正落地
-    /// （可站面，法线 y >= STANDABLE_NORMAL，见 categorize_position）才累加；
-    /// 斜面滑行（surfing）不算落地，滑行中 gate 恒不通过 → 不判定传送，避免
-    /// 坡底 trigger 被多点下探命中而误传送。仅当落地持续 ≥ gate_ticks 帧后
-    /// 才开始判定是否位于传送平面上；防止跳跃/下落轨迹"穿过"触发面瞬间误触。
-    pub fn check(&mut self, pos: &V3, ground_ticks: u32, gate_ticks: u32, dt: f64, predict: bool) -> Option<TeleportDestination> {
+    /// **StartTouch 外→内边沿 + 落地脚底检测（2026-08-08 用户定调，双条件 OR）**：
+    /// - **A. StartTouch 外→内边沿**：任何状态（空中/滑行/落地），玩家从
+    ///   trigger 体积外跨入（false→true 跳变）即传送（CS:S 原生语义）
+    /// - **B. 落地脚底检测**：刚落地（ground_ticks 0→≥1 上升沿）且脚底 2 单位
+    ///   范围内存在传送区域 → 传送。注意这是"落地动作本身触发"，**不是**
+    ///   "传送区域内落地后才触发"（后者是 start-touch-grounded 的停留语义，
+    ///   会导致与斜面重合/位置相差不大的 trigger 不触发——玩家可能从区域
+    ///   内部起飞再落地，StartTouch 无边沿可走）
+    /// 探测点收窄到脚底 2 单位（TRIGGER_PROBES [0,2]）：只有脚底真正贴合
+    /// trigger 才算 inside——高处/trigger 上方不误置 inside。
+    pub fn check(&mut self, pos: &V3, ground_ticks: u32, _gate_ticks: u32, dt: f64, predict: bool) -> Option<TeleportDestination> {
         if predict {
             return None;
         }
@@ -165,26 +170,36 @@ impl TeleportManager {
             self.cooldown -= dt;
             // 冷却期间仍需更新 inside 状态，否则冷却结束后误触发 start-touch
             for t in &mut self.triggers {
-                t.inside = probe_inside(pos, t); // 同主判定（多点下探）
+                t.inside = probe_inside(pos, t); // 同主判定（脚底 2 单位）
             }
             return None;
         }
 
-        // 落地稳定门槛：ground_ticks >= gate_ticks 才算"站定"（gate 默认 1）
-        let grounded = ground_ticks >= gate_ticks;
-        if grounded && !self.was_grounded {
-            // 刚跨过门槛：重置全部 inside，重新从"未触碰"开始边沿跟踪——
-            // 否则跳跃轨迹穿过触发面时 inside 已被置 true，落地后永不触发
+        // B. 落地脚底检测：刚落地（上升沿）且脚底贴 trigger → 传送
+        let just_landed = ground_ticks > 0 && !self.was_landed;
+        self.was_landed = ground_ticks > 0;
+        if just_landed {
             for t in &mut self.triggers {
-                t.inside = false;
+                if t.start_disabled {
+                    continue;
+                }
+                if t.spawnflags != 0 && (t.spawnflags & 0x01) == 0 && (t.spawnflags & 0x40) == 0 {
+                    continue;
+                }
+                if t.dest_index < 0 {
+                    continue;
+                }
+                if (t.dest_index as usize) >= self.destinations.len() {
+                    continue;
+                }
+                if probe_inside(pos, t) {
+                    self.cooldown = TRIGGER_COOLDOWN;
+                    return self.destinations.get(t.dest_index as usize).cloned();
+                }
             }
         }
-        self.was_grounded = grounded;
-        if !grounded {
-            // 未站定：不判定（也不污染 inside 状态）
-            return None;
-        }
 
+        // A. StartTouch 外→内边沿（任何状态）
         for t in &mut self.triggers {
             if t.start_disabled {
                 continue;
@@ -200,10 +215,9 @@ impl TeleportManager {
             if (t.dest_index as usize) >= self.destinations.len() {
                 continue; // 越界防御（dest_by_name 已用数组下标，正常不会触发）
             }
-            // 多点下探（0~48）：覆盖落地瞬间脚底尚未完全贴合的 gap 与薄片 trigger；
-            // gate（落地帧 ≥ gate_ticks）兜底——滑行/飞行中 ground_ticks=0 恒不判定
+            // 脚底 2 单位探测（0 点即 origin/脚底，2 点给贴合容差）
             let now_inside = probe_inside(pos, t);
-            // StartTouch 边沿触发：仅 false→true 跳变
+            // StartTouch 边沿触发：仅 false→true 跳变（外→内）
             let should_fire = now_inside && !t.inside;
             t.inside = now_inside;
             if should_fire {
@@ -227,11 +241,12 @@ impl TeleportManager {
     }
 }
 
-/// trigger 探测深度列表（units）：落地判定时玩家 origin 已被吸附贴地（GROUND_TRACE_DIST），
-/// 点 0 即脚底、正常情况下已在 trigger 体积内；多下探点覆盖落地瞬间贴合前的微小 gap
-/// 与薄片 trigger（surf_666 大量 h≤8 薄片）。滑行/飞行中不触发任何探测（gate 基于
-/// 落地帧计数，滑行 surfing 不算落地——修复正常滑翔图坡底 trigger 滑行中被下探命中误传）。
-const TRIGGER_PROBES: [f64; 7] = [0.0, 8.0, 16.0, 24.0, 32.0, 40.0, 48.0];
+/// trigger 探测深度列表（units）：**脚底 24 单位**（用户定调 2026-08-08）——
+/// 覆盖与斜面重合/薄片 trigger 场景（trigger 顶面可能低于脚底 2~24 单位）。
+/// 0 点即 origin/脚底，24 点给深度容差。
+/// 注：StartTouch inside 判定加深后，高处/trigger 上方可能误置 inside——
+/// 但落地脚底检测 B（落地边沿 + 脚底探测）兜底触发，不会漏。
+const TRIGGER_PROBES: [f64; 2] = [0.0, 24.0];
 
 /// 多点探测：任一深度点在 trigger 内即视为 inside（覆盖滑行 gap 与薄片 trigger）。
 fn probe_inside(pos: &V3, t: &TeleportTrigger) -> bool {

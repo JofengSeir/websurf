@@ -170,6 +170,12 @@ export class MsgState {
     return { dx, dy, keysMask: this.keysMask };
   }
 
+  /** 清空未消费输入增量（同步瞬间；键位保留，同 SAB resetInput）。 */
+  resetInput(): void {
+    this.dxAcc = 0;
+    this.dyAcc = 0;
+  }
+
   /** Worker 写权威帧 → postMessage `phys-frame`。 */
   writeAuthoritative(a: Omit<AuthFrame, 'onGround'>, onGround: boolean): number {
     this.va++;
@@ -258,6 +264,16 @@ export class ShmState {
     const dx = Number(dxFixed < 0n ? -dxClamped : dxClamped) / 1000;
     const dy = Number(dyFixed < 0n ? -dyClamped : dyClamped) / 1000;
     return { dx, dy, keysMask: Atomics.load(this.i32, I_KEYS) };
+  }
+
+  /**
+   * 清空未消费的输入增量（渲染主线 → 权威同步瞬间调用）：丢弃同步前的
+   * 残留鼠标增量，防止旧输入注入新状态；键位（keysMask）保留——按键
+   * 按住状态是实时的，清掉会导致丢按键。
+   */
+  resetInput(): void {
+    Atomics.store(this.b64, B_DX_ACC, 0n);
+    Atomics.store(this.b64, B_DY_ACC, 0n);
   }
 
   /**

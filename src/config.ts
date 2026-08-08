@@ -69,11 +69,29 @@ export interface InputConfig {
   yawBindSpeed: number;
 }
 
+/** 准星风格化配置（面板可调，localStorage 持久化）。 */
+export interface CrosshairConfig {
+  /** 准星颜色（CSS hex）。 */
+  color: string;
+  /** 线条长度（px）。 */
+  size: number;
+  /** 线条粗细（px）。 */
+  thickness: number;
+  /** 中心间隙（px）。 */
+  gap: number;
+  /** 黑色描边（深色背景下更清晰）。 */
+  outline: boolean;
+  /** 中心点。 */
+  dot: boolean;
+}
+
 export interface HudConfig {
   /** 显示右上角 HUD（stats/cullStats/gameStats/planeInfo）；关闭时 Worker 停止 stats 发送与平面检测，省性能。 */
   visible: boolean;
   /** 是否显示中心准星。 */
   showCrosshair: boolean;
+  /** 准星风格（见 CrosshairConfig）。 */
+  crosshair: CrosshairConfig;
 }
 
 export interface DebugConfig {
@@ -113,7 +131,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     maxSpeed: 250,
     friction: 4,
     accelerate: 10,
-    airAccel: 100,
+    airAccel: 150,
     stopSpeed: 100,
     duckScale: 0.34,
     groundAngle: (30 * Math.PI) / 180,
@@ -164,6 +182,14 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   hud: {
     visible: true,
     showCrosshair: true,
+    crosshair: {
+      color: '#4ade80',
+      size: 6,
+      thickness: 2,
+      gap: 4,
+      outline: true,
+      dot: false,
+    },
   },
   debug: {
     showSolids: false,

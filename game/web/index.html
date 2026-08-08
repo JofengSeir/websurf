@@ -51,14 +51,50 @@
     }
     #stats .vsep { color: #9aa3b2; margin: 0 6px; font-weight: 400; }
 
-    /* ── 准星 ─────────────────────────────────────────── */
+    /* ── 准星（风格化：CSS 变量驱动，面板可调）──────────── */
     #crosshair {
       position: absolute; left: 50%; top: 50%; z-index: 4;
-      width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
-      background: rgba(74,222,128,0.9); border-radius: 50%;
-      box-shadow: 0 0 6px rgba(74,222,128,0.5);
+      --ch-color: #4ade80;
+      --ch-size: 6px;
+      --ch-thickness: 2px;
+      --ch-gap: 4px;
+      pointer-events: none;
     }
     #crosshair.hidden { display: none; }
+    #crosshair .ch-line {
+      position: absolute;
+      background: var(--ch-color);
+    }
+    #crosshair .ch-line.outline {
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.85);
+    }
+    #crosshair .ch-t {
+      left: 50%; bottom: calc(50% + var(--ch-gap));
+      width: var(--ch-thickness); height: var(--ch-size);
+      margin-left: calc(var(--ch-thickness) / -2);
+    }
+    #crosshair .ch-b {
+      left: 50%; top: calc(50% + var(--ch-gap));
+      width: var(--ch-thickness); height: var(--ch-size);
+      margin-left: calc(var(--ch-thickness) / -2);
+    }
+    #crosshair .ch-l {
+      top: 50%; right: calc(50% + var(--ch-gap));
+      height: var(--ch-thickness); width: var(--ch-size);
+      margin-top: calc(var(--ch-thickness) / -2);
+    }
+    #crosshair .ch-r {
+      top: 50%; left: calc(50% + var(--ch-gap));
+      height: var(--ch-thickness); width: var(--ch-size);
+      margin-top: calc(var(--ch-thickness) / -2);
+    }
+    #crosshair .ch-dot {
+      position: absolute; left: 50%; top: 50%;
+      width: calc(var(--ch-thickness) * 2.5); height: calc(var(--ch-thickness) * 2.5);
+      margin: calc(var(--ch-thickness) * -1.25) 0 0 calc(var(--ch-thickness) * -1.25);
+      background: var(--ch-color); border-radius: 50%;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.85);
+    }
 
     /* ── 面板：桌面两栏（左导航 + 右设置）────────────── */
     #panel {
@@ -280,7 +316,13 @@
   <div id="status">正在加载 WASM 模块...</div>
   <div id="error"></div>
 
-  <div id="crosshair"></div>
+  <div id="crosshair">
+    <div class="ch-line ch-t"></div>
+    <div class="ch-line ch-b"></div>
+    <div class="ch-line ch-l"></div>
+    <div class="ch-line ch-r"></div>
+    <div class="ch-dot"></div>
+  </div>
   <div id="hud"><div id="stats">0</div></div>
 
   <!-- FPS 显示（左上角） -->
@@ -335,8 +377,8 @@
             <input type="range" id="accelerate" min="1" max="30" step="1" value="10" />
             <div class="val"><input id="accelerateNum" type="number" value="10" /></div></div>
           <div class="row"><label>空气加速</label>
-            <input type="range" id="airAccel" min="1" max="200" step="1" value="100" />
-            <div class="val"><input id="airAccelNum" type="number" value="100" /></div></div>
+            <input type="range" id="airAccel" min="1" max="200" step="1" value="150" />
+            <div class="val"><input id="airAccelNum" type="number" value="150" /></div></div>
           <div class="row"><label>摩擦</label>
             <input type="range" id="friction" min="0" max="10" step="0.1" value="4" />
             <div class="val"><input id="frictionNum" type="number" value="4" /></div></div>
@@ -419,6 +461,21 @@
           <h4>准星</h4>
           <div class="row"><label>显示准星</label>
             <input type="checkbox" id="showCrosshair" checked /></div>
+          <div class="row"><label>颜色</label>
+            <input type="color" id="chColor" value="#4ade80" /></div>
+          <div class="row"><label>线长</label>
+            <input type="range" id="chSize" min="1" max="20" step="1" value="6" />
+            <div class="val"><input id="chSizeNum" type="number" min="1" max="20" value="6" /></div></div>
+          <div class="row"><label>粗细</label>
+            <input type="range" id="chThickness" min="1" max="8" step="1" value="2" />
+            <div class="val"><input id="chThicknessNum" type="number" min="1" max="8" value="2" /></div></div>
+          <div class="row"><label>中心间隙</label>
+            <input type="range" id="chGap" min="0" max="16" step="1" value="4" />
+            <div class="val"><input id="chGapNum" type="number" min="0" max="16" value="4" /></div></div>
+          <div class="row"><label>描边</label>
+            <input type="checkbox" id="chOutline" checked /></div>
+          <div class="row"><label>中心点</label>
+            <input type="checkbox" id="chDot" /></div>
           <h4>速度面板</h4>
           <div class="row"><label>模式</label>
             <select id="speedMode">
@@ -428,8 +485,8 @@
             </select></div>
           <h4>近平面（防贴墙透视）</h4>
           <div class="row"><label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到，性能开销略增">探测距离</label>
-            <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="72" />
-            <div class="val"><input id="nearProbeDistNum" type="number" min="16" max="128" step="any" value="72" /></div></div>
+            <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />
+            <div class="val"><input id="nearProbeDistNum" type="number" min="16" max="128" step="any" value="100" /></div></div>
           <div class="row"><label title="贴墙时 near = 最近几何距离 × 此系数：越小越不易裁墙，远处深度精度略降">收缩系数</label>
             <input type="range" id="nearRatio" min="0.1" max="1" step="0.01" value="0.3" />
             <div class="val"><input id="nearRatioNum" type="number" min="0.1" max="1" step="any" value="0.3" /></div></div>

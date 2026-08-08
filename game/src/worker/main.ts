@@ -229,6 +229,24 @@ function dispatch(e: MessageEvent<WorkerMessage | { type: string }>): void {
     phys?.respawn();
     return;
   }
+  if (type === 'sync-render-state') {
+    // 渲染主线 → 权威同步（用户定调：渲染 144Hz 预测物理精度更高，大偏差时
+    // 以渲染主线为准反向校准权威）。同步瞬间清空权威侧未消费输入增量，
+    // 防止同步前的旧鼠标/按键残留注入新状态（键位保留——按住状态是实时的）。
+    const sm = msg as {
+      state?: {
+        posX: number; posY: number; posZ: number;
+        yaw: number; pitch: number;
+        velX: number; velY: number; velZ: number;
+        onGround: boolean;
+      };
+    };
+    if (!phys || !sm.state) return;
+    const s = sm.state;
+    phys.set_state(s.posX, s.posY, s.posZ, s.yaw, s.pitch, s.velX, s.velY, s.velZ, s.onGround);
+    shared?.resetInput();
+    return;
+  }
   if (type === 'set-spawn-points') {
     // 权威物理出生点列表（spawn 下拉切换用；world-json 只设了初始 spawn，
     // 缺此列表时 teleport_to_spawn 索引为空 → 静默忽略 → 传送被权威帧拉回）

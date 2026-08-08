@@ -99,6 +99,11 @@ async function main(): Promise<void> {
   // 2. 渲染器 = 主线程唯一物理线（BSP 解析/物理/渲染全在主线程）
   renderer = new RendererMain(shared);
   renderer.onSceneLoaded = (deathY) => renderer?.setDeathY(deathY);
+  // 兜底同步：渲染主线（144Hz 精度更高）→ 权威 Worker 反向校准；同步瞬间
+  // 清双端未消费输入增量（Worker 侧由 sync-render-state 处理 resetInput）
+  renderer.onSyncRenderState = (s) => {
+    fixWorker?.postMessage({ type: 'sync-render-state', state: s });
+  };
   renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
   renderer.start();
   // 主线程 wasm 初始化（BspProcessor + PhysWorld 同模块）

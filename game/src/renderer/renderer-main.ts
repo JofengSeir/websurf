@@ -70,6 +70,12 @@ export class RendererMain {
   /** 上次记录时的渲染物理 yaw / 权威 yaw（水平转动方向判断用）。 */
   private prevRenderYaw = 0;
   private prevAuthYaw = 0;
+  /** 渲染主线 → 权威同步在途（防权威追平前重复触发）。 */
+  private syncInFlight = false;
+  /** 上次兜底处理时间戳（同步或撤回；冷却内不重复处理）。 */
+  private lastSyncAt = 0;
+  /** 兜底处理冷却（ms）：同步/撤回后 250ms 内不再触发，防抖（用户调 2s→250ms）。 */
+  private static readonly SYNC_COOLDOWN_MS = 250;
   /** 主线程渲染物理是否已用首个权威帧校准起点。 */
   private predStarted = false;
   /** 渲染帧推进（dt 上限防异常）。 */
@@ -86,7 +92,7 @@ export class RendererMain {
    * 48 = 3×最小贴墙距离：配合 8 个水平探测方向（相邻夹角 45°），任意贴墙
    * 角度下最近方向与墙面夹角 ≥ 22.5°，斜距 ≤ 16/sin22.5° ≈ 41.8 < 48，
    * 垂直墙全角度可探测（原 32 + 仅 4 正交方向时斜贴墙掠射角 < 30° 会漏检）。 */
-  private static readonly NEAR_PROBE_DIST_DEFAULT = 72;
+  private static readonly NEAR_PROBE_DIST_DEFAULT = 100;
   private static readonly CAMERA_NEAR_MIN = 0.05;
   /** near 收缩系数默认：near = 最近几何距离 × 此值。 */
   private static readonly NEAR_RATIO_DEFAULT = 0.3;
@@ -101,14 +107,24 @@ export class RendererMain {
   private readonly _nearDirF = new THREE.Vector3();
   private readonly _nearDirR = new THREE.Vector3();
   private readonly _nearDirU = new THREE.Vector3();
-  private readonly _nearDirD1 = new THREE.Vector3();
-  private readonly _nearDirD2 = new THREE.Vector3();
   private readonly _nearRaycaster = new THREE.Raycaster();
 
 
   constructor(private readonly shared: ShmState | MsgState) {}
 
   onSceneLoaded: ((deathThresholdY: number) => void) | null = null;
+
+  /**
+   * 渲染主线 → 权威同步回调（兜底触发时携带渲染主线帧完整状态；app.ts
+   * 注册后发 `sync-render-state` 消息给 Worker 权威物理，并清双端输入增量）。
+   */
+  onSyncRenderState: ((s: {
+    posX: number; posY: number; posZ: number;
+    yaw: number; pitch: number;
+    velX: number; velY: number; velZ: number;
+    onGround: boolean;
+    eyeHeight: number;
+  }) => void) | null = null;
 
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, _config: RuntimeConfig): void {
     this.renderer = new THREE.WebGLRenderer({
@@ -276,29 +292,21 @@ export class RendererMain {
       });
     }
 
-    // 2. 相机局部 6 方向 → 水平 8 方向 + 上下（10 条射线）探测最近几何：
-    //    任意贴墙角度下最近方向与墙面夹角 ≥ 22.5°（垂直墙全角度可探测）
+    // 2. 相机局部基向量 + 6 方向（4 水平正交 + 上下）探测最近几何：
+    //    用户定调 2026-08-08——距离 90 下方向数收益递减，4 水平 + 上下
+    //    覆盖绝大多数贴墙角度（斜贴 <10.2° 掠射才漏检）；上下保坡面/地面
     let minD = Infinity;
     if (candidates.length > 0) {
       const q = camera.quaternion;
       this._nearDirF.set(0, 0, -1).applyQuaternion(q);
       const right = this._nearDirR.set(1, 0, 0).applyQuaternion(q);
       const up = this._nearDirU.set(0, 1, 0).applyQuaternion(q);
-      const f = this._nearDirF;
-      const r = right;
-      // 水平对角（单位化）
-      const fr = this._nearDirD1.set(f.x + r.x, f.y + r.y, f.z + r.z).normalize();
-      const fl = this._nearDirD2.set(f.x - r.x, f.y - r.y, f.z - r.z).normalize();
       const dirs = [
-        f,
-        f.clone().negate(),
-        r,
-        r.clone().negate(),
-        fr,
-        fr.clone().negate(),
-        fl,
-        fl.clone().negate(),
-        up,
+        this._nearDirF,
+        this._nearDirF.clone().negate(),
+        right.clone(),
+        right.clone().negate(),
+        up.clone(),
         up.clone().negate(),
       ];
       for (const dir of dirs) {
@@ -415,18 +423,24 @@ export class RendererMain {
   }
 
   /**
-   * 权威帧到达（A2）处理 —— **只读权威，绝不反写**（v7 定案）。
+   * 权威帧到达（A2）处理 —— **只读权威，绝不反写**（v7 定案，2026-08-08 修订）。
    *
    * Worker 是权威帧计算器（加载地图碰撞、独立 64Hz 模拟）；本方法仅记录
-   * 权威帧（速度供外推校准、位置/角度供异常兜底）：
-   * - 首次权威帧（或重载后）：主线程渲染物理 set_state(权威帧) 作为起点（仅一次）
-   * - 异常兜底（用户定调 2026-08-08）：
-   *   - 位置差 > 500 → **强制**对齐权威帧（绝对异常，不看朝向）
-   *   - 位置差 > 300 **且** 水平朝向一致 → 对齐权威帧：
-   *     ① yaw 最小角差 ≤ ±3°（归一化，防 350° vs 0° 误判为 350°）
-   *     ② 水平转动方向相同（本权威帧间隔内渲染 yaw 与权威 yaw 的
-   *        转向符号一致；静止 sign=0 视为兼容）——方向反了说明渲染物理
-   *        可能已跑飞/输入错乱，对齐会放大错误，交给速度校准慢慢拉回
+   * 权威帧（速度供外推校准、位置/角度供异常兜底）。
+   *
+   * **兜底方向（用户定调）**：渲染主线（144Hz 预测物理）精度高于权威
+   * （64Hz + 消息延迟），大偏差时**以渲染主线为准反向同步权威**——
+   * 同步内容 = 渲染主线帧那一刻的完整状态（位置/角度/速度/着地/眼高），
+   * 同步瞬间清空主线程与权威侧未消费的鼠标/按键增量
+   * （onSyncRenderState 回调 → Worker；权威侧 resetInput）。
+   * - 首次权威帧（或重载后）：仍以权威全状态作为渲染物理起点（无渲染历史）
+   * - 触发条件：
+   *   - 位置差 > 500 → **强制**同步（绝对异常，不看朝向）
+   *   - 位置差 > 300 **且** 水平朝向一致 → 同步：
+   *     ① yaw 最小角差 ≤ ±3°（归一化，防 350° vs 0° 误判）
+   *     ② 水平转动方向相同（本权威帧间隔内渲染/权威 yaw 转向符号一致，
+   *        静止 sign=0 视为兼容）——方向反了说明渲染物理可能已跑飞
+   * - 同步在途（syncInFlight）期间不重复触发，直到权威追平（dist < 300）
    * - 速度校准由 calibrateVelocity 在每个渲染帧执行（外推，位置不覆盖）
    */
   private correctFromAuthority(): void {
@@ -454,8 +468,13 @@ export class RendererMain {
       return;
     }
 
-    // 异常兜底：距离 + 朝向一致性判据（用户定调）
-    const st = this.predPhys.state() as { posX: number; posY: number; posZ: number; yaw: number };
+    const st = this.predPhys.state() as {
+      posX: number; posY: number; posZ: number;
+      yaw: number; pitch: number;
+      velX: number; velY: number; velZ: number;
+      onGround: boolean;
+      eyeHeight: number;
+    };
     const dist = Math.hypot(st.posX - f.pos.x, st.posY - f.pos.y, st.posZ - f.pos.z);
 
     // 水平转动方向（本权威帧间隔内；正负 = 转向，0 = 静止）
@@ -464,24 +483,59 @@ export class RendererMain {
     this.prevRenderYaw = st.yaw;
     this.prevAuthYaw = f.yaw;
 
-    // ① 绝对异常：> 500 强制对齐
-    if (dist > 500) {
-      this.predPhys.set_state(f.pos.x, f.pos.y, f.pos.z, f.yaw, f.pitch, f.vel.x, f.vel.y, f.vel.z, f.onGround);
-      this.prevRenderYaw = f.yaw;
-      this.pendingDx = 0;
-      this.pendingDy = 0;
-      return;
+    const yawDiff = Math.abs(this.normalizeAngleDeg(st.yaw - f.yaw));
+    const now = performance.now();
+
+    // 权威已追平（同步在途结束）：位置 < 300 且视角 ≤ 45° 视为收敛
+    if (this.syncInFlight && dist < 300 && yawDiff <= 45) {
+      this.syncInFlight = false;
     }
-    // ② 距离 > 300 且朝向一致（yaw 最小角差 ≤ 3° + 转动方向相同）→ 对齐
-    if (dist > 300) {
-      const yawDiff = Math.abs(this.normalizeAngleDeg(st.yaw - f.yaw));
-      const sameTurn = renderTurn === 0 || authTurn === 0 || renderTurn === authTurn;
-      if (yawDiff <= 3 && sameTurn) {
+    if (this.syncInFlight) {
+      // 撤回监视：同步在途但再次大幅分叉（dist > 500 或 yaw > 45°）——
+      // 说明渲染侧在漂移/上次"渲染为准"的方向错误 → **撤回兜底**：
+      // 以权威为准回滚渲染（权威保持自己的演化，不再盲从渲染）。
+      if (dist > 500 || yawDiff > 45) {
         this.predPhys.set_state(f.pos.x, f.pos.y, f.pos.z, f.yaw, f.pitch, f.vel.x, f.vel.y, f.vel.z, f.onGround);
-        this.prevRenderYaw = f.yaw;
         this.pendingDx = 0;
         this.pendingDy = 0;
+        this.pendingKeys = 0;
+        this.syncInFlight = false;
+        this.lastSyncAt = now;
+        this.prevRenderYaw = f.yaw;
+        this.prevAuthYaw = f.yaw;
       }
+      return;
+    }
+
+    // 2s 冷却：同步/撤回后冷却期内不重复兜底处理（防抖；正常游玩
+    // 快速甩视角或短暂分叉不会反复触发）
+    if (now - this.lastSyncAt < RendererMain.SYNC_COOLDOWN_MS) return;
+
+    // 兜底判定（用户定调 2026-08-08，三条件 OR）：
+    // ① 位置差 > 500 → 强制同步（绝对异常，不看朝向）
+    // ② 位置差 > 300 且朝向一致（yaw 最小角差 ≤ 3° + 转动方向相同）→ 同步
+    // ③ 位置差 ≤ 300 但视角偏差 > 45° → 同步（位置接近但视角大幅分叉；
+    //    45° 为高阈值——正常快速甩视角 3 帧内不会超过 45°（144Hz × 3 ≈ 21ms，
+    //    需 >2100°/s 才可能），只有双端视角真分叉才触发）
+    const sameTurn = renderTurn === 0 || authTurn === 0 || renderTurn === authTurn;
+    const shouldSync =
+      dist > 500 ||
+      (dist > 300 && yawDiff <= 3 && sameTurn) ||
+      (dist <= 300 && yawDiff > 45);
+    if (shouldSync) {
+      this.syncInFlight = true;
+      this.lastSyncAt = now;
+      this.onSyncRenderState?.({
+        posX: st.posX, posY: st.posY, posZ: st.posZ,
+        yaw: st.yaw, pitch: st.pitch,
+        velX: st.velX, velY: st.velY, velZ: st.velZ,
+        onGround: st.onGround,
+        eyeHeight: st.eyeHeight,
+      });
+      // 清主线程待喂输入（同步瞬间的旧增量不注入新状态）
+      this.pendingDx = 0;
+      this.pendingDy = 0;
+      this.pendingKeys = 0;
     }
   }
 
@@ -552,6 +606,8 @@ export class RendererMain {
     this.prevAuthTimeMs = 0;
     this.prevRenderYaw = 0;
     this.prevAuthYaw = 0;
+    this.syncInFlight = false;
+    this.lastSyncAt = 0;
     this.predStarted = false;
     this.curAuth = null;
     this.lastVa = -1;

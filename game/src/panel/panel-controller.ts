@@ -46,9 +46,16 @@ export class PanelController {
     this.root = document.getElementById('panel') as HTMLElement;
     // 按键：读取持久化键位（与 app.ts 初始 KeyboardInput 一致）
     this.keymap = loadKeymap();
+    // 面板偏好持久化：构造时加载（localStorage → config → 控件/双端生效）
+    this.loadPanelPrefs();
     this.bindEvents();
     this.bindModuleNav();
     this.renderKeyList();
+    // 持久化加载后：控件值回写 + 双端同步 + 准星应用（在 bindEvents 之后执行，
+    // 避免控件初始化覆盖加载值）
+    this.syncControlsFromConfig();
+    this.sendAllPrefs();
+    this.applyCrosshair();
   }
 
   /** 面板可见 = 未锁定 ∥ 场景未就绪。 */
@@ -309,6 +316,7 @@ export class PanelController {
       (document.getElementById('hullStandHeight') as HTMLInputElement).value = '72';
       (document.getElementById('hullDuckHeight') as HTMLInputElement).value = '54';
       this.sendHull();
+      this.savePanelPrefs();
     });
 
     // 操作：灵敏度 / Q-E 旋转速度
@@ -330,10 +338,42 @@ export class PanelController {
       if (el) el.classList.toggle('hidden', !v);
     });
 
+    // 准星风格化（主线程本地；变更即应用 + 持久化）
+    const ch = (): void => {
+      this.applyCrosshair();
+      this.savePanelPrefs();
+    };
+    const chColor = document.getElementById('chColor') as HTMLInputElement | null;
+    chColor?.addEventListener('input', () => {
+      this.config.hud.crosshair.color = chColor.value;
+      ch();
+    });
+    this.bindSlider('chSize', 1, 20, 1, (v) => {
+      this.config.hud.crosshair.size = v;
+      ch();
+    });
+    this.bindSlider('chThickness', 1, 8, 1, (v) => {
+      this.config.hud.crosshair.thickness = v;
+      ch();
+    });
+    this.bindSlider('chGap', 0, 16, 1, (v) => {
+      this.config.hud.crosshair.gap = v;
+      ch();
+    });
+    this.bindCheckbox('chOutline', (v) => {
+      this.config.hud.crosshair.outline = v;
+      ch();
+    });
+    this.bindCheckbox('chDot', (v) => {
+      this.config.hud.crosshair.dot = v;
+      ch();
+    });
+
     // 速度面板模式（主线程本地 8Hz）
     const speedMode = document.getElementById('speedMode') as HTMLSelectElement | null;
     speedMode?.addEventListener('change', () => {
       this.config.hud.speedMode = speedMode.value as 'lateral' | 'lateral-vertical' | 'total';
+      this.savePanelPrefs();
     });
 
     // 自由视角切换（noclip）
@@ -393,6 +433,7 @@ export class PanelController {
       const v = parseFloat(el.value);
       if (num && Number.isFinite(v)) num.value = String(v);
       onInput(v);
+      this.savePanelPrefs(); // 面板偏好持久化
     });
     if (num) {
       num.addEventListener('input', () => {
@@ -400,12 +441,145 @@ export class PanelController {
         if (!Number.isFinite(v)) return;
         el.value = String(Math.min(max, Math.max(min, v)));
         onInput(Math.min(max, Math.max(min, v)));
+        this.savePanelPrefs();
       });
     }
   }
 
   private bindCheckbox(id: string, onChange: (v: boolean) => void): void {
     const el = document.getElementById(id) as HTMLInputElement | null;
-    el?.addEventListener('change', () => onChange(el.checked));
+    el?.addEventListener('change', () => {
+      onChange(el.checked);
+      this.savePanelPrefs();
+    });
+  }
+
+  // ── 面板偏好持久化（localStorage；体型/物理/操作/显示/视角）─────────
+
+  /** localStorage 存储键。 */
+  private static readonly PREFS_KEY = 'vbsp:panelPrefs';
+
+  /** 从 config 收集全部面板可调偏好。 */
+  private collectPrefs(): Record<string, unknown> {
+    const p = this.config;
+    return {
+      physics: { ...p.physics },
+      player: { ...p.player },
+      input: {
+        sensitivity: p.input.sensitivity,
+        yawBindSpeed: p.input.yawBindSpeed,
+        noclipSpeed: p.input.noclipSpeed,
+      },
+      hud: { showCrosshair: p.hud.showCrosshair, speedMode: p.hud.speedMode, crosshair: { ...p.hud.crosshair } },
+    };
+  }
+
+  /** 保存面板偏好（构造/变更时调用）。 */
+  private savePanelPrefs(): void {
+    try {
+      localStorage.setItem(PanelController.PREFS_KEY, JSON.stringify(this.collectPrefs()));
+    } catch (err) {
+      console.warn('[panel] 面板偏好保存失败:', err);
+    }
+  }
+
+  /** 加载面板偏好 → 合并到 config（仅覆盖已存在的字段）。 */
+  private loadPanelPrefs(): void {
+    try {
+      const raw = localStorage.getItem(PanelController.PREFS_KEY);
+      if (!raw) return;
+      const prefs = JSON.parse(raw) as Record<string, unknown>;
+      const merge = <T>(section: T, patch: unknown): void => {
+        if (!patch || typeof patch !== 'object') return;
+        Object.assign(section as object, patch);
+      };
+      merge(this.config.physics, prefs.physics);
+      merge(this.config.player, prefs.player);
+      merge(this.config.input, prefs.input);
+      merge(this.config.hud, prefs.hud);
+    } catch (err) {
+      console.warn('[panel] 面板偏好加载失败:', err);
+    }
+  }
+
+  /** 按 config 当前值回写全部控件 UI（持久化加载后同步显示）。 */
+  private syncControlsFromConfig(): void {
+    const setVal = (id: string, val: string): void => {
+      const el = document.getElementById(id) as HTMLInputElement | null;
+      if (el) el.value = val;
+    };
+    const setChecked = (id: string, val: boolean): void => {
+      const el = document.getElementById(id) as HTMLInputElement | null;
+      if (el) el.checked = val;
+    };
+    const p = this.config;
+    // 物理
+    setVal('tickRate', String(p.physics.tickRate));
+    setVal('gravity', String(p.physics.gravity));
+    setVal('accelerate', String(p.physics.accelerate));
+    setVal('airAccel', String(p.physics.airAccel));
+    setVal('friction', String(p.physics.friction));
+    setVal('maxSpeed', String(p.physics.maxSpeed));
+    setVal('walkSpeed', String(p.physics.walkSpeed));
+    setVal('crouchSpeed', String(p.physics.crouchSpeed));
+    setVal('stopSpeed', String(p.physics.stopSpeed));
+    setVal('jumpSpeed', String(p.physics.jumpSpeed));
+    setChecked('autobhop', p.physics.autobhop);
+    setChecked('bhopSpeedClamp', p.physics.bhopSpeedClamp);
+    setChecked('noPrestrafe', p.physics.noPrestrafe);
+    setVal('teleportGateTicks', String(p.physics.teleportGateTicks));
+    // 体型
+    setVal('hullHalfWidth', String(p.player.halfWidth));
+    setVal('hullStandHeight', String(p.player.standHeight));
+    setVal('hullDuckHeight', String(p.player.duckHeight));
+    // 操作
+    setVal('sensitivity', String(p.input.sensitivity));
+    setVal('yawBindSpeed', String(p.input.yawBindSpeed));
+    // 视角
+    setVal('noclipSpeed', String(p.input.noclipSpeed));
+    // 显示
+    setChecked('showCrosshair', p.hud.showCrosshair);
+    const speedMode = document.getElementById('speedMode') as HTMLSelectElement | null;
+    if (speedMode) speedMode.value = p.hud.speedMode;
+    // 准星
+    setVal('chColor', p.hud.crosshair.color);
+    setVal('chSize', String(p.hud.crosshair.size));
+    setVal('chThickness', String(p.hud.crosshair.thickness));
+    setVal('chGap', String(p.hud.crosshair.gap));
+    setChecked('chOutline', p.hud.crosshair.outline);
+    setChecked('chDot', p.hud.crosshair.dot);
+  }
+
+  /** 持久化加载后向双端（Worker 权威 + 主线程预测实例）推送全部偏好。 */
+  private sendAllPrefs(): void {
+    const p = this.config;
+    this.bridge.sendConfig('physics', { ...p.physics });
+    this.bridge.sendConfig('player', { ...p.player });
+    this.bridge.sendConfig('input', {
+      sensitivity: p.input.sensitivity,
+      yawBindSpeed: p.input.yawBindSpeed,
+      noclipSpeed: p.input.noclipSpeed,
+    });
+    this.pushPhysicsParams();
+    this.sendHull();
+  }
+
+  /** 应用准星风格到 DOM（CSS 变量 + 可见性）。 */
+  private applyCrosshair(): void {
+    const el = document.getElementById('crosshair');
+    if (!el) return;
+    const c = this.config.hud.crosshair;
+    const s = (el as HTMLElement).style;
+    s.setProperty('--ch-color', c.color);
+    s.setProperty('--ch-size', `${c.size}px`);
+    s.setProperty('--ch-thickness', `${c.thickness}px`);
+    s.setProperty('--ch-gap', `${c.gap}px`);
+    el.classList.toggle('hidden', !this.config.hud.showCrosshair);
+    // 描边：四线加 outline class（中心点恒带描边）
+    el.querySelectorAll('.ch-line').forEach((line) => {
+      line.classList.toggle('outline', c.outline);
+    });
+    const dot = el.querySelector('.ch-dot') as HTMLElement | null;
+    if (dot) dot.style.display = c.dot ? 'block' : 'none';
   }
 }

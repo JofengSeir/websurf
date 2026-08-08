@@ -44,7 +44,7 @@ const CAMERA_NEAR_MIN = 0.05;
  * 运行时可调：面板「显示设置 → 近平面探测距离/收缩系数」实时生效
  * （setNearParams）。
  */
-const NEAR_PROBE_DIST_DEFAULT = 72;
+const NEAR_PROBE_DIST_DEFAULT = 100;
 /** near 收缩系数默认值：near = 最近几何距离 × 此值。 */
 const NEAR_RATIO_DEFAULT = 0.3;
 /**
@@ -126,8 +126,6 @@ export class RendererMain {
   private readonly _nearDirF = new THREE.Vector3();
   private readonly _nearDirR = new THREE.Vector3();
   private readonly _nearDirU = new THREE.Vector3();
-  private readonly _nearDirD1 = new THREE.Vector3();
-  private readonly _nearDirD2 = new THREE.Vector3();
   private readonly _nearSphere = new THREE.Sphere();
   private nearCheckToggle = false;
   /** 场景默认 near（maxDim/1000 下限 NEAR_MIN）。 */
@@ -546,27 +544,19 @@ export class RendererMain {
 
     let minD = Infinity;
     if (candidates.length > 0) {
-      // 2. 相机局部基向量（YXZ euler 四元数）+ 水平 8 方向（正交 + 对角）：
-      //    保证任意贴墙角度下最近方向与墙面夹角 ≥ 22.5°（垂直墙全角度可探测）
+      // 2. 相机局部基向量（YXZ euler 四元数）+ 6 方向（4 水平正交 + 上下）：
+      //    用户定调 2026-08-08——距离 90 下方向数收益递减，4 水平正交 + 上下
+      //    覆盖绝大多数贴墙角度（斜贴 <10.2° 掠射才漏检）；上下保坡面/地面
       const q = camera.quaternion;
       this._nearDirF.set(0, 0, -1).applyQuaternion(q);
       const right = this._nearDirR.set(1, 0, 0).applyQuaternion(q);
       const up = this._nearDirU.set(0, 1, 0).applyQuaternion(q);
-      const f = this._nearDirF;
-      const r = right;
-      // 水平对角（单位化）
-      const fr = this._nearDirD1.set(f.x + r.x, f.y + r.y, f.z + r.z).normalize();
-      const fl = this._nearDirD2.set(f.x - r.x, f.y - r.y, f.z - r.z).normalize();
       const dirs = [
-        f,
-        f.clone().negate(),
-        r,
-        r.clone().negate(),
-        fr,
-        fr.clone().negate(),
-        fl,
-        fl.clone().negate(),
-        up,
+        this._nearDirF,
+        this._nearDirF.clone().negate(),
+        right.clone(),
+        right.clone().negate(),
+        up.clone(),
         up.clone().negate(),
       ];
       for (const dir of dirs) {
