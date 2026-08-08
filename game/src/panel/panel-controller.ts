@@ -42,6 +42,8 @@ export class PanelController {
     private readonly onSyncHull?: (halfWidth: number, standHeight: number, duckHeight: number) => void,
     /** noclip 切换 → 同步主线程预测实例（set_noclip + 渲染走权威直读）。 */
     private readonly onNoclipChange?: (active: boolean) => void,
+    /** 纹理画质切换 → 主线程渲染（mosaic 贴图替换，即时生效）。 */
+    private readonly onTextureQualityChange?: (quality: 'original' | 'mini') => void,
   ) {
     this.root = document.getElementById('panel') as HTMLElement;
     // 按键：读取持久化键位（与 app.ts 初始 KeyboardInput 一致）
@@ -376,6 +378,14 @@ export class PanelController {
       this.savePanelPrefs();
     });
 
+    // 纹理画质（原始 / mosaic 压缩低清，主线程渲染即时切换）
+    const textureQuality = document.getElementById('textureQuality') as HTMLSelectElement | null;
+    textureQuality?.addEventListener('change', () => {
+      this.config.texture.quality = textureQuality.value as 'original' | 'mini';
+      this.onTextureQualityChange?.(this.config.texture.quality);
+      this.savePanelPrefs();
+    });
+
     // 自由视角切换（noclip）
     const noclipBtn = document.getElementById('noclipToggle') as HTMLButtonElement | null;
     noclipBtn?.addEventListener('click', () => {
@@ -471,6 +481,7 @@ export class PanelController {
         noclipSpeed: p.input.noclipSpeed,
       },
       hud: { showCrosshair: p.hud.showCrosshair, speedMode: p.hud.speedMode, crosshair: { ...p.hud.crosshair } },
+      texture: { ...p.texture },
     };
   }
 
@@ -497,6 +508,7 @@ export class PanelController {
       merge(this.config.player, prefs.player);
       merge(this.config.input, prefs.input);
       merge(this.config.hud, prefs.hud);
+      merge(this.config.texture, prefs.texture);
     } catch (err) {
       console.warn('[panel] 面板偏好加载失败:', err);
     }
@@ -541,6 +553,8 @@ export class PanelController {
     setChecked('showCrosshair', p.hud.showCrosshair);
     const speedMode = document.getElementById('speedMode') as HTMLSelectElement | null;
     if (speedMode) speedMode.value = p.hud.speedMode;
+    const textureQuality = document.getElementById('textureQuality') as HTMLSelectElement | null;
+    if (textureQuality) textureQuality.value = p.texture.quality;
     // 准星
     setVal('chColor', p.hud.crosshair.color);
     setVal('chSize', String(p.hud.crosshair.size));

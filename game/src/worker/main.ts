@@ -13,7 +13,7 @@
 
 /// <reference lib="webworker" />
 
-import { PhysWorld, default as wasmInit } from '../../pkg/websurf_wasm.js';
+import { PhysWorld, initSync } from '../../pkg/websurf_wasm.js';
 import { createWorkerSharedState, type ShmState, type MsgState } from './shared-state.js';
 import type { WorkerMessage } from './worker-types.js';
 import { createConfig, applyConfigPatch } from '../config.js';
@@ -168,19 +168,31 @@ function dispatch(e: MessageEvent<WorkerMessage | { type: string }>): void {
     return;
   }
   if (type === 'wasm-init') {
-    const m = msg as { wasmUrl?: string };
-    if (!m.wasmUrl) return;
-    fetch(m.wasmUrl)
-      .then((r) => r.arrayBuffer())
-      .then((buf) => wasmInit({ module: buf }))
-      .then(() => {
-        ready = true;
-        if (!loopStarted) {
-          loopStarted = true;
-          loop();
-        }
-      })
-      .catch((err) => postMessage({ type: 'error', message: `Worker wasm 加载失败: ${err}` }));
+    const m = msg as { wasmB64?: string; wasmUrl?: string };
+    const initWasm = async (): Promise<void> => {
+      // 注意：必须用 initSync({module})——async init() 解构的是 {module_or_path}，
+      // 传 {module} 会解构出 undefined → 走 new URL(import.meta.url) 路径，
+      // dist 下 import.meta.url 被 define 为 about:blank → "Failed to construct 'URL'"。
+      if (m.wasmB64) {
+        // dist 内嵌模式（file:// 双击）：base64 → initSync
+        const bin = atob(m.wasmB64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        initSync({ module: bytes.buffer as ArrayBuffer });
+      } else if (m.wasmUrl) {
+        const resp = await fetch(m.wasmUrl);
+        const buf = await resp.arrayBuffer();
+        initSync({ module: buf });
+      } else {
+        return;
+      }
+      ready = true;
+      if (!loopStarted) {
+        loopStarted = true;
+        loop();
+      }
+    };
+    initWasm().catch((err) => postMessage({ type: 'error', message: `Worker wasm 加载失败: ${err}` }));
     return;
   }
   if (type === 'world-json') {

@@ -15,7 +15,7 @@ Fixes #(issue number)
 
 ## 测试
 
-- [ ] `npm run build` 构建通过
+- [ ] 在对应工程目录（`debug/` 或 `game/`）`npm run build` 构建通过
 - [ ] 本地验证通过
 
 ## 截图（可选）

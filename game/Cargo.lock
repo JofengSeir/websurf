@@ -1989,6 +1989,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "websurf-phys"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "websurf-wasm"
 version = "0.1.0"
 dependencies = [
@@ -2027,6 +2037,44 @@ dependencies = [
  "vtf",
  "wasm-bindgen",
  "web-sys",
+ "websurf-phys",
+ "websurf-wasm-core",
+ "zip-lzma",
+]
+
+[[package]]
+name = "websurf-wasm-core"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "arrayvec",
+ "binrw 0.14.2",
+ "bitflags",
+ "bv",
+ "bytemuck",
+ "byteorder 1.5.0",
+ "cgmath",
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
+ "gltf",
+ "gltf-json",
+ "image",
+ "itertools 0.13.0",
+ "lzma-rs",
+ "miette",
+ "num_enum",
+ "parse-display 0.9.1",
+ "path-dedot",
+ "serde",
+ "serde_json",
+ "static_assertions",
+ "texpresso",
+ "tf-asset-loader",
+ "thiserror 2.0.19",
+ "vdf-reader 0.2.0",
+ "vmdl",
+ "vmt-parser",
+ "vtf",
  "zip-lzma",
 ]
 

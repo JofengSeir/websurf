@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebSurf-min</title>
+  <title>WebSurf-game</title>
   <style>
     /* ── 基础 ─────────────────────────────────────────── */
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -280,33 +280,6 @@
       background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
       border-radius: 4px; padding: 1px 5px; margin: 0 1px;
     }
-
-    /* 致命错误覆盖层（file:// 双击无 SAB 时显示） */
-    #fatalOverlay {
-      display: none; position: fixed; inset: 0; z-index: 9999;
-      background: rgba(8,10,18,0.82); backdrop-filter: blur(8px);
-      align-items: center; justify-content: center; flex-direction: column;
-      color: #e8ecf4; font-family: "Segoe UI", system-ui, sans-serif; text-align: center;
-    }
-    #fatalOverlay.show { display: flex; }
-    #fatalOverlay .card {
-      max-width: 560px; margin: 0 24px; padding: 34px 38px; border-radius: 20px;
-      background: linear-gradient(160deg, #1b2033, #141826);
-      border: 1px solid rgba(255,255,255,0.1);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
-    }
-    #fatalOverlay h2 {
-      margin: 0 0 14px; font-size: 22px; font-weight: 600;
-      background: linear-gradient(135deg, #ff8a80, #ff5c7a);
-      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    #fatalOverlay .reason { font-size: 14px; line-height: 1.7; color: #aab3c8; margin-bottom: 18px; }
-    #fatalOverlay .reason code {
-      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
-      border-radius: 6px; padding: 1px 7px; font-family: Consolas, monospace; color: #7fb3ff;
-    }
-    #fatalOverlay .steps { text-align: left; font-size: 13.5px; line-height: 2; color: #c6cede; }
-    #fatalOverlay .steps b { color: #7ee0a3; }
   </style>
 </head>
 <body>
@@ -483,6 +456,12 @@
               <option value="lateral-vertical">横向 + 竖向</option>
               <option value="total">综合速度</option>
             </select></div>
+          <h4>纹理画质</h4>
+          <div class="row"><label title="原始 = VTF 解码原图；压缩 = mosaic 字节码还原的低清纹理（切换即时生效，无需重载地图）">画质</label>
+            <select id="textureQuality">
+              <option value="original" selected>原始纹理</option>
+              <option value="mini">压缩低清</option>
+            </select></div>
           <h4>近平面（防贴墙透视）</h4>
           <div class="row"><label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到，性能开销略增">探测距离</label>
             <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />
@@ -504,24 +483,6 @@
             <div class="val"><input id="noclipSpeedNum" type="number" value="800" /></div></div>
         </div>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- 致命错误覆盖层：双击 file:// 缺少 SharedArrayBuffer 时显示 -->
-<div id="fatalOverlay">
-  <div class="card">
-    <h2>无法启动</h2>
-    <div class="reason">
-      当前以 <code>file://</code> 方式打开，浏览器禁用了 <code>SharedArrayBuffer</code>
-      （物理引擎双 Worker 需要 COOP/COEP 跨域隔离头），因此游戏未能初始化。
-    </div>
-    <div class="steps">
-      <b>方法一（推荐）：</b>双击 <code>play.cmd</code> 一键启动，将自动打开本页面<br />
-      <b>方法二：</b>命令行运行 <code>python serve.py 8137</code>，
-      然后访问 <code>http://localhost:8137/dist/index.html</code><br />
-      <b>开发模式：</b><code>python serve.py 8090</code> →
-      <code>http://localhost:8090/web/index.html</code>
     </div>
   </div>
 </div>

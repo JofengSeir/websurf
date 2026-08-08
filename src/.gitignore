@@ -1,0 +1,11 @@
+# 共享层独立 workspace（websurf-phys / websurf-wasm-core）与 vendored crate（vendor/vmdl）
+#
+# 构建产物与独立锁定文件：各 crate 的 target/ 与 Cargo.lock
+# （依赖版本由 debug/ 与 game/ 的 workspace lock 解析，独立 lock 无意义）
+#
+# 需要跟踪（勿加入排除）：
+#   materials/textures.mtz（公共默认纹理包）
+#   vendor/vmdl/（vendored 源码）
+
+target/
+Cargo.lock

@@ -12,17 +12,15 @@ use std::io::Cursor;
 
 use wasm_bindgen::prelude::*;
 
-use crate::model_integrator::{
+use model_integrator::{
     ExportOptions, InMemoryModel, InMemoryResources, ModelIntegrator, StaticProp,
 };
 
-mod bsp_to_gltf_core;
-mod model_integrator;
-mod pakfile_models;
-mod phyfile;
-mod phys;
-mod texture_utils;
-mod vbsp;
+// 解析层共享自仓库根 src/wasm-core/（websurf-wasm-core crate）
+use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, phyfile, texture_utils, vbsp};
+
+// 物理系统：共享自仓库根 src/（websurf-phys crate，原 game/crates/wasm/src/phys/ 已迁出）
+pub use websurf_phys::phys::PhysWorld;
 
 // 诊断探针：仅在 `cargo test` 下编译，复刻 export_model_colliders 管线 dump 中间产物。
 
@@ -55,7 +53,7 @@ struct PakMaterials {
 /// 返回 `(模型三件套, 静态道具放置表, PAKFILE 全部条目名)`；
 /// 第三项供 [`pakfile_models::PakIndex`] 复用，避免为找材质再遍历 zip。
 fn collect_pakfile_models(
-    bsp: &crate::vbsp::Bsp,
+    bsp: &vbsp::Bsp,
 ) -> Result<(Vec<InMemoryModel>, Vec<StaticProp>, Vec<String>), JsValue> {
     // 1. 被静态道具引用的模型路径集合
     let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -121,16 +119,44 @@ fn collect_pakfile_models(
 
 /// 内部 VTF → PNG 解码（GLB 材质贴图导出用；不导出为 wasm API）。
 fn decode_vtf_to_png(data: &[u8]) -> Result<Vec<u8>, JsValue> {
-    let vtf = crate::texture_utils::from_bytes(data).map_err(|e| to_js_err(e, "VTF 解析失败"))?;
+    let vtf = texture_utils::from_bytes(data).map_err(|e| to_js_err(e, "VTF 解析失败"))?;
     let image = vtf
         .highres_image
         .decode(0)
         .map_err(|e| to_js_err(e, "VTF 图像解码失败"))?;
+
     let mut output: Vec<u8> = Vec::new();
     image
         .write_to(&mut Cursor::new(&mut output), image::ImageFormat::Png)
         .map_err(|e| to_js_err(e, "PNG 编码失败"))?;
+
     Ok(output)
+}
+
+// ---------------------------------------------------------------------------
+// 纹理画质切换（mosaic 共享模块：压缩/还原低清纹理）
+// ---------------------------------------------------------------------------
+
+/// PNG 字节 → mosaic v4 纹理字节码（压缩）。
+#[wasm_bindgen]
+pub fn mosaic_encode(png: &[u8], name: &str) -> Result<String, JsValue> {
+    websurf_wasm_core::mosaic::encode::img_to_code(png, name)
+        .map_err(|e| JsValue::from_str(&format!("mosaic_encode: {e}")))
+}
+
+/// mosaic v4 字节码 → PNG 字节（低清还原，最近邻放大 ×scale，默认 ×8）。
+#[wasm_bindgen]
+pub fn mosaic_decode(code: &str, scale: u32) -> Result<Vec<u8>, JsValue> {
+    websurf_wasm_core::mosaic::decode::code_to_img(code, scale)
+        .map_err(|e| JsValue::from_str(&format!("mosaic_decode: {e}")))
+}
+
+/// 解压默认配置纹理包（textures.mtz，MTZ5/6 容器）→ textures.json 文本。
+/// 纹理键 = `materials/xxx`（与 basetexture 一致），供缺失纹理回退/比对。
+#[wasm_bindgen]
+pub fn decompress_mtz(bytes: &[u8]) -> Result<String, JsValue> {
+    websurf_wasm_core::mosaic::mtz::decompress_mtz(bytes)
+        .map_err(|e| JsValue::from_str(&format!("decompress_mtz: {e}")))
 }
 
 /// 加载内存中的模型三件套为 `vmdl::Model`（任一环节失败即返回 `None`）。
@@ -148,7 +174,7 @@ fn load_vmdl(m: &InMemoryModel) -> Option<vmdl::Model> {
 /// 材质路径解析顺序：`TextureInfo::search_paths` → `Mdl::texture_paths` → 裸材质名，
 /// 均交 [`pakfile_models::PakIndex`] 做大小写不敏感 + `materials/` 前缀补全匹配。
 fn resolve_pakfile_materials(
-    bsp: &crate::vbsp::Bsp,
+    bsp: &vbsp::Bsp,
     models: &[InMemoryModel],
     index: &pakfile_models::PakIndex,
     decode_textures: bool,
@@ -233,9 +259,6 @@ fn resolve_pakfile_materials(
 // 全局初始化
 // ---------------------------------------------------------------------------
 
-/// 在 WASM panic 时打印到控制台，便于调试。
-#[cfg(target_arch = "wasm32")]
-
 // ---------------------------------------------------------------------------
 // 元数据 / 解析入口
 // ---------------------------------------------------------------------------
@@ -270,7 +293,7 @@ pub struct BspMetadata {
 impl BspMetadata {
     // packed_files 由调用方传入：vbsp 0.6.0 的 Packfile.zip 为私有字段，
     // into_zip() 消费 self，只能 clone 后取 len()；由 new 缓存避免 metadata() 重复克隆。
-    fn from_bsp(bsp: &crate::vbsp::Bsp, packed_files: usize) -> Self {
+    fn from_bsp(bsp: &vbsp::Bsp, packed_files: usize) -> Self {
         let num_entities = bsp.entities.iter().count();
         let num_static_props = bsp.static_props().count();
 
@@ -317,7 +340,7 @@ impl BspMetadata {
 /// 获取元数据。
 #[wasm_bindgen]
 pub struct BspProcessor {
-    bsp: Option<crate::vbsp::Bsp>,
+    bsp: Option<vbsp::Bsp>,
     /// 缓存的 pakfile 文件数，避免 metadata() 重复克隆 Packfile
     packed_files: usize,
 }
@@ -327,7 +350,7 @@ impl BspProcessor {
     /// 创建处理器并立即解析 BSP 数据。
     #[wasm_bindgen(constructor)]
     pub fn new(data: &[u8]) -> Result<BspProcessor, JsValue> {
-        let bsp = crate::vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
+        let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
         // 一次性计算并缓存 packed_files，避免 metadata() 重复克隆 Packfile
         let packed_files = bsp.pack.clone().into_zip().lock().unwrap().len();
         Ok(BspProcessor {
@@ -366,6 +389,62 @@ impl BspProcessor {
             .to_writer(&mut output)
             .map_err(|e| to_js_err(e, "GLB 序列化失败"))?;
 
+        Ok(output)
+    }
+
+    /// 导出 GLB（含 PAKFILE 模型）+ **缺失纹理回退**：`defaults_json` 为默认纹理包
+    /// （`{ "materials/<材质路径小写>": "#mosaic v4 字节码" }`），材质缺失时直接在
+    /// 导出期解码低清纹理嵌入 GLB——渲染端拿到的即自包含场景，零后期处理。
+    ///
+    /// 与 [`BspProcessor::export_glb_with_pakfile_models`] 同流程，仅注入回退表。
+    pub fn export_glb_with_pakfile_models_with_defaults(
+        &mut self,
+        defaults_json: &str,
+    ) -> Result<Vec<u8>, JsValue> {
+        let bsp = self
+            .bsp
+            .take()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
+        let fallback: std::collections::HashMap<String, String> =
+            serde_json::from_str(defaults_json).map_err(|e| to_js_err(e, "默认纹理包 JSON 解析失败"))?;
+
+        let (models, static_props, entry_names) = collect_pakfile_models(&bsp)?;
+
+        let options = |generate_missing_list: bool| bsp_to_gltf_core::ConvertOptions {
+            missing_fallback: fallback.clone(),
+            generate_missing_list,
+            ..bsp_to_gltf_core::ConvertOptions::default()
+        };
+
+        if models.is_empty() {
+            let result = bsp_to_gltf_core::export_bsp(bsp, options(true))
+                .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
+            let mut output: Vec<u8> = Vec::new();
+            result
+                .glb
+                .to_writer(&mut output)
+                .map_err(|e| to_js_err(e, "GLB 序列化失败"))?;
+            return Ok(output);
+        }
+
+        let index = pakfile_models::PakIndex::build(&entry_names);
+        let materials = resolve_pakfile_materials(&bsp, &models, &index, true);
+        let resources = InMemoryResources {
+            models,
+            entities: Vec::new(),
+            static_props,
+            textures: materials.textures,
+            material_alpha_mode: materials.alpha_modes,
+            light_entities: Vec::new(),
+        };
+        let integrator = ModelIntegrator::from_in_memory(resources, ExportOptions::default());
+        let result = bsp_to_gltf_core::export_bsp_with_models(bsp, options(true), Some(&integrator))
+            .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
+        let mut output: Vec<u8> = Vec::new();
+        result
+            .glb
+            .to_writer(&mut output)
+            .map_err(|e| to_js_err(e, "GLB 序列化失败"))?;
         Ok(output)
     }
 
@@ -441,7 +520,7 @@ impl BspProcessor {
     /// # 与显示几何一致
     ///
     /// 显示与碰撞共用同一条顶点变换链 `map_coords(model.apply_root_transform(v))` → `scale` → `quat` → `translation`，
-    /// `quat`/`translation` 来自与 GLB 节点同一份 [`crate::model_integrator::resolve_placements`]，无「看得到摸不着」偏移。
+    /// `quat`/`translation` 来自与 GLB 节点同一份 [`model_integrator::resolve_placements`]，无「看得到摸不着」偏移。
     ///
     /// 几何为「原始三角网格 → 逐三角沿法线反向挤出薄壳」，逐面贴合显示网格（surf 图 ramp 坡的硬要求）。
     /// 不做共面合并（会把薄斜坡变成 quad + filler 面，致碰撞外观与显示不一致）。
@@ -475,7 +554,7 @@ impl BspProcessor {
         let index = pakfile_models::PakIndex::build(&entry_names);
         let materials = resolve_pakfile_materials(bsp, &models, &index, false);
 
-        let no_entities: Vec<crate::model_integrator::Entity> = Vec::new();
+        let no_entities: Vec<model_integrator::Entity> = Vec::new();
 
         /// 单个实例的三角形网格（世界空间，与显示逐位一致）。
         #[derive(serde::Serialize)]
@@ -499,7 +578,7 @@ impl BspProcessor {
             }
 
             let placements =
-                crate::model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
+                model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
             let placements: Vec<_> = placements
                 .into_iter()
                 .filter(|p| p.solid != Some(0))
@@ -514,7 +593,7 @@ impl BspProcessor {
             let src = model.vertices();
             let mut local: Vec<[f32; 3]> = Vec::with_capacity(src.len());
             for v in src {
-                local.push(crate::model_integrator::map_coords(
+                local.push(model_integrator::map_coords(
                     model.apply_root_transform(v.position),
                 ));
             }
@@ -613,7 +692,7 @@ impl BspProcessor {
             return Ok("[]".to_string());
         }
 
-        let no_entities: Vec<crate::model_integrator::Entity> = Vec::new();
+        let no_entities: Vec<model_integrator::Entity> = Vec::new();
 
         #[derive(serde::Serialize)]
         struct TriMeshOut {
@@ -635,7 +714,7 @@ impl BspProcessor {
             }
             // 只解析被引用的模型（static_props 匹配）；无 .phy 或解析失败 → 跳过（前端 auto 回退）
             let placements =
-                crate::model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
+                model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
             let placements: Vec<_> = placements
                 .into_iter()
                 .filter(|p| p.solid != Some(0))
@@ -647,7 +726,7 @@ impl BspProcessor {
             let Ok(Some(phy_bytes)) = bsp.pack.get(&phy_name) else {
                 continue;
             };
-            let solids = match crate::phyfile::parse_phy(&phy_bytes) {
+            let solids = match phyfile::parse_phy(&phy_bytes) {
                 Ok(s) => s,
                 Err(e) => {
                     eprintln!("⚠️ 跳过 PHY 解析失败 {}: {e}", m.name);
@@ -687,7 +766,7 @@ impl BspProcessor {
                             y: ivp2src[1],
                             z: ivp2src[2],
                         });
-                        local.push(crate::model_integrator::map_coords([rt.x, rt.y, rt.z]));
+                        local.push(model_integrator::map_coords([rt.x, rt.y, rt.z]));
                     }
                     for t in &c.indices {
                         tris.push([base + t[0], base + t[1], base + t[2]]);
@@ -741,6 +820,48 @@ impl BspProcessor {
     /// 检查 BSP 是否仍持有（未被 export_glb 消费）。
     pub fn is_alive(&self) -> bool {
         self.bsp.is_some()
+    }
+
+    /// 生成纹理画质 manifest：`{ 纹理名(小写 VMT 路径): mosaic v4 字节码 }` JSON。
+    ///
+    /// 前端画质切换（原始/压缩低清）用：GLB 导出后调用一次（export_glb* 消费 BSP 之前），
+    /// 切换画质时用 `mosaic_decode` 还原低清 PNG 替换贴图，无需重载地图。
+    ///
+    /// 覆盖两类纹理（与 GLB texture.name 对应）：
+    /// 1. 地图 face 纹理（key = basetexture 小写，如 "materials/xxx"）
+    /// 2. PAKFILE 模型贴图（key = 材质名小写，如 "maplebark"——修复 prop 墙面未压缩）
+    pub fn export_mosaic_manifest(&self) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
+        let mut pairs = websurf_wasm_core::mosaic::manifest::build_mosaic_manifest(bsp);
+        // 模型贴图（材质名 → PNG → mosaic）；失败静默跳过（不影响地图纹理覆盖）
+        if let Ok((models, _props, entry_names)) = collect_pakfile_models(bsp) {
+            let index = pakfile_models::PakIndex::build(&entry_names);
+            let materials = resolve_pakfile_materials(bsp, &models, &index, true);
+            for (name, png) in materials.textures {
+                if let Ok(code) = websurf_wasm_core::mosaic::encode::img_to_code(&png, &name) {
+                    pairs.push((name.to_ascii_lowercase(), code));
+                }
+            }
+        }
+        let map: std::collections::HashMap<String, String> = pairs.into_iter().collect();
+        serde_json::to_string(&map).map_err(|e| to_js_err(e, "序列化 mosaic manifest 失败"))
+    }
+
+    /// 导出缺失材质纹理列表（VMT/VTF 缺失或解码失败 → 占位色）JSON 字符串数组。
+    ///
+    /// 前端加载后与默认配置纹理包（textures.mtz 解压的键集合）比对；
+    /// 可覆盖的已在 GLB 导出期自动回退（见
+    /// [`BspProcessor::export_glb_with_pakfile_models_with_defaults`]）。
+    pub fn export_missing_textures(&self) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
+        let missing = websurf_wasm_core::mosaic::manifest::collect_missing_textures(bsp);
+        serde_json::to_string(&missing).map_err(|e| to_js_err(e, "序列化缺失纹理列表失败"))
     }
 
     /// 提取出生点实体（info_player_start / info_player_terrorist / info_player_counterterrorist 等）。
@@ -941,9 +1062,9 @@ impl BspProcessor {
 
         // 三平面求交（克莱默法则），退化返回 None
         fn tri_intersect(
-            p1: &crate::vbsp::Plane,
-            p2: &crate::vbsp::Plane,
-            p3: &crate::vbsp::Plane,
+            p1: &vbsp::Plane,
+            p2: &vbsp::Plane,
+            p3: &vbsp::Plane,
         ) -> Option<[f32; 3]> {
             let n1 = &p1.normal;
             let n2 = &p2.normal;
@@ -984,7 +1105,7 @@ impl BspProcessor {
         /// 返回 (局部 AABB min, 局部 AABB max, 局部凸包平面 [nx,ny,nz,dist])；
         /// 凸包平面供 TS 端精确判定（楔形/斜面触发区不是 AABB）。
         fn model_brush_aabbs(
-            bsp: &crate::vbsp::Bsp,
+            bsp: &vbsp::Bsp,
             model_idx: usize,
         ) -> Vec<([f32; 3], [f32; 3], Vec<[f32; 4]>)> {
             let Some(model) = bsp.models.get(model_idx) else {
@@ -1019,7 +1140,7 @@ impl BspProcessor {
                 };
                 let start = brush.brush_side as usize;
                 let count = brush.num_brush_sides as usize;
-                let mut ps: Vec<&crate::vbsp::Plane> = Vec::new();
+                let mut ps: Vec<&vbsp::Plane> = Vec::new();
                 for s in start..(start + count).min(bsp.brush_sides.len()) {
                     if let Some(side) = bsp.brush_sides.get(s) {
                         if let Some(pl) = bsp.planes.get(side.plane as usize) {
@@ -1326,7 +1447,7 @@ impl BspProcessor {
             .as_ref()
             .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?;
 
-        use crate::vbsp::{Leaf, Node, Plane};
+        use vbsp::{Leaf, Node, Plane};
 
         // ---- 可序列化结构 ----
         #[derive(serde::Serialize)]
@@ -1357,7 +1478,7 @@ impl BspProcessor {
         }
 
         // 坐标旋转 [x,y,z]→[y,z,x]（BSP Z-up → Three.js Y-up），与其他导出函数保持一致
-        fn rotate_yup_f32(v: &crate::vbsp::Vector) -> [f32; 3] {
+        fn rotate_yup_f32(v: &vbsp::Vector) -> [f32; 3] {
             [v.y, v.z, v.x]
         }
         fn rotate_yup_i16(v: [i16; 3]) -> [i16; 3] {
@@ -1371,7 +1492,7 @@ impl BspProcessor {
             .map(|node: &Node| {
                 // 边界检查：plane_index 可能越界（损坏的 BSP 文件）
                 let plane_idx = node.plane_index as usize;
-                let default_plane = Plane { normal: crate::vbsp::Vector { x: 0.0, y: 0.0, z: 1.0 }, dist: 0.0, ty: 0 };
+                let default_plane = Plane { normal: vbsp::Vector { x: 0.0, y: 0.0, z: 1.0 }, dist: 0.0, ty: 0 };
                 let plane = bsp.planes.get(plane_idx).unwrap_or(&default_plane);
                 PvsNode {
                     normal: rotate_yup_f32(&plane.normal),
@@ -1435,8 +1556,8 @@ impl BspProcessor {
                     continue;
                 }
                 let row_offset = c_usize * bytes_per_row;
-                // RLE 解码（权威实现：crate::vbsp::decode_pvs_row，含 `*8` 修复）
-                crate::vbsp::decode_pvs_row(vis_data, offset, cluster_count, bytes_per_row, row_offset, &mut pvs_bits);
+                // RLE 解码（权威实现：vbsp::decode_pvs_row，含 `*8` 修复）
+                vbsp::decode_pvs_row(vis_data, offset, cluster_count, bytes_per_row, row_offset, &mut pvs_bits);
             }
         }
 
@@ -1472,7 +1593,7 @@ impl BspProcessor {
         let filter: ColliderFilter =
             serde_json::from_str(filter_json).unwrap_or_default();
 
-        use crate::vbsp::{BrushFlags, Plane};
+        use vbsp::{BrushFlags, Plane};
 
         #[derive(serde::Serialize)]
         struct WasmBrushPlane {
@@ -1587,12 +1708,12 @@ impl BspProcessor {
         }
 
         // 坐标旋转 [x,y,z]→[y,z,x]（det=+1，正交变换，BSP Z-up → Three.js Y-up）
-        fn rotate_yup(v: &crate::vbsp::Vector) -> [f32; 3] {
+        fn rotate_yup(v: &vbsp::Vector) -> [f32; 3] {
             [v.y, v.z, v.x]
         }
 
         const MAX_BRUSHES: usize = 8000; // 性能保护：上限
-        let sky_flags = crate::vbsp::TextureFlags::SKY | crate::vbsp::TextureFlags::SKY2D;
+        let sky_flags = vbsp::TextureFlags::SKY | vbsp::TextureFlags::SKY2D;
         let mut brushes_out: Vec<WasmBrush> = Vec::new();
         let mut skipped = 0;
         // 【修复】brush → 模型 world origin 映射（实体 brush 局部坐标 → 世界坐标）
@@ -1655,7 +1776,7 @@ impl BspProcessor {
                         if !is_sky && ti.flags.intersects(sky_flags) {
                             is_sky = true;
                         }
-                        if !is_nodraw && ti.flags.contains(crate::vbsp::TextureFlags::NODRAW) {
+                        if !is_nodraw && ti.flags.contains(vbsp::TextureFlags::NODRAW) {
                             is_nodraw = true;
                         }
                     }
@@ -1684,7 +1805,7 @@ impl BspProcessor {
                 bsp_planes
                     .iter()
                     .map(|p| Plane {
-                        normal: crate::vbsp::Vector {
+                        normal: vbsp::Vector {
                             x: p.normal.x,
                             y: p.normal.y,
                             z: p.normal.z,
@@ -1715,7 +1836,7 @@ impl BspProcessor {
                 bsp_plane_refs
                     .iter()
                     .map(|p| Plane {
-                        normal: crate::vbsp::Vector {
+                        normal: vbsp::Vector {
                             x: -p.normal.x,
                             y: -p.normal.y,
                             z: -p.normal.z,
@@ -1877,7 +1998,7 @@ fn entity_is_non_solid(classname: &str) -> bool {
 }
 
 /// 实体 → 模型 classname 映射（`model="*N"` 实体）；model[0]（worldspawn）为 None。
-fn model_classnames(bsp: &crate::vbsp::Bsp) -> Vec<Option<String>> {
+fn model_classnames(bsp: &vbsp::Bsp) -> Vec<Option<String>> {
     let mut m: Vec<Option<String>> = vec![None; bsp.models.len()];
     for ent in bsp.entities.iter() {
         let Ok(model_raw) = ent.prop("model") else {
@@ -1902,7 +2023,7 @@ fn model_classnames(bsp: &crate::vbsp::Bsp) -> Vec<Option<String>> {
 }
 
 /// brush → 模型索引映射（遍历 model.head_node 收集）；worldspawn 与无归属 brush 为 None。
-fn brush_model_indices(bsp: &crate::vbsp::Bsp) -> Vec<Option<usize>> {
+fn brush_model_indices(bsp: &vbsp::Bsp) -> Vec<Option<usize>> {
     let mut map: Vec<Option<usize>> = vec![None; bsp.brushes.len()];
     for (mi, model) in bsp.models.iter().enumerate() {
         if mi == 0 {
@@ -1941,7 +2062,7 @@ fn brush_model_indices(bsp: &crate::vbsp::Bsp) -> Vec<Option<usize>> {
 /// 权威来源是 entities lump 中实体的 `origin` keyvalue（与 `parse_teleports` 一致）。
 ///
 /// worldspawn（model[0]）局部即世界，无需平移；无实体引用的 model 跳过。
-fn build_brush_model_origins(bsp: &crate::vbsp::Bsp) -> Vec<[f32; 3]> {
+fn build_brush_model_origins(bsp: &vbsp::Bsp) -> Vec<[f32; 3]> {
     let mut origins = vec![[0.0f32; 3]; bsp.brushes.len()];
 
     // 1. 实体 → 模型 origin 映射（model="*N" 实体的 origin 为权威位置）
@@ -1963,7 +2084,7 @@ fn build_brush_model_origins(bsp: &crate::vbsp::Bsp) -> Vec<[f32; 3]> {
         let Ok(origin_raw) = ent.prop("origin") else {
             continue; // 无 origin keyvalue（如 func_door 旋转摆法）→ 不平移
         };
-        let Ok(origin) = origin_raw.parse::<crate::vbsp::Vector>() else {
+        let Ok(origin) = origin_raw.parse::<vbsp::Vector>() else {
             continue;
         };
         model_origins[mi] = Some(origin.into());

@@ -1,0 +1,30 @@
+{
+  "name": "websurf",
+  "version": "0.1.0",
+  "description": "浏览器中的 Counter-Strike 滑翔（Surf）地图游玩器：BSP 解析（WASM）+ CS 移动物理 + Three.js 渲染。",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../pkg",
+    "typecheck": "tsc --noEmit",
+    "build:worker": "esbuild src/worker/main.ts --bundle --outfile=web/worker.js --format=esm --target=es2022",
+    "build:app": "esbuild src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022",
+    "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
+    "build:dist": "node scripts/build-dist.mjs",
+    "build": "npm run build:wasm && npm run build:ts",
+    "dev": "python ../src/serve.py 8080 .",
+    "check:api": "node scripts/check-wasm-api.mjs"
+  },
+  "dependencies": {
+    "three": "^0.165.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/three": "^0.165.0",
+    "esbuild": "^0.23.0",
+    "typescript": "~5.7.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

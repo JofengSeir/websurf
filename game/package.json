@@ -1,5 +1,5 @@
 {
-  "name": "websurf-min",
+  "name": "websurf-game",
   "version": "0.1.0",
   "description": "WebSurf 最小化实现：BSP 解析（WASM）+ Rust 物理（WASM）+ 双 Worker 预测 + Three.js 渲染。",
   "type": "module",
@@ -12,7 +12,7 @@
     "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
     "build:dist": "node scripts/build-dist.mjs",
     "build": "npm run build:wasm && npm run build:ts",
-    "dev": "python serve.py 8080",
+    "dev": "python ../src/serve.py 8080 .",
     "check:api": "node scripts/check-wasm-api.mjs",
     "test:phys": "node scripts/phys-smoke.mjs"
   },
