@@ -96,6 +96,9 @@ export interface SceneDataMessage {
   glbSizeKb: number;
   numSpawnPoints: number;
   hasPvs: boolean;
+  /** 纹理画质 manifest：`{ 纹理名(小写 basetexture): mosaic v4 字节码 }` JSON。
+   * 画质切换（原始/压缩低清）时按贴图名查表，`mosaic_decode` 还原低清 PNG 替换。 */
+  mosaicManifest?: string;
 }
 
 export interface StatsMessage {

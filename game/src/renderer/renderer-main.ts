@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { PhysWorld, default as wasmInit } from '../../pkg/websurf_wasm.js';
+import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
 import type { ShmState, MsgState } from '../worker/shared-state.js';
@@ -45,6 +45,8 @@ export class RendererMain {
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
   private pvsManager: PvsManager | null = null;
+  /** 运行时配置（init 时注入；纹理画质等渲染侧配置读取）。 */
+  private config!: RuntimeConfig;
 
   private rafId = 0;
   private running = false;
@@ -84,6 +86,12 @@ export class RendererMain {
   private lodItems: Array<{ mesh: THREE.Mesh; center: THREE.Vector3; radius: number; clusterIds: number[] }> = [];
   /** 剔除距离（场景加载后校准）。 */
   private cullDistance = 12800;
+
+  // ── 纹理画质切换（mosaic）──────────────────────────────────
+  /** 画质 manifest：{ 纹理名(小写 basetexture): mosaic 字节码 }。 */
+  private mosaicManifest: Record<string, string> | null = null;
+  /** 原始贴图图像缓存（切换回 original 时恢复）。 */
+  private readonly origTextureImages = new Map<THREE.Texture, unknown>();
 
   // ── 近平面贴墙自适应（防贴墙透视；同步自主项目 renderer-main）─────────
   /** 近平面收缩探测距离默认（HU）：相机距墙最小距离 = 碰撞箱半宽 16，射线必须
@@ -126,7 +134,8 @@ export class RendererMain {
     eyeHeight: number;
   }) => void) | null = null;
 
-  init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, _config: RuntimeConfig): void {
+  init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
+    this.config = config;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
@@ -219,6 +228,68 @@ export class RendererMain {
 
     // 5. 回传死亡阈值（场景最低 Y - 1000）
     this.onSceneLoaded?.(bbox.min.y);
+
+    // 6. 纹理画质 manifest + 按当前画质应用（mosaic 切换数据源）
+    this.mosaicManifest = data.mosaicManifest
+      ? (JSON.parse(data.mosaicManifest) as Record<string, string>)
+      : null;
+    void this.applyTextureQuality(this.config.texture.quality);
+  }
+
+  // ── 纹理画质切换（原始 / mosaic 压缩低清）────────────────────
+
+  /**
+   * 按画质档位替换场景全部贴图：mini = mosaic 字节码还原低清 PNG；
+   * original = 恢复缓存的原图。即时生效（替换 texture.image），无需重载地图。
+   */
+  async applyTextureQuality(quality: 'original' | 'mini'): Promise<void> {
+    const manifest = this.mosaicManifest;
+    if (!manifest || !this.scene) return;
+    const maps = new Set<THREE.Texture>();
+    this.scene.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (!mat) return;
+      const list = Array.isArray(mat) ? mat : [mat];
+      for (const m of list) {
+        const map = (m as unknown as { map?: THREE.Texture | null }).map;
+        if (map) maps.add(map);
+      }
+    });
+    const jobs: Promise<void>[] = [];
+    for (const map of maps) {
+      if (quality === 'original') {
+        const orig = this.origTextureImages.get(map);
+        if (orig !== undefined) {
+          map.dispose(); // 尺寸可能变化（512 低清 → 原始），强制重建 GPU 纹理
+          map.image = orig;
+          map.needsUpdate = true;
+          this.origTextureImages.delete(map);
+        }
+        continue;
+      }
+      const code = manifest[(map.name ?? '').toLowerCase()];
+      if (!code) continue;
+      if (!this.origTextureImages.has(map)) this.origTextureImages.set(map, map.image);
+      jobs.push(this.replaceMapWithMosaic(map, code));
+    }
+    await Promise.all(jobs);
+  }
+
+  /** 单个贴图：mosaic 字节码 → 低清 PNG → ImageBitmap 替换 image。
+   * 替换前必须 dispose()：three.js r152+ 对同一 texture 的 image 替换走增量
+   * glTexSubImage2D——新 image 尺寸与原 GPU 纹理不符会 GL_INVALID_VALUE 越界、
+   * 上传失败（纹理保持旧内容）。dispose 后重建 GPU 纹理（按新尺寸分配）。 */
+  private async replaceMapWithMosaic(map: THREE.Texture, code: string): Promise<void> {
+    try {
+      const png = mosaic_decode(code, 8);
+      const bitmap = await createImageBitmap(new Blob([png], { type: 'image/png' }));
+      map.dispose();
+      map.image = bitmap;
+      map.needsUpdate = true;
+    } catch (e) {
+      console.warn('[renderer] mosaic 贴图替换失败:', e);
+    }
   }
 
   start(): void {
@@ -343,11 +414,21 @@ export class RendererMain {
 
   // ── 主线程唯一物理线 ───────────────────────────────────────
 
-  /** 主线程初始化 wasm（PhysWorld 模块）。 */
-  async initPrediction(wasmUrl: string): Promise<void> {
+  /** 主线程初始化 wasm（PhysWorld 模块）。dist 内嵌模式传 wasmB64（file:// 无法 fetch）。
+   * 注意：用 initSync({module})——async init() 解构 {module_or_path}，传 {module} 会
+   * 解构出 undefined 走 new URL(import.meta.url) 路径（dist 下 import.meta.url 被
+   * define 为 about:blank → "Failed to construct 'URL'"，dev 下多余一次 fetch）。 */
+  async initPrediction(wasmUrl: string, wasmB64?: string): Promise<void> {
+    if (wasmB64) {
+      const bin = atob(wasmB64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      initSync({ module: bytes.buffer as ArrayBuffer });
+      return;
+    }
     const resp = await fetch(wasmUrl);
     const buf = await resp.arrayBuffer();
-    await wasmInit({ module: buf });
+    initSync({ module: buf });
   }
 
   /** world-json 到达：主线程构建 PhysWorld（唯一物理：世界+碰撞+输入+渲染）。 */

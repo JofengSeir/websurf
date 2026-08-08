@@ -39,7 +39,7 @@ export const DEFAULT_KEYMAP: Record<BindableAction, string[]> = {
 };
 
 /** localStorage 存储键。 */
-const STORAGE_KEY = 'websurf-min.keymap.v1';
+const STORAGE_KEY = 'websurf-game.keymap.v1';
 
 /** 读取持久化键位（缺省返回默认深拷贝）。 */
 export function loadKeymap(): Record<BindableAction, string[]> {

@@ -1,29 +1,39 @@
-# ── 构建产物 ──────────────────────────────
-dist/
-pkg/
-web/app.js
-web/worker.js
+# WebSurf 仓库级 .gitignore（分层：各工程另有自身 .gitignore 补充特有排除）
+#
+# 注意 gitignore 语义：
+# - 含内部斜杠的模式（如 web/app.js）只匹配仓库根层级 → 需用 **/ 前缀覆盖任意层级
+# - 无斜杠的模式（如 dist/、target/）匹配任意层级
+
+# ── 构建产物（覆盖 debug/ 与 game/）──────────
+**/dist/
+**/pkg/
+**/web/app.js
+**/web/worker.js
+**/web/predictor.js
+**/web/websurf_wasm_bg.wasm
+# 注意：**/web/textures.mtz 不在此列——该文件是公共默认纹理包的副本（跟踪）
 
 # ── Rust / Cargo ─────────────────────────
-target/
 **/target/
-.cargo-home/
-.tmp/
-.wasm-pack-cache/
-# Cargo.lock 保留提交（应用项目锁定依赖版本，保证可复现构建）
+**/.cargo-home/
+**/.tmp/
+**/.wasm-pack-cache/
+# Cargo.lock 保留提交（debug/game/materials-mini 为应用项目，锁定依赖版本保证可复现构建；
+# 共享层 src/ 的 Cargo.lock 由 src/.gitignore 忽略——其依赖版本由两端 workspace lock 解析）
 
 # ── Node ─────────────────────────────────
-node_modules/
+**/node_modules/
 
 # ── 地图文件 ──────────────────────────────
 # BSP 地图体积大（surf_666.bsp 75MB 超 GitHub 50MB 推荐限制），
-# 不应进入版本库；本地放 maps/ 即可，需要分享时走网盘/直链。
+# 不应进入版本库；本地放 src/maps/ 即可，需要分享时走网盘/直链。
 *.bsp
 
 # ── 临时 / 验证产物 ───────────────────────
+temp/*
 .tmp-*
-scripts/verify-*
-scripts/cdp-*
+**/scripts/verify-*
+**/scripts/cdp-*
 
 # ── 编辑器 / 系统 ────────────────────────
 .workbuddy/

@@ -66,6 +66,12 @@ export interface HudConfig {
   crosshair: CrosshairConfig;
 }
 
+/** 纹理画质配置（mosaic 共享模块，运行时切换贴图，无需重载地图）。 */
+export interface TextureConfig {
+  /** original = 原始纹理（VTF 解码）；mini = mosaic 压缩低清纹理（×8 最近邻）。 */
+  quality: 'original' | 'mini';
+}
+
 export interface RuntimeConfig {
   /**
    * 锁定 tick 频率（V8/P2 公平性）：true = 锁定 64Hz 只读（计时玩法）；
@@ -76,6 +82,7 @@ export interface RuntimeConfig {
   input: InputConfig;
   player: PlayerConfig;
   hud: HudConfig;
+  texture: TextureConfig;
 }
 
 export const DEFAULT_CONFIG: RuntimeConfig = {
@@ -120,6 +127,9 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
       outline: true,
       dot: false,
     },
+  },
+  texture: {
+    quality: 'original',
   },
 };
 

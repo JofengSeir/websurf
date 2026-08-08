@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebSurf · 入口</title>
+<style>
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #f7f7f7; color: #333;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    padding: 24px; text-align: center;
+  }
+  h1 { font-size: 28px; font-weight: 600; margin: 0 0 4px; }
+  .sub { font-size: 14px; color: #666; margin-bottom: 32px; }
+  .entry { font-size: 17px; line-height: 2.2; }
+  .entry a { color: #2b6cb0; text-decoration: none; }
+  .entry a:hover { text-decoration: underline; }
+  .entry .desc { color: #888; font-size: 13px; }
+  .note { margin-top: 40px; font-size: 12.5px; color: #999; max-width: 560px; line-height: 1.8; }
+  footer { margin-top: 16px; font-size: 12px; color: #bbb; }
+</style>
+</head>
+<body>
+  <h1>WebSurf</h1>
+  <div class="sub">BSP 地图解析 / 物理碰撞 / 渲染的浏览器实现</div>
+
+  <div class="entry">
+    <div><a href="./debug/">Debug Build</a> — 调试测试页面<span class="desc">（WebSurf-debug）</span></div>
+    <div><a href="./game/">Game Build</a> — 尝试游戏化<span class="desc">（WebSurf-game 最小实现）</span></div>
+  </div>
+
+  <div class="note">提示：Game Build 依赖 SharedArrayBuffer（需 COOP/COEP 响应头），GitHub Pages 不提供——线上可打开但功能受限；完整游玩请下载仓库后运行 <code>game/play.cmd</code>。</div>
+
+  <footer>由 GitHub Actions 自动构建部署</footer>
+</body>
+</html>

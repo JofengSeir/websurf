@@ -1,6 +1,10 @@
 # WebSurf: 构建并部署到 GitHub Pages
 #
-# 构建链路（与本地 build-dist.cmd 一致）：
+# 仓库布局（两个同级独立工程）：
+#   debug/ = 主工程（Debug Build，TS 物理，IIFE 单文件 dist）
+#   game/  = WebSurf-game（Game Build，Rust 物理，多文件 dist）
+#
+# debug/ 构建链路（与本地 build-dist.cmd 一致）：
 #   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.126 与 Cargo.lock 精确匹配）
 #   2. esbuild 打包 TypeScript（worker + app）
 #   3. scripts/build-dist.mjs 生成自包含 dist/（index.html + app.js，WASM base64 内嵌 + Worker Blob URL）
@@ -59,19 +63,25 @@ jobs:
           cp "/tmp/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" "$HOME/.cargo/bin/"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Install npm dependencies
+      # ── debug/ 主工程（Debug Build，调试测试页面）─────────────
+      - name: Install debug dependencies
+        working-directory: debug
         run: npm ci
 
-      - name: Build WASM
+      - name: Build debug WASM
+        working-directory: debug
         run: npm run build:wasm
 
-      - name: Build TypeScript (typecheck + bundle)
+      - name: "Build debug TypeScript (typecheck + bundle)"
+        working-directory: debug
         run: npm run build:ts
 
-      - name: Build dist package
-        run: npm run build:dist
+      - name: Build debug dist package
+        working-directory: debug
+        # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常，体积更小
+        run: node scripts/build-dist.mjs --multi
 
-      # ── game/ 独立工程（WebSurf-min，尝试游戏化）────────────────
+      # ── game/ 独立工程（WebSurf-game，尝试游戏化）────────────────
       - name: Install game dependencies
         working-directory: game
         run: npm ci
@@ -86,15 +96,16 @@ jobs:
 
       - name: Build game dist package
         working-directory: game
-        run: node scripts/build-dist.mjs
+        # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常
+        run: node scripts/build-dist.mjs --multi
 
       # ── 组装 Pages 部署目录（入口页 + debug/ + game/）───────────
       - name: Assemble Pages deploy directory
         run: |
           mkdir -p deploy/debug deploy/game
-          cp -r dist/. deploy/debug/
+          cp -r debug/dist/. deploy/debug/
           cp -r game/dist/. deploy/game/
-          cp scripts/pages-index.html deploy/index.html
+          cp debug/scripts/pages-index.html deploy/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

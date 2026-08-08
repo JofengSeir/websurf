@@ -28,6 +28,38 @@
 
 ### 变更
 
+- **仓库结构重组：单一工程 → 双工程 + 共享层**（2026-08-09）
+  - `src/` 由原 TS 源码目录改为**共享层**：`websurf-phys`（Rust CS 物理，原
+    crates/wasm 物理部分，game 中诞生后上移共享）、`websurf-wasm-core`
+    （BSP 解析/GLB/模型/纹理解析，纯 rlib）、`vendor/vmdl`（vendored，单副本）、
+    `materials/textures.mtz`（默认纹理包 9448+ 条，三处副本同步）、`maps/`、
+    `serve.py`（共享 dev 服务器）
+  - `debug/` = **WebSurf-debug**（原全功能主项目迁入）：`crates/wasm/src/`
+    仅导出层 + `shell_colliders.rs`（薄壳碰撞特色）+ `debug_probe.rs`；`src/`
+    TS 全套（app/renderer/worker/world/physics/game/panel）；`web/`
+  - `game/` = **WebSurf-game**：`crates/wasm/src/` 仅 `lib.rs` 导出层
+    （BspProcessor/PhysWorld/画质 API re-export），物理/解析经 path 依赖
+    共享层，`[patch.crates-io]` → `../src/vendor/vmdl`
+  - 旧顶层 `crates/`、`src/*.ts`、`web/`、`pkg/`、`target/` 全部移除
+- **材质低清压缩体系（mosaic + MTZ）**（`src/wasm-core/mosaic/`）：
+  `encode.rs`（PNG → mosaic v4 字节码）/ `decode.rs`（→ 低清 PNG，2 次幂对齐）/
+  `manifest.rs`（BSP 纹理收集 + 缺失列表）/ `mtz.rs`（textures.json ↔ MTZ5/6
+  压缩容器）；`export_mosaic_manifest` / `export_missing_textures` 须在
+  `export_glb*` 之前调用（借用 vs take 时序约定）
+- **画质切换**（debug + game 共有）：运行时按 manifest 用 `mosaic_decode`
+  还原低清贴图替换；缺失纹理回退在 GLB 导出期完成（`with_defaults` +
+  默认纹理包），渲染端零后期处理（曾引发 `RESULT_CODE_HUNG` 的修复）
+- **打包双模式**：`build-dist.mjs [--multi]`——`single`（默认）单文件 IIFE
+  （WASM + Worker 代码 + 默认纹理包全 base64 内嵌，file:// 双击可玩）；
+  `multi` 多文件 ESM（WASM/MTZ 外置，HTTP/Pages 部署）；注入全局：
+  `__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` / `__VBSP_TEXTURES_MTZ_B64__` /
+  `__VBSP_WASM_URL__`（multi）
+- **CI（deploy-pages.yml）**：debug + game 均以 `--multi` 构建 → 组装
+  `deploy/{debug,game}` + 入口页 → GitHub Pages 部署
+- **文档重组**：`docs/` 新四篇（architecture / timing-debug / timing-game /
+  materials）替换旧 `bsp-architecture` / `bsp-export-status` / `project-overview`
+  / `项目时序图`；`game/docs/` 新四篇（overview / physics / panel / materials）
+  替换旧实现状态文档
 - `frame` 信号改为纯触发（去除主线程时间戳），物理 dt 由 Worker 侧 `performance.now()`
   计算（与主线程同源时钟，LERP 插值基准不变）
 - 共享内存布局重设计：输入区由单槽 `inDx/inDy` 累加器改为 `inHead/inTail` 环形缓冲

@@ -1,0 +1,20 @@
+[package]
+name = "websurf-phys"
+version = "0.1.0"
+edition = "2021"
+description = "WebSurf 共享物理系统（源自 game/ WebSurf-game 的 Rust 物理，被 debug/ 与 game/ 两工程共同引用）"
+license = "MIT"
+
+# 独立 workspace root（不归属 debug/ 或 game/ 的 workspace，
+# 两工程经 path 依赖引用；保持独立避免多 workspace 成员冲突）
+[workspace]
+
+[lib]
+crate-type = ["rlib"]
+path = "lib.rs"
+
+[dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

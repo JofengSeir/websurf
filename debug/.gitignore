@@ -1,0 +1,11 @@
+# debug 主工程 .gitignore
+#
+# 构建产物大部分由根 .gitignore 全局覆盖：
+#   **/dist/ **/pkg/ **/node_modules/ **/target/ **/.cargo-home/ **/.tmp/ **/.wasm-pack-cache/
+#   **/web/app.js **/web/worker.js *.bsp .tmp-*
+#
+# 本文件补充本工程特有排除：
+# （当前无特有产物；dev 模式 WASM 走 ../pkg/，textures.mtz 为公共包副本需跟踪）
+#
+# 需要跟踪（勿加入排除）：
+#   web/index.html  web/textures.mtz  Cargo.lock  package-lock.json

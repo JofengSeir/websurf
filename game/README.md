@@ -1,4 +1,4 @@
-# WebSurf-min（最小化实现）
+# WebSurf-game（最小化实现）
 
 WebSurf 的激进最小化实现（独立工程 `game/`，不修改原项目）。物理栈整体下沉 Rust WASM，
 双 Worker（权威 64Hz 自驱 + 预测热待机）三源决策零等待渲染。
@@ -55,7 +55,7 @@ npm run build:dist   # 常规多文件 dist/（index.html + app.js + worker.js +
 
 > **必须通过本地 HTTP 服务器**：物理双 Worker 依赖 SharedArrayBuffer，
 > 需要 COOP/COEP 跨域隔离头——`file://` 双击无法启用（页面会显示引导卡片）。
-> 推荐直接双击 `play.cmd`；或 `python serve.py 8137` 后访问
+> 推荐直接双击 `play.cmd`；或工程根目录下 `python ..\src\serve.py 8137 .` 后访问
 > `http://localhost:8137/dist/index.html`（开发用 `8090/web/index.html`）。
 
 ## 控制
@@ -81,4 +81,4 @@ npm run build:dist   # 常规多文件 dist/（index.html + app.js + worker.js +
 - `IMPLEMENTATION-STATUS.md` — 实现现状 + 三方差异对照（时序图/蓝图/现状，D1-D6/T1-T6）
 - `DESIGN-DISCUSSION.md` — 差异点讨论（含优先级与已实施记录）
 
-> 目标架构参照根 `docs/项目时序图.md`（终版：双缓冲 + 代际校验 + 预测链防滥用）。
+> 目标架构参照根 `docs/项目时序图.md`（终版：双缓冲 + 代际校验 + 预测链防滥用；规划蓝图，现状以本工程 docs 为准）。

@@ -1,5 +1,5 @@
 /**
- * WebSurf-min — 主线程入口。
+ * WebSurf-game — 主线程入口。
  *
  * 架构（2026-08-07 v5 定案）：
  * - **唯一物理渲染主线 = 主线程**：主线程解析 BSP、构建 PhysWorld（世界+碰撞+输入）、
@@ -11,7 +11,7 @@
 
 import { createConfig, buildPhysicsParams } from './config.js';
 import type { RuntimeConfig } from './config.js';
-import { BspProcessor } from '../pkg/websurf_wasm.js';
+import { BspProcessor, decompress_mtz } from '../pkg/websurf_wasm.js';
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { loadKeymap, type BindableAction } from './input/keymap.js';
@@ -51,6 +51,8 @@ let renderer: RendererMain | null = null;
 let panel: PanelController | null = null;
 let sharedState: ReturnType<typeof createMainSharedState> | null = null;
 let sceneReady = false;
+/** 主线程 wasm 初始化 promise（handleLoadBsp 的 decompress_mtz 依赖就绪）。 */
+let mainWasmReady: Promise<void> = Promise.resolve();
 /** 速度面板 8Hz 门控（0.125s）。 */
 let speedUpdateAt = 0;
 /** 滚轮跳 pending（wheel 事件置位，下一帧消费并清除；与根工程语义一致）。 */
@@ -72,7 +74,12 @@ async function main(): Promise<void> {
   const sharedBuffer = canSab ? new SharedArrayBuffer(SHARED_BUFFER_SIZE) : null;
 
   // 1. 权威帧 Worker（加载地图碰撞、独立固定步长权威模拟，输出权威帧供渲染校准）
-  fixWorker = new Worker('./worker.js', { type: 'module' });
+  //    dist 内嵌模式（file:// 双击）：worker 代码内嵌 → Blob URL（module worker 在
+  //    file:// 下被 CORS 拦截）；dev 模式用 module worker（./worker.js）
+  const embeddedWorkerJs = (globalThis as { __VBSP_WORKER_JS__?: string }).__VBSP_WORKER_JS__;
+  fixWorker = embeddedWorkerJs
+    ? new Worker(URL.createObjectURL(new Blob([embeddedWorkerJs], { type: 'text/javascript' })))
+    : new Worker('./worker.js', { type: 'module' });
   fixWorker.onerror = (e) => setError(`Worker error: ${e.message}`);
   fixWorker.onmessage = (e: MessageEvent<{ type?: string }>) => {
     const msg = e.data;
@@ -90,7 +97,13 @@ async function main(): Promise<void> {
     }
   };
   fixWorker.postMessage({ type: 'init', shared: sharedBuffer });
-  fixWorker.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
+  // wasm-init：dist 内嵌 base64 → initSync（file:// 无法 fetch）；dev → fetch URL
+  const embeddedWasm = (globalThis as { __VBSP_WASM_B64__?: string }).__VBSP_WASM_B64__;
+  if (embeddedWasm) {
+    fixWorker.postMessage({ type: 'wasm-init', wasmB64: embeddedWasm });
+  } else {
+    fixWorker.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
+  }
 
   // 通道创建（SAB / MsgState 同接口）
   sharedState = createMainSharedState(sharedBuffer, fixWorker);
@@ -106,8 +119,9 @@ async function main(): Promise<void> {
   };
   renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
   renderer.start();
-  // 主线程 wasm 初始化（BspProcessor + PhysWorld 同模块）
-  renderer.initPrediction('./websurf_wasm_bg.wasm').catch((err) => {
+  // 主线程 wasm 初始化（BspProcessor + PhysWorld 同模块；dist 内嵌 base64）。
+  // 保存 promise：handleLoadBsp 的 decompress_mtz 依赖 wasm 就绪（await 防竞态）。
+  mainWasmReady = renderer.initPrediction('./websurf_wasm_bg.wasm', embeddedWasm).catch((err) => {
     setError(`主线程 WASM 初始化失败: ${err instanceof Error ? err.message : String(err)}`);
   });
 
@@ -123,6 +137,7 @@ async function main(): Promise<void> {
     (params) => renderer?.setPredictionParams(params),
     (hw, sh, dh) => renderer?.setPredictionHull(hw, sh, dh),
     (active) => renderer?.setPredictionNoclip(active),
+    (quality) => void renderer?.applyTextureQuality(quality),
   );
 
   // 5. 输入绑定
@@ -326,6 +341,8 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
     setError('渲染器未就绪');
     return;
   }
+  // 主线程 wasm 就绪（decompress_mtz 依赖；失败则继续，回退降级为占位色）
+  await mainWasmReady.catch(() => undefined);
   renderer.disposeScene();
   sceneReady = false;
   panel?.updateVisibility(false);
@@ -381,12 +398,43 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
         }
       : { x: 0, y: 100, z: 0, yawDeg: 0 };
 
-    // GLB（消费 BSP，最后调用）
+    // GLB（消费 BSP，最后调用；mosaic manifest 必须在消费前生成）
+    let mosaicManifest: string | undefined;
+    try {
+      mosaicManifest = proc.export_mosaic_manifest();
+    } catch (e) {
+      console.warn('[app] mosaic manifest 生成失败（画质切换不可用）:', e);
+    }
+    // 缺失纹理回退数据源：默认纹理包（与地图纹理处理同一时序节点加载；
+    // GLB 导出时直接在 Rust 侧把缺失材质替换为低清纹理——渲染端零后期处理）
+    let defaultsJson = '{}';
+    try {
+      const embeddedMtz = (globalThis as { __VBSP_TEXTURES_MTZ_B64__?: string })
+        .__VBSP_TEXTURES_MTZ_B64__;
+      if (embeddedMtz) {
+        // single 打包（file://）：内嵌 base64
+        const bin = atob(embeddedMtz);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        defaultsJson = decompress_mtz(bytes);
+        console.log('[app] 默认纹理包已加载（内嵌，缺失纹理回退可用）');
+      } else {
+        const resp = await fetch('./textures.mtz');
+        if (resp.ok) {
+          const bytes = new Uint8Array(await resp.arrayBuffer());
+          defaultsJson = decompress_mtz(bytes);
+          console.log('[app] 默认纹理包已加载（缺失纹理回退可用）');
+        }
+      }
+    } catch (e) {
+      console.warn('[app] 默认纹理包加载失败（缺失纹理保持占位色）:', e);
+    }
     let glbBytes: Uint8Array;
     try {
+      glbBytes = proc.export_glb_with_pakfile_models_with_defaults(defaultsJson);
+    } catch (e) {
+      console.warn('[app] 带默认纹理回退的 GLB 导出失败，回退无回退导出:', e);
       glbBytes = proc.export_glb_with_pakfile_models();
-    } catch {
-      glbBytes = proc.export_glb();
     }
     const glbBuffer = glbBytes.buffer.slice(
       glbBytes.byteOffset,
@@ -399,6 +447,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       glb: glbBuffer,
       spawnJson,
       pvsJson,
+      mosaicManifest,
       metadata: {
         mapName: meta.map_name,
         numFaces: meta.num_faces,
