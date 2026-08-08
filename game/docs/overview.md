@@ -9,9 +9,11 @@
 |---|---|
 | `crates/wasm/src/lib.rs` | WASM 导出层（唯一文件：BspProcessor + PhysWorld/画质 API re-export） |
 | `src/app.ts` | 主线程入口：BSP 解析、物理线、输入层、桥 |
+| `src/config.ts` | 运行时配置（physics/input/player/hud/texture） |
 | `src/renderer/renderer-main.ts` | 渲染 + 主线程 PhysWorld（唯一物理渲染线）+ 权威校准 |
 | `src/worker/main.ts` | 权威帧计算器（固定步长 64/128Hz） |
-| `src/worker/shared-state.ts` | SAB（输入槽 + 权威双缓冲 + 代际）/ MsgState 回退 |
+| `src/worker/shared-state.ts` | SAB（输入槽 + 权威双缓冲）/ MsgState 回退 |
+| `src/world/` | pvs-manager / types（PVS 剔除） |
 | `src/panel/panel-controller.ts` | ESC 弹出面板（左导航 + 右设置 + 键位录制） |
 | `src/input/` | input-bridge / keyboard / keymap / mouse-buffer / pointer-lock |
 

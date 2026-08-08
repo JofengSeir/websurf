@@ -12,10 +12,10 @@
 | `crates/wasm/src/shell_colliders.rs` | **特色**：薄壳 brush 模型碰撞（`export_model_colliders` 等） |
 | `crates/wasm/src/debug_probe.rs` | **特色**：测试探针（`cargo test` 用，不进 WASM 产物） |
 | `src/app.ts` | 主线程入口：Worker 编排、面板绑定、弹窗、输入 |
-| `src/renderer/` | 渲染：renderer-main / camera / collider-debug / plane-inspector / fog / light / lod / lightmap-shader |
+| `src/renderer/` | 渲染：renderer-main / camera-controller / collider-debug / plane-inspector / fog-manager / light-manager / lod-manager / lightmap-shader |
 | `src/worker/` | Worker：main / physics-worker（协调）/ physics-loop（物理循环）/ shared-state（SAB+回退）/ mtz-data |
 | `src/world/` | pvs-manager / spawn-loader / collider-adapter（可视化用）/ teleport-manager（可视化用）/ types |
-| `src/physics/` | param-defs / physics-params（面板参数管理器）；vec3/Collision.types 类型 |
+| `src/physics/` | param-defs / physics-params（面板参数管理器）；`math/vec3.ts`、`physics/Collision/Collision.types.ts`（渲染层类型，保留） |
 | `src/game/` | **特色**：计时挑战状态机（GameState） |
 | `src/main-wasm.ts` / `default-pack.ts` | 主线程 wasm 懒初始化 / 默认纹理包加载 |
 
@@ -41,12 +41,12 @@
 
 ## 4. 侧边栏面板（HTML 静态声明 + app.ts 绑定）
 
-| 折叠区 | 内容 |
+| 折叠区（`web/index.html` `<details>`） | 内容 |
 |---|---|
-| 加载/信息 | 文件选择、状态、元数据、出生点下拉、重生 |
-| 物理 | 参数滑块/开关（13 项）、碰撞箱体型、自动恢复开关、传送触发模式 |
-| 显示设置 | HUD、准星风格化、纹理画质、碰撞箱可视化、近平面参数 |
-| 调试 | showSolids / showTriggers / 准星信息（planeInfo） |
+| 加载地图 / 出生点 / 元数据（三个独立折叠区 + 顶部状态条） | 文件选择、状态、出生点下拉、元数据 |
+| 物理 | 参数滑块/开关（13 项）、碰撞箱体型、自动恢复开关、传送触发模式、重生按钮 |
+| 视距与视角 | 视距剔除滑块、PVS 开关 |
+| 显示设置 | HUD、准星风格化、纹理画质、近平面参数、showSolids / showTriggers / 准星信息（showPlaneInfo） |
 | 自定义传送点 | 保存当前位置、坐标传送、清空 |
 
 控件 → `applyConfigPatch(config, ...)` + `rendererMain.applyConfigPatch` + `inputBridge.sendConfig`（三路同步）+ `saveUiPrefs`（localStorage 持久化）。

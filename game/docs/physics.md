@@ -22,12 +22,11 @@ Worker = 权威帧计算器（独立固定步长 = 1/tickRate，64/128Hz，累�
 
 | 区 | 内容 | 内存序 |
 |---|---|---|
-| 控制区 | V_A + gen_A + keys + onGround | release 写 / acquire 读 |
+| 控制区 | V_A + keys + onGround | Atomics.store / load（seq_cst，语义近似 release/acquire） |
 | 输入槽 | dx/dy（BigInt64 原子累加，绝不丢）+ keys | 主线程 add；Worker exchange 消耗 |
-| 权威全状态双缓冲 | pos/yaw/pitch/vel/eyeHeight/timeMs（每槽 10 值定点：pos/vel×100、角度×1000） | Worker 写槽后 release 递增 V_A |
+| 权威全状态双缓冲 | pos/yaw/pitch/vel/eyeHeight/timeMs（每槽 10 值定点：pos/vel×100、角度×1000） | Worker 写槽后 store 递增 V_A |
 
-- **双缓冲**（S_A[0]/S_A[1]）：读侧按 `(V_A-1)&1` 选槽，防多字段撕裂。
-- **代际校验**（gen_A）：防主线程读到写入中状态。
+- **双缓冲**（S_A[0]/S_A[1]）：读侧按 `(V_A-1)&1` 选槽，防多字段撕裂（无代际校验字段）。
 - **定点精度**：位置 0.01 HU、角度 0.001°（Atomics 仅支持整数 TypedArray）。
 
 ### MsgState（postMessage 回退，file:// / 静态部署无 COOP/COEP）
@@ -42,8 +41,8 @@ Worker = 权威帧计算器（独立固定步长 = 1/tickRate，64/128Hz，累�
 |---|---|
 | 每帧校准 | `set_velocity(vel_A + a×Δt)`：权威速度 + 两帧加速度差外推（考虑中途地图碰撞）；**位置/角度不覆盖** |
 | 碰撞事件 | `phys-event`（land/blocked）→ 位置微调（差 <60）+ 角度同步（仅碰撞时可影响渲染角度） |
-| 位置突变 | respawn/teleport：双端同执行 + `player-respawn` 回传归零（清输入缓冲） |
-| 兜底同步反转 | 渲染主线 → 权威反向同步（渲染 144Hz 精度更高）：dist>500 或（dist>300 且 yaw 同向小差）或 yaw>45° 分叉；250ms 冷却；同步中再分叉回滚以权威为准。通道 `sync-render-state`（Worker `set_state` + resetInput） |
+| 位置突变 | respawn/teleport：双端同执行（渲染物理本地重生 + Worker 同步），无回传归零——由权威帧校准后续收敛 |
+| 兜底同步反转 | 渲染主线 → 权威反向同步（渲染 rAF 精度更高）：三条件 OR（①dist>500 ②dist>300 且 yaw 差≤3° 且转动方向相同 ③dist≤300 且 yaw 差>45°）；250ms 冷却；同步中再分叉回滚以权威为准。通道 `sync-render-state`（Worker `set_state` + resetInput） |
 | 角度隔离 | 权威帧不得影响渲染角度（输入层化后双端同源 → 天然一致） |
 
 ## 4. 输入层（`app.ts`）
@@ -67,10 +66,10 @@ Worker = 权威帧计算器（独立固定步长 = 1/tickRate，64/128Hz，累�
 
 ## 6. noclip（`set_noclip`）
 
-- 面板「自由视角」→ 双端 `set_noclip(true)`（Rust 侧 noclip_step，单一物理源）；noclip 速度 `noclipSpeed`（默认 800，sprint ×4）。
-- 渲染切权威直读（防止双管道撕裂）。
+- 面板「自由视角」→ `config` 消息 mode 字段（`bridge.sendConfig('physics', { mode })`）→ 双端 `set_noclip`（Rust 侧 noclip_step，单一物理源）；noclip 速度 `noclipSpeed`（默认 800，sprint ×4）。
+- 无独立权威直读路径（noclip 由渲染物理单线处理）。
 
 ## 7. 防穿墙与时间守恒
 
-- 单 tick 输入增量上限（`MAX_INPUT_PER_STEP` 随步长缩放）。
-- 固定步长累积器**无封顶**：低帧率不丢物理时间（曾修复"250 速地面一直滑行"= keysMask 残留 + 累积器覆盖式丢时间两个根因）。
+- 单 tick 输入增量上限 `MAX_INPUT_PER_STEP_BASE`（1200，随步长缩放：base × dt × 64）。
+- 固定步长累积器无封顶（每轮询 while 有 `guard < 64` 步数上限，剩余时间留在 acc 不丢失）——低帧率不丢物理时间（曾修复"250 速地面一直滑行"= keysMask 残留 + 累积器覆盖式丢时间两个根因）。
