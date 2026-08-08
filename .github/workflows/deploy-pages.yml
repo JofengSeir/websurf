@@ -45,8 +45,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 20 已弃用（GH Actions 提示默认 24）；22 为 LTS 稳定线（esbuild/wasm-pack 兼容）
+          node-version: 22
+          # 重构后 lock 文件在两端工程（debug/package-lock.json + game/package-lock.json），
+          # 根目录无锁文件——必须 glob 匹配，否则 cache: npm 报
+          # "Dependencies lock file is not found"（8-09 CI 失败根因）
           cache: npm
+          cache-dependency-path: '**/package-lock.json'
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0

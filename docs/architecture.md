@@ -22,11 +22,11 @@ websurf/
 │   └── serve.py                 共享开发服务器（COOP/COEP + CORS + WASM MIME）
 ├── debug/                    WebSurf-debug（Debug Build）：全功能调试测试页面
 │   ├── crates/wasm/src/         lib.rs（导出层）+ shell_colliders.rs（薄壳碰撞特色）+ debug_probe.rs
-│   ├── src/                     TS：app/renderer/worker/world/physics(参数)/game/panel
+│   ├── src/                     TS：app/renderer/worker/world/physics(参数)/game + main-wasm/default-pack
 │   └── web/                     dev 页面（index.html + 构建产物）
 ├── game/                      WebSurf-game（Game Build）：最小化游戏化实现
 │   ├── crates/wasm/src/         lib.rs（导出层，唯一文件）
-│   ├── src/                     TS：app/renderer/worker/panel/input
+│   ├── src/                     TS：app/renderer/worker/panel/input/world
 │   └── web/                     dev 页面
 ├── docs/                     仓库级文档（本文 / 两端时序 / 材质技术）
 └── .github/workflows/deploy-pages.yml    CI：双工程构建 + Pages 部署
@@ -81,12 +81,12 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 | 文件 | 职责 |
 |---|---|
 | `mod.rs` | `PhysWorld` wasm 绑定层：`build_world` / `tick` / `predict` / `respawn` / `teleport_to(_spawn)` / `set_spawn_points` / `set_state` / `set_velocity` / `set_yaw_pitch` / `set_death_y` / `set_params` / `set_hull` / `set_noclip` / `state` / `take_event` |
-| `world.rs` | 世界碰撞：brush/tri 双空间索引（BrushGrid/TriangleGrid）+ Minkowski 扫掠盒 + 梯形/楔形凸包判定 |
+| `world.rs` | 世界碰撞：brush/tri 双空间索引（BrushGrid/TriangleGrid）+ Minkowski 扫掠盒 |
 | `player.rs` | 全套 CS 移动语义（WalkMove/AirMove/Accelerate/Friction/Jump/Duck/Ladder/StepMove/StuckCheck…）+ `PhysParams`（19 项可调） |
-| `teleport.rs` | 传送检测（StartTouch 边沿 + 落地脚底 OR）+ 死亡判定（`set_death_y`） |
+| `teleport.rs` | 传送检测（凸包精确判定 > AABB > 球形；StartTouch 边沿 + 落地脚底 OR）+ 死亡判定（`set_death_y`） |
 
-`build_world` 输入为 JSON 字符串（与 BspProcessor 的导出输出**同构**，零转换）：
-`brushJson`（WasmBrush[]）、`triJson`（TriMesh[]）、`teleportJson`（{teleports,triggers}）、spawn（xyz + yaw 度）。
+`build_world` 输入为 JSON 字符串 + 出生点标量（与 BspProcessor 的导出输出**同构**，零转换）：
+`brushJson`（WasmBrush[]）、`triJson`（TriMesh[]）、`teleportJson`（{teleports,triggers}）+ `spawn_x/y/z` 与 `spawn_yaw`（4 个独立 f64 标量，非 JSON）。
 
 ### 3.2 websurf-wasm-core（src/wasm-core/）
 
@@ -116,14 +116,14 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 
 | 模式 | 产物 | 用途 |
 |---|---|---|
-| **single**（默认，`build-dist.cmd` / `play.cmd` 配套） | 单文件 IIFE：WASM + Worker 代码 + **默认纹理包**全部 base64 内嵌，classic index.html | 本地双击 file://（无 fetch 能力，全内嵌；无 SAB 自动 MsgState 回退） |
+| **single**（默认；debug `build-dist.cmd`，game `build-dist.cmd` 配套） | 单文件 IIFE：WASM + Worker 代码 + **默认纹理包**全部 base64 内嵌，classic index.html | 本地双击 file://（无 fetch 能力，全内嵌；无 SAB 自动 MsgState 回退） |
 | **multi**（`--multi`） | 多文件 ESM：app.js + worker.js + wasm 外置 + textures.mtz 外置 | GitHub Pages / HTTP 部署（fetch 正常，体积小） |
 
 **运行时内嵌消费约定**（single 模式注入的全局变量）：
 - `__VBSP_WASM_B64__`：WASM base64（主线程/Worker 经消息 initSync）
 - `__VBSP_WORKER_JS__`：Worker 代码（Blob URL 创建；Blob worker 读不到主线程 global，**数据一律经 postMessage 传递**）
 - `__VBSP_TEXTURES_MTZ_B64__`：默认纹理包 base64（主线程直接读；Worker 经 `wasm-init` 消息的 `mtzB64` 字段下发）
-- `__VBSP_WASM_URL__`（multi 注入）：WASM 相对路径（`./websurf_wasm_bg.wasm`）；无则 dev 默认 `../pkg/websurf_wasm_bg.wasm`
+- `__VBSP_WASM_URL__`（仅 debug multi 注入）：WASM 相对路径（`./websurf_wasm_bg.wasm`），无则 dev 默认 `../pkg/websurf_wasm_bg.wasm`。game 不使用该变量——其 dev/multi 的 wasm 路径统一硬编码 `./websurf_wasm_bg.wasm`（build:wasm 复制 wasm 到 web/，dev 与 dist 同构）。
 
 **CI（deploy-pages.yml）**：两端均以 `--multi` 构建 → 组装 `deploy/{debug,game}` + 入口页 → Pages 部署。
 
@@ -136,7 +136,7 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 | 定位 | 全功能调试测试页面 | 最小化游戏化实现 |
 | BSP 解析/导出位置 | Worker（`physics-worker.ts`） | 主线程（`app.ts`） |
 | 物理执行 | Worker 物理循环（frame 信号驱动） | **主线程唯一物理渲染线** + Worker **权威帧计算器** |
-| 共享通道 | SAB 输入环形缓冲 + 输出 seqlock（`shared-state.ts`） | SAB 输入槽 + 权威双缓冲 + 代际校验（或 MsgState 回退） |
+| 共享通道 | SAB 输入环形缓冲 + 输出 seqlock（`shared-state.ts`） | SAB 输入槽（BigInt64）+ 权威全状态双缓冲（或 MsgState 回退） |
 | 面板 | 侧边栏手风琴（HTML 静态 + app.ts 绑定） | ESC 弹出面板（`panel-controller.ts` + 键位录制） |
 | 特色功能 | 薄壳碰撞、调试探针、计时挑战、自定义传送点、准星射线、碰撞可视化 | 键位自定义、noclip、速度面板、tick 锁定预留 |
 

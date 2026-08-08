@@ -29,7 +29,7 @@ BSP PAKFILE 内的 .vtf
   → GLB 纹理嵌入（gltf_builder.push_texture，PNG 编码）
 ```
 
-- GLB 的 `texture.name` = **basetexture 小写**（如 `materials/brick/brickwall003d`）；材质名 = **VMT 材质路径小写**（画质切换与回退的匹配键）。
+- GLB 的 `texture.name` = basetexture 路径（大小写随源数据；manifest 生成与渲染端匹配均显式 `toLowerCase()`，键为小写）。材质名 = **VMT 材质路径小写**（画质切换与回退的匹配键）。
 - 模型贴图（PAKFILE 模型）的 `texture.name` = 材质名（如 `maplebark`，无 `materials/` 前缀）。
 
 ---

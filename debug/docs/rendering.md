@@ -17,7 +17,7 @@ scene-data（GLB 字节 transfer + 各 JSON）
 
 ## 2. 渲染循环
 
-- 每帧：`readFrame`（锁占用→复用缓存）→ 双快照 LERP → 相机同步 → LOD/PVS 剔除 → 近平面自适应 → 渲染。
+- 每帧：`readFrame`（锁占用→复用缓存）→ 双快照 LERP → 相机同步（含近平面自适应，每 2 帧探测）→ LOD/PVS 剔除 → 渲染。
 - 无人为帧率上限；`needsRender` 脏标记（配置/场景变更触发）。
 - 外推插帧（dead-reckoning）：`alpha > 1` 时按快照速度一阶外推（限 1/64s，防跑飞）；速度门限 500（低速不外推）。
 
@@ -25,7 +25,7 @@ scene-data（GLB 字节 transfer + 各 JSON）
 
 | 特性 | 说明 |
 |---|---|
-| PVS 剔除 | `PvsManager`（cluster 位图）+ `LodManager`（近/中/远三级 LOD + 距离剔除） |
+| PVS 剔除 | `PvsManager`（cluster 位图）+ `LodManager`（**2 级 LOD**：近/远 + PVS 隐藏，距离剔除） |
 | Lightmap | 图集化 + RGBExp32 解码（`lightmap-shader.ts` 注入 onBeforeCompile） |
 | 雾 | `FogManager`（场景半径/中心自适应） |
 | 近平面自适应 | 6 方向探测（4 水平正交 + 上下 2，距离 100）× 收缩系数 0.3，面板实时可调 |
@@ -45,8 +45,8 @@ scene-data（GLB 字节 transfer + 各 JSON）
 ## 5. 游戏化（计时挑战，`src/game/game-state.ts`）
 
 - 状态机：`idle →(移动)→ running →(终点)→ finished`；死亡回退检查点。
-- 检查点：每次传送（`take_event` teleport）记录（位置/名称/时间）；终点 = targetname 以 `end` 结尾（`level_end` 等）。
-- 死亡：Y < 阈值（主线程回传 sceneMinY-1000）→ `onDeath` + `getRespawnPos` 回退。
+- 检查点：传送事件（`take_event` teleport）记录（位置/名称/时间），**同名检查点去重**（只记首个；finished 后不再记录）；终点 = targetname 以 `end` 结尾（`level_end` 等）。
+- 死亡：Rust 物理内部判定（Y < 阈值）→ `take_event` death 事件 → `onDeath` + `getRespawnPos` 回退；阈值 = 主线程回传场景 `boundingBox.min.y`，Worker 侧 `set_death_y(minY - 1000)`。
 - HUD：计时/检查点数/死亡次数（10Hz game-stats）。
 
 ## 6. 自定义传送点
