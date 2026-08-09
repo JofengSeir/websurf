@@ -11,16 +11,16 @@ import type { Brush, TriMesh } from '../physics/physics/Collision/Collision.type
 import type { RuntimeConfig } from '../config.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
 
-/** 玩家附近显示半径（HU）。 */
-const DEBUG_RADIUS = 512;
 /** Y 方向上下扩展（HU）。 */
 const DEBUG_Y_EXTENT = 300;
 /** 最多显示的碰撞体数量。 */
 const MAX_DEBUG_COLLIDERS = 800;
 /** 重建限流（每 N 帧）。 */
 const REBUILD_INTERVAL = 6;
-/** 模型三角形碰撞线框重建限流（每 N 帧；三角形量大，重建更慢）。 */
+/** 可视网格三角形线框重建限流（每 N 帧；三角形量大，重建更慢）。 */
 const TRI_REBUILD_INTERVAL = 30;
+/** 可视网格（紫色）附近三角形上限（超限截断，避免拖垮每帧重建）。 */
+const MAX_TRI_LINES = 12_000;
 /** 碰撞体半透明填充不透明度（0-1）。仅相机进入 brush 内部时显示，且颜色淡。 */
 const FILL_OPACITY = 0.09;
 
@@ -344,12 +344,28 @@ export class ColliderDebug {
 	private scene: THREE.Scene | null = null;
 	/** 实体碰撞箱线框组（受 showSolids 控制）。 */
 	private solidGroup: THREE.Group | null = null;
-	/** 模型三角形碰撞网格线框组（受 showSolids 控制）。 */
-	private triGroup: THREE.Group | null = null;
+	/** 模型 .phy 碰撞网格线框组（橙色，受 showPhy 控制）。 */
+	private phyGroup: THREE.Group | null = null;
+	/** 模型可视网格线框组（紫色，受 showVis 控制）。 */
+	private visGroup: THREE.Group | null = null;
 	/** 触发碰撞箱线框组（受 showTriggers 控制）。 */
 	private triggerGroup: THREE.Group | null = null;
 	private showSolids = false;
+	/** brush 线框显示可视距离（HU；0 = 全量）。 */
+	private brushViewDistance = 512;
 	private showTriggers = false;
+	/** 触发区域线框显示可视距离（HU；0 = 全量）。 */
+	private triggerViewDistance = 0;
+	/** .phy 碰撞网格独立开关（橙色）。 */
+	private showPhy = false;
+	/** 可视网格独立开关（紫色）。 */
+	private showVis = false;
+	/** .phy 碰撞网格显示可视距离（HU；0 = 全量）。 */
+	private phyViewDistance = 2048;
+	/** 可视网格显示可视距离（HU）。 */
+	private visViewDistance = 512;
+	/** .phy 距离/开关变更待重建标记（立即生效不等限流）。 */
+	private phyDirty = false;
 	private frameCounter = 0;
 	private triFrameCounter = 0;
 	/** 传送触发器列表（由 PhysicsWorker 注入）。 */
@@ -365,10 +381,15 @@ export class ColliderDebug {
 		this.solidGroup.visible = false;
 		scene.add(this.solidGroup);
 
-		this.triGroup = new THREE.Group();
-		this.triGroup.name = '__model_tri_collider_debug__';
-		this.triGroup.visible = false;
-		scene.add(this.triGroup);
+		this.phyGroup = new THREE.Group();
+		this.phyGroup.name = '__model_phy_collider_debug__';
+		this.phyGroup.visible = false;
+		scene.add(this.phyGroup);
+
+		this.visGroup = new THREE.Group();
+		this.visGroup.name = '__model_vis_collider_debug__';
+		this.visGroup.visible = false;
+		scene.add(this.visGroup);
 
 		this.triggerGroup = new THREE.Group();
 		this.triggerGroup.name = '__vbsp_trigger_debug__';
@@ -376,9 +397,10 @@ export class ColliderDebug {
 		scene.add(this.triggerGroup);
 	}
 
-	/** 注入模型三角形碰撞网格（场景加载后调用）。 */
+	/** 注入模型三角形碰撞网格（场景加载后调用）；标记 phyDirty 等下次 update 重建。 */
 	setTriMeshes(meshes: TriMesh[]): void {
 		this.triMeshes = meshes;
+		this.phyDirty = true;
 		this.triFrameCounter = TRI_REBUILD_INTERVAL;
 	}
 
@@ -389,23 +411,62 @@ export class ColliderDebug {
 		this.frameCounter = REBUILD_INTERVAL;
 	}
 
-	/** 设置显示标志（showSolids / showTriggers）。 */
-	setDebugFlags(showSolids: boolean, showTriggers: boolean): void {
+	/** 设置显示标志（showSolids / showTriggers / 各自可视距离；triGroup 由 setTriDebugFlags 独立管理）。 */
+	setDebugFlags(
+		showSolids: boolean,
+		showTriggers: boolean,
+		triggerViewDistance?: number,
+		brushViewDistance?: number,
+	): void {
 		this.showSolids = showSolids;
 		this.showTriggers = showTriggers;
+		if (triggerViewDistance !== undefined) {
+			this.triggerViewDistance = triggerViewDistance;
+		}
+		if (brushViewDistance !== undefined) {
+			this.brushViewDistance = brushViewDistance;
+		}
 		if (this.solidGroup) {
 			this.solidGroup.visible = showSolids;
 			if (!showSolids) this.clearGroup(this.solidGroup);
-		}
-		if (this.triGroup) {
-			this.triGroup.visible = showSolids;
-			if (!showSolids) this.clearGroup(this.triGroup);
 		}
 		if (this.triggerGroup) {
 			this.triggerGroup.visible = showTriggers;
 			if (!showTriggers) this.clearGroup(this.triggerGroup);
 		}
 		this.frameCounter = REBUILD_INTERVAL;
+	}
+
+	/**
+	 * 设置模型三角形线框独立开关与可视距离（.phy 橙 / 可视网格紫）。
+	 * 距离或开关变更立即重建（phyDirty），不等限流。
+	 */
+	setTriDebugFlags(
+		showPhy: boolean,
+		showVis: boolean,
+		phyViewDistance: number,
+		visViewDistance: number,
+	): void {
+		if (
+			this.showPhy !== showPhy ||
+			this.showVis !== showVis ||
+			this.phyViewDistance !== phyViewDistance ||
+			this.visViewDistance !== visViewDistance
+		) {
+			this.phyDirty = true;
+		}
+		this.showPhy = showPhy;
+		this.showVis = showVis;
+		this.phyViewDistance = phyViewDistance;
+		this.visViewDistance = visViewDistance;
+		if (this.phyGroup) {
+			this.phyGroup.visible = showPhy;
+			if (!showPhy) this.clearGroup(this.phyGroup);
+		}
+		if (this.visGroup) {
+			this.visGroup.visible = showVis;
+			if (!showVis) this.clearGroup(this.visGroup);
+		}
 		this.triFrameCounter = TRI_REBUILD_INTERVAL;
 	}
 
@@ -434,19 +495,22 @@ export class ColliderDebug {
 			}
 		}
 
-		// 1.5 模型三角形碰撞网格（受 showSolids 控制，独立限流——重建成本高）
-		if (this.showSolids && this.triGroup) {
+		// 1.5 模型三角形线框（.phy 橙 / 可视网格紫，独立开关 + 各自可视距离；
+		//     共用限流——重建成本高；距离/开关变更时 phyDirty 立即重建）
+		if ((this.showPhy || this.showVis) && (this.phyGroup || this.visGroup)) {
 			this.triFrameCounter++;
-			if (this.triFrameCounter >= TRI_REBUILD_INTERVAL) {
+			if (this.phyDirty || this.triFrameCounter >= TRI_REBUILD_INTERVAL) {
 				this.triFrameCounter = 0;
-				this.rebuildTriangles(cameraPos);
+				this.phyDirty = false;
+				if (this.showPhy && this.phyGroup) this.rebuildPhyTriangles(cameraPos);
+				if (this.showVis && this.visGroup) this.rebuildVisTriangles(cameraPos);
 				rebuilt = true;
 			}
 		}
 
 		// 2. 触发碰撞箱（受 showTriggers 控制，数量少直接每帧重建）
 		if (this.showTriggers && this.triggerGroup) {
-			this.rebuildTriggers();
+			this.rebuildTriggers(cameraPos);
 			rebuilt = true;
 		}
 
@@ -455,7 +519,7 @@ export class ColliderDebug {
 
 	/** 当前是否有调试显示工作（render-loop 据此决定是否调用 update）。 */
 	get hasDebugWork(): boolean {
-		return this.showSolids || this.showTriggers;
+		return this.showSolids || this.showTriggers || this.showPhy || this.showVis;
 	}
 
 	/**
@@ -475,19 +539,22 @@ export class ColliderDebug {
 		const feetY = pos.y - playerHeight + config.player.eyeOffset;
 		const minY = feetY - DEBUG_Y_EXTENT;
 		const maxY = feetY + playerHeight + DEBUG_Y_EXTENT;
-		const radiusSq = DEBUG_RADIUS * DEBUG_RADIUS;
+		const full = this.brushViewDistance <= 0;
+		const radiusSq = this.brushViewDistance * this.brushViewDistance;
 
-		// 过滤附近 brush（XZ 距离 < radius，Y 在范围内）
+		// 过滤附近 brush（XZ 距离 < radius，Y 在范围内；0 = 全量）
 		const nearby: { brush: Brush; distSq: number }[] = [];
 		for (const brush of colliders) {
-			const nx = Math.max(brush.min.x, Math.min(pos.x, brush.max.x));
-			const nz = Math.max(brush.min.z, Math.min(pos.z, brush.max.z));
-			const dx = pos.x - nx;
-			const dz = pos.z - nz;
-			const distSq = dx * dx + dz * dz;
-			if (distSq > radiusSq) continue;
+			if (!full) {
+				const nx = Math.max(brush.min.x, Math.min(pos.x, brush.max.x));
+				const nz = Math.max(brush.min.z, Math.min(pos.z, brush.max.z));
+				const dx = pos.x - nx;
+				const dz = pos.z - nz;
+				const distSq = dx * dx + dz * dz;
+				if (distSq > radiusSq) continue;
+			}
 			if (brush.max.y < minY || brush.min.y > maxY) continue;
-			nearby.push({ brush, distSq });
+			nearby.push({ brush, distSq: 0 });
 		}
 
 		if (nearby.length === 0) return;
@@ -550,23 +617,63 @@ export class ColliderDebug {
 	}
 
 	/**
-	 * 重建模型三角形碰撞网格线框（只显示玩家附近半径内的三角形）。
-	 * 按来源分组着色：可视网格=青色 / 模型自带碰撞体(.phy)=黄色（surfaceprop 存在即 .phy 来源）。
+	 * 重建 **.phy** 碰撞网格线框（橙色，全部 .phy 三角形，无上限截断）。
+	 * 按 phyViewDistance 距离筛选（0 = 全量）；受 tri 共用限流，距离/开关变更
+	 * 由 phyDirty 立即触发。
 	 */
-	private rebuildTriangles(cameraPos: THREE.Vector3): void {
-		this.clearGroup(this.triGroup!);
+	private rebuildPhyTriangles(cameraPos: THREE.Vector3): void {
+		const group = this.phyGroup!;
+		this.clearGroup(group);
 		if (this.triMeshes.length === 0) return;
 
 		const pos = cameraPos;
-		const radiusSq = DEBUG_RADIUS * DEBUG_RADIUS;
-		/** 附近三角形上限（超限截断，避免拖垮每帧重建）。 */
-		const MAX_TRI_LINES = 12_000;
+		const full = this.phyViewDistance <= 0;
+		const radiusSq = this.phyViewDistance * this.phyViewDistance;
 
-		const visPos: number[] = []; // 可视网格（青）
-		const phyPos: number[] = []; // 模型自带 .phy（黄）
+		const phyPos: number[] = [];
+		for (const mesh of this.triMeshes) {
+			if (mesh.surfaceprop === undefined) continue; // 仅 .phy 来源
+			if (!full) {
+				// mesh AABB 距离粗筛（Y-up 水平面 = x/z）
+				const nx = Math.max(mesh.min[0], Math.min(pos.x, mesh.max[0]));
+				const nz = Math.max(mesh.min[2], Math.min(pos.z, mesh.max[2]));
+				const dx = pos.x - nx;
+				const dz = pos.z - nz;
+				if (dx * dx + dz * dz > radiusSq) continue;
+			}
+			for (const [a, b, c] of mesh.indices) {
+				const va = mesh.vertices[a];
+				const vb = mesh.vertices[b];
+				const vc = mesh.vertices[c];
+				phyPos.push(va[0], va[1], va[2], vb[0], vb[1], vb[2]);
+				phyPos.push(vb[0], vb[1], vb[2], vc[0], vc[1], vc[2]);
+				phyPos.push(vc[0], vc[1], vc[2], va[0], va[1], va[2]);
+			}
+		}
+		console.log(
+			`[collider-debug] phy 重建: 距离=${this.phyViewDistance} 三角形=${phyPos.length / 18}`,
+		);
+
+		this.addTriLines(phyPos, 0xff8c00, group); // 橙色：模型自带 .phy 碰撞
+	}
+
+	/**
+	 * 重建**可视网格**三角形线框（紫色，按 visViewDistance 距离筛选 + 数量上限）。
+	 * 独立 Group，不影响 .phy 线框。
+	 */
+	private rebuildVisTriangles(cameraPos: THREE.Vector3): void {
+		const group = this.visGroup!;
+		this.clearGroup(group);
+		if (this.triMeshes.length === 0) return;
+
+		const pos = cameraPos;
+		const radiusSq = this.visViewDistance * this.visViewDistance;
+
+		const visPos: number[] = []; // 可视网格（紫）
 		let triCount = 0;
 
 		for (const mesh of this.triMeshes) {
+			if (mesh.surfaceprop !== undefined) continue; // 跳过 .phy（phy Group 已画）
 			if (triCount * 3 >= MAX_TRI_LINES) break;
 			// mesh AABB 距离粗筛（顶点/边界为紧凑数组 `[x,y,z]`；Y-up 水平面 = x/z）
 			const nx = Math.max(mesh.min[0], Math.min(pos.x, mesh.max[0]));
@@ -574,7 +681,6 @@ export class ColliderDebug {
 			const dx = pos.x - nx;
 			const dz = pos.z - nz;
 			if (dx * dx + dz * dz > radiusSq) continue;
-			const target = mesh.surfaceprop !== undefined ? phyPos : visPos;
 
 			for (const [a, b, c] of mesh.indices) {
 				if (triCount * 3 >= MAX_TRI_LINES) break;
@@ -591,44 +697,59 @@ export class ColliderDebug {
 				const dxp = pos.x - cxp;
 				const dzp = pos.z - czp;
 				if (dxp * dxp + dzp * dzp > radiusSq) continue;
-				target.push(va[0], va[1], va[2], vb[0], vb[1], vb[2]);
-				target.push(vb[0], vb[1], vb[2], vc[0], vc[1], vc[2]);
-				target.push(vc[0], vc[1], vc[2], va[0], va[1], va[2]);
+				visPos.push(va[0], va[1], va[2], vb[0], vb[1], vb[2]);
+				visPos.push(vb[0], vb[1], vb[2], vc[0], vc[1], vc[2]);
+				visPos.push(vc[0], vc[1], vc[2], va[0], va[1], va[2]);
 				triCount++;
 			}
 		}
 
-		if (triCount === 0) return;
-		this.addTriLines(visPos, 0xaa66ff); // 紫色：可视模型网格
-		this.addTriLines(phyPos, 0xff8c00); // 橙色：模型自带 .phy 碰撞
+		if (visPos.length === 0) return;
+		console.log(
+			`[collider-debug] vis 重建: 距离=${this.visViewDistance} 三角形=${visPos.length / 18}`,
+		);
+		this.addTriLines(visPos, 0xaa66ff, group); // 紫色：可视模型网格
 	}
 
-	/** 追加一组三角形线框（positions 为 3 顶点 × 3 条边 × 3 分量）。 */
-	private addTriLines(positions: number[], color: number): void {
+	/**
+	 * 追加一组三角形线框（positions 为 3 顶点 × 3 条边 × 3 分量）。
+	 * 不透明材质：opaque 阶段恒在透明 brush 线框之后渲染，橙色不被混合染色。
+	 */
+	private addTriLines(positions: number[], color: number, group: THREE.Group): void {
 		if (positions.length === 0) return;
 		const geom = new THREE.BufferGeometry();
 		geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
 		const mat = new THREE.LineBasicMaterial({
 			color,
-			transparent: true,
-			opacity: 0.7,
-			depthTest: true,
+			depthTest: false, // 不被 brush 线框/几何遮挡，始终可见
 		});
-		this.triGroup!.add(new THREE.LineSegments(geom, mat));
+		group.add(new THREE.LineSegments(geom, mat));
 	}
 
 	/**
-	 * 重建触发碰撞箱线框（显示全部 trigger，凸包线框或 AABB 回退，不限距离）。
+	 * 重建触发碰撞箱线框（凸包线框或 AABB 回退；按 triggerViewDistance 距离筛选，0 = 全量）。
 	 */
-	private rebuildTriggers(): void {
+	private rebuildTriggers(cameraPos: THREE.Vector3): void {
 		this.clearGroup(this.triggerGroup!);
 		if (this.triggers.length === 0) return;
+
+		const pos = cameraPos;
+		const full = this.triggerViewDistance <= 0;
+		const radiusSq = this.triggerViewDistance * this.triggerViewDistance;
 
 		const positions: number[] = [];
 		const colors: number[] = [];
 
 		for (const trigger of this.triggers) {
 			if (!trigger.mins || !trigger.maxs) continue;
+			if (!full) {
+				// AABB 距离粗筛（Y-up 水平面 = x/z）
+				const nx = Math.max(trigger.mins.x, Math.min(pos.x, trigger.maxs.x));
+				const nz = Math.max(trigger.mins.z, Math.min(pos.z, trigger.maxs.z));
+				const dx = pos.x - nx;
+				const dz = pos.z - nz;
+				if (dx * dx + dz * dz > radiusSq) continue;
+			}
 
 			let color: RgbColor;
 			if (trigger.startDisabled) {
@@ -696,7 +817,8 @@ export class ColliderDebug {
 	 */
 	clearAll(): void {
 		if (this.solidGroup) this.clearGroup(this.solidGroup);
-		if (this.triGroup) this.clearGroup(this.triGroup);
+		if (this.phyGroup) this.clearGroup(this.phyGroup);
+		if (this.visGroup) this.clearGroup(this.visGroup);
 		if (this.triggerGroup) this.clearGroup(this.triggerGroup);
 	}
 
@@ -705,12 +827,14 @@ export class ColliderDebug {
 		this.clearAll();
 		if (this.scene) {
 			if (this.solidGroup) this.scene.remove(this.solidGroup);
-			if (this.triGroup) this.scene.remove(this.triGroup);
+			if (this.phyGroup) this.scene.remove(this.phyGroup);
+			if (this.visGroup) this.scene.remove(this.visGroup);
 			if (this.triggerGroup) this.scene.remove(this.triggerGroup);
 		}
 		this.scene = null;
 		this.solidGroup = null;
-		this.triGroup = null;
+		this.phyGroup = null;
+		this.visGroup = null;
 		this.triggerGroup = null;
 	}
 }

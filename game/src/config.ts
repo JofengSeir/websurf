@@ -2,6 +2,8 @@
  * 运行时配置（最小化版）— 物理参数经 config 消息 → Worker-A → wasm set_params/set_hull。
  */
 
+import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../src/ts-shared/phys/params.js';
+
 export interface PhysicsConfig {
   /** 物理模式：physics（权威物理）/ noclip（自由视角，禁物理/传送）。 */
   mode: 'physics' | 'noclip';
@@ -147,27 +149,30 @@ export function applyConfigPatch(
   Object.assign(target, patch);
 }
 
-/** 构造 Rust `set_params` 兼容的全量参数对象（权威 Worker 与主线程预测实例共用）。 */
+/** 构造 Rust `set_params` 兼容的全量参数对象（权威 Worker 与主线程预测实例共用）。
+ * 公共化：映射实现收敛到 ts-shared（buildPhysicsParams + PhysicsParamsLike），
+ * 本处仅做 config 字段名 → 统一入参接口的薄映射。 */
 export function buildPhysicsParams(config: RuntimeConfig): Record<string, unknown> {
   const p = config.physics;
-  return {
-    gravity: p.gravity,
-    accelerate: p.accelerate,
-    friction: p.friction,
-    stop_speed: p.stopSpeed,
-    jump_height: (p.jumpSpeed * p.jumpSpeed) / (2 * p.gravity),
-    air_accelerate: p.airAccel,
-    run_speed: p.maxSpeed,
-    walk_speed: p.walkSpeed,
-    crouch_speed: p.crouchSpeed,
-    autobhop: p.autobhop,
-    bhop_speed_clamp: p.bhopSpeedClamp,
-    no_prestrafe: p.noPrestrafe,
-    // 灵敏度固定 1：真实灵敏度由主线程输入层应用（mousemove 时乘入角度增量），
-    // 双端物理（权威 Worker + 主线程渲染）用同一份已缩放输入 → 改灵敏度不产生双端分叉
-    sensitivity: 1,
-    yaw_bind_speed: config.input.yawBindSpeed,
-    noclip_speed: config.input.noclipSpeed,
-    teleport_gate_ticks: p.teleportGateTicks,
-  };
+  return sharedBuildPhysicsParams(
+    {
+      gravity: p.gravity,
+      accelerate: p.accelerate,
+      friction: p.friction,
+      stopSpeed: p.stopSpeed,
+      jumpSpeed: p.jumpSpeed,
+      airAccel: p.airAccel,
+      maxSpeed: p.maxSpeed,
+      walkSpeed: p.walkSpeed,
+      crouchSpeed: p.crouchSpeed,
+      autobhop: p.autobhop,
+      bhopSpeedClamp: p.bhopSpeedClamp,
+      noPrestrafe: p.noPrestrafe,
+      teleportGateTicks: p.teleportGateTicks,
+    },
+    {
+      yawBindSpeed: config.input.yawBindSpeed,
+      noclipSpeed: config.input.noclipSpeed,
+    },
+  );
 }

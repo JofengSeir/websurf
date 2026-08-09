@@ -175,7 +175,8 @@ export type MainMessage =
   | WorldJsonMessage
   | PhysEventMessage;
 
-// ── 输入状态（共享内存 keys 位掩码，与 Rust KEY_MASK 一致）─────
+// ── 输入状态（共享内存 keys 位掩码，与 Rust KEY_MASK 一致；掩码常量/转换
+//    收敛到 ts-shared auth/shared-state.ts，此处仅保留类型）─────
 
 export interface KeyState {
   forward: boolean;
@@ -189,34 +190,4 @@ export interface KeyState {
   wheelJump: boolean;
   yawLeft: boolean;
   yawRight: boolean;
-}
-
-export const KEY_MASK: Record<keyof KeyState, number> = {
-  forward: 1,
-  backward: 2,
-  left: 4,
-  right: 8,
-  jump: 16,
-  duck: 32,
-  sprint: 64,
-  reset: 128,
-  wheelJump: 256,
-  yawLeft: 512,
-  yawRight: 1024,
-};
-
-export function keysToMask(keys: KeyState): number {
-  let m = 0;
-  if (keys.forward) m |= KEY_MASK.forward;
-  if (keys.backward) m |= KEY_MASK.backward;
-  if (keys.left) m |= KEY_MASK.left;
-  if (keys.right) m |= KEY_MASK.right;
-  if (keys.jump) m |= KEY_MASK.jump;
-  if (keys.duck) m |= KEY_MASK.duck;
-  if (keys.sprint) m |= KEY_MASK.sprint;
-  if (keys.reset) m |= KEY_MASK.reset;
-  if (keys.wheelJump) m |= KEY_MASK.wheelJump;
-  if (keys.yawLeft) m |= KEY_MASK.yawLeft;
-  if (keys.yawRight) m |= KEY_MASK.yawRight;
-  return m;
 }

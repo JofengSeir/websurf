@@ -1,33 +1,40 @@
 /**
  * WebSurf — 主线程入口
- * 创建 Worker（WASM 解析 .bsp）、绑定键盘/鼠标输入与 UI 控件、
- * 接收 Worker 消息（stats/error/scene-ready 等）更新 UI。
+ * 创建 Worker（权威帧计算器：WASM 物理世界 + 固定步长模拟）、绑定键盘/鼠标输入与
+ * UI 控件、主线程解析 BSP 并驱动渲染物理（唯一物理渲染线），本地更新 HUD。
  */
 
-import type { WasmBspMetadata } from './world/types.js';
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { MouseBuffer } from './input/mouse-buffer.js';
 import { PointerLockController } from './input/pointer-lock.js';
 import { createConfig, applyConfigPatch } from './config.js';
 import { loadDefaultTexturePack } from './default-pack.js';
-import { mainWasmUrl } from './main-wasm.js';
+import { ensureMainWasm, mainWasmUrl } from './main-wasm.js';
+// 阶段 1：主线程解析/物理接管（与 Worker 同一 wasm 模块实例）
+import { BspProcessor, decompress_mtz } from '../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from './config.js';
 import type {
 	MainMessage,
 	SceneDataMessage,
-	StatsMessage,
-	GameStatsMessage,
-	PlayerPosMessage,
+	PhysFrameMessage,
+	PhysEventMessage,
 	PhysicsSnapshotMessage,
 	PhysicsEventMessage,
 	PlaneInfo,
 } from './worker/worker-types.js';
-import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask } from './worker/shared-state.js';
-import { RendererMain, type CullStatsLike } from './renderer/renderer-main.js';
-import { formatTime } from './game/game-state.js';
+import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../src/ts-shared/auth/shared-state.js';
+import type { SharedState } from '../../src/ts-shared/auth/shared-state.js';
+import { layerMouseDelta, qeEquivalentDx } from '../../src/ts-shared/input/input-layer.js';
+import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../src/ts-shared/phys/params.js';
+import { buildWorldBundle } from '../../src/ts-shared/phys/world-builder.js';
+import type { WorldMetadata } from '../../src/ts-shared/phys/world-builder.js';
+import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
+import { formatTime, GameState } from './game/game-state.js';
 // 物理控制面板：参数定义表（主线程渲染用，不含物理实现依赖）
 import { PARAM_DEFS, type ParamSource } from './physics/param-defs.js';
+// 面板参数名 → Rust set_params snake_case（physics-params.ts 导出）
+import { PARAM_TO_RUST } from './physics/physics-params.js';
 // 自定义传送点：localStorage 数据层
 import {
 	loadCustomTeleports,
@@ -76,8 +83,6 @@ const dom = {
 	pvsEnabledChk: document.getElementById('pvsEnabled') as HTMLInputElement | null,
 	respawnBtn: document.getElementById('respawnBtn') as HTMLButtonElement | null,
 	spawnSelect: document.getElementById('spawnSelect') as HTMLSelectElement | null,
-	// 传送触发模式（物理面板）
-	triggerModeRadios: document.querySelectorAll('input[name="teleportTriggerMode"]') as NodeListOf<HTMLInputElement>,
 	// 纹理画质（显示设置面板）
 	textureQualityRadios: document.querySelectorAll('input[name="textureQuality"]') as NodeListOf<HTMLInputElement>,
 	// 缺失材质纹理确认弹窗
@@ -85,12 +90,19 @@ const dom = {
 	missingTexturesSummary: document.getElementById('missingTexturesSummary') as HTMLElement | null,
 	missingTexturesList: document.getElementById('missingTexturesList') as HTMLElement | null,
 	missingTexturesOk: document.getElementById('missingTexturesOk') as HTMLButtonElement | null,
-	groundedFramesRow: document.getElementById('groundedFramesRow') as HTMLElement | null,
-	groundedFramesRange: document.getElementById('groundedFramesRange') as HTMLInputElement | null,
-	groundedFramesNum: document.getElementById('groundedFramesNum') as HTMLInputElement | null,
 	// 显示设置（显示设置面板）
 	showSolidsChk: document.getElementById('showSolids') as HTMLInputElement | null,
+	brushViewDistanceRange: document.getElementById('brushViewDistance') as HTMLInputElement | null,
+	brushViewDistanceNum: document.getElementById('brushViewDistanceNum') as HTMLInputElement | null,
 	showTriggersChk: document.getElementById('showTriggers') as HTMLInputElement | null,
+	triggerViewDistanceRange: document.getElementById('triggerViewDistance') as HTMLInputElement | null,
+	triggerViewDistanceNum: document.getElementById('triggerViewDistanceNum') as HTMLInputElement | null,
+	showPhyChk: document.getElementById('showPhy') as HTMLInputElement | null,
+	phyViewDistanceRange: document.getElementById('phyViewDistance') as HTMLInputElement | null,
+	phyViewDistanceNum: document.getElementById('phyViewDistanceNum') as HTMLInputElement | null,
+	showVisChk: document.getElementById('showVis') as HTMLInputElement | null,
+	visViewDistanceRange: document.getElementById('visViewDistance') as HTMLInputElement | null,
+	visViewDistanceNum: document.getElementById('visViewDistanceNum') as HTMLInputElement | null,
 	showPlaneInfoChk: document.getElementById('showPlaneInfo') as HTMLInputElement | null,
 	planeInfoEl: document.getElementById('planeInfo') as HTMLElement | null,
 	// 近平面贴墙自适应（实时生效）
@@ -133,22 +145,33 @@ const pointerLock = new PointerLockController();
 
 let worker: Worker | null = null;
 let inputBridge: InputBridge | null = null;
+/** 跨线程状态通道（SAB / MsgState 回退；phys-frame 缓存 + recvFrame）。 */
+let sharedState: SharedState | null = null;
 /** 最近一次出生点传送索引（去重；换地图时重置）。 */
 let lastTeleportIdx = -1;
 /** 主线程渲染器（唯一渲染入口）。 */
 let rendererMain: RendererMain | null = null;
 let sceneReady = false;
 
-/** 最近加载的 BSP 文件名（bsp-metadata 消息不含 name）。 */
-let lastLoadedFileName = '';
+/** 计时挑战状态机（阶段 2 起主线程持有；权威 Worker 不再消费事件）。 */
+const game = new GameState();
+
+/** 场景死亡阈值 Y（onSceneLoaded 记录；world-json 后重发 Worker 防丢弃）。 */
+let sceneDeathY: number | null = null;
 
 // 自定义传送点：地图名（localStorage 分组）
 let teleportMapName = '';
-/** 保存当前位置后，是否已在等待 Worker 回传 player-pos。 */
-let awaitingPlayerPos = false;
-
-// 输入循环状态
+/** 输入循环状态 */
 let wheelJumpPending = false;
+
+// HUD 本地采样（阶段 2）：FPS 主线程 rAF 计数（每秒刷新）
+let localFps = 0;
+let fpsFrames = 0;
+let fpsTime = 0;
+
+/** 主线程 wasm 就绪（默认已 resolved；渲染器初始化处赋 ensureMainWasm promise）。
+ * 地图加载前 await，保证后续阶段主线程 BspProcessor/PhysWorld 可用。 */
+let mainWasmReady: Promise<void> = Promise.resolve();
 
 // ---------------------------------------------------------------------------
 // 初始化
@@ -201,8 +224,9 @@ async function main(): Promise<void> {
 		});
 	}
 
-	const sharedState = createMainSharedState(worker, sharedBuffer);
-	inputBridge = new InputBridge(worker, sharedState);
+	const sharedStateInstance = createMainSharedState(sharedBuffer, worker);
+	sharedState = sharedStateInstance;
+	inputBridge = new InputBridge(worker);
 	inputBridge.sendInit(
 		sharedBuffer,
 		dom.canvas.clientWidth,
@@ -211,12 +235,23 @@ async function main(): Promise<void> {
 	);
 
 	// 2. 主线程渲染器
-	rendererMain = new RendererMain(sharedState);
+	rendererMain = new RendererMain(sharedStateInstance);
 	rendererMain.onCullStats = updateCullStatsUI;
 	rendererMain.onSceneLoaded = (deathThresholdY) => {
-		// 回传死亡阈值给 Worker（死亡判定依赖世界 Y 下限）
+		// 双端设置掉落死亡阈值（主线程渲染物理 + Worker 权威物理）。
+		// 注意：loadScene 时机早于 world-json，Worker 侧 phys 未构建会丢弃该消息，
+		// 需在 handleLoadBsp world-json 后重发（见 handleLoadBsp）。
+		sceneDeathY = deathThresholdY;
+		rendererMain?.setDeathY(deathThresholdY);
 		inputBridge?.sendSetDeathThreshold(deathThresholdY);
 	};
+	// 权威兜底：渲染主线（144Hz 精度更高）→ 权威 Worker 反向校准；同步瞬间
+	// 清双端未消费输入增量（Worker 侧由 sync-render-state 处理 resetInput）
+	rendererMain.onSyncRenderState = (s) => {
+		worker?.postMessage({ type: 'sync-render-state', state: s });
+	};
+	// 渲染物理事件（Rust take_event：teleport/death）→ 计时挑战状态机（主线程）
+	rendererMain.onPhysEvent = onRenderPhysEvent;
 	rendererMain.init(
 		dom.canvas,
 		dom.canvas.clientWidth,
@@ -225,6 +260,11 @@ async function main(): Promise<void> {
 		config,
 	);
 	rendererMain.start();
+	// 主线程 wasm 懒初始化（mosaic / 地图加载前置依赖；与 worker 实例互不影响）。
+	// 保存 promise：handleBspFile 开头 await 防地图加载时 wasm 未就绪（参照 game 模式）。
+	mainWasmReady = ensureMainWasm().catch((err) => {
+		setError(`主线程 WASM 初始化失败: ${err instanceof Error ? err.message : String(err)}`);
+	});
 
 	// 3. 绑定输入
 	bindInput(dom.canvas);
@@ -234,13 +274,12 @@ async function main(): Promise<void> {
 	applyCrosshairStyle();
 	sendPrefsToWorker();
 	bindUI();
-
-	// 3.5 初始化"进入地图前即可设置"的控件（物理模式/碰撞来源/PVS 等与地图加载无关）
+	// 3.3 初始控件状态（config 默认值 → 面板）
 	if (dom.colliderSourceSelect) dom.colliderSourceSelect.value = config.physics.colliderSource;
 	if (dom.pvsEnabledChk) dom.pvsEnabledChk.checked = config.lod.pvsEnabled;
 	if (dom.physicsModeSelect) dom.physicsModeSelect.value = config.physics.mode;
 
-	// 4. 启动输入循环（帧信号 + 按键位掩码）
+	// 4. 输入循环（按键/滚轮/Q-E → 主线程渲染物理 + SAB 权威端）
 	startInputLoop();
 }
 
@@ -253,43 +292,26 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
 	if (!msg || typeof msg !== 'object') return;
 	switch (msg.type) {
 		case 'ready':
+			// 阶段 2：Worker 不再需要同步配置（world-json 后由 handleLoadBsp 发送）
 			setStatus('Worker 已就绪。请加载 .bsp 文件。', 'success');
-			// 同步全量配置到 Worker
-			syncFullConfig();
 			break;
-		case 'bsp-metadata':
-			// 解析后回传元数据 → 渲染 UI（文件名取 lastLoadedFileName）
-			renderMetadata(msg.metadata, lastLoadedFileName);
+		case 'phys-frame': {
+			// 回退模式（MsgState）：缓存 Worker 权威帧（readAuthoritative 读取）
+			const f = msg as unknown as PhysFrameMessage;
+			(sharedState as { recvFrame?: (frame: PhysFrameMessage['frame'], va: number) => void })?.recvFrame?.(f.frame, f.va);
 			break;
-		case 'parse-progress':
-			// 解析进度 → status 区实时展示
-			setStatus(msg.stage, '');
+		}
+		case 'phys-event': {
+			// 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染）
+			const ev = msg as unknown as PhysEventMessage;
+			rendererMain?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg);
 			break;
-		case 'spawn-options':
-			// 出生点列表由 Worker 回传
-			renderSpawnOptions(msg.spawnJson);
-			break;
-		case 'scene-data':
-			void handleSceneData(msg);
-			break;
-		case 'phys-frame':
-			// 回退模式（MsgState）：缓存 Worker 回传的物理帧
-			inputBridge?.setCachedFrame(msg.frame);
-			break;
-		case 'stats':
-			updateStatsUI(msg);
-			break;
-		case 'game-stats':
-			updateGameStatsUI(msg);
-			break;
+		}
 		case 'physics-snapshot':
 			renderPhysicsSnapshot(msg);
 			break;
 		case 'physics-event':
 			onPhysicsEvent(msg);
-			break;
-		case 'player-pos':
-			onPlayerPos(msg);
 			break;
 		case 'error':
 			setError(msg.message);
@@ -300,14 +322,14 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
 	}
 }
 
-/** 场景数据到达：主线程建场景（GLTFLoader + LOD/PVS）并启用控件。 */
-async function handleSceneData(msg: SceneDataMessage): Promise<void> {
-	if (!rendererMain) {
-		setStatus('渲染器未就绪，无法加载场景。', 'error');
-		return;
-	}
-	const diag = await rendererMain.loadScene(msg);
-	sceneReady = true;
+/**
+ * 场景就绪（主线程解析完成）：启用控件 + 同步面板状态 + 缺失纹理弹窗。
+ * 原 handleSceneData 的 UI 部分（渲染已由主线程 loadScene 本地完成）。
+ */
+async function onSceneReadyUi(
+	diag: { diagonal: number; defaultCull: number; maxCull: number } | null,
+	msg: SceneDataMessage,
+): Promise<void> {
 	setStatus(
 		`场景已加载（GLB ${msg.glbSizeKb} KB，${msg.metadata.numBrushes} brushes，` +
 			`${msg.numSpawnPoints} 出生点，PVS ${msg.hasPvs ? '启用' : '无'}，` +
@@ -337,20 +359,19 @@ async function handleSceneData(msg: SceneDataMessage): Promise<void> {
 	if (dom.capturePosBtn) dom.capturePosBtn.disabled = false;
 	if (dom.addTeleportBtn) dom.addTeleportBtn.disabled = false;
 	renderCustomTeleports();
-	// 传送触发模式：同步 radio 状态 + 落地帧数滑块可见性
-	dom.triggerModeRadios.forEach((radio) => {
-		radio.checked = radio.value === config.debug.teleportTriggerMode;
-	});
-	if (dom.groundedFramesRange) {
-		dom.groundedFramesRange.value = String(config.debug.groundedFramesRequired);
-	}
-	if (dom.groundedFramesNum) {
-		dom.groundedFramesNum.value = String(config.debug.groundedFramesRequired);
-	}
-	updateGroundedFramesVisibility();
 	// 显示设置：同步碰撞箱显示开关 + 准星信息开关
 	if (dom.showSolidsChk) dom.showSolidsChk.checked = config.debug.showSolids;
+	if (dom.brushViewDistanceRange) dom.brushViewDistanceRange.value = String(config.debug.brushViewDistance);
+	if (dom.brushViewDistanceNum) dom.brushViewDistanceNum.value = String(config.debug.brushViewDistance);
 	if (dom.showTriggersChk) dom.showTriggersChk.checked = config.debug.showTriggers;
+	if (dom.triggerViewDistanceRange) dom.triggerViewDistanceRange.value = String(config.debug.triggerViewDistance);
+	if (dom.triggerViewDistanceNum) dom.triggerViewDistanceNum.value = String(config.debug.triggerViewDistance);
+	if (dom.showPhyChk) dom.showPhyChk.checked = config.debug.showPhy;
+	if (dom.phyViewDistanceRange) dom.phyViewDistanceRange.value = String(config.debug.phyViewDistance);
+	if (dom.phyViewDistanceNum) dom.phyViewDistanceNum.value = String(config.debug.phyViewDistance);
+	if (dom.showVisChk) dom.showVisChk.checked = config.debug.showVis;
+	if (dom.visViewDistanceRange) dom.visViewDistanceRange.value = String(config.debug.visViewDistance);
+	if (dom.visViewDistanceNum) dom.visViewDistanceNum.value = String(config.debug.visViewDistance);
 	if (dom.showPlaneInfoChk) dom.showPlaneInfoChk.checked = config.debug.showPlaneInfo;
 	// 纹理画质：同步 radio 状态
 	dom.textureQualityRadios.forEach((radio) => {
@@ -417,25 +438,27 @@ async function showMissingTextures(missing: string[] | undefined): Promise<void>
 	modal.classList.remove('hidden');
 }
 
-function updateStatsUI(msg: StatsMessage): void {
+// ---------------------------------------------------------------------------
+// HUD（阶段 2：主线程本地采样，无 Worker 回传）
+// ---------------------------------------------------------------------------
+
+/** 主 HUD 统计（10Hz 本地采样：FPS 主线程 rAF 计数；pos/vel/cluster 本地物理）。 */
+function updateStatsUI(): void {
 	if (!dom.statsEl) return;
-	const [px, py, pz] = msg.pos;
-	let text =
-		`FPS ${msg.fps}  位置 ${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}  ` +
-		`速度 ${msg.speed.toFixed(0)}  ${msg.onGround ? '地面' : '空中'}  ` +
-		`cluster ${msg.cluster >= 0 ? msg.cluster : '—'}`;
-	// 速度归零诊断（卡坡时显示触发路径，如 cornered×3 / blocked×3 / stuck×N）
-	if (msg.zeroCause) {
-		text += `  卡因[${msg.zeroCause}]`;
-	}
+	const st = rendererMain?.getCurrentState();
+	if (!st) return;
+	const cluster = rendererMain?.getPvsCluster() ?? -1;
+	const lateral = Math.hypot(st.vel.x, st.vel.z);
+	const text =
+		`FPS ${localFps}  位置 ${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}  ` +
+		`速度 ${lateral.toFixed(0)}  ${st.onGround ? '地面' : '空中'}  cluster ${cluster >= 0 ? cluster : '—'}`;
 	dom.statsEl.textContent = text;
-	// 准星射线检测信息（渲染器本地计算，随渲染循环刷新）
 	if (dom.planeInfoEl) {
 		dom.planeInfoEl.textContent = formatPlaneInfo(rendererMain?.getPlaneInfo() ?? null);
 	}
 }
 
-/** 格式化准星射线检测信息（模型/实体平面/触发面）。 */
+/** 准星信息格式化（mesh/solid/ladder/trigger 分类展示）。 */
 function formatPlaneInfo(info: PlaneInfo | null): string {
 	if (!info) return '准星 —';
 	const [px, py, pz] = info.point;
@@ -450,11 +473,12 @@ function formatPlaneInfo(info: PlaneInfo | null): string {
 						m.isWater ? '水面' : null,
 						m.isTrans ? '半透明' : null,
 						m.isLightEmissive ? '发光' : null,
-					].filter(Boolean).join(' ')
+					]
+						.filter(Boolean)
+						.join(' ')
 				: '';
 			return (
-				`准星 模型「${info.meshName ?? ''}」 ${dist}HU ` +
-				`[${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}]` +
+				`准星 模型「${info.meshName ?? ''}」 ${dist}HU [${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}]` +
 				(info.materialName ? ` 材质:${info.materialName}` : '') +
 				(info.textureName ? ` 纹理:${info.textureName}` : '') +
 				(flags ? ` (${flags})` : '')
@@ -465,16 +489,14 @@ function formatPlaneInfo(info: PlaneInfo | null): string {
 			const n = info.normal ? info.normal.map((v) => v.toFixed(2)).join(',') : '—';
 			return (
 				`准星 ${info.type === 'solid' ? '实体面' : '梯子面'}` +
-				`#${info.brushIndex} ${dist}HU 法线(${n}) ` +
-				`[${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}]`
+				`#${info.brushIndex} ${dist}HU 法线(${n}) [${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}]`
 			);
 		}
 		case 'trigger': {
 			const t = info.triggerTarget ?? '—';
 			const dest = info.triggerDestIdx ?? -1;
 			return (
-				`准星 触发面「${info.triggerClassname ?? 'trigger'}」→${t}` +
-				`(dest#${dest}) ${dist}HU` +
+				`准星 触发面「${info.triggerClassname ?? 'trigger'}」→${t}(dest#${dest}) ${dist}HU` +
 				(info.triggerStartDisabled ? ' [禁用]' : '')
 			);
 		}
@@ -483,44 +505,45 @@ function formatPlaneInfo(info: PlaneInfo | null): string {
 	}
 }
 
+/** 剔除统计（主线程回调；LOD/PVS 本地数据）。 */
 function updateCullStatsUI(msg: CullStatsLike): void {
 	if (dom.cullStatsEl) {
 		const p = msg.pvs;
 		dom.cullStatsEl.textContent =
 			`可见 ${msg.visible}/${msg.total} (cull=${msg.cullDist.toFixed(0)})  ` +
 			`PVS: cluster=${p.cluster >= 0 ? p.cluster : '—'} ` +
-			`${p.visibleClusters}/${p.totalClusters} 可见 隐藏${p.pvsHidden}  ` +
-			`LOD 近${p.near}/远${p.far}`;
+			`${p.visibleClusters}/${p.totalClusters} 可见 隐藏${p.pvsHidden}  LOD 近${p.near}/远${p.far}`;
 	}
 }
 
-function updateGameStatsUI(msg: GameStatsMessage): void {
+/** 计时挑战 HUD（主线程本地快照 + justDied 闪烁）。 */
+function updateGameStatsUI(): void {
 	if (!dom.gameStatsEl) return;
+	const snap = game.getSnapshot();
 	let phaseLabel: string;
 	let timeLabel: string;
-	switch (msg.phase) {
+	switch (snap.phase) {
 		case 'idle':
 			phaseLabel = '待开始';
-			timeLabel = formatTime(msg.elapsedMs);
+			timeLabel = formatTime(snap.elapsedMs);
 			break;
 		case 'running':
 			phaseLabel = '挑战中';
-			timeLabel = formatTime(msg.elapsedMs);
+			timeLabel = formatTime(snap.elapsedMs);
 			break;
 		case 'finished':
 			phaseLabel = '已完成';
-			timeLabel = formatTime(msg.finishTimeMs);
+			timeLabel = formatTime(snap.finishTimeMs);
 			break;
 	}
-	const cpLabel = msg.checkpointCount > 0
-		? `${msg.checkpointCount}(${msg.lastCheckpointName})`
+	const cpLabel = snap.checkpointCount > 0
+		? `${snap.checkpointCount}(${snap.lastCheckpointName})`
 		: '0';
 	const text =
-		`阶段 ${phaseLabel}  计时 ${timeLabel}  ` +
-		`检查点 ${cpLabel}  死亡 ${msg.deaths}`;
+		`阶段 ${phaseLabel}  计时 ${timeLabel}  检查点 ${cpLabel}  死亡 ${snap.deaths}`;
 	dom.gameStatsEl.textContent = text;
-	// 死亡闪烁：红色高亮 500ms
-	if (msg.justDied) {
+	// justDied 闪烁提示（500ms 后恢复）
+	if (game.consumeJustDied()) {
 		dom.gameStatsEl.style.color = '#f44';
 		dom.gameStatsEl.style.fontWeight = 'bold';
 		window.setTimeout(() => {
@@ -540,13 +563,16 @@ function bindInput(canvas: HTMLCanvasElement): void {
 	// 键盘绑定 window（canvas 无 tabindex 无法获焦，绑定 canvas 则 keydown/keyup 永不触发）
 	keyboard.bind(window);
 
-	// 鼠标移动：过滤后立即写入共享内存输入区，不再经 8ms 限流批量发送，输入→物理延迟≈0
+	// 鼠标移动：主线程渲染物理输入（灵敏度在此乘入；渲染 tick 同写 SAB 权威端）
 	window.addEventListener('mousemove', (e) => {
 		if (!pointerLock.isLocked()) return;
 		const r = mouseBuffer.process(e.movementX, e.movementY);
-		if (r && inputBridge) {
-			inputBridge.setInput(r.dx, r.dy, keyboard.getMask());
-		}
+		if (!r) return;
+		const mask = keyboard.getMask();
+		// 灵敏度输入层应用：物理两端 sensitivity 固定 1，这里乘入角度增量后统一分发
+		// （改灵敏度只改这个系数，双端物理用同一份已缩放输入 → 角度永不因灵敏度分叉）
+		const { dx, dy } = layerMouseDelta(r.dx, r.dy, config.input.sensitivity);
+		rendererMain?.feedInput(dx, dy, mask);
 	});
 
 	// Pointer Lock：点击 canvas 时请求锁定
@@ -562,6 +588,8 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		mouseBuffer.onLockChange(locked);
 		keyboard.reset();
 		wheelJumpPending = false;
+		// 清主线程渲染物理残留输入（防 ESC 前最后输入/按住键残留）
+		rendererMain?.clearPendingInput();
 		if (locked) {
 			setStatus('Pointer Lock 已锁定。WASD 移动，鼠标视角，ESC 退出。', '');
 		} else {
@@ -583,6 +611,7 @@ function bindInput(canvas: HTMLCanvasElement): void {
 	// 失焦时清空键盘状态
 	window.addEventListener('blur', () => {
 		keyboard.reset();
+		rendererMain?.clearPendingInput();
 	});
 }
 
@@ -653,7 +682,7 @@ function applyCrosshairStyle(): void {
 	if (dot) dot.style.display = c.dot ? 'block' : 'none';
 }
 
-/** 按 config 当前值回写面板控件（持久化加载后同步显示）。 */
+/** 同步面板控件值（config → 控件；启动/偏好加载后调用）。 */
 function syncPrefsControls(): void {
 	const setNum = (id: string, val: number): void => {
 		const el = document.getElementById(id) as HTMLInputElement | null;
@@ -678,16 +707,10 @@ function syncPrefsControls(): void {
 	setNum('chGap', config.hud.crosshair.gap);
 	if (dom.chOutlineChk) dom.chOutlineChk.checked = config.hud.crosshair.outline;
 	if (dom.chDotChk) dom.chDotChk.checked = config.hud.crosshair.dot;
-	dom.triggerModeRadios.forEach((radio) => {
-		radio.checked = radio.value === config.debug.teleportTriggerMode;
-	});
-	if (dom.groundedFramesRange) dom.groundedFramesRange.value = String(config.debug.groundedFramesRequired);
-	if (dom.groundedFramesNum) dom.groundedFramesNum.value = String(config.debug.groundedFramesRequired);
-	// HUD 可见性即时应用
 	if (dom.hudEl) dom.hudEl.style.display = config.hud.visible ? '' : 'none';
 }
 
-/** 持久化加载后向 Worker 推送各段配置。 */
+/** 面板偏好 → Worker（启动时一次全量下发）。 */
 function sendPrefsToWorker(): void {
 	if (!inputBridge) return;
 	inputBridge.sendConfig('input', { ...config.input });
@@ -697,28 +720,26 @@ function sendPrefsToWorker(): void {
 	inputBridge.sendConfig('player', { ...config.player });
 }
 
+/** 全部 UI 控件绑定（文件选择/面板/传送点/准星/显示设置）。 */
 function bindUI(): void {
-	// 物理控制面板：参数行初始化（值由 physics-snapshot 回填）
 	initPhysicsPanel();
-
-	// 文件上传
 	dom.fileInput?.addEventListener('change', async (e) => {
 		const input = e.target as HTMLInputElement;
 		const file = input.files?.[0];
 		if (!file) return;
 		await handleBspFile(file);
-		// 重置 input.value 允许重新选择同一文件
 		input.value = '';
 	});
 
-	// 物理模式
+	// 物理模式：physics/noclip（立即生效双端）
 	dom.physicsModeSelect?.addEventListener('change', (e) => {
 		const mode = (e.target as HTMLSelectElement).value as 'noclip' | 'physics';
-		inputBridge?.sendSetPhysicsMode(mode);
 		applyConfigPatch(config, 'physics', { mode });
+		inputBridge?.sendConfig('physics', { mode });
+		rendererMain?.setPredictionNoclip(mode === 'noclip');
 	});
 
-	// 碰撞来源（模型碰撞网格：可视网格 vs 模型自带 .phy；重新加载地图后生效）
+	// 碰撞来源（加载地图时生效；切换后需重新加载）
 	dom.colliderSourceSelect?.addEventListener('change', (e) => {
 		const v = (e.target as HTMLSelectElement).value as 'auto' | 'visual' | 'phy';
 		applyConfigPatch(config, 'physics', { colliderSource: v });
@@ -731,7 +752,6 @@ function bindUI(): void {
 		const val = parseFloat((e.target as HTMLInputElement).value);
 		if (dom.mouseSensNum && Number.isFinite(val)) dom.mouseSensNum.value = String(val);
 		config.input.sensitivity = val;
-		// sensitivity 通过 config 同步到 Worker 端 player.settings.sensitivity
 		inputBridge?.sendConfig('input', { sensitivity: val });
 		saveUiPrefs();
 	});
@@ -744,7 +764,7 @@ function bindUI(): void {
 		saveUiPrefs();
 	});
 
-	// Q/E 键 yaw 旋转速度（turn bind，度/秒）
+	// Q/E 键 yaw 旋转速度（度/秒）
 	dom.yawBindSpeedRange?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
 		if (dom.yawBindSpeedNum && Number.isFinite(val)) dom.yawBindSpeedNum.value = String(val);
@@ -761,7 +781,7 @@ function bindUI(): void {
 		saveUiPrefs();
 	});
 
-	// 视距剔除（主线程渲染器 LOD 直接生效 + Worker 配置同步）
+	// 视距剔除距离（渲染器实时生效 + Worker 协议兼容保留）
 	dom.cullDistRange?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
 		if (dom.cullDistNum && Number.isFinite(val)) dom.cullDistNum.value = String(val);
@@ -781,7 +801,7 @@ function bindUI(): void {
 		saveUiPrefs();
 	});
 
-	// PVS 开关
+	// PVS 剔除开关
 	dom.pvsEnabledChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyConfigPatch(config, 'lod', { pvsEnabled: enabled });
@@ -789,17 +809,36 @@ function bindUI(): void {
 		saveUiPrefs();
 	});
 
-	// 重生
+	// 重生：检查点回退优先（无检查点 = 纯 Rust 重生到初始出生点）
 	dom.respawnBtn?.addEventListener('click', () => {
+		const cp = game.getRespawnPos();
+		if (cp) {
+			const pos: [number, number, number] = [cp.pos.x, cp.pos.y, cp.pos.z];
+			const yawDeg = (cp.yaw * 180) / Math.PI;
+			rendererMain?.teleportToPos(pos, yawDeg);
+			inputBridge?.sendTeleportToPos(pos, yawDeg);
+			rendererMain?.resetTo(pos, yawDeg);
+			setStatus('已退回到最后检查点。', 'success');
+			return;
+		}
+		rendererMain?.respawn();
 		inputBridge?.sendRespawn();
+		// 纯 Rust 重生后双端归零（防权威帧把重生位置拉回）
+		const st = rendererMain?.getCurrentState();
+		if (st) rendererMain?.resetTo([st.pos.x, st.pos.y, st.pos.z], st.yaw, st.pitch);
 	});
 
-	// Spawn 选择（input + change 双监听：select 重选当前值/部分浏览器只触发
-	// input 不触发 change 时都能响应；lastTeleportIdx 去重防重复传送）
+	// Spawn 选择（input + change 双监听：重选当前值/部分浏览器只触发 input 时
+	// 也能响应；去重防重复传送——同步自主项目修复）。
+	// 注意：必须双端同步（主线程预测物理 + Worker 权威物理）+ resetTo——
+	// 只传主线程时权威帧 >200 兜底会把传送点拉回（"传送初始点出现问题"根因）。
 	const onSpawnPick = (idx: number): void => {
 		if (idx === lastTeleportIdx || Number.isNaN(idx)) return;
 		lastTeleportIdx = idx;
 		inputBridge?.sendTeleport(idx);
+		rendererMain?.teleportToSpawn(idx);
+		const st = rendererMain?.getCurrentState();
+		if (st) rendererMain?.resetTo([st.pos.x, st.pos.y, st.pos.z], st.yaw, st.pitch);
 	};
 	dom.spawnSelect?.addEventListener('change', (e) => {
 		onSpawnPick(parseInt((e.target as HTMLSelectElement).value, 10));
@@ -808,9 +847,9 @@ function bindUI(): void {
 		onSpawnPick(parseInt((e.target as HTMLSelectElement).value, 10));
 	});
 
-	// 自定义传送点：保存当前位置
+	// 捕获当前位置为自定义传送点（主线程本地 state()）
 	dom.capturePosBtn?.addEventListener('click', () => {
-		if (!sceneReady || !inputBridge) {
+		if (!sceneReady) {
 			setStatus('场景尚未就绪，请先加载地图。', 'error');
 			return;
 		}
@@ -818,15 +857,24 @@ function bindUI(): void {
 			setStatus('未识别当前地图名称，无法保存传送点。', 'error');
 			return;
 		}
-		if (awaitingPlayerPos) {
-			setStatus('正在获取玩家位置...', '');
+		const st = rendererMain?.getCurrentState();
+		if (!st) {
+			setStatus('物理未就绪，无法获取位置。', 'error');
 			return;
 		}
-		awaitingPlayerPos = true;
-		inputBridge.sendGetPlayerPos();
+		const list = addCustomTeleport(teleportMapName, {
+			name: `位置 ${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}`,
+			pos: [st.pos.x, st.pos.y, st.pos.z],
+			yaw: st.yaw,
+		});
+		renderCustomTeleports(list);
+		setStatus(
+			`已保存当前位置 (${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}) 为传送点。`,
+			'success',
+		);
 	});
 
-	// 自定义传送点：手动添加（展开 X/Y/Z 输入框，避免单框自由文本误填）
+	// 手动添加传送点表单
 	dom.addTeleportBtn?.addEventListener('click', () => {
 		if (!sceneReady || !inputBridge) {
 			setStatus('场景尚未就绪，请先加载地图。', 'error');
@@ -842,8 +890,6 @@ function bindUI(): void {
 		form.style.display = showing ? 'none' : 'flex';
 		if (!showing) dom.tpX?.focus();
 	});
-
-	// 手动添加表单：提交（X/Y/Z 三个数字框分别校验）
 	dom.addTeleportForm?.addEventListener('submit', (e) => {
 		e.preventDefault();
 		if (!teleportMapName) return;
@@ -869,13 +915,8 @@ function bindUI(): void {
 			yaw = ((yv % 360) + 360) % 360;
 		}
 		const name = (dom.tpName?.value ?? '').trim() || fmtPos([x, y, z]);
-		const list = addCustomTeleport(teleportMapName, {
-			name,
-			pos: [x, y, z],
-			yaw,
-		});
+		const list = addCustomTeleport(teleportMapName, { name, pos: [x, y, z], yaw });
 		renderCustomTeleports(list);
-		// 重置并收起表单
 		if (dom.tpX) dom.tpX.value = '';
 		if (dom.tpY) dom.tpY.value = '';
 		if (dom.tpZ) dom.tpZ.value = '';
@@ -884,8 +925,6 @@ function bindUI(): void {
 		if (dom.addTeleportForm) dom.addTeleportForm.style.display = 'none';
 		setStatus(`已添加传送点 (${x.toFixed(0)},${y.toFixed(0)},${z.toFixed(0)})。`, 'success');
 	});
-
-	// 手动添加表单：取消
 	dom.tpCancel?.addEventListener('click', () => {
 		if (dom.tpX) dom.tpX.value = '';
 		if (dom.tpY) dom.tpY.value = '';
@@ -895,7 +934,7 @@ function bindUI(): void {
 		if (dom.addTeleportForm) dom.addTeleportForm.style.display = 'none';
 	});
 
-	// 自定义传送点：列表点击（传送 / 删除，事件委托）
+	// 自定义传送点列表操作（go = 双端传送 + resetTo；delete = 移除）
 	dom.customTeleportList?.addEventListener('click', (e) => {
 		const target = (e.target as HTMLElement).closest('button');
 		if (!target) return;
@@ -907,6 +946,9 @@ function bindUI(): void {
 			const tp = list.find((t) => t.id === id);
 			if (tp) {
 				inputBridge?.sendTeleportToPos(tp.pos, tp.yaw ?? undefined);
+				rendererMain?.teleportToPos(tp.pos, tp.yaw ?? undefined);
+				const st = rendererMain?.getCurrentState();
+				if (st) rendererMain?.resetTo([st.pos.x, st.pos.y, st.pos.z], st.yaw, st.pitch);
 				setStatus(`传送到「${tp.name}」(${fmtPos(tp.pos)})。`, 'success');
 			}
 		} else if (action === 'delete') {
@@ -915,7 +957,7 @@ function bindUI(): void {
 		}
 	});
 
-	// HUD 开关（关闭时停止 stats 发送 + 平面检测，省性能）
+	// HUD 可见性
 	dom.hudVisibleChk?.addEventListener('change', (e) => {
 		const visible = (e.target as HTMLInputElement).checked;
 		if (dom.hudEl) dom.hudEl.style.display = visible ? '' : 'none';
@@ -924,7 +966,7 @@ function bindUI(): void {
 		saveUiPrefs();
 	});
 
-	// 准星开关
+	// 准星可见性
 	dom.showCrosshairChk?.addEventListener('change', (e) => {
 		const visible = (e.target as HTMLInputElement).checked;
 		if (dom.crosshairEl) {
@@ -935,7 +977,7 @@ function bindUI(): void {
 		saveUiPrefs();
 	});
 
-	// 准星风格化（滑块 ↔ 输入框双向 + 变更即应用 + 持久化）
+	// 准星风格化（颜色/尺寸/粗细/间隙/描边/中心点）
 	const bindCh = (
 		range: HTMLInputElement | null,
 		num: HTMLInputElement | null,
@@ -986,26 +1028,7 @@ function bindUI(): void {
 		applyCh();
 	});
 
-	// 传送触发模式（物理面板）：StartTouch / 落地检测
-	dom.triggerModeRadios.forEach((radio) => {
-		radio.addEventListener('change', () => {
-			if (!radio.checked) return;
-			const mode = radio.value as 'start-touch' | 'start-touch-grounded';
-			applyConfigPatch(config, 'debug', { teleportTriggerMode: mode });
-			inputBridge?.sendConfig('debug', { teleportTriggerMode: mode });
-			updateGroundedFramesVisibility();
-			saveUiPrefs();
-		});
-	});
-	// 落地检测：连续落地帧数滑块 + 输入框
-	dom.groundedFramesRange?.addEventListener('input', (e) => {
-		const val = parseInt((e.target as HTMLInputElement).value, 10);
-		if (dom.groundedFramesNum && Number.isFinite(val)) dom.groundedFramesNum.value = String(val);
-		applyConfigPatch(config, 'debug', { groundedFramesRequired: val });
-		inputBridge?.sendConfig('debug', { groundedFramesRequired: val });
-		saveUiPrefs();
-	});
-	// 纹理画质（显示设置）：原始纹理 / mosaic 压缩低清（运行时切换贴图，即时生效）
+	// 纹理画质（mosaic 切换：渲染器实时替换贴图）
 	dom.textureQualityRadios.forEach((radio) => {
 		radio.addEventListener('change', () => {
 			if (!radio.checked) return;
@@ -1015,20 +1038,13 @@ function bindUI(): void {
 			saveUiPrefs();
 		});
 	});
-	// 缺失材质纹理弹窗：确认后关闭（等待确认）
+
+	// 缺失纹理确认弹窗关闭
 	dom.missingTexturesOk?.addEventListener('click', () => {
 		dom.missingTexturesModal?.classList.add('hidden');
 	});
-	dom.groundedFramesNum?.addEventListener('input', (e) => {
-		const val = parseInt((e.target as HTMLInputElement).value, 10);
-		if (!Number.isFinite(val)) return;
-		if (dom.groundedFramesRange) dom.groundedFramesRange.value = String(Math.min(30, Math.max(1, val)));
-		applyConfigPatch(config, 'debug', { groundedFramesRequired: val });
-		inputBridge?.sendConfig('debug', { groundedFramesRequired: val });
-		saveUiPrefs();
-	});
 
-	// 显示设置：实体/触发碰撞箱、准星射线检测（渲染器负责可视化，config 同步 Worker）
+	// 显示设置：碰撞箱/传送触发器/准星信息
 	dom.showSolidsChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyConfigPatch(config, 'debug', { showSolids: enabled });
@@ -1036,6 +1052,12 @@ function bindUI(): void {
 		inputBridge?.sendConfig('debug', { showSolids: enabled });
 		saveUiPrefs();
 	});
+	bindSlider(dom.brushViewDistanceRange, dom.brushViewDistanceNum, (v) => {
+		applyConfigPatch(config, 'debug', { brushViewDistance: v });
+		rendererMain?.applyConfigPatch('debug', { brushViewDistance: v });
+		inputBridge?.sendConfig('debug', { brushViewDistance: v });
+		saveUiPrefs();
+	}, (v) => Math.round(v / 64) * 64);
 	dom.showTriggersChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyConfigPatch(config, 'debug', { showTriggers: enabled });
@@ -1043,7 +1065,12 @@ function bindUI(): void {
 		inputBridge?.sendConfig('debug', { showTriggers: enabled });
 		saveUiPrefs();
 	});
-	// 准星射线检测（hover 查看模型/实体平面/触发面信息）
+	bindSlider(dom.triggerViewDistanceRange, dom.triggerViewDistanceNum, (v) => {
+		applyConfigPatch(config, 'debug', { triggerViewDistance: v });
+		rendererMain?.applyConfigPatch('debug', { triggerViewDistance: v });
+		inputBridge?.sendConfig('debug', { triggerViewDistance: v });
+		saveUiPrefs();
+	}, (v) => Math.round(v / 64) * 64);
 	dom.showPlaneInfoChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyConfigPatch(config, 'debug', { showPlaneInfo: enabled });
@@ -1052,110 +1079,260 @@ function bindUI(): void {
 		saveUiPrefs();
 	});
 
-	// 近平面贴墙自适应参数（滑块 ↔ 输入框双向同步，实时生效）
+	// 显示设置：模型三角形线框（.phy 橙 / 可视网格紫）独立开关 + 可视距离滑块
+	const applyTriDebug = (patch: Record<string, unknown>): void => {
+		applyConfigPatch(config, 'debug', patch);
+		rendererMain?.applyConfigPatch('debug', patch);
+		inputBridge?.sendConfig('debug', patch);
+		saveUiPrefs();
+	};
+	dom.showPhyChk?.addEventListener('change', (e) => {
+		const enabled = (e.target as HTMLInputElement).checked;
+		applyTriDebug({ showPhy: enabled });
+	});
+	dom.showVisChk?.addEventListener('change', (e) => {
+		const enabled = (e.target as HTMLInputElement).checked;
+		applyTriDebug({ showVis: enabled });
+	});
+	bindSlider(dom.phyViewDistanceRange, dom.phyViewDistanceNum, (v) => {
+		applyTriDebug({ phyViewDistance: v });
+	}, (v) => Math.round(v / 64) * 64);
+	bindSlider(dom.visViewDistanceRange, dom.visViewDistanceNum, (v) => {
+		applyTriDebug({ visViewDistance: v });
+	}, (v) => Math.round(v / 64) * 64);
+
+	// 近平面自适应参数（滑块 ↔ 输入框双向同步 + 渲染器实时生效）
 	bindNearParamControls();
 }
 
-/** 近平面自适应参数控件：滑块 ↔ 输入框双向同步 + rendererMain 实时生效。 */
-function bindNearParamControls(): void {
-	const bind = (
-		range: HTMLInputElement | null,
-		num: HTMLInputElement | null,
-		apply: (val: number) => void,
-		round: (v: number) => number,
-	): void => {
-		if (!range && !num) return;
-		const onRange = (): void => {
-			if (!range) return;
-			const val = round(parseFloat(range.value));
-			if (num) num.value = String(val);
-			apply(val);
-		};
-		const onNum = (): void => {
-			if (!num) return;
-			const raw = parseFloat(num.value);
-			if (Number.isNaN(raw)) return;
-			const val = round(raw);
-			if (range) range.value = String(val);
-			apply(val);
-		};
-		range?.addEventListener('input', onRange);
-		num?.addEventListener('change', onNum);
+/**
+ * 滑块 ↔ 数字输入框双向同步绑定（round 统一取整；apply 实时回调）。
+ */
+function bindSlider(
+	range: HTMLInputElement | null,
+	num: HTMLInputElement | null,
+	apply: (v: number) => void,
+	round: (v: number) => number,
+): void {
+	if (!range && !num) return;
+	const onRange = (): void => {
+		if (!range) return;
+		const val = round(parseFloat(range.value));
+		if (num) num.value = String(val);
+		apply(val);
 	};
-	bind(dom.nearProbeDistRange, dom.nearProbeDistNum, (v) => {
+	const onNum = (): void => {
+		if (!num) return;
+		const raw = parseFloat(num.value);
+		if (Number.isNaN(raw)) return;
+		const val = round(raw);
+		if (range) range.value = String(val);
+		apply(val);
+	};
+	range?.addEventListener('input', onRange);
+	num?.addEventListener('change', onNum);
+}
+
+/** 近平面探测距离/收缩系数控件绑定。 */
+function bindNearParamControls(): void {
+	bindSlider(dom.nearProbeDistRange, dom.nearProbeDistNum, (v) => {
 		rendererMain?.setNearParams(v, undefined);
 	}, (v) => v);
-	bind(dom.nearRatioRange, dom.nearRatioNum, (v) => {
+	bindSlider(dom.nearRatioRange, dom.nearRatioNum, (v) => {
 		rendererMain?.setNearParams(undefined, v);
 	}, (v) => Math.round(v * 100) / 100);
 }
 
-/** 落地检测模式时显示连续落地帧数滑块，StartTouch 时隐藏。 */
-function updateGroundedFramesVisibility(): void {
-	const mode = config.debug.teleportTriggerMode;
-	const isGrounded = mode === 'start-touch-grounded';
-	if (dom.groundedFramesRow) {
-		dom.groundedFramesRow.style.display = isGrounded ? '' : 'none';
-	}
+// ---------------------------------------------------------------------------
+// 文件处理（阶段 1：主线程解析 BSP + 构建物理 + 渲染，Worker 过渡保留并行物理）
+// ---------------------------------------------------------------------------
+
+/**
+ * 构造 Rust `set_params` 兼容的全量参数对象（主线程渲染物理实例）。
+ * 默认值对齐物理面板 PARAM_DEFS（与 Rust PhysParams::default 一致）；
+ * 灵敏度固定 1（真实灵敏度由主线程输入层乘入，game 同法）。
+ * 公共化：映射收敛到 ts-shared buildPhysicsParams，本处仅做 config 映射。
+ */
+function buildPredictionParams(config: RuntimeConfig): Record<string, unknown> {
+	const p = config.physics;
+	return sharedBuildPhysicsParams(
+		{
+			gravity: p.gravity,
+			accelerate: p.accelerate,
+			friction: p.friction,
+			stopSpeed: p.stopSpeed,
+			jumpSpeed: p.jumpSpeed,
+			airAccel: p.airAccel,
+			maxSpeed: p.maxSpeed,
+			// debug 无独立走路/蹲走配置：取面板定义默认值（与 Worker PhysicsParams 默认一致）
+			walkSpeed: 130,
+			crouchSpeed: 85,
+			autobhop: true,
+			bhopSpeedClamp: true,
+			noPrestrafe: true,
+			teleportGateTicks: p.teleportGateTicks,
+		},
+		{
+			yawBindSpeed: config.input.yawBindSpeed,
+			noclipSpeed: config.input.noclipSpeed,
+		},
+	);
 }
 
-// ---------------------------------------------------------------------------
-// 文件处理（WASM 解析）
-// ---------------------------------------------------------------------------
-
-/** 文件入口：只读字节 → transfer 给 Worker 解析。主线程不解析 WASM，UI 零阻塞。 */
+/** 文件入口：读字节 → 主线程解析（BspProcessor → 渲染 + 物理世界）。 */
 async function handleBspFile(file: File): Promise<void> {
+	// 主线程 wasm 就绪（BspProcessor/decompress_mtz 依赖；失败则继续由下方 try 报错）
+	await mainWasmReady.catch(() => undefined);
 	if (!inputBridge) {
 		setError('Worker 未就绪');
 		return;
 	}
 	// 内存重置：先卸载旧地图的全部渲染资源（GPU geometry/material/纹理 +
-	// LOD/PVS/碰撞可视化/插值缓存），防止多次加载地图累积泄漏导致帧率下降
+	// LOD/PVS/碰撞可视化 + 主线程物理实例），防止多次加载地图累积泄漏
 	rendererMain?.disposeScene();
-	lastLoadedFileName = file.name;
+	sceneReady = false;
 	teleportMapName = file.name;
-	awaitingPlayerPos = false;
 	// 换地图重置出生点传送去重（新地图选相同索引也应生效）
 	lastTeleportIdx = -1;
-	setStatus(`正在发送 ${file.name} 到 Worker 解析...`, '');
 	if (dom.spawnSelect) dom.spawnSelect.innerHTML = '';
-	// transfer 后主线程不再读取 bytes（已 detach）
-	inputBridge.sendLoadBsp(file.name, await file.arrayBuffer());
+	setStatus(`正在加载 ${file.name}（主线程解析 BSP）...`, '');
+	// 让 UI 先更新（解析可能耗时）
+	await new Promise((r) => setTimeout(r, 0));
+	try {
+		await handleLoadBsp(file.name, await file.arrayBuffer());
+	} catch (err) {
+		setError(`BSP 解析失败: ${err instanceof Error ? err.message : String(err)}`);
+		rendererMain?.disposeScene();
+	}
 }
 
-function renderMetadata(meta: WasmBspMetadata, filename: string): void {
+/**
+ * 主线程解析 BSP（参照 game handleLoadBsp 顺序）：
+ * BspProcessor → metadata → 借用导出（brush/tri/spawn/teleport/pvs）→ mosaicManifest
+ * → 默认纹理包（内嵌 base64 / fetch textures.mtz）→ export_glb* → 渲染场景 →
+ * buildPredictionWorld → Worker 过渡（同一字节仍发 Worker 并行物理，渲染不用其输出）。
+ * 公共化：导出管线收敛到 ts-shared buildWorldBundle（colliderSource 三档 +
+ * 缺失纹理 + 阶段进度回调全部共享）。
+ */
+async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void> {
+	if (!rendererMain || !inputBridge) return;
+	const bundle = await buildWorldBundle(new BspProcessor(new Uint8Array(bytes)), {
+		colliderSource: config.physics.colliderSource ?? 'auto',
+		collectMissingTextures: true,
+		decompressMtz: decompress_mtz,
+		onProgress: (s) => setStatus(s, ''),
+	});
+	renderMetadata(bundle.metadata, fileName);
+
+	const sceneData: SceneDataMessage = {
+		type: 'scene-data',
+		glb: bundle.glbBytes,
+		brushJson: bundle.brushJson,
+		triJson: bundle.triJson,
+		mosaicManifest: bundle.mosaicManifest,
+		missingTextures: bundle.missingTextures,
+		spawnJson: bundle.spawnJson,
+		pvsJson: bundle.pvsJson,
+		teleportJson: bundle.teleportJson,
+		metadata: {
+			mapName: bundle.metadata.mapName,
+			numFaces: bundle.metadata.numFaces,
+			numVertices: bundle.metadata.numVertices,
+			numBrushes: bundle.metadata.numBrushes,
+			numModels: bundle.metadata.numModels,
+		},
+		spawn: bundle.spawn,
+		// 场景对角线/剔除范围由主线程 GLTFLoader 后计算并校准
+		diagonal: 0,
+		maxCull: 100000,
+		defaultCull: config.lod.cullDistance,
+		glbSizeKb: Math.round(bundle.glbBytes.byteLength / 1024),
+		numSpawnPoints: bundle.spawnList.length,
+		hasPvs: bundle.pvsJson.length > 2,
+		deathThresholdY: 0,
+	};
+
+	// 渲染场景（GLB + PVS + spawn；主线程直读本地数据，不再经 Worker scene-data）
+	const diag = (await rendererMain.loadScene(sceneData)) ?? null;
+	// 主线程物理世界（唯一物理渲染线）
+	rendererMain.buildPredictionWorld({
+		brushJson: bundle.brushJson,
+		triJson: bundle.triJson,
+		teleportJson: bundle.teleportJson,
+		spawn: bundle.spawn,
+	});
+	// 出生点列表（spawn 下拉切换用）：主线程渲染物理 + Worker 权威物理**双端**
+	// 都要设置——否则权威侧 teleport_to_spawn 索引为空静默忽略，权威帧
+	// 兜底会把传送点拉回（"一瞬间传送过去又被拉回"根因）
+	const spawnList = bundle.spawnList;
+	rendererMain.setSpawnPoints(spawnList);
+	// 初始物理参数/体型/模式同步主线程实例（面板参数经 physics-snapshot 镜像双端）
+	rendererMain.setPredictionParams(buildPredictionParams(config));
+	rendererMain.setPredictionHull(
+		config.player.radius,
+		config.player.standHeight,
+		config.player.duckHeight,
+	);
+	rendererMain.setPredictionNoclip(config.physics.mode === 'noclip');
+
+	// 权威 Worker：world-json 构建权威 PhysWorld（阶段 2：不再发 load-bsp，
+	// Worker 不解析 BSP）→ 出生点列表 → 双端参数 config
+	inputBridge.sendWorldJson({
+		brushJson: bundle.brushJson,
+		triJson: bundle.triJson,
+		teleportJson: bundle.teleportJson,
+		spawn: bundle.spawn,
+	});
+	inputBridge.sendSetSpawnPoints(spawnList);
+	syncFullConfig();
+	// 死亡阈值重发：loadScene 时的消息早于 world-json 被 Worker 丢弃
+	if (sceneDeathY !== null) {
+		inputBridge.sendSetDeathThreshold(sceneDeathY);
+	}
+
+	// 计时挑战状态机重置（初始出生点；死亡阈值由 onSceneLoaded 双端设置）
+	game.reset();
+	game.setInitialSpawn(
+		{ x: bundle.spawn.x, y: bundle.spawn.y, z: bundle.spawn.z },
+		(bundle.spawn.yawDeg * Math.PI) / 180,
+	);
+
+	sceneReady = true;
+	// 出生点下拉（与 Worker spawn-options 幂等）
+	if (dom.spawnSelect) {
+		const spawnPoints = (JSON.parse(bundle.spawnJson) as { spawn_points?: Array<{ classname: string; origin: number[] }> })
+			.spawn_points ?? [];
+		dom.spawnSelect.innerHTML = spawnPoints
+			.map(
+				(sp, i) =>
+					`<option value="${i}">${i}: ${sp.classname} (${sp.origin[0].toFixed(0)},` +
+					`${sp.origin[1].toFixed(0)},${sp.origin[2].toFixed(0)})</option>`,
+			)
+			.join('');
+	}
+	// UI 激活（控件/面板同步/缺失纹理弹窗）
+	await onSceneReadyUi(diag, sceneData);
+}
+
+/** 场景元数据面板（文件名 + 统计行；公共化：数据来自 ts-shared WorldMetadata）。 */
+function renderMetadata(meta: WorldMetadata, filename: string): void {
 	if (!dom.metadataEl) return;
 	const rows: [string, string | number][] = [
 		['文件名', filename],
-		['魔术字', meta.magic],
-		['模型数', meta.num_models],
-		['面数', meta.num_faces],
-		['顶点数', meta.num_vertices],
-		['Brush 数', meta.num_brushes],
-		['Leaf 数', meta.num_leaves],
-		['Node 数', meta.num_nodes],
-		['实体数', meta.num_entities],
-		['静态道具数', meta.num_static_props],
-		['Pakfile 文件数', meta.packed_files],
+		['魔术字', meta.magic ?? ''],
+		['模型数', meta.numModels],
+		['面数', meta.numFaces],
+		['顶点数', meta.numVertices],
+		['Brush 数', meta.numBrushes],
+		['Leaf 数', meta.numLeaves ?? 0],
+		['Node 数', meta.numNodes ?? 0],
+		['实体数', meta.numEntities ?? 0],
+		['静态道具数', meta.numStaticProps ?? 0],
+		['Pakfile 文件数', meta.packedFiles ?? 0],
 	];
 	dom.metadataEl.innerHTML = rows
 		.map(([k, v]) => `<div class="kv-row"><span class="k">${k}</span><span class="v">${v}</span></div>`)
 		.join('');
-}
-
-function renderSpawnOptions(spawnJson: string): void {
-	if (!dom.spawnSelect) return;
-	try {
-		const data = JSON.parse(spawnJson) as { spawn_points: Array<{ classname: string; origin: number[]; angles: number[] }> };
-		const opts = data.spawn_points.map((sp, i) => {
-			const label = `${i}: ${sp.classname} (${sp.origin.map(n => n.toFixed(0)).join(',')})`;
-			return `<option value="${i}">${label}</option>`;
-		});
-		dom.spawnSelect.innerHTML = opts.join('');
-	} catch (err) {
-		console.warn('[app] spawn 解析失败', err);
-		setStatus(`出生点解析失败：${err instanceof Error ? err.message : String(err)}`, 'error');
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1213,39 +1390,50 @@ function escapeHtml(s: string): string {
 		.replace(/'/g, '&#39;');
 }
 
-/** 处理 player-pos 回传：保存当前位置为自定义传送点。 */
-function onPlayerPos(msg: PlayerPosMessage): void {
-	if (!awaitingPlayerPos) return;
-	awaitingPlayerPos = false;
-	if (!teleportMapName) return;
-	const [x, y, z] = msg.pos;
-	const list = addCustomTeleport(teleportMapName, {
-		name: `位置 ${msg.pos.map((n) => n.toFixed(0)).join(',')}`,
-		pos: [x, y, z],
-		yaw: msg.yaw,
-	});
-	renderCustomTeleports(list);
-	setStatus(
-		`已保存当前位置 (${msg.pos.map((n) => n.toFixed(0)).join(',')}) 为传送点。`,
-		'success',
-	);
+// ---------------------------------------------------------------------------
+// 渲染物理事件（Rust take_event → 计时挑战状态机；主线程消费，权威侧不消费）
+// ---------------------------------------------------------------------------
+
+/** teleport → 检查点记录 / 终点完成；death → 死亡统计 + 检查点回退。 */
+function onRenderPhysEvent(ev: RenderPhysEvent): void {
+	if (ev.kind === 'teleport') {
+		const yaw = ev.yaw ?? 0;
+		game.onTeleport({
+			index: -1,
+			targetname: String(ev.targetname ?? ''),
+			origin: { x: ev.origin?.[0] ?? 0, y: ev.origin?.[1] ?? 0, z: ev.origin?.[2] ?? 0 },
+			angles: [0, yaw, 0],
+			yaw,
+		});
+	} else if (ev.kind === 'death') {
+		game.onDeath();
+		// 死亡回退到最后检查点（双端 teleport-to-pos + resetTo 防权威帧拉回）
+		const cp = game.getRespawnPos();
+		if (cp && rendererMain) {
+			const pos: [number, number, number] = [cp.pos.x, cp.pos.y, cp.pos.z];
+			const yawDeg = (cp.yaw * 180) / Math.PI;
+			rendererMain.teleportToPos(pos, yawDeg);
+			inputBridge?.sendTeleportToPos(pos, yawDeg);
+			rendererMain.resetTo(pos, yawDeg);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
-// 物理控制面板
+// 物理控制面板（阶段 4：参数迁主线程，snapshot 镜像双端）
 // ---------------------------------------------------------------------------
 
-/** 参数来源徽标样式（snapshot 回传 source → 展示）。 */
+/** 参数来源标签（默认/手动/地图设置）。 */
 const SOURCE_LABEL: Record<ParamSource, { text: string; color: string }> = {
 	'mode-default': { text: '默认', color: '#4a4' },
 	manual: { text: '手动', color: '#4a90e2' },
 	map: { text: '地图设置', color: '#c9a84a' },
 };
 
-/** 面板渲染防回环标志（snapshot 回写控件时抑制 input 事件）。 */
+/** 面板渲染抑制（snapshot 回填时防触发 input 事件回发 Worker，防循环）。 */
 let panelSuppress = false;
 
-/** 初始化物理参数行（静态定义渲染一次，值由 physics-snapshot 更新）。 */
+/** 物理参数行初始化（静态定义渲染一次，值由 physics-snapshot 更新）。 */
 function initPhysicsPanel(): void {
 	if (!dom.physicsParamList) return;
 	dom.physicsParamList.innerHTML = PARAM_DEFS.map((def) => {
@@ -1255,11 +1443,9 @@ function initPhysicsPanel(): void {
 				`<div class="ctrl-checkbox-row ctrl-full" data-param-row="${def.name}">` +
 				`<input type="checkbox" data-param="${def.name}" ${def.default ? 'checked' : ''} />` +
 				`<label data-param-label="${def.name}" title="${def.description}" style="cursor:pointer;">${def.label}</label>` +
-				`<span data-param-src="${def.name}" style="font-size:10px;"></span>` +
-				`</div>`
+				`<span data-param-src="${def.name}" style="font-size:10px;"></span></div>`
 			);
 		}
-		// 数值参数：滑块 + 数字输入框（允许范围内任意输入，双向同步）
 		return (
 			`<label data-param-label="${def.name}" title="${def.description}">${def.label}</label>` +
 			`<input type="range" data-param="${def.name}" min="${def.min ?? 0}" max="${def.max ?? 100}" step="${def.step ?? 1}" />` +
@@ -1269,14 +1455,13 @@ function initPhysicsPanel(): void {
 		);
 	}).join('');
 
-	// 参数行事件（range/number/checkbox → Worker，滑块与输入框双向同步）
 	dom.physicsParamList.addEventListener('input', (e) => {
 		if (panelSuppress) return;
 		const el = e.target as HTMLInputElement;
 		const name = el.dataset.param ?? el.dataset.paramInput;
 		if (!name) return;
 		const value = el.type === 'checkbox' ? el.checked : Number(el.value);
-		// 同步兄弟控件（range ↔ number）
+		// 联动（range ↔ number）
 		if (el.dataset.param && el.type === 'range') {
 			const numEl = document.querySelector(`[data-param-input="${name}"]`) as HTMLInputElement | null;
 			if (numEl) numEl.value = String(value);
@@ -1284,9 +1469,11 @@ function initPhysicsPanel(): void {
 			const rangeEl = document.querySelector(`[data-param="${name}"]`) as HTMLInputElement | null;
 			if (rangeEl && Number.isFinite(value)) rangeEl.value = String(value);
 		}
+		// 发 Worker（权威 set_params；快照回传后镜像主线程实例）
 		if (Number.isFinite(value)) inputBridge?.sendSetPhysicsParam(name, value);
 	});
-	// 碰撞箱控件（滑块 ↔ 输入框双向同步）
+
+	// 碰撞箱体型（缩放/逐项）
 	const syncHullNum = (): void => {
 		if (dom.hullHalfWidthNum) dom.hullHalfWidthNum.value = dom.hullHalfWidth?.value ?? '16';
 		if (dom.hullStandHeightNum) dom.hullStandHeightNum.value = dom.hullStandHeight?.value ?? '72';
@@ -1355,7 +1542,7 @@ function initPhysicsPanel(): void {
 	});
 }
 
-/** 从三个数值控件（滑块/输入框）发送 set-hull（同时把倍率滑块标为自定义）。 */
+/** 从碰撞箱输入框发送 set-hull（面板手动调整）。 */
 function sendHullFromInputs(): void {
 	if (panelSuppress) return;
 	inputBridge?.sendSetHull({
@@ -1366,27 +1553,26 @@ function sendHullFromInputs(): void {
 	if (dom.hullScaleNum) dom.hullScaleNum.value = '1';
 }
 
-/** 渲染物理参数快照（Worker → 主线程；参数值/来源/碰撞箱状态）。 */
+/** 物理参数快照回填面板（Worker physics-snapshot 消息）。 */
 function renderPhysicsSnapshot(msg: PhysicsSnapshotMessage): void {
 	panelSuppress = true;
 	try {
-		// 1. 参数行：值（输入框/滑块）+ 来源 badge
 		for (const p of msg.params) {
 			const label = SOURCE_LABEL[p.source as ParamSource] ?? SOURCE_LABEL['mode-default'];
 			const numEl = document.querySelector(`[data-param-input="${p.name}"]`) as HTMLInputElement | null;
-			const srcEl = document.querySelector(`[data-param-src="${p.name}"]`);
+			const srcEl = document.querySelector(`[data-param-src="${p.name}"]`) as HTMLElement | null;
 			const inputEl = document.querySelector(`[data-param="${p.name}"]`) as HTMLInputElement | null;
 			if (numEl) numEl.value = String(p.value);
 			if (srcEl) {
 				srcEl.textContent = label.text;
-				(srcEl as HTMLElement).style.color = label.color;
+				srcEl.style.color = label.color;
 			}
 			if (inputEl) {
 				if (inputEl.type === 'checkbox') inputEl.checked = Boolean(p.value);
 				else inputEl.value = String(p.value);
 			}
 		}
-		// 2. 碰撞箱：三值同步 + 倍率（与默认×k 一致则显示 k，否则"自定义"）
+		// 碰撞箱回填（含比例缩放联动）
 		const { halfWidth, standHeight, duckHeight, source, isDefault } = msg.hull;
 		if (dom.hullHalfWidth) dom.hullHalfWidth.value = String(halfWidth);
 		if (dom.hullHalfWidthNum) dom.hullHalfWidthNum.value = String(halfWidth);
@@ -1408,19 +1594,35 @@ function renderPhysicsSnapshot(msg: PhysicsSnapshotMessage): void {
 				dom.hullScaleNum.value = '1';
 			}
 		}
-		// 3. 自动恢复开关 + 来源 badge
 		if (dom.autoRestoreHullChk) dom.autoRestoreHullChk.checked = msg.autoRestoreHull;
 		if (dom.hullSourceBadge) {
 			const label = SOURCE_LABEL[source as ParamSource] ?? SOURCE_LABEL['mode-default'];
 			dom.hullSourceBadge.textContent = `来源：${label.text}`;
 			dom.hullSourceBadge.style.color = label.color;
 		}
+		// 面板参数 → 主线程渲染物理实例镜像（双端同参）
+		mirrorSnapshotToPrediction(msg);
 	} finally {
 		panelSuppress = false;
 	}
 }
 
-/** 物理事件通知（碰撞箱自动恢复等）。 */
+/** 物理面板快照 → 主线程渲染物理实例（PARAM_TO_RUST snake_case 映射）。 */
+function mirrorSnapshotToPrediction(msg: PhysicsSnapshotMessage): void {
+	if (!rendererMain) return;
+	const params: Record<string, number | boolean> = {};
+	for (const p of msg.params) {
+		const rustName = PARAM_TO_RUST[p.name as keyof typeof PARAM_TO_RUST];
+		if (rustName) params[rustName] = p.value;
+	}
+	if (Object.keys(params).length > 0) {
+		rendererMain.setPredictionParams(params);
+	}
+	const { halfWidth, standHeight, duckHeight } = msg.hull;
+	rendererMain.setPredictionHull(halfWidth, standHeight, duckHeight);
+}
+
+/** 物理事件通知（自动恢复等）。 */
 function onPhysicsEvent(msg: PhysicsEventMessage): void {
 	if (msg.event === 'hull-auto-restored') {
 		setStatus(msg.message, 'success');
@@ -1428,24 +1630,60 @@ function onPhysicsEvent(msg: PhysicsEventMessage): void {
 }
 
 // ---------------------------------------------------------------------------
-// 输入循环（主线程 rAF，每帧推送按键状态 + frame 触发信号到 Worker）
+// 输入循环（主线程 rAF：每帧推送按键到 Worker + 喂主线程渲染物理按键/Q-E 等效像素）
 // ---------------------------------------------------------------------------
 
+/** 主线程 rAF 循环：按键 → 渲染物理（同写 SAB 权威端）+ HUD 本地采样（阶段 2）。 */
 function startInputLoop(): void {
-	const tick = (): void => {
+	let lastQeMs = 0;
+	// HUD 本地采样：FPS 主线程 rAF 计数；stats/game-stats 10Hz
+	let lastStatsAt = 0;
+	let lastGameStatsAt = 0;
+	const tick = (now: number): void => {
 		requestAnimationFrame(tick);
-		if (!inputBridge || !sceneReady) return;
+		// FPS 计数（每秒一次刷新 localFps，供 HUD 显示）
+		fpsFrames++;
+		if (now - fpsTime >= 1000) {
+			localFps = fpsFrames;
+			fpsFrames = 0;
+			fpsTime = now;
+		}
+		if (!inputBridge || !rendererMain || !sceneReady) return;
 
-		// 按键位掩码（含滚轮连跳脉冲，置位后清零）；环形缓冲下每帧推送，保证按住键不动鼠标时
-		// Worker 仍能刷新按键状态
+		// 按键位掩码；每帧喂渲染物理（渲染 tick 同写 SAB 权威输入槽 → Worker
+		// 权威帧模拟同输入，双端角度不分叉）。未锁定（面板打开）时强制 0：
+		// 双保险防 ESC 前后按键状态残留（与 game startInputLoop 同法）
 		const keys = keyboard.getState();
-		keys.wheelJump = wheelJumpPending;
+		const mask = pointerLock.isLocked() ? keysToMask(keys) : 0;
+		// 滚轮跳：仅锁定时并入本帧输入（消费一次即清）
+		const maskWithWheel = pointerLock.isLocked() && wheelJumpPending ? mask | KEY_MASK.wheelJump : mask;
 		wheelJumpPending = false;
-		const mask = keysToMask(keys);
-		inputBridge.setKeys(mask);
 
-		// frame 触发信号（无负载，物理 dt 由 Worker 自算）；M2 Worker 自驱落地后移除
-		inputBridge.sendFrame();
+		// Q/E 键 → 等效鼠标像素（与 game 输入层同法：yaw_bind_speed/M_YAW × dt，
+		// 独立增量不受灵敏度影响；实现收敛到 ts-shared qeEquivalentDx），并入本帧输入
+		const dtF = lastQeMs === 0 ? 1 / 144 : Math.min((now - lastQeMs) / 1000, 0.1);
+		lastQeMs = now;
+		const qe = qeEquivalentDx(config.input.yawBindSpeed, dtF);
+		const qeDx = (maskWithWheel & KEY_MASK.yawRight ? qe : 0) - (maskWithWheel & KEY_MASK.yawLeft ? qe : 0);
+		rendererMain.feedInput(qeDx, 0, maskWithWheel);
+
+		// 计时挑战：玩家移动（physics 模式）→ idle → running
+		if (config.physics.mode === 'physics') {
+			const v = rendererMain.getCurrentVel();
+			if (v.x * v.x + v.y * v.y + v.z * v.z > 1) {
+				game.onPlayerMove();
+			}
+		}
+
+		// HUD 本地采样（10Hz）：stats（FPS/pos/vel/cluster）+ game-stats
+		if (now - lastStatsAt >= 100) {
+			lastStatsAt = now;
+			updateStatsUI();
+		}
+		if (now - lastGameStatsAt >= 100) {
+			lastGameStatsAt = now;
+			updateGameStatsUI();
+		}
 	};
 	requestAnimationFrame(tick);
 }

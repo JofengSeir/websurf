@@ -18,15 +18,8 @@ use model_integrator::{
     ExportOptions, InMemoryModel, InMemoryResources, ModelIntegrator, StaticProp,
 };
 
-// 薄壳 brush 模型碰撞（debug 特色功能，仅 debug 打包包含）
-mod shell_colliders;
-
 // 物理系统：共享自仓库根 src/（websurf-phys crate）
 pub use websurf_phys::phys::PhysWorld;
-
-// 诊断探针：仅在 `cargo test` 下编译，复刻 export_model_colliders 管线 dump 中间产物。
-#[cfg(test)]
-mod debug_probe;
 
 // ---------------------------------------------------------------------------
 // 错误处理辅助
@@ -40,17 +33,6 @@ fn to_js_err<E: std::fmt::Debug>(e: E, ctx: &str) -> JsValue {
 // ---------------------------------------------------------------------------
 // PAKFILE 内嵌模型：三件套提取 / 材质解析 / 碰撞体参数
 // ---------------------------------------------------------------------------
-
-/// 原始三角网格碰撞的路径预算（三角数上限）；超出回退 OBB 粗碰撞。
-///
-/// 不做共面合并后每个三角生成一个 brush，故用三角数卡护栏（比面数预算大得多）。
-const MAX_MODEL_TRIS: usize = 4096;
-
-/// 模型碰撞体的全局 brush 上限（`traceBox` 是线性 broadphase，需要护栏）。
-const MAX_MODEL_BRUSHES: usize = 24_000;
-
-/// 面片挤出厚度（Hammer 单位）；薄壳不会被高速穿透，取小值使碰撞体贴合显示几何。
-const COLLIDER_THICKNESS: f32 = 4.0;
 
 /// PAKFILE 材质解析产物。
 #[derive(Default)]
@@ -560,185 +542,8 @@ impl BspProcessor {
         Ok(output)
     }
 
-    /// 导出 **PAKFILE 内嵌模型**的碰撞体，输出与
-    /// [`BspProcessor::export_brushes_planes`] **同构**的 `WasmBrush[]` JSON 数组。
-    ///
-    /// 前端将其与地图 brush JSON 合并交给 `adaptBrushes` 即可，无新增数据契约。
-    ///
-    /// # 与显示几何一致
-    ///
-    /// 显示与碰撞共用同一条顶点变换链 `map_coords(model.apply_root_transform(v))` → `scale` → `quat` → `translation`，
-    /// `quat`/`translation` 来自与 GLB 节点同一份 [`model_integrator::resolve_placements`]，无「看得到摸不着」偏移。
-    ///
-    /// 几何为「原始三角网格 → 逐三角沿法线反向挤出薄壳」，逐面贴合显示网格（surf 图 ramp 坡的硬要求）。
-    /// 不做共面合并（会把薄斜坡变成 quad + filler 面，致碰撞外观与显示不一致）。
-    /// 三角数超预算（`MAX_MODEL_TRIS`）时回退 OBB 粗碰撞，避免高模装饰件拖垮 `traceBox` 线性 broadphase。
-    ///
-    /// # 透明度门控（没有标注就默认有碰撞）
-    ///
-    /// Source 的透明度标注全部写在 `.vmt` 里，据此逐 mesh 判定：
-    ///
-    /// | 情形 | 判定 |
-    /// |---|---|
-    /// | `$translucent 1` / `$alpha < 1` | 真半透明 → **跳过碰撞** |
-    /// | `$alphatest 1`（铁丝网/栅栏镂空） | Source 中本是实体 → **保留碰撞** |
-    /// | VMT 未打包 / 无任何标注 | 按不透明 → **保留碰撞** |
-    /// | `static_prop.solid == 0`（`SOLID_NONE`） | 引擎级明确无碰撞 → **跳过** |
-    ///
-    /// # 调用时机
-    ///
-    /// 只**借用** BSP，须在 [`BspProcessor::export_glb_with_pakfile_models`]（消费 BSP）**之前**调用。
-    pub fn export_model_colliders(&self) -> Result<String, JsValue> {
-        let bsp = self
-            .bsp
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
-
-        let (models, static_props, entry_names) = collect_pakfile_models(bsp)?;
-        if models.is_empty() {
-            return Ok("[]".to_string());
-        }
-
-        // 碰撞体只需 alpha 标注，不解码 VTF
-        let index = pakfile_models::PakIndex::build(&entry_names);
-        let materials = resolve_pakfile_materials(bsp, &models, &index, false);
-
-        let no_entities: Vec<model_integrator::Entity> = Vec::new();
-        let mut out: Vec<crate::shell_colliders::BrushOut> = Vec::new();
-
-        for m in &models {
-            if out.len() >= MAX_MODEL_BRUSHES {
-                break;
-            }
-
-            // 该模型在地图中的全部实例（与 GLB 节点同源）
-            let placements =
-                model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
-            // 过滤掉引擎级标注为「无碰撞」的实例
-            let placements: Vec<_> = placements
-                .into_iter()
-                .filter(|p| p.solid != Some(0))
-                .collect();
-            if placements.is_empty() {
-                continue;
-            }
-
-            let Some(model) = load_vmdl(m) else { continue };
-
-            // ---- 局部空间顶点（Y-up，与 GLB 顶点同一变换）----
-            let src = model.vertices();
-            let mut local: Vec<[f32; 3]> = Vec::with_capacity(src.len());
-            let mut normals: Vec<[f32; 3]> = Vec::with_capacity(src.len());
-            for v in src {
-                local.push(model_integrator::map_coords(
-                    model.apply_root_transform(v.position),
-                ));
-                // 根变换是纯旋转（骨骼 rot），法线可用同一变换
-                normals.push(model_integrator::map_coords(
-                    model.apply_root_transform(v.normal),
-                ));
-            }
-            if local.is_empty() {
-                continue;
-            }
-
-            // ---- 展开三角，逐 mesh 做透明度门控 ----
-            let skin = model.skin_tables().next();
-            let mut tris: Vec<[[f32; 3]; 3]> = Vec::new();
-            for mesh in model.meshes() {
-                let alpha = skin
-                    .as_ref()
-                    .and_then(|s| s.texture_info(mesh.material_index()))
-                    .and_then(|t| materials.alpha_modes.get(&t.name).copied())
-                    .unwrap_or(0);
-                if alpha == 1 {
-                    continue; // 真半透明：可穿过
-                }
-                let idx: Vec<usize> = mesh.vertex_strip_indices().flatten().collect();
-                for c in idx.chunks_exact(3) {
-                    let (a, b, d) = (c[0], c[1], c[2]);
-                    if a >= local.len() || b >= local.len() || d >= local.len() {
-                        continue;
-                    }
-                    let hint = [
-                        normals[a][0] + normals[b][0] + normals[d][0],
-                        normals[a][1] + normals[b][1] + normals[d][1],
-                        normals[a][2] + normals[b][2] + normals[d][2],
-                    ];
-                    crate::shell_colliders::push_oriented_tri(
-                        &mut tris,
-                        [local[a], local[b], local[d]],
-                        hint,
-                    );
-                }
-            }
-            if tris.is_empty() {
-                continue;
-            }
-
-            // ---- 以原始三角网格作为碰撞几何（不做共面合并）----
-            //
-            // 原先 `build_convex_faces` 把共面三角合并成凸多边形，使薄斜坡变为 quad + filler 面，
-            // 拓扑与显示网格不一致。改法：每个三角 → 沿法线挤出 `COLLIDER_THICKNESS` 的薄壳 brush。
-            // 三角数超预算（高模装饰件）时回退 OBB 粗碰撞。
-            if tris.len() > MAX_MODEL_TRIS {
-                // 高模：回退 OBB 粗碰撞
-                let mut lmin = [f32::INFINITY; 3];
-                let mut lmax = [f32::NEG_INFINITY; 3];
-                for t in &tris {
-                    for v in t {
-                        for i in 0..3 {
-                            if v[i] < lmin[i] {
-                                lmin[i] = v[i];
-                            }
-                            if v[i] > lmax[i] {
-                                lmax[i] = v[i];
-                            }
-                        }
-                    }
-                }
-                if !lmin.iter().all(|f| f.is_finite()) {
-                    continue;
-                }
-                for p in &placements {
-                    let (corners, axes) = crate::shell_colliders::placed_obb(
-                        lmin, lmax, p.translation, p.rotation, p.scale,
-                    );
-                    if let Some(b) = crate::shell_colliders::obb_to_brush(&corners, axes) {
-                        out.push(b);
-                    }
-                    if out.len() >= MAX_MODEL_BRUSHES {
-                        break;
-                    }
-                }
-            } else {
-                for p in &placements {
-                    for t in &tris {
-                        let face = crate::shell_colliders::tri_to_face(*t);
-                        let Some((verts, n)) = crate::shell_colliders::transform_face(
-                            &face, p.translation, p.rotation, p.scale,
-                        ) else {
-                            continue;
-                        };
-                        if let Some(b) =
-                            crate::shell_colliders::face_to_brush(&verts, n, COLLIDER_THICKNESS)
-                        {
-                            out.push(b);
-                        }
-                    }
-                    if out.len() >= MAX_MODEL_BRUSHES {
-                        break;
-                    }
-                }
-            }
-        }
-
-        serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化模型碰撞体失败"))
-    }
-
     /// 导出 **PAKFILE 内嵌模型的「可视网格」作为碰撞网格**（世界空间三角形，零转化）。
     ///
-    /// 与 [`BspProcessor::export_model_colliders`]（逐三角挤出薄壳 brush）不同，
     /// 本方法**不做任何转化**：不挤出厚度、不共面合并、不凸包、不 OBB 回退 ——
     /// 输出的三角形与 GLB 显示网格**逐位一致**（顶点 = 同一条变换链
     /// `map_coords(apply_root_transform(v))` → `place_point`（scale/rot/translation），

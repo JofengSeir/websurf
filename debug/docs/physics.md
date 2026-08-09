@@ -1,64 +1,80 @@
 # debug 物理模块
 
-> 物理核心为共享层 Rust 物理（`src/phys/`，websurf-phys），Worker 内驱动。
-> 公共时序见 `docs/timing-debug.md`。本文档：debug 侧的物理接入细节、循环、共享内存、参数面板链路。
+> 物理核心为共享层（Rust `src/phys/` + TS `src/ts-shared/`），与 game 同模式：
+> **主线程唯一物理渲染线** + **Worker 权威帧计算器**。公共时序见 `docs/timing-debug.md`。
+> 本文档：debug 侧的物理接入、校准、面板参数链路、事件消费。
 
-## 1. 物理世界构建（`physics-worker.ts` handleLoadBsp）
+## 1. 物理世界构建（主线程）
 
 ```
-PhysWorld 实例（WASM）
+PhysWorld 实例（主线程渲染物理）
   ├─ build_world(brushJson, triJson ?? '[]', teleportJson, spawn.x, spawn.y, spawn.z, spawn.yaw)
-  │     brushJson = export_brushes_planes（colliderSource: auto/visual/phy 三方案合并）
-  │     triJson   = export_model_tri_colliders / _phy_colliders（失败回退薄壳 brush 并入 brushJson）
-  │     teleportJson = parse_teleports
-  ├─ set_params({ sensitivity: 1 })   ← 灵敏度在 TS 输入层乘入，Rust 端固定 1
-  ├─ set_spawn_points([[x,y,z,yaw],...])  ← spawn 下拉切换用
-  └─ set_death_y(sceneMinY - 1000)    ← 主线程场景包围盒回传
+  │     brushJson = world-builder 导出（colliderSource: auto/visual/phy 三方案 + 薄壳回退并入）
+  │     triJson   = export_model_tri_colliders / _phy_colliders
+  ├─ set_params(buildPhysicsParams(config))   ← 共享 ts-shared/phys/params（sensitivity: 1）
+  ├─ set_spawn_points([[x,y,z,yaw],...])
+  └─ set_death_y(sceneMinY)                   ← 主线程场景包围盒 min.y（双端同值，无减量）
 ```
 
-## 2. 物理循环（`physics-loop.ts`）
+权威 Worker：收 `world-json`（同一导出数据）构建独立 PhysWorld（共享 auth-loop 驱动）。
+
+## 2. 渲染帧（主线程唯一物理渲染线，rAF 可变 dt 钳 0.1s）
 
 ```
-frame 信号（主线程每帧）
-  → takeInput（SAB 环形缓冲批量聚合）→ maskToKeys
-  → 鼠标增量 × 灵敏度（frameDx/frameDy，每帧一次）
-  → 固定步长累积器（1/tickRate，MAX_FIXED_STEPS=10）
-      └─ 每步 stepFixed(dt, frameDx, frameDy)：
-           physics 模式：Q/E 等效像素（yawBindSpeed·dt/M_YAW）并入 dx
-                         → phys.tick(dt, keysMask, dx, dy)（首步含鼠标增量）
-           noclip 模式：TS noclipStep（noclipView 自由飞行，不进入 Rust）
-  → writeFrame（输出 seqlock）
-  → onAfterPhysics（事件/游戏状态/stats）
+每 rAF：
+  → shared.addInput(pendingDx, pendingDy, pendingKeys)   （SAB 输入槽，权威同源）
+  → calibrator.correctFromAuthority()                      （读权威帧 V_A，三条件兜底+冷却+回滚）
+  → calibrator.calibrateVelocity(now)                      （set_velocity(vel_A + a×Δt)，只动速度）
+  → predPhys.tick(dt, keys, dx, dy)                        （完整物理：碰撞/传送/死亡）
+  → take_event 消费（传送/死亡 → 计时挑战）
+  → state() 直读渲染（相机 = pos + eyeHeight，度→弧度）
 ```
 
-**输入键位掩码**（与共享层 `apply_input` 一致）：forward=1/back=2/left=4/right=8/jump=16/duck=32/sprint(walk)=64/reset=128/wheelJump=256/yawLeft=512/yawRight=1024（wheelJump 并入 jump）。
+共享实现：`AuthorityCalibrator`（`src/ts-shared/phys/authority-calibrator.ts`）。
 
-**noclip**：TS 侧 noclipView（位置/视角权威源），切回 physics 时 `phys.set_state(noclipView 位置/视角, 速度清零)`。
-
-## 3. 共享内存（`shared-state.ts`）
-
-见 `docs/timing-debug.md` §2（输入环形缓冲 SPSC + 输出 seqlock）；`MsgState`（postMessage）为无 SAB 环境的功能等价回退。
-
-## 4. 物理事件（`take_event`）
-
-Rust `tick` 内部触发传送/死亡时记录事件，TS 每帧消费：
-- `teleport` → `GameState.onTeleport`（记录检查点 / 终点完成）
-- `death` → `GameState.onDeath` + 检查点回退（`getRespawnPos` → `phys.teleport_to`）
-
-## 5. 面板参数链路（`src/physics/`）
+## 3. 权威帧（Worker，共享 auth-loop）
 
 ```
-面板 set-physics-param / reset-physics-param / set-hull / reset-hull 消息
-  → PhysicsParams（physics-params.ts）
-      ├─ PARAM_TO_RUST 映射 → set_params(snake_case JSON patch)
-      ├─ set_hull(halfWidth, standHeight, duckHeight)
-      └─ tickRate → onTickRateChange → physicsLoop.setTickRate（固定步长）
-  → physics-snapshot 回传面板（值 + 来源 mode-default/manual/map）
+setTimeout 4ms 自驱；固定步长累积器无封顶（guard<64）
+  → exchange 消耗输入（maxStep 防穿墙，随步长缩放）
+  → PhysWorld.tick（独立权威演化，含地图碰撞）
+  → 碰撞事件检测（落地上升沿 / 撞墙速度骤降+位移受阻）
+  → 写权威全状态双缓冲 + V_A++
+  → phys-event（land/blocked）低频回传
+```
+
+共享实现：`createAuthLoop` / `createWorkerDispatch`（`src/ts-shared/auth/`）。
+
+## 4. 校准与兜底
+
+| 机制 | 规则 |
+|---|---|
+| 每帧校准 | `set_velocity(vel_A + a×Δt)`（权威速度 + 两帧加速度差外推，clamp±20000）；位置/角度不覆盖 |
+| 碰撞事件 | `phys-event` → 渲染位置与权威差 <60 → `set_state` 微调（含角度） |
+| 位置突变 | respawn/teleport/teleport-to-pos：双端同执行 + `resetTo`（清校准状态，防"权威帧拉回"） |
+| 兜底同步反转 | 渲染主线 → 权威：三条件 OR（dist>500 / dist>300 且 yaw 差≤3° 同向 / dist≤300 且 yaw 差>45°）；250ms 冷却；在途再分叉回滚以权威为准。通道 `sync-render-state`（Worker `set_state` + resetInput） |
+| 角度隔离 | 权威帧不影响渲染角度（输入层化后双端同源 → 天然一致） |
+
+## 5. 输入链路（共享 input-layer）
+
+- 灵敏度：主线程 mousemove 乘入角度增量（`layerMouseDelta`，CLAMP 1000），物理两端 `sensitivity` 固定 1。
+- Q/E：`qeEquivalentDx`（`yawBindSpeed/M_YAW × dt` 等效像素，不受灵敏度影响）。
+- 双端同源：同一份已层化输入喂 SAB（权威）与主线程物理缓冲。
+- 未锁定强制 mask=0；滚轮跳锁定门控；退锁/失焦清双端输入。
+
+## 6. 面板参数链路（debug 特有）
+
+```
+面板 set-physics-param / set-hull / reset 消息
+  → 权威 Worker（physics-worker.ts PhysicsParams → set_params / set_hull）
+  → physics-snapshot 回传 → 主线程镜像 predPhys（PARAM_TO_RUST 映射，双端同参）
+  → tickRate：面板变更 → 权威 Worker fixedDt（共享 worker-dispatch config 处理）；
+    渲染线为 rAF 可变 dt，无需步长
 ```
 
 参数定义（`param-defs.ts`）：maxSpeed/walkSpeed/crouchSpeed/airAccelerate/gravity/accelerate/friction/stopSpeed/jumpHeight/autobhop/bhopSpeedClamp/noPrestrafe/tickRate（13 项，与 Rust PhysParams 对应子集）。
 
-## 6. 物理模式切换
+## 7. noclip
 
-- `set-physics-mode`（noclip ↔ physics）：`physicsLoop.setPhysicsMode` 双向继承位置/视角（noclip→physics 经 set_state 清零速度；physics→noclip 从 Rust state 快照）。
-- 传送/重生：`teleport_to_spawn(idx)` / `teleport_to(x,y,z,yaw)` / `respawn()`——noclip 模式同步 noclipView。
+- 面板切换 → `config { physics: { mode } }` 消息双端 → Rust `set_noclip`（noclip_step 无碰撞纯移动，`noclipSpeed` 默认 800，sprint ×4）。
+- 位置/视角继承在 Rust 内部（无 TS 双视图）。

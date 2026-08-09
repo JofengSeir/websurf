@@ -17,7 +17,7 @@ import type { PhysWorld } from '../../pkg/websurf_wasm.js';
 const DEFAULT_HULL = { halfWidth: 16, standHeight: 72, duckHeight: 54 };
 
 /** 面板参数名 → Rust set_params snake_case 字段名。 */
-const PARAM_TO_RUST: Record<string, string> = {
+export const PARAM_TO_RUST: Record<string, string> = {
   maxSpeed: 'run_speed',
   walkSpeed: 'walk_speed',
   crouchSpeed: 'crouch_speed',
@@ -68,6 +68,13 @@ export class PhysicsParams {
       phys.set_params(JSON.stringify(patch));
     }
     phys.set_hull(this.hull.halfWidth, this.hull.standHeight, this.hull.duckHeight);
+    // tickRate 覆盖（JS 驱动层参数，不进 Rust）：重新触发固定步长回调——
+    // world-json 构建后会按 config.physics.tickRate 重置 fixedDt，此处让
+    // 面板在进入地图前已调好的 tickRate 覆盖优先（防"面板显示 128 实际跑 64"）
+    const tickRate = this.overrides.get('tickRate');
+    if (tickRate) {
+      this.onTickRateChange?.(tickRate.value as number);
+    }
   }
 
   /** 手动设置参数（来源 = manual）。 */

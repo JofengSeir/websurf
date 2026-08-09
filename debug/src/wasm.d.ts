@@ -24,8 +24,6 @@ declare module '*/pkg/websurf_wasm.js' {
     export_glb(): Uint8Array;
     /** 自动从 BSP PAKFILE lump 提取模型并合并进地图 GLB（消费内部 Bsp 实例） */
     export_glb_with_pakfile_models(): Uint8Array;
-    /** 导出 PAKFILE 内嵌模型的碰撞体 JSON（消费前调用；与 brush JSON 同构） */
-    export_model_colliders(): string;
     /** 导出 PAKFILE 内嵌模型的「可视网格」三角形碰撞 JSON（零转化，与 GLB 显示逐位一致；消费前调用） */
     export_model_tri_colliders(): string;
     /** 导出 PAKFILE 内嵌模型的「自带物理碰撞体」(.phy) 凸包三角形 JSON（引擎实际碰撞；消费前调用） */

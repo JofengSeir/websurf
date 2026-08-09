@@ -160,8 +160,9 @@ impl TeleportManager {
     ///   "传送区域内落地后才触发"（后者是 start-touch-grounded 的停留语义，
     ///   会导致与斜面重合/位置相差不大的 trigger 不触发——玩家可能从区域
     ///   内部起飞再落地，StartTouch 无边沿可走）
-    /// 探测点收窄到脚底 2 单位（TRIGGER_PROBES [0,2]）：只有脚底真正贴合
-    /// trigger 才算 inside——高处/trigger 上方不误置 inside。
+    /// 探测点为脚底上下多点（TRIGGER_PROBES）：身体下部穿过 trigger 即 inside——
+    /// 覆盖斜面薄片 trigger（顶面高于脚底 0~24）与下沉 trigger（顶面低于脚底 24）。
+    /// 上探止于小腿高度，高处/trigger 上方不误置 inside。
     pub fn check(&mut self, pos: &V3, ground_ticks: u32, _gate_ticks: u32, dt: f64, predict: bool) -> Option<TeleportDestination> {
         if predict {
             return None;
@@ -241,12 +242,14 @@ impl TeleportManager {
     }
 }
 
-/// trigger 探测深度列表（units）：**脚底 24 单位**（用户定调 2026-08-08）——
-/// 覆盖与斜面重合/薄片 trigger 场景（trigger 顶面可能低于脚底 2~24 单位）。
-/// 0 点即 origin/脚底，24 点给深度容差。
-/// 注：StartTouch inside 判定加深后，高处/trigger 上方可能误置 inside——
-/// 但落地脚底检测 B（落地边沿 + 脚底探测）兜底触发，不会漏。
-const TRIGGER_PROBES: [f64; 2] = [0.0, 24.0];
+/// trigger 探测深度列表（units，脚底 0 点 + 上下扩展，覆盖两类薄片场景）：
+/// - 脚底**上方** 2/4/8/16/24：斜面上的薄 trigger 顶面可能比脚底高 0~24 单位
+///   （trigger 底面与斜面几乎共面时，脚底 0 点受浮点/法线方向影响可能落在
+///   底面外侧而 miss；身体下部探测点仍在 trigger 体积内 → 站立即触发）
+/// - 脚底**下方** 2/24：trigger 顶面可能低于脚底 2~24 单位（与斜面重合/下沉）
+/// 任一深度点在 trigger 内即视为 inside（覆盖滑行 gap 与薄片 trigger）。
+/// 上探仅到小腿高度（24），不会因高处/trigger 上方跳跃误置 inside。
+const TRIGGER_PROBES: [f64; 7] = [-2.0, 0.0, 2.0, 4.0, 8.0, 16.0, 24.0];
 
 /// 多点探测：任一深度点在 trigger 内即视为 inside（覆盖滑行 gap 与薄片 trigger）。
 fn probe_inside(pos: &V3, t: &TeleportTrigger) -> bool {

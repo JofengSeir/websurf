@@ -8,7 +8,7 @@
  */
 
 import type { KeyState } from '../worker/worker-types.js';
-import { KEY_MASK } from '../worker/shared-state.js';
+import { keysToMask } from '../../../src/ts-shared/auth/shared-state.js';
 import type { BindableAction } from './keymap.js';
 
 /** 从 action→code[] 键位表构建 code→action 反查表。 */
@@ -101,22 +101,9 @@ export class KeyboardInput {
     return { ...this.state };
   }
 
-  /** 返回当前按键位掩码（共享内存输入区写入用）。 */
+  /** 返回当前按键位掩码（共享内存输入区写入用；实现收敛到 ts-shared keysToMask）。 */
   getMask(): number {
-    const s = this.state;
-    let m = 0;
-    if (s.forward) m |= KEY_MASK.forward;
-    if (s.backward) m |= KEY_MASK.backward;
-    if (s.left) m |= KEY_MASK.left;
-    if (s.right) m |= KEY_MASK.right;
-    if (s.jump) m |= KEY_MASK.jump;
-    if (s.duck) m |= KEY_MASK.duck;
-    if (s.sprint) m |= KEY_MASK.sprint;
-    if (s.reset) m |= KEY_MASK.reset;
-    if (s.wheelJump) m |= KEY_MASK.wheelJump;
-    if (s.yawLeft) m |= KEY_MASK.yawLeft;
-    if (s.yawRight) m |= KEY_MASK.yawRight;
-    return m;
+    return keysToMask(this.state);
   }
 
   /** 清空所有按键状态（Pointer Lock 退出时调用）。 */
