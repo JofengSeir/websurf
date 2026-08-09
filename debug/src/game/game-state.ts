@@ -66,21 +66,12 @@ export class GameState {
 	private finishTimeMs = 0;
 	private deaths = 0;
 	private justDied = false;
-	private checkpoints: Checkpoint[] = [];
 
-	/** 死亡 Y 阈值（场景 min.y - 1000 HU，由 setDeathThreshold 设置）。 */
-	private deathYThreshold = -Infinity;
+	/** 检查点列表（teleport 事件消费记录）。 */
+	private checkpoints: Checkpoint[] = [];
 
 	/** 初始 spawn（用于无检查点时回退）。 */
 	private initialSpawn: { pos: Vec3; yaw: number } | null = null;
-
-	/**
-	 * 设置死亡 Y 阈值（场景包围盒 min.y - 1000 HU）。
-	 * 由 physics-worker 在场景构建完成后调用。
-	 */
-	setDeathThreshold(sceneMinY: number): void {
-		this.deathYThreshold = sceneMinY - 1000;
-	}
 
 	/** 设置初始 spawn（无检查点时回退）。 */
 	setInitialSpawn(pos: Vec3, yaw: number): void {
@@ -161,32 +152,6 @@ export class GameState {
 			});
 		}
 		return false;
-	}
-
-	/**
-	 * 死亡检测：玩家 Y < 阈值时触发。
-	 *
-	 * @returns 若死亡返回检查点位置（用于回退），否则 null。
-	 */
-	checkDeath(pos: Vec3): { pos: Vec3; yaw: number } | null {
-		if (this.phase !== 'running') return null;
-		if (pos.y >= this.deathYThreshold) return null;
-
-		// 死亡
-		this.deaths++;
-		this.justDied = true;
-
-		// 回退到最后检查点（或初始 spawn）
-		const cp = this.checkpoints.length > 0
-			? this.checkpoints[this.checkpoints.length - 1]
-			: null;
-		if (cp) {
-			return { pos: cp.pos, yaw: cp.yaw };
-		}
-		if (this.initialSpawn) {
-			return { pos: this.initialSpawn.pos, yaw: this.initialSpawn.yaw };
-		}
-		return null;
 	}
 
 	/**

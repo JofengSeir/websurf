@@ -1,59 +1,34 @@
 /**
  * 主线程 → Worker 消息桥接。
  *
- * 输入通道重构（共享内存架构）：
- * - 共享内存模式：鼠标增量/按键写入 SharedState（SharedArrayBuffer + Atomics），
- *   每帧仅发轻量 `frame` 信号（携带主线程时间戳）。
- * - 回退模式：SharedState 内部走 postMessage（MsgStateMain）。
- * 其余低频控制（config/resize/teleport/物理面板等）保持 postMessage。
+ * 阶段 2（权威帧计算器模式）：
+ * - 输入不再经本桥：鼠标/按键增量由 renderer tick 统一写 SAB 输入槽
+ *   （shared.addInput；MsgState 回退自动转 postMessage input 消息）。
+ * - 其余低频控制（config/teleport/物理面板等）保持 postMessage。
  */
 import type { RuntimeConfig } from '../config.js';
-import type { FrameSnapshot } from '../worker/worker-types.js';
-import type { SharedState } from '../worker/shared-state.js';
 
 export class InputBridge {
-  constructor(
-    private readonly worker: Worker,
-    private readonly shared: SharedState,
-  ) {}
+  constructor(private readonly worker: Worker) {}
 
   /** 发送 init：共享内存（可 null）+ 画布尺寸（渲染在主线程）。 */
   sendInit(shared: SharedArrayBuffer | null, width: number, height: number, dpr: number): void {
     this.worker.postMessage({ type: 'init', shared, width, height, dpr });
   }
 
-  /** 发送 BSP 原始字节（Worker 内解析；transfer 后主线程 data 被 detach）。 */
-  sendLoadBsp(name: string, data: ArrayBuffer): void {
-    this.worker.postMessage({ type: 'load-bsp', name, data }, [data]);
+  /** 世界数据（主线程解析 BSP 后下发；Worker 构建权威 PhysWorld）。 */
+  sendWorldJson(world: {
+    brushJson: string;
+    triJson: string;
+    teleportJson: string;
+    spawn: { x: number; y: number; z: number; yawDeg: number };
+  }): void {
+    this.worker.postMessage({ type: 'world-json', ...world });
   }
 
-  // ── 输入通道（共享内存 / 回退）────────────────────────────
-
-  /** 写入鼠标增量 + 按键位掩码（阶段一：极速输入）。 */
-  setInput(dx: number, dy: number, keysMask: number): void {
-    this.shared.setInput(dx, dy, keysMask);
-  }
-
-  /** 仅更新按键位掩码。 */
-  setKeys(keysMask: number): void {
-    this.shared.setKeys(keysMask);
-  }
-
-  /** 每帧发送 frame 触发信号（无数据负载；dt 由 Worker 侧 performance.now() 计算）。 */
-  sendFrame(): void {
-    this.worker.postMessage({ type: 'frame' });
-  }
-
-  /** 安全读取物理快照（安全检查 + LERP 插值）。 */
-  readFrame(): FrameSnapshot | null {
-    return this.shared.readFrame();
-  }
-
-  /** 回退模式：缓存 Worker 回传的物理帧。 */
-  setCachedFrame(frame: FrameSnapshot): void {
-    if ('setCachedFrame' in this.shared) {
-      (this.shared as { setCachedFrame(f: FrameSnapshot): void }).setCachedFrame(frame);
-    }
+  /** 设置出生点列表（[[x,y,z,yaw], ...]，spawn 下拉切换用）。 */
+  sendSetSpawnPoints(list: Array<[number, number, number, number]>): void {
+    this.worker.postMessage({ type: 'set-spawn-points', json: JSON.stringify(list) });
   }
 
   // ── 低频控制消息 ──────────────────────────────────────────
@@ -66,12 +41,7 @@ export class InputBridge {
     this.worker.postMessage({ type: 'config', section, patch });
   }
 
-  /** 发送窗口尺寸变化（Worker 物理无需尺寸，协议兼容）。 */
-  sendResize(width: number, height: number): void {
-    this.worker.postMessage({ type: 'resize', width, height });
-  }
-
-  /** 发送重生请求。 */
+  /** 发送重生请求（纯 Rust 重生；检查点回退由主线程 teleport-to-pos 完成）。 */
   sendRespawn(): void {
     this.worker.postMessage({ type: 'respawn' });
   }
@@ -81,19 +51,9 @@ export class InputBridge {
     this.worker.postMessage({ type: 'teleport', target });
   }
 
-  /** 传送到任意自定义坐标（自定义传送点面板）。yaw 缺省 = 保持当前朝向。 */
+  /** 传送到任意自定义坐标（自定义传送点面板/检查点回退）。yaw 缺省 = 保持当前朝向。 */
   sendTeleportToPos(pos: [number, number, number], yaw?: number): void {
     this.worker.postMessage({ type: 'teleport-to-pos', pos, yaw });
-  }
-
-  /** 请求玩家当前位置（Worker 回传 player-pos）。 */
-  sendGetPlayerPos(): void {
-    this.worker.postMessage({ type: 'get-player-pos' });
-  }
-
-  /** 设置物理模式。 */
-  sendSetPhysicsMode(mode: 'noclip' | 'physics'): void {
-    this.worker.postMessage({ type: 'set-physics-mode', mode });
   }
 
   /** 设置物理参数（物理控制面板）。 */
@@ -121,7 +81,7 @@ export class InputBridge {
     this.worker.postMessage({ type: 'set-auto-restore-hull', enabled });
   }
 
-  /** 设置视距剔除距离。 */
+  /** 设置视距剔除距离（Worker 无剔除职责，协议兼容保留）。 */
   sendSetCullDistance(value: number): void {
     this.worker.postMessage({ type: 'set-cull-distance', value });
   }

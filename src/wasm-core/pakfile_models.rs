@@ -1,13 +1,12 @@
-//! PAKFILE 内嵌模型的**材质解析**与**碰撞体生成**。
+//! PAKFILE 内嵌模型的**材质解析**与**碰撞体数据准备**。
 //!
 //! Source BSP 会把地图用到的 `.mdl/.vvd/.vtx/.vmt/.vtf` 打进 PAKFILE lump。
 //! 本模块在**无外部游戏资源**前提下，仅凭 BSP 字节完成两件事：
 //!
 //! 1. **材质**：解析 `.vmt`（Source KeyValues 文本）取 `$basetexture` 与透明度标注，
 //!    再找对应 `.vtf` 解码成 PNG，交给 `model-integrator` 贴到 GLB 材质上。
-//! 2. **碰撞体**：把模型的**可见三角网格**逐三角挤出成薄壳 brush（每个三角一个 brush，
-//!    输出与 [`crate::BspProcessor::export_brushes_planes`] 同构的 `WasmBrush[]`，
-//!    碰撞体与显示几何**逐面一致**（用户要求：「碰撞体积需要与模型显示的一致」）。
+//! 2. **碰撞体数据**：为模型碰撞导出提供顶点/网格/透明度门控数据（三角碰撞与
+//!    .phy 凸包碰撞由各工程 `BspProcessor::export_model_*_colliders` 消费）。
 //!
 //! ## 透明度的「内置标注」在哪
 //!

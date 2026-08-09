@@ -53,45 +53,44 @@
 
     /* ── 准星（风格化：CSS 变量驱动，面板可调）──────────── */
     #crosshair {
-      position: absolute; left: 50%; top: 50%; z-index: 4;
+      position: absolute; left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
       --ch-color: #4ade80;
       --ch-size: 6px;
       --ch-thickness: 2px;
       --ch-gap: 4px;
       pointer-events: none;
+      z-index: 4;
     }
     #crosshair.hidden { display: none; }
     #crosshair .ch-line {
       position: absolute;
+      left: 50%; top: 50%;
       background: var(--ch-color);
     }
     #crosshair .ch-line.outline {
       box-shadow: 0 0 0 1px rgba(0,0,0,0.85);
     }
+    /* 四条线均以容器中心为锚点 + translate 精确对称（容器 0×0，50% 即中心） */
     #crosshair .ch-t {
-      left: 50%; bottom: calc(50% + var(--ch-gap));
       width: var(--ch-thickness); height: var(--ch-size);
-      margin-left: calc(var(--ch-thickness) / -2);
+      transform: translate(-50%, calc(-100% - var(--ch-gap)));
     }
     #crosshair .ch-b {
-      left: 50%; top: calc(50% + var(--ch-gap));
       width: var(--ch-thickness); height: var(--ch-size);
-      margin-left: calc(var(--ch-thickness) / -2);
+      transform: translate(-50%, var(--ch-gap));
     }
     #crosshair .ch-l {
-      top: 50%; right: calc(50% + var(--ch-gap));
       height: var(--ch-thickness); width: var(--ch-size);
-      margin-top: calc(var(--ch-thickness) / -2);
+      transform: translate(calc(-100% - var(--ch-gap)), -50%);
     }
     #crosshair .ch-r {
-      top: 50%; left: calc(50% + var(--ch-gap));
       height: var(--ch-thickness); width: var(--ch-size);
-      margin-top: calc(var(--ch-thickness) / -2);
+      transform: translate(var(--ch-gap), -50%);
     }
     #crosshair .ch-dot {
-      position: absolute; left: 50%; top: 50%;
       width: calc(var(--ch-thickness) * 2.5); height: calc(var(--ch-thickness) * 2.5);
-      margin: calc(var(--ch-thickness) * -1.25) 0 0 calc(var(--ch-thickness) * -1.25);
+      transform: translate(-50%, -50%);
       background: var(--ch-color); border-radius: 50%;
       box-shadow: 0 0 0 1px rgba(0,0,0,0.85);
     }

@@ -17,7 +17,9 @@ import { KeyboardInput } from './input/keyboard.js';
 import { loadKeymap, type BindableAction } from './input/keymap.js';
 import { MouseBuffer } from './input/mouse-buffer.js';
 import { PointerLockController } from './input/pointer-lock.js';
-import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from './worker/shared-state.js';
+import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../src/ts-shared/auth/shared-state.js';
+import { layerMouseDelta, qeEquivalentDx } from '../../src/ts-shared/input/input-layer.js';
+import { buildWorldBundle } from '../../src/ts-shared/phys/world-builder.js';
 import { RendererMain } from './renderer/renderer-main.js';
 import { PanelController } from './panel/panel-controller.js';
 
@@ -156,10 +158,7 @@ function bindInput(): void {
     const mask = keyboard.getMask();
     // 灵敏度输入层应用：物理两端 sensitivity 固定 1，这里乘入角度增量后统一分发
     // （改灵敏度只改这个系数，双端物理用同一份已缩放输入 → 角度永不因灵敏度分叉）
-    const sens = config.input.sensitivity;
-    const CLAMP = 1000; // 与 MouseBuffer 一致的增量上限（乘灵敏度后可能超限，重新钳制）
-    const dx = Math.max(-CLAMP, Math.min(CLAMP, r.dx * sens));
-    const dy = Math.max(-CLAMP, Math.min(CLAMP, r.dy * sens));
+    const { dx, dy } = layerMouseDelta(r.dx, r.dy, config.input.sensitivity);
     renderer?.feedInput(dx, dy, mask); // 主线程渲染物理输入（RendererMain.tick 同写 SAB 权威端）
   });
 
@@ -296,15 +295,10 @@ function startInputLoop(): void {
     // 与真实鼠标同一输入通道（feedInput + SAB 累积，双端消费同源输入 →
     // 角度天然一致，无 Q/E 分叉）；旋转速度恒 = yawBindSpeed（固定角速度，
     // **不受灵敏度影响**——qeDx 不乘 sensitivity，物理两端 sensitivity 固定 1）
-    const M_YAW = 0.022; // 与 Rust player.rs M_YAW 一致（度/像素）
     const dtF = lastQeMs === 0 ? 1 / 144 : Math.min((now - lastQeMs) / 1000, 0.1);
     lastQeMs = now;
-    let qeDx = 0;
-    if (maskWithWheel & KEY_MASK.yawLeft) qeDx -= (config.input.yawBindSpeed / M_YAW) * dtF;
-    if (maskWithWheel & KEY_MASK.yawRight) qeDx += (config.input.yawBindSpeed / M_YAW) * dtF;
-    if (qeDx !== 0) {
-      qeDx = Math.max(-1000, Math.min(1000, qeDx)); // 上限防异常（yawBind 720 时单帧仅 ~227px，不触发）
-    }
+    const qe = qeEquivalentDx(config.input.yawBindSpeed, dtF);
+    const qeDx = (maskWithWheel & KEY_MASK.yawRight ? qe : 0) - (maskWithWheel & KEY_MASK.yawLeft ? qe : 0);
     renderer?.feedInput(qeDx, 0, maskWithWheel); // 主线程物理按键 + Q/E 等效鼠标量
     // 速度面板 8Hz（0.125s）
     if (now - speedUpdateAt >= 125) {
@@ -335,6 +329,8 @@ function updateSpeedHud(): void {
 /**
  * 主线程加载 BSP（唯一物理线：解析 + 渲染 + 构建物理世界全部在主线程）。
  * Worker 已不参与地图加载/解析。
+ * 公共化：BspProcessor 导出管线收敛到 ts-shared buildWorldBundle（colliderSource
+ * auto + 默认纹理包回退 + GLB 导出 + 出生点解析全部共享）。
  */
 async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void> {
   if (!renderer) {
@@ -349,152 +345,58 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   setStatus(`正在加载 ${fileName}（主线程解析 BSP）...`, '');
   await new Promise((r) => setTimeout(r, 0)); // 让 UI 先更新（解析可能耗时）
   try {
-    const proc = new BspProcessor(new Uint8Array(bytes));
-    const meta = JSON.parse(proc.metadata()) as {
-      map_name: string; num_faces: number; num_vertices: number;
-      num_brushes: number; num_models: number;
-    };
-
-    // 导出顺序：借用方法（brush/tri/spawn/teleport/pvs）先于消费 BSP 的 export_glb
-    const brushJson = proc.export_brushes_planes(
-      JSON.stringify({
-        include_ladder: true,
-        include_solid: true,
-        min_brush_volume: 0,
-        skip_sky: true,
-        skip_nodraw: false,
-      }),
-    );
-    let triJson: string;
-    try {
-      triJson = proc.export_model_phy_colliders();
-      if ((JSON.parse(triJson) as unknown[]).length === 0) {
-        triJson = proc.export_model_tri_colliders();
-      }
-    } catch {
-      try {
-        triJson = proc.export_model_tri_colliders();
-      } catch {
-        triJson = '[]';
-      }
-    }
-    const spawnJson = proc.parse_spawn_points();
-    const teleportJson = proc.parse_teleports();
-    const pvsJson = proc.parse_pvs_data();
-
-    // spawn 解析（primary 出生点 + 全部列表）
-    const spawnData = JSON.parse(spawnJson) as {
-      spawn_points: Array<{ classname: string; origin: number[]; angles: number[] }>;
-      primary?: number;
-    };
-    const spawnPoints = spawnData.spawn_points ?? [];
-    const primaryIdx = (spawnData.primary ?? 0) >= 0 ? (spawnData.primary ?? 0) : 0;
-    const primary = spawnPoints[primaryIdx] ?? spawnPoints[0];
-    const bspYawToCsYaw = (yaw: number): number => ((270 - yaw) % 360 + 360) % 360;
-    const spawn = primary
-      ? {
-          x: primary.origin[0], y: primary.origin[1], z: primary.origin[2],
-          yawDeg: bspYawToCsYaw(primary.angles[1]),
-        }
-      : { x: 0, y: 100, z: 0, yawDeg: 0 };
-
-    // GLB（消费 BSP，最后调用；mosaic manifest 必须在消费前生成）
-    let mosaicManifest: string | undefined;
-    try {
-      mosaicManifest = proc.export_mosaic_manifest();
-    } catch (e) {
-      console.warn('[app] mosaic manifest 生成失败（画质切换不可用）:', e);
-    }
-    // 缺失纹理回退数据源：默认纹理包（与地图纹理处理同一时序节点加载；
-    // GLB 导出时直接在 Rust 侧把缺失材质替换为低清纹理——渲染端零后期处理）
-    let defaultsJson = '{}';
-    try {
-      const embeddedMtz = (globalThis as { __VBSP_TEXTURES_MTZ_B64__?: string })
-        .__VBSP_TEXTURES_MTZ_B64__;
-      if (embeddedMtz) {
-        // single 打包（file://）：内嵌 base64
-        const bin = atob(embeddedMtz);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        defaultsJson = decompress_mtz(bytes);
-        console.log('[app] 默认纹理包已加载（内嵌，缺失纹理回退可用）');
-      } else {
-        const resp = await fetch('./textures.mtz');
-        if (resp.ok) {
-          const bytes = new Uint8Array(await resp.arrayBuffer());
-          defaultsJson = decompress_mtz(bytes);
-          console.log('[app] 默认纹理包已加载（缺失纹理回退可用）');
-        }
-      }
-    } catch (e) {
-      console.warn('[app] 默认纹理包加载失败（缺失纹理保持占位色）:', e);
-    }
-    let glbBytes: Uint8Array;
-    try {
-      glbBytes = proc.export_glb_with_pakfile_models_with_defaults(defaultsJson);
-    } catch (e) {
-      console.warn('[app] 带默认纹理回退的 GLB 导出失败，回退无回退导出:', e);
-      glbBytes = proc.export_glb_with_pakfile_models();
-    }
-    const glbBuffer = glbBytes.buffer.slice(
-      glbBytes.byteOffset,
-      glbBytes.byteOffset + glbBytes.byteLength,
-    );
+    const bundle = await buildWorldBundle(new BspProcessor(new Uint8Array(bytes)), {
+      decompressMtz: decompress_mtz,
+    });
 
     // 渲染场景（GLB + PVS + spawn）
     await renderer.loadScene({
       type: 'scene-data',
-      glb: glbBuffer,
-      spawnJson,
-      pvsJson,
-      mosaicManifest,
-      metadata: {
-        mapName: meta.map_name,
-        numFaces: meta.num_faces,
-        numVertices: meta.num_vertices,
-        numBrushes: meta.num_brushes,
-        numModels: meta.num_models,
-      },
-      spawn,
-      glbSizeKb: Math.round(glbBuffer.byteLength / 1024),
-      numSpawnPoints: spawnPoints.length,
-      hasPvs: pvsJson.length > 2,
+      glb: bundle.glbBytes,
+      spawnJson: bundle.spawnJson,
+      pvsJson: bundle.pvsJson,
+      mosaicManifest: bundle.mosaicManifest,
+      metadata: bundle.metadata,
+      spawn: bundle.spawn,
+      glbSizeKb: Math.round(bundle.glbBytes.byteLength / 1024),
+      numSpawnPoints: bundle.spawnList.length,
+      hasPvs: bundle.pvsJson.length > 2,
     });
 
     // 主线程物理世界（渲染线）
     renderer.buildPredictionWorld({
-      brushJson,
-      triJson: triJson ?? '[]',
-      teleportJson,
-      spawn,
+      brushJson: bundle.brushJson,
+      triJson: bundle.triJson,
+      teleportJson: bundle.teleportJson,
+      spawn: bundle.spawn,
     });
-    // Worker 权威物理世界（地图碰撞；独立 64Hz 权威帧计算）
+    // Worker 权威物理世界（地图碰撞；独立固定步长权威帧计算）
     fixWorker?.postMessage({
       type: 'world-json',
-      brushJson,
-      triJson: triJson ?? '[]',
-      teleportJson,
-      spawn,
+      brushJson: bundle.brushJson,
+      triJson: bundle.triJson,
+      teleportJson: bundle.teleportJson,
+      spawn: bundle.spawn,
     });
     // 出生点列表（spawn 下拉切换用）：主线程渲染物理 + Worker 权威物理**双端**
     // 都要设置——否则权威侧 teleport_to_spawn 索引为空静默忽略，权威帧
     // >200 兜底会把传送点拉回（"一瞬间传送过去又被拉回"根因）
-    const spawnList: Array<[number, number, number, number]> = spawnPoints.map((sp) => [
-      sp.origin[0], sp.origin[1], sp.origin[2], bspYawToCsYaw(sp.angles[1]),
-    ]);
-    renderer.setSpawnPoints(spawnList);
-    fixWorker?.postMessage({ type: 'set-spawn-points', json: JSON.stringify(spawnList) });
+    renderer.setSpawnPoints(bundle.spawnList);
+    fixWorker?.postMessage({ type: 'set-spawn-points', json: JSON.stringify(bundle.spawnList) });
     // 双端参数同步（Worker 权威 + 主线程渲染物理；含灵敏度，防操作分叉）
     syncFullConfig();
 
     sceneReady = true;
     setStatus(
-      `场景已加载（GLB ${Math.round(glbBuffer.byteLength / 1024)} KB，${meta.num_brushes} brushes，` +
-        `${spawnPoints.length} 出生点）`,
+      `场景已加载（GLB ${Math.round(bundle.glbBytes.byteLength / 1024)} KB，${bundle.metadata.numBrushes} brushes，` +
+        `${bundle.spawnList.length} 出生点）`,
       'success',
     );
     // 出生点下拉
     if (dom.spawnSelect) {
+      const spawnPoints = (JSON.parse(bundle.spawnJson) as {
+        spawn_points?: Array<{ classname: string; origin: number[] }>;
+      }).spawn_points ?? [];
       dom.spawnSelect.innerHTML = spawnPoints
         .map(
           (sp, i) =>

@@ -1,8 +1,8 @@
 /**
- * WebSurf — 主线程渲染器（渲染从 Worker 搬回主线程）
- * 每帧安全读取物理快照（锁占用→复用缓存，锁释放→读取+seq 校验）、
- * LERP 插值（渲染/物理帧率解耦）、相机同步 → LOD/PVS 剔除 → 雾/碰撞箱可视化/准星射线 → Draw Call。
- * 场景数据由 Worker 一次性传输（GLB + 碰撞体/PVS/出生点/传送点 JSON），
+ * WebSurf — 主线程渲染器（阶段 1：主线程解析/物理接管，LERP 删除、渲染直读）
+ * 主线程 PhysWorld 每 rAF tick 推进（真实物理模拟 + 碰撞），state() 直读渲染——
+ * 相机同步 → LOD/PVS 剔除 → 雾/碰撞箱可视化/准星射线 → Draw Call。
+ * 场景数据由主线程（app.ts handleLoadBsp）解析后本地传入（GLB + 碰撞体/PVS/出生点/传送点 JSON），
  * 本类承担 GLTFLoader 建场景及 LOD/PVS/雾/碰撞箱/准星/lightmap 等子管理器。
  */
 
@@ -11,9 +11,12 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
 import { ensureMainWasm, mosaic_decode } from '../main-wasm.js';
+// 主线程唯一物理线：PhysWorld 与 BspProcessor 同模块（main-wasm 已 initSync）
+import { PhysWorld } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
-import type { FrameSnapshot, PlaneInfo, SceneDataMessage } from '../worker/worker-types.js';
-import type { SharedState } from '../worker/shared-state.js';
+import type { PlaneInfo, SceneDataMessage } from '../worker/worker-types.js';
+import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
+import { AuthorityCalibrator } from '../../../src/ts-shared/phys/authority-calibrator.js';
 import type { Brush } from '../physics/physics/Collision/Collision.types.js';
 import { PvsManager } from '../world/pvs-manager.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
@@ -49,18 +52,6 @@ const CAMERA_NEAR_MIN = 0.05;
 const NEAR_PROBE_DIST_DEFAULT = 100;
 /** near 收缩系数默认值：near = 最近几何距离 × 此值。 */
 const NEAR_RATIO_DEFAULT = 0.3;
-/**
- * 外推插帧上限（秒）：物理快照过期（alpha>1）时用速度一阶外推填充中间渲染帧。
- * 上限约一个物理固定步（1/64s）——覆盖 64Hz 物理与高刷渲染之间的空窗，
- * 同时防止物理真卡时外推跑飞穿墙。
- */
-const EXTRAPOLATE_MAX_S = 1 / 64;
-/**
- * 外推插帧最低速度（unit/s）：横向（x/z）与竖向（y）速度**均**低于此值时不外推。
- * 起步拉地速阶段运动不可预测（加速/转向/起跳），外推会产生误导性位移；
- * 高速滑行阶段运动方向稳定，外推才可靠。
- */
-const EXTRAPOLATE_MIN_SPEED = 500;
 
 /** 剔除统计回调（主线程直接更新 UI）。 */
 export interface CullStatsLike {
@@ -75,6 +66,17 @@ export interface CullStatsLike {
     near: number;
     far: number;
   };
+}
+
+/** 主线程渲染物理事件（Rust take_event 消费：计时挑战检查点/死亡）。 */
+export interface RenderPhysEvent {
+  kind: string;
+  /** teleport 目标名。 */
+  targetname?: string;
+  /** teleport 目标位置（Y-up）。 */
+  origin?: number[];
+  /** teleport 目标 yaw（度）。 */
+  yaw?: number;
 }
 
 /** 主线程渲染器。 */
@@ -117,10 +119,26 @@ export class RendererMain {
   private rafId = 0;
   private running = false;
 
-  // ── LERP 插值状态 ─────────────────────────────────────────
-  private prevSnap: FrameSnapshot | null = null;
-  private curSnap: FrameSnapshot | null = null;
-  private lastSeq = -1;
+  // ── 主线程唯一物理线（阶段 1：LERP 删除、渲染直读 state()）──
+  /** 主线程 PhysWorld 实例（唯一物理渲染线：世界+碰撞+输入；每帧 tick 推进）。 */
+  private predPhys: PhysWorld | null = null;
+  /** 主线程物理就绪（buildPredictionWorld 完成）。 */
+  private predReady = false;
+  /** 待喂给物理实例的输入（app 事件回调累积）。 */
+  private pendingDx = 0;
+  private pendingDy = 0;
+  private pendingKeys = 0;
+  /** noclip 模式（Rust set_noclip，tick 走 noclip_step 无碰撞纯移动）。 */
+  private noclipActive = false;
+  /** 渲染帧推进（dt 上限防异常）。 */
+  private lastTickMs = 0;
+  /** 死亡阈值 Y（loadScene 回调记录；buildPredictionWorld 时应用）。 */
+  private deathY: number | null = null;
+
+  // ── 权威帧校准（阶段 2，公共化：AuthorityCalibrator 收敛到 ts-shared）──
+  /** 权威校准（correctFromAuthority 三条件 OR + 250ms 冷却 + syncInFlight 回滚、
+   * calibrateVelocity 外推、applyCollisionCorrection <60 微调、resetTo 归零）。 */
+  private readonly calibrator: AuthorityCalibrator;
 
   // ── 近平面自适应（防穿墙：不移动相机，动态收缩 near）────────
   private readonly _nearRaycaster = new THREE.Raycaster();
@@ -138,6 +156,21 @@ export class RendererMain {
   /** 场景加载完成回调（携带死亡阈值 Y 下限，主线程回传 Worker）。 */
   onSceneLoaded: ((deathThresholdY: number) => void) | null = null;
 
+  /**
+   * 渲染主线 → 权威同步回调（兜底触发时携带渲染主线帧完整状态；app.ts
+   * 注册后发 `sync-render-state` 消息给 Worker 权威物理，并清双端输入增量）。
+   */
+  onSyncRenderState: ((s: {
+    posX: number; posY: number; posZ: number;
+    yaw: number; pitch: number;
+    velX: number; velY: number; velZ: number;
+    onGround: boolean;
+    eyeHeight: number;
+  }) => void) | null = null;
+
+  /** 渲染物理事件回调（Rust take_event 消费：计时挑战检查点/死亡统计）。 */
+  onPhysEvent: ((ev: RenderPhysEvent) => void) | null = null;
+
   // ── 纹理画质切换（mosaic）──────────────────────────────────
   /** 画质 manifest：{ 纹理名(小写 basetexture): mosaic 字节码 }。 */
   private mosaicManifest: Record<string, string> | null = null;
@@ -148,6 +181,16 @@ export class RendererMain {
     private readonly shared: SharedState,
   ) {
     // config 在 init() 中赋值
+    this.calibrator = new AuthorityCalibrator({
+      readAuth: () => this.shared.readAuthoritative(),
+      getPhys: () => this.predPhys,
+      clearPendingInput: () => {
+        this.pendingDx = 0;
+        this.pendingDy = 0;
+        this.pendingKeys = 0;
+      },
+      onSyncRenderState: (s) => this.onSyncRenderState?.(s),
+    });
   }
 
   // ── 生命周期 ───────────────────────────────────────────────
@@ -155,6 +198,8 @@ export class RendererMain {
   /** 初始化渲染器/场景/相机与子管理器。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
+    // 阶段 1：SharedState 注入保留（后续阶段接 SAB 权威帧通道）；本阶段渲染直读本地物理，不再读其输出
+    console.log(`[renderer] 跨线程通道: ${this.shared.isShared ? 'SAB' : 'MsgState'}（阶段 1 渲染直读本地物理）`);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -179,6 +224,14 @@ export class RendererMain {
     this.colliderDebug.setDebugFlags(
       config.debug.showSolids,
       config.debug.showTriggers,
+      config.debug.triggerViewDistance,
+      config.debug.brushViewDistance,
+    );
+    this.colliderDebug.setTriDebugFlags(
+      config.debug.showPhy,
+      config.debug.showVis,
+      config.debug.phyViewDistance,
+      config.debug.visViewDistance,
     );
     this.planeInfoEnabled = config.debug.showPlaneInfo;
 
@@ -222,8 +275,17 @@ export class RendererMain {
     // 碰撞可视化清空（保留 group/scene 引用，新地图 rebuild 直接复用）
     this.colliderDebug.clearAll();
 
-    // 4. 插值缓存重置（避免跨地图 LERP 瞬移）+ 强制下一帧重绘
-    this.resetInterpolation();
+    // 4. 主线程物理渲染线状态清零（防跨地图残留输入）
+    this.predPhys = null;
+    this.predReady = false;
+    this.pendingDx = 0;
+    this.pendingDy = 0;
+    this.pendingKeys = 0;
+    this.noclipActive = false;
+    this.lastTickMs = 0;
+    this.deathY = null;
+    // 权威帧校准状态清零（防跨地图残留权威帧注入新地图）
+    this.calibrator.clear();
     this.needsRender = true;
   }
 
@@ -260,20 +322,19 @@ export class RendererMain {
     });
   }
 
-  /** 加载 Worker 传来的场景数据（GLB + PVS + 碰撞体 + 传送点）。 */
+  /** 加载场景数据（GLB + PVS + 碰撞体 + 传送点 + lightmap + 雾；主线程本地数据）。 */
   async loadScene(data: SceneDataMessage): Promise<{ diagonal: number; defaultCull: number; maxCull: number } | null> {
     if (!this.scene || !this.camera) return null;
-
-    // 0. 防御：加载前先卸载旧地图资源（正常流程 handleBspFile 已调用）
     this.disposeScene();
 
-    // 1. GLB → Scene（SceneBuilder 逻辑主线程版）
     const gltf = await this.loadGlb(data.glb);
     const scene = new THREE.Scene();
     gltf.scene.userData.isBspModel = true;
     this.resetRootRotations(gltf);
     scene.add(gltf.scene);
     this.collectMetadata(scene);
+
+    // lightmap（存在时应用；主线程 GLB 解析期生成）
     const atlasTexture = await loadLightmapAtlas(gltf.parser, gltf);
     if (atlasTexture) {
       applyLightmapToMeshes(scene, atlasTexture);
@@ -283,7 +344,7 @@ export class RendererMain {
     const size = boundingBox.getSize(new THREE.Vector3());
     const diagonal = size.length();
 
-    // 2. 移除旧模型（保留灯光）
+    // 移除旧 BSP 模型子树（disposeScene 已处理旧资源，此处摘除引用防叠加）
     for (let i = this.scene.children.length - 1; i >= 0; i--) {
       const child = this.scene.children[i];
       if (child.userData?.isBspModel) {
@@ -294,52 +355,49 @@ export class RendererMain {
     this.bspModelScene = scene;
     this.scene.add(scene);
 
-    // 3. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 updateNearPlane 收缩防穿墙）
     const maxDim = Math.max(size.x, size.y, size.z);
     this.defaultNear = Math.max(maxDim / 1000, CAMERA_NEAR_MIN);
     this.camera.near = this.defaultNear;
     this.camera.far = maxDim * 100;
     this.camera.updateProjectionMatrix();
 
-    // 4. LOD 注册 + PVS cluster 分配
+    // LOD/PVS 注册（主线程本地数据源）
     const diagInfo = this.lodManager.setup(scene, this.config);
     this.pvsManager = new PvsManager(data.pvsJson);
     this.lodManager.assignClusterIds(this.pvsManager);
 
-    // 5. 传送触发器（可视化 + 准星检测）
+    // 传送触发器（本地解析；碰撞箱可视化 + 准星射线）
     this.teleportManager = new TeleportManager(data.teleportJson);
     this.triggers = [...this.teleportManager.getTriggers()];
     this.colliderDebug.setTriggers(this.triggers);
-
-    // 5.5 模型「可视网格」三角形碰撞（零转化；调试可视化 + 准星检测）
     if (data.triJson) {
       this.colliderDebug.setTriMeshes(JSON.parse(data.triJson));
     }
 
-    // 5.6 纹理画质 manifest（mosaic 切换数据源）+ 按当前画质应用
-    // （缺失纹理回退已在 GLB 导出期完成——默认纹理包低清直接嵌入 GLB，渲染端零后期处理）
-    this.mosaicManifest = data.mosaicManifest ? (JSON.parse(data.mosaicManifest) as Record<string, string>) : null;
+    // 纹理画质 manifest + 按当前画质应用（mosaic 切换数据源）
+    this.mosaicManifest = data.mosaicManifest
+      ? (JSON.parse(data.mosaicManifest) as Record<string, string>)
+      : null;
     void this.applyTextureQuality(this.config.texture.quality);
 
-    // 6. 碰撞体（可视化 + 准星检测）
+    // 实体碰撞体（碰撞箱可视化 + 准星射线；主线程本地 adaptBrushes）
     const adaptResult = adaptBrushes(data.brushJson);
     this.colliders = [...adaptResult.solids, ...adaptResult.ladders];
     this.solids = adaptResult.solids;
     this.ladders = adaptResult.ladders;
 
-    // 7. 雾初始化（基于场景半径）
+    // 雾（按场景包围球初始化）
     const center = boundingBox.getCenter(new THREE.Vector3());
     const radius = diagonal / 2;
     this.fogManager.init(this.scene, radius, center);
     this.fogManager.setColor(this.config.lighting.bgColor);
 
-    // 8. 同步 LOD 配置（scene-data 中 maxCull/diagonal 为占位，此处校准）
+    // 剔除距离校准（场景加载后）
     this.config.lod.cullDistance = this.lodManager.cullDistance;
-    this.needsRender = true;
 
+    this.needsRender = true;
     this.onSceneLoaded?.(boundingBox.min.y);
     this.emitCullStats();
-
     return {
       diagonal: diagInfo.diagonal,
       defaultCull: diagInfo.defaultCull,
@@ -363,7 +421,7 @@ export class RendererMain {
     }
   }
 
-  // ── 渲染循环（阶段三）──────────────────────────────────────
+  // ── 渲染循环（阶段 1：主线程物理渲染线）──────────────────────
 
   private readonly boundTick = this.tick.bind(this);
 
@@ -372,54 +430,64 @@ export class RendererMain {
     this.rafId = requestAnimationFrame(this.boundTick);
     if (!this.renderer || !this.scene || !this.camera || !this.cameraController) return;
 
-    // 1. 安全检查：读取物理快照（锁占用 → 复用上一帧缓存）
-    const snap = this.shared.readFrame();
-    if (snap && snap.seq !== this.lastSeq) {
-      this.prevSnap = this.curSnap;
-      this.curSnap = snap;
-      this.lastSeq = snap.seq;
-    }
-
-    // 2. LERP 时间插值 + 相机同步
-    // 相机位置 = 眼睛（origin + eyeHeight），不做位置修正——防穿墙靠近平面自适应
-    if (this.curSnap) {
-      const render = this.interpolate(now);
+    // 1. 主线程渲染物理线 + Worker 权威帧校准（阶段 2，game 同序）：
+    //    写输入 SAB（Worker 权威模拟同输入）→ 读权威帧 → 外推校准 → tick → 渲染
+    if (this.predReady && this.predPhys) {
+      const dt = this.lastTickMs === 0 ? 1 / 64 : Math.min((now - this.lastTickMs) / 1000, 0.1);
+      this.lastTickMs = now;
+      // 输入 → SAB 输入槽（Worker 权威帧模拟消费；与主线程同输入）
+      this.shared.addInput(this.pendingDx, this.pendingDy, this.pendingKeys);
+      // 权威帧到达 → 记录（只读）；首次 set_state 起点；大偏差异常兜底
+      this.correctFromAuthority();
+      // 权威速度外推校准（考虑中途地图碰撞后的正确速度；位置不覆盖）
+      this.calibrateVelocity(now);
+      // 完整物理推进：physics = 碰撞/传送/死亡/reset；noclip = noclip_step（无碰撞）
+      this.predPhys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
+      this.pendingDx = 0;
+      this.pendingDy = 0;
+      // 物理事件消费（计时挑战：teleport 检查点 / death 回退，回调 app.ts）
+      this.consumePhysEvents();
+      // 渲染 = 主线程物理状态（Rust 输出角度为度 → 弧度）
+      const st = this.predPhys.state() as {
+        posX: number; posY: number; posZ: number;
+        yaw: number; pitch: number;
+        eyeHeight: number;
+      };
       const cc = this.cameraController;
-      cc.setYawPitch(render.yaw * DEG2RAD, render.pitch * DEG2RAD, false);
+      cc.setYawPitch(st.yaw * DEG2RAD, st.pitch * DEG2RAD, false);
       cc.update();
-      const camX = render.pos.x;
-      const camY = render.pos.y + render.eyeHeight;
-      const camZ = render.pos.z;
-      cc.setPosition(camX, camY, camZ);
+      // 相机位置 = 眼睛（origin + eyeHeight），不做位置修正——防穿墙靠近平面自适应
+      const camY = st.posY + st.eyeHeight;
+      cc.setPosition(st.posX, camY, st.posZ);
 
-      // 近平面自适应（每 2 帧）：NEAR_PROBE_DIST 内有几何则 near 收缩到最近距离 80%，
-      // 否则恢复默认；只改投影矩阵，相机位置/视角零影响。
+      // 近平面自适应（每 2 帧）：贴墙收缩 near 防近平面裁剪透视；
+      // noclip 位置不受碰撞约束，跳过探测
       this.nearCheckToggle = !this.nearCheckToggle;
-      if (this.nearCheckToggle && render.mode === 'physics' && this.bspModelScene) {
-        this.updateNearPlane(camX, camY, camZ);
+      if (this.nearCheckToggle && !this.noclipActive && this.bspModelScene) {
+        this.updateNearPlane(st.posX, camY, st.posZ);
       }
     }
 
     const camPos = this.camera.position;
 
-    // 3. LOD/PVS 剔除
+    // 2. LOD/PVS 剔除
     if (this.lodManager.itemCount > 0) {
       if (this.lodManager.update(camPos, this.config, this.pvsManager)) {
         this.needsRender = true;
       }
     }
 
-    // 4. 雾
+    // 3. 雾
     this.fogManager.update(camPos, this.fogManager.currentSceneRadius);
 
-    // 5. 碰撞箱可视化
+    // 4. 碰撞箱可视化
     if (this.colliderDebug.hasDebugWork) {
       if (this.colliderDebug.update(camPos, this.colliders, this.config)) {
         this.needsRender = true;
       }
     }
 
-    // 6. 准星射线检测（限流）
+    // 5. 准星射线检测（限流）
     if (this.planeInfoEnabled) {
       this.planeInspectCounter++;
       if (this.planeInspectCounter >= PLANE_INSPECT_INTERVAL) {
@@ -430,16 +498,15 @@ export class RendererMain {
       this.lastPlaneInfo = null;
     }
 
-    // 7. 渲染：快照就绪后每帧无条件渲染（帧率跟随 rAF，不降频/限流）。
-    //    LERP 负责物理帧与渲染帧解耦，渲染帧率更高时中间帧饱和显示最新位置。
+    // 6. 渲染：物理就绪后每帧无条件渲染（帧率跟随 rAF，不降频/限流）。
     //    needsRender 仅用于强制刷新（加载场景、LOD 变化等）。
-    const shouldRender = this.curSnap !== null || this.needsRender;
+    const shouldRender = this.predReady || this.needsRender;
     if (shouldRender) {
       this.renderer.render(this.scene, this.camera);
       this.needsRender = false;
     }
 
-    // 8. 周期剔除统计（主线程本地计算）
+    // 7. 周期剔除统计（主线程本地计算）
     if (now - this.lastStatsAt > 100) {
       this.lastStatsAt = now;
       this.emitCullStats();
@@ -447,70 +514,6 @@ export class RendererMain {
   }
 
   private lastStatsAt = 0;
-
-  /**
-   * LERP 插值 + 外推插帧（物理面与渲染面解耦的核心）。
-   *
-   * 物理 64Hz 固定步但快照随渲染频率写入，存在"空快照"（位置不变、时间
-   * 前进）窗口；且 Worker 写帧/消息传递有延迟抖动。两因素叠加导致
-   * alpha 间歇性 >1 —— 旧实现 clamp 到 1 停等，画面"停-动-停"微卡顿。
-   *
-   * 修复：alpha > 1 时用快照真实速度一阶外推（dead-reckoning），中间渲染
-   * 帧保持连续运动；外推上限 EXTRAPOLATE_MAX_S（约一物理步），物理新快照
-   * 到达后 LERP 自然接管。yaw/pitch 由输入驱动、外推无意义，保持 cur。
-   */
-  private interpolate(now: number): FrameSnapshot {
-    const cur = this.curSnap!;
-    const prev = this.prevSnap;
-    if (!prev || cur.timeMs <= prev.timeMs) return cur;
-    // alpha = (渲染时刻 - 旧帧时间) / (新帧时间 - 旧帧时间)；>1 = 物理帧过期
-    const alpha = (now - prev.timeMs) / (cur.timeMs - prev.timeMs);
-
-    if (alpha > 1) {
-      // 低速门限：横向(xz)与竖向(y)速度**均** < 500 时不外推——起步拉地速
-      // 阶段运动不可预测（加速/转向/起跳），外推会产生误导性位移；
-      // 退回最新物理快照位置停等（等价旧实现 clamp 到 1）。
-      // 任一方 ≥ 500（坡上高速滑行等方向稳定阶段）时启用一阶外推。
-      const speedXZ = Math.hypot(cur.vel.x, cur.vel.z);
-      const speedY = Math.abs(cur.vel.y);
-      if (speedXZ < EXTRAPOLATE_MIN_SPEED && speedY < EXTRAPOLATE_MIN_SPEED) {
-        return cur;
-      }
-      // 外推插帧：超过最新物理快照的部分按速度积分（钳制上限防穿墙跑飞）
-      const extSec = Math.min((now - cur.timeMs) / 1000, EXTRAPOLATE_MAX_S);
-      return {
-        pos: {
-          x: cur.pos.x + cur.vel.x * extSec,
-          y: cur.pos.y + cur.vel.y * extSec,
-          z: cur.pos.z + cur.vel.z * extSec,
-        },
-        yaw: cur.yaw,
-        pitch: cur.pitch,
-        vel: { ...cur.vel },
-        onGround: cur.onGround,
-        mode: cur.mode,
-        eyeHeight: cur.eyeHeight,
-        timeMs: now,
-        seq: cur.seq,
-      };
-    }
-
-    return {
-      pos: {
-        x: lerp(prev.pos.x, cur.pos.x, alpha),
-        y: lerp(prev.pos.y, cur.pos.y, alpha),
-        z: lerp(prev.pos.z, cur.pos.z, alpha),
-      },
-      yaw: lerp(prev.yaw, cur.yaw, alpha),
-      pitch: lerp(prev.pitch, cur.pitch, alpha),
-      vel: { ...cur.vel },
-      onGround: cur.onGround,
-      mode: cur.mode,
-      eyeHeight: lerp(prev.eyeHeight, cur.eyeHeight, alpha),
-      timeMs: now,
-      seq: cur.seq,
-    };
-  }
 
   /** 准星射线检测（从相机正前方发射，与 mesh/碰撞体/触发器求交）。 */
   private inspectPlane(): void {
@@ -555,11 +558,11 @@ export class RendererMain {
       }
     });
 
+    // 2. 相机局部基向量 + 6 方向（4 水平正交 + 上下）探测最近几何：
+    //    用户定调 2026-08-08——距离 90 下方向数收益递减，4 水平 + 上下
+    //    覆盖绝大多数贴墙角度（斜贴 <10.2° 掠射才漏检）；上下保坡面/地面
     let minD = Infinity;
     if (candidates.length > 0) {
-      // 2. 相机局部基向量（YXZ euler 四元数）+ 6 方向（4 水平正交 + 上下）：
-      //    用户定调 2026-08-08——距离 90 下方向数收益递减，4 水平正交 + 上下
-      //    覆盖绝大多数贴墙角度（斜贴 <10.2° 掠射才漏检）；上下保坡面/地面
       const q = camera.quaternion;
       this._nearDirF.set(0, 0, -1).applyQuaternion(q);
       const right = this._nearDirR.set(1, 0, 0).applyQuaternion(q);
@@ -602,7 +605,6 @@ export class RendererMain {
     if (ratio !== undefined && ratio > 0 && ratio <= 1) {
       this.nearRatio = ratio;
     }
-    // 强制下一帧重算 near（当前值可能已不匹配新参数）
     this.needsRender = true;
   }
 
@@ -642,6 +644,14 @@ export class RendererMain {
       this.colliderDebug.setDebugFlags(
         this.config.debug.showSolids,
         this.config.debug.showTriggers,
+        this.config.debug.triggerViewDistance,
+        this.config.debug.brushViewDistance,
+      );
+      this.colliderDebug.setTriDebugFlags(
+        this.config.debug.showPhy,
+        this.config.debug.showVis,
+        this.config.debug.phyViewDistance,
+        this.config.debug.visViewDistance,
       );
       this.planeInfoEnabled = this.config.debug.showPlaneInfo;
       this.needsRender = true;
@@ -660,7 +670,7 @@ export class RendererMain {
    * 按画质档位替换场景全部贴图：mini = mosaic 字节码还原低清 PNG；
    * original = 恢复缓存的原图。即时生效（替换 texture.image），无需重载地图。
    */
-  private async applyTextureQuality(quality: 'original' | 'mini'): Promise<void> {
+  async applyTextureQuality(quality: 'original' | 'mini'): Promise<void> {
     const manifest = this.mosaicManifest;
     console.log(
       `[renderer] 画质切换 → ${quality}，manifest ${manifest ? Object.keys(manifest).length : 0} 条，bspModelScene=${!!this.bspModelScene}`,
@@ -692,7 +702,6 @@ export class RendererMain {
         }
         continue;
       }
-      // mini：按贴图名（basetexture 小写）查 manifest
       const code = manifest[(map.name ?? '').toLowerCase()];
       if (!code) {
         noMatch.push(map.name ?? '(无名)');
@@ -710,7 +719,7 @@ export class RendererMain {
   /** 单个贴图：mosaic 字节码 → 低清 PNG → ImageBitmap 替换 image。
    * 替换前必须 dispose()：three.js r152+ 对同一 texture 的 image 替换走增量
    * glTexSubImage2D（allocateMemory 仅首次为 true）——新 image 尺寸与原 GPU
-   * 纹理不符会 GL_INVALID_VALUE 越界、上传失败（纹理保持旧内容 = "没应用"）。
+   * 纹理不符会 GL_INVALID_VALUE 越界、上传失败（纹理保持旧内容 = "没生效"）。
    * dispose 后下次渲染重建 GPU 纹理（按新尺寸 texStorage2D）。 */
   private async replaceMapWithMosaic(map: THREE.Texture, code: string): Promise<void> {
     try {
@@ -729,11 +738,198 @@ export class RendererMain {
   // 已在 GLB 导出期完成（export_glb_with_pakfile_models_with_defaults）：
   // Rust 侧对缺失材质直接嵌入默认纹理包的低清纹理，渲染端零后期处理。
 
-  /** 清除插值缓存（传送/重生/模式切换后调用，避免跨状态插值）。 */
-  resetInterpolation(): void {
-    this.prevSnap = null;
-    this.curSnap = null;
-    this.lastSeq = -1;
+  // ── 主线程唯一物理线（app.ts 接线入口）────────────────────
+
+  /** 主线程构建 PhysWorld（唯一物理：世界+碰撞+输入+渲染）。 */
+  buildPredictionWorld(world: {
+    brushJson: string;
+    triJson: string;
+    teleportJson: string;
+    spawn: { x: number; y: number; z: number; yawDeg: number };
+  }): void {
+    const phys = new PhysWorld();
+    phys.build_world(
+      world.brushJson,
+      world.triJson,
+      world.teleportJson,
+      world.spawn.x,
+      world.spawn.y,
+      world.spawn.z,
+      world.spawn.yawDeg,
+    );
+    if (this.deathY !== null) {
+      phys.set_death_y(this.deathY);
+    }
+    this.predPhys = phys;
+    this.predReady = true;
+    this.noclipActive = false;
+    this.lastTickMs = 0;
+    // 权威帧校准状态清零（首帧权威帧将作为新起点）
+    this.calibrator.clear();
+    this.clearPendingInput();
+  }
+
+  /** 物理实例输入（app 事件回调喂入；唯一输入通道）。 */
+  feedInput(dx: number, dy: number, keysMask: number): void {
+    this.pendingDx += dx;
+    this.pendingDy += dy;
+    this.pendingKeys = keysMask;
+  }
+
+  /** 清空待喂输入（Pointer Lock 退锁/重锁时调用，防残留输入污染）。 */
+  clearPendingInput(): void {
+    this.pendingDx = 0;
+    this.pendingDy = 0;
+    this.pendingKeys = 0;
+  }
+
+  /** 物理参数（主线程实例直接 set_params；面板参数阶段 4 迁主线程）。 */
+  setPredictionParams(params: Record<string, unknown>): void {
+    try {
+      this.predPhys?.set_params(JSON.stringify(params));
+    } catch (err) {
+      console.error('[renderer] set_params 失败:', err);
+    }
+  }
+
+  /** 碰撞箱体型（立即生效）。 */
+  setPredictionHull(halfWidth: number, standHeight: number, duckHeight: number): void {
+    this.predPhys?.set_hull(halfWidth, standHeight, duckHeight);
+  }
+
+  /** noclip 模式（Rust set_noclip：tick 走 noclip_step 无碰撞纯移动）。 */
+  setPredictionNoclip(active: boolean): void {
+    this.noclipActive = active;
+    try {
+      this.predPhys?.set_noclip(active);
+    } catch (err) {
+      console.error('[renderer] set_noclip 失败:', err);
+    }
+    this.clearPendingInput();
+  }
+
+  /** 重生（主线程物理直接 respawn；与 Worker 双端同步）。 */
+  respawn(): void {
+    this.predPhys?.respawn();
+  }
+
+  /** 传送至指定出生点索引（spawn 下拉；与 Worker 双端同步）。 */
+  teleportToSpawn(idx: number): void {
+    this.predPhys?.teleport_to_spawn(idx);
+  }
+
+  /** 传送到任意坐标（自定义传送点；yaw 缺省 = 保持当前朝向）。 */
+  teleportToPos(pos: number[], yawDeg?: number): void {
+    const phys = this.predPhys;
+    if (!phys) return;
+    const cur = phys.state() as { yaw: number };
+    phys.teleport_to(pos[0], pos[1], pos[2], yawDeg ?? cur.yaw);
+  }
+
+  /** 设置出生点列表（[[x,y,z,yaw], ...]，spawn 下拉切换用）。 */
+  setSpawnPoints(list: Array<[number, number, number, number]>): void {
+    try {
+      this.predPhys?.set_spawn_points(JSON.stringify(list));
+    } catch (err) {
+      console.error('[renderer] set_spawn_points 失败:', err);
+    }
+  }
+
+  /** 设置死亡 Y 阈值（loadScene 后由 onSceneLoaded 回调传入）。 */
+  setDeathY(y: number): void {
+    this.deathY = y;
+    this.predPhys?.set_death_y(y);
+  }
+
+  /** 当前物理速度（HUD/计时挑战采样用）。 */
+  getCurrentVel(): { x: number; y: number; z: number } {
+    if (!this.predPhys) return { x: 0, y: 0, z: 0 };
+    const st = this.predPhys.state() as { velX: number; velY: number; velZ: number };
+    return { x: st.velX, y: st.velY, z: st.velZ };
+  }
+
+  // ── 权威帧校准四件套（阶段 2，公共化：实现收敛到 ts-shared AuthorityCalibrator）──
+
+  /**
+   * 权威帧到达（A2）处理 —— **只读权威，绝不反写**。
+   *
+   * Worker 是权威帧计算器（加载地图碰撞、独立固定步长模拟）；本方法仅记录
+   * 权威帧（速度供外推校准、位置/角度供异常兜底）。
+   *
+   * **兜底方向（用户定调）**：渲染主线（144Hz 预测物理）精度高于权威
+   * （64Hz + 消息延迟），大偏差时**以渲染主线为准反向同步权威**——
+   * 同步内容 = 渲染主线帧那一刻的完整状态，同步瞬间清空主线程与权威侧
+   * 未消费的鼠标/按键增量（onSyncRenderState 回调 → Worker；权威侧 resetInput）。
+   * - 首次权威帧（或重载后）：仍以权威全状态作为渲染物理起点（无渲染历史）
+   * - 触发条件（三条件 OR）：
+   *   - 位置差 > 500 → **强制**同步（绝对异常，不看朝向）
+   *   - 位置差 > 300 **且** 水平朝向一致（yaw 最小角差 ≤ 3° + 转动方向相同）→ 同步
+   *   - 位置差 ≤ 300 但视角偏差 > 45° → 同步（位置接近但视角大幅分叉）
+   * - 同步在途（syncInFlight）期间不重复触发，直到权威追平（dist < 300）
+   */
+  private correctFromAuthority(): void {
+    this.calibrator.correctFromAuthority();
+  }
+
+  /** 逐帧速度校准（权威速度外推反馈；实现见 ts-shared AuthorityCalibrator）。 */
+  private calibrateVelocity(now: number): void {
+    this.calibrator.calibrateVelocity(now);
+  }
+
+  /**
+   * 位置突变归零（显式重置允许覆盖：respawn/teleport/noclip 切换/检查点回退）。
+   * 清空权威校准状态，防止旧权威帧把突变位置拉回。
+   */
+  resetTo(pos: number[], yawDeg: number, pitchDeg = 0): void {
+    this.calibrator.resetTo(pos, yawDeg, pitchDeg);
+  }
+
+  /**
+   * 权威碰撞事件 → 位置微调 + 角度同步（权威仅在碰撞判断时可影响渲染角度；
+   * 实现见 ts-shared AuthorityCalibrator）。
+   */
+  applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number): void {
+    this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg);
+  }
+
+  /** 消费 Rust 物理事件（每帧 tick 后）：teleport/death → onPhysEvent 回调
+   * （app.ts 计时挑战状态机：检查点记录 / 死亡统计 + 检查点回退）。 */
+  private consumePhysEvents(): void {
+    if (!this.predPhys) return;
+    for (;;) {
+      const ev = this.predPhys.take_event() as RenderPhysEvent | null;
+      if (!ev) break;
+      this.onPhysEvent?.(ev);
+    }
+  }
+
+  /** 当前物理全状态（自定义传送点保存位置 / HUD 采样用）。 */
+  getCurrentState(): {
+    pos: { x: number; y: number; z: number };
+    yaw: number;
+    pitch: number;
+    vel: { x: number; y: number; z: number };
+    onGround: boolean;
+  } {
+    if (!this.predPhys) return { pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, vel: { x: 0, y: 0, z: 0 }, onGround: false };
+    const st = this.predPhys.state() as {
+      posX: number; posY: number; posZ: number;
+      yaw: number; pitch: number;
+      velX: number; velY: number; velZ: number;
+      onGround: boolean;
+    };
+    return {
+      pos: { x: st.posX, y: st.posY, z: st.posZ },
+      yaw: st.yaw,
+      pitch: st.pitch,
+      vel: { x: st.velX, y: st.velY, z: st.velZ },
+      onGround: st.onGround,
+    };
+  }
+
+  /** 当前 PVS cluster（HUD cluster 显示用；无 PVS = -1）。 */
+  getPvsCluster(): number {
+    return this.pvsManager?.currentClusterId ?? -1;
   }
 
   // ── GLB 加载（SceneBuilder 主线程版）──────────────────────
@@ -823,10 +1019,4 @@ export class RendererMain {
   private readonly _fwdDir = new THREE.Vector3();
 }
 
-/** 线性插值。 */
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-/** 度 → 弧度。 */
 const DEG2RAD = Math.PI / 180;

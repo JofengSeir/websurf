@@ -16,7 +16,8 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
-import type { ShmState, MsgState } from '../worker/shared-state.js';
+import type { ShmState, MsgState } from '../../../src/ts-shared/auth/shared-state.js';
+import { AuthorityCalibrator } from '../../../src/ts-shared/phys/authority-calibrator.js';
 import { PvsManager } from '../world/pvs-manager.js';
 
 const FOV = 75;
@@ -26,19 +27,6 @@ const DEG2RAD = Math.PI / 180;
 const LOD_NEAR = 0;
 const LOD_FAR = 2;
 const LOD_PVS_HIDDEN = -1;
-
-/** 权威帧快照（A2；速度外推校准依据）。 */
-interface AuthSnap {
-  pos: { x: number; y: number; z: number };
-  yaw: number;
-  pitch: number;
-  vel: { x: number; y: number; z: number };
-  /** 权威最近加速度（两权威帧速度差 / tick；外推校准用）。 */
-  accel: { x: number; y: number; z: number };
-  eyeHeight: number;
-  /** 权威帧产生时刻（tick 结束时刻，ms）。 */
-  timeMs: number;
-}
 
 export class RendererMain {
   private renderer: THREE.WebGLRenderer | null = null;
@@ -62,24 +50,10 @@ export class RendererMain {
   private pendingKeys = 0;
   /** noclip 模式（物理走 tick 的 noclip_step 分支，无碰撞纯移动）。 */
   private noclipActive = false;
-  /** 权威版本号（修正去重）。 */
-  private lastVa = -1;
-  /** 最新权威帧快照（速度外推校准依据，只留当前一帧）。 */
-  private curAuth: AuthSnap | null = null;
-  /** 上一权威速度/时刻（算权威加速度用）。 */
-  private prevAuthVel: { x: number; y: number; z: number } | null = null;
-  private prevAuthTimeMs = 0;
-  /** 上次记录时的渲染物理 yaw / 权威 yaw（水平转动方向判断用）。 */
-  private prevRenderYaw = 0;
-  private prevAuthYaw = 0;
-  /** 渲染主线 → 权威同步在途（防权威追平前重复触发）。 */
-  private syncInFlight = false;
-  /** 上次兜底处理时间戳（同步或撤回；冷却内不重复处理）。 */
-  private lastSyncAt = 0;
-  /** 兜底处理冷却（ms）：同步/撤回后 250ms 内不再触发，防抖（用户调 2s→250ms）。 */
-  private static readonly SYNC_COOLDOWN_MS = 250;
-  /** 主线程渲染物理是否已用首个权威帧校准起点。 */
-  private predStarted = false;
+  /** 权威校准（公共化：correctFromAuthority 三条件 OR + 250ms 冷却 + syncInFlight
+   * 回滚、calibrateVelocity 外推、applyCollisionCorrection、resetTo 收敛到
+   * ts-shared AuthorityCalibrator）。 */
+  private readonly calibrator: AuthorityCalibrator;
   /** 渲染帧推进（dt 上限防异常）。 */
   private lastTickMs = 0;
   /** mesh → { center, radius, clusterIds }（LOD/PVS 用；clusterIds 空间采样分配）。 */
@@ -118,7 +92,18 @@ export class RendererMain {
   private readonly _nearRaycaster = new THREE.Raycaster();
 
 
-  constructor(private readonly shared: ShmState | MsgState) {}
+  constructor(private readonly shared: ShmState | MsgState) {
+    this.calibrator = new AuthorityCalibrator({
+      readAuth: () => this.shared.readAuthoritative(),
+      getPhys: () => this.predPhys,
+      clearPendingInput: () => {
+        this.pendingDx = 0;
+        this.pendingDy = 0;
+        this.pendingKeys = 0;
+      },
+      onSyncRenderState: (s) => this.onSyncRenderState?.(s),
+    });
+  }
 
   onSceneLoaded: ((deathThresholdY: number) => void) | null = null;
 
@@ -324,11 +309,8 @@ export class RendererMain {
     this.pendingDy = 0;
     this.pendingKeys = 0;
     this.noclipActive = false;
-    this.prevAuthVel = null;
-    this.prevAuthTimeMs = 0;
-    this.predStarted = false;
-    this.curAuth = null;
-    this.lastVa = -1;
+    // 权威帧校准状态清零（防跨地图残留权威帧注入新地图）
+    this.calibrator.clear();
   }
 
   /**
@@ -451,11 +433,8 @@ export class RendererMain {
     this.predPhys = phys;
     this.predReady = true;
     this.noclipActive = false;
-    this.prevAuthVel = null;
-    this.prevAuthTimeMs = 0;
-    this.predStarted = false;
-    this.curAuth = null;
-    this.lastVa = -1;
+    // 权威帧校准状态清零（首帧权威帧将作为新起点）
+    this.calibrator.clear();
   }
 
   /** 物理实例输入（app 事件回调喂入；唯一输入通道）。 */
@@ -504,221 +483,31 @@ export class RendererMain {
   }
 
   /**
-   * 权威帧到达（A2）处理 —— **只读权威，绝不反写**（v7 定案，2026-08-08 修订）。
-   *
-   * Worker 是权威帧计算器（加载地图碰撞、独立 64Hz 模拟）；本方法仅记录
-   * 权威帧（速度供外推校准、位置/角度供异常兜底）。
-   *
-   * **兜底方向（用户定调）**：渲染主线（144Hz 预测物理）精度高于权威
-   * （64Hz + 消息延迟），大偏差时**以渲染主线为准反向同步权威**——
-   * 同步内容 = 渲染主线帧那一刻的完整状态（位置/角度/速度/着地/眼高），
-   * 同步瞬间清空主线程与权威侧未消费的鼠标/按键增量
-   * （onSyncRenderState 回调 → Worker；权威侧 resetInput）。
-   * - 首次权威帧（或重载后）：仍以权威全状态作为渲染物理起点（无渲染历史）
-   * - 触发条件：
-   *   - 位置差 > 500 → **强制**同步（绝对异常，不看朝向）
-   *   - 位置差 > 300 **且** 水平朝向一致 → 同步：
-   *     ① yaw 最小角差 ≤ ±3°（归一化，防 350° vs 0° 误判）
-   *     ② 水平转动方向相同（本权威帧间隔内渲染/权威 yaw 转向符号一致，
-   *        静止 sign=0 视为兼容）——方向反了说明渲染物理可能已跑飞
-   * - 同步在途（syncInFlight）期间不重复触发，直到权威追平（dist < 300）
-   * - 速度校准由 calibrateVelocity 在每个渲染帧执行（外推，位置不覆盖）
+   * 权威帧到达（A2）处理 / 速度外推校准 / 碰撞事件微调 / 位置突变归零。
+   * 公共化：实现收敛到 ts-shared AuthorityCalibrator（correctFromAuthority
+   * 三条件 OR + 250ms 冷却 + syncInFlight 回滚、calibrateVelocity 外推、
+   * applyCollisionCorrection <60 微调、resetTo 归零）。
    */
   private correctFromAuthority(): void {
-    if (!this.predPhys) return;
-    const auth = this.shared.readAuthoritative();
-    if (!auth || auth.va === this.lastVa) return;
-    this.lastVa = auth.va;
-    const f = auth.frame;
-    this.curAuth = {
-      pos: { ...f.pos },
-      yaw: f.yaw,
-      pitch: f.pitch,
-      vel: { ...f.vel },
-      accel: this.computeAuthAccel(f.vel, f.timeMs),
-      eyeHeight: f.eyeHeight,
-      timeMs: f.timeMs,
-    };
-
-    // 首次权威帧（或重载后）：以权威全状态作为渲染物理起点
-    if (!this.predStarted) {
-      this.predStarted = true;
-      this.predPhys.set_state(f.pos.x, f.pos.y, f.pos.z, f.yaw, f.pitch, f.vel.x, f.vel.y, f.vel.z, f.onGround);
-      this.prevRenderYaw = f.yaw;
-      this.prevAuthYaw = f.yaw;
-      return;
-    }
-
-    const st = this.predPhys.state() as {
-      posX: number; posY: number; posZ: number;
-      yaw: number; pitch: number;
-      velX: number; velY: number; velZ: number;
-      onGround: boolean;
-      eyeHeight: number;
-    };
-    const dist = Math.hypot(st.posX - f.pos.x, st.posY - f.pos.y, st.posZ - f.pos.z);
-
-    // 水平转动方向（本权威帧间隔内；正负 = 转向，0 = 静止）
-    const renderTurn = Math.sign(this.normalizeAngleDeg(st.yaw - this.prevRenderYaw));
-    const authTurn = Math.sign(this.normalizeAngleDeg(f.yaw - this.prevAuthYaw));
-    this.prevRenderYaw = st.yaw;
-    this.prevAuthYaw = f.yaw;
-
-    const yawDiff = Math.abs(this.normalizeAngleDeg(st.yaw - f.yaw));
-    const now = performance.now();
-
-    // 权威已追平（同步在途结束）：位置 < 300 且视角 ≤ 45° 视为收敛
-    if (this.syncInFlight && dist < 300 && yawDiff <= 45) {
-      this.syncInFlight = false;
-    }
-    if (this.syncInFlight) {
-      // 撤回监视：同步在途但再次大幅分叉（dist > 500 或 yaw > 45°）——
-      // 说明渲染侧在漂移/上次"渲染为准"的方向错误 → **撤回兜底**：
-      // 以权威为准回滚渲染（权威保持自己的演化，不再盲从渲染）。
-      if (dist > 500 || yawDiff > 45) {
-        this.predPhys.set_state(f.pos.x, f.pos.y, f.pos.z, f.yaw, f.pitch, f.vel.x, f.vel.y, f.vel.z, f.onGround);
-        this.pendingDx = 0;
-        this.pendingDy = 0;
-        this.pendingKeys = 0;
-        this.syncInFlight = false;
-        this.lastSyncAt = now;
-        this.prevRenderYaw = f.yaw;
-        this.prevAuthYaw = f.yaw;
-      }
-      return;
-    }
-
-    // 2s 冷却：同步/撤回后冷却期内不重复兜底处理（防抖；正常游玩
-    // 快速甩视角或短暂分叉不会反复触发）
-    if (now - this.lastSyncAt < RendererMain.SYNC_COOLDOWN_MS) return;
-
-    // 兜底判定（用户定调 2026-08-08，三条件 OR）：
-    // ① 位置差 > 500 → 强制同步（绝对异常，不看朝向）
-    // ② 位置差 > 300 且朝向一致（yaw 最小角差 ≤ 3° + 转动方向相同）→ 同步
-    // ③ 位置差 ≤ 300 但视角偏差 > 45° → 同步（位置接近但视角大幅分叉；
-    //    45° 为高阈值——正常快速甩视角 3 帧内不会超过 45°（144Hz × 3 ≈ 21ms，
-    //    需 >2100°/s 才可能），只有双端视角真分叉才触发）
-    const sameTurn = renderTurn === 0 || authTurn === 0 || renderTurn === authTurn;
-    const shouldSync =
-      dist > 500 ||
-      (dist > 300 && yawDiff <= 3 && sameTurn) ||
-      (dist <= 300 && yawDiff > 45);
-    if (shouldSync) {
-      this.syncInFlight = true;
-      this.lastSyncAt = now;
-      this.onSyncRenderState?.({
-        posX: st.posX, posY: st.posY, posZ: st.posZ,
-        yaw: st.yaw, pitch: st.pitch,
-        velX: st.velX, velY: st.velY, velZ: st.velZ,
-        onGround: st.onGround,
-        eyeHeight: st.eyeHeight,
-      });
-      // 清主线程待喂输入（同步瞬间的旧增量不注入新状态）
-      this.pendingDx = 0;
-      this.pendingDy = 0;
-      this.pendingKeys = 0;
-    }
+    this.calibrator.correctFromAuthority();
   }
 
-  /** 角度归一化到 (-180, 180]：最小角差/旋转方向判断用（350° vs 0° → 10°）。 */
-  private normalizeAngleDeg(a: number): number {
-    return ((a + 180) % 360 + 360) % 360 - 180;
-  }
-
-  /** 权威加速度 = 两权威帧速度差 / 帧间隔（u/s²）；首帧/间隔异常 → 0。 */
-  private computeAuthAccel(
-    vel: { x: number; y: number; z: number },
-    timeMs: number,
-  ): { x: number; y: number; z: number } {
-    const prev = this.prevAuthVel;
-    const prevT = this.prevAuthTimeMs;
-    this.prevAuthVel = { ...vel };
-    this.prevAuthTimeMs = timeMs;
-    if (!prev || prevT <= 0) return { x: 0, y: 0, z: 0 };
-    const dt = (timeMs - prevT) / 1000;
-    if (dt < 0.001 || dt > 0.5) return { x: 0, y: 0, z: 0 };
-    // clamp ±20000（重力 800；碰撞瞬间速度跳变可能巨大，防外推爆炸）
-    const clamp = (v: number): number => Math.max(-20000, Math.min(20000, v));
-    return {
-      x: clamp((vel.x - prev.x) / dt),
-      y: clamp((vel.y - prev.y) / dt),
-      z: clamp((vel.z - prev.z) / dt),
-    };
-  }
-
-  /**
-   * 逐帧速度校准（每个渲染帧、tick 之前）—— 权威速度外推反馈。
-   *
-   * Worker 权威帧速度已考虑中途地图物理碰撞（卡坡/穿墙/落地）→ 用它修正
-   * 渲染物理速度，让渲染轨迹向权威对齐。权威帧到达滞后（64Hz vs 渲染帧）：
-   *   vel_target = vel_A + a × (t_now − t_A)
-   * a = 权威最近加速度；动态帧距（拿到权威帧的那一帧，Bn+k 自动适配）。
-   * 垂直落体实测：锯齿 5.54≈理论 5.56，滞后偏差消除。
-   *
-   * **角度不校准**（用户定调）：权威帧不得影响渲染帧角度——角度由渲染物理
-   * 自己输入驱动（鼠标 + Q/E，144Hz 高精度），Q/E 速度等输入参数立即生效；
-   * 权威仅在碰撞事件（phys-event）时才可影响角度（见 applyCollisionCorrection）。
-   */
+  /** 逐帧速度校准（权威速度外推反馈；实现见 ts-shared AuthorityCalibrator）。 */
   private calibrateVelocity(now: number): void {
-    if (!this.predPhys || !this.curAuth) return;
-    const a = this.curAuth;
-    const dt = (now - a.timeMs) / 1000; // 权威帧产生 → 当前渲染帧（动态帧距）
-    let v = a.vel;
-    if (dt > 0 && dt <= 0.1) {
-      v = {
-        x: a.vel.x + a.accel.x * dt,
-        y: a.vel.y + a.accel.y * dt,
-        z: a.vel.z + a.accel.z * dt,
-      };
-    }
-    // dt<=0（时间戳异常）或 >0.1s（权威停更/暂停恢复）→ 直接用权威速度，不外推防漂移
-    this.predPhys.set_velocity(v.x, v.y, v.z);
+    this.calibrator.calibrateVelocity(now);
   }
 
   /** 位置突变归零（显式重置允许覆盖：respawn/teleport/noclip 切换）。 */
   resetTo(pos: number[], yawDeg: number): void {
-    if (!this.predPhys) return;
-    this.predPhys.set_state(pos[0], pos[1], pos[2], yawDeg, 0, 0, 0, 0, true);
-    // 清待喂输入，防突变后残留方向/跳跃
-    this.pendingDx = 0;
-    this.pendingDy = 0;
-    this.pendingKeys = 0;
-    this.prevAuthVel = null;
-    this.prevAuthTimeMs = 0;
-    this.prevRenderYaw = 0;
-    this.prevAuthYaw = 0;
-    this.syncInFlight = false;
-    this.lastSyncAt = 0;
-    this.predStarted = false;
-    this.curAuth = null;
-    this.lastVa = -1;
+    this.calibrator.resetTo(pos, yawDeg);
   }
 
   /**
-   * 权威碰撞事件 → 位置微调 + 角度同步（用户定调：权威**仅在碰撞判断时**可影响
-   * 渲染角度）。渲染物理与权威物理的碰撞相位差（64 vs 144Hz）导致落地/撞墙瞬间
-   * 位置差几 units——权威碰撞结果回传一次，微调渲染位置让碰撞视觉对齐；
-   * 角度取权威（碰撞瞬间的权威朝向，玩家注意力在碰撞上，小角度差无感）。
-   * - land：权威全状态（落地瞬间速度已碰撞处理，权威为准）
-   * - blocked：仅位置/角度（速度保留渲染侧，由逐帧校准收敛）
-   * 距离 < 60 才调整；≥ 60 跳过防视觉跳变（异常场景仍由 >200 权威帧兜底处理）。
+   * 权威碰撞事件 → 位置微调 + 角度同步（权威仅在碰撞判断时可影响渲染角度；
+   * 实现见 ts-shared AuthorityCalibrator）。
    */
   applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number): void {
-    if (!this.predPhys) return;
-    const st = this.predPhys.state() as {
-      posX: number; posY: number; posZ: number;
-      velX: number; velY: number; velZ: number;
-      onGround: boolean;
-    };
-    const dist = Math.hypot(st.posX - pos[0], st.posY - pos[1], st.posZ - pos[2]);
-    if (dist >= 60) return;
-    if (kind === 'land') {
-      // 权威落地全状态（位置 + 角度 + 速度 + 着地），权威碰撞结果为准
-      this.predPhys.set_state(pos[0], pos[1], pos[2], yawDeg, pitchDeg, st.velX, st.velY, st.velZ, st.onGround);
-    } else {
-      // 撞墙：位置/角度取权威（速度由每帧校准拉向权威）
-      this.predPhys.set_state(pos[0], pos[1], pos[2], yawDeg, pitchDeg, st.velX, st.velY, st.velZ, st.onGround);
-    }
+    this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg);
   }
 
   /** 面板参数实时同步到主线程物理实例（与 set_params 同字段）。 */

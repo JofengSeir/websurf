@@ -23,6 +23,6 @@
       "@worker/*": ["src/worker/*"]
     }
   },
-  "include": ["src", "web/vendor"],
+  "include": ["src", "web/vendor", "../src/ts-shared/**/*.ts"],
   "exclude": ["node_modules", "pkg", "crates"]
 }

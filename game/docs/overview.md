@@ -40,10 +40,11 @@
 
 ## 4. 与 debug 的差异速览
 
+> debug 已采用与 game 相同的物理渲染模式（共享 `src/ts-shared/`），核心时序一致；差异仅剩工程特有逻辑。
+
 | 项 | debug | game |
 |---|---|---|
-| BSP 解析 | Worker | 主线程 |
-| 物理线 | Worker 固定步长（frame 信号） | **主线程 rAF 同频**（可变 dt）+ Worker 权威帧 |
-| 权威校准 | 无（单一物理源） | set_velocity 外推 / 碰撞事件 / 兜底同步反转 |
+| BSP 解析/导出/物理渲染 | 主线程（共享 world-builder + PhysWorld，同 game 模式） | 主线程 |
+| 权威帧 Worker | 共享 auth-loop / worker-dispatch | 共享 auth-loop / worker-dispatch |
 | 面板 | 侧边栏 | ESC 弹出 |
-| 计时挑战/调试可视化 | 有 | 无（最小化） |
+| 特色 | 计时挑战、调试可视化、自定义传送点、缺失纹理弹窗、物理面板参数 | 键位自定义、noclip、速度面板 |

@@ -1,7 +1,10 @@
 /**
- * 共享状态层 — 输入槽（主线程写）+ 权威帧双缓冲（Worker 写）。
+ * 共享状态层（公共化 v1）— 输入槽（主线程写）+ 权威帧双缓冲（Worker 写）。
  *
- * 架构（2026-08-07 v7 定案，用户核心思想）：
+ * 由 debug/game 两端收敛而来（game 原版 + debug 的 SharedState 联合类型），
+ * 此后权威帧协议变更只改本文件一处。
+ *
+ * 架构（v7 定案，用户核心思想）：
  * - **Worker = 权威帧计算器**：加载地图（物理碰撞）、独立模拟权威物理线
  *   （固定 64Hz tick，含碰撞/摩擦/重力），每 tick 输出**权威帧**
  *   （位置/朝向/速度/眼高/着地/时间戳）
@@ -28,7 +31,26 @@
  * - 主线程读 S_A[(V_A-1)&1]（写者已离开的槽，无撕裂）
  */
 
-import type { KeyState } from './worker-types.js';
+// ── 按键状态（与 Rust KEY_MASK 一致；两端 keyboard 实现结构兼容）───────
+
+export interface KeyState {
+  forward: boolean;
+  backward: boolean;
+  left: boolean;
+  right: boolean;
+  jump: boolean;
+  duck: boolean;
+  /** Shift 键：noclip 模式=冲刺倍率，physics 模式映射到 input.walk（慢走）。 */
+  sprint: boolean;
+  /** R 键：重生（cs-movement input.reset）。 */
+  reset: boolean;
+  /** 滚轮连跳（chasemod 风格 bhop）：本帧是否有滚轮 +jump 脉冲。 */
+  wheelJump: boolean;
+  /** Q 键：yaw 左旋（turn bind）。 */
+  yawLeft: boolean;
+  /** E 键：yaw 右旋（turn bind）。 */
+  yawRight: boolean;
+}
 
 // ── 按键位掩码（与 Rust KEY_MASK 一致）───────────────────────
 export const KEY_MASK = {
@@ -59,6 +81,23 @@ export function keysToMask(keys: KeyState): number {
   if (keys.yawLeft) m |= KEY_MASK.yawLeft;
   if (keys.yawRight) m |= KEY_MASK.yawRight;
   return m;
+}
+
+/** 位掩码 → KeyState（keysToMask 逆变换；node 测试/调试用）。 */
+export function maskToKeys(mask: number): KeyState {
+  return {
+    forward: (mask & KEY_MASK.forward) !== 0,
+    backward: (mask & KEY_MASK.backward) !== 0,
+    left: (mask & KEY_MASK.left) !== 0,
+    right: (mask & KEY_MASK.right) !== 0,
+    jump: (mask & KEY_MASK.jump) !== 0,
+    duck: (mask & KEY_MASK.duck) !== 0,
+    sprint: (mask & KEY_MASK.sprint) !== 0,
+    reset: (mask & KEY_MASK.reset) !== 0,
+    wheelJump: (mask & KEY_MASK.wheelJump) !== 0,
+    yawLeft: (mask & KEY_MASK.yawLeft) !== 0,
+    yawRight: (mask & KEY_MASK.yawRight) !== 0,
+  };
 }
 
 // ── SAB 布局 ─────────────────────────────────────────────────
@@ -194,10 +233,8 @@ export class ShmState {
   readonly isShared = true;
   private readonly i32: Int32Array;
   private readonly b64: BigInt64Array;
-  private readonly buffer: SharedArrayBuffer;
 
   constructor(buffer: SharedArrayBuffer) {
-    this.buffer = buffer;
     this.i32 = new Int32Array(buffer);
     this.b64 = new BigInt64Array(buffer);
   }
@@ -300,6 +337,9 @@ export class ShmState {
     return va;
   }
 }
+
+/** 跨线程状态通道（SAB / MsgState 统一类型）。 */
+export type SharedState = ShmState | MsgState;
 
 /** 主线程侧创建：crossOriginIsolated（本地 serve.py COOP/COEP）→ SAB 高性能；
  * 否则（线上静态部署无 COOP/COEP）→ MsgState postMessage 回退（功能等价，性能降级）。 */

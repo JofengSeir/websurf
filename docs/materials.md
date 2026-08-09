@@ -143,6 +143,6 @@ textures.json（逐条 "key": "#mosaic v4\n..."）
 | `debug/web/`、`game/web/` | dev 副本（serve 提供） |
 | dist（single 内嵌 / multi 外置） | 打包自动附带 |
 
-**single（file://）内嵌链路**：`__VBSP_TEXTURES_MTZ_B64__`（主线程直接读）；Worker 端经 `wasm-init` 消息的 `mtzB64` 字段下发（Blob worker 读不到主线程 global）→ `worker/mtz-data.ts` 存取 → 导出时解压。
+**single（file://）内嵌链路**：`__VBSP_TEXTURES_MTZ_B64__`（主线程直接读，atob → decompress）——解析/导出在主线程，无需下发给 Worker（`wasm-init` 消息的 `mtzB64` 字段与 `worker/mtz-data.ts` 仅为协议兼容保留，权威 Worker 不消费默认包）。
 
 **导出/更新**：由独立工具（materials-mini：encode-img → pack）生成新 mtz → 替换 `src/materials/textures.mtz` 并同步两端 `web/` 副本；`decompress_mtz` 兼容 MTZ5（旧包）与 MTZ6（含半透明系数）。

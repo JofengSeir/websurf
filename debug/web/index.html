@@ -167,6 +167,7 @@
     /* 中心准星（风格化：CSS 变量驱动，面板可调） */
     #crosshair {
       position: absolute; left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
       --ch-color: #4ade80;
       --ch-size: 6px;
       --ch-thickness: 2px;
@@ -177,35 +178,32 @@
     #crosshair.hidden { display: none; }
     #crosshair .ch-line {
       position: absolute;
+      left: 50%; top: 50%;
       background: var(--ch-color);
     }
     #crosshair .ch-line.outline {
       box-shadow: 0 0 0 1px rgba(0,0,0,0.85);
     }
+    /* 四条线均以容器中心为锚点 + translate 精确对称（容器 0×0，50% 即中心） */
     #crosshair .ch-t {
-      left: 50%; bottom: calc(50% + var(--ch-gap));
       width: var(--ch-thickness); height: var(--ch-size);
-      margin-left: calc(var(--ch-thickness) / -2);
+      transform: translate(-50%, calc(-100% - var(--ch-gap)));
     }
     #crosshair .ch-b {
-      left: 50%; top: calc(50% + var(--ch-gap));
       width: var(--ch-thickness); height: var(--ch-size);
-      margin-left: calc(var(--ch-thickness) / -2);
+      transform: translate(-50%, var(--ch-gap));
     }
     #crosshair .ch-l {
-      top: 50%; right: calc(50% + var(--ch-gap));
       height: var(--ch-thickness); width: var(--ch-size);
-      margin-top: calc(var(--ch-thickness) / -2);
+      transform: translate(calc(-100% - var(--ch-gap)), -50%);
     }
     #crosshair .ch-r {
-      top: 50%; left: calc(50% + var(--ch-gap));
       height: var(--ch-thickness); width: var(--ch-size);
-      margin-top: calc(var(--ch-thickness) / -2);
+      transform: translate(var(--ch-gap), -50%);
     }
     #crosshair .ch-dot {
-      position: absolute; left: 50%; top: 50%;
       width: calc(var(--ch-thickness) * 2.5); height: calc(var(--ch-thickness) * 2.5);
-      margin: calc(var(--ch-thickness) * -1.25) 0 0 calc(var(--ch-thickness) * -1.25);
+      transform: translate(-50%, -50%);
       background: var(--ch-color); border-radius: 50%;
       box-shadow: 0 0 0 1px rgba(0,0,0,0.85);
     }
@@ -334,31 +332,8 @@
               </select>
               <div style="font-size:11px; color:#9098b5; white-space:nowrap;">重新加载地图生效</div>
 
-              <label title="传送触发判定方式">传送触发</label>
-              <div style="display:flex; flex-direction:column; gap:2px;">
-                <label style="font-size:12px; cursor:pointer; color:#d4d4d4; white-space:nowrap;">
-                  <input type="radio" name="teleportTriggerMode" value="start-touch" checked style="margin-right:3px;" />StartTouch 边沿
-                </label>
-                <label style="font-size:12px; cursor:pointer; color:#d4d4d4; white-space:nowrap;">
-                  <input type="radio" name="teleportTriggerMode" value="start-touch-grounded" style="margin-right:3px;" />落地检测
-                </label>
-              </div>
-              <div></div>
-
               <div class="ctrl-full" style="margin-top:4px;">
                 <button id="respawnBtn" disabled>重生</button>
-              </div>
-            </div>
-
-            <!-- 落地检测：连续落地帧数（仅落地检测模式显示） -->
-            <div id="groundedFramesRow" style="display:none; border-top: 1px solid #2a2d3a; margin-top: 6px; padding-top: 6px;">
-              <div style="font-size: 11px; color: #9098b5; margin-bottom: 4px;">
-                落地检测需连续着地帧数（1=单帧即触发；3-5=过滤瞬时触地；10=严格）
-              </div>
-              <div class="ctrl-grid">
-                <label>连续落地帧数</label>
-                <input type="range" id="groundedFramesRange" min="1" max="30" step="1" value="1" />
-                <div class="val"><input type="number" id="groundedFramesNum" class="param-num" min="1" max="30" step="any" value="1" /></div>
               </div>
             </div>
 
@@ -483,12 +458,32 @@
               </div>
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showSolids" />
-                <label for="showSolids" title="玩家附近碰撞箱线框：地面绿/斜坡黄/墙红">显示实体碰撞箱</label>
+                <label for="showSolids" title="玩家附近碰撞箱线框：地面绿/斜坡黄/墙红">显示brush碰撞</label>
               </div>
+              <label title="brush 碰撞线框显示可视距离（HU）：0 = 全量显示">brush 可视距离</label>
+              <input type="range" id="brushViewDistance" min="0" max="16384" step="64" value="512" />
+              <div class="val"><input type="number" id="brushViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="512" /></div>
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showTriggers" />
-                <label for="showTriggers" title="传送触发区域线框：青=已链接/紫=孤儿/灰=禁用/橙=非玩家">显示触发碰撞箱</label>
+                <label for="showTriggers" title="传送触发区域线框：青=已链接/紫=孤儿/灰=禁用/橙=非玩家">显示触发区域</label>
               </div>
+              <label title="触发区域线框显示可视距离（HU）：0 = 全量显示">触发区域距离</label>
+              <input type="range" id="triggerViewDistance" min="0" max="16384" step="64" value="0" />
+              <div class="val"><input type="number" id="triggerViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="0" /></div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPhy" />
+                <label for="showPhy" title="模型自带 .phy 碰撞网格线框（橙色）">显示模型phy碰撞</label>
+              </div>
+              <label title="phy 碰撞网格显示可视距离（HU）：0 = 全量显示">phy 可视距离</label>
+              <input type="range" id="phyViewDistance" min="0" max="16384" step="64" value="4096" />
+              <div class="val"><input type="number" id="phyViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="4096" /></div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showVis" />
+                <label for="showVis" title="模型可视网格线框（紫色，与显示网格逐位一致）">显示模型可视碰撞</label>
+              </div>
+              <label title="可视网格线框显示可视距离（HU）">可视网格距离</label>
+              <input type="range" id="visViewDistance" min="128" max="16384" step="64" value="1024" />
+              <div class="val"><input type="number" id="visViewDistanceNum" class="param-num" min="128" max="16384" step="any" value="1024" /></div>
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showPlaneInfo" />
                 <label for="showPlaneInfo" title="准星对准模型/实体面/触发面时，在 HUD 显示其名称与属性信息">准星信息</label>

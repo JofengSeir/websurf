@@ -20,6 +20,8 @@ export interface PhysicsConfig {
   slideAngle: number; // 弧度
   /** 物理模拟频率（Hz，默认 64；面板可调 48-128）。 */
   tickRate: number;
+  /** 传送落地触发门槛帧数，Rust 侧当前未消费，为 config 对齐预留。默认 1。 */
+  teleportGateTicks: number;
 }
 
 export interface PlayerConfig {
@@ -67,6 +69,8 @@ export interface InputConfig {
   pitchLimit: number; // 度
   /** Q/E 键 yaw 旋转速度（度/秒，turn bind），按住时视角水平旋转。默认 210 度/秒。 */
   yawBindSpeed: number;
+  /** noclip 自由视角移动速度 HU/s，Rust noclip_step 用，sprint ×4。默认 800。 */
+  noclipSpeed: number;
 }
 
 /** 准星风格化配置（面板可调，localStorage 持久化）。 */
@@ -95,17 +99,33 @@ export interface HudConfig {
 }
 
 export interface DebugConfig {
-  /** 显示实体碰撞箱线框（附近 512 HU 内 brush AABB，地面绿/斜坡黄/墙红）。 */
+  /** 显示实体碰撞箱线框（玩家附近 brush AABB，地面绿/斜坡黄/墙红）。 */
   showSolids: boolean;
+  /** brush 碰撞线框显示可视距离（HU，0 = 全量）。 */
+  brushViewDistance: number;
   /** 显示传送触发碰撞箱线框（所有 trigger AABB，青/紫/灰/橙分类）。 */
   showTriggers: boolean;
+  /** 触发区域线框显示可视距离（HU，0 = 全量）。 */
+  triggerViewDistance: number;
+  /** 显示模型 .phy 碰撞网格线框（橙色，按 phyViewDistance 距离筛选）。 */
+  showPhy: boolean;
+  /** .phy 碰撞网格显示可视距离（HU，0 = 全量）。 */
+  phyViewDistance: number;
+  /** 显示模型可视网格线框（紫色，按 visViewDistance 距离筛选）。 */
+  showVis: boolean;
+  /** 可视网格线框显示可视距离（HU）。 */
+  visViewDistance: number;
   /** 准星射线检测（hover 查看模型/实体平面/触发面信息）。 */
   showPlaneInfo: boolean;
-  /** 传送触发模式：start-touch（StartTouch 边沿触发，CS:S 原生行为，默认）/
-   * start-touch-grounded（StartTouch + 着地状态，"落地才传送"）。 */
+  /**
+   * 传送触发模式（阶段 4：面板 UI 已删除——Rust 物理固定双条件 OR 触发，
+   * 无 StartTouch/落地检测之分；字段保留仅为 config 段对齐与旧 localStorage
+   * 持久化兼容，不再有任何 UI/逻辑消费）。
+   */
   teleportTriggerMode: 'start-touch' | 'start-touch-grounded';
-  /** 触发传送所需连续着地帧数（仅 start-touch-grounded 生效）：1 单帧触发 /
-   * 3-5 过滤坡道短暂触地 / 10 严格模式。默认 1。 */
+  /**
+   * 触发传送所需连续着地帧数（同上：面板 UI 已删除，保留为 config 段对齐占位）。
+   */
   groundedFramesRequired: number;
 }
 
@@ -144,6 +164,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     groundAngle: (30 * Math.PI) / 180,
     slideAngle: (70 * Math.PI) / 180,
     tickRate: 64,
+    teleportGateTicks: 1,
   },
   player: {
     radius: 16,
@@ -185,6 +206,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     sensitivity: 1.5,
     pitchLimit: 89,
     yawBindSpeed: 210,
+    noclipSpeed: 800,
   },
   hud: {
     visible: true,
@@ -200,9 +222,15 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   },
   debug: {
     showSolids: false,
+    brushViewDistance: 512,
     showTriggers: false,
+    triggerViewDistance: 0,
+    showPhy: false,
+    phyViewDistance: 4096,
+    showVis: false,
+    visViewDistance: 1024,
     showPlaneInfo: false,
-    // 默认 StartTouch 边沿触发（CS:S 引擎原生行为）
+    // 阶段 4：传送触发面板 UI 已删除，字段保留为 config 对齐占位（默认值不再消费）
     teleportTriggerMode: 'start-touch',
     groundedFramesRequired: 1,
   },

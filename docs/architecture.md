@@ -13,9 +13,11 @@
 
 ```
 websurf/
-├── src/                      ← 共享层（3 个独立 workspace + 资源）
+├── src/                      ← 共享层（3 个独立 Rust workspace + TS 共享 + 资源）
 │   ├── Cargo.toml + phys/       websurf-phys：Rust 物理（wasm-bindgen 绑定层）
 │   ├── wasm-core/               websurf-wasm-core：BSP 解析 / GLB / 模型 / 纹理 / mosaic / mtz（纯 rlib）
+│   ├── ts-shared/               TS 物理渲染共享（auth/shared-state、auth-loop、worker-dispatch、
+│   │                            authority-calibrator、input-layer、params、world-builder）
 │   ├── materials/textures.mtz   默认纹理包（公共资源，MTZ 压缩，9448+ 条）
 │   ├── maps/                    BSP 地图资源（*.bsp，gitignored，本地放此处）
 │   ├── vendor/vmdl/             vendored vmdl（VTX 条带展开修复，单副本）
@@ -40,7 +42,19 @@ websurf/
 | `src/wasm-core/`（websurf-wasm-core） | BSP 解析/GLB/模型/纹理解析 + mosaic 编解码 + MTZ 容器（纯 rlib，无 wasm 导出） | debug/game 的 `crates/wasm`（path 依赖，内部模块直接调用） |
 | `src/vendor/vmdl/` | vendored vmdl（patch 到两端 workspace） | 两端 `[patch.crates-io]` → `../src/vendor/vmdl` |
 
-**共享原则**：解析层/物理/资源单副本；wasm-bindgen 导出层与**特色函数**（debug 的薄壳碰撞、调试 API）留在各自工程的 `crates/wasm/src/`——打包时 `mod` 声明即自动编译进各自 WASM。
+### 共享层 TS 模块（`src/ts-shared/`，两端 import 共享，改一处双端生效）
+
+| 模块 | 导出 | 说明 |
+|---|---|---|
+| `auth/shared-state.ts` | ShmState（BigInt64 输入槽 + 权威双缓冲 V_A）/ MsgState 回退 / KEY_MASK / AuthFrame / InputSample / 工厂 | 权威帧共享内存布局与消息回退通道 |
+| `auth/auth-loop.ts` | `createAuthLoop`（4ms 自驱 + 固定步长累积器 + land/blocked 碰撞事件，注入 post/onCollisionEvent） | Worker 权威帧计算器主循环 |
+| `auth/worker-dispatch.ts` | `createWorkerDispatch`（init/wasm-init/world-json/config/respawn/teleport/teleport-to-pos/set-spawn-points/set-death-threshold/sync-render-state + 扩展点钩子） | Worker 消息分发（两端差异经 onInit/onWorldBuilt/onConfigApplied/onExtraMessage 注入） |
+| `phys/authority-calibrator.ts` | `AuthorityCalibrator`（correctFromAuthority 三条件+冷却+回滚 / calibrateVelocity / applyCollisionCorrection / resetTo） | 主线程渲染物理的权威校准 |
+| `input/input-layer.ts` | `INPUT_CLAMP` / `M_YAW` / `layerMouseDelta` / `qeEquivalentDx` | 输入层（灵敏度乘入 + Q/E 等效像素） |
+| `phys/params.ts` | `buildPhysicsParams`（sensitivity:1、jump_height 换算、全量 snake_case） | 面板参数 → Rust set_params |
+| `phys/world-builder.ts` | `buildWorldBundle`（bytes → WorldBundle：colliderSource 三档 + 薄壳回退 + 缺失纹理 + GLB with defaults + onProgress） | 地图导入导出统一管线 |
+
+**共享原则**：物理/解析/物理渲染（Rust + TS）单副本——**修改一处，两端编译即同步生效**；各工程 `crates/wasm/src/lib.rs`（wasm 导出层与特色函数）与 TS 前端（面板 UI、调试可视化、计时挑战、渲染层）保持各自。
 
 ---
 
@@ -50,25 +64,27 @@ websurf/
 .bsp 文件（本地选择 / src/maps/）
   │
   ▼
-WASM（BspProcessor，两端各一实例：debug 在 Worker、game 在主线程）
+WASM（BspProcessor——两端均在主线程解析，共用 ts-shared world-builder 管线）
   ├─ parse_spawn_points / parse_teleports / parse_pvs_data   → 出生点/传送点/PVS JSON
   ├─ export_brushes_planes                                   → 地图碰撞 brush JSON
   ├─ export_model_tri_colliders / _phy_colliders             → 模型三角形碰撞 JSON
   ├─ export_mosaic_manifest                                  → 画质切换 manifest（纹理名 → mosaic 字节码）
   ├─ export_missing_textures                                 → 缺失纹理列表
   ├─ export_glb_with_pakfile_models_with_defaults            → GLB（地图几何 + PAKFILE 模型 + 缺失纹理回退）
-  └─ PhysWorld.build_world(brushJson, triJson, teleportJson, spawn)   → 物理世界
+  └─ PhysWorld.build_world(brushJson, triJson, teleportJson, spawnX/Y/Z, spawnYaw)   → 物理世界（主线程渲染物理）
   │
   ▼
-渲染端（three.js）
+渲染端（three.js，主线程唯一物理渲染线）
   ├─ GLTFLoader 建场景（GLB 自包含：纹理在导出期已定——含默认包回退的低清纹理）
   ├─ PVS/LOD 剔除、lightmap、雾、碰撞可视化
+  ├─ 每 rAF：PhysWorld.tick（真实物理）→ 渲染直读 state()
   └─ 画质切换：运行时按 manifest 用 mosaic_decode 还原低清贴图替换
 ```
 
 **关键时序约定**：
 - `export_mosaic_manifest` / `export_missing_textures` 必须在消费 BSP 的 `export_glb*` **之前**调用（借用 vs take）。
 - 缺失纹理回退在 **GLB 导出期**完成（`with_defaults`）——渲染端零后期处理，避免中途替换（曾引发 `RESULT_CODE_HUNG`）。
+- 两端解析/导出/物理渲染均走共享管线（ts-shared world-builder + Rust 物理）——**地图导入导出与物理逻辑改一处即双端生效**。
 
 ---
 
@@ -129,15 +145,16 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 
 ---
 
-## 5. 两端差异一览（详见各自时序图与工程 docs）
+## 5. 两端差异一览（详见各自工程 docs）
 
 | 维度 | debug | game |
 |---|---|---|
 | 定位 | 全功能调试测试页面 | 最小化游戏化实现 |
-| BSP 解析/导出位置 | Worker（`physics-worker.ts`） | 主线程（`app.ts`） |
-| 物理执行 | Worker 物理循环（frame 信号驱动） | **主线程唯一物理渲染线** + Worker **权威帧计算器** |
-| 共享通道 | SAB 输入环形缓冲 + 输出 seqlock（`shared-state.ts`） | SAB 输入槽（BigInt64）+ 权威全状态双缓冲（或 MsgState 回退） |
+| 解析/导出/物理渲染 | 主线程（与 game 同模式，共享 ts-shared） | 主线程 |
+| 权威帧 Worker | 共享 auth-loop / worker-dispatch（debug 扩展：物理面板参数、mtzB64 内嵌） | 共享 auth-loop / worker-dispatch |
 | 面板 | 侧边栏手风琴（HTML 静态 + app.ts 绑定） | ESC 弹出面板（`panel-controller.ts` + 键位录制） |
-| 特色功能 | 薄壳碰撞、调试探针、计时挑战、自定义传送点、准星射线、碰撞可视化 | 键位自定义、noclip、速度面板、tick 锁定预留 |
+| 特色功能 | 薄壳碰撞、调试探针、计时挑战、自定义传送点、准星射线、碰撞可视化、缺失纹理弹窗 | 键位自定义、noclip、速度面板、tick 锁定预留 |
 
-**两端共有功能**：画质切换（manifest + mosaic 运行时替换）、缺失纹理回退（GLB 导出期 + 默认纹理包）、双模式打包、共享 Rust 物理/解析。
+**两端共有功能**（共享实现，改一处双端生效）：物理（Rust websurf-phys）、地图导入导出（Rust wasm-core + ts-shared world-builder）、物理渲染/权威帧（ts-shared auth 系）、画质切换、缺失纹理回退、双模式打包。
+
+**工程特有**（各自维护）：面板 UI、调试可视化、计时挑战、自定义传送点、渲染层（light/fog/lightmap/camera）、wasm 导出层与特色函数（debug 薄壳碰撞等）。
