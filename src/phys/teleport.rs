@@ -1,9 +1,15 @@
-//! 传送检测（Rust 移植自 TS TeleportManager，仅保留 start-touch 模式）。
+//! 传送检测（Rust 移植自 TS TeleportManager）。
 //!
 //! 触发检测：trigger_teleport 的几何范围由 model *N 指向的 brush 凸包平面定义
-//! （WASM parse_teleports 已输出 model_planes，法线朝外 Y-up）；优先凸包精确判定，
-//! 无 planes 回退 AABB，再回退 origin 球形。StartTouch 边沿触发（CS:S 原生）：
-//! 仅 false→true 跳变触发；传送后重置 inside 状态避免立即误触发。
+//! （WASM parse_teleports 已输出 model_planes，法线朝外 Y-up）；凸包平面夹取
+//! 判定，无 planes 回退 AABB。
+//!
+//! **检测语义（2026-08-09 用户定调，最终版）**：
+//! - **A 路径**（任意状态：落地/空中/半空）：玩家竖直线段 [脚底, 脚底+身高]
+//!   与 trigger 凸包区间相交（XZ 受凸包竖直平面约束；**仅"落地 && 斜面"时
+//!   脚底允许高于凸包顶 64**——跨斜面 origin 提升，其余 gap=0）；
+//! - **B 路径**（仅落地启用）：脚底往下 **8** 单位区间与凸包相交；
+//! - **滑行（surfing）不触发**；冷却 0.5s 防重复。
 //! 死亡判定并入：玩家 Y < death_y 阈值 → 回退到初始出生点。
 
 use super::world::V3;
@@ -11,8 +17,10 @@ use super::world::V3;
 /// 触发冷却时间（秒），防止同一触发器连续 tick 反复触发。
 const TRIGGER_COOLDOWN: f64 = 0.5;
 
-/// 球形检测半径（HU），仅无 model AABB 时回退。
-const TRIGGER_RADIUS: f64 = 64.0;
+/// 落地后脚底往下探测深度（units）：**8**——传送区域贴合玩家所站表面
+/// （2067 凸包贴表面 0.5、1240 贴 0.2——A 路径直接触发）；8 仅作浮点/
+/// 微小 gap 容差，防"传送区域埋在表面下方深处"的深下探误触。
+const FOOT_PROBE_DEPTH: f64 = 8.0;
 
 /// BSP yaw（方位角，顺时针）→ cs-movement yaw（逆时针）。cs_yaw = (270 - BSP_yaw) % 360。
 fn bsp_yaw_to_cs_yaw(bsp_yaw: f64) -> f64 {
@@ -53,14 +61,12 @@ pub struct TeleportTrigger {
     pub inside: bool,
 }
 
-/// 传送管理器（start-touch + 落地脚底检测）。
+/// 传送管理器（A 进入区域 + B 落地脚底 8 下探双路径检测）。
 #[derive(Clone, Debug, Default)]
 pub struct TeleportManager {
     pub triggers: Vec<TeleportTrigger>,
     pub destinations: Vec<TeleportDestination>,
     cooldown: f64,
-    /// 上一 tick 是否着地（落地边沿检测用：0→≥1 的上升沿 = 刚落地）。
-    was_landed: bool,
 }
 
 impl TeleportManager {
@@ -145,62 +151,42 @@ impl TeleportManager {
             triggers,
             destinations,
             cooldown: 0.0,
-            was_landed: false,
         })
     }
 
     /// 每 tick 检测：返回触发目标（若触发），否则 None。
-    /// `predict` 模式（Worker-B）不检测传送（预测只填充中间帧，权威每帧校正）。
+    /// `predict` 模式不检测传送（预测只填充中间帧，权威每帧校正）。
     ///
-    /// **StartTouch 外→内边沿 + 落地脚底检测（2026-08-08 用户定调，双条件 OR）**：
-    /// - **A. StartTouch 外→内边沿**：任何状态（空中/滑行/落地），玩家从
-    ///   trigger 体积外跨入（false→true 跳变）即传送（CS:S 原生语义）
-    /// - **B. 落地脚底检测**：刚落地（ground_ticks 0→≥1 上升沿）且脚底 2 单位
-    ///   范围内存在传送区域 → 传送。注意这是"落地动作本身触发"，**不是**
-    ///   "传送区域内落地后才触发"（后者是 start-touch-grounded 的停留语义，
-    ///   会导致与斜面重合/位置相差不大的 trigger 不触发——玩家可能从区域
-    ///   内部起飞再落地，StartTouch 无边沿可走）
-    /// 探测点为脚底上下多点（TRIGGER_PROBES）：身体下部穿过 trigger 即 inside——
-    /// 覆盖斜面薄片 trigger（顶面高于脚底 0~24）与下沉 trigger（顶面低于脚底 24）。
-    /// 上探止于小腿高度，高处/trigger 上方不误置 inside。
-    pub fn check(&mut self, pos: &V3, ground_ticks: u32, _gate_ticks: u32, dt: f64, predict: bool) -> Option<TeleportDestination> {
+    /// **双路径检测（2026-08-09 用户定调，最终版）**：
+    /// - **A. 进入传送区域**（任何状态：落地/空中/半空/走过）：`in_trigger_zone`
+    ///   竖直线段 [脚底, 脚底+身高] 与凸包区间相交（XZ 受凸包竖直平面约束；
+    ///   **gap = 落地 && 斜面 ? 64 : 0**——跨斜面 origin 提升，空中/平面 0）→ 触发；
+    /// - **B. 落地脚底检测**（**落地才启用**，非触发事件本身）：落地时检测
+    ///   **脚底往下 8 单位区间**（`probe_below_foot`）与 trigger 相交 → 触发。
+    /// **滑行（surfing）不触发**；触发后 0.5s 冷却防重复。
+    pub fn check(
+        &mut self,
+        pos: &V3,
+        ground_ticks: u32,
+        _gate_ticks: u32,
+        dt: f64,
+        predict: bool,
+        surfing: bool,
+        body_top: f64,
+    ) -> Option<TeleportDestination> {
         if predict {
             return None;
         }
         if self.cooldown > 0.0 {
             self.cooldown -= dt;
-            // 冷却期间仍需更新 inside 状态，否则冷却结束后误触发 start-touch
-            for t in &mut self.triggers {
-                t.inside = probe_inside(pos, t); // 同主判定（脚底 2 单位）
-            }
             return None;
         }
-
-        // B. 落地脚底检测：刚落地（上升沿）且脚底贴 trigger → 传送
-        let just_landed = ground_ticks > 0 && !self.was_landed;
-        self.was_landed = ground_ticks > 0;
-        if just_landed {
-            for t in &mut self.triggers {
-                if t.start_disabled {
-                    continue;
-                }
-                if t.spawnflags != 0 && (t.spawnflags & 0x01) == 0 && (t.spawnflags & 0x40) == 0 {
-                    continue;
-                }
-                if t.dest_index < 0 {
-                    continue;
-                }
-                if (t.dest_index as usize) >= self.destinations.len() {
-                    continue;
-                }
-                if probe_inside(pos, t) {
-                    self.cooldown = TRIGGER_COOLDOWN;
-                    return self.destinations.get(t.dest_index as usize).cloned();
-                }
-            }
+        // 滑行（surfing）不触发传送（贴坡滑行不算进入传送区域）
+        if surfing {
+            return None;
         }
+        let grounded = ground_ticks > 0;
 
-        // A. StartTouch 外→内边沿（任何状态）
         for t in &mut self.triggers {
             if t.start_disabled {
                 continue;
@@ -216,12 +202,14 @@ impl TeleportManager {
             if (t.dest_index as usize) >= self.destinations.len() {
                 continue; // 越界防御（dest_by_name 已用数组下标，正常不会触发）
             }
-            // 脚底 2 单位探测（0 点即 origin/脚底，2 点给贴合容差）
-            let now_inside = probe_inside(pos, t);
-            // StartTouch 边沿触发：仅 false→true 跳变（外→内）
-            let should_fire = now_inside && !t.inside;
-            t.inside = now_inside;
-            if should_fire {
+            // A. 进入传送区域：身体线段与凸包相交（gap 仅斜面+落地生效；
+            //    空中严格相交——跳入区域才触发）
+            if in_trigger_zone(pos, body_top, t, grounded) {
+                self.cooldown = TRIGGER_COOLDOWN;
+                return self.destinations.get(t.dest_index as usize).cloned();
+            }
+            // B. 落地时脚底往下探测（落地是检测启用条件，非触发本身）
+            if grounded && probe_below_foot(pos, t) {
                 self.cooldown = TRIGGER_COOLDOWN;
                 return self.destinations.get(t.dest_index as usize).cloned();
             }
@@ -229,7 +217,7 @@ impl TeleportManager {
         None
     }
 
-    /// 传送后重置全部 inside 状态（CS:S 行为：传送后须先离开再进入才触发）。
+    /// 传送后重置（cooldown 由调用方 reset_cooldown 处理；无 inside 边沿状态）。
     pub fn on_teleported(&mut self) {
         for t in &mut self.triggers {
             t.inside = false;
@@ -242,50 +230,125 @@ impl TeleportManager {
     }
 }
 
-/// trigger 探测深度列表（units，脚底 0 点 + 上下扩展，覆盖两类薄片场景）：
-/// - 脚底**上方** 2/4/8/16/24：斜面上的薄 trigger 顶面可能比脚底高 0~24 单位
-///   （trigger 底面与斜面几乎共面时，脚底 0 点受浮点/法线方向影响可能落在
-///   底面外侧而 miss；身体下部探测点仍在 trigger 体积内 → 站立即触发）
-/// - 脚底**下方** 2/24：trigger 顶面可能低于脚底 2~24 单位（与斜面重合/下沉）
-/// 任一深度点在 trigger 内即视为 inside（覆盖滑行 gap 与薄片 trigger）。
-/// 上探仅到小腿高度（24），不会因高处/trigger 上方跳跃误置 inside。
-const TRIGGER_PROBES: [f64; 7] = [-2.0, 0.0, 2.0, 4.0, 8.0, 16.0, 24.0];
-
-/// 多点探测：任一深度点在 trigger 内即视为 inside（覆盖滑行 gap 与薄片 trigger）。
-fn probe_inside(pos: &V3, t: &TeleportTrigger) -> bool {
-    for drop in TRIGGER_PROBES {
-        let mut probe = *pos;
-        probe[1] -= drop;
-        if is_in_trigger(&probe, t) {
-            return true;
-        }
-    }
-    false
-}
-
-/// 玩家是否在 trigger 区域内：凸包平面精确判定 > AABB > 球形回退。
-fn is_in_trigger(pos: &V3, t: &TeleportTrigger) -> bool {
-    if !t.planes.is_empty() {
-        for p in &t.planes {
-            let d = p[0] * pos[0] + p[1] * pos[1] + p[2] * pos[2] - p[3];
-            if d > 0.001 {
+/// 落地脚底检测（B 路径）：**脚底往下 FOOT_PROBE_DEPTH（8）的区间**
+/// [pos.y-8, pos.y] 与 trigger 相交（**区间夹取，不依赖离散采样**）。
+/// 凸包平面夹取 > AABB 回退。
+fn probe_below_foot(pos: &V3, t: &TeleportTrigger) -> bool {
+    let mut lo = f64::NEG_INFINITY;
+    let mut hi = f64::INFINITY;
+    let mut has_planes = false;
+    for p in &t.planes {
+        has_planes = true;
+        // 竖直线 x,z 固定：n1*y = d - n0*x - n2*z
+        let rhs = p[3] - p[0] * pos[0] - p[2] * pos[2];
+        if p[1].abs() < 1e-9 {
+            // 竖直平面：XZ 必须在内侧（rhs = d-n0*x-n2*z ≥ 0）
+            if rhs < -0.001 {
                 return false;
             }
+            continue;
         }
-        return true;
+        let yc = rhs / p[1];
+        if p[1] > 0.0 {
+            hi = hi.min(yc);
+        } else {
+            lo = lo.max(yc);
+        }
     }
-    if let (Some(min), Some(max)) = (&t.mins, &t.maxs) {
+    if !has_planes {
+        // AABB 回退：下探区间与 AABB y 相交 + XZ 在 AABB 内
+        let (Some(min), Some(max)) = (&t.mins, &t.maxs) else {
+            return false;
+        };
         return pos[0] >= min[0]
             && pos[0] <= max[0]
-            && pos[1] >= min[1]
-            && pos[1] <= max[1]
             && pos[2] >= min[2]
-            && pos[2] <= max[2];
+            && pos[2] <= max[2]
+            && pos[1] - FOOT_PROBE_DEPTH <= max[1]
+            && pos[1] >= min[1];
     }
-    let dx = pos[0] - t.origin[0];
-    let dy = pos[1] - t.origin[1];
-    let dz = pos[2] - t.origin[2];
-    dx * dx + dy * dy + dz * dz <= TRIGGER_RADIUS * TRIGGER_RADIUS
+    // 下探区间 [pos.y - FOOT_PROBE_DEPTH, pos.y] 与凸包区间 [lo, hi] 相交
+    pos[1] - FOOT_PROBE_DEPTH <= hi && pos[1] >= lo
+}
+
+/// 玩家原点是否在 trigger 的 model AABB（mins/maxs）内。
+/// **当前未用于传送触发判定**（历史遗留：AABB 判定曾把触发位置抬高到
+/// "凸包与 AABB 之间的空区域"，已被凸包精确判定取代；保留供调试/回退）。
+#[allow(dead_code)]
+fn in_aabb(pos: &V3, t: &TeleportTrigger) -> bool {
+    let (Some(min), Some(max)) = (&t.mins, &t.maxs) else {
+        return false;
+    };
+    pos[0] >= min[0]
+        && pos[0] <= max[0]
+        && pos[1] >= min[1]
+        && pos[1] <= max[1]
+        && pos[2] >= min[2]
+        && pos[2] <= max[2]
+}
+
+/// 贴面/跨斜面容差（units，**仅斜面 trigger + 落地状态生效**）：玩家物理
+/// origin（碰撞箱底中心）在斜面上因跨斜面效应高出表面 8~44（半宽 16 ×
+/// tan(坡角)）。落地时斜面传送允许脚底高于凸包顶 64（"站在斜面上"）；
+/// **空中不因容差触发**（严格身体相交——跳入区域才触发）；**平面传送
+/// 无容差**（不做任何抬高）。
+const TRIGGER_FACE_GAP: f64 = 64.0;
+
+/// trigger 是否为斜面传送（planes 中存在倾斜面，|ny| ∈ (0.05, 0.95)）。
+fn is_sloped(t: &TeleportTrigger) -> bool {
+    t.planes
+        .iter()
+        .any(|p| p[1].abs() > 0.05 && p[1].abs() < 0.95)
+}
+
+/// **A 路径区域判定**（"碰到传送区域才触发"）：玩家竖直线段
+/// （[pos.y, pos.y+body_top]）与 trigger **凸包**相交——XZ 受凸包竖直平面
+/// 约束（凸包 XZ 投影内）+ 垂直凸包区间相交。**gap 仅斜面 + 落地生效**
+/// （落地站在斜面上允许脚底高于凸包顶 64，覆盖跨斜面 origin 提升）；
+/// **空中 gap=0**（严格身体相交——跳入区域才触发，不因容差触发）；
+/// **平面传送 gap=0**（不做抬高）。
+fn in_trigger_zone(pos: &V3, body_top: f64, t: &TeleportTrigger, grounded: bool) -> bool {
+    let mut lo = f64::NEG_INFINITY;
+    let mut hi = f64::INFINITY;
+    let mut has_planes = false;
+    for p in &t.planes {
+        has_planes = true;
+        // 竖直线 x,z 固定：n1*y = d - n0*x - n2*z
+        let rhs = p[3] - p[0] * pos[0] - p[2] * pos[2];
+        if p[1].abs() < 1e-9 {
+            // 竖直平面：XZ 必须在内侧（rhs = d-n0*x-n2*z ≥ 0）
+            if rhs < -0.001 {
+                return false;
+            }
+            continue;
+        }
+        let yc = rhs / p[1];
+        if p[1] > 0.0 {
+            hi = hi.min(yc);
+        } else {
+            lo = lo.max(yc);
+        }
+    }
+    // gap：仅斜面 + 落地（跨斜面 origin 提升）；其余（平面/空中）= 0
+    let gap = if grounded && is_sloped(t) {
+        TRIGGER_FACE_GAP
+    } else {
+        0.0
+    };
+    if !has_planes {
+        // AABB/球形回退：玩家竖直线段与 AABB 相交（含 gap）
+        let (Some(min), Some(max)) = (&t.mins, &t.maxs) else {
+            return false;
+        };
+        return pos[0] >= min[0]
+            && pos[0] <= max[0]
+            && pos[2] >= min[2]
+            && pos[2] <= max[2]
+            && pos[1] <= max[1] + gap
+            && pos[1] + body_top >= min[1];
+    }
+    // 身体线段与凸包区间相交（脚底允许高于凸包顶 gap）
+    pos[1] <= hi + gap && pos[1] + body_top >= lo
 }
 
 /// 死亡判定：玩家 Y 低于阈值 → 返回重生到初始出生点。

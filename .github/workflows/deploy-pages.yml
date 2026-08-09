@@ -1,13 +1,14 @@
 # WebSurf: 构建并部署到 GitHub Pages
 #
 # 仓库布局（两个同级独立工程）：
-#   debug/ = 主工程（Debug Build，TS 物理，IIFE 单文件 dist）
-#   game/  = WebSurf-game（Game Build，Rust 物理，多文件 dist）
+#   debug/ = 主工程（Debug Build，共享 Rust 物理，多文件 dist）
+#   game/  = WebSurf-game（Game Build，共享 Rust 物理，多文件 dist）
 #
-# debug/ 构建链路（与本地 build-dist.cmd 一致）：
+# 两端构建链路（与本地 build-dist.cmd 一致）：
 #   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.126 与 Cargo.lock 精确匹配）
 #   2. esbuild 打包 TypeScript（worker + app）
-#   3. scripts/build-dist.mjs 生成自包含 dist/（index.html + app.js，WASM base64 内嵌 + Worker Blob URL）
+#   3. scripts/build-dist.mjs --multi 生成多文件 dist/（app.js + worker.js + wasm 外置 + textures.mtz 外置，
+#      Pages HTTP 环境；single 模式仅本地 file:// 使用）
 #
 # 部署产物为 dist/（相对路径引用，兼容 Pages 的 /<repo>/ 子路径）。
 

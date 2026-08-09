@@ -1,7 +1,7 @@
 {
   "name": "websurf-game",
   "version": "0.1.0",
-  "description": "WebSurf 最小化实现：BSP 解析（WASM）+ Rust 物理（WASM）+ 双 Worker 预测 + Three.js 渲染。",
+  "description": "WebSurf 最小化实现：BSP 解析（WASM）+ Rust 物理（WASM）+ 主线程唯一物理渲染线 + 单 Worker 权威帧 + Three.js 渲染。",
   "type": "module",
   "license": "MIT",
   "scripts": {

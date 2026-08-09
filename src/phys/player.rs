@@ -33,7 +33,7 @@ pub const DEFAULT_HULL_STAND_HEIGHT: f64 = 72.0;
 pub const DEFAULT_HULL_DUCK_HEIGHT: f64 = 54.0;
 pub const EYE_STAND: f64 = 64.09;
 pub const EYE_DUCK: f64 = 46.04;
-pub const DUCK_LERP_TIME: f64 = 0.2;
+pub const DUCK_LERP_TIME: f64 = 0.1;
 
 pub const JUMP_HEIGHT: f64 = 57.0;
 pub const BHOP_MAX_SPEED_FACTOR: f64 = 1.1;
@@ -187,7 +187,8 @@ impl Player {
         }
     }
 
-    /// 视角高度（站立/蹲下按 duck_frac 插值）。
+    /// 视角高度：统一按 duck_frac 插值——空中蹲视角也随姿态（0.1s 渐变到
+    /// 蹲姿），落地全程按蹲姿计算、无站立检测相位、无跳变。
     pub fn eye_height(&self) -> f64 {
         let stand = EYE_STAND * (self.stand_maxs[1] / DEFAULT_HULL_STAND_HEIGHT);
         let duck = EYE_DUCK * (self.duck_maxs[1] / DEFAULT_HULL_DUCK_HEIGHT);
@@ -573,7 +574,9 @@ fn update_duck(world: &mut World, p: &mut Player) {
     if want && !p.ducked {
         p.ducked = true;
         if !p.on_ground {
-            // 空中蹲下把脚收起、头部不动
+            // 空中蹲下：**从脚部往上缩**（origin 上移 = 收脚，头顶位置不动）。
+            // 收脚后眼高 = origin+18+46.04 ≈ origin+64.04 ≈ 站立眼高 64.09——
+            // 空中蹲视角自然不变；落地时箱底贴地，眼高 ≈ 站立视角，无跳变。
             let delta = p.stand_maxs[1] - p.duck_maxs[1];
             let tmp = [p.origin[0], p.origin[1] + delta, p.origin[2]];
             if world.is_position_free(&tmp, &p.duck_mins, &p.duck_maxs) {
@@ -581,13 +584,14 @@ fn update_duck(world: &mut World, p: &mut Player) {
             }
         }
     } else if !want && p.ducked {
-        // tryUnduck
+        // tryUnduck：头顶被挡则保持蹲
         if p.on_ground {
             if world.is_position_free(&p.origin, &p.stand_mins, &p.stand_maxs) {
                 p.ducked = false;
             }
             return;
         }
+        // 空中站起：放脚（origin 下移），头顶位置不变
         let delta = p.stand_maxs[1] - p.duck_maxs[1];
         let tmp = [p.origin[0], p.origin[1] - delta, p.origin[2]];
         if world.is_position_free(&tmp, &p.stand_mins, &p.stand_maxs) {
@@ -1029,11 +1033,18 @@ pub fn player_tick(world: &mut World, p: &mut Player, params: &PhysParams, dt: f
     p.land_punch *= (1.0 - 10.0 * dt).max(0.0);
     p.old_jump = p.input.jump;
 
-    // 蹲下视角高度插值
+    // 蹲下视角高度插值：**空中与刚落地 tick 即时置位**（duck_frac 直接置目标
+    // ——空中蹲收脚 origin+18 的瞬间眼高同步到位：眼睛 = origin+18+46.04
+    // = 64.04 ≈ 站立 64.09，轨迹无台阶、无"先上跳再回落"的减速感；落地瞬间
+    // 直接为蹲姿）。**仅地面站/蹲**按 DUCK_LERP_TIME 渐变过渡。
     let target = if p.ducked { 1.0 } else { 0.0 };
-    let rate = dt / DUCK_LERP_TIME;
-    let delta = (target - p.duck_frac).signum() * rate.min((target - p.duck_frac).abs());
-    p.duck_frac += delta;
+    if !p.on_ground || p.ground_ticks_since_landing == 0 {
+        p.duck_frac = target;
+    } else {
+        let rate = dt / DUCK_LERP_TIME;
+        let delta = (target - p.duck_frac).signum() * rate.min((target - p.duck_frac).abs());
+        p.duck_frac += delta;
+    }
 
     p.contacts.clear();
 }

@@ -11,7 +11,7 @@
 | `src/app.ts` | 主线程入口：BSP 解析（world-builder 管线）、物理渲染线、输入层、面板、弹窗 |
 | `src/renderer/` | 渲染：renderer-main（唯一物理渲染线 + AuthorityCalibrator）/ camera-controller / collider-debug / plane-inspector / fog-manager / light-manager / lod-manager / lightmap-shader |
 | `src/worker/` | 权威帧：main（共享 auth-loop + worker-dispatch 接线）/ physics-worker（物理面板参数）/ worker-types / mtz-data |
-| `src/world/` | pvs-manager / spawn-loader / collider-adapter（可视化用）/ teleport-manager（可视化用）/ types |
+| `src/world/` | pvs-manager / spawn-loader / collider-adapter（可视化用）/ teleport-manager（可视化用）/ custom-teleports（自定义传送点持久化）/ types |
 | `src/physics/` | param-defs / physics-params（面板参数管理器）；`math/vec3.ts`、`physics/Collision/Collision.types.ts`（渲染层类型，保留） |
 | `src/game/` | **特色**：计时挑战状态机（GameState，主线程 take_event 消费） |
 | `src/main-wasm.ts` / `default-pack.ts` | 主线程 wasm 初始化 / 默认纹理包加载 |

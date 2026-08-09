@@ -71,9 +71,8 @@ export class RendererMain {
   /** 近平面收缩探测距离默认（HU）：相机距墙最小距离 = 碰撞箱半宽 16，射线必须
    * 能覆盖该距离才能探测到面前的墙——原固定 near=maxDim/1000（大地图 50+）
    * 贴墙时墙被近平面裁剪 → 透视看到地图外面。
-   * 48 = 3×最小贴墙距离：配合 8 个水平探测方向（相邻夹角 45°），任意贴墙
-   * 角度下最近方向与墙面夹角 ≥ 22.5°，斜距 ≤ 16/sin22.5° ≈ 41.8 < 48，
-   * 垂直墙全角度可探测（原 32 + 仅 4 正交方向时斜贴墙掠射角 < 30° 会漏检）。 */
+   * 48 = 3×最小贴墙距离：配合 4 个水平探测方向（前/后/左/右），贴墙角度下
+   * 最近方向与墙面夹角足够小时斜距 ≤ 16/sinθ，垂直墙主要角度可探测。 */
   private static readonly NEAR_PROBE_DIST_DEFAULT = 100;
   private static readonly CAMERA_NEAR_MIN = 0.05;
   /** near 收缩系数默认：near = 最近几何距离 × 此值。 */
@@ -314,7 +313,7 @@ export class RendererMain {
   }
 
   /**
-   * 近平面自适应（同步自主项目）：检测相机 6 方向（相机局部系）
+   * 近平面自适应（同步自主项目）：检测相机 4 方向（相机局部系，4 水平正交）
    * NEAR_PROBE_DIST 内最近的 mesh，动态设置 camera.near。
    * - 贴墙 → near = max(最近距离 × 0.8, CAMERA_NEAR_MIN)，墙面不被裁剪
    * - 空旷 → 恢复场景默认
@@ -345,22 +344,17 @@ export class RendererMain {
       });
     }
 
-    // 2. 相机局部基向量 + 6 方向（4 水平正交 + 上下）探测最近几何：
-    //    用户定调 2026-08-08——距离 90 下方向数收益递减，4 水平 + 上下
-    //    覆盖绝大多数贴墙角度（斜贴 <10.2° 掠射才漏检）；上下保坡面/地面
+    // 2. 相机局部基向量 + 4 方向（4 水平正交）探测最近几何
     let minD = Infinity;
     if (candidates.length > 0) {
       const q = camera.quaternion;
       this._nearDirF.set(0, 0, -1).applyQuaternion(q);
       const right = this._nearDirR.set(1, 0, 0).applyQuaternion(q);
-      const up = this._nearDirU.set(0, 1, 0).applyQuaternion(q);
       const dirs = [
         this._nearDirF,
         this._nearDirF.clone().negate(),
         right.clone(),
         right.clone().negate(),
-        up.clone(),
-        up.clone().negate(),
       ];
       for (const dir of dirs) {
         this._nearRaycaster.set(this._nearOrigin, dir);

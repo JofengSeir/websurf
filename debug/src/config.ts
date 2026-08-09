@@ -117,16 +117,6 @@ export interface DebugConfig {
   visViewDistance: number;
   /** 准星射线检测（hover 查看模型/实体平面/触发面信息）。 */
   showPlaneInfo: boolean;
-  /**
-   * 传送触发模式（阶段 4：面板 UI 已删除——Rust 物理固定双条件 OR 触发，
-   * 无 StartTouch/落地检测之分；字段保留仅为 config 段对齐与旧 localStorage
-   * 持久化兼容，不再有任何 UI/逻辑消费）。
-   */
-  teleportTriggerMode: 'start-touch' | 'start-touch-grounded';
-  /**
-   * 触发传送所需连续着地帧数（同上：面板 UI 已删除，保留为 config 段对齐占位）。
-   */
-  groundedFramesRequired: number;
 }
 
 /** 纹理画质配置（mosaic 共享模块，运行时切换贴图，无需重载地图）。 */
@@ -230,9 +220,6 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     showVis: false,
     visViewDistance: 1024,
     showPlaneInfo: false,
-    // 阶段 4：传送触发面板 UI 已删除，字段保留为 config 对齐占位（默认值不再消费）
-    teleportTriggerMode: 'start-touch',
-    groundedFramesRequired: 1,
   },
   texture: {
     quality: 'original',
