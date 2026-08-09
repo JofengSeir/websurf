@@ -28,7 +28,7 @@ scene-data（GLB 字节 transfer + 各 JSON）
 | PVS 剔除 | `PvsManager`（cluster 位图）+ `LodManager`（**2 级 LOD**：近/远 + PVS 隐藏，距离剔除） |
 | Lightmap | 图集化 + RGBExp32 解码（`lightmap-shader.ts` 注入 onBeforeCompile） |
 | 雾 | `FogManager`（场景半径/中心自适应） |
-| 近平面自适应 | 6 方向探测（4 水平正交 + 上下 2，距离 100）× 收缩系数 0.3，面板实时可调 |
+| 近平面自适应 | 4 方向探测（4 水平正交，距离 100）× 收缩系数 0.3，面板实时可调 |
 | 准星 | CSS 变量驱动 4 线 + 中心点（颜色/线长/粗细/间隙/描边），localStorage 持久化 |
 
 ## 4. 调试可视化
@@ -58,9 +58,9 @@ scene-data（GLB 字节 transfer + 各 JSON）
 
 ## 6. 自定义传送点
 
-- 「保存当前位置」（`get-player-pos` 消息）→ localStorage 持久化（按地图名）；坐标传送（`teleport-to-pos`）、清空。
+- 「保存当前位置」（主线程本地 `rendererMain.getCurrentState()`）→ localStorage 持久化（按地图名）；坐标传送（`teleport-to-pos`）、清空。
 
 ## 7. 内存管理
 
-- 地图重载：`disposeScene()` 递归释放旧 BSP 模型 GPU 资源（geometry/material/纹理 + renderLists/LOD/PVS/碰撞可视化/插值缓存）。
+- 地图重载：`disposeScene()` 递归释放旧 BSP 模型 GPU 资源（geometry/material/纹理 + renderLists/LOD/PVS/碰撞可视化）。
 - 画质切换：`map.dispose()`（见 materials 文档）。

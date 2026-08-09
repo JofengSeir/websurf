@@ -23,7 +23,7 @@ websurf/
 │   ├── vendor/vmdl/             vendored vmdl（VTX 条带展开修复，单副本）
 │   └── serve.py                 共享开发服务器（COOP/COEP + CORS + WASM MIME）
 ├── debug/                    WebSurf-debug（Debug Build）：全功能调试测试页面
-│   ├── crates/wasm/src/         lib.rs（导出层）+ shell_colliders.rs（薄壳碰撞特色）+ debug_probe.rs
+│   ├── crates/wasm/src/         lib.rs（导出层，唯一文件）
 │   ├── src/                     TS：app/renderer/worker/world/physics(参数)/game + main-wasm/default-pack
 │   └── web/                     dev 页面（index.html + 构建产物）
 ├── game/                      WebSurf-game（Game Build）：最小化游戏化实现
@@ -52,7 +52,7 @@ websurf/
 | `phys/authority-calibrator.ts` | `AuthorityCalibrator`（correctFromAuthority 三条件+冷却+回滚 / calibrateVelocity / applyCollisionCorrection / resetTo） | 主线程渲染物理的权威校准 |
 | `input/input-layer.ts` | `INPUT_CLAMP` / `M_YAW` / `layerMouseDelta` / `qeEquivalentDx` | 输入层（灵敏度乘入 + Q/E 等效像素） |
 | `phys/params.ts` | `buildPhysicsParams`（sensitivity:1、jump_height 换算、全量 snake_case） | 面板参数 → Rust set_params |
-| `phys/world-builder.ts` | `buildWorldBundle`（bytes → WorldBundle：colliderSource 三档 + 薄壳回退 + 缺失纹理 + GLB with defaults + onProgress） | 地图导入导出统一管线 |
+| `phys/world-builder.ts` | `buildWorldBundle`（bytes → WorldBundle：colliderSource 三档 + 可视网格回退 + 缺失纹理 + GLB with defaults + onProgress） | 地图导入导出统一管线 |
 
 **共享原则**：物理/解析/物理渲染（Rust + TS）单副本——**修改一处，两端编译即同步生效**；各工程 `crates/wasm/src/lib.rs`（wasm 导出层与特色函数）与 TS 前端（面板 UI、调试可视化、计时挑战、渲染层）保持各自。
 
@@ -99,7 +99,7 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 | `mod.rs` | `PhysWorld` wasm 绑定层：`build_world` / `tick` / `predict` / `respawn` / `teleport_to(_spawn)` / `set_spawn_points` / `set_state` / `set_velocity` / `set_yaw_pitch` / `set_death_y` / `set_params` / `set_hull` / `set_noclip` / `state` / `take_event` |
 | `world.rs` | 世界碰撞：brush/tri 双空间索引（BrushGrid/TriangleGrid）+ Minkowski 扫掠盒 |
 | `player.rs` | 全套 CS 移动语义（WalkMove/AirMove/Accelerate/Friction/Jump/Duck/Ladder/StepMove/StuckCheck…）+ `PhysParams`（19 项可调） |
-| `teleport.rs` | 传送检测（凸包精确判定 > AABB > 球形；StartTouch 边沿 + 落地脚底 OR）+ 死亡判定（`set_death_y`） |
+| `teleport.rs` | 传送检测（A 路径：竖直线段 [脚底,脚底+身高] 与凸包区间相交，gap=落地&&斜面?64:0；B 路径：仅落地，脚底往下 8 区间相交；surfing 滑行不触发；冷却 0.5s）+ 死亡判定（`set_death_y`） |
 
 `build_world` 输入为 JSON 字符串 + 出生点标量（与 BspProcessor 的导出输出**同构**，零转换）：
 `brushJson`（WasmBrush[]）、`triJson`（TriMesh[]）、`teleportJson`（{teleports,triggers}）+ `spawn_x/y/z` 与 `spawn_yaw`（4 个独立 f64 标量，非 JSON）。
@@ -153,8 +153,8 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 | 解析/导出/物理渲染 | 主线程（与 game 同模式，共享 ts-shared） | 主线程 |
 | 权威帧 Worker | 共享 auth-loop / worker-dispatch（debug 扩展：物理面板参数、mtzB64 内嵌） | 共享 auth-loop / worker-dispatch |
 | 面板 | 侧边栏手风琴（HTML 静态 + app.ts 绑定） | ESC 弹出面板（`panel-controller.ts` + 键位录制） |
-| 特色功能 | 薄壳碰撞、调试探针、计时挑战、自定义传送点、准星射线、碰撞可视化、缺失纹理弹窗 | 键位自定义、noclip、速度面板、tick 锁定预留 |
+| 特色功能 | 计时挑战、自定义传送点、准星射线、碰撞可视化（4 开关 + 4 距离滑块）、缺失纹理弹窗 | 键位自定义、noclip、速度面板、tick 锁定预留 |
 
 **两端共有功能**（共享实现，改一处双端生效）：物理（Rust websurf-phys）、地图导入导出（Rust wasm-core + ts-shared world-builder）、物理渲染/权威帧（ts-shared auth 系）、画质切换、缺失纹理回退、双模式打包。
 
-**工程特有**（各自维护）：面板 UI、调试可视化、计时挑战、自定义传送点、渲染层（light/fog/lightmap/camera）、wasm 导出层与特色函数（debug 薄壳碰撞等）。
+**工程特有**（各自维护）：面板 UI、调试可视化、计时挑战、自定义传送点、渲染层（light/fog/lightmap/camera）、wasm 导出层与特色函数（debug 调试 API 等）。

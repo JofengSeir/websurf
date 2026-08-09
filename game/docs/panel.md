@@ -18,7 +18,7 @@
 
 | Pane | 内容 |
 |---|---|
-| 通用（general） | 加载地图、状态、出生点下拉、重生 |
+| 通用（general） | 加载地图、出生点下拉、重生 |
 | 物理 | tickRate（48-128）、gravity/accelerate/airAccel/friction/maxSpeed/walkSpeed/crouchSpeed/stopSpeed/jumpSpeed、autobhop/bhopSpeedClamp/noPrestrafe、teleportGateTicks |
 | 体型 | hull 半宽/站高/蹲高 + 恢复默认 |
 | 按键 | 键位列表 + 录制（点击 → 按新键 → 保存 localStorage `websurf-game.keymap.v1`） |

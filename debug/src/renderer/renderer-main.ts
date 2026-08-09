@@ -145,7 +145,6 @@ export class RendererMain {
   private readonly _nearOrigin = new THREE.Vector3();
   private readonly _nearDirF = new THREE.Vector3();
   private readonly _nearDirR = new THREE.Vector3();
-  private readonly _nearDirU = new THREE.Vector3();
   private readonly _nearSphere = new THREE.Sphere();
   private nearCheckToggle = false;
   /** 场景默认 near（maxDim/1000 下限 NEAR_MIN）。 */
@@ -530,10 +529,10 @@ export class RendererMain {
   }
 
   /**
-   * 近平面自适应：检测相机 6 方向（相机局部系）NEAR_PROBE_DIST 内最近的 mesh，动态设置 camera.near。
+   * 近平面自适应：检测相机 4 方向（相机局部系，4 水平正交）NEAR_PROBE_DIST 内最近的 mesh，动态设置 camera.near。
    * - 贴墙 → near = max(最近距离 × 0.8, CAMERA_NEAR_MIN)，墙面不被裁剪（相机不动，仅改投影）
    * - 空旷 → 恢复场景默认
-   * 性能：包围球粗筛候选后做 6 方向 raycaster，每 2 帧一次。
+   * 性能：包围球粗筛候选后做 4 方向 raycaster，每 2 帧一次。
    */
   private updateNearPlane(px: number, py: number, pz: number): void {
     const camera = this.camera;
@@ -558,22 +557,17 @@ export class RendererMain {
       }
     });
 
-    // 2. 相机局部基向量 + 6 方向（4 水平正交 + 上下）探测最近几何：
-    //    用户定调 2026-08-08——距离 90 下方向数收益递减，4 水平 + 上下
-    //    覆盖绝大多数贴墙角度（斜贴 <10.2° 掠射才漏检）；上下保坡面/地面
+    // 2. 相机局部基向量 + 4 方向（4 水平正交）探测最近几何
     let minD = Infinity;
     if (candidates.length > 0) {
       const q = camera.quaternion;
       this._nearDirF.set(0, 0, -1).applyQuaternion(q);
       const right = this._nearDirR.set(1, 0, 0).applyQuaternion(q);
-      const up = this._nearDirU.set(0, 1, 0).applyQuaternion(q);
       const dirs = [
         this._nearDirF,
         this._nearDirF.clone().negate(),
         right.clone(),
         right.clone().negate(),
-        up.clone(),
-        up.clone().negate(),
       ];
       for (const dir of dirs) {
         this._nearRaycaster.set(this._nearOrigin, dir);

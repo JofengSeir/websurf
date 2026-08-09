@@ -7,8 +7,8 @@
 | 目录 | 定位 | 说明 |
 |---|---|---|
 | [`src/`](src/) | 共享层 | `phys/`（websurf-phys：Rust 物理 WASM 核心）、`wasm-core/`（websurf-wasm-core：BSP 解析/GLB/模型/纹理解析）、`maps/`（BSP 地图资源）、`vendor/vmdl/`（vendored vmdl 单副本）、`serve.py`（dev 服务器） |
-| [`debug/`](debug/) | 主工程（Debug Build） | 全功能调试测试页面，TS 物理已由共享 Rust 物理替代；含薄壳碰撞/调试 API 特色（`crates/wasm/src/shell_colliders.rs`） |
-| [`game/`](game/) | WebSurf-game（Game Build） | 尝试游戏化的最小化实现，Rust 物理 + 双 Worker 权威/预测 |
+| [`debug/`](debug/) | 主工程（Debug Build） | 全功能调试测试页面，TS 物理已由共享 Rust 物理替代；含调试 API 特色（`parse_entities`/`list_pakfile`/`export_visleaf_pvs` 等，仅 debug 导出） |
+| [`game/`](game/) | WebSurf-game（Game Build） | 尝试游戏化的最小化实现，Rust 物理 + 主线程唯一物理渲染线 + 单 Worker 权威帧 |
 
 入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` 双入口。
 

@@ -519,6 +519,9 @@ export class PanelController {
     const setVal = (id: string, val: string): void => {
       const el = document.getElementById(id) as HTMLInputElement | null;
       if (el) el.value = val;
+      // 同步滑块旁的数字输入框（否则数值框恒显示 HTML 默认值）
+      const num = document.getElementById(`${id}Num`) as HTMLInputElement | null;
+      if (num) num.value = val;
     };
     const setChecked = (id: string, val: boolean): void => {
       const el = document.getElementById(id) as HTMLInputElement | null;

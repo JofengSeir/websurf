@@ -173,15 +173,18 @@ impl PhysWorld {
         if self.noclip {
             noclip_step(&mut self.player, dt, &self.params);
         } else {
-            // 传送检测（权威才检测；predict 禁用；落地稳定 ≥ gate 帧才判定位于传送平面——
-            // 落地 = 可站面（normal.y >= 0.7），斜面滑行（surfing）不算落地、不触发传送，
-            // 修复正常滑翔图坡底 trigger 在滑行中被多点下探误触）
+            // 传送检测（权威才检测；predict 禁用；surfing 滑行不触发；
+            // gate_ticks 参数已无效——check 内不使用，仅保留签名兼容）
             if let Some(dest) = self.teleport.check(
                 &self.player.origin,
                 self.player.contact_ticks,
                 self.params.teleport_gate_ticks,
                 dt,
                 false,
+                // 滑行（surfing）不触发传送
+                self.player.surfing,
+                // 身体高度（站立 72 / 蹲伏蹲箱高）——A 路径身体线段判定
+                self.player.maxs()[1],
             ) {
                 self.event = Some(PhysEvent::Teleport {
                     targetname: dest.targetname.clone(),

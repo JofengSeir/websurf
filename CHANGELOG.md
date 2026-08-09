@@ -6,25 +6,24 @@
 
 ### 新增
 
-- 共享内存**输入环形缓冲**（SPSC 无锁，64 槽 SOA，每样本带 `performance.now()` 时间戳）替换单槽累加器：
-  批量消费聚合（增量求和保留 + 最新按键 + 首末时间戳）、满则覆盖最旧（自动降采样）、
-  积压 ≥ 8 时 `Atomics.notify` 唤醒（为 Worker 自驱循环铺路）
-- HUD 帧率显示拆分：**真实渲染帧率**（主线程 rAF 统计）与 Worker 处理频率
-  （墙钟统计——修复物理 dt 含 Worker 抖动导致显示值虚低的问题）
-- **渲染端外推插帧**（dead-reckoning）：物理 64Hz 固定步但快照随渲染频率写入，
-  存在"空快照"（位置不变、时间前进）窗口 + Worker 写帧延迟抖动 → 旧 LERP 的
-  `alpha` 被 clamp 到 1 时画面"停等"物理，高速滑行呈"停-动-停"微卡顿。
-  修复：`alpha > 1` 时用快照**真实速度一阶外推**位置（上限 `EXTRAPOLATE_MAX_S`
-  = 1/64s，防外推跑飞穿墙），中间渲染帧保持连续运动；yaw/pitch 保持 cur；
-  **速度门限** `EXTRAPOLATE_MIN_SPEED = 500`：横向(xz)与竖向(y)速度**均** < 500
-  时不外推（起步拉地速阶段运动不可预测，退回停等最新快照）。
-  **低速门限**：横向(xz)或纵向(y)速度任一 < 500 u/s 时物理帧间位置变化小且
-  运动不可预测（站立/起步/贴墙/垂直下落），外推只会引入微漂移——**禁用外推**
-  等待物理快照；仅横向与纵向都 ≥ 500（高速对角运动）时启用外推平滑
+- **共享 TS 层收敛（0f3558b）**：`src/ts-shared/`（auth/{shared-state,auth-loop,
+  worker-dispatch}、input/input-layer、phys/{authority-calibrator,params,
+  world-builder}）——两端共用 SAB 输入槽（BigInt64 原子累加）与权威双缓冲
+  （512B）、权威循环（setTimeout 4ms 自驱 + 固定步长 1/tickRate + 累积器无封顶）、
+  消息分发、校准（三条件 + 250ms 冷却 + 在途回滚）、输入层、参数映射、地图导入
+  导出管线；debug/game 删除各自 worker/shared-state.ts 与 physics-loop.ts，
+  debug 删除 shell_colliders.rs（薄壳碰撞）与 debug_probe.rs；**LERP/外推插帧
+  删除**——渲染改为主线程预测物理直读 state() + 权威速度外推校准
 - **面板可用性**：所有数值控件（灵敏度/QE 转速/视距/落地帧数/碰撞倍率/物理参数）
   增加**数字输入框**（step=any 精确输入，滑块步进统一为 1）；**物理模式/碰撞来源/
   PVS 剔除/视距**改为**进入地图前即可设置**（碰撞来源修改后提示"重新加载地图生效"，
   不再需要先进地图再改再重进）
+- **碰撞可视化（debug）**：4 独立开关 + 4 距离滑块（显示brush碰撞/显示触发区域/
+  显示模型phy碰撞/显示模型可视碰撞；config.debug：showSolids/brushViewDistance/
+  showTriggers/triggerViewDistance/showPhy/phyViewDistance/showVis/visViewDistance，
+  0=全量）；phy 橙（surfaceprop 存在）/可视网格紫/brush 绿黄红/trigger 青紫灰橙；
+  线框**不透明 + depthTest:false**（防透明混合染绿）；phy/vis 独立 Group、
+  phyDirty 距离变更立即重建
 
 ### 变更
 
@@ -35,8 +34,8 @@
     `materials/textures.mtz`（默认纹理包 9448+ 条，三处副本同步）、`maps/`、
     `serve.py`（共享 dev 服务器）
   - `debug/` = **WebSurf-debug**（原全功能主项目迁入）：`crates/wasm/src/`
-    仅导出层 + `shell_colliders.rs`（薄壳碰撞特色）+ `debug_probe.rs`；`src/`
-    TS 全套（app/renderer/worker/world/physics/game/panel）；`web/`
+    仅导出层 `lib.rs`；`src/` TS 全套（app/renderer/worker/world/physics/game/panel）；
+    `web/`
   - `game/` = **WebSurf-game**：`crates/wasm/src/` 仅 `lib.rs` 导出层
     （BspProcessor/PhysWorld/画质 API re-export），物理/解析经 path 依赖
     共享层，`[patch.crates-io]` → `../src/vendor/vmdl`
@@ -60,13 +59,11 @@
   materials）替换旧 `bsp-architecture` / `bsp-export-status` / `project-overview`
   / `项目时序图`；`game/docs/` 新四篇（overview / physics / panel / materials）
   替换旧实现状态文档
-- `frame` 信号改为纯触发（去除主线程时间戳），物理 dt 由 Worker 侧 `performance.now()`
-  计算（与主线程同源时钟，LERP 插值基准不变）
-- 共享内存布局重设计：输入区由单槽 `inDx/inDy` 累加器改为 `inHead/inTail` 环形缓冲
-  （`SHARED_BUFFER_SIZE` 144B → 1904B）
+- 共享内存布局（0f3558b 后）：输入区为 BigInt64 `dxAcc/dyAcc` 原子累加槽 +
+  权威帧双缓冲（`SHARED_BUFFER_SIZE` 512B，V_A 代际，无锁协议）
 - 重建 WASM：pkg 补全模型三角形碰撞导出 API（`export_model_tri_colliders` /
   `export_model_phy_colliders`），`colliderSource`（auto/visual/phy）路径真正生效
-  （此前 pkg 过期，模型碰撞体始终回退薄壳 brush）
+  （薄壳 brush 兜底已整体移除，导出失败回退可视网格）
 
 ### 修复
 
@@ -80,8 +77,7 @@
   near 保持默认大值（大地图 50+）→ 墙被近平面裁剪，透视看到地图外面。已与上游
   cs-movement 逐项核对（碰撞箱 16/72/54、眼睛 64.09/46.04、DIST_EPSILON、brush
   碰撞逻辑全一致），物理层无差异，纯渲染层 bug
-  - **垂直墙增强**：探测方向最终 **6 条**（4 水平正交 + 上下 2——4 条纯水平会
-    丢坡面/地面，上下保脚下与头顶；斜贴 <9.2° 掠射才漏检）、探测距离 **100**、
+  - **垂直墙增强**：探测方向最终 **4 条**（4 水平正交）、探测距离 **100**、
     收缩系数默认 **0.3**（near = 最近距离 × 0.3，更保守不易裁墙）
   - **面板可调（实时生效）**：显示设置新增「近平面探测距离」「近平面收缩系数」
     滑块 + 输入框，`RendererMain.setNearParams()` 下一帧生效，无需重载地图
@@ -106,11 +102,11 @@
   **250ms 冷却**防抖；**撤回机制**：同步在途再次大幅分叉（>500 或 yaw>45°）
   视为"渲染为准"方向错误 → 以权威为准回滚渲染（撤销推错影响）
 
-- **传送触发（game，用户定调双条件）**：**StartTouch 外→内边沿**（任何状态
-  跨入 trigger 即触发，空中/滑行/落地）+ **落地脚底检测**（刚落地上升沿且
-  脚底 24 单位内存在传送区域 → 触发；**不是**"区域内落地才传送"的停留语义）。
-  探测深度 `TRIGGER_PROBES` 最终 [0, 24]（覆盖与斜面重合/薄片 trigger）。
-  `was_landed` 落地边沿跟踪
+- **传送触发（共享物理 teleport.rs，2026-08-09 最终版）**：A 路径（任意状态）
+  竖直线段 [脚底, 脚底+身高] 与凸包区间相交（XZ 凸包竖直平面约束；gap =
+  落地 && 斜面 ? 64 : 0——跨斜面 origin 提升；空中/平面 0）+ B 路径（仅落地，
+  脚底往下 8 单位区间相交）；surfing 滑行不触发；冷却 0.5s。历史方案（StartTouch
+  边沿/竖直射线/凸包顶点/AABB/投影）全部废弃
 
 - **sv_airaccelerate 100 → 150**（KZ/HNS 服务器值；主项目 config + game Rust）
 
@@ -136,8 +132,9 @@
   - **速度骤降校验**：未归零但大幅减速（空中 + 撞击接触 + 降幅 >30%）记录
     `slowdown-XX% c[法线@fraction...]` 诊断——HUD 显示减速来源（多平面剪裁/
     夹缝转向），便于针对性修复
-  - **归零诊断**：所有归零路径记录原因（allSolid/planes≥8/cornered×N/blocked×6/
-    stuck×N），经 stats 回传，HUD 显示"卡因[xxx]"
+  - **归零诊断**：归零路径记录原因（allSolid/planes≥8/cornered×N/blocked×6/
+    stuck×N），经 stats 回传，HUD 显示"卡因[xxx]"（**注：该诊断 HUD 已随
+    0f3558b 移除**，代码无 zeroCause）
 
 ## [0.1.0] - 2026-08-05
 
