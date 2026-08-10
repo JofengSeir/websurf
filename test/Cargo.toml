@@ -1,0 +1,22 @@
+# WebSurf-test — Rust workspace 根
+#
+# 单一 WASM crate（crates/wasm），薄导出层：仅 re-export 共享物理系统
+# （仓库根 src/，websurf-phys）的 PhysWorld。不解析 BSP/GLB/纹理——
+# 时序验证用简单手工 brush 世界，聚焦"输入→物理→渲染"共享内存时序。
+
+[workspace]
+members = ["crates/wasm"]
+resolver = "2"
+
+# 与 game/ 同款 [patch.crates-io]（vmdl vendor 到共享目录 src/vendor/vmdl）；
+# 本工程依赖图暂不含 vmdl（无 wasm-core），patch 仅作一致性保留。
+[patch.crates-io]
+vmdl = { path = "../src/vendor/vmdl" }
+
+# ============================================================
+# 性能优化配置（WASM 构建需启用 LTO + 优化）
+# ============================================================
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
