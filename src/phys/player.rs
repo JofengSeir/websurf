@@ -7,7 +7,7 @@
 //!
 //! 与 TS 版语义逐字一致（Y-up，Source 单位）。纯计算，无 wasm-bindgen 依赖。
 
-use super::world::{LadderVolume, V3, World};
+use super::world::{V3, World};
 
 // ---------------------------------------------------------------------------
 // 常量（原 constants.ts + 各 .config.ts）
@@ -139,7 +139,9 @@ pub struct Player {
     pub ground_normal: V3,
     pub ducked: bool,
     pub duck_frac: f64, // 0 站立，1 蹲下（驱动视角插值）
-    pub on_ladder: Option<LadderVolume>,
+    /// 当前梯子（世界 ladders 索引；None = 不在梯上）。
+    /// 用索引而非克隆的 LadderVolume——热路径（每 tick check_ladder）零克隆。
+    pub on_ladder: Option<usize>,
     pub surfing: bool,
     pub surfed_since_grounded: bool,
 
@@ -167,7 +169,6 @@ pub struct Player {
     // 诊断（最小化：仅保留速度面板所需字段）
     pub prev_origin: V3,
     pub prev_speed: f64,
-    pub contacts: Vec<String>,
 }
 
 impl Player {
@@ -417,10 +418,6 @@ fn try_player_move(world: &mut World, p: &mut Player, _params: &PhysParams, dt: 
         }
 
         let n = tr.normal.unwrap_or([0.0, 0.0, 1.0]);
-        p.contacts.push(format!(
-            "{:.2},{:.2},{:.2}@{:.2}",
-            n[0], n[1], n[2], tr.fraction
-        ));
 
         // 夹缝检测：已有平面与当前法线相对（V 形槽/墙缝）→ 沿交线滑出
         let wedge = planes.iter().find(|pl| dot(pl, &n) < -0.5).copied();
@@ -605,33 +602,34 @@ fn update_duck(world: &mut World, p: &mut Player) {
 
 // -- Ladder ------------------------------------------------------------------
 
-fn check_ladder(world: &World, p: &Player) -> Option<LadderVolume> {
+fn check_ladder(world: &World, p: &Player) -> Option<usize> {
     if p.ladder_cooldown > 0.0 {
         return None;
     }
     let mins = p.mins();
     let maxs = p.maxs();
-    let ladder = world.ladder_at(&p.origin, &mins, &maxs);
-    let ladder = ladder?;
+    let ladder_idx = world.ladder_at(&p.origin, &mins, &maxs)?;
     if p.on_ladder.is_some() {
-        return Some(ladder.clone()); // 已在梯上——保持
+        return Some(ladder_idx); // 已在梯上——保持
     }
     // 仅在空中、或主动走向梯子时抓住
     if !p.on_ground {
-        return Some(ladder.clone());
+        return Some(ladder_idx);
     }
+    let ladder = &world.ladders[ladder_idx];
     let yaw_rad = p.yaw * DEG2RAD;
     let facing_dot = (-yaw_rad.sin()) * (-ladder.facing[0]) + (-yaw_rad.cos()) * (-ladder.facing[2]);
     if p.input.forward && facing_dot > 0.3 {
-        return Some(ladder.clone());
+        return Some(ladder_idx);
     }
     None
 }
 
-fn ladder_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64, ladder: &LadderVolume) {
-    p.on_ladder = Some(ladder.clone());
+fn ladder_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64, ladder_idx: usize) {
+    p.on_ladder = Some(ladder_idx);
     p.on_ground = false;
     p.fall_velocity = 0.0;
+    let ladder = &world.ladders[ladder_idx];
 
     // 跳离：推离梯面
     if p.input.jump && !p.old_jump {
@@ -809,6 +807,18 @@ fn categorize_position(world: &mut World, p: &mut Player) {
         p.contact_ticks = p.contact_ticks.saturating_add(1);
         p.ground_normal = tr.normal.unwrap_or([0.0, 1.0, 0.0]);
         p.origin = tr.end_pos;
+        // CS:GO 风格贴地投影：速度压向地面的法向分量（dot<0）移除——平地（n=(0,1,0)）
+        // 等价于原 walk_move 的 vy 清零（vy≤0 贴地）；坡面保留沿坡分量（vy=0.5|vz|）
+        // → 贴坡滑行/爬升出坡瞬间速度带斜上分量（真实 surf 出坡；修复前出坡必水平、
+        // 飞行高度恒 0）。投影仅发生在贴地判定时——walk_move 不碰 vy → 贴坡加速不受
+        // 泄压（F+A 斜向 surf 加速 2→347→525 保留）
+        let n = tr.normal.unwrap_or([0.0, 1.0, 0.0]);
+        let ground_dot = p.velocity[0] * n[0] + p.velocity[1] * n[1] + p.velocity[2] * n[2];
+        if ground_dot < 0.0 {
+            p.velocity[0] -= n[0] * ground_dot;
+            p.velocity[1] -= n[1] * ground_dot;
+            p.velocity[2] -= n[2] * ground_dot;
+        }
         if was_airborne {
             p.ground_ticks_since_landing = 0;
             // 落地瞬间速度快照（完美重跳继承；perf.enabled=false 时不消费，保留语义）
@@ -885,15 +895,16 @@ fn detect_blocked_move(p: &mut Player) {
 
 fn walk_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64) {
     let mut wish_dir = [0.0, 0.0, 0.0];
-    p.velocity[1] = 0.0;
     apply_friction(&mut p.velocity, params.friction, params.stop_speed, dt);
 
     let wishspeed = compute_wish(p, params, &mut wish_dir);
     accelerate(&mut p.velocity, &wish_dir, wishspeed, params.accelerate, dt);
-    p.velocity[1] = 0.0;
 
-    // nopre：落地速度硬钳到 runSpeed
-    if params.no_prestrafe {
+    // nopre：落地速度硬钳到 runSpeed（防 bhop 预加速——从空中平落时的高速被钳）。
+    // **仅平地（ground_normal.y > 0.999）钳制**：坡面滑行/冲坡/出坡（ground_normal
+    // 倾斜）不钳——撞坡/冲坡的高速被钳到 runSpeed 会让出坡高度/距离与撞击速度无关
+    // （恒定 250 滑行——"出坡物理异常"根因：V 5 倍高度只 +4%）；地面 bhop 预加速照常钳
+    if params.no_prestrafe && p.ground_normal[1] > 0.999 {
         let cap = current_max_speed(p, params);
         if wishspeed > 0.0 && p.ground_ticks_since_landing > 0 {
             let proj = p.velocity[0] * wish_dir[0] + p.velocity[2] * wish_dir[2];
@@ -983,7 +994,6 @@ pub fn create_player(origin: V3, params: &PhysParams) -> Player {
         duck_maxs: [0.0; 3],
         prev_origin: origin,
         prev_speed: 0.0,
-        contacts: Vec::new(),
     };
     apply_hull(
         &mut p,
@@ -1013,7 +1023,7 @@ pub fn player_tick(world: &mut World, p: &mut Player, params: &PhysParams, dt: f
     if !check_stuck(world, p) {
         let ladder = check_ladder(world, p);
         if let Some(l) = ladder {
-            ladder_move(world, p, params, dt, &l);
+            ladder_move(world, p, params, dt, l);
         } else {
             p.on_ladder = None;
             check_jump(p, params);
@@ -1045,6 +1055,4 @@ pub fn player_tick(world: &mut World, p: &mut Player, params: &PhysParams, dt: f
         let delta = (target - p.duck_frac).signum() * rate.min((target - p.duck_frac).abs());
         p.duck_frac += delta;
     }
-
-    p.contacts.clear();
 }

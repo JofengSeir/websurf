@@ -1,8 +1,9 @@
 //! PhysWorld — 权威/预测共用的 Rust 物理世界（wasm-bindgen 绑定层）。
 //!
 //! 组装：World（brush/tri 碰撞 + 双空间索引）+ Player（全套移动语义）+ TeleportManager。
-//! 导出 9 个 API：build_world / tick / predict / respawn / teleport_to / set_death_y /
-//! set_params / set_hull / set_noclip。
+//! 导出 12 个 API：build_world / tick / tick_into / predict / respawn / teleport_to /
+//! set_death_y / set_params / set_hull / set_noclip / state / take_event
+//! （tick_into + state_out_ptr 为零分配热路径：状态写 wasm 固定缓冲，不构造 JS 对象）。
 //!
 //! 线程模型：Worker-A（权威）与 Worker-B（预测）各持一个本实例（同一 wasm 模块，
 //! 各自线性内存）；tick/predict 输入输出经标量传值（每帧 ~8 个 f64），无 SAB 直写。
@@ -65,6 +66,9 @@ pub struct PhysWorld {
     ready: bool,
     /// 最近一次物理事件（传送/死亡），经 take_event 一次性消费。
     event: Option<PhysEvent>,
+    /// 零分配热路径输出缓冲（tick_into 写入；JS 侧经 state_out_ptr 建
+    /// Float64Array 视图直读 pos×3/yaw/pitch/vel×3——不构造 wasm→JS 对象）。
+    state_out: [f64; 8],
 }
 
 #[wasm_bindgen]
@@ -86,6 +90,7 @@ impl PhysWorld {
             noclip: false,
             ready: false,
             event: None,
+            state_out: [0.0; 8],
         }
     }
 
@@ -159,6 +164,40 @@ impl PhysWorld {
         if !self.ready {
             return Ok(self.state_js());
         }
+        self.step_core(dt, keys_mask, dx, dy);
+        Ok(self.state_js())
+    }
+
+    /// 零分配热路径：与 tick 完全同语义（输入应用/角度/传送/死亡/碰撞步进），
+    /// 但状态写入本实例固定缓冲 state_out（不构造 wasm→JS 对象）。
+    /// JS 侧：`new Float64Array(memory.buffer, phys.state_out_ptr(), 8)` 直读
+    /// pos×3 / vel×3 / yaw / pitch（与 JS writeStateRaw 参数序一致），再原子写 SAB——
+    /// 每子步零 JS 对象分配。
+    pub fn tick_into(&mut self, dt: f64, keys_mask: u32, dx: f64, dy: f64) {
+        if !self.ready {
+            return;
+        }
+        self.step_core(dt, keys_mask, dx, dy);
+        let p = &self.player;
+        let o = &mut self.state_out;
+        o[0] = p.origin[0];
+        o[1] = p.origin[1];
+        o[2] = p.origin[2];
+        o[3] = p.velocity[0];
+        o[4] = p.velocity[1];
+        o[5] = p.velocity[2];
+        o[6] = p.yaw;
+        o[7] = p.pitch;
+    }
+
+    /// tick_into 输出缓冲在 wasm 线性内存中的地址（JS 建 Float64Array 视图用；
+    /// wasm 内存增长（memory.buffer 更换）后视图须按 state_out_ptr 重建）。
+    pub fn state_out_ptr(&self) -> usize {
+        self.state_out.as_ptr() as usize
+    }
+
+    /// tick/tick_into 共用核心步进（输入 → 角度 → 传送/死亡/重置 → 碰撞移动）。
+    fn step_core(&mut self, dt: f64, keys_mask: u32, dx: f64, dy: f64) {
         // 输入：键位掩码 → InputState；鼠标增量 → yaw/pitch
         apply_input(&mut self.player, keys_mask);
         self.player.yaw -= dx * (self.params.sensitivity * player::M_YAW);
@@ -208,7 +247,6 @@ impl PhysWorld {
             }
             player_tick(&mut self.world, &mut self.player, &self.params, dt);
         }
-        Ok(self.state_js())
     }
 
     /// 预测微步（Worker-B）：2 子步轻量预测，禁用传送/死亡副作用。
