@@ -1,21 +1,32 @@
 /**
- * WorkerB — three.js 第一人称 BSP 渲染（OffscreenCanvas + WebGL；frame 消息驱动）。
+ * WorkerB — three.js 第一人称 BSP 渲染（OffscreenCanvas + WebGL；WAKEUP 唤醒驱动）。
  *
- * 对齐点（README 最新时序图 阶段3：渲染采样与抽帧）：
+ * 对齐点（README 最新时序图 阶段3：渲染采样）：
  * - 握手：{type:'init-shared', shared: SAB}（main 已 transfer）+ {type:'init-canvas', canvas}
- *   （main 在 transferControlToOffscreen() 后 transfer 控制权）；顺序无关
+ *   （main 在 transferControlToOffscreen() 后 transfer 控制权）；顺序无关；
+ *   消息回退模式（无 SAB）：{type:'init-msg', renderPort}——WorkerA 状态直连端口，
+ *   shared-state 到达即缓存（readState 消费，"仅状态更新时重绘"语义与 SAB 一致）
  * - 场景：{type:'glb', bytes:ArrayBuffer}（主线程 BspProcessor export_glb_with_pakfile_models
  *   产物，transfer）→ GLTFLoader.parse 异步回调挂载；GLB 内嵌纹理在 Worker 内经
  *   createImageBitmap 解码（无需 DOM），外部 URL 贴图由 FileLoader(fetch) 加载——
  *   纹理异步就绪后首帧 renderer.render 上传，个别贴图报错不影响场景挂载
- * - 完全 frame 驱动（无自身 rAF/setTimeout 循环）：收到 {type:'frame'} 消息时执行——
+ * - 帧循环（自驱，**发布驱动**——渲染率 = WorkerA 物理发布率，不受显示刷新率限制）：
+ *   MessageChannel 自投递续环 + waitRenderWakeup(RENDER_WAKEUP)：
+ *   ① **主驱动** = WorkerA 每发布状态后的 notify（writeStateRaw → V++ → notify）——
+ *      无 BSP 轻负载全速 1kHz 渲染（HUD 重绘/s 显示真实发布率）；有 BSP 重场景时
+ *      渲染耗时自然节流（渲染期间错过的 notify 不积压，醒后只渲染最新状态）
+ *   ② 主线程 wake() 的 store+notify 为帧对齐冗余（无等待者时无操作）
+ *   ③ 超时兜底（**自适应**）：有数据（重绘）→ 20ms；无数据/重复参数（V 未变不重绘）
+ *      → 100ms 长超时（降低无效唤醒/空转——性能优化；**发布 notify 不受超时影响**，
+ *      数据源源不断更新时立即唤醒全力渲染）；消息回退模式无数据 → 100ms 低频自检
+ *      （shared-state 到达时立即触发循环——响应及时）
+ * - 采样与重绘（用户核心定调：渲染参数必须唯一来源于 WorkerA 的 1ms 无限制物理真理源——
+ *   本地副本**只被 readState 更新**（无其他来源），Draw 只消费本地副本 → 渲染参数零污染）：
  *   ① shared.readState() 非阻塞 acquire 读 V：已更新 → 读最新槽 S[V&1]（double-check
- *      防撕裂）→ 刷新本地副本（参数永远最新）；未变 → null（本地副本复用）
- *   ② 每帧消息都构建 Draw Calls（相机 = 本地副本 pos + 眼高 + yaw/pitch）→
- *      renderer.render(scene, camera)——**渲染帧率不被 TICK_RATE 限制**（与 game 每 rAF
- *      渲染一致 120+ fps；TICK_RATE 只影响 WorkerA 手感速度修正）
- * - 用户核心定调：渲染参数必须唯一来源于 WorkerA 的 1ms 无限制物理真理源——
- *   本地副本**只被 readState 更新**（无其他来源），Draw 只消费本地副本 → 渲染参数零污染
+ *      防撕裂）→ 刷新本地副本；未变 → 不重绘（状态未更新，上一帧画面保持——
+ *      高频屏不再重复提交相同相机状态的无效 Draw Calls）
+ *   ② 本地副本更新后 → 相机映射 → renderer.render(scene, camera)（渲染帧率不被
+ *      TICK_RATE 限制，仅受物理发布率约束——物理 1kHz 发布时每帧都是新状态）
  * - readState 防撕裂：读 V → 读当前槽 S[V&1] 全部字段（pos/vel/yaw/pitch）→
  *   重读 V 校验（double-check），不一致以新版本重读一次
  *
@@ -31,12 +42,17 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { TestShared, type SharedStateData } from './shared-state.js';
+import { TestShared, type SharedStateMsg, type SharedStateData } from './shared-state.js';
 
 // ── 消息握手（与 main.ts 约定）──────────────────────────────────
 interface InitSharedMessage {
   type: 'init-shared';
   shared: SharedArrayBuffer;
+}
+/** 消息回退模式初始化（无 SAB）：renderPort 为 WorkerA→WorkerB 状态发布直连端口。 */
+interface InitMsgMessage {
+  type: 'init-msg';
+  renderPort: MessagePort;
 }
 interface InitCanvasMessage {
   type: 'init-canvas';
@@ -46,9 +62,6 @@ interface ResizeMessage {
   type: 'resize';
   width: number;
   height: number;
-}
-interface FrameMessage {
-  type: 'frame';
 }
 /** 场景 GLB（主线程 BspProcessor export_glb_with_pakfile_models 产物，transfer 到达）。 */
 interface GlbMessage {
@@ -60,7 +73,29 @@ interface PvsMessage {
   type: 'pvs';
   pvsJson: string;
 }
-type WorkerBMessage = InitSharedMessage | InitCanvasMessage | ResizeMessage | FrameMessage | GlbMessage | PvsMessage;
+/** trace 路径节点（main 转发 WorkerA——3D 世界坐标，场景中画两条线）。 */
+interface TracePointMessage {
+  type: 'trace-point';
+  baseX: number;
+  baseY: number;
+  baseZ: number;
+  tickX: number;
+  tickY: number;
+  tickZ: number;
+}
+/** trace 清除（按钮"删除"——清空路径线）。 */
+interface TraceClearMessage {
+  type: 'trace-clear';
+}
+type WorkerBMessage =
+  | InitSharedMessage
+  | InitMsgMessage
+  | InitCanvasMessage
+  | ResizeMessage
+  | GlbMessage
+  | PvsMessage
+  | TracePointMessage
+  | TraceClearMessage;
 
 /** WorkerB → main 状态摘要（每秒一次；main 更新 DOM HUD）。 */
 interface StatusMessage {
@@ -337,6 +372,61 @@ let gltfLoader: GLTFLoader | null = null;
 /** GLB 是否已成功挂载（状态摘要回传 main 显示加载进度）。 */
 let glbReady = false;
 
+// ── trace 路径线（3D 场景显示：无限制基准[绿] vs tick 实际[红]——记录路径可视化）──
+let traceBasePts: THREE.Vector3[] = [];
+let traceTickPts: THREE.Vector3[] = [];
+let traceBaseLine: THREE.Line | null = null;
+let traceTickLine: THREE.Line | null = null;
+/** 路径节点滚动窗口上限（防内存溢出；按钮删除时清空）。 */
+const TRACE_MAX_POINTS = 2000;
+
+/** 首次 trace-point 时创建两条 3D 路径线（挂 scene；初始隐藏）。 */
+function ensureTraceLines(): void {
+  if (traceBaseLine || !scene) return;
+  traceBaseLine = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color: 0x4ade80 }), // 绿 = 无限制基准
+  );
+  traceTickLine = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color: 0xf87171 }), // 红 = tick 实际
+  );
+  traceBaseLine.visible = false;
+  traceTickLine.visible = false;
+  scene.add(traceBaseLine, traceTickLine);
+}
+
+/** 更新路径线几何（节点 < 2 时隐藏；每次重建 BufferGeometry）。 */
+function updateTraceLine(line: THREE.Line | null, pts: THREE.Vector3[]): void {
+  if (!line) return;
+  if (pts.length < 2) {
+    line.visible = false;
+    return;
+  }
+  line.geometry.dispose();
+  line.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+  line.visible = true;
+}
+
+/** trace 节点（main 转发 WorkerA）：3D 世界坐标累积 → 更新两条线。 */
+function onTracePoint(msg: { baseX: number; baseY: number; baseZ: number; tickX: number; tickY: number; tickZ: number }): void {
+  ensureTraceLines();
+  traceBasePts.push(new THREE.Vector3(msg.baseX, msg.baseY, msg.baseZ));
+  traceTickPts.push(new THREE.Vector3(msg.tickX, msg.tickY, msg.tickZ));
+  if (traceBasePts.length > TRACE_MAX_POINTS) traceBasePts.shift();
+  if (traceTickPts.length > TRACE_MAX_POINTS) traceTickPts.shift();
+  updateTraceLine(traceBaseLine, traceBasePts);
+  updateTraceLine(traceTickLine, traceTickPts);
+}
+
+/** trace 清除（按钮"删除"）：清空节点 + 隐藏线。 */
+function onTraceClear(): void {
+  traceBasePts = [];
+  traceTickPts = [];
+  if (traceBaseLine) traceBaseLine.visible = false;
+  if (traceTickLine) traceTickLine.visible = false;
+}
+
 /** 本地副本：唯一渲染参数源（只被 readState 更新——WorkerA 1ms 无限制物理真理源；
  * 一旦非 null 永不回落 null——首帧竞争保护）。 */
 let localCopy: SharedStateData | null = null;
@@ -344,7 +434,7 @@ let localCopy: SharedStateData | null = null;
 /** PVS 管理器（{type:'pvs'} 消息构建；null = 地图无 PVS 数据 → 全部可见）。 */
 let pvsManager: PvsManager | null = null;
 
-// ── 性能统计（render 内自结算，无自身定时器——渲染由自身 rAF 驱动，绝对自主）──
+/** 渲染统计（帧循环内自结算，无独立定时器）。 */
 const stats = { frames: 0, repaints: 0, fps: 0, repaintSec: 0, t0: performance.now() };
 
 self.addEventListener('message', (e: MessageEvent) => {
@@ -352,6 +442,20 @@ self.addEventListener('message', (e: MessageEvent) => {
   switch (msg.type) {
     case 'init-shared':
       shared = TestShared.init(msg.shared);
+      break;
+    case 'init-msg':
+      // 消息回退模式（无 SAB）：renderPort 直连 WorkerA——shared-state 到达即缓存
+      // （本地副本唯一来源；readState 消费，"仅状态更新时重绘"语义与 SAB 模式一致）
+      shared = TestShared.initMessagingRender();
+      msg.renderPort.onmessage = (ev: MessageEvent<SharedStateMsg>) => {
+        const d = ev.data;
+        if (shared && d && d.type === 'shared-state') {
+          shared.onStateMessage(d);
+          // 数据到达立即触发帧循环（绕过无数据节流——消息回退模式响应及时，
+          // 不等待 MSG_IDLE_INTERVAL_MS 自检）
+          resumeChannel.port2.postMessage(null);
+        }
+      };
       break;
     case 'init-canvas':
       initRenderer(msg.canvas);
@@ -370,10 +474,13 @@ self.addEventListener('message', (e: MessageEvent) => {
         applyPvsVisibility(true);
       }
       break;
-    case 'frame':
-      // 阶段1 帧信号（时序图保留）：触发一次立即渲染——**非渲染驱动**（渲染由自身 rAF
-      // 自驱，绝对不受主线程/WorkerA 任何行为限制）；与自驱循环天然合并，无节流/堆积问题
-      if (renderer && scene && camera && shared) onFrame();
+    case 'trace-point':
+      // trace 路径节点（3D 场景两条线：绿=无限制基准 / 红=tick 实际）
+      onTracePoint(msg);
+      break;
+    case 'trace-clear':
+      // 按钮"删除"：清空路径线
+      onTraceClear();
       break;
   }
 });
@@ -386,12 +493,10 @@ function initRenderer(canvas: OffscreenCanvas): void {
   // 主线程 resize 消息可按需带 dpr——固定 1 性能优先）
   renderer.setPixelRatio(PIXEL_RATIO_MAX);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  // 渲染绝对自主：自身 rAF 自驱（帧率 = 显示器刷新率，不受 frame 消息/WorkerA/主线程影响）
-  if (workerRaf) workerRaf(rafLoop);
-  else {
-    // 回退：Worker 环境无 rAF（旧浏览器）→ setTimeout 16ms 循环（仍自驱，不受外部限制）
-    setTimeout(rafLoop, 16);
-  }
+  // 帧循环自驱启动：发布驱动（MessageChannel 自投递 + waitRenderWakeup(RENDER_WAKEUP)）——
+  // 主驱动 = WorkerA 每发布状态 notify（渲染率 = 物理发布率，无 BSP 全速 1kHz）；
+  // 主线程 wake 冗余帧对齐；20ms 超时兜底（WorkerA/主线程停摆渲染不冻结）
+  resumeChannel.port2.postMessage(null);
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(BG_COLOR);
@@ -555,43 +660,86 @@ function applyPvsVisibility(force = false): void {
 }
 
 /**
- * 阶段3 帧处理（用户核心定调：渲染参数必须唯一来源于 WorkerA 的 1ms 无限制物理真理源——
- * 本地副本只被 readState 更新，无其他来源；**渲染帧率不被 TICK_RATE 限制**——每帧消息都
- * 绘制（与 game 每 rAF 渲染一致，120+ fps；TICK_RATE 只影响 WorkerA 手感速度修正））：
- * ① 非阻塞读 V → 已更新则读最新槽 S[V&1]（无撕裂）→ 刷新本地副本（参数永远最新）
- * ② 本地副本非 null → 构建 Draw Calls → renderer.render → GPU（每帧消息都 Draw）
+ * 帧循环超时兜底（ms）：WorkerA/主线程停摆时 WorkerB 自检节奏（渲染不冻结）。
+ * 主驱动 = WorkerA 每发布状态的 notify（writeStateRaw → notify(RENDER_WAKEUP)）——
+ * 渲染率 = 物理发布率（无 BSP 轻负载全速 1kHz；重场景渲染耗时自然节流）。
+ * 主线程 wake 的 store+notify 为帧对齐冗余（无等待者时无操作）。
  */
-/** 自驱渲染循环：每 rAF 采样 → 绘制（渲染绝对自主——帧率 = 显示器刷新率，
- * 不受 frame 消息频率 / WorkerA 物理背压中断 / 主线程繁忙的任何限制）。
- * readState 非阻塞（WorkerA 写状态与渲染完全解耦——渲染永不等待物理）。
- * try/catch 保护：单帧渲染异常（GPU 驱动/几何错误）不中断循环。 */
-function rafLoop(): void {
+const RENDER_TIMEOUT_MS = 20;
+/** 无数据/重复参数时的长超时（ms）：V 未变（readState null）→ 下次 wait 用此值——
+ * 降低无效唤醒/空转（性能优化）；**发布 notify 不受超时影响**（数据到来立即唤醒），
+ * 因此长超时不影响"数据源源不断更新时的全力渲染"。 */
+const RENDER_IDLE_TIMEOUT_MS = 100;
+/** 消息回退模式无数据时的自检间隔（ms）：无阻塞原语 + 消息自旋会 2-10kHz 空转——
+ * V 未变时降为低频自检（10Hz）；shared-state 到达时立即触发循环（数据响应及时）。 */
+const MSG_IDLE_INTERVAL_MS = 100;
+/** 自适应超时（SAB 模式）：有数据（重绘）→ RENDER_TIMEOUT_MS；无数据 → RENDER_IDLE_TIMEOUT_MS。 */
+let renderTimeout = RENDER_TIMEOUT_MS;
+
+/**
+ * 自驱续环通道：port2 每轮末 postMessage(null) → port1 onmessage →
+ * waitRenderWakeup(自适应超时) → 采样/重绘 → 自投递续环。消息任务无 setTimeout 嵌套
+ * 4ms 钳制，唤醒到采样/重绘的延时可忽略。主驱动 = WorkerA 发布 notify（发布驱动）。
+ */
+const resumeChannel = new MessageChannel();
+
+/**
+ * 单帧处理：采样（非阻塞）→ 状态更新才重绘。
+ * @returns 是否发生重绘（V 更新并提交 Draw——用于自适应超时判定）。
+ * try/catch 保护：单帧渲染异常（GPU 驱动/几何错误）不中断循环。
+ */
+function frameTick(): boolean {
+  if (!renderer || !scene || !camera || !shared) return false;
   try {
-    if (renderer && scene && camera && shared) onFrame();
+    return onFrame();
   } catch (err) {
     console.error('[worker-b] 渲染帧异常（已跳过，循环继续）:', err);
+    return false;
   }
-  if (workerRaf) workerRaf(rafLoop);
-  else setTimeout(rafLoop, 16); // 回退（旧浏览器/Worker 无 rAF）
 }
 
-/** 帧处理：采样（非阻塞）→ 绘制（无任何间隔/节流限制）。 */
-function onFrame(): void {
+/** 发布驱动帧循环：waitRenderWakeup(自适应超时)——WorkerA 发布 notify 为主驱动 /
+ *  主线程 wake 冗余对齐 / 超时兜底（无数据时长超时降空转，数据不断时 notify 立即
+ *  唤醒全力渲染）；未就绪（异常时序）时自投递续环，就绪后立即生效。 */
+resumeChannel.port1.onmessage = () => {
+  let repainted = false;
+  if (shared) {
+    shared.waitRenderWakeup(renderTimeout);
+    repainted = frameTick();
+    // 自适应超时：无数据/重复参数（V 未变不重绘）→ 延长超时降空转；有数据 → 恢复短超时
+    renderTimeout = repainted ? RENDER_TIMEOUT_MS : RENDER_IDLE_TIMEOUT_MS;
+  }
+  if (shared && shared.isMessageMode && !repainted) {
+    // 消息回退模式节流：无新状态 → 低频自检（setTimeout 100ms 不受嵌套 4ms 钳制），
+    // 降 2-10kHz 消息自旋空转；shared-state 到达时 onStateMessage 立即触发循环
+    setTimeout(() => resumeChannel.port2.postMessage(null), MSG_IDLE_INTERVAL_MS);
+  } else {
+    resumeChannel.port2.postMessage(null);
+  }
+};
+
+/**
+ * 帧处理：采样（非阻塞）→ 状态更新才重绘。
+ * ① readState：V 更新 → 读最新槽（无撕裂）→ 刷新本地副本；未变 → 不重绘
+ *   （状态未更新，保持上一帧画面——高频屏不再重复提交相同相机状态的无效 Draw，
+ *   且 HUD「重绘/s」反映真实渲染帧率而非唤醒频率）
+ * ② 本地副本更新 → PVS 应用 + renderer.render 提交 GPU
+ * @returns 是否发生重绘（V 更新——自适应超时/消息节流判定用）。
+ */
+function onFrame(): boolean {
+  stats.frames++; // 唤醒次数（主线程帧对齐度）
   const state = shared!.readState(); // ① 非阻塞；V 更新→读最新槽（无撕裂），未变→null
   if (state) {
     // 本地副本只被 readState 更新（无其他来源——渲染参数零污染；首帧竞争保护：
     // localCopy 一旦非 null 永不回落 null）
     localCopy = state;
-  }
-
-  stats.frames++;
-  // ② 每帧都绘制（无 Draw 间隔/节流/限频——渲染绝对；TICK_RATE 只影响 WorkerA 手感）
-  if (localCopy) {
+    stats.repaints++;
     // PVS 剔除：渲染前应用可见性（cluster 变化时才重遍历；renderer.render 只提交可见 mesh）
     applyPvsVisibility(false);
-    stats.repaints++;
     render();
+    return true;
   }
+  return false;
 }
 
 /** 重绘：相机映射（FPS 约定）→ renderer.render 提交 GPU。 */
@@ -606,8 +754,7 @@ function render(): void {
   updateStats();
 }
 
-/** 渲染统计结算（每秒一次，仅用重绘路径自计时，无独立定时器）+ 状态摘要回传 main。
- * 保持完全 frame 驱动。 */
+/** 渲染统计结算（每秒一次，仅用帧循环自计时，无独立定时器）+ 状态摘要回传 main。 */
 function updateStats(): void {
   const now = performance.now();
   if (now - stats.t0 < 1000) return;
@@ -632,15 +779,10 @@ function updateStats(): void {
   self.postMessage(msg);
 }
 
-/** OffscreenCanvas Worker 内 rAF（特征检测；旧浏览器回退 setTimeout——渲染仍自驱）。 */
-const workerRaf = (self as unknown as {
-  requestAnimationFrame?: (cb: (time: number) => void) => number;
-}).requestAnimationFrame;
-
-// ── 入口：渲染由 initRenderer 启动自身 rAF 自驱循环（绝对自主，见 initRenderer）──
+// ── 入口：帧循环由 initRenderer 启动自驱（waitWakeup 对齐主线程 rAF，见 initRenderer）──
 
 export function startWorkerB(): void {
-  // 消息监听已在模块顶层注册；渲染循环由 init-canvas（initRenderer）自驱启动
+  // 消息监听已在模块顶层注册；帧循环由 init-canvas（initRenderer）自驱启动
 }
 
 startWorkerB();

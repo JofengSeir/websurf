@@ -59,6 +59,25 @@
     #bspbar .filebtn:hover { background: rgba(255,255,255,0.12); }
     #bspbar input[type="file"] { display: none; }
     #bspStatus { font-size: 12px; color: #9aa3b2; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* 路径记录（trace）：3D 场景中显示两条空间路径线（绿=无限制基准 / 红=tick 实际）；
+       按钮状态机：开始 → 保存 → 删除 → 开始（循环）；仅记录时发送节点防内存溢出 */
+    #tracebar {
+      position: absolute; top: 94px; right: 14px; z-index: 5;
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px; border-radius: 10px;
+      background: rgba(15,17,21,0.78); border: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(8px);
+    }
+    #traceBtn {
+      font-size: 12px; color: #c8ccd4; padding: 5px 12px;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px; cursor: pointer; transition: all 0.15s;
+    }
+    #traceBtn:hover { background: rgba(255,255,255,0.12); }
+    #traceBtn.active { border-color: rgba(94,129,244,0.7); color: #5e81f4; background: rgba(94,129,244,0.12); }
+    #traceLegend { font-size: 11px; color: #9aa3b2; }
+    #traceLegend .base { color: #4ade80; }
+    #traceLegend .tick { color: #f87171; }
   </style>
 </head>
 <body>
@@ -77,6 +96,7 @@
        渲染恒平滑跟随 1ms 无限制物理状态。0 = 关闭难度修正（纯 1ms 无限制） -->
   <div id="difficulty">
     <button data-rate="0">关</button>
+    <button data-rate="32">32</button>
     <button data-rate="64" class="active">64</button>
     <button data-rate="128">128</button>
     <button data-rate="256">256</button>
@@ -87,6 +107,14 @@
   <div id="bspbar">
     <label class="filebtn">加载 BSP 地图<input id="bspFile" type="file" accept=".bsp" /></label>
     <span id="bspStatus">未加载地图（BSP 为唯一玩法）</span>
+  </div>
+
+  <!-- 路径记录（trace）：3D 场景中显示无限制基准（绿）与 tick 实际（红）空间路径线；
+       按钮状态机：开始 → 保存（路径保留显示）→ 删除（清空）→ 开始 循环；
+       仅"开始"记录时 WorkerA 发送节点（防内存溢出） -->
+  <div id="tracebar">
+    <button id="traceBtn">开始</button>
+    <span id="traceLegend"><span class="base">■ 无限制基准</span> · <span class="tick">■ tick 实际</span> · 兜底 ×0</span>
   </div>
 </div>
 

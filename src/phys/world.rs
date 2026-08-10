@@ -352,8 +352,9 @@ pub fn trace_box_tri_entries(
 }
 
 /// `origin` 处的盒子是否与（凸）体相交。
-pub fn box_in_brush(origin: &V3, mins: &V3, maxs: &V3, brush: &Brush) -> bool {
-    for p in &brush.planes {
+/// planes 由调用方提供切片——调用方（如 ladder_at）无需构造带克隆的 Brush 中间体。
+pub fn box_in_brush(origin: &V3, mins: &V3, maxs: &V3, planes: &[Plane]) -> bool {
+    for p in planes {
         let dist = p.dist - plane_offset(&p.normal, mins, maxs);
         if dot(&p.normal, origin) - dist > 0.0 {
             return false;
@@ -410,24 +411,28 @@ impl<T> GridCells<T> {
         self.big.push(idx);
     }
 
-    /// 查询覆盖 cell 范围内的对象（超集，已去重）。
+    /// 查询覆盖 cell 范围内的对象（超集，已按 epoch 去重——同一对象只 visit 一次，
+    /// 调用方无需再次去重）。
     /// `cell_keys` 由调用方生成（避免闭包借用冲突）。
+    ///
+    /// 热路径（每物理 tick 数次查询）：用字段级借用拆分直读 `big`/`cells`，
+    /// 不再 clone 大对象列表与命中 cell 的 Vec——避免每次查询的堆分配。
     fn query(&mut self, keys: impl Iterator<Item = (i32, i32, i32)>, visit: &mut impl FnMut(usize)) {
         self.epoch += 1;
+        let epoch = self.epoch;
+        let visited = &mut self.visited;
         // big 始终参与
-        let big_ids = self.big.clone();
-        for id in big_ids {
-            if self.visited[id] != self.epoch {
-                self.visited[id] = self.epoch;
+        for &id in &self.big {
+            if visited[id] != epoch {
+                visited[id] = epoch;
                 visit(id);
             }
         }
         for key in keys {
             if let Some(arr) = self.cells.get(&key) {
-                let snapshot = arr.clone();
-                for &id in &snapshot {
-                    if self.visited[id] != self.epoch {
-                        self.visited[id] = self.epoch;
+                for &id in arr {
+                    if visited[id] != epoch {
+                        visited[id] = epoch;
                         visit(id);
                     }
                 }
@@ -442,6 +447,8 @@ pub struct BrushGrid {
     cells: GridCells<Brush>,
     /// 全部 brush（引用由 World 持有，构建时复制索引）。
     brushes: Vec<Brush>,
+    /// 查询复用缓冲（避免每次 query_refs 新建 ids Vec——热路径零分配）。
+    scratch: Vec<usize>,
 }
 
 impl BrushGrid {
@@ -450,6 +457,7 @@ impl BrushGrid {
             cell_size: 512.0,
             cells: GridCells::new(),
             brushes: Vec::new(),
+            scratch: Vec::new(),
         }
     }
 
@@ -483,7 +491,8 @@ impl BrushGrid {
         }
     }
 
-    /// 查询与 AABB 相交的所有 brush 索引（超集，已去重）。
+    /// 查询与 AABB 相交的所有 brush 索引（超集，已去重——GridCells.query 的 epoch 去重保证，
+    /// 无需 contains 线性去重（原 O(n²)，大候选集下是每 tick 查询的主要开销））。
     fn query_indices(&mut self, min: &V3, max: &V3, out: &mut Vec<usize>) {
         out.clear();
         let inv = 1.0 / self.cell_size;
@@ -499,21 +508,19 @@ impl BrushGrid {
                 (cz0..=cz1).map(move |cz| (cx, cy, cz))
             })
         });
-        let mut visit = |id: usize| {
-            if !out.contains(&id) {
-                out.push(id);
-            }
-        };
-        self.cells.query(key_iter, &mut visit);
+        self.cells.query(key_iter, &mut |id: usize| out.push(id));
     }
 
-    /// 查询 brush 引用（World.trace 用）。
+    /// 查询 brush 引用（World.trace 用；复用 scratch 缓冲，无热路径分配）。
     fn query_refs<'a>(&'a mut self, min: &V3, max: &V3, out: &mut Vec<&'a Brush>) {
-        let mut ids: Vec<usize> = Vec::new();
-        self.query_indices(min, max, &mut ids);
-        for id in ids {
+        // 先用 mem::take 把复用缓冲挪出 self（零成本），避免 query_indices(&mut self)
+        // 与 &mut self.scratch 的双重可变借用冲突
+        let mut scratch = std::mem::take(&mut self.scratch);
+        self.query_indices(min, max, &mut scratch);
+        for &id in &scratch {
             out.push(&self.brushes[id]);
         }
+        self.scratch = scratch;
     }
 }
 
@@ -733,15 +740,11 @@ impl World {
         true
     }
 
-    /// 玩家碰撞箱是否与某个梯子相交（返回该梯子）。
-    pub fn ladder_at(&self, origin: &V3, mins: &V3, maxs: &V3) -> Option<&LadderVolume> {
-        for ladder in &self.ladders {
-            if box_in_brush(origin, mins, maxs, &Brush {
-                planes: ladder.planes.clone(),
-                min: ladder.min,
-                max: ladder.max,
-            }) {
-                return Some(ladder);
+    /// 玩家碰撞箱是否与某个梯子相交（返回该梯子索引——避免返回引用导致每 tick 克隆）。
+    pub fn ladder_at(&self, origin: &V3, mins: &V3, maxs: &V3) -> Option<usize> {
+        for (i, ladder) in self.ladders.iter().enumerate() {
+            if box_in_brush(origin, mins, maxs, &ladder.planes) {
+                return Some(i);
             }
         }
         None

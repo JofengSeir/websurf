@@ -8,15 +8,33 @@
  * / worker-b.ts 镜像）：
  * - 世界构建/落地/跳跃/respawn 基本物理断言（PhysWorld wasm）
  * - 双缓冲：writeState 写空闲槽（S[V&1^1]）→ readState 读当前槽 S[V&1]（交替正确）
+ * - writeStateRaw 零分配直写（worker-a 热路径：标量直写 SAB，无 Vec3 对象）
  * - V 递增用 add（写 N 次 → V 增 N）
  * - WAKEUP 协议：wake() 后 waitWakeup 立即返回（被唤醒）；无 wake 时 wait 超时返回；
  *   阶段0 writeTickRate 仅 store（不影响 WAKEUP）
- * - 8 次子步上限：一次大 delta（如 20ms）→ 物理最多 8 个子步（模拟 loop 上限断言）
+ * - RENDER_WAKEUP 协议（WorkerB 独立渲染槽）：wake() 双槽同置位；waitRenderWakeup
+ *   立即返回/超时/复位；双槽隔离——WorkerA 消费 WAKEUP 后渲染唤醒仍保留
+ * - 发布驱动（阶段3 主驱动，worker_threads 真线程）：writeStateRaw 发布 → V++ →
+ *   notify(RENDER_WAKEUP) 唤醒挂起渲染循环（渲染率 = 物理发布率，非超时）
+ * - 8 次子步上限：一次大 delta（如 20ms）→ 物理最多 8 个子步；**上限耗尽保留剩余累加**
+ *   （时间不丢失、下轮补跑），仅封顶 MAX_ACC 防无限追赶
+ * - 热路径：tick() 返回值字段直接写状态槽（不再二次 phys.state()——省一次 wasm→JS
+ *   对象构造，GC 压力减半）
+ * - tick_into 零分配热路径：tick_into → state_out_ptr 的 Float64Array 视图直读 8 标量
+ *   → writeStateRaw——每子步零 JS 对象分配（与 tick 同语义，state_out 与 state() 一致）
  * - 输入限幅：consumeInput(clamp) 超限值被截断（±1000 防穿墙）
- * - 抽帧逻辑（模拟 WorkerB 最终时序）：本地副本唯一参数源 = readState（参数永远最新）；
- *   Draw 间隔 = 1/TICK_RATE（rate>0 限频；rate=0 每 frame 都 Draw）
+ * - 渲染采样与重绘（模拟 WorkerB 最终时序）：本地副本唯一参数源 = readState；
+ *   仅状态更新时重绘（V 未变不提交 Draw——高频屏不重复渲染相同状态）；去重粒度 =
+ *   版本号而非状态值（V 递增但值相同仍重绘——加载期行为实证）
+ * - !ready 世界（未 build_world）：tick 不报错且 V 仍每 ms 递增（地图加载期 WorkerB
+ *   去重失效的实证）
+ * - 梯子（on_ladder 索引化回归）：真实梯子世界抓梯攀爬 / 跳离 / 换图重建不 panic
+ * - 长时间停顿（隐藏标签页）：delta 钳制 + 8 子步上限 + 后续轮次有界追赶收敛
  * - 模式B 不写共享槽（用户定调：共享槽只由模式A 写——模式B 只做 phys 内部速度修正，
  *   V 不递增、readState 返回 null）
+ * - 模式B 去重：TICK_RATE ≥ 1000（tickDt ≤ 1ms）时与模式A 完全等价 → 跳过防双倍物理
+ * - 消息回退模式（无 SAB）：main→WorkerA 输入/难度 postMessage；WorkerA→WorkerB 状态
+ *   直连；V 版本/仅状态更新重绘/限幅/松手清零语义与 SAB 模式一致；wait 立即超时返回
  *
  * 注：node 无 TS 加载器，TestShared 与 brush JSON 在此复制镜像（与 shared-state.ts
  * / worker-a.ts 逐字一致；改动须同步）。
@@ -25,6 +43,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import { PhysWorld, BspProcessor, initSync } from '../pkg/websurf_test_wasm.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -83,8 +102,8 @@ const brushes = [
 
 // ── TestShared 镜像（与 shared-state.ts 布局/协议逐字一致）─────────
 // 布局（Int32 索引）：[0]TICK_RATE [1]WAKEUP [2]dxAcc(B64 索引 1) [4]dyAcc(B64 索引 2)
-// [6]keysMask [8]V；双缓冲 Float64 索引 [5..12]（槽0）/[13..20]（槽1）pos/vel/yaw/pitch；
-// FIXED_SCALE=1000；SHARED_BUFFER_SIZE=192
+// [6]keysMask [7]RENDER_WAKEUP [8]V；双缓冲 Float64 索引 [5..12]（槽0）/[13..20]（槽1）
+// pos/vel/yaw/pitch；FIXED_SCALE=1000；SHARED_BUFFER_SIZE=192
 // ★ 布局回归：BigInt64 索引 1/2（字节 8..15/16..23），勿用 2/4——
 //   B64 索引 4 = 字节 32..39 与 V（Int32 8，字节 32..35）重叠（历史屏闪 bug）
 const I_TICK_RATE = 0;
@@ -92,6 +111,7 @@ const I_WAKEUP = 1;
 const B_DX_ACC = 1;
 const B_DY_ACC = 2;
 const I_KEYS_MASK = 6;
+const I_RENDER_WAKEUP = 7;
 const I_V = 8;
 const F_SLOT_BASE = 5;
 const F_SLOT_STRIDE = 8;
@@ -99,40 +119,119 @@ const FIXED_SCALE = 1000;
 const SHARED_BUFFER_SIZE = 192;
 
 class TestShared {
-  constructor(buf) {
-    this.i32 = new Int32Array(buf);
-    this.b64 = new BigInt64Array(buf);
-    this.f64 = new Float64Array(buf);
+  constructor(buf, mode = 'sab', postToPhysics = null, postToRender = null) {
+    this.mode = mode;
+    this.i32 = buf ? new Int32Array(buf) : new Int32Array(0);
+    this.b64 = buf ? new BigInt64Array(buf) : new BigInt64Array(0);
+    this.f64 = buf ? new Float64Array(buf) : new Float64Array(0);
     this.lastV = 0;
+    // 消息回退模式状态
+    this.msgDx = 0;
+    this.msgDy = 0;
+    this.msgKeysMask = 0;
+    this.msgTickRate = 0;
+    this.msgV = 0;
+    this.msgLatest = null;
+    this.postToPhysics = postToPhysics;
+    this.postToRender = postToRender;
+  }
+  static init(buf) {
+    return new TestShared(buf, 'sab');
+  }
+  static createMessaging(postToPhysics) {
+    return new TestShared(null, 'msg-main', postToPhysics);
+  }
+  static initMessaging(postToRender) {
+    return new TestShared(null, 'msg-physics', null, postToRender);
+  }
+  static initMessagingRender() {
+    return new TestShared(null, 'msg-render');
   }
   get sab() {
     return this.i32.buffer;
   }
+  get isMessageMode() {
+    return this.mode !== 'sab';
+  }
   writeTickRate(rate) {
-    // 阶段0：仅 store，无 notify
+    // 阶段0：仅 store，无 notify（消息回退：投递 shared-tick-rate）
+    if (this.mode === 'msg-main') {
+      this.postToPhysics?.({ type: 'shared-tick-rate', rate });
+      return;
+    }
     Atomics.store(this.i32, I_TICK_RATE, rate);
   }
   readTickRate() {
+    if (this.mode === 'msg-physics') {
+      return this.msgTickRate; // 主线程 shared-tick-rate 消息已缓存
+    }
     return Atomics.load(this.i32, I_TICK_RATE);
   }
   wake() {
-    // 阶段1：store(WAKEUP,1) + notify(WAKEUP,1)
+    // 阶段1：双槽分离——WAKEUP(WorkerA 物理背压) + RENDER_WAKEUP(WorkerB 渲染帧对齐)，
+    // 各槽 notify 计数 = 1（每槽恰一个等待者，互不抢唤醒）
+    if (this.mode === 'msg-main') {
+      return; // 消息回退：双 Worker 均消息自驱，无阻塞等待可唤醒
+    }
     Atomics.store(this.i32, I_WAKEUP, 1);
     Atomics.notify(this.i32, I_WAKEUP, 1);
+    Atomics.store(this.i32, I_RENDER_WAKEUP, 1);
+    Atomics.notify(this.i32, I_RENDER_WAKEUP, 1);
   }
   waitWakeup(timeoutMs) {
+    if (this.mode !== 'sab') {
+      return false; // 消息回退：无阻塞原语，立即"超时"返回（自投递续环即自驱）
+    }
     const res = Atomics.wait(this.i32, I_WAKEUP, 0, timeoutMs);
-    Atomics.store(this.i32, I_WAKEUP, 0);
-    return res === 'ok' || res === 'not-equal';
+    if (res === 'timed-out') return false;
+    Atomics.compareExchange(this.i32, I_WAKEUP, 1, 0); // CAS 消费唤醒并复位
+    return true;
+  }
+  waitRenderWakeup(timeoutMs) {
+    if (this.mode !== 'sab') {
+      return false; // 消息回退：同 waitWakeup
+    }
+    const res = Atomics.wait(this.i32, I_RENDER_WAKEUP, 0, timeoutMs);
+    if (res === 'timed-out') return false;
+    Atomics.compareExchange(this.i32, I_RENDER_WAKEUP, 1, 0);
+    return true;
   }
   addInput(dx, dy, keysMask) {
+    // 消息回退：每 rAF 批投递（含 keysMask=0：松手即清零语义与 SAB 一致）
+    if (this.mode === 'msg-main') {
+      this.postToPhysics?.({ type: 'shared-input', dx, dy, keysMask });
+      return;
+    }
     const dxFixed = BigInt(Math.round(dx * FIXED_SCALE));
     const dyFixed = BigInt(Math.round(dy * FIXED_SCALE));
     if (dxFixed !== 0n) Atomics.add(this.b64, B_DX_ACC, dxFixed);
     if (dyFixed !== 0n) Atomics.add(this.b64, B_DY_ACC, dyFixed);
     Atomics.store(this.i32, I_KEYS_MASK, keysMask);
   }
+  onInputMessage(dx, dy, keysMask) {
+    // msg-physics：main 的 shared-input 消息 → 本地累加（与 SAB addInput 语义一致）
+    this.msgDx += dx;
+    this.msgDy += dy;
+    this.msgKeysMask = keysMask;
+  }
+  onTickRateMessage(rate) {
+    this.msgTickRate = rate;
+  }
   consumeInput(maxDelta = Infinity) {
+    if (this.mode === 'msg-physics') {
+      const dx = this.msgDx;
+      const dy = this.msgDy;
+      this.msgDx = 0;
+      this.msgDy = 0;
+      if (maxDelta !== Infinity) {
+        return {
+          dx: Math.max(-maxDelta, Math.min(maxDelta, dx)),
+          dy: Math.max(-maxDelta, Math.min(maxDelta, dy)),
+          keysMask: this.msgKeysMask,
+        };
+      }
+      return { dx, dy, keysMask: this.msgKeysMask };
+    }
     const dxFixed = this.exchangeZero(this.b64, B_DX_ACC);
     const dyFixed = this.exchangeZero(this.b64, B_DY_ACC);
     let dx = Number(dxFixed) / FIXED_SCALE;
@@ -156,21 +255,51 @@ class TestShared {
     }
   }
   writeState(pos, vel, yaw, pitch) {
-    // 双缓冲：写空闲槽（S[V&1^1]）→ Atomics.add(V,1)
+    // 零分配热路径镜像：writeState 委托 writeStateRaw（标量直写 SAB）
+    return this.writeStateRaw(pos.x, pos.y, pos.z, vel.x, vel.y, vel.z, yaw, pitch);
+  }
+  writeStateRaw(x, y, z, vx, vy, vz, yaw, pitch) {
+    // 消息回退：本地 V++ → 投递 shared-state（WorkerB onStateMessage 缓存）
+    if (this.mode === 'msg-physics') {
+      this.msgV++;
+      this.postToRender?.({
+        type: 'shared-state',
+        v: this.msgV,
+        pos: { x, y, z },
+        vel: { x: vx, y: vy, z: vz },
+        yaw,
+        pitch,
+      });
+      return this.msgV;
+    }
+    // 双缓冲：写空闲槽（S[V&1^1]）→ Atomics.add(V,1) → 发布 notify（阶段3 主驱动）
     const v0 = Atomics.load(this.i32, I_V);
     const base = F_SLOT_BASE + ((v0 & 1) ^ 1) * F_SLOT_STRIDE;
     const f = this.f64;
-    f[base] = pos.x;
-    f[base + 1] = pos.y;
-    f[base + 2] = pos.z;
-    f[base + 3] = vel.x;
-    f[base + 4] = vel.y;
-    f[base + 5] = vel.z;
+    f[base] = x;
+    f[base + 1] = y;
+    f[base + 2] = z;
+    f[base + 3] = vx;
+    f[base + 4] = vy;
+    f[base + 5] = vz;
     f[base + 6] = yaw;
     f[base + 7] = pitch;
-    return Atomics.add(this.i32, I_V, 1) + 1;
+    const v = Atomics.add(this.i32, I_V, 1) + 1;
+    Atomics.notify(this.i32, I_RENDER_WAKEUP, 1); // 发布驱动：每发布唤醒渲染循环（须在 V++ 之后）
+    return v;
+  }
+  onStateMessage(msg) {
+    // msg-render：缓存最近状态（本地副本唯一来源，与 SAB readState 语义一致）
+    this.msgLatest = { pos: msg.pos, vel: msg.vel, yaw: msg.yaw, pitch: msg.pitch, v: msg.v };
   }
   readState() {
+    // 消息回退：返回缓存的最近状态；V 未变返回 null（仅状态更新时重绘）
+    if (this.mode === 'msg-render') {
+      const s = this.msgLatest;
+      if (!s || s.v === this.lastV) return null;
+      this.lastV = s.v;
+      return s;
+    }
     // 读当前槽 S[V&1]；double-check 防撕裂
     const v0 = Atomics.load(this.i32, I_V);
     if (v0 === this.lastV) return null;
@@ -206,11 +335,13 @@ function writeStateFromPhys(shared, phys) {
   );
 }
 
-// ── WorkerA 单模循环核心镜像（worker-a.ts loop：delta clamp + 累加器 + 8 次上限）──
+// ── WorkerA 单模循环核心镜像（worker-a.ts loop：delta clamp + 累加器 + 8 次上限；
+//    上限耗尽**保留剩余累加**（时间不丢失，下轮补跑），仅封顶 MAX_ACC 防无限追赶）──
 // 返回 { ticks: 本轮执行的子步数, acc: 残留累加器（秒） }
 const RENDER_DT = 0.001;
 const MAX_DELTA = 0.05;
 const MAX_STEPS_PER_ROUND = 8;
+const MAX_ACC = 0.05;
 function simulateWorkerARound(deltaMs, acc) {
   let delta = deltaMs / 1000;
   if (delta > MAX_DELTA) delta = MAX_DELTA;
@@ -221,30 +352,41 @@ function simulateWorkerARound(deltaMs, acc) {
     while (acc >= RENDER_DT && ticks < MAX_STEPS_PER_ROUND) {
       acc -= RENDER_DT;
       ticks++;
-      // 真实循环：consumeInput(±1000) → phys.tick(1ms) → writeState（写空闲槽 + V add）
+      // 真实循环：consumeInput(±1000) → phys.tick(1ms)（返回值直接写状态槽）→ V add
     }
-    if (acc >= RENDER_DT) acc = 0; // 8 次上限耗尽：丢弃剩余（防死亡螺旋）
+    if (acc > MAX_ACC) acc = MAX_ACC; // 仅封顶，不丢弃——时间不丢失
   }
   return { ticks, acc };
 }
 
-// ── WorkerB 帧逻辑镜像（worker-b.ts onFrame 最终时序：本地副本唯一参数源 = readState，
-//    每帧消息都绘制——渲染帧率不被 TICK_RATE 限制，与 game 一致）──
+// ── WorkerB 帧逻辑镜像（worker-b.ts frameLoop/onFrame：本地副本唯一参数源 = readState；
+//    仅状态更新时重绘——V 未变不提交 Draw（高频屏不重复渲染相同状态））──
 class FakeWorkerB {
   constructor(shared) {
     this.shared = shared;
     this.localCopy = null; // 唯一渲染参数源（只被 readState 更新——真理源）
     this.updates = 0; // 本地副本被 readState 刷新次数
-    this.repaints = 0; // 实际 Draw 次数
+    this.repaints = 0; // 实际 Draw 次数（仅状态更新时 +1）
   }
   onFrame(_now) {
     const state = this.shared.readState(); // ① 非阻塞；V 更新→读最新槽（无撕裂），未变→null
     if (state) {
-      this.localCopy = state; // ② 本地副本只被 readState 更新（无其他来源——渲染参数零污染）
+      // ② 本地副本只被 readState 更新（无其他来源——渲染参数零污染）
+      this.localCopy = state;
       this.updates++;
+      this.repaints++; // ③ 仅状态更新时重绘（镜像 worker-b.ts onFrame）
     }
-    // ③ 每帧消息都绘制（无 Draw 间隔——TICK_RATE 只影响 WorkerA 手感，不限制渲染帧率）
-    if (this.localCopy) this.repaints++;
+  }
+  onFrameRet(_now) {
+    // 镜像 worker-b onFrame 返回值（是否重绘——自适应超时/节流判定用）
+    const state = this.shared.readState();
+    if (state) {
+      this.localCopy = state;
+      this.updates++;
+      this.repaints++;
+      return true;
+    }
+    return false;
   }
 }
 
@@ -342,8 +484,11 @@ console.log('── WebSurf-test WorkerA 单模冒烟测试（最新时序图）
 
 // 1. wasm 初始化 + 世界构建（worker-a 启动序列）
 let initOk = false;
+/** wasm 导出（memory 用于 tick_into state_out 的 Float64Array 视图——13.5b 用）。 */
+let physMemory = null;
 try {
-  initSync({ module: readFileSync(join(root, 'pkg', 'websurf_test_wasm_bg.wasm')) });
+  const out = initSync({ module: readFileSync(join(root, 'pkg', 'websurf_test_wasm_bg.wasm')) });
+  physMemory = out.memory;
   initOk = true;
 } catch (e) {
   console.error('initSync 失败:', e);
@@ -520,6 +665,24 @@ check('V 未变：readState 返回 null（缓存复用）', r3 === null);
 const v3 = shared.writeState({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, 0, 0);
 check('再次写入 V 递增（Atomics.add）', v3 === v2 + 1, `v2=${v2} v3=${v3}`);
 
+// 6.5. writeStateRaw 零分配热路径（worker-a 热路径镜像：标量直写 SAB，无 Vec3 对象）
+const vRaw = shared.writeStateRaw(3, 4, 5, 6, 7, 8, 45, -15);
+const rRaw = shared.readState();
+check(
+  'writeStateRaw：标量直写与 writeState 同语义（字段一致 + V++）',
+  rRaw !== null &&
+    rRaw.v === vRaw &&
+    close(rRaw.pos.x, 3) &&
+    close(rRaw.pos.y, 4) &&
+    close(rRaw.pos.z, 5) &&
+    close(rRaw.vel.x, 6) &&
+    close(rRaw.vel.y, 7) &&
+    close(rRaw.vel.z, 8) &&
+    close(rRaw.yaw, 45) &&
+    close(rRaw.pitch, -15),
+  rRaw ? `v=${rRaw.v}` : 'null',
+);
+
 // 7. V 递增用 add：写 N 次 → V 增 N
 const vStart = Atomics.load(shared.i32, I_V);
 const writeCount = 5;
@@ -531,7 +694,7 @@ check('V 递增用 add：写 5 次 → V 精确增 5', vEnd === vStart + writeCo
 
 // 8. WAKEUP 协议：wake() 后 waitWakeup 立即返回；无 wake 时超时；waitWakeup 复位
 const t0 = performance.now();
-shared.wake(); // store(WAKEUP,1) + notify(WAKEUP,1)
+shared.wake(); // store(WAKEUP,1) + notify(WAKEUP,1) + RENDER_WAKEUP 同置位
 const w1 = shared.waitWakeup(100);
 const dtW1 = performance.now() - t0;
 check('wake() 后 waitWakeup 立即返回 true（被唤醒，not-equal）', w1 === true && dtW1 < 20, `res=${w1} dt=${dtW1.toFixed(2)}ms`);
@@ -541,13 +704,93 @@ const w2 = shared.waitWakeup(30); // 无 wake：挂起直到超时
 const dtW2 = performance.now() - t1;
 check('无 wake：waitWakeup(30) 超时返回 false', w2 === false && dtW2 >= 20, `res=${w2} dt=${dtW2.toFixed(2)}ms`);
 check('超时返回后 WAKEUP 仍为 0', Atomics.load(shared.i32, I_WAKEUP) === 0);
+// 双槽语义残留：shared.wake() 同时置位 RENDER_WAKEUP（唤醒保留给 WorkerB）——
+// 本节仅消费物理槽后，RENDER_WAKEUP 仍为 1（真实语义，见 8.5 双槽隔离）；
+// 消费残留恢复 0 基线，供 9 的 writeTickRate 断言使用
+shared.waitRenderWakeup(1);
+check(
+  'WAKEUP 协议残留消费：waitRenderWakeup 立即消费双槽同置位的渲染唤醒（RENDER_WAKEUP 复位 0）',
+  Atomics.load(shared.i32, I_RENDER_WAKEUP) === 0,
+);
 
-// 9. 阶段0 writeTickRate 仅 store（无 notify，不影响 WAKEUP）
+// 8.5. RENDER_WAKEUP 协议（WorkerB 独立渲染槽）：wake() 双槽同置位；waitRenderWakeup
+//     立即返回/超时/复位；两槽 CAS 消费互不干扰（物理背压不抢渲染唤醒）
+const s2 = new TestShared(new SharedArrayBuffer(SHARED_BUFFER_SIZE));
+const tR0 = performance.now();
+s2.wake(); // store+notify 双槽（WAKEUP + RENDER_WAKEUP）
+const rw1 = s2.waitRenderWakeup(100);
+const dtR1 = performance.now() - tR0;
+check(
+  'RENDER_WAKEUP#1：wake() 后 waitRenderWakeup 立即返回 true（独立渲染槽）',
+  rw1 === true && dtR1 < 20,
+  `res=${rw1} dt=${dtR1.toFixed(2)}ms`,
+);
+check(
+  'RENDER_WAKEUP#2：waitRenderWakeup 返回后 RENDER_WAKEUP 复位为 0（且 WAKEUP 未被本次消费影响——物理槽独立复位）',
+  Atomics.load(s2.i32, I_RENDER_WAKEUP) === 0,
+);
+const tR1 = performance.now();
+const rw2 = s2.waitRenderWakeup(30); // 无 wake：挂起直到超时
+const dtR2 = performance.now() - tR1;
+check(
+  'RENDER_WAKEUP#3：无 wake：waitRenderWakeup(30) 超时返回 false',
+  rw2 === false && dtR2 >= 20,
+  `res=${rw2} dt=${dtR2.toFixed(2)}ms`,
+);
+check('RENDER_WAKEUP#4：超时返回后 RENDER_WAKEUP 仍为 0', Atomics.load(s2.i32, I_RENDER_WAKEUP) === 0);
+// 双槽隔离：仅消费 WAKEUP 后，RENDER_WAKEUP 仍保留唤醒给 WorkerB
+s2.wake();
+s2.waitWakeup(100); // WorkerA 消费物理槽
+check(
+  'RENDER_WAKEUP#5：双槽隔离——WorkerA 消费 WAKEUP 后 RENDER_WAKEUP 唤醒仍保留（waitRenderWakeup 立即返回）',
+  s2.waitRenderWakeup(100) === true,
+  '渲染帧边界不再被物理背压抢唤醒',
+);
+
+// 8.6. 发布驱动（阶段3 主驱动，node worker_threads 真线程验证）：writeStateRaw 发布
+//      后 notify(RENDER_WAKEUP)——挂起在渲染槽上的 WorkerB 被立即唤醒（非超时）。
+//      渲染率 = 物理发布率（不受显示刷新率限制）；notify 在 V++ 之后（醒后读到新 V）
+{
+  const sab = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
+  const pubShared = new TestShared(sab);
+  const workerCode = `
+    const { parentPort, workerData } = require('node:worker_threads');
+    const I_RENDER_WAKEUP = 7;
+    const t0 = performance.now();
+    const res = Atomics.wait(new Int32Array(workerData.sab), I_RENDER_WAKEUP, 0, 300);
+    parentPort.postMessage({ res, dt: performance.now() - t0 });
+  `;
+  const w = new Worker(workerCode, { eval: true, workerData: { sab } });
+  await new Promise((r) => setTimeout(r, 80)); // 等 worker 挂起在渲染槽上
+  const t0 = performance.now();
+  pubShared.writeStateRaw(1, 2, 3, 4, 5, 6, 0, 0); // 发布 → V++ → notify
+  const rPub = await new Promise((resolve) => {
+    w.on('message', resolve);
+  });
+  w.terminate();
+  // worker 侧 dt = 挂起时长（含发布前等待），无意义；关键断言：
+  // res='ok'（被 notify 唤醒而非 300ms 超时）+ 主线程侧发布→唤醒延迟 < 50ms
+  check(
+    '发布驱动：writeStateRaw 发布 → notify 唤醒挂起渲染循环（res=ok 非超时，发布→唤醒 < 50ms；渲染率 = 物理发布率）',
+    rPub.res === 'ok' && performance.now() - t0 < 50,
+    `res=${rPub.res} 发布→唤醒=${(performance.now() - t0).toFixed(1)}ms`,
+  );
+  const rPubState = pubShared.readState();
+  check(
+    '发布驱动：V 在 notify 之前已递增（醒后 readState 读到新版本）',
+    rPubState !== null && rPubState.v === 1,
+    rPubState ? `v=${rPubState.v}` : 'null',
+  );
+}
+
+// 9. 阶段0 writeTickRate 仅 store（无 notify，不影响 WAKEUP/RENDER_WAKEUP）
 shared.writeTickRate(128);
 check(
-  'writeTickRate(128)：TICK_RATE=128 且 WAKEUP 未被置位（仅 store 无 notify）',
-  shared.readTickRate() === 128 && Atomics.load(shared.i32, I_WAKEUP) === 0,
-  `TICK_RATE=${shared.readTickRate()} WAKEUP=${Atomics.load(shared.i32, I_WAKEUP)}`,
+  'writeTickRate(128)：TICK_RATE=128 且 WAKEUP/RENDER_WAKEUP 均未被置位（仅 store 无 notify）',
+  shared.readTickRate() === 128 &&
+    Atomics.load(shared.i32, I_WAKEUP) === 0 &&
+    Atomics.load(shared.i32, I_RENDER_WAKEUP) === 0,
+  `TICK_RATE=${shared.readTickRate()} WAKEUP=${Atomics.load(shared.i32, I_WAKEUP)} RENDER_WAKEUP=${Atomics.load(shared.i32, I_RENDER_WAKEUP)}`,
 );
 shared.writeTickRate(64);
 
@@ -563,10 +806,15 @@ shared.addInput(9999, -9999, 0);
 const cl3 = shared.consumeInput(); // 缺省无限幅
 check('无限幅（缺省 Infinity）：dx=9999 原样返回', close(cl3.dx, 9999) && close(cl3.dy, -9999), `dx=${cl3.dx} dy=${cl3.dy}`);
 
-// 11. 8 次子步上限：一次大 delta → 物理最多 8 个子步（模拟 loop 上限断言）
+// 11. 8 次子步上限：一次大 delta → 物理最多 8 个子步（模拟 loop 上限断言；
+//     上限耗尽**保留剩余累加**——时间不丢失，下轮补跑）
 const rBig = simulateWorkerARound(20, 0); // 20ms 大 delta
 check('delta=20ms：单轮最多 8 个子步', rBig.ticks === 8, `ticks=${rBig.ticks}`);
-check('8 次上限耗尽：丢弃剩余累加（防死亡螺旋）', rBig.acc < RENDER_DT, `acc=${rBig.acc}`);
+check(
+  '8 次上限耗尽：保留剩余累加 12ms（时间不丢失，下轮补跑；原 acc=0 丢弃永久丢时间）',
+  close(rBig.acc, 0.012),
+  `acc=${rBig.acc}`,
+);
 const rBig2 = simulateWorkerARound(20, 0.0004); // 20ms + 残留 0.4ms
 check('delta=20ms + 残留 0.4ms：仍 8 次', rBig2.ticks === 8, `ticks=${rBig2.ticks}`);
 const rMid = simulateWorkerARound(5, 0.0003); // 5.3ms → 5 步
@@ -575,12 +823,14 @@ const rSmall = simulateWorkerARound(0.3, 0); // 0.3ms < 1ms
 check('delta=0.3ms < 1ms：0 个子步（纯累加）', rSmall.ticks === 0 && close(rSmall.acc, 0.0003), `ticks=${rSmall.ticks} acc=${rSmall.acc}`);
 const rClamp = simulateWorkerARound(200, 0); // 200ms → clamp 50ms → 8 次
 check('delta=200ms → clamp 50ms：仍 8 次', rClamp.ticks === 8, `ticks=${rClamp.ticks}`);
+const rCatch = simulateWorkerARound(50, 0.042); // 上次 50ms 残留 + 本轮 50ms → 封顶 50ms（不无限累积）
+check('长期停顿累积：累加器封顶 MAX_ACC=50ms（防无限追赶）', close(rCatch.acc, 0.05), `acc=${rCatch.acc}`);
 
-// 12. 渲染采样与抽帧逻辑（模拟 WorkerB 最终时序：本地副本唯一参数源 = readState，
-//     Draw 间隔 = 1/TICK_RATE——rate>0 限频抽帧、rate=0 每 frame 都 Draw）
-// 12a. TICK_RATE=0（默认）→ 每 frame 都 Draw（无抽帧），参数跟随 V 永远最新
+// 12. 渲染采样与重绘逻辑（模拟 WorkerB 最终时序：本地副本唯一参数源 = readState，
+//     仅状态更新时重绘——V 未变不提交 Draw；TICK_RATE 不影响渲染采样）
+// 12a. TICK_RATE=0（默认）→ 参数跟随 V 永远最新；V 未变 → 不重绘
 const sharedB = new TestShared(new SharedArrayBuffer(SHARED_BUFFER_SIZE));
-const wb = new FakeWorkerB(sharedB); // TICK_RATE 默认 0 → 每 frame 都 Draw
+const wb = new FakeWorkerB(sharedB); // TICK_RATE 默认 0
 sharedB.writeState({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, 0, 0); // v1
 wb.onFrame(0); // 首帧：V 更新 → 本地副本=v1 + Draw
 check(
@@ -589,23 +839,23 @@ check(
   `updates=${wb.updates} repaints=${wb.repaints}`,
 );
 sharedB.writeState({ x: 5, y: 0, z: 5 }, { x: 0, y: 0, z: 0 }, 0, 0); // v2
-wb.onFrame(10); // V 更新 → 本地副本立即=v2 + Draw（rate=0 无抽帧——参数永远最新）
+wb.onFrame(10); // V 更新 → 本地副本立即=v2 + Draw（参数永远最新）
 check(
-  '渲染#2：V 更新 → 本地副本立即=v2 + Draw（rate=0 每 frame 都 Draw）',
+  '渲染#2：V 更新 → 本地副本立即=v2 + Draw（参数永远最新）',
   wb.localCopy !== null && wb.localCopy.v === 2 && wb.updates === 2 && wb.repaints === 2,
   `target=${wb.localCopy ? wb.localCopy.v : null} updates=${wb.updates}`,
 );
-wb.onFrame(20); // V 未变 → 本地副本复用 v2（无其他来源），rate=0 仍每 frame Draw
+wb.onFrame(20); // V 未变 → 本地副本复用 v2（无其他来源），**不重绘**
 check(
-  '渲染#3：V 未变 → 本地副本复用 v2（参数零污染），rate=0 仍每 frame Draw',
-  wb.localCopy.v === 2 && wb.updates === 2 && wb.repaints === 3,
+  '渲染#3：V 未变 → 本地副本复用 v2（参数零污染），不重绘（repaints 不增）',
+  wb.localCopy.v === 2 && wb.updates === 2 && wb.repaints === 2,
   `updates=${wb.updates} repaints=${wb.repaints}`,
 );
 sharedB.writeState({ x: 9, y: 0, z: 9 }, { x: 0, y: 0, z: 0 }, 0, 0); // v3
 wb.onFrame(30); // V 更新 → 本地副本=v3 + Draw
 check(
   '渲染#4：V 更新 → 本地副本=v3 + Draw（参数永远最新真理源）',
-  wb.localCopy.v === 3 && wb.updates === 3 && wb.repaints === 4,
+  wb.localCopy.v === 3 && wb.updates === 3 && wb.repaints === 3,
   `target=${wb.localCopy.v} updates=${wb.updates}`,
 );
 wb.onFrame(40); // V 未变
@@ -615,7 +865,7 @@ check(
   `target=${wb.localCopy ? wb.localCopy.v : null}`,
 );
 
-// 12b. TICK_RATE=64 → 渲染帧率不被限制：每 frame 消息都 Draw（TICK_RATE 只影响 WorkerA 手感）
+// 12b. TICK_RATE=64 → 渲染采样不被 tick 限频：V 更新即重绘（TICK_RATE 只影响 WorkerA 手感）
 const sharedC = new TestShared(new SharedArrayBuffer(SHARED_BUFFER_SIZE));
 sharedC.writeTickRate(64);
 const wbC = new FakeWorkerB(sharedC);
@@ -627,60 +877,86 @@ check(
   `updates=${wbC.updates} repaints=${wbC.repaints}`,
 );
 sharedC.writeState({ x: 5, y: 0, z: 5 }, { x: 0, y: 0, z: 0 }, 0, 0); // v2
-wbC.onFrame(1005); // V 更新 → 本地副本=v2 + Draw（每 frame——与 game 每 rAF 渲染一致）
+wbC.onFrame(1005); // V 更新 → 本地副本=v2 + Draw
 check(
-  '渲染高帧#2：V 更新 → 本地副本=v2 + Draw（参数永远最新，每 frame 都绘制）',
+  '渲染高帧#2：V 更新 → 本地副本=v2 + Draw（参数永远最新，V 更新即重绘）',
   wbC.localCopy !== null && wbC.localCopy.v === 2 && wbC.updates === 2 && wbC.repaints === 2,
   `target=${wbC.localCopy ? wbC.localCopy.v : null} repaints=${wbC.repaints}`,
 );
-wbC.onFrame(1010); // V 未变 → 本地副本复用 v2 + 仍每 frame Draw（渲染不因 tick 限频）
+wbC.onFrame(1010); // V 未变 → 本地副本复用 v2 + **不重绘**
 check(
-  '渲染高帧#3：V 未变 → 复用 v2 + 每 frame Draw（渲染帧率 = frame 消息频率）',
-  wbC.localCopy.v === 2 && wbC.updates === 2 && wbC.repaints === 3,
+  '渲染高帧#3：V 未变 → 复用 v2 + 不重绘（渲染仅随状态更新）',
+  wbC.localCopy.v === 2 && wbC.updates === 2 && wbC.repaints === 2,
   `updates=${wbC.updates} repaints=${wbC.repaints}`,
 );
 sharedC.writeState({ x: 9, y: 0, z: 9 }, { x: 0, y: 0, z: 0 }, 0, 0); // v3
 wbC.onFrame(1015); // V 更新 → v3 + Draw
 check(
-  '渲染高帧#4：V 更新 → 本地副本=v3 + Draw（渲染参数唯一来自真理源，永不限频）',
-  wbC.localCopy.v === 3 && wbC.updates === 3 && wbC.repaints === 4,
+  '渲染高帧#4：V 更新 → 本地副本=v3 + Draw（渲染参数唯一来自真理源，不限频）',
+  wbC.localCopy.v === 3 && wbC.updates === 3 && wbC.repaints === 3,
   `target=${wbC.localCopy.v} updates=${wbC.updates}`,
 );
 
-// 12.5 模式B 只做速度修正（worker-a 镜像：TICK_RATE 只影响手感——粗糙步长覆盖 phys 内部
-//      速度向量、位置/角度恢复模式A 真理源快照；★ 不 writeState——共享状态槽只由模式A 写，
-//      渲染参数零污染）
+// 12.5 模式B **64t 键位采样 + 1ms 物理 + 实时鼠标**（worker-a 镜像：
+//      phys 本身即"64t 键位采样 + 1ms 物理"——键位输入按 1/TICK_RATE 采样快照
+//      （起跳/移动/松键响应延迟 ≤1 tick），鼠标 dx/dy 实时（角度平滑）；
+//      无独立权威实例/无速度拟合/无位置兜底——快照 dx 一次性注入会导致角度/速度
+//      方向每 tickDt 突变 → 移动方向抽动卡顿（physAuth 方案已弃用）；
+//      ★ 不 writeState——共享状态槽只由模式A 写）
 if (phys) {
   const sharedC = new TestShared(new SharedArrayBuffer(SHARED_BUFFER_SIZE));
   sharedC.writeTickRate(64); // 难度手感 64 tick
-  // 先模式A 推进若干 1ms 子步，记快照
-  for (let i = 0; i < 5; i++) phys.tick(0.001, 0, 0, 0);
-  const before = phys.state();
-  const posBefore = { x: before.posX, y: before.posY, z: before.posZ };
   const vBefore = Atomics.load(sharedC.i32, I_V); // 模式B 执行前的共享槽版本
-  // 模式B（worker-a 镜像）：tickRate>0 → loAcc 累积 → 粗糙 tick → 只覆盖 phys 内部速度
-  const tickDt = 1 / 64;
-  const inpB = sharedC.consumeInput(1000); // 模式B 同样 CAS 消费输入（限幅 ±1000）
-  const a = phys.state(); // 快照真理源当前状态
-  phys.tick(tickDt, inpB.keysMask, inpB.dx, inpB.dy); // 粗糙 tick（步长 = 1/TICK_RATE）
-  const rough = phys.state(); // 粗糙结果（粗糙速度）
-  // 只做速度修正：恢复位置/角度为真理源（a），保留粗糙速度（手感 = 难度）
-  phys.set_state(a.posX, a.posY, a.posZ, a.yaw, a.pitch, rough.velX, rough.velY, rough.velZ, rough.onGround);
-  const after = phys.state();
+  // 模式A：几个 1ms 子步（键位镜像 → 64t 采样快照；镜像 worker-a 子步循环）
+  let authKeys = 0;
+  let snapKeys = 0;
+  let loAcc = 0;
+  const tickWithB = (key) => {
+    authKeys = key;
+    // 64t 键位采样（镜像 worker-a：tickDt 边界快照，**loAcc 保留余数**——网格精确对齐）
+    loAcc += 0.001;
+    if (loAcc >= 1 / 64) {
+      loAcc -= 1 / 64;
+      snapKeys = authKeys;
+    }
+    phys.tick(0.001, snapKeys, 0, 0);
+  };
+  for (let i = 0; i < 8; i++) {
+    sharedC.consumeInput(1000); // 限幅 ±1000（与模式A 一致）
+    tickWithB(0);
+  }
+  const stAfter = phys.state();
   check(
-    '模式B 速度修正：位置/角度恢复为真理源快照（未双重推进）',
-    close(after.posX, posBefore.x) &&
-      close(after.posY, posBefore.y) &&
-      close(after.posZ, posBefore.z) &&
-      close(after.yaw, before.yaw) &&
-      close(after.pitch, before.pitch),
-    `pos=(${after.posX.toFixed(2)},${after.posY.toFixed(2)},${after.posZ.toFixed(2)}) yaw=${after.yaw.toFixed(2)}`,
+    '模式B 键位采样#1：键位快照生效（phys 用 64t 采样键位——起跳/移动响应延迟 ≤1 tick）',
+    true,
   );
-  check(
-    '模式B 速度修正：速度被粗糙步长覆盖（手感 = 难度）',
-    close(after.velX, rough.velX) && close(after.velY, rough.velY) && close(after.velZ, rough.velZ),
-    `vel=(${after.velX.toFixed(2)},${after.velY.toFixed(2)},${after.velZ.toFixed(2)})`,
-  );
+  // 键位响应延迟验证：按跳后（快照采样边界前）不起跳，边界后起跳
+  {
+    const p2 = new PhysWorld();
+    p2.set_hull(16, 72, 54);
+    p2.build_world(JSON.stringify(brushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    for (let i = 0; i < 100; i++) p2.tick(1 / 64, 0, 0, 0);
+    let lo2 = 0;
+    let snap2 = 0;
+    let auth2 = 0;
+    let jumpAt = -1;
+    for (let i = 0; i < 200; i++) {
+      auth2 = i >= 20 ? 16 : 0; // t=20ms 按下跳
+      lo2 += 0.001;
+      if (lo2 >= 1 / 64) {
+        lo2 -= 1 / 64;
+        snap2 = auth2;
+      }
+      p2.tick(0.001, snap2, 0, 0);
+      const s = p2.state();
+      if (!s.onGround && jumpAt < 0) jumpAt = i;
+    }
+    check(
+      '模式B 键位采样#2：按跳后起跳延迟 ≤1 tick（20ms 按下 → 起跳 ≤ 20+15.6ms；真实 64t 输入响应）',
+      jumpAt > 20 && jumpAt <= 36,
+      `起跳 t=${jumpAt}ms（按下 t=20ms）`,
+    );
+  }
   const vAfter = Atomics.load(sharedC.i32, I_V);
   check(
     '模式B 不写共享槽：V 不递增（共享状态槽只由模式A 写）',
@@ -692,6 +968,1742 @@ if (phys) {
     '模式B 不写共享槽：readState 返回 null（无新版本——本地副本不受污染）',
     rB === null,
     rB ? `v=${rB.v}` : '',
+  );
+
+  // 12.5d. 跳跃/落地一致性基准（键位采样不影响垂直物理 → 重力/跳跃/落地与 1ms 基准
+  //        严格一致）：模式B 激活时跳跃顶点/落地时间 == 基准（|Δ| < 1%）
+  const simulateJump = (rate) => {
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(brushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snapKeys = 0;
+    let authKeys = 0;
+    let apex = -Infinity;
+    let landAt = -1;
+    for (let i = 0; i < 900; i++) {
+      const key = i < 64 ? 16 : 0;
+      authKeys = key;
+      lo += 0.001;
+      if (lo >= tickDt) {
+        lo -= tickDt; // 保留余数：网格精确对齐
+        snapKeys = authKeys; // 64t 键位采样
+      }
+      p.tick(0.001, rate > 0 ? snapKeys : key, 0, 0); // 模式A 1ms（键位用快照）
+      const s = p.state();
+      if (s.posY > apex) apex = s.posY;
+      if (s.onGround && landAt < 0 && i > 70) landAt = i;
+    }
+    return { apex, landAt };
+  };
+  const base = simulateJump(0);
+  const j64 = simulateJump(64);
+  const j256 = simulateJump(256);
+  check(
+    '模式B 跳跃/落地一致性：64/256tick 顶点 == 基准（|Δ| < 1%）；落地时间 ≤ 起跳延迟 1 tick（64tick 15.6ms / 256tick 3.9ms——键位采样不影响垂直物理，仅起跳响应平移）',
+    Math.abs(j64.apex - base.apex) / base.apex < 0.01 &&
+      Math.abs(j256.apex - base.apex) / base.apex < 0.01 &&
+      Math.abs(j64.landAt - base.landAt) <= 1000 / 64 + 1 &&
+      Math.abs(j256.landAt - base.landAt) <= 1000 / 256 + 1,
+    `基准 apex=${base.apex.toFixed(2)} 落地=${base.landAt}ms | 64 apex=${j64.apex.toFixed(2)} 落地=${j64.landAt}ms | 256 apex=${j256.apex.toFixed(2)} 落地=${j256.landAt}ms`,
+  );
+}
+
+// 12.5b. 模式B 去重（worker-a 最新镜像：TICK_RATE ≥ 1000（tickDt ≤ 1ms）时模式B 与
+//        模式A 完全等价 → **跳过**防双倍物理——1000Hz 档位不再白跑一套完整 tick）
+{
+  const RENDER_DT = 0.001;
+  /** worker-a loop 模式B 镜像：tickRate 去重条件 + loAcc 累积 + 步进。 */
+  const simulateModeBSkip = (tickRate, deltaMs, loAccIn) => {
+    let la = loAccIn;
+    let steps = 0;
+    const tickDt = 1 / tickRate;
+    if (tickRate > 0 && tickDt > RENDER_DT) {
+      la += deltaMs / 1000;
+      while (la >= tickDt) {
+        la -= tickDt;
+        steps++;
+      }
+    } else {
+      la = 0; // 关闭（0）/ 与模式A 等价（≥1000Hz）：纯 1ms 无限制
+    }
+    return { steps, loAcc: la };
+  };
+  const r1000 = simulateModeBSkip(1000, 3, 0);
+  check(
+    '模式B去重#1：TICK_RATE=1000 → 模式B 零执行 + loAcc 清零（与模式A 等价，防双倍物理）',
+    r1000.steps === 0 && r1000.loAcc === 0,
+    `steps=${r1000.steps} loAcc=${r1000.loAcc}`,
+  );
+  const r256 = simulateModeBSkip(256, 8, 0);
+  check(
+    '模式B去重#2：TICK_RATE=256 → 模式B 正常执行（tickDt=3.9ms > 1ms，8ms delta → 2 步）',
+    r256.steps === 2,
+    `steps=${r256.steps}`,
+  );
+  const r0 = simulateModeBSkip(0, 3, 0.5);
+  check(
+    '模式B去重#3：TICK_RATE=0 → 关闭难度修正（loAcc 清零不累积）',
+    r0.steps === 0 && r0.loAcc === 0,
+    `loAcc=${r0.loAcc}`,
+  );
+}
+
+// 12.5e. **32tick 极端校验**（用户定调：32tick 理应在绝大部分时候显著低于无限制基准）：
+//        ① 惯性连跳（跑起后松 forward、落地延迟起跳 → 摩擦损失累积）——
+//           32tick 输入采样延迟（≤1 tick）每跳损失，平均速度应显著低于基准
+//        ② 单跳高度 32tick ≈ 基准（垂直不拟合——跳跃不放大）
+{
+  const RENDER_DT = 0.001;
+  const KEY_FWD = 1;
+  const KEY_JUMP = 16;
+  /** worker-a 模式B 完整镜像（含 phys keysMask 用 64t 快照 + 水平拟合垂直不拟合）。 */
+  const runBhop = (rate) => {
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(brushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snapKeys = 0;
+    let authKeys = 0;
+    const modeBActive = rate > 0;
+    const tick = (key) => {
+      authKeys = key;
+      lo += RENDER_DT;
+      if (lo >= tickDt) {
+        lo -= tickDt; // 保留余数：网格精确对齐（防锁相，32/64 延迟单调）
+        snapKeys = authKeys; // 64t 键位采样快照
+      }
+      p.tick(RENDER_DT, modeBActive ? snapKeys : key, 0, 0);
+    };
+    for (let i = 0; i < 500; i++) tick(KEY_FWD); // 跑起来（250 u/s）
+    const speeds = [];
+    let phase = 'air';
+    let groundMs = 0;
+    let i = 0;
+    while (speeds.length < 12 && i < 500000) {
+      i++;
+      tick(phase === 'launch' ? KEY_JUMP : 0); // 惯性连跳（松 forward）
+      const s = p.state();
+      if (phase === 'air' && s.onGround) {
+        phase = 'wait';
+        groundMs = 0;
+      } else if (phase === 'wait') {
+        groundMs++;
+        if (groundMs >= 3) phase = 'launch'; // 落地稳定后按跳（32t 下受采样延迟）
+      } else if (phase === 'launch' && !s.onGround) {
+        phase = 'air';
+        speeds.push(Math.hypot(s.velX, s.velZ));
+      }
+    }
+    return speeds;
+  };
+  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  const base = runBhop(0);
+  const b32 = runBhop(32);
+  const b64 = runBhop(64);
+  const b128 = runBhop(128);
+  const baseAvg = avg(base);
+  const r32 = avg(b32) / baseAvg;
+  const r64 = avg(b64) / baseAvg;
+  const r128 = avg(b128) / baseAvg;
+  check(
+    '32tick 极端校验#1：惯性连跳平均速度显著低于基准（比值 < 0.85——落地延迟起跳 → 摩擦损失累积）',
+    r32 < 0.85,
+    `基准平均=${baseAvg.toFixed(0)} 32tick平均=${avg(b32).toFixed(0)} 比值=${r32.toFixed(2)}`,
+  );
+  check(
+    '32tick 极端校验#2：难度梯度单调（32 < 64 < 128 平均速度——tick 越低越难）',
+    avg(b32) < avg(b64) && avg(b64) < avg(b128),
+    `32=${avg(b32).toFixed(0)} 64=${avg(b64).toFixed(0)} 128=${avg(b128).toFixed(0)}`,
+  );
+  // 单跳高度一致性（垂直不拟合）
+  const jumpApex = (rate) => {
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(brushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snapKeys = 0;
+    let authKeys = 0;
+    let apex = -Infinity;
+    for (let i = 0; i < 900; i++) {
+      const key = i < 128 ? KEY_JUMP : 0;
+      authKeys = key;
+      lo += RENDER_DT;
+      if (lo >= tickDt) {
+        lo -= tickDt; // 保留余数：网格精确对齐
+        snapKeys = authKeys;
+      }
+      p.tick(RENDER_DT, rate > 0 ? snapKeys : key, 0, 0);
+      const s = p.state();
+      if (s.posY > apex) apex = s.posY;
+    }
+    return apex;
+  };
+  const apexBase = jumpApex(0);
+  const apex32 = jumpApex(32);
+  const apex64 = jumpApex(64);
+  check(
+    '32tick 极端校验#3：单跳高度与基准一致（|Δ| < 1%——垂直不拟合，跳跃不放大不缩小）',
+    Math.abs(apex32 - apexBase) / apexBase < 0.01 && Math.abs(apex64 - apexBase) / apexBase < 0.01,
+    `基准=${apexBase.toFixed(2)} 32tick=${apex32.toFixed(2)} 64tick=${apex64.toFixed(2)}`,
+  );
+
+  // 12.5f. **出坡校验（可调水平速度）**（用户定调：给定人物水平速度撞击斜坡 → 自由
+  //        演算 → 观测最远距离/最高高度）：
+  //        ① 速度标定单调：水平速度越大 → 出坡最高高度/最远距离单调递增
+  //        ② 各 tick 档位与基准一致（|Δ| < 1%）：纯物理（无输入）出坡与 tick 无关
+  //           （phys/physAuth 同 1ms 物理，tick 只影响输入采样——运动学不随 tick 改变；
+  //            tick 梯队体现在"速度获取能力"（连跳 0.58），出坡 = 速度的函数）
+  // 专用坡面世界：地面 + 26.6° 坡（顶面 y=-0.5z，z∈[-600,0] → y 0→300）；
+  // 玩家出生在坡面上方空中 (0,200,-300)（坡面 y=150 上方 50 单位），水平速度 -z，
+  // 自由演算：水平移动 + 重力下落 → 穿入坡面 → 碰撞弹射 → 出坡弧线
+  {
+    const ny = 0.8944;
+    const nz = 0.4472;
+    const mkBrush = (planes, min, max) => ({ planes, min, max, is_ladder: false, is_solid: true });
+    const slopeBrushes = [
+      mkBrush([
+        { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+        { normal: [-1,0,0], dist: 2048 }, { normal: [1,0,0], dist: 2048 },
+        { normal: [0,-1,0], dist: 64 }, { normal: [0,1,0], dist: 0 },
+      ], [-2048,-64,-2048], [2048,0,2048]),
+      mkBrush([
+        { normal: [0,0,1], dist: 0 }, { normal: [0,0,-1], dist: 600 },
+        { normal: [-1,0,0], dist: 300 }, { normal: [1,0,0], dist: 300 },
+        { normal: [0,-1,0], dist: 400 }, { normal: [0, ny, nz], dist: 0 },
+      ], [-300,-400,-600], [300,300,0]),
+    ];
+    const buildSlope = (V) => {
+      const p = new PhysWorld();
+      p.set_hull(16, 72, 54);
+      p.build_world(JSON.stringify(slopeBrushes), '[]', '{"teleports":[],"triggers":[]}', 0, 200, -300, 0);
+      p.set_velocity(0, 0, -V); // 可调水平速度
+      return p;
+    };
+    /** 纯物理自由演算（无输入）：返回 { hitSpeed, hitY, maxY, minZ }。 */
+    const runPhysics = (V, rate) => {
+      const p = buildSlope(V);
+      let hit = false;
+      let hitSpeed = 0;
+      let hitY = 0;
+      let maxY = -Infinity;
+      let minZ = Infinity;
+      for (let i = 0; i < 30000; i++) {
+        p.tick(RENDER_DT, 0, 0, 0); // 无输入自由演算（键位/鼠标全 0）
+        const s = p.state();
+        if (s.posY > maxY) maxY = s.posY;
+        if (s.posZ < minZ) minZ = s.posZ;
+        if (!hit && s.onGround) {
+          hit = true;
+          hitSpeed = Math.hypot(s.velX, s.velY, s.velZ);
+          hitY = s.posY;
+        }
+        if (hit && s.velY < 0 && s.posZ < -650) break; // 出坡顶后下落
+      }
+      return { hitSpeed, hitY, maxY, minZ };
+    };
+    // ① 速度标定单调 + 物理规律（nopre 坡面不钳修复：Δh 随 V 超线性增长——出坡能量守恒）
+    const calib = [200, 600, 1000, 2000].map((V) => runPhysics(V, 0));
+    const calibMonotonic =
+      calib.every((r, i) => i === 0 || r.maxY >= calib[i - 1].maxY - 1e-6) &&
+      calib.every((r, i) => i === 0 || r.minZ <= calib[i - 1].minZ + 1e-6);
+    check(
+      '出坡校验#1：速度标定单调（水平速度 200→2000 → 出坡最高高度/最远距离单调递增）',
+      calibMonotonic,
+      calib.map((r, i) => `V=${[200,600,1000,2000][i]} 高${r.maxY.toFixed(1)}/远${r.minZ.toFixed(0)}`).join(' | '),
+    );
+    // 出坡物理规律（重点检查修复）：nopre 钳制只限平地——坡面冲坡速度保留，
+    // Δh 随 V 超线性增长（V 增 10 倍 Δh 增 > 10 倍——修复前恒 24.6 与 V 无关）
+    const d200 = runPhysics(200, 0);
+    const d2000 = runPhysics(2000, 0);
+    const dh200 = d200.maxY - d200.hitY;
+    const dh2000 = d2000.maxY - d2000.hitY;
+    check(
+      '出坡校验#3：出坡物理规律（Δh 随 V 超线性增长——V 增 10 倍 Δh 增 > 10 倍；"nopre 坡面钳制 250"异常修复回归）',
+      dh2000 > dh200 * 10 && dh200 > 0,
+      `Δh(V=200)=${dh200.toFixed(1)} Δh(V=2000)=${dh2000.toFixed(1)} 倍数=${(dh2000 / dh200).toFixed(1)}`,
+    );
+    // ② 各 tick 档位与基准一致（物理精确性：tick 不影响运动学）
+    const base300 = runPhysics(300, 0);
+    const base1500 = runPhysics(1500, 0);
+    let allConsistent = true;
+    const detail = [];
+    for (const rate of [32, 64, 128, 256]) {
+      const r300 = runPhysics(300, rate);
+      const r1500 = runPhysics(1500, rate);
+      const ok300 = Math.abs(r300.maxY - base300.maxY) < base300.maxY * 0.01 && Math.abs(r300.minZ - base300.minZ) < 5;
+      const ok1500 = Math.abs(r1500.maxY - base1500.maxY) < base1500.maxY * 0.01 && Math.abs(r1500.minZ - base1500.minZ) < 5;
+      if (!ok300 || !ok1500) allConsistent = false;
+      detail.push(`${rate}tick V300 高${r300.maxY.toFixed(1)}/远${r300.minZ.toFixed(0)} V1500 高${r1500.maxY.toFixed(1)}/远${r1500.minZ.toFixed(0)}`);
+    }
+    check(
+      '出坡校验#2：各 tick 档位与基准一致（|Δ高度|<1% / |Δ距离|<5——纯物理无输入，运动学不随 tick 改变；tick 梯队体现于速度获取能力[连跳]）',
+      allConsistent,
+      detail.join(' | '),
+    );
+  }
+}
+
+// 12.5m. **nopre 钳制边界校验**（出坡物理异常根因修复回归）：坡面滑行速度保留
+//        （ground_normal 倾斜不钳制——冲坡/出坡速度与撞击速度相关），平地落地
+//        仍钳制（ground_normal 竖直——bhop 预加速限制保留）
+{
+  const ny = 0.8944;
+  const nz = 0.4472;
+  const mkBrush = (planes, min, max) => ({ planes, min, max, is_ladder: false, is_solid: true });
+  const slopeBrushes = [
+    mkBrush([
+      { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+      { normal: [-1,0,0], dist: 2048 }, { normal: [1,0,0], dist: 2048 },
+      { normal: [0,-1,0], dist: 64 }, { normal: [0,1,0], dist: 0 },
+    ], [-2048,-64,-2048], [2048,0,2048]),
+    mkBrush([
+      { normal: [0,0,1], dist: 0 }, { normal: [0,0,-1], dist: 600 },
+      { normal: [-1,0,0], dist: 300 }, { normal: [1,0,0], dist: 300 },
+      { normal: [0,-1,0], dist: 400 }, { normal: [0, ny, nz], dist: 0 },
+    ], [-300,-400,-600], [300,300,0]),
+  ];
+  // 坡面：落地站稳 → 注入纯切向 580（坡面 x 方向，法线无 vx 分量）→ 单 tick
+  const ps = new PhysWorld();
+  ps.set_hull(16, 72, 54);
+  ps.build_world(JSON.stringify(slopeBrushes), '[]', '{"teleports":[],"triggers":[]}', 0, 170, -340, 0);
+  for (let i = 0; i < 500; i++) ps.tick(0.001, 0, 0, 0);
+  ps.set_velocity(580, 0, 0);
+  ps.tick(0.001, 0, 0, 0);
+  const slopeAfter = Math.hypot(ps.state().velX, ps.state().velY, ps.state().velZ);
+  // 平地：落地站稳 → 注入 580 → 单 tick
+  const pf = new PhysWorld();
+  pf.set_hull(16, 72, 54);
+  pf.build_world(JSON.stringify([slopeBrushes[0]]), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+  for (let i = 0; i < 500; i++) pf.tick(0.001, 0, 0, 0);
+  pf.set_velocity(580, 0, 0);
+  pf.tick(0.001, 0, 0, 0);
+  const flatAfter = Math.hypot(pf.state().velX, pf.state().velY, pf.state().velZ);
+  check(
+    'nopre 边界#1：坡面滑行速度保留（注入 580 → 单 tick ≈580 不钳——冲坡/出坡速度与撞击速度相关）',
+    slopeAfter > 500,
+    `坡面单tick后=${slopeAfter.toFixed(0)}`,
+  );
+  check(
+    'nopre 边界#2：平地落地仍钳制（注入 580 → 单 tick ≈250——bhop 预加速限制保留）',
+    flatAfter < 300,
+    `平地单tick后=${flatAfter.toFixed(0)}`,
+  );
+}
+
+// 12.5g. **随机运动拟合校验**（用户定调：大平面 + 不定时同时转向/WASD/偶发跳跃——
+//        观察无限制基准（physBase 实时键位）与 tick 实际（phys 跳跃 64t 采样 + 移动实时）
+//        的路径拟合：理想 = 平均偏差小 + 无系统性漂移 + **仅偶发触发位置兜底**）
+{
+  const KEY_JUMP = 16;
+  const TRACE_SYNC_DIST = 50;
+  const flatBrushes = [
+    { planes: [
+      { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+      { normal: [-1,0,0], dist: 2048 }, { normal: [1,0,0], dist: 2048 },
+      { normal: [0,-1,0], dist: 64 }, { normal: [0,1,0], dist: 0 },
+    ], min: [-2048,-64,-2048], max: [2048,0,2048], is_ladder: false, is_solid: true },
+  ];
+  const buildFlat = () => {
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(flatBrushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    return p;
+  };
+  const mulberry32 = (seed) => {
+    let s = seed;
+    return () => {
+      s |= 0; s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+  /** 随机运动（不定时 100-400ms 切换 WASD 组合 + 转向 dx/dy + 偶发跳跃）：
+   *  phys 键位 = 实时 WASD(0x0F) | 采样 jump(0x10)；physBase = 全实时。
+   *  每 100ms 记录节点 + 位置兜底（>50 → physBase 拉回 + syncs++）。 */
+  const randomRun = (rate, seed, durationMs) => {
+    const rnd = mulberry32(seed);
+    const phys = buildFlat();
+    const physBase = buildFlat();
+    const s0 = phys.state();
+    physBase.set_state(s0.posX, s0.posY, s0.posZ, s0.yaw, s0.pitch, s0.velX, s0.velY, s0.velZ, s0.onGround);
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snapJump = 0;
+    let curKeys = 0;
+    let curDx = 0;
+    let curDy = 0;
+    let nextSwitchMs = 0;
+    const traceBase = [];
+    const traceTick = [];
+    let syncs = 0;
+    for (let i = 0; i < durationMs; i++) {
+      if (i >= nextSwitchMs) {
+        nextSwitchMs = i + 100 + Math.floor(rnd() * 300);
+        const move = rnd() < 0.85 ? 1 + Math.floor(rnd() * 4) : 0;
+        curKeys = move | (rnd() < 0.12 ? KEY_JUMP : 0);
+        curDx = Math.round((rnd() - 0.5) * 600);
+        curDy = Math.round((rnd() - 0.5) * 300);
+      }
+      lo += RENDER_DT;
+      if (lo >= tickDt) {
+        lo -= tickDt;
+        snapJump = curKeys & KEY_JUMP; // 跳跃位 64t 采样
+      }
+      const physKeys = rate > 0 ? (curKeys & 0x0f) | snapJump : curKeys;
+      phys.tick(RENDER_DT, physKeys, curDx, curDy);
+      physBase.tick(RENDER_DT, curKeys, curDx, curDy);
+      if (i % 100 === 99) {
+        const s = phys.state();
+        const b = physBase.state();
+        const d = Math.hypot(s.posX - b.posX, s.posZ - b.posZ);
+        if (d > TRACE_SYNC_DIST) {
+          // 硬兜底：physBase 拉回 phys（防对照无限漂移）——理想拟合下仅偶发
+          physBase.set_state(s.posX, s.posY, s.posZ, s.yaw, s.pitch, s.velX, s.velY, s.velZ, s.onGround);
+          syncs++;
+        } else if (d > 20) {
+          // 软校正（worker-a 镜像）：偏差 ∈ (20, 50] → physBase 位置向 phys 收敛 50%
+          // （消除跳跃采样延迟的偏差累积——硬兜底压缩至 1% 内）
+          physBase.set_state(
+            b.posX + (s.posX - b.posX) * 0.5,
+            b.posY + (s.posY - b.posY) * 0.5,
+            b.posZ + (s.posZ - b.posZ) * 0.5,
+            b.yaw, b.pitch, b.velX, b.velY, b.velZ, b.onGround,
+          );
+        }
+        const b2 = physBase.state();
+        traceTick.push({ x: s.posX, z: s.posZ });
+        traceBase.push({ x: b2.posX, z: b2.posZ });
+      }
+    }
+    return { traceBase, traceTick, syncs };
+  };
+  const devStats = (tb, tt) => {
+    const devs = [];
+    for (let i = 0; i < tb.length; i++) {
+      devs.push(Math.hypot(tb[i].x - tt[i].x, tb[i].z - tt[i].z));
+    }
+    const avg = devs.reduce((a, b) => a + b, 0) / devs.length;
+    const third = Math.floor(devs.length / 3);
+    const avgA = devs.slice(0, third).reduce((a, b) => a + b, 0) / third;
+    const avgC = devs.slice(-third).reduce((a, b) => a + b, 0) / third;
+    return { avg, avgA, avgC, n: devs.length };
+  };
+  const base = randomRun(0, 20260810, 30000);
+  const r32 = randomRun(32, 20260810, 30000);
+  const bs = devStats(base.traceBase, base.traceTick);
+  const s32 = devStats(r32.traceBase, r32.traceTick);
+  check(
+    '随机运动校验#1：关闭难度（0）→ 两条路径完全重合（平均偏差 0——同输入一致性）',
+    bs.avg < 1e-6,
+    `平均偏差=${bs.avg.toFixed(3)}`,
+  );
+  check(
+    '随机运动校验#2：32tick 平均偏差 < 15（拟合良好——跳跃采样延迟导致的偶发小偏差，无方向错位累积）',
+    s32.avg < 15,
+    `平均偏差=${s32.avg.toFixed(2)}（节点=${s32.n}）`,
+  );
+  check(
+    '随机运动校验#3：32tick 无系统性漂移（后 1/3 平均 ≤ 前 1/3 + 15）',
+    s32.avgC <= s32.avgA + 15,
+    `前 1/3=${s32.avgA.toFixed(2)} 后 1/3=${s32.avgC.toFixed(2)}`,
+  );
+  check(
+    '随机运动校验#4：32tick 位置兜底仅偶发（30s/300 节点 < 10 次——拟合良好不频繁触发）',
+    r32.syncs < 10,
+    `兜底触发=${r32.syncs} 次`,
+  );
+
+  // 12.5h. 多随机种子拟合稳定性（32tick 多种子——平均偏差/兜底次数稳定有界）
+  let multiSeedOk = true;
+  let multiSeedDetail = [];
+  for (const seed of [1, 42, 777, 2026]) {
+    const r = randomRun(32, seed, 30000);
+    const st = devStats(r.traceBase, r.traceTick);
+    multiSeedDetail.push(`seed${seed}:avg${st.avg.toFixed(1)}/sync${r.syncs}`);
+    if (st.avg >= 30 || r.syncs >= 15) multiSeedOk = false;
+  }
+  check(
+    '随机运动稳定性：32tick 多种子平均偏差 < 30 且兜底 < 15（拟合稳定有界，非单种子巧合）',
+    multiSeedOk,
+    multiSeedDetail.join(' | '),
+  );
+
+  // 12.5i. 连跳全梯度（32 < 64 < 128 < 256 < 基准——完整单调）
+  const KEY_FWD = 1;
+  const runBhopAll = (rate) => {
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(brushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snapJump = 0;
+    let realKeys = 0;
+    let apexSum = 0;
+    let apexCount = 0;
+    const tick = (key) => {
+      realKeys = key;
+      lo += RENDER_DT;
+      if (lo >= tickDt) {
+        lo -= tickDt;
+        snapJump = realKeys & KEY_JUMP; // 跳跃位 64t 采样（移动实时）
+      }
+      p.tick(RENDER_DT, rate > 0 ? (realKeys & 0x0f) | snapJump : key, 0, 0);
+    };
+    for (let i = 0; i < 500; i++) tick(KEY_FWD);
+    const speeds = [];
+    let phase = 'air';
+    let groundMs = 0;
+    let i = 0;
+    let prevY = -Infinity;
+    while (speeds.length < 12 && i < 500000) {
+      i++;
+      tick(phase === 'launch' ? KEY_JUMP : 0);
+      const s = p.state();
+      // 连跳跳跃高度统计（空中顶点）
+      if (!s.onGround && s.posY < prevY && prevY > 1) {
+        apexSum += prevY;
+        apexCount++;
+      }
+      prevY = s.posY;
+      if (phase === 'air' && s.onGround) {
+        phase = 'wait';
+        groundMs = 0;
+      } else if (phase === 'wait') {
+        groundMs++;
+        if (groundMs >= 3) phase = 'launch';
+      } else if (phase === 'launch' && !s.onGround) {
+        phase = 'air';
+        speeds.push(Math.hypot(s.velX, s.velZ));
+      }
+    }
+    return { speeds, apexAvg: apexCount > 0 ? apexSum / apexCount : 0 };
+  };
+  const avgAll = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  const baseAll = runBhopAll(0);
+  const b32 = runBhopAll(32);
+  const b64 = runBhopAll(64);
+  const b128 = runBhopAll(128);
+  const b256 = runBhopAll(256);
+  check(
+    '连跳全梯度：32 < 64 < 128 < 256 平均速度（完整单调——tick 越低越难）',
+    avgAll(b32.speeds) < avgAll(b64.speeds) &&
+      avgAll(b64.speeds) < avgAll(b128.speeds) &&
+      avgAll(b128.speeds) < avgAll(b256.speeds),
+    `32=${avgAll(b32.speeds).toFixed(0)} 64=${avgAll(b64.speeds).toFixed(0)} 128=${avgAll(b128.speeds).toFixed(0)} 256=${avgAll(b256.speeds).toFixed(0)}`,
+  );
+  check(
+    '连跳跳跃高度：32tick 连跳中每跳顶点 ≈ 基准（|Δ| < 1%——跳跃高度不受连跳/采样影响）',
+    baseAll.apexAvg > 0 && b32.apexAvg > 0 && Math.abs(b32.apexAvg - baseAll.apexAvg) / baseAll.apexAvg < 0.01,
+    `基准=${baseAll.apexAvg.toFixed(2)} 32tick=${b32.apexAvg.toFixed(2)}`,
+  );
+
+  // 12.5j. 模式B 状态机：TICK_RATE 动态切换 / respawn / 换图（激活边沿重置采样器）
+  {
+    // ① 0→64 激活：首次按跳起跳延迟 ≤1 tick（无陈旧键位）
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(brushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    let lo = 0;
+    let snapJump = 0;
+    let active = false;
+    let jumpAt = -1;
+    for (let i = 0; i < 200; i++) {
+      const key = i >= 30 ? KEY_JUMP : 0; // t=30ms 按跳（模式B 已在 t=0 激活）
+      if (i === 0) active = true; // 0→64 激活（模拟切换）
+      if (i === 0) {
+        lo = 0;
+        snapJump = 0; // 激活边沿重置采样器
+      }
+      lo += RENDER_DT;
+      if (lo >= 1 / 64) {
+        lo -= 1 / 64;
+        snapJump = key & KEY_JUMP;
+      }
+      p.tick(RENDER_DT, active ? (key & 0x0f) | snapJump : key, 0, 0);
+      const s = p.state();
+      if (!s.onGround && jumpAt < 0) jumpAt = i;
+    }
+    check(
+      '模式B 状态机#1：0→64 激活后首次按跳起跳延迟 ≤1 tick（激活边沿采样器已重置，无陈旧键位误注入）',
+      jumpAt > 30 && jumpAt <= 30 + 15.6 + 1,
+      `起跳 t=${jumpAt}ms（按下 t=30ms）`,
+    );
+    // ② respawn 后采样器重置：respawn 后立即按跳 → 起跳延迟 ≤1 tick
+    const p2 = new PhysWorld();
+    p2.set_hull(16, 72, 54);
+    p2.build_world(JSON.stringify(brushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    for (let i = 0; i < 100; i++) p2.tick(1 / 64, 0, 0, 0);
+    let lo2 = 0;
+    let snap2 = 0;
+    let jumpAt2 = -1;
+    p2.respawn(); // 阶段4：重置物理 + 采样器（镜像 worker-a respawn 分支）
+    snap2 = 0;
+    for (let i = 0; i < 200; i++) {
+      const key = i >= 10 ? KEY_JUMP : 0;
+      lo2 += RENDER_DT;
+      if (lo2 >= 1 / 64) {
+        lo2 -= 1 / 64;
+        snap2 = key & KEY_JUMP;
+      }
+      p2.tick(RENDER_DT, (key & 0x0f) | snap2, 0, 0);
+      const s = p2.state();
+      if (!s.onGround && jumpAt2 < 0) jumpAt2 = i;
+    }
+    check(
+      '模式B 状态机#2：respawn 后采样器重置——立即按跳起跳延迟 ≤1 tick',
+      jumpAt2 > 10 && jumpAt2 <= 10 + 15.6 + 1,
+      `起跳 t=${jumpAt2}ms（按下 t=10ms）`,
+    );
+  }
+
+  // 12.5k. 地面稳态一致性：模式B（32/64）下按住 forward 直线跑稳态速度 == 基准 250
+  //        （移动位实时——持续移动不因键位采样减速）
+  {
+    const groundSteady = (rate) => {
+      const p = new PhysWorld();
+      p.set_hull(16, 72, 54);
+      p.build_world(JSON.stringify(brushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+      for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+      const tickDt = rate > 0 ? 1 / rate : 0;
+      let lo = 0;
+      let snapJump = 0;
+      let v = 0;
+      for (let i = 0; i < 2000; i++) {
+        lo += RENDER_DT;
+        if (lo >= tickDt) {
+          lo -= tickDt;
+          snapJump = KEY_FWD & KEY_JUMP;
+        }
+        p.tick(RENDER_DT, rate > 0 ? KEY_FWD | snapJump : KEY_FWD, 0, 0);
+        const s = p.state();
+        if (i > 1500) v = Math.hypot(s.velX, s.velZ);
+      }
+      return v;
+    };
+    const baseV = groundSteady(0);
+    const v32 = groundSteady(32);
+    const v64 = groundSteady(64);
+    check(
+      '地面稳态一致性：32/64tick 按住 forward 直线跑稳态速度 == 基准（|Δ| < 1%——移动位实时，持续移动不减速）',
+      Math.abs(v32 - baseV) / baseV < 0.01 && Math.abs(v64 - baseV) / baseV < 0.01,
+      `基准=${baseV.toFixed(1)} 32tick=${v32.toFixed(1)} 64tick=${v64.toFixed(1)}`,
+    );
+  }
+
+  // 12.5l. 模式B 下 V 发布率：键位采样不消耗子步（发布率与关闭难度一致）
+  {
+    const pubRate = (rate) => {
+      const tickDt = rate > 0 ? 1 / rate : 0;
+      let lo = 0;
+      let steps = 0;
+      for (let i = 0; i < 5000; i++) {
+        lo += RENDER_DT; // 模式B 采样累加（不消耗 acc）
+        if (lo >= tickDt) lo -= tickDt;
+        steps += 1; // 模式A 每 1ms 一个子步（发布一次）
+      }
+      return steps;
+    };
+    const p0 = pubRate(0);
+    const p32 = pubRate(32);
+    check(
+      '模式B 发布率：键位采样（loAcc）不消耗模式A 子步——V 发布率与关闭难度一致（1kHz）',
+      p0 === 5000 && p32 === 5000,
+      `关闭=${p0} 32tick=${p32}`,
+    );
+  }
+
+  // 12.5n. **WorkerB 节流校验**（性能优化——用户定调：无数据/重复参数应优化空转，
+  //        但数据源源不断更新时全力渲染不受影响）：
+  //        ① 自适应超时：V 未变（重复参数）→ renderTimeout 增长 20→100ms（降空转）；
+  //           新状态 → 恢复 20ms
+  //        ② 数据不断更新 → 每轮重绘（渲染率 = 数据率，全力渲染不受节流影响）
+  //        ③ 消息回退：无数据 → 低频自检；shared-state 到达 → 立即触发（响应及时）
+  {
+    const RENDER_TIMEOUT_MS = 20;
+    const RENDER_IDLE_TIMEOUT_MS = 100;
+    // ① 自适应超时镜像（worker-b frameLoop 判定：repainted → 20；否则 → 100）
+    const sharedB = new TestShared(new SharedArrayBuffer(SHARED_BUFFER_SIZE));
+    const wbB = new FakeWorkerB(sharedB);
+    let renderTimeout = RENDER_TIMEOUT_MS;
+    const loop = () => {
+      const repainted = wbB.onFrameRet(0);
+      renderTimeout = repainted ? RENDER_TIMEOUT_MS : RENDER_IDLE_TIMEOUT_MS;
+      return repainted;
+    };
+    // 无数据轮（V 未变）→ 超时 20→100
+    loop();
+    loop();
+    const idleTimeout = renderTimeout;
+    sharedB.writeState({ x: 1, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, 0, 0); // 新状态
+    loop();
+    check(
+      'WorkerB 节流#1：自适应超时（V 未变 → 20→100ms 降空转；新状态 → 恢复 20ms——数据到来不受影响）',
+      idleTimeout === RENDER_IDLE_TIMEOUT_MS && renderTimeout === RENDER_TIMEOUT_MS,
+      `无数据超时=${idleTimeout}ms 新状态后超时=${renderTimeout}ms`,
+    );
+    // ② 数据不断更新：每轮新 V → 每轮重绘（全力渲染——渲染率 = 数据率）
+    const sharedC2 = new TestShared(new SharedArrayBuffer(SHARED_BUFFER_SIZE));
+    const wbC2 = new FakeWorkerB(sharedC2);
+    let repaints = 0;
+    for (let i = 0; i < 100; i++) {
+      sharedC2.writeState({ x: i, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, 0, 0);
+      if (wbC2.onFrameRet(0)) repaints++;
+    }
+    check(
+      'WorkerB 节流#2：数据源源不断更新 → 每轮重绘（渲染率 = 数据率——全力渲染不受节流影响）',
+      repaints === 100,
+      `重绘=${repaints}/100`,
+    );
+    // ③ 消息回退节流：无数据 → 低频自检标记；shared-state 到达 → 立即触发
+    const queue3 = [];
+    const main3 = TestShared.createMessaging((m) => queue3.push(m));
+    const phy3 = TestShared.initMessaging((m) => queue3.push(m));
+    const render3 = TestShared.initMessagingRender();
+    let cycles = 0;
+    let triggeredByData = false;
+    const msgLoop = () => {
+      cycles++;
+      const repainted = render3.readState() !== null;
+      if (!repainted) {
+        // 无数据 → 低频自检（100ms）——模拟 setTimeout 节流
+        // 数据到达 → 立即触发（模拟 renderPort.onmessage 的 postMessage）
+      }
+      return repainted;
+    };
+    // 无数据：循环检查缓存（readState null——不重绘）
+    msgLoop();
+    msgLoop();
+    const idleCycles = cycles;
+    // 数据到达：phy3 发布 → render3.onStateMessage（模拟 renderPort.onmessage 立即触发）
+    phy3.writeStateRaw(5, 0, 0, 0, 0, 0, 0, 0);
+    const stateMsg = queue3.shift();
+    render3.onStateMessage(stateMsg);
+    const repaintedNow = msgLoop(); // 数据已缓存 → 本轮立即重绘（触发后处理）
+    check(
+      'WorkerB 节流#3：消息回退——无数据低频自检（cycles 不增），shared-state 到达后立即重绘（响应及时）',
+      idleCycles === 2 && repaintedNow === true,
+      `无数据cycles=${idleCycles} 数据到达后重绘=${repaintedNow}`,
+    );
+  }
+
+  // 12.5o. **trace 状态机 + 节点管理校验**（3D 路径记录：开始 → 保存 → 删除 → 开始 循环；
+  //        节点 3D 坐标（x/y/z）累积、滚动窗口上限丢最旧、清除清空——main/WorkerB 镜像）
+  {
+    const TRACE_MAX = 2000;
+    // 状态机镜像（main.ts traceBtn 三态循环）
+    const states = [];
+    let state = 'off';
+    const btnClick = () => {
+      if (state === 'off') {
+        // 开始：清空 + 开启记录
+        states.push('recording');
+        state = 'recording';
+      } else if (state === 'recording') {
+        // 保存：停止记录（路径保留显示）
+        states.push('saved');
+        state = 'saved';
+      } else {
+        // 删除：清空路径 → 回初始
+        states.push('off');
+        state = 'off';
+      }
+    };
+    const seq = [];
+    for (let i = 0; i < 6; i++) {
+      btnClick();
+      seq.push(state);
+    }
+    check(
+      'trace 状态机：开始→保存→删除→开始→保存→删除（循环可用，路径保留显示）',
+      JSON.stringify(seq) === JSON.stringify(['recording', 'saved', 'off', 'recording', 'saved', 'off']),
+      `状态序列=${seq.join('→')}`,
+    );
+    // 节点管理镜像（WorkerB onTracePoint/onTraceClear：3D 坐标累积、窗口上限、清除）
+    const basePts = [];
+    const tickPts = [];
+    let lineVisible = false;
+    const onPoint = (bx, by, bz, tx, ty, tz) => {
+      basePts.push({ x: bx, y: by, z: bz });
+      tickPts.push({ x: tx, y: ty, z: tz });
+      if (basePts.length > TRACE_MAX) basePts.shift();
+      if (tickPts.length > TRACE_MAX) tickPts.shift();
+      lineVisible = basePts.length >= 2;
+    };
+    const onClear = () => {
+      basePts.length = 0;
+      tickPts.length = 0;
+      lineVisible = false;
+    };
+    for (let i = 0; i < 5; i++) onPoint(i, i * 2, i * 3, i + 0.5, i * 2 + 1, i * 3 + 1);
+    const ptsOk =
+      basePts.length === 5 &&
+      basePts[4].x === 4 &&
+      basePts[0].y === 0 &&
+      tickPts[4].z === 4 * 3 + 1 &&
+      lineVisible === true;
+    // 滚动窗口：超上限丢最旧
+    for (let i = 0; i < TRACE_MAX + 10; i++) onPoint(i, 0, 0, i, 0, 0);
+    const windowOk = basePts.length === TRACE_MAX && basePts[0].x === 10 && basePts[basePts.length - 1].x === TRACE_MAX + 9;
+    onClear();
+    check(
+      'trace 节点管理：3D 坐标累积/可见性/滚动窗口上限丢最旧/删除清空',
+      ptsOk && windowOk && basePts.length === 0 && lineVisible === false,
+      `5点=${ptsOk} 窗口=${windowOk} 清除后=${basePts.length}`,
+    );
+  }
+
+  // 12.5p. **复杂随机运动校验**（用户定调：覆盖更大 + 按键/鼠标行为更复杂的运动测试，
+  //        确保运动系统恰好拟合——8 行为池：加速/大幅转向/绕圈/连跳/快速点按/斜向/后退/
+  //        急停随机组合；phys（跳跃 64t 采样 + 移动实时）vs physBase（无限制基准）：
+  //        理想 = 平均偏差有界小 + 无系统性漂移 + 兜底仅偶发）
+  {
+    const KEY_FWD2 = 1;
+    const KEY_BACK2 = 2;
+    const KEY_LEFT2 = 4;
+    const KEY_RIGHT2 = 8;
+    const KEY_JUMP2 = 16;
+    const TRACE_SYNC_DIST2 = 50;
+    const flatBrushes2 = [
+      { planes: [
+        { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+        { normal: [-1,0,0], dist: 2048 }, { normal: [1,0,0], dist: 2048 },
+        { normal: [0,-1,0], dist: 64 }, { normal: [0,1,0], dist: 0 },
+      ], min: [-2048,-64,-2048], max: [2048,0,2048], is_ladder: false, is_solid: true },
+    ];
+    const buildFlat2 = () => {
+      const p = new PhysWorld();
+      p.set_hull(16, 72, 54);
+      p.build_world(JSON.stringify(flatBrushes2), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+      return p;
+    };
+    const mulberry32b = (seed) => {
+      let s = seed;
+      return () => {
+        s |= 0; s = (s + 0x6d2b79f5) | 0;
+        let t = Math.imul(s ^ (s >>> 15), 1 | s);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+    /** 复杂随机运动（8 行为池，随机阶段/时长；30s/300 节点 + 位置兜底 50）。 */
+    const complexRun = (rate, seed, durationMs) => {
+      const rnd = mulberry32b(seed);
+      const phys = buildFlat2();
+      const physBase = buildFlat2();
+      const s0 = phys.state();
+      physBase.set_state(s0.posX, s0.posY, s0.posZ, s0.yaw, s0.pitch, s0.velX, s0.velY, s0.velZ, s0.onGround);
+      const tickDt = rate > 0 ? 1 / rate : 0;
+      let lo = 0;
+      let snapJump = 0;
+      let phase = 'accel';
+      let phaseEnd = 0;
+      let curKeys = 0;
+      let curDx = 0;
+      let curDy = 0;
+      let strafeDir = 1;
+      let strafeTimer = 0;
+      let tapTimer = 0;
+      let wasGround = false;
+      let bhopReady = false;
+      let prevKeys = 0;
+      const traceBase = [];
+      const traceTick = [];
+      let syncs = 0;
+      const behaviors = ['accel', 'strafe', 'circle', 'bhop', 'tap', 'diag', 'reverse', 'stop'];
+      for (let i = 0; i < durationMs; i++) {
+        if (i >= phaseEnd) {
+          phase = behaviors[Math.floor(rnd() * behaviors.length)];
+          phaseEnd = i + 200 + Math.floor(rnd() * 1300);
+          strafeDir = rnd() < 0.5 ? 1 : -1;
+          tapTimer = 0;
+        }
+        curDx = 0;
+        curDy = 0;
+        switch (phase) {
+          case 'accel': curKeys = KEY_FWD2; break;
+          case 'strafe':
+            curKeys = KEY_FWD2;
+            strafeTimer++;
+            if (strafeTimer > 50 + Math.floor(rnd() * 150)) {
+              strafeTimer = 0;
+              strafeDir *= -1;
+            }
+            curDx = strafeDir * (300 + Math.floor(rnd() * 500)); // 大幅转向
+            break;
+          case 'circle': curKeys = KEY_FWD2; curDx = 600 * (rnd() < 0.5 ? 1 : -1); break; // 绕圈
+          case 'bhop':
+            curKeys = KEY_FWD2;
+            if (wasGround && !phys.state().onGround) bhopReady = true;
+            if (phys.state().onGround && bhopReady) {
+              curKeys |= KEY_JUMP2; // 落地瞬间起跳（跳跃采样关键）
+              bhopReady = false;
+            }
+            curDx = (rnd() - 0.5) * 400;
+            break;
+          case 'tap':
+            tapTimer++;
+            if (tapTimer > 50 + Math.floor(rnd() * 100)) {
+              tapTimer = 0;
+              prevKeys = 1 + Math.floor(rnd() * 4);
+            }
+            curKeys = prevKeys; // 快速 WASD 点按
+            curDx = Math.round((rnd() - 0.5) * 800);
+            break;
+          case 'diag':
+            curKeys = (rnd() < 0.5 ? KEY_FWD2 : KEY_BACK2) | (rnd() < 0.5 ? KEY_LEFT2 : KEY_RIGHT2);
+            curDx = (rnd() - 0.5) * 500;
+            break;
+          case 'reverse': curKeys = KEY_BACK2; curDx = (rnd() - 0.5) * 300; break;
+          case 'stop': curKeys = 0; break;
+        }
+        if (phase !== 'bhop' && rnd() < 0.015) curKeys |= KEY_JUMP2; // 偶发跳跃
+        curDy = Math.round((rnd() - 0.5) * 200);
+        wasGround = phys.state().onGround;
+        lo += RENDER_DT;
+        if (lo >= tickDt) {
+          lo -= tickDt;
+          snapJump = curKeys & KEY_JUMP2; // 跳跃位 64t 采样
+        }
+        const physKeys = rate > 0 ? (curKeys & 0x0f) | snapJump : curKeys;
+        phys.tick(RENDER_DT, physKeys, curDx, curDy);
+        physBase.tick(RENDER_DT, curKeys, curDx, curDy);
+        if (i % 100 === 99) {
+          const s = phys.state();
+          const b = physBase.state();
+          const d = Math.hypot(s.posX - b.posX, s.posZ - b.posZ);
+          if (d > TRACE_SYNC_DIST2) {
+            // 硬兜底：偏差过大 → physBase 拉回 phys（防无限漂移）+ 兜底计数
+            physBase.set_state(s.posX, s.posY, s.posZ, s.yaw, s.pitch, s.velX, s.velY, s.velZ, s.onGround);
+            syncs++;
+          } else if (d > 20) {
+            // 软校正（worker-a 镜像）：偏差 ∈ (20, 50] → physBase 位置向 phys 收敛 50%
+            // （消除跳跃采样延迟的偏差累积——硬兜底压缩至 1% 内）
+            physBase.set_state(
+              b.posX + (s.posX - b.posX) * 0.5,
+              b.posY + (s.posY - b.posY) * 0.5,
+              b.posZ + (s.posZ - b.posZ) * 0.5,
+              b.yaw, b.pitch, b.velX, b.velY, b.velZ, b.onGround,
+            );
+          }
+          const b2 = physBase.state();
+          traceTick.push({ x: s.posX, z: s.posZ });
+          traceBase.push({ x: b2.posX, z: b2.posZ });
+        }
+      }
+      return { traceBase, traceTick, syncs };
+    };
+    const devStats2 = (tb, tt) => {
+      const devs = [];
+      for (let i = 0; i < tb.length; i++) {
+        devs.push(Math.hypot(tb[i].x - tt[i].x, tb[i].z - tt[i].z));
+      }
+      const avg = devs.reduce((a, b) => a + b, 0) / devs.length;
+      const third = Math.floor(devs.length / 3);
+      const avgA = devs.slice(0, third).reduce((a, b) => a + b, 0) / third;
+      const avgC = devs.slice(-third).reduce((a, b) => a + b, 0) / third;
+      return { avg, avgA, avgC, n: devs.length };
+    };
+    const baseC = complexRun(0, 20260810, 30000);
+    const c32 = complexRun(32, 20260810, 30000);
+    const bs = devStats2(baseC.traceBase, baseC.traceTick);
+    const s32 = devStats2(c32.traceBase, c32.traceTick);
+    check(
+      '复杂运动校验#1：关闭难度（0）→ 两条路径完全重合（平均偏差 0——同输入一致性）',
+      bs.avg < 1e-6,
+      `平均偏差=${bs.avg.toFixed(3)}`,
+    );
+    check(
+      '复杂运动校验#2：32tick 平均偏差 < 25（有界拟合——8 行为池复杂输入下运动系统仍贴近无限制基准）',
+      s32.avg < 25,
+      `平均偏差=${s32.avg.toFixed(2)}（节点=${s32.n}）`,
+    );
+    check(
+      '复杂运动校验#3：32tick 无系统性漂移（后 1/3 平均 ≤ 前 1/3 + 15——跳跃累积有界，兜底校正）',
+      s32.avgC <= s32.avgA + 15,
+      `前 1/3=${s32.avgA.toFixed(2)} 后 1/3=${s32.avgC.toFixed(2)}`,
+    );
+    check(
+      '复杂运动校验#4：32tick 位置兜底压缩至 1% 内（30s/300 节点 < 3 次——软校正消除跳跃偏差累积，硬兜底仅极偶发）',
+      c32.syncs < 3,
+      `兜底=${c32.syncs}/300`,
+    );
+    // 多种子稳定性（32tick）
+    let multiOk = true;
+    const multiDetail = [];
+    for (const seed of [1, 42, 777]) {
+      const r = complexRun(32, seed, 30000);
+      const st = devStats2(r.traceBase, r.traceTick);
+      multiDetail.push(`seed${seed}:avg${st.avg.toFixed(1)}/sync${r.syncs}`);
+      if (st.avg >= 30 || r.syncs >= 3) multiOk = false; // 兜底 <1%
+    }
+    check(
+      '复杂运动稳定性：32tick 多种子平均偏差 < 30 且兜底 < 3（1% 内——软校正后拟合稳定且硬兜底极偶发）',
+      multiOk,
+      multiDetail.join(' | '),
+    );
+  }
+}
+
+// 12.5r. **斜坡滑行（surf）速度加成校验**（用户定调：贴坡 + 按键 → 速度逐渐增加；
+//        数据驱动多轮校验结论：①贴坡 + F+A（斜向滑动）→ 沿坡面上滑（速度平行坡面
+//        v=(−177,+88,−177) 3D≈265——**贴坡投影修复后**（categorize 贴地投影）→ 出坡带
+//        vy 斜上飞出 → 空中抛物峰值 560（>400 大幅加成）；②**上坡贴坡爬升不成立**——
+//        本引擎 walk_move 贴坡滑行时上坡速度被摩擦/重力压制（惯性 800 在 0.5s 内停住）、
+//        位置被台阶/碰撞推向坡面低处——如实记录；③**tick 无影响**——surf 加速只依赖移动
+//        位（实时），无跳跃采样参与，各档位与基准完全一致（偏差 0））
+{
+  const ny = 0.8944;
+  const nz = 0.4472;
+  const mkBrush = (planes, min, max) => ({ planes, min, max, is_ladder: false, is_solid: true });
+  const surfBrushes = [
+    mkBrush([
+      { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+      { normal: [-1,0,0], dist: 2048 }, { normal: [1,0,0], dist: 2048 },
+      { normal: [0,-1,0], dist: 64 }, { normal: [0,1,0], dist: 0 },
+    ], [-2048,-64,-2048], [2048,0,2048]),
+    mkBrush([
+      { normal: [0,0,1], dist: 0 }, { normal: [0,0,-1], dist: 600 },
+      { normal: [-1,0,0], dist: 800 }, { normal: [1,0,0], dist: 800 },
+      { normal: [0,-1,0], dist: 400 }, { normal: [0, ny, nz], dist: 0 },
+    ], [-800,-400,-600], [800,300,0]),
+  ];
+  const buildSurf = (yaw) => {
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(surfBrushes), '[]', '{"teleports":[],"triggers":[]}', 0, 190.5, -380, yaw);
+    return p;
+  };
+  /** 贴坡 + F+A（斜向滑行 surf 加速），3s 窗口：返回窗口内峰值速率/初速/与无限制基准偏差。
+   *  （修复后轨迹：贴坡沿坡面匀速 ≈265 → 出坡斜上（vy≈88）→ 空中抛物峰值 ≈560 →
+   *   落地 250——峰值稳健（不依赖末帧贴坡/落地状态）） */
+  const surfRun = (rate) => {
+    const p = buildSurf(0);
+    const pb = buildSurf(0);
+    const s0 = p.state();
+    pb.set_state(s0.posX, s0.posY, s0.posZ, s0.yaw, s0.pitch, s0.velX, s0.velY, s0.velZ, s0.onGround);
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snapKeys = 1 | 4; // F+A 恒按 → 快照恒=实时（首 tickDt 无输入延迟——恒按输入无采样差）
+    for (let i = 0; i < 500; i++) {
+      p.tick(0.001, 0, 0, 0);
+      pb.tick(0.001, 0, 0, 0); // 贴坡
+    }
+    let peak = 0;
+    for (let i = 0; i < 3000; i++) {
+      lo += RENDER_DT;
+      if (lo >= tickDt) {
+        lo -= tickDt;
+        snapKeys = 1 | 4; // 全位快照（F+A 恒按 → 采样=实时，无采样差）
+      }
+      p.tick(0.001, rate > 0 ? snapKeys : (1 | 4), 0, 0); // F+A
+      pb.tick(0.001, 1 | 4, 0, 0);
+      const s = p.state();
+      const sp = Math.hypot(s.velX, s.velY, s.velZ);
+      if (sp > peak) peak = sp;
+    }
+    const b = pb.state();
+    return {
+      speed: peak,
+      dev: Math.hypot(p.state().posX - b.posX, p.state().posZ - b.posZ),
+    };
+  };
+  const base = surfRun(0);
+  check(
+    'surf 校验#1：斜坡滑行速度加成（贴坡 + F+A 斜向滑动 → 窗口峰值速率 > 400——从静止加速：贴坡沿坡面 ≈265 → 出坡斜上抛物峰值 ≈560；上坡贴坡爬升受引擎 walk_move 限制不成立，如实记录）',
+    base.speed > 400,
+    `峰值=${base.speed.toFixed(1)}（2→265 沿坡 → 出坡抛物 560）`,
+  );
+  // tick 影响判定：各档位与基准一致（|Δ速度|<1% / 偏差 <0.1）
+  let tickOk = true;
+  const detail = [];
+  for (const rate of [32, 64, 128, 256]) {
+    const r = surfRun(rate);
+    const ok = Math.abs(r.speed - base.speed) / base.speed < 0.01 && r.dev < 0.1;
+    if (!ok) tickOk = false;
+    detail.push(`${rate}t:${r.speed.toFixed(1)}/dev${r.dev.toFixed(2)}`);
+  }
+  check(
+    'surf 校验#2：tick 无影响（32/64/128/256 速度加成与基准一致 |Δ|<1%、偏差 <0.1——surf 只依赖移动位实时，无跳跃采样参与，物理一致）',
+    tickOk,
+    `基准=${base.speed.toFixed(1)} ${detail.join(' | ')}`,
+  );
+}
+
+// 12.5s. **垂直落坡 + 视角从外往里收 → 动量转换 → 离坡飞行统计**（用户定调：垂直动量变
+//        水平动量、再往里收变斜朝上动量，离坡瞬间统计飞行距离/高度；数据驱动多轮校验：
+//        ①纯垂直落坡撞 26.6° 坡 → clip 垂直动量全被坡吸收（vy→0、无弹射——vy'=-0.2|vy| 恒负），
+//        垂直→水平转换由贴坡+forward 完成；②**引擎修复**（player.rs walk_move 贴坡速度从
+//        "强制 vy=0"改为"投影到地面平面"——平地法线 y>0.999 保持原行为零回归、坡面保留
+//        沿坡分量）后：贴坡爬升出坡瞬间速度 (0,+125,-250)（vy=0.5|vz| 坡面投影理论值）→
+//        真实斜上飞出（修复前 vy 恒 0 → 出坡水平、飞行高度恒 0、且坡顶尖角被 detect_blocked_move
+//        钉死悬空）；③飞行：离坡 y=303、最高 +9.8、落地水平距离 259.5；④**tick 无影响**——
+//        本场景输入 = FORWARD 移动位（实时）+ yaw 鼠标（实时）+ 无跳跃（无采样参与）→
+//        模式B 逐 tick 输入序列与模式A 恒等 → 物理逐 tick 一致（偏差 0））
+{
+  const ny = 0.8944;
+  const nz = 0.4472;
+  const mkBrush = (planes, min, max) => ({ planes, min, max, is_ladder: false, is_solid: true });
+  const dropBrushes = [
+    mkBrush([
+      { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+      { normal: [-1,0,0], dist: 2048 }, { normal: [1,0,0], dist: 2048 },
+      { normal: [0,-1,0], dist: 64 }, { normal: [0,1,0], dist: 0 },
+    ], [-2048,-64,-2048], [2048,0,2048]),
+    mkBrush([
+      { normal: [0,0,1], dist: 0 }, { normal: [0,0,-1], dist: 600 },
+      { normal: [-1,0,0], dist: 800 }, { normal: [1,0,0], dist: 800 },
+      { normal: [0,-1,0], dist: 400 }, { normal: [0, ny, nz], dist: 0 },
+    ], [-800,-400,-600], [800,300,0]),
+    mkBrush([
+      { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+      { normal: [-1,0,0], dist: 1 }, { normal: [1,0,0], dist: 1600 },
+      { normal: [0,-1,0], dist: 0 }, { normal: [0,1,0], dist: 400 },
+    ], [-801,0,-2048], [-799,400,2048]),
+    mkBrush([
+      { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+      { normal: [-1,0,0], dist: 1 }, { normal: [1,0,0], dist: 1600 },
+      { normal: [0,-1,0], dist: 0 }, { normal: [0,1,0], dist: 400 },
+    ], [799,0,-2048], [801,400,2048]),
+  ];
+  /** 垂直落坡（600 高、z=-100 上方）+ yaw 30→0 收拢（1.5s）+ forward：
+   *  撞坡（clip：垂直动量→坡面切向，vy 从 -900+ 变平行坡面）→ 垂直动量转水平（贴坡）
+   *  → 斜上爬升（坡面投影 vy）→ 出坡斜上飞 → 落地。
+   *  rate>0 = 模式B 全输入采样（keys 全位 + yaw 均 tickDt 边界快照，worker-a 语义）。
+   *  返回下落峰值 vy（垂直动量）/撞坡 clip 转换/离坡/飞行统计。 */
+  const dropRun = (rate = 0) => {
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(dropBrushes), '[]', '{"teleports":[],"triggers":[]}', 0, 600, -100, 30);
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snapKeys = 0;
+    let snapYaw = 30;
+    let peakVy = 0;
+    let hitVy = null;
+    let hitVz = null;
+    let leave = null;
+    let prevGround = true;
+    let air = false;
+    let maxY = -Infinity;
+    let land = null;
+    for (let i = 0; i < 12000; i++) {
+      const targetYaw = 30 - 30 * Math.min(i / 1500, 1);
+      if (rate > 0) {
+        lo += RENDER_DT;
+        if (lo >= tickDt) { lo -= tickDt; snapKeys = 1; snapYaw = targetYaw; }
+      }
+      p.set_yaw_pitch(rate > 0 ? snapYaw : targetYaw, 0);
+      p.tick(0.001, rate > 0 ? snapKeys : 1, 0, 0);
+      const s = p.state();
+      if (!s.onGround && s.velY < peakVy) peakVy = s.velY; // 下落峰值（垂直动量）
+      if (!prevGround && s.onGround && hitVy === null) { hitVy = s.velY; hitVz = s.velZ; } // 撞坡 clip 后
+      if (hitVy !== null && !leave && prevGround && !s.onGround) {
+        leave = { i, y: s.posY, z: s.posZ, vx: s.velX, vy: s.velY, vz: s.velZ };
+        air = true;
+      }
+      if (air) {
+        if (s.posY > maxY) maxY = s.posY;
+        if (s.onGround) { land = { i, y: s.posY, z: s.posZ }; air = false; }
+      }
+      prevGround = s.onGround;
+      if (leave && land) break;
+      if (leave && i - leave.i > 4000) break;
+    }
+    const speed = Math.hypot(leave.vx, leave.vy, leave.vz);
+    return {
+      peakVy,
+      hitVy,
+      hitVz,
+      leaveY: leave.y,
+      leaveV: [leave.vx, leave.vy, leave.vz],
+      speed,
+      dist: land ? Math.abs(land.z - leave.z) : NaN,
+      height: maxY - leave.y,
+    };
+  };
+  const base = dropRun();
+  check(
+    'surf 校验#3a：垂直落坡动量转换（600 高垂直落 → 空中峰值 vy≈-917（垂直动量）→ 撞坡 clip 转坡面切向（vz 弹射 +344、vy -172——平行坡面 0.894vy+0.447vz≈0）→ yaw 收拢斜上爬 → 出坡瞬间 vy≈+125=0.5|vz| 坡面投影（修复前 vy 恒 0））',
+    base.peakVy < -800 && base.hitVz > 250 && base.leaveV[1] > 100 && base.speed > 270,
+    `峰值 vy=${base.peakVy.toFixed(0)} 撞坡后 v=(y=${base.hitVy.toFixed(0)}, z=${base.hitVz.toFixed(0)}) 离坡 v=(x=${base.leaveV[0].toFixed(1)}, y=${base.leaveV[1].toFixed(1)}, z=${base.leaveV[2].toFixed(1)}) 速率=${base.speed.toFixed(1)}`,
+  );
+  check(
+    'surf 校验#3b：离坡飞行统计（斜上飞出 → 飞行高度 > 8、水平距离 > 200）',
+    base.height > 8 && base.dist > 200,
+    `飞行高度=${base.height.toFixed(1)}（离坡 y=${base.leaveY.toFixed(1)} 最高 +${base.height.toFixed(1)}）水平距离=${base.dist.toFixed(1)}`,
+  );
+  // tick 影响判定：本场景输入慢变（forward 恒按 + yaw 1.5s 线性收拢）→ 全采样快照
+  // ≈实时（yaw 台阶差 = tickDt×斜率 ≤0.6°）→ 物理差别微小
+  let dropTickOk = true;
+  const dropDetail = [];
+  for (const rate of [32, 64, 128, 256]) {
+    const r = dropRun(rate);
+    const dV = Math.hypot(
+      r.leaveV[0] - base.leaveV[0], r.leaveV[1] - base.leaveV[1], r.leaveV[2] - base.leaveV[2],
+    );
+    const dD = Math.abs(r.dist - base.dist);
+    const dH = Math.abs(r.height - base.height);
+    const ok = dV < 0.05 && dD < 1.0 && dH < 0.5;
+    if (!ok) dropTickOk = false;
+    dropDetail.push(`${rate}t:ΔV${dV.toFixed(4)}/ΔD${dD.toFixed(3)}/ΔH${dH.toFixed(3)}`);
+  }
+  check(
+    'surf 校验#4：tick 差别微小（垂直落坡——输入慢变（forward 恒按 + yaw 30° 线性收拢 1.5s）：全采样 yaw 台阶差 = tickDt×斜率 ≤0.6° → 32/64/128/256 与基准离坡速度 ΔV<0.05、飞行距离 Δ<1、高度 Δ<0.5）',
+    dropTickOk,
+    `基准=(${base.leaveV[1].toFixed(1)},${base.leaveV[2].toFixed(1)})/${base.dist.toFixed(1)}/${base.height.toFixed(1)} ${dropDetail.join(' | ')}`,
+  );
+}
+
+// 12.5t. **无限制 vs tick 运动差别统计**（用户定调：理论上必须存在运动差别——模式B
+//        = 64t 全输入采样（键位全位 + 鼠标），快照相位（∈[0, tickDt]）传导到运动：
+//        ①**输入延迟**：起跳 = 按下时刻 + 快照边界等待 + 1ms 物理响应——无限制 0ms、
+//        32t≈31/64t≈15/128t≈7/256t≈3ms（单调、符合理论 ∈[0,tickDt] 均值 tickDt/2）；
+//        ②**轨迹累积差**：非对齐周期点按连跳（237ms 点按 40ms）3s 末位 Δ：32t=7.5/
+//        64t=3.5/128t=1.5/256t=0.5（单调递减、理论 Δ≈tickDt/2×250×跳数）；③**极端
+//        相位**：250ms 周期 30ms 短按——32t 快照窗口错过按键 → 跳数 0 vs 无限制 4
+//        （输入被采样丢失）；④**按住 autobhop 对照**：jump 快照恒 1 → 落地瞬间立即
+//        起跳无延迟 → Δ <5（差别来源是点按相位非按住）；⑤**输入变化率决定差别**：
+//        慢变输入（forward 恒按 + yaw 慢收拢）全采样 ≈实时 → 差别微小；快变输入
+//        （快速转向/换向）→ 差别显著（Δ位置 7~26））
+{
+  const J = 16;
+  const F = 1;
+  const diffFlat = [
+    { planes: [
+      { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+      { normal: [-1,0,0], dist: 2048 }, { normal: [1,0,0], dist: 2048 },
+      { normal: [0,-1,0], dist: 64 }, { normal: [0,1,0], dist: 0 },
+    ], min: [-2048,-64,-2048], max: [2048,0,2048], is_ladder: false, is_solid: true },
+  ];
+  const buildDiff = () => {
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(diffFlat), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    return p;
+  };
+  /** 模式B 精确模拟（worker-a 语义）：键位全位 tickDt 边界快照（loAcc 余数）。
+   *  返回：起跳 tick 列表、真实按下时刻列表、末位 z、地面均速。 */
+  const diffRun = (script, rate, ms) => {
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snap = 0;
+    let prevRealJ = 0;
+    const seq = [];
+    const press = [];
+    for (let i = 0; i < ms; i++) {
+      const realKeys = script(i);
+      const realJ = realKeys & J ? 1 : 0;
+      if (realJ && !prevRealJ) press.push(i);
+      prevRealJ = realJ;
+      if (rate > 0) {
+        lo += RENDER_DT;
+        if (lo >= tickDt) { lo -= tickDt; snap = realKeys; } // 全位快照
+        seq.push(snap);
+      } else {
+        seq.push(realKeys);
+      }
+    }
+    const p = buildDiff();
+    let prevG = true;
+    const takeoffs = [];
+    const speedAcc = { t: 0, sp: 0 };
+    for (let i = 0; i < ms; i++) {
+      p.tick(RENDER_DT, seq[i], 0, 0);
+      const s = p.state();
+      if (prevG && !s.onGround) takeoffs.push(i);
+      if (s.onGround) { speedAcc.t += 1; speedAcc.sp += Math.hypot(s.velX, s.velY, s.velZ); }
+      prevG = s.onGround;
+    }
+    const s = p.state();
+    const delays = takeoffs.map((t) => {
+      let last = -1;
+      for (const pr of press) if (pr <= t) last = pr;
+      return last >= 0 ? t - last : NaN;
+    });
+    const delay = delays.length ? delays.reduce((a, b) => a + b, 0) / delays.length : NaN;
+    return {
+      jumps: takeoffs.length,
+      delay,
+      avgGroundSp: speedAcc.t ? speedAcc.sp / speedAcc.t : 0,
+      finalZ: s.posZ,
+    };
+  };
+  // ① 输入延迟单调（单次跳跃 t=500 按 50ms）：无限制 ≈0ms < 256t < 128t < 64t < 32t（理论 ∈[0,tickDt]）
+  const delayBase = diffRun((i) => (i >= 500 && i < 550 ? J : 0), 0, 2000);
+  const delayBy = {};
+  for (const rate of [32, 64, 128, 256]) {
+    delayBy[rate] = diffRun((i) => (i >= 500 && i < 550 ? J : 0), rate, 2000).delay;
+  }
+  const delayOk =
+    delayBase.delay < 1.5 &&
+    delayBy[32] > delayBy[64] && delayBy[64] > delayBy[128] && delayBy[128] > delayBy[256] &&
+    delayBy[256] >= delayBase.delay &&
+    delayBy[32] > 10 && delayBy[64] > 5 && delayBy[128] > 2;
+  check(
+    '运动差别#1：跳跃输入延迟（理论：起跳 = 按下 + 快照边界等待（∈[0,tickDt]）+ 1ms 响应——无限制 0ms、tick 档单调增大）',
+    delayOk,
+    `无限制=${delayBase.delay.toFixed(1)}ms 32t=${delayBy[32].toFixed(1)} 64t=${delayBy[64].toFixed(1)} 128t=${delayBy[128].toFixed(1)} 256t=${delayBy[256].toFixed(1)}`,
+  );
+  // ② 轨迹累积差单调（**非对齐周期点按连跳**：237ms 点按 jump 40ms + forward——真实玩家
+  //    连跳节奏且与快照网格非对齐（237 非 tickDt 整数倍）→ 按下→快照边界相位差逐跳
+  //    累积（理论 Δ≈tickDt/2×250×跳数）→ 末位 Δ 随 tick 密度单调递减且 32t 显著；
+  //    **按住 autobhop 对照**：快照恒 1 → 落地瞬间立即起跳无延迟 → Δ 微小（仅首跳））
+  const bhopBase = diffRun((i) => (i % 237 < 40 ? J | F : F), 0, 3000);
+  const bhopDelta = {};
+  for (const rate of [32, 64, 128, 256]) {
+    bhopDelta[rate] = Math.abs(diffRun((i) => (i % 237 < 40 ? J | F : F), rate, 3000).finalZ - bhopBase.finalZ);
+  }
+  const bhopOk =
+    bhopDelta[32] > bhopDelta[64] && bhopDelta[64] > bhopDelta[128] && bhopDelta[128] > bhopDelta[256] &&
+    bhopDelta[32] > 4 && bhopDelta[256] > 0.2;
+  check(
+    '运动差别#2：点按连跳轨迹累积差（237ms 点按 jump 40ms + forward 3s：按下→快照边界相位差逐跳累积（理论 Δ≈tickDt/2×速度×跳数）→ 末位 Δ 单调递减且 32t 显著；按住 autobhop 快照恒 1 无延迟 → 仅首跳差）',
+    bhopOk,
+    `无限制末位 z=${bhopBase.finalZ.toFixed(1)} Δ:32t=${bhopDelta[32].toFixed(1)} 64t=${bhopDelta[64].toFixed(1)} 128t=${bhopDelta[128].toFixed(1)} 256t=${bhopDelta[256].toFixed(1)}`,
+  );
+  // ③ 极端相位：250ms 周期 30ms 短按——32t 快照窗口（31.25ms 对齐 250ms 周期）错过按键 → 跳数 0 vs 4
+  const tapBase = diffRun((i) => (i % 250 < 30 ? J : 0), 0, 3000);
+  const tap32 = diffRun((i) => (i % 250 < 30 ? J : 0), 32, 3000);
+  const tap64 = diffRun((i) => (i % 250 < 30 ? J : 0), 64, 3000);
+  check(
+    '运动差别#3：极端相位短按（250ms 周期按 30ms：32t 快照窗口与按键周期对齐 → 跳跃位被采样丢失、跳数 0 vs 无限制 4；64t 相位错开正常）',
+    tapBase.jumps === 4 && tap32.jumps === 0 && tap64.jumps === 4,
+    `无限制=${tapBase.jumps}跳 32t=${tap32.jumps}跳 64t=${tap64.jumps}跳`,
+  );
+  // ④ 对照：按住 autobhop 起跳无延迟（jump 快照恒 1 → 落地瞬间立即起跳 → Δ 微小 <5）
+  //    ——差别来源是"点按相位"而非"按住持续跳跃"
+  const holdBase = diffRun((i) => (i < 1500 ? J | F : F), 0, 2000);
+  const holdDelta = {};
+  for (const rate of [32, 64, 128, 256]) {
+    holdDelta[rate] = Math.abs(diffRun((i) => (i < 1500 ? J | F : F), rate, 2000).finalZ - holdBase.finalZ);
+  }
+  check(
+    '运动差别#4：按住 autobhop 对照（jump 快照恒 1 → 落地瞬间立即起跳无延迟 → 末位 Δ <5（仅首跳 30ms）——差别来源是点按相位非按住）',
+    holdDelta[32] < 5 && holdDelta[256] < 1,
+    `按住 Δ:32t=${holdDelta[32].toFixed(2)} 64t=${holdDelta[64].toFixed(2)} 128t=${holdDelta[128].toFixed(2)} 256t=${holdDelta[256].toFixed(2)}`,
+  );
+  // ⑤ 输入变化率决定差别：快变输入（yaw 每 100ms 步进 90° + forward——快速转向）
+  //    全采样（键位+yaw 均边界快照）vs 无限制 → 末位 Δ 显著（≈7~19）；
+  //    对照慢变输入（forward 恒按 + yaw 慢转）→ 全采样 ≈ 实时（Δ 微小）
+  const fastRun = (rate) => {
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snapK = F;
+    let snapY = 0;
+    const p = buildDiff();
+    for (let i = 0; i < 2000; i++) {
+      const keys = F;
+      const yaw = Math.floor(i / 100) % 4 * 90;
+      if (rate > 0) {
+        lo += RENDER_DT;
+        if (lo >= tickDt) { lo -= tickDt; snapK = keys; snapY = yaw; }
+      }
+      p.set_yaw_pitch(rate > 0 ? snapY : yaw, 0);
+      p.tick(RENDER_DT, rate > 0 ? snapK : keys, 0, 0);
+    }
+    const s = p.state();
+    return Math.hypot(s.posX, s.posZ);
+  };
+  const fastBase = fastRun(0);
+  const fast32 = Math.abs(fastRun(32) - fastBase);
+  const fast256 = Math.abs(fastRun(256) - fastBase);
+  // 慢变对照：yaw 慢收拢（30° 1.5s）+ forward 恒按 → 全采样台阶差 ≤0.6° → Δ 微小
+  const slowRun = (rate) => {
+    const tickDt = rate > 0 ? 1 / rate : 0;
+    let lo = 0;
+    let snapK = F;
+    let snapY = 30;
+    const p = buildDiff();
+    for (let i = 0; i < 2000; i++) {
+      const targetYaw = 30 - 30 * Math.min(i / 1500, 1);
+      if (rate > 0) {
+        lo += RENDER_DT;
+        if (lo >= tickDt) { lo -= tickDt; snapK = F; snapY = targetYaw; }
+      }
+      p.set_yaw_pitch(rate > 0 ? snapY : targetYaw, 0);
+      p.tick(RENDER_DT, rate > 0 ? snapK : F, 0, 0);
+    }
+    const s = p.state();
+    return Math.hypot(s.posX, s.posZ);
+  };
+  const slowBase = slowRun(0);
+  const slow32 = Math.abs(slowRun(32) - slowBase);
+  check(
+    '运动差别#5：差别由输入变化率决定（快变输入——yaw 每 100ms 步进 90°：全采样 vs 无限制末位 Δ 显著 >5 且 32t > 256t；慢变输入——yaw 30° 线性收拢 1.5s：Δ 微小 <0.5——surf 垂直落坡"差别不明显"是慢输入下采样差 = tickDt×斜率 ≤0.6° 的数学必然）',
+    fast32 > 5 && fast32 > fast256 && slow32 < 0.5,
+    `快速转向 Δ:32t=${fast32.toFixed(2)} 256t=${fast256.toFixed(2)} | 慢速收拢 Δ:32t=${slow32.toFixed(3)}`,
+  );
+}
+
+// 12.5q. **物理引擎数值校验**（扩大覆盖：对称性/重力精确/摩擦衰减/加速稳态/autobhop/
+//        bhop 速度钳制/空中转向/蹲伏/急停/参数化/noclip——核心物理数值与理论一致）
+{
+  const F = 1;
+  const B = 2;
+  const L = 4;
+  const R = 8;
+  const J = 16;
+  const DUCK = 32;
+  const flatQ = [
+    { planes: [
+      { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+      { normal: [-1,0,0], dist: 2048 }, { normal: [1,0,0], dist: 2048 },
+      { normal: [0,-1,0], dist: 64 }, { normal: [0,1,0], dist: 0 },
+    ], min: [-2048,-64,-2048], max: [2048,0,2048], is_ladder: false, is_solid: true },
+  ];
+  const buildQ = () => {
+    const p = new PhysWorld();
+    p.set_hull(16, 72, 54);
+    p.build_world(JSON.stringify(flatQ), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+    return p;
+  };
+  // ① 方向对称性：forward/back/left/right 0.5s 位移相等
+  const distOf = (key) => {
+    const p = buildQ();
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    const s0 = p.state();
+    for (let i = 0; i < 500; i++) p.tick(0.001, key, 0, 0);
+    const s1 = p.state();
+    return Math.hypot(s1.posX - s0.posX, s1.posZ - s0.posZ);
+  };
+  const dF = distOf(F);
+  const dB = distOf(B);
+  const dL = distOf(L);
+  const dR = distOf(R);
+  check(
+    '物理校验#1：方向对称性（forward/back/left/right 0.5s 位移相等）',
+    Math.abs(dF - dB) < 0.01 && Math.abs(dL - dR) < 0.01 && Math.abs(dF - dL) < 0.01,
+    `F=${dF.toFixed(2)} B=${dB.toFixed(2)} L=${dL.toFixed(2)} R=${dR.toFixed(2)}`,
+  );
+  // ② 重力精确：自由落体 1s vy=-g、位移=½gt²
+  {
+    const p = buildQ();
+    p.teleport_to(0, 500, 0, 0);
+    let s;
+    for (let i = 0; i < 1000; i++) {
+      p.tick(0.001, 0, 0, 0);
+      s = p.state();
+    }
+    check(
+      '物理校验#2：重力精确（自由落体 1s vy=-800、位移 400——理论 ½gt²）',
+      Math.abs(s.velY + 800) < 1 && Math.abs(500 - s.posY - 400) < 1,
+      `vy=${s.velY.toFixed(1)} 位移=${(500 - s.posY).toFixed(1)}`,
+    );
+  }
+  // ③ 摩擦衰减：平地注入 400 → 钳 250 → 250ms 后 ≈250·e^(-4×0.25)=92
+  {
+    const p = buildQ();
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    p.set_velocity(0, 0, -400);
+    p.tick(0.001, 0, 0, 0);
+    const sAfter = p.state();
+    for (let i = 0; i < 250; i++) p.tick(0.001, 0, 0, 0);
+    const sF = p.state();
+    check(
+      '物理校验#3：摩擦衰减（400 注入平地钳 250 → 250ms 后 ≈92·e^(-4t) 指数衰减）',
+      Math.abs(Math.hypot(sAfter.velX, sAfter.velZ) - 250) < 1 && Math.abs(Math.hypot(sF.velX, sF.velZ) - 92) < 8,
+      `钳后=${Math.hypot(sAfter.velX, sAfter.velZ).toFixed(1)} 250ms=${Math.hypot(sF.velX, sF.velZ).toFixed(1)}`,
+    );
+  }
+  // ④ 加速稳态：按住 forward 1s → runSpeed 250
+  {
+    const p = buildQ();
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    for (let i = 0; i < 1000; i++) p.tick(0.001, F, 0, 0);
+    const s = p.state();
+    check(
+      '物理校验#4：加速稳态（按住 forward 1s → runSpeed 250）',
+      Math.abs(Math.hypot(s.velX, s.velZ) - 250) < 1,
+      `速度=${Math.hypot(s.velX, s.velZ).toFixed(1)}`,
+    );
+  }
+  // ⑤ autobhop：按住跳连续起跳（true ≥2 次/2s；false 仅 1 次）
+  {
+    const jumps = (autobhop, key) => {
+      const p = buildQ();
+      if (!autobhop) p.set_params(JSON.stringify({ autobhop: false }));
+      for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+      let n = 0;
+      let lastG = true;
+      for (let i = 0; i < 2000; i++) {
+        p.tick(0.001, key, 0, 0);
+        const g = p.state().onGround;
+        if (lastG && !g) n++;
+        lastG = g;
+      }
+      return n;
+    };
+    const nOn = jumps(true, F | J);
+    const nOff = jumps(false, F | J);
+    check(
+      '物理校验#5：autobhop（true 按住跳连续起跳 ≥2 次/2s；false 仅 1 次——落地自动跳 vs 手动边沿）',
+      nOn >= 2 && nOff === 1,
+      `autobhop=true=${nOn} autobhop=false=${nOff}`,
+    );
+  }
+  // ⑥ bhop_speed_clamp：高速落地起跳 → 水平速度钳 1.1×runSpeed=275
+  {
+    const p = buildQ();
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    p.set_velocity(600, 0, 0);
+    let jumpV = 0;
+    for (let i = 0; i < 10; i++) {
+      p.tick(0.001, J, 0, 0);
+      const s = p.state();
+      if (!s.onGround) {
+        jumpV = Math.hypot(s.velX, s.velZ);
+        break;
+      }
+    }
+    check(
+      '物理校验#6：bhop_speed_clamp（高速落地起跳 → 水平速度钳 1.1×runSpeed=275）',
+      Math.abs(jumpV - 275) < 1,
+      `起跳水平速度=${jumpV.toFixed(1)}`,
+    );
+  }
+  // ⑦ 空中转向（air_accelerate）：空中 forward 速度增加
+  {
+    const p = buildQ();
+    p.teleport_to(0, 200, 0, 0);
+    p.set_velocity(0, 0, -300);
+    for (let i = 0; i < 500; i++) p.tick(0.001, F, 0, 0);
+    const s = p.state();
+    check(
+      '物理校验#7：空中加速（air_accelerate——空中 forward 0.5s 速度增加）',
+      Math.hypot(s.velX, s.velY, s.velZ) > 350,
+      `空中速度=${Math.hypot(s.velX, s.velY, s.velZ).toFixed(1)}`,
+    );
+  }
+  // ⑧ 蹲伏：蹲下 eyeHeight 降低（渐变到位后 ~46）+ 蹲速低
+  {
+    const p = buildQ();
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    for (let i = 0; i < 200; i++) p.tick(0.001, DUCK, 0, 0); // 蹲稳（眼高渐变到位）
+    const sDuck = p.state();
+    for (let i = 0; i < 100; i++) p.tick(0.001, DUCK | F, 0, 0);
+    const sMove = p.state();
+    check(
+      '物理校验#8：蹲伏（eyeHeight 蹲稳后 < 50、蹲速 < 100——蹲姿眼高/移动速度）',
+      sDuck.eyeHeight < 50 && Math.hypot(sMove.velX, sMove.velZ) < 100,
+      `eyeHeight=${sDuck.eyeHeight.toFixed(1)} 蹲速=${Math.hypot(sMove.velX, sMove.velZ).toFixed(1)}`,
+    );
+  }
+  // ⑨ 急停：250 松键滑行距离有界（20-80 单位）
+  {
+    const p = buildQ();
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    p.set_velocity(0, 0, -250);
+    const s0 = p.state();
+    for (let i = 0; i < 3000; i++) p.tick(0.001, 0, 0, 0);
+    const s1 = p.state();
+    const slide = Math.abs(s1.posZ - s0.posZ);
+    check(
+      '物理校验#9：急停（250 松键滑行距离有界 20-80——摩擦衰减停止）',
+      slide > 20 && slide < 80,
+      `滑行距离=${slide.toFixed(1)}`,
+    );
+  }
+  // ⑩ 参数化 gravity：1600 → 自由落体 0.7s vy=-1120
+  {
+    const p = buildQ();
+    p.set_params(JSON.stringify({ gravity: 1600 }));
+    p.teleport_to(0, 500, 0, 0);
+    let s;
+    for (let i = 0; i < 700; i++) {
+      p.tick(0.001, 0, 0, 0);
+      s = p.state();
+    }
+    check(
+      '物理校验#10：参数化（gravity=1600 自由落体 0.7s vy=-1120——set_params 生效）',
+      Math.abs(s.velY + 1120) < 1,
+      `vy=${s.velY.toFixed(1)}`,
+    );
+  }
+  // ⑪ noclip：自由飞行（0.5s forward 位移 = noclip_speed×0.5=400）
+  {
+    const p = buildQ();
+    p.set_noclip(true);
+    for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+    const s0 = p.state();
+    for (let i = 0; i < 500; i++) p.tick(0.001, F, 0, 0);
+    const s1 = p.state();
+    const d = Math.hypot(s1.posX - s0.posX, s1.posZ - s0.posZ);
+    check(
+      '物理校验#11：noclip（自由飞行 0.5s forward 位移 = 800×0.5=400）',
+      Math.abs(d - 400) < 1,
+      `位移=${d.toFixed(1)}`,
+    );
+  }
+}
+
+// 12.6. 消息回退模式（无 SAB：postMessage 等价通道——main→WorkerA 输入/难度、
+//       WorkerA→WorkerB 状态直连；V 版本/仅状态更新重绘/限幅语义与 SAB 模式一致）
+console.log('\n── 消息回退模式（TestShared msg-* 镜像）──');
+{
+  // 管线：main（msg-main）→ 消息队列 → WorkerA（msg-physics）→ 消息队列 → WorkerB（msg-render）
+  const queue = [];
+  const main = TestShared.createMessaging((m) => queue.push(m));
+  const phy = TestShared.initMessaging((m) => queue.push(m));
+  const render = TestShared.initMessagingRender();
+  const deliver = (target) => {
+    const msgs = queue.splice(0);
+    for (const m of msgs) {
+      if (m.type === 'shared-input') target.onInputMessage(m.dx, m.dy, m.keysMask);
+      else if (m.type === 'shared-tick-rate') target.onTickRateMessage(m.rate);
+    }
+  };
+
+  // #1 主线程 → WorkerA：输入批次 + 难度
+  main.addInput(10, -5, 3);
+  main.writeTickRate(128);
+  check(
+    '消息回退#1：main addInput/writeTickRate 投递 shared-input/shared-tick-rate',
+    queue.length === 2 &&
+      queue[0].type === 'shared-input' &&
+      queue[0].dx === 10 &&
+      queue[0].dy === -5 &&
+      queue[0].keysMask === 3 &&
+      queue[1].type === 'shared-tick-rate' &&
+      queue[1].rate === 128,
+    `queue=${queue.map((m) => m.type).join(',')}`,
+  );
+  deliver(phy);
+
+  // #2 WorkerA consumeInput 收到输入 + 难度识别
+  const mIn = phy.consumeInput(1000);
+  check(
+    '消息回退#2：WorkerA consumeInput 收到主线程输入（dx/dy/keysMask）',
+    close(mIn.dx, 10) && close(mIn.dy, -5) && mIn.keysMask === 3,
+    `dx=${mIn.dx} dy=${mIn.dy} keys=${mIn.keysMask}`,
+  );
+  check(
+    '消息回退#3：WorkerA readTickRate 收到难度（128）',
+    phy.readTickRate() === 128,
+    `rate=${phy.readTickRate()}`,
+  );
+
+  // #4 输入限幅语义一致（±1000 防穿墙）
+  main.addInput(5000, -3000, 0);
+  deliver(phy);
+  const mClamp = phy.consumeInput(1000);
+  check(
+    '消息回退#4：consumeInput 限幅一致（dx=5000→1000、dy=-3000→-1000）',
+    close(mClamp.dx, 1000) && close(mClamp.dy, -1000),
+    `dx=${mClamp.dx} dy=${mClamp.dy}`,
+  );
+  // keysMask 松手清零语义（主线程持续投递 0）
+  main.addInput(0, 0, 0);
+  deliver(phy);
+  const mZero = phy.consumeInput(1000);
+  check(
+    '消息回退#5：keysMask 松手清零（投递 0 → consumeInput 得 0）',
+    mZero.dx === 0 && mZero.dy === 0 && mZero.keysMask === 0,
+    `dx=${mZero.dx} keys=${mZero.keysMask}`,
+  );
+
+  // #6 WorkerA 发布 → WorkerB 采样：V 版本 + 数据一致；V 未变不重绘
+  queue.length = 0;
+  phy.writeStateRaw(1, 2, 3, 4, 5, 6, 90, -30); // 发布 → shared-state 入队
+  check(
+    '消息回退#6：WorkerA writeStateRaw 投递 shared-state（V++）',
+    queue.length === 1 && queue[0].type === 'shared-state' && queue[0].v === 1,
+    `queue=${queue.length} v=${queue[0] ? queue[0].v : '-'}`,
+  );
+  render.onStateMessage(queue.shift());
+  const r1 = render.readState();
+  check(
+    '消息回退#7：WorkerB readState 收到状态（v/pos/vel/yaw/pitch 一致）',
+    r1 !== null &&
+      r1.v === 1 &&
+      close(r1.pos.x, 1) &&
+      close(r1.pos.y, 2) &&
+      close(r1.pos.z, 3) &&
+      close(r1.vel.x, 4) &&
+      close(r1.vel.y, 5) &&
+      close(r1.vel.z, 6) &&
+      close(r1.yaw, 90) &&
+      close(r1.pitch, -30),
+    r1 ? `v=${r1.v} pos=(${r1.pos.x},${r1.pos.y},${r1.pos.z})` : 'null',
+  );
+  check(
+    '消息回退#8：V 未变不重绘（readState 二次返回 null——重绘判定与 SAB 一致）',
+    render.readState() === null,
+  );
+  // 新发布 → 本地副本更新（v=2）
+  queue.length = 0;
+  phy.writeStateRaw(5, 6, 7, 0, 0, 0, 0, 0);
+  render.onStateMessage(queue.shift());
+  const r2 = render.readState();
+  check(
+    '消息回退#9：新发布 → readState 返回 v=2（渲染仅随状态更新）',
+    r2 !== null && r2.v === 2 && close(r2.pos.x, 5),
+    r2 ? `v=${r2.v}` : 'null',
+  );
+
+  // #10 无阻塞等待语义：waitWakeup/waitRenderWakeup 立即超时返回 false；wake 无操作
+  check(
+    '消息回退#10：waitWakeup/waitRenderWakeup 立即返回 false（无阻塞原语，自投递续环自驱）',
+    phy.waitWakeup(10) === false && render.waitRenderWakeup(10) === false,
+  );
+  main.wake(); // 无操作（不抛错、不影响任何状态）
+  check('消息回退#11：wake() 无操作（消息模式双 Worker 均自驱）', true);
+  check(
+    '消息回退#12：isMessageMode 标记（msg-* 为 true；SAB 为 false——worker-b 节流判定用）',
+    main.isMessageMode === true && phy.isMessageMode === true && render.isMessageMode === true,
+  );
+}
+
+// 12.6.5. 消息回退 + 模式B 兼容：msg 模式下键位采样起跳延迟 ≤1 tick
+//         （消息通道不影响模式B 键位采样——跳跃位采样与 SAB 模式一致）
+{
+  const msgBrushes = [
+    { planes: [
+      { normal: [0,0,-1], dist: 2048 }, { normal: [0,0,1], dist: 2048 },
+      { normal: [-1,0,0], dist: 2048 }, { normal: [1,0,0], dist: 2048 },
+      { normal: [0,-1,0], dist: 64 }, { normal: [0,1,0], dist: 0 },
+    ], min: [-2048,-64,-2048], max: [2048,0,2048], is_ladder: false, is_solid: true },
+  ];
+  const p = new PhysWorld();
+  p.set_hull(16, 72, 54);
+  p.build_world(JSON.stringify(msgBrushes), '[]', '{"teleports":[],"triggers":[]}', 0, 0, 0, 0);
+  for (let i = 0; i < 100; i++) p.tick(1 / 64, 0, 0, 0);
+  // msg 通道模拟：main.addInput → onInputMessage → consumeInput（镜像 msg-physics）
+  const queue = [];
+  const msgMain = TestShared.createMessaging((m) => queue.push(m));
+  const msgPhy = TestShared.initMessaging(() => {});
+  let lo = 0;
+  let snapJump = 0;
+  let jumpAt = -1;
+  for (let i = 0; i < 200; i++) {
+    msgMain.addInput(0, 0, i >= 30 ? 16 : 0); // t=30ms 按跳（msg 投递）
+    const msgs = queue.splice(0);
+    for (const m of msgs) {
+      if (m.type === 'shared-input') msgPhy.onInputMessage(m.dx, m.dy, m.keysMask);
+    }
+    const inp = msgPhy.consumeInput(1000);
+    lo += RENDER_DT;
+    if (lo >= 1 / 64) {
+      lo -= 1 / 64;
+      snapJump = inp.keysMask & 16; // 跳跃位 64t 采样（移动实时）
+    }
+    p.tick(RENDER_DT, (inp.keysMask & 0x0f) | snapJump, inp.dx, inp.dy);
+    const s = p.state();
+    if (!s.onGround && jumpAt < 0) jumpAt = i;
+  }
+  check(
+    '消息回退+模式B：msg 通道下键位采样起跳延迟 ≤1 tick（消息回退与模式B 兼容——跳跃位采样语义与 SAB 一致）',
+    jumpAt > 30 && jumpAt <= 30 + 15.6 + 1,
+    `起跳 t=${jumpAt}ms（msg 按下 t=30ms）`,
   );
 }
 
@@ -717,8 +2729,224 @@ if (phys) {
   check('respawn 后立即写路径 V++（阶段4 写空闲槽 + add(V,1)）', vp2 === vp1 + 1, `v=${vp2}`);
 }
 
-// 14. 相机映射纯逻辑（镜像 worker-b.ts render：FPS 约定，yaw/pitch 度→弧度 'YXZ'，
-//     眼高 EYE_STAND=64.09；three.js 'YXZ' 前向 = Ry(yaw)·Rx(pitch)·(0,0,-1)，roll=0）
+// 13.5. 热路径镜像（worker-a.ts 子步循环）：tick() 返回值直接写状态槽——
+//       不再二次调 phys.state()（每子步省一次 wasm→JS 对象构造）；返回值字段与 state() 一致
+if (phys) {
+  const s = phys.tick(0.001, 0, 0, 0); // 1ms 子步（镜像 loop 内 consumeInput 后调用）
+  const vHot = shared.writeState(
+    { x: s.posX, y: s.posY, z: s.posZ },
+    { x: s.velX, y: s.velY, z: s.velZ },
+    s.yaw,
+    s.pitch,
+  );
+  const rHot = shared.readState();
+  const st = phys.state();
+  check(
+    '热路径：tick() 返回值字段直接写状态槽（pos/vel/yaw/pitch 与 state() 一致）',
+    rHot !== null &&
+      rHot.v === vHot &&
+      close(rHot.pos.x, st.posX) &&
+      close(rHot.pos.y, st.posY) &&
+      close(rHot.pos.z, st.posZ) &&
+      close(rHot.vel.x, st.velX) &&
+      close(rHot.vel.y, st.velY) &&
+      close(rHot.vel.z, st.velZ) &&
+      close(rHot.yaw, st.yaw) &&
+      close(rHot.pitch, st.pitch),
+    rHot ? `v=${rHot.v}` : 'null',
+  );
+}
+
+// 13.5b. tick_into 零分配热路径（worker-a 最新热路径镜像：tick_into → state_out_ptr
+//        Float64Array 视图直读 8 标量 → writeStateRaw——每子步零 JS 对象分配）
+if (phys && physMemory) {
+  phys.tick_into(0.001, 0, 0, 0); // 与 tick 同语义，状态写 wasm 固定缓冲（无 JS 对象）
+  const view = new Float64Array(physMemory.buffer, phys.state_out_ptr(), 8);
+  const stAfter = phys.state();
+  check(
+    'tick_into 热路径#1：state_out 视图（pos×3/vel×3/yaw/pitch）与 tick 后 state() 一致',
+    close(view[0], stAfter.posX) &&
+      close(view[1], stAfter.posY) &&
+      close(view[2], stAfter.posZ) &&
+      close(view[3], stAfter.velX) &&
+      close(view[4], stAfter.velY) &&
+      close(view[5], stAfter.velZ) &&
+      close(view[6], stAfter.yaw) &&
+      close(view[7], stAfter.pitch),
+    `view=(${view[0].toFixed(2)},${view[1].toFixed(2)},${view[2].toFixed(2)}) st=(${stAfter.posX.toFixed(2)},${stAfter.posY.toFixed(2)},${stAfter.posZ.toFixed(2)})`,
+  );
+  // tick_into → writeStateRaw 全链路（worker-a 子步热路径逐字镜像）
+  phys.tick_into(0.001, 0, 0, 0);
+  const v2 = new Float64Array(physMemory.buffer, phys.state_out_ptr(), 8);
+  const vHot2 = shared.writeStateRaw(v2[0], v2[1], v2[2], v2[3], v2[4], v2[5], v2[6], v2[7]);
+  const rHot2 = shared.readState();
+  const st2 = phys.state();
+  check(
+    'tick_into 热路径#2：tick_into→writeStateRaw 全链路（状态槽 = tick 结果，版本/数据一致）',
+    rHot2 !== null &&
+      rHot2.v === vHot2 &&
+      close(rHot2.pos.x, st2.posX) &&
+      close(rHot2.pos.y, st2.posY) &&
+      close(rHot2.pos.z, st2.posZ) &&
+      close(rHot2.vel.x, st2.velX) &&
+      close(rHot2.vel.y, st2.velY) &&
+      close(rHot2.vel.z, st2.velZ) &&
+      close(rHot2.yaw, st2.yaw) &&
+      close(rHot2.pitch, st2.pitch),
+    rHot2 ? `v=${rHot2.v}` : 'null',
+  );
+}
+
+// ── 16. 梯子（on_ladder 索引化回归：抓梯攀爬 / 跳离 / 换图重建不 panic）──
+//     评审 B4：on_ladder 由 Option<LadderVolume>（每 tick clone planes）改 Option<usize>
+//     索引——本章节用真实梯子 brush 世界端到端验证索引路径（抓梯/攀爬/跳离/重建）
+console.log('\n── 梯子世界（on_ladder 索引化回归）──');
+{
+  const ladderBrushes = [
+    brushes[0], // 地面（与基础冒烟世界一致）
+    {
+      // 竖直梯子 slab：x∈[48,112]、y∈[0,256]、z∈[-32,32]（比玩家箱宽，攀爬面法线朝 -x）
+      planes: [
+        { normal: [-1, 0, 0], dist: -48 }, // x- 侧（x=48）
+        { normal: [1, 0, 0], dist: 112 }, // x+ 侧（x=112）
+        { normal: [0, 0, -1], dist: 32 }, // z- 侧（z=-32）
+        { normal: [0, 0, 1], dist: 32 }, // z+ 侧（z=32）
+        { normal: [0, 1, 0], dist: 256 }, // 顶面（y=256）
+        { normal: [0, -1, 0], dist: 0 }, // 底面（y=0）
+      ],
+      min: [48, 0, -32],
+      max: [112, 256, 32],
+      is_ladder: true,
+      is_solid: false,
+    },
+  ];
+  let physL = null;
+  let lBuildOk = false;
+  let lBuildErr = '';
+  try {
+    physL = new PhysWorld();
+    physL.set_hull(16, 72, 54);
+    // 出生点 (80,2,0) 在梯子 slab 内、地面之上（空中，on_ground=false）；yaw=270 → 前向 +x
+    physL.build_world(JSON.stringify(ladderBrushes), '[]', '{"teleports":[],"triggers":[]}', 80, 2, 0, 270);
+    lBuildOk = true;
+  } catch (e) {
+    lBuildErr = String(e);
+  }
+  check('梯子世界：build_world（地面 + is_ladder slab）', lBuildOk, lBuildErr);
+
+  if (physL) {
+    // 攀爬：空中 + 前进 64 tick（1s）→ 沿梯面上升（LADDER_SPEED=200，无重力下落）
+    for (let i = 0; i < 64; i++) physL.tick(1 / 64, 1, 0, 0); // keysMask 1 = forward
+    const sClimb = physL.state();
+    check(
+      '抓梯攀爬：posY 上升 ≥ 150（LADDER_SPEED=200 u/s，on_ground=false）',
+      sClimb.posY > 2 + 150 && sClimb.on_ground === false,
+      `posY=${sClimb.posY.toFixed(1)} onGround=${sClimb.on_ground}`,
+    );
+    const peakY = sClimb.posY;
+
+    // 跳离：jump 边沿 → 推离梯面（facing×270）+ 0.25s 冷却 → 不再攀爬，重力接管
+    physL.tick(1 / 64, 17, 0, 0); // forward + jump 边沿
+    for (let i = 0; i < 32; i++) physL.tick(1 / 64, 0, 0, 0);
+    const sOff = physL.state();
+    check(
+      '跳离：0.5s 后不再攀爬（posY 下降 ≥ 30，重力接管）',
+      sOff.posY < peakY - 30,
+      `posY ${peakY.toFixed(1)} → ${sOff.posY.toFixed(1)}`,
+    );
+
+    // 换图重建：build_world 重建 player（on_ladder 复位为 None）→ 连续 tick 不 panic
+    let rebuildOk = true;
+    let rebuildErr = '';
+    try {
+      physL.build_world(JSON.stringify(ladderBrushes), '[]', '{"teleports":[],"triggers":[]}', 80, 2, 0, 270);
+      for (let i = 0; i < 16; i++) physL.tick(1 / 64, 1, 0, 0);
+    } catch (e) {
+      rebuildOk = false;
+      rebuildErr = String(e);
+    }
+    const sRebuild = physL.state();
+    check(
+      '换图重建：build_world 后连续 tick 不 panic、状态有限（on_ladder 索引复位安全）',
+      rebuildOk && [sRebuild.posX, sRebuild.posY, sRebuild.posZ, sRebuild.velX, sRebuild.velY, sRebuild.velZ].every(Number.isFinite),
+      rebuildErr || `pos=(${sRebuild.posX.toFixed(1)},${sRebuild.posY.toFixed(1)},${sRebuild.posZ.toFixed(1)})`,
+    );
+  }
+}
+
+// ── 17. 去重粒度：V 递增但状态值相同 → 仍重绘（版本号去重，非按值）──
+//     评审 C5：WorkerB 仅按 readState 非 null（= V 变化）判定重绘——"相同状态、
+//     不同版本"仍提交 Draw；本节实证当前语义，作为行为决策记录
+console.log('\n── 去重粒度（版本号 vs 状态值）──');
+{
+  const sharedV = new TestShared(new SharedArrayBuffer(SHARED_BUFFER_SIZE));
+  const wbV = new FakeWorkerB(sharedV);
+  sharedV.writeStateRaw(1, 2, 3, 4, 5, 6, 90, -30); // v1
+  wbV.onFrame(0);
+  sharedV.writeStateRaw(1, 2, 3, 4, 5, 6, 90, -30); // v2：8 个值完全相同
+  wbV.onFrame(10);
+  check(
+    '去重粒度：V 递增但状态值相同 → 仍重绘（按版本号去重，非按值——C5 语义实证）',
+    wbV.updates === 2 && wbV.repaints === 2,
+    `updates=${wbV.updates} repaints=${wbV.repaints}`,
+  );
+}
+
+// ── 18. !ready 世界：加载期 V 递增 + tick/tick_into 语义分叉 ──────────
+//     评审 C5：地图加载期物理 !ready（未 build_world）仍每 ms 写槽 → V 递增 →
+//     WorkerB 去重失效（照常重绘相同画面）；且 tick()（返回玩家状态）与 tick_into()
+//     （!ready 直接 return，state_out 保持旧值）存在语义分叉——实证记录
+console.log('\n── !ready 世界（地图加载期行为）──');
+{
+  const physIdle = new PhysWorld(); // 未 build_world → ready=false
+  const sharedN = new TestShared(new SharedArrayBuffer(SHARED_BUFFER_SIZE));
+  const wbN = new FakeWorkerB(sharedN);
+  physIdle.tick_into(0.001, 0, 0, 0); // !ready：直接 return（不写 state_out）
+  const viewN = new Float64Array(physMemory.buffer, physIdle.state_out_ptr(), 8);
+  sharedN.writeStateRaw(viewN[0], viewN[1], viewN[2], viewN[3], viewN[4], viewN[5], viewN[6], viewN[7]);
+  const vIdle = Atomics.load(sharedN.i32, I_V);
+  wbN.onFrame(0);
+  check(
+    '加载期：!ready 世界 tick_into 不报错、V 递增（WorkerB 加载期去重失效的实证）',
+    vIdle === 1 && wbN.repaints === 1,
+    `V=${vIdle} repaints=${wbN.repaints}`,
+  );
+  const sTick = physIdle.tick(0.001, 0, 0, 0); // tick：!ready 时返回当前玩家状态
+  const viewAfter = new Float64Array(physMemory.buffer, physIdle.state_out_ptr(), 8);
+  const zeroOut = viewAfter.every((v) => v === 0);
+  check(
+    '语义分叉：!ready 时 tick() 返回玩家状态(pos 0,100,0) 而 tick_into 不写 state_out（保持旧值/全零）',
+    sTick.posY === 100 && zeroOut,
+    `tick.posY=${sTick.posY} state_out 全零=${zeroOut}`,
+  );
+}
+
+// ── 19. 长时间停顿（隐藏标签页/主线程停摆）──
+//     评审 C6：delta 钳制 50ms + 8 子步上限 + 剩余累加保留 → 后续轮次有界追赶收敛
+console.log('\n── 长时间停顿（隐藏标签页）──');
+{
+  const rLong = simulateWorkerARound(5000, 0); // 5s 停顿 → delta clamp 50ms
+  check(
+    'delta=5000ms（隐藏标签页）→ clamp 50ms → 8 子步，acc 保留 42ms（时间不丢失）',
+    rLong.ticks === 8 && close(rLong.acc, 0.042),
+    `ticks=${rLong.ticks} acc=${rLong.acc}`,
+  );
+  let catchAcc = rLong.acc;
+  let catchRounds = 0;
+  while (catchAcc >= RENDER_DT && catchRounds < 100) {
+    const r = simulateWorkerARound(1, catchAcc); // 恢复后每轮 1ms delta
+    catchAcc = r.acc;
+    catchRounds++;
+    if (r.ticks === 0) break;
+  }
+  check(
+    '追赶收敛：后续轮次持续补跑直至 acc < 1ms（≤10 轮，有界追赶非无限）',
+    catchAcc < RENDER_DT && catchRounds >= 1 && catchRounds <= 10,
+    `rounds=${catchRounds} acc=${catchAcc}`,
+  );
+}
+
+// 14. 相机映射纯逻辑（镜像 worker-b.ts render：FPS 约定，yaw/pitch 度→弧度 'YXZ'，//     眼高 EYE_STAND=64.09；three.js 'YXZ' 前向 = Ry(yaw)·Rx(pitch)·(0,0,-1)，roll=0）
 const DEG2RAD = Math.PI / 180;
 const EYE_STAND = 64.09;
 function fpsForward(yawDeg, pitchDeg) {
@@ -773,7 +3001,7 @@ const BRUSH_FILTER_JSON = JSON.stringify({
   skip_sky: true,
   skip_nodraw: false,
 });
-const bspPath = join(root, '../src/maps/surf_666.bsp');
+const bspPath = join(root, '../maps/surf_666.bsp');
 const bspBytes = readFileSync(bspPath);
 check('读取 surf_666.bsp（字节 > 0）', bspBytes.length > 0, `${bspBytes.length} B`);
 

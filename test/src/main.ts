@@ -2,12 +2,14 @@
  * WebSurf-test — 主线程入口（时序图 阶段0/1/4）。
  *
  * 职责（绝不做物理/渲染）：
- * - 前置条件检测：crossOriginIsolated + SharedArrayBuffer 支持，失败显示错误面板并停止
- * - 创建 SAB + WorkerA（物理）/ WorkerB（渲染），transfer 共享内存
+ * - 前置条件检测：crossOriginIsolated + SharedArrayBuffer 支持 → 共享内存模式；
+ *   不满足 → **消息回退模式**（postMessage 通道，功能等价，不再停止）
+ * - 创建 SAB + WorkerA（物理）/ WorkerB（渲染），transfer 共享内存（或消息通道直连）
  * - 阶段1：捕获鼠标（pointer lock 后累积）与键盘（WASD/空格），
- *   每 rAF 一次性 Atomics.add 写入 SAB 输入槽后清零（提取无上限）
- *   → wake()（store(WAKEUP,1) + notify(WAKEUP,1) 唤醒 WorkerA）
- *   → workerB.postMessage({type:'frame'})（帧信号驱动 WorkerB 渲染）
+ *   每 rAF 一次性写入输入（SAB Atomics.add / 消息回退 postMessage 批投递）
+ *   → wake()（双槽通知：WAKEUP → WorkerA 物理背压；RENDER_WAKEUP → WorkerB
+ *   渲染唤醒——**主驱动为 WorkerA 发布 notify，主线程 wake 仅为帧对齐冗余**，
+ *   见 shared-state.ts / worker-b.ts）
  * - 阶段0：难度按钮 → 写 SAB 控制区 TICK_RATE（仅 store，无 notify）
  * - 阶段4：R 键 → postMessage({type:'respawn'}) 到 WorkerA
  */
@@ -25,38 +27,41 @@ if (!canvas) {
 }
 
 // ── 前置条件检测（阶段0 前置）：crossOriginIsolated + SharedArrayBuffer ──
+// 满足 → 共享内存模式（SAB 无锁通道，最高性能）；不满足 → **消息回退模式**
+// （postMessage 通道，功能等价——无 SAB 环境（file:// 无 COOP/COEP / 旧浏览器）
+// 不再停止，HUD 提示模式）
 const sabSupported = typeof SharedArrayBuffer !== 'undefined';
 const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
-if (!sabSupported || !isolated) {
-  const reasons: string[] = [];
-  if (!sabSupported) reasons.push('当前浏览器不支持 SharedArrayBuffer');
-  if (!isolated) reasons.push('页面未启用 crossOriginIsolated（需 HTTP + COOP/COEP 响应头）');
-  const panel = document.createElement('div');
-  panel.style.cssText = [
-    'position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;',
-    'background:#1a1016;color:#ffb4b4;font:14px/1.8 -apple-system,"PingFang SC",monospace;',
-  ].join('');
-  const box = document.createElement('div');
-  box.style.cssText = 'max-width:640px;padding:28px 32px;border:1px solid rgba(255,90,90,.4);border-radius:12px;background:#241419;';
-  box.innerHTML =
-    '<div style="font-size:16px;font-weight:600;margin-bottom:8px">WebSurf-test 无法启动</div>' +
-    '<div>共享内存前置条件未满足：</div>' +
-    `<ul style="margin:8px 0 12px 20px">${reasons.map((r) => `<li>${r}</li>`).join('')}</ul>` +
-    '<div style="color:#d99">请用 <code>python ../src/serve.py 8080 dist</code> 提供 HTTP + COOP/COEP 头后访问。</div>';
-  panel.appendChild(box);
-  document.body.appendChild(panel);
-  throw new Error(`前置条件失败: ${reasons.join('；')}`);
-}
+const useSab = sabSupported && isolated;
 
 // ── 共享内存 + 双 Worker 创建（dev 与 dist 同构：module worker + 外置 wasm）──
-const sab = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
 const workerA = new Worker(new URL('./worker-a.js', import.meta.url), { type: 'module' });
 const workerB = new Worker(new URL('./worker-b.js', import.meta.url), { type: 'module' });
 workerA.onerror = (e) => console.error('[main] WorkerA 错误:', e.message);
 workerB.onerror = (e) => console.error('[main] WorkerB 错误:', e.message);
 
-const shared = TestShared.create(sab, workerA); // postMessage 共享 SAB（非 transfer）
-workerB.postMessage({ type: 'init-shared', shared: sab }); // 同上：SAB 不可进 transfer list
+// 通道模式：SAB 满足 → 共享内存（最高性能）；否则 → 消息回退（postMessage，功能等价）
+let shared: TestShared;
+if (useSab) {
+  const sab = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
+  shared = TestShared.create(sab, workerA); // postMessage 共享 SAB（非 transfer）
+  workerB.postMessage({ type: 'init-shared', shared: sab }); // 同上：SAB 不可进 transfer list
+} else {
+  shared = TestShared.createMessaging(workerA); // msg-main：输入/难度 → postMessage
+  // WorkerA ↔ WorkerB 直连通道（状态发布不经主线程中转）
+  const physRender = new MessageChannel();
+  workerA.postMessage({ type: 'init-msg', renderPort: physRender.port1 }, [physRender.port1]);
+  workerB.postMessage({ type: 'init-msg', renderPort: physRender.port2 }, [physRender.port2]);
+}
+
+// HUD 模式提示（共享内存 / 消息回退）
+const modeNotice = document.createElement('div');
+modeNotice.className = 'hint';
+modeNotice.style.color = useSab ? '#8ab4f8' : '#c9a05c';
+modeNotice.textContent = useSab
+  ? '通道：共享内存（SAB）'
+  : '通道：消息回退（无 SharedArrayBuffer，postMessage 等价传输）';
+document.getElementById('hud')?.appendChild(modeNotice);
 
 // ── WorkerB 状态摘要（每秒一次）→ DOM HUD（渲染 HUD 移出 Worker：OffscreenCanvas 仅一个
 //    context 被 WebGL 占用；状态/进度文本由页面 DOM 承载）──────────────────────────
@@ -286,6 +291,71 @@ document.querySelectorAll<HTMLButtonElement>('#difficulty button[data-rate]').fo
   });
 });
 
+// ── 路径记录（trace）：按钮状态机 **开始 → 保存 → 删除 → 开始** 循环——
+//    开始：清空 + 开启记录（WorkerA 采样节点）；保存：停止记录（路径保留显示）；
+//    删除：清空路径线。节点经 main 转发 WorkerB → **3D 场景中显示两条空间路径线**
+//    （绿 = 无限制基准，红 = tick 实际）。仅记录时 WorkerA 发送节点（防内存溢出）──
+const traceBtn = document.getElementById('traceBtn') as HTMLButtonElement | null;
+const TRACE_MAX_NODES = 2000;
+/** 记录状态机：off（未记录）→ recording（记录中）→ saved（已保存保留显示）→ off。 */
+type TraceState = 'off' | 'recording' | 'saved';
+let traceState: TraceState = 'off';
+/** WorkerA 节点滚动窗口上限（转发前截断，防内存溢出）。 */
+const traceNodes: { base: { x: number; y: number; z: number }; tick: { x: number; y: number; z: number } }[] = [];
+
+/** 按钮切换（开始 → 保存 → 删除 → 开始 循环）。 */
+traceBtn?.addEventListener('click', () => {
+  if (traceState === 'off') {
+    // 开始：清空旧路径 + 开启记录
+    workerB.postMessage({ type: 'trace-clear' });
+    traceNodes.length = 0;
+    traceSyncCount = 0;
+    workerA.postMessage({ type: 'trace', enabled: true });
+    traceState = 'recording';
+    traceBtn.textContent = '保存';
+  } else if (traceState === 'recording') {
+    // 保存：停止记录（WorkerA 停止采样发送），路径保留在 3D 场景中显示
+    workerA.postMessage({ type: 'trace', enabled: false });
+    traceState = 'saved';
+    traceBtn.textContent = '删除';
+  } else {
+    // 删除：清空路径线（3D 场景）→ 回到初始
+    workerB.postMessage({ type: 'trace-clear' });
+    traceNodes.length = 0;
+    traceState = 'off';
+    traceBtn.textContent = '开始';
+  }
+});
+
+// WorkerA trace-data 消息：累积节点（滚动窗口上限）→ 转发 WorkerB 3D 路径线
+// trace-sync：兜底事件计数（图例显示）
+let traceSyncCount = 0;
+workerA.onmessage = (e: MessageEvent<{ type: string; baseX?: number; baseY?: number; baseZ?: number; tickX?: number; tickY?: number; tickZ?: number; dist?: number }>) => {
+  const msg = e.data;
+  if (!msg) return;
+  if (msg.type === 'trace-sync') {
+    // 位置兜底触发（physBase 拉回 phys）——拟合良好时应仅偶发
+    traceSyncCount++;
+    const legend = document.getElementById('traceLegend');
+    if (legend) legend.textContent = `兜底 ×${traceSyncCount}`;
+    return;
+  }
+  if (msg.type !== 'trace-data') return;
+  // 仅记录中转发（保存/删除后忽略残留消息）
+  if (traceState !== 'recording') return;
+  traceNodes.push({
+    base: { x: msg.baseX!, y: msg.baseY!, z: msg.baseZ! },
+    tick: { x: msg.tickX!, y: msg.tickY!, z: msg.tickZ! },
+  });
+  if (traceNodes.length > TRACE_MAX_NODES) traceNodes.shift();
+  // 转发 WorkerB → 3D 场景路径线更新
+  workerB.postMessage({
+    type: 'trace-point',
+    baseX: msg.baseX!, baseY: msg.baseY!, baseZ: msg.baseZ!,
+    tickX: msg.tickX!, tickY: msg.tickY!, tickZ: msg.tickZ!,
+  });
+};
+
 // ── 主线程 rAF 循环（阶段1）：输入转发 + wake（WorkerB 渲染由自身 rAF 自驱，不依赖 frame 消息——
 //    移除 frame 消息避免双渲染过载卡死；渲染绝对自主不受主线程频率限制）──
 function frame(): void {
@@ -295,7 +365,7 @@ function frame(): void {
   mouseDx = 0;
   mouseDy = 0;
   const mask = locked ? keysToMask(keyState) : 0;
-  shared.addInput(dx, dy, mask); // Atomics.add 累加（主线程耗时 < 0.1ms，绝不参与物理/渲染）
-  shared.wake(); // store(WAKEUP,1) + notify(WAKEUP,1) → 唤醒可能挂起的 WorkerA
+  shared.addInput(dx, dy, mask); // SAB Atomics.add 累加 / 消息回退 postMessage 批投递（主线程耗时 < 0.1ms）
+  shared.wake(); // 双槽通知：WAKEUP → WorkerA 背压 + RENDER_WAKEUP → WorkerB 渲染（主驱动=WorkerA 发布 notify，此处冗余）
 }
 requestAnimationFrame(frame);
