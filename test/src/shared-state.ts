@@ -325,10 +325,11 @@ export class TestShared {
   }
 
   /**
-   * WorkerB 渲染帧循环：wait(RENDER_WAKEUP, 0, timeoutMs) 挂起在**发布唤醒槽**上——
-   * 主驱动 = WorkerA 每发布状态的 notify（writeStateRaw，渲染率 = 物理发布率，
-   * 不受显示刷新率限制）；主线程 wake 的 store+notify 为帧对齐冗余；超时兜底自驱
-   * （WorkerA/主线程停摆时仍以自身节奏采样 V）。
+   * WorkerB 渲染帧循环：wait(RENDER_WAKEUP, 0, timeoutMs) 挂起在**帧信号槽**上——
+   * 主驱动 = 主线程 rAF 的 wake()（store+notify RENDER_WAKEUP——vsync 对齐，渲染
+   * 节奏 = 显示器刷新，呈现平滑）；WorkerA 发布（writeStateRaw）**不 notify**（仅
+   * V++，1kHz 随机相位唤醒已移除——见 writeStateRaw）；超时兜底自驱（主线程 rAF
+   * 停摆时仍以自身节奏采样 V，渲染不冻结）。
    * 复位语义与 waitWakeup 相同（CAS(1→0) 消费；'timed-out' 保留窗口内新唤醒）。
    * @returns 是否被唤醒；超时返回 false。
    */

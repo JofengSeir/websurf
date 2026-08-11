@@ -1,5 +1,7 @@
 # game 物理模块（双物理线 + 权威帧）
 
+> 最后核对：2026-08-11。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
+
 > 公共时序见 `docs/timing-game.md`。本文档：双物理线架构、SAB/MsgState 双通道、校准与兜底、输入层细节。
 
 ## 1. 架构（v7 定案：权威帧计算模式）
@@ -73,3 +75,21 @@ Worker = 权威帧计算器（独立固定步长 = 1/tickRate，64/128Hz，累�
 
 - 单 tick 输入增量上限 `MAX_INPUT_PER_STEP_BASE`（1200，随步长缩放：base × dt × 64）。
 - 固定步长累积器无封顶（每轮询 while 有 `guard < 64` 步数上限，剩余时间留在 acc 不丢失）——低帧率不丢物理时间（曾修复"250 速地面一直滑行"= keysMask 残留 + 累积器覆盖式丢时间两个根因）。
+
+## 8. 已知现状（如实记录）
+
+- **`teleport_gate_ticks` 已失效**：面板仍可调（1-20，默认 1）并下发 `set_params`，但
+  Rust `teleport.check` 不再使用该参数（`src/phys/mod.rs` 注释明示"仅保留签名兼容"）；
+  传送触发由 A/B 双路径 + 冷却决定（见 `docs/architecture.md` §3.1）。
+- **碰撞事件检测基准**：`land` = onGround 上升沿；`blocked` = 速度骤降（>250 u/s）且
+  位移 < 速度对应位移的 0.3，且当前速度 > 80（`curSpeed > 80` 附加门槛，`auth-loop.ts`）。
+- **死亡阈值双端不对称**：主线程预测物理收到 `set_death_y(bbox.min.y)`（`renderer-main.ts`
+  回传场景最低 Y，注释虽写"最低 Y - 1000"但实传未减）；而权威 Worker **从未收到**
+  `set-death-threshold` 消息（共享层已定义、game 未发送）→ 权威侧 `death_y` 恒为
+  Rust 默认 -100000 → **权威物理掉落永不死亡重生**，双端死亡判定分叉（与 debug 双端
+  同值回传不同）。
+- **Rust 移动语义细节**（`src/phys/player.rs`，两端共享）：nopre 落地钳制**仅平地**
+  （`ground_normal.y > 0.999` 才钳，坡面滑行/冲坡保留速度）；categorize 贴地投影
+  （落地的法向速度分量 <0 时移除——平地等价 vy 清零，坡面保留沿坡分量 → 出坡带
+  斜上速度）；`contact_ticks` 仅 `normal.y ≥ 0.7`（STANDABLE_NORMAL）计数（斜面滑行
+  不计落地 → 传送 gate 防 surf 误触）。

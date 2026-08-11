@@ -1,9 +1,11 @@
 # debug 渲染 / 调试 / 游戏化模块
 
+> 最后核对：2026-08-11。以实际代码为准（`debug/src/renderer/`、`debug/src/game/`）。
+
 ## 1. 场景构建（`renderer-main.ts` loadScene）
 
 ```
-scene-data（GLB 字节 transfer + 各 JSON）
+scene-data（GLB 字节 + 各 JSON，同线程本地传递，无 postMessage/transfer）
   → GLTFLoader 加载 GLB（Blob URL）
   → resetRootRotations（根节点 Y 旋转归一）
   → collectMetadata（材质/贴图名索引，平面信息用）

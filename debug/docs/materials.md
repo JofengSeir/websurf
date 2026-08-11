@@ -1,5 +1,6 @@
 # debug 材质模块（应用侧）
 
+> 最后核对：2026-08-11。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/phys/world-builder.ts`）。
 > 公共材质技术（mosaic 压缩 / MTZ 打包 / 解压拼装 / 回退机制）见 `docs/materials.md`。
 > 本文档：debug 侧的**应用链路**——画质切换、缺失纹理回退、默认纹理包比对弹窗、运行时 wasm。
 
@@ -37,7 +38,9 @@
 ```
 buildWorldBundle（ts-shared world-builder）
   ├─ export_mosaic_manifest / export_missing_textures（借用，先于 GLB）
-  ├─ 默认纹理包：loadDefaultTexturePack（内嵌 __VBSP_TEXTURES_MTZ_B64__ 或 fetch）→ decompress_mtz
+  ├─ 默认纹理包：world-builder 内联实现（内嵌 __VBSP_TEXTURES_MTZ_B64__ 或 fetch
+  │   './textures.mtz'）→ decompress_mtz（注：函数名 loadDefaultTexturePack 仅被
+  │   缺失纹理弹窗比对使用，加载路径为内联实现）
   └─ export_glb_with_pakfile_models_with_defaults(defaultsJson)
       （Rust 侧：材质失败 → 查表 → 低清纹理嵌入 GLB；失败降级无回退导出）
 ```

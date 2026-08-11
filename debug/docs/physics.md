@@ -1,5 +1,7 @@
 # debug 物理模块
 
+> 最后核对：2026-08-11。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/`）。
+
 > 物理核心为共享层（Rust `src/phys/` + TS `src/ts-shared/`），与 game 同模式：
 > **主线程唯一物理渲染线** + **Worker 权威帧计算器**。公共时序见 `docs/timing-debug.md`。
 > 本文档：debug 侧的物理接入、校准、面板参数链路、事件消费。
@@ -38,7 +40,7 @@ PhysWorld 实例（主线程渲染物理）
 setTimeout 4ms 自驱；固定步长累积器无封顶（guard<64）
   → exchange 消耗输入（maxStep 防穿墙，随步长缩放）
   → PhysWorld.tick（独立权威演化，含地图碰撞）
-  → 碰撞事件检测（落地上升沿 / 撞墙速度骤降+位移受阻）
+  →   碰撞事件检测（落地上升沿 / 撞墙速度骤降>250 u/s 且位移<预期 30% 且当前速度>80）
   → 写权威全状态双缓冲 + V_A++
   → phys-event（land/blocked）低频回传
 ```
@@ -68,11 +70,12 @@ setTimeout 4ms 自驱；固定步长累积器无封顶（guard<64）
 面板 set-physics-param / set-hull / reset 消息
   → 权威 Worker（physics-worker.ts PhysicsParams → set_params / set_hull）
   → physics-snapshot 回传 → 主线程镜像 predPhys（PARAM_TO_RUST 映射，双端同参）
-  → tickRate：面板变更 → 权威 Worker fixedDt（共享 worker-dispatch config 处理）；
-    渲染线为 rAF 可变 dt，无需步长
+  → tickRate：面板变更 → `PhysicsParams.setParam('tickRate')` → **`onTickRateChange` 钩子**
+    → `authLoop.setFixedDt`（worker/main.ts；共享 worker-dispatch 的 config 分支仅在
+    地图加载 syncFullConfig 路径生效，非面板变更主路径）；渲染线为 rAF 可变 dt，无需步长
 ```
 
-参数定义（`param-defs.ts`）：maxSpeed/walkSpeed/crouchSpeed/airAccelerate/gravity/accelerate/friction/stopSpeed/jumpHeight/autobhop/bhopSpeedClamp/noPrestrafe/tickRate（13 项，与 Rust PhysParams 对应子集）。
+参数定义（`param-defs.ts`）：maxSpeed/walkSpeed/crouchSpeed/airAccelerate/gravity/accelerate/friction/stopSpeed/jumpHeight/autobhop/bhopSpeedClamp/noPrestrafe/tickRate（13 项，与 Rust PhysParams 对应子集——其中 tickRate 为 JS 驱动层参数，不进 Rust，实际映射 Rust 的为 12 项）。
 
 ## 7. noclip
 

@@ -1,7 +1,10 @@
 # game 材质模块（应用侧）
 
+> 最后核对：2026-08-11。以实际代码为准（`game/src/app.ts`、`game/src/renderer/renderer-main.ts`）。
 > 公共材质技术（mosaic 压缩 / MTZ 打包 / 解压拼装 / 回退机制）见 `docs/materials.md`。
 > 本文档：game 侧的应用链路（与 debug 同机制，解析/导出在主线程）。
+
+> 注：test 工程不导出 mosaic/默认包相关 API，无画质切换与缺失纹理回退。
 
 ## 1. 与 debug 的差异
 

@@ -1,7 +1,9 @@
 # WebSurf debug 工程时序图
 
+> 最后核对：2026-08-11。以实际代码为准（`debug/src/renderer/renderer-main.ts` + 共享 `src/ts-shared/`）。
+
 > 对应 `debug/`（WebSurf-debug，Debug Build）。**渲染时序已与 game 同模式**（主线程唯一物理渲染线 + Worker 权威帧计算器），共享实现位于 `src/ts-shared/`（auth/shared-state、auth-loop、worker-dispatch、authority-calibrator）。
-> game 时序见 `docs/timing-game.md`（两图结构相同；差异仅在工程特有逻辑：debug 的计时挑战/物理面板/调试可视化）。
+> game 时序见 `docs/timing-game.md`（两图结构相同；差异仅在工程特有逻辑：debug 的计时挑战/物理面板/调试可视化等，完整差异清单见文末）。
 
 ```mermaid
 sequenceDiagram
@@ -39,10 +41,10 @@ sequenceDiagram
     GPU-->>Main: 渲染完成
 
     Note over Hardware, GPU: === 第四阶段：权威帧计算 (共享 auth-loop, 固定步长 = 1/tickRate) ===
-    loop 自驱循环 (setTimeout 4ms 轮询; 固定步长累积器无封顶, guard<64)
+    loop 自驱循环 (setTimeout 4ms 轮询; 固定步长累积器无封顶, 每轮 ≤64 步 guard)
         Worker->>SharedMem: exchange 消耗输入 (maxStep 防穿墙, 随步长缩放)
         Worker->>Worker: PhysWorld.tick (完整物理, 独立权威演化)
-        Worker->>Worker: 碰撞事件检测 (落地上升沿 / 撞墙速度骤降)
+        Worker->>Worker: 碰撞事件检测 (落地上升沿 / 撞墙速度骤降>250 u/s 且位移<预期 30% 且当前速度>80)
         Worker->>SharedMem: 写权威全状态双缓冲 (V_A&1) → store 递增 V_A
     end
 
@@ -71,5 +73,6 @@ sequenceDiagram
 
 ## 与 game 的差异（仅工程特有逻辑）
 
-共享：解析/导出（ts-shared world-builder）、物理渲染线、权威帧、校准、输入层。
-debug 特有：计时挑战（GameState 主线程 take_event）、物理面板参数（physics-snapshot 镜像 predPhys）、调试可视化、自定义传送点、缺失纹理弹窗、noclipSpeed 配置。
+共享：解析/导出（ts-shared world-builder）、物理渲染线、权威帧、校准、输入层、近平面自适应。
+debug 特有：计时挑战（GameState 主线程 take_event）、物理面板参数（physics-snapshot 镜像 predPhys）、调试可视化、自定义传送点、缺失纹理弹窗、colliderSource 三档、PAKFILE 调试 API。
+game 特有（debug 无）：改键（keymap）、speedMode、lockTickRate（64Hz 公平锁定）、teleportGateTicks 滑块；noclipSpeed 为双端 config 层共有（game 面板有滑块，debug 面板无控件）。

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * WebSurf-test — WorkerA 单模物理核心冒烟测试（node 可跑，不依赖 DOM/Worker）。
+ * WebSurf-test — WorkerA 双模物理核心冒烟测试（node 可跑，不依赖 DOM/Worker）。
  *
  * 用法：node scripts/phys-smoke.mjs
  *
@@ -8,7 +8,8 @@
  * / worker-b.ts 镜像）：
  * - 世界构建/落地/跳跃/respawn 基本物理断言（PhysWorld wasm）
  * - 双缓冲：writeState 写空闲槽（S[V&1^1]）→ readState 读当前槽 S[V&1]（交替正确）
- * - writeStateRaw 零分配直写（worker-a 热路径：标量直写 SAB，无 Vec3 对象）
+ * - writeStateRaw 零分配直写（wasm API 能力验证；worker-a 实际子步热路径为
+ *   writeState → phys.state()，不使用 writeStateRaw/tick_into——见下方热路径两条）
  * - V 递增用 add（写 N 次 → V 增 N）
  * - WAKEUP 协议：wake() 后 waitWakeup 立即返回（被唤醒）；无 wake 时 wait 超时返回；
  *   阶段0 writeTickRate 仅 store（不影响 WAKEUP）
@@ -18,9 +19,11 @@
  *   notify**（仅 V++——1kHz 随机相位唤醒已移除）；主线程 wake()（rAF 帧信号）唤醒
  *   挂起渲染循环（vsync 对齐——渲染节奏 = 显示器刷新，呈现平滑）
  * - 8 次子步上限：一次大 delta（如 20ms）→ 物理最多 8 个子步；**上限耗尽保留剩余累加**
- *   （时间不丢失、下轮补跑），仅封顶 MAX_ACC 防无限追赶
- * - 热路径：tick() 返回值字段直接写状态槽（不再二次 phys.state()——省一次 wasm→JS
- *   对象构造，GC 压力减半）
+ *   （下轮补跑），仅封顶 MAX_ACC 防无限追赶（MAX_ACC=0.02 与 worker-a 同步）
+ * - 热路径 API 能力验证（worker-a 实际子步热路径为 writeState → phys.state()，
+ *   不使用 tick 返回值直写 / tick_into / writeStateRaw——下述两条仅验证 wasm API 能力）：
+ * - tick() 返回值字段直接写状态槽（不再二次 phys.state()——能力描述，省一次
+ *   wasm→JS 对象构造，GC 压力减半）
  * - tick_into 零分配热路径：tick_into → state_out_ptr 的 Float64Array 视图直读 8 标量
  *   → writeStateRaw——每子步零 JS 对象分配（与 tick 同语义，state_out 与 state() 一致）
  * - 输入限幅：consumeInput(clamp) 超限值被截断（±1000 防穿墙）
@@ -343,12 +346,13 @@ function writeStateFromPhys(shared, phys) {
 }
 
 // ── WorkerA 单模循环核心镜像（worker-a.ts loop：delta clamp + 累加器 + 8 次上限；
-//    上限耗尽**保留剩余累加**（时间不丢失，下轮补跑），仅封顶 MAX_ACC 防无限追赶）──
+//    上限耗尽**保留剩余累加**（下轮补跑），仅封顶 MAX_ACC 防无限追赶；
+//    **MAX_ACC=0.02 与 worker-a.ts 同步**（2026-08-11 对齐，曾漂移为 0.05））──
 // 返回 { ticks: 本轮执行的子步数, acc: 残留累加器（秒） }
 const RENDER_DT = 0.001;
 const MAX_DELTA = 0.05;
 const MAX_STEPS_PER_ROUND = 8;
-const MAX_ACC = 0.05;
+const MAX_ACC = 0.02;
 function simulateWorkerARound(deltaMs, acc) {
   let delta = deltaMs / 1000;
   if (delta > MAX_DELTA) delta = MAX_DELTA;
@@ -754,7 +758,7 @@ check('V 未变：readState 返回 null（缓存复用）', r3 === null);
 const v3 = shared.writeState({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, 0, 0);
 check('再次写入 V 递增（Atomics.add）', v3 === v2 + 1, `v2=${v2} v3=${v3}`);
 
-// 6.5. writeStateRaw 零分配热路径（worker-a 热路径镜像：标量直写 SAB，无 Vec3 对象）
+// 6.5. writeStateRaw 零分配直写（wasm API 能力验证——worker-a 实际子步热路径为 writeState → phys.state()，不使用本 API）
 const vRaw = shared.writeStateRaw(3, 4, 5, 6, 7, 8, 45, -15);
 const rRaw = shared.readState();
 check(
@@ -924,8 +928,8 @@ const rSmall = simulateWorkerARound(0.3, 0); // 0.3ms < 1ms
 check('delta=0.3ms < 1ms：0 个子步（纯累加）', rSmall.ticks === 0 && close(rSmall.acc, 0.0003), `ticks=${rSmall.ticks} acc=${rSmall.acc}`);
 const rClamp = simulateWorkerARound(200, 0); // 200ms → clamp 50ms → 8 次
 check('delta=200ms → clamp 50ms：仍 8 次', rClamp.ticks === 8, `ticks=${rClamp.ticks}`);
-const rCatch = simulateWorkerARound(50, 0.042); // 上次 50ms 残留 + 本轮 50ms → 封顶 50ms（不无限累积）
-check('长期停顿累积：累加器封顶 MAX_ACC=50ms（防无限追赶）', close(rCatch.acc, 0.05), `acc=${rCatch.acc}`);
+const rCatch = simulateWorkerARound(50, 0.042); // 上次 50ms 残留 + 本轮 50ms → 封顶 20ms（防无限追赶）
+check('长期停顿累积：累加器封顶 MAX_ACC=20ms（防无限追赶，与 worker-a 同步）', close(rCatch.acc, 0.02), `acc=${rCatch.acc}`);
 
 // 12. 渲染采样与重绘逻辑（模拟 WorkerB 最终时序：本地副本唯一参数源 = readState，
 //     仅状态更新时重绘——V 未变不提交 Draw；TICK_RATE 不影响渲染采样）
@@ -2979,7 +2983,7 @@ if (phys) {
   );
 }
 
-// 13.5b. tick_into 零分配热路径（worker-a 最新热路径镜像：tick_into → state_out_ptr
+// 13.5b. tick_into 零分配（wasm API 能力验证——worker-a 实际子步热路径为 writeState → phys.state()，不使用本 API；tick_into → state_out_ptr
 //        Float64Array 视图直读 8 标量 → writeStateRaw——每子步零 JS 对象分配）
 if (phys && physMemory) {
   phys.tick_into(0.001, 0, 0, 0); // 与 tick 同语义，状态写 wasm 固定缓冲（无 JS 对象）
@@ -3140,8 +3144,8 @@ console.log('\n── 长时间停顿（隐藏标签页）──');
 {
   const rLong = simulateWorkerARound(5000, 0); // 5s 停顿 → delta clamp 50ms
   check(
-    'delta=5000ms（隐藏标签页）→ clamp 50ms → 8 子步，acc 保留 42ms（时间不丢失）',
-    rLong.ticks === 8 && close(rLong.acc, 0.042),
+    'delta=5000ms（隐藏标签页）→ clamp 50ms → 8 子步，acc 封顶 20ms（MAX_ACC 防无限追赶；残余时间下轮补跑）',
+    rLong.ticks === 8 && close(rLong.acc, 0.02),
     `ticks=${rLong.ticks} acc=${rLong.acc}`,
   );
   let catchAcc = rLong.acc;
