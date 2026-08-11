@@ -1,25 +1,32 @@
 /**
- * WorkerA — 双模物理核心（阶段2：模式A 1ms 无限制真理源 + 模式B 权威 tick 速度校准）。
+ * WorkerA — 双模物理核心（2026-08-11 重构：tick 先行 + 独立 64t 权威速度线）。
  *
- * 用户核心定调：
- * - **渲染参数唯一来自模式A**（1ms 无限制物理真理源）——共享状态槽只由模式A 写入；
- * - **TICK_RATE 只影响手感（难度）**：模式B 每 1/TICK_RATE 边界执行"权威 tick"——
- *   参考 game 双线实现（renderer-main tick：addInput → correctFromAuthority →
- *   calibrateVelocity（set_velocity 只覆盖速度）→ predPhys.tick（可变 dt 单步）→
- *   渲染直读 state()——**位置/渲染 = 主线程物理（连续流畅）；速度被权威校准
- *   （Worker 固定步长 1/tickRate 的结果，64t 离散）**）：
- *   - 输入采样：键位/鼠标每 1/TICK_RATE 边界采样一次（consumeInput 累积增量——
- *     bhop 时机、转向台阶、跳跃延迟 ≤1 tick = 难度核心）；
- *   - 粗糙 tick：phys.tick(tickDt, 采样键位, 采样dx, 采样dy)——64t 粒度的物理结果
- *     （"权威帧"：64t 摩擦/加速）；
- *   - 速度校准（game calibrateVelocity 语义）：xz 用粗糙结果（64t 摩擦/加速——
- *     难度手感）；vy 用模式A 的（重力/跳跃正确——单实例下粗糙 tick 会重复推进该
- *     时间窗口，vy 采用模式A 避免"重力变大/浮空"）；位置/角度恢复模式A 快照——
- *     渲染参数（位置/角度）连续由模式A 推进（单实例无独立权威实例，粗糙 tick 的
- *     位置推进不能残留，否则渲染位置被双倍推进）；
- * - 模式B 不写共享槽（共享槽只由模式A 写——渲染参数零污染）；
- * - 双重"tick 难度"：输入采样（操作粒度 64t）+ 速度校准（64t 摩擦/加速）；
- * - TICK_RATE=0 或 ≥1000（tickDt≤1ms，与模式A 等价）→ 跳过模式B（纯 1ms 无限制实时输入）。
+ * 架构（依据 test/CONCLUSION.md 会审结论 + 四条用户要求）：
+ * - **输入唯一入口**：主线程只写 SAB 输入槽（或消息回退），WorkerA 是唯一消费者；
+ *   模式A（无限制）逐 1ms 子步**实时消耗**——位置/角度只由模式A 推进；
+ * - **先 tick 计算、后无限制计算**：每轮循环先检查 tick 节点（loAcc ≥ tickDt），
+ *   未到达**跳过直达无限制计算**；到达则：
+ *   ① 输入采样（tick 边界快照：键位 = 当前掩码 peekKeys；鼠标 = 自上一边界
+ *      模式A 实时消耗的累积增量——64t 操作粒度 = 难度核心）；
+ *   ② **独立 tick 实例**（tickPhys，第二个 PhysWorld，只走 tickDt 步长）推进——
+ *      真实 64t 物理（摩擦/加速/碰撞/bhop 钳制相位全在 64t 网格上，game 权威
+ *      实例语义）；**分叉兜底锚定**：与模式A 位置偏差 > TICK_ANCHOR_DIST（死亡/
+ *      传送/卡墙/坡缘等极限操作后的无界分叉——校准速度脱离渲染上下文的"渲染
+ *      混乱"根因）→ 全量拉回模式A；正常演化不干预（64t 离散相位保留）；
+ *      其状态时刻 = 边界时刻 → 校准速度与模式A 位置**同刻**（消除旧单实例
+ *      "未来速度"伪差）；
+ *   ③ **速度校准（唯一 tick 影响通道）**：`phys.set_velocity(tickPhys 三轴速度)`
+ *      —— 位置/角度绝不触碰；vy 用 tick 实例的（独立实例无重复重力问题，
+ *      旧实现"vy 用模式A"的补救 hack 不再需要）；
+ * - **模式A（无限制真理源）**：1ms 子步 + 实时输入，共享状态槽唯一写入者 =
+ *   模式A 子步（WorkerB 渲染参数唯一来源——用户要求 4）；
+ * - TICK_RATE=0 或 ≥1000（tickDt ≤ 1ms，与模式A 等价）→ 跳过 tick
+ *   （纯 1ms 无限制实时输入）；
+ * - 模式B 停用→激活边沿：累积器清零 + tickPhys.set_state(phys 全状态) 对齐起点；
+ *   respawn / world-json：双实例同步重建。
+ *
+ * 预期行为：sustained surf 稳态速度仍 tick 无关（dt 标定正确物理）；tick 难度
+ * 可见于 bhop 时机（速度通道延迟 ∈(0,tickDt]）、快变输入、碰撞相位。
  *
  * 世界构建：主线程 BSP 解析分发（{type:'world-json'}）→ set_hull + build_world +
  * 死亡阈值（brushJson min y）。BSP 是唯一玩法。
@@ -44,6 +51,10 @@ const MAX_STEPS_PER_ROUND = 8;
 const MAX_ACC = 0.02;
 /** 单次步进 dx/dy 上限 ±1000（防穿墙，与 game 输入层 CLAMP 一致）。 */
 const MAX_INPUT_DELTA = 1000;
+/** tick 边界鼠标增量上限：按 tick 窗口放大（1000/ms × tickDt），防极端甩视角穿墙。 */
+function tickInputMax(tickDt: number): number {
+  return MAX_INPUT_DELTA * (tickDt / RENDER_DT);
+}
 /** 背压休眠阈值：距下次子步剩余 >= 1ms 才挂起（WAKEUP 槽），否则自旋。 */
 const WAIT_THRESHOLD_MS = 1;
 /** 单次最长休眠（ms）：限制 respawn/init-wasm 等消息最坏延迟。 */
@@ -76,7 +87,11 @@ type WorkerAMessage = InitSharedMessage | InitWasmMessage | RespawnMessage | Wor
 
 // ── 运行时状态 ──────────────────────────────────────────────────
 let shared: TestShared | null = null;
+/** 模式A：无限制 1ms 真理源（渲染参数唯一源；共享槽唯一写入者）。 */
 let phys: PhysWorld | null = null;
+/** 模式B：独立 64t 权威速度线（tickPhys，只走 tickDt 步长；对模式A 唯一影响 =
+ *  set_velocity 三轴速度校准）。 */
+let tickPhys: PhysWorld | null = null;
 let pendingWasmUrl: string | null = null;
 let initStarted = false;
 /** world-json 先于 wasm 初始化到达时暂存。 */
@@ -86,6 +101,12 @@ let pendingWorld: WorldJsonMessage | null = null;
 let acc = 0;
 /** 模式B 累加器（秒；保留余数——网格对齐真实时间轴）。 */
 let loAcc = 0;
+/** 模式B tick 边界采样累积（自上一边界以来模式A 实时消耗的鼠标增量——tick 实例
+ *  每 tickDt 消费一次；键位取边界当前掩码 peekKeys）。 */
+let tickDxAcc = 0;
+let tickDyAcc = 0;
+/** 模式B 上一轮是否激活（激活边沿重置采样器 + 对齐 tickPhys）。 */
+let modeBWasActive = false;
 let lastNow = performance.now();
 
 // ── 世界构建（BSP 导出分发）─────────────────────────────────────
@@ -94,6 +115,11 @@ function applyWorld(msg: WorldJsonMessage): void {
   const [sx, sy, sz, yaw] = msg.spawn;
   phys.set_hull(16, 72, 54);
   phys.build_world(msg.brushJson, msg.triJson, msg.teleportJson, sx, sy, sz, yaw);
+  // tick 实例同世界构建（独立 64t 权威线——与模式A 同出生点同世界）
+  if (tickPhys) {
+    tickPhys.set_hull(16, 72, 54);
+    tickPhys.build_world(msg.brushJson, msg.triJson, msg.teleportJson, sx, sy, sz, yaw);
+  }
   // 死亡阈值：brushJson 最小 min[1] - 100（默认 -100000 兜底）
   try {
     const brushes = JSON.parse(msg.brushJson) as Array<{ min: number[] }>;
@@ -101,14 +127,18 @@ function applyWorld(msg: WorldJsonMessage): void {
     for (const b of brushes) {
       if (b.min[1] < minY) minY = b.min[1];
     }
-    if (Number.isFinite(minY)) phys.set_death_y(minY - 100);
+    if (Number.isFinite(minY)) {
+      phys.set_death_y(minY - 100);
+      tickPhys?.set_death_y(minY - 100);
+    }
   } catch (e) {
     console.error('[worker-a] brushJson 解析失败（死亡阈值保持默认）:', e);
   }
   writeStateFromPhys(); // 首帧状态即刻可见
 }
 
-/** 状态写回（模式A 子步 / respawn 共用）：写空闲槽（S[V&1^1]）→ Atomics.add(V,1）。 */
+/** 状态写回（模式A 子步 / respawn 共用）：写空闲槽（S[V&1^1]）→ Atomics.add(V,1）。
+ * 共享槽**唯一写入者 = 模式A**（WorkerB 渲染参数唯一来源——用户要求 4）。 */
 function writeStateFromPhys(): void {
   if (!shared || !phys) return;
   const s = phys.state();
@@ -118,6 +148,30 @@ function writeStateFromPhys(): void {
     s.yaw,
     s.pitch,
   );
+}
+
+/** tickPhys 对齐模式A 当前全状态（模式B 停用→激活边沿 / 分叉兜底锚定调用；
+ * 之后 tickPhys 独立演化）。 */
+function alignTickPhys(): void {
+  if (!phys || !tickPhys) return;
+  const s = phys.state();
+  tickPhys.set_state(s.posX, s.posY, s.posZ, s.yaw, s.pitch, s.velX, s.velY, s.velZ, s.onGround);
+}
+
+/** 分叉兜底锚定距离阈值（units）：tick 实例与模式A 位置偏差超过此值视为
+ * "极限操作分叉"（死亡/传送/卡墙/坡缘），全量拉回；正常演化偏差有界（数十
+ * units 内）不触发——tick 保持自身 64t 离散演化，避免锚定引入相位伪差。 */
+const TICK_ANCHOR_DIST = 64;
+
+/** tick 实例与模式A 位置是否已分叉（超阈值）。 */
+function tickDiverged(): boolean {
+  if (!phys || !tickPhys) return false;
+  const s = phys.state();
+  const t = tickPhys.state();
+  const dx = s.posX - t.posX;
+  const dy = s.posY - t.posY;
+  const dz = s.posZ - t.posZ;
+  return dx * dx + dy * dy + dz * dz > TICK_ANCHOR_DIST * TICK_ANCHOR_DIST;
 }
 
 // ── wasm 初始化 + 世界构建 + 启动自驱循环（幂等）──────────────────
@@ -131,6 +185,7 @@ async function startInit(): Promise<void> {
     const bytes = await resp.arrayBuffer();
     initSync({ module: bytes });
     phys = new PhysWorld();
+    tickPhys = new PhysWorld();
     if (pendingWorld) {
       applyWorld(pendingWorld);
       pendingWorld = null;
@@ -141,18 +196,7 @@ async function startInit(): Promise<void> {
   }
 }
 
-// ── 模式B 输入采样状态（CS 64t 服务器 / game 权威 tick 粒度手感：键位与鼠标每
-//    1/TICK_RATE 边界采样一次——bhop 时机、转向台阶、跳跃延迟 ≤1 tick = 难度核心；
-//    模式A 子步用采样快照——物理仍 1ms 步长，重力/跳跃物理正确性不受影响）──────
-let keysSnap = 0;
-let dxSnap = 0;
-let dySnap = 0;
-/** 本 tickDt 内鼠标增量是否已应用（每 tick 只消费一次增量，避免 16 个子步重复旋转）。 */
-let dxApplied = false;
-/** 模式B 是否在上一轮激活（激活边沿重置采样器）。 */
-let modeBWasActive = false;
-
-// ── 双模自驱循环（阶段2）────────────────────────────────────────
+// ── 双模自驱循环（阶段2：先 tick 计算 → 后无限制计算）────────────
 function loop(): void {
   if (!shared || !phys) return;
 
@@ -167,81 +211,74 @@ function loop(): void {
   let tickRate = shared.readTickRate();
   if (!Number.isFinite(tickRate) || tickRate < 0) tickRate = 0;
   const modeBActive = tickRate > 0 && 1 / tickRate > RENDER_DT;
-  // 停用→激活边沿：重置采样器（快照清零，避免陈旧键位/鼠标误注入）
+  // 停用→激活边沿：重置采样累积器 + tickPhys 对齐模式A（防陈旧输入/错位起点）
   if (modeBActive && !modeBWasActive) {
-    keysSnap = 0;
-    dxSnap = 0;
-    dySnap = 0;
-    dxApplied = true;
     loAcc = 0;
+    tickDxAcc = 0;
+    tickDyAcc = 0;
+    alignTickPhys();
+  } else if (!modeBActive && modeBWasActive) {
+    loAcc = 0;
+    tickDxAcc = 0;
+    tickDyAcc = 0;
   }
   modeBWasActive = modeBActive;
 
-  // ── 模式A：1ms 无限制高精度子步（渲染数据源——每轮最多 MAX_STEPS_PER_ROUND 次）──
+  // ── 第一步：tick 计算（先——tick 节点到达才执行；未到达越过直达无限制计算）──
+  if (modeBActive && tickPhys) {
+    const tickDt = 1 / tickRate;
+    loAcc += delta;
+    while (loAcc >= tickDt) {
+      loAcc -= tickDt;
+      // 输入采样（tick 边界快照）：键位 = 当前掩码（64t 粒度——bhop/转向台阶）；
+      // 鼠标 = 自上一边界模式A 实时消耗的累积增量（限幅防极端甩视角穿墙）
+      const tickKeys = shared.peekKeys();
+      const tickMax = tickInputMax(tickDt);
+      const tickDx = Math.max(-tickMax, Math.min(tickMax, tickDxAcc));
+      const tickDy = Math.max(-tickMax, Math.min(tickMax, tickDyAcc));
+      tickDxAcc = 0;
+      tickDyAcc = 0;
+      // **分叉兜底锚定（极限操作防护）**：tick 实例与模式A 位置偏差 >
+      // TICK_ANCHOR_DIST（死亡/传送/卡墙/坡缘等极限操作后位置/朝向无界分叉 →
+      // 校准速度脱离渲染上下文的"渲染混乱"根因）→ 全量 set_state 拉回模式A；
+      // 正常演化（偏差有界 ≤ 数十 units）**不干预**——tick 保持自身 64t 离散演化
+      // （bhop 采样/碰撞/钳制相位），无锚定引入的相位伪差
+      if (tickDiverged()) {
+        alignTickPhys();
+      }
+      // 独立实例推进（真实 64t 物理——摩擦/加速/碰撞/bhop 钳制相位在 64t 网格上；
+      // 状态时刻 = 边界时刻 → 校准速度与模式A 位置同刻，无"未来速度"伪差）
+      tickPhys.tick(tickDt, tickKeys, tickDx, tickDy);
+      // 速度校准（**唯一 tick 影响通道**——game calibrateVelocity 语义）：
+      // 三轴速度写回模式A（含 vy——独立实例自身 64t 重力演化，无重复推进问题）；
+      // 位置/角度绝不触碰（用户要求 3）
+      const st = tickPhys.state();
+      phys.set_velocity(st.velX, st.velY, st.velZ);
+    }
+  } else {
+    loAcc = 0; // 关闭难度修正（0）/ 与模式A 等价（≥1000Hz）：纯 1ms 无限制实时输入
+  }
+
+  // ── 第二步：无限制计算（后——1ms 子步 + 实时输入；位置/角度只由模式A 推进）──
   acc += delta;
   if (acc >= RENDER_DT) {
     let steps = 0;
     while (acc >= RENDER_DT && steps < MAX_STEPS_PER_ROUND) {
       acc -= RENDER_DT;
       steps++;
-      // 输入：模式B 激活时用 64t 采样快照（keys 保持、dx/dy 每 tick 只应用一次——
-      // 防重复旋转；操作粒度 64t——跳跃/转向台阶）；否则实时输入
-      let dx: number;
-      let dy: number;
-      let keys: number;
+      // 实时输入（模式A 是**唯一** SAB 消费路径——用户要求 1：输入仅进入 WorkerA）
+      const inp = shared.consumeInput(MAX_INPUT_DELTA);
+      // tick 边界采样累积（模式B 专用：上一边界以来模式A 实时消耗的鼠标增量，
+      // 下一边界一次性注入 tick 实例——与真实 64t 服务器"边界消费整窗口"等价）
       if (modeBActive) {
-        keys = keysSnap;
-        if (!dxApplied) {
-          dx = dxSnap;
-          dy = dySnap;
-          dxApplied = true;
-        } else {
-          dx = 0;
-          dy = 0;
-        }
-      } else {
-        const inp = shared.consumeInput(MAX_INPUT_DELTA); // CAS 清零 + 限幅防穿墙
-        dx = inp.dx;
-        dy = inp.dy;
-        keys = inp.keysMask;
+        tickDxAcc += inp.dx;
+        tickDyAcc += inp.dy;
       }
-      phys.tick(RENDER_DT, keys, dx, dy); // 1ms 子步
+      phys.tick(RENDER_DT, inp.keysMask, inp.dx, inp.dy); // 1ms 子步
       writeStateFromPhys(); // 写空闲槽（S[V&1 ^ 1]）→ Atomics.add(V,1)——唯一写槽者
     }
     // 8 次上限耗尽：保留剩余累加（时间不丢失，下轮继续补跑），仅封顶防无限追赶
     if (acc > MAX_ACC) acc = MAX_ACC;
-  }
-
-  // ── 模式B：权威 tick + 速度校准（每 1/TICK_RATE 边界——game 双线 calibrateVelocity
-  //    语义；不写共享槽——渲染参数零污染；渲染位置/角度 = 模式A 1ms 连续推进）──
-  if (modeBActive) {
-    const tickDt = 1 / tickRate;
-    loAcc += delta;
-    while (loAcc >= tickDt) {
-      loAcc -= tickDt;
-      // 输入采样（tickDt 粒度——game 主线程每帧消费输入的等价：键位/鼠标在 tick
-      // 边界采样一次；累积增量经 consumeInput 一次性取出——子步用快照）
-      const inp = shared.consumeInput(MAX_INPUT_DELTA);
-      keysSnap = inp.keysMask;
-      dxSnap = inp.dx;
-      dySnap = inp.dy;
-      dxApplied = false; // 下一个模式A 子步应用该增量（每 tick 只应用一次）
-      // 粗糙 tick（64t 粒度的物理结果——"权威帧"）：在模式A 连续状态上推进一个 tickDt
-      const a = phys.state(); // 快照当前（模式A 连续状态——渲染参数源）
-      phys.tick(tickDt, keysSnap, dxSnap, dySnap);
-      const rough = phys.state();
-      // 校准速度（game calibrateVelocity 语义——只覆盖速度，不动位置/角度/渲染参数）：
-      //   xz 用粗糙结果（64t 摩擦/加速——难度手感）；vy 用模式A 的（重力/跳跃正确——
-      //   单实例下粗糙 tick 会重复推进该时间，vy 采用模式A 避免"重力变大/浮空"）；
-      //   位置/角度恢复模式A 快照——渲染参数连续由模式A 推进（单实例无独立权威实例，
-      //   粗糙 tick 的位置推进不能残留——否则渲染位置被双倍推进）
-      phys.set_state(
-        a.posX, a.posY, a.posZ, a.yaw, a.pitch,
-        rough.velX, a.velY, rough.velZ, a.onGround,
-      );
-    }
-  } else {
-    loAcc = 0; // 关闭难度修正（0）/ 与模式A 等价（≥1000Hz）：纯 1ms 无限制实时输入
   }
 
   // 背压：距下次 1ms 子步剩余时间 >= 1ms → 挂起 WAKEUP 槽（可被阶段1 wake 提前唤醒）；
@@ -268,9 +305,13 @@ self.addEventListener('message', (e: MessageEvent) => {
       if (shared && !initStarted) void startInit();
       break;
     case 'respawn':
-      // 阶段4：立即重置物理状态 → 写空闲槽 + Atomics.add(V,1)
+      // 阶段4：立即重置物理状态（双实例同步）+ 采样器重置 → 写空闲槽 + Atomics.add(V,1)
       if (phys) {
         phys.respawn();
+        tickPhys?.respawn();
+        loAcc = 0;
+        tickDxAcc = 0;
+        tickDyAcc = 0;
         writeStateFromPhys();
       }
       break;

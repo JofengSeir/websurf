@@ -1,5 +1,5 @@
 /**
- * WorkerB — three.js 第一人称 BSP 渲染（OffscreenCanvas + WebGL；WAKEUP 唤醒驱动）。
+ * WorkerB — three.js 第一人称 BSP 渲染（OffscreenCanvas + WebGL；帧信号驱动）。
  *
  * 对齐点（README 最新时序图 阶段3：渲染采样）：
  * - 握手：{type:'init-shared', shared: SAB}（main 已 transfer）+ {type:'init-canvas', canvas}
@@ -10,23 +10,20 @@
  *   产物，transfer）→ GLTFLoader.parse 异步回调挂载；GLB 内嵌纹理在 Worker 内经
  *   createImageBitmap 解码（无需 DOM），外部 URL 贴图由 FileLoader(fetch) 加载——
  *   纹理异步就绪后首帧 renderer.render 上传，个别贴图报错不影响场景挂载
- * - 帧循环（自驱，**发布驱动**——渲染率 = WorkerA 物理发布率，不受显示刷新率限制）：
+ * - 帧循环（自驱，**帧信号驱动**——渲染节奏 = 主线程 rAF（vsync 对齐，平滑呈现））：
  *   MessageChannel 自投递续环 + waitRenderWakeup(RENDER_WAKEUP)：
- *   ① **主驱动** = WorkerA 每发布状态后的 notify（writeStateRaw → V++ → notify）——
- *      无 BSP 轻负载全速 1kHz 渲染（HUD 重绘/s 显示真实发布率）；有 BSP 重场景时
- *      渲染耗时自然节流（渲染期间错过的 notify 不积压，醒后只渲染最新状态）
- *   ② 主线程 wake() 的 store+notify 为帧对齐冗余（无等待者时无操作）
- *   ③ 超时兜底（**自适应**）：有数据（重绘）→ 20ms；无数据/重复参数（V 未变不重绘）
- *      → 100ms 长超时（降低无效唤醒/空转——性能优化；**发布 notify 不受超时影响**，
- *      数据源源不断更新时立即唤醒全力渲染）；消息回退模式无数据 → 100ms 低频自检
- *      （shared-state 到达时立即触发循环——响应及时）
+ *   ① **主驱动 = 主线程 rAF 的 wake()**（store+notify RENDER_WAKEUP——渲染/呈现与
+ *      显示器刷新对齐，消除"1kHz 随机相位唤醒 → 画面呈现时间不规则"的观感抖动；
+ *      每 rAF 一帧，呈现平滑）——
+ *   ② WorkerA 发布**不** notify（只写槽 + V++；醒后读最新槽，V 未变不重绘）
+ *   ③ 超时兜底（50ms）：主线程 rAF 停摆（隐藏标签页/主线程卡顿）时自驱，渲染不冻结
  * - 采样与重绘（用户核心定调：渲染参数必须唯一来源于 WorkerA 的 1ms 无限制物理真理源——
  *   本地副本**只被 readState 更新**（无其他来源），Draw 只消费本地副本 → 渲染参数零污染）：
  *   ① shared.readState() 非阻塞 acquire 读 V：已更新 → 读最新槽 S[V&1]（double-check
  *      防撕裂）→ 刷新本地副本；未变 → 不重绘（状态未更新，上一帧画面保持——
  *      高频屏不再重复提交相同相机状态的无效 Draw Calls）
- *   ② 本地副本更新后 → 相机映射 → renderer.render(scene, camera)（渲染帧率不被
- *      TICK_RATE 限制，仅受物理发布率约束——物理 1kHz 发布时每帧都是新状态）
+ *   ② 本地副本更新后 → 相机映射 → renderer.render(scene, camera)（渲染帧率 =
+ *      min(显示器刷新率, GPU 渲染耗时)；rAF 信号每帧唤醒、每帧只重绘一次）
  * - readState 防撕裂：读 V → 读当前槽 S[V&1] 全部字段（pos/vel/yaw/pitch）→
  *   重读 V 校验（double-check），不一致以新版本重读一次
  *
@@ -487,15 +484,16 @@ self.addEventListener('message', (e: MessageEvent) => {
 
 /** init-canvas 后初始化 three.js 渲染器（WebGLRenderer + OffscreenCanvas，Worker 内可用）。 */
 function initRenderer(canvas: OffscreenCanvas): void {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.setSize(Math.max(1, canvas.width), Math.max(1, canvas.height), false);
   // 像素比限制（高 dpr 屏像素 4 倍是卡顿主因；OffscreenCanvas 无 devicePixelRatio，
   // 主线程 resize 消息可按需带 dpr——固定 1 性能优先）
   renderer.setPixelRatio(PIXEL_RATIO_MAX);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  // 帧循环自驱启动：发布驱动（MessageChannel 自投递 + waitRenderWakeup(RENDER_WAKEUP)）——
-  // 主驱动 = WorkerA 每发布状态 notify（渲染率 = 物理发布率，无 BSP 全速 1kHz）；
-  // 主线程 wake 冗余帧对齐；20ms 超时兜底（WorkerA/主线程停摆渲染不冻结）
+  // 帧循环自驱启动：帧信号驱动（MessageChannel 自投递 + waitRenderWakeup(RENDER_WAKEUP)）——
+  // 主驱动 = 主线程 rAF 的 wake()（store+notify RENDER_WAKEUP：vsync 对齐——渲染节奏 =
+  // 显示器刷新，呈现平滑）；WorkerA 发布不 notify（1kHz 随机相位唤醒 → 呈现抖动）；
+  // 50ms 超时兜底（主线程 rAF 停摆时自驱，渲染不冻结）
   resumeChannel.port2.postMessage(null);
 
   scene = new THREE.Scene();
@@ -660,32 +658,27 @@ function applyPvsVisibility(force = false): void {
 }
 
 /**
- * 帧循环超时兜底（ms）：WorkerA/主线程停摆时 WorkerB 自检节奏（渲染不冻结）。
- * 主驱动 = WorkerA 每发布状态的 notify（writeStateRaw → notify(RENDER_WAKEUP)）——
- * 渲染率 = 物理发布率（无 BSP 轻负载全速 1kHz；重场景渲染耗时自然节流）。
- * 主线程 wake 的 store+notify 为帧对齐冗余（无等待者时无操作）。
+ * 帧循环超时兜底（ms）：主线程 rAF 停摆（隐藏标签页/主线程卡顿）时 WorkerB 自检
+ * 节奏（渲染不冻结）。**主驱动 = 主线程 rAF 的 wake()**（store+notify RENDER_WAKEUP——
+ * vsync 对齐，渲染节奏 = 显示器刷新，呈现平滑）；WorkerA 发布不 notify（1kHz 随机
+ * 相位唤醒 → 渲染完成时刻与显示器 BeginFrame 错位 → 呈现时间不规则 → 观感抖动）。
+ * 超时只作兜底：正常由 rAF 信号即时唤醒，50ms 超时在可见页面下不会命中。
  */
-const RENDER_TIMEOUT_MS = 20;
-/** 无数据/重复参数时的长超时（ms）：V 未变（readState null）→ 下次 wait 用此值——
- * 降低无效唤醒/空转（性能优化）；**发布 notify 不受超时影响**（数据到来立即唤醒），
- * 因此长超时不影响"数据源源不断更新时的全力渲染"。 */
-const RENDER_IDLE_TIMEOUT_MS = 100;
+const RENDER_TIMEOUT_MS = 50;
 /** 消息回退模式无数据时的自检间隔（ms）：无阻塞原语 + 消息自旋会 2-10kHz 空转——
  * V 未变时降为低频自检（10Hz）；shared-state 到达时立即触发循环（数据响应及时）。 */
 const MSG_IDLE_INTERVAL_MS = 100;
-/** 自适应超时（SAB 模式）：有数据（重绘）→ RENDER_TIMEOUT_MS；无数据 → RENDER_IDLE_TIMEOUT_MS。 */
-let renderTimeout = RENDER_TIMEOUT_MS;
 
 /**
  * 自驱续环通道：port2 每轮末 postMessage(null) → port1 onmessage →
- * waitRenderWakeup(自适应超时) → 采样/重绘 → 自投递续环。消息任务无 setTimeout 嵌套
- * 4ms 钳制，唤醒到采样/重绘的延时可忽略。主驱动 = WorkerA 发布 notify（发布驱动）。
+ * waitRenderWakeup(超时兜底) → 采样/重绘 → 自投递续环。消息任务无 setTimeout 嵌套
+ * 4ms 钳制，唤醒到采样/重绘的延时可忽略。主驱动 = 主线程 rAF 帧信号（vsync 对齐）。
  */
 const resumeChannel = new MessageChannel();
 
 /**
  * 单帧处理：采样（非阻塞）→ 状态更新才重绘。
- * @returns 是否发生重绘（V 更新并提交 Draw——用于自适应超时判定）。
+ * @returns 是否发生重绘（V 更新并提交 Draw——消息回退模式节流判定用）。
  * try/catch 保护：单帧渲染异常（GPU 驱动/几何错误）不中断循环。
  */
 function frameTick(): boolean {
@@ -698,16 +691,17 @@ function frameTick(): boolean {
   }
 }
 
-/** 发布驱动帧循环：waitRenderWakeup(自适应超时)——WorkerA 发布 notify 为主驱动 /
- *  主线程 wake 冗余对齐 / 超时兜底（无数据时长超时降空转，数据不断时 notify 立即
- *  唤醒全力渲染）；未就绪（异常时序）时自投递续环，就绪后立即生效。 */
+/**
+ * 帧信号驱动帧循环：waitRenderWakeup(RENDER_TIMEOUT_MS)——主线程 rAF 的 wake()
+ * 为主驱动（store+notify RENDER_WAKEUP：vsync 对齐，每 rAF 一帧，呈现平滑）；
+ * 超时兜底（主线程停摆时自驱，渲染不冻结）；未就绪（异常时序）时自投递续环，
+ * 就绪后立即生效。**无节流**：每次唤醒都采样，V 更新才重绘（重复唤醒零成本）。
+ */
 resumeChannel.port1.onmessage = () => {
   let repainted = false;
   if (shared) {
-    shared.waitRenderWakeup(renderTimeout);
+    shared.waitRenderWakeup(RENDER_TIMEOUT_MS); // 主驱动 = 主线程 rAF 帧信号；超时 = 停摆兜底
     repainted = frameTick();
-    // 自适应超时：无数据/重复参数（V 未变不重绘）→ 延长超时降空转；有数据 → 恢复短超时
-    renderTimeout = repainted ? RENDER_TIMEOUT_MS : RENDER_IDLE_TIMEOUT_MS;
   }
   if (shared && shared.isMessageMode && !repainted) {
     // 消息回退模式节流：无新状态 → 低频自检（setTimeout 100ms 不受嵌套 4ms 钳制），
@@ -721,10 +715,10 @@ resumeChannel.port1.onmessage = () => {
 /**
  * 帧处理：采样（非阻塞）→ 状态更新才重绘。
  * ① readState：V 更新 → 读最新槽（无撕裂）→ 刷新本地副本；未变 → 不重绘
- *   （状态未更新，保持上一帧画面——高频屏不再重复提交相同相机状态的无效 Draw，
+ *   （状态未更新，保持上一帧画面——rAF 每帧唤醒但只在新状态时提交 Draw，
  *   且 HUD「重绘/s」反映真实渲染帧率而非唤醒频率）
  * ② 本地副本更新 → PVS 应用 + renderer.render 提交 GPU
- * @returns 是否发生重绘（V 更新——自适应超时/消息节流判定用）。
+ * @returns 是否发生重绘（V 更新——消息回退模式节流判定用）。
  */
 function onFrame(): boolean {
   stats.frames++; // 唤醒次数（主线程帧对齐度）
