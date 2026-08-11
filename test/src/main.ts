@@ -291,6 +291,15 @@ document.querySelectorAll<HTMLButtonElement>('#difficulty button[data-rate]').fo
   });
 });
 
+// ── 视野 FOV：滑块 → WorkerB set-fov 消息（相机透视矩阵即时更新；CS:S 标准 75）──
+const fovRange = document.getElementById('fovRange') as HTMLInputElement | null;
+const fovVal = document.getElementById('fovVal') as HTMLElement | null;
+fovRange?.addEventListener('input', () => {
+  const fov = Number(fovRange.value);
+  if (fovVal) fovVal.textContent = String(fov);
+  workerB.postMessage({ type: 'set-fov', fov });
+});
+
 // ── 路径记录（trace）：按钮状态机 **开始 → 保存 → 删除 → 开始** 循环——
 //    开始：清空 + 开启记录（WorkerA 采样节点）；保存：停止记录（路径保留显示）；
 //    删除：清空路径线。节点经 main 转发 WorkerB → **3D 场景中显示两条空间路径线**

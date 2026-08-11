@@ -34,11 +34,18 @@
  *
  * HUD：OffscreenCanvas 只能挂一个 context（此处被 WebGL 占用）→ 状态摘要改为每秒一次
  *   postMessage {type:'status'} 回传 main，由 main 更新页面 DOM 文本（轻量，无 TextGeometry）。
+ *
+ * 渲染减负（optimizeScene，GLB 挂载后执行）：surf_666 GLB 117 meshes / 34409 primitives /
+ *   377385 顶点——GLTFLoader 每 primitive 一个 THREE.Mesh → ~3.4 万 Mesh 对象：每帧遍历/剔除
+ *   开销使渲染耗时接近 vsync 帧间隔（120Hz=8.3ms）→ 合成器错过取帧 → 视觉帧率减半。空间分块
+ *   合并（cell 大小自适应，目标 ~300~800 块；块内按材质子合并——draw call = 材质数而非 mesh
+ *   数）→ 每帧对象遍历 ~几百 → 渲染耗时 < 5ms → vsync 边界安全。
  */
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TestShared, type SharedStateMsg, type SharedStateData } from './shared-state.js';
 
 // ── 消息握手（与 main.ts 约定）──────────────────────────────────
@@ -92,7 +99,14 @@ type WorkerBMessage =
   | GlbMessage
   | PvsMessage
   | TracePointMessage
-  | TraceClearMessage;
+  | TraceClearMessage
+  | SetFovMessage;
+
+/** FOV 面板调节消息（main → WorkerB；相机透视矩阵即时更新）。 */
+interface SetFovMessage {
+  type: 'set-fov';
+  fov: number;
+}
 
 /** WorkerB → main 状态摘要（每秒一次；main 更新 DOM HUD）。 */
 interface StatusMessage {
@@ -107,19 +121,64 @@ interface StatusMessage {
   repaintSec: number;
 }
 
-// ── 相机常量（视距优化 2026-08-09：far 20000→8192、near 0.1→0.5、pixelRatio 限 1、雾拉近）
+// ── 相机常量（视距优化 2026-08-09：far 20000→8192、near 0.1→0.5、pixelRatio 限 1、雾拉近；
+//    视野扩展 2026-08-11：FOV 75→90、far 8192→12288——surf_666 世界 ~16320，扩大视锥后
+//    旁边/远处不空白；配合距离 LOD（LOD_DIST=far×0.75≈9200 隐藏远处块）与雾承接视觉；
+//    FOV 面板可调 2026-08-12：默认改回 CS:S 标准 75，面板 60-110 滑块 set-fov 消息即时生效）
 // far 过大会：①深度缓冲精度差（远处闪烁/抖动）②单 mesh 大几何（surf_666 GLB 数十万三角）
-// frustum culling 无效——远处全几何仍参与光栅化 → 卡顿。8192 覆盖 surf_666 主要视野，
+// frustum culling 无效——远处全几何仍参与光栅化 → 卡顿。12288 覆盖 surf_666 世界大部分，
 // 配合雾（0.4×far~0.9×far 淡出）消除远处细节；pixelRatio 限 1（高 dpr 屏像素 4 倍是卡顿主因）。
-const FOV = 75;
+/** 当前 FOV（度；默认 CS:S 标准 75，面板 set-fov 消息可调）。 */
+let fov = 75;
 const CAMERA_NEAR = 0.5;
-const CAMERA_FAR = 8192;
+const CAMERA_FAR = 12288;
 const PIXEL_RATIO_MAX = 1;
 const DEG2RAD = Math.PI / 180;
 /** 固定站立眼高（readState 无 eyeHeight 槽；与 game EYE_STAND 一致，不处理蹲伏）。 */
 const EYE_STAND = 64.09;
 /** 背景/雾色（沿用旧 top-down 深蓝背景）。 */
 const BG_COLOR = 0x0d1b2a;
+
+// ── 距离 LOD（仿 game renderer-main lodItems 距离剔除语义）──
+// 块 mesh 中心距相机 > LOD_DIST → visible=false（远处隐藏）；<= LOD_DIST 时由 PVS/视锥
+// 决定（three.js frustum culling 自动——"保留视锥内渲染"指不干预视锥剔除，LOD 是
+// 视锥/PVS 之上的距离粗筛）。LOD_DIST = far×0.75 ≈ 9200：落在雾（0.4~0.9×far）深处，
+// 隐藏时已淡化为背景色，视觉平滑不突兀。与 game 语义关系：game LOD_FAR（距离 >
+// cullDistance → 隐藏）即此一档的对应——块粒度下无需多级 LOD，这里只分 可见/隐藏；
+// game LOD_NEAR（<= 距离 → 按 PVS/视锥决定）同理。far×0.75 比例沿用本工程惯例
+// （game cullDistance 12800 / far 20000 = 0.64 同数量级），雾深处淡出。
+const LOD_DIST = CAMERA_FAR * 0.75;
+/**
+ * PVS 剔除开关：**当前禁用**（实证 surf_666 PVS 数据不可用：8269 cluster 平均可见率
+ * 仅 1.6%（中位 1.3%、最大 5.1%）、spawn 点 cluster=-1——开放 surf 图 BSP leaf/PVS
+ * 划分失效，可见集几乎为空 → 相邻区域被错误全剔（"必须穿过连接处才能看到"）+ 晃动
+ * 穿越 cluster 边界时边缘消失）。分块合并后渲染量已由视锥剔除（FRUSTUM_PAD 膨胀）+
+ * 距离 LOD（LOD_DIST）控制，PVS 为负收益。PVS 数据修复后可置 true 恢复。
+ */
+const ENABLE_PVS = false;
+
+// ── 空间分块合并参数（optimizeScene：GLB 挂载后渲染减负）──
+// surf_666 GLB：117 meshes / 34409 primitives / 377385 顶点（mesh 12 含 34043 primitive，
+// 32.2 万顶点，85%）——GLTFLoader 每个 primitive 生成一个 THREE.Mesh → scene 有 ~3.4 万
+// Mesh 对象：每帧 three.js 遍历 3.4 万对象做剔除 + 可见 mesh 逐个 draw call → 渲染耗时接近
+// vsync 帧间隔（120Hz = 8.3ms）→ 合成器错过取帧 → 视觉帧率减半。分块合并把 3.4 万对象 →
+// ~300~800 空间块（块内按材质子合并，draw call = 材质数而非 mesh 数）→ 渲染耗时 < 5ms。
+/** 目标 cell 数（cell 大小 = 世界包围盒对角线 / cbrt(目标块数)，自适应微调区间 [300,800]）。 */
+const OPT_TARGET_CELLS = 512;
+/** 非空 cell 数目标下限/上限（自适应微调）。 */
+const OPT_MIN_CELLS = 300;
+const OPT_MAX_CELLS = 800;
+/** cell 大小钳制（world units；surf_666 世界 ~16320 → cell ≈ 512~1024 数量级）。 */
+const OPT_CELL_MIN = 128;
+const OPT_CELL_MAX = 4096;
+/**
+ * 视锥外保留圈（frustum culling 包围球膨胀系数）：three.js 每帧按 geometry.boundingSphere
+ * 判定剔除——半径 ×FRUSTUM_PAD 后，视锥外约 (FRUSTUM_PAD-1)×半径 的块仍渲染（疯狂晃动/快速
+ * 转动时，新进入视锥的几何上一帧已预渲染 → 边缘不空白；块包围球大者膨胀量自然大，覆盖一帧
+ * 相机移动量）。膨胀只作用于 renderer 剔除，LOD/PVS（userData.center/radius、clusterIds）
+ * 是独立数据不受影响。
+ */
+const FRUSTUM_PAD = 1.6;
 
 // ── PVS 类型（parse_pvs_data JSON，camelCase；与 game types.ts WasmPvsData 同构）──
 interface PvsVec3 {
@@ -457,6 +516,16 @@ self.addEventListener('message', (e: MessageEvent) => {
     case 'init-canvas':
       initRenderer(msg.canvas);
       break;
+    case 'set-fov':
+      // FOV 面板调节（CS:S 标准 75；60-110 可调，透视矩阵即时更新）
+      if (typeof (msg as { fov?: unknown }).fov === 'number') {
+        fov = (msg as { fov: number }).fov;
+        if (camera) {
+          camera.fov = fov;
+          camera.updateProjectionMatrix();
+        }
+      }
+      break;
     case 'resize':
       resize(msg.width, msg.height);
       break;
@@ -464,11 +533,11 @@ self.addEventListener('message', (e: MessageEvent) => {
       loadGlb(msg.bytes);
       break;
     case 'pvs':
-      // PVS 数据（先于 GLB 到达；若 GLB 已挂载——异常时序——补一次 cluster 分配）
+      // PVS 数据（先于 GLB 到达；若 GLB 已挂载——异常时序——补一次 LOD/PVS 数据分配）
       pvsManager = new PvsManager(msg.pvsJson);
       if (glbReady && scene) {
-        assignClusterIds();
-        applyPvsVisibility(true);
+        assignMeshCullingData(); // LOD 数据已就绪，仅补 clusterIds
+        applyCulling(true);
       }
       break;
     case 'trace-point':
@@ -498,11 +567,12 @@ function initRenderer(canvas: OffscreenCanvas): void {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(BG_COLOR);
-  // 雾（视距优化）：0.4×far 起淡出、0.9×far 全雾——远处细节淡化（消除远处闪烁/降低感知负荷）
+  // 雾（视距优化）：0.4×far 起淡出、0.9×far 全雾——远处细节淡化（消除远处闪烁/降低感知
+  // 负荷；far=12288 → 雾 4915.2~11059.2；LOD_DIST 9200 恰在雾深处——隐藏块已融入背景色）
   scene.fog = new THREE.Fog(BG_COLOR, CAMERA_FAR * 0.4, CAMERA_FAR * 0.9);
 
   camera = new THREE.PerspectiveCamera(
-    FOV,
+    fov,
     canvas.width / Math.max(canvas.height, 1),
     CAMERA_NEAR,
     CAMERA_FAR,
@@ -547,9 +617,11 @@ function loadGlb(bytes: ArrayBuffer): void {
       modelRoot = root;
       glbReady = true;
 
-      // GLB 挂载后：为每个 mesh 分配 clusterIds（包围盒 7 点采样）并应用一次可见性
-      assignClusterIds();
-      applyPvsVisibility(true);
+      // GLB 挂载后：空间分块合并（3.4 万 Mesh → ~数百空间块——渲染减负核心）
+      optimizeScene();
+      // 为每个（合并后）mesh 分配 LOD 数据（世界包围盒中心/半径）+ clusterIds（7 点采样）
+      assignMeshCullingData();
+      applyCulling(true);
     },
     (err) => {
       console.error('[worker-b] GLB 解析失败:', err);
@@ -584,16 +656,258 @@ function resetRootRotations(gltf: GLTF): void {
   gltf.scene.updateMatrixWorld(true);
 }
 
+// ── 空间分块合并（optimizeScene：GLB 挂载后执行一次）─────────────
+// 渲染减负核心：3.4 万 Mesh（每帧遍历/剔除开销）→ ~300~800 空间块。
+// ① 收集：scene.traverse 收集所有 THREE.Mesh（含 isBspModel 组内；trace 线是 Line 非
+//    Mesh 自动排除）——先 updateMatrixWorld(true) 使其 matrixWorld 为世界变换基准；
+// ② 分块：世界空间网格分块——cell 大小自适应（世界包围盒对角 / cbrt(目标块数)，
+//    再按非空 cell 数微调落 [300,800]）；每 mesh 世界包围盒中心归 cell（横跨多 cell 归中心）；
+// ③ 合并：顶点先 applyMatrix4(matrixWorld) 烘焙到世界空间（clone 后变换，勿动原 geometry）；
+//    单 mesh cell 保留原 mesh（烘焙后移除原父变换）；多 mesh cell 块内按材质（实例恒等）
+//    子合并（draw call = 块内材质数而非 mesh 数）→ mergeGeometries(useGroups=true) 最终
+//    合并——groups 保留材质索引：材质去重收集 + 块内材质索引重映射；
+// ④ 替换：移除原 mesh（旧 geometry 逐个 dispose）加入块 mesh；重建 modelRoot；
+//    调用方随后重新 assignMeshCullingData() + applyCulling(true)；
+// ⑤ console.log 统计：原 mesh 数 → 块数、每块平均顶点、前向视锥（fov 当前值）内可见块估算
+//    （块包围盒中心与相机方向点积粗估——仅诊断）。
+
+/** 收集的 mesh + 世界包围盒中心（分块键用）。 */
+interface OptMeshInfo {
+  mesh: THREE.Mesh;
+  cx: number;
+  cy: number;
+  cz: number;
+}
+
+/** cell 键：世界坐标 / cellSize 取整（字符串键；一次性分桶，无性能要求）。 */
+function optCellKey(x: number, y: number, z: number, cellSize: number): string {
+  return Math.floor(x / cellSize) + '|' + Math.floor(y / cellSize) + '|' + Math.floor(z / cellSize);
+}
+
+/** 非空 cell 计数（cell 大小自适应循环用）。 */
+function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
+  const keys = new Set<string>();
+  for (const it of infos) keys.add(optCellKey(it.cx, it.cy, it.cz, cellSize));
+  return keys.size;
+}
+
+/** GLB 挂载后执行：空间分块合并（见上方流程注释）。失败时保持场景原状（计算先行、后替换）。 */
+function optimizeScene(): void {
+  if (!scene) return;
+
+  // ① 收集：matrixWorld 更新后作为世界变换基准；多材质 mesh（GLB primitive 恒单材质，
+  //    防御性路径）与无材质 mesh 单独烘焙保留，不参与分块
+  scene.updateMatrixWorld(true);
+  const infos: OptMeshInfo[] = [];
+  const keptMeshes: THREE.Mesh[] = [];
+  const worldBox = new THREE.Box3();
+  const box = new THREE.Box3();
+  const center = new THREE.Vector3();
+  scene.traverse((obj) => {
+    const m = obj as THREE.Mesh;
+    if (!m.isMesh) return;
+    if (!m.geometry || !m.geometry.attributes.position) return;
+    if (Array.isArray(m.material) || !m.material) {
+      // 多材质/无材质：烘焙到世界空间后整体保留（不参与分块合并）
+      if (Array.isArray(m.material)) {
+        const baked = m.geometry.clone();
+        baked.applyMatrix4(m.matrixWorld);
+        m.geometry.dispose();
+        m.geometry = baked;
+        m.position.set(0, 0, 0);
+        m.rotation.set(0, 0, 0);
+        m.scale.set(1, 1, 1);
+        m.updateMatrix();
+        keptMeshes.push(m);
+      }
+      return;
+    }
+    const g = m.geometry;
+    if (!g.boundingBox) g.computeBoundingBox();
+    if (!g.boundingBox) return;
+    box.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
+    worldBox.union(box);
+    box.getCenter(center);
+    infos.push({ mesh: m, cx: center.x, cy: center.y, cz: center.z });
+  });
+  if (infos.length === 0) return;
+
+  // ② cell 大小自适应：cell = 世界包围盒对角线 / cbrt(目标块数)，再按非空 cell 数微调
+  //    （非空 cell 偏少 → 缩小 cell，偏多 → 放大 cell，收敛到 300~800）
+  const diag = Math.max(worldBox.getSize(new THREE.Vector3()).length(), 1);
+  let cellSize = Math.min(Math.max(diag / Math.cbrt(OPT_TARGET_CELLS), OPT_CELL_MIN), OPT_CELL_MAX);
+  for (let i = 0; i < 6; i++) {
+    const n = optCountCells(infos, cellSize);
+    if (n >= OPT_MIN_CELLS && n <= OPT_MAX_CELLS) break;
+    const scale = Math.min(Math.max(Math.cbrt(n / OPT_TARGET_CELLS), 0.55), 1.8);
+    cellSize = Math.min(Math.max(cellSize * scale, OPT_CELL_MIN), OPT_CELL_MAX);
+  }
+
+  // ③ 分桶：每 mesh 世界包围盒中心归 cell（横跨多 cell 归中心所在 cell）
+  const cells = new Map<string, OptMeshInfo[]>();
+  for (const it of infos) {
+    const key = optCellKey(it.cx, it.cy, it.cz, cellSize);
+    let arr = cells.get(key);
+    if (!arr) {
+      arr = [];
+      cells.set(key, arr);
+    }
+    arr.push(it);
+  }
+
+  // ④ 合并 + 替换：单 mesh cell 保留原 mesh（烘焙世界变换、移除原父变换）；
+  //    多 mesh cell 块内按材质子合并 → 最终 mergeGeometries(useGroups=true)（groups 保留
+  //    材质索引：材质去重收集 + 块内索引重映射）→ 每块一个 THREE.Mesh(mergedGeom, materials)
+  const optRoot = new THREE.Group();
+  optRoot.userData.isBspModel = true;
+  let chunkCount = 0;
+  let drawCallEst = 0;
+  let vertsTotal = 0;
+  for (const arr of cells.values()) {
+    if (arr.length === 1) {
+      const m = arr[0].mesh;
+      const baked = m.geometry.clone();
+      baked.applyMatrix4(m.matrixWorld);
+      m.geometry.dispose();
+      m.geometry = baked;
+      m.position.set(0, 0, 0);
+      m.rotation.set(0, 0, 0);
+      m.scale.set(1, 1, 1);
+      m.updateMatrix();
+      optRoot.add(m); // 自动脱离原父节点
+      chunkCount++;
+      drawCallEst++;
+      vertsTotal += baked.attributes.position.count;
+      continue;
+    }
+
+    // 多 mesh cell：块内按材质（实例恒等）分组 → 同材质子合并 → 每材质一个几何
+    const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+    for (const it of arr) {
+      const m = it.mesh;
+      const mat = m.material as THREE.Material;
+      const baked = m.geometry.clone();
+      baked.applyMatrix4(m.matrixWorld);
+      let list = byMat.get(mat);
+      if (!list) {
+        list = [];
+        byMat.set(mat, list);
+      }
+      list.push(baked);
+    }
+    const mergedGeoms: THREE.BufferGeometry[] = [];
+    const mats: THREE.Material[] = [];
+    for (const [mat, geoms] of byMat) {
+      let merged: THREE.BufferGeometry[];
+      if (geoms.length === 1) {
+        merged = geoms;
+      } else {
+        const mg = mergeGeometries(geoms, false);
+        if (mg) {
+          for (const g of geoms) g.dispose();
+          merged = [mg];
+        } else {
+          merged = geoms; // 属性不一致（防御）：保留单独几何，材质索引各自映射
+        }
+      }
+      for (const g of merged) {
+        mergedGeoms.push(g);
+        mats.push(mat);
+      }
+    }
+    if (mergedGeoms.length === 0) {
+      for (const it of arr) it.mesh.geometry.dispose();
+      continue;
+    }
+    let chunk: THREE.Mesh;
+    if (mergedGeoms.length === 1) {
+      chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
+      drawCallEst++;
+    } else {
+      const final = mergeGeometries(mergedGeoms, true);
+      if (final) {
+        for (const g of mergedGeoms) if (g !== final) g.dispose();
+        chunk = new THREE.Mesh(final, mats);
+        drawCallEst += final.groups.length;
+      } else {
+        // 最终合并失败（极端防御）：每个材质单独一块
+        chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
+        for (let i = 1; i < mergedGeoms.length; i++) {
+          optRoot.add(new THREE.Mesh(mergedGeoms[i], mats[i]));
+          chunkCount++;
+          drawCallEst++;
+        }
+      }
+    }
+    for (const it of arr) it.mesh.geometry.dispose();
+    chunkCount++;
+    for (const g of mergedGeoms) vertsTotal += g.attributes.position.count;
+    optRoot.add(chunk);
+  }
+  for (const m of keptMeshes) optRoot.add(m);
+
+  // ④b 视锥外保一圈：块 geometry.boundingSphere 半径 ×FRUSTUM_PAD。
+  //    必须强制 computeBoundingSphere（非 null 检查）：烘焙路径是 geometry.clone() +
+  //    applyMatrix4(matrixWorld)——克隆残留 GLB 局部空间的旧球（非 null 会被跳过）→
+  //    剔除按错误位置判定 → 眼前块被误剔不渲染。顶点已烘焙世界空间 → 重算球正确。
+  //    只影响剔除判定，不改变几何/包围盒；LOD/PVS（userData 数据）不受影响。
+  for (const child of optRoot.children) {
+    const g = (child as THREE.Mesh).geometry;
+    if (!g) continue;
+    g.computeBoundingSphere();
+    (g.boundingSphere as THREE.Sphere).radius *= FRUSTUM_PAD;
+  }
+
+  // ④c 替换：移除原 modelRoot（旧 mesh 几何已逐个 dispose），加入块 mesh 根
+  const totalMeshes = infos.length;
+  if (modelRoot) scene.remove(modelRoot);
+  scene.add(optRoot);
+  modelRoot = optRoot;
+
+  // ⑤ 统计 + 前向视锥可见块估算（仅诊断：块包围盒中心与相机方向点积粗估，fov 当前值）
+  const chunkBox = new THREE.Box3();
+  const chunkCenter = new THREE.Vector3();
+  const toCam = new THREE.Vector3();
+  let visibleEst = -1;
+  if (camera) {
+    camera.updateMatrixWorld(true);
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    const cosHalfFov = Math.cos((fov / 2) * DEG2RAD);
+    visibleEst = 0;
+    for (const child of optRoot.children) {
+      const mesh = child as THREE.Mesh;
+      chunkBox.setFromObject(mesh);
+      if (chunkBox.isEmpty()) continue;
+      chunkBox.getCenter(chunkCenter);
+      toCam.subVectors(chunkCenter, camera.position);
+      const dist = toCam.length();
+      if (dist < CAMERA_FAR && toCam.dot(camDir) / dist > cosHalfFov) visibleEst++;
+    }
+  }
+  console.log(
+    `[optimizeScene] 分块合并: ${totalMeshes} mesh → ${chunkCount} 块` +
+      `（cellSize=${cellSize.toFixed(1)}、非空 cell=${cells.size}）| ` +
+      `平均顶点/块 ${(vertsTotal / Math.max(chunkCount, 1)).toFixed(0)}（总顶点 ${vertsTotal}）| ` +
+      `draw call 估算 ${drawCallEst} | ` +
+      `前向视锥可见块估算 ${visibleEst >= 0 ? `${visibleEst}/${chunkCount}` : 'N/A（camera 未就绪）'}`,
+  );
+}
+
 /**
- * PVS：为场景中每个 mesh 建立 cluster 集合（渲染减负核心——GLB 挂载后执行一次）。
+ * LOD/PVS：为场景中每个 mesh 分配 LOD 数据与 cluster 集合（GLB 挂载后执行一次；
+ * PVS 消息后到时补一次——见 message 处理器）。
  *
- * 按 mesh 世界包围盒（Box3.setFromObject）取中心 ± 半径采样 7 点（中心 + 6 面中点），
- * 逐点用 getClusterAt 定位 cluster 并去重（参照 debug lod-manager assignClusterIds）。
- * mesh 横跨多个 cluster 时全部收录，PVS 判定"任一 cluster 可见即可见"（保守，不误剔大 mesh）。
- * 无 PVS（pvsManager null）或空包围盒 → 不设 clusterIds（全部可见）。
+ * ① LOD 数据（无条件分配）：mesh 世界包围盒（Box3.setFromObject）中心 → userData.center、
+ *    包围球半径（对角线一半）→ userData.radius——距离 LOD 每帧距离判定用。
+ * ② clusterIds（仅 PVS 存在时分配）：中心 ± 半径采样 7 点（中心 + 6 面中点），逐点用
+ *    getClusterAt 定位 cluster 并去重（参照 debug lod-manager assignClusterIds）。
+ *    mesh 横跨多个 cluster 时全部收录，PVS 判定"任一 cluster 可见即可见"（保守，不误剔大 mesh）。
+ * 无 PVS（pvsManager null）→ 不设 clusterIds（全部可见，仅距离 LOD 生效）；
+ * 空包围盒 → 无任何数据（保持可见）。
  */
-function assignClusterIds(): void {
-  if (!scene || !pvsManager) return;
+function assignMeshCullingData(): void {
+  if (!scene) return;
   const box = new THREE.Box3();
   const size = new THREE.Vector3();
   const center = new THREE.Vector3();
@@ -601,14 +915,17 @@ function assignClusterIds(): void {
   scene.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
-    const ud = mesh.userData as { clusterIds?: number[] };
-    if (ud.clusterIds) return; // 已分配（重复挂载防重）
+    const ud = mesh.userData as { center?: THREE.Vector3; radius?: number; clusterIds?: number[] };
+    if (ud.clusterIds) return; // 已分配（重复挂载防重；LOD 数据已随同写入）
     box.setFromObject(mesh);
     if (box.isEmpty()) return; // 无几何 → 保持可见
     box.getCenter(center);
-    // 半径 = 包围球半径（对角线一半），采样点覆盖整个包围盒
-    const r = Math.max(box.getSize(size).length() / 2, 1);
+    // LOD 数据：世界包围盒中心 + 包围球半径（距离剔除用）
+    ud.center = center.clone();
+    ud.radius = Math.max(box.getSize(size).length() / 2, 1);
+    if (!pvsManager) return; // 无 PVS → 仅 LOD 数据（PVS 后到时补 clusterIds）
     const set = new Set<number>();
+    const r = ud.radius;
     const samples: [number, number, number][] = [
       [center.x, center.y, center.z],
       [center.x + r, center.y, center.z],
@@ -630,29 +947,50 @@ function assignClusterIds(): void {
 }
 
 /**
- * PVS：按相机位置更新并重应用 mesh 可见性（渲染前调用）。
+ * LOD + PVS：渲染前合并应用 mesh 可见性（与 game renderer-main LOD/PVS 剔除同法；
+ * three.js frustum culling 在 renderer.render 内自动执行，本函数不干预——视锥内渲染保留）。
  *
- * - 每帧只调 pvsManager.update（findLeaf 轻量）；**仅 update 返回 true（cluster 变化）
- *   时才 scene.traverse 重应用可见性**——mesh 数量多时避免每帧全遍历开销。
- * - clusterIds 非空：任一 cluster 可见即可见；空集合/未分配（无 PVS、无几何）跳过——
- *   保持可见（参照 debug：空集合跳过 PVS 判定）。
- * - force=true（GLB 刚挂载）：跳过 update 判断强制重应用一次（首帧 cluster 初始化场景）。
- * - 相机位置用 localCopy.pos（无本地副本——WorkerA 物理首帧未到——跳过 PVS 应用）。
+ * - 距离 LOD（每帧）：块中心距相机 > LOD_DIST → visible=false（远处隐藏——雾 0.9×far
+ *   已全雾，淡出平滑不突兀）；<= LOD_DIST → 交 PVS/视锥决定。块数数百、每帧距离计算
+ *   亚毫秒，无需增量——相机移动即距离变化，每帧重算。
+ * - PVS：每帧只调 pvsManager.update（findLeaf 轻量；cluster 变化才重解码可见集）。
+ *   相机不在任何 cluster（固体/地图外，currentClusterId < 0）时跳过 PVS 仅按距离 LOD
+ *   （game 同法——避免可见集为空时 cluster 网格被错误全剔）。
+ * - 由 onFrame 节流：仅本地副本更新（状态变化）时调用，状态静止不重遍历。
+ * - force=true（GLB 刚挂载）：GLB/PVS 到达后强制重应用一次（首帧初始化场景）。
  */
-function applyPvsVisibility(force = false): void {
-  if (!pvsManager || !pvsManager.enabled || !scene || !localCopy) return;
-  const changed = pvsManager.update({
-    x: localCopy.pos.x,
-    y: localCopy.pos.y,
-    z: localCopy.pos.z,
-  });
-  if (!changed && !force) return;
+function applyCulling(force = false): void {
+  if (!scene || !localCopy) return;
+  // 相机眼位（与 render 中 camera.position 一致：pos + EYE_STAND）
+  const cam = { x: localCopy.pos.x, y: localCopy.pos.y + EYE_STAND, z: localCopy.pos.z };
+  const pvsActive = ENABLE_PVS && !!pvsManager && pvsManager.enabled;
+  if (pvsActive) {
+    pvsManager!.update(cam);
+  }
+  // 相机 cluster 无效（固体/地图外/未初始化）→ PVS 不可信，跳过（仅距离 LOD）
+  const pvsClusterValid = pvsActive && pvsManager!.currentClusterId >= 0;
+  const lodDistSq = LOD_DIST * LOD_DIST;
   scene.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
-    const ids = (mesh.userData as { clusterIds?: number[] }).clusterIds;
-    if (Array.isArray(ids) && ids.length > 0) {
-      mesh.visible = ids.some((c) => pvsManager!.isVisible(c));
+    const ud = mesh.userData as { center?: THREE.Vector3; radius?: number; clusterIds?: number[] };
+    // ① 距离 LOD：块中心距相机 > LOD_DIST → 隐藏（雾已淡化为背景色，视觉平滑）
+    if (ud.center) {
+      const ax = ud.center.x - cam.x;
+      const ay = ud.center.y - cam.y;
+      const az = ud.center.z - cam.z;
+      if (ax * ax + ay * ay + az * az > lodDistSq) {
+        mesh.visible = false;
+        return;
+      }
+    }
+    // ② PVS：clusterIds 非空 → 任一 cluster 可见即可见；空集合/未分配（无 PVS、无几何）
+    //    跳过——保持可见；PVS 未激活或相机 cluster 无效 → 全部跳过（保持可见）
+    if (pvsClusterValid) {
+      const ids = ud.clusterIds;
+      if (Array.isArray(ids) && ids.length > 0) {
+        mesh.visible = ids.some((c) => pvsManager!.isVisible(c));
+      }
     }
   });
 }
@@ -728,8 +1066,9 @@ function onFrame(): boolean {
     // localCopy 一旦非 null 永不回落 null）
     localCopy = state;
     stats.repaints++;
-    // PVS 剔除：渲染前应用可见性（cluster 变化时才重遍历；renderer.render 只提交可见 mesh）
-    applyPvsVisibility(false);
+    // LOD+PVS 剔除：渲染前应用可见性（距离 LOD 每帧 + cluster 变化时 PVS——单次遍历
+    // 合并；renderer.render 只提交可见 mesh，three.js frustum culling 自动执行）
+    applyCulling(false);
     render();
     return true;
   }

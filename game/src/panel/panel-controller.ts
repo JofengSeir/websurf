@@ -44,6 +44,8 @@ export class PanelController {
     private readonly onNoclipChange?: (active: boolean) => void,
     /** 纹理画质切换 → 主线程渲染（mosaic 贴图替换，即时生效）。 */
     private readonly onTextureQualityChange?: (quality: 'original' | 'mini') => void,
+    /** FOV 变更 → 主线程渲染器 setFov（相机透视矩阵即时更新）。 */
+    private readonly onSyncFov?: (fov: number) => void,
   ) {
     this.root = document.getElementById('panel') as HTMLElement;
     // 按键：读取持久化键位（与 app.ts 初始 KeyboardInput 一致）
@@ -371,6 +373,12 @@ export class PanelController {
       ch();
     });
 
+    // 视野 FOV（主线程渲染器；60-110，CS:S 标准 75）
+    this.bindSlider('fov', 60, 110, 1, (v) => {
+      this.config.hud.fov = v;
+      this.onSyncFov?.(v);
+    });
+
     // 速度面板模式（主线程本地 8Hz）
     const speedMode = document.getElementById('speedMode') as HTMLSelectElement | null;
     speedMode?.addEventListener('change', () => {
@@ -480,7 +488,7 @@ export class PanelController {
         yawBindSpeed: p.input.yawBindSpeed,
         noclipSpeed: p.input.noclipSpeed,
       },
-      hud: { showCrosshair: p.hud.showCrosshair, speedMode: p.hud.speedMode, crosshair: { ...p.hud.crosshair } },
+      hud: { showCrosshair: p.hud.showCrosshair, speedMode: p.hud.speedMode, fov: p.hud.fov, crosshair: { ...p.hud.crosshair } },
       texture: { ...p.texture },
     };
   }
@@ -565,6 +573,8 @@ export class PanelController {
     setVal('chGap', String(p.hud.crosshair.gap));
     setChecked('chOutline', p.hud.crosshair.outline);
     setChecked('chDot', p.hud.crosshair.dot);
+    // 视野
+    setVal('fov', String(p.hud.fov));
   }
 
   /** 持久化加载后向双端（Worker 权威 + 主线程预测实例）推送全部偏好。 */
@@ -579,6 +589,8 @@ export class PanelController {
     });
     this.pushPhysicsParams();
     this.sendHull();
+    // 持久化加载后 FOV 应用（相机创建用 config.hud.fov，此处覆盖面板加载值）
+    this.onSyncFov?.(p.hud.fov);
   }
 
   /** 应用准星风格到 DOM（CSS 变量 + 可见性）。 */

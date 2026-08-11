@@ -3218,7 +3218,7 @@ const BRUSH_FILTER_JSON = JSON.stringify({
   skip_sky: true,
   skip_nodraw: false,
 });
-const bspPath = join(root, '../maps/surf_666.bsp'); // 仓库重构后地图位于仓库根 maps/（perf-bench 同路径）
+const bspPath = join(root, '../src/maps/surf_666.bsp'); // 仓库重构后地图位于仓库根 maps/（perf-bench 同路径）
 const bspBytes = readFileSync(bspPath);
 check('读取 surf_666.bsp（字节 > 0）', bspBytes.length > 0, `${bspBytes.length} B`);
 

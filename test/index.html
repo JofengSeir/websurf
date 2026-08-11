@@ -44,6 +44,16 @@
     }
     #difficulty button:hover { background: rgba(255,255,255,0.12); }
     #difficulty button.active { border-color: rgba(94,129,244,0.7); color: #5e81f4; background: rgba(94,129,244,0.12); }
+    #fovbar {
+      position: absolute; top: 54px; left: 14px; z-index: 5;
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-radius: 10px;
+      background: rgba(15,17,21,0.78); border: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(8px);
+      font-size: 12px; color: #9aa3b2;
+    }
+    #fovbar input[type="range"] { width: 120px; accent-color: #5e81f4; }
+    #fovVal { min-width: 24px; text-align: right; color: #c8ccd4; font-variant-numeric: tabular-nums; }
     #bspbar {
       position: absolute; top: 54px; right: 14px; z-index: 5;
       display: flex; align-items: center; gap: 10px;
@@ -101,6 +111,13 @@
     <button data-rate="128">128</button>
     <button data-rate="256">256</button>
     <button data-rate="1000">1000</button>
+  </div>
+
+  <!-- 视野 FOV 调节：CS:S 标准 75，60-110 可调（main → WorkerB set-fov 即时生效） -->
+  <div id="fovbar">
+    <label for="fovRange">FOV</label>
+    <input id="fovRange" type="range" min="60" max="110" step="1" value="75" />
+    <span id="fovVal">75</span>
   </div>
 
   <!-- BSP 地图加载：文件选择 → 主线程解析（BspProcessor）→ WorkerA 物理世界 + WorkerB GLB 渲染 -->

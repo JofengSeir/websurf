@@ -140,6 +140,7 @@ async function main(): Promise<void> {
     (hw, sh, dh) => renderer?.setPredictionHull(hw, sh, dh),
     (active) => renderer?.setPredictionNoclip(active),
     (quality) => void renderer?.applyTextureQuality(quality),
+    (fov) => renderer?.setFov(fov),
   );
 
   // 5. 输入绑定
