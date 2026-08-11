@@ -1,5 +1,7 @@
 # WebSurf-debug（Debug Build）总览
 
+> 最后核对：2026-08-11。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/`）。
+
 > 全功能调试测试页面：BSP 解析/模型导出/物理碰撞/计时挑战的完整调试环境。
 > 公共架构见 `docs/architecture.md`；时序见 `docs/timing-debug.md`（主线程唯一物理渲染线 + Worker 权威帧，与 game 同模式）；材质技术见 `docs/materials.md`。
 
@@ -10,11 +12,12 @@
 | `crates/wasm/src/lib.rs` | WASM 导出层（BspProcessor 全部方法 + PhysWorld/画质 API re-export） |
 | `src/app.ts` | 主线程入口：BSP 解析（world-builder 管线）、物理渲染线、输入层、面板、弹窗 |
 | `src/renderer/` | 渲染：renderer-main（唯一物理渲染线 + AuthorityCalibrator）/ camera-controller / collider-debug / plane-inspector / fog-manager / light-manager / lod-manager / lightmap-shader |
-| `src/worker/` | 权威帧：main（共享 auth-loop + worker-dispatch 接线）/ physics-worker（物理面板参数）/ worker-types / mtz-data |
+| `src/worker/` | 权威帧：main（共享 auth-loop + worker-dispatch 接线；面板消息/回执经 onInit/onWasmInit/onWorldBuilt/onConfigApplied/onExtraMessage 钩子）/ physics-worker（物理面板参数）/ worker-types / mtz-data |
 | `src/world/` | pvs-manager / spawn-loader / collider-adapter（可视化用）/ teleport-manager（可视化用）/ custom-teleports（自定义传送点持久化）/ types |
 | `src/physics/` | param-defs / physics-params（面板参数管理器）；`math/vec3.ts`、`physics/Collision/Collision.types.ts`（渲染层类型，保留） |
 | `src/game/` | **特色**：计时挑战状态机（GameState，主线程 take_event 消费） |
-| `src/main-wasm.ts` / `default-pack.ts` | 主线程 wasm 初始化 / 默认纹理包加载 |
+| `src/input/` | 输入层接线：input-bridge / keyboard / mouse-buffer / pointer-lock（逻辑在 ts-shared input-layer） |
+| `src/main-wasm.ts` / `default-pack.ts` / `config.ts` / `wasm.d.ts` | 主线程 wasm 初始化 / 默认纹理包加载 / 运行时配置 / WASM 类型入口 |
 
 **共享实现**（`../../src/ts-shared/`，与 game 同源，改一处双端生效）：权威帧共享内存（auth/shared-state）、权威循环（auth/auth-loop）、消息分发（auth/worker-dispatch）、校准（phys/authority-calibrator）、输入层（input/input-layer）、参数映射（phys/params）、地图导入导出（phys/world-builder）。
 
@@ -31,7 +34,7 @@
 ## 3. 加载流程（主线程解析）
 
 ```
-选择 .bsp（文件输入；地图放 src/maps/）
+选择 .bsp（文件输入；本地地图放入 `maps/` 等目录，gitignored）
   → await mainWasmReady（主线程 wasm 就绪）
   → buildWorldBundle（ts-shared：BSP 解析 → 各导出 → 默认纹理包 → GLB with defaults → 缺失纹理）
   → renderer.loadScene（GLB 自包含）+ buildPredictionWorld（主线程 PhysWorld）
@@ -45,7 +48,7 @@
 |---|---|
 | 加载地图 / 出生点 / 元数据（三个独立折叠区 + 顶部状态条） | 文件选择、状态、出生点下拉、元数据 |
 | 物理 | 参数滑块/开关（13 项）、碰撞箱体型、自动恢复开关、重生按钮 |
-| 视距与视角 | 视距剔除滑块、PVS 开关 |
+| 视距与视角 | 视距剔除滑块、PVS 开关、鼠标灵敏度、Q/E 旋转速度 |
 | 显示设置 | HUD、准星风格化、纹理画质、近平面参数、碰撞可视化 4 开关 + 4 距离滑块、准星信息（showPlaneInfo） |
 | 自定义传送点 | 保存当前位置、坐标传送、清空 |
 

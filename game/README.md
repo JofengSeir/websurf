@@ -1,5 +1,7 @@
 # WebSurf-game（最小化实现）
 
+> 最后核对：2026-08-11。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
+
 WebSurf 的激进最小化实现（独立工程 `game/`）。物理栈整体下沉 Rust WASM，
 v7 定案：**主线程唯一物理渲染线 + 单 Worker 权威帧计算器**。
 
@@ -9,7 +11,8 @@ v7 定案：**主线程唯一物理渲染线 + 单 Worker 权威帧计算器**�
 主线程 (src/app.ts + src/renderer/renderer-main.ts)
   ├─ 输入采集（MouseBuffer CLAMP 1000）→ 灵敏度输入层 → SAB 输入槽（BigInt64 原子累加）
   ├─ 每 rAF：写输入 → 读权威帧 → set_velocity 外推校准 → PhysWorld.tick（可变 dt 单步，上限 0.1s）→ 渲染直读 state()
-  ├─ ESC 两栏面板（左导航 + 右设置，七模块）＋ 按键自定义录制
+  ├─ ESC 两栏面板（左导航 + 右设置，七模块）＋ 按键自定义录制；lockTickRate 可锁定 64Hz（公平模式）
+  ├─ 渲染：LOD/PVS 距离剔除（cullDistance=maxDim×0.5）+ 近平面贴墙自适应（4 水平方向探测，每 2 帧）
   └─ 速度 HUD 8Hz（PhysWorld.state().vel 采样，纯数字，居中偏下 24%）
 Worker (src/worker/main.ts，共享 ts-shared/auth)
   ├─ setTimeout 4ms 自驱权威循环（auth-loop）
@@ -55,6 +58,14 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 - **或**：`python ..\src\serve.py 8080 .` 后访问 `http://localhost:8080/dist/index.html`（dev 页面 `web/index.html`）
 - `file://` 双击 single 构建也可玩（MsgState 降级；SAB 高性能需 HTTP）
 
+> **注意（如实记录）**：仓库内 `web/*.js` 与 `dist/*` 为 2026-08-07 旧架构（v3：load-bsp
+> 协议、Worker-B 预测）构建产物，与当前 `src/`（v7 公共化）不匹配——**运行前请先
+> `npm run build:ts`（dev）或 `build-dist.cmd`（dist）重建**；`play.cmd` 不自动构建。
+> 另：`game/web/predictor.js` 为旧双 Worker 时代 gitignored 残留产物（build-dist 清理列表
+> 含之）；`src/worker/worker-types.ts` 协议类型落后于实现（头注释仍为 v3 旧协议、联合
+> 类型缺 world-json/set-spawn-points/sync-render-state/teleport-to-pos/input——运行时
+> 协议以 `src/ts-shared/auth/worker-dispatch.ts` 为准）。
+
 ## 控制
 
 - WASD 移动 · 空格跳 · Ctrl 蹲 · Shift 慢走 · Q/E 转视角 · R 重生（**全部可自定义**，面板「按键」模块录制 + localStorage 持久化）
@@ -67,10 +78,10 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 
 | 层 | 说明 |
 |---|---|
-| TS | ~2,800 行 / 14 文件（不含共享 src/ts-shared ~1,200 行） |
-| Rust 物理 | 2,489 行 / 4 文件（world/player/teleport/mod，共享仓库根 src/phys） |
+| TS | ~3,062 行 / 14 文件（不含共享 src/ts-shared ~1,480 行，2026-08-11 实测） |
+| Rust 物理 | 2,822 行 / 4 文件（world/player/teleport/mod，共享仓库根 src/phys，2026-08-11 实测） |
 | scene-data | GLB + spawn/pvs 小 JSON（-95%） |
-| 消息协议 | 约 14 种（init/wasm-init/world-json/config/respawn/sync-render-state/set-spawn-points/teleport/teleport-to-pos/set-death-threshold/input/phys-frame/phys-event/error） |
+| 消息协议 | 约 14 种（init/wasm-init/world-json/config/respawn/sync-render-state/set-spawn-points/teleport/teleport-to-pos/set-death-threshold/input/phys-frame/phys-event/error）——其中 `set-death-threshold`/`teleport-to-pos` 为共享层已定义但 **game 主线程实际未发送**（权威 Worker 死亡阈值恒为 Rust 默认 -100000，见 physics.md §8） |
 
 ## 文档（`game/docs/`）
 
@@ -79,4 +90,5 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 - `panel.md` — 面板控件与持久化
 - `materials.md` — 画质切换与缺失纹理回退
 
-> 公共架构见根 `docs/architecture.md`；时序见 `docs/timing-game.md`、`docs/timing-debug.md`。
+> 公共架构见根 `docs/architecture.md`；时序见 `docs/timing-game.md`、`docs/timing-debug.md`；
+> 验证工程（双模物理 + 帧信号渲染时序）见 `../test/README.md` + `test/CONCLUSION.md`。

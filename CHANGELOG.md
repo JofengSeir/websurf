@@ -6,10 +6,35 @@
 
 ### 新增
 
+- **WebSurf-test 验证工程（c2e88b0 / 607c9a0 / d1767c0 / 3854f71，2026-08-11 收尾）**：
+  `test/` 独立工程（不入 Pages 部署），验证"主线程不做物理/渲染（BSP 解析导出 +
+  输入转发 + rAF wake）→ SAB 无锁 → WorkerA 双模物理 → WorkerB 帧信号渲染"完整循环，
+  含 `scripts/` 验证套件（phys-smoke **191/191 PASS** / perf-bench / race-wakeup /
+  tmp-dual-compare）与 `play.cmd`。
+  - **WorkerA 双模物理核心（d1767c0 重构）**：**先 tick 计算 → 后无限制计算**；
+    模式A = 1ms 子步 + 实时输入（位置/角度唯一推进者，共享槽唯一写入者）；
+    模式B = **独立 64t 权威速度线**（第二个 PhysWorld，只走 tickDt 步长：
+    键位边界快照 peekKeys + 模式A 消耗鼠标窗口累积 → `set_velocity(三轴)`
+    校准——唯一 tick 影响通道，位置/角度不碰）；**分叉兜底锚定**
+    TICK_ANCHOR_DIST=64（死亡/传送/卡墙/坡缘后全量拉回，正常演化不干预）；
+    respawn/world-json 双实例同步；TICK_RATE=0/≥1000 跳过模式B
+  - **渲染驱动三轮修复（发布驱动 → 帧信号驱动）**：主驱动 = 主线程 rAF
+    `wake()` 的 RENDER_WAKEUP（vsync 对齐，呈现平滑）；WorkerA 发布**不 notify**
+    （1kHz 随机相位唤醒 → 呈现时间不规则 → 观感抖动，已移除）；解除节流
+    （固定 50ms 超时仅作停摆兜底）；V 未变不重绘；OffscreenCanvas 零拷贝直通
+  - **会审结论文档**：`test/CONCLUSION.md`——「64t 坡速 ≈ 无限制」主因 =
+    物理算子按 dt 标定（稳态速度 tick 不变量），真实难度载体 = 输入采样相位 +
+    离散施加点；旧单实例双模三层缺陷（粗糙 tick 非独立演化/校准空操作/读数遮蔽）
+    与四条用户要求的逐条落地
+  - **验证套件适配**：ModeAB 重构为双实例语义（tick 先行 + 独立 tickPhys +
+    三轴速度校准）、分叉兜底锚定回归测试、帧信号驱动测试（worker_threads 真线程）
+- **传送双路径检测（5dcb903，共享 phys/teleport.rs）**：A 路径 = 进入区域任意状态
+  （身体竖直线段与凸包区间相交，gap = 落地&&斜面 ? 64 : 0）+ B 路径 = 仅落地
+  （脚底往下 8 区间相交）；surfing 滑行不触发；冷却 0.5s；空中蹲视角渐变同步
 - **共享 TS 层收敛（0f3558b）**：`src/ts-shared/`（auth/{shared-state,auth-loop,
   worker-dispatch}、input/input-layer、phys/{authority-calibrator,params,
   world-builder}）——两端共用 SAB 输入槽（BigInt64 原子累加）与权威双缓冲
-  （512B）、权威循环（setTimeout 4ms 自驱 + 固定步长 1/tickRate + 累积器无封顶）、
+  （512B）、权威循环（setTimeout 4ms 自驱 + 固定步长 1/tickRate + 累积器无封顶（每轮 ≤64 步 guard））、
   消息分发、校准（三条件 + 250ms 冷却 + 在途回滚）、输入层、参数映射、地图导入
   导出管线；debug/game 删除各自 worker/shared-state.ts 与 physics-loop.ts，
   debug 删除 shell_colliders.rs（薄壳碰撞）与 debug_probe.rs；**LERP/外推插帧
@@ -31,8 +56,8 @@
   - `src/` 由原 TS 源码目录改为**共享层**：`websurf-phys`（Rust CS 物理，原
     crates/wasm 物理部分，game 中诞生后上移共享）、`websurf-wasm-core`
     （BSP 解析/GLB/模型/纹理解析，纯 rlib）、`vendor/vmdl`（vendored，单副本）、
-    `materials/textures.mtz`（默认纹理包 9448+ 条，三处副本同步）、`maps/`、
-    `serve.py`（共享 dev 服务器）
+    `materials/textures.mtz`（默认纹理包 9448+ 条，三处副本同步）、
+    `serve.py`（共享 dev 服务器；BSP 地图位于仓库根 `maps/` 与 `game/maps/`，gitignored）
   - `debug/` = **WebSurf-debug**（原全功能主项目迁入）：`crates/wasm/src/`
     仅导出层 `lib.rs`；`src/` TS 全套（app/renderer/worker/world/physics/game/panel）；
     `web/`
@@ -67,6 +92,7 @@
 
 ### 修复
 
+- **CI（3618603）**：Pages 流水线修复——Node 20 弃用 + 仓库重构后 lock 文件位置变化导致的构建失败；测试前置改用 Node 20 后，Pages 构建步骤升级
 - **地图重载内存泄漏**：`loadScene` 移除旧 BSP 模型只 `remove()` 不 `dispose()`，
   GPU 侧 geometry/material/纹理（含 lightmap atlas）累积导致帧率下降。新增
   `RendererMain.disposeScene()`（递归释放 + renderLists/LOD/PVS/碰撞可视化/插值

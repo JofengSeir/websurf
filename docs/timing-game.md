@@ -1,5 +1,7 @@
 # WebSurf game 工程时序图
 
+> 最后核对：2026-08-11。以实际代码为准（`game/src/renderer/renderer-main.ts` + `src/ts-shared/auth/*`）。
+
 > 对应 `game/`（WebSurf-game，Game Build）。实际实现（v7 定案）：**主线程 = 唯一物理渲染线**
 > （PhysWorld tick + 渲染同频，rAF 帧率可变 dt、dt 钳制 0.1s）；**Worker = 权威帧计算器**
 > （独立固定步长 = 1/tickRate，默认 64Hz、面板 48-128 可调，含地图碰撞）。无 Worker-B——预测已在主线程（v4 起删除双 Worker 预测）。
@@ -45,10 +47,10 @@ sequenceDiagram
     GPU-->>Main: 渲染完成
 
     Note over Hardware, GPU: === 第四阶段：权威帧计算 (固定步长 = 1/tickRate, 默认 64Hz, 面板 48-128 可调) ===
-    loop 自驱循环 (setTimeout 4ms 轮询; 固定步长累积器无封顶, 不丢物理时间)
+    loop 自驱循环 (setTimeout 4ms 轮询; 固定步长累积器无封顶, 每轮 ≤64 步 guard, 不丢物理时间)
         Worker->>SharedMem: exchange 消耗输入 (maxStep 防穿墙, 随步长缩放)
         Worker->>Worker: PhysWorld.tick (完整物理: 碰撞/传送/死亡; 独立权威演化)
-        Worker->>Worker: 碰撞事件检测 (落地上升沿 / 撞墙速度骤降+位移受阻)
+        Worker->>Worker: 碰撞事件检测 (落地上升沿 / 撞墙速度骤降>250 u/s 且位移<预期 30% 且当前速度>80)
         Worker->>SharedMem: 写权威全状态到双缓冲槽 (V_A&1)
         Worker->>SharedMem: Atomics.store 递增 V_A (内存屏障语义; 状态先于版本号可见)
     end
@@ -77,6 +79,11 @@ sequenceDiagram
 | 角度隔离 | 权威帧不得影响渲染角度（输入层化后双端同源 → 天然一致）；仅碰撞事件可同步角度 |
 | 输入双通道 | 同一份输入同时喂 SAB（权威）与主线程本地缓冲——无分叉 |
 | 无 Worker-B | 预测即主线程渲染物理本身（v4 起删除双 Worker 预测：双 Worker 同步复杂易卡） |
+
+**已知不对称（如实记录）**：`set-death-threshold` 为共享层已定义消息，但 game 主线程
+**从未发送**——权威 Worker 死亡阈值恒为 Rust 默认 -100000（掉落永不死亡重生）；主线程
+预测物理则收到 `set_death_y(bbox.min.y)`（renderer-main 实传未减 1000，注释与实现不符）。
+双端死亡判定分叉，详见 `game/docs/physics.md` §8。
 
 ## MsgState 回退（无 SAB 环境：file:// / GitHub Pages）
 
