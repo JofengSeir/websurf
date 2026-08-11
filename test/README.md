@@ -1,5 +1,9 @@
 # WebSurf-test — 单模 1ms 物理 + OffscreenCanvas 渲染时序验证工程
 
+> **2026-08-11 双模核心重构**：「64t 坡速 ≈ 无限制」成因分析与修复架构见
+> **[CONCLUSION.md](CONCLUSION.md)**（tick 先行 + 独立 64t 权威速度线 + 速度唯一校准）。
+> 本 README 其余部分为历史时序设计记录，以 CONCLUSION.md + worker-a.ts 为准。
+
 > 目的：按"主线程仅输入转发/UI → SAB 无锁（含 WAKEUP 唤醒 + 双缓冲状态槽）→ WorkerA 单模
 > 1ms 物理（自驱）→ WorkerB OffscreenCanvas 渲染（frame 驱动 + 抽帧）"的最新时序图，
 > 验证一套独立的输入→物理→渲染循环。
@@ -267,6 +271,9 @@ V 版本/仅状态更新重绘语义与 SAB 一致、wait 立即超时返回、i
 **运行**：`python ../src/serve.py 8080 dist` → 访问 `http://localhost:8080/dist/index.html`
 （需 HTTP + COOP/COEP 启用 SharedArrayBuffer，否则显示错误面板；pointer lock 后 WASD/鼠标
 操作，R 重生，按钮切换 64/128/256/1000Hz 观察 HUD 中 V 版本、TICK 与渲染帧率（重绘/s）变化）。
+
+**双击运行**：`play.cmd`（自动 `npm run build:ts` 后启动本地服务器并打开浏览器，
+访问 dev 布局 `http://localhost:8080/index.html`；依赖 Node.js + Python 3）。
 
 **校验点（实现完成后逐条核对）**：
 1. 主线程不碰物理/渲染（仅输入转发 + wake + 难度调节 + respawn），单帧耗时 < 0.1ms

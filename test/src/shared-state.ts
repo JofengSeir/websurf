@@ -22,9 +22,10 @@
  * - 控制区：阶段0 主线程 store TICK_RATE（仅 store，不 notify——WorkerA 每轮循环自动识别）；
  *   WAKEUP 槽承载阶段1 物理背压唤醒：wake() = store(WAKEUP,1) + notify(WAKEUP,1)
  *   （WorkerA 专用，背压 wait 挂起其上）；
- *   RENDER_WAKEUP 槽承载渲染唤醒：**主驱动 = WorkerA 每发布状态的 notify**
- *   （writeStateRaw → V++ → notify，渲染率 = 物理发布率 1kHz，不受显示刷新率限制）；
- *   主线程 wake() 的 store(1)+notify(1) 为帧对齐冗余；两槽分离——物理背压与渲染唤醒
+ *   RENDER_WAKEUP 槽承载渲染唤醒：**主驱动 = 主线程 rAF 帧信号**（wake() 的
+ *   store+notify——vsync 对齐，渲染节奏 = 显示器刷新）；**WorkerA 发布不 notify**
+ *   （1kHz 随机相位唤醒 → 渲染/呈现时间不规则 → 观感抖动；醒后只读最新槽）；
+ *   主线程停摆 → WorkerB 超时兜底自驱；两槽分离——物理背压与渲染帧对齐
  *   互不干扰（WorkerA 抢唤醒不再拖延渲染帧边界）
  * - 输入槽：主线程 Atomics.add 累加（无上限），WorkerA consumeInput(maxDelta) CAS 清零消费 + 限幅
  * - 状态槽双缓冲：writeState/writeStateRaw 写"当前 V 的另一槽"（S[V&1 ^ 1]，不覆盖读槽）→ Atomics.add(V,1)；
@@ -280,6 +281,15 @@ export class TestShared {
     return Atomics.load(this.i32, I_TICK_RATE);
   }
 
+  /** 非消耗读当前键位掩码（模式B tick 边界采样用——不消费累积鼠标增量；
+   * 键位是"当前状态"覆盖写，读边界时刻的当前值 = 真实 64t 服务器语义）。 */
+  peekKeys(): number {
+    if (this.mode === 'msg-physics') {
+      return this.msgKeysMask; // 最近一条 shared-input 消息的键位
+    }
+    return Atomics.load(this.i32, I_KEYS_MASK);
+  }
+
   /**
    * 阶段1 唤醒双 Worker（双槽分离）：WAKEUP → WorkerA 物理背压；RENDER_WAKEUP → WorkerB
    * 渲染帧循环。各槽 notify 计数 = 1（每槽恰一个等待者——物理背压与渲染帧对齐互不干扰：
@@ -462,11 +472,11 @@ export class TestShared {
     f[base + F_YAW] = yaw;
     f[base + F_PITCH] = pitch;
     const v = Atomics.add(this.i32, I_V, 1) + 1;
-    // 发布驱动（阶段3 主驱动）：每发布即 notify(RENDER_WAKEUP) 唤醒 WorkerB——
-    // 渲染率 = 物理发布率（无 BSP 轻负载全速 1kHz；重场景渲染耗时自然节流，
-    // 渲染中错过的 notify 不积压，醒后只渲染最新状态）；须在 V add **之后**通知，
-    // 否则 WorkerB 醒来读 V 仍是旧版本（readState 返回 null 丢一帧）
-    Atomics.notify(this.i32, I_RENDER_WAKEUP, 1);
+    // 渲染唤醒移交**主线程 rAF 帧信号**（wake() 的 RENDER_WAKEUP store+notify——
+    // vsync 对齐：渲染节奏 = 显示器刷新，呈现平滑）。发布**不再 notify**
+    // RENDER_WAKEUP：1kHz 随机相位唤醒 → 渲染完成时刻与显示器 BeginFrame 错位 →
+    // 画面呈现时间不规则（"60 f/s 却观感 ~20f"的抖动根因）；醒后 WorkerB 只读
+    // 最新槽（V 未变不重绘）。主线程停摆时由 WorkerB 超时兜底自驱。
     return v;
   }
 

@@ -8,8 +8,8 @@
  * - 阶段1：捕获鼠标（pointer lock 后累积）与键盘（WASD/空格），
  *   每 rAF 一次性写入输入（SAB Atomics.add / 消息回退 postMessage 批投递）
  *   → wake()（双槽通知：WAKEUP → WorkerA 物理背压；RENDER_WAKEUP → WorkerB
- *   渲染唤醒——**主驱动为 WorkerA 发布 notify，主线程 wake 仅为帧对齐冗余**，
- *   见 shared-state.ts / worker-b.ts）
+ *   渲染帧信号——**主驱动 = 主线程 rAF（vsync 对齐，呈现平滑）**，WorkerA 发布
+ *   不 notify；见 shared-state.ts / worker-b.ts）
  * - 阶段0：难度按钮 → 写 SAB 控制区 TICK_RATE（仅 store，无 notify）
  * - 阶段4：R 键 → postMessage({type:'respawn'}) 到 WorkerA
  */
@@ -356,8 +356,11 @@ workerA.onmessage = (e: MessageEvent<{ type: string; baseX?: number; baseY?: num
   });
 };
 
-// ── 主线程 rAF 循环（阶段1）：输入转发 + wake（WorkerB 渲染由自身 rAF 自驱，不依赖 frame 消息——
-//    移除 frame 消息避免双渲染过载卡死；渲染绝对自主不受主线程频率限制）──
+// ── 主线程 rAF 循环（阶段1）：输入转发 + wake（**RENDER_WAKEUP = WorkerB 渲染主驱动**：
+//    主线程 rAF 与浏览器合成器/vsync 同相 → WorkerB 每帧信号渲染一次，呈现平滑；
+//    WorkerA 发布不 notify（1kHz 随机相位唤醒 → 呈现时间不规则 → 观感抖动）；
+//    WAKEUP = WorkerA 物理背压缩短休眠；渲染画面经 OffscreenCanvas 由浏览器合成器
+//    零拷贝直通上屏，主线程不参与取帧）──
 function frame(): void {
   requestAnimationFrame(frame);
   const dx = mouseDx;
@@ -366,6 +369,6 @@ function frame(): void {
   mouseDy = 0;
   const mask = locked ? keysToMask(keyState) : 0;
   shared.addInput(dx, dy, mask); // SAB Atomics.add 累加 / 消息回退 postMessage 批投递（主线程耗时 < 0.1ms）
-  shared.wake(); // 双槽通知：WAKEUP → WorkerA 背压 + RENDER_WAKEUP → WorkerB 渲染（主驱动=WorkerA 发布 notify，此处冗余）
+  shared.wake(); // 双槽通知：WAKEUP → WorkerA 背压 + RENDER_WAKEUP → WorkerB 渲染帧信号（vsync 对齐）
 }
 requestAnimationFrame(frame);
