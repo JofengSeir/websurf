@@ -93,6 +93,17 @@
     summary:hover { background: #2d2d2d; }
     .acc-body { padding: 4px 8px 8px 8px; }
 
+    /* 手风琴内子分组标题 */
+    .acc-section-title {
+      font-size: 11px; color: #9098b5; margin: 6px 0 4px;
+      letter-spacing: 0.02em;
+    }
+    .acc-section-title:first-child { margin-top: 0; }
+    .acc-divider {
+      border-top: 1px solid #2a2d3a;
+      margin-top: 6px; padding-top: 6px;
+    }
+
     /* 控件网格 */
     .ctrl-grid {
       display: grid;
@@ -133,6 +144,7 @@
       padding: 1px 3px;
     }
     .param-num:focus { outline: none; border-color: #4a90e2; }
+    .ctrl-hint { font-size: 11px; color: #9098b5; white-space: nowrap; }
 
     /* 元数据 KV */
     .kv { display: grid; grid-template-columns: 110px 1fr; gap: 2px 8px; font-size: 11px; }
@@ -287,20 +299,32 @@
           </div>
         </details>
 
-        <!-- 视距与视角 -->
+        <!-- 视角与操作 -->
         <details open>
-          <summary>视距与视角</summary>
+          <summary>视角与操作</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
-              <label>鼠标灵敏度</label>
+              <label title="鼠标灵敏度（cs-movement 乘数：有效灵敏度 = 灵敏度 × m_yaw 0.022 deg/px）">鼠标灵敏度</label>
               <input type="range" id="mouseSens" min="0.1" max="5.0" step="0.01" value="1.5" />
               <div class="val"><input type="number" id="mouseSensNum" class="param-num" min="0.1" max="5" step="0.01" value="1.5" /></div>
 
-              <label>Q/E 旋转速度</label>
+              <label title="Q/E 键 yaw 旋转速度（度/秒）">Q/E 旋转速度</label>
               <input type="range" id="yawBindSpeed" min="0" max="720" step="1" value="210" />
               <div class="val"><input type="number" id="yawBindSpeedNum" class="param-num" min="0" max="720" step="any" value="210" /></div>
 
-              <label>视距上限</label>
+              <label title="相机俯仰角限制（度）：越接近 90° 越接近完全俯视/仰视">俯仰角限制</label>
+              <input type="range" id="pitchLimit" min="10" max="89" step="1" value="89" />
+              <div class="val"><input type="number" id="pitchLimitNum" class="param-num" min="10" max="89" step="any" value="89" /></div>
+            </div>
+          </div>
+        </details>
+
+        <!-- 渲染与视距 -->
+        <details open>
+          <summary>渲染与视距</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid">
+              <label title="视距剔除距离（HU）：超出此距离的几何体不渲染">视距上限</label>
               <input type="range" id="cullDistance" min="1000" max="50000" step="1" value="12800" />
               <div class="val"><input type="number" id="cullDistanceNum" class="param-num" min="1000" max="100000" step="any" value="12800" /></div>
 
@@ -308,6 +332,30 @@
                 <input type="checkbox" id="pvsEnabled" checked />
                 <label for="pvsEnabled">PVS 剔除</label>
               </div>
+
+              <div class="ctrl-full acc-divider"></div>
+              <div class="ctrl-full acc-section-title">纹理</div>
+
+              <label title="纹理画质：原始 = VTF 解码原图；压缩 = mosaic 字节码还原的低清纹理（切换即时生效，无需重载地图）">纹理画质</label>
+              <div class="ctrl-radio-group ctrl-full">
+                <label class="ctrl-radio"><input type="radio" name="textureQuality" value="original" checked /><span>原始纹理</span></label>
+                <label class="ctrl-radio"><input type="radio" name="textureQuality" value="mini" /><span>压缩低清</span></label>
+              </div>
+
+              <label title="场景环境光强度（AmbientLight，即时生效）">环境光强度</label>
+              <input type="range" id="ambientIntensity" min="0" max="2" step="0.05" value="0.6" />
+              <div class="val"><input type="number" id="ambientIntensityNum" class="param-num" min="0" max="2" step="any" value="0.6" /></div>
+
+              <div class="ctrl-full acc-divider"></div>
+              <div class="ctrl-full acc-section-title">近平面（防贴墙透视）</div>
+
+              <label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到（防透视），性能开销略增">探测距离</label>
+              <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />
+              <div class="val"><input type="number" id="nearProbeDistNum" class="param-num" min="16" max="128" step="any" value="100" /></div>
+
+              <label title="贴墙时 near = 最近几何距离 × 此系数：越小越不易裁墙（更保守），远处深度精度略降">收缩系数</label>
+              <input type="range" id="nearRatio" min="0.1" max="1" step="0.01" value="0.3" />
+              <div class="val"><input type="number" id="nearRatioNum" class="param-num" min="0.1" max="1" step="any" value="0.3" /></div>
             </div>
           </div>
         </details>
@@ -330,16 +378,20 @@
                 <option value="visual">可视模型网格</option>
                 <option value="phy">模型自带碰撞体(.phy)</option>
               </select>
-              <div style="font-size:11px; color:#9098b5; white-space:nowrap;">重新加载地图生效</div>
+              <div class="ctrl-hint">重新加载地图生效</div>
+
+              <label title="权威物理固定步长（Hz）：越高越精确，性能开销越大；即时生效">物理 tick 率</label>
+              <input type="range" id="tickRate" min="48" max="128" step="1" value="64" />
+              <div class="val"><input type="number" id="tickRateNum" class="param-num" min="48" max="128" step="any" value="64" /></div>
 
               <div class="ctrl-full" style="margin-top:4px;">
                 <button id="respawnBtn" disabled>重生</button>
               </div>
             </div>
 
-            <!-- 碰撞箱体积（物理控制面板） -->
-            <div style="border-top: 1px solid #2a2d3a; margin-top: 6px; padding-top: 6px;">
-              <div style="font-size: 11px; color: #9098b5; margin-bottom: 4px;">
+            <!-- 碰撞箱体积 -->
+            <div class="acc-divider">
+              <div class="acc-section-title">
                 碰撞箱体积（CS:S 基准 32×32×72 / 蹲 54，倍率或数值）
               </div>
               <div class="ctrl-grid">
@@ -371,9 +423,9 @@
             </div>
 
             <!-- 移动/力学参数（动态渲染） -->
-            <div style="border-top: 1px solid #2a2d3a; margin-top: 6px; padding-top: 6px;">
-              <div style="font-size: 11px; color: #9098b5; margin-bottom: 4px;">
-                物理参数（地速 / 重力 / 加速 / 跳跃等，拖动实时生效）
+            <div class="acc-divider">
+              <div class="acc-section-title">
+                力学参数（地速 / 重力 / 加速 / 跳跃等，拖动实时生效）
               </div>
               <div id="physicsParamList" class="ctrl-grid"></div>
               <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2d3a;">
@@ -423,9 +475,9 @@
           </div>
         </details>
 
-        <!-- 显示设置 -->
+        <!-- 准星与 HUD -->
         <details open>
-          <summary>显示设置</summary>
+          <summary>准星与 HUD</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
               <div class="ctrl-checkbox-row ctrl-full">
@@ -436,13 +488,17 @@
                 <input type="checkbox" id="showCrosshair" checked />
                 <label for="showCrosshair">显示准星</label>
               </div>
-              <label title="准星颜色">准星颜色</label>
+
+              <div class="ctrl-full acc-divider"></div>
+              <div class="ctrl-full acc-section-title">准星样式</div>
+
+              <label title="准星颜色">颜色</label>
               <input type="color" id="chColor" value="#4ade80" />
               <div></div>
-              <label title="准星线长（px）">准星线长</label>
+              <label title="准星线长（px）">线长</label>
               <input type="range" id="chSize" min="1" max="20" step="1" value="6" />
               <div class="val"><input type="number" id="chSizeNum" class="param-num" min="1" max="20" step="any" value="6" /></div>
-              <label title="准星粗细（px）">准星粗细</label>
+              <label title="准星粗细（px）">粗细</label>
               <input type="range" id="chThickness" min="1" max="8" step="1" value="2" />
               <div class="val"><input type="number" id="chThicknessNum" class="param-num" min="1" max="8" step="any" value="2" /></div>
               <label title="准星中心间隙（px）">中心间隙</label>
@@ -456,6 +512,23 @@
                 <input type="checkbox" id="chDot" />
                 <label for="chDot" title="中心圆点">中心点</label>
               </div>
+
+              <div class="ctrl-full acc-divider"></div>
+              <div class="ctrl-full acc-section-title">准星信息</div>
+
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPlaneInfo" />
+                <label for="showPlaneInfo" title="准星对准模型/实体面/触发面时，在 HUD 显示其名称与属性信息">启用准星信息</label>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- 调试线框 -->
+        <details>
+          <summary>调试线框</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid">
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showSolids" />
                 <label for="showSolids" title="玩家附近碰撞箱线框：地面绿/斜坡黄/墙红">显示brush碰撞</label>
@@ -463,6 +536,7 @@
               <label title="brush 碰撞线框显示可视距离（HU）：0 = 全量显示">brush 可视距离</label>
               <input type="range" id="brushViewDistance" min="0" max="16384" step="64" value="512" />
               <div class="val"><input type="number" id="brushViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="512" /></div>
+
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showTriggers" />
                 <label for="showTriggers" title="传送触发区域线框：青=已链接/紫=孤儿/灰=禁用/橙=非玩家">显示触发区域</label>
@@ -470,6 +544,7 @@
               <label title="触发区域线框显示可视距离（HU）：0 = 全量显示">触发区域距离</label>
               <input type="range" id="triggerViewDistance" min="0" max="16384" step="64" value="0" />
               <div class="val"><input type="number" id="triggerViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="0" /></div>
+
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showPhy" />
                 <label for="showPhy" title="模型自带 .phy 碰撞网格线框（橙色）">显示模型phy碰撞</label>
@@ -477,6 +552,7 @@
               <label title="phy 碰撞网格显示可视距离（HU）：0 = 全量显示">phy 可视距离</label>
               <input type="range" id="phyViewDistance" min="0" max="16384" step="64" value="4096" />
               <div class="val"><input type="number" id="phyViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="4096" /></div>
+
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showVis" />
                 <label for="showVis" title="模型可视网格线框（紫色，与显示网格逐位一致）">显示模型可视碰撞</label>
@@ -484,21 +560,6 @@
               <label title="可视网格线框显示可视距离（HU）">可视网格距离</label>
               <input type="range" id="visViewDistance" min="128" max="16384" step="64" value="1024" />
               <div class="val"><input type="number" id="visViewDistanceNum" class="param-num" min="128" max="16384" step="any" value="1024" /></div>
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showPlaneInfo" />
-                <label for="showPlaneInfo" title="准星对准模型/实体面/触发面时，在 HUD 显示其名称与属性信息">准星信息</label>
-              </div>
-              <label title="纹理画质：原始 = VTF 解码原图；压缩 = mosaic 字节码还原的低清纹理（切换即时生效，无需重载地图）">纹理画质</label>
-              <div class="ctrl-radio-group ctrl-full">
-                <label class="ctrl-radio"><input type="radio" name="textureQuality" value="original" checked /><span>原始纹理</span></label>
-                <label class="ctrl-radio"><input type="radio" name="textureQuality" value="mini" /><span>压缩低清</span></label>
-              </div>
-              <label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到（防透视），性能开销略增">近平面探测距离</label>
-              <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />
-              <div class="val"><input type="number" id="nearProbeDistNum" class="param-num" min="16" max="128" step="any" value="100" /></div>
-              <label title="贴墙时 near = 最近几何距离 × 此系数：越小越不易裁墙（更保守），远处深度精度略降">近平面收缩系数</label>
-              <input type="range" id="nearRatio" min="0.1" max="1" step="0.01" value="0.3" />
-              <div class="val"><input type="number" id="nearRatioNum" class="param-num" min="0.1" max="1" step="any" value="0.3" /></div>
             </div>
           </div>
         </details>
