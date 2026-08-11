@@ -74,10 +74,14 @@ const dom = {
 	chDotChk: document.getElementById('chDot') as HTMLInputElement | null,
 	physicsModeSelect: document.getElementById('physicsMode') as HTMLSelectElement | null,
 	colliderSourceSelect: document.getElementById('colliderSource') as HTMLSelectElement | null,
+	tickRateRange: document.getElementById('tickRate') as HTMLInputElement | null,
+	tickRateNum: document.getElementById('tickRateNum') as HTMLInputElement | null,
 	mouseSensRange: document.getElementById('mouseSens') as HTMLInputElement | null,
 	mouseSensNum: document.getElementById('mouseSensNum') as HTMLInputElement | null,
 	yawBindSpeedRange: document.getElementById('yawBindSpeed') as HTMLInputElement | null,
 	yawBindSpeedNum: document.getElementById('yawBindSpeedNum') as HTMLInputElement | null,
+	pitchLimitRange: document.getElementById('pitchLimit') as HTMLInputElement | null,
+	pitchLimitNum: document.getElementById('pitchLimitNum') as HTMLInputElement | null,
 	cullDistRange: document.getElementById('cullDistance') as HTMLInputElement | null,
 	cullDistNum: document.getElementById('cullDistanceNum') as HTMLInputElement | null,
 	pvsEnabledChk: document.getElementById('pvsEnabled') as HTMLInputElement | null,
@@ -110,6 +114,8 @@ const dom = {
 	nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
 	nearRatioRange: document.getElementById('nearRatio') as HTMLInputElement | null,
 	nearRatioNum: document.getElementById('nearRatioNum') as HTMLInputElement | null,
+	ambientIntensityRange: document.getElementById('ambientIntensity') as HTMLInputElement | null,
+	ambientIntensityNum: document.getElementById('ambientIntensityNum') as HTMLInputElement | null,
 	// 物理控制面板
 	hullScale: document.getElementById('hullScale') as HTMLInputElement | null,
 	hullScaleNum: document.getElementById('hullScaleNum') as HTMLInputElement | null,
@@ -694,6 +700,9 @@ function syncPrefsControls(): void {
 	};
 	setNum('mouseSens', config.input.sensitivity);
 	setNum('yawBindSpeed', config.input.yawBindSpeed);
+	setNum('pitchLimit', config.input.pitchLimit);
+	setNum('tickRate', config.physics.tickRate);
+	setNum('ambientIntensity', config.lighting.ambientIntensity);
 	setNum('cullDistance', config.lod.cullDistance);
 	setChk('pvsEnabled', config.lod.pvsEnabled);
 	setChk('showSolids', config.debug.showSolids);
@@ -747,6 +756,12 @@ function bindUI(): void {
 		setStatus('碰撞来源已切换，重新加载地图后生效。', '');
 	});
 
+	// 物理 tick 率（权威固定步长，即时生效；不随 UI 偏好持久化）
+	bindSlider(dom.tickRateRange, dom.tickRateNum, (v) => {
+		applyConfigPatch(config, 'physics', { tickRate: v });
+		inputBridge?.sendConfig('physics', { tickRate: v });
+	}, (v) => v);
+
 	// 鼠标灵敏度（cs-movement 乘数：有效灵敏度 = sensitivity * m_yaw 0.022 deg/px）
 	dom.mouseSensRange?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
@@ -780,6 +795,14 @@ function bindUI(): void {
 		inputBridge?.sendConfig('input', { yawBindSpeed: val });
 		saveUiPrefs();
 	});
+
+	// 俯仰角限制（相机 pitch clamp，度；渲染端即时生效 + Worker 协议同步）
+	bindSlider(dom.pitchLimitRange, dom.pitchLimitNum, (v) => {
+		applyConfigPatch(config, 'input', { pitchLimit: v });
+		rendererMain?.applyConfigPatch('input', { pitchLimit: v });
+		inputBridge?.sendConfig('input', { pitchLimit: v });
+		saveUiPrefs();
+	}, (v) => v);
 
 	// 视距剔除距离（渲染器实时生效 + Worker 协议兼容保留）
 	dom.cullDistRange?.addEventListener('input', (e) => {
@@ -1038,6 +1061,13 @@ function bindUI(): void {
 			saveUiPrefs();
 		});
 	});
+
+	// 环境光强度（渲染即时生效；lighting 不随 UI 偏好持久化）
+	bindSlider(dom.ambientIntensityRange, dom.ambientIntensityNum, (v) => {
+		applyConfigPatch(config, 'lighting', { ambientIntensity: v });
+		rendererMain?.applyConfigPatch('lighting', { ambientIntensity: v });
+		inputBridge?.sendConfig('lighting', { ambientIntensity: v });
+	}, (v) => Math.round(v * 20) / 20);
 
 	// 缺失纹理确认弹窗关闭
 	dom.missingTexturesOk?.addEventListener('click', () => {
