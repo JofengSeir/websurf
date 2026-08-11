@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
@@ -20,13 +21,65 @@ import type { ShmState, MsgState } from '../../../src/ts-shared/auth/shared-stat
 import { AuthorityCalibrator } from '../../../src/ts-shared/phys/authority-calibrator.js';
 import { PvsManager } from '../world/pvs-manager.js';
 
-const FOV = 75;
+/** FOV 默认值（CS:S 标准 75；面板 hud.fov 可调，60-110）。 */
+const FOV_DEFAULT = 75;
 const DEG2RAD = Math.PI / 180;
+
+// ── 空间分块合并参数（optimizeScene：GLB 挂载后渲染减负）──────────
+// surf_666 GLB：117 meshes / 34409 primitives / 377385 顶点——GLTFLoader 每个 primitive
+// 生成一个 THREE.Mesh → 场景 ~3.4 万 Mesh 对象：每帧 three.js 遍历 3.4 万对象做剔除 +
+// 可见 mesh 逐个 draw call → 渲染耗时接近 vsync 帧间隔（120Hz=8.3ms）→ 合成器错过取帧 →
+// 视觉帧率减半。分块合并把 3.4 万对象 → ~300~800 空间块（块内按材质子合并，draw call =
+// 材质数而非 mesh 数）→ 渲染耗时 < 5ms。逻辑移植自 test/src/worker-b.ts optimizeScene
+// （已验证 34409 mesh → 300~800 块），主线程差异见方法注释。
+/** 目标 cell 数（cell 大小 = 世界包围盒对角线 / cbrt(目标块数)，自适应微调区间 [300,800]）。 */
+const OPT_TARGET_CELLS = 512;
+/** 非空 cell 数目标下限/上限（自适应微调）。 */
+const OPT_MIN_CELLS = 300;
+const OPT_MAX_CELLS = 800;
+/** cell 大小钳制（world units；surf_666 世界 ~16320 → cell ≈ 512~1024 数量级）。 */
+const OPT_CELL_MIN = 128;
+const OPT_CELL_MAX = 4096;
+/**
+ * 视锥外保留圈（frustum culling 包围球膨胀系数）：three.js 每帧按 geometry.boundingSphere
+ * 判定剔除——半径 ×FRUSTUM_PAD 后，视锥外约 (FRUSTUM_PAD-1)×半径 的块仍渲染（疯狂晃动/快速
+ * 转动时，新进入视锥的几何上一帧已预渲染 → 边缘不空白；块包围球大者膨胀量自然大，覆盖一帧
+ * 相机移动量）。同 test worker-b FRUSTUM_PAD。
+ */
+const FRUSTUM_PAD = 1.6;
+
+/** 分块收集的 mesh + 世界包围盒中心（分块键用；同 worker-b OptMeshInfo）。 */
+interface OptMeshInfo {
+  mesh: THREE.Mesh;
+  cx: number;
+  cy: number;
+  cz: number;
+}
+
+/** cell 键：世界坐标 / cellSize 取整（字符串键；一次性分桶，无性能要求）。 */
+function optCellKey(x: number, y: number, z: number, cellSize: number): string {
+  return Math.floor(x / cellSize) + '|' + Math.floor(y / cellSize) + '|' + Math.floor(z / cellSize);
+}
+
+/** 非空 cell 计数（cell 大小自适应循环用）。 */
+function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
+  const keys = new Set<string>();
+  for (const it of infos) keys.add(optCellKey(it.cx, it.cy, it.cz, cellSize));
+  return keys.size;
+}
 
 /** LOD 级别。 */
 const LOD_NEAR = 0;
 const LOD_FAR = 2;
 const LOD_PVS_HIDDEN = -1;
+/**
+ * PVS 剔除开关：**当前禁用**（实证 surf_666 PVS 数据不可用：8269 cluster 平均可见率
+ * 仅 1.6%（中位 1.3%、最大 5.1%）、spawn 点 cluster=-1——开放 surf 图 BSP leaf/PVS
+ * 划分失效，可见集几乎为空 → 相邻区域被错误全剔（"必须穿过连接处才能看到"）+ 晃动
+ * 穿越 cluster 边界时边缘消失）。分块合并后渲染量已由视锥剔除（FRUSTUM_PAD 膨胀）+ 
+ * 距离 LOD（cullDistance）控制，PVS 为负收益。PVS 数据修复后可置 true 恢复。
+ */
+const ENABLE_PVS = false;
 
 export class RendererMain {
   private renderer: THREE.WebGLRenderer | null = null;
@@ -130,7 +183,12 @@ export class RendererMain {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(FOV, width / Math.max(height, 1), 0.1, 100000);
+    this.camera = new THREE.PerspectiveCamera(
+      this.config?.hud?.fov ?? FOV_DEFAULT,
+      width / Math.max(height, 1),
+      0.1,
+      100000,
+    );
     this.camera.position.set(0, 100, 0);
 
     // 固定三点光（替代原 LightManager）
@@ -163,6 +221,11 @@ export class RendererMain {
     const maxDim = Math.max(size.x, size.y, size.z);
 
     this.scene.add(scene);
+
+    // 1.5 空间分块合并（GLB 挂载后、PVS/LOD 注册前）：3.4 万 mesh → ~300~800 空间块。
+    //    必须在下方 traverse（lodItems 收集 + clusterIds 分配 = lodManager.setup/
+    //    assignClusterIds 的主线程等价物）之前执行——setup 收集分块后的块 mesh。
+    this.optimizeScene(scene, gltf.scene);
 
     // 2. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 updateNearPlane 收缩）
     this.defaultNear = Math.max(maxDim / 1000, RendererMain.CAMERA_NEAR_MIN);
@@ -388,6 +451,13 @@ export class RendererMain {
     }
   }
 
+  /** 设置视野角 FOV（度，面板调用；相机透视矩阵即时更新）。 */
+  setFov(fov: number): void {
+    if (!this.camera) return;
+    this.camera.fov = fov;
+    this.camera.updateProjectionMatrix();
+  }
+
   // ── 主线程唯一物理线 ───────────────────────────────────────
 
   /** 主线程初始化 wasm（PhysWorld 模块）。dist 内嵌模式传 wasmB64（file:// 无法 fetch）。
@@ -592,10 +662,10 @@ export class RendererMain {
     // 2. LOD/PVS 剔除
     if (this.lodItems.length > 0) {
       const pvs = this.pvsManager;
-      if (pvs) pvs.update(camPos);
+      if (ENABLE_PVS && pvs) pvs.update(camPos);
       // PVS 安全保护（主项目同法）：相机不在任何 cluster（出生在固体/地图外）时
       // 可见集为空，有 cluster 的 mesh 会被错误全剔 → 跳过 PVS，仅按距离 LOD
-      const pvsActive = pvs !== null && pvs.enabled;
+      const pvsActive = ENABLE_PVS && pvs !== null && pvs.enabled;
       const pvsClusterValid = pvs !== null && pvs.currentClusterId >= 0;
       for (const item of this.lodItems) {
         const dist = item.center.distanceTo(camPos);
@@ -657,5 +727,222 @@ export class RendererMain {
       }
     }
     gltf.scene.updateMatrixWorld(true);
+  }
+
+  // ── 空间分块合并（optimizeScene：GLB 挂载后执行一次）─────────────
+  // 渲染减负核心：3.4 万 Mesh（每帧遍历/剔除开销）→ ~300~800 空间块。
+  // 移植自 test/src/worker-b.ts optimizeScene（已验证：34409 mesh → 300~800 块）。
+  // 与 test 的差异（Worker → 主线程）：
+  // - 载体：test 重建 modelRoot 组替换；本实现直接在 BSP 根（bspRoot，userData.isBspModel
+  //   保留不变）内替换内容——移除 gltf.scene、块 mesh 直接挂 BSP 根；
+  // - 时序：loadScene 中场景挂载（this.scene.add）之后、PVS/LOD 注册 traverse 之前执行——
+  //   下方 traverse 收集分块后的 mesh（lodItems + clusterIds 对块生效）；
+  // - 统计：前向视锥估算用 this.camera（非 Worker 模块级 camera）。
+  // 流程：① scene.updateMatrixWorld(true) → traverse 收集 Mesh（世界包围盒中心）
+  // ② cell 自适应（世界对角 / cbrt(目标块数)，微调落 [300,800]）
+  // ③ 顶点 applyMatrix4(matrixWorld) 烘焙世界空间（clone 后变换，勿动原 geometry）
+  // ④ 单 mesh cell 保留原 mesh（变换清零重挂）；多 mesh cell 块内按材质（实例恒等）子
+  //    合并 → mergeGeometries(useGroups=true) 最终合并（groups 保留材质索引）；多材质/
+  //    无材质 mesh 防御性烘焙保留；失败保持场景原状（计算先行、后替换）
+  // ⑤ console.log 统计：原 mesh 数 → 块数、平均顶点、draw call 估算、前向视锥可见块
+  private optimizeScene(bspRoot: THREE.Scene, gltfScene: THREE.Object3D): void {
+    // ① 收集：matrixWorld 更新后作为世界变换基准；多材质 mesh（GLB primitive 恒单材质，
+    //    防御性路径）与无材质 mesh 单独烘焙保留，不参与分块
+    bspRoot.updateMatrixWorld(true);
+    const infos: OptMeshInfo[] = [];
+    const keptMeshes: THREE.Mesh[] = [];
+    const worldBox = new THREE.Box3();
+    const box = new THREE.Box3();
+    const center = new THREE.Vector3();
+    bspRoot.traverse((obj) => {
+      const m = obj as THREE.Mesh;
+      if (!m.isMesh) return;
+      if (!m.geometry || !m.geometry.attributes.position) return;
+      if (Array.isArray(m.material) || !m.material) {
+        // 多材质/无材质：烘焙到世界空间后整体保留（不参与分块合并）
+        if (Array.isArray(m.material)) {
+          const baked = m.geometry.clone();
+          baked.applyMatrix4(m.matrixWorld);
+          m.geometry.dispose();
+          m.geometry = baked;
+          m.position.set(0, 0, 0);
+          m.rotation.set(0, 0, 0);
+          m.scale.set(1, 1, 1);
+          m.updateMatrix();
+          keptMeshes.push(m);
+        }
+        return;
+      }
+      const g = m.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      if (!g.boundingBox) return;
+      box.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
+      worldBox.union(box);
+      box.getCenter(center);
+      infos.push({ mesh: m, cx: center.x, cy: center.y, cz: center.z });
+    });
+    if (infos.length === 0) return;
+
+    // ② cell 大小自适应：cell = 世界包围盒对角线 / cbrt(目标块数)，再按非空 cell 数微调
+    //    （非空 cell 偏少 → 缩小 cell，偏多 → 放大 cell，收敛到 300~800）
+    const diag = Math.max(worldBox.getSize(new THREE.Vector3()).length(), 1);
+    let cellSize = Math.min(Math.max(diag / Math.cbrt(OPT_TARGET_CELLS), OPT_CELL_MIN), OPT_CELL_MAX);
+    for (let i = 0; i < 6; i++) {
+      const n = optCountCells(infos, cellSize);
+      if (n >= OPT_MIN_CELLS && n <= OPT_MAX_CELLS) break;
+      const scale = Math.min(Math.max(Math.cbrt(n / OPT_TARGET_CELLS), 0.55), 1.8);
+      cellSize = Math.min(Math.max(cellSize * scale, OPT_CELL_MIN), OPT_CELL_MAX);
+    }
+
+    // ③ 分桶：每 mesh 世界包围盒中心归 cell（横跨多 cell 归中心所在 cell）
+    const cells = new Map<string, OptMeshInfo[]>();
+    for (const it of infos) {
+      const key = optCellKey(it.cx, it.cy, it.cz, cellSize);
+      let arr = cells.get(key);
+      if (!arr) {
+        arr = [];
+        cells.set(key, arr);
+      }
+      arr.push(it);
+    }
+
+    // ④ 合并 + 替换：单 mesh cell 保留原 mesh（烘焙世界变换、移除原父变换）；
+    //    多 mesh cell 块内按材质子合并 → 最终 mergeGeometries(useGroups=true)（groups 保留
+    //    材质索引：材质去重收集 + 块内索引重映射）→ 每块一个 THREE.Mesh(mergedGeom, materials)
+    const chunks: THREE.Mesh[] = [];
+    let chunkCount = 0;
+    let drawCallEst = 0;
+    let vertsTotal = 0;
+    for (const arr of cells.values()) {
+      if (arr.length === 1) {
+        const m = arr[0].mesh;
+        const baked = m.geometry.clone();
+        baked.applyMatrix4(m.matrixWorld);
+        m.geometry.dispose();
+        m.geometry = baked;
+        m.position.set(0, 0, 0);
+        m.rotation.set(0, 0, 0);
+        m.scale.set(1, 1, 1);
+        m.updateMatrix();
+        chunks.push(m);
+        chunkCount++;
+        drawCallEst++;
+        vertsTotal += baked.attributes.position.count;
+        continue;
+      }
+
+      // 多 mesh cell：块内按材质（实例恒等）分组 → 同材质子合并 → 每材质一个几何
+      const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+      for (const it of arr) {
+        const m = it.mesh;
+        const mat = m.material as THREE.Material;
+        const baked = m.geometry.clone();
+        baked.applyMatrix4(m.matrixWorld);
+        let list = byMat.get(mat);
+        if (!list) {
+          list = [];
+          byMat.set(mat, list);
+        }
+        list.push(baked);
+      }
+      const mergedGeoms: THREE.BufferGeometry[] = [];
+      const mats: THREE.Material[] = [];
+      for (const [mat, geoms] of byMat) {
+        let merged: THREE.BufferGeometry[];
+        if (geoms.length === 1) {
+          merged = geoms;
+        } else {
+          const mg = mergeGeometries(geoms, false);
+          if (mg) {
+            for (const g of geoms) g.dispose();
+            merged = [mg];
+          } else {
+            merged = geoms; // 属性不一致（防御）：保留单独几何，材质索引各自映射
+          }
+        }
+        for (const g of merged) {
+          mergedGeoms.push(g);
+          mats.push(mat);
+        }
+      }
+      if (mergedGeoms.length === 0) {
+        for (const it of arr) it.mesh.geometry.dispose();
+        continue;
+      }
+      let chunk: THREE.Mesh;
+      if (mergedGeoms.length === 1) {
+        chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
+        drawCallEst++;
+      } else {
+        const final = mergeGeometries(mergedGeoms, true);
+        if (final) {
+          for (const g of mergedGeoms) if (g !== final) g.dispose();
+          chunk = new THREE.Mesh(final, mats);
+          drawCallEst += final.groups.length;
+        } else {
+          // 最终合并失败（极端防御）：每个材质单独一块
+          chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
+          for (let i = 1; i < mergedGeoms.length; i++) {
+            chunks.push(new THREE.Mesh(mergedGeoms[i], mats[i]));
+            chunkCount++;
+            drawCallEst++;
+          }
+        }
+      }
+      for (const it of arr) it.mesh.geometry.dispose();
+      chunkCount++;
+      for (const g of mergedGeoms) vertsTotal += g.attributes.position.count;
+      chunks.push(chunk);
+    }
+
+    // ④b 替换：移除原 GLB 子树（旧 mesh 几何已逐个 dispose），块 mesh 直接挂 BSP 根
+    //    （bspRoot.userData.isBspModel 保留——disposeScene/updateNearPlane 依赖）；add()
+    //    自动使块 mesh 脱离原父节点
+    const totalMeshes = infos.length;
+    for (const m of chunks) bspRoot.add(m);
+    for (const m of keptMeshes) bspRoot.add(m);
+    bspRoot.remove(gltfScene);
+
+    // ④c 视锥外保一圈：块 geometry.boundingSphere 半径 ×FRUSTUM_PAD。
+    //    必须强制 computeBoundingSphere（非 null 检查）：烘焙路径是 geometry.clone() +
+    //    applyMatrix4(matrixWorld)——克隆残留 GLB 局部空间的旧球（非 null 会被跳过）→
+    //    剔除按错误位置判定 → 眼前块被误剔不渲染。顶点已烘焙世界空间 → 重算球正确。
+    //    只影响剔除判定，不改变几何/包围盒；LOD/PVS（userData 数据）不受影响。
+    for (const child of bspRoot.children) {
+      const g = (child as THREE.Mesh).geometry;
+      if (!g) continue;
+      g.computeBoundingSphere();
+      (g.boundingSphere as THREE.Sphere).radius *= FRUSTUM_PAD;
+    }
+
+    // ⑤ 统计 + 前向视锥可见块估算（仅诊断：块包围盒中心与相机方向点积粗估，FOV 75°）
+    const chunkBox = new THREE.Box3();
+    const chunkCenter = new THREE.Vector3();
+    const toCam = new THREE.Vector3();
+    let visibleEst = -1;
+    const camera = this.camera;
+    if (camera) {
+      camera.updateMatrixWorld(true);
+      const camDir = new THREE.Vector3();
+      camera.getWorldDirection(camDir);
+      const cosHalfFov = Math.cos(((this.config?.hud?.fov ?? FOV_DEFAULT) / 2) * DEG2RAD);
+      visibleEst = 0;
+      for (const child of bspRoot.children) {
+        const mesh = child as THREE.Mesh;
+        chunkBox.setFromObject(mesh);
+        if (chunkBox.isEmpty()) continue;
+        chunkBox.getCenter(chunkCenter);
+        toCam.subVectors(chunkCenter, camera.position);
+        const dist = toCam.length();
+        if (dist < camera.far && toCam.dot(camDir) / dist > cosHalfFov) visibleEst++;
+      }
+    }
+    console.log(
+      `[optimizeScene] 分块合并: ${totalMeshes} mesh → ${chunkCount} 块` +
+        `（cellSize=${cellSize.toFixed(1)}、非空 cell=${cells.size}）| ` +
+        `平均顶点/块 ${(vertsTotal / Math.max(chunkCount, 1)).toFixed(0)}（总顶点 ${vertsTotal}）| ` +
+        `draw call 估算 ${drawCallEst} | ` +
+        `前向视锥可见块估算 ${visibleEst >= 0 ? `${visibleEst}/${chunkCount}` : 'N/A（camera 未就绪）'}`,
+    );
   }
 }

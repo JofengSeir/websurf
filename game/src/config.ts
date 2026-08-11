@@ -66,6 +66,8 @@ export interface HudConfig {
   speedMode: 'lateral' | 'lateral-vertical' | 'total';
   /** 准星风格（见 CrosshairConfig）。 */
   crosshair: CrosshairConfig;
+  /** 视野角 FOV（度，CS:S 标准 75；面板 60-110 可调）。 */
+  fov: number;
 }
 
 /** 纹理画质配置（mosaic 共享模块，运行时切换贴图，无需重载地图）。 */
@@ -121,6 +123,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   hud: {
     showCrosshair: true,
     speedMode: 'lateral',
+    fov: 75,
     crosshair: {
       color: '#4ade80',
       size: 6,
