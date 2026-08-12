@@ -538,8 +538,35 @@ function initRenderer(canvas: OffscreenCanvas): void {
   // 雾（视距优化）：0.4×far 起淡出、0.9×far 全雾——远处细节淡化（消除远处闪烁/降低感知
   // 负荷；far=12288 → 雾 4915.2~11059.2；LOD_DIST 9200 恰在雾深处——隐藏块已融入背景色）
   scene.fog = new THREE.Fog(BG_COLOR, CAMERA_FAR * 0.4, CAMERA_FAR * 0.9);
-  // trace 路径线（公共 TraceRenderer，惰性创建线）
-  traceRenderer = new TraceRenderer(scene);
+  // trace 路径线（公共 TraceRenderer，渲染引擎无关；注入 three 适配 lineFactory）
+  const traceScene = scene; // initRenderer 内 scene 已就绪（非空）
+  traceRenderer = new TraceRenderer({
+    lineFactory: (color: number) => {
+      const line = new THREE.Line(
+        new THREE.BufferGeometry(),
+        new THREE.LineBasicMaterial({ color }),
+      );
+      traceScene.add(line);
+      return {
+        setPoints: (pts) => {
+          line.geometry.dispose();
+          if (pts.length < 2) {
+            line.visible = false;
+            return;
+          }
+          line.geometry = new THREE.BufferGeometry().setFromPoints(
+            pts.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
+          );
+          line.visible = true;
+        },
+        dispose: () => {
+          traceScene.remove(line);
+          line.geometry.dispose();
+          (line.material as THREE.Material).dispose();
+        },
+      };
+    },
+  });
 
   camera = new THREE.PerspectiveCamera(
     fov,
