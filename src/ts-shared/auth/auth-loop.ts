@@ -57,6 +57,8 @@ export interface AuthCollisionEvent {
   /** 权威碰撞瞬间朝向（度；权威仅在碰撞判断时可影响渲染角度）。 */
   yawDeg: number;
   pitchDeg: number;
+  /** 权威碰撞瞬间速度（land：以权威速度为校准基准；blocked：供参考）。 */
+  vel: number[];
   timeMs: number;
 }
 
@@ -164,6 +166,7 @@ export function createAuthLoop(env: AuthLoopEnv): AuthLoop {
         pos: [s.posX, s.posY, s.posZ],
         yawDeg: s.yaw,
         pitchDeg: s.pitch,
+        vel: [s.velX, s.velY, s.velZ],
         timeMs: performance.now(),
       });
       return;
@@ -180,6 +183,7 @@ export function createAuthLoop(env: AuthLoopEnv): AuthLoop {
         pos: [s.posX, s.posY, s.posZ],
         yawDeg: s.yaw,
         pitchDeg: s.pitch,
+        vel: [s.velX, s.velY, s.velZ],
         timeMs: performance.now(),
       });
     }

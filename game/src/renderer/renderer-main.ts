@@ -2,7 +2,7 @@
  * 主线程渲染器（最小化版）— 客户端预测渲染。
  *
  * 架构（2026-08-07 v4.1）：
- * - 主线程持 wasm `PhysWorld` 预测实例：每 rAF 调 `predict(dt, keys, dx, dy)`
+ * - 主线程持 wasm `PhysWorld` 预测实例：每 rAF 调 `tick(dt, keys, dx, dy)`
  *   做**真实物理模拟**（移动语义 + 碰撞），渲染预测结果（输入零延迟）
  * - Worker-A 权威物理每帧写全状态到 SAB → 主线程 `set_state` 修正预测基线
  *   （标准客户端预测：本地模拟即时响应，权威定期纠偏）
@@ -21,8 +21,8 @@ import type { ShmState, MsgState } from '../../../src/ts-shared/auth/shared-stat
 import { AuthorityCalibrator } from '../../../src/ts-shared/phys/authority-calibrator.js';
 import { PvsManager } from '../world/pvs-manager.js';
 
-/** FOV 默认值（CS:S 标准 75；面板 hud.fov 可调，60-110）。 */
-const FOV_DEFAULT = 75;
+/** FOV 默认值（73.6；面板 hud.fov 可调，60-110）。 */
+const FOV_DEFAULT = 73.6;
 const DEG2RAD = Math.PI / 180;
 
 // ── 空间分块合并参数（optimizeScene：GLB 挂载后渲染减负）──────────
@@ -101,8 +101,6 @@ export class RendererMain {
   private pendingDx = 0;
   private pendingDy = 0;
   private pendingKeys = 0;
-  /** noclip 模式（物理走 tick 的 noclip_step 分支，无碰撞纯移动）。 */
-  private noclipActive = false;
   /** 权威校准（公共化：correctFromAuthority 三条件 OR + 250ms 冷却 + syncInFlight
    * 回滚、calibrateVelocity 外推、applyCollisionCorrection、resetTo 收敛到
    * ts-shared AuthorityCalibrator）。 */
@@ -140,7 +138,6 @@ export class RendererMain {
   private readonly _nearSphere = new THREE.Sphere();
   private readonly _nearDirF = new THREE.Vector3();
   private readonly _nearDirR = new THREE.Vector3();
-  private readonly _nearDirU = new THREE.Vector3();
   private readonly _nearRaycaster = new THREE.Raycaster();
 
 
@@ -370,7 +367,6 @@ export class RendererMain {
     this.pendingDx = 0;
     this.pendingDy = 0;
     this.pendingKeys = 0;
-    this.noclipActive = false;
     // 权威帧校准状态清零（防跨地图残留权威帧注入新地图）
     this.calibrator.clear();
   }
@@ -496,7 +492,6 @@ export class RendererMain {
     );
     this.predPhys = phys;
     this.predReady = true;
-    this.noclipActive = false;
     // 权威帧校准状态清零（首帧权威帧将作为新起点）
     this.calibrator.clear();
   }
@@ -570,8 +565,8 @@ export class RendererMain {
    * 权威碰撞事件 → 位置微调 + 角度同步（权威仅在碰撞判断时可影响渲染角度；
    * 实现见 ts-shared AuthorityCalibrator）。
    */
-  applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number): void {
-    this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg);
+  applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number, vel?: number[]): void {
+    this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg, vel);
   }
 
   /** 面板参数实时同步到主线程物理实例（与 set_params 同字段）。 */
@@ -589,7 +584,6 @@ export class RendererMain {
    * 物理实例内部切换，无需额外渲染分支。
    */
   setPredictionNoclip(active: boolean): void {
-    this.noclipActive = active;
     try {
       this.predPhys?.set_noclip(active);
     } catch (err) {
@@ -915,7 +909,7 @@ export class RendererMain {
       (g.boundingSphere as THREE.Sphere).radius *= FRUSTUM_PAD;
     }
 
-    // ⑤ 统计 + 前向视锥可见块估算（仅诊断：块包围盒中心与相机方向点积粗估，FOV 75°）
+    // ⑤ 统计 + 前向视锥可见块估算（仅诊断：块包围盒中心与相机方向点积粗估，FOV 73.6°）
     const chunkBox = new THREE.Box3();
     const chunkCenter = new THREE.Vector3();
     const toCam = new THREE.Vector3();

@@ -81,7 +81,11 @@ const I_KEYS_MASK = 6;
 
 /** 控制区：RENDER_WAKEUP 渲染帧对齐唤醒信号（Int32，WorkerB 专用槽）。
  * 与 WAKEUP 分离：WorkerA 物理背压与 WorkerB 渲染帧循环不再挂起同一槽——
- * 物理 wait 的 CAS 复位不再"抢"渲染唤醒（帧边界抖动/一帧双绘根因）。 */
+ * 物理 wait 的 CAS 复位不再"抢"渲染唤醒（帧边界抖动/一帧双绘根因）。
+ * **计数语义**（Atomics.add 递增，非 store 电平）：主线程每 rAF add+1；
+ * WorkerB waitRenderWakeup 记录 lastRenderWake 消费差值——渲染完成后
+ * absorbRenderWake 吸收渲染期间到达的信号（合并丢弃），渲染频率严格 =
+ * min(显示器刷新率, GPU 渲染耗时)，杜绝忙循环超限（渲染快时不会 > 刷新率）。 */
 const I_RENDER_WAKEUP = 7;
 
 /** 状态槽：V 版本号（Int32，Atomics.add 递增）。 */
@@ -173,6 +177,9 @@ export class TestShared {
   private readonly f64: Float64Array;
   /** readState 上次见到的版本号（acquire 读 V 比对，未变返回 null）。 */
   private lastV = 0;
+  /** waitRenderWakeup 上次消费的唤醒计数（SAB 计数语义：每 rAF 一次 add，
+   * 渲染循环消费差值——渲染快时不会忙循环超过刷新率）。 */
+  private lastRenderWake = 0;
 
   // ── 消息回退模式状态（msg-* 模式专用；SAB 模式不使用）──
   /** msg-physics 本地输入累加（main 的 shared-input 消息 onInputMessage 填充）。 */
@@ -292,9 +299,9 @@ export class TestShared {
 
   /**
    * 阶段1 唤醒双 Worker（双槽分离）：WAKEUP → WorkerA 物理背压；RENDER_WAKEUP → WorkerB
-   * 渲染帧循环。各槽 notify 计数 = 1（每槽恰一个等待者——物理背压与渲染帧对齐互不干扰：
-   * WorkerA 的 wait 返回后 CAS 复位 WAKEUP，WorkerB 的帧边界由 RENDER_WAKEUP 独立维持，
-   * 不再出现"物理先到消费唤醒 → 渲染帧被拖延一整帧"的抖动）。
+   * 渲染帧循环。WAKEUP 用 store 电平 + CAS 复位（单等待者）；RENDER_WAKEUP 用 **计数语义**
+   * （Atomics.add 递增）：主线程每 rAF 唤醒一次 → 计数 +1，WorkerB waitRenderWakeup 消费
+   * 差值——渲染期间到达的信号由 absorbRenderWake 合并丢弃，渲染频率不会超过刷新率。
    */
   wake(): void {
     if (this.mode === 'msg-main') {
@@ -302,7 +309,7 @@ export class TestShared {
     }
     Atomics.store(this.i32, I_WAKEUP, 1);
     Atomics.notify(this.i32, I_WAKEUP, 1);
-    Atomics.store(this.i32, I_RENDER_WAKEUP, 1);
+    Atomics.add(this.i32, I_RENDER_WAKEUP, 1); // 计数 +1（非 store——防止渲染期间覆盖丢失）
     Atomics.notify(this.i32, I_RENDER_WAKEUP, 1);
   }
 
@@ -325,22 +332,41 @@ export class TestShared {
   }
 
   /**
-   * WorkerB 渲染帧循环：wait(RENDER_WAKEUP, 0, timeoutMs) 挂起在**帧信号槽**上——
-   * 主驱动 = 主线程 rAF 的 wake()（store+notify RENDER_WAKEUP——vsync 对齐，渲染
+   * WorkerB 渲染帧循环：wait(RENDER_WAKEUP, lastRenderWake, timeoutMs) 挂起在**帧信号槽**上——
+   * 主驱动 = 主线程 rAF 的 wake()（Atomics.add RENDER_WAKEUP + notify——vsync 对齐，渲染
    * 节奏 = 显示器刷新，呈现平滑）；WorkerA 发布（writeStateRaw）**不 notify**（仅
    * V++，1kHz 随机相位唤醒已移除——见 writeStateRaw）；超时兜底自驱（主线程 rAF
    * 停摆时仍以自身节奏采样 V，渲染不冻结）。
-   * 复位语义与 waitWakeup 相同（CAS(1→0) 消费；'timed-out' 保留窗口内新唤醒）。
+   * **计数语义**：等待"计数 > lastRenderWake"（非电平），消费差值后更新 lastRenderWake。
+   * 渲染完成后须调 absorbRenderWake() 吸收渲染期间新到的信号——否则渲染期间到达的
+   * add 会让下次 wait 立即返回 → 忙循环（渲染频率 = 1/渲染耗时，可能远超刷新率）。
    * @returns 是否被唤醒；超时返回 false。
    */
   waitRenderWakeup(timeoutMs: number): boolean {
     if (this.mode !== 'sab') {
       return false; // 消息回退：同 waitWakeup——自投递续环即自驱，无等待
     }
-    const res = Atomics.wait(this.i32, I_RENDER_WAKEUP, 0, timeoutMs);
+    // 快路径：已有未消费信号（渲染期间到达）→ 直接消费一次
+    if (Atomics.load(this.i32, I_RENDER_WAKEUP) !== this.lastRenderWake) {
+      this.lastRenderWake = Atomics.load(this.i32, I_RENDER_WAKEUP);
+      return true;
+    }
+    const res = Atomics.wait(this.i32, I_RENDER_WAKEUP, this.lastRenderWake, timeoutMs);
     if (res === 'timed-out') return false;
-    Atomics.compareExchange(this.i32, I_RENDER_WAKEUP, 1, 0);
+    // 'ok'/'not-equal'：计数已变（>= lastRenderWake+1），消费到当前值
+    this.lastRenderWake = Atomics.load(this.i32, I_RENDER_WAKEUP);
     return true;
+  }
+
+  /**
+   * 渲染完成后吸收渲染期间新到的唤醒信号（SAB 渲染帧节流关键）：
+   * 渲染耗时 < 帧间隔时，主线程在渲染期间仍会 add RENDER_WAKEUP；若不吸收，
+   * 下一次 waitRenderWakeup 看到计数变化立即返回 → 忙循环超过刷新率（重复释放
+   * 性能上限）。吸收 = 合并丢弃渲染期间到达的信号，渲染频率严格 = 刷新率上限。
+   */
+  absorbRenderWake(): void {
+    if (this.mode !== 'sab') return;
+    this.lastRenderWake = Atomics.load(this.i32, I_RENDER_WAKEUP);
   }
 
   // ── 输入槽（主线程累加写 / WorkerA CAS 消费）──────────────────

@@ -113,11 +113,11 @@
     <button data-rate="1000">1000</button>
   </div>
 
-  <!-- 视野 FOV 调节：CS:S 标准 75，60-110 可调（main → WorkerB set-fov 即时生效） -->
+  <!-- 视野 FOV 调节：默认 73.6，60-110 可调（main → WorkerB set-fov 即时生效） -->
   <div id="fovbar">
     <label for="fovRange">FOV</label>
-    <input id="fovRange" type="range" min="60" max="110" step="1" value="75" />
-    <span id="fovVal">75</span>
+    <input id="fovRange" type="range" min="60" max="110" step="0.1" value="73.6" />
+    <span id="fovVal">73.6</span>
   </div>
 
   <!-- BSP 地图加载：文件选择 → 主线程解析（BspProcessor）→ WorkerA 物理世界 + WorkerB GLB 渲染 -->

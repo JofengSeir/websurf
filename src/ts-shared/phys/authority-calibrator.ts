@@ -301,6 +301,7 @@ export class AuthorityCalibrator {
     pos: number[],
     yawDeg: number,
     pitchDeg: number,
+    vel?: number[],
   ): void {
     const phys = this.deps.getPhys();
     if (!phys) return;
@@ -316,10 +317,14 @@ export class AuthorityCalibrator {
     const dist = Math.hypot(st.posX - pos[0], st.posY - pos[1], st.posZ - pos[2]);
     if (dist >= 60) return;
     if (kind === 'land') {
-      // 权威落地全状态（位置 + 角度 + 速度 + 着地），权威碰撞结果为准
-      phys.set_state(pos[0], pos[1], pos[2], yawDeg, pitchDeg, st.velX, st.velY, st.velZ, st.onGround);
+      // 权威落地全状态：位置 + 角度 + **权威碰撞速度** + 着地 true（落地瞬间已碰撞处理）
+      const vx = vel?.[0] ?? st.velX;
+      const vy = vel?.[1] ?? st.velY;
+      const vz = vel?.[2] ?? st.velZ;
+      phys.set_state(pos[0], pos[1], pos[2], yawDeg, pitchDeg, vx, vy, vz, true);
     } else {
-      // 撞墙：位置/角度取权威（速度由每帧校准收敛）
+      // 撞墙：位置/角度取权威，速度保留渲染侧（由逐帧校准收敛——碰撞后方向由
+      // 渲染物理自身演化，避免权威速度注入造成视觉抖动）
       phys.set_state(pos[0], pos[1], pos[2], yawDeg, pitchDeg, st.velX, st.velY, st.velZ, st.onGround);
     }
   }

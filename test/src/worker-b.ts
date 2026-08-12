@@ -47,6 +47,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TestShared, type SharedStateMsg, type SharedStateData } from './shared-state.js';
+import { TraceRenderer } from '../../src/ts-shared/trace/trace-renderer.js';
+import type { TracePoint } from '../../src/ts-shared/trace/trace-types.js';
 
 // ── 消息握手（与 main.ts 约定）──────────────────────────────────
 interface InitSharedMessage {
@@ -124,12 +126,12 @@ interface StatusMessage {
 // ── 相机常量（视距优化 2026-08-09：far 20000→8192、near 0.1→0.5、pixelRatio 限 1、雾拉近；
 //    视野扩展 2026-08-11：FOV 75→90、far 8192→12288——surf_666 世界 ~16320，扩大视锥后
 //    旁边/远处不空白；配合距离 LOD（LOD_DIST=far×0.75≈9200 隐藏远处块）与雾承接视觉；
-//    FOV 面板可调 2026-08-12：默认改回 CS:S 标准 75，面板 60-110 滑块 set-fov 消息即时生效）
+//    FOV 面板可调 2026-08-12：默认 73.6，面板 60-110 滑块 set-fov 消息即时生效）
 // far 过大会：①深度缓冲精度差（远处闪烁/抖动）②单 mesh 大几何（surf_666 GLB 数十万三角）
 // frustum culling 无效——远处全几何仍参与光栅化 → 卡顿。12288 覆盖 surf_666 世界大部分，
 // 配合雾（0.4×far~0.9×far 淡出）消除远处细节；pixelRatio 限 1（高 dpr 屏像素 4 倍是卡顿主因）。
-/** 当前 FOV（度；默认 CS:S 标准 75，面板 set-fov 消息可调）。 */
-let fov = 75;
+/** 当前 FOV（度；默认 73.6，面板 set-fov 消息可调）。 */
+let fov = 73.6;
 const CAMERA_NEAR = 0.5;
 const CAMERA_FAR = 12288;
 const PIXEL_RATIO_MAX = 1;
@@ -428,64 +430,23 @@ let gltfLoader: GLTFLoader | null = null;
 /** GLB 是否已成功挂载（状态摘要回传 main 显示加载进度）。 */
 let glbReady = false;
 
-// ── trace 路径线（3D 场景显示：无限制基准[绿] vs tick 实际[红]——记录路径可视化）──
-let traceBasePts: THREE.Vector3[] = [];
-let traceTickPts: THREE.Vector3[] = [];
-let traceBaseLine: THREE.Line | null = null;
-let traceTickLine: THREE.Line | null = null;
-/** 路径节点滚动窗口上限（防内存溢出；按钮删除时清空）。 */
-const TRACE_MAX_POINTS = 2000;
-
-/** 首次 trace-point 时创建两条 3D 路径线（挂 scene；初始隐藏）。 */
-function ensureTraceLines(): void {
-  if (traceBaseLine || !scene) return;
-  traceBaseLine = new THREE.Line(
-    new THREE.BufferGeometry(),
-    new THREE.LineBasicMaterial({ color: 0x4ade80 }), // 绿 = 无限制基准
-  );
-  traceTickLine = new THREE.Line(
-    new THREE.BufferGeometry(),
-    new THREE.LineBasicMaterial({ color: 0xf87171 }), // 红 = tick 实际
-  );
-  traceBaseLine.visible = false;
-  traceTickLine.visible = false;
-  scene.add(traceBaseLine, traceTickLine);
-}
-
-/** 更新路径线几何（节点 < 2 时隐藏；每次重建 BufferGeometry）。 */
-function updateTraceLine(line: THREE.Line | null, pts: THREE.Vector3[]): void {
-  if (!line) return;
-  if (pts.length < 2) {
-    line.visible = false;
-    return;
-  }
-  line.geometry.dispose();
-  line.geometry = new THREE.BufferGeometry().setFromPoints(pts);
-  line.visible = true;
-}
-
-/** trace 节点（main 转发 WorkerA）：3D 世界坐标累积 → 更新两条线。 */
-function onTracePoint(msg: { baseX: number; baseY: number; baseZ: number; tickX: number; tickY: number; tickZ: number }): void {
-  ensureTraceLines();
-  traceBasePts.push(new THREE.Vector3(msg.baseX, msg.baseY, msg.baseZ));
-  traceTickPts.push(new THREE.Vector3(msg.tickX, msg.tickY, msg.tickZ));
-  if (traceBasePts.length > TRACE_MAX_POINTS) traceBasePts.shift();
-  if (traceTickPts.length > TRACE_MAX_POINTS) traceTickPts.shift();
-  updateTraceLine(traceBaseLine, traceBasePts);
-  updateTraceLine(traceTickLine, traceTickPts);
-}
-
-/** trace 清除（按钮"删除"）：清空节点 + 隐藏线。 */
-function onTraceClear(): void {
-  traceBasePts = [];
-  traceTickPts = [];
-  if (traceBaseLine) traceBaseLine.visible = false;
-  if (traceTickLine) traceTickLine.visible = false;
-}
+// ── trace 路径线（公共模块 TraceRenderer：绿=无限制基准 / 红=tick 实际）──
+/** 3D 路径线渲染器（scene 挂载后惰性创建；addPoint/clear 即时更新）。 */
+let traceRenderer: TraceRenderer | null = null;
 
 /** 本地副本：唯一渲染参数源（只被 readState 更新——WorkerA 1ms 无限制物理真理源；
  * 一旦非 null 永不回落 null——首帧竞争保护）。 */
 let localCopy: SharedStateData | null = null;
+
+// ── 渲染插值窗口（物理状态间平滑：渲染帧率 = 屏幕刷新率，观感平滑）──
+/** 上一物理状态（插值起点）。 */
+let interpLast: SharedStateData | null = null;
+/** 收到 interpLast 的时间戳（performance.now）。 */
+let interpLastT = 0;
+/** 当前物理状态（插值终点）。 */
+let interpCur: SharedStateData | null = null;
+/** 收到 interpCur 的时间戳。 */
+let interpCurT = 0;
 
 /** PVS 管理器（{type:'pvs'} 消息构建；null = 地图无 PVS 数据 → 全部可见）。 */
 let pvsManager: PvsManager | null = null;
@@ -517,7 +478,7 @@ self.addEventListener('message', (e: MessageEvent) => {
       initRenderer(msg.canvas);
       break;
     case 'set-fov':
-      // FOV 面板调节（CS:S 标准 75；60-110 可调，透视矩阵即时更新）
+      // FOV 面板调节（默认 73.6；60-110 可调，透视矩阵即时更新）
       if (typeof (msg as { fov?: unknown }).fov === 'number') {
         fov = (msg as { fov: number }).fov;
         if (camera) {
@@ -541,12 +502,19 @@ self.addEventListener('message', (e: MessageEvent) => {
       }
       break;
     case 'trace-point':
-      // trace 路径节点（3D 场景两条线：绿=无限制基准 / 红=tick 实际）
-      onTracePoint(msg);
+      // trace 路径节点（公共 TraceRenderer：绿=无限制基准 / 红=tick 实际）
+      if (traceRenderer) {
+        const p = msg as { baseX: number; baseY: number; baseZ: number; tickX: number; tickY: number; tickZ: number };
+        const pt: TracePoint = {
+          base: { x: p.baseX, y: p.baseY, z: p.baseZ },
+          tick: { x: p.tickX, y: p.tickY, z: p.tickZ },
+        };
+        traceRenderer.addPoint(pt);
+      }
       break;
     case 'trace-clear':
       // 按钮"删除"：清空路径线
-      onTraceClear();
+      traceRenderer?.clear();
       break;
   }
 });
@@ -570,6 +538,8 @@ function initRenderer(canvas: OffscreenCanvas): void {
   // 雾（视距优化）：0.4×far 起淡出、0.9×far 全雾——远处细节淡化（消除远处闪烁/降低感知
   // 负荷；far=12288 → 雾 4915.2~11059.2；LOD_DIST 9200 恰在雾深处——隐藏块已融入背景色）
   scene.fog = new THREE.Fog(BG_COLOR, CAMERA_FAR * 0.4, CAMERA_FAR * 0.9);
+  // trace 路径线（公共 TraceRenderer，惰性创建线）
+  traceRenderer = new TraceRenderer(scene);
 
   camera = new THREE.PerspectiveCamera(
     fov,
@@ -956,13 +926,15 @@ function assignMeshCullingData(): void {
  * - PVS：每帧只调 pvsManager.update（findLeaf 轻量；cluster 变化才重解码可见集）。
  *   相机不在任何 cluster（固体/地图外，currentClusterId < 0）时跳过 PVS 仅按距离 LOD
  *   （game 同法——避免可见集为空时 cluster 网格被错误全剔）。
- * - 由 onFrame 节流：仅本地副本更新（状态变化）时调用，状态静止不重遍历。
+ * - 由 onFrame 节流：仅渲染时调用（每次唤醒渲染，相机位置 = 插值/权威渲染状态）。
  * - force=true（GLB 刚挂载）：GLB/PVS 到达后强制重应用一次（首帧初始化场景）。
+ * @param camState 渲染相机状态（插值或权威）；缺省回退 localCopy（兼容旧调用）。
  */
-function applyCulling(force = false): void {
+function applyCulling(force = false, camState?: SharedStateData): void {
   if (!scene || !localCopy) return;
+  const ref = camState ?? localCopy;
   // 相机眼位（与 render 中 camera.position 一致：pos + EYE_STAND）
-  const cam = { x: localCopy.pos.x, y: localCopy.pos.y + EYE_STAND, z: localCopy.pos.z };
+  const cam = { x: ref.pos.x, y: ref.pos.y + EYE_STAND, z: ref.pos.z };
   const pvsActive = ENABLE_PVS && !!pvsManager && pvsManager.enabled;
   if (pvsActive) {
     pvsManager!.update(cam);
@@ -1031,15 +1003,17 @@ function frameTick(): boolean {
 
 /**
  * 帧信号驱动帧循环：waitRenderWakeup(RENDER_TIMEOUT_MS)——主线程 rAF 的 wake()
- * 为主驱动（store+notify RENDER_WAKEUP：vsync 对齐，每 rAF 一帧，呈现平滑）；
- * 超时兜底（主线程停摆时自驱，渲染不冻结）；未就绪（异常时序）时自投递续环，
- * 就绪后立即生效。**无节流**：每次唤醒都采样，V 更新才重绘（重复唤醒零成本）。
+ * 为主驱动（Atomics.add RENDER_WAKEUP 计数 + notify：vsync 对齐，每 rAF 一帧，
+ * 呈现平滑）；超时兜底（主线程停摆时自驱，渲染不冻结）；未就绪（异常时序）时
+ * 自投递续环，就绪后立即生效。**帧率上限 = 刷新率**：渲染完成后 absorbRenderWake
+ * 吸收渲染期间到达的信号（合并丢弃）→ 渲染快时不会忙循环超过刷新率（重复释放）。
  */
 resumeChannel.port1.onmessage = () => {
   let repainted = false;
   if (shared) {
     shared.waitRenderWakeup(RENDER_TIMEOUT_MS); // 主驱动 = 主线程 rAF 帧信号；超时 = 停摆兜底
     repainted = frameTick();
+    shared.absorbRenderWake(); // 渲染期间新到的唤醒 → 合并丢弃（严格 = 刷新率上限）
   }
   if (shared && shared.isMessageMode && !repainted) {
     // 消息回退模式节流：无新状态 → 低频自检（setTimeout 100ms 不受嵌套 4ms 钳制），
@@ -1051,34 +1025,90 @@ resumeChannel.port1.onmessage = () => {
 };
 
 /**
- * 帧处理：采样（非阻塞）→ 状态更新才重绘。
- * ① readState：V 更新 → 读最新槽（无撕裂）→ 刷新本地副本；未变 → 不重绘
- *   （状态未更新，保持上一帧画面——rAF 每帧唤醒但只在新状态时提交 Draw，
- *   且 HUD「重绘/s」反映真实渲染帧率而非唤醒频率）
- * ② 本地副本更新 → PVS 应用 + renderer.render 提交 GPU
- * @returns 是否发生重绘（V 更新——消息回退模式节流判定用）。
+ * 帧处理：采样（非阻塞）→ 每次唤醒都渲染（物理状态间插值平滑）。
+ * ① readState：V 更新 → 读最新槽（无撕裂）→ 刷新本地副本（权威状态）；未变 → 用插值
+ *   （物理发布 ~50Hz 但渲染 320Hz：两状态间线性插值相机位置/角度 → 观感 = 刷新率；
+ *   不再"V 未变不重绘"——那是观感 ~50fps 的根因）
+ * ② 渲染参数 = 插值状态（readState 成功时推进插值窗口；失败时按时间比例插值）
+ * ③ PVS 应用 + renderer.render 提交 GPU；stats.frames 仅在实际渲染时递增
+ * @returns 是否渲染（消息回退模式节流判定用：状态未更新也渲染 → 恒 true）。
  */
 function onFrame(): boolean {
-  stats.frames++; // 唤醒次数（主线程帧对齐度）
+  const now = performance.now();
   const state = shared!.readState(); // ① 非阻塞；V 更新→读最新槽（无撕裂），未变→null
+  const newState = state !== null;
   if (state) {
+    // 推进插值窗口：last ← cur（旧），cur ← 新权威状态（时间戳 = 收到时刻）
+    if (interpCur) {
+      interpLast = interpCur;
+      interpLastT = interpCurT;
+    } else {
+      // 首帧：无 prev，直接用权威状态（无插值）
+      interpLast = null;
+      interpLastT = 0;
+    }
+    interpCur = state;
+    interpCurT = now;
     // 本地副本只被 readState 更新（无其他来源——渲染参数零污染；首帧竞争保护：
     // localCopy 一旦非 null 永不回落 null）
     localCopy = state;
     stats.repaints++;
-    // LOD+PVS 剔除：渲染前应用可见性（距离 LOD 每帧 + cluster 变化时 PVS——单次遍历
-    // 合并；renderer.render 只提交可见 mesh，three.js frustum culling 自动执行）
-    applyCulling(false);
-    render();
-    return true;
   }
-  return false;
+  if (!localCopy || !interpCur) return false; // 首帧未就绪
+  // 消息回退模式：仅新状态到达时渲染（无 SAB 高频帧信号；状态即节奏，
+  // 节流防自旋——resumeChannel 自投递由 onStateMessage 触发，无新状态时降频）
+  if (shared!.isMessageMode && !newState) return false;
+  // ② 渲染参数：状态间插值（线性；yaw/pitch 角度环绕处理）——
+  //    独立 renderState，不污染 localCopy 权威语义（权威源仍只被 readState 更新）。
+  //    插值窗口 = 两次权威状态"到达时刻"之间：状态到达帧 now===interpCurT → alpha=1
+  //    （直接用最新权威，无中间帧）；仅当物理发布 < 刷新率时，状态到达间的后续 rAF
+  //    帧 now 落入窗口内 → alpha<1 产生中间帧（观感平滑）。现役 surf_666 物理 ~1kHz
+  //    发布 > 刷新率，每次唤醒都有新状态 → alpha 恒 1（正确：直接取最新权威）。
+  let renderState: SharedStateData;
+  if (interpLast && interpCurT > interpLastT) {
+    const span = interpCurT - interpLastT;
+    const alpha = Math.min(Math.max((now - interpLastT) / span, 0), 1);
+    renderState = interpolateState(interpLast, interpCur, alpha);
+  } else {
+    renderState = interpCur; // 首帧 / 窗口未建立：直接权威状态
+  }
+  stats.frames++; // 实际渲染提交（fps = 真实渲染帧率，非唤醒次数）
+  // LOD+PVS 剔除：渲染前应用可见性（距离 LOD 每帧 + cluster 变化时 PVS——单次遍历
+  // 合并；renderer.render 只提交可见 mesh，three.js frustum culling 自动执行）
+  applyCulling(false, renderState);
+  render(renderState);
+  return true;
 }
 
-/** 重绘：相机映射（FPS 约定）→ renderer.render 提交 GPU。 */
-function render(): void {
-  if (!renderer || !scene || !camera || !localCopy) return;
-  const t = localCopy;
+/** 两状态线性插值（位置/角度；yaw 最短路径环绕）。 */
+function interpolateState(a: SharedStateData, b: SharedStateData, alpha: number): SharedStateData {
+  // yaw 最短路径：d ∈ [-180, 180]
+  let dy = (b.yaw - a.yaw) % 360;
+  if (dy > 180) dy -= 360;
+  else if (dy < -180) dy += 360;
+  const yaw = a.yaw + dy * alpha;
+  // 归一化到 [-180, 180)：防止 350°→10° 插值出现 360/540 等越界值
+  const yawNorm = ((yaw + 180) % 360 + 360) % 360 - 180;
+  return {
+    pos: {
+      x: a.pos.x + (b.pos.x - a.pos.x) * alpha,
+      y: a.pos.y + (b.pos.y - a.pos.y) * alpha,
+      z: a.pos.z + (b.pos.z - a.pos.z) * alpha,
+    },
+    vel: {
+      x: a.vel.x + (b.vel.x - a.vel.x) * alpha,
+      y: a.vel.y + (b.vel.y - a.vel.y) * alpha,
+      z: a.vel.z + (b.vel.z - a.vel.z) * alpha,
+    },
+    yaw: yawNorm,
+    pitch: a.pitch + (b.pitch - a.pitch) * alpha,
+    v: b.v,
+  };
+}
+
+/** 重绘：相机映射（FPS 约定）→ renderer.render 提交 GPU。@param t 渲染状态（权威或插值）。 */
+function render(t: SharedStateData): void {
+  if (!renderer || !scene || !camera) return;
   // 度 → 弧度，'YXZ' 欧拉（yaw 绕 Y / pitch 绕 X；与 game renderer-main.ts 一致）
   camera.rotation.set(t.pitch * DEG2RAD, t.yaw * DEG2RAD, 0, 'YXZ');
   // 眼高：pos.y + EYE_STAND（64.09 固定站立，不处理蹲伏——状态槽无 eyeHeight）

@@ -9,7 +9,7 @@
  * - ESC 弹出式面板（PanelController）+ 速度面板 8Hz
  */
 
-import { createConfig, buildPhysicsParams } from './config.js';
+import { createConfig } from './config.js';
 import type { RuntimeConfig } from './config.js';
 import { BspProcessor, decompress_mtz } from '../pkg/websurf_wasm.js';
 import { InputBridge } from './input/input-bridge.js';
@@ -90,8 +90,8 @@ async function main(): Promise<void> {
       setError((msg as { message?: string }).message ?? 'Worker 错误');
     } else if (msg.type === 'phys-event') {
       // 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染）
-      const ev = msg as { kind: 'land' | 'blocked'; pos: number[]; yawDeg: number; pitchDeg: number };
-      renderer?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg);
+      const ev = msg as { kind: 'land' | 'blocked'; pos: number[]; yawDeg: number; pitchDeg: number; vel?: number[] };
+      renderer?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg, ev.vel);
     } else if (msg.type === 'phys-frame') {
       // MsgState 回退：Worker 权威帧消息 → 缓存（readAuthoritative 读取）
       const f = msg as { va: number; frame: { pos: { x: number; y: number; z: number }; yaw: number; pitch: number; vel: { x: number; y: number; z: number }; onGround: boolean; eyeHeight: number; timeMs: number } };

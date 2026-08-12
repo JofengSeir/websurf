@@ -14,8 +14,9 @@
  * - 阶段4：R 键 → postMessage({type:'respawn'}) 到 WorkerA
  */
 
-import { KEY_MASK, keysToMask, SHARED_BUFFER_SIZE, TestShared } from './shared-state.js';
+import { keysToMask, SHARED_BUFFER_SIZE, TestShared } from './shared-state.js';
 import { BspProcessor, initSync } from '../pkg/websurf_test_wasm.js';
+import type { TraceState } from '../../src/ts-shared/trace/trace-types.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement | null;
 const rateLabel = document.getElementById('rateLabel') as HTMLElement | null;
@@ -95,7 +96,7 @@ workerB.onmessage = (e: MessageEvent<WorkerBStatusMessage>) => {
     }
   }
   parts.push(`V${msg.v}`);
-  parts.push(`渲染 ${msg.fps} f/s · 重绘 ${msg.repaintSec}/s`);
+  parts.push(`渲染 ${msg.fps} f/s · 物理刷新 ${msg.repaintSec}/s`);
   statusLine.textContent = parts.join(' · ');
 };
 
@@ -291,7 +292,7 @@ document.querySelectorAll<HTMLButtonElement>('#difficulty button[data-rate]').fo
   });
 });
 
-// ── 视野 FOV：滑块 → WorkerB set-fov 消息（相机透视矩阵即时更新；CS:S 标准 75）──
+// ── 视野 FOV：滑块 → WorkerB set-fov 消息（相机透视矩阵即时更新；默认 73.6）──
 const fovRange = document.getElementById('fovRange') as HTMLInputElement | null;
 const fovVal = document.getElementById('fovVal') as HTMLElement | null;
 fovRange?.addEventListener('input', () => {
@@ -299,6 +300,11 @@ fovRange?.addEventListener('input', () => {
   if (fovVal) fovVal.textContent = String(fov);
   workerB.postMessage({ type: 'set-fov', fov });
 });
+// 初始化同步：HTML 滑条为 UI 源头，首帧即把默认 73.6 应用到 WorkerB
+// （与 worker-b.ts 默认值一致，双保险防初始态不一致）
+if (fovRange) {
+  workerB.postMessage({ type: 'set-fov', fov: Number(fovRange.value) });
+}
 
 // ── 路径记录（trace）：按钮状态机 **开始 → 保存 → 删除 → 开始** 循环——
 //    开始：清空 + 开启记录（WorkerA 采样节点）；保存：停止记录（路径保留显示）；
@@ -306,8 +312,7 @@ fovRange?.addEventListener('input', () => {
 //    （绿 = 无限制基准，红 = tick 实际）。仅记录时 WorkerA 发送节点（防内存溢出）──
 const traceBtn = document.getElementById('traceBtn') as HTMLButtonElement | null;
 const TRACE_MAX_NODES = 2000;
-/** 记录状态机：off（未记录）→ recording（记录中）→ saved（已保存保留显示）→ off。 */
-type TraceState = 'off' | 'recording' | 'saved';
+/** 记录状态机（公共 TraceState：off → recording → saved → off）。 */
 let traceState: TraceState = 'off';
 /** WorkerA 节点滚动窗口上限（转发前截断，防内存溢出）。 */
 const traceNodes: { base: { x: number; y: number; z: number }; tick: { x: number; y: number; z: number } }[] = [];
