@@ -1,7 +1,7 @@
 /**
  * WASM 契约校验：确认 pkg/websurf_wasm.d.ts 包含最小化实现所需的全部 API。
  *
- * 契约 = 导出层 9 API（BSP 解析/导出）+ 物理层 9 API（PhysWorld）。
+ * 契约 = 导出层 16 API（BSP 解析/导出/纹理）+ 物理层 17 API（PhysWorld）。
  * 缺失任一 API 即失败（提示先 npm run build:wasm）。
  *
  * 用法：node scripts/check-wasm-api.mjs
@@ -21,7 +21,7 @@ if (!existsSync(dtsPath)) {
 
 const dts = readFileSync(dtsPath, 'utf8');
 
-// 导出层：BspProcessor 方法与独立函数（BSP 解析 → GLB/碰撞/实体/PVS）
+// 导出层：BspProcessor 方法与独立函数（BSP 解析 → GLB/碰撞/实体/PVS/纹理）
 const EXPORT_API = [
   'metadata',
   'parse_spawn_points',
@@ -31,14 +31,25 @@ const EXPORT_API = [
   'export_model_tri_colliders',
   'export_model_phy_colliders',
   'export_glb_with_pakfile_models',
+  'export_glb_with_pakfile_models_with_defaults',
   'export_glb',
+  'export_mosaic_manifest',
+  'export_missing_textures',
+  'take_event',
+  // 独立函数（纹理压缩/解压）
+  'mosaic_encode',
+  'mosaic_decode',
+  'decompress_mtz',
 ];
 
 // 物理层：PhysWorld 类（Rust phys 模块，双 Worker 权威/预测共用）
 const PHYS_API = [
   'build_world',
   'tick',
+  'tick_into',
   'predict',
+  'state',
+  'state_out_ptr',
   'respawn',
   'teleport_to',
   'teleport_to_spawn',
@@ -48,6 +59,8 @@ const PHYS_API = [
   'set_hull',
   'set_noclip',
   'set_state',
+  'set_velocity',
+  'set_yaw_pitch',
 ];
 
 const missing = [];

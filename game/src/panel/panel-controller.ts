@@ -373,8 +373,8 @@ export class PanelController {
       ch();
     });
 
-    // 视野 FOV（主线程渲染器；60-110，CS:S 标准 75）
-    this.bindSlider('fov', 60, 110, 1, (v) => {
+    // 视野 FOV（主线程渲染器；60-110，默认 73.6）
+    this.bindSlider('fov', 60, 110, 0.1, (v) => {
       this.config.hud.fov = v;
       this.onSyncFov?.(v);
     });

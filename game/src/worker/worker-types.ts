@@ -162,6 +162,8 @@ export interface PhysEventMessage {
   /** 权威碰撞瞬间朝向（度；权威仅在碰撞判断时可影响渲染角度）。 */
   yawDeg: number;
   pitchDeg: number;
+  /** 权威碰撞瞬间速度（land：权威速度为校准基准；blocked：供参考）。 */
+  vel?: number[];
   timeMs: number;
 }
 

@@ -31,7 +31,7 @@ import { PlaneInspector } from './plane-inspector.js';
 import { applyLightmapToMeshes, loadLightmapAtlas } from './lightmap-shader.js';
 
 /** 视场角（度）。 */
-const FOV = 75;
+const FOV = 73.6;
 /** 准星射线检测限流（每 N 帧一次）。 */
 const PLANE_INSPECT_INTERVAL = 6;
 /** 近裁剪面下限（HU）：贴墙时近平面动态收缩到最近几何距离的 80%（不低于此值），
@@ -882,8 +882,8 @@ export class RendererMain {
    * 权威碰撞事件 → 位置微调 + 角度同步（权威仅在碰撞判断时可影响渲染角度；
    * 实现见 ts-shared AuthorityCalibrator）。
    */
-  applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number): void {
-    this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg);
+  applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number, vel?: number[]): void {
+    this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg, vel);
   }
 
   /** 消费 Rust 物理事件（每帧 tick 后）：teleport/death → onPhysEvent 回调

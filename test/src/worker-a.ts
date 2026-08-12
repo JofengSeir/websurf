@@ -39,6 +39,8 @@
 
 import { TestShared } from './shared-state.js';
 import { PhysWorld, initSync } from '../pkg/websurf_test_wasm.js';
+import { TraceRecorder } from '../../src/ts-shared/trace/trace-recorder.js';
+import type { TraceControlMessage } from '../../src/ts-shared/trace/trace-types.js';
 
 // ── 常量 ────────────────────────────────────────────────────────
 /** 模式A：1ms 固定子步（无限制真理源）。 */
@@ -83,7 +85,7 @@ interface WorldJsonMessage {
   teleportJson: string;
   spawn: [number, number, number, number];
 }
-type WorkerAMessage = InitSharedMessage | InitWasmMessage | RespawnMessage | WorldJsonMessage;
+type WorkerAMessage = InitSharedMessage | InitWasmMessage | RespawnMessage | WorldJsonMessage | TraceControlMessage;
 
 // ── 运行时状态 ──────────────────────────────────────────────────
 let shared: TestShared | null = null;
@@ -108,6 +110,19 @@ let tickDyAcc = 0;
 /** 模式B 上一轮是否激活（激活边沿重置采样器 + 对齐 tickPhys）。 */
 let modeBWasActive = false;
 let lastNow = performance.now();
+
+// ── trace 路径采样（公共模块 TraceRecorder：绿=无限制基准 / 红=tick 实际）──
+/** 采集端状态机（采样节流 + 滚动窗口；onPoint 经 postMessage 发 trace-data）。 */
+const traceRecorder = new TraceRecorder({
+  sampleEvery: 16, // ~1ms×16 = 每 ~16ms 一点（64Hz 量级）
+  onPoint: (pt) => {
+    self.postMessage({
+      type: 'trace-data',
+      baseX: pt.base.x, baseY: pt.base.y, baseZ: pt.base.z,
+      tickX: pt.tick.x, tickY: pt.tick.y, tickZ: pt.tick.z,
+    });
+  },
+});
 
 // ── 世界构建（BSP 导出分发）─────────────────────────────────────
 function applyWorld(msg: WorldJsonMessage): void {
@@ -276,6 +291,12 @@ function loop(): void {
       }
       phys.tick(RENDER_DT, inp.keysMask, inp.dx, inp.dy); // 1ms 子步
       writeStateFromPhys(); // 写空闲槽（S[V&1 ^ 1]）→ Atomics.add(V,1)——唯一写槽者
+      // trace 采样（公共 TraceRecorder：节流 + 滚动窗口；双实例位置）
+      {
+        const sB = phys.state();
+        const sT = tickPhys ? tickPhys.state() : sB;
+        traceRecorder.tick(sB, sT);
+      }
     }
     // 8 次上限耗尽：保留剩余累加（时间不丢失，下轮继续补跑），仅封顶防无限追赶
     if (acc > MAX_ACC) acc = MAX_ACC;
@@ -321,6 +342,10 @@ self.addEventListener('message', (e: MessageEvent) => {
       } else {
         pendingWorld = msg; // wasm 未就绪：暂存，startInit 完成后应用
       }
+      break;
+    case 'trace':
+      // 路径记录开关（公共 TraceRecorder：开始→采样发送；保存→停止，路径保留 3D 显示）
+      traceRecorder.setEnabled((msg as TraceControlMessage).enabled === true);
       break;
   }
 });

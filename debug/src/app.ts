@@ -310,7 +310,7 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
 		case 'phys-event': {
 			// 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染）
 			const ev = msg as unknown as PhysEventMessage;
-			rendererMain?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg);
+			rendererMain?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg, ev.vel);
 			break;
 		}
 		case 'physics-snapshot':
