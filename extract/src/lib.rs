@@ -15,6 +15,9 @@ pub mod lzma;
 pub mod pak;
 pub mod scene;
 
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 pub use bsp::{lump_name, lumps, BspError, BspHeader, BspVersion, LumpEntry, BSP_LUMP_COUNT};
 pub use pak::{open_pak, parse_entities, pak_extract, list_pak_entries, Entity, PakEntryInfo};
 
