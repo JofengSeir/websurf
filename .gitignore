@@ -32,6 +32,7 @@
 # ── 临时 / 验证产物 ───────────────────────
 temp/*
 .tmp-*
+*.glb
 **/scripts/verify-*
 **/scripts/cdp-*
 
