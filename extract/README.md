@@ -31,8 +31,10 @@ VBSP 头(签名 + 版本 + 64×16B lump 目录 + mapRevision)
 | `pak.rs` | PAKFILE zip 枚举/提取(大小写不敏感、`\`/`/` 兼容)、实体 KV 文本解析 |
 | `scene.rs` | 场景几何重建:面→三角形(扇形三角化)+ UV + 坐标映射 + 材质名分组 |
 | `glb.rs` | glTF 2.0 二进制(GLB)写入器,零依赖手写实现 |
+| `wasm.rs` | wasm-bindgen 导出层(`--features wasm`):`bsp_to_glb` / `bsp_info` |
 | `lib.rs` | `BspFile` 高层 API(持有字节,按需解压/打开 zip/解析实体) |
 | `main.rs` | CLI:`info` / `entities` / `pak list` / `pak get` / `pak extract` / `glb` |
+| `web/` | 最小网页:拖入/选择 `.bsp` → wasm 解析显示信息 → 下载 GLB |
 
 ## 用法
 
@@ -76,13 +78,29 @@ for ent in bsp.entities()? {
 }
 ```
 
+## 网页(最小导入导出)
+
+```bash
+# 1. 构建 wasm 产物到 pkg/(cargo + wasm-bindgen CLI,见 build-wasm.cmd)
+build-wasm.cmd
+
+# 2. 启动本地服务器(COOP/COEP 头,wasm 必需)
+python serve.py          # http://localhost:8280/web/
+
+# 3. Node 端到端验证(无需浏览器)
+node test-wasm.mjs [bsp路径]   # bsp_info + bsp_to_glb + GLB 头校验
+```
+
+网页功能:拖入/选择 `.bsp` → wasm 解析显示元数据(版本/lump/实体/PAK/几何)→ 导出 GLB 下载。
+wasm API:`bsp_to_glb(bytes) -> Uint8Array`、`bsp_info(bytes) -> JSON string`。
+
 ## 构建与测试
 
 ```bash
 cargo build                 # 原生
 cargo build --release
 cargo build --target wasm32-unknown-unknown   # 纯 Rust 依赖,零障碍
-cargo test                  # 22 个测试:单元 + 合成 BSP 全链路集成
+cargo test                  # 单元 + 合成 BSP 全链路集成
 cargo clippy --all-targets  # 零警告
 ```
 
@@ -97,6 +115,8 @@ cargo clippy --all-targets  # 零警告
 - GLB 导出冒烟(three.js GLTFLoader 实测可加载):
   - `maps/ze_cursed_bear_tales_v1_2.bsp`(v21 CS:GO,151MB)→ 6421 材质组、48769 三角形、133 材质,bbox ≈ 320×90×300
   - `maps/surf_666.bsp`(v20)→ 3436 材质组、89057 三角形、60 材质
+- wasm 端到端(`node test-wasm.mjs`):wasm 产出 GLB 字节数与 CLI 完全一致
+  (ze:6991960B / surf_666:8279180B),GLB 头校验通过
 
 ## 已知限制
 
