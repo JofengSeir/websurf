@@ -1,0 +1,29 @@
+[package]
+name = "bsp-extract"
+version = "0.1.0"
+edition = "2021"
+description = "独立实现的 Source 1 (CS:GO) BSP 解包器:Rust 版 VBSP 解析 + Valve LZMA + PAKFILE 提取"
+license = "MIT"
+
+# 独立 workspace(不归属仓库根/其他工程 workspace,不触碰外部文件)
+[workspace]
+
+[lib]
+name = "bsp_extract"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bsp-extract"
+path = "src/main.rs"
+
+[dependencies]
+# 纯 Rust LZMA(wasm32 可编译;Valve 变体经头转换后交给它)
+lzma-rs = "0.3.0"
+# 纯 Rust zip(defalte 走 miniz_oxide 后端,wasm32 无 C 依赖)
+zip = { version = "0.6.3", default-features = false, features = ["deflate"] }
+# GLB JSON chunk 序列化
+serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
