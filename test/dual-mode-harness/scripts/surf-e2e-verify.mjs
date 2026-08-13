@@ -53,7 +53,7 @@ const f64 = new Float64Array(sab);
 import('../pkg/websurf_test_wasm.js').then(async ({ BspProcessor, initSync }) => {
   initSync({ module: readFileSync(join(root, 'pkg/websurf_test_wasm_bg.wasm')) });
   console.log('═══ surf_666 端到端链路测试 v2（三线程）═══');
-  const bspBytes = readFileSync(join(root, '../../maps/surf_666.bsp'));
+  const bspBytes = readFileSync(join(root, '../../src/maps/surf_666.bsp'));
   console.log(`地图: surf_666.bsp (${(bspBytes.length / 1e6).toFixed(1)} MB)`);
 
   const proc = new BspProcessor(new Uint8Array(bspBytes));

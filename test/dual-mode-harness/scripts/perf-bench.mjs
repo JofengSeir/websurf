@@ -214,7 +214,7 @@ function stateOutView(phys) {
 let big = null;
 let bigErr = '';
 try {
-  const bspBytes = readFileSync(join(root, '../../maps/surf_666.bsp'));
+  const bspBytes = readFileSync(join(root, '../../src/maps/surf_666.bsp'));
   const proc = new BspProcessor(bspBytes);
   const brushJson = proc.export_brushes_planes(BRUSH_FILTER_JSON);
   let triJson = proc.export_model_phy_colliders();
