@@ -1,6 +1,6 @@
 # game 面板与操作模块
 
-> 最后核对：2026-08-11。以实际代码为准（`game/src/panel/`、`game/src/input/`、`game/web/index.html`）。
+> 最后核对：2026-08-13。以实际代码为准（`game/src/panel/`、`game/src/input/`、`game/web/index.html`）。
 
 ## 1. ESC 弹出面板（`panel-controller.ts`）
 
@@ -25,7 +25,7 @@
 | 体型 | hull 半宽/站高/蹲高 + 恢复默认 |
 | 按键 | 键位列表 + 录制（点击 → 按新键 → 保存 localStorage `websurf-game.keymap.v1`） |
 | 操作（look） | 灵敏度、Q/E 旋转速度 |
-| 显示 | 准星（显示/颜色/线长/粗细/间隙/描边/中心点）、速度面板模式（横向/横+竖/综合）、**纹理画质**（原始/压缩低清）、近平面参数 |
+| 显示 | 准星（显示/颜色/线长/粗细/间隙/描边/中心点）、视野 FOV（60-110，默认 73.6）、速度面板模式（横向/横+竖/综合）、**纹理画质**（原始/压缩低清）、近平面参数 |
 | 视角（view） | 自由视角（noclip）切换、noclip 移动速度 |
 
 **绑定**：`bindSlider` / `bindCheckbox`（自动保存 prefs）/ 原生 select/button 监听。

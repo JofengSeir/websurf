@@ -1,6 +1,6 @@
 # debug 物理模块
 
-> 最后核对：2026-08-11。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/`）。
+> 最后核对：2026-08-13。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/`）。
 
 > 物理核心为共享层（Rust `src/phys/` + TS `src/ts-shared/`），与 game 同模式：
 > **主线程唯一物理渲染线** + **Worker 权威帧计算器**。公共时序见 `docs/timing-debug.md`。

@@ -1,14 +1,14 @@
 # WebSurf 整体架构
 
-> 最后核对：2026-08-11。以实际代码为准（共享层 `src/` + 双工程 `debug/`、`game/` + 验证工程 `test/`）。
+> 最后核对：2026-08-13。以实际代码为准（共享层 `src/` + 双工程 `debug/`、`game/` + 独立解包器 `extract/` + 验证工程 `test/`）。
 
 浏览器中的 Counter-Strike 滑翔（Surf）地图游玩器：BSP 解析（Rust/WASM）+ CS 移动物理 + Three.js 渲染。
 
-仓库由**两个同级独立工程**（各自完整前端与打包链，互不引用）、一个**共享层**（仓库根 `src/`）
-与一个**验证工程**（`test/`，不入 Pages 部署）组成。
+仓库由**两个同级独立工程**（各自完整前端与打包链，互不引用）、一个**共享层**（仓库根 `src/`）、
+一个**独立解包器**（`extract/`，bsp-extract crate，独立 workspace，不依赖共享层）与一个**验证工程**（`test/`，不入 Pages 部署）组成。
 文档地图：公共架构见本文；两端时序见 `docs/timing-debug.md`（debug）、`docs/timing-game.md`（game）；
 公共材质技术（mosaic 低清压缩 / MTZ 打包 / 默认纹理包）见 `docs/materials.md`；
-各工程特色功能见 `debug/docs/`、`game/docs/`；验证工程见 `test/README.md` + `test/CONCLUSION.md`。
+各工程特色功能见 `debug/docs/`、`game/docs/`；独立解包器见 `extract/README.md`；验证工程见 `test/README.md` + `test/CONCLUSION.md`。
 
 ---
 
@@ -21,7 +21,8 @@ websurf/
 │   ├── Cargo.toml + phys/       websurf-phys：Rust 物理（wasm-bindgen 绑定层）
 │   ├── wasm-core/               websurf-wasm-core：BSP 解析 / GLB / 模型 / 纹理 / mosaic / mtz（纯 rlib）
 │   ├── ts-shared/               TS 物理渲染共享（auth/shared-state、auth-loop、worker-dispatch、
-│   │                            authority-calibrator、input-layer、params、world-builder）
+│   │                            authority-calibrator、input-layer、params、world-builder、
+│   │                            trace/trace-types、trace-recorder、trace-renderer）
 │   ├── materials/textures.mtz   默认纹理包（公共资源，MTZ6 压缩，9448+ 条，三处副本同步）
 │   ├── vendor/vmdl/             vendored vmdl（VTX 条带展开修复，单副本）
 │   └── serve.py                 共享开发服务器（COOP/COEP + CORS + WASM MIME；注：game/serve.py
@@ -34,21 +35,23 @@ websurf/
 │   ├── crates/wasm/src/         lib.rs（导出层，唯一文件）
 │   ├── src/                     TS：app/renderer/worker/panel/input/world
 │   └── web/                     dev 页面
+├── extract/                  bsp-extract：独立 Rust BSP 解包器（独立 workspace，不依赖共享层；对齐 VPKEdit/sourcepp bsppp）
 ├── test/                      WebSurf-test（验证工程，2026-08-11 收尾）：双模物理 + 帧信号渲染时序验证
 │   ├── crates/wasm/src/         lib.rs（薄导出层：PhysWorld + BspProcessor 最小导出集，无 mosaic/默认包）
 │   ├── src/                     TS：main（不做物理/渲染——主线程负责 BSP 解析导出 + 输入转发 + UI）/ shared-state（SAB + 消息回退）/ worker-a（双模物理）/ worker-b（渲染）
-│   └── scripts/                 phys-smoke（191/191 PASS）/ perf-bench / race-wakeup / tmp-dual-compare / build-dist（另有已跟踪的临时脚本 _tmp_flicker-debug.mjs）
+│   └── scripts/                 phys-smoke（192/192 PASS）/ perf-bench / race-wakeup / tmp-dual-compare / trace-verify / build-dist（另有已跟踪的临时脚本 _tmp_flicker-debug.mjs）
 ├── docs/                     仓库级文档（本文 / 两端时序 / 材质技术）
 └── .github/workflows/deploy-pages.yml    CI：debug + game 构建 + Pages 部署（test 不入部署）
 ```
 
-### 共享层三个 Rust workspace 的引用关系
+### 四个 Rust workspace 的引用关系（extract 为独立 crate，不属共享层）
 
 | crate | 角色 | 被谁引用 |
 |---|---|---|
-| `src/`（websurf-phys） | 物理核心 + wasm 绑定（`PhysWorld` 类，16+ 方法） | debug/game/test 的 `crates/wasm`（path 依赖，经 `pub use` re-export 进各自 WASM） |
+| `src/`（websurf-phys） | 物理核心 + wasm 绑定（`PhysWorld` 类，19 个 pub 方法，含 `new`） | debug/game/test 的 `crates/wasm`（path 依赖，经 `pub use` re-export 进各自 WASM） |
 | `src/wasm-core/`（websurf-wasm-core） | BSP 解析/GLB/模型/纹理解析 + mosaic 编解码 + MTZ 容器（纯 rlib，无 wasm 导出） | debug/game/test 的 `crates/wasm`（path 依赖，内部模块直接调用） |
 | `src/vendor/vmdl/` | vendored vmdl（patch 到三端 workspace） | 三端（debug/game/test）`[patch.crates-io]` → `../src/vendor/vmdl` |
+| `extract/`（bsp-extract） | 独立 Source 1 (CS:GO) BSP 解包器（VBSP 头解析/64 lump/Valve LZMA/PAKFILE zip/实体/GLB 导出，CLI + wasm） | 无（独立 workspace，不依赖共享层任何 crate） |
 
 ### 共享层 TS 模块（`src/ts-shared/`，两端 import 共享，改一处双端生效）
 
@@ -61,6 +64,9 @@ websurf/
 | `input/input-layer.ts` | `INPUT_CLAMP` / `M_YAW` / `layerMouseDelta` / `qeEquivalentDx` | 输入层（灵敏度乘入 + Q/E 等效像素） |
 | `phys/params.ts` | `buildPhysicsParams`（sensitivity:1、jump_height 换算、全量 snake_case） | 面板参数 → Rust set_params |
 | `phys/world-builder.ts` | `buildWorldBundle`（bytes → WorldBundle：colliderSource 三档 + 可视网格回退 + 缺失纹理 + GLB with defaults + onProgress） | 地图导入导出统一管线 |
+| `trace/trace-types.ts` | `TracePoint` / `TraceState` / `TRACE_MAX_POINTS` / 消息协议（trace/trace-data/trace-point/trace-clear） | 运动路径采集协议与数据结构（由 test 提升为公共） |
+| `trace/trace-recorder.ts` | `TraceRecorder`（setEnabled/tick 节流采样/clear/滚动窗口） | 采集端状态机（物理 Worker 侧，双实例位置采样） |
+| `trace/trace-renderer.ts` | `TraceRenderer`（addPoint/clear/dispose，LineFactory 依赖注入） | 显示端（渲染引擎无关，three 适配注入） |
 
 **共享原则**：物理/解析/物理渲染（Rust + TS）单副本——**修改一处，两端编译即同步生效**；各工程
 `crates/wasm/src/lib.rs`（wasm 导出层与特色函数）与 TS 前端（面板 UI、调试可视化、计时挑战、渲染层）保持各自。
@@ -101,7 +107,7 @@ WASM（BspProcessor——两端均在主线程解析，共用 ts-shared world-bu
 
 ## 3. 共享层详解
 
-### 3.1 websurf-phys（src/phys/，2,822 行 / 4 文件，2026-08-11 实测）
+### 3.1 websurf-phys（src/phys/，2,821 行 / 4 文件，2026-08-13 实测）
 
 CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞生后共享）：
 
@@ -119,7 +125,7 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 
 | 模块 | 职责 |
 |---|---|
-| `vbsp/` | BSP 解析（26 lump、Leaves 排序修复、LZMA 支持、displacement 展开） |
+| `vbsp/` | BSP 解析（64 lump、Leaves 排序修复、LZMA 支持、displacement 展开） |
 | `bsp_to_gltf_core/` | BSP → GLB（`export_bsp` / `export_bsp_with_models`），`ConvertOptions` 含**缺失纹理回退表**（`missing_fallback`） |
 | `model_integrator/` | MDL 模型整合（放置/网格/材质） |
 | `pakfile_models.rs` | PAKFILE 索引、VMT 解析（`VmtInfo`/`parse_vmt`） |

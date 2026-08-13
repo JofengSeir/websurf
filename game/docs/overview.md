@@ -1,6 +1,6 @@
 # game（WebSurf-game）总览
 
-> 最后核对：2026-08-11。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
+> 最后核对：2026-08-13。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
 
 > 最小化游戏化实现：Rust 物理 + 单权威 Worker（v7 定案：主线程唯一物理渲染线 + Worker 权威帧计算器）。
 > 公共架构见 `docs/architecture.md`；时序见 `docs/timing-game.md`；材质技术见 `docs/materials.md`。
@@ -13,7 +13,7 @@
 | `src/app.ts` | 主线程入口：BSP 解析、物理线、输入层、桥 |
 | `src/config.ts` | 运行时配置（physics/input/player/hud/texture） |
 | `src/renderer/renderer-main.ts` | 渲染 + 主线程 PhysWorld（唯一物理渲染线）+ 权威校准 |
-| `src/worker/main.ts` | 权威帧计算器（固定步长 64/128Hz） |
+| `src/worker/main.ts` | 权威帧计算器（固定步长 1/tickRate，默认 64Hz，面板 48-128 可调） |
 | `src/ts-shared/auth/shared-state.ts` | SAB（输入槽 + 权威双缓冲）/ MsgState 回退（共享层，仓库根） |
 | `src/world/` | pvs-manager / types（PVS 剔除） |
 | `src/panel/panel-controller.ts` | ESC 弹出面板（左导航 + 右设置 + 键位录制） |

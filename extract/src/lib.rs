@@ -10,6 +10,7 @@
 //! 本 crate 完全独立于仓库其他工程,不依赖 `websurf-wasm-core`。
 
 pub mod bsp;
+pub mod displacement;
 pub mod glb;
 pub mod lzma;
 pub mod pak;

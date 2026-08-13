@@ -49,6 +49,9 @@ struct ParsedTexData {
 }
 
 /// 重建整个 BSP 场景,返回按材质分组的 primitives。
+///
+/// 覆盖世界模型 + 全部 brush 实体模型(MODELS lump 中每个 model 的面)+ displacement 地形,
+/// 与 websurf bsp_to_gltf_core 的 `bsp_models()` 行为对齐。
 pub fn rebuild_scene(bsp: &BspFile) -> Result<Vec<PrimitiveData>, BspError> {
     // ---- 解析基础 lump ----
     let vertices = parse_vertices(bsp)?;
@@ -58,30 +61,78 @@ pub fn rebuild_scene(bsp: &BspFile) -> Result<Vec<PrimitiveData>, BspError> {
     let texinfos = parse_texinfos(bsp)?;
     let texdatas = parse_texdatas(bsp)?;
     let (string_table, string_data) = parse_string_table(bsp)?;
+    let models = parse_models(bsp)?;
+    let dispinfos = crate::displacement::parse_dispinfo(bsp)?;
+    let dispverts = crate::displacement::parse_dispverts(bsp)?;
 
     // ---- 按材质分组 ----
     // 材质键 = 纹理名;一个 face 引用一个 texinfo
     let mut groups: Vec<(Option<String>, Vec<FaceRef>)> = Vec::new();
     let mut group_of_texinfo: Vec<Option<usize>> = vec![None; texinfos.len()];
 
-    for (face_idx, face) in faces.iter().enumerate() {
-        // 跳过非法索引与不可见面
-        let Some(texinfo) = texinfos.get(face.tex_info as usize) else {
-            continue;
-        };
-        if is_invisible(texinfo.flags) {
+    // 收集所有应导出的 face(世界模型 + brush 实体),避免重复
+    let mut face_seen = vec![false; faces.len()];
+    let mut model_faces: Vec<Vec<usize>> = Vec::new();
+
+    // MODELS lump 为空时退化为"全部面"(兼容旧 BSP)
+    let (model_ranges, has_models) = if models.is_empty() {
+        (vec![(0usize, faces.len())], false)
+    } else {
+        (
+            models
+                .iter()
+                .map(|m| (m.first_face as usize, (m.first_face + m.num_faces) as usize))
+                .collect(),
+            true,
+        )
+    };
+
+    for (first, last) in &model_ranges {
+        if *last > faces.len() {
             continue;
         }
-        // 跳过 displacement 面(disp_info >= 0 暂不支持)
-        if face.disp_info >= 0 {
-            continue;
+        let mut model_fs = Vec::new();
+        for face_idx in *first..*last {
+            if face_seen[face_idx] {
+                continue;
+            }
+            face_seen[face_idx] = true;
+            let face = &faces[face_idx];
+            // 跳过非法索引与不可见面
+            let Some(texinfo) = texinfos.get(face.tex_info as usize) else {
+                continue;
+            };
+            if is_invisible(texinfo.flags) {
+                continue;
+            }
+            // 校验顶点链
+            let start = face.first_edge as usize;
+            let count = face.num_edges as usize;
+            if count < 3 || start + count > surfedges.len() {
+                continue;
+            }
+            model_fs.push(face_idx);
         }
-        // 校验顶点链
+        if has_models || !model_fs.is_empty() {
+            model_faces.push(model_fs);
+        }
+    }
+
+    // 无 MODELS lump 时 model_faces 已是全量
+    if !has_models {
+        model_faces = vec![face_seen
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &seen)| (!seen).then_some(i))
+            .collect::<Vec<_>>()];
+    }
+
+    // 分组
+    for face_idx in model_faces.into_iter().flatten() {
+        let face = &faces[face_idx];
+        let texinfo = &texinfos[face.tex_info as usize];
         let start = face.first_edge as usize;
         let count = face.num_edges as usize;
-        if count < 3 || start + count > surfedges.len() {
-            continue;
-        }
 
         let texinfo_idx = face.tex_info as usize;
         let group_idx = if group_of_texinfo[texinfo_idx].is_none() {
@@ -99,6 +150,7 @@ pub fn rebuild_scene(bsp: &BspFile) -> Result<Vec<PrimitiveData>, BspError> {
             first_edge: start,
             num_edges: count,
             texinfo_idx,
+            disp_info: face.disp_info,
         });
     }
 
@@ -114,6 +166,29 @@ pub fn rebuild_scene(bsp: &BspFile) -> Result<Vec<PrimitiveData>, BspError> {
         for fr in face_refs {
             let texinfo = &texinfos[fr.texinfo_idx];
             let texdata = texdatas.get(texinfo.tex_data_index as usize);
+
+            // displacement 面:用 displacement 三角化(可能生成大量顶点)
+            if fr.disp_info >= 0 {
+                let Some(disp) = dispinfos.get(fr.disp_info as usize) else { continue };
+                // 4 个角点来自 face 的多边形顶点(displacement 面必为四边形)
+                let corners = collect_face_corners(&vertices, &edges, &surfedges, fr.first_edge, fr.num_edges);
+                let Some(corners) = corners else { continue };
+                let tri_verts = crate::displacement::triangulate_displacement(disp, &dispverts, &corners);
+                for p in &tri_verts {
+                    let uv = uv_at(texinfo, texdata, *p);
+                    prim.vertices.push(VertexData {
+                        position: map_coords(*p),
+                        uv,
+                    });
+                }
+                for i in 0..tri_verts.len() / 3 {
+                    let base = prim.vertices.len() as u32 - tri_verts.len() as u32 + i as u32 * 3;
+                    prim.indices.push(base);
+                    prim.indices.push(base + 1);
+                    prim.indices.push(base + 2);
+                }
+                continue;
+            }
 
             // 收集该面的多边形顶点索引
             let mut poly: Vec<[f32; 3]> = Vec::with_capacity(fr.num_edges);
@@ -158,6 +233,28 @@ pub fn rebuild_scene(bsp: &BspFile) -> Result<Vec<PrimitiveData>, BspError> {
     Ok(out)
 }
 
+/// 收集 face 的多边形角点(最多 4 个,displacement 面为四边形)。
+fn collect_face_corners(
+    vertices: &[Vertex],
+    edges: &[Edge],
+    surfedges: &[i32],
+    first_edge: usize,
+    num_edges: usize,
+) -> Option<[[f32; 3]; 4]> {
+    let mut poly: Vec<[f32; 3]> = Vec::with_capacity(num_edges);
+    for se in &surfedges[first_edge..first_edge + num_edges] {
+        let edge_idx = se.unsigned_abs() as usize;
+        let edge = edges.get(edge_idx)?;
+        let vert_idx = if *se >= 0 { edge.start_index as usize } else { edge.end_index as usize };
+        let vert = vertices.get(vert_idx)?;
+        poly.push(vert.position);
+    }
+    if poly.len() < 4 {
+        return None;
+    }
+    Some([poly[0], poly[1], poly[2], poly[3]])
+}
+
 #[derive(Debug, Clone)]
 struct FaceRef {
     #[allow(dead_code)]
@@ -165,6 +262,7 @@ struct FaceRef {
     first_edge: usize,
     num_edges: usize,
     texinfo_idx: usize,
+    disp_info: i16,
 }
 
 /// 面不可见判定(SKY/TRIGGER/NODRAW/HINT/SKIP)。
@@ -361,8 +459,64 @@ fn parse_faces(bsp: &BspFile) -> Result<Vec<Face>, BspError> {
     Ok(out)
 }
 
-fn parse_texinfos(bsp: &BspFile) -> Result<Vec<ParsedTexInfo>, BspError> {
-    let Some(data) = bsp.lump_data(lumps::TEXINFO, false)? else {
+#[derive(Debug, Clone)]
+struct BrushModel {
+    #[allow(dead_code)]
+    min: [f32; 3],
+    #[allow(dead_code)]
+    max: [f32; 3],
+    #[allow(dead_code)]
+    origin: [f32; 3],
+    #[allow(dead_code)]
+    head_node: i32,
+    first_face: i32,
+    num_faces: i32,
+}
+
+/// 解析 MODELS lump(48 字节/项:min 12 + max 12 + origin 12 + headnode 4 + firstface 4 + numfaces 4)。
+fn parse_models(bsp: &BspFile) -> Result<Vec<BrushModel>, BspError> {
+    let Some(data) = bsp.lump_data(lumps::MODELS, false)? else {
+        return Ok(Vec::new());
+    };
+    const MODEL_SIZE: usize = 48;
+    if !data.len().is_multiple_of(MODEL_SIZE) {
+        return Err(BspError::Entity(format!("MODELS lump 大小非法:{}", data.len())));
+    }
+    let mut out = Vec::with_capacity(data.len() / MODEL_SIZE);
+    for chunk in data.chunks_exact(MODEL_SIZE) {
+        let mut r = 0usize;
+        let mut rd = |n: usize| -> &[u8] {
+            let s = &chunk[r..r + n];
+            r += n;
+            s
+        };
+        let mut read_vec3 = || -> [f32; 3] {
+            let mut v = [0f32; 3];
+            for item in v.iter_mut() {
+                *item = f32::from_le_bytes(rd(4).try_into().unwrap());
+            }
+            v
+        };
+        let min = read_vec3();
+        let max = read_vec3();
+        let origin = read_vec3();
+        let head_node = i32::from_le_bytes(rd(4).try_into().unwrap());
+        let first_face = i32::from_le_bytes(rd(4).try_into().unwrap());
+        let num_faces = i32::from_le_bytes(rd(4).try_into().unwrap());
+        debug_assert_eq!(r, MODEL_SIZE);
+        out.push(BrushModel {
+            min,
+            max,
+            origin,
+            head_node,
+            first_face,
+            num_faces,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_texinfos(bsp: &BspFile) -> Result<Vec<ParsedTexInfo>, BspError> {    let Some(data) = bsp.lump_data(lumps::TEXINFO, false)? else {
         return Ok(Vec::new());
     };
     const TEXINFO_SIZE: usize = 72; // 4×4×f32 + flags u32 + texDataIndex i32

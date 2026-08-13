@@ -1,6 +1,6 @@
 # debug 渲染 / 调试 / 游戏化模块
 
-> 最后核对：2026-08-11。以实际代码为准（`debug/src/renderer/`、`debug/src/game/`）。
+> 最后核对：2026-08-13。以实际代码为准（`debug/src/renderer/`、`debug/src/game/`）。
 
 ## 1. 场景构建（`renderer-main.ts` loadScene）
 

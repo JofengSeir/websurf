@@ -2,7 +2,13 @@
 
 > 分析对象:VPKEdit(shell)+ sourcepp(核心库,bsppp 模块)
 > 结论日期:2026-08-12
+> 最后核对:2026-08-13
 > 分析方法:Three Minds 三人协作(架构师 / 工程师 / 审核员)达成共识
+>
+> **修订(2026-08-13)**:本文 §4 的"移植方案"当时是可行性提案。实际实现
+> (提交 f3662c8 + 647ff07)走了不同路径——**落地为独立 `extract/` crate(bsp-extract)**,
+> 未按提案在 game/crates/wasm 上加 4 个 API、未新建 /extract 面板。详见 §1/§4/§5 修订注
+> 与 `extract/README.md`。
 
 ---
 
@@ -11,9 +17,9 @@
 | 问题 | 结论 |
 |---|---|
 | VPKEdit 如何解包 CSGO BSP? | 把 BSP 当"VBSP 头 + 64 个 lump 目录 + 内嵌 zip(PAKFILE lump)"处理,先切 lump 再解 LZMA,PAKFILE 原样是 zip |
-| 能否转为 Rust 实现? | **完全可行,且大部分已实现**。websurf 的 `src/wasm-core/vbsp/` 已具备等价核心能力 |
-| 移植成本 | **小**(约 300 行小改),核心缺口仅版本分派、L4D2 布局、实体 KV 结构化 |
-| 网页 wasm 场景重建? | **成立且比预想轻**:不新 crate、不新构建脚本,在现有 game/crates/wasm 上加 4 个 API + 新建 `/extract` 面板 |
+| 能否转为 Rust 实现? | **已实现**。独立 `extract/` crate(bsp-extract)已完整落地(CLI + wasm + 网页),见 `extract/README.md` |
+| 移植成本 | 实际为**独立 crate**(非"约 300 行小改"):`extract/` 自带独立 workspace,不依赖 websurf-wasm-core |
+| 网页 wasm 场景重建? | **已实现为独立 `extract/` crate + `extract/web/` 网页**,非原提案的 game/crates/wasm 4 API + /extract 面板 |
 
 ---
 
@@ -81,7 +87,7 @@ u32 条目数 + 每项 16B 头(`signature 4B + isCompressed u16 + version u16 + 
 
 | 能力 | sourcepp | websurf 现状 | 判定 |
 |---|---|---|---|
-| BSP 版本 | v19/v20/v21/v27 + console | 仅 v20(`bspfile.rs:21` 硬编码 `0x14`) | **缺失,小改** |
+| BSP 版本 | v19/v20/v21/v27 + console | 仅 v20(`src/wasm-core/vbsp/bspfile.rs:21` 硬编码 `0x14`) | **缺失,小改** |
 | Valve LZMA 解压 | liblzma | lzma-rs `lzma_decompress_with_options` | **已有,等价** |
 | PAKFILE 提取 | miniz | `zip-lzma` 的 `ZipArchive` | **已有** |
 | 实体解析 | 结构化 KV + 转义 | 仅整段 UTF-8 文本 | **部分** |
@@ -111,6 +117,12 @@ u32 条目数 + 每项 16B 头(`signature 4B + isCompressed u16 + version u16 + 
 ---
 
 ## 4. 网页 wasm 解包 + 场景重建方案(审核员审核)
+
+> **修订(2026-08-13)**:本节是 2026-08-12 的可行性提案。实际实现(f3662c8 + 647ff07)
+> 未按此提案执行——**未**在 game/crates/wasm 上加 4 个 API、**未**新建 /extract 面板;
+> 而是创建了**独立 `extract/` crate(bsp-extract)**:独立 workspace、不依赖 websurf-wasm-core,
+> 模块 bsp/lzma/pak/scene/glb/wasm,CLI(info/entities/pak list/pak get/pak extract/glb),
+> wasm API(bsp_to_glb/bsp_info)+ 最小网页(extract/web/)。以下提案内容仅作历史参考。
 
 ### 4.1 方案定位:与现有能力互补
 
@@ -153,7 +165,7 @@ u32 条目数 + 每项 16B 头(`signature 4B + isCompressed u16 + version u16 + 
 
 1. **VPKEdit 解包 = "VBSP 切片器 + zip 适配器"**:bsppp::BSP 解析 header/定位/解压任意 lump,bsppp::PakLump 把 PAKFILE 切出来当 zip 打开
 2. **Rust 移植成本小**:websurf 已有等价核心(header/lump/LZMA/PAK/static props),缺口仅版本分派、L4D2、实体 KV,约 300 行小改
-3. **网页场景重建成立**:不新 crate、不新构建脚本,在 game/crates/wasm 的 BspProcessor 上加 4 个 API + 新建 `/extract` 面板
+3. **网页场景重建已实现(路径与提案不同)**:落地为**独立 `extract/` crate(bsp-extract)**——独立 workspace、不依赖 websurf-wasm-core;模块 bsp/lzma/pak/scene/glb/wasm;CLI(info/entities/pak list/pak get/pak extract/glb)+ wasm API(bsp_to_glb/bsp_info)+ 最小网页(extract/web/)。非原提案的"game 面板 4 API"(见 extract/README.md)
 4. **内存是第一风险**:worker 内加载持有、按需取文件、显式释放/重建 worker 回收
 5. **范围锁定**:只做"读 + 预览 + 导出",不做写入/编辑;版本锁 Source1/v20+
 

@@ -30,6 +30,7 @@ VBSP 头(签名 + 版本 + 64×16B lump 目录 + mapRevision)
 | `lzma.rs` | Valve LZMA 17B 头格式解压(转 alone 流) |
 | `pak.rs` | PAKFILE zip 枚举/提取(大小写不敏感、`\`/`/` 兼容)、实体 KV 文本解析 |
 | `scene.rs` | 场景几何重建:面→三角形(扇形三角化)+ UV + 坐标映射 + 材质名分组 |
+| `displacement.rs` | DISPINFO/DISP_VERTS lump 解析 + 位移地形三角化(双线性细分,与 src 一致) |
 | `glb.rs` | glTF 2.0 二进制(GLB)写入器,零依赖手写实现 |
 | `wasm.rs` | wasm-bindgen 导出层(`--features wasm`):`bsp_to_glb` / `bsp_info` |
 | `lib.rs` | `BspFile` 高层 API(持有字节,按需解压/打开 zip/解析实体) |
@@ -85,7 +86,7 @@ for ent in bsp.entities()? {
 build-wasm.cmd
 
 # 2. 启动本地服务器(COOP/COEP 头,wasm 必需)
-python serve.py          # http://localhost:8280/web/
+python serve.py          # http://localhost:8280/extract/web/
 
 # 3. Node 端到端验证(无需浏览器)
 node test-wasm.mjs [bsp路径]   # bsp_info + bsp_to_glb + GLB 头校验
@@ -93,6 +94,31 @@ node test-wasm.mjs [bsp路径]   # bsp_info + bsp_to_glb + GLB 头校验
 
 网页功能:拖入/选择 `.bsp` → wasm 解析显示元数据(版本/lump/实体/PAK/几何)→ 导出 GLB 下载。
 wasm API:`bsp_to_glb(bytes) -> Uint8Array`、`bsp_info(bytes) -> JSON string`。
+
+## 场景查看器(支持 BSP 直接解析 + GLB)
+
+查看器基于 three.js(**CDN 引入 esm.sh,零本地依赖**),既能直接看 GLB,**也能直接拖入 .bsp 由 wasm 解析后渲染场景**(无需手动导出):
+
+```bash
+# 一键启动(起服务器 + 自动打开浏览器)
+view-glb.cmd
+view-glb.cmd maps/surf_666.bsp        # 直接加载 BSP 并解析渲染
+view-glb.cmd maps/xxx.glb             # 或加载 GLB
+view-glb.cmd 8080                     # 指定端口
+```
+
+或手动:`python serve.py` 后访问 `http://localhost:8280/extract/viewer/`。
+查看器功能:
+- 打开/拖放 `.bsp` → 浏览器内 wasm `bsp_to_glb` 解析 → three.js 渲染(几何 + 材质分组 + 根节点旋转)
+- 打开/拖放 `.glb` → 直接渲染
+- `?file=...` 参数直接加载(如 `?file=/maps/surf_666.bsp`)
+- 轨道控制(左键旋转/右键平移/滚轮缩放)、顶点/三角形/材质统计 HUD、自适应相机取景、示例按钮
+- **依赖策略:three.js 经 import map 从 `esm.sh` CDN 加载,项目内不内置任何 JS 库副本**
+  (首次加载需联网;其余页面资源均为本地)
+- wasm 仅在使用 BSP 时按需加载(pkg/ 下构建产物)
+
+已验证(Chrome headless 截图):`surf_666.bsp` 拖入 → wasm 解析 → 场景渲染成功;
+`surf_666.glb`(322851 顶点/107617 三角)正常显示。
 
 ## 构建与测试
 
@@ -112,15 +138,17 @@ cargo clippy --all-targets  # 零警告
   走 `BspFile` 全链路验证
 - 真实地图冒烟:`maps/surf_666.bsp`(v20,79MB)— 解析 60+ lump、2700 实体、
   PAKFILE 1500 个文件列表 + 全量解包 30MB,内容校验通过
-- GLB 导出冒烟(three.js GLTFLoader 实测可加载):
-  - `maps/ze_cursed_bear_tales_v1_2.bsp`(v21 CS:GO,151MB)→ 6421 材质组、48769 三角形、133 材质,bbox ≈ 320×90×300
-  - `maps/surf_666.bsp`(v20)→ 3436 材质组、89057 三角形、60 材质
+- GLB 导出冒烟(与 websurf src bsp_to_gltf_core 参考导出逐项比对一致):
+  - `maps/ze_cursed_bear_tales_v1_2.bsp`(v21 CS:GO,151MB)→ 803331 顶点、267777 三角形、171 材质
+  - `maps/surf_666.bsp`(v20)→ **322851 顶点、107617 三角形、66 材质——与 src 参考导出完全一致**
+    (顶点集合/UV 一致率 100%,bbox 相同)
 - wasm 端到端(`node test-wasm.mjs`):wasm 产出 GLB 字节数与 CLI 完全一致
-  (ze:6991960B / surf_666:8279180B),GLB 头校验通过
+  (ze:23872448B / surf_666:9697952B),GLB 头校验通过
 
 ## 已知限制
 
 - 仅 Source 1 家族(v19~v29);console 大端变体(`PSBV`)不支持
 - L4D2 的 lump 字段错位布局未做启发式 swap(当前只覆盖标准 CS:GO 布局)
 - 只做"读 + 提取 + 几何导出",不含 PAKFILE 写入/重打包(那是 VPKEdit `bake` 的范围)
-- GLB 导出暂不含:displacement 地形(disp_info>=0 的面跳过)、光照贴图、纹理贴图(仅材质名分组)
+- GLB 导出含:世界模型 + brush 实体 + displacement 地形 + UV + 材质名分组 + 根节点 Y+90° 旋转;
+  暂不含光照贴图与 VTF 纹理嵌入(材质仅按名分组)

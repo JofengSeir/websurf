@@ -6,11 +6,20 @@
 
 ### 新增
 
+- **bsp-extract 独立 Rust BSP 解包器（f3662c8 / 647ff07，2026-08-12）**：
+  `extract/` 独立 workspace（不归属仓库根/其他工程，不依赖共享层任何 crate），独立重实现
+  VPKEdit/sourcepp 的 bsppp 模块——VBSP 头解析、64 lump 目录、Valve LZMA、PAKFILE zip
+  枚举/提取、实体 KV 解析、场景几何重建与 GLB 导出；CLI 子命令 info/entities/pak
+  list/pak get/pak extract/glb，wasm 导出 bsp_to_glb/bsp_info，配套最小网页与端到端验证。
+- **trace 公共模块（878515f / b019115）**：`src/ts-shared/trace/`（trace-types / trace-recorder /
+  trace-renderer）——运动路径采集与显示（双线对照：无限制基准 vs tick 实际），由 /test 的
+  trace 功能提升为公共模块，供 game/debug/test 复用；trace-renderer 渲染引擎无关（依赖注入，
+  移除 three 硬依赖）。
 - **WebSurf-test 验证工程（c2e88b0 / 607c9a0 / d1767c0 / 3854f71，2026-08-11 收尾）**：
   `test/` 独立工程（不入 Pages 部署），验证"主线程不做物理/渲染（BSP 解析导出 +
   输入转发 + rAF wake）→ SAB 无锁 → WorkerA 双模物理 → WorkerB 帧信号渲染"完整循环，
-  含 `scripts/` 验证套件（phys-smoke **191/191 PASS** / perf-bench / race-wakeup /
-  tmp-dual-compare）与 `play.cmd`。
+  含 `scripts/` 验证套件（phys-smoke **192/192 PASS** / perf-bench / race-wakeup /
+  tmp-dual-compare / trace-verify）与 `play.cmd`。
   - **WorkerA 双模物理核心（d1767c0 重构）**：**先 tick 计算 → 后无限制计算**；
     模式A = 1ms 子步 + 实时输入（位置/角度唯一推进者，共享槽唯一写入者）；
     模式B = **独立 64t 权威速度线**（第二个 PhysWorld，只走 tickDt 步长：

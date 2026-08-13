@@ -1,6 +1,6 @@
 # WebSurf-test — 双模物理 + OffscreenCanvas 渲染时序验证工程
 
-> **事实基准**：本文档最后核对 2026-08-11，以实际代码为准（`src/worker-a.ts` / `src/shared-state.ts`
+> **事实基准**：本文档最后核对 2026-08-13，以实际代码为准（`src/worker-a.ts` / `src/shared-state.ts`
 > / `src/worker-b.ts` / `src/main.ts`）。「64t 坡速 ≈ 无限制」成因分析、会审结论与修复架构详见
 > **[CONCLUSION.md](CONCLUSION.md)**（2026-08-11 会审 + 双模核心重构后的事实基准，两文档对齐）。
 
@@ -21,7 +21,7 @@
   │    ★ RENDER_WAKEUP = 渲染主驱动（rAF 与 vsync 同相 → 呈现平滑）；WorkerA 发布不 notify
   ├─ 难度按钮（关/32/64/128/256/1000，默认 64）→ writeTickRate（仅 store，无 notify）
   ├─ BSP 加载：文件选择 → BspProcessor 导出（brush/tri/teleport/spawn/pvs/GLB）→ 双 Worker 分发
-  └─ R 重生 → postMessage({type:'respawn'})；trace 按钮 UI（死代码，见 §四）
+  └─ R 重生 → postMessage({type:'respawn'})；trace 按钮 UI（TraceState 状态机，见 §四）
 
 WorkerA (src/worker-a.ts) — 双模物理核心
   ├─ 模式A（无限制真理源）：phys = 1ms 固定子步 + 实时输入（consumeInput ±1000）
@@ -42,7 +42,7 @@ WorkerB (src/worker-b.ts) — three.js 第一人称渲染（帧信号驱动）
   ├─ 无节流（SAB 模式）：每次唤醒采样 readState；V 未变不重绘（重复唤醒零成本）；
   │    例外：消息回退模式（无 SAB）无数据时 100ms 低频自检（数据到达立即触发）
   ├─ 本地副本只被 readState 更新（渲染参数零污染）；PVS 剔除（复刻 game pvs-manager）
-  └─ status 摘要每秒回传 main → DOM HUD；trace 3D 路径线 UI（死代码，见 §四）
+  └─ status 摘要每秒回传 main → DOM HUD；trace 3D 路径线 UI（TraceRenderer，见 §四）
 
 共享状态 (src/shared-state.ts)
   └─ SAB 192B：TICK_RATE / WAKEUP / 输入槽(dxAcc,dyAcc BigInt64, keysMask) / RENDER_WAKEUP
@@ -81,9 +81,10 @@ test/
     worker-b.ts       WorkerB 帧信号驱动渲染（OffscreenCanvas + PVS + 50ms 超时兜底）
   scripts/
     build-dist.mjs    构建 dist（multi 5 文件：app/worker-a/worker-b/wasm/index.html；test 无 single 内嵌模式）
-    phys-smoke.mjs    node 冒烟测试（**191/191 PASS**，2026-08-11 双模适配后；含 ModeAB 双实例镜像、分叉兜底锚定回归、帧信号驱动、消息回退、PVS）
+    phys-smoke.mjs    node 冒烟测试（**192/192 PASS**，2026-08-11 双模适配后；含 ModeAB 双实例镜像、分叉兜底锚定回归、帧信号驱动、消息回退、PVS）
     perf-bench.mjs    性能基准（消费/写入/热路径 vs 对象构造；worker_threads 模拟）
     race-wakeup.mjs   唤醒竞争测试（WAKEUP/RENDER_WAKEUP 双槽隔离）
+    trace-verify.mjs  trace 公共链路验证（Chrome headless + CDP：开始→保存→无错误）
     tmp-dual-compare.mjs  test 双模 vs game 双线数据对照（关键指标 <15%）
 ```
 
@@ -94,10 +95,11 @@ test/
 
 ## 四、已知边界与死代码（如实记录）
 
-1. **trace 双线 UI 为死代码**：`main.ts`（按钮状态机 + trace-data 转发）与 `worker-b.ts`
-   （3D 绿/红路径线）仍保留，但 `worker-a.ts` 自 d1767c0 起不再处理 `trace` 消息、不再发送
-   trace-data——路径记录不可用。新架构下双线对照可直接采样 phys（无限制基准）与 tickPhys
-   （tick 实际），无需旧 physBase 对照实例。
+1. **trace 双线 UI 已恢复可用**：commit 878515f（2026-08-12）新增 `src/ts-shared/trace/` 公共模块；
+   `worker-a.ts` 现导入 `TraceRecorder`（`../../src/ts-shared/trace/trace-recorder.js`）并处理
+   `trace` 消息（约 L42/L116/L346），采样 phys（无限制基准）与 tickPhys（tick 实际）后发
+   trace-data；`main.ts` 导入 `TraceState` 转发 trace-point；`worker-b.ts` 用 `TraceRenderer`
+   渲染双线。（原 d1767c0 的"死代码"状态已被此提交修正。）
 2. **sustained surf 稳态速度 tick 无关**（正确物理，非缺陷）；tick 难度载体 = 输入采样相位
    与离散施加点。
 3. **稀疏轮次输入滞后**：单轮 ≥2 个 tick 边界时 tick 实例输入 ≤1 窗口滞后，有界自愈。
@@ -118,7 +120,7 @@ npm install
 npm run build:wasm   # wasm-pack release → pkg/，并拷贝 wasm 到 test 根
 npm run build:ts     # typecheck + esbuild（app / worker-a / worker-b 三产物）
 npm run build:dist   # multi 打包（5 文件，HTTP 运行；test 仅 HTTP，SAB 恒定可用）
-node scripts/phys-smoke.mjs   # 冒烟测试（191/191 PASS）
+node scripts/phys-smoke.mjs   # 冒烟测试（192/192 PASS）
 node scripts/perf-bench.mjs   # 性能基准
 node scripts/race-wakeup.mjs  # 唤醒竞争
 ```

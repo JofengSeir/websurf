@@ -1,6 +1,6 @@
 # WebSurf debug 工程时序图
 
-> 最后核对：2026-08-11。以实际代码为准（`debug/src/renderer/renderer-main.ts` + 共享 `src/ts-shared/`）。
+> 最后核对：2026-08-13。以实际代码为准（`debug/src/renderer/renderer-main.ts` + 共享 `src/ts-shared/`）。
 
 > 对应 `debug/`（WebSurf-debug，Debug Build）。**渲染时序已与 game 同模式**（主线程唯一物理渲染线 + Worker 权威帧计算器），共享实现位于 `src/ts-shared/`（auth/shared-state、auth-loop、worker-dispatch、authority-calibrator）。
 > game 时序见 `docs/timing-game.md`（两图结构相同；差异仅在工程特有逻辑：debug 的计时挑战/物理面板/调试可视化等，完整差异清单见文末）。
