@@ -26,7 +26,9 @@ zip = { version = "0.6.3", default-features = false, features = ["deflate"] }
 # GLB JSON chunk 序列化
 serde_json = "1.0"
 # 仅 wasm 导出层使用(wasm-pack --features wasm);版本须与本机 wasm-bindgen CLI 一致
-wasm-bindgen = { version = "=0.2.103", optional = true }
+# 2026-08-14: 0.2.103 → 0.2.126（与主项目 debug/game 一致，build-wasm.cmd 自动下载
+# prebuilt CLI 秒级可用，避免 cargo install 编译慢 + 版本冲突）
+wasm-bindgen = { version = "=0.2.126", optional = true }
 
 [features]
 default = []
