@@ -75,6 +75,6 @@ import type { TraceState } from '../../src/ts-shared/trace/trace-types.js';
 
 ## 验证
 
-- test 端到端：`test/scripts/trace-verify.mjs`（Chrome headless + CDP）——点击"开始" →
+- test 端到端：`test/dual-mode-harness/scripts/trace-verify.mjs`（Chrome headless + CDP）——点击"开始" →
   WorkerA `TraceRecorder` 采样 → main 转发 → WorkerB `TraceRenderer` 渲染 3D 路径线，
   断言无控制台错误（无独立 Node 单测）

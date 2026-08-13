@@ -1,7 +1,7 @@
 # WebSurf 材质系统（公共技术）
 
 > 最后核对：2026-08-13。以实际代码为准（`src/wasm-core/mosaic/`、`src/wasm-core/texture_utils/`）。
-> 测试工程 `test/` 的 wasm 导出层**不含** mosaic/缺失纹理/默认纹理包（无画质切换与回退），本体系仅适用于 debug / game 两端。
+> 测试工程 `test/dual-mode-harness/` 的 wasm 导出层**不含** mosaic/缺失纹理/默认纹理包（无画质切换与回退），本体系仅适用于 debug / game 两端。
 
 两端（debug / game）共用的材质处理体系：**原始纹理（VTF）→ GLB 嵌入** + **低清压缩（mosaic v4）** + **默认纹理包（MTZ 打包）** + **画质切换** + **缺失纹理回退**。
 代码位于共享层 `src/wasm-core/mosaic/` 与 `src/wasm-core/texture_utils/`。
