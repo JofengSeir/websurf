@@ -1,6 +1,6 @@
 # game 材质模块（应用侧）
 
-> 最后核对：2026-08-11。以实际代码为准（`game/src/app.ts`、`game/src/renderer/renderer-main.ts`）。
+> 最后核对：2026-08-13。以实际代码为准（`game/src/app.ts`、`game/src/renderer/renderer-main.ts`）。
 > 公共材质技术（mosaic 压缩 / MTZ 打包 / 解压拼装 / 回退机制）见 `docs/materials.md`。
 > 本文档：game 侧的应用链路（与 debug 同机制，解析/导出在主线程）。
 
@@ -10,8 +10,8 @@
 
 | 项 | debug | game |
 |---|---|---|
-| 解析/导出位置 | Worker | **主线程**（app.ts） |
-| 默认纹理包消费 | Worker 经 `wasm-init` 消息 `mtzB64` 下发 | **主线程直接读** `__VBSP_TEXTURES_MTZ_B64__`（single）或 fetch |
+| 解析/导出位置 | **主线程**（app.ts） | **主线程**（app.ts） |
+| 默认纹理包消费 | **主线程直接读** `__VBSP_TEXTURES_MTZ_B64__`（single）或 fetch（`loadDefaultTexturePack` / world-builder 内联） | **主线程直接读** `__VBSP_TEXTURES_MTZ_B64__`（single）或 fetch |
 | 缺失纹理弹窗 | 有（比对列表 + 确认） | 无（回退静默完成） |
 
 ## 2. 加载链路（`app.ts` handleLoadBsp）

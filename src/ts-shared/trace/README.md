@@ -8,7 +8,7 @@
 |---|---|
 | `trace-types.ts` | 协议（消息类型）+ 状态机类型 + 点数据结构 + 转换工具 |
 | `trace-recorder.ts` | 采集端状态机（物理 Worker 侧：开关/节流采样/滚动窗口/双实例位置） |
-| `trace-renderer.ts` | 显示端（three.js 双线路径，任意渲染 Worker 可挂载） |
+| `trace-renderer.ts` | 显示端（渲染引擎无关，依赖注入 `lineFactory`；任意渲染 Worker 可挂载） |
 
 ## 架构（数据流）
 
@@ -42,7 +42,12 @@ case 'trace': traceRecorder.setEnabled(msg.enabled); break;
 
 ```ts
 import { TraceRenderer } from '../../src/ts-shared/trace/trace-renderer.js';
-const traceRenderer = new TraceRenderer(scene); // 绿=基准 / 红=tick，可配颜色
+// 渲染引擎无关：线条由 lineFactory 注入（three 或其他引擎适配）
+const traceRenderer = new TraceRenderer({
+  baseColor: 0x4ade80, // 绿=无限制基准
+  tickColor: 0xf87171, // 红=tick 实际
+  lineFactory: (color) => { /* 创建/更新/销毁一条指定颜色的路径线 */ },
+});
 
 case 'trace-point': traceRenderer.addPoint(pt); break;
 case 'trace-clear': traceRenderer.clear(); break;
@@ -70,5 +75,6 @@ import type { TraceState } from '../../src/ts-shared/trace/trace-types.js';
 
 ## 验证
 
-- `TraceRecorder` 单测：节流/滚动窗口/状态机/清除（esbuild 打包后 Node 运行，7 项 PASS）
-- test 端到端：按钮状态机（开始→保存→删除）+ 无控制台错误（Chrome headless + CDP）
+- test 端到端：`test/scripts/trace-verify.mjs`（Chrome headless + CDP）——点击"开始" →
+  WorkerA `TraceRecorder` 采样 → main 转发 → WorkerB `TraceRenderer` 渲染 3D 路径线，
+  断言无控制台错误（无独立 Node 单测）

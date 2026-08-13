@@ -1,6 +1,6 @@
 # WebSurf-game（最小化实现）
 
-> 最后核对：2026-08-11。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
+> 最后核对：2026-08-13。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
 
 WebSurf 的激进最小化实现（独立工程 `game/`）。物理栈整体下沉 Rust WASM，
 v7 定案：**主线程唯一物理渲染线 + 单 Worker 权威帧计算器**。
@@ -39,7 +39,7 @@ Worker (src/worker/main.ts，共享 ts-shared/auth)
 npm install
 npm run build:wasm   # wasm-pack release（wasm-opt=false：本机 NODE_OPTIONS 污染 wasm-opt；并拷贝 wasm 到 web/）
 npm run build:ts     # typecheck + esbuild（app/worker 两产物）
-node scripts/check-wasm-api.mjs  # 契约校验（导出 9 + 物理 12 API）
+node scripts/check-wasm-api.mjs  # 契约校验（导出 16 + 物理 17 API）
 npm run test:phys                # Rust 物理冒烟（node 跑 WASM）
 npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可玩）；--multi 多文件（HTTP）
 ```
@@ -79,7 +79,7 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 | 层 | 说明 |
 |---|---|
 | TS | ~3,062 行 / 14 文件（不含共享 src/ts-shared ~1,480 行，2026-08-11 实测） |
-| Rust 物理 | 2,822 行 / 4 文件（world/player/teleport/mod，共享仓库根 src/phys，2026-08-11 实测） |
+| Rust 物理 | 2,821 行 / 4 文件（world/player/teleport/mod，共享仓库根 src/phys，2026-08-13 实测） |
 | scene-data | GLB + spawn/pvs 小 JSON（-95%） |
 | 消息协议 | 约 14 种（init/wasm-init/world-json/config/respawn/sync-render-state/set-spawn-points/teleport/teleport-to-pos/set-death-threshold/input/phys-frame/phys-event/error）——其中 `set-death-threshold`/`teleport-to-pos` 为共享层已定义但 **game 主线程实际未发送**（权威 Worker 死亡阈值恒为 Rust 默认 -100000，见 physics.md §8） |
 

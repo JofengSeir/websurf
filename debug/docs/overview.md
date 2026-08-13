@@ -1,6 +1,6 @@
 # WebSurf-debug（Debug Build）总览
 
-> 最后核对：2026-08-11。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/`）。
+> 最后核对：2026-08-13。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/`）。
 
 > 全功能调试测试页面：BSP 解析/模型导出/物理碰撞/计时挑战的完整调试环境。
 > 公共架构见 `docs/architecture.md`；时序见 `docs/timing-debug.md`（主线程唯一物理渲染线 + Worker 权威帧，与 game 同模式）；材质技术见 `docs/materials.md`。
@@ -44,13 +44,17 @@
 
 ## 4. 侧边栏面板（HTML 静态声明 + app.ts 绑定）
 
-| 折叠区（`web/index.html` `<details>`） | 内容 |
+| 折叠区（`web/index.html` `<details>`，共 9 组） | 内容 |
 |---|---|
-| 加载地图 / 出生点 / 元数据（三个独立折叠区 + 顶部状态条） | 文件选择、状态、出生点下拉、元数据 |
-| 物理 | 参数滑块/开关（13 项）、碰撞箱体型、自动恢复开关、重生按钮 |
-| 视距与视角 | 视距剔除滑块、PVS 开关、鼠标灵敏度、Q/E 旋转速度 |
-| 显示设置 | HUD、准星风格化、纹理画质、近平面参数、碰撞可视化 4 开关 + 4 距离滑块、准星信息（showPlaneInfo） |
-| 自定义传送点 | 保存当前位置、坐标传送、清空 |
+| 文件输入 | 文件选择（.bsp） |
+| 视角与操作 | 鼠标灵敏度、Q/E 旋转速度、俯仰角限制（pitchLimit） |
+| 渲染与视距 | 视距上限、PVS 剔除开关、纹理画质（原始/压缩低清）、环境光强度、近平面参数（探测距离/收缩系数） |
+| 物理 | 物理模式、碰撞来源、物理 tick 率、重生按钮、碰撞箱体型（倍率/半宽/站高/蹲高/自动恢复）、力学参数（13 项，动态渲染）+ 恢复全部默认 |
+| 出生点 | 出生点下拉 |
+| 自定义传送点 | 保存当前位置、手动添加坐标、清空 |
+| 准星与 HUD | HUD 显示、准星显示、准星样式（颜色/线长/粗细/间隙/描边/中心点）、准星信息（showPlaneInfo） |
+| 调试线框 | 碰撞可视化 4 开关 + 4 距离滑块（brush/trigger/phy/vis） |
+| 元数据 | 元数据 KV |
 
 控件 → `applyConfigPatch(config, ...)` + `rendererMain.applyConfigPatch` + `inputBridge.sendConfig`（三路同步）+ `saveUiPrefs`（localStorage 持久化）。
 物理参数变更：面板 → `set-physics-param` 消息 → 权威 Worker `set_params` → snapshot 回传 → 主线程 predPhys 镜像（双端同参）。

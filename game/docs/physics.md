@@ -1,6 +1,6 @@
 # game 物理模块（双物理线 + 权威帧）
 
-> 最后核对：2026-08-11。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
+> 最后核对：2026-08-13。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
 
 > 公共时序见 `docs/timing-game.md`。本文档：双物理线架构、SAB/MsgState 双通道、校准与兜底、输入层细节。
 
@@ -12,7 +12,7 @@
   ├─ 输入层：灵敏度乘入角度增量 / Q/E 等效鼠标量（双端同源输入）
   └─ 读权威帧 → set_velocity 校准（只动速度）→ tick → 渲染
 
-Worker = 权威帧计算器（独立固定步长 = 1/tickRate，64/128Hz，累积器无封顶）
+Worker = 权威帧计算器（独立固定步长 = 1/tickRate，48-128Hz（默认 64Hz），累积器无封顶）
   ├─ PhysWorld（权威物理）：world-json 构建（含地图碰撞）
   ├─ 每 tick：takeInput（SAB 累积输入）→ 完整物理 → 碰撞事件检测 → 写权威全状态 + V_A++
   └─ 不反写位置、不渲染
@@ -25,7 +25,7 @@ Worker = 权威帧计算器（独立固定步长 = 1/tickRate，64/128Hz，累�
 | 区 | 内容 | 内存序 |
 |---|---|---|
 | 控制区 | V_A + keys + onGround | Atomics.store / load（seq_cst，语义近似 release/acquire） |
-| 输入槽 | dx/dy（BigInt64 原子累加，绝不丢）+ keys | 主线程 add；Worker exchange 消耗 |
+| 输入槽 | dx/dy（BigInt64 原子累加，绝不丢） | 主线程 add；Worker exchange 消耗 |
 | 权威全状态双缓冲 | pos/yaw/pitch/vel/eyeHeight/timeMs（每槽 10 值定点：pos/vel×100、角度×1000） | Worker 写槽后 store 递增 V_A |
 
 - **双缓冲**（S_A[0]/S_A[1]）：读侧按 `(V_A-1)&1` 选槽，防多字段撕裂（无代际校验字段）。

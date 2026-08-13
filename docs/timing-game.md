@@ -1,6 +1,6 @@
 # WebSurf game 工程时序图
 
-> 最后核对：2026-08-11。以实际代码为准（`game/src/renderer/renderer-main.ts` + `src/ts-shared/auth/*`）。
+> 最后核对：2026-08-13。以实际代码为准（`game/src/renderer/renderer-main.ts` + `src/ts-shared/auth/*`）。
 
 > 对应 `game/`（WebSurf-game，Game Build）。实际实现（v7 定案）：**主线程 = 唯一物理渲染线**
 > （PhysWorld tick + 渲染同频，rAF 帧率可变 dt、dt 钳制 0.1s）；**Worker = 权威帧计算器**

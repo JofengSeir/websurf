@@ -116,14 +116,19 @@ loop():
   呈现帧率上限 = min(显示器刷新率, GPU 渲染耗时)。
 - 渲染器 `powerPreference: 'high-performance'`（GPU 优先调度）。
 
-### 附带说明：trace 双线（范围外，如实记录）
+### 附带说明：trace 双线（范围外，如实记录；2026-08-13 修订）
 
-- main.ts（按钮状态机 + trace-data 转发）与 worker-b.ts（3D 绿/红路径线）的 trace
-  UI 仍在，但 worker-a 自 d1767c0 起不再发送 trace-data（死代码）——**本轮修复未恢复
-  trace 数据链路**（不在四条要求范围内）。
+- **[2026-08-13 修订]**：trace 数据链路已在后续提交 878515f 恢复——新增
+  `src/ts-shared/trace/` 公共模块，worker-a.ts 现用 `TraceRecorder` 采样
+  phys（无限制基准）与 tickPhys（tick 实际）并发 trace-data；main.ts 转发
+  trace-point；worker-b.ts 用 `TraceRenderer` 渲染双线。下列"死代码"描述已过时。
+- （2026-08-11 会审时的记录）main.ts（按钮状态机 + trace-data 转发）与 worker-b.ts
+  （3D 绿/红路径线）的 trace UI 仍在，但 worker-a 自 d1767c0 起不再发送 trace-data
+  （死代码）——本轮修复未恢复 trace 数据链路（不在四条要求范围内）。
 - 新架构使双线对照直接可得：**模式A = 无限制基准**（实时输入，渲染参数），
-  **tickPhys = tick 实际**（独立 64t 速度线）。若日后重连 trace，绿/红线分别采样
-  phys 与 tickPhys 的状态即可，无需再维护旧的 physBase 对照实例。
+  **tickPhys = tick 实际**（独立 64t 速度线）。后续重连 trace 时，绿/红线分别采样
+  phys 与 tickPhys 的状态即可，无需再维护旧的 physBase 对照实例（已由
+  src/ts-shared/trace/ 的 TraceRecorder 实现）。
 
 ---
 

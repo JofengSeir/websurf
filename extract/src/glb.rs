@@ -36,10 +36,12 @@ pub struct PrimitiveData {
 pub fn build_glb(primitives: &[PrimitiveData], scene_name: &str) -> Vec<u8> {
     // ---- 1. 二进制 buffer ----
     let mut bin = Vec::new();
-    let mut buffer_views = Vec::new(); // (offset, length, target)
+    let mut buffer_views = Vec::new(); // (offset, length, target, stride)
     let mut accessors = Vec::new(); // (view_index, byte_offset, count, component_type, type_, min, max)
     let mut primitive_json = Vec::new();
     let mut material_names: Vec<String> = Vec::new();
+
+    const VERTEX_STRIDE: usize = size_of::<VertexData>(); // 20B: position(12) + uv(8)
 
     for prim in primitives {
         // 顶点区
@@ -51,10 +53,11 @@ pub fn build_glb(primitives: &[PrimitiveData], scene_name: &str) -> Vec<u8> {
             bin.extend_from_slice(&v.uv[0].to_le_bytes());
             bin.extend_from_slice(&v.uv[1].to_le_bytes());
         }
-        let vert_len = prim.vertices.len() * size_of::<VertexData>();
+        let vert_len = prim.vertices.len() * VERTEX_STRIDE;
         let (min, max) = bbox(&prim.vertices);
         let vert_view = buffer_views.len() as u32;
-        buffer_views.push((vert_start, vert_len, 34962 /* ARRAY_BUFFER */));
+        // 交错顶点布局必须声明 byteStride,否则加载器按紧凑排列读取导致错位
+        buffer_views.push((vert_start, vert_len, 34962 /* ARRAY_BUFFER */, Some(VERTEX_STRIDE)));
         let vert_acc = accessors.len() as u32;
         accessors.push((vert_view, 0, prim.vertices.len() as u32, 5126 /* FLOAT */, "VEC3", Some(min), Some(max)));
 
@@ -62,14 +65,14 @@ pub fn build_glb(primitives: &[PrimitiveData], scene_name: &str) -> Vec<u8> {
         let uv_acc = accessors.len() as u32;
         accessors.push((vert_view, 12, prim.vertices.len() as u32, 5126, "VEC2", None, None));
 
-        // 索引区
+        // 索引区(紧凑 u32,无 stride)
         let idx_start = bin.len();
         for i in &prim.indices {
             bin.extend_from_slice(&i.to_le_bytes());
         }
         let idx_len = prim.indices.len() * 4;
         let idx_view = buffer_views.len() as u32;
-        buffer_views.push((idx_start, idx_len, 34963 /* ELEMENT_ARRAY_BUFFER */));
+        buffer_views.push((idx_start, idx_len, 34963 /* ELEMENT_ARRAY_BUFFER */, None));
         let idx_acc = accessors.len() as u32;
         accessors.push((idx_view, 0, prim.indices.len() as u32, 5125 /* UNSIGNED_INT */, "SCALAR", None, None));
 
@@ -104,7 +107,13 @@ pub fn build_glb(primitives: &[PrimitiveData], scene_name: &str) -> Vec<u8> {
         "asset": { "version": "2.0", "generator": "bsp-extract" },
         "scene": 0,
         "scenes": [{ "nodes": [0] }],
-        "nodes": [{ "mesh": 0, "name": scene_name }],
+        "nodes": [{
+            "mesh": 0,
+            "name": scene_name,
+            // Source 引擎 Z-up → glTF Y-up:根节点绕 Y 轴 +90°(与 websurf bsp_to_gltf_core 对齐)
+            // 四元数 [x,y,z,w] = [0, sin(45°), 0, cos(45°)]
+            "rotation": rotation_json(),
+        }],
         "meshes": [{
             "primitives": primitive_json,
             "name": scene_name,
@@ -120,7 +129,13 @@ pub fn build_glb(primitives: &[PrimitiveData], scene_name: &str) -> Vec<u8> {
         "buffers": [{ "byteLength": bin.len() }],
         "bufferViews": buffer_views
             .iter()
-            .map(|(offset, len, target)| json!({ "buffer": 0, "byteOffset": offset, "byteLength": len, "target": target }))
+            .map(|(offset, len, target, stride)| {
+                let mut bv = json!({ "buffer": 0, "byteOffset": offset, "byteLength": len, "target": target });
+                if let Some(s) = stride {
+                    bv["byteStride"] = json!(s);
+                }
+                bv
+            })
             .collect::<Vec<_>>(),
         "accessors": accessors
             .iter()
@@ -178,6 +193,12 @@ fn pad4(n: usize) -> usize {
     (n + 3) & !3
 }
 
+/// 根节点 Y+90° 旋转四元数(避免硬编码近似值触发 clippy)。
+fn rotation_json() -> serde_json::Value {
+    let q = std::f32::consts::FRAC_1_SQRT_2;
+    serde_json::json!([0.0f32, q, 0.0f32, q])
+}
+
 fn bbox(verts: &[VertexData]) -> ([f32; 3], [f32; 3]) {
     let mut min = [f32::INFINITY; 3];
     let mut max = [f32::NEG_INFINITY; 3];
@@ -226,5 +247,36 @@ mod tests {
         assert_eq!(&glb[bin_off + 4..bin_off + 8], b"BIN\x00");
         // 顶点数据 3×(12+8)=60B + 索引 3×4=12B
         assert_eq!(bin_len, 72);
+
+        // 顶点 bufferView 必须声明 byteStride=20(交错布局),否则加载器错位
+        let views = json["bufferViews"].as_array().unwrap();
+        assert_eq!(views[0]["byteStride"], 20);
+        assert!(views[0].get("byteStride").is_some());
+    }
+
+    #[test]
+    fn interleaved_vertex_reads_correctly() {
+        // 验证:按 stride=20 读取,第一个顶点 UV 在 offset 12,第二个顶点 position 在 offset 20
+        let prim = PrimitiveData {
+            vertices: vec![
+                VertexData { position: [1.0, 2.0, 3.0], uv: [0.5, 0.25] },
+                VertexData { position: [4.0, 5.0, 6.0], uv: [0.75, 0.5] },
+            ],
+            indices: vec![0, 1, 1],
+            material: None,
+        };
+        let glb = build_glb(&[prim], "t");
+        // BIN 数据:顶点 2×20=40B + 索引 3×4=12B = 52,填充到 52
+        let jlen = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+        let bin_off = 12 + 8 + jlen + 8;
+        let bin_len = u32::from_le_bytes(glb[bin_off - 8..bin_off - 4].try_into().unwrap()) as usize;
+        assert_eq!(bin_len, 52);
+        let bin = &glb[bin_off..bin_off + bin_len];
+
+        // 顶点 0:position[1,2,3] @ 0,uv[0.5,0.25] @ 12
+        assert_eq!(f32::from_le_bytes(bin[0..4].try_into().unwrap()), 1.0);
+        assert_eq!(f32::from_le_bytes(bin[12..16].try_into().unwrap()), 0.5);
+        // 顶点 1:position[4,5,6] @ 20
+        assert_eq!(f32::from_le_bytes(bin[20..24].try_into().unwrap()), 4.0);
     }
 }

@@ -178,6 +178,7 @@ pub mod lumps {
     pub const BRUSHSIDES: usize = 19;
     pub const DISPINFO: usize = 26;
     pub const ORIGINALFACES: usize = 27;
+    pub const DISP_VERTS: usize = 33;
     pub const GAME_LUMP: usize = 35;
     pub const PAKFILE: usize = 40;
     pub const TEXDATA_STRING_DATA: usize = 43;
