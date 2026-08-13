@@ -6,6 +6,11 @@
 
 ### 新增
 
+- **test/ 测试合集重组（2026-08-13）**：根 `test/` 集中全部测试内容并细分三目录——
+  - `test/dual-mode-harness/`：原 WebSurf-test 验证工程整体搬入（双模物理 + 帧信号渲染时序验证，含 mini/ 与 scripts/ 全套验证套件）；
+  - `test/extract/`：原根 `extract/`（bsp-extract 独立解包器）整体搬入（CLI + wasm + 网页/查看器，URL 变更为 `/test/extract/web|viewer/`）；
+  - `test/map-min-export/`：**新增**地图最小导出实验——导出**最小可视几何**（GLB，跳过 SKY/TRIGGER/NODRAW/HINT/SKIP 不可见面）+ **碰撞**（BRUSHES/BRUSHSIDES/PLANES → `{planes,min,max,is_ladder,is_solid}` JSON，与 game brushJson 契约同构）+ **材质纹理**（PAKFILE 提取 VMT/VTF，VTF→PNG 解码 DXT1/DXT5/常见未压缩格式），含 manifest 与 Node 验证脚本；
+  - 全部搬移经 git mv 保留历史（R 状态）；dual-mode-harness 相对依赖同步加深一级（`crates/wasm` → `../../../../src`、`[patch.crates-io] vmdl` → `../../src/vendor/vmdl`）；根 README/docs/CHANGELOG 引用同步更新。
 - **bsp-extract 独立 Rust BSP 解包器（f3662c8 / 647ff07，2026-08-12）**：
   `extract/` 独立 workspace（不归属仓库根/其他工程，不依赖共享层任何 crate），独立重实现
   VPKEdit/sourcepp 的 bsppp 模块——VBSP 头解析、64 lump 目录、Valve LZMA、PAKFILE zip
@@ -31,7 +36,7 @@
     `wake()` 的 RENDER_WAKEUP（vsync 对齐，呈现平滑）；WorkerA 发布**不 notify**
     （1kHz 随机相位唤醒 → 呈现时间不规则 → 观感抖动，已移除）；解除节流
     （固定 50ms 超时仅作停摆兜底）；V 未变不重绘；OffscreenCanvas 零拷贝直通
-  - **会审结论文档**：`test/CONCLUSION.md`——「64t 坡速 ≈ 无限制」主因 =
+  - **会审结论文档**：`test/dual-mode-harness/CONCLUSION.md`——「64t 坡速 ≈ 无限制」主因 =
     物理算子按 dt 标定（稳态速度 tick 不变量），真实难度载体 = 输入采样相位 +
     离散施加点；旧单实例双模三层缺陷（粗糙 tick 非独立演化/校准空操作/读数遮蔽）
     与四条用户要求的逐条落地

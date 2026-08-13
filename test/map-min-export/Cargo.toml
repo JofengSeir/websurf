@@ -1,0 +1,38 @@
+# map-min-export — 地图最小导出实验
+#
+# 测试功能：从 .bsp 导出「最小可视几何 + 碰撞 + 材质纹理」三件套，验证
+# 下游（渲染/物理/材质）所需的最小数据契约：
+#   geometry.glb      最小可视几何（scene::rebuild_scene：已剔除 SKY/TRIGGER/NODRAW/HINT/SKIP 不可见面）
+#   collision.json    brush 碰撞（BRUSHES/BRUSHSIDES/PLANES → {planes,min,max,is_ladder,is_solid}，与 game brushJson 同构）
+#   materials/        VMT 文本 + VTF→PNG 解码（DXT1/DXT3/DXT5/常见未压缩格式）
+#   manifest.json     上述三者的统计与逐材质元数据
+#
+# 复用 test/extract（bsp-extract）的 BspFile 解析层（lump 切片/LZMA/PAKFILE zip），
+# 不依赖共享层（src/），保持独立 workspace。
+
+[package]
+name = "map-min-export"
+version = "0.1.0"
+edition = "2021"
+description = "地图最小导出实验：最小可视几何(GLB) + 碰撞(brush 平面 JSON) + 材质纹理(VMT/VTF→PNG)"
+license = "MIT"
+
+# 独立 workspace（与 test/extract 同为独立 crate；path 依赖 bsp-extract）
+[workspace]
+
+[[bin]]
+name = "map-min-export"
+path = "src/main.rs"
+
+[dependencies]
+# 复用 bsp-extract 的 BSP 解析层（BspFile/lump_data/pak_extract + scene/glb）
+bsp-extract = { path = "../extract" }
+# manifest/碰撞 JSON 序列化（collision 用 struct 派生：f32 最短十进制，与 game brushJson 文本级一致）
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# PNG IDAT zlib 压缩
+flate2 = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true

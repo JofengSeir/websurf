@@ -30,7 +30,7 @@ const DEG2RAD = Math.PI / 180;
 // 生成一个 THREE.Mesh → 场景 ~3.4 万 Mesh 对象：每帧 three.js 遍历 3.4 万对象做剔除 +
 // 可见 mesh 逐个 draw call → 渲染耗时接近 vsync 帧间隔（120Hz=8.3ms）→ 合成器错过取帧 →
 // 视觉帧率减半。分块合并把 3.4 万对象 → ~300~800 空间块（块内按材质子合并，draw call =
-// 材质数而非 mesh 数）→ 渲染耗时 < 5ms。逻辑移植自 test/src/worker-b.ts optimizeScene
+// 材质数而非 mesh 数）→ 渲染耗时 < 5ms。逻辑移植自 test/dual-mode-harness/src/worker-b.ts optimizeScene
 // （已验证 34409 mesh → 300~800 块），主线程差异见方法注释。
 /** 目标 cell 数（cell 大小 = 世界包围盒对角线 / cbrt(目标块数)，自适应微调区间 [300,800]）。 */
 const OPT_TARGET_CELLS = 512;
@@ -725,7 +725,7 @@ export class RendererMain {
 
   // ── 空间分块合并（optimizeScene：GLB 挂载后执行一次）─────────────
   // 渲染减负核心：3.4 万 Mesh（每帧遍历/剔除开销）→ ~300~800 空间块。
-  // 移植自 test/src/worker-b.ts optimizeScene（已验证：34409 mesh → 300~800 块）。
+  // 移植自 test/dual-mode-harness/src/worker-b.ts optimizeScene（已验证：34409 mesh → 300~800 块）。
   // 与 test 的差异（Worker → 主线程）：
   // - 载体：test 重建 modelRoot 组替换；本实现直接在 BSP 根（bspRoot，userData.isBspModel
   //   保留不变）内替换内容——移除 gltf.scene、块 mesh 直接挂 BSP 根；
