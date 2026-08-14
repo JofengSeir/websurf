@@ -1,6 +1,0 @@
-# WebSurf-test 构建产物（根目录 dev 运行文件；dist/ pkg/ target/ node_modules/ 由仓库根 .gitignore 覆盖）
-/app.js
-/worker-a.js
-/worker-b.js
-/worker-a-test.js
-/websurf_test_wasm_bg.wasm

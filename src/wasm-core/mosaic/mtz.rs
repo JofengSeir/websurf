@@ -833,6 +833,7 @@ mod tests {
             sig: vec![],
             alpha: None,
             indices,
+            opacity: 255, // 无 T 字段 = 不透明
         }
     }
 

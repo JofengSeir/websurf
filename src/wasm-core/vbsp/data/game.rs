@@ -160,6 +160,7 @@ impl BinRead for StaticPropLump {
         match args.0 {
             6 => StaticPropLumpV6::read_options(reader, endian, ()).map(StaticPropLump::from),
             7 | 10 => StaticPropLumpV10::read_options(reader, endian, ()).map(StaticPropLump::from),
+            11 => StaticPropLumpV11::read_options(reader, endian, ()).map(StaticPropLump::from),
             version => Err(binrw::Error::Custom {
                 err: Box::new(UnsupportedLumpVersion {
                     lump_type: "static props",
@@ -269,6 +270,33 @@ struct StaticPropLumpV10 {
     pub lightmap_resolution: [u16; 2],
 }
 
+// CS:GO 后期 sprp v11（80B/记录，实测 ze_cursed_bear_tales 2026-08-14）：
+// 与 V10 的差异——angles 为 3×f32（12B，非 QAngle 6B）；flags 移到 solid 之后；
+// 新增 min/max_gpu_level、diff_modulation、unknown；无 lightmap_resolution。
+#[derive(BinRead)]
+struct StaticPropLumpV11 {
+    pub origin: Vector,
+    /// 角度（pitch/yaw/roll，f32 三元组——与 V10 的 QAngle i16 不同）。
+    pub angles: Angles,
+    pub prop_type: u16,
+    pub first_leaf: u16,
+    pub leaf_count: u16,
+    #[br(pad_after = 1)]
+    pub solid: SolidType,
+    pub flags: StaticPropLumpFlags,
+    pub skin: i32,
+    pub fade_min_distance: f32,
+    pub fade_max_distance: f32,
+    pub lighting_origin: Vector,
+    pub forced_fade_scale: f32,
+    pub min_dx_level: u16,
+    pub max_dx_level: u16,
+    pub min_gpu_level: u16,
+    pub max_gpu_level: u16,
+    pub diff_modulation: u32,
+    pub unknown: f32,
+}
+
 #[test]
 fn test_static_prop_lump_bytes() {
     super::test_read_bytes::<StaticPropLumpV10>();
@@ -316,6 +344,28 @@ impl From<StaticPropLumpV10> for StaticPropLump {
             max_dx_level: from.max_dx_level,
             flags: from.flags,
             lightmap_resolution: from.lightmap_resolution,
+        }
+    }
+}
+
+impl From<StaticPropLumpV11> for StaticPropLump {
+    fn from(from: StaticPropLumpV11) -> Self {
+        StaticPropLump {
+            origin: from.origin,
+            angles: from.angles,
+            prop_type: from.prop_type,
+            first_leaf: from.first_leaf,
+            leaf_count: from.leaf_count,
+            solid: from.solid,
+            skin: from.skin,
+            fade_min_distance: from.fade_min_distance,
+            fade_max_distance: from.fade_max_distance,
+            lighting_origin: from.lighting_origin,
+            forced_fade_scale: from.forced_fade_scale,
+            min_dx_level: from.min_dx_level,
+            max_dx_level: from.max_dx_level,
+            flags: from.flags,
+            lightmap_resolution: Default::default(), // V11 无此字段
         }
     }
 }

@@ -17,7 +17,7 @@ Fixes #(issue number)
 
 - [ ] debug（主工程）
 - [ ] game（WebSurf-game）
-- [ ] test（WebSurf-test：`test/dual-mode-harness/` / `test/extract/` / `test/map-min-export/`）
+- [ ] test（WebSurf-test：`test/dual-mode-harness/`）
 - [ ] 共享层（src/，两端均受影响——需双端契约校验通过）
 
 ## 测试

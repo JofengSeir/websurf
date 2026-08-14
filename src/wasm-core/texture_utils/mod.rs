@@ -1,9 +1,6 @@
 // 迁移自 texture-utils：作为模块并入。WASM 仅用解码路径，保留编码 API 结构。
 #![allow(dead_code)]
-pub mod header;
 pub mod image;
-pub mod resources;
-mod utils;
 pub mod vtf;
 
 pub use crate::texture_utils::image::DynamicImage;

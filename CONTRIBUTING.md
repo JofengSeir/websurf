@@ -5,7 +5,7 @@
 ## 报告问题
 
 - 使用 Issue 模板提交（Bug 报告 / 功能请求 / 其他），模板中注明所属工程
-  （`debug/` / `game/` / `test/`（`test/dual-mode-harness/`、`test/extract/`、`test/map-min-export/`）/ 共享层 `src/`）与运行模式（SAB 共享内存 /
+  （`debug/` / `game/` / `test/`（`test/dual-mode-harness/`）/ 共享层 `src/`）与运行模式（SAB 共享内存 /
   消息回退）等环境信息
 - 提供复现步骤和环境信息（浏览器及版本、操作系统、地图文件）
 

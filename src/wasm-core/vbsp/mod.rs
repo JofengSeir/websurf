@@ -574,6 +574,7 @@ mod tests {
     use super::Bsp;
 
     #[test]
+    #[ignore = "需要本地 koth_bagel_rc2a.bsp（未随仓库分发）"]
     fn tf2_file() {
         use std::fs::read;
 

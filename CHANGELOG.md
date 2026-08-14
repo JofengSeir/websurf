@@ -10,6 +10,21 @@
   - `test/dual-mode-harness/`：原 WebSurf-test 验证工程整体搬入（双模物理 + 帧信号渲染时序验证，含 mini/ 与 scripts/ 全套验证套件）；
   - `test/extract/`：原根 `extract/`（bsp-extract 独立解包器）整体搬入（CLI + wasm + 网页/查看器，URL 变更为 `/test/extract/web|viewer/`）；
   - `test/map-min-export/`：**新增**地图最小导出实验——导出**最小可视几何**（GLB，跳过 SKY/TRIGGER/NODRAW/HINT/SKIP 不可见面）+ **碰撞**（BRUSHES/BRUSHSIDES/PLANES → `{planes,min,max,is_ladder,is_solid}` JSON，与 game brushJson 契约同构）+ **材质纹理**（PAKFILE 提取 VMT/VTF，VTF→PNG 解码 DXT1/DXT5/常见未压缩格式），含 manifest 与 Node 验证脚本；
+  - **CSS + CS:GO 双版本支持（2026-08-14）**：Source 1 v19~v29 全版本；`FACES` 按 lump version 分派（v0 28B CSS 老图 / v1 56B / v2 64B，关键字段偏移全版本一致）；CSS 无 PAKFILE 场景优雅注明（材质在外部 vpk）而非报错；合成 v19 CSS 特征 BSP 全链路验证（FACES v0 + 空 PAKFILE + NODES/LEAFS v0 + 实体 brush origin 平移）19/19 PASS；extract 补 FACES v0 合成回归测试；产物零冗余（PNG 成功不落 .vtf）。
+  - **移除 bsp-extract，解析层并入 map-min-export（2026-08-14）**：`test/extract/` 整体移除（git rm，历史保留）；其 CS:GO 版 BSP 导出逻辑（VBSP 头/64 lump/Valve LZMA/PAKFILE zip/实体/场景重建/GLB 写入/displacement）以**最小实现**并入 `test/map-min-export/`——新增 `[lib]` 目标（`map_min_export`：bsp/bspfile/lzma/pak/scene/glb/displacement 模块 + 原有 collision/materials/vtf），main.rs 改薄 CLI 入口；依赖收敛为 lzma-rs/zip/serde/serde_json/flate2（无 wasm-bindgen）；合成 BSP 集成测试随迁 `tests/integration.rs`（4 项，含 FACES v0 CSS 变体）；lib 测试 39 + 集成 4 全过，clippy 零警告；文档（根 README/architecture/CONTRIBUTING/PR 模板/CHANGELOG）同步更新。
+  - **交互式选择性导出 CLI（2026-08-14）**：`map-min-export` 支持拖拽 .bsp 释放后交互——
+    「默认导出（几何/模型/材质/碰撞）? [y/n]」，否定后**依次提问全部可导出部分**
+    （几何/模型/材质/碰撞/光照/音效/脚本/其他资源），最后一问答完立即导出；`--parts
+    geometry,models|default|all` 非交互模式供自动化；**输出改为单文件夹内每部分同名
+    文件夹包裹**（`geometry/`、`models/`、`materials/`、`collision/`、`lightmap/`、
+    `sounds/`、`scripts/`、`other/` + `manifest.json` 汇总含逐材质明细）；
+    新增 `parts.rs`（部分枚举/默认四项/全部八项）与 `pakres.rs`（PAKFILE 子集提取：
+    models/sounds/scripts/other 保留相对路径 + 路径穿越防护；LIGHTING lump 光照导出）；
+    materials 改为相对路径子目录；verify.mjs 按 manifest.parts 逐部分校验（22/22×3）；
+    surf_666 实测：模型 620 文件 / 其他 655 / 光照 29.04MB；ze 实测：音效 50 文件 / 脚本 3；
+    CSS 无 PAKFILE 图资源部分自动跳过（0 文件而非报错）。
+  - **src 共享层文件合并与命名整理（2026-08-14）**：`src/wasm-core` 内部重组（顶层模块路径不变，三端 wasm 契约零改动）——`vbsp/data` 8→3（vector/prop/displacement 并入 mod.rs）、`vbsp/handle` 4→1、`texture_utils` 6→2（header/resources/utils 并入 vtf.rs）、`bsp_to_gltf_core` 5→4（error 并入 mod.rs），wasm-core 25→17 文件；函数/参数命名经检查已合理（CS 物理术语 + wasm 契约，phys/ts-shared 不改）；验证：wasm-core 16 测试 + 三端 wasm 构建 + 地图加载零回归（surf_666 7065 brush/142.6MB、ze 4818/38MB）。
+  - **地图最小导出合并进共享层 vbsp，map-min-export 移除（2026-08-14）**：比对 `src/wasm-core` 地图加载与 map-min-export 后实证 **v20 与 v21 的 lump version 分布一致**（NODES v0 / LEAFS v1 / FACES v1 / 其余 v0，记录大小 32/32/56B 相同）——v21 地图（ze_cursed_bear_tales）解析失败的根因仅是**版本检查硬编码 v20**；据此合并：① vbsp 版本检查放宽至 v19~v29（`vbsp/bspfile.rs`）；② 新增 **sprp v11 静态道具支持**（`vbsp/data/game.rs`，80B/记录实测布局：angles 为 3×f32 12B、flags 移位、新增 min/max_gpu_level/diff_modulation/unknown、无 lightmap_resolution）；③ 顺带修复 wasm-core 既有测试（mtz Entry 缺 opacity、tf2_file 标 ignore）；验证：ze(v21) 全链路（metadata 21774 faces/5123 brushes/302 models、碰撞 4818 brush、GLB 37MB 含 static props 354 nodes）✓、surf_666(v20) 碰撞 7065 零回归 ✓、debug/game wasm 构建 ✓；`test/map-min-export/` 整体移除（测试使命完成，文档/CHANGELOG/architecture 同步清理）。
   - 全部搬移经 git mv 保留历史（R 状态）；dual-mode-harness 相对依赖同步加深一级（`crates/wasm` → `../../../../src`、`[patch.crates-io] vmdl` → `../../src/vendor/vmdl`）；根 README/docs/CHANGELOG 引用同步更新。
 - **bsp-extract 独立 Rust BSP 解包器（f3662c8 / 647ff07，2026-08-12）**：
   `extract/` 独立 workspace（不归属仓库根/其他工程，不依赖共享层任何 crate），独立重实现

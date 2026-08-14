@@ -6,19 +6,16 @@
 #![allow(dead_code)]
 
 mod convert;
-mod error;
 mod gltf_builder;
 pub(crate) mod materials;
 
+use thiserror::Error;
 use ahash::RandomState;
 use serde::Deserialize;
 use std::hash::{BuildHasher, Hash, Hasher};
 
 /// 导出 BSP 文件为 GLTF 格式
 pub use convert::{export_bsp, export_bsp_with_models};
-
-/// 错误类型
-pub use error::Error;
 
 /// 资源类型
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,4 +117,35 @@ fn default_scale() -> f32 {
 /// 默认启用缺失资源清单生成
 fn default_enable_missing_list() -> bool {
     true
+}
+
+
+// ── 错误类型（并入自 error.rs）─────────────────────────────
+/// 错误类型
+#[derive(Error, Debug, miette::Diagnostic)]
+pub enum Error {
+    /// 资源未找到
+    #[error("资源未找到: {0}")]
+    ResourceNotFound(String),
+    /// 其他错误
+    #[error("{0}")]
+    Other(String),
+    /// IO 错误
+    #[error("IO 错误: {0}")]
+    IoError(#[from] std::io::Error),
+    /// UTF-8 错误
+    #[error("UTF-8 错误: {0}")]
+    Utf8Error(#[from] std::string::FromUtf8Error),
+    /// VTF 错误
+    #[error("VTF 错误: {0}")]
+    VtfError(#[from] vtf::Error),
+    /// VDF 错误
+    #[error("VDF 错误: {0}")]
+    VdfError(#[from] vmt_parser::VdfError),
+    /// GLTF JSON 错误
+    #[error("GLTF JSON 错误: {0}")]
+    GltfJsonError(#[from] gltf_json::Error),
+    /// 模型集成错误
+    #[error("模型集成错误: {0}")]
+    ModelIntegratorError(#[from] crate::model_integrator::ModelIntegratorError),
 }
