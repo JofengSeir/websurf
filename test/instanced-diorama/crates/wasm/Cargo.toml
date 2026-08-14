@@ -1,0 +1,88 @@
+# websurf — 单一 WASM crate
+#
+# 模块结构：
+# - lib.rs / pakfile_models.rs: WASM 绑定主体（BSP 解析/GLB 导出/brush 导出 API）
+# - src/vbsp/: BSP 文件解析模块（含 Leaves 排序修复）
+# - src/bsp_to_gltf_core/: GLB 导出核心
+# - src/model_integrator/: 模型/静态道具集成
+# - src/texture_utils/: 纹理解码（VTF/DDS → PNG）
+
+[package]
+name = "websurf-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "WebSurf WASM 核心：BSP 解析、GLB 导出、brush 平面导出"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# 共享物理系统（仓库根 src/，websurf-phys）
+websurf-phys = { path = "../../../../src" }
+# 共享解析层（仓库根 src/wasm-core/，websurf-wasm-core）
+websurf-wasm-core = { path = "../../../../src/wasm-core" }
+
+# WASM 核心绑定
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["console"] }
+js-sys = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+md5 = "0.8"
+
+# JS ↔ Rust 结构化数据反序列化（用于接收内存模型/纹理字节）
+serde-wasm-bindgen = "0.6"
+
+# 模型解析（wasm-bindings + bsp-to-gltf-core + model-integrator 共用）
+vmdl = "0.2"
+vtf = "0.3"
+vmt-parser = "0.2"
+tf-asset-loader = { version = "0.1.7", features = ["zip"] }
+
+# GLB 导出（bsp-to-gltf-core）
+gltf = "1.4.1"
+gltf-json = { version = "1.4.1", features = ["KHR_texture_transform", "extras"] }
+cgmath = "0.18.0"
+bytemuck = { version = "1.17.1", features = ["derive"] }
+miette = "7.2.0"
+
+# BSP 解析（src/vbsp/ 模块依赖）
+arrayvec = "0.7.6"
+binrw = "0.14.0"
+bitflags = "2.6.0"
+bv = "0.11.1"
+itertools = "0.13.0"
+lzma-rs = "0.3.0"
+num_enum = "0.7.2"
+static_assertions = "1.1.0"
+thiserror = "2.0.11"
+vdf-reader = "0.2.0"
+zip = { version = "0.6.3", package = "zip-lzma", features = ["lzma"], default-features = false }
+
+# 纹理解码（texture-utils）
+byteorder = "1.5.0"
+texpresso = "2.0.2"
+parse-display = "0.9.0"
+
+# image 库：仅启用 png 编解码器（WASM 下减小体积）
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# WASM 下的 getrandom 需要 js feature（0.2 用于直接依赖，0.3 用于 ahash 间接依赖）
+getrandom = { version = "0.2", features = ["js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+# path-dedot 在 wasm32 下需要 use_unix_paths_on_wasm feature 才能编译 unix 模块
+# （被 tf-asset-loader 间接拉入但未启用此 feature）
+path-dedot = { version = "3", features = ["use_unix_paths_on_wasm"] }
+
+# ahash 在 WASM 下需要禁用 runtime-rng（无 /dev/urandom）
+[dependencies.ahash]
+version = "0.8"
+default-features = false
+features = ["compile-time-rng"]
+
+# 本机 NODE_OPTIONS 含 --use-system-ca 会污染 wasm-opt（node 脚本）；LTO+opt3 已足够，跳过二次优化
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

@@ -1,0 +1,7 @@
+# 构建产物
+app.js
+app.js.map
+pkg/
+websurf_wasm_bg.wasm
+node_modules/
+target/

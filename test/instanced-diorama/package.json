@@ -1,0 +1,25 @@
+{
+  "name": "websurf-instanced-diorama",
+  "version": "0.1.0",
+  "description": "WebSurf instanced-diorama — 实例化绘制 + PBR 材质 + 影棚光照 + SSAO/DOF 后处理测试用例（含 BSP 光照导出验证）。",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../pkg && node -e \"require('fs').copyFileSync('../../pkg/websurf_wasm_bg.wasm','../../websurf_wasm_bg.wasm')\"",
+    "typecheck": "tsc --noEmit",
+    "build:ts": "npm run typecheck && esbuild src/main.ts --bundle --outfile=app.js --format=esm --target=es2022",
+    "build": "npm run build:wasm && npm run build:ts",
+    "dev": "python serve.py 8080",
+    "check:lights": "node scripts/check-lights.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/three": "^0.165.0",
+    "esbuild": "^0.23.0",
+    "pngjs": "^7.0.0",
+    "typescript": "~5.7.2"
+  },
+  "dependencies": {
+    "three": "^0.165.0"
+  }
+}
