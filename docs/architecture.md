@@ -1,14 +1,14 @@
 # WebSurf 整体架构
 
-> 最后核对：2026-08-13。以实际代码为准（共享层 `src/` + 双工程 `debug/`、`game/` + 测试合集 `test/`（`extract/` + `dual-mode-harness/` + `map-min-export/`））。
+> 最后核对：2026-08-14。以实际代码为准（共享层 `src/` + 双工程 `debug/`、`game/` + 验证工程 `test/dual-mode-harness/`）。
 
 浏览器中的 Counter-Strike 滑翔（Surf）地图游玩器：BSP 解析（Rust/WASM）+ CS 移动物理 + Three.js 渲染。
 
 仓库由**两个同级独立工程**（各自完整前端与打包链，互不引用）、一个**共享层**（仓库根 `src/`）与一个**测试合集**（`test/`，不入 Pages 部署）组成；
-`test/` 内含独立解包器 `test/extract/`（bsp-extract crate，独立 workspace，不依赖共享层）、验证工程 `test/dual-mode-harness/` 与地图最小导出实验 `test/map-min-export/`。
+`test/` 内含验证工程 `test/dual-mode-harness/`。（注：2026-08-14 地图最小导出实验 map-min-export 的验证结论——v20 与 v21 共用 lump 布局——已合并进共享层 vbsp：版本检查放宽至 v19~v29 + sprp v11 静态道具支持，实验工程随之移除。）
 文档地图：公共架构见本文；两端时序见 `docs/timing-debug.md`（debug）、`docs/timing-game.md`（game）；
 公共材质技术（mosaic 低清压缩 / MTZ 打包 / 默认纹理包）见 `docs/materials.md`；
-各工程特色功能见 `debug/docs/`、`game/docs/`；独立解包器见 `test/extract/README.md`；验证工程见 `test/dual-mode-harness/README.md` + `test/dual-mode-harness/CONCLUSION.md`。
+各工程特色功能见 `debug/docs/`、`game/docs/`；验证工程见 `test/dual-mode-harness/README.md` + `test/dual-mode-harness/CONCLUSION.md`。
 
 ---
 
@@ -35,27 +35,23 @@ websurf/
 │   ├── crates/wasm/src/         lib.rs（导出层，唯一文件）
 │   ├── src/                     TS：app/renderer/worker/panel/input/world
 │   └── web/                     dev 页面
-├── test/                      测试合集（不入 Pages 部署）
-│   ├── extract/                bsp-extract：独立 Rust BSP 解包器（独立 workspace，不依赖共享层；对齐 VPKEdit/sourcepp bsppp；CLI + wasm + 查看器）
-│   ├── dual-mode-harness/      WebSurf-test（验证工程，2026-08-11 收尾）：双模物理 + 帧信号渲染时序验证
-│   │   ├── crates/wasm/src/      lib.rs（薄导出层：PhysWorld + BspProcessor 最小导出集，无 mosaic/默认包）
-│   │   ├── src/                  TS：main（不做物理/渲染——主线程负责 BSP 解析导出 + 输入转发 + UI）/ shared-state（SAB + 消息回退）/ worker-a（双模物理）/ worker-b（渲染）
-│   │   ├── mini/                 核心链路最小实现（输入 → 物理 → SAB → 插值渲染，与完整版架构一致）
-│   │   └── scripts/              phys-smoke（192/192 PASS）/ perf-bench / race-wakeup / tmp-dual-compare / trace-verify / build-dist（另有已跟踪的临时脚本 _tmp_flicker-debug.mjs）
-│   └── map-min-export/        地图最小导出实验：导出最小可视几何（GLB）+ 碰撞（brush 平面）+ 材质纹理（VMT/VTF→PNG）
+├── test/                      验证工程（不入 Pages 部署）
+│   └── dual-mode-harness/      WebSurf-test（验证工程，2026-08-11 收尾）：双模物理 + 帧信号渲染时序验证
+│       ├── crates/wasm/src/      lib.rs（薄导出层：PhysWorld + BspProcessor 最小导出集，无 mosaic/默认包）
+│       ├── src/                  TS：main（不做物理/渲染——主线程负责 BSP 解析导出 + 输入转发 + UI）/ shared-state（SAB + 消息回退）/ worker-a（双模物理）/ worker-b（渲染）
+│       ├── mini/                 核心链路最小实现（输入 → 物理 → SAB → 插值渲染，与完整版架构一致）
+│       └── scripts/              phys-smoke（191/191 PASS）/ perf-bench / race-wakeup / tmp-dual-compare / trace-verify / build-dist（另有已跟踪的临时脚本 _tmp_flicker-debug.mjs）
 ├── docs/                     仓库级文档（本文 / 两端时序 / 材质技术）
 └── .github/workflows/deploy-pages.yml    CI：debug + game 构建 + Pages 部署（test 不入部署）
 ```
 
-### 五个 Rust workspace 的引用关系（extract 与 map-min-export 为独立 crate，不属共享层）
+### 三个 Rust workspace 的引用关系（共享层 + 两端 + 验证工程）
 
 | crate | 角色 | 被谁引用 |
 |---|---|---|
 | `src/`（websurf-phys） | 物理核心 + wasm 绑定（`PhysWorld` 类，19 个 pub 方法，含 `new`） | debug/game/test/dual-mode-harness 的 `crates/wasm`（path 依赖，经 `pub use` re-export 进各自 WASM） |
-| `src/wasm-core/`（websurf-wasm-core） | BSP 解析/GLB/模型/纹理解析 + mosaic 编解码 + MTZ 容器（纯 rlib，无 wasm 导出） | debug/game/test/dual-mode-harness 的 `crates/wasm`（path 依赖，内部模块直接调用） |
+| `src/wasm-core/`（websurf-wasm-core） | BSP 解析（**v20-v21**，2026-08-14 起支持 CS:GO v21 含 sprp v11 静态道具）/GLB/模型/纹理解析 + mosaic 编解码 + MTZ 容器（纯 rlib，无 wasm 导出） | debug/game/test/dual-mode-harness 的 `crates/wasm`（path 依赖，内部模块直接调用） |
 | `src/vendor/vmdl/` | vendored vmdl（patch 到三端 workspace） | 三端（debug/game/test/dual-mode-harness）`[patch.crates-io]` → `../src/vendor/vmdl`（dual-mode-harness 为 `../../src/vendor/vmdl`） |
-| `test/extract/`（bsp-extract） | 独立 Source 1 (CS:GO) BSP 解包器（VBSP 头解析/64 lump/Valve LZMA/PAKFILE zip/实体/GLB 导出，CLI + wasm） | `test/map-min-export/`（path 依赖，复用 BspFile/scene/glb）；其余工程不依赖 |
-| `test/map-min-export/`（map-min-export） | 地图最小导出实验（最小可视几何 GLB + brush 平面碰撞 JSON + VMT/VTF→PNG 纹理） | 无（独立 workspace；path 依赖 bsp-extract，不依赖共享层） |
 
 ### 共享层 TS 模块（`src/ts-shared/`，两端 import 共享，改一处双端生效）
 
@@ -164,7 +160,7 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 - `__VBSP_WASM_URL__`（仅 debug multi 注入）：WASM 相对路径（`./websurf_wasm_bg.wasm`），无则 dev 默认 `../pkg/websurf_wasm_bg.wasm`。game 不使用该变量——其 dev/multi 的 wasm 路径统一硬编码 `./websurf_wasm_bg.wasm`（build:wasm 复制 wasm 到 web/，dev 与 dist 同构）。
 
 **test/dual-mode-harness 工程**：仅 multi 多文件（5 文件：app/worker-a/worker-b/wasm/index.html），无 single 内嵌模式
-（仅 HTTP 运行，SAB 恒定可用）。`test/map-min-export/` 为原生 Rust CLI（无 npm/wasm 链）。
+（仅 HTTP 运行，SAB 恒定可用）。
 
 **CI（deploy-pages.yml）**：debug + game 均以 `--multi` 构建 → 组装 `deploy/{debug,game}` + 入口页 → Pages 部署（test 不入部署）。
 

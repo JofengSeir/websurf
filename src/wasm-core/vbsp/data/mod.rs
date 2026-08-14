@@ -1,36 +1,31 @@
 // vbsp 子模块：保留完整解析语义，允许未使用项
 #![allow(dead_code)]
 
-mod displacement;
 mod entity;
 mod game;
-mod prop;
-mod vector;
 
-pub use self::displacement::*;
 pub use self::entity::*;
 pub use self::game::*;
 
-pub use self::vector::*;
 use crate::vbsp::bspfile::LumpType;
-use crate::vbsp::error::EntityParseError;
-use crate::vbsp::{BspResult, StringError};
+use crate::vbsp::error::{EntityParseError, InvalidNeighbourError};
+use crate::vbsp::{BspResult, Handle, StringError};
 use arrayvec::ArrayString;
 use binrw::error::CustomError;
 use binrw::{BinRead, BinResult, Endian};
 use bitflags::bitflags;
 use bv::BitVec;
-use cgmath::{Deg, Quaternion, Rotation3};
+use cgmath::{Deg, Quaternion, Rotation3, Vector3};
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use serde::de::{Error, Unexpected};
 use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
-use std::cmp::min;
+use std::cmp::{min, Ordering};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
-use std::io::{Cursor, Read, Seek};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::mem::{align_of, size_of};
-use std::ops::Index;
+use std::ops::{Add, Index, Mul, Sub};
 use std::str::FromStr;
 use std::sync::Mutex;
 use zip::result::ZipError;
@@ -682,5 +677,394 @@ mod tests {
             let expect = matches!(t, 0 | 1 | 2 | 3 | 16 | 17 | 18 | 19);
             assert_eq!(is_visible(t), expect, "cluster {} visibility", t);
         }
+    }
+}
+
+
+// ── vector（并入自 vector.rs）──────────────────────────
+
+#[derive(Debug, Clone, Copy, BinRead, Default)]
+pub struct Vector {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl Vector {
+    pub fn iter(&self) -> impl Iterator<Item = f32> {
+        [self.x, self.y, self.z].into_iter()
+    }
+
+    pub fn length_squared(&self) -> f32 {
+        self.x.powf(2.0) + self.y.powf(2.0) + self.z.powf(2.0)
+    }
+}
+
+impl Add<Vector> for Vector {
+    type Output = Vector;
+
+    fn add(self, rhs: Vector) -> Self::Output {
+        Vector {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+            z: self.z + rhs.z,
+        }
+    }
+}
+
+impl Sub<Vector> for Vector {
+    type Output = Vector;
+
+    fn sub(self, rhs: Vector) -> Self::Output {
+        Vector {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+            z: self.z - rhs.z,
+        }
+    }
+}
+
+impl Mul<f32> for Vector {
+    type Output = Vector;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Vector {
+            x: self.x * rhs,
+            y: self.y * rhs,
+            z: self.z * rhs,
+        }
+    }
+}
+
+impl PartialEq for Vector {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x && self.y == other.y && self.z == other.z
+    }
+}
+
+impl PartialOrd for Vector {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.length_squared().partial_cmp(&other.length_squared())
+    }
+}
+
+impl From<Vector> for [f32; 3] {
+    fn from(vector: Vector) -> Self {
+        [vector.x, vector.y, vector.z]
+    }
+}
+
+impl From<[f32; 3]> for Vector {
+    fn from(vector: [f32; 3]) -> Self {
+        Vector {
+            x: vector[0],
+            y: vector[1],
+            z: vector[2],
+        }
+    }
+}
+
+impl From<&Vector> for [f32; 3] {
+    fn from(vector: &Vector) -> Self {
+        [vector.x, vector.y, vector.z]
+    }
+}
+
+impl FromStr for Vector {
+    type Err = EntityParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut floats = s.split(' ').map(f32::from_str);
+        let x = floats.next().ok_or(EntityParseError::ElementCount)??;
+        let y = floats.next().ok_or(EntityParseError::ElementCount)??;
+        let z = floats.next().ok_or(EntityParseError::ElementCount)??;
+        Ok(Vector { x, y, z })
+    }
+}
+
+impl From<Vector> for Vector3<f32> {
+    fn from(v: Vector) -> Self {
+        Vector3::new(v.x, v.y, v.z)
+    }
+}
+
+impl<'de> Deserialize<'de> for Vector {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let str = <&str>::deserialize(deserializer)?;
+        str.parse()
+            .map_err(|_| D::Error::invalid_value(Unexpected::Other(str), &"a vector"))
+    }
+}
+
+// ── prop（并入自 prop.rs）─────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct PropPlacement<'a> {
+    pub model: &'a str,
+    pub rotation: Quaternion<f32>,
+    pub scale: f32,
+    pub origin: Vector,
+    pub skin: i32,
+}
+
+impl<'a> Handle<'a, StaticPropLump> {
+    pub fn as_prop_placement(&self) -> PropPlacement<'a> {
+        PropPlacement {
+            model: self.model(),
+            rotation: self.rotation(),
+            scale: 1.0,
+            origin: self.origin,
+            skin: self.skin,
+        }
+    }
+}
+
+impl<'a> PropDynamic<'a> {
+    pub fn as_prop_placement(&self) -> PropPlacement<'a> {
+        PropPlacement {
+            model: self.model,
+            rotation: self.angles.as_quaternion(),
+            scale: self.scale,
+            origin: self.origin,
+            skin: 0,
+        }
+    }
+}
+
+impl<'a> PropDynamicOverride<'a> {
+    pub fn as_prop_placement(&self) -> PropPlacement<'a> {
+        PropPlacement {
+            model: self.model,
+            rotation: self.angles.as_quaternion(),
+            scale: self.scale,
+            origin: self.origin,
+            skin: 0,
+        }
+    }
+}
+
+// ── displacement（并入自 displacement.rs）──────────────
+
+#[derive(Debug, Clone, BinRead)]
+pub struct DisplacementInfo {
+    pub start_position: Vector,
+    pub displacement_vertex_start: i32,
+    pub displacement_triangle_tag_start: i32,
+
+    pub power: i32,
+    pub minimum_tesselation: i32,
+    pub smoothing_angle: f32,
+    pub contents: i32,
+
+    pub map_face: u16,
+
+    #[br(align_before = 4)]
+    pub lightmap_alpha_start: i32,
+    pub lightmap_sample_position_start: i32,
+
+    pub edge_neighbours: [DisplacementNeighbour; 4],
+    pub corner_neighbours: [DisplacementCornerNeighbour; 4],
+
+    pub allowed_vertices: [u32; 10],
+}
+
+impl DisplacementInfo {
+    pub fn vertex_count(&self) -> i32 {
+        (2i32.pow(self.power as u32) + 1).pow(2)
+    }
+
+    pub fn triangle_count(&self) -> i32 {
+        2 * 2i32.pow(self.power as u32).pow(2)
+    }
+}
+
+#[test]
+fn test_displacement_bytes() {
+    test_read_bytes::<DisplacementInfo>();
+}
+
+static_assertions::const_assert_eq!(size_of::<DisplacementInfo>(), 176);
+
+#[derive(Debug, Clone)]
+pub struct DisplacementNeighbour {
+    pub sub_neighbours: [Option<DisplacementSubNeighbour>; 2],
+}
+
+impl DisplacementNeighbour {
+    pub fn iter(&self) -> impl Iterator<Item = &DisplacementSubNeighbour> {
+        self.sub_neighbours.iter().filter_map(|sub| sub.as_ref())
+    }
+}
+
+impl BinRead for DisplacementNeighbour {
+    type Args<'a> = ();
+
+    fn read_options<R: Read + Seek>(
+        reader: &mut R,
+        endian: Endian,
+        args: Self::Args<'_>,
+    ) -> BinResult<Self> {
+        Ok(DisplacementNeighbour {
+            sub_neighbours: [
+                read_option_sub_neighbour(reader, endian, args)?,
+                read_option_sub_neighbour(reader, endian, args)?,
+            ],
+        })
+    }
+}
+
+fn read_option_sub_neighbour<R: Read + Seek>(
+    reader: &mut R,
+    endian: Endian,
+    args: (),
+) -> BinResult<Option<DisplacementSubNeighbour>> {
+    let neighbour_index = u16::read_options(reader, endian, args)?;
+
+    // 非连接的 sub-neighbour 的朝向/跨度数据是垃圾值，直接跳过
+    if neighbour_index == u16::MAX {
+        reader.seek(SeekFrom::Current(
+            size_of::<DisplacementSubNeighbour>() as i64 - 2,
+        ))?;
+        Ok(None)
+    } else {
+        reader.seek(SeekFrom::Current(-2))?;
+        Ok(Some(DisplacementSubNeighbour::read_options(
+            reader, endian, args,
+        )?))
+    }
+}
+
+static_assertions::const_assert_eq!(size_of::<DisplacementNeighbour>(), 12);
+
+#[test]
+fn test_neighbour_bytes() {
+    test_read_bytes::<DisplacementNeighbour>();
+}
+
+#[derive(Debug, Clone, BinRead)]
+pub struct DisplacementSubNeighbour {
+    pub neighbour_index: u16,
+    /// 邻居相对我们的朝向
+    pub neighbour_orientation: NeighbourOrientation,
+    /// 邻居如何嵌入我们
+    pub span: NeighbourSpan,
+    /// 我们如何嵌入邻居
+    #[br(align_after = align_of::<DisplacementSubNeighbour>())]
+    pub neighbour_span: NeighbourSpan,
+}
+
+#[test]
+fn test_sub_neighbour_bytes() {
+    test_read_bytes::<DisplacementSubNeighbour>();
+}
+
+static_assertions::const_assert_eq!(size_of::<DisplacementSubNeighbour>(), 6);
+static_assertions::const_assert_eq!(align_of::<DisplacementSubNeighbour>(), 2);
+
+#[derive(Debug, Clone, TryFromPrimitive)]
+#[repr(u8)]
+pub enum NeighbourSpan {
+    CornerToCorner = 0,
+    CornerToMidPoint = 1,
+    MidPointToCorner = 2,
+}
+
+impl BinRead for NeighbourSpan {
+    type Args<'a> = ();
+
+    fn read_options<R: Read + Seek>(
+        reader: &mut R,
+        endian: Endian,
+        args: Self::Args<'_>,
+    ) -> BinResult<Self> {
+        try_read_enum(
+            reader,
+            endian,
+            args,
+            InvalidNeighbourError::InvalidNeighbourSpan,
+        )
+    }
+}
+
+#[derive(Debug, Clone, TryFromPrimitive)]
+#[repr(u8)]
+pub enum NeighbourOrientation {
+    Ccw0 = 0,
+    Ccw90 = 1,
+    Ccw180 = 2,
+    Ccw270 = 3,
+}
+
+impl BinRead for NeighbourOrientation {
+    type Args<'a> = ();
+
+    fn read_options<R: Read + Seek>(
+        reader: &mut R,
+        endian: Endian,
+        args: Self::Args<'static>,
+    ) -> BinResult<Self> {
+        try_read_enum(
+            reader,
+            endian,
+            args,
+            InvalidNeighbourError::InvalidNeighbourOrientation,
+        )
+    }
+}
+
+#[derive(Debug, Clone, BinRead)]
+pub struct DisplacementCornerNeighbour {
+    neighbours: [u16; 4],
+    #[br(align_after = align_of::< DisplacementCornerNeighbour > ())]
+    neighbour_count: u8,
+}
+
+impl DisplacementCornerNeighbour {
+    pub fn neighbours(&self) -> impl Iterator<Item = u16> + '_ {
+        self.neighbours
+            .iter()
+            .copied()
+            .take(self.neighbour_count as usize)
+    }
+}
+
+static_assertions::const_assert_eq!(size_of::<DisplacementCornerNeighbour>(), 10);
+
+#[test]
+fn test_corner_neighbour_bytes() {
+    test_read_bytes::<DisplacementCornerNeighbour>();
+}
+
+#[derive(Debug, Clone, BinRead)]
+pub struct DisplacementVertex {
+    pub vector: Vector,
+    pub distance: f32,
+    pub alpha: f32,
+}
+
+impl DisplacementVertex {
+    pub fn displacement(&self) -> Vector {
+        self.vector * self.distance
+    }
+}
+
+#[derive(Debug, Clone, BinRead)]
+pub struct DisplacementTriangle {
+    pub tags: DisplacementTriangleFlags,
+}
+
+#[derive(BinRead, Debug, Clone, Copy)]
+pub struct DisplacementTriangleFlags(u8);
+
+bitflags! {
+    impl DisplacementTriangleFlags: u8 {
+        const SURFACE =       0x01;
+        const WALKABLE =      0x02;
+        const BULDABLE =      0x04;
+        const SURFACE_PROP1 = 0x08;
+        const SURFACE_PROP2 = 0x10;
     }
 }

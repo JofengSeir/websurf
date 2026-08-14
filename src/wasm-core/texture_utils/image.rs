@@ -1,5 +1,5 @@
-use crate::texture_utils::header::VTFHeader;
-use crate::texture_utils::utils::get_offset;
+use crate::texture_utils::vtf::VTFHeader;
+use crate::texture_utils::vtf::get_offset;
 use crate::texture_utils::Error;
 pub use image::{DynamicImage, ImageBuffer, Pixel};
 use num_enum::TryFromPrimitive;

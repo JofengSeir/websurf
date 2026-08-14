@@ -17,14 +17,19 @@ impl<'a> BspFile<'a> {
             s: b'S',
             p: b'P',
         };
-        // TODO: 用此版本号决定按哪个版本解析
-        const EXPECTED_VERSION: u32 = 0x14;
+        // Source 1 家族版本范围（CSS/HL2 v19-v20、CS:GO v20-v21、L4D2/Portal2 v21+）。
+        // 实证（2026-08-14）：v20 与 v21 的 lump version 分布一致（NODES v0 / LEAFS v1 /
+        // FACES v1 / 其余 v0），NODES/LEAFS/FACES 记录大小相同（32/32/56B）——
+        // v21 地图（如 ze_cursed_bear_tales）与 v20 共用同一布局，仅需放宽版本检查。
+        // 注：v19 早期 CSS 图的 FACES 可能是 v0（28B），需 lump version 分派（未实现）。
+        const VERSION_MIN: u32 = 19;
+        const VERSION_MAX: u32 = 29;
 
         let mut cursor = Cursor::new(data);
         let header: Header = cursor.read_le()?;
         let version: u32 = cursor.read_le()?;
 
-        if header != EXPECTED_HEADER || version != EXPECTED_VERSION {
+        if header != EXPECTED_HEADER || !(VERSION_MIN..=VERSION_MAX).contains(&version) {
             return Err(BspError::UnexpectedHeader(header));
         }
 

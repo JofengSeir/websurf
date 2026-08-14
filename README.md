@@ -3,16 +3,16 @@
 浏览器中的 Counter-Strike 滑翔（Surf）地图游玩器：BSP 解析（Rust/WASM）+ CS 移动物理 + Three.js 渲染。
 
 仓库由**两个同级独立工程**（各含完整 TS 前端与打包链，互不引用）与一个**共享层**（仓库根 `src/`）、
-一个**测试合集**（`test/`，内含独立解包器 `test/extract/`、验证工程 `test/dual-mode-harness/` 与地图最小导出实验 `test/map-min-export/`）组成：
+一个**验证工程**（`test/dual-mode-harness/`）组成：
 
 | 目录 | 定位 | 说明 |
 |---|---|---|
-| [`src/`](src/) | 共享层 | `phys/`（websurf-phys：Rust 物理 WASM 核心）、`wasm-core/`（websurf-wasm-core：BSP 解析/GLB/模型/纹理解析 + mosaic/MTZ）、`ts-shared/`（TS 物理渲染共享：权威帧/校准/输入层/世界构建）、`materials/textures.mtz`（默认纹理包）、`vendor/vmdl/`（vendored vmdl 单副本）、`serve.py`（dev 服务器；BSP 地图位于仓库根 `maps/` 与 `game/maps/`，gitignored） |
+| [`src/`](src/) | 共享层 | `phys/`（websurf-phys：Rust 物理 WASM 核心）、`wasm-core/`（websurf-wasm-core：BSP 解析 v20-v21/GLB/模型/纹理解析 + mosaic/MTZ）、`ts-shared/`（TS 物理渲染共享：权威帧/校准/输入层/世界构建）、`materials/textures.mtz`（默认纹理包）、`vendor/vmdl/`（vendored vmdl 单副本）、`serve.py`（dev 服务器；BSP 地图位于仓库根 `maps/` 与 `game/maps/`，gitignored） |
 | [`debug/`](debug/) | 主工程（Debug Build） | 全功能调试测试页面：计时挑战、碰撞可视化、物理面板、自定义传送点、调试 API（`parse_entities`/`list_pakfile`/`export_visleaf_pvs` 等，仅 debug 导出） |
 | [`game/`](game/) | WebSurf-game（Game Build） | 尝试游戏化的最小化实现：Rust 物理 + 主线程唯一物理渲染线 + 单 Worker 权威帧 + ESC 面板 |
-| [`test/`](test/) | 测试合集 | `extract/`（bsp-extract 独立解包器，CLI + wasm）、`dual-mode-harness/`（WebSurf-test 验证工程：输入→物理→渲染时序）、`map-min-export/`（地图最小导出实验：可视几何+碰撞+材质纹理） |
+| [`test/`](test/) | 验证工程 | `dual-mode-harness/`（WebSurf-test：输入→物理→渲染时序验证） |
 
-入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` 双入口（test 合集仅本地运行）。
+入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` 双入口（test 仅本地运行）。
 
 ## 构建
 
@@ -22,14 +22,6 @@
 cd debug   # 或 cd game / test/dual-mode-harness
 npm install
 npm run build   # 编译 WASM（共享 crate 自动参与）+ TypeScript
-```
-
-独立解包器 `test/extract/`（bsp-extract）不使用 npm，改为 cargo + wasm-pack 构建（详见 [test/extract/README.md](test/extract/README.md)）：
-
-```bash
-cd test/extract
-cargo build --release    # 原生 CLI：bsp-extract
-build-wasm.cmd           # wasm 产物（cargo build + wasm-bindgen CLI）
 ```
 
 ## 开发 / 运行
@@ -57,9 +49,7 @@ BSP 地图文件体积大，不随仓库分发（见 .gitignore，`*.bsp` 全忽
 - [debug/docs/](debug/docs/) — 主工程特色功能（材质应用/物理/渲染调试/计时挑战）
 - [game/docs/](game/docs/) — WebSurf-game 特色功能（双物理线/面板键位/材质应用）
 - [game/README.md](game/README.md) — WebSurf-game 使用说明
-- [test/extract/README.md](test/extract/README.md) — bsp-extract 独立解包器使用说明
 - [test/dual-mode-harness/README.md](test/dual-mode-harness/README.md) / [test/dual-mode-harness/CONCLUSION.md](test/dual-mode-harness/CONCLUSION.md) — 验证工程说明与「64t 坡速 ≈ 无限制」会审结论
-- [test/map-min-export/README.md](test/map-min-export/README.md) — 地图最小导出（最小可视几何+碰撞+材质纹理）实验
 
 ## 第三方组件
 

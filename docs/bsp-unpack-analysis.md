@@ -8,7 +8,9 @@
 > **修订(2026-08-13)**:本文 §4 的"移植方案"当时是可行性提案。实际实现
 > (提交 f3662c8 + 647ff07)走了不同路径——**落地为独立 `test/extract/` crate(bsp-extract)**,
 > 未按提案在 game/crates/wasm 上加 4 个 API、未新建 /extract 面板。详见 §1/§4/§5 修订注
-> 与 `test/extract/README.md`。（注:2026-08-13 仓库重组后 `extract/` 位于 `test/extract/`）
+> 与 `test/extract/README.md`。（注:2026-08-13 仓库重组后 `extract/` 位于 `test/extract/`；
+> **2026-08-14 bsp-extract 已移除**,其 CS:GO 版 BSP 解析逻辑以最小实现并入
+> `test/map-min-export/` 自包含 lib——本文历史引用仅作记录。）
 
 ---
 
