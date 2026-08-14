@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>实例化绘制 · PBR 光照沙盘 (instanced-diorama)</title>
+<style>
+  :root {
+    --bg: #0e1114;
+    --panel: rgba(16, 20, 26, 0.86);
+    --border: rgba(255, 255, 255, 0.14);
+    --text: #d8dee6;
+    --dim: #8b95a1;
+    --accent: #6fb7ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+  #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* ── HUD（左上：渲染统计）── */
+  #hud {
+    position: fixed; top: 12px; left: 12px; z-index: 10; pointer-events: none;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; min-width: 240px; backdrop-filter: blur(6px);
+  }
+  #hud h1 { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #fff; }
+  #hud .row { display: flex; justify-content: space-between; gap: 16px; }
+  #hud .row b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  #hud .dim { color: var(--dim); font-size: 11px; margin-top: 4px; }
+
+  /* ── 控制面板（右上）── */
+  #panel {
+    position: fixed; top: 12px; right: 12px; z-index: 10;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; width: 260px; backdrop-filter: blur(6px);
+    max-height: calc(100vh - 24px); overflow-y: auto;
+  }
+  #panel h2 { font-size: 12px; font-weight: 600; color: var(--dim); margin: 10px 0 4px; }
+  #panel h2:first-child { margin-top: 0; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tabs button {
+    flex: 1; padding: 6px 0; border: 1px solid var(--border); border-radius: 6px;
+    background: transparent; color: var(--text); cursor: pointer; font-size: 12px;
+  }
+  .tabs button.active { background: var(--accent); border-color: var(--accent); color: #0b1118; font-weight: 600; }
+  label.ctl { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 12px; }
+  label.ctl .name { width: 88px; color: var(--dim); flex: none; }
+  label.ctl input[type="range"] { flex: 1; accent-color: var(--accent); }
+  label.ctl .val { width: 46px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+  label.ctl input[type="checkbox"] { accent-color: var(--accent); }
+  .btn {
+    display: block; width: 100%; padding: 7px 0; margin: 8px 0 4px;
+    border: 1px solid var(--border); border-radius: 6px; background: rgba(255,255,255,0.05);
+    color: var(--text); cursor: pointer; font-size: 12px;
+  }
+  .btn:hover { border-color: var(--accent); }
+  #bsp-info { font-size: 11px; color: var(--dim); margin-top: 6px; white-space: pre-wrap; word-break: break-all; }
+  .hint { font-size: 11px; color: var(--dim); margin-top: 8px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud">
+  <h1>instanced-diorama</h1>
+  <div class="row"><span>FPS</span><b id="hud-fps">--</b></div>
+  <div class="row"><span>帧耗时</span><b id="hud-ms">--</b></div>
+  <div class="row"><span>Draw calls</span><b id="hud-calls">--</b></div>
+  <div class="row"><span>三角形</span><b id="hud-tris">--</b></div>
+  <div class="row"><span>实例总数</span><b id="hud-instances">--</b></div>
+  <div class="dim" id="hud-note"></div>
+</div>
+
+<div id="panel">
+  <div class="tabs">
+    <button id="tab-diorama" class="active">沙盘 Diorama</button>
+    <button id="tab-bsp">BSP 地图</button>
+  </div>
+
+  <div id="ctrl-diorama">
+    <h2>实例化</h2>
+    <label class="ctl"><span class="name">方块数量</span>
+      <input type="range" id="inst-count" min="2000" max="100000" step="1000" value="21000">
+      <span class="val" id="inst-count-val">21000</span></label>
+    <h2>影棚光照</h2>
+    <label class="ctl"><span class="name">阴影分辨率</span>
+      <select id="shadow-size" style="flex:1;background:#1a2027;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
+        <option value="2048">2048</option>
+        <option value="4096" selected>4096</option>
+        <option value="8192">8192</option>
+      </select></label>
+    <label class="ctl"><span class="name">曝光</span>
+      <input type="range" id="exposure" min="0.5" max="2.0" step="0.05" value="1.15">
+      <span class="val" id="exposure-val">1.15</span></label>
+    <h2>后处理</h2>
+    <label class="ctl"><span class="name"><input type="checkbox" id="ssao-on" checked> SSAO</span></label>
+    <label class="ctl"><span class="name">AO 强度</span>
+      <input type="range" id="ao-intensity" min="0.5" max="3.0" step="0.1" value="1.2">
+      <span class="val" id="ao-intensity-val">1.2</span></label>
+    <label class="ctl"><span class="name">AO 半径</span>
+      <input type="range" id="ao-radius" min="4" max="40" step="1" value="16">
+      <span class="val" id="ao-radius-val">16</span></label>
+    <label class="ctl"><span class="name"><input type="checkbox" id="dof-on" checked> 景深 DOF</span></label>
+    <label class="ctl"><span class="name">DOF 焦点</span>
+      <input type="range" id="dof-focus" min="10" max="500" step="1" value="110">
+      <span class="val" id="dof-focus-val">110</span></label>
+    <label class="ctl"><span class="name">DOF 光圈</span>
+      <input type="range" id="dof-aperture" min="0.001" max="0.05" step="0.001" value="0.005">
+      <span class="val" id="dof-aperture-val">0.005</span></label>
+    <label class="ctl"><span class="name"><input type="checkbox" id="fxaa-on" checked> FXAA</span></label>
+  </div>
+
+  <div id="ctrl-bsp" style="display:none">
+    <h2>导出 → 渲染</h2>
+    <input type="file" id="bsp-file" accept=".bsp" style="display:none">
+    <button class="btn" id="bsp-pick">选择 .bsp 文件</button>
+    <div class="hint">拖拽 .bsp 到窗口也可加载。<br>wasm 导出含模型 + KHR_lights_punctual 光照的 GLB → 共享 mesh 节点自动实例化。</div>
+    <div id="bsp-info"></div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
