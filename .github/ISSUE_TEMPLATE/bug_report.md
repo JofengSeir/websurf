@@ -14,6 +14,7 @@ assignees: ''
 
 - [ ] debug（主工程 / Debug Build）
 - [ ] game（WebSurf-game）
+- [ ] test/game（WebSurf-game 修复版移植）
 - [ ] test（WebSurf-test 验证工程）
 - [ ] 共享层（src/，两端均受影响）
 

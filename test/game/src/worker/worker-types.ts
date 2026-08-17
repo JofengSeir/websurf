@@ -1,0 +1,195 @@
+/**
+ * 消息协议（最小化版）— 主线程 ↔ Worker-A（权威）
+ *
+ * Main→Worker: wasm-init / init / load-bsp / config / respawn / teleport / set-death-threshold
+ * Worker→Main: ready / bsp-metadata / scene-data / stats / error
+ * Worker-B（预测）用独立协议（predictor-worker 内部，见 worker-types-predictor）。
+ */
+
+import type { RuntimeConfig } from '../config.js';
+
+// ── 主线程 → Worker-A ────────────────────────────────────────
+
+export interface WasmInitMessage {
+  type: 'wasm-init';
+  wasmUrl?: string;
+}
+
+export interface InitMessage {
+  type: 'init';
+  shared: SharedArrayBuffer | null;
+  width: number;
+  height: number;
+  dpr: number;
+}
+
+export interface LoadBspMessage {
+  type: 'load-bsp';
+  name: string;
+  data: ArrayBuffer;
+}
+
+export interface ConfigMessage {
+  type: 'config';
+  section: keyof RuntimeConfig;
+  patch: Record<string, unknown>;
+}
+
+export interface RespawnMessage {
+  type: 'respawn';
+}
+
+export interface TeleportMessage {
+  type: 'teleport';
+  /** 出生点索引。 */
+  target: number;
+}
+
+export interface SetDeathThresholdMessage {
+  type: 'set-death-threshold';
+  value: number;
+}
+
+export type WorkerMessage =
+  | WasmInitMessage
+  | InitMessage
+  | LoadBspMessage
+  | ConfigMessage
+  | RespawnMessage
+  | TeleportMessage
+  | SetDeathThresholdMessage;
+
+// ── Worker-A → 主线程 ────────────────────────────────────────
+
+export interface ReadyMessage {
+  type: 'ready';
+}
+
+export interface BspMetadataMessage {
+  type: 'bsp-metadata';
+  metadata: {
+    map_name: string;
+    num_faces: number;
+    num_vertices: number;
+    num_brushes: number;
+    num_models: number;
+  };
+}
+
+export interface SceneDataMessage {
+  type: 'scene-data';
+  /** GLB 字节（transfer 零拷贝）。 */
+  glb: ArrayBuffer;
+  /** 出生点 JSON（主线程渲染 spawn 下拉）。 */
+  spawnJson: string;
+  /** PVS JSON（主线程渲染剔除）。 */
+  pvsJson: string;
+  metadata: {
+    mapName: string;
+    numFaces: number;
+    numVertices: number;
+    numBrushes: number;
+    numModels: number;
+  };
+  /** 初始出生点（Y-up）。 */
+  spawn: { x: number; y: number; z: number; yawDeg: number };
+  glbSizeKb: number;
+  numSpawnPoints: number;
+  hasPvs: boolean;
+  /** 纹理画质 manifest：`{ 纹理名(小写 basetexture): mosaic v4 字节码 }` JSON。
+   * 画质切换（原始/压缩低清）时按贴图名查表，`mosaic_decode` 还原低清 PNG 替换。 */
+  mosaicManifest?: string;
+}
+
+export interface StatsMessage {
+  type: 'stats';
+  fps: number;
+  speed: number;
+  speedY: number;
+  speedTotal: number;
+  onGround: boolean;
+}
+
+export interface ErrorMessage {
+  type: 'error';
+  message: string;
+}
+
+/** Worker-A → 主线程：位置重置事件（respawn/teleport；位置突变时通知）。 */
+export interface PlayerRespawnMessage {
+  type: 'player-respawn';
+  pos: number[];
+  yawDeg: number;
+}
+
+/** Worker-A → 主线程：世界 JSON（主线程构建预测 PhysWorld 用；加载时一次，非热路径）。 */
+export interface WorldJsonMessage {
+  type: 'world-json';
+  brushJson: string;
+  triJson: string;
+  teleportJson: string;
+  spawn: { x: number; y: number; z: number; yawDeg: number };
+}
+
+/** 主线程 → Worker：输入消息（MsgState 回退模式；SAB 模式无此消息）。 */
+export interface InputMessage {
+  type: 'input';
+  dx: number;
+  dy: number;
+  keys: number;
+}
+
+/** Worker → 主线程：权威帧消息（MsgState 回退模式；SAB 模式无此消息）。 */
+export interface PhysFrameMessage {
+  type: 'phys-frame';
+  va: number;
+  frame: {
+    pos: { x: number; y: number; z: number };
+    yaw: number;
+    pitch: number;
+    vel: { x: number; y: number; z: number };
+    onGround: boolean;
+    eyeHeight: number;
+    timeMs: number;
+  };
+}
+
+/** Worker → 主线程：权威碰撞事件（落地/撞墙瞬间；低频，位置兜底驳回用）。 */
+export interface PhysEventMessage {
+  type: 'phys-event';
+  kind: 'land' | 'blocked';
+  pos: number[];
+  /** 权威碰撞瞬间朝向（度；权威仅在碰撞判断时可影响渲染角度）。 */
+  yawDeg: number;
+  pitchDeg: number;
+  /** 权威碰撞瞬间速度（land：权威速度为校准基准；blocked：供参考）。 */
+  vel?: number[];
+  timeMs: number;
+}
+
+export type MainMessage =
+  | ReadyMessage
+  | BspMetadataMessage
+  | SceneDataMessage
+  | StatsMessage
+  | ErrorMessage
+  | PlayerRespawnMessage
+  | WorldJsonMessage
+  | PhysEventMessage;
+
+// ── 输入状态（共享内存 keys 位掩码，与 Rust KEY_MASK 一致；掩码常量/转换
+//    收敛到 ts-shared auth/shared-state.ts，此处仅保留类型）─────
+
+export interface KeyState {
+  forward: boolean;
+  backward: boolean;
+  left: boolean;
+  right: boolean;
+  jump: boolean;
+  duck: boolean;
+  sprint: boolean;
+  reset: boolean;
+  wheelJump: boolean;
+  yawLeft: boolean;
+  yawRight: boolean;
+}

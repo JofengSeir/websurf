@@ -12,7 +12,7 @@ assignees: ''
 
 **适用工程**
 
-- [ ] debug / [ ] game / [ ] test / [ ] 共享层（src/）
+- [ ] debug / [ ] game / [ ] test/game / [ ] test / [ ] 共享层（src/）
 
 **你希望实现的解决方案**
 
