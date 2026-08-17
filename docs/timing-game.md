@@ -5,7 +5,7 @@
 > 对应 `game/`（WebSurf-game，Game Build）。实际实现（v7 定案）：**主线程 = 唯一物理渲染线**
 > （PhysWorld tick + 渲染同频，rAF 帧率可变 dt、dt 钳制 0.1s）；**Worker = 权威帧计算器**
 > （独立固定步长 = 1/tickRate，默认 64Hz、面板 48-128 可调，含地图碰撞）。无 Worker-B——预测已在主线程（v4 起删除双 Worker 预测）。
-> debug 时序见 `docs/timing-debug.md`。
+> debug 时序见 `docs/timing-debug.md`。兜底同步逐场景深挖与专题分析（垂直落体锯齿 5.54 / 重力手感）见 `docs/timing-game-analysis.md`。
 
 ```mermaid
 sequenceDiagram
