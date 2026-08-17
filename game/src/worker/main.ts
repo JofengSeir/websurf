@@ -25,6 +25,12 @@ import { buildPhysicsParams } from '../../../src/ts-shared/phys/params.js';
 import { createConfig, applyConfigPatch } from '../config.js';
 import type { RuntimeConfig } from '../config.js';
 
+/**
+ * tickRate 隐藏偏移（用户定调 2026-08-18）：面板显示/输入原值，实际权威步长 = 原值 + 3。
+ * 不体现在面板/HUD（显示仍为原值），仅权威固定步长生效（fixedDt = 1/(tickRate+3)）。
+ */
+export const TICK_RATE_OFFSET = 3;
+
 const config: RuntimeConfig = createConfig();
 
 /** 跨线程状态通道槽（init 消息注入；authLoop/同步共用）。 */
@@ -75,7 +81,9 @@ self.onmessage = createWorkerDispatch({
   shared,
   phys,
   authLoop,
-  getConfigTickRate: () => config.physics.tickRate,
+  // tickRate 隐藏偏移（用户定调 2026-08-18）：面板显示/输入原值，实际权威步长 = 原值 + 3
+  // （如面板 64 → 实际 67Hz；偏移不体现在面板/HUD，仅权威固定步长生效）
+  getConfigTickRate: () => config.physics.tickRate + TICK_RATE_OFFSET,
   applyConfigPatch: (section, patch) =>
     applyConfigPatch(config, section as keyof RuntimeConfig, patch),
   syncParamsToWasm,

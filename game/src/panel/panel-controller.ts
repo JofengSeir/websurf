@@ -46,6 +46,10 @@ export class PanelController {
     private readonly onTextureQualityChange?: (quality: 'original' | 'mini') => void,
     /** FOV 变更 → 主线程渲染器 setFov（相机透视矩阵即时更新）。 */
     private readonly onSyncFov?: (fov: number) => void,
+    /** 存点列表删除（索引；无确认直接删）→ app 更新存储并回刷列表。 */
+    private readonly onSavePointDelete?: (index: number) => void,
+    /** 存点列表读点（索引）→ app 恢复该存点（主线程 + 权威同步）。 */
+    private readonly onSavePointLoad?: (index: number) => void,
   ) {
     this.root = document.getElementById('panel') as HTMLElement;
     // 按键：读取持久化键位（与 app.ts 初始 KeyboardInput 一致）
@@ -610,5 +614,46 @@ export class PanelController {
     });
     const dot = el.querySelector('.ch-dot') as HTMLElement | null;
     if (dot) dot.style.display = c.dot ? 'block' : 'none';
+  }
+
+  /** 渲染存点列表（通用 tab；X 存点 / C 读最近，列表项可删除/读取任意存点）。 */
+  renderSavePoints(list: Array<{ x: number; y: number; z: number; yaw: number; vx: number; vy: number; vz: number }>): void {
+    const box = document.getElementById('savepointList');
+    if (!box) return;
+    box.innerHTML = '';
+    if (list.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'hint';
+      empty.textContent = '暂无存点（X 键存点 / C 键读最近）';
+      box.appendChild(empty);
+      return;
+    }
+    list.forEach((p, i) => {
+      const row = document.createElement('div');
+      row.className = 'savepoint-row';
+      const speed = Math.hypot(p.vx, p.vy, p.vz).toFixed(0);
+      row.innerHTML =
+        `<span class="sp-idx">${i + 1}</span>` +
+        `<span class="sp-pos">(${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}) · ${speed}u/s</span>`;
+      const loadBtn = document.createElement('button');
+      loadBtn.className = 'small';
+      loadBtn.textContent = '读';
+      loadBtn.title = '恢复该存点';
+      loadBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.onSavePointLoad?.(i);
+      });
+      const delBtn = document.createElement('button');
+      delBtn.className = 'small danger';
+      delBtn.textContent = '×';
+      delBtn.title = '删除该存点（无确认）';
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.onSavePointDelete?.(i);
+      });
+      row.appendChild(loadBtn);
+      row.appendChild(delBtn);
+      box.appendChild(row);
+    });
   }
 }
