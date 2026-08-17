@@ -72,12 +72,21 @@ node scripts/phys-rate-parity.mjs
 node scripts/phys-rate-parity-v2.mjs   # P2/P3 回归基线
 node scripts/phys-teleport-gate.mjs
 node scripts/phys-dual-pipe.mjs
+node scripts/phys-random-projectile.mjs   # 随机抛射/阻挡：统计 tick 紧跟渲染、渲染无位置兜底跳变
+node scripts/phys-cs-reference.mjs        # 走路/跳跃/高空坠落 vs CS:S 参考值
 ```
 
 结果：场景 B 幻影墙（原 Δvel 2242/2422 量级）已消除；H=2.1 全部 <10，
 H=2.5 残余 43~47、H=3 vz800 残余 536 为 64Hz 粗步长接坡采样/弹道越坡差
 （不是幻影碰撞；真实游玩中渲染线 144Hz 先接坡，权威由正向同步收敛）。
 实验⑥（双管道"规律归零"）速度序列单调增长、仅落地后按摩擦衰减，无归零/软锁。
+随机抛射/阻挡脚本（默认 10 次；本次已跑 2000 次高速统计，初速 3500–5000 u/s）：
+自由飞行物理一致，渲染路径无异常位置跳变，权威-渲染最大偏移均值约 90u、最坏 108u
+（阈值 500u），tick 路径紧跟渲染路径；2000 次通过率 100%（Wilson 95%CI 下界 99.81%）。
+
+CS:S 参考值脚本（简单平坦场景，真实 WASM PhysWorld）：稳态走路 250.0 u/s、
+起跳首 tick velY≈289.5、跳跃高度≈52.4u、空中时间≈0.73s、1s 自由落体 Δy=400u/vy=-800，
+全部在容差内通过。
 
 本地游玩：`python serve.py 8080 .` → `http://localhost:8080/web/index.html`
 （需 COOP/COEP 头以启用 SAB；serve 已带）。

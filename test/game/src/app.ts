@@ -66,6 +66,8 @@ let mainWasmReady: Promise<void> = Promise.resolve();
 let speedUpdateAt = 0;
 /** 滚轮跳 pending（wheel 事件置位，下一帧消费并清除；与根工程语义一致）。 */
 let wheelJumpPending = false;
+/** 调试/验证用：未锁定时强制注入的按键掩码（默认 0，浏览器验证脚本可 setInput）。 */
+let debugKeysMask = 0;
 
 async function main(): Promise<void> {
   if (!dom.canvas) {
@@ -136,6 +138,30 @@ async function main(): Promise<void> {
   };
   renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
   renderer.start();
+
+  // 调试/验证钩子：真实浏览器运行时通过 CDP 采样实际渲染/权威状态与校准统计。
+  (globalThis as unknown as { __WEBSURF_DEBUG__?: unknown }).__WEBSURF_DEBUG__ = {
+    sample: () => {
+      const r = renderer?.getDebugState() ?? null;
+      const auth = sharedState?.readAuthoritative() ?? null;
+      const stats = renderer?.getDebugStats() ?? null;
+      return {
+        ready: sceneReady,
+        render: r,
+        auth: auth ? { frame: auth.frame, va: auth.va } : null,
+        stats,
+      };
+    },
+    injectInput: (dx: number, dy: number, keysMask: number) => {
+      // 绕过 Pointer Lock 直接喂给渲染物理（真实 rAF 会把它同步写入 SAB/权威）
+      renderer?.feedInput(dx, dy, keysMask);
+    },
+    setInput: (keysMask: number) => {
+      // 持久设置未锁定时的调试按键掩码（浏览器验证脚本用于持续前进）
+      debugKeysMask = keysMask;
+    },
+  };
+
   // 主线程 wasm 初始化（BspProcessor + PhysWorld 同模块；dist 内嵌 base64）。
   // 保存 promise：handleLoadBsp 的 decompress_mtz 依赖 wasm 就绪（await 防竞态）。
   mainWasmReady = renderer.initPrediction('./websurf_wasm_bg.wasm', embeddedWasm).catch((err) => {
@@ -323,8 +349,8 @@ function startInputLoop(): void {
     }
     if (!bridge || !sceneReady) return;
     // 未锁定（面板打开）时强制输入为 0：面板内按键不进入物理（keyboard 已禁用，
-    // 这里双保险防 ESC 前后按键状态残留）
-    const mask = pointerLock.isLocked() ? keysToMask(keyboard.getState()) : 0;
+    // 这里双保险防 ESC 前后按键状态残留；调试钩子 setInput 可覆盖为测试输入）
+    const mask = pointerLock.isLocked() ? keysToMask(keyboard.getState()) : debugKeysMask;
     // 滚轮跳：仅锁定时并入本帧输入（消费一次即清）
     const maskWithWheel = pointerLock.isLocked() && wheelJumpPending ? mask | KEY_MASK.wheelJump : mask;
     wheelJumpPending = false;
