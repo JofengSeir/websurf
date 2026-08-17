@@ -573,6 +573,22 @@ export class RendererMain {
     this.calibrator.clear();
   }
 
+  /** 调试/验证：返回当前渲染物理状态快照（未就绪返回 null）。 */
+  getDebugState(): Record<string, number | boolean> | null {
+    if (!this.predPhys) return null;
+    const st = this.predPhys.state() as Record<string, number | boolean>;
+    return { ...st, ready: this.predReady };
+  }
+
+  /** 调试/验证：返回校准器统计（反向同步/碰撞驳回等）。 */
+  getDebugStats(): { syncCount: number; collisionRejectCount: number; lastSyncAt: number } {
+    return {
+      syncCount: this.calibrator.debugSyncCount,
+      collisionRejectCount: this.calibrator.debugCollisionRejectCount,
+      lastSyncAt: this.calibrator.debugLastSyncAt,
+    };
+  }
+
   /**
    * 权威帧到达（A2）处理 / 速度外推校准 / 碰撞事件位置兜底驳回 / 位置突变归零。
    * 公共化：实现收敛到 ts-shared AuthorityCalibrator（correctFromAuthority

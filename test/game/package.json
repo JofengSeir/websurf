@@ -14,7 +14,9 @@
     "build": "npm run build:wasm && npm run build:ts",
     "dev": "python serve.py 8080 .",
     "check:api": "node scripts/check-wasm-api.mjs",
-    "test:phys": "node scripts/phys-smoke.mjs"
+    "test:phys": "node scripts/phys-smoke.mjs",
+    "test:random-projectile": "node scripts/phys-random-projectile.mjs",
+    "test:cs-reference": "node scripts/phys-cs-reference.mjs"
   },
   "dependencies": {
     "three": "^0.165.0"

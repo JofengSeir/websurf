@@ -91,6 +91,13 @@ export class AuthorityCalibrator {
   /** 主线程渲染物理是否已用首个权威帧校准起点。 */
   private predStarted = false;
 
+  /** 调试/验证：渲染→权威反向同步次数（含首帧/碰撞驳回/大偏差）。 */
+  debugSyncCount = 0;
+  /** 调试/验证：碰撞事件位置兜底驳回次数。 */
+  debugCollisionRejectCount = 0;
+  /** 调试/验证：最近一次反向同步时间戳（ms）。 */
+  debugLastSyncAt = 0;
+
   constructor(private readonly deps: CalibratorDeps) {}
 
   /** 兜底处理冷却（ms）：大偏差反向同步后 63ms 内不再重复触发（用户要求 250→63）。 */
@@ -280,6 +287,8 @@ export class AuthorityCalibrator {
     });
     // 同步瞬间清主线程待喂输入（旧增量不注入新状态）
     this.deps.clearPendingInput();
+    this.debugSyncCount++;
+    this.debugLastSyncAt = performance.now();
   }
 
   /**
@@ -390,6 +399,7 @@ export class AuthorityCalibrator {
       if (!st.onGround && Math.abs(st.velY) >= 100) return;
     }
     // 驳回权威→渲染的位置替换：保持渲染不动，把权威拉到渲染位置
+    this.debugCollisionRejectCount++;
     this.syncInFlight = true;
     this.lastSyncAt = performance.now();
     this.pushRenderToAuthority(st);
