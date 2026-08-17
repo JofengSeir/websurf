@@ -111,8 +111,8 @@
   `multi` 多文件 ESM（WASM/MTZ 外置，HTTP/Pages 部署）；注入全局：
   `__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` / `__VBSP_TEXTURES_MTZ_B64__` /
   `__VBSP_WASM_URL__`（multi）
-- **CI（deploy-pages.yml）**：debug + game 均以 `--multi` 构建 → 组装
-  `deploy/{debug,game}` + 入口页 → GitHub Pages 部署
+- **CI（deploy-pages.yml）**：debug、game、test/game 均以 `--multi` 构建 → 组装
+  `deploy/{debug,game,test/game}` + 入口页 → GitHub Pages 部署
 - **文档重组**：`docs/` 新四篇（architecture / timing-debug / timing-game /
   materials）替换旧 `bsp-architecture` / `bsp-export-status` / `project-overview`
   / `项目时序图`；`game/docs/` 新四篇（overview / physics / panel / materials）
