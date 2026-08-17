@@ -97,6 +97,12 @@ export class RendererMain {
   private predPhys: PhysWorld | null = null;
   /** 主线程物理就绪（world-json 构建完成）。 */
   private predReady = false;
+  /** 按住 C 读点冻结目标（非空 = 冻结中：每帧强制 set_state 位置/朝向、速度 0）。 */
+  private holdPoint: {
+    x: number; y: number; z: number;
+    yaw: number; pitch: number;
+    onGround: boolean;
+  } | null = null;
   /** 待喂给物理实例的输入（app 事件回调累积）。 */
   private pendingDx = 0;
   private pendingDy = 0;
@@ -588,6 +594,30 @@ export class RendererMain {
   }
 
   /**
+   * 按住 C 读点：冻结在存点（每帧 tick 强制 set_state——位置/朝向=存点、速度=0）。
+   * "按住定在点的那一刻不要给速度"：空中存点悬停、地面存点站定，物理/权威
+   * 被持续覆盖；松开（releaseHoldPoint）才恢复存点速度。
+   */
+  setHoldPoint(sp: {
+    x: number; y: number; z: number;
+    yaw: number; pitch: number;
+    onGround: boolean;
+  }): void {
+    this.holdPoint = sp;
+  }
+
+  /** 松开 C：解除冻结并恢复存点速度（loadSavepoint 全量恢复 + 同步权威）。 */
+  releaseHoldPoint(sp: {
+    x: number; y: number; z: number;
+    yaw: number; pitch: number;
+    vx: number; vy: number; vz: number;
+    onGround: boolean;
+  }): void {
+    this.holdPoint = null;
+    this.loadSavepoint(sp);
+  }
+
+  /**
    * 权威帧到达（A2）处理 / 速度外推校准 / 碰撞事件微调 / 位置突变归零。
    * 公共化：实现收敛到 ts-shared AuthorityCalibrator（correctFromAuthority
    * 三条件 OR + 250ms 冷却 + syncInFlight 回滚、calibrateVelocity 外推、
@@ -680,6 +710,12 @@ export class RendererMain {
       this.predPhys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
       this.pendingDx = 0;
       this.pendingDy = 0;
+      // 按住 C 读点冻结：每帧强制 set_state（位置/朝向=存点、速度=0、着地=存点值）
+      // ——"按住定在点的那一刻不要给速度"，悬停直到松开（空中存点悬空、地面存点站定）
+      if (this.holdPoint) {
+        const h = this.holdPoint;
+        this.predPhys.set_state(h.x, h.y, h.z, h.yaw, h.pitch, 0, 0, 0, h.onGround);
+      }
       // 渲染 = 主线程物理状态（连续无屏闪）
       const st = this.predPhys.state() as {
         posX: number; posY: number; posZ: number;

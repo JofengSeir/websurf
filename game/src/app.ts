@@ -64,6 +64,8 @@ let wheelJumpPending = false;
 let currentMapName = '';
 /** 存点存储（X 存点 / C 读点 / 面板列表；按地图持久化，上限 50）。 */
 const savePointStore = new SavePointStore();
+/** 按住 C 冻结中的存点（非空 = 冻结中，keyup 时恢复速度）。 */
+let holdPoint: SavePoint | null = null;
 
 async function main(): Promise<void> {
   if (!dom.canvas) {
@@ -192,16 +194,22 @@ function bindInput(): void {
     }
   });
 
-  // 存点 / 读点快捷键（用户定调 2026-08-18）：X 存点、C 读最近存点。
-  // 独立于 KeyState（不参与物理输入），仅锁定状态下响应。
+  // 存点 / 读点快捷键（用户定调 2026-08-18）：X 存点；C 按住 = 定在存点（速度 0），
+  // 松开 = 恢复存点速度。独立于 KeyState（不参与物理输入），仅锁定状态下响应。
   window.addEventListener('keydown', (e) => {
     if (!pointerLock.isLocked()) return;
     if (e.code === 'KeyX') {
       e.preventDefault();
       savePoint();
-    } else if (e.code === 'KeyC') {
+    } else if (e.code === 'KeyC' && !holdPoint) {
       e.preventDefault();
-      loadPoint();
+      startHoldPoint();
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'KeyC' && holdPoint) {
+      e.preventDefault();
+      endHoldPoint();
     }
   });
 
@@ -461,16 +469,25 @@ function savePoint(): void {
   setStatus(`已存点（${list.length}/${SAVEPOINT_MAX}） @ (${s.x.toFixed(0)}, ${s.y.toFixed(0)}, ${s.z.toFixed(0)})`, 'success');
 }
 
-/** C 键读点：恢复最近一个存点的完整状态（主线程 + 权威同步）。 */
-function loadPoint(): void {
+/** C 键按住：定在最近存点（每帧冻结——位置/朝向=存点、速度=0；空中悬停/地面站定）。 */
+function startHoldPoint(): void {
   if (!sceneReady || !renderer) return;
   const sp = savePointStore.latest();
   if (!sp) {
     setStatus('无存点（X 键可存点）', 'error');
     return;
   }
-  renderer.loadSavepoint(sp);
-  setStatus(`已读点 @ (${sp.x.toFixed(0)}, ${sp.y.toFixed(0)}, ${sp.z.toFixed(0)})`, 'success');
+  holdPoint = sp;
+  renderer.setHoldPoint(sp);
+  setStatus('已定在存点（松开 C 恢复速度）', 'success');
+}
+
+/** C 键松开：解除冻结并恢复存点速度（主线程 + 权威同步）。 */
+function endHoldPoint(): void {
+  if (!holdPoint || !renderer) return;
+  renderer.releaseHoldPoint(holdPoint);
+  holdPoint = null;
+  setStatus('已恢复存点速度', 'success');
 }
 
 function syncFullConfig(): void {  if (!bridge) return;
