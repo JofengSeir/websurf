@@ -116,7 +116,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     noclipSpeed: 800,
   },
   player: {
-    halfWidth: 16,
+    halfWidth: 15,
     standHeight: 72,
     duckHeight: 54,
   },

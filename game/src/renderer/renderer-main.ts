@@ -541,6 +541,52 @@ export class RendererMain {
     return { x: st.velX, y: st.velY, z: st.velZ };
   }
 
+  /** 存点用：完整物理状态（位置/朝向/速度/着地；X 键存点采样）。 */
+  getFullState(): {
+    x: number; y: number; z: number;
+    yaw: number; pitch: number;
+    vx: number; vy: number; vz: number;
+    onGround: boolean;
+  } {
+    const empty = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vx: 0, vy: 0, vz: 0, onGround: false };
+    if (!this.predPhys) return empty;
+    const st = this.predPhys.state() as {
+      posX: number; posY: number; posZ: number;
+      yaw: number; pitch: number;
+      velX: number; velY: number; velZ: number;
+      onGround: boolean;
+    };
+    return {
+      x: st.posX, y: st.posY, z: st.posZ,
+      yaw: st.yaw, pitch: st.pitch,
+      vx: st.velX, vy: st.velY, vz: st.velZ,
+      onGround: st.onGround,
+    };
+  }
+
+  /** 读点：恢复存点全状态（C 键/面板）。主线程 set_state 即时生效 + 同步权威
+   * （复用 sync-render-state 链路：权威 set_state 到存点并清双端输入增量）。 */
+  loadSavepoint(sp: {
+    x: number; y: number; z: number;
+    yaw: number; pitch: number;
+    vx: number; vy: number; vz: number;
+    onGround: boolean;
+  }): void {
+    this.predPhys?.set_state(sp.x, sp.y, sp.z, sp.yaw, sp.pitch, sp.vx, sp.vy, sp.vz, sp.onGround);
+    this.clearPendingInput();
+    // 权威同步（复用 sync-render-state）：eyeHeight 取当前姿态值（存点不含蹲伏态）
+    const cur = this.predPhys?.state() as
+      | { eyeHeight: number }
+      | undefined;
+    this.onSyncRenderState?.({
+      posX: sp.x, posY: sp.y, posZ: sp.z,
+      yaw: sp.yaw, pitch: sp.pitch,
+      velX: sp.vx, velY: sp.vy, velZ: sp.vz,
+      onGround: sp.onGround,
+      eyeHeight: cur?.eyeHeight ?? 64.09,
+    });
+  }
+
   /**
    * 权威帧到达（A2）处理 / 速度外推校准 / 碰撞事件微调 / 位置突变归零。
    * 公共化：实现收敛到 ts-shared AuthorityCalibrator（correctFromAuthority

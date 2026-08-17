@@ -22,6 +22,7 @@ import { layerMouseDelta, qeEquivalentDx } from '../../src/ts-shared/input/input
 import { buildWorldBundle } from '../../src/ts-shared/phys/world-builder.js';
 import { RendererMain } from './renderer/renderer-main.js';
 import { PanelController } from './panel/panel-controller.js';
+import { SavePointStore, SAVEPOINT_MAX, type SavePoint } from './savepoint.js';
 
 const config: RuntimeConfig = createConfig();
 
@@ -59,6 +60,10 @@ let mainWasmReady: Promise<void> = Promise.resolve();
 let speedUpdateAt = 0;
 /** 滚轮跳 pending（wheel 事件置位，下一帧消费并清除；与根工程语义一致）。 */
 let wheelJumpPending = false;
+/** 当前地图名（去掉 .bsp 后缀；存点按地图持久化）。 */
+let currentMapName = '';
+/** 存点存储（X 存点 / C 读点 / 面板列表；按地图持久化，上限 50）。 */
+const savePointStore = new SavePointStore();
 
 async function main(): Promise<void> {
   if (!dom.canvas) {
@@ -141,6 +146,20 @@ async function main(): Promise<void> {
     (active) => renderer?.setPredictionNoclip(active),
     (quality) => void renderer?.applyTextureQuality(quality),
     (fov) => renderer?.setFov(fov),
+    // 存点列表：删除（无确认）→ 存储更新 + 回刷列表
+    (i) => {
+      const list = savePointStore.delete(i);
+      panel?.renderSavePoints(list);
+    },
+    // 存点列表：读取任意存点 → 恢复（主线程 + 权威同步）
+    (i) => {
+      const list = savePointStore.all();
+      const sp = list[i];
+      if (sp && renderer) {
+        renderer.loadSavepoint(sp);
+        setStatus(`已读点 #${i + 1} @ (${sp.x.toFixed(0)}, ${sp.y.toFixed(0)}, ${sp.z.toFixed(0)})`, 'success');
+      }
+    },
   );
 
   // 5. 输入绑定
@@ -170,6 +189,19 @@ function bindInput(): void {
       p.then((ok) => {
         if (!ok) setStatus('锁定失败，请再次点击画布（确保焦点在页面内）', 'error');
       });
+    }
+  });
+
+  // 存点 / 读点快捷键（用户定调 2026-08-18）：X 存点、C 读最近存点。
+  // 独立于 KeyState（不参与物理输入），仅锁定状态下响应。
+  window.addEventListener('keydown', (e) => {
+    if (!pointerLock.isLocked()) return;
+    if (e.code === 'KeyX') {
+      e.preventDefault();
+      savePoint();
+    } else if (e.code === 'KeyC') {
+      e.preventDefault();
+      loadPoint();
     }
   });
 
@@ -338,6 +370,10 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
     setError('渲染器未就绪');
     return;
   }
+  // 存点按地图持久化：记录地图名并加载该地图存点列表（换地图清空/载入）
+  currentMapName = fileName.replace(/\.bsp$/i, '');
+  savePointStore.load(currentMapName);
+  panel?.renderSavePoints(savePointStore.all());
   // 主线程 wasm 就绪（decompress_mtz 依赖；失败则继续，回退降级为占位色）
   await mainWasmReady.catch(() => undefined);
   renderer.disposeScene();
@@ -415,8 +451,29 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   }
 }
 
-function syncFullConfig(): void {
-  if (!bridge) return;
+/** X 键存点：采样当前完整状态（位置/朝向/速度/着地）入列表并持久化。 */
+function savePoint(): void {
+  if (!sceneReady || !renderer) return;
+  const s = renderer.getFullState();
+  const point: SavePoint = { ...s, t: performance.now() };
+  const list = savePointStore.add(point);
+  panel?.renderSavePoints(list);
+  setStatus(`已存点（${list.length}/${SAVEPOINT_MAX}） @ (${s.x.toFixed(0)}, ${s.y.toFixed(0)}, ${s.z.toFixed(0)})`, 'success');
+}
+
+/** C 键读点：恢复最近一个存点的完整状态（主线程 + 权威同步）。 */
+function loadPoint(): void {
+  if (!sceneReady || !renderer) return;
+  const sp = savePointStore.latest();
+  if (!sp) {
+    setStatus('无存点（X 键可存点）', 'error');
+    return;
+  }
+  renderer.loadSavepoint(sp);
+  setStatus(`已读点 @ (${sp.x.toFixed(0)}, ${sp.y.toFixed(0)}, ${sp.z.toFixed(0)})`, 'success');
+}
+
+function syncFullConfig(): void {  if (!bridge) return;
   // V8/P2：锁定模式下强制 tickRate=64（防面板/外部消息绕过）
   if (config.lockTickRate) {
     config.physics.tickRate = 64;
