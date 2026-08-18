@@ -1894,6 +1894,14 @@ impl BspProcessor {
                 let Some(side) = bsp.brush_sides.get(start + i) else {
                     continue;
                 };
+                // 【遗弃 BSP 自带 bevel】Source 编译时生成的 bevel 平面常为"高悬于
+                // 坡顶/凸棱之上、斜率远缓于原始面"的假想扩张面；在本引擎的
+                // box-Minkowski 点扫掠模型里，直接用它们做碰撞会让"坡顶永远打滑"
+                // 或产生穿模。因此这里**剔除 `side.bevel` 标记的面**，只保留真实
+                // brush 面；棱边平滑改由运行时按 AddEdgeBevels 生成的 chamfer 承担。
+                if side.bevel != 0 {
+                    continue;
+                }
                 // 收集平面引用
                 if let Some(plane) = bsp.planes.get(side.plane as usize) {
                     planes.push(plane);
@@ -2438,6 +2446,7 @@ impl BspProcessor {
 
             // 单次遍历 brush_sides 收集平面引用 + sky/nodraw 标志；
             // 数组访问用 .get() 防 panic 破坏 wasm-bindgen 借用状态
+            // 【遗弃 BSP bevel】：剔除 side.bevel 标记的高悬面(见 collect_planes_and_flags 说明)
             let mut bsp_planes: Vec<&Plane> = Vec::new();
             let mut is_sky = false;
             let mut is_nodraw = false;
@@ -2447,6 +2456,9 @@ impl BspProcessor {
                 let Some(side) = bsp.brush_sides.get(start + i) else {
                     continue;
                 };
+                if side.bevel != 0 {
+                    continue;
+                }
                 if let Some(plane) = bsp.planes.get(side.plane as usize) {
                     bsp_planes.push(plane);
                 }
@@ -2506,35 +2518,176 @@ impl BspProcessor {
                 bsp_planes.clone()
             };
 
-            // 计算 BSP 坐标顶点（用于 AABB）
-            let mut verts_bsp = compute_vertices(&bsp_plane_refs);
+        // 计算 BSP 坐标顶点（用于 AABB）
+        let mut verts_bsp = compute_vertices(&bsp_plane_refs);
 
-            // 回退：顶点 < 4 时翻转法线重算（部分编辑器生成法线朝内的 brush）
-            // 与 export_colliders_with_filter 保持一致
-            let flipped_planes: Vec<Plane> = if verts_bsp.len() < 4 {
-                bsp_plane_refs
-                    .iter()
-                    .map(|p| Plane {
+        // 回退：顶点 < 4 时翻转法线重算（部分编辑器生成法线朝内的 brush）
+        // 与 export_colliders_with_filter 保持一致
+        let flipped_planes: Vec<Plane> = if verts_bsp.len() < 4 {
+            bsp_plane_refs
+                .iter()
+                .map(|p| Plane {
+                    normal: vbsp::Vector {
+                        x: -p.normal.x,
+                        y: -p.normal.y,
+                        z: -p.normal.z,
+                    },
+                    dist: -p.dist,
+                    ty: p.ty,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if verts_bsp.len() < 4 && !flipped_planes.is_empty() {
+            let flipped_refs: Vec<&Plane> = flipped_planes.iter().collect();
+            verts_bsp = compute_vertices(&flipped_refs);
+        }
+        if verts_bsp.len() < 4 {
+            skipped += 1;
+            continue;
+        }
+
+        // =========================================================================
+        // 运行时棱边 chamfer(AddEdgeBevels 简化版) —— 替代被遗弃的 BSP bevel
+        // -------------------------------------------------------------------------
+        // 对凸包的每条"真实棱边"（两个非平行面共享 ≥2 个顶点），构造一个微小切角
+        // 平面：法线 = 两相邻面法线的归一化均值，位于棱边外侧。它负责：
+        //   1) 高速盒角扫过坡顶棱线时平滑引导入坡；
+        //   2) 打开凸包棱线的尖锐过渡，避免盒角在该处提前/异常碰撞。
+        // 关键约束：chamfer 必须位于凸包**外部**（所有其它凸包顶点都在其
+        // "外侧"），否则会实际挤压凸包、影响可站性 —— 这正是 BSP 高悬 bevel
+        // 的问题所在，绝不能再犯。这里只在被原始面"夹住"的极薄棱外层生效。
+        // 生成逻辑（BSP 坐标）：
+        //   - 对每对平面 i<j：axis = cross(n_i,n_j) 为两平面交线方向；
+        //   - 找同时落在这两平面上的顶点（距离 < eps）集合，若 ≥2 即是一条真实棱；
+        //   - chamfer 法线 n_ch = normalize(n_i + n_j)（非共面才可用）；
+        //   - 取其棱上一顶点作为过平面点，dist = dot(n_ch, 顶点)；
+        //   - 验证：对凸包上**不属于该棱的其它顶点**，dot(n_ch, v) - dist 同号
+        //     （都在 chamfer 平面的外侧）→ 才是"凸棱上的外切角"；否则丢弃。
+        // =========================================================================
+        let mut chamfer_planes: Vec<Plane> = Vec::new();
+        {
+            let eps_plane = 0.1f32; // 顶点在某平面上的判定容差
+            let n_planes = bsp_plane_refs.len();
+            // 预计算每个顶点落在哪些平面上（idx -> 平面索引集）
+            let mut vert_planes: Vec<Vec<usize>> = Vec::with_capacity(verts_bsp.len());
+            for v in &verts_bsp {
+                let mut on: Vec<usize> = Vec::new();
+                for (pi, p) in bsp_plane_refs.iter().enumerate() {
+                    let d = p.normal.x * v[0] + p.normal.y * v[1] + p.normal.z * v[2] - p.dist;
+                    if d.abs() < eps_plane {
+                        on.push(pi);
+                    }
+                }
+                vert_planes.push(on);
+            }
+            for i in 0..n_planes {
+                for j in (i + 1)..n_planes {
+                    let ni = [
+                        bsp_plane_refs[i].normal.x,
+                        bsp_plane_refs[i].normal.y,
+                        bsp_plane_refs[i].normal.z,
+                    ];
+                    let nj = [
+                        bsp_plane_refs[j].normal.x,
+                        bsp_plane_refs[j].normal.y,
+                        bsp_plane_refs[j].normal.z,
+                    ];
+                    // 共面或平行 → 无真实棱
+                    let ndot = ni[0] * nj[0] + ni[1] * nj[1] + ni[2] * nj[2];
+                    if ndot.abs() > 0.999 {
+                        continue;
+                    }
+                    // 找出同时落在面 i、j 上的顶点
+                    let mut shared: Vec<usize> = Vec::new();
+                    for (vi, on) in vert_planes.iter().enumerate() {
+                        if on.contains(&i) && on.contains(&j) {
+                            shared.push(vi);
+                        }
+                    }
+                    if shared.len() < 2 {
+                        continue; // 非共边：只共享 0/1 个顶点（角点）
+                    }
+                    // chamfer 法线 = 两法线均值（BSP 朝内约定下同样适用，方向随后校验）
+                    let mut nch = [
+                        ni[0] + nj[0],
+                        ni[1] + nj[1],
+                        ni[2] + nj[2],
+                    ];
+                    let len = (nch[0] * nch[0] + nch[1] * nch[1] + nch[2] * nch[2]).sqrt();
+                    if len < 1e-6 {
+                        continue;
+                    }
+                    nch = [nch[0] / len, nch[1] / len, nch[2] / len];
+                    // 取棱上一点（任一共享顶点）求 dist
+                    let anchor = &verts_bsp[shared[0]];
+                    let dist = nch[0] * anchor[0] + nch[1] * anchor[1] + nch[2] * anchor[2];
+                    // 方向校验：chamfer 应位于凸包外侧。
+                    // BSP 约定法线朝内（内部顶点 dot(n,v)-dist >= 0）。
+                    // 定义"符号基准"：该棱两个共享顶点在 chamfer 平面上（≈0）。
+                    // 其余凸包顶点应全部落在 chamfer 平面**同一侧**且该侧与"两相邻
+                    // 面法线的均值指向"一致 → 若其它顶点都在 chamfer 的负侧(外部)，
+                    // 说明 chamfer 法线朝外，正确；若混号则丢弃。
+                    let mut first_side: Option<f32> = None;
+                    let mut valid = true;
+                    for (vi0, v) in verts_bsp.iter().enumerate() {
+                        if shared.contains(&vi0) {
+                            continue; // 棱上顶点，跳过
+                        }
+                        let d = nch[0] * v[0] + nch[1] * v[1] + nch[2] * v[2] - dist;
+                        match first_side {
+                            None => first_side = Some(if d > 0.0 { 1.0 } else { -1.0 }),
+                            Some(s) => {
+                                if d * s < -0.001 {
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if !valid {
+                        continue;
+                    }
+                    // chamfer 法线需相对"两相邻面法线均值"同向（朝外）
+                    let radj = match first_side {
+                        Some(s) => s,
+                        None => 1.0,
+                    };
+                    let nch_final = if radj > 0.0 {
+                        nch
+                    } else {
+                        [-nch[0], -nch[1], -nch[2]]
+                    };
+                    let dist_final = nch_final[0] * anchor[0]
+                        + nch_final[1] * anchor[1]
+                        + nch_final[2] * anchor[2];
+                    chamfer_planes.push(Plane {
                         normal: vbsp::Vector {
-                            x: -p.normal.x,
-                            y: -p.normal.y,
-                            z: -p.normal.z,
+                            x: nch_final[0],
+                            y: nch_final[1],
+                            z: nch_final[2],
                         },
-                        dist: -p.dist,
-                        ty: p.ty,
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            if verts_bsp.len() < 4 && !flipped_planes.is_empty() {
-                let flipped_refs: Vec<&Plane> = flipped_planes.iter().collect();
-                verts_bsp = compute_vertices(&flipped_refs);
+                        dist: dist_final,
+                        ty: 0,
+                    });
+                }
             }
-            if verts_bsp.len() < 4 {
-                skipped += 1;
-                continue;
+        }
+        // 合并真实面 + chatfer（chamfer 也会参与最终序列化，同样 rotate+flip）
+        let mut all_planes_src: Vec<Plane> = Vec::new();
+        if !flipped_planes.is_empty() {
+            all_planes_src.extend(flipped_planes.iter().cloned());
+        } else {
+            for p in &bsp_plane_refs {
+                all_planes_src.push(Plane {
+                    normal: p.normal.clone(),
+                    dist: p.dist,
+                    ty: p.ty,
+                });
             }
+        }
+        all_planes_src.extend(chamfer_planes);
 
             // 体积过滤（基于 AABB 体积估算）
             if filter.min_brush_volume > 0.0 {
@@ -2569,29 +2722,18 @@ impl BspProcessor {
             //
             // 修复：对每平面取负 `normal` 与 `dist`（`dot(-n,p)-(-dist) = -(dot(n,p)-dist)`，
             // 内部点 d>=0 → d<=0，等价翻转半空间）。先旋转到 Y-up 再取负（二者可交换）。
-            let planes_yup: Vec<WasmBrushPlane> = if !flipped_planes.is_empty() {
-                flipped_planes
-                    .iter()
-                    .map(|p| {
-                        let r = rotate_yup(&p.normal);
-                        WasmBrushPlane {
-                            normal: [-r[0], -r[1], -r[2]],
-                            dist: -p.dist,
-                        }
-                    })
-                    .collect()
-            } else {
-                bsp_planes
-                    .iter()
-                    .map(|p| {
-                        let r = rotate_yup(&p.normal);
-                        WasmBrushPlane {
-                            normal: [-r[0], -r[1], -r[2]],
-                            dist: -p.dist,
-                        }
-                    })
-                    .collect()
-            };
+            // 统一从 all_planes_src（真实面 + 运行时 chamfer）构建，chamfer 一并输出，
+            // 既进物理碰撞也进 debug 线框显示。
+            let planes_yup: Vec<WasmBrushPlane> = all_planes_src
+                .iter()
+                .map(|p| {
+                    let r = rotate_yup(&p.normal);
+                    WasmBrushPlane {
+                        normal: [-r[0], -r[1], -r[2]],
+                        dist: -p.dist,
+                    }
+                })
+                .collect();
 
             brushes_out.push(WasmBrush {
                 planes: planes_yup,

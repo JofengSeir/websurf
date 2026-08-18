@@ -1852,6 +1852,10 @@ impl BspProcessor {
                 let Some(side) = bsp.brush_sides.get(start + i) else {
                     continue;
                 };
+                // 【遗弃 BSP bevel】剔除高悬 bevel 面（详见 debug/crates/wasm export_brushes_planes 说明）
+                if side.bevel != 0 {
+                    continue;
+                }
                 if let Some(plane) = bsp.planes.get(side.plane as usize) {
                     bsp_planes.push(plane);
                 }
@@ -1965,6 +1969,111 @@ impl BspProcessor {
                 }
             }
 
+            // =========================================================================
+            // 运行时棱边 chamfer(AddEdgeBevels 简化版) —— 替代被遗弃的 BSP bevel
+            // 与 debug/crates/wasm export_brushes_planes 完全同构。
+            // 对每条真实凸棱生成微小外切角平面：法线 = 两相邻面法线均值归一化，
+            // 并校验所有其它凸包顶点都在其外侧（不会挤压凸包、不破坏可站性）。
+            // =========================================================================
+            let mut chamfer_planes: Vec<Plane> = Vec::new();
+            {
+                let eps_plane = 0.1f32;
+                let n_planes = bsp_plane_refs.len();
+                let mut vert_planes: Vec<Vec<usize>> = Vec::with_capacity(verts_bsp.len());
+                for v in &verts_bsp {
+                    let mut on: Vec<usize> = Vec::new();
+                    for (pi, p) in bsp_plane_refs.iter().enumerate() {
+                        let d = p.normal.x * v[0] + p.normal.y * v[1] + p.normal.z * v[2] - p.dist;
+                        if d.abs() < eps_plane {
+                            on.push(pi);
+                        }
+                    }
+                    vert_planes.push(on);
+                }
+                for i in 0..n_planes {
+                    for j in (i + 1)..n_planes {
+                        let ni = [
+                            bsp_plane_refs[i].normal.x,
+                            bsp_plane_refs[i].normal.y,
+                            bsp_plane_refs[i].normal.z,
+                        ];
+                        let nj = [
+                            bsp_plane_refs[j].normal.x,
+                            bsp_plane_refs[j].normal.y,
+                            bsp_plane_refs[j].normal.z,
+                        ];
+                        let ndot = ni[0] * nj[0] + ni[1] * nj[1] + ni[2] * nj[2];
+                        if ndot.abs() > 0.999 {
+                            continue; // 共面/平行，无真实棱
+                        }
+                        let mut shared: Vec<usize> = Vec::new();
+                        for (vi, on) in vert_planes.iter().enumerate() {
+                            if on.contains(&i) && on.contains(&j) {
+                                shared.push(vi);
+                            }
+                        }
+                        if shared.len() < 2 {
+                            continue;
+                        }
+                        let mut nch = [ni[0] + nj[0], ni[1] + nj[1], ni[2] + nj[2]];
+                        let len = (nch[0] * nch[0] + nch[1] * nch[1] + nch[2] * nch[2]).sqrt();
+                        if len < 1e-6 {
+                            continue;
+                        }
+                        nch = [nch[0] / len, nch[1] / len, nch[2] / len];
+                        let anchor = &verts_bsp[shared[0]];
+                        let dist = nch[0] * anchor[0] + nch[1] * anchor[1] + nch[2] * anchor[2];
+                        let mut first_side: Option<f32> = None;
+                        let mut valid = true;
+                        for (vi0, v) in verts_bsp.iter().enumerate() {
+                            if shared.contains(&vi0) {
+                                continue;
+                            }
+                            let d = nch[0] * v[0] + nch[1] * v[1] + nch[2] * v[2] - dist;
+                            match first_side {
+                                None => first_side = Some(if d > 0.0 { 1.0 } else { -1.0 }),
+                                Some(s) => {
+                                    if d * s < -0.001 {
+                                        valid = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if !valid {
+                            continue;
+                        }
+                        let radj = first_side.unwrap_or(1.0);
+                        let nch_final = if radj > 0.0 { nch } else { [-nch[0], -nch[1], -nch[2]] };
+                        let dist_final =
+                            nch_final[0] * anchor[0] + nch_final[1] * anchor[1] + nch_final[2] * anchor[2];
+                        chamfer_planes.push(Plane {
+                            normal: vbsp::Vector {
+                                x: nch_final[0],
+                                y: nch_final[1],
+                                z: nch_final[2],
+                            },
+                            dist: dist_final,
+                            ty: 0,
+                        });
+                    }
+                }
+            }
+            // 合并真实面 + chamfer（先取 flipped 或 bsp 平面，统一与 chamfer 一起序列化）
+            let mut all_planes_src: Vec<Plane> = Vec::new();
+            if !flipped_planes.is_empty() {
+                all_planes_src.extend(flipped_planes.iter().cloned());
+            } else {
+                for p in &bsp_plane_refs {
+                    all_planes_src.push(Plane {
+                        normal: p.normal.clone(),
+                        dist: p.dist,
+                        ty: p.ty,
+                    });
+                }
+            }
+            all_planes_src.extend(chamfer_planes);
+
             // 旋转平面法线到 Y-up，并翻转法线方向（vbsp 内部约定 → cs-movement 约定）。
             //
             // **法线方向转换（关键修复）**：vbsp 读取的平面为"法线朝内"约定
@@ -1974,29 +2083,17 @@ impl BspProcessor {
             //
             // 修复：对每平面取负 `normal` 与 `dist`（`dot(-n,p)-(-dist) = -(dot(n,p)-dist)`，
             // 内部点 d>=0 → d<=0，等价翻转半空间）。先旋转到 Y-up 再取负（二者可交换）。
-            let planes_yup: Vec<WasmBrushPlane> = if !flipped_planes.is_empty() {
-                flipped_planes
-                    .iter()
-                    .map(|p| {
-                        let r = rotate_yup(&p.normal);
-                        WasmBrushPlane {
-                            normal: [-r[0], -r[1], -r[2]],
-                            dist: -p.dist,
-                        }
-                    })
-                    .collect()
-            } else {
-                bsp_planes
-                    .iter()
-                    .map(|p| {
-                        let r = rotate_yup(&p.normal);
-                        WasmBrushPlane {
-                            normal: [-r[0], -r[1], -r[2]],
-                            dist: -p.dist,
-                        }
-                    })
-                    .collect()
-            };
+            // 统一从 all_planes_src（真实面 + 运行时 chamfer）构建，chamfer 一并输出
+            let planes_yup: Vec<WasmBrushPlane> = all_planes_src
+                .iter()
+                .map(|p| {
+                    let r = rotate_yup(&p.normal);
+                    WasmBrushPlane {
+                        normal: [-r[0], -r[1], -r[2]],
+                        dist: -p.dist,
+                    }
+                })
+                .collect();
 
             brushes_out.push(WasmBrush {
                 planes: planes_yup,

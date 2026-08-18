@@ -139,12 +139,20 @@ function computeBrushHull(brush: Brush): [number, number, number][] {
 
 /**
  * 对 brush 的每个平面，返回落在面上的顶点索引，按绕法线的极角排序为凸多边形。
+ * 同时返回每面的单位法线（背面/侧面/斜面分类用），使绘制可按面独立着色。
  */
+interface OrderedFace {
+	/** 构成该凸多边形面的顶点索引（按绕法线极角排序）。 */
+	face: number[];
+	/** 该面的单位法线（复用 brush plane 法线，朝外）。 */
+	normal: { x: number; y: number; z: number };
+}
+
 function orderedFaces(
 	brush: Brush,
 	verts: [number, number, number][],
-): number[][] {
-	const faces: number[][] = [];
+): OrderedFace[] {
+	const faces: OrderedFace[] = [];
 	for (const p of brush.planes) {
 		const n = p.normal;
 		// 面上顶点
@@ -193,23 +201,47 @@ function orderedFaces(
 			};
 		});
 		angled.sort((a, b) => a.ang - b.ang);
-		faces.push(angled.map((a) => a.vi));
+		faces.push({ face: angled.map((a) => a.vi), normal: { x: n.x, y: n.y, z: n.z } });
 	}
 	return faces;
 }
 
 /**
+ * 按单面法线分类颜色（Y-up）：
+ *
+ * - n.y > cos(groundAngle) → 近乎水平朝上 → 地面（绿）
+ * - n.y > cos(slideAngle)  → 斜面/缓坡 → 斜坡（黄）
+ * - else                   → 垂直墙 / 朝下底面 / 陡面 → 墙（红）
+ *
+ * 注意：这里 **只** 看该面自身法线，与 `classifyBrush` 的"整 brush 最大法线 y"
+ * 不同——`classifyBrush` 会让"含水平面的斜面 brush"被误判成地面（绿），
+ * 使所有 bevel（斜面）都看不见黄色。逐面分类后，斜面面单独显示为黄色。
+ */
+function classifyNormal(
+	normal: { x: number; y: number; z: number },
+	groundAngleCos: number,
+	slideAngleCos: number,
+): RgbColor {
+	const ny = normal.y;
+	if (ny > groundAngleCos) return COLOR_GROUND;
+	if (ny > slideAngleCos) return COLOR_SLOPE;
+	return COLOR_WALL;
+}
+
+/**
  * 把 brush 凸包画成线框：对每个面，闭合多边形连边（真实碰撞几何边）。
+ * 每面按其法线调用 `classify` 独立着色（支持 bevel 斜面显示为斜坡色）。
  */
 function pushBrushWireframe(
 	positions: number[],
 	colors: number[],
 	brush: Brush,
 	verts: [number, number, number][],
-	color: RgbColor,
+	classify: (normal: { x: number; y: number; z: number }) => RgbColor,
 ): void {
 	const faces = orderedFaces(brush, verts);
-	for (const face of faces) {
+	for (const { face, normal } of faces) {
+		const color = classify(normal);
 		const len = face.length;
 		for (let i = 0; i < len; i++) {
 			const a = verts[face[i]];
@@ -238,17 +270,19 @@ function isPointInsideBrush(
 /**
  * 把 brush 凸包填充为半透明实心：对每个面（凸多边形）做扇形三角化。
  * 与线框共用 `orderedFaces`，填充严格贴合描边，一眼分辨内外。
+ * 每面按其法线调用 `classify` 独立着色（与描边颜色逐面一致）。
  */
 function pushBrushFill(
 	positions: number[],
 	colors: number[],
 	brush: Brush,
 	verts: [number, number, number][],
-	color: RgbColor,
+	classify: (normal: { x: number; y: number; z: number }) => RgbColor,
 ): void {
 	const faces = orderedFaces(brush, verts);
-	for (const face of faces) {
+	for (const { face, normal } of faces) {
 		if (face.length < 3) continue;
+		const color = classify(normal);
 		const anchor = verts[face[0]];
 		for (let i = 1; i < face.length - 1; i++) {
 			const b = verts[face[i]];
@@ -308,28 +342,6 @@ function pushAabbEdges(
 		positions.push(pa[0], pa[1], pa[2], pb[0], pb[1], pb[2]);
 		colors.push(r, g, blue, r, g, blue);
 	}
-}
-
-/**
- * 按 brush 中最朝上的平面法线分类颜色。
- *
- * - max(n.y) > cos(groundAngle) → 地面（绿）
- * - max(n.y) > cos(slideAngle) → 斜坡（黄）
- * - else → 墙（红）
- */
-function classifyBrush(
-	brush: Brush,
-	groundAngleCos: number,
-	slideAngleCos: number,
-): RgbColor {
-	let maxNy = -2;
-	for (const plane of brush.planes) {
-		if (plane.normal.y > maxNy) maxNy = plane.normal.y;
-	}
-
-	if (maxNy > groundAngleCos) return COLOR_GROUND;
-	if (maxNy > slideAngleCos) return COLOR_SLOPE;
-	return COLOR_WALL;
 }
 
 // ---------------------------------------------------------------------------
@@ -566,6 +578,10 @@ export class ColliderDebug {
 
 		const groundAngleCos = Math.cos(config.physics.groundAngle);
 		const slideAngleCos = Math.cos(config.physics.slideAngle);
+		// 逐面分类：每个面按其自身法线着色（斜面 bevel 显示为黄色斜坡，
+		// 而非被同 brush 的水平面拖成全绿——修复原 classifyBrush 的 maxNy 误判）
+		const classify = (normal: { x: number; y: number; z: number }) =>
+			classifyNormal(normal, groundAngleCos, slideAngleCos);
 
 		const positions: number[] = [];
 		const colors: number[] = [];
@@ -573,16 +589,21 @@ export class ColliderDebug {
 		const fillColors: number[] = [];
 
 		for (const { brush } of nearby) {
-			const color = classifyBrush(brush, groundAngleCos, slideAngleCos);
+			// 退化（顶点 < 4）回退 AABB：用整 brush 主朝向（最朝上法线）定单色
 			// planes → 凸包线框（斜坡/斜面显示真实形状）；退化（顶点 < 4）回退 AABB
 			const hull = computeBrushHull(brush);
 			if (hull.length >= 4) {
-				pushBrushWireframe(positions, colors, brush, hull, color);
+				pushBrushWireframe(positions, colors, brush, hull, classify);
 				// 仅相机进入 brush 内部时显示半透明填充（提示"身处固体内部"）
 				if (isPointInsideBrush(pos, brush)) {
-					pushBrushFill(fillPositions, fillColors, brush, hull, color);
+					pushBrushFill(fillPositions, fillColors, brush, hull, classify);
 				}
 			} else {
+				const dominant = { x: 0, y: -2, z: 0 };
+				for (const plane of brush.planes) {
+					if (plane.normal.y > dominant.y) dominant.y = plane.normal.y;
+				}
+				const color = classify(dominant);
 				pushAabbEdges(positions, colors, brush.min, brush.max, color);
 			}
 		}
@@ -773,7 +794,8 @@ export class ColliderDebug {
 				};
 				const hull = computeBrushHull(brushLike);
 				if (hull.length >= 4) {
-					pushBrushWireframe(positions, colors, brushLike, hull, color);
+					// trigger 用触发类型定单色，不按面分类
+					pushBrushWireframe(positions, colors, brushLike, hull, () => color);
 				} else {
 					pushAabbEdges(positions, colors, trigger.mins, trigger.maxs, color);
 				}
