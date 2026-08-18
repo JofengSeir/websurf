@@ -646,12 +646,20 @@
       height: 100%; width: 0%; border-radius: 3px;
       background: linear-gradient(90deg, var(--accent), #22d3ee);
       box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
-      transition: width 0.18s var(--ease-out);
     }
     #loadingOverlay .load-meta {
       display: flex; justify-content: space-between; margin-top: 10px;
       font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
+    }
+    /* 加载失败态：填充转红，副文本超长换行以便查看原因 */
+    #loadingOverlay.error .load-fill {
+      background: linear-gradient(90deg, var(--danger), #ffb199);
+      box-shadow: 0 0 10px rgba(255, 123, 131, 0.5);
+    }
+    #loadingOverlay.error .load-title { color: var(--danger); }
+    #loadingOverlay.error .load-sub {
+      white-space: normal; word-break: break-all; color: var(--danger);
     }
 
     @media (max-width: 640px) {
