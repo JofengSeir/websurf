@@ -100,7 +100,7 @@ impl Default for PhysParams {
             sensitivity: 1.5,
             yaw_bind_speed: 210.0,
             noclip_speed: 800.0,
-            teleport_gate_ticks: 1,
+            teleport_gate_ticks: 3,
             hull_half_width: DEFAULT_HULL_HALF_WIDTH,
             hull_stand_height: DEFAULT_HULL_STAND_HEIGHT,
             hull_duck_height: DEFAULT_HULL_DUCK_HEIGHT,

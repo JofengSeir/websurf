@@ -107,7 +107,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     crouchSpeed: 85,
     bhopSpeedClamp: true,
     noPrestrafe: true,
-    teleportGateTicks: 1,
+    teleportGateTicks: 3,
   },
   input: {
     sensitivity: 1.5,
@@ -116,7 +116,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     noclipSpeed: 800,
   },
   player: {
-    halfWidth: 15,
+    halfWidth: 16,
     standHeight: 72,
     duckHeight: 54,
   },

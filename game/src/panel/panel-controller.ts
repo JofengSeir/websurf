@@ -72,6 +72,11 @@ export class PanelController {
     this.root.style.display = visible ? 'flex' : 'none';
   }
 
+  /** 强制隐藏面板（读取地图后退出面板，交给加载进度覆盖层显示）。 */
+  hide(): void {
+    this.root.style.display = 'none';
+  }
+
   // ── 模块导航（左栏切换，事件委托防 DOM 替换失效）────────────
 
   private bindModuleNav(): void {
@@ -320,9 +325,17 @@ export class PanelController {
       this.config.player.halfWidth = 16;
       this.config.player.standHeight = 72;
       this.config.player.duckHeight = 54;
-      (document.getElementById('hullHalfWidth') as HTMLInputElement).value = '16';
-      (document.getElementById('hullStandHeight') as HTMLInputElement).value = '72';
-      (document.getElementById('hullDuckHeight') as HTMLInputElement).value = '54';
+      // 滑块与其右侧数值输入框都要更新（否则数值框恒显示旧值，无法确认是否重置）
+      for (const [id, val] of [
+        ['hullHalfWidth', 16],
+        ['hullStandHeight', 72],
+        ['hullDuckHeight', 54],
+      ] as const) {
+        const range = document.getElementById(id) as HTMLInputElement | null;
+        if (range) range.value = String(val);
+        const num = document.getElementById(`${id}Num`) as HTMLInputElement | null;
+        if (num) num.value = String(val);
+      }
       this.sendHull();
       this.savePanelPrefs();
     });
@@ -481,10 +494,18 @@ export class PanelController {
   /** localStorage 存储键。 */
   private static readonly PREFS_KEY = 'vbsp:panelPrefs';
 
+  /**
+   * 面板偏好结构版本：默认值变更（如 halfWidth 15→16、teleportGateTicks 1→3）
+   * 时递增。加载时若旧版本 ≠ 当前版本，丢弃旧持久化（新默认覆盖旧设置），
+   * 避免旧配置长期残留。
+   */
+  private static readonly PREFS_VERSION = 2;
+
   /** 从 config 收集全部面板可调偏好。 */
   private collectPrefs(): Record<string, unknown> {
     const p = this.config;
     return {
+      __version: PanelController.PREFS_VERSION,
       physics: { ...p.physics },
       player: { ...p.player },
       input: {
@@ -506,12 +527,22 @@ export class PanelController {
     }
   }
 
-  /** 加载面板偏好 → 合并到 config（仅覆盖已存在的字段）。 */
+  /** 加载面板偏好 → 合并到 config（仅覆盖已存在的字段）。
+   * 版本不匹配时：丢弃旧持久化（新默认值生效），并立即以新默认写回。 */
   private loadPanelPrefs(): void {
     try {
       const raw = localStorage.getItem(PanelController.PREFS_KEY);
       if (!raw) return;
       const prefs = JSON.parse(raw) as Record<string, unknown>;
+      if (prefs.__version !== PanelController.PREFS_VERSION) {
+        console.warn(
+          `[panel] 面板偏好版本 ${String(prefs.__version)} → ${PanelController.PREFS_VERSION}，` +
+            '丢弃旧设置，采用新默认值。',
+        );
+        // 不合并旧值；以当前默认（config）写回新版本
+        this.savePanelPrefs();
+        return;
+      }
       const merge = <T>(section: T, patch: unknown): void => {
         if (!patch || typeof patch !== 'object') return;
         Object.assign(section as object, patch);
