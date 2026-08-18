@@ -71,7 +71,7 @@
   2. 读 `seqA = load(I_OUT_SEQ)` → 读全部输出值 shared-state.ts:316-327
   3. 后置校验：再查锁占用 → `null`；再查 `load(I_OUT_SEQ) !== seqA` → `null`（写者已开始下一轮 → 数据可能不完整，丢弃）shared-state.ts:329-330
 
-> 注：JS `Atomics.store/load` 均为 seq_cst，"release/acquire" 是语义近似（docs/timing-debug.md:16 注释）。
+> 注：JS `Atomics.store/load` 均为 seq_cst，"release/acquire" 是语义近似（../../debug/docs/timing-debug.md:16 注释）。
 
 ### MsgState 回退（无 crossOriginIsolated）
 
@@ -518,4 +518,4 @@ sequenceDiagram
 | game resetTo（定义未用） | game/src/renderer/renderer-main.ts:679-695 |
 | game respawn/teleport 双端同步 | game/src/input/input-bridge.ts:57-65；game/src/app.ts:221, 229-239 |
 | game noclip 切换 | game/src/panel/panel-controller.ts:389-398；game/src/renderer/renderer-main.ts:738-746 |
-| 时序文档（参考） | docs/timing-debug.md；docs/timing-game.md |
+| 时序文档（参考） | ../../debug/docs/timing-debug.md；../../game/docs/timing-game.md |

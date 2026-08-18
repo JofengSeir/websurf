@@ -90,5 +90,5 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 - `panel.md` — 面板控件与持久化
 - `materials.md` — 画质切换与缺失纹理回退
 
-> 公共架构见根 `docs/architecture.md`；时序见 `docs/timing-game.md`、`docs/timing-debug.md`；
+> 公共架构见根 `../docs/architecture.md`；时序见 `docs/timing-game.md`、`../debug/docs/timing-debug.md`；
 > 验证工程（双模物理 + 帧信号渲染时序）见 `../test/dual-mode-harness/README.md` + `../test/dual-mode-harness/CONCLUSION.md`。

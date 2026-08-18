@@ -1,7 +1,7 @@
 /**
  * 步长分区等价性（rate parity）实验 — 同一 wasm 物理在不同积分步长下的行为对比。
  *
- * 背景（docs/timing-game-analysis.md 专题 C）：
+ * 背景（../docs/timing-game-analysis.md 专题 C）：
  * - 渲染线（主线程预测，~144Hz 可变 dt）与权威线（Worker 64Hz 固定 dt）共用同一
  *   PhysWorld 代码；air_move 为半重力中点法（先半重力→move→后半重力）。
  * - 理论：纯弹道（无碰撞/无输入）下速度 Σg·dt 与位置（中点法对线性速度精确）

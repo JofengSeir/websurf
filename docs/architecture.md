@@ -6,7 +6,7 @@
 
 仓库由**两个同级独立工程**（各自完整前端与打包链，互不引用）、一个**共享层**（仓库根 `src/`）与一个**测试合集**（`test/`，不入 Pages 部署）组成；
 `test/` 内含验证工程 `test/dual-mode-harness/`。（注：2026-08-14 地图最小导出实验 map-min-export 的验证结论——v20 与 v21 共用 lump 布局——已合并进共享层 vbsp：版本检查放宽至 v19~v29 + sprp v11 静态道具支持，实验工程随之移除。）
-文档地图：公共架构见本文；两端时序见 `docs/timing-debug.md`（debug）、`docs/timing-game.md`（game）；
+文档地图：公共架构见本文；两端时序见 `../debug/docs/timing-debug.md`（debug）、`../game/docs/timing-game.md`（game）；game 深度分析见 `../game/docs/timing-game-analysis.md`；
 公共材质技术（mosaic 低清压缩 / MTZ 打包 / 默认纹理包）见 `docs/materials.md`；
 各工程特色功能见 `debug/docs/`、`game/docs/`；验证工程见 `test/dual-mode-harness/README.md` + `test/dual-mode-harness/CONCLUSION.md`。
 

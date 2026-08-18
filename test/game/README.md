@@ -3,7 +3,7 @@
 > 最后核对：2026-08-13。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
 >
 > **本目录为修复版移植**：全量拷贝自仓根 `game/`（含共享层），并实施
-> `docs/phys-fix-directions.md` 的 P2/P3/P4/P5/P6。改动清单与验证见
+> `../../docs/phys-fix-directions.md` 的 P2/P3/P4/P5/P6。改动清单与验证见
 > [README-fixes.md](./README-fixes.md)。
 
 WebSurf 的激进最小化实现（独立工程 `game/`）。物理栈整体下沉 Rust WASM，
@@ -87,12 +87,13 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 | scene-data | GLB + spawn/pvs 小 JSON（-95%） |
 | 消息协议 | 约 14 种（init/wasm-init/world-json/config/respawn/sync-render-state/set-spawn-points/teleport/teleport-to-pos/set-death-threshold/input/phys-frame/phys-event/error）——`set-death-threshold` 已由 P5 双端下发；`teleport-to-pos` 为共享层已定义但 game 主线程实际未发送（见 physics.md §8） |
 
-## 文档（`game/docs/`）
+## 文档（`docs/`）
 
 - `overview.md` — 总览与工程结构
 - `physics.md` — 物理时序（主线程物理线 + 权威帧校准）
 - `panel.md` — 面板控件与持久化
 - `materials.md` — 画质切换与缺失纹理回退
+- `README-fixes.md` — 修复版移植说明与验证结果
 
-> 公共架构见根 `docs/architecture.md`；时序见 `docs/timing-game.md`、`docs/timing-debug.md`；
-> 验证工程（双模物理 + 帧信号渲染时序）见 `../test/dual-mode-harness/README.md` + `../test/dual-mode-harness/CONCLUSION.md`。
+> 公共架构见根 `../../docs/architecture.md`；时序见 `../game/docs/timing-game.md`、`../../debug/docs/timing-debug.md`；
+> 验证工程（双模物理 + 帧信号渲染时序）见 `../../test/dual-mode-harness/README.md` + `../../test/dual-mode-harness/CONCLUSION.md`。

@@ -3,7 +3,7 @@
 > 最后核对：2026-08-13。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/`）。
 
 > 全功能调试测试页面：BSP 解析/模型导出/物理碰撞/计时挑战的完整调试环境。
-> 公共架构见 `docs/architecture.md`；时序见 `docs/timing-debug.md`（主线程唯一物理渲染线 + Worker 权威帧，与 game 同模式）；材质技术见 `docs/materials.md`。
+> 公共架构见 `../../docs/architecture.md`；时序见 `./timing-debug.md`（主线程唯一物理渲染线 + Worker 权威帧，与 game 同模式）；材质技术见 `../../docs/materials.md`。
 
 ## 1. 定位与工程结构
 

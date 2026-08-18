@@ -2,7 +2,7 @@
 
 > 最后核对：2026-08-13。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
 
-> 公共时序见 `docs/timing-game.md`。本文档：双物理线架构、SAB/MsgState 双通道、校准与兜底、输入层细节。
+> 公共时序见 `./timing-game.md`。本文档：双物理线架构、SAB/MsgState 双通道、校准与兜底、输入层细节。
 
 ## 1. 架构（v7 定案：权威帧计算模式）
 
