@@ -419,10 +419,10 @@ FOV/眼高/单位全标准，但浏览器窗口宽高比若偏离 16:9（垂直 
 
 ## 附：相关文档与实验脚本
 
-- `timing-game.md` —— v7 时序图（帧阶段速查）
-- `game/docs/physics.md` —— 物理参数与校准常量表、已知现状
-- `docs/archive/render-authoritative-frames.md` —— 校准方案 v4.x 演化史
-- `docs/phys-fix-directions.md` —— 上述问题的修复方向（P1–P7）
+- `./timing-game.md` —— v7 时序图（帧阶段速查）
+- `./physics.md` —— 物理参数与校准常量表、已知现状
+- `../../docs/archive/render-authoritative-frames.md` —— 校准方案 v4.x 演化史
+- `../../docs/phys-fix-directions.md` —— 上述问题的修复方向（P1–P7）
 - `game/scripts/phys-rate-parity.mjs` —— 实验①②④⑤（分区等价性/直坡/接缝/槽）
 - `game/scripts/phys-rate-parity-v2.mjs` —— 场景 A/B（坡顶入坡相位扫描）+ 实验⑥（Q3 双管道）
 - `game/scripts/phys-diag-flat.mjs` —— 贴面 spawn 吸附诊断（GROUND_TRACE_DIST=2）

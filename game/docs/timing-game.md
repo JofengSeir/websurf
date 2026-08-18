@@ -5,7 +5,7 @@
 > 对应 `game/`（WebSurf-game，Game Build）。实际实现（v7 定案）：**主线程 = 唯一物理渲染线**
 > （PhysWorld tick + 渲染同频，rAF 帧率可变 dt、dt 钳制 0.1s）；**Worker = 权威帧计算器**
 > （独立固定步长 = 1/tickRate，默认 64Hz、面板 48-128 可调，含地图碰撞）。无 Worker-B——预测已在主线程（v4 起删除双 Worker 预测）。
-> debug 时序见 `docs/timing-debug.md`。兜底同步逐场景深挖与专题分析（垂直落体锯齿 5.54 / 重力手感）见 `docs/timing-game-analysis.md`。
+> debug 时序见 `../../debug/docs/timing-debug.md`。兜底同步逐场景深挖与专题分析（垂直落体锯齿 5.54 / 重力手感）见 `./timing-game-analysis.md`。
 
 ```mermaid
 sequenceDiagram
@@ -83,7 +83,7 @@ sequenceDiagram
 **已知不对称（如实记录）**：`set-death-threshold` 为共享层已定义消息，但 game 主线程
 **从未发送**——权威 Worker 死亡阈值恒为 Rust 默认 -100000（掉落永不死亡重生）；主线程
 预测物理则收到 `set_death_y(bbox.min.y)`（renderer-main 实传未减 1000，注释与实现不符）。
-双端死亡判定分叉，详见 `game/docs/physics.md` §8。
+双端死亡判定分叉，详见 `./physics.md` §8。
 
 ## MsgState 回退（无 SAB 环境：file:// / GitHub Pages）
 

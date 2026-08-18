@@ -44,10 +44,11 @@ BSP 地图文件体积大，不随仓库分发（见 .gitignore，`*.bsp` 全忽
 
 - [docs/](docs/) — 仓库级文档：
   - [architecture.md](docs/architecture.md) — 整体架构（共享层/数据流/构建部署）
-  - [timing-debug.md](docs/timing-debug.md) / [timing-game.md](docs/timing-game.md) — 两端时序图
+  - [timing-debug.md](debug/docs/timing-debug.md) — debug 时序图
+  - [timing-game.md](game/docs/timing-game.md) / [timing-game-analysis.md](game/docs/timing-game-analysis.md) — game 时序图与深度分析
   - [materials.md](docs/materials.md) — 公共材质技术（mosaic 低清压缩 / MTZ 打包解压拼装 / 默认纹理包全流程）
-- [debug/docs/](debug/docs/) — 主工程特色功能（材质应用/物理/渲染调试/计时挑战）
-- [game/docs/](game/docs/) — WebSurf-game 特色功能（双物理线/面板键位/材质应用）
+- [debug/docs/](debug/docs/) — 主工程特色功能（材质应用/物理/渲染调试/计时挑战/时序）
+- [game/docs/](game/docs/) — WebSurf-game 特色功能（双物理线/面板键位/材质应用/时序）
 - [game/README.md](game/README.md) — WebSurf-game 使用说明
 - [test/dual-mode-harness/README.md](test/dual-mode-harness/README.md) / [test/dual-mode-harness/CONCLUSION.md](test/dual-mode-harness/CONCLUSION.md) — 验证工程说明与「64t 坡速 ≈ 无限制」会审结论
 

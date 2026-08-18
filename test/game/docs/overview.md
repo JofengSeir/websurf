@@ -3,7 +3,7 @@
 > 最后核对：2026-08-13。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
 
 > 最小化游戏化实现：Rust 物理 + 单权威 Worker（v7 定案：主线程唯一物理渲染线 + Worker 权威帧计算器）。
-> 公共架构见 `docs/architecture.md`；时序见 `docs/timing-game.md`；材质技术见 `docs/materials.md`。
+> 公共架构见 `../../../docs/architecture.md`；时序见 `../../game/docs/timing-game.md`；材质技术见 `../../../docs/materials.md`。
 
 ## 1. 定位与工程结构
 

@@ -1,7 +1,7 @@
 # WebSurf-test/game — 修复版移植说明
 
 > 2026-08-17。本目录是 `game/` 的完整自包含移植（含共享层），并按
-> `docs/phys-fix-directions.md` 实施了修复。根因分析见仓根 `docs/timing-game-analysis.md`。
+> `../../docs/phys-fix-directions.md` 实施了修复。根因分析见 `../game/docs/timing-game-analysis.md`。
 
 ## 目录结构（相对本目录）
 
@@ -37,7 +37,7 @@ test/game/
 | P5 | `app.ts`, `input-bridge.ts`, `renderer-main.ts` | 场景加载后死亡阈值双端下发：`sendSetDeathThreshold` 补发 `set-death-threshold` 到 Worker；renderer 传 `bbox.min.y - 1000`（贴合注释语义） |
 | P6 | `config.ts`, `panel-controller.ts`, `params.ts`, `worker/main.ts`, `player.rs`, `mod.rs`, `teleport.rs` | 删除死参数 `teleportGateTicks`（Rust check 签名、set_params、TS 字段/映射/面板项全清） |
 
-## 追加风险项修复（依据 docs/timing-game-analysis.md §4）
+## 追加风险项修复（依据 ../game/docs/timing-game-analysis.md §4）
 
 | 风险 | 文件 | 内容 |
 |---|---|---|
