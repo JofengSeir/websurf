@@ -87,11 +87,24 @@ export class AuthorityCalibrator {
   private lastSyncAt = 0;
   /** 主线程渲染物理是否已用首个权威帧校准起点。 */
   private predStarted = false;
+  /**
+   * 传送/重置后的权威豁免截止时间戳（performance.now()，ms）。
+   *
+   * 位置突变（respawn/teleport/noclip/检查点回退）的瞬间，权威 Worker 侧仍是
+   * 旧位置；若不豁免，`correctFromAuthority` 会把已突变的位置当"分叉（dist>500）"
+   * 或"首个权威帧"用权威旧位置覆盖回去 → 视觉上"传送/重置没生效"。
+   * 豁免期内：只读权威速度供外推，绝不覆盖渲染物理位置；并把主线程新状态
+   * 同步给 Worker（onSyncRenderState），让权威侧追平到新位置。
+   */
+  private teleportExemptUntilMs = 0;
 
   constructor(private readonly deps: CalibratorDeps) {}
 
   /** 兜底处理冷却（ms）：同步/撤回后 250ms 内不再触发，防抖（用户调 2s→250ms）。 */
   static readonly SYNC_COOLDOWN_MS = 250;
+
+  /** 传送/重置后权威豁免时长（ms）：约 12 个 64Hz 权威帧窗口，足够权威追平新位置。 */
+  static readonly TELEPORT_EXEMPT_MS = 200;
 
   /**
    * 权威帧到达（A2）处理 —— **只读权威，绝不反写**（v7 定案，2026-08-08 修订）。
@@ -116,7 +129,45 @@ export class AuthorityCalibrator {
     const phys = this.deps.getPhys();
     if (!phys) return;
     const auth = this.deps.readAuth();
-    if (!auth || auth.va === this.lastVa) return;
+    if (!auth) return;
+
+    // ── 传送/重置豁免期：位置刚突变，权威侧仍可能是旧位置 ──
+    // 绝不把权威旧位置覆盖到渲染物理（覆盖 = 传送被拉回）。只刷新权威速度供
+    // calibrateVelocity 外推；同时把渲染物理当前（新）状态同步给权威 Worker，
+    // 让权威在豁免窗口内追平，避免豁免结束后首次权威帧（predStarted 已置位）
+    // 因 dist 过大再被 fallback 逻辑拉回。
+    if (performance.now() < this.teleportExemptUntilMs) {
+      // 记录权威帧（供 calibrateVelocity 外推速度），但不覆盖渲染位置
+      this.lastVa = auth.va;
+      const f = auth.frame;
+      this.curAuth = {
+        pos: { ...f.pos },
+        yaw: f.yaw,
+        pitch: f.pitch,
+        vel: { ...f.vel },
+        accel: this.computeAuthAccel(f.vel, f.timeMs),
+        eyeHeight: f.eyeHeight,
+        timeMs: f.timeMs,
+      };
+      // 主线程新状态 → 权威（覆盖旧位置，防止权威帧把它当起点/分叉拉回）
+      const st = phys.state() as {
+        posX: number; posY: number; posZ: number;
+        yaw: number; pitch: number;
+        velX: number; velY: number; velZ: number;
+        onGround: boolean; eyeHeight: number;
+      };
+      this.deps.onSyncRenderState?.({
+        posX: st.posX, posY: st.posY, posZ: st.posZ,
+        yaw: st.yaw, pitch: st.pitch,
+        velX: st.velX, velY: st.velY, velZ: st.velZ,
+        onGround: st.onGround, eyeHeight: st.eyeHeight,
+      });
+      // 视为主线程已校准起点，避免豁免结束后权威帧再 set_state 旧位置
+      this.predStarted = true;
+      return;
+    }
+
+    if (auth.va === this.lastVa) return;
     this.lastVa = auth.va;
     const f = auth.frame;
     this.curAuth = {
@@ -272,6 +323,9 @@ export class AuthorityCalibrator {
     // 清待喂输入，防突变后残留方向/跳跃
     this.deps.clearPendingInput();
     this.clear();
+    // 传送/重置后设置权威豁免窗口：期间权威旧位置不得覆盖渲染物理，
+    // 并把主线程新位置同步给 Worker（由 correctFromAuthority 中豁免分支执行）。
+    this.teleportExemptUntilMs = performance.now() + AuthorityCalibrator.TELEPORT_EXEMPT_MS;
   }
 
   /** 清空全部权威校准状态（disposeScene / buildPredictionWorld 跨地图重置用）。 */

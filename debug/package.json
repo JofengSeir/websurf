@@ -13,7 +13,8 @@
     "build:dist": "node scripts/build-dist.mjs",
     "build": "npm run build:wasm && npm run build:ts",
     "dev": "python ../src/serve.py 8080 .",
-    "check:api": "node scripts/check-wasm-api.mjs"
+    "check:api": "node scripts/check-wasm-api.mjs",
+    "verify:chamfer": "node scripts/verify-chamfer.mjs"
   },
   "dependencies": {
     "three": "^0.165.0"
