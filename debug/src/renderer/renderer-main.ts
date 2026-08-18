@@ -232,6 +232,10 @@ export class RendererMain {
       config.debug.phyViewDistance,
       config.debug.visViewDistance,
     );
+    this.colliderDebug.setChamferDebugFlags(
+      config.debug.showChamfers,
+      config.debug.chamferViewDistance,
+    );
     this.planeInfoEnabled = config.debug.showPlaneInfo;
 
     this.needsRender = true;
@@ -646,6 +650,10 @@ export class RendererMain {
         this.config.debug.showVis,
         this.config.debug.phyViewDistance,
         this.config.debug.visViewDistance,
+      );
+      this.colliderDebug.setChamferDebugFlags(
+        this.config.debug.showChamfers,
+        this.config.debug.chamferViewDistance,
       );
       this.planeInfoEnabled = this.config.debug.showPlaneInfo;
       this.needsRender = true;

@@ -228,6 +228,96 @@ function classifyNormal(
 	return COLOR_WALL;
 }
 
+// ---------------------------------------------------------------------------
+// chamfer（切角）平面可视化（黄色）
+// ---------------------------------------------------------------------------
+// 远端在 WASM 导出层（debug/crates/wasm/src/lib.rs 的 AddEdgeBevels 简化版）为每个
+// brush 的凸棱运行时生成一张"外切角"平面（n = normalize(n_i + n_j)，凸包外侧校验），
+// 已合并进 brush.planes 一并输出：既进物理碰撞，也进 debug 线框。本模块把这类
+// "只过棱、不构成面"的平面单独标黄，供排查坡顶/尖角幻影碰撞。
+// 分类判据：平面上落在凸包上的顶点 <3 或全部共线（= 只含一条棱，不是真实面）
+// → 该平面即 chamfer；与 orderedFaces 的 `face.length < 3` 跳过逻辑同源。
+// 绘制：平铺在平面内、沿"平面内 ⊥ 棱 ∧ 背离 brush 质心"方向外推 CHAMFER_QUAD_LEN，
+// —— 角平分线 chamfer 呈现为贴坡倒角、水平过棱呈现为贴面帽盖，而非竖起的挡墙。
+// 黄色且 depthTest:false 恒可见（chamfer 常嵌在几何内/背面）。
+
+/** chamfer 切角平面线段（棱两端点 + 朝外法线）。 */
+interface ChamferStrip {
+	a: [number, number, number];
+	b: [number, number, number];
+	n: [number, number, number];
+}
+
+/** chamfer 四边形沿平面内方向外推长度（HU，≈ hull 半宽，示意扩张尺度）。 */
+const CHAMFER_QUAD_LEN = 16;
+/** 共线判定容差（HU；顶点到棱线的垂直距离小于此值视为共线 → 该平面是 chamfer）。 */
+const CHAMFER_COLLINEAR_EPS = 0.5;
+
+/** 两点向量差。 */
+function chVecSub(a: [number, number, number], b: [number, number, number]): [number, number, number] {
+	return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+/** 两点距离。 */
+function chVecDist(a: [number, number, number], b: [number, number, number]): number {
+	const d = chVecSub(a, b);
+	return Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+}
+
+/**
+ * 提取 brush 的全部 chamfer（切角）平面线段。
+ * 判据：平面上落在凸包上的顶点 <3 或全部共线 → 只过棱、不构成面 → chamfer。
+ */
+function computeChamferStrips(brush: Brush): ChamferStrip[] {
+	const verts = computeBrushHull(brush);
+	if (verts.length < 4) return [];
+	const strips: ChamferStrip[] = [];
+	for (const p of brush.planes) {
+		// 落在平面上的顶点
+		const on: number[] = [];
+		for (let vi = 0; vi < verts.length; vi++) {
+			const v = verts[vi];
+			const d = p.normal.x * v[0] + p.normal.y * v[1] + p.normal.z * v[2] - p.dist;
+			if (Math.abs(d) < FACE_EPS) on.push(vi);
+		}
+		if (on.length < 2) continue;
+		// 取相距最远的两点作棱线段
+		let ai = on[0], bi = on[1], best = -1;
+		for (let x = 0; x < on.length; x++) {
+			for (let y = x + 1; y < on.length; y++) {
+				const d = chVecDist(verts[on[x]], verts[on[y]]);
+				if (d > best) { best = d; ai = on[x]; bi = on[y]; }
+			}
+		}
+		const a = verts[ai], b = verts[bi];
+		if (chVecDist(a, b) < 0.01) continue;
+		// 共线判定：其余面上顶点到棱线的垂直距离
+		let collinear = true;
+		const ab = chVecSub(b, a);
+		const abLen = Math.sqrt(ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2]);
+		for (const vi of on) {
+			if (vi === ai || vi === bi) continue;
+			const ap = chVecSub(verts[vi], a);
+			const cp = [
+				ab[1] * ap[2] - ab[2] * ap[1],
+				ab[2] * ap[0] - ab[0] * ap[2],
+				ab[0] * ap[1] - ab[1] * ap[0],
+			];
+			if (Math.sqrt(cp[0] * cp[0] + cp[1] * cp[1] + cp[2] * cp[2]) / abLen > CHAMFER_COLLINEAR_EPS) {
+				collinear = false;
+				break;
+			}
+		}
+		if (!collinear) continue; // 真实面（≥3 非共线顶点）
+		strips.push({
+			a: [a[0], a[1], a[2]],
+			b: [b[0], b[1], b[2]],
+			n: [p.normal.x, p.normal.y, p.normal.z],
+		});
+	}
+	return strips;
+}
+
 /**
  * 把 brush 凸包画成线框：对每个面，闭合多边形连边（真实碰撞几何边）。
  * 每面按其法线调用 `classify` 独立着色（支持 bevel 斜面显示为斜坡色）。
@@ -360,6 +450,8 @@ export class ColliderDebug {
 	private phyGroup: THREE.Group | null = null;
 	/** 模型可视网格线框组（紫色，受 showVis 控制）。 */
 	private visGroup: THREE.Group | null = null;
+	/** chamfer 切角平面线框组（黄色，受 showChamfers 控制）。 */
+	private chamferGroup: THREE.Group | null = null;
 	/** 触发碰撞箱线框组（受 showTriggers 控制）。 */
 	private triggerGroup: THREE.Group | null = null;
 	private showSolids = false;
@@ -372,13 +464,21 @@ export class ColliderDebug {
 	private showPhy = false;
 	/** 可视网格独立开关（紫色）。 */
 	private showVis = false;
+	/** chamfer 切角平面独立开关（黄色）。 */
+	private showChamfers = false;
 	/** .phy 碰撞网格显示可视距离（HU；0 = 全量）。 */
 	private phyViewDistance = 2048;
 	/** 可视网格显示可视距离（HU）。 */
 	private visViewDistance = 512;
+	/** chamfer 切角平面显示可视距离（HU；0 = 全量）。 */
+	private chamferViewDistance = 512;
 	/** .phy 距离/开关变更待重建标记（立即生效不等限流）。 */
 	private phyDirty = false;
 	private frameCounter = 0;
+	/** chamfer 切角平面线框重建限流计数（与 solid 同周期）。 */
+	private chamferFrameCounter = 0;
+	/** chamfer 线段缓存（凸包重建昂贵，仅首次计算；brush 引用稳定，地图重载清空）。 */
+	private chamferCache = new WeakMap<Brush, ChamferStrip[]>();
 	private triFrameCounter = 0;
 	/** 传送触发器列表（由 PhysicsWorker 注入）。 */
 	private triggers: readonly TeleportTrigger[] = [];
@@ -402,6 +502,11 @@ export class ColliderDebug {
 		this.visGroup.name = '__model_vis_collider_debug__';
 		this.visGroup.visible = false;
 		scene.add(this.visGroup);
+
+		this.chamferGroup = new THREE.Group();
+		this.chamferGroup.name = '__vbsp_chamfer_debug__';
+		this.chamferGroup.visible = false;
+		scene.add(this.chamferGroup);
 
 		this.triggerGroup = new THREE.Group();
 		this.triggerGroup.name = '__vbsp_trigger_debug__';
@@ -483,6 +588,20 @@ export class ColliderDebug {
 	}
 
 	/**
+	 * 设置 chamfer 切角平面线框独立开关与可视距离（黄色；导出层运行时生成并已并入
+	 * brush 平面，此处仅分类显示）。开关/距离变更立即生效（限流周期内照常重建）。
+	 */
+	setChamferDebugFlags(showChamfers: boolean, chamferViewDistance: number): void {
+		this.showChamfers = showChamfers;
+		this.chamferViewDistance = chamferViewDistance;
+		if (this.chamferGroup) {
+			this.chamferGroup.visible = showChamfers;
+			if (!showChamfers) this.clearGroup(this.chamferGroup);
+		}
+		this.chamferFrameCounter = REBUILD_INTERVAL;
+	}
+
+	/**
 	 * 每帧更新。
 	 * @param cameraPos 相机世界坐标（眼睛位置）。
 	 * @param colliders 实体碰撞体（World.solids + ladders）。
@@ -520,6 +639,17 @@ export class ColliderDebug {
 			}
 		}
 
+		// 1.6 chamfer 切角平面线框（黄色；独立开关 + 可视距离，与 solid 同限流周期；
+		//     线段已缓存，重建只做距离筛选，成本低）
+		if (this.showChamfers && this.chamferGroup) {
+			this.chamferFrameCounter++;
+			if (this.chamferFrameCounter >= REBUILD_INTERVAL) {
+				this.chamferFrameCounter = 0;
+				this.rebuildChamfers(cameraPos, colliders, config);
+				rebuilt = true;
+			}
+		}
+
 		// 2. 触发碰撞箱（受 showTriggers 控制，数量少直接每帧重建）
 		if (this.showTriggers && this.triggerGroup) {
 			this.rebuildTriggers(cameraPos);
@@ -531,7 +661,7 @@ export class ColliderDebug {
 
 	/** 当前是否有调试显示工作（render-loop 据此决定是否调用 update）。 */
 	get hasDebugWork(): boolean {
-		return this.showSolids || this.showTriggers || this.showPhy || this.showVis;
+		return this.showSolids || this.showTriggers || this.showPhy || this.showVis || this.showChamfers;
 	}
 
 	/**
@@ -733,6 +863,96 @@ export class ColliderDebug {
 	}
 
 	/**
+	 * 重建 chamfer 切角平面线框（黄色）。距离筛选同实体碰撞箱（XZ 半径 + Y 窗口）；
+	 * 线段缓存在 WeakMap，凸包分类仅首次执行，重建只做筛选与装配。
+	 * 四边形平铺在平面内、沿"平面内 ⊥ 棱 ∧ 背离 brush 质心"外推：角平分线 chamfer
+	 * 呈现为贴坡倒角、水平过棱呈现为贴面帽盖（坡面切线感），而非竖起的挡墙。
+	 * depthTest:false —— 贴在几何内/后被遮挡也能看到（排查需要）。
+	 */
+	private rebuildChamfers(
+		cameraPos: THREE.Vector3,
+		colliders: Brush[],
+		config: RuntimeConfig,
+	): void {
+		const group = this.chamferGroup!;
+		this.clearGroup(group);
+		if (colliders.length === 0) return;
+
+		const pos = cameraPos;
+		const playerHeight = config.player.standHeight;
+		const feetY = pos.y - playerHeight + config.player.eyeOffset;
+		const minY = feetY - DEBUG_Y_EXTENT;
+		const maxY = feetY + playerHeight + DEBUG_Y_EXTENT;
+		const full = this.chamferViewDistance <= 0;
+		const radiusSq = this.chamferViewDistance * this.chamferViewDistance;
+
+		const positions: number[] = [];
+		let drawn = 0;
+		for (const brush of colliders) {
+			if (brush.max.y < minY || brush.min.y > maxY) continue;
+			if (!full) {
+				const nx = Math.max(brush.min.x, Math.min(pos.x, brush.max.x));
+				const nz = Math.max(brush.min.z, Math.min(pos.z, brush.max.z));
+				const dx = pos.x - nx;
+				const dz = pos.z - nz;
+				if (dx * dx + dz * dz > radiusSq) continue;
+			}
+			let strips = this.chamferCache.get(brush);
+			if (!strips) {
+				strips = computeChamferStrips(brush);
+				this.chamferCache.set(brush, strips);
+			}
+			for (const s of strips) {
+				// 四边形：平铺在 chamfer 平面内，沿"平面内 ⊥ 棱 ∧ 背离 brush 质心"外推
+				const ex = s.b[0] - s.a[0];
+				const ey = s.b[1] - s.a[1];
+				const ez = s.b[2] - s.a[2];
+				// 法线 ⊥ 棱 → cross(n, e) 落在平面内且 ⊥ 棱
+				let dx = s.n[1] * ez - s.n[2] * ey;
+				let dy = s.n[2] * ex - s.n[0] * ez;
+				let dz = s.n[0] * ey - s.n[1] * ex;
+				const dLen = Math.hypot(dx, dy, dz);
+				if (dLen < 1e-6) continue;
+				dx /= dLen; dy /= dLen; dz /= dLen;
+				// 符号：指向"背离 brush 质心"的一侧（幻影区 / 坡面切线方向）
+				const mdx = (s.a[0] + s.b[0]) / 2 - (brush.min.x + brush.max.x) / 2;
+				const mdy = (s.a[1] + s.b[1]) / 2 - (brush.min.y + brush.max.y) / 2;
+				const mdz = (s.a[2] + s.b[2]) / 2 - (brush.min.z + brush.max.z) / 2;
+				if (dx * mdx + dy * mdy + dz * mdz < 0) {
+					dx = -dx; dy = -dy; dz = -dz;
+				}
+				const a2: [number, number, number] = [
+					s.a[0] + dx * CHAMFER_QUAD_LEN,
+					s.a[1] + dy * CHAMFER_QUAD_LEN,
+					s.a[2] + dz * CHAMFER_QUAD_LEN,
+				];
+				const b2: [number, number, number] = [
+					s.b[0] + dx * CHAMFER_QUAD_LEN,
+					s.b[1] + dy * CHAMFER_QUAD_LEN,
+					s.b[2] + dz * CHAMFER_QUAD_LEN,
+				];
+				positions.push(
+					s.a[0], s.a[1], s.a[2], s.b[0], s.b[1], s.b[2],
+					s.a[0], s.a[1], s.a[2], a2[0], a2[1], a2[2],
+					s.b[0], s.b[1], s.b[2], b2[0], b2[1], b2[2],
+					a2[0], a2[1], a2[2], b2[0], b2[1], b2[2],
+				);
+				drawn++;
+			}
+		}
+		console.log(`[collider-debug] chamfer 重建: 距离=${this.chamferViewDistance} 平面=${drawn}`);
+
+		if (positions.length === 0) return;
+		const geom = new THREE.BufferGeometry();
+		geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+		const mat = new THREE.LineBasicMaterial({
+			color: 0xfffb14,
+			depthTest: false, // 不被遮挡，始终可见（chamfer 常在几何内/背面）
+		});
+		group.add(new THREE.LineSegments(geom, mat));
+	}
+
+	/**
 	 * 追加一组三角形线框（positions 为 3 顶点 × 3 条边 × 3 分量）。
 	 * 不透明材质：opaque 阶段恒在透明 brush 线框之后渲染，橙色不被混合染色。
 	 */
@@ -841,7 +1061,10 @@ export class ColliderDebug {
 		if (this.solidGroup) this.clearGroup(this.solidGroup);
 		if (this.phyGroup) this.clearGroup(this.phyGroup);
 		if (this.visGroup) this.clearGroup(this.visGroup);
+		if (this.chamferGroup) this.clearGroup(this.chamferGroup);
 		if (this.triggerGroup) this.clearGroup(this.triggerGroup);
+		// brush 引用已随地图刷新 → chamfer 缓存随之失效（WeakMap 自动回收）
+		this.chamferCache = new WeakMap();
 	}
 
 	/** 释放资源。 */
@@ -851,12 +1074,14 @@ export class ColliderDebug {
 			if (this.solidGroup) this.scene.remove(this.solidGroup);
 			if (this.phyGroup) this.scene.remove(this.phyGroup);
 			if (this.visGroup) this.scene.remove(this.visGroup);
+			if (this.chamferGroup) this.scene.remove(this.chamferGroup);
 			if (this.triggerGroup) this.scene.remove(this.triggerGroup);
 		}
 		this.scene = null;
 		this.solidGroup = null;
 		this.phyGroup = null;
 		this.visGroup = null;
+		this.chamferGroup = null;
 		this.triggerGroup = null;
 	}
 }
