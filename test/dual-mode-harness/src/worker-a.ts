@@ -37,10 +37,8 @@
 
 /// <reference lib="webworker" />
 
-import { TestShared } from './shared-state.js';
+import { TestShared, type SharedInputMsg, type SharedTickRateMsg } from './shared-state.js';
 import { PhysWorld, initSync } from '../pkg/websurf_test_wasm.js';
-import { TraceRecorder } from '../../../src/ts-shared/trace/trace-recorder.js';
-import type { TraceControlMessage } from '../../../src/ts-shared/trace/trace-types.js';
 
 // ── 常量 ────────────────────────────────────────────────────────
 /** 模式A：1ms 固定子步（无限制真理源）。 */
@@ -51,7 +49,7 @@ const MAX_DELTA = 0.05;
 const MAX_STEPS_PER_ROUND = 8;
 /** 累加器封顶（秒）：8 次上限耗尽后的残留上限，防无限追赶。 */
 const MAX_ACC = 0.02;
-/** 单次步进 dx/dy 上限 ±1000（防穿墙，与 game 输入层 CLAMP 一致）。 */
+/** 单次 mousemove 事件削平阈值（主线程已按事件 CLAMP；这里用于 tick 边界窗口上限）。 */
 const MAX_INPUT_DELTA = 1000;
 /** tick 边界鼠标增量上限：按 tick 窗口放大（1000/ms × tickDt），防极端甩视角穿墙。 */
 function tickInputMax(tickDt: number): number {
@@ -65,11 +63,18 @@ const MAX_WAIT_MS = 4;
 const GRAVITY = 800;
 /** wasm 文件（build:wasm 已复制到 test 根）。 */
 const DEFAULT_WASM_URL = './websurf_test_wasm_bg.wasm';
+/** 空传送 report：最小集明确排除传送区域，build_world 必须接收该参数。 */
+const EMPTY_TELEPORT_JSON = '{"teleports":[],"triggers":[]}';
 
 // ── 消息协议 ────────────────────────────────────────────────────
 interface InitSharedMessage {
   type: 'init-shared';
   shared: SharedArrayBuffer;
+}
+/** 消息回退模式初始化（无 SAB）：renderPort 为 WorkerA→WorkerB 状态发布直连端口。 */
+interface InitMsgMessage {
+  type: 'init-msg';
+  renderPort: MessagePort;
 }
 interface InitWasmMessage {
   type: 'init-wasm';
@@ -82,10 +87,16 @@ interface WorldJsonMessage {
   type: 'world-json';
   brushJson: string;
   triJson: string;
-  teleportJson: string;
   spawn: [number, number, number, number];
 }
-type WorkerAMessage = InitSharedMessage | InitWasmMessage | RespawnMessage | WorldJsonMessage | TraceControlMessage;
+type WorkerAMessage =
+  | InitSharedMessage
+  | InitMsgMessage
+  | InitWasmMessage
+  | RespawnMessage
+  | WorldJsonMessage
+  | SharedInputMsg
+  | SharedTickRateMsg;
 
 // ── 运行时状态 ──────────────────────────────────────────────────
 let shared: TestShared | null = null;
@@ -111,29 +122,16 @@ let tickDyAcc = 0;
 let modeBWasActive = false;
 let lastNow = performance.now();
 
-// ── trace 路径采样（公共模块 TraceRecorder：绿=无限制基准 / 红=tick 实际）──
-/** 采集端状态机（采样节流 + 滚动窗口；onPoint 经 postMessage 发 trace-data）。 */
-const traceRecorder = new TraceRecorder({
-  sampleEvery: 16, // ~1ms×16 = 每 ~16ms 一点（64Hz 量级）
-  onPoint: (pt) => {
-    self.postMessage({
-      type: 'trace-data',
-      baseX: pt.base.x, baseY: pt.base.y, baseZ: pt.base.z,
-      tickX: pt.tick.x, tickY: pt.tick.y, tickZ: pt.tick.z,
-    });
-  },
-});
-
 // ── 世界构建（BSP 导出分发）─────────────────────────────────────
 function applyWorld(msg: WorldJsonMessage): void {
   if (!phys) return;
   const [sx, sy, sz, yaw] = msg.spawn;
   phys.set_hull(16, 72, 54);
-  phys.build_world(msg.brushJson, msg.triJson, msg.teleportJson, sx, sy, sz, yaw);
+  phys.build_world(msg.brushJson, msg.triJson, EMPTY_TELEPORT_JSON, sx, sy, sz, yaw);
   // tick 实例同世界构建（独立 64t 权威线——与模式A 同出生点同世界）
   if (tickPhys) {
     tickPhys.set_hull(16, 72, 54);
-    tickPhys.build_world(msg.brushJson, msg.triJson, msg.teleportJson, sx, sy, sz, yaw);
+    tickPhys.build_world(msg.brushJson, msg.triJson, EMPTY_TELEPORT_JSON, sx, sy, sz, yaw);
   }
   // 死亡阈值：brushJson 最小 min[1] - 100（默认 -100000 兜底）
   try {
@@ -282,7 +280,9 @@ function loop(): void {
       acc -= RENDER_DT;
       steps++;
       // 实时输入（模式A 是**唯一** SAB 消费路径——用户要求 1：输入仅进入 WorkerA）
-      const inp = shared.consumeInput(MAX_INPUT_DELTA);
+      // 不在此削平：主线程已按单次 mousemove 事件 CLAMP；这里必须消费完整帧增量，
+      // 避免“整帧累加器被排空 + 削平到 ±1000”导致快速甩动丢失（与 game 主线程直通一致）。
+      const inp = shared.consumeInput();
       // tick 边界采样累积（模式B 专用：上一边界以来模式A 实时消耗的鼠标增量，
       // 下一边界一次性注入 tick 实例——与真实 64t 服务器"边界消费整窗口"等价）
       if (modeBActive) {
@@ -291,12 +291,6 @@ function loop(): void {
       }
       phys.tick(RENDER_DT, inp.keysMask, inp.dx, inp.dy); // 1ms 子步
       writeStateFromPhys(); // 写空闲槽（S[V&1 ^ 1]）→ Atomics.add(V,1)——唯一写槽者
-      // trace 采样（公共 TraceRecorder：节流 + 滚动窗口；双实例位置）
-      {
-        const sB = phys.state();
-        const sT = tickPhys ? tickPhys.state() : sB;
-        traceRecorder.tick(sB, sT);
-      }
     }
     // 8 次上限耗尽：保留剩余累加（时间不丢失，下轮继续补跑），仅封顶防无限追赶
     if (acc > MAX_ACC) acc = MAX_ACC;
@@ -321,6 +315,11 @@ self.addEventListener('message', (e: MessageEvent) => {
       shared = TestShared.init(msg.shared);
       void startInit();
       break;
+    case 'init-msg':
+      // 消息回退模式：状态发布直连 WorkerB 端口；无 SAB 时 same API 双实现
+      shared = TestShared.initMessaging((m: unknown) => msg.renderPort.postMessage(m));
+      void startInit();
+      break;
     case 'init-wasm':
       if (msg.wasmUrl) pendingWasmUrl = msg.wasmUrl;
       if (shared && !initStarted) void startInit();
@@ -343,9 +342,13 @@ self.addEventListener('message', (e: MessageEvent) => {
         pendingWorld = msg; // wasm 未就绪：暂存，startInit 完成后应用
       }
       break;
-    case 'trace':
-      // 路径记录开关（公共 TraceRecorder：开始→采样发送；保存→停止，路径保留 3D 显示）
-      traceRecorder.setEnabled((msg as TraceControlMessage).enabled === true);
+    case 'shared-input':
+      // 消息回退模式：主线程每 rAF 投递的输入批次（等价 SAB addInput）
+      shared?.onInputMessage(msg.dx, msg.dy, msg.keysMask);
+      break;
+    case 'shared-tick-rate':
+      // 消息回退模式：难度调节（等价 SAB writeTickRate）
+      shared?.onTickRateMessage(msg.rate);
       break;
   }
 });

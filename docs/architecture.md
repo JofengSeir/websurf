@@ -39,7 +39,6 @@ websurf/
 │   ├── dual-mode-harness/      WebSurf-test（验证工程，2026-08-11 收尾）：双模物理 + 帧信号渲染时序验证
 │   │   ├── crates/wasm/src/      lib.rs（薄导出层：PhysWorld + BspProcessor 最小导出集，无 mosaic/默认包）
 │   │   ├── src/                  TS：main（不做物理/渲染——主线程负责 BSP 解析导出 + 输入转发 + UI）/ shared-state（SAB + 消息回退）/ worker-a（双模物理）/ worker-b（渲染）
-│   │   ├── mini/                 核心链路最小实现（输入 → 物理 → SAB → 插值渲染，与完整版架构一致）
 │   │   └── scripts/              phys-smoke（191/191 PASS）/ perf-bench / race-wakeup / tmp-dual-compare / trace-verify / build-dist（另有已跟踪的临时脚本 _tmp_flicker-debug.mjs）
 │   └── game/                   WebSurf-game 修复版自包含移植（P2–P6 + 风险2/5；独立 Pages 入口）
 ├── docs/                     仓库级文档（本文 / 两端时序 / 材质技术）

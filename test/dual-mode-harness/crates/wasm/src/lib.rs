@@ -4,14 +4,19 @@
 //! - [`PhysWorld`]：共享物理系统（仓库根 src/，websurf-phys），wasm-bindgen 绑定
 //!   在 websurf-phys 的 `#[wasm_bindgen]` 定义处生成，本 crate 链接为 cdylib 后即随
 //!   wasm 导出（与 game/crates/wasm 同模式）。
-//! - [`BspProcessor`]：BSP 解析 + 最小导出集（BSP 游玩所需，参考 game 的导出实现，
-//!   解析层共享 src/wasm-core/）。最小导出集：
+//! - [`BspProcessor`]：BSP 解析 + 导出集（BSP 游玩所需，参考 game 的导出实现，
+//!   解析层共享 src/wasm-core/）。导出集：
 //!   - `metadata()`：map 元数据（magic/brush/face/entity 计数等）
 //!   - `export_brushes_planes(filterJson)`：brush 凸包碰撞体（Y-up、法线朝外）
 //!   - `export_model_phy_colliders()` / `export_model_tri_colliders()`：PAKFILE 模型碰撞体
-//!   - `parse_teleports()` / `parse_spawn_points()`：传送 report / 出生点 report
-//!   - `parse_pvs_data()`：PVS 位图 + BSP 树导出（遮挡剔除；WorkerB 消费）
+//!   - `parse_spawn_points()`：出生点 report（运行时最小集使用）
 //!   - `export_glb_with_pakfile_models()`：含 PAKFILE 模型的 GLB（渲染用；消费 BSP）
+//!
+//! 运行时最小集（main.ts）只调用：metadata / export_brushes_planes /
+//! export_model_phy_colliders（空则回退 export_model_tri_colliders）/ parse_spawn_points /
+//! export_glb_with_pakfile_models。
+//! `parse_teleports()` / `parse_pvs_data()` 保留在 WASM API（供脚本/扩展），
+//! **主线程导出流程不调用**，以排除传送区域/检测（PVS）等非核心移动影响。
 //!
 //! 未导出（mosaic/缺失纹理/薄壳）：test 工程最小 BSP 游玩不需要。
 
@@ -306,7 +311,7 @@ impl BspMetadata {
 /// BSP 处理器：先调用 [`BspProcessor::new`] 解析字节数组，再调用各导出方法。
 ///
 /// 注意：`export_glb_with_pakfile_models` 会**消费**内部 Bsp 实例，须在
-/// 其余借用方法（brushes/模型碰撞/teleport/spawn/pvs）之后调用。
+/// 其余借用方法（brushes/模型碰撞/spawn，以及可选的 teleport/pvs 扩展）之后调用。
 #[wasm_bindgen]
 pub struct BspProcessor {
     bsp: Option<vbsp::Bsp>,
@@ -645,7 +650,9 @@ impl BspProcessor {
                     })
                     .collect()
             } else {
-                bsp_planes
+                // 有实体 origin 时 bsp_plane_refs 指向已平移到世界坐标的 owned_planes；
+                // 不能用 bsp_planes（局部坐标），否则 AABB 世界坐标但平面仍局部坐标 → 碰撞错位。
+                bsp_plane_refs
                     .iter()
                     .map(|p| {
                         let r = rotate_yup(&p.normal);
@@ -1674,7 +1681,7 @@ impl BspProcessor {
     /// 若 BSP 未打包任何被引用模型，**自动回退为纯地图导出**，不报错、不降级。
     ///
     /// 注意：此操作会**消耗**内部 Bsp 实例（与 game 的 `export_glb` 一致），
-    /// 须在其余借用方法（brushes/模型碰撞/teleport/spawn）**之后**调用。
+    /// 须在其余借用方法（brushes/模型碰撞/spawn，以及可选的 teleport/pvs 扩展）**之后**调用。
     pub fn export_glb_with_pakfile_models(&mut self) -> Result<Vec<u8>, JsValue> {
         let bsp = self
             .bsp

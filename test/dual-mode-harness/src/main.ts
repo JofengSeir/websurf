@@ -16,12 +16,56 @@
 
 import { keysToMask, SHARED_BUFFER_SIZE, TestShared } from './shared-state.js';
 import { BspProcessor, initSync } from '../pkg/websurf_test_wasm.js';
-import type { TraceState } from '../../../src/ts-shared/trace/trace-types.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement | null;
 const rateLabel = document.getElementById('rateLabel') as HTMLElement | null;
 const bspFileInput = document.getElementById('bspFile') as HTMLInputElement | null;
 const bspStatusEl = document.getElementById('bspStatus') as HTMLElement | null;
+
+// ── 鼠标输入优化（与 game/debug 的 MouseBuffer + PointerLock 对齐）──────────
+/** 单次 mousemove 事件增量削平阈值（像素）。Pointer Lock 初始跳变由 discardNext 处理，
+ *  这里只做驱动异常/浏览器事件合并的兜底 CLAMP（保留方向与大部分量级）。 */
+const MOUSE_MAX_DELTA = 1000;
+/** Pointer Lock 变化后丢弃下一个 mousemove（cs-movement discardNextMouse 语义）。 */
+let discardNextMouse = false;
+
+/** 绝对削平：将增量限制在 ±MOUSE_MAX_DELTA，保留符号（方向）。 */
+function clampMouseDelta(v: number): number {
+  return Math.max(-MOUSE_MAX_DELTA, Math.min(MOUSE_MAX_DELTA, v));
+}
+
+/** requestPointerLock 运行时签名：现代 Chromium 支持 options 并返回 Promise。 */
+type RequestPointerLockFn = (
+  options?: { unadjustedMovement?: boolean },
+) => Promise<void> | void;
+
+/**
+ * 请求 Pointer Lock：优先使用 `{ unadjustedMovement: true }` 禁用 OS 鼠标加速；
+ * 不支持时降级为普通锁定（与 game/src/input/pointer-lock.ts 同策略）。
+ */
+function requestPointerLockWithUnadjusted(target: HTMLElement): void {
+  const fn = target.requestPointerLock as unknown as RequestPointerLockFn;
+  try {
+    const result: unknown = fn.call(target, { unadjustedMovement: true });
+    if (result && typeof (result as Promise<void>).then === 'function') {
+      (result as Promise<void>).catch(() => {
+        console.warn('[main] unadjustedMovement 不可用，降级为普通锁定');
+        try {
+          fn.call(target);
+        } catch {
+          /* 忽略降级失败 */
+        }
+      });
+    }
+  } catch {
+    // 旧浏览器不接受 options 参数：直接普通锁定
+    try {
+      fn.call(target);
+    } catch {
+      /* 忽略 */
+    }
+  }
+}
 
 if (!canvas) {
   throw new Error('canvas#game 未找到');
@@ -61,7 +105,7 @@ modeNotice.className = 'hint';
 modeNotice.style.color = useSab ? '#8ab4f8' : '#c9a05c';
 modeNotice.textContent = useSab
   ? '通道：共享内存（SAB）'
-  : '通道：消息回退（无 SharedArrayBuffer，postMessage 等价传输）';
+  : '通道：消息回退（无跨源隔离或 SharedArrayBuffer 不可用，postMessage 等价传输）';
 document.getElementById('hud')?.appendChild(modeNotice);
 
 // ── WorkerB 状态摘要（每秒一次）→ DOM HUD（渲染 HUD 移出 Worker：OffscreenCanvas 仅一个
@@ -120,8 +164,10 @@ shared.writeTickRate(DEFAULT_RATE);
 setActiveRate(DEFAULT_RATE);
 
 // ── BSP 地图加载（文件选择 → 主线程解析 → WorkerA world-json / WorkerB glb）──
-// 与 game handleLoadBsp 同管线精简：借用导出（brush/模型碰撞/teleport/spawn）必须在
+// 与 game handleLoadBsp 同管线精简：借用导出（brush/模型碰撞/spawn）必须在
 // export_glb_with_pakfile_models（消费 Bsp 实例）之前完成。
+// 最小集：只导出核心移动所需数据——brush 碰撞、模型碰撞（.phy 优先/可视网格回退）、
+// 出生点、GLB（基本几何+材质纹理+模型）。不导出 teleport/PVS（检测/传送区域等非核心）。
 const BRUSH_FILTER_JSON = JSON.stringify({
   include_ladder: true,
   include_solid: true,
@@ -168,10 +214,7 @@ async function loadBsp(file: File): Promise<void> {
     if ((JSON.parse(triJson) as unknown[]).length === 0) {
       triJson = proc.export_model_tri_colliders();
     }
-    const teleportJson = proc.parse_teleports();
     const spawnJson = proc.parse_spawn_points();
-    // PVS（借用导出，须在 GLB 之前——export_glb_with_pakfile_models 消费 Bsp 实例）
-    const pvsJson = proc.parse_pvs_data();
 
     // 首个出生点（primary 优先）：origin 已 Y-up，yaw 用 cs 转换
     const spawnData = JSON.parse(spawnJson) as {
@@ -184,19 +227,18 @@ async function loadBsp(file: File): Promise<void> {
       ? [primary.origin[0], primary.origin[1], primary.origin[2], bspYawToCsYaw(primary.angles[1])]
       : [0, 100, 0, 0];
 
-    workerA.postMessage({ type: 'world-json', brushJson, triJson, teleportJson, spawn });
-
-    // PVS → WorkerB（先于 GLB 发送——消息同信道保序，GLB 挂载后即消费剔除）
-    workerB.postMessage({ type: 'pvs', pvsJson });
+    // 传送区域明确排除：WorkerA 内部使用空 teleport report，确保物理世界不注册任何 trigger/destination
+    workerA.postMessage({ type: 'world-json', brushJson, triJson, spawn });
 
     // GLB（含 PAKFILE 模型）→ WorkerB 渲染；transfer 零拷贝
     const glb = proc.export_glb_with_pakfile_models();
     const glbBuffer = glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength);
+    const glbSize = glbBuffer.byteLength; // transfer 前保存，transfer 后 byteLength 会变 0
     workerB.postMessage({ type: 'glb', bytes: glbBuffer }, [glbBuffer]);
 
     setBspStatus(
       `${file.name}：${meta.magic ?? 'VBSP'}，${meta.num_brushes ?? 0} brushes，` +
-        `${spawnPoints.length} 出生点，GLB ${Math.round(glbBuffer.byteLength / 1024)} KB`,
+        `${spawnPoints.length} 出生点，GLB ${Math.round(glbSize / 1024)} KB`,
     );
   } catch (e) {
     setBspStatus(`BSP 加载失败：${e instanceof Error ? e.message : String(e)}`);
@@ -227,13 +269,19 @@ const MOVEMENT_CODES = new Map<string, keyof typeof keyState>([
   ['Space', 'jump'],
 ]);
 
-// 指针锁定：点击画布请求（浏览器要求用户手势）
+// 指针锁定：点击画布请求（浏览器要求用户手势；优先 unadjustedMovement 禁用 OS 加速）
 canvas.addEventListener('click', () => {
-  if (!locked) void canvas.requestPointerLock();
+  if (!locked) requestPointerLockWithUnadjusted(canvas);
+});
+
+document.addEventListener('pointerlockerror', () => {
+  console.warn('[main] Pointer Lock 请求失败');
 });
 
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
+  // Pointer Lock 状态变化后丢弃下一个 mousemove（初始跳变通常 2000-5000+ px）
+  discardNextMouse = true;
   if (!locked) {
     // 退锁：清残留输入，防 ESC 前最后输入/按住键残留
     mouseDx = 0;
@@ -243,10 +291,16 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 // 鼠标增量 → 本地累积（仅锁定时；mousemove 高频事件不触碰 SAB）
+// 每个事件先做 discardNext + 绝对削平（CLAMP），与 game MouseBuffer 对齐；
+// 完整帧增量仍由 rAF 一次性写入 SAB，但不再在 WorkerA 的 1ms 子步里被截断。
 window.addEventListener('mousemove', (e) => {
   if (!locked) return;
-  mouseDx += e.movementX;
-  mouseDy += e.movementY;
+  if (discardNextMouse) {
+    discardNextMouse = false;
+    return;
+  }
+  mouseDx += clampMouseDelta(e.movementX);
+  mouseDy += clampMouseDelta(e.movementY);
 });
 
 // 键盘：WASD/空格 → 键位状态；R → respawn 消息（阶段4）
@@ -291,84 +345,6 @@ document.querySelectorAll<HTMLButtonElement>('#difficulty button[data-rate]').fo
     setActiveRate(rate);
   });
 });
-
-// ── 视野 FOV：滑块 → WorkerB set-fov 消息（相机透视矩阵即时更新；默认 73.6）──
-const fovRange = document.getElementById('fovRange') as HTMLInputElement | null;
-const fovVal = document.getElementById('fovVal') as HTMLElement | null;
-fovRange?.addEventListener('input', () => {
-  const fov = Number(fovRange.value);
-  if (fovVal) fovVal.textContent = String(fov);
-  workerB.postMessage({ type: 'set-fov', fov });
-});
-// 初始化同步：HTML 滑条为 UI 源头，首帧即把默认 73.6 应用到 WorkerB
-// （与 worker-b.ts 默认值一致，双保险防初始态不一致）
-if (fovRange) {
-  workerB.postMessage({ type: 'set-fov', fov: Number(fovRange.value) });
-}
-
-// ── 路径记录（trace）：按钮状态机 **开始 → 保存 → 删除 → 开始** 循环——
-//    开始：清空 + 开启记录（WorkerA 采样节点）；保存：停止记录（路径保留显示）；
-//    删除：清空路径线。节点经 main 转发 WorkerB → **3D 场景中显示两条空间路径线**
-//    （绿 = 无限制基准，红 = tick 实际）。仅记录时 WorkerA 发送节点（防内存溢出）──
-const traceBtn = document.getElementById('traceBtn') as HTMLButtonElement | null;
-const TRACE_MAX_NODES = 2000;
-/** 记录状态机（公共 TraceState：off → recording → saved → off）。 */
-let traceState: TraceState = 'off';
-/** WorkerA 节点滚动窗口上限（转发前截断，防内存溢出）。 */
-const traceNodes: { base: { x: number; y: number; z: number }; tick: { x: number; y: number; z: number } }[] = [];
-
-/** 按钮切换（开始 → 保存 → 删除 → 开始 循环）。 */
-traceBtn?.addEventListener('click', () => {
-  if (traceState === 'off') {
-    // 开始：清空旧路径 + 开启记录
-    workerB.postMessage({ type: 'trace-clear' });
-    traceNodes.length = 0;
-    traceSyncCount = 0;
-    workerA.postMessage({ type: 'trace', enabled: true });
-    traceState = 'recording';
-    traceBtn.textContent = '保存';
-  } else if (traceState === 'recording') {
-    // 保存：停止记录（WorkerA 停止采样发送），路径保留在 3D 场景中显示
-    workerA.postMessage({ type: 'trace', enabled: false });
-    traceState = 'saved';
-    traceBtn.textContent = '删除';
-  } else {
-    // 删除：清空路径线（3D 场景）→ 回到初始
-    workerB.postMessage({ type: 'trace-clear' });
-    traceNodes.length = 0;
-    traceState = 'off';
-    traceBtn.textContent = '开始';
-  }
-});
-
-// WorkerA trace-data 消息：累积节点（滚动窗口上限）→ 转发 WorkerB 3D 路径线
-// trace-sync：兜底事件计数（图例显示）
-let traceSyncCount = 0;
-workerA.onmessage = (e: MessageEvent<{ type: string; baseX?: number; baseY?: number; baseZ?: number; tickX?: number; tickY?: number; tickZ?: number; dist?: number }>) => {
-  const msg = e.data;
-  if (!msg) return;
-  if (msg.type === 'trace-sync') {
-    // 位置兜底触发（physBase 拉回 phys）——拟合良好时应仅偶发
-    traceSyncCount++;
-    const legend = document.getElementById('traceLegend');
-    if (legend) legend.textContent = `兜底 ×${traceSyncCount}`;
-    return;
-  }
-  if (msg.type !== 'trace-data') return;
-  // 仅记录中转发（保存/删除后忽略残留消息）
-  if (traceState !== 'recording') return;
-  traceNodes.push({
-    base: { x: msg.baseX!, y: msg.baseY!, z: msg.baseZ! },
-    tick: { x: msg.tickX!, y: msg.tickY!, z: msg.tickZ! },
-  });
-  if (traceNodes.length > TRACE_MAX_NODES) traceNodes.shift();
-  // 转发 WorkerB → 3D 场景路径线更新
-  workerB.postMessage({
-    type: 'trace-point',
-    baseX: msg.baseX!, baseY: msg.baseY!, baseZ: msg.baseZ!,
-    tickX: msg.tickX!, tickY: msg.tickY!, tickZ: msg.tickZ!,
-  });
-};
 
 // ── 主线程 rAF 循环（阶段1）：输入转发 + wake（**RENDER_WAKEUP = WorkerB 渲染主驱动**：
 //    主线程 rAF 与浏览器合成器/vsync 同相 → WorkerB 每帧信号渲染一次，呈现平滑；

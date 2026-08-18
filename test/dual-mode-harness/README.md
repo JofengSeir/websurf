@@ -20,11 +20,11 @@
   ├─ wake()：双槽 store+notify —— WAKEUP(WorkerA 物理背压) + RENDER_WAKEUP(WorkerB 渲染帧信号)
   │    ★ RENDER_WAKEUP = 渲染主驱动（rAF 与 vsync 同相 → 呈现平滑）；WorkerA 发布不 notify
   ├─ 难度按钮（关/32/64/128/256/1000，默认 64）→ writeTickRate（仅 store，无 notify）
-  ├─ BSP 加载：文件选择 → BspProcessor 导出（brush/tri/teleport/spawn/pvs/GLB）→ 双 Worker 分发
-  └─ R 重生 → postMessage({type:'respawn'})；trace 按钮 UI（TraceState 状态机，见 §四）
+  ├─ BSP 加载：文件选择 → BspProcessor 导出（brush/tri/spawn/GLB，最小集不含 teleport/PVS）→ 双 Worker 分发
+  └─ R 重生 → postMessage({type:'respawn'})
 
 WorkerA (src/worker-a.ts) — 双模物理核心
-  ├─ 模式A（无限制真理源）：phys = 1ms 固定子步 + 实时输入（consumeInput ±1000）
+  ├─ 模式A（无限制真理源）：phys = 1ms 固定子步 + 实时输入（consumeInput 完整增量直通）
   │    位置/角度只由模式A 推进；共享状态槽唯一写入者（WorkerB 渲染参数唯一来源）
   ├─ 模式B（tick 权威速度线）：tickPhys = 第二个 PhysWorld，只走 tickDt 步长
   │    每 tick 边界：键位 = peekKeys() 快照 + 鼠标 = 模式A 消耗的窗口累积
@@ -41,8 +41,8 @@ WorkerB (src/worker-b.ts) — three.js 第一人称渲染（帧信号驱动）
   │    主驱动 = 主线程 rAF 帧信号（vsync 对齐，每 rAF 一帧）；50ms 超时仅作停摆兜底
   ├─ 无节流（SAB 模式）：每次唤醒采样 readState；V 未变不重绘（重复唤醒零成本）；
   │    例外：消息回退模式（无 SAB）无数据时 100ms 低频自检（数据到达立即触发）
-  ├─ 本地副本只被 readState 更新（渲染参数零污染）；PVS 剔除（复刻 game pvs-manager）
-  └─ status 摘要每秒回传 main → DOM HUD；trace 3D 路径线 UI（TraceRenderer，见 §四）
+  ├─ 本地副本只被 readState 更新（渲染参数零污染）；仅距离 LOD（最小集不启用 PVS）
+  └─ status 摘要每秒回传 main → DOM HUD
 
 共享状态 (src/shared-state.ts)
   └─ SAB 192B：TICK_RATE / WAKEUP / 输入槽(dxAcc,dyAcc BigInt64, keysMask) / RENDER_WAKEUP
@@ -67,18 +67,18 @@ WorkerB (src/worker-b.ts) — three.js 第一人称渲染（帧信号驱动）
 
 ```
 test/dual-mode-harness/
-  index.html          入口（canvas + file input 加载 .bsp + 难度按钮[关/32/64/128/256/1000] + HUD + trace 按钮）
+  index.html          入口（canvas + file input 加载 .bsp + 难度按钮[关/32/64/128/256/1000] + HUD）
   package.json        构建脚本（build:wasm / build:ts / build / build:dist，依赖 three）
   crates/wasm/src/lib.rs  薄导出层（path 依赖共享 src/phys + src/wasm-core：PhysWorld +
-                       BspProcessor 最小导出集：metadata/export_brushes_planes/模型碰撞/parse_teleports/
-                       parse_spawn_points/parse_pvs_data/export_glb_with_pakfile_models——
-                       **未导出 mosaic/缺失纹理/默认纹理包**：test 无画质切换与回退）
+                       BspProcessor 导出集：metadata/export_brushes_planes/模型碰撞/parse_spawn_points/
+                       export_glb_with_pakfile_models——运行时最小集；parse_teleports/parse_pvs_data
+                       WASM API 保留但主线程不调用；**未导出 mosaic/缺失纹理/默认纹理包**）
   pkg/                wasm-pack 产物（gitignored）
   src/
     shared-state.ts   SAB 布局与读写协议 + peekKeys + 消息回退模式（msg-main/msg-physics/msg-render）
     main.ts           主线程：前置检测 → 输入转发 + wake()（RENDER_WAKEUP = 渲染主驱动）→ BSP 分发 → respawn
     worker-a.ts       WorkerA 双模物理核心（先 tick 计算 → 后无限制计算）
-    worker-b.ts       WorkerB 帧信号驱动渲染（OffscreenCanvas + PVS + 50ms 超时兜底）
+    worker-b.ts       WorkerB 帧信号驱动渲染（OffscreenCanvas + 距离 LOD + 50ms 超时兜底）
   scripts/
     build-dist.mjs    构建 dist（multi 5 文件：app/worker-a/worker-b/wasm/index.html；test 无 single 内嵌模式）
     phys-smoke.mjs    node 冒烟测试（**191/191 PASS**，2026-08-13 实测；含 ModeAB 双实例镜像、分叉兜底锚定回归、帧信号驱动、消息回退、PVS）
@@ -86,6 +86,7 @@ test/dual-mode-harness/
     race-wakeup.mjs   唤醒竞争测试（WAKEUP/RENDER_WAKEUP 双槽隔离）
     trace-verify.mjs  trace 公共链路验证（Chrome headless + CDP：开始→保存→无错误）
     tmp-dual-compare.mjs  test 双模 vs game 双线数据对照（关键指标 <15%）
+  docs/                 源码解析文档（整体架构 / 地图解析 / 运行时序图）
 ```
 
 > 注：`phys-smoke.mjs` 在 node 环境复制镜像 TestShared / ModeAB（核心逻辑与
@@ -95,11 +96,9 @@ test/dual-mode-harness/
 
 ## 四、已知边界与死代码（如实记录）
 
-1. **trace 双线 UI 已恢复可用**：commit 878515f（2026-08-12）新增 `src/ts-shared/trace/` 公共模块；
-   `worker-a.ts` 现导入 `TraceRecorder`（`../../../src/ts-shared/trace/trace-recorder.js`）并处理
-   `trace` 消息（约 L42/L116/L346），采样 phys（无限制基准）与 tickPhys（tick 实际）后发
-   trace-data；`main.ts` 导入 `TraceState` 转发 trace-point；`worker-b.ts` 用 `TraceRenderer`
-   渲染双线。（原 d1767c0 的"死代码"状态已被此提交修正。）
+1. **trace/FOV 已从运行时移除**（2026-08 最小集调整）：`main.ts` / `worker-a.ts` / `worker-b.ts` /
+   `index.html` 不再包含 trace 路径线与 FOV 滑块；`src/ts-shared/trace/` 公共模块与
+   `scripts/trace-verify.mjs` 仍保留供独立验证使用，但不属于运行时最小集。
 2. **sustained surf 稳态速度 tick 无关**（正确物理，非缺陷）；tick 难度载体 = 输入采样相位
    与离散施加点。
 3. **稀疏轮次输入滞后**：单轮 ≥2 个 tick 边界时 tick 实例输入 ≤1 窗口滞后，有界自愈。
@@ -133,4 +132,4 @@ node scripts/race-wakeup.mjs  # 唤醒竞争
 
 **操作**：点击画布锁定指针 → WASD/方向键移动、空格跳、鼠标视角；R 重生；难度按钮切换
 关/32/64/128/256/1000（仅 store TICK_RATE，WorkerA 下轮自动识别）；「加载 BSP 地图」选择
-`.bsp` 文件（BSP 是唯一玩法，主线程解析 → world-json/GLB/PVS 分发双 Worker）。
+`.bsp` 文件（BSP 是唯一玩法，主线程解析 → world-json/GLB 分发双 Worker；最小集不含 teleport/PVS）。
