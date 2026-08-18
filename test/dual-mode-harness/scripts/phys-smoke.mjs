@@ -26,7 +26,8 @@
  *   wasm→JS 对象构造，GC 压力减半）
  * - tick_into 零分配热路径：tick_into → state_out_ptr 的 Float64Array 视图直读 8 标量
  *   → writeStateRaw——每子步零 JS 对象分配（与 tick 同语义，state_out 与 state() 一致）
- * - 输入限幅：consumeInput(clamp) 超限值被截断（±1000 防穿墙）
+ * - 输入限幅：consumeInput(maxDelta) 仍支持按需截断；worker-a 当前使用默认无限幅
+ *   （主线程已按单次 mousemove 事件 CLAMP，完整帧增量直通不再丢量）
  * - 渲染采样与重绘（模拟 WorkerB 最终时序）：本地副本唯一参数源 = readState；
  *   仅状态更新时重绘（V 未变不提交 Draw——高频屏不重复渲染相同状态）；去重粒度 =
  *   版本号而非状态值（V 递增但值相同仍重绘——加载期行为实证）
@@ -363,7 +364,7 @@ function simulateWorkerARound(deltaMs, acc) {
     while (acc >= RENDER_DT && ticks < MAX_STEPS_PER_ROUND) {
       acc -= RENDER_DT;
       ticks++;
-      // 真实循环：consumeInput(±1000) → phys.tick(1ms)（返回值直接写状态槽）→ V add
+      // 真实循环：consumeInput()（完整帧增量直通，主线程已按事件削平）→ phys.tick(1ms)（返回值直接写状态槽）→ V add
     }
     if (acc > MAX_ACC) acc = MAX_ACC; // 仅封顶，不丢弃——时间不丢失
   }
@@ -439,7 +440,7 @@ class ModeAB {
   takeReal() {
     if (this.shared) {
       if (this.shared.mode === 'sab') this.shared.addInput(this.realDx, this.realDy, this.realKeys);
-      return this.shared.consumeInput(1000);
+      return this.shared.consumeInput(); // 镜像 worker-a：完整帧增量直通，不在 1ms 子步削平
     }
     return { dx: this.realDx, dy: this.realDy, keysMask: this.realKeys };
   }

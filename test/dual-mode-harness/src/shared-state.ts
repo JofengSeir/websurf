@@ -23,11 +23,12 @@
  *   WAKEUP 槽承载阶段1 物理背压唤醒：wake() = store(WAKEUP,1) + notify(WAKEUP,1)
  *   （WorkerA 专用，背压 wait 挂起其上）；
  *   RENDER_WAKEUP 槽承载渲染唤醒：**主驱动 = 主线程 rAF 帧信号**（wake() 的
- *   store+notify——vsync 对齐，渲染节奏 = 显示器刷新）；**WorkerA 发布不 notify**
+ *   add+notify——计数语义，vsync 对齐，渲染节奏 = 显示器刷新）；**WorkerA 发布不 notify**
  *   （1kHz 随机相位唤醒 → 渲染/呈现时间不规则 → 观感抖动；醒后只读最新槽）；
  *   主线程停摆 → WorkerB 超时兜底自驱；两槽分离——物理背压与渲染帧对齐
  *   互不干扰（WorkerA 抢唤醒不再拖延渲染帧边界）
- * - 输入槽：主线程 Atomics.add 累加（无上限），WorkerA consumeInput(maxDelta) CAS 清零消费 + 限幅
+ * - 输入槽：主线程 Atomics.add 累加（无上限），WorkerA consumeInput(maxDelta?) CAS 清零消费；
+ *   默认不限幅（主线程已按单次 mousemove 事件 CLAMP），调用方可按需传 maxDelta 限幅
  * - 状态槽双缓冲：writeState/writeStateRaw 写"当前 V 的另一槽"（S[V&1 ^ 1]，不覆盖读槽）→ Atomics.add(V,1)；
  *   readState acquire 读 V，V 未变返回 null（非阻塞采样），否则读当前槽 S[V&1]（double-check 防撕裂）
  *
@@ -37,7 +38,7 @@
  *   {type:'shared-tick-rate'} 给 WorkerA；wake() 无操作（消息模式双 Worker 均自驱）
  * - msg-physics（WorkerA）：consumeInput 读本地累加（onInputMessage 填充）；
  *   writeStateRaw → 本地 V++ → 投递 {type:'shared-state'} 给 WorkerB（直连 MessageChannel）；
- *   waitWakeup 立即超时返回 false（无阻塞原语，MessageChannel 自投递续环即自驱）
+ *   waitWakeup 立即超时返回 false（无阻塞原语，WorkerA 以 setTimeout(loop,0) 自驱）
  * - msg-render（WorkerB）：readState 返回最近一条 shared-state（onStateMessage 缓存），
  *   V 未变返回 null（重绘判定与 SAB 模式一致）；waitRenderWakeup 立即返回 false
  * 语义等价性：V 版本/仅状态更新重绘/输入限幅/难度识别全部保留，仅传输介质不同。
@@ -280,7 +281,7 @@ export class TestShared {
     Atomics.store(this.i32, I_TICK_RATE, rate);
   }
 
-  /** 读当前 TICK_RATE（WorkerA 每轮循环 / WorkerB 抽帧间隔计算）。 */
+  /** 读当前 TICK_RATE（WorkerA 每轮循环识别难度）。 */
   readTickRate(): number {
     if (this.mode === 'msg-physics') {
       return this.msgTickRate; // 主线程 shared-tick-rate 消息已缓存
@@ -405,7 +406,9 @@ export class TestShared {
   /**
    * 消耗输入（WorkerA 每次 1ms 子步前调用）：CAS 清零累加器——
    * 读当前值 → Atomics.compareExchange 为 0 直到成功，返回累加增量。
-   * @param maxDelta 可选限幅（调用方传入，如 ±1000 防穿墙）；缺省 Infinity = 不限幅。
+   * @param maxDelta 可选限幅（调用方可按需传入）；缺省 Infinity = 不限幅。
+   *   当前 worker-a 使用缺省值：主线程已按单次 mousemove 事件 CLAMP，这里必须
+   *   消费完整帧增量，避免快速甩动被截断。
    */
   consumeInput(maxDelta: number = Infinity): InputSample {
     if (this.mode === 'msg-physics') {
@@ -499,8 +502,8 @@ export class TestShared {
     f[base + F_YAW] = yaw;
     f[base + F_PITCH] = pitch;
     const v = Atomics.add(this.i32, I_V, 1) + 1;
-    // 渲染唤醒移交**主线程 rAF 帧信号**（wake() 的 RENDER_WAKEUP store+notify——
-    // vsync 对齐：渲染节奏 = 显示器刷新，呈现平滑）。发布**不再 notify**
+    // 渲染唤醒移交**主线程 rAF 帧信号**（wake() 的 RENDER_WAKEUP add+notify——
+    // 计数语义，vsync 对齐：渲染节奏 = 显示器刷新，呈现平滑）。发布**不再 notify**
     // RENDER_WAKEUP：1kHz 随机相位唤醒 → 渲染完成时刻与显示器 BeginFrame 错位 →
     // 画面呈现时间不规则（"60 f/s 却观感 ~20f"的抖动根因）；醒后 WorkerB 只读
     // 最新槽（V 未变不重绘）。主线程停摆时由 WorkerB 超时兜底自驱。
