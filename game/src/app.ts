@@ -39,6 +39,12 @@ const dom = {
   nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
   nearRatioRange: document.getElementById('nearRatio') as HTMLInputElement | null,
   nearRatioNum: document.getElementById('nearRatioNum') as HTMLInputElement | null,
+  // 地图加载进度覆盖层
+  loadingOverlay: document.getElementById('loadingOverlay') as HTMLElement | null,
+  loadingSub: document.getElementById('loadingSub') as HTMLElement | null,
+  loadingFill: document.getElementById('loadingFill') as HTMLElement | null,
+  loadingStage: document.getElementById('loadingStage') as HTMLElement | null,
+  loadingPct: document.getElementById('loadingPct') as HTMLElement | null,
 } as const;
 
 const keyboard = new KeyboardInput(loadKeymap());
@@ -382,19 +388,23 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   currentMapName = fileName.replace(/\.bsp$/i, '');
   savePointStore.load(currentMapName);
   panel?.renderSavePoints(savePointStore.all());
+  // 读取地图后退出面板，改用加载进度覆盖层
+  panel?.hide();
   // 主线程 wasm 就绪（decompress_mtz 依赖；失败则继续，回退降级为占位色）
   await mainWasmReady.catch(() => undefined);
   renderer.disposeScene();
   sceneReady = false;
-  panel?.updateVisibility(false);
   setStatus(`正在加载 ${fileName}（主线程解析 BSP）...`, '');
+  showLoading(fileName);
   await new Promise((r) => setTimeout(r, 0)); // 让 UI 先更新（解析可能耗时）
   try {
     const bundle = await buildWorldBundle(new BspProcessor(new Uint8Array(bytes)), {
       decompressMtz: decompress_mtz,
+      onProgress: (stage) => advanceLoading(stage),
     });
 
     // 渲染场景（GLB + PVS + spawn）
+    advanceLoading('构建渲染场景 (GLB)');
     await renderer.loadScene({
       type: 'scene-data',
       glb: bundle.glbBytes,
@@ -409,6 +419,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
     });
 
     // 主线程物理世界（渲染线）
+    advanceLoading('构建物理世界');
     renderer.buildPredictionWorld({
       brushJson: bundle.brushJson,
       triJson: bundle.triJson,
@@ -451,11 +462,13 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       dom.spawnSelect.disabled = false;
     }
     if (dom.respawnBtn) dom.respawnBtn.disabled = false;
-    // 面板状态机：场景就绪 → 面板隐藏（等待锁定）
+    // 加载完成：隐藏进度覆盖层（面板状态机：场景就绪 → 面板隐藏，等待锁定）
+    hideLoading();
     panel?.updateVisibility(true);
   } catch (err) {
     setError(`BSP 解析失败: ${err instanceof Error ? err.message : String(err)}`);
     renderer.disposeScene();
+    hideLoading();
   }
 }
 
@@ -506,6 +519,68 @@ function setStatus(msg: string, cls: 'success' | 'error' | ''): void {
     dom.statusEl.textContent = msg;
     dom.statusEl.className = cls ? `status ${cls}` : 'status';
   }
+}
+
+// ---------------------------------------------------------------------------
+// 地图加载进度覆盖层
+// ---------------------------------------------------------------------------
+
+/** 加载过程阶段 → 进度百分比（解析/导出占大头；GLB 加载与物理构建收尾）。 */
+const LOAD_STAGE_PCT: Record<string, number> = {
+  '正在加载地图': 0,
+  'WASM 解析中': 8,
+  '解析出生点/传送点/PVS': 22,
+  '导出碰撞体': 40,
+  '导出 GLB（含 PAKFILE 模型）': 58,
+  '构建渲染场景 (GLB)': 78,
+  '构建物理世界': 92,
+};
+
+let loadingFillEl: HTMLElement | null = null;
+let loadingStageEl: HTMLElement | null = null;
+let loadingPctEl: HTMLElement | null = null;
+let loadingSubEl: HTMLElement | null = null;
+let loadingOverlayEl: HTMLElement | null = null;
+
+/** 缓存加载覆盖层 DOM（首次调用时）。 */
+function ensureLoadingEls(): void {
+  if (loadingOverlayEl) return;
+  loadingOverlayEl = dom.loadingOverlay;
+  loadingSubEl = dom.loadingSub;
+  loadingFillEl = dom.loadingFill;
+  loadingStageEl = dom.loadingStage;
+  loadingPctEl = dom.loadingPct;
+}
+
+/** 显示加载覆盖层（读取地图后退出面板，改为展示进度）。 */
+function showLoading(mapName: string): void {
+  ensureLoadingEls();
+  if (loadingOverlayEl) loadingOverlayEl.classList.add('show');
+  if (loadingFillEl) loadingFillEl.style.width = '0%';
+  if (loadingSubEl) loadingSubEl.textContent = mapName ? `加载 ${mapName}…` : '加载地图…';
+  updateLoadingProgress('正在加载地图', 0);
+}
+
+/** 更新进度条（阶段名 + 百分比 0-100）。 */
+function updateLoadingProgress(stage: string, pct: number): void {
+  ensureLoadingEls();
+  const clamped = Math.max(0, Math.min(100, pct));
+  if (loadingFillEl) loadingFillEl.style.width = `${clamped}%`;
+  if (loadingStageEl) loadingStageEl.textContent = stage;
+  if (loadingPctEl) loadingPctEl.textContent = `${Math.round(clamped)}%`;
+}
+
+/** 按阶段名推进进度（映射到全局百分比；阶段名不识别时保持不动）。 */
+function advanceLoading(stage: string): void {
+  const pct = LOAD_STAGE_PCT[stage];
+  if (pct !== undefined) updateLoadingProgress(stage, pct);
+  else if (loadingStageEl) loadingStageEl.textContent = stage;
+}
+
+/** 隐藏加载覆盖层（加载完成或失败）。 */
+function hideLoading(): void {
+  ensureLoadingEls();
+  if (loadingOverlayEl) loadingOverlayEl.classList.remove('show');
 }
 
 function setError(msg: string): void {

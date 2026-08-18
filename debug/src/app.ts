@@ -634,9 +634,16 @@ function bindInput(canvas: HTMLCanvasElement): void {
 /** 面板偏好持久化键（input/hud/debug/lod/player 子集；物理参数由 Settings 另管）。 */
 const UI_PREFS_KEY = 'vbsp:uiPrefs';
 
+/**
+ * UI 偏好结构版本：默认值变更时递增，加载时旧版本 ≠ 当前 → 丢弃旧持久化
+ * （新默认覆盖旧设置），避免旧配置长期残留。
+ */
+const UI_PREFS_VERSION = 2;
+
 /** 收集面板可调偏好（config 子集，序列化用）。 */
 function collectUiPrefs(): Record<string, unknown> {
 	return {
+		__version: UI_PREFS_VERSION,
 		input: { ...config.input },
 		hud: { ...config.hud, crosshair: { ...config.hud.crosshair } },
 		debug: { ...config.debug },
@@ -655,12 +662,21 @@ function saveUiPrefs(): void {
 	}
 }
 
-/** 加载面板偏好 → 合并到 config + 控件同步 + 双端发送。 */
+/** 加载面板偏好 → 合并到 config + 控件同步 + 双端发送。
+ * 版本不匹配时：丢弃旧持久化（新默认值生效）并立即以新默认写回。 */
 function loadUiPrefs(): void {
 	try {
 		const raw = localStorage.getItem(UI_PREFS_KEY);
 		if (!raw) return;
 		const prefs = JSON.parse(raw) as Record<string, unknown>;
+		if (prefs.__version !== UI_PREFS_VERSION) {
+			console.warn(
+				`[app] UI 偏好版本 ${String(prefs.__version)} → ${UI_PREFS_VERSION}，` +
+					'丢弃旧设置，采用新默认值。',
+			);
+			saveUiPrefs();
+			return;
+		}
 		const merge = (section: keyof RuntimeConfig, patch: unknown): void => {
 			if (!patch || typeof patch !== 'object') return;
 			applyConfigPatch(config, section, patch as Record<string, unknown>);

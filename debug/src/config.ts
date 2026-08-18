@@ -158,7 +158,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     groundAngle: (30 * Math.PI) / 180,
     slideAngle: (70 * Math.PI) / 180,
     tickRate: 64,
-    teleportGateTicks: 1,
+    teleportGateTicks: 3,
   },
   player: {
     radius: 16,
