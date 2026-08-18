@@ -560,6 +560,14 @@
               <label title="可视网格线框显示可视距离（HU）">可视网格距离</label>
               <input type="range" id="visViewDistance" min="128" max="16384" step="64" value="1024" />
               <div class="val"><input type="number" id="visViewDistanceNum" class="param-num" min="128" max="16384" step="any" value="1024" /></div>
+
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showChamfers" />
+                <label for="showChamfers" title="brush 运行时生成的棱边 chamfer（切角）平面线框（黄色）：凸包棱线外侧的微小切角，高速过坡顶/扫角时平滑引导">显示chamfer切角面</label>
+              </div>
+              <label title="chamfer 切角平面线框显示可视距离（HU）：0 = 全量显示">chamfer 可视距离</label>
+              <input type="range" id="chamferViewDistance" min="0" max="16384" step="64" value="512" />
+              <div class="val"><input type="number" id="chamferViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="512" /></div>
             </div>
           </div>
         </details>

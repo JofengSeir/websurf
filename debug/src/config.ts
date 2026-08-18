@@ -115,6 +115,10 @@ export interface DebugConfig {
   showVis: boolean;
   /** 可视网格线框显示可视距离（HU）。 */
   visViewDistance: number;
+  /** 显示 brush 运行时生成的棱边 chamfer（切角）平面（黄色，排查幻影碰撞/坡顶入坡用）。 */
+  showChamfers: boolean;
+  /** chamfer 切角平面显示可视距离（HU，0 = 全量）。 */
+  chamferViewDistance: number;
   /** 准星射线检测（hover 查看模型/实体平面/触发面信息）。 */
   showPlaneInfo: boolean;
 }
@@ -219,6 +223,8 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     phyViewDistance: 4096,
     showVis: false,
     visViewDistance: 1024,
+    showChamfers: false,
+    chamferViewDistance: 512,
     showPlaneInfo: false,
   },
   texture: {

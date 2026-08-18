@@ -9,8 +9,10 @@ declare module '*/pkg/websurf_wasm.js' {
     module_or_path?: string | URL | Request | ArrayBuffer | Uint8Array,
   ): Promise<unknown>;
 
-  /** 同步初始化（dist 内嵌模式：传入 { module: ArrayBuffer }）。 */
-  export function initSync(module: { module: ArrayBuffer }): unknown;
+  /** 同步初始化（wasm 字节 或 `{ module: bytes }` 两种形态均支持，与 pkg 生成的 initSync 一致）。 */
+  export function initSync(
+    module: ArrayBuffer | Uint8Array | { module: ArrayBuffer | Uint8Array },
+  ): unknown;
 
   /** 仅解析 BSP 元数据（不持有 Bsp 实例）。返回 BspMetadata JSON 字符串。 */
   export function parse_bsp(data: Uint8Array | ArrayBuffer): string;
@@ -24,6 +26,10 @@ declare module '*/pkg/websurf_wasm.js' {
     export_glb(): Uint8Array;
     /** 自动从 BSP PAKFILE lump 提取模型并合并进地图 GLB（消费内部 Bsp 实例） */
     export_glb_with_pakfile_models(): Uint8Array;
+    /** 带默认纹理包回退的 GLB 导出（缺失材质 → 低清纹理，消费内部 Bsp 实例） */
+    export_glb_with_pakfile_models_with_defaults(defaultsJson: string): Uint8Array;
+    /** 画质切换 manifest JSON（消费前调用） */
+    export_mosaic_manifest(): string;
     /** 导出 PAKFILE 内嵌模型的「可视网格」三角形碰撞 JSON（零转化，与 GLB 显示逐位一致；消费前调用） */
     export_model_tri_colliders(): string;
     /** 导出 PAKFILE 内嵌模型的「自带物理碰撞体」(.phy) 凸包三角形 JSON（引擎实际碰撞；消费前调用） */
