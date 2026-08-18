@@ -462,13 +462,14 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       dom.spawnSelect.disabled = false;
     }
     if (dom.respawnBtn) dom.respawnBtn.disabled = false;
-    // 加载完成：隐藏进度覆盖层（面板状态机：场景就绪 → 面板隐藏，等待锁定）
-    hideLoading();
+    // 加载完成：进度冲到 100 后隐藏（面板状态机：场景就绪 → 面板隐藏，等待锁定）
+    finishLoading();
     panel?.updateVisibility(true);
   } catch (err) {
-    setError(`BSP 解析失败: ${err instanceof Error ? err.message : String(err)}`);
+    const msg = `BSP 解析失败: ${err instanceof Error ? err.message : String(err)}`;
+    setError(msg);
     renderer.disposeScene();
-    hideLoading();
+    failLoading(msg);
   }
 }
 
@@ -542,6 +543,17 @@ let loadingPctEl: HTMLElement | null = null;
 let loadingSubEl: HTMLElement | null = null;
 let loadingOverlayEl: HTMLElement | null = null;
 
+/** 平滑补间：目标值 + 动画状态。 */
+const loadingAnim = {
+  /** 当前展示值（0-100，驱动补间）。 */
+  current: 0,
+  /** 目标值（最新阶段百分比）。 */
+  target: 0,
+  /** 阶段进行中的轻微漂移（伪不确定进度，避免视觉卡死）。 */
+  drifting: false,
+  raf: 0,
+};
+
 /** 缓存加载覆盖层 DOM（首次调用时）。 */
 function ensureLoadingEls(): void {
   if (loadingOverlayEl) return;
@@ -552,35 +564,110 @@ function ensureLoadingEls(): void {
   loadingPctEl = dom.loadingPct;
 }
 
+/** 停止补间动画（隐藏覆盖层时调用，防泄漏）。 */
+function stopLoadingAnim(): void {
+  if (loadingAnim.raf) cancelAnimationFrame(loadingAnim.raf);
+  loadingAnim.raf = 0;
+  loadingAnim.drifting = false;
+}
+
+/**
+ * 逐帧推进进度条：朝 target 平滑接近；阶段切换(target 前进)后若目标不变，
+ * 在阶段区间内做轻微漂移，营造"仍在处理"的感觉（默认共 ~4ms 采样自然推进）。
+ */
+function tickLoading(): void {
+  loadingAnim.raf = 0;
+  let cur = loadingAnim.current;
+  const target = loadingAnim.target;
+  // 朝目标平滑逼近（ease-out 手感；差距大时走得快）
+  const diff = target - cur;
+  if (Math.abs(diff) > 0.1) {
+    cur += diff * (0.12 + 0.02 * Math.abs(diff));
+    if (cur > 0.98 * target && cur < target) cur = target; // 收尾贴合，避免无限趋近
+    loadingAnim.current = cur;
+  } else if (loadingAnim.drifting) {
+    // 阶段进行中的伪前进：在当前阶段区间内缓慢漂移（封顶到下一阶段前）
+    cur = Math.min(cur + 0.15, Math.max(target, 0) + 2);
+    loadingAnim.current = cur;
+  }
+  // 渲染
+  const shown = Math.max(0, Math.min(100, cur));
+  if (loadingFillEl) loadingFillEl.style.width = `${shown}%`;
+  if (loadingPctEl) loadingPctEl.textContent = `${Math.round(shown)}%`;
+  // 只要还在展示且有动画需求就继续
+  if (loadingOverlayEl?.classList.contains('show')) {
+    loadingAnim.raf = requestAnimationFrame(tickLoading);
+  }
+}
+
 /** 显示加载覆盖层（读取地图后退出面板，改为展示进度）。 */
 function showLoading(mapName: string): void {
   ensureLoadingEls();
-  if (loadingOverlayEl) loadingOverlayEl.classList.add('show');
+  stopLoadingAnim();
+  loadingAnim.current = 0;
+  loadingAnim.target = 0;
+  if (loadingOverlayEl) {
+    loadingOverlayEl.classList.add('show');
+    // 清掉可能的错误态
+    loadingOverlayEl.classList.remove('error');
+  }
   if (loadingFillEl) loadingFillEl.style.width = '0%';
+  if (loadingStageEl) loadingStageEl.textContent = '初始化';
+  if (loadingPctEl) loadingPctEl.textContent = '0%';
   if (loadingSubEl) loadingSubEl.textContent = mapName ? `加载 ${mapName}…` : '加载地图…';
-  updateLoadingProgress('正在加载地图', 0);
+  loadingAnim.raf = requestAnimationFrame(tickLoading);
 }
 
-/** 更新进度条（阶段名 + 百分比 0-100）。 */
+/** 更新进度（阶段名 + 目标百分比；实际展示经补间平滑）。 */
 function updateLoadingProgress(stage: string, pct: number): void {
   ensureLoadingEls();
-  const clamped = Math.max(0, Math.min(100, pct));
-  if (loadingFillEl) loadingFillEl.style.width = `${clamped}%`;
+  loadingAnim.target = Math.max(0, Math.min(100, pct));
+  loadingAnim.drifting = false;
   if (loadingStageEl) loadingStageEl.textContent = stage;
-  if (loadingPctEl) loadingPctEl.textContent = `${Math.round(clamped)}%`;
 }
 
-/** 按阶段名推进进度（映射到全局百分比；阶段名不识别时保持不动）。 */
+/** 按阶段名推进进度（映射到全局百分比；阶段名不识别时仅更新文字）。 */
 function advanceLoading(stage: string): void {
   const pct = LOAD_STAGE_PCT[stage];
-  if (pct !== undefined) updateLoadingProgress(stage, pct);
-  else if (loadingStageEl) loadingStageEl.textContent = stage;
+  if (pct !== undefined) {
+    updateLoadingProgress(stage, pct);
+    // 在阶段内做伪确定漂移，直到下个阶段到来（覆盖层动画循环里消费）
+    // 仅在非最后一个已知阶段后允许漂移，避免 92→100 前乱漂
+    loadingAnim.drifting = pct < 92;
+  } else if (loadingStageEl) {
+    loadingStageEl.textContent = stage;
+  }
+}
+
+/** 加载完成：进度冲到 100 后延迟隐藏（给玩家收尾缓冲）。 */
+function finishLoading(): void {
+  ensureLoadingEls();
+  loadingAnim.target = 100;
+  loadingAnim.drifting = false;
+  if (loadingStageEl) loadingStageEl.textContent = '完成';
+  // 等补间贴近 100 再隐藏（约 250ms）
+  window.setTimeout(() => hideLoading(), 260);
+}
+
+/** 加载失败：覆盖层转错误态并显示原因（不直接消失）。 */
+function failLoading(message: string): void {
+  ensureLoadingEls();
+  stopLoadingAnim();
+  if (loadingOverlayEl) loadingOverlayEl.classList.add('error');
+  if (loadingStageEl) loadingStageEl.textContent = '加载失败';
+  if (loadingSubEl) loadingSubEl.textContent = message;
+  if (loadingFillEl) loadingFillEl.style.width = '100%';
+  if (loadingPctEl) loadingPctEl.textContent = '—';
 }
 
 /** 隐藏加载覆盖层（加载完成或失败）。 */
 function hideLoading(): void {
   ensureLoadingEls();
-  if (loadingOverlayEl) loadingOverlayEl.classList.remove('show');
+  stopLoadingAnim();
+  if (loadingOverlayEl) {
+    loadingOverlayEl.classList.remove('show');
+    loadingOverlayEl.classList.remove('error');
+  }
 }
 
 function setError(msg: string): void {
