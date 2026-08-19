@@ -12,6 +12,9 @@ pub mod player;
 pub mod teleport;
 pub mod world;
 
+#[cfg(test)]
+mod p2_gate_tests;
+
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
 use world::{Brush, LadderVolume, TriMesh, World};
@@ -194,6 +197,25 @@ impl PhysWorld {
     /// wasm 内存增长（memory.buffer 更换）后视图须按 state_out_ptr 重建）。
     pub fn state_out_ptr(&self) -> usize {
         self.state_out.as_ptr() as usize
+    }
+
+    /// 诊断：盒-AABB 门校验否决次数（P2 修复探针）。
+    pub fn gate_veto_count(&self) -> u32 {
+        world::GATE_VETO_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// 诊断：原样 trace（站立 hull），返回 `fraction,normal_x,normal_y,normal_z` 数组。
+    pub fn debug_trace(&mut self, sx: f64, sy: f64, sz: f64, ex: f64, ey: f64, ez: f64) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        let r = self.world.trace(
+            &[sx, sy, sz],
+            &[ex, ey, ez],
+            &mins,
+            &maxs,
+        );
+        let n = r.normal.unwrap_or([0.0, 0.0, 0.0]);
+        vec![r.fraction, n[0], n[1], n[2]]
     }
 
     /// tick/tick_into 共用核心步进（输入 → 角度 → 传送/死亡/重置 → 碰撞移动）。
