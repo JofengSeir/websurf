@@ -113,6 +113,47 @@ fn plane_offset(n: &V3, mins: &V3, maxs: &V3) -> f64 {
 /// 浮点容差（与 Collision.config.ts 的 DIST_EPSILON 一致）。
 const DIST_EPSILON: f64 = 0.03125;
 
+/// 门校验否决计数（诊断探针：确认 wasm 构建确实包含 aabb_overlaps_at 否决路径）。
+pub static GATE_VETO_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// 命中分数 `f` 处盒 AABB 与实体 AABB 三轴重叠（真实相交的**必要条件**）。
+///
+/// 任一轴分离即返回 `false`，可安全剔除该「进入平面」——因为 AABB 不重叠
+/// 时两凸形必不相交（零误杀）。
+///
+/// `EPS` 取 `DIST_EPSILON / 8`：门在**真实接触分数**（盒表面恰贴 brush 平面、
+/// 盒极值到平面距离为 0）处评估，故合法擦边接触的盒 AABB 与 brush AABB 各轴
+/// 差 ≤ 0；EPS 仅吸收浮点误差，不用再吸收 Minkowski 穿透量（那是「扩展进入
+/// 分数」的悬停间隙 0.03125，用于停止位置；若把该间隙算进门判据，会放过
+/// 沿表面悬停滑行的盒对相邻 brush 前缘的假进入——P2 第二层幻影，见
+/// docs/chamfer-physics §9）。
+///
+/// 这是 P2 坡顶幻影碰撞的根治手段：用「命中处盒 AABB 是否与该 brush/tri AABB
+/// 重叠」否决由无限平面造成的假进入（如坡面 z=0 端盖），且为**逐平面**否决
+/// （仅跳过幻影平面、保留更晚的真实接触），而非整实体否决（后者会丢合法接触、
+/// 致穿模）。
+#[inline]
+fn aabb_overlaps_at(
+    bmin: &V3,
+    bmax: &V3,
+    start: &V3,
+    end: &V3,
+    mins: &V3,
+    maxs: &V3,
+    f: f64,
+) -> bool {
+    const EPS: f64 = DIST_EPSILON / 8.0;
+    for i in 0..3 {
+        let px = start[i] + (end[i] - start[i]) * f;
+        let lo = px + mins[i];
+        let hi = px + maxs[i];
+        if hi < bmin[i] - EPS || lo > bmax[i] + EPS {
+            return false;
+        }
+    }
+    true
+}
+
 /// 对一组平面做 Minkowski 扩张的扫掠盒裁剪（clipBoxToBrush / clipBoxToTriangle 核心循环）。
 /// 约定：实体 = 各半空间交集 `dot(n, p) - dist <= 0`（法线朝外）。
 fn clip_planes(
@@ -121,6 +162,8 @@ fn clip_planes(
     end: &V3,
     mins: &V3,
     maxs: &V3,
+    bmin: &V3,
+    bmax: &V3,
     result: &mut TraceResult,
 ) {
     let mut enter_frac = -1.0f64;
@@ -153,9 +196,17 @@ fn clip_planes(
         if d1 > d2 {
             // 通过该平面进入凸体。
             let f = (d1 - DIST_EPSILON) / (d1 - d2);
-            if f > enter_frac {
+            // 【盒-AABB 必要校验】在**真实接触分数**（盒表面恰贴平面、未悬停）处
+            // 判盒 AABB 与该实体 AABB 三轴重叠，才是真实进入；否则是无限平面造成的
+            // 幻影进入（如坡面 z=0 端盖、或沿平台顶悬停滑行的盒对坡前缘的假进入），
+            // 仅跳过该平面（保留更晚的真实接触，避免整实体否决导致穿模——
+            // 见 docs/chamfer-physics §9）。
+            let f_true = d1 / (d1 - d2);
+            if aabb_overlaps_at(bmin, bmax, start, end, mins, maxs, f_true) && f > enter_frac {
                 enter_frac = f;
                 clip_plane = Some(p);
+            } else {
+                GATE_VETO_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         } else {
             // 通过该平面离开凸体。
@@ -167,6 +218,14 @@ fn clip_planes(
     }
 
     if !start_out {
+        // 【盒-AABB 必要校验·起点】平面判定「起点在体内」同样是无限平面过逼近：
+        // 盒仅刺入某平面 EPS 量、AABB 却与实体分离时（如 P2 盒底高于坡顶、z_max
+        // 刚过 z=0），start_solid/all_solid 会把速度整速清零、把盒钉在幻影平面处。
+        // 与进入平面同源同判（docs/chamfer-physics §9）：AABB 分离即真实不相交。
+        if !aabb_overlaps_at(bmin, bmax, start, start, mins, maxs, 0.0) {
+            GATE_VETO_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
         result.start_solid = true;
         if !get_out {
             result.all_solid = true;
@@ -191,7 +250,9 @@ fn clip_box_to_brush(
     maxs: &V3,
     result: &mut TraceResult,
 ) {
-    clip_planes(&brush.planes, start, end, mins, maxs, result);
+    clip_planes(
+        &brush.planes, start, end, mins, maxs, &brush.min, &brush.max, result,
+    );
 }
 
 /// 扫掠盒 vs 单个三角形（模型可视网格原样碰撞）。
@@ -259,7 +320,18 @@ fn clip_box_to_triangle(
     if planes.len() < 5 {
         return;
     }
-    clip_planes(&planes, start, end, mins, maxs, result);
+    // 三角形包围盒（与 brush 同处理：命中处盒 AABB 与其重叠才认作真实进入）
+    let tmin = [
+        va[0].min(vb[0]).min(vc[0]),
+        va[1].min(vb[1]).min(vc[1]),
+        va[2].min(vb[2]).min(vc[2]),
+    ];
+    let tmax = [
+        va[0].max(vb[0]).max(vc[0]),
+        va[1].max(vb[1]).max(vc[1]),
+        va[2].max(vb[2]).max(vc[2]),
+    ];
+    clip_planes(&planes, start, end, mins, maxs, &tmin, &tmax, result);
 }
 
 // ---------------------------------------------------------------------------
