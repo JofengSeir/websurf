@@ -1,9 +1,8 @@
 # WebSurf: 构建并部署到 GitHub Pages
 #
-# 仓库布局（两个同级独立工程 + 一个修复版验证副本）：
+# 仓库布局（两个同级独立工程 + 一个验证工程）：
 #   debug/     = 主工程（Debug Build，共享 Rust 物理，多文件 dist）
 #   game/      = WebSurf-game（Game Build，共享 Rust 物理，多文件 dist）
-#   test/game/ = WebSurf-game 修复版移植（P2–P6 + 风险2/5，独立自包含验证副本）
 #
 # 各工程构建链路（与本地 build-dist.cmd 一致）：
 #   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.126 与 Cargo.lock 精确匹配）
@@ -49,8 +48,8 @@ jobs:
         with:
           # Node 20 已弃用（GH Actions 提示默认 24）；22 为 LTS 稳定线（esbuild/wasm-pack 兼容）
           node-version: 22
-          # 重构后 lock 文件在各工程（debug/package-lock.json、game/package-lock.json、
-          # test/game/package-lock.json），根目录无锁文件——必须 glob 匹配，否则 cache: npm 报
+          # 重构后 lock 文件在各工程（debug/package-lock.json、game/package-lock.json 等），
+          # 根目录无锁文件——必须 glob 匹配，否则 cache: npm 报
           # "Dependencies lock file is not found"（8-09 CI 失败根因）
           cache: npm
           cache-dependency-path: '**/package-lock.json'
@@ -106,31 +105,12 @@ jobs:
         # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常
         run: node scripts/build-dist.mjs --multi
 
-      # ── test/game/ 修复版移植（WebSurf-game-fixes，验证 P2–P6 + 风险2/5）──
-      - name: Install test/game dependencies
-        working-directory: test/game
-        run: npm ci
-
-      - name: Build test/game WASM
-        working-directory: test/game
-        run: npm run build:wasm
-
-      - name: "Build test/game TypeScript (typecheck + bundle)"
-        working-directory: test/game
-        run: npm run build:ts
-
-      - name: Build test/game dist package
-        working-directory: test/game
-        # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常
-        run: node scripts/build-dist.mjs --multi
-
-      # ── 组装 Pages 部署目录（入口页 + debug/ + game/ + test/game/）──
+      # ── 组装 Pages 部署目录（入口页 + debug/ + game/）──
       - name: Assemble Pages deploy directory
         run: |
-          mkdir -p deploy/debug deploy/game deploy/test/game
+          mkdir -p deploy/debug deploy/game
           cp -r debug/dist/. deploy/debug/
           cp -r game/dist/. deploy/game/
-          cp -r test/game/dist/. deploy/test/game/
           cp debug/scripts/pages-index.html deploy/index.html
 
       - name: Upload Pages artifact

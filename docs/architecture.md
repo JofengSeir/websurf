@@ -36,13 +36,12 @@ websurf/
 │   ├── src/                     TS：app/renderer/worker/panel/input/world
 │   └── web/                     dev 页面
 ├── test/                      验证工程
-│   ├── dual-mode-harness/      WebSurf-test（验证工程，2026-08-11 收尾）：双模物理 + 帧信号渲染时序验证
-│   │   ├── crates/wasm/src/      lib.rs（薄导出层：PhysWorld + BspProcessor 最小导出集，无 mosaic/默认包）
-│   │   ├── src/                  TS：main（不做物理/渲染——主线程负责 BSP 解析导出 + 输入转发 + UI）/ shared-state（SAB + 消息回退）/ worker-a（双模物理）/ worker-b（渲染）
-│   │   └── scripts/              phys-smoke（191/191 PASS）/ perf-bench / race-wakeup / tmp-dual-compare / trace-verify / build-dist（另有已跟踪的临时脚本 _tmp_flicker-debug.mjs）
-│   └── game/                   WebSurf-game 修复版自包含移植（P2–P6 + 风险2/5；独立 Pages 入口）
+│   └── dual-mode-harness/      WebSurf-test（验证工程，2026-08-11 收尾）：双模物理 + 帧信号渲染时序验证
+│       ├── crates/wasm/src/      lib.rs（薄导出层：PhysWorld + BspProcessor 最小导出集，无 mosaic/默认包）
+│       ├── src/                  TS：main（不做物理/渲染——主线程负责 BSP 解析导出 + 输入转发 + UI）/ shared-state（SAB + 消息回退）/ worker-a（双模物理）/ worker-b（渲染）
+│       └── scripts/              phys-smoke（191/191 PASS）/ perf-bench / race-wakeup / tmp-dual-compare / trace-verify / build-dist（另有已跟踪的临时脚本 _tmp_flicker-debug.mjs）
 ├── docs/                     仓库级文档（本文 / 两端时序 / 材质技术）
-└── .github/workflows/deploy-pages.yml    CI：debug + game + test/game 构建 + Pages 部署
+└── .github/workflows/deploy-pages.yml    CI：debug + game 构建 + Pages 部署
 ```
 
 ### 三个 Rust workspace 的引用关系（共享层 + 两端 + 验证工程）
@@ -150,7 +149,7 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 
 | 模式 | 产物 | 用途 |
 |---|---|---|
-| **single**（默认；debug/game/test/game `build-dist.cmd`） | 单文件 IIFE：WASM + Worker 代码 + **默认纹理包**全部 base64 内嵌，classic index.html | 本地双击 file://（无 fetch 能力，全内嵌；无 SAB 自动 MsgState 回退） |
+| **single**（默认；debug/game `build-dist.cmd`） | 单文件 IIFE：WASM + Worker 代码 + **默认纹理包**全部 base64 内嵌，classic index.html | 本地双击 file://（无 fetch 能力，全内嵌；无 SAB 自动 MsgState 回退） |
 | **multi**（`--multi`） | 多文件 ESM：app.js + worker.js + wasm 外置 + textures.mtz 外置 | GitHub Pages / HTTP 部署（fetch 正常，体积小） |
 
 **运行时内嵌消费约定**（single 模式注入的全局变量）：
@@ -162,8 +161,8 @@ CS 移动物理的 Rust 实现（原 @unsurf/cs-movement TS 移植，game 中诞
 **test/dual-mode-harness 工程**：仅 multi 多文件（5 文件：app/worker-a/worker-b/wasm/index.html），无 single 内嵌模式
 （仅 HTTP 运行，SAB 恒定可用）。
 
-**CI（deploy-pages.yml）**：debug、game、test/game 均以 `--multi` 构建 → 组装
-`deploy/{debug,game,test/game}` + 入口页 → Pages 部署（dual-mode-harness 仍不入部署）。
+**CI（deploy-pages.yml）**：debug、game 均以 `--multi` 构建 → 组装
+`deploy/{debug,game}` + 入口页 → Pages 部署（dual-mode-harness 仍不入部署）。
 
 ---
 
