@@ -111,8 +111,8 @@
   `multi` 多文件 ESM（WASM/MTZ 外置，HTTP/Pages 部署）；注入全局：
   `__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` / `__VBSP_TEXTURES_MTZ_B64__` /
   `__VBSP_WASM_URL__`（multi）
-- **CI（deploy-pages.yml）**：debug、game、test/game 均以 `--multi` 构建 → 组装
-  `deploy/{debug,game,test/game}` + 入口页 → GitHub Pages 部署
+- **CI（deploy-pages.yml）**：debug、game 均以 `--multi` 构建 → 组装
+  `deploy/{debug,game}` + 入口页 → GitHub Pages 部署
 - **文档重组**：`docs/` 新四篇（architecture / timing-debug / timing-game /
   materials）替换旧 `bsp-architecture` / `bsp-export-status` / `project-overview`
   / `项目时序图`；`game/docs/` 新四篇（overview / physics / panel / materials）
@@ -122,6 +122,10 @@
 - 重建 WASM：pkg 补全模型三角形碰撞导出 API（`export_model_tri_colliders` /
   `export_model_phy_colliders`），`colliderSource`（auto/visual/phy）路径真正生效
   （薄壳 brush 兜底已整体移除，导出失败回退可视网格）
+- **移除 test/game（2026-08-19）**：`test/game/`（WebSurf-game 修复版自包含移植）
+  整体移除（git rm，历史保留）；关联清理：CI（deploy-pages.yml）移除其构建与
+  `deploy/test/game` 组装、Pages 入口页（debug/scripts/pages-index.html）移除
+  Test/Game Fixes 入口、GitHub Issue/PR 模板与 README / docs/architecture 同步更新
 
 ### 修复
 

@@ -10,9 +10,9 @@
 | [`src/`](src/) | 共享层 | `phys/`（websurf-phys：Rust 物理 WASM 核心）、`wasm-core/`（websurf-wasm-core：BSP 解析 v20-v21/GLB/模型/纹理解析 + mosaic/MTZ）、`ts-shared/`（TS 物理渲染共享：权威帧/校准/输入层/世界构建）、`materials/textures.mtz`（默认纹理包）、`vendor/vmdl/`（vendored vmdl 单副本）、`serve.py`（dev 服务器；BSP 地图位于仓库根 `maps/` 与 `game/maps/`，gitignored） |
 | [`debug/`](debug/) | 主工程（Debug Build） | 全功能调试测试页面：计时挑战、碰撞可视化、物理面板、自定义传送点、调试 API（`parse_entities`/`list_pakfile`/`export_visleaf_pvs` 等，仅 debug 导出） |
 | [`game/`](game/) | WebSurf-game（Game Build） | 尝试游戏化的最小化实现：Rust 物理 + 主线程唯一物理渲染线 + 单 Worker 权威帧 + ESC 面板 |
-| [`test/`](test/) | 验证工程 | `dual-mode-harness/`（WebSurf-test：输入→物理→渲染时序验证）；`game/`（WebSurf-game 修复版自包含移植，独立部署入口） |
+| [`test/`](test/) | 验证工程 | `dual-mode-harness/`（WebSurf-test：输入→物理→渲染时序验证） |
 
-入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` + `./test/game/` 三入口。
+入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` 双入口。
 
 ## 构建
 
