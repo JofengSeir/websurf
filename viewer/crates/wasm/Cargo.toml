@@ -1,0 +1,37 @@
+# WebSurf-viewer — 单一 WASM crate（薄导出层）
+#
+# 导出 BspProcessor 最小集（websurf-wasm-core 解析层）：
+# metadata / parse_spawn_points / export_glb_with_pakfile_models。
+# 不含 websurf-phys（无物理）、不含 mosaic/缺失纹理/默认纹理包（纯视觉查看器）。
+
+[package]
+name = "websurf-viewer-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "WebSurf-viewer WASM 薄导出层：BSP 解析 + GLB 导出最小集"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# 共享解析层（仓库根 src/wasm-core/，websurf-wasm-core）
+websurf-wasm-core = { path = "../../../src/wasm-core" }
+
+# WASM 绑定（与 websurf-phys 同一 wasm-bindgen 主版本，保证 glue 版本一致）
+wasm-bindgen = "0.2"
+
+# BSP 导出 JSON / GLB 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+gltf = "1.4.1"
+
+# PAKFILE 模型解析（load_vmdl）
+vmdl = "0.2"
+
+# VTF → PNG 解码（GLB 材质贴图；仅 png 编解码器，减小体积）
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# 本机 NODE_OPTIONS 含 --use-system-ca 会污染 wasm-opt（node 脚本）；LTO+opt3 已足够，跳过二次优化
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
