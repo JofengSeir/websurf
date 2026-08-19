@@ -1,0 +1,25 @@
+{
+  "name": "websurf-viewer",
+  "version": "0.1.0",
+  "description": "WebSurf-viewer — 最小 BSP 自由视角查看器：BSP → GLB 场景 + 自由飞行相机 + 位置/朝向 API（URL/哈希/window.viewer）。",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../pkg && node -e \"require('fs').copyFileSync('../../pkg/websurf_viewer_wasm_bg.wasm','../../websurf_viewer_wasm_bg.wasm')\"",
+    "typecheck": "tsc --noEmit",
+    "build:ts": "npm run typecheck && esbuild src/app.ts --bundle --outfile=app.js --format=esm --target=es2022",
+    "build": "npm run build:wasm && npm run build:ts",
+    "dev": "python ../src/serve.py 8080 ."
+  },
+  "devDependencies": {
+    "@types/three": "^0.165.0",
+    "esbuild": "^0.23.0",
+    "typescript": "~5.7.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "three": "^0.165.0"
+  }
+}

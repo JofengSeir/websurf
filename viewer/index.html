@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebSurf-viewer — BSP 自由视角查看器</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+      font-size: 13px; color: #e8e8e8; background: #0f1115;
+    }
+    #app { position: fixed; inset: 0; }
+    #game {
+      display: block; width: 100%; height: 100%;
+      background: #0f1115; cursor: crosshair;
+    }
+    #hud {
+      position: absolute; top: 14px; left: 14px; z-index: 5;
+      padding: 10px 14px; border-radius: 10px;
+      background: rgba(15,17,21,0.78); border: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(8px); line-height: 1.9;
+      pointer-events: none; user-select: none; max-width: 560px;
+    }
+    #hud .title { font-size: 14px; font-weight: 600; color: #e2e8f0; }
+    #hud kbd {
+      font-family: inherit; font-size: 11px; color: #9aa3b2;
+      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 4px; padding: 1px 5px; margin: 0 1px;
+    }
+    #hud .hint { font-size: 12px; color: #9aa3b2; }
+    #hud .hint code { font-size: 11px; color: #8ab4f8; }
+    #pose { font-size: 12px; color: #c9a05c; }
+    #bspbar {
+      position: absolute; top: 14px; right: 14px; z-index: 5;
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px; border-radius: 10px;
+      background: rgba(15,17,21,0.78); border: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(8px);
+    }
+    #bspbar .filebtn {
+      font-size: 12px; color: #c8ccd4; padding: 5px 12px;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px; cursor: pointer; white-space: nowrap;
+    }
+    #bspbar .filebtn:hover { background: rgba(255,255,255,0.12); }
+    #bspbar input[type="file"] { display: none; }
+    #bspStatus { font-size: 12px; color: #9aa3b2; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="title">WebSurf-viewer — BSP 自由视角查看器</div>
+    <div class="hint">
+      点击画布锁定鼠标；<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移，<kbd>空格</kbd>/<kbd>Ctrl</kbd> 升降，<kbd>Shift</kbd> 加速（×4），<kbd>Esc</kbd> 解锁
+    </div>
+    <div class="hint">
+      位姿传入：URL <code>?pos=x,y,z&amp;ang=yaw,pitch</code>（加载即应用）或 <code>#pos=...&amp;ang=...</code>（hash 变更实时应用）；JS <code>window.viewer.setPose/getPose</code>
+    </div>
+    <div class="hint" id="pose">未就绪</div>
+    <div class="hint" id="bspStatus">未加载地图（选择 .bsp 文件加载）</div>
+  </div>
+
+  <div id="bspbar">
+    <label class="filebtn">加载 BSP 地图<input id="bspFile" type="file" accept=".bsp" /></label>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# WebSurf-viewer — Rust workspace
+#
+# 单一 WASM crate（crates/wasm），薄导出层：仅 BSP 解析 + GLB 导出
+# （websurf-wasm-core 共享解析层）——无物理、无碰撞、无 mosaic/默认纹理包。
+# 自由视角查看器运行时最小集：metadata / parse_spawn_points / export_glb_with_pakfile_models。
+
+[workspace]
+members = ["crates/wasm"]
+resolver = "2"
+
+# 与 debug/game/test 同款 [patch.crates-io]（vmdl vendor 到共享目录 src/vendor/vmdl）
+[patch.crates-io]
+vmdl = { path = "../src/vendor/vmdl" }
+
+# ============================================================
+# 性能优化配置（WASM 构建需启用 LTO + 优化 3）
+# ============================================================
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

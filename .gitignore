@@ -43,6 +43,7 @@ temp/*
 *.log
 .DS_Store
 Thumbs.db
+agent-teams-guide.md
 
 # extract 本地工具缓存
 **/.wasm-bindgen/
