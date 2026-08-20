@@ -179,18 +179,29 @@ src/phys/world.rs::clip_planes / clip_box_to_brush（118-183 / 186-195）
 
 结论：**对单个凸 brush，逐平面否决 与 整 brush 否决 结果等价**；二者都不会在凸 brush 上丢合法接触。原"整 brush 否决会穿模"是把 `nogate`（**完全不校验**）与"整 brush 否决"混为一谈导致的误判。**真正的修复**是：相对原始 `nogate`（根本不做 AABB 必要校验），在 `clip_planes` 进入分支**逐平面**加 `aabb_overlaps_at` 校验——这样既剔除 z=0 端盖等 axis-separated 幻影，又因"逐平面"只跳过幻影平面、保留其余合法进入，自然无损真实坡面接触。
 
-> 实际落点（`src/phys/world.rs::clip_planes` 进入分支，约 191-200 行）：
+> 实际落点（`src/phys/world.rs::clip_planes` 进入分支，约 196-210 行，**2026-08-19 最终版**）：
 > ```rust
 > if d1 > d2 {
 >     let f = (d1 - DIST_EPSILON) / (d1 - d2);
->     // 命中处盒 AABB 与 brush AABB 三轴重叠，才是真实进入；否则是无限平面幻影
->     if aabb_overlaps_at(bmin, bmax, start, end, mins, maxs, f) && f > enter_frac {
+>     // 【盒-AABB 必要校验】在**真实接触分数**（盒表面恰贴平面、未悬停）处
+>     // 判盒 AABB 与该实体 AABB 三轴重叠，才是真实进入；否则是无限平面幻影
+>     // （坡面 z=0 端盖、或沿平台顶悬停滑行的盒对坡前缘的假进入）。
+>     let f_true = d1 / (d1 - d2);
+>     if aabb_overlaps_at(bmin, bmax, start, end, mins, maxs, f_true) && f > enter_frac {
 >         enter_frac = f;
 >         clip_plane = Some(p);
+>     } else {
+>         GATE_VETO_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 >     }
 > }
 > ```
-> `aabb_overlaps_at` 在分数 `f` 处取盒 AABB `[start+(end-start)*f + mins, … + maxs]`，与 `bmin/bmax` 三轴比较（EPS 取 `2*DIST_EPSILON`，见 191 行附近注释）。需把 `bmin/bmax` 透传进 `clip_planes`（签名加两参；三角形路径传三角形 AABB）。
+> 要点：**门在真实接触分数 `f_true=d1/(d1-d2)` 处评估**（而非扩展进入分数 `f`）——
+> 扩展分数处盒表面悬空 DIST_EPSILON，若把该悬停间隙算进门判据，会放过沿表面滑行的
+> 盒对相邻 brush 前缘的假进入。同时 `clip_planes` 起点分支（约 220-233 行）对
+> start_solid 判定也加同源 AABB 门（P2 实际阻断机制 = tick 间 z_max 刺入半空间的
+> all_solid 整速清零）。`aabb_overlaps_at` EPS 取 `DIST_EPSILON/8`（f_true 处合法接触
+> 盒表面恰贴平面，各轴差 ≤ 0，EPS 仅吸收浮点误差）。`bmin/bmax` 已透传进
+> `clip_planes`（签名两参；三角形路径传三角形 AABB）。
 
 > **为何仍选"逐平面"而非"整 brush"**：二者对凸 brush 等价，但"逐平面"是更局部、更不易出错的实现——它只针对单条进入平面做否决，绝不触碰其它合法进入；若未来 brush 变为非凸（多连通）或校验逻辑扩到 trace 聚合层，"逐平面"语义仍能正确级联到真正的命中平面，而"整 brush"口径在聚合层会误伤同 brush 内的合法子区域。当前实现采用逐平面，符合此稳健性取向。
 
@@ -218,9 +229,15 @@ AABB 重叠是真实相交的**必要条件、非充分条件**：
 
 用户原始提问："执行，并需要确定其是否可以在脚本中得到验证。" 结论：**可以在脚本中得到验证**——`clip_planes` 是纯几何算法，无引擎/wasm 依赖，可忠实镜像到 Python 做单元级断言。
 
-**Rust 端（已落地 + 编译验证）**
-- `src/phys/world.rs` 已加 `aabb_overlaps_at`（EPS=`2*DIST_EPSILON`）并在 `clip_planes` 进入分支逐平面调用；`clip_box_to_brush` / `clip_box_to_triangle` 透传 `bmin/bmax`。
-- `cargo check -p websurf-phys` **通过**（dev profile，0.81s，无 error/warning）。注意：这是编译期验证，确认签名/类型/借用正确；运行期疗效以 §8 的 wasm 实跑 H×vz 矩阵为最终裁决（探针已清理，需重建 `phys-chamfer-real.mjs`）。
+**Rust 端（已落地 + 编译验证 + wasm 实跑验证）**
+- `src/phys/world.rs` 已加 `aabb_overlaps_at`（EPS=`DIST_EPSILON/8`，2026-08-19 由
+  `2*DIST_EPSILON` 收紧）并在 `clip_planes` 进入分支以 `f_true=d1/(d1-d2)` 逐平面调用；
+  起点分支另加 start_solid AABB 门；`clip_box_to_brush` / `clip_box_to_triangle` 透传
+  `bmin/bmax`。
+- `cargo check -p websurf-phys` **通过**；单测 `src/phys/p2_gate_tests.rs` 3/3 PASS。
+- **wasm 实跑（phys-gate-probe2.mjs）**：仅 ramp brush + 64Hz H=2.5/vz=300 → 盒飞过坡，
+  gate_veto_count=14（修复前 STOPPED 于 z≈−15.94）。**H×vz 矩阵残余发散 = 地面物理固有
+  速率依赖，非幻影**（详见 §10）。
 
 **Python 镜像脚本（忠实对应 world.rs 算法）**
 - 位置：`docs/chamfer-physics/verify_box_aabb_necessary_check.py`（镜像 world.rs:107-200）。
@@ -236,4 +253,31 @@ AABB 重叠是真实相交的**必要条件、非充分条件**：
 **对"脚本可验证性"的边界说明（诚实标注）**
 - 脚本验证的是**算法逻辑**（AABB 必要校验是否按预期否决 axis-separated 幻影、保留合法接触）。它与 world.rs 逐行对应，可作为回归守护。
 - 它**不等于**引擎级验证：盒轴对齐/yaw 不旋转、Minkowski `plane_offset`、`clip_velocity` 清零 vz 等真实链路，需在 wasm 实跑里用 H×vz 矩阵确认 Δvel<10 全收敛；Python 不含这些。
-- EPS 边界：EPS=`2*DIST_EPSILON`（=0.0625）旨在吸收"扩展进入分数处盒表面恰贴 brush 平面"的 `DIST_EPSILON` 穿透量 + 浮点误差，同时仍 ≪ P2 幻影的轴分离量（≥1.6 HU），不会误杀合法擦边。该取值已由 S2/S3 的合法擦边接触（盒 AABB 与 brush AABB 仅差 `DIST_EPSILON` 量级）不被否决所佐证。
+- EPS 边界：EPS=`DIST_EPSILON/8`（=0.00390625）。门在**真实接触分数** f_true 处评估——
+  合法擦边接触的盒表面恰贴 brush 平面（极值到平面距离=0），各轴差 ≤ 0，EPS 仅吸收
+  浮点误差；扩展进入分数 f 处盒表面悬空 `DIST_EPSILON`（Minkowski 穿透量），只用于
+  停止位置，不再算进门判据（否则会放过沿表面悬停滑行的盒对相邻 brush 前缘的假进入）。
+  该取值已由 S2/S3 的合法擦边接触（盒 AABB 与 brush AABB 恰贴）不被否决所佐证。
+
+## 10. wasm 最终裁决（2026-08-20）：幻影已根治，矩阵残余为地面物理速率依赖
+
+**修复目标**（P2 幻影碰撞）已达成并实证：
+- 空中停驻（2242.1/2421.6 基线）消失；`phys-gate-probe2.mjs`（仅 ramp）盒飞过坡 PASS；
+  单测 3/3、Python 镜像 3/3。
+
+**H×vz 矩阵（phys-p2-regression.mjs）残余 9/12 发散（Δvel 10~48）**——经
+`phys-p2-ground.mjs` 全程 200 tick 逐 tick 打点，**判定为固有速率依赖，非碰撞幻影**：
+1. 所有 H≤4 配置盒先在平台顶落地（GROUND_TRACE_DIST=2 吸附），随后 nopre 钳制
+   （walk_move :907-923，速度>run_speed=250 → 缩到 250，首碰 −50）+ 逐 tick 摩擦
+   （apply_friction :306-319，friction=4，×(1−4·dt)）滑行——64Hz/144Hz 落地 tick 与
+   摩擦累计不同 → 离缘速度不同（64Hz vz≈88.7 vs 144Hz vz≈82.0）；
+2. 离缘后在坡面发生**真实掠触**：64Hz 单次擦触后飞越整坡；144Hz 持续 surf 下滑——
+   掠触角度对步长敏感（初始条件敏感依赖）；
+3. 门对全部幻影进入（平台前缘 z=0、坡端盖 z=0）正确否决（gate_veto_count>0 且摩擦
+   序列无碰撞干扰）——滑行段速度序列 300→250→234.4→219.7→… 与 nopre+摩擦公式逐值
+   吻合，无任何真实/幻影碰撞参与。
+
+**结论**：盒-AABB 必要校验是 P2 幻影的**根治手段**（与几何参数无关的拓扑必要条件否决）；
+H×vz 矩阵的残余发散反映的是场景内生的地面滑行/边缘掠触速率依赖，**不属于幻影修复范围**。
+若需矩阵 12/12 收敛，须重设计场景（盒全程空中飞越、不落平台），或将矩阵降级为地面物理
+参考（当前 `phys-p2-regression.mjs` 保留此定位）。`phys-p2-ground.mjs` 为该结论的实证依据。

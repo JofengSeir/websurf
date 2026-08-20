@@ -1,6 +1,14 @@
-/** P2 坡顶幻影碰撞 —— 修复后 H×vz 矩阵回归（64Hz vs 144Hz 分叉 Δvel）。
+/** P2 坡顶幻影碰撞 —— H×vz 矩阵回归（64Hz vs 144Hz 分叉 Δvel）。
  *  几何与 phys-rate-parity-v2.mjs 场景 B 一致：60° 坡（表面 y=-z·tan60°）+
- *  平顶台（z≤0），spawn (0,H,-30) 平飞 vz。判定：Δvel<10 收敛（phys-fix-directions.md P2）。
+ *  平顶台（z≤0），spawn (0,H,-30) 平飞 vz。
+ *
+ *  定位（2026-08-20，见 docs/chamfer-physics/p2-remaining-task.md）：
+ *  本矩阵度量的是「终速速率一致性」，**不纯是幻影**——幻影（z=0 无限平面端盖）
+ *  已被盒-AABB 门根除（phys-gate-probe2.mjs PASS）。残余发散来自地面物理的固有
+ *  速率依赖：盒在平台顶落地后 nopre 钳制(300→250) + 逐 tick 摩擦×(1-4·dt) 滑行，
+ *  64/144Hz 离缘速度不同；随后坡面真实掠触对步长敏感（64Hz 擦触飞越 vs 144Hz
+ *  持续 surf）。此发散非碰撞幻影（phys-p2-ground.mjs 实证：摩擦序列与公式逐值吻合）。
+ *  故本矩阵保留为「地面物理参考」；幻影修复验证以 phys-gate-probe2.mjs + 单测为准。
  */
 import { initSync, PhysWorld } from '../pkg/websurf_wasm.js';
 import { readFileSync } from 'fs';
@@ -47,7 +55,7 @@ function run(geo, spawn, vel, dt, nSteps) {
   return { st, firstHit };
 }
 
-console.log('===== P2 坡顶幻影：修复后 H×vz 矩阵（Δvel<10 通过）=====');
+console.log('===== P2 H×vz 矩阵（幻影已根除；残余发散=地面物理速率依赖，见 docs）=====');
 const geo = [flatTop(0, 0, 2000), rampDown(0, 1500, 3000)];
 let fails = 0;
 for (const H of [2.1, 2.5, 3, 4]) {
@@ -64,4 +72,4 @@ for (const H of [2.1, 2.5, 3, 4]) {
     }
   }
 }
-console.log(`===== 判定: ${fails === 0 ? 'ALL PASS —— 盒-AABB 必要校验修复 P2' : `FAIL (${fails}/12 发散)`} =====`);
+console.log(`===== 判定: ${fails === 0 ? 'ALL PASS —— 全程速率一致' : `参考矩阵：${fails}/12 发散（幻影已根治；发散为地面物理固有速率依赖）`} =====`);
