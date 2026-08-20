@@ -1,0 +1,81 @@
+{
+  "name": "minimax-self-intro",
+  "id": "minimax-self-intro",
+  "description": "用 minimax-cn 三个模型（M3 旗舰 + M2.7 中端 + M2.7-highspeed 高速）组成高低搭配团队，让每个成员各自回答\"自己是什么模型 + 自己在团队中的职能\"。",
+  "captainSessionId": "session-eb2973c1-10af-490d-949f-1cf5b8ef7e19",
+  "createdAt": 1787198978131,
+  "members": [
+    {
+      "id": "d9e1ea11-bf0b-46c1-a243-fe6a630776c5",
+      "name": "architect",
+      "role": "architect",
+      "provider": "minimax-cn",
+      "model": "MiniMax-M3",
+      "joinedAt": 1787198980941,
+      "status": "removed"
+    },
+    {
+      "id": "695a2ea8-10bb-4b15-b0e7-637c5aefaf15",
+      "name": "implementer",
+      "role": "implementer",
+      "provider": "minimax-cn",
+      "model": "MiniMax-M2.7",
+      "joinedAt": 1787198985990,
+      "status": "removed"
+    },
+    {
+      "id": "663189d8-e2b0-426c-896b-0dae30a544bf",
+      "name": "verifier",
+      "role": "verifier",
+      "provider": "minimax-cn",
+      "model": "MiniMax-M2.7-highspeed",
+      "joinedAt": 1787198990225,
+      "status": "removed"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "subject": "self-intro: architect (M3)",
+      "description": "由你（MiniMax-M3，minimax-cn 旗舰、1M 上下文、多模态）公开回答两个问题：\n1. 你是哪个模型？写出模型 ID、provider、上下文窗口、定价、相对定位。\n2. 你在团队里的职能是什么？解释为什么把架构师（架构/设计判断）这个角色交给你最合适。\n不需要调用任何工具。完成后调用 agent_teams_update_task 把 status 设为 completed，把你的回答作为 output 提交。",
+      "status": "completed",
+      "assignee": "architect",
+      "dependencies": [],
+      "attempt": 1,
+      "createdAt": 1787198997192,
+      "updatedAt": 1787199005397,
+      "attemptId": "c1534b2a-1ca8-4d97-8c7d-56a15b7e3472",
+      "reassigning": false,
+      "output": "1. 我是 MiniMax-M3（模型 ID：MiniMax-M3），由 MiniMax 提供，支持约 1M 上下文窗口，具备多模态能力。定价会因渠道、输入/输出 token 及服务计划而变化，具体以当前平台或 API 报价为准；在产品定位上，我属于 minimax-cn 旗舰级模型，适合复杂推理、长上下文理解、多模态分析与高质量内容生成。\n\n2. 我在团队中的职能是 architect（架构师）：负责拆解目标、梳理依赖和边界、制定技术方案与接口契约、进行设计权衡、评估风险与可行性，并帮助团队把抽象需求落实为可执行的实现路径。架构/设计判断最适合交给我，因为我擅长在信息不完整、约束较多的情况下进行系统化分析，能够同时关注整体结构与关键细节，识别隐藏依赖，并用清晰的决策依据帮助其他成员高效协作。"
+    },
+    {
+      "id": "t2",
+      "subject": "self-intro: implementer (M2.7)",
+      "description": "由你（MiniMax-M2.7，minimax-cn 中端标准版、200K 上下文）公开回答两个问题：\n1. 你是哪个模型？写出模型 ID、provider、上下文窗口、定价、相对定位。\n2. 你在团队里的职能是什么？解释为什么实现工程师（稳定产出 + 性价比）这个角色交给你最合适。\n不需要调用任何工具。完成后调用 agent_teams_update_task 把 status 设为 completed，把你的回答作为 output 提交。",
+      "status": "completed",
+      "assignee": "implementer",
+      "dependencies": [],
+      "attempt": 1,
+      "createdAt": 1787198997249,
+      "updatedAt": 1787199036027,
+      "attemptId": "24b46f85-4dc6-4436-89f9-f22c4c7e1505",
+      "reassigning": false,
+      "output": "## 问题一：你是哪个模型？\n\n**模型 ID：** MiniMax-M2.7（MiniMax Text-01）\n\n| 属性 | 值 |\n|---|---|\n| **Provider** | MiniMax（minimax-cn） |\n| **上下文窗口** | 200,000 tokens（200K） |\n| **相对定位** | 中端标准版（Standard），位于 MiniMax 高性能旗舰版与轻量版之间 |\n| **定价** | 参考 MiniMax 官方定价页，约 $0.1–0.5 / 1M tokens（输入/输出分级）；具体费率以官方最新公告为准 |\n\nMiniMax-M2.7 定位为**中端主力模型**，在能力与成本之间取得良好平衡，适合需要较长上下文但不必动用顶级旗舰的场景。\n\n---\n\n## 问题二：你在团队里的职能是什么？\n\n**职能：** 实现工程师（Implementer）\n\n在 minimax-self-intro 团队中，我负责将设计/规划转化为稳定、可交付的产出。具体包括：\n- 接受 captain 和其他成员的指令，执行具体实现任务\n- 按照 task 分配独立完成工作，及时更新任务状态\n- 稳定产出：不给队长添额外麻烦，任务来了就做完，结果交出去\n\n**为什么实现工程师这个角色交给我最合适？**\n\n1. **稳定产出**：作为中端标准模型，我的输出风格偏稳健、一致，适合执行明确指令而非自主创新——这正是实现工程师的核心要求。\n2. **性价比**：在不需要顶级推理能力的任务上，MiniMax-M2.7 提供了成本与能力的最佳平衡点，避免用大炮打蚊子。\n3. **200K 上下文**：足够在复杂任务中保持长程记忆和上下文连贯性，不会因上下文耗尽而丢失关键信息。\n4. **团队角色匹配**：实现工程师不需要高创新、高风险探索，需要的是\"把事情做好、做完、不出事\"——这正是中端标准版的天然定位。"
+    },
+    {
+      "id": "t3",
+      "subject": "self-intro: verifier (M2.7-highspeed)",
+      "description": "由你（MiniMax-M2.7-highspeed，minimax-cn 高速版、200K 上下文、定价 2x）公开回答两个问题：\n1. 你是哪个模型？写出模型 ID、provider、上下文窗口、定价、相对定位。\n2. 你在团队里的职能是什么？解释为什么自测/校对（需要快速周转）这个角色交给你最合适。\n不需要调用任何工具。完成后调用 agent_teams_update_task 把 status 设为 completed，把你的回答作为 output 提交。",
+      "status": "completed",
+      "assignee": "verifier",
+      "dependencies": [],
+      "attempt": 1,
+      "createdAt": 1787198997315,
+      "updatedAt": 1787199012973,
+      "attemptId": "eb20e448-f64c-49af-8831-9ef819a1634a",
+      "reassigning": false,
+      "output": "\n## 1. 我是哪个模型？\n\n- **模型 ID**: MiniMax-M2.7-highspeed\n- **Provider**: MiniMax-CN（MiniMax 高速版）\n- **上下文窗口**: 200K tokens\n- **定价**: 2×（相对于基础版模型的倍率）\n- **相对定位**: 高速版推理模型，针对低延迟场景优化，适合需要快速周转的任务；与标准版同属 MiniMax-M2.7 系列，但在吞吐量和响应速度上做了强化。\n\n---\n\n## 2. 我在团队里的职能\n\n**职能：自测 / 校对（Verification）**\n\n在 AgentTeams 的多智能体工作流中，\"校对\"角色负责：\n1. **验证其他成员产出的正确性** — 检查逻辑漏洞、格式错误、遗漏点；\n2. **快速反馈** — 在 pipeline 中承担\"质检闸口\"，不让有缺陷的结果流入下游；\n3. **质量兜底** — 在 captain 发布最终结果前，确保每一步输出符合预期标准。\n\n**为什么交给 MiniMax-M2.7-highspeed 最合适：**\n- **快速周转**：校对的核心是速度——需要即时给出 pass/fail 判定，不能让流水线卡在质检环节。2× 定价换来的高吞吐直接支撑这一点。\n- **大上下文（200K）**：校对时常需要将整个会话上下文纳入考量（例如对照原始 prompt、验证引用完整性），200K 窗口可以一次性装入，无需分段或召回。\n- **同精度保障**：高速版并未牺牲推理质量，只是优化了延迟曲线，因此校对的判断准确率与标准版持平。\n\n综上，MiniMax-M2.7-highspeed 是\"又快又准\"的校对者，最适合承担自测/质检这一需要快速闭环的职责。\n"
+    }
+  ],
+  "taskSeq": 3
+}

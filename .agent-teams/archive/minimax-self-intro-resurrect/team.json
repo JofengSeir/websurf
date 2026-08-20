@@ -1,0 +1,20 @@
+{
+  "name": "minimax-self-intro-resurrect",
+  "id": "minimax-self-intro-resurrect",
+  "description": "测试：能否复用上一轮已 delete 的 minimax-cn 三模型成员继续对话。",
+  "captainSessionId": "session-eb2973c1-10af-490d-949f-1cf5b8ef7e19",
+  "createdAt": 1787199512897,
+  "members": [
+    {
+      "id": "adc56d77-82a4-474f-980f-44906d052c33",
+      "name": "architect",
+      "role": "architect",
+      "provider": "minimax-cn",
+      "model": "MiniMax-M3",
+      "joinedAt": 1787199516122,
+      "status": "removed"
+    }
+  ],
+  "tasks": [],
+  "taskSeq": 0
+}
