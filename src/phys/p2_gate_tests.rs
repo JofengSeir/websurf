@@ -80,3 +80,25 @@ fn p2_start_solid_phantom_vetoed() {
         r.start_solid, r.all_solid, r.fraction
     );
 }
+
+#[test]
+fn p2_hover_glide_edge_phantom_vetoed() {
+    // f_true 门的关键场景：盒沿平台顶悬停滑行（y=0.03 = DIST_EPSILON 悬停间隙），
+    // 前端（z_max）穿越坡 z=0 端盖。端盖进入的**真实接触分数** f_true 处盒 AABB 与
+    // 坡 AABB 在 y 轴分离 0.03（> EPS=DIST_EPSILON/8=0.0039）→ 必须否决。
+    // 旧实现（扩展进入分数 f + EPS=2*DIST_EPSILON=0.0625）会把 0.03 间隙吸收掉而
+    // 放过 → 盒被端盖擦碰减速（P2 第二层假象，实测摩擦序列证实非碰撞；但门必须
+    // 只否决真实分离，此处验证 f_true 判据的区分能力）。
+    let start = [0.0, 0.03, -25.0];
+    let end = [0.0, 0.03, -10.0];
+    let mins = [-16.0, 0.0, -16.0];
+    let maxs = [16.0, 72.0, 16.0];
+
+    let brushes = [ramp()];
+    let r = trace_box(&start, &end, &mins, &maxs, &brushes.iter().collect::<Vec<_>>());
+    assert_eq!(
+        r.fraction, 1.0,
+        "悬停滑行盒对坡前缘的端盖进入应在 f_true 处被否决（y 分离 0.03），实际 fraction={}",
+        r.fraction
+    );
+}

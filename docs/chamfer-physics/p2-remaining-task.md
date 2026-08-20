@@ -32,10 +32,11 @@
 
 | 验证 | 结果 |
 |---|---|
-| Rust 单测 `src/phys/p2_gate_tests.rs`（3 例） | 3/3 PASS |
-| `phys-gate-probe2.mjs`（仅 ramp，64Hz H=2.5/vz=300） | PASS：盒飞过坡，gate_veto_count=14 |
+| Rust 单测 `src/phys/p2_gate_tests.rs`（4 例） | 4/4 PASS（含 f_true 悬停滑行端盖否决） |
+| `phys-gate-probe2.mjs`（仅 ramp，64Hz **与 144Hz** H=2.5/vz=300） | 双速率 PASS：盒飞过坡，final v=(0,-800,300) 两线一致，veto=16/54 |
 | `phys-p2-ground.mjs`（H=2.1/vz=300 全程 200 tick 逐 tick） | 摩擦序列与 nopre+摩擦公式**逐值吻合**；无幻影 clip |
 | Python `verify_box_aabb_necessary_check.py`（S1 幻影否决/S2 合法保留/S3 perplane≡whole） | 3/3 PASS（几何已修正为 P2 真实 y 分离端盖） |
+| `phys-rate-parity-v2.mjs` 场景 A 对照 | H=8/vz=500 纯坡面接触**收敛**（首碰 2.0781/2.0764，终速 2423.6/2424.2）；H=5 的 144Hz 边缘掠触分叉；H=3 落平台同机制 |
 | 基线 2242.1/2421.6 空中停驻 | 消失 |
 
 ## 4. 残余 H×vz 矩阵发散（9/12）—— 固有速率依赖，非幻影
@@ -96,7 +97,7 @@ node scripts/phys-p2-regression.mjs      # H×vz 矩阵（残余=地面物理速
 |---|---|
 | `src/phys/world.rs` | clip_planes 三处门 + GATE_VETO_COUNT |
 | `src/phys/mod.rs` | gate_veto_count() / debug_trace() 诊断方法 |
-| `src/phys/p2_gate_tests.rs` | 3 单测 |
+| `src/phys/p2_gate_tests.rs` | 4 单测（含 f_true 悬停滑行端盖否决） |
 | `game/scripts/phys-gate-probe2.mjs` | 幻影修复探针（ramp-only） |
 | `game/scripts/phys-p2-ground.mjs` | 全程打点实证（新增） |
 | `game/scripts/phys-p2-regression.mjs` | H×vz 矩阵（地面物理参考） |
