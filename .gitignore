@@ -37,6 +37,8 @@ temp/*
 **/scripts/cdp-*
 
 # ── 编辑器 / 系统 ────────────────────────
+.agent-teams/
+.code-review/
 .workbuddy/
 .vscode/
 .idea/
