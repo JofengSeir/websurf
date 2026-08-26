@@ -224,7 +224,9 @@ function bindInput(): void {
     // 按键捕获门控：仅锁定时接受按键；退锁（ESC 打开面板）后忽略面板内按键
     keyboard.setEnabled(locked);
     keyboard.reset();
-    // 清预测实例残留输入 + 权威 keysMask 归零（防 ESC 前最后输入/按住键残留）
+    // 清预测实例残留输入（防 ESC 前最后输入/按住键残留）；权威键位由下一帧
+    // 输入循环写 0 兜底（退锁后 mask 恒 0 → RendererMain.tick 统一写 SAB，
+    // 一帧内自愈；bridge.addInput 为历史 no-op 占位，显式清权威键位见 blur 处理器）
     renderer?.clearPendingInput();
     bridge?.addInput(0, 0, 0);
     // 重锁时清滚轮跳 pending（面板期间滚动不产生跳跃）
@@ -240,8 +242,11 @@ function bindInput(): void {
 
   window.addEventListener('blur', () => {
     keyboard.reset();
-    // 页面失焦：立即清权威 keysMask + 预测输入（rAF 可能暂停，防 Worker 继续移动）
-    bridge?.addInput(0, 0, 0);
+    // 页面失焦：rAF 后台停摆会冻结 SAB 输入槽（I_KEYS 停在失焦前键位，Worker
+    // 权威模拟按旧键位继续移动）——立即显式写 keysMask=0 清权威键位（SAB 路径
+    // Atomics.store(I_KEYS,0)；MsgState 回退 post input{keys:0}，共享层 addInput
+    // 双通道同接口）+ 清预测待喂输入。
+    sharedState?.addInput(0, 0, 0);
     renderer?.clearPendingInput();
   });
 

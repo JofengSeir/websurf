@@ -4,6 +4,11 @@
  * 坐标已旋转为 Y-up（[x,y,z]→[y,z,x]），TS 端不再二次重映射。
  * yaw 转换（关键）：BSP yaw 为方位角（顺时针），cs-movement/Three.js yaw 为逆时针（从 +Y 向下看），
  * 旋转后 BSP +Y→TS +X、+X→+Z，故转换公式 cs_yaw = (270 - BSP_yaw) % 360。
+ *
+ * ⚠️ 未接线（预留工具，勿误认为活跃加载链路）：全仓无任何 import 本模块；
+ * 出生点实际加载走共享层 src/ts-shared/phys/world-builder.ts 的 parse_spawn_points
+ * 管线（buildWorldBundle 直接消费其 JSON）。本文件保留作为坐标/yaw 转换的参考实现，
+ * 公式推导另被 world/teleport-manager.ts 注释引用。
  */
 
 import type { Vec3 } from '../physics/math/vec3.js';

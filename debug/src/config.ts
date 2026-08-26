@@ -20,7 +20,7 @@ export interface PhysicsConfig {
   slideAngle: number; // 弧度
   /** 物理模拟频率（Hz，默认 64；面板可调 48-128）。 */
   tickRate: number;
-  /** 传送落地触发门槛帧数，Rust 侧当前未消费，为 config 对齐预留。默认 1。 */
+  /** 传送落地触发门槛帧数，Rust 侧当前未消费，为 config 对齐预留。默认 3。 */
   teleportGateTicks: number;
 }
 

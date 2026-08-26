@@ -64,7 +64,12 @@ export class InputBridge {
     this.worker.postMessage({ type: 'teleport', target });
   }
 
+  /** 设置死亡 Y 阈值：本地预测物理 + Worker 权威物理双端同值（对齐 debug 桥模式）。 */
   sendSetDeathThreshold(value: number): void {
     this.renderer.setDeathY(value);
+    // 权威侧同值下发：共享 dispatch（worker-dispatch.ts set-death-threshold）→
+    // Rust set_death_y。缺此消息权威 death_y 恒为 Rust 默认 -100000，与主线程
+    // 场景包围盒阈值不一致 → 双端死亡判定分叉。
+    this.worker.postMessage({ type: 'set-death-threshold', value });
   }
 }
