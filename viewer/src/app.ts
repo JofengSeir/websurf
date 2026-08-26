@@ -82,14 +82,50 @@ const canvas = document.getElementById('game') as HTMLCanvasElement | null;
 const bspFileInput = document.getElementById('bspFile') as HTMLInputElement | null;
 const bspStatusEl = document.getElementById('bspStatus') as HTMLElement | null;
 const poseEl = document.getElementById('pose') as HTMLElement | null;
+const guideEl = document.getElementById('guide');
+const guideBtn = document.getElementById('guideBtn') as HTMLButtonElement | null;
+const guideErrorEl = document.getElementById('guideError');
+const dropzoneEl = document.getElementById('dropzone');
+const fatalEl = document.getElementById('fatal');
+const fatalDetailEl = document.getElementById('fatalDetail');
+const bspbarBtn = document.getElementById('bspbarBtn');
 if (!canvas) throw new Error('canvas#game 未找到');
 
+/** 启动失败兜底卡（WebGL 缺失等初始化期错误；资源加载缺失由 index.html 内联脚本覆盖）。 */
+function showFatal(detail: string): void {
+  if (!fatalEl || !fatalDetailEl) return;
+  fatalDetailEl.textContent =
+    detail +
+    '\n\n建议：使用最新版 Chrome / Edge / Firefox（需 WebGL）；' +
+    '若首次构建请先在 viewer/ 目录运行 npm install → npm run build:wasm → npm run build:ts。';
+  fatalEl.classList.add('show');
+}
+
+/** 状态行临时闪现提示（约 3s 后恢复原文本，用于指针锁定失败等轻量反馈）。 */
+function flashStatus(text: string, ms = 3000): void {
+  if (!bspStatusEl) return;
+  const prev = bspStatusEl.textContent;
+  bspStatusEl.textContent = text;
+  window.setTimeout(() => {
+    if (bspStatusEl.textContent === text && prev !== null) bspStatusEl.textContent = prev;
+  }, ms);
+}
+
 // ── THREE 初始化 ─────────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({
-  canvas,
-  antialias: true,
-  powerPreference: 'high-performance',
-});
+let renderer: THREE.WebGLRenderer;
+try {
+  renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    powerPreference: 'high-performance',
+  });
+} catch (e) {
+  showFatal(
+    '无法创建 WebGL 渲染上下文（' + (e instanceof Error ? e.message : String(e)) + '）。\n' +
+      '可能原因：浏览器禁用了 WebGL / 硬件加速未开启 / 显式驱动过旧。',
+  );
+  throw e;
+}
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -165,6 +201,7 @@ canvas.addEventListener('click', () => {
 
 document.addEventListener('pointerlockerror', () => {
   console.warn('[viewer] Pointer Lock 请求失败');
+  flashStatus('鼠标锁定失败，请再点击一次画布重试');
 });
 
 document.addEventListener('pointerlockchange', () => {
@@ -189,7 +226,7 @@ window.addEventListener('mousemove', (e) => {
 
 window.addEventListener('keydown', (e) => {
   if (!locked) return;
-  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight'].includes(e.code)) {
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'Space', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight'].includes(e.code)) {
     e.preventDefault();
     keys.add(e.code);
   }
@@ -257,8 +294,17 @@ let mainWasmReady: Promise<void> | null = null;
 function ensureMainWasm(): Promise<void> {
   if (!mainWasmReady) {
     mainWasmReady = (async () => {
-      const resp = await fetch('./websurf_viewer_wasm_bg.wasm');
-      if (!resp.ok) throw new Error(`fetch wasm → ${resp.status}`);
+      let resp: Response;
+      try {
+        resp = await fetch('./websurf_viewer_wasm_bg.wasm');
+      } catch (e) {
+        throw new Error('WASM 文件请求失败：请确认通过 npm run dev 启动并访问 http://localhost:8080/');
+      }
+      if (!resp.ok) {
+        throw new Error(
+          `fetch wasm → ${resp.status}：缺少 WASM 产物，请在 viewer/ 目录先运行 npm run build:wasm`,
+        );
+      }
       initSync({ module: await resp.arrayBuffer() });
     })();
   }
@@ -274,7 +320,63 @@ function setBspStatus(text: string): void {
   if (bspStatusEl) bspStatusEl.textContent = text;
 }
 
+// ── 引导层 / 错误可视化 ──────────────────────────────────────────────
+function showGuideError(human: string, raw?: string): void {
+  if (!guideErrorEl) return;
+  guideErrorEl.innerHTML = '';
+  const msg = document.createElement('div');
+  msg.textContent = human;
+  guideErrorEl.appendChild(msg);
+  if (raw) {
+    const detail = document.createElement('span');
+    detail.className = 'raw';
+    detail.textContent = raw;
+    guideErrorEl.appendChild(detail);
+  }
+  guideErrorEl.classList.add('show');
+}
+
+function clearGuideError(): void {
+  guideErrorEl?.classList.remove('show');
+}
+
+function hideGuide(): void {
+  guideEl?.classList.add('hidden');
+}
+
+function showGuide(): void {
+  guideEl?.classList.remove('hidden');
+}
+
+/** 把底层异常翻译成人话；返回 [人类可读, 原始信息]。 */
+function humanizeBspError(e: unknown): [string, string] {
+  const raw = e instanceof Error ? e.message : String(e);
+  if (/magic|format|parse|binrw|unexpected|invalid/i.test(raw)) {
+    return ['这不是有效的（或暂不支持的）BSP 地图文件', raw];
+  }
+  if (/wasm|fetch|404|network/i.test(raw)) {
+    return ['运行时组件缺失：请先完成构建（npm run build:wasm）', raw];
+  }
+  if (/memory|allocation/i.test(raw)) {
+    return ['地图过大，内存不足导致解析失败', raw];
+  }
+  return ['地图加载失败', raw];
+}
+
+/** 加载互斥：解析进行中忽略新的加载请求，防止并发解析竞态。 */
+let bspLoading = false;
+
+function setLoadBusy(busy: boolean): void {
+  guideBtn?.classList.toggle('busy', busy);
+  bspbarBtn?.classList.toggle('busy', busy);
+  if (bspFileInput) bspFileInput.disabled = busy;
+}
+
 async function loadBsp(file: File): Promise<void> {
+  if (bspLoading) return;
+  bspLoading = true;
+  setLoadBusy(true);
+  clearGuideError();
   try {
     setBspStatus(`正在解析 ${file.name}（主线程 BSP 解析）…`);
     await ensureMainWasm();
@@ -292,7 +394,7 @@ async function loadBsp(file: File): Promise<void> {
     // 借用导出（spawn）必须在消费 BSP 的 export_glb* 之前调用
     const spawnJson = proc.parse_spawn_points();
     const glb = proc.export_glb_with_pakfile_models();
-    const glbBytes = glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength);
+    const glbBytes = glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength) as ArrayBuffer;
 
     await loadGlb(glbBytes);
 
@@ -327,15 +429,59 @@ async function loadBsp(file: File): Promise<void> {
           `GLB ${Math.round(glbBytes.byteLength / 1024)} KB（已应用外部位姿）`,
       );
     }
+    hideGuide();
   } catch (e) {
-    setBspStatus(`BSP 加载失败：${e instanceof Error ? e.message : String(e)}`);
+    const [human, raw] = humanizeBspError(e);
+    setBspStatus(`BSP 加载失败：${human}`);
     console.error('[viewer] BSP 加载失败:', e);
+    if (!modelRoot) {
+      // 尚无任何地图：回到引导层并展示可见错误
+      showGuide();
+      showGuideError(human, raw);
+    } else {
+      // 已有地图在场景中：保留画面，仅状态行提示
+      flashStatus(`新地图加载失败：${human}`, 5000);
+    }
+  } finally {
+    bspLoading = false;
+    setLoadBusy(false);
   }
 }
 
 bspFileInput?.addEventListener('change', () => {
   const file = bspFileInput.files?.[0];
+  bspFileInput.value = ''; // 允许重复选择同名文件（change 事件依赖 value 变化）
   if (file) void loadBsp(file);
+});
+
+// 引导层按钮复用同一个文件输入（避免双 input 状态不同步）
+guideBtn?.addEventListener('click', () => bspFileInput?.click());
+
+// ── 拖拽加载（既有文件加载交互的标准形态）────────────────────────────
+window.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  if (!bspLoading) dropzoneEl?.classList.add('active');
+});
+window.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) dropzoneEl?.classList.remove('active');
+});
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzoneEl?.classList.remove('active');
+  if (bspLoading) return;
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  if (!/\.bsp$/i.test(file.name)) {
+    if (!modelRoot) {
+      // 尚无地图：引导层可见，错误写引导层
+      showGuideError('请拖入 .bsp 地图文件（当前拖入的是其他类型）', file.name);
+    } else {
+      // 已有地图在场景中：引导层已隐藏，走状态行闪现
+      flashStatus(`未加载：${file.name} 不是 .bsp 地图文件`, 5000);
+    }
+    return;
+  }
+  void loadBsp(file);
 });
 
 // ── GLB 场景构建 ─────────────────────────────────────────────────────
@@ -599,7 +745,7 @@ function frame(now: number): void {
     if (keys.has('KeyD')) move.add(right);
     if (keys.has('KeyA')) move.sub(right);
     if (keys.has('Space')) move.y += 1;
-    if (keys.has('ControlLeft') || keys.has('ControlRight')) move.y -= 1;
+    if (keys.has('KeyC') || keys.has('ControlLeft') || keys.has('ControlRight')) move.y -= 1;
     if (move.lengthSq() > 0) {
       fly.pos.addScaledVector(move.normalize(), speed * dt);
     }

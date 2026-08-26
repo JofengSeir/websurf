@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WebSurf-viewer — BSP 自由视角查看器</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='4' width='24' height='24' rx='5' fill='%230d1b2a'/%3E%3Cpath d='M9 20 L16 9 L23 20 Z' fill='none' stroke='%238ab4f8' stroke-width='2.2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='17' r='2.2' fill='%23c9a05c'/%3E%3C/svg%3E" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
@@ -47,29 +48,140 @@
     #bspbar .filebtn:hover { background: rgba(255,255,255,0.12); }
     #bspbar input[type="file"] { display: none; }
     #bspStatus { font-size: 12px; color: #9aa3b2; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ── 首访引导层（无地图时显示）─────────────────────────────── */
+    #guide {
+      position: absolute; inset: 0; z-index: 8;
+      display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at center, rgba(13,27,42,0.55), rgba(15,17,21,0.88));
+    }
+    #guide.hidden { display: none; }
+    #guide .card {
+      max-width: 420px; margin: 0 16px; padding: 26px 30px;
+      border-radius: 14px; text-align: center;
+      background: rgba(15,17,21,0.92); border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+    }
+    #guide .gtitle { font-size: 17px; font-weight: 600; color: #e2e8f0; margin-bottom: 14px; }
+    #guide .gstep { font-size: 13px; color: #9aa3b2; line-height: 2; }
+    #guide .gstep code { font-size: 12px; color: #8ab4f8; }
+    #guide kbd {
+      font-family: inherit; font-size: 11px; color: #9aa3b2;
+      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 4px; padding: 1px 5px; margin: 0 1px;
+    }
+    #guideBtn {
+      display: inline-block; margin-top: 18px; padding: 9px 22px;
+      font-size: 13px; color: #0f1115; font-weight: 600;
+      background: #8ab4f8; border: none; border-radius: 9px; cursor: pointer;
+    }
+    #guideBtn:hover { background: #a5c6ff; }
+    #guideBtn.busy, #bspbar .filebtn.busy {
+      opacity: 0.45; pointer-events: none; cursor: default;
+    }
+    #guideError {
+      display: none; margin-top: 14px; padding: 9px 12px; text-align: left;
+      font-size: 12px; line-height: 1.7; color: #ffb4a8;
+      background: rgba(255,99,71,0.09); border: 1px solid rgba(255,99,71,0.35);
+      border-radius: 8px; word-break: break-all;
+    }
+    #guideError.show { display: block; }
+    #guideError .raw { display: block; margin-top: 5px; font-size: 11px; color: #b08a83; }
+
+    /* ── 拖拽视觉反馈 ──────────────────────────────────────────── */
+    #dropzone {
+      position: absolute; inset: 0; z-index: 9; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(138,180,248,0.08);
+      box-shadow: inset 0 0 0 3px #8ab4f8;
+      font-size: 16px; color: #a5c6ff; font-weight: 600;
+      pointer-events: none; text-shadow: 0 1px 8px rgba(0,0,0,0.7);
+    }
+    #dropzone.active { display: flex; }
+
+    /* ── 启动失败兜底卡 ────────────────────────────────────────── */
+    #fatal {
+      position: absolute; inset: 0; z-index: 20; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(15,17,21,0.96);
+    }
+    #fatal.show { display: flex; }
+    #fatal .card {
+      max-width: 480px; margin: 0 16px; padding: 26px 30px;
+      border-radius: 14px;
+      background: rgba(15,17,21,0.98); border: 1px solid rgba(255,99,71,0.4);
+    }
+    #fatal .ftitle { font-size: 16px; font-weight: 600; color: #ffb4a8; margin-bottom: 12px; }
+    #fatal .fdetail { font-size: 12px; color: #9aa3b2; line-height: 1.9; white-space: pre-wrap; word-break: break-all; }
+    #fatal .fdetail code { color: #8ab4f8; }
   </style>
 </head>
 <body>
 <div id="app">
   <canvas id="game"></canvas>
 
+  <!-- 启动失败兜底（JS 检测到初始化错误时显示）-->
+  <div id="fatal">
+    <div class="card">
+      <div class="ftitle">viewer 初始化失败</div>
+      <div class="fdetail" id="fatalDetail"></div>
+    </div>
+  </div>
+
+  <!-- 首访引导层（地图加载成功后隐藏）-->
+  <div id="guide">
+    <div class="card">
+      <div class="gtitle">加载 BSP 地图，开始自由视角预览</div>
+      <div class="gstep">
+        ① 点击下方按钮选择 <code>.bsp</code> 地图文件，<br>或直接把它<b>拖进本窗口</b>（仓库 <code>maps/</code> 目录有现成示例）
+      </div>
+      <div class="gstep">
+        ② 加载后点击画面锁定鼠标，<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移、
+        <kbd>空格</kbd>/<kbd>C</kbd> 升降、<kbd>Shift</kbd> 加速、<kbd>Esc</kbd> 解锁
+      </div>
+      <button id="guideBtn" type="button">选择 BSP 地图…</button>
+      <div id="guideError"></div>
+    </div>
+  </div>
+
+  <!-- 拖拽高亮反馈 -->
+  <div id="dropzone">松开鼠标，加载 .bsp 地图</div>
+
   <div id="hud">
     <div class="title">WebSurf-viewer — BSP 自由视角查看器</div>
     <div class="hint">
-      点击画布锁定鼠标；<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移，<kbd>空格</kbd>/<kbd>Ctrl</kbd> 升降，<kbd>Shift</kbd> 加速（×4），<kbd>Esc</kbd> 解锁
+      点击画布锁定鼠标；<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移，<kbd>空格</kbd>/<kbd>Ctrl</kbd>/<kbd>C</kbd> 下降与升降，<kbd>Shift</kbd> 加速（×4），<kbd>Esc</kbd> 解锁
     </div>
     <div class="hint">
       位姿传入：URL <code>?pos=x,y,z&amp;ang=yaw,pitch</code>（加载即应用）或 <code>#pos=...&amp;ang=...</code>（hash 变更实时应用）；JS <code>window.viewer.setPose/getPose</code>
     </div>
     <div class="hint" id="pose">未就绪</div>
-    <div class="hint" id="bspStatus">未加载地图（选择 .bsp 文件加载）</div>
+    <div class="hint" id="bspStatus">未加载地图（选择或拖入 .bsp 文件加载）</div>
   </div>
 
   <div id="bspbar">
-    <label class="filebtn">加载 BSP 地图<input id="bspFile" type="file" accept=".bsp" /></label>
+    <label class="filebtn" id="bspbarBtn">加载 BSP 地图<input id="bspFile" type="file" accept=".bsp" /></label>
   </div>
 </div>
 
+<!-- 资源加载兜底：app.js / wasm 缺失（未构建就打开页面）时给出可见指引 -->
+<script>
+  window.addEventListener('error', function (e) {
+    var t = e && e.target;
+    var isResource = t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG');
+    if (!isResource) return;
+    var name = (t.src || t.href || '').split('/').pop();
+    var hint = name && name.indexOf('.wasm') >= 0
+      ? '缺少 WASM 产物：请在 viewer/ 目录先运行 npm run build:wasm'
+      : '缺少构建产物（' + (name || 'app.js') + '）：请在 viewer/ 目录依次运行 npm install、npm run build:wasm、npm run build:ts';
+    var fatal = document.getElementById('fatal');
+    var detail = document.getElementById('fatalDetail');
+    if (fatal && detail) {
+      detail.textContent = hint + '\n\n需要 WebGL 的现代桌面浏览器（Chrome / Edge / Firefox 最新版）。';
+      fatal.classList.add('show');
+    }
+  }, true);
+</script>
 <script type="module" src="./app.js"></script>
 </body>
 </html>
