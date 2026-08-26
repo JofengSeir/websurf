@@ -1,7 +1,9 @@
 # WebSurf 材质系统（公共技术）
 
-> 最后核对：2026-08-13。以实际代码为准（`src/wasm-core/mosaic/`、`src/wasm-core/texture_utils/`）。
-> 测试工程 `test/dual-mode-harness/` 的 wasm 导出层**不含** mosaic/缺失纹理/默认纹理包（无画质切换与回退），本体系仅适用于 debug / game 两端。
+> 最后核对：2026-08-24。以实际代码为准（`src/wasm-core/mosaic/`、`src/wasm-core/texture_utils/`）。
+> 适用范围：wasm 层的 mosaic 导出（encode/decode/decompress_mtz）存在于 debug / game /
+> test/instanced-diorama 三处导出层；**完整体系**（画质切换 + 默认纹理包回退链路）当前仅
+> debug / game 两端前端接入——viewer 与 dual-mode-harness 的导出层不含 mosaic。
 
 两端（debug / game）共用的材质处理体系：**原始纹理（VTF）→ GLB 嵌入** + **低清压缩（mosaic v4）** + **默认纹理包（MTZ 打包）** + **画质切换** + **缺失纹理回退**。
 代码位于共享层 `src/wasm-core/mosaic/` 与 `src/wasm-core/texture_utils/`。
@@ -16,10 +18,10 @@
 | `src/wasm-core/mosaic/encode.rs` | **压缩**：PNG → `#mosaic v4` 字节码（`img_to_code`） |
 | `src/wasm-core/mosaic/decode.rs` | **解压**：字节码 → 低清 PNG（`code_to_img`，2 次幂对齐） |
 | `src/wasm-core/mosaic/manifest.rs` | **拼装**：BSP 纹理收集（`collect_face_texture_names`）、画质 manifest（`build_mosaic_manifest`）、缺失列表（`collect_missing_textures`） |
-| `src/wasm-core/mosaic/mtz.rs` | **打包**：textures.json ↔ MTZ 压缩容器（`compress_json` / `decompress_mtz`，字段分区 + LZ77 + Huffman） |
-| `src/materials/textures.mtz` | 默认纹理包（MTZ6，9448+ 条；公共资源，三处副本） |
+| `src/wasm-core/mosaic/mtz.rs` | **打包**：textures.json ↔ MTZ 压缩容器（**写 MTZ6、读 MTZ5+MTZ6**；字段分区 + LZ77 + Huffman） |
+| `src/materials/textures.mtz` | 默认纹理包（MTZ6，**9,448 条**——容器头 count 实测；5,942,995 B ≈5.67MB；公共资源，三处副本） |
 
-wasm 导出（两端 `crates/wasm/src/lib.rs`）：`mosaic_encode` / `mosaic_decode` / `decompress_mtz`（顶层）、`BspProcessor.export_mosaic_manifest` / `export_missing_textures` / `export_glb_with_pakfile_models_with_defaults`。
+wasm 导出：`mosaic_encode` / `mosaic_decode` / `decompress_mtz`（顶层）+ `BspProcessor.export_mosaic_manifest` / `export_missing_textures` / `export_glb_with_pakfile_models_with_defaults`，存在于 debug 与 game 的 `crates/wasm/src/lib.rs`（instanced-diorama 导出层亦含前三个 mosaic 顶层函数）。
 
 ---
 
@@ -86,16 +88,22 @@ PNG 字节
 ```
 textures.json（逐条 "key": "#mosaic v4\n..."）
   ├─ 解析为 Entry（key/w/h/调色板/签名/alpha/索引/opacity）
-  ├─ 字段分区分组：meta（定长 8B 含 opacity）/名字/颜色/签名/alpha/索引
+  ├─ 字段分区分组：meta /名字/颜色/签名/alpha/索引 六区
   │   （同类数据集中，统计分布互不污染）
-  ├─ 每区独立规范 Huffman；Huffman 前可选 LZ77（哈希链 + 贪心），取更小者写标志位
+  ├─ **meta 区恒纯 Huffman**；其余五区各自尝试「纯 Huffman vs LZ77+Huffman（大窗口
+  │   自定义实现）」取更小者，分别记入 flags bit0..4
   └─ 输出 MTZ 文件：
-       magic "MTZ6"（旧 "MTZ5" 兼容解压，meta 7B 无 opacity）
-       + u32 条目数 + u8 区域标志位 + 6 个 Huffman 块（256B 码长表 + u32 长度 + 位流）
+       magic "MTZ6"(4B) + count u32 LE + flags u8
+       + 6 个 Huffman 块（256B 码长表 + u32 解码长度 + 位流）
 ```
 
-- **无损往返**：解压（`decompress_mtz`）还原结果与压缩前**逐字节一致**（`unpack --check` 校验）。
-- 实测（默认包）：5.67MB → 解压 11.4MB JSON，9448 条，~200ms。
+- **MTZ6 的 meta 记录定长 8 字节**：`name_len u16 + w u8 + h u8 + colors 数 u8 + sig_len u8 +
+  alpha 标志 u8 + opacity u8`；旧 **MTZ5 为 7 字节**（无 opacity，解压时默认 255）——读侧同时兼容两种魔数。
+- **无损往返**：解压（`decompress_mtz`）还原结果与压缩前**逐字节一致**（JSON 往返一致有单元测试保障，
+  另有独立 `unpack --check` 工具校验）。
+- 实测（默认包）：5.67MB（5,942,995 B）→ 解压 11.4MB JSON，**9,448 条**（容器头 count 实测），~200ms。
+  （~200ms 为撰写时一次实测的经验值，非稳定基准——随机器 CPU 与运行环境（Node/浏览器 JS 引擎、
+  JIT 预热状态）不同会有明显出入，仅作数量级参考。）
 - 打包工具链（`materials-mini`，独立工具工程，用后即删）：`encode-img`（图片目录 → textures.json）→ `pack`（json → mtz）→ `unpack --check`（校验）→ `decode-img`（还原验证）。
 
 ---
@@ -128,13 +136,18 @@ textures.json（逐条 "key": "#mosaic v4\n..."）
 **流程**：
 
 ```
-地图加载 → 默认纹理包（内嵌 base64 或 fetch）→ decompress_mtz → JSON
+地图加载 → 默认纹理包（内嵌 base64 __VBSP_TEXTURES_MTZ_B64__，否则 fetch ./textures.mtz）
+  → decompress_mtz → defaultsJson
   → export_glb_with_pakfile_models_with_defaults(defaultsJson)
       └─ Rust 导出循环：材质失败 → 查表 → 低清纹理嵌入 GLB
   → 渲染端：缺失墙面直接显示默认包低清纹理
 ```
 
-**弹窗**（debug）：加载后列出缺失纹理（默认包可覆盖 N 个 / 完全缺失 M 个），确认仅关闭（回退已完成）。
+- 加载链在 ts-shared `world-builder.ts` 统一实现（两端 handleLoadBsp 收敛）；默认包解压或导出异常时
+  **双重回退**为无回退导出（缺失处保持占位色），不阻断加载。
+- **弹窗**（debug）：`showMissingTextures` 将导出的 missingTextures 与默认纹理包键集比对——绿色
+  「✓ 可覆盖」（已在构建期自动回退低清纹理）/ 红色「✗ 缺失」（保持占位色）；确认按钮仅关闭
+  （回退早已在 Rust GLB 导出期完成）。
 
 ---
 
@@ -142,10 +155,15 @@ textures.json（逐条 "key": "#mosaic v4\n..."）
 
 | 位置 | 说明 |
 |---|---|
-| `src/materials/textures.mtz` | 公共源（MTZ6） |
-| `debug/web/`、`game/web/` | dev 副本（serve 提供） |
+| `src/materials/textures.mtz` | 公共源（MTZ6）——**构建期真正输入源**（两份 build-dist.mjs 都只读它） |
+| `debug/web/`、`game/web/` | dev 副本（serve 直开用；均被 git 跟踪——根 `.gitignore:14` 明确豁免「`**/web/textures.mtz` 不在此列」并注明是公共默认纹理包的副本，debug/game 各自 .gitignore 同样标注勿排除） |
 | dist（single 内嵌 / multi 外置） | 打包自动附带 |
 
-**single（file://）内嵌链路**：`__VBSP_TEXTURES_MTZ_B64__`（主线程直接读，atob → decompress）——解析/导出在主线程，无需下发给 Worker（`wasm-init` 消息的 `mtzB64` 字段与 `worker/mtz-data.ts` 仅为协议兼容保留，权威 Worker 不消费默认包）。
+**副本同步现状**：三处副本 SHA256 逐字节一致（2026-08-24 快照实测，前 16 位 `A87F36F591CBD5B4`，
+5,942,995 B）；web/ 两份仅为 dev 页面直开而存在，**有漂移风险**——更新默认包时须三处同步替换。
+
+**single（file://）内嵌链路**：`__VBSP_TEXTURES_MTZ_B64__`（主线程直接读 / world-builder 统一消费）——
+解析/导出在主线程完成回退注入，无需下发给 Worker（`wasm-init` 消息的 `mtzB64` 字段与 debug
+`worker/mtz-data.ts` 仅为协议兼容保留，权威 Worker 不再消费默认包）。
 
 **导出/更新**：由独立工具（materials-mini：encode-img → pack）生成新 mtz → 替换 `src/materials/textures.mtz` 并同步两端 `web/` 副本；`decompress_mtz` 兼容 MTZ5（旧包）与 MTZ6（含半透明系数）。

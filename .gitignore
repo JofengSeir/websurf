@@ -37,15 +37,15 @@ temp/*
 **/scripts/cdp-*
 
 # ── 编辑器 / 系统 ────────────────────────
-.agent-teams/
-.code-review/
-.workbuddy/
-.vscode/
-.idea/
+**/.agent-teams/
+**/.code-review/
+**/.team-docs/
+**/.workbuddy/
+**/.vscode/
+**/.idea/
 *.log
 .DS_Store
 Thumbs.db
-agent-teams-guide.md
 
 # extract 本地工具缓存
 **/.wasm-bindgen/

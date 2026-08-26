@@ -3,7 +3,7 @@
 > 方案定稿：2026-08-09。目标：debug 主线程成为唯一物理渲染线（BspProcessor 解析 + PhysWorld.build_world + 每 rAF tick + 渲染），Worker 退化为权威帧计算器（固定步长 + 权威全状态双缓冲 V_A）；"物理渲染"两端共用一套 TS 实现。
 > 执行方式：分 5 阶段 + 公共化，每阶段由子代理实施并节点测试。
 >
-> **⚠ 历史方案（2026-08-09 晚标注）**：本方案已由 commit 0f3558b 完整实施（ts-shared 公共化 + debug 主线程解析/物理 + Worker 权威帧 + 删除 LERP/physics-loop）。文中引用的文件路径/行号已大面积失效（debug 原 worker/shared-state.ts、physics-loop.ts 已删；shared-state 迁至 src/ts-shared/auth/）。仅 `debug/src/config.ts` 的 `teleportTriggerMode` 死字段（本方案 4.3 的删除项）保留为 config 占位。
+> **⚠ 历史方案（2026-08-09 晚标注）**：本方案已由 commit 0f3558b 完整实施（ts-shared 公共化 + debug 主线程解析/物理 + Worker 权威帧 + 删除 LERP/physics-loop）。文中引用的文件路径/行号已大面积失效（debug 原 worker/shared-state.ts、physics-loop.ts 已删；shared-state 迁至 src/ts-shared/auth/）。~~仅 `debug/src/config.ts` 的 `teleportTriggerMode` 死字段（本方案 4.3 的删除项）保留为 config 占位。~~（**2026-08-24 补注**：该字段现已从 config.ts 彻底移除，全仓零引用——本方案的删除项已全部完成。）
 
 ## 1. 目标架构
 

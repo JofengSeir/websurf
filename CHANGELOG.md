@@ -6,8 +6,13 @@
 
 ### 新增
 
+- **viewer 最小 BSP 自由视角查看器（349ee26，2026-08-19）**：新增第四应用工程
+  `viewer/`——最小 BSP 自由视角查看器（WASM 解析 + Three.js 渲染，无玩法系统），
+  位姿三通道：URL 参数 / `location.hash` / `window.viewer` 编程接口；自带
+  README 与 `docs/overview.md`；path 依赖共享层 `../src`、dev 复用
+  `../src/serve.py`；不接入 Pages CI（仅 debug/game 部署）。
 - **test/ 测试合集重组（2026-08-13）**：根 `test/` 集中全部测试内容并细分三目录——
-  - `test/dual-mode-harness/`：原 WebSurf-test 验证工程整体搬入（双模物理 + 帧信号渲染时序验证，含 mini/ 与 scripts/ 全套验证套件）；
+  - `test/dual-mode-harness/`：原 WebSurf-test 验证工程整体搬入（双模物理 + 帧信号渲染时序验证，含 mini/〔随后已移除，2026-08-24 核对不在仓库〕与 scripts/ 全套验证套件）；
   - `test/extract/`：原根 `extract/`（bsp-extract 独立解包器）整体搬入（CLI + wasm + 网页/查看器，URL 变更为 `/test/extract/web|viewer/`）；
   - `test/map-min-export/`：**新增**地图最小导出实验——导出**最小可视几何**（GLB，跳过 SKY/TRIGGER/NODRAW/HINT/SKIP 不可见面）+ **碰撞**（BRUSHES/BRUSHSIDES/PLANES → `{planes,min,max,is_ladder,is_solid}` JSON，与 game brushJson 契约同构）+ **材质纹理**（PAKFILE 提取 VMT/VTF，VTF→PNG 解码 DXT1/DXT5/常见未压缩格式），含 manifest 与 Node 验证脚本；
   - **CSS + CS:GO 双版本支持（2026-08-14）**：Source 1 v19~v29 全版本；`FACES` 按 lump version 分派（v0 28B CSS 老图 / v1 56B / v2 64B，关键字段偏移全版本一致）；CSS 无 PAKFILE 场景优雅注明（材质在外部 vpk）而非报错；合成 v19 CSS 特征 BSP 全链路验证（FACES v0 + 空 PAKFILE + NODES/LEAFS v0 + 实体 brush origin 平移）19/19 PASS；extract 补 FACES v0 合成回归测试；产物零冗余（PNG 成功不落 .vtf）。
@@ -43,7 +48,7 @@
   `test/` 独立工程（不入 Pages 部署），验证"主线程不做物理/渲染（BSP 解析导出 +
   输入转发 + rAF wake）→ SAB 无锁 → WorkerA 双模物理 → WorkerB 帧信号渲染"完整循环，
   含 `scripts/` 验证套件（phys-smoke **192/192 PASS** / perf-bench / race-wakeup /
-  tmp-dual-compare / trace-verify）与 `play.cmd`。
+  tmp-dual-compare（现名 `dual-compare.mjs`）/ trace-verify）与 `play.cmd`。
   - **WorkerA 双模物理核心（d1767c0 重构）**：**先 tick 计算 → 后无限制计算**；
     模式A = 1ms 子步 + 实时输入（位置/角度唯一推进者，共享槽唯一写入者）；
     模式B = **独立 64t 权威速度线**（第二个 PhysWorld，只走 tickDt 步长：
@@ -90,7 +95,7 @@
     crates/wasm 物理部分，game 中诞生后上移共享）、`websurf-wasm-core`
     （BSP 解析/GLB/模型/纹理解析，纯 rlib）、`vendor/vmdl`（vendored，单副本）、
     `materials/textures.mtz`（默认纹理包 9448+ 条，三处副本同步）、
-    `serve.py`（共享 dev 服务器；BSP 地图位于仓库根 `maps/` 与 `game/maps/`，gitignored）
+    `serve.py`（共享 dev 服务器；BSP 地图位于仓库根 `maps/`，gitignored）
   - `debug/` = **WebSurf-debug**（原全功能主项目迁入）：`crates/wasm/src/`
     仅导出层 `lib.rs`；`src/` TS 全套（app/renderer/worker/world/physics/game/panel）；
     `web/`
@@ -125,10 +130,17 @@
 - **移除 test/game（2026-08-19）**：`test/game/`（WebSurf-game 修复版自包含移植）
   整体移除（git rm，历史保留）；关联清理：CI（deploy-pages.yml）移除其构建与
   `deploy/test/game` 组装、Pages 入口页（debug/scripts/pages-index.html）移除
-  Test/Game Fixes 入口、GitHub Issue/PR 模板与 README / docs/architecture 同步更新
+  Test/Game Fixes 入口、GitHub Issue/PR 模板与 README / docs/architecture 同步更新；
+  同提交一并移除根目录 `git-sync-ref.sh`（d55593a 引入的本机 packed-refs
+  tracking-ref 修复脚本，仅开发环境使用，未入文档）
 
 ### 修复
 
+- **P2 坡顶幻影根治（7c33a58 / 4f11e5a / 0b08a61，2026-08-19~20）**：盒-AABB
+  碰撞必要性校验（进入/start_solid 门 + f_true + EPS 收紧）消除坡顶幻影碰撞；
+  随后 docs+verify 实证残余发散为地面物理固有速率依赖（非幻影）；
+  补 f_true 悬停滑行端盖否决单测（4/4 PASS）与 probe2 双速率验证；
+  分析与验证脚本见 `docs/chamfer-physics/` 与 `game/scripts/phys-p2-*.mjs`。
 - **CI（3618603）**：Pages 流水线修复——Node 20 弃用 + 仓库重构后 lock 文件位置变化导致的构建失败；测试前置改用 Node 20 后，Pages 构建步骤升级
 - **地图重载内存泄漏**：`loadScene` 移除旧 BSP 模型只 `remove()` 不 `dispose()`，
   GPU 侧 geometry/material/纹理（含 lightmap atlas）累积导致帧率下降。新增

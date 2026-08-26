@@ -1,6 +1,6 @@
 # debug 材质模块（应用侧）
 
-> 最后核对：2026-08-13。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/phys/world-builder.ts`）。
+> 最后核对：2026-08-24。以实际代码为准（`debug/src/` + 共享 `src/ts-shared/phys/world-builder.ts`）。
 > 公共材质技术（mosaic 压缩 / MTZ 打包 / 解压拼装 / 回退机制）见 `docs/materials.md`。
 > 本文档：debug 侧的**应用链路**——画质切换、缺失纹理回退、默认纹理包比对弹窗、运行时 wasm。
 
@@ -20,7 +20,7 @@
 面板「纹理画质」radio
   → applyConfigPatch(config, 'texture', { quality })
   → renderer.applyConfigPatch('texture') → applyTextureQuality(quality)
-  → 遍历 bspModelScene 材质收集 map（按贴图名去重）
+  → 遍历 bspModelScene 材质收集 map（按 Texture 对象实例去重 Set<Texture>，renderer-main.ts:681-691）
   → mini：manifest[map.name 小写] → mosaic_decode(code, 8)
       → ImageBitmap → map.dispose() → map.image = bitmap → needsUpdate
   → original：恢复 origTextureImages 缓存的原图（同样 dispose）

@@ -10,6 +10,11 @@ teleportGateTicks（§4.6）｜P7 跳跃冲量无补偿（专题 B③）。
 
 ## P1 手感偏沉 —— 大部分子项被 P2/P3 覆盖
 
+> **实施状态（2026-08-24 复核）**：判断维持（[不修] 子项不动、无新增实施）。引用刷新：noPrestrafe /
+> bhopSpeedClamp 默认 true 已不在 `debug/src/config.ts`（字段随重构迁移），现位于
+> `debug/src/app.ts:1239-1240` 与 `debug/src/worker/main.ts:66-67`；面板项定义在 debug
+> `param-defs.ts`（「连跳限速 / 落地限速」），Rust 映射在共享 `params.ts:55-56`。
+
 积分层已证无误差（专题 C：分区不变，Δ=1e-13 级），**该子项不修**。剩余子项：
 
 - 幻影碰撞损失 → **由 P2 根治** [确定]
@@ -23,6 +28,11 @@ teleportGateTicks（§4.6）｜P7 跳跃冲量无补偿（专题 B③）。
   但会改变长落差行为（现可超 3500），是否对齐 Source 由产品定。
 
 ## P2 坡顶入坡幻影碰撞（brush 凸棱无 bevel）—— 根治项
+
+> **实施状态（2026-08-24 复核）**：**已根治，但未走 bevel**——实际落地为盒-AABB 必要门校验
+> （提交链 7c33a58→4f11e5a→0b08a61）：`world.rs` `aabb_overlaps_at`(:136)、进入平面门(:205)、
+> start_solid 门(:225)、否决计数 `GATE_VETO_COUNT`(:117) 与 `gate_veto_count` 探针 + 端盖否决单测
+> （p2_gate_tests.rs）。机制分析见 `docs/chamfer-physics/`；下述 bevel 方案降级为历史备选记录。
 
 **[确定] 方向：brush 构建期生成轴向 bevel 平面（Quake QBSP 同款）。**
 
@@ -49,6 +59,10 @@ teleportGateTicks（§4.6）｜P7 跳跃冲量无补偿（专题 B③）。
 
 ## P3 坡底速度规律归零（摩擦灌入）
 
+> **实施状态（2026-08-24 复核）**：主修 A2/A1 均未实施——`calibrateVelocity` 现仍无条件灌入
+> （authority-calibrator.ts:298-313）。辅修行号刷新：land 分支现位于 authority-calibrator.ts:349-373
+> （「距离 < 60 才调整」注 :351、`dist >= 60` return :372；原文引用 :319-324 已漂移），收紧建议仍适用。
+
 **[候选] 主修：权威 onGround 与渲染线状态分歧时暂停速度灌入。两个实现层级：**
 
 - **A2（推荐先行，零 wasm 改动）**：`authority-calibrator.ts calibrateVelocity` 增加
@@ -73,6 +87,9 @@ teleportGateTicks（§4.6）｜P7 跳跃冲量无补偿（专题 B③）。
 
 ## P4 后台标签页（时序黑洞）
 
+> **实施状态（2026-08-24 复核）**：B1/B2 主方案均未实施——`authLoop.pause()` 与 shared-state
+> `clearKeys()` 皆不存在。仅失焦场景有最小对齐：game blur 处理器已改为显式清权威键位（keysMask=0）。
+
 **[候选] 两个子方向：**
 
 - **B1（推荐）：隐藏时暂停权威线。** `visibilitychange` hidden：`authLoop.pause()`
@@ -87,6 +104,13 @@ B1 多一个 pause/resume 生命周期，注意与 worker-dispatch 的 loopStart
 
 ## P5 死亡阈值未下发（协议缺失被兜底掩盖）
 
+> **实施状态（2026-08-24 复核）**：**debug 已完整接线**——`input-bridge.ts:90-92` 向 Worker
+> postMessage `set-death-threshold`；`app.ts:255` 双端设置（renderer + bridge）；`app.ts:1357-1359`
+> world-json 后重发（规避 Worker 未就绪早退丢弃）。**game 部分推进**：bridge 已补 postMessage 通道
+> （game `input-bridge.ts:68-75`，对齐 debug 桥模式），但 game app.ts 仍无调用者——阈值实际仍未
+> 下发，待接线。渲染侧注释与实参不符仍在：game renderer-main.ts:279 注释「场景最低 Y − 1000」、
+> 实参仅 `bbox.min.y`（:280；原文引用 :273-274 已漂移）。
+
 **[确定] 接线即可**：`InputBridge.sendSetDeathThreshold` 已实现（`input-bridge.ts:67-69`）
 但无调用者——`app.ts` 在 worker ready 后发送 `set-death-threshold`，值与渲染侧一致。
 同时修正渲染侧传参：`renderer-main.ts:273-274` 传 `bbox.min.y` 但注释声称
@@ -94,6 +118,11 @@ B1 多一个 pause/resume 生命周期，注意与 worker-dispatch 的 loopStart
 修后权威侧死亡/重生真正生效，也消除"渲染坠亡 → 反向同步拉回"的兜底掩盖路径。
 
 ## P6 死配置 teleportGateTicks
+
+> **实施状态（2026-08-24 复核）**：下文括注所述「默认值矛盾」已消失——现处处默认 3
+> （player.rs:103、debug config.ts:161、game config.ts:110），全仓无「默认 1」残留。no-op 判定仍成立：
+> teleport.rs:171 `_gate_ticks` 未使用、mod.rs:238-239 注释「仅保留签名兼容」（原文 mod.rs:216 已漂移），
+> 删除建议维持。
 
 **[确定] 删除**（Rust `teleport.rs check` 已忽略，`mod.rs:216` 仅保签名；默认值 1 与
 注释"默认 3"不符）。连带清理：`config.ts` 字段、面板项、`params.ts` 映射、
@@ -110,12 +139,12 @@ B1 多一个 pause/resume 生命周期，注意与 worker-dispatch 的 loopStart
 
 ## 建议实施顺序
 
-| 序 | 项 | 理由 |
-|---|---|---|
-| 1 | P3-A2 + P3 辅修 | 零 wasm 改动、当天可上，surf 手感立竿见影 |
-| 2 | P2 bevel | 根治幻影碰撞（同时消 P3 软锁、P1 主要碰撞损失），中工作量需回归 |
-| 3 | P4-B1 | 必然触发的时序缺陷，独立于物理改动 |
-| 4 | P5、P6 | 小改动，协议一致性 |
-| 5 | P3-A1、P7、P1 maxvelocity | 精确化与可选项，按需 |
+| 序 | 项 | 理由 | 现状（2026-08-24 复核） |
+|---|---|---|---|
+| 1 | P3-A2 + P3 辅修 | 零 wasm 改动、当天可上，surf 手感立竿见影 | 未实施 |
+| 2 | P2 bevel | 根治幻影碰撞（同时消 P3 软锁、P1 主要碰撞损失），中工作量需回归 | ✅ 已按替代方案完成（盒-AABB 门校验，7c33a58→4f11e5a→0b08a61） |
+| 3 | P4-B1 | 必然触发的时序缺陷，独立于物理改动 | 未实施（仅 game blur 显式清键最小对齐） |
+| 4 | P5、P6 | 小改动，协议一致性 | P5：debug 完成、game 待 app 接线；P6：待删 |
+| 5 | P3-A1、P7、P1 maxvelocity | 精确化与可选项，按需 | 未实施 |
 
 验证基建：`game/scripts/phys-rate-parity*.mjs` 已可复现 P2/P3 症状，作为修后回归基线。

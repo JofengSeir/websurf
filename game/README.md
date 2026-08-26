@@ -12,11 +12,11 @@ v7 定案：**主线程唯一物理渲染线 + 单 Worker 权威帧计算器**�
   ├─ 输入采集（MouseBuffer CLAMP 1000）→ 灵敏度输入层 → SAB 输入槽（BigInt64 原子累加）
   ├─ 每 rAF：写输入 → 读权威帧 → set_velocity 外推校准 → PhysWorld.tick（可变 dt 单步，上限 0.1s）→ 渲染直读 state()
   ├─ ESC 两栏面板（左导航 + 右设置，七模块）＋ 按键自定义录制；lockTickRate 可锁定 64Hz（公平模式）
-  ├─ 渲染：LOD/PVS 距离剔除（cullDistance=maxDim×0.5）+ 近平面贴墙自适应（4 水平方向探测，每 2 帧）
+  ├─ 渲染：LOD 距离剔除（cullDistance=maxDim×0.5；PVS 管线保留但默认禁用 ENABLE_PVS=false——surf_666 实测负收益）+ 近平面贴墙自适应（4 水平方向探测，每 2 帧）
   └─ 速度 HUD 8Hz（PhysWorld.state().vel 采样，纯数字，居中偏下 24%）
 Worker (src/worker/main.ts，共享 ts-shared/auth)
   ├─ setTimeout 4ms 自驱权威循环（auth-loop）
-  ├─ 固定步长 1/tickRate（默认 64Hz，面板 48-128）
+  ├─ 固定步长 1/(tickRate+3)（TICK_RATE_OFFSET=3 隐藏偏移：面板显示原值，面板 64 → 权威实际 67Hz；面板 48-128 可调）
   ├─ 消费 SAB 输入槽 → 完整物理（Rust PhysWorld）→ 碰撞事件（land/blocked）→ 写权威双缓冲 + V_A++
   └─ 兜底同步（sync-render-state 三条件 + 250ms 冷却 + 在途回滚）
 ```

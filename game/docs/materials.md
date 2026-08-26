@@ -1,10 +1,10 @@
 # game 材质模块（应用侧）
 
-> 最后核对：2026-08-13。以实际代码为准（`game/src/app.ts`、`game/src/renderer/renderer-main.ts`）。
+> 最后核对：2026-08-24。以实际代码为准（`game/src/app.ts`、`game/src/renderer/renderer-main.ts`）。
 > 公共材质技术（mosaic 压缩 / MTZ 打包 / 解压拼装 / 回退机制）见 `docs/materials.md`。
 > 本文档：game 侧的应用链路（与 debug 同机制，解析/导出在主线程）。
 
-> 注：test 工程不导出 mosaic/默认包相关 API，无画质切换与缺失纹理回退。
+> 注：验证工程 test/dual-mode-harness 不导出 mosaic/默认包相关 API，无画质切换与缺失纹理回退（原 test/game 修复版已于 654d2ef 整体移除）。
 
 ## 1. 与 debug 的差异
 
@@ -38,7 +38,7 @@
 ```
 
 - `map.dispose()` 必要性：three.js r152+ 增量上传 glTexSubImage2D 尺寸不符越界（详见 `docs/materials.md` §6）。
-- 主线程 wasm 由渲染物理（PhysWorld）初始化，`mosaic_decode` 直接可用（无 debug 的懒初始化需求）。
+- 主线程 wasm 由渲染物理线初始化（`initPrediction` 内 `initSync({ module })`，renderer-main.ts:469-476），`mosaic_decode` 直接可用，无需 debug 式的独立懒初始化通道；§2 前置的 `await mainWasmReady` 只是防竞态（decompress_mtz 依赖 wasm 就绪），并非懒初始化本身。
 
 ## 4. 纹理参数约定
 

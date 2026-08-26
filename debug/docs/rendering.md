@@ -1,6 +1,6 @@
 # debug 渲染 / 调试 / 游戏化模块
 
-> 最后核对：2026-08-13。以实际代码为准（`debug/src/renderer/`、`debug/src/game/`）。
+> 最后核对：2026-08-24。以实际代码为准（`debug/src/renderer/`、`debug/src/game/`）。
 
 ## 1. 场景构建（`renderer-main.ts` loadScene）
 
@@ -35,7 +35,7 @@ scene-data（GLB 字节 + 各 JSON，同线程本地传递，无 postMessage/tra
 
 ## 4. 调试可视化
 
-四个开关相互独立（config.debug 段，localStorage 持久化），各配独立可视距离滑块（0 = 全量）：
+五个开关相互独立（config.debug 段，localStorage 持久化），各配独立可视距离滑块（0 = 全量）：
 
 | 开关 | 颜色 | 内容 | 距离字段（默认） |
 |---|---|---|---|
@@ -43,13 +43,21 @@ scene-data（GLB 字节 + 各 JSON，同线程本地传递，无 postMessage/tra
 | 显示触发区域 | 青=已链接/紫=孤儿/灰=禁用/橙=非玩家 | 传送触发器线框（凸包或 AABB） | `triggerViewDistance`（0=全量） |
 | 显示模型phy碰撞 | 橙 | 模型自带 .phy 凸包三角形线框（无上限截断） | `phyViewDistance`（4096） |
 | 显示模型可视碰撞 | 紫 | 模型可视网格三角形线框（贴合显示网格，12k 上限） | `visViewDistance`（1024） |
+| 显示chamfer切角平面 | 黄（0xfffb14，depthTest:false 恒可见） | brush 运行时生成的棱边切角（chamfer）平面——排查坡顶/尖角幻影碰撞 | `chamferViewDistance`（512） |
 
 - 判定来源：`mesh.surfaceprop !== undefined` = .phy（橙），否则可视网格（紫）。
 - 渲染：线框材质**不透明 + depthTest:false**（opaque 恒在透明 brush 线框之后渲染，不被绿色混合染色/遮挡；三.js 透明材质按深度排序，透明混合会把橙色染绿）。
 - 距离筛选按 mesh/brush AABB 的 XZ 距离（玩家相机为圆心）；phy 距离变更立即重建（phyDirty），常规 30 帧限流。
 - showPlaneInfo：准星射线检测（mesh Raycaster / brush Ray-Convex / trigger Ray-AABB，HUD 显示名称与属性）。
 
-实现：`collider-debug.ts`（phy/vis 独立 Group）、`plane-inspector.ts`（数据来自 scene-data 的 brushJson/triJson/teleportJson——主线程自建只读可视化副本，与物理解耦）。
+**chamfer 切角平面（黄色，d0cd4e9 新增）实现要点**（`collider-debug.ts`）：
+
+- **来源**：chamfer 平面由 WASM 导出层运行时生成（AddEdgeBevels 简化版，n = normalize(n_i+n_j)，凸包外侧校验）并已并入 brush.planes 一并输出——既进物理碰撞也进本线框；物理机制详见 `../../docs/chamfer-physics/chamfer-bevel-analysis.md`。
+- **分类判据**（`computeChamferStrips`）：平面上落在凸包上的顶点 <3 或全部共线（其余顶点到棱线垂直距离 ≤ 0.5 HU）→「只过棱、不构成面」→ 该平面即 chamfer；与导出层 `face.length < 3` 的跳过逻辑同源。
+- **绘制**：每个 chamfer 取棱两端点，沿「平面内 ⊥ 棱 ∧ 背离 brush 质心」方向外推 16 HU（CHAMFER_QUAD_LEN）画四边形——角平分线 chamfer 呈贴坡倒角、水平过棱呈贴面帽盖，而非竖起的挡墙；材质 depthTest:false（chamfer 常嵌在几何内/背面）。
+- **性能**：per-brush 分类结果 WeakMap 缓存（凸包重建昂贵，仅首次计算；地图重载失效重建）；与 solid 组同周期限流重建（REBUILD_INTERVAL）。
+
+实现：`collider-debug.ts`（phy/vis/chamfer 独立 Group）、`plane-inspector.ts`（数据来自 scene-data 的 brushJson/triJson/teleportJson——主线程自建只读可视化副本，与物理解耦）。
 
 ## 5. 游戏化（计时挑战，`src/game/game-state.ts`）
 

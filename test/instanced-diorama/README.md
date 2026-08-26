@@ -53,7 +53,8 @@ src/
 └── wasm.d.ts        pkg/websurf_wasm.d.ts re-export
 crates/wasm/         wasm 层副本（含新增 export_glb_with_pakfile_models_with_lights）
 scripts/check-lights.mjs   Node 冒烟：导出 GLB 校验 KHR_lights_punctual / lights / 节点
-scripts/verify-shot.mjs    截图像素统计（唯一色/亮度/边缘差）——后处理效果客观判据
+# （旧 scripts/verify-shot.mjs 截图像素统计判据为本地验证工具：按 **/scripts/verify-*
+#   ignore 约定不入库，当前工作区亦不存在；方法与结果见下文「验证记录」）
 serve.py             开发服务器（/maps/ 别名）
 ```
 

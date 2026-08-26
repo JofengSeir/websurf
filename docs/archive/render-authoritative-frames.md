@@ -4,6 +4,8 @@
 > 所有结论均基于实际代码（引用 `文件:行号`），非臆测。临时分析文档，供后续参考。
 >
 > **⚠ 历史快照（2026-08-09 晚标注）**：本文写于 22aa6d5 之后、0f3558b 之前。debug 侧的 shared-state.ts/physics-loop.ts 已删（现共享 src/ts-shared/auth/），debug 已切换为 game 同构架构（主线程唯一物理渲染线 + 单 Worker 权威帧）；B 章（game 架构）的内容判断大体仍正确，但路径/行号已公共化迁移。
+>
+> **行号时效（2026-08-24 补注）**：A 章（SPSC 环形缓冲/seqlock/I_LOCK/I_OUT_SEQ/SHARED_BUFFER_SIZE=1904 等）与 C.3 行号索引均对应已删除或漂移的旧代码；现行协议见 `src/ts-shared/auth/shared-state.ts:117` 起 SAB 512B + BigInt64 输入槽 + V_A 双缓冲。C.3 整表请勿按行号索引现行代码。
 
 ---
 
