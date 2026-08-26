@@ -1,6 +1,6 @@
 # WebSurf-test — 双模物理 + OffscreenCanvas 渲染时序验证工程
 
-> **事实基准**：本文档最后核对 2026-08-13，以实际代码为准（`src/worker-a.ts` / `src/shared-state.ts`
+> **事实基准**：本文档最后核对 2026-08-24，以实际代码为准（`src/worker-a.ts` / `src/shared-state.ts`
 > / `src/worker-b.ts` / `src/main.ts`）。「64t 坡速 ≈ 无限制」成因分析、会审结论与修复架构详见
 > **[CONCLUSION.md](CONCLUSION.md)**（2026-08-11 会审 + 双模核心重构后的事实基准，两文档对齐）。
 
@@ -80,12 +80,19 @@ test/dual-mode-harness/
     worker-a.ts       WorkerA 双模物理核心（先 tick 计算 → 后无限制计算）
     worker-b.ts       WorkerB 帧信号驱动渲染（OffscreenCanvas + 距离 LOD + 50ms 超时兜底）
   scripts/
-    build-dist.mjs    构建 dist（multi 5 文件：app/worker-a/worker-b/wasm/index.html；test 无 single 内嵌模式）
-    phys-smoke.mjs    node 冒烟测试（**191/191 PASS**，2026-08-13 实测；含 ModeAB 双实例镜像、分叉兜底锚定回归、帧信号驱动、消息回退、PVS）
-    perf-bench.mjs    性能基准（消费/写入/热路径 vs 对象构造；worker_threads 模拟）
-    race-wakeup.mjs   唤醒竞争测试（WAKEUP/RENDER_WAKEUP 双槽隔离）
-    trace-verify.mjs  trace 公共链路验证（Chrome headless + CDP：开始→保存→无错误）
-    tmp-dual-compare.mjs  test 双模 vs game 双线数据对照（关键指标 <15%）
+    build-dist.mjs        构建 dist（multi 5 文件：app/worker-a/worker-b/wasm/index.html；test 无 single 内嵌模式）
+    check-wasm-api.mjs    WASM 契约校验（薄导出层 12 API，缺一即败）
+    phys-smoke.mjs        node 冒烟测试（**192 处 check() 断言**，2026-08-24 读脚本计数；2026-08-13 实测
+                          191/191 PASS 后又新增 1 项；含 ModeAB 双实例镜像、分叉兜底锚定回归、
+                          帧信号驱动、消息回退、PVS）
+    perf-bench.mjs        性能基准（消费/写入/热路径 vs 对象构造；worker_threads 模拟）
+    race-wakeup.mjs       唤醒竞争测试（WAKEUP/RENDER_WAKEUP 双槽隔离）
+    render-loop-verify.mjs busy-wait 高精度 rAF 三线程渲染时序校验 v3
+    surf-e2e-verify.mjs   surf_666 三线程端到端链路测试
+    flicker-debug.mjs     屏闪根因排查（双缓冲污染断言 / 真图传送乒乓几何扫描；临时诊断脚本）
+    workerb-isolated.mjs  WorkerB 隔离纯渲染上限测试
+    trace-verify.mjs      trace 公共链路验证（Chrome headless + CDP：开始→保存→无错误）
+    dual-compare.mjs      test 双模 vs game 双线数据对照（关键指标 <15%；旧名 tmp-dual-compare.mjs）
   docs/                 源码解析文档（整体架构 / 地图解析 / 运行时序图）
 ```
 
@@ -106,9 +113,9 @@ test/dual-mode-harness/
    （game 客户端预测同款语义）。
 5. **残差相位伪差**：64t 离散相位导致 ≤1 tick 的有界起跳提前/延后（着地判定窗口内），属设计内难度手感。
 6. **死亡阈值**：`brushJson` 最小 min[1] − 100（默认 −100000 兜底），与 game（场景包围盒 min.y）不同。
-7. **UI/脚本文案滞后（如实记录）**：`index.html` HUD 标题仍为"单模 1ms 物理时序验证"（与双模现状不符）；
-   `scripts/tmp-dual-compare.mjs` 头注释仍按旧校准语义描述（"xz=粗糙/vy=模式A"），未随三轴校准重构适配；
-   `writeStateRaw`/`tick_into` 为 wasm API 能力（worker-a 实际子步热路径为 `writeState → phys.state()`，
+7. **UI/脚本文案核对（R2 更正，基线 @2026-08-26）**：`index.html` HUD 标题为「WebSurf-test — 双模物理 + 帧信号渲染」（index.html:6，与双模现状一致——原「仍为单模」记载失效）；
+   对照脚本现名 `scripts/dual-compare.mjs`（旧名 tmp-dual-compare.mjs 已弃用；其头注释校准语义本轮未复核，以源码为准）；
+   `writeStateRaw`/`tick_into` 为 TS 侧 TestShared 方法而非 wasm API 能力（worker-a 实际子步热路径为 `writeState → phys.state()`，
    不使用两者）；`pendingWorld` 暂存（world-json 先于 wasm 就绪）与布局回归史（dyAcc 与 V 重叠的屏闪根因）
    仅在源码注释记载。
 
@@ -119,7 +126,7 @@ npm install
 npm run build:wasm   # wasm-pack release → pkg/，并拷贝 wasm 到 test 根
 npm run build:ts     # typecheck + esbuild（app / worker-a / worker-b 三产物）
 npm run build:dist   # multi 打包（5 文件，HTTP 运行；test 仅 HTTP，SAB 恒定可用）
-node scripts/phys-smoke.mjs   # 冒烟测试（191/191 PASS）
+node scripts/phys-smoke.mjs   # 冒烟测试（192 处 check() 断言）
 node scripts/perf-bench.mjs   # 性能基准
 node scripts/race-wakeup.mjs  # 唤醒竞争
 ```

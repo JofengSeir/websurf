@@ -3,29 +3,43 @@
 > 说明：根目录 `src/` 只有共享输入工具 `src/ts-shared/input/input-layer.ts`，不包含浏览器事件绑定。
 > 你所说的“\src 视角拖拽非常丝滑”，我按实际包含鼠标事件处理的 **`game/src`（`debug/src` 同款）** 实现来对比。
 
+> **⚠️ 结构说明（历史快照 + 现状对照）**：本文最初是输入链路重构**之前**的问题分析。
+> 「结论」「对比表」「详细差异 §1–§4」描述的是当时的旧行为（WorkerA 子步削平丢量、
+> 无 unadjustedMovement / discardNext / 单事件削平等），这些差异**已全部通过文末
+> 「已实施改动」修复落地**——阅读前半篇时应视为历史分析；「§5 灵敏度」与「已实施改动」
+> 描述的为现行行为。下方对比表已扩为「重构前 → 现状」三列，可直接查现行状态。
+
 ## 结论
 
-`test/dual-mode-harness` 的鼠标视角不丝滑，主要不是灵敏度问题，而是**输入链路设计不同**：
+> ⚠️ **以下 1–4 为重构前状态分析**（历史快照）；所列差异均已修复，现行行为见文末「[已实施改动](#已实施改动本仓库当前代码)」与上方三列对比表的「现状」列。
+
+`test/dual-mode-harness` 的鼠标视角不丝滑（重构前），主要不是灵敏度问题，而是**输入链路设计不同**：
 
 1. **关键差异**：`src` 的主线程渲染物理直接消费每帧完整鼠标增量；`test` 的 WorkerA 用 `consumeInput(±1000)` 按 1ms 子步消费，而 SAB 累加器是一次性排空，导致**单帧快速移动超过 1000px 的部分被截断丢弃**。
 2. `src` 使用 `PointerLockController` + `{ unadjustedMovement: true }` 禁用 OS 鼠标加速；`test` 只是裸 `canvas.requestPointerLock()`，OS 加速会让像素增量非线性。
 3. `src` 在 Pointer Lock 后丢弃首个 mousemove（`discardNext`），避免锁定瞬间的大跳变；`test` 没有。
 4. `src` 是主线程即时物理 + 渲染同帧；`test` 是主线程 → SAB → WorkerA → SAB → WorkerB 的跨线程链路，存在额外的调度/相位抖动。
 
-## 对比表
+## 对比表（重构前 → 现状）
 
-| 维度 | `game/src`（丝滑） | `test/dual-mode-harness`（不丝滑） |
-|---|---|---|
-| 鼠标事件处理 | `MouseBuffer.process()` 每事件过滤 | 裸累加 `mouseDx += e.movementX` |
-| Pointer Lock | `PointerLockController` + `unadjustedMovement: true` | `canvas.requestPointerLock()` 无选项 |
-| 锁定后首事件 | `discardNext` 丢弃 | 无丢弃，可能瞬间跳变 |
-| 单事件削平 | `MouseBuffer` 每事件 `clamp(±1000)` | 无 |
-| 灵敏度 | 主线程 `layerMouseDelta` 乘入 | 不显式乘入（依赖 Rust 默认 sensitivity=1.5） |
-| 每帧消费 | 主线程 `predPhys.tick(dt, pendingDx, pendingDy)` 直通完整增量 | WorkerA `consumeInput(MAX_INPUT_DELTA=1000)` 排空并削平 |
-| 物理位置 | 主线程（渲染同一 rAF） | WorkerA（跨线程，WorkerB 再采样） |
-| 输入到渲染延迟 | 同帧、相位固定 | 至少跨线程 + 1ms 子步边界，相位可变 |
+「重构前」列为本文撰写时的旧行为（历史分析对象）；「现状」列对齐当前代码（2026-08-24 复核）：
+
+| 维度 | `game/src`（丝滑） | `test/dual-mode-harness` 重构前 | `test/dual-mode-harness` 现状 |
+|---|---|---|---|
+| 鼠标事件处理 | `MouseBuffer.process()` 每事件过滤 | 裸累加 `mouseDx += e.movementX` | 每事件先 discardNext、再削平后累加（`main.ts:296-304`；`MOUSE_MAX_DELTA=1000` @`main.ts:28`） |
+| Pointer Lock | `PointerLockController` + `unadjustedMovement: true` | `canvas.requestPointerLock()` 无选项 | `requestPointerLockWithUnadjusted()`：优先 `{unadjustedMovement:true}`，失败降级普通锁定（`main.ts:46-68`，click 处 `:273-275`） |
+| 锁定后首事件 | `discardNext` 丢弃 | 无丢弃，可能瞬间跳变 | 有：`discardNextMouse` 丢弃锁定后的首个 mousemove（声明 `main.ts:30`，置位 `:281-291`，消费 `:298-301`） |
+| 单事件削平 | `MouseBuffer` 每事件 `clamp(±MAX_DELTA)` | 无 | 有：`clampMouseDelta` 每事件 `clamp(±MOUSE_MAX_DELTA)`（`main.ts:32-35,302-303`） |
+| 灵敏度 | 主线程 `layerMouseDelta` 乘入 | 不显式乘入（依赖 Rust 默认 sensitivity=1.5） | 未变：仍依赖 Rust 默认 sensitivity=1.5 |
+| 每帧消费 | 主线程 `predPhys.tick(dt, pendingDx, pendingDy)` 直通完整增量 | WorkerA `consumeInput(MAX_INPUT_DELTA=1000)` 排空并削平 | WorkerA `consumeInput()` **不限幅**直通完整帧增量（`worker-a.ts:285`，缺省 `Infinity`）；模式B tick 窗口另有限幅 `tickInputMax`（`worker-a.ts:53-57`） |
+| 物理位置 | 主线程（渲染同一 rAF） | WorkerA（跨线程，WorkerB 再采样） | 未变：双模验证架构保留（物理仍在 WorkerA） |
+| 输入到渲染延迟 | 同帧、相位固定 | 至少跨线程 + 1ms 子步边界，相位可变 | 未变：链路相位特性同前；但主线程按事件削平后快速甩动不再丢量 |
+
+> 三层 ±1000 钳制语义（帧总量 / 单事件 / tick 窗口）的精确对照见 [architecture.md §3.1](architecture.md#31-附注1000-钳制的三层语义对照)。
 
 ## 详细差异
+
+> ⚠️ 以下 §1–§4 均为**重构前状态**分析（历史快照），其中引用的 harness 代码摘录为当时代码；现行实现见文末「已实施改动」。
 
 ### 1. 每帧鼠标增量是否会被截断（最关键）
 
@@ -134,17 +148,20 @@ process(movementX, movementY) {
 
 ## 修复建议
 
-1. **在 `test/dual-mode-harness` 主线程引入 `MouseBuffer` 同款处理**：
+> 状态：✔ = 已实施（见文末「已实施改动」）；待办 = 尚未落地。
+
+1. **✔ 已实施 — 在 `test/dual-mode-harness` 主线程引入 `MouseBuffer` 同款处理**：
    - 使用 `PointerLockController`（或至少 `requestPointerLock({ unadjustedMovement: true })`）；
    - 锁定后 `discardNext` 丢弃首事件；
    - 每个 mousemove 事件先 `clamp(±1000)` 再累加。
-2. **不要用 `consumeInput(MAX_INPUT_DELTA)` 作为每帧鼠标的唯一消费路径**：
+2. **✔ 已实施 — 不要用 `consumeInput(MAX_INPUT_DELTA)` 作为每帧鼠标的唯一消费路径**：
    - 要么像 `game` 一样在主线程增加一个渲染物理实例，直接消费完整 `pendingDx/Dy`；
    - 要么把 SAB 输入改为“只累加不排空/按窗口消费”的方式，让 WorkerA 在 1ms 子步内只消费该子步应得的增量，而不是一次性排空整帧并削平。
-3. **统一使用 `src/ts-shared/input/input-layer.ts`**：
+   - 落地方案：WorkerA 改为无参 `consumeInput()`（缺省不限幅）直通完整帧增量——与“主线程已按事件削平”配合，等效达成“不排空丢量”目标。
+3. **待办 — 统一使用 `src/ts-shared/input/input-layer.ts`**：
    - 主线程 `layerMouseDelta` 乘入灵敏度；
    - 物理两端 sensitivity 固定 1，避免双端参数分叉。
-4. 如果只想快速改善：把 `MAX_INPUT_DELTA` 调大并改为“每帧只消费一次、不按 1ms 子步排空”，或直接让 WorkerA 的 `consumeInput` 支持“保留超出部分到下个子步”。
+4. **已被建议 1/2 取代 — 快速改善选项**（调大 `MAX_INPUT_DELTA` / 每帧一次消费 / 保留超出部分）：相关痛点已由建议 1、2 的落地消除，无需再改。
 
 ## 已实施改动（本仓库当前代码）
 
@@ -154,20 +171,23 @@ process(movementX, movementY) {
    - 新增 `requestPointerLockWithUnadjusted`：优先 `{ unadjustedMovement: true }` 禁用 OS 鼠标加速，不支持时降级普通锁定；
    - 增加 `pointerlockerror` 日志。
 2. `test/dual-mode-harness/src/worker-a.ts`
-   - 模式A 子步不再调用 `consumeInput(MAX_INPUT_DELTA)`，改为 `consumeInput()`；
+   - 模式A 子步不再调用 `consumeInput(MAX_INPUT_DELTA)`，改为无参 `consumeInput()`（缺省 `maxDelta=Infinity` 不限幅）；
    - 因此 SAB 累加器中的完整帧增量不再被“排空 + 削平到 ±1000”截断；
-   - 单次事件削平已由主线程负责，快速甩动不再丢量。
+   - 单次事件削平已由主线程负责，快速甩动不再丢量；
+   - `MAX_INPUT_DELTA=1000` 保留但语义收窄为 **tick 边界窗口上限**（`tickInputMax = 1000/ms × tickDt`，仅作用于模式B tick 边界注入），三层 ±1000 语义对照见 [architecture.md §3.1](architecture.md#31-附注1000-钳制的三层语义对照)。
 
 > 说明：`test/dual-mode-harness` 的物理仍按设计在 WorkerA、渲染在 WorkerB；本次改动把鼠标输入链路从“WorkerA 1ms 子步削平丢量”修正为“主线程按事件削平 + WorkerA 完整增量直通”，在保留双模验证架构的前提下对齐 `src` 的鼠标手感。
 
 ## 参考代码位置
 
-- `game/src/app.ts`：mousemove 绑定（约 L176-185）、`startInputLoop`（L315-350）
-- `game/src/input/mouse-buffer.ts`：`process/push/drain/onLockChange`
+> 行号以 2026-08-24 工作区代码为准复核；后续代码演进请优先按符号名检索，避免行号漂移再次失效。
+
+- `game/src/app.ts`：mousemove 绑定（约 L182-191）、`startInputLoop`（L326-362；初记 L321-357 系 F-09 blur 修复未提交位移前的基线，见 §四.7 基线注）
+- `game/src/input/mouse-buffer.ts`：`process/push/drain/onLockChange`（`MAX_DELTA=1000` @L40）
 - `game/src/input/pointer-lock.ts`：`unadjustedMovement`
 - `game/src/renderer/renderer-main.ts`：`feedInput`（L506-510）、`tick`（L693-712）
-- `src/ts-shared/input/input-layer.ts`：`layerMouseDelta`
-- `src/phys/mod.rs`：`step_core` 中 yaw/pitch 应用（L200-204）
-- `test/dual-mode-harness/src/main.ts`：鼠标累积与 rAF（L213-250、L378-387）
-- `test/dual-mode-harness/src/shared-state.ts`：`consumeInput`（L410-437）
-- `test/dual-mode-harness/src/worker-a.ts`：`MAX_INPUT_DELTA`（L54-55）、子步消费（L285）
+- `src/ts-shared/input/input-layer.ts`：`layerMouseDelta`；`INPUT_CLAMP=1000` @L13（帧总量钳制层）
+- `src/phys/mod.rs`：`step_core` 中 yaw/pitch 应用（L225-226）；noclip 路径同款应用（L286-287）；Rust 侧无二次削平
+- `test/dual-mode-harness/src/main.ts`：鼠标常量与单事件削平（L25-35）、Pointer Lock 与 mousemove 处理（L272-304）、rAF `frame()`（L349-364；全文件共 364 行——旧文引用的 L378-387 越界系笔误）
+- `test/dual-mode-harness/src/shared-state.ts`：`consumeInput`（L406-441，缺省 `maxDelta = Infinity` @L413）、`writeStateRaw`（@L469）
+- `test/dual-mode-harness/src/worker-a.ts`：`MAX_INPUT_DELTA`（@L53）与 `tickInputMax()`（L55-57）、tick 边界限幅施加（L249-251）、模式A 子步消费 `consumeInput()` 无参调用（@L285）

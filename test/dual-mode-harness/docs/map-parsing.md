@@ -120,7 +120,9 @@ main.loadBsp(file)
 - 优先 `export_model_phy_colliders()`：
   - 从 PAKFILE 提取被 static_props 引用的模型三件套 `.mdl/.vvd/.dx90.vtx`；
   - 解析 `.phy`（vphysics 碰撞体）；
-  - 仅支持 `modelType == 0`（IVPCompactSurface 凸包）与 `bone_index == 0` 的凸体；
+  - 仅支持 `modelType == 0`（IVPCompactSurface 凸包）与 `bone_index == 0` 的凸体——两个限制分属两层，失败行为不同：
+    `modelType == 0` 在解析层强制（`src/wasm-core/phyfile.rs:113-117`，不满足时**该模型整体报错跳过**）；
+    `bone_index == 0` 在导出层逐凸体过滤（`crates/wasm/src/lib.rs:761-763` `export_model_phy_colliders`，仅**跳过非 0 骨骼凸体**、模型其余部分保留）；
   - IVP 坐标系 → Source 坐标（`[x,y,z]→[x,z,-y]`）→ root transform → `map_coords`（Z-up→Y-up）→ `place_point`（世界摆放）。
 - 若 `.phy` 导出为空，主线程回退到 `export_model_tri_colliders()`：
   - 用模型可视网格作为碰撞网格；

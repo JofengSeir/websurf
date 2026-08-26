@@ -11,6 +11,10 @@
 > 与 `test/extract/README.md`。（注:2026-08-13 仓库重组后 `extract/` 位于 `test/extract/`；
 > **2026-08-14 bsp-extract 已移除**,其 CS:GO 版 BSP 解析逻辑以最小实现并入
 > `test/map-min-export/` 自包含 lib——本文历史引用仅作记录。）
+>
+> **修订(2026-08-24)**:头注所指 `test/map-min-export/` 亦已整体移除——其结论(v20 与 v21 共用
+> lump 布局等)已合并进共享层 `src/wasm-core/vbsp`(见 `docs/architecture.md` 开头历史注),
+> CSGO BSP 解析现由该共享层承担;`test/extract/` 相关指引同样仅为历史记录。
 
 ---
 
@@ -97,6 +101,11 @@ u32 条目数 + 每项 16B 头(`signature 4B + isCompressed u16 + version u16 + 
 | static props | 多版本 | v6/v7/v10 | **已有** |
 | L4D2 v21 布局 | 检测 + swap 字段 | 无 | **缺失,小改** |
 | console 大端 | 支持 | 无(结构改动大) | **不建议做** |
+
+> 注(2026-08-24):本表为 2026-08-13 历史快照。现行共享层 vbsp 已支持 **v19..=29**
+> (VERSION_MIN/VERSION_MAX),sprp 静态道具扩至 v6/v7/v10/v11,主 lump 与 game lump 的 LZMA
+> 均已实现——表中「仅 v20」「static props v6/v7/v10」「L4D2 v21 布局无」等差距已成历史,
+> 请勿据本表评估当前能力。
 
 ### 3.2 移植结论
 

@@ -116,8 +116,12 @@ loop():
   呈现帧率上限 = min(显示器刷新率, GPU 渲染耗时)。
 - 渲染器 `powerPreference: 'high-performance'`（GPU 优先调度）。
 
-### 附带说明：trace 双线（范围外，如实记录；2026-08-13 修订）
+### 附带说明：trace 双线（范围外，如实记录；2026-08-13 修订 / 2026-08-24 校准）
 
+- **[2026-08-24 校准]**：上述「恢复」随后已被最小集调整**再次撤销**——当前运行时
+  （main.ts / worker-a.ts / worker-b.ts / index.html）不含任何 trace 路径线与 FOV 调节
+  （FOV 固定 73.6，无面板）；`src/ts-shared/trace/` 公共模块与 `scripts/trace-verify.mjs`
+  仅作独立验证保留。以下历史记录仅作存档，非当前实况。
 - **[2026-08-13 修订]**：trace 数据链路已在后续提交 878515f 恢复——新增
   `src/ts-shared/trace/` 公共模块，worker-a.ts 现用 `TraceRecorder` 采样
   phys（无限制基准）与 tickPhys（tick 实际）并发 trace-data；main.ts 转发

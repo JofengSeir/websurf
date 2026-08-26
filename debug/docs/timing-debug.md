@@ -1,6 +1,6 @@
 # WebSurf debug 工程时序图
 
-> 最后核对：2026-08-13。以实际代码为准（`debug/src/renderer/renderer-main.ts` + 共享 `src/ts-shared/`）。
+> 最后核对：2026-08-24。以实际代码为准（`debug/src/renderer/renderer-main.ts` + 共享 `src/ts-shared/`）。
 
 > 对应 `debug/`（WebSurf-debug，Debug Build）。**渲染时序已与 game 同模式**（主线程唯一物理渲染线 + Worker 权威帧计算器），共享实现位于 `src/ts-shared/`（auth/shared-state、auth-loop、worker-dispatch、authority-calibrator）。
 > game 时序见 `../game/docs/timing-game.md`（两图结构相同；差异仅在工程特有逻辑：debug 的计时挑战/物理面板/调试可视化等，完整差异清单见文末）。
@@ -14,7 +14,7 @@ sequenceDiagram
     participant Worker as Worker (权威帧计算器: 共享 auth-loop + worker-dispatch)
     participant GPU as 图形硬件
 
-    Note over SharedMem: *** 布局与内存序约束 (共享 ts-shared/auth/shared-state) ***<br/>控制区: V_A + keys + onGround<br/>输入槽: dx/dy (BigInt64 原子累加, 防溢出绝不丢)<br/>权威全状态双缓冲 S_A[0] & S_A[1] (10 值/槽, 定点: pos/vel×100, 角度×1000)<br/>防撕裂: 双缓冲槽选择 (V_A-1)&1<br/>无 SAB 环境 → MsgState postMessage 回退 (input/phys-frame 消息, 接口等价)
+    Note over SharedMem: *** 布局与内存序约束 (共享 ts-shared/auth/shared-state) ***<br/>控制区: V_A + keys + onGround<br/>输入槽: dx/dy (BigInt64 原子累加, 防溢出绝不丢)<br/>权威全状态双缓冲 S_A[0] & S_A[1] (10 值/槽, 定点: pos/vel/eyeHeight×100, 角度×1000, timeMs×1)<br/>防撕裂: 双缓冲槽选择 (V_A-1)&1<br/>无 SAB 环境 → MsgState postMessage 回退 (input/phys-frame 消息, 接口等价)
 
     Note over Hardware, GPU: === 第一阶段：输入捕获 ===
     loop 每 1ms 硬件信号
@@ -74,5 +74,6 @@ sequenceDiagram
 ## 与 game 的差异（仅工程特有逻辑）
 
 共享：解析/导出（ts-shared world-builder）、物理渲染线、权威帧、校准、输入层、近平面自适应。
-debug 特有：计时挑战（GameState 主线程 take_event）、物理面板参数（physics-snapshot 镜像 predPhys）、调试可视化、自定义传送点、缺失纹理弹窗、colliderSource 三档、PAKFILE 调试 API。
+debug 特有：计时挑战（GameState 主线程 take_event）、物理面板参数（physics-snapshot 镜像 predPhys）、调试可视化（含 chamfer 切角平面黄色线框，见 `./rendering.md` §4）、自定义传送点、缺失纹理弹窗、colliderSource 三档、PAKFILE 调试 API（WASM 导出层 debug-only 方法：parse_entities/list_pakfile/read_pakfile_*/export_visleaf_pvs，非 window 全局，见 `./overview.md` §5）。
 game 特有（debug 无）：改键（keymap）、speedMode、lockTickRate（64Hz 公平锁定）、teleportGateTicks 滑块；noclipSpeed 为双端 config 层共有（game 面板有滑块，debug 面板无控件）。
+频率注意：本图「固定步长 = 1/tickRate」仅对 debug 成立——game 侧 Worker 有 TICK_RATE_OFFSET=3 隐藏偏移（面板 64 → 权威实际 67Hz），详见 `../game/docs/timing-game.md`。

@@ -33,7 +33,7 @@ sequenceDiagram
 2. **SAB 模式共享内存**：`TestShared.create(sab, workerA)` 创建 192B SAB 并 `postMessage` 给 WorkerA；WorkerB 也收到同一 SAB（SAB 不能放 transfer list，只能结构化克隆共享）。
 3. **消息回退模式**：主线程与 WorkerA 用 `msg-main` 消息；WorkerA 与 WorkerB 之间建立 `MessageChannel` 直连，状态发布不经过主线程中转。
 4. **OffscreenCanvas 移交**：主线程 `transferControlToOffscreen()` 后把控制权 transfer 给 WorkerB；此后 WebGL 渲染完全在 WorkerB 内完成，主线程只保留事件/指针锁定能力。
-5. **WorkerB 初始化**：创建 three.js 渲染器、场景、相机、光照、TraceRenderer，并通过 `resumeChannel.port2.postMessage(null)` 启动帧循环自驱。
+5. **WorkerB 初始化**：创建 three.js 渲染器、场景、相机、光照，并通过 `resumeChannel.port2.postMessage(null)` 启动帧循环自驱。
 6. **WorkerA 初始化**：`init-shared` 触发 `startInit()`，fetch wasm、`initSync`、创建 `phys` 与 `tickPhys` 两个 `PhysWorld`；若 `world-json` 先到则暂存 `pendingWorld`。
 7. **WorkerA 循环启动**：wasm 就绪后进入 `loop()`；之后以 setTimeout(0) 自驱 + `waitWakeup` 背压。
 8. **状态摘要回传**：WorkerB 每秒通过 `status` 消息回传 pos/vel/yaw/pitch/GLB 状态/渲染帧率，主线程更新 DOM HUD。
@@ -77,7 +77,7 @@ sequenceDiagram
 9. **GLB 导出**：`export_glb_with_pakfile_models()` 会消费 Bsp 实例，因此必须在所有借用方法之后调用。
 10. **GLB 分发**：`ArrayBuffer` 通过 transfer 零拷贝给 WorkerB。
 11. **WorkerA 建世界**：`applyWorld()` 调用 `set_hull(16,72,54)` 与 `build_world(...)`，并设置死亡阈值；`tickPhys` 同步构建同一世界；随后 `writeStateFromPhys()` 让首帧状态立即可见。
-12. **WorkerB 挂载场景**：`loadGlb()` 用 GLTFLoader 解析，成功回调后 `optimizeScene()` 做空间分块合并，再 `assignMeshCullingData()` + `applyCulling(true)`。
+12. **WorkerB 挂载场景**：`loadGlb()` 用 GLTFLoader 解析，成功回调后 `optimizeScene()` 做空间分块合并，再 `assignMeshCullingData()` + `applyCulling()`（无参调用，缺省回退 localCopy 相机状态；签名 `applyCulling(camState?)`，见 `worker-b.ts:589`）。
 
 ## 3. 常规帧循环（稳态）
 
@@ -102,7 +102,7 @@ sequenceDiagram
             A->>T: tickPhys.tick(tickDt, keys, tickDx, tickDy)
             A->>A: phys.set_velocity(tickPhys 三轴)
         end
-        A->>S: consumeInput(±1000)
+        A->>S: consumeInput()（不限幅）
         A->>A: phys.tick(1ms, input)
         A->>S: writeStateFromPhys()：写空闲槽 + V++
         S-->>B: V 已更新
@@ -116,17 +116,17 @@ sequenceDiagram
 ### 节点说明
 
 1. **输入事件累积**：mousemove 只累加到主线程本地 `mouseDx/mouseDy`，keydown/keyup 只更新 `keyState`；高频事件不直接触碰 SAB。
-2. **写入输入槽**：每个 rAF 一次性 `addInput(dx,dy,keysMask)`——鼠标增量用 BigInt64 定点原子累加，键位掩码用 Int32 覆盖写。
+2. **写入输入槽**：每个 rAF 一次性 `addInput(dx,dy,keysMask)`——鼠标增量用 BigInt64 定点原子累加，键位掩码用 Int32 覆盖写。（KEY_MASK 位宽注：ts-shared 为 11 位全量掩码，对应 `src/phys/mod.rs:546-556` 位定义；本工程仅实现前 5 位子集 forward/backward/left/right/jump——同名不同宽，见 architecture.md §2.4。）
 3. **双槽唤醒**：`wake()` 同时做两件事：
    - `WAKEUP`：`store(1)+notify(1)`，WorkerA 背压 `wait` 立即返回；
    - `RENDER_WAKEUP`：`add(1)+notify(1)`，WorkerB 帧循环被唤醒，且计数语义保证渲染频率 ≤ 刷新率。
 4. **WorkerA 被唤醒**：`waitWakeup` 返回并 CAS 复位；若在休眠期间没有新输入也会因主线程 rAF 唤醒。
 5. **WorkerB 被唤醒**：`waitRenderWakeup` 消费计数差值；随后进入一帧采样/渲染。
 6. **WorkerA 计算 delta 与模式判定**：`delta` clamp 到 `[0,0.05]`；读 `TICK_RATE` 判断 `modeBActive`；停用→激活边沿会重置累积器并 `alignTickPhys()`。
-7. **tick 边界**：`loAcc ≥ tickDt` 时执行模式B；键位取边界当前掩码，鼠标取模式A 自上一边界消耗的累积增量（限幅）。
+7. **tick 边界**：`loAcc ≥ tickDt` 时执行模式B；键位取边界当前掩码，鼠标取模式A 自上一边界消耗的累积增量，并施加 tick 窗口限幅 `tickInputMax = MAX_INPUT_DELTA(1000/ms) × tickDt`（`worker-a.ts:249-251`）。
 8. **tick 实例推进**：`tickPhys.tick(tickDt, ...)` 是独立 64t 物理演化；若与模式A 位置偏差超过 64，先 `alignTickPhys()` 全量拉回。
 9. **速度校准**：`phys.set_velocity(tickPhys 三轴速度)` 是模式B 对模式A 的唯一影响通道；位置/角度不触碰。
-10. **模式A 消费输入**：`consumeInput(±1000)` 是唯一输入消费路径；tick 边界采样所需鼠标增量在这里累积到 `tickDxAcc/tickDyAcc`。
+10. **模式A 消费输入**：`consumeInput()` 是唯一输入消费路径——缺省 `maxDelta=Infinity` **不限幅**（主线程已按单事件削平），完整帧增量直通物理（`worker-a.ts:282-285`）；tick 边界采样所需鼠标增量在这里累积到 `tickDxAcc/tickDyAcc`，其限幅由 tick 窗口 `tickInputMax` 另行施加（见节点 7 与 architecture.md §3.1 三层语义对照）。
 11. **模式A 子步**：`phys.tick(1ms, keysMask, dx, dy)` 推进位置/角度/速度；每轮最多 8 步，累加器封顶 20ms。
 12. **状态发布**：`writeStateFromPhys()` 写“当前 V 的另一槽”再 `Atomics.add(V,1)`；发布不 notify RENDER_WAKEUP（渲染主驱动是主线程 rAF）。
 13. **WorkerB 看到 V 更新**：`readState()` 返回非 null，进入状态刷新分支。

@@ -1,10 +1,11 @@
 # WebSurf game 工程时序图
 
-> 最后核对：2026-08-13。以实际代码为准（`game/src/renderer/renderer-main.ts` + `src/ts-shared/auth/*`）。
+> 最后核对：2026-08-24。以实际代码为准（`game/src/renderer/renderer-main.ts` + `src/ts-shared/auth/*`）。
 
 > 对应 `game/`（WebSurf-game，Game Build）。实际实现（v7 定案）：**主线程 = 唯一物理渲染线**
 > （PhysWorld tick + 渲染同频，rAF 帧率可变 dt、dt 钳制 0.1s）；**Worker = 权威帧计算器**
-> （独立固定步长 = 1/tickRate，默认 64Hz、面板 48-128 可调，含地图碰撞）。无 Worker-B——预测已在主线程（v4 起删除双 Worker 预测）。
+> （独立固定步长 = **1/(tickRate+3)**——TICK_RATE_OFFSET=3 隐藏偏移，面板显示原值不体现：
+> 面板 64 即权威实际 67Hz；面板 48-128 可调，含地图碰撞）。无 Worker-B——预测已在主线程（v4 起删除双 Worker 预测）。
 > debug 时序见 `../../debug/docs/timing-debug.md`。兜底同步逐场景深挖与专题分析（垂直落体锯齿 5.54 / 重力手感）见 `./timing-game-analysis.md`。
 
 ```mermaid
@@ -41,12 +42,13 @@ sequenceDiagram
     end
     Main->>Main: 校准: set_velocity(vel_A + a×(t_now − t_A)) —— 权威速度外推反馈<br/>(位置/角度不覆盖; 渲染帧永远是主线程物理的连续输出)
     Main->>Main: PhysWorld.tick(dt, keys, dx, dy) —— 完整物理 (碰撞/传送/死亡)
+    Main->>Main: [game 特有] C 按住期间 holdPoint 强制 set_state 冻结在存点 (速度 0; predPhys.tick 后执行, renderer-main.ts:713-718)
     Main->>Main: 渲染物理状态 (相机 = pos + eyeHeight; 角度 度→弧度)
     Main->>GPU: 提交渲染指令
     GPU->>GPU: 光栅化 & 像素处理
     GPU-->>Main: 渲染完成
 
-    Note over Hardware, GPU: === 第四阶段：权威帧计算 (固定步长 = 1/tickRate, 默认 64Hz, 面板 48-128 可调) ===
+    Note over Hardware, GPU: === 第四阶段：权威帧计算 (固定步长 = 1/(tickRate+3), 面板 64 → 实际 67Hz, 面板 48-128 可调) ===
     loop 自驱循环 (setTimeout 4ms 轮询; 固定步长累积器无封顶, 每轮 ≤64 步 guard, 不丢物理时间)
         Worker->>SharedMem: exchange 消耗输入 (maxStep 防穿墙, 随步长缩放)
         Worker->>Worker: PhysWorld.tick (完整物理: 碰撞/传送/死亡; 独立权威演化)
@@ -59,9 +61,11 @@ sequenceDiagram
     Worker-->>Main: phys-event (land/blocked: pos + yawDeg/pitchDeg)
     Main->>Main: 渲染位置与权威差 <60 → set_state 微调 (含权威角度)<br/>差 ≥60 → 跳过防跳变
 
-    Note over Hardware, GPU: === 第六阶段：位置突变事件 (respawn / teleport) ===
+    Note over Hardware, GPU: === 第六阶段：位置突变事件 (respawn / teleport / 存点读点) ===
     Main->>Worker: respawn / teleport 消息 (双端同执行)
     Main->>Main: 渲染物理本地 respawn / teleport (无回传归零; 权威帧校准随后收敛)
+    Main->>Worker: sync-render-state —— 存点读点 loadSavepoint / C 松开恢复 (主线程状态反向注入权威)
+    Note over Main: 另有 holdPoint 按住期间每帧强制 set_state 覆盖权威演化 (e86eb7b/b16a1c3)<br/>第三条自动注入路径：校准器传送豁免窗口内每帧 onSyncRenderState 反向推送<br/>(authority-calibrator.ts:159-164, TELEPORT_EXEMPT_MS=200) —— game 当前休眠 (resetTo 无调用方)
 
     Note over Hardware, GPU: === 第七阶段：兜底同步反转 (渲染主线 → 权威) ===
     Main->>Worker: sync-render-state (三条件 OR: ①dist>500 ②dist>300 且 yaw 差≤3° 且转动方向相同 ③dist≤300 且 yaw 差>45°)
@@ -79,9 +83,12 @@ sequenceDiagram
 | 角度隔离 | 权威帧不得影响渲染角度（输入层化后双端同源 → 天然一致）；仅碰撞事件可同步角度 |
 | 输入双通道 | 同一份输入同时喂 SAB（权威）与主线程本地缓冲——无分叉 |
 | 无 Worker-B | 预测即主线程渲染物理本身（v4 起删除双 Worker 预测：双 Worker 同步复杂易卡） |
+| 权威步长隐藏偏移 | 权威实际步长 = 1/(面板 tickRate+3)（TICK_RATE_OFFSET=3，用户定调 2026-08-18）；主线程预测不受偏移影响 → 名义同档双端步长不同（67 vs 64 Hz）。b16a1c3 引入 |
 
-**已知不对称（如实记录）**：`set-death-threshold` 为共享层已定义消息，但 game 主线程
-**从未发送**——权威 Worker 死亡阈值恒为 Rust 默认 -100000（掉落永不死亡重生）；主线程
+**已知不对称（如实记录）**：`set-death-threshold` 共享层已定义，game 桥方法亦已具备
+双发通道（`sendSetDeathThreshold`：本地 `setDeathY` + `worker.postMessage`，
+`input-bridge.ts:68-74`，对齐 debug 桥模式），但**运行时从未调用/发送**（无 UI 入口）
+——权威 Worker 死亡阈值恒为 Rust 默认 -100000（掉落永不死亡重生）；主线程
 预测物理则收到 `set_death_y(bbox.min.y)`（renderer-main 实传未减 1000，注释与实现不符）。
 双端死亡判定分叉，详见 `./physics.md` §8。
 
