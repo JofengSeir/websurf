@@ -620,9 +620,14 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		rendererMain?.resize(canvas.clientWidth, canvas.clientHeight);
 	});
 
-	// 失焦时清空键盘状态
+	// 失焦：rAF 后台停摆会冻结 SAB 输入槽（I_KEYS 停在失焦前键位，Worker 权威
+	// 模拟按旧键位继续移动）——立即显式写 keysMask=0 清权威键位（SAB 路径
+	// Atomics.store(I_KEYS,0)；MsgState 回退 post input{keys:0}，共享层 addInput
+	// 双通道同接口，与 game blur 修复同款）。退锁路径由下一帧输入循环写 0 兜底，
+	// 此处针对的是后台标签页 rAF 暂停场景。
 	window.addEventListener('blur', () => {
 		keyboard.reset();
+		sharedState?.addInput(0, 0, 0);
 		rendererMain?.clearPendingInput();
 	});
 }

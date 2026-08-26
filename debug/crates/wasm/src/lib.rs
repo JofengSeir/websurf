@@ -2674,7 +2674,7 @@ impl BspProcessor {
                 }
             }
         }
-        // 合并真实面 + chatfer（chamfer 也会参与最终序列化，同样 rotate+flip）
+        // 合并真实面 + chamfer（chamfer 也会参与最终序列化，同样 rotate+flip）
         let mut all_planes_src: Vec<Plane> = Vec::new();
         if !flipped_planes.is_empty() {
             all_planes_src.extend(flipped_planes.iter().cloned());
