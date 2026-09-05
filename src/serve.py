@@ -40,12 +40,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         sys.stderr.write(f"{self.address_string()} - {fmt % args}\n")
 
 
-with socketserver.TCPServer(("", PORT), Handler) as s:
+class Server(socketserver.TCPServer):
+    # SO_REUSEADDR：关窗后立刻重开不会被 TIME_WAIT 卡死（"通常每个套接字地址
+    # 只允许使用一次"）；占用中的活动端口仍会报错，由下方 OSError 提示兜底
+    allow_reuse_address = True
+
+
+try:
+    server = Server(("", PORT), Handler)
+except OSError as e:
+    print(f"[错误] 端口 {PORT} 无法监听：{e}")
+    print(f"[提示] 端口可能已被占用——换一个端口：python serve.py {PORT + 1}")
+    sys.exit(1)
+
+with server:
     print(f"Serving {ROOT} at http://localhost:{PORT}/")
     print(f"  App:   http://localhost:{PORT}/web/index.html")
     print(f"  Quit:  Ctrl+C")
     sys.stdout.flush()
     try:
-        s.serve_forever()
+        server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down.")
