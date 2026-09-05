@@ -24,7 +24,7 @@
     <div class="card">
       <div class="gtitle">加载 BSP 地图，开始预览</div>
       <div class="gstep">
-        ① 点击下方按钮选择 <code>.bsp</code> 地图文件，<br>或直接把 <code>.bsp</code> / <code>.json</code> 录像拖进本窗口
+        ① 点击下方按钮选择 <code>.bsp</code> 地图文件，<br>或直接把 <code>.bsp</code> / <code>.json</code> / <code>.js</code> 拖进本窗口
       </div>
       <div class="gstep">
         ② 加载后点击画面锁定鼠标即可自由飞行
@@ -41,7 +41,7 @@
   </div>
 
   <!-- 拖拽高亮反馈 -->
-  <div id="dropzone">松开鼠标，加载 .bsp 地图或 .json 录像</div>
+  <div id="dropzone">松开鼠标：.bsp 加载地图、.json 导入录像、.js 换规则脚本</div>
 
   <div id="hud">
     <div class="hud-line" id="pose">位姿 —</div>
@@ -66,6 +66,10 @@
     <div class="help-sec">
       <div class="help-h">载入地图与录像</div>
       <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。地图页底部可开关地面网格与世界坐标轴参考。录像：录像页「选择 JSON 录像…」、拖入 <code>.json</code>（自动切到录像页）、「载入示例录像」；URL 深链 <code>?bsp=&amp;replay=&amp;rule=</code> 可直接打开配套资源。</p>
+    </div>
+    <div class="help-sec">
+      <div class="help-h">规则脚本与播放控制</div>
+      <p>第三方格式录像：把 <code>.js</code> 转化脚本拖进窗口或在录像页「载入规则脚本」（写法与提示词模板见 docs/replay-rule-ai.md）；深链 <code>?rule=</code> 同样接受 .js。录像↔地图没对齐时用「变换调整」（平移 / 旋转 yaw / 一键锚定到出生点）。外部脚本可经 <code>window.viewer.replay</code> 控制播放：play / pause / seek(秒) / setSpeed / setMode / follow / tracks()。</p>
     </div>
     <div class="help-sec">
       <div class="help-h">起点对齐阈值</div>

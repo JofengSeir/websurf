@@ -229,6 +229,14 @@ select.field-input option { background: #16181d; }
 .track-btn.active { color: var(--gold); border-color: rgba(201, 160, 92, 0.55); background: rgba(201, 160, 92, 0.14); }
 .track-btn.danger:hover { color: var(--danger); border-color: rgba(255, 99, 71, 0.5); background: rgba(255, 99, 71, 0.12); }
 
+/* 规则脚本只读展示 */
+.rule-src {
+  margin: 0; max-height: 180px; overflow: auto;
+  font-family: var(--mono); font-size: 11px; line-height: 1.5; color: #d8e2f0;
+  background: #0b0d11; border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 8px 10px; white-space: pre; tab-size: 2;
+}
+
 /* 出生点列表（单行 pill） */
 .spawn-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
 .spawn-item {
