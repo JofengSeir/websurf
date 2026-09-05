@@ -40,12 +40,12 @@ dist/
   `index.html?replay=assets/maps/surf_null_4.replay.json&rule=assets/maps/surf_null_4.rule.json`
   （`?bsp=` / `?replay=` / `?rule=` 任意组合，相对路径相对页面解析，也支持带 CORS 头的绝对 URL）。
 
-## 朝向诊断（录像回放）
+## 变换调整（录像↔地图对齐）
 
-「录像」面板 →「朝向诊断」：只用录像自身数据判定映射链**保角自洽**（源/viewer 双空间
-「移动方向 vs 首帧朝向」夹角相等 |差|≤1°；绝对夹角不作失败条件——surf 起跑常侧身）；
-不自洽时点「一键修正朝向」自动调整 yaw 偏移并重导（pitch 不参与自动修正）。详见
-`viewer/README.md` 与 `viewer/docs/overview.md`。
+录像整体位置/朝向与地图不符时（悬空、侧转 90°、落在地图外），「录像」页「变换调整」区
+人工微调：平移 X/Y/Z、旋转 yaw（±90° 快捷）、「一键锚定到出生点」自动平移对齐；改动即
+重新导入当前轨道。第三方录像格式的 .js 转化脚本规范见 `viewer/docs/replay-rule-ai.md`，
+播放可由外部脚本经 `window.viewer.replay`（play/pause/seek/setSpeed/setMode/follow）控制。
 
 ## 部署
 

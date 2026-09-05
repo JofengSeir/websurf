@@ -1,7 +1,7 @@
 {
   "name": "websurf-viewer",
   "version": "0.1.0",
-  "description": "WebSurf-viewer — 最小 BSP 自由视角查看器：BSP → GLB 场景 + 自由飞行相机 + 位置/朝向 API（URL/哈希/window.viewer）。",
+  "description": "WebSurf-viewer — 最小 BSP 自由视角查看器：BSP → GLB 场景 + 自由飞行相机 + 录像回放（规则脚本 + 变换调整 + 播放控制 API）。",
   "type": "module",
   "license": "MIT",
   "scripts": {
