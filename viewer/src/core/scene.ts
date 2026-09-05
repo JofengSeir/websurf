@@ -362,7 +362,11 @@ export class ViewerScene {
           for (const g of mergedGeoms) if (g !== final) g.dispose();
           optRoot.add(new THREE.Mesh(final, mats));
         } else {
-          optRoot.add(new THREE.Mesh(mergedGeoms[0], mats[0]));
+          // 最终合并失败（属性不兼容，如 indexed/non-indexed 混合）：全部单独保留。
+          // 与 game 同法——只留第一块会把该 cell 其余几何静默丢掉（渲染不全根因）。
+          for (let i = 0; i < mergedGeoms.length; i++) {
+            optRoot.add(new THREE.Mesh(mergedGeoms[i], mats[i]));
+          }
         }
       }
       for (const it of arr) it.mesh.geometry.dispose();
