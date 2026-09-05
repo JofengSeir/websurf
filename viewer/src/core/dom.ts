@@ -34,12 +34,6 @@ export function section(parent: HTMLElement, title: string): HTMLElement {
   return body;
 }
 
-export interface FoldBoxOptions {
-  open?: boolean;
-  /** 标题右侧的浅色小字说明（如分区内容清单）。 */
-  hint?: string;
-}
-
 /**
  * 可折叠分组容器（<details>/<summary>）：面板分段折叠用。
  * 构造时全量渲染、仅折叠；折叠头不拦截组内控件事件。
@@ -47,46 +41,17 @@ export interface FoldBoxOptions {
 export function foldBox(
   parent: HTMLElement,
   title: string,
-  opts?: FoldBoxOptions,
+  opts?: { open?: boolean },
 ): { details: HTMLDetailsElement; body: HTMLElement } {
   const details = el('details', 'fold');
   if (opts?.open) details.open = true;
   const head = el('summary', 'fold-title');
   head.appendChild(el('span', 'fold-name', title));
-  if (opts?.hint) head.appendChild(el('span', 'fold-hint', opts.hint));
   details.appendChild(head);
   const body = el('div', 'fold-body');
   details.appendChild(body);
   parent.appendChild(details);
   return { details, body };
-}
-
-interface FieldOpts {
-  label: string;
-  value?: string;
-  placeholder?: string;
-  hint?: string;
-  onInput?: (v: string) => void;
-  onChange?: (v: string) => void;
-}
-
-/** 单行文本输入行（label + input + 可选说明）。返回 input 元素。 */
-export function textField(parent: HTMLElement, opts: FieldOpts): HTMLInputElement {
-  const row = el('label', 'field');
-  row.appendChild(el('span', 'field-label', opts.label));
-  const input = el('input', 'field-input');
-  input.type = 'text';
-  input.spellcheck = false;
-  if (opts.value !== undefined) input.value = opts.value;
-  if (opts.placeholder) input.placeholder = opts.placeholder;
-  if (opts.hint) input.title = opts.hint;
-  const onInput = opts.onInput;
-  if (onInput) input.addEventListener('input', () => onInput(input.value));
-  const onChange = opts.onChange;
-  if (onChange) input.addEventListener('change', () => onChange(input.value));
-  row.appendChild(input);
-  parent.appendChild(row);
-  return input;
 }
 
 interface NumOpts {
@@ -116,30 +81,6 @@ export function numField(parent: HTMLElement, opts: NumOpts): HTMLInputElement {
   row.appendChild(input);
   parent.appendChild(row);
   return input;
-}
-
-interface SelectOpts {
-  label: string;
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  hint?: string;
-  onChange: (v: string) => void;
-}
-
-export function selectField(parent: HTMLElement, opts: SelectOpts): HTMLSelectElement {
-  const row = el('label', 'field');
-  row.appendChild(el('span', 'field-label', opts.label));
-  const sel = el('select', 'field-input');
-  for (const o of opts.options) {
-    const opt = el('option', undefined, o.label, { value: o.value });
-    sel.appendChild(opt);
-  }
-  sel.value = opts.value;
-  if (opts.hint) sel.title = opts.hint;
-  sel.addEventListener('change', () => opts.onChange(sel.value));
-  row.appendChild(sel);
-  parent.appendChild(row);
-  return sel;
 }
 
 /** 勾选行。 */

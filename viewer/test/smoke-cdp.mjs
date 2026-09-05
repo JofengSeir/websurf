@@ -258,6 +258,15 @@ try {
   );
   check('WebGL 可用', webgl === true, String(webgl));
 
+  console.log('\n[1b] localStorage 卫生（防跨运行污染顶替「内置默认规则」）');
+  await evaluate('(() => { localStorage.clear(); location.reload(); return true; })()', sessionId);
+  await sleep(4000); // 重载 + 应用初始化
+  const reloaded = await evaluate(
+    "document.getElementById('game') !== null && document.getElementById('fatal')?.classList.contains('show') !== true",
+    sessionId,
+  );
+  check('清空 localStorage 后页面重载正常', reloaded === true);
+
   console.log('\n[2] 切到「录像」标签页');
   await evaluate(
     "document.querySelector('.tab[data-tab=\"replay\"]').click()",
@@ -370,6 +379,7 @@ try {
   console.log('  场景统计：' + JSON.stringify(sceneInfo));
 
   console.log('\n[7] 变换调整（transform 后处理，替换而非追加）');
+  const tracksBeforeTf = await evaluate('window.viewer.replay.tracks()', sessionId);
   const durBeforeTf = (await evaluate('window.viewer.replay', sessionId)).duration;
   await evaluate(
     `(() => {
@@ -383,15 +393,62 @@ try {
   );
   await sleep(1800); // 0.5s 防抖 + 重新导入
   const stTf = await evaluate('window.viewer.replay', sessionId);
+  const tracksAfterTf = await evaluate('window.viewer.replay.tracks()', sessionId);
   check('改变换后仍是 1 条（替换当前轨道）', stTf.trackCount === 1, JSON.stringify(stTf));
   check('变换只动坐标不改时长', Math.abs(stTf.duration - durBeforeTf) < 0.01, `${durBeforeTf} → ${stTf.duration}`);
-  await evaluate(
-    "(() => { Array.from(document.querySelectorAll('#pane-replay button')).find(x => x.textContent.trim() === '重置变换')?.click(); return true; })()",
+  check(
+    '平移 500 真实作用到坐标（firstPos.x + 500）',
+    tracksAfterTf.length === 1 &&
+      Math.abs(tracksAfterTf[0].firstPos[0] - (tracksBeforeTf[0].firstPos[0] + 500)) < 1,
+    `${JSON.stringify(tracksBeforeTf[0]?.firstPos)} → ${JSON.stringify(tracksAfterTf[0]?.firstPos)}`,
+  );
+  const resetClicked = await evaluate(
+    "(() => { const b = Array.from(document.querySelectorAll('#pane-replay button')).find(x => x.textContent.trim() === '重置变换'); if (!b) return false; b.click(); return true; })()",
     sessionId,
   );
+  check('找到并点击「重置变换」', resetClicked === true);
   await sleep(1500);
   const stReset = await evaluate('window.viewer.replay', sessionId);
+  const tracksReset = await evaluate('window.viewer.replay.tracks()', sessionId);
   check('重置变换后仍 1 条', stReset.trackCount === 1, JSON.stringify(stReset));
+  check(
+    '重置后坐标回到基线',
+    tracksReset.length === 1 &&
+      Math.abs(tracksReset[0].firstPos[0] - tracksBeforeTf[0].firstPos[0]) < 1,
+    JSON.stringify(tracksReset[0]?.firstPos),
+  );
+
+  console.log('\n[7b] .js 规则脚本载入（拖拽 → loadRuleFile → 替换当前轨道）');
+  // 合成一条「pos.x ×2」的规则脚本，用真实 drop 链路载入；断言来源标记 + 坐标翻倍
+  const fpBeforeJs = (await evaluate('window.viewer.replay.tracks()', sessionId))[0]?.firstPos;
+  const jsDropped = await evaluate(
+    `(() => {
+      const text = '(raw, i, H) => ({ t: i / 128, pos: [H.num(H.get(raw, "pos[0]")) * 2, H.num(H.get(raw, "pos[1]")), H.num(H.get(raw, "pos[2]"))], ang: [H.wrap(H.num(H.get(raw, "ang[0]"))), H.clampPitch(H.num(H.get(raw, "ang[1]"))), 0], vel: null })';
+      const dt = new DataTransfer();
+      dt.items.add(new File([text], 'smoke-rule.js', { type: 'text/javascript' }));
+      window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
+      return true;
+    })()`,
+    sessionId,
+  );
+  await sleep(2000); // 拖 .js 换规则 → 复用缓存重导
+  const srcLabel = await evaluate(
+    "Array.from(document.querySelectorAll('#pane-replay .kv')).find(r => r.querySelector('.k')?.textContent === '规则来源')?.querySelector('.v')?.textContent ?? ''",
+    sessionId,
+  );
+  const stJs = await evaluate('window.viewer.replay', sessionId);
+  const fpAfterJs = (await evaluate('window.viewer.replay.tracks()', sessionId))[0]?.firstPos;
+  check('拖入 .js 触发规则载入', jsDropped === true);
+  check('规则来源标记为 .js 文件', srcLabel.includes('smoke-rule.js'), srcLabel);
+  check('换规则后仍 1 条（替换当前轨道）', stJs.trackCount === 1, JSON.stringify(stJs));
+  check(
+    '.js 规则真实生效（firstPos.x ×2）',
+    fpBeforeJs !== undefined &&
+      fpAfterJs !== undefined &&
+      Math.abs(fpAfterJs[0] - fpBeforeJs[0] * 2) < 1 &&
+      Math.abs(fpAfterJs[1] - fpBeforeJs[1]) < 1,
+    `${JSON.stringify(fpBeforeJs)} → ${JSON.stringify(fpAfterJs)}`,
+  );
 
   console.log('\n[8] 多轨迹（Q2）：再载入一份 → 追加第二条');
   await evaluate(
@@ -462,11 +519,11 @@ try {
 
   console.log('\n[11] 播放控制 API（window.viewer.replay）');
   // 先清掉 [5] 设下的 A-B 区间，seek 才能到绝对时间
-  await evaluate(
-    "(() => { Array.from(document.querySelectorAll('#timeline button')).find(b => b.textContent.trim() === '整段')?.click(); return true; })()",
+  const rangeCleared = await evaluate(
+    "(() => { const b = Array.from(document.querySelectorAll('#timeline button')).find(x => x.textContent.trim() === '整段'); if (!b) return false; b.click(); return true; })()",
     sessionId,
   );
-  await sleep(300);
+  check('找到并点击「整段」清除区间', rangeCleared === true);
   await evaluate(
     `(() => {
       const r = window.viewer.replay;
@@ -518,14 +575,17 @@ try {
     `(() => {
       const sec = Array.from(document.querySelectorAll('#pane-map .sec'))
         .find(s => s.querySelector('.sec-title')?.textContent === '参考显示');
-      if (!sec) return -1;
-      const boxes = sec.querySelectorAll('input[type=checkbox]');
+      if (!sec) return { n: -1, changed: false };
+      const boxes = Array.from(sec.querySelectorAll('input[type=checkbox]'));
+      const before = boxes.map(b => b.checked);
       boxes.forEach(b => b.click());
-      return boxes.length;
+      const changed = boxes.some((b, i) => b.checked !== before[i]);
+      return { n: boxes.length, changed };
     })()`,
     sessionId,
   );
-  check('网格/坐标轴开关存在且可切换', toggled === 2, String(toggled));
+  check('网格/坐标轴开关存在', toggled.n === 2, JSON.stringify(toggled));
+  check('开关点击后勾选态翻转', toggled.changed === true, JSON.stringify(toggled));
   await evaluate("document.querySelector('.tab[data-tab=\"replay\"]').click()", sessionId);
 
   console.log('\n[13] 控制台（累计）');

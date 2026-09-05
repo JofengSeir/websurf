@@ -74,6 +74,19 @@ check(
 );
 check('bbox 有效', clip.bbox.min[0] < clip.bbox.max[0]);
 
+// 朝向自洽回归（防 raw.ang 序装反）：sample 的 yaw 指向运动方向，
+// 经默认规则映射后 forward = (−sin yaw, −cos yaw) 必须与水平运动同向
+{
+  const fr = frames[100] as { pos: number[]; ang: number[] };
+  const prev = frames[99] as { pos: number[] };
+  const yaw = (fr.ang[0] * Math.PI) / 180;
+  const fwd = [-Math.sin(yaw), -Math.cos(yaw)];
+  const mv = [fr.pos[0] - prev.pos[0], fr.pos[2] - prev.pos[2]];
+  const cos =
+    (fwd[0] * mv[0] + fwd[1] * mv[1]) / (Math.hypot(...fwd) * Math.hypot(...mv));
+  check('示例录像经默认规则后朝向与运动方向一致', cos > 0.999, `cos=${cos.toFixed(4)}`);
+}
+
 console.log('\n[4] 播放器采样');
 const p = new ReplayPlayer();
 p.load(clip);
@@ -245,12 +258,13 @@ check('给出了警告', dirtyWarnings.length > 0, dirtyWarnings.join(';'));
 console.log('\n[9] transform 后处理（变换调整的后端）');
 function makeSimpleClip(tf?: RuleConfig['transform']) {
   const r: RuleConfig = { ...defaultRule(), scriptSrc: DEFAULT_RULE_SRC, transform: tf };
-  // 默认脚本约定：raw.ang = [pitch, yaw]。这里造一条沿 +X 匀速、面朝 +X（yaw=-90）的轨迹
+  // 默认脚本约定：raw.ang = [yaw, pitch]（与标准帧同序）。
+  // 这里造一条沿 +X 匀速、面朝 +X（yaw=-90）的轨迹
   return buildClip({
     name: 'tf',
     frames: Array.from({ length: 4 }, (_, i) => ({
       pos: [i * 10, 100, 0],
-      ang: [0, -90],
+      ang: [-90, 0],
       vel: [1, 0, 0],
     })),
     fn: compileScript(DEFAULT_RULE_SRC),
@@ -287,6 +301,7 @@ function makeSimpleClip(tf?: RuleConfig['transform']) {
   check('旋转后 pos 沿 −Z 递减', near(c.pos[2], 0) && near(c.pos[2 + 6], -20), JSON.stringify([c.pos[2], c.pos[8]]));
   check('旋转后 vel → (0,0,−1)', c.vel !== null && near(c.vel[0], 0, 1e-6) && near(c.vel[2], -1, 1e-6), JSON.stringify(c.vel ? [c.vel[0], c.vel[2]] : []));
   check('旋转后 yaw = 0（与运动方向自洽）', near(c.ang[0], 0) || near(c.ang[0], 360), String(c.ang[0]));
+  check('绕 Y 旋转不改 pitch', near(c.ang[1], 0), String(c.ang[1]));
   check('旋转重算 bbox', near(c.bbox.min[2], -30) && near(c.bbox.max[2], 0), JSON.stringify(c.bbox));
 }
 

@@ -103,7 +103,8 @@
 ### 5.2 规则脚本
 
 - **编译契约**：`scriptSrc` 是「求值为 `(raw, i, H) => Frame` 的单表达式」，
-  `compileScript` 以 `new Function('H', 'return (' + src + ');')` 编译
+  `compileScript` 以 `new Function('H', '"use strict"; return (' + src + ');')` 编译
+  （源码会先剥掉 AI 产码常见的尾分号再编译）
 - **来源**：内置默认（`default-rule.ts`，自家格式直通 tick 128）｜`.js` 文件（AI 按
   `replay-rule-ai.md` 产出）｜深链 `?rule=`（JSON 或裸 .js）｜localStorage 持久化
 - **双形态判定**（`rule-file.ts`）：文本 trim 后以 `{` 开头按规则 JSON 解析
@@ -113,7 +114,7 @@
 | H 成员 | 作用 |
 |---|---|
 | `H.get(raw, path)` | 按 `a.b[0].c` 路径取值，取不到返回 undefined（不抛） |
-| `H.num(v)` | 转数字，不可转为 NaN（会被校验阶段抓出） |
+| `H.num(v)` | 转数字，转不成返回 NaN（会被校验阶段抓出） |
 | `H.wrap(deg)` | 角度归一 [0,360) |
 | `H.clampPitch(deg)` | ±89° 限幅 |
 | `H.deg(rad)` | 弧度 → 度 |

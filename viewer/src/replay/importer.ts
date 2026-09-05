@@ -1,10 +1,9 @@
 /** 录像导入：优先走 Worker（不卡 UI + 复用已解析的 JSON），失败自动回退主线程。 */
 
 import { compileScript, probeScript } from './codegen.js';
-import { findArrayCandidates, getPath, num, pickFrameArray, readMeta } from './helpers.js';
+import { getPath, pickFrameArray } from './helpers.js';
 import { buildClip, safePreview } from './build.js';
 import type {
-  ArrayCandidateInfo,
   ClipPayload,
   ParseRequest,
   ParseResponse,
@@ -18,14 +17,6 @@ export interface ImportResult {
   clip: Clip;
   warnings: string[];
   resolvedPath: string;
-}
-
-export interface ProbeResult {
-  candidates: ArrayCandidateInfo[];
-  resolvedPath: string | null;
-  sample: string;
-  /** 根对象 meta 的浅拷贝（若存在）。 */
-  meta?: Record<string, unknown>;
 }
 
 interface Pending {
@@ -94,24 +85,6 @@ export class ReplayImporter {
     });
   }
 
-  /** 探测 JSON 结构：列出候选帧数组路径 + 首帧样例。 */
-  async probe(file: File): Promise<ProbeResult> {
-    try {
-      const res = await this.send({ id: ++this.seq, type: 'probe', file });
-      if (res.type === 'error') throw new Error(res.message);
-      if (res.type !== 'probed') throw new Error('探测返回了意外的响应类型');
-      return {
-        candidates: res.candidates,
-        resolvedPath: res.resolvedPath,
-        sample: res.sample,
-        meta: res.meta,
-      };
-    } catch (e) {
-      if (isNoWorker(e)) return this.probeOnMain(file);
-      throw e;
-    }
-  }
-
   /** 应用规则并生成 Clip。file 为 null 时复用上次已解析的文件（调规则不用重解析）。 */
   async import(
     file: File | null,
@@ -132,12 +105,6 @@ export class ReplayImporter {
       if (isNoWorker(e) || this.workerBroken) return this.importOnMain(file, rule, name, onProgress);
       throw e;
     }
-  }
-
-  reset(): void {
-    this.mainFile = null;
-    this.mainRoot = undefined;
-    if (this.worker) this.worker.postMessage({ id: ++this.seq, type: 'reset' } as ParseRequest);
   }
 
   dispose(): void {
@@ -164,22 +131,6 @@ export class ReplayImporter {
     this.mainRoot = root;
     onProgress?.('parse', 1, 1);
     return root;
-  }
-
-  private async probeOnMain(file: File): Promise<ProbeResult> {
-    const root = await this.mainRootOf(file);
-    const candidates = findArrayCandidates(root).map((c) => ({
-      path: c.path,
-      length: c.length,
-      depth: c.depth,
-    }));
-    const auto = pickFrameArray(root);
-    let sample = '';
-    if (auto !== null) {
-      const arr = getPath(root, auto) as unknown[];
-      if (Array.isArray(arr) && arr.length > 0) sample = safePreview(arr[0]);
-    }
-    return { candidates, resolvedPath: auto, sample, meta: readMeta(root) };
   }
 
   private async importOnMain(
@@ -223,7 +174,7 @@ function resolveFrames(root: unknown, framePath: string): unknown[] {
     throw new Error(
       framePath
         ? `路径 "${framePath}" 取到的不是数组`
-        : '没能在 JSON 里自动找到「元素为对象的数组」——请在规则脚本的 framePath 里手动指定路径',
+        : '没能在 JSON 里自动找到「元素为对象的数组」——第三方格式请用规则 JSON 的 framePath 指定路径',
     );
   }
   if (value.length === 0) throw new Error('帧数组为空');

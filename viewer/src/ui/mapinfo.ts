@@ -34,7 +34,7 @@ export class MapPanel {
   private readonly spawnBody: HTMLElement;
   private readonly reloadWrap: HTMLElement;
   private readonly emptyNote: HTMLElement;
-  /** 出生点快照（世界坐标，脚底），供录像「起点对齐」检测与锚定用。 */
+  /** 出生点快照（世界坐标，脚底），供录像「起点对齐」检测与一键锚定用。 */
   private spawns: Array<{ name: string; pos: [number, number, number] }> = [];
 
   constructor(

@@ -153,14 +153,14 @@ export class Timeline {
     row2.appendChild(this.rangeEl);
 
     this.speedEl = el('span', 'tl-speed', '速度 —');
-    this.speedEl.title = '无速度数据：规则未提供速度字段（可在「高级规则」里映射）';
+    this.speedEl.title = '无速度数据：规则脚本未提供速度字段（写法见 docs/replay-rule-ai.md）';
     row2.appendChild(this.speedEl);
 
     root.appendChild(row2);
 
     window.addEventListener('keydown', (e) => {
       if (!this.hasTracks) return;
-      // 别抢输入框的键——脚本编辑框里打 , . k i o 应该正常输入
+      // 别抢输入框的键——输入框里打 , . k i o 应该正常输入
       if (isTypingTarget(e.target)) return;
       if (e.code === 'KeyK') {
         e.preventDefault();
