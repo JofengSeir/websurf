@@ -12,9 +12,11 @@ import type { Frame, FrameMapper } from './types.js';
 
 /** 把脚本源码编译成映射函数（同源执行，仅用于本地工具）。 */
 export function compileScript(src: string): FrameMapper {
+  // 容错：剥掉 AI 产码常见的尾分号（整个文件会被包进 return (…) 里）
+  const body = src.trim().replace(/;+\s*$/, '');
   const factory = new Function(
     'H',
-    '"use strict";\nreturn (' + src + ');',
+    '"use strict";\nreturn (' + body + ');',
   ) as (H: unknown) => FrameMapper;
   return factory(REPLAY_HELPERS);
 }

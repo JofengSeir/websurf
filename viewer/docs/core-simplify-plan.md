@@ -5,6 +5,18 @@
 > 旧文档保留作历史记录，文首已加 superseded 标记）。
 > 对象：`D:\code\projects\websurf\viewer`（~9,000 行 TS + index.html/styles.css + 测试 + 文档）。
 
+> **复审增补（2026-09-06，团队四评审 A/B/C/D 后的修正记录）**：
+> ① P0：replay-rule-ai.md §2 表 ang[0]/ang[1] 互换已修正；自家格式 raw.ang 序**定案为与标准帧同序
+>   （[yaw, pitch] 直通）**——default-rule.ts 映射随之翻转，selftest 新增「示例经默认规则后朝向与
+>   运动方向一致」回归断言。② P1：smoke 增 .js 规则拖拽端到端（含坐标 ×2 断言）、[7] 变换调整补
+>   firstPos 坐标级断言（tracks() 扩展 `firstPos` 字段）、开场清 localStorage 防跨运行污染、README
+>   深链示例改回 `.rule.json`、compileScript 容错剥尾分号。③ probe 链（importer.probe/probeOnMain/
+>   协议 probe·probed·reset/readMeta）确认零调用方后物理删除；§2 R6 中「importer 内部探测逻辑保留」
+>   的表述与事实不符，以本条为准。④ 死代码/布局残留清扫：dom.ts textField/selectField/FoldBoxOptions.hint、
+>   styles.css 死样式六处、timeline/index.html/mapinfo 死文案。⑤ ruleFromText 判定为「`{` 开头但非合法
+>   规则 JSON → 直接报错，不按脚本处理」，比本文 §6.3 原表述更防呆（selftest [7b] 固化）；
+>   viewer.replay 内省含 `speed` 字段与 tracks().firstPos（随测试需要增补）。§7 验收清单已随实施逐项复核。
+
 ---
 
 ## 0. 决策记录（用户原话裁决）

@@ -233,12 +233,29 @@ export class ReplayPanel {
 
   /** 载入一个录像文件（面板按钮 / 主窗口拖拽共用）。换文件＝追加一条新轨道。 */
   async loadFile(file: File): Promise<void> {
+    if (this.busy) {
+      this.fileNote('上一次导入还在进行，请稍候再试', 'warn');
+      return;
+    }
     this.file = file;
     this.lastTrackId = null;
     this.fileNote(`正在解析录像 ${file.name} …`);
     this.opts.onStatus(`正在解析录像 ${file.name} …`);
     // freshFile=true：把文件交给 importer/Worker（解析并缓存）；之后的重导复用缓存
     await this.runImport(true, true);
+  }
+
+  /**
+   * .json 双语义入口（主窗口拖拽共用）：内容是规则 JSON 就换规则，
+   * 否则按录像导入。规则判定只看内容（ruleFromText），不看扩展名。
+   */
+  async ingestJson(file: File): Promise<void> {
+    const rf = ruleFromText(await file.text(), file.name);
+    if (rf) {
+      await this.applyRuleFile(rf, file.name + '（规则 JSON）');
+      return;
+    }
+    await this.loadFile(file);
   }
 
   /**
@@ -273,7 +290,11 @@ export class ReplayPanel {
       if (explicit) this.fileNote('还没有选择录像文件', 'warn');
       return;
     }
-    if (this.busy) return;
+    if (this.busy) {
+      // 大文件导入期间到达的重导请求（防抖回调/锚定/变换）不排队，明确告知
+      if (explicit) this.fileNote('上一次导入还在进行，本次改动未生效——请稍候重试', 'warn');
+      return;
+    }
     this.busy = true;
     try {
       const result = await this.importer.import(
@@ -346,8 +367,9 @@ export class ReplayPanel {
 
   /** 锚定后把输入框同步到新 transform（叠加结果）。 */
   private syncTransformInputs(): void {
-    const tf = this.rule.transform;
-    if (!tf) return;
+    // 无 transform 的规则也要把输入框归零——否则旧规则残留的微调值
+    // 会在用户下次触碰输入框时被写进新规则
+    const tf = this.rule.transform ?? { offset: [0, 0, 0] as [number, number, number], yawDeg: 0 };
     this.tfOffInputs.forEach((el, i) => {
       el.value = String(tf.offset[i]);
     });
@@ -387,8 +409,16 @@ export class ReplayPanel {
       );
       return;
     }
+    await this.applyRuleFile(rf, file.name + (rf.kind === 'json' ? '（规则 JSON）' : '（.js）'));
+  }
+
+  /** 规则落盘 + 刷新规则视图/变换输入 + 按需重导（替换当前轨道）。 */
+  private async applyRuleFile(
+    rf: NonNullable<ReturnType<typeof ruleFromText>>,
+    sourceLabel: string,
+  ): Promise<void> {
     this.rule = rf.rule;
-    this.ruleSource = file.name + (rf.kind === 'json' ? '（规则 JSON）' : '（.js）');
+    this.ruleSource = sourceLabel;
     this.saveRule();
     this.refreshRuleView();
     this.syncTransformInputs();

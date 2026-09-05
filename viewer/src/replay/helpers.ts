@@ -73,23 +73,6 @@ export const REPLAY_HELPERS = {
   clamp: (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v)),
 };
 
-/**
- * 取根对象的 `meta`（仅保留可 JSON 化、体积可控的字段，限深 1 层）。
- * 用于自动识别录像来源（Shavit / 自录 / 第三方），主线程与 Worker 共用。
- */
-export function readMeta(root: unknown): Record<string, unknown> | undefined {
-  if (!root || typeof root !== 'object' || Array.isArray(root)) return undefined;
-  const m = (root as Record<string, unknown>).meta;
-  if (!m || typeof m !== 'object' || Array.isArray(m)) return undefined;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(m)) {
-    if (v === null) out[k] = null;
-    else if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') out[k] = v;
-    else if (Array.isArray(v) && v.length <= 64) out[k] = v;
-  }
-  return out;
-}
-
 // ── 帧数组自动探测 ──────────────────────────────────────────────────
 
 export interface ArrayCandidate {

@@ -23,7 +23,9 @@
 - `i`：帧序号，从 0 开始
 - `H`：辅助函数集（见 §3）
 - **文件内容就是这个表达式**（可带前置 `//` 注释）。不要写 `const`/`module.exports`/`export`，
-  不要 IIFE 包裹——viewer 用 `new Function('H', 'return (' + 源码 + ');')` 编译它。
+  不要 IIFE 包裹，**结尾不要加分号**——viewer 用 `new Function('H', '"use strict"; return ('
+  + 源码 + ');')` 编译它，尾分号会直接语法错误
+- **返回的帧字段**：`t` 秒（**单调不减**，相等合法）；`pos`/`ang`/`vel` 约定见 §2
 
 ### 帧数组定位
 
@@ -40,10 +42,10 @@ viewer 世界坐标与 Source/Hammer 完全不同，映射错了会看到轨迹�
 | 单位 | HU（Hammer Unit），**不缩放**（源数据若是米/英寸，先换算成 HU） |
 | 轴向 | **Y-up**：`pos[1]` 是高度。Source 的 Z-up 数据 → `(x, y, z)_源 → (y, z, x)_viewer` |
 | `pos` | **人物脚底**（不是眼位；眼位数据要减 `H.EYE` = 64.09） |
-| `ang[0]` | pitch，度，**正 = 仰视**，会被限幅 ±89°。Source pitch 正 = 俯视，**要取反** |
-| `ang[1]` | yaw，度，**0 = 面朝 −Z，逆时针为正**，归一到 [0,360)。Source 世界坐标下 `viewerYaw = yaw + 180` |
+| `ang[0]` | **yaw**，度，**0 = 面朝 −Z，逆时针为正**，请用 `H.wrap` 归一。Source 世界坐标下 `viewerYaw = yaw + 180` |
+| `ang[1]` | **pitch**，度，**正 = 仰视**，请用 `H.clampPitch` 限幅 ±89°（相机路径会再夹一次，但幽灵渲染不限）。Source pitch 正 = 俯视，**要取反** |
 | `ang[2]` | roll，度，一般源数据没有就填 0 |
-| `t` | **秒**。tick 数据 → `i / tickrate`；毫秒 → `/ 1000`；必须单调不减 |
+| `t` | **秒**。tick 数据 → `i / tickrate`；毫秒 → `/ 1000`；**单调不减** |
 | `vel` | **世界速度** `[vx,vy,vz]`（HU/s），没有就 `null`。⚠ Shavit 的 `vel` 字段是按键命令打包（forwardmove \| sidemove<<16），**不是世界速度——不要映射** |
 
 > Source/Shavit 定标结论（2026-09-03 用 surf_null.bsp + surf_null_4.replay 实测）：
@@ -86,24 +88,23 @@ viewer 世界坐标与 Source/Hammer 完全不同，映射错了会看到轨迹�
 
 - `transform` 是**人工微调**（viewer 侧在脚本输出之后统一施加：平移 + 绕 Y 旋转），
   给用户在「变换调整」面板里对齐地图用——AI 一般填全零或干脆省略
-- 判定规则：文本 trim 后以 `{` 开头按规则 JSON 解析（须有 `version:1` + `scriptSrc`），
-  否则一律按裸脚本文本处理
+- 判定规则：文本 trim 后以 `{` 开头按规则 JSON 解析（须有 `version:1` + `scriptSrc`，
+  不满足会直接报错，**不会**被当作脚本）；不以 `{` 开头的文本一律按裸脚本文本处理
 
 ## 6. 完整示例 A：viewer 自家标准格式
 
-自家格式无需脚本（内置默认规则），这里作为最小范例：
+自家格式无需脚本（内置默认规则），这里作为最小范例。
+注意：**自家格式的 raw 帧与标准帧同序**——`ang = [yaw, pitch]`（roll 通常没有），直通映射：
 
 ```js
 // 自家标准格式：pos/ang/vel 直通，tick 128
 (raw, i, H) => ({
   t: i / 128,
   pos: [H.num(H.get(raw, "pos[0]")), H.num(H.get(raw, "pos[1]")), H.num(H.get(raw, "pos[2]"))],
-  ang: [H.wrap(H.num(H.get(raw, "ang[1]"))), H.clampPitch(H.num(H.get(raw, "ang[0]"))), 0],
+  ang: [H.wrap(H.num(H.get(raw, "ang[0]"))), H.clampPitch(H.num(H.get(raw, "ang[1]"))), 0],
   vel: [H.num(H.get(raw, "vel[0]")), H.num(H.get(raw, "vel[1]")), H.num(H.get(raw, "vel[2]"))],
 })
 ```
-
-注意自家帧的 `ang` 是 `[pitch, yaw]` 序（pitch 在前）——映射时别接反。
 
 ## 7. 完整示例 B：Source / Shavit 系录像（Z-up → viewer）
 

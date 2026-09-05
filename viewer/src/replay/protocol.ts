@@ -2,12 +2,6 @@
 
 import type { RuleConfig } from './types.js';
 
-export interface ArrayCandidateInfo {
-  path: string;
-  length: number;
-  depth: number;
-}
-
 /** Clip 的可转移形态（定型数组，零拷贝回传）。 */
 export interface ClipPayload {
   name: string;
@@ -22,21 +16,16 @@ export interface ClipPayload {
   resolvedPath: string;
 }
 
-export type ParseRequest =
-  | { id: number; type: 'probe'; file: File }
-  | { id: number; type: 'import'; file: File | null; rule: RuleConfig; name: string }
-  | { id: number; type: 'reset' };
+export type ParseRequest = {
+  id: number;
+  type: 'import';
+  /** null = 复用 Worker 里已解析的上一份文件（改规则不重解析）。 */
+  file: File | null;
+  rule: RuleConfig;
+  name: string;
+};
 
 export type ParseResponse =
   | { id: number; type: 'progress'; phase: 'parse' | 'map'; done: number; total: number }
-  | {
-      id: number;
-      type: 'probed';
-      candidates: ArrayCandidateInfo[];
-      resolvedPath: string | null;
-      sample: string;
-      /** 根对象的 `meta` 浅拷贝（若存在且是普通对象）——用于自动识别录像来源。 */
-      meta?: Record<string, unknown>;
-    }
   | { id: number; type: 'done'; payload: ClipPayload; warnings: string[]; resolvedPath: string }
-  | { id: number; type: 'error'; message: string; raw?: string };
+  | { id: number; type: 'error'; message: string };

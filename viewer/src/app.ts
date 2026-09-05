@@ -328,7 +328,8 @@ window.addEventListener('drop', (e) => {
   }
   if (/\.json$/i.test(file.name)) {
     activateTab('replay');
-    void replayPanel?.loadFile(file);
+    // .json 双语义：规则 JSON 换规则，否则按录像导入（按内容判定）
+    void replayPanel?.ingestJson(file);
     return;
   }
   if (/\.js$/i.test(file.name)) {
@@ -355,7 +356,7 @@ window.addEventListener('drop', (e) => {
       mode: player.mode,
       followId: player.tracks.followId,
       sceneObjects: scene.scene.children.length,
-      /** 各轨道只读信息（id / 名 / 帧数 / 时长 / 偏移 / 显隐 / 配色）。 */
+      /** 各轨道只读信息（id / 名 / 帧数 / 时长 / 偏移 / 显隐 / 配色 / 首帧坐标）。 */
       tracks: () =>
         player.tracks.tracks.map((t) => ({
           id: t.id,
@@ -365,6 +366,10 @@ window.addEventListener('drop', (e) => {
           offset: t.offset,
           visible: t.visible,
           color: t.color,
+          firstPos:
+            t.clip.count > 0
+              ? ([t.clip.pos[0], t.clip.pos[1], t.clip.pos[2]] as [number, number, number])
+              : ([0, 0, 0] as [number, number, number]),
         })),
       // 播放控制（时间单位 = 秒，主时钟；seek 会被 A-B 区间夹取）
       play: () => player.play(),

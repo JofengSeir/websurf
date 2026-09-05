@@ -6,7 +6,7 @@
  */
 
 import { compileScript, probeScript } from '../replay/codegen.js';
-import { findArrayCandidates, getPath, num, pickFrameArray, readMeta } from '../replay/helpers.js';
+import { getPath, pickFrameArray } from '../replay/helpers.js';
 import { buildClip, safePreview } from '../replay/build.js';
 import type { ParseRequest, ParseResponse } from '../replay/protocol.js';
 import type { Clip } from '../replay/types.js';
@@ -52,7 +52,7 @@ function locateFrames(root: unknown, framePath: string): unknown[] {
     throw new Error(
       framePath
         ? `路径 "${framePath}" 取到的不是数组`
-        : '没能在 JSON 里自动找到「元素为对象的数组」——请在规则脚本的 framePath 里手动指定路径',
+        : '没能在 JSON 里自动找到「元素为对象的数组」——第三方格式请用规则 JSON 的 framePath 指定路径',
     );
   }
   if (value.length === 0) throw new Error('帧数组为空');
@@ -67,39 +67,6 @@ ctx.onmessage = (e: MessageEvent) => {
 async function handle(req: ParseRequest): Promise<void> {
   const { id } = req;
   try {
-    if (req.type === 'reset') {
-      cachedFile = null;
-      cachedRoot = undefined;
-      return;
-    }
-
-    if (req.type === 'probe') {
-      const root = await ensureRoot(req.file, id);
-      const candidates = findArrayCandidates(root).map((c) => ({
-        path: c.path,
-        length: c.length,
-        depth: c.depth,
-      }));
-      const auto = pickFrameArray(root);
-      let sample = '';
-      if (auto !== null) {
-        const arr = getPath(root, auto) as unknown[];
-        if (Array.isArray(arr) && arr.length > 0) sample = safePreview(arr[0]);
-      }
-      post({
-        id,
-        type: 'probed',
-        candidates,
-        resolvedPath: auto,
-        sample,
-        meta: readMeta(root),
-      });
-      return;
-    }
-
-    // rawpos 分支已随坐标系标定移除（core-simplify-plan P2）
-
-    // import
     const file = req.file ?? cachedFile;
     if (!file) throw new Error('没有可解析的文件');
     const root = await ensureRoot(file, id);

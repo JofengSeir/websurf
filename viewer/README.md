@@ -34,7 +34,7 @@
 | 命令 | 覆盖 |
 |---|---|
 | `npm run test:replay` | 录像管线 Node 自检：帧探测 / 规则编译 / transform 后处理 / 规则文件双形态解析 / 播放与 A-B / 多轨道 / 大文件进度 |
-| `npm run test:smoke` | 真浏览器冒烟（CDP 驱动本机 Edge headless）：页面加载 → 面板渲染 → 导入示例录像 → 播放 / A-B → 变换调整 → 多轨迹增删与跟随 → 播放控制 API → 地图页参考显示，并断言全程无 console error |
+| `npm run test:smoke` | 真浏览器冒烟（CDP 驱动本机 Edge headless）：页面加载 → 面板渲染 → 导入示例录像 → 播放 / A-B → 变换调整（坐标级断言）→ 多轨迹增删与跟随 → 播放控制 API → 地图页参考显示 → 拖入 .js 规则脚本，并断言全程无 console error |
 
 > `test:smoke` 需要另开一个终端跑着 `npm run dev`，并需要 `ws`（`npm i ws`）与 Edge/Chromium；
 > 路径可用 `EDGE_PATH` / `WS_PATH` / `SMOKE_URL` / `SMOKE_PORT` 覆盖。
@@ -58,7 +58,7 @@
 - **纯双击（file://）**：直接双击 `dist/index.html` 即可；WASM/Worker 已内嵌，地图/录像用
   页面文件选择或拖入。
 - **深链示例（HTTP）**（免点选文件，可分享）：
-  `index.html?bsp=assets/maps/<地图>.bsp&replay=assets/maps/surf_null_4.replay.json&rule=assets/maps/surf_null_4.rule.js`
+  `index.html?bsp=assets/maps/<地图>.bsp&replay=assets/maps/surf_null_4.replay.json&rule=assets/maps/surf_null_4.rule.json`
   （`?rule=` 同时接受规则 JSON 与裸 `.js` 转化脚本；`file://` 下浏览器拦截 fetch，深链仅 HTTP 可用）。
 - **部署**：整包上传 `dist/` 到任意静态托管（GitHub Pages 已含 `.nojekyll`；
   Cloudflare Pages / Netlify / nginx 发布目录指向 `dist/`）。跨域引用远端 BSP/录像时资源方需返回 CORS 头。
@@ -146,7 +146,7 @@ viewer 不猜录像格式，映射规则是一段 **JS 脚本**：
 | 一键锚定到出生点 | 按「录像首帧 → 最近出生点」的偏差自动平移（叠加进当前变换） |
 
 - 改动即重新导入**当前轨道**（0.5s 防抖）；变换随规则持久化（localStorage / 规则 JSON 的 `transform` 字段）
-- 面板 note 常显「录像起点距最近出生点的距离」：≤128 HU 视为已贴合，≥1024 HU 建议处理；
+- 面板 note 常显「录像起点距最近出生点的距离」：≤128 HU 视为已贴合（阈值口径详见帮助浮层「起点对齐阈值」）；
   轨迹整段落在地图包围盒外时 HUD 也会跨面提醒
 
 ### 播放控制（底部时间轴）
@@ -173,7 +173,7 @@ viewer 不猜录像格式，映射规则是一段 **JS 脚本**：
 |---|---|
 | `trackCount` / `duration` / `time` / `playing` / `speed` / `mode` / `followId` | 当前状态快照（duration = `max(偏移 + 各轨道时长)`，秒） |
 | `sceneObjects` | 场景根对象数（轨迹线/幽灵是否真挂进去了） |
-| `tracks()` | 各轨道只读信息数组：`{ id, name, frames, duration, offset, visible, color }` |
+| `tracks()` | 各轨道只读信息数组：`{ id, name, frames, duration, offset, visible, color, firstPos }`（firstPos = 首帧坐标，调试对齐用） |
 | `play()` / `pause()` | 播放 / 暂停 |
 | `seek(sec)` | 定位到主时钟第几秒（会被 A-B 区间夹取） |
 | `setSpeed(x)` | 倍速（0.1~16，夹取） |
