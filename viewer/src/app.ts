@@ -1,22 +1,22 @@
 /**
  * WebSurf-viewer — BSP 地图预览 + 录像回放。
  *
- * 主线程装配：场景 / 飞行相机 / 位姿三通道 / 地图信息 / 出生点导航 / 量测 / 录像导入与回放。
+ * 主线程装配：场景 / 飞行相机 / 地图信息 / 出生点导航 / 参考显示 / 录像导入与回放。
  * 纯视觉定位：不引入物理与碰撞，录像只做播放与观察。
  */
 
 import { DEG2RAD } from './core/constants.js';
 import { ViewerScene } from './core/scene.js';
 import { FlyCam } from './core/fly.js';
-import { normalizePose, parsePoseParams, bspYawToCsYaw } from './core/pose.js';
-import type { Pose, PoseLike } from './core/pose.js';
+import { bspYawToCsYaw } from './core/pose.js';
+import type { Pose } from './core/pose.js';
 import { humanizeBspError, loadBspFile } from './core/bsp.js';
 import type { BspLoadResult } from './core/bsp.js';
 import { qs } from './core/dom.js';
 import { Hud } from './ui/hud.js';
 import { MapPanel } from './ui/mapinfo.js';
 import type { WorldBox } from './ui/mapinfo.js';
-import { MeasureTool } from './ui/measure.js';
+import { ReferenceGrid } from './ui/reference.js';
 import { ReplayImporter } from './replay/importer.js';
 import { ReplayPanel } from './replay/panel.js';
 import type { StartAid } from './replay/panel.js';
@@ -79,13 +79,10 @@ function activateTab(name: string): void {
   document.querySelector<HTMLButtonElement>(`.tab[data-tab="${name}"]`)?.click();
 }
 
-// ── 地图信息 / 出生点 / 量测 ────────────────────────────────────────
+// ── 地图信息 / 出生点 / 参考显示 ────────────────────────────────────
 const mapPane = qs('pane-map');
-const measurePane = qs('pane-measure');
 
-/** 外部显式传入的位姿（非空时覆盖出生点默认视角）。 */
-let explicitPose: Pose | null = null;
-/** 当前地图包围盒（量测网格 / 录像贴合检查用）。 */
+/** 当前地图包围盒（参考网格 / 录像贴合检查用）。 */
 let currentBox: WorldBox | null = null;
 
 function applyPose(pose: Pose): void {
@@ -96,16 +93,10 @@ const mapPanel =
   mapPane &&
   new MapPanel(mapPane, (pose) => {
     if (replayFirstPerson()) return;
-    explicitPose = null;
     applyPose(pose);
   });
 
-const measure =
-  measurePane &&
-  new MeasureTool(measurePane, scene, gameCanvas, (picking) => {
-    // 量测拾取时别抢指针锁定
-    fly.allowPointerLock = !picking;
-  });
+const reference = mapPane && new ReferenceGrid(mapPane, scene);
 
 // ── 录像 ────────────────────────────────────────────────────────────
 const importer = new ReplayImporter();
@@ -275,7 +266,7 @@ async function loadBsp(file: File): Promise<void> {
       currentBox = null;
     }
     mapPanel?.setMap(result, currentBox);
-    measure?.setWorld(currentBox);
+    reference?.setWorld(currentBox);
     // 地图换了：刷新出生点下拉与「起点对齐」检测（录像已载入时这会立刻暴露映射错误）
     replayPanel?.refreshSpawns();
     replayPanel?.refreshStartAnchor();
@@ -306,12 +297,8 @@ async function loadBsp(file: File): Promise<void> {
   }
 }
 
-/** 初始视角：外部位姿优先，否则推荐出生点。返回是否命中出生点。 */
+/** 初始视角：推荐出生点（外部位姿通道已移除）。返回是否命中出生点。 */
 function applyInitialPose(result: BspLoadResult): boolean {
-  if (explicitPose) {
-    applyPose(explicitPose);
-    return true;
-  }
   const points = result.spawnPoints;
   const primary = points[result.primary] ?? points[0];
   if (!primary) return false;
@@ -356,17 +343,9 @@ window.addEventListener('drop', (e) => {
   else hud.flashStatus(msg, 5000);
 });
 
-// ── 位姿三通道 ──────────────────────────────────────────────────────
+// ── JS 接口：window.viewer.replay（只读内省，外部脚本 / 自动化检查用）──
 (globalThis as unknown as { viewer?: unknown }).viewer = {
-  setPose(input: PoseLike): void {
-    if (replayFirstPerson()) return;
-    explicitPose = normalizePose(input);
-    applyPose(explicitPose);
-  },
-  getPose(): Pose {
-    return fly.getPose();
-  },
-  /** 只读内省：录像与场景的当前状态（外部脚本 / 自动化检查用）。 */
+  /** 只读内省：录像与场景的当前状态。 */
   get replay() {
     return {
       trackCount: player.tracks.tracks.length,
@@ -376,25 +355,10 @@ window.addEventListener('drop', (e) => {
       mode: player.mode,
       followId: player.tracks.followId,
       sceneObjects: scene.scene.children.length,
-      /** 最近一次「朝向诊断」结果；未运行过为 null（冒烟断言走这里，不依赖面板文字）。 */
-      orientation: replayPanel?.orientationResult ?? null,
     };
   },
 };
 
-window.addEventListener('hashchange', () => {
-  const pose = parsePoseParams(new URLSearchParams(window.location.hash.slice(1)));
-  if (pose && !replayFirstPerson()) {
-    explicitPose = pose;
-    applyPose(pose);
-  }
-});
-
-const initialPose = parsePoseParams(new URLSearchParams(window.location.search));
-if (initialPose) {
-  explicitPose = initialPose;
-  applyPose(initialPose);
-}
 
 // ── URL 深链：?bsp=&replay=&rule=（打包部署 / 示例直开；相对路径相对页面解析）──
 async function loadUrlAssets(): Promise<void> {

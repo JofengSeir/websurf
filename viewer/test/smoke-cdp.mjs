@@ -329,53 +329,7 @@ try {
   );
   check('载入录像后默认第一人称', modeNow === 'first', String(modeNow));
 
-  console.log('\n[3b] 朝向诊断（window.viewer.replay.orientation 钩子）');
-  const diagClicked = await evaluate(
-    `(() => {
-      const sec = Array.from(document.querySelectorAll('#pane-replay .sec'))
-        .find(s => s.querySelector('.sec-title')?.textContent === '朝向诊断');
-      if (!sec) return false;
-      const b = Array.from(sec.querySelectorAll('button'))
-        .find(x => x.textContent.trim() === '运行朝向诊断');
-      if (!b) return false;
-      b.click();
-      return true;
-    })()`,
-    sessionId,
-  );
-  check('找到并点击「运行朝向诊断」', diagClicked === true);
-  await sleep(1800); // 诊断要读文件 + JSON 解析（大文件需要一点时间）
-  const orient = await evaluate(
-    'window.viewer?.replay?.orientation ?? null',
-    sessionId,
-  );
-  check(
-    'orientation 钩子已填充（report 对象且 verdict ∈ pass/fix/skip）',
-    orient !== null &&
-      typeof orient === 'object' &&
-      ['pass', 'fix', 'skip'].includes(orient?.verdict),
-    JSON.stringify(orient),
-  );
-  const orientMode = useDeepLink
-    ? '深链（surf_null_4 + 规则）'
-    : localReplay
-      ? 'file:// 本地（surf_null_4 + 注入规则）'
-      : '示例录像（合成）';
-  if (useDeepLink || localReplay) {
-    check(
-      `朝向一致（${orientMode}）：verdict === 'pass' 且保角自洽（|angleDeg − srcAngleDeg| ≤ 1°）`,
-      orient?.verdict === 'pass' &&
-        Math.abs(Number(orient?.angleDeg) - Number(orient?.srcAngleDeg)) <= 1,
-      JSON.stringify(orient),
-    );
-  } else {
-    check(
-      '示例录像模式：verdict ∈ {pass,fix,skip}（只验通路）',
-      ['pass', 'fix', 'skip'].includes(orient?.verdict),
-      JSON.stringify(orient),
-    );
-    console.log('  示例模式朝向报告：' + JSON.stringify(orient));
-  }
+  // [3b] 朝向诊断钩子断言已随功能删除移除（core-simplify-plan P1/P2）
 
   console.log('\n[4] 播放控制');
   const dur = await evaluate(

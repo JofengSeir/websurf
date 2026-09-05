@@ -30,10 +30,10 @@
         ② 加载后点击画面锁定鼠标即可自由飞行
       </div>
       <div class="gstep">
-        ③ 右侧面板：地图信息与出生点跳转、量测距离、<br>导入录像按规则回放（换图入口在地图页顶部）
+        ③ 右侧面板：地图信息与出生点跳转、网格/坐标轴参考、<br>导入录像按规则回放（换图入口在地图页顶部）
       </div>
       <div class="gstep">
-        帮助：载图后点右上角「?」——键位 / 位姿通道 / 载入 / HU 换算 / 对齐阈值
+        帮助：载图后点右上角「?」——键位 / 载入 / 对齐阈值
       </div>
       <button id="guideBtn" type="button">选择 BSP 地图…</button>
       <div id="guideError"></div>
@@ -50,7 +50,7 @@
   </div>
 
   <div id="topbar">
-    <button class="iconbtn" id="helpBtn" type="button" title="操作帮助：键位 / 位姿通道 / 载入 / HU 换算 / 对齐阈值">?</button>
+    <button class="iconbtn" id="helpBtn" type="button" title="操作帮助：键位 / 载入 / 对齐阈值">?</button>
     <button class="iconbtn" id="sidebarToggle" type="button" title="显示 / 隐藏右侧面板">面板</button>
     <input id="bspFile" type="file" accept=".bsp" />
   </div>
@@ -64,16 +64,8 @@
       <p>录像回放：<kbd>K</kbd> 播放 / 暂停，<kbd>,</kbd> / <kbd>.</kbd> 逐帧，<kbd>I</kbd> / <kbd>O</kbd> 设区间 A / B。输入框 / 脚本编辑时这些键不生效。</p>
     </div>
     <div class="help-sec">
-      <div class="help-h">位姿三通道</div>
-      <p>URL 参数 <code>?pos=x,y,z&amp;ang=yaw,pitch</code>（载入即应用）；hash <code>#pos=…&amp;ang=…</code>（修改即时生效）；JS：<code>window.viewer.setPose / getPose</code>。约定：pos 为脚底坐标（Y-up），yaw 0 面朝 −Z（逆时针为正），pitch ±89°。第一人称回放期间三通道被忽略。</p>
-    </div>
-    <div class="help-sec">
       <div class="help-h">载入地图与录像</div>
-      <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。录像：录像页「选择 JSON 录像…」、拖入 <code>.json</code>（自动切到录像页）、「载入示例录像」；URL 深链 <code>?bsp=&amp;replay=&amp;rule=</code> 可直接打开配套资源。</p>
-    </div>
-    <div class="help-sec">
-      <div class="help-h">量测与单位换算</div>
-      <p>量测页「开始拾取」后点击地图表面取点：第一次记 A、第二次记 B，之后滚动更新。长度与速度单位是 HU（Hammer Unit）：1000 HU/s ≈ 15.24 m/s。</p>
+      <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。地图页底部可开关地面网格与世界坐标轴参考。录像：录像页「选择 JSON 录像…」、拖入 <code>.json</code>（自动切到录像页）、「载入示例录像」；URL 深链 <code>?bsp=&amp;replay=&amp;rule=</code> 可直接打开配套资源。</p>
     </div>
     <div class="help-sec">
       <div class="help-h">起点对齐阈值</div>
@@ -85,11 +77,9 @@
     <div id="tabs">
       <button class="tab active" data-tab="map" type="button">地图</button>
       <button class="tab" data-tab="replay" type="button">录像</button>
-      <button class="tab" data-tab="measure" type="button">量测</button>
     </div>
     <div class="tabpane active" id="pane-map"></div>
     <div class="tabpane" id="pane-replay"></div>
-    <div class="tabpane" id="pane-measure"></div>
   </aside>
 
   <!-- 录像时间轴（有录像时显示；内容由 timeline.ts 构建）-->
