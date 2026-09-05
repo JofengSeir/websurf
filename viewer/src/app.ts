@@ -138,13 +138,6 @@ if (replayPane) {
     },
     // 显隐 / 偏移 / 跟随 / 重命名：TrackPanel 自己重绘列表，这里只需重建 3D 与时间轴
     onTracksChanged: () => syncTracks(),
-    getWorldRefs: () => ({
-      spawns: (mapPanel?.spawnPoints ?? []).map((s) => ({
-        name: s.name,
-        pos: [s.pos[0], s.pos[1], s.pos[2]] as [number, number, number],
-      })),
-      current: fly.getPose().pos,
-    }),
     /** 起点对齐：录像首帧 vs 最近出生点（viewer 世界坐标）。 */
     getStartAid: () => computeStartAid(),
     onStatus: (text) => {
@@ -267,8 +260,7 @@ async function loadBsp(file: File): Promise<void> {
     }
     mapPanel?.setMap(result, currentBox);
     reference?.setWorld(currentBox);
-    // 地图换了：刷新出生点下拉与「起点对齐」检测（录像已载入时这会立刻暴露映射错误）
-    replayPanel?.refreshSpawns();
+    // 地图换了：刷新「起点对齐」检测（录像已载入时这会立刻暴露映射错误）
     replayPanel?.refreshStartAnchor();
     updateReplayMapStatus();
 
