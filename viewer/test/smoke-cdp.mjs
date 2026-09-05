@@ -138,7 +138,8 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   check('play.cmd 含 serve.py', playCmd.includes('serve.py'));
   check('play.cmd 含 http://localhost:', playCmd.includes('http://localhost:'));
   check('play.cmd 含 npx serve 备选', playCmd.includes('npx serve'));
-  check('play.cmd 含中文 python 提示', playCmd.includes('未找到 python'));
+  // play.cmd 已 ASCII 化（cmd.exe 对非 ASCII + LF 批处理存在解析失步风险，2026-09-05）
+  check('play.cmd 含 python 缺失提示（ASCII）', playCmd.includes('python not found'));
   check('play.cmd 不含旧 start-local', !playCmd.includes('start-local'));
 }
 
