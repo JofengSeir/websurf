@@ -248,12 +248,15 @@ export class ReplayPanel {
   /**
    * .json 双语义入口（主窗口拖拽共用）：内容是规则 JSON 就换规则，
    * 否则按录像导入。规则判定只看内容（ruleFromText），不看扩展名。
+   * 体积护栏：规则文件必然很小，超限直接按录像走，避免大文件被主线程全量 parse 两遍。
    */
   async ingestJson(file: File): Promise<void> {
-    const rf = ruleFromText(await file.text(), file.name);
-    if (rf) {
-      await this.applyRuleFile(rf, file.name + '（规则 JSON）');
-      return;
+    if (file.size <= 4 * 1024 * 1024) {
+      const rf = ruleFromText(await file.text(), file.name);
+      if (rf) {
+        await this.applyRuleFile(rf, file.name + '（规则 JSON）');
+        return;
+      }
     }
     await this.loadFile(file);
   }

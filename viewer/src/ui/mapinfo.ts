@@ -61,7 +61,7 @@ export class MapPanel {
     this.spawnBody = section(root, '出生点导航');
   }
 
-  /** 出生点快照（录像标定的世界侧参考点来源）。 */
+  /** 出生点快照（世界坐标，脚底），供录像「起点对齐」检测与一键锚定用。 */
   get spawnPoints(): ReadonlyArray<{ name: string; pos: [number, number, number] }> {
     return this.spawns;
   }
