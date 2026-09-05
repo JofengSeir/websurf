@@ -95,43 +95,45 @@ with server:
 
 /**
  * dist/play.cmd —— 双击启动入口（Windows）。
- * 契约（静态可测）：python 优先；缺失 → 中文提示 + npx serve 自动备选；双缺 → 两条指引 + pause；
+ * 契约（静态可测）：python 优先；缺失 → 提示 + npx serve 自动备选；双缺 → 两条指引 + pause；
  * 打印地址（普通页 + 示例深链）；`start ""` 延时 1s 异步开浏览器；前台起 serve.py（端口首参可覆盖）。
+ * ⚠️ 全文纯 ASCII：cmd.exe 对「非 ASCII + chcp」的批处理存在解析失步风险（行被从中间
+ * 撕开执行）；写盘统一转 CRLF（LF-only 批处理同样会触发解析错乱，见 2026-09-05 修复）。
  */
 const PLAY_CMD = `@echo off
 chcp 65001 >nul
-rem WebSurf-viewer 本地预览：起静态服务并自动打开浏览器（Windows）
-rem 用法：play.cmd [port]（默认 8090；关闭本窗口即停止服务，Ctrl+C 亦可）
+rem WebSurf-viewer local preview: serve dist and open browser (Windows)
+rem usage: play.cmd [port] (default 8090; close this window to stop, Ctrl+C also works)
 setlocal EnableExtensions
 cd /d "%~dp0"
 
 set PORT=8090
 if not "%~1"=="" set PORT=%~1
 
-rem ── 工具链：python 优先，缺失时自动切 npx serve ──
+rem -- toolchain: python first, fallback to npx serve --
 where python >nul 2>nul
 if errorlevel 1 (
-  echo [提示] 未找到 python —— 请先安装 Python 3（https://www.python.org/downloads/）。
+  echo [WARN] python not found -- install Python 3 first ^(https://www.python.org/downloads/^).
   where npx >nul 2>nul
   if errorlevel 1 (
-    echo [提示] 也未找到 npx —— 需要 Node.js（https://nodejs.org/）。
-    echo [提示] 手动备选：安装 Python 3 或 Node.js 后重试；或装好任意静态服务器后运行  npx serve -l %PORT% .
+    echo [WARN] npx not found either -- install Node.js ^(https://nodejs.org/^).
+    echo [HINT] install Python 3 or Node.js and retry; or run: npx serve -l %PORT% .
     pause
     exit /b 1
   )
-  echo [提示] 使用 Node 备选：npx serve（python 缺失，自动安装并启动）。
-  echo [提示] 正在启动：npx --yes serve -l %PORT% .
+  echo [INFO] python missing - using Node fallback: npx serve.
+  echo [INFO] starting: npx --yes serve -l %PORT% .
   start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
   npx --yes serve -l %PORT% .
   exit /b %errorlevel%
 )
 
 echo ============================================================
-echo  WebSurf-viewer 本地预览（关闭本窗口即停止服务；Ctrl+C 亦可）
-echo   普通页  http://localhost:%PORT%/index.html
-echo   示例    http://localhost:%PORT%/index.html?replay=assets/maps/surf_null_4.replay.json^&rule=assets/maps/surf_null_4.rule.json
+echo  WebSurf-viewer local preview ^(close this window to stop^)
+echo   page    http://localhost:%PORT%/index.html
+echo   demo    http://localhost:%PORT%/index.html?replay=assets/maps/surf_null_4.replay.json^&rule=assets/maps/surf_null_4.rule.json
 echo ============================================================
-rem 延时 1 秒自动打开浏览器（异步，不阻塞服务器启动）
+rem open browser after 1s (async, does not block server startup)
 start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
 python serve.py %PORT%
 `;
@@ -186,7 +188,8 @@ await mkdir(join(dist, 'assets', 'maps'), { recursive: true });
 await writeFile(join(dist, '.nojekyll'), '');
 await copyFile(join(viewerRoot, 'scripts/dist-README.md'), join(dist, 'README.md'));
 await writeFile(join(dist, 'serve.py'), SERVE_PY);
-await writeFile(join(dist, 'play.cmd'), PLAY_CMD);
+// .cmd 必须 CRLF：LF-only 批处理会触发 cmd.exe 解析错乱（行被撕开执行）
+await writeFile(join(dist, 'play.cmd'), PLAY_CMD.replace(/\n/g, '\r\n'));
 await writeFile(join(dist, 'play.sh'), PLAY_SH);
 
 // ── single：app 打成 IIFE，WASM/WORKER 内嵌，classic script —— file:// 双击可用 ──
