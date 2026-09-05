@@ -347,25 +347,28 @@ try {
   );
   console.log('  时间读数：' + dur);
   check('时长非零', !/0\.00 \/ 0\.00/.test(dur), dur);
-  await evaluate(
-    "Array.from(document.querySelectorAll('#timeline button')).find(b => b.textContent.trim() === '播放')?.click()",
+  const playClicked = await evaluate(
+    "(() => { const b = Array.from(document.querySelectorAll('#timeline button')).find(x => x.textContent.trim() === '播放'); if (!b) return false; b.click(); return true; })()",
     sessionId,
   );
+  check('找到并点击「播放」', playClicked === true);
   await sleep(1500);
   const dur2 = await evaluate("document.querySelector('.tl-time')?.textContent ?? ''", sessionId);
   check('播放后时间在推进', dur !== dur2, `${dur} → ${dur2}`);
-  await evaluate(
-    "Array.from(document.querySelectorAll('#timeline button')).find(b => b.textContent.trim() === '暂停')?.click()",
+  const pauseClicked = await evaluate(
+    "(() => { const b = Array.from(document.querySelectorAll('#timeline button')).find(x => x.textContent.trim() === '暂停'); if (!b) return false; b.click(); return true; })()",
     sessionId,
   );
+  check('找到并点击「暂停」', pauseClicked === true);
 
   console.log('\n[5] A-B 区间');
   await evaluate("document.querySelector('.tl-slider').value = 300; document.querySelector('.tl-slider').dispatchEvent(new Event('input'))", sessionId);
   await sleep(300);
-  await evaluate(
-    "Array.from(document.querySelectorAll('#timeline button')).find(b => b.textContent.trim() === 'A 起点')?.click()",
+  const aClicked = await evaluate(
+    "(() => { const b = Array.from(document.querySelectorAll('#timeline button')).find(x => x.textContent.trim() === 'A 起点'); if (!b) return false; b.click(); return true; })()",
     sessionId,
   );
+  check('找到并点击「A 起点」', aClicked === true);
   await sleep(300);
   const rangeText = await evaluate("document.querySelector('.tl-range')?.textContent ?? ''", sessionId);
   console.log('  区间读数：' + rangeText);

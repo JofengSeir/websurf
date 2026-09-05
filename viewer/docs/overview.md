@@ -65,7 +65,7 @@
 |---|---|
 | `trackCount` / `duration` / `time` / `playing` / `speed` / `mode` / `followId` | 状态快照（秒，主时钟） |
 | `sceneObjects` | 场景根对象数 |
-| `tracks()` | 各轨道只读信息 `{ id, name, frames, duration, offset, visible, color }` |
+| `tracks()` | 各轨道只读信息 `{ id, name, frames, duration, offset, visible, color, firstPos }` |
 | `play()` / `pause()` / `seek(sec)` | 播放控制（seek 被 A-B 区间夹取） |
 | `setSpeed(x)` / `setMode('first'\|'third')` / `follow(trackId\|null)` | 倍速 / 视角 / 跟随目标（null = 第一条） |
 
