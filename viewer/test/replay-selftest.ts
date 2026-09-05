@@ -16,6 +16,7 @@ import {
 import { compileScript, probeScript } from '../src/replay/codegen.js';
 import { DEFAULT_RULE_SRC } from '../src/replay/default-rule.js';
 import { buildClip } from '../src/replay/build.js';
+import { ruleFromText } from '../src/replay/rule-file.js';
 import { ReplayPlayer } from '../src/replay/player.js';
 import { defaultRule } from '../src/replay/types.js';
 import type { RuleConfig } from '../src/replay/types.js';
@@ -196,6 +197,29 @@ try {
 } catch {
   check('语法错误会抛', true);
 }
+
+console.log('\n[7b] 规则文件解析（.js / 规则 JSON 双形态，ruleFromText）');
+const jsRule = ruleFromText(CUSTOM_SRC, 'custom.js');
+check(
+  '裸 .js → script 规则（scriptSrc 原样）',
+  jsRule?.kind === 'script' && jsRule.rule.scriptSrc === CUSTOM_SRC,
+);
+check('裸 .js 规则名取文件名', jsRule?.rule.name === 'custom.js');
+const jsonRule = ruleFromText(
+  JSON.stringify({
+    version: 1,
+    name: 'R',
+    scriptSrc: CUSTOM_SRC,
+    transform: { offset: [1, 2, 3], yawDeg: 90 },
+  }),
+  'r.json',
+);
+check('规则 JSON → json 规则（scriptSrc 原样）', jsonRule?.kind === 'json' && jsonRule.rule.scriptSrc === CUSTOM_SRC);
+check('transform 字段原样保留', jsonRule?.rule.transform?.yawDeg === 90 && jsonRule.rule.transform?.offset[2] === 3);
+check('坏 JSON（{ 开头解析失败）→ null', ruleFromText('{oops', 'x') === null);
+check('非规则 JSON（缺 version/scriptSrc）→ null', ruleFromText(JSON.stringify({ foo: 1 }), 'x') === null);
+const compiledFromJs = compileScript(jsRule!.rule.scriptSrc);
+check('.js 规则可编译并产出合法帧', compiledFromJs({ o: [1, 100, 2], yaw: 0, pitch: 0, ms: 0, v: [0, 0, 0] }, 0, H).pos[0] === 2);
 
 console.log('\n[8] 容错：脏数据不炸（NaN / 时间回退）');
 const dirty = [

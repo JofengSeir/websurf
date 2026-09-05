@@ -23,6 +23,7 @@ import type { StartAid } from './replay/panel.js';
 import { ReplayPlayer } from './replay/player.js';
 import { ReplayVisuals } from './replay/visuals.js';
 import { Timeline } from './replay/timeline.js';
+import { ruleFromText } from './replay/rule-file.js';
 import type { RuleConfig, Track } from './replay/types.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement | null;
@@ -330,23 +331,60 @@ window.addEventListener('drop', (e) => {
     void replayPanel?.loadFile(file);
     return;
   }
-  const msg = `未加载：${file.name} 既不是 .bsp 也不是 .json`;
+  if (/\.js$/i.test(file.name)) {
+    // .js = 规则转化脚本（改规则＝替换当前轨道）
+    activateTab('replay');
+    void replayPanel?.loadRuleFile(file);
+    return;
+  }
+  const msg = `未加载：${file.name} 不是 .bsp / .json / .js`;
   if (!scene.hasModel()) hud.showGuideError(msg);
   else hud.flashStatus(msg, 5000);
 });
 
-// ── JS 接口：window.viewer.replay（只读内省，外部脚本 / 自动化检查用）──
+// ── JS 接口：window.viewer.replay（只读内省 + 播放控制，外部脚本 / 自动化用）──
 (globalThis as unknown as { viewer?: unknown }).viewer = {
-  /** 只读内省：录像与场景的当前状态。 */
   get replay() {
     return {
+      // 内省
       trackCount: player.tracks.tracks.length,
       duration: player.duration,
       time: player.time,
       playing: player.playing,
+      speed: player.speed,
       mode: player.mode,
       followId: player.tracks.followId,
       sceneObjects: scene.scene.children.length,
+      /** 各轨道只读信息（id / 名 / 帧数 / 时长 / 偏移 / 显隐 / 配色）。 */
+      tracks: () =>
+        player.tracks.tracks.map((t) => ({
+          id: t.id,
+          name: t.name,
+          frames: t.clip.count,
+          duration: t.clip.duration,
+          offset: t.offset,
+          visible: t.visible,
+          color: t.color,
+        })),
+      // 播放控制（时间单位 = 秒，主时钟；seek 会被 A-B 区间夹取）
+      play: () => player.play(),
+      pause: () => player.pause(),
+      seek: (sec: number) => player.seek(sec),
+      setSpeed: (x: number) => {
+        player.speed = Math.max(0.1, Math.min(16, Number(x) || 1));
+      },
+      setMode: (m: 'first' | 'third') => {
+        player.mode = m === 'third' ? 'third' : 'first';
+      },
+      /** 切换第一人称跟随目标；null = 回到第一条轨道。 */
+      follow: (trackId: string | null) => {
+        if (trackId === null) {
+          const t0 = player.tracks.tracks[0];
+          if (t0) player.followTrack(t0.id);
+          return;
+        }
+        player.followTrack(trackId);
+      },
     };
   },
 };
@@ -376,10 +414,9 @@ async function loadUrlAssets(): Promise<void> {
       if (ruleUrl) {
         const rresp = await fetch(ruleUrl);
         if (rresp.ok) {
-          const parsed = JSON.parse(await rresp.text()) as Partial<RuleConfig>;
-          if (parsed?.version === 1 && typeof parsed.scriptSrc === 'string') {
-            rule = parsed as RuleConfig;
-          }
+          // ?rule= 同时接受规则 JSON 与裸 .js 转化脚本（AI 按 docs/replay-rule-ai.md 产出）
+          const rf = ruleFromText(await rresp.text(), nameOf(ruleUrl));
+          if (rf) rule = rf.rule;
         }
       }
       await replayPanel?.loadUrlContent(text, nameOf(replayUrl), rule);

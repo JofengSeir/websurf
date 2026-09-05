@@ -369,6 +369,30 @@ try {
   );
   console.log('  场景统计：' + JSON.stringify(sceneInfo));
 
+  console.log('\n[7] 变换调整（transform 后处理，替换而非追加）');
+  const durBeforeTf = (await evaluate('window.viewer.replay', sessionId)).duration;
+  await evaluate(
+    `(() => {
+      const x = document.getElementById('tf-offX');
+      if (!x) return false;
+      x.value = '500';
+      x.dispatchEvent(new Event('input'));
+      return true;
+    })()`,
+    sessionId,
+  );
+  await sleep(1800); // 0.5s 防抖 + 重新导入
+  const stTf = await evaluate('window.viewer.replay', sessionId);
+  check('改变换后仍是 1 条（替换当前轨道）', stTf.trackCount === 1, JSON.stringify(stTf));
+  check('变换只动坐标不改时长', Math.abs(stTf.duration - durBeforeTf) < 0.01, `${durBeforeTf} → ${stTf.duration}`);
+  await evaluate(
+    "(() => { Array.from(document.querySelectorAll('#pane-replay button')).find(x => x.textContent.trim() === '重置变换')?.click(); return true; })()",
+    sessionId,
+  );
+  await sleep(1500);
+  const stReset = await evaluate('window.viewer.replay', sessionId);
+  check('重置变换后仍 1 条', stReset.trackCount === 1, JSON.stringify(stReset));
+
   console.log('\n[8] 多轨迹（Q2）：再载入一份 → 追加第二条');
   await evaluate(
     `(() => {
@@ -436,7 +460,75 @@ try {
   check('移除后回到 1 条', st5.trackCount === 1, JSON.stringify(st5));
   check('移除后跟随回到剩下的那条', st5.followId === 'track-1', String(st5.followId));
 
-  console.log('\n[11] 控制台（累计）');
+  console.log('\n[11] 播放控制 API（window.viewer.replay）');
+  // 先清掉 [5] 设下的 A-B 区间，seek 才能到绝对时间
+  await evaluate(
+    "(() => { Array.from(document.querySelectorAll('#timeline button')).find(b => b.textContent.trim() === '整段')?.click(); return true; })()",
+    sessionId,
+  );
+  await sleep(300);
+  await evaluate(
+    `(() => {
+      const r = window.viewer.replay;
+      r.pause(); r.seek(5); r.setSpeed(2); r.setMode('third');
+      return true;
+    })()`,
+    sessionId,
+  );
+  // replay 是快照 getter：变更后再取一次快照读值
+  const api1 = await evaluate(
+    "(() => { const r = window.viewer.replay; return { seeked: r.time, speed: r.speed, mode: r.mode }; })()",
+    sessionId,
+  );
+  check('seek(5) 生效（秒，主时钟）', Math.abs(api1.seeked - 5) < 0.01, JSON.stringify(api1));
+  check('setSpeed 生效', api1.speed === 2, JSON.stringify(api1));
+  check('setMode 生效', api1.mode === 'third', JSON.stringify(api1));
+  await evaluate("(() => { const r = window.viewer.replay; r.setMode('first'); r.play(); return true; })()", sessionId);
+  await sleep(500);
+  const playingNow = await evaluate('window.viewer.replay.playing', sessionId);
+  check('play() 后在播', playingNow === true, String(playingNow));
+  await evaluate('window.viewer.replay.pause()', sessionId);
+  await evaluate('window.viewer.replay.setSpeed(1)', sessionId);
+  const tracksInfo = await evaluate('window.viewer.replay.tracks()', sessionId);
+  check(
+    'tracks() 只读信息（id/name/frames…）',
+    Array.isArray(tracksInfo) && tracksInfo.length === 1 && tracksInfo[0].id === 'track-1' && tracksInfo[0].frames > 0,
+    JSON.stringify(tracksInfo),
+  );
+  const followBack = await evaluate(
+    "(() => { const r = window.viewer.replay; r.follow(null); return r.followId; })()",
+    sessionId,
+  );
+  check('follow(null) 回第一条', followBack === 'track-1', String(followBack));
+
+  console.log('\n[12] 地图页参考显示（网格 / 坐标轴开关）');
+  await evaluate("document.querySelector('.tab[data-tab=\"map\"]').click()", sessionId);
+  await sleep(400);
+  const mapActive = await evaluate(
+    "document.getElementById('pane-map').classList.contains('active')",
+    sessionId,
+  );
+  check('地图页已激活', mapActive === true);
+  const mapSecs = await evaluate(
+    "Array.from(document.querySelectorAll('#pane-map .sec-title')).map(e => e.textContent)",
+    sessionId,
+  );
+  check('存在「参考显示」分区', mapSecs.includes('参考显示'), JSON.stringify(mapSecs));
+  const toggled = await evaluate(
+    `(() => {
+      const sec = Array.from(document.querySelectorAll('#pane-map .sec'))
+        .find(s => s.querySelector('.sec-title')?.textContent === '参考显示');
+      if (!sec) return -1;
+      const boxes = sec.querySelectorAll('input[type=checkbox]');
+      boxes.forEach(b => b.click());
+      return boxes.length;
+    })()`,
+    sessionId,
+  );
+  check('网格/坐标轴开关存在且可切换', toggled === 2, String(toggled));
+  await evaluate("document.querySelector('.tab[data-tab=\"replay\"]').click()", sessionId);
+
+  console.log('\n[13] 控制台（累计）');
   const realErrors = errors.filter(
     (e) => !/favicon|Failed to load resource.*favicon/i.test(e),
   );

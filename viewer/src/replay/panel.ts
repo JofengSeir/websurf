@@ -6,8 +6,9 @@
  * 「换文件＝追加轨道；改规则＝替换当前轨道」的语义不变。
  */
 
-import { buttonRow, el, noteLine, section } from '../core/dom.js';
+import { buttonRow, el, foldBox, noteLine, numField, section } from '../core/dom.js';
 import { DEFAULT_RULE_SRC } from './default-rule.js';
+import { ruleFromText } from './rule-file.js';
 import { TrackPanel } from './trackpanel.js';
 import type { ReplayImporter } from './importer.js';
 import type { ReplayPlayer } from './player.js';
@@ -60,6 +61,15 @@ export class ReplayPanel {
   private readonly infoBody: HTMLElement;
   private trackPanel: TrackPanel | null = null;
 
+  /** 当前生效规则的来源描述（内置默认 / 文件名 / 深链规则名）。 */
+  private ruleSource = '内置默认';
+  private readonly ruleSourceEl: HTMLElement;
+  private readonly ruleSrcPre: HTMLElement;
+  /** 变换调整输入（offset X/Y/Z + yaw°），见构造器「变换调整」分区。 */
+  private readonly tfOffInputs: HTMLInputElement[] = [];
+  private tfYawInput: HTMLInputElement | null = null;
+  private tfDebounce = 0;
+
   constructor(
     root: HTMLElement,
     private readonly importer: ReplayImporter,
@@ -95,6 +105,40 @@ export class ReplayPanel {
     this.infoBody.style.marginTop = '6px';
     fileBody.appendChild(this.infoBody);
 
+    // ── 导入 · 规则脚本（.js 一等公民：文件来自 AI 按 docs/replay-rule-ai.md 产出）──
+    fileBody.appendChild(el('div', 'sec-sub', '规则脚本'));
+    const ruleFileInput = el('input');
+    ruleFileInput.type = 'file';
+    ruleFileInput.accept = '.js,.json,application/javascript,application/json';
+    ruleFileInput.style.display = 'none';
+    ruleFileInput.addEventListener('change', () => {
+      const f = ruleFileInput.files?.[0];
+      ruleFileInput.value = '';
+      if (f) void this.loadRuleFile(f);
+    });
+    fileBody.appendChild(ruleFileInput);
+    buttonRow(fileBody, [
+      {
+        label: '载入规则脚本…',
+        onClick: () => ruleFileInput.click(),
+        title: '选择 .js 转化脚本或规则 JSON（.js = 求值为帧映射函数的单表达式，写法见 docs/replay-rule-ai.md）',
+      },
+      {
+        label: '复制脚本',
+        onClick: () => void this.copyRuleSrc(),
+        title: '复制当前生效的脚本文本',
+      },
+    ]);
+    const srcRow = el('div', 'kv');
+    srcRow.appendChild(el('span', 'k', '规则来源'));
+    this.ruleSourceEl = el('span', 'v', this.ruleSource);
+    srcRow.appendChild(this.ruleSourceEl);
+    fileBody.appendChild(srcRow);
+    const srcFold = foldBox(fileBody, '脚本内容');
+    this.ruleSrcPre = el('pre', 'rule-src mono');
+    srcFold.body.appendChild(this.ruleSrcPre);
+    this.refreshRuleView();
+
     // ── 轨迹列表（Q2：多轨迹对比；清空全部也在这里）──
     this.trackPanel = new TrackPanel(root, this.player, {
       onChange: () => this.opts.onTracksChanged(),
@@ -102,10 +146,46 @@ export class ReplayPanel {
       onCleared: () => this.opts.onClearAll(),
     });
 
-    // ── 变换调整（录像↔地图对齐的人工微调；P3 加平移/yaw 输入与重置）──
+    // ── 变换调整（录像↔地图对齐的人工微调：平移 + 绕 Y 旋转，作用于脚本输出之后）──
     const tfBody = section(root, '变换调整');
     this.anchorNote = noteLine(tfBody);
+    const tf = this.rule.transform ?? { offset: [0, 0, 0] as [number, number, number], yawDeg: 0 };
+    ('平移 X 平移 Y 平移 Z'.split(' ')).forEach((label, i) => {
+      const input = numField(tfBody, {
+        label,
+        value: tf.offset[i],
+        step: 10,
+        hint: 'HU；与 yaw 一起在脚本输出后施加',
+        onInput: () => this.applyTransformFromInputs(),
+      });
+      input.id = ['tf-offX', 'tf-offY', 'tf-offZ'][i];
+      this.tfOffInputs.push(input);
+    });
+    const yawInput = numField(tfBody, {
+      label: '旋转 yaw（度）',
+      value: tf.yawDeg,
+      step: 15,
+      hint: '绕 Y 旋转：pos/vel 同步旋转、yaw 同步加该角（正 = 逆时针，对照 viewer 约定）',
+      onInput: () => this.applyTransformFromInputs(),
+    });
+    yawInput.id = 'tf-yaw';
+    this.tfYawInput = yawInput;
     buttonRow(tfBody, [
+      {
+        label: 'yaw +90°',
+        onClick: () => this.bumpYaw(90),
+        title: '整条轨迹绕竖直轴转 90°（轨迹相对地图侧转 90° 时的修正）',
+      },
+      {
+        label: 'yaw −90°',
+        onClick: () => this.bumpYaw(-90),
+        title: '整条轨迹绕竖直轴转 −90°',
+      },
+      {
+        label: '重置变换',
+        onClick: () => this.resetTransform(),
+        title: '清零平移与旋转并重新导入当前轨道',
+      },
       {
         label: '一键锚定到出生点',
         onClick: () => this.applyAnchor(),
@@ -129,6 +209,7 @@ export class ReplayPanel {
       const parsed = JSON.parse(raw) as Partial<RuleConfig>;
       if (parsed && parsed.version === 1 && typeof parsed.scriptSrc === 'string') {
         this.rule = { ...defaultRule(), ...parsed } as RuleConfig;
+        if (parsed.scriptSrc) this.ruleSource = this.rule.name || 'localStorage 规则';
       }
     } catch {
       /* 读取失败就用默认规则 */
@@ -167,10 +248,14 @@ export class ReplayPanel {
   async loadUrlContent(jsonText: string, name: string, rule?: RuleConfig | null): Promise<void> {
     if (rule) {
       this.rule = { ...defaultRule(), ...rule } as RuleConfig;
+      this.ruleSource = this.rule.name || name;
       this.saveRule();
+      this.refreshRuleView();
+      this.syncTransformInputs();
       this.fileNote(`已套用规则「${this.rule.name}」`, 'info');
     } else {
       this.saveRule();
+      this.refreshRuleView();
     }
     const file = new File([jsonText], name, { type: 'application/json' });
     await this.loadFile(file);
@@ -226,6 +311,91 @@ export class ReplayPanel {
 
   // ── 变换调整 ──────────────────────────────────────────────────────
 
+  /** 读取变换输入 → 写规则 → 防抖重导（复用已解析缓存，替换当前轨道）。 */
+  private applyTransformFromInputs(): void {
+    const off = this.tfOffInputs.map((el) => Number(el.value));
+    const yaw = Number(this.tfYawInput?.value ?? 0);
+    if (!off.every(Number.isFinite) || !Number.isFinite(yaw)) return;
+    this.rule.transform = {
+      offset: [off[0] ?? 0, off[1] ?? 0, off[2] ?? 0],
+      yawDeg: yaw,
+    };
+    this.saveRule();
+    window.clearTimeout(this.tfDebounce);
+    this.tfDebounce = window.setTimeout(() => {
+      this.anchorNote('变换已更新，重新导入中…', 'info');
+      void this.runImport(true);
+    }, 500);
+  }
+
+  private bumpYaw(delta: number): void {
+    if (!this.tfYawInput) return;
+    const cur = Number(this.tfYawInput.value) || 0;
+    this.tfYawInput.value = String(cur + delta);
+    this.applyTransformFromInputs();
+  }
+
+  private resetTransform(): void {
+    for (const el of this.tfOffInputs) el.value = '0';
+    if (this.tfYawInput) this.tfYawInput.value = '0';
+    this.rule.transform = { offset: [0, 0, 0], yawDeg: 0 };
+    this.saveRule();
+    this.anchorNote('变换已重置，重新导入中…', 'info');
+    void this.runImport(true);
+  }
+
+  /** 锚定后把输入框同步到新 transform（叠加结果）。 */
+  private syncTransformInputs(): void {
+    const tf = this.rule.transform;
+    if (!tf) return;
+    this.tfOffInputs.forEach((el, i) => {
+      el.value = String(tf.offset[i]);
+    });
+    if (this.tfYawInput) this.tfYawInput.value = String(tf.yawDeg);
+  }
+
+  // ── 规则脚本视图 ──────────────────────────────────────────────────
+
+  private effectiveScript(): string {
+    return this.rule.scriptSrc || DEFAULT_RULE_SRC;
+  }
+
+  private refreshRuleView(): void {
+    this.ruleSourceEl.textContent = this.ruleSource;
+    this.ruleSrcPre.textContent = this.effectiveScript();
+  }
+
+  private async copyRuleSrc(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.effectiveScript());
+      this.fileNote('脚本已复制到剪贴板', 'info');
+    } catch (e) {
+      this.fileNote(`复制失败：${e instanceof Error ? e.message : String(e)}`, 'error');
+    }
+  }
+
+  /**
+   * 载入规则文件（.js 裸脚本或规则 JSON；面板按钮与主窗口拖拽共用）。
+   * 改规则＝替换当前轨道：已有录像时复用已解析缓存重新导入。
+   */
+  async loadRuleFile(file: File): Promise<void> {
+    const rf = ruleFromText(await file.text(), file.name);
+    if (!rf) {
+      this.fileNote(
+        `${file.name} 既不是规则 JSON（缺 version:1 / scriptSrc），也无法按脚本文本处理（脚本应是求值为 (raw, i, H) => Frame 的单表达式）`,
+        'error',
+      );
+      return;
+    }
+    this.rule = rf.rule;
+    this.ruleSource = file.name + (rf.kind === 'json' ? '（规则 JSON）' : '（.js）');
+    this.saveRule();
+    this.refreshRuleView();
+    this.syncTransformInputs();
+    this.fileNote(`已载入规则「${this.rule.name}」（${this.ruleSource}）`, 'info');
+    if (this.file) await this.runImport(true);
+  }
+
   /**
    * 起点对齐提示：录像首帧（viewer 世界坐标）距离最近出生点多远。
    * 由 app 在导入 / 换图后调用。
@@ -262,6 +432,7 @@ export class ReplayPanel {
       yawDeg: tf.yawDeg,
     };
     this.saveRule();
+    this.syncTransformInputs();
     this.anchorNote(
       `已按起点锚定平移 Δ=${aid.delta.map((v) => v.toFixed(1)).join(', ')}，重新导入中…`,
       'info',
