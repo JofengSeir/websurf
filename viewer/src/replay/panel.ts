@@ -58,17 +58,19 @@ export class ReplayPanel {
 
   private readonly fileNote: (t: string, k?: 'info' | 'warn' | 'error') => void;
   private readonly anchorNote: (t: string, k?: 'info' | 'warn' | 'error') => void;
-  private readonly infoBody: HTMLElement;
   private trackPanel: TrackPanel | null = null;
 
   /** 当前生效规则的来源描述（内置默认 / 文件名 / 深链规则名）。 */
   private ruleSource = '内置默认';
   private readonly ruleSourceEl: HTMLElement;
   private readonly ruleSrcPre: HTMLElement;
+  private readonly ruleFoldTitle: HTMLElement;
   /** 变换调整输入（offset X/Y/Z + yaw°），见构造器「变换调整」分区。 */
   private readonly tfOffInputs: HTMLInputElement[] = [];
   private tfYawInput: HTMLInputElement | null = null;
   private tfDebounce = 0;
+  /** 变换工具折叠容器：起点失配（>128 HU）时自动展开。 */
+  private readonly tfFoldDetails: HTMLDetailsElement;
 
   constructor(
     root: HTMLElement,
@@ -101,12 +103,10 @@ export class ReplayPanel {
       },
     ]);
 
-    this.infoBody = el('div');
-    this.infoBody.style.marginTop = '6px';
-    fileBody.appendChild(this.infoBody);
-
-    // ── 导入 · 规则脚本（.js 一等公民：文件来自 AI 按 docs/replay-rule-ai.md 产出）──
-    fileBody.appendChild(el('div', 'sec-sub', '规则脚本'));
+    // ── 导入 · 规则脚本（.js 一等公民：默认折叠，标题随来源更新）──
+    const ruleFold = foldBox(fileBody, '规则脚本');
+    this.ruleFoldTitle = ruleFold.details.querySelector('.fold-name') as HTMLElement;
+    ruleFold.details.title = '查看当前生效的规则脚本、复制或更换（.js 转化脚本写法见 docs/replay-rule-ai.md）';
     const ruleFileInput = el('input');
     ruleFileInput.type = 'file';
     ruleFileInput.accept = '.js,.json,application/javascript,application/json';
@@ -116,8 +116,8 @@ export class ReplayPanel {
       ruleFileInput.value = '';
       if (f) void this.loadRuleFile(f);
     });
-    fileBody.appendChild(ruleFileInput);
-    buttonRow(fileBody, [
+    ruleFold.body.appendChild(ruleFileInput);
+    buttonRow(ruleFold.body, [
       {
         label: '载入规则脚本…',
         onClick: () => ruleFileInput.click(),
@@ -133,10 +133,9 @@ export class ReplayPanel {
     srcRow.appendChild(el('span', 'k', '规则来源'));
     this.ruleSourceEl = el('span', 'v', this.ruleSource);
     srcRow.appendChild(this.ruleSourceEl);
-    fileBody.appendChild(srcRow);
-    const srcFold = foldBox(fileBody, '脚本内容');
+    ruleFold.body.appendChild(srcRow);
     this.ruleSrcPre = el('pre', 'rule-src mono');
-    srcFold.body.appendChild(this.ruleSrcPre);
+    ruleFold.body.appendChild(this.ruleSrcPre);
     this.refreshRuleView();
 
     // ── 轨迹列表（Q2：多轨迹对比；清空全部也在这里）──
@@ -146,12 +145,15 @@ export class ReplayPanel {
       onCleared: () => this.opts.onClearAll(),
     });
 
-    // ── 变换调整（录像↔地图对齐的人工微调：平移 + 绕 Y 旋转，作用于脚本输出之后）──
+    // ── 变换调整（状态 note 常显；8 个调整工具默认折叠，起点失配时自动展开）──
     const tfBody = section(root, '变换调整');
     this.anchorNote = noteLine(tfBody);
+    const tfFold = foldBox(tfBody, '调整工具（平移 / 旋转 / 锚定）');
+    this.tfFoldDetails = tfFold.details;
+    const tfTools = tfFold.body;
     const tf = this.rule.transform ?? { offset: [0, 0, 0] as [number, number, number], yawDeg: 0 };
     ('平移 X 平移 Y 平移 Z'.split(' ')).forEach((label, i) => {
-      const input = numField(tfBody, {
+      const input = numField(tfTools, {
         label,
         value: tf.offset[i],
         step: 10,
@@ -161,7 +163,7 @@ export class ReplayPanel {
       input.id = ['tf-offX', 'tf-offY', 'tf-offZ'][i];
       this.tfOffInputs.push(input);
     });
-    const yawInput = numField(tfBody, {
+    const yawInput = numField(tfTools, {
       label: '旋转 yaw（度）',
       value: tf.yawDeg,
       step: 15,
@@ -170,7 +172,7 @@ export class ReplayPanel {
     });
     yawInput.id = 'tf-yaw';
     this.tfYawInput = yawInput;
-    buttonRow(tfBody, [
+    buttonRow(tfTools, [
       {
         label: 'yaw +90°',
         onClick: () => this.bumpYaw(90),
@@ -319,7 +321,9 @@ export class ReplayPanel {
       const big = result.clip.count >= LARGE_CLIP_FRAMES;
       this.fileNote(
         `${this.file.name}：${result.clip.count.toLocaleString('en-US')} 帧，` +
-          `${result.clip.duration.toFixed(2)} s，路径 ${result.resolvedPath || '（根数组）'}` +
+          `${result.clip.duration.toFixed(2)} s` +
+          (result.clip.vel ? `，最大速度 ${result.clip.maxSpeed.toFixed(0)} HU/s` : '') +
+          `，路径 ${result.resolvedPath || '（根数组）'}` +
           (big ? ' —— 帧数较多，改规则重新导入耗时较长' : ''),
         big ? 'warn' : 'info',
       );
@@ -388,6 +392,8 @@ export class ReplayPanel {
   private refreshRuleView(): void {
     this.ruleSourceEl.textContent = this.ruleSource;
     this.ruleSrcPre.textContent = this.effectiveScript();
+    // 折叠标题带上来源：不展开也能一眼看到当前规则是什么
+    this.ruleFoldTitle.textContent = `规则脚本 · ${this.ruleSource}`;
   }
 
   private async copyRuleSrc(): Promise<void> {
@@ -440,6 +446,8 @@ export class ReplayPanel {
       return;
     }
     const near = aid.dist <= 128;
+    // 起点失配 = 大概率坐标系没对上：自动展开调整工具，别让用户找
+    if (!near) this.tfFoldDetails.open = true;
     this.anchorNote(
       `录像起点距最近出生点「${aid.spawnName}」${aid.dist.toFixed(0)} HU` +
         (near ? ' —— 已贴合传送起点' : ' —— 与传送起点不符：可一键锚定') +
@@ -471,24 +479,5 @@ export class ReplayPanel {
       'info',
     );
     void this.runImport(true);
-  }
-
-  /** 由 app 调用：展示当前 clip 的统计信息。 */
-  showClipInfo(clip: Clip | null): void {
-    this.infoBody.innerHTML = '';
-    if (!clip) return;
-    const rows: Array<[string, string]> = [
-      ['帧数', clip.count.toLocaleString('en-US')],
-      ['时长', `${clip.duration.toFixed(3)} s`],
-      ['帧率', clip.duration > 0 ? `${(clip.count / clip.duration).toFixed(1)} 帧/秒` : '—'],
-      ['最大速度', clip.vel ? `${clip.maxSpeed.toFixed(0)} HU/s` : '—'],
-      ['解析路径', clip.resolvedPath || '（根数组）'],
-    ];
-    for (const [k, v] of rows) {
-      const row = el('div', 'kv');
-      row.appendChild(el('span', 'k', k));
-      row.appendChild(el('span', 'v mono', v));
-      this.infoBody.appendChild(row);
-    }
   }
 }
