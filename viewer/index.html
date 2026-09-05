@@ -3,118 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebSurf-viewer — BSP 自由视角查看器</title>
+  <title>WebSurf-viewer — BSP 地图预览与录像回放</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='4' width='24' height='24' rx='5' fill='%230d1b2a'/%3E%3Cpath d='M9 20 L16 9 L23 20 Z' fill='none' stroke='%238ab4f8' stroke-width='2.2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='17' r='2.2' fill='%23c9a05c'/%3E%3C/svg%3E" />
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; overflow: hidden; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
-      font-size: 13px; color: #e8e8e8; background: #0f1115;
-    }
-    #app { position: fixed; inset: 0; }
-    #game {
-      display: block; width: 100%; height: 100%;
-      background: #0f1115; cursor: crosshair;
-    }
-    #hud {
-      position: absolute; top: 14px; left: 14px; z-index: 5;
-      padding: 10px 14px; border-radius: 10px;
-      background: rgba(15,17,21,0.78); border: 1px solid rgba(255,255,255,0.1);
-      backdrop-filter: blur(8px); line-height: 1.9;
-      pointer-events: none; user-select: none; max-width: 560px;
-    }
-    #hud .title { font-size: 14px; font-weight: 600; color: #e2e8f0; }
-    #hud kbd {
-      font-family: inherit; font-size: 11px; color: #9aa3b2;
-      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 4px; padding: 1px 5px; margin: 0 1px;
-    }
-    #hud .hint { font-size: 12px; color: #9aa3b2; }
-    #hud .hint code { font-size: 11px; color: #8ab4f8; }
-    #pose { font-size: 12px; color: #c9a05c; }
-    #bspbar {
-      position: absolute; top: 14px; right: 14px; z-index: 5;
-      display: flex; align-items: center; gap: 10px;
-      padding: 8px 12px; border-radius: 10px;
-      background: rgba(15,17,21,0.78); border: 1px solid rgba(255,255,255,0.1);
-      backdrop-filter: blur(8px);
-    }
-    #bspbar .filebtn {
-      font-size: 12px; color: #c8ccd4; padding: 5px 12px;
-      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 8px; cursor: pointer; white-space: nowrap;
-    }
-    #bspbar .filebtn:hover { background: rgba(255,255,255,0.12); }
-    #bspbar input[type="file"] { display: none; }
-    #bspStatus { font-size: 12px; color: #9aa3b2; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-    /* ── 首访引导层（无地图时显示）─────────────────────────────── */
-    #guide {
-      position: absolute; inset: 0; z-index: 8;
-      display: flex; align-items: center; justify-content: center;
-      background: radial-gradient(ellipse at center, rgba(13,27,42,0.55), rgba(15,17,21,0.88));
-    }
-    #guide.hidden { display: none; }
-    #guide .card {
-      max-width: 420px; margin: 0 16px; padding: 26px 30px;
-      border-radius: 14px; text-align: center;
-      background: rgba(15,17,21,0.92); border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: 0 18px 50px rgba(0,0,0,0.45);
-    }
-    #guide .gtitle { font-size: 17px; font-weight: 600; color: #e2e8f0; margin-bottom: 14px; }
-    #guide .gstep { font-size: 13px; color: #9aa3b2; line-height: 2; }
-    #guide .gstep code { font-size: 12px; color: #8ab4f8; }
-    #guide kbd {
-      font-family: inherit; font-size: 11px; color: #9aa3b2;
-      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 4px; padding: 1px 5px; margin: 0 1px;
-    }
-    #guideBtn {
-      display: inline-block; margin-top: 18px; padding: 9px 22px;
-      font-size: 13px; color: #0f1115; font-weight: 600;
-      background: #8ab4f8; border: none; border-radius: 9px; cursor: pointer;
-    }
-    #guideBtn:hover { background: #a5c6ff; }
-    #guideBtn.busy, #bspbar .filebtn.busy {
-      opacity: 0.45; pointer-events: none; cursor: default;
-    }
-    #guideError {
-      display: none; margin-top: 14px; padding: 9px 12px; text-align: left;
-      font-size: 12px; line-height: 1.7; color: #ffb4a8;
-      background: rgba(255,99,71,0.09); border: 1px solid rgba(255,99,71,0.35);
-      border-radius: 8px; word-break: break-all;
-    }
-    #guideError.show { display: block; }
-    #guideError .raw { display: block; margin-top: 5px; font-size: 11px; color: #b08a83; }
-
-    /* ── 拖拽视觉反馈 ──────────────────────────────────────────── */
-    #dropzone {
-      position: absolute; inset: 0; z-index: 9; display: none;
-      align-items: center; justify-content: center;
-      background: rgba(138,180,248,0.08);
-      box-shadow: inset 0 0 0 3px #8ab4f8;
-      font-size: 16px; color: #a5c6ff; font-weight: 600;
-      pointer-events: none; text-shadow: 0 1px 8px rgba(0,0,0,0.7);
-    }
-    #dropzone.active { display: flex; }
-
-    /* ── 启动失败兜底卡 ────────────────────────────────────────── */
-    #fatal {
-      position: absolute; inset: 0; z-index: 20; display: none;
-      align-items: center; justify-content: center;
-      background: rgba(15,17,21,0.96);
-    }
-    #fatal.show { display: flex; }
-    #fatal .card {
-      max-width: 480px; margin: 0 16px; padding: 26px 30px;
-      border-radius: 14px;
-      background: rgba(15,17,21,0.98); border: 1px solid rgba(255,99,71,0.4);
-    }
-    #fatal .ftitle { font-size: 16px; font-weight: 600; color: #ffb4a8; margin-bottom: 12px; }
-    #fatal .fdetail { font-size: 12px; color: #9aa3b2; line-height: 1.9; white-space: pre-wrap; word-break: break-all; }
-    #fatal .fdetail code { color: #8ab4f8; }
-  </style>
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
 <div id="app">
@@ -131,13 +22,18 @@
   <!-- 首访引导层（地图加载成功后隐藏）-->
   <div id="guide">
     <div class="card">
-      <div class="gtitle">加载 BSP 地图，开始自由视角预览</div>
+      <div class="gtitle">加载 BSP 地图，开始预览</div>
       <div class="gstep">
-        ① 点击下方按钮选择 <code>.bsp</code> 地图文件，<br>或直接把它<b>拖进本窗口</b>（仓库 <code>maps/</code> 目录有现成示例）
+        ① 点击下方按钮选择 <code>.bsp</code> 地图文件，<br>或直接把 <code>.bsp</code> / <code>.json</code> 录像拖进本窗口
       </div>
       <div class="gstep">
-        ② 加载后点击画面锁定鼠标，<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移、
-        <kbd>空格</kbd>/<kbd>C</kbd> 升降、<kbd>Shift</kbd> 加速、<kbd>Esc</kbd> 解锁
+        ② 加载后点击画面锁定鼠标即可自由飞行
+      </div>
+      <div class="gstep">
+        ③ 右侧面板：地图信息与出生点跳转、量测距离、<br>导入录像按规则回放（换图入口在地图页顶部）
+      </div>
+      <div class="gstep">
+        帮助：载图后点右上角「?」——键位 / 位姿通道 / 载入 / HU 换算 / 对齐阈值
       </div>
       <button id="guideBtn" type="button">选择 BSP 地图…</button>
       <div id="guideError"></div>
@@ -145,23 +41,59 @@
   </div>
 
   <!-- 拖拽高亮反馈 -->
-  <div id="dropzone">松开鼠标，加载 .bsp 地图</div>
+  <div id="dropzone">松开鼠标，加载 .bsp 地图或 .json 录像</div>
 
   <div id="hud">
-    <div class="title">WebSurf-viewer — BSP 自由视角查看器</div>
-    <div class="hint">
-      点击画布锁定鼠标；<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移，<kbd>空格</kbd>/<kbd>Ctrl</kbd>/<kbd>C</kbd> 下降与升降，<kbd>Shift</kbd> 加速（×4），<kbd>Esc</kbd> 解锁
-    </div>
-    <div class="hint">
-      位姿传入：URL <code>?pos=x,y,z&amp;ang=yaw,pitch</code>（加载即应用）或 <code>#pos=...&amp;ang=...</code>（hash 变更实时应用）；JS <code>window.viewer.setPose/getPose</code>
-    </div>
-    <div class="hint" id="pose">未就绪</div>
-    <div class="hint" id="bspStatus">未加载地图（选择或拖入 .bsp 文件加载）</div>
+    <div class="hud-line" id="pose">位姿 —</div>
+    <div class="hud-line" id="bspStatus">未加载地图</div>
+    <div class="hud-line" id="replayStatus"></div>
   </div>
 
-  <div id="bspbar">
-    <label class="filebtn" id="bspbarBtn">加载 BSP 地图<input id="bspFile" type="file" accept=".bsp" /></label>
+  <div id="topbar">
+    <button class="iconbtn" id="helpBtn" type="button" title="操作帮助：键位 / 位姿通道 / 载入 / HU 换算 / 对齐阈值">?</button>
+    <button class="iconbtn" id="sidebarToggle" type="button" title="显示 / 隐藏右侧面板">面板</button>
+    <input id="bspFile" type="file" accept=".bsp" />
   </div>
+
+  <!-- 操作帮助浮层（非模态；Esc 关闭）-->
+  <div id="help" class="hidden" aria-label="操作帮助">
+    <div class="help-title">操作帮助 <span class="help-close" id="helpClose" title="关闭（Esc）">×</span></div>
+    <div class="help-sec">
+      <div class="help-h">鼠标与键盘</div>
+      <p>点击画面锁定鼠标后自由飞行：<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移、<kbd>空格</kbd>/<kbd>C</kbd> 升降、<kbd>Shift</kbd> 加速（×4）、<kbd>Esc</kbd> 解锁。</p>
+      <p>录像回放：<kbd>K</kbd> 播放 / 暂停，<kbd>,</kbd> / <kbd>.</kbd> 逐帧，<kbd>I</kbd> / <kbd>O</kbd> 设区间 A / B。输入框 / 脚本编辑时这些键不生效。</p>
+    </div>
+    <div class="help-sec">
+      <div class="help-h">位姿三通道</div>
+      <p>URL 参数 <code>?pos=x,y,z&amp;ang=yaw,pitch</code>（载入即应用）；hash <code>#pos=…&amp;ang=…</code>（修改即时生效）；JS：<code>window.viewer.setPose / getPose</code>。约定：pos 为脚底坐标（Y-up），yaw 0 面朝 −Z（逆时针为正），pitch ±89°。第一人称回放期间三通道被忽略。</p>
+    </div>
+    <div class="help-sec">
+      <div class="help-h">载入地图与录像</div>
+      <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。录像：录像页「选择 JSON 录像…」、拖入 <code>.json</code>（自动切到录像页）、「载入示例录像」；URL 深链 <code>?bsp=&amp;replay=&amp;rule=</code> 可直接打开配套资源。</p>
+    </div>
+    <div class="help-sec">
+      <div class="help-h">量测与单位换算</div>
+      <p>量测页「开始拾取」后点击地图表面取点：第一次记 A、第二次记 B，之后滚动更新。长度与速度单位是 HU（Hammer Unit）：1000 HU/s ≈ 15.24 m/s。</p>
+    </div>
+    <div class="help-sec">
+      <div class="help-h">起点对齐阈值</div>
+      <p>录像起点距最近出生点 ≤128 HU 视为已贴合；≥1024 HU 应处理（坐标系映射很可能不对）。详情与修正（一键锚定 / 朝向诊断 / 坐标系标定）见录像页对应分区。</p>
+    </div>
+  </div>
+
+  <aside id="sidebar">
+    <div id="tabs">
+      <button class="tab active" data-tab="map" type="button">地图</button>
+      <button class="tab" data-tab="replay" type="button">录像</button>
+      <button class="tab" data-tab="measure" type="button">量测</button>
+    </div>
+    <div class="tabpane active" id="pane-map"></div>
+    <div class="tabpane" id="pane-replay"></div>
+    <div class="tabpane" id="pane-measure"></div>
+  </aside>
+
+  <!-- 录像时间轴（有录像时显示；内容由 timeline.ts 构建）-->
+  <div id="timeline" class="hidden"></div>
 </div>
 
 <!-- 资源加载兜底：app.js / wasm 缺失（未构建就打开页面）时给出可见指引 -->

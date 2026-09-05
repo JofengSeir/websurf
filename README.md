@@ -10,7 +10,7 @@
 | [`src/`](src/) | 共享层 | `phys/`（websurf-phys：Rust 物理 WASM 核心）、`wasm-core/`（websurf-wasm-core：BSP 解析 v19~v29 / GLB / 模型 / 纹理解析 + mosaic/MTZ）、`ts-shared/`（TS 物理渲染共享：权威帧/校准/输入层/世界构建）、`materials/textures.mtz`（默认纹理包）、`vendor/vmdl/`（vendored vmdl 单副本）、`serve.py`（dev 服务器；BSP 地图放仓库根 `maps/`，gitignored） |
 | [`debug/`](debug/) | 主工程（Debug Build） | 全功能调试测试页面：计时挑战、碰撞可视化（brush/trigger/phy/vis/chamfer 切角共 5 组开关 + 距离滑块）、物理面板（13 项力学参数动态列表）、自定义传送点、准星射线、缺失纹理弹窗、调试 API（`parse_entities`/`list_pakfile`/`read_pakfile_*`/`export_colliders*`/`export_visleaf_pvs` 等，仅 debug 导出） |
 | [`game/`](game/) | WebSurf-game（Game Build） | 最小化游戏实现：主线程唯一物理渲染线 + 单 Worker 权威帧 + ESC 弹出面板（录制改键）+ 存点系统（X 键存点 / C 键读点、按住冻结松开恢复）+ 加载进度覆盖层（平滑补间 + 失败红态）+ 空间分块合并渲染 |
-| [`viewer/`](viewer/) | WebSurf-viewer | 最小 BSP 自由视角查看器（349ee26 新增）：无物理、无面板，GLB 场景 + 自由飞行相机，位姿三通道传入（URL 查询参数 / hash / `window.viewer` JS API），见 [viewer/README.md](viewer/README.md) |
+| [`viewer/`](viewer/) | WebSurf-viewer | 最小 BSP 自由视角查看器（349ee26 新增）：无物理、无面板，GLB 场景 + 自由飞行相机，位姿三通道传入（URL 查询参数 / hash / `window.viewer` JS API）+ 录像导入回放与**朝向诊断/一键修正**（Shavit .replay），见 [viewer/README.md](viewer/README.md) |
 | [`test/`](test/) | 验证工程 | [`dual-mode-harness/`](test/dual-mode-harness/)（WebSurf-test：输入→双模物理→帧信号渲染时序验证）、[`instanced-diorama/`](test/instanced-diorama/)（实例化绘制 + PBR 光照渲染测试，验证 GLB 内嵌 `KHR_lights_punctual` 灯光导出） |
 
 入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` 双入口。
@@ -36,7 +36,8 @@ npm run dev     # 启动开发服务器 http://localhost:8080（复用共享 src
 `?bsp=maps/xxx.bsp` URL 直载与 `?ssao=0` 等后处理对照开关）：`python serve.py 8080`。
 
 Windows 下可直接双击：`debug/start-dev.cmd`（dev 服务器）、`debug/build-dist.cmd`（构建 dist 包）、
-`game/play.cmd`（构建并游玩）、`test/dual-mode-harness/play.cmd` 与 `test/instanced-diorama/play.cmd`
+`game/play.cmd`（构建并游玩）、`viewer/play.cmd`（构建后起 viewer 本地服务器并自动打开浏览器）、
+`test/dual-mode-harness/play.cmd` 与 `test/instanced-diorama/play.cmd`
 （构建并运行验证页面）。
 
 ## 地图

@@ -136,6 +136,22 @@
 
 ### 修复
 
+- **viewer 渲染方法与 game 对齐（2026-09-05）**：修复"部分场景渲染不全"——三处根因：
+  1. **分块合并丢几何（主因）**：`optimizeScene` 最终合并失败（GLB 内 indexed/
+     non-indexed 几何混合致 `mergeGeometries` 属性不兼容）时，兜底分支只保留
+     第一块、该 cell 其余几何静默丢弃 → 高空俯瞰大面积镂空（surf_null 实测
+     60 个 cell 受影响）。对齐 game 兜底：失败时全部单独保留（零丢失）。
+  2. **雾 + 远平面截断**：原 `Fog(bg, far*0.4, far*0.9)` + far 钳制 65536——
+     大地图远景被雾吞掉、超大地图（对角 > 32768）被 far 整体裁掉。对齐 game：
+     无雾，far = maxDim × 100（基本无远裁剪）。
+  3. **贴墙近平面裁剪**：原固定 near=1，自由飞行贴近几何时被近平面裁剪透视。
+     移植 game `updateNearPlane`（每 2 帧 6 方向探测——4 水平 + 查看器补垂直
+     两向，near = 最近距离 × 0.3、下限 0.05，空旷恢复 maxDim/1000 默认）；
+     灯光同步 game 三点光（ambient 0.6 + hemisphere + directional 0xfff4e0）。
+  4. `optimizeScene` 遍历范围从整个 scene 收敛到 BSP 模型子树（与 game 一致，
+     防回放轨迹/量测辅助对象被误合并进地图块）。
+  验证：headless Edge 加载 surf_null.bsp 截图 A/B（高空镂空 → 完整）、CDP 冒烟
+  全过、typecheck 过；`app.js`/`dist` 已重建。
 - **P2 坡顶幻影根治（7c33a58 / 4f11e5a / 0b08a61，2026-08-19~20）**：盒-AABB
   碰撞必要性校验（进入/start_solid 门 + f_true + EPS 收紧）消除坡顶幻影碰撞；
   随后 docs+verify 实证残余发散为地面物理固有速率依赖（非幻影）；
