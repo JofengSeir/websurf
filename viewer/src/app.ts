@@ -125,7 +125,6 @@ if (replayPane) {
       player.mode = 'first';
       syncTracks();
       replayPanel?.refreshTracks();
-      replayPanel?.showClipInfo(clip);
       updateReplayMapStatus();
       replayPanel?.refreshStartAnchor();
       return track.id;
