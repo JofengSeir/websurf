@@ -157,14 +157,7 @@ code { font-family: var(--mono); color: var(--accent); }
 .kv .k { color: var(--muted); flex: 0 0 auto; }
 .kv .v { color: var(--text); text-align: right; word-break: break-all; }
 
-/* 分区内的二级小标题（如导入区的「规则脚本」） */
-.sec-sub {
-  font-size: 11.5px; font-weight: 600; color: var(--muted);
-  margin: 8px 0 2px; letter-spacing: 0.02em;
-}
-.sec-sub:first-child { margin-top: 0; }
-
-/* ── 可折叠分组（录像页三段 / 地图统计明细）────────────────────── */
+/* ── 可折叠分组（录像页折叠 / 地图统计明细）────────────────────── */
 .fold {
   border: 1px solid var(--border); border-radius: var(--r-md);
   margin-bottom: 12px; background: rgba(255, 255, 255, 0.02);

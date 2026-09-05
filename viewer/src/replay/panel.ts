@@ -69,6 +69,8 @@ export class ReplayPanel {
   private readonly tfOffInputs: HTMLInputElement[] = [];
   private tfYawInput: HTMLInputElement | null = null;
   private tfDebounce = 0;
+  /** 上一次起点对齐检查是否失配（自动展开只在失配状态变化时触发一次）。 */
+  private lastAnchorWarn = false;
   /** 变换工具折叠容器：起点失配（>128 HU）时自动展开。 */
   private readonly tfFoldDetails: HTMLDetailsElement;
 
@@ -313,19 +315,18 @@ export class ReplayPanel {
           );
         },
       );
-      this.fileNote(
-        result.warnings.length > 0 ? result.warnings.join('；') : '',
-        result.warnings.length > 0 ? 'warn' : 'info',
-      );
       this.lastTrackId = this.opts.onClip(result.clip, result.warnings, this.lastTrackId);
       const big = result.clip.count >= LARGE_CLIP_FRAMES;
-      this.fileNote(
+      // warnings 与摘要合并为一条 note（warnings 若独占会被摘要立即覆盖）
+      const summary =
         `${this.file.name}：${result.clip.count.toLocaleString('en-US')} 帧，` +
-          `${result.clip.duration.toFixed(2)} s` +
-          (result.clip.vel ? `，最大速度 ${result.clip.maxSpeed.toFixed(0)} HU/s` : '') +
-          `，路径 ${result.resolvedPath || '（根数组）'}` +
-          (big ? ' —— 帧数较多，改规则重新导入耗时较长' : ''),
-        big ? 'warn' : 'info',
+        `${result.clip.duration.toFixed(2)} s` +
+        (result.clip.vel ? `，最大速度 ${result.clip.maxSpeed.toFixed(0)} HU/s` : '') +
+        `，路径 ${result.resolvedPath || '（根数组）'}` +
+        (big ? ' —— 帧数较多，改规则重新导入耗时较长' : '');
+      this.fileNote(
+        result.warnings.length > 0 ? result.warnings.join('；') + ' —— ' + summary : summary,
+        result.warnings.length > 0 || big ? 'warn' : 'info',
       );
       this.opts.onStatus('');
     } catch (e) {
@@ -446,8 +447,10 @@ export class ReplayPanel {
       return;
     }
     const near = aid.dist <= 128;
-    // 起点失配 = 大概率坐标系没对上：自动展开调整工具，别让用户找
-    if (!near) this.tfFoldDetails.open = true;
+    // 起点失配 = 大概率坐标系没对上：首次失配自动展开调整工具。
+    // 记录上一次失配态——持续失配期间的重导（改规则/变换）不反复顶开用户收起的折叠。
+    if (!near && !this.lastAnchorWarn) this.tfFoldDetails.open = true;
+    this.lastAnchorWarn = !near;
     this.anchorNote(
       `录像起点距最近出生点「${aid.spawnName}」${aid.dist.toFixed(0)} HU` +
         (near ? ' —— 已贴合传送起点' : ' —— 与传送起点不符：可一键锚定') +
