@@ -25,14 +25,6 @@ export interface ClipPayload {
 export type ParseRequest =
   | { id: number; type: 'probe'; file: File }
   | { id: number; type: 'import'; file: File | null; rule: RuleConfig; name: string }
-  /** 取某一帧的原始坐标（未经规则变换），供坐标系标定使用。 */
-  | {
-      id: number;
-      type: 'rawpos';
-      framePath: string;
-      index: number;
-      paths: [string, string, string];
-    }
   | { id: number; type: 'reset' };
 
 export type ParseResponse =
@@ -47,14 +39,4 @@ export type ParseResponse =
       meta?: Record<string, unknown>;
     }
   | { id: number; type: 'done'; payload: ClipPayload; warnings: string[]; resolvedPath: string }
-  | {
-      id: number;
-      type: 'rawposed';
-      /** 三个轴都取到有效数字才有值。 */
-      value: [number, number, number] | null;
-      /** 该帧原始对象摘要，取值失败时给用户看。 */
-      preview: string;
-      /** 帧数组总长度，供 UI 夹取帧号。 */
-      count: number;
-    }
   | { id: number; type: 'error'; message: string; raw?: string };

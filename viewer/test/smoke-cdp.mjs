@@ -217,7 +217,7 @@ try {
   await send('Page.enable', {}, sessionId);
 
   // file:// 冒烟前置：把本地配套规则注入 localStorage（page 脚本运行前生效），
-  // 保证 surf_null_4 用正确映射导入 → 「朝向诊断」断言确定（本地 replay.json 旁若带 rule.json）。
+  // 顺带覆盖「localStorage 规则载入」路径（本地 replay.json 旁若带 rule.json）。
   const useDeepLink = /[?&](replay|bsp)=/.test(URL_);
   const localReplay = process.env.SMOKE_FILE_REPLAY;
   const seedRulePath =
@@ -234,10 +234,10 @@ try {
           },
           sessionId,
         );
-        console.log('  [file:// 前置] 已注入本地规则到 localStorage（朝向断言前置条件）');
+        console.log('  [file:// 前置] 已注入本地规则到 localStorage');
       }
     } catch (e) {
-      console.log(`  [file:// 前置] 无配套规则可注入（${e.message}）——朝向断言按实际规则判定`);
+      console.log(`  [file:// 前置] 无配套规则可注入（${e.message}）——使用内置默认规则`);
     }
   }
 
@@ -274,7 +274,7 @@ try {
     sessionId,
   );
   console.log('  面板分区：' + JSON.stringify(sections));
-  for (const need of ['录像文件', '轨迹列表', '起点对齐', '数据定位', '坐标系标定', '坐标系预设', '朝向诊断', '规则脚本（逃生舱）']) {
+  for (const need of ['导入', '轨迹列表', '变换调整']) {
     check(`存在「${need}」分区`, sections.includes(need));
   }
 
@@ -409,91 +409,7 @@ try {
     `${beforeOffset} → ${st3.duration}`,
   );
 
-  console.log('\n[9] 坐标系标定（Q4）：录入对应点 → 求解 → 应用');
-  const calib = await evaluate(
-    `(() => {
-      const sec = Array.from(document.querySelectorAll('#pane-replay .sec'))
-        .find(s => s.querySelector('.sec-title')?.textContent === '坐标系标定');
-      if (!sec) return { err: '找不到标定分区' };
-      window.__calib = sec;
-      return { ok: true };
-    })()`,
-    sessionId,
-  );
-  check('定位到标定分区', calib.ok === true, JSON.stringify(calib));
-
-  // 加两组对应点：帧 0 / 帧 1000，世界坐标随手给（这里只验通路，正确性由 Node 自检覆盖）
-  for (const [frame, world] of [
-    [0, [0, 0, 0]],
-    [1000, [500, -120, 800]],
-  ]) {
-    await evaluate(
-      `(() => {
-        const sec = window.__calib;
-        const frameInput = sec.querySelectorAll('input[type=number]')[0];
-        frameInput.value = '${frame}';
-        frameInput.dispatchEvent(new Event('input'));
-        return true;
-      })()`,
-      sessionId,
-    );
-    await sleep(200);
-    await evaluate(
-      "(() => { const b = Array.from(window.__calib.querySelectorAll('button')).find(x => x.textContent.trim() === '取该帧原始坐标'); b.click(); return true; })()",
-      sessionId,
-    );
-    await sleep(1200);
-    await evaluate(
-      `(() => {
-        const nums = Array.from(window.__calib.querySelectorAll('input[type=number]'));
-        const world = nums.slice(-3);   // 世界 X / Y / Z
-        const vals = ${JSON.stringify(world)};
-        world.forEach((el, i) => { el.value = String(vals[i]); el.dispatchEvent(new Event('input')); });
-        const add = Array.from(window.__calib.querySelectorAll('button')).find(x => x.textContent.trim() === '添加对应点');
-        add.click();
-        return true;
-      })()`,
-      sessionId,
-    );
-    await sleep(300);
-  }
-  const pairRows = await evaluate(
-    "window.__calib.querySelectorAll('.calib-row').length",
-    sessionId,
-  );
-  check('对应点列表有 2 组', pairRows === 2, `rows=${pairRows}`);
-
-  await evaluate(
-    "(() => { const b = Array.from(window.__calib.querySelectorAll('button')).find(x => x.textContent.trim() === '求解'); b.click(); return true; })()",
-    sessionId,
-  );
-  await sleep(600);
-  const resultShown = await evaluate(
-    "window.__calib.querySelector('.calib-result')?.style.display !== 'none'",
-    sessionId,
-  );
-  const resultText = await evaluate(
-    "window.__calib.querySelector('.calib-result')?.textContent ?? ''",
-    sessionId,
-  );
-  check('求解结果已展示', resultShown === true);
-  check('结果含最大残差', /最大残差/.test(resultText), resultText.slice(0, 120));
-  console.log('  求解结果：' + resultText.replace(/\s+/g, ' ').slice(0, 160));
-
-  // 应用标定 → 应**替换**上次导入产出的那条（track-2），总数不变
-  const beforeApply = await evaluate('window.viewer.replay', sessionId);
-  await evaluate(
-    "(() => { const b = Array.from(window.__calib.querySelectorAll('button')).find(x => x.textContent.trim() === '应用结果'); b.click(); return true; })()",
-    sessionId,
-  );
-  await sleep(4000);
-  const afterApply = await evaluate('window.viewer.replay', sessionId);
-  check(
-    '应用后仍是 2 条（替换而非追加）',
-    beforeApply.trackCount === 2 && afterApply.trackCount === 2,
-    `${beforeApply.trackCount} → ${afterApply.trackCount}`,
-  );
-  check('替换的是 track-2', afterApply.followId === 'track-1' || afterApply.followId === 'track-2');
+  // [9] 坐标系标定断言已随功能删除移除（core-simplify-plan P2；替换语义由 Node 自检覆盖）
 
   console.log('\n[10] 跟随切换与移除');
   await evaluate(

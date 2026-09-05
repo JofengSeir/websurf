@@ -28,15 +28,6 @@ export interface ProbeResult {
   meta?: Record<string, unknown>;
 }
 
-/** 某帧的原始坐标（未经规则变换），坐标系标定用。 */
-export interface RawPosResult {
-  /** 三个轴都取到有效数字才有值。 */
-  value: [number, number, number] | null;
-  preview: string;
-  /** 帧数组总长度，供 UI 夹取帧号。 */
-  count: number;
-}
-
 interface Pending {
   resolve: (v: ParseResponse) => void;
   reject: (e: Error) => void;
@@ -143,26 +134,6 @@ export class ReplayImporter {
     }
   }
 
-  /**
-   * 取某一帧的**原始**坐标（规则变换之前），坐标系标定用。
-   * 要求录像已被解析过（导入或探测都行）——不触发二次解析。
-   */
-  async readRawPos(
-    framePath: string,
-    index: number,
-    paths: [string, string, string],
-  ): Promise<RawPosResult> {
-    try {
-      const res = await this.send({ id: ++this.seq, type: 'rawpos', framePath, index, paths });
-      if (res.type === 'error') throw new Error(res.message);
-      if (res.type !== 'rawposed') throw new Error('读取原始坐标返回了意外的响应类型');
-      return { value: res.value, preview: res.preview, count: res.count };
-    } catch (e) {
-      if (isNoWorker(e) || this.workerBroken) return this.readRawPosOnMain(framePath, index, paths);
-      throw e;
-    }
-  }
-
   reset(): void {
     this.mainFile = null;
     this.mainRoot = undefined;
@@ -239,26 +210,6 @@ export class ReplayImporter {
     onProgress?.('map', frames.length, frames.length);
     return { clip, warnings, resolvedPath };
   }
-
-  private readRawPosOnMain(
-    framePath: string,
-    index: number,
-    paths: [string, string, string],
-  ): RawPosResult {
-    const root = this.mainRoot;
-    if (root === undefined) throw new Error('还没有解析过录像文件——先导入一次再做标定');
-    const resolvedPath = framePath || pickFrameArray(root) || '';
-    const frames = resolveFrames(root, resolvedPath);
-    const idx = Math.max(0, Math.min(frames.length - 1, Math.floor(index)));
-    const raw = frames[idx];
-    const v = paths.map((p) => num(getPath(raw, p)));
-    const ok = v.every((x) => Number.isFinite(x));
-    return {
-      value: ok ? [v[0], v[1], v[2]] : null,
-      preview: safePreview(raw),
-      count: frames.length,
-    };
-  }
 }
 
 function isNoWorker(e: unknown): boolean {
@@ -272,7 +223,7 @@ function resolveFrames(root: unknown, framePath: string): unknown[] {
     throw new Error(
       framePath
         ? `路径 "${framePath}" 取到的不是数组`
-        : '没能在 JSON 里自动找到「元素为对象的数组」，请在「数据定位」里手动填路径',
+        : '没能在 JSON 里自动找到「元素为对象的数组」——请在规则脚本的 framePath 里手动指定路径',
     );
   }
   if (value.length === 0) throw new Error('帧数组为空');

@@ -5,7 +5,19 @@
  * 播放器只认 Clip，规则怎么改都不影响播放层。
  */
 
-// ── 规则配置（声明式；UI 表单直接编辑这份结构，再编译成脚本）────────────
+// ── 规则配置（脚本文本 + 人工变换微调）────────────────────────────────
+
+/** 人工变换微调：viewer 侧后处理，作用于脚本输出之后（「变换调整」面板写入）。 */
+export interface RuleTransform {
+  /** 平移（HU），加到输出坐标上。 */
+  offset: [number, number, number];
+  /**
+   * 绕 Y 旋转（度）：pos 与 vel 同步旋转，yaw 同步加该角。
+   * 方向对照 viewer 约定（yaw 0 = 面朝 −Z，逆时针为正）：yawDeg=90 把
+   * 面朝 −Z 的轨迹变为面朝 −X。
+   */
+  yawDeg: number;
+}
 
 /** 输出某个轴取自输入的哪个轴。 */
 export type AxisSrc = 'x' | 'y' | 'z';
@@ -38,7 +50,7 @@ export interface RuleConfig {
   posScale: number;
   /**
    * 位置平移（HU），在「轴映射 + 符号 + 缩放」之后施加于**输出**坐标。
-   * 用于把录像原点搬到地图原点；由「坐标系标定」求解得到。
+   * 历史字段：表单时代由「坐标系标定」求解得到；现行人工微调走 transform 字段。
    * 只对位置生效——速度是方向量，平移不影响它。
    */
   offX: number;
@@ -71,10 +83,12 @@ export interface RuleConfig {
   timePath: string;
   timeUnit: TimeUnit;
 
-  /** 编译产物 / 手改后的脚本源码。 */
+  /** 编译产物 / 手改后的脚本源码；空串 = 使用内置默认规则（DEFAULT_RULE_SRC）。 */
   scriptSrc: string;
-  /** true = 已被手工改写，UI 改动不再覆盖（除非点「重新生成」）。 */
+  /** true = 已被手工改写（历史字段，保留以兼容旧持久化数据）。 */
   customized: boolean;
+  /** 人工微调变换（缺省 = 恒等）。 */
+  transform?: RuleTransform;
 }
 
 // ── 标准帧（规则层唯一产出）─────────────────────────────────────────

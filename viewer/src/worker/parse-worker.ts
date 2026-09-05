@@ -52,7 +52,7 @@ function locateFrames(root: unknown, framePath: string): unknown[] {
     throw new Error(
       framePath
         ? `路径 "${framePath}" 取到的不是数组`
-        : '没能在 JSON 里自动找到「元素为对象的数组」，请在「数据定位」里手动填路径',
+        : '没能在 JSON 里自动找到「元素为对象的数组」——请在规则脚本的 framePath 里手动指定路径',
     );
   }
   if (value.length === 0) throw new Error('帧数组为空');
@@ -97,26 +97,7 @@ async function handle(req: ParseRequest): Promise<void> {
       return;
     }
 
-    // rawpos：取某帧的原始坐标（未经规则变换），供坐标系标定使用
-    if (req.type === 'rawpos') {
-      if (cachedRoot === undefined) {
-        throw new Error('还没有解析过录像文件——先导入一次再做标定');
-      }
-      const resolvedPath = req.framePath || pickFrameArray(cachedRoot) || '';
-      const frames = locateFrames(cachedRoot, resolvedPath);
-      const idx = Math.max(0, Math.min(frames.length - 1, Math.floor(req.index)));
-      const raw = frames[idx];
-      const v = req.paths.map((p) => num(getPath(raw, p)));
-      const ok = v.every((x) => Number.isFinite(x));
-      post({
-        id,
-        type: 'rawposed',
-        value: ok ? [v[0], v[1], v[2]] : null,
-        preview: safePreview(raw),
-        count: frames.length,
-      });
-      return;
-    }
+    // rawpos 分支已随坐标系标定移除（core-simplify-plan P2）
 
     // import
     const file = req.file ?? cachedFile;
