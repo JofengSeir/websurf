@@ -1,1 +1,0 @@
-{"id":"a12a37cb-c064-43a3-8870-9430c84f8fe3","from":"captain","to":"architect","content":"你的任务 t1「self-intro: architect (M3)」已创建在团队 minimax-self-intro。请立即调用 agent_teams_claim_task(task_id=\"t1\") 认领任务，完成后用 agent_teams_update_task 把 status 设为 completed 并提交 output（回答：你是哪个模型 + 你的职能）。无需等待其他成员。","ts":1787199006341,"deliveredAt":1787199006347,"readAt":1787199006347}
