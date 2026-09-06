@@ -17,6 +17,7 @@
  */
 
 import { mkdir, rm, copyFile, writeFile, readFile, readdir, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -233,15 +234,16 @@ const distHtml = html.replace(
 await writeFile(join(dist, 'index.html'), distHtml);
 await copyFile(join(viewerRoot, 'styles.css'), join(dist, 'styles.css'));
 
-// 参考资源（file:// 不能 fetch，载入走面板「选择 JSON 录像」）
-await copyFile(
-  join(repoRoot, 'maps/surf_null_4.replay.json'),
-  join(dist, 'assets/maps/surf_null_4.replay.json'),
-);
-await copyFile(
-  join(repoRoot, 'maps/surf_null_4.rule.json'),
-  join(dist, 'assets/maps/surf_null_4.rule.json'),
-);
+// 参考资源（file:// 不能 fetch，载入走面板「选择 JSON 录像」）。
+// 入库白名单：maps/surf_null_4.*.json（见根 .gitignore）；缺失时警告跳过，不阻断构建。
+for (const name of ['surf_null_4.replay.json', 'surf_null_4.rule.json']) {
+  const src = join(repoRoot, 'maps', name);
+  if (existsSync(src)) {
+    await copyFile(src, join(dist, 'assets/maps', name));
+  } else {
+    console.warn(`[warn] 示例资产缺失，跳过: maps/${name}（dist 示例深链将不可用）`);
+  }
+}
 
 async function tree(dir) {
   const out = [];
