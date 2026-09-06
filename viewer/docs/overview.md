@@ -20,7 +20,7 @@
 | `src/replay/` | 录像子系统：`codegen` 脚本编译与试跑校验、`default-rule` 内置默认规则（自家格式）、`rule-file` 规则文件双形态解析（.js / 规则 JSON）、`importer` 导入、`build` 帧映射+transform 后处理、`tracks` 多轨道、`player` 播放（`sampling` 采样）、`visuals` 可视化、`timeline` 时间轴、`panel`·`trackpanel` 面板 |
 | `src/worker/parse-worker.ts` | 录像解析 Worker；esbuild 产物 `web/parse-worker.js`（构建生成，已 gitignore） |
 | `test/replay-selftest.ts` | 录像管线 Node 自检（`npm run test:replay`），覆盖路径取值/帧探测/规则编译/transform 后处理/规则文件双形态/时间轴/容错/多轨道 |
-| `index.html` | 入口页（canvas + 引导层 + 拖拽层 + HUD 状态行 + 帮助浮层 + 顶栏〔?帮助 / 面板〕+ 侧栏两标签页 + 底部时间轴） |
+| `web/index.html` | 入口页（canvas + 引导层 + 拖拽层 + HUD 状态行 + 帮助浮层 + 顶栏〔?帮助 / 面板〕+ 侧栏两标签页 + 底部时间轴） |
 | `package.json` | 脚本：build:wasm / build:worker / build:ts / build / test:replay / test:smoke / build:dist（单一 dist）/ dev（复用 `../src/serve.py`） |
 
 **共享实现**（`../../src/wasm-core/`）：BSP 解析 / GLB 导出 / PAKFILE 模型整合——与 debug/game/test

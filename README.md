@@ -10,7 +10,7 @@
 | [`src/`](src/) | 共享层 | `phys/`（websurf-phys：Rust 物理 WASM 核心）、`wasm-core/`（websurf-wasm-core：BSP 解析 v19~v29 / GLB / 模型 / 纹理解析 + mosaic/MTZ）、`ts-shared/`（TS 物理渲染共享：权威帧/校准/输入层/世界构建）、`materials/textures.mtz`（默认纹理包）、`vendor/vmdl/`（vendored vmdl 单副本）、`serve.py`（dev 服务器；BSP 地图放仓库根 `maps/`，gitignored） |
 | [`debug/`](debug/) | 主工程（Debug Build） | 全功能调试测试页面：计时挑战、碰撞可视化（brush/trigger/phy/vis/chamfer 切角共 5 组开关 + 距离滑块）、物理面板（13 项力学参数动态列表）、自定义传送点、准星射线、缺失纹理弹窗、调试 API（`parse_entities`/`list_pakfile`/`read_pakfile_*`/`export_colliders*`/`export_visleaf_pvs` 等，仅 debug 导出） |
 | [`game/`](game/) | WebSurf-game（Game Build） | 最小化游戏实现：主线程唯一物理渲染线 + 单 Worker 权威帧 + ESC 弹出面板（录制改键）+ 存点系统（X 键存点 / C 键读点、按住冻结松开恢复）+ 加载进度覆盖层（平滑补间 + 失败红态）+ 空间分块合并渲染 |
-| [`viewer/`](viewer/) | WebSurf-viewer | 最小 BSP 自由视角查看器（349ee26 新增）：无物理、无面板，GLB 场景 + 自由飞行相机，位姿三通道传入（URL 查询参数 / hash / `window.viewer` JS API）+ 录像导入回放与**朝向诊断/一键修正**（Shavit .replay），见 [viewer/README.md](viewer/README.md) |
+| [`viewer/`](viewer/) | WebSurf-viewer | 最小 BSP 自由视角查看器（349ee26 新增，2026-09-06 经 P1-P4 核心化简化）：无物理，BSP→GLB 场景 + 自由飞行相机；导入 JSON/第三方录像、经 .js 规则脚本映射后回放（规则脚本一等公民 + 变换调整面板 + 播放控制 API `window.viewer.replay`）；已移除位姿三通道/朝向诊断/量测。见 [viewer/README.md](viewer/README.md) |
 | [`test/`](test/) | 验证工程 | [`dual-mode-harness/`](test/dual-mode-harness/)（WebSurf-test：输入→双模物理→帧信号渲染时序验证）、[`instanced-diorama/`](test/instanced-diorama/)（实例化绘制 + PBR 光照渲染测试，验证 GLB 内嵌 `KHR_lights_punctual` 灯光导出） |
 
 入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` + `./viewer/` 三入口。
@@ -27,14 +27,14 @@ npm run build   # 编译 WASM（共享 crate 自动参与）+ TypeScript
 
 Rust 侧构建拓扑：仓库根 `Cargo.toml` 为共享层 workspace（websurf-phys / websurf-wasm-core），
 五个模块 wasm crate 保留各自 workspace；仓库根 `.cargo/config.toml` 让**所有**构建共用
-根 `target/` 编译缓存——共享 crate 与三方依赖全仓库只编译一份。五份 Cargo.lock 的
+根 `target/` 编译缓存——共享 crate 与三方依赖全仓库只编译一份。六份 Cargo.lock（五个模块工程 + 根 workspace）的
 wasm-bindgen 统一锁 0.2.128（与 CI 的 wasm-bindgen-cli 匹配）。
 
 ## 开发 / 运行
 
 ```bash
 cd debug   # 或 cd game / viewer / test/dual-mode-harness
-npm run dev     # 启动开发服务器 http://localhost:8080（复用共享 src/serve.py，COOP/COEP）
+npm run dev     # 启动开发服务器（复用共享 src/serve.py，COOP/COEP；应用页在 /web/ 下，如 http://localhost:8080/web/）
 ```
 
 `test/instanced-diorama` 使用自带的 serve.py（在共享版基础上增加 `/maps/` 别名，支持

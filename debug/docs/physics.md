@@ -10,7 +10,7 @@
 
 ```
 PhysWorld 实例（主线程渲染物理）
-  ├─ build_world(brushJson, triJson ?? '[]', teleportJson, spawn.x, spawn.y, spawn.z, spawn.yaw)
+  ├─ build_world(brushJson, triJson ?? '[]', teleportJson, spawn.x, spawn.y, spawn.z, spawn.yawDeg)
   │     brushJson = world-builder 导出（colliderSource: auto/visual/phy 三方案互斥单选）
   │     triJson   = 按 colliderSource 选 export_model_phy_colliders（auto/phy）或 export_model_tri_colliders（visual）；导出失败回退可视网格
   ├─ set_params(buildPhysicsParams(config))   ← 共享 ts-shared/phys/params（sensitivity: 1）

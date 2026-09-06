@@ -8,9 +8,9 @@
 
 - **viewer 最小 BSP 自由视角查看器（349ee26，2026-08-19）**：新增第四应用工程
   `viewer/`——最小 BSP 自由视角查看器（WASM 解析 + Three.js 渲染，无玩法系统），
-  位姿三通道：URL 参数 / `location.hash` / `window.viewer` 编程接口；自带
+  位姿三通道：URL 参数 / `location.hash` / `window.viewer` 编程接口（后于 2026-09-06 核心化简化中移除）；自带
   README 与 `docs/overview.md`；path 依赖共享层 `../src`、dev 复用
-  `../src/serve.py`；不接入 Pages CI（仅 debug/game 部署）。
+  `../src/serve.py`；未接入 Pages CI（仅 debug/game 部署；**2026-09-06 起已接入**，随 debug/game 一同部署 single dist，见 deploy-pages.yml）。
 - **test/ 测试合集重组（2026-08-13）**：根 `test/` 集中全部测试内容并细分三目录——
   - `test/dual-mode-harness/`：原 WebSurf-test 验证工程整体搬入（双模物理 + 帧信号渲染时序验证，含 mini/〔随后已移除，2026-08-24 核对不在仓库〕与 scripts/ 全套验证套件）；
   - `test/extract/`：原根 `extract/`（bsp-extract 独立解包器）整体搬入（CLI + wasm + 网页/查看器，URL 变更为 `/test/extract/web|viewer/`）；

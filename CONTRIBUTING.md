@@ -33,7 +33,7 @@
   验证一端即可覆盖编译，但契约校验
   `node scripts/check-wasm-api.mjs` 两端都要通过
 - 构建缓存：仓库根 `.cargo/config.toml` 使全部 cargo/wasm-pack 构建共用根
-  `target/`；五份 Cargo.lock 的 wasm-bindgen 需保持同版本（改依赖版本时五处
+  `target/`；六份 Cargo.lock（五个模块工程 + 根 workspace）的 wasm-bindgen 需保持同版本（改依赖版本时六处
   `cargo update -p js-sys -p wasm-bindgen -p web-sys` 锁步执行，并与 CI 的
   wasm-bindgen-cli 钉版对齐）
 - 注释与文档使用中文；新增导出 API 需同步更新对应工程的 `src/wasm.d.ts`

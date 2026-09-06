@@ -111,7 +111,7 @@ B1 多一个 pause/resume 生命周期，注意与 worker-dispatch 的 loopStart
 > 下发，待接线。渲染侧注释与实参不符仍在：game renderer-main.ts:279 注释「场景最低 Y − 1000」、
 > 实参仅 `bbox.min.y`（:280；原文引用 :273-274 已漂移）。
 
-**[确定] 接线即可**：`InputBridge.sendSetDeathThreshold` 已实现（`input-bridge.ts:67-69`）
+**[确定] 接线即可**：`InputBridge.sendSetDeathThreshold` 已实现（`input-bridge.ts:90-91`）
 但无调用者——`app.ts` 在 worker ready 后发送 `set-death-threshold`，值与渲染侧一致。
 同时修正渲染侧传参：`renderer-main.ts:273-274` 传 `bbox.min.y` 但注释声称
 "场景最低 Y − 1000"，二取一（建议按注释改为 `bbox.min.y - 1000` 或改注释）。
