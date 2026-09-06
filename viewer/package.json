@@ -5,12 +5,12 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../pkg && node -e \"require('fs').copyFileSync('../../pkg/websurf_viewer_wasm_bg.wasm','../../websurf_viewer_wasm_bg.wasm')\"",
+    "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../pkg && node -e \"require('fs').copyFileSync('../../pkg/websurf_viewer_wasm_bg.wasm','../../web/websurf_viewer_wasm_bg.wasm')\"",
     "typecheck": "tsc --noEmit",
     "test:replay": "esbuild test/replay-selftest.ts --bundle --outfile=temp/replay-selftest.mjs --format=esm --platform=node --target=node18 && node temp/replay-selftest.mjs",
     "test:smoke": "node test/smoke-cdp.mjs",
-    "build:worker": "esbuild src/worker/parse-worker.ts --bundle --outfile=parse-worker.js --format=esm --target=es2022",
-    "build:ts": "npm run typecheck && npm run build:worker && esbuild src/app.ts --bundle --outfile=app.js --format=esm --target=es2022",
+    "build:worker": "esbuild src/worker/parse-worker.ts --bundle --outfile=web/parse-worker.js --format=esm --target=es2022",
+    "build:ts": "npm run typecheck && npm run build:worker && esbuild src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022",
     "build": "npm run build:wasm && npm run build:ts",
     "build:dist": "node scripts/build-dist.mjs",
     "dev": "python ../src/serve.py 8080 ."

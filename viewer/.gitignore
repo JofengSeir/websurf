@@ -1,7 +1,7 @@
-# WebSurf-viewer 构建产物（根目录 dev 运行文件；pkg/ target/ node_modules/ 由仓库根 .gitignore 覆盖）
-/app.js
-/parse-worker.js
-/websurf_viewer_wasm_bg.wasm
+# WebSurf-viewer 构建产物（web/ dev 运行文件；pkg/ target/ node_modules/ 由仓库根 .gitignore 覆盖）
+/web/app.js
+/web/parse-worker.js
+/web/websurf_viewer_wasm_bg.wasm
 
 # 自检脚本的 esbuild 中间产物（源在 test/，临时产物不入库）
 /temp/

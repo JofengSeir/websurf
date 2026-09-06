@@ -24,9 +24,9 @@
 > 安装，或参考 [官方安装器](https://rustwasm.github.io/wasm-pack/installer/)）。
 
 1. **安装依赖**：`npm install`
-2. **构建产物**：`npm run build:wasm`（wasm-pack release → `pkg/`，并拷贝 wasm 到 viewer 根）
-   + `npm run build:ts`（typecheck + esbuild 出 `app.js` 与 `parse-worker.js`）；两步可合并为 `npm run build`
-3. **启动**：`npm run dev`（即 `python ../src/serve.py 8080 .`）→ 打开 <http://localhost:8080/>；
+2. **构建产物**：`npm run build:wasm`（wasm-pack release → `pkg/`，并拷贝 wasm 到 `web/`）
+   + `npm run build:ts`（typecheck + esbuild 出 `web/app.js` 与 `web/parse-worker.js`）；两步可合并为 `npm run build`
+3. **启动**：`npm run dev`（即 `python ../src/serve.py 8080 .`）→ 打开 <http://localhost:8080/web/>；
    或者打包后**双击 `play.cmd`**（自动起服务器 + 开浏览器，见下节）
 
 自检（可选，改录像链路时建议跑）：
@@ -53,7 +53,6 @@
 | `npm run build:dist` | `dist/`（唯一产物） | **本地双击 `dist/index.html` 直接打开（file://）**：IIFE 打包 + 内嵌 WASM(base64) + 录像 Worker（Blob URL）；同一份产物也可 HTTP 服务 / 部署 |
 
 - **双击启动**：Windows 双击 `viewer/play.cmd`（或构建后 `dist/play.cmd`）；macOS/Linux
-  `play.sh`——起静态服务器并延时 1s 自动打开浏览器（默认端口 8090，`play.cmd 9000` 可覆盖；
   python 缺失 → 中文提示 + 自动改用 `npx serve` 备选）。
 - **纯双击（file://）**：直接双击 `dist/index.html` 即可；WASM/Worker 已内嵌，地图/录像用
   页面文件选择或拖入。
