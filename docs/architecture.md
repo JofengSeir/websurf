@@ -241,12 +241,14 @@ dev 命令全部复用共享 `src/serve.py`（唯独 instanced-diorama 用自己
 **test 工程**：dual-mode-harness 仅 multi 多文件（app/worker-a/worker-b/wasm/index.html），无 single 内嵌
 （仅 HTTP 运行，SAB 恒定可用）；instanced-diorama 无 dist 打包环节。
 
-**CI（deploy-pages.yml，130 行）**：push main / 手动触发；并发组 `pages-deploy-websurf`（默认 "pages"
-并发组会被 GH 内部 cancel，实测过）。build job（ubuntu-latest）：Node **22** + wasm-pack action +
-**手工下载预编译 wasm-bindgen-cli 0.2.128**（与 Cargo.lock 精确匹配）→ debug 四连（npm ci → build:wasm →
-build:ts → `node scripts/build-dist.mjs --multi`）→ game 同款四连 → 组装 `deploy/{debug,game}` +
-入口页（pages-index.html：Debug Build + Game Build 双入口 + SAB 受限提示）→ upload-pages-artifact →
-deploy-pages。**viewer 与两个 test 工程不入 CI**（设计如此）。
+**CI（deploy-pages.yml，2026-09-06 起全模块覆盖）**：push main / 手动触发；并发组 `pages-deploy-websurf`
+（默认 "pages" 并发组会被 GH 内部 cancel，实测过）。build job（ubuntu-latest，timeout 45min）：Node **22** +
+wasm-pack action + **手工下载预编译 wasm-bindgen-cli 0.2.128**（与五份 Cargo.lock 统一版本精确匹配）→
+debug 四连（npm ci → build:wasm → build:ts → `node scripts/build-dist.mjs --multi`）→ game 同款四连 →
+viewer 五步（npm ci → build:wasm → build:ts → build:dist(single) → test:replay）→ dual/instanced 各
+「npm ci → build:wasm → build:ts」构建验证 → 组装 `deploy/{debug,game,viewer}` +
+入口页（pages-index.html：Debug / Game / Viewer 三入口 + SAB 受限提示）→ upload-pages-artifact →
+deploy-pages。
 
 > 备注：`debug/package.json` 的 `verify:chamfer` 脚本指向 `scripts/verify-chamfer.mjs`——该类脚本按根
 > `.gitignore` 的 `**/scripts/verify-*` 约定为本地工具不入库，克隆后直接执行会 ENOENT（断链引用）。

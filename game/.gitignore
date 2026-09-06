@@ -6,7 +6,6 @@ pkg/
 target/
 web/app.js
 web/worker.js
-web/predictor.js
 web/websurf_wasm_bg.wasm
 
 # ── 临时 / 调试 ─────────────────────────
