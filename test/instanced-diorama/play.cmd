@@ -36,6 +36,9 @@ if errorlevel 1 (
 )
 :deps_done
 
+REM ---- shared cargo/wasm-pack env (root .cargo-home / .wasm-pack-cache / .tmp) ----
+call "%~dp0..\..\src\scripts\cargo-env.cmd"
+
 if exist "pkg\websurf_wasm.js" goto :wasm_done
 echo [2/3] WASM missing - building (release, slow on first run; wasm-pack required)...
 call npm run build:wasm

@@ -14,13 +14,15 @@ REM so it never blocks waiting for a keypress.
 REM ============================================================
 
 set "VERSION=0.2.128"
-set "ROOT=%~dp0.."
-set "CACHE_DIR=%ROOT%\.wasm-pack-cache"
+REM Shared env: CARGO_HOME / WASM_PACK_CACHE / WASM_BINDGEN point at the
+rem REPOSITORY ROOT (see src/scripts/cargo-env.cmd).
+call "%~dp0..\..\src\scripts\cargo-env.cmd"
+set "CACHE_DIR=%WASM_PACK_CACHE%"
 set "INSTALL_DIR=%CACHE_DIR%\.wasm-bindgen-cargo-install-%VERSION%\bin"
 set "TARBALL=%CACHE_DIR%\wasm-bindgen-%VERSION%.tar.gz"
 set "URL=https://github.com/rustwasm/wasm-bindgen/releases/download/%VERSION%/wasm-bindgen-%VERSION%-x86_64-pc-windows-msvc.tar.gz"
 set "EXE_REL=wasm-bindgen-%VERSION%-x86_64-pc-windows-msvc\wasm-bindgen.exe"
-set "CARGO_BIN=%ROOT%\.cargo-home\bin"
+set "CARGO_BIN=%CARGO_HOME%\bin"
 set "NO_PAUSE=0"
 if /i "%~1"=="nopause" set "NO_PAUSE=1"
 
@@ -29,6 +31,7 @@ if exist "%INSTALL_DIR%\wasm-bindgen.exe" (
     echo [wasm-bindgen] already installed at: %INSTALL_DIR%\wasm-bindgen.exe
     if not exist "%CARGO_BIN%" mkdir "%CARGO_BIN%"
     copy /Y "%INSTALL_DIR%\wasm-bindgen.exe" "%CARGO_BIN%\wasm-bindgen.exe" >nul 2>&1
+    set "WASM_BINDGEN=%CARGO_BIN%\wasm-bindgen.exe"
     echo [wasm-bindgen] === install finished, exit 0 (normal return, not an error) ===
     if "%NO_PAUSE%"=="0" pause
     exit /b 0
@@ -93,6 +96,7 @@ if not exist "%INSTALL_DIR%\wasm-bindgen.exe" (
 
 echo [wasm-bindgen] Installed successfully (version %VERSION%):
 echo   %INSTALL_DIR%\wasm-bindgen.exe
+set "WASM_BINDGEN=%CARGO_BIN%\wasm-bindgen.exe"
 echo [wasm-bindgen] === install finished, exit 0 (normal return, not an error) ===
 if "%NO_PAUSE%"=="0" (
     echo [wasm-bindgen] You can now build WASM (re-run the build script).
