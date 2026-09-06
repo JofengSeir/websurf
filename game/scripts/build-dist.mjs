@@ -155,11 +155,6 @@ async function buildMulti(distDir, wasmPath) {
   // 3. index.html（module script 原样）+ 清理旧单文件
   console.log('[3/4] 复制 index.html...');
   copyFileSync(join(root, 'web', 'index.html'), join(distDir, 'index.html'));
-  try {
-    unlinkSync(join(distDir, 'predictor.js'));
-  } catch {
-    /* 不存在则忽略 */
-  }
 
   // 4. 总览
   console.log('[4/4] 完成');
