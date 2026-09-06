@@ -4,7 +4,7 @@
  * ── single（默认/唯一，本地双击 file:// 可用，也可 HTTP 服务/部署）→ viewer/dist/ ──
  *   index.html — classic `<script>`（file:// 下 module script 被浏览器 CORS 拦截）
  *   app.js     — IIFE：内嵌 WASM(base64) + 录像解析 Worker 代码（Blob URL 启动）
- *   styles.css
+ *   web/styles.css
  *   assets/maps/*.replay.json/.rule.json（参考资源；file:// 无法 fetch，载入走面板文件选择）
  *   serve.py   — 静态服务器（python serve.py [port]）
  *   play.cmd / play.sh — 双击启动：起服务器 + 延时 1s 自动打开浏览器（python 缺失 → 中文提示 + npx serve 备选）
@@ -208,7 +208,7 @@ const iife = {
 };
 
 console.log('[1/3] 编码 WASM → base64 …');
-const wasmBytes = await readFile(join(viewerRoot, 'websurf_viewer_wasm_bg.wasm'));
+const wasmBytes = await readFile(join(viewerRoot, 'web/websurf_viewer_wasm_bg.wasm'));
 const wasmB64 = wasmBytes.toString('base64');
 
 console.log('[2/3] 打包录像解析 Worker（IIFE，Blob URL 用）…');
@@ -226,13 +226,13 @@ const preamble =
 await writeFile(join(dist, 'app.js'), preamble + appCode);
 
 // classic script：file:// 下 module script 被 CORS 拦截
-const html = await readFile(join(viewerRoot, 'index.html'), 'utf8');
+const html = await readFile(join(viewerRoot, 'web/index.html'), 'utf8');
 const distHtml = html.replace(
   '<script type="module" src="./app.js"></script>',
   '<script src="./app.js"></script>',
 );
 await writeFile(join(dist, 'index.html'), distHtml);
-await copyFile(join(viewerRoot, 'styles.css'), join(dist, 'styles.css'));
+await copyFile(join(viewerRoot, 'web/styles.css'), join(dist, 'styles.css'));
 
 // 参考资源（file:// 不能 fetch，载入走面板「选择 JSON 录像」）。
 // 入库白名单：maps/surf_null_4.*.json（见根 .gitignore）；缺失时警告跳过，不阻断构建。

@@ -24,7 +24,7 @@ const EDGE =
   process.env.EDGE_PATH ??
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = Number(process.env.SMOKE_PORT ?? 9333);
-const URL_ = process.env.SMOKE_URL ?? 'http://127.0.0.1:8080/index.html';
+const URL_ = process.env.SMOKE_URL ?? 'http://127.0.0.1:8080/web/index.html';
 
 async function loadWs() {
   try {
