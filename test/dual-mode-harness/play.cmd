@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 >nul
 setlocal EnableExtensions
 title WebSurf-test - Play (close this window to stop the server)
 cd /d "%~dp0"
@@ -22,12 +21,36 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM ---- rebuild TS bundles (best-effort; keep app in sync with src/) ----
-echo [1/2] Building TS bundles (npm run build:ts) ...
-call npm run build:ts >nul 2>nul
+REM ---- bootstrap: deps -> wasm -> ts (auto when missing) ----
+if exist "node_modules\.bin\tsc" goto :deps_done
+echo [1/3] Installing Node dependencies (npm install, only when missing)...
+call npm install
 if errorlevel 1 (
-  echo [WARN] TS build failed ^(node_modules missing? run "npm install" first^).
-  echo        Serving existing bundles in "%~dp0." instead.
+  echo [ERROR] npm install failed. Check network connectivity and package-lock.json.
+  echo         This window will stay open until you press a key.
+  pause
+  exit /b 1
+)
+:deps_done
+
+if exist "pkg\websurf_test_wasm.js" goto :wasm_done
+echo [2/3] WASM missing - building (release, slow on first run; Rust toolchain required)...
+call npm run build:wasm
+if errorlevel 1 (
+  echo [ERROR] WASM build failed - check Rust toolchain: rustup + wasm-pack.
+  echo         This window will stay open until you press a key.
+  pause
+  exit /b 1
+)
+:wasm_done
+
+echo [3/3] Building TS bundles (npm run build:ts) ...
+call npm run build:ts
+if errorlevel 1 (
+  echo [ERROR] TS build failed - see esbuild errors above.
+  echo         This window will stay open until you press a key.
+  pause
+  exit /b 1
 )
 
 REM ---- start server (foreground) + open browser (delayed 1s) ----
@@ -41,8 +64,8 @@ echo  close it (or press Ctrl+C) to stop the server and free resources.
 echo ============================================
 
 start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
-REM 注意：root 参数用 "%~dp0."（尾点）——"%~dp0" 以反斜杠结尾会被
-REM CommandLineToArgvW 把 \" 解析为转义引号（root 收到尾引号，os.chdir 失败）。
+REM Note: root arg uses "%~dp0." (trailing dot): "%~dp0" ends with a backslash,
+REM which CommandLineToArgvW parses as an escaped quote (root gets a trailing quote, os.chdir fails).
 python "%~dp0..\..\src\serve.py" %PORT% "%~dp0."
 if errorlevel 1 (
   echo.

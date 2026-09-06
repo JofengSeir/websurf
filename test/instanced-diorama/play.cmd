@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 >nul
 setlocal EnableExtensions
 title WebSurf instanced-diorama - Play (close this window to stop the server)
 cd /d "%~dp0"
@@ -21,17 +20,43 @@ if errorlevel 1 (
 )
 where wasm-pack >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] wasm-pack not found. Please install it (cargo install wasm-pack).
+  echo [ERROR] wasm-pack not found. Install it with: cargo install wasm-pack
   pause
   exit /b 1
 )
 
-REM ---- build wasm + TS (best-effort; keep app in sync with src/) ----
-echo [1/2] Building wasm + TS (npm run build) ...
-call npm run build >nul 2>nul
+REM ---- bootstrap: deps -> wasm -> ts (auto when missing) ----
+if exist "node_modules\.bin\tsc" goto :deps_done
+echo [1/3] Installing Node dependencies (npm install, only when missing)...
+call npm install
 if errorlevel 1 (
-  echo [WARN] Build failed ^(node_modules missing? run "npm install" first^).
-  echo        Serving existing bundles in "%~dp0." instead.
+  echo [ERROR] npm install failed. Check network connectivity and package-lock.json.
+  pause
+  exit /b 1
+)
+:deps_done
+
+if exist "pkg\websurf_wasm.js" goto :wasm_done
+echo [2/3] WASM missing - building (release, slow on first run; wasm-pack required)...
+call npm run build:wasm
+if errorlevel 1 (
+  echo [ERROR] WASM build failed - check Rust toolchain: rustup + wasm-pack.
+  pause
+  exit /b 1
+)
+:wasm_done
+
+echo [3/3] Building TS bundle (npm run build:ts) ...
+call npm run build:ts
+if errorlevel 1 (
+  echo [ERROR] TS build failed - see esbuild errors above.
+  pause
+  exit /b 1
+)
+if not exist "app.js" (
+  echo [ERROR] app.js not found after build - cannot serve the app.
+  pause
+  exit /b 1
 )
 
 REM ---- start server (foreground) + open browser (delayed 1s) ----
@@ -45,8 +70,8 @@ echo  close it (or press Ctrl+C) to stop the server.
 echo ============================================
 
 start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
-REM 注意：root 参数用 "%~dp0."（尾点）——"%~dp0" 以反斜杠结尾会被
-REM CommandLineToArgvW 把 \" 解析为转义引号（root 收到尾引号，os.chdir 失败）。
+REM Note: root arg uses "%~dp0." (trailing dot): "%~dp0" ends with a backslash,
+REM which CommandLineToArgvW parses as an escaped quote (root gets a trailing quote, os.chdir fails).
 python "%~dp0serve.py" %PORT%
 if errorlevel 1 (
   echo.
