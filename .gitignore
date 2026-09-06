@@ -29,9 +29,12 @@
 *.bsp
 
 # ── 本地数据（不上传 GitHub）──────────────
-# maps/ 为本地地图/录像测试数据：bsp/dem 体积大且可重新获取，
-# replay.json/rule.json 由转换工具再生（viewer/dist/assets 内有冒烟用副本）。
-maps/
+# maps/ 为本地地图/录像测试数据：bsp/dem 体积大且可重新获取。
+# 例外：surf_null_4 的 replay.json / rule.json 是 viewer dist 的构建输入
+# （示例深链 assets/maps/*，CI 也依赖），体积小、必须入库。
+maps/*
+!maps/surf_null_4.replay.json
+!maps/surf_null_4.rule.json
 *.dem
 *.replay
 
