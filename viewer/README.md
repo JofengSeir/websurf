@@ -192,7 +192,7 @@ console.log(r.tracks());   // [{ id: 'track-1', name: '…', frames: 3072, … }
 | 现象 | 原因 / 处理 |
 |---|---|
 | 页面显示「viewer 初始化失败」，提示缺 `app.js` / wasm | 未构建就打开了页面：在 `viewer/` 目录依次运行 `npm install` → `npm run build:wasm` → `npm run build:ts` 后刷新 |
-| 状态行报 `fetch wasm → 404` 或「缺少 WASM 产物」 | 缺 WASM 产物：先运行 `npm run build:wasm`（生成 `pkg/` 并拷贝 wasm 到 viewer 根）再刷新 |
+| 状态行报 `fetch wasm → 404` 或「缺少 WASM 产物」 | 缺 WASM 产物：先运行 `npm run build:wasm`（生成 `pkg/` 并拷贝 wasm 到 `web/`）再刷新 |
 | 「无法创建 WebGL 渲染上下文」 | 浏览器不支持/禁用了 WebGL、硬件加速关闭或显卡驱动过旧——换最新版 Chrome / Edge / Firefox 并开启硬件加速 |
 | `npm run dev` 报端口占用 | 8080 被其他进程占用：结束占用进程，或换端口启动 `python ../src/serve.py 8090 .` 后访问对应端口 |
 | 按 `Ctrl` 下降时误触浏览器关闭标签页（Ctrl+W） | 浏览器级快捷键页面无法拦截：下降改用 `C` 键，或在 Firefox 中使用（按键拦截更宽松） |

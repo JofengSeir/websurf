@@ -57,7 +57,7 @@
 | 元数据 | 元数据 KV |
 
 控件 → `applyConfigPatch(config, ...)` + `rendererMain.applyConfigPatch` + `inputBridge.sendConfig`（三路同步）+ `saveUiPrefs`（localStorage 持久化）。
-例外（不持久化）：物理段与环境光段——`collectUiPrefs` 仅收录 input/hud/debug/lod/player/texture 六组（app.ts:649-658），物理 tick 率滑块亦注明「不随 UI 偏好持久化」（app.ts:786），刷新后这两组回到默认值。
+例外（不持久化）：物理段与环境光段——`collectUiPrefs` 仅收录 input/hud/debug/lod/player/texture 六组（app.ts:649-658），物理 tick 率滑块亦注明「不随 UI 偏好持久化」（app.ts:787），刷新后这两组回到默认值。
 物理参数变更：面板 → `set-physics-param` 消息 → 权威 Worker `set_params` → snapshot 回传 → 主线程 predPhys 镜像（双端同参）。
 
 ## 5. 特色功能索引

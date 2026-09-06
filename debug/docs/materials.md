@@ -20,7 +20,7 @@
 面板「纹理画质」radio
   → applyConfigPatch(config, 'texture', { quality })
   → renderer.applyConfigPatch('texture') → applyTextureQuality(quality)
-  → 遍历 bspModelScene 材质收集 map（按 Texture 对象实例去重 Set<Texture>，renderer-main.ts:681-691）
+  → 遍历 bspModelScene 材质收集 map（按 Texture 对象实例去重 Set<Texture>，renderer-main.ts:680-690）
   → mini：manifest[map.name 小写] → mosaic_decode(code, 8)
       → ImageBitmap → map.dispose() → map.image = bitmap → needsUpdate
   → original：恢复 origTextureImages 缓存的原图（同样 dispose）

@@ -56,7 +56,8 @@ websurf/
 │   ├── crates/wasm/src/         lib.rs 薄导出层：metadata / parse_spawn_points /
 │   │                            export_glb_with_pakfile_models——仅依赖 websurf-wasm-core
 │   │                            （无 websurf-phys、无 mosaic/默认纹理包）
-│   ├── index.html + src/        入口页在根目录；src/ 仅 app.ts（飞行相机 + 位姿三通道）+ wasm.d.ts
+│   ├── web/                     入口页 index.html + dev 产物 app.js/parse-worker.js/wasm（gitignored）
+│   ├── src/                     app.ts（飞行相机）+ core/ replay/ ui/ worker/ 四层 + wasm.d.ts
 │   └── docs/                    overview.md
 ├── test/                      验证工程合集（不入 Pages 部署）
 │   ├── dual-mode-harness/       WebSurf-test（2026-08-11 收尾）：双模物理 + 帧信号渲染时序验证
@@ -89,7 +90,7 @@ websurf/
 > **所有** cargo/wasm-pack 构建共享一份编译缓存，共享 crate 与三方依赖全仓库只编译一份。
 > 模块 crate 未并入根 workspace 的原因：debug/game/instanced 三者同名 `websurf-wasm`
 >（导出层有意各自维护），Cargo 不允许同 workspace 同名成员，而改名会连锁 40+ 处
-> 产物名引用（pkg/websurf_wasm_bg.*）。五份 Cargo.lock 的 wasm-bindgen/js-sys/web-sys
+> 产物名引用（pkg/websurf_wasm_bg.*）。六份 Cargo.lock（五模块 + 根 workspace）的 wasm-bindgen/js-sys/web-sys
 > 已统一锁到 0.2.128/0.3.105/0.3.105（与 CI 的 wasm-bindgen-cli 0.2.128 精确匹配）。
 
 | crate | 角色 | 被谁引用 |
@@ -285,7 +286,7 @@ deploy-pages。
 wasm 导出层与特色函数（debug 调试 API、game 灯光导出）。
 
 **第三形态 viewer/**：纯视觉最小集——仅 websurf-wasm-core（无物理、无 mosaic/默认包、无 PVS/LOD），
-自由飞行相机 + 位姿三通道（URL/hash/window.viewer），详见 `viewer/README.md`。
+自由飞行相机 + 录像回放（.js 规则脚本一等公民 + 变换调整面板 + 播放控制 API `window.viewer.replay`），详见 `viewer/README.md`。
 
 **验证工程定位**：
 - `test/dual-mode-harness/`：独立验证「输入 → 双模物理 → 帧信号渲染」时序——主线程不做物理/渲染

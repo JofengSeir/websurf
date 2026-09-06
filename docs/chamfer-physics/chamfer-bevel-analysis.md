@@ -31,8 +31,8 @@
 |------|------|------|
 | `src/wasm-core/vbsp/data/mod.rs:320-326` | `BrushSide { plane, texture_info, displacement_info, bevel: i16 }` | BSP 数据结构定义，含 `bevel` 标志位 |
 | `src/wasm-core/vbsp/mod.rs:308` | `brush_sides` 被解析进 `BspFile` | **解析后即在 /src 内不再被读取**（无碰撞消费代码） |
-| `src/phys/mod.rs:100-134` | `build_world` 遍历 brush JSON，**全平面无条件**加入 `World.solids`/`ladders` | 无 bevel/chamfer 过滤 |
-| `src/phys/world.rs:118-183` / `186-195` | `clip_planes` / `clip_box_to_brush` | 标准平面裁剪碰撞，chamfer 平面走同一路径 |
+| `src/phys/mod.rs:103 起` | `build_world` 遍历 brush JSON，**全平面无条件**加入 `World.solids`/`ladders` | 无 bevel/chamfer 过滤 |
+| `src/phys/world.rs:159-243` / `245-262` | `clip_planes` / `clip_box_to_brush` | 标准平面裁剪碰撞，chamfer 平面走同一路径 |
 
 证据：`bevel` 在 `/src` 中**仅作为字段存在**（`data/mod.rs:325`）；`brush_sides` 在 `src/wasm-core` 仅被解析（`mod.rs:308`），**无任何消费代码**。导出层的 brush 碰撞 JSON 由 `crates/wasm/src/lib.rs` 生成，而非 `/src`。
 
@@ -83,10 +83,10 @@ BSP(brush_sides[].bevel)
   ▼
 brush JSON（含 chamfer 平面，法线朝外）
   │
-  ▼  src/phys/mod.rs::build_world（100-134，全部平面无条件）
+  ▼  src/phys/mod.rs::build_world（103 起，全部平面无条件）
   │   → World.solids / World.ladders
   ▼
-src/phys/world.rs::clip_planes / clip_box_to_brush（118-183 / 186-195）
+src/phys/world.rs::clip_planes / clip_box_to_brush（159-243 / 245-262）
   │   chamfer 作为普通碰撞平面参与盒扫掠
   ▼
 碰撞响应（凸棱过渡平滑；P2 坡顶幻影仍需 world.rs 轴向 bevel / 端盖容差，见 §8）
@@ -122,7 +122,7 @@ src/phys/world.rs::clip_planes / clip_box_to_brush（118-183 / 186-195）
 |------|---------|
 | `BrushSide` 数据定义（含 `bevel`） | `src/wasm-core/vbsp/data/mod.rs:320-326` |
 | `brush_sides` 解析进 `BspFile` | `src/wasm-core/vbsp/mod.rs:308` |
-| `build_world` 全平面无条件入碰撞 | `src/phys/mod.rs:100-134` |
+| `build_world` 全平面无条件入碰撞 | `src/phys/mod.rs:103 起` |
 | 平面裁剪碰撞 | `src/phys/world.rs:118-183`（`clip_planes`）/ `186-195`（`clip_box_to_brush`） |
 | 剔除 BSP bevel 面 | `debug/crates/wasm/src/lib.rs:1902`、`2459` 两处；`game/crates/wasm/src/lib.rs:1856` |
 | 运行时棱边 chamfer 生成 | `debug/crates/wasm/src/lib.rs:2552-2690`（game `1973-2075`） |

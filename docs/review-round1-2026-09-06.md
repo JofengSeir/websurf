@@ -59,7 +59,7 @@
 
 ## 四、模块速查（各单元 P1 一句话 + 代表性 P2）
 
-- **src/**：P1 SAB 读侧复验。代表 P2：vbsp panic 路径（face.plane_num 未验证/num_edges<3）、phyfile 环路无防护、mtz count 无上界、stale src/Cargo.lock(0.2.127)、ts-shared 死导出 maskToKeys。
+- **src/**：P1 SAB 读侧复验。代表 P2：vbsp panic 路径（face.plane_num 未验证/num_edges<3）、phyfile 环路无防护、mtz count 无上界、stale src/Cargo.lock(0.2.127)〔已随构建拓扑收敛合入根 Cargo.lock 而消解〕、ts-shared 死导出 maskToKeys。
 - **debug/**：P1 lib.rs 复制粘贴债。代表 P2：~720 行零消费导出（export_colliders 系/export_visleaf_pvs/export_glb_with_models）、bspYawToCsYaw 两份拷贝（spawn-loader.ts:61 / teleport-manager.ts:41）、check-wasm-api 只查符号级、mtz-data.ts 写后不读、verify:chamfer 断链、tsconfig 死 paths。
 - **game/**：P1 死亡阈值缺口。代表 P2：worker-types.ts 协议整体落后、app.ts 头注 v5 旧架构、teleportGateTicks 面板参数 Rust 已失效、serve.py 陈旧 fork、wasm.d.ts 零导入。
 - **viewer/**：P1 出生点朝向换算。代表 P2：smoke [1b] reload 竞态（CI 随机红）、ang/vel NaN 静默、Timeline 视角下拉失同步、第一人称期间鼠标增量累积、多轨迹锚定目标错位、selftest 一条恒真断言、pnpm-lock 双锁。

@@ -120,7 +120,7 @@ loop():
 
 - **[2026-08-24 校准]**：上述「恢复」随后已被最小集调整**再次撤销**——当前运行时
   （main.ts / worker-a.ts / worker-b.ts / index.html）不含任何 trace 路径线与 FOV 调节
-  （FOV 固定 73.6，无面板）；`src/ts-shared/trace/` 公共模块与 `scripts/trace-verify.mjs`
+  （FOV 固定 73.6，无面板）；`scripts/trace-verify.mjs` 仍保留（`src/ts-shared/trace/` 公共模块现已整体移除；原
   仅作独立验证保留。以下历史记录仅作存档，非当前实况。
 - **[2026-08-13 修订]**：trace 数据链路已在后续提交 878515f 恢复——新增
   `src/ts-shared/trace/` 公共模块，worker-a.ts 现用 `TraceRecorder` 采样

@@ -104,7 +104,7 @@ test/dual-mode-harness/
 ## 四、已知边界与死代码（如实记录）
 
 1. **trace/FOV 已从运行时移除**（2026-08 最小集调整）：`main.ts` / `worker-a.ts` / `worker-b.ts` /
-   `index.html` 不再包含 trace 路径线与 FOV 滑块；`src/ts-shared/trace/` 公共模块与
+   `index.html` 不再包含 trace 路径线与 FOV 滑块；`scripts/trace-verify.mjs` 仍保留（`src/ts-shared/trace/` 公共模块已随最小集调整整体移除，原
    `scripts/trace-verify.mjs` 仍保留供独立验证使用，但不属于运行时最小集。
 2. **sustained surf 稳态速度 tick 无关**（正确物理，非缺陷）；tick 难度载体 = 输入采样相位
    与离散施加点。
@@ -115,7 +115,7 @@ test/dual-mode-harness/
 6. **死亡阈值**：`brushJson` 最小 min[1] − 100（默认 −100000 兜底），与 game（场景包围盒 min.y）不同。
 7. **UI/脚本文案核对（R2 更正，基线 @2026-08-26）**：`index.html` HUD 标题为「WebSurf-test — 双模物理 + 帧信号渲染」（index.html:6，与双模现状一致——原「仍为单模」记载失效）；
    对照脚本现名 `scripts/dual-compare.mjs`（旧名 tmp-dual-compare.mjs 已弃用；其头注释校准语义本轮未复核，以源码为准）；
-   `writeStateRaw`/`tick_into` 为 TS 侧 TestShared 方法而非 wasm API 能力（worker-a 实际子步热路径为 `writeState → phys.state()`，
+   `writeStateRaw` 为 TS 侧 TestShared 方法（`tick_into` 实为 wasm API，worker-a 未使用）（worker-a 实际子步热路径为 `writeState → phys.state()`，
    不使用两者）；`pendingWorld` 暂存（world-json 先于 wasm 就绪）与布局回归史（dyAcc 与 V 重叠的屏闪根因）
    仅在源码注释记载。
 
