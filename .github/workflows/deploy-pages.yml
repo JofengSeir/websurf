@@ -1,14 +1,17 @@
 # WebSurf: 构建并部署到 GitHub Pages
 #
-# 仓库布局（两个同级独立工程 + 一个验证工程）：
+# 仓库布局（三个同级应用工程 + 两个验证工程，共享仓库根 src/ Rust/TS 共享层）：
 #   debug/     = 主工程（Debug Build，共享 Rust 物理，多文件 dist）
 #   game/      = WebSurf-game（Game Build，共享 Rust 物理，多文件 dist）
+#   viewer/    = WebSurf-viewer（BSP 游览 + 录像回放，仅解析层，single dist）
+#   test/dual-mode-harness、test/instanced-diorama = 验证工程（仅构建验证，不部署）
 #
-# 各工程构建链路（与本地 build-dist.cmd 一致）：
-#   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.126 与 Cargo.lock 精确匹配）
+# 各应用工程构建链路（与本地 build-dist.cmd 一致）：
+#   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.128 与五份 Cargo.lock 统一匹配；
+#      仓库根 .cargo/config.toml 使全部构建共享根 target/ 缓存）
 #   2. esbuild 打包 TypeScript（worker + app）
 #   3. scripts/build-dist.mjs --multi 生成多文件 dist/（app.js + worker.js + wasm 外置 + textures.mtz 外置，
-#      Pages HTTP 环境；single 模式仅本地 file:// 使用）
+#      Pages HTTP 环境；single 模式仅本地 file:// 使用——viewer 例外，其 dist 为 single-only）
 #
 # 部署产物为 dist/（相对路径引用，兼容 Pages 的 /<repo>/ 子路径）。
 
@@ -33,7 +36,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,11 +60,11 @@ jobs:
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
 
-      - name: Install wasm-bindgen-cli 0.2.126 (prebuilt, matches Cargo.lock)
+      - name: Install wasm-bindgen-cli 0.2.128 (prebuilt, matches Cargo.lock)
         shell: bash
         run: |
           set -euo pipefail
-          VERSION=0.2.126
+          VERSION=0.2.128
           curl -sSL --retry 3 -o /tmp/wbg.tar.gz \
             "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
           tar -xzf /tmp/wbg.tar.gz -C /tmp
@@ -105,12 +108,60 @@ jobs:
         # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常
         run: node scripts/build-dist.mjs --multi
 
-      # ── 组装 Pages 部署目录（入口页 + debug/ + game/）──
+      # ── viewer/（WebSurf-viewer，BSP 游览 + 录像回放，single dist）──────
+      - name: Install viewer dependencies
+        working-directory: viewer
+        run: npm ci
+
+      - name: Build viewer WASM
+        working-directory: viewer
+        run: npm run build:wasm
+
+      - name: "Build viewer TypeScript (typecheck + bundle app/parse-worker)"
+        working-directory: viewer
+        run: npm run build:ts
+
+      - name: Build viewer dist package
+        working-directory: viewer
+        # single 模式（viewer 唯一产物形态）：IIFE + wasm base64 内嵌，HTTP/file:// 皆可用
+        run: npm run build:dist
+
+      - name: Run viewer replay selftest
+        working-directory: viewer
+        run: npm run test:replay
+
+      # ── test/ 验证工程（仅构建验证，不部署）────────────────────
+      - name: Install dual-mode-harness dependencies
+        working-directory: test/dual-mode-harness
+        run: npm ci
+
+      - name: Build dual-mode-harness WASM
+        working-directory: test/dual-mode-harness
+        run: npm run build:wasm
+
+      - name: "Build dual-mode-harness TypeScript (main/worker-a/worker-b)"
+        working-directory: test/dual-mode-harness
+        run: npm run build:ts
+
+      - name: Install instanced-diorama dependencies
+        working-directory: test/instanced-diorama
+        run: npm ci
+
+      - name: Build instanced-diorama WASM
+        working-directory: test/instanced-diorama
+        run: npm run build:wasm
+
+      - name: Build instanced-diorama TypeScript
+        working-directory: test/instanced-diorama
+        run: npm run build:ts
+
+      # ── 组装 Pages 部署目录（入口页 + debug/ + game/ + viewer/）──
       - name: Assemble Pages deploy directory
         run: |
-          mkdir -p deploy/debug deploy/game
+          mkdir -p deploy/debug deploy/game deploy/viewer
           cp -r debug/dist/. deploy/debug/
           cp -r game/dist/. deploy/game/
+          cp -r viewer/dist/. deploy/viewer/
           cp debug/scripts/pages-index.html deploy/index.html
 
       - name: Upload Pages artifact

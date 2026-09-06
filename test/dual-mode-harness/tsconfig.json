@@ -3,7 +3,12 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable",
+      "WebWorker"
+    ],
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
@@ -12,5 +17,9 @@
     "isolatedModules": true,
     "types": []
   },
-  "include": ["src/**/*.ts", "src/wasm.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/wasm.d.ts",
+    "../../src/ts-shared/**/*.ts"
+  ]
 }

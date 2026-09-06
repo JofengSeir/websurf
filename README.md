@@ -13,7 +13,7 @@
 | [`viewer/`](viewer/) | WebSurf-viewer | 最小 BSP 自由视角查看器（349ee26 新增）：无物理、无面板，GLB 场景 + 自由飞行相机，位姿三通道传入（URL 查询参数 / hash / `window.viewer` JS API）+ 录像导入回放与**朝向诊断/一键修正**（Shavit .replay），见 [viewer/README.md](viewer/README.md) |
 | [`test/`](test/) | 验证工程 | [`dual-mode-harness/`](test/dual-mode-harness/)（WebSurf-test：输入→双模物理→帧信号渲染时序验证）、[`instanced-diorama/`](test/instanced-diorama/)（实例化绘制 + PBR 光照渲染测试，验证 GLB 内嵌 `KHR_lights_punctual` 灯光导出） |
 
-入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` 双入口。
+入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` + `./viewer/` 三入口。
 
 ## 构建
 
@@ -24,6 +24,11 @@ cd debug   # 或 cd game / viewer / test/dual-mode-harness / test/instanced-dior
 npm install
 npm run build   # 编译 WASM（共享 crate 自动参与）+ TypeScript
 ```
+
+Rust 侧构建拓扑：仓库根 `Cargo.toml` 为共享层 workspace（websurf-phys / websurf-wasm-core），
+五个模块 wasm crate 保留各自 workspace；仓库根 `.cargo/config.toml` 让**所有**构建共用
+根 `target/` 编译缓存——共享 crate 与三方依赖全仓库只编译一份。五份 Cargo.lock 的
+wasm-bindgen 统一锁 0.2.128（与 CI 的 wasm-bindgen-cli 匹配）。
 
 ## 开发 / 运行
 

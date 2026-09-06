@@ -13,7 +13,7 @@ REM Pass "nopause" as %1 when invoked from an automated build
 REM so it never blocks waiting for a keypress.
 REM ============================================================
 
-set "VERSION=0.2.126"
+set "VERSION=0.2.128"
 set "ROOT=%~dp0.."
 set "CACHE_DIR=%ROOT%\.wasm-pack-cache"
 set "INSTALL_DIR=%CACHE_DIR%\.wasm-bindgen-cargo-install-%VERSION%\bin"

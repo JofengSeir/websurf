@@ -3,9 +3,8 @@
 # 模块来源：debug/ 与 game/ 的 crates/wasm（解析层已统一合并到此，
 # 两端 lib.rs 仅保留 wasm-bindgen 导出层与各自特色函数）。
 #
-# 独立 workspace root（不归属 debug/ 或 game/ 的 workspace，
-# 两工程经 path 依赖引用；websurf-phys 同模式）。
-[workspace]
+# 归属仓库根 Cargo workspace（与 websurf-phys、五个模块 wasm crate 同 workspace，
+# 共享根 target/ 与根 Cargo.lock；曾为独立 workspace root，2026-09-06 合并）。
 
 [package]
 name = "websurf-wasm-core"

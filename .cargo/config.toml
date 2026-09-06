@@ -1,0 +1,13 @@
+# 仓库级 Cargo 构建配置：所有 cargo / wasm-pack 构建共用仓库根 target/
+#
+# 动机（2026-09-06）：此前 src/wasm-core 与 websurf-phys 被 5 个模块 workspace
+# 各自编译一遍、各落各的 target/。本配置让 cargo 的 target 目录统一到
+# 仓库根 target/——同一份依赖（vmdl / wasm-bindgen / image / gltf …）与
+# 共享 crate（websurf-phys / websurf-wasm-core）全仓库只编译一份，
+# 构建缓存跨模块复用。
+#
+# 解析规则：cargo 从当前目录向上查找 .cargo/config.toml，target-dir 相对路径
+# 相对 .cargo 所在目录解析——即仓库根 target/。可用环境变量 CARGO_TARGET_DIR 覆盖。
+
+[build]
+target-dir = "target"

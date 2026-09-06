@@ -61,8 +61,7 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 > **注意（如实记录）**：仓库内 `web/*.js` 与 `dist/*` 为 2026-08-07 旧架构（v3：load-bsp
 > 协议、Worker-B 预测）构建产物，与当前 `src/`（v7 公共化）不匹配——**运行前请先
 > `npm run build:ts`（dev）或 `build-dist.cmd`（dist）重建**；`play.cmd` 不自动构建。
-> 另：`game/web/predictor.js` 为旧双 Worker 时代 gitignored 残留产物（build-dist 清理列表
-> 含之）；`src/worker/worker-types.ts` 协议类型落后于实现（头注释仍为 v3 旧协议、联合
+> 另：`src/worker/worker-types.ts` 协议类型落后于实现（头注释仍为 v3 旧协议、联合
 > 类型缺 world-json/set-spawn-points/sync-render-state/teleport-to-pos/input——运行时
 > 协议以 `src/ts-shared/auth/worker-dispatch.ts` 为准）。
 

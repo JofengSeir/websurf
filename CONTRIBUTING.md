@@ -32,6 +32,10 @@
   （debug / game / viewer / test 均以 path 依赖共享层）均能编译，
   验证一端即可覆盖编译，但契约校验
   `node scripts/check-wasm-api.mjs` 两端都要通过
+- 构建缓存：仓库根 `.cargo/config.toml` 使全部 cargo/wasm-pack 构建共用根
+  `target/`；五份 Cargo.lock 的 wasm-bindgen 需保持同版本（改依赖版本时五处
+  `cargo update -p js-sys -p wasm-bindgen -p web-sys` 锁步执行，并与 CI 的
+  wasm-bindgen-cli 钉版对齐）
 - 注释与文档使用中文；新增导出 API 需同步更新对应工程的 `src/wasm.d.ts`
   （debug/、game/、viewer/、test/dual-mode-harness/、test/instanced-diorama/
   五处各自一份）与 `docs/` 相关文档

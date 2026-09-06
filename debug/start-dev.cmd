@@ -27,12 +27,12 @@ if not exist "%WASM_PACK_CACHE%" mkdir "%WASM_PACK_CACHE%"
 REM GNU 工具链 self-contained bin（dlltool.exe 等）
 set "PATH=C:\Users\Jofen\.rustup\toolchains\stable-x86_64-pc-windows-gnu\lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained;%PATH%"
 
-echo [1/3] Ensuring wasm-bindgen-cli v0.2.126 is present (auto-install if missing)...
+echo [1/3] Ensuring wasm-bindgen-cli v0.2.128 is present (auto-install if missing)...
 call "%~dp0scripts\install-wasm-bindgen.cmd" nopause
 if errorlevel 1 goto :wasm_failed
 echo [1/3] wasm-bindgen-cli ready. Building WASM...
 REM 让 wasm-pack 使用预构建 CLI，避免回退到静默源码编译。
-if exist "%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.126\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.126\bin\wasm-bindgen.exe"
+if exist "%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.128\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.128\bin\wasm-bindgen.exe"
 if not defined WASM_BINDGEN if exist "%~dp0.cargo-home\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%~dp0.cargo-home\bin\wasm-bindgen.exe"
 echo [1/3] using WASM_BINDGEN=%WASM_BINDGEN%
 echo [1/3] Next, wasm-pack will run in order: check target - compile Rust to WASM - install wasm-bindgen - wasm-opt optimize. The wasm-opt step usually prints nothing; that is normal. Keep the window open until you see "Done in", which means this step finished. Total time depends on your machine; as long as there is no red error, it is still progressing.
