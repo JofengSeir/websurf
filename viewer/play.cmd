@@ -15,6 +15,9 @@ rem       on non-ASCII content and on LF-only batch files.
 set PORT=8090
 if not "%~1"=="" set PORT=%~1
 
+REM ---- shared cargo/wasm-pack env (root .cargo-home / .wasm-pack-cache / .tmp) ----
+call "%~dp0..\src\scripts\cargo-env.cmd"
+
 REM ============================================================
 REM Step 1: WASM artifact check - build pkg only when missing
 REM ============================================================

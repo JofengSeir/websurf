@@ -16,14 +16,9 @@ REM ------------------------------------------------------------
 set "WASM_FILE=%~dp0pkg\websurf_wasm_bg.wasm"
 
 echo [1/3] Building WASM (release)...
-set "CARGO_HOME=%~dp0.cargo-home"
-set "TMP=%~dp0.tmp"
-set "TEMP=%~dp0.tmp"
-set "WASM_PACK_CACHE=%~dp0.wasm-pack-cache"
-
-if not exist "%CARGO_HOME%" mkdir "%CARGO_HOME%"
-if not exist "%TMP%" mkdir "%TMP%"
-if not exist "%WASM_PACK_CACHE%" mkdir "%WASM_PACK_CACHE%"
+REM Redirect env vars to the REPOSITORY ROOT (shared by all subprojects).
+REM Also detects prebuilt WASM_BINDGEN. See src/scripts/cargo-env.cmd.
+call "%~dp0..\src\scripts\cargo-env.cmd"
 
 set "SC_DIR=C:\Users\Jofen\.rustup\toolchains\stable-x86_64-pc-windows-gnu\lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained"
 if exist "%SC_DIR%" set "PATH=%SC_DIR%;%PATH%"
@@ -36,9 +31,6 @@ if errorlevel 1 (
     goto :wasm_failed
 )
 echo [1/3] wasm-bindgen-cli ready. Building WASM...
-REM Let wasm-pack use the prebuilt CLI instead of a slow source build.
-if exist "%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.128\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%~dp0.wasm-pack-cache\.wasm-bindgen-cargo-install-0.2.128\bin\wasm-bindgen.exe"
-if not defined WASM_BINDGEN if exist "%~dp0.cargo-home\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%~dp0.cargo-home\bin\wasm-bindgen.exe"
 echo [1/3] using WASM_BINDGEN=%WASM_BINDGEN%
 echo [1/3] Next, wasm-pack will run in order: check target - compile Rust to WASM - install wasm-bindgen - wasm-opt optimize. The wasm-opt step usually prints nothing; that is normal. Keep the window open until you see "Done in", which means this step finished. Total time depends on your machine; as long as there is no red error, it is still progressing.
 call npm run build:wasm

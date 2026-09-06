@@ -13,6 +13,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM ---- shared cargo/wasm-pack env (root .cargo-home / .wasm-pack-cache / .tmp) ----
+call "%~dp0..\src\scripts\cargo-env.cmd"
+
 REM ---- bootstrap: deps -> wasm -> ts -> dist (auto when missing) ----
 REM Fresh-clone friendly: first click installs deps, builds WASM and dist
 REM (a few minutes), later clicks reuse pkg/ and only rebuild TS + dist.
