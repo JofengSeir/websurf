@@ -1,5 +1,7 @@
 /**
- * WebSurf-test 共享内存布局（SAB 无锁通信，与 README 最新时序图一致）。
+ * WebSurf-test 时序测量专用 SAB 布局（与 game ts-shared 权威帧协议**不是**同一套：
+ * 本文件是双 Worker 时序 harness 专属的 192B 布局，键位掩码位定义复用 src/ts-shared；
+ * 与 README 最新时序图一致）。
  *
  * 布局（Int32 索引 / 字节偏移）：
  *
@@ -44,14 +46,10 @@
  * 语义等价性：V 版本/仅状态更新重绘/输入限幅/难度识别全部保留，仅传输介质不同。
  */
 
-// ── 键位掩码（与 Rust src/phys/mod.rs apply_input 位定义一致）────────
-export const KEY_MASK = {
-  forward: 1,
-  backward: 2,
-  left: 4,
-  right: 8,
-  jump: 16,
-} as const;
+// ── 键位掩码（位定义唯一来源：src/ts-shared/auth/shared-state.ts，与 Rust apply_input 一致）──
+// 本 harness 只用到前 5 键；KEY_MASK 从共享层导入，杜绝位定义漂移。
+import { KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
+export { KEY_MASK };
 
 /** 键位掩码 → boolean 集合（main 键盘状态 → 掩码）。 */
 export function keysToMask(keys: { forward: boolean; backward: boolean; left: boolean; right: boolean; jump: boolean }): number {

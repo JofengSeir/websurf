@@ -23,15 +23,14 @@ chamfer 切角与 P2 幻影碰撞机制分析见 `chamfer-physics/`；两端时�
 ```
 websurf/
 ├── maps/                      BSP 地图资源（*.bsp 全 gitignore，仅本地存放）
-├── src/                       ← 共享层（3 个独立 Rust workspace + TS 共享 + 资源）
+├── src/                       ← 共享层（归属仓库根 Cargo workspace + TS 共享 + 资源）
 │   ├── Cargo.toml + phys/       websurf-phys：Rust 物理（wasm-bindgen 绑定层，5 文件共 3,018 行，
 │   │                            含 cfg(test) 回归 p2_gate_tests.rs）
 │   ├── wasm-core/               websurf-wasm-core：BSP 解析/GLB/模型/纹理/mosaic/mtz（纯 rlib，
 │   │                            24 个 .rs 文件共 9,134 行）
-│   ├── ts-shared/               TS 物理渲染共享（10 文件共 1,856 行）：auth/{shared-state,
+│   ├── ts-shared/               TS 物理渲染共享（7 文件共约 1,540 行）：auth/{shared-state,
 │   │                            auth-loop,worker-dispatch}、phys/{authority-calibrator,params,
-│   │                            world-builder}、input/input-layer、trace/{trace-types,
-│   │                            trace-recorder,trace-renderer}
+│   │                            world-builder}、input/input-layer
 │   ├── materials/textures.mtz   默认纹理包（MTZ6，9,448 条，5,942,995 B ≈5.67MB，三处副本同步）
 │   ├── vendor/vmdl/             vendored vmdl 0.2.0（15 个 .rs 文件共 3,262 行；唯一 patch：VTX 条带展开修复）
 │   └── serve.py                 共享开发服务器（COOP/COEP + CORS + WASM MIME + no-store；
@@ -83,11 +82,21 @@ websurf/
 
 ### Rust workspace 引用关系（共享层 + 各工程 wasm 导出层）
 
+> 构建拓扑（2026-09-06 收敛）：仓库根 `Cargo.toml` 为共享层 workspace（websurf-phys +
+> websurf-wasm-core 两成员）；五个模块 wasm crate 保留各自 workspace（debug/game/viewer/
+> test 双模 各自根 Cargo.toml，instanced-diorama 同日补齐根——此前缺失导致其用 crates.io
+> 原版 vmdl）。仓库根 `.cargo/config.toml` 把 `build.target-dir` 统一到根 `target/`——
+> **所有** cargo/wasm-pack 构建共享一份编译缓存，共享 crate 与三方依赖全仓库只编译一份。
+> 模块 crate 未并入根 workspace 的原因：debug/game/instanced 三者同名 `websurf-wasm`
+>（导出层有意各自维护），Cargo 不允许同 workspace 同名成员，而改名会连锁 40+ 处
+> 产物名引用（pkg/websurf_wasm_bg.*）。五份 Cargo.lock 的 wasm-bindgen/js-sys/web-sys
+> 已统一锁到 0.2.128/0.3.105/0.3.105（与 CI 的 wasm-bindgen-cli 0.2.128 精确匹配）。
+
 | crate | 角色 | 被谁引用 |
 |---|---|---|
 | `src/`（websurf-phys） | 物理核心 + wasm 绑定（`PhysWorld` 类，**21 个 pub 方法，含 `new`**） | debug / game / dual-mode-harness / instanced-diorama 的 `crates/wasm`（path 依赖，经 `pub use` re-export 进各自 WASM）；**viewer 不依赖**（纯视觉无物理） |
 | `src/wasm-core/`（websurf-wasm-core） | BSP 解析（**v19~v29**）/GLB/模型/纹理解析 + mosaic 编解码 + MTZ 容器（纯 rlib，无 wasm 导出） | 全部五个 wasm crate path 依赖（debug/game/viewer/dual-mode-harness/instanced-diorama），内部模块直接调用 |
-| `src/vendor/vmdl/` | vendored vmdl 0.2.0（唯一 patch：VTX 条带展开修复） | debug/game/viewer/dual-mode-harness 经 `[patch.crates-io]` 引用（harness 为 `../../src/vendor/vmdl`）；**instanced-diorama 未打 patch**（直接用 crates.io 原版 0.2.0） |
+| `src/vendor/vmdl/` | vendored vmdl 0.2.0（唯一 patch：VTX 条带展开修复） | 全部五个 workspace 经各自 `[patch.crates-io]` 引用（根 workspace 管共享层；debug/game/viewer/双模/instanced 五处同款声明） |
 
 ### 共享层 TS 模块（`src/ts-shared/`，两端 import 共享，改一处双端生效）
 
@@ -102,12 +111,8 @@ websurf/
 | `input/input-layer.ts` | 40 | `INPUT_CLAMP=1000` / `M_YAW=0.022`（与 Rust player.rs 一致） / `layerMouseDelta` / `qeEquivalentDx` | 输入层（灵敏度只在输入层乘一次 → 物理两端 sensitivity 恒 1 不分叉；Q/E 等效像素换算） |
 | `phys/params.ts` | 64 | `buildPhysicsParams`（camelCase config → Rust snake_case 全量、`jump_height = jumpSpeed²/2g`、`sensitivity:1` 硬编码、输出 teleport_gate_ticks） | 面板参数 → Rust set_params |
 | `phys/world-builder.ts` | 254 | `buildWorldBundle`（bytes → WorldBundle 含 spawnList：colliderSource auto/visual/phy 三档 + 可视网格回退 + 缺失纹理收集 + 默认纹理包加载 + GLB with defaults + onProgress） | 地图导入导出统一管线（两端 handleLoadBsp 收敛于此）；出生点 yaw 换算 `(270−bspYaw)%360` |
-| `trace/trace-types.ts` | 91 | `TracePoint` / `TraceState` / `TRACE_MAX_POINTS=2000` / 消息协议（trace/trace-data/trace-point/trace-clear） | 运动路径采集协议与数据结构 |
-| `trace/trace-recorder.ts` | 95 | `TraceRecorder`（setEnabled/tick 节流采样 sampleEvery=16≈62.5Hz/clear/滚动窗口） | 采集端状态机 off→recording→saved（物理 Worker 侧，纯逻辑无环境依赖） |
-| `trace/trace-renderer.ts` | 127 | `TraceRenderer`（addPoint/clear/dispose，LineFactory 依赖注入；绿 0x4ade80=基准 / 红 0xf87171=tick 实际） | 显示端（渲染引擎无关，three 适配注入） |
 
-> 注意：`trace/*` 三个模块当前**无任何工程运行时引用**（debug/game/harness 三端 src 均未 import；
-> 仅 harness 的 scripts/{phys-smoke,trace-verify}.mjs 以文本提及），属共享层中的「验证脚本专用」部分。
+> 注：原 `trace/*` 三模块（运动路径采集/显示）全仓库零运行时引用，已于 2026-09-06 删除（git 历史可找回）。
 > harness 运行时的共享状态协议为其自研的 SAB 双缓冲 + WAKEUP/RENDER_WAKEUP
 > 布局（`test/dual-mode-harness/src/shared-state.ts`），与 ts-shared shared-state 不同源。
 
@@ -238,7 +243,7 @@ dev 命令全部复用共享 `src/serve.py`（唯独 instanced-diorama 用自己
 
 **CI（deploy-pages.yml，130 行）**：push main / 手动触发；并发组 `pages-deploy-websurf`（默认 "pages"
 并发组会被 GH 内部 cancel，实测过）。build job（ubuntu-latest）：Node **22** + wasm-pack action +
-**手工下载预编译 wasm-bindgen-cli 0.2.126**（与 Cargo.lock 精确匹配）→ debug 四连（npm ci → build:wasm →
+**手工下载预编译 wasm-bindgen-cli 0.2.128**（与 Cargo.lock 精确匹配）→ debug 四连（npm ci → build:wasm →
 build:ts → `node scripts/build-dist.mjs --multi`）→ game 同款四连 → 组装 `deploy/{debug,game}` +
 入口页（pages-index.html：Debug Build + Game Build 双入口 + SAB 受限提示）→ upload-pages-artifact →
 deploy-pages。**viewer 与两个 test 工程不入 CI**（设计如此）。

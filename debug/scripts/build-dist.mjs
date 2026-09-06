@@ -125,7 +125,7 @@ async function buildSingle(distDir, wasmPath, mtzPath) {
 	writeFileSync(join(distDir, 'index.html'), distHtml);
 
 	// 清理旧的多文件产物（single 全内嵌，外置文件无用）
-	for (const stale of ['worker.js', 'websurf_wasm_bg.wasm', 'predictor.js', 'textures.mtz']) {
+	for (const stale of ['worker.js', 'websurf_wasm_bg.wasm', 'textures.mtz']) {
 		try {
 			unlinkSync(join(distDir, stale));
 		} catch {

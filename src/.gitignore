@@ -1,7 +1,7 @@
-# 共享层独立 workspace（websurf-phys / websurf-wasm-core）与 vendored crate（vendor/vmdl）
+# 共享层 crate（websurf-phys / websurf-wasm-core，归属仓库根 Cargo workspace）
 #
-# 构建产物与独立锁定文件：各 crate 的 target/ 与 Cargo.lock
-# （依赖版本由 debug/ 与 game/ 的 workspace lock 解析，独立 lock 无意义）
+# 本目录不再产生本地构建产物：target/ 统一到仓库根（.cargo/config.toml），
+# 依赖版本由根 Cargo.lock 锁定。此排除规则保留作兜底。
 #
 # 需要跟踪（勿加入排除）：
 #   materials/textures.mtz（公共默认纹理包）

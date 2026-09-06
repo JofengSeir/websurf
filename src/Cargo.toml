@@ -5,9 +5,8 @@ edition = "2021"
 description = "WebSurf 共享物理系统（源自 game/ WebSurf-game 的 Rust 物理，被 debug/ 与 game/ 两工程共同引用）"
 license = "MIT"
 
-# 独立 workspace root（不归属 debug/ 或 game/ 的 workspace，
-# 两工程经 path 依赖引用；保持独立避免多 workspace 成员冲突）
-[workspace]
+# 归属仓库根 Cargo workspace（与 websurf-wasm-core、五个模块 wasm crate 同 workspace，
+# 共享根 target/ 与根 Cargo.lock；曾为独立 workspace root，2026-09-06 合并）。
 
 [lib]
 crate-type = ["rlib"]

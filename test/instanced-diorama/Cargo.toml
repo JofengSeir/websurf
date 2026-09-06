@@ -1,0 +1,27 @@
+# WebSurf-test · instanced-diorama — Rust workspace 根
+#
+# 单一 WASM crate（crates/wasm），薄导出层：re-export 共享解析层
+# （仓库根 src/wasm-core，websurf-wasm-core）的 BspProcessor——
+# 实景灯光/实例化渲染验证页，无物理。
+#
+# ⚠ 本文件 2026-09-06 补齐：此前本工程没有 workspace 根（无法声明
+# [patch.crates-io]），Cargo.lock 解析到 crates.io 原版 vmdl——错过了
+# src/vendor/vmdl 修复的 Source VTX 三角形条带展开 bug。补齐后与其余
+# 四个模块（debug/game/viewer/test 双模）对齐；仓库根 .cargo/config.toml
+# 使其与全仓库共享 target/ 构建缓存。
+
+[workspace]
+members = ["crates/wasm"]
+resolver = "2"
+
+# 与 debug/game/viewer/双模 同款 [patch.crates-io]（vmdl vendor 到共享目录 src/vendor/vmdl）
+[patch.crates-io]
+vmdl = { path = "../../src/vendor/vmdl" }
+
+# ============================================================
+# 性能优化配置（WASM 构建需启用 LTO + 优化）
+# ============================================================
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
