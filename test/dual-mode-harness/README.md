@@ -93,7 +93,7 @@ test/dual-mode-harness/
     workerb-isolated.mjs  WorkerB 隔离纯渲染上限测试
     trace-verify.mjs      trace 公共链路验证（Chrome headless + CDP：开始→保存→无错误）
     dual-compare.mjs      test 双模 vs game 双线数据对照（关键指标 <15%；旧名 tmp-dual-compare.mjs）
-  docs/                 源码解析文档（整体架构 / 地图解析 / 运行时序图）
+  docs/                 源码解析文档（overview 总览 / sequences 时序 / implementation×2 细分 / differences 差异；旧档在 docs/archive/）
 ```
 
 > 注：`phys-smoke.mjs` 在 node 环境复制镜像 TestShared / ModeAB（核心逻辑与

@@ -438,7 +438,7 @@ impl VisData {
 
 /// 把 Source 引擎 RLE 压缩的一行 VIS 解码为可见性位图。
 ///
-/// 这是 Source `CM_DecompressVis` 的唯一权威实现（见 `docs/VISLEAF-PVS.md`）。
+/// 这是 Source `CM_DecompressVis` 的唯一权威实现。
 /// 所有 PVS 路径 —— WASM `parse_pvs_data`、离线 `.bin` 导出器、已废弃的
 /// `VisData::visible_clusters` —— 都必须经由此处，保证解码与引擎一致。
 ///
@@ -650,7 +650,7 @@ mod tests {
     use super::*;
 
     /// PVS RLE 解码：`0x00` 转义后的下一字节是**零字节**数（每字节 = 8 个不可见 cluster），
-    /// 而非 cluster 数。`skip` 为 1 时必须前进 8 个 cluster，而非 1 —— 这就是历史 bug（VISLEAF-PVS.md）。
+    /// 而非 cluster 数。`skip` 为 1 时必须前进 8 个 cluster，而非 1 —— 这就是历史 bug。
     #[test]
     fn decode_pvs_row_rle_skip_is_in_groups_of_8_clusters() {
         // cluster_count = 24 => bytes_per_row = 3。

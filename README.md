@@ -54,13 +54,12 @@ BSP 地图文件体积大，不随仓库分发（`.gitignore` 对 `*.bsp` 全忽
 ## 文档
 
 - [docs/](docs/) — 仓库级文档：
-  - [architecture.md](docs/architecture.md) — 整体架构（仓库布局 / 共享层 / 数据流 / 构建部署 / 两端差异）
-  - [materials.md](docs/materials.md) — 公共材质技术（mosaic 低清压缩 / MTZ 打包解压拼装 / 默认纹理包全流程）
-  - [phys-fix-directions.md](docs/phys-fix-directions.md) — 物理与时序问题修复方向（P1~P7，标注 [确定]/[候选]/[不修]）
-  - [chamfer-physics/](docs/chamfer-physics/) — chamfer 切角与 P2 幻影碰撞机制分析、实证记录与 Python 验证脚本
-  - [archive/](docs/archive/) — 历史分析文档归档
-- [debug/docs/](debug/docs/) — 主工程特色功能（总览 / 材质应用 / 物理 / 渲染调试 / 权威帧时序 timing-debug）
-- [game/docs/](game/docs/) — WebSurf-game 特色功能（总览 / 面板键位 / 物理 / 材质应用 / 时序 timing-game 与深度分析 timing-game-analysis）
+  - [index.md](docs/index.md) — 全树导航与阅读层次（总架构 → 共享层 → 工程总览 → 细分实现 → 差异）
+  - [architecture.md](docs/architecture.md) — 整体架构（仓库组成与边界 / 共享层引用矩阵 / 构建链 / BSP→解析→物理→渲染数据流 / 各工程差异一览）
+  - [phys.md](docs/phys.md) / [wasm-core.md](docs/wasm-core.md) / [ts-shared.md](docs/ts-shared.md) / [materials.md](docs/materials.md) — 共享层（Rust 物理内核 / BSP 解析·GLB·纹理解码 / TS 权威帧协议与算法 / 材质体系全景）
+  - [archive/](docs/archive/) — 历史分析文档归档（phys-fix-directions.md / chamfer-physics/ 已移入 archive/，无重建计划；materials.md 已由 docs/materials.md 重建承接）
+- [debug/docs/](debug/docs/) — 主工程（overview 总览 / sequences 时序 / implementation×3 细分 / differences 差异）
+- [game/docs/](game/docs/) — WebSurf-game（overview / sequences / implementation×2 / differences）
 - [viewer/README.md](viewer/README.md) + [viewer/docs/overview.md](viewer/docs/overview.md) — 查看器说明、操作与位姿约定
 - [test/dual-mode-harness/README.md](test/dual-mode-harness/README.md) / [CONCLUSION.md](test/dual-mode-harness/CONCLUSION.md) — 验证工程说明与「64t 坡速 ≈ 无限制」三方会审结论
 - [test/instanced-diorama/README.md](test/instanced-diorama/README.md) — 渲染测试工程说明（自动化验证参数表 / 光照导出链路 / 踩坑记录）

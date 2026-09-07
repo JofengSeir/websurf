@@ -2971,7 +2971,7 @@ fn aabb_volume(verts: &[[f32; 3]]) -> f32 {
 //
 // 与 crates/vbsp/src/bin/export-vis-pvs.rs 的 compute_core + export_binary 一致，
 // 输出字节完全相同的 .visleaf.bin / .pvs.bin（格式 v1）。
-// 依赖 vbsp 修复：leaves lump version 1 解析 + vis data 完整基址（见 docs/PVS-BUG-ROOTCAUSE.md）。
+// 依赖 vbsp 修复：leaves lump version 1 解析 + vis data 完整基址。
 // ---------------------------------------------------------------------------
 
 /// 从 BSP 字节数组导出 visleaf + PVS 二进制数据。
