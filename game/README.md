@@ -84,10 +84,12 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 
 ## 文档（`game/docs/`）
 
-- `overview.md` — 总览与工程结构
-- `physics.md` — 物理时序（主线程物理线 + 权威帧校准）
-- `panel.md` — 面板控件与持久化
-- `materials.md` — 画质切换与缺失纹理回退
+- [overview.md](docs/overview.md) — 总览与工程结构（v7 架构总图）
+- [sequences.md](docs/sequences.md) — 时序（启动/地图加载/双线程帧循环/校准与反向同步/SAB 协议）
+- [implementation/panel-and-input.md](docs/implementation/panel-and-input.md) — 输入采集链、键位录制、PointerLock、面板七模块
+- [implementation/gameplay.md](docs/implementation/gameplay.md) — 存点/出生点/渲染体验/死亡阈值/PVS 现状
+- [differences.md](docs/differences.md) — 与 debug/viewer/test 的架构取舍与共享层收敛
+- [archive/](docs/archive/) — 旧版文档（2026-09 重编纂归档，仅供历史对照）
 
-> 公共架构见根 `../docs/architecture.md`；时序见 `docs/timing-game.md`、`../debug/docs/timing-debug.md`；
-> 验证工程（双模物理 + 帧信号渲染时序）见 `../test/dual-mode-harness/README.md` + `../test/dual-mode-harness/CONCLUSION.md`。
+> 公共架构见根 [../docs/architecture.md](../docs/architecture.md)；时序见 [sequences.md](docs/sequences.md)、[../debug/docs/sequences.md](../debug/docs/sequences.md)；
+> 验证工程（双模物理 + 帧信号渲染时序）见 [../test/dual-mode-harness/README.md](../test/dual-mode-harness/README.md) + [../test/dual-mode-harness/CONCLUSION.md](../test/dual-mode-harness/CONCLUSION.md)。
