@@ -1,233 +1,251 @@
-# viewer 实现细节 · 录像回放系统（src/replay/ + worker/）
+# viewer 实现细节 · 录像回放系统（src/replay/ + worker/ + ui/replaymeta.ts）
 
-> viewer 回放的一切建立在一条固定管线上：**任意 JSON → 规则脚本映射 → 标准帧 → Clip（定型数组）→ 播放**。
-> 播放器只认 Clip；"第三方格式"只是换一个映射脚本。总览见 [../overview.md](../overview.md)，
-> 时序见 [../sequences.md](../sequences.md)，.js 规则写法契约另见 [../replay-rule-ai.md](../replay-rule-ai.md)。
-> 本文按数据流顺序展开 16 个模块，所有论断标注 `文件:行号`。
+> viewer 回放建立在一条固定管线上：**Shavit `.replay` 原生解析（二进制 → 定标映射）→ Clip（定型数组）→ 播放**。
+> 播放器只认 Clip；播放基准 = **帧自身坐标**（解码仅做坐标映射，任何平移/旋转都只能由用户显式叠加）。
+> 格式规格与字节级实测见 [shavit-replay-format.md](shavit-replay-format.md)，总览见 [../overview.md](../overview.md)，
+> 时序见 [../sequences.md](../sequences.md)。
+> ⚠ t4 起 JSON/规则脚本通道已整体移除（`codegen.ts` / `rule-file.ts` / `default-rule.ts` / `sample.ts` 已删，
+> 非法嗅探明确报错）。本文按数据流顺序展开 14 个模块（`src/replay/` 13 个 + `worker/parse-worker.ts`），论断标注 `文件:行号`。
 
-## 1. 数据契约层（`viewer/src/replay/types.ts`，205 行）
+## 1. 数据契约层（`viewer/src/replay/types.ts`，164 行）
 
-### 1.1 标准帧 Frame（`types.ts:96-105`）与映射器（`types.ts:108`）
+### 1.1 规则配置 RuleConfig v2（`types.ts:38-54`，默认 `defaultRule` `types.ts:51-54`）
 
-```ts
-interface Frame { t: number; pos: [number,number,number]; ang: [number,number,number]; vel: [number,number,number] | null }
-type FrameMapper = (raw: unknown, index: number, H: unknown) => Frame;
-```
+原生结构化规则——只有「坐标映射切换 + 人工变换微调」两组旋钮（v1 的 scriptSrc/framePath 等 30+ JSON 字段已随脚本通道删除，`types.ts:39-40` 注释）：
 
-- `t` 秒、**单调不减**（相等合法）；`pos` = **脚底**、viewer 世界坐标 Y-up；`ang = [yaw, pitch, roll]` 度（yaw 0 = −Z 逆时针，pitch 正 = 仰视 ±89° 限幅）；`vel` 世界速度 HU/s 或 null。字段注释即契约（`types.ts:97-104`）。
-- `H` 是助手集（见 §2）；`index` 供 tick 换算（`t = i / tickrate`）。
-
-### 1.2 RuleConfig（`types.ts:29-92`，默认值 `types.ts:168-205`）
-
-声明式映射的可选字段（全部可省——**scriptSrc 才是本体**，其余字段是给"不写脚本"用户的旋钮/历史兼容）：
-
-| 字段组 | 字段 | 语义 |
+| 字段 | 类型 | 语义 |
 |---|---|---|
-| 帧定位 | `framePath`（`types.ts:36`） | 帧数组路径；空 = 自动探测（§2.3） |
-| 位置 | `posX/Y/Z` 路径、`axisX/Y/Z` 输出轴映射、`signX/Y/Z`、`posScale`、`offX/Y/Z`、`posIsEye`（`types.ts:39-60`） | 脚本缺省时的声明式替代；`posIsEye` 表示输入是眼位（构建时减 `EYE_STAND`） |
-| 朝向 | `yawPath/pitchPath/rollPath`、`angleUnit`（deg/rad）、`yawScale/yawOffset`、`pitchSign/rollSign`（`types.ts:61-79`） | `yaw_out = wrap(yaw_in × yawScale + yawOffset)`（注释 `types.ts:67`） |
-| 时间 | `timeMode`（tick/field）、`tickrate`、`timePath`、`timeUnit`（s/ms/tick）（`types.ts:80-90`） | tick 模式 `t = i / tickrate` |
-| 速度 | `velX/Y/Z`（`types.ts:87-90` 附近） | 空则 `vel = null` |
-| 脚本 | `scriptSrc`（`types.ts:87`） | **一等公民**：单表达式映射脚本 |
-| 后处理 | `transform?: RuleTransform { offset, yawDeg }`（`types.ts:11-14, 91`） | 人工微调，在**脚本输出之后**统一施加（§4.2） |
+| `version` | `2` | 持久化版本号（v2 = 原生规则；v1 键载入时清除） |
+| `name` | string | 规则名（持久化用，默认「内置默认」） |
+| `axesMode` | `'shavit' \| 'raw'`（`types.ts:22-28`） | 坐标轴映射：`shavit`（默认）= Source `[x,y,z]` → viewer `[y,z,x]`（与 wasm `rotate_yup` 同构，det=+1）；`raw` = `[x,y,z]` 直读（对照项） |
+| `yawMode` | `'shavit' \| 'raw'`（`types.ts:30-36`） | 朝向轴：`shavit`（默认）= `yaw = wrap(srcYaw+180)`、`pitch = −srcPitch`（实测定标，见 §2.7）；`raw` = 角度直读 |
+| `transform?` | `RuleTransform { offset, yawDeg }`（`types.ts:11-20`） | 人工微调，**仅用户显式设置时非恒等**，解码输出之后统一施加（§3.2） |
 
-### 1.3 Clip（`types.ts:112-132`）与 Track（`types.ts:146-158`）
+### 1.2 Shavit 头部元信息 `ReplayHeaderMeta`（`types.ts:56-101`）
 
-- `Clip`：`t` Float64Array（n）、`pos/ang/vel` Float32Array（3n，vel 可能 null）、`count/duration/bbox/min·max/maxSpeed/resolvedPath/rule`。**可转移**（Worker 零拷贝回传，§6）。
-- `Track`：`clip + { id, name, color, visible, offset }`——`offset`（秒）把本轨第 0 帧对到主时钟某刻，用来对齐起跑不同的多轨对比。
+解析器回传的头部契约（replay-file.inc FINAL 字段；V2 无对应字段 → 0/null），字段/顺序/语义对齐
+[shavit-replay-format.md §2](shavit-replay-format.md)：`version`（FINAL 版本；V2=0）、`format`（'final'|'v2'）、
+`map`（基础名，不带 `_N` 后缀）、`style`、`track`（0=主图，>0=bonus N）、`preFrames`/`frameCount`/`postFrames`/`totalFrames`、
+`time`（头部 fTime 官方成绩；V2 → null）、`steamId` + `steamIdDisplay`（`[U:1:<id>]`；**文件无玩家名**）、
+`tickrate`（V2/<v5 头部无该字段 → **128 估算**并出 warning，不静默）、`zoneOffset[2]`（亚 tick 份额，∈[0,1]，非秒）、
+`stage`、`timestamp`（创纪录 Unix 秒；<v12 用文件 mtime 兜底）、`offsetsLength`（fail-replay 记录数+1）。
 
-## 2. 取值助手与帧数组探测（`viewer/src/replay/helpers.ts`，145 行）
+### 1.3 Clip（`types.ts:103-132`）与 Track（`types.ts:143-158`）
 
-### 2.1 助手集 H（`helpers.ts:21-74`）
+- `Clip`：`id/name/count`、`t` Float64Array（n，秒）、`pos/ang/vel` Float32Array（3n，vel 可 null）、`duration`（= 末帧 t）、
+  `bbox`、`maxSpeed`、`resolvedPath`（原生路径恒 `'.replay'`，`shavit-replay.ts:577`——导入来源标识）、
+  `rule`（生成这份 clip 的规则快照）、**`buttons`** Int32Array（逐帧 IN_* 按键掩码，仅原生路径填充，`types.ts:125-129`）、
+  **`meta`**（§1.2，`types.ts:130-131`）。全部定型数组 → Worker 零拷贝回传（§4）。
+- `Track` = `clip + { id, name, color, visible, offset }`——`offset`（秒）把本轨第 0 帧对到主时钟某刻（对齐起跑不同的多轨对比）。
+- `Sample` / `TrackSample`（`types.ts:134-141, 160-164`）：采样结果与「某轨在主时钟 t 的采样（未开始/已播完 → null）」。
 
-| 调用 | 行为 | 位置 |
+## 2. 原生 .replay 解析器（`viewer/src/replay/shavit-replay.ts`，584 行）
+
+规格依据 = [shavit-replay-format.md](shavit-replay-format.md)（t2 研究 + 真实文件逐字节验证），本节只记行为锚点。
+
+### 2.1 嗅探与头部行（`shavit-replay.ts:42-138`）
+
+- 常量：`SHAVIT_MAGIC = '{SHAVITREPLAYFORMAT}'`（`:42-43`）、`SHAVIT_MAX_VERSION = 0x0C`（`:45-46`，更高版本明确拒绝）、
+  `SHAVIT_SNIFF_BYTES = 64`（`:48-49`，与 shavit 读侧 `ReadLine(64)` 同宽）、`NT_STRING_MAX = 256`（`:58-59`）。
+- `looksLikeShavitReplay(head)`（`:63-79`）：前 64 B 内逐字节搜魔数（latin1 比对，不依赖文本解码）。
+- `fileLooksLikeShavitReplay(file)`（`:81-89`）：`file.slice(0,64)` 读头嗅探；读失败按「不是 .replay」处理。
+- `parseHeaderLine`（`:101-138`）：找首个 `\n`（无 → 报「第 1 行缺失」）；`:` 前必须是非负整数；
+  后半 = `{SHAVITREPLAYFORMAT}{FINAL}` → FINAL（数字 = **格式版本**）或 `{V2}` → V2（数字 = **帧数**，注释 `:95-99`）；
+  含魔数的其他标签 → 「不支持的 Shavit 回放格式……viewer 只支持 FINAL / V2」（远古文本/btimes 不支持）；
+  不含魔数 → 「不是有效的 Shavit .replay」。
+
+### 2.2 FINAL 头部解析（`parseShavitReplay`，`shavit-replay.ts:257-382`）
+
+游标式读取（`ByteReader`，`:142-201`，每步带边界检查与截断报错）：版本护栏（`:279-283`）→ sMap NUL 字符串 →
+style/track（≥v3）→ preFrames/frameCount/fTime → steamID（≥v4）→ postFrames（≥v5）→ tickrate（≥v5，≤0 报「损坏」）→
+zoneOffset[2]（≥v8）→ stage（≥v10）→ timestamp（≥v12，缺失时用调用方 `timestampFallback` = File.mtime）→
+offsetsLength（≥v11，≥2 时**跳过** `(n−1)×12` B offsets 区，`:336-339`）。
+
+兼容修正（对齐 RFC 读侧）：负 preFrames 归零；`v < 0x07` frameCount 读侧减 pre（以及 ≥v5 时减 post）；
+帧区长度按 `frameStart + N×cellBytes` 与文件大小闭合校验（截断 → 报错、尾多字节 → warning，`:344-353`）。
+头部没有 tickrate 时（V2 / <v5）用 `FALLBACK_TICKRATE = 128`（现代 bhop 服务器主流值）并产生明确 warning（`:51-56`）。
+
+### 2.3 V2 兼容（`parseV2`，`shavit-replay.ts:384-437`）
+
+第 1 行 `<帧数>:{SHAVITREPLAYFORMAT}{V2}` + 定长 6-cell 帧（pos3+ang2+buttons）、无二进制头——版本按 0 处理复用解码路径；
+`meta` 各字段取 0/null、tickrate 用 128 估算 + warning。
+
+### 2.4 帧解码（`decodeFrames`，`shavit-replay.ts:445-528`）
+
+- 定长帧 `cellBytes = cells×4`（`cellsForVersion`，`:244-251`：≥v10 = 11 cell；≥v6 = 10；≥v2 = 8；否则 6）。
+- 每帧读 `pos[3] f32 → pitch/yaw f32 → buttons i32 → flags u32`（`:466-472`；flags 按 u32 读，CS2 高位 bit 保位型，`:473-474`）。
+  cells ≥10 的 mousexy/packed vel、≥11 的 stage **不读不输出**——packed vel 是按键 wishmove 不是世界速度（`:475-476`）。
+- 坐标/朝向映射（受 `mapping.axesMode/yawMode` 控制，`:478-507`）：
+  `shavit`（默认）= pos `[y,z,x]` + `ang=[wrap(yaw+180), clampPitch(−pitch), 0]`；`raw` = Source 值直读。
+- 脏数据兜底：NaN/Inf 帧沿用上一帧的值并计数进 warnings（`:486-487, 510-511`）。
+- 世界速度：**位置差分 × tickrate**（中央差分、端点单侧差分，`:513-526`）填 `vel`。
+- 时间轴：`t(i) = (i − preFrames)/tickrate`（`buildTimeArray`，`:439-443`）——prerun 为负、单调，**主时钟 0 = 起跑帧**。
+
+### 2.5 坐标定标（为何 +180）
+
+Source 前向 `(cos yaw_s, sin yaw_s)` 在 `[y,z,x]` 映射下落入 viewer 前向定义 `(−sin yaw_v, −cos yaw_v)`，
+恒等式 ⇔ `yaw_v = wrap(yaw_s + 180)`。实证：真实 `surf_null_4.replay` run 段 1078 个有效帧
+「视角·运动方向」平均 cos = **0.9992**（270− 口径同帧集 ≈ 0.05）；断言固化于
+`test/replay-selftest.ts:286-307`（run 段平均 cos > 0.98）与合成 fixture（src yaw=30 → viewer 210，`replay-selftest.ts:381-386`）。
+⚠ `src/core/pose.ts:12-14 bspYawToCsYaw`（270−yaw）**仅服务 BSP 出生点实体角路径**（初始视角/出生点跳转），
+与 .replay 解码无关且实测疑似镜像（已知问题，t8 评审 F6）——两套口径不可混用。详见 [shavit-replay-format.md §8.2](shavit-replay-format.md)。
+
+### 2.6 Clip 适配（`clipFromShavitReplay`，`shavit-replay.ts:536-584`）解析数组做**拷贝**（transform 原地后处理、parsed 结果保持可复用）→ 复算 `bbox`/`maxSpeed` → 组装 Clip
+（`resolvedPath='.replay'`、`meta=header`、`buttons`）→ `applyClipTransform(clip, rule.transform)`（§3.2）→ 返回 `{clip, warnings}`。
+
+## 3. 角度工具与变换后处理
+
+### 3.1 角度工具（`viewer/src/replay/helpers.ts`，17 行）
+
+JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapDeg`（角度归一 [0,360)，`:8-11`）、
+`clampPitch`（限幅 ±89°，常量 `PITCH_LIMIT_DEG` 来自 `core/constants.ts`，`:13-17`）。
+
+### 3.2 人工变换微调（`viewer/src/replay/build.ts`，72 行）
+
+- `LARGE_CLIP_FRAMES = 100_000`（`:11-12`）：超过按「大文件」提示合并/精度说明。
+- `applyClipTransform(clip, tf)`（`:24-72`）：**恒等变换（全零）直接跳过**（`:28`）；绕 Y 旋转 θ 时
+  pos/vel 用标准 Y 旋转且 yaw 同步 +θ（与「朝向加 θ」自洽，`:30-55`），再统一平移；旋转后 bbox 全量重算（`:58-71`）。
+  平移/旋转只作用于**用户显式设置**的调整工具——这不是锚定，没有自动触发。
+
+## 4. Worker / 导入层
+
+### 4.1 消息协议（`viewer/src/replay/protocol.ts`，35 行）
+
+- `ClipPayload`（`:6-21`）：可转移形态（定型数组零拷贝），含 `buttons/meta`（`:17-20`）。
+- `ParseRequest`（`:23-30`）：`file` 传 null = 复用 Worker 内已缓存的上一份文件（改映射/变换不重读盘）。
+- `ParseResponse`（`:32-35`）：`progress`（parse 阶段进度）/ `done`（payload + warnings + resolvedPath）/ `error`。
+
+### 4.2 解析 Worker（`viewer/src/worker/parse-worker.ts`，110 行）
+
+原生唯一导入路径：**先魔数嗅探（在 `file.text()` 之前——文本解码会破坏二进制，`:44-49`）** → 字节缓存
+（重导重新解码，缓冲区已 transfer 不能复用，`:25-27, 52-61`）→ `parseShavitReplay`（入参
+`timestampFallback` = File.mtime、`mapping` = 规则的两档切换，`:63-68`）→ `clipFromShavitReplay` → transfer 回传
+（t/pos/ang/vel/buttons 五个 buffer，`:73-85`）。嗅探不命中 → 明确报错
+「不是 Shavit .replay——viewer 只支持 Shavit 原生 .replay（JSON/规则脚本通道已移除）」。
+
+### 4.3 导入器（`viewer/src/replay/importer.ts`，176 行）
+
+- `ensureWorker`（`:39-79`）：单文件（file://）构建时 Worker 代码内嵌 `__VBSP_WORKER_JS__` → Blob URL 启动
+  （`:42-52`）；否则 module Worker。起不来 → `workerBroken` + 全部 pending reject（`:64-72`）。
+- `import(file, rule, name)`（`:90-110`）：优先 Worker；`__NO_WORKER__` / workerBroken → **主线程回退**。
+- `importOnMain`（`:118-152`）：与 Worker **同源**的同一条链路（嗅探 → 字节缓存 → 原生解析 → Clip），
+  两处 import 同一批函数（`parse-worker.ts:10-14` vs `importer.ts:3-7`），行为一致。
+- `payloadToClip`（`:159-176`）：payload + rule → Clip（id 时间戳命名）。
+
+### 4.4 三个导入入口（均先嗅探）
+
+| 入口 | 位置 | 说明 |
 |---|---|---|
-| `H.get(root, "a.b[0].c")` | 按 `.` / `[n]` 路径取值，缺失 undefined | `helpers.ts:21-38` |
-| `H.num(v)` | 转数字；无效值（undefined/null/NaN/非数值）→ NaN | `helpers.ts:41-45` |
-| `H.wrap(d)` | 角度归一 [0,360) | `helpers.ts:48-50` |
-| `H.clampPitch(d)` | pitch 限幅 ±89° | `helpers.ts:53-56` |
-| `H.deg(rad)` | 弧度 → 度 | `helpers.ts:59-61` |
-| `H.clamp(v, lo, hi)` | 通用限幅（内联定义于助手集内） | `helpers.ts:73-74` |
-| `H.EYE` | 站立眼高 64.09（复用 `core/constants.ts:7`） | `helpers.ts:71` |
+| 面板「选择录像文件…」 | `panel.ts:63-82` | `accept='.replay'`；换文件 → `loadFile`（§7.1） |
+| 全窗拖拽 `.replay` | `app.ts:286-304`（`.replay` 分支 `:295-300`） | 拖入即导入并自动切到录像页 |
+| URL 深链 `?replay=` | `app.ts:368-405`（`:381-391`） | 直接 `arrayBuffer()` + `looksLikeShavitReplay`（不按文本读）；`?rule=` 参数已删 |
 
-`REPLAY_HELPERS` 对象（`helpers.ts:64-74`）作为第三实参传给脚本——**这就是 `.js` 规则里 `H` 的实体**（传参点：`build.ts` 的 `fn(frame, i, H)` 调用与 `codegen.ts` 的探针，见 §3）。
+## 5. 播放器与多轨迹
 
-### 2.2 帧数组自动探测（`helpers.ts:78-145`）
+### 5.1 轨道集合（`viewer/src/replay/tracks.ts`，110 行）
 
-- `findArrayCandidates(root, maxDepth=4)`（`helpers.ts:93-139`）：广度优先遍历对象树，深度 ≤4；候选 = **元素数 ≥2 且首元素是普通对象**的数组（`helpers.ts:97-104`）；遍历环引用 `seen` 防护（`helpers.ts:107-108`）、候选 >60 停止下钻（`helpers.ts:105`）。
-- 排序：长度降序 → 深度升序，最终只取前 30（`helpers.ts:136-138`）。
-- `pickFrameArray(root)`（`helpers.ts:142-145`）：取第一名；找不到 → null → 上层报"没能在 JSON 里自动找到『元素为对象的数组』"。
+`TRACK_PALETTE`（`:12`）固定配色轮转；`add`（第一条自动成为跟随目标，`:31,40`）、`replaceClip`
+（改映射/变换重导 = 原位替换，`:49-54`）、`remove`（清跟随指针，`:57-60`）、`follow`（缺省第一条，`:74`）、
+`setFollow`（`:78`）、`duration`（各轨 offset+时长最大值，`:85`）、`sampleAll`（`:107`）。
 
-## 3. 规则脚本编译与试跑（`viewer/src/replay/codegen.ts`，74 行）
+### 5.2 播放器（`viewer/src/replay/player.ts`，206 行）
 
-### 3.1 编译契约（`codegen.ts:14-22`，实现原文）
+持有**主时钟**与轨道集合，只认 Clip（`PlayMode = 'first' | 'third'`，`:14`）。状态读数：`duration`（`:39`）、
+`rangeStop/rangeLength/ratio`（A-B 区间语义，`:44-56`）。控制：`load`（清空后单条，旧语义，`:61`）、
+`addTrack`（多轨对比；第一条复位时钟与区间，`:69-77`）、`removeTrack/clearTracks`（`:77-86`）、
+`followTrack`（切第一人称跟随/速度读数来源，`:88-92`）、`play/pause/toggle/stop/seek/seekRatio`、
+`stepFrames`（逐帧，`:137-146`）。采样：`indexAt`（二分，`:167`）、`sample/sampleAt`（插值，`:176-183`）、
+`sampleAll`（全轨，`:185-187`）。
 
-```ts
-export function compileScript(src: string): FrameMapper {
-  // 容错：剥掉 AI 产码常见的尾分号（整个文件会被包进 return (…) 里）
-  const body = src.trim().replace(/;+\s*$/, '');
-  const factory = new Function(
-    'H',
-    '"use strict";\nreturn (' + body + ');',
-  ) as (H: unknown) => FrameMapper;
-  return factory(REPLAY_HELPERS);
-}
-```
+### 5.3 采样纯函数（`viewer/src/replay/sampling.ts`，80 行）
 
-要点（写作 `.js` 时逐条对应，详见 [replay-rule-ai.md](../replay-rule-ai.md)）：
+`lerpAngle`（yaw/roll 走**最短弧**，`:11-14`）、`lerp`、`indexInClip`（二分查找，`:24-39`）、
+`sampleClip`（插值组装 Sample，`:41-75`）、`horizontalSpeed`（HUD 速度读数，`:77-80`）。
 
-- 文件内容 = **单个 JS 表达式**（求值为 `(raw, i, H) => Frame`），可带前置 `//` 注释；
-- `new Function('H', 'return (…)')` 的形式决定了：不要 `const`/`module.exports`/`export`/IIFE；
-- 剥尾分号只是容错（`codegen.ts:16`），**结尾不要写分号**；
-- `H` 在编译期即绑定 `REPLAY_HELPERS`（`codegen.ts:7, 22`）——探针与 build 的每次调用传同一实例；
-- 编译错误（语法）在 `new Function` 构造时直接抛（自检断言 `test/replay-selftest.ts:207-212`）。
+### 5.4 播放基准（t4 修复）
 
-### 3.2 三帧试跑校验（`probeScript`，`codegen.ts:36-74`）
+- 帧自身坐标直读为唯一默认：解析产出即渲染坐标，**无起点锚定、无自动平移**（t4 已删
+  `computeStartAid/refreshStartAnchor/applyAnchor` 全链）。
+- 「调整工具」（§3.2）与「坐标映射」切换仅在**用户显式设置**时叠加；改设置 = 替换当前轨道（§7.1）。
+- HUD「轨迹完全落在地图包围盒外」检查保留（`app.ts:157-188`）——正确的 .replay 触发它说明映射不对，
+  应修「坐标映射」切换而不是平移。
 
-对帧数组取 `[0, 中间, 最后]` 三个探针（去重、防空数组越界，`codegen.ts:37-40`），逐帧验证（`codegen.ts:41-73`）：
+## 6. 3D 可视化（`viewer/src/replay/visuals.ts`，174 行）
 
-1. 函数执行抛异常 → `第 N 帧执行出错：…`；
-2. 返回非对象 → `第 N 帧未返回对象`；
-3. `t` 非有限数 → `第 N 帧的 t 不是有效数字（…）——检查时间配置`；
-4. `pos` 不是 3 个 number 或含非有限值 → `第 N 帧的位置不是三个有效数字（[原始值]）——检查位置字段路径与轴映射`（`NUM3` 只验"3 个 number 类型"，NaN 由 `Number.isFinite` 补抓，`codegen.ts:32-33, 52-58`）；
-5. `ang` 同理（`codegen.ts:59-65`）；`vel` 允许 `null`/`undefined`，存在时必须是 3 个 number（`codegen.ts:66-68`）。
+每条轨道一套「轨迹线 + 幽灵实体 + 起终点标记」（`:1`）。`setTracks`（轨道增减后整体重建，`:29`）、
+`update`（每帧采样驱动；第一人称只隐藏**被跟随**轨、其余照常显示，`:41-44`）。轨迹线：顶点 +8 HU 抬升
+（`:116, 124`）、超 `MAX_TRAIL_POINTS = 40000` 等间距抽稀（`:10, 110`）、`frustumCulled=false`（`:131`）；
+幽灵 = Capsule + 朝向 Cone（`:140, 147`）；`disposeTree` 递归释放（`:165`）。
 
-探针**只抽三帧**——抽查通过不代表每帧都好，真正的逐帧容错在 build 层（§4.1），这也是自检 [8] 节绕过探针直灌脏数据验证兜底的原因（`test/replay-selftest.ts:237-256`）。
+## 7. UI 面板层
 
-## 4. 构建与后处理（`viewer/src/replay/build.ts`，230 行）
+### 7.1 录像面板（`viewer/src/replay/panel.ts`，318 行）
 
-### 4.1 buildClip（`build.ts:28-148`）
+- **导入**分区（`:63-82`）：「选择录像文件…」（`accept='.replay'`）。
+- **坐标映射**分区（`:90-109`）：两个 checkField——「坐标轴映射：标准 ↔ 直读 `[x,y,z]`」与
+  「朝向轴映射：实测定标（yaw+180、pitch 取反）↔ 角度直读」（title 带定标证据）；切换即 `setAxesMode/setYawMode`
+  → 保存 + **重导替换当前轨道**（`:204-224`）。
+- **调整工具**分区（`:111-158`）：offset X/Y/Z + yaw°（±15° 步进）+ 重置；改动 500ms 防抖后重导
+  （`applyTransformFromInputs`，`:287-301`）；默认折叠，**不再自动展开**。
+- **换文件 = 追加轨道；改映射/变换 = 替换当前轨道**：`lastTrackId` 复用机制（`:36-41, 228-282`）。
+- 持久化：`STORAGE_KEY = 'websurf-viewer.replay-rule.v2'`（`:17`），载入校验 `version===2` + 枚举值，
+  非法即丢弃回默认；旧 `…v1` 键载入时清除（`:162-187`）；写失败静默（隐私模式，`:189-195`）。
 
-逐帧执行 `fn(frame, i, H)` 并写入定型数组（`build.ts:28-148`），关键行为：
+### 7.2 轨迹面板（`viewer/src/replay/trackpanel.ts`，214 行）
 
-- **时间单调兜底**（`build.ts:60-71`）：`t` 非法或回退时沿用 `prevT` 并计入告警——保证二分查找前提（`sampling.ts:24-38`）。
-- **脏帧兜底**（`build.ts:74-99`）：`pos/ang` 出 NaN 时沿用上一帧值并计告警（"个别帧缺字段不炸，但有告警可查"，告警汇总 `build.ts:126-133`）；`vel` 可选——从未出现过有效值则整轨 `vel = null`（`build.ts:100-112`）。
-- **bbox / maxSpeed**：逐帧扩张（`build.ts:114-119`）。
-- **进度节流**：`PROGRESS_MIN_STEP = 4096`（`build.ts:23`），约每 2% 上报一次，29 万帧 ≤50 次回调（自检 [11] 断言 `test/replay-selftest.ts:399-418`）。
-- **大轨道提醒**：`LARGE_CLIP_FRAMES = 100_000`（`build.ts:26`）——超过则面板摘要附"帧数较多，改规则重新导入耗时较长"（`panel.ts:319-326`）。
-- **warning 形态**：英文机器可读 + 面板聚合展示（`panel.ts:327-330` 把 warnings 与摘要合并成一条 note）。
+每轨一行（显隐/配色/名称/时间偏移/跟随/移除）+ 批量操作（全部显示/全部隐藏/偏移归零/清空全部，
+仅在有轨道时出现，`:47-79`）；清空回调 `onCleared`（`:206`）。
 
-### 4.2 transform 后处理（`applyClipTransform`，`build.ts:150-205`，函数 158 起）
+### 7.3 时间轴（`viewer/src/replay/timeline.ts`，342 行）
 
-脚本输出之后统一施加（所以"变换"不用改脚本）：
+三行结构（`:1-10`）：上行 = 进度条（**正式跑段高亮带**按 `Clip.meta.frameCount` 定位 + A-B 区间金框叠加，
+`:42-50, 292-312`）；中行 = 播放/停止/逐帧/时间·帧读数/倍速选择器（8 档 0.1–16，`SPEEDS`，`:17-18`）；
+下行 = 视角与显示开关 + A-B 区间读数 + 速度读数。帧读数语义（`:321-334`）：跟随轨第 idx 帧 →
+`n/总数 帧 · pre | run k/frameCount | post`（run 段定位，多轨/pre 边界下明确）。快捷键 K/,/./I/O（`:189-209`）。
 
-- `offset`：pos 整体平移（`build.ts:160-175` 区域）；
-- `yawDeg`：绕 Y 旋转——`pos` 与 `vel` 的 XZ 分量同步旋转、`yaw` 同步加角（正 = 逆时针），pitch/roll 不动（`build.ts:157-205`）；
-- bbox **完全重算**（不是平移旧 bbox，`build.ts:195-205`）；
-- **刚体变换不污染速度模长**——自检断言（`test/replay-selftest.ts:316-320`）。
+### 7.4 录像信息条（`viewer/src/ui/replaymeta.ts`，107 行）
 
-设计注记：`finite3()`（`build.ts:208-222`）在 transform 阶段对无效坐标**返回 null 而不是兜底**——变换是刚体操作，输入有 NaN 说明上游已脏，此时宁可在告警里暴露而不是静默把 NaN 平移出个"看似合法"的值（`build.ts:208-212` 注释）。
+底部 dock 常驻展示 `Clip.meta`（数据链：`syncTracks` → `setTracks(tracks, followId)` → 逐字段渲染，`:19-29`）：
+成绩 fTime（title 带 zoneOffset 闭环说明）/ 玩家 `[U:1:<id>]`（无玩家名不硬造）/ 地图·Bonus track /
+风格 / tick / 帧段（title 带 stage）/ 日期（本地 YYYY-MM-DD）/ 格式版本（title 带 offsets 记录数）。
+缺失字段不出该项（V2 无成绩不渲染）；静态字段只在轨道增删/跟随切换时重渲染（`:1-7`）。
 
-`safePreview`（`build.ts:225-236`）：错误信息里嵌原始帧 JSON，截 240 字符——报错形态示例见 README 故障排查表（`../README.md:112-115`）。
+### 7.5 装配与对外 API（`viewer/src/app.ts`，461 行）
 
-## 5. 采样层（`viewer/src/replay/sampling.ts`，80 行）
+- 接线（`:102-148`）：`importer/player/visuals`（`:102-104`）→ `ReplayPanel`（回调 `onClip/onClearAll/onTracksChanged/onStatus`，
+  **无 getStartAid**，`:116-145`）→ `ReplayMetaPanel`（`:147`）→ `Timeline`（`:148`）；`syncTracks` 统一同步
+  3D 可视化/时间轴/信息条（`:108-113`）。
+- HUD 跨面提醒 `updateReplayMapStatus`（`:157-188`）：轨迹 bbox 完全在地图包围盒外 → 提醒修「坐标映射」。
+- `window.viewer.replay`（`:307-364`）：内省（trackCount/duration/time/playing/speed/mode/followId/tracks()）+
+  控制（play/pause/seek/setSpeed 0.1–16/setMode/follow）+ **`meta()`**（跟随轨头部元信息，`:334-335`）。
+  getter 每次返回新快照（自动化注意：取值后对象即快照）。
 
-**纯函数模块**（`sampling.ts:1-6` 注释"纯函数：给 player 与 tracks 共用，避免循环依赖"）：
+## 8. 测试
 
-| 函数 | 行为 | 位置 |
-|---|---|---|
-| `lerpAngle(a,b,t)` | yaw/roll 用**最短弧**插值（350°→10° 走 +20° 不走 −340°） | `sampling.ts:11-14` |
-| `lerp(a,b,t)` | pos/pitch/vel 线性 | `sampling.ts:16-18` |
-| `indexInClip(clip, t)` | 二分查找（前提：`clip.t` 单调不减——build 层保证，§4.1），夹取 [0, n−1]（末帧时 a=0，采样退化取末帧值） | `sampling.ts:24-38` |
-| `sampleClip(clip, t)` | 区间插值出 `{pos, ang, vel, index}`；span ≤1e-9 或末帧时 a=0 | `sampling.ts:41-74` |
-| `horizontalSpeed(sample)` | `hypot(vx, vz)`（时间轴速度读数的"水平"项） | `sampling.ts:77-80` |
+### 8.1 Node 自检 `test/replay-selftest.ts`（831 行，153 项，`npm run test:replay`）
 
-## 6. Worker 与回退（`viewer/src/worker/parse-worker.ts` 130 行、`viewer/src/replay/importer.ts` 199 行、`viewer/src/replay/protocol.ts` 31 行）
+8 节：`[1]` 角度工具（`:44`）→ `[2]` **真实文件** `maps/surf_null_4.replay` 原生解析（fixture `:58`、大小 53365 B、
+嗅探命中/排除 JSON、header 14 字段、帧 0 字节级断言、zoneOffset 闭环复算 fTime `:210-214`、朝向自洽
+run 段 cos `:286-307`、Clip/播放器/transform `:310-368`）→ `[3]` 坐标映射切换（synthetic fixture 双档断言 + 头部/时间轴不受映射影响，`:372-472`）→
+`[4]` 播放器采样（`:474`）→ `[4b]` A-B（`:503`）→ `[5]` 多轨迹（`:523`）→ `[6]` transform 后处理（`:594`）→
+`[7]` 脏数据兜底（`:649`）→ `[8]` 异常输入 11 类（截断/版本护栏/V2 帧数语义/远古格式/负 pre/tickrate≤0/无 run 帧/v11 mtime 兜底…，`:668-828`）。
+fixture 构造器 `buildFinalFixture/buildV2Fixture`（`:99-166`）按版本门槛拼字节。
 
-### 6.1 消息协议（`protocol.ts:19-31`）
+### 8.2 真浏览器冒烟 `test/smoke-cdp.mjs`（690 行，CDP 驱动 headless）
 
-- 请求 `ParseRequest { id, type:'import', file: File|null, rule, name }`——`file=null` = 复用已解析缓存（改规则重导）；
-- 响应 `progress { phase:'parse'|'map', done, total }` / `done { payload, warnings, resolvedPath }` / `error { message }`；
-- `ClipPayload`（`protocol.ts:6-17`）：`t` Float64Array + `pos/ang/vel` Float32Array——**Transferable 零拷贝**回传（post 第二参 transfer 列表）。
+`[0]` dist 结构静态断言（单文件/内嵌/无 .json 残留，`:127-…`）→ `[1]/[1b]` 页面加载与 localStorage 卫生
+（`:240, 257`）→ `[2]` 面板分区 → `[3]` 导入真实 .replay → `[3b]` 头部元信息条断言（成绩/玩家/地图·Bonus/tick/帧段/v12 + meta() API，`:327`）→
+`[3c]` 播放基准（firstPos = 解析帧 0、无锚定平移，`:353`）→ `[4]` 播放 → `[5]` A-B → `[6]` 场景对象 →
+`[7]` 调整工具（替换而非追加，`:413`）→ `[7b]` 同文件再选 = 追加第二轨（`:453`）→ `[8]` 时间偏移 →
+`[9]` 拖入合成 V2 .replay（DataTransfer drop 链路，`:489`）→ `[9b]` 坐标映射切换实测（`[20,30,10]↔[10,20,30]`，`:520`）→
+`[10]` 跟随切换与信息条同步（`:559`）→ `[11]` 播放控制 API（`:606`）→ `[12]` ReferenceGrid 已移除 + 出生点导航在位（`:651-664`）→
+`[13]` 全程 console 零 error（`:671`）。
 
-### 6.2 Worker 主流程（`parse-worker.ts:67-114`）
-
-```
-ensureRoot（parse-worker.ts:28-47）
-  file 非空 → 缓存 JSON.parse（大文件耗时大头在此，改规则不再解析）；file=null → 复用
-locateFrames（parse-worker.ts:49-60, 74-75）
-  rule.framePath 或 pickFrameArray 自动探测（§2.2）
-compileScript + probeScript（parse-worker.ts:77-83）
-buildClip（parse-worker.ts:86-94）——与主线程共用同一函数（§4）
-post('done', payload, [t.buffer, pos.buffer, ang.buffer, vel?.buffer])（parse-worker.ts:96-107）
-```
-
-- Worker 顶部 import 与主线程回退**同一组模块**（`parse-worker.ts:8-12` vs `importer.ts:3-5`）——两条路径行为一致，且让管线核心可以在 Node 里裸测（`test/replay-selftest.ts:1-6`）。
-
-### 6.3 导入器（`importer.ts`）
-
-- **建 Worker**（`importer.ts:37-77`）：常规构建 `new Worker(new URL('./parse-worker.js', import.meta.url), { type:'module' })`（`importer.ts:49`）；单文件构建从 `globalThis.__VBSP_WORKER_JS__` 建 Blob URL（file:// 下 module worker 被拦，`importer.ts:41-47`）。
-- **失败降级**（`importer.ts:62-70, 104-107`）：`onerror` 一次 → `workerBroken = true` → 拒绝所有在途请求（明确报错不挂死）→ 后续导入走 `importOnMain`（`importer.ts:136-163`：同一链路 + 自己的 `mainFile/mainRoot` 缓存）。
-- **在途请求表**（`importer.ts:79-108`）：pending map 按 id 派发回；progress/done/error 三型分流。
-- `payloadToClip`（`importer.ts:184-199`）：payload → Clip，`id = clip-<Date.now().toString(36)>`。
-
-## 7. 可视化层（`viewer/src/replay/visuals.ts`，174 行）
-
-每条轨道三件套（`visuals.ts:12-18` 注释）：
-
-- **轨迹线** `THREE.Line`：抽稀采样，上限 `MAX_TRAIL_POINTS = 40000`（`visuals.ts:10, 107-110`——stride = ceil(total/40000)，注释"29 万帧 → stride 8"），整体抬升 +8 HU 防穿地（`visuals.ts` 内 TRAIL 常量），`frustumCulled = false`（线段端点稀疏时包围球不可靠）。
-- **幽灵**：`CapsuleGeometry(16, 40)` ≈ 玩家碰撞体 32×72（半径 16 + 总高 72），叠 `ConeGeometry(9, 26)` 朝向锥标 nose（yaw 方向，`visuals.ts:136-158`）。
-- **起终点标记**：首/末帧球体（`visuals.ts` `buildMark`）。
-
-`update(samples, mode, followId)`（`visuals.ts:46-67`）：**第一人称只隐藏被跟随那条的幽灵**（它贴在相机上会挡满屏），其余轨道照常——这正是多轨对比的意义（注释 `visuals.ts:41-45`）。`setTracks` 全量重建（增删轨时调用），逐帧更新只摆位不重建（`visuals.ts:29-40`）；dispose 沿 `disposeTree` 递归清理。
-
-## 8. 面板层（panel.ts 486 行 / trackpanel.ts 214 行 / timeline.ts 251 行）
-
-### 8.1 ReplayPanel（`viewer/src/replay/panel.ts`）
-
-**分区**（构造 `panel.ts:79-200`）：导入（按钮 + 规则脚本折叠）→ 轨迹列表（TrackPanel 嵌入）→ 变换调整（note 常显 + 工具折叠）。
-
-- **导入入口**：`loadFile`（换文件 = 追加新轨，`panel.ts:239-250`：`lastTrackId = null` + freshFile 解析缓存）、`ingestJson`（.json 双语义——≤4MB 先试规则 JSON 判定，超限直接按录像，`panel.ts:257-266`）、`loadRuleFile`（.js / 规则 JSON，`panel.ts:413-423`）、`loadSample`（示例录像，`panel.ts:288-293`）、`loadUrlContent`（深链直喂文本，`panel.ts:272-286`）。
-- **busy 闸**（`panel.ts:57, 240-243, 300-304`）：导入期间到达的重导请求不排队，明确告知"本次改动未生效——请稍候重试"。
-- **runImport**（`panel.ts:295-339`）：`freshFile` 时把文件交给 importer 解析缓存，否则 `file=null` 复用；进度经 `onStatus` 进 HUD 录像域；结果经 `onClip` 回 app（替换/追加判定见 [../sequences.md](../sequences.md) §3）；摘要 + warnings 合并一条 note（`panel.ts:318-331`）。
-- **规则脚本折叠**（`panel.ts:108-141`）：折叠标题常显当前来源（`refreshRuleView`，`panel.ts:393-398`："内置默认" / 文件名 / "localStorage 规则" / 深链名）；「载入规则脚本…」（`.js,.json` 同一选择器）+「复制脚本」（`panel.ts:122-133, 400-407`）。
-- **规则持久化**（`panel.ts:20, 209-229`）：`STORAGE_KEY = 'websurf-viewer.replay-rule.v1'`，读入要求 `version===1 && scriptSrc` 字符串，写失败静默（隐私模式）；`transform` 随规则一起持久化。
-- **变换调整**（`panel.ts:150-199, 341-385`）：平移 XYZ + yaw 输入（step 10/15），改动 → `saveRule` + **500ms 防抖重导**（`panel.ts:344-358`）；`yaw ±90°` 一键修正侧转（`bumpYaw`，`panel.ts:360-365`）；「重置变换」（`panel.ts:367-374`）；输入框与规则状态由 `syncTransformInputs` 单向同步（无 transform 的规则也要归零输入框，防旧值残留污染新规则，`panel.ts:377-385`）。
-- **起点对齐**（`panel.ts:443-460`）：note 常显"录像起点距最近出生点 X HU"；≤128 HU 视为贴合，首次失配自动展开调整工具（持续失配不反复顶开，`lastAnchorWarn`）；1024 HU 量级在帮助浮层标为"严重失配"（阈值口径统一在 `web/index.html:72-74`）。
-- **一键锚定**（`panel.ts:462-485`）：把 `getStartAid`（app 计算：首帧 → 最近出生点的欧氏距离与平移 Δ，`app.ts:196-222`）的 Δ **叠加**进 `rule.transform.offset` 再重导——"叠加"不是覆盖，多次锚定不丢之前的手工平移。
-
-### 8.2 TrackPanel（`viewer/src/replay/trackpanel.ts`）
-
-每轨一张两行卡：行 1 色块 + 名称（可改名回车生效）+ 帧数/时长；行 2 显隐 ◉/◌ + 时间偏移（秒，输入即生效）+ 跟随 ◎ + 移除 ×（`trackpanel.ts:149-213` 区域）。批量操作（全部显示/全部隐藏/偏移归零/清空全部）**只在有轨道时渲染**（`trackpanel.ts:48-79`）；`onCleared` 回调把"清空全部"升级为 app 级复位（HUD 提醒行清空 + 起点对齐 hint 复原，`trackpanel.ts:15-16` + `app.ts:132-138`）。
-
-### 8.3 Timeline（`viewer/src/replay/timeline.ts`）
-
-- 行 1：播放/停止、逐帧 ◀/▶、时间+帧读数、进度条（`seekRatio` 0-1000 拖动）、倍速选择（`SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4]`，`timeline.ts:13`）。
-- 行 2：视角（第一/第三人称）、循环、轨迹线/幽灵开关、A-B 起点/终点（"整段"清除）、速度读数（被跟随轨的总/水平/垂直 HU/s；无 vel 显示"速度 —"，`timeline.ts` 读数区）。
-- 键盘：`K` 播放/暂停、`,`/`.` 逐帧、`I`/`O` A-B——`isTypingTarget` 守卫输入框（`timeline.ts:163-185`，守卫函数 246-251）。
-- 刷新策略：事件驱动 `refresh()` + app 帧循环 80ms 节流（`app.ts:478-482`）。
-
-## 9. 示例与测试
-
-### 9.1 示例录像（`viewer/src/replay/sample.ts`，59 行）
-
-`buildSampleReplayText()` 生成 3072 帧合成螺旋（半径 900 收缩、y 900 递降、tick 128、viewer 原生约定），与真实文件走**同一条导入管线**（`panel.ts:288-293` → `loadFile`）——冒烟测试与首次体验共用它（`test/smoke-cdp.mjs:314-339`）。
-
-### 9.2 Node 自检（`viewer/test/replay-selftest.ts`，421 行；`npm run test:replay`）
-
-11 节覆盖（无 DOM、纯管线核心）：
-
-| 节 | 断言内容 | 位置 |
-|---|---|---|
-| [1] | getPath 路径取值 / wrapDeg | `replay-selftest.ts:43-51` |
-| [2] | 帧数组自动探测（嵌套/多候选） | `replay-selftest.ts:52-57` |
-| [3] | DEFAULT_RULE（时长 = 511/128） | `replay-selftest.ts:58-89` |
-| [4]/[4b] | 播放器采样 / A-B 区间 | `replay-selftest.ts:90-137` |
-| [5] | 自定义脚本形态（缩放/眼位/弧度/毫秒/速度） | `replay-selftest.ts:138-162` |
-| [6] | **Source→viewer 定标断言**（(x,y,z)→(y,z,x)、viewerYaw=srcYaw+180、pitch 取反、视角与运动方向 cos>0.999） | `replay-selftest.ts:164-196` |
-| [7]/[7b] | 错误处理（probe 抓坏路径/语法错抛）/ 规则文件双形态 | `replay-selftest.ts:198-235` |
-| [8] | 脏数据兜底（NaN 沿用 + 告警计数） | `replay-selftest.ts:237-256` |
-| [9] | transform 后处理（恒等/平移/旋转/组合/速度模长不变） | `replay-selftest.ts:258-320` |
-| [10] | 多轨迹对比（Q2） | `replay-selftest.ts:322-397` |
-| [11] | 大文件进度节奏（29 万帧 40~120 次回调、单调） | `replay-selftest.ts:399-418` |
-
-### 9.3 浏览器冒烟（`viewer/test/smoke-cdp.mjs`，613 行；`npm run test:smoke`，需 `npm run dev`）
-
-CDP 驱动 Edge headless（SwiftShader 软渲染）。断言范围：dist 结构静态断言（classic script / 内嵌 base64 wasm+worker / dist 无独立 wasm 与 worker 文件 / dist-multi 不存在，`smoke-cdp.mjs:121-143`）→ 页面加载无兜底卡 → 示例导入 → 播放/A-B → 变换（坐标级断言：仍是 1 条、时长不变，`smoke-cdp.mjs:384-422`）→ 拖入 .js 规则（替换不追加，`smoke-cdp.mjs:424-451`）→ 双轨对比与跟随切换（`smoke-cdp.mjs:464-509`）→ 全程 console 零错误。
-
-## 10. 回放侧坐标与 yaw 约定（约定即代码）
+## 9. 回放侧坐标与 yaw 约定（约定即代码）
 
 - 标准帧 `pos` = 脚底（Y-up）；相机眼位 = pos + 64.09（`fly.ts:174-177`）。
-- `ang[0]` yaw：0 = 面朝 −Z，逆时针为正（`pose.ts:5-9`；第一人称相机写法 `fly.ts:174-177` `rotation.set(pitch, yaw, roll, 'YXZ')`）。
-- Source 系数据的换算定标以**可执行断言**固化：`test/replay-selftest.ts:164-196`（`[x,y,z]→[y,z,x]` 与 GLB 导出 `map_coords`、出生点 `rotate_yup` 同变换——`src/wasm-core/bsp_to_gltf_core/convert.rs:813-816`、`viewer/crates/wasm/src/lib.rs:339-342`；`viewerYaw = srcYaw + 180`、pitch 取反）。Shavit 的 `vel` 是按键打包**不要映射**（`../README.md:205`；selftest 的 Source 示例脚本输出 `vel: null`，`replay-selftest.ts:178`）。
-- 写第三方映射时按 [replay-rule-ai.md](../replay-rule-ai.md) 的契约与模板产出。
+- `ang[0]` yaw：0 = 面朝 −Z，逆时针为正（`pose.ts:5-9`；第一人称相机 `fly.ts:174-177` `rotation.set(pitch, yaw, roll, 'YXZ')`）。
+- `.replay` 帧的换算定标以**可执行断言**固化（§2.7 + [shavit-replay-format.md §8.2](shavit-replay-format.md)）：
+  `pos: [x,y,z]→[y,z,x]`、`yaw = wrap(src+180)`、`pitch = −src`；`vel` = 位置差分（packed vel 不映射）。
+- BSP 出生点实体走另一套（`pose.ts:12-14 bspYawToCsYaw`，270−yaw）——**仅出生点路径**，与 .replay 无关；
+  实测疑似镜像（F6 已知问题，未在本次范围修复）。

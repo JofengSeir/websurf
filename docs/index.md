@@ -13,10 +13,10 @@
 | 改地图解析 / GLB 导出 / 材质字节码 | [wasm-core.md](./wasm-core.md)（BSP→GLB 三条消费流）+ [materials.md](./materials.md)（材质体系全景与消费链） |
 | 玩 / 改游戏体验 | [game/docs/overview.md](../game/docs/overview.md)（存点/面板/键位/画质） |
 | 调物理参数 / 调渲染 | [debug/docs/overview.md](../debug/docs/overview.md)（物理面板/碰撞可视化/准星检查） |
-| 看图 / 放录像 / 写回放规则脚本 | [viewer/docs/overview.md](../viewer/docs/overview.md) + [replay-rule-ai.md](../viewer/docs/replay-rule-ai.md) |
+| 看图 / 放录像 | [viewer/docs/overview.md](../viewer/docs/overview.md) + [shavit-replay-format.md](../viewer/docs/implementation/shavit-replay-format.md)（`.replay` 格式规格） |
 | 验证物理时序 / 跑对照 | [test/dual-mode-harness/docs/overview.md](../test/dual-mode-harness/docs/overview.md) |
 
-## 2. 文档树（当前全量，27 篇）
+## 2. 文档树（当前全量，28 篇）
 
 ### 根 docs/（5 篇：总架构 + 共享层四篇）
 
@@ -49,15 +49,16 @@
 | [implementation/gameplay.md](../game/docs/implementation/gameplay.md) | I：存点/出生点/渲染体验/死亡阈值/PVS 现状 |
 | [differences.md](../game/docs/differences.md) | D：vs debug（同构中的最小化）/viewer/test、共享层取舍 |
 
-### viewer/docs/（6 篇：游览与回放工程）
+### viewer/docs/（7 篇：游览与回放工程）
 
 | 文档 | 维度 |
 |---|---|
 | [overview.md](../viewer/docs/overview.md) | A：无物理"看"工程、构建链（产物不入库）、分层架构 |
 | [sequences.md](../viewer/docs/sequences.md) | T：启动→BSP 加载→GLB 挂载→录像导入→帧循环→深链 |
 | [implementation/scene-core.md](../viewer/docs/implementation/scene-core.md) | I：场景/相机/常量/DOM/HUD/面板基建 |
-| [implementation/replay-system.md](../viewer/docs/implementation/replay-system.md) | I：录像回放全系统（codegen/build/sampling/面板/测试） |
-| [replay-rule-ai.md](../viewer/docs/replay-rule-ai.md) | I：AI 转化脚本规范（写法契约 + 提示词模板，代码 tooltip 入口） |
+| [implementation/replay-system.md](../viewer/docs/implementation/replay-system.md) | I：录像回放全系统（.replay 原生解析/shavit-replay/build/sampling/面板/测试） |
+| [implementation/shavit-replay-format.md](../viewer/docs/implementation/shavit-replay-format.md) | I：Shavit `.replay` 二进制格式规格（replay-file.inc 对齐 + 真实文件逐字节验证 + 坐标定标） |
+| [replay-rule-ai.md](../viewer/docs/replay-rule-ai.md) | 历史注记：`.js` 规则脚本通道已移除（原稿存 archive/，不再作为事实来源） |
 | [differences.md](../viewer/docs/differences.md) | D：无物理/单线程/不引 ts-shared 的边界与反向印证 |
 
 ### test/dual-mode-harness/docs/（5 篇：验证工程）
@@ -76,7 +77,7 @@
 
 - **新人通读**：architecture.md §1-§4 → 想深入哪个工程就进其 overview + sequences → 细分实现按需 → differences 收尾。
 - **改共享层**：phys.md / wasm-core.md / ts-shared.md → 对应工程 differences.md 的"共享层取舍"节 → 改后核对 architecture.md §5 不变量清单。
-- **写回放脚本**：viewer/docs/replay-rule-ai.md（契约与模板）→ viewer/docs/implementation/replay-system.md（实现细节）。
+- **放录像 / 调映射**：viewer/docs/implementation/shavit-replay-format.md（格式规格）→ viewer/docs/implementation/replay-system.md（实现细节）。
 - **排查时序问题**：debug/docs/sequences.md（权威帧双线）↔ test/dual-mode-harness/docs/sequences.md（对照系）。
 
 ## 4. 归档说明

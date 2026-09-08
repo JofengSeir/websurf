@@ -214,14 +214,6 @@ code { font-family: var(--mono); color: var(--accent); }
 .track-btn.active { color: var(--gold); border-color: rgba(201, 160, 92, 0.55); background: rgba(201, 160, 92, 0.14); }
 .track-btn.danger:hover { color: var(--danger); border-color: rgba(255, 99, 71, 0.5); background: rgba(255, 99, 71, 0.12); }
 
-/* 规则脚本只读展示 */
-.rule-src {
-  margin: 0; max-height: 180px; overflow: auto;
-  font-family: var(--mono); font-size: 11px; line-height: 1.5; color: #d8e2f0;
-  background: #0b0d11; border: 1px solid var(--border); border-radius: var(--r-sm);
-  padding: 8px 10px; white-space: pre; tab-size: 2;
-}
-
 /* 出生点列表（单行 pill） */
 .spawn-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
 .spawn-item {
@@ -239,24 +231,64 @@ code { font-family: var(--mono); color: var(--accent); }
 }
 .spawn-item button:hover { background: rgba(255, 255, 255, 0.16); }
 
-/* ── 时间轴（底）────────────────────────────────────────────────── */
-#timeline {
+/* ── 底部 dock：录像信息条 + 时间轴控制条（三区布局的「元信息 + 控制」区）── */
+#dock {
   position: absolute; left: 14px; right: calc(var(--sidebar-w) + 26px); bottom: 14px; z-index: 6;
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 6px; pointer-events: none;
+}
+#dock.full { right: 14px; }
+#dock > * { pointer-events: auto; }
+
+/* 录像信息条：.replay 头部元信息（消费 Clip.meta，静态字段，随跟随轨道切换） */
+.replay-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 18px;
+  padding: 7px 12px; border-radius: var(--r-md);
+  background: var(--panel); border: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+}
+.meta-name {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap;
+}
+.meta-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.mi { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.mk { font-size: 11px; color: var(--muted); }
+.mv { font-family: var(--mono); font-size: 11.5px; color: var(--text); }
+.mi.headline .mv { color: var(--gold); font-size: 14px; font-weight: 600; }
+
+/* 时间轴控制条（timeline.ts 构建：进度 / 主控制 / 显示开关三行） */
+#timeline {
+  display: flex; flex-direction: column; gap: 6px;
   padding: 8px 12px; border-radius: var(--r-md);
   background: var(--panel); border: 1px solid var(--border);
   backdrop-filter: blur(10px);
 }
-#timeline.full { right: 14px; }
-.tl-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.tl-time { font-family: var(--mono); font-size: 12px; color: var(--gold); }
-.tl-frame { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.tl-slider-row { display: flex; align-items: center; gap: 10px; }
+.tl-sliderwrap {
+  position: relative; flex: 1; min-width: 160px; height: 18px;
+  display: flex; align-items: center;
+}
+.tl-slider {
+  flex: 1; width: 100%; position: relative; z-index: 2; background: transparent;
+  accent-color: #8ab4f8; cursor: pointer;
+}
+.tl-zone { position: absolute; top: 1px; bottom: 1px; border-radius: 4px; pointer-events: none; }
+.tl-zone-run { background: rgba(138, 180, 248, 0.1); }
+.tl-zone-ab {
+  background: rgba(201, 160, 92, 0.14);
+  border-left: 1px solid rgba(201, 160, 92, 0.6);
+  border-right: 1px solid rgba(201, 160, 92, 0.6);
+}
+.tl-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.btn.playbtn { min-width: 70px; font-weight: 600; padding: 5px 14px; }
+.tl-time { font-family: var(--mono); font-size: 12px; color: var(--gold); white-space: nowrap; }
+.tl-frame { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+.tl-speed-select { flex: 0 0 auto; }
+.tl-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tl-speed {
   font-size: 11px; color: var(--muted); font-family: var(--mono);
   margin-left: auto; white-space: nowrap;
 }
-.tl-speed-select { flex: 0 0 auto; }
-.tl-slider { flex: 1; min-width: 140px; accent-color: #8ab4f8; cursor: pointer; }
 select.tl-select {
   font-family: inherit; font-size: 11.5px; color: var(--text);
   background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border);

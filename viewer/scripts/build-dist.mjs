@@ -5,7 +5,7 @@
  *   index.html — classic `<script>`（file:// 下 module script 被浏览器 CORS 拦截）
  *   app.js     — IIFE：内嵌 WASM(base64) + 录像解析 Worker 代码（Blob URL 启动）
  *   web/styles.css
- *   assets/maps/*.replay.json/.rule.json（参考资源；file:// 无法 fetch，载入走面板文件选择）
+ *   assets/maps/surf_null_4.replay（原生 Shavit 示例录像；HTTP 深链演示用，file:// 走面板文件选择）
  *   serve.py   — 静态服务器（python serve.py [port]）
  *   play.cmd / play.sh — 双击启动：起服务器 + 延时 1s 自动打开浏览器（python 缺失 → 中文提示 + npx serve 备选）
  *   README.md / .nojekyll
@@ -62,10 +62,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         sys.stderr.write(f"{self.address_string()} - {fmt % args}\\n")
 
 
-DEMO = (
-    "/index.html?replay=assets/maps/surf_null_4.replay.json"
-    "&rule=assets/maps/surf_null_4.rule.json"
-)
+DEMO = "/index.html?replay=assets/maps/surf_null_4.replay"
 
 
 class Server(socketserver.TCPServer):
@@ -132,7 +129,7 @@ if errorlevel 1 (
 echo ============================================================
 echo  WebSurf-viewer local preview ^(close this window to stop^)
 echo   page    http://localhost:%PORT%/index.html
-echo   demo    http://localhost:%PORT%/index.html?replay=assets/maps/surf_null_4.replay.json^&rule=assets/maps/surf_null_4.rule.json
+echo   demo    http://localhost:%PORT%/index.html?replay=assets/maps/surf_null_4.replay
 echo ============================================================
 rem open browser after 1s (async, does not block server startup)
 start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
@@ -176,7 +173,7 @@ fi
 echo "============================================================"
 echo " WebSurf-viewer 本地预览（关闭本窗口即停止服务；Ctrl+C 亦可）"
 echo "  普通页  http://localhost:$PORT/index.html"
-echo "  示例    http://localhost:$PORT/index.html?replay=assets/maps/surf_null_4.replay.json&rule=assets/maps/surf_null_4.rule.json"
+echo "  示例    http://localhost:$PORT/index.html?replay=assets/maps/surf_null_4.replay"
 echo "============================================================"
 open_browser
 exec "$PY" serve.py "$PORT"
@@ -234,9 +231,9 @@ const distHtml = html.replace(
 await writeFile(join(dist, 'index.html'), distHtml);
 await copyFile(join(viewerRoot, 'web/styles.css'), join(dist, 'styles.css'));
 
-// 参考资源（file:// 不能 fetch，载入走面板「选择 JSON 录像」）。
-// 入库白名单：maps/surf_null_4.*.json（见根 .gitignore）；缺失时警告跳过，不阻断构建。
-for (const name of ['surf_null_4.replay.json', 'surf_null_4.rule.json']) {
+// 参考资源（HTTP 深链演示用；file:// 不能 fetch，载入走面板「选择录像文件…」）。
+// 入库白名单：maps/surf_null_4.replay（原生 Shavit 示例录像）；缺失时警告跳过，不阻断构建。
+for (const name of ['surf_null_4.replay']) {
   const src = join(repoRoot, 'maps', name);
   if (existsSync(src)) {
     await copyFile(src, join(dist, 'assets/maps', name));

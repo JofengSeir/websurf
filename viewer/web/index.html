@@ -24,13 +24,13 @@
     <div class="card">
       <div class="gtitle">加载 BSP 地图，开始预览</div>
       <div class="gstep">
-        ① 点击下方按钮选择 <code>.bsp</code> 地图文件，<br>或直接把 <code>.bsp</code> / <code>.json</code> / <code>.js</code> 拖进本窗口
+        ① 点击下方按钮选择 <code>.bsp</code> 地图文件，<br>或直接把 <code>.bsp</code> / <code>.replay</code> 拖进本窗口
       </div>
       <div class="gstep">
         ② 加载后点击画面锁定鼠标即可自由飞行
       </div>
       <div class="gstep">
-        ③ 右侧面板：地图信息与出生点跳转、参考显示、<br>录像回放（换图入口在地图页顶部）；右上角「?」打开帮助
+        ③ 右侧面板：地图信息与出生点跳转、<br>录像回放（换图入口在地图页顶部）；右上角「?」打开帮助
       </div>
       <button id="guideBtn" type="button">选择 BSP 地图…</button>
       <div id="guideError"></div>
@@ -38,7 +38,7 @@
   </div>
 
   <!-- 拖拽高亮反馈 -->
-  <div id="dropzone">松开鼠标：.bsp 加载地图、.json 导入录像、.js 换规则脚本</div>
+  <div id="dropzone">松开鼠标：.bsp 加载地图、.replay 导入录像</div>
 
   <div id="hud">
     <div class="hud-line" id="pose">位姿 —</div>
@@ -47,7 +47,7 @@
   </div>
 
   <div id="topbar">
-    <button class="iconbtn" id="helpBtn" type="button" title="操作帮助：键位 / 载入 / 对齐阈值">?</button>
+    <button class="iconbtn" id="helpBtn" type="button" title="操作帮助：键位 / 载入 / 播放基准">?</button>
     <button class="iconbtn" id="sidebarToggle" type="button" title="显示 / 隐藏右侧面板">面板</button>
     <input id="bspFile" type="file" accept=".bsp" />
   </div>
@@ -62,15 +62,11 @@
     </div>
     <div class="help-sec">
       <div class="help-h">载入地图与录像</div>
-      <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。地图页底部可开关地面网格与世界坐标轴参考。录像：录像页「选择 JSON 录像…」、拖入 <code>.json</code>（自动切到录像页）、「载入示例录像」；URL 深链 <code>?bsp=&amp;replay=&amp;rule=</code> 可直接打开配套资源。</p>
+      <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。录像：录像页「选择录像文件…」、拖入 <code>.replay</code>（自动切到录像页）；URL 深链 <code>?bsp=&amp;replay=</code> 可直接打开配套资源。导入后底部显示「录像信息条」——<code>.replay</code> 头部元信息：成绩 / 玩家 / 地图 / 轨道 / tick / 帧段 / 日期。</p>
     </div>
     <div class="help-sec">
-      <div class="help-h">规则脚本与播放控制</div>
-      <p>第三方格式录像：把 <code>.js</code> 转化脚本拖进窗口或在录像页「载入规则脚本」（写法与提示词模板见 docs/replay-rule-ai.md）；深链 <code>?rule=</code> 同样接受 .js。录像↔地图没对齐时用「变换调整」（平移 / 旋转 yaw / 一键锚定到出生点）。外部脚本可经 <code>window.viewer.replay</code> 控制播放：play / pause / seek(秒) / setSpeed / setMode / follow / tracks()。</p>
-    </div>
-    <div class="help-sec">
-      <div class="help-h">起点对齐阈值</div>
-      <p>录像起点距最近出生点 ≤128 HU 视为已贴合；≥1024 HU 应处理（坐标系映射很可能不对）。修正用录像页「变换调整」分区（一键锚定等）。</p>
+      <div class="help-h">播放基准与坐标映射</div>
+      <p>录像以 <code>.replay</code> 帧自身坐标播放（默认直读，无起点锚定）。轨迹与地图对不上时用录像页「坐标映射」切换对照（轴序 / 朝向轴），仍差一点用「调整工具」显式平移 / 旋转 yaw。时间轴以起跑帧为 0（prerun 帧不在播放区间）；进度条淡蓝带 = 正式跑段、金色框 = A-B 区间。外部脚本可经 <code>window.viewer.replay</code> 控制播放：play / pause / seek(秒) / setSpeed / setMode / follow / tracks() / meta()。</p>
     </div>
   </div>
 
@@ -83,8 +79,12 @@
     <div class="tabpane" id="pane-replay"></div>
   </aside>
 
-  <!-- 录像时间轴（有录像时显示；内容由 timeline.ts 构建）-->
-  <div id="timeline" class="hidden"></div>
+  <!-- 底部 dock（有录像时显示）：录像信息条（.replay 头部元信息）+ 时间轴控制条 -->
+  <div id="dock">
+    <div id="replayMeta" class="hidden replay-meta"></div>
+    <!-- 时间轴内容由 timeline.ts 构建 -->
+    <div id="timeline" class="hidden"></div>
+  </div>
 </div>
 
 <!-- 资源加载兜底：app.js / wasm 缺失（未构建就打开页面）时给出可见指引 -->

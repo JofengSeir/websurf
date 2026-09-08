@@ -1,8 +1,9 @@
 /**
  * WebSurf-viewer — BSP 地图预览 + 录像回放。
  *
- * 主线程装配：场景 / 飞行相机 / 地图信息 / 出生点导航 / 参考显示 / 录像导入与回放。
+ * 主线程装配：场景 / 飞行相机 / 地图信息 / 出生点导航 / 录像导入与回放。
  * 纯视觉定位：不引入物理与碰撞，录像只做播放与观察。
+ * 播放基准 = .replay 帧自身坐标（t4）：无强制起点锚定；平移/映射切换仅显式叠加。
  */
 
 import { DEG2RAD } from './core/constants.js';
@@ -16,15 +17,14 @@ import { qs } from './core/dom.js';
 import { Hud } from './ui/hud.js';
 import { MapPanel } from './ui/mapinfo.js';
 import type { WorldBox } from './ui/mapinfo.js';
-import { ReferenceGrid } from './ui/reference.js';
+import { ReplayMetaPanel } from './ui/replaymeta.js';
 import { ReplayImporter } from './replay/importer.js';
 import { ReplayPanel } from './replay/panel.js';
-import type { StartAid } from './replay/panel.js';
 import { ReplayPlayer } from './replay/player.js';
 import { ReplayVisuals } from './replay/visuals.js';
 import { Timeline } from './replay/timeline.js';
-import { ruleFromText } from './replay/rule-file.js';
-import type { RuleConfig, Track } from './replay/types.js';
+import { looksLikeShavitReplay, SHAVIT_SNIFF_BYTES } from './replay/shavit-replay.js';
+import type { Track } from './replay/types.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement | null;
 if (!canvas) throw new Error('canvas#game 未找到');
@@ -47,15 +47,16 @@ const fly = new FlyCam();
 fly.attach(gameCanvas);
 fly.onLockError = () => hud.flashStatus('鼠标锁定失败，请再点击一次画布重试');
 
-// ── 侧栏与标签页 ────────────────────────────────────────────────────
+// ── 侧栏与标签页 / 底部 dock（录像信息条 + 时间轴）─────────────────
 const sidebarEl = qs('sidebar');
+const dockEl = qs('dock');
 const timelineEl = qs('timeline');
 const sidebarToggle = qs<HTMLButtonElement>('sidebarToggle');
 
 sidebarToggle?.addEventListener('click', () => {
   const hidden = sidebarEl?.classList.toggle('hidden') ?? false;
   sidebarToggle.classList.toggle('active', !hidden);
-  timelineEl?.classList.toggle('full', hidden);
+  dockEl?.classList.toggle('full', hidden);
 });
 
 for (const tab of Array.from(document.querySelectorAll<HTMLButtonElement>('.tab'))) {
@@ -80,10 +81,10 @@ function activateTab(name: string): void {
   document.querySelector<HTMLButtonElement>(`.tab[data-tab="${name}"]`)?.click();
 }
 
-// ── 地图信息 / 出生点 / 参考显示 ────────────────────────────────────
+// ── 地图信息 / 出生点 ────────────────────────────────────────────────
 const mapPane = qs('pane-map');
 
-/** 当前地图包围盒（参考网格 / 录像贴合检查用）。 */
+/** 当前地图包围盒（录像贴合检查用）。 */
 let currentBox: WorldBox | null = null;
 
 function applyPose(pose: Pose): void {
@@ -97,25 +98,25 @@ const mapPanel =
     applyPose(pose);
   });
 
-const reference = mapPane && new ReferenceGrid(mapPane, scene);
-
 // ── 录像 ────────────────────────────────────────────────────────────
 const importer = new ReplayImporter();
 const player = new ReplayPlayer();
 const visuals = new ReplayVisuals(scene);
 const replayPane = qs('pane-replay');
 
-/** 轨道增删 / 属性变化后同步三处：3D 可视化、时间轴、轨迹列表。 */
+/** 轨道增删 / 属性变化后同步：3D 可视化、时间轴、录像信息条（轨迹列表由 refreshTracks 负责）。 */
 function syncTracks(): void {
-  visuals.setTracks(player.tracks.tracks);
-  timeline.setTracks(player.tracks.tracks);
+  const tracks = player.tracks.tracks;
+  visuals.setTracks(tracks);
+  timeline.setTracks(tracks);
+  metaPanel.setTracks(tracks, player.tracks.followId);
 }
 
 let replayPanel: ReplayPanel | null = null;
 if (replayPane) {
   replayPanel = new ReplayPanel(replayPane, importer, player, {
     onClip: (clip, _warnings, replaceId) => {
-      // 改规则后的重新导入 → 替换那条轨道（保留配色/显隐/偏移）；换文件才追加
+      // 改映射/变换后的重新导入 → 替换那条轨道（保留配色/显隐/偏移）；换文件才追加
       let track: Track | null = null;
       if (replaceId && player.tracks.replaceClip(replaceId, clip)) {
         track = player.tracks.tracks.find((t) => t.id === replaceId) ?? null;
@@ -126,20 +127,16 @@ if (replayPane) {
       syncTracks();
       replayPanel?.refreshTracks();
       updateReplayMapStatus();
-      replayPanel?.refreshStartAnchor();
       return track.id;
     },
     onClearAll: () => {
       player.clearTracks();
       syncTracks();
       replayPanel?.refreshTracks();
-      replayPanel?.refreshStartAnchor();
       hud.setReplayStatus('');
     },
-    // 显隐 / 偏移 / 跟随 / 重命名：TrackPanel 自己重绘列表，这里只需重建 3D 与时间轴
+    // 轨道属性变化（显隐 / 偏移 / 跟随 / 重命名）：TrackPanel 自己重绘列表，这里重建 3D、时间轴与信息条
     onTracksChanged: () => syncTracks(),
-    /** 起点对齐：录像首帧 vs 最近出生点（viewer 世界坐标）。 */
-    getStartAid: () => computeStartAid(),
     onStatus: (text) => {
       // 录像域临时消息（导入进度 / 工具结果）走 HUD 提醒行；'' 立即恢复持久内容
       hud.flashReplayStatus(text, 8000);
@@ -147,14 +144,15 @@ if (replayPane) {
   });
 }
 
+const metaPanel = new ReplayMetaPanel(qs('replayMeta') ?? document.createElement('div'));
 const timeline = new Timeline(timelineEl ?? document.createElement('div'), player, visuals);
 
 /**
  * 地图贴合检查，合并成一条 HUD 提醒（仅 #replayStatus，跨面提醒）。
  *
- * 「轨迹整段落在地图包围盒外」暴露坐标系映射不对，用户可能不在录像页，
- * 所以仍走 HUD；「录像首帧离最近出生点远」的细节与动作指引只保留在
- * 录像页「起点对齐」note（阈值口径统一写进帮助浮层），HUD 不再重复报同因。
+ * 「轨迹整段落在地图包围盒外」暴露坐标系映射不对（t4 基准=帧自身坐标，正确的
+ * .replay 若触发此提醒应修「坐标映射」切换而不是平移锚定），用户可能不在录像页，
+ * 所以仍走 HUD，细节指引在录像页「坐标映射」分区。
  */
 function updateReplayMapStatus(): void {
   const tracks = player.tracks.tracks;
@@ -191,34 +189,6 @@ function updateReplayMapStatus(): void {
 
 function tip(a: [number, number, number]): string {
   return `${a[0].toFixed(0)},${a[1].toFixed(0)},${a[2].toFixed(0)}`;
-}
-
-/**
- * 起点对齐：录像首帧应贴近地图传送起点（出生点）。
- * 取第一条轨道的首帧，找最近的出生点，返回距离与输出坐标平移量；
- * 无地图 / 无录像 / 无出生点时返回 null。
- */
-function computeStartAid(): StartAid | null {
-  const spawns = mapPanel?.spawnPoints ?? [];
-  if (spawns.length === 0 || player.tracks.isEmpty) return null;
-  const clip = player.tracks.tracks[0].clip;
-  const p0: [number, number, number] = [clip.pos[0], clip.pos[1], clip.pos[2]];
-  let best = -1;
-  let bestDist = Infinity;
-  spawns.forEach((s, i) => {
-    const d = Math.hypot(s.pos[0] - p0[0], s.pos[1] - p0[1], s.pos[2] - p0[2]);
-    if (d < bestDist) {
-      bestDist = d;
-      best = i;
-    }
-  });
-  if (best < 0) return null;
-  const s = spawns[best];
-  return {
-    dist: bestDist,
-    delta: [s.pos[0] - p0[0], s.pos[1] - p0[1], s.pos[2] - p0[2]],
-    spawnName: s.name,
-  };
 }
 
 function replayFirstPerson(): boolean {
@@ -259,9 +229,6 @@ async function loadBsp(file: File): Promise<void> {
       currentBox = null;
     }
     mapPanel?.setMap(result, currentBox);
-    reference?.setWorld(currentBox);
-    // 地图换了：刷新「起点对齐」检测（录像已载入时这会立刻暴露映射错误）
-    replayPanel?.refreshStartAnchor();
     updateReplayMapStatus();
 
     const glbKb = Math.round(result.glbBytes.byteLength / 1024);
@@ -308,7 +275,7 @@ bspFileInput?.addEventListener('change', () => {
 });
 guideBtn?.addEventListener('click', () => bspFileInput?.click());
 
-// ── 拖拽：.bsp 加载地图，.json 载入录像 ─────────────────────────────
+// ── 拖拽：.bsp 加载地图，.replay 载入录像 ───────────────────────────
 window.addEventListener('dragover', (e) => {
   e.preventDefault();
   hud.setDropActive(true);
@@ -325,19 +292,13 @@ window.addEventListener('drop', (e) => {
     void loadBsp(file);
     return;
   }
-  if (/\.json$/i.test(file.name)) {
+  if (/\.replay$/i.test(file.name)) {
+    // Shavit 原生录像：帧自身坐标直接播放，零配置直入
     activateTab('replay');
-    // .json 双语义：规则 JSON 换规则，否则按录像导入（按内容判定）
-    void replayPanel?.ingestJson(file);
+    void replayPanel?.loadFile(file);
     return;
   }
-  if (/\.js$/i.test(file.name)) {
-    // .js = 规则转化脚本（改规则＝替换当前轨道）
-    activateTab('replay');
-    void replayPanel?.loadRuleFile(file);
-    return;
-  }
-  const msg = `未加载：${file.name} 不是 .bsp / .json / .js`;
+  const msg = `未加载：${file.name} 不是 .bsp / .replay（viewer 只支持 Shavit 原生 .replay 录像）`;
   if (!scene.hasModel()) hud.showGuideError(msg);
   else hud.flashStatus(msg, 5000);
 });
@@ -370,6 +331,8 @@ window.addEventListener('drop', (e) => {
               ? ([t.clip.pos[0], t.clip.pos[1], t.clip.pos[2]] as [number, number, number])
               : ([0, 0, 0] as [number, number, number]),
         })),
+      /** 跟随轨道的 .replay 头部元信息（Clip.meta；无轨道 / 无元信息 → null）。 */
+      meta: () => player.tracks.follow?.clip.meta ?? null,
       // 播放控制（时间单位 = 秒，主时钟；seek 会被 A-B 区间夹取）
       play: () => player.play(),
       pause: () => player.pause(),
@@ -382,24 +345,30 @@ window.addEventListener('drop', (e) => {
       },
       /** 切换第一人称跟随目标；null = 回到第一条轨道。 */
       follow: (trackId: string | null) => {
+        const before = player.tracks.followId;
         if (trackId === null) {
           const t0 = player.tracks.tracks[0];
           if (t0) player.followTrack(t0.id);
-          return;
+        } else {
+          player.followTrack(trackId);
         }
-        player.followTrack(trackId);
+        // API 跟随切换与面板 ◎ 按钮同语义：信息条与轨迹列表状态要同步刷新
+        // （信息条是事件驱动、只挂在 syncTracks 上；timeline/visuals 每帧自取 follow，无此问题）
+        if (player.tracks.followId !== before) {
+          syncTracks();
+          replayPanel?.refreshTracks();
+        }
       },
     };
   },
 };
 
 
-// ── URL 深链：?bsp=&replay=&rule=（打包部署 / 示例直开；相对路径相对页面解析）──
+// ── URL 深链：?bsp=&replay=（.replay = Shavit 原生录像；打包部署 / 示例直开）──
 async function loadUrlAssets(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const bspUrl = params.get('bsp');
   const replayUrl = params.get('replay');
-  const ruleUrl = params.get('rule');
   if (!bspUrl && !replayUrl) return;
   const nameOf = (u: string): string => u.split('/').pop()?.split('?')[0] ?? 'asset';
   try {
@@ -413,17 +382,14 @@ async function loadUrlAssets(): Promise<void> {
       activateTab('replay');
       const resp = await fetch(replayUrl);
       if (!resp.ok) throw new Error(`录像 → HTTP ${resp.status}（${replayUrl}）`);
-      const text = await resp.text();
-      let rule: RuleConfig | null = null;
-      if (ruleUrl) {
-        const rresp = await fetch(ruleUrl);
-        if (rresp.ok) {
-          // ?rule= 同时接受规则 JSON 与裸 .js 转化脚本（AI 按 docs/replay-rule-ai.md 产出）
-          const rf = ruleFromText(await rresp.text(), nameOf(ruleUrl));
-          if (rf) rule = rf.rule;
-        }
+      // 深链只走 Shavit 原生 .replay：先拿原始字节嗅探（JSON 通道已移除，不按文本读）
+      const buf = await resp.arrayBuffer();
+      if (!looksLikeShavitReplay(new Uint8Array(buf.slice(0, SHAVIT_SNIFF_BYTES)))) {
+        throw new Error(
+          `${nameOf(replayUrl)} 不是 Shavit .replay 录像（深链只支持 Shavit 原生 .replay）`,
+        );
       }
-      await replayPanel?.loadUrlContent(text, nameOf(replayUrl), rule);
+      await replayPanel?.loadFile(new File([buf], nameOf(replayUrl)));
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

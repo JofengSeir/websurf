@@ -16,7 +16,7 @@ export interface TrackPanelOptions {
   onPresence?: (count: number) => void;
   /**
    * 清空/清到零回调：接回 app 的 onClearAll（清播放器、重建可视化与时间轴、
-   * 复位「起点对齐」提示、清空 HUD 录像提醒行）。列表自身刷新仍由 TrackPanel
+   * 清空 HUD 录像提醒行）。列表自身刷新仍由 TrackPanel
    * 完成；缺省时保留本地自清兜底，TrackPanel 独立可用。
    */
   onCleared?: () => void;
@@ -64,7 +64,7 @@ export class TrackPanel {
       {
         label: '清空全部',
         onClick: () => {
-          // 接回 app.onClearAll（清播放器/重建可视化/复位起点对齐与 HUD 提醒行）；
+          // 接回 app.onClearAll（清播放器/重建可视化/刷新时间轴、信息条与 HUD 提醒行）；
           // 无回调时保留本地自清兜底，保证独立可用。
           if (this.opts.onCleared) this.opts.onCleared();
           else {
@@ -98,7 +98,7 @@ export class TrackPanel {
       this.summaryEl.style.display = 'none';
       this.batchRow.style.display = 'none';
       this.listEl.appendChild(
-        el('div', 'note note-info', '还没有轨迹——导入一份 JSON 录像，或点上面的「载入示例录像」'),
+        el('div', 'note note-info', '还没有轨迹——录像页「选择录像文件…」或直接把 .replay 拖进窗口'),
       );
       return;
     }
@@ -202,7 +202,7 @@ export class TrackPanel {
       this.player.removeTrack(track.id);
       this.refresh();
       this.opts.onChange();
-      // 逐条移除到零也要复位「起点对齐」提示与 HUD 录像提醒行
+      // 逐条移除到零也接回 app 的清空回调（清可视化并清空 HUD 录像提醒行）
       if (this.player.tracks.tracks.length === 0) this.opts.onCleared?.();
       this.note(`已移除「${track.name}」`, 'info');
     });

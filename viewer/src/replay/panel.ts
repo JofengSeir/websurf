@@ -1,38 +1,25 @@
 /**
- * 录像面板（右侧「录像」标签页）：导入 + 轨迹列表 + 变换调整。
+ * 录像面板（右侧「录像」标签页）：导入 + 坐标映射切换 + 轨迹列表 + 变换调整。
  *
- * 规则 = 一段映射脚本文本（scriptSrc：内置默认 / .js 文件 / 深链 / localStorage），
- * 外加 transform 人工微调（平移 + 绕 Y 旋转，viewer 侧后处理）。
- * 「换文件＝追加轨道；改规则＝替换当前轨道」的语义不变。
+ * t4 播放基准：导入即以 .replay 帧自身坐标播放（解码只做标准坐标映射，默认零变换）；
+ * 「调整工具」的平移/旋转与「坐标映射」切换仅在用户显式设置时叠加。
+ * 「换文件＝追加轨道；改映射/变换＝替换当前轨道」的语义不变。
  */
 
-import { buttonRow, el, foldBox, noteLine, numField, section } from '../core/dom.js';
-import { DEFAULT_RULE_SRC } from './default-rule.js';
-import { ruleFromText } from './rule-file.js';
+import { buttonRow, checkField, el, foldBox, noteLine, numField, section } from '../core/dom.js';
 import { TrackPanel } from './trackpanel.js';
 import type { ReplayImporter } from './importer.js';
 import type { ReplayPlayer } from './player.js';
-import { buildSampleReplayText, SAMPLE_FILE_NAME } from './sample.js';
 import { LARGE_CLIP_FRAMES } from './build.js';
-import type { Clip, RuleConfig } from './types.js';
+import type { Clip, RuleConfig, YawMode, AxesMode } from './types.js';
 import { defaultRule } from './types.js';
 
-const STORAGE_KEY = 'websurf-viewer.replay-rule.v1';
-
-/** 起点对齐信息：录像首帧（viewer 世界坐标）与最近出生点的距离和所需平移。 */
-export interface StartAid {
-  /** 与最近出生点的距离（HU）。 */
-  dist: number;
-  /** 输出坐标平移量：出生点 − 录像首帧。 */
-  delta: [number, number, number];
-  /** 最近出生点的显示名。 */
-  spawnName: string;
-}
+const STORAGE_KEY = 'websurf-viewer.replay-rule.v2';
 
 export interface ReplayPanelOptions {
   /**
    * 导入成功。
-   * `replaceId` 非 null 表示这是对同一份文件改规则后的重新导入——替换那条轨道，别追加。
+   * `replaceId` 非 null 表示这是对同一份文件改映射/变换后的重新导入——替换那条轨道，别追加。
    * 返回实际承载这份 clip 的轨道 id，供下次重新导入复用。
    */
   onClip: (clip: Clip, warnings: string[], replaceId: string | null) => string;
@@ -40,8 +27,6 @@ export interface ReplayPanelOptions {
   onClearAll: () => void;
   /** 轨道属性变化（显隐 / 偏移 / 重命名 / 移除 / 跟随）→ 重建可视化。 */
   onTracksChanged: () => void;
-  /** 起点对齐信息（无地图或无录像时返回 null）。 */
-  getStartAid?: () => StartAid | null;
   onStatus: (text: string) => void;
 }
 
@@ -50,29 +35,21 @@ export class ReplayPanel {
   private file: File | null = null;
   /**
    * 上次导入承载结果的轨道 id。
-   * 同一份文件改规则后的重新导入要**替换**那条轨道，否则每次改规则都会多出一条重复轨迹；
+   * 同一份文件改映射/变换后的重新导入要**替换**那条轨道，否则每次改动都会多出一条重复轨迹；
    * 换文件（loadFile）时清空，于是导入新文件＝追加一条轨道。
    */
   private lastTrackId: string | null = null;
   private busy = false;
 
   private readonly fileNote: (t: string, k?: 'info' | 'warn' | 'error') => void;
-  private readonly anchorNote: (t: string, k?: 'info' | 'warn' | 'error') => void;
+  /** 变换/映射状态 note（调整工具分区顶部，常显）。 */
+  private readonly tfNote: (t: string, k?: 'info' | 'warn' | 'error') => void;
   private trackPanel: TrackPanel | null = null;
 
-  /** 当前生效规则的来源描述（内置默认 / 文件名 / 深链规则名）。 */
-  private ruleSource = '内置默认';
-  private readonly ruleSourceEl: HTMLElement;
-  private readonly ruleSrcPre: HTMLElement;
-  private readonly ruleFoldTitle: HTMLElement;
-  /** 变换调整输入（offset X/Y/Z + yaw°），见构造器「变换调整」分区。 */
+  /** 变换调整输入（offset X/Y/Z + yaw°），见构造器「调整工具」分区。 */
   private readonly tfOffInputs: HTMLInputElement[] = [];
   private tfYawInput: HTMLInputElement | null = null;
   private tfDebounce = 0;
-  /** 上一次起点对齐检查是否失配（自动展开只在失配状态变化时触发一次）。 */
-  private lastAnchorWarn = false;
-  /** 变换工具折叠容器：起点失配（>128 HU）时自动展开。 */
-  private readonly tfFoldDetails: HTMLDetailsElement;
 
   constructor(
     root: HTMLElement,
@@ -87,7 +64,7 @@ export class ReplayPanel {
     this.fileNote = noteLine(fileBody);
     const fileInput = el('input');
     fileInput.type = 'file';
-    fileInput.accept = '.json,application/json';
+    fileInput.accept = '.replay';
     fileInput.style.display = 'none';
     fileInput.addEventListener('change', () => {
       const f = fileInput.files?.[0];
@@ -97,69 +74,55 @@ export class ReplayPanel {
     fileBody.appendChild(fileInput);
 
     buttonRow(fileBody, [
-      { label: '选择 JSON 录像…', onClick: () => fileInput.click() },
       {
-        label: '载入示例录像',
-        onClick: () => void this.loadSample(),
-        title: '生成一段合成的螺旋下降轨迹，用来验证整条导入链路',
+        label: '选择录像文件…',
+        onClick: () => fileInput.click(),
+        title: '.replay = Shavit 原生录像，零配置直入（帧自身坐标直接播放）',
       },
     ]);
-
-    // ── 导入 · 规则脚本（.js 一等公民：默认折叠，标题随来源更新）──
-    const ruleFold = foldBox(fileBody, '规则脚本');
-    this.ruleFoldTitle = ruleFold.details.querySelector('.fold-name') as HTMLElement;
-    ruleFold.details.title = '查看当前生效的规则脚本、复制或更换（.js 转化脚本写法见 docs/replay-rule-ai.md）';
-    const ruleFileInput = el('input');
-    ruleFileInput.type = 'file';
-    ruleFileInput.accept = '.js,.json,application/javascript,application/json';
-    ruleFileInput.style.display = 'none';
-    ruleFileInput.addEventListener('change', () => {
-      const f = ruleFileInput.files?.[0];
-      ruleFileInput.value = '';
-      if (f) void this.loadRuleFile(f);
-    });
-    ruleFold.body.appendChild(ruleFileInput);
-    buttonRow(ruleFold.body, [
-      {
-        label: '载入规则脚本…',
-        onClick: () => ruleFileInput.click(),
-        title: '选择 .js 转化脚本或规则 JSON（.js = 求值为帧映射函数的单表达式，写法见 docs/replay-rule-ai.md）',
-      },
-      {
-        label: '复制脚本',
-        onClick: () => void this.copyRuleSrc(),
-        title: '复制当前生效的脚本文本',
-      },
-    ]);
-    const srcRow = el('div', 'kv');
-    srcRow.appendChild(el('span', 'k', '规则来源'));
-    this.ruleSourceEl = el('span', 'v', this.ruleSource);
-    srcRow.appendChild(this.ruleSourceEl);
-    ruleFold.body.appendChild(srcRow);
-    this.ruleSrcPre = el('pre', 'rule-src mono');
-    ruleFold.body.appendChild(this.ruleSrcPre);
-    this.refreshRuleView();
 
     // ── 轨迹列表（Q2：多轨迹对比；清空全部也在这里）──
     this.trackPanel = new TrackPanel(root, this.player, {
       onChange: () => this.opts.onTracksChanged(),
-      // 清空/清到零 → app 的 onClearAll（复位起点对齐提示与 HUD 提醒行）
       onCleared: () => this.opts.onClearAll(),
     });
 
-    // ── 变换调整（状态 note 常显；8 个调整工具默认折叠，起点失配时自动展开）──
-    const tfBody = section(root, '变换调整');
-    this.anchorNote = noteLine(tfBody);
-    const tfFold = foldBox(tfBody, '调整工具（平移 / 旋转 / 锚定）');
-    this.tfFoldDetails = tfFold.details;
+    // ── 坐标映射（t4：两个切换按钮的 src 侧支撑；默认直读无变换）──
+    const mapBody = section(root, '坐标映射');
+    noteLine(mapBody)(
+      '默认直读 .replay 帧自身坐标（标准轴序 + 实测朝向映射）。轨迹与地图对不上时切换对照项，不用改任何平移。',
+      'info',
+    );
+    checkField(
+      mapBody,
+      '坐标轴映射：标准（Source [x,y,z] → viewer [y,z,x]）',
+      this.rule.axesMode === 'shavit',
+      (v) => this.setAxesMode(v ? 'shavit' : 'raw'),
+      '与地图 GLB 导出同一变换（rotate_yup）。轨迹整体轴错位/侧转 90° 时切换「直读 [x,y,z]」对照。',
+    );
+    checkField(
+      mapBody,
+      '朝向轴映射：实测定标（yaw+180、pitch 取反）',
+      this.rule.yawMode === 'shavit',
+      (v) => this.setYawMode(v ? 'shavit' : 'raw'),
+      '真实 run 段「视角·运动方向」平均 cos=0.9992（+180 口径）。朝向反了/镜像时切换「角度直读」对照。',
+    );
+
+    // ── 调整工具（仅用户显式设置时叠加；默认折叠，不再自动展开）──
+    const tfBody = section(root, '调整工具');
+    this.tfNote = noteLine(tfBody);
+    const tfFold = foldBox(tfBody, '平移 / 旋转');
     const tfTools = tfFold.body;
     const tf = this.rule.transform ?? { offset: [0, 0, 0] as [number, number, number], yawDeg: 0 };
-    ('平移 X 平移 Y 平移 Z'.split(' ')).forEach((label, i) => {
+    // 三个平移输入（X/Y/Z 各一个）；t5 修复：此前 '平移 X 平移 Y 平移 Z'.split(' ')
+    // 生成 6 个输入（后 3 个 value=undefined、id 越界），偏移读数错位
+    const offLabels = ['平移 X', '平移 Y', '平移 Z'] as const;
+    offLabels.forEach((label, i) => {
       const input = numField(tfTools, {
         label,
-        value: tf.offset[i],
+        value: tf.offset[i] ?? 0,
         step: 10,
-        hint: 'HU；与 yaw 一起在脚本输出后施加',
+        hint: 'HU；显式叠加在帧坐标上（默认 0 = 播放帧自身坐标）',
         onInput: () => this.applyTransformFromInputs(),
       });
       input.id = ['tf-offX', 'tf-offY', 'tf-offZ'][i];
@@ -188,32 +151,35 @@ export class ReplayPanel {
       {
         label: '重置变换',
         onClick: () => this.resetTransform(),
-        title: '清零平移与旋转并重新导入当前轨道',
-      },
-      {
-        label: '一键锚定到出生点',
-        onClick: () => this.applyAnchor(),
-        title: '把「录像首帧 → 最近出生点」的偏差作为平移叠加进变换，并重新导入当前轨道',
+        title: '清零平移与旋转（回到帧自身坐标）并重新导入当前轨道',
       },
     ]);
-    this.refreshStartAnchor();
+    this.tfNote('播放基准 = 帧自身坐标；下面都是可选项，不动就是原始轨迹。', 'info');
   }
 
-  // ── 规则 ──────────────────────────────────────────────────────────
-
-  /** scriptSrc 为空时使用内置默认规则（自家标准格式）。 */
-  private effectiveRule(): RuleConfig {
-    return this.rule.scriptSrc ? this.rule : { ...this.rule, scriptSrc: DEFAULT_RULE_SRC };
-  }
+  // ── 规则持久化 ────────────────────────────────────────────────────
 
   private loadRule(): void {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
+      if (!raw) {
+        // 旧版 v1 脚本规则已随 JSON 通道移除：清掉，避免误导
+        localStorage.removeItem('websurf-viewer.replay-rule.v1');
+        return;
+      }
       const parsed = JSON.parse(raw) as Partial<RuleConfig>;
-      if (parsed && parsed.version === 1 && typeof parsed.scriptSrc === 'string') {
-        this.rule = { ...defaultRule(), ...parsed } as RuleConfig;
-        if (parsed.scriptSrc) this.ruleSource = this.rule.name || 'localStorage 规则';
+      if (
+        parsed &&
+        parsed.version === 2 &&
+        (parsed.axesMode === 'shavit' || parsed.axesMode === 'raw') &&
+        (parsed.yawMode === 'shavit' || parsed.yawMode === 'raw')
+      ) {
+        this.rule = {
+          ...defaultRule(),
+          axesMode: parsed.axesMode,
+          yawMode: parsed.yawMode,
+          transform: parsed.transform,
+        };
       }
     } catch {
       /* 读取失败就用默认规则 */
@@ -233,9 +199,33 @@ export class ReplayPanel {
     this.trackPanel?.refresh();
   }
 
+  // ── 坐标映射切换（t4 ②）────────────────────────────────────────────
+
+  private setAxesMode(mode: AxesMode): void {
+    if (this.rule.axesMode === mode) return;
+    this.rule.axesMode = mode;
+    this.saveRule();
+    this.tfNote(
+      `坐标轴映射 → ${mode === 'shavit' ? '标准 [y,z,x]' : '直读 [x,y,z]'}，重新导入中…`,
+      'info',
+    );
+    void this.runImport(true);
+  }
+
+  private setYawMode(mode: YawMode): void {
+    if (this.rule.yawMode === mode) return;
+    this.rule.yawMode = mode;
+    this.saveRule();
+    this.tfNote(
+      `朝向轴映射 → ${mode === 'shavit' ? '实测定标（yaw+180、pitch 取反）' : '角度直读'}，重新导入中…`,
+      'info',
+    );
+    void this.runImport(true);
+  }
+
   // ── 导入 ──────────────────────────────────────────────────────────
 
-  /** 载入一个录像文件（面板按钮 / 主窗口拖拽共用）。换文件＝追加一条新轨道。 */
+  /** 载入一个录像文件（面板按钮 / 主窗口拖拽 / 深链共用）。换文件＝追加一条新轨道。 */
   async loadFile(file: File): Promise<void> {
     if (this.busy) {
       this.fileNote('上一次导入还在进行，请稍候再试', 'warn');
@@ -245,74 +235,28 @@ export class ReplayPanel {
     this.lastTrackId = null;
     this.fileNote(`正在解析录像 ${file.name} …`);
     this.opts.onStatus(`正在解析录像 ${file.name} …`);
-    // freshFile=true：把文件交给 importer/Worker（解析并缓存）；之后的重导复用缓存
-    await this.runImport(true, true);
+    await this.runImport(true);
   }
 
-  /**
-   * .json 双语义入口（主窗口拖拽共用）：内容是规则 JSON 就换规则，
-   * 否则按录像导入。规则判定只看内容（ruleFromText），不看扩展名。
-   * 体积护栏：规则文件必然很小，超限直接按录像走，避免大文件被主线程全量 parse 两遍。
-   */
-  async ingestJson(file: File): Promise<void> {
-    if (file.size <= 4 * 1024 * 1024) {
-      const rf = ruleFromText(await file.text(), file.name);
-      if (rf) {
-        await this.applyRuleFile(rf, file.name + '（规则 JSON）');
-        return;
-      }
-    }
-    await this.loadFile(file);
-  }
-
-  /**
-   * 外部 API（URL 深链 / 打包演示）：直接喂 JSON 文本 + 可选规则，免文件选择。
-   * 规则给定时先套用（覆盖 localStorage 里的旧规则），再走导入。
-   */
-  async loadUrlContent(jsonText: string, name: string, rule?: RuleConfig | null): Promise<void> {
-    if (rule) {
-      this.rule = { ...defaultRule(), ...rule } as RuleConfig;
-      this.ruleSource = this.rule.name || name;
-      this.saveRule();
-      this.refreshRuleView();
-      this.syncTransformInputs();
-      this.fileNote(`已套用规则「${this.rule.name}」`, 'info');
-    } else {
-      this.saveRule();
-      this.refreshRuleView();
-    }
-    const file = new File([jsonText], name, { type: 'application/json' });
-    await this.loadFile(file);
-  }
-
-  private async loadSample(): Promise<void> {
-    const text = buildSampleReplayText();
-    const file = new File([text], SAMPLE_FILE_NAME, { type: 'application/json' });
-    this.fileNote('已生成示例录像（螺旋下降，viewer 原生约定，默认规则可直接播）', 'info');
-    await this.loadFile(file);
-  }
-
-  private async runImport(explicit: boolean, freshFile = false): Promise<void> {
+  private async runImport(explicit: boolean): Promise<void> {
     if (!this.file) {
       if (explicit) this.fileNote('还没有选择录像文件', 'warn');
       return;
     }
     if (this.busy) {
-      // 大文件导入期间到达的重导请求（防抖回调/锚定/变换）不排队，明确告知
+      // 大文件导入期间到达的重导请求（防抖回调/映射切换）不排队，明确告知
       if (explicit) this.fileNote('上一次导入还在进行，本次改动未生效——请稍候重试', 'warn');
       return;
     }
     this.busy = true;
     try {
       const result = await this.importer.import(
-        freshFile ? this.file : null,
-        this.effectiveRule(),
+        this.file,
+        this.rule,
         this.file.name,
         (phase, done, total) => {
           const pct = total > 1 ? ` ${Math.round((done / total) * 100)}%` : '';
-          this.opts.onStatus(
-            phase === 'parse' ? `解析 JSON…${pct}` : `映射帧… ${done}/${total}${pct}`,
-          );
+          if (phase === 'parse') this.opts.onStatus(`解析 .replay…${pct}`);
         },
       );
       this.lastTrackId = this.opts.onClip(result.clip, result.warnings, this.lastTrackId);
@@ -322,8 +266,7 @@ export class ReplayPanel {
         `${this.file.name}：${result.clip.count.toLocaleString('en-US')} 帧，` +
         `${result.clip.duration.toFixed(2)} s` +
         (result.clip.vel ? `，最大速度 ${result.clip.maxSpeed.toFixed(0)} HU/s` : '') +
-        `，路径 ${result.resolvedPath || '（根数组）'}` +
-        (big ? ' —— 帧数较多，改规则重新导入耗时较长' : '');
+        (big ? ' —— 帧数较多，改映射/变换重新导入耗时较长' : '');
       this.fileNote(
         result.warnings.length > 0 ? result.warnings.join('；') + ' —— ' + summary : summary,
         result.warnings.length > 0 || big ? 'warn' : 'info',
@@ -338,9 +281,9 @@ export class ReplayPanel {
     }
   }
 
-  // ── 变换调整 ──────────────────────────────────────────────────────
+  // ── 调整工具（仅显式叠加）──────────────────────────────────────────
 
-  /** 读取变换输入 → 写规则 → 防抖重导（复用已解析缓存，替换当前轨道）。 */
+  /** 读取变换输入 → 写规则 → 防抖重导（复用已缓存文件，替换当前轨道）。 */
   private applyTransformFromInputs(): void {
     const off = this.tfOffInputs.map((el) => Number(el.value));
     const yaw = Number(this.tfYawInput?.value ?? 0);
@@ -352,7 +295,7 @@ export class ReplayPanel {
     this.saveRule();
     window.clearTimeout(this.tfDebounce);
     this.tfDebounce = window.setTimeout(() => {
-      this.anchorNote('变换已更新，重新导入中…', 'info');
+      this.tfNote('变换已更新，重新导入中…', 'info');
       void this.runImport(true);
     }, 500);
   }
@@ -369,118 +312,7 @@ export class ReplayPanel {
     if (this.tfYawInput) this.tfYawInput.value = '0';
     this.rule.transform = { offset: [0, 0, 0], yawDeg: 0 };
     this.saveRule();
-    this.anchorNote('变换已重置，重新导入中…', 'info');
-    void this.runImport(true);
-  }
-
-  /** 锚定后把输入框同步到新 transform（叠加结果）。 */
-  private syncTransformInputs(): void {
-    // 无 transform 的规则也要把输入框归零——否则旧规则残留的微调值
-    // 会在用户下次触碰输入框时被写进新规则
-    const tf = this.rule.transform ?? { offset: [0, 0, 0] as [number, number, number], yawDeg: 0 };
-    this.tfOffInputs.forEach((el, i) => {
-      el.value = String(tf.offset[i]);
-    });
-    if (this.tfYawInput) this.tfYawInput.value = String(tf.yawDeg);
-  }
-
-  // ── 规则脚本视图 ──────────────────────────────────────────────────
-
-  private effectiveScript(): string {
-    return this.rule.scriptSrc || DEFAULT_RULE_SRC;
-  }
-
-  private refreshRuleView(): void {
-    this.ruleSourceEl.textContent = this.ruleSource;
-    this.ruleSrcPre.textContent = this.effectiveScript();
-    // 折叠标题带上来源：不展开也能一眼看到当前规则是什么
-    this.ruleFoldTitle.textContent = `规则脚本 · ${this.ruleSource}`;
-  }
-
-  private async copyRuleSrc(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(this.effectiveScript());
-      this.fileNote('脚本已复制到剪贴板', 'info');
-    } catch (e) {
-      this.fileNote(`复制失败：${e instanceof Error ? e.message : String(e)}`, 'error');
-    }
-  }
-
-  /**
-   * 载入规则文件（.js 裸脚本或规则 JSON；面板按钮与主窗口拖拽共用）。
-   * 改规则＝替换当前轨道：已有录像时复用已解析缓存重新导入。
-   */
-  async loadRuleFile(file: File): Promise<void> {
-    const rf = ruleFromText(await file.text(), file.name);
-    if (!rf) {
-      this.fileNote(
-        `${file.name} 既不是规则 JSON（缺 version:1 / scriptSrc），也无法按脚本文本处理（脚本应是求值为 (raw, i, H) => Frame 的单表达式）`,
-        'error',
-      );
-      return;
-    }
-    await this.applyRuleFile(rf, file.name + (rf.kind === 'json' ? '（规则 JSON）' : '（.js）'));
-  }
-
-  /** 规则落盘 + 刷新规则视图/变换输入 + 按需重导（替换当前轨道）。 */
-  private async applyRuleFile(
-    rf: NonNullable<ReturnType<typeof ruleFromText>>,
-    sourceLabel: string,
-  ): Promise<void> {
-    this.rule = rf.rule;
-    this.ruleSource = sourceLabel;
-    this.saveRule();
-    this.refreshRuleView();
-    this.syncTransformInputs();
-    this.fileNote(`已载入规则「${this.rule.name}」（${this.ruleSource}）`, 'info');
-    if (this.file) await this.runImport(true);
-  }
-
-  /**
-   * 起点对齐提示：录像首帧（viewer 世界坐标）距离最近出生点多远。
-   * 由 app 在导入 / 换图后调用。
-   */
-  refreshStartAnchor(): void {
-    const aid = this.opts.getStartAid?.() ?? null;
-    if (!aid) {
-      this.anchorNote('载入录像并加载地图后，这里会检查录像起点是否贴近传送起点', 'info');
-      return;
-    }
-    const near = aid.dist <= 128;
-    // 起点失配 = 大概率坐标系没对上：首次失配自动展开调整工具。
-    // 记录上一次失配态——持续失配期间的重导（改规则/变换）不反复顶开用户收起的折叠。
-    if (!near && !this.lastAnchorWarn) this.tfFoldDetails.open = true;
-    this.lastAnchorWarn = !near;
-    this.anchorNote(
-      `录像起点距最近出生点「${aid.spawnName}」${aid.dist.toFixed(0)} HU` +
-        (near ? ' —— 已贴合传送起点' : ' —— 与传送起点不符：可一键锚定') +
-        `（Δ=${aid.delta.map((v) => v.toFixed(1)).join(', ')}）`,
-      near ? 'info' : 'warn',
-    );
-  }
-
-  /**
-   * 一键锚定：把起点偏差**叠加**进 rule.transform.offset（viewer 侧后处理），
-   * 重新导入（替换当前轨道，不追加）。
-   */
-  applyAnchor(): void {
-    const aid = this.opts.getStartAid?.() ?? null;
-    if (!aid) return;
-    const tf = this.rule.transform ?? { offset: [0, 0, 0] as [number, number, number], yawDeg: 0 };
-    this.rule.transform = {
-      offset: [
-        tf.offset[0] + aid.delta[0],
-        tf.offset[1] + aid.delta[1],
-        tf.offset[2] + aid.delta[2],
-      ],
-      yawDeg: tf.yawDeg,
-    };
-    this.saveRule();
-    this.syncTransformInputs();
-    this.anchorNote(
-      `已按起点锚定平移 Δ=${aid.delta.map((v) => v.toFixed(1)).join(', ')}，重新导入中…`,
-      'info',
-    );
+    this.tfNote('变换已重置（回到帧自身坐标），重新导入中…', 'info');
     void this.runImport(true);
   }
 }

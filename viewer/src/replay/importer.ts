@@ -1,8 +1,10 @@
-/** 录像导入：优先走 Worker（不卡 UI + 复用已解析的 JSON），失败自动回退主线程。 */
+/** 录像导入：优先走 Worker（不卡 UI），失败自动回退主线程；只支持 Shavit 原生 .replay。 */
 
-import { compileScript, probeScript } from './codegen.js';
-import { getPath, pickFrameArray } from './helpers.js';
-import { buildClip, safePreview } from './build.js';
+import {
+  clipFromShavitReplay,
+  fileLooksLikeShavitReplay,
+  parseShavitReplay,
+} from './shavit-replay.js';
 import type {
   ClipPayload,
   ParseRequest,
@@ -30,9 +32,9 @@ export class ReplayImporter {
   private workerBroken = false;
   private seq = 0;
   private readonly pending = new Map<number, Pending>();
-  /** 主线程回退路径用的解析缓存。 */
-  private mainFile: File | null = null;
-  private mainRoot: unknown = undefined;
+  /** Shavit .replay 的主线程回退缓存（字节级，重导时重新解码）。 */
+  private mainNativeFile: File | null = null;
+  private mainNativeBytes: ArrayBuffer | null = null;
 
   private ensureWorker(): Worker | null {
     if (this.workerBroken) return null;
@@ -85,7 +87,7 @@ export class ReplayImporter {
     });
   }
 
-  /** 应用规则并生成 Clip。file 为 null 时复用上次已解析的文件（调规则不用重解析）。 */
+  /** 应用规则（映射切换 + 变换微调）并生成 Clip。file 为 null 时复用上次缓存的文件。 */
   async import(
     file: File | null,
     rule: RuleConfig,
@@ -113,25 +115,7 @@ export class ReplayImporter {
     this.pending.clear();
   }
 
-  // ── 主线程回退 ────────────────────────────────────────────────────
-
-  private async mainRootOf(file: File | null, onProgress?: ProgressFn): Promise<unknown> {
-    const target = file ?? this.mainFile;
-    if (!target) throw new Error('没有可解析的文件');
-    if (target === this.mainFile && this.mainRoot !== undefined) return this.mainRoot;
-    onProgress?.('parse', 0, 1);
-    const text = await target.text();
-    let root: unknown;
-    try {
-      root = JSON.parse(text);
-    } catch (e) {
-      throw new Error(`JSON 解析失败：${e instanceof Error ? e.message : String(e)}`);
-    }
-    this.mainFile = target;
-    this.mainRoot = root;
-    onProgress?.('parse', 1, 1);
-    return root;
-  }
+  // ── 主线程回退（与 Worker 同源：嗅探 → 字节缓存 → 原生解析 → Clip）──
 
   private async importOnMain(
     file: File | null,
@@ -139,46 +123,37 @@ export class ReplayImporter {
     name: string,
     onProgress?: ProgressFn,
   ): Promise<ImportResult> {
-    const root = await this.mainRootOf(file, onProgress);
-    const resolvedPath = rule.framePath || pickFrameArray(root) || '';
-    const frames = resolveFrames(root, resolvedPath);
-    const fn = compileScript(rule.scriptSrc);
-    const probe = probeScript(fn, frames);
-    if (!probe.ok) {
+    const target = file ?? this.mainNativeFile;
+    if (!target) throw new Error('没有可解析的文件');
+
+    // 魔数嗅探必须在 text() 之前——Shavit .replay 是二进制，文本解码会破坏它
+    if (!(await fileLooksLikeShavitReplay(target))) {
       throw new Error(
-        `${probe.error ?? '规则校验失败'}\n原始对象：${safePreview(frames[probe.frameIndex ?? 0])}`,
+        `${name} 不是 Shavit .replay 录像文件——viewer 只支持 Shavit 原生 .replay（JSON/规则脚本通道已移除）`,
       );
     }
-    onProgress?.('map', 0, frames.length);
-    const { clip, warnings } = buildClip({
-      name,
-      frames,
-      fn,
-      rule,
-      resolvedPath,
-      onProgress: (done, total) => onProgress?.('map', done, total),
+
+    onProgress?.('parse', 0, 1);
+    let bytes = this.mainNativeFile === target ? this.mainNativeBytes : null;
+    if (!bytes) {
+      bytes = await target.arrayBuffer();
+      this.mainNativeFile = target;
+      this.mainNativeBytes = bytes;
+    }
+    const parsed = parseShavitReplay(bytes, {
+      // File.lastModified 是 ms；.replay 头部 iTimestamp 是 Unix 秒（mtime 兜底同单位）
+      timestampFallback: Math.floor(target.lastModified / 1000),
+      // 坐标映射切换（默认 shavit 定标映射；仅用户显式切换时非默认）
+      mapping: { axesMode: rule.axesMode, yawMode: rule.yawMode },
     });
-    onProgress?.('map', frames.length, frames.length);
-    return { clip, warnings, resolvedPath };
+    onProgress?.('parse', 1, 1);
+    const { clip, warnings } = clipFromShavitReplay(name, parsed, rule);
+    return { clip, warnings, resolvedPath: clip.resolvedPath };
   }
 }
 
 function isNoWorker(e: unknown): boolean {
   return e instanceof Error && e.message === '__NO_WORKER__';
-}
-
-function resolveFrames(root: unknown, framePath: string): unknown[] {
-  const path = framePath || pickFrameArray(root) || '__none__';
-  const value = getPath(root, path);
-  if (!Array.isArray(value)) {
-    throw new Error(
-      framePath
-        ? `路径 "${framePath}" 取到的不是数组`
-        : '没能在 JSON 里自动找到「元素为对象的数组」——第三方格式请用规则 JSON 的 framePath 指定路径',
-    );
-  }
-  if (value.length === 0) throw new Error('帧数组为空');
-  return value;
 }
 
 function payloadToClip(p: ClipPayload, rule: RuleConfig): Clip {
@@ -195,5 +170,7 @@ function payloadToClip(p: ClipPayload, rule: RuleConfig): Clip {
     maxSpeed: p.maxSpeed,
     resolvedPath: p.resolvedPath,
     rule,
+    buttons: p.buttons,
+    meta: p.meta,
   };
 }

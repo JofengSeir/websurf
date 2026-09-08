@@ -23,8 +23,8 @@
 | Rust 依赖 | 仅 `websurf-wasm-core`（`viewer/crates/wasm/Cargo.toml:18-19`）；头注自证"不含 websurf-phys（无物理）"（`viewer/crates/wasm/Cargo.toml:3-5`） | `websurf-phys = { path = "../../../src" }` + re-export `pub use websurf_phys::phys::PhysWorld`（`debug/crates/wasm/Cargo.toml:21-22` + `debug/crates/wasm/src/lib.rs:22`；game 同款 `game/crates/wasm/Cargo.toml:21-22` + `game/crates/wasm/src/lib.rs:23`） |
 | WASM 导出面 | `grep 'pub fn'` 实测 **4**（构造 + metadata/spawn/GLB 三方法，`viewer/crates/wasm/src/lib.rs:273-465`） | debug **29** / game **18**（同口径 grep，含 tick/predict/respawn/teleport/pvs/mosaic 等） |
 | SharedArrayBuffer / Atomics | **无**（grep `viewer/src viewer/crates` → 空） | debug/game 的 app.ts / input / worker-types 均引用（`grep -l SharedArrayBuffer debug/src game/src` → `debug/src/app.ts`、`debug/src/input/input-bridge.ts`、`game/src/app.ts`、`game/src/worker/worker-types.ts` 等） |
-| Worker | 唯一一个：**录像解析 Worker**（`viewer/src/worker/parse-worker.ts:1-6`），且可失效回退主线程（`importer.ts:104-107`） | 权威物理 Worker + 主线程双线（`game/src/worker/`、ts-shared `auth-loop/worker-dispatch`） |
-| 渲染循环 | 单线程 `requestAnimationFrame`，每帧「主时钟 → 相机 → 可视化 → render」（`app.ts:447-483`） | 物理 tick 与渲染解耦的双线时序 |
+| Worker | 唯一一个：**录像解析 Worker**（`viewer/src/worker/parse-worker.ts:1-8` 头注："Shavit .replay 原生解析，产出定型数组零拷贝回传"），且可失效回退主线程同源链路（`importer.ts:106-109`） | 权威物理 Worker + 主线程双线（`game/src/worker/`、ts-shared `auth-loop/worker-dispatch`） |
+| 渲染循环 | 单线程 `requestAnimationFrame`，每帧「主时钟 → 相机 → 可视化 → render」（`app.ts:413-449`） | 物理 tick 与渲染解耦的双线时序 |
 
 推论：viewer 的"每帧确定性"只取决于录像 Clip 本身——回放不重演物理，**断网/慢机也不会跑歪轨迹**。
 
@@ -62,20 +62,20 @@
 |---|---|---|
 | 相机 | 自由飞行（WASD/Space/C/Shift×4 + 指针锁定，`fly.ts:57-105`）+ 回放第一/第三人称 | game：受控玩家；debug：调参视角 |
 | 键位掩码 / 输入槽 | 无（键鼠直接进 FlyCam） | ts-shared `input-layer`/`keysToMask`（debug/game） |
-| 面板 | 地图信息 + 出生点导航 + 参考显示 + 录像页 | debug：物理参数/碰撞/传送/PVS/画质面板；game：玩法面板 + 存点（`game/src/panel/`、`game/src/savepoint.ts`） |
+| 面板 | 地图信息 + 出生点导航 + 录像页（导入/坐标映射/轨迹列表/调整工具 + 时间轴 + 录像信息条） | debug：物理参数/碰撞/传送/PVS/画质面板；game：玩法面板 + 存点（`game/src/panel/`、`game/src/savepoint.ts`） |
 | 存点 / 计时 | 无（定位即"看"） | game 具备 |
-| 外部控制 API | `window.viewer.replay`（`app.ts:345-394`，供自动化/冒烟） | game/debug 以面板与参数为主 |
+| 外部控制 API | `window.viewer.replay`（内省 + `meta()` + 播放控制，`app.ts:307-364`，供自动化/冒烟） | game/debug 以面板与参数为主 |
 
 ## 7. 与共享层的边界（避免误读）
 
 1. **`websurf-wasm-core` 是真依赖**：BSP 解析（`vbsp` 26 lump + LZMA + Leaves 排序修复）、GLB 导出（`bsp_to_gltf_core`）、模型整合（`model_integrator`）、PAKFILE 索引（`pakfile_models`）、VTF 解码（`texture_utils`）全部来自共享 crate——viewer 侧 `crates/wasm/src/lib.rs` 只是 wasm-bindgen 导出层 + PAKFILE 模型/材质提取的"viewer 版组装"（`lib.rs:1-9, 16-17`）。
-2. **`websurf-phys` / `ts-shared` 是"对齐"不是"依赖"**：共享的只有数值与约定（EYE_STAND 64.09、`bspYawToCsYaw = (270 − yaw) mod 360`）。同式三处各自维护：`viewer/src/core/pose.ts:12-14`、`src/ts-shared/phys/world-builder.ts:92`、`debug/src/world/spawn-loader.ts:61`——不 import 是有意为之（工程间零 import 原则），改公式需三处同步。
-3. **坐标系同一约定**：GLB 顶点/出生点都走 `[x,y,z]→[y,z,x]` Y-up 变换（`src/wasm-core/bsp_to_gltf_core/convert.rs:813-816`、`src/wasm-core/model_integrator/mod.rs:1041-1045`、`viewer/crates/wasm/src/lib.rs:339-342`），所以 viewer 的录像坐标能直接和场景对齐（起点对齐检测 `app.ts:196-222` 的前提）。
+2. **`websurf-phys` / `ts-shared` 是"对齐"不是"依赖"**：共享的只有数值与约定（EYE_STAND 64.09、`bspYawToCsYaw = (270 − yaw) mod 360`）。同式三处各自维护：`viewer/src/core/pose.ts:12-14`、`src/ts-shared/phys/world-builder.ts:92`、`debug/src/world/spawn-loader.ts:61`——不 import 是有意为之（工程间零 import 原则），改公式需三处同步。⚠ 该式**仅服务 BSP 出生点实体角路径**（`app.ts:266` 初始视角、`mapinfo.ts:139` 出生点 title），与 `.replay` 帧解码的实测定标（`yaw = wrap(src+180)`，`viewer/src/replay/shavit-replay.ts:494-497`）是两套口径；t8 评审实测 270− 式对出生点实体疑似镜像（F6 已知问题，未修复）——故 `.replay` 侧**不**复用此式。
+3. **坐标系同一约定**：GLB 顶点/出生点都走 `[x,y,z]→[y,z,x]` Y-up 变换（`src/wasm-core/bsp_to_gltf_core/convert.rs:813-816`、`src/wasm-core/model_integrator/mod.rs:1041-1045`、`viewer/crates/wasm/src/lib.rs:339-342`），所以 Shavit 录像帧的绝对世界坐标可直接与场景对齐——`.replay` 解码走同一 `[y,z,x]` 映射（`viewer/src/replay/shavit-replay.ts:481`），HUD 包围盒外检查（`app.ts:157-188`）只用于暴露映射错误。
 4. **与 test/dual-mode-harness 的特殊关系**：viewer 的空间分块合并算法移植自 harness 的 `worker-b.ts`（`scene.ts:236-241` 注释自证）；viewer 的录像自检与 harness 的对照测试互补（管线 vs 物理）。
 
 ## 8. 若要在 viewer 上"加物理"会破坏什么（反向印证取舍）
 
 - 需要引入 websurf-phys + SAB/权威 Worker → 破坏"单线程、双击 dist 可用"（§2）；
 - 需要碰撞 → GLB 导出要补 brush 碰撞体（共享层已有该路径，viewer 未启用，`lib.rs:1-9`"brush/模型碰撞…均不导出"）；
-- 需要重演物理 → 录像回放要换成重模拟，规则脚本映射与"任意格式 JSON"的通用性消失。
-这就是 viewer 保持"无物理纯视觉"的原因：**每一项它不做的能力，都换来一条它独有的简单性**（file:// 双击、29 万帧无卡顿、跨格式通用回放）。
+- 需要重演物理 → 录像回放要换成重模拟，与"原生 `.replay` 帧直读回放"（基准 = 帧自身坐标）的定位冲突——viewer 刻意不做重演。
+这就是 viewer 保持"无物理纯视觉"的原因：**每一项它不做的能力，都换来一条它独有的简单性**（file:// 双击、`.replay` 零配置直入、53 KB→1211 帧毫秒级解析，断网/慢机也不会跑歪轨迹）。

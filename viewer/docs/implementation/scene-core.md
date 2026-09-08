@@ -1,7 +1,8 @@
 # viewer 实现细节 · 场景与自由飞行（core/ + ui/）
 
 > 本文覆盖 `viewer/src/core/*`、`viewer/src/ui/*`：渲染场景、飞行相机、位姿契约、常量、
-> DOM 工具与三个 UI 组件。总览见 [../overview.md](../overview.md)，时序见 [../sequences.md](../sequences.md)；
+> DOM 工具与三个 UI 组件（hud / mapinfo / replaymeta——原第四个组件 ReferenceGrid 已随 2026-09
+> 界面精简移除，见 §6.2）。总览见 [../overview.md](../overview.md)，时序见 [../sequences.md](../sequences.md)；
 > 录像子系统另见 [replay-system.md](replay-system.md)。
 
 ## 1. ViewerScene（`viewer/src/core/scene.ts`，416 行）
@@ -43,7 +44,7 @@
 
 ### 1.6 拾取接口
 
-`hasModel()` / `model` getter（拾取与量测用）/ `worldBox()`（参考网格与地图贴合检查用，`scene.ts:86-99`）。
+`hasModel()` / `model` getter（拾取用）/ `worldBox()`（地图贴合检查/录像对照用，`scene.ts:86-99`）。
 
 ## 2. FlyCam 自由飞行相机（`viewer/src/core/fly.ts`，220 行）
 
@@ -78,7 +79,8 @@
 ## 3. 位姿契约与换算（`viewer/src/core/pose.ts`，25 行）
 
 - `Pose = { pos:[x,y,z] 脚底; ang:[yawDeg, pitchDeg] }`（`pose.ts:5-9`）——HUD 读数、出生点跳转、回放相机三处共用（`pose.ts:1`）。
-- `bspYawToCsYaw(bspYaw) = ((270 − yaw) mod 360)`（`pose.ts:11-14`）：BSP 方位角（顺时针）→ viewer yaw（逆时针）。**同式在三处各自维护**：`viewer/src/core/pose.ts:12-14`、`src/ts-shared/phys/world-builder.ts:92`、`debug/src/world/spawn-loader.ts:61`（互不 import，公式对齐，见 [../differences.md](../differences.md) §7）。
+- `bspYawToCsYaw(bspYaw) = ((270 − yaw) mod 360)`（`pose.ts:12-14`）：BSP 方位角（顺时针）→ viewer yaw（逆时针）。**同式在三处各自维护**：`viewer/src/core/pose.ts:12-14`、`src/ts-shared/phys/world-builder.ts:92`、`debug/src/world/spawn-loader.ts:61`（互不 import，公式对齐，见 [../differences.md](../differences.md) §7）。
+  ⚠ **该式仅服务 BSP 出生点实体角路径**（初始视角 `app.ts:266`、出生点列表 title `mapinfo.ts:139`），与 `.replay` 帧解码的实测定标（`yaw = wrap(srcYaw+180)`，`shavit-replay.ts:494-497`）**是两套口径，不可混用**；且 t8 评审实测该式对出生点实体**疑似镜像**（跨出生点差分互斥，F6 已知问题，未在本次范围修复）——引用时注意上下文。
 - `pitchClampedRad` / `eyeHeight`（`pose.ts:16-24`）。
 - `EYE_STAND = 64.09` HU（`core/constants.ts:6-7`，注释"与 game EYE_STAND 一致"）——与共享物理常量同值：`src/phys/player.rs:34` `pub const EYE_STAND: f64 = 64.09`。
 
@@ -116,19 +118,18 @@
 - flash 语义：临时消息显示 ms 后恢复**该行**持久文本（'' 立即恢复，不残留）（`hud.ts:6-7`）。
 - 帮助浮层：顶栏 `?` 开 / × 或 Esc 关，非模态不拦点击（`hud.ts:28-38, 100-108`）。
 - 启动兜底：`showFatal`（WebGL 不可用）+ `showGuide/showGuideError`（首访引导层报错）+ `setDropActive`（拖拽高亮）（`hud.ts:110-143`）。
-- HUD 行内容与分工的跨面逻辑（哪条消息进哪个域）见 `app.ts:159-190` 的 `updateReplayMapStatus` 注释。
+- HUD 行内容与分工的跨面逻辑（哪条消息进哪个域）见 `app.ts:157-188` 的 `updateReplayMapStatus` 注释。
 
-## 6. MapPanel 与 ReferenceGrid（`viewer/src/ui/mapinfo.ts` 165 行、`viewer/src/ui/reference.ts` 77 行）
+## 6. MapPanel（`viewer/src/ui/mapinfo.ts`，165 行；ReferenceGrid 已移除）
 
-### 6.1 MapPanel（地图页上半）
+### 6.1 MapPanel（地图页全部内容）
 
-- 「更换地图」入口：加载成功后显示，点击走 `#bspFile.click()` 同一链路（`mapinfo.ts:44-56`；加载中 `setLoadBusy` 禁用，`mapinfo.ts:69-72`）。
-- 地图信息：默认核心三行（文件 / 出生点数 / 世界尺寸 X×Y×Z HU，`mapinfo.ts:89-104`）；magic/brushes/faces/models/vertices/static props/PAKFILE 数/解析耗时/包围盒收进「统计明细」折叠（`mapinfo.ts:106-121`）。
-- 出生点导航：单行 pill（★ = 推荐点 `info_player_start`），坐标与 viewer 约定 yaw 全量进 title；「跳转」按钮 → `onJump(pose)` → `fly.setPose`（`mapinfo.ts:123-165`，跳转 156-161；app 侧在 `app.ts:93-98` 接线，回放第一人称时跳转被忽略）。
-- **出生点快照**：`spawnPoints` getter 暴露 `{name,pos}[]`（世界坐标脚底），供录像"起点对齐"检测与一键锚定（`mapinfo.ts:37-38, 65-68`；消费方 `app.ts:196-222`、`panel.ts`）。
+- 「更换地图」入口：加载成功后显示，点击走 `#bspFile.click()` 同一链路（`mapinfo.ts:44-55`；加载中 `setLoadBusy` 禁用，`mapinfo.ts:69-72`）。
+- 地图信息：默认核心三行（文件 / 出生点数 / 世界尺寸 X×Y×Z HU，`mapinfo.ts:90-103`）；magic/brushes/faces/models/vertices/static props/PAKFILE 数/解析耗时/包围盒收进「统计明细」折叠（`mapinfo.ts:106-118`）。
+- 出生点导航：单行 pill（★ = 推荐点 `info_player_start`），坐标与 viewer 约定 yaw 全量进 title；「跳转」按钮 → `onJump(pose)` → `fly.setPose`（`mapinfo.ts:121-157`，跳转按钮 `:145-152`；app 侧在 `app.ts:94-99` 接线，回放第一人称时跳转被忽略）。
+- **出生点快照**：`spawnPoints` getter 暴露 `{name,pos}[]`（世界坐标脚底，`mapinfo.ts:37-38, 65-68`）——消费方只剩「出生点导航」跳转列表自身（头注释 `:64` 同口径）；录像侧已不再消费（t4 起无「起点对齐」检测与一键锚定）。
 
-### 6.2 ReferenceGrid（地图页底部）
+### 6.2 ReferenceGrid（已移除）
 
-- 地面网格：按地图 XZ 尺寸自适应（下限 1024，向上取整到 512 的倍数），512 HU 一格，中心对齐地图中心、贴地 `box.min[1]`（`reference.ts:31-45`）。
-- 世界坐标轴：X 红 / Y 绿 / Z 蓝，长度 `max(256, span/8)`（`reference.ts:47-50`）。
-- 无地图时开关联动提示"需要先加载 BSP"（`reference.ts:54-59`）；`setWorld` 换图时先 dispose 旧网格/轴（`reference.ts:27-50`）。
+- `viewer/src/ui/reference.ts`（地面网格 + 世界坐标轴）已于 2026-09 界面精简中**删除**——地图页底部不再有「参考显示」开关；`scene.worldBox()` 仍保留（拾取接口，§1.6），地图贴合检查改由 HUD 提醒承担（`app.ts:157-188`）。
+- 证据：`src/ui/` 现仅 `hud.ts / mapinfo.ts / replaymeta.ts` 三文件；冒烟自检断言「参考显示（ReferenceGrid）已不存在」（`test/smoke-cdp.mjs:651-664`）。

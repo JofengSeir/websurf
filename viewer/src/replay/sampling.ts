@@ -19,7 +19,7 @@ export function lerp(a: number, b: number, t: number): number {
 
 /**
  * 时间 → 帧序号（插值左端）。t 超出范围会被夹到首尾帧。
- * clip.t 单调不减（buildClip 保证），所以可以二分。
+ * clip.t 单调不减（导入管线保证：t(i)=(i−preFrames)/tickrate），所以可以二分。
  */
 export function indexInClip(clip: Clip, t: number): number {
   const n = clip.count;
