@@ -57,7 +57,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 │ │         constants dom(DOM 工具)                                    │
 │ ├─ ui/    hud(三行状态域·引导·帮助) mapinfo(地图信息·出生点)          │
 │ │          replaymeta(录像信息条：Clip.meta 渲染)                     │
-│ │          telemetry(速度 HUD[game 同款]+timeline 右列按键)           │
+│ │          telemetry(速度 HUD[可视区中心]+timeline 右列按键)        │
 │ ├─ replay/ 13 个模块：.replay 原生解析→Clip→播放·多轨迹·可视化·面板    │
 │ └─ worker/parse-worker.ts ──(esbuild)──> web/parse-worker.js         │
 └───────┬──────────────────────────────────────────────┬──────────────┘
@@ -98,7 +98,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 | replay | `src/replay/player.ts` | 206 | 播放器：主时钟 + A-B/循环/倍速/逐帧 + 采样出口 | 同上 §5.2 |
 | replay | `src/replay/visuals.ts` | 174 | 3D 呈现：轨迹线（抽稀 4 万点）+ 幽灵 + 起终点标记 | 同上 §6 |
 | replay | `src/replay/panel.ts` | 318 | 录像面板：导入 + 坐标映射切换 + 轨迹列表 + 调整工具（仅显式叠加） | 同上 §7.1 |
-| replay | `src/replay/timeline.ts` | 327 | 底部时间轴（三行 grid：进度条+正式跑段高亮 / 主控制 / 显示开关；右列为遥测按键簇） | 同上 §7.3 |
+| replay | `src/replay/timeline.ts` | 330 | 底部时间轴（三行 grid：进度条+正式跑段高亮 / 主控制 / 显示开关；右列为遥测按键簇；默认窗口 = 整条 clip 含 prerun） | 同上 §7.3 |
 | replay | `src/replay/trackpanel.ts` | 214 | 轨迹列表（每轨两行卡 + 批量操作） | 同上 §7.2 |
 | worker | `src/worker/parse-worker.ts` | 110 | 解析 Worker：魔数嗅探（text() 前）→ 字节缓存 → 原生解析 → 零拷贝回传 | 同上 §4.2 |
 | rust | `crates/wasm/src/lib.rs` | 466 | WASM 薄导出层：BspProcessor 三方法 + PAKFILE 模型/材质提取 | [sequences.md](sequences.md) §2.1 |

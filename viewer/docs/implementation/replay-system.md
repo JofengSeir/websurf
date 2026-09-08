@@ -197,12 +197,18 @@ JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapD
 每轨一行（显隐/配色/名称/时间偏移/跟随/移除）+ 批量操作（全部显示/全部隐藏/偏移归零/清空全部，
 仅在有轨道时出现，`:47-79`）；清空回调 `onCleared`（`:206`）。
 
-### 7.3 时间轴（`viewer/src/replay/timeline.ts`，327 行）
+### 7.3 时间轴（`viewer/src/replay/timeline.ts`，330 行）
 
 三行结构（`:1-10`）：上行 = 进度条（**正式跑段高亮带**按 `Clip.meta.frameCount` 定位 + A-B 区间金框叠加，
 `:42-50, 292-312`）；中行 = 播放/停止/逐帧/时间·帧读数/倍速选择器（8 档 0.1–16，`SPEEDS`，`:17-18`）；
 下行 = 视角与显示开关 + A-B 区间读数（速度读数已迁遥测 HUD，见 §7.5）。帧读数语义（`:321-334`）：跟随轨第 idx 帧 →
 `n/总数 帧 · pre | run k/frameCount | post`（run 段定位，多轨/pre 边界下明确）。快捷键 K/,/./I/O（`:189-209`）。
+
+**默认播放窗口 = 整条 clip**（用户要求放完，含 prerun 与 post）：主时钟 0 = 起跑帧语义不变，
+`resetRange/clearRange` 把窗口设为 `[min(0, clip.t[0]), duration]`（player.ts）；「整段」按钮与
+加载后初始窗口一致。带状叠加（run 高亮/A-B 金框）按**当前窗口**映射（`refreshZones` 的 `rel()`，
+负起点下 run 带正确落在窗口内 9.3% 处）。`tracks.localTime` 的「未开始」守卫相应改为
+`local < clip.t[0]`（片头前才返回 null，prerun 负段内幽灵/第一人称正常采样）。
 
 ### 7.4 录像信息条（`viewer/src/ui/replaymeta.ts`，107 行）
 
@@ -214,7 +220,7 @@ JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapD
 ### 7.5 遥测 HUD（`viewer/src/ui/telemetry.ts`，93 行）
 
 两部分（用户定调：速度位置照 game、按键在 timeline 右侧）：
-**速度 HUD**（`#telemetry`，game/web 同款：横向居中、距底 24%、单行裸数字 `横向｜竖向`，
+**速度 HUD**（`#telemetry`，game/web 同款：距底 24%、单行裸数字 `横向｜竖向`，水平锚点 = **可视区域**中心——右面板开启时扣除 `--sidebar-w + 26px`（与 #dock 同参），面板收起（`.full`）回全屏居中；
 竖向取绝对值，无标签无单位卡片底；数据源 = 跟随轨道 `Clip.vel` 相邻帧差分：
 横向 = `hypot(vel[0],vel[2])`、竖向 = `|vel[1]|`）；
 **按键簇**（挂 `#timeline` grid 右列，随时间轴显隐）：六键 W/A/S/D/跳/蹲，按跟随轨道当前帧

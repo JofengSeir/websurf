@@ -90,11 +90,13 @@ export class TrackSet {
 
   /**
    * 主时钟 t → 轨道内部时间。
-   * 还没开始返回 null（幽灵不显示）；已播完夹到末帧（停在终点，便于看谁先到）。
+   * 还没到该轨道片头返回 null（幽灵不显示）——片头含 prerun 负段（默认播放
+   * 窗口 = 整条 clip，用户要求放完）；已播完夹到末帧（停在终点，便于看谁先到）。
    */
   localTime(track: Track, t: number): number | null {
     const local = t - track.offset;
-    if (local < 0) return null;
+    const head = track.clip.count > 0 ? track.clip.t[0] : 0;
+    if (local < head) return null;
     return Math.min(local, track.clip.duration);
   }
 

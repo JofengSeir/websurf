@@ -53,12 +53,15 @@ fly.onLockError = () => hud.flashStatus('鼠标锁定失败，请再点击一次
 const sidebarEl = qs('sidebar');
 const dockEl = qs('dock');
 const timelineEl = qs('timeline');
+const telemetryEl = qs('telemetry');
 const sidebarToggle = qs<HTMLButtonElement>('sidebarToggle');
 
 sidebarToggle?.addEventListener('click', () => {
   const hidden = sidebarEl?.classList.toggle('hidden') ?? false;
   sidebarToggle.classList.toggle('active', !hidden);
   dockEl?.classList.toggle('full', hidden);
+  // 速度 HUD 锚点跟随可视区域：面板收起 → 全屏居中
+  telemetryEl?.classList.toggle('full', hidden);
 });
 
 for (const tab of Array.from(document.querySelectorAll<HTMLButtonElement>('.tab'))) {
@@ -75,6 +78,7 @@ for (const tab of Array.from(document.querySelectorAll<HTMLButtonElement>('.tab'
       sidebarEl.classList.remove('hidden');
       sidebarToggle?.classList.add('active');
       timelineEl?.classList.remove('full');
+      telemetryEl?.classList.remove('full');
     }
   });
 }

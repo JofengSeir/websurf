@@ -91,10 +91,37 @@ export class ReplayPlayer {
   }
 
   private resetRange(): void {
-    this.rangeStart = 0;
-    this.rangeEnd = 0;
-    this.time = 0;
+    this.applyFullRange();
+    this.time = this.rangeStart;
     this.playing = false;
+  }
+
+  /**
+   * 播放窗口复位为**整条 clip**（用户要求放完：含 prerun 与 post）。
+   * 主时钟 0 = 起跑帧的语义不变；首帧 t[0] 为负（prerun）时窗口起点即片头。
+   */
+  clearRange(): void {
+    this.applyFullRange();
+    this.time = Math.max(this.rangeStart, Math.min(this.rangeStop, this.time));
+    this.notify();
+  }
+
+  private applyFullRange(): void {
+    const first = this.tracks.tracks[0]?.clip;
+    const t0 = first && first.count > 0 ? first.t[0] : 0;
+    this.rangeStart = Math.min(0, t0);
+    this.rangeEnd = this.tracks.duration;
+  }
+
+  /** 当前窗口是否就是默认整条 clip（时间轴据此显示「整段」而不是区间读数）。 */
+  get isFullWindow(): boolean {
+    const first = this.tracks.tracks[0]?.clip;
+    const t0 = first && first.count > 0 ? first.t[0] : 0;
+    return (
+      this.rangeEnd > this.rangeStart &&
+      this.rangeStart === Math.min(0, t0) &&
+      Math.abs(this.rangeEnd - this.tracks.duration) < 1e-9
+    );
   }
 
   // ── 播放控制 ────────────────────────────────────────────────────

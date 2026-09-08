@@ -286,15 +286,20 @@ code { font-family: var(--mono); color: var(--accent); }
 .tl-speed-select { flex: 0 0 auto; }
 .tl-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-/* ── 回放遥测 HUD：速度（game 同款：横向居中，距底 24%，单行裸数字）──
- * 对照 game/web/index.html #hud/#stats：无卡片底、text-shadow、tabular-nums。 */
+/* ── 回放遥测 HUD：速度（game 同款：单行裸数字，距底 24%）──
+ * 对照 game/web/index.html #hud/#stats：无卡片底、text-shadow、tabular-nums。
+ * 水平锚点 = **可视区域**中心：右面板开启时扣除面板宽度（与 #dock 同参），
+ * 面板收起（.full）后回全屏居中——用户定调：以可观看区域为中心。 */
 .telemetry {
-  position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%);
+  position: absolute; bottom: 24%;
+  left: calc((100% - (var(--sidebar-w) + 26px)) / 2);
+  transform: translateX(-50%);
   z-index: 5; pointer-events: none; user-select: none;
   font-variant-numeric: tabular-nums;
   font-size: 21px; font-weight: 600; letter-spacing: .5px; color: var(--text);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.3);
 }
+.telemetry.full { left: 50%; }
 .telemetry .vsep { color: rgba(255, 255, 255, 0.35); margin: 0 8px; font-weight: 400; }
 .telemetry .tm-vert { color: var(--muted); }
 
