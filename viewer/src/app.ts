@@ -19,6 +19,7 @@ import { Hud } from './ui/hud.js';
 import { MapPanel } from './ui/mapinfo.js';
 import type { WorldBox } from './ui/mapinfo.js';
 import { ReplayMetaPanel } from './ui/replaymeta.js';
+import { TelemetryHud } from './ui/telemetry.js';
 import { ReplayImporter } from './replay/importer.js';
 import { ReplayPanel } from './replay/panel.js';
 import { ReplayPlayer } from './replay/player.js';
@@ -105,12 +106,13 @@ const player = new ReplayPlayer();
 const visuals = new ReplayVisuals(scene);
 const replayPane = qs('pane-replay');
 
-/** 轨道增删 / 属性变化后同步：3D 可视化、时间轴、录像信息条（轨迹列表由 refreshTracks 负责）。 */
+/** 轨道增删 / 属性变化后同步：3D 可视化、时间轴、录像信息条、遥测 HUD（轨迹列表由 refreshTracks 负责）。 */
 function syncTracks(): void {
   const tracks = player.tracks.tracks;
   visuals.setTracks(tracks);
   timeline.setTracks(tracks);
   metaPanel.setTracks(tracks, player.tracks.followId);
+  telemetry.setTracks(tracks.length > 0);
 }
 
 let replayPanel: ReplayPanel | null = null;
@@ -147,6 +149,7 @@ if (replayPane) {
 
 const metaPanel = new ReplayMetaPanel(qs('replayMeta') ?? document.createElement('div'));
 const timeline = new Timeline(timelineEl ?? document.createElement('div'), player, visuals);
+const telemetry = new TelemetryHud(qs('telemetry') ?? document.createElement('div'));
 
 /**
  * 地图贴合检查，合并成一条 HUD 提醒（仅 #replayStatus，跨面提醒）。
@@ -480,6 +483,11 @@ function frame(now: number): void {
     hudAt = now;
     hud.setPose(poseText(fly.getPose()));
     timeline.refresh();
+    // 遥测 HUD：速度双读数（横向/竖向）+ 按键可视化（跟随轨道当前帧）
+    const follow = player.tracks.follow;
+    const frameButtons = follow?.clip.buttons ?? null;
+    const fi = player.indexAt(player.time);
+    telemetry.update(player.sample(), frameButtons ? frameButtons[fi] ?? null : null);
   }
 }
 

@@ -1,4 +1,4 @@
-# viewer 实现细节 · 录像回放系统（src/replay/ + worker/ + ui/replaymeta.ts）
+# viewer 实现细节 · 录像回放系统（src/replay/ + worker/ + ui/replaymeta.ts + ui/telemetry.ts）
 
 > viewer 回放建立在一条固定管线上：**Shavit `.replay` 原生解析（二进制 → 定标映射）→ Clip（定型数组）→ 播放**。
 > 播放器只认 Clip；播放基准 = **帧自身坐标**（解码仅做坐标映射，任何平移/旋转都只能由用户显式叠加）。
@@ -197,11 +197,11 @@ JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapD
 每轨一行（显隐/配色/名称/时间偏移/跟随/移除）+ 批量操作（全部显示/全部隐藏/偏移归零/清空全部，
 仅在有轨道时出现，`:47-79`）；清空回调 `onCleared`（`:206`）。
 
-### 7.3 时间轴（`viewer/src/replay/timeline.ts`，342 行）
+### 7.3 时间轴（`viewer/src/replay/timeline.ts`，327 行）
 
 三行结构（`:1-10`）：上行 = 进度条（**正式跑段高亮带**按 `Clip.meta.frameCount` 定位 + A-B 区间金框叠加，
 `:42-50, 292-312`）；中行 = 播放/停止/逐帧/时间·帧读数/倍速选择器（8 档 0.1–16，`SPEEDS`，`:17-18`）；
-下行 = 视角与显示开关 + A-B 区间读数 + 速度读数。帧读数语义（`:321-334`）：跟随轨第 idx 帧 →
+下行 = 视角与显示开关 + A-B 区间读数（速度读数已迁遥测 HUD，见 §7.5）。帧读数语义（`:321-334`）：跟随轨第 idx 帧 →
 `n/总数 帧 · pre | run k/frameCount | post`（run 段定位，多轨/pre 边界下明确）。快捷键 K/,/./I/O（`:189-209`）。
 
 ### 7.4 录像信息条（`viewer/src/ui/replaymeta.ts`，107 行）
@@ -211,7 +211,16 @@ JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapD
 风格 / tick / 帧段（title 带 stage）/ 日期（本地 YYYY-MM-DD）/ 格式版本（title 带 offsets 记录数）。
 缺失字段不出该项（V2 无成绩不渲染）；静态字段只在轨道增删/跟随切换时重渲染（`:1-7`）。
 
-### 7.5 装配与对外 API（`viewer/src/app.ts`，496 行）
+### 7.5 遥测 HUD（`viewer/src/ui/telemetry.ts`，96 行）
+
+视口中心偏下常驻（`#telemetry`，有轨道即显示）：**横向/竖向速度双读数**（横向 = `hypot(vel[0],vel[2])`
+XY 平面主读数，竖向 = `vel[1]` Z 轴副读数，HU/s；数据源 = 跟随轨道 `Clip.vel` 相邻帧差分）
++ **按键可视化**（六键簇 W/A/S/D/跳/蹲，按 `Clip.buttons[index]` IN_* 位掩码高亮：
+IN_JUMP=2、IN_DUCK=4、IN_FORWARD=8、IN_BACK=16、IN_MOVELEFT=512、IN_MOVERIGHT=1024，
+与 selftest `IN_FORWARD(8)`/`IN_MOVELEFT(512)` 断言同源）。驱动：`syncTracks` 控显隐 +
+帧循环 80ms 节拍内 `update(sample(), followClip.buttons[index])`（app.ts 帧循环段）。
+
+### 7.6 装配与对外 API（`viewer/src/app.ts`，504 行）
 
 - 接线（`:102-149`）：`importer/player/visuals`（`:102-104`）→ `ReplayPanel`（回调 `onClip/onClearAll/onTracksChanged/onStatus`，
   **无 getStartAid**，`:117-146`）→ `ReplayMetaPanel`（`:148`）→ `Timeline`（`:149`）；`syncTracks` 统一同步

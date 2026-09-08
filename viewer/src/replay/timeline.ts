@@ -3,7 +3,7 @@
  *
  * t5 重排（三行结构）：上行 = 进度条（正式跑段高亮 + A-B 区间带叠加在轨道上）；
  * 中行 = 主控制（播放 / 停止 / 逐帧 / 时间·帧读数 / 倍速）；
- * 下行 = 视角与显示开关 + A-B 区间 + 速度读数。
+ * 下行 = 视角与显示开关 + A-B 区间。（速度读数已迁至遥测 HUD：ui/telemetry.ts）
  *
  * 主时钟 0 = 起跑帧（t3 方案 A：t(i)=(i−preFrames)/tickrate，prerun 帧在负时间轴、
  * 不在播放区间）；正式跑段高亮与帧读数的 run 段标注按跟随轨道的头部元信息（Clip.meta）。
@@ -24,7 +24,6 @@ export class Timeline {
   private readonly slider: HTMLInputElement;
   private readonly runZone: HTMLElement;
   private readonly abBand: HTMLElement;
-  private readonly speedEl: HTMLElement;
   private readonly rangeEl: HTMLElement;
   /** 有没有轨道（有才显示时间轴）。帧数等读数一律从播放器取，不缓存。 */
   private hasTracks = false;
@@ -180,10 +179,6 @@ export class Timeline {
     this.rangeEl = el('span', 'tl-range', '整段');
     opts.appendChild(this.rangeEl);
 
-    this.speedEl = el('span', 'tl-speed', '速度 —');
-    this.speedEl.title = '速度由相邻帧位置差分计算（HU/s，跟随轨道）';
-    opts.appendChild(this.speedEl);
-
     root.appendChild(opts);
 
     window.addEventListener('keydown', (e) => {
@@ -246,16 +241,6 @@ export class Timeline {
       this.slider.value = String(Math.round(p.ratio * 1000));
     }
     this.refreshZones();
-
-    const s = p.sample();
-    if (s?.vel) {
-      const horiz = Math.hypot(s.vel[0], s.vel[2]);
-      const vert = s.vel[1];
-      const total = Math.hypot(s.vel[0], s.vel[1], s.vel[2]);
-      this.speedEl.textContent = `速度 ${total.toFixed(0)}（水平 ${horiz.toFixed(0)}，垂直 ${vert.toFixed(0)}）HU/s`;
-    } else {
-      this.speedEl.textContent = '速度 —';
-    }
 
     const inRange = p.rangeEnd > p.rangeStart;
     this.rangeEl.textContent = inRange
