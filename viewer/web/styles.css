@@ -285,10 +285,39 @@ code { font-family: var(--mono); color: var(--accent); }
 .tl-frame { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
 .tl-speed-select { flex: 0 0 auto; }
 .tl-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.tl-speed {
-  font-size: 11px; color: var(--muted); font-family: var(--mono);
-  margin-left: auto; white-space: nowrap;
+
+/* ── 回放遥测 HUD（中心偏下：横向/竖向速度 + 按键可视化）────────── */
+.telemetry {
+  position: absolute; left: 50%; top: 62%; transform: translateX(-50%);
+  display: flex; align-items: flex-end; gap: 18px;
+  z-index: 5; padding: 8px 14px; border-radius: var(--r-md);
+  background: var(--panel); border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  pointer-events: none; user-select: none;
+  font-variant-numeric: tabular-nums;
 }
+.tm-speed { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
+.tm-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.tm-label { font-size: 11px; color: var(--muted); }
+.tm-value { font-family: var(--mono); font-size: 20px; line-height: 1.2; color: var(--text); }
+.tm-vert { font-size: 14px; color: var(--muted); }
+.tm-value::after { content: ' HU/s'; font-family: inherit; font-size: 10px; color: var(--muted); }
+.tm-keys { display: grid; grid-template-columns: repeat(3, 22px); grid-auto-rows: 22px; gap: 3px; }
+.tm-key {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10.5px; color: var(--muted);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+.tm-key.on {
+  color: #0f1115; background: var(--accent); border-color: var(--accent); font-weight: 600;
+}
+.tm-key-w { grid-area: 1 / 2; }
+.tm-key-a { grid-area: 2 / 1; }
+.tm-key-s { grid-area: 2 / 2; }
+.tm-key-d { grid-area: 2 / 3; }
+.tm-key-jump { grid-area: 3 / 1 / 4 / 3; }
+.tm-key-duck { grid-area: 3 / 3; }
 select.tl-select {
   font-family: inherit; font-size: 11.5px; color: var(--text);
   background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border);

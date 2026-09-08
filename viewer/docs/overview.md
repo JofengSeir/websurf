@@ -57,6 +57,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 │ │         constants dom(DOM 工具)                                    │
 │ ├─ ui/    hud(三行状态域·引导·帮助) mapinfo(地图信息·出生点)          │
 │ │          replaymeta(录像信息条：Clip.meta 渲染)                     │
+│ │          telemetry(遥测 HUD：横/竖速度+按键)                        │
 │ ├─ replay/ 13 个模块：.replay 原生解析→Clip→播放·多轨迹·可视化·面板    │
 │ └─ worker/parse-worker.ts ──(esbuild)──> web/parse-worker.js         │
 └───────┬──────────────────────────────────────────────┬──────────────┘
@@ -85,6 +86,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 | ui | `src/ui/hud.ts` | 143 | 三行状态域（位姿/地图/录像）+ flash 语义 + 引导层/兜底卡/帮助浮层 | 同上 §5 |
 | ui | `src/ui/mapinfo.ts` | 171 | 地图信息面板 + 出生点导航（跳转即换位姿） | 同上 §6 |
 | ui | `src/ui/replaymeta.ts` | 107 | 录像信息条：`.replay` 头部元信息常驻展示（Clip.meta → 成绩/玩家/地图/tick/帧段/日期/格式） | [implementation/replay-system.md](implementation/replay-system.md) §7.4 |
+| ui | `src/ui/telemetry.ts` | 96 | 遥测 HUD（中心偏下）：横向/竖向速度双读数（Clip.vel 差分）+ 六键按键可视化（Clip.buttons IN_* 位掩码） | 同上 §7.5 |
 | replay | `src/replay/types.ts` | 164 | 数据契约：RuleConfig v2（映射切换）/ ReplayHeaderMeta / Clip（含 buttons+meta）/ Track | 同上 §1 |
 | replay | `src/replay/shavit-replay.ts` | 585 | `.replay` 原生解析：嗅探/头部/帧解码/坐标定标映射/世界速度差分/V2 兼容 | 同上 §2 |
 | replay | `src/replay/helpers.ts` | 17 | 角度纯函数（wrapDeg / clampPitch） | 同上 §3.1 |
@@ -96,7 +98,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 | replay | `src/replay/player.ts` | 206 | 播放器：主时钟 + A-B/循环/倍速/逐帧 + 采样出口 | 同上 §5.2 |
 | replay | `src/replay/visuals.ts` | 174 | 3D 呈现：轨迹线（抽稀 4 万点）+ 幽灵 + 起终点标记 | 同上 §6 |
 | replay | `src/replay/panel.ts` | 318 | 录像面板：导入 + 坐标映射切换 + 轨迹列表 + 调整工具（仅显式叠加） | 同上 §7.1 |
-| replay | `src/replay/timeline.ts` | 342 | 底部时间轴（三行：进度条+正式跑段高亮 / 主控制 / 显示开关与读数） | 同上 §7.3 |
+| replay | `src/replay/timeline.ts` | 327 | 底部时间轴（三行：进度条+正式跑段高亮 / 主控制 / 显示开关；速度读数已迁遥测 HUD） | 同上 §7.3 |
 | replay | `src/replay/trackpanel.ts` | 214 | 轨迹列表（每轨两行卡 + 批量操作） | 同上 §7.2 |
 | worker | `src/worker/parse-worker.ts` | 110 | 解析 Worker：魔数嗅探（text() 前）→ 字节缓存 → 原生解析 → 零拷贝回传 | 同上 §4.2 |
 | rust | `crates/wasm/src/lib.rs` | 466 | WASM 薄导出层：BspProcessor 三方法 + PAKFILE 模型/材质提取 | [sequences.md](sequences.md) §2.1 |
