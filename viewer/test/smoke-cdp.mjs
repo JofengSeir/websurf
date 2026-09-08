@@ -370,33 +370,37 @@ try {
     JSON.stringify(metaApi),
   );
 
-  console.log('\n[3b2] 遥测 HUD（#telemetry：横向/竖向速度 + 按键可视化）');
+  console.log('\n[3b2] 遥测 HUD（速度 = game 同款单行；按键 = #timeline 右列）');
   const tmState = await evaluate(
     `(() => {
       const t = document.getElementById('telemetry');
-      if (!t) return null;
-      const horiz = t.querySelector('.tm-horiz')?.textContent ?? '';
-      const vert = t.querySelector('.tm-vert')?.textContent ?? '';
-      const keys = [...t.querySelectorAll('.tm-key')].map((k) => ({
+      const keys = [...document.querySelectorAll('#timeline .tm-key')].map((k) => ({
         label: k.textContent, on: k.classList.contains('on'),
       }));
-      return { hidden: t.classList.contains('hidden'), horiz, vert, keys };
+      return {
+        hidden: t ? t.classList.contains('hidden') : null,
+        horiz: t?.querySelector('.tm-horiz')?.textContent ?? '',
+        vert: t?.querySelector('.tm-vert')?.textContent ?? '',
+        sep: !!t?.querySelector('.vsep'),
+        keys,
+      };
     })()`,
     sessionId,
   );
-  check('遥测 HUD 可见（有轨道即显示）', tmState && tmState.hidden === false, JSON.stringify(tmState));
+  check('速度 HUD 可见（有轨道即显示）', tmState && tmState.hidden === false, JSON.stringify(tmState));
   check(
-    '横向速度读数存在且非占位（vel 差分，textContent = 纯数字；HU/s 由 CSS 伪元素补）',
-    tmState && tmState.horiz !== '—' && /^[0-9]+$/.test(tmState.horiz),
+    '横向速度读数非占位（vel 差分，textContent = 纯数字）',
+    tmState && /^[0-9]+$/.test(tmState.horiz),
     String(tmState?.horiz),
   );
   check(
-    '竖向速度读数存在（拆分显示，textContent = 带符号纯数字，下落为负）',
-    tmState && /^-?[0-9]+$/.test(tmState.vert),
+    '竖向速度读数存在（绝对值口径，与 game 同款）',
+    tmState && /^[0-9]+$/.test(tmState.vert),
     String(tmState?.vert),
   );
+  check('速度为单行「横向｜竖向」结构（vsep 分隔）', tmState && tmState.sep === true, String(tmState?.sep));
   check(
-    '按键簇六键齐备（W/A/S/D/跳/蹲）',
+    '按键簇六键齐备且位于 #timeline（W/A/S/D/跳/蹲）',
     tmState && tmState.keys.length === 6 &&
       ['W', 'A', 'S', 'D', '跳', '蹲'].every((l) => tmState.keys.some((k) => k.label === l)),
     JSON.stringify(tmState?.keys),

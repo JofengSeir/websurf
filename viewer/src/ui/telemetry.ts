@@ -1,10 +1,12 @@
 /**
- * 回放遥测 HUD（视口中心偏下）：横向 / 竖向速度双读数 + 按键可视化。
+ * 回放遥测 HUD：速度（视口内，game 同款位置/样式）+ 按键簇（timeline 右侧）。
  *
- * 速度 = 相邻帧位置差分的世界速度（Clip.vel，HU/s，跟随轨道），与原时间轴读数同源；
- * 应用户要求自时间轴下行迁入 HUD 并拆分横向（XY 平面）/ 竖向（Z 轴）两种显示。
- * 按键 = 逐帧 IN_* 位掩码（Clip.buttons；bit 值锚点见 types.ts「逐帧按键位掩码」注释
- * 与 replay-selftest 的 IN_FORWARD(8) / IN_MOVELEFT(512) 断言）。
+ * 速度 = 单行裸数字「横向｜竖向」（无标签无单位，竖向取绝对值），位置横向居中、
+ * 距底 24%——与 game/web/index.html 速度 HUD 同款（用户定调）。数据源 = 跟随轨道
+ * Clip.vel 相邻帧差分（横向 = hypot(vel[0],vel[2])，竖向 = |vel[1]|）。
+ * 按键 = 六键簇（W/A/S/D/跳/蹲），挂 #timeline 右列（grid），按跟随轨道当前帧
+ * Clip.buttons[index] 的 IN_* 位掩码高亮（bit 值锚点见 types.ts 注释与 replay-selftest
+ * 的 IN_FORWARD(8) / IN_MOVELEFT(512) 断言）。
  */
 
 import { el } from '../core/dom.js';
@@ -40,23 +42,20 @@ export class TelemetryHud {
   private readonly vertEl: HTMLElement;
   private readonly keyEls: ReadonlyMap<string, HTMLElement>;
 
-  constructor(private readonly root: HTMLElement) {
-    // ── 速度：横向（XY 平面，主读数）+ 竖向（Z 轴）──
-    const speed = el('div', 'tm-speed');
+  /**
+   * @param speedRoot 速度 HUD 容器（#telemetry，game 同款定位由 CSS 决定）
+   * @param keysRoot 按键簇容器（#timeline，右列；随时间轴显隐）
+   */
+  constructor(speedRoot: HTMLElement, keysRoot: HTMLElement) {
+    // ── 速度：单行「横向｜竖向」裸数字（game 同款）──
+    this.horizEl = el('span', 'tm-horiz', '—');
+    const sep = el('span', 'vsep', '｜');
+    this.vertEl = el('span', 'tm-vert', '—');
+    speedRoot.appendChild(this.horizEl);
+    speedRoot.appendChild(sep);
+    speedRoot.appendChild(this.vertEl);
 
-    const hRow = el('div', 'tm-row');
-    hRow.appendChild(el('span', 'tm-label', '横向'));
-    this.horizEl = el('span', 'tm-value tm-horiz', '—');
-    hRow.appendChild(this.horizEl);
-    speed.appendChild(hRow);
-
-    const vRow = el('div', 'tm-row');
-    vRow.appendChild(el('span', 'tm-label', '竖向'));
-    this.vertEl = el('span', 'tm-value tm-vert', '—');
-    vRow.appendChild(this.vertEl);
-    speed.appendChild(vRow);
-
-    // ── 按键簇：3 列网格（W 上排居中，A/S/D 中排，跳/蹲 下排）──
+    // ── 按键簇：3 列网格（W 上排居中，A/S/D 中排，跳/蹲 下排），timeline 右列 ──
     const keys = el('div', 'tm-keys');
     const map = new Map<string, HTMLElement>();
     for (const k of KEYS) {
@@ -65,14 +64,12 @@ export class TelemetryHud {
       keys.appendChild(keyEl);
     }
     this.keyEls = map;
-
-    root.appendChild(speed);
-    root.appendChild(keys);
+    keysRoot.appendChild(keys);
   }
 
-  /** 轨道增删后调用；无轨道时整块隐藏。 */
+  /** 轨道增删后调用；无轨道时速度 HUD 隐藏（按键随 #timeline 自身显隐）。 */
   setTracks(hasTracks: boolean): void {
-    this.root.classList.toggle('hidden', !hasTracks);
+    (this.horizEl.parentElement as HTMLElement).classList.toggle('hidden', !hasTracks);
   }
 
   /**
@@ -83,7 +80,7 @@ export class TelemetryHud {
   update(s: Sample | null, buttons: number | null): void {
     if (s?.vel) {
       this.horizEl.textContent = Math.hypot(s.vel[0], s.vel[2]).toFixed(0);
-      this.vertEl.textContent = s.vel[1].toFixed(0);
+      this.vertEl.textContent = Math.abs(s.vel[1]).toFixed(0);
     } else {
       this.horizEl.textContent = '—';
       this.vertEl.textContent = '—';

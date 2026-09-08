@@ -149,7 +149,11 @@ if (replayPane) {
 
 const metaPanel = new ReplayMetaPanel(qs('replayMeta') ?? document.createElement('div'));
 const timeline = new Timeline(timelineEl ?? document.createElement('div'), player, visuals);
-const telemetry = new TelemetryHud(qs('telemetry') ?? document.createElement('div'));
+// 遥测：速度 HUD 挂 #telemetry（game 同款位置）；按键簇挂 #timeline 右列
+const telemetry = new TelemetryHud(
+  qs('telemetry') ?? document.createElement('div'),
+  timelineEl ?? document.createElement('div'),
+);
 
 /**
  * 地图贴合检查，合并成一条 HUD 提醒（仅 #replayStatus，跨面提醒）。
