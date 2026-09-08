@@ -156,7 +156,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 | 通道 | SAB 512B / MsgState | 同 debug | 无 | SAB 192B / 消息回退 |
 | 渲染位置 | 主线程 | 主线程 | 主线程（单线程） | WorkerB（OffscreenCanvas） |
 | 配置面 | 11 段 RuntimeConfig + 13 项物理面板 | 5 段 + lockTickRate；tickRate 隐藏偏移 +3（`game/src/worker/main.ts:32,86`） | 无面板（FOV 固定 73.6） | 难度按钮（TICK_RATE=模式B 步长，非权威频率） |
-| 独有设施 | 物理参数面板/碰撞可视化/准星检查/近平面调参、计时挑战状态机、自定义传送编辑、默认纹理包装配 | 存点系统（X/C 冻结）、键位录制重绑、风格化准星、ESC 双栏面板 | 录像回放全系统（规则脚本→标准帧→多轨迹）、地图信息面板、`window.viewer.replay` API | 11 个验证脚本（53 断言冒烟/唤醒并发/性能基准/屏闪排查/双线对照） |
+| 独有设施 | 物理参数面板/碰撞可视化/准星检查/近平面调参、计时挑战状态机、自定义传送编辑、默认纹理包装配 | 存点系统（X/C 冻结）、键位录制重绑、风格化准星、ESC 双栏面板 | Shavit `.replay` 原生解析回放（帧自身坐标直读 + 多轨迹/信息条/时间轴）、地图信息面板、`window.viewer.replay` API（含 `meta()`） | 11 个验证脚本（53 断言冒烟/唤醒并发/性能基准/屏闪排查/双线对照） |
 | PVS | 面板可控 | 代码在但 `ENABLE_PVS=false`（`renderer-main.ts:82`） | 无 | 排除（teleport/PVS 保留 API 不调用） |
 | CI/产物 | multi dist 部署 | multi dist 部署 | single dist 部署 | 仅构建验证 |
 
@@ -190,7 +190,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 | 共享层 | [phys.md](./phys.md)（172 行）· [wasm-core.md](./wasm-core.md)（168 行）· [ts-shared.md](./ts-shared.md)（192 行）· [materials.md](./materials.md) | Rust 物理内核 · BSP 解析/GLB/纹理解码 · TS 协议与算法 · 材质体系全景 |
 | debug | [overview](../debug/docs/overview.md) · [sequences](../debug/docs/sequences.md) · [implementation×3](../debug/docs/implementation/loading-pipeline.md) · [differences](../debug/docs/differences.md) | 主工程四维度 |
 | game | [overview](../game/docs/overview.md) · [sequences](../game/docs/sequences.md) · [implementation×2](../game/docs/implementation/panel-and-input.md) · [differences](../game/docs/differences.md) | 游戏工程四维度 |
-| viewer | [overview](../viewer/docs/overview.md) · [sequences](../viewer/docs/sequences.md) · [implementation×2](../viewer/docs/implementation/scene-core.md) · [replay-rule-ai](../viewer/docs/replay-rule-ai.md) · [differences](../viewer/docs/differences.md) | 游览/回放工程四维度 + AI 脚本规范 |
+| viewer | [overview](../viewer/docs/overview.md) · [sequences](../viewer/docs/sequences.md) · [implementation×3](../viewer/docs/implementation/scene-core.md) · [differences](../viewer/docs/differences.md) | 游览/回放工程四维度（含 `.replay` 格式规格；规则脚本规范已归档为历史注记） |
 | harness | [overview](../test/dual-mode-harness/docs/overview.md) · [sequences](../test/dual-mode-harness/docs/sequences.md) · [implementation×2](../test/dual-mode-harness/docs/implementation/dual-physics.md) · [differences](../test/dual-mode-harness/docs/differences.md) | 验证工程四维度 |
 
 历史分析文档全部在 5 处 `archive/`（`docs/archive/`、`debug/docs/archive/`、`game/docs/archive/`、`test/dual-mode-harness/docs/archive/`、`viewer/docs/archive/`），仅作背景，不作为事实来源。

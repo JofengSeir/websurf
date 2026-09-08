@@ -1,6 +1,6 @@
 /** 主线程 ↔ 解析 Worker 的消息协议。 */
 
-import type { RuleConfig } from './types.js';
+import type { ReplayHeaderMeta, RuleConfig } from './types.js';
 
 /** Clip 的可转移形态（定型数组，零拷贝回传）。 */
 export interface ClipPayload {
@@ -14,6 +14,10 @@ export interface ClipPayload {
   bbox: { min: [number, number, number]; max: [number, number, number] };
   maxSpeed: number;
   resolvedPath: string;
+  /** 逐帧按键位掩码；仅 .replay 原生路径填充，JSON 路径为 null。 */
+  buttons: Int32Array | null;
+  /** Shavit .replay 头部元信息；JSON 路径为 null（UI 元信息面板数据源）。 */
+  meta: ReplayHeaderMeta | null;
 }
 
 export type ParseRequest = {

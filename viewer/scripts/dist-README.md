@@ -15,9 +15,8 @@ dist/
 ├── index.html                 应用页（classic script；双击或拖进浏览器均可）
 ├── app.js                     单文件 IIFE：内嵌 WASM(base64) + 录像 Worker（Blob URL）
 ├── styles.css
-├── assets/maps/               示例录像 + 配套规则（HTTP 深链演示用；file:// 下走面板文件选择）
-│   ├── surf_null_4.replay.json
-│   └── surf_null_4.rule.json
+├── assets/maps/               示例录像（HTTP 深链演示用；file:// 下走面板文件选择）
+│   └── surf_null_4.replay
 ├── serve.py                   静态服务器（python serve.py [port]，默认 8090）
 ├── play.cmd                   双击 = 起服务器 + 自动打开浏览器（Windows）★
 ├── play.sh                    同左（macOS/Linux）★
@@ -35,17 +34,17 @@ dist/
 ## file:// 与 HTTP 的差异
 
 - file:// 下：WASM、Worker 全部内嵌/Blob，正常可用；地图与录像用页面里
-  「选择 BSP 地图…」/「选择 JSON 录像…」按钮或直接拖入窗口。
+  「选择 BSP 地图…」/「选择录像文件…」按钮或直接拖入窗口。
 - HTTP 下额外支持 URL 深链（免点选文件，可分享）：
-  `index.html?replay=assets/maps/surf_null_4.replay.json&rule=assets/maps/surf_null_4.rule.json`
-  （`?bsp=` / `?replay=` / `?rule=` 任意组合，相对路径相对页面解析，也支持带 CORS 头的绝对 URL）。
+  `index.html?replay=assets/maps/surf_null_4.replay`
+  （`?bsp=` / `?replay=` 任意组合，相对路径相对页面解析，也支持带 CORS 头的绝对 URL）。
 
-## 变换调整（录像↔地图对齐）
+## 播放基准与坐标映射
 
-录像整体位置/朝向与地图不符时（悬空、侧转 90°、落在地图外），「录像」页「变换调整」区
-人工微调：平移 X/Y/Z、旋转 yaw（±90° 快捷）、「一键锚定到出生点」自动平移对齐；改动即
-重新导入当前轨道。第三方录像格式的 .js 转化脚本规范见 `viewer/docs/replay-rule-ai.md`，
-播放可由外部脚本经 `window.viewer.replay`（play/pause/seek/setSpeed/setMode/follow）控制。
+录像以 `.replay` 帧自身坐标播放（默认直读，无起点锚定）。轨迹与地图对不上时（悬空、
+侧转 90°、落在地图外），「录像」页「坐标映射」切换对照（轴序 / 朝向轴），仍差一点用
+「调整工具」显式平移 / 旋转 yaw，改动即重新导入当前轨道。播放可由外部脚本经
+`window.viewer.replay`（play/pause/seek/setSpeed/setMode/follow/tracks/meta）控制。
 
 ## 部署
 
@@ -55,7 +54,7 @@ nginx 发布目录指向 `dist/`）。跨域引用远端 BSP/录像时资源方�
 ## CORS
 
 - 同站点资源无需任何头。
-- 录像/规则/地图放在其他域名（OSS、CDN）时，资源方需返回 `Access-Control-Allow-Origin`。
+- 录像/地图放在其他域名（OSS、CDN）时，资源方需返回 `Access-Control-Allow-Origin`。
 
 ## 参考 nginx 片段
 
@@ -83,4 +82,4 @@ server {
 
 - `dist/` 是 `src/app.ts` + `src/worker/parse-worker.ts` 的 esbuild 产物，single 额外内嵌
   WASM/Worker（见 `scripts/build-dist.mjs`）。
-- 深链自动加载（`?bsp= / ?replay= / ?rule=`）在 HTTP（dev、dist）下可用；file:// 下被浏览器拦截。
+- 深链自动加载（`?bsp= / ?replay=`）在 HTTP（dev、dist）下可用；file:// 下被浏览器拦截。

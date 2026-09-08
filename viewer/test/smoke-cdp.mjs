@@ -3,12 +3,14 @@
  * 目的：抓运行时异常——typecheck 与 Node 自检都覆盖不到 UI 接线。
  *
  * 前置：
- *   1. 另开终端 `npm run dev`（默认 8080）
+ *   1. 另开终端 `npm run dev`（默认 8080；SMOKE_URL=file:///…dist/index.html 可改跑 dist 产物）
  *   2. 需要 `ws`（`npm i ws`，或用 WS_PATH 指向已有的安装）
  *   3. 需要 Edge/Chromium（用 EDGE_PATH 覆盖默认路径）
  *
  * 用法：npm run test:smoke
- *   环境变量：EDGE_PATH / WS_PATH / SMOKE_URL / SMOKE_PORT
+ *   环境变量：EDGE_PATH / WS_PATH / SMOKE_URL / SMOKE_PORT / SMOKE_FILE_REPLAY
+ *   默认导入本地真实 maps/surf_null_4.replay（CDP 塞进文件选择 input，
+ *   与真实用户点选完全同链路）；SMOKE_URL 带 ?replay= 时走深链自动导入。
  */
 
 import { spawn } from 'node:child_process';
@@ -25,6 +27,9 @@ const EDGE =
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = Number(process.env.SMOKE_PORT ?? 9333);
 const URL_ = process.env.SMOKE_URL ?? 'http://127.0.0.1:8080/web/index.html';
+// 真实录像：maps/surf_null_4.replay（仓库根；深链跑不需要文件选择）
+const LOCAL_REPLAY =
+  process.env.SMOKE_FILE_REPLAY ?? join(VIEWER_ROOT, '..', 'maps', 'surf_null_4.replay');
 
 async function loadWs() {
   try {
@@ -133,6 +138,10 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   check('dist 根无 parse-worker.js / *.wasm', !existsSync(join(distRoot, 'parse-worker.js')) && !existsSync(join(distRoot, 'websurf_viewer_wasm_bg.wasm')));
   check('dist/play.cmd 存在', existsSync(join(distRoot, 'play.cmd')));
   check('dist-multi/ 不存在（单一 dist）', !existsSync(join(VIEWER_ROOT, 'dist-multi')));
+  check(
+    'dist/assets/maps/surf_null_4.replay 存在（原生示例，HTTP 深链可用）',
+    existsSync(join(distRoot, 'assets', 'maps', 'surf_null_4.replay')),
+  );
 
   const playCmd = readFileSync(join(distRoot, 'play.cmd'), 'utf8');
   check('play.cmd 含 serve.py', playCmd.includes('serve.py'));
@@ -141,6 +150,16 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   // play.cmd 已 ASCII 化（cmd.exe 对非 ASCII + LF 批处理存在解析失步风险，2026-09-05）
   check('play.cmd 含 python 缺失提示（ASCII）', playCmd.includes('python not found'));
   check('play.cmd 不含旧 start-local', !playCmd.includes('start-local'));
+  // JSON 通道资源已删：启动脚本不得再引用 .replay.json / .rule.json
+  check(
+    'play.cmd 无 .replay.json/.rule.json 残留',
+    !playCmd.includes('.replay.json') && !playCmd.includes('.rule.json'),
+  );
+  const playSh = readFileSync(join(distRoot, 'play.sh'), 'utf8');
+  check(
+    'play.sh 无 .replay.json/.rule.json 残留',
+    !playSh.includes('.replay.json') && !playSh.includes('.rule.json'),
+  );
 }
 
 /** 等轨迹行渲染出来（headless 下 DOM 渲染偶发滞后，轮询而不是固定 sleep）。 */
@@ -158,7 +177,7 @@ async function waitRows(sessionId, want, timeoutMs = 20000) {
   return rows;
 }
 
-/** CDP 设置本地文件到 `<input type=file>`（file:// 模式验证「双击打开 + 选择录像文件」用）。 */
+/** CDP 设置本地文件到 `<input type=file>`（file:// 与 http 都走「选择录像文件」真实链路）。 */
 async function setFileInput(sessionId, selector, filePath) {
   const { root } = await send('DOM.getDocument', {}, sessionId);
   const { nodeId } = await send(
@@ -216,30 +235,7 @@ try {
   await send('Log.enable', {}, sessionId);
   await send('Page.enable', {}, sessionId);
 
-  // file:// 冒烟前置：把本地配套规则注入 localStorage（page 脚本运行前生效），
-  // 顺带覆盖「localStorage 规则载入」路径（本地 replay.json 旁若带 rule.json）。
   const useDeepLink = /[?&](replay|bsp)=/.test(URL_);
-  const localReplay = process.env.SMOKE_FILE_REPLAY;
-  const seedRulePath =
-    !useDeepLink && localReplay ? localReplay.replace(/\.replay\.json$/i, '.rule.json') : null;
-  if (seedRulePath) {
-    try {
-      const ruleText = readFileSync(seedRulePath, 'utf8');
-      const parsedRule = JSON.parse(ruleText);
-      if (parsedRule.version === 1 && typeof parsedRule.scriptSrc === 'string') {
-        await send(
-          'Page.addScriptToEvaluateOnNewDocument',
-          {
-            source: `try { localStorage.setItem(${JSON.stringify('websurf-viewer.replay-rule.v1')}, ${JSON.stringify(ruleText)}); } catch (e) {}`,
-          },
-          sessionId,
-        );
-        console.log('  [file:// 前置] 已注入本地规则到 localStorage');
-      }
-    } catch (e) {
-      console.log(`  [file:// 前置] 无配套规则可注入（${e.message}）——使用内置默认规则`);
-    }
-  }
 
   console.log('\n[1] 打开页面');
   const nav = await send('Page.navigate', { url: URL_ }, sessionId);
@@ -258,7 +254,7 @@ try {
   );
   check('WebGL 可用', webgl === true, String(webgl));
 
-  console.log('\n[1b] localStorage 卫生（防跨运行污染顶替「内置默认规则」）');
+  console.log('\n[1b] localStorage 卫生（防跨运行污染顶替「坐标映射默认直读」）');
   await evaluate('(() => { localStorage.clear(); location.reload(); return true; })()', sessionId);
   await sleep(4000); // 重载 + 应用初始化
   const reloaded = await evaluate(
@@ -283,35 +279,24 @@ try {
     sessionId,
   );
   console.log('  面板分区：' + JSON.stringify(sections));
-  for (const need of ['导入', '轨迹列表', '变换调整']) {
+  for (const need of ['导入', '轨迹列表', '坐标映射', '调整工具']) {
     check(`存在「${need}」分区`, sections.includes(need));
   }
 
   const modeLabel = useDeepLink
-    ? '深链示例（?replay=…&rule=… 自动导入并应用规则）'
-    : localReplay
-      ? `本地录像文件（file:// 面板选择：${localReplay}）`
-      : '载入示例录像（走完整导入链路）';
+    ? '深链自动导入（?replay= 原生 .replay）'
+    : `本地真实 .replay（CDP 文件选择：${LOCAL_REPLAY}）`;
   console.log(`\n[3] ${modeLabel}`);
   if (useDeepLink) {
     // URL 深链自动导入，无需操作
-  } else if (localReplay) {
-    // file:// 双击打开场景：CDP 直接把本地 JSON 塞进「选择 JSON 录像」的 input，
-    // 走与真实用户点击选择完全相同的 change → loadFile 链路
-    await setFileInput(sessionId, '#pane-replay input[type=file]', localReplay);
-    await sleep(500);
   } else {
-    const clicked = await evaluate(
-      `(() => {
-        const btns = Array.from(document.querySelectorAll('#pane-replay button'));
-        const b = btns.find(x => x.textContent.trim() === '载入示例录像');
-        if (!b) return false;
-        b.click();
-        return true;
-      })()`,
-      sessionId,
-    );
-    check('找到并点击了「载入示例录像」', clicked === true);
+    if (!existsSync(LOCAL_REPLAY)) {
+      throw new Error(`本地录像不存在：${LOCAL_REPLAY}（maps/surf_null_4.replay 未入库？）`);
+    }
+    // CDP 直接把本地 .replay 塞进「选择录像文件」的 input，
+    // 走与真实用户点击选择完全相同的 change → loadFile → 嗅探 → 解码链路
+    await setFileInput(sessionId, '#pane-replay input[type=file]', LOCAL_REPLAY);
+    await sleep(500);
   }
 
   const rows = await waitRows(sessionId, 1);
@@ -332,13 +317,57 @@ try {
   );
   console.log('  轨道信息：' + info);
   check('轨道信息含帧数', /\d[\d,]* 帧/.test(info), info);
+  check('轨道帧数 = 1,211（真实文件）', info.includes('1,211 帧'), info);
   const modeNow = await evaluate(
     "window.viewer?.replay?.mode ?? null",
     sessionId,
   );
   check('载入录像后默认第一人称', modeNow === 'first', String(modeNow));
 
-  // [3b] 朝向诊断钩子断言已随功能删除移除（core-simplify-plan P1/P2）
+  console.log('\n[3b] 头部元信息展示（#replayMeta，数据源 = Clip.meta）');
+  const metaText = await evaluate(
+    "document.getElementById('replayMeta')?.textContent ?? ''",
+    sessionId,
+  );
+  console.log('  信息条：' + metaText);
+  // surf_null_4.replay 头部实测（t3/t4 selftest 同源数值）
+  check('信息条含成绩 16.21 s', metaText.includes('成绩') && metaText.includes('16.21 s'), metaText);
+  check('信息条含玩家 [U:1:196340649]', metaText.includes('[U:1:196340649]'), metaText);
+  check('信息条含地图 surf_null · Bonus 4', metaText.includes('surf_null') && metaText.includes('Bonus 4'), metaText);
+  check('信息条含 tick 66.67', metaText.includes('66.67'), metaText);
+  check('信息条含帧 113+1080+18', metaText.includes('113+1080+18'), metaText);
+  check('信息条含格式 v12', metaText.includes('v12'), metaText);
+  const metaApi = await evaluate('window.viewer.replay.meta()', sessionId);
+  check(
+    'meta() API 返回真实头部（time≈16.207 / tickrate≈66.67 / track=4 / steamId）',
+    metaApi &&
+      Math.abs(metaApi.time - 16.20744) < 0.001 &&
+      Math.abs(metaApi.tickrate - 66.66667) < 0.01 &&
+      metaApi.track === 4 &&
+      metaApi.steamId === 196340649 &&
+      metaApi.preFrames === 113 &&
+      metaApi.frameCount === 1080,
+    JSON.stringify(metaApi),
+  );
+
+  console.log('\n[3c] 播放基准（帧自身坐标直读，无起点锚定）');
+  const tracks0 = await evaluate('window.viewer.replay.tracks()', sessionId);
+  // 解析帧 0（prerun 真实位置）→ viewer [y,z,x]；锚定 bug 会把这里平移 ~10.7k HU
+  const base0 = tracks0[0]?.firstPos;
+  check(
+    'firstPos = 帧自身坐标（12187.20, -1791.97, 2375.04）',
+    base0 &&
+      Math.abs(base0[0] - 12187.2012) < 0.01 &&
+      Math.abs(base0[1] + 1791.9688) < 0.01 &&
+      Math.abs(base0[2] - 2375.0391) < 0.01,
+    JSON.stringify(base0),
+  );
+  const stDur = await evaluate('window.viewer.replay', sessionId);
+  check(
+    '总时长 = (1211-113)/66.667 ≈ 16.455 s（主时钟 0 = 起跑帧）',
+    Math.abs(stDur.duration - 16.455) < 0.05,
+    String(stDur.duration),
+  );
 
   console.log('\n[4] 播放控制');
   const dur = await evaluate(
@@ -381,7 +410,7 @@ try {
   );
   console.log('  场景统计：' + JSON.stringify(sceneInfo));
 
-  console.log('\n[7] 变换调整（transform 后处理，替换而非追加）');
+  console.log('\n[7] 调整工具（transform 后处理，替换而非追加）');
   const tracksBeforeTf = await evaluate('window.viewer.replay.tracks()', sessionId);
   const durBeforeTf = (await evaluate('window.viewer.replay', sessionId)).duration;
   await evaluate(
@@ -421,49 +450,12 @@ try {
     JSON.stringify(tracksReset[0]?.firstPos),
   );
 
-  console.log('\n[7b] .js 规则脚本载入（拖拽 → loadRuleFile → 替换当前轨道）');
-  // 合成一条「pos.x ×2」的规则脚本，用真实 drop 链路载入；断言来源标记 + 坐标翻倍
-  const fpBeforeJs = (await evaluate('window.viewer.replay.tracks()', sessionId))[0]?.firstPos;
-  const jsDropped = await evaluate(
-    `(() => {
-      const text = '(raw, i, H) => ({ t: i / 128, pos: [H.num(H.get(raw, "pos[0]")) * 2, H.num(H.get(raw, "pos[1]")), H.num(H.get(raw, "pos[2]"))], ang: [H.wrap(H.num(H.get(raw, "ang[0]"))), H.clampPitch(H.num(H.get(raw, "ang[1]"))), 0], vel: null })';
-      const dt = new DataTransfer();
-      dt.items.add(new File([text], 'smoke-rule.js', { type: 'text/javascript' }));
-      window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
-      return true;
-    })()`,
-    sessionId,
-  );
-  await sleep(2000); // 拖 .js 换规则 → 复用缓存重导
-  const srcLabel = await evaluate(
-    "Array.from(document.querySelectorAll('#pane-replay .kv')).find(r => r.querySelector('.k')?.textContent === '规则来源')?.querySelector('.v')?.textContent ?? ''",
-    sessionId,
-  );
-  const stJs = await evaluate('window.viewer.replay', sessionId);
-  const fpAfterJs = (await evaluate('window.viewer.replay.tracks()', sessionId))[0]?.firstPos;
-  check('拖入 .js 触发规则载入', jsDropped === true);
-  check('规则来源标记为 .js 文件', srcLabel.includes('smoke-rule.js'), srcLabel);
-  check('换规则后仍 1 条（替换当前轨道）', stJs.trackCount === 1, JSON.stringify(stJs));
-  check(
-    '.js 规则真实生效（firstPos.x ×2）',
-    fpBeforeJs !== undefined &&
-      fpAfterJs !== undefined &&
-      Math.abs(fpAfterJs[0] - fpBeforeJs[0] * 2) < 1 &&
-      Math.abs(fpAfterJs[1] - fpBeforeJs[1]) < 1,
-    `${JSON.stringify(fpBeforeJs)} → ${JSON.stringify(fpAfterJs)}`,
-  );
-
-  console.log('\n[8] 多轨迹（Q2）：再载入一份 → 追加第二条');
-  await evaluate(
-    `(() => {
-      const b = Array.from(document.querySelectorAll('#pane-replay button'))
-        .find(x => x.textContent.trim() === '载入示例录像');
-      b.click();
-      return true;
-    })()`,
-    sessionId,
-  );
-  await sleep(4000);
+  console.log('\n[7b] 多轨迹（Q2）：同一录像再选一次 → 追加第二条');
+  if (useDeepLink) {
+    // 深链跑没有本地文件前置，但输入框路径同构：同样可再选一次本地文件
+  }
+  await setFileInput(sessionId, '#pane-replay input[type=file]', LOCAL_REPLAY);
+  await sleep(2500);
   const rows2 = await waitRows(sessionId, 2);
   check('轨迹列表变成 2 行', rows2 === 2, `rows=${rows2}`);
   const colors = await evaluate(
@@ -471,7 +463,8 @@ try {
     sessionId,
   );
   check('两条轨迹配色不同', colors.length === 2 && colors[0] !== colors[1], JSON.stringify(colors));
-  // 给第二条加偏移，主时钟总长应当变长（基准取加偏移前的总长，规则/录像不同也成立）
+
+  console.log('\n[8] 轨道时间偏移：第二条 +5s → 总长 +5s');
   const st2 = await evaluate('window.viewer.replay', sessionId);
   check('trackCount = 2', st2.trackCount === 2, JSON.stringify(st2));
   const beforeOffset = st2.duration;
@@ -493,9 +486,77 @@ try {
     `${beforeOffset} → ${st3.duration}`,
   );
 
-  // [9] 坐标系标定断言已随功能删除移除（core-simplify-plan P2；替换语义由 Node 自检覆盖）
+  console.log('\n[9] 拖入合成 V2 .replay（drop 链路 → 追加第三条）');
+  // 最小 V2 文件：第 1 行 "<帧数>:{SHAVITREPLAYFORMAT}{V2}\n" + 2 帧 × 6 cell
+  // （pos x/y/z、pitch、yaw 各 f32 + buttons i32）；帧 0 = Source (10,20,30)、yaw=30
+  const dropped = await evaluate(
+    `(() => {
+      const bytes = [];
+      const line = '2:{SHAVITREPLAYFORMAT}{V2}\\n';
+      for (let i = 0; i < line.length; i++) bytes.push(line.charCodeAt(i) & 0xff);
+      const push = (x, signed) => {
+        const dv = new DataView(new ArrayBuffer(4));
+        if (signed) dv.setInt32(0, x, true); else dv.setFloat32(0, x, true);
+        for (let i = 0; i < 4; i++) bytes.push(dv.getUint8(i));
+      };
+      const frames = [[10, 20, 30, 0, 30], [20, 20, 30, 0, 30]];
+      for (const [x, y, z, pi, ya] of frames) {
+        push(x, false); push(y, false); push(z, false); push(pi, false); push(ya, false); push(8, true);
+      }
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array(bytes)], 'smoke-v2.replay', { type: 'application/octet-stream' }));
+      window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
+      return bytes.length;
+    })()`,
+    sessionId,
+  );
+  check('合成 V2 已投递（75 字节）', dropped === 75, String(dropped));
+  await sleep(2000);
+  const rows3 = await waitRows(sessionId, 3);
+  check('拖入后 3 行', rows3 === 3, `rows=${rows3}`);
+  const stV2 = await evaluate('window.viewer.replay', sessionId);
+  check('trackCount = 3', stV2.trackCount === 3, JSON.stringify(stV2));
 
-  console.log('\n[10] 跟随切换与移除');
+  console.log('\n[9b] 坐标映射切换（当前文件 = 合成 V2 → 替换 track-3）');
+  // 默认 shavit：Source[x,y,z]→viewer[y,z,x] → firstPos = [20,30,10]
+  const fpBeforeToggle = (await evaluate('window.viewer.replay.tracks()', sessionId))[2]?.firstPos;
+  check(
+    '默认轴序（shavit）：firstPos = [20,30,10]',
+    fpBeforeToggle &&
+      Math.abs(fpBeforeToggle[0] - 20) < 0.01 &&
+      Math.abs(fpBeforeToggle[1] - 30) < 0.01 &&
+      Math.abs(fpBeforeToggle[2] - 10) < 0.01,
+    JSON.stringify(fpBeforeToggle),
+  );
+  const toggleBox = (nth) =>
+    `(() => {
+      const sec = Array.from(document.querySelectorAll('#pane-replay .sec'))
+        .find(s => s.querySelector('.sec-title')?.textContent === '坐标映射');
+      if (!sec) return false;
+      const box = sec.querySelectorAll('input[type=checkbox]')[${nth}];
+      if (!box) return false;
+      box.click();
+      return true;
+    })()`;
+  await evaluate(toggleBox(0), sessionId); // 轴序 → 直读 [x,y,z]
+  await sleep(1800);
+  const fpRaw = (await evaluate('window.viewer.replay.tracks()', sessionId))[2]?.firstPos;
+  check(
+    '切换「直读 [x,y,z]」：firstPos = [10,20,30]',
+    fpRaw &&
+      Math.abs(fpRaw[0] - 10) < 0.01 &&
+      Math.abs(fpRaw[1] - 20) < 0.01 &&
+      Math.abs(fpRaw[2] - 30) < 0.01,
+    JSON.stringify(fpRaw),
+  );
+  await evaluate(toggleBox(0), sessionId); // 切回默认
+  await sleep(1800);
+  const stAfterToggle = await evaluate('window.viewer.replay', sessionId);
+  const fpBack = (await evaluate('window.viewer.replay.tracks()', sessionId))[2]?.firstPos;
+  check('切回后仍 3 条（替换语义，不追加）', stAfterToggle.trackCount === 3, JSON.stringify(stAfterToggle));
+  check('切回默认轴序：firstPos 回 [20,30,10]', fpBack && Math.abs(fpBack[0] - 20) < 0.01, JSON.stringify(fpBack));
+
+  console.log('\n[10] 跟随切换与移除（含信息条跟随刷新）');
   await evaluate(
     `(() => {
       const rows = Array.from(document.querySelectorAll('#pane-replay .track-row'));
@@ -507,18 +568,40 @@ try {
   await sleep(300);
   const st4 = await evaluate('window.viewer.replay', sessionId);
   check('跟随切到第二条', st4.followId === 'track-2', String(st4.followId));
+  const metaNameAt2 = await evaluate(
+    "document.querySelector('#replayMeta .meta-name span:last-child')?.textContent ?? ''",
+    sessionId,
+  );
+  check('信息条跟随显示第二条名', metaNameAt2 === 'surf_null_4.replay', metaNameAt2);
+  // API 跟随切换 → 信息条必须重渲染（t11 修复：follow 路径补 syncTracks）。
+  // 注意 replay 是快照 getter：follow() 之后要**重新取快照**读 followId，同快照内读到的是旧值。
+  await evaluate("window.viewer.replay.follow('track-3')", sessionId);
+  await sleep(300);
+  const followed3 = await evaluate('window.viewer.replay.followId', sessionId);
+  const metaNameAt3 = await evaluate(
+    "document.querySelector('#replayMeta .meta-name span:last-child')?.textContent ?? ''",
+    sessionId,
+  );
+  check('API follow(track-3) 生效', followed3 === 'track-3', String(followed3));
+  check(
+    'API 跟随切换后信息条同步刷新（smoke-v2.replay）',
+    metaNameAt3 === 'smoke-v2.replay',
+    metaNameAt3,
+  );
   await evaluate(
     `(() => {
       const rows = Array.from(document.querySelectorAll('#pane-replay .track-row'));
-      rows[1].querySelector('.track-btn.danger').click();  // × 移除
+      rows[1].querySelector('.track-btn.danger').click();  // × 移除第二条
       return true;
     })()`,
     sessionId,
   );
   await sleep(500);
   const st5 = await evaluate('window.viewer.replay', sessionId);
-  check('移除后回到 1 条', st5.trackCount === 1, JSON.stringify(st5));
-  check('移除后跟随回到剩下的那条', st5.followId === 'track-1', String(st5.followId));
+  check('移除后回到 2 条', st5.trackCount === 2, JSON.stringify(st5));
+  // 移除的是非跟随轨道（跟随在 track-3）→ followId 保持不变（tracks.ts:60 仅在被移除轨道
+  // 是跟随目标时回退到第一条）
+  check('移除非跟随轨道后跟随保持 track-3', st5.followId === 'track-3', String(st5.followId));
 
   console.log('\n[11] 播放控制 API（window.viewer.replay）');
   // 先清掉 [5] 设下的 A-B 区间，seek 才能到绝对时间
@@ -551,17 +634,21 @@ try {
   await evaluate('window.viewer.replay.setSpeed(1)', sessionId);
   const tracksInfo = await evaluate('window.viewer.replay.tracks()', sessionId);
   check(
-    'tracks() 只读信息（id/name/frames…）',
-    Array.isArray(tracksInfo) && tracksInfo.length === 1 && tracksInfo[0].id === 'track-1' && tracksInfo[0].frames > 0,
+    'tracks() 只读信息（真实 + 合成两条）',
+    Array.isArray(tracksInfo) &&
+      tracksInfo.length === 2 &&
+      tracksInfo[0].id === 'track-1' &&
+      tracksInfo[0].frames === 1211 &&
+      tracksInfo[1].id === 'track-3',
     JSON.stringify(tracksInfo),
   );
   const followBack = await evaluate(
-    "(() => { const r = window.viewer.replay; r.follow(null); return r.followId; })()",
+    "(() => { window.viewer.replay.follow(null); return window.viewer.replay.followId; })()",
     sessionId,
   );
   check('follow(null) 回第一条', followBack === 'track-1', String(followBack));
 
-  console.log('\n[12] 地图页参考显示（网格 / 坐标轴开关）');
+  console.log('\n[12] 地图页（ReferenceGrid 已移除；出生点导航在位）');
   await evaluate("document.querySelector('.tab[data-tab=\"map\"]').click()", sessionId);
   await sleep(400);
   const mapActive = await evaluate(
@@ -573,22 +660,12 @@ try {
     "Array.from(document.querySelectorAll('#pane-map .sec-title')).map(e => e.textContent)",
     sessionId,
   );
-  check('存在「参考显示」分区', mapSecs.includes('参考显示'), JSON.stringify(mapSecs));
-  const toggled = await evaluate(
-    `(() => {
-      const sec = Array.from(document.querySelectorAll('#pane-map .sec'))
-        .find(s => s.querySelector('.sec-title')?.textContent === '参考显示');
-      if (!sec) return { n: -1, changed: false };
-      const boxes = Array.from(sec.querySelectorAll('input[type=checkbox]'));
-      const before = boxes.map(b => b.checked);
-      boxes.forEach(b => b.click());
-      const changed = boxes.some((b, i) => b.checked !== before[i]);
-      return { n: boxes.length, changed };
-    })()`,
-    sessionId,
-  );
-  check('网格/坐标轴开关存在', toggled.n === 2, JSON.stringify(toggled));
-  check('开关点击后勾选态翻转', toggled.changed === true, JSON.stringify(toggled));
+  console.log('  地图页分区：' + JSON.stringify(mapSecs));
+  check('「参考显示」（ReferenceGrid）已不存在', !mapSecs.includes('参考显示'), JSON.stringify(mapSecs));
+  check('「出生点导航」分区在位', mapSecs.includes('出生点导航'), JSON.stringify(mapSecs));
+  // F6(info) 目检备注（本次不修）：surf_null 无 info_player_start，出生点实体朝向经
+  // pose.ts bspYawToCsYaw(270−yaw) 映射，与 t3 实测定标（srcYaw+180，cos=0.9992）口径
+  // 不一致，疑似镜像——待带出生点地图端到端目检后回报（见 t8 output）。
   await evaluate("document.querySelector('.tab[data-tab=\"replay\"]').click()", sessionId);
 
   console.log('\n[13] 控制台（累计）');

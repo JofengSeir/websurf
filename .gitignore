@@ -30,13 +30,13 @@
 
 # ── 本地数据（不上传 GitHub）──────────────
 # maps/ 为本地地图/录像测试数据：bsp/dem 体积大且可重新获取。
-# 例外：surf_null_4 的 replay.json / rule.json 是 viewer dist 的构建输入
-# （示例深链 assets/maps/*，CI 也依赖），体积小、必须入库。
+# 例外：surf_null_4.replay（原生 Shavit 录像，53 KB）是 viewer 的构建/自检输入
+# （dist 示例深链 assets/maps/ + npm run test:replay fixture），必须入库。
 maps/*
-!maps/surf_null_4.replay.json
-!maps/surf_null_4.rule.json
+!maps/surf_null_4.replay
 *.dem
 *.replay
+!maps/surf_null_4.replay
 
 # ── 临时 / 验证产物 ───────────────────────
 temp/*

@@ -10,7 +10,7 @@
 | [`src/`](src/) | 共享层 | `phys/`（websurf-phys：Rust 物理 WASM 核心）、`wasm-core/`（websurf-wasm-core：BSP 解析 v19~v29 / GLB / 模型 / 纹理解析 + mosaic/MTZ）、`ts-shared/`（TS 物理渲染共享：权威帧/校准/输入层/世界构建）、`materials/textures.mtz`（默认纹理包）、`vendor/vmdl/`（vendored vmdl 单副本）、`serve.py`（dev 服务器；BSP 地图放仓库根 `maps/`，gitignored） |
 | [`debug/`](debug/) | 主工程（Debug Build） | 全功能调试测试页面：计时挑战、碰撞可视化（brush/trigger/phy/vis/chamfer 切角共 5 组开关 + 距离滑块）、物理面板（13 项力学参数动态列表）、自定义传送点、准星射线、缺失纹理弹窗、调试 API（`parse_entities`/`list_pakfile`/`read_pakfile_*`/`export_colliders*`/`export_visleaf_pvs` 等，仅 debug 导出） |
 | [`game/`](game/) | WebSurf-game（Game Build） | 最小化游戏实现：主线程唯一物理渲染线 + 单 Worker 权威帧 + ESC 弹出面板（录制改键）+ 存点系统（X 键存点 / C 键读点、按住冻结松开恢复）+ 加载进度覆盖层（平滑补间 + 失败红态）+ 空间分块合并渲染 |
-| [`viewer/`](viewer/) | WebSurf-viewer | 最小 BSP 自由视角查看器（349ee26 新增，2026-09-06 经 P1-P4 核心化简化）：无物理，BSP→GLB 场景 + 自由飞行相机；导入 JSON/第三方录像、经 .js 规则脚本映射后回放（规则脚本一等公民 + 变换调整面板 + 播放控制 API `window.viewer.replay`）；已移除位姿三通道/朝向诊断/量测。见 [viewer/README.md](viewer/README.md) |
+| [`viewer/`](viewer/) | WebSurf-viewer | 最小 BSP 自由视角查看器（349ee26 新增，2026-09-06 经 P1-P4 核心化简化）：无物理，BSP→GLB 场景 + 自由飞行相机；导入 Shavit `.replay` 录像、二进制原生解析后以帧自身坐标回放（坐标映射切换 + 调整工具 + 播放控制 API `window.viewer.replay` 含 `meta()`）；已移除位姿三通道/朝向诊断/量测/JSON 规则脚本通道。见 [viewer/README.md](viewer/README.md) |
 | [`test/`](test/) | 验证工程 | [`dual-mode-harness/`](test/dual-mode-harness/)（WebSurf-test：输入→双模物理→帧信号渲染时序验证）、[`instanced-diorama/`](test/instanced-diorama/)（实例化绘制 + PBR 光照渲染测试，验证 GLB 内嵌 `KHR_lights_punctual` 灯光导出） |
 
 入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` + `./viewer/` 三入口。

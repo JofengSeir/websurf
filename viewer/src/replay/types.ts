@@ -1,13 +1,13 @@
 /**
  * 录像（replay）数据契约。
  *
- * 管线：任意 JSON → 规则层（RuleConfig → 脚本）→ 标准帧（Frame）→ Clip（定型数组）→ 播放器。
- * 播放器只认 Clip，规则怎么改都不影响播放层。
+ * 管线：Shavit `.replay`（原生解析，t4 起 JSON 通道已移除）→ Clip（定型数组）→ 播放器。
+ * 播放基准 = 帧自身坐标（解码时仅做坐标映射；任何平移/旋转都只能由用户显式叠加）。
  */
 
-// ── 规则配置（脚本文本 + 人工变换微调）────────────────────────────────
+// ── 规则配置（坐标映射切换 + 人工变换微调）──────────────────────────
 
-/** 人工变换微调：viewer 侧后处理，作用于脚本输出之后（「变换调整」面板写入）。 */
+/** 人工变换微调：viewer 侧后处理（「调整工具」面板写入；仅用户显式设置时非恒等）。 */
 export interface RuleTransform {
   /** 平移（HU），加到输出坐标上。 */
   offset: [number, number, number];
@@ -19,93 +19,86 @@ export interface RuleTransform {
   yawDeg: number;
 }
 
-/** 输出某个轴取自输入的哪个轴。 */
-export type AxisSrc = 'x' | 'y' | 'z';
-export type Sign = 1 | -1;
-export type AngleUnit = 'deg' | 'rad';
-export type TimeMode = 'tick' | 'field';
-export type TimeUnit = 's' | 'ms' | 'tick';
+/**
+ * 坐标轴映射切换（解码层，非变换；录像与 viewer 坐标系不一致时的逃生口）。
+ * - `shavit`（默认）：Source `[x,y,z]` → viewer `[y,z,x]`——与 wasm rotate_yup、
+ *   地图 GLB 导出同一变换（det=+1），实测定标（test/replay-selftest.ts）。
+ * - `raw`：`[x,y,z]` 直读（坐标序不合时的对照项）。
+ */
+export type AxesMode = 'shavit' | 'raw';
+
+/**
+ * 朝向轴切换（解码层，非变换）。
+ * - `shavit`（默认）：yaw = wrap(srcYaw + 180)、pitch = −srcPitch（Source 正值=俯视）。
+ *   实证：真实 run 段「视角·运动方向」平均 cos=0.9992；详见 shavit-replay.ts 头注释。
+ * - `raw`：角度直读（yaw/pitch 原样），供角度约定本就一致的数据对照。
+ */
+export type YawMode = 'shavit' | 'raw';
 
 export interface RuleConfig {
-  /** 版本，用于持久化兼容。 */
-  version: 1;
+  /** 版本，用于持久化兼容（v2 = 原生 .replay 结构化规则；v1 脚本规则已随 JSON 通道移除）。 */
+  version: 2;
   /** 规则名（持久化用）。 */
   name: string;
-
-  /** 帧数组在 JSON 中的路径；空串 = 自动探测。 */
-  framePath: string;
-
-  // 位置
-  posX: string;
-  posY: string;
-  posZ: string;
-  /** 输出 X 取自输入哪个轴。 */
-  axisX: AxisSrc;
-  axisY: AxisSrc;
-  axisZ: AxisSrc;
-  signX: Sign;
-  signY: Sign;
-  signZ: Sign;
-  /** 位置单位缩放（HU/米/英寸换算）。 */
-  posScale: number;
-  /**
-   * 位置平移（HU），在「轴映射 + 符号 + 缩放」之后施加于**输出**坐标。
-   * 历史字段：表单时代由「坐标系标定」求解得到；现行人工微调走 transform 字段。
-   * 只对位置生效——速度是方向量，平移不影响它。
-   */
-  offX: number;
-  offY: number;
-  offZ: number;
-  /** 输入 pos 是眼位而非脚底（是则输出时减 EYE_STAND）。 */
-  posIsEye: boolean;
-
-  // 朝向
-  yawPath: string;
-  pitchPath: string;
-  rollPath: string;
-  angleUnit: AngleUnit;
-  /** yaw_out = wrap(yaw_in * yawScale + yawOffset)。 */
-  yawScale: number;
-  yawOffset: number;
-  /** pitch 符号（Source 系正值为俯视，需翻转）。 */
-  pitchSign: Sign;
-  rollSign: Sign;
-
-  // 速度（可选；全空则 vel = null）
-  velX: string;
-  velY: string;
-  velZ: string;
-
-  // 时间
-  timeMode: TimeMode;
-  /** tick 模式下的 tickrate（帧/秒）。 */
-  tickrate: number;
-  timePath: string;
-  timeUnit: TimeUnit;
-
-  /** 编译产物 / 手改后的脚本源码；空串 = 使用内置默认规则（DEFAULT_RULE_SRC）。 */
-  scriptSrc: string;
-  /** true = 已被手工改写（历史字段，保留以兼容旧持久化数据）。 */
-  customized: boolean;
-  /** 人工微调变换（缺省 = 恒等）。 */
+  /** 坐标轴映射切换（默认 shavit = 与地图 GLB 同构）。 */
+  axesMode: AxesMode;
+  /** 朝向轴切换（默认 shavit = 实测定标映射）。 */
+  yawMode: YawMode;
+  /** 人工微调变换（缺省 = 恒等；仅用户显式设置时叠加）。 */
   transform?: RuleTransform;
 }
 
-// ── 标准帧（规则层唯一产出）─────────────────────────────────────────
-
-export interface Frame {
-  /** 秒，单调递增。 */
-  t: number;
-  /** viewer 世界坐标 Y-up，人物脚底。 */
-  pos: [number, number, number];
-  /** [yaw, pitch, roll] 度；yaw 0 = 面朝 −Z，逆时针为正。 */
-  ang: [number, number, number];
-  /** 世界速度 [vx,vy,vz]，缺失为 null。 */
-  vel: [number, number, number] | null;
+/** 内置默认规则：直读帧坐标（标准轴序 + 实测朝向映射），零变换。 */
+export function defaultRule(): RuleConfig {
+  return { version: 2, name: '内置默认', axesMode: 'shavit', yawMode: 'shavit' };
 }
 
-/** 规则函数的形状：输入原始帧 + 序号 + 辅助函数，产出标准帧。 */
-export type FrameMapper = (raw: unknown, index: number, H: unknown) => Frame;
+// ── Shavit .replay 头部元信息（原生解析路径的元数据契约）──────────────
+
+/**
+ * Shavit `.replay` 头部元信息（replay-file.inc FINAL 规格；V2 无对应字段 → 0/null）。
+ * 字段/顺序/语义见 viewer/docs/implementation/shavit-replay-format.md。
+ */
+export interface ReplayHeaderMeta {
+  /** FINAL 格式版本（1..0x0C）；V2 无版本概念 → 0。 */
+  version: number;
+  /** 格式变体。 */
+  format: 'final' | 'v2';
+  /** 地图基础名（头部 sMap，不带 `_N`/`_sN` 后缀；V2 无 → ''）。 */
+  map: string;
+  /** 样式（V2 / <v3 无 → 0）。 */
+  style: number;
+  /** 轨道：0 = 主图，>0 = bonus N。 */
+  track: number;
+  /** 起跑前帧数（prerun）。 */
+  preFrames: number;
+  /** 正式跑帧数。 */
+  frameCount: number;
+  /** 结束后帧数（<v5 无 → 0）。 */
+  postFrames: number;
+  /** 总帧数 = preFrames + frameCount + postFrames。 */
+  totalFrames: number;
+  /** 官方成绩（秒，头部 fTime，含 zone 口径）；无官方计时（V2）→ null。 */
+  time: number | null;
+  /** steamID3；文件没记（<v4 / V2）→ null。 */
+  steamId: number | null;
+  /** 显示名 `[U:1:<id>]`——文件里没有玩家名，只有账号 ID。 */
+  steamIdDisplay: string | null;
+  /** tick/s；V2 / <v5 头部没有该字段 → 估算值（见解析 warnings）。 */
+  tickrate: number;
+  /**
+   * zoneOffset：起点区/终点区的**亚 tick 份额**（∈[0,1]，非秒，§2.1）。
+   * 与 fTime 有闭环关系 fTime ≈ (frameCount + zo0 − (1 − zo1)) × tickInterval；
+   * <v8 无此字段 → [0,0]。
+   */
+  zoneOffset: [number, number];
+  /** stage（0 = 非 stage；<v10 无 → 0）。 */
+  stage: number;
+  /** 创纪录 Unix 秒（≥v12 有；更早 / V2 用文件 mtime 兜底，无则 null）。 */
+  timestamp: number | null;
+  /** fail-replay offsets 记录数+1（解析时跳过该区；<v11 无 → 0）。 */
+  offsetsLength: number;
+}
 
 // ── Clip（导入产物，定型数组存帧以便 Worker 零拷贝回传）────────────────
 
@@ -125,10 +118,17 @@ export interface Clip {
   duration: number;
   bbox: { min: [number, number, number]; max: [number, number, number] };
   maxSpeed: number;
-  /** 导入时实际用到的帧数组路径（自动探测时会回填）。 */
+  /** 导入来源标识：'.replay'（原生 Shavit）。 */
   resolvedPath: string;
-  /** 生成这份 clip 的规则快照（重放/导出时可读）。 */
+  /** 生成这份 clip 的规则快照（重放时可读）。 */
   rule: RuleConfig;
+  /**
+   * 逐帧按键位掩码（IN_*：IN_JUMP=2、IN_DUCK=4、IN_FORWARD=8…）。
+   * 仅 Shavit .replay 原生路径填充。
+   */
+  buttons: Int32Array | null;
+  /** Shavit .replay 头部元信息（地图/track/成绩/玩家/tick…）。 */
+  meta: ReplayHeaderMeta | null;
 }
 
 /** 播放器采样结果。 */
@@ -161,45 +161,4 @@ export interface Track {
 export interface TrackSample {
   track: Track;
   sample: Sample | null;
-}
-
-// ── 默认值 ──────────────────────────────────────────────────────────
-
-export function defaultRule(): RuleConfig {
-  return {
-    version: 1,
-    name: '默认规则',
-    framePath: '',
-    posX: 'pos[0]',
-    posY: 'pos[1]',
-    posZ: 'pos[2]',
-    axisX: 'x',
-    axisY: 'y',
-    axisZ: 'z',
-    signX: 1,
-    signY: 1,
-    signZ: 1,
-    posScale: 1,
-    offX: 0,
-    offY: 0,
-    offZ: 0,
-    posIsEye: false,
-    yawPath: 'ang[1]',
-    pitchPath: 'ang[0]',
-    rollPath: '',
-    angleUnit: 'deg',
-    yawScale: 1,
-    yawOffset: 0,
-    pitchSign: 1,
-    rollSign: 1,
-    velX: 'vel[0]',
-    velY: 'vel[1]',
-    velZ: 'vel[2]',
-    timeMode: 'tick',
-    tickrate: 128,
-    timePath: '',
-    timeUnit: 's',
-    scriptSrc: '',
-    customized: false,
-  };
 }
