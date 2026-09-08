@@ -166,7 +166,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 
 1. **sensitivity=1 全链路**：灵敏度只在主线程输入层乘入一次，物理两端消费同一份已折算输入（[ts-shared.md](./ts-shared.md) §4.4）。
 2. **Q/E 不进物理**：转向折算为等效鼠标增量 `qeEquivalentDx`，Rust 侧只收 dx/dy（`src/phys/mod.rs:222-233`）。
-3. **yaw 公式三处同式各自维护**：`bspYawToCsYaw = (270 − yaw) % 360` 在 `viewer/src/core/pose.ts:12-14`、`src/ts-shared/phys/world-builder.ts:92`、`debug/src/world/spawn-loader.ts:61`——互不 import 是刻意的（工程间零引用原则），改公式须三处同步。
+3. **yaw 公式五处同式各自维护**（spawn-loader 为未接线参考实现）：`bspYawToCsYaw = wrap(yaw + 180)`（t2 统一口径；旧式 270− 为 det=−1 镜像已废弃）在 `viewer/src/core/pose.ts:23-25`、`src/ts-shared/phys/world-builder.ts:99-100`、`src/phys/teleport.rs:31-38`、`debug/src/world/spawn-loader.ts:65-66` 与 `debug/src/world/teleport-manager.ts:42-44`——互不 import 是刻意的（工程间零引用原则），改公式须各处同步。
 4. **`KEY_MASK` 单点定义**：位定义只在 ts-shared 一份，harness 复用 import 而非复制。
 5. **共享层只收敛协议与算法内核**：UI/渲染/调试设施留在各工程（debug/game 重复携带 chamfer 生成、近平面探测、画质切换等——见 debug [differences.md](../debug/docs/differences.md) §6）。
 

@@ -17,16 +17,16 @@ app.js 顶层（viewer/src/app.ts，自上而下一次装配）
   ├─ [46-48]   new FlyCam().attach(canvas)（指针锁定 + 键鼠监听；锁定失败 → HUD 闪提示）
   ├─ [51-82]   侧栏折叠按钮 + .tab/.tabpane 标签页接线（切到录像页自动展开侧栏，app.ts:72-76）
   ├─ [94-99]   MapPanel(pane-map)（onJump 在第一人称回放时被忽略，app.ts:96-98）
-  ├─ [102-104] ReplayImporter / ReplayPlayer / ReplayVisuals
-  ├─ [108-113] syncTracks：轨道变化 → 3D 可视化 + 时间轴 + 录像信息条 一把刷新
-  ├─ [117-145] ReplayPanel(pane-replay)（回调 onClip / onClearAll / onTracksChanged / onStatus——无起点锚定回调）
-  ├─ [147]     ReplayMetaPanel(#replayMeta)（录像信息条，挂 syncTracks 刷新）
-  ├─ [148]     Timeline(#timeline)
-  ├─ [271-277] #bspFile change → loadBsp；引导按钮 → click #bspFile
-  ├─ [279-304] 窗口级拖拽（.bsp / .replay 两分支；其余明确报错）
-  ├─ [307-364] 挂 window.viewer.replay（只读内省 + meta() + 播放控制）
-  ├─ [368-405] loadUrlAssets()（?bsp=&replay= 深链）并立即执行 [405]
-  └─ [453]     requestAnimationFrame(frame)  ← 进入渲染循环
+  ├─ [103-105] ReplayImporter / ReplayPlayer / ReplayVisuals
+  ├─ [109-114] syncTracks：轨道变化 → 3D 可视化 + 时间轴 + 录像信息条 一把刷新
+  ├─ [118]     ReplayPanel(pane-replay)（回调 onClip / onClearAll / onTracksChanged / onStatus——无起点锚定回调）
+  ├─ [148]     ReplayMetaPanel(#replayMeta)（录像信息条，挂 syncTracks 刷新）
+  ├─ [149]     Timeline(#timeline)
+  ├─ [288-293] #bspFile change → loadBsp；引导按钮 → click #bspFile
+  ├─ [295-321] 窗口级拖拽（.bsp / .replay 两分支；其余明确报错）
+  ├─ [324-399] 挂 window.viewer.replay（只读内省 + meta() + 播放控制）+ window.viewer.map（P2-4 位姿内省）
+  ├─ [403-440] loadUrlAssets()（?bsp=&replay= 深链）并立即执行 [440]
+  └─ [488]     requestAnimationFrame(frame)  ← 进入渲染循环
 ```
 
 - DOM 骨架本身就是状态机的一部分：`#guide` 首访引导层（地图加载成功后隐藏，`app.ts:243`）、`#fatal` 启动失败兜底卡（`hud.ts:110-117`）、`#dropzone` 拖拽高亮（`app.ts:279-285`）、`#dock`（录像信息条 + 时间轴，有录像时显示）、`#help` 帮助浮层（键位 / 载入 / 播放基准，`web/index.html:56-71`）。
@@ -67,20 +67,22 @@ loadBspFile 返回 BspLoadResult
       ③ resetRootRotations（清 GLB 根节点旋转，与 game 同法）      [scene.ts:142-144]
       ④ optimizeScene 空间分块合并（数千~数万 Mesh → ~数百块）     [scene.ts:148-149]
       ⑤ fitCamera（near/far 按地图尺寸自适应）                     [scene.ts:150]
-  → scene.worldBox() → currentBox（app.ts:224-233，录像贴合检查用）
-  → mapPanel.setMap(result, box)                              [app.ts:234]
-  → updateReplayMapStatus()（轨迹/地图包围盒对照刷新）          [app.ts:235]
-  → applyInitialPose(result)：推荐出生点 → fly.setPose         [app.ts:238, 260-269]
-  → hud.setStatus 摘要 + hud.hideGuide()                       [app.ts:239-243]
+  → scene.worldBox() → currentBox（app.ts:223-231，录像贴合检查 + P2-4 回退判定用）
+  → resolveInitialSpawn(spawnPoints, primary, currentBox)        [app.ts:232-234；core/spawn.ts:79-101]
+  → mapPanel.setMap(result, box, init?.index)（★ 与初始视角同源） [app.ts:235，mapinfo.ts:79-83]
+  → updateReplayMapStatus()（轨迹/地图包围盒对照刷新）            [app.ts:236]
+  → applyInitialPose(init)：解析结果 → fly.setPose              [app.ts:239, 270-273]
+  → hud.setStatus 摘要 + hud.hideGuide()                        [app.ts:240-243]
 ```
 
-- 初始视角换算：`bspYawToCsYaw(angles[1])`（`app.ts:266`；换算式 `(270 − yaw) mod 360`，`core/pose.ts:12-14`）——**注意：该式仅服务 BSP 出生点实体角路径**（与 `.replay` 帧解码的 `yaw = wrap(src+180)` 定标是两套口径），且实测对出生点实体疑似镜像（评审 F6 已知问题，未修复）；详见 [implementation/replay-system.md](implementation/replay-system.md) §2.5 与 [differences.md](differences.md) §7。
-- 换图失败语义：已有地图时只临时闪 5s 提示并还原旧摘要，不弹引导层（`app.ts:250-254`）；首图失败才回到引导层报错（`app.ts:245-249`）。
-- 出生点快照对外暴露：`mapPanel.spawnPoints`（`mapinfo.ts:65-68`，供出生点导航跳转列表；不再有"起点对齐"消费方）。
+- 初始视角解析（P2-4 回退策略，`core/spawn.ts:79-101` 单点）：spawn 实体（`info_player_start` → 实体序首个 `info_player_*`）→ 首个在几何 bbox 内的 `info_teleport_destination`（域外判空域弃用）→ 兜底 bbox 中心高位俯瞰（水平居中 + 顶面高度、pitch −60°）；仅当无任何可用出生点且无 bbox 才保持当前视角。HUD 状态行随回退来源加注（`app.ts:276-286`：传送目标 →「无玩家出生点，初始视角 = 传送目标」、俯瞰 →「无可用出生点，初始视角 = 包围盒高位俯瞰」）。surf_null（无 `info_player_start` 且传送目标排在实体序前）修前初始视角落 wasm primary = taiikii_bonus_dest（距主出生区 26,200 HU 空域），修后命中 `info_player_terrorist`（srcYaw 180 → viewer 0°）。
+- 初始视角换算：`spawnPointAng`（`core/spawn.ts:47-50`）——`yaw = wrap(src + 180)`（`core/pose.ts:23-25 bspYawToCsYaw` 同式）、`pitch = −src`（Source 正值 = 俯视，viewer 正值 = 仰视）。与 `.replay` 帧解码定标**同一口径**（t1 已修评审 F6：旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射——surf_null primary srcYaw=180 应为 0°，旧式给 90°）；详见 [implementation/replay-system.md](implementation/replay-system.md) §2.5 与 [differences.md](differences.md) §7.2。
+- 换图失败语义：已有地图时只临时闪 5s 提示并还原旧摘要，不弹引导层（`app.ts:253-256`）；首图失败才回到引导层报错（`app.ts:248-252`）。
+- 出生点快照对外暴露：`mapPanel.spawnPoints`（`mapinfo.ts:64-67`，供出生点导航跳转列表；不再有"起点对齐"消费方）。
 
 ## 3. 录像导入时序（Shavit .replay 原生解析，Worker 优先）
 
-入口（三个，**均先魔数嗅探**）：录像页「选择录像文件…」（`panel.ts:63-82`）/ 窗口拖拽 `.replay`（`app.ts:286-304`，分支 `:295-300`，导入后自动切到录像页）/ 深链 `?replay=`（`app.ts:368-405`，直接 `arrayBuffer()`）→ 汇入 `ReplayImporter.import(file, rule, name, onProgress)`（`viewer/src/replay/importer.ts:90-110`）。
+入口（三个，**均先魔数嗅探**）：录像页「选择录像文件…」（`panel.ts:63-82`）/ 窗口拖拽 `.replay`（`app.ts:295-321`，分支 `:308-317`，导入后自动切到录像页）/ 深链 `?replay=`（`app.ts:402-435`，直接 `arrayBuffer()`）→ 汇入 `ReplayImporter.import(file, rule, name, onProgress)`（`viewer/src/replay/importer.ts:90-110`）。
 
 ```
 importer.import(file, rule, name)
@@ -125,13 +127,13 @@ importer.import(file, rule, name)
 - **主时钟推进**（`replay/player.ts:147-163`）：`time += dt*speed`；到 `rangeStop` 后按循环与否回绕或停止。主时钟 0 = 起跑帧（prerun 帧在负时间轴、不在播放区间）。
 - **采样**（`replay/player.ts:176-187` → `tracks.ts:95-108` → `sampling.ts:41-75`）：主时钟 `t` 先经 `TrackSet.localTime` 减去轨道 `offset`（未开始 → null；播完 → 夹到末帧"停在终点"），再在 clip 内二分定位（`sampling.ts:24-39`）并线性插值——`pos/vel` 直接 lerp，`yaw/roll` 走最短弧 `lerpAngle`（`sampling.ts:11-14`）。
 - **第一人称接管**与自由飞行互不打断状态：`FlyCam` 照常持有位姿，只是 `drivesCamera/allowMove` 双闸关闭（`core/fly.ts:29-41`），退出回放立即原地接管（`app.ts:433-439`）。
-- **播放控制入口**：时间轴按钮/键盘 K、,/.、I/O（`replay/timeline.ts:189-209` + 输入框避让 `isTypingTarget` `timeline.ts:336-342`）、`window.viewer.replay`（`app.ts:307-364`）。
+- **播放控制入口**：时间轴按钮/键盘 K、,/.、I/O（`replay/timeline.ts:189-209` + 输入框避让 `isTypingTarget` `timeline.ts:336-342`）、`window.viewer.replay`（`app.ts:343-398`）。
 - **跨面提醒**：轨迹 bbox 完全落在地图包围盒外（外扩 512 HU）→ HUD `#replayStatus` 提醒（`app.ts:157-188`）；提醒指回录像页「坐标映射」切换（t4 基准 = 帧自身坐标，正确的 .replay 触发提醒说明映射不对）。
 
 ## 5. 深链与对外 API 时序
 
 - **深链 `?bsp=&replay=`**（`app.ts:368-405`）：`loadUrlAssets()` 逐个 fetch（BSP → `loadBsp`，`:374-380`；replay → `activateTab('replay')` 后直接 `arrayBuffer()` + 魔数嗅探（不按文本读），嗅探失败明确报错，`:381-391`）。失败时按"是否已有地图"分流到引导层报错或 HUD 闪现（`:394-404`）。file:// 下 fetch 被拦，深链仅 HTTP 可用（`scripts/dist-README.md:34-40`「file:// 与 HTTP 的差异」）。
-- **`window.viewer.replay`**（`app.ts:307-364`）：getter 每次返回新快照对象——内省（trackCount/duration/time/playing/speed/mode/followId/sceneObjects/tracks()）+ `meta()`（跟随轨 `.replay` 头部元信息，`app.ts:335`）+ 控制（play/pause/seek/setSpeed 0.1–16/setMode/follow(null)）。供外部脚本与自动化（冒烟测试即以此驱动，`test/smoke-cdp.mjs:606-649`）。
+- **`window.viewer.replay`**（`app.ts:343-398`）：getter 每次返回新快照对象——内省（trackCount/duration/time/playing/speed/mode/followId/sceneObjects/tracks()）+ `meta()`（跟随轨 `.replay` 头部元信息，`app.ts:369-370`）+ 控制（play/pause/seek/setSpeed 0.1–16/setMode/follow(null)）。供外部脚本与自动化（冒烟测试即以此驱动，`test/smoke-cdp.mjs:606-649`）。另有 `window.viewer.map`（相机位姿/地图 bbox/初始视角来源 `spawnSource` 内省，`app.ts:326-342`，P2-4 回退断言用）。
 
 ## 6. 时序上的三个"必须知道"
 

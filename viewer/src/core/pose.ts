@@ -8,9 +8,20 @@ export interface Pose {
   ang: [number, number];
 }
 
-/** BSP 方位角 yaw（顺时针）→ viewer yaw（逆时针，与 ts-shared bspYawToCsYaw 一致）。 */
+/** 角度归一到 [0,360)。单点实现在此；replay/helpers 从本模块转发导出（两条路径共用）。 */
+export function wrapDeg(d: number): number {
+  return (((d % 360) + 360) % 360) || 0;
+}
+
+/**
+ * BSP 出生点实体 Source yaw → viewer yaw：wrap(src + 180)。
+ * 与 .replay 帧解码同一定标（shavit-replay.ts 实测定标：facing·motion cos=0.9992；
+ * 本轴映射 [x,y,z]→[y,z,x]（det=+1）下 Source 前向 (cos yaw, sin yaw) → viewer
+ * (sin yaw, cos yaw)，恒等式即 +180）。旧式 (270 − yaw) 是 det=−1 镜像映射
+ * （surf_null primary spawn Source yaw=180 → 应为 0°，旧式给 90°），已废弃。
+ */
 export function bspYawToCsYaw(bspYaw: number): number {
-  return (((270 - bspYaw) % 360) + 360) % 360;
+  return wrapDeg(bspYaw + 180);
 }
 
 /** 度 → 弧度并做 pitch 限幅（±89°）。 */

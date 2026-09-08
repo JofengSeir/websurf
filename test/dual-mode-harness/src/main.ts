@@ -190,9 +190,9 @@ function ensureMainWasm(): Promise<void> {
   return mainWasmReady;
 }
 
-/** BSP 方位角 yaw（顺时针）→ cs-movement yaw（逆时针），与 ts-shared bspYawToCsYaw 一致。 */
+/** BSP 实体 Source yaw → cs-movement yaw：wrap(src + 180)，与 ts-shared bspYawToCsYaw 同口径（旧式 270− 为 det=−1 镜像，已废弃）。 */
 function bspYawToCsYaw(bspYaw: number): number {
-  return ((270 - bspYaw) % 360 + 360) % 360;
+  return (((bspYaw + 180) % 360) + 360) % 360;
 }
 
 function setBspStatus(text: string): void {

@@ -9,7 +9,8 @@
 import { DEG2RAD } from './core/constants.js';
 import { ViewerScene } from './core/scene.js';
 import { FlyCam } from './core/fly.js';
-import { bspYawToCsYaw } from './core/pose.js';
+import { resolveInitialSpawn } from './core/spawn.js';
+import type { ResolvedSpawn, SpawnSource } from './core/spawn.js';
 import type { Pose } from './core/pose.js';
 import { humanizeBspError, loadBspFile } from './core/bsp.js';
 import type { BspLoadResult } from './core/bsp.js';
@@ -228,14 +229,17 @@ async function loadBsp(file: File): Promise<void> {
     } else {
       currentBox = null;
     }
-    mapPanel?.setMap(result, currentBox);
+    // 初始视角回退解析（P2-4）需要几何 bbox，须在 worldBox 之后；
+    // 面板 ★ 推荐标记与初始视角同源（resolveInitialSpawn 单点）。
+    const init = resolveInitialSpawn(result.spawnPoints, result.primary, currentBox);
+    mapPanel?.setMap(result, currentBox, init?.index);
     updateReplayMapStatus();
 
     const glbKb = Math.round(result.glbBytes.byteLength / 1024);
-    const spawned = applyInitialPose(result);
+    applyInitialPose(init);
     hud.setStatus(
       `${file.name}：${result.meta.magic ?? 'VBSP'}，${result.meta.num_brushes ?? 0} brushes，` +
-        `${result.spawnPoints.length} 出生点，GLB ${glbKb} KB${spawned ? '' : '（无出生点，初始视角 = 原点）'}`,
+        `${result.spawnPoints.length} 出生点，GLB ${glbKb} KB${initialPoseNote(init)}`,
     );
     hud.hideGuide();
   } catch (e) {
@@ -256,16 +260,29 @@ async function loadBsp(file: File): Promise<void> {
   }
 }
 
-/** 初始视角：推荐出生点（外部位姿通道已移除）。返回是否命中出生点。 */
-function applyInitialPose(result: BspLoadResult): boolean {
-  const points = result.spawnPoints;
-  const primary = points[result.primary] ?? points[0];
-  if (!primary) return false;
-  applyPose({
-    pos: [primary.origin?.[0] ?? 0, primary.origin?.[1] ?? 0, primary.origin?.[2] ?? 0],
-    ang: [bspYawToCsYaw(primary.angles?.[1] ?? 0), primary.angles?.[0] ?? 0],
-  });
-  return true;
+/** 本次地图的初始视角来源（window.viewer.map.pose 内省用）。 */
+let lastSpawnSource: SpawnSource | null = null;
+
+/**
+ * 应用初始视角（P2-4 回退策略，resolveInitialSpawn 单点解析：
+ * spawn 实体 → bbox 内传送目标 → bbox 中心高位俯瞰）。
+ */
+function applyInitialPose(init: ResolvedSpawn | null): void {
+  lastSpawnSource = init?.source ?? null;
+  if (init) applyPose({ pos: init.pos, ang: init.ang });
+}
+
+/** HUD 状态行的初始视角注记：正常命中出生点不加注，回退路径说明来源。 */
+function initialPoseNote(init: ResolvedSpawn | null): string {
+  if (!init) return '（无出生点，初始视角不变）';
+  switch (init.source) {
+    case 'teleport-dest':
+      return '（无玩家出生点，初始视角 = 传送目标）';
+    case 'bbox-vantage':
+      return '（无可用出生点，初始视角 = 包围盒高位俯瞰）';
+    default:
+      return '';
+  }
 }
 
 bspFileInput?.addEventListener('change', () => {
@@ -303,8 +320,26 @@ window.addEventListener('drop', (e) => {
   else hud.flashStatus(msg, 5000);
 });
 
-// ── JS 接口：window.viewer.replay（只读内省 + 播放控制，外部脚本 / 自动化用）──
+// ── JS 接口：window.viewer.replay / window.viewer.map（只读内省 + 播放控制，外部脚本 / 自动化用）──
 (globalThis as unknown as { viewer?: unknown }).viewer = {
+  /** 地图与相机位姿内省（headless 冒烟断言用；只读）。 */
+  get map() {
+    return {
+      /** 相机脚底位姿（度）+ 本次地图初始视角来源（未加载地图时 source=null）。 */
+      pose: () => {
+        const p = fly.getPose();
+        return {
+          pos: [p.pos[0], p.pos[1], p.pos[2]] as [number, number, number],
+          yawDeg: p.ang[0],
+          pitchDeg: p.ang[1],
+          spawnSource: lastSpawnSource,
+        };
+      },
+      /** 当前地图几何包围盒（GLB 场景 worldBox；无地图 → null）。 */
+      mapBox: (): { min: [number, number, number]; max: [number, number, number] } | null =>
+        currentBox,
+    };
+  },
   get replay() {
     return {
       // 内省

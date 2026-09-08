@@ -128,7 +128,7 @@
   - 实证：真实 `surf_null_4.replay` run 段 **1078** 个有效帧「视角·运动方向」平均 **cos = 0.9992**；同帧集按 270− 口径复算仅 ≈ **0.05**（近乎正交）。定标固化在 `test/replay-selftest.ts:286-307`（run 段平均 cos > 0.98 断言）与合成 fixture 断言（src yaw=30 → viewer 210 = wrap(30+180)，`replay-selftest.ts:381-386`）；面板开关 title 同口径（`panel.ts:108`）。
 - pitch：取负（Source 正值 = 俯视，`types.ts:70-71` 同口径）并限幅 ±89°；roll 恒 0（`shavit-replay.ts:493-497`）。
 - `posIsEye = false`（帧位是**脚底**绝对世界坐标）。
-- ⚠ `src/core/pose.ts:12-14 bspYawToCsYaw`（270−yaw）**仅服务 BSP 出生点实体角路径**（初始视角 `app.ts:266`、出生点列表 title `mapinfo.ts:145`），与 `.replay` 帧解码**无关**，勿混用；t8 实测该式对出生点实体**疑似镜像**（跨点差分互斥，评审 F6，已知问题、本次不改）。
+- `pose.ts:23-25 bspYawToCsYaw`（t1 起为 `wrap(src+180)`）服务 BSP 出生点实体角路径（初始视角 `core/spawn.ts:47-50` spawnPointAng、出生点列表 title/跳转 `mapinfo.ts:144-161`），与本节 `.replay` 帧解码定标**同式同源**——评审 F6（旧式 270− 为 det=−1 镜像，surf_null primary srcYaw=180 应 0° 旧给 90°）已于 t1 闭合，全链统一 +180 口径。
 - 映射以 `RuleConfig.axesMode/yawMode` 开放为「标准（shavit）/直读（raw）」两档切换（逃生口：`types.ts:22-36`；面板「坐标映射」分区 `panel.ts:90-109`，切换即重导当前轨道）；`raw` 档 = Source 值直读，供坐标系不符的数据对照（断言 `replay-selftest.ts:388-401`）。
 
 ### 8.3 时间轴（t2 §8.3 方案 A）
@@ -150,7 +150,7 @@
 ### 8.6 元信息面板与按键（t5）
 
 - `src/ui/replaymeta.ts`（107 行）：底部 dock 常驻「录像信息条」，逐字段渲染 `Clip.meta`——成绩 fTime（title 带 zoneOffset 闭环说明）/ 玩家 `[U:1:<id>]`（文件无玩家名，title 说明）/ 地图·Bonus track / 风格 / tick / 帧段（pre+run+post，title 带 stage）/ 日期（iTimestamp → 本地 YYYY-MM-DD）/ 格式版本（title 带 fail-replay 记录数）。**缺失字段不硬造**（V2 无成绩 → 不渲染该项；无玩家名 → 只显示 `[U:1:id]`）。
-- `window.viewer.replay.meta()` 同源暴露（`app.ts:334-335`）。
+- `window.viewer.replay.meta()` 同源暴露（`app.ts:369-370`）。
 - 逐帧按键 `Clip.buttons`（IN_* 掩码）已进 Clip/播放链路数据面（HUD 不展示，留待后续）。
 
 ## 9. 待实现确认项 → 逐条结论（t3/t4 实现后勾销）

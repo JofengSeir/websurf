@@ -22,9 +22,14 @@ const TRIGGER_COOLDOWN: f64 = 0.5;
 /// 微小 gap 容差，防"传送区域埋在表面下方深处"的深下探误触。
 const FOOT_PROBE_DEPTH: f64 = 8.0;
 
-/// BSP yaw（方位角，顺时针）→ cs-movement yaw（逆时针）。cs_yaw = (270 - BSP_yaw) % 360。
+/// BSP 实体 Source yaw → cs-movement yaw：wrap(bsp_yaw + 180)。
+/// 与 viewer pose.ts bspYawToCsYaw、ts-shared world-builder 同口径
+/// （[x,y,z]→[y,z,x] det=+1 轴映射下 Source 前向 (cos yaw, sin yaw) →
+/// (sin yaw, cos yaw)，恒等式即 +180；player.yaw 0 = 朝 −Z 同约定）。
+/// 旧式 (270 − yaw) 是 det=−1 镜像（t8 实证：surf_null primary spawn
+/// Source yaw=180 应为 0°，旧式给 90°），2026-09 修正。
 fn bsp_yaw_to_cs_yaw(bsp_yaw: f64) -> f64 {
-    let v = (270.0 - bsp_yaw) % 360.0;
+    let v = (bsp_yaw + 180.0) % 360.0;
     if v < 0.0 {
         v + 360.0
     } else {

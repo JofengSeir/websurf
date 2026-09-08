@@ -117,7 +117,7 @@ let triJson = proc.export_model_phy_colliders();
 if (JSON.parse(triJson).length === 0) triJson = proc.export_model_tri_colliders();
 const teleportReport = resolveDestIndexes(JSON.parse(proc.parse_teleports()));
 const spawnReport = JSON.parse(proc.parse_spawn_points());
-const bspYawToCsYaw = (bspYaw) => ((270 - bspYaw) % 360 + 360) % 360;
+const bspYawToCsYaw = (bspYaw) => (((bspYaw + 180) % 360) + 360) % 360; // wrap(src+180)，与 ts-shared 同口径（旧式 270− 为 det=−1 镜像，已废弃）
 const spawn = spawnReport.spawn_points[spawnReport.primary ?? 0] ?? spawnReport.spawn_points[0];
 
 function buildWorld() {

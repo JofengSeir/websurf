@@ -66,7 +66,7 @@ import('../pkg/websurf_test_wasm.js').then(async ({ BspProcessor, initSync }) =>
   const spawnData = JSON.parse(proc.parse_spawn_points());
   const sp = (spawnData.spawn_points ?? [])[0];
   if (!sp) throw new Error('无出生点');
-  const bspYawToCsYaw = (bspYaw) => ((270 - bspYaw) % 360 + 360) % 360;
+  const bspYawToCsYaw = (bspYaw) => (((bspYaw + 180) % 360) + 360) % 360; // wrap(src+180)，与 ts-shared 同口径（旧式 270− 为 det=−1 镜像，已废弃）
 
   const wasmBytes = readFileSync(join(root, 'pkg/websurf_test_wasm_bg.wasm'));
 

@@ -27,7 +27,7 @@
 |---|---|---|
 | debug | 全部 7 模块（auth×3、phys×3、input×1），相对路径 `../../src/ts-shared/...` | `debug/src/app.ts`、`debug/src/worker/main.ts`、`debug/src/renderer/renderer-main.ts` 等的 import 区 |
 | game | 同 debug 的 7 模块集合 | `game/src/config.ts:5`（buildPhysicsParams）、`game/src/worker/main.ts`、`game/src/renderer/renderer-main.ts` 等 |
-| viewer | **不 import**（无物理无双线程）；仅在本地复刻 `bspYawToCsYaw` 公式并注释引用 ts-shared | `viewer/src/core/pose.ts:11-13` |
+| viewer | **不 import**（无物理无双线程）；仅在本地复刻 `bspYawToCsYaw` 公式（wrap(src+180)，t2 统一口径）并注释引用 ts-shared | `viewer/src/core/pose.ts:16-25` |
 | test/dual-mode-harness | **仅复用 `KEY_MASK`**（位定义与 Rust 一致）；其 SAB 是 192B 私有协议，与本文 512B 权威帧协议**不是同一套** | `test/dual-mode-harness/src/shared-state.ts:51`、`:1-4` 头注 |
 | test/instanced-diorama | 不使用 | grep `ts-shared` 于 `test/instanced-diorama/src` → 空 |
 
@@ -145,7 +145,7 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:32-34`：`C
 
 - `BspProcessorLike` 接口（`:19-31`，11 方法）：`new/metadata/parse_spawn_points/parse_teleports/parse_pvs_data/export_brushes_planes/export_model_tri_colliders/export_model_phy_colliders/export_mosaic_manifest/export_missing_textures/export_glb_with_pakfile_models(_with_defaults)`——各工程 cdylib 导出面的公共收敛（工程能力差异见 §4.1）。
 - `DEFAULT_BRUSH_FILTER = {include_ladder:true, include_solid:true, min_brush_volume:0, skip_sky:true, skip_nodraw:false}`（`:83-90`）。
-- `bspYawToCsYaw(bspYaw) = ((270 − bspYaw) % 360 + 360) % 360`（`:92-94`；与 Rust `teleport.rs:26` 公式同源）。
+- `bspYawToCsYaw(bspYaw) = wrap(bspYaw + 180) = (((bspYaw + 180) % 360) + 360) % 360`（`:99-100`，t2 统一口径；旧式 (270 − yaw) 为 det=−1 镜像已废弃；与 Rust `teleport.rs:31-38` 公式同源）。
 - `ColliderSource = 'auto' | 'visual' | 'phy'`（`:35` 附近）；默认 `'auto'`。
 
 ### 3.7 `phys/authority-calibrator.ts` —— 校准四件套
@@ -181,7 +181,7 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:32-34`：`C
 
 ### 4.2 viewer：不使用本层
 
-viewer 无物理、无双线程、无输入协议——不 import ts-shared（§1.2）。唯一交集是 `bspYawToCsYaw` 公式的**本地复刻**（`viewer/src/core/pose.ts:11-13`，注释注明与 ts-shared 一致）：录像回放的位姿换算需要同一 yaw 约定。公式修改时须两处同步。
+viewer 无物理、无双线程、无输入协议——不 import ts-shared（§1.2）。唯一交集是 `bspYawToCsYaw` 公式的**本地复刻**（`viewer/src/core/pose.ts:16-25`，`wrap(src + 180)`，t2 统一口径；注释注明与 ts-shared 一致）：录像回放的位姿换算需要同一 yaw 约定。公式修改时须两处同步（Rust `teleport.rs:31-38` 亦同式，全量同步点见 architecture.md 不变量 3）。
 
 ### 4.3 dual-mode-harness：只复用 KEY_MASK，协议是另一套
 

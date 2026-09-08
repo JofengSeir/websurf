@@ -5,10 +5,8 @@
 
 import { PITCH_LIMIT_DEG } from '../core/constants.js';
 
-/** 角度归一到 [0,360)。 */
-export function wrapDeg(d: number): number {
-  return (((d % 360) + 360) % 360) || 0;
-}
+/** 角度归一到 [0,360)。单点实现在 core/pose.ts（BSP 出生点路径与 .replay 路径共用），此处转发导出。 */
+export { wrapDeg } from '../core/pose.js';
 
 /** pitch 限幅 ±89°。 */
 export function clampPitch(d: number): number {

@@ -6,7 +6,7 @@
  */
 
 import { el, foldBox, section } from '../core/dom.js';
-import { bspYawToCsYaw } from '../core/pose.js';
+import { spawnPointAng } from '../core/spawn.js';
 import type { Pose } from '../core/pose.js';
 import type { BspLoadResult } from '../core/bsp.js';
 
@@ -71,10 +71,15 @@ export class MapPanel {
     this.reloadWrap.classList.toggle('busy', busy);
   }
 
-  setMap(result: BspLoadResult | null, box: WorldBox | null): void {
+  /**
+   * result（null = 清空）+ 几何包围盒 + 推荐出生点下标。
+   * primaryIndex 缺省用 wasm 的 result.primary；传入 app 侧 resolveInitialSpawn
+   * 的命中下标时，★ 标记与初始视角同源（P2-4 回退：推荐位可能不再是 wasm primary）。
+   */
+  setMap(result: BspLoadResult | null, box: WorldBox | null, primaryIndex?: number): void {
     this.reloadWrap.style.display = result ? '' : 'none';
     this.renderInfo(result, box);
-    this.renderSpawns(result);
+    this.renderSpawns(result, primaryIndex ?? result?.primary ?? -1);
   }
 
   private renderInfo(result: BspLoadResult | null, box: WorldBox | null): void {
@@ -118,7 +123,7 @@ export class MapPanel {
     }
   }
 
-  private renderSpawns(result: BspLoadResult | null): void {
+  private renderSpawns(result: BspLoadResult | null, primaryIndex: number): void {
     const body = this.spawnBody;
     body.innerHTML = '';
     this.spawns = [];
@@ -132,17 +137,18 @@ export class MapPanel {
       const o = sp.origin ?? [];
       const pos: [number, number, number] = [o[0] ?? 0, o[1] ?? 0, o[2] ?? 0];
       this.spawns.push({
-        name: `${i === result.primary ? '★ ' : ''}#${i} ${sp.classname}（${n(pos[0])}, ${n(pos[1])}, ${n(pos[2])}）`,
+        name: `${i === primaryIndex ? '★ ' : ''}#${i} ${sp.classname}（${n(pos[0])}, ${n(pos[1])}, ${n(pos[2])}）`,
         pos,
       });
 
-      // 单行 pill：名 + 跳转；坐标/yaw 全量进 title
-      const item = el('div', 'spawn-item' + (i === result.primary ? ' primary' : ''));
-      const star = i === result.primary ? '★ ' : '';
+      // 单行 pill：名 + 跳转；坐标/角度全量进 title（viewer 约定：yaw=wrap(src+180)、pitch=−src）
+      const [vyaw, vpitch] = spawnPointAng(sp);
+      const item = el('div', 'spawn-item' + (i === primaryIndex ? ' primary' : ''));
+      const star = i === primaryIndex ? '★ ' : '';
       const cls = el('span', 'cls', `${star}#${i} ${sp.classname}`);
       cls.title =
         `${star}#${i} ${sp.classname}（${n(o[0])}, ${n(o[1])}, ${n(o[2])}）` +
-        `　yaw ${n(bspYawToCsYaw(sp.angles?.[1] ?? 0))}°（viewer 约定）`;
+        `　yaw ${n(vyaw)}° pitch ${n(vpitch)}°（viewer 约定）`;
       item.appendChild(cls);
 
       const btn = el('button', undefined, '跳转', { type: 'button' });
@@ -150,7 +156,7 @@ export class MapPanel {
       btn.addEventListener('click', () => {
         this.onJump({
           pos: [o[0] ?? 0, o[1] ?? 0, o[2] ?? 0],
-          ang: [bspYawToCsYaw(sp.angles?.[1] ?? 0), sp.angles?.[0] ?? 0],
+          ang: [vyaw, vpitch],
         });
       });
       item.appendChild(btn);
