@@ -211,14 +211,17 @@ JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapD
 风格 / tick / 帧段（title 带 stage）/ 日期（本地 YYYY-MM-DD）/ 格式版本（title 带 offsets 记录数）。
 缺失字段不出该项（V2 无成绩不渲染）；静态字段只在轨道增删/跟随切换时重渲染（`:1-7`）。
 
-### 7.5 遥测 HUD（`viewer/src/ui/telemetry.ts`，96 行）
+### 7.5 遥测 HUD（`viewer/src/ui/telemetry.ts`，93 行）
 
-视口中心偏下常驻（`#telemetry`，有轨道即显示）：**横向/竖向速度双读数**（横向 = `hypot(vel[0],vel[2])`
-XY 平面主读数，竖向 = `vel[1]` Z 轴副读数，HU/s；数据源 = 跟随轨道 `Clip.vel` 相邻帧差分）
-+ **按键可视化**（六键簇 W/A/S/D/跳/蹲，按 `Clip.buttons[index]` IN_* 位掩码高亮：
-IN_JUMP=2、IN_DUCK=4、IN_FORWARD=8、IN_BACK=16、IN_MOVELEFT=512、IN_MOVERIGHT=1024，
-与 selftest `IN_FORWARD(8)`/`IN_MOVELEFT(512)` 断言同源）。驱动：`syncTracks` 控显隐 +
-帧循环 80ms 节拍内 `update(sample(), followClip.buttons[index])`（app.ts 帧循环段）。
+两部分（用户定调：速度位置照 game、按键在 timeline 右侧）：
+**速度 HUD**（`#telemetry`，game/web 同款：横向居中、距底 24%、单行裸数字 `横向｜竖向`，
+竖向取绝对值，无标签无单位卡片底；数据源 = 跟随轨道 `Clip.vel` 相邻帧差分：
+横向 = `hypot(vel[0],vel[2])`、竖向 = `|vel[1]|`）；
+**按键簇**（挂 `#timeline` grid 右列，随时间轴显隐）：六键 W/A/S/D/跳/蹲，按跟随轨道当前帧
+`Clip.buttons[index]` IN_* 位掩码高亮（IN_JUMP=2、IN_DUCK=4、IN_FORWARD=8、IN_BACK=16、
+IN_MOVELEFT=512、IN_MOVERIGHT=1024，与 selftest `IN_FORWARD(8)`/`IN_MOVELEFT(512)` 断言同源）。
+驱动：`syncTracks` 控速度 HUD 显隐 + 帧循环 80ms 节拍内
+`update(sample(), followClip.buttons[index])`（app.ts 帧循环段）。
 
 ### 7.6 装配与对外 API（`viewer/src/app.ts`，504 行）
 

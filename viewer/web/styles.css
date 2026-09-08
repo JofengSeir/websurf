@@ -286,28 +286,30 @@ code { font-family: var(--mono); color: var(--accent); }
 .tl-speed-select { flex: 0 0 auto; }
 .tl-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-/* ── 回放遥测 HUD（中心偏下：横向/竖向速度 + 按键可视化）────────── */
+/* ── 回放遥测 HUD：速度（game 同款：横向居中，距底 24%，单行裸数字）──
+ * 对照 game/web/index.html #hud/#stats：无卡片底、text-shadow、tabular-nums。 */
 .telemetry {
-  position: absolute; left: 50%; top: 62%; transform: translateX(-50%);
-  display: flex; align-items: flex-end; gap: 18px;
-  z-index: 5; padding: 8px 14px; border-radius: var(--r-md);
-  background: var(--panel); border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
-  pointer-events: none; user-select: none;
+  position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%);
+  z-index: 5; pointer-events: none; user-select: none;
   font-variant-numeric: tabular-nums;
+  font-size: 21px; font-weight: 600; letter-spacing: .5px; color: var(--text);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.3);
 }
-.tm-speed { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
-.tm-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.tm-label { font-size: 11px; color: var(--muted); }
-.tm-value { font-family: var(--mono); font-size: 20px; line-height: 1.2; color: var(--text); }
-.tm-vert { font-size: 14px; color: var(--muted); }
-.tm-value::after { content: ' HU/s'; font-family: inherit; font-size: 10px; color: var(--muted); }
-.tm-keys { display: grid; grid-template-columns: repeat(3, 22px); grid-auto-rows: 22px; gap: 3px; }
+.telemetry .vsep { color: rgba(255, 255, 255, 0.35); margin: 0 8px; font-weight: 400; }
+.telemetry .tm-vert { color: var(--muted); }
+
+/* ── 按键簇：#timeline 右列（grid 布局，随时间轴显隐）────────────── */
+#timeline { display: grid; grid-template-columns: 1fr auto; column-gap: 14px; }
+.tl-slider-row, .tl-controls, .tl-opts { grid-column: 1; }
+.tm-keys {
+  grid-column: 2; grid-row: 1 / span 3; align-self: center;
+  display: grid; grid-template-columns: repeat(3, 22px); grid-auto-rows: 22px; gap: 3px;
+}
 .tm-key {
   display: flex; align-items: center; justify-content: center;
-  font-size: 10.5px; color: var(--muted);
+  font-size: 10.5px; font-weight: 400; color: var(--muted);
   background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: 4px; text-shadow: none;
 }
 .tm-key.on {
   color: #0f1115; background: var(--accent); border-color: var(--accent); font-weight: 600;
