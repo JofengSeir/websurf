@@ -265,7 +265,7 @@ export class ReplayPanel {
       const summary =
         `${this.file.name}：${result.clip.count.toLocaleString('en-US')} 帧，` +
         `${result.clip.duration.toFixed(2)} s` +
-        (result.clip.vel ? `，最大速度 ${result.clip.maxSpeed.toFixed(0)} HU/s` : '') +
+        (result.clip.vel ? `，最大速度 ${result.clip.maxSpeed.toFixed(0)} u/s` : '') +
         (big ? ' —— 帧数较多，改映射/变换重新导入耗时较长' : '');
       this.fileNote(
         result.warnings.length > 0 ? result.warnings.join('；') + ' —— ' + summary : summary,
