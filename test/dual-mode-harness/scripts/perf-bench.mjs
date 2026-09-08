@@ -125,7 +125,7 @@ const BRUSH_FILTER_JSON = JSON.stringify({
   skip_sky: true,
   skip_nodraw: false,
 });
-const bspYawToCsYaw = (bspYaw) => ((270 - bspYaw) % 360 + 360) % 360;
+const bspYawToCsYaw = (bspYaw) => (((bspYaw + 180) % 360) + 360) % 360; // wrap(src+180)，与 ts-shared 同口径（旧式 270− 为 det=−1 镜像，已废弃）
 
 /** 小世界（手工 brush 镜像，与 phys-smoke brushes 一致）：物理 ~µs 级，对象构造占主导。 */
 const q = 1 / Math.SQRT2;

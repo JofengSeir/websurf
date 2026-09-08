@@ -35,11 +35,12 @@ export type TeleportTriggerMode =
   | 'start-touch-grounded';
 
 /**
- * BSP yaw（方位角，顺时针）→ cs-movement yaw（逆时针）。
- * 公式：cs_yaw = (270 - BSP_yaw) % 360，推导见 spawn-loader.ts 文件头。
+ * BSP 实体 Source yaw → cs-movement yaw：wrap(src + 180)。
+ * 与 ts-shared world-builder / viewer pose.ts bspYawToCsYaw 同口径；
+ * 推导见 spawn-loader.ts 文件头（旧式 (270 − yaw) 为 det=−1 镜像，已废弃）。
  */
 function bspYawToCsYaw(bspYaw: number): number {
-  return ((270 - bspYaw) % 360 + 360) % 360;
+  return (((bspYaw + 180) % 360) + 360) % 360;
 }
 
 // ---------------------------------------------------------------------------

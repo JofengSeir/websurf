@@ -197,6 +197,10 @@ try {
     socket.once('error', rej);
   });
 
+  // 日志按 session 归桶：[13] 只检查主页面；[12b] BSP 独立页面单独收集未捕获异常
+  let mainSessionId = null;
+  let bspSessionId = null;
+  const bspErrors = [];
   socket.on('message', (raw) => {
     const msg = JSON.parse(raw.toString());
     if (msg.id && pending.has(msg.id)) {
@@ -206,19 +210,34 @@ try {
       else p.resolve(msg.result);
       return;
     }
+    const isMain = msg.sessionId === mainSessionId;
+    const isBsp = msg.sessionId != null && msg.sessionId === bspSessionId;
     if (msg.method === 'Runtime.consoleAPICalled') {
       const text = msg.params.args
         .map((a) => a.value ?? a.description ?? a.type)
         .join(' ');
-      logs.push(`${msg.params.type}: ${text}`);
-      if (msg.params.type === 'error') errors.push(text);
+      if (isMain) {
+        logs.push(`${msg.params.type}: ${text}`);
+        if (msg.params.type === 'error') errors.push(text);
+      } else if (isBsp && msg.params.type === 'error') {
+        bspErrors.push(text);
+      }
     } else if (msg.method === 'Runtime.exceptionThrown') {
-      const d = msg.params.exceptionDetails;
-      errors.push(d.exception?.description ?? d.text);
+      if (isMain) {
+        const d = msg.params.exceptionDetails;
+        errors.push(d.exception?.description ?? d.text);
+      } else if (isBsp) {
+        const d = msg.params.exceptionDetails;
+        bspErrors.push(d.exception?.description ?? d.text);
+      }
     } else if (msg.method === 'Log.entryAdded') {
       const e = msg.params.entry;
-      logs.push(`log.${e.level}: ${e.text}`);
-      if (e.level === 'error') errors.push(e.text);
+      if (isMain) {
+        logs.push(`log.${e.level}: ${e.text}`);
+        if (e.level === 'error') errors.push(e.text);
+      } else if (isBsp && e.level === 'error') {
+        bspErrors.push(e.text);
+      }
     }
   });
 
@@ -230,6 +249,7 @@ try {
     targetId: page.id,
     flatten: true,
   });
+  mainSessionId = sessionId;
 
   await send('Runtime.enable', {}, sessionId);
   await send('Log.enable', {}, sessionId);
@@ -663,10 +683,128 @@ try {
   console.log('  地图页分区：' + JSON.stringify(mapSecs));
   check('「参考显示」（ReferenceGrid）已不存在', !mapSecs.includes('参考显示'), JSON.stringify(mapSecs));
   check('「出生点导航」分区在位', mapSecs.includes('出生点导航'), JSON.stringify(mapSecs));
-  // F6(info) 目检备注（本次不修）：surf_null 无 info_player_start，出生点实体朝向经
-  // pose.ts bspYawToCsYaw(270−yaw) 映射，与 t3 实测定标（srcYaw+180，cos=0.9992）口径
-  // 不一致，疑似镜像——待带出生点地图端到端目检后回报（见 t8 output）。
+  // F6(info) 目检备注（已修复）：surf_null 无 info_player_start，出生点实体朝向原经
+  // pose.ts bspYawToCsYaw(270−yaw) 映射（det=−1 镜像），t1 已修为 wrapDeg(bspYaw+180)，
+  // 与 .replay 实测定标（srcYaw+180，cos=0.9992）口径一致。surf_null.bsp 实测（viewer wasm）：
+  // primary spawn Source yaw=180 → 初始 viewer yaw 旧 90° / 新 0°（+180 定标生效）。
   await evaluate("document.querySelector('.tab[data-tab=\"replay\"]').click()", sessionId);
+
+  // [12b] P2-4 验收断言持久化（t9）：真实 .bsp 走 #bspFile 用户链路，断言初始相机
+  // 与地图几何 bbox 相交、命中玩家出生点、yaw/pitch 符合 t1/t3 定标。
+  // 口径：yaw = wrap(src+180)、pitch = −src（Source 正=俯视）；回退优先级见 core/spawn.ts。
+  // 独立 target（新页面）：与主页面回放状态隔离——first-person 回放会逐帧覆盖 fly 相机，
+  // 在主页面加载 .bsp 读不到初始位姿；其 console 噪声也不进 [13] 主页面检查。
+  console.log('\n[12b] BSP 加载：初始相机 bbox 相交断言（P2-4 回退 + t1 定标）');
+  {
+    const { targetId: bspTargetId } = await send('Target.createTarget', { url: URL_ });
+    const { sessionId: bspSession } = await send('Target.attachToTarget', {
+      targetId: bspTargetId,
+      flatten: true,
+    });
+    bspSessionId = bspSession;
+    try {
+      await send('Runtime.enable', {}, bspSession);
+      await send('Log.enable', {}, bspSession);
+      await sleep(5000); // 应用初始化（wasm 懒加载 + 装配）
+      const bspReady = await evaluate('!!window.viewer?.map', bspSession);
+      check('[12b] BSP 页面装配完成（window.viewer.map）', bspReady === true, String(bspReady));
+
+      const bspCases = [
+        {
+          file: 'surf_null.bsp',
+          expectSource: 'player-spawn',
+          expectYaw: 0, // 首个 info_player_* Source yaw=180 → wrap(180+180)=0
+          expectPitch: 0, // Source pitch=0 → −0
+          oldVoidPos: [11264, -9600, 5792], // 旧 wasm primary（taiikii_bonus_dest），距主出生区 26,200 HU
+        },
+        {
+          file: 'surf_666.bsp',
+          expectSource: 'player-spawn',
+          expectYaw: 180, // 首个 info_player_* Source yaw=0 → wrap(0+180)=180
+          expectPitch: 0,
+        },
+      ];
+      for (const bspCase of bspCases) {
+        const bspPath = join(VIEWER_ROOT, '..', 'maps', bspCase.file);
+        if (!existsSync(bspPath)) {
+          console.log(`  skip  ${bspCase.file} 不存在（maps/），跳过本图断言`);
+          continue;
+        }
+        await setFileInput(bspSession, '#bspFile', bspPath);
+        // 换图真正完成（HUD 状态行出现本文件名）再断言——避免拿到上一张图的位姿
+        let loaded = false;
+        for (let i = 0; i < 120 && !loaded; i++) {
+          const st = await evaluate(
+            "document.getElementById('bspStatus')?.textContent ?? ''",
+            bspSession,
+          );
+          if (typeof st === 'string' && st.startsWith(`${bspCase.file}：`)) loaded = true;
+          else await sleep(500);
+        }
+        check(`${bspCase.file} 加载完成（HUD 状态行确认）`, loaded);
+        if (!loaded) continue;
+        const pose = JSON.parse(await evaluate('JSON.stringify(window.viewer.map.pose())', bspSession));
+        const mapBox = JSON.parse(await evaluate('JSON.stringify(window.viewer.map.mapBox())', bspSession));
+        console.log(
+          `  初始视角 source=${pose.spawnSource} pos=(${pose.pos.map((v) => v.toFixed(0)).join(', ')}) ` +
+            `yaw=${pose.yawDeg.toFixed(1)}° pitch=${pose.pitchDeg.toFixed(1)}°`,
+        );
+        const insideBbox =
+          Array.isArray(mapBox?.min) &&
+          mapBox.min.every(Number.isFinite) &&
+          pose.pos.every((v, k) => v >= mapBox.min[k] && v <= mapBox.max[k]);
+        check(
+          `${bspCase.file} 初始相机与地图 bbox 相交（P2-4 验收断言）`,
+          insideBbox,
+          JSON.stringify({ pos: pose.pos, box: mapBox }),
+        );
+        check(
+          `${bspCase.file} 命中玩家出生点（source=${bspCase.expectSource}）`,
+          pose.spawnSource === bspCase.expectSource,
+          String(pose.spawnSource),
+        );
+        check(
+          `${bspCase.file} 初始 yaw = ${bspCase.expectYaw}°（wrap(src+180)）`,
+          Math.abs(pose.yawDeg - bspCase.expectYaw) < 1e-6,
+          String(pose.yawDeg),
+        );
+        check(
+          `${bspCase.file} 初始 pitch = ${bspCase.expectPitch}°（−src，Source 正=俯视）`,
+          Math.abs(pose.pitchDeg - bspCase.expectPitch) < 1e-6,
+          String(pose.pitchDeg),
+        );
+        if (bspCase.oldVoidPos) {
+          const distOld = Math.hypot(...pose.pos.map((v, i) => v - bspCase.oldVoidPos[i]));
+          check(
+            `${bspCase.file} 初始相机不在旧空域传送点（dist > 10k HU）`,
+            distOld > 10000,
+            `dist=${distOld.toFixed(0)} HU`,
+          );
+        }
+      }
+      // 已知降级（pre-existing，非本次改动引入）：surf 系 GLB 静态 prop 几何混合
+      // indexed/non-indexed 触发 three mergeGeometries console.error，该批网格跳过合并
+      // 但其余网格正常渲染——只滤这一族，未捕获异常与其它 error 仍判定失败。
+      const knownBspNoise = /^THREE\.BufferGeometryUtils: \.mergeGeometries\(\) failed/;
+      const realBspErrors = bspErrors.filter((e) => !knownBspNoise.test(e));
+      console.log(
+        `  （已知降级过滤：mergeGeometries ×${bspErrors.length - realBspErrors.length}，` +
+          `其余 error ×${realBspErrors.length}）`,
+      );
+      check(
+        '[12b] BSP 页面无未捕获异常 / 非 mergeGeometries error',
+        realBspErrors.length === 0,
+        realBspErrors.join(' | '),
+      );
+    } finally {
+      try {
+        await send('Target.closeTarget', { targetId: bspTargetId });
+      } catch {
+        /* 已随 Edge 退出 */
+      }
+      bspSessionId = null;
+    }
+  }
 
   console.log('\n[13] 控制台（累计）');
   const realErrors = errors.filter(

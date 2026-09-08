@@ -76,12 +76,13 @@
 - `applyToWithRoll(camera, eyeOffset)`：回放第一人称专用，叠加 roll（`fly.ts:195-198`）。
 - 位姿进出：`setPose`（度 → 弧度 + 限幅，出生点跳转用）、`setWorld`（弧度直写，回放同步用）、`getPose`（度返回，HUD 读数用）（`fly.ts:180-206`）。
 
-## 3. 位姿契约与换算（`viewer/src/core/pose.ts`，25 行）
+## 3. 位姿契约与换算（`viewer/src/core/pose.ts`，36 行）
 
 - `Pose = { pos:[x,y,z] 脚底; ang:[yawDeg, pitchDeg] }`（`pose.ts:5-9`）——HUD 读数、出生点跳转、回放相机三处共用（`pose.ts:1`）。
-- `bspYawToCsYaw(bspYaw) = ((270 − yaw) mod 360)`（`pose.ts:12-14`）：BSP 方位角（顺时针）→ viewer yaw（逆时针）。**同式在三处各自维护**：`viewer/src/core/pose.ts:12-14`、`src/ts-shared/phys/world-builder.ts:92`、`debug/src/world/spawn-loader.ts:61`（互不 import，公式对齐，见 [../differences.md](../differences.md) §7）。
-  ⚠ **该式仅服务 BSP 出生点实体角路径**（初始视角 `app.ts:266`、出生点列表 title `mapinfo.ts:139`），与 `.replay` 帧解码的实测定标（`yaw = wrap(srcYaw+180)`，`shavit-replay.ts:494-497`）**是两套口径，不可混用**；且 t8 评审实测该式对出生点实体**疑似镜像**（跨出生点差分互斥，F6 已知问题，未在本次范围修复）——引用时注意上下文。
-- `pitchClampedRad` / `eyeHeight`（`pose.ts:16-24`）。
+- `wrapDeg(d)`（`pose.ts:11-14`）：角度归一 [0,360) 单点实现（`replay/helpers.ts` 从此转发导出，两条路径共用）。
+- `bspYawToCsYaw(bspYaw) = wrapDeg(bspYaw + 180)`（`pose.ts:23-25`）：BSP 出生点实体 Source yaw → viewer yaw。**t1 已修评审 F6**——旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射（surf_null primary srcYaw=180 应为 0°，旧式给 90°），现与 `.replay` 帧解码的实测定标（`yaw = wrap(srcYaw+180)`，`shavit-replay.ts:494-498`）**同一口径**。同式多处各自维护（互不 import，公式对齐，见 [../differences.md](../differences.md) §7.2）：`viewer/src/core/pose.ts:23-25`、`src/ts-shared/phys/world-builder.ts:99-100`、`src/phys/teleport.rs:31-38`（Rust）、`debug/src/world/spawn-loader.ts:65-66` 与 `debug/src/world/teleport-manager.ts:42-44`——改公式需多处同步。
+  该式服务 BSP 出生点/传送实体角路径：初始视角经 `core/spawn.ts:47-50 spawnPointAng`（P2-4 回退解析 `spawn.ts:79-101`，消费在 `app.ts:270-273`）、出生点列表 title/跳转 `mapinfo.ts:144-161`。
+- `pitchClampedRad` / `eyeHeight`（`pose.ts:27-35`）。
 - `EYE_STAND = 64.09` HU（`core/constants.ts:6-7`，注释"与 game EYE_STAND 一致"）——与共享物理常量同值：`src/phys/player.rs:34` `pub const EYE_STAND: f64 = 64.09`。
 
 ## 4. 常量与 DOM 工具
@@ -120,14 +121,14 @@
 - 启动兜底：`showFatal`（WebGL 不可用）+ `showGuide/showGuideError`（首访引导层报错）+ `setDropActive`（拖拽高亮）（`hud.ts:110-143`）。
 - HUD 行内容与分工的跨面逻辑（哪条消息进哪个域）见 `app.ts:157-188` 的 `updateReplayMapStatus` 注释。
 
-## 6. MapPanel（`viewer/src/ui/mapinfo.ts`，165 行；ReferenceGrid 已移除）
+## 6. MapPanel（`viewer/src/ui/mapinfo.ts`，171 行；ReferenceGrid 已移除）
 
 ### 6.1 MapPanel（地图页全部内容）
 
 - 「更换地图」入口：加载成功后显示，点击走 `#bspFile.click()` 同一链路（`mapinfo.ts:44-55`；加载中 `setLoadBusy` 禁用，`mapinfo.ts:69-72`）。
-- 地图信息：默认核心三行（文件 / 出生点数 / 世界尺寸 X×Y×Z HU，`mapinfo.ts:90-103`）；magic/brushes/faces/models/vertices/static props/PAKFILE 数/解析耗时/包围盒收进「统计明细」折叠（`mapinfo.ts:106-118`）。
-- 出生点导航：单行 pill（★ = 推荐点 `info_player_start`），坐标与 viewer 约定 yaw 全量进 title；「跳转」按钮 → `onJump(pose)` → `fly.setPose`（`mapinfo.ts:121-157`，跳转按钮 `:145-152`；app 侧在 `app.ts:94-99` 接线，回放第一人称时跳转被忽略）。
-- **出生点快照**：`spawnPoints` getter 暴露 `{name,pos}[]`（世界坐标脚底，`mapinfo.ts:37-38, 65-68`）——消费方只剩「出生点导航」跳转列表自身（头注释 `:64` 同口径）；录像侧已不再消费（t4 起无「起点对齐」检测与一键锚定）。
+- 地图信息：默认核心三行（文件 / 出生点数 / 世界尺寸 X×Y×Z HU，`mapinfo.ts:93-108`）；magic/brushes/faces/models/vertices/static props/PAKFILE 数/解析耗时/包围盒收进「统计明细」折叠（`mapinfo.ts:110-123`）。
+- 出生点导航：单行 pill（★ = 初始视角命中点——`setMap` 接收 app 侧 `resolveInitialSpawn` 的下标，与初始视角同源；P2-4 回退下推荐位可能不是 wasm primary，`mapinfo.ts:74-83`），坐标与 viewer 约定 yaw/pitch 全量进 title（`spawnPointAng` 同款：yaw=wrap(src+180)、pitch=−src）；「跳转」按钮 → `onJump(pose)` → `fly.setPose`（`mapinfo.ts:126-166`，跳转按钮 `:154-161`；app 侧在 `app.ts:94-99` 接线，回放第一人称时跳转被忽略）。
+- **出生点快照**：`spawnPoints` getter 暴露 `{name,pos}[]`（世界坐标脚底，`mapinfo.ts:37-38, 64-67`）——消费方只剩「出生点导航」跳转列表自身（头注释 `:64` 同口径）；录像侧已不再消费（t4 起无「起点对齐」检测与一键锚定）。
 
 ### 6.2 ReferenceGrid（已移除）
 

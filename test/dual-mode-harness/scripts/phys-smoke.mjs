@@ -3500,8 +3500,8 @@ check('export_glb_with_pakfile_models 非空（GLB 有字节）', glbBytes !== n
 
 // 15. build_world 真实地图：surf_666 导出 → 物理 tick 正常
 console.log('\n── build_world 真实地图（surf_666 导出）──');
-/** BSP yaw → cs-movement yaw（与 main.ts bspYawToCsYaw 一致）。 */
-const bspYawToCsYaw = (bspYaw) => ((270 - bspYaw) % 360 + 360) % 360;
+/** BSP yaw → cs-movement yaw：wrap(src+180)（与 main.ts/ts-shared 同口径；旧式 270− 为 det=−1 镜像，已废弃）。 */
+const bspYawToCsYaw = (bspYaw) => (((bspYaw + 180) % 360) + 360) % 360;
 
 let physReal = null;
 let realBuildOk = false;

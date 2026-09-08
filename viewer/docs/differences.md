@@ -64,12 +64,12 @@
 | 键位掩码 / 输入槽 | 无（键鼠直接进 FlyCam） | ts-shared `input-layer`/`keysToMask`（debug/game） |
 | 面板 | 地图信息 + 出生点导航 + 录像页（导入/坐标映射/轨迹列表/调整工具 + 时间轴 + 录像信息条） | debug：物理参数/碰撞/传送/PVS/画质面板；game：玩法面板 + 存点（`game/src/panel/`、`game/src/savepoint.ts`） |
 | 存点 / 计时 | 无（定位即"看"） | game 具备 |
-| 外部控制 API | `window.viewer.replay`（内省 + `meta()` + 播放控制，`app.ts:307-364`，供自动化/冒烟） | game/debug 以面板与参数为主 |
+| 外部控制 API | `window.viewer.replay`（内省 + `meta()` + 播放控制，`app.ts:343-398`）+ `window.viewer.map`（相机位姿/地图 bbox/初始视角来源内省，`app.ts:326-342`，P2-4 冒烟断言用），供自动化/冒烟 | game/debug 以面板与参数为主 |
 
 ## 7. 与共享层的边界（避免误读）
 
 1. **`websurf-wasm-core` 是真依赖**：BSP 解析（`vbsp` 26 lump + LZMA + Leaves 排序修复）、GLB 导出（`bsp_to_gltf_core`）、模型整合（`model_integrator`）、PAKFILE 索引（`pakfile_models`）、VTF 解码（`texture_utils`）全部来自共享 crate——viewer 侧 `crates/wasm/src/lib.rs` 只是 wasm-bindgen 导出层 + PAKFILE 模型/材质提取的"viewer 版组装"（`lib.rs:1-9, 16-17`）。
-2. **`websurf-phys` / `ts-shared` 是"对齐"不是"依赖"**：共享的只有数值与约定（EYE_STAND 64.09、`bspYawToCsYaw = (270 − yaw) mod 360`）。同式三处各自维护：`viewer/src/core/pose.ts:12-14`、`src/ts-shared/phys/world-builder.ts:92`、`debug/src/world/spawn-loader.ts:61`——不 import 是有意为之（工程间零 import 原则），改公式需三处同步。⚠ 该式**仅服务 BSP 出生点实体角路径**（`app.ts:266` 初始视角、`mapinfo.ts:139` 出生点 title），与 `.replay` 帧解码的实测定标（`yaw = wrap(src+180)`，`viewer/src/replay/shavit-replay.ts:494-497`）是两套口径；t8 评审实测 270− 式对出生点实体疑似镜像（F6 已知问题，未修复）——故 `.replay` 侧**不**复用此式。
+2. **`websurf-phys` / `ts-shared` 是"对齐"不是"依赖"**：共享的只有数值与约定（EYE_STAND 64.09、`bspYawToCsYaw = wrap(src + 180)`，t1/t2 于 2026-09 统一——旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射，surf_null primary srcYaw=180 应为 0° 旧式给 90°，评审 F6 已修）。同式多处各自维护：`viewer/src/core/pose.ts:23-25`、`src/ts-shared/phys/world-builder.ts:99-100`、`src/phys/teleport.rs:31-38`（Rust 传送面向）、`debug/src/world/spawn-loader.ts:65-66` 与 `debug/src/world/teleport-manager.ts:42-44`——不 import 是有意为之（工程间零 import 原则），改公式需多处同步。该式服务 BSP 出生点/传送实体角路径（viewer 初始视角 `core/spawn.ts:47-50` + 面板跳转、ts-shared 出生点 yawDeg、Rust 传送后朝向），与 `.replay` 帧解码的实测定标（`yaw = wrap(src+180)`，`viewer/src/replay/shavit-replay.ts:494-498`）**同一定标**——全链统一 +180 口径。
 3. **坐标系同一约定**：GLB 顶点/出生点都走 `[x,y,z]→[y,z,x]` Y-up 变换（`src/wasm-core/bsp_to_gltf_core/convert.rs:813-816`、`src/wasm-core/model_integrator/mod.rs:1041-1045`、`viewer/crates/wasm/src/lib.rs:339-342`），所以 Shavit 录像帧的绝对世界坐标可直接与场景对齐——`.replay` 解码走同一 `[y,z,x]` 映射（`viewer/src/replay/shavit-replay.ts:481`），HUD 包围盒外检查（`app.ts:157-188`）只用于暴露映射错误。
 4. **与 test/dual-mode-harness 的特殊关系**：viewer 的空间分块合并算法移植自 harness 的 `worker-b.ts`（`scene.ts:236-241` 注释自证）；viewer 的录像自检与 harness 的对照测试互补（管线 vs 物理）。
 

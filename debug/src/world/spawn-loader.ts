@@ -2,8 +2,11 @@
  * 出生点加载器
  * 将 WASM parse_spawn_points 输出的 JSON 转换为 cs-movement 的 Vec3 出生坐标与初始 yaw。
  * 坐标已旋转为 Y-up（[x,y,z]→[y,z,x]），TS 端不再二次重映射。
- * yaw 转换（关键）：BSP yaw 为方位角（顺时针），cs-movement/Three.js yaw 为逆时针（从 +Y 向下看），
- * 旋转后 BSP +Y→TS +X、+X→+Z，故转换公式 cs_yaw = (270 - BSP_yaw) % 360。
+ * yaw 转换（关键）：本轴映射 [x,y,z]→[y,z,x] 为 det=+1 循环置换，Source 前向
+ * (cos yaw, sin yaw) 置换后 → (sin yaw, cos yaw)；消费端 cs-movement yaw 0 = 朝 −Z
+ * （fwd = (−sin, −cos)），故 cs_yaw = wrap(BSP_yaw + 180)。旧式 (270 − BSP_yaw)
+ * 是 det=−1 镜像映射（t8 实证 surf_null primary yaw=180 应 0°，旧式给 90°），
+ * 2026-09 与 ts-shared world-builder / viewer pose.ts 统一修正。
  *
  * ⚠️ 未接线（预留工具，勿误认为活跃加载链路）：全仓无任何 import 本模块；
  * 出生点实际加载走共享层 src/ts-shared/phys/world-builder.ts 的 parse_spawn_points
@@ -55,11 +58,12 @@ const DEFAULT_YAW = 0;
 // ---------------------------------------------------------------------------
 
 /**
- * BSP yaw（方位角，顺时针）→ cs-movement yaw（逆时针）。
- * 公式：cs_yaw = (270 - BSP_yaw) % 360（推导见文件头）。
+ * BSP 出生点实体 Source yaw → cs-movement yaw：wrap(src + 180)。
+ * 与 ts-shared world-builder / viewer pose.ts bspYawToCsYaw 同口径
+ * （推导见文件头；旧式 (270 − yaw) 为 det=−1 镜像，已废弃）。
  */
 function bspYawToCsYaw(bspYaw: number): number {
-  return ((270 - bspYaw) % 360 + 360) % 360;
+  return (((bspYaw + 180) % 360) + 360) % 360;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +93,7 @@ export function loadSpawnPoints(wasmJson: string): SpawnLoadResult {
     (sp: WasmSpawnPoint) => ({
       classname: sp.classname,
       origin: { x: sp.origin[0], y: sp.origin[1], z: sp.origin[2] },
-      yaw: bspYawToCsYaw(sp.angles[1]), // BSP 顺时针 → cs-movement 逆时针
+      yaw: bspYawToCsYaw(sp.angles[1]), // wrap(+180) 定标（见文件头；与 ts-shared 同口径）
       angles: sp.angles,
     }),
   );

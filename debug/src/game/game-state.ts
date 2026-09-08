@@ -26,7 +26,7 @@ export interface Checkpoint {
 	pos: Vec3;
 	/** 目标名称（用于显示）。 */
 	name: string;
-	/** yaw（用于重生朝向）。 */
+	/** yaw（用于重生朝向；弧度，cs-movement 口径 = wrap(BSP yaw + 180)，换算见 onTeleport）。 */
 	yaw: number;
 }
 
@@ -148,7 +148,12 @@ export class GameState {
 					: 0,
 				pos: { x: dest.origin.x, y: dest.origin.y, z: dest.origin.z },
 				name: dest.targetname,
-				yaw: (dest.angles[1] * Math.PI) / 180,
+				// 重生朝向：消费端换算统一——取单点转换后的 cs-movement yaw（度），
+				// 即 teleport-manager bspYawToCsYaw = wrap(BSP yaw + 180)，与 viewer
+				// pose.ts / ts-shared world-builder / Rust teleport.rs 同口径。
+				// 旧式直用 dest.angles[1]（接口契约 = BSP 原始 yaw）缺消费端 +180
+				// 换算，重生面向与换算后口径恒差 180°（反向，t7 发现）。
+				yaw: (dest.yaw * Math.PI) / 180,
 			});
 		}
 		return false;

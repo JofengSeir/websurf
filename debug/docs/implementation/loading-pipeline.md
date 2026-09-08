@@ -34,7 +34,7 @@
 5. **缺失纹理**（`export_missing_textures`，debug 特有）；
 6. **默认纹理包回退**：内嵌 base64（`__VBSP_TEXTURES_MTZ_B64__`）或 fetch `./textures.mtz` → `decompressMtz` → defaultsJson；
 7. **GLB 导出**：`export_glb_with_pakfile_models_with_defaults(defaultsJson)`（构建期把默认低清纹理烧进 GLB），失败回退 `export_glb_with_pakfile_models()`；
-8. **出生点解析**：`primary`（优先 info_player_start）→ `spawn {x,y,z,yawDeg}`；`spawnList = [[x,y,z,yaw],…]`，yaw 统一经 `bspYawToCsYaw`（`cs_yaw = (270 - bsp_yaw) % 360`，`world-builder.ts:91-94,223-239`）。无出生点回退 `(0,100,0)`。
+8. **出生点解析**：`primary`（优先 info_player_start）→ `spawn {x,y,z,yawDeg}`；`spawnList = [[x,y,z,yaw],…]`，yaw 统一经 `bspYawToCsYaw`（`cs_yaw = wrap(bsp_yaw + 180)`，`world-builder.ts:91-101`；旧式 270− 为 det=−1 镜像，2026-09 修正）。无出生点回退 `(0,100,0)`。
    - 注：`debug/src/world/spawn-loader.ts` 是同一逻辑的**预留工具副本**，全仓无 import（文件头自述 `spawn-loader.ts:8-11`），活跃链路在 world-builder。
 
 ## 3. BspProcessor 导出面（`debug/crates/wasm/src/lib.rs`）

@@ -87,8 +87,9 @@ Source 前向 `(cos yaw_s, sin yaw_s)` 在 `[y,z,x]` 映射下落入 viewer 前�
 恒等式 ⇔ `yaw_v = wrap(yaw_s + 180)`。实证：真实 `surf_null_4.replay` run 段 1078 个有效帧
 「视角·运动方向」平均 cos = **0.9992**（270− 口径同帧集 ≈ 0.05）；断言固化于
 `test/replay-selftest.ts:286-307`（run 段平均 cos > 0.98）与合成 fixture（src yaw=30 → viewer 210，`replay-selftest.ts:381-386`）。
-⚠ `src/core/pose.ts:12-14 bspYawToCsYaw`（270−yaw）**仅服务 BSP 出生点实体角路径**（初始视角/出生点跳转），
-与 .replay 解码无关且实测疑似镜像（已知问题，t8 评审 F6）——两套口径不可混用。详见 [shavit-replay-format.md §8.2](shavit-replay-format.md)。
+`pose.ts:23-25 bspYawToCsYaw`（t1 起同为 `wrap(src+180)`，F6 镜像已修）服务 BSP 出生点实体角路径
+（初始视角 `core/spawn.ts:47-50` / 面板跳转 `mapinfo.ts:144-161`）——与 .replay 解码**同一定标**，
+全链统一口径。详见 [shavit-replay-format.md §8.2](shavit-replay-format.md)。
 
 ### 2.6 Clip 适配（`clipFromShavitReplay`，`shavit-replay.ts:536-584`）解析数组做**拷贝**（transform 原地后处理、parsed 结果保持可复用）→ 复算 `bbox`/`maxSpeed` → 组装 Clip
 （`resolvedPath='.replay'`、`meta=header`、`buttons`）→ `applyClipTransform(clip, rule.transform)`（§3.2）→ 返回 `{clip, warnings}`。
@@ -210,14 +211,14 @@ JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapD
 风格 / tick / 帧段（title 带 stage）/ 日期（本地 YYYY-MM-DD）/ 格式版本（title 带 offsets 记录数）。
 缺失字段不出该项（V2 无成绩不渲染）；静态字段只在轨道增删/跟随切换时重渲染（`:1-7`）。
 
-### 7.5 装配与对外 API（`viewer/src/app.ts`，461 行）
+### 7.5 装配与对外 API（`viewer/src/app.ts`，496 行）
 
-- 接线（`:102-148`）：`importer/player/visuals`（`:102-104`）→ `ReplayPanel`（回调 `onClip/onClearAll/onTracksChanged/onStatus`，
-  **无 getStartAid**，`:116-145`）→ `ReplayMetaPanel`（`:147`）→ `Timeline`（`:148`）；`syncTracks` 统一同步
-  3D 可视化/时间轴/信息条（`:108-113`）。
+- 接线（`:102-149`）：`importer/player/visuals`（`:102-104`）→ `ReplayPanel`（回调 `onClip/onClearAll/onTracksChanged/onStatus`，
+  **无 getStartAid**，`:117-146`）→ `ReplayMetaPanel`（`:148`）→ `Timeline`（`:149`）；`syncTracks` 统一同步
+  3D 可视化/时间轴/信息条（`:109-114`）。
 - HUD 跨面提醒 `updateReplayMapStatus`（`:157-188`）：轨迹 bbox 完全在地图包围盒外 → 提醒修「坐标映射」。
-- `window.viewer.replay`（`:307-364`）：内省（trackCount/duration/time/playing/speed/mode/followId/tracks()）+
-  控制（play/pause/seek/setSpeed 0.1–16/setMode/follow）+ **`meta()`**（跟随轨头部元信息，`:334-335`）。
+- `window.viewer.replay`（`app.ts:343-398`）：内省（trackCount/duration/time/playing/speed/mode/followId/tracks()）+
+  控制（play/pause/seek/setSpeed 0.1–16/setMode/follow）+ **`meta()`**（跟随轨头部元信息，`:369-370`）。
   getter 每次返回新快照（自动化注意：取值后对象即快照）。
 
 ## 8. 测试
@@ -247,5 +248,6 @@ fixture 构造器 `buildFinalFixture/buildV2Fixture`（`:99-166`）按版本门�
 - `ang[0]` yaw：0 = 面朝 −Z，逆时针为正（`pose.ts:5-9`；第一人称相机 `fly.ts:174-177` `rotation.set(pitch, yaw, roll, 'YXZ')`）。
 - `.replay` 帧的换算定标以**可执行断言**固化（§2.7 + [shavit-replay-format.md §8.2](shavit-replay-format.md)）：
   `pos: [x,y,z]→[y,z,x]`、`yaw = wrap(src+180)`、`pitch = −src`；`vel` = 位置差分（packed vel 不映射）。
-- BSP 出生点实体走另一套（`pose.ts:12-14 bspYawToCsYaw`，270−yaw）——**仅出生点路径**，与 .replay 无关；
-  实测疑似镜像（F6 已知问题，未在本次范围修复）。
+- BSP 出生点实体与 .replay 解码**同一 yaw 定标**（`pose.ts:23-25 bspYawToCsYaw` = `wrap(src+180)`；t1 已修
+  旧式 270− 的 det=−1 镜像，评审 F6 闭合）；初始视角另有 P2-4 回退链（`core/spawn.ts:79-101`：
+  spawn 实体 → bbox 内传送目标 → bbox 高位俯瞰）。

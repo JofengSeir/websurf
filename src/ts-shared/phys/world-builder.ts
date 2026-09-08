@@ -88,9 +88,16 @@ const DEFAULT_BRUSH_FILTER = {
   skip_nodraw: false,
 };
 
-/** BSP 方位角 yaw（顺时针）→ cs-movement yaw（逆时针）。 */
+/**
+ * BSP 出生点实体 Source yaw → cs-movement yaw：wrap(src + 180)。
+ * 与 viewer pose.ts bspYawToCsYaw、.replay 实测定标同口径（本轴映射
+ * [x,y,z]→[y,z,x]（det=+1）下 Source 前向 (cos yaw, sin yaw) → (sin yaw, cos yaw)，
+ * 恒等式即 +180；消费端 Rust player.yaw 0 = 朝 −Z 同约定）。旧式 (270 − yaw)
+ * 是 det=−1 镜像（t8 实证：surf_null primary spawn Source yaw=180 应为 0°，
+ * 旧式给 90°），2026-09 修正。
+ */
 function bspYawToCsYaw(bspYaw: number): number {
-  return ((270 - bspYaw) % 360 + 360) % 360;
+  return (((bspYaw + 180) % 360) + 360) % 360;
 }
 
 export async function buildWorldBundle(

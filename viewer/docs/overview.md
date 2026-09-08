@@ -52,7 +52,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 └───────────────┬─────────────────────────────────────────────────────┘
                 │ <script src="./app.js">（esbuild 产物）
 ┌───────────────▼ TS 主线程（viewer/src）────────────────────────────┐
-│ app.ts（461 行）  装配 + 事件接线 + 深链 + window.viewer.replay + 帧循环 │
+│ app.ts（496 行）  装配 + 事件接线 + 深链 + window.viewer.replay + 帧循环 │
 │ ├─ core/  scene(渲染·分块合并·near/far) fly(飞行相机) pose bsp(加载)  │
 │ │         constants dom(DOM 工具)                                    │
 │ ├─ ui/    hud(三行状态域·引导·帮助) mapinfo(地图信息·出生点)          │
@@ -74,18 +74,19 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 
 | 层 | 文件 | 行数 | 职责（一句话） | 详见 |
 |---|---|---|---|---|
-| 装配 | `src/app.ts` | 461 | 顶层装配：场景/相机/HUD/侧栏、BSP 与录像事件接线、拖拽与深链、`window.viewer.replay`（含 `meta()`）、帧循环 | [sequences.md](sequences.md) §1-§5 |
+| 装配 | `src/app.ts` | 496 | 顶层装配：场景/相机/HUD/侧栏、BSP 与录像事件接线、拖拽与深链、`window.viewer.replay`（含 `meta()`）、帧循环 | [sequences.md](sequences.md) §1-§5 |
 | core | `src/core/scene.ts` | 416 | three.js renderer/scene/camera、GLB 挂载、空间分块合并、近平面贴墙自适应 | [implementation/scene-core.md](implementation/scene-core.md) §1 |
 | core | `src/core/fly.ts` | 220 | 自由飞行相机：指针锁定 + 键鼠输入 + 位姿状态 | 同上 §2 |
-| core | `src/core/pose.ts` | 25 | 位姿契约（脚底 + yaw/pitch 度）与 BSP 出生点 yaw 换算（270−yaw，**仅 BSP 路径**，疑似镜像为已知问题） | 同上 §3 |
+| core | `src/core/pose.ts` | 36 | 位姿契约（脚底 + yaw/pitch 度）与 BSP 出生点 yaw 换算（wrap(src+180)，与 .replay 定标同口径；t1 修正 F6 镜像） | 同上 §3 |
+| core | `src/core/spawn.ts` | 101 | 出生点解析与初始视角回退（P2-4）：spawn 实体 → bbox 内传送目标 → bbox 俯瞰，单点换算 spawnPointAng | 同上 §3.1 |
 | core | `src/core/bsp.ts` | 111 | WASM 懒初始化 + `BspProcessor` 三步调用链 + 错误人话化 | [sequences.md](sequences.md) §2 |
 | core | `src/core/constants.ts` | 35 | 与 game 对齐的渲染/飞行常量（EYE_STAND=64.09 等） | 同上 §3 |
 | core | `src/core/dom.ts` | 136 | 面板 DOM 工具（qs/el/section/foldBox/numField…） | [implementation/scene-core.md](implementation/scene-core.md) §4 |
 | ui | `src/ui/hud.ts` | 143 | 三行状态域（位姿/地图/录像）+ flash 语义 + 引导层/兜底卡/帮助浮层 | 同上 §5 |
-| ui | `src/ui/mapinfo.ts` | 165 | 地图信息面板 + 出生点导航（跳转即换位姿） | 同上 §6 |
+| ui | `src/ui/mapinfo.ts` | 171 | 地图信息面板 + 出生点导航（跳转即换位姿） | 同上 §6 |
 | ui | `src/ui/replaymeta.ts` | 107 | 录像信息条：`.replay` 头部元信息常驻展示（Clip.meta → 成绩/玩家/地图/tick/帧段/日期/格式） | [implementation/replay-system.md](implementation/replay-system.md) §7.4 |
 | replay | `src/replay/types.ts` | 164 | 数据契约：RuleConfig v2（映射切换）/ ReplayHeaderMeta / Clip（含 buttons+meta）/ Track | 同上 §1 |
-| replay | `src/replay/shavit-replay.ts` | 584 | `.replay` 原生解析：嗅探/头部/帧解码/坐标定标映射/世界速度差分/V2 兼容 | 同上 §2 |
+| replay | `src/replay/shavit-replay.ts` | 585 | `.replay` 原生解析：嗅探/头部/帧解码/坐标定标映射/世界速度差分/V2 兼容 | 同上 §2 |
 | replay | `src/replay/helpers.ts` | 17 | 角度纯函数（wrapDeg / clampPitch） | 同上 §3.1 |
 | replay | `src/replay/build.ts` | 72 | transform 人工变换后处理（恒等直跳）+ LARGE_CLIP_FRAMES | 同上 §3.2 |
 | replay | `src/replay/protocol.ts` | 35 | 主线程 ↔ Worker 消息协议（ClipPayload 含 buttons/meta，定型数组可转移） | 同上 §4.1 |

@@ -20,7 +20,8 @@
  * - yaw：viewer = wrap(source + 180)。viewer forward = (−sin yaw, −cos yaw)，在该轴
  *   映射下 Source 前向 (cos yaw, sin yaw) → viewer (sin yaw, cos yaw)，两者恒等式即
  *   +180。真实回放 run 段 1078 个有效帧上「视角·运动方向」平均 cos = 0.9992（
- *   pose.ts 的 270−yaw 口径为 BSP 实体角路径所用，与本轴映射不同构，实测 ≈0.05）。
+ *   BSP 出生点路径的 bspYawToCsYaw 现已统一为同一定标 wrap(src+180)，见 core/pose.ts；
+ *   旧式 270−yaw 属 det=−1 镜像、同帧实测 ≈0.05，已废弃）。
  * - pitch：viewer = −source（Source 正值=俯视，types.ts 同一口径），限幅 ±89°；roll=0。
  * - t(i) = (i − preFrames) / tickrate：prerun 为负、单调；主时钟 0 = 起跑帧（t2 §8.3
  *   方案 A）。头部 fTime 是官方计时（含 zone 口径），展示成绩用它，播放对轴用帧推算。
