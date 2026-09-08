@@ -170,8 +170,7 @@ export class Timeline {
       title: '清除区间，恢复整段播放',
     });
     clearRangeBtn.addEventListener('click', () => {
-      this.player.rangeStart = 0;
-      this.player.rangeEnd = 0;
+      this.player.clearRange();
       this.refresh();
     });
     opts.appendChild(clearRangeBtn);
@@ -242,7 +241,7 @@ export class Timeline {
     }
     this.refreshZones();
 
-    const inRange = p.rangeEnd > p.rangeStart;
+    const inRange = p.rangeEnd > p.rangeStart && !p.isFullWindow;
     this.rangeEl.textContent = inRange
       ? `${fmtTime(p.rangeStart)} → ${fmtTime(p.rangeStop)}（${fmtTime(p.rangeLength)} s）`
       : '整段';
@@ -253,17 +252,21 @@ export class Timeline {
   private refreshZones(): void {
     const p = this.player;
     const dur = p.duration;
-    if (!(dur > 0)) {
+    const winStart = p.rangeStart;
+    const winLen = p.rangeStop - p.rangeStart;
+    if (!(dur > 0) || !(winLen > 0)) {
       this.runZone.style.display = 'none';
       this.abBand.style.display = 'none';
       return;
     }
+    // 带状叠加一律按**当前播放窗口**映射（默认窗口 = 整条 clip，含 prerun 负段）
+    const rel = (t: number): number => ((t - winStart) / winLen) * 100;
 
-    // A-B 区间带：主时钟绝对位置（rangeStop 已被播放器夹到时长内）
-    if (p.rangeEnd > p.rangeStart) {
-      const left = (p.rangeStart / dur) * 100;
-      const width = ((Math.min(p.rangeStop, dur) - p.rangeStart) / dur) * 100;
-      if (width > 0.05) {
+    // A-B 区间带（用户显式设的区间才画；默认整条窗口不画——整条滑杆就是它）
+    if (p.rangeEnd > p.rangeStart && !p.isFullWindow) {
+      const left = Math.max(0, rel(p.rangeStart));
+      const width = ((Math.min(p.rangeStop, dur) - p.rangeStart) / winLen) * 100;
+      if (width > 0.05 && width < 99.95) {
         this.abBand.style.display = '';
         this.abBand.style.left = `${left}%`;
         this.abBand.style.width = `${width}%`;
@@ -282,9 +285,9 @@ export class Timeline {
       const idxEnd = meta.preFrames + meta.frameCount;
       const arr = track.clip.t;
       const runEndLocal = idxEnd < track.clip.count ? arr[idxEnd] : track.clip.duration;
-      const left = (track.offset / dur) * 100;
-      const width = (Math.min(runEndLocal, track.clip.duration) / dur) * 100;
-      // 整条进度条都是正式跑段（无 post 帧）时高亮没有信息量，不画
+      const left = rel(track.offset);
+      const width = ((Math.min(runEndLocal, track.clip.duration) - Math.max(track.offset, winStart)) / winLen) * 100;
+      // 跑段占满/缺失窗口时高亮没有信息量，不画
       if (width > 0.05 && width < 99.95) {
         this.runZone.style.display = '';
         this.runZone.style.left = `${left}%`;
