@@ -29,7 +29,6 @@
 | game | 同 debug 的 7 模块集合 | `game/src/config.ts:5`（buildPhysicsParams）、`game/src/worker/main.ts`、`game/src/renderer/renderer-main.ts` 等 |
 | viewer | **不 import**（无物理无双线程）；仅在本地复刻 `bspYawToCsYaw` 公式（wrap(src+180)，t2 统一口径）并注释引用 ts-shared | `viewer/src/core/pose.ts:16-25` |
 | test/dual-mode-harness | **仅复用 `KEY_MASK`**（位定义与 Rust 一致）；其 SAB 是 192B 私有协议，与本文 512B 权威帧协议**不是同一套** | `test/dual-mode-harness/src/shared-state.ts:51`、`:1-4` 头注 |
-| test/instanced-diorama | 不使用 | grep `ts-shared` 于 `test/instanced-diorama/src` → 空 |
 
 编译期：debug/game 的 tsconfig `include` 均含 `../src/ts-shared/**/*.ts`（`debug/tsconfig.json:26`、`game/tsconfig.json:15`）；dual-mode-harness 也包含（`test/dual-mode-harness/tsconfig.json:23`），但运行时只 import KEY_MASK 一项。
 

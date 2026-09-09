@@ -39,7 +39,6 @@
 | debug / game | cdylib `use websurf_wasm_core::{…}` + `BspProcessor` 全导出集 | `debug/crates/wasm/src/lib.rs`、`game/crates/wasm/src/lib.rs` |
 | viewer | `use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, texture_utils, vbsp};`——**不用 phyfile/mosaic**（查看器无碰撞/无画质切换） | `viewer/crates/wasm/src/lib.rs:15-20` |
 | test/dual-mode-harness | BspProcessor 物理导出子集（brush/phy/tri/teleport/pvs） | `test/dual-mode-harness/crates/wasm/src/lib.rs` |
-| test/instanced-diorama | BspProcessor 薄导出 | `test/instanced-diorama/crates/wasm/src/lib.rs` |
 | TS 侧消费契约 | `BspProcessorLike` 接口（11 方法）约束导出层 | `src/ts-shared/phys/world-builder.ts:19-31`（见 [ts-shared.md](./ts-shared.md)） |
 
 cargo 依赖声明：各工程 `crates/wasm/Cargo.toml` `websurf-wasm-core = { path = "../../../src/wasm-core" }`。
@@ -163,6 +162,5 @@ BSP bytes
 | game | 3 个自由函数（mosaic_encode/mosaic_decode/decompress_mtz，`:177/184/192`）+ BspProcessor 15 方法 | 与 debug 同源精简：保留 mosaic 画质切换，无实体/PAKFILE 自省 | `game/crates/wasm/src/lib.rs:387-1671` |
 | viewer | BspProcessor 仅 `new/metadata/parse_spawn_points/export_glb_with_pakfile_models`，运行时只调后三者；**不导出** brush/模型碰撞/teleport/PVS/mosaic/默认纹理包 | 最小查看器面 | `viewer/crates/wasm/src/lib.rs:1-9` 头注 + `:277-418` |
 | test/dual-mode-harness | BspProcessor 9 方法：brush/phy/tri 碰撞 + spawn/teleport/pvs + GLB（**无 mosaic**） | 时序验证所需的物理导出子集 | `test/dual-mode-harness/crates/wasm/src/lib.rs:326-1685` |
-| test/instanced-diorama | BspProcessor 薄导出 | 验证工程（非四子工程写作范围） | `test/instanced-diorama/crates/wasm/src/lib.rs` |
 
 通用模式：各工程 `collect_pakfile_models(bsp)` 从 `bsp.pack`（zip）提取 `.mdl/.vvd/.vtx/.vmt/.vtf` 字节，组装 `InMemoryResources` 后交给 `ModelIntegrator`（`debug/crates/wasm/src/lib.rs:50` 起；game `:55`；dual-mode `:63`）。导出方法的 JS 契约由 ts-shared `BspProcessorLike` 接口约束（`world-builder.ts:19-31`），详见 [ts-shared.md](./ts-shared.md)。

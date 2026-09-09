@@ -82,7 +82,7 @@ harness 作为验证工程，对共享解析层的消费是**裁剪过的最小�
 
 ## 5. 工程形态差异（workspace 与产物名）
 
-- **workspace 隔离**：仓库根 workspace 只收共享层两个 crate（`仓库根 Cargo.toml:21-26`）；5 个模块 crate 有意保留各自 workspace——其中 **debug/game/instanced 的 wasm crate 同名 `websurf-wasm`**（Cargo workspace 不允许同名成员，`仓库根 Cargo.toml:5-11`），harness 的 crate 名为 `websurf-test-wasm`（`crates/wasm/Cargo.toml:8`）、viewer 为 `websurf-viewer-wasm`（`viewer/crates/wasm/Cargo.toml:8`）——同名约束只涉及前者三兄弟。harness 自建 `[workspace] members=["crates/wasm"]` + 同款 `[patch.crates-io] vmdl = path`（`Cargo.toml:9-16`）。
+- **workspace 隔离**：仓库根 workspace 只收共享层两个 crate（`仓库根 Cargo.toml:21-26`）；4 个模块 crate 有意保留各自 workspace——其中 **debug/game 的 wasm crate 同名 `websurf-wasm`**（Cargo workspace 不允许同名成员，`仓库根 Cargo.toml:5-11`），harness 的 crate 名为 `websurf-test-wasm`（`crates/wasm/Cargo.toml:8`）、viewer 为 `websurf-viewer-wasm`（`viewer/crates/wasm/Cargo.toml:8`）——同名约束只涉及前两者。harness 自建 `[workspace] members=["crates/wasm"]` + 同款 `[patch.crates-io] vmdl = path`（`Cargo.toml:9-16`）。
 - **产物名各不相同**：harness → `pkg/websurf_test_wasm.js` + wasm 复制到工程根 `websurf_test_wasm_bg.wasm`（`package.json:8`）；debug/game → 各自 `pkg/websurf_wasm.js`（同名不同包）；viewer → `pkg/websurf_viewer_wasm.js`（各工程 crates/wasm/Cargo.toml 产物名核实）。
 - **WASM 构建配置同款**：LTO + opt-level 3 + codegen-units 1（`Cargo.toml:22-27`）；wasm-opt 关闭（`crates/wasm/Cargo.toml:30-31`，注：本机 NODE_OPTIONS 污染 wasm-opt，LTO 已足够）。
 - **运行通道要求**：harness 主路径依赖 SAB（`crossOriginIsolated`，`src/main.ts:74-80`）→ 必须 HTTP + COOP/COEP（`仓库根 src/serve.py:32-34`）；为此保留**消息回退模式**做到 file:// 等无 SAB 环境功能等价（`src/main.ts:75-77`）——这是其他工程没有的降级通道（game/debug 权威帧协议强依赖 SAB）。

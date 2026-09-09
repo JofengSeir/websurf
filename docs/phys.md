@@ -41,7 +41,6 @@
 | debug | `pub use websurf_phys::phys::PhysWorld;`（cdylib 顶层 re-export） | `debug/crates/wasm/src/lib.rs:22` |
 | game | 同上 | `game/crates/wasm/src/lib.rs:23` |
 | test/dual-mode-harness | 同上 | `test/dual-mode-harness/crates/wasm/src/lib.rs:35` |
-| test/instanced-diorama | 同上（仅 Rust 侧声明 re-export；其 TS 运行时未调用 PhysWorld） | `test/instanced-diorama/crates/wasm/src/lib.rs:23` |
 | viewer | **不依赖**（Cargo.toml 无 `websurf-phys`，查看器无物理） | `viewer/crates/wasm/Cargo.toml`（deps 仅 websurf-wasm-core）；`viewer/crates/wasm/src/lib.rs:1-9` 头注 |
 
 依赖关系声明（各工程 `crates/wasm/Cargo.toml` 的 `path = "../../../src"`）与总览矩阵另见 [ts-shared.md](./ts-shared.md) §4。
@@ -156,7 +155,7 @@
 
 - **本 crate 不含 wasm-bindgen 导出层以外的任何工程逻辑**：GLB/解析归 [wasm-core.md](./wasm-core.md)，Worker 编排/输入/SAB 归 [ts-shared.md](./ts-shared.md)。各工程 cdylib 一行 `pub use websurf_phys::phys::PhysWorld;` 即获得同一物理（§1.4 证据行）。
 - **brush/tri 数据由消费工程的 `BspProcessor` 导出**：`export_brushes_planes`（brush JSON）、`export_model_tri_colliders`/`export_model_phy_colliders`（模型三角形/凸包 JSON），`build_world` 只消费 JSON 字符串（`mod.rs:103` 签名）。`mod.rs:81` 头注提到的 `collect_phys_brushes` 为历史名称，现库中不存在——现名即各工程 `export_brushes_planes`（`game/crates/wasm/src/lib.rs:1671`）。
-- **五个模块 crate 有意不进根 workspace**（均需同名 `websurf-wasm`，见根 `Cargo.toml:5-18` 头注），但都经 path 依赖共享本 crate，构建共享根 `target/`（`.cargo/config.toml:12-13`）。
+- **四个模块 crate 有意不进根 workspace**（debug/game 同名 `websurf-wasm`，见根 `Cargo.toml:5-18` 头注），但都经 path 依赖共享本 crate，构建共享根 `target/`（`.cargo/config.toml:12-13`）。
 
 ### 4.2 与 ts-shared 的接口契约
 

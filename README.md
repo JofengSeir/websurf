@@ -11,7 +11,7 @@
 | [`debug/`](debug/) | 主工程（Debug Build） | 全功能调试测试页面：计时挑战、碰撞可视化（brush/trigger/phy/vis/chamfer 切角共 5 组开关 + 距离滑块）、物理面板（13 项力学参数动态列表）、自定义传送点、准星射线、缺失纹理弹窗、调试 API（`parse_entities`/`list_pakfile`/`read_pakfile_*`/`export_colliders*`/`export_visleaf_pvs` 等，仅 debug 导出） |
 | [`game/`](game/) | WebSurf-game（Game Build） | 最小化游戏实现：主线程唯一物理渲染线 + 单 Worker 权威帧 + ESC 弹出面板（录制改键）+ 存点系统（X 键存点 / C 键读点、按住冻结松开恢复）+ 加载进度覆盖层（平滑补间 + 失败红态）+ 空间分块合并渲染 |
 | [`viewer/`](viewer/) | WebSurf-viewer | 最小 BSP 自由视角查看器（349ee26 新增，2026-09-06 经 P1-P4 核心化简化）：无物理，BSP→GLB 场景 + 自由飞行相机；导入 Shavit `.replay` 录像、二进制原生解析后以帧自身坐标回放（坐标映射切换 + 调整工具 + 播放控制 API `window.viewer.replay` 含 `meta()`）；已移除位姿三通道/朝向诊断/量测/JSON 规则脚本通道。见 [viewer/README.md](viewer/README.md) |
-| [`test/`](test/) | 验证工程 | [`dual-mode-harness/`](test/dual-mode-harness/)（WebSurf-test：输入→双模物理→帧信号渲染时序验证）、[`instanced-diorama/`](test/instanced-diorama/)（实例化绘制 + PBR 光照渲染测试，验证 GLB 内嵌 `KHR_lights_punctual` 灯光导出） |
+| [`test/`](test/) | 验证工程 | [`dual-mode-harness/`](test/dual-mode-harness/)（WebSurf-test：输入→双模物理→帧信号渲染时序验证） |
 
 入口页（`debug/scripts/pages-index.html`）由 CI 组装后部署到 GitHub Pages：`./debug/` + `./game/` + `./viewer/` 三入口。
 
@@ -20,14 +20,14 @@
 前置要求：Rust + wasm-pack、Node.js ≥ 18。进入对应工程目录后执行：
 
 ```bash
-cd debug   # 或 cd game / viewer / test/dual-mode-harness / test/instanced-diorama
+cd debug   # 或 cd game / viewer / test/dual-mode-harness
 npm install
 npm run build   # 编译 WASM（共享 crate 自动参与）+ TypeScript
 ```
 
 Rust 侧构建拓扑：仓库根 `Cargo.toml` 为共享层 workspace（websurf-phys / websurf-wasm-core），
-五个模块 wasm crate 保留各自 workspace；仓库根 `.cargo/config.toml` 让**所有**构建共用
-根 `target/` 编译缓存——共享 crate 与三方依赖全仓库只编译一份。六份 Cargo.lock（五个模块工程 + 根 workspace）的
+四个模块 wasm crate 保留各自 workspace；仓库根 `.cargo/config.toml` 让**所有**构建共用
+根 `target/` 编译缓存——共享 crate 与三方依赖全仓库只编译一份。五份 Cargo.lock（四个模块工程 + 根 workspace）的
 wasm-bindgen 统一锁 0.2.128（与 CI 的 wasm-bindgen-cli 匹配）。
 
 ## 开发 / 运行
@@ -37,18 +37,14 @@ cd debug   # 或 cd game / viewer / test/dual-mode-harness
 npm run dev     # 启动开发服务器（复用共享 src/serve.py，COOP/COEP；应用页在 /web/ 下，如 http://localhost:8080/web/）
 ```
 
-`test/instanced-diorama` 使用自带的 serve.py（在共享版基础上增加 `/maps/` 别名，支持
-`?bsp=maps/xxx.bsp` URL 直载与 `?ssao=0` 等后处理对照开关）：`python serve.py 8080`。
-
 Windows 下可直接双击：`debug/start-dev.cmd`（dev 服务器）、`debug/build-dist.cmd`（构建 dist 包）、`debug/play.cmd`（构建并游玩，dist 起本地服务器 8081）、
 `game/play.cmd`（构建并游玩）、`viewer/play.cmd`（构建后起 viewer 本地服务器并自动打开浏览器）、
-`test/dual-mode-harness/play.cmd` 与 `test/instanced-diorama/play.cmd`
-（构建并运行验证页面）。
+`test/dual-mode-harness/play.cmd`（构建并运行验证页面）。
 
 ## 地图
 
 BSP 地图文件体积大，不随仓库分发（`.gitignore` 对 `*.bsp` 全忽略）。本地副本放入仓库根 `maps/`
-目录即可；debug/game/viewer 页面通过文件选择加载，instanced-diorama 另支持 `?bsp=` URL 直载。
+目录即可；debug/game/viewer 页面通过文件选择加载。
 注意单个 `.bsp` 超 GitHub 50MB 推荐限制 / 100MB 硬限后无法推送。地图版权归原作者。
 
 ## 文档
@@ -62,7 +58,6 @@ BSP 地图文件体积大，不随仓库分发（`.gitignore` 对 `*.bsp` 全忽
 - [game/docs/](game/docs/) — WebSurf-game（overview / sequences / implementation×2 / differences）
 - [viewer/README.md](viewer/README.md) + [viewer/docs/overview.md](viewer/docs/overview.md) — 查看器说明、操作与位姿约定
 - [test/dual-mode-harness/README.md](test/dual-mode-harness/README.md) / [CONCLUSION.md](test/dual-mode-harness/CONCLUSION.md) — 验证工程说明与「64t 坡速 ≈ 无限制」三方会审结论
-- [test/instanced-diorama/README.md](test/instanced-diorama/README.md) — 渲染测试工程说明（自动化验证参数表 / 光照导出链路 / 踩坑记录）
 
 ## 第三方组件
 

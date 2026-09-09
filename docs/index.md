@@ -71,7 +71,7 @@
 | [implementation/shared-layout.md](../test/dual-mode-harness/docs/implementation/shared-layout.md) | I：TestShared 192B 布局与 WorkerB 渲染 |
 | [differences.md](../test/dual-mode-harness/docs/differences.md) | D：vs game/debug/viewer、192B vs 512B 对照 |
 
-> 工程根说明文档（操作/部署）：[game/README.md](../game/README.md) · [viewer/README.md](../viewer/README.md) · [test/dual-mode-harness/README.md](../test/dual-mode-harness/README.md)（验证工程）· [test/instanced-diorama/README.md](../test/instanced-diorama/README.md)（第二验证工程，未单开文档树）。debug 工程无根 README，其操作说明见 [debug/docs/overview.md](../debug/docs/overview.md)。
+> 工程根说明文档（操作/部署）：[game/README.md](../game/README.md) · [viewer/README.md](../viewer/README.md) · [test/dual-mode-harness/README.md](../test/dual-mode-harness/README.md)（验证工程）。debug 工程无根 README，其操作说明见 [debug/docs/overview.md](../debug/docs/overview.md)。
 
 ## 3. 阅读路径建议
 
