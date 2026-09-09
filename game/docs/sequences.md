@@ -72,7 +72,7 @@ mousemove/keys ──▶ MouseBuffer ─▶ layerMouseDelta ─▶ feedInput ─
  失败分支：setError + disposeScene + failLoading（覆盖层转错误态不自动消失，app.ts:473-478）
 ```
 
-**加载覆盖层**（`app.ts:530-677`）：阶段名→百分比映射 `LOAD_STAGE_PCT`（`app.ts:535-543`）；`advanceLoading`（`:636-646`）设目标百分比，`tickLoading` rAF 补间驱动（ease-out 逼近 + 阶段内伪漂移防卡死感，`:583-606`，逐帧写 `loadingFill.style.width` `:600`）。显隐/错误态走 CSS class 钩子（`#loadingOverlay.show`/`#loadingOverlay.error`，`game/web/styles.css:510,540`）；显示时进度条复位 `style.removeProperty('width')` 回落 CSS 基础值（`app.ts:619-620`，基础值即 `.load-fill` `width:var(--load-pct, 0%)`，`styles.css:530`）。
+**加载覆盖层**（`app.ts:530-677`）：阶段名→百分比映射 `LOAD_STAGE_PCT`（`app.ts:535-543`）；`advanceLoading`（`:636-646`）设目标百分比，`tickLoading` rAF 补间驱动（ease-out 逼近 + 阶段内伪漂移防卡死感，`:583-606`，逐帧写 `--load-pct` 自定义属性（`setProperty`，`:600`））。显隐/错误态走 CSS class 钩子（`#loadingOverlay.show`/`#loadingOverlay.error`，`game/web/styles.css:510,540`）；显示时进度条复位 `removeProperty('--load-pct')` 回落 0% 回落值（`app.ts:619-620`，`.load-fill` `width:var(--load-pct, 0%)`，`styles.css:530`）。
 
 ## 3. 主线程帧循环（`game/src/renderer/renderer-main.ts:693-768` tick）
 

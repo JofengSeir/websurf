@@ -69,12 +69,12 @@ export class PanelController {
   /** 面板可见 = 未锁定 ∥ 场景未就绪。 */
   updateVisibility(sceneReady: boolean): void {
     const visible = !this.getLocked() || !sceneReady;
-    this.root.style.display = visible ? 'flex' : 'none';
+    this.root.classList.toggle('hidden', !visible);
   }
 
   /** 强制隐藏面板（读取地图后退出面板，交给加载进度覆盖层显示）。 */
   hide(): void {
-    this.root.style.display = 'none';
+    this.root.classList.add('hidden');
   }
 
   // ── 模块导航（左栏切换，事件委托防 DOM 替换失效）────────────
@@ -159,7 +159,7 @@ export class PanelController {
     this.recordingAction = action;
     const hint = document.getElementById('keyRecHint');
     if (hint) {
-      hint.style.display = 'block';
+      hint.classList.add('show');
       hint.textContent = `录制「${ACTION_LABELS[action]}」：按下一个键…（Esc 取消）`;
     }
     // 高亮当前动作的 chips
@@ -179,7 +179,7 @@ export class PanelController {
   private finishRecording(code: string, action: BindableAction, append: boolean): void {
     this.recordingAction = null;
     const hint = document.getElementById('keyRecHint');
-    if (hint) hint.style.display = 'none';
+    if (hint) hint.classList.remove('show');
     document.querySelectorAll('.key-chip').forEach((c) => c.classList.remove('recording'));
     if (code === 'Escape' || !isBindableCode(code)) return; // 取消或修饰键
     // 从其他动作移除该键（避免冲突），再绑定
@@ -207,14 +207,14 @@ export class PanelController {
     window.addEventListener('keydown', (e) => {
       if (e.code === 'KeyM') {
         e.preventDefault();
-        this.root.style.display = this.root.style.display === 'none' ? 'flex' : 'none';
+        this.root.classList.toggle('hidden');
       }
     });
 
     // ESC：未锁定时展开面板（锁定态由浏览器退锁 pointerlockchange 触发显示）
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Escape' && !this.getLocked()) {
-        this.root.style.display = 'flex';
+        this.root.classList.remove('hidden');
       }
     });
 
@@ -437,7 +437,7 @@ export class PanelController {
 
     // 关闭：直接隐藏面板（不请求指针锁定；锁定由点击画布触发）
     document.getElementById('panelClose')?.addEventListener('click', () => {
-      this.root.style.display = 'none';
+      this.root.classList.add('hidden');
     });
   }
 
@@ -644,7 +644,7 @@ export class PanelController {
       line.classList.toggle('outline', c.outline);
     });
     const dot = el.querySelector('.ch-dot') as HTMLElement | null;
-    if (dot) dot.style.display = c.dot ? 'block' : 'none';
+    el.classList.toggle('no-dot', !c.dot);
   }
 
   /** 渲染存点列表（通用 tab；X 存点 / C 读最近，列表项可删除/读取任意存点）。 */

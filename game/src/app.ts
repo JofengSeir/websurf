@@ -597,7 +597,7 @@ function tickLoading(): void {
   }
   // 渲染
   const shown = Math.max(0, Math.min(100, cur));
-  if (loadingFillEl) loadingFillEl.style.width = `${shown}%`;
+  if (loadingFillEl) loadingFillEl.style.setProperty('--load-pct', `${shown}%`);
   if (loadingPctEl) loadingPctEl.textContent = `${Math.round(shown)}%`;
   // 只要还在展示且有动画需求就继续
   if (loadingOverlayEl?.classList.contains('show')) {
@@ -616,8 +616,8 @@ function showLoading(mapName: string): void {
     // 清掉可能的错误态
     loadingOverlayEl.classList.remove('error');
   }
-  // 进度条复位走 CSS 基础值（styles.css .load-fill width:0%）——JS 不写死字面量
-  if (loadingFillEl) loadingFillEl.style.removeProperty('width');
+  // 进度条复位走 CSS 回落值（.load-fill width:var(--load-pct, 0%)）——清除自定义属性即回落 0%
+  if (loadingFillEl) loadingFillEl.style.removeProperty('--load-pct');
   if (loadingStageEl) loadingStageEl.textContent = '初始化';
   if (loadingPctEl) loadingPctEl.textContent = '0%';
   if (loadingSubEl) loadingSubEl.textContent = mapName ? `加载 ${mapName}…` : '加载地图…';
@@ -662,7 +662,7 @@ function failLoading(message: string): void {
   if (loadingOverlayEl) loadingOverlayEl.classList.add('error');
   if (loadingStageEl) loadingStageEl.textContent = '加载失败';
   if (loadingSubEl) loadingSubEl.textContent = message;
-  if (loadingFillEl) loadingFillEl.style.width = '100%';
+  if (loadingFillEl) loadingFillEl.style.setProperty('--load-pct', '100%');
   if (loadingPctEl) loadingPctEl.textContent = '—';
 }
 
@@ -680,7 +680,7 @@ function setError(msg: string): void {
   const el = document.getElementById('error') as HTMLElement | null;
   if (el) {
     el.textContent = msg;
-    el.style.display = msg ? 'block' : 'none';
+    el.classList.toggle('show', !!msg);
   }
   console.error(`[app] ${msg}`);
 }
