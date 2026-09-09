@@ -10,7 +10,7 @@ WebSurf 的**激进最小化游戏化实现**——物理栈整体下沉 Rust WA
 | 维度 | 事实 | 来源 |
 |---|---|---|
 | 包名 | `websurf-game` v0.1.0，`"type": "module"`，描述"主线程唯一物理渲染线 + 单 Worker 权威帧 + Three.js 渲染" | `game/package.json:2-5` |
-| workspace | `game/Cargo.toml` 独立 `[workspace] members=["crates/wasm"]`，与仓库根 workspace 分离（5 个模块 crate 同名 `websurf-wasm`，不能同 workspace） | `game/Cargo.toml:6-19` |
+| workspace | `game/Cargo.toml` 独立 `[workspace] members=["crates/wasm"]`，与仓库根 workspace 分离（debug/game 的 wasm crate 同名 `websurf-wasm`，不能同 workspace） | `game/Cargo.toml:6-19` |
 | vmdl 补丁 | `[patch.crates-io] vmdl → ../src/vendor/vmdl`（共享 vendor，VTX 三角形条带展开修复） | `game/Cargo.toml:13-18` |
 | 唯一 crate | `crates/wasm`（包名 `websurf-wasm`）：wasm-bindgen 导出层，物理/解析实现在共享 crate | `game/crates/wasm/Cargo.toml:11,22-24`（`websurf-phys`→`../../../src`、`websurf-wasm-core`→`../../../src/wasm-core`） |
 | 依赖 | `three ^0.165.0`、esbuild、TypeScript（仅 dev）；运行时零 npm 依赖 | `game/package.json` dependencies/devDependencies |

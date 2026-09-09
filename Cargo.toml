@@ -2,11 +2,11 @@
 #
 # 本 workspace 只收共享层 crate：websurf-phys（src/）与 websurf-wasm-core（src/wasm-core）。
 #
-# ── 为什么五个模块 crate 不进来 ─────────────────────────────────────
-# debug / game / test/instanced-diorama 的 wasm crate 都叫 `websurf-wasm`（wasm-bindgen
+# ── 为什么四个模块 crate 不进来 ─────────────────────────────────────
+# debug / game 的 wasm crate 都叫 `websurf-wasm`（wasm-bindgen
 # 导出层有意各自维护，见 src/wasm-core/Cargo.toml 头注），Cargo workspace 不允许同名成员，
 # 而改名会连锁改 40+ 处产物名引用（pkg/websurf_wasm_bg.* 的 fetch/内嵌/校验脚本）。
-# 因此模块 crate 保留各自 workspace（debug/ 等 4 个 + instanced 新增根，见各模块 Cargo.toml），
+# 因此模块 crate 保留各自 workspace（debug/ 等 4 个，见各模块 Cargo.toml），
 # 通过仓库级 .cargo/config.toml 让**所有** cargo/wasm-pack 构建共用根 target/——
 # 共享 crate 与三方依赖（image/gltf/wasm-bindgen…）全仓库只编译一份。
 #

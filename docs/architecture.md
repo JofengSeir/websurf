@@ -7,7 +7,7 @@
 
 ---
 
-## 1. 仓库组成：一个共享 workspace + 五个模块工程
+## 1. 仓库组成：一个共享 workspace + 四个模块工程
 
 ### 1.1 目录与身份
 
@@ -17,28 +17,27 @@
 | `game/` | `websurf-game` | 最小化游戏化实现（主线程唯一物理渲染线 + 单 Worker 权威帧） | `websurf-wasm` | `pkg/websurf_wasm.js`（同名不同包） | `game/package.json:2-4`、`game/crates/wasm/Cargo.toml:11` |
 | `viewer/` | `websurf-viewer` | 最小 BSP 自由视角查看器（GLB + 飞行相机 + 录像回放） | `websurf-viewer-wasm` | `pkg/websurf_viewer_wasm.js` | `viewer/package.json:2-3`、`viewer/crates/wasm/Cargo.toml:8` |
 | `test/dual-mode-harness/` | `websurf-test` | 双模物理 + OffscreenCanvas 渲染时序验证工程 | `websurf-test-wasm` | `pkg/websurf_test_wasm.js` | `test/dual-mode-harness/package.json:2-3`、`crates/wasm/Cargo.toml:8` |
-| `test/instanced-diorama/` | `websurf-instanced-diorama` | 实例化绘制 + PBR + 影棚光照 + SSAO/DOF 测试用例 | `websurf-wasm` | `pkg/websurf_wasm.js`（拷至工程根） | `test/instanced-diorama/package.json:2-3`、`crates/wasm/Cargo.toml:11`、`package.json:8` |
 | `src/` | —（无 npm 包） | 共享 Rust 物理系统 `websurf-phys` | `websurf-phys`（rlib） | — | `src/Cargo.toml:2` |
 | `src/wasm-core/` | —（无 npm 包） | 共享 BSP/GLB/模型解析导出 `websurf-wasm-core` | `websurf-wasm-core`（rlib，无 wasm-bindgen 导出） | — | `src/wasm-core/Cargo.toml:1`、`src/wasm-core/lib.rs:6` |
 | `src/ts-shared/` | —（无 npm 包） | TS 共享层（7 文件三域，共 1543 行，`wc -l` 实测） | — | — | `src/ts-shared/`（清单见 [ts-shared.md](./ts-shared.md) §1.1） |
 
 ### 1.2 workspace 划界：两个刻意的决定
 
-1. **根 workspace 只收共享层两个 crate**（`[workspace] members = ["src", "src/wasm-core"]`，`Cargo.toml:20-25`）。不收编模块工程的原因：debug/game/instanced-diorama 三者的 wasm crate **同名 `websurf-wasm`**（Cargo workspace 不允许同名成员），改名会连锁改 40+ 处产物名引用——因此模块 crate 各自保留 workspace（根 `Cargo.toml:5-11` 头注释明示；`test/dual-mode-harness/docs/differences.md` §5 同口径）。harness/viewer 的 crate 名（`websurf-test-wasm`/`websurf-viewer-wasm`）本无同名冲突，但同批留在各自 workspace。
-2. **全仓构建缓存统一到根 `target/`**：`.cargo/config.toml` `[build] target-dir = "target"`（`.cargo/config.toml:12-13`）——同一份依赖与共享 crate 全仓库只编译一份，构建缓存跨 6 个 workspace 复用（`CARGO_TARGET_DIR` 可覆盖，`:10` 注释）。
+1. **根 workspace 只收共享层两个 crate**（`[workspace] members = ["src", "src/wasm-core"]`，`Cargo.toml:20-25`）。不收编模块工程的原因：debug/game 两者的 wasm crate **同名 `websurf-wasm`**（Cargo workspace 不允许同名成员），改名会连锁改 40+ 处产物名引用——因此模块 crate 各自保留 workspace（根 `Cargo.toml:5-11` 头注释明示；`test/dual-mode-harness/docs/differences.md` §5 同口径）。harness/viewer 的 crate 名（`websurf-test-wasm`/`websurf-viewer-wasm`）本无同名冲突，但同批留在各自 workspace。
+2. **全仓构建缓存统一到根 `target/`**：`.cargo/config.toml` `[build] target-dir = "target"`（`.cargo/config.toml:12-13`）——同一份依赖与共享 crate 全仓库只编译一份，构建缓存跨 5 个 workspace 复用（`CARGO_TARGET_DIR` 可覆盖，`:10` 注释）。
 
 ### 1.3 工程间隔离：TS 互不引用
 
-四个应用/验证工程的 TS 源码互不 import（跨工程路径 import 全仓 grep 为 0 命中，`grep -rnE "from ['\"][^'\"]*(game/src|debug/src|viewer/src|dual-mode-harness/src|instanced-diorama/src)" debug/src game/src viewer/src test/*/src`）。共享只有两条合法通道：
+四个应用/验证工程的 TS 源码互不 import（跨工程路径 import 全仓 grep 为 0 命中，`grep -rnE "from ['\"][^'\"]*(game/src|debug/src|viewer/src|dual-mode-harness/src)" debug/src game/src viewer/src test/*/src`）。共享只有两条合法通道：
 
 - **Rust 层**：`websurf-phys` / `websurf-wasm-core` 的 path 依赖（`debug/crates/wasm/Cargo.toml:21-22`、`game/crates/wasm/Cargo.toml:21-22` 等同款）；
 - **TS 层**：debug/game 相对路径 import `../../src/ts-shared/...`（7 模块清单见 [ts-shared.md](./ts-shared.md) §1.2）。
 
 唯一例外形态：viewer/harness 对共享**常量与公式**采用"复制并注释对齐"而非 import（EYE_STAND 64.09 源 `src/phys/player.rs:34` → `viewer/src/core/constants.ts:6-7`；harness 仅复用 `KEY_MASK` 位定义，`test/dual-mode-harness/src/shared-state.ts:51`——位定义共用、协议另建）。
 
-### 1.4 vmdl vendor patch：六处同源
+### 1.4 vmdl vendor patch：五处同源
 
-crates.io vmdl 0.2.0 vendor 到 `src/vendor/vmdl/`（修复 Source VTX 三角形条带展开 bug），`[patch.crates-io]` 在**根 workspace 与 5 个模块 workspace 共 6 处同款**（根 `Cargo.toml:27-28`；debug `:13-14`、game `:13-18`、viewer `:11-13`、harness `:9-16`、instanced `:17-19`）。注意 patch 只对声明它的 workspace 生效——所以模块工程必须各自带同款（根 `Cargo.toml:17-18` 头注；vendor 说明注释块在 `:13-16`，勿与 patch 声明位置混淆）。
+crates.io vmdl 0.2.0 vendor 到 `src/vendor/vmdl/`（修复 Source VTX 三角形条带展开 bug），`[patch.crates-io]` 在**根 workspace 与 4 个模块 workspace 共 5 处同款**（根 `Cargo.toml:27-28`；debug `:13-14`、game `:13-18`、viewer `:11-13`、harness `:9-16`）。注意 patch 只对声明它的 workspace 生效——所以模块工程必须各自带同款（根 `Cargo.toml:17-18` 头注；vendor 说明注释块在 `:13-16`，勿与 patch 声明位置混淆）。
 
 ### 1.5 CI 部署面
 
@@ -49,21 +48,21 @@ crates.io vmdl 0.2.0 vendor 到 `src/vendor/vmdl/`（修复 Source VTX 三角形
 | debug | 构建并部署，`node scripts/build-dist.mjs --multi`（多文件 dist） | `deploy-pages.yml:4`（头注"主工程…多文件 dist"）、`:86-88` |
 | game | 构建并部署，`--multi` | `deploy-pages.yml:104-112`（注释"multi 模式：多文件…HTTP 部署"） |
 | viewer | 构建并部署，`npm run build:dist`（**single 是唯一产物形态**，dist-multi 分支已移除） | `deploy-pages.yml:120-126`、`viewer/scripts/build-dist.mjs:13` |
-| test/dual-mode-harness、test/instanced-diorama | **仅构建验证，不部署**（install + build WASM/TS） | `deploy-pages.yml:7`、`:133-146` |
+| test/dual-mode-harness | **仅构建验证，不部署**（install + build WASM/TS） | `deploy-pages.yml:7`、`:134-144` |
 
 ---
 
 ## 2. 共享层引用矩阵
 
-五个模块工程对三件共享物的真实消费面（各行均有独立文档详述，此处给矩阵与入口）：
+四个模块工程对三件共享物的真实消费面（各行均有独立文档详述，此处给矩阵与入口）：
 
-| 共享件 | debug | game | viewer | dual-mode-harness | instanced-diorama |
-|---|---|---|---|---|---|
-| `websurf-phys`（rlib 物理内核，21 个 wasm-bindgen 导出方法） | ✅ `pub use websurf_phys::phys::PhysWorld`（`debug/crates/wasm/src/lib.rs:22`） | ✅ 同款（`game/crates/wasm/src/lib.rs:23`） | ❌ 无物理（Cargo.toml 无此依赖；`viewer/crates/wasm/Cargo.toml:3-5` 注释自证） | ✅（`crates/wasm/src/lib.rs:35`；WorkerA 内双实例） | ✅ 声明 re-export（`crates/wasm/src/lib.rs:23`）；**TS 运行时未调用**（grep `PhysWorld test/instanced-diorama/src` → 空） |
-| `websurf-wasm-core`（BSP/GLB/模型/纹理解析） | ✅ 全导出集（BspProcessor 15 方法 + mosaic 3 函数） | ✅ 全导出集（同源精简：`crates/wasm/src/lib.rs:387-1671`） | ✅ 薄消费（vbsp/gltf/model/pakfile/texture 五模块，**不用 phyfile/mosaic**，`viewer/crates/wasm/src/lib.rs:16-20`） | ✅ 物理导出子集（brush/phy/tri/spawn/GLB；teleport/PVS 保留 API 但主流程不调用，`crates/wasm/src/lib.rs:18-19`） | ✅ 薄导出（`crates/wasm/src/lib.rs:21`） |
-| `src/ts-shared`（TS 共享层） | ✅ 7 模块全用（import 区实测） | ✅ 7 模块全用（`game/src/worker/main.ts:21-24` 等） | ❌ 零 import（仅 `core/pose.ts:11` 注释对齐） | 仅 `KEY_MASK`（`src/shared-state.ts:51`；192B 是另一套协议） | ❌ 不使用（grep 空） |
-| `src/serve.py`（dev 服务器，COOP/COEP） | ✅ `npm run dev`（`debug/package.json`） | ✅ | ✅ | ✅ | ✅ |
-| vmdl vendor patch | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 共享件 | debug | game | viewer | dual-mode-harness |
+|---|---|---|---|---|
+| `websurf-phys`（rlib 物理内核，21 个 wasm-bindgen 导出方法） | ✅ `pub use websurf_phys::phys::PhysWorld`（`debug/crates/wasm/src/lib.rs:22`） | ✅ 同款（`game/crates/wasm/src/lib.rs:23`） | ❌ 无物理（Cargo.toml 无此依赖；`viewer/crates/wasm/Cargo.toml:3-5` 注释自证） | ✅（`crates/wasm/src/lib.rs:35`；WorkerA 内双实例） |
+| `websurf-wasm-core`（BSP/GLB/模型/纹理解析） | ✅ 全导出集（BspProcessor 15 方法 + mosaic 3 函数） | ✅ 全导出集（同源精简：`crates/wasm/src/lib.rs:387-1671`） | ✅ 薄消费（vbsp/gltf/model/pakfile/texture 五模块，**不用 phyfile/mosaic**，`viewer/crates/wasm/src/lib.rs:16-20`） | ✅ 物理导出子集（brush/phy/tri/spawn/GLB；teleport/PVS 保留 API 但主流程不调用，`crates/wasm/src/lib.rs:18-19`） |
+| `src/ts-shared`（TS 共享层） | ✅ 7 模块全用（import 区实测） | ✅ 7 模块全用（`game/src/worker/main.ts:21-24` 等） | ❌ 零 import（仅 `core/pose.ts:11` 注释对齐） | 仅 `KEY_MASK`（`src/shared-state.ts:51`；192B 是另一套协议） |
+| `src/serve.py`（dev 服务器，COOP/COEP） | ✅ `npm run dev`（`debug/package.json`） | ✅ | ✅ | ✅ |
+| vmdl vendor patch | ✅ | ✅ | ✅ | ✅ |
 
 > 矩阵逐格证据的完整展开：物理消费面见 [phys.md](./phys.md) §1.4，解析消费面见 [wasm-core.md](./wasm-core.md) §1.3 与 §4（各工程导出面差异表），TS 消费面见 [ts-shared.md](./ts-shared.md) §1.2。
 
@@ -93,7 +92,6 @@ WASM/Worker/入口三者的页面接线：debug `debug/web/index.html:621`、gam
 | game | single（默认）+ `--multi` | multi | single 形态可用 | `game/scripts/build-dist.mjs:26,55-58`（dispatch）与 `:9,121`（multi 注释）、`deploy-pages.yml:104-112` |
 | viewer | **仅 single**（multi 分支 2026-09 移除） | single | ✅ 双击可用（wasm base64 + Blob worker + classic script） | `viewer/scripts/build-dist.mjs:5,13`、`deploy-pages.yml:120-126` |
 | harness | 多文件 dist（5 文件，无 single 内嵌） | 不部署 | 仅消息回退模式等价可用 | `test/dual-mode-harness/scripts/build-dist.mjs:10-11`、overview §5 |
-| instanced | 无 dist 构建脚本（`npm run build` = wasm + ts） | 不部署 | — | `test/instanced-diorama/package.json:8,11` |
 
 注意：`viewer/web/app.js`、`web/worker.js` 与 wasm 产物**不入库**（`viewer/.gitignore:2-4`、根 `.gitignore:9-12`）——git 只跟踪 `viewer/web/index.html` + `styles.css`，页面打开前必须先构建（未构建时有 `web/index.html:91-107` 的 `#fatal` 兜底提示）。debug/game 的 `web/*.js` 同为构建产物；game 的现存 `web/*.js`/`dist/*` 可能是旧架构（v3）产物，运行前先重建（`game/docs/overview.md` §5 ⚠️ 注）。
 
@@ -172,16 +170,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 
 ---
 
-## 6. 验证工程：test/instanced-diorama（不在四工程写作范围，按已核实口径记录）
-
-- **定位**：第二个验证工程——实例化绘制 + PBR 材质 + 影棚光照 + SSAO/DOF 后处理测试用例（含 BSP 光照导出验证）（`test/instanced-diorama/package.json:2-3`）；CI 仅构建验证不部署（`deploy-pages.yml:7,146`）。
-- **共享层关系**：`crates/wasm` 声明并 re-export `websurf_phys::phys::PhysWorld`（`crates/wasm/src/lib.rs:23`，头注注明"原 game/crates/wasm/src/phys/ 已迁出"），同时消费 `websurf_wasm_core` 六模块（`lib.rs:21`）；**TS 运行时未调用 PhysWorld**（grep `PhysWorld test/instanced-diorama/src` → 空）。
-- **形态**：crate 同名 `websurf-wasm`（三兄弟之一）；pkg 产物 `websurf_wasm.js` 并把 `_bg.wasm` 拷至工程根（`package.json:8`）；无 dist 构建脚本，`scripts/` 仅 `check-lights.mjs`（光照验证）。
-- 本工程未单开文档树（2026-09-07 决议）；深入细节直接读代码与工程 README（[test/instanced-diorama/README.md](../test/instanced-diorama/README.md)）。
-
----
-
-## 7. 文档体系（根导航 → 工程总览 → 细分实现 → 差异）
+## 6. 文档体系（根导航 → 工程总览 → 细分实现 → 差异）
 
 | 层 | 文档 | 覆盖 |
 |---|---|---|
@@ -197,7 +186,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 
 ---
 
-## 8. 已知历史残留（写文档时勿引用为现行事实）
+## 7. 已知历史残留（写文档时勿引用为现行事实）
 
 | 残留 | 位置 | 现实 |
 |---|---|---|

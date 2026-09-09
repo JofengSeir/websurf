@@ -7,7 +7,7 @@
 
 **WebSurf-test（test/dual-mode-harness）是「双模物理 + OffscreenCanvas 渲染时序」验证工程**：用最小实现验证一条独立的 `输入 → 双模物理 → 帧信号渲染` 数据通路——主线程只做输入转发与 UI，物理运行在 WorkerA（同一 Worker 内持有两个 PhysWorld 实例，双模对照），渲染运行在 WorkerB（OffscreenCanvas + three.js）。声明见 `package.json:4`（description）与 `src/main.ts:1-15`（职责头注：「绝不做物理/渲染」）。
 
-- **验证工程定位**：CI 中仅构建验证、不部署——`.github/workflows/deploy-pages.yml:7`（「test/dual-mode-harness、test/instanced-diorama = 验证工程（仅构建验证，不部署）」）与 `:133-145`（仅 install + 构建 WASM/TS 两步）。
+- **验证工程定位**：CI 中仅构建验证、不部署——`.github/workflows/deploy-pages.yml:7`（「test/dual-mode-harness = 验证工程（仅构建验证，不部署）」）与 `:133-144`（仅 install + 构建 WASM/TS 两步）。
 - **最小集取舍**：BSP 是唯一玩法；只导出 brush 碰撞、模型碰撞、出生点、GLB，**明确排除传送区域与 PVS**（`src/main.ts:166-177`、`crates/wasm/src/lib.rs:18-19`「`parse_teleports()` / `parse_pvs_data()` 保留在 WASM API……主线程导出流程不调用」）；FOV 固定 73.6 无面板（`src/worker-b.ts:96-103`）；UI 仅 HUD 提示 + 难度按钮 + BSP 文件加载（`index.html:68-91`）。
 - **与其他工程互不引用**：harness TS 源码的全部 import 面仅 6 项——ts-shared KEY_MASK、pkg wasm、本地 shared-state、three ×3（grep `src/*.ts` 核实，无任何指向 debug/game/viewer 的 import）；Rust 侧仅共享 crate path 依赖 `websurf-phys` + `websurf-wasm-core`（`crates/wasm/Cargo.toml:19,21`）；TS 侧仅复用 `KEY_MASK` 键位掩码定义（`src/shared-state.ts:51` import 自 `仓库根 src/ts-shared/auth/shared-state.js`）。跨工程 ts-shared 消费对照（debug/game 7 模块、viewer 0 模块）见 [./differences.md](./differences.md) §4。
 
