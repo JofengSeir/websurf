@@ -32,7 +32,7 @@ window.mousemove（仅锁定时）
 
 - `BindableAction = Exclude<keyof KeyState,'wheelJump'>`（`:10-11`）——滚轮跳不可绑定（wheel 事件直接置位 `wheelJumpPending`，`game/src/app.ts:255-257`）。
 - `DEFAULT_KEYMAP`（`:28`）与 cs-movement 契约一致；`loadKeymap/saveKeymap/resetKeymap` 走 localStorage `websurf-game.keymap.v1`（`STORAGE_KEY` `:42`，加载时逐字段校验防脏数据 `:45-61`）。
-- 面板「按键」模块录制：`KeyboardInput.setKeymap` 热更新（`game/src/input/keyboard.ts:53-56`），`panel-controller.ts:12` 头注；`keyList/keyRecHint/keyReset` 控件（`game/web/index.html` 80 个 id 之列）。录制提示 `keyRecHint` 显隐：初始隐藏由 CSS 基础规则承担（`.key-rec-hint{display:none}`，`game/web/styles.css:552`，原 HTML 行内 `style="display:none"` 已摘除，index.html 零行内样式）；JS 现行 `style.display` 写法（`panel-controller.ts:162,182`）优先级高于 class 规则、行为连续；`.key-rec-hint.show` 钩子（`styles.css:553`）备后续 class 化切换。
+- 面板「按键」模块录制：`KeyboardInput.setKeymap` 热更新（`game/src/input/keyboard.ts:53-56`），`panel-controller.ts:12` 头注；`keyList/keyRecHint/keyReset` 控件（`game/web/index.html` 80 个 id 之列）。录制提示 `keyRecHint` 显隐：初始隐藏由 CSS 基础规则承担（`.key-rec-hint{display:none}`，`game/web/styles.css:552`，原 HTML 行内 `style="display:none"` 已摘除，index.html 零行内样式）；JS 现行 class 切换（`panel-controller.ts:162` `add('show')` / `:182` `remove('show')`）驱动 `.key-rec-hint.show` 钩子（`styles.css:553`）。
 
 ### 2.3 按键门控（`game/src/input/keyboard.ts:41-115`）
 
