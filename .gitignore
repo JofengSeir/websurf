@@ -3,45 +3,51 @@
 # 注意 gitignore 语义：
 # - 含内部斜杠的模式（如 web/app.js）只匹配仓库根层级 → 需用 **/ 前缀覆盖任意层级
 # - 无斜杠的模式（如 dist/、target/）匹配任意层级
+# - 后出现的规则覆盖先出现的（地图区块依此排序）
 
 # ── 构建产物（覆盖 debug/ 与 game/）──────────
+# 运行时 app.js/worker.js/wasm 均为构建产物：克隆后需 npm run build:wasm + build:ts 再生成
 **/dist/
 **/pkg/
 **/web/app.js
 **/web/worker.js
 **/web/websurf_wasm_bg.wasm
-# 注意：**/web/textures.mtz 不在此列——该文件是公共默认纹理包的副本（跟踪）
+# 注意：**/web/textures.mtz 不在此列——该文件是公共默认纹理包的副本（跟踪，服务运行必需）
 
 # ── Rust / Cargo ─────────────────────────
 **/target/
 **/.cargo-home/
 **/.tmp/
 **/.wasm-pack-cache/
+**/.wasm-bindgen/
 # Cargo.lock 保留提交（debug/game/materials-mini 为应用项目，锁定依赖版本保证可复现构建；
 # 共享层 src/ 的 Cargo.lock 由 src/.gitignore 忽略——其依赖版本由两端 workspace lock 解析）
 
 # ── Node ─────────────────────────────────
 **/node_modules/
 
+# ── Python（src/serve.py 与各脚本工具链）────
+__pycache__/
+*.pyc
+
 # ── 地图文件 ──────────────────────────────
 # BSP 地图体积大（surf_666.bsp 75MB 超 GitHub 50MB 推荐限制），
 # 不应进入版本库；本地放 src/maps/ 即可，需要分享时走网盘/直链。
+# 本地数据 maps/ 为地图/录像测试数据：bsp/dem 体积大且可重新获取。
+# 例外：maps/surf_null_4.replay（原生 Shavit 录像，53 KB）是 viewer 的
+# 构建/自检输入（dist 示例深链 assets/maps/ + npm run test:replay fixture），必须入库。
 *.bsp
-
-# ── 本地数据（不上传 GitHub）──────────────
-# maps/ 为本地地图/录像测试数据：bsp/dem 体积大且可重新获取。
-# 例外：surf_null_4.replay（原生 Shavit 录像，53 KB）是 viewer 的构建/自检输入
-# （dist 示例深链 assets/maps/ + npm run test:replay fixture），必须入库。
 maps/*
-!maps/surf_null_4.replay
 *.dem
 *.replay
 !maps/surf_null_4.replay
 
 # ── 临时 / 验证产物 ───────────────────────
 temp/*
+temp_*
 .tmp-*
 *.glb
+.dsh-shots/
 **/scripts/verify-*
 **/scripts/cdp-*
 
@@ -54,8 +60,5 @@ temp/*
 **/.idea/
 *.log
 .DS_Store
+Desktop.ini
 Thumbs.db
-
-# extract 本地工具缓存
-**/.wasm-bindgen/
-**/.cargo-home/
