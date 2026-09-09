@@ -40,7 +40,7 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 ```
 
 依据：`game/src/worker/main.ts:1-16`（头注"权威帧计算器（v7）"+ `TICK_RATE_OFFSET = 3` 于 `:32`）、`game/src/renderer/renderer-main.ts:96-113`（`predPhys` 主线程唯一物理 + `AuthorityCalibrator` 收敛 ts-shared）、`src/ts-shared/phys/authority-calibrator.ts:110-127`（"只读权威，绝不反写"+ 大偏差反向同步定调）。
-⚠️ `game/src/app.ts:8-9` 头注仍写"v5 …Worker = 纯速度修正器"，与现行 v7 代码不符——以 `worker/main.ts` 头注与实际消息流为准（历史残留，勿引用）。
+⚠️ `game/src/app.ts:4,7` 头注仍写"v5 …Worker = 纯速度修正器"，与现行 v7 代码不符——以 `worker/main.ts` 头注与实际消息流为准（历史残留，勿引用）。
 
 ### 2.1 双端同构（同一物理、同一输入）
 
@@ -55,7 +55,7 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 
 | 路径 | 行数 | 职责（实测 wc -l） |
 |---|---|---|
-| `game/src/app.ts` | 687 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
+| `game/src/app.ts` | 688 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
 | `game/src/config.ts` | 181 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate`）+ `applyConfigPatch` + `buildPhysicsParams` |
 | `game/src/renderer/renderer-main.ts` | 1024 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、主线程物理 tick、权威校准入口、画质切换 |
 | `game/src/worker/main.ts` | 93 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:86`） |
@@ -69,6 +69,8 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 | `game/src/world/pvs-manager.ts` | 281 | PVS 叶子查找 + 行 RLE 解码 + 可见集（**当前 `ENABLE_PVS=false` 整体禁用**，`renderer-main.ts:82`） |
 | `game/src/world/types.ts` | 34 | 最小化世界类型：仅主线程渲染需要的 PVS 结构（对照 debug 231 行） |
 | `game/src/savepoint.ts` | 106 | `SavePointStore`：按地图 localStorage（`websurf-game.savepoints.{mapName}`）、上限 50（`SAVEPOINT_MAX` `:27`）、latest/add/delete |
+| `game/web/index.html` | 245 | 页面外壳（纯结构与挂载点）：80 元素 id / 14 data-* / 30 class 与 JS 绑定零改动（r1 复核 80/80、14/14、30/30）；不含任何行内样式，视觉层全在 styles.css |
+| `game/web/styles.css` | 571 | 独立视觉层（viewer S10 令牌体系）：:root 设计令牌 + 卡片化面板 + 悬停/激活交互态；可见性 class 钩子（`#panel.hidden`/`#error.show`/`.key-rec-hint(.show)`/`#crosshair.no-dot .ch-dot`）+ `.load-fill` 进度条 `var(--load-pct, 0%)` |
 | `game/crates/wasm/src/lib.rs` | 2326 | WASM 导出层（见 §1） |
 
 ### 3.1 ts-shared 复用矩阵（import 实测）
@@ -99,9 +101,9 @@ npm run test:phys    # scripts/phys-smoke.mjs：node 直跑 WASM 物理冒烟（
 npm run build:dist   # scripts/build-dist.mjs：single（默认，内嵌 file:// 可玩）/ --multi（Pages）
 ```
 
-- 产物引用：`game/web/index.html:918` `<script type="module" src="./app.js">`（920 行单页：80 个元素 id + Win11 风格内联样式）。
-- **single 构建**（`scripts/build-dist.mjs:63-120`）：wasm base64 + worker 代码 + mtz 全部内嵌进 `dist/app.js`（Blob URL module worker），专门支持 `file://` 双击（无 fetch/无 SAB 自动 MsgState 降级）。
-- **multi 构建**（`build-dist.mjs:122-161`）：`app.js + worker.js + websurf_wasm_bg.wasm + textures.mtz` 外置，用于 GitHub Pages（`.github/workflows/deploy-pages.yml` 头注 9-13 行：game 以 multi dist 部署）。
+- 产物引用：`game/web/index.html`（245 行，纯结构与挂载点——`<link rel="stylesheet" href="./styles.css">` 于 `:17`、`<script type="module" src="./app.js">` 于 `:243`；80 元素 id / 14 data-* / 30 class 与 JS 绑定零改动，r1 复核 80/80、14/14、30/30）+ `game/web/styles.css`（571 行独立视觉层，viewer S10 令牌体系：:root 令牌 + 卡片化面板 + 悬停/激活交互态；零行内样式）。
+- **single 构建**（`scripts/build-dist.mjs:66-126`）：wasm base64 + worker 代码 + mtz 全部内嵌进 `dist/app.js`（Blob URL module worker），`dist/index.html` + `dist/styles.css` 外置（copyFileSync `:110-111`，file:// 下 `<link>` 同样可加载），专门支持 `file://` 双击（无 fetch/无 SAB 自动 MsgState 降级）。
+- **multi 构建**（`build-dist.mjs:129-174`）：`index.html + styles.css + app.js + worker.js + websurf_wasm_bg.wasm + textures.mtz` 共 6 文件（index/styles 拷贝 `:163-165`），用于 GitHub Pages（`.github/workflows/deploy-pages.yml` 头注 9-13 行：game 以 multi dist 部署）。
 - 一键：`game/play.cmd:32-62` 四步自举（ensure-node-deps → wasm → ts → dist）后以 `game/serve.py` 起服务（**COOP/COEP + no-store**，`game/serve.py:27-34`，SAB 生效前提）自动打开 `http://localhost:8137/dist/index.html`。
 - dev 页面：`python src/serve.py 8080` 后访问 `/game/web/index.html`（需先 `npm run build:ts`）。
 - ⚠️ 仓库内已有 `game/web/*.js` 与 `game/dist/*` 可能是旧架构（v3）产物——运行前先重建（`game/README.md` 已明示）。

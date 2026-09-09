@@ -4,12 +4,15 @@
  * ── single（默认，本地双击 file://）─────────────────────────────
  *   dist/index.html — classic script（file:// 下 module 被 CORS 拦截）
  *   dist/app.js     — IIFE，内嵌 WASM(base64) + Worker 代码(Blob URL)
+ *   dist/styles.css — 外置样式表（web/styles.css 原样拷贝，index.html 以
+ *                     <link rel="stylesheet" href="./styles.css"> 引用）
  *   file:// 兼容：MsgState 回退（无 SAB）+ initSync（wasm 内嵌）+ Blob Worker
  *
  * ── multi（--multi，GitHub Pages / HTTP 部署）─────────────────
  *   dist/index.html — module script
  *   dist/app.js     — ESM
  *   dist/worker.js  — ESM（module worker）
+ *   dist/styles.css — 外置样式表（web/styles.css 原样拷贝）
  *   dist/websurf_wasm_bg.wasm — WASM 外置（fetch；game 的 dev/multi 路径统一
  *                              为 './websurf_wasm_bg.wasm'，运行时零改动）
  *   dist/textures.mtz         — 默认纹理包外置（公共资源，HTTP fetch 可用）
@@ -104,6 +107,10 @@ async function buildSingle(distDir, wasmPath) {
   );
   writeFileSync(join(distDir, 'index.html'), distHtml);
 
+  // 外置样式表（index.html 以 <link href="./styles.css"> 引用，file:// 下同样可加载）
+  copyFileSync(join(root, 'web', 'styles.css'), join(distDir, 'styles.css'));
+  console.log('      dist/index.html + dist/styles.css 已生成');
+
   // 清理旧的多文件产物（single 内嵌全量，外置文件无用）
   for (const stale of ['worker.js', 'websurf_wasm_bg.wasm', 'textures.mtz']) {
     try {
@@ -152,16 +159,17 @@ async function buildMulti(distDir, wasmPath) {
   copyFileSync(join(root, '..', 'src', 'materials', 'textures.mtz'), join(distDir, 'textures.mtz'));
   console.log(`      websurf_wasm_bg.wasm / textures.mtz 已复制`);
 
-  // 3. index.html（module script 原样）+ 清理旧单文件
-  console.log('[3/4] 复制 index.html...');
+  // 3. index.html（module script 原样）+ 外置样式表 + 清理旧单文件
+  console.log('[3/4] 复制 index.html / styles.css...');
   copyFileSync(join(root, 'web', 'index.html'), join(distDir, 'index.html'));
+  copyFileSync(join(root, 'web', 'styles.css'), join(distDir, 'styles.css'));
 
   // 4. 总览
   console.log('[4/4] 完成');
-  const total = ['app.js', 'worker.js', 'websurf_wasm_bg.wasm', 'textures.mtz']
+  const total = ['app.js', 'worker.js', 'websurf_wasm_bg.wasm', 'textures.mtz', 'styles.css']
     .reduce((acc, f) => acc + (existsSync(join(distDir, f)) ? readFileSync(join(distDir, f)).length : 0), 0);
   console.log('\n=== 构建完成（multi）===');
-  console.log(`总大小: ${(total / 1024 / 1024).toFixed(2)} MB（5 个文件）`);
+  console.log(`总大小: ${(total / 1024 / 1024).toFixed(2)} MB（6 个文件）`);
   console.log(`\n部署到 HTTP（GitHub Pages 等）后访问 dist/index.html。`);
 }
 
