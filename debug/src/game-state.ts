@@ -12,8 +12,8 @@
  * 完成：触发 targetname 含 "end" 的传送点 → 停止计时。
  */
 
-import type { Vec3 } from '../physics/math/vec3.js';
-import type { TeleportDestination } from '../world/teleport-manager.js';
+import type { Vec3 } from './physics/math/vec3.js';
+import type { TeleportDestination } from './world/teleport-manager.js';
 
 /** 游戏状态。 */
 export type GamePhase = 'idle' | 'running' | 'finished';

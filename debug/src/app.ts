@@ -30,7 +30,7 @@ import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../src/ts-sha
 import { buildWorldBundle } from '../../src/ts-shared/phys/world-builder.js';
 import type { WorldMetadata } from '../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
-import { formatTime, GameState } from './game/game-state.js';
+import { formatTime, GameState } from './game-state.js';
 // 物理控制面板：参数定义表（主线程渲染用，不含物理实现依赖）
 import { PARAM_DEFS, type ParamSource } from './physics/param-defs.js';
 // 面板参数名 → Rust set_params snake_case（physics-params.ts 导出）

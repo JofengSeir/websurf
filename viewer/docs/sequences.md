@@ -86,20 +86,20 @@ loadBspFile 返回 BspLoadResult
 
 ```
 importer.import(file, rule, name)
-  ├─ send({type:'import', file, rule}) → parse-worker（importer.ts:81-88）
-  │   worker 内（viewer/src/worker/parse-worker.ts:38-93）：
-  │   ① 魔数嗅探（file.text() 之前——文本解码会破坏二进制）[parse-worker.ts:44-49]
-  │   ② file → arrayBuffer 字节缓存（改映射/变换不重读盘）[parse-worker.ts:52-61]
-  │   ③ parseShavitReplay(bytes, {timestampFallback: File.mtime, mapping})[parse-worker.ts:63-68]
-  │   ④ clipFromShavitReplay：解析数组拷贝 → applyClipTransform → Clip [parse-worker.ts:70-72]
-  │   ⑤ post('done', payload, transfer=[t,pos,ang,vel,buttons].buffer)[parse-worker.ts:73-85]
+  ├─ send({type:'import', file, rule}) → worker（importer.ts:81-88）
+  │   worker 内（viewer/src/worker/main.ts:38-93）：
+  │   ① 魔数嗅探（file.text() 之前——文本解码会破坏二进制）[main.ts:44-49]
+  │   ② file → arrayBuffer 字节缓存（改映射/变换不重读盘）[main.ts:52-61]
+  │   ③ parseShavitReplay(bytes, {timestampFallback: File.mtime, mapping})[main.ts:63-68]
+  │   ④ clipFromShavitReplay：解析数组拷贝 → applyClipTransform → Clip [main.ts:70-72]
+  │   ⑤ post('done', payload, transfer=[t,pos,ang,vel,buttons].buffer)[main.ts:73-85]
   ├─ 主线程收 done → payloadToClip（importer.ts:159-176）
   └─ 失败 / workerBroken → importOnMain（importer.ts:106-109, 118-152）：
         同源链路在主线程重放（同一批 shavit-replay/build 函数，importer.ts:3-7）
 ```
 
-- **嗅探失败 = 明确报错**：「不是 Shavit .replay 录像文件——viewer 只支持 Shavit 原生 .replay（JSON/规则脚本通道已移除）」（`parse-worker.ts:46-49`、主线程同文案 `importer.ts:130-134`）。
-- **Worker 建立路径**（`importer.ts:39-79`）：常规构建 `new Worker(new URL('./parse-worker.js', import.meta.url), {type:'module'})`；单文件构建从 `globalThis.__VBSP_WORKER_JS__` 建 Blob URL（file:// 下 module worker 被拦，`importer.ts:42-52`）。`onerror` 一次即 `workerBroken = true`，之后全部走主线程（`importer.ts:64-72`）。
+- **嗅探失败 = 明确报错**：「不是 Shavit .replay 录像文件——viewer 只支持 Shavit 原生 .replay（JSON/规则脚本通道已移除）」（`main.ts:46-49`、主线程同文案 `importer.ts:130-134`）。
+- **Worker 建立路径**（`importer.ts:39-79`）：常规构建 `new Worker(new URL('./worker.js', import.meta.url), {type:'module'})`；单文件构建从 `globalThis.__VBSP_WORKER_JS__` 建 Blob URL（file:// 下 module worker 被拦，`importer.ts:42-52`）。`onerror` 一次即 `workerBroken = true`，之后全部走主线程（`importer.ts:64-72`）。
 - **消息协议**：`viewer/src/replay/protocol.ts:32-35`（progress / done / error 三型；payload 的 `t` 是 Float64Array、`pos/ang/vel/buttons` 是定型数组，经 Transferable 零拷贝回传，`protocol.ts:6-21`——`buttons/meta` 为原生路径特有）。
 - **解析产出即播放基准**：帧是绝对世界坐标 + 实测定标映射（pos `[y,z,x]`、yaw = wrap(src+180)、pitch 取反，`shavit-replay.ts:478-507`），**无起点锚定、无自动平移**——`onClip` 只做落轨与刷新（`app.ts:118-131`）。
 - **导入结果落轨**：`ReplayPanel.onClip`（`app.ts:117-131`）——`replaceId` 存在则 `tracks.replaceClip`（保配色/显隐/偏移/名字，`replay/tracks.ts:49-54`），否则 `player.addTrack` 追加新轨；随后 `player.mode = 'first'`（载入即第一人称跟随，`app.ts:126`）并 `syncTracks()` 重建 3D 可视化、时间轴与信息条。
@@ -139,4 +139,4 @@ importer.import(file, rule, name)
 
 1. **WASM 初始化是懒的**：不载地图就不会碰 WASM（`bsp.ts:41-68` 单例 Promise）——只看录像、无 BSP 也能用（播放基准 = 帧自身坐标，不依赖地图；但 HUD 贴合提醒需要地图才有包围盒，`app.ts:157-188`）。
 2. **GLB 消费顺序固定**：spawn 借用必须在 GLB 导出之前（`bsp.ts:78` + `crates/wasm/src/lib.rs:58-68` zip 锁移交）。
-3. **录像导入的 Worker/主线程是同一套逻辑**：parse-worker 与 importer 主线程回退共用 `shavit-replay`/`build` 模块（`parse-worker.ts:10-14` 与 `importer.ts:3-7` 的对称 import），行为一致——这也是自检可以只在 Node 跑管线核心的原因（`test/replay-selftest.ts:1-30`）。
+3. **录像导入的 Worker/主线程是同一套逻辑**：main.ts 与 importer 主线程回退共用 `shavit-replay`/`build` 模块（`main.ts:10-14` 与 `importer.ts:3-7` 的对称 import），行为一致——这也是自检可以只在 Node 跑管线核心的原因（`test/replay-selftest.ts:1-30`）。

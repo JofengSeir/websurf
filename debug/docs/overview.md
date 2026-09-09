@@ -21,7 +21,7 @@ debug 是五个工程中的**权威帧计算器 + 调试工作台**：加载任�
 | API 契约检查 | `debug/scripts/check-wasm-api.mjs` | 构建期比对 `pkg/websurf_wasm.js` 导出符号与 TS 导入符号，要求 100% 匹配（`check-wasm-api.mjs:1-9`）；`npm run check:api` |
 | 类型检查 | `tsc --noEmit` | `npm run typecheck` |
 
-注意：`package.json` 中 `verify:chamfer` 指向 `scripts/verify-chamfer.mjs`，但该文件当前不存在于 `debug/scripts/`（目录内仅 `build-dist.mjs`、`check-wasm-api.mjs`、两个 .cmd、`pages-index.html`），此 npm 入口现为空引用。
+注意：`package.json` 原有的 `verify:chamfer` 入口已删除（曾指向当时不存在的 `scripts/verify-chamfer.mjs`，空引用）；`debug/scripts/` 内现仅 `build-dist.mjs`、`check-wasm-api.mjs`、两个 .cmd、`pages-index.html`。
 
 ## 3. 整体架构：两阶段权威帧计算器
 
@@ -79,7 +79,7 @@ debug 的运行时由**两条物理线 + 一条状态通道**构成（v7 架构�
 | `world/custom-teleports.ts` | 98 | 自定义传送点：localStorage 按地图分组（`vbsp:customTeleports:<map>`），上限 50 | [physics-panel](implementation/physics-panel.md) |
 | `world/spawn-loader.ts` | 128 | 出生点解析——**未接线预留工具**（全仓无 import，文件头自述"出生点实际加载走 ts-shared world-builder 管线"，`spawn-loader.ts:8-11`） | [loading-pipeline](implementation/loading-pipeline.md) |
 | `world/types.ts` | 231 | WASM 导出 JSON 的完整 TS 契约（brush/spawn/teleport/PVS/metadata/ColliderFilter） | [loading-pipeline](implementation/loading-pipeline.md) |
-| `game/game-state.ts` | 191 | 计时挑战状态机：idle→running→finished、检查点去重、死亡回退 | [sequences §6](sequences.md) |
+| `game-state.ts` | 191 | 计时挑战状态机：idle→running→finished、检查点去重、死亡回退 | [sequences §6](sequences.md) |
 | `physics/param-defs.ts` | 108 | 物理面板参数定义表（13 项 PARAM_DEFS，默认值=Rust `PhysParams::default()`） | [physics-panel](implementation/physics-panel.md) |
 | `physics/physics-params.ts` | 163 | 参数管理器：applyOverride/归一化/tickRate 变更回调；`PARAM_TO_RUST` 映射 | [physics-panel](implementation/physics-panel.md) |
 | `physics/math/vec3.ts`、`physics/physics/Collision/Collision.types.ts` | 101/49 | 平面/凸包碰撞类型与零分配 Vec3（collider-debug/plane-inspector/collider-adapter 消费；源自 @unsurf/cs-movement 约定） | [rendering](implementation/rendering.md) |

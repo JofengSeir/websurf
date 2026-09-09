@@ -3,7 +3,7 @@
 > **本文不再是现行规范。** viewer 的录像管线已改为 **Shavit `.replay` 二进制原生解析**（无 JSON 中转、
 > 无规则脚本），`codegen.ts` / `rule-file.ts` / `default-rule.ts` / `sample.ts` 及全部相关 UI 已删除。
 > 代码证据：`viewer/src/replay/shavit-replay.ts`（原生解析器）、
-> `viewer/src/worker/parse-worker.ts:44-49`（嗅探失败即报错"JSON/规则脚本通道已移除"）、
+> `viewer/src/worker/main.ts:44-49`（嗅探失败即报错"JSON/规则脚本通道已移除"）、
 > `viewer/src/replay/types.ts:1-6`（管线头注）。
 >
 > **现行文档**：

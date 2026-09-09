@@ -5,7 +5,7 @@
 > 格式规格与字节级实测见 [shavit-replay-format.md](shavit-replay-format.md)，总览见 [../overview.md](../overview.md)，
 > 时序见 [../sequences.md](../sequences.md)。
 > ⚠ t4 起 JSON/规则脚本通道已整体移除（`codegen.ts` / `rule-file.ts` / `default-rule.ts` / `sample.ts` 已删，
-> 非法嗅探明确报错）。本文按数据流顺序展开 14 个模块（`src/replay/` 13 个 + `worker/parse-worker.ts`），论断标注 `文件:行号`。
+> 非法嗅探明确报错）。本文按数据流顺序展开 14 个模块（`src/replay/` 13 个 + `worker/main.ts`），论断标注 `文件:行号`。
 
 ## 1. 数据契约层（`viewer/src/replay/types.ts`，164 行）
 
@@ -116,7 +116,7 @@ JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapD
 - `ParseRequest`（`:23-30`）：`file` 传 null = 复用 Worker 内已缓存的上一份文件（改映射/变换不重读盘）。
 - `ParseResponse`（`:32-35`）：`progress`（parse 阶段进度）/ `done`（payload + warnings + resolvedPath）/ `error`。
 
-### 4.2 解析 Worker（`viewer/src/worker/parse-worker.ts`，110 行）
+### 4.2 解析 Worker（`viewer/src/worker/main.ts`，110 行）
 
 原生唯一导入路径：**先魔数嗅探（在 `file.text()` 之前——文本解码会破坏二进制，`:44-49`）** → 字节缓存
 （重导重新解码，缓冲区已 transfer 不能复用，`:25-27, 52-61`）→ `parseShavitReplay`（入参
@@ -130,7 +130,7 @@ JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapD
   （`:42-52`）；否则 module Worker。起不来 → `workerBroken` + 全部 pending reject（`:64-72`）。
 - `import(file, rule, name)`（`:90-110`）：优先 Worker；`__NO_WORKER__` / workerBroken → **主线程回退**。
 - `importOnMain`（`:118-152`）：与 Worker **同源**的同一条链路（嗅探 → 字节缓存 → 原生解析 → Clip），
-  两处 import 同一批函数（`parse-worker.ts:10-14` vs `importer.ts:3-7`），行为一致。
+  两处 import 同一批函数（`main.ts:10-14` vs `importer.ts:3-7`），行为一致。
 - `payloadToClip`（`:159-176`）：payload + rule → Clip（id 时间戳命名）。
 
 ### 4.4 三个导入入口（均先嗅探）

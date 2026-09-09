@@ -48,7 +48,7 @@ export class ReplayImporter {
         const blob = new Blob([g.__VBSP_WORKER_JS__], { type: 'text/javascript' });
         w = new Worker(URL.createObjectURL(blob));
       } else {
-        w = new Worker(new URL('./parse-worker.js', import.meta.url), { type: 'module' });
+        w = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
       }
       w.onmessage = (e: MessageEvent) => {
         const msg = e.data as ParseResponse;
@@ -62,7 +62,7 @@ export class ReplayImporter {
         p.resolve(msg);
       };
       w.onerror = (e) => {
-        // Worker 起不来（缺少 parse-worker.js 等）：后续全部走主线程
+        // Worker 起不来（缺少 worker.js 等）：后续全部走主线程
         this.workerBroken = true;
         this.worker?.terminate();
         this.worker = null;

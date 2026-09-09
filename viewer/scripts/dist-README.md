@@ -80,6 +80,6 @@ server {
 
 ## 与源码版的差异
 
-- `dist/` 是 `src/app.ts` + `src/worker/parse-worker.ts` 的 esbuild 产物，single 额外内嵌
+- `dist/` 是 `src/app.ts` + `src/worker/main.ts` 的 esbuild 产物，single 额外内嵌
   WASM/Worker（见 `scripts/build-dist.mjs`）。
 - 深链自动加载（`?bsp= / ?replay=`）在 HTTP（dev、dist）下可用；file:// 下被浏览器拦截。

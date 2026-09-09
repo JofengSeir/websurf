@@ -40,7 +40,7 @@ npm run dev     # 启动开发服务器（复用共享 src/serve.py，COOP/COEP�
 `test/instanced-diorama` 使用自带的 serve.py（在共享版基础上增加 `/maps/` 别名，支持
 `?bsp=maps/xxx.bsp` URL 直载与 `?ssao=0` 等后处理对照开关）：`python serve.py 8080`。
 
-Windows 下可直接双击：`debug/start-dev.cmd`（dev 服务器）、`debug/build-dist.cmd`（构建 dist 包）、
+Windows 下可直接双击：`debug/start-dev.cmd`（dev 服务器）、`debug/build-dist.cmd`（构建 dist 包）、`debug/play.cmd`（构建并游玩，dist 起本地服务器 8081）、
 `game/play.cmd`（构建并游玩）、`viewer/play.cmd`（构建后起 viewer 本地服务器并自动打开浏览器）、
 `test/dual-mode-harness/play.cmd` 与 `test/instanced-diorama/play.cmd`
 （构建并运行验证页面）。

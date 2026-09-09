@@ -106,7 +106,7 @@
 ## 7. 浏览器可行性（t3 实现后核验）
 
 - **纯 `DataView` 小端读取即可**（`getInt32/getFloat32/getUint8/getUint32`，全部显式 `littleEndian=true`），零依赖零解压；53 KB→1211 帧毫秒级。无对齐要求（DataView 显式处理非对齐）。实现载体：`src/replay/shavit-replay.ts`（584 行，纯函数、无 DOM 依赖，Node/Worker/主线程三处共用）。
-- 路由已实现在 **`file.text()`/`JSON.parse` 之前**：先读前 64 B 嗅探 `{SHAVITREPLAYFORMAT}`（`looksLikeShavitReplay`，`shavit-replay.ts:63-79`；File 形态走 `file.slice(0,64)` 的 `fileLooksLikeShavitReplay`，`:81-89`）。三个导入入口全部先嗅探后解码：Worker `parse-worker.ts:44-49`、主线程回退 `importer.ts:129-134`、深链 `app.ts:381-391`（深链直接 `arrayBuffer()`，不按文本读）。嗅探不命中 → 明确报错「不是 Shavit .replay……（JSON/规则脚本通道已移除）」，不做静默错解。
+- 路由已实现在 **`file.text()`/`JSON.parse` 之前**：先读前 64 B 嗅探 `{SHAVITREPLAYFORMAT}`（`looksLikeShavitReplay`，`shavit-replay.ts:63-79`；File 形态走 `file.slice(0,64)` 的 `fileLooksLikeShavitReplay`，`:81-89`）。三个导入入口全部先嗅探后解码：Worker `main.ts:44-49`、主线程回退 `importer.ts:129-134`、深链 `app.ts:381-391`（深链直接 `arrayBuffer()`，不按文本读）。嗅探不命中 → 明确报错「不是 Shavit .replay……（JSON/规则脚本通道已移除）」，不做静默错解。
 - 版本护栏已实现：`iReplayVersion > 0x0C` → 明确报错拒绝（`SHAVIT_MAX_VERSION = 0x0C`，`shavit-replay.ts:45-46` + `:279-283`；shavit 同款规则，RFC:132）。
 
 ## 8. viewer 实现现状（t3/t4/t5 交付后的代码事实，2026-09）
