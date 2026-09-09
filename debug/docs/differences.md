@@ -52,7 +52,7 @@
 
 ### 3.5 玩法层：计时挑战 vs 存点
 
-- **debug 计时挑战**：`debug/src/game/game-state.ts`（191 行，idle→running→finished、检查点 targetname 去重、死亡回退）+ `app.ts` 接线（onRenderPhysEvent `1471-1493`）；respawn 按钮语义"回最后检查点"（`app.ts:863-880`）。
+- **debug 计时挑战**：`debug/src/game-state.ts`（191 行，idle→running→finished、检查点 targetname 去重、死亡回退）+ `app.ts` 接线（onRenderPhysEvent `1471-1493`）；respawn 按钮语义"回最后检查点"（`app.ts:863-880`）。
 - **game 无计时挑战状态机**：全仓 grep `计时/challenge/checkpoint/game-state` 仅命中 lockTickRate 注释（`game/src/config.ts:81,93`、`panel-controller.ts:222`），无对应状态文件——大纲遗留问题 #4 已核实。
 - **game 独有存点系统**：X 存点 / C 读点，`SavePointStore`（按地图 localStorage `websurf-game.savepoints.<map>`，上限 50 遗弃最早，`game/src/savepoint.ts:27-30`）；按住 C 冻结——渲染 tick 每帧强制 `set_state(存点位置, 速度 0)`（`game/src/renderer/renderer-main.ts:713-718`）。debug 无存点；debug 侧对应物是**自定义传送点**（`vbsp:customTeleports:<map>`，上限 50，`debug/src/world/custom-teleports.ts`——语义是"跳到点"而非"恢复速度冻结"）。
 - **键位**：debug 固定键位（`keyboard.bind(window)`，KeyState 全键位，无改键 UI）；game 有完整改键系统（`game/src/input/keymap.ts`：action→code[] 多绑定、localStorage `websurf-game.keymap.v1`、面板录制，`ACTION_LABELS`/`DEFAULT_KEYMAP`）。
@@ -77,7 +77,7 @@
 
 - 消息类型：debug `worker/worker-types.ts` 342 行（含 PlaneInfo/SceneDataMessage/PhysicsSnapshot 等调试类型）；game 版本较小，且头注仍提"Worker-B（预测）用独立协议（worker-types-predictor）"（`game/src/worker/worker-types.ts:6`）——该文件在两工程都不存在（`game/src/worker/` 只有 main.ts/worker-types.ts），属历史残留注释，不构成任何运行时行为。
 - 数据契约：debug `world/types.ts` 231 行（brush/spawn/teleport/PVS/metadata/ColliderFilter 全集）；game `world/types.ts` 仅 34 行 PVS 类型——因为 game 的渲染器不消费 brush/teleport JSON 的 TS 侧类型（碰撞体直接以字符串透传 wasm）。
-- 脚本：两端都有 build-dist.mjs + check-wasm-api.mjs；game 另有 9 个 `phys-*.mjs` 物理诊断脚本（`game/scripts/`），debug 侧无对应物；debug 的 `verify:chamfer` npm 入口指向不存在的 `scripts/verify-chamfer.mjs`（空引用）。
+- 脚本：两端都有 build-dist.mjs + check-wasm-api.mjs；game 另有 9 个 `phys-*.mjs` 物理诊断脚本（`game/scripts/`），debug 侧无对应物；debug 原有的 `verify:chamfer` 空引用入口（指向当时不存在的 `scripts/verify-chamfer.mjs`）已删除。
 
 ## 4. debug vs viewer
 

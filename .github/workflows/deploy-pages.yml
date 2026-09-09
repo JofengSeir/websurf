@@ -117,7 +117,7 @@ jobs:
         working-directory: viewer
         run: npm run build:wasm
 
-      - name: "Build viewer TypeScript (typecheck + bundle app/parse-worker)"
+      - name: "Build viewer TypeScript (typecheck + bundle app/worker)"
         working-directory: viewer
         run: npm run build:ts
 

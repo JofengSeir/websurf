@@ -9,8 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test:replay": "esbuild test/replay-selftest.ts --bundle --outfile=temp/replay-selftest.mjs --format=esm --platform=node --target=node18 && node temp/replay-selftest.mjs",
     "test:smoke": "node test/smoke-cdp.mjs",
-    "build:worker": "esbuild src/worker/parse-worker.ts --bundle --outfile=web/parse-worker.js --format=esm --target=es2022",
-    "build:ts": "npm run typecheck && npm run build:worker && esbuild src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022",
+    "build:worker": "esbuild src/worker/main.ts --bundle --outfile=web/worker.js --format=esm --target=es2022",
+    "build:app": "esbuild src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022",
+    "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
     "build": "npm run build:wasm && npm run build:ts",
     "build:dist": "node scripts/build-dist.mjs",
     "dev": "python ../src/serve.py 8080 ."

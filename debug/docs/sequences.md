@@ -135,7 +135,7 @@ Worker 侧：world-json → createPhysWorld → build_world(brushJson,triJson,te
 | 面板 hull | `mirrorSnapshotToPrediction` → `setPredictionHull` | `set-hull` 消息（Rust set_hull） | 双线体型分叉 |
 | 面板参数 | 同上（`PARAM_TO_RUST` 映射） | `set-physics-param` | 双线参数分叉 |
 
-## 6. 计时挑战状态机（`debug/src/game/game-state.ts`）
+## 6. 计时挑战状态机（`debug/src/game-state.ts`）
 
 ```
 idle ──(首次 onPlayerMove：速度>阈值)──→ running ──(触达 end 目标)──→ finished

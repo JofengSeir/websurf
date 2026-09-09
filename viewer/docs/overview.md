@@ -16,7 +16,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 代码自证：
 
 - `viewer/package.json:4`——工程描述："WebSurf-viewer — 最小 BSP 自由视角查看器：BSP → GLB 场景 + 自由飞行相机 + Shavit .replay 录像回放（帧自身坐标直读 + 坐标映射切换 + 变换调整 + 播放控制 API）"。
-- `viewer/src/worker/parse-worker.ts:1-8`（Worker 头注）："Shavit `.replay` 原生解析，产出定型数组零拷贝回传……t4 起 JSON 解析通道已移除——这是唯一的录像导入路径：先按魔数嗅探（在 file.text() 之前），非 `.replay` 明确报错"。
+- `viewer/src/worker/main.ts:1-8`（Worker 头注）："Shavit `.replay` 原生解析，产出定型数组零拷贝回传……t4 起 JSON 解析通道已移除——这是唯一的录像导入路径：先按魔数嗅探（在 file.text() 之前），非 `.replay` 明确报错"。
 - `viewer/src/replay/types.ts:1-6`（数据契约头注）："管线：Shavit `.replay`（原生解析，t4 起 JSON 通道已移除）→ Clip（定型数组）→ 播放器。播放基准 = 帧自身坐标"。
 - `viewer/crates/wasm/Cargo.toml:5`（WASM crate 头部注释）："不含 websurf-phys（无物理）、不含 mosaic/缺失纹理/默认纹理包（纯视觉查看器）"；`:19` 依赖只有 `websurf-wasm-core = { path = "../../../src/wasm-core" }`。
 - `viewer/crates/wasm/src/lib.rs:1-9`（crate 头注）：运行时最小集 = `metadata()` / `parse_spawn_points()` / `export_glb_with_pakfile_models()` 三个方法，"自由视角查看器不需要 brush/模型碰撞/teleport/PVS/mosaic/默认纹理包，均不导出"。
@@ -33,13 +33,13 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 | TS 检查 | `npm run typecheck` | `tsc --noEmit`（strict，`tsconfig.json:1-16`） | `viewer/package.json:9` |
 | 自检（Node） | `npm run test:replay` | esbuild bundle → `temp/replay-selftest.mjs` → 运行（153 项断言） | `viewer/package.json:10` |
 | 冒烟（真浏览器） | `npm run test:smoke` | CDP 驱动本机 Edge headless（需 dev server） | `viewer/package.json:11` |
-| Worker 产物 | `npm run build:worker` | `web/parse-worker.js`（esbuild ESM bundle） | `viewer/package.json:12` |
+| Worker 产物 | `npm run build:worker` | `web/worker.js`（esbuild ESM bundle） | `viewer/package.json:12` |
 | TS 产物 | `npm run build:ts` | `web/app.js`（esbuild bundle；前置 typecheck 与 worker bundle） | `viewer/package.json:13` |
 | 单文件打包 | `npm run build:dist` | `viewer/dist/`：IIFE `app.js` 内嵌 WASM(base64)+Worker 代码、classic `index.html`、`assets/maps/surf_null_4.replay` 示例、serve.py、play.cmd/play.sh | `viewer/package.json:15`、`viewer/scripts/build-dist.mjs:1-16` |
 | 本地开发 | `npm run dev` | `python ../src/serve.py 8080 .`（共享 dev 服务器） | `viewer/package.json:16` |
 
 - **唯一产物形态是 single**：dist-multi 分支已于 2026-09 移除（`viewer/scripts/build-dist.mjs:13`"dist-multi / --multi / --bsp 分支已移除（2026-09：单一 dist 策略）"）。
-- **产物不入库**：`viewer/web/app.js`、`viewer/web/parse-worker.js`、`viewer/web/websurf_viewer_wasm_bg.wasm`、`pkg/`、自检中间产物 `temp/` 均被 ignore（`viewer/.gitignore:1-7`）；git 只跟踪 `viewer/web/index.html`、`viewer/web/styles.css`（`git ls-files viewer/web`）。打开 `web/index.html` 前必须先构建。
+- **产物不入库**：`viewer/web/app.js`、`viewer/web/worker.js`、`viewer/web/websurf_viewer_wasm_bg.wasm`、`pkg/`、自检中间产物 `temp/` 均被 ignore（`viewer/.gitignore:1-7`）；git 只跟踪 `viewer/web/index.html`、`viewer/web/styles.css`（`git ls-files viewer/web`）。打开 `web/index.html` 前必须先构建。
 - **示例录像入库例外**：`maps/surf_null_4.replay`（原生 Shavit 录像，53 KB）是 dist 示例深链资产 + `test:replay` fixture，根 `.gitignore:32-39` 加了 `!maps/surf_null_4.replay` 例外强制入库（其余 `maps/*` 与 `*.replay` 仍忽略）；`maps/surf_null_4.replay.json`/`.rule.json` 已删且**不再需要**（JSON 通道已移除）。
 - **资源兜底**：`web/index.html:91-107` 有一个 capture-phase 的 `window.error` 监听——`app.js`/wasm 缺失（未构建就打开页面）时直接把"请先运行 npm install → npm run build:wasm → npm run build:ts"写进 `#fatal` 兜底卡。
 - **file:// 双击可用**的实现要点：WASM 以 base64 内嵌 `globalThis.__VBSP_WASM_B64__`（`viewer/src/core/bsp.ts:44-51`）、Worker 代码内嵌 `globalThis.__VBSP_WORKER_JS__` 经 Blob URL 启动（`viewer/src/replay/importer.ts:42-52`）、入口用 classic script（module script 会被 file:// CORS 拦截，`viewer/scripts/build-dist.mjs:5`）。断言见冒烟自检 `viewer/test/smoke-cdp.mjs:127-166`（dist 结构静态断言节）。
@@ -59,7 +59,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 │ │          replaymeta(录像信息条：Clip.meta 渲染)                     │
 │ │          telemetry(速度 HUD[可视区中心]+timeline 右列按键)        │
 │ ├─ replay/ 13 个模块：.replay 原生解析→Clip→播放·多轨迹·可视化·面板    │
-│ └─ worker/parse-worker.ts ──(esbuild)──> web/parse-worker.js         │
+│ └─ worker/main.ts ──(esbuild)──> web/worker.js         │
 └───────┬──────────────────────────────────────────────┬──────────────┘
         │ fetch wasm + initSync（core/bsp.ts:41-68）     │ Worker 消息
 ┌───────▼ Rust WASM（viewer/crates/wasm，薄导出层）─────▼──────────────┐
@@ -69,7 +69,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 ```
 
 - 渲染循环是**单线程**的：`viewer/src/app.ts:413-449`（`frame`）每帧做「主时钟推进 → 相机驱动 → 可视化更新 → `scene.render()`」，没有物理 tick、没有权威 Worker（对比 debug/game 的双线时序见根架构篇）。
-- 唯一的 Web Worker 是**录像解析 Worker**（`viewer/src/worker/parse-worker.ts:1-8` 头注，上引），起不来会自动回退主线程同源链路（`viewer/src/replay/importer.ts:106-109`）。
+- 唯一的 Web Worker 是**录像解析 Worker**（`viewer/src/worker/main.ts:1-8` 头注，上引），起不来会自动回退主线程同源链路（`viewer/src/replay/importer.ts:106-109`）。
 
 ## 4. 模块划分（实测行数）
 
@@ -100,7 +100,7 @@ viewer 是 WebSurf 五工程里**唯一不含物理系统**的工程，只做两
 | replay | `src/replay/panel.ts` | 318 | 录像面板：导入 + 坐标映射切换 + 轨迹列表 + 调整工具（仅显式叠加） | 同上 §7.1 |
 | replay | `src/replay/timeline.ts` | 330 | 底部时间轴（三行 grid：进度条+正式跑段高亮 / 主控制 / 显示开关；右列为遥测按键簇；默认窗口 = 整条 clip 含 prerun） | 同上 §7.3 |
 | replay | `src/replay/trackpanel.ts` | 214 | 轨迹列表（每轨两行卡 + 批量操作） | 同上 §7.2 |
-| worker | `src/worker/parse-worker.ts` | 110 | 解析 Worker：魔数嗅探（text() 前）→ 字节缓存 → 原生解析 → 零拷贝回传 | 同上 §4.2 |
+| worker | `src/worker/main.ts` | 110 | 解析 Worker：魔数嗅探（text() 前）→ 字节缓存 → 原生解析 → 零拷贝回传 | 同上 §4.2 |
 | rust | `crates/wasm/src/lib.rs` | 466 | WASM 薄导出层：BspProcessor 三方法 + PAKFILE 模型/材质提取 | [sequences.md](sequences.md) §2.1 |
 | 测试 | `test/replay-selftest.ts` | 831 | 录像管线 Node 自检（无 DOM，153 项断言） | 同上 §8.1 |
 | 测试 | `test/smoke-cdp.mjs` | 690 | CDP 驱动真浏览器（Edge headless + SwiftShader）冒烟 | 同上 §8.2 |

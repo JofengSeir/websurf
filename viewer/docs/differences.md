@@ -23,7 +23,7 @@
 | Rust 依赖 | 仅 `websurf-wasm-core`（`viewer/crates/wasm/Cargo.toml:18-19`）；头注自证"不含 websurf-phys（无物理）"（`viewer/crates/wasm/Cargo.toml:3-5`） | `websurf-phys = { path = "../../../src" }` + re-export `pub use websurf_phys::phys::PhysWorld`（`debug/crates/wasm/Cargo.toml:21-22` + `debug/crates/wasm/src/lib.rs:22`；game 同款 `game/crates/wasm/Cargo.toml:21-22` + `game/crates/wasm/src/lib.rs:23`） |
 | WASM 导出面 | `grep 'pub fn'` 实测 **4**（构造 + metadata/spawn/GLB 三方法，`viewer/crates/wasm/src/lib.rs:273-465`） | debug **29** / game **18**（同口径 grep，含 tick/predict/respawn/teleport/pvs/mosaic 等） |
 | SharedArrayBuffer / Atomics | **无**（grep `viewer/src viewer/crates` → 空） | debug/game 的 app.ts / input / worker-types 均引用（`grep -l SharedArrayBuffer debug/src game/src` → `debug/src/app.ts`、`debug/src/input/input-bridge.ts`、`game/src/app.ts`、`game/src/worker/worker-types.ts` 等） |
-| Worker | 唯一一个：**录像解析 Worker**（`viewer/src/worker/parse-worker.ts:1-8` 头注："Shavit .replay 原生解析，产出定型数组零拷贝回传"），且可失效回退主线程同源链路（`importer.ts:106-109`） | 权威物理 Worker + 主线程双线（`game/src/worker/`、ts-shared `auth-loop/worker-dispatch`） |
+| Worker | 唯一一个：**录像解析 Worker**（`viewer/src/worker/main.ts:1-8` 头注："Shavit .replay 原生解析，产出定型数组零拷贝回传"），且可失效回退主线程同源链路（`importer.ts:106-109`） | 权威物理 Worker + 主线程双线（`game/src/worker/`、ts-shared `auth-loop/worker-dispatch`） |
 | 渲染循环 | 单线程 `requestAnimationFrame`，每帧「主时钟 → 相机 → 可视化 → render」（`app.ts:413-449`） | 物理 tick 与渲染解耦的双线时序 |
 
 推论：viewer 的"每帧确定性"只取决于录像 Clip 本身——回放不重演物理，**断网/慢机也不会跑歪轨迹**。

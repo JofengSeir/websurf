@@ -84,7 +84,7 @@ tickRate 特例：滑块 → `sendSetPhysicsParam('tickRate', v)` → Worker `on
 - 读取防御式过滤（缺字段/NaN 剔除，`load()`）；UI：捕获当前位置（主线程 `getCurrentState()`）、手动输入 x/y/z/名称/yaw（yaw 留空 = 保持当前朝向）、列表跳转/删除/清空（`app.ts:1416-1464` + `index.html:452-466`）。
 - 跳转链路与出生点切换同构：`teleportToPos(pos, yaw?)` + `sendTeleportToPos` + `resetTo`（[../sequences.md §5](../sequences.md)）。
 
-### 6.2 计时挑战 HUD（`game/game-state.ts`，191 行）
+### 6.2 计时挑战 HUD（`game-state.ts`，191 行）
 
 状态机与回退时序见 [../sequences.md §6](../sequences.md)；面板呈现：timer/检查点数/死亡数（`updateGameStatsUI`，`app.ts:532` 起，10Hz）。触发器线框与准星 trigger 元数据（target/destIdx/classname/spawnflags）来自 TeleportManager + PlaneInspector（[rendering.md §6、§9](rendering.md)），是排查"为什么这个传送没触发"的主要工具。
 

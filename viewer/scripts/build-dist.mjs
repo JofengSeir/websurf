@@ -27,7 +27,7 @@ const repoRoot = join(viewerRoot, '..');
 const dist = join(viewerRoot, 'dist');
 
 const APP_SRC = join(viewerRoot, 'src/app.ts');
-const WORKER_SRC = join(viewerRoot, 'src/worker/parse-worker.ts');
+const WORKER_SRC = join(viewerRoot, 'src/worker/main.ts');
 
 const SERVE_PY = `"""WebSurf-viewer 静态服务器（本地预览；部署时任意静态托管均可）。
 

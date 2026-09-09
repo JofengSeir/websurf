@@ -95,7 +95,7 @@ WASM/Worker/入口三者的页面接线：debug `debug/web/index.html:621`、gam
 | harness | 多文件 dist（5 文件，无 single 内嵌） | 不部署 | 仅消息回退模式等价可用 | `test/dual-mode-harness/scripts/build-dist.mjs:10-11`、overview §5 |
 | instanced | 无 dist 构建脚本（`npm run build` = wasm + ts） | 不部署 | — | `test/instanced-diorama/package.json:8,11` |
 
-注意：`viewer/web/app.js`、`web/parse-worker.js` 与 wasm 产物**不入库**（`viewer/.gitignore:2-4`、根 `.gitignore:9-12`）——git 只跟踪 `viewer/web/index.html` + `styles.css`，页面打开前必须先构建（未构建时有 `web/index.html:91-107` 的 `#fatal` 兜底提示）。debug/game 的 `web/*.js` 同为构建产物；game 的现存 `web/*.js`/`dist/*` 可能是旧架构（v3）产物，运行前先重建（`game/docs/overview.md` §5 ⚠️ 注）。
+注意：`viewer/web/app.js`、`web/worker.js` 与 wasm 产物**不入库**（`viewer/.gitignore:2-4`、根 `.gitignore:9-12`）——git 只跟踪 `viewer/web/index.html` + `styles.css`，页面打开前必须先构建（未构建时有 `web/index.html:91-107` 的 `#fatal` 兜底提示）。debug/game 的 `web/*.js` 同为构建产物；game 的现存 `web/*.js`/`dist/*` 可能是旧架构（v3）产物，运行前先重建（`game/docs/overview.md` §5 ⚠️ 注）。
 
 ### 3.3 运行通道与降级
 
@@ -203,7 +203,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 |---|---|---|
 | "v5 Worker=纯速度修正器"头注 | `game/src/app.ts:8-9` | 现行为 v7 权威帧计算器（`game/src/worker/main.ts:1-16`） |
 | predictor 协议注释 | `game/src/worker/worker-types.ts:6` | 注释提及 Worker-B/predictor 独立协议，但 game 仅单权威 Worker、`worker-types-predictor` 协议文件不存在，运行时协议以 `src/ts-shared/auth/worker-dispatch.ts:79-216` 为准；**本体在用勿清理**——game（195 行）3 处 type-only import：`input/keyboard.ts`、`input/keymap.ts`（KeyState）、`renderer/renderer-main.ts`（SceneDataMessage）；该残留仅 game 侧（debug 的 worker-types.ts 无此注释，其 342 行本体被 6 处 type-only import——`input/keyboard.ts:17`（KeyState）、`renderer/renderer-main.ts:17`（PlaneInfo+SceneDataMessage）、`renderer/plane-inspector.ts:12`（PlaneInfo）、`app.ts:25`（MainMessage/SceneDataMessage/PhysFrameMessage/PhysEventMessage/PhysicsSnapshotMessage/PhysicsEventMessage/PlaneInfo 多类型块）、`worker/main.ts:31` 与 `worker/physics-worker.ts:17`（MainMessage/WorkerMessage，worker 侧消息类型）） |
-| `verify:chamfer` npm 入口 | `debug/package.json` → `scripts/verify-chamfer.mjs` | 该脚本不存在（目录实测），入口空引用 |
+| `verify:chamfer` npm 入口 | 已从 `debug/package.json` 删除 | 原为空引用（`scripts/verify-chamfer.mjs` 不存在），本轮已移除该入口 |
 | "导出 12 个 API"头注 | `src/phys/mod.rs:4` | 实测 21 个（`mod.rs:84-460`），见 [phys.md](./phys.md) §4.4 |
 | BspProcessor 孤儿注释 | `game/crates/wasm/src/lib.rs:364-367` | 已删除的 `parse_bsp` 提法；实际结构体声明 `:376-377` |
 | `teleport_gate_ticks` 参数 | `src/phys/mod.rs`（`set_params`） | `TeleportManager::check` 已不使用（仅签名兼容，`teleport.rs:171`） |

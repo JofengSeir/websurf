@@ -26,7 +26,7 @@
 | debug 特有 | 证据 | game 处置 |
 |---|---|---|
 | 物理参数定义库 + 物理面板 Worker | `debug/src/physics/param-defs.ts`、`debug/src/worker/physics-worker.ts`（存在） | 不存在；参数直接 `PanelController` → InputBridge 双写（`game/src/input/input-bridge.ts:30-56`） |
-| 计时挑战系统（game-state） | `debug/src/game/game-state.ts`（存在） | 无计时系统（grep `game/src` 仅 `lockTickRate` 注释提及"计时玩法"预留，`game/src/config.ts:81-93`；详见 [implementation/gameplay.md](implementation/gameplay.md) §6） |
+| 计时挑战系统（game-state） | `debug/src/game-state.ts`（存在） | 无计时系统（grep `game/src` 仅 `lockTickRate` 注释提及"计时玩法"预留，`game/src/config.ts:81-93`；详见 [implementation/gameplay.md](implementation/gameplay.md) §6） |
 | 自定义传送编辑 | `debug/src/world/custom-teleports.ts`（存在） | 仅用 BSP 内建 trigger_teleport（`src/phys/teleport.rs`） |
 | 默认纹理包运行时装配 | `debug/src/default-pack.ts`、`debug/src/worker/mtz-data.ts`（存在） | mtz 只作为 `buildWorldBundle` 回退入参（`game/src/app.ts:407` 注入 `decompress_mtz`） |
 | Worker 面板消息钩子 | debug `worker/main.ts:110-119`（mtzB64 钩子/onWorldBuilt/onConfigApplied/onExtraMessage） | game `worker/main.ts:80-93` **不传任何 onXxx 钩子**（grep 证实），面板消息走共享 `config` 通道 |

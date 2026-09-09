@@ -135,7 +135,7 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   const appJs = readFileSync(join(distRoot, 'app.js'), 'utf8');
   check('app.js 内嵌 __VBSP_WASM_B64__', appJs.includes('__VBSP_WASM_B64__'));
   check('app.js 内嵌 __VBSP_WORKER_JS__', appJs.includes('__VBSP_WORKER_JS__'));
-  check('dist 根无 parse-worker.js / *.wasm', !existsSync(join(distRoot, 'parse-worker.js')) && !existsSync(join(distRoot, 'websurf_viewer_wasm_bg.wasm')));
+  check('dist 根无 worker.js / *.wasm', !existsSync(join(distRoot, 'worker.js')) && !existsSync(join(distRoot, 'websurf_viewer_wasm_bg.wasm')));
   check('dist/play.cmd 存在', existsSync(join(distRoot, 'play.cmd')));
   check('dist-multi/ 不存在（单一 dist）', !existsSync(join(VIEWER_ROOT, 'dist-multi')));
   check(

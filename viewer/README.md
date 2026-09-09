@@ -26,7 +26,7 @@
 
 1. **安装依赖**：`npm install`
 2. **构建产物**：`npm run build:wasm`（wasm-pack release → `pkg/`，并拷贝 wasm 到 `web/`）
-   + `npm run build:ts`（typecheck + esbuild 出 `web/app.js` 与 `web/parse-worker.js`）；两步可合并为 `npm run build`
+   + `npm run build:ts`（typecheck + esbuild 出 `web/app.js` 与 `web/worker.js`）；两步可合并为 `npm run build`
 3. **启动**：`npm run dev`（即 `python ../src/serve.py 8080 .`）→ 打开 <http://localhost:8080/web/>；
    或者打包后**双击 `play.cmd`**（自动起服务器 + 开浏览器，见下节）
 
