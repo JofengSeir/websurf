@@ -616,7 +616,8 @@ function showLoading(mapName: string): void {
     // 清掉可能的错误态
     loadingOverlayEl.classList.remove('error');
   }
-  if (loadingFillEl) loadingFillEl.style.width = '0%';
+  // 进度条复位走 CSS 基础值（styles.css .load-fill width:0%）——JS 不写死字面量
+  if (loadingFillEl) loadingFillEl.style.removeProperty('width');
   if (loadingStageEl) loadingStageEl.textContent = '初始化';
   if (loadingPctEl) loadingPctEl.textContent = '0%';
   if (loadingSubEl) loadingSubEl.textContent = mapName ? `加载 ${mapName}…` : '加载地图…';
