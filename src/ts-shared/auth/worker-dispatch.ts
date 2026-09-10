@@ -21,7 +21,9 @@ import type {
 
 /** W-GAP-1 键名归一表：InputBridge buildPhysicsParams snake_case patch →
  * game config camelCase 字段（snake 与 camel 同名键自动穿透，无需列出）。
- * 归一只改键名不改值——debug 端 patch 全 camel，本表零命中零影响（additive 安全）。 */
+ * 归一只改键名不改值——debug 端 patch 全 camel，本表零命中零影响（additive 安全）。
+ * ⚠️ 唯一值语义例外 = jump_height（下方 normalizeConfigPatchKeys 值反演）：
+ * 表内条目仅作存在性登记，实际转换走专用分支。 */
 const SNAKE_TO_CAMEL_PATCH_KEYS: Record<string, string> = {
   stop_speed: 'stopSpeed',
   jump_height: 'jumpSpeed',
@@ -36,11 +38,24 @@ const SNAKE_TO_CAMEL_PATCH_KEYS: Record<string, string> = {
   noclip_speed: 'noclipSpeed',
 };
 
-/** config patch 键名归一（physics/input 段）：snake → camel，未知键原样保留。 */
-function normalizeConfigPatchKeys(patch: Record<string, unknown>): Record<string, unknown> {
+/** config patch 键名归一（physics/input 段）：snake → camel，未知键原样保留。
+ * jump_height 值反演（跳跃回归修复）：patch 的 jump_height 是 Rust 语义
+ * （起跳跳高 HU，= v²/2g），config.jumpSpeed 是起跳速度 HU/s——纯改名会把
+ * 「已换算的跳高」当「速度」存入 config，worker 侧 syncParamsToWasm 再走一次
+ * v²/2g → 跳高 57²/2g=2.03 → Rust 脉冲 √(2·800·2.03)=57 < NON_JUMP_VELOCITY(180)
+ * → categorize_position 永不判空中、贴地回吸，解耦模式跳不起来。
+ * 反演 v=√(2·g·h) 后与主线程同参（302 → 脉冲 302 > 180 正常离地）。
+ * gravity 取 patch 自带值（buildPhysicsParams 恒发），缺省回退 800（createConfig 默认）。 */
+export function normalizeConfigPatchKeys(patch: Record<string, unknown>): Record<string, unknown> {
   let renamed = false;
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(patch)) {
+    if (key === 'jump_height' && typeof patch[key] === 'number') {
+      const g = typeof patch.gravity === 'number' ? patch.gravity : 800;
+      out.jumpSpeed = Math.sqrt(2 * g * (patch[key] as number));
+      renamed = true;
+      continue;
+    }
     const mapped = SNAKE_TO_CAMEL_PATCH_KEYS[key];
     if (mapped !== undefined) {
       out[mapped] = patch[key];

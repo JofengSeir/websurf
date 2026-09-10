@@ -160,6 +160,8 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 
 `buildPhysicsParams(config)`（`:45` 起）把前端驼峰配置映射为 Rust `set_params` 的 snake_case JSON patch：`stop_speed`、`jump_height = jumpSpeed²/(2g)`（`params.ts:49`，能量守恒换算）、`run_speed`、`air_accelerate`、`noclip_speed`、`yaw_bind_speed`、`teleport_gate_ticks` 等；**`sensitivity` 恒固定 1**（`:58-60`）——理由见 §4.4。
 
+**jump_height 值语义例外（跳跃回归修复，e0cbab6 后热修）**：worker-dispatch `normalizeConfigPatchKeys` 把该 patch 归一进 config 时，其余 10 键 snake↔camel 数值同构可纯改名，唯 `jump_height` 例外——它是 Rust 语义（起跳跳高 HU = v²/2g），而 `config.jumpSpeed` 存起跳速度 HU/s。纯改名会把「已换算跳高 57.0025」当速度存入，worker 再换算一次 `57.0025²/2g = 2.03` → Rust 脉冲 `√(2·800·2.03) = 57 < NON_JUMP_VELOCITY(180)`（`player.rs:49`）→ `categorize_position` 永不判空中、贴地回吸——解耦模式跳不起来（耦合主线 predPhys 走对象直传不受影响，故仅解耦复现）。修复 = 归一时值反演 `jumpSpeed = √(2·g·jump_height)`（g 取 patch.gravity，缺省 800）；node 单测 `temp/jump-fix.test.mjs` 验证全链恒等（worker jump_height 与主线程逐位一致、脉冲 302 > 180）。
+
 ### 3.6 `phys/world-builder.ts` —— 接口与数据契约
 
 - `BspProcessorLike` 接口（`:19-31`，11 方法）：`new/metadata/parse_spawn_points/parse_teleports/parse_pvs_data/export_brushes_planes/export_model_tri_colliders/export_model_phy_colliders/export_mosaic_manifest/export_missing_textures/export_glb_with_pakfile_models(_with_defaults)`——各工程 cdylib 导出面的公共收敛（工程能力差异见 §4.1）。
