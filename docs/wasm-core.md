@@ -61,7 +61,7 @@ BSP bytes
              export_mosaic_manifest / export_missing_textures（可选，按工程能力）
 ```
 
-编排方为 ts-shared `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:96` 起）：metadata → 出生点/传送点/PVS → 碰撞体（brush + 模型，colliderSource 三档）→ mosaic manifest / 缺失纹理（**必须先于 GLB 导出**，`world-builder.ts:164` 注释）→ 默认纹理包回退 → `export_glb_with_pakfile_models_with_defaults`。完整管线见 [ts-shared.md](./ts-shared.md) §2.2。
+编排方为 ts-shared `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:103` 起）：metadata → 出生点/传送点/PVS → 碰撞体（brush + 模型，colliderSource 三档）→ mosaic manifest / 缺失纹理（**必须先于 GLB 导出**，`world-builder.ts:171` 注释）→ 默认纹理包回退 → `export_glb_with_pakfile_models_with_defaults`。完整管线见 [ts-shared.md](./ts-shared.md) §2.2。
 
 ### 2.2 GLB 导出内部时序（`bsp_to_gltf_core/convert.rs`）
 
@@ -146,7 +146,7 @@ BSP bytes
 
 **解码** `decode::code_to_img(code, scale)`（`decode.rs:49`）：解析字段（长度校验：网格 ≤100_000 格、R/A 长度精确匹配）→ 查色板拼 w×h 网格（不透明格 alpha = opacity）→ 最近邻放大至 **2 次幂对齐**（长边×scale 向上取 2 次幂，短边独立对齐）——防 WebGL1/NPOT 环境下 three.js `floorPowerOfTwo` 钳制造成 Repeat 采样「田字分隔」（`decode.rs:42-48` 注释）→ PNG。
 
-**manifest**（`manifest.rs`）：`collect_face_texture_names`（可见 face 的 VMT 材质路径小写去重，与 GLB 导出 TextureCollector 同口径，`:15-29`）；`build_mosaic_manifest`（VMT→VTF→PNG→字节码，单纹理失败跳过不中断，`:48-58`）；`collect_missing_textures`（与 manifest 互补的失败清单，`:33-43`）。manifest 生成时机受编排层约束：**必须先于 GLB 导出**（`world-builder.ts:164`）。
+**manifest**（`manifest.rs`）：`collect_face_texture_names`（可见 face 的 VMT 材质路径小写去重，与 GLB 导出 TextureCollector 同口径，`:15-29`）；`build_mosaic_manifest`（VMT→VTF→PNG→字节码，单纹理失败跳过不中断，`:48-58`）；`collect_missing_textures`（与 manifest 互补的失败清单，`:33-43`）。manifest 生成时机受编排层约束：**必须先于 GLB 导出**（`world-builder.ts:171`）。
 
 **MTZ5/6 容器**（`mtz.rs`，纯 std 无第三方依赖，`:2`）：魔数 `MTZ6`/`MTZ5`（`:7-9`）；字节级 Huffman（频次表 + 规范码，平局按 (freq,id) 保证确定性，`:16-79`）+ 大窗口 LZ77（`lz_compress`/`lz_decompress`，`:198/256`）；`compress_json`/`compress_json_detailed`（含 CompressReport）/`decompress_mtz`（`:726/731/775`）；字节码以 `Entry{name,sig,colors,alpha,indices,bits}` 中转（`parse_bytecode`/`render_bytecode`/`parse_json`/`render_json`，`:395-589`），字段分区 `pack_regions`/`unpack_regions`（`:591/624`）。默认纹理包 `src/materials/textures.mtz`（5,942,995 B，与 `debug/web/textures.mtz`、`game/web/textures.mtz` 三处同步副本，`ls` 实测）经 `decompress_mtz` 还原为 `{纹理名: "#mosaic v4 …"}` JSON。
 

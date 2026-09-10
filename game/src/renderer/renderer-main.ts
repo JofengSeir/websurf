@@ -18,7 +18,11 @@ import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
 import type { ShmState, MsgState } from '../../../src/ts-shared/auth/shared-state.js';
-import { AuthorityCalibrator } from '../../../src/ts-shared/phys/authority-calibrator.js';
+import {
+  AuthorityCalibrator,
+  extrapolateAuthPose,
+  type SyncRenderState,
+} from '../../../src/ts-shared/phys/authority-calibrator.js';
 import { PvsManager } from '../world/pvs-manager.js';
 
 /** FOV 默认值（73.6；面板 hud.fov 可调，60-110）。 */
@@ -113,6 +117,42 @@ export class RendererMain {
   private readonly calibrator: AuthorityCalibrator;
   /** 渲染帧推进（dt 上限防异常）。 */
   private lastTickMs = 0;
+
+  // ── 双模式（phys-mode-port §3.4.D/§3.5）────────────────────
+  /** 物理计算模式：coupled = v7 现行（预测 + 权威校准）；decoupled = Worker
+   * 唯一物理，主线程纯消费（T7' 读最新解耦帧 + 外推）。运行时热切经
+   * set-mode/mode-ack 握手（§3.4.C）。 */
+  private computeMode: 'coupled' | 'decoupled' = 'coupled';
+  /** 解耦消费分支激活（mode-ack 到达后置位——§3.4.C 主线程步骤 3；ack 前
+   * 相机保持预测末姿态，≤500ms）。 */
+  private decoupledConsumerActive = false;
+  /** 解耦消费时钟锚（t12 F1 修复）：worker/main 时钟原点差（worker 创建时刻 vs
+   * 导航起点）为近常数偏移，裸 dt = now − frame.timeMs 会带入定值超前/滞后。
+   * 消费激活后首帧锚定 anchor = now − frame.timeMs，此后 dtMs =
+   * clamp((now − frame.timeMs) − anchor, 0, EXTRAP_MAX_MS)（等价
+   * extrapolateAuthPose(frame, now − anchor)，extrapolateAuthPose 签名零改，
+   * inScope 内闭合）。handleModeAck（双 mode）/onModeAckTimeout/onModeSwitchFailed
+   * 置 null 重锚——交接帧由 worker publishCurrentState 即发，重锚误差 ≤ transit。
+   * null = 待锚。 */
+  private extrapClockAnchorMs: number | null = null;
+  /** 在途热切目标（null = 无在途握手）。 */
+  private pendingMode: 'coupled' | 'decoupled' | null = null;
+  /** 热切 ack 超时定时器 id（0 = 无；§3.4.C：500ms 超时重发一次 → 再超时回滚）。 */
+  private modeAckTimer = 0;
+  /** 本次握手是否已重发过一次。 */
+  private modeResent = false;
+  /** 解耦期搁置的预测世界构建材料（§3.5 T5 门控：解耦跳过主线程 wasm 构建
+   * 省载入；切回耦合时懒建——热切双向合同需要预测实例兜底）。 */
+  private stashedWorld: {
+    brushJson: string;
+    triJson: string;
+    teleportJson: string;
+    spawn: { x: number; y: number; z: number; yawDeg: number };
+  } | null = null;
+  /** 解耦期搁置的出生点列表（predPhys 未建时 stash，懒建后补设）。 */
+  private stashedSpawnPoints: Array<[number, number, number, number]> | null = null;
+  /** 解耦期预测实例参数陈旧标记（面板参数只进 worker；切回耦合时全量重推）。 */
+  private predParamsStale = false;
   /** mesh → { center, radius, clusterIds }（LOD/PVS 用；clusterIds 空间采样分配）。 */
   private lodItems: Array<{ mesh: THREE.Mesh; center: THREE.Vector3; radius: number; clusterIds: number[] }> = [];
   /** 剔除距离（场景加载后校准）。 */
@@ -173,6 +213,14 @@ export class RendererMain {
     onGround: boolean;
     eyeHeight: number;
   }) => void) | null = null;
+
+  // ── 双模式热切回调（phys-mode-port §3.4.C；app.ts 装配）───────
+  /** 热切 ack 超时重发（500ms 无 ack 触发一次；app 转发 bridge.resendSetMode）。 */
+  onSetModeResend: ((mode: 'coupled' | 'decoupled') => void) | null = null;
+  /** 热切失败回滚（重发后仍超时；app 回滚 config.physics.computeMode + 面板 + status）。 */
+  onModeSwitchFailed: ((mode: 'coupled' | 'decoupled') => void) | null = null;
+  /** 切回耦合后预测实例参数陈旧 → 全量重推回调（app 转 syncFullConfig）。 */
+  onParamsResync: (() => void) | null = null;
 
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
@@ -479,8 +527,23 @@ export class RendererMain {
     initSync({ module: buf });
   }
 
-  /** world-json 到达：主线程构建 PhysWorld（唯一物理：世界+碰撞+输入+渲染）。 */
+  /** world-json 到达：主线程构建 PhysWorld（唯一物理：世界+碰撞+输入+渲染）。
+   * §3.5 T5 门控：解耦模式跳过构建（省载入）——材料搁置，切回耦合（mode-ack）
+   * 时懒建（热切双向合同需要预测实例兜底）。 */
   buildPredictionWorld(world: {
+    brushJson: string;
+    triJson: string;
+    teleportJson: string;
+    spawn: { x: number; y: number; z: number; yawDeg: number };
+  }): void {
+    if (this.computeMode === 'decoupled') {
+      this.stashedWorld = world;
+      return;
+    }
+    this.buildPredictionWorldNow(world);
+  }
+
+  private buildPredictionWorldNow(world: {
     brushJson: string;
     triJson: string;
     teleportJson: string;
@@ -500,6 +563,132 @@ export class RendererMain {
     this.predReady = true;
     // 权威帧校准状态清零（首帧权威帧将作为新起点）
     this.calibrator.clear();
+  }
+
+  /** 懒建搁置的预测世界（切回耦合时；出生点列表一并补设）。 */
+  private flushStashedWorld(): void {
+    const world = this.stashedWorld;
+    if (!world) return;
+    this.stashedWorld = null;
+    this.buildPredictionWorldNow(world);
+    const spawns = this.stashedSpawnPoints;
+    this.stashedSpawnPoints = null;
+    if (spawns) this.setSpawnPoints(spawns);
+  }
+
+  // ── 双模式热切（phys-mode-port §3.4.C 主线程侧）──────────────
+
+  /** 热切交接快照（耦合→解耦必带：predPhys 全态 10 字段 SyncRenderState）。
+   * §3.9-P7①：ducked 姿态不随热切交接（Rust 零改动定稿），眼高在下次蹲起自愈；
+   * set_posture 为可选后续轮（§3.4.F 存档设计）。eyeHeight 仅作 T7' 相机眼高参考。 */
+  buildHandoverState(): SyncRenderState | null {
+    if (!this.predPhys) return null;
+    const st = this.predPhys.state() as {
+      posX: number; posY: number; posZ: number;
+      yaw: number; pitch: number;
+      velX: number; velY: number; velZ: number;
+      onGround: boolean; eyeHeight: number;
+    };
+    return {
+      posX: st.posX, posY: st.posY, posZ: st.posZ,
+      yaw: st.yaw, pitch: st.pitch,
+      velX: st.velX, velY: st.velY, velZ: st.velZ,
+      onGround: st.onGround,
+      eyeHeight: st.eyeHeight,
+    };
+  }
+
+  /** 耦合→解耦（bridge 在 set-mode 发出后调用）：耦合物理块门控停（T2-T6）+
+   * 清待喂输入；消费分支等 mode-ack 再激活（§3.4.C 主线程步骤 1-2 → 3）。
+   * ack 前相机保持预测末姿态（≤500ms，超时回滚恢复耦合无感）。 */
+  enterDecoupledSwitch(): void {
+    this.pendingMode = 'decoupled';
+    this.computeMode = 'decoupled';
+    this.decoupledConsumerActive = false;
+    this.clearPendingInput();
+    this.armModeAckTimeout('decoupled');
+  }
+
+  /** 解耦→耦合（bridge 在 set-mode 发出后调用）：消费分支保持激活
+   * （相机继续跟随权威帧），等 mode-ack 恢复预测线（§3.4.C 步骤 2-4）。 */
+  enterCoupledSwitch(): void {
+    this.pendingMode = 'coupled';
+    this.armModeAckTimeout('coupled');
+  }
+
+  private armModeAckTimeout(mode: 'coupled' | 'decoupled'): void {
+    this.modeResent = false;
+    if (this.modeAckTimer !== 0) clearTimeout(this.modeAckTimer);
+    this.modeAckTimer = setTimeout(() => this.onModeAckTimeout(mode), 500) as unknown as number;
+  }
+
+  private onModeAckTimeout(mode: 'coupled' | 'decoupled'): void {
+    this.modeAckTimer = 0;
+    if (!this.pendingMode) return;
+    if (!this.modeResent) {
+      // 重发一次（丢消息兜底；§3.4.C）
+      this.modeResent = true;
+      this.extrapClockAnchorMs = null; // t12 F1：重发帧重锚（误差 ≤ 一个发布周期）
+      this.armModeAckTimeout(mode);
+      this.onSetModeResend?.(mode);
+      return;
+    }
+    // 重发仍无 ack → 回滚（requested='decoupled' 失败：恢复耦合门控；
+    // requested='coupled' 失败：保持解耦消费——computeMode 未动）
+    this.pendingMode = null;
+    this.extrapClockAnchorMs = null; // t12 F1：回滚重锚（交接帧即发，误差 ≤ transit）
+    this.decoupledConsumerActive = false;
+    if (mode === 'decoupled') this.computeMode = 'coupled';
+    this.onModeSwitchFailed?.(mode);
+  }
+
+  /** 在途握手查询（t12 F2 双保险）：bridge.sendSetMode 顶部守卫用——pending
+   * ack 期间禁止二次发送（与 500ms 超时重发协同：重发走 resendSetMode 不经此口；
+   * 面板控件禁用为第一道防线，此为程序化路径兜底）。 */
+  hasPendingModeSwitch(): boolean {
+    return this.pendingMode !== null;
+  }
+
+  /** mode-ack 到达（app onmessage 转发）：§3.4.C 主线程侧收尾。
+   * decoupled：激活 T7' 消费分支。coupled：懒建预测实例（解耦自启动会话）→
+   * 读最后权威帧 → predPhys.set_state（9 字段）→ 清待喂输入/校准器 → 关闭解耦
+   * 消费，耦合 tick 恢复；预测参数陈旧则全量重推。
+   * §3.9-P7①：ducked 姿态不随热切交接（Rust 零改动定稿），眼高在下次蹲起自愈；
+   * set_posture 为可选后续轮（§3.4.F 存档设计，含方向2 的 predPhys 一行接线）。 */
+  handleModeAck(mode: 'coupled' | 'decoupled', _appliedAtMs: number): void {
+    if (this.modeAckTimer !== 0) {
+      clearTimeout(this.modeAckTimer);
+      this.modeAckTimer = 0;
+    }
+    this.pendingMode = null;
+    // t12 F1：握手收尾重锚（双 mode）——解耦向首帧即 worker publishCurrentState
+    // 交接帧（锚误差 ≤ transit）；耦合向消费停，未来再入解耦时重新首帧建锚
+    this.extrapClockAnchorMs = null;
+    if (mode === 'decoupled') {
+      this.decoupledConsumerActive = true;
+      return;
+    }
+    this.flushStashedWorld();
+    // 解耦期帧源 = 解耦帧（V_D/S_D）；无解耦帧（worker 未写/MsgState 空窗）回退
+    // 耦合权威帧（耦合→解耦 pre-ack 窗口的连续真理源）
+    const entry = this.shared.readDecoupled() ?? this.shared.readAuthoritative();
+    const frame = entry?.frame ?? null;
+    this.decoupledConsumerActive = false;
+    this.computeMode = 'coupled';
+    this.clearPendingInput();
+    this.calibrator.clear();
+    if (this.predPhys && frame) {
+      this.predPhys.set_state(
+        frame.pos.x, frame.pos.y, frame.pos.z,
+        frame.yaw, frame.pitch,
+        frame.vel.x, frame.vel.y, frame.vel.z,
+        frame.onGround,
+      );
+    }
+    if (this.predParamsStale) {
+      this.predParamsStale = false;
+      this.onParamsResync?.();
+    }
   }
 
   /** 物理实例输入（app 事件回调喂入；唯一输入通道）。 */
@@ -528,8 +717,13 @@ export class RendererMain {
 
   /** 设置出生点列表（[[x,y,z,yaw], ...]，spawn 下拉切换用）。 */
   setSpawnPoints(list: Array<[number, number, number, number]>): void {
+    if (!this.predPhys) {
+      // 解耦期预测实例未建（T5 门控 stash）：列表搁置，懒建后补设
+      this.stashedSpawnPoints = list;
+      return;
+    }
     try {
-      this.predPhys?.set_spawn_points(JSON.stringify(list));
+      this.predPhys.set_spawn_points(JSON.stringify(list));
     } catch (err) {
       console.error('[renderer] set_spawn_points 失败:', err);
     }
@@ -540,14 +734,20 @@ export class RendererMain {
     this.predPhys?.set_death_y(y);
   }
 
-  /** 当前物理速度（速度面板 8Hz 采样）。 */
+  /** 当前物理速度（速度面板 8Hz 采样；§3.5 T7' 族：解耦读权威帧速度）。 */
   getCurrentVel(): { x: number; y: number; z: number } {
+    if (this.computeMode === 'decoupled') {
+      const entry = this.shared.readDecoupled() ?? this.shared.readAuthoritative();
+      const v = entry?.frame.vel;
+      return { x: v?.x ?? 0, y: v?.y ?? 0, z: v?.z ?? 0 };
+    }
     if (!this.predPhys) return { x: 0, y: 0, z: 0 };
     const st = this.predPhys.state() as { velX: number; velY: number; velZ: number };
     return { x: st.velX, y: st.velY, z: st.velZ };
   }
 
-  /** 存点用：完整物理状态（位置/朝向/速度/着地；X 键存点采样）。 */
+  /** 存点用：完整物理状态（位置/朝向/速度/着地；X 键存点采样；§3.5 T7' 族：
+   * 解耦采样源 = 最新解耦权威帧——无回退耦合权威帧，覆盖 pre-ack 窗口）。 */
   getFullState(): {
     x: number; y: number; z: number;
     yaw: number; pitch: number;
@@ -555,6 +755,17 @@ export class RendererMain {
     onGround: boolean;
   } {
     const empty = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vx: 0, vy: 0, vz: 0, onGround: false };
+    if (this.computeMode === 'decoupled') {
+      const entry = this.shared.readDecoupled() ?? this.shared.readAuthoritative();
+      const f = entry?.frame;
+      if (!f) return empty;
+      return {
+        x: f.pos.x, y: f.pos.y, z: f.pos.z,
+        yaw: f.yaw, pitch: f.pitch,
+        vx: f.vel.x, vy: f.vel.y, vz: f.vel.z,
+        onGround: f.onGround,
+      };
+    }
     if (!this.predPhys) return empty;
     const st = this.predPhys.state() as {
       posX: number; posY: number; posZ: number;
@@ -640,13 +851,20 @@ export class RendererMain {
   /**
    * 权威碰撞事件 → 位置微调 + 角度同步（权威仅在碰撞判断时可影响渲染角度；
    * 实现见 ts-shared AuthorityCalibrator）。
+   * 解耦模式 phys-event 停发（worker 侧事件门控；防御性 gate，§3.9-P8）。
    */
   applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number, vel?: number[]): void {
+    if (this.computeMode !== 'coupled') return;
     this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg, vel);
   }
 
-  /** 面板参数实时同步到主线程物理实例（与 set_params 同字段）。 */
+  /** 面板参数实时同步到主线程物理实例（与 set_params 同字段）。
+   * 解耦模式预测线停 tick：参数搁置（标记陈旧，切回耦合 onParamsResync 全量重推）。 */
   setPredictionParams(params: Record<string, unknown>): void {
+    if (this.computeMode === 'decoupled') {
+      this.predParamsStale = true;
+      return;
+    }
     try {
       this.predPhys?.set_params(JSON.stringify(params));
     } catch (err) {
@@ -658,8 +876,13 @@ export class RendererMain {
    * noclip 模式同步到主线程物理。
    * Rust tick 在 noclip 下走 noclip_step（无碰撞纯移动 + Q/E 转向），
    * 物理实例内部切换，无需额外渲染分支。
+   * 解耦模式：预测实例停 tick，搁置（切回耦合重推）。
    */
   setPredictionNoclip(active: boolean): void {
+    if (this.computeMode === 'decoupled') {
+      this.predParamsStale = true;
+      return;
+    }
     try {
       this.predPhys?.set_noclip(active);
     } catch (err) {
@@ -668,8 +891,12 @@ export class RendererMain {
     this.clearPendingInput();
   }
 
-  /** 面板体型实时同步到主线程物理实例。 */
+  /** 面板体型实时同步到主线程物理实例（解耦搁置，切回耦合重推）。 */
   setPredictionHull(halfWidth: number, standHeight: number, duckHeight: number): void {
+    if (this.computeMode === 'decoupled') {
+      this.predParamsStale = true;
+      return;
+    }
     this.predPhys?.set_hull(halfWidth, standHeight, duckHeight);
   }
 
@@ -695,42 +922,63 @@ export class RendererMain {
     this.rafId = requestAnimationFrame(this.boundTick);
     if (!this.renderer || !this.scene || !this.camera) return;
 
-    // 1. 主线程渲染物理线 + Worker 权威帧校准（v7）：
-    //    写输入 SAB（Worker 权威模拟同输入）→ 读权威帧 → 外推校准 → tick → 渲染
-    if (this.predReady && this.predPhys) {
-      const dt = this.lastTickMs === 0 ? 1 / 64 : Math.min((now - this.lastTickMs) / 1000, 0.1);
-      this.lastTickMs = now;
-      // 输入 → SAB 输入槽（Worker 权威帧模拟消费；与主线程同输入）
+    // 1. 物理计算模式分叉（phys-mode-port §3.5 T1-T10）：
+    //    coupled = v7 现行逐行保留（T1 输入漏斗 → T2-T4 校准+预测 tick → T6 hold → T5 相机）
+    //    decoupled = T7' 消费（读最新解耦权威帧 + 外推；主线程零物理 tick，纯消费）
+    //    dt/lastTickMs 两模式共用每帧推进（解耦期挂起预测线，切回耦合无大步长跳变）
+    const dt = this.lastTickMs === 0 ? 1 / 64 : Math.min((now - this.lastTickMs) / 1000, 0.1);
+    this.lastTickMs = now;
+    // T1 输入漏斗（两模式同写）：耦合 Worker 权威模拟消费 / 解耦 1ms 真理源实时消费。
+    // 地图就绪门控（同 v7 predReady 语义 + 解耦 stash 场景）：加载前 pending 恒 0，
+    // 防御 MsgState 空输入消息每帧 post / SAB 累积槽陈旧堆积
+    if (this.predReady || this.stashedWorld) {
       this.shared.addInput(this.pendingDx, this.pendingDy, this.pendingKeys);
-      // 权威帧到达 → 记录（只读）；首次 set_state 起点；>200 异常兜底
-      this.correctFromAuthority();
-      // 权威速度外推校准（考虑中途地图碰撞后的正确速度；位置不覆盖）
-      this.calibrateVelocity(now);
-      // 完整物理推进：physics = 碰撞/传送/死亡/reset；noclip = noclip_step（无碰撞）
-      this.predPhys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
-      this.pendingDx = 0;
-      this.pendingDy = 0;
-      // 按住 C 读点冻结：每帧强制 set_state（位置/朝向=存点、速度=0、着地=存点值）
-      // ——"按住定在点的那一刻不要给速度"，悬停直到松开（空中存点悬空、地面存点站定）
-      if (this.holdPoint) {
-        const h = this.holdPoint;
-        this.predPhys.set_state(h.x, h.y, h.z, h.yaw, h.pitch, 0, 0, 0, h.onGround);
+      if (this.computeMode !== 'coupled') {
+        // 解耦：本地无 tick 消费待喂输入（worker 从 SAB 累积槽取走）——立即清零，
+        // 防下帧重复写入（耦合路径由 predPhys.tick 后统一清零）
+        this.pendingDx = 0;
+        this.pendingDy = 0;
       }
-      // 渲染 = 主线程物理状态（连续无屏闪）
-      const st = this.predPhys.state() as {
-        posX: number; posY: number; posZ: number;
-        yaw: number; pitch: number;
-        eyeHeight: number;
-      };
-      // Rust 输出角度为度 → 弧度
-      this.camera.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
-      this.camera.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);
+    }
+    // 解耦线背压唤醒（t10 (e) 项 / §3.4.B：rAF 漏斗每帧一次无条件 wake——
+    // SAB store(i32[4])+notify；MsgState 回退 no-op。不入地图就绪门控：逐字规格
+    // 每帧一次，等待侧自行 CAS 复位，耦合期唤醒空转成本 ≈ 0）
+    this.shared.wake();
+    if (this.computeMode === 'coupled') {
+      if (this.predReady && this.predPhys) {
+        // 权威帧到达 → 记录（只读）；首次 set_state 起点；>200 异常兜底
+        this.correctFromAuthority();
+        // 权威速度外推校准（考虑中途地图碰撞后的正确速度；位置不覆盖）
+        this.calibrateVelocity(now);
+        // 完整物理推进：physics = 碰撞/传送/死亡/reset；noclip = noclip_step（无碰撞）
+        this.predPhys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
+        this.pendingDx = 0;
+        this.pendingDy = 0;
+        // 按住 C 读点冻结：每帧强制 set_state（位置/朝向=存点、速度=0、着地=存点值）
+        // ——"按住定在点的那一刻不要给速度"，悬停直到松开（空中存点悬空、地面存点站定）
+        if (this.holdPoint) {
+          const h = this.holdPoint;
+          this.predPhys.set_state(h.x, h.y, h.z, h.yaw, h.pitch, 0, 0, 0, h.onGround);
+        }
+        // 渲染 = 主线程物理状态（连续无屏闪）
+        const st = this.predPhys.state() as {
+          posX: number; posY: number; posZ: number;
+          yaw: number; pitch: number;
+          eyeHeight: number;
+        };
+        // Rust 输出角度为度 → 弧度
+        this.camera.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
+        this.camera.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);
 
-      // 近平面贴墙自适应（每 2 帧）：贴墙收缩 near 防近平面裁剪透视
-      this.nearCheckToggle = !this.nearCheckToggle;
-      if (this.nearCheckToggle) {
-        this.updateNearPlane(st.posX, st.posY + st.eyeHeight, st.posZ);
+        // 近平面贴墙自适应（每 2 帧）：贴墙收缩 near 防近平面裁剪透视
+        this.nearCheckToggle = !this.nearCheckToggle;
+        if (this.nearCheckToggle) {
+          this.updateNearPlane(st.posX, st.posY + st.eyeHeight, st.posZ);
+        }
       }
+    } else if (this.decoupledConsumerActive) {
+      // T7' 解耦消费（mode-ack 后激活；ack 前相机保持预测末姿态 ≤500ms）
+      this.tickDecoupledCamera(now);
     }
 
     const camPos = this.camera.position;
@@ -765,6 +1013,36 @@ export class RendererMain {
 
     // 3. 渲染（快照就绪后无条件渲染，帧率跟随 rAF）
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * T7' 解耦消费（phys-mode-port §3.5）：读最新解耦权威帧（V_D/S_D 双缓冲，
+   * MsgState 回退同缓存）→ extrapolateAuthPose 一阶外推（位置 = 权威帧位置 +
+   * 权威速度 × dt；角度/眼高直读——权威帧已含全部输入语义）→ 相机。
+   * 主线程零物理实例 tick（纯消费）；近平面自适应（T8）两模式共享。
+   * t12 F1：首帧建时钟锚（吸收 worker/main 时钟原点差）——
+   * dtMs = clamp((now − frame.timeMs) − anchor, 0, EXTRAP_MAX_MS)，等价于
+   * extrapolateAuthPose(frame, now − anchor)（消定值超前/滞后，稳态误差 ≈ 0）。
+   */
+  private tickDecoupledCamera(now: number): void {
+    const camera = this.camera;
+    if (!camera) return;
+    const entry = this.shared.readDecoupled();
+    if (!entry) return;
+    if (this.extrapClockAnchorMs === null) {
+      // 首帧建锚：anchor = 主线程时钟 − worker 帧时钟（原点差，近常数）
+      this.extrapClockAnchorMs = now - entry.frame.timeMs;
+    }
+    // 等价 dtMs = clamp((now − frame.timeMs) − anchor, 0, 250)（公式见
+    // extrapolateAuthPose：dtS = clamp(adjustedNow − timeMs, 0, 250)/1000）
+    const pose = extrapolateAuthPose(entry.frame, now - this.extrapClockAnchorMs);
+    camera.rotation.set(pose.pitch * DEG2RAD, pose.yaw * DEG2RAD, 0, 'YXZ');
+    camera.position.set(pose.x, pose.y + pose.eyeHeight, pose.z);
+    // T8 近平面贴墙自适应（共享，每 2 帧）
+    this.nearCheckToggle = !this.nearCheckToggle;
+    if (this.nearCheckToggle) {
+      this.updateNearPlane(pose.x, pose.y + pose.eyeHeight, pose.z);
+    }
   }
 
   resize(width: number, height: number): void {

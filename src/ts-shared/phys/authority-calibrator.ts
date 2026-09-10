@@ -73,6 +73,52 @@ export function normalizeAngleDeg(a: number): number {
   return ((a + 180) % 360 + 360) % 360 - 180;
 }
 
+// ── 解耦消费外推（phys-mode-port §3.5 T7'，additive）──────────────
+
+/** 外推输入帧（结构化最小面：AuthFrame / AuthSnap 均满足）。 */
+export interface ExtrapolatableFrame {
+  pos: { x: number; y: number; z: number };
+  vel: { x: number; y: number; z: number };
+  yaw: number;
+  pitch: number;
+  eyeHeight: number;
+  /** 权威帧产生时刻（ms）。 */
+  timeMs: number;
+}
+
+/** 外推输出位姿（相机直用；角度保持度数，renderer 统一 DEG2RAD）。 */
+export interface ExtrapolatedPose {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  eyeHeight: number;
+}
+
+/** 解耦模式权威外推上限（ms）：超过视为权威线停滞，冻结在最后一帧位置
+ * （防权威线卡死时幽灵漂移；phys-mode-port §3.5 T7' 冻结值 250）。 */
+export const EXTRAP_MAX_MS = 250;
+
+/**
+ * 解耦消费外推纯函数（§3.5 冻结：位置 = 权威帧位置 + 权威速度 × dt 线性一阶，
+ * 无加速度项——加速度项吸收自耦合线 computeAuthAccel 差分口径，作为常量开关
+ * 留 t5 验收后评估启用；角度/眼高直读权威帧——权威帧已含全部输入语义）。
+ * 耦合模式的 calibrateVelocity 算式由此改向承接（终审③：外推数学复用，
+ * 反向同步链废弃——解耦语义 = 权威拉渲染单向，不回写权威）。
+ */
+export function extrapolateAuthPose(frame: ExtrapolatableFrame, nowMs: number): ExtrapolatedPose {
+  const dtS = Math.max(0, Math.min(EXTRAP_MAX_MS, nowMs - frame.timeMs)) / 1000;
+  return {
+    x: frame.pos.x + frame.vel.x * dtS,
+    y: frame.pos.y + frame.vel.y * dtS,
+    z: frame.pos.z + frame.vel.z * dtS,
+    yaw: frame.yaw,
+    pitch: frame.pitch,
+    eyeHeight: frame.eyeHeight,
+  };
+}
+
 export class AuthorityCalibrator {
   private lastVa = -1;
   private curAuth: AuthSnap | null = null;

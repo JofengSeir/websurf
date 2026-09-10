@@ -7,6 +7,8 @@
  */
 
 import type { RuntimeConfig } from '../config.js';
+import type { SyncRenderState } from '../../../src/ts-shared/phys/authority-calibrator.js';
+import type { SavePoint } from '../savepoint.js';
 
 // ── 主线程 → Worker-A ────────────────────────────────────────
 
@@ -50,6 +52,23 @@ export interface SetDeathThresholdMessage {
   value: number;
 }
 
+/** 热切请求（phys-mode-port §3.4.A/G2/G1）。coupled→decoupled 必带 state
+ * （主线程预测全态 10 字段——SyncRenderState，eyeHeight 兼任姿态源，§3.4.F）；
+ * decoupled→coupled 免带（worker phys 即真理源）。 */
+export interface SetModeMessage {
+  type: 'set-mode';
+  mode: 'coupled' | 'decoupled';
+  state?: SyncRenderState;
+}
+
+/** 解耦模式 C 键 hold 冻结（worker 侧执行，§3.4.A）：null = 解除并全量恢复
+ * 该存点（release 非空时按 loadSavepoint 对齐 renderer-main.ts:609-618）。 */
+export interface SetHoldMessage {
+  type: 'set-hold';
+  hold: { x: number; y: number; z: number; yaw: number; pitch: number; onGround: boolean } | null;
+  release?: SavePoint;
+}
+
 export type WorkerMessage =
   | WasmInitMessage
   | InitMessage
@@ -57,7 +76,9 @@ export type WorkerMessage =
   | ConfigMessage
   | RespawnMessage
   | TeleportMessage
-  | SetDeathThresholdMessage;
+  | SetDeathThresholdMessage
+  | SetModeMessage
+  | SetHoldMessage;
 
 // ── Worker-A → 主线程 ────────────────────────────────────────
 
@@ -167,6 +188,15 @@ export interface PhysEventMessage {
   timeMs: number;
 }
 
+/** 热切确认握手（phys-mode-port §3.4.A）：主线程收到后才翻转自己的消费分支
+ * ——单向确认，丢消息由主线程 500ms 超时回滚 UI 并重发 set-mode 兜底。 */
+export interface ModeAckMessage {
+  type: 'mode-ack';
+  mode: 'coupled' | 'decoupled';
+  /** worker performance.now()，交接耗时诊断。 */
+  appliedAtMs: number;
+}
+
 export type MainMessage =
   | ReadyMessage
   | BspMetadataMessage
@@ -175,7 +205,8 @@ export type MainMessage =
   | ErrorMessage
   | PlayerRespawnMessage
   | WorldJsonMessage
-  | PhysEventMessage;
+  | PhysEventMessage
+  | ModeAckMessage;
 
 // ── 输入状态（共享内存 keys 位掩码，与 Rust KEY_MASK 一致；掩码常量/转换
 //    收敛到 ts-shared auth/shared-state.ts，此处仅保留类型）─────
