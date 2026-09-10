@@ -79,6 +79,13 @@
             <button class="small" id="respawnBtn" disabled>重生</button></div>
           <div class="row"><label>出生点</label>
             <select id="spawnSelect" disabled></select></div>
+          <h4>物理计算模式</h4>
+          <div class="row"><label>计算模式</label>
+            <select id="computeMode">
+              <option value="coupled">耦合（预测 + 权威校准）</option>
+              <option value="decoupled">解耦（Worker 权威）</option>
+            </select></div>
+          <div class="hint">热切即时生效（位置/朝向/速度连续交接，ESC 关面板后生效同用）。姿态（蹲伏）不随切换交接，下次蹲起自纠。</div>
           <h4>存点</h4>
           <div class="hint">X 键存点（位置/朝向/速度）· C 键读最近存点 · 按地图持久化（上限 50）</div>
           <div id="savepointList" class="savepoint-list"></div>

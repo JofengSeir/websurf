@@ -47,6 +47,9 @@ export interface PhysWorldLike {
   teleport_to(x: number, y: number, z: number, yaw: number): void;
   set_spawn_points(json: string): void;
   set_death_y(y: number): void;
+  /** 释放 wasm 实例（wasm-bindgen free；双模式 world-json 重建时防泄漏——
+   * phys-mode-port P5。可选：缺省无 free 的注入实现跳过）。 */
+  free?(): void;
 }
 
 /** 权威碰撞事件（低频，postMessage 回传主线程；两端 MainMessage 同构）。 */
@@ -70,6 +73,9 @@ export interface AuthLoopEnv {
   post?(msg: unknown): void;
   /** 碰撞事件回调（缺省 postMessage；可注入做断言/过滤）。 */
   onCollisionEvent?(ev: AuthCollisionEvent): void;
+  /** 模式门（phys-mode-port §3.2 双线互斥，additive）：返回 false = 耦合线早退
+   * （解耦线独占物理推进）。缺省 undefined = 恒真——v7 单线行为零变化。 */
+  modeGate?: () => boolean;
 }
 
 export interface AuthLoop {
@@ -79,6 +85,9 @@ export interface AuthLoop {
   reset(): void;
   /** 启动自驱循环（幂等；wasm-init 就绪后调用一次）。 */
   start(): void;
+  /** 立即发布当前权威状态一帧（不 tick；phys-mode-port §3.4.C 解耦→耦合复入
+   * 首帧——主线程 readAuthoritative 读到切换时刻态而非耦合期陈旧帧）。 */
+  publishCurrentState(): void;
 }
 
 /** 防穿墙：单 tick 输入增量上限（度）。 */
@@ -192,6 +201,13 @@ export function createAuthLoop(env: AuthLoopEnv): AuthLoop {
   /** 主循环：墙钟驱动固定步长权威 tick（250Hz 轮询 > 最大 tick 率）。 */
   function loop(): void {
     setTimeout(loop, 4);
+    // 模式门（双线互斥；缺省恒真）：关断时冻结墙钟基准——复入时从当前时刻
+    // 重新累积，不补跑关断期间的时间（该窗口内物理时间由解耦线独占消耗）
+    if (env.modeGate && !env.modeGate()) {
+      lastWall = 0;
+      acc = 0;
+      return;
+    }
     if (!env.shared || !env.getPhys()) return;
     const now = performance.now();
     if (lastWall === 0) {
@@ -221,6 +237,34 @@ export function createAuthLoop(env: AuthLoopEnv): AuthLoop {
       if (started) return;
       started = true;
       loop();
+    },
+    publishCurrentState(): void {
+      const shared = env.shared;
+      const phys = env.getPhys();
+      if (!shared || !phys) return;
+      const s = phys.state() as {
+        posX: number;
+        posY: number;
+        posZ: number;
+        yaw: number;
+        pitch: number;
+        velX: number;
+        velY: number;
+        velZ: number;
+        onGround: boolean;
+        eyeHeight: number;
+      };
+      shared.writeAuthoritative(
+        {
+          pos: { x: s.posX, y: s.posY, z: s.posZ },
+          yaw: s.yaw,
+          pitch: s.pitch,
+          vel: { x: s.velX, y: s.velY, z: s.velZ },
+          eyeHeight: s.eyeHeight,
+          timeMs: performance.now(),
+        },
+        s.onGround,
+      );
     },
   };
 }

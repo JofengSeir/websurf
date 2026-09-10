@@ -17,7 +17,7 @@
 | 共享实现（编码/解码/容器） | `src/wasm-core/mosaic/`：`mtz.rs`(910，全仓最大单文件)、`encode.rs`(190)、`decode.rs`(159)、`manifest.rs`(79)、`mod.rs`(10) | 纯 std 无第三方依赖 | `wc -l` 实测；`mtz.rs:2` 头注 |
 | 共享实现（VTF 解码） | `src/wasm-core/texture_utils/`：`vtf.rs`(409)、`image.rs`(179)、`mod.rs`(44) | texpresso BC 解压 → DynamicImage | 同上；`mod.rs:1` 注释「WASM 仅用解码路径，保留编码 API 结构」 |
 | 共享数据 | `src/materials/textures.mtz`（5,942,995 B） | 与 `debug/web/textures.mtz`、`game/web/textures.mtz` 三处副本逐字节等大（`ls` 实测） | `ls -l` 实测 |
-| 共享协议注入点 | `src/ts-shared/phys/world-builder.ts` | `WorldBundle.mosaicManifest?/missingTextures?`（`:61-64`）、`WorldBuilderOptions.collectMissingTextures?/decompressMtz?`（`:76-79`）、管线调用点（`:164-178`） | `world-builder.ts` 实读 |
+| 共享协议注入点 | `src/ts-shared/phys/world-builder.ts` | `WorldBundle.mosaicManifest?/missingTextures?`（`:61-64`）、`WorldBuilderOptions.collectMissingTextures?/decompressMtz?`（`:76-79`）、管线调用点（`:171-186`） | `world-builder.ts` 实读 |
 
 ### 1.2 数据流总览
 
@@ -40,8 +40,8 @@ BSP pack(zip) 内 .vmt/.vtf
 
 | 链 | 触发点 | 实现 | 消费者 |
 |---|---|---|---|
-| ① 构建期回退 | 地图加载，GLB 导出前 | `world-builder.ts:180-204` 组装 `defaultsJson`（内嵌 base64 或 `fetch('./textures.mtz')` → 注入的 `decompressMtz`）→ `export_glb_with_pakfile_models_with_defaults(defaultsJson)`（`:207-211`） | **Rust 侧直接把缺失材质替换为低清纹理进 GLB**——渲染端零后期处理（`:180-181` 注释） |
-| ② 运行期画质切换 | 用户切「纹理画质 mini/original」 | `renderer-main.ts applyTextureQuality`：mini = `mosaicManifest[code]` → `mosaic_decode(code, 8)` → PNG → `createImageBitmap` → `map.dispose()` + `image` 替换 | debug `renderer-main.ts:674-736`、game `renderer-main.ts:295-335`（两端同构） |
+| ① 构建期回退 | 地图加载，GLB 导出前 | `world-builder.ts:187-211` 组装 `defaultsJson`（内嵌 base64 或 `fetch('./textures.mtz')` → 注入的 `decompressMtz`）→ `export_glb_with_pakfile_models_with_defaults(defaultsJson)`（`:213-219`） | **Rust 侧直接把缺失材质替换为低清纹理进 GLB**——渲染端零后期处理（`:187-188` 注释） |
+| ② 运行期画质切换 | 用户切「纹理画质 mini/original」 | `renderer-main.ts applyTextureQuality`：mini = `mosaicManifest[code]` → `mosaic_decode(code, 8)` → PNG → `createImageBitmap` → `map.dispose()` + `image` 替换 | debug `renderer-main.ts:674-736`、game `renderer-main.ts:343-375`（两端同构） |
 | ③ 缺失纹理比对（debug 独有） | 地图加载完成 | `showMissingTextures`（`debug/src/app.ts:410-451`，由 `onSceneReadyUi` `:349` 触发）+ `loadDefaultTexturePack`（`default-pack.ts:18-31`） | 弹窗列出「连默认包都没有」的材质；回退本身已在链①自动应用（`app.ts:394-397` 注释） |
 
 ### 1.4 被引用关系（哪些工程拿到材质能力）
@@ -61,23 +61,23 @@ TS 侧接口收敛：`BspProcessorLike` 的 `export_mosaic_manifest/export_missi
 
 ### 2.1 加载管线内的材质时序（`world-builder.ts`，两工程共用）
 
-`buildWorldBundle` 中材质相关五步，**顺序有硬约束**——manifest/缺失纹理必须先于 GLB 导出（消费 BSP）生成（`:164` 注释）：
+`buildWorldBundle` 中材质相关五步，**顺序有硬约束**——manifest/缺失纹理必须先于 GLB 导出（消费 BSP）生成（`:171` 注释）：
 
-1. `mosaicManifest = proc.export_mosaic_manifest()`，失败仅告警降级「画质切换不可用」（`:165-170`）；
-2. `missingTextures`：仅 `options.collectMissingTextures` 开启时收集（debug 传 true），失败告警（`:171-178`）；
-3. `defaultsJson`：默认纹理包解压（`:180-204`）——single 打包（file://）取 `globalThis.__VBSP_TEXTURES_MTZ_B64__` 内嵌 base64（`:185-192`）；multi/dev（HTTP）`fetch('./textures.mtz')`（`:194-199`）；两者都经注入的 `options.decompressMtz` 还原为 `{材质路径: "#mosaic v4 …"}` JSON；无注入或失败 → `'{}'`（缺失材质不进回退表，GLB 中保持素色底，代码原话见 `:203` warn 文本）；
-4. GLB 导出：`export_glb_with_pakfile_models_with_defaults(defaultsJson)`，失败回退无回退版 `export_glb_with_pakfile_models`（`:206-211`）；
-5. `glbBytes` 做 buffer slice 拷贝（`:213-216`）。
+1. `mosaicManifest = proc.export_mosaic_manifest()`，失败仅告警降级「画质切换不可用」（`:172-177`）；
+2. `missingTextures`：仅 `options.collectMissingTextures` 开启时收集（debug 传 true），失败告警（`:178-185`）；
+3. `defaultsJson`：默认纹理包解压（`:187-211`）——single 打包（file://）取 `globalThis.__VBSP_TEXTURES_MTZ_B64__` 内嵌 base64（`:192-200`）；multi/dev（HTTP）`fetch('./textures.mtz')`（`:201-208`）；两者都经注入的 `options.decompressMtz` 还原为 `{材质路径: "#mosaic v4 …"}` JSON；无注入或失败 → `'{}'`（缺失材质不进回退表，GLB 中保持素色底，代码原话见 `:210` warn 文本）；
+4. GLB 导出：`export_glb_with_pakfile_models_with_defaults(defaultsJson)`，失败回退无回退版 `export_glb_with_pakfile_models`（`:213-219`）；
+5. `glbBytes` 做 buffer slice 拷贝（`:220-223`）。
 
-bundle 产物携带 `mosaicManifest?/missingTextures?`（`:61-64`）→ 主线程 `handleLoadBsp` 组装 `SceneDataMessage` 交给渲染器：debug `app.ts:1305`、game `app.ts:418`；类型定义 `debug/src/worker/worker-types.ts:298`。
+bundle 产物携带 `mosaicManifest?/missingTextures?`（`:61-64`）→ 主线程 `handleLoadBsp` 组装 `SceneDataMessage` 交给渲染器：debug `app.ts:1305`、game `app.ts:462`；类型定义 `debug/src/worker/worker-types.ts:298`。
 
 ### 2.2 运行期画质切换时序（链②，debug/game 同构）
 
-`applyTextureQuality(quality)`（debug `renderer-main.ts:674`，game `renderer-main.ts:295`）：
+`applyTextureQuality(quality)`（debug `renderer-main.ts:674`，game `renderer-main.ts:343`）：
 
-- **mini**：`manifest = this.mosaicManifest`（debug `:675`，game `:296`）→ `code = manifest[材质名]` → `mosaic_decode(code, 8)`（默认 ×8，`mosaic_decode` cdylib 注释 `debug lib.rs:3193`）→ PNG 字节 → `createImageBitmap` → **先 `map.dispose()` 再替换 `map.image`**（three r152+ 增量上传约束，debug `renderer-main.ts:720-724` 注释）→ `needsUpdate`；
+- **mini**：`manifest = this.mosaicManifest`（debug `:675`，game `:344`）→ `code = manifest[材质名]` → `mosaic_decode(code, 8)`（默认 ×8，`mosaic_decode` cdylib 注释 `debug lib.rs:3193`）→ PNG 字节 → `createImageBitmap` → **先 `map.dispose()` 再替换 `map.image`**（three r152+ 增量上传约束，debug `renderer-main.ts:720-724` 注释）→ `needsUpdate`；
 - **original**：从 `origTextureImages` 缓存恢复原始位图（debug `:697-704`；备份发生在切换前 `:712`）；
-- manifest 来源：`loadScene` 时 `JSON.parse(data.mosaicManifest)` 存入 `renderer.mosaicManifest`（debug `:380-382`、game `:283-285`；字段声明 debug `:174`、game `:123`）。
+- manifest 来源：`loadScene` 时 `JSON.parse(data.mosaicManifest)` 存入 `renderer.mosaicManifest`（debug `:380-382`、game `:331-333`；字段声明 debug `:174`、game `:163`）。
 
 ### 2.3 缺失纹理比对时序（链③，debug 独有）
 
@@ -113,7 +113,7 @@ bundle 产物携带 `mosaicManifest?/missingTextures?`（`:61-64`）→ 主线�
 
 - `textures.mtz` 源文件 `src/materials/textures.mtz`（5,942,995 B）；`debug/scripts/build-dist.mjs`：single 模式读入并 base64 注入 `globalThis.__VBSP_TEXTURES_MTZ_B64__`（`:55`、`:115`）、multi 模式复制到 `dist/textures.mtz`（`:14`、`:185`）；
 - 主线程 wasm 出口：`debug/src/main-wasm.ts:10` 导入 `mosaic_decode/decompress_mtz`、`:45` 再导出（game 直接从 `../pkg/websurf_wasm.js` 导入，`game/src/app.ts:14`）；
-- **debug Worker 侧 mtz 通道是协议兼容残留**：`wasm-init` 消息的 `mtzB64` 字段仍下发（`worker-dispatch.ts:35` 签名），debug `worker/main.ts:110` 存入 `mtz-data.ts`，但其自注「协议兼容保留（Worker 不再解析 BSP，纹理包不再使用）」——`mtz-data.ts:4` 头注的「handleLoadBsp 消费」为过时描述，以 `main.ts:110` 行内注释为准。game 侧 worker 完全无 mtz 文件（grep 空）。
+- **debug Worker 侧 mtz 通道是协议兼容残留**：`wasm-init` 消息的 `mtzB64` 字段仍下发（`worker-dispatch.ts:88` 签名），debug `worker/main.ts:110` 存入 `mtz-data.ts`，但其自注「协议兼容保留（Worker 不再解析 BSP，纹理包不再使用）」——`mtz-data.ts:4` 头注的「handleLoadBsp 消费」为过时描述，以 `main.ts:110` 行内注释为准。game 侧 worker 完全无 mtz 文件（grep 空）。
 
 ---
 
@@ -123,8 +123,8 @@ bundle 产物携带 `mosaicManifest?/missingTextures?`（`:61-64`）→ 主线�
 
 | 维度 | debug | game | 证据 |
 |---|---|---|---|
-| 链①构建期回退 | ✅（decompressMtz 注入） | ✅（同） | `debug/src/app.ts:1295`、`game/src/app.ts:407` |
-| 链②画质切换 | ✅ mini/original | ✅ 同构（含 manifest 解析） | `debug/src/renderer/renderer-main.ts:674-736`、`game/src/renderer/renderer-main.ts:295-335` |
+| 链①构建期回退 | ✅（decompressMtz 注入） | ✅（同） | `debug/src/app.ts:1295`、`game/src/app.ts:451` |
+| 链②画质切换 | ✅ mini/original | ✅ 同构（含 manifest 解析） | `debug/src/renderer/renderer-main.ts:674-736`、`game/src/renderer/renderer-main.ts:343-375` |
 | `collectMissingTextures` | **true** | **不传**（无此能力消费） | `debug/src/app.ts:1294`、`game/src/app.ts:406-409` |
 | 链③缺失比对弹窗 | ✅（default-pack.ts + showMissingTextures） | ❌ 无 default-pack 文件、无弹窗 | `debug/src/default-pack.ts`（game/src 无同名文件，grep 实证） |
 | wasm 就绪门 | `ensureMainWasm`（main-wasm.ts 封装） | `app.ts:63/:138` promise（防 decompress_mtz 未就绪竞态） | `game/src/app.ts:63,138` |

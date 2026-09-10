@@ -44,29 +44,39 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 
 ### 2.1 双端同构（同一物理、同一输入）
 
-- 双端各持一个 `PhysWorld`（`game/src/renderer/renderer-main.ts:483-519` 主线程 `buildPredictionWorld`；`src/ts-shared/auth/worker-dispatch.ts:101-117` Worker `world-json` → `build_world`），都由 `buildPhysicsParams` 生成同一份 snake_case 参数（`game/src/config.ts:158` + `src/ts-shared/phys/params.ts:40-59`，其中 `sensitivity: 1` 固定——灵敏度在主线程输入层乘入，双端消费同一份已缩放输入，角度永不因灵敏度分叉）。
-- Q/E 转向不进物理：输入层生成等效鼠标量 `qeEquivalentDx = yawBindSpeed/M_YAW×dt`（`src/ts-shared/input/input-layer.ts`；`game/src/app.ts:346-354` 每帧并入 `feedInput`），Rust 侧仅收 dx/dy（`src/phys/mod.rs:222-233` step_core 注释明示"物理不再内部旋转"）。
+- 双端各持一个 `PhysWorld`（`game/src/renderer/renderer-main.ts:533-576` 主线程 `buildPredictionWorld`（解耦模式暂存 `stashedWorld` 待切回耦合再建，`:538-540`）；`src/ts-shared/auth/worker-dispatch.ts:154-182` Worker `world-json` → `build_world` 双实例），都由 `buildPhysicsParams` 生成同一份 snake_case 参数（`game/src/config.ts:166` + `src/ts-shared/phys/params.ts:40-59`，其中 `sensitivity: 1` 固定——灵敏度在主线程输入层乘入，双端消费同一份已缩放输入，角度永不因灵敏度分叉）。
+- Q/E 转向不进物理：输入层生成等效鼠标量 `qeEquivalentDx = yawBindSpeed/M_YAW×dt`（`src/ts-shared/input/input-layer.ts`；`game/src/app.ts:391-398` 每帧并入 `feedInput`），Rust 侧仅收 dx/dy（`src/phys/mod.rs:222-233` step_core 注释明示"物理不再内部旋转"）。
 
 ### 2.2 通道层
 
-`crossOriginIsolated`（serve.py 发 COOP/COEP）→ `SharedArrayBuffer(512B)` 高性能通道；否则 MsgState postMessage 回退（功能等价可玩）。创建于 `game/src/app.ts:82-124`；接口统一在 `src/ts-shared/auth/shared-state.ts`（`ShmState`/`MsgState`，布局常量 `I_V_A/I_KEYS/I_A_GROUND/B_DX_ACC/B_DY_ACC/B_A0/B_A1` 于 `:104-117`，`SHARED_BUFFER_SIZE = 512` 于 `:117`）。
+`crossOriginIsolated`（serve.py 发 COOP/COEP）→ `SharedArrayBuffer(512B)` 高性能通道；否则 MsgState postMessage 回退（功能等价可玩）。创建于 `game/src/app.ts:82-124`；接口统一在 `src/ts-shared/auth/shared-state.ts`（`ShmState`/`MsgState`，布局常量 `I_V_A/I_KEYS/I_A_GROUND` + 双模式扩展 `I_V_D/I_WAKEUP`（`:110-115`）与 `B_DX_ACC/B_DY_ACC/B_A0/B_A1` + 解耦帧 `B_D0/B_D1`（`:118-127`），`SHARED_BUFFER_SIZE = 512` 于 `:130`）。
+
+### 2.3 双模式物理计算（耦合/解耦热切，phys-mode-port）
+
+game 现有两套可切换的物理计算模式（**默认耦合**，ESC 面板"计算模式"下拉运行时热切，`panel-controller.ts:430-440`；`config.physics.computeMode` 为声明性元数据，运行时切换只认 `set-mode` 握手，`game/src/worker/main.ts:66-71`）：
+
+- **耦合模式 = v7 现行（零回归保留）**：主线程渲染循环 tick 全速预测 `predPhys`（§2 总图六步），Worker 64Hz 权威线（`auth-loop`）仅校准；§2/§3/§4 各节描述的都是本模式。
+- **解耦模式 = 物理整体搬 Worker**：Worker 内 `phys` 实例成为 1ms 无限制真理源（`src/ts-shared/decoupled/decoupled-loop.ts`——harness WorkerA 编排移植：1ms 子步实时消耗输入 + 独立 64t `tickPhys` 实例速度校准 `set_velocity` 唯一通道 + 分叉锚定 `TICK_ANCHOR_DIST=64` 拉回，`decoupled-loop.ts:134,368-372`）；主线程**纯消费**——rAF 读最新解耦帧（S_D 槽）+ 权威速度一阶外推设相机（`renderer-main.ts:979-982,1027-1046`，外推实现 `src/ts-shared/phys/authority-calibrator.ts:110-121`），零物理实例 tick。
+- **热切握手**（`worker-dispatch.ts:325-337` set-mode/mode-ack + `game/src/worker/main.ts:146-179` applyModeSwitch）：面板 change → `set-mode{mode,state?}`（主线程预测全态随行）→ worker gate 翻转 + 双实例状态注入 + 采样器清零 + 交接帧发布 → `mode-ack` → 主线程切换消费分支/恢复预测线；500ms 无 ack 重发一次，再失败回滚（`renderer-main.ts:619-643`）。位置/朝向/速度连续交接；蹲伏姿态字段 v1 明确不随切（Rust 零改动，见 `renderer-main.ts:656-657` 注释）。
+- **双线互斥**：auth-loop 与 decoupled-loop 常驻同 Worker 自驱，各带模式门早退（`game/src/worker/main.ts:122,135`；auth-loop `modeGate` `src/ts-shared/auth/auth-loop.ts:78`）——切换即翻转 worker 侧 `computeMode`，无 start/stop 竞态。
+- 面板热切操作：ESC 面板 → 通用模块"计算模式"下拉 `<select id="computeMode">`（`web/index.html:84`，形态备案）——耦合/解耦，默认耦合，偏好持久化自启动 `app.ts:213-216`（自启动 `sendSetMode` 无交接态直发、不挂 ack 定时器，send→ack 往返窗口内解耦消费分支未激活、无相机/输入，用户无感——披露见 `differences.md` §7.2⑤）；**在途禁用双保险**（t12-F2）：面板源侧 change 即锁 `#computeMode`（`panel-controller.ts:436-438`）+ bridge 在途守卫禁止二次发送（`input-bridge.ts:95`，查询 `hasPendingModeSwitch` `renderer-main.ts:645`），ack/回滚后由 `onComputeModeSettled` 恢复（`app.ts:122,158`）。修复链与披露清单见 `differences.md` §7。
 
 ## 3. 目录结构与模块划分
 
 | 路径 | 行数 | 职责（实测 wc -l） |
 |---|---|---|
-| `game/src/app.ts` | 688 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
-| `game/src/config.ts` | 181 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate`）+ `applyConfigPatch` + `buildPhysicsParams` |
-| `game/src/renderer/renderer-main.ts` | 1024 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、主线程物理 tick、权威校准入口、画质切换 |
-| `game/src/worker/main.ts` | 93 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:86`） |
-| `game/src/worker/worker-types.ts` | 195 | 协议类型（⚠️ 部分注释落后于实现，运行时协议以 `src/ts-shared/auth/worker-dispatch.ts` 为准；`:6` 提到的 predictor-worker 文件已不存在，纯历史残留） |
-| `game/src/input/input-bridge.ts` | 75 | 面板 → 双端物理的参数桥（sendConfig 双写、respawn/teleport） |
+| `game/src/app.ts` | 746 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C（解耦分支发 set-hold `:543-568`）、mode-ack 消息处理（`:117-123`）、加载覆盖层 |
+| `game/src/config.ts` | 191 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate` + `physics.computeMode` `:11-17`，默认耦合 `:105-106`）+ `applyConfigPatch` + `buildPhysicsParams` |
+| `game/src/renderer/renderer-main.ts` | 1302 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、双模式 tick 分叉（耦合 T1-T6 `:947-978` / 解耦 T7' 消费 `:979-982,1027-1046`）、权威校准入口、热切握手主线程侧（`:601-692`）、画质切换 |
+| `game/src/worker/main.ts` | 232 | Worker 装配（双模式）：`createAuthLoop`（耦合线 + modeGate `:122`）+ `createDecoupledLoop`（解耦线 `:127-140`）+ `applyModeSwitch`（`:146-179`）/`applySetHold`（`:187-208`）+ `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:222`，常量 `:53`） |
+| `game/src/worker/worker-types.ts` | 226 | 协议类型（新增 `SetModeMessage :58`/`SetHoldMessage :66`/`ModeAckMessage :193`；⚠️ 部分注释落后于实现，运行时协议以 `src/ts-shared/auth/worker-dispatch.ts` 为准；`:6` 提到的 predictor-worker 文件已不存在，纯历史残留） |
+| `game/src/input/input-bridge.ts` | 129 | 面板 → 双端物理的参数桥（sendConfig 双写、respawn/teleport、热切发送 `sendSetMode :94`/重发 `:112`/`sendSetHold :125`、`sendSetDeathThreshold :76`） |
 | `game/src/input/keyboard.ts` | 113 | `KeyboardInput`：锁定门控、`getState/getMask/reset`、面板 `setKeymap` 热更新 |
 | `game/src/input/keymap.ts` | 112 | 默认键位 + 录制重绑 + localStorage（`STORAGE_KEY='websurf-game.keymap.v1'` `:42`） |
 | `game/src/input/mouse-buffer.ts` | 128 | `process()` 路径：discardNext + 单事件削平 ±1000（`MAX_DELTA` `:40`；`push/drain` 为遗留未用路径） |
 | `game/src/input/pointer-lock.ts` | 154 | `unadjustedMovement:true` 请求 + 旧浏览器 void 降级 + 3s 超时（`:71`） |
-| `game/src/panel/panel-controller.ts` | 690 | ESC 两栏面板：通用/物理/体型/按键/操作/显示/视角七模块、控件绑定、偏好持久化、noclip、存点列表 |
-| `game/src/world/pvs-manager.ts` | 281 | PVS 叶子查找 + 行 RLE 解码 + 可见集（**当前 `ENABLE_PVS=false` 整体禁用**，`renderer-main.ts:82`） |
+| `game/src/panel/panel-controller.ts` | 722 | ESC 两栏面板：通用/物理/体型/按键/操作/显示/视角七模块、计算模式热切控件（`:430-440`）、控件绑定、偏好持久化、noclip、存点列表 |
+| `game/src/world/pvs-manager.ts` | 281 | PVS 叶子查找 + 行 RLE 解码 + 可见集（**当前 `ENABLE_PVS=false` 整体禁用**，`renderer-main.ts:86`） |
 | `game/src/world/types.ts` | 34 | 最小化世界类型：仅主线程渲染需要的 PVS 结构（对照 debug 231 行） |
 | `game/src/savepoint.ts` | 106 | `SavePointStore`：按地图 localStorage（`websurf-game.savepoints.{mapName}`）、上限 50（`SAVEPOINT_MAX` `:27`）、latest/add/delete |
 | `game/web/index.html` | 245 | 页面外壳（纯结构与挂载点）：80 元素 id / 14 data-* / 30 class 与 JS 绑定零改动（r1 复核 80/80、14/14、30/30）；不含任何行内样式，视觉层全在 styles.css |
@@ -77,17 +87,18 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 
 | 共享模块 | game 引用点 |
 |---|---|
-| `auth/shared-state.ts` | `game/src/app.ts:20`（createMainSharedState/keysToMask/KEY_MASK）、`keyboard.ts:11`、`renderer-main.ts:20`、`worker/main.ts:21` |
-| `auth/auth-loop.ts` | `game/src/worker/main.ts:22` |
-| `auth/worker-dispatch.ts` | `game/src/worker/main.ts:23` |
-| `phys/params.ts` | `game/src/config.ts:5`、`worker/main.ts:24` |
+| `auth/shared-state.ts` | `game/src/app.ts:20`（createMainSharedState/keysToMask/KEY_MASK）、`keyboard.ts:11`、`renderer-main.ts:20`、`worker/main.ts:33` |
+| `auth/auth-loop.ts` | `game/src/worker/main.ts:34` |
+| `auth/worker-dispatch.ts` | `game/src/worker/main.ts:35` |
+| `decoupled/decoupled-loop.ts`（双模式扩展） | `game/src/worker/main.ts:36-43`（createDecoupledLoop/ComputeMode/HoldState 等，仅 game 注入——debug 未 import） |
+| `phys/params.ts` | `game/src/config.ts:5`、`worker/main.ts:44` |
 | `phys/world-builder.ts` | `game/src/app.ts:22` |
 | `phys/authority-calibrator.ts` | `game/src/renderer/renderer-main.ts:21` |
 | `input/input-layer.ts` | `game/src/app.ts:21` |
 
 ## 4. 配置系统（最小化五段）
 
-`game/src/config.ts:92-143` `DEFAULT_CONFIG`：`physics`（tickRate 64 / gravity 800 / jumpSpeed 302 / maxSpeed 250 / friction 4 / accelerate 10 / airAccel 150 / stopSpeed 100 / autobhop / walkSpeed 130 / crouchSpeed 85 / bhopSpeedClamp / noPrestrafe / teleportGateTicks 3）、`input`（sensitivity 1.5 / pitchLimit 89 / yawBindSpeed 210 / noclipSpeed 800）、`player`（半宽 16 / 站高 72 / 蹲高 54）、`hud`（fov 73.6、准星、速度模式）、`texture.quality`；外加 `lockTickRate`（默认 false；true 时锁定 64Hz 只读，为"计时玩法公平性"预留，`config.ts:81-93`、`panel-controller.ts:222`）。
+`game/src/config.ts:100-143` `DEFAULT_CONFIG`：`physics`（**computeMode**（`:11-17`，默认 coupled `:105-106`，面板偏好持久化）/ tickRate 64 / gravity 800 / jumpSpeed 302 / maxSpeed 250 / friction 4 / accelerate 10 / airAccel 150 / stopSpeed 100 / autobhop / walkSpeed 130 / crouchSpeed 85 / bhopSpeedClamp / noPrestrafe / teleportGateTicks 3）、`input`（sensitivity 1.5 / pitchLimit 89 / yawBindSpeed 210 / noclipSpeed 800）、`player`（半宽 16 / 站高 72 / 蹲高 54）、`hud`（fov 73.6、准星、速度模式）、`texture.quality`；外加 `lockTickRate`（默认 false；true 时锁定 64Hz 只读，为"计时玩法公平性"预留，`config.ts:92,102`、`panel-controller.ts:238-241`）。注意 `computeMode` 是声明性元数据（默认值 + 偏好恢复），运行时热切只走 `set-mode` 握手（§2.3）。
 对比 debug 的十余段可调参数 + 物理参数定义库，game 把面板参数收敛为最小集合（差异详见 [differences.md](differences.md)）。
 
 ## 5. 构建与运行链
@@ -104,7 +115,7 @@ npm run build:dist   # scripts/build-dist.mjs：single（默认，内嵌 file://
 - 产物引用：`game/web/index.html`（245 行，纯结构与挂载点——`<link rel="stylesheet" href="./styles.css">` 于 `:17`、`<script type="module" src="./app.js">` 于 `:243`；80 元素 id / 14 data-* / 30 class 与 JS 绑定零改动，r1 复核 80/80、14/14、30/30）+ `game/web/styles.css`（571 行独立视觉层，viewer S10 令牌体系：:root 令牌 + 卡片化面板 + 悬停/激活交互态；零行内样式）。
 - **single 构建**（`scripts/build-dist.mjs:66-126`）：wasm base64 + worker 代码 + mtz 全部内嵌进 `dist/app.js`（Blob URL module worker），`dist/index.html` + `dist/styles.css` 外置（copyFileSync `:110-111`，file:// 下 `<link>` 同样可加载），专门支持 `file://` 双击（无 fetch/无 SAB 自动 MsgState 降级）。
 - **multi 构建**（`build-dist.mjs:129-174`）：`index.html + styles.css + app.js + worker.js + websurf_wasm_bg.wasm + textures.mtz` 共 6 文件（index/styles 拷贝 `:163-165`），用于 GitHub Pages（`.github/workflows/deploy-pages.yml` 头注 9-13 行：game 以 multi dist 部署）。
-- 一键：`game/play.cmd:32-62` 四步自举（ensure-node-deps → wasm → ts → dist）后以 `game/serve.py` 起服务（**COOP/COEP + no-store**，`game/serve.py:27-34`，SAB 生效前提）自动打开 `http://localhost:8137/dist/index.html`。
+- 一键：`game/play.cmd:32-62` 四步自举（ensure-node-deps → wasm → ts → dist）后以 `game/serve.py` 起服务（**COOP/COEP + no-store**，`game/serve.py:28-33`，SAB 生效前提）自动打开 `http://localhost:8137/dist/index.html`。
 - dev 页面：`python src/serve.py 8080` 后访问 `/game/web/index.html`（需先 `npm run build:ts`）。
 - ⚠️ 仓库内已有 `game/web/*.js` 与 `game/dist/*` 可能是旧架构（v3）产物——运行前先重建（`game/README.md` 已明示）。
 
@@ -114,13 +125,13 @@ npm run build:dist   # scripts/build-dist.mjs：single（默认，内嵌 file://
 
 - **导出层 16**：`metadata / parse_spawn_points / parse_teleports / parse_pvs_data / export_brushes_planes / export_model_tri_colliders / export_model_phy_colliders / export_glb(_with_pakfile_models(_with_defaults)) / export_mosaic_manifest / export_missing_textures / take_event / mosaic_encode / mosaic_decode / decompress_mtz`；
 - **物理层 17**：`build_world / tick / tick_into / predict / state / state_out_ptr / respawn / teleport_to / teleport_to_spawn / set_spawn_points / set_death_y / set_params / set_hull / set_noclip / set_state / set_velocity / set_yaw_pitch`（全部来自共享 `src/phys/mod.rs`）。
-- game 实际只用其中一部分：主线程 `tick/state/set_state/set_params/set_hull/set_noclip/set_death_y/build_world/set_spawn_points`（renderer-main），Worker `tick/build_world/respawn/teleport_to_spawn/set_spawn_points/sync 参数`（auth-loop/dispatch）；`tick_into/state_out_ptr/predict/debug_trace/gate_veto_count/take_event/set_velocity/set_yaw_pitch/teleport_to` 为共享层或验证工程接口，game 未调用（grep `game/src` 无引用）。
+- game 实际只用其中一部分：主线程 `tick/state/set_state/set_params/set_hull/set_noclip/set_death_y/build_world/set_spawn_points/set_death_y`（renderer-main），Worker `tick/build_world/respawn/teleport_to_spawn/set_spawn_points/sync 参数`（auth-loop/dispatch）+ 解耦线 `tick_into/state_out_ptr/set_velocity`（`src/ts-shared/decoupled/decoupled-loop.ts:215-238,372,395`——1ms 真理源零分配热路径，wasm 内存注入 `worker/main.ts:63-64,227-230`）；`predict/debug_trace/gate_veto_count/take_event/set_yaw_pitch/teleport_to` 仍为共享层或验证工程接口，game 未调用（grep `game/src` 无引用）。
 
 ## 7. 文档导航
 
 | 文档 | 维度 | 内容 |
 |---|---|---|
-| [sequences.md](sequences.md) | T | 启动时序、地图加载管线、双线程帧循环、校准与反向同步、SAB/Msg 协议 |
+| [sequences.md](sequences.md) | T | 启动时序、地图加载管线、双线程帧循环（耦合）、双模式热切时序（§8）、校准与反向同步、SAB/Msg 协议 |
 | [implementation/panel-and-input.md](implementation/panel-and-input.md) | I | 输入采集链、键位录制、PointerLock、参数桥、面板七模块 |
 | [implementation/gameplay.md](implementation/gameplay.md) | I | 存点/读点/按住冻结、出生点选择、渲染体验子系统、死亡阈值、PVS 现状 |
 | [differences.md](differences.md) | D | game vs debug/viewer/dual-mode-harness 的架构取舍与共享层收敛 |

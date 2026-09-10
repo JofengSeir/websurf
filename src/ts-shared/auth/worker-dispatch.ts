@@ -1,6 +1,8 @@
 /**
  * Worker 消息分发（公共化 v1）— init / wasm-init / world-json / config / respawn /
- * teleport / teleport-to-pos / set-spawn-points / set-death-threshold / sync-render-state。
+ * teleport / teleport-to-pos / set-spawn-points / set-death-threshold / sync-render-state
+ * + 双模式扩展（phys-mode-port §3.4.A/C/D/E）：set-mode / mode-ack / set-hold、
+ * tickRate 模式感知、config patch 键名归一（W-GAP-1 修复）、respawn/teleport 双实例化。
  *
  * 两端消息集已对齐（debug 补充 teleport-to-pos / set-death-threshold，game 同步协议
  * 后共用）。工程特有消息（debug 物理面板 set-physics-param/set-hull 等）经
@@ -10,6 +12,45 @@
 
 import { createWorkerSharedState, type ShmState, type MsgState } from './shared-state.js';
 import type { AuthLoop, PhysWorldLike } from './auth-loop.js';
+import type {
+  DecoupledLoop,
+  HoldState,
+  SavePointLike,
+  SyncRenderStateLike,
+} from '../decoupled/decoupled-loop.js';
+
+/** W-GAP-1 键名归一表：InputBridge buildPhysicsParams snake_case patch →
+ * game config camelCase 字段（snake 与 camel 同名键自动穿透，无需列出）。
+ * 归一只改键名不改值——debug 端 patch 全 camel，本表零命中零影响（additive 安全）。 */
+const SNAKE_TO_CAMEL_PATCH_KEYS: Record<string, string> = {
+  stop_speed: 'stopSpeed',
+  jump_height: 'jumpSpeed',
+  air_accelerate: 'airAccel',
+  run_speed: 'maxSpeed',
+  walk_speed: 'walkSpeed',
+  crouch_speed: 'crouchSpeed',
+  bhop_speed_clamp: 'bhopSpeedClamp',
+  no_prestrafe: 'noPrestrafe',
+  teleport_gate_ticks: 'teleportGateTicks',
+  yaw_bind_speed: 'yawBindSpeed',
+  noclip_speed: 'noclipSpeed',
+};
+
+/** config patch 键名归一（physics/input 段）：snake → camel，未知键原样保留。 */
+function normalizeConfigPatchKeys(patch: Record<string, unknown>): Record<string, unknown> {
+  let renamed = false;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(patch)) {
+    const mapped = SNAKE_TO_CAMEL_PATCH_KEYS[key];
+    if (mapped !== undefined) {
+      out[mapped] = patch[key];
+      renamed = true;
+    } else {
+      out[key] = patch[key];
+    }
+  }
+  return renamed ? out : patch;
+}
 
 export interface WorkerDispatchEnv {
   /** 跨线程状态通道槽（init 消息写入；authLoop/同步共用）。 */
@@ -29,6 +70,18 @@ export interface WorkerDispatchEnv {
   initSync(module: ArrayBuffer): void;
   /** 消息发送（Worker → 主线程）。 */
   post(msg: unknown): void;
+  // ── 双模式扩展（phys-mode-port §3.7 t10；全部可选——debug 不注入 = 解耦面整体不激活）──
+  /** 解耦第二实例槽（tickPhys 64t 校准线；world-json 与 phys 同建同参，G3/P9）。 */
+  tickPhys?: { current: PhysWorldLike | null };
+  /** 解耦循环句柄（respawn 首帧/publish、config tickRate 边沿处理用）。 */
+  decoupledLoop?: DecoupledLoop;
+  /** 当前计算模式（worker 侧真相源；set-mode 翻转。缺省恒 'coupled'——debug 零感知）。 */
+  getComputeMode?(): 'coupled' | 'decoupled';
+  /** set-mode 执行钩子（§3.4.C 步骤 a-f：gate 翻转 + set_state 状态注入 +
+   * tickPhys 对齐 + 采样器清零 + resetInput；game 侧实现）。 */
+  onSetMode?(mode: 'coupled' | 'decoupled', state?: SyncRenderStateLike): void;
+  /** set-hold 执行钩子（解耦 hold 冻结注入/解除（带存点全量恢复）；game 侧实现）。 */
+  onSetHold?(hold: HoldState | null, release?: SavePointLike): void;
   /** init 消息处理钩子（debug：回执 `ready`；game 无）。 */
   onInit?(msg: unknown): void;
   /** wasm-init 消息处理钩子（debug：内嵌默认纹理包 mtzB64 存取）。 */
@@ -106,25 +159,51 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         spawn: { x: number; y: number; z: number; yawDeg: number };
       };
       if (!ready) return; // wasm 未就绪则忽略（主线程 init 顺序保证 wasm 先行）
+      // P5（phys-mode-port 前置修复）：重建前释放旧实例（wasm free）——世界
+      // 反复加载时旧 PhysWorld 泄漏，双实例时代泄漏翻倍
+      env.phys.current?.free?.();
+      env.tickPhys?.current?.free?.();
       const p = env.createPhysWorld();
       p.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
       env.phys.current = p;
-      env.syncParamsToWasm();
+      // G3/P9（phys-mode-port §3.2）：tickPhys 与 phys 同建同参（harness
+      // applyWorld:132-135 双构建先例）——热切零延迟、双实例同步重建
+      if (env.tickPhys) {
+        const t = env.createPhysWorld();
+        t.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
+        env.tickPhys.current = t;
+      }
+      env.syncParamsToWasm(); // 双实例同参（注入实现按槽内全部实例同步）
       env.authLoop.setFixedDt(env.getConfigTickRate()); // 面板 tickRate 生效
       env.authLoop.reset();
+      env.decoupledLoop?.publishCurrentState(); // 首帧状态即刻可见（harness applyWorld:150 语义）
       env.onWorldBuilt?.(p);
       return;
     }
     if (type === 'config') {
       const c = msg as { section: string; patch: Record<string, unknown> };
       if (!env.phys.current) return;
+      // W-GAP-1（phys-mode-port 前置修复）：InputBridge 以 buildPhysicsParams 的
+      // snake_case 键下发 patch，而 config/worker 全 camelCase——此前 Object.assign
+      // 直入，仅 gravity/accelerate/friction/autobhop/tickRate 五键同构生效，
+      // 其余 11 键在权威侧永远陈旧。归一后 patch 键与 config 字段对齐。
+      const normalizedPatch =
+        c.section === 'physics' || c.section === 'input'
+          ? normalizeConfigPatchKeys(c.patch)
+          : c.patch;
       // 更新自身 config（v7 隐藏 bug 修复：之前从不应用 patch，权威一直用默认参数，
       // 面板改任何参数（含灵敏度）双端都分叉）
-      env.applyConfigPatch(c.section, c.patch);
-      // tickRate → 权威固定步长即时生效（面板 64↔128 切换真正改变物理采样率）
-      if (c.section === 'physics' && typeof c.patch.tickRate === 'number') {
-        env.authLoop.setFixedDt(env.getConfigTickRate());
-        env.authLoop.reset(); // 清累积器，防新旧步长错配
+      env.applyConfigPatch(c.section, normalizedPatch);
+      // tickRate → 模式感知生效（§3.4.D）：耦合 = 权威固定步长（+3 偏移）即时生效；
+      // 解耦 = tickPhys raw 速率 + 激活边沿处理（清 loAcc/tickDx/tickDy + align，
+      // 速率值变化不 reset 主累积器——网格相位按新步长自然延续）
+      if (c.section === 'physics' && typeof normalizedPatch.tickRate === 'number') {
+        if ((env.getComputeMode?.() ?? 'coupled') === 'decoupled') {
+          env.decoupledLoop?.onTickRateChanged();
+        } else {
+          env.authLoop.setFixedDt(env.getConfigTickRate());
+          env.authLoop.reset(); // 清累积器，防新旧步长错配
+        }
       }
       if (c.section === 'player') {
         // 两端碰撞箱字段名差异：game 用 halfWidth，debug 用 radius —— 统一归一化
@@ -137,6 +216,12 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         const hw = pl.halfWidth ?? pl.radius;
         if (hw !== undefined && pl.standHeight !== undefined && pl.duckHeight !== undefined) {
           env.phys.current.set_hull(hw, pl.standHeight, pl.duckHeight);
+          // G3 双实例同参（t14 修复 r1b-G1，G1 终裁定案 option 2 · 议题已关闭）：
+          // player fast-path 原漏同步 tickPhys hull——解耦会话内 64t 校准线持续以
+          // 旧 hull 算校准速度（alignTickPhys 只同步状态不同步参数）。纯 additive：
+          // 耦合期 tickPhys 闲置零影响、debug 不注入 tickPhys 时 optional chain
+          // 跳过、halfWidth/radius 归一与 partial-patch 三字段守卫原样保留
+          env.tickPhys?.current?.set_hull(hw, pl.standHeight, pl.duckHeight);
         }
       } else {
         env.syncParamsToWasm();
@@ -150,13 +235,26 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     }
     if (type === 'respawn') {
       // 纯 Rust 重生到初始出生点（计时挑战检查点回退已移主线程）
-      env.phys.current?.respawn();
+      if ((env.getComputeMode?.() ?? 'coupled') === 'decoupled') {
+        // §3.4.E：解耦模式升级为双实例同步重置（respawn 同建同参 → 两实例同落
+        // 出生点天然对齐）+ 采样器清零 + writeDecoupled 首帧
+        env.phys.current?.respawn();
+        env.tickPhys?.current?.respawn();
+        env.decoupledLoop?.resetSamplers(false);
+        env.decoupledLoop?.publishCurrentState();
+      } else {
+        // 耦合模式维持 v7 单实例现状（tickPhys 空闲；复入解耦时 set-mode 对齐）
+        env.phys.current?.respawn();
+      }
       return;
     }
     if (type === 'sync-render-state') {
       // 渲染主线 → 权威同步（用户定调：渲染 144Hz 预测物理精度更高，大偏差时
       // 以渲染主线为准反向校准权威）。同步瞬间清空权威侧未消费输入增量，
       // 防止同步前的旧鼠标/按键残留注入新状态（键位保留——按住状态是实时的）。
+      // phys-mode-port §3.4.C/§3.5 升级：本消息原样保留并升级为**模式无关的
+      // 「主→worker 全态注入」通道**——解耦下 = phys.set_state + tickPhys 对齐
+      //（loop 采样器不清：仅热切才清，set-mode 分支负责）。
       const sm = msg as {
         state?: {
           posX: number;
@@ -176,6 +274,13 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         s.posX, s.posY, s.posZ, s.yaw, s.pitch,
         s.velX, s.velY, s.velZ, s.onGround,
       );
+      if ((env.getComputeMode?.() ?? 'coupled') === 'decoupled') {
+        // tickPhys 同注入（避免边界锚定把注入态拉走；§3.4.C-c 对齐语义）
+        env.tickPhys?.current?.set_state(
+          s.posX, s.posY, s.posZ, s.yaw, s.pitch,
+          s.velX, s.velY, s.velZ, s.onGround,
+        );
+      }
       env.shared.current?.resetInput();
       return;
     }
@@ -185,6 +290,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       const sm = msg as { json?: string };
       if (typeof sm.json === 'string' && env.phys.current) {
         env.phys.current.set_spawn_points(sm.json);
+        env.tickPhys?.current?.set_spawn_points(sm.json); // G3 双实例同参
       }
       return;
     }
@@ -192,6 +298,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       const tm = msg as { target?: number };
       if (typeof tm.target === 'number') {
         env.phys.current?.teleport_to_spawn(tm.target);
+        env.tickPhys?.current?.teleport_to_spawn(tm.target); // G3 双实例同步
       }
       return;
     }
@@ -200,16 +307,39 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       const tm = msg as { pos?: [number, number, number]; yaw?: number };
       if (!env.phys.current || !tm.pos) return;
       const cur = env.phys.current.state() as { yaw: number };
-      env.phys.current.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], tm.yaw !== undefined ? tm.yaw : cur.yaw);
+      const yaw = tm.yaw !== undefined ? tm.yaw : cur.yaw;
+      env.phys.current.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw);
+      env.tickPhys?.current?.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw); // G3 双实例同步
       return;
     }
     if (type === 'set-death-threshold') {
       // 主线程传场景包围盒 minY，直接作为 Rust 死亡阈值（check_death: pos.y < death_y），
-      // 与主线程渲染物理 setDeathY 同值——双端判定不因阈值差异分叉。
+      // 与主线程渲染物理 setDeathY 同值——双端判定不因阈值差异分叉。G3 双实例同参。
       const dm = msg as { value?: number };
       if (typeof dm.value === 'number') {
         env.phys.current?.set_death_y(dm.value);
+        env.tickPhys?.current?.set_death_y(dm.value);
       }
+      return;
+    }
+    if (type === 'set-mode') {
+      // 热切握手（§3.4.C/G2）：UI 触发 → worker 翻转 gate + 状态注入 → mode-ack。
+      // 幂等：同 mode 的 set-mode 直接回 ack（不重复执行步骤 a-f）——主线程
+      // 500ms 超时重发的兜底回执。
+      const sm = msg as { mode?: string; state?: SyncRenderStateLike };
+      const mode = sm.mode;
+      if (mode !== 'coupled' && mode !== 'decoupled') return;
+      if (mode !== (env.getComputeMode?.() ?? 'coupled')) {
+        env.onSetMode?.(mode, sm.state);
+      }
+      env.post({ type: 'mode-ack', mode, appliedAtMs: performance.now() });
+      return;
+    }
+    if (type === 'set-hold') {
+      // 解耦模式 C 键 hold 冻结（worker 侧执行，§3.4.A）：hold=null = 解除
+      //（release 非空 = 按 loadSavepoint 全量恢复该存点，双实例 + 采样器清零）。
+      const hm = msg as { hold?: HoldState | null; release?: SavePointLike };
+      if (env.onSetHold) env.onSetHold(hm.hold ?? null, hm.release);
       return;
     }
     // 工程特有消息（物理面板等）
