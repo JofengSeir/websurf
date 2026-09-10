@@ -1,11 +1,21 @@
 #!/usr/bin/env node
 /**
- * WebSurf-test — WorkerA 双模物理核心冒烟测试（node 可跑，不依赖 DOM/Worker）。
+ * WebSurf-test — 解耦模式（1ms 无限制真理源 + 64t tickPhys 速度校准）物理冒烟测试
+ * （node 可跑，不依赖 DOM/Worker）。
  *
  * 用法：node scripts/phys-smoke.mjs
  *
- * 在 node 环境模拟最新时序图核心逻辑（与 test/dual-mode-harness/src/shared-state.ts / worker-a.ts
- * / worker-b.ts 镜像）：
+ * **镜像对象已于 2026-09-11 迁移**（重要）：本脚本原本逐字镜像 `src/worker-a.ts`
+ * 的双模循环；三种计算模式（coupled/decoupled/tick）的物理计算本体此后被抽到共享层，
+ * `src/worker-a.ts` 现在是三模式**装配层**（不再含该循环本体）。故本脚本的语义镜像
+ * 对象改为：
+ *   - `src/ts-shared/decoupled/decoupled-loop.ts` —— 1ms 真理源 + 64t 校准 + 分叉锚定
+ *     （即原 `worker-a.ts:43-61`/`:177` 逻辑的抽出地；其文件头亦记载该出处）
+ *   - `test/dual-mode-harness/src/shared-state.ts` —— 渲染通道 192B 布局/协议
+ *   - `test/dual-mode-harness/src/worker-b.ts` —— 读取/重绘时序
+ * **改动同步对象随之改为上述文件；不要再按 `worker-a.ts` 同步**（它是装配层）。
+ *
+ * 在 node 环境模拟核心时序逻辑：
  * - 世界构建/落地/跳跃/respawn 基本物理断言（PhysWorld wasm）
  * - 双缓冲：writeState 写空闲槽（S[V&1^1]）→ readState 读当前槽 S[V&1]（交替正确）
  * - writeStateRaw 零分配直写（wasm API 能力验证；worker-a 实际子步热路径为
@@ -48,7 +58,7 @@
  *   直连；V 版本/仅状态更新重绘/限幅/松手清零语义与 SAB 模式一致；wait 立即超时返回
  *
  * 注：node 无 TS 加载器，TestShared 与 brush JSON 在此复制镜像（与 shared-state.ts
- * / worker-a.ts 逐字一致；改动须同步）。
+ * / `src/ts-shared/decoupled/decoupled-loop.ts` 一致；改动须同步——**不是** worker-a.ts）。
  */
 
 import { readFileSync } from 'node:fs';
@@ -335,7 +345,8 @@ class TestShared {
   }
 }
 
-// ── WorkerA 写路径镜像（worker-a.ts writeStateFromPhys）──────────
+// ── 解耦线发布路径镜像（现址：src/ts-shared/decoupled/decoupled-loop.ts 的发布段；
+//    原为 worker-a.ts writeStateFromPhys——该函数已随迁移移出 worker-a）──────────
 function writeStateFromPhys(shared, phys) {
   const s = phys.state();
   return shared.writeState(
@@ -346,9 +357,9 @@ function writeStateFromPhys(shared, phys) {
   );
 }
 
-// ── WorkerA 单模循环核心镜像（worker-a.ts loop：delta clamp + 累加器 + 8 次上限；
+// ── 解耦线单轮循环核心镜像（decoupled-loop.ts：delta clamp + 累加器 + 8 次上限；
 //    上限耗尽**保留剩余累加**（下轮补跑），仅封顶 MAX_ACC 防无限追赶；
-//    **MAX_ACC=0.02 与 worker-a.ts 同步**（2026-08-11 对齐，曾漂移为 0.05））──
+//    **MAX_ACC=0.02 与 decoupled-loop.ts 同步**（2026-08-11 对齐，曾漂移为 0.05））──
 // 返回 { ticks: 本轮执行的子步数, acc: 残留累加器（秒） }
 const RENDER_DT = 0.001;
 const MAX_DELTA = 0.05;
@@ -402,7 +413,8 @@ class FakeWorkerB {
   }
 }
 
-// ── 模式A+B 双模驱动器（worker-a.ts loop 逐字镜像，2026-08-11 重构）────────────
+// ── 模式A+B 双模驱动器（现址：src/ts-shared/decoupled/decoupled-loop.ts 逐字镜像，
+//    2026-08-11 重构；原记于 worker-a.ts——该循环已随迁移移出）────────────
 // 输入通道：input(keys, dx, dy) 注入真实输入（可选走 TestShared 通道）；
 // tick(p) 执行一个 1ms 轮次，**先 tick 计算、后无限制计算**：
 // - 第一步 tick：tick 节点（loAcc ≥ tickDt）到达才执行，未到达跳过直达无限制——
@@ -3002,7 +3014,7 @@ if (phys && physMemory) {
       close(view[7], stAfter.pitch),
     `view=(${view[0].toFixed(2)},${view[1].toFixed(2)},${view[2].toFixed(2)}) st=(${stAfter.posX.toFixed(2)},${stAfter.posY.toFixed(2)},${stAfter.posZ.toFixed(2)})`,
   );
-  // tick_into → writeStateRaw 全链路（worker-a 子步热路径逐字镜像）
+  // tick_into → writeStateRaw 全链路（decoupled-loop.ts 子步热路径逐字镜像）
   phys.tick_into(0.001, 0, 0, 0);
   const v2 = new Float64Array(physMemory.buffer, phys.state_out_ptr(), 8);
   const vHot2 = shared.writeStateRaw(v2[0], v2[1], v2[2], v2[3], v2[4], v2[5], v2[6], v2[7]);
@@ -3519,7 +3531,8 @@ try {
     sp.origin[2],
     bspYawToCsYaw(sp.angles[1]),
   );
-  // 死亡阈值：brushJson 遍历取最小 min[1] - 100（与 worker-a.ts applyWorld 一致）
+  // 死亡阈值：brushJson 遍历取最小 min[1] - 100（现由 worker-a.ts onWorldBuilt 施加，
+// 语义与原 applyWorld 一致）
   let minY = Infinity;
   for (const b of bspBrushes) {
     if (b.min[1] < minY) minY = b.min[1];

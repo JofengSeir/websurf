@@ -252,7 +252,7 @@ console.log('\n── B. 真实时序 10s 模拟（模式A 1ms + 模式B 64tick 
       if (acc >= RENDER_DT) acc = 0;
     }
 
-    // 模式B（镜像 worker-a：粗糙 tick 只改速度，位置/角度恢复快照）
+    // 模式B（镜像 decoupled-loop.ts：粗糙 tick 只改速度，位置/角度恢复快照）
     const tickRate = shared.readTickRate();
     if (tickRate > 0) {
       const tickDt = 1 / tickRate;
@@ -581,7 +581,7 @@ console.log('\n── E. 模式B 残留（纯 A vs A+B 轨迹对比，同步输�
       const ev = physA.take_event();
       if (ev && ev.kind === 'teleport') tpA.push(ev);
     }
-    // A + B（同一 physB 实例：A 子步 + B 粗步，镜像 worker-a.ts 双模循环）
+    // A + B（同一 physB 实例：A 子步 + B 粗步，镜像 decoupled-loop.ts 双模循环）
   accB += delta;
   if (accB >= RENDER_DT) {
     let steps = 0;

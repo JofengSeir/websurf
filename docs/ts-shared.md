@@ -2,7 +2,10 @@
 
 > 定位：debug 与 game 两工程收敛出的**双端共享 TS 层**——跨线程输入/权威帧协议（SAB 或 postMessage）、
 > Worker 权威物理循环、主线程渲染物理线与权威校准、地图加载管线、输入折算；
-> phys-mode-port 后增加**解耦物理循环**（`decoupled/decoupled-loop.ts`，可选装配、仅 game 注入）。
+> 后续在三模式方案中演进为**三计算模式物理内核**（`coupled` / `decoupled` / `tick`：`auth/compute-mode.ts`、
+> `auth/tick-authority.ts`、`tick/ordering-gate.ts`、`tick/tick-consumer.ts`、`decoupled/decoupled-loop.ts`）——
+> **物理计算本体在本层**，三模式的**运行时装配与热切**在 `test/dual-mode-harness/`（`src/worker-a.ts` / `src/main.ts`）；
+> `game/` 已回退到 `c4824e9`（仅耦合模式，不再注入任何模式钩子），debug 亦未注入。
 > 纯 TypeScript，无框架依赖；各工程以**相对路径直接 import**（无 npm 依赖、无构建产物）。
 > 本文所有论断均标注来源（`相对路径:行号`），写作基线为当前工作区代码。
 
@@ -10,14 +13,18 @@
 
 ## 1. 整体架构
 
-### 1.1 文件地图（8 文件三域，`src/ts-shared/`，`wc -l` 实测共 2386 行）
+### 1.1 文件地图（12 源文件五域，`src/ts-shared/`，`wc -l` 实测共 4171 行；另有 4 个 `*.test.ts` 不计入）
 
 | 文件 | 域 | 职责一句话 |
 |---|---|---|
-| `auth/shared-state.ts`(529) | 通信 | 输入槽 + 权威帧双缓冲：`ShmState`（SAB 原子操作）与 `MsgState`（postMessage 回退）同接口双实现；双模式扩展解耦帧 S_D/V_D/WAKEUP 槽 |
-| `auth/auth-loop.ts`(270) | 通信 | Worker 侧权威帧计算循环：4ms 自驱 + 固定步长累积器 + 碰撞事件推导 + 模式门 |
-| `auth/worker-dispatch.ts`(348) | 通信 | Worker 消息分发（init/wasm-init/world-json/config/set-mode/set-hold/…）+ 工程特有钩子注入点 |
-| `decoupled/decoupled-loop.ts`(443) | 物理（双模式扩展，新） | 解耦物理自驱循环：1ms 无限制真理源 + 64t tickPhys 速度校准 + 分叉锚定 + 背压（harness WorkerA 编排移植） |
+| `auth/shared-state.ts`(756) | 通信 | 输入槽 + 权威帧双缓冲：`ShmState`（SAB 原子操作）与 `MsgState`（postMessage 回退）同接口双实现；双模式扩展解耦帧 S_D/V_D/WAKEUP 槽 + tick 模式元数据槽 I_A_SEG/I_A_TICK/I_A_EVT/I_A_PSEQ |
+| `auth/compute-mode.ts`(128) | 通信（三模式，新） | `ComputeMode` 三值唯一权威定义 + `isAuthLineMode`/`isDecoupledLineMode` 双线门谓词 + `resolveAuthTickRate` 步长解析 + `MODE_HANDOVER_MATRIX` 六行交接矩阵 |
+| `auth/auth-loop.ts`(396) | 通信 | Worker 侧权威帧计算循环：4ms 自驱 + 固定步长累积器 + 碰撞事件推导 + 三值模式门 + tick 模式 F4-C 支路 |
+| `auth/tick-authority.ts`(618) | 通信（tick 模式，新） | F4-C tick 权威控制器：零分配权威推进 + scratch 乐观评估 + `publishMeta` 元数据发布 + 排序门接线 |
+| `auth/worker-dispatch.ts`(406) | 通信 | Worker 消息分发（init/wasm-init/world-json/config/set-mode/set-hold/…）+ 工程特有钩子注入点 |
+| `tick/ordering-gate.ts`(173) | 通信（tick 模式，新） | 发布排序门：δ≤T−ε_max 上限 + 双档等待（setTimeout/Atomics）+ 发布门/lead-miss；被 `auth/tick-authority.ts:53` 消费 |
+| `tick/tick-consumer.ts`(454) | 通信（tick 模式，新） | 主线程 α 确定性网格弦插值消费器：六显示态 + Δ 事件驱动控制器 + 断窗八类（共享层落盘版，当前无 import 点；运行时副本为 `test/dual-mode-harness/src/renderer/tick-consumer.ts`） |
+| `decoupled/decoupled-loop.ts`(444) | 物理（双模式扩展） | 解耦物理自驱循环：1ms 无限制真理源 + 64t tickPhys 速度校准 + 分叉锚定 + 背压（harness WorkerA 编排移植） |
 | `input/input-layer.ts`(40) | 输入 | 灵敏度乘入 + Q/E 键位折算等效鼠标增量 |
 | `phys/params.ts`(64) | 物理 | 前端配置 → Rust `set_params` snake_case 全量映射 |
 | `phys/world-builder.ts`(261) | 物理 | 地图加载管线：`BspProcessor` 字节级导出 → `WorldBundle` |
@@ -27,12 +34,12 @@
 
 | 工程 | 使用面 | 证据 |
 |---|---|---|
-| debug | 7 模块（auth×3、phys×3、input×1；**不含** decoupled-loop——worker 侧未注入双模式钩子，可选缺省 = 解耦面整体不激活），相对路径 `../../src/ts-shared/...` | `debug/src/app.ts`、`debug/src/worker/main.ts`、`debug/src/renderer/renderer-main.ts` 等的 import 区 |
-| game | 8 模块全用（debug 集合 + `decoupled/decoupled-loop.ts`，worker/main.ts:36-43 import） | `game/src/config.ts:5`（buildPhysicsParams）、`game/src/worker/main.ts:33-44`、`game/src/renderer/renderer-main.ts:20-21` 等 |
-| viewer | **不 import**（无物理无双线程）；仅在本地复刻 `bspYawToCsYaw` 公式（wrap(src+180)，t2 统一口径）并注释引用 ts-shared | `viewer/src/core/pose.ts:16-25` |
-| test/dual-mode-harness | **仅复用 `KEY_MASK`**（位定义与 Rust 一致）；其 SAB 是 192B 私有协议，与本文 512B 权威帧协议**不是同一套**（但其模式A/模式B 编排即 §3.8 的移植母本） | `test/dual-mode-harness/src/shared-state.ts:51`、`:1-4` 头注 |
+| debug | 7 模块（auth×3、phys×3、input×1；**不含** compute-mode / tick-authority / decoupled-loop——worker 侧未注入任何模式钩子，缺省即纯耦合线），相对路径 `../../src/ts-shared/...` | `debug/src/app.ts:26-31`、`debug/src/worker/main.ts:27-30`、`debug/src/renderer/renderer-main.ts:18-19`、`debug/src/input/keyboard.ts:18` |
+| game | **同为 7 模块同集**（`c4824e9` 回退后不再 import `decoupled/decoupled-loop.ts`；`game/src/worker/main.ts:21-24` 仅 auth×3 + params） | `game/src/config.ts:5`（buildPhysicsParams）、`game/src/worker/main.ts:21-24`、`game/src/app.ts:20-22`、`game/src/renderer/renderer-main.ts:20-21`、`game/src/input/keyboard.ts:11` |
+| viewer | **不 import**（无物理无双线程）；仅在本地复刻 `bspYawToCsYaw` 公式（wrap(src+180)，t2 统一口径） | `viewer/src/core/pose.ts:23-25`（`grep ts-shared viewer/src` 零命中——文档口径为「同式各自维护」，非注释互引） |
+| test/dual-mode-harness | **6 模块**：auth 通道与三模式物理内核全走共享层（`shared-state`/`auth-loop`/`worker-dispatch`/`tick-authority`/`decoupled-loop`/`compute-mode`；`tick/ordering-gate.ts` 经 `auth/tick-authority.ts:53` 间接引入）；另自建 192B `TestShared` 渲染通道，与本文 512B 权威帧协议**不是同一套**（`src/shared-state.ts:2-4` 头注） | `test/dual-mode-harness/src/worker-a.ts:32-56`、`src/main.ts:17-19`、`src/shared-state.ts:51`、`src/renderer/tick-consumer.ts:46` |
 
-编译期：debug/game 的 tsconfig `include` 均含 `../src/ts-shared/**/*.ts`（`debug/tsconfig.json:26`、`game/tsconfig.json:15`）；dual-mode-harness 也包含（`test/dual-mode-harness/tsconfig.json:23`），但运行时只 import KEY_MASK 一项。
+编译期：debug/game 的 tsconfig `include` 均含 `../src/ts-shared/**/*.ts`（`debug/tsconfig.json:26`、`game/tsconfig.json:15`）；dual-mode-harness 也包含（`test/dual-mode-harness/tsconfig.json:23`），运行时 import 面见上表。
 
 ### 1.3 通信模型总览
 
@@ -46,17 +53,17 @@ rAF 渲染物理线（耦合模式）                    └ SAB 权威帧双缓
   └ calibrateVelocity / correctFromAuthority
   └ predPhys.tick（预测推进）+ 事件消费
 
-解耦模式（phys-mode-port，同 Worker 内第二自驱线，模式互斥）：
+解耦模式（同 Worker 内第二自驱线，模式互斥；当前唯一装配方为 test/dual-mode-harness WorkerA，debug/game 均未注入）：
 decoupled-loop（setTimeout 0 急轮询）          同 phys 实例 + 独立 tickPhys 实例
   └ consumeInput（CAS 不限幅）─SAB 输入槽──▶   phys.tick_into(1ms) 逐子步实时消耗
 rAF 纯消费（主线程零物理 tick）                └ tickPhys.tick(64t) → phys.set_velocity 校准
   └ readDecoupled() ◀─S_D 双缓冲（V_D release）└ 分叉锚定 TICK_ANCHOR_DIST 拉回
   └ extrapolateAuthPose 一阶外推设相机          └ 背压 waitWakeup（rAF 每帧 wake()）
 （crossOriginIsolated = false 时整链降级为 MsgState postMessage：'input' / 'phys-frame'，
- 接口同构（解耦帧同载荷双喂，MsgState.recvFrame :223-232），见 shared-state.ts:154-162 注释与 MsgState 实现）
+ 接口同构（解耦帧同载荷双喂，MsgState.recvFrame `:322-336`），见 `shared-state.ts:216-227` 头注与 MsgState 实现 `:228-407`）
 ```
 
-SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`Cross-Origin-Opener-Policy` + `Cross-Origin-Embedder-Policy: require-corp`）使 `crossOriginIsolated = true`；工厂按 `SharedArrayBuffer` 是否为 null 选择实现（`shared-state.ts:519-529` `createMainSharedState`/`createWorkerSharedState`）。
+SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`Cross-Origin-Opener-Policy` + `Cross-Origin-Embedder-Policy: require-corp`）使 `crossOriginIsolated = true`；工厂按 `SharedArrayBuffer` 是否为 null 选择实现（`shared-state.ts:746-757` `createMainSharedState`/`createWorkerSharedState`）。
 
 ---
 
@@ -64,10 +71,10 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 
 ### 2.1 权威帧双线时序（debug/game 同构，v7）
 
-1. **输入路径**：主线程 rAF 输入循环（debug `app.ts:1710` `startInputLoop` / game `app.ts:370` 同名函数）→ `keysToMask` + wheelJump + Q/E 等效像素（`qeEquivalentDx`）→ `rendererMain.feedInput`。未锁定指针时 mask 强制 0（防 ESC 残留）。
-2. **渲染物理线（主线程 rAF 六步，耦合模式）**：debug `renderer-main.ts:441-453`（tick 入口 `:430`）/ game `:947-978`（校准 wrapper `:838-843`）——① `shared.addInput` 写输入槽 → ② `correctFromAuthority()`（权威帧到达处理 + 大偏差兜底）→ ③ `calibrateVelocity(now)`（速度外推，不覆盖位置）→ ④ `predPhys.tick(dt, keys, dx, dy)`（完整物理推进）→ ⑤ 消费 phys-event → ⑥ 按 `predPhys.state()` 设相机（度→弧度）。解耦模式整体停跑该六步，改走 T7' 消费（§3.7 末、§3.8）。
-3. **权威线（Worker）**：`auth-loop.ts` `setTimeout(loop, 4)` 自驱（`:203`）+ 累积器（`acc >= fixedDt && guard < 64`，`:217-225`）；每步 `stepPhysics`（`:123`）：`takeInput(maxStep)` → `phys.tick(dt, mask, dx, dy)` → `writeAuthoritative`（`:156`）→ land/blocked 事件 postMessage（`:171-200`）。模式门 `modeGate`（`:78,206-210`）：解耦期间关断墙钟早退，复入不补跑。
-4. **tick rate**：`fixedDt` 默认 1/64（`:98`），`setFixedDt(1/max(rate,1))` 动态覆盖（`:229`）——`config.physics.tickRate` 经 config 消息下发（game 耦合语义 = raw+3，`game/src/worker/main.ts:49-53,222`）。
+1. **输入路径**：主线程 rAF 输入循环（debug `app.ts:1710` `startInputLoop` / game `app.ts:326` 同名函数）→ `keysToMask` + wheelJump + Q/E 等效像素（`qeEquivalentDx`）→ `rendererMain.feedInput`。未锁定指针时 mask 强制 0（防 ESC 残留）。
+2. **渲染物理线（主线程 rAF 六步，耦合模式）**：debug `renderer-main.ts:441-453`（tick 入口 `:430`）/ game `renderer-main.ts:700-734`（六步 `:704-710`，校准 wrapper `:626-645`）——① `shared.addInput` 写输入槽 → ② `correctFromAuthority()`（权威帧到达处理 + 大偏差兜底）→ ③ `calibrateVelocity(now)`（速度外推，不覆盖位置）→ ④ `predPhys.tick(dt, keys, dx, dy)`（完整物理推进）→ ⑤ 消费 phys-event → ⑥ 按 `predPhys.state()` 设相机（度→弧度）。解耦/tick 模式整体停跑该六步（该分支当前只在 harness 装配），改走 T7' 消费（§3.7 末、§3.8）。
+3. **权威线（Worker）**：`auth-loop.ts` `setTimeout(loop, 4)` 自驱（`:319`）+ 累积器（`acc >= fixedDt && guard < 64`，`:345-350`）；每步 `stepPhysics`（`:199`）：`takeInput(maxStep)`（`:216`/`:239`）→ `phys.tick(dt, mask, dx, dy)` → `writeAuthoritative`（`:221`/`:271`）→ land/blocked 事件 postMessage（`emitCollision :164`，判据 `:288-314`）。模式门 `resolveAuthGateOpen`（`:135-140`；loop 内早退 `:323-327`）：解耦期间关断墙钟早退，复入不补跑。
+4. **tick rate**：`fixedDt` 默认 1/64（`:145`），`setFixedDt(1/max(rate,1))` 动态覆盖（`:354-356`）——`config.physics.tickRate` 经 config 消息下发（game 耦合语义 = raw+3，`game/src/worker/main.ts:29-32,86`；三模式步长解析单点在 `auth/compute-mode.ts:51-57` `resolveAuthTickRate`：tick=raw、coupled=+偏移）。
 
 ### 2.2 地图加载管线：`buildWorldBundle`（`phys/world-builder.ts:103` 起）
 
@@ -85,20 +92,21 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 
 ### 2.3 Worker 生命周期（`auth/worker-dispatch.ts`）
 
-`createWorkerDispatch(env)` 按消息类型分发（`:97-128` 装配，onmessage 主分支 `:128` 起 if/else 链）：
+`createWorkerDispatch(env)` 按消息类型分发（`WorkerDispatchEnv` 声明 `:72-126`；onmessage 主分支 `:159` 起 if/else 链至 `:404`）：
 
 | 消息 | 行为 |
 |---|---|
-| `init` | 存 shared 状态通道 + `env.onInit` 钩子（`:132-138`） |
-| `wasm-init` | `wasmB64`（atob→Uint8Array）或 `wasmUrl`（fetch）→ **必须 `initSync({module})`**（async init 会解构出 undefined 走错误路径，`:105-107` 注释）→ `env.onWasmInit`（debug 借此挂 mtz 内嵌）→ `authLoop.start()`（`:147-153`） |
-| `world-json` | **双实例 build_world**（phys + 可选 tickPhys 同建同参，重建前 `free?()` 释放旧实例）→ `syncParamsToWasm` → `authLoop.setFixedDt/getConfigTickRate` + `reset` + `decoupledLoop.publishCurrentState` 首帧 → `env.onWorldBuilt(phys)`（`:154-182`） |
-| `config` | W-GAP-1（**B2**）`normalizeConfigPatchKeys` snake→camel 键归一（`:186-196`，单点修——终审①+⑤，11 参数权威侧首次生效）→ `applyConfigPatch` → tickRate 模式感知（耦合 `setFixedDt(+3)/reset` / 解耦 `onTickRateChanged`，`:197-207`）→ `set_hull`（**双实例同参**，player fast-path 在位 + t14/r1b-G1 additive 补行，`:208-226`）/ noclip → `env.onConfigApplied`（`:183-235`） |
-| `respawn` / `teleport` / `teleport-to-pos` / `set-spawn-points` / `set-death-threshold` | 直呼对应 PhysWorld 方法，**双实例同调**（phys + tickPhys，`:236-250,287-323`） |
-| `sync-render-state` | 渲染主线反向同步权威：`set_state` + `resetInput`（丢弃同步前残留增量、保留按住键位，`shared-state.ts:377-381` `resetInput` 注释）；解耦模式 tickPhys 同注入防锚定拉走（`:251-286`） |
-| `set-mode` | 热切握手入口：同 mode 幂等回 ack / 异 mode → `env.onSetMode(mode, state?)` → `mode-ack{mode, appliedAtMs}`（`:325-337`） |
-| `set-hold` | 解耦模式 C 键冻结注入/解除（release 存点全量恢复语义），`:338-344` |
+| `init` | 存 shared 状态通道 + `env.onInit` 钩子（`:163-169`） |
+| `input` | MsgState 回退路径的增量/键位注入（`:170-177`；SAB 模式无此消息） |
+| `wasm-init` | `wasmB64`（atob→Uint8Array）或 `wasmUrl`（fetch）→ **必须 `initSync({module})`**（async init 会解构出 undefined 走错误路径，`:136-138` 注释）→ `env.onWasmInit`（debug 借此挂 mtz 内嵌）→ `authLoop.start()`（`initWasm :134-157`，分支 `:178-184`） |
+| `world-json` | **三实例 build_world**（phys + 可选 tickPhys + 可选 scratch 同建同参 G3，重建前 `free?()` 释放旧实例）→ `syncParamsToWasm` → `authLoop.setFixedDt(getConfigTickRate)` + `reset` + `decoupledLoop.publishCurrentState` 首帧 + `onWorldRebuilt`（tick 标号归零）→ `env.onWorldBuilt(phys)`（`:185-221`） |
+| `config` | W-GAP-1（**B2**）`normalizeConfigPatchKeys` snake→camel 键归一（定义 `:51-70`，调用 `:229-232`）→ `applyConfigPatch` → tickRate 模式感知（解耦 `onTickRateChanged` / 其余 `setFixedDt+reset`，`:239-246`）→ `set_hull`（**三实例同参**，player 归一 + t14/r1b-G1 additive 补行，`:247-265`）/ noclip（`:271-274`）→ `env.onConfigApplied`（`:222-277`） |
+| `respawn` / `teleport` / `teleport-to-pos` / `set-spawn-points` / `set-death-threshold` | 直呼对应 PhysWorld 方法，**三实例同调**（phys + tickPhys + scratch，`:278-293,334-376`），并置 tick 模式外部断点（`env.tickExternalBreak`） |
+| `sync-render-state` | 渲染主线反向同步权威：`set_state` + `resetInput`（丢弃同步前残留增量、保留按住键位，`shared-state.ts:368-374` `resetInput` 注释）；解耦模式 tickPhys 同注入防锚定拉走（`:295-333`） |
+| `set-mode` | 三值热切握手入口：同 mode 幂等回 ack / 异 mode → `env.onSetMode(mode, state?)` → `mode-ack{mode, appliedAtMs}`（`:378-395`；非法 mode 直接忽略） |
+| `set-hold` | 解耦模式 C 键冻结注入/解除（release 存点全量恢复语义），`:396-402` |
 
-工程特有副作用全部经钩子注入（`WorkerDispatchEnv :55-95`）：工程通用 `onInit?/onWasmInit?/onWorldBuilt?/onConfigApplied?/onExtraMessage?`——共享层零工程分支（`:7-8` 头注）；**双模式扩展可选钩子**（`:73-84`）：`tickPhys?/decoupledLoop?/getComputeMode?/onSetMode?/onSetHold?/getConfigTickRate?`——未注入时解耦面整体不激活（debug 现状），注入即双线共存（game 现状，见 §4.1）。
+工程特有副作用全部经钩子注入（`WorkerDispatchEnv :72-126`）：工程通用 `onInit?/onWasmInit?/onWorldBuilt?/onConfigApplied?/onExtraMessage?`——共享层零工程分支（`:7-10` 头注）；**三模式扩展可选钩子**（`:90-115`）：`tickPhys?/scratch?/decoupledLoop?/getComputeMode?/onSetMode?/onSetHold?/tickExternalBreak?/onWorldRebuilt?` + 必填 `getConfigTickRate`——未注入时解耦/tick 面整体不激活（**debug 与 game 现状**，两者 Worker 只传通用钩子），全注入即三模式共存（**test/dual-mode-harness 现状**：`src/worker-a.ts:331-340`，见 §4.1）。
 
 ---
 
@@ -106,48 +114,53 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 
 ### 3.1 `auth/shared-state.ts` —— 512B SAB 协议
 
-**布局常量**（`:109-130`）：`SHARED_BUFFER_SIZE = 512`——逐槽实测：耦合槽区用至 **288B**（B_A1=26 + 10 值 stride，止于字节 287）；S_D 扩展占用 **288-447**（160B 双缓冲）后实际用至 **448B**、余量 64B。源码头注 `:128`「实际使用至 416B」为 t9 前旧口径，与逐槽计算不符（t2/t3 勘误、t7 顺带校正）——已记入 [differences §6 残留表](../game/docs/differences.md)。
+**布局常量**（`:114-195`）：`SHARED_BUFFER_SIZE = 512`——逐槽实测：耦合槽区用至 **288B**（B_A1=26 + 10 值 stride，止于字节 287）；S_D 扩展占用 **288-447**（160B 双缓冲）后实际用至 **448B**、余量 64B。源码头注 `:194`「实际使用至 416B」为 t9 前旧口径，与逐槽计算不符（t2/t3 勘误、t7 顺带校正）——已记入 [differences §6 残留表](../game/docs/differences.md)。
 
 | 区 | 偏移 | 类型 | 语义 |
 |---|---|---|---|
 | `I_V_A` | i32[0] | Int32 | 权威帧版本号（release 递增；0 = 未开始） |
-| `I_KEYS` | i32[1] | Int32 | 当前键位掩码（无条件覆盖写，松手即清零，`:311-317`） |
+| `I_KEYS` | i32[1] | Int32 | 当前键位掩码（无条件覆盖写，松手即清零，`:424-431`） |
 | `I_A_GROUND` | i32[2] | Int32 | 着地标志（先于版本号可见；双模式互斥复用——耦合写权威帧/解耦写解耦帧） |
-| `I_V_D` | i32[3] | Int32 | **解耦帧版本号**（双模式扩展 `:114`；协议同 V_A；0 = 未开始） |
-| `I_WAKEUP` | i32[4] | Int32 | **背压唤醒电平**（`:115`；主线程 rAF `wake()` store(1)+notify / 解耦线 `waitWakeup` wait+CAS 复位） |
-| `B_DX_ACC` / `B_DY_ACC` | i64[8] / [9] | BigInt64 | 鼠标增量累加槽（**×1000 定点**，`Atomics.add`，`:311-317`） |
-| `B_A0` / `B_A1` | i64[16..25] / [26..35] | BigInt64 | 权威帧双缓冲，每帧 10 值：pos×3（×100）、yaw/pitch（×1000）、vel×3（×100）、eyeHeight（×100）、timeMs（×1）（`:492-511`） |
-| `B_D0` / `B_D1` | i64[36..45] / [46..55] | BigInt64 | **解耦帧双缓冲**（双模式扩展 `:126-127`；同款 10 值定点编码；V_D 协议同 V_A） |
+| `I_V_D` | i32[3] | Int32 | **解耦帧版本号**（双模式扩展 `:118-120`；协议同 V_A；0 = 未开始） |
+| `I_WAKEUP` | i32[4] | Int32 | **背压唤醒电平**（`:120`；主线程 rAF `wake()` store(1)+notify / 解耦线 `waitWakeup` wait+CAS 复位） |
+| `I_A_SEG` | i32[5] | Int32 | **段序号**（tick 模式扩展 `:128-131`；断窗帧 +1，消费端「seg 变化」即断窗判据） |
+| `I_A_TICK` | i32[6] | Int32 | **tickIndex**（`:132-135`；仅真实 tick 递增，`publishCurrentState` 等非 tick 发布沿用；α 确定性网格时间基准） |
+| `I_A_EVT` | i32[7] | Int32 | **事件位掩码**（`:136-140`；bit0-7 = 八类事件 `AUTH_EVT :153-162`，bit8 = OPT `AUTH_EVT_OPT :164-167`；逐帧量非粘滞量） |
+| `I_A_PSEQ` | i32[8] | Int32 | **发布序守卫**（`:141-148`；seqlock：写者置奇→写 onGround+三元组→置偶，读者偶值快照 + 复检；占 i64[4] 视图前 4 字节——`i64[4..7]` 永久禁用作数据槽） |
+| `B_DX_ACC` / `B_DY_ACC` | i64[8] / [9] | BigInt64 | 鼠标增量累加槽（**×1000 定点**，`Atomics.add`，`:424-431`） |
+| `B_A0` / `B_A1` | i64[16..25] / [26..35] | BigInt64 | 权威帧双缓冲，每帧 10 值：pos×3（×100）、yaw/pitch（×1000）、vel×3（×100）、eyeHeight（×100）、timeMs（×1）（`:633-665`） |
+| `B_D0` / `B_D1` | i64[36..45] / [46..55] | BigInt64 | **解耦帧双缓冲**（双模式扩展 `:190-192`；同款 10 值定点编码；V_D 协议同 V_A） |
 
 **协议要点**：
 
-- 写者（Worker）`writeAuthoritative`：写**空闲槽** `S_A[V_A&1]` → 置 A_GROUND → `store` 递增 V_A（release 语义，注释「状态先于版本号可见」，`:492-511`）；
-- 读者（主线程）`readAuthoritative`：`va = load(V_A)`，读**写者已离开的槽** `(va-1)&1`——无撕裂；`va===0` 返回 null（`:324-357`）；
-- 消费者（耦合权威线）`takeInput(maxStep)`：`Atomics.exchange` 清空增量 + **maxStep 饱和截断**（防穿墙，`:358-369`）；
-- 消费者（解耦线）`consumeInput`：**CAS 清零不限幅**（`exchangeZero` `:403-410`——1ms 真理源必须消费完整帧增量，两消费者并存各归各线，`:392-401`）；
-- `peekKeys`：非消耗读键位掩码（解耦 tickPhys 边界快照——64t 网格"当前状态"覆盖写语义，`:386-388`）；
-- 解耦帧同构面：`writeDecoupled`（写空闲槽 → release V_D，onGround 复用 i32[2]，`:417-440`）/ `readDecoupled`（`(V_D-1)&1` 槽，V_D=0 返回 null，`:441-464`）；
-- 背压：主线程 `wake()`（store(1)+notify，`:470-474`）/ 解耦线 `waitWakeup(timeoutMs)`（wait + CAS(1→0) 复位，超时不清电平防唤醒丢失，`:479-486`）；
-- `resetInput`：只清增量不清键位（同步瞬间防旧输入注入；按住状态是实时的，`:377-381` 注释，实现 `:377-381`）。
+- 写者（Worker）`writeAuthoritative`：写**空闲槽** `S_A[V_A&1]` → 置 A_GROUND → `store` 递增 V_A（release 语义，注释「状态先于版本号可见」，`:633-665`）；带 `meta` 时改走 seqlock 发布序（置奇 `:656-657` → 写 seg/tick/evt/ground `:658-661` → release V_A → 置偶 `:663`）；
+- 读者（主线程）`readAuthoritative`：`va = load(V_A)`，读**写者已离开的槽** `(va-1)&1`——无撕裂；`va===0` 返回 null（ShmState `:437-463`、MsgState `:278-287`）；tick 消费器走零分配 `readAuthoritativeInto`（ShmState `:690-722`：PSEQ 偶值快照 + 复检 + V_A 代际复检；`0`=通道未开始、`−1`=读写冲突）；
+- 消费者（耦合/tick 权威线）`takeInput(maxStep)`：`Atomics.exchange` 清空增量 + **maxStep 饱和截断**（防穿墙，`:471-483`）；
+- 消费者（解耦线）`consumeInput`：**CAS 清零不限幅**（`exchangeZero :536-543`——1ms 真理源必须消费完整帧增量，两消费者并存各归各线，`:525-533`）；另有非消耗投影读 `peekInput(maxStep)`（tick 模式 scratch 用，`:508-521`）；
+- `peekKeys`：非消耗读键位掩码（解耦 tickPhys 边界快照——64t 网格"当前状态"覆盖写语义，`:499-501`）；
+- 解耦帧同构面：`writeDecoupled`（写空闲槽 → release V_D，onGround 复用 i32[2]，`:550-568`）/ `readDecoupled`（`(V_D-1)&1` 槽，V_D=0 返回 null，`:574-600`）；
+- 背压：主线程 `wake()`（store(1)+notify，`:603-606`）/ 解耦线 `waitWakeup(timeoutMs)`（wait + CAS(1→0) 复位，超时不清电平防唤醒丢失，`:615-620`）；
+- `resetInput`：只清增量不清键位（同步瞬间防旧输入注入；按住状态是实时的，`:490-493`，MsgState 等价实现 `:368-374`）。
 
-**KEY_MASK 11 位**（`:62-74`，与 Rust `apply_input` 逐位一致）：forward 1 / backward 2 / left 4 / right 8 / jump 16 / duck 32 / sprint 64 / reset 128 / wheelJump 256 / yawLeft 512 / yawRight 1024。`keysToMask`/`maskToKeys`（`:76-108`）。注意 `sprint`（Shift）在 physics 模式映射 Rust `input.walk`（`KeyState.sprint` 字段注释，`:49-50`；Rust 0x40 = walk，`phys/mod.rs:553`）。
+**KEY_MASK 11 位**（`:67-79`，与 Rust `apply_input` 逐位一致）：forward 1 / backward 2 / left 4 / right 8 / jump 16 / duck 32 / sprint 64 / reset 128 / wheelJump 256 / yawLeft 512 / yawRight 1024。`keysToMask`/`maskToKeys`（`:81-112`）。注意 `sprint`（Shift）在 physics 模式映射 Rust `input.walk`（`KeyState.sprint` 字段注释，`:49-50`；Rust 0x40 = walk，`phys/mod.rs:553`）。
 
-**MsgState 回退**（`:154-296`）：同 API 双实现——主线程 `addInput` → postMessage `'input'`（增量+键位，有序不丢）；Worker 每 tick → postMessage `'phys-frame'`（权威帧+va，节流 `publishFloorMs = 4`，`:168,282-284`）；主线程缓存最新帧供 `readAuthoritative` 返回。双模式扩展：`recvFrame` 同载荷双喂 latest/latestDecoupled（mode 内互斥运行，`:223-232`）；`readDecoupled`/`writeDecoupled`/`peekKeys`/`consumeInput` 消息态等价实现（`:213-216,250-257,282-289`）；`wake` no-op / `waitWakeup` 保持挂起语义（`:218-219,291`）。
+**MsgState 回退**（`:228-407`）：同 API 双实现——主线程 `addInput` → postMessage `'input'`（增量+键位，有序不丢，`:273-277`）；Worker 每 tick → postMessage `'phys-frame'`（权威帧+va，节流 `publishFloorMs = 4`，`:233`、`:375-394`）；主线程缓存最新帧供 `readAuthoritative` 返回。三模式扩展：`recvFrame` 同载荷双喂 latest/latestDecoupled（mode 内互斥运行，`:322-336`）；`readDecoupled`/`writeDecoupled`/`peekKeys`/`consumeInput` 消息态等价实现（`:311-315`、`:395-403`、`:354-358`、`:359-367`）；`wake` no-op（`:316-321`）/ `waitWakeup` 保持挂起语义（`:404-406`）。
 
 ### 3.2 `auth/auth-loop.ts` —— 权威循环
 
-- `PhysWorldLike` 接口（`:19-53`）：`state/tick/build_world/set_params/set_hull/set_noclip/set_state/respawn/teleport_to_spawn/teleport_to/set_spawn_points/set_death_y` + `free?()`（双实例重建前置释放，P5）——Rust `PhysWorld` 21 个导出方法的 camelCase 子集，结构化满足（见 [phys.md](./phys.md) §4.2）。
-- `AuthLoopEnv.modeGate?`（`:76-78`）：双线互斥门——缺省恒真；game 传 `() => computeMode === 'coupled'`，解耦期间冻结墙钟早退（复入不补跑该窗口时间），`loop` 内 `:206-210`。
-- 输入上限 `MAX_INPUT_PER_STEP_BASE = 1200`（`:94`）：`maxStep = 1200·dt·64`（`:127`）——单步最多消费的鼠标像素，配合 `takeInput` 饱和截断防大甩穿墙。
-- 碰撞事件推导（`:171-200`，postMessage `{type:'phys-event'}`）：
+- `PhysWorldLike` 接口（`:32-66`）：`state/tick/build_world/set_params/set_hull/set_noclip/set_state/respawn/teleport_to_spawn/teleport_to/set_spawn_points/set_death_y` + `free?()`（多实例重建前置释放，P5）——Rust `PhysWorld` 21 个导出方法的 camelCase 子集，结构化满足（见 [phys.md](./phys.md) §4.2）。
+- 模式门（`AuthLoopEnv :81-109`）：`resolveAuthGateOpen`（`:135-141`）三值化——显式 `modeGate?`（`:93`）优先，否则 `getComputeMode?`（`:98`）→ `isAuthLineMode`（coupled/tick 推进、decoupled 早退）；缺省恒真（v7 单线零变化）。门关时冻结墙钟早退（复入不补跑该窗口时间），`loop` 内 `:323-327`。
+- 另两个可选钩子：`holdState?`（`:99-103`，tick 模式 C 键冻结快照）与 `tickF4?`（`:104-108`，F4-C 乐观窗；提供时 `stepPhysics` 走 tick 模式零分配支路 `:211-238`）；缺省 = 引擎本体逐行不动（耦合/解耦零回归）。
+- 输入上限 `MAX_INPUT_PER_STEP_BASE = 1200`（`:126`）：`maxStep = 1200·dt·64`（`:210`）——单步最多消费的鼠标像素，配合 `takeInput` 饱和截断防大甩穿墙。
+- 碰撞事件推导（`emitCollision :164-167`，postMessage `{type:'phys-event'}`；判据 `:288-314`）：
   - **land**：`onGround` 上升沿（权威真实落地点；渲染侧相位差可能差几 units）——主线程 `applyCollisionCorrection` 用全状态吸附；
-  - **blocked**：撞墙/被阻——当前速度 >80 且 `prevSpeed − curSpeed > 250` 且实际位移 < 速度对应位移 ×0.3（`:161-164` 注释 + `:186-200` 实现）。
-- 循环保守性：单轮最多补 64 步（`guard < 64`，`:221`），防标签页挂起后追帧风暴。
-- 公共 API（`:228-268`）：`setFixedDt`（`:229`）/`reset`（`:232`）/`start`（`:236`，幂等）/`publishCurrentState`（`:241-268`）——即时写权威帧不推进物理，供热切复入首帧（§2.1 注 3、`game/src/worker/main.ts:172-177`）。
+  - **blocked**：撞墙/被阻——当前速度 >80 且 `prevSpeed − curSpeed > 250` 且实际位移 < 速度对应位移 ×0.3（`:299-314` 实现）。
+- 循环保守性：单轮最多补 64 步（`guard < 64`，`:345-350`），防标签页挂起后追帧风暴。
+- 公共 API（`:353-395`）：`setFixedDt`（`:354-356`）/`reset`（`:357-360`）/`start`（`:361-365`，幂等）/`publishCurrentState`（`:366-394`）——即时写权威帧不推进物理，供热切复入首帧（§2.1 注 3；三模式调用方为 harness，`test/dual-mode-harness/src/worker-a.ts:245,286,294`）。
 
 ### 3.3 `auth/worker-dispatch.ts` —— 分发与钩子
 
-见 §2.3 表格。补充：wasm 初始化失败路径给出可读错误（initSync 的 undefined 解构问题，`:105-107`）；`onExtraMessage` 返回 true 表示消息已消费，供 debug 物理面板等扩展（`:93-94`）。各钩子的两端实际注入清单属 debug/game 工程篇范围（`debug/src/worker/main.ts`、`game/src/worker/main.ts:210-232`，另篇；双模式装配差异见 §4.1）。
+见 §2.3 表格。补充：wasm 初始化失败路径给出可读错误（initSync 的 undefined 解构问题，`:136-138`）；`onExtraMessage` 返回 true 表示消息已消费，供 debug 物理面板等扩展（`:124-125`）。各钩子的实际注入清单：debug `debug/src/worker/main.ts:94-120`（通用钩子 + `getConfigTickRate`，**无模式钩子**）、game `game/src/worker/main.ts:80-93`（通用钩子 + `getConfigTickRate`，**无模式钩子**）、harness `test/dual-mode-harness/src/worker-a.ts:331-340`（三模式全注入）；三模式装配差异见 §4.1。
 
 ### 3.4 `input/input-layer.ts` —— 输入折算
 
@@ -171,7 +184,7 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 
 ### 3.7 `phys/authority-calibrator.ts` —— 校准四件套 + 解耦外推
 
-**原则**（`:1-17` 模块头注）：校准器**只读权威，绝不反写权威的物理演化**；常规兜底方向 = 「以渲染主线为准，反向同步权威」（发 `sync-render-state` 消息，Worker 侧 `set_state + resetInput`，`worker-dispatch.ts:251-286`）；唯一例外是「撤回兜底」——同步在途仍大幅分叉时改以权威为准回滚渲染（见下）。
+**原则**（`:1-17` 模块头注）：校准器**只读权威，绝不反写权威的物理演化**；常规兜底方向 = 「以渲染主线为准，反向同步权威」（发 `sync-render-state` 消息，Worker 侧 `set_state + resetInput`，`worker-dispatch.ts:295-333`）；唯一例外是「撤回兜底」——同步在途仍大幅分叉时改以权威为准回滚渲染（见下）。
 
 | 成员 | 语义 | 证据 |
 |---|---|---|
@@ -185,22 +198,22 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 
 ### 3.8 `decoupled/decoupled-loop.ts` —— 解耦物理自驱循环（双模式扩展）
 
-`createDecoupledLoop(env)`（`:144`）返回第二自驱循环；env：`shared/getPhys/getTickPhys/getTickPhysRate/isDecoupled/getWasmMemory/getHold`（`:83-99`）。**可选装配**——仅 game worker 注入（`game/src/worker/main.ts:127-140`），debug 未注入即解耦面整体休眠。
+`createDecoupledLoop(env)`（`:145`）返回第二自驱循环；env：`shared/getPhys/getTickPhys/getTickPhysRate/isDecoupled/getWasmMemory/getHold`（`:84-101`）。**可选装配**——当前唯一注入方为 test/dual-mode-harness WorkerA（`test/dual-mode-harness/src/worker-a.ts:199-211,333`），**debug 与 game 均未注入**（解耦面整体休眠；game 侧注入随 `c4824e9` 回退移除）。
 
 | 要素 | 语义 | 证据 |
 |---|---|---|
-| 调度 | `setTimeout(loop, active ? 0 : 4)`：解耦激活 0ms 急轮询；门关/未就绪 4ms 与 auth-loop 同节奏空转 | `:301-305` |
-| 常量 | `RENDER_DT=0.001 / MAX_DELTA=0.05 / MAX_STEPS_PER_ROUND=8 / MAX_ACC=0.02 / MAX_INPUT_DELTA=1000 / WAIT_THRESHOLD_MS=1 / MAX_WAIT_MS=4 / TICK_ANCHOR_DIST=64 / SLOW_FIELD_REFRESH_MS=16` | `:116-137` |
-| tickPhys 步长 | `config.physics.tickRate` **raw 原值**（无 +3 偏移——偏移仅耦合权威线语义）；`tickInputMax = 1000×(tickDt/0.001)` 窗口限幅 | `:139-142`；game `worker/main.ts:133-134` |
-| 激活边沿 | `modeBActive = tickRate>0 && 1/rate>1ms`；停用→激活清采样器 + `alignTickPhys`，激活→停用仅清采样 | `:328-343` |
-| 单轮全序 | delta clamp（`:313-317`）→ hold 冻结轮（`:320-325`）→ tick 窗口（`peekKeys :354` + `tickDx/Dy clampAbs :356-359` → 分叉锚定 `tickDiverged :363-365` → `tickPhys.tick :368` → `phys.set_velocity :372`）→ 无限制步（`consumeInput :388` 不限幅 → `phys.tick_into(1ms) :395` → S_D 零分配发布 `:396-399` → acc 封顶 `:402`）→ 背压 `waitWakeup(min(idle,4ms)) :405-410` | `loop :297-411` |
-| 分叉锚定 | 位置偏差 > `TICK_ANCHOR_DIST=64` → `alignTickPhys()` 全量拉回（正常演化不干预，先检查后推进） | `:190-200,363-365` |
-| 零分配热路径（A5） | wasm 内存注入 → `phys.tick_into` + `state_out_ptr` Float64Array 直读（pos/vel/yaw/pitch 8 值）→ 定点写 S_D；内存增长后按 `memory.buffer` 重建视图缓存 | `:215-238`（`:221-225` 视图重建）；退化路径 `publishFromState :241-269`（node 测试） |
-| 慢字段 | 眼高/着地不在 8 值内 → 16ms 低频 `phys.state()` 缓存刷新 + 发布帧即时刷新 | `:19-22,137,203-213` |
-| hold 冻结 | `runHeldRound`：逐轮 `set_state(held, vel=0)` + 时间/输入丢弃 + tickPhys 同步冻结；松开 release = 双实例 set_state 全量恢复（worker 侧执行见 `game/src/worker/main.ts:187-208`） | `:273-294` |
-| 对齐/复位 API | `alignTickPhys`（tickPhys←phys 全量 set_state，`:171-187`）/ `resetSamplers(align?)`（acc/loAcc/tickDx/tickDy 清零 + lastNow 刷新，`:420-428`）/ `onTickRateChanged`（清采样器+对齐，速率值变化不重置主累积器，`:414-419`）/ `publishCurrentState`（`:429-432`）/ `start`（`:433-438`，幂等） | `:413-440` |
+| 调度 | `setTimeout(loop, active ? 0 : 4)`：解耦激活 0ms 急轮询；门关/未就绪 4ms 与 auth-loop 同节奏空转 | `:302-306` |
+| 常量 | `RENDER_DT=0.001 / MAX_DELTA=0.05 / MAX_STEPS_PER_ROUND=8 / MAX_ACC=0.02 / MAX_INPUT_DELTA=1000 / WAIT_THRESHOLD_MS=1 / MAX_WAIT_MS=4 / TICK_ANCHOR_DIST=64 / SLOW_FIELD_REFRESH_MS=16` | `:117-139` |
+| tickPhys 步长 | `config.physics.tickRate` **raw 原值**（无 +3 偏移——偏移仅耦合权威线语义）；`tickInputMax = 1000×(tickDt/0.001)` 窗口限幅 | `:141-143`；harness `worker-a.ts:205`（`getTickPhysRate = panelTickRate()`） |
+| 激活边沿 | `modeBActive = tickRate>0 && 1/rate>1ms`；停用→激活清采样器 + `alignTickPhys`，激活→停用仅清采样 | `:331-344` |
+| 单轮全序 | delta clamp（`:313-318`）→ hold 冻结轮（`:320-326`）→ tick 窗口（`peekKeys :355` + `tickDx/Dy clampAbs` → 分叉锚定 `tickDiverged :364-365` → `tickPhys.tick` → `phys.set_velocity :373`）→ 无限制步（`consumeInput :389` 不限幅 → `phys.tick_into(1ms) :396` → S_D 零分配发布 `:397-400` → acc 封顶 `:403`）→ 背压 `waitWakeup(min(idle,4ms)) :408-411` | `loop :298-412` |
+| 分叉锚定 | 位置偏差 > `TICK_ANCHOR_DIST=64` → `alignTickPhys()` 全量拉回（正常演化不干预，先检查后推进） | `:191-202,364-365` |
+| 零分配热路径（A5） | wasm 内存注入 → `phys.tick_into` + `state_out_ptr` Float64Array 直读（pos/vel/yaw/pitch 8 值）→ 定点写 S_D；内存增长后按 `memory.buffer` 重建视图缓存 | `:216-240`（`:225` 视图重建）；退化路径 `publishFromState :242-272`（node 测试） |
+| 慢字段 | 眼高/着地不在 8 值内 → 16ms 低频 `phys.state()` 缓存刷新 + 发布帧即时刷新 | `:19-22,138,203-213` |
+| hold 冻结 | `runHeldRound`：逐轮 `set_state(held, vel=0)` + 时间/输入丢弃 + tickPhys 同步冻结；松开 release = 多实例 set_state 全量恢复（worker 侧执行见 harness `src/worker-a.ts:301-323`） | `:274-295` |
+| 对齐/复位 API | `alignTickPhys`（tickPhys←phys 全量 set_state，`:172-190`）/ `resetSamplers(align?)`（acc/loAcc/tickDx/tickDy 清零 + lastNow 刷新，`:421-429`）/ `onTickRateChanged`（清采样器+对齐，速率值变化不重置主累积器，`:415-419`）/ `publishCurrentState`（`:430-432`）/ `start`（`:434-439`，幂等） | `:414-440` |
 
-**S_D 写入者唯一**：worker 侧解耦线是 S_D 槽唯一写入者——`writeDecoupled` 调用仅存在于 decoupled-loop（S_D 唯一写入侧，调用簇 `decoupled-loop.ts:228/:260/:285`，publishFromStateOut/publishFromState 内），`:396-399` 为循环侧调用入口；主线程纯消费（§3.7 末行 + `game/src/renderer/renderer-main.ts:1027-1046`）。热切交接时序见 [game/docs/sequences.md](../game/docs/sequences.md) §8。
+**S_D 写入者唯一**：worker 侧解耦线是 S_D 槽唯一写入者——`writeDecoupled` 调用仅存在于 decoupled-loop（S_D 唯一写入侧，调用簇 `decoupled-loop.ts:229/:261/:286`，publishFromStateOut/publishFromState/runHeldRound 内），`:397-399` 为循环侧调用入口；主线程纯消费（§3.7 末行 + `test/dual-mode-harness/src/main.ts:125-126`「WorkerB 也持 auth 通道」）。热切交接时序见 harness [sequences.md](../test/dual-mode-harness/docs/sequences.md)。
 
 ---
 
@@ -212,24 +225,26 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 
 | 差异点 | debug | game | 证据 |
 |---|---|---|---|
-| `colliderSource` | UI 三档可选（auto/visual/phy） | 固定 `'auto'`（调用未传，走默认值；注释明示「colliderSource auto」收敛进共享管线） | debug `app.ts:1293`；game `app.ts:450-454`、`world-builder.ts:139` 默认值 |
-| `collectMissingTextures` | true（缺失比对弹窗） | 不开启（调用未传） | debug `app.ts:1294`；game `app.ts:450-454` |
-| 进度回调 `onProgress` | `setStatus` | `advanceLoading`（两端都有，仅 UI 实现不同） | debug `app.ts:1296`；game `app.ts:452` |
+| `colliderSource` | UI 三档可选（auto/visual/phy） | 固定 `'auto'`（调用未传，走默认值；注释明示「colliderSource auto」收敛进共享管线） | debug `app.ts:1292-1293`；game `app.ts:406-408`、`world-builder.ts:146` 默认值 |
+| `collectMissingTextures` | true（缺失比对弹窗） | 不开启（调用未传） | debug `app.ts:1294`；game `app.ts:406-408` |
+| 进度回调 `onProgress` | `setStatus` | `advanceLoading`（两端都有，仅 UI 实现不同） | debug `app.ts:1296`；game `app.ts:408` |
 | `onWasmInit` 钩子 | 挂 mtzB64——**协议兼容保留**（Worker 已不再解析 BSP，纹理包不再使用） | 不使用 | debug `worker/main.ts:109-110`（含原注释） |
-| `onExtraMessage` 钩子 | 物理面板参数/快照消息 | 不使用 | `worker-dispatch.ts:93-94`、debug `worker/physics-worker.ts` |
-| **双模式装配（phys-mode-port）** | 未注入（`tickPhys/decoupledLoop/getComputeMode/onSetMode/onSetHold` 全缺省）→ 解耦面不激活，v7 行为零变化 | 全注入：`tickPhys` 槽（双实例同建同参）+ `decoupledLoop` + `getComputeMode`（gate 真相源）+ `onSetMode/onSetHold`（热切/hold 执行）+ `getConfigTickRate`（耦合 +3 语义） | `worker-dispatch.ts:73-84`（可选钩子声明）、`game/src/worker/main.ts:127-140,210-232`、debug `worker/main.ts`（grep 无 getComputeMode/tickPhys） |
+| `onExtraMessage` 钩子 | 物理面板参数/快照消息 | 不使用 | `worker-dispatch.ts:124-125`、debug `worker/physics-worker.ts` |
+| **三模式装配** | 未注入（`tickPhys/scratch/decoupledLoop/getComputeMode/onSetMode/onSetHold/tickExternalBreak/onWorldRebuilt` 全缺省）→ 解耦/tick 面不激活，v7 行为零变化 | 同 debug：`game/src/worker/main.ts:80-93` 只传通用钩子 + `getConfigTickRate`，**无任何模式钩子**（`c4824e9` 回退前曾全注入） | `worker-dispatch.ts:90-115`（可选钩子声明）、debug `worker/main.ts:94-120`、game `src/worker/main.ts:80-93`、harness `test/dual-mode-harness/src/worker-a.ts:331-340`（唯一全注入方） |
 
-工程侧实现细节见 `debug/docs/`、`game/docs/`（另篇）。
+工程侧实现细节见 `debug/docs/`、`game/docs/`（另篇）；三模式运行时装配见 `test/dual-mode-harness/docs/`（另篇）。
 
 ### 4.2 viewer：不使用本层
 
-viewer 无物理、无双线程、无输入协议——不 import ts-shared（§1.2）。唯一交集是 `bspYawToCsYaw` 公式的**本地复刻**（`viewer/src/core/pose.ts:16-25`，`wrap(src + 180)`，t2 统一口径；注释注明与 ts-shared 一致）：录像回放的位姿换算需要同一 yaw 约定。公式修改时须两处同步（Rust `teleport.rs:31-38` 亦同式，全量同步点见 architecture.md 不变量 3）。
+viewer 无物理、无双线程、无输入协议——不 import ts-shared（§1.2）。唯一交集是 `bspYawToCsYaw` 公式的**本地复刻**（`viewer/src/core/pose.ts:16-25`，`wrap(src + 180)`，t2 统一口径；`viewer/src` 内 `ts-shared` 零出现，属同式各自维护而非注释互引）：录像回放的位姿换算需要同一 yaw 约定。公式修改时须多处同步（Rust `teleport.rs:31-38` 亦同式，全量同步点见 architecture.md 不变量 3）。
 
-### 4.3 dual-mode-harness：只复用 KEY_MASK，协议是另一套
+### 4.3 dual-mode-harness：三模式内核走共享层，另建 192B 渲染通道
 
-harness 自建 **192B TestShared SAB**（布局：控制区 `[0]TICK_RATE`/`[1]WAKEUP`、BigInt64 输入槽 dxAcc/dyAcc（i64 索引 1/2）、`[6]keysMask`、`[7]RENDER_WAKEUP`（WorkerB 专用唤醒，与 WAKEUP 分离）、`[8]V` + 双缓冲 Float64 槽0[5..12]/槽1[13..20]（pos×3/vel×3/yaw/pitch），共 192B，`test/dual-mode-harness/src/shared-state.ts:5-21` 布局注释），头注明确「与 ts-shared 512B 权威帧协议**不是**同一套」（`:1-4`）。复用的唯一共享物是 `KEY_MASK` 位定义（`:50-51` import，注释「杜绝位定义漂移」）。两套协议的设计差异（双物理实例 + 双唤醒槽 vs 单权威 + V_A 版本号；CAS 消费输入 vs exchange 饱和截断）对照见 `test/dual-mode-harness/docs/`（另篇）。
+harness 自建 **192B TestShared SAB**（布局：控制区 `[0]TICK_RATE`/`[1]WAKEUP`、BigInt64 输入槽 dxAcc/dyAcc（i64 索引 1/2）、`[6]keysMask`、`[7]RENDER_WAKEUP`（WorkerB 专用唤醒，与 WAKEUP 分离）、`[8]V` + 双缓冲 Float64 槽0[5..12]/槽1[13..20]（pos×3/vel×3/yaw/pitch），共 192B，`test/dual-mode-harness/src/shared-state.ts:5-21` 布局注释），头注明确「与 ts-shared 512B 权威帧协议**不是**同一套」（`:2-4`）。
 
-phys-mode-port 移植关系：game 解耦模式把 harness **WorkerA 编排**（模式A 1ms 无限制真理源 + 模式B 64t tickPhys 速度校准 + 分叉锚定 + 背压）平移为本仓 `decoupled/decoupled-loop.ts`（§3.8，全序对照 `decoupled-loop.ts:10-15` 头注）；**WorkerB/OffscreenCanvas 渲染不移植**（game 渲染留在主线程，T7' 纯消费）。移植后 game 的 `consumeInput`（CAS 不限幅）与耦合线 `takeInput`（exchange 饱和截断）在 ts-shared 内并存，harness 的 CAS 语义以此落地。
+但**三模式物理不再走这条私有通道**：harness 另开 **auth 通道**（`ShmState`，512B，即本文协议，`src/main.ts:17-18,128-143`），三种模式的物理计算（auth-loop / decoupled-loop / tick-authority）全部经它消费输入、发布权威帧；192B 通道降为**渲染专用**——WorkerA 每次发布即镜像帧进 TestShared（`src/worker-a.ts:103-115`），WorkerB 渲染路径零改动（`src/worker-b.ts:737`）。因此 harness 对共享层的使用面 = **6 模块**（§1.2）+ `KEY_MASK` 位定义（`:51` import，注释「杜绝位定义漂移」），而非仅 KEY_MASK。两套协议的设计差异（双物理实例 + 双唤醒槽 vs 单权威 + V_A 版本号；CAS 消费输入 vs exchange 饱和截断）对照见 `test/dual-mode-harness/docs/`（另篇）。
+
+移植关系（历史与现状）：`decoupled/decoupled-loop.ts` 由 harness 早年的 **WorkerA 编排**（模式A 1ms 无限制真理源 + 模式B 64t tickPhys 速度校准 + 分叉锚定 + 背压）平移而来（§3.8，全序对照 `decoupled-loop.ts:10-15` 头注）；该共享实现随后被 game 的解耦模式装配使用，**game 已整体回退**（`c4824e9`），当前服务对象回到 harness 自身（`src/worker-a.ts:199-211`）。**WorkerB/OffscreenCanvas 渲染始终是 harness 专属，从未进共享层**。`consumeInput`（CAS 不限幅）与耦合线 `takeInput`（exchange 饱和截断）在 ts-shared 内并存，harness 的三模式装配同时使用两者。
 
 ### 4.4 sensitivity=1 全链路设计（防双端视角分叉）
 

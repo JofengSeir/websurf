@@ -16,4 +16,6 @@ path = "lib.rs"
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# t3: float_roundtrip = parse↔print 位级精确往返（种子面 JSON 通道的位级契约前提；
+# 默认 fast parser 对部分 f64 有 1-ULP 往返偏差，实测 origin[2] 10.478655362066775 → …776）
+serde_json = { version = "1.0", features = ["float_roundtrip"] }

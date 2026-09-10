@@ -50,9 +50,6 @@ export class PanelController {
     private readonly onSavePointDelete?: (index: number) => void,
     /** 存点列表读点（索引）→ app 恢复该存点（主线程 + 权威同步）。 */
     private readonly onSavePointLoad?: (index: number) => void,
-    /** 计算模式热切（phys-mode-port §3.4.C）：面板下拉 → bridge.sendSetMode
-     * （set-mode/mode-ack 握手；500ms 超时重发/回滚在 renderer）。 */
-    private readonly onComputeModeChange?: (mode: 'coupled' | 'decoupled') => void,
   ) {
     this.root = document.getElementById('panel') as HTMLElement;
     // 按键：读取持久化键位（与 app.ts 初始 KeyboardInput 一致）
@@ -78,19 +75,6 @@ export class PanelController {
   /** 强制隐藏面板（读取地图后退出面板，交给加载进度覆盖层显示）。 */
   hide(): void {
     this.root.classList.add('hidden');
-  }
-
-  /** 计算模式落定回写（app 收 mode-ack / 回滚时调用）：config + 控件对齐并持久化。
-   * ack 路径 = 乐观值与实际一致（幂等回写）；回滚路径 = 控件从切换值纠正回实际值。
-   * 两路径均为在途握手收尾 → 同时解锁控件（t12：change 时禁用的恢复点）。 */
-  onComputeModeSettled(mode: 'coupled' | 'decoupled'): void {
-    this.config.physics.computeMode = mode;
-    const el = document.getElementById('computeMode') as HTMLSelectElement | null;
-    if (el) {
-      el.value = mode;
-      el.disabled = false;
-    }
-    this.savePanelPrefs();
   }
 
   // ── 模块导航（左栏切换，事件委托防 DOM 替换失效）────────────
@@ -427,19 +411,6 @@ export class PanelController {
       this.savePanelPrefs();
     });
 
-    // 物理计算模式热切（耦合/解耦；§3.4.C 握手——不落 sendConfig）
-    const computeMode = document.getElementById('computeMode') as HTMLSelectElement | null;
-    computeMode?.addEventListener('change', () => {
-      const mode = computeMode.value as 'coupled' | 'decoupled';
-      // 乐观落字段（ack 失败回滚由 renderer.onModeSwitchFailed → app 纠正）
-      this.config.physics.computeMode = mode;
-      // t12：在途握手禁用控件（set-mode 发出 → mode-ack/回滚回写前锁定，防在途
-      // 重复切换；恢复点 = onComputeModeSettled——app 在 ack 与回滚两条路径均调用）
-      computeMode.disabled = true;
-      this.onComputeModeChange?.(mode);
-      this.savePanelPrefs();
-    });
-
     // 自由视角切换（noclip）
     const noclipBtn = document.getElementById('noclipToggle') as HTMLButtonElement | null;
     noclipBtn?.addEventListener('click', () => {
@@ -630,9 +601,6 @@ export class PanelController {
     if (speedMode) speedMode.value = p.hud.speedMode;
     const textureQuality = document.getElementById('textureQuality') as HTMLSelectElement | null;
     if (textureQuality) textureQuality.value = p.texture.quality;
-    // 计算模式（通用模块；§3.4.D 声明性元数据——默认耦合，偏好持久化恢复）
-    const computeMode = document.getElementById('computeMode') as HTMLSelectElement | null;
-    if (computeMode) computeMode.value = p.physics.computeMode;
     // 准星
     setVal('chColor', p.hud.crosshair.color);
     setVal('chSize', String(p.hud.crosshair.size));

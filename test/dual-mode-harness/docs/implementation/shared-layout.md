@@ -1,8 +1,16 @@
-# TestShared 布局与 WorkerB 渲染（实现篇 · 维度 I）
+# TestShared 布局（渲染通道）与 WorkerB 渲染（实现篇 · 维度 I）
 
-> **事实基准**：本文所有论断核对自当前工作区代码（核对日期 2026-09-07）。未注明前缀的相对路径均相对 `test/dual-mode-harness/`；仓库根共享层以 `仓库根 src/…` 标注。时序视角（唤醒/读写协议的时序语义）见 [../sequences.md](../sequences.md)；与 game 权威帧协议（512B）的取舍对比见 [../differences.md](../differences.md)。
+> **事实基准**：本文所有论断核对自当前工作区代码（核对日期 2026-09-11）。未注明前缀的相对路径均相对 `test/dual-mode-harness/`；仓库根共享层以 `仓库根 src/…` 标注。时序视角（唤醒/读写协议的时序语义）见 [../sequences.md](../sequences.md)；与 game 权威帧协议（512B）的取舍对比见 [../differences.md](../differences.md)。
+>
+> **⚠ 2026-09-11 三模式迁移（读前须知）**：本文描述的是 harness 的**渲染通道**（自建 192B）。
+> **三模式物理不在这条通道上**——它走本工程**第二条 auth 通道**（512B，直接用共享层 `ShmState`，
+> 含权威/解耦帧 + `I_A_SEG`/`I_A_TICK`/`I_A_EVT`/`I_A_PSEQ` 元数据三元组）。WorkerA 侧 `MirrorShmState`
+> 在每次发布时把帧镜像进本文的 192B 渲染通道，使耦合/解耦模式的 WorkerB 渲染路径**零改动**
+> （`src/worker-a.ts:122-150`）；tick 模式的 WorkerB 则直接经 `TickConsumer` 消费 auth 通道
+> （`src/worker-b.ts:227-233,719-733`）。auth 通道与三模式协议见 [../../../docs/ts-shared.md](../../../docs/ts-shared.md)，
+> 本工程总览见 [../overview.md](../overview.md) §2。
 
-# 第一部分：TestShared —— 192B SAB 布局（src/shared-state.ts）
+# 第一部分：TestShared —— 渲染通道 192B SAB 布局（src/shared-state.ts）
 
 ## 1. 布局总表
 
@@ -85,15 +93,23 @@ msg-* 模式下 SAB 视图为长度 0 的空视图（无实际缓冲，`:173,211
 
 `WebGLRenderer({canvas: OffscreenCanvas, antialias: true, powerPreference: 'high-performance'})`（OffscreenCanvas 在 Worker 内可用，`:206-208`）→ `setPixelRatio(1)`、SRGB 输出（`:212-213`）→ **`resumeChannel.port2.postMessage(null)` 启动帧循环**（`:218`）→ Scene（背景 + 雾）→ 透视相机（初始 (0, 64.09, 0)）→ 光照 ambient 0.6 + directional 0.8（`:220-240`）。`resize` 消息：`renderer.setSize(w,h,false)` + 相机 aspect（`:243-249`）。
 
-## 8. 帧信号驱动循环（src/worker-b.ts:619-662）
+## 8. 帧信号驱动循环（src/worker-b.ts:664-710）
 
-- **自投递续环**：`resumeChannel = new MessageChannel()`（`:624`）；port2 `postMessage(null)` → port1 onmessage → `waitRenderWakeup(50ms)` → `frameTick()` → `absorbRenderWake()` → 再自投递。MessageChannel 消息任务**无 setTimeout 嵌套 4ms 钳制**，唤醒到重绘延时最小（`:619-623`）。
-- **主驱动 = 主线程 rAF 的 wake()**（计数语义，vsync 对齐——每 rAF 一帧，呈现平滑）；WorkerA 发布不 notify；50ms 超时仅兜底（`:641-647` 注释）。
-- **帧率上限 = 刷新率**：渲染完成后 `absorbRenderWake` 吸收渲染期间到达的信号 → 渲染快时不忙循环超限（`:645-646,653`）。
-- **单帧保护**：`frameTick` 用 try/catch 包住 `onFrame`——单帧异常（GPU 驱动/几何错误）不中断循环（`:626-639`）。
-- **消息回退节流**：`isMessageMode && !repainted` → `setTimeout(100ms)` 自检；`shared-state` 到达时 `onStateMessage` 立即 `postMessage(null)` 触发循环（`:655-658`；`:184-192`）。
+- **自投递续环**：`resumeChannel = new MessageChannel()`（`:664`）；port2 `postMessage(null)` → port1 onmessage → `waitRenderWakeup(50ms)` → `frameTick()` → `absorbRenderWake()` → 再自投递。MessageChannel 消息任务**无 setTimeout 嵌套 4ms 钳制**，唤醒到重绘延时最小。
+- **主驱动 = 主线程 rAF 的 wake()**（计数语义，vsync 对齐——每 rAF 一帧，呈现平滑）；WorkerA 发布不 notify；50ms 超时仅兜底。
+- **帧率上限 = 刷新率**：渲染完成后 `absorbRenderWake` 吸收渲染期间到达的信号 → 渲染快时不忙循环超限。
+- **单帧保护**：`frameTick`（`:671`）用 try/catch 包住 `onFrame`——单帧异常（GPU 驱动/几何错误）不中断循环。
+- **消息回退节流**：`isMessageMode && !repainted` → `setTimeout(100ms)` 自检；`shared-state` 到达时 `onStateMessage` 立即 `postMessage(null)` 触发循环。
 
-## 9. 采样与插值（onFrame，src/worker-b.ts:665-743）
+## 9. 采样与插值（onFrame，src/worker-b.ts:712-781）
+
+> **2026-09-11 迁移：onFrame 现在有两条分支。**
+> - **tick 模式**（`computeMode === 'tick' && authShared`，`:719-733`）：走**共享层 `TickConsumer`**——
+>   `tickConsumer.step(now, (dstF, dstI) => authShared.readAuthoritativeInto(dstF, dstI))`，
+>   由消费器产出 `TickDisplayPose`（α 网格弦插值 + 六显示态 + Δ 控制器），再 `applyCulling` + `render`。
+>   消费器的 tick 率取自面板 `readPanelTickRate()`（tick 模式权威步长 = 面板值 raw 直译，无 +3 偏移）。
+> - **耦合/解耦模式**：走本节下文描述的既有路径（`readState` 消费 192B 渲染通道 + 线性插值窗口）。
+> 模式由 main 转发 WorkerA 的 `mode-ack` 通知（`:227-233`）；切换时 `tickConsumer.reset()`，状态不跨模式存活。
 
 1. **采样**：`readState()` 非阻塞——V 更新 → 推进插值窗口（`interpLast ← interpCur`，`interpCur ← 新状态`，时间戳 = 到达时刻）→ `localCopy = state`（**本地副本唯一更新来源**，一旦非 null 永不回落——首帧竞争保护，`:688-690,157-159`）；V 未变 → 用插值。
 2. **消息回退节流**：`isMessageMode && !newState` → 返回不渲染（状态即节奏，`:694-696`）。

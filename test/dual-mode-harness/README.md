@@ -1,13 +1,19 @@
-# WebSurf-test — 双模物理 + OffscreenCanvas 渲染时序验证工程
+# WebSurf-test — 三模式物理（耦合/解耦/tick）+ OffscreenCanvas 渲染时序验证工程
 
-> **事实基准**：本文档最后核对 2026-08-24，以实际代码为准（`src/worker-a.ts` / `src/shared-state.ts`
+> **事实基准**：本文档最后核对 2026-09-11，以实际代码为准（`src/worker-a.ts` / `src/shared-state.ts`
 > / `src/worker-b.ts` / `src/main.ts`）。「64t 坡速 ≈ 无限制」成因分析、会审结论与修复架构详见
 > **[CONCLUSION.md](CONCLUSION.md)**（2026-08-11 会审 + 双模核心重构后的事实基准，两文档对齐）。
 
-> 目的：验证一套独立的 输入 → 双模物理 → 帧信号渲染 循环：主线程仅输入转发 / UI → SAB 无锁
-> （WAKEUP/RENDER_WAKEUP 双唤醒槽 + 双缓冲状态槽）→ WorkerA 双模物理（模式A 1ms 无限制真理源 +
-> 模式B 独立 64t 权威速度线）→ WorkerB OffscreenCanvas 渲染（**帧信号驱动**：主驱动 = 主线程 rAF）。
-> 仅保留基本 WASD + 鼠标视角 + BSP 地图加载 + 难度按钮，无面板/功能扩展。
+> 目的：验证一套独立的 输入 → 三模物理 → 帧信号渲染 循环：主线程仅输入转发 / UI → SAB 无锁
+> （WAKEUP/RENDER_WAKEUP 双唤醒槽 + 双缓冲状态槽）→ WorkerA 三模物理 → WorkerB OffscreenCanvas 渲染
+> （**帧信号驱动**：主驱动 = 主线程 rAF）。
+> 仅保留基本 WASD + 鼠标视角 + BSP 地图加载 + 难度按钮 + **计算模式热切**，无面板/功能扩展。
+>
+> **迁移出处（2026-09-11）**：`coupled` / `decoupled` / `tick` 三种模式的**物理计算本体**迁自
+> game 工程（game 侧的模式切换经真机手测判定失败，已回退为原本的耦合单模，其 `game/` 与
+> 提交 `c4824e9` 逐字节一致）。三模式实现位于 `src/ts-shared/{auth,decoupled,tick}`（被本工程与
+> debug 共享），本工程提供运行时装配（WorkerA 三实例 + 双线互斥 gate + `set-mode`/`mode-ack`
+> 热切握手 + 页面模式切换 UI）。
 
 ---
 
@@ -23,25 +29,31 @@
   ├─ BSP 加载：文件选择 → BspProcessor 导出（brush/tri/spawn/GLB，最小集不含 teleport/PVS）→ 双 Worker 分发
   └─ R 重生 → postMessage({type:'respawn'})
 
-WorkerA (src/worker-a.ts) — 双模物理核心
-  ├─ 模式A（无限制真理源）：phys = 1ms 固定子步 + 实时输入（consumeInput 完整增量直通）
-  │    位置/角度只由模式A 推进；共享状态槽唯一写入者（WorkerB 渲染参数唯一来源）
-  ├─ 模式B（tick 权威速度线）：tickPhys = 第二个 PhysWorld，只走 tickDt 步长
-  │    每 tick 边界：键位 = peekKeys() 快照 + 鼠标 = 模式A 消耗的窗口累积
-  │    → 独立 64t 物理演化 → set_velocity(三轴) 校准模式A（唯一 tick 影响通道，位置/角度不碰）
-  │    分叉兜底：与模式A 偏差 > TICK_ANCHOR_DIST(64)（死亡/传送/卡墙/坡缘）→ 全量拉回
-  ├─ **先 tick 计算 → 后无限制计算**；tick 节点未到则越过直达无限制
-  ├─ 自驱循环：setTimeout(loop, 0) 续环 + waitWakeup 背压（剩余 ≥1ms 挂起，否则自旋）
-  ├─ 子步上限 8/轮 + 累加器封顶 0.02s（时间不丢失）；delta clamp 0~50ms
-  └─ respawn / world-json：双实例同步重建；模式B 停用→激活边沿 set_state 对齐起点
+WorkerA (src/worker-a.ts) — 三模式物理核心（装配层；计算本体在 src/ts-shared）
+  ├─ 实例拓扑（G3 三实例同建同参同 hull）：
+  │    phys     权威实例（耦合=auth 线 / 解耦=1ms 真理源 / tick=raw 64Hz 唯一实例）
+  │    tickPhys 第二实例（解耦=64t 速度校准线；tick 闲置不驱动不 free）
+  │    scratch  第三实例（tick=F4-C 乐观评估执行体；权威实例零写入）
+  ├─ 模式语义（唯一权威 src/ts-shared/auth/compute-mode.ts）：
+  │    coupled   auth 线 64Hz 权威（面板 tickRate + 3 隐藏偏移）——默认模式
+  │    decoupled 1ms 无限制真理源 + 独立 64t tickPhys 速度校准 + 分叉锚定拉回
+  │    tick      raw 64Hz 单实例权威 + F4-C scratch 乐观评估（排序门 + 内容封帽）
+  ├─ 双线互斥 gate：auth-loop（coupled+tick 推进）+ decoupled-loop（解耦独占），
+  │    各自 body 顶部 mode gate 早退；切换 = set-mode 翻转 worker 侧 computeMode
+  ├─ 热切握手（§3.4.C）：set-mode → onSetMode（gate 翻转 + 状态注入 + tickPhys 对齐
+  │    + 采样器清零 + resetInput + 交接首帧）→ mode-ack（回执由 shared 层 dispatch 收口）
+  ├─ 双通道：**auth 通道**（ShmState，512B，共享协议）= 三模式物理唯一读写面；
+  │    **渲染通道**（TestShared，192B）= MirrorShmState 发布即镜像 → WorkerB 零改动
+  └─ respawn / world-json：三实例同步重建；死亡阈值 = brushJson min[1] − 100
 
 WorkerB (src/worker-b.ts) — three.js 第一人称渲染（帧信号驱动）
   ├─ OffscreenCanvas（transferControlToOffscreen，主线程零取帧零等待）
   ├─ 帧循环：MessageChannel 自投递 + waitRenderWakeup(RENDER_WAKEUP)
   │    主驱动 = 主线程 rAF 帧信号（vsync 对齐，每 rAF 一帧）；50ms 超时仅作停摆兜底
-  ├─ 无节流（SAB 模式）：每次唤醒采样 readState；V 未变不重绘（重复唤醒零成本）；
-  │    例外：消息回退模式（无 SAB）无数据时 100ms 低频自检（数据到达立即触发）
-  ├─ 本地副本只被 readState 更新（渲染参数零污染）；仅距离 LOD（最小集不启用 PVS）
+  ├─ **tick 模式**：接 auth 通道（main 转发 mode-ack），经共享层 `TickConsumer`
+  │    消费权威帧（`readAuthoritativeInto`）：α 网格弦插值 + 六显示态 + Δ 控制器 + 断窗八类
+  ├─ **耦合/解耦模式**：既有路径——readState 消费渲染通道镜像 + 线性插值窗口
+  ├─ 无节流（SAB 模式）：每次唤醒采样 readState；V 未变不重绘（重复唤醒零成本）
   └─ status 摘要每秒回传 main → DOM HUD
 
 共享状态 (src/shared-state.ts)
@@ -76,12 +88,20 @@ test/dual-mode-harness/
   pkg/                wasm-pack 产物（gitignored）
   src/
     shared-state.ts   SAB 布局与读写协议 + peekKeys + 消息回退模式（msg-main/msg-physics/msg-render）
-    main.ts           主线程：前置检测 → 输入转发 + wake()（RENDER_WAKEUP = 渲染主驱动）→ BSP 分发 → respawn
-    worker-a.ts       WorkerA 双模物理核心（先 tick 计算 → 后无限制计算）
+    main.ts           主线程：前置检测 → 输入转发（双通道）+ wake()（RENDER_WAKEUP = 渲染主驱动）
+                      → BSP 分发 → respawn → 计算模式热切（set-mode 意图 + mode-ack 回执）
+    worker-a.ts       WorkerA 三模式物理核心（coupled/decoupled/tick 装配 + 热切握手 + 发布镜像）
     worker-b.ts       WorkerB 帧信号驱动渲染（OffscreenCanvas + 距离 LOD + 50ms 超时兜底）
+    worker/           phys-instances.ts（三实例参数扇出，纯函数）+ t4-chain.test.ts（三模式链路单测）
+    renderer/         tick-consumer.ts（α 网格弦插值 + 六显示态 + Δ 控制器 + 断窗八类）+ 单测
+    panel/            tick-telemetry-format.ts（tick 遥测 7 行格式化）+ 单测
   scripts/
     build-dist.mjs        构建 dist（multi 5 文件：app/worker-a/worker-b/wasm/index.html；test 无 single 内嵌模式）
     check-wasm-api.mjs    WASM 契约校验（薄导出层 12 API，缺一即败）
+    three-mode-verify.mjs **三模式运行时验证**（node 驱动构建产物 worker-a.js：补最小 Web Worker
+                          宿主 → init-shared/auth-init/wasm-init/world-json → set-mode 三值，
+                          断言 mode-ack 闭合 + 幂等 + 非法 mode 拒绝 + 每模式帧发布（V 前进）
+                          + 连续往返热切 + tick-stats 遥测链路；`npm run test:three-mode`，14 断言）
     phys-smoke.mjs        node 冒烟测试（**192 处 check() 断言**，2026-08-24 读脚本计数；2026-08-13 实测
                           191/191 PASS 后又新增 1 项；含 ModeAB 双实例镜像、分叉兜底锚定回归、
                           帧信号驱动、消息回退、PVS）
@@ -127,6 +147,7 @@ npm run build:wasm   # wasm-pack release → pkg/，并拷贝 wasm 到 test 根
 npm run build:ts     # typecheck + esbuild（app / worker-a / worker-b 三产物）
 npm run build:dist   # multi 打包（5 文件，HTTP 运行；test 仅 HTTP，SAB 恒定可用）
 node scripts/phys-smoke.mjs   # 冒烟测试（192 处 check() 断言）
+npm run test:three-mode       # 三模式运行时验证（驱动构建产物；14 断言，须先 build:ts）
 node scripts/perf-bench.mjs   # 性能基准
 node scripts/race-wakeup.mjs  # 唤醒竞争
 ```
@@ -138,5 +159,11 @@ node scripts/race-wakeup.mjs  # 唤醒竞争
 （需 HTTP + COOP/COEP 启用 SharedArrayBuffer；SAB 不可用时自动消息回退模式，HUD 提示通道模式）。
 
 **操作**：点击画布锁定指针 → WASD/方向键移动、空格跳、鼠标视角；R 重生；难度按钮切换
-关/32/64/128/256/1000（仅 store TICK_RATE，WorkerA 下轮自动识别）；「加载 BSP 地图」选择
-`.bsp` 文件（BSP 是唯一玩法，主线程解析 → world-json/GLB 分发双 Worker；最小集不含 teleport/PVS）。
+关/32/64/128/256/1000（仅 store TICK_RATE，WorkerA 下轮自动识别）；**计算模式按钮**切换
+耦合/解耦/tick（发 `set-mode` 意图，高亮与文案以 worker 回执 `mode-ack` 为准——不做乐观切换）；
+「加载 BSP 地图」选择 `.bsp` 文件（BSP 是唯一玩法，主线程解析 → world-json/GLB 分发双 Worker；
+最小集不含 teleport/PVS）。
+
+> **三模式运行时验证**：`npm run test:three-mode`（须先 `npm run build:ts`）在 node 里给
+> 构建产物 `worker-a.js` 补最小 Web Worker 宿主，按真实消息序列驱动并断言热切闭合。
+> 真机（真实浏览器）主观/客观读数仍需用户手测——本工程脚本不启动真实浏览器。

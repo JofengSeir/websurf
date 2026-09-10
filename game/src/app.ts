@@ -72,9 +72,6 @@ let currentMapName = '';
 const savePointStore = new SavePointStore();
 /** 按住 C 冻结中的存点（非空 = 冻结中，keyup 时恢复速度）。 */
 let holdPoint: SavePoint | null = null;
-/** noclip 当前激活态（面板切换时记录；切回耦合补推预测实例用——noclip 走
- * sendConfig 之外的独立同步路径，不在 syncFullConfig 全量重推范围内）。 */
-let noclipActive = false;
 
 async function main(): Promise<void> {
   if (!dom.canvas) {
@@ -105,21 +102,13 @@ async function main(): Promise<void> {
     if (msg.type === 'error') {
       setError((msg as { message?: string }).message ?? 'Worker 错误');
     } else if (msg.type === 'phys-event') {
-      // 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染；
-      // 解耦模式 worker 侧停发，renderer 内部防御性 gate）
+      // 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染）
       const ev = msg as { kind: 'land' | 'blocked'; pos: number[]; yawDeg: number; pitchDeg: number; vel?: number[] };
       renderer?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg, ev.vel);
     } else if (msg.type === 'phys-frame') {
-      // MsgState 回退：Worker 权威帧消息 → 缓存（readAuthoritative 读取；解耦期
-      // 同载荷即解耦帧——MsgState.recvFrame 双喂 latest/latestDecoupled）
+      // MsgState 回退：Worker 权威帧消息 → 缓存（readAuthoritative 读取）
       const f = msg as { va: number; frame: { pos: { x: number; y: number; z: number }; yaw: number; pitch: number; vel: { x: number; y: number; z: number }; onGround: boolean; eyeHeight: number; timeMs: number } };
       (sharedState as { recvFrame?: (frame: unknown, va: number) => void })?.recvFrame?.(f.frame, f.va);
-    } else if (msg.type === 'mode-ack') {
-      // 热切握手 ack（phys-mode-port §3.4.C）：主线程翻转消费分支 / 恢复预测线；
-      // 500ms 超时重发/回滚在 renderer 内部（onSetModeResend / onModeSwitchFailed）
-      const ack = msg as { type: 'mode-ack'; mode: 'coupled' | 'decoupled'; appliedAtMs: number };
-      renderer?.handleModeAck(ack.mode, ack.appliedAtMs);
-      panel?.onComputeModeSettled(config.physics.computeMode);
     }
   };
   fixWorker.postMessage({ type: 'init', shared: sharedBuffer });
@@ -137,35 +126,11 @@ async function main(): Promise<void> {
 
   // 2. 渲染器 = 主线程唯一物理线（BSP 解析/物理/渲染全在主线程）
   renderer = new RendererMain(shared);
-  renderer.onSceneLoaded = (deathY) => {
-    renderer?.setDeathY(deathY);
-    // W-GAP-2（§3.9-P1(b)）：加载链补发死亡阈值到 Worker 权威侧——此前仅主线程
-    // set_death_y，权威 death_y 恒 Rust 默认 -100000 → 双端死亡判定分叉（有意行为修复）
-    bridge?.sendSetDeathThreshold(deathY);
-  };
+  renderer.onSceneLoaded = (deathY) => renderer?.setDeathY(deathY);
   // 兜底同步：渲染主线（144Hz 精度更高）→ 权威 Worker 反向校准；同步瞬间
-  // 清双端未消费输入增量（Worker 侧由 sync-render-state 处理 resetInput）。
-  // 双模式改向（§3.5）：此链路升级为模式无关的「主→worker 全态注入」通道——
-  // 解耦下 worker 收到 = phys.set_state + tickPhys 对齐（读点/存点恢复共用）
+  // 清双端未消费输入增量（Worker 侧由 sync-render-state 处理 resetInput）
   renderer.onSyncRenderState = (s) => {
     fixWorker?.postMessage({ type: 'sync-render-state', state: s });
-  };
-  // 热切超时重发（§3.4.C：500ms 无 ack 重发一次；再超时回滚见 onModeSwitchFailed）
-  renderer.onSetModeResend = (mode) => bridge?.resendSetMode(mode);
-  // 热切彻底失败回滚：config 回滚 + 面板控件对齐 + status 提示
-  renderer.onModeSwitchFailed = (mode) => {
-    config.physics.computeMode = mode === 'decoupled' ? 'coupled' : 'decoupled';
-    panel?.onComputeModeSettled(config.physics.computeMode);
-    setStatus(
-      `计算模式切换失败（无 ack，已回滚为${config.physics.computeMode === 'decoupled' ? '解耦' : '耦合'}模式）`,
-      'error',
-    );
-  };
-  // 切回耦合：解耦期面板参数只进了 worker（预测实例停 tick 搁置）——全量重推
-  // （noclip 是 sendConfig 之外的单独立即同步路径，单独补推）
-  renderer.onParamsResync = () => {
-    syncFullConfig();
-    if (noclipActive) renderer?.setPredictionNoclip(true);
   };
   renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
   renderer.start();
@@ -186,10 +151,7 @@ async function main(): Promise<void> {
     () => pointerLock.isLocked(),
     (params) => renderer?.setPredictionParams(params),
     (hw, sh, dh) => renderer?.setPredictionHull(hw, sh, dh),
-    (active) => {
-      noclipActive = active;
-      renderer?.setPredictionNoclip(active);
-    },
+    (active) => renderer?.setPredictionNoclip(active),
     (quality) => void renderer?.applyTextureQuality(quality),
     (fov) => renderer?.setFov(fov),
     // 存点列表：删除（无确认）→ 存储更新 + 回刷列表
@@ -206,13 +168,7 @@ async function main(): Promise<void> {
         setStatus(`已读点 #${i + 1} @ (${sp.x.toFixed(0)}, ${sp.y.toFixed(0)}, ${sp.z.toFixed(0)})`, 'success');
       }
     },
-    // 计算模式热切（面板下拉 → set-mode/mode-ack 握手，§3.4.C）
-    (mode) => bridge?.sendSetMode(mode),
   );
-
-  // 持久化解耦偏好自启动（§3.6：默认耦合；面板构造时已把偏好合并进 config）——
-  // 解耦自启动无预测交接（predPhys 未建 → state 省略，worker 用自己初始态）
-  if (config.physics.computeMode === 'decoupled') bridge.sendSetMode('decoupled');
 
   // 5. 输入绑定
   bindInput();
@@ -532,8 +488,7 @@ function savePoint(): void {
   setStatus(`已存点（${list.length}/${SAVEPOINT_MAX}） @ (${s.x.toFixed(0)}, ${s.y.toFixed(0)}, ${s.z.toFixed(0)})`, 'success');
 }
 
-/** C 键按住：定在最近存点（每帧冻结——位置/朝向=存点、速度=0；空中悬停/地面站定）。
- * 解耦模式：冻结在 worker 侧执行（§3.4.A set-hold；主线程 T6 门控停）。 */
+/** C 键按住：定在最近存点（每帧冻结——位置/朝向=存点、速度=0；空中悬停/地面站定）。 */
 function startHoldPoint(): void {
   if (!sceneReady || !renderer) return;
   const sp = savePointStore.latest();
@@ -542,27 +497,14 @@ function startHoldPoint(): void {
     return;
   }
   holdPoint = sp;
-  if (config.physics.computeMode === 'decoupled') {
-    bridge?.sendSetHold({
-      x: sp.x, y: sp.y, z: sp.z,
-      yaw: sp.yaw, pitch: sp.pitch,
-      onGround: sp.onGround,
-    });
-  } else {
-    renderer.setHoldPoint(sp);
-  }
+  renderer.setHoldPoint(sp);
   setStatus('已定在存点（松开 C 恢复速度）', 'success');
 }
 
-/** C 键松开：解除冻结并恢复存点速度（主线程 + 权威同步；解耦 = worker 侧
- * set-hold release 全量恢复，§3.4.A）。 */
+/** C 键松开：解除冻结并恢复存点速度（主线程 + 权威同步）。 */
 function endHoldPoint(): void {
   if (!holdPoint || !renderer) return;
-  if (config.physics.computeMode === 'decoupled') {
-    bridge?.sendSetHold(null, holdPoint);
-  } else {
-    renderer.releaseHoldPoint(holdPoint);
-  }
+  renderer.releaseHoldPoint(holdPoint);
   holdPoint = null;
   setStatus('已恢复存点速度', 'success');
 }

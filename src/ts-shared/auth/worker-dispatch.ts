@@ -11,7 +11,9 @@
  */
 
 import { createWorkerSharedState, type ShmState, type MsgState } from './shared-state.js';
+import { AUTH_EVT } from './shared-state.js';
 import type { AuthLoop, PhysWorldLike } from './auth-loop.js';
+import type { ComputeMode } from './compute-mode.js';
 import type {
   DecoupledLoop,
   HoldState,
@@ -88,15 +90,32 @@ export interface WorkerDispatchEnv {
   // ── 双模式扩展（phys-mode-port §3.7 t10；全部可选——debug 不注入 = 解耦面整体不激活）──
   /** 解耦第二实例槽（tickPhys 64t 校准线；world-json 与 phys 同建同参，G3/P9）。 */
   tickPhys?: { current: PhysWorldLike | null };
+  /** F4-C scratch 第三实例槽（可选，t4 · t6 §10.1 主案：worker 内乐观评估
+   * 执行体；world-json 与 phys 同建同参 G3；仅 tick 模式被驱动，耦合/解耦
+   * 零触碰——debug 不注入 = F4-C 整面不激活）。 */
+  scratch?: { current: PhysWorldLike | null };
   /** 解耦循环句柄（respawn 首帧/publish、config tickRate 边沿处理用）。 */
   decoupledLoop?: DecoupledLoop;
-  /** 当前计算模式（worker 侧真相源；set-mode 翻转。缺省恒 'coupled'——debug 零感知）。 */
-  getComputeMode?(): 'coupled' | 'decoupled';
+  /** 当前计算模式（worker 侧真相源；set-mode 翻转。三值——plan-v2 §1.1 新增
+   * tick。缺省恒 'coupled'——debug 零感知）。 */
+  getComputeMode?(): ComputeMode;
   /** set-mode 执行钩子（§3.4.C 步骤 a-f：gate 翻转 + set_state 状态注入 +
-   * tickPhys 对齐 + 采样器清零 + resetInput；game 侧实现）。 */
-  onSetMode?(mode: 'coupled' | 'decoupled', state?: SyncRenderStateLike): void;
-  /** set-hold 执行钩子（解耦 hold 冻结注入/解除（带存点全量恢复）；game 侧实现）。 */
+   * tickPhys 对齐 + 采样器清零 + resetInput）。三值——tick 支路
+   * 交接语义见 auth/compute-mode.ts MODE_HANDOVER_MATRIX（t3-memo §2.2）。
+   * **装配侧实现**：当前唯一注入方 = `test/dual-mode-harness/src/worker-a.ts`
+   * 的 `applyModeSwitch`（game 侧注入随 c4824e9 回退移除，debug 未注入）。 */
+  onSetMode?(mode: ComputeMode, state?: SyncRenderStateLike): void;
+  /** set-hold 执行钩子（解耦 hold 冻结注入/解除（带存点全量恢复））。
+   * **装配侧实现**：当前唯一注入方 = harness `worker-a.ts` 的 `applySetHold`。 */
   onSetHold?(hold: HoldState | null, release?: SavePointLike): void;
+  /** tick 模式外部断点钩子（可选，t4）：dispatch 侧 respawn/teleport/load 消息
+   * → 段序号 +1 + 事件位编码进下一帧（Rust 事件槽不含外部驱动断点——t3-memo
+   * §3.4.1 触发清单的 dispatch 面）。实现侧自查 tick 模式（非 tick no-op），
+   * 耦合/解耦零回归。 */
+  tickExternalBreak?(evtBit: number): void;
+  /** world-json 重建钩子（可选，t4）：tick 模式下 tick 标号归零 + 段 +1 +
+   * worldRebuild 位 + 排序门重建。非 tick 模式 no-op（实现侧自查）。 */
+  onWorldRebuilt?(): void;
   /** init 消息处理钩子（debug：回执 `ready`；game 无）。 */
   onInit?(msg: unknown): void;
   /** wasm-init 消息处理钩子（debug：内嵌默认纹理包 mtzB64 存取）。 */
@@ -178,6 +197,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       // 反复加载时旧 PhysWorld 泄漏，双实例时代泄漏翻倍
       env.phys.current?.free?.();
       env.tickPhys?.current?.free?.();
+      env.scratch?.current?.free?.(); // t4 G3 三实例：scratch 随世界重建同步重建
       const p = env.createPhysWorld();
       p.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
       env.phys.current = p;
@@ -188,11 +208,18 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         t.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
         env.tickPhys.current = t;
       }
-      env.syncParamsToWasm(); // 双实例同参（注入实现按槽内全部实例同步）
+      // t4 G3 三实例：scratch 同建同参（F4-C 乐观评估执行体；仅 tick 模式驱动）
+      if (env.scratch) {
+        const sc = env.createPhysWorld();
+        sc.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
+        env.scratch.current = sc;
+      }
+      env.syncParamsToWasm(); // 双/三实例同参（注入实现按槽内全部实例同步）
       env.authLoop.setFixedDt(env.getConfigTickRate()); // 面板 tickRate 生效
       env.authLoop.reset();
       env.decoupledLoop?.publishCurrentState(); // 首帧状态即刻可见（harness applyWorld:150 语义）
       env.onWorldBuilt?.(p);
+      env.onWorldRebuilt?.(); // t4：tick 模式标号归零 + 段 +1 + worldRebuild 位（非 tick no-op）
       return;
     }
     if (type === 'config') {
@@ -237,13 +264,16 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
           // 耦合期 tickPhys 闲置零影响、debug 不注入 tickPhys 时 optional chain
           // 跳过、halfWidth/radius 归一与 partial-patch 三字段守卫原样保留
           env.tickPhys?.current?.set_hull(hw, pl.standHeight, pl.duckHeight);
+          env.scratch?.current?.set_hull(hw, pl.standHeight, pl.duckHeight); // t4 G3 三实例
         }
       } else {
         env.syncParamsToWasm();
       }
-      // noclip 模式：与主线程渲染物理同步
+      // noclip 模式：与主线程渲染物理同步（G3：scratch 同步——noclip 不在种子面
+      // （§11.1 排除面「转换窗不可变」），双实例状态由 G3 同步保持恒等）
       if (typeof c.patch.mode === 'string') {
         env.phys.current.set_noclip(c.patch.mode === 'noclip');
+        env.scratch?.current?.set_noclip(c.patch.mode === 'noclip');
       }
       env.onConfigApplied?.(c.section, c.patch);
       return;
@@ -260,7 +290,9 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       } else {
         // 耦合模式维持 v7 单实例现状（tickPhys 空闲；复入解耦时 set-mode 对齐）
         env.phys.current?.respawn();
+        env.scratch?.current?.respawn(); // t4 G3：scratch 同落出生点（tick 模式种子等价）
       }
+      env.tickExternalBreak?.(AUTH_EVT.respawn); // tick 模式段 +1 + respawn 位（非 tick no-op）
       return;
     }
     if (type === 'sync-render-state') {
@@ -296,6 +328,9 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
           s.velX, s.velY, s.velZ, s.onGround,
         );
       }
+      // t4：tick 模式存点 load = 断点（§3.4.1 存点 load 触发——LOAD 位 + 段 +1；
+      // 非 tick 模式 no-op——耦合大偏差校准不是断点）
+      env.tickExternalBreak?.(AUTH_EVT.load);
       env.shared.current?.resetInput();
       return;
     }
@@ -306,6 +341,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       if (typeof sm.json === 'string' && env.phys.current) {
         env.phys.current.set_spawn_points(sm.json);
         env.tickPhys?.current?.set_spawn_points(sm.json); // G3 双实例同参
+        env.scratch?.current?.set_spawn_points(sm.json); // t4 G3 三实例
       }
       return;
     }
@@ -314,6 +350,8 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       if (typeof tm.target === 'number') {
         env.phys.current?.teleport_to_spawn(tm.target);
         env.tickPhys?.current?.teleport_to_spawn(tm.target); // G3 双实例同步
+        env.scratch?.current?.teleport_to_spawn(tm.target); // t4 G3 三实例
+        env.tickExternalBreak?.(AUTH_EVT.teleport); // t4：tick 模式段 +1 + teleport 位
       }
       return;
     }
@@ -325,6 +363,8 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       const yaw = tm.yaw !== undefined ? tm.yaw : cur.yaw;
       env.phys.current.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw);
       env.tickPhys?.current?.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw); // G3 双实例同步
+      env.scratch?.current?.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw); // t4 G3 三实例
+      env.tickExternalBreak?.(AUTH_EVT.teleport); // t4：tick 模式段 +1 + teleport 位
       return;
     }
     if (type === 'set-death-threshold') {
@@ -334,6 +374,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       if (typeof dm.value === 'number') {
         env.phys.current?.set_death_y(dm.value);
         env.tickPhys?.current?.set_death_y(dm.value);
+        env.scratch?.current?.set_death_y(dm.value); // t4 G3 三实例
       }
       return;
     }
@@ -341,9 +382,14 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       // 热切握手（§3.4.C/G2）：UI 触发 → worker 翻转 gate + 状态注入 → mode-ack。
       // 幂等：同 mode 的 set-mode 直接回 ack（不重复执行步骤 a-f）——主线程
       // 500ms 超时重发的兜底回执。
+      // tick 模式注册（任务 t2）：mode 联合类型三值化——四向交接矩阵
+      // （coupled↔decoupled 既有两向 + coupled→tick/decoupled→tick/tick→coupled/
+      // tick→decoupled 四向 tick 行，auth/compute-mode.ts MODE_HANDOVER_MATRIX）
+      // 全部经本入口；coupled→tick 必带 state（主线程 predPhys 全态 9 字段，
+      // 复用 coupled→decoupled 同款通道，t3-memo §2.2）。
       const sm = msg as { mode?: string; state?: SyncRenderStateLike };
       const mode = sm.mode;
-      if (mode !== 'coupled' && mode !== 'decoupled') return;
+      if (mode !== 'coupled' && mode !== 'decoupled' && mode !== 'tick') return;
       if (mode !== (env.getComputeMode?.() ?? 'coupled')) {
         env.onSetMode?.(mode, sm.state);
       }

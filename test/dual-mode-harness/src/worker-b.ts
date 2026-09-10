@@ -47,6 +47,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TestShared, type SharedStateMsg, type SharedStateData } from './shared-state.js';
+import { ShmState } from '../../../src/ts-shared/auth/shared-state.js';
+import type { ComputeMode } from '../../../src/ts-shared/auth/compute-mode.js';
+import { TickConsumer } from './renderer/tick-consumer.js';
 
 // ── 消息握手（与 main.ts 约定）──────────────────────────────────
 interface InitSharedMessage {
@@ -57,6 +60,16 @@ interface InitSharedMessage {
 interface InitMsgMessage {
   type: 'init-msg';
   renderPort: MessagePort;
+}
+/** auth 通道初始化（tick 模式经 TickConsumer 消费权威帧；与渲染通道 TestShared 分离）。 */
+interface InitAuthMessage {
+  type: 'init-auth';
+  shared: SharedArrayBuffer | null;
+}
+/** 计算模式通知（main 由 WorkerA 的 mode-ack 转发而来；真相源仍在 WorkerA）。 */
+interface ComputeModeMessage {
+  type: 'compute-mode';
+  mode: ComputeMode;
 }
 interface InitCanvasMessage {
   type: 'init-canvas';
@@ -75,6 +88,8 @@ interface GlbMessage {
 type WorkerBMessage =
   | InitSharedMessage
   | InitMsgMessage
+  | InitAuthMessage
+  | ComputeModeMessage
   | InitCanvasMessage
   | ResizeMessage
   | GlbMessage;
@@ -145,6 +160,20 @@ const FRUSTUM_PAD = 1.6;
 
 // ── 运行时状态 ──────────────────────────────────────────────────
 let shared: TestShared | null = null;
+
+// ── 三模式渲染侧（tick 模式消费 auth 通道）──────────────────────
+/** 计算模式镜像（真相源在 WorkerA；由 main 转发 mode-ack——不做本地推断）。 */
+let computeMode: ComputeMode = 'coupled';
+/** auth 通道（tick 模式权威帧来源；与渲染通道 TestShared 相互独立）。 */
+let authShared: ShmState | null = null;
+/** tick 模式消费器（迁自 game：α 网格弦插值 + 六显示态 + Δ 控制器 + 断窗八类）。 */
+const tickConsumer = new TickConsumer({ tickRate: 64 });
+
+/** 面板 tickRate（渲染通道槽；未就绪/非法 → 64）。tick 模式权威步长 = 该值 raw。 */
+function readPanelTickRate(): number {
+  const r = shared?.readTickRate();
+  return typeof r === 'number' && Number.isFinite(r) && r > 0 ? r : 64;
+}
 let renderer: THREE.WebGLRenderer | null = null;
 let scene: THREE.Scene | null = null;
 let camera: THREE.PerspectiveCamera | null = null;
@@ -190,6 +219,17 @@ self.addEventListener('message', (e: MessageEvent) => {
           resumeChannel.port2.postMessage(null);
         }
       };
+      break;
+    case 'init-auth':
+      // auth 通道（tick 模式权威帧来源）；无 SAB 时保持 null → tick 模式回退既有路径
+      authShared = msg.shared ? new ShmState(msg.shared) : null;
+      break;
+    case 'compute-mode':
+      // 模式切换：消费器状态不跨模式存活（重新播种插值窗口/Δ 控制器）。
+      // tick 模式下权威步长 = 面板值 raw 直译（无 +3 偏移），故按面板 tickRate 设给消费器。
+      computeMode = msg.mode;
+      tickConsumer.setTickRate(readPanelTickRate());
+      tickConsumer.reset();
       break;
     case 'init-canvas':
       initRenderer(msg.canvas);
@@ -671,6 +711,29 @@ resumeChannel.port1.onmessage = () => {
  */
 function onFrame(): boolean {
   const now = performance.now();
+
+  // ── tick 模式：经 TickConsumer 消费 auth 通道权威帧 ──────────────
+  // tick 模式的权威帧不在 TestShared 渲染通道上（那是 MirrorShmState 的镜像），
+  // 而是走 auth 通道的 I_A_* 三元组 + seqlock 读侧代际复检；消费器负责
+  // α 确定性网格弦插值、六显示态（hold-scheduled/starved/gap/break-direct…）
+  // 与 Δ 事件驱动控制器。耦合/解耦模式仍走下方既有插值路径。
+  if (computeMode === 'tick' && authShared) {
+    tickConsumer.step(now, (dstF, dstI) => authShared!.readAuthoritativeInto(dstF, dstI));
+    const o = tickConsumer.out;
+    const pose: SharedStateData = {
+      pos: { x: o.x, y: o.y, z: o.z },
+      vel: { x: o.vx, y: o.vy, z: o.vz },
+      yaw: o.yaw,
+      pitch: o.pitch,
+      v: tickConsumer.stats.displayedFrames,
+    };
+    localCopy = pose; // HUD 摘要显示权威消费位姿
+    stats.frames++;
+    applyCulling(pose);
+    render(pose);
+    return true;
+  }
+
   const state = shared!.readState(); // ① 非阻塞；V 更新→读最新槽（无撕裂），未变→null
   const newState = state !== null;
   if (state) {

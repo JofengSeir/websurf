@@ -68,9 +68,14 @@ frame(): requestAnimationFrame(frame)
 | 失焦清理 | `blur` → 清键位 + 鼠标增量 | `src/main.ts:326-330` |
 | 难度按钮 | `shared.writeTickRate(rate)` 仅 store 无 notify；按钮组 关/32/64/128/256/1000 | `src/main.ts:332-347`、`index.html:78-85` |
 
-## 4. WorkerA 双模物理循环（阶段2）
+## 4. WorkerA 解耦线物理循环（阶段2）
 
-**每轮结构**（`src/worker-a.ts:213-308`，逐字语义）：
+> **⚠ 2026-09-11 迁移**：本节记录的双模循环（1ms 真理源 + 64t tickPhys 校准）计算本体已抽到共享层
+> `仓库根 src/ts-shared/decoupled/decoupled-loop.ts`；`src/worker-a.ts` 现为三模式装配层，本节
+> `src/worker-a.ts:NNN` 行号**已漂移**，语义以 `decoupled-loop.ts` 为准。三模式热切握手（`set-mode`→`mode-ack`）
+> 的时序见 [../overview.md](../overview.md) §3 阶段0 与 [../README.md](../README.md)。
+
+**每轮结构**（现址 `仓库根 src/ts-shared/decoupled/decoupled-loop.ts`，逐字语义）：
 
 ```
 loop():

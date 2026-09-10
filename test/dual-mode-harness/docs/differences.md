@@ -6,16 +6,30 @@
 
 | 维度 | WebSurf-test（本工程） | game / debug | viewer |
 |---|---|---|---|
-| 定位 | **时序验证工程**：双模物理 + OffscreenCanvas 渲染时序验证（`package.json:4`） | 完整可玩产品（面板/计时挑战/地图管理等功能层） | 地图浏览/查看器（无物理） |
-| 线程拓扑 | 主线程（仅输入/UI）+ WorkerA（双模物理）+ WorkerB（渲染）三线程 | 主线程（预测物理 + 渲染 + UI）+ Worker（权威帧计算）双线程 | 单线程主线程 |
-| 渲染位置 | **WorkerB**（OffscreenCanvas，主线程零取帧零等待，`src/main.ts:151-152`） | **主线程** canvas（rAF tick 内 renderer.render，`game/src/renderer/renderer-main.ts:693-734`） | 主线程 |
-| 物理 | WorkerA 双实例：1ms 无限制真理源 + 独立 64t 速度线（`src/worker-a.ts:103-107`） | Worker 权威 64Hz 单实例 + 主线程预测单实例（`仓库根 src/ts-shared/auth/auth-loop.ts:89`；`game/src/renderer/renderer-main.ts:700-710`） | 无（`viewer/crates/wasm/Cargo.toml:5` 注释明示「不含 websurf-phys（无物理）」，依赖表亦无此依赖） |
-| ts-shared 复用 | 仅 `KEY_MASK`（`src/shared-state.ts:51`） | 7 模块：auth-loop/shared-state/worker-dispatch + input-layer + authority-calibrator/params/world-builder（grep `debug/src`、`game/src` ts-shared import 核实） | 无 import（grep 空仅注释引用，`viewer/src/core/pose.ts:11`） |
-| CI | 仅构建验证不部署（`仓库根 .github/workflows/deploy-pages.yml:7,133-145`） | 构建并部署 Pages | 构建并部署 Pages |
+| 定位 | **时序验证工程**：三计算模式物理（耦合/解耦/tick，运行时热切）+ OffscreenCanvas 渲染时序验证（`package.json:4`） | 完整可玩产品（面板/计时挑战/地图管理等功能层）；**game 已回退为仅耦合模式**（工作区 = `c4824e9`） | 地图浏览/查看器（无物理） |
+| 线程拓扑 | 主线程（输入/UI/模式切换）+ WorkerA（三模式物理）+ WorkerB（渲染）三线程 | 主线程（预测物理 + 渲染 + UI）+ Worker（权威帧计算）双线程 | 单线程主线程 |
+| 渲染位置 | **WorkerB**（OffscreenCanvas，主线程零取帧零等待，`src/main.ts:197-198`） | **主线程** canvas（rAF tick 内 renderer.render，`game/src/renderer/renderer-main.ts:700-734`） | 主线程 |
+| 物理 | WorkerA **三实例**：`phys` 权威（三模式共用）/ `tickPhys` 解耦 64t 校准线 / `scratch` tick 模式 F4-C 乐观评估（`src/worker-a.ts:96-110`）；双线互斥 gate + `set-mode`/`mode-ack` 热切 | Worker 权威 64Hz 单实例 + 主线程预测单实例（`仓库根 src/ts-shared/auth/auth-loop.ts:89`；`game/src/renderer/renderer-main.ts:700-710`） | 无（`viewer/crates/wasm/Cargo.toml:5` 注释明示「不含 websurf-phys（无物理）」，依赖表亦无此依赖） |
+| ts-shared 复用 | **2026-09-11 迁移后显著加深**：物理侧 6 模块（auth/shared-state、auth/auth-loop、auth/worker-dispatch、auth/tick-authority、decoupled/decoupled-loop、auth/compute-mode，`src/worker-a.ts:32-56`）+ 渲染侧 auth/shared-state + auth/compute-mode（`src/worker-b.ts:49-52`）；自建的只剩 192B 渲染通道协议（其键位掩码定义仍复用共享层 `src/shared-state.ts:51`） | 7 模块：auth-loop/shared-state/worker-dispatch + input-layer + authority-calibrator/params/world-builder（debug 与 game **同集**；grep 核实） | 无 import（`viewer/src/core/pose.ts:23-25` 本地复刻 `bspYawToCsYaw`，非注释互引） |
+| CI | 仅构建验证不部署 + 跑 `test:three-mode`（`仓库根 .github/workflows/deploy-pages.yml:7,134-150`） | 构建并部署 Pages | 构建并部署 Pages |
+
+> **⚠ 2026-09-11 三模式迁移**：本文核对日期为 2026-09-07（迁移前）。**第一节 SAB 布局**的对照现应读作
+> 「harness **渲染通道** 192B vs game/debug 权威帧协议 512B」——harness 现在**另有一条 auth 通道**，
+> 直接用共享层 `ShmState`（512B，权威/解耦帧 + `I_A_SEG/I_A_TICK/I_A_EVT/I_A_PSEQ` 元数据三元组），
+> 三模式物理全部经它读写；`MirrorShmState` 再把帧镜像进 192B 渲染通道（`src/worker-a.ts:122-150`）。
+> 协议细节见 [./implementation/shared-layout.md](./implementation/shared-layout.md) 与 [../../../docs/ts-shared.md](../../../docs/ts-shared.md)。
+> 第 2 节「双实例」现为三实例，语义归属不变（解耦线 = 原模式A/B 的抽出地
+> `仓库根 src/ts-shared/decoupled/decoupled-loop.ts`）。
 
 以下各节展开最关键的四处差异（SAB 布局、物理拓扑与校准、渲染管线、最小集取舍）。
 
-## 1. SAB 布局：192B harness 专属 vs 512B 权威帧协议
+## 1. 通道布局：harness 渲染通道 192B 专属 vs 共享层 512B 协议
+
+**先看结论（2026-09-11 迁移后）**：harness 现在有**两条通道**——
+① **渲染通道** `TestShared` 192B（下表左列，自建，供 WorkerB 采样）；
+② **auth 通道** 512B，直接用共享层 `ShmState`（**与 game/debug 同一套协议**，含权威/解耦帧 +
+`I_A_SEG`/`I_A_TICK`/`I_A_EVT`/`I_A_PSEQ` 元数据三元组），三模式物理全部经它读写——**它不再是 harness 专属**。
+故下表的「同族不同版」对照只适用于**渲染通道**那一列。
 
 两套协议**同族不同版**：harness 的 `TestShared` 与 game/debug 的 ts-shared `SharedState` 都是「SAB + Atomics + 双缓冲状态槽」，但布局与语义不同（`src/shared-state.ts:2-4` 自我声明「不是同一套」）。
 
@@ -33,7 +47,7 @@
 
 ### 2.1 实例归属不同
 
-- **harness**：两个 PhysWorld 都在 **WorkerA** 内——`phys`（模式A，1ms 子步实时输入，唯一 SAB 输入消费者与状态槽写入者）+ `tickPhys`（模式B，仅 64t 步长，独立演化）（`src/worker-a.ts:103-107,21-22`）。
+- **harness**：**三个** PhysWorld 都在 **WorkerA** 内——`phys`（权威实例，三模式共用；解耦模式下即 1ms 子步实时输入的无限制真理源）+ `tickPhys`（解耦模式 64t 速度校准线，独立演化）+ `scratch`（tick 模式 F4-C 乐观评估执行体，权威实例零写入）（`src/worker-a.ts:96-110`；解耦循环本体见 `仓库根 src/ts-shared/decoupled/decoupled-loop.ts`）。
 - **game/debug**：权威 PhysWorld 在 **Worker**（auth-loop 固定步长 `fixedDt=1/64`，`config.physics.tickRate` 动态覆盖，`仓库根 src/ts-shared/auth/auth-loop.ts:89,205-213`）；预测 PhysWorld 在**主线程**（可变 dt ≤ 0.1s、每 rAF 一 tick，`game/src/renderer/renderer-main.ts:701-710`；debug 同序 `debug/src/renderer/renderer-main.ts:437-447`）。
 
 ### 2.2 「哪条线是真理」方向相反
