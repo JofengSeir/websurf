@@ -143,6 +143,12 @@ jobs:
         working-directory: test/dual-mode-harness
         run: npm run build:ts
 
+      - name: Run dual-mode-harness three-mode runtime verification
+        working-directory: test/dual-mode-harness
+        # 三模式（coupled/decoupled/tick）运行时装配 + 热切握手 + 遥测链路（14 断言，
+        # 驱动 build:ts 产物 worker-a.js）——game 侧模式切换已回退，此处为唯一运行面
+        run: npm run test:three-mode
+
       # ── 组装 Pages 部署目录（入口页 + debug/ + game/ + viewer/）──
       - name: Assemble Pages deploy directory
         run: |

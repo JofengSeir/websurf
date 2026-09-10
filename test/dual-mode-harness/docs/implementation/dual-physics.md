@@ -1,6 +1,17 @@
-# WorkerA 双模物理（实现篇 · 维度 I）
+# 解耦线物理（实现篇 · 维度 I）
 
-> **事实基准**：本文所有论断核对自当前工作区代码（核对日期 2026-09-07）。未注明前缀的相对路径均相对 `test/dual-mode-harness/`；仓库根共享层以 `仓库根 src/…` 标注。循环骨架与唤醒协议的时序视角见 [../sequences.md](../sequences.md)。
+> **事实基准**：本文所有论断核对自当前工作区代码（核对日期 2026-09-11）。未注明前缀的相对路径均相对 `test/dual-mode-harness/`；仓库根共享层以 `仓库根 src/…` 标注。循环骨架与唤醒协议的时序视角见 [../sequences.md](../sequences.md)。
+>
+> **⚠ 2026-09-11 三模式迁移（重要读前须知）**：本文原题「WorkerA 双模物理」，记录 `src/worker-a.ts` 内的
+> 双实例循环。该循环的**计算本体已抽到共享层** `仓库根 src/ts-shared/decoupled/decoupled-loop.ts`
+> （其文件头记载了「移植自 harness worker-a.ts:43-61/:177」的出处），`worker-a.ts` 现为**三模式装配层**
+> （418 行：三实例槽 + 双线互斥 gate + `set-mode`/`mode-ack` 热切 + 发布镜像）。
+> 因此：
+> - **本文描述的物理语义仍然成立**（解耦 = 1ms 无限制真理源 + 独立 64t tickPhys 速度校准 + 分叉锚定），
+>   但现在对应 `decoupled-loop.ts`；文中 `src/worker-a.ts:NNN` 行号**已随迁移漂移**，请以该文件为准。
+> - 本工程现支持三模式（`coupled`/`decoupled`/`tick`）运行时热切：总览见 [../overview.md](../overview.md) §1/§2，
+>   三模式内核与协议见 [../../../../docs/ts-shared.md](../../../../docs/ts-shared.md)。
+>
 > 设计动机的历史推导（「64t 坡速 ≈ 无限制」会审、旧单实例实现的缺陷、四条用户要求）见工程根 [../../CONCLUSION.md](../../CONCLUSION.md)；本文只记录**当前代码**如何落地这些结论。
 
 ## 1. 双实例架构：两个 PhysWorld
@@ -114,6 +125,7 @@ function tickDiverged(): boolean {
 
 ## 9. 验证覆盖
 
-- `scripts/phys-smoke.mjs`（3585 行，53 断言）：`ModeAB` 驱动器逐字镜像 worker-a loop 语义（`scripts/phys-smoke.mjs:405-486`），覆盖模式A 起跳即时/tick 线起跳延迟、稳态速度、累加器上限、消息回退等；断言 #24-29 直接针对 §3.3 的子步上限/封顶。
-- `scripts/dual-compare.mjs`：相同输入序列下 game 双线（可变 dt）vs test 双模数据对照（`scripts/dual-compare.mjs:1-12`）。
+- `scripts/phys-smoke.mjs`（3598 行）：`ModeAB` 驱动器镜像**本解耦线语义**（原 `worker-a.ts` loop，现址 `仓库根 src/ts-shared/decoupled/decoupled-loop.ts`），覆盖模式A 起跳即时/tick 线起跳延迟、稳态速度、累加器上限、消息回退等。⚠️ 当前实测 **190/191**——1 项「出坡校验#2 各 tick 档位互相一致」为**迁移前既有失败**（已用剥除全部 WIP 的 HEAD Rust 复现同值，与三模式迁移无关）；另 `phys-smoke.mjs` 有硬编码路径 `src/maps/surf_666.bsp`，而地图实际在仓库根 `maps/`（需先建 `src/maps` 链接才能跑真实地图段）。
+- `scripts/three-mode-verify.mjs`（163 行，14 断言）：三模式运行时验证——node 里给构建产物 `worker-a.js` 补最小 Web Worker 宿主，断言热切闭合/幂等/非法 mode 拒绝/每模式帧发布/tick-stats 遥测链路。
+- `scripts/dual-compare.mjs`：相同输入序列下 game 双线（可变 dt）vs test 解耦线数据对照（`scripts/dual-compare.mjs:1-12`）。
 - `scripts/perf-bench.mjs`：1ms 子步耗时分布，判据 p95 < 1000µs（`scripts/perf-bench.mjs:6-8`）。

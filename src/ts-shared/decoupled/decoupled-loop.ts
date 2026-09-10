@@ -1,13 +1,17 @@
 /**
  * 解耦模式物理循环（WorkerA 编排移植，phys-mode-port t10）。
  *
- * 移植源：test/dual-mode-harness/src/worker-a.ts（§2 移植面清单〔整体移植〕核心），
- * 归宿：game Worker 内与 v7 权威线（auth-loop）**双线共存、mode gate 互斥**——
+ * 移植源：test/dual-mode-harness/src/worker-a.ts（§2 移植面清单〔整体移植〕核心）。
+ * **归宿（2026-09-11 更新）**：本循环是**共享层物理内核**，当前唯一装配方是
+ * `test/dual-mode-harness/src/worker-a.ts`（`createDecoupledLoop` + `start()`）——
+ * game 侧的三模式特性经真机手测判定失败并已整体回退（`game/` 工作区 = `c4824e9`，
+ * 仅耦合模式），debug 亦未注入。装配后与 v7 权威线（auth-loop）**双线共存、mode gate 互斥**：
  * - 耦合模式：本循环 gate 早退（setTimeout 4ms 空转等待），v7 权威线照旧；
  * - 解耦模式：本循环驱动 phys（1ms 无限制真理源）+ tickPhys（64t 速度校准线），
  *   S_D 槽唯一写入者；v7 auth-loop gate 早退（写槽权移交本线）。
  *
- * 全序（harness worker-a.ts:213-308 顺序硬约束，逐段移植）：
+ * 全序（**迁移前**双模版 harness worker-a.ts:213-308 顺序硬约束，逐段移植；该文件已于
+ * 2026-09-11 重写为三模式装配层，下列 worker-a 行号均属迁移前版本）：
  * delta clamp → tickPhys 激活判定 → 停用↔激活边沿（清采样器 + alignTickPhys）→
  * 【第一步 tick 计算】边界到达才执行：peekKeys 快照 + tickDx/tickDy 窗口限幅 →
  * 分叉锚定（TICK_ANCHOR_DIST 拉回）→ tickPhys.tick(tickDt) → phys.set_velocity 校准
@@ -27,8 +31,9 @@
 import type { ShmState, MsgState, AuthFrame } from '../auth/shared-state.js';
 import type { PhysWorldLike } from '../auth/auth-loop.js';
 
-/** 计算模式（worker 侧真相源；set-mode 消息翻转，§3.4.C）。 */
-export type ComputeMode = 'coupled' | 'decoupled';
+/** 计算模式（三值，plan-v2 §1.1 新增 tick——worker 单实例 raw 64Hz；类型唯一
+ * 权威定义收敛 auth/compute-mode.ts，此处 re-export 保持既有导入点零改）。 */
+export type { ComputeMode } from '../auth/compute-mode.js';
 
 /** 主线程同步渲染态（10 字段；game authority-calibrator.ts:37-48 的结构等价声明
  * ——ts-shared 不反向依赖 game，两端按结构兼容消费）。 */
@@ -113,7 +118,7 @@ export interface DecoupledLoop {
   start(): void;
 }
 
-// ── 移植常量（harness worker-a.ts:43-61, :177；GRAVITY/DEFAULT_WASM_URL/
+// ── 移植常量（**迁移前**双模版 harness worker-a.ts:43-61, :177；GRAVITY/DEFAULT_WASM_URL/
 //    EMPTY_TELEPORT_JSON〔不移植〕——game 重力走 params 链、wasm/世界走 dispatch）──
 /** 模式A：1ms 固定子步（无限制真理源）。 */
 const RENDER_DT = 0.001;
@@ -142,7 +147,7 @@ function tickInputMax(tickDt: number): number {
 }
 
 export function createDecoupledLoop(env: DecoupledLoopEnv): DecoupledLoop {
-  // ── 运行时状态（harness worker-a.ts:113-123 平移）───────────────
+  // ── 运行时状态（**迁移前**双模版 harness worker-a.ts:113-123 平移）───────────────
   /** 模式A 累加器（秒）。 */
   let acc = 0;
   /** 模式B 累加器（秒；保留余数——64t 网格对齐真实时间轴的相位来源）。 */
@@ -293,7 +298,7 @@ export function createDecoupledLoop(env: DecoupledLoopEnv): DecoupledLoop {
     });
   }
 
-  /** 主循环（harness worker-a.ts:213-308 全序移植 + mode gate）。 */
+  /** 主循环（**迁移前**双模版 harness worker-a.ts:213-308 全序移植 + mode gate）。 */
   function loop(): void {
     const active = env.isDecoupled() && !!env.shared && !!env.getPhys();
     // 让出事件循环（投递 respawn/world-json/set-mode 消息；active 时 0ms 急轮询，

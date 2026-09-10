@@ -14,7 +14,9 @@
  * 基准 3（对象构造开销模型）：11×Reflect.set vs 8×SAB Float64 写 vs 8×视图读——
  *   回答"直写 SAB 与 Reflect.set 是否一个量级"
  *
- * 注：与 phys-smoke.mjs 同为镜像风格（TestShared 布局/常量在此复制，改动须同步）。
+ * 注：与 phys-smoke.mjs 同为镜像风格（TestShared 布局在此复制，改动须同步
+ * `src/shared-state.ts`；解耦循环语义同步对象为 `src/ts-shared/decoupled/decoupled-loop.ts`——
+ * 2026-09-11 起不再按 worker-a.ts 同步，它已变为三模式装配层）。
  */
 
 import { readFileSync } from 'node:fs';

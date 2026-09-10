@@ -70,7 +70,7 @@ import('../pkg/websurf_test_wasm.js').then(async ({ BspProcessor, initSync }) =>
 
   const wasmBytes = readFileSync(join(root, 'pkg/websurf_test_wasm_bg.wasm'));
 
-  // ── 主线程物理 loop（镜像 worker-a.ts 双模；PhysWorld 实例线程隔离，须主线程持有；
+  // ── 主线程物理 loop（镜像 decoupled-loop.ts 双模；PhysWorld 实例线程隔离，须主线程持有；
   //    rAF 与 WorkerB 均为独立线程——三线程并行，互不抢占主线程）──
   const { PhysWorld } = await import('../pkg/websurf_test_wasm.js');
   const phys = new PhysWorld();

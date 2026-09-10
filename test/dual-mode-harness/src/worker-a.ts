@@ -1,361 +1,418 @@
 /**
- * WorkerA — 双模物理核心（2026-08-11 重构：tick 先行 + 独立 64t 权威速度线）。
+ * WorkerA — 三模式物理核心（coupled / decoupled / tick + 运行时热切）。
  *
- * 架构（依据 test/dual-mode-harness/CONCLUSION.md 会审结论 + 四条用户要求）：
- * - **输入唯一入口**：主线程只写 SAB 输入槽（或消息回退），WorkerA 是唯一消费者；
- *   模式A（无限制）逐 1ms 子步**实时消耗**——位置/角度只由模式A 推进；
- * - **先 tick 计算、后无限制计算**：每轮循环先检查 tick 节点（loAcc ≥ tickDt），
- *   未到达**跳过直达无限制计算**；到达则：
- *   ① 输入采样（tick 边界快照：键位 = 当前掩码 peekKeys；鼠标 = 自上一边界
- *      模式A 实时消耗的累积增量——64t 操作粒度 = 难度核心）；
- *   ② **独立 tick 实例**（tickPhys，第二个 PhysWorld，只走 tickDt 步长）推进——
- *      真实 64t 物理（摩擦/加速/碰撞/bhop 钳制相位全在 64t 网格上，game 权威
- *      实例语义）；**分叉兜底锚定**：与模式A 位置偏差 > TICK_ANCHOR_DIST（死亡/
- *      传送/卡墙/坡缘等极限操作后的无界分叉——校准速度脱离渲染上下文的"渲染
- *      混乱"根因）→ 全量拉回模式A；正常演化不干预（64t 离散相位保留）；
- *      其状态时刻 = 边界时刻 → 校准速度与模式A 位置**同刻**（消除旧单实例
- *      "未来速度"伪差）；
- *   ③ **速度校准（唯一 tick 影响通道）**：`phys.set_velocity(tickPhys 三轴速度)`
- *      —— 位置/角度绝不触碰；vy 用 tick 实例的（独立实例无重复重力问题，
- *      旧实现"vy 用模式A"的补救 hack 不再需要）；
- * - **模式A（无限制真理源）**：1ms 子步 + 实时输入，共享状态槽唯一写入者 =
- *   模式A 子步（WorkerB 渲染参数唯一来源——用户要求 4）；
- * - TICK_RATE=0 或 ≥1000（tickDt ≤ 1ms，与模式A 等价）→ 跳过 tick
- *   （纯 1ms 无限制实时输入）；
- * - 模式B 停用→激活边沿：累积器清零 + tickPhys.set_state(phys 全状态) 对齐起点；
- *   respawn / world-json：双实例同步重建。
+ * 迁移背景（2026-09-10）：game 的三模式切换经真机手测判定失败，该工程已回退为
+ * 原本的耦合单模（`game/` 与 c4824e9 逐字节一致）。三种模式的**物理计算本体**
+ * 迁入本测试工程，实现在 src/ts-shared（auth-loop / decoupled-loop /
+ * tick-authority / compute-mode / worker-dispatch）——本文件只做 harness 装配。
  *
- * 预期行为：sustained surf 稳态速度仍 tick 无关（dt 标定正确物理）；tick 难度
- * 可见于 bhop 时机（速度通道延迟 ∈(0,tickDt]）、快变输入、碰撞相位。
+ * 通道（双通道，职责分离）：
+ * - **auth 通道**（`ShmState`，512B，共享协议）：输入消费 + 权威/解耦帧 + meta
+ *   三元组（seg/tick/evt）。三模式物理的唯一读写面；`createWorkerDispatch`
+ *   拥有其 'init'/'input'/'wasm-init'/'world-json' 生命周期。
+ * - **渲染通道**（harness 既有 `TestShared`，192B）：`MirrorShmState` 在**每次
+ *   发布时**把帧镜像进 TestShared 状态槽 → WorkerB 渲染路径**零改动**
+ *   （TestShared 状态槽无 eyeHeight 字段，沿用既有固定站立眼高语义）。
  *
- * 世界构建：主线程 BSP 解析分发（{type:'world-json'}）→ set_hull + build_world +
- * 死亡阈值（brushJson min y）。BSP 是唯一玩法。
+ * 三模式语义（唯一权威：src/ts-shared/auth/compute-mode.ts）：
+ * - `coupled`：auth 线 64Hz 权威（面板 tickRate + 3 隐藏偏移）；默认模式。
+ * - `decoupled`：1ms 无限制真理源 + 独立 64t tickPhys 速度校准 + 分叉锚定。
+ * - `tick`：raw 64Hz 单实例权威 + F4-C scratch 乐观评估（排序门 + 内容封帽）。
+ * 双线互斥 gate + `set-mode`/`mode-ack` 热切握手全部由共享层 dispatch 收口。
  *
- * 循环驱动：setTimeout(loop, 0)——让出事件循环投递消息（respawn/world-json）；
- * 独立 Worker 线程永不阻塞主线程。背压 waitWakeup 承担休眠（多数轮次挂起/自旋交替）。
+ * 世界构建：主线程 BSP 解析后发 `world-json`（brushJson/triJson/teleportJson/
+ * spawn{x,y,z,yawDeg}）；dispatch 建三实例同参（G3）并 setFixedDt；本文件补齐
+ * harness 既有的死亡阈值（brushJson 最小 min[1] − 100）。
  */
 
 /// <reference lib="webworker" />
 
-import { TestShared, type SharedInputMsg, type SharedTickRateMsg } from './shared-state.js';
 import { PhysWorld, initSync } from '../pkg/websurf_test_wasm.js';
+import { TestShared, type SharedInputMsg, type SharedTickRateMsg } from './shared-state.js';
+import {
+  ShmState,
+  MsgState,
+  AUTH_EVT,
+  type AuthFrame,
+  type AuthPublishMeta,
+  type SharedState,
+} from '../../../src/ts-shared/auth/shared-state.js';
+import { createAuthLoop, type PhysWorldLike } from '../../../src/ts-shared/auth/auth-loop.js';
+import { createWorkerDispatch } from '../../../src/ts-shared/auth/worker-dispatch.js';
+import {
+  createTickAuthority,
+  type TickF4Controller,
+  type F4AuthorityWorld,
+  type F4ScratchWorld,
+} from '../../../src/ts-shared/auth/tick-authority.js';
+import {
+  createDecoupledLoop,
+  type ComputeMode,
+  type DecoupledPhysWorld,
+  type HoldState,
+  type SavePointLike,
+  type SyncRenderStateLike,
+} from '../../../src/ts-shared/decoupled/decoupled-loop.js';
+import { resolveAuthTickRate } from '../../../src/ts-shared/auth/compute-mode.js';
 
-// ── 常量 ────────────────────────────────────────────────────────
-/** 模式A：1ms 固定子步（无限制真理源）。 */
-const RENDER_DT = 0.001;
-/** delta 限幅防炸：clamp(实际间隔, 0, 50ms)。 */
-const MAX_DELTA = 0.05;
-/** 每轮最多执行的 1ms 子步数（大 delta 防死亡螺旋；超限保留剩余累加防时间丢失）。 */
-const MAX_STEPS_PER_ROUND = 8;
-/** 累加器封顶（秒）：8 次上限耗尽后的残留上限，防无限追赶。 */
-const MAX_ACC = 0.02;
-/** 单次 mousemove 事件削平阈值（主线程已按事件 CLAMP；这里用于 tick 边界窗口上限）。 */
-const MAX_INPUT_DELTA = 1000;
-/** tick 边界鼠标增量上限：按 tick 窗口放大（1000/ms × tickDt），防极端甩视角穿墙。 */
-function tickInputMax(tickDt: number): number {
-  return MAX_INPUT_DELTA * (tickDt / RENDER_DT);
-}
-/** 背压休眠阈值：距下次子步剩余 >= 1ms 才挂起（WAKEUP 槽），否则自旋。 */
-const WAIT_THRESHOLD_MS = 1;
-/** 单次最长休眠（ms）：限制 respawn/init-wasm 等消息最坏延迟。 */
-const MAX_WAIT_MS = 4;
-/** 重力（默认 PhysParams.gravity=800；test 无重力调节面板）。 */
-const GRAVITY = 800;
-/** wasm 文件（build:wasm 已复制到 test 根）。 */
-const DEFAULT_WASM_URL = './websurf_test_wasm_bg.wasm';
-/** 空传送 report：最小集明确排除传送区域，build_world 必须接收该参数。 */
-const EMPTY_TELEPORT_JSON = '{"teleports":[],"triggers":[]}';
+/** 耦合权威线隐藏偏移（用户定调 2026-08-18）：实际步长 = 面板值 + 3。
+ *  仅耦合线消费；tick 走 raw 直译、解耦 tickPhys 另读 raw（§3.4.D）。 */
+const TICK_RATE_OFFSET = 3;
 
-// ── 消息协议 ────────────────────────────────────────────────────
-interface InitSharedMessage {
-  type: 'init-shared';
-  shared: SharedArrayBuffer;
-}
-/** 消息回退模式初始化（无 SAB）：renderPort 为 WorkerA→WorkerB 状态发布直连端口。 */
-interface InitMsgMessage {
-  type: 'init-msg';
-  renderPort: MessagePort;
-}
-interface InitWasmMessage {
-  type: 'init-wasm';
-  wasmUrl?: string;
-}
-interface RespawnMessage {
-  type: 'respawn';
-}
-interface WorldJsonMessage {
-  type: 'world-json';
-  brushJson: string;
-  triJson: string;
-  spawn: [number, number, number, number];
-}
-type WorkerAMessage =
-  | InitSharedMessage
-  | InitMsgMessage
-  | InitWasmMessage
-  | RespawnMessage
-  | WorldJsonMessage
-  | SharedInputMsg
-  | SharedTickRateMsg;
+/** 默认 tickRate（harness 难度按钮默认 64；TestShared 未就绪时兜底）。 */
+const DEFAULT_TICK_RATE = 64;
 
-// ── 运行时状态 ──────────────────────────────────────────────────
-let shared: TestShared | null = null;
-/** 模式A：无限制 1ms 真理源（渲染参数唯一源；共享槽唯一写入者）。 */
-let phys: PhysWorld | null = null;
-/** 模式B：独立 64t 权威速度线（tickPhys，只走 tickDt 步长；对模式A 唯一影响 =
- *  set_velocity 三轴速度校准）。 */
-let tickPhys: PhysWorld | null = null;
-let pendingWasmUrl: string | null = null;
-let initStarted = false;
-/** world-json 先于 wasm 初始化到达时暂存。 */
-let pendingWorld: WorldJsonMessage | null = null;
+/** 碰撞箱（harness 既有值；与 game player 配置一致）。 */
+const HULL_HALF_WIDTH = 16;
+const HULL_STAND_HEIGHT = 72;
+const HULL_DUCK_HEIGHT = 54;
 
-/** 模式A 累加器（秒）。 */
-let acc = 0;
-/** 模式B 累加器（秒；保留余数——网格对齐真实时间轴）。 */
-let loAcc = 0;
-/** 模式B tick 边界采样累积（自上一边界以来模式A 实时消耗的鼠标增量——tick 实例
- *  每 tickDt 消费一次；键位取边界当前掩码 peekKeys）。 */
-let tickDxAcc = 0;
-let tickDyAcc = 0;
-/** 模式B 上一轮是否激活（激活边沿重置采样器 + 对齐 tickPhys）。 */
-let modeBWasActive = false;
-let lastNow = performance.now();
+// ── 槽（dispatch/loops 共享）─────────────────────────────────────
+/** auth 通道槽（三模式物理唯一读写面；由 'auth-init' 注入）。 */
+const shared: { current: SharedState | null } = { current: null };
+/** 渲染通道槽（harness 既有 TestShared；由 'init-shared' 注入）。 */
+const testShared: { current: TestShared | null } = { current: null };
+/** 权威实例（耦合=权威线 / 解耦=1ms 真理源 / tick=raw 64Hz 唯一实例）。 */
+const phys: { current: DecoupledPhysWorld | null } = { current: null };
+/** 第二实例（解耦=64t 速度校准线；tick 模式闲置不驱动不 free）。 */
+const tickPhys: { current: PhysWorldLike | null } = { current: null };
+/** 第三实例（F4-C scratch 乐观评估执行体；仅 tick 模式驱动）。 */
+const scratch: { current: PhysWorldLike | null } = { current: null };
+/** wasm 线性内存（state_out 零分配视图宿主）。 */
+const wasmMemory: { current: WebAssembly.Memory | null } = { current: null };
 
-// ── 世界构建（BSP 导出分发）─────────────────────────────────────
-function applyWorld(msg: WorldJsonMessage): void {
-  if (!phys) return;
-  const [sx, sy, sz, yaw] = msg.spawn;
-  phys.set_hull(16, 72, 54);
-  phys.build_world(msg.brushJson, msg.triJson, EMPTY_TELEPORT_JSON, sx, sy, sz, yaw);
-  // tick 实例同世界构建（独立 64t 权威线——与模式A 同出生点同世界）
-  if (tickPhys) {
-    tickPhys.set_hull(16, 72, 54);
-    tickPhys.build_world(msg.brushJson, msg.triJson, EMPTY_TELEPORT_JSON, sx, sy, sz, yaw);
-  }
-  // 死亡阈值：brushJson 最小 min[1] - 100（默认 -100000 兜底）
-  try {
-    const brushes = JSON.parse(msg.brushJson) as Array<{ min: number[] }>;
-    let minY = Infinity;
-    for (const b of brushes) {
-      if (b.min[1] < minY) minY = b.min[1];
-    }
-    if (Number.isFinite(minY)) {
-      phys.set_death_y(minY - 100);
-      tickPhys?.set_death_y(minY - 100);
-    }
-  } catch (e) {
-    console.error('[worker-a] brushJson 解析失败（死亡阈值保持默认）:', e);
-  }
-  writeStateFromPhys(); // 首帧状态即刻可见
+/** 计算模式（worker 侧真相源；仅 set-mode 翻转——§3.4.C 握手纪律）。 */
+let computeMode: ComputeMode = 'coupled';
+/** 解耦 hold 冻结态（set-hold 注入；null = 自由）。 */
+let hold: HoldState | null = null;
+/** 最近一次 world-json 的 brushJson（死亡阈值计算用；dispatch 不透传）。 */
+let lastBrushJson: string | null = null;
+
+/** harness 侧配置（无参数面板；仅 tickRate 参与权威步长解析）。 */
+const config = {
+  physics: { tickRate: DEFAULT_TICK_RATE },
+};
+
+/** 当前面板 tickRate（harness 难度按钮 → TestShared 槽；tickRate=0/≥1000 由
+ *  harness 既有语义处理：0 = 关闭 tick 线）。 */
+function panelTickRate(): number {
+  const r = testShared.current?.readTickRate();
+  return typeof r === 'number' && Number.isFinite(r) && r > 0 ? r : DEFAULT_TICK_RATE;
 }
 
-/** 状态写回（模式A 子步 / respawn 共用）：写空闲槽（S[V&1^1]）→ Atomics.add(V,1）。
- * 共享槽**唯一写入者 = 模式A**（WorkerB 渲染参数唯一来源——用户要求 4）。 */
-function writeStateFromPhys(): void {
-  if (!shared || !phys) return;
-  const s = phys.state();
-  shared.writeState(
-    { x: s.posX, y: s.posY, z: s.posZ },
-    { x: s.velX, y: s.velY, z: s.velZ },
-    s.yaw,
-    s.pitch,
+// ── 渲染通道镜像（发布即镜像，无轮询）────────────────────────────
+/** 把 auth 帧写进 harness 既有 TestShared 状态槽（WorkerB 唯一渲染参数源）。
+ *  TestShared 槽位为 pos×3/vel×3/yaw/pitch——eyeHeight 不在槽内（既有语义）。 */
+function mirrorFrame(f: AuthFrame): void {
+  const t = testShared.current;
+  if (!t) return;
+  t.writeState(
+    { x: f.pos.x, y: f.pos.y, z: f.pos.z },
+    { x: f.vel.x, y: f.vel.y, z: f.vel.z },
+    f.yaw,
+    f.pitch,
   );
 }
 
-/** tickPhys 对齐模式A 当前全状态（模式B 停用→激活边沿 / 分叉兜底锚定调用；
- * 之后 tickPhys 独立演化）。 */
-function alignTickPhys(): void {
-  if (!phys || !tickPhys) return;
-  const s = phys.state();
-  tickPhys.set_state(s.posX, s.posY, s.posZ, s.yaw, s.pitch, s.velX, s.velY, s.velZ, s.onGround);
+/**
+ * auth 通道的 ShmState 子类：每次权威/解耦发布后把帧镜像进渲染通道。
+ * 用子类而非包装对象，是为了保持 `ShmState | MsgState` 的精确类型
+ * （dispatch/loops 的 env 按该联合类型标注，结构性包装无法通过类型门）。
+ */
+class MirrorShmState extends ShmState {
+  private readonly mirror: (f: AuthFrame) => void;
+
+  constructor(buffer: SharedArrayBuffer, mirror: (f: AuthFrame) => void) {
+    super(buffer);
+    this.mirror = mirror;
+  }
+
+  override writeAuthoritative(
+    a: Omit<AuthFrame, 'onGround'>,
+    onGround: boolean,
+    meta?: AuthPublishMeta,
+  ): number {
+    const v = super.writeAuthoritative(a, onGround, meta);
+    this.mirror({ ...a, onGround });
+    return v;
+  }
+
+  override writeDecoupled(frame: AuthFrame): void {
+    super.writeDecoupled(frame);
+    this.mirror(frame);
+  }
 }
 
-/** 分叉兜底锚定距离阈值（units）：tick 实例与模式A 位置偏差超过此值视为
- * "极限操作分叉"（死亡/传送/卡墙/坡缘），全量拉回；正常演化偏差有界（数十
- * units 内）不触发——tick 保持自身 64t 离散演化，避免锚定引入相位伪差。 */
-const TICK_ANCHOR_DIST = 64;
+/** worker 侧消息回退通道（无 SAB）：与 ShmState 分支同构地做发布镜像，
+ *  使非 SAB 环境下 WorkerB（经 renderPort 直连）仍能收到帧。 */
+class MirrorMsgState extends MsgState {
+  private readonly mirror: (f: AuthFrame) => void;
 
-/** tick 实例与模式A 位置是否已分叉（超阈值）。 */
-function tickDiverged(): boolean {
-  if (!phys || !tickPhys) return false;
-  const s = phys.state();
-  const t = tickPhys.state();
-  const dx = s.posX - t.posX;
-  const dy = s.posY - t.posY;
-  const dz = s.posZ - t.posZ;
-  return dx * dx + dy * dy + dz * dz > TICK_ANCHOR_DIST * TICK_ANCHOR_DIST;
+  constructor(mirror: (f: AuthFrame) => void) {
+    super(null);
+    this.mirror = mirror;
+  }
+
+  override writeAuthoritative(
+    a: Omit<AuthFrame, 'onGround'>,
+    onGround: boolean,
+    meta?: AuthPublishMeta,
+  ): number {
+    const v = super.writeAuthoritative(a, onGround, meta);
+    this.mirror({ ...a, onGround });
+    return v;
+  }
+
+  override writeDecoupled(frame: AuthFrame): void {
+    super.writeDecoupled(frame);
+    this.mirror(frame);
+  }
 }
 
-// ── wasm 初始化 + 世界构建 + 启动自驱循环（幂等）──────────────────
-async function startInit(): Promise<void> {
-  if (initStarted) return;
-  initStarted = true;
-  const url = pendingWasmUrl ?? DEFAULT_WASM_URL;
+function createAuthShared(buffer: SharedArrayBuffer | null): SharedState {
+  return buffer ? new MirrorShmState(buffer, mirrorFrame) : new MirrorMsgState(mirrorFrame);
+}
+
+// ── 三模式引擎装配（全部来自 src/ts-shared）──────────────────────
+/** F4-C 控制器（tick 模式 scratch 乐观评估 + 排序门 + 内容封帽）。 */
+const tickF4: TickF4Controller = createTickAuthority({
+  getShared: () => shared.current,
+  getAuthority: () => phys.current as F4AuthorityWorld | null,
+  getScratch: () => scratch.current as F4ScratchWorld | null,
+  getWasmBuffer: () => wasmMemory.current?.buffer ?? null,
+  getTickPeriodMs: () => 1000 / Math.max(panelTickRate(), 1),
+});
+
+/** 耦合权威自驱循环（auth 线：coupled + tick 推进；decoupled 早退）。 */
+const authLoop = createAuthLoop({
+  get shared() {
+    return shared.current;
+  },
+  getPhys: () => phys.current,
+  post: (msg) => postMessage(msg),
+  getComputeMode: () => computeMode,
+  holdState: () => (computeMode === 'tick' ? hold : null),
+  tickF4,
+});
+
+/** 解耦自驱循环（1ms 真理源 + 64t tickPhys 速度校准 + 分叉锚定）。 */
+const decoupledLoop = createDecoupledLoop({
+  get shared() {
+    return shared.current;
+  },
+  getPhys: () => phys.current,
+  getTickPhys: () => tickPhys.current as DecoupledPhysWorld | null,
+  getTickPhysRate: () => panelTickRate(),
+  isDecoupled: () => computeMode === 'decoupled',
+  getWasmMemory: () => wasmMemory.current,
+  getHold: () => hold,
+});
+// 自驱待命：未就绪/门关轮次空转等待，就绪 + 解耦后自动接管
+decoupledLoop.start();
+
+// ── 世界构建辅助 ────────────────────────────────────────────────
+/** 三实例同参（G3）：本 harness 无参数面板，仅同步碰撞箱（保持既有 wasm
+ *  默认参数语义不变——harness 此前从不调用 set_params）。 */
+function syncParamsToWasm(): void {
+  const instances: (PhysWorldLike | null)[] = [phys.current, tickPhys.current, scratch.current];
+  for (const w of instances) {
+    if (!w) continue;
+    w.set_hull(HULL_HALF_WIDTH, HULL_STAND_HEIGHT, HULL_DUCK_HEIGHT);
+  }
+}
+
+/** 死亡阈值：brushJson 最小 min[1] − 100（harness 既有语义，默认 −100000 兜底）。 */
+function applyDeathThreshold(): void {
+  if (!lastBrushJson) return;
+  let minY = Infinity;
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`fetch ${url} → ${resp.status}`);
-    const bytes = await resp.arrayBuffer();
-    initSync({ module: bytes });
-    phys = new PhysWorld();
-    tickPhys = new PhysWorld();
-    if (pendingWorld) {
-      applyWorld(pendingWorld);
-      pendingWorld = null;
+    const brushes = JSON.parse(lastBrushJson) as Array<{ min: number[] }>;
+    for (const b of brushes) {
+      if (b.min[1] < minY) minY = b.min[1];
     }
-    loop();
   } catch (e) {
-    console.error('[worker-a] wasm 初始化失败:', e);
+    console.error('[worker-a] brushJson 解析失败（死亡阈值保持默认）:', e);
+    return;
   }
+  if (!Number.isFinite(minY)) return;
+  phys.current?.set_death_y(minY - 100);
+  tickPhys.current?.set_death_y(minY - 100);
+  scratch.current?.set_death_y(minY - 100);
 }
 
-// ── 双模自驱循环（阶段2：先 tick 计算 → 后无限制计算）────────────
-function loop(): void {
-  if (!shared || !phys) return;
+/** 立即发布一帧（respawn/world-json 后首帧可见；镜像随之更新）。 */
+function publishNow(): void {
+  if (computeMode === 'decoupled') decoupledLoop.publishCurrentState();
+  else authLoop.publishCurrentState(tickF4.firstFrameMeta());
+}
 
-  // 真实时间片 delta（clamp 0~50ms 防炸）
-  const now = performance.now();
-  let delta = (now - lastNow) / 1000;
-  lastNow = now;
-  if (delta > MAX_DELTA) delta = MAX_DELTA;
-  if (delta < 0) delta = 0;
+// ── 热切执行（§3.4.C 步骤 a-f；dispatch set-mode 分支调用）────────
+function applyModeSwitch(mode: ComputeMode, state?: SyncRenderStateLike): void {
+  if (mode === computeMode) return; // 幂等守卫（dispatch 已做同 mode 幂等，双保险）
+  computeMode = mode; // a. gate 翻转（两 loop 下一轮自然互斥）
 
-  // TICK_RATE：模式B 激活判定（tickDt > 1ms 才激活；0 或 ≥1000Hz 等价模式A 时跳过）
-  let tickRate = shared.readTickRate();
-  if (!Number.isFinite(tickRate) || tickRate < 0) tickRate = 0;
-  const modeBActive = tickRate > 0 && 1 / tickRate > RENDER_DT;
-  // 停用→激活边沿：重置采样累积器 + tickPhys 对齐模式A（防陈旧输入/错位起点）
-  if (modeBActive && !modeBWasActive) {
-    loAcc = 0;
-    tickDxAcc = 0;
-    tickDyAcc = 0;
-    alignTickPhys();
-  } else if (!modeBActive && modeBWasActive) {
-    loAcc = 0;
-    tickDxAcc = 0;
-    tickDyAcc = 0;
-  }
-  modeBWasActive = modeBActive;
-
-  // ── 第一步：tick 计算（先——tick 节点到达才执行；未到达越过直达无限制计算）──
-  if (modeBActive && tickPhys) {
-    const tickDt = 1 / tickRate;
-    loAcc += delta;
-    while (loAcc >= tickDt) {
-      loAcc -= tickDt;
-      // 输入采样（tick 边界快照）：键位 = 当前掩码（64t 粒度——bhop/转向台阶）；
-      // 鼠标 = 自上一边界模式A 实时消耗的累积增量（限幅防极端甩视角穿墙）
-      const tickKeys = shared.peekKeys();
-      const tickMax = tickInputMax(tickDt);
-      const tickDx = Math.max(-tickMax, Math.min(tickMax, tickDxAcc));
-      const tickDy = Math.max(-tickMax, Math.min(tickMax, tickDyAcc));
-      tickDxAcc = 0;
-      tickDyAcc = 0;
-      // **分叉兜底锚定（极限操作防护）**：tick 实例与模式A 位置偏差 >
-      // TICK_ANCHOR_DIST（死亡/传送/卡墙/坡缘等极限操作后位置/朝向无界分叉 →
-      // 校准速度脱离渲染上下文的"渲染混乱"根因）→ 全量 set_state 拉回模式A；
-      // 正常演化（偏差有界 ≤ 数十 units）**不干预**——tick 保持自身 64t 离散演化
-      // （bhop 采样/碰撞/钳制相位），无锚定引入的相位伪差
-      if (tickDiverged()) {
-        alignTickPhys();
-      }
-      // 独立实例推进（真实 64t 物理——摩擦/加速/碰撞/bhop 钳制相位在 64t 网格上；
-      // 状态时刻 = 边界时刻 → 校准速度与模式A 位置同刻，无"未来速度"伪差）
-      tickPhys.tick(tickDt, tickKeys, tickDx, tickDy);
-      // 速度校准（**唯一 tick 影响通道**——game calibrateVelocity 语义）：
-      // 三轴速度写回模式A（含 vy——独立实例自身 64t 重力演化，无重复推进问题）；
-      // 位置/角度绝不触碰（用户要求 3）
-      const st = tickPhys.state();
-      phys.set_velocity(st.velX, st.velY, st.velZ);
+  if (mode === 'decoupled') {
+    // 0. F4 状态清理（离开 tick 模式；非 tick 来向幂等 no-op）
+    tickF4.exitMode();
+    // b. 状态注入（主线程预测全态 9 字段；eyeHeight→set_posture 为明确不做项）
+    if (state && phys.current) {
+      phys.current.set_state(
+        state.posX, state.posY, state.posZ, state.yaw, state.pitch,
+        state.velX, state.velY, state.velZ, state.onGround,
+      );
     }
+    // c+d. tickPhys 全量对齐 + 采样器全清（acc/loAcc/tickDx/tickDy/modeBWasActive）
+    decoupledLoop.resetSamplers(true);
+    // e. 输入增量清零（键位保留）
+    shared.current?.resetInput();
+    // 交接即时帧（清掉上一段会话的陈旧 S_D）
+    decoupledLoop.publishCurrentState();
+  } else if (mode === 'tick') {
+    // ── tick 支路（四向交接矩阵行①②）──
+    // a.0 F4 进入（段 +1 + modeSwitch 位）
+    tickF4.enterMode();
+    // b. 状态注入：仅耦合→tick（行① stateInject=true）；解耦→tick 零注入
+    if (state && phys.current) {
+      phys.current.set_state(
+        state.posX, state.posY, state.posZ, state.yaw, state.pitch,
+        state.velX, state.velY, state.velZ, state.onGround,
+      );
+    }
+    // c. 清在途 hold（冻结不跨模式存活）
+    hold = null;
+    // d. 输入增量清零（键位保留）
+    shared.current?.resetInput();
+    // e. raw 步长 + 清累积器/墙钟（不动物理状态）
+    authLoop.setFixedDt(resolveAuthTickRate('tick', panelTickRate(), TICK_RATE_OFFSET));
+    authLoop.reset();
+    // f. 交接首帧（meta 携带 seg+1 + modeSwitch 位）
+    authLoop.publishCurrentState(tickF4.firstFrameMeta());
   } else {
-    loAcc = 0; // 关闭难度修正（0）/ 与模式A 等价（≥1000Hz）：纯 1ms 无限制实时输入
+    // 解耦/tick → 耦合
+    hold = null;
+    tickF4.exitMode();
+    authLoop.setFixedDt(resolveAuthTickRate('coupled', panelTickRate(), TICK_RATE_OFFSET));
+    authLoop.reset();
+    authLoop.publishCurrentState(tickF4.firstFrameMeta());
   }
-
-  // ── 第二步：无限制计算（后——1ms 子步 + 实时输入；位置/角度只由模式A 推进）──
-  acc += delta;
-  if (acc >= RENDER_DT) {
-    let steps = 0;
-    while (acc >= RENDER_DT && steps < MAX_STEPS_PER_ROUND) {
-      acc -= RENDER_DT;
-      steps++;
-      // 实时输入（模式A 是**唯一** SAB 消费路径——用户要求 1：输入仅进入 WorkerA）
-      // 不在此削平：主线程已按单次 mousemove 事件 CLAMP；这里必须消费完整帧增量，
-      // 避免“整帧累加器被排空 + 削平到 ±1000”导致快速甩动丢失（与 game 主线程直通一致）。
-      const inp = shared.consumeInput();
-      // tick 边界采样累积（模式B 专用：上一边界以来模式A 实时消耗的鼠标增量，
-      // 下一边界一次性注入 tick 实例——与真实 64t 服务器"边界消费整窗口"等价）
-      if (modeBActive) {
-        tickDxAcc += inp.dx;
-        tickDyAcc += inp.dy;
-      }
-      phys.tick(RENDER_DT, inp.keysMask, inp.dx, inp.dy); // 1ms 子步
-      writeStateFromPhys(); // 写空闲槽（S[V&1 ^ 1]）→ Atomics.add(V,1)——唯一写槽者
-    }
-    // 8 次上限耗尽：保留剩余累加（时间不丢失，下轮继续补跑），仅封顶防无限追赶
-    if (acc > MAX_ACC) acc = MAX_ACC;
-  }
-
-  // 背压：距下次 1ms 子步剩余时间 >= 1ms → 挂起 WAKEUP 槽（可被阶段1 wake 提前唤醒）；
-  // 否则自旋直接继续（时序图 else 分支）
-  const idleMs = (RENDER_DT - acc) * 1000;
-  if (idleMs >= WAIT_THRESHOLD_MS) {
-    shared.waitWakeup(Math.min(idleMs, MAX_WAIT_MS)); // wait(WAKEUP,0,timeout) → 复位 WAKEUP=0
-  }
-
-  // 让出事件循环（投递 respawn/world-json 消息；主线程零阻塞）
-  setTimeout(loop, 0);
 }
 
-// ── 消息处理 ────────────────────────────────────────────────────
+/** set-hold 执行（解耦模式 worker 侧 hold 冻结；§3.4.A）。 */
+function applySetHold(next: HoldState | null, release?: SavePointLike): void {
+  hold = next;
+  if (next || !phys.current) return;
+  if (release) {
+    phys.current.set_state(
+      release.x, release.y, release.z, release.yaw, release.pitch,
+      release.vx, release.vy, release.vz, release.onGround,
+    );
+    tickPhys.current?.set_state(
+      release.x, release.y, release.z, release.yaw, release.pitch,
+      release.vx, release.vy, release.vz, release.onGround,
+    );
+    tickF4.externalBreak(AUTH_EVT.holdRelease);
+    decoupledLoop.resetSamplers(true);
+    shared.current?.resetInput();
+    decoupledLoop.publishCurrentState();
+    authLoop.publishCurrentState(tickF4.firstFrameMeta());
+  } else {
+    decoupledLoop.resetSamplers(false);
+    tickF4.externalBreak(AUTH_EVT.holdRelease);
+    authLoop.publishCurrentState(tickF4.firstFrameMeta());
+  }
+}
+
+// ── dispatch（共享层：init / wasm-init / world-json / config / respawn /
+//    set-mode / set-hold / spawns 等）────────────────────────────
+const dispatch = createWorkerDispatch({
+  shared,
+  phys,
+  authLoop,
+  tickPhys,
+  scratch,
+  decoupledLoop,
+  getComputeMode: () => computeMode,
+  onSetMode: applyModeSwitch,
+  onSetHold: applySetHold,
+  tickExternalBreak: (evtBit) => tickF4.externalBreak(evtBit),
+  onWorldRebuilt: () => tickF4.externalWorldRebuild(),
+  getConfigTickRate: () =>
+    resolveAuthTickRate(computeMode, panelTickRate(), TICK_RATE_OFFSET),
+  applyConfigPatch: (section, patch) => {
+    if (section === 'physics' && typeof patch.tickRate === 'number') {
+      config.physics.tickRate = patch.tickRate;
+    }
+  },
+  syncParamsToWasm,
+  createPhysWorld: () => new PhysWorld() as unknown as PhysWorldLike,
+  // initSync 包装：捕获 InitOutput.memory（state_out 零分配视图宿主，§3.2 A5）
+  initSync: (module) => {
+    wasmMemory.current = initSync({ module }).memory;
+  },
+  post: (msg) => postMessage(msg),
+  // 世界构建完成：三实例死亡阈值（dispatch 不透传 brushJson，用拦截记录）
+  onWorldBuilt: () => {
+    applyDeathThreshold();
+    publishNow();
+  },
+});
+
+// ── 消息入口：harness 私有消息自行处理，其余全部交给 dispatch ────
+interface AuthInitMessage {
+  type: 'auth-init';
+  shared: SharedArrayBuffer | null;
+}
+type HarnessMessage =
+  | AuthInitMessage
+  | { type: 'init-shared'; shared: SharedArrayBuffer }
+  | { type: 'init-msg'; renderPort: MessagePort }
+  | SharedInputMsg
+  | SharedTickRateMsg
+  | { type: 'world-json'; brushJson: string; triJson: string; teleportJson: string; spawn: { x: number; y: number; z: number; yawDeg: number } };
+
 self.addEventListener('message', (e: MessageEvent) => {
-  const msg = e.data as WorkerAMessage;
+  const msg = e.data as HarnessMessage;
+
   switch (msg.type) {
+    // harness 渲染通道（TestShared，192B）——WorkerB 参数源
     case 'init-shared':
-      shared = TestShared.init(msg.shared);
-      void startInit();
-      break;
-    case 'init-msg':
-      // 消息回退模式：状态发布直连 WorkerB 端口；无 SAB 时 same API 双实现
-      shared = TestShared.initMessaging((m: unknown) => msg.renderPort.postMessage(m));
-      void startInit();
-      break;
-    case 'init-wasm':
-      if (msg.wasmUrl) pendingWasmUrl = msg.wasmUrl;
-      if (shared && !initStarted) void startInit();
-      break;
-    case 'respawn':
-      // 阶段4：立即重置物理状态（双实例同步）+ 采样器重置 → 写空闲槽 + Atomics.add(V,1)
-      if (phys) {
-        phys.respawn();
-        tickPhys?.respawn();
-        loAcc = 0;
-        tickDxAcc = 0;
-        tickDyAcc = 0;
-        writeStateFromPhys();
-      }
-      break;
-    case 'world-json':
-      if (phys) {
-        applyWorld(msg);
-      } else {
-        pendingWorld = msg; // wasm 未就绪：暂存，startInit 完成后应用
-      }
-      break;
-    case 'shared-input':
-      // 消息回退模式：主线程每 rAF 投递的输入批次（等价 SAB addInput）
-      shared?.onInputMessage(msg.dx, msg.dy, msg.keysMask);
-      break;
+      testShared.current = TestShared.init((msg as { shared: SharedArrayBuffer }).shared);
+      return;
+    // auth 通道（ShmState，512B）——三模式物理读写面（镜像到 TestShared）
+    case 'auth-init':
+      shared.current = createAuthShared((msg as AuthInitMessage).shared);
+      return;
+    // 消息回退模式：状态发布直连 WorkerB 端口（无 SAB 时的渲染通道）
+    case 'init-msg': {
+      const port = (msg as unknown as { renderPort: MessagePort }).renderPort;
+      testShared.current = TestShared.initMessaging((m: unknown) => port.postMessage(m));
+      return;
+    }
+    // 消息回退模式：主线程每 rAF 投递的输入批次（等价 SAB addInput）
+    case 'shared-input': {
+      const m = msg as SharedInputMsg;
+      testShared.current?.onInputMessage(m.dx, m.dy, m.keysMask);
+      return;
+    }
+    // 消息回退模式：难度调节（等价 SAB writeTickRate）
     case 'shared-tick-rate':
-      // 消息回退模式：难度调节（等价 SAB writeTickRate）
-      shared?.onTickRateMessage(msg.rate);
+      testShared.current?.onTickRateMessage((msg as SharedTickRateMsg).rate);
+      return;
+    // world-json：记录 brushJson（死亡阈值）后交 dispatch 建世界
+    case 'world-json':
+      lastBrushJson = (msg as { brushJson: string }).brushJson;
+      break;
+    default:
       break;
   }
+
+  dispatch(e);
 });
 
 // ── 入口 ────────────────────────────────────────────────────────
 export function startWorkerA(): void {
-  // 消息监听已在模块顶层注册；循环在 wasm 就绪后自驱
+  // 消息监听已在模块顶层注册；authLoop 在 wasm-init 就绪后由 dispatch 启动，
+  // decoupledLoop 已在模块层 start() 自驱待命。
 }
 
 startWorkerA();

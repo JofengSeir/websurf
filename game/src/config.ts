@@ -7,14 +7,6 @@ import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../src/ts-sha
 export interface PhysicsConfig {
   /** 物理模式：physics（权威物理）/ noclip（自由视角，禁物理/传送）。 */
   mode: 'physics' | 'noclip';
-  /**
-   * 物理计算模式（phys-mode-port §3.4.D）：coupled = v7 现行（主线程渲染循环
-   * tick 全速预测 + Worker 64Hz 权威线校准）；decoupled = 物理整体在 Worker
-   * （1ms 子步实时消耗 + 独立 64t tickPhys 速度校准 + 锚定拉回），主线程纯消费。
-   * 运行时热切走 set-mode/mode-ack 握手（§3.4.C）——本字段是声明性元数据
-   * （默认耦合 + 面板偏好持久化），不绕过握手切换。
-   */
-  computeMode: 'coupled' | 'decoupled';
   /** 物理模拟频率（Hz，默认 64；面板 48-128 可调，Worker-A/B 步长联动）。 */
   tickRate: number;
   gravity: number;
@@ -102,8 +94,6 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   lockTickRate: false,
   physics: {
     mode: 'physics',
-    // 双模式默认耦合（§3.0：默认 coupled，面板热切）
-    computeMode: 'coupled',
     tickRate: 64,
     gravity: 800,
     jumpSpeed: 302,

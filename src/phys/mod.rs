@@ -7,10 +7,18 @@
 //!
 //! 线程模型：Worker-A（权威）与 Worker-B（预测）各持一个本实例（同一 wasm 模块，
 //! 各自线性内存）；tick/predict 输入输出经标量传值（每帧 ~8 个 f64），无 SAB 直写。
+//!
+//! t3 增补（additive，种子面 v2 + state_out 22 槽）：`set_state_ex(json)` /
+//! `state_full_json(include_event)` / `seed_from(src)` 三 API + tick_into 追加
+//! B5 十字段 + eye_height + on_ground（槽 8-21；槽 0-7 布局不变）。
+//! 见 `phys::seed` 模块文档（t1 事实表修正逐字段注记）。
 
 pub mod player;
 pub mod teleport;
 pub mod world;
+
+/// 种子面 v2（t3 additive：F4-C scratch 单向写入；t6 §11.1 全量字段表 + t1 事实表修正）。
+mod seed;
 
 #[cfg(test)]
 mod p2_gate_tests;
@@ -70,8 +78,12 @@ pub struct PhysWorld {
     /// 最近一次物理事件（传送/死亡），经 take_event 一次性消费。
     event: Option<PhysEvent>,
     /// 零分配热路径输出缓冲（tick_into 写入；JS 侧经 state_out_ptr 建
-    /// Float64Array 视图直读 pos×3/yaw/pitch/vel×3——不构造 wasm→JS 对象）。
-    state_out: [f64; 8],
+    /// Float64Array 视图直读——不构造 wasm→JS 对象）。
+    /// 布局（captain 批复 22 字段方案，t3 append-only）：0-7 = pos×3/vel×3/yaw/pitch
+    /// （既有布局不变，JS 既有 8 槽视图零回归）；8-19 = B5 十字段（t6:145）；
+    /// 20 = eye_height（bench M4 P2 点名，消费端蹲伏视高平滑插值刚需）；
+    /// 21 = on_ground（消费侧遥测/调试）。
+    state_out: [f64; 22],
 }
 
 #[wasm_bindgen]
@@ -93,7 +105,7 @@ impl PhysWorld {
             noclip: false,
             ready: false,
             event: None,
-            state_out: [0.0; 8],
+            state_out: [0.0; 22],
         }
     }
 
@@ -176,6 +188,8 @@ impl PhysWorld {
     /// JS 侧：`new Float64Array(memory.buffer, phys.state_out_ptr(), 8)` 直读
     /// pos×3 / vel×3 / yaw / pitch（与 JS writeStateRaw 参数序一致），再原子写 SAB——
     /// 每子步零 JS 对象分配。
+    /// t3 append-only：槽 8-21 追加 B5 十字段 + eye_height + on_ground（既有
+    /// 0-7 写入行逐行不动，槽序不变——JS 既有 8 槽视图零回归）。
     pub fn tick_into(&mut self, dt: f64, keys_mask: u32, dx: f64, dy: f64) {
         if !self.ready {
             return;
@@ -191,12 +205,49 @@ impl PhysWorld {
         o[5] = p.velocity[2];
         o[6] = p.yaw;
         o[7] = p.pitch;
+        fill_state_out(p, o);
     }
 
     /// tick_into 输出缓冲在 wasm 线性内存中的地址（JS 建 Float64Array 视图用；
     /// wasm 内存增长（memory.buffer 更换）后视图须按 state_out_ptr 重建）。
     pub fn state_out_ptr(&self) -> usize {
         self.state_out.as_ptr() as usize
+    }
+
+    // -----------------------------------------------------------------------
+    // 种子面 v2（t3 additive：F4-C scratch 单向写入；t6 §11.1 全量字段表 +
+    // t1 事实表修正；实现在 phys::seed 模块，逻辑单一通路 extract_seed/apply_seed）
+    // -----------------------------------------------------------------------
+
+    /// 种子面单向写入（scratch 实例）：§11.1 全量字段 + t1 修正，一次 JSON 调用。
+    ///
+    /// 纪律：只写本实例，零读自身状态做决策、零触碰权威实例（t4 集成：
+    /// `scratch.set_state_ex(authority.state_full_json(false))`）。
+    /// 9 参 `set_state` 签名/语义不动（三模共存兼容）；event 键默认不传
+    /// （t1 §5：事件不可播种）；schema v 必须为 2；非有限值（NaN/Inf）FAIL LOUD。
+    pub fn set_state_ex(&mut self, json: &str) -> Result<(), JsValue> {
+        let s: seed::SeedState =
+            serde_json::from_str(json).map_err(|e| to_js_err(e, "set_state_ex"))?;
+        self.apply_seed(&s).map_err(|e| JsValue::from_str(&e))
+    }
+
+    /// 全量导出（与 set_state_ex 同 schema，serde_json f64 往返位级精确）。
+    ///
+    /// `include_event=false`（F4-C 种子链必须传 false）：导出不含 event 槽
+    /// （t1 §5——事件不可播种，authority pending 事件走权威通道）；
+    /// `true` 仅 bench/审计导出用。失败（理论不可能，非有限值序列化为 null
+    /// 不报错、由 set_state_ex 侧拒绝）→ Err。
+    pub fn state_full_json(&self, include_event: bool) -> Result<String, JsValue> {
+        serde_json::to_string(&self.extract_seed(include_event))
+            .map_err(|e| to_js_err(e, "state_full_json"))
+    }
+
+    /// 零序列化种子通道：从同模块另一实例单向复制种子面字段（f64 字段拷贝，
+    /// 位级精确 by construction）。事件硬编码不复制（t1 §5）；world/params/spawn
+    /// 等构建期面不在种子面（双实例同图构建恒等）。
+    pub fn seed_from(&mut self, src: &PhysWorld) -> Result<(), JsValue> {
+        let s = src.extract_seed(false);
+        self.apply_seed(&s).map_err(|e| JsValue::from_str(&e))
     }
 
     /// 诊断：盒-AABB 门校验否决次数（P2 修复探针）。
@@ -669,4 +720,25 @@ fn compute_ladder_facing(planes: &[world::Plane]) -> [f64; 3] {
         fz = 1.0;
     }
     [fx, 0.0, fz]
+}
+
+/// state_out 槽 8-21 统一写入口径（t3 additive；tick_into 每 tick 调用 +
+/// 种子面预填共用；槽 0-7 由 tick_into 既有行 / 种子面预填分别写入）。
+/// 布局（captain 批复 22 字段方案）：8-19 = B5 十字段（t6:145）；
+/// 20 = eye_height（bench M4 P2）；21 = on_ground。
+fn fill_state_out(p: &Player, o: &mut [f64; 22]) {
+    o[8] = if p.ducked { 1.0 } else { 0.0 };
+    o[9] = p.duck_frac;
+    o[10] = p.ground_ticks_since_landing as f64;
+    o[11] = p.contact_ticks as f64;
+    o[12] = if p.surfing { 1.0 } else { 0.0 };
+    o[13] = p.blocked_ticks as f64;
+    o[14] = p.on_ladder.map(|i| i as f64).unwrap_or(-1.0);
+    o[15] = p.fall_velocity;
+    o[16] = p.landing_velocity[0];
+    o[17] = p.landing_velocity[1];
+    o[18] = p.landing_velocity[2];
+    o[19] = if p.has_jumped_before { 1.0 } else { 0.0 };
+    o[20] = p.eye_height();
+    o[21] = if p.on_ground { 1.0 } else { 0.0 };
 }

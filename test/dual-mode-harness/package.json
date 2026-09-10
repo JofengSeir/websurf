@@ -1,7 +1,7 @@
 {
   "name": "websurf-test",
   "version": "0.1.0",
-  "description": "WebSurf-test — 双模物理 + OffscreenCanvas 渲染时序验证工程（主线程仅输入转发/UI → SAB 无锁 → WorkerA 双模物理 → WorkerB 渲染）。",
+  "description": "WebSurf-test — 三模式物理（耦合/解耦/tick，运行时热切）+ OffscreenCanvas 渲染时序验证工程（主线程仅输入转发/UI → SAB 无锁 → WorkerA 三模物理 → WorkerB 渲染）。",
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -11,7 +11,8 @@
     "build": "npm run build:wasm && npm run build:ts",
     "build:dist": "node scripts/build-dist.mjs",
     "dev": "python ../../src/serve.py 8080 .",
-    "check:api": "node scripts/check-wasm-api.mjs"
+    "check:api": "node scripts/check-wasm-api.mjs",
+    "test:three-mode": "node scripts/three-mode-verify.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

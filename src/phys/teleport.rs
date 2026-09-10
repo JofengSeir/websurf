@@ -233,6 +233,42 @@ impl TeleportManager {
     pub fn reset_cooldown(&mut self) {
         self.cooldown = 0.0;
     }
+
+    // ======================================================================
+    // 种子面通道（t3 additive：F4-C scratch 单向写入；不动任何既有语义）
+    // ======================================================================
+
+    /// 种子面：写入隐藏字段 cooldown（t6 §11.1；t1 §4 实证为自 erase 死位——
+    /// check 置 0.5 → 同 step apply_teleport reset + fire 后 reset 归零，armed 态
+    /// 不跨 tick 存活；播种仅为全量表完整性）。
+    pub fn seed_cooldown(&mut self, v: f64) {
+        self.cooldown = v;
+    }
+
+    /// 种子面：读取隐藏字段 cooldown 当前值（extract 用）。
+    pub fn cooldown_value(&self) -> f64 {
+        self.cooldown
+    }
+
+    /// 种子面：逐 trigger 写 inside 沿位（长度不匹配返回 Err，防错位播种）。
+    pub fn seed_trigger_inside(&mut self, bits: &[bool]) -> Result<(), String> {
+        if bits.len() != self.triggers.len() {
+            return Err(format!(
+                "set_state_ex: triggers_inside 长度 {} != 本实例 triggers {}",
+                bits.len(),
+                self.triggers.len()
+            ));
+        }
+        for (t, &v) in self.triggers.iter_mut().zip(bits.iter()) {
+            t.inside = v;
+        }
+        Ok(())
+    }
+
+    /// 种子面：读取全部 trigger inside 位（顺序与 triggers 数组一致）。
+    pub fn trigger_inside_vec(&self) -> Vec<bool> {
+        self.triggers.iter().map(|t| t.inside).collect()
+    }
 }
 
 /// 落地脚底检测（B 路径）：**脚底往下 FOOT_PROBE_DEPTH（8）的区间**

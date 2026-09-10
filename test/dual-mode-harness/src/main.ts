@@ -15,6 +15,9 @@
  */
 
 import { keysToMask, SHARED_BUFFER_SIZE, TestShared } from './shared-state.js';
+import { ShmState, SHARED_BUFFER_SIZE as AUTH_BUFFER_SIZE } from '../../../src/ts-shared/auth/shared-state.js';
+import type { ComputeMode } from '../../../src/ts-shared/auth/compute-mode.js';
+import { formatWorkerStatsLine, type WorkerTickStats } from './panel/tick-telemetry-format.js';
 import { BspProcessor, initSync } from '../pkg/websurf_test_wasm.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement | null;
@@ -85,6 +88,29 @@ const workerB = new Worker(new URL('./worker-b.js', import.meta.url), { type: 'm
 workerA.onerror = (e) => console.error('[main] WorkerA 错误:', e.message);
 workerB.onerror = (e) => console.error('[main] WorkerB 错误:', e.message);
 
+/** 计算模式（主线程镜像）。真相源在 WorkerA——本值只由 mode-ack 更新，
+ *  不做乐观切换（避免 UI 与 worker 实态不一致）。 */
+let computeMode: ComputeMode = 'coupled';
+/** tick 遥测账行 DOM（tick-authority 每秒自发 {type:'tick-stats'}）。 */
+const tickStatsLine = document.getElementById('tickStatsLine') as HTMLElement | null;
+workerA.onmessage = (
+  e: MessageEvent<{ type?: string; mode?: ComputeMode; stats?: WorkerTickStats }>,
+) => {
+  const msg = e.data;
+  if (msg?.type === 'mode-ack' && msg.mode) {
+    computeMode = msg.mode;
+    setActiveComputeMode(msg.mode);
+    // 渲染侧同步（tick 模式由 TickConsumer 消费 auth 通道；其余走渲染通道镜像）
+    workerB.postMessage({ type: 'compute-mode', mode: msg.mode });
+    // 离开 tick 模式：清掉上一段会话的遥测（不让陈旧账目冒充当前状态）
+    if (msg.mode !== 'tick' && tickStatsLine) {
+      tickStatsLine.textContent = formatWorkerStatsLine(null);
+    }
+  } else if (msg?.type === 'tick-stats') {
+    if (tickStatsLine) tickStatsLine.textContent = formatWorkerStatsLine(msg.stats);
+  }
+};
+
 // 通道模式：SAB 满足 → 共享内存（最高性能）；否则 → 消息回退（postMessage，功能等价）
 let shared: TestShared;
 if (useSab) {
@@ -98,6 +124,26 @@ if (useSab) {
   workerA.postMessage({ type: 'init-msg', renderPort: physRender.port1 }, [physRender.port1]);
   workerB.postMessage({ type: 'init-msg', renderPort: physRender.port2 }, [physRender.port2]);
 }
+
+// ── auth 通道（三模式物理的唯一读写面）───────────────────────────
+// 与渲染通道（TestShared，192B）职责分离：本通道走 src/ts-shared 共享协议
+// （ShmState，512B）。三种模式的物理计算（auth-loop / decoupled-loop /
+// tick-authority）全部经此消费输入并发布权威帧；WorkerA 侧的 MirrorShmState
+// 在每次发布时把帧镜像回 TestShared → WorkerB 渲染路径**零改动**。
+let authShared: ShmState | null = null;
+if (useSab) {
+  const authSab = new SharedArrayBuffer(AUTH_BUFFER_SIZE);
+  authShared = new ShmState(authSab);
+  workerA.postMessage({ type: 'auth-init', shared: authSab }); // 共享传递（非 transfer）
+  // WorkerB 也持 auth 通道：tick 模式经 TickConsumer 消费权威帧（渲染通道仅作镜像兜底）
+  workerB.postMessage({ type: 'init-auth', shared: authSab });
+} else {
+  workerA.postMessage({ type: 'auth-init', shared: null }); // MsgState 回退
+  workerB.postMessage({ type: 'init-auth', shared: null });
+}
+
+// wasm 就绪：dispatch 收到 wasm-init 后 initSync + 启动 authLoop
+workerA.postMessage({ type: 'wasm-init', wasmUrl: './websurf_test_wasm_bg.wasm' });
 
 // HUD 模式提示（共享内存 / 消息回退）
 const modeNotice = document.createElement('div');
@@ -176,6 +222,10 @@ const BRUSH_FILTER_JSON = JSON.stringify({
   skip_nodraw: false,
 });
 
+/** 传送区域明确排除（最小集）：空 teleport report → 物理世界不注册任何
+ *  trigger/destination（与迁移前 worker-a 的 EMPTY_TELEPORT_JSON 同义）。 */
+const EMPTY_TELEPORT_JSON = '{"teleports":[],"triggers":[]}';
+
 /** 主线程 wasm 懒初始化（BspProcessor 与 WorkerA 同一 wasm 文件，独立实例化一次）。 */
 let mainWasmReady: Promise<void> | null = null;
 function ensureMainWasm(): Promise<void> {
@@ -227,8 +277,15 @@ async function loadBsp(file: File): Promise<void> {
       ? [primary.origin[0], primary.origin[1], primary.origin[2], bspYawToCsYaw(primary.angles[1])]
       : [0, 100, 0, 0];
 
-    // 传送区域明确排除：WorkerA 内部使用空 teleport report，确保物理世界不注册任何 trigger/destination
-    workerA.postMessage({ type: 'world-json', brushJson, triJson, spawn });
+    // 传送区域明确排除：空 teleport report，确保物理世界不注册任何 trigger/destination
+    // （dispatch 期望 spawn 为对象 + yawDeg 字段名）
+    workerA.postMessage({
+      type: 'world-json',
+      brushJson,
+      triJson,
+      teleportJson: EMPTY_TELEPORT_JSON,
+      spawn: { x: spawn[0], y: spawn[1], z: spawn[2], yawDeg: spawn[3] },
+    });
 
     // GLB（含 PAKFILE 模型）→ WorkerB 渲染；transfer 零拷贝
     const glb = proc.export_glb_with_pakfile_models();
@@ -346,6 +403,32 @@ document.querySelectorAll<HTMLButtonElement>('#difficulty button[data-rate]').fo
   });
 });
 
+// ── 计算模式热切（coupled / decoupled / tick）─────────────────────
+// 三种模式的物理计算本体在 src/ts-shared（auth-loop / decoupled-loop /
+// tick-authority / compute-mode）；本页只发切换意图并显示 mode-ack
+// （§3.4.C 握手）。harness 无主线程预测实例 → set-mode 不带 state
+// （worker 侧三实例状态自持，交接由 worker 侧 onSetMode 收口）。
+const MODE_LABEL: Record<ComputeMode, string> = {
+  coupled: '耦合（auth 线 64Hz 权威）',
+  decoupled: '解耦（1ms 无限制 + 64t 速度校准）',
+  tick: 'tick（raw 64Hz + F4-C 乐观评估）',
+};
+const computeModeLabel = document.getElementById('computeModeLabel') as HTMLElement | null;
+function setActiveComputeMode(mode: ComputeMode): void {
+  document.querySelectorAll<HTMLButtonElement>('#computeMode button[data-mode]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === mode);
+  });
+  if (computeModeLabel) computeModeLabel.textContent = `计算模式：${MODE_LABEL[mode]}`;
+}
+document.querySelectorAll<HTMLButtonElement>('#computeMode button[data-mode]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const mode = btn.dataset.mode as ComputeMode;
+    if (mode === computeMode) return;
+    workerA.postMessage({ type: 'set-mode', mode }); // worker 翻转 gate → mode-ack
+  });
+});
+setActiveComputeMode('coupled');
+
 // ── 主线程 rAF 循环（阶段1）：输入转发 + wake（**RENDER_WAKEUP = WorkerB 渲染主驱动**：
 //    主线程 rAF 与浏览器合成器/vsync 同相 → WorkerB 每帧信号渲染一次，呈现平滑；
 //    WorkerA 发布不 notify（1kHz 随机相位唤醒 → 呈现时间不规则 → 观感抖动）；
@@ -359,6 +442,14 @@ function frame(): void {
   mouseDy = 0;
   const mask = locked ? keysToMask(keyState) : 0;
   shared.addInput(dx, dy, mask); // SAB Atomics.add 累加 / 消息回退 postMessage 批投递（主线程耗时 < 0.1ms）
-  shared.wake(); // 双槽通知：WAKEUP → WorkerA 背压 + RENDER_WAKEUP → WorkerB 渲染帧信号（vsync 对齐）
+  shared.wake(); // RENDER_WAKEUP → WorkerB 渲染帧信号（vsync 对齐）
+  // auth 通道输入（三模式物理的唯一消费面）+ 物理背压唤醒
+  // （解耦/tick 循环 waitWakeup 挂在 auth 通道上，TestShared 的 WAKEUP 槽不参与）
+  if (authShared) {
+    authShared.addInput(dx, dy, mask);
+    authShared.wake();
+  } else {
+    workerA.postMessage({ type: 'input', dx, dy, keys: mask }); // MsgState 回退
+  }
 }
 requestAnimationFrame(frame);

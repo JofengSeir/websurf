@@ -14,12 +14,12 @@
 | 目录 | npm 包名 | 定位（package.json description 摘录） | Cargo crate | WASM 产物 | 来源 |
 |---|---|---|---|---|---|
 | `debug/` | `websurf` | 浏览器中的 Surf 地图游玩器（主工程/调试台） | `websurf-wasm` | `pkg/websurf_wasm.js` | `debug/package.json:2-3`、`debug/crates/wasm/Cargo.toml:11` |
-| `game/` | `websurf-game` | 最小化游戏化实现（主线程唯一物理渲染线 + 单 Worker 权威帧；phys-mode-port 后双模式热切：耦合/解耦） | `websurf-wasm` | `pkg/websurf_wasm.js`（同名不同包） | `game/package.json:2-4`、`game/crates/wasm/Cargo.toml:11` |
+| `game/` | `websurf-game` | 最小化游戏化实现（主线程唯一物理渲染线 + 单 Worker 权威帧；**仅耦合模式**——三计算模式特性已整体回退，工作区与 `c4824e9` 逐字节一致） | `websurf-wasm` | `pkg/websurf_wasm.js`（同名不同包） | `game/package.json:2-4`、`game/crates/wasm/Cargo.toml:11` |
 | `viewer/` | `websurf-viewer` | 最小 BSP 自由视角查看器（GLB + 飞行相机 + 录像回放） | `websurf-viewer-wasm` | `pkg/websurf_viewer_wasm.js` | `viewer/package.json:2-3`、`viewer/crates/wasm/Cargo.toml:8` |
-| `test/dual-mode-harness/` | `websurf-test` | 双模物理 + OffscreenCanvas 渲染时序验证工程 | `websurf-test-wasm` | `pkg/websurf_test_wasm.js` | `test/dual-mode-harness/package.json:2-3`、`crates/wasm/Cargo.toml:8` |
+| `test/dual-mode-harness/` | `websurf-test` | 三模式物理（耦合/解耦/tick，运行时热切）+ OffscreenCanvas 渲染时序验证工程 | `websurf-test-wasm` | `pkg/websurf_test_wasm.js` | `test/dual-mode-harness/package.json:2-3`、`crates/wasm/Cargo.toml:8` |
 | `src/` | —（无 npm 包） | 共享 Rust 物理系统 `websurf-phys` | `websurf-phys`（rlib） | — | `src/Cargo.toml:2` |
 | `src/wasm-core/` | —（无 npm 包） | 共享 BSP/GLB/模型解析导出 `websurf-wasm-core` | `websurf-wasm-core`（rlib，无 wasm-bindgen 导出） | — | `src/wasm-core/Cargo.toml:1`、`src/wasm-core/lib.rs:6` |
-| `src/ts-shared/` | —（无 npm 包） | TS 共享层（8 文件三域，共 2386 行，`wc -l` 实测；phys-mode-port 增 `decoupled/decoupled-loop.ts` 443 行） | — | — | `src/ts-shared/`（清单见 [ts-shared.md](./ts-shared.md) §1.1） |
+| `src/ts-shared/` | —（无 npm 包） | TS 共享层（12 源文件五域，共 4171 行，`wc -l` 实测；含三模式物理内核 `auth/compute-mode.ts`、`auth/tick-authority.ts`、`tick/ordering-gate.ts`、`tick/tick-consumer.ts`、`decoupled/decoupled-loop.ts`） | — | — | `src/ts-shared/`（清单见 [ts-shared.md](./ts-shared.md) §1.1） |
 
 ### 1.2 workspace 划界：两个刻意的决定
 
@@ -31,9 +31,9 @@
 四个应用/验证工程的 TS 源码互不 import（跨工程路径 import 全仓 grep 为 0 命中，`grep -rnE "from ['\"][^'\"]*(game/src|debug/src|viewer/src|dual-mode-harness/src)" debug/src game/src viewer/src test/*/src`）。共享只有两条合法通道：
 
 - **Rust 层**：`websurf-phys` / `websurf-wasm-core` 的 path 依赖（`debug/crates/wasm/Cargo.toml:21-22`、`game/crates/wasm/Cargo.toml:21-22` 等同款）；
-- **TS 层**：debug/game 相对路径 import `../../src/ts-shared/...`（8 模块清单见 [ts-shared.md](./ts-shared.md) §1.2；debug 实用 7 模块——decoupled-loop 为 game 独有注入）。
+- **TS 层**：debug/game 相对路径 import `../../src/ts-shared/...`（两者为同一 7 模块集，见 [ts-shared.md](./ts-shared.md) §1.2；三模式内核 compute-mode/tick-authority/decoupled-loop 两者均未 import）；test/dual-mode-harness 亦 import 共享层（auth 通道 + 三模式物理内核，6 模块，`test/dual-mode-harness/src/worker-a.ts:32-56`）。
 
-唯一例外形态：viewer/harness 对共享**常量与公式**采用"复制并注释对齐"而非 import（EYE_STAND 64.09 源 `src/phys/player.rs:34` → `viewer/src/core/constants.ts:6-7`；harness 仅复用 `KEY_MASK` 位定义，`test/dual-mode-harness/src/shared-state.ts:51`——位定义共用、协议另建）。
+唯一例外形态：viewer 对共享**常量与公式**采用"复制并注释对齐"而非 import（EYE_STAND 64.09 源 `src/phys/player.rs:34` → `viewer/src/core/constants.ts:6-7`）。harness 则两面性并存：192B 渲染通道协议**自建**（`test/dual-mode-harness/src/shared-state.ts:2-4`「与 game ts-shared 权威帧协议不是同一套」），键位位定义（`:51`）与三模式物理内核（`src/worker-a.ts:32-56`）**走共享层 import**。
 
 ### 1.4 vmdl vendor patch：五处同源
 
@@ -58,9 +58,9 @@ crates.io vmdl 0.2.0 vendor 到 `src/vendor/vmdl/`（修复 Source VTX 三角形
 
 | 共享件 | debug | game | viewer | dual-mode-harness |
 |---|---|---|---|---|
-| `websurf-phys`（rlib 物理内核，21 个 wasm-bindgen 导出方法） | ✅ `pub use websurf_phys::phys::PhysWorld`（`debug/crates/wasm/src/lib.rs:22`） | ✅ 同款（`game/crates/wasm/src/lib.rs:23`） | ❌ 无物理（Cargo.toml 无此依赖；`viewer/crates/wasm/Cargo.toml:3-5` 注释自证） | ✅（`crates/wasm/src/lib.rs:35`；WorkerA 内双实例） |
+| `websurf-phys`（rlib 物理内核，21 个 wasm-bindgen 导出方法） | ✅ `pub use websurf_phys::phys::PhysWorld`（`debug/crates/wasm/src/lib.rs:22`） | ✅ 同款（`game/crates/wasm/src/lib.rs:23`） | ❌ 无物理（Cargo.toml 无此依赖；`viewer/crates/wasm/Cargo.toml:3-5` 注释自证） | ✅（`crates/wasm/src/lib.rs:35`；WorkerA 内三实例：判定模式建 phys + tickPhys + F4-scratch，`src/worker-a.ts:24,75-80`） |
 | `websurf-wasm-core`（BSP/GLB/模型/纹理解析） | ✅ 全导出集（BspProcessor 15 方法 + mosaic 3 函数） | ✅ 全导出集（同源精简：`crates/wasm/src/lib.rs:387-1671`） | ✅ 薄消费（vbsp/gltf/model/pakfile/texture 五模块，**不用 phyfile/mosaic**，`viewer/crates/wasm/src/lib.rs:16-20`） | ✅ 物理导出子集（brush/phy/tri/spawn/GLB；teleport/PVS 保留 API 但主流程不调用，`crates/wasm/src/lib.rs:18-19`） |
-| `src/ts-shared`（TS 共享层） | ✅ 7 模块全用（import 区实测；decoupled-loop 未 import——可选钩子缺省 = 解耦面不激活） | ✅ 8 模块全用（`game/src/worker/main.ts:33-44` 等，含 decoupled-loop `:36-43`） | ❌ 零 import（仅 `core/pose.ts:11` 注释对齐） | 仅 `KEY_MASK`（`src/shared-state.ts:51`；192B 是另一套协议） |
+| `src/ts-shared`（TS 共享层） | ✅ 7 模块（auth×3、phys×3、input×1；import 区实测，`debug/src/app.ts:26-31`、`debug/src/worker/main.ts:27-30`、`debug/src/renderer/renderer-main.ts:18-19`、`debug/src/input/keyboard.ts:18`；三模式内核未 import） | ✅ 7 模块（与 debug 同集；c4824e9 回退后 `game/src/worker/main.ts:21-24` 只注入 auth×3 + params，三模式内核未 import） | ❌ 零 import（仅 `core/pose.ts:23-25` 本地复刻 `bspYawToCsYaw`） | ✅ auth 通道 + 三模式内核 6 模块（`src/worker-a.ts:32-56`：shared-state/auth-loop/worker-dispatch/tick-authority/decoupled-loop/compute-mode；渲染通道仍是自建 192B `src/shared-state.ts:5-21`） |
 | `src/serve.py`（dev 服务器，COOP/COEP） | ✅ `npm run dev`（`debug/package.json`） | ✅ | ✅ | ✅ |
 | vmdl vendor patch | ✅ | ✅ | ✅ | ✅ |
 
@@ -82,7 +82,7 @@ esbuild（tsc --noEmit 前置 typecheck）    →  <工程>/web/（或工程根�
 scripts/build-dist.mjs                    →  <工程>/dist/（部署形态，矩阵见 §3.2）
 ```
 
-WASM/Worker/入口三者的页面接线：debug `debug/web/index.html:621`、game `game/web/index.html:918`、viewer `viewer/web/index.html`、harness `index.html:94`（均 `<script … src="./app.js">` 或同构 module 入口）。
+WASM/Worker/入口三者的页面接线：debug `debug/web/index.html:621`、game `game/web/index.html:243`、viewer `viewer/web/index.html`、harness `index.html:120`（均 `<script … src="./app.js">` 或同构 module 入口）。
 
 ### 3.2 dist 形态矩阵
 
@@ -98,7 +98,7 @@ WASM/Worker/入口三者的页面接线：debug `debug/web/index.html:621`、gam
 ### 3.3 运行通道与降级
 
 - **SAB 前置**：`src/serve.py:33-34` 发 `Cross-Origin-Opener-Policy: same-origin`（:33）+ `Cross-Origin-Embedder-Policy: require-corp`（:34，:32 为注释行；另 `Cache-Control: no-store` `:36`），使 `crossOriginIsolated=true` 启用 `SharedArrayBuffer`。
-- **降级链各不相同**：debug/game 的权威帧协议在无 SAB 时降级为 MsgState postMessage（`src/ts-shared/auth/shared-state.ts` 双实现同接口）；harness 自带**消息回退模式**（`test/dual-mode-harness/src/main.ts:74-100`，WorkerA↔WorkerB 直连 MessageChannel）；viewer 单线程根本不需要 SAB。
+- **降级链各不相同**：debug/game 的权威帧协议在无 SAB 时降级为 MsgState postMessage（`src/ts-shared/auth/shared-state.ts` 双实现同接口）；harness 自带**消息回退模式**（`test/dual-mode-harness/src/main.ts:114-143`：渲染通道 WorkerA↔WorkerB 直连 MessageChannel，auth 通道同样退 MsgState）；viewer 单线程根本不需要 SAB。
 
 ### 3.4 契约校验
 
@@ -129,16 +129,16 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 
 | 形态 | 工程 | 渲染发生位置 | 物理推进位置 | 依据 |
 |---|---|---|---|---|
-| 主线程 rAF 双线 | debug / game（耦合模式） | 主线程 three.js（`renderer-main.ts`） | 主线程预测实例（可变 dt）+ Worker 权威实例（固定步长） | `debug/src/renderer/renderer-main.ts:430-516` ≙ `game/src/renderer/renderer-main.ts:947-978`（耦合分支）；game 另有解耦模式：物理整体搬 Worker（1ms 真理源 + 64t tickPhys 校准），主线程纯消费外推（`:979-982,1027-1046`，[ts-shared.md](./ts-shared.md) §3.8） |
-| Worker 渲染 | harness | **WorkerB**（OffscreenCanvas + three.js，`transferControlToOffscreen`） | WorkerA（同 Worker 内双实例：1ms 无限制 + 64t 速度线） | `test/dual-mode-harness/src/main.ts:151-152`、`worker-b.ts:631,666-668`（readState 采样+插值帧循环）、`worker-a.ts:103-107` |
+| 主线程 rAF 双线 | debug / game（均为耦合单模） | 主线程 three.js（`renderer-main.ts`） | 主线程预测实例（可变 dt）+ Worker 权威实例（固定步长） | `debug/src/renderer/renderer-main.ts:430-516` ≙ `game/src/renderer/renderer-main.ts:700-734`（耦合分支）；解耦模式（物理整体搬 Worker：1ms 真理源 + 64t tickPhys 校准，主线程纯消费外推）**已不在 game**——其装配在 `test/dual-mode-harness/src/worker-a.ts`，见 [ts-shared.md](./ts-shared.md) §3.8 |
+| Worker 渲染 | harness | **WorkerB**（OffscreenCanvas + three.js，`transferControlToOffscreen`） | WorkerA（三模式物理：coupled=auth 线单实例 / decoupled=1ms 无限制 + 64t 速度线 / tick=raw 64Hz + F4-C scratch；每次发布镜像进 192B 渲染通道） | `test/dual-mode-harness/src/main.ts:86-87`（双 Worker 创建）、`worker-b.ts:737`（readState 采样）+`:192-198`（插值窗口）+`:715-721`（tick 模式 TickConsumer 消费）、`worker-a.ts:103-115`（镜像发布）、`:176-178`（三模式引擎装配） |
 | 单线程 | viewer | 主线程 rAF（主时钟→相机→可视化→render） | 无物理 | `viewer/src/app.ts:447-483` |
 
 ### 4.4 时序族谱（三族协议）
 
 | 族 | 布局 | 使用者 | 关键语义 | 详见 |
 |---|---|---|---|---|
-| 权威帧双线（512B SAB + MsgState 回退） | 输入槽 + V_A 双缓冲（pos/yaw/pitch/vel/eyeHeight/timeMs）+ 双模式扩展 V_D/S_D/WAKEUP（解耦帧同款双缓冲，模式互斥复用 onGround 槽） | debug（纯耦合线）、game（耦合默认 + 解耦热切：同一 SAB 上解耦线写 S_D、主线程 T7' 消费外推） | Worker 4ms 自驱 + 固定步长累积器（默认 1/64）；主线程渲染线每帧读权威校准；解耦期耦合线模式门早退、解耦线接管推进 | [ts-shared.md](./ts-shared.md) §1.3/§2.1/§3.1/§3.8；debug [sequences.md](../debug/docs/sequences.md)、game [sequences.md](../game/docs/sequences.md) §8 |
-| 双模验证（192B TestShared） | 控制区 + 输入槽 + RENDER_WAKEUP + 双缓冲（8 值，无 eyeHeight/timeMs） | harness（WorkerA 双实例 + 双槽唤醒 WAKEUP/RENDER_WAKEUP） | 主线程只转发输入；渲染在 WorkerB 按帧信号采样 | harness [shared-layout.md](../test/dual-mode-harness/docs/implementation/shared-layout.md)、[ts-shared.md](./ts-shared.md) §4.3 |
+| 权威帧双线（512B SAB + MsgState 回退） | 输入槽 + V_A 双缓冲（pos/yaw/pitch/vel/eyeHeight/timeMs）+ 双模式扩展 V_D/S_D/WAKEUP（解耦帧同款双缓冲，模式互斥复用 onGround 槽）+ tick 模式元数据槽 I_A_SEG/I_A_TICK/I_A_EVT/I_A_PSEQ（`src/ts-shared/auth/shared-state.ts:131-148`） | debug、game（均为纯耦合线：只跑 V_A，未注入任何模式钩子）、test/dual-mode-harness（三模式全装配：同一 512B auth 通道上解耦线写 S_D、tick 线写 meta 四元组） | Worker 4ms 自驱 + 固定步长累积器（默认 1/64）；主线程渲染线每帧读权威校准；解耦期耦合线模式门早退、解耦线接管推进（仅 harness 装配） | [ts-shared.md](./ts-shared.md) §1.3/§2.1/§3.1/§3.8；debug [sequences.md](../debug/docs/sequences.md)、harness [sequences.md](../test/dual-mode-harness/docs/sequences.md) |
+| 双模验证（192B TestShared） | 控制区 + 输入槽 + RENDER_WAKEUP + 双缓冲（8 值，无 eyeHeight/timeMs） | harness（渲染通道：WorkerA 三模式物理帧发布即镜像进 TestShared + 双槽唤醒 WAKEUP/RENDER_WAKEUP） | 主线程只转发输入；渲染在 WorkerB 按帧信号采样 | harness [shared-layout.md](../test/dual-mode-harness/docs/implementation/shared-layout.md)、[ts-shared.md](./ts-shared.md) §4.3 |
 | 单线程（无共享内存协议） | — | viewer | 唯一 Worker 是录像解析（可回退主线程）；回放不重演物理，断网/慢机不跑歪 | viewer [sequences.md](../viewer/docs/sequences.md) |
 
 两族共享的唯一常量是 `KEY_MASK` 位定义（harness 头注"杜绝位定义漂移"，`shared-state.ts:1-4,51`）。
@@ -149,12 +149,12 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 
 | 维度 | debug | game | viewer | dual-mode-harness |
 |---|---|---|---|---|
-| 一句话定位 | 权威帧计算器 + 调试工作台（调参/查碰撞/验时序/计时挑战） | 激进最小化游戏化（跑图/存点练习，可玩优先） | 看：BSP 游览 + 录像回放（无物理） | 验：双模物理 + OffscreenCanvas 渲染时序验证 |
-| 物理线 | 双线同构（渲染预测 + Worker 权威） | 双线同构（与 debug 共用 ts-shared）+ **双模式热切**：耦合=现行 / 解耦=harness WorkerA 编排移植（物理整体 Worker 全托管，默认耦合） | 无 | WorkerA 双实例（1ms 真理源 + 64t 速度线） |
-| 通道 | SAB 512B / MsgState | 同 debug（双模式扩展槽 V_D/S_D/WAKEUP 与解耦线共用） | 无 | SAB 192B / 消息回退 |
+| 一句话定位 | 权威帧计算器 + 调试工作台（调参/查碰撞/验时序/计时挑战） | 激进最小化游戏化（跑图/存点练习，可玩优先） | 看：BSP 游览 + 录像回放（无物理） | 验：三模式物理 + OffscreenCanvas 渲染时序验证 |
+| 物理线 | 双线同构（渲染预测 + Worker 权威） | 双线同构（与 debug 共用 ts-shared 的同一 7 模块集）；**仅耦合模式**（三模式特性已随 `c4824e9` 回退移除） | 无 | WorkerA 三实例 + 三模式热切（coupled=auth 线 64Hz 权威 / decoupled=1ms 真理源 + 64t 速度线 / tick=raw 64Hz 单实例 + F4-C scratch 乐观评估） |
+| 通道 | SAB 512B / MsgState | 同 debug（512B / MsgState，仅耦合线） | 无 | 双通道：auth 通道 512B / 消息回退（ts-shared 协议，三模式物理唯一读写面）+ 渲染通道 SAB 192B（自建 TestShared） |
 | 渲染位置 | 主线程 | 主线程 | 主线程（单线程） | WorkerB（OffscreenCanvas） |
-| 配置面 | 11 段 RuntimeConfig + 13 项物理面板 | 5 段 + lockTickRate + `physics.computeMode`（声明性，热切只走 set-mode 握手）；tickRate 隐藏偏移 +3（`game/src/worker/main.ts:49-53,222`） | 无面板（FOV 固定 73.6） | 难度按钮（TICK_RATE=模式B 步长，非权威频率） |
-| 独有设施 | 物理参数面板/碰撞可视化/准星检查/近平面调参、计时挑战状态机、自定义传送编辑、默认纹理包装配 | 存点系统（X/C 冻结）、键位录制重绑、风格化准星、ESC 双栏面板、**计算模式热切**（面板运行时切换 + 500ms 重发/回滚握手） | Shavit `.replay` 原生解析回放（帧自身坐标直读 + 多轨迹/信息条/时间轴）、地图信息面板、`window.viewer.replay` API（含 `meta()`） | 11 个验证脚本（53 断言冒烟/唤醒并发/性能基准/屏闪排查/双线对照） |
+| 配置面 | 11 段 RuntimeConfig + 13 项物理面板 | 5 段 + lockTickRate（**无**计算模式字段）；tickRate 隐藏偏移 +3（`game/src/worker/main.ts:29-32,86`） | 无面板（FOV 固定 73.6） | 计算模式三键（coupled/decoupled/tick，只发 set-mode、显示以 mode-ack 为准，`index.html:106-110`）+ 难度按钮（TICK_RATE=模式B 步长，非权威频率） |
+| 独有设施 | 物理参数面板/碰撞可视化/准星检查/近平面调参、计时挑战状态机、自定义传送编辑、默认纹理包装配 | 存点系统（X/C 冻结）、键位录制重绑、风格化准星、ESC 双栏面板 | Shavit `.replay` 原生解析回放（帧自身坐标直读 + 多轨迹/信息条/时间轴）、地图信息面板、`window.viewer.replay` API（含 `meta()`） | 12 个验证脚本（53 断言冒烟/唤醒并发/性能基准/屏闪排查/双线对照 + `npm run test:three-mode`：`scripts/three-mode-verify.mjs` 三模式运行时 12 断言）+ 三模式热切 UI 与 tick 遥测面板 |
 | PVS | 面板可控 | 代码在但 `ENABLE_PVS=false`（`renderer-main.ts:86`） | 无 | 排除（teleport/PVS 保留 API 不调用） |
 | CI/产物 | multi dist 部署 | multi dist 部署 | single dist 部署 | 仅构建验证 |
 
@@ -176,7 +176,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 |---|---|---|
 | 导航 | [index.md](./index.md) | 全树导航 + 阅读层次 |
 | 总架构 | 本文 `architecture.md` | 组成/边界/共享矩阵/构建链/数据流/差异一览 |
-| 共享层 | [phys.md](./phys.md)（172 行）· [wasm-core.md](./wasm-core.md)（168 行）· [ts-shared.md](./ts-shared.md)（192 行）· [materials.md](./materials.md) | Rust 物理内核 · BSP 解析/GLB/纹理解码 · TS 协议与算法 · 材质体系全景 |
+| 共享层 | [phys.md](./phys.md)（172 行）· [wasm-core.md](./wasm-core.md)（168 行）· [ts-shared.md](./ts-shared.md)（251 行）· [materials.md](./materials.md) | Rust 物理内核 · BSP 解析/GLB/纹理解码 · TS 协议与算法 · 材质体系全景 |
 | debug | [overview](../debug/docs/overview.md) · [sequences](../debug/docs/sequences.md) · [implementation×3](../debug/docs/implementation/loading-pipeline.md) · [differences](../debug/docs/differences.md) | 主工程四维度 |
 | game | [overview](../game/docs/overview.md) · [sequences](../game/docs/sequences.md) · [implementation×2](../game/docs/implementation/panel-and-input.md) · [differences](../game/docs/differences.md) | 游戏工程四维度 |
 | viewer | [overview](../viewer/docs/overview.md) · [sequences](../viewer/docs/sequences.md) · [implementation×3](../viewer/docs/implementation/scene-core.md) · [differences](../viewer/docs/differences.md) | 游览/回放工程四维度（含 `.replay` 格式规格；规则脚本规范已归档为历史注记） |
@@ -191,11 +191,12 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 | 残留 | 位置 | 现实 |
 |---|---|---|
 | "v5 Worker=纯速度修正器"头注 | `game/src/app.ts:7-9` | 现行为 v7 权威帧计算器（`game/src/worker/main.ts:1-16`） |
-| predictor 协议注释 | `game/src/worker/worker-types.ts:6` | 注释提及 Worker-B/predictor 独立协议，但 game 仅单权威 Worker、`worker-types-predictor` 协议文件不存在，运行时协议以 `src/ts-shared/auth/worker-dispatch.ts:97-348` 为准；**本体在用勿清理**——game（226 行）3 处 type-only import：`input/keyboard.ts`、`input/keymap.ts`（KeyState）、`renderer/renderer-main.ts`（SceneDataMessage）；该残留仅 game 侧（debug 的 worker-types.ts 无此注释，其 342 行本体被 6 处 type-only import——`input/keyboard.ts:17`（KeyState）、`renderer/renderer-main.ts:17`（PlaneInfo+SceneDataMessage）、`renderer/plane-inspector.ts:12`（PlaneInfo）、`app.ts:25`（MainMessage/SceneDataMessage/PhysFrameMessage/PhysEventMessage/PhysicsSnapshotMessage/PhysicsEventMessage/PlaneInfo 多类型块）、`worker/main.ts:31` 与 `worker/physics-worker.ts:17`（MainMessage/WorkerMessage，worker 侧消息类型）） |
+| predictor 协议注释 | `game/src/worker/worker-types.ts:6` | 注释提及 Worker-B/predictor 独立协议，但 game 仅单权威 Worker、`worker-types-predictor` 协议文件不存在，运行时协议以 `src/ts-shared/auth/worker-dispatch.ts:159-406` 为准；**本体在用勿清理**——game（195 行）3 处 type-only import：`input/keyboard.ts`、`input/keymap.ts`（KeyState）、`renderer/renderer-main.ts`（SceneDataMessage）；该残留仅 game 侧（debug 的 worker-types.ts 无此注释，其 342 行本体被 6 处 type-only import——`input/keyboard.ts:17`（KeyState）、`renderer/renderer-main.ts:17`（PlaneInfo+SceneDataMessage）、`renderer/plane-inspector.ts:12`（PlaneInfo）、`app.ts:25`（MainMessage/SceneDataMessage/PhysFrameMessage/PhysEventMessage/PhysicsSnapshotMessage/PhysicsEventMessage/PlaneInfo 多类型块）、`worker/main.ts:31` 与 `worker/physics-worker.ts:17`（MainMessage/WorkerMessage，worker 侧消息类型）） |
 | `verify:chamfer` npm 入口 | 已从 `debug/package.json` 删除 | 原为空引用（`scripts/verify-chamfer.mjs` 不存在），本轮已移除该入口 |
 | "导出 12 个 API"头注 | `src/phys/mod.rs:4` | 实测 21 个（`mod.rs:84-460`），见 [phys.md](./phys.md) §4.4 |
 | BspProcessor 孤儿注释 | `game/crates/wasm/src/lib.rs:364-367` | 已删除的 `parse_bsp` 提法；实际结构体声明 `:376-377` |
 | `teleport_gate_ticks` 参数 | `src/phys/mod.rs`（`set_params`） | `TeleportManager::check` 已不使用（仅签名兼容，`teleport.rs:171`） |
 | trace-verify.mjs / PvsMirror | `test/dual-mode-harness/scripts/` | 当前 src 已无 Trace/PVS 实现，脚本自包含仅作存档 |
+| 三模式计算产物（tick-consumer 装配 / 计算模式面板 / `physics.computeMode` 字段） | `game/temp/`、`game/docs/`、`game/web/` 等 | game/ 已回退为 `c4824e9` 逐字节状态（`git diff --stat c4824e9 -- game/` 输出为空），只剩耦合模式；三模式物理内核在 `src/ts-shared/`、运行时装配与热切在 `test/dual-mode-harness/`，勿按 game 侧旧文档/旧产物引用 |
 
 > 以上残留均为各工程 [differences.md](../game/docs/differences.md) §6、[phys.md](./phys.md) §4.4 等已核验记载的汇总；修复它们不是文档任务，而是代码清理项（按"只认代码"原则列此防误引）。原 §8 曾记录的 `debug/docs/overview.md:120 → docs/materials.md` 前向悬空已随 [materials.md](./materials.md) 落盘（t18）自行闭环，移出本表。
