@@ -232,13 +232,14 @@ await writeFile(join(dist, 'index.html'), distHtml);
 await copyFile(join(viewerRoot, 'web/styles.css'), join(dist, 'styles.css'));
 
 // 参考资源（HTTP 深链演示用；file:// 不能 fetch，载入走面板「选择录像文件…」）。
-// 入库白名单：maps/surf_null_4.replay（原生 Shavit 示例录像）；缺失时警告跳过，不阻断构建。
+// 本地 fixture（test/maps/，gitignored）：存在时打包进 dist 示例深链（assets/maps/）；
+// 缺失时警告跳过，不阻断构建（本地无源则 build 也不会产出该示例，深链不可用）。
 for (const name of ['surf_null_4.replay']) {
-  const src = join(repoRoot, 'maps', name);
+  const src = join(repoRoot, 'test', 'maps', name);
   if (existsSync(src)) {
     await copyFile(src, join(dist, 'assets/maps', name));
   } else {
-    console.warn(`[warn] 示例资产缺失，跳过: maps/${name}（dist 示例深链将不可用）`);
+    console.warn(`[warn] 示例资产缺失，跳过: test/maps/${name}（dist 示例深链将不可用）`);
   }
 }
 

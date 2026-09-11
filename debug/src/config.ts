@@ -178,8 +178,18 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     cooldownMs: 600,
   },
   lod: {
-    // PVS 默认开启，每帧判定，视角转动时剔除即时响应，显著降低 draw calls
-    pvsEnabled: true,
+    // PVS 剔除：**默认关闭**（2026-09-11）。原为 true（"每帧判定、显著降低 draw calls"），
+    // 但实测 surf_666 的 PVS 数据不可用，开启会**大量错误剔除、面成片消失**：
+    //   · 实测（headless + 真实 GPU，分块后 2221 块）：PVS 可见集仅 **153/8269 cluster
+    //     = 1.85%**，被 PVS 隐藏 **1968/2221 块（88.6%）**，HUD 显示「可见 118/2221」。
+    //   · 与 game 侧记载的同一现象一致（game/src/renderer/renderer-main.ts:75-81：
+    //     "8269 cluster 平均可见率仅 1.6%、spawn 点 cluster=-1——开放 surf 图 BSP leaf/PVS
+    //     划分失效，可见集几乎为空 → 相邻区域被错误全剔，晃动穿越 cluster 边界时边缘消失"）。
+    //   · 分块合并后渲染量已由**视锥剔除（FRUSTUM_PAD 包围球膨胀）+ 距离 LOD
+    //     （cullDistance）** 控制，PVS 对本类地图为**负收益**。game 因此硬关（ENABLE_PVS=false）。
+    // 保留此开关（debug 面板可运行时勾选）以便 PVS 数据修好后回归验证；
+    // 若换用 PVS 数据正常的地图，可勾选开启。
+    pvsEnabled: false,
     updateInterval: 1,
     cullDistance: 12800, // 默认视距上限（加载后由场景覆盖，见 lod-manager）
   },

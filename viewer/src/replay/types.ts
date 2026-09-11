@@ -57,7 +57,7 @@ export function defaultRule(): RuleConfig {
 
 /**
  * Shavit `.replay` 头部元信息（replay-file.inc FINAL 规格；V2 无对应字段 → 0/null）。
- * 字段/顺序/语义见 viewer/docs/implementation/shavit-replay-format.md。
+ * 字段/顺序/语义见 documents/viewer/implementation/shavit-replay-format.md。
  */
 export interface ReplayHeaderMeta {
   /** FINAL 格式版本（1..0x0C）；V2 无版本概念 → 0。 */

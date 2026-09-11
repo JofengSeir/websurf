@@ -148,9 +148,19 @@ class StubAuthLoop {
   readonly fixedDts: number[] = [];
   resets = 0;
   starts = 0;
+  /** 最近一次 setFixedDt 的步长（首条无前置 → 视为 -1 恒不相等 → 首次必变更）。 */
+  private lastRate = -1;
   readonly published: unknown[] = [];
-  setFixedDt(rate: number): void {
+  /** 返回契约对齐 auth-loop.ts：步长未变返回 false、变化返回 true（调用方据此
+   * 决定是否 reset）。修复 2 配套：原 `: void` 签名吞掉返回值，无法覆盖
+   * "步长不变跳过 reset" 的接线语义。 */
+  setFixedDt(rate: number): boolean {
     this.fixedDts.push(rate);
+    if (rate !== this.lastRate) {
+      this.lastRate = rate;
+      return true;
+    }
+    return false;
   }
   reset(): void {
     this.resets++;

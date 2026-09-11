@@ -8,7 +8,7 @@
 #
 # 各应用工程构建链路（与本地 build-dist.cmd 一致）：
 #   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.128 与五份 Cargo.lock（4 模块工程 + 根）统一匹配；
-#      仓库根 .cargo/config.toml 使全部构建共享根 target/ 缓存）
+#      四个模块 workspace 各自保留 target/，根 workspace 的 target/ 位于仓库根，不再跨 workspace 复用编译缓存）
 #   2. esbuild 打包 TypeScript（worker + app）
 #   3. scripts/build-dist.mjs --multi 生成多文件 dist/（app.js + worker.js + wasm 外置 + textures.mtz 外置，
 #      Pages HTTP 环境；single 模式仅本地 file:// 使用——viewer 例外，其 dist 为 single-only）
@@ -89,6 +89,34 @@ jobs:
         working-directory: debug
         # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常，体积更小
         run: node scripts/build-dist.mjs --multi
+
+      - name: Verify debug optimizeScene (GLB 空间分块合并)
+        working-directory: debug
+        # 渲染性能回归门：面片规模的地图（实测 surf_666 GLB = 34409 primitive →
+        # 未合并时场景 3.4 万 THREE.Mesh，每帧全量视锥剔除 + 逐 mesh draw call）
+        # 必须走 optimizeScene 合并到 300~800 块。断言顶点守恒 + 块数区间。
+        run: npm run test:optimize-scene
+
+      # 权威时钟回归门：`input-bridge` 把 tickRate 塞进每一条 physics 配置消息，
+      # 而调用方原先无条件 `setFixedDt + reset()`；`reset()` 会永久丢弃累积器余数 +
+      # 一次唤醒区间。实测（确定性 Node 测试）在 4ms 间隔的配置消息下权威时钟从
+      # 63.6 tick/s 崩到 0.5 tick/s = 用户报告的「tick 计算滑落、拖累渲染」。
+      # 断言：新契约下 tick 率与基线一致，且旧行为会复现缺陷。
+      - name: 权威时钟验证（配置消息不得丢仿真时间）
+        working-directory: debug
+        run: npm run test:auth-clock
+
+      # tick→渲染 路径垂距验收门：Worker 权威帧的**发布位置**必须是渲染轨迹上的一个
+      # 采样点（每个 tick 点到渲染折线的最短距离 ≈0）。度量 = 垂距（对线段投影钳位；
+      # 跳变 >100 HU 的段不参与），与面板"偏差梳"（时间对齐、含切向滞后）**不是同一个量**。
+      # 阈值（稳态总体，剔除传送邻近点）：p95 ≤ 2 HU / max ≤ 10 HU / 毛刺 ≤ 1% / 剔除 ≤ 10%。
+      # 当前夹具 = tick-on-render-prefix.json（**缺陷存在时**的真实录制，实测稳态 p95=36.52 HU），
+      # 配 `--expect fail` —— 即本步是**判别力自检**：证明这道门确实能识破"发布位置不在渲染
+      # 轨迹上"的缺陷。修好后的真实录制到手后再加一个 `--expect pass` 的夹具（见
+      # debug/scripts/path-baseline.md 的两夹具语义）。
+      - name: tick→render 路径垂距验收（稳态 p95 ≤ 2 HU）
+        working-directory: debug
+        run: npm run test:path-acceptance
 
       # ── game/ 独立工程（WebSurf-game，尝试游戏化）────────────────
       - name: Install game dependencies

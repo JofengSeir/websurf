@@ -126,7 +126,7 @@ pub static GATE_VETO_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::At
 /// 差 ≤ 0；EPS 仅吸收浮点误差，不用再吸收 Minkowski 穿透量（那是「扩展进入
 /// 分数」的悬停间隙 0.03125，用于停止位置；若把该间隙算进门判据，会放过
 /// 沿表面悬停滑行的盒对相邻 brush 前缘的假进入——P2 第二层幻影，见
-/// docs/chamfer-physics §9）。
+/// documents/archive/chamfer-physics §9）。
 ///
 /// 这是 P2 坡顶幻影碰撞的根治手段：用「命中处盒 AABB 是否与该 brush/tri AABB
 /// 重叠」否决由无限平面造成的假进入（如坡面 z=0 端盖），且为**逐平面**否决
@@ -200,7 +200,7 @@ fn clip_planes(
             // 判盒 AABB 与该实体 AABB 三轴重叠，才是真实进入；否则是无限平面造成的
             // 幻影进入（如坡面 z=0 端盖、或沿平台顶悬停滑行的盒对坡前缘的假进入），
             // 仅跳过该平面（保留更晚的真实接触，避免整实体否决导致穿模——
-            // 见 docs/chamfer-physics §9）。
+            // 见 documents/archive/chamfer-physics §9）。
             let f_true = d1 / (d1 - d2);
             if aabb_overlaps_at(bmin, bmax, start, end, mins, maxs, f_true) && f > enter_frac {
                 enter_frac = f;
@@ -221,7 +221,7 @@ fn clip_planes(
         // 【盒-AABB 必要校验·起点】平面判定「起点在体内」同样是无限平面过逼近：
         // 盒仅刺入某平面 EPS 量、AABB 却与实体分离时（如 P2 盒底高于坡顶、z_max
         // 刚过 z=0），start_solid/all_solid 会把速度整速清零、把盒钉在幻影平面处。
-        // 与进入平面同源同判（docs/chamfer-physics §9）：AABB 分离即真实不相交。
+        // 与进入平面同源同判（documents/archive/chamfer-physics §9）：AABB 分离即真实不相交。
         if !aabb_overlaps_at(bmin, bmax, start, start, mins, maxs, 0.0) {
             GATE_VETO_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return;

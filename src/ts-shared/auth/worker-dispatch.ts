@@ -113,6 +113,10 @@ export interface WorkerDispatchEnv {
    * §3.4.1 触发清单的 dispatch 面）。实现侧自查 tick 模式（非 tick no-op），
    * 耦合/解耦零回归。 */
   tickExternalBreak?(evtBit: number): void;
+  /** 健康护栏：世界构建完成 → 上报本图出生点 Y（越界地板基准）与已记忆的死亡阈值。 */
+  onWorldSpawn?(spawnY: number, deathY: number | null): void;
+  /** 健康护栏：死亡阈值到达 → 记忆（无出生点信息时当地板用）。 */
+  onDeathThreshold?(value: number): void;
   /** world-json 重建钩子（可选，t4）：tick 模式下 tick 标号归零 + 段 +1 +
    * worldRebuild 位 + 排序门重建。非 tick 模式 no-op（实现侧自查）。 */
   onWorldRebuilt?(): void;
@@ -129,6 +133,22 @@ export interface WorkerDispatchEnv {
 }
 
 export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<unknown>) => void {
+  /**
+   * 最近一次收到的死亡阈值（`set-death-threshold` 记忆）。
+   *
+   * 为什么必须记忆：`world-json` 重建物理世界会 `authLoop.reset()` 并新建 PhysWorld，
+   * 而 Rust 的 `death_y` 默认是 -100_000（`src/phys/mod.rs`）——重建后若不重放，
+   * 判定阈值就退回默认值。故此处记忆 + `reapplyDeathY()` 重放。
+   */
+  let lastDeathY: number | null = null;
+  /** 把记忆的死亡阈值重放到当前全部物理实例（world 重建 / 循环 reset 之后调用）。 */
+  const reapplyDeathY = (): void => {
+    if (lastDeathY === null) return;
+    env.phys.current?.set_death_y(lastDeathY);
+    env.tickPhys?.current?.set_death_y(lastDeathY);
+    env.scratch?.current?.set_death_y(lastDeathY);
+  };
+
   /** wasm 就绪（wasm-init 成功；world-json 早于 wasm-init 则忽略——主线程 init
    * 顺序保证 wasm 先行）。 */
   let ready = false;
@@ -172,9 +192,23 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     }
     if (type === 'input') {
       // MsgState 回退：主线程每帧消息输入（SAB 模式无此消息）
-      const d = msg as { dx?: number; dy?: number; keys?: number };
+      // 修复 1：原分支把消息窄化为 {dx?,dy?,keys?}，丢弃 addInput 同拍携带的
+      // 6 个渲染采样字段（rt/rx/ry/rz/ri0/repoch）→ 非 COOP/COEP 部署（Pages）
+      // 下 Worker 侧 renderSample 恒 null、渲染轨迹投影静默失效。此处补齐全部
+      // 字段；recvInput 对 rt===undefined 天然 no-op → 旧形态消息零回归。
+      const d = msg as {
+        dx?: number;
+        dy?: number;
+        keys?: number;
+        rt?: number;
+        rx?: number;
+        ry?: number;
+        rz?: number;
+        ri0?: number;
+        repoch?: number;
+      };
       if (env.shared.current && !env.shared.current.isShared) {
-        env.shared.current.recvInput(d.dx ?? 0, d.dy ?? 0, d.keys ?? 0);
+        env.shared.current.recvInput(d.dx ?? 0, d.dy ?? 0, d.keys ?? 0, d.rt, d.rx, d.ry, d.rz, d.ri0, d.repoch);
       }
       return;
     }
@@ -217,8 +251,10 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       env.syncParamsToWasm(); // 双/三实例同参（注入实现按槽内全部实例同步）
       env.authLoop.setFixedDt(env.getConfigTickRate()); // 面板 tickRate 生效
       env.authLoop.reset();
+      reapplyDeathY(); // world 重建 → 重放记忆的死亡阈值（否则退回 Rust 默认 -100_000）
       env.decoupledLoop?.publishCurrentState(); // 首帧状态即刻可见（harness applyWorld:150 语义）
       env.onWorldBuilt?.(p);
+      env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 健康护栏：本图出生点 Y + 已记忆阈值
       env.onWorldRebuilt?.(); // t4：tick 模式标号归零 + 段 +1 + worldRebuild 位（非 tick no-op）
       return;
     }
@@ -243,8 +279,13 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         if ((env.getComputeMode?.() ?? 'coupled') === 'decoupled') {
           env.decoupledLoop?.onTickRateChanged();
         } else {
-          env.authLoop.setFixedDt(env.getConfigTickRate());
-          env.authLoop.reset(); // 清累积器，防新旧步长错配
+          // 修复 2：原支路无条件 setFixedDt + reset，而 input-bridge 把 tickRate
+          // 塞进每一条 physics config → 每条都清累积器、丢仿真时间（"tick 计算滑落"）。
+          // 正确范式（debug/src/worker/main.ts）：setFixedDt 步长未变返回 false，
+          // 此时跳过 reset()，仅步长真变化才清累积器（防新旧步长错配）。
+          if (env.authLoop.setFixedDt(env.getConfigTickRate())) {
+            env.authLoop.reset(); // 仅步长真变化才清累积器（防新旧步长错配）
+          }
         }
       }
       if (c.section === 'player') {
@@ -314,9 +355,46 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
           velZ: number;
           onGround: boolean;
         };
+        teleport?: boolean;
       };
       if (!env.phys.current || !sm.state) return;
       const s = sm.state;
+      if (sm.teleport === false) {
+        // ── 常规反向重锚 = 位置 + 角度取渲染侧（`routineReanchor`）─────────────
+        // 位置**和 yaw/pitch** 一律以渲染为准；权威保留自己的**速度**与 on_ground。
+        //
+        // 角度为什么必须取渲染侧：移动方向由**权威速度**决定（`calibrateVelocity`
+        // 每帧把权威速度写进渲染——用户定调"权威是速度之主"），而画面朝向是渲染
+        // yaw（renderer-main: `cc.setYawPitch(st.yaw …)`）。两侧 yaw 一旦分叉 δ，
+        // 玩家就会"只按 W/S、视角不动，却斜着走"，δ 就是偏角。
+        // 实测（debug/scripts/input-replay-verify.mjs 移动方向自检，同协议 A/B）：
+        // 修复前稳定偏差 **-3.115°/-3.444°**，补上 yaw/pitch 后 **0.000°**。
+        // 此前 yaw 分叉只有两条纠正路径——传送豁免期（`emitTeleportSync`），或
+        // `>45° 且渲染静止 8 帧`（authority-calibrator YAW_FAULT_DEG）——**0°~45°
+        // 区间无人纠正**，长时间按 W 就一直偏着。
+        //
+        // 绝不可把渲染的 onGround / 速度写进权威：
+        //  · 写 onGround 会在权威**实际腾空**时打开 `check_jump` 的唯一硬门
+        //    （player.rs:537 `if !p.on_ground { return; }`），而紧随其后的
+        //    `p.velocity[1] = jump_velocity`（≈302）是**赋值**而非累加——
+        //    于空中重赋即等于"中途再跳一次"，顶点附近触发会让顶高 57→≈114 **翻倍**。
+        //  · 写速度会**反转速度主从**（用户硬性要求：权威速度为准），
+        //    并构成"渲染被膨胀的速度 → 权威 → 再写回渲染"的正反馈。
+        // 回归门禁：`npm run test:jump-apex`（Fix A 的验收）+ `test:auth-clock`。
+        const cur = env.phys.current.state() as {
+          velX: number;
+          velY: number;
+          velZ: number;
+          onGround: boolean;
+        };
+        env.phys.current.set_state(
+          s.posX, s.posY, s.posZ,
+          s.yaw, s.pitch,
+          cur.velX, cur.velY, cur.velZ,
+          cur.onGround,
+        );
+        return;
+      }
       env.phys.current.set_state(
         s.posX, s.posY, s.posZ, s.yaw, s.pitch,
         s.velX, s.velY, s.velZ, s.onGround,
@@ -372,6 +450,8 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       // 与主线程渲染物理 setDeathY 同值——双端判定不因阈值差异分叉。G3 双实例同参。
       const dm = msg as { value?: number };
       if (typeof dm.value === 'number') {
+        lastDeathY = dm.value; // 记忆：world 重建后由 reapplyDeathY() 重放
+        env.onDeathThreshold?.(dm.value); // 健康护栏：无出生点信息时当地板用
         env.phys.current?.set_death_y(dm.value);
         env.tickPhys?.current?.set_death_y(dm.value);
         env.scratch?.current?.set_death_y(dm.value); // t4 G3 三实例

@@ -4,7 +4,7 @@
 # 两端 lib.rs 仅保留 wasm-bindgen 导出层与各自特色函数）。
 #
 # 归属仓库根 Cargo workspace（与 websurf-phys、四个模块 wasm crate 同 workspace，
-# 共享根 target/ 与根 Cargo.lock；曾为独立 workspace root，2026-09-06 合并）。
+# 共享根 Cargo.lock；target/ 位于各工程本地；曾为独立 workspace root，2026-09-06 合并）。
 
 [package]
 name = "websurf-wasm-core"

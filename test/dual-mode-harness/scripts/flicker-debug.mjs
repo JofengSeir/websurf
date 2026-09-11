@@ -106,7 +106,7 @@ class TestShared {
 // ── wasm 初始化 ────────────────────────────────────────────────────────
 initSync({ module: readFileSync(join(root, 'pkg', 'websurf_test_wasm_bg.wasm')) });
 
-const bspBytes = readFileSync(join(ROOT_REPO, 'src', 'maps', 'surf_666.bsp'));
+const bspBytes = readFileSync(join(ROOT_REPO, 'maps', 'surf_666.bsp'));
 const proc = new BspProcessor(bspBytes);
 const BRUSH_FILTER_JSON = JSON.stringify({
   include_ladder: true, include_solid: true, min_brush_volume: 0,

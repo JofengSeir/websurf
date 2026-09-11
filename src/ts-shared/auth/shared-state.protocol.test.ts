@@ -298,8 +298,8 @@ console.log('[4c] PSEQ read-side consistency (even snapshot + recheck, probe sea
 // 场景 5（t11 f' raw 停点，raw store 级）：不经 writeAuthoritative、直接 raw
 // store 构造 f' 序中段/尾段停点，锁写序合同本体——中段（三元组写完、VA 未
 // release、PS 恒奇）→ R 奇检重试 ×2 → −1 冲突契约（dst 弃用）；尾段补完（VA
-// release → PS 偶）→ 同代一致。对照组=红档（temp/phys-plan-discuss/
-// f1-repro-entry.ts F1_LEGACY=1）：旧序停点（PS 偶完、VA 未 release）下混合被
+// release → PS 偶）→ 同代一致。对照组=红档（原 temp/phys-plan-discuss/
+// f1-repro-entry.ts，2026-09 清理；F1_LEGACY=1）：旧序停点（PS 偶完、VA 未 release）下混合被
 // 接受——证明盲区只对非 f' 写者可达，写序 f' 是不可达性之根。
 {
   const sabF = new SharedArrayBuffer(SHARED_BUFFER_SIZE);

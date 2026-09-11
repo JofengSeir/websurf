@@ -6,7 +6,7 @@ description = "WebSurf 共享物理系统（源自 game/ WebSurf-game 的 Rust �
 license = "MIT"
 
 # 归属仓库根 Cargo workspace（与 websurf-wasm-core、四个模块 wasm crate 同 workspace，
-# 共享根 target/ 与根 Cargo.lock；曾为独立 workspace root，2026-09-06 合并）。
+# 共享根 Cargo.lock；target/ 位于各工程本地；曾为独立 workspace root，2026-09-06 合并）。
 
 [lib]
 crate-type = ["rlib"]

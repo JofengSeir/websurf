@@ -26,8 +26,7 @@ npm run build   # 编译 WASM（共享 crate 自动参与）+ TypeScript
 ```
 
 Rust 侧构建拓扑：仓库根 `Cargo.toml` 为共享层 workspace（websurf-phys / websurf-wasm-core），
-四个模块 wasm crate 保留各自 workspace；仓库根 `.cargo/config.toml` 让**所有**构建共用
-根 `target/` 编译缓存——共享 crate 与三方依赖全仓库只编译一份。五份 Cargo.lock（四个模块工程 + 根 workspace）的
+四个模块 wasm crate 保留各自 workspace，各工程目录内各自保留 `target/`（不再跨 workspace 复用编译缓存）；根 workspace（共享层 websurf-phys / websurf-wasm-core）的 `target/` 位于仓库根——共享 crate 与三方依赖在各 workspace 内独立编译。五份 Cargo.lock（四个模块工程 + 根 workspace）的
 wasm-bindgen 统一锁 0.2.128（与 CI 的 wasm-bindgen-cli 匹配）。
 
 ## 开发 / 运行
@@ -49,15 +48,20 @@ BSP 地图文件体积大，不随仓库分发（`.gitignore` 对 `*.bsp` 全忽
 
 ## 文档
 
-- [docs/](docs/) — 仓库级文档：
-  - [index.md](docs/index.md) — 全树导航与阅读层次（总架构 → 共享层 → 工程总览 → 细分实现 → 差异）
-  - [architecture.md](docs/architecture.md) — 整体架构（仓库组成与边界 / 共享层引用矩阵 / 构建链 / BSP→解析→物理→渲染数据流 / 各工程差异一览）
-  - [phys.md](docs/phys.md) / [wasm-core.md](docs/wasm-core.md) / [ts-shared.md](docs/ts-shared.md) / [materials.md](docs/materials.md) — 共享层（Rust 物理内核 / BSP 解析·GLB·纹理解码 / TS 权威帧协议与算法 / 材质体系全景）
-  - [archive/](docs/archive/) — 历史分析文档归档（phys-fix-directions.md / chamfer-physics/ 已移入 archive/，无重建计划；materials.md 已由 docs/materials.md 重建承接）
-- [debug/docs/](debug/docs/) — 主工程（overview 总览 / sequences 时序 / implementation×3 细分 / differences 差异）
-- [game/docs/](game/docs/) — WebSurf-game（overview / sequences / implementation×2 / differences）
-- [viewer/README.md](viewer/README.md) + [viewer/docs/overview.md](viewer/docs/overview.md) — 查看器说明、操作与位姿约定
-- [test/dual-mode-harness/README.md](test/dual-mode-harness/README.md) / [CONCLUSION.md](test/dual-mode-harness/CONCLUSION.md) — 验证工程说明与「64t 坡速 ≈ 无限制」三方会审结论
+文档集中归档在仓库根 **`documents/`**（2026-09 由根 `docs/` 与 debug/game/viewer 三个工程的 `docs/` 合并而来，
+各树内部结构与相对导航保持不变）。找法：**仓库级 / 共享层文档**在 `documents/` 顶层；**工程文档**在
+`documents/<工程名>/`（debug、game、viewer）；**历史分析**在各树的 `archive/` 子目录。
+`test/dual-mode-harness/docs/` **未合并**，仍在原处（见最后一条）。
+
+- [documents/](documents/) — 仓库级文档：
+  - [index.md](documents/index.md) — 全树导航与阅读层次（总架构 → 共享层 → 工程总览 → 细分实现 → 差异）
+  - [architecture.md](documents/architecture.md) — 整体架构（仓库组成与边界 / 共享层引用矩阵 / 构建链 / BSP→解析→物理→渲染数据流 / 各工程差异一览）
+  - [phys.md](documents/phys.md) / [wasm-core.md](documents/wasm-core.md) / [ts-shared.md](documents/ts-shared.md) / [materials.md](documents/materials.md) — 共享层（Rust 物理内核 / BSP 解析·GLB·纹理解码 / TS 权威帧协议与算法 / 材质体系全景）
+  - [archive/](documents/archive/) — 历史分析文档归档（phys-fix-directions.md / chamfer-physics/ 已移入 archive/，无重建计划；materials.md 已由 documents/materials.md 重建承接）
+- [documents/debug/](documents/debug/) — 主工程（overview 总览 / sequences 时序 / implementation×3 细分 / differences 差异）
+- [documents/game/](documents/game/) — WebSurf-game（overview / sequences / implementation×2 / differences）
+- [documents/viewer/](documents/viewer/) — WebSurf-viewer（overview / sequences / implementation×3 / replay-rule-ai / differences）+ [viewer/README.md](viewer/README.md)（说明、操作与位姿约定）
+- [test/dual-mode-harness/README.md](test/dual-mode-harness/README.md) / [CONCLUSION.md](test/dual-mode-harness/CONCLUSION.md) — 验证工程说明与「64t 坡速 ≈ 无限制」三方会审结论；其文档树未合并，见 [test/dual-mode-harness/docs/overview.md](test/dual-mode-harness/docs/overview.md)
 
 ## 第三方组件
 

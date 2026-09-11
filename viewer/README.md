@@ -13,8 +13,8 @@
 | `src/core/` | 通用层：场景 / 飞行相机 / 位姿类型 / BSP 加载 / DOM 工具 / 常量 |
 | `src/ui/` | 地图页（信息 · 出生点）+ HUD/引导层/帮助浮层 + 录像信息条（`.replay` 头部元信息） |
 | `src/replay/` | 录像子系统：`.replay` 原生解析（含坐标定标映射）/ 导入 / 播放 / 可视化 / 时间轴 / 轨迹列表 / 坐标映射切换 / 调整工具 |
-| `docs/implementation/shavit-replay-format.md` | Shavit `.replay` 二进制格式规格（replay-file.inc 对齐 + 真实文件逐字节验证） |
-| `docs/replay-rule-ai.md` | 历史注记：`.js` 规则脚本通道已于 2026-09 移除（原稿存 `docs/archive/`） |
+| `../documents/viewer/implementation/shavit-replay-format.md` | Shavit `.replay` 二进制格式规格（replay-file.inc 对齐 + 真实文件逐字节验证） |
+| `../documents/viewer/replay-rule-ai.md` | 历史注记：`.js` 规则脚本通道已于 2026-09 移除（原稿存 `../documents/viewer/archive/`） |
 | `test/replay-selftest.ts` | 录像管线 Node 自检（`npm run test:replay`） |
 
 共享 `src/wasm-core/`（BSP 解析/GLB 导出），vmdl patch 同 debug/game/test。
@@ -34,7 +34,7 @@
 
 | 命令 | 覆盖 |
 |---|---|
-| `npm run test:replay` | 录像管线 Node 自检（153 项断言）：真实 `.replay`（仓库根 `maps/surf_null_4.replay`）逐字节解析 / 头部元信息与 zoneOffset 闭环 / 坐标定标与朝向自洽（run 段 view·motion cos）/ 坐标映射切换 / transform 后处理 / 播放与 A-B / 多轨道 / 异常输入与版本护栏 |
+| `npm run test:replay` | 录像管线 Node 自检（153 项断言）：真实 `.replay`（本地 `test/maps/surf_null_4.replay`）逐字节解析 / 头部元信息与 zoneOffset 闭环 / 坐标定标与朝向自洽（run 段 view·motion cos）/ 坐标映射切换 / transform 后处理 / 播放与 A-B / 多轨道 / 异常输入与版本护栏 |
 | `npm run test:smoke` | 真浏览器冒烟（CDP 驱动本机 Edge headless）：页面加载 → 面板渲染 → 导入真实 `.replay` → 录像信息条 → 播放基准（帧自身坐标，坐标级断言）→ 播放 / A-B → 调整工具 → 多轨迹增删与跟随 → 拖入合成 V2 `.replay` → 坐标映射切换 → 播放控制 API（含 `meta()`）→ 地图页（参考显示已移除），并断言全程无 console error |
 
 > `test:smoke` 需要另开一个终端跑着 `npm run dev`，并需要 `ws`（`npm i ws`）与 Edge/Chromium；
@@ -44,8 +44,8 @@
 （多文件取首个；解析进行中忽略重复触发）。地图加载后，换图入口在侧栏「地图」页顶部的
 「更换地图」（拖拽 `.bsp` 仍全局可用）。本地地图副本放仓库根 `maps/`（gitignored）。
 
-> 只想验证录像链路、手头没有 BSP？直接把仓库根 `maps/surf_null_4.replay`（原生 Shavit 示例录像，
-> 已入库）拖进窗口；打包后的 dist 则有内置示例深链（见下节「深链示例」）。
+> 只想验证录像链路、手头没有 BSP？直接把 `test/maps/surf_null_4.replay`（原生 Shavit 示例录像，
+> 本地未跟踪）拖进窗口；打包后的 dist 则有内置示例深链（见下节「深链示例」）。
 
 ## 打包与部署（单一 dist，双击即用）
 

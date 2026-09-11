@@ -328,10 +328,8 @@
               <input type="range" id="cullDistance" min="1000" max="50000" step="1" value="12800" />
               <div class="val"><input type="number" id="cullDistanceNum" class="param-num" min="1000" max="100000" step="any" value="12800" /></div>
 
-              <div class="ctrl-checkbox-row ctrl-full" style="margin-top:2px;">
-                <input type="checkbox" id="pvsEnabled" checked />
-                <label for="pvsEnabled">PVS 剔除</label>
-              </div>
+              <!-- PVS 剔除开关已移除：2026-09-11 照搬 game 的剔除实现（仅距离判据，无 PVS）。
+                   实测 surf_666 的 PVS 可见集仅 153/8269 cluster、会隐藏 1968/2221 块 → 面成片消失。 -->
 
               <div class="ctrl-full acc-divider"></div>
               <div class="ctrl-full acc-section-title">纹理</div>
@@ -356,6 +354,53 @@
               <label title="贴墙时 near = 最近几何距离 × 此系数：越小越不易裁墙（更保守），远处深度精度略降">收缩系数</label>
               <input type="range" id="nearRatio" min="0.1" max="1" step="0.01" value="0.3" />
               <div class="val"><input type="number" id="nearRatioNum" class="param-num" min="0.1" max="1" step="any" value="0.3" /></div>
+            </div>
+          </div>
+        </details>
+
+        <!-- 物理路径记录：同时记录两条物理计算线的脚底中心点 -->
+        <details open>
+          <summary>路径记录</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid">
+              <div class="ctrl-full" style="font-size:11px;color:#9aa3b2;line-height:1.6;"
+                   title="两条线都记录 PhysWorld 脚底中心点（origin 的 x/y/z），节点之间直连直线段（真实轨迹），跳变 >100 HU（respawn/传送）处自动断开不连线。采样严格按各自的计算节点：渲染物理 = 主线程 predPhys 每个 rAF 物理步一个节点（更新率 = 显示器刷新率）；tick 物理 = Worker 权威帧每来一帧新的（V_A 变化）一个节点（64 档 ≈ 67 节点/秒）。tick 段按折角着色：绿 ≤5° / 黄 ≤20° / 红 >20°。导出均为原始节点，带 t 供外部按时间对齐。">
+                <span style="color:#22d3ee">■</span> 渲染物理（主线程 predPhys，每 rAF）<br />
+                <span style="color:#f59e0b">■</span> tick 物理（Worker 权威帧，每新帧）
+                <span style="color:#ff2626">■</span> 硬折角(&gt;20°)<br />
+                <span style="font-size:10px;color:#7a8398;">tick 节点时间戳 = 该帧发布所依据的<b>渲染时钟采样时刻 τ</b>（不是轮询时刻）；权威发布位置即渲染轨迹上的一个采样点 → 偏差梳与垂距都应 ≈0。</span><br />
+              </div>
+
+              <div class="ctrl-full" id="pathBuildTag" style="font-size:10px;color:#7a8398;margin-top:2px;">
+                实现版本 v4 · 节点直连段 + tick 时间戳=渲染时钟 τ + 垂距/偏差梳分列（若这里不是 v4，说明浏览器跑的是旧构建 → Ctrl+Shift+R 强刷）
+              </div>
+
+              <div class="ctrl-full" id="pathCounts" style="font-size:11px;color:#9aa3b2;margin-top:4px;"
+                   title="两个度量口径不同，勿混用：①垂距 = 每个 tick 点到渲染折线的最短距离（投影钳位到线段；跳变 >100 HU 的段不参与）——对采样相位不敏感，是**验收口径**（面板为 ±250ms 近似窗，权威判定 = debug/scripts/path-acceptance.mjs，阈值 稳态 p95 ≤ 2 HU / max ≤ 10 HU）。②偏差梳 = 每个 tick 点与渲染线【同一时刻】插值位置的差——时间对齐、含切向滞后，会被 respawn/传送放大成数百 HU。">
+                未开始 · 渲染 0 点 / tick 0 点
+              </div>
+
+              <div class="ctrl-full" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+                <button id="pathToggleBtn" style="padding:3px 10px;">开始记录</button>
+                <button id="pathClearBtn" style="padding:3px 10px;">清除</button>
+                <button id="pathExportJsonBtn" style="padding:3px 10px;">导出 JSON</button>
+                <button id="pathExportCsvBtn" style="padding:3px 10px;">导出 CSV</button>
+              </div>
+
+              <label class="ctrl-full" style="margin-top:6px;">
+                <input type="checkbox" id="pathRenderVisibleChk" checked /> 显示渲染物理线（密，320Hz）
+              </label>
+              <label class="ctrl-full" style="margin-top:2px;">
+                <input type="checkbox" id="pathTickVisibleChk" checked /> 显示 tick 物理线 + 节点（64Hz）
+              </label>
+              <label class="ctrl-full" style="margin-top:2px;"
+                     title="tick 节点方点（每 64Hz 一个）。方点在屏幕上密集时会连成一条'方链'、看起来不是线——此时可单独关掉它，只保留折线本身。">
+                <input type="checkbox" id="pathDotsVisibleChk" checked /> 显示 tick 节点方点
+              </label>
+              <label class="ctrl-full" style="margin-top:2px;"
+                     title="每个 tick 节点画一条洋红短线，连到渲染线在【同一时刻】的插值位置。两个物理计算的差异在 3D 里最难看（tick 段 22 HU 被透视压扁、又被密的渲染线盖住），偏差梳把它变成一根根看得见的短线，且不受相机朝向影响。">
+                <input type="checkbox" id="pathDeviVisibleChk" /> 显示偏差梳（tick→渲染 同时刻连线）
+              </label>
             </div>
           </div>
         </details>

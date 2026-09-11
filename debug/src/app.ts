@@ -8,6 +8,12 @@ import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { MouseBuffer } from './input/mouse-buffer.js';
 import { PointerLockController } from './input/pointer-lock.js';
+import {
+	InputPlayer,
+	InputRecorder,
+	INPUT_REPLAY_SCHEMA,
+} from './input/input-recorder.js';
+import type { InputReplayMeta } from './input/input-recorder.js';
 import { createConfig, applyConfigPatch } from './config.js';
 import { loadDefaultTexturePack } from './default-pack.js';
 import { ensureMainWasm, mainWasmUrl } from './main-wasm.js';
@@ -26,7 +32,6 @@ import type {
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../src/ts-shared/auth/shared-state.js';
 import type { SharedState } from '../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../src/ts-shared/input/input-layer.js';
-import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../src/ts-shared/phys/params.js';
 import { buildWorldBundle } from '../../src/ts-shared/phys/world-builder.js';
 import type { WorldMetadata } from '../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
@@ -43,6 +48,8 @@ import {
 	clearCustomTeleports,
 } from './world/custom-teleports.js';
 import type { CustomTeleport } from './world/custom-teleports.js';
+// 物理参数映射（渲染物理 + 输入录制 meta 共用同一份实现）
+import { buildDebugPredictionParams } from './physics/prediction-params.js';
 
 // ---------------------------------------------------------------------------
 // 全局状态
@@ -94,6 +101,25 @@ const dom = {
 	missingTexturesSummary: document.getElementById('missingTexturesSummary') as HTMLElement | null,
 	missingTexturesList: document.getElementById('missingTexturesList') as HTMLElement | null,
 	missingTexturesOk: document.getElementById('missingTexturesOk') as HTMLButtonElement | null,
+	// 物理路径记录（渲染物理线 + tick 物理线）
+	pathToggleBtn: document.getElementById('pathToggleBtn') as HTMLButtonElement | null,
+	pathClearBtn: document.getElementById('pathClearBtn') as HTMLButtonElement | null,
+	pathExportJsonBtn: document.getElementById('pathExportJsonBtn') as HTMLButtonElement | null,
+	pathExportCsvBtn: document.getElementById('pathExportCsvBtn') as HTMLButtonElement | null,
+	pathVisibleChk: document.getElementById('pathVisibleChk') as HTMLInputElement | null,
+	pathRenderVisibleChk: document.getElementById('pathRenderVisibleChk') as HTMLInputElement | null,
+	pathTickVisibleChk: document.getElementById('pathTickVisibleChk') as HTMLInputElement | null,
+	pathDeviVisibleChk: document.getElementById('pathDeviVisibleChk') as HTMLInputElement | null,
+	pathDotsVisibleChk: document.getElementById('pathDotsVisibleChk') as HTMLInputElement | null,
+	pathCountsEl: document.getElementById('pathCounts') as HTMLElement | null,
+	// 输入录制 / 确定性回放（用户录一段，开发者无头复现）
+	inputRecStatusEl: document.getElementById('inputRecStatus') as HTMLElement | null,
+	inputRecToggleBtn: document.getElementById('inputRecToggleBtn') as HTMLButtonElement | null,
+	inputRecClearBtn: document.getElementById('inputRecClearBtn') as HTMLButtonElement | null,
+	inputRecExportBtn: document.getElementById('inputRecExportBtn') as HTMLButtonElement | null,
+	inputRecLoadBtn: document.getElementById('inputRecLoadBtn') as HTMLButtonElement | null,
+	inputRecStopPlayBtn: document.getElementById('inputRecStopPlayBtn') as HTMLButtonElement | null,
+	inputRecFile: document.getElementById('inputRecFile') as HTMLInputElement | null,
 	// 显示设置（显示设置面板）
 	showSolidsChk: document.getElementById('showSolids') as HTMLInputElement | null,
 	brushViewDistanceRange: document.getElementById('brushViewDistance') as HTMLInputElement | null,
@@ -170,8 +196,69 @@ let sceneDeathY: number | null = null;
 
 // 自定义传送点：地图名（localStorage 分组）
 let teleportMapName = '';
+/** 当前已加载的 BSP 文件（`__wsInput.reloadForTest` 重建物理世界用；诊断专用）。 */
+let lastBspFile: File | null = null;
+/** 最近加载的出生点列表 `[x,y,z,yaw]`（输入录制 meta 记录；回放端可还原）。 */
+let loadedSpawnList: Array<[number, number, number, number]> = [];
 /** 输入循环状态 */
 let wheelJumpPending = false;
+
+// ── 输入录制 / 确定性回放（用户录一段，开发者无头复现）─────────────────────
+// 说明与设计见 debug/src/input/input-recorder.ts 文件头；面板见 web/index.html
+// 「输入录制」区。live 路径（既不录制也不回放）与改动前**逐字节一致**。
+/** 用户录制器（面板/`__wsInput` 驱动；只在 recording 时落样本）。 */
+const inputRecorder = new InputRecorder();
+/** 回放期"实际喂出去的帧"捕获器（确定性自检用；与用户录制互不干扰）。 */
+const replayCapture = new InputRecorder();
+replayCapture.setAlwaysOn(true); // 回放期无条件落样本（不经过 recording 状态）
+/** 回放器（载入 JSON 后由输入循环驱动）。 */
+const inputPlayer = new InputPlayer();
+/** 回放中（输入循环覆盖设备输入；键鼠事件一并忽略）。 */
+let inputReplaying = false;
+/** 回放捕获开关：仅回放期把实际喂出的值写入 replayCapture。 */
+let replayCaptureArmed = false;
+/** 回放期输入循环走过回放分支的帧数（诊断：确认覆盖真的发生了）。 */
+let replayLoopFrames = 0;
+/**
+ * 上一次**真喂出去**的回放样本下标。
+ *
+ * 用途：确定性回放的推进节拍（`tickReplay` → 等渲染主循环消费）要求两个 rAF 窗口，
+ * 于是输入循环会为**同一个样本**跑两次；`feedInput` 的 dx/dy 是累加语义，喂两次会
+ * 把该帧输入翻倍，且回放捕获会变成"一帧两条"（实测 480 帧录制 → 959 条捕获）。
+ * 因此同一 `playerIndex` 只喂一次（`next()` 不推游标，重复调用返回同一样本）。
+ */
+let lastFedReplayIndex = -2;
+/** 回放元数据（载入时保存；armReplay 用它对齐世界状态）。 */
+let playbackMeta: Partial<InputReplayMeta> = {};
+/** 录制状态行刷新节流（10Hz）。 */
+let lastRecUiAt = 0;
+/**
+ * 确定性回放等待计数（`__wsInput.tickReplay()` 用；见该 API 注释）。
+ * 0 = 可推进；1 = 已推进一帧、等渲染主循环消费（跨一个 rAF 窗口）；2 = 可结算。
+ */
+let replayTickWait = 0;
+/**
+ * 回放游标推进权归属：`false` = 输入循环自己推进（**面板路径**，由 rAF 驱动）；
+ * `true` = 由外部 `__wsInput.tickReplay()` 推进（**无头确定性协议**）。
+ *
+ * 两者**绝不能同时推进**：输入循环原先只读 `next()`（不推进），而无头协议靠
+ * `tickReplay()→stepReplay()` 推进；若给面板补上推进却不收回无头的推进权，
+ * 一帧就会走两步（实测 120 帧录制在 41 帧放完、轨迹缺 80 帧）。
+ */
+let externalReplayClock = false;
+/**
+ * 合成输入队列（**仅由 `__wsInput.pushSynthetic()` 填充**，用户操作永不写入）。
+ *
+ * 为什么需要：无头验证要"用真实输入循环录制一段合成会话"，若直接在页外反复调
+ * `feedInput`，录制帧数会与 rAF 帧数脱钩（录制器在 rAF 里记账）。走这条队列，
+ * 合成值与真实键鼠**走完全相同的路径**（含 Q/E 合并、滚轮位、录制点），
+ * 从而「录制 → 回放」比对是同一口径。
+ */
+const syntheticQueue: Array<{ dx: number; dy: number; keys: number }> = [];
+/** 取一帧合成输入（队列空 = 无合成输入 → 走设备路径）。 */
+function takeSynthetic(): { dx: number; dy: number; keys: number } | null {
+	return syntheticQueue.length > 0 ? syntheticQueue.shift() ?? null : null;
+}
 
 // HUD 本地采样（阶段 2）：FPS 主线程 rAF 计数（每秒刷新）
 let localFps = 0;
@@ -254,10 +341,11 @@ async function main(): Promise<void> {
 		rendererMain?.setDeathY(deathThresholdY);
 		inputBridge?.sendSetDeathThreshold(deathThresholdY);
 	};
-	// 权威兜底：渲染主线（144Hz 精度更高）→ 权威 Worker 反向校准；同步瞬间
-	// 清双端未消费输入增量（Worker 侧由 sync-render-state 处理 resetInput）
-	rendererMain.onSyncRenderState = (s) => {
-		worker?.postMessage({ type: 'sync-render-state', state: s });
+	// 渲染主线 → 权威反向同步：真位置突变（teleport=true）清双端未消费输入增量；
+	// 常规反向重锚（teleport=false，缺陷修复 A）只注入状态、**不清输入**
+	// （每几十毫秒一次例行对齐，清输入会变成可见的瞄准顿挫）
+	rendererMain.onSyncRenderState = (s, teleport) => {
+		worker?.postMessage({ type: 'sync-render-state', state: s, teleport });
 	};
 	// 渲染物理事件（Rust take_event：teleport/death）→ 计时挑战状态机（主线程）
 	rendererMain.onPhysEvent = onRenderPhysEvent;
@@ -290,6 +378,8 @@ async function main(): Promise<void> {
 
 	// 4. 输入循环（按键/滚轮/Q-E → 主线程渲染物理 + SAB 权威端）
 	startInputLoop();
+	// 4.1 输入录制面板初始状态（未开始）
+	updateInputRecUi();
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +431,7 @@ async function onSceneReadyUi(
 ): Promise<void> {
 	setStatus(
 		`场景已加载（GLB ${msg.glbSizeKb} KB，${msg.metadata.numBrushes} brushes，` +
-			`${msg.numSpawnPoints} 出生点，PVS ${msg.hasPvs ? '启用' : '无'}，` +
+			`${msg.numSpawnPoints} 出生点，PVS 已停用（照搬 game），` +
 			`对角线 ${(diag?.diagonal ?? 0).toFixed(0)} HU）`,
 		'success',
 	);
@@ -526,7 +616,531 @@ function updateCullStatsUI(msg: CullStatsLike): void {
 			`PVS: cluster=${p.cluster >= 0 ? p.cluster : '—'} ` +
 			`${p.visibleClusters}/${p.totalClusters} 可见 隐藏${p.pvsHidden}  LOD 近${p.near}/远${p.far}`;
 	}
+	updatePathCountsUI(); // 顺带刷新路径记录点数（~10Hz，够用）
 }
+
+// ---------------------------------------------------------------------------
+// 物理路径记录（面板接线）
+// 两条线：渲染物理 = 主线程 predPhys（每 rAF 物理步）；tick 物理 = Worker 权威帧（每新帧）。
+// 记录节点 = 脚底中心点（PhysWorld origin 的 x/y/z）。采样按各自计算节点，非定时轮询。
+// ---------------------------------------------------------------------------
+
+/** 刷新记录状态与点数。 */
+function updatePathCountsUI(): void {
+	if (!dom.pathCountsEl || !rendererMain) return;
+	const c = rendererMain.getPathCounts();
+	const rec = rendererMain.isPathRecording() ? '● 记录中' : '未开始';
+	const d = rendererMain.getPathDeviStats();
+	// ── 两个度量**必须分开显示、分开标注**（口径不同，混用会把结论搞反）──────
+	// 垂距 = tick 点到渲染折线的最短距离（不敏感于采样相位）= 验收口径；
+	// 偏差梳 = tick 点与渲染线【同一时刻】位置的差（时间对齐，含切向滞后）。
+	const perp = d.perp.n
+		? `　<b>垂距</b> p50 ${d.perp.p50.toFixed(1)} / <b>p95 ${d.perp.p95.toFixed(1)}</b> / max ${d.perp.max.toFixed(1)} HU` +
+			`（n=${d.perp.n}；HUD 近似 ±250ms 窗，**验收以 CI 脚本为准**）`
+		: '';
+	const devi = d.n
+		? `　<b>偏差梳</b>（时间对齐）均值 ${d.mean.toFixed(1)} / 最大 ${d.max.toFixed(1)} HU` +
+			`（<span style="color:#26d966">≤10:${d.green}</span> <span style="color:#ffd926">≤30:${d.yellow}</span> <span style="color:#ff2626">&gt;30:${d.red}</span>）`
+		: '';
+	const resid = d.residual.n ? `　残差 p95 ${d.residual.p95.toFixed(2)} HU` : '';
+	// 折线形状自检：决定性判据是「绘制长度 / 节点直线长度」——直连恒 1.00，阶梯会 >1.3
+	const sh = rendererMain.getPathShapeStats();
+	let shape = '';
+	if (sh.total > 0) {
+		const ratio = sh.lenRatio;
+		const bad = ratio > 1.15;
+		shape =
+			`<br />折线自检：段 ${sh.total}　长度比 ${ratio.toFixed(3)}（直连=1.000）` +
+			`　轴对齐 ${((100 * sh.axis) / sh.total).toFixed(0)}%　折角&gt;45° ${((100 * sh.hard45) / sh.total).toFixed(0)}%` +
+			(bad
+				? ` <span style="color:#ff2626">← 长度比 >1.15：折线被展开成阶梯（异常）</span>`
+				: ` <span style="color:#26d966">← 节点直连（正常）</span>`);
+	}
+	dom.pathCountsEl.innerHTML =
+		`${rec} · 渲染 ${c.render} 点 / tick ${c.tick} 点${perp}${devi}${resid}${shape}`;
+}
+
+/** 隐藏 anchor + Blob URL 触发浏览器下载。 */
+function downloadText(filename: string, text: string, mime: string): void {
+	const url = URL.createObjectURL(new Blob([text], { type: mime }));
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = filename;
+	a.style.display = 'none';
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** 文件名时间戳 YYYYMMDD-HHMMSS。 */
+function pathStamp(): string {
+	const d = new Date();
+	const p = (n: number): string => String(n).padStart(2, '0');
+	return (
+		`${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+		`-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+	);
+}
+
+dom.pathToggleBtn?.addEventListener('click', () => {
+	if (!rendererMain) return;
+	if (rendererMain.isPathRecording()) {
+		rendererMain.stopPathRecording();
+		if (dom.pathToggleBtn) dom.pathToggleBtn.textContent = '开始记录';
+	} else {
+		rendererMain.startPathRecording();
+		if (dom.pathToggleBtn) dom.pathToggleBtn.textContent = '停止记录';
+	}
+	updatePathCountsUI();
+});
+
+dom.pathClearBtn?.addEventListener('click', () => {
+	rendererMain?.clearPath();
+	updatePathCountsUI();
+});
+
+dom.pathVisibleChk?.addEventListener('change', () => {
+	rendererMain?.setPathVisible(dom.pathVisibleChk?.checked ?? true);
+});
+
+dom.pathRenderVisibleChk?.addEventListener('change', () => {
+	rendererMain?.setPathRenderVisible(dom.pathRenderVisibleChk?.checked ?? true);
+});
+
+dom.pathTickVisibleChk?.addEventListener('change', () => {
+	rendererMain?.setPathTickVisible(dom.pathTickVisibleChk?.checked ?? true);
+});
+
+dom.pathDeviVisibleChk?.addEventListener('change', () => {
+	rendererMain?.setPathDeviVisible(dom.pathDeviVisibleChk?.checked ?? false);
+});
+
+dom.pathDotsVisibleChk?.addEventListener('change', () => {
+	rendererMain?.setPathDotsVisible(dom.pathDotsVisibleChk?.checked ?? true);
+});
+
+// ---------------------------------------------------------------------------
+// 输入录制 / 确定性回放（面板 + 永久调试 API）
+//
+// 用途（用户明确要求）：不再让用户"手动复现一遍给我看"，而是用户录一段输入
+// （键盘 + 鼠标），导出 JSON 交给开发者；开发者在无头浏览器里逐帧确定性回放，
+// 自己复现问题。**这是产品功能（确定性复现工具链），不是临时插桩**，故
+// `globalThis.__wsInput` 永久公开（见文件末尾注册处）。
+//
+// 录制点唯一：输入循环里 `feedInput` 之前那一处（拿到的就是最终值）。
+// 回放优先级最高：回放期间覆盖设备输入（键鼠事件也在 bindInput 里短路）。
+// ---------------------------------------------------------------------------
+
+/** 刷新状态行与按钮文案（10Hz；由输入循环、录制启停、回放启停调用）。 */
+function updateInputRecUi(): void {
+	const c = inputRecorder.counts();
+	const p = inputPlayer.state();
+	let text: string;
+	if (inputReplaying) {
+		const played = Math.max(0, p.index + 1);
+		text =
+			`<span style="color:#ffd926">● 回放中</span> ${played}/${p.total} 帧` +
+			(p.skipped > 0 ? `　<span style="color:#ff9f26">丢帧 ${p.skipped}</span>` : '') +
+			`　起点 ${inputPlayer.isSampleClock() ? '确定性逐帧' : '实时墙钟'}`;
+	} else if (inputRecorder.isRecording()) {
+		const secs = c.frames > 1 ? ((c.t1 - c.t0) / 1000).toFixed(1) : '0.0';
+		text = `<span style="color:#ff4444">● 录制中</span> ${c.frames} 帧（${secs}s）`;
+	} else if (c.frames > 0) {
+		const secs = c.frames > 1 ? ((c.t1 - c.t0) / 1000).toFixed(1) : '0.0';
+		text = `已停止 · ${c.frames} 帧（${secs}s）待导出`;
+	} else {
+		text = '未开始';
+	}
+	if (dom.inputRecStatusEl) dom.inputRecStatusEl.innerHTML = text;
+	if (dom.inputRecToggleBtn) {
+		dom.inputRecToggleBtn.textContent = inputRecorder.isRecording() ? '停止录制' : '开始录制';
+	}
+	if (dom.inputRecStopPlayBtn) dom.inputRecStopPlayBtn.disabled = !inputReplaying;
+}
+
+/** 输入录制导出的 meta：地图/起点/物理参数/玩家状态（回放复现的全部前提）。 */
+function buildReplayMeta(extra?: Partial<InputReplayMeta>): Partial<InputReplayMeta> {
+	const cap = rendererMain?.captureReplayState() ?? null;
+	const st = cap?.state ?? null;
+	const spawnIdx = dom.spawnSelect ? Number(dom.spawnSelect.value) : -1;
+	// 世界出生点（与 spawnIndex 对应；越界/未加载则 null）。**不是**录制起点位置——
+	// 录制起点在 initialState.pos（用户可能早已离开出生点）。
+	const sp = spawnIdx >= 0 ? loadedSpawnList[spawnIdx] : undefined;
+	return {
+		mapFile: teleportMapName,
+		spawnIndex: Number.isFinite(spawnIdx) ? spawnIdx : -1,
+		spawnPos: sp ? { x: sp[0], y: sp[1], z: sp[2] } : null,
+		tickRate: config.physics.tickRate,
+		physics: cap?.physics ?? {},
+		hull: cap?.hull ?? null,
+		initialState: st,
+		physSeed: cap?.seed ?? null,
+		spawnList: loadedSpawnList,
+		sensitivity: config.input.sensitivity,
+		devicePixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio : 1,
+		startedAt: new Date().toISOString(),
+		href: location.href,
+		...extra,
+	};
+}
+
+/** 开始录制（锚定当前状态为回放起点）。 */
+function startRecording(): void {
+	if (inputReplaying) endPlayback();
+	inputRecorder.startWithState(buildReplayMeta());
+	updateInputRecUi();
+}
+
+/** 停止录制（样本保留）。 */
+function stopRecording(): void {
+	inputRecorder.stop();
+	updateInputRecUi();
+}
+
+/** 合成输入入队（无头驱动用；见 syntheticQueue 注释）。 */
+function enqueueSynthetic(dx: number, dy: number, keys: number): void {
+	syntheticQueue.push({ dx, dy, keys });
+}
+
+/**
+ * 对齐回放起点：把录制 meta 里的物理参数/碰撞箱/玩家状态**原样写回**。
+ *
+ * 不做这一步就会"输入一样、起点不同"→ 复现失败。返回是否成功对齐。
+ */
+function armReplay(meta: Partial<InputReplayMeta>): boolean {
+	if (!rendererMain) return false;
+	const init = meta.initialState;
+	if (!init) return false;
+	// 1) 物理参数 + 碰撞箱（双端：渲染物理走 setter，Worker 走消息）
+	if (meta.physics && Object.keys(meta.physics).length > 0) {
+		rendererMain.setPredictionParams(meta.physics);
+		inputBridge?.sendConfig('physics', meta.physics);
+	}
+	if (meta.hull) {
+		rendererMain.setPredictionHull(meta.hull.halfWidth, meta.hull.standHeight, meta.hull.duckHeight);
+		inputBridge?.sendSetHull(meta.hull);
+	}
+	// 2) 起点状态：优先**全量种子**（bit-exact；见 renderer-main.captureFullPhysState），
+	//    缺种子时退化为 9 参部分对齐（initialState）
+	rendererMain.resetTo([init.pos.x, init.pos.y, init.pos.z], init.yaw, init.pitch);
+	const seedRestored = typeof meta.physSeed === 'string' && meta.physSeed.length > 0
+		? rendererMain.restoreFullPhysState(meta.physSeed)
+		: false;
+	if (!seedRestored) {
+		rendererMain.setPredictionState(
+			init.pos.x, init.pos.y, init.pos.z,
+			init.yaw, init.pitch,
+			init.vel.x, init.vel.y, init.vel.z,
+			init.onGround,
+		);
+	}
+	// 相机与渲染立即跟上（否则首帧位置读数会带上一处残留）
+	rendererMain.syncCameraToCurrentState();
+	lastSeedRestored = seedRestored;
+	// 3) 回放模式：dt 覆盖 + 关权威实时耦合（见 renderer-main.setReplayMode 注释）
+	rendererMain.setReplayMode(true);
+	rendererMain.clearPendingInput();
+	return true;
+}
+
+/**
+ * 上一次 `armReplay` 是否成功用**全量种子**写回起点（`false` = 退化为 9 参部分对齐，
+ * 轨迹可能分叉）。仅诊断用（`__wsInput.counts()` 报出）。
+ */
+let lastSeedRestored = false;
+
+/** 停止回放：交还设备输入（幂等）。 */
+function endPlayback(): void {
+	inputReplaying = false;
+	replayCaptureArmed = false;
+	inputPlayer.stop();
+	rendererMain?.setReplayMode(false);
+	rendererMain?.clearPendingInput();
+	updateInputRecUi();
+}
+
+/**
+ * 开始回放（`__wsInput.play()` / 面板「载入并回放」）。
+ *
+ * `deterministic = true`（默认）= 逐帧确定性回放（帧号 = 录制帧号，逐帧覆盖值与
+ * 录制完全相同——用户面板与无头验证都用它；代价是不按真实时间流逝，放 N 帧用 N 个
+ * rAF）。`false` = 按墙钟实时回放（帧率不足会丢样本，`counts().skipped` 报数）。
+ *
+ * @returns 是否真的开始（缺起点状态 / 未载入数据 → false）
+ */
+function startPlayback(deterministic = true): boolean {
+	if (!inputPlayer.counts().total) return false;
+	if (inputReplaying) endPlayback();
+	const init = playbackMeta.initialState;
+	if (!init) {
+		console.warn('[input-recorder] 该录制缺少 meta.initialState（起点状态）→ 无法对齐起点，拒绝回放。');
+		updateInputRecUi();
+		return false;
+	}
+	// 地图名不符只告警不阻断（用户可能已手动换图；错了会立刻看出来）
+	if (playbackMeta.mapFile && teleportMapName && playbackMeta.mapFile !== teleportMapName) {
+		console.warn(
+			`[input-recorder] 录制地图 ${playbackMeta.mapFile} ≠ 当前地图 ${teleportMapName}——回放结果不可信。`,
+		);
+	}
+	// 回放期间禁止 Pointer Lock：键鼠输入被覆盖，锁了反而容易被鼠标乱拖窗口
+	if (pointerLock.isLocked()) document.exitPointerLock();
+	keyboard.reset();
+	if (!armReplay(playbackMeta)) return false;
+	if (deterministic) inputPlayer.playDeterministic();
+	else inputPlayer.playRealtime();
+	// 面板/API 发起的回放：推进权交给输入循环（无头若要用 tickReplay 自行接管，
+	// 会在 replayAdvanceAndWait 里把该标志置回 true）。
+	externalReplayClock = false;
+	inputReplaying = true;
+	replayCaptureArmed = true;
+	replayCapture.clear();
+	replayTickWait = 0;
+	lastFedReplayIndex = -2;
+	updateInputRecUi();
+	return true;
+}
+
+/** 面板：开始/停止录制。 */
+dom.inputRecToggleBtn?.addEventListener('click', () => {
+	if (inputRecorder.isRecording()) stopRecording();
+	else startRecording();
+});
+
+/** 面板：清空已录帧。 */
+dom.inputRecClearBtn?.addEventListener('click', () => {
+	inputRecorder.clear();
+	updateInputRecUi();
+});
+
+/** 面板：导出 JSON（Blob 下载，与路径记录导出同款）。 */
+dom.inputRecExportBtn?.addEventListener('click', () => {
+	downloadText(
+		`input-replay-${pathStamp()}.json`,
+		inputRecorder.toJson({ stoppedAt: new Date().toISOString() }),
+		'application/json',
+	);
+});
+
+/** 面板：载入并回放（file input 选 JSON）。 */
+dom.inputRecLoadBtn?.addEventListener('click', () => {
+	dom.inputRecFile?.click();
+});
+
+dom.inputRecFile?.addEventListener('change', async () => {
+	const file = dom.inputRecFile?.files?.[0];
+	if (!file) return;
+	try {
+		const text = await file.text();
+		loadPlaybackFromJson(text, { mapFile: file.name.replace(/\.json$/i, '') });
+		if (!startPlayback(true)) setStatus('输入回放：载入成功但无法开始（缺起点状态？）', 'error');
+		else setStatus(`输入回放：已载入 ${file.name}，开始逐帧回放。`, 'success');
+	} catch (err) {
+		setError(`输入回放载入失败: ${err instanceof Error ? err.message : String(err)}`);
+	} finally {
+		// 允许重复选择同一个文件
+		if (dom.inputRecFile) dom.inputRecFile.value = '';
+	}
+});
+
+/** 面板：停止回放。 */
+dom.inputRecStopPlayBtn?.addEventListener('click', () => {
+	endPlayback();
+});
+
+/**
+ * 载入录制 JSON 到回放器（不自动开始；`play()` / `startPlayback` 负责开始）。
+ * @param override 覆盖 meta 字段（面板传文件名，无头可传 mapFile 校正）
+ */
+function loadPlaybackFromJson(text: string, override?: Partial<InputReplayMeta>): number {
+	// 只接受 JSON **文本**（`__wsInput.load` 契约）。若调用方已经把对象解析好了，
+	// 也容忍直接传对象——但绝不把字符串当对象用（那会一路走到"不是合法 JSON 对象"）。
+	const parsed = (typeof text === 'string' ? JSON.parse(text) : text) as {
+		meta?: Partial<InputReplayMeta>;
+		schema?: unknown;
+	} | null;
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('不是合法 JSON 对象');
+	if (parsed.schema !== INPUT_REPLAY_SCHEMA) {
+		throw new Error(`schema 不符：期望 ${INPUT_REPLAY_SCHEMA}，实际 ${String(parsed.schema)}`);
+	}
+	inputPlayer.load(parsed);
+	playbackMeta = { ...(parsed.meta ?? {}), ...(override ?? {}) };
+	updateInputRecUi();
+	return inputPlayer.counts().total;
+}
+
+// ---------------------------------------------------------------------------
+// 永久调试 API：globalThis.__wsInput
+//
+// **这是产品功能，不是临时插桩**（用户明确要求：不要求用户做测试，开发者自己在
+// 无头浏览器里复现）——确定性复现所需的全部动作（录制/导出/载入/逐帧回放/取状态）
+// 都必须能被 CDP 脚本无点击驱动，故该 API 永久保留在本应用（仅 debug 应用注册；
+// game 应用不注册）。
+//
+// 契约（签名固定，改动须同步 debug/scripts/input-replay-verify.mjs 与面板 title）：
+//   start(): void                       开始录制（锚定当前状态为回放起点）
+//   stop(): void                        停止录制
+//   clear(): void                       清空已录帧
+//   isRecording(): boolean
+//   isPlaying(): boolean
+//   exportJson(): string                录制载荷 JSON 文本（面板「导出 JSON」同源）
+//   load(text, meta?): number           载入录制 JSON → 返回帧数（>0 成功）
+//   play(deterministic?): boolean       开始回放（默认逐帧确定性）
+//   stopPlay(): void
+//   tickReplay(): Promise<…>            **确定性推进一帧**（等渲染主循环消费后再结算）
+//   counts(): {…}                       录制/回放/捕获计数（含丢帧数）
+//   captureText(): string               回放期**实际喂出去**的帧（自检用）
+//   setPlaybackMeta(patch): void        覆盖回放 meta（无头跳过地图名核对等）
+//   pushSynthetic({dx,dy,keys}): void   注入合成输入（走真实输入路径；无头录制用）
+//   clearSynthetic(): number
+//   status(): string                    状态行文本
+// ---------------------------------------------------------------------------
+
+/**
+ * 逐帧确定性回放：推进一帧 → 等渲染主循环**消费完**该帧再结算。
+ *
+ * 为什么要"等两拍 rAF"：渲染主循环（RendererMain.tick）与输入循环（本文件
+ * startInputLoop）注册顺序固定为「渲染先、输入后」。本函数在输入循环之外调用，
+ * 于是：拍 N 推进样本 → 拍 N+1 渲染 tick 用 `replayDtS` 推物理、输入循环喂入该样本
+ * → 拍 N+2 结算时 `getCurrentState()` 已是 post-tick 状态。
+ *
+ * 返回 `{ frame, dtS, index, total, done, state }`；`reason` 出现在异常路径
+ * （`not-playing` / `busy`（上一帧还没消费完）/ `exhausted`）。
+ */
+function replayAdvanceAndWait(): Promise<Record<string, unknown>> {
+	externalReplayClock = true; // 无头协议接管推进权（输入循环不再自行 step）
+	if (!inputReplaying) return Promise.resolve({ frame: null, done: true, reason: 'not-playing' });
+	if (replayTickWait > 0) return Promise.resolve({ frame: null, done: false, reason: 'busy' });
+	const r = inputPlayer.stepReplay(1 / 64);
+	if (!r.frame) return Promise.resolve({ frame: null, done: true, reason: 'exhausted' });
+	// **必须**把录制步长交给渲染主循环：不设的话物理回落到墙钟 dt，两条独立回放
+	// 因此分叉（实测首个分叉帧 67、最大差 3968 HU）。
+	if (rendererMain) rendererMain.replayDtS = r.dtS;
+	const frame = { t: r.frame.t, dx: r.frame.dx, dy: r.frame.dy, keys: r.frame.keys };
+	replayTickWait = 1;
+	return new Promise((resolve) => {
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				const st = rendererMain?.getCurrentState() ?? null;
+				resolve({
+					frame,
+					dtS: r.dtS,
+					index: r.index,
+					total: r.total,
+					done: r.done,
+					state: st
+						? { pos: st.pos, yaw: st.yaw, pitch: st.pitch, vel: st.vel, onGround: st.onGround }
+						: null,
+				});
+			});
+		});
+	});
+}
+
+(globalThis as unknown as { __wsInput?: Record<string, unknown> }).__wsInput = {
+	/** 开始录制并锚定当前状态为回放起点。 */
+	start: (): void => startRecording(),
+	/** 停止录制（样本保留）。 */
+	stop: (): void => stopRecording(),
+	/** 清空已录帧。 */
+	clear: (): void => {
+		inputRecorder.clear();
+		updateInputRecUi();
+	},
+	isRecording: (): boolean => inputRecorder.isRecording(),
+	isPlaying: (): boolean => inputReplaying,
+	/** 录制载荷 JSON（未录到帧时也返回合法空载荷，脚本可据 frames 判定）。 */
+	exportJson: (): string => inputRecorder.toJson({ stoppedAt: new Date().toISOString() }),
+	/** 载入录制 JSON（字符串）→ 返回帧数。 */
+	load: (text: string, meta?: Partial<InputReplayMeta>): number => loadPlaybackFromJson(text, meta),
+	/** 开始回放；deterministic=false 走墙钟实时（默认逐帧确定性）。 */
+	play: (deterministic = true): boolean => startPlayback(deterministic),
+	/** 停止回放。 */
+	stopPlay: (): void => endPlayback(),
+	/** 确定性推进一帧（无头验证用；见 replayAdvanceAndWait）。 */
+	tickReplay: replayAdvanceAndWait,
+	counts: (): Record<string, unknown> => ({
+		recording: inputRecorder.isRecording(),
+		frames: inputRecorder.counts().frames,
+		playing: inputReplaying,
+		playerIndex: inputPlayer.state().index,
+		playerTotal: inputPlayer.state().total,
+		skipped: inputPlayer.state().skipped,
+		captureFrames: replayCapture.counts().frames,
+		replayLoopFrames,
+		seedRestored: lastSeedRestored,
+		replayMode: rendererMain?.isReplayMode() ?? false,
+		syntheticPending: syntheticQueue.length,
+	}),
+	/** 回放期实际喂出的帧（逐帧自检口径；空 = 尚未回放过）。 */
+	captureText: (): string => replayCapture.toJson({ capturedAt: new Date().toISOString() }),
+	/** 覆盖回放 meta（无头补 mapFile / 跳过地图名核对用）。 */
+	setPlaybackMeta: (patch: Partial<InputReplayMeta>): void => {
+		playbackMeta = { ...playbackMeta, ...patch };
+	},
+	/** 注入一帧合成输入（走真实输入路径：Q/E 合并 + 录制点）。 */
+	pushSynthetic: (v: { dx?: number; dy?: number; keys?: number }): void =>
+		enqueueSynthetic(v.dx ?? 0, v.dy ?? 0, v.keys ?? 0),
+	/**
+	 * 注入一次**设备级**输入——等价于一次 `mousemove` 事件：**直连 `feedInput`，
+	 * 不经过输入循环**（无头驱动鼠标路径用）。
+	 *
+	 * 存在意义：录制点已从输入循环移到物理步（见 `rendererMain.onPhysicsStep`），
+	 * 本 API 正是用来证明"循环外到达的输入也会被录进去"——旧实现里这条路径的
+	 * `dy` 永远录不到（恒为 0）。
+	 */
+	feedDeviceInput: (v: { dx?: number; dy?: number; keys?: number }): void => {
+		rendererMain?.feedInput(v.dx ?? 0, v.dy ?? 0, v.keys ?? 0);
+	},
+	/** 清空未消费的合成输入 → 返回清掉的条数。 */
+	clearSynthetic: (): number => {
+		const n = syntheticQueue.length;
+		syntheticQueue.length = 0;
+		return n;
+	},
+	/** 状态行文本（与面板同一口径）。 */
+	status: (): string => dom.inputRecStatusEl?.textContent ?? '',
+	/** 录制起点快照（诊断：确认 meta 会记下什么）。 */
+	replayState: (): unknown => rendererMain?.captureReplayState() ?? null,
+	/** 渲染物理当前全量种子 JSON（诊断：直接搬运/播种用的位级状态）。 */
+	physSeed: (): string | null => rendererMain?.captureFullPhysState() ?? null,
+	/** 用全量种子 JSON 写回渲染物理（诊断/确定性验证用；返回是否成功）。 */
+	seedPhys: (json: string): boolean => rendererMain?.restoreFullPhysState(json) ?? false,
+	/**
+	 * 单步闸门（诊断/确定性验证用）：n>0 → 渲染主循环最多再推进 n 个物理步；
+	 * n=0 → 恢复逐帧连续推进。见 renderer-main.setManualSteps。
+	 */
+	setManualSteps: (n: number): void => rendererMain?.setManualSteps(n),
+	/**
+	 * 直接开关渲染器的"回放模式"（关权威实时耦合 + dt 覆盖；见 renderer-main）。
+	 * 只给无头验证的对照实验用（模块内部由 play()/stopPlay() 自动管理）：
+	 * 对照 A = 录制时也关掉权威耦合 → 轨迹应当逐位复现；
+	 * 对照 B（默认，用户真实情形）= 录制时权威耦合是开的 → 轨迹带权威线抖动。
+	 */
+	setReplayMode: (on: boolean): void => rendererMain?.setReplayMode(on),
+	/**
+	 * 重建物理世界（重新解析并加载已缓存的 BSP）——**只给无头验证的干净复位用**。
+	 * 用途：排除"物理世界内部残留状态"对两次回放的影响（诊断非确定性用）。
+	 */
+	reloadForTest: (): Promise<unknown> => {
+		const file = lastBspFile;
+		if (!file) return Promise.resolve({ ok: false, reason: 'no-bsp-loaded' });
+		return handleBspFile(file).then(() => ({ ok: true }));
+	},
+};
+
+dom.pathExportJsonBtn?.addEventListener('click', () => {
+	if (!rendererMain) return;
+	const meta = { source: 'websurf-debug', href: location.href, recordedAt: new Date().toISOString() };
+	downloadText(`phys-path-${pathStamp()}.json`, rendererMain.exportPathJson(meta), 'application/json');
+});
+
+dom.pathExportCsvBtn?.addEventListener('click', () => {
+	if (!rendererMain) return;
+	downloadText(`phys-path-${pathStamp()}.csv`, rendererMain.exportPathCsv(), 'text/csv');
+});
+
 
 /** 计时挑战 HUD（主线程本地快照 + justDied 闪烁）。 */
 function updateGameStatsUI(): void {
@@ -578,6 +1192,8 @@ function bindInput(canvas: HTMLCanvasElement): void {
 	// 鼠标移动：主线程渲染物理输入（灵敏度在此乘入；渲染 tick 同写 SAB 权威端）
 	window.addEventListener('mousemove', (e) => {
 		if (!pointerLock.isLocked()) return;
+		// 回放中：设备输入被回放流覆盖——不喂鼠标，避免实时甩动污染复现
+		if (inputReplaying) return;
 		const r = mouseBuffer.process(e.movementX, e.movementY);
 		if (!r) return;
 		const mask = keyboard.getMask();
@@ -1222,38 +1838,19 @@ function bindNearParamControls(): void {
 
 /**
  * 构造 Rust `set_params` 兼容的全量参数对象（主线程渲染物理实例）。
- * 默认值对齐物理面板 PARAM_DEFS（与 Rust PhysParams::default 一致）；
- * 灵敏度固定 1（真实灵敏度由主线程输入层乘入，game 同法）。
- * 公共化：映射收敛到 ts-shared buildPhysicsParams，本处仅做 config 映射。
+ *
+ * 实现（config → PhysicsParamsLike → snake_case）已抽到
+ * `debug/src/physics/prediction-params.ts`：输入回放的起点快照
+ * （`RendererMain.captureReplayState`）要用**同一份**实现取参数，否则「录制时记的
+ * 参数」与「实际喂给物理的参数」可能不同源，回放就会在起点就分叉。
  */
 function buildPredictionParams(config: RuntimeConfig): Record<string, unknown> {
-	const p = config.physics;
-	return sharedBuildPhysicsParams(
-		{
-			gravity: p.gravity,
-			accelerate: p.accelerate,
-			friction: p.friction,
-			stopSpeed: p.stopSpeed,
-			jumpSpeed: p.jumpSpeed,
-			airAccel: p.airAccel,
-			maxSpeed: p.maxSpeed,
-			// debug 无独立走路/蹲走配置：取面板定义默认值（与 Worker PhysicsParams 默认一致）
-			walkSpeed: 130,
-			crouchSpeed: 85,
-			autobhop: true,
-			bhopSpeedClamp: true,
-			noPrestrafe: true,
-			teleportGateTicks: p.teleportGateTicks,
-		},
-		{
-			yawBindSpeed: config.input.yawBindSpeed,
-			noclipSpeed: config.input.noclipSpeed,
-		},
-	);
+	return buildDebugPredictionParams(config);
 }
 
 /** 文件入口：读字节 → 主线程解析（BspProcessor → 渲染 + 物理世界）。 */
 async function handleBspFile(file: File): Promise<void> {
+	lastBspFile = file; // 供 __wsInput.reloadForTest 重建世界（诊断用）
 	// 主线程 wasm 就绪（BspProcessor/decompress_mtz 依赖；失败则继续由下方 try 报错）
 	await mainWasmReady.catch(() => undefined);
 	if (!inputBridge) {
@@ -1339,6 +1936,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 	// 兜底会把传送点拉回（"一瞬间传送过去又被拉回"根因）
 	const spawnList = bundle.spawnList;
 	rendererMain.setSpawnPoints(spawnList);
+	loadedSpawnList = spawnList; // 输入录制 meta（回放端可还原出生点列表）
 	// 初始物理参数/体型/模式同步主线程实例（面板参数经 physics-snapshot 镜像双端）
 	rendererMain.setPredictionParams(buildPredictionParams(config));
 	rendererMain.setPredictionHull(
@@ -1723,22 +2321,97 @@ function startInputLoop(): void {
 		}
 		if (!inputBridge || !rendererMain || !sceneReady) return;
 
-		// 按键位掩码；每帧喂渲染物理（渲染 tick 同写 SAB 权威输入槽 → Worker
-		// 权威帧模拟同输入，双端角度不分叉）。未锁定（面板打开）时强制 0：
-		// 双保险防 ESC 前后按键状态残留（与 game startInputLoop 同法）
-		const keys = keyboard.getState();
-		const mask = pointerLock.isLocked() ? keysToMask(keys) : 0;
-		// 滚轮跳：仅锁定时并入本帧输入（消费一次即清）
-		const maskWithWheel = pointerLock.isLocked() && wheelJumpPending ? mask | KEY_MASK.wheelJump : mask;
-		wheelJumpPending = false;
+		// ── 本帧最终输入（唯一权威来源；三条路径互斥）────────────────────────
+		// ① 回放中：**覆盖**设备输入（replay wins——绝不同时应用实时键位/鼠标）。
+		//    时间戳取"下一个待消费样本 − ε"（确定性回放要求时间即录制时间；
+		//    物理 dt 另由 frameDt() 覆盖到渲染主循环，见 renderer-main.replayDtS）。
+		// ② 合成输入（__wsInput.pushSynthetic，无头驱动用）：与真实路径同构。
+		// ③ 实时：按键位掩码 + 滚轮跳 + Q/E 等效鼠标量（与改动前逐字节一致）。
+		let finalDx: number;
+		let finalDy: number;
+		let finalKeys: number;
+		/** 本帧是否真的要把输入交给 feedInput（回放期同一帧只喂一次，见 lastFedReplayIndex）。 */
+		let feed = true;
+		if (inputReplaying) {
+			// **游标由回放自己推进**：确定性（样本时钟）模式下每帧恰推进一步。
+			// 这里原先只调 next()，而 next() 的语义是"保持当前帧"（游标只由 step()/
+			// stepReplay() 推进）——于是面板回放**永远停在第 0 帧**，只有走
+			// __wsInput.tickReplay()（内部 stepReplay）的无头路径才会前进。
+			// 握手：仅当上一帧的录制 dt 已被渲染主循环消费（replayDtS 归 null）才推进
+			// 下一帧 →"回放帧 ↔ 物理步"严格 1:1。不握手就会丢帧（本帧输入被下一帧
+			// 覆盖，dx/dy 是累加语义）或重复喂。
+			const canAdvance = !rendererMain || rendererMain.replayDtS === null;
+			const stepped =
+				inputPlayer.isSampleClock() && !externalReplayClock && canAdvance
+					? inputPlayer.stepReplay(1 / 64)
+					: null;
+			const f = stepped ? stepped.frame : inputPlayer.next(inputPlayer.sampleNow());
+			if (f) {
+				finalDx = f.dx;
+				finalDy = f.dy;
+				finalKeys = f.keys;
+				rendererMain.replayDtS = stepped ? stepped.dtS : inputPlayer.frameDt(1 / 64);
+			} else {
+				// 尚未到首帧时间：本帧零输入（保持 pendingKeys 原值不动会沿用设备残留）
+				finalDx = 0;
+				finalDy = 0;
+				finalKeys = 0;
+			}
+			const idx = inputPlayer.state().index;
+			if (idx === lastFedReplayIndex) {
+				// 同一回放样本的第二个 rAF 窗口：不重复喂（dx/dy 是累加语义）
+				feed = false;
+			} else if (replayCaptureArmed) {
+				// 回放捕获：每个样本**只记一条**（与录制逐帧一一对应，才能逐帧比对）
+				replayCapture.record(now, finalDx, finalDy, finalKeys);
+				replayLoopFrames++;
+			}
+			if (idx !== lastFedReplayIndex) lastFedReplayIndex = idx;
+			// 确定性回放：渲染主循环已消费上一拍推进的那一帧 → 等待计数递减
+			if (replayTickWait > 0) replayTickWait--;
+		} else {
+			const syn = takeSynthetic();
+			if (syn) {
+				// 合成鼠标量也要吃 Q/E 合并（与真实路径同一处代码），按键位直接给
+				const qe = qeEquivalentDx(config.input.yawBindSpeed, 1 / 64);
+				const qeDx = (syn.keys & KEY_MASK.yawRight ? qe : 0) - (syn.keys & KEY_MASK.yawLeft ? qe : 0);
+				finalDx = syn.dx + qeDx;
+				finalDy = syn.dy;
+				finalKeys = syn.keys;
+			} else {
+				// 按键位掩码；每帧喂渲染物理（渲染 tick 同写 SAB 权威输入槽 → Worker
+				// 权威帧模拟同输入，双端角度不分叉）。未锁定（面板打开）时强制 0：
+				// 双保险防 ESC 前后按键状态残留（与 game startInputLoop 同法）
+				const keys = keyboard.getState();
+				const mask = pointerLock.isLocked() ? keysToMask(keys) : 0;
+				// 滚轮跳：仅锁定时并入本帧输入（消费一次即清）
+				const maskWithWheel = pointerLock.isLocked() && wheelJumpPending ? mask | KEY_MASK.wheelJump : mask;
+				wheelJumpPending = false;
 
-		// Q/E 键 → 等效鼠标像素（与 game 输入层同法：yaw_bind_speed/M_YAW × dt，
-		// 独立增量不受灵敏度影响；实现收敛到 ts-shared qeEquivalentDx），并入本帧输入
-		const dtF = lastQeMs === 0 ? 1 / 144 : Math.min((now - lastQeMs) / 1000, 0.1);
-		lastQeMs = now;
-		const qe = qeEquivalentDx(config.input.yawBindSpeed, dtF);
-		const qeDx = (maskWithWheel & KEY_MASK.yawRight ? qe : 0) - (maskWithWheel & KEY_MASK.yawLeft ? qe : 0);
-		rendererMain.feedInput(qeDx, 0, maskWithWheel);
+				// Q/E 键 → 等效鼠标像素（与 game 输入层同法：yaw_bind_speed/M_YAW × dt，
+				// 独立增量不受灵敏度影响；实现收敛到 ts-shared qeEquivalentDx），并入本帧输入
+				const dtF = lastQeMs === 0 ? 1 / 144 : Math.min((now - lastQeMs) / 1000, 0.1);
+				lastQeMs = now;
+				const qe = qeEquivalentDx(config.input.yawBindSpeed, dtF);
+				const qeDx = (maskWithWheel & KEY_MASK.yawRight ? qe : 0) - (maskWithWheel & KEY_MASK.yawLeft ? qe : 0);
+				finalDx = qeDx;
+				finalDy = 0;
+				finalKeys = maskWithWheel;
+			}
+			// 录制点已移到**物理步**（rendererMain.onPhysicsStep）：挂在本循环会漏掉
+			// 鼠标（鼠标走 mousemove 直连 feedInput，不经过本循环）。
+		}
+		// feedInput：回放期同一回放样本只喂一次（见 lastFedReplayIndex）
+		if (feed) rendererMain.feedInput(finalDx, finalDy, finalKeys);
+
+		// 回放跑完：自动收尾（把输入交还键盘鼠标，避免"卡在最后一帧"）
+		if (inputReplaying && inputPlayer.isExhausted()) endPlayback();
+		// 状态行刷新：回放中与**录制中**都要刷（录制期原本从不刷新 → 帧数冻结在
+		// 点击「开始录制」那一刻的 0，看起来像"录不到东西"，实际样本一直在累积）。
+		else if ((inputReplaying || inputRecorder.isRecording()) && now - lastRecUiAt >= 100) {
+			lastRecUiAt = now;
+			updateInputRecUi();
+		}
 
 		// 计时挑战：玩家移动（physics 模式）→ idle → running
 		if (config.physics.mode === 'physics') {

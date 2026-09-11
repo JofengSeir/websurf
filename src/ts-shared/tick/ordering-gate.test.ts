@@ -9,8 +9,8 @@
  *   ε 尾 drop-late（now > due → lead-miss+1）、边界 now == due → publish；
  * - 实时语义演示：δ*+ε_max ≤ T 在 ε 抖动下的放行/丢弃分界。
  *
- * protocol-engineer 42 例套件对拍映射（temp/phys-plan-discuss/
- * t2-sortgate-testcases-protocol-engineer.md；ref 42/42 独立参考实现交叉验证）：
+ * protocol-engineer 42 例套件对拍映射（原 temp/phys-plan-discuss/
+ * t2-sortgate-testcases-protocol-engineer.md，2026-09 清理；ref 42/42 独立参考实现交叉验证）：
  * - SG-C1→§1（T 常量；μs 整数域在 ref 验证，本件以 15.625ms 等价承载）
  *   SG-C2/C3→§1/§3  SG-C4/C5/C6→§2  SG-C7→§7（判定面拒+运行时钳制两层）
  *   SG-C8/C10/C11→§1/§2/§3  SG-C12→§2  SG-C9→§1（ε≥T→cap 0 防御形态）

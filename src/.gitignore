@@ -1,6 +1,6 @@
 # 共享层 crate（websurf-phys / websurf-wasm-core，归属仓库根 Cargo workspace）
 #
-# 本目录不再产生本地构建产物：target/ 统一到仓库根（.cargo/config.toml），
+# 本目录不再产生本地构建产物：各模块 target/ 位于各自工程目录内、根 workspace 的 target/ 位于仓库根，
 # 依赖版本由根 Cargo.lock 锁定。此排除规则保留作兜底。
 #
 # 需要跟踪（勿加入排除）：

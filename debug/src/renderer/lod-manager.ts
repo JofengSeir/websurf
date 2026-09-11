@@ -1,9 +1,11 @@
 /**
- * WebSurf — 2 级 LOD（近/远）+ 视距剔除 + PVS + hysteresis
- * - 近(0)完整渲染，远(2)隐藏，PVS 剔除(-1)直接隐藏
- * - PVS 基于相机所在 cluster 的可见集，仅跨 cluster 边界时重算
+ * WebSurf — 视距剔除（照搬 game 的语义）
+ * - **唯一判据**：块中心到相机距离 > cullDistance → 隐藏；否则可见。
+ * - **无 PVS、无 hysteresis、无 cluster**（2026-09-11 对齐 game：
+ *   game/src/renderer/renderer-main.ts:746-763 就是这个单条距离判据，ENABLE_PVS=false）。
+ *   原 PVS 判定实测在 surf_666 上可见集仅 153/8269 cluster、隐藏 1968/2221 块 → 面成片消失。
  * - update 每帧执行（updateCounter++ 无条件）确保 stats 正确
- * - 剔除滑块上限 = 场景对角线 ×2，默认值 = 对角线 ×0.5
+ * - 剔除滑块上限 = 场景对角线 ×4，默认值对齐 game 的 maxDim×0.5（不低于 12800）
  * 原 3 级 LOD 的中级（lightmap 降级 shader）已移除：cullDistance 恒小于 midDistance，
  * 物体在到达中级前已被视距剔除，该级永不生效。
  */
@@ -18,9 +20,6 @@ export const LOD_LEVEL = {
 	FAR: 2, // 隐藏（视距剔除）
 	PVS_HIDDEN: -1, // PVS 剔除隐藏
 } as const;
-
-/** hysteresis 因子（恢复阈值 = cullDist * 0.85）。 */
-const CULL_HYSTERESIS = 0.85;
 
 /** 单个 mesh 的 LOD 注册项。 */
 interface LodItem {
@@ -146,12 +145,20 @@ export class LodManager {
 		});
 
 		// 场景对角线 → 视距上限（向上取整到 100 HU）
-		// 默认视距：小地图全可见（diag*2），大地图默认钳制到 12800
+		// 默认视距：小地图全可见（diag*2）；大地图与 game 口径对齐。
+		// 2026-09-11 修正：原为「大地图硬钳 12800」，但 game 用 maxDim×0.5——
+		//   实测 surf_666 世界 32152×32592×32624（maxDim=32624、diag=56217）：
+		//   game → 16312，debug 旧口径 → 12800（**近 21%**）。在 32k 宽的开放 surf 图上，
+		//   这会让远处平台比 game 早 ~3500 单位消失，是「面莫名消失」的第二个来源
+		//   （第一个是 PVS，已默认关闭，见 config.ts lod.pvsEnabled）。
+		//   现口径：min(diag*2, max(12800, maxDim*0.5))——小地图仍全可见，
+		//   大地图取 game 的 maxDim×0.5（且不低于 12800，不回退）。
 		const box = new THREE.Box3().setFromObject(model);
 		const size = box.getSize(new THREE.Vector3());
 		const diag = size.length();
 		const maxCull = Math.ceil((diag * 4) / 100) * 100;
-		const defaultCull = Math.min(Math.ceil((diag * 2) / 100) * 100, 12800);
+		const gameAlignedCull = Math.max(12800, Math.ceil((Math.max(size.x, size.y, size.z) * 0.5) / 100) * 100);
+		const defaultCull = Math.min(Math.ceil((diag * 2) / 100) * 100, gameAlignedCull);
 		this.diagonal = diag;
 		this.maxCull = maxCull;
 		this.cullDistance = defaultCull;
@@ -218,11 +225,7 @@ export class LodManager {
 	 * @param pvsManager PVS 管理器（null 表示无 PVS）。
 	 * @returns 是否发生 LOD 变化。
 	 */
-	update(
-		cameraPos: THREE.Vector3,
-		config: RuntimeConfig,
-		pvsManager: PvsManager | null,
-	): boolean {
+	update(cameraPos: THREE.Vector3, config: RuntimeConfig): boolean {
 		if (this.items.length === 0) return false;
 
 		this.updateCounter++;
@@ -231,25 +234,15 @@ export class LodManager {
 
 		let lodChanged = false;
 
-		// 更新 PVS（仅跨 cluster 边界时重算，由 PvsManager 内部保证）
-		if (pvsManager && config.lod.pvsEnabled) {
-			pvsManager.update({
-				x: cameraPos.x,
-				y: cameraPos.y,
-				z: cameraPos.z,
-			});
-		}
-
+		// 2026-09-11 照搬 game 的剔除实现（game/src/renderer/renderer-main.ts:746-763）：
+		// **只按「块中心距离 > cullDistance」判可见性**——无 PVS、无迟滞、无 cluster。
+		// 原实现的两处额外机制已移除：
+		//   · PVS 判定（实测 surf_666 可见集仅 153/8269 cluster，隐藏 1968/2221 块 → 面成片消失）；
+		//   · 迟滞带（0.85×cull）——game 没有，去掉以保持两边完全同语义。
 		const cullDistSq = this.cullDistance * this.cullDistance;
-		const cullHysteresisSq = cullDistSq * CULL_HYSTERESIS * CULL_HYSTERESIS;
-		const pvsActive = pvsManager !== null && pvsManager.enabled && config.lod.pvsEnabled;
-		// PVS 安全保护：currentCluster < 0（出生在固体/地图外）时可见集为空，
-		// 有 cluster 的 mesh 会被错误剔除，此时跳过 PVS 判定，全部按距离 LOD 处理。
-		const pvsClusterValid = pvsManager !== null && pvsManager.currentClusterId >= 0;
 
 		let nearCount = 0;
 		let farCount = 0;
-		let pvsHiddenCount = 0;
 
 		for (let i = 0, n = this.items.length; i < n; i++) {
 			const item = this.items[i];
@@ -259,48 +252,15 @@ export class LodManager {
 			const dz = cameraPos.z - item.center.z;
 			const distSq = dx * dx + dy * dy + dz * dz;
 
-			// 1. PVS 判定：覆盖 cluster 任一可见即可见；全不可见则隐藏；集合为空则跳过
-			if (
-				pvsActive &&
-				pvsClusterValid &&
-				item.clusterIds.length > 0 &&
-				!item.clusterIds.some((c) => pvsManager!.isVisible(c))
-			) {
-				if (item.lodLevel !== LOD_LEVEL.PVS_HIDDEN) {
-					item.mesh.visible = false;
-					item.lodLevel = LOD_LEVEL.PVS_HIDDEN;
-					item.isVisible = false;
-					lodChanged = true;
-				}
-				pvsHiddenCount++;
-				continue;
-			}
-
-			// 2. 距离 LOD 判定（2 级：近 0 / 远 2）
-			let newLevel: number;
-			if (item.isVisible) {
-				// 当前可见：仅超过 cullDistance 才剔除
-				newLevel = distSq > cullDistSq ? LOD_LEVEL.FAR : LOD_LEVEL.NEAR;
-			} else {
-				// 当前不可见：需低于 hysteresis 阈值才恢复
-				newLevel = distSq < cullHysteresisSq ? LOD_LEVEL.NEAR : LOD_LEVEL.FAR;
-			}
-
-			// 应用 LOD 变更
-			if (newLevel !== item.lodLevel) {
-				item.lodLevel = newLevel;
-				if (newLevel === LOD_LEVEL.FAR) {
-					item.mesh.visible = false;
-					item.isVisible = false;
-				} else {
-					item.mesh.visible = true;
-					item.isVisible = true;
-				}
+			const visible = distSq <= cullDistSq;
+			if (item.isVisible !== visible) {
+				item.mesh.visible = visible;
+				item.isVisible = visible;
+				item.lodLevel = visible ? LOD_LEVEL.NEAR : LOD_LEVEL.FAR;
 				lodChanged = true;
 			}
 
-			// 统计
-			if (newLevel === LOD_LEVEL.NEAR) nearCount++;
+			if (visible) nearCount++;
 			else farCount++;
 		}
 
@@ -309,7 +269,7 @@ export class LodManager {
 		this.stats.total = this.items.length;
 		this.stats.near = nearCount;
 		this.stats.far = farCount;
-		this.stats.pvsHidden = pvsHiddenCount;
+		this.stats.pvsHidden = 0;
 		this.stats.cullDistance = this.cullDistance;
 		this.stats.diagonal = this.diagonal;
 		this.stats.maxCull = this.maxCull;

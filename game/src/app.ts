@@ -127,10 +127,10 @@ async function main(): Promise<void> {
   // 2. 渲染器 = 主线程唯一物理线（BSP 解析/物理/渲染全在主线程）
   renderer = new RendererMain(shared);
   renderer.onSceneLoaded = (deathY) => renderer?.setDeathY(deathY);
-  // 兜底同步：渲染主线（144Hz 精度更高）→ 权威 Worker 反向校准；同步瞬间
-  // 清双端未消费输入增量（Worker 侧由 sync-render-state 处理 resetInput）
-  renderer.onSyncRenderState = (s) => {
-    fixWorker?.postMessage({ type: 'sync-render-state', state: s });
+  // 渲染主线 → 权威反向同步：真位置突变（teleport=true）清双端未消费输入增量；
+  // 常规反向重锚（teleport=false，缺陷修复 A）只注入状态、**不清输入**
+  renderer.onSyncRenderState = (s, teleport) => {
+    fixWorker?.postMessage({ type: 'sync-render-state', state: s, teleport });
   };
   renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
   renderer.start();

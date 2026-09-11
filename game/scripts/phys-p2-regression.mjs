@@ -2,7 +2,7 @@
  *  几何与 phys-rate-parity-v2.mjs 场景 B 一致：60° 坡（表面 y=-z·tan60°）+
  *  平顶台（z≤0），spawn (0,H,-30) 平飞 vz。
  *
- *  定位（2026-08-20，见 docs/archive/chamfer-physics/p2-remaining-task.md，已归档）：
+ *  定位（2026-08-20，见 documents/archive/chamfer-physics/p2-remaining-task.md，已归档）：
  *  本矩阵度量的是「终速速率一致性」，**不纯是幻影**——幻影（z=0 无限平面端盖）
  *  已被盒-AABB 门根除（phys-gate-probe2.mjs PASS）。残余发散来自地面物理的固有
  *  速率依赖：盒在平台顶落地后 nopre 钳制(300→250) + 逐 tick 摩擦×(1-4·dt) 滑行，

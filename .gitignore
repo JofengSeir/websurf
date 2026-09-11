@@ -30,26 +30,47 @@
 __pycache__/
 *.pyc
 
-# ── 地图文件 ──────────────────────────────
-# BSP 地图体积大（surf_666.bsp 75MB 超 GitHub 50MB 推荐限制），
-# 不应进入版本库；本地放 src/maps/ 即可，需要分享时走网盘/直链。
-# 本地数据 maps/ 为地图/录像测试数据：bsp/dem 体积大且可重新获取。
-# 例外：maps/surf_null_4.replay（原生 Shavit 录像，53 KB）是 viewer 的
-# 构建/自检输入（dist 示例深链 assets/maps/ + npm run test:replay fixture），必须入库。
+# ── 地图 / 录像 / 演示数据 ────────────────
+# BSP 地图体积大（surf_666.bsp 75MB 超 GitHub 50MB 推荐限制），一律不入库；
+# 本地数据统一放 test/maps/（仓库根 maps/ 已废弃），需要分享走网盘/直链。
 *.bsp
-maps/*
 *.dem
 *.replay
-!maps/surf_null_4.replay
+maps/*
+test/maps/
 
-# ── 临时 / 验证产物 ───────────────────────
-temp/*
+# 例外：CI 验收夹具（debug/scripts/path-acceptance.mjs 的输入）必须入库——
+# 它是"修复前最差真实录制"，用于给 tick→render 垂距验收门留一条可复现的失败基线。
+# 放在地图区块之后：gitignore 后出现的规则覆盖先出现的（同上文排序约定）。
+!debug/fixtures/path/
+!debug/fixtures/path/*.json
+
+# ── 临时 / 验证产物（任意层级）─────────────
+# **/temp/：各工程 temp/ 一次性试验产物（如 game/temp 的 wasm 备份/bench json）；
+# 注意根级 temp/* 不含内部斜杠只匹配根，必须用 **/temp/ 才能覆盖子工程。
+**/temp/
 temp_*
 .tmp-*
 *.glb
 .dsh-shots/
 **/scripts/verify-*
 **/scripts/cdp-*
+# plot-path.mjs 的 PNG 输出目录（落在输入 json 同目录，如 debug/.tmp/.../plot-xxx/）
+**/plot-*/
+*.tsbuildinfo
+*.bak
+*~
+*.orig
+*.rej
+
+# ── 工具缓存 / 归档产物 ───────────────────
+**/coverage/
+**/.cache/
+.eslintcache
+*.zip
+*.7z
+*.mp4
+*.mov
 
 # ── 编辑器 / 系统 ────────────────────────
 **/.agent-teams/

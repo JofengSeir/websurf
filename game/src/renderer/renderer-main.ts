@@ -25,6 +25,18 @@ import { PvsManager } from '../world/pvs-manager.js';
 const FOV_DEFAULT = 73.6;
 const DEG2RAD = Math.PI / 180;
 
+/**
+ * 渲染采样传输契约（实现 = `src/ts-shared/auth/shared-state.ts` 的 ShmState/MsgState，
+ * 两者同签名；本文件直接调 `this.shared.*`，由 typecheck 保证契约一致）：
+ * ```ts
+ * writeRenderSample(tMs, x, y, z, i0, epoch): void; // 与渲染帧同拍同源
+ * resetRenderSample(): void;                         // 失效世代 +1（Worker 丢弃缓存）
+ * readPublishedTau(): number;                        // 最近一次权威发布所用的渲染时钟 τ（ms；0=未发布）
+ * ```
+ * R1：写侧只有 5 个 f64 载荷 store + 一对 seqlock 原子戳（既有 i64 槽），
+ * **无分配对象、无同步等待**（不阻塞渲染帧）。
+ */
+
 // ── 空间分块合并参数（optimizeScene：GLB 挂载后渲染减负）──────────
 // surf_666 GLB：117 meshes / 34409 primitives / 377385 顶点——GLTFLoader 每个 primitive
 // 生成一个 THREE.Mesh → 场景 ~3.4 万 Mesh 对象：每帧 three.js 遍历 3.4 万对象做剔除 +
@@ -113,6 +125,24 @@ export class RendererMain {
   private readonly calibrator: AuthorityCalibrator;
   /** 渲染帧推进（dt 上限防异常）。 */
   private lastTickMs = 0;
+
+  // ── 渲染采样传输（Worker 权威发布位置 = 渲染轨迹上的一个采样点）──────
+  // 契约见文件头（writeRenderSample / resetRenderSample / readPublishedTau）。
+  /** 渲染采样序号（单调递增；与渲染帧同拍同源，供 Worker 标注"第几个采样点"）。
+   *  仅在 resetSampleStream()（失效世代 +1，索引空间重启）时归零。 */
+  private renderSampleIndex = 0;
+  /**
+   * 采样流**失效世代**（渲染器侧本地计数器）：resetTo（respawn/传送/检查点回退）/
+   * loadSavepoint / 换图（buildPredictionWorld、disposeScene）/ noclip 切换时 +1，
+   * 并同时调用 `shared.resetRenderSample()` 让 Worker 丢弃旧代缓存（缓存里的渲染采样
+   * 对新位置毫无意义，继续投影会把权威位置钉在旧轨迹上）。
+   *
+   * ⚠️ **不再随 `writeRenderSample` 过线**（缺陷修复 · epoch 竞态）：权威世代槽由
+   * `shared-state.ts` 独占并自持，写入时就地读槽内值。此前渲染器把这份缓存当参数传
+   * 过去，任何在途/延迟的写入都会把 `resetRenderSample()` 刚自增的世代**写回旧值**，
+   * Worker 便继续在旧世界样本对上插值（详见 shared-state.ts 同名方法注释）。
+   */
+  private sampleEpoch = 0;
   /** mesh → { center, radius, clusterIds }（LOD/PVS 用；clusterIds 空间采样分配）。 */
   private lodItems: Array<{ mesh: THREE.Mesh; center: THREE.Vector3; radius: number; clusterIds: number[] }> = [];
   /** 剔除距离（场景加载后校准）。 */
@@ -156,15 +186,30 @@ export class RendererMain {
         this.pendingDy = 0;
         this.pendingKeys = 0;
       },
-      onSyncRenderState: (s) => this.onSyncRenderState?.(s),
+      onSyncRenderState: (s, teleport) => this.onSyncRenderState?.(s, teleport),
     });
   }
 
   onSceneLoaded: ((deathThresholdY: number) => void) | null = null;
 
+  /** 失效世代 +1 + 通知 Worker 丢弃缓存（两者必须成对，见 sampleEpoch 注释）。 */
+  private bumpSampleEpoch(): void {
+    this.sampleEpoch++;
+    this.shared.resetRenderSample();
+  }
+
+  /** 采样索引空间重启（序号归零**必须**配失效世代 +1，否则新 i0 会与旧代同号项混淆）。 */
+  private resetSampleStream(): void {
+    this.renderSampleIndex = 0;
+    this.bumpSampleEpoch();
+  }
+
   /**
-   * 渲染主线 → 权威同步回调（兜底触发时携带渲染主线帧完整状态；app.ts
-   * 注册后发 `sync-render-state` 消息给 Worker 权威物理，并清双端输入增量）。
+   * 渲染主线 → 权威同步回调（兜底/常规重锚触发时携带渲染主线帧完整状态；app.ts
+   * 注册后发 `sync-render-state` 消息给 Worker 权威物理）。
+   *
+   * @param teleport true = 真位置突变（Worker 清未消费输入增量）；
+   *   false = 常规反向重锚（缺陷修复 A，Worker **保留**输入增量）。
    */
   onSyncRenderState: ((s: {
     posX: number; posY: number; posZ: number;
@@ -172,7 +217,7 @@ export class RendererMain {
     velX: number; velY: number; velZ: number;
     onGround: boolean;
     eyeHeight: number;
-  }) => void) | null = null;
+  }, teleport: boolean) => void) | null = null;
 
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
@@ -375,6 +420,8 @@ export class RendererMain {
     this.pendingKeys = 0;
     // 权威帧校准状态清零（防跨地图残留权威帧注入新地图）
     this.calibrator.clear();
+    // 换图：渲染采样流不连续 → 索引空间重启（代数 +1，Worker 丢弃旧图缓存）
+    this.resetSampleStream();
   }
 
   /**
@@ -500,6 +547,8 @@ export class RendererMain {
     this.predReady = true;
     // 权威帧校准状态清零（首帧权威帧将作为新起点）
     this.calibrator.clear();
+    // 新世界：渲染采样流不连续 → 索引空间重启（代数 +1，Worker 丢弃旧世界缓存）
+    this.resetSampleStream();
   }
 
   /** 物理实例输入（app 事件回调喂入；唯一输入通道）。 */
@@ -519,11 +568,14 @@ export class RendererMain {
   /** 重生（面板/按键；主线程物理直接 respawn，不经 Worker）。 */
   respawn(): void {
     this.predPhys?.respawn();
+    // 位置突变：失效代数 +1（Worker 丢弃旧位置缓存）
+    this.bumpSampleEpoch();
   }
 
   /** 传送至指定出生点索引（面板 spawn 下拉）。 */
   teleportToSpawn(idx: number): void {
     this.predPhys?.teleport_to_spawn(idx);
+    this.bumpSampleEpoch();
   }
 
   /** 设置出生点列表（[[x,y,z,yaw], ...]，spawn 下拉切换用）。 */
@@ -579,18 +631,23 @@ export class RendererMain {
     onGround: boolean;
   }): void {
     this.predPhys?.set_state(sp.x, sp.y, sp.z, sp.yaw, sp.pitch, sp.vx, sp.vy, sp.vz, sp.onGround);
+    // 位置突变：渲染采样流不连续 → 失效代数 +1（Worker 丢弃旧位置缓存）
+    this.bumpSampleEpoch();
     this.clearPendingInput();
     // 权威同步（复用 sync-render-state）：eyeHeight 取当前姿态值（存点不含蹲伏态）
     const cur = this.predPhys?.state() as
       | { eyeHeight: number }
       | undefined;
-    this.onSyncRenderState?.({
-      posX: sp.x, posY: sp.y, posZ: sp.z,
-      yaw: sp.yaw, pitch: sp.pitch,
-      velX: sp.vx, velY: sp.vy, velZ: sp.vz,
-      onGround: sp.onGround,
-      eyeHeight: cur?.eyeHeight ?? 64.09,
-    });
+    this.onSyncRenderState?.(
+      {
+        posX: sp.x, posY: sp.y, posZ: sp.z,
+        yaw: sp.yaw, pitch: sp.pitch,
+        velX: sp.vx, velY: sp.vy, velZ: sp.vz,
+        onGround: sp.onGround,
+        eyeHeight: cur?.eyeHeight ?? 64.09,
+      },
+      true, // 存点 load = 真位置突变：清双端未消费输入增量（旧增量对新位置无意义）
+    );
   }
 
   /**
@@ -635,6 +692,8 @@ export class RendererMain {
   /** 位置突变归零（显式重置允许覆盖：respawn/teleport/noclip 切换）。 */
   resetTo(pos: number[], yawDeg: number): void {
     this.calibrator.resetTo(pos, yawDeg);
+    // 位置突变：渲染采样流不连续 → 失效代数 +1（Worker 丢弃旧位置缓存）
+    this.bumpSampleEpoch();
   }
 
   /**
@@ -665,6 +724,8 @@ export class RendererMain {
     } catch (err) {
       console.error('[renderer] set_noclip 失败:', err);
     }
+    // 模式切换 = 轨迹不连续（无碰撞纯移动会瞬间脱离渲染折线）→ 失效代数 +1
+    this.bumpSampleEpoch();
     this.clearPendingInput();
   }
 
@@ -722,6 +783,12 @@ export class RendererMain {
         yaw: number; pitch: number;
         eyeHeight: number;
       };
+      // 渲染采样传输（R1：写侧 4 个 f64 载荷 store + seqlock 戳，无同步等待）：
+      // 权威发布位置 = 本渲染轨迹上的一个采样点（Worker 按渲染时钟 τ 取点后发布）。
+      // 与渲染状态读取同拍同源，i0 单调递增（见 renderSampleIndex 注释）。
+      // ⚠️ 不传 epoch（缺陷修复 · epoch 竞态）：世代由 shared-state 独占并就地读，
+      // 传调用方缓存值会把 `bumpSampleEpoch()` 的自增写回旧值（详见 shared-state.ts）。
+      this.shared.writeRenderSample(now, st.posX, st.posY, st.posZ, this.renderSampleIndex++);
       // Rust 输出角度为度 → 弧度
       this.camera.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
       this.camera.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);

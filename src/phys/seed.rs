@@ -6,7 +6,7 @@
 //!   检查链 / set_state(9 参) 等既有物理语义逐行不动。
 //! - **单向写入**：`apply_seed` 只写 self（scratch 实例），从不读自身状态做决策、
 //!   从不写权威实例；`extract_seed` 只读（`&self`）。
-//! - **t1 事实表收编**（plan/field-fidelity.md，22 相位 / rig 自检 22/22）：
+//! - **t1 事实表收编**（原 plan/field-fidelity.md，2026-09 清理；22 相位 / rig 自检 22/22）：
 //!   · MUST 增补（行为级活性缺口，实证量化）：`ground_normal`(3×f64，nopre 钳制
 //!     唯一消费点 player.rs:907) / `contact_ticks`(u32，teleport B 路径 grounded 门) /
 //!     `ducked`(bool)+`duck_frac`(f64，半蹲态不可播种缺口)；
