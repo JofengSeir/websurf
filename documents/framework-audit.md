@@ -572,7 +572,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | I-02 | 已执行 | debug/game 半边：批 1 `6da49ae` 把 `test:*` 补进 CI（当前 `deploy-pages.yml:99/108/120/125/151/157`）；viewer 半边：批 3 `32c2ddb` 已把脚本改名 `local:smoke`（`apps/viewer/package.json:11`），而「是否入 CI」按规范 §4.3/§6.2 本属**排除要求**（CI 从未含该步骤）→ 无需动作 | 闭环 |
 | I-03 | 已执行 | 批 1 `fa5552e`（两脚本各补一层 `..`） | 闭环 |
 | I-04 | 已执行 | 批 4 `b5be059`（`apps/debug/tsconfig.json` 删 `web/vendor`） | 闭环 |
-| I-05 | **部分执行** | 根 `README.md:43` 已统一为 `test/maps/`（并声明「仓库根 `maps/` 已废弃」，出处 `a4ed66f`）；**`apps/viewer/README.md:45` 仍是旧表述**（「本地地图副本放仓库根 `maps/`（gitignored）」），实测未修 → viewer 半边**留待执行**。该文件不在本任务 inScope（`apps/` 属 out of scope），故**只登记不修** | 遗留项 R-14（见 [rollout-status.md](rollout-status.md) §5） |
+| I-05 | 已执行 | 根 `README.md:43` 已统一为 `test/maps/`（并声明「仓库根 `maps/` 已废弃」，出处 `a4ed66f`）；`apps/viewer/README.md:45` 的旧表述（「本地地图副本放仓库根 `maps/`（gitignored）」）**已由收尾轮直接改为 `test/maps/` 并补指根 README §4**，viewer 半边闭环。收口期间该文件不在任务 inScope（`apps/` 属 out of scope），故当时只登记为「部分执行」并立 R-14 | 闭环（R-14 见 [rollout-status.md](rollout-status.md) §5） |
 | I-06 | 已执行（规范侧） | 规范 [framework-launch-structure.md](framework-launch-structure.md) §3.1 已把三件套写为「debug 有 `start-dev.cmd`，game/viewer 无」的差异表；批 3 `32c2ddb` 已为 game/viewer 补齐 `start-dev.cmd` | 闭环 |
 | I-07 | 已执行 | 批 3 `32c2ddb`（端口槽位表，见规范 §2.3） | 闭环（harness 8080 半边随 R-11） |
 | I-08 | 已执行 | 批 3 `32c2ddb` + `2135056`（`[N/M]` 逐字模板） | 闭环 |
