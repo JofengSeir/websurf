@@ -44,7 +44,7 @@ type RequestPointerLockFn = (
 
 /**
  * 请求 Pointer Lock：优先使用 `{ unadjustedMovement: true }` 禁用 OS 鼠标加速；
- * 不支持时降级为普通锁定（与 game/src/input/pointer-lock.ts 同策略）。
+ * 不支持时降级为普通锁定（与 src/ts-shared/input/pointer-lock.ts 同策略）。
  */
 function requestPointerLockWithUnadjusted(target: HTMLElement): void {
   const fn = target.requestPointerLock as unknown as RequestPointerLockFn;

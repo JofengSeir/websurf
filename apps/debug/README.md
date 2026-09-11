@@ -1,6 +1,6 @@
 # WebSurf（Debug Build，调试测试页面）
 
-> 定位：**主工程**（独立工程 `debug/`）。浏览器中的 Counter-Strike 滑翔（Surf）地图游玩器：
+> 定位：**主工程**（独立工程 `apps/debug/`）。浏览器中的 Counter-Strike 滑翔（Surf）地图游玩器：
 > BSP 解析（WASM，`src/worker/main.ts` 权威帧）+ 主线程渲染预测线（完整物理）+ CS 移动物理 + Three.js 渲染。
 > 相对 game/viewer 的差异面：物理控制面板、渲染调试层（collider/fog/light/lightmap/lod/plane-inspector）、
 > 计时挑战状态机（`src/game-state.ts`）、自定义传送点、默认纹理包（`textures.mtz`）。
@@ -39,7 +39,7 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 - [implementation/physics-panel.md](../../documents/debug/implementation/physics-panel.md) — 物理面板与计时挑战
 - [implementation/rendering.md](../../documents/debug/implementation/rendering.md) — 渲染层
 - [differences.md](../../documents/debug/differences.md) — 与 game/viewer/test 的架构取舍与共享层收敛
-- [archive/](../../documents/debug/archive/) — 旧版文档归档
+- 旧版文档与过程材料已移出版本库（见 git 历史），不再作为事实来源
 
 > 公共架构见根 [../../documents/architecture.md](../../documents/architecture.md)；共享层 `src/ts-shared/`
-> 与仓库级说明见根 [README.md](../README.md)。
+> 与仓库级说明见根 [README.md](../../README.md) 与 [AGENTS.md](../../AGENTS.md)。

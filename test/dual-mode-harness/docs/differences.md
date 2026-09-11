@@ -71,7 +71,7 @@
 
 ## 3. 渲染管线：WorkerB 帧信号 vs 主线程 rAF
 
-| 环节 | harness（`src/worker-b.ts`） | game（`game/src/renderer/renderer-main.ts`） |
+| 环节 | harness（`src/worker-b.ts`） | game（`apps/game/src/renderer/renderer-main.ts`） |
 |---|---|---|
 | 渲染驱动 | 主线程 rAF 仅发**帧信号**（RENDER_WAKEUP 计数 + notify）；WorkerB 醒来采样渲染；50ms 超时兜底；absorbRenderWake 限制帧率 ≤ 刷新率（`:648-662,636-669`） | 渲染与物理同在主线程 rAF tick 内——tick → 相机 → renderer.render（`:693-734`） |
 | 渲染参数来源 | readState 双缓冲采样 → 本地副本（唯一来源）→ 状态间插值（`:672-717`） | 直接读主线程预测物理 `predPhys.state()`（每帧全 dt 推进，无需插值）（`:720-727`） |

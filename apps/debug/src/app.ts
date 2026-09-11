@@ -6,8 +6,8 @@
 
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
-import { MouseBuffer } from './input/mouse-buffer.js';
-import { PointerLockController } from './input/pointer-lock.js';
+import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
+import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
 import {
 	InputPlayer,
 	InputRecorder,

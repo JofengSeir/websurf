@@ -1,0 +1,47 @@
+# WebSurf: 文档漂移体检（doc drift check）
+#
+# 背景：仓库铁律是「文档内容以实际代码为准，不一致时以代码为准并回改文档」。
+# 但 2026-09 的实践表明，文档「文件地图」会随代码演进而漂移（行数声明过期、
+# 锚点越界、迁移后遗留旧目录前缀），且人工不易发现。本 workflow 把校验自动化。
+#
+# 校验项（src/scripts/check-doc-drift.mjs）：
+#   A 行数声明 —— `path`(NNN) / `| path | NNN |` 是否等于实测 wc -l
+#   B 文件:行号 锚点 —— 锚点是否超出文件总行数
+#   C 路径失效 —— 仅告警（历史叙述里常有「原 xxx 已移出」这类刻意保留的旧路径）
+#   D 裸文件名歧义 —— 仅计数（跨工程文档用 `app.ts` 之类简写，无法自动消歧，非错误）
+# A 或 B 非空即脚本 exit 1 → 本 workflow 失败。
+#
+# 为什么独立成一个 workflow：
+#   1. 脚本只用 node 内置模块，无需 npm ci，跑一次 < 1 分钟，不必挂进 45 分钟的 Pages 构建；
+#   2. Pages 工作流只在 push main 时触发，而文档漂移需要在 **PR** 阶段就拦住。
+#
+# 能力边界（重要）：锚点只查「是否越界」，不查「该行内容是否与文档描述相符」——
+# 在锚点之前增删代码会造成「在范围内但错位」，这类仍需人工判读
+# （2026-09 实测到一例：文档称 getConfigTickRate 在 worker/main.ts:86，实际已在 :429）。
+
+name: Doc Drift Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  doc-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run doc drift check
+        run: node src/scripts/check-doc-drift.mjs
