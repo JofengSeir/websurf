@@ -13,8 +13,7 @@ licensed under the Apache License, Version 2.0. Modified files carry the
 "Modified by WebSurf" notice in their headers (per upstream requirement,
 the @license headers are kept intact).
 
-Files added by WebSurf (not present upstream):
-  - src/physics/param-defs.ts
-  - src/physics/physics-params.ts
-  - src/physics/runtime.ts
-  - src/physics/physics/Collision/brush-grid.ts
+Files added by WebSurf (not present upstream; paths relative to the repository root):
+  - apps/debug/src/physics/param-defs.ts
+  - apps/debug/src/physics/physics-params.ts
+  - apps/debug/src/physics/prediction-params.ts

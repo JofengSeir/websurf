@@ -6,7 +6,7 @@
 | 用法 | 说明 |
 |---|---|
 | **双击打开**（file://） | 直接双击 `index.html`——WASM + 解析 Worker 已内嵌，浏览器打开即可用 |
-| **本地服务器 / 部署** | `play.cmd` / `play.sh`（起服务器 + 自动开浏览器）、`python serve.py 8090`、`npx serve -l 8090 .`、或任意静态托管 |
+| **本地服务器 / 部署** | `play.cmd` / `play.sh`（起服务器 + 自动开浏览器）、`python serve.py 8101`、`npx serve -l 8101 .`、或任意静态托管 |
 
 ## 目录结构
 
@@ -17,7 +17,7 @@ dist/
 ├── styles.css
 ├── assets/maps/               示例录像（HTTP 深链演示用；file:// 下走面板文件选择）
 │   └── surf_null_4.replay
-├── serve.py                   静态服务器（python serve.py [port]，默认 8090）
+├── serve.py                   静态服务器（python serve.py [port]，默认 8101）
 ├── play.cmd                   双击 = 起服务器 + 自动打开浏览器（Windows）★
 ├── play.sh                    同左（macOS/Linux）★
 ├── README.md / .nojekyll
@@ -26,7 +26,7 @@ dist/
 ## 双击启动（play.cmd / play.sh）
 
 - Windows：双击 `play.cmd`；macOS/Linux：`bash play.sh`（或 `./play.sh`）。
-- 默认端口 8090，支持首参覆盖：`play.cmd 9000` / `./play.sh 9000`。
+- 默认端口 8101，支持首参覆盖：`play.cmd 9000` / `./play.sh 9000`。
 - 启动后延时 1 秒自动打开浏览器；打印普通页与示例录像深链两种地址；关闭窗口即停服（Ctrl+C 亦可）。
 - **工具链**：优先 `python`；缺失时给出中文提示并自动改用 Node 备选 `npx --yes serve -l <port> .`
   （自动安装运行，无需交互）；python 与 npx 都缺失时打印两条指引并退出。

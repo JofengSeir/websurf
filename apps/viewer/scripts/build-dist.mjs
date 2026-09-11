@@ -1,44 +1,74 @@
 /**
- * viewer 打包：单文件（single）产物 → viewer/dist/（唯一产物目录）。
+ * viewer 打包：单文件（single）产物 → viewer/dist/（唯一产物目录）。薄入口（D-04 / T-04）。
  *
  * ── single（默认/唯一，本地双击 file:// 可用，也可 HTTP 服务/部署）→ viewer/dist/ ──
  *   index.html — classic `<script>`（file:// 下 module script 被浏览器 CORS 拦截）
  *   app.js     — IIFE：内嵌 WASM(base64) + 录像解析 Worker 代码（Blob URL 启动）
- *   web/styles.css
+ *   styles.css — web/styles.css 原样拷贝
  *   assets/maps/surf_null_4.replay（原生 Shavit 示例录像；HTTP 深链演示用，file:// 走面板文件选择）
- *   serve.py   — 静态服务器（python serve.py [port]）
- *   play.cmd / play.sh — 双击启动：起服务器 + 延时 1s 自动打开浏览器（python 缺失 → 中文提示 + npx serve 备选）
+ *   serve.py   — 静态服务器（python serve.py [port]，默认 8101）
+ *   play.cmd / play.sh — 双击启动：起服务器 + 延时 1s 自动打开浏览器（python 缺失 → 提示 + npx serve 备选）
  *   README.md / .nojekyll
  *
- * dist-multi / --multi / --bsp 分支已移除（2026-09：单一 dist 策略）。
+ * 【豁免保留】（framework-launch-structure.md §3.2/§8.2）：viewer 是 **single-only** 工程，
+ * `--multi` 必须显式报错退出 1，不得静默降级；dist/ 自带启动器与说明是其「纯静态产物 +
+ * file:// 双击可用」交付形态，禁止为了整齐改成统一启动器。
+ *
+ * 打包内核（esbuild 注入、cleanDist 先删后建、__VBSP_* 拼装）：
+ *   ../../../src/scripts/lib/dist-pack.mjs
  *
  * 用法（在 viewer/ 目录）：
  *   node scripts/build-dist.mjs    # single → dist/
  */
-
-import { mkdir, rm, copyFile, writeFile, readFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, copyFile, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import {
+  bundleIife,
+  writeEmbeddedPreamble,
+  rewriteIndexToClassicScript,
+  cleanDist,
+  cleanStale,
+  printTree,
+} from '../../../src/scripts/lib/dist-pack.mjs';
 
-const viewerRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = join(viewerRoot, '..', '..');
+const HERE = dirname(fileURLToPath(import.meta.url));
+const viewerRoot = join(HERE, '..'); // apps/viewer
+const repoRoot = join(viewerRoot, '..', '..'); // 仓库根
 const dist = join(viewerRoot, 'dist');
+
+if (process.argv.includes('--multi')) {
+  console.error('[ERROR] Unsupported argument: --multi');
+  console.error('[HINT] viewer is single-only (file:// double-click + static hosting): run build-dist.cmd without arguments.');
+  process.exit(1);
+}
 
 const APP_SRC = join(viewerRoot, 'src/app.ts');
 const WORKER_SRC = join(viewerRoot, 'src/worker/main.ts');
+const HEADER = '/* WebSurf-viewer single-file build — auto-generated, do not edit */\n';
+const KEEP = [
+  '.nojekyll',
+  'README.md',
+  'serve.py',
+  'play.cmd',
+  'play.sh',
+  'index.html',
+  'app.js',
+  'styles.css',
+];
 
 const SERVE_PY = `"""WebSurf-viewer 静态服务器（本地预览；部署时任意静态托管均可）。
 
-用法：python serve.py [port]   # 默认 8090，服务目录 = 本脚本所在目录
+用法：python serve.py [port]   # 默认 8101，服务目录 = 本脚本所在目录
 """
 import http.server
 import socketserver
 import os
 import sys
 
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8090
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8101
 ROOT = os.path.dirname(os.path.abspath(__file__))
 os.chdir(ROOT)
 
@@ -74,8 +104,8 @@ class Server(socketserver.TCPServer):
 try:
     server = Server(("", PORT), Handler)
 except OSError as e:
-    print(f"[错误] 端口 {PORT} 无法监听：{e}")
-    print(f"[提示] 端口可能已被占用——换一个端口：python serve.py {PORT + 1}")
+    print(f"[ERROR] 端口 {PORT} 无法监听：{e}")
+    print(f"[HINT] 端口可能已被占用——换一个端口：python serve.py {PORT + 1}")
     sys.exit(1)
 
 with server:
@@ -101,11 +131,11 @@ with server:
 const PLAY_CMD = `@echo off
 chcp 65001 >nul
 rem WebSurf-viewer local preview: serve dist and open browser (Windows)
-rem usage: play.cmd [port] (default 8090; close this window to stop, Ctrl+C also works)
+rem usage: play.cmd [port] (default 8101; close this window to stop, Ctrl+C also works)
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-set PORT=8090
+set PORT=8101
 if not "%~1"=="" set PORT=%~1
 
 rem -- toolchain: python first, fallback to npx serve --
@@ -142,10 +172,10 @@ python serve.py %PORT%
  */
 const PLAY_SH = `#!/usr/bin/env bash
 # WebSurf-viewer 本地预览：起静态服务并自动打开浏览器（macOS/Linux）
-# 用法：./play.sh [port]（默认 8090；关闭本窗口即停止服务，Ctrl+C 亦可）
+# 用法：./play.sh [port]（默认 8101；关闭本窗口即停止服务，Ctrl+C 亦可）
 set -e
 cd "$(dirname "$0")"
-PORT="\${1:-8090}"
+PORT="\${1:-8101}"
 
 open_browser() {
   ( sleep 1
@@ -158,15 +188,15 @@ open_browser() {
 if command -v python3 >/dev/null 2>&1; then PY=python3
 elif command -v python >/dev/null 2>&1; then PY=python
 else
-  echo "[提示] 未找到 python —— 请先安装 Python 3（https://www.python.org/downloads/）。"
+  echo "[HINT] 未找到 python —— 请先安装 Python 3（https://www.python.org/downloads/）。"
   if command -v npx >/dev/null 2>&1; then
-    echo "[提示] 使用 Node 备选：npx serve（python 缺失，自动安装并启动）。"
-    echo "[提示] 正在启动：npx --yes serve -l $PORT ."
+    echo "[HINT] 使用 Node 备选：npx serve（python 缺失，自动安装并启动）。"
+    echo "[HINT] 正在启动：npx --yes serve -l $PORT ."
     open_browser
     exec npx --yes serve -l "$PORT" .
   fi
-  echo "[提示] 也未找到 npx —— 需要 Node.js（https://nodejs.org/）。"
-  echo "[提示] 手动备选：安装 Python 3 或 Node.js 后重试；或装好任意静态服务器后运行  npx serve -l $PORT ."
+  echo "[HINT] 也未找到 npx —— 需要 Node.js（https://nodejs.org/）。"
+  echo "[HINT] 手动备选：安装 Python 3 或 Node.js 后重试；或装好任意静态服务器后运行  npx serve -l $PORT ."
   exit 1
 fi
 
@@ -179,79 +209,77 @@ open_browser
 exec "$PY" serve.py "$PORT"
 `;
 
-await rm(dist, { recursive: true, force: true });
-await mkdir(join(dist, 'assets', 'maps'), { recursive: true });
+async function rebuildDist() {
+  // 全量重建：先删后建（规范 §5.2 R-15，禁止增量残留）
+  await cleanDist(dist);
+  await mkdir(join(dist, 'assets', 'maps'), { recursive: true });
 
-// ── 公共尾随产物 ────────────────────────────────────────────────────
-await writeFile(join(dist, '.nojekyll'), '');
-await copyFile(join(viewerRoot, 'scripts/dist-README.md'), join(dist, 'README.md'));
-await writeFile(join(dist, 'serve.py'), SERVE_PY);
-// .cmd 必须 CRLF：LF-only 批处理会触发 cmd.exe 解析错乱（行被撕开执行）
-await writeFile(join(dist, 'play.cmd'), PLAY_CMD.replace(/\n/g, '\r\n'));
-await writeFile(join(dist, 'play.sh'), PLAY_SH);
+  // ── 公共尾随产物 ────────────────────────────────────────────────────
+  await writeFile(join(dist, '.nojekyll'), '');
+  await copyFile(join(viewerRoot, 'scripts/dist-README.md'), join(dist, 'README.md'));
+  await writeFile(join(dist, 'serve.py'), SERVE_PY);
+  // .cmd 必须 CRLF：LF-only 批处理会触发 cmd.exe 解析错乱（行被撕开执行）
+  await writeFile(join(dist, 'play.cmd'), PLAY_CMD.replace(/\n/g, '\r\n'));
+  await writeFile(join(dist, 'play.sh'), PLAY_SH);
 
-// ── single：app 打成 IIFE，WASM/WORKER 内嵌，classic script —— file:// 双击可用 ──
-const iife = {
-  bundle: true,
-  target: 'es2022',
-  format: 'iife',
-  minify: true,
-  sourcemap: false,
-  legalComments: 'eof',
-  logLevel: 'warning',
-  write: false,
-  // IIFE 无 import.meta；内嵌构建不走 fetch 路径（bsp/importer 已按内嵌分支短路）
-  define: { 'import.meta.url': JSON.stringify('about:blank') },
-};
+  // ── single：app 打成 IIFE，WASM/WORKER 内嵌，classic script —— file:// 双击可用 ──
+  console.log('[5/5] 编码 WASM → base64 …');
+  const wasmBytes = await readFile(join(viewerRoot, 'web/websurf_viewer_wasm_bg.wasm'));
+  const wasmB64 = wasmBytes.toString('base64');
 
-console.log('[1/3] 编码 WASM → base64 …');
-const wasmBytes = await readFile(join(viewerRoot, 'web/websurf_viewer_wasm_bg.wasm'));
-const wasmB64 = wasmBytes.toString('base64');
+  console.log('[5/5] 打包录像解析 Worker（IIFE，Blob URL 用）…');
+  const workerCode = await bundleIife({
+    build,
+    entry: WORKER_SRC,
+    options: { logLevel: 'warning' },
+  });
 
-console.log('[2/3] 打包录像解析 Worker（IIFE，Blob URL 用）…');
-const workerResult = await build({ ...iife, entryPoints: [WORKER_SRC] });
-const workerCode = workerResult.outputFiles[0].text;
+  console.log('[5/5] 打包 app（IIFE + 内嵌）…');
+  const appCode = await bundleIife({
+    build,
+    entry: APP_SRC,
+    options: { logLevel: 'warning' },
+  });
 
-console.log('[3/3] 打包 app（IIFE + 内嵌）…');
-const appResult = await build({ ...iife, entryPoints: [APP_SRC] });
-const appCode = appResult.outputFiles[0].text;
-
-const preamble =
-  `/* WebSurf-viewer single-file build — auto-generated, do not edit */\n` +
-  `globalThis.__VBSP_WASM_B64__=${JSON.stringify(wasmB64)};\n` +
-  `globalThis.__VBSP_WORKER_JS__=${JSON.stringify(workerCode)};\n`;
-await writeFile(join(dist, 'app.js'), preamble + appCode);
-
-// classic script：file:// 下 module script 被 CORS 拦截
-const html = await readFile(join(viewerRoot, 'web/index.html'), 'utf8');
-const distHtml = html.replace(
-  '<script type="module" src="./app.js"></script>',
-  '<script src="./app.js"></script>',
-);
-await writeFile(join(dist, 'index.html'), distHtml);
-await copyFile(join(viewerRoot, 'web/styles.css'), join(dist, 'styles.css'));
-
-// 参考资源（HTTP 深链演示用；file:// 不能 fetch，载入走面板「选择录像文件…」）。
-// 本地 fixture（test/maps/，gitignored）：存在时打包进 dist 示例深链（assets/maps/）；
-// 缺失时警告跳过，不阻断构建（本地无源则 build 也不会产出该示例，深链不可用）。
-for (const name of ['surf_null_4.replay']) {
-  const src = join(repoRoot, 'test', 'maps', name);
-  if (existsSync(src)) {
-    await copyFile(src, join(dist, 'assets/maps', name));
-  } else {
-    console.warn(`[warn] 示例资产缺失，跳过: test/maps/${name}（dist 示例深链将不可用）`);
+  console.log('[5/5] 写入 dist/（classic index.html + 内嵌 app.js + styles.css）…');
+  await writeEmbeddedPreamble({
+    distDir: dist,
+    appCode,
+    headerComment: HEADER,
+    wasmB64,
+    workerJs: workerCode,
+  });
+  const rewritten = await rewriteIndexToClassicScript({
+    webIndex: join(viewerRoot, 'web/index.html'),
+    distIndex: join(dist, 'index.html'),
+  });
+  if (!rewritten) {
+    console.warn('[WARN] web/index.html 未命中 module script 特征串，dist/index.html 可能仍是 module script。');
   }
+  await copyFile(join(viewerRoot, 'web/styles.css'), join(dist, 'styles.css'));
+
+  // 参考资源（HTTP 深链演示用；file:// 不能 fetch，载入走面板「选择录像文件…」）。
+  // 本地 fixture（test/maps/，gitignored）：存在时打包进 dist 示例深链（assets/maps/）；
+  // 缺失时警告跳过，不阻断构建（本地无源则 build 也不会产出该示例，深链不可用）。
+  for (const name of ['surf_null_4.replay']) {
+    const src = join(repoRoot, 'test', 'maps', name);
+    if (existsSync(src)) {
+      await copyFile(src, join(dist, 'assets/maps', name));
+    } else {
+      console.warn(`[WARN] 示例资产缺失，跳过: test/maps/${name}（dist 示例深链将不可用）`);
+    }
+  }
+
+  await cleanStale(dist, KEEP);
 }
 
-async function tree(dir) {
-  const out = [];
-  for (const name of (await readdir(dir)).sort()) {
-    const p = join(dir, name);
-    const st = await stat(p);
-    if (st.isDirectory()) out.push(`  ${name}/` + (await tree(p)).join(''));
-    else out.push(`  ${name}  ${(st.size / 1024).toFixed(0)} KB`);
-  }
-  return out;
-}
-console.log(`\nsingle（本地 file:// 双击 + HTTP 均可）打包完成 → ${dist}`);
-console.log((await tree(dist)).join('\n'));
+rebuildDist()
+  .then(async () => {
+    console.log(`[5/5] single（本地 file:// 双击 + HTTP 均可）打包完成 → ${dist}`);
+    console.log((await printTree(dist)).join('\n'));
+  })
+  .catch((err) => {
+    console.error(`[ERROR] dist build failed: ${err?.message ?? err}`);
+    console.error('[HINT] See the message above, fix the input or toolchain, then retry.');
+    process.exit(1);
+  });

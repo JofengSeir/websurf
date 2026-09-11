@@ -88,7 +88,8 @@ jobs:
       - name: Build debug dist package
         working-directory: apps/debug
         # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常，体积更小
-        run: node scripts/build-dist.mjs --multi
+        # 走 package.json 唯一入口（规范 §6.2 禁止 CI 绕过 npm 直接调工程脚本）
+        run: npm run build:dist -- --multi
 
       - name: Verify debug optimizeScene (GLB 空间分块合并)
         working-directory: apps/debug
@@ -118,6 +119,11 @@ jobs:
         working-directory: apps/debug
         run: npm run test:path-acceptance
 
+      # 跳跃顶点权威验证门（批 1 修好层数缺陷后，规范 §6.2 要求 test:* ⊆ CI）
+      - name: 跳跃顶点权威验证（jump apex）
+        working-directory: apps/debug
+        run: npm run test:jump-apex
+
       # ── game/ 独立工程（WebSurf-game，尝试游戏化）────────────────
       - name: Install game dependencies
         working-directory: apps/game
@@ -134,7 +140,8 @@ jobs:
       - name: Build game dist package
         working-directory: apps/game
         # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常
-        run: node scripts/build-dist.mjs --multi
+        # 走 package.json 唯一入口（规范 §6.2 禁止 CI 绕过 npm 直接调工程脚本）
+        run: npm run build:dist -- --multi
 
       # 物理冒烟门：game 的 Rust 物理（PhysWorld）基本行为回归。脚本直接读
       # apps/game/pkg/websurf_wasm_bg.wasm（scripts/phys-smoke.mjs:7,13），

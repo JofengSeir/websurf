@@ -314,20 +314,20 @@ viewer 是 single-only 并不只是「没实现 multi」：它的 `dist/index.ht
 | `auth/compute-mode.ts` | 128 | 三模式解析 |
 | `auth/compute-mode.test.ts` | 116 | 测试 |
 | `auth/shared-state.ts` | 1033 | 512B SAB 布局与 ShmState/MsgState |
-| `auth/shared-state.protocol.test.ts` | 344 | 测试 |
+| `auth/shared-state.protocol.test.ts` | 345 | 测试 |
 | `auth/tick-authority.ts` | 618 | tick 权威 |
 | `auth/tick-authority.test.ts` | 774 | 测试 |
-| `auth/worker-dispatch.ts` | 489 | Worker 消息派发 |
-| `decoupled/decoupled-loop.ts` | 448 | 解耦循环 |
+| `auth/worker-dispatch.ts` | 485 | Worker 消息派发 |
+| `decoupled/decoupled-loop.ts` | 449 | 解耦循环 |
 | `input/input-layer.ts` | 40 | 灵敏度/等效鼠标量 |
 | `input/mouse-buffer.ts` | 128 | 鼠标缓冲 |
 | `input/pointer-lock.ts` | 154 | 指针锁定 |
 | `phys/authority-calibrator.ts` | 668 | 权威校准 |
 | `phys/params.ts` | 64 | 物理参数映射 |
-| `phys/world-builder.ts` | 261 | world bundle 组装 |
+| `phys/world-builder.ts` | 248 | world bundle 组装 |
 | `tick/ordering-gate.ts` | 173 | 顺序门 |
 | `tick/ordering-gate.test.ts` | 289 | 测试 |
-| `tick/tick-consumer.ts` | 454 | 渲染侧消费 |
+| `tick/tick-consumer.ts` | 455 | 渲染侧消费 |
 | — | **6664**（18 个文件） | 与既有事实「18 个文件」一致 |
 
 ### 5.3 共享层消费矩阵（实测，含 **更正**）

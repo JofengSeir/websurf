@@ -1,79 +1,78 @@
 @echo off
 chcp 65001 >nul
-title WebSurf-viewer - Play
 setlocal EnableExtensions
+title WebSurf-viewer - Play
 cd /d "%~dp0"
 
-rem WebSurf-viewer source workspace double-click entry, aligned with
-rem debug/start-dev.cmd automation:
-rem   auto build:wasm when pkg missing -> auto npm install when node_modules
-rem   missing -> rebuild dist every run (source changes always take effect)
-rem   -> port in use: reuse running instance; otherwise serve + open browser
-rem usage: play.cmd [port] (default 8090)
-rem NOTE: keep this file pure ASCII with CRLF line endings - cmd.exe breaks
-rem       on non-ASCII content and on LF-only batch files.
-set PORT=8090
+set PORT=8101
 if not "%~1"=="" set PORT=%~1
+
+REM ---- toolchain: python is required by the local server ----
+where python >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Python not found.
+  echo [HINT] Install Python 3 and make sure "python" is on PATH.
+  pause
+  exit /b 1
+)
 
 REM ---- shared cargo/wasm-pack env (root .cargo-home / .wasm-pack-cache / .tmp) ----
 call "%~dp0..\..\src\scripts\cargo-env.cmd"
 
-REM ============================================================
-REM Step 1: WASM artifact check - build pkg only when missing
-REM ============================================================
-if exist "pkg\websurf_viewer_wasm.js" goto :pkg_done
-
-echo [1/3] WASM pkg missing - building via wasm-pack ^(Rust toolchain required, slow on first run^)...
-call npm run build:wasm
-if errorlevel 1 goto :wasm_failed
-:pkg_done
-if exist "pkg\websurf_viewer_wasm.js" echo [1/3] WASM ready.
-
-REM ============================================================
-REM Step 2: Node deps + build dist (esbuild bundle with embedded WASM)
-REM ============================================================
-echo [2/3] Ensuring Node dependencies ^(auto npm install if missing^)...
+REM ---- bootstrap: deps -> wasm -> ts -> dist (auto when missing) ----
+echo [1/4] Ensuring Node build dependencies (auto npm install if missing)...
 call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
-if errorlevel 1 goto :deps_failed
+if errorlevel 1 (
+  echo [ERROR] npm install failed.
+  echo [HINT] Check network connectivity and package-lock.json, then retry.
+  pause
+  exit /b 1
+)
 
-echo [2/3] Building dist ^(source changes take effect every run^)...
-call npm run build:dist
-if errorlevel 1 goto :build_failed
+if exist "pkg\websurf_viewer_wasm_bg.wasm" goto :wasm_done
+echo [2/4] WASM missing - building (release, slow on first run; Rust toolchain required)...
+call npm run build:wasm
+if errorlevel 1 (
+  echo [ERROR] WASM build failed.
+  echo [HINT] Install Rust and wasm-pack (rustup + cargo install wasm-pack), then retry.
+  pause
+  exit /b 1
+)
+:wasm_done
+echo [2/4] WASM ready.
 
-REM ============================================================
-REM Step 3: port check -> reuse running instance or serve + open browser
-REM         (dist\play.cmd: python first, npx serve fallback,
-REM          serve.py has SO_REUSEADDR + friendly bind-error hint)
-REM ============================================================
+echo [3/4] Building TypeScript (worker.js + app.js)...
+call npm run build:ts
+if errorlevel 1 (
+  echo [ERROR] TypeScript build failed.
+  echo [HINT] Fix the tsc/esbuild errors printed above, then retry.
+  pause
+  exit /b 1
+)
+
+echo [4/4] Building dist package (single, embedded WASM - always fresh)...
+call node "%~dp0scripts\build-dist.mjs"
+if errorlevel 1 (
+  echo [ERROR] dist build failed.
+  echo [HINT] See the build-dist.mjs errors printed above, then retry.
+  pause
+  exit /b 1
+)
+
 netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul 2>&1
 if errorlevel 1 goto :start_server
-
-echo Port %PORT% already in use - opening browser to the running viewer.
+echo [SKIP] Port %PORT% is already in use - opening the browser to the running server.
 start "" http://localhost:%PORT%/index.html
-goto :running
-
-:start_server
-echo [3/3] Starting local server and opening browser...
-call "dist\play.cmd" %PORT%
-
-:running
-echo.
-echo WebSurf-viewer is running at http://localhost:%PORT%/index.html
-echo Close the server window to stop it.
 exit /b 0
 
-:wasm_failed
-echo.
-echo [ERROR] WASM build failed - Rust toolchain required ^(rustup + wasm-pack^).
-echo [HINT] Preview only? If dist\ exists, just double-click dist\play.cmd.
-echo.
-pause
-exit /b 1
+:start_server
+echo ============================================================
+echo   WebSurf-viewer - Local Play (dist)
+echo   Server:  http://localhost:%PORT%/
+echo   App:     http://localhost:%PORT%/index.html
+echo   Close this window to stop the server.
+echo ============================================================
 
-:build_failed
-echo.
-echo [ERROR] dist build failed - see esbuild errors above.
-echo [HINT] Preview only? If dist\ exists, just double-click dist\play.cmd.
-echo.
-pause
-exit /b 1
+REM viewer delivery form (framework-launch-structure.md 8.2): dist/ ships its own
+REM launcher (dist\play.cmd / dist\play.sh); the app-root entry reuses it as the
+call "dist\play.cmd" %PORT%
