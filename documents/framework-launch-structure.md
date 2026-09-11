@@ -178,7 +178,7 @@ call "%~dp0..\..\src\scripts\cargo-env.cmd"
 |---|---|
 | `where python` 失败 | `[ERROR] Python not found.` / `[HINT] Install Python 3 and make sure "python" is on PATH.` |
 | `ensure-node-deps.cmd` 失败 | `[ERROR] npm install failed.` / `[HINT] Check network connectivity and package-lock.json, then retry.` |
-| `npm run build:wasm` 失败 | `[ERROR] WASM build failed.` / `[HINT] Install Rust and wasm-pack (rustup + cargo install wasm-pack), then retry.` |
+| `npm run build:wasm` 失败 | `[ERROR] WASM build failed.` / `[HINT] Install Rust and wasm-pack ^(rustup + cargo install wasm-pack^), then retry.` |
 | `npm run build:ts` 失败 | `[ERROR] TypeScript build failed.` / `[HINT] Fix the tsc/esbuild errors printed above, then retry.` |
 | `scripts/build-dist.mjs` 失败 | `[ERROR] dist build failed.` / `[HINT] See the build-dist.mjs errors printed above, then retry.` |
 
