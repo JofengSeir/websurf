@@ -79,7 +79,7 @@ window.mousemove（仅锁定时）
 
 ### 5.4 noclip 切换链
 
-按钮 toggle active → `bridge.sendConfig('physics',{mode:'noclip'|'physics'})`（`:415-423`）→ Worker `set_noclip`（`worker-dispatch.ts:144-147`）+ 主线程 `renderer.setPredictionNoclip`（`renderer-main.ts:662-669`，Rust tick 走 `noclip_step` 无碰撞纯移动，`src/phys/mod.rs:234-235`）。
+按钮 toggle active → `bridge.sendConfig('physics',{mode:'noclip'|'physics'})`（`:415-423`）→ Worker `config` 分支的 `set_noclip`（`worker-dispatch.ts:311-314`）+ 主线程 `renderer.setPredictionNoclip`（`renderer-main.ts:662-669`，Rust tick 走 `noclip_step` 无碰撞纯移动，`src/phys/mod.rs:234-235`）。
 
 ### 5.5 存点列表
 

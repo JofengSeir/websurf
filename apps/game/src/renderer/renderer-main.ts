@@ -19,7 +19,9 @@ import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
 import type { ShmState, MsgState } from '../../../../src/ts-shared/auth/shared-state.js';
 import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-calibrator.js';
-import { PvsManager } from '../world/pvs-manager.js';
+import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
+import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
+import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
 
 /** FOV 默认值（73.6；面板 hud.fov 可调，60-110）。 */
 const FOV_DEFAULT = 73.6;
@@ -515,9 +517,7 @@ export class RendererMain {
    * define 为 about:blank → "Failed to construct 'URL'"，dev 下多余一次 fetch）。 */
   async initPrediction(wasmUrl: string, wasmB64?: string): Promise<void> {
     if (wasmB64) {
-      const bin = atob(wasmB64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const bytes = base64ToBytes(wasmB64);
       initSync({ module: bytes.buffer as ArrayBuffer });
       return;
     }
@@ -644,7 +644,7 @@ export class RendererMain {
         yaw: sp.yaw, pitch: sp.pitch,
         velX: sp.vx, velY: sp.vy, velZ: sp.vz,
         onGround: sp.onGround,
-        eyeHeight: cur?.eyeHeight ?? 64.09,
+        eyeHeight: cur?.eyeHeight ?? EYE_STAND,
       },
       true, // 存点 load = 真位置突变：清双端未消费输入增量（旧增量对新位置无意义）
     );

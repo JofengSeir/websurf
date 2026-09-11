@@ -59,8 +59,8 @@ debug 的运行时由**两条物理线 + 一条状态通道**构成（v7 架构�
 |---|---|---|---|
 | `app.ts` | 2487 | 主入口：main() 装配、handleLoadBsp 编排、输入循环（rAF）、UI 绑定、物理面板消息处理、计时挑战接线 | [loading-pipeline](implementation/loading-pipeline.md)、[physics-panel](implementation/physics-panel.md)、[sequences](sequences.md) |
 | `config.ts` | 259 | `RuntimeConfig` **11 段**运行时配置（physics/player/movement/smoothing/teleport/lod/lighting/input/hud/debug/texture）与 `applyConfigPatch` | 本文 §5 |
-| `main-wasm.ts` | 45 | 主线程 WASM 懒初始化（内嵌 `__VBSP_WASM_B64__` → `initSync`，否则 fetch pkg）；导出 `mosaic_decode`/`decompress_mtz` | [loading-pipeline](implementation/loading-pipeline.md) |
-| `default-pack.ts` | 43 | 默认纹理包 `textures.mtz` 加载（内嵌 base64 或 fetch），供缺失纹理比对 | [loading-pipeline](implementation/loading-pipeline.md) |
+| `main-wasm.ts` | 43 | 主线程 WASM 懒初始化（内嵌 `__VBSP_WASM_B64__` → `initSync`，否则 fetch 同目录 wasm）；导出 `mosaic_decode`/`decompress_mtz` | [loading-pipeline](implementation/loading-pipeline.md) |
+| `default-pack.ts` | 42 | 默认纹理包 `textures.mtz` 加载（内嵌 base64 或 fetch），供缺失纹理比对 | [loading-pipeline](implementation/loading-pipeline.md) |
 | `worker/main.ts` | 120 | Worker 入口：装配 ts-shared auth-loop + worker-dispatch，注入 debug 特有钩子（ready 回执、mtz 存取、面板消息） | [physics-panel](implementation/physics-panel.md)、[sequences](sequences.md) |
 | `worker/physics-worker.ts` | 114 | Worker 侧物理面板协调器：set_params/set_hull 应用 + physics-snapshot 回传 | [physics-panel](implementation/physics-panel.md) |
 | `worker/worker-types.ts` | 342 | 主线程↔Worker 消息类型全集（MainMessage/WorkerMessage/SceneDataMessage/PlaneInfo 等） | [physics-panel](implementation/physics-panel.md) |
@@ -74,11 +74,11 @@ debug 的运行时由**两条物理线 + 一条状态通道**构成（v7 架构�
 | `renderer/lightmap-shader.ts` | 224 | RGBExp32 lightmap 解码着色器注入（onBeforeCompile + 手动双线性） | [rendering](implementation/rendering.md) |
 | `renderer/fog-manager.ts` | 102 | 线性雾动态 near/far（随相机-场景中心距离外推） | [rendering](implementation/rendering.md) |
 | `world/collider-adapter.ts` | 287 | 碰撞体反腐败层：WasmBrush JSON → cs-movement `Brush[]`/`LadderVolume[]`（法线翻转已在 Rust 端完成） | [loading-pipeline](implementation/loading-pipeline.md) |
-| `world/pvs-manager.ts` | 281 | PVS 位图解码 + findLeaf + isVisible（仅 cluster 变化重算） | [rendering](implementation/rendering.md) |
-| `world/teleport-manager.ts` | 334 | 传送触发器元数据（trigger/dest/链接/凸包平面）；`checkTeleport` 在 debug 无调用方（物理权威在 Rust 侧） | [loading-pipeline](implementation/loading-pipeline.md) |
+| `world/pvs-manager.ts` | —（批 4 已上提） | PVS 位图解码 + findLeaf + isVisible（仅 cluster 变化重算）——**D-10 起实现在 `src/ts-shared/world/pvs-manager.ts`（271 行）**，本工程文件已删除 | [rendering](implementation/rendering.md) |
+| `world/teleport-manager.ts` | 326 | 传送触发器元数据（trigger/dest/链接/凸包平面）；`checkTeleport` 在 debug 无调用方（物理权威在 Rust 侧） | [loading-pipeline](implementation/loading-pipeline.md) |
 | `world/custom-teleports.ts` | 98 | 自定义传送点：localStorage 按地图分组（`vbsp:customTeleports:<map>`），上限 50 | [physics-panel](implementation/physics-panel.md) |
-| `world/spawn-loader.ts` | 132 | 出生点解析——**未接线预留工具**（全仓无 import，文件头自述"出生点实际加载走 ts-shared world-builder 管线"，`spawn-loader.ts:8-11`） | [loading-pipeline](implementation/loading-pipeline.md) |
-| `world/types.ts` | 231 | WASM 导出 JSON 的完整 TS 契约（brush/spawn/teleport/PVS/metadata/ColliderFilter） | [loading-pipeline](implementation/loading-pipeline.md) |
+| `world/spawn-loader.ts` | 120 | 出生点解析——**未接线预留工具**（全仓无 import，文件头自述"出生点实际加载走 ts-shared world-builder 管线"，`spawn-loader.ts:8-11`）；批 4（D-08）起 `bspYawToCsYaw` 改用共享单点 | [loading-pipeline](implementation/loading-pipeline.md) |
+| `world/types.ts` | 198 | WASM 导出 JSON 的 TS 契约（brush/spawn/teleport/metadata/ColliderFilter）；PVS 三类型批 4（D-10）起改为 re-export 共享单点 `src/ts-shared/world/types.ts` | [loading-pipeline](implementation/loading-pipeline.md) |
 | `game-state.ts` | 196 | 计时挑战状态机：idle→running→finished、检查点去重、死亡回退 | [sequences §6](sequences.md) |
 | `physics/param-defs.ts` | 108 | 物理面板参数定义表（13 项 PARAM_DEFS，默认值=Rust `PhysParams::default()`） | [physics-panel](implementation/physics-panel.md) |
 | `physics/physics-params.ts` | 163 | 参数管理器：applyOverride/归一化/tickRate 变更回调；`PARAM_TO_RUST` 映射 | [physics-panel](implementation/physics-panel.md) |

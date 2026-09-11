@@ -4,19 +4,20 @@
  * debug 的 wasm 解析在 Worker 内；主线程仅在需要 mosaic 能力时初始化
  * 同一 wasm 模块的独立实例（与 worker 实例互不影响）：
  * - dist 内嵌模式：globalThis.__VBSP_WASM_B64__（build-dist.mjs 注入）→ initSync
- * - dev 模式：fetch 相对 pkg 的 wasm → init
+ * - dev 模式：fetch 相对 web/ 的 wasm（`./websurf_wasm_bg.wasm`，R-14/B4-8）→ initSync
  */
 
-import init, { initSync, mosaic_decode, decompress_mtz } from '../pkg/websurf_wasm.js';
+import { initSync, mosaic_decode, decompress_mtz } from '../pkg/websurf_wasm.js';
+import { base64ToBytes, fetchWasmBytes, readEmbeddedWasmB64 } from '../../../src/ts-shared/wasm/loader.js';
 
 let mainWasmInit: Promise<void> | null = null;
 
 /** 主线程 WASM 加载路径：multi 打包注入 __VBSP_WASM_URL__（相对 dist/）；
- * 否则 dev 默认相对 web/ 的 pkg 路径。 */
+ * 否则 dev 默认相对 web/ 的同目录 wasm（`npm run build:wasm` 负责拷贝到 web/）。 */
 export function mainWasmUrl(): string {
 	return (
 		(globalThis as unknown as { __VBSP_WASM_URL__?: string }).__VBSP_WASM_URL__ ??
-		'../pkg/websurf_wasm_bg.wasm'
+		'./websurf_wasm_bg.wasm'
 	);
 }
 
@@ -24,15 +25,12 @@ export function mainWasmUrl(): string {
 export async function ensureMainWasm(): Promise<void> {
 	if (!mainWasmInit) {
 		mainWasmInit = (async () => {
-			const embedded = (globalThis as unknown as { __VBSP_WASM_B64__?: string })
-				.__VBSP_WASM_B64__;
+			const embedded = readEmbeddedWasmB64();
 			if (embedded) {
-				const bin = atob(embedded);
-				const bytes = new Uint8Array(bin.length);
-				for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+				const bytes = base64ToBytes(embedded);
 				initSync({ module: bytes.buffer as ArrayBuffer });
 			} else {
-				await init(mainWasmUrl());
+				initSync({ module: (await fetchWasmBytes(mainWasmUrl())).buffer as ArrayBuffer });
 			}
 		})().catch((e) => {
 			mainWasmInit = null;

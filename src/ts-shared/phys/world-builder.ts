@@ -15,6 +15,9 @@
  * - 不共享：渲染场景构建（GLB 加载/贴图画质）、面板 UI、计时挑战等工程特有逻辑
  */
 
+import { bspYawToCsYaw } from './angles.js';
+import { base64ToBytes, fetchWasmBytes } from '../wasm/loader.js';
+
 /** BspProcessor 结构性接口（两端 pkg/websurf_wasm.js 的 BspProcessor 满足）。 */
 export interface BspProcessorLike {
   metadata(): string;
@@ -87,18 +90,6 @@ const DEFAULT_BRUSH_FILTER = {
   skip_sky: true,
   skip_nodraw: false,
 };
-
-/**
- * BSP 出生点实体 Source yaw → cs-movement yaw：wrap(src + 180)。
- * 与 viewer pose.ts bspYawToCsYaw、.replay 实测定标同口径（本轴映射
- * [x,y,z]→[y,z,x]（det=+1）下 Source 前向 (cos yaw, sin yaw) → (sin yaw, cos yaw)，
- * 恒等式即 +180；消费端 Rust player.yaw 0 = 朝 −Z 同约定）。旧式 (270 − yaw)
- * 是 det=−1 镜像（t8 实证：surf_null primary spawn Source yaw=180 应为 0°，
- * 旧式给 90°），2026-09 修正。
- */
-function bspYawToCsYaw(bspYaw: number): number {
-  return (((bspYaw + 180) % 360) + 360) % 360;
-}
 
 export async function buildWorldBundle(
   proc: BspProcessorLike,
@@ -189,22 +180,18 @@ export async function buildWorldBundle(
   let defaultsJson = '{}';
   if (options.decompressMtz) {
     try {
+      // 双路取字节（内嵌 base64 或 fetch './textures.mtz'）；纯解码与 fetch 走共享单点 D-09。
       const embeddedMtz = (globalThis as unknown as { __VBSP_TEXTURES_MTZ_B64__?: string })
         .__VBSP_TEXTURES_MTZ_B64__;
       if (embeddedMtz) {
         // single 打包（file://）：内嵌 base64
-        const bin = atob(embeddedMtz);
-        const mtzBytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) mtzBytes[i] = bin.charCodeAt(i);
+        const mtzBytes = base64ToBytes(embeddedMtz);
         defaultsJson = options.decompressMtz(mtzBytes);
         console.log('[load-bsp] 默认纹理包已加载（内嵌，缺失纹理回退可用）');
       } else {
-        const resp = await fetch('./textures.mtz');
-        if (resp.ok) {
-          const mtzBytes = new Uint8Array(await resp.arrayBuffer());
-          defaultsJson = options.decompressMtz(mtzBytes);
-          console.log('[load-bsp] 默认纹理包已加载（缺失纹理回退可用）');
-        }
+        const mtzBytes = await fetchWasmBytes('./textures.mtz');
+        defaultsJson = options.decompressMtz(mtzBytes);
+        console.log('[load-bsp] 默认纹理包已加载（缺失纹理回退可用）');
       }
     } catch (e) {
       console.warn('[load-bsp] 默认纹理包加载失败（缺失纹理保持占位色）:', e);

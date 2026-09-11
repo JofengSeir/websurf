@@ -87,7 +87,7 @@ Source 前向 `(cos yaw_s, sin yaw_s)` 在 `[y,z,x]` 映射下落入 viewer 前�
 恒等式 ⇔ `yaw_v = wrap(yaw_s + 180)`。实证：真实 `surf_null_4.replay` run 段 1078 个有效帧
 「视角·运动方向」平均 cos = **0.9992**（270− 口径同帧集 ≈ 0.05）；断言固化于
 `test/replay-selftest.ts:286-307`（run 段平均 cos > 0.98）与合成 fixture（src yaw=30 → viewer 210，`replay-selftest.ts:381-386`）。
-`pose.ts:23-25 bspYawToCsYaw`（t1 起同为 `wrap(src+180)`，F6 镜像已修）服务 BSP 出生点实体角路径
+`src/ts-shared/phys/angles.ts:36-38 bspYawToCsYaw`（经 `pose.ts:9` re-export；t1 起同为 `wrap(src+180)`，F6 镜像已修；D-08 批 4 起全 TS 侧共享单一份）服务 BSP 出生点实体角路径
 （初始视角 `core/spawn.ts:47-50` / 面板跳转 `mapinfo.ts:144-161`）——与 .replay 解码**同一定标**，
 全链统一口径。详见 [shavit-replay-format.md §8.2](shavit-replay-format.md)。
 
@@ -262,10 +262,10 @@ fixture 构造器 `buildFinalFixture/buildV2Fixture`（`:99-166`）按版本门�
 
 ## 9. 回放侧坐标与 yaw 约定（约定即代码）
 
-- 标准帧 `pos` = 脚底（Y-up）；相机眼位 = pos + 64.09（`fly.ts:174-177`）。
-- `ang[0]` yaw：0 = 面朝 −Z，逆时针为正（`pose.ts:5-9`；第一人称相机 `fly.ts:174-177` `rotation.set(pitch, yaw, roll, 'YXZ')`）。
+- 标准帧 `pos` = 脚底（Y-up）；相机眼位 = pos + `EYE_STAND`（`fly.ts:174-177`；常量源 `src/ts-shared/phys/constants.ts:19`，D-16）。
+- `ang[0]` yaw：0 = 面朝 −Z，逆时针为正（`pose.ts:11-14`；第一人称相机 `fly.ts:174-177` `rotation.set(pitch, yaw, roll, 'YXZ')`）。
 - `.replay` 帧的换算定标以**可执行断言**固化（§2.7 + [shavit-replay-format.md §8.2](shavit-replay-format.md)）：
   `pos: [x,y,z]→[y,z,x]`、`yaw = wrap(src+180)`、`pitch = −src`；`vel` = 位置差分（packed vel 不映射）。
-- BSP 出生点实体与 .replay 解码**同一 yaw 定标**（`pose.ts:23-25 bspYawToCsYaw` = `wrap(src+180)`；t1 已修
+- BSP 出生点实体与 .replay 解码**同一 yaw 定标**（`src/ts-shared/phys/angles.ts:36-38 bspYawToCsYaw` = `wrap(src+180)`，经 `pose.ts:9` re-export；t1 已修
   旧式 270− 的 det=−1 镜像，评审 F6 闭合）；初始视角另有 P2-4 回退链（`core/spawn.ts:79-101`：
   spawn 实体 → bbox 内传送目标 → bbox 高位俯瞰）。

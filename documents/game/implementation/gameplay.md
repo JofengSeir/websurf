@@ -69,8 +69,8 @@ Ambient 0.6 + Hemisphere(0xb0c4de/0x404030) 0.4 + Directional(0xfff4e0) 0.5—�
 
 ## 5. PVS 数据与世界类型（`apps/game/src/world/`）
 
-- `types.ts`（34 行）：仅保留主线程渲染需要的 `WasmPvsNode/WasmPvsLeaf/WasmPvsData/Vec3`——对照 `apps/debug/src/world/types.ts` 231 行的最小化裁剪（差异见 [../differences.md](../differences.md)）。
-- `pvs-manager.ts`：`getClusterAt`（叶子点定位）→ `decodePvsRow`（RLE 位行解码，与 Rust `vbsp::decode_pvs_row` 权威实现一致，`apps/game/crates/wasm/src/lib.rs:1643-1644` 注释）→ `isVisible(cluster)`。因 `ENABLE_PVS=false`，运行时不生效，但数据链路（pvsJson）仍随地图加载。
+- `types.ts`（**17 行**）：只余 `Vec3Like`/`Vec3`（D-07 判保留——TS 结构化类型下两份 `{x;y;z}` 互相赋值合法）+ PVS 三类型的 **re-export**（批 4 D-10 起定义在 `src/ts-shared/world/types.ts`，本工程不再持有）——对照 `apps/debug/src/world/types.ts` **198 行**（其 PVS 三类型同批改 re-export，其余为 brush/spawn/teleport/metadata 契约；差异见 [../differences.md](../differences.md)）。
+- `pvs-manager.ts`（**批 4 D-10 上提**）：实现已移至 `src/ts-shared/world/pvs-manager.ts`（271 行），本工程文件删除、`renderer-main.ts` 改 import 共享单点。`getClusterAt`（叶子点定位）→ `decodePvsRow`（RLE 位行解码，与 Rust `vbsp::decode_pvs_row` 权威实现一致，`apps/game/crates/wasm/src/lib.rs:1643-1644` 注释）→ `isVisible(cluster)`。因 `ENABLE_PVS=false`，运行时不生效，但数据链路（pvsJson）仍随地图加载。
 
 ## 6. 无计时挑战（与 debug 的关键差异）
 

@@ -76,7 +76,7 @@ loadBspFile 返回 BspLoadResult
 ```
 
 - 初始视角解析（P2-4 回退策略，`core/spawn.ts:79-101` 单点）：spawn 实体（`info_player_start` → 实体序首个 `info_player_*`）→ 首个在几何 bbox 内的 `info_teleport_destination`（域外判空域弃用）→ 兜底 bbox 中心高位俯瞰（水平居中 + 顶面高度、pitch −60°）；仅当无任何可用出生点且无 bbox 才保持当前视角。HUD 状态行随回退来源加注（`app.ts:276-286`：传送目标 →「无玩家出生点，初始视角 = 传送目标」、俯瞰 →「无可用出生点，初始视角 = 包围盒高位俯瞰」）。surf_null（无 `info_player_start` 且传送目标排在实体序前）修前初始视角落 wasm primary = taiikii_bonus_dest（距主出生区 26,200 HU 空域），修后命中 `info_player_terrorist`（srcYaw 180 → viewer 0°）。
-- 初始视角换算：`spawnPointAng`（`core/spawn.ts:47-50`）——`yaw = wrap(src + 180)`（`core/pose.ts:23-25 bspYawToCsYaw` 同式）、`pitch = −src`（Source 正值 = 俯视，viewer 正值 = 仰视）。与 `.replay` 帧解码定标**同一口径**（t1 已修评审 F6：旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射——surf_null primary srcYaw=180 应为 0°，旧式给 90°）；详见 [implementation/replay-system.md](implementation/replay-system.md) §2.5 与 [differences.md](differences.md) §7.2。
+- 初始视角换算：`spawnPointAng`（`core/spawn.ts:47-50`）——`yaw = wrap(src + 180)`（共享单点 `src/ts-shared/phys/angles.ts:36-38 bspYawToCsYaw`，经 `core/pose.ts:9` re-export；D-08 批 4 起为全 TS 侧单一份）、`pitch = −src`（Source 正值 = 俯视，viewer 正值 = 仰视）。与 `.replay` 帧解码定标**同一口径**（t1 已修评审 F6：旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射——surf_null primary srcYaw=180 应为 0°，旧式给 90°）；详见 [implementation/replay-system.md](implementation/replay-system.md) §2.5 与 [differences.md](differences.md) §7.2。
 - 换图失败语义：已有地图时只临时闪 5s 提示并还原旧摘要，不弹引导层（`app.ts:253-256`）；首图失败才回到引导层报错（`app.ts:248-252`）。
 - 出生点快照对外暴露：`mapPanel.spawnPoints`（`mapinfo.ts:64-67`，供出生点导航跳转列表；不再有"起点对齐"消费方）。
 

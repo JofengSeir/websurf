@@ -66,8 +66,8 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 | `src/ts-shared/input/mouse-buffer.ts` | 128 | `process()` 路径：discardNext + 单事件削平 ±1000（`MAX_DELTA` `:40`；`push/drain` 为遗留未用路径） |
 | `src/ts-shared/input/pointer-lock.ts` | 154 | `unadjustedMovement:true` 请求 + 旧浏览器 void 降级 + 3s 超时（`:71`） |
 | `apps/game/src/panel/panel-controller.ts` | 690 | ESC 两栏面板：通用/物理/体型/按键/操作/显示/视角七模块、控件绑定、偏好持久化、noclip、存点列表 |
-| `apps/game/src/world/pvs-manager.ts` | 281 | PVS 叶子查找 + 行 RLE 解码 + 可见集（**当前 `ENABLE_PVS=false` 整体禁用**，`renderer-main.ts:82`） |
-| `apps/game/src/world/types.ts` | 34 | 最小化世界类型：仅主线程渲染需要的 PVS 结构（对照 debug 231 行） |
+| `apps/game/src/world/pvs-manager.ts` | —（批 4 已上提） | PVS 叶子查找 + 行 RLE 解码 + 可见集——**D-10 起实现在 `src/ts-shared/world/pvs-manager.ts`（271 行）**，本工程文件已删除（`renderer-main.ts` 改 import 共享单点） |
+| `apps/game/src/world/types.ts` | 17 | 最小化世界类型：`Vec3Like`/`Vec3` 留在本工程（D-07 判保留）；PVS 三类型批 4（D-10）起为 re-export 共享单点（对照 debug 198 行） |
 | `apps/game/src/savepoint.ts` | 106 | `SavePointStore`：按地图 localStorage（`websurf-game.savepoints.{mapName}`）、上限 50（`SAVEPOINT_MAX` `:27`）、latest/add/delete |
 | `apps/game/web/index.html` | 245 | 页面外壳（纯结构与挂载点）：80 元素 id / 14 data-* / 30 class 与 JS 绑定零改动（r1 复核 80/80、14/14、30/30）；不含任何行内样式，视觉层全在 styles.css |
 | `apps/game/web/styles.css` | 571 | 独立视觉层（viewer S10 令牌体系）：:root 设计令牌 + 卡片化面板 + 悬停/激活交互态；可见性 class 钩子（`#panel.hidden`/`#error.show`/`.key-rec-hint(.show)`/`#crosshair.no-dot .ch-dot`）+ `.load-fill` 进度条 `var(--load-pct, 0%)` |

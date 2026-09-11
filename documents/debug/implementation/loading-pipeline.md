@@ -23,9 +23,9 @@
 | `colliderSource` | `config.physics.colliderSource`（'auto' 默认） | 模型碰撞来源三档，见 §4.2 |
 | `collectMissingTextures` | `true` | 收集缺失材质纹理列表（game 不开启） |
 | `decompressMtz` | 主线程 wasm 的 `decompress_mtz` | 默认纹理包解压注入 |
-| `onProgress` | 刷侧栏状态行 | 每阶段回调后 `setTimeout 0` 让出主线程（`world-builder.ts:100-106`） |
+| `onProgress` | 刷侧栏状态行 | 每阶段回调后 `setTimeout 0` 让出主线程（`world-builder.ts:87-93`） |
 
-管线阶段（`world-builder.ts:96-254`）：
+管线阶段（`world-builder.ts:83-241`）：
 
 1. **metadata**（`proc.metadata()` → WorldMetadata；debug 面板展示 magic/numLeaves/numNodes/numEntities/numStaticProps/packedFiles 等扩展字段，`app.ts:1391-1409` renderMetadata）；
 2. **借用导出** spawn/teleport/pvs（`parse_spawn_points` / `parse_teleports` / `parse_pvs_data`，一次性 JSON 字符串）；
@@ -35,7 +35,7 @@
 6. **默认纹理包回退**：内嵌 base64（`__VBSP_TEXTURES_MTZ_B64__`）或 fetch `./textures.mtz` → `decompressMtz` → defaultsJson；
 7. **GLB 导出**：`export_glb_with_pakfile_models_with_defaults(defaultsJson)`（构建期把默认低清纹理烧进 GLB），失败回退 `export_glb_with_pakfile_models()`；
 8. **出生点解析**：`primary`（优先 info_player_start）→ `spawn {x,y,z,yawDeg}`；`spawnList = [[x,y,z,yaw],…]`，yaw 统一经 `bspYawToCsYaw`（`cs_yaw = wrap(bsp_yaw + 180)`，`world-builder.ts:91-101`；旧式 270− 为 det=−1 镜像，2026-09 修正）。无出生点回退 `(0,100,0)`。
-   - 注：`apps/debug/src/world/spawn-loader.ts` 是同一逻辑的**预留工具副本**，全仓无 import（文件头自述 `spawn-loader.ts:8-11`），活跃链路在 world-builder。
+   - 注：`apps/debug/src/world/spawn-loader.ts` 是同一逻辑的**预留工具副本**，全仓无 import（文件头自述 `spawn-loader.ts:8-11`），活跃链路在 world-builder；批 4（D-08）起其 `bspYawToCsYaw` 改为 import 共享单点 `src/ts-shared/phys/angles.ts`（本地副本已删）。
 
 ## 3. BspProcessor 导出面（`apps/debug/crates/wasm/src/lib.rs`）
 

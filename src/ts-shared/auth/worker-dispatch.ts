@@ -12,6 +12,7 @@
 
 import { createWorkerSharedState, type ShmState, type MsgState } from './shared-state.js';
 import { AUTH_EVT } from './shared-state.js';
+import { base64ToBytes, fetchWasmBytes } from '../wasm/loader.js';
 import type { AuthLoop, PhysWorldLike } from './auth-loop.js';
 import type { ComputeMode } from './compute-mode.js';
 import type {
@@ -160,15 +161,10 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     // 传 {module} 会解构出 undefined → 走 new URL(import.meta.url) 路径，
     // dist 下 import.meta.url 被 define 为 about:blank → "Failed to construct 'URL'"。
     if (m.wasmB64) {
-      // dist 内嵌模式（file:// 双击）：base64 → initSync
-      const bin = atob(m.wasmB64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      env.initSync(bytes.buffer as ArrayBuffer);
+      // dist 内嵌模式（file:// 双击）：base64 → initSync（解码走共享单点 D-09）
+      env.initSync(base64ToBytes(m.wasmB64).buffer as ArrayBuffer);
     } else if (m.wasmUrl) {
-      const resp = await fetch(m.wasmUrl);
-      const buf = await resp.arrayBuffer();
-      env.initSync(buf);
+      env.initSync((await fetchWasmBytes(m.wasmUrl)).buffer as ArrayBuffer);
     } else {
       return;
     }

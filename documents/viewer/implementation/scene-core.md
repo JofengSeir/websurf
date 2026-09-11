@@ -76,22 +76,22 @@
 - `applyToWithRoll(camera, eyeOffset)`：回放第一人称专用，叠加 roll（`fly.ts:195-198`）。
 - 位姿进出：`setPose`（度 → 弧度 + 限幅，出生点跳转用）、`setWorld`（弧度直写，回放同步用）、`getPose`（度返回，HUD 读数用）（`fly.ts:180-206`）。
 
-## 3. 位姿契约与换算（`apps/viewer/src/core/pose.ts`，36 行）
+## 3. 位姿契约与换算（`apps/viewer/src/core/pose.ts`，26 行）
 
-- `Pose = { pos:[x,y,z] 脚底; ang:[yawDeg, pitchDeg] }`（`pose.ts:5-9`）——HUD 读数、出生点跳转、回放相机三处共用（`pose.ts:1`）。
-- `wrapDeg(d)`（`pose.ts:11-14`）：角度归一 [0,360) 单点实现（`replay/helpers.ts` 从此转发导出，两条路径共用）。
-- `bspYawToCsYaw(bspYaw) = wrapDeg(bspYaw + 180)`（`pose.ts:23-25`）：BSP 出生点实体 Source yaw → viewer yaw。**t1 已修评审 F6**——旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射（surf_null primary srcYaw=180 应为 0°，旧式给 90°），现与 `.replay` 帧解码的实测定标（`yaw = wrap(srcYaw+180)`，`shavit-replay.ts:494-498`）**同一口径**。同式多处各自维护（互不 import，公式对齐，见 [../differences.md](../differences.md) §7.2）：`apps/viewer/src/core/pose.ts:23-25`、`src/ts-shared/phys/world-builder.ts:99-100`、`src/phys/teleport.rs:31-38`（Rust）、`apps/debug/src/world/spawn-loader.ts:65-66` 与 `apps/debug/src/world/teleport-manager.ts:42-44`——改公式需多处同步。
+- `Pose = { pos:[x,y,z] 脚底; ang:[yawDeg, pitchDeg] }`（`pose.ts:11-14`）——HUD 读数、出生点跳转、回放相机三处共用（`pose.ts:1-6` 头注）。
+- `wrapDeg(d)`（`pose.ts:9` re-export）：角度归一 [0,360) 单点实现已上提共享层 **`src/ts-shared/phys/angles.ts:28-30`**（D-08）；`replay/helpers.ts` 仍从 `pose.ts` 转发导出，两条路径共用，调用方路径不变。
+- `bspYawToCsYaw(bspYaw) = wrapDeg(bspYaw + 180)`（`pose.ts:9` re-export → `src/ts-shared/phys/angles.ts:36-38`）：BSP 出生点实体 Source yaw → viewer yaw。**t1 已修评审 F6**——旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射（surf_null primary srcYaw=180 应为 0°，旧式给 90°），现与 `.replay` 帧解码的实测定标（`yaw = wrap(srcYaw+180)`，`shavit-replay.ts:494-498`）**同一口径**。**批 4（D-08）起全 TS 侧只剩共享单一份**：原 4 份副本（`apps/viewer/src/core/pose.ts`、`src/ts-shared/phys/world-builder.ts`、`apps/debug/src/world/spawn-loader.ts`、`apps/debug/src/world/teleport-manager.ts`）全部改为 import/re-export；仍各自维护的只有 Rust 同式（`src/phys/teleport.rs:31-38`，跨语言无法共享符号，E-06）。语义归一口径：`wrapDeg` 带 `|| 0`（`-0` 归一为 `+0`），见 `angles.ts:1-22` 头注。
   该式服务 BSP 出生点/传送实体角路径：初始视角经 `core/spawn.ts:47-50 spawnPointAng`（P2-4 回退解析 `spawn.ts:79-101`，消费在 `app.ts:270-273`）、出生点列表 title/跳转 `mapinfo.ts:144-161`。
-- `pitchClampedRad` / `eyeHeight`（`pose.ts:27-35`）。
-- `EYE_STAND = 64.09` HU（`core/constants.ts:6-7`，注释"与 game EYE_STAND 一致"）——与共享物理常量同值：`src/phys/player.rs:34` `pub const EYE_STAND: f64 = 64.09`。
+- `pitchClampedRad` / `eyeHeight`（`pose.ts:17-26`）。
+- `EYE_STAND = 64.09` HU（`core/constants.ts:13` re-export 共享单点 `src/ts-shared/phys/constants.ts:19`，D-16）——与 Rust 权威同值：`src/phys/player.rs:34` `pub const EYE_STAND: f64 = 64.09`；跨语言一致性由 `src/scripts/check-shared-sync.mjs` 的 `eye-stand` 子检查保证。
 
 ## 4. 常量与 DOM 工具
 
-### 4.1 `core/constants.ts`（35 行）
+### 4.1 `core/constants.ts`（41 行）
 
 | 常量 | 值 | 与 game 的关系（代码内注释自证） |
 |---|---|---|
-| `EYE_STAND` | 64.09 | "与 game EYE_STAND 一致"（`constants.ts:6-7`；共享物理同值 `src/phys/player.rs:34`） |
+| `EYE_STAND` | 64.09 | **re-export 共享单点**（`constants.ts:13` → `src/ts-shared/phys/constants.ts:19`，D-16）；Rust 同值 `src/phys/player.rs:34`，由 `check-shared-sync.mjs` 的 `eye-stand` 子检查保证 |
 | `FOV` | 73.6° | — |
 | `CAMERA_INIT_NEAR/FAR` | 0.1 / 100000 | "与 game renderer init 一致"（`constants.ts:11-13`） |
 | `CAMERA_FAR_SCALE` | 100 | "与 game loadScene 一致：基本无远裁剪"（`constants.ts:14-15`） |

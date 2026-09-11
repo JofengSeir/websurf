@@ -19,7 +19,7 @@
 | `test/dual-mode-harness/` | `websurf-test` | 三模式物理（耦合/解耦/tick，运行时热切）+ OffscreenCanvas 渲染时序验证工程 | `websurf-test-wasm` | `pkg/websurf_test_wasm.js` | `test/dual-mode-harness/package.json:2-3`、`crates/wasm/Cargo.toml:8` |
 | `src/` | —（无 npm 包） | 共享 Rust 物理系统 `websurf-phys` | `websurf-phys`（rlib） | — | `src/Cargo.toml:2` |
 | `src/wasm-core/` | —（无 npm 包） | 共享 BSP/GLB/模型解析导出 `websurf-wasm-core` | `websurf-wasm-core`（rlib，无 wasm-bindgen 导出） | — | `src/wasm-core/Cargo.toml:1`、`src/wasm-core/lib.rs:6` |
-| `src/ts-shared/` | —（无 npm 包） | TS 共享层（18 源文件五域，共 6664 行，`wc -l` 实测；含三模式物理内核 `auth/compute-mode.ts`、`auth/tick-authority.ts`、`tick/ordering-gate.ts`、`tick/tick-consumer.ts`、`decoupled/decoupled-loop.ts`） | — | — | `src/ts-shared/`（清单见 [ts-shared.md](./ts-shared.md) §1.1） |
+| `src/ts-shared/` | —（无 npm 包） | TS 共享层（23 源文件五域，共 7102 行，`wc -l` 实测，含 4 个 `*.test.ts`；含三模式物理内核 `auth/compute-mode.ts`、`auth/tick-authority.ts`、`tick/ordering-gate.ts`、`tick/tick-consumer.ts`、`decoupled/decoupled-loop.ts`，以及批 4 新增的 `phys/angles.ts`、`phys/constants.ts`、`wasm/loader.ts`、`world/{types,pvs-manager}.ts`） | — | — | `src/ts-shared/`（清单见 [ts-shared.md](./ts-shared.md) §1.1） |
 
 ### 1.2 workspace 划界：两个刻意的决定
 
@@ -33,7 +33,7 @@
 - **Rust 层**：`websurf-phys` / `websurf-wasm-core` 的 path 依赖（`apps/debug/crates/wasm/Cargo.toml:21-22`、`apps/game/crates/wasm/Cargo.toml:21-22` 等同款）；
 - **TS 层**：debug/game 相对路径 import `../../src/ts-shared/...`（两者为同一 7 模块集，见 [ts-shared.md](./ts-shared.md) §1.2；三模式内核 compute-mode/tick-authority/decoupled-loop 两者均未 import）；test/dual-mode-harness 亦 import 共享层（auth 通道 + 三模式物理内核，6 模块，`test/dual-mode-harness/src/worker-a.ts:32-56`）。
 
-唯一例外形态：viewer 对共享**常量与公式**采用"复制并注释对齐"而非 import（EYE_STAND 64.09 源 `src/phys/player.rs:34` → `apps/viewer/src/core/constants.ts:6-7`）。harness 则两面性并存：192B 渲染通道协议**自建**（`test/dual-mode-harness/src/shared-state.ts:2-4`「与 game ts-shared 权威帧协议不是同一套」），键位位定义（`:51`）与三模式物理内核（`src/worker-a.ts:32-56`）**走共享层 import**。
+唯一例外形态：**批 4（D-08/D-09/D-16）后 viewer 接入 3 个共享单点**（`phys/angles.ts`、`phys/constants.ts`、`wasm/loader.ts`，经 `core/pose.ts:9`、`core/constants.ts:13` re-export 与 `core/bsp.ts:4` import），**不再是"复制并注释对齐"**；其 `input/auth/tick/decoupled/phys-params/world-builder/pvs-manager` 七项仍正当隔离（framework-decoupling §4.3）。harness 则两面性并存：192B 渲染通道协议**自建**（`test/dual-mode-harness/src/shared-state.ts:2-4`「与 game ts-shared 权威帧协议不是同一套」），键位位定义（`:51`）与三模式物理内核（`src/worker-a.ts:32-56`）**走共享层 import**。
 
 ### 1.4 vmdl vendor patch：五处同源
 
@@ -60,7 +60,7 @@ crates.io vmdl 0.2.0 vendor 到 `src/vendor/vmdl/`（修复 Source VTX 三角形
 |---|---|---|---|---|
 | `websurf-phys`（rlib 物理内核，21 个 wasm-bindgen 导出方法） | ✅ `pub use websurf_phys::phys::PhysWorld`（`apps/debug/crates/wasm/src/lib.rs:22`） | ✅ 同款（`apps/game/crates/wasm/src/lib.rs:23`） | ❌ 无物理（Cargo.toml 无此依赖；`apps/viewer/crates/wasm/Cargo.toml:3-5` 注释自证） | ✅（`crates/wasm/src/lib.rs:35`；WorkerA 内三实例：判定模式建 phys + tickPhys + F4-scratch，`src/worker-a.ts:24,75-80`） |
 | `websurf-wasm-core`（BSP/GLB/模型/纹理解析） | ✅ 全导出集（BspProcessor 15 方法 + mosaic 3 函数） | ✅ 全导出集（同源精简：`crates/wasm/src/lib.rs:387-1671`） | ✅ 薄消费（vbsp/gltf/model/pakfile/texture 五模块，**不用 phyfile/mosaic**，`apps/viewer/crates/wasm/src/lib.rs:16-20`） | ✅ 物理导出子集（brush/phy/tri/spawn/GLB；teleport/PVS 保留 API 但主流程不调用，`crates/wasm/src/lib.rs:18-19`） |
-| `src/ts-shared`（TS 共享层） | ✅ 7 模块（auth×3、phys×3、input×1；import 区实测，`apps/debug/src/app.ts:26-31`、`apps/debug/src/worker/main.ts:27-30`、`apps/debug/src/renderer/renderer-main.ts:18-19`、`apps/debug/src/input/keyboard.ts:18`；三模式内核未 import） | ✅ 7 模块（与 debug 同集；c4824e9 回退后 `apps/game/src/worker/main.ts:21-24` 只注入 auth×3 + params，三模式内核未 import） | ❌ 零 import（仅 `core/pose.ts:23-25` 本地复刻 `bspYawToCsYaw`） | ✅ auth 通道 + 三模式内核 6 模块（`src/worker-a.ts:32-56`：shared-state/auth-loop/worker-dispatch/tick-authority/decoupled-loop/compute-mode；渲染通道仍是自建 192B `src/shared-state.ts:5-21`） |
+| `src/ts-shared`（TS 共享层） | ✅ 7 模块 + 批 4 新增 4 单点（auth×3、phys×5、input×1、wasm/loader、world/pvs-manager；import 区实测，`apps/debug/src/app.ts:26-31`、`apps/debug/src/worker/main.ts:27-30`、`apps/debug/src/renderer/renderer-main.ts:18-23`、`apps/debug/src/input/keyboard.ts:18`、`apps/debug/src/world/{spawn-loader,teleport-manager,types}.ts`、`apps/debug/src/{main-wasm,default-pack}.ts`；三模式内核未 import） | ✅ 7 模块 + 批 4 新增 4 单点（与 debug 同集；c4824e9 回退后 `apps/game/src/worker/main.ts:21-24` 只注入 auth×3 + params，三模式内核未 import；批 4 另接 `phys/angles`、`phys/constants`、`wasm/loader`、`world/pvs-manager`） | ✅ **3 个共享单点**（批 4 D-08/D-09/D-16：`core/pose.ts:9` re-export angles、`core/constants.ts:13` re-export constants、`core/bsp.ts:4` import loader；其余七项正当隔离） | ✅ auth 通道 + 三模式内核 6 模块（`src/worker-a.ts:32-56`：shared-state/auth-loop/worker-dispatch/tick-authority/decoupled-loop/compute-mode；渲染通道仍是自建 192B `src/shared-state.ts:5-21`） |
 | `src/serve.py`（dev 服务器，COOP/COEP） | ✅ `npm run dev`（`apps/debug/package.json`） | ✅ | ✅ | ✅ |
 | vmdl vendor patch | ✅ | ✅ | ✅ | ✅ |
 
@@ -164,7 +164,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 
 1. **sensitivity=1 全链路**：灵敏度只在主线程输入层乘入一次，物理两端消费同一份已折算输入（[ts-shared.md](./ts-shared.md) §4.4）。
 2. **Q/E 不进物理**：转向折算为等效鼠标增量 `qeEquivalentDx`，Rust 侧只收 dx/dy（`src/phys/mod.rs:222-233`）。
-3. **yaw 公式五处同式各自维护**（spawn-loader 为未接线参考实现）：`bspYawToCsYaw = wrap(yaw + 180)`（t2 统一口径；旧式 270− 为 det=−1 镜像已废弃）在 `apps/viewer/src/core/pose.ts:23-25`、`src/ts-shared/phys/world-builder.ts:99-100`、`src/phys/teleport.rs:31-38`、`apps/debug/src/world/spawn-loader.ts:65-66` 与 `apps/debug/src/world/teleport-manager.ts:42-44`——互不 import 是刻意的（工程间零引用原则），改公式须各处同步。
+3. **yaw 公式：TS 侧已收敛为共享单点，Rust 侧同式并存**（2026-09 批 4 / D-08）：`bspYawToCsYaw = wrap(yaw + 180)`（t2 统一口径；旧式 270− 为 det=−1 镜像已废弃）的**定义**现在只有两处——TS `src/ts-shared/phys/angles.ts:36-38`（原 4 处副本：`apps/viewer/src/core/pose.ts`、`src/ts-shared/phys/world-builder.ts`、`apps/debug/src/world/spawn-loader.ts`、`apps/debug/src/world/teleport-manager.ts` 全部改为 import/re-export）与 Rust `src/phys/teleport.rs:31-38`（跨语言无法共享符号，E-06）。改公式须改这两处。
 4. **`KEY_MASK` 单点定义**：位定义只在 ts-shared 一份，harness 复用 import 而非复制。
 5. **共享层只收敛协议与算法内核**：UI/渲染/调试设施留在各工程（debug/game 重复携带 chamfer 生成、近平面探测、画质切换等——见 debug [differences.md](./debug/differences.md) §6）。
 

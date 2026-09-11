@@ -137,45 +137,12 @@ export interface WasmTeleportReport {
 // PVS（parse_pvs_data）— camelCase（Rust 使用 #[serde(rename_all = "camelCase")]）
 // ---------------------------------------------------------------------------
 
-/** BSP 树内部节点（用于 cluster 定位）。 */
-export interface WasmPvsNode {
-  /** 分割平面法线（已旋转为 Y-up）。 */
-  normal: [number, number, number];
-  /** 分割平面 dist（标量，旋转不变）。 */
-  dist: number;
-  /** 子节点索引 `[front, back]`，负值表示 leaf（`~index` 取 leaf 索引）。 */
-  children: [number, number];
-}
-
-/** BSP 叶子节点。 */
-export interface WasmPvsLeaf {
-  /** 所属 cluster id（负值表示固体 leaf）。 */
-  cluster: number;
-  /** AABB min（已旋转为 Y-up，i16 精度）。 */
-  mins: [number, number, number];
-  /** AABB max（已旋转为 Y-up，i16 精度）。 */
-  maxs: [number, number, number];
-  /** 是否为固体 leaf（cluster < 0）。 */
-  isSolid: boolean;
-}
-
-/** `parse_pvs_data` 返回的 JSON 顶层结构。 */
-export interface WasmPvsData {
-  /** 根节点索引（始终为 0）。 */
-  rootNode: number;
-  /** BSP 树内部节点列表。 */
-  nodes: WasmPvsNode[];
-  /** 叶子节点列表（保持原始 BSP 顺序，与 node.children 索引对应）。 */
-  leaves: WasmPvsLeaf[];
-  /** face → cluster 映射（-1 = 无 cluster / 固体）。 */
-  faceClusters: number[];
-  /** 预解码的 PVS 位图（Base64 编码）。 */
-  pvsBitsBase64: string;
-  /** cluster 总数。 */
-  clusterCount: number;
-  /** 每个 cluster 行的字节数。 */
-  bytesPerRow: number;
-}
+/**
+ * PVS 三类型的定义已上提共享层（D-10）：`src/ts-shared/world/types.ts`。
+ * 此处保留 re-export，使本工程内既有 `from './types.js'` 调用方路径不变。
+ * 结构等价的 `Vec3` 仍留在各工程（D-07 判「保留」，不上提）。
+ */
+export type { WasmPvsNode, WasmPvsLeaf, WasmPvsData } from '../../../../src/ts-shared/world/types.js';
 
 // ---------------------------------------------------------------------------
 // 元数据（metadata）

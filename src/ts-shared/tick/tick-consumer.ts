@@ -41,6 +41,7 @@
  */
 
 import type { SharedState } from '../auth/shared-state.js';
+import { EYE_STAND } from '../phys/constants.js';
 
 /** raw 64Hz tick 周期（ms）——与排序门同源常量。 */
 export const TICK_PERIOD_MS = 1000 / 64; // 15.625
@@ -179,7 +180,7 @@ export function createTickConsumer(shared: SharedState): TickConsumer {
   for (let i = 0; i < RING_CAP; i++) {
     ring.push({ k: 0, seg: 0, wallMs: 0, f: new Float64Array(10), onGround: 0 });
   }
-  const pose: TickPose = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, eyeHeight: 64.09, onGround: false };
+  const pose: TickPose = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, eyeHeight: EYE_STAND, onGround: false };
 
   const stats: TickConsumerStats = {
     starvationEvents: 0, starvedTicks: 0, readConflictSkip: 0,

@@ -6,6 +6,7 @@
  */
 
 import { ensureMainWasm, decompress_mtz } from './main-wasm.js';
+import { base64ToBytes } from '../../../src/ts-shared/wasm/loader.js';
 
 const DEFAULT_TEXTURE_PACK_URL = './textures.mtz';
 
@@ -23,9 +24,7 @@ export async function loadDefaultTexturePack(): Promise<Record<string, string> |
 			.__VBSP_TEXTURES_MTZ_B64__;
 		let json: string;
 		if (embedded) {
-			const bin = atob(embedded);
-			const bytes = new Uint8Array(bin.length);
-			for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+			const bytes = base64ToBytes(embedded);
 			json = decompress_mtz(bytes);
 		} else {
 			const resp = await fetch(DEFAULT_TEXTURE_PACK_URL);
