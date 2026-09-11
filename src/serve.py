@@ -49,8 +49,8 @@ class Server(socketserver.TCPServer):
 try:
     server = Server(("", PORT), Handler)
 except OSError as e:
-    print(f"[错误] 端口 {PORT} 无法监听：{e}")
-    print(f"[提示] 端口可能已被占用——换一个端口：python serve.py {PORT + 1}")
+    print(f"[ERROR] 端口 {PORT} 无法监听：{e}")
+    print(f"[HINT] 端口可能已被占用——换一个端口：python serve.py {PORT + 1}")
     sys.exit(1)
 
 with server:

@@ -1,155 +1,93 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableExtensions
-title WebSurf-game build dist
+title WebSurf-game - Build dist
 cd /d "%~dp0"
 
-REM ============================================================
-REM   WebSurf-game - Build dist package (multi-file ESM)
-REM   ASCII-only batch (avoid codepage issues). Double-click safe:
-REM   window stays open on both success and failure.
-REM ============================================================
-echo.
-echo ============================================================
-echo   WebSurf-game - Build dist package
-echo ============================================================
-echo.
-
-REM ------------------------------------------------------------
-REM PATH boost for double-click context: ensure npm/node/wasm-pack
-REM ------------------------------------------------------------
-set "PATH=%PATH%;%APPDATA%\npm;%ProgramFiles%\nodejs;%ProgramFiles(x86)%\nodejs;%USERPROFILE%\.cargo\bin"
+set "DIST_MODE=single"
+if /i "%~1"=="multi" set "DIST_MODE=multi"
+if /i "%~1"=="" goto :mode_ok
+if /i "%~1"=="single" goto :mode_ok
+if /i "%~1"=="multi" goto :mode_ok
+echo [ERROR] Unsupported argument: %~1
+echo [HINT] Usage: build-dist.cmd [single^|multi]
+pause
+exit /b 1
+:mode_ok
 
 echo [0/5] Checking toolchain...
-where npm >nul 2>&1
-if errorlevel 1 (
-  echo   [!] npm not found. Install Node.js and add it to PATH.
-  goto :toolchain_failed
+set "TOOLCHAIN_OK=1"
+where npm >nul 2>nul
+if errorlevel 1 (echo   [!] npm not found. Install Node.js and add it to PATH.& set "TOOLCHAIN_OK=0") else (echo   npm: OK)
+where wasm-pack >nul 2>nul
+if errorlevel 1 (echo   [!] wasm-pack not found. Install with: cargo install wasm-pack& set "TOOLCHAIN_OK=0") else (echo   wasm-pack: OK)
+where node >nul 2>nul
+if errorlevel 1 (echo   [!] node not found. Install Node.js and add it to PATH.& set "TOOLCHAIN_OK=0") else (echo   node: OK)
+if not "%TOOLCHAIN_OK%"=="1" (
+  echo [ERROR] Toolchain incomplete.
+  echo [HINT] Install Node.js ^(npm + node^) and wasm-pack, then retry.
+  pause
+  exit /b 1
 )
-echo   npm: OK
-where wasm-pack >nul 2>&1
-if errorlevel 1 (
-  echo   [!] wasm-pack not found. Install with: cargo install wasm-pack
-  goto :toolchain_failed
-)
-echo   wasm-pack: OK
-where node >nul 2>&1
-if errorlevel 1 (
-  echo   [!] node not found.
-  goto :toolchain_failed
-)
-echo   node: OK
 
-REM ------------------------------------------------------------
-REM Step 1: Node dependencies (auto npm install if node_modules missing)
-REM ------------------------------------------------------------
-echo.
+call "%~dp0..\..\src\scripts\cargo-env.cmd"
+
 echo [1/5] Ensuring Node build dependencies (auto npm install if missing)...
 call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
-if errorlevel 1 goto :deps_failed
+if errorlevel 1 (
+  echo [ERROR] npm install failed.
+  echo [HINT] Check network connectivity and package-lock.json, then retry.
+  pause
+  exit /b 1
+)
 echo [1/5] Node dependencies ready.
 
-REM ------------------------------------------------------------
-REM Step 2: WASM build (release). wasm-opt=false is set in
-REM crates/wasm/Cargo.toml (NODE_OPTIONS pollutes wasm-opt node script).
-REM ------------------------------------------------------------
-set "WASM_FILE=%~dp0pkg\websurf_wasm_bg.wasm"
-
-echo.
+if exist "pkg\websurf_wasm_bg.wasm" goto :wasm_done
 echo [2/5] Building WASM (release)...
 call npm run build:wasm
-if errorlevel 1 goto :wasm_failed
+if errorlevel 1 (
+  echo [ERROR] WASM build failed.
+  echo [HINT] Delete crates\wasm\target\wasm32-unknown-unknown and retry (antivirus locks are the usual cause).
+  pause
+  exit /b 1
+)
+:wasm_done
+echo [2/5] WASM ready (release).
 
-if exist "%WASM_FILE%" (
-  echo [2/5] WASM ready ^(release^).
-) else (
-  echo ERROR: %WASM_FILE% not found after build.
-  goto :wasm_failed
+echo [3/5] Checking WASM API contract...
+call npm run check:api
+if errorlevel 1 (
+  echo [ERROR] WASM API contract check failed.
+  echo [HINT] Run npm run check:api, fix src/wasm.d.ts vs crates/wasm, then retry.
+  pause
+  exit /b 1
 )
 
-REM ------------------------------------------------------------
-REM Step 3: WASM API contract check (9 export + 12 phys)
-REM ------------------------------------------------------------
-echo.
-echo [3/5] Checking WASM API contract...
-call node "%~dp0scripts\check-wasm-api.mjs"
-if errorlevel 1 goto :wasm_api_failed
-
-REM ------------------------------------------------------------
-REM Step 4: TypeScript typecheck + bundle (worker/app)
-REM ------------------------------------------------------------
-echo.
-echo [4/5] TypeScript typecheck + bundle...
+echo [4/5] Building TypeScript (worker.js + app.js)...
 call npm run build:ts
-if errorlevel 1 goto :ts_failed
+if errorlevel 1 (
+  echo [ERROR] TypeScript build failed.
+  echo [HINT] Fix the tsc/esbuild errors printed above, then retry.
+  pause
+  exit /b 1
+)
 
-REM ------------------------------------------------------------
-REM Step 5: dist package (multi-file ESM: app + worker + wasm)
-REM ------------------------------------------------------------
-echo.
 echo [5/5] Building dist package...
-call node "%~dp0scripts\build-dist.mjs"
-if errorlevel 1 goto :dist_failed
+set "DIST_ARG="
+if /i "%DIST_MODE%"=="multi" set "DIST_ARG=--multi"
+call node "%~dp0scripts\build-dist.mjs" %DIST_ARG%
+if errorlevel 1 (
+  echo [ERROR] dist build failed.
+  echo [HINT] See the build-dist.mjs errors printed above, then retry.
+  pause
+  exit /b 1
+)
 
-echo.
 echo ============================================================
-echo   Build complete.
-echo   Run dist via: play.cmd (or python ..\..\src\serve.py 8137 . + open
-echo   http://localhost:8137/dist/index.html).
-echo   Note: file:// double-click does NOT work - SharedArrayBuffer
-echo   requires COOP/COEP headers from a local server.
+echo   WebSurf-game - Build dist package: complete
+echo   Output:  dist/ (mode: %DIST_MODE%)
+echo   Run:     play.cmd
+if /i "%DIST_MODE%"=="multi" echo   Note:    multi mode needs the local HTTP server (play.cmd).
+if /i "%DIST_MODE%"=="single" echo   Note:    file:// double-click works (WASM embedded).
 echo ============================================================
-echo.
-pause
 exit /b 0
-
-:deps_failed
-echo.
-echo *** ERROR: Node dependencies install failed ***
-echo Check network connectivity and package-lock.json, then retry.
-echo.
-pause
-exit /b 1
-
-:toolchain_failed
-echo.
-echo *** ERROR: Toolchain incomplete ***
-echo Install:
-echo   - Node.js (npm + node)
-echo   - wasm-pack: cargo install wasm-pack
-echo Or add the bin directories to system PATH and retry.
-echo.
-pause
-exit /b 1
-
-:wasm_failed
-echo.
-echo *** ERROR: WASM build failed ***
-echo If you see "os error 5 access denied" (antivirus locking target),
-echo delete crates\wasm\target\wasm32-unknown-unknown and retry.
-echo.
-pause
-exit /b 1
-
-:wasm_api_failed
-echo.
-echo *** ERROR: WASM API contract check failed ***
-echo Run npm run build:wasm first, or check scripts\check-wasm-api.mjs.
-echo.
-pause
-exit /b 1
-
-:ts_failed
-echo.
-echo *** ERROR: TypeScript build failed ***
-echo Fix typecheck / esbuild errors and retry.
-echo.
-pause
-exit /b 1
-
-:dist_failed
-echo.
-echo *** ERROR: dist build failed ***
-echo.
-pause
-exit /b 1

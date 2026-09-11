@@ -1,179 +1,177 @@
 /**
- * 构建 WebSurf-game dist/，双模式：
+ * 构建 WebSurf-game dist/，双模式（薄入口，D-04 / T-04）：
  *
  * ── single（默认，本地双击 file://）─────────────────────────────
  *   dist/index.html — classic script（file:// 下 module 被 CORS 拦截）
- *   dist/app.js     — IIFE，内嵌 WASM(base64) + Worker 代码(Blob URL)
- *   dist/styles.css — 外置样式表（web/styles.css 原样拷贝，index.html 以
- *                     <link rel="stylesheet" href="./styles.css"> 引用）
+ *   dist/app.js     — IIFE，内嵌 WASM(base64) + Worker 代码(Blob URL) + 默认纹理包(base64)
+ *   dist/styles.css — 外置样式表（web/styles.css 原样拷贝）
+ *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 产物级许可证副本
  *   file:// 兼容：MsgState 回退（无 SAB）+ initSync（wasm 内嵌）+ Blob Worker
  *
  * ── multi（--multi，GitHub Pages / HTTP 部署）─────────────────
  *   dist/index.html — module script
- *   dist/app.js     — ESM
+ *   dist/app.js     — ESM（前缀注入 __VBSP_WASM_URL__）
  *   dist/worker.js  — ESM（module worker）
  *   dist/styles.css — 外置样式表（web/styles.css 原样拷贝）
- *   dist/websurf_wasm_bg.wasm — WASM 外置（fetch；game 的 dev/multi 路径统一
- *                              为 './websurf_wasm_bg.wasm'，运行时零改动）
+ *   dist/websurf_wasm_bg.wasm — WASM 外置（fetch；dev/multi 路径统一为 './websurf_wasm_bg.wasm'）
  *   dist/textures.mtz         — 默认纹理包外置（公共资源，HTTP fetch 可用）
+ *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 产物级许可证副本
+ *
+ * 打包内核（esbuild 注入、cleanDist 先删后建、__VBSP_* 拼装、许可证唯一源拷贝）：
+ *   ../../../src/scripts/lib/dist-pack.mjs
  *
  * 用法：node scripts/build-dist.mjs [--multi]
  */
 import { build } from 'esbuild';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  bundleIife,
+  bundleEsm,
+  writeEmbeddedPreamble,
+  rewriteIndexToClassicScript,
+  cleanDist,
+  cleanStale,
+  copyLicensePair,
+  printTree,
+} from '../../../src/scripts/lib/dist-pack.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const root = join(__dirname, '..');
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, '..'); // apps/game
+const REPO = join(ROOT, '..', '..'); // 仓库根
+const DIST = join(ROOT, 'dist');
+const INDEX_HTML = join(ROOT, 'web', 'index.html');
+const STYLES = join(ROOT, 'web', 'styles.css');
+const WASM_FILE = 'websurf_wasm_bg.wasm';
+const MTZ = join(REPO, 'src', 'materials', 'textures.mtz');
+
+const HEADER = '/* WebSurf-game embedded build — auto-generated, do not edit */\n';
+
+const KEEP_SINGLE = ['index.html', 'app.js', 'styles.css', 'LICENSE.cs-movement', 'NOTICE.cs-movement'];
+const KEEP_MULTI = [
+  'index.html',
+  'app.js',
+  'worker.js',
+  'styles.css',
+  WASM_FILE,
+  'textures.mtz',
+  'LICENSE.cs-movement',
+  'NOTICE.cs-movement',
+];
+
 const multi = process.argv.includes('--multi');
 
-// esbuild 公共配置
-const commonOptions = {
-  bundle: true,
-  target: 'es2022',
-  minify: true,
-  sourcemap: false,
-  write: false,
-  legalComments: 'eof',
-  // IIFE 不支持 import.meta.url；用占位符替换（内嵌模式不走 fetch 路径）
-  define: {
-    'import.meta.url': JSON.stringify('about:blank'),
-  },
-  logLevel: 'info',
-};
-
-async function main() {
-  console.log(`=== WebSurf-game dist 构建（${multi ? 'multi / HTTP 部署' : 'single / 本地 file://'}）===\n`);
-
-  const wasmPath = join(root, 'pkg', 'websurf_wasm_bg.wasm');
-  if (!existsSync(wasmPath)) {
-    console.error('错误: pkg/websurf_wasm_bg.wasm 不存在。请先运行 npm run build:wasm');
-    process.exit(1);
+function requireInputs() {
+  const wasm = join(ROOT, 'pkg', WASM_FILE);
+  if (!existsSync(wasm)) {
+    throw new Error(`${wasm} 不存在（先运行 npm run build:wasm）`);
   }
-
-  const distDir = join(root, 'dist');
-  if (!existsSync(distDir)) mkdirSync(distDir, { recursive: true });
-
-  if (multi) {
-    await buildMulti(distDir, wasmPath);
-  } else {
-    await buildSingle(distDir, wasmPath);
+  if (!existsSync(MTZ)) {
+    throw new Error(`默认纹理包不存在（${MTZ}）`);
   }
+  return wasm;
 }
 
 /** single：单文件 IIFE，WASM + Worker 内嵌（file:// 双击可用）。 */
-async function buildSingle(distDir, wasmPath) {
-  // 1. WASM → base64
-  console.log('[1/4] 编码 WASM (base64)...');
-  const wasmBytes = readFileSync(wasmPath);
-  const wasmBase64 = wasmBytes.toString('base64');
+async function buildSingle(wasmPath) {
+  console.log('[5/5] 编码 WASM (base64)...');
+  const wasmB64 = readFileSync(wasmPath).toString('base64');
 
-  // 2. worker → IIFE（Blob URL）
-  console.log('[2/4] 打包 worker (IIFE)...');
-  const workerResult = await build({
-    ...commonOptions,
-    entryPoints: [join(root, 'src', 'worker', 'main.ts')],
-    format: 'iife',
+  console.log('[5/5] 编码默认纹理包 (base64)...');
+  const mtzB64 = readFileSync(MTZ).toString('base64');
+
+  console.log('[5/5] 打包 worker (IIFE，Blob URL 用)...');
+  const workerJs = await bundleIife({
+    build,
+    entry: join(ROOT, 'src', 'worker', 'main.ts'),
+    options: { logLevel: 'info' },
   });
-  const workerCode = workerResult.outputFiles[0].text;
 
-  // 3. app → IIFE
-  console.log('[3/4] 打包 app (IIFE)...');
-  const appResult = await build({
-    ...commonOptions,
-    entryPoints: [join(root, 'src', 'app.ts')],
-    format: 'iife',
+  console.log('[5/5] 打包 app (IIFE)...');
+  const appCode = await bundleIife({
+    build,
+    entry: join(ROOT, 'src', 'app.ts'),
+    options: { logLevel: 'info' },
   });
-  const appCode = appResult.outputFiles[0].text;
 
-  // 4. 生成 dist/
-  const mtzBytes = readFileSync(join(root, '..', '..', 'src', 'materials', 'textures.mtz'));
-  const mtzBase64 = mtzBytes.toString('base64');
-  const embeddedPreamble =
-    `/* WebSurf-game embedded build — auto-generated, do not edit */\n` +
-    `globalThis.__VBSP_WASM_B64__=${JSON.stringify(wasmBase64)};\n` +
-    `globalThis.__VBSP_WORKER_JS__=${JSON.stringify(workerCode)};\n` +
-    `globalThis.__VBSP_TEXTURES_MTZ_B64__=${JSON.stringify(mtzBase64)};\n`;
-  const finalAppJs = embeddedPreamble + appCode;
-  writeFileSync(join(distDir, 'app.js'), finalAppJs);
-  console.log(`      dist/app.js: ${(finalAppJs.length / 1024 / 1024).toFixed(2)} MB`);
-
-  // classic script（file:// 下 module 被 CORS 拦截）
-  const html = readFileSync(join(root, 'web', 'index.html'), 'utf8');
-  const distHtml = html.replace(
-    '<script type="module" src="./app.js"></script>',
-    '<script src="./app.js"></script>',
-  );
-  writeFileSync(join(distDir, 'index.html'), distHtml);
-
-  // 外置样式表（index.html 以 <link href="./styles.css"> 引用，file:// 下同样可加载）
-  copyFileSync(join(root, 'web', 'styles.css'), join(distDir, 'styles.css'));
-  console.log('      dist/index.html + dist/styles.css 已生成');
-
-  // 清理旧的多文件产物（single 内嵌全量，外置文件无用）
-  for (const stale of ['worker.js', 'websurf_wasm_bg.wasm', 'textures.mtz']) {
-    try {
-      unlinkSync(join(distDir, stale));
-    } catch {
-      /* 不存在则忽略 */
-    }
+  console.log('[5/5] 写入 dist/（classic index.html + 内嵌 app.js + styles.css）...');
+  const { bytes } = await writeEmbeddedPreamble({
+    distDir: DIST,
+    appCode,
+    headerComment: HEADER,
+    wasmB64,
+    workerJs,
+    mtzB64,
+  });
+  const rewritten = await rewriteIndexToClassicScript({
+    webIndex: INDEX_HTML,
+    distIndex: join(DIST, 'index.html'),
+  });
+  if (!rewritten) {
+    console.warn('[WARN] web/index.html 未命中 module script 特征串，dist/index.html 可能仍是 module script。');
   }
-
-  console.log('\n=== 构建完成（single）===');
-  console.log(`总大小: ${(finalAppJs.length / 1024 / 1024).toFixed(2)} MB`);
-  console.log(`\n双击 dist/index.html 即可在浏览器中打开（无 SAB 自动走 MsgState 回退）。`);
+  copyFileSync(STYLES, join(DIST, 'styles.css'));
+  console.log(`[5/5] dist/app.js: ${(bytes / 1024 / 1024).toFixed(2)} MB（single 全内嵌）`);
 }
 
 /** multi：多文件 ESM（HTTP 部署，fetch 正常，体积更小）。 */
-async function buildMulti(distDir, wasmPath) {
-  // 1. app / worker → ESM
-  console.log('[1/4] 打包 app / worker (ESM)...');
-  await build({
-    bundle: true,
-    target: 'es2022',
-    format: 'esm',
-    minify: true,
-    sourcemap: false,
-    legalComments: 'eof',
-    logLevel: 'info',
-    entryPoints: [join(root, 'src', 'app.ts')],
-    outfile: join(distDir, 'app.js'),
+async function buildMulti(wasmPath) {
+  console.log('[5/5] 打包 app / worker (ESM)...');
+  await bundleEsm({
+    build,
+    entry: join(ROOT, 'src', 'app.ts'),
+    outfile: join(DIST, 'app.js'),
+    options: { logLevel: 'info' },
   });
-  await build({
-    bundle: true,
-    target: 'es2022',
-    format: 'esm',
-    minify: true,
-    sourcemap: false,
-    legalComments: 'eof',
-    logLevel: 'info',
-    entryPoints: [join(root, 'src', 'worker', 'main.ts')],
-    outfile: join(distDir, 'worker.js'),
+  await bundleEsm({
+    build,
+    entry: join(ROOT, 'src', 'worker', 'main.ts'),
+    outfile: join(DIST, 'worker.js'),
+    options: { logLevel: 'info' },
   });
-  console.log(`      app.js / worker.js 已生成`);
 
-  // 2. 复制 WASM + 默认纹理包（外置，fetch 加载；game 的运行时统一 fetch './websurf_wasm_bg.wasm'）
-  console.log('[2/4] 复制 WASM / 默认纹理包...');
-  copyFileSync(wasmPath, join(distDir, 'websurf_wasm_bg.wasm'));
-  copyFileSync(join(root, '..', '..', 'src', 'materials', 'textures.mtz'), join(distDir, 'textures.mtz'));
-  console.log(`      websurf_wasm_bg.wasm / textures.mtz 已复制`);
+  // app.js 前缀注入 WASM URL（multi 模式下 fetch 相对 dist/ 的 wasm）
+  const appPath = join(DIST, 'app.js');
+  writeFileSync(
+    appPath,
+    `/* WebSurf multi-file build — auto-generated, do not edit */\n` +
+      `globalThis.__VBSP_WASM_URL__=${JSON.stringify('./' + WASM_FILE)};\n` +
+      readFileSync(appPath, 'utf8'),
+  );
 
-  // 3. index.html（module script 原样）+ 外置样式表 + 清理旧单文件
-  console.log('[3/4] 复制 index.html / styles.css...');
-  copyFileSync(join(root, 'web', 'index.html'), join(distDir, 'index.html'));
-  copyFileSync(join(root, 'web', 'styles.css'), join(distDir, 'styles.css'));
+  console.log('[5/5] 复制 WASM / 默认纹理包...');
+  copyFileSync(wasmPath, join(DIST, WASM_FILE));
+  copyFileSync(MTZ, join(DIST, 'textures.mtz'));
 
-  // 4. 总览
-  console.log('[4/4] 完成');
-  const total = ['app.js', 'worker.js', 'websurf_wasm_bg.wasm', 'textures.mtz', 'styles.css']
-    .reduce((acc, f) => acc + (existsSync(join(distDir, f)) ? readFileSync(join(distDir, f)).length : 0), 0);
-  console.log('\n=== 构建完成（multi）===');
-  console.log(`总大小: ${(total / 1024 / 1024).toFixed(2)} MB（6 个文件）`);
-  console.log(`\n部署到 HTTP（GitHub Pages 等）后访问 dist/index.html。`);
+  console.log('[5/5] 复制 index.html / styles.css（module script 原样）...');
+  copyFileSync(INDEX_HTML, join(DIST, 'index.html'));
+  copyFileSync(STYLES, join(DIST, 'styles.css'));
+}
+
+async function main() {
+  const wasmPath = requireInputs();
+
+  // 全量重建：先删后建（规范 §5.2 R-15，禁止增量残留）
+  await cleanDist(DIST);
+
+  if (multi) await buildMulti(wasmPath);
+  else await buildSingle(wasmPath);
+
+  // 许可证产物级副本：唯一源 src/phys/{LICENSE,NOTICE}（D-23 / E-08）
+  await copyLicensePair({
+    repoRoot: REPO,
+    distDir: DIST,
+    srcDir: 'src/phys',
+    targets: ['LICENSE.cs-movement', 'NOTICE.cs-movement'],
+  });
+
+  await cleanStale(DIST, multi ? KEEP_MULTI : KEEP_SINGLE);
+  console.log((await printTree(DIST)).join('\n'));
 }
 
 main().catch((err) => {
-  console.error('构建失败:', err);
+  console.error(`[ERROR] dist build failed: ${err?.message ?? err}`);
+  console.error('[HINT] See the message above, fix the input or toolchain, then retry.');
   process.exit(1);
 });

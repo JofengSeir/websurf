@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableExtensions
-title WebSurf-debug - Dev Server
+title WebSurf-viewer - Dev Server
 cd /d "%~dp0"
 
-set PORT=8080
+set PORT=8100
 if not "%~1"=="" set PORT=%~1
 
 REM ---- toolchain: python is required by the local server ----
@@ -20,19 +20,8 @@ REM ---- shared cargo/wasm-pack env (root .cargo-home / .wasm-pack-cache / .tmp)
 call "%~dp0..\..\src\scripts\cargo-env.cmd"
 
 REM ---- dev serve target: web/ (<wasm> copy produced by build:wasm) ----
-if exist "pkg\websurf_wasm_bg.wasm" goto :wasm_done
+if exist "pkg\websurf_viewer_wasm_bg.wasm" goto :wasm_done
 echo [1/3] Building WASM (release)...
-REM debug-specific ability (framework-launch-structure.md 8.2/8.3): ensure
-REM wasm-bindgen-cli as a [1/3] sub-step, reported with [INFO] lines only.
-echo [INFO] Ensuring wasm-bindgen-cli v0.2.128 is present (auto-install if missing)...
-call "%~dp0..\..\src\scripts\install-wasm-bindgen.cmd" nopause
-if errorlevel 1 (
-  echo [ERROR] wasm-bindgen-cli setup failed.
-  echo [HINT] Run the shared src\scripts\install-wasm-bindgen.cmd manually, then retry.
-  pause
-  exit /b 1
-)
-echo [INFO] wasm-bindgen-cli ready.
 call npm run build:wasm
 if errorlevel 1 (
   echo [ERROR] WASM build failed.
@@ -69,7 +58,7 @@ exit /b 0
 
 :start_server
 echo ============================================================
-echo   WebSurf-debug - Dev Server (web/)
+echo   WebSurf-viewer - Dev Server (web/)
 echo   Server:  http://localhost:%PORT%/
 echo   App:     http://localhost:%PORT%/web/index.html
 echo   Close this window to stop the server.

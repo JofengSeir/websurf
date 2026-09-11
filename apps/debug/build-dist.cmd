@@ -1,108 +1,104 @@
 @echo off
+chcp 65001 >nul
 setlocal EnableExtensions
-title WebSurf build dist
+title WebSurf-debug - Build dist
 cd /d "%~dp0"
 
-echo ============================================================
-echo   WebSurf - Build dist package
-echo ============================================================
-echo.
+set "DIST_MODE=single"
+if /i "%~1"=="multi" set "DIST_MODE=multi"
+if /i "%~1"=="" goto :mode_ok
+if /i "%~1"=="single" goto :mode_ok
+if /i "%~1"=="multi" goto :mode_ok
+echo [ERROR] Unsupported argument: %~1
+echo [HINT] Usage: build-dist.cmd [single^|multi]
+pause
+exit /b 1
+:mode_ok
 
-REM ------------------------------------------------------------
-REM Step 1: WASM build (release) - always rebuilt so dist embeds a release wasm.
-REM wasm32-unknown-unknown target needs no native GNU binutils (as.exe),
-REM so this also works on machines where the native exporter build fails.
-REM ------------------------------------------------------------
-set "WASM_FILE=%~dp0pkg\websurf_wasm_bg.wasm"
+echo [0/5] Checking toolchain...
+set "TOOLCHAIN_OK=1"
+where npm >nul 2>nul
+if errorlevel 1 (echo   [!] npm not found. Install Node.js and add it to PATH.& set "TOOLCHAIN_OK=0") else (echo   npm: OK)
+where wasm-pack >nul 2>nul
+if errorlevel 1 (echo   [!] wasm-pack not found. Install with: cargo install wasm-pack& set "TOOLCHAIN_OK=0") else (echo   wasm-pack: OK)
+where node >nul 2>nul
+if errorlevel 1 (echo   [!] node not found. Install Node.js and add it to PATH.& set "TOOLCHAIN_OK=0") else (echo   node: OK)
+if not "%TOOLCHAIN_OK%"=="1" (
+  echo [ERROR] Toolchain incomplete.
+  echo [HINT] Install Node.js ^(npm + node^) and wasm-pack, then retry.
+  pause
+  exit /b 1
+)
 
-echo [1/3] Building WASM (release)...
-REM Redirect env vars to the REPOSITORY ROOT (shared by all subprojects).
-REM Also detects prebuilt WASM_BINDGEN. See src/scripts/cargo-env.cmd.
 call "%~dp0..\..\src\scripts\cargo-env.cmd"
 
-set "SC_DIR=C:\Users\Jofen\.rustup\toolchains\stable-x86_64-pc-windows-gnu\lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained"
-if exist "%SC_DIR%" set "PATH=%SC_DIR%;%PATH%"
-
-echo [1/3] Ensuring wasm-bindgen-cli v0.2.128 is present (auto-install if missing)...
-call "%~dp0..\..\src\scripts\install-wasm-bindgen.cmd" nopause
-echo [1/3] wasm-bindgen-cli installer returned with code %errorlevel%.
-if errorlevel 1 (
-    echo [1/3] wasm-bindgen-cli setup failed.
-    goto :wasm_failed
-)
-echo [1/3] wasm-bindgen-cli ready. Building WASM...
-echo [1/3] using WASM_BINDGEN=%WASM_BINDGEN%
-echo [1/3] Next, wasm-pack will run in order: check target - compile Rust to WASM - install wasm-bindgen - wasm-opt optimize. The wasm-opt step usually prints nothing; that is normal. Keep the window open until you see "Done in", which means this step finished. Total time depends on your machine; as long as there is no red error, it is still progressing.
-call npm run build:wasm
-if errorlevel 1 goto :wasm_failed
-
-if exist "%WASM_FILE%" (
-  echo [1/3] WASM ready ^(release^).
-) else (
-  echo ERROR: %WASM_FILE% not found after build.
-  goto :wasm_failed
-)
-
-REM WASM API contract check: every TS import must exist in the wasm-pack exports.
-call node "%~dp0scripts\check-wasm-api.mjs"
-if errorlevel 1 goto :wasm_api_failed
-
-REM ------------------------------------------------------------
-REM Step 2: TypeScript typecheck + build (worker.js + app.js)
-REM ------------------------------------------------------------
-echo [2/3] Ensuring Node build dependencies are installed (auto npm install if missing)...
+echo [1/5] Ensuring Node build dependencies (auto npm install if missing)...
 call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
-if errorlevel 1 goto :ts_failed
-echo [2/3] Building TypeScript...
-call npm run build:ts
-if errorlevel 1 goto :ts_failed
-
-REM ------------------------------------------------------------
-REM Step 3: build dist package (embedded WASM + worker Blob URL)
-REM ------------------------------------------------------------
-echo [3/3] Building dist package...
-call npm run build:dist
-if errorlevel 1 goto :dist_failed
-
-REM ------------------------------------------------------------
-REM Done - open the output directory
-REM ------------------------------------------------------------
-echo.
-echo Build complete. Output: dist\
-if exist "%~dp0dist\index.html" (
-    echo dist\index.html ready - double-click to run in browser.
-    start "" explorer "%~dp0dist"
-) else (
-    echo WARNING: dist\index.html not found. Check build output above.
+if errorlevel 1 (
+  echo [ERROR] npm install failed.
+  echo [HINT] Check network connectivity and package-lock.json, then retry.
+  pause
+  exit /b 1
 )
-echo.
-pause
+echo [1/5] Node dependencies ready.
+
+if exist "pkg\websurf_wasm_bg.wasm" goto :wasm_done
+echo [2/5] Building WASM (release)...
+REM debug-specific ability (framework-launch-structure.md 8.2/8.3): ensure
+REM wasm-bindgen-cli as a [2/5] sub-step, reported with [INFO] lines only.
+echo [INFO] Ensuring wasm-bindgen-cli v0.2.128 is present (auto-install if missing)...
+call "%~dp0..\..\src\scripts\install-wasm-bindgen.cmd" nopause
+if errorlevel 1 (
+  echo [ERROR] wasm-bindgen-cli setup failed.
+  echo [HINT] Run the shared src\scripts\install-wasm-bindgen.cmd manually, then retry.
+  pause
+  exit /b 1
+)
+echo [INFO] wasm-bindgen-cli ready.
+call npm run build:wasm
+if errorlevel 1 (
+  echo [ERROR] WASM build failed.
+  echo [HINT] Delete crates\wasm\target\wasm32-unknown-unknown and retry (antivirus locks are the usual cause).
+  pause
+  exit /b 1
+)
+:wasm_done
+echo [2/5] WASM ready (release).
+
+echo [3/5] Checking WASM API contract...
+call npm run check:api
+if errorlevel 1 (
+  echo [ERROR] WASM API contract check failed.
+  echo [HINT] Run npm run check:api, fix src/wasm.d.ts vs crates/wasm, then retry.
+  pause
+  exit /b 1
+)
+
+echo [4/5] Building TypeScript (worker.js + app.js)...
+call npm run build:ts
+if errorlevel 1 (
+  echo [ERROR] TypeScript build failed.
+  echo [HINT] Fix the tsc/esbuild errors printed above, then retry.
+  pause
+  exit /b 1
+)
+
+echo [5/5] Building dist package...
+set "DIST_ARG="
+if /i "%DIST_MODE%"=="multi" set "DIST_ARG=--multi"
+call node "%~dp0scripts\build-dist.mjs" %DIST_ARG%
+if errorlevel 1 (
+  echo [ERROR] dist build failed.
+  echo [HINT] See the build-dist.mjs errors printed above, then retry.
+  pause
+  exit /b 1
+)
+
+echo ============================================================
+echo   WebSurf-debug - Build dist package: complete
+echo   Output:  dist/ (mode: %DIST_MODE%)
+echo   Run:     play.cmd
+if /i "%DIST_MODE%"=="multi" echo   Note:    multi mode needs the local HTTP server (play.cmd).
+if /i "%DIST_MODE%"=="single" echo   Note:    file:// double-click works (WASM embedded).
+echo ============================================================
 exit /b 0
-
-:wasm_failed
-echo.
-echo WASM build failed.
-echo If wasm-bindgen-cli install fails, run: ..\..\src\scripts\install-wasm-bindgen.cmd
-echo.
-pause
-exit /b 1
-
-:wasm_api_failed
-echo.
-echo WASM API contract check FAILED - pkg exports do not match TS imports.
-echo   Inspect: rebuild pkg (wasm-pack) or check src/wasm.d.ts vs crates/wasm.
-echo.
-pause
-exit /b 1
-
-:ts_failed
-echo.
-echo TS build failed.
-pause
-exit /b 1
-
-:dist_failed
-echo.
-echo dist build failed.
-pause
-exit /b 1
