@@ -136,6 +136,19 @@ jobs:
         # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常
         run: node scripts/build-dist.mjs --multi
 
+      # 物理冒烟门：game 的 Rust 物理（PhysWorld）基本行为回归。脚本直接读
+      # apps/game/pkg/websurf_wasm_bg.wasm（scripts/phys-smoke.mjs:7,13），
+      # 上面的 build:wasm 已生成 pkg/，无需浏览器。
+      - name: game 物理冒烟（PhysWorld 基本行为）
+        working-directory: apps/game
+        run: npm run test:phys
+
+      # 种子面冒烟门：确定性种子面契约（scripts/phys-seed-smoke.mjs:18,24，
+      # 与 test:phys 同源读 pkg/）。两条同为 CONTRIBUTING §4 登记的门禁。
+      - name: game 种子面冒烟（确定性种子契约）
+        working-directory: apps/game
+        run: npm run test:seed-smoke
+
       # ── viewer/（WebSurf-viewer，BSP 游览 + 录像回放，single dist）──────
       - name: Install viewer dependencies
         working-directory: apps/viewer
