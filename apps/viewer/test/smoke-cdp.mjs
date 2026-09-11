@@ -29,7 +29,7 @@ const PORT = Number(process.env.SMOKE_PORT ?? 9333);
 const URL_ = process.env.SMOKE_URL ?? 'http://127.0.0.1:8080/web/index.html';
 // 真实录像：test/maps/surf_null_4.replay（test/maps/；深链跑不需要文件选择）
 const LOCAL_REPLAY =
-  process.env.SMOKE_FILE_REPLAY ?? join(VIEWER_ROOT, '..', 'test', 'maps', 'surf_null_4.replay');
+  process.env.SMOKE_FILE_REPLAY ?? join(VIEWER_ROOT, '..', '..', 'test', 'maps', 'surf_null_4.replay');
 
 async function loadWs() {
   try {
@@ -772,7 +772,7 @@ try {
         },
       ];
       for (const bspCase of bspCases) {
-        const bspPath = join(VIEWER_ROOT, '..', 'test', 'maps', bspCase.file);
+        const bspPath = join(VIEWER_ROOT, '..', '..', 'test', 'maps', bspCase.file);
         if (!existsSync(bspPath)) {
           console.log(`  skip  ${bspCase.file} 不存在（test/maps/），跳过本图断言`);
           continue;

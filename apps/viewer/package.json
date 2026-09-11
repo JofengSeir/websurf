@@ -14,7 +14,7 @@
     "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
     "build": "npm run build:wasm && npm run build:ts",
     "build:dist": "node scripts/build-dist.mjs",
-    "dev": "python ../src/serve.py 8080 ."
+    "dev": "python ../../src/serve.py 8080 ."
   },
   "devDependencies": {
     "@types/three": "^0.165.0",

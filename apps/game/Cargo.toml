@@ -11,7 +11,7 @@ resolver = "2"
 # （原实现奇数位生成退化三角形 + 末尾索引越界 → 模型边角出现杂散"四角面"）。
 # 详见 src/vendor/vmdl/Cargo.toml 与 src/vendor/vmdl/src/vtx/mod.rs::Strip::indices。
 [patch.crates-io]
-vmdl = { path = "../src/vendor/vmdl" }
+vmdl = { path = "../../src/vendor/vmdl" }
 
 # ============================================================
 # 性能优化配置（WASM 构建需启用 LTO + 优化）

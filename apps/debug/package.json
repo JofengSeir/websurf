@@ -12,15 +12,15 @@
     "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
     "build:dist": "node scripts/build-dist.mjs",
     "build": "npm run build:wasm && npm run build:ts",
-    "dev": "python ../src/serve.py 8080 .",
+    "dev": "python ../../src/serve.py 8080 .",
     "check:api": "node scripts/check-wasm-api.mjs",
     "count:glb-meshes": "node scripts/glb-mesh-count.mjs",
     "bench:frames": "node scripts/frame-bench.mjs",
     "test:optimize-scene": "esbuild src/renderer/renderer-main.ts --bundle --format=esm --platform=node --outfile=.tmp/opt-verify/renderer-main.bundle.mjs && node scripts/optimize-scene-verify.mjs",
     "plot:path": "node scripts/plot-path.mjs",
     "test:path-acceptance": "node scripts/path-acceptance.mjs fixtures/path/tick-on-render-prefix.json --assert --expect fail",
-    "test:auth-clock": "esbuild ../src/ts-shared/auth/auth-loop.ts --bundle --format=esm --platform=node --outfile=.tmp/auth-clock/auth-loop.bundle.mjs && node scripts/auth-clock-verify.mjs",
-    "test:jump-apex": "esbuild ../src/ts-shared/phys/authority-calibrator.ts --bundle --format=esm --platform=node --outfile=.tmp/jump-apex/authority-calibrator.bundle.mjs && node scripts/jump-apex-verify.mjs"
+    "test:auth-clock": "esbuild ../../src/ts-shared/auth/auth-loop.ts --bundle --format=esm --platform=node --outfile=.tmp/auth-clock/auth-loop.bundle.mjs && node scripts/auth-clock-verify.mjs",
+    "test:jump-apex": "esbuild ../../src/ts-shared/phys/authority-calibrator.ts --bundle --format=esm --platform=node --outfile=.tmp/jump-apex/authority-calibrator.bundle.mjs && node scripts/jump-apex-verify.mjs"
   },
   "dependencies": {
     "three": "^0.165.0"

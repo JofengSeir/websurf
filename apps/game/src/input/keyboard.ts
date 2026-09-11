@@ -8,7 +8,7 @@
  */
 
 import type { KeyState } from '../worker/worker-types.js';
-import { keysToMask } from '../../../src/ts-shared/auth/shared-state.js';
+import { keysToMask } from '../../../../src/ts-shared/auth/shared-state.js';
 import type { BindableAction } from './keymap.js';
 
 /** 从 action→code[] 键位表构建 code→action 反查表。 */

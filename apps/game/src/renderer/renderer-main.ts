@@ -17,8 +17,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
-import type { ShmState, MsgState } from '../../../src/ts-shared/auth/shared-state.js';
-import { AuthorityCalibrator } from '../../../src/ts-shared/phys/authority-calibrator.js';
+import type { ShmState, MsgState } from '../../../../src/ts-shared/auth/shared-state.js';
+import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-calibrator.js';
 import { PvsManager } from '../world/pvs-manager.js';
 
 /** FOV 默认值（73.6；面板 hud.fov 可调，60-110）。 */

@@ -84,12 +84,12 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 
 ## 文档（`documents/game/`）
 
-- [overview.md](../documents/game/overview.md) — 总览与工程结构（v7 架构总图）
-- [sequences.md](../documents/game/sequences.md) — 时序（启动/地图加载/双线程帧循环/校准与反向同步/SAB 协议）
-- [implementation/panel-and-input.md](../documents/game/implementation/panel-and-input.md) — 输入采集链、键位录制、PointerLock、面板七模块
-- [implementation/gameplay.md](../documents/game/implementation/gameplay.md) — 存点/出生点/渲染体验/死亡阈值/PVS 现状
-- [differences.md](../documents/game/differences.md) — 与 debug/viewer/test 的架构取舍与共享层收敛
-- [archive/](../documents/game/archive/) — 旧版文档（2026-09 重编纂归档，仅供历史对照）
+- [overview.md](../../documents/game/overview.md) — 总览与工程结构（v7 架构总图）
+- [sequences.md](../../documents/game/sequences.md) — 时序（启动/地图加载/双线程帧循环/校准与反向同步/SAB 协议）
+- [implementation/panel-and-input.md](../../documents/game/implementation/panel-and-input.md) — 输入采集链、键位录制、PointerLock、面板七模块
+- [implementation/gameplay.md](../../documents/game/implementation/gameplay.md) — 存点/出生点/渲染体验/死亡阈值/PVS 现状
+- [differences.md](../../documents/game/differences.md) — 与 debug/viewer/test 的架构取舍与共享层收敛
+- [archive/](../../documents/game/archive/) — 旧版文档（2026-09 重编纂归档，仅供历史对照）
 
-> 公共架构见根 [../documents/architecture.md](../documents/architecture.md)；时序见 [sequences.md](../documents/game/sequences.md)、[../documents/debug/sequences.md](../documents/debug/sequences.md)；
+> 公共架构见根 [../../documents/architecture.md](../../documents/architecture.md)；时序见 [sequences.md](../../documents/game/sequences.md)、[../../documents/debug/sequences.md](../../documents/debug/sequences.md)；
 > 验证工程（双模物理 + 帧信号渲染时序）见 [../test/dual-mode-harness/README.md](../test/dual-mode-harness/README.md) + [../test/dual-mode-harness/CONCLUSION.md](../test/dual-mode-harness/CONCLUSION.md)。

@@ -15,7 +15,7 @@
  */
 
 import type { KeyState } from '../worker/worker-types.js';
-import { keysToMask } from '../../../src/ts-shared/auth/shared-state.js';
+import { keysToMask } from '../../../../src/ts-shared/auth/shared-state.js';
 
 /** KeyboardEvent.code → KeyState 字段映射。 */
 const KEY_MAP: Record<string, keyof KeyState> = {

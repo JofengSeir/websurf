@@ -42,8 +42,8 @@ test/maps/
 # 例外：CI 验收夹具（debug/scripts/path-acceptance.mjs 的输入）必须入库——
 # 它是"修复前最差真实录制"，用于给 tick→render 垂距验收门留一条可复现的失败基线。
 # 放在地图区块之后：gitignore 后出现的规则覆盖先出现的（同上文排序约定）。
-!debug/fixtures/path/
-!debug/fixtures/path/*.json
+!apps/debug/fixtures/path/
+!apps/debug/fixtures/path/*.json
 
 # ── 临时 / 验证产物（任意层级）─────────────
 # **/temp/：各工程 temp/ 一次性试验产物（如 game/temp 的 wasm 备份/bench json）；

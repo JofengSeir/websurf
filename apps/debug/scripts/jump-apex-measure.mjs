@@ -11,7 +11,7 @@
  *   shared-state.ts KEY_MASK.jump）按住 → 页内 rAF 采样（渲染物理线 state + 权威帧
  *   只读 SAB）→ 松开 → 落地 → 导出 JSON。
  *
- * 前置：静态服务已跑（`cd debug && python ../src/serve.py 8080 .`）。
+ * 前置：静态服务已跑（`cd debug && python ../../src/serve.py 8080 .`）。
  * 用法：node scripts/jump-apex-measure.mjs <label> [url] [mapPath] [seconds]
  * 输出：debug/.tmp/jump-apex/<label>.json
  */
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const debugDir = join(__dirname, '..');
-const repoRoot = join(debugDir, '..');
+const repoRoot = join(debugDir, '..', '..');
 
 const LABEL = process.argv[2] ?? 'run';
 const URL_ = process.argv[3] || 'http://localhost:8080/web/index.html';

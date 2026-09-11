@@ -19,9 +19,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # 共享物理系统（仓库根 src/，websurf-phys）
-websurf-phys = { path = "../../../src" }
+websurf-phys = { path = "../../../../src" }
 # 共享解析层（仓库根 src/wasm-core/，websurf-wasm-core）
-websurf-wasm-core = { path = "../../../src/wasm-core" }
+websurf-wasm-core = { path = "../../../../src/wasm-core" }
 
 # WASM 核心绑定
 wasm-bindgen = "0.2"

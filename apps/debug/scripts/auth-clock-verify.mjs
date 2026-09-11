@@ -119,7 +119,7 @@ check('B 明显优于 C（修复有效）', neo > old * 1.15,
     const wdBundlePath = resolve(HERE, '..', '.tmp', 'worker-dispatch', 'worker-dispatch.bundle.mjs');
     mkdirSync(resolve(HERE, '..', '.tmp', 'worker-dispatch'), { recursive: true });
     await build({
-      entryPoints: [resolve(HERE, '..', '..', 'src', 'ts-shared', 'auth', 'worker-dispatch.ts')],
+      entryPoints: [resolve(HERE, '..', '..', '..', 'src', 'ts-shared', 'auth', 'worker-dispatch.ts')],
       bundle: true,
       format: 'esm',
       platform: 'node',

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEBUG = join(HERE, '..');
-const REPO = join(DEBUG, '..');
+const REPO = join(DEBUG, '..', '..');
 const URL_ = process.argv[2] ?? 'http://localhost:8080/web/index.html';
 const MAP = join(REPO, 'test', 'maps', 'surf_666.bsp');
 const CANDIDATES = [

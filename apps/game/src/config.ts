@@ -2,7 +2,7 @@
  * 运行时配置（最小化版）— 物理参数经 config 消息 → Worker-A → wasm set_params/set_hull。
  */
 
-import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../src/ts-shared/phys/params.js';
+import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../../src/ts-shared/phys/params.js';
 
 export interface PhysicsConfig {
   /** 物理模式：physics（权威物理）/ noclip（自由视角，禁物理/传送）。 */

@@ -20,7 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const debugDir = join(__dirname, '..');
-const repoRoot = join(debugDir, '..');
+const repoRoot = join(debugDir, '..', '..');
 
 const mapPath = process.argv[2] ?? join(repoRoot, 'test', 'maps', 'surf_666.bsp');
 const pkgJs = join(debugDir, 'pkg', 'websurf_wasm.js');

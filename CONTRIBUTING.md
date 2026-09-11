@@ -18,7 +18,7 @@
    `src/` 共享层、`test/` 测试合集（dual-mode-harness）；
    共享层改动一处多端生效，勿在工程内复制共享实现）
 3. 在对应工程目录运行 `npm run build` 确保构建通过
-   （如 `cd debug && npm run build`；查看器为 `cd viewer && npm run build`；
+   （如 `cd apps/debug && npm run build`；查看器为 `cd apps/viewer && npm run build`；
    验证工程为 `cd test/dual-mode-harness && npm run build`）
 4. 涉及物理/时序改动时，运行对应验证脚本（如 `test/dual-mode-harness/` 的
    `node scripts/phys-smoke.mjs`、`game/` 的 `npm run test:phys`）
@@ -27,7 +27,7 @@
 ## 代码规范
 
 - TypeScript：严格类型，在对应工程目录通过 `npm run typecheck`
-  （如 `cd game && npm run typecheck`）
+  （如 `cd apps/game && npm run typecheck`）
 - Rust：使用 `cargo fmt` 格式化；共享层 `src/` 内改动需在依赖它的各工程
   （debug / game / viewer / test 均以 path 依赖共享层）均能编译，
   验证一端即可覆盖编译，但契约校验
