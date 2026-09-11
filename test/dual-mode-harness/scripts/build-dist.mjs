@@ -67,7 +67,7 @@ async function main() {
     .reduce((acc, f) => acc + (existsSync(join(distDir, f)) ? readFileSync(join(distDir, f)).length : 0), 0);
   console.log('\n=== 构建完成（multi）===');
   console.log(`总大小: ${(total / 1024 / 1024).toFixed(2)} MB（5 个文件）`);
-  console.log(`\n用 HTTP 服务 dist/（如 python ../../src/serve.py 8080 dist）后访问 dist/index.html。`);
+  console.log(`\n用 HTTP 服务 dist/（如 python ../../src/serve.py 8110 dist）后访问 dist/index.html。`);
 }
 
 main().catch((err) => {
