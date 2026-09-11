@@ -14,6 +14,7 @@
     "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
     "build": "npm run build:wasm && npm run build:ts",
     "build:dist": "node scripts/build-dist.mjs",
+    "check:api": "node scripts/check-wasm-api.mjs",
     "dev": "python ../../src/serve.py 8080 ."
   },
   "devDependencies": {

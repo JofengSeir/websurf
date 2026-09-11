@@ -32,12 +32,9 @@ if exist "pkg\websurf_viewer_wasm.js" echo [1/3] WASM ready.
 REM ============================================================
 REM Step 2: Node deps + build dist (esbuild bundle with embedded WASM)
 REM ============================================================
-if exist "node_modules\esbuild" goto :deps_done
-
-echo [2/3] Installing Node dependencies ^(npm install, only when missing^)...
-call npm install
+echo [2/3] Ensuring Node dependencies ^(auto npm install if missing^)...
+call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
 if errorlevel 1 goto :deps_failed
-:deps_done
 
 echo [2/3] Building dist ^(source changes take effect every run^)...
 call npm run build:dist
@@ -69,13 +66,6 @@ exit /b 0
 echo.
 echo [ERROR] WASM build failed - Rust toolchain required ^(rustup + wasm-pack^).
 echo [HINT] Preview only? If dist\ exists, just double-click dist\play.cmd.
-echo.
-pause
-exit /b 1
-
-:deps_failed
-echo.
-echo [ERROR] npm install failed - check Node.js install ^(https://nodejs.org/^) and network.
 echo.
 pause
 exit /b 1

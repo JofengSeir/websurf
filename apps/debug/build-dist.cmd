@@ -24,7 +24,7 @@ set "SC_DIR=C:\Users\Jofen\.rustup\toolchains\stable-x86_64-pc-windows-gnu\lib\r
 if exist "%SC_DIR%" set "PATH=%SC_DIR%;%PATH%"
 
 echo [1/3] Ensuring wasm-bindgen-cli v0.2.128 is present (auto-install if missing)...
-call "%~dp0scripts\install-wasm-bindgen.cmd" nopause
+call "%~dp0..\..\src\scripts\install-wasm-bindgen.cmd" nopause
 echo [1/3] wasm-bindgen-cli installer returned with code %errorlevel%.
 if errorlevel 1 (
     echo [1/3] wasm-bindgen-cli setup failed.
@@ -51,7 +51,7 @@ REM ------------------------------------------------------------
 REM Step 2: TypeScript typecheck + build (worker.js + app.js)
 REM ------------------------------------------------------------
 echo [2/3] Ensuring Node build dependencies are installed (auto npm install if missing)...
-call "%~dp0scripts\ensure-node-deps.cmd" nopause
+call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
 if errorlevel 1 goto :ts_failed
 echo [2/3] Building TypeScript...
 call npm run build:ts
@@ -82,7 +82,7 @@ exit /b 0
 :wasm_failed
 echo.
 echo WASM build failed.
-echo If wasm-bindgen-cli install fails, run: scripts\install-wasm-bindgen.cmd
+echo If wasm-bindgen-cli install fails, run: ..\..\src\scripts\install-wasm-bindgen.cmd
 echo.
 pause
 exit /b 1

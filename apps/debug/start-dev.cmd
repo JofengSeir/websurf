@@ -23,7 +23,7 @@ REM GNU toolchain self-contained bin (dlltool.exe etc.)
 set "PATH=C:\Users\Jofen\.rustup\toolchains\stable-x86_64-pc-windows-gnu\lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained;%PATH%"
 
 echo [1/3] Ensuring wasm-bindgen-cli v0.2.128 is present (auto-install if missing)...
-call "%~dp0scripts\install-wasm-bindgen.cmd" nopause
+call "%~dp0..\..\src\scripts\install-wasm-bindgen.cmd" nopause
 if errorlevel 1 goto :wasm_failed
 echo [1/3] wasm-bindgen-cli ready. Building WASM...
 echo [1/3] using WASM_BINDGEN=%WASM_BINDGEN%
@@ -38,7 +38,7 @@ REM ============================================================
 REM Step 2: TypeScript build (worker.js + app.js)
 REM ============================================================
 echo [2/3] Ensuring Node build dependencies are installed (auto npm install if missing)...
-call "%~dp0scripts\ensure-node-deps.cmd" nopause
+call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
 if errorlevel 1 goto :ts_failed
 echo [2/3] Building TypeScript...
 call npm run build:ts
@@ -76,7 +76,7 @@ exit /b 0
 :wasm_failed
 echo.
 echo WASM build failed.
-echo If wasm-bindgen-cli install fails, run: scripts\install-wasm-bindgen.cmd
+echo If wasm-bindgen-cli install fails, run: ..\..\src\scripts\install-wasm-bindgen.cmd
 echo.
 pause
 exit /b 1
