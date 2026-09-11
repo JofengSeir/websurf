@@ -1,40 +1,39 @@
 # 贡献指南
 
-欢迎任何形式的贡献！请遵循以下流程。
+欢迎任何形式的贡献：报告问题、改进文档、修复 bug、新增功能均可。
 
-## 报告问题
+## 1. 报告问题
 
-- 使用 Issue 模板提交（Bug 报告 / 功能请求 / 其他），模板中注明所属工程
-  （`debug/` / `game/` / `viewer/` / `test/`（`test/dual-mode-harness/`）/
-  共享层 `src/`）与运行模式（SAB 共享内存 /
-  消息回退）等环境信息
-- 提供复现步骤和环境信息（浏览器及版本、操作系统、地图文件）
+使用 Issue 模板（Bug 报告 / 功能请求 / 其他）提交，注明**所属工程**（`apps/debug` / `apps/game` / `apps/viewer` / `test/dual-mode-harness` / 共享层 `src/`）与**运行模式**（SAB 共享内存（HTTP + COOP/COEP）/ 消息回退），并提供复现步骤与环境信息（浏览器版本、操作系统、地图文件，必要时附 Node / Rust 版本）。
 
-## 提交代码
+## 2. 提交代码
 
-1. Fork 仓库并创建功能分支
-2. 修改代码，保持与现有风格一致（仓库为三应用工程 + 共享层 + 测试合集布局：
-   `debug/` 主工程、`game/` WebSurf-game、`viewer/` BSP 自由视角查看器、
-   `src/` 共享层、`test/` 测试合集（dual-mode-harness）；
-   共享层改动一处多端生效，勿在工程内复制共享实现）
-3. 在对应工程目录运行 `npm run build` 确保构建通过
-   （如 `cd apps/debug && npm run build`；查看器为 `cd apps/viewer && npm run build`；
-   验证工程为 `cd test/dual-mode-harness && npm run build`）
-4. 涉及物理/时序改动时，运行对应验证脚本（如 `test/dual-mode-harness/` 的
-   `node scripts/phys-smoke.mjs`、`game/` 的 `npm run test:phys`）
-5. 提交 Pull Request，简要描述改动内容；使用 PR 模板勾选测试项
+1. Fork 仓库并创建功能分支。
+2. 修改代码并保持与现有风格一致。⚠️ 共享层（`src/`）改动一处多端生效，请勿在工程内复制共享实现，公共逻辑一律上提。
+3. 在对应工程目录完成构建（四个工程命令一致）：
 
-## 代码规范
+   ```bash
+   cd apps/debug        # 或 apps/game、apps/viewer、test/dual-mode-harness
+   npm install
+   npm run build        # build:wasm + typecheck + esbuild 打包
+   ```
+4. 涉及物理、时序或渲染回归的改动，运行对应验证脚本（见 §4）。
+5. 提交 Pull Request，简要说明改动与验证方式，并按 PR 模板勾选测试项。
 
-- TypeScript：严格类型，在对应工程目录通过 `npm run typecheck`
-  （如 `cd apps/game && npm run typecheck`）
-- Rust：使用 `cargo fmt` 格式化；共享层 `src/` 内改动需在依赖它的各工程
-  （debug / game / viewer / test 均以 path 依赖共享层）均能编译，
-  验证一端即可覆盖编译，但契约校验
-  `node scripts/check-wasm-api.mjs` 两端都要通过
-- 构建缓存：四个模块 workspace 各自保留 `target/`（位于各工程目录内），根 workspace（共享层两 crate）的 `target/` 位于仓库根；不再跨 workspace 复用编译缓存。五份 Cargo.lock（四个模块工程 + 根 workspace）的 wasm-bindgen 需保持同版本（改依赖版本时五处
-  `cargo update -p js-sys -p wasm-bindgen -p web-sys` 锁步执行，并与 CI 的
-  wasm-bindgen-cli 钉版对齐）
-- 注释与文档使用中文；新增导出 API 需同步更新对应工程的 `src/wasm.d.ts`
-  （debug/、game/、viewer/、test/dual-mode-harness/
-  四处各自一份）与 `documents/` 相关文档
+## 3. 代码规范
+
+- **注释与文档使用中文**；新增导出 API 需同步更新对应工程的 `src/wasm.d.ts`（四处各一份）与 `documents/` 相关文档。
+- **TypeScript** 严格类型，`npm run typecheck`；**Rust** 使用 `cargo fmt`。
+- **构建与依赖**：模块 workspace 划分、`target/` 布局与五份 `Cargo.lock` 的 wasm-bindgen 锁步（当前 `0.2.128`）见 [README.md](README.md) 第 3 节——改依赖版本时需五处同步并核对 CI 的 wasm-bindgen-cli。
+- **提交信息**：采用 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/)，格式 `type(scope): 摘要`；type 如 `feat` / `fix` / `refactor` / `docs` / `test` / `chore`，scope 为变更所在工程或模块（`repo`、`ci`、`debug`、`game`、`viewer`、`phys`、`wasm-core` 等）。
+
+## 4. 验证脚本
+
+| 工程 | 命令 |
+|---|---|
+| apps/debug | `check:api`、`test:optimize-scene`、`test:auth-clock`、`test:path-acceptance`、`test:jump-apex` |
+| apps/game | `check:api`、`test:phys` |
+| apps/viewer | `test:replay`、`test:smoke` |
+| test/dual-mode-harness | `check:api`、`test:three-mode` |
+
+以上脚本同为 CI 门禁的组成部分，详见 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) 与 [README.md](README.md) 第 6 节。

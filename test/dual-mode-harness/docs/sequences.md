@@ -73,7 +73,7 @@ frame(): requestAnimationFrame(frame)
 > **⚠ 2026-09-11 迁移**：本节记录的双模循环（1ms 真理源 + 64t tickPhys 校准）计算本体已抽到共享层
 > `仓库根 src/ts-shared/decoupled/decoupled-loop.ts`；`src/worker-a.ts` 现为三模式装配层，本节
 > `src/worker-a.ts:NNN` 行号**已漂移**，语义以 `decoupled-loop.ts` 为准。三模式热切握手（`set-mode`→`mode-ack`）
-> 的时序见 [../overview.md](../overview.md) §3 阶段0 与 [../README.md](../README.md)。
+> 的时序见 [./overview.md](./overview.md) §3 阶段0 与 [../README.md](../README.md)。
 
 **每轮结构**（现址 `仓库根 src/ts-shared/decoupled/decoupled-loop.ts`，逐字语义）：
 

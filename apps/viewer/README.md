@@ -14,7 +14,7 @@
 | `src/ui/` | 地图页（信息 · 出生点）+ HUD/引导层/帮助浮层 + 录像信息条（`.replay` 头部元信息） |
 | `src/replay/` | 录像子系统：`.replay` 原生解析（含坐标定标映射）/ 导入 / 播放 / 可视化 / 时间轴 / 轨迹列表 / 坐标映射切换 / 调整工具 |
 | `../../documents/viewer/implementation/shavit-replay-format.md` | Shavit `.replay` 二进制格式规格（replay-file.inc 对齐 + 真实文件逐字节验证） |
-| `../../documents/viewer/replay-rule-ai.md` | 历史注记：`.js` 规则脚本通道已于 2026-09 移除（原稿存 `../../documents/viewer/archive/`） |
+| `../../documents/viewer/replay-rule-ai.md` | 历史注记：`.js` 规则脚本通道已于 2026-09 移除（原稿已移出版本库，见 git 历史） |
 | `test/replay-selftest.ts` | 录像管线 Node 自检（`npm run test:replay`） |
 
 共享 `src/wasm-core/`（BSP 解析/GLB 导出），vmdl patch 同 debug/game/test。
@@ -53,7 +53,7 @@
 |---|---|---|
 | `npm run build:dist` | `dist/`（唯一产物） | **本地双击 `dist/index.html` 直接打开（file://）**：IIFE 打包 + 内嵌 WASM(base64) + 录像 Worker（Blob URL）；同一份产物也可 HTTP 服务 / 部署 |
 
-- **双击启动**：Windows 双击 `viewer/play.cmd`（或构建后 `dist/play.cmd`）；macOS/Linux
+- **双击启动**：Windows 双击 `apps/viewer/play.cmd`（或构建后 `dist/play.cmd`）；macOS/Linux
   python 缺失 → 中文提示 + 自动改用 `npx serve` 备选）。
 - **纯双击（file://）**：直接双击 `dist/index.html` 即可；WASM/Worker 已内嵌，地图/录像用
   页面文件选择或拖入。

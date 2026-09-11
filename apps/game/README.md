@@ -1,6 +1,6 @@
 # WebSurf-game（最小化实现）
 
-> 最后核对：2026-08-13。以实际代码为准（`game/src/` + 共享 `src/ts-shared/`）。
+> 最后核对：2026-08-13。以实际代码为准（`apps/game/src/` + 共享 `src/ts-shared/`）。
 
 WebSurf 的激进最小化实现（独立工程 `game/`）。物理栈整体下沉 Rust WASM，
 v7 定案：**主线程唯一物理渲染线 + 单 Worker 权威帧计算器**。
@@ -55,7 +55,7 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 ## 运行
 
 - **推荐**：双击 `play.cmd`（本地 HTTP + COOP/COEP，SAB 高性能）
-- **或**：`python ..\src\serve.py 8080 .` 后访问 `http://localhost:8080/dist/index.html`（dev 页面 `web/index.html`）
+- **或**：`python ..\..\src\serve.py 8080 .` 后访问 `http://localhost:8080/dist/index.html`（dev 页面 `web/index.html`）
 - `file://` 双击 single 构建也可玩（MsgState 降级；SAB 高性能需 HTTP）
 
 > **注意（如实记录）**：仓库内 `web/*.js` 与 `dist/*` 为 2026-08-07 旧架构（v3：load-bsp
@@ -89,7 +89,7 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 - [implementation/panel-and-input.md](../../documents/game/implementation/panel-and-input.md) — 输入采集链、键位录制、PointerLock、面板七模块
 - [implementation/gameplay.md](../../documents/game/implementation/gameplay.md) — 存点/出生点/渲染体验/死亡阈值/PVS 现状
 - [differences.md](../../documents/game/differences.md) — 与 debug/viewer/test 的架构取舍与共享层收敛
-- [archive/](../../documents/game/archive/) — 旧版文档（2026-09 重编纂归档，仅供历史对照）
+- 旧版文档与过程材料已移出版本库（见 git 历史），不再作为事实来源
 
 > 公共架构见根 [../../documents/architecture.md](../../documents/architecture.md)；时序见 [sequences.md](../../documents/game/sequences.md)、[../../documents/debug/sequences.md](../../documents/debug/sequences.md)；
-> 验证工程（双模物理 + 帧信号渲染时序）见 [../test/dual-mode-harness/README.md](../test/dual-mode-harness/README.md) + [../test/dual-mode-harness/CONCLUSION.md](../test/dual-mode-harness/CONCLUSION.md)。
+> 验证工程（双模物理 + 帧信号渲染时序）见 [../../test/dual-mode-harness/README.md](../../test/dual-mode-harness/README.md) + [../../test/dual-mode-harness/CONCLUSION.md](../../test/dual-mode-harness/CONCLUSION.md)。

@@ -1,234 +1,97 @@
 # Changelog
 
-本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范。
+本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)，日期格式为 `YYYY-MM-DD`。条目中的短哈希为对应提交，路径以当前仓库结构（三应用工程位于 `apps/`）为准。
 
 ## [0.2.0] - 未发布
 
 ### 新增
 
-- **viewer 最小 BSP 自由视角查看器（349ee26，2026-08-19）**：新增第四应用工程
-  `viewer/`——最小 BSP 自由视角查看器（WASM 解析 + Three.js 渲染，无玩法系统），
-  位姿三通道：URL 参数 / `location.hash` / `window.viewer` 编程接口（后于 2026-09-06 核心化简化中移除）；自带
-  README 与 `docs/overview.md`；path 依赖共享层 `../src`、dev 复用
-  `../src/serve.py`；未接入 Pages CI（仅 debug/game 部署；**2026-09-06 起已接入**，随 debug/game 一同部署 single dist，见 deploy-pages.yml）。
-- **test/ 测试合集重组（2026-08-13）**：根 `test/` 集中全部测试内容并细分三目录——
-  - `test/dual-mode-harness/`：原 WebSurf-test 验证工程整体搬入（双模物理 + 帧信号渲染时序验证，含 mini/〔随后已移除，2026-08-24 核对不在仓库〕与 scripts/ 全套验证套件）；
-  - `test/extract/`：原根 `extract/`（bsp-extract 独立解包器）整体搬入（CLI + wasm + 网页/查看器，URL 变更为 `/test/extract/web|viewer/`）；
-  - `test/map-min-export/`：**新增**地图最小导出实验——导出**最小可视几何**（GLB，跳过 SKY/TRIGGER/NODRAW/HINT/SKIP 不可见面）+ **碰撞**（BRUSHES/BRUSHSIDES/PLANES → `{planes,min,max,is_ladder,is_solid}` JSON，与 game brushJson 契约同构）+ **材质纹理**（PAKFILE 提取 VMT/VTF，VTF→PNG 解码 DXT1/DXT5/常见未压缩格式），含 manifest 与 Node 验证脚本；
-  - **CSS + CS:GO 双版本支持（2026-08-14）**：Source 1 v19~v29 全版本；`FACES` 按 lump version 分派（v0 28B CSS 老图 / v1 56B / v2 64B，关键字段偏移全版本一致）；CSS 无 PAKFILE 场景优雅注明（材质在外部 vpk）而非报错；合成 v19 CSS 特征 BSP 全链路验证（FACES v0 + 空 PAKFILE + NODES/LEAFS v0 + 实体 brush origin 平移）19/19 PASS；extract 补 FACES v0 合成回归测试；产物零冗余（PNG 成功不落 .vtf）。
-  - **移除 bsp-extract，解析层并入 map-min-export（2026-08-14）**：`test/extract/` 整体移除（git rm，历史保留）；其 CS:GO 版 BSP 导出逻辑（VBSP 头/64 lump/Valve LZMA/PAKFILE zip/实体/场景重建/GLB 写入/displacement）以**最小实现**并入 `test/map-min-export/`——新增 `[lib]` 目标（`map_min_export`：bsp/bspfile/lzma/pak/scene/glb/displacement 模块 + 原有 collision/materials/vtf），main.rs 改薄 CLI 入口；依赖收敛为 lzma-rs/zip/serde/serde_json/flate2（无 wasm-bindgen）；合成 BSP 集成测试随迁 `tests/integration.rs`（4 项，含 FACES v0 CSS 变体）；lib 测试 39 + 集成 4 全过，clippy 零警告；文档（根 README/architecture/CONTRIBUTING/PR 模板/CHANGELOG）同步更新。
-  - **交互式选择性导出 CLI（2026-08-14）**：`map-min-export` 支持拖拽 .bsp 释放后交互——
-    「默认导出（几何/模型/材质/碰撞）? [y/n]」，否定后**依次提问全部可导出部分**
-    （几何/模型/材质/碰撞/光照/音效/脚本/其他资源），最后一问答完立即导出；`--parts
-    geometry,models|default|all` 非交互模式供自动化；**输出改为单文件夹内每部分同名
-    文件夹包裹**（`geometry/`、`models/`、`materials/`、`collision/`、`lightmap/`、
-    `sounds/`、`scripts/`、`other/` + `manifest.json` 汇总含逐材质明细）；
-    新增 `parts.rs`（部分枚举/默认四项/全部八项）与 `pakres.rs`（PAKFILE 子集提取：
-    models/sounds/scripts/other 保留相对路径 + 路径穿越防护；LIGHTING lump 光照导出）；
-    materials 改为相对路径子目录；verify.mjs 按 manifest.parts 逐部分校验（22/22×3）；
-    surf_666 实测：模型 620 文件 / 其他 655 / 光照 29.04MB；ze 实测：音效 50 文件 / 脚本 3；
-    CSS 无 PAKFILE 图资源部分自动跳过（0 文件而非报错）。
-  - **instanced-diorama 实例化绘制 + PBR 光照渲染测试（2026-08-14）**：新增 `test/instanced-diorama/`——双模式测试用例：
-    - **沙盘 Diorama**：2.1 万~10 万实例方块（每材质 1 个 `InstancedMesh` = 1 draw call，实测 2.1 万实例仅 4 个方块 draw call）；写实体素材质物理区分——金属（metalness 1.0 / roughness 0.22 / RoomEnvironment 影棚反射）、玻璃（MeshPhysicalMaterial transmission + ior 1.5 真折射）、木头/砖块（全漫反射 / roughness 0.9+ / 程序化画布纹理，零外部资源）；影棚光照（物理单位强度平行光 PCFSoftShadowMap 4096 软阴影 + 紧贴阴影视锥 + 半球天光 + 冷色补光）；电影级后处理（SnapshotPass 快照 + SSAO 强度可调合成 + Bokeh DOF 焦点跟随相机 + FXAA + ACES）；
-    - **BSP 地图**：wasm 新增 `export_glb_with_pakfile_models_with_lights`（`collect_light_entities`：light/light_spot/light_environment → `KHR_lights_punctual` 写入 GLB，实测 ze 499 灯 / surf_666 2118 灯）→ GLTFLoader 原生解析导出灯光 → 渲染端实例化（共享 mesh 节点 → 空间 cell 分组 InstancedMesh：ze 449 / surf_666 1013 实例）+ 世界几何合并（GLTFLoader primitive 级 18734/35254 mesh → 按材质+空间 cell 合并为 503/1677 块，draw call 55591→2376 约 23 倍削减）→ 同一条 SSAO/FXAA 管线（DOF 默认关闭：参数按沙盘尺度调校）；光照预算默认取亮度 top-32（three.js 前向着色器灯光上限）；修复三处渲染管线坑（EffectComposer 跳过 pass 破坏 swap 链 → 效果归零而非 disable；ShaderPass 换材质需同步 uniforms；沙盘 Fog 污染大地图 → BSP 模式清雾）；
-    - 验证：wasm-pack + typecheck + esbuild 构建 ✓；node 光照导出冒烟（两图 extensionsUsed/lights/节点断言 PASS）；headless Chrome 截图像素统计矩阵证明 SSAO（遮蔽变暗）/DOF（边缘模糊）/FXAA 逐项生效；`?bsp=` / `?probe=`（8×8 亮度网格）/ `?lights=` / `?ambient=` 参数供自动化验证。
-  - **src 共享层文件合并与命名整理（2026-08-14）**：`src/wasm-core` 内部重组（顶层模块路径不变，三端 wasm 契约零改动）——`vbsp/data` 8→3（vector/prop/displacement 并入 mod.rs）、`vbsp/handle` 4→1、`texture_utils` 6→2（header/resources/utils 并入 vtf.rs）、`bsp_to_gltf_core` 5→4（error 并入 mod.rs），wasm-core 25→17 文件；函数/参数命名经检查已合理（CS 物理术语 + wasm 契约，phys/ts-shared 不改）；验证：wasm-core 16 测试 + 三端 wasm 构建 + 地图加载零回归（surf_666 7065 brush/142.6MB、ze 4818/38MB）。
-  - **地图最小导出合并进共享层 vbsp，map-min-export 移除（2026-08-14）**：比对 `src/wasm-core` 地图加载与 map-min-export 后实证 **v20 与 v21 的 lump version 分布一致**（NODES v0 / LEAFS v1 / FACES v1 / 其余 v0，记录大小 32/32/56B 相同）——v21 地图（ze_cursed_bear_tales）解析失败的根因仅是**版本检查硬编码 v20**；据此合并：① vbsp 版本检查放宽至 v19~v29（`vbsp/bspfile.rs`）；② 新增 **sprp v11 静态道具支持**（`vbsp/data/game.rs`，80B/记录实测布局：angles 为 3×f32 12B、flags 移位、新增 min/max_gpu_level/diff_modulation/unknown、无 lightmap_resolution）；③ 顺带修复 wasm-core 既有测试（mtz Entry 缺 opacity、tf2_file 标 ignore）；验证：ze(v21) 全链路（metadata 21774 faces/5123 brushes/302 models、碰撞 4818 brush、GLB 37MB 含 static props 354 nodes）✓、surf_666(v20) 碰撞 7065 零回归 ✓、debug/game wasm 构建 ✓；`test/map-min-export/` 整体移除（测试使命完成，文档/CHANGELOG/architecture 同步清理）。
-  - 全部搬移经 git mv 保留历史（R 状态）；dual-mode-harness 相对依赖同步加深一级（`crates/wasm` → `../../../../src`、`[patch.crates-io] vmdl` → `../../src/vendor/vmdl`）；根 README/docs/CHANGELOG 引用同步更新。
-- **bsp-extract 独立 Rust BSP 解包器（f3662c8 / 647ff07，2026-08-12）**：
-  `extract/` 独立 workspace（不归属仓库根/其他工程，不依赖共享层任何 crate），独立重实现
-  VPKEdit/sourcepp 的 bsppp 模块——VBSP 头解析、64 lump 目录、Valve LZMA、PAKFILE zip
-  枚举/提取、实体 KV 解析、场景几何重建与 GLB 导出；CLI 子命令 info/entities/pak
-  list/pak get/pak extract/glb，wasm 导出 bsp_to_glb/bsp_info，配套最小网页与端到端验证。
-- **trace 公共模块（878515f / b019115）**：`src/ts-shared/trace/`（trace-types / trace-recorder /
-  trace-renderer）——运动路径采集与显示（双线对照：无限制基准 vs tick 实际），由 /test 的
-  trace 功能提升为公共模块，供 game/debug/test 复用；trace-renderer 渲染引擎无关（依赖注入，
-  移除 three 硬依赖）。
-- **WebSurf-test 验证工程（c2e88b0 / 607c9a0 / d1767c0 / 3854f71，2026-08-11 收尾）**：
-  `test/` 独立工程（不入 Pages 部署），验证"主线程不做物理/渲染（BSP 解析导出 +
-  输入转发 + rAF wake）→ SAB 无锁 → WorkerA 双模物理 → WorkerB 帧信号渲染"完整循环，
-  含 `scripts/` 验证套件（phys-smoke **192/192 PASS** / perf-bench / race-wakeup /
-  tmp-dual-compare（现名 `dual-compare.mjs`）/ trace-verify）与 `play.cmd`。
-  - **WorkerA 双模物理核心（d1767c0 重构）**：**先 tick 计算 → 后无限制计算**；
-    模式A = 1ms 子步 + 实时输入（位置/角度唯一推进者，共享槽唯一写入者）；
-    模式B = **独立 64t 权威速度线**（第二个 PhysWorld，只走 tickDt 步长：
-    键位边界快照 peekKeys + 模式A 消耗鼠标窗口累积 → `set_velocity(三轴)`
-    校准——唯一 tick 影响通道，位置/角度不碰）；**分叉兜底锚定**
-    TICK_ANCHOR_DIST=64（死亡/传送/卡墙/坡缘后全量拉回，正常演化不干预）；
-    respawn/world-json 双实例同步；TICK_RATE=0/≥1000 跳过模式B
-  - **渲染驱动三轮修复（发布驱动 → 帧信号驱动）**：主驱动 = 主线程 rAF
-    `wake()` 的 RENDER_WAKEUP（vsync 对齐，呈现平滑）；WorkerA 发布**不 notify**
-    （1kHz 随机相位唤醒 → 呈现时间不规则 → 观感抖动，已移除）；解除节流
-    （固定 50ms 超时仅作停摆兜底）；V 未变不重绘；OffscreenCanvas 零拷贝直通
-  - **会审结论文档**：`test/dual-mode-harness/CONCLUSION.md`——「64t 坡速 ≈ 无限制」主因 =
-    物理算子按 dt 标定（稳态速度 tick 不变量），真实难度载体 = 输入采样相位 +
-    离散施加点；旧单实例双模三层缺陷（粗糙 tick 非独立演化/校准空操作/读数遮蔽）
-    与四条用户要求的逐条落地
-  - **验证套件适配**：ModeAB 重构为双实例语义（tick 先行 + 独立 tickPhys +
-    三轴速度校准）、分叉兜底锚定回归测试、帧信号驱动测试（worker_threads 真线程）
-- **传送双路径检测（5dcb903，共享 phys/teleport.rs）**：A 路径 = 进入区域任意状态
-  （身体竖直线段与凸包区间相交，gap = 落地&&斜面 ? 64 : 0）+ B 路径 = 仅落地
-  （脚底往下 8 区间相交）；surfing 滑行不触发；冷却 0.5s；空中蹲视角渐变同步
-- **共享 TS 层收敛（0f3558b）**：`src/ts-shared/`（auth/{shared-state,auth-loop,
-  worker-dispatch}、input/input-layer、phys/{authority-calibrator,params,
-  world-builder}）——两端共用 SAB 输入槽（BigInt64 原子累加）与权威双缓冲
-  （512B）、权威循环（setTimeout 4ms 自驱 + 固定步长 1/tickRate + 累积器无封顶（每轮 ≤64 步 guard））、
-  消息分发、校准（三条件 + 250ms 冷却 + 在途回滚）、输入层、参数映射、地图导入
-  导出管线；debug/game 删除各自 worker/shared-state.ts 与 physics-loop.ts，
-  debug 删除 shell_colliders.rs（薄壳碰撞）与 debug_probe.rs；**LERP/外推插帧
-  删除**——渲染改为主线程预测物理直读 state() + 权威速度外推校准
-- **面板可用性**：所有数值控件（灵敏度/QE 转速/视距/落地帧数/碰撞倍率/物理参数）
-  增加**数字输入框**（step=any 精确输入，滑块步进统一为 1）；**物理模式/碰撞来源/
-  PVS 剔除/视距**改为**进入地图前即可设置**（碰撞来源修改后提示"重新加载地图生效"，
-  不再需要先进地图再改再重进）
-- **碰撞可视化（debug）**：4 独立开关 + 4 距离滑块（显示brush碰撞/显示触发区域/
-  显示模型phy碰撞/显示模型可视碰撞；config.debug：showSolids/brushViewDistance/
-  showTriggers/triggerViewDistance/showPhy/phyViewDistance/showVis/visViewDistance，
-  0=全量）；phy 橙（surfaceprop 存在）/可视网格紫/brush 绿黄红/trigger 青紫灰橙；
-  线框**不透明 + depthTest:false**（防透明混合染绿）；phy/vis 独立 Group、
-  phyDirty 距离变更立即重建
+#### 查看器与回放（apps/viewer）
+
+- **最小 BSP 自由视角查看器（349ee26，2026-08-19）**：新增查看器工程——最小 BSP 自由视角查看器（WASM 解析 + Three.js 渲染，无玩法系统），以 path 依赖共享层 `../src`、dev 复用 `../src/serve.py`，自带 README 与 `docs/overview.md`（工程内 `docs/` 后于 2026-09 并入仓库根 `documents/`）。初始的位姿三通道（URL 参数 / `location.hash` / `window.viewer` 编程接口）已于 2026-09-06 核心化简化中移除，同时接入 Pages CI，随 debug / game 一同部署 single dist。
+- **Shavit `.replay` 原生回放子系统（faae806 / d5f3742 / 8ef32a9 / 830ceea / 47183d6 / 93216d8，2026-09-08）**：查看器源码全量入库，二进制原生解析 `.replay` 并回放；JSON 与规则脚本通道移除，仅保留坐标映射（axesMode / yawMode）与人工变换微调；新增回放遥测 HUD（横 / 竖向速度双读数 + 按键可视化）；默认播放窗口改为整条 clip（含 prerun / post，速度锚点跟随可视区域）；速度单位由 `HU/s` 改为 `u/s`。
+
+#### 验证工程与物理
+
+- **WebSurf-test 验证工程（c2e88b0 / 607c9a0 / d1767c0 / 3854f71，2026-08-11 收尾）**：新增独立验证工程（不入 Pages 部署），验证「主线程不做物理与渲染（BSP 解析导出 + 输入转发 + rAF wake）→ SAB 无锁 → WorkerA 双模物理 → WorkerB 帧信号渲染」完整循环，含 `scripts/` 验证套件（phys-smoke **192/192 PASS**、perf-bench、race-wakeup、dual-compare.mjs、trace-verify）与 `play.cmd`。
+  - **WorkerA 双模物理核心（d1767c0 重构）**：改为「先 tick 计算、后无限制计算」——模式A = 1 ms 子步 + 实时输入（位置与角度的唯一推进者、共享槽唯一写入者）；模式B = 独立 64t 权威速度线（第二个 PhysWorld 只走 tickDt 步长，经 `peekKeys` 键位边界快照与模式A 消耗的鼠标窗口累积执行 `set_velocity(三轴)` 校准，不碰位置与角度）；分叉兜底锚定 `TICK_ANCHOR_DIST=64`（死亡 / 传送 / 卡墙 / 坡缘后全量拉回）；`TICK_RATE=0` 或 ≥1000 时跳过模式B。
+  - **渲染驱动三轮修复（发布驱动 → 帧信号驱动）**：主驱动改为主线程 rAF `wake()` 的 RENDER_WAKEUP（vsync 对齐）；WorkerA 发布不再 notify（1 kHz 随机相位唤醒会导致呈现时间不规则、观感抖动）；解除节流（固定 50 ms 超时仅作停摆兜底）；值未变不重绘；OffscreenCanvas 零拷贝直通。
+  - **会审结论（`CONCLUSION.md`）**：「64t 坡速 ≈ 无限制」的主因是物理算子按 dt 标定（稳态速度为 tick 不变量），真实难度载体是输入采样相位与离散施加点；同时记录旧单实例双模的三层缺陷（粗糙 tick 非独立演化、校准空操作、读数遮蔽）。
+  - **验证套件适配**：ModeAB 重构为双实例语义、补分叉兜底锚定回归测试与帧信号驱动测试（worker_threads 真线程）。
+- **三模式物理迁入验证工程（7582c40，2026-09-11）**：`coupled` / `decoupled` / `tick` 三种模式的物理计算本体自 game 回退并迁入验证工程（game 侧的模式切换经真机手测判定失败，恢复为耦合单模）。计算本体位于 `src/ts-shared/{auth,decoupled,tick}`，验证工程提供运行时装配（WorkerA 三实例 + 双线互斥 gate + `set-mode` / `mode-ack` 热切握手 + 页面模式切换 UI）。
+- **game 双模式物理架构（e0cbab6，2026-09-10）**：向 game 移植 harness 的解耦运动计算并支持 ESC 面板运行时热切；该方向于 2026-09-11（7582c40）整体回退。
+
+#### 共享层
+
+- **共享 TS 层收敛（0f3558b）**：新增 `src/ts-shared/`，收拢 `auth/{shared-state,auth-loop,worker-dispatch}`、`input/input-layer`、`phys/{authority-calibrator,params,world-builder}`——覆盖 SAB 输入槽（BigInt64 原子累加）与权威双缓冲（512 B）、权威循环（setTimeout 4 ms 自驱 + 固定步长 1/tickRate + 累积器无封顶，每轮 ≤64 步 guard）、消息分发、校准（三条件 + 250 ms 冷却 + 在途回滚）、输入层、参数映射与地图导入导出管线。debug / game 删除各自的 `worker/shared-state.ts` 与 `physics-loop.ts`，debug 另删 `shell_colliders.rs`（薄壳碰撞）与 `debug_probe.rs`；同时删除 LERP 与外推插帧——渲染改为主线程预测物理直读 `state()` + 权威速度外推校准。
+- **trace 公共模块（878515f / b019115）**：新增 `src/ts-shared/trace/`（trace-types / trace-recorder / trace-renderer），提供运动路径采集与双线对照显示（无限制基准 vs tick 实际）；由验证工程的 trace 功能上提为公共模块，供 game / debug / test 复用；trace-renderer 与渲染引擎解耦（依赖注入，移除 three 硬依赖）。
+
+#### 解析与导出（含已移除工程的阶段性成果）
+
+- **bsp-extract 独立 BSP 解包器（f3662c8 / 647ff07，2026-08-12）**：新增独立 workspace（不归属仓库根与其他工程、不依赖共享层任何 crate），独立重实现 VPKEdit / sourcepp 的 bsppp 模块——VBSP 头解析、64 lump 目录、Valve LZMA、PAKFILE zip 枚举与提取、实体 KV 解析、场景几何重建与 GLB 导出；CLI 子命令 `info` / `entities` / `pak list` / `pak get` / `pak extract` / `glb`，wasm 导出 `bsp_to_glb` / `bsp_info`，配套最小网页与端到端验证。
+- **test/ 测试合集重组（2026-08-13）**：根 `test/` 集中全部测试内容并细分为三目录——`test/dual-mode-harness/`（原 WebSurf-test 整体搬入；`mini/` 后经 2026-08-24 核对确认不在仓库）、`test/extract/`（原根 `extract/` 搬入，URL 变更为 `/test/extract/web|viewer/`）、`test/map-min-export/`（新增地图最小导出实验：最小可视几何 GLB（跳过 SKY / TRIGGER / NODRAW / HINT / SKIP）+ 碰撞（BRUSHES / BRUSHSIDES / PLANES → `{planes,min,max,is_ladder,is_solid}` JSON，与 game 的 brushJson 契约同构）+ 材质纹理（PAKFILE 提取 VMT / VTF，VTF→PNG 解码 DXT1 / DXT5 与常见未压缩格式），含 manifest 与 Node 验证脚本）。搬移经 `git mv` 保留历史；dual-mode-harness 的相对依赖同步加深一级（`crates/wasm` → `../../../../src`、`[patch.crates-io] vmdl` → `../../src/vendor/vmdl`）。
+- **CSS / CS:GO 双版本支持（2026-08-14）**：支持 Source 1 v19~v29；`FACES` 按 lump version 分派（v0 = 28 B CSS 老图 / v1 = 56 B / v2 = 64 B，关键字段偏移全版本一致）；CSS 无 PAKFILE 时注明材质位于外部 vpk 而非报错；以合成 v19 CSS 特征 BSP 完成全链路验证（FACES v0 + 空 PAKFILE + NODES / LEAFS v0 + 实体 brush origin 平移），**19/19 PASS**；产物零冗余（PNG 解码成功即不落 `.vtf`）。
+- **移除 bsp-extract，解析层并入 map-min-export（2026-08-14）**：`test/extract/` 整体移除（`git rm`，历史保留），其 CS:GO 版 BSP 导出逻辑（VBSP 头 / 64 lump / Valve LZMA / PAKFILE zip / 实体 / 场景重建 / GLB / displacement）以最小实现并入 `test/map-min-export/`：新增 `[lib]` 目标 `map_min_export`（bsp / bspfile / lzma / pak / scene / glb / displacement + 原有 collision / materials / vtf），`main.rs` 改薄 CLI 入口；依赖收敛为 lzma-rs / zip / serde / serde_json / flate2；合成 BSP 集成测试随迁 `tests/integration.rs`（4 项，含 FACES v0 变体）；lib 39 + 集成 4 全过，clippy 零警告。
+- **交互式选择性导出 CLI（2026-08-14）**：拖拽 `.bsp` 释放后先询问「默认导出（几何 / 模型 / 材质 / 碰撞）? [y/n]」，否定后依次询问全部八类可导出部分，最后一问答完立即导出；`--parts geometry,models|default|all` 提供非交互模式。输出改为单文件夹内以同名子文件夹包裹各部分（`geometry/`、`models/`、`materials/`、`collision/`、`lightmap/`、`sounds/`、`scripts/`、`other/` + `manifest.json` 汇总含逐材质明细）；新增 `parts.rs`（部分枚举）与 `pakres.rs`（PAKFILE 子集提取：models / sounds / scripts / other 保留相对路径 + 路径穿越防护，含 LIGHTING lump 光照导出）。实测：surf_666 模型 620 文件 / 其他 655 / 光照 29.04 MB，ze 音效 50 / 脚本 3；CSS 无 PAKFILE 图资源部分自动跳过（0 文件而非报错）。
+- **instanced-diorama 实例化绘制 + PBR 光照渲染测试（2026-08-14）**：新增 `test/instanced-diorama/`，含沙盘 Diorama（2.1 万~10 万实例方块，每材质 1 个 `InstancedMesh` 即 1 个 draw call，实测 2.1 万实例仅 4 个方块 draw call；金属（metalness 1.0 / roughness 0.22）、玻璃（transmission + ior 1.5 真折射）、木头砖块三类材质物理区分；影棚光照为物理单位强度平行光 + PCFSoftShadowMap 4096 软阴影 + 半球天光 + 冷色补光；后处理为 SSAO / Bokeh DOF / FXAA / ACES）与 BSP 地图（wasm 新增 `export_glb_with_pakfile_models_with_lights`，`collect_light_entities` 将 light / light_spot / light_environment 写为 `KHR_lights_punctual`，实测 ze 499 灯 / surf_666 2118 灯；渲染端实例化（ze 449 / surf_666 1013 实例）+ 世界几何合并（GLTFLoader primitive 级 18734 / 35254 mesh → 按材质与空间 cell 合并为 503 / 1677 块，draw call 55591 → 2376，约 23 倍削减））两种模式，并以 headless Chrome 截图像素统计验证 SSAO / DOF / FXAA 逐项生效（`?bsp=` / `?probe=`（8×8 亮度网格）/ `?lights=` / `?ambient=` 参数供自动化验证）。过程中修复三处渲染管线问题：EffectComposer 跳过 pass 破坏 swap 链（表现为效果归零而非 disable）、ShaderPass 换材质需同步 uniforms、沙盘 Fog 污染大地图。
+- **地图最小导出合并进共享层 vbsp，map-min-export 移除（2026-08-14）**：比对后实证 **v20 与 v21 的 lump version 分布一致**（NODES v0 / LEAFS v1 / FACES v1 / 其余 v0，记录大小 32 / 32 / 56 B 相同）——v21 地图解析失败的根因仅是版本检查硬编码 v20。据此：① vbsp 版本检查放宽至 v19~v29（`vbsp/bspfile.rs`）；② 新增 sprp v11 静态道具支持（`vbsp/data/game.rs`，80 B/记录，angles 为 3×f32 12 B、flags 移位、无 lightmap_resolution）；③ 修复 wasm-core 既有测试（mtz Entry 缺 opacity、tf2_file 标 ignore）。验证：ze（v21）全链路通过（21774 faces / 5123 brushes / 302 models、碰撞 4818 brush、GLB 37 MB 含 354 static props nodes）、surf_666（v20）碰撞 7065 零回归、debug / game wasm 构建通过；随后 `test/map-min-export/` 整体移除（使命完成，文档与 CHANGELOG 同步清理）。
+- **src 共享层文件合并与命名整理（2026-08-14）**：`src/wasm-core` 内部重组，顶层模块路径不变、三端 wasm 契约零改动——`vbsp/data` 8→3、`vbsp/handle` 4→1、`texture_utils` 6→2、`bsp_to_gltf_core` 5→4，文件数 25→17。验证：wasm-core 16 项测试 + 三端 wasm 构建 + 地图加载零回归（surf_666 7065 brush / 142.6 MB、ze 4818 / 38 MB）。
+
+#### 应用工程
+
+- **面板可用性（debug / game）**：所有数值控件（灵敏度 / QE 转速 / 视距 / 落地帧数 / 碰撞倍率 / 物理参数）增加数字输入框（`step=any`）；物理模式 / 碰撞来源 / PVS 剔除 / 视距改为进入地图前即可设置（碰撞来源修改后提示「重新加载地图生效」）。
+- **碰撞可视化（debug）**：4 个独立开关 + 4 个距离滑块（brush 碰撞 / 触发区域 / 模型 phy 碰撞 / 模型可视碰撞，对应 `config.debug` 的 `showSolids`、`showTriggers`、`showPhy`、`showVis` 与各自 `*ViewDistance`，取值 0 为全量）；配色 phy 橙 / 可视网格紫 / brush 绿黄红 / trigger 青紫灰橙；线框不透明且 `depthTest:false`（防透明混合染绿）。
+- **game UI 风格迁移（483b75b / 623c67d，2026-09-10）**：game 界面迁移至 viewer 的 S10 令牌体系（纯视觉换血）；JS 状态绑定完成 class 化收尾，12 处 `style.*` 全部清零。
+
+#### 仓库级文档与 Agent 规范
+
+- **新增 `AGENTS.md`（2026-09-12）**：面向 AI / 自动化 Agent 的文件结构与协作规范——仓库布局与工程标准目录、新增文件归属决策表、临时区五条铁律与实况清单（约 68 MB，均未入库）、生成物「勿手改 / 勿清理」清单、文档编写与相对链接校验规范（附可复用的校验脚本）、改前/改中/改后工作流，以及已知残留问题表。
+- **根级四份文档深度重编（2026-09-12）**：`README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md` 统一格式与标题层级，修正失效引用（本地数据目录由仓库根 `maps/` 订正为 `test/maps/`、`docs/` 订正为 `documents/`、工程路径补齐 `apps/` 前缀、`test/dual-mode-harness` 由「双模」订正为三模式），补录此前未记录的变更，并新增提交信息规范（Conventional Commits）与验证脚本速查表、SECURITY 的支持范围与报告要素。
 
 ### 变更
 
-- **仓库结构重组：单一工程 → 双工程 + 共享层**（2026-08-09）
-  - `src/` 由原 TS 源码目录改为**共享层**：`websurf-phys`（Rust CS 物理，原
-    crates/wasm 物理部分，game 中诞生后上移共享）、`websurf-wasm-core`
-    （BSP 解析/GLB/模型/纹理解析，纯 rlib）、`vendor/vmdl`（vendored，单副本）、
-    `materials/textures.mtz`（默认纹理包 9448+ 条，三处副本同步）、
-    `serve.py`（共享 dev 服务器；BSP 地图位于仓库根 `maps/`，gitignored）
-  - `debug/` = **WebSurf-debug**（原全功能主项目迁入）：`crates/wasm/src/`
-    仅导出层 `lib.rs`；`src/` TS 全套（app/renderer/worker/world/physics/game/panel）；
-    `web/`
-  - `game/` = **WebSurf-game**：`crates/wasm/src/` 仅 `lib.rs` 导出层
-    （BspProcessor/PhysWorld/画质 API re-export），物理/解析经 path 依赖
-    共享层，`[patch.crates-io]` → `../src/vendor/vmdl`
-  - 旧顶层 `crates/`、`src/*.ts`、`web/`、`pkg/`、`target/` 全部移除
-- **材质低清压缩体系（mosaic + MTZ）**（`src/wasm-core/mosaic/`）：
-  `encode.rs`（PNG → mosaic v4 字节码）/ `decode.rs`（→ 低清 PNG，2 次幂对齐）/
-  `manifest.rs`（BSP 纹理收集 + 缺失列表）/ `mtz.rs`（textures.json ↔ MTZ5/6
-  压缩容器）；`export_mosaic_manifest` / `export_missing_textures` 须在
-  `export_glb*` 之前调用（借用 vs take 时序约定）
-- **画质切换**（debug + game 共有）：运行时按 manifest 用 `mosaic_decode`
-  还原低清贴图替换；缺失纹理回退在 GLB 导出期完成（`with_defaults` +
-  默认纹理包），渲染端零后期处理（曾引发 `RESULT_CODE_HUNG` 的修复）
-- **打包双模式**：`build-dist.mjs [--multi]`——`single`（默认）单文件 IIFE
-  （WASM + Worker 代码 + 默认纹理包全 base64 内嵌，file:// 双击可玩）；
-  `multi` 多文件 ESM（WASM/MTZ 外置，HTTP/Pages 部署）；注入全局：
-  `__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` / `__VBSP_TEXTURES_MTZ_B64__` /
-  `__VBSP_WASM_URL__`（multi）
-- **CI（deploy-pages.yml）**：debug、game 均以 `--multi` 构建 → 组装
-  `deploy/{debug,game}` + 入口页 → GitHub Pages 部署
-- **文档重组**：`docs/` 新四篇（architecture / timing-debug / timing-game /
-  materials）替换旧 `bsp-architecture` / `bsp-export-status` / `project-overview`
-  / `项目时序图`；`game/docs/` 新四篇（overview / physics / panel / materials）
-  替换旧实现状态文档
-- 共享内存布局（0f3558b 后）：输入区为 BigInt64 `dxAcc/dyAcc` 原子累加槽 +
-  权威帧双缓冲（`SHARED_BUFFER_SIZE` 512B，V_A 代际，无锁协议）
-- 重建 WASM：pkg 补全模型三角形碰撞导出 API（`export_model_tri_colliders` /
-  `export_model_phy_colliders`），`colliderSource`（auto/visual/phy）路径真正生效
-  （薄壳 brush 兜底已整体移除，导出失败回退可视网格）
-- **移除 test/game（2026-08-19）**：`test/game/`（WebSurf-game 修复版自包含移植）
-  整体移除（git rm，历史保留）；关联清理：CI（deploy-pages.yml）移除其构建与
-  `deploy/test/game` 组装、Pages 入口页（debug/scripts/pages-index.html）移除
-  Test/Game Fixes 入口、GitHub Issue/PR 模板与 README / docs/architecture 同步更新；
-  同提交一并移除根目录 `git-sync-ref.sh`（d55593a 引入的本机 packed-refs
-  tracking-ref 修复脚本，仅开发环境使用，未入文档）
+- **仓库卫生清理与规范固化（2026-09-12）**：系统排查文件卫生问题并修复——① 30 个已入库文件的 `CR CR LF` / `CR CR CR LF` 行尾规范化为标准 CRLF（逐文件验证「去掉 CR 后与 HEAD 字节全等」，内容零变化）；② 清理 105 个文件 / 约 25 MB 临时堆积（`apps/debug/.tmp`、`apps/game/temp`、`apps/viewer/temp`、仓库根 `.tmp`、`apps/debug/npm-ci-test.log`），删除前已备份到仓库外；③ 删除遗留重复文件 `apps/game/serve.py`（共享 `src/serve.py` 为其超集：支持 `root_dir` 参数、`SO_REUSEADDR` 与友好报错）；④ 将仅存于忽略目录的实验结论与仪器提升入库——`documents/phys.md` 新增 §3.5（`float_roundtrip` 影响半径实测闭环，含三输入面、1862 条字面量扫描与构建确定性 pin），`apps/game/scripts/` 新增 `phys-seed-smoke.mjs`（注册 `npm run test:seed-smoke`，实测 7/7 通过）、`wasm-hash-pin.mjs`、`t13-input-surface-probe.mjs`、`t13-literal-sweep.mjs`、`t13-ulp-sensitivity-control.mjs`；⑤ 修正全仓 md 共 20 处失效相对链接（`apps/{debug,game}/README.md`、`documents/index.md`、`documents/{game,viewer}/` 子树、`test/dual-mode-harness/docs/sequences.md` 等），并同步 `documents/index.md` 的篇数（29 → 24）与已移除目录表述，**全仓 md 相对链接现为 100% 可达**；⑥ `AGENTS.md` 补行尾规范与多 CR 体检命令，问题台账改为「已闭环 / 仍需处理」两段。
+
+- **输入层去重：`mouse-buffer` / `pointer-lock` 上提共享层（2026-09-12）**：两端 `apps/{debug,game}/src/input/{mouse-buffer,pointer-lock}.ts` 原为字节全等的重复实现（违反共享层约定，修一处 bug 需改两处），现收敛为共享单份 `src/ts-shared/input/`，两端 `app.ts` 导入同一实现（`../../../src/ts-shared/input/*.js`）。`input-bridge` / `keyboard` 仍保留各自实现（内容确有差异，另有 debug 的 `input-recorder` 与 game 的 `keymap`）。同步更新 5 篇文档与 1 处源码注释（`documents/{game/overview,game/implementation/panel-and-input,debug/sequences,debug/overview,debug/differences}`、`test/dual-mode-harness/src/main.ts`）。验证：两端 `npm run typecheck` 与 `npm run build:ts` 均 exit 0，打包产物 `web/app.js` 内含共享模块源注释与特征实现（`discardNext` / `unadjustedMovement`），旧路径零残留引用。
+
+- **文档漂移盘点与体检工具（2026-09-12）**：以脚本全量核验 45 篇 md 的「文件地图」（117 条行数声明 + 1428 个 `文件:行号` 锚点），修正 10 处过期行数、2 处越界锚点（`apps/game/src/input/keyboard.ts` 由 41-115 段收缩为 41-113；`apps/viewer/src/replay/timeline.ts` 由 336-342 段改指 325-330）、10 处遗留 `game/`、`debug/`、`viewer/` 目录前缀，以及 1 处因删除 `apps/game/serve.py` 而失效的引用（改指共享 `src/serve.py:31-36`，并核实该副本的 `no-store` 头在共享实现中同样存在、无能力丢失）；同时校正 `documents/game/overview.md` 的 dev 直达路径与 `apps/game/README.md` 的工程前缀。新增可复用体检工具 `src/scripts/check-doc-drift.mjs`（A 行数漂移 / B 锚点越界失败即 `exit 1`，C 路径失效告警，D 裸文件名歧义计数），当前 **0 漂移 / 0 越界**；工具能力边界（锚点只查越界、不查内容相符）与「改被引用文件后须回看锚点」写入 `AGENTS.md` §5.3。
+
+- **仓库结构：单一工程 → 双工程 + 共享层（2026-08-09）**：`src/` 由 TS 源码目录改为共享层（`websurf-phys`、`websurf-wasm-core`、`vendor/vmdl` 单副本、`materials/textures.mtz` 默认纹理包 9448+ 条三处副本同步、`serve.py` dev 服务器）；`debug/` = WebSurf-debug（原全功能主项目迁入）、`game/` = WebSurf-game（`crates/wasm/src/` 仅导出层 `lib.rs`，物理与解析 path 依赖共享层，`[patch.crates-io]` 指向 `../src/vendor/vmdl`）；旧顶层 `crates/`、`src/*.ts`、`web/`、`pkg/`、`target/` 全部移除。
+- **三大子项目集中迁入 apps/（15507c1 / b4b8f9a / 2cd80f3，2026-09-11）**：debug、game、viewer 集中迁入 `apps/`，统一仓库结构；README、`.github` 模板、CI `working-directory` 与工程内相对路径（含 +1 层修正的 46 个文件）同步更新。
+- **移除 test/game（654d2ef，2026-08-19）**：`test/game/`（WebSurf-game 修复版的自包含移植）整体移除（`git rm`，历史保留）；同步清理 CI 中其构建与 `deploy/test/game` 组装、Pages 入口页的 Test/Game Fixes 入口、Issue / PR 模板与 README / architecture 文档；同一提交一并移除根目录 `git-sync-ref.sh`（d55593a 引入的本机 packed-refs 修复脚本，仅开发环境使用）。
+- **移除 test/instanced-diorama（c4824e9，2026-09-10）**：删除该渲染测试工程并同步全部引用。
+- **三子项目文件架构有限统一（2a53816，2026-09-10）**：debug / game / viewer 按最小共同约定对齐文件架构。
+- **材质低清压缩体系（mosaic + MTZ）**：`src/wasm-core/mosaic/` 引入 `encode.rs`（PNG → mosaic v4 字节码）、`decode.rs`（→ 低清 PNG，2 次幂对齐）、`manifest.rs`（纹理收集 + 缺失列表）、`mtz.rs`（`textures.json` ↔ MTZ5/6 容器）；`export_mosaic_manifest` 与 `export_missing_textures` 须在 `export_glb*` 之前调用（借用 vs take 的时序约定）。
+- **画质切换（debug + game 共有）**：运行时按 manifest 用 `mosaic_decode` 还原低清贴图替换；缺失纹理回退在 GLB 导出期完成（`with_defaults` + 默认纹理包），渲染端零后期处理（曾引发 `RESULT_CODE_HUNG` 的修复）。
+- **打包双模式**：`build-dist.mjs [--multi]` 提供 `single`（默认，单文件 IIFE，WASM + Worker + 默认纹理包全 base64 内嵌，`file://` 双击可玩）与 `multi`（多文件 ESM，WASM / MTZ 外置）；注入全局 `__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` / `__VBSP_TEXTURES_MTZ_B64__` / `__VBSP_WASM_URL__`（仅 multi）。
+- **CI（`deploy-pages.yml`）**：debug 与 game 以 `--multi` 构建、viewer 以 single dist 构建，组装 `deploy/{debug,game,viewer}` 与入口页后部署 GitHub Pages。后续演进：Node 20 弃用后升级 Node 22、`cache-dependency-path` 改为 `**/package-lock.json` glob 以适配 lock 随工程分布、`npm ci` 失败重试与日志输出、`working-directory` 全部改指 `apps/{debug,game,viewer}`，并新增五项验收门禁（`test:optimize-scene` / `test:auth-clock` / `test:path-acceptance` / `test:replay` / `test:three-mode`）。
+- **文档体系重编（2026-09-07~11）**：`docs/` 与各工程 `docs/` 合并为仓库根 `documents/`；6 组子代理并行核查 31 份 md，修正 26 处不一致（727c4ae）；5 处 `docs/` 现存文档移入各自 `archive/`（9cd8581，纯移动）；全仓文档按四维度重编 28 篇（5d9a373，约 4764 行，代码锚点实证）；随后完成修复轮 F-01~F-11 与五模块深审修正（9543caf）。更早一次重组以 `docs/` 新四篇（architecture / timing-debug / timing-game / materials）替换旧 `bsp-architecture` / `bsp-export-status` / `project-overview` / `项目时序图`；`game/docs/` 则新四篇（overview / physics / panel / materials）替换旧实现状态文档。
+- **共享内存布局（0f3558b 后）**：输入区为 BigInt64 `dxAcc` / `dyAcc` 原子累加槽 + 权威帧双缓冲（`SHARED_BUFFER_SIZE` = 512 B，V_A 代际，无锁协议）。
+- **重建 WASM**：pkg 补全 `export_model_tri_colliders` / `export_model_phy_colliders`，使 `colliderSource`（auto / visual / phy）真正生效（薄壳 brush 兜底已移除，导出失败回退可视网格）。
+- **本地数据与工具目录出库（5fdaf72 / 8e949e0 / 854fb27 / b8222dd，2026-09-05~10）**：工作区精简并增补 `.gitignore` 本地数据规则；地图与录像统一收口 `test/maps/`（仓库根 `maps/` 废弃），`*.bsp` / `*.dem` / `*.replay` 不入库，仅保留 `apps/debug/fixtures/path/` 这一 CI 验收夹具例外；智能体工具状态目录（`.agent-teams/` / `.code-review/`）移出版本库。
 
 ### 修复
 
-- **viewer 渲染方法与 game 对齐（2026-09-05）**：修复"部分场景渲染不全"——三处根因：
-  1. **分块合并丢几何（主因）**：`optimizeScene` 最终合并失败（GLB 内 indexed/
-     non-indexed 几何混合致 `mergeGeometries` 属性不兼容）时，兜底分支只保留
-     第一块、该 cell 其余几何静默丢弃 → 高空俯瞰大面积镂空（surf_null 实测
-     60 个 cell 受影响）。对齐 game 兜底：失败时全部单独保留（零丢失）。
-  2. **雾 + 远平面截断**：原 `Fog(bg, far*0.4, far*0.9)` + far 钳制 65536——
-     大地图远景被雾吞掉、超大地图（对角 > 32768）被 far 整体裁掉。对齐 game：
-     无雾，far = maxDim × 100（基本无远裁剪）。
-  3. **贴墙近平面裁剪**：原固定 near=1，自由飞行贴近几何时被近平面裁剪透视。
-     移植 game `updateNearPlane`（每 2 帧 6 方向探测——4 水平 + 查看器补垂直
-     两向，near = 最近距离 × 0.3、下限 0.05，空旷恢复 maxDim/1000 默认）；
-     灯光同步 game 三点光（ambient 0.6 + hemisphere + directional 0xfff4e0）。
-  4. `optimizeScene` 遍历范围从整个 scene 收敛到 BSP 模型子树（与 game 一致，
-     防回放轨迹/量测辅助对象被误合并进地图块）。
-  验证：headless Edge 加载 surf_null.bsp 截图 A/B（高空镂空 → 完整）、CDP 冒烟
-  全过、typecheck 过；`app.js`/`dist` 已重建。
-- **P2 坡顶幻影根治（7c33a58 / 4f11e5a / 0b08a61，2026-08-19~20）**：盒-AABB
-  碰撞必要性校验（进入/start_solid 门 + f_true + EPS 收紧）消除坡顶幻影碰撞；
-  随后 docs+verify 实证残余发散为地面物理固有速率依赖（非幻影）；
-  补 f_true 悬停滑行端盖否决单测（4/4 PASS）与 probe2 双速率验证；
-  分析与验证脚本见 `docs/chamfer-physics/` 与 `game/scripts/phys-p2-*.mjs`。
-- **CI（3618603）**：Pages 流水线修复——Node 20 弃用 + 仓库重构后 lock 文件位置变化导致的构建失败；测试前置改用 Node 20 后，Pages 构建步骤升级
-- **地图重载内存泄漏**：`loadScene` 移除旧 BSP 模型只 `remove()` 不 `dispose()`，
-  GPU 侧 geometry/material/纹理（含 lightmap atlas）累积导致帧率下降。新增
-  `RendererMain.disposeScene()`（递归释放 + renderLists/LOD/PVS/碰撞可视化/插值
-  缓存清空），`handleBspFile` 触发文件输入即重置内存，`loadScene` 开头防御调用；
-  `ColliderDebug` 新增 `clearAll()`（保留 scene/group 引用），`dispose()` 补 triGroup
-- **贴墙透视（近平面裁剪）**：近平面自适应探测距离 `NEAR_PROBE_DIST` 4 → 32——
-  相机距墙最小距离 = 碰撞箱半宽 16，原射线 far=4 永远探测不到面前的墙，贴墙时
-  near 保持默认大值（大地图 50+）→ 墙被近平面裁剪，透视看到地图外面。已与上游
-  cs-movement 逐项核对（碰撞箱 16/72/54、眼睛 64.09/46.04、DIST_EPSILON、brush
-  碰撞逻辑全一致），物理层无差异，纯渲染层 bug
-  - **垂直墙增强**：探测方向最终 **4 条**（4 水平正交）、探测距离 **100**、
-    收缩系数默认 **0.3**（near = 最近距离 × 0.3，更保守不易裁墙）
-  - **面板可调（实时生效）**：显示设置新增「近平面探测距离」「近平面收缩系数」
-    滑块 + 输入框，`RendererMain.setNearParams()` 下一帧生效，无需重载地图
-
-- **出生点下拉无反应**（select 重选当前值/部分浏览器只触发 input 不触发 change）：
-  input + change 双监听 + 去重（换地图重置去重索引）；解析失败 status 可见提示
-
-- **game/ 双端同步**（websurf-min 预测 + 权威双线架构）：
-  - 近平面自适应全套同步（6 方向探测 + 面板实时可调 + 默认 100/0.3）
-  - spawnSelect/respawnBtn 改走 `bridge.sendTeleport/sendRespawn` 双端同步
-    （此前直接调 renderer 绕过 Worker 权威物理 → 传送被权威帧 >200 兜底拉回）
-  - **`set-spawn-points` 消息**：出生点列表同步到 Worker 权威物理（此前只设
-    预测物理，权威侧 `teleport_to_spawn` 索引为空静默忽略 → "一瞬间传送过去
-    又被拉回"根因）
-
-- **兜底同步方向反转 + 条件化（game）**：原"位置差 >200 无条件权威覆盖渲染"；
-  反转方向为**渲染主线（144Hz 精度更高）→ 权威追平**，同步内容 = 渲染帧完整
-  状态（位置/角度/速度/着地/眼高），同步瞬间清双端未消费输入增量（主线程
-  pending + Worker `resetInput`，键位保留）。触发三条件 OR：
-  ① 位置差 > 500 → 强制同步（不看朝向）；② 位置差 > 300 且 yaw 最小角差 ≤3°
-  且水平转动方向相同；③ 位置差 ≤ 300 但 yaw 偏差 > 45°（视角大幅分叉）。
-  **250ms 冷却**防抖；**撤回机制**：同步在途再次大幅分叉（>500 或 yaw>45°）
-  视为"渲染为准"方向错误 → 以权威为准回滚渲染（撤销推错影响）
-
-- **传送触发（共享物理 teleport.rs，2026-08-09 最终版）**：A 路径（任意状态）
-  竖直线段 [脚底, 脚底+身高] 与凸包区间相交（XZ 凸包竖直平面约束；gap =
-  落地 && 斜面 ? 64 : 0——跨斜面 origin 提升；空中/平面 0）+ B 路径（仅落地，
-  脚底往下 8 单位区间相交）；surfing 滑行不触发；冷却 0.5s。历史方案（StartTouch
-  边沿/竖直射线/凸包顶点/AABB/投影）全部废弃
-
-- **sv_airaccelerate 100 → 150**（KZ/HNS 服务器值；主项目 config + game Rust）
-
-- **面板偏好持久化 + 准星风格化**（双项目）：
-  - game `vbsp:panelPrefs`：物理参数/体型/操作（灵敏度/QE/noclip 速度）/
-    显示（准星/速度面板模式/准星风格）刷新恢复；构造加载 → 控件回写 → 双端推送
-  - 主项目 `vbsp:uiPrefs`：input/hud（含准星）/debug/lod/player 子集
-  - 准星重构为 **CSS 变量驱动 4 线 + 中心点**：颜色/线长/粗细/中心间隙/描边/
-    中心点 面板可调，即时生效 + 持久化
-
-- **斜坡接缝卡零速**（surf 高速滑行在垂直转横线折角带/密集接缝处速度归零）：
-  - `TryPlayerMove` 振荡检测宽容化：剪裁后速度反向不再整体归零，保留沿最后撞击
-    平面的切向速度（Quake 风格沿墙滑动）；多平面（≥2）沿前两平面交线滑动
-  - 多平面围角（≥3 平面）优先用平均法线剪裁（等效接缝平滑），失败才回退归零
-  - `MAX_CLIP_PLANES` 5 → 8（密集接缝区一 tick 触及多平面的容忍度）
-  - **撞击后沿法线推开 `PUSH_OUT=0.1`**（贴面解死锁）：surf 滑行时 AABB 表面停在
-    距坡面 DIST_EPSILON 处，重力每 tick 注入垂直分量 → trace fraction≈0 微撞击 →
-    origin 不更新（移动量≈0）→ `blocked×3` 误判归零；推开使下一 tick 有正常
-    "进入距离"，切向滑行不再被 fraction≈0 吞掉（Source/Quake 的 hitpos 惯例）
-  - `BlockedMove` 冻结检测阈值 3 → 6（给推开收敛时间，减少误判）
-  - **夹缝特殊逻辑**：检测到相对平面（V 形槽/墙缝，法线 dot < -0.5）时不再推开
-    （推开会来回撞墙、前后都卡死），改为沿两平面交线滑出夹缝
-  - **速度骤降校验**：未归零但大幅减速（空中 + 撞击接触 + 降幅 >30%）记录
-    `slowdown-XX% c[法线@fraction...]` 诊断——HUD 显示减速来源（多平面剪裁/
-    夹缝转向），便于针对性修复
-  - **归零诊断**：归零路径记录原因（allSolid/planes≥8/cornered×N/blocked×6/
-    stuck×N），经 stats 回传，HUD 显示"卡因[xxx]"（**注：该诊断 HUD 已随
-    0f3558b 移除**，代码无 zeroCause）
+- **viewer 渲染方法与 game 对齐（2026-09-05）**：修复「部分场景渲染不全」，四处根因——① **分块合并丢几何（主因）**：`optimizeScene` 最终合并失败（GLB 内 indexed 与 non-indexed 几何混合致 `mergeGeometries` 属性不兼容）时兜底只保留第一块、其余几何被静默丢弃（surf_null 实测 60 个 cell 受影响，高空俯瞰大面积镂空），现对齐 game——失败时全部单独保留（零丢失）；② **雾与远平面截断**：原 `Fog(bg, far*0.4, far*0.9)` + far 钳制 65536 会吞掉远景并整体裁掉对角 > 32768 的地图，现改为无雾、`far = maxDim × 100`；③ **贴墙近平面裁剪**：原固定 `near=1`，现移植 game 的 `updateNearPlane`（每 2 帧 6 方向探测，`near = 最近距离 × 0.3`、下限 0.05，空旷恢复 `maxDim/1000`），灯光同步 game 三点光（ambient 0.6 + hemisphere + directional 0xfff4e0）；④ `optimizeScene` 遍历范围收敛到 BSP 模型子树（防回放轨迹与量测辅助对象被误合并）。验证：headless Edge 加载 surf_null.bsp 截图 A/B、CDP 冒烟、typecheck 均通过，`app.js` 与 `dist` 已重建。
+- **合并失败兜底修复真正落盘（8a8c21a，2026-09-05）**：上一轮恢复时误用备份，导致丢 39% 几何的 bug 版本入库，本次修正并确认落盘。
+- **BSP 域 yaw 定标统一（d5f3742，2026-09-08）**：修正镜像问题，并补充出生点回退策略。
+- **传送检测（共享 `phys/teleport.rs`，5dcb903 / 2026-08-09 最终版）**：A 路径 = 任意状态下身体竖直线段 `[脚底, 脚底+身高]` 与凸包区间相交（XZ 凸包竖直平面约束，`gap = 落地 && 斜面 ? 64 : 0` 用于跨斜面 origin 提升）+ B 路径 = 仅落地时脚底往下 8 单位区间相交；surfing 滑行不触发；冷却 0.5 s。历史方案（StartTouch 边沿 / 竖直射线 / 凸包顶点 / AABB / 投影）全部废弃。
+- **P2 坡顶幻影根治（7c33a58 / 4f11e5a / 0b08a61，2026-08-19~20）**：以盒-AABB 碰撞必要性校验（进入 / `start_solid` 门 + `f_true` + EPS 收紧）消除坡顶幻影碰撞；随后以文档与验证实证残余发散属地面物理固有的速率依赖；补 `f_true` 悬停滑行端盖否决单测（4/4 PASS）与 probe2 双速率验证。分析文档当时位于 `docs/chamfer-physics/`（已随后续文档重编移出，见 git 历史），验证脚本见 `apps/game/scripts/phys-p2-*.mjs`。
+- **CI（deploy-pages.yml）**：修复 Node 20 弃用与 lock 文件位置变化导致的 Pages 构建失败（3618603）；恢复被误清空的 `deploy-pages.yml`（203 行完整版，8735073）；`working-directory` 改指 `apps/{debug,game,viewer}`（d5bdb77）；`npm ci` 增加重试与失败日志（f5831e6 / 8fae492）。
+- **地图重载内存泄漏**：`loadScene` 移除旧 BSP 模型只 `remove()` 未 `dispose()`，GPU 侧 geometry / material / 纹理（含 lightmap atlas）持续累积导致帧率下降。新增 `RendererMain.disposeScene()`（递归释放并清空 renderLists / LOD / PVS / 碰撞可视化 / 插值缓存），`handleBspFile` 触发文件输入即重置，`loadScene` 开头防御性调用；`ColliderDebug` 新增 `clearAll()` 并补 `triGroup` 释放。
+- **贴墙透视（近平面裁剪）**：`NEAR_PROBE_DIST` 由 4 改为 32——相机距墙最小距离等于碰撞箱半宽 16，原射线 `far=4` 永远探测不到面前的墙，贴墙时 near 保持默认大值（大地图 50+），墙被近平面裁掉而透视看到地图外。已与上游 cs-movement 逐项核对（碰撞箱 16 / 72 / 54、眼睛 64.09 / 46.04、DIST_EPSILON、brush 碰撞逻辑一致），确认属纯渲染层 bug。随后增强垂直墙探测：方向最终 4 条（4 水平正交）、探测距离 100、收缩系数默认 0.3；面板新增「近平面探测距离」与「近平面收缩系数」滑块 + 输入框，`RendererMain.setNearParams()` 下一帧生效。
+- **出生点下拉无反应**：`select` 重选当前值时部分浏览器只触发 `input` 不触发 `change`，改为 input + change 双监听并去重（换地图时重置去重索引），解析失败时在 status 给出可见提示。
+- **game 双端同步**：近平面自适应全套同步（6 方向探测 + 面板实时可调 + 默认 100 / 0.3）；`spawnSelect` / `respawnBtn` 改走 `bridge.sendTeleport` / `sendRespawn`（此前直接调 renderer 绕过 Worker 权威物理，传送被权威帧 >200 的兜底拉回）；新增 `set-spawn-points` 消息同步出生点列表至 Worker 权威物理（此前只设预测物理，权威侧 `teleport_to_spawn` 索引为空而静默忽略，是「一瞬间传送过去又被拉回」的根因）。
+- **兜底同步方向反转 + 条件化（game）**：原策略为位置差 > 200 时无条件以权威覆盖渲染，现反转为**渲染主线（144 Hz 精度更高）→ 权威追平**，同步内容为渲染帧完整状态（位置 / 角度 / 速度 / 着地 / 眼高），同步瞬间清空双端未消费输入增量（主线程 pending + Worker `resetInput`，键位保留）。触发三条件取或：① 位置差 > 500 强制同步（不看朝向）；② 位置差 > 300 且 yaw 最小角差 ≤3° 且水平转动方向相同；③ 位置差 ≤ 300 但 yaw 偏差 > 45°。250 ms 冷却防抖；并引入撤回机制——同步在途再次大幅分叉（>500 或 yaw > 45°）视为方向错误，改以权威为准回滚渲染。
+- **失焦显式冻结权威键位（6e4b688）**：`blur` 时补 `addInput(0,0,0)` 写入 SAB `keysMask=0`（game 侧 F-09 落地并同步 debug），避免窗口失焦后键位悬挂。
+- **worker 侧 `jump_height` 值语义反演（8149861，2026-09-10）**：修复解耦模式下跳不起来的问题。
+- **`sv_airaccelerate` 100 → 150**：对齐 KZ / HNS 服务器取值（主项目 config + game Rust）。
+- **面板偏好持久化 + 准星风格化（双项目）**：game 侧 `vbsp:panelPrefs` 与主项目侧 `vbsp:uiPrefs` 分别持久化各自面板子集，刷新后自动恢复并双端推送；准星重构为 CSS 变量驱动的 4 线 + 中心点，颜色 / 线长 / 粗细 / 中心间隙 / 描边 / 中心点均可调且即时生效。
+- **斜坡接缝卡零速**：surf 高速滑行在垂直转横线折角带或密集接缝处速度归零，修复涉及——`TryPlayerMove` 振荡检测宽容化（剪裁后速度反向不再整体归零，保留沿最后撞击平面的切向速度，多平面时沿前两平面交线滑动）；多平面围角（≥3 平面）优先用平均法线剪裁，失败才回退归零；`MAX_CLIP_PLANES` 5 → 8；撞击后沿法线推开 `PUSH_OUT=0.1` 解贴面死锁（AABB 表面停在距坡面 DIST_EPSILON 处时重力每 tick 注入垂直分量 → `fraction≈0` 微撞击 → origin 不更新 → `blocked×3` 误判归零）；`BlockedMove` 冻结检测阈值 3 → 6；夹缝（相对平面，法线 dot < -0.5）不再推开，改为沿两平面交线滑出；新增速度骤降诊断 `slowdown-XX% c[法线@fraction...]`（未归零但降幅 >30% 时记录减速来源）与归零原因诊断（`allSolid` / `planes≥8` / `cornered×N` / `blocked×6` / `stuck×N`，该 HUD 已随 0f3558b 移除）。
+- **viewer `play.cmd` 启动问题（cdff33a / 6caed6b，2026-09-05）**：先对齐 debug / start-dev 的自动化流程根治启动问题，再根治编码层问题——cmd.exe 解析失步会导致「碎片命令 + 乱码报错」。
 
 ## [0.1.0] - 2026-08-05
 
 ### 新增
 
-- 初始版本：BSP 解析、CS 移动物理、Three.js 渲染
+- 初始版本：BSP 解析、CS 移动物理、Three.js 渲染。

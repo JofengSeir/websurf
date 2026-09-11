@@ -112,7 +112,7 @@
 | `surf-e2e-verify.mjs` | 289 | surf_666 端到端三线程验证（worker_threads 模拟：解耦线双模 + SAB 传输 + WorkerB readState 不丢帧，`scripts/surf-e2e-verify.mjs:1-8`） |
 | `dual-compare.mjs` | 422 | game 双线 vs test 解耦线数据对照（node 直跑 wasm，相同输入序列比对两条物理线的输出，`scripts/dual-compare.mjs:1-12`） |
 | `race-wakeup.mjs` | 205 | 唤醒槽并发协议测试（worker_threads 真线程；含旧单槽协议对照组，`scripts/race-wakeup.mjs:1-6`） |
-| `perf-bench.mjs` | 321 | 性能基准：1ms 子步耗时分布（p95 < 1000µs 判据）等（`scripts/perf-bench.mjs:1-8`） |
+| `perf-bench.mjs` | 323 | 性能基准：1ms 子步耗时分布（p95 < 1000µs 判据）等（`scripts/perf-bench.mjs:1-8`） |
 | `render-loop-verify.mjs` | 180 | 渲染循环时序校验 v3（独立定时线程 + busy-wait 微秒级 rAF 节奏，`scripts/render-loop-verify.mjs:1-4`） |
 | `workerb-isolated.mjs` | 72 | WorkerB 隔离渲染能力上限测试（无物理竞争，`scripts/workerb-isolated.mjs:1-2`） |
 | `flicker-debug.mjs` | 707 | 屏闪根因排查（双缓冲协议压力测试 + 逐版本一致性断言，`scripts/flicker-debug.mjs:1-8`） |
