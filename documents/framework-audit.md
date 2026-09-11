@@ -29,8 +29,8 @@
 | §3.2 `dist/` 实况 | **仍是快照** | 历史叙述：磁盘上的 `dist/` 是改造前构建产物 |
 | §3.3 控制台输出 | **已按批 3 更新** | 现行事实：文案与行号均为当前实测 |
 | §3.4 `dist` 与 CI | **已按批 3 更新** | 现行事实：CI 行号与命令为当前实测 |
-| §4.1–§4.4 文件结构 | **仍是快照** | 历史叙述：目录清单、重复对、临时区实况均为改造前实测 |
-| §5.1–§5.5 共享层 | **仍是快照** | 历史叙述：文件数、消费矩阵、行数为改造前实测（批 4 后共享层已扩，见 [ts-shared.md](ts-shared.md)） |
+| §4.1–§4.4 文件结构 | **仍是快照**（§4.1 第 1 条另加落地状态） | 历史叙述：目录清单、重复对、临时区实况均为改造前实测；§4.1 第 1 条的 tsconfig 断言**已随批 4 失效**，见 §0.3 |
+| §5.1–§5.5 共享层 | **仍是快照**（§5.3 的 viewer 列另加失效声明） | 历史叙述：文件数、消费矩阵、行数为改造前实测（批 4 后共享层已扩，见 [ts-shared.md](ts-shared.md)）；§5.3 的 viewer 消费数 `0 → 3`，见 §0.3 |
 | §6.1–§6.3 不一致清单 | **逐条标注落地状态** | `I-nn` 的「证据」列含改造前锚点；每条的处置状态见 §6.4 与 [rollout-status.md](rollout-status.md) §4–§5 |
 | §7.1–§7.4 约定覆核 | **仍是快照** | 历史叙述：`AGENTS.md` §1.2/§2/§3 的覆核结论为改造前实测；§7.4 的命令与退出码为当时实跑 |
 | §8 `R-nn` 条款 | **逐条标注落地状态** | 条款文本不变；`R-19` 行与 §8.5 的落地状态块为收口追加 |
@@ -66,6 +66,30 @@
 
 **同批一并修正的当前事实类锚点**（不属上述错位，但同属「证据列失真」）：§2.1 入口清单与字节（批 3 后）与 `install-wasm-bindgen.cmd` 的上提补注；§2.3 的 `build:wasm` 形态、`dev` 端口分流、`check:api` 已补、`ws` 依赖行号；§2.4 三份 `build-dist.cmd` 的步骤骨架与 `chcp` 全量列；§3.1 产物字节；§3.2 内嵌序列与许可拷贝；§4.4 与 §7.3 的 `temp/`→`.tmp/`；§5.1 `src/scripts/` 清单；§6.1 的 `I-04`/`I-22`/`I-21`；§6.2 的 `I-07`/`I-12`/`I-13`；§8 的 `R-02`/`R-03`/`R-08`/`R-09`/`R-17`/`R-19`/`R-20`；§9 的下游指引状态。
 
+## 0.3 已随批 4 失效的前序「更正」（**性质：当时为真，后被改动作废**）
+
+本文 §4.1 第 1 条、§5.3 末尾、§8.4 的 `R-20` 三处曾断言：**viewer 与共享层是「正当隔离」**——依据是审计当时 `apps/viewer/tsconfig.json` 不含 `ts-shared`、且 viewer 对共享层的 import 为 `0`（口径 1）。**该依据现在是错的**，批 4 `b5be059` 主动反转了它。三处断言**在当时是对的**（审计实测确认 viewer 确实不含），是**批 4 让它们过期**——**不属「当初写错」**，故正文保留原文并就地标注，不按错误回改。
+
+**三项实证（可在仓库内逐条复核）**：
+
+| 证据 | 当前值 | 复核命令 |
+|---|---|---|
+| `apps/viewer/tsconfig.json` 的 `include` | `["src/**/*.ts", "src/wasm.d.ts", "test/**/*.ts", "../../src/ts-shared/**/*.ts"]`（**含**共享层） | `git show b5be059 -- apps/viewer/tsconfig.json` |
+| 上述改动的确切归属 | 批 4 `b5be059`：`-  "include": ["src/**/*.ts", "src/wasm.d.ts", "test/**/*.ts"]` → `+  …, "../../src/ts-shared/**/*.ts"]` | 同上（diff 只此一行） |
+| viewer 对共享层的真实 import（口径 1） | **3 个文件**（非「零引用」）：`apps/viewer/src/core/bsp.ts:4`、`apps/viewer/src/core/constants.ts:13`、`apps/viewer/src/core/pose.ts:9` | 见下表逐行原文 |
+
+三类引用的逐行原文（node 按字节读）：
+
+```text
+apps/viewer/src/core/bsp.ts:4        import { base64ToBytes, readEmbeddedWasmB64 } from '../../../../src/ts-shared/wasm/loader.js';
+apps/viewer/src/core/constants.ts:13 export { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
+apps/viewer/src/core/pose.ts:9       export { wrapDeg, bspYawToCsYaw } from '../../../../src/ts-shared/phys/angles.js';
+```
+
+即批 4 的三项上提把共享单点反向暴露给 viewer：`D-09`（`wasm/loader.ts`）、`D-16`（`phys/constants.ts`）、`D-08`（`phys/angles.ts`）。所以当前事实是「**viewer 有引用且已 include，两侧一致**」——`R-09`/`R-20` 由「正当隔离（防回归）」变为「已接入，依据 = 有引用且有 include」。
+
+**因此**：`R-09`/`R-20` 的判定与本文 §5.3 的 viewer 消费数**不是「漂移」而是「被批 4 反转」**；凡后续复核再读到 `§4.1`/`§5.3`/`R-20` 的「正当隔离」表述，一律以本节的当前值为准。**修正面**：本次只改文档侧（`framework-audit.md` 的三处断言 + 本节），`apps/viewer/tsconfig.json` 与 `apps/viewer/src/**` 属批 4 的 `b5be059` 落地面，**不在本次范围**。
+
 **核验清单（口径与结果）**：修正后按「node 按字节读 → 抽取全部行号引用（`文件:行号` 与同段内的裸 `:行号`）→ 读取被引文件对应行 → 判定『行存在且非空』」实跑，工具输出为：
 
 ```text
@@ -76,7 +100,7 @@
 
 - **机械口径**：本文全部行号引用共 409 处；按「反引号内的 `文件:行号` 锚点 + 同段内裸行号」抽检实跑，工具报出 **7 处**「空行/越界」，**没有一处指向现行事实**，逐类复核：① 刻意保留的历史行号 3 处（§3.2 的 debug `scripts/build-dist.mjs`、§6.1 的 debug `scripts/build-dist.mjs` 与 debug `scripts/check-wasm-api.mjs`）—— 为求「当时写在哪一行」可回溯而保留改造前原值，正文已就地标注「已不再指向原文」；其中 check-wasm-api 那一处属**越界**且落在空行，其余为「在范围内但内容不符」。② 裸行号被工具挂错文件 3 处：本节上表「实测」列写的是**改造前**行号（viewer 与 game 的 `play.cmd`），表中已有「文件限定」，工具挂到上一行出现的文件名上属口径限制。③ 1 处为 §2.4 表内裸行号（`apps/game/build-dist.cmd` 的 `:18-31` 与 `:18`）被工具挂到同段其它文件名上。以上均**不计入**「现行事实锚点」的验收面。
 - **语义口径（本节上表）**：19 组错位逐条给出「期望 vs 实测 vs 处置」，**全部按当前实测改正**；其中 14 组来自前序独立验证点名的位置（§2.2 端口表 6 组 + §3.3 控制台输出表 5 组 + CI / `pages-index` 2 组 + `CONTRIBUTING.md` 1 组），另 5 组为本次实测补齐（§2.5 失败块两组、§2.2 命令证据组、§2.2 debug dev 锚点、§7.4 `local:smoke`）。
-- **全仓门禁（本次实跑）**：等价口径 doc-drift 输出 `50 篇 md ｜ 行数声明 149（漂移 0）｜锚点 1875（越界 0）｜路径失效 18（C 类告警）｜歧义未判 409`，**退出码 0**；相对链接 100% 可达（本章末段口径）。
+- **全仓门禁（本次实跑）**：等价口径 doc-drift 输出 `50 篇 md ｜ 行数声明 149（漂移 0）｜锚点 1888（越界 0）｜路径失效 18（C 类告警）｜歧义未判 410`，**退出码 0**；相对链接 100% 可达（本章末段口径）。
 - **仍需人工判读的部分**：上表只覆盖本次修正的 19 组；其余被引文件的行号锚点已逐条实读、非空且在范围内，但**语义是否相符**仍须按 §0.1 的逐节状态区分「现行事实 / 历史快照」后判读——这正是本文保留「快照」标注而不改写历史叙述的原因。
 
 ## 1. 审计范围与方法
@@ -321,7 +345,7 @@ viewer 是 single-only 并不只是「没实现 multi」：它的 `dist/index.ht
 
 1. `apps/debug/tsconfig.json:26` 的 `include` 里含 `web/vendor`，而 `apps/debug/web/vendor` **不存在**（`$ Test-Path apps/debug/web/vendor` → `False`），是一处失效 include。
    **更正（2026-09-12，captain 实测）**：本条初稿写作「`apps/viewer/tsconfig.json:15` 与 `apps/game/tsconfig.json:15` 均把 `../../src/ts-shared/**/*.ts` 纳入 `include`；viewer 却零引用，于是白列一整套文件」——**上半句不成立**。逐文件实测：审计当时 `apps/viewer/tsconfig.json:15` = `["src/**/*.ts","src/wasm.d.ts","test/**/*.ts"]`，**不含共享层**，与「零引用」自洽，属合规；`apps/game/tsconfig.json:15` 与 `apps/debug/tsconfig.json:26` 确实含 `../../src/ts-shared/**/*.ts`，且两者都有真实 import（口径 1：game 5 / debug 6），属正确配置。故「失效 include」在本仓库只有 `apps/debug/tsconfig.json:26` 的 `web/vendor` 一处，viewer 无配置冲突。
-   **落地状态（批 4 `b5be059`）**：`apps/debug/tsconfig.json:26` 的 `web/vendor` 已移除（实测现为 `"include": ["src", "../../src/ts-shared/**/*.ts"]`）；viewer 已在批 4 上提共享层后**改为 include 共享层**（实测 `apps/viewer/tsconfig.json:15` 现为 `["src/**/*.ts", "src/wasm.d.ts", "test/**/*.ts", "../../src/ts-shared/**/*.ts"]`），与批 4 新增的 3 处 `ts-shared` import 自洽——`R-09`/`R-20` 的「正当隔离」判定因此**在批 4 后被反转**，属刻意变更而非回归。
+   **落地状态（批 4 `b5be059`）**：`apps/debug/tsconfig.json:26` 的 `web/vendor` 已移除（实测现为 `"include": ["src", "../../src/ts-shared/**/*.ts"]`）；viewer 已在批 4 上提共享层后**改为 include 共享层**（实测 `apps/viewer/tsconfig.json:15` 现为 `["src/**/*.ts", "src/wasm.d.ts", "test/**/*.ts", "../../src/ts-shared/**/*.ts"]`），与批 4 新增的 3 处 `ts-shared` 引用自洽——`R-09`/`R-20` 的「正当隔离」判定因此**在批 4 后被反转**，属刻意变更而非回归（**上面这条「更正」与 §5.3/`R-20` 的同类表述均已随之过期，机制与实证见 §0.3**）。
 2. `apps/viewer/README.md:45` 写「本地地图副本放仓库根 `maps/`（gitignored）」，而 `$ Test-Path maps` → `False`，根 `README.md:43` 已明确写「本地地图统一放入 **`test/maps/`**（仓库根 `maps/` 已废弃）」——属遗留路径未清理。
 
 ### 4.2 同名文件的近重复度（实测）
@@ -465,6 +489,8 @@ harness 侧（`test/dual-mode-harness/`，目录层级为 `src/` + `src/panel/` 
 - 对照其他工程 `scripts/`：debug 4 个 `.mjs` 含该字面量（`auth-clock-verify.mjs`、`jump-apex-measure.mjs`、`jump-apex-serve.mjs`、`jump-apex-verify.mjs`），game 与 viewer 各 0 个。
 
 viewer 为 0 这一条三级口径一致，且是**全工程级**的（`apps/viewer/README.md`、`apps/viewer/tsconfig.json`、`apps/viewer/package.json` 均无 `ts-shared`；`apps/viewer/tsconfig.json:15` 的 `include` 亦**不含**共享层，与零引用自洽）——**更正**：本条初稿称「viewer `tsconfig.json:15` 却把共享层纳入编译范围」，经逐文件实测不成立（见 §4.1 第 1 条更正）；viewer 属「正当隔离」，不存在失效配置。
+
+> **已随批 4 失效（口径 1：viewer `0 → 3`）**：批 4 `b5be059` 把三项共享单点反向暴露给 viewer 后，viewer 的口径 1 引用为 **3 个文件** —— `apps/viewer/src/core/bsp.ts:4`（`wasm/loader.js`）、`apps/viewer/src/core/constants.ts:13`（`phys/constants.js`）、`apps/viewer/src/core/pose.ts:9`（`phys/angles.js`），且 `apps/viewer/tsconfig.json:15` 已同步 `include` 共享层。故本节上表与上面这段的 viewer 列**均为 `a4ed66f` 快照**，现行值以 §0.3 为准；§5.3 的表**不逐格回改**（其余列同样是快照），只在此就地声明时点与差量。
 
 ### 5.4 Rust 侧共享消费（实测）
 
@@ -619,7 +645,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | `npm run test:three-mode`（harness） | `0` | 通过 |
 | `node src/scripts/check-doc-drift.mjs [任意参数]` | **`1`（沙箱限制，与参数无关）** | `Error: spawnSync git EPERM`（§1.3） |
 | 单文件铁律自查（纯 `fs`，沙箱内可跑，**本文的正式验收命令**） | `0` | 见本节末尾的三行输出 |
-| 等价替代（改读预生成 **LF** 文件列表，其余逻辑逐字不变） | `0` | 审计当时：`文档漂移体检：45 篇 md ｜ 行数声明 117（漂移 0）｜锚点 1431（越界 0）｜路径失效 1 ｜歧义未判 383`（首次全仓跑、本文尚未落盘时的结果）；本文落盘后全仓复跑为 46 篇 / 135 声明 / 1533 锚点 / 漂移 0 / 越界 0 / 路径失效 1 / 歧义 387。**现行（事实时点 `640da1a`，批 1–4 与本次修订后）**：`50 篇 md ｜ 行数声明 149（漂移 0）｜锚点 1868（越界 0）｜路径失效 18（C 类告警，不参与退出码）｜歧义未判 409`，退出码 **`0`**（较修订前 147/1818 的差额全部来自本次改动：§2.1 为两份已上提的共享脚本补了行数声明（+2），全文 409 处行号引用中的错位逐条改正并补齐文件限定（+50 锚点口径），**越界仍为 0**） |
+| 等价替代（改读预生成 **LF** 文件列表，其余逻辑逐字不变） | `0` | 审计当时：`文档漂移体检：45 篇 md ｜ 行数声明 117（漂移 0）｜锚点 1431（越界 0）｜路径失效 1 ｜歧义未判 383`（首次全仓跑、本文尚未落盘时的结果）；本文落盘后全仓复跑为 46 篇 / 135 声明 / 1533 锚点 / 漂移 0 / 越界 0 / 路径失效 1 / 歧义 387。**现行（事实时点 `640da1a`，批 1–4 与本次修订后）**：`50 篇 md ｜ 行数声明 149（漂移 0）｜锚点 1888（越界 0）｜路径失效 18（C 类告警，不参与退出码）｜歧义未判 410`，退出码 **`0`**（较修订前 147/1818 的差额全部来自本次改动：§2.1 为两份已上提的共享脚本补了行数声明（+2），全文 409 处行号引用中的错位逐条改正并补齐文件限定，并新增 §0.2/§0.3 的实证锚点（锚点口径 +70），**越界仍为 0**） |
 
 `AGENTS.md` §7.1 第 11 项记录的基线是「117 条行数声明与 1428 个锚点零漂移/零越界（383 处跨工程裸文件名歧义）」。仅替换 git 调用后的本次实测（未含本审计文档）为 **117 声明 / 0 漂移**、**1431 锚点 / 0 越界**、**383 歧义**——声明数与歧义数完全一致，锚点数 +3 属本轮新增文档引用所致，零漂移结论**成立**。
 
@@ -684,7 +710,7 @@ exit=0
 |---|---|---|
 | R-18 | 同一算法/常量在仓库内只允许一份实现；判定「重复」的阈值为：两文件在剔除以工程为单位的 import 行后内容全等，或差异行数 ≤ 5 行 | 对候选对跑 `git diff --no-index --numstat`（当前 `pvs-manager.ts` 为 `2 2` → 必须上提） |
 | R-19 | 纯自举/环境准备类 shell 脚本（不含工程特有产物名的）必须在 `src/scripts/` 单份提供，工程内不得存副本 | `git ls-files 'apps/*/scripts/*.cmd'` 中不得出现 `ensure-node-deps.cmd`、`cargo-env.cmd` 之类通用名（审计当时两份 `ensure-node-deps.cmd` 违反 → I-15，**批 2 `fc3de84` 已修**） |
-| R-20 | viewer 与共享层的关系必须显式声明为「正当隔离」或「欠债」：若为隔离，`tsconfig.json` 不得 include `ts-shared`；若为欠债，必须列出接入清单 | 交叉核对（**更正（审计当时）**：实测 `apps/viewer/tsconfig.json:15` 既未 include 共享层也无引用，条件互斥不成立 → viewer 现状**满足「正当隔离」分支**，R-20 判定为**当前合规**；初稿「既 include 又不引用」经实测不成立，见 §4.1 第 1 条更正、§5.3。**批 4 `b5be059` 后**：viewer 已接入共享层 3 处并同步 include，该条款的「隔离」分支不再适用，实际落地为「接入清单」路径，见 §8.5） |
+| R-20 | viewer 与共享层的关系必须显式声明为「正当隔离」或「欠债」：若为隔离，`tsconfig.json` 不得 include `ts-shared`；若为欠债，必须列出接入清单 | 交叉核对（**更正（审计当时）**：实测 `apps/viewer/tsconfig.json:15` 既未 include 共享层也无引用，条件互斥不成立 → viewer 现状**满足「正当隔离」分支**，R-20 判定为**当前合规**；初稿「既 include 又不引用」经实测不成立，见 §4.1 第 1 条更正、§5.3。**批 4 `b5be059` 后该判定被反转**：viewer 已接入共享层 3 处（`bsp.ts:4`/`constants.ts:13`/`pose.ts:9`）并同步 `include`，「隔离」分支不再适用，实际落地为「接入清单」路径——**机制与实证见 §0.3**，落地状态见 §8.5） |
 | R-21 | 共享层的「不可合并重复」必须列为明示例外并给出理由：五份 `Cargo.toml` 的 `[patch.crates-io] vmdl`、四份 `Cargo.toml` 模块 workspace 清单、四份 `src/wasm.d.ts` | 规范中列出例外表，且每一项都有 Cargo/TS 语义级理由 |
 
 条款与不一致项的覆盖关系（**审计当时的判定**，逐条落地状态见 §8.5）：`R-01→I-06`、`R-02/R-05→I-07/I-16`、`R-03→I-16`、`R-04→（当前合规，防回归）`、`R-07→I-19`、`R-08→I-04`、`R-09/R-20→（**更正**：viewer 经逐文件实测为「正当隔离」且 `tsconfig.json:15` 未 include 共享层，两条均**当前合规**，改列为防回归；**批 4 `b5be059` 后 viewer 已接入共享层并同步 include，两条依据变为「有引用且有 include」**）`、`R-10→I-14`、`R-11→（**更正**：`apps/viewer/package.json:10` 的 `test:replay` outfile 指向 `temp/`，而 `apps/viewer/.gitignore:7` 仅忽略 `/temp/`，实测 `apps/viewer/temp` 目录存在 → **违反**，须改 `.tmp/`；初稿「当前合规」不成立。**批 4 已改为 `.tmp/`**）`、`R-12→I-11`、`R-13→I-01/I-02`、`R-14→I-20`、`R-15→I-13/I-17`、`R-16→I-08/I-09/I-11`、`R-17→I-21`、`R-18→I-15/§4.2`、`R-19→I-12/I-15/I-22`、`R-21→I-18`。`I-03`、`I-10`、`I-22`（脚本相对路径层数与实现分叉）、`I-05`（文档遗留路径）不直接映射到 R 条款，属**本轮待修缺陷**与**待裁决项**，应由规范给出处置口径（`R-19` 已把 I-22 纳入——共享工具上提时必须同时修正调用方的上溯层数）。
