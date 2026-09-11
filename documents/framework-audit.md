@@ -119,15 +119,15 @@
 
 | 入口 | 成功退出码 | 失败时的暂停行为 | 失败段锚点 |
 |---|---|---|---|
-| debug `play.cmd` | 由 `python serve.py` 决定 | 每个失败分支 `pause` + `exit /b 1` | `apps/debug/play.cmd` 的 4 个内联失败块（`:27-31`、`:36-40`、`:46-50`、`:54-58`） |
-| game `play.cmd` | 同上 | 同上 | `apps/game/play.cmd` 的 4 个内联失败块（`:26-31`、`:35-40`、`:45-50`、`:53-58`） |
-| viewer `play.cmd` | `exit /b 0`（复用已运行实例时，`:66`） | 三处失败分支 `pause` + `exit /b 1` | `:68-74`、`:76-81`、`:83-89` |
-| debug `start-dev.cmd` | `cmd /k` + `exit /b 0`（`:73-74`） | 失败分支 `pause` | `:76-82`、`:84-88` |
-| debug `build-dist.cmd` | `exit /b 0` | 4 个失败分支 `pause` | `:82-88`、`:90-96`、`:98-102`、`:104-108` |
-| game `build-dist.cmd` | `exit /b 0` | 5 个失败分支 `pause` | `apps/game/build-dist.cmd:14-15`、`:29-30`、`:40-41`、`:51-52`、`:62-63`、`:71-72`、`:82-83` |
-| viewer `build-dist.cmd` | `exit /b 0` | 5 个失败分支 `pause` | `apps/viewer/build-dist.cmd:12-13`、`:27-28`、`:38-39`、`:49-50`、`:60-61`、`:69-70`、`:78-79` |
+| debug `play.cmd` | 由 `python serve.py` 决定 | 每个失败分支 `pause` + `exit /b 1` | `apps/debug/play.cmd` 的 5 个内联失败块（`:12-17`、`:25-30`、`:35-40`、`:46-51`、`:55-60`） |
+| game `play.cmd` | 同上 | 同上 | `apps/game/play.cmd` 的 5 个内联失败块（`:12-17`、`:25-30`、`:35-40`、`:46-51`、`:55-60`） |
+| viewer `play.cmd` | `exit /b 0`（复用已运行实例时，`:66`） | 5 处失败分支 `pause` + `exit /b 1` | `:12-17`、`:25-30`、`:35-40`、`:46-51`、`:55-60` |
+| debug `start-dev.cmd` | `exit /b 0`（端口复用分支 `:68`；`cmd /k` 已由批 3 `32c2ddb` 移除） | 失败分支 `pause` | `:12-17`、`:29-34`、`:37-42`、`:48-53`、`:56-61` |
+| debug `build-dist.cmd` | `exit /b 0` | 8 个失败分支 `pause` | `:12-15`、`:26-31`、`:37-42`、`:51-56`、`:59-64`、`:70-75`、`:79-84`、`:90-95` |
+| game `build-dist.cmd` | `exit /b 0` | 7 个失败分支 `pause` | `apps/game/build-dist.cmd:11-15`、`:26-31`、`:37-42`、`:48-53`、`:59-64`、`:68-73`、`:79-84` |
+| viewer `build-dist.cmd` | `exit /b 0` | 7 个失败分支 `pause` | `apps/viewer/build-dist.cmd:9-13`、`:24-29`、`:35-40`、`:46-51`、`:57-62`、`:66-71`、`:75-80` |
 
-**退出码传递形态不一致（实测）**：游戏侧与 viewer 侧的 dist 步骤都用 `call node "%~dp0scripts\build-dist.mjs"`（直接调 node），viewer 还在注释里写明理由——「Direct node call（same as game\build-dist.cmd）：bypasses npm run so the exit code flows straight through」（`apps/viewer/build-dist.cmd:84-88`）；而 debug 侧第 3 步是 `call npm run build:dist`（`apps/debug/build-dist.cmd:63-64`）。同一仓库里「`npm run` 会吞退出码」这条经验只在 viewer 侧被写进注释并绕开，debug 未跟进。
+**退出码传递形态不一致（实测）**：游戏侧与 viewer 侧的 dist 步骤都用 `call node "%~dp0scripts\build-dist.mjs"`（直接调 node），viewer 还在注释里写明理由——「Direct node call（same as game\build-dist.cmd）：bypasses npm run so the exit code flows straight through」（`apps/viewer/build-dist.cmd:84-88`）；而 debug 侧第 3 步是 `call npm run build:dist`（`apps/debug/build-dist.cmd:63-64`）。同一仓库里「`npm run` 会吞退出码」这条经验只在 viewer 侧被写进注释并绕开，debug 未跟进。——**批 3 `32c2ddb` 已统一**：debug 的 `[5/5]`（`:86`）也改为 `call node "%~dp0scripts\build-dist.mjs"`（`:89`），viewer 对应 `:73`/`:74`，三工程一致。
 
 ### 2.6 `play.cmd` 正文重复度（实测）
 
@@ -194,7 +194,7 @@ debug 没有 `web/styles.css`，样式内联在 `apps/debug/web/index.html:7`（
 | 启动横幅 | `echo  WebSurf  Local Play (dist)`（`apps/debug/play.cmd:61`） | `echo  WebSurf-game  Local Play`（`apps/game/play.cmd:59`） | `echo  WebSurf-viewer local preview ^(close this window to stop^)`（`dist/play.cmd`，由 `apps/viewer/scripts/build-dist.mjs:130` 生成） |
 | 步骤编号 | `[1/4]`…`[4/4]`（`apps/debug/play.cmd:25`、`:34`、`:44`、`:52`） | `[1/4]`…`[4/4]`（`apps/game/play.cmd:23`、`:32`、`:42`、`:50`） | 本工程自己的 `[N/M]` 编号是 `[1/3]`…`[3/3]`（`apps/viewer/play.cmd:26`、`:37`、`:59`），而它要调用的 `dist/play.cmd` 没有任何编号 |
 | 服务地址行 | `Server:  http://localhost:%PORT%/` + `App:     http://localhost:%PORT%/dist/index.html`（`apps/debug/play.cmd:62-63`） | 同结构（`apps/game/play.cmd:60-61`） | `page    http://localhost:%PORT%/index.html` + `demo    …?replay=assets/maps/surf_null_4.replay`（`apps/viewer/scripts/build-dist.mjs:131-132`） |
-| 失败前缀 | `[ERROR] …` | `[ERROR] …` / `*** ERROR: … ***`（`apps/game/build-dist.cmd:80`、`apps/viewer/build-dist.cmd:76`） | `[错误] …` / `[提示] …`（`apps/viewer/scripts/build-dist.mjs:77-78`、`apps/viewer/build-dist.cmd:70`） |
+| 失败前缀 | `[ERROR] …` | `[ERROR] …`（`*** ERROR: … ***` 已由批 3 `32c2ddb` 移除；`apps/game/build-dist.cmd:80`、`apps/viewer/build-dist.cmd:76` 两锚点现分别指向各文件的 `[ERROR] dist build failed.` 行） | `[ERROR] …` / `[HINT] …`（批 3 `32c2ddb` 后已统一；`apps/viewer/scripts/build-dist.mjs:77-78` 现为内嵌 `serve.py` 模板的 `[ERROR]`/`[HINT]` 行，即 `dist/serve.py` 的端口占用提示） |
 | 失败提示格式 | 英文短句 | 英文短句 | 中文长句 + 英文 `[WARN]`/`[INFO]` 混排（`apps/viewer/scripts/build-dist.mjs:114-118`） |
 
 同一仓库里同时存在 `[ERROR]` / `*** ERROR: ***` / `[错误]` 三种失败前缀，且 viewer 的 `play.cmd` 混排中英文——这就是「启动文件的输出内容不一致」的直接来源。
@@ -428,10 +428,10 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 |---|---|---|---|
 | I-07 | 端口分配无文档且互相冲突：8080 被「三处 dev + harness play」同时占用 | 见 §2.2；`apps/debug/start-dev.cmd:11`（8080）、`test/dual-mode-harness/play.cmd:6`（8080）、四个 `npm run dev`（8080） | 是否建立固定端口表 + 冲突处理规则 |
 | I-08 | `[N/M]` 步骤编号与横幅文案不一致（`[1/4]`/`[0/5]`/`[0/4]`/`[1/3]`）——**更正**：本条初稿末项写「无编号」，实测 `test/dual-mode-harness/play.cmd` **有**编号 `[1/3]`(:26)、`[2/3]`(:40)、`[3/3]`(:50)，五个入口的编号各写各的（`apps/debug/play.cmd` `/4`、`apps/debug/start-dev.cmd` `/3`、`apps/debug/build-dist.cmd` `/3`、`apps/game/build-dist.cmd` `/5`、`apps/viewer/build-dist.cmd` `/4`） | 见 §3.3 表 | 是否统一输出模板（含成功/失败逐字文案） |
-| I-09 | 失败前缀三套：`[ERROR]` / `*** ERROR: ***` / `[错误]`——**更正**：本条初稿写「viewer 中英文混排」，实测 `apps/viewer/play.cmd` 为**纯 ASCII**（bytes >127 计数 = 0），中英混排实际出现在 `apps/viewer/scripts/build-dist.mjs` 与 `src/serve.py`，故问题性质是「**中文标记散落在构建脚本与共享脚本中**」，不是「viewer 入口中英混排」 | `apps/debug/play.cmd:31`（`[ERROR]`）、`apps/game/build-dist.cmd:80`（`*** ERROR: ***`）、`apps/viewer/build-dist.cmd:70`（`[ERROR]`）；中文标记实测 **9 处**：`apps/viewer/scripts/build-dist.mjs` **7 处**（:77、:78、:161、:163、:164、:168、:169）+ `src/serve.py` **2 处**（:52、:53）。**更正**：初稿把 `apps/viewer/build-dist.cmd:70` 列为 `[错误]` 出处——实测该文件 **0 处** `[错误]`/`[提示]` | 是否统一前缀与语言 |
+| I-09 | 失败前缀三套：`[ERROR]` / `*** ERROR: ***` / `[错误]`——**更正**：本条初稿写「viewer 中英文混排」，实测 `apps/viewer/play.cmd` 为**纯 ASCII**（bytes >127 计数 = 0），中英混排实际出现在 `apps/viewer/scripts/build-dist.mjs` 与 `src/serve.py`，故问题性质是「**中文标记散落在构建脚本与共享脚本中**」，不是「viewer 入口中英混排」 | `apps/debug/play.cmd:26`（`[ERROR] npm install failed.`）、`apps/game/build-dist.cmd:80`（批 3 `32c2ddb` 前为 `*** ERROR: ***`，现为 `[ERROR] dist build failed.`）、`apps/viewer/build-dist.cmd:76`（同上）；中文标记批 3 前实测 **9 处**：`apps/viewer/scripts/build-dist.mjs` **7 处**（:77、:78、:161、:163、:164、:168、:169）+ `src/serve.py` **2 处**（:52、:53）——**批 3 `32c2ddb` 后全部改为 `[ERROR]`/`[HINT]`，实测 0 处**。**更正**：初稿把 `apps/viewer/build-dist.cmd:70` 列为 `[错误]` 出处——实测该文件 **0 处** `[错误]`/`[提示]` | 是否统一前缀与语言 |
 | I-10 | 「谁提供 WASM 契约检查」四样（**批 2 已收敛**：执行记录见 [rollout-plan.md](rollout-plan.md) §4 的 B2-3）：debug「导出符号 vs TS 导入动态比对」（**薄配置 55 行 + 共享引擎**）、game「硬编码 16 + 17 个 API 名字」（**薄配置 99 行 + 共享引擎**）、viewer「薄配置」（**批 2 补：1 类 + 1 API**，`npm run check:api` 实测 exit 0）、harness「硬编码 12 个方法」（未收敛） | `apps/debug/scripts/check-wasm-api.mjs:40-42` 输出 `WASM 导出符号 (12)`（原 `:109-126`，D-03 收敛后该文件由 127 行削至 55 行）；`apps/game/scripts/check-wasm-api.mjs:30-69` 的 `EXPORT_API`（`:30-48`）/`PHYS_API`（`:51-69`）两数组（D-03 收敛后由 `:25-64` 移到 `:30-69`）；共享引擎 `src/scripts/lib/wasm-api-contract.mjs`（203 行，纯函数：`:54` `extractExportNames`、`:77` `extractExportsFromPkgJs`、`:88` `extractExportsFromDts`、`:102` `readDtsApiNames`、`:127` `assertDtsExports`、`:152` `assertTsImportsCoveredByExports`） | 是统一为一个共享脚本，还是承认「导出集不同 → 检查项天然不同」（**已裁定并与 D-03 一致**：共享引擎 + 各工程薄配置；引擎不 import 任何工程 `pkg/*`） |
 | I-11 | `chcp 65001` 有无不一致 | §2.4 实测表 | 是否统一（`play.cmd` 两者无、`viewer/play.cmd` 有……实测：debug/game 的 play 无 `chcp`，viewer 的 play 有） |
-| I-12 | Node 依赖引导三套：`ensure-node-deps.cmd`×2（字节全等）/ 内联 `if exist node_modules\esbuild` / 检测 `node_modules\.bin\tsc` | `apps/debug/build-dist.cmd:54`、`apps/viewer/build-dist.cmd:60`、`apps/debug/scripts/ensure-node-deps.cmd:13`、harness `play.cmd` 用 `node_modules\.bin\tsc` | 是否上提为 `src/scripts/ensure-node-deps.cmd` |
+| I-12 | Node 依赖引导三套：`ensure-node-deps.cmd`×2（字节全等）/ 内联 `if exist node_modules\esbuild` / 检测 `node_modules\.bin\tsc` | `apps/debug/build-dist.cmd:54`、`apps/viewer/build-dist.cmd:60`、`apps/debug/scripts/ensure-node-deps.cmd:13`、harness `play.cmd` 用 `node_modules\.bin\tsc` | 是否上提为 `src/scripts/ensure-node-deps.cmd`（**批 2 已执行**：两份工程内副本已上提共享单份 `src/scripts/ensure-node-deps.cmd`，viewer 两处内联探针亦改为同一调用，共 9 个入口调用点） |
 | I-13 | dist 形态（single/multi）在本地与 CI 不一致，且无 `--multi` 的本地入口 | §3.4；`.github/workflows/deploy-pages.yml:91,137,155` vs 三个 `build-dist.cmd` | 是否补 `build-dist-multi.cmd` / 参数化入口 |
 | I-14 | viewer 的 `dist/` 自带 `play.cmd`+`play.sh`+`serve.py`+`README.md`+`.nojekyll`，debug/game 的 dist 都没有 | `apps/viewer/dist/` 实测 9 项 vs debug 4 项 / game 3 项（§3.2） | 这是否是规范要求（可交付产物自带启动器）还是工程特例 |
 | I-15 | `ensure-node-deps.cmd` 字节全等重复两份（AGENTS.md §7.2.1 判「保持现状」） | SHA256 前 16 位均为 `EAB3496C3F1EE6FB`，各 1267 B | 需重新裁决：纯自举逻辑 + `src/scripts/` 已有先例 |
@@ -562,7 +562,7 @@ exit=0
 | 条款 | 命题 | 判定方法 |
 |---|---|---|
 | R-18 | 同一算法/常量在仓库内只允许一份实现；判定「重复」的阈值为：两文件在剔除以工程为单位的 import 行后内容全等，或差异行数 ≤ 5 行 | 对候选对跑 `git diff --no-index --numstat`（当前 `pvs-manager.ts` 为 `2 2` → 必须上提） |
-| R-19 | 纯自举/环境准备类 shell 脚本（不含工程特有产物名的）必须在 `src/scripts/` 单份提供，工程内不得存副本 | `git ls-files 'apps/*/scripts/*.cmd'` 中不得出现 `ensure-node-deps.cmd`、`cargo-env.cmd` 之类通用名（当前两份 `ensure-node-deps.cmd` 违反 → I-15） |
+| R-19 | 纯自举/环境准备类 shell 脚本（不含工程特有产物名的）必须在 `src/scripts/` 单份提供，工程内不得存副本 | `git ls-files 'apps/*/scripts/*.cmd'` 中不得出现 `ensure-node-deps.cmd`、`cargo-env.cmd` 之类通用名（当前两份 `ensure-node-deps.cmd` 违反 → I-15） |（**批 2 `fc3de84` 已执行**：`ensure-node-deps.cmd` 的两份工程内副本已上提为 `src/scripts/ensure-node-deps.cmd` 单份，`git ls-files -- 'apps/*/scripts/ensure-node-deps.cmd'` 实测空；`cargo-env.cmd` 本就在 `src/scripts/`） **【落地状态（收口 `t9` 追加，2026-09-12）】**：审计的 `I-01..I-22` 与 `R-01..R-21` 在批 1–4 后**部分已完成、部分仍待执行**，两者不得混淆——**已执行**：`I-02`/`I-03`/`I-22`（批 1）、`I-10`/`I-12`/`I-15`（批 2 `fc3de84`）、`I-07`/`I-08`/`I-09`/`I-11`/`I-13`/`I-14`/`I-16`/`I-21`（批 3 `32c2ddb`+`2135056`）、`R-17`/`R-18`/`R-19`/`R-20`/`R-21` 的落地面（批 2–4）；**仍待执行**：`test:smoke` 的 CI 化与改名（`I-02` 的 viewer 半边）、`test/dual-mode-harness` 另案（`I-10` 的 harness 半边、`I-12` 的 harness 半边）、`architecture.md` 之外的跨工程文档端口引用收尾。逐条处置与去向见 [rollout-status.md](rollout-status.md) §4–§5。
 | R-20 | viewer 与共享层的关系必须显式声明为「正当隔离」或「欠债」：若为隔离，`tsconfig.json` 不得 include `ts-shared`；若为欠债，必须列出接入清单 | 交叉核对（**更正**：实测 `apps/viewer/tsconfig.json:15` 既未 include 共享层也无引用，条件互斥不成立 → viewer 现状**满足「正当隔离」分支**，R-20 判定为**当前合规**；初稿「既 include 又不引用」经实测不成立，见 §4.1 第 1 条更正、§5.3） |
 | R-21 | 共享层的「不可合并重复」必须列为明示例外并给出理由：五份 `Cargo.toml` 的 `[patch.crates-io] vmdl`、四份 `Cargo.toml` 模块 workspace 清单、四份 `src/wasm.d.ts` | 规范中列出例外表，且每一项都有 Cargo/TS 语义级理由 |
 

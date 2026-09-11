@@ -60,7 +60,7 @@ BSP 地图体积大，不随仓库分发（`.gitignore` 忽略 `*.bsp`、`*.dem`
 
 ## 7. 第三方组件
 
-- [@unsurf/cs-movement](https://github.com/unsurf/cs-movement) — 移动物理引擎（已修改），Apache-2.0，见 [NOTICE](apps/debug/src/physics/NOTICE)
+- [@unsurf/cs-movement](https://github.com/unsurf/cs-movement) — 移动物理引擎（已修改），Apache-2.0，见 [NOTICE](src/phys/NOTICE)
 - [vmdl](https://codeberg.org/icewind/vmdl) — Source 模型解析（vendored 于 [src/vendor/vmdl](src/vendor/vmdl)，已修改），MIT
 - [three.js](https://threejs.org/) — 3D 渲染，MIT
 

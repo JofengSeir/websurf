@@ -17,9 +17,9 @@
 | 验证物理时序 / 跑对照 | [test/dual-mode-harness/docs/overview.md](../test/dual-mode-harness/docs/overview.md) |
 | 建新子工程 / 统一启动方式与文件结构 / 判断什么该上提到 `src/` | [framework-launch-structure.md](./framework-launch-structure.md)（启动·结构·产物规范）+ [framework-decoupling.md](./framework-decoupling.md)（共享层解耦裁决）+ [framework-audit.md](./framework-audit.md)（现状事实基线） |
 
-## 2. 文档树（documents/ 下全量 27 篇，含本文 index.md 自身；test/dual-mode-harness/docs/ 5 篇验证工程文档另列；历史档案与过程讨论已移出版本库（2026-09-11））
+## 2. 文档树（documents/ 下全量 29 篇，含本文 index.md 自身；test/dual-mode-harness/docs/ 5 篇验证工程文档另列；历史档案与过程讨论已移出版本库（2026-09-11））
 
-### 根 documents/（9 篇：总架构 + 共享层四篇 + 三篇仓库框架规范 + 本导航）
+### 根 documents/（11 篇：总架构 + 共享层四篇 + 三篇仓库框架规范 + 本导航）
 
 | 文档 | 覆盖 |
 |---|---|
@@ -31,6 +31,8 @@
 | [framework-audit.md](./framework-audit.md) | 仓库框架现状审计（事实基线）：三工程启动/构建入口对照、产物与输出对照、文件结构对照、`src/` 共享层消费矩阵、`I-01..I-22` 不一致清单、`R-01..R-21` 规范需求条款 |
 | [framework-launch-structure.md](./framework-launch-structure.md) | 启动方式/文件结构/产物与输出统一规范：三件套入口语义、`start-dev.cmd` 三条件判据、10 端口段固定槽位、`.cmd` 输出逐字模板、相对路径层数对照表、豁免清单、新工程脚手架清单 |
 | [framework-decoupling.md](./framework-decoupling.md) | 共享层解耦方案：上提判定准则（级别 A/A′/B/C）、`D-01..D-23` 逐项裁决与反向否决理由、`src/` 目标结构、viewer 正当隔离专项、三批迁移顺序与回滚、`E-01..E-08` 例外表 |
+| [rollout-plan.md](./rollout-plan.md) | 批 2/3/4 逐文件施工计划：动作表（动作/源路径/目标路径/同步改动/验收命令与判据/依据编号）、两条硬约束实测、esbuild 注入方案、文件冲突面与每批回滚 |
+| [rollout-status.md](./rollout-status.md) | 框架改造交付状态与遗留登记：批次状态总表（附提交号与实际提交边界）、C 类旧路径逐条处置、全仓体检实测、`R-n` 遗留项与去向 |
 
 ### documents/debug/（6 篇：主工程）
 
