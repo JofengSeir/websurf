@@ -91,6 +91,15 @@ jobs:
         # 走 package.json 唯一入口（规范 §6.2 禁止 CI 绕过 npm 直接调工程脚本）
         run: npm run build:dist -- --multi
 
+      # ── dual-mode-harness WASM（jump-apex 门依赖其 pkg，需先构建）──
+      - name: Install dual-mode-harness dependencies
+        working-directory: test/dual-mode-harness
+        run: npm ci || npm ci
+
+      - name: Build dual-mode-harness WASM
+        working-directory: test/dual-mode-harness
+        run: npm run build:wasm
+
       - name: Verify debug optimizeScene (GLB 空间分块合并)
         working-directory: apps/debug
         # 渲染性能回归门：面片规模的地图（实测 surf_666 GLB = 34409 primitive →
@@ -179,14 +188,6 @@ jobs:
         run: npm run test:replay
 
       # ── test/ 验证工程（仅构建验证，不部署）────────────────────
-      - name: Install dual-mode-harness dependencies
-        working-directory: test/dual-mode-harness
-        run: npm ci || npm ci
-
-      - name: Build dual-mode-harness WASM
-        working-directory: test/dual-mode-harness
-        run: npm run build:wasm
-
       - name: "Build dual-mode-harness TypeScript (main/worker-a/worker-b)"
         working-directory: test/dual-mode-harness
         run: npm run build:ts
