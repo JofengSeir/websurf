@@ -2,7 +2,7 @@
 
 > 定位：三份仓库框架规范（[framework-audit.md](framework-audit.md)、[framework-launch-structure.md](framework-launch-structure.md)、[framework-decoupling.md](framework-decoupling.md)）的**交付状态**与**遗留项登记**；逐文件施工清单见 [rollout-plan.md](rollout-plan.md)。
 > 本文档是**状态记录**，不是规范、不是施工计划；规范内容仍以那三份为准，与代码冲突时以代码为准并回改本文档。
-> 记录时点：基线提交 = `5406e15`（audit `§0.3` 更正之后）；**现行事实 = 本次收口提交**（同一提交亦记于 [framework-audit.md](framework-audit.md) §0.1 的「事实时点」字段）。**本表随交付推进更新**，更新时必须同步 §1 的提交号与 §3 的实测数字。
+> 记录时点：基线提交 = **`1fe641e`**（本次收口；同一提交亦记于 [framework-audit.md](framework-audit.md) §0.1 的「事实时点」字段，由紧随其后的极小追加提交钉定）。**本表随交付推进更新**，更新时必须同步 §1 的提交号与 §3 的实测数字。
 > 记号：`已落地` = 代码在版本库内且可实测；`待执行` = 尚无对应提交；`已闭环` = 已确认无需动作；`已登记` = 明确留作后续任务。
 
 ## 1. 批次状态总表（按实际提交边界）
@@ -14,7 +14,7 @@
 | 批 3 | 启动与产物收敛：端口 10 段槽位 + `.cmd` 逐字模板 + `start-dev.cmd` 补齐 + `T-04` 内核 `dist-pack.mjs` + `D-23`/`E-08` 许可唯一源 | 已落地 | `32c2ddb`（21 文件）+ `2135056`（9 文件，修 9 处块内括号静默失效） |
 | 批 4 | 共享层上提：`D-08` / `D-09` / `D-10` / `D-16` + viewer include + 共享一致性门禁 | 已落地 | `b5be059`（40 文件）∪ `3b16366` 内的 `src/ts-shared/**` 与 `src/phys/LICENSE`·`NOTICE` ∪ `32c2ddb` 内的 2 篇文档 |
 | 前置 | `t1` 逐文件施工计划 [rollout-plan.md](rollout-plan.md) | 已落地 | `c8ef88b`（349 行） |
-| 收口 | 规范落地状态与全文计数事实同步 | 已落地 | `f911ee7` ∪ `8879c15`（批 4 收尾锚点清空）∪ `9fd4b1f` / `785ddac` / `e558558` / `2f33b20` / `3656e22` / `691cd8f` / `18f33f4` / `23d1e00` / `640da1a`（§2.5.x 判据与 `.cmd` 括号块类）∪ `6695447` / `5406e15`（audit 内容级锚点与 `§0.3`）∪ **本次收口提交**（本文件、`framework-audit.md` 三处状态/时点、`CHANGELOG.md` 追加条目） |
+| 收口 | 规范落地状态与全文计数事实同步 | 已落地 | `f911ee7` ∪ `8879c15`（批 4 收尾锚点清空）∪ `9fd4b1f` / `785ddac` / `e558558` / `2f33b20` / `3656e22` / `691cd8f` / `18f33f4` / `23d1e00` / `640da1a`（§2.5.x 判据与 `.cmd` 括号块类）∪ `6695447` / `5406e15`（audit 内容级锚点与 `§0.3`）∪ **`1fe641e`**（本次收口：本文件、`framework-audit.md` 三处状态/时点、`CHANGELOG.md` 追加条目） |
 
 **提交边界交叉（如实登记，不掩盖）**：`3b16366` 与 `32c2ddb` 的**文件归属跨了批次**——`3b16366`（标题为「修 t3 报出的三处 low 级缺陷」）同时携带了批 4 的产物（`src/ts-shared/phys/{angles,constants}.ts`、`src/ts-shared/wasm/loader.ts`、`src/ts-shared/world/{pvs-manager,types}.ts`、`src/phys/{LICENSE,NOTICE}`、`apps/debug/src/world/pvs-manager.ts`，共 11 文件），`32c2ddb`（标题为批 3）内另含批 4 的 2 篇文档（`documents/architecture.md`、`documents/decoupling` 侧引用）。系 captain 提交时**未复核暂存区**所致。**判据**：`git show --name-only 3b16366` 列出上述路径；故上表批 4 一行的提交列写作「∪」而非单一提交号。
 
@@ -100,7 +100,7 @@
 |---|---|---|---|
 | 1 | `framework-audit.md` §6.4 `I-02` 行 | 状态列 `部分执行` → `已执行`；描述列去掉「**是否入 CI 仍待定**」，改为「按规范 §4.3/§6.2 本属**排除要求**（CI 从未含该步骤）→ 无需动作」 | 与本文档 §5 的 R-1 口径一致（此前两处互相矛盾）；出处 `32c2ddb` 经 `git blame` + `git log -S` 双证 |
 | 2 | `framework-audit.md` §8.5 `R-11` 行 | 归因 `批 4` → **批 3 `32c2ddb`**（附两行 `blame` 均为 `32c2ddbf`） | `git show b5be059:apps/viewer/package.json` 内仍是 `temp/replay-selftest.mjs`，反证归因错误 |
-| 3 | `framework-audit.md` §0.1 事实时点行 | 「现行事实」由 `640da1a` 推进为**本次收口提交**；上一档保留并注明属正常前进 | 与本文档 §1 的基线为同一提交 |
+| 3 | `framework-audit.md` §0.1 事实时点行 | 「现行事实」由 `640da1a` 推进为 **`1fe641e`**（本次收口）；上一档保留并注明属正常前进 | 与本文档 §1 的基线为同一提交 |
 | 4 | 本文档 §4 表 | 8 条失效「位置」锚点按**实测内容**重定位（含第 7 条描述错位如实登记） | 门禁只查越界不查内容相符（[AGENTS.md](../AGENTS.md) §5.3）；逐条经 node 按字节读取核对 |
 | 5 | 本文档 §5 | R-1/R-11 改记已执行（`32c2ddb`）并保留成因说明；R-8 更新为「`640da1a` 已登记例外 + 判据白名单化」；**新增 R-12**（`[IMPORTANT]` 词表外，harness）、**新增 R-13**（`Q4` 登记，非缺陷） | `git blame -L 10,11 -- apps/viewer/package.json`；`git grep -n "IMPORTANT"` 实测 1 处；`src/scripts/lib/dist-pack.mjs:107` |
 | 6 | 本文档 §1/§2/§3/§7 | 基线提交号、门禁四个数字改为**收口后复跑实测值**（`50 篇 ｜ 150 声明 ｜ 1895 锚点 ｜ 失效 18 ｜ 歧义 410`，exit 0）、等价口径说明改为「`.tmp/` 副本 + 动态 import，不碰被跟踪文件」、修正两个 `## 6` 重号标题为 §6/§7 | 复跑输出见 §3；`git diff --quiet -- src/scripts/check-doc-drift.mjs` 退出 0 |
@@ -111,3 +111,4 @@
 
 - **本文档不改变任何规范条文的效力**：与三份规范冲突时以规范为准；与代码冲突时以代码为准并回改本文档。
 - 本文档的**行数/计数类数字**（50 篇 / 150 / 1895 / 71 等）是实测快照；新增或修改文档后必须重跑 §3 的命令并同步更新，否则会被 `check-doc-drift.mjs` 记为漂移。
+- **收口提交链（自引用说明）**：本次收口分两笔——`1fe641e`（内容收口：`framework-audit.md` 三处、本文件、`CHANGELOG.md` 追加）与其后一笔**极小追加提交**（把 §0.1 与本文档 §1 的「本次收口提交」替换为真实 sha `1fe641e`；该追加提交自身的 sha 记在它的提交信息里，**不在正文中自引用**，以免每次改写都改变自身标识）。因提交无法引用自身尚未生成的 sha，§0.1 的「现行事实」记为 **`1fe641e`**；两者是同一时点。
