@@ -726,7 +726,7 @@ exit=0
 | R-01 | 已执行 | 批 3 `32c2ddb`（`apps/game/start-dev.cmd`、`apps/viewer/start-dev.cmd` 新建；三工程各 3 个入口） | 闭环 |
 | R-02 | **部分执行** | 批 3 `32c2ddb` 建立端口槽位表并改 debug/game/viewer 四段；**harness 8080→8110 未执行** | 随 R-11 / R-2 另案 |
 | R-03 | 已执行 | 批 3 `32c2ddb`（三份 `play.cmd:8` 均为 `if not "%~1"=="" set PORT=%~1`） | 闭环 |
-| R-04 | 已执行（防回归） | 审计当时即合规；批 3 后 9 个入口 `.cmd` 仍全部 CRLF、纯 ASCII、无 BOM（§2.4 实测） | 防回归 |
+| R-04 | 已执行（防回归） | 批 3 `32c2ddb` + `2135056` 已把 9 个入口 `.cmd` 统一为 CRLF / 纯 ASCII / 无 BOM；本次收口逐字节复核（`node` 按字节读全仓 `*.cmd`）：**13 个被跟踪 `.cmd` 全部合规**——BOM 0、孤立 CR 0、裸 LF 0（即全 CRLF）、字节 >127 计数 0；其中三工程 9 个入口为 `apps/{debug,game,viewer}/{play,build-dist,start-dev}.cmd`。另按规范 [framework-launch-structure.md](framework-launch-structure.md) §8.2（`各工程特有能力`，`:708`）与 §3.2（`一致性豁免表`，`:413`）登记：本项属**防回归**，不属豁免 | 防回归 |
 | R-05 | 已执行 | 批 3 `32c2ddb`（端口复用分支三工程一致，`exit /b 0`） | 闭环 |
 | R-06 | 已执行 | 批 3 `32c2ddb` / `2135056`（失败分支 `pause`；`package.json` 内无 `pause`） | 闭环 |
 | R-07 | 已执行（含豁免） | 批 3 `32c2ddb` 补 `start-dev.cmd`；豁免项（harness 无 `web/`、debug 无 `web/styles.css`）写进规范 §8.2 | 闭环 |
