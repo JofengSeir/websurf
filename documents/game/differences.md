@@ -52,7 +52,7 @@
 | SAB 布局 | ts-shared 512B（`shared-state.ts:104-117`） | harness 专属 192B（`test/dual-mode-harness/src/shared-state.ts:109-110`；头注 `:3` 明示"专属布局、键位掩码位复用 ts-shared"——唯一借用的共享件就是 KEY_MASK，与 scout 矩阵一致） |
 | 物理线模型 | 单 Worker 权威 + 主线程渲染线 + 外推校准 | 双物理实例（权威 + Worker-B 预测）+ 速度校准、双槽唤醒 |
 | 渲染位置 | 主线程 Three.js（`renderer-main.ts:693-768`） | Worker-B 内 OffscreenCanvas |
-| wasm 包 | game/pkg（全量导出 + mosaic） | harness/pkg 运行时最小集仅 5 API（metadata/export_brushes_planes/export_model_phy_colliders|tri 回退/parse_spawn_points/export_glb_with_pakfile_models）；`parse_teleports/parse_pvs_data` 保留但导出流程不调用、mosaic/缺失纹理未导出（`test/dual-mode-harness/crates/wasm/src/lib.rs:14-20` 头注） |
+| wasm 包 | game/pkg（全量导出 + mosaic） | harness/pkg 运行时最小集仅 5 API（metadata/export_brushes_planes/export_model_phy_colliders\|tri 回退/parse_spawn_points/export_glb_with_pakfile_models）；`parse_teleports/parse_pvs_data` 保留但导出流程不调用、mosaic/缺失纹理未导出（`test/dual-mode-harness/crates/wasm/src/lib.rs:14-20` 头注） |
 | 用途 | 可玩游戏 | 时序验证/回归（phys-rate-parity 等脚本对拍对象） |
 
 ## 4. game vs viewer（有/无物理的分界）
