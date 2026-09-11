@@ -34,7 +34,7 @@ echo [2/4] WASM missing - building (release, slow on first run; Rust toolchain r
 call npm run build:wasm
 if errorlevel 1 (
   echo [ERROR] WASM build failed.
-  echo [HINT] Install Rust and wasm-pack (rustup + cargo install wasm-pack), then retry.
+  echo [HINT] Install Rust and wasm-pack ^(rustup + cargo install wasm-pack^), then retry.
   pause
   exit /b 1
 )

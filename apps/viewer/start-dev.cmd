@@ -25,7 +25,7 @@ echo [1/3] Building WASM (release)...
 call npm run build:wasm
 if errorlevel 1 (
   echo [ERROR] WASM build failed.
-  echo [HINT] Install Rust and wasm-pack (rustup + cargo install wasm-pack), then retry.
+  echo [HINT] Install Rust and wasm-pack ^(rustup + cargo install wasm-pack^), then retry.
   pause
   exit /b 1
 )

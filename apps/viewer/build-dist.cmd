@@ -45,7 +45,7 @@ echo [2/5] Building WASM (release)...
 call npm run build:wasm
 if errorlevel 1 (
   echo [ERROR] WASM build failed.
-  echo [HINT] Delete crates\wasm\target\wasm32-unknown-unknown and retry (antivirus locks are the usual cause).
+  echo [HINT] Delete crates\wasm\target\wasm32-unknown-unknown and retry ^(antivirus locks are the usual cause^).
   pause
   exit /b 1
 )
