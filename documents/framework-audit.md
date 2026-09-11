@@ -12,7 +12,7 @@
 
 本文自称「唯一事实基线」，但它同时是一座**审计快照**：正文里有的是**现行事实**（引用行号必须按当前代码核验），有的是**改造前历史快照**（记录当时实测，只作追溯，**不要求**与当前代码一致）。
 
-> - **事实时点**：**审计快照 = `a4ed66f`（2026-09-12，只读实测）**；**现行事实 = `1fe641e`**（批 1–4 与全部文档收口提交之后；与 [rollout-status.md](rollout-status.md) §1 的基线为同一提交，同一时点）。上一档为 `640da1a`（t1 写作时点的现行事实，属正常前进一档）。
+> - **事实时点**：**审计快照 = `a4ed66f`（2026-09-12，只读实测）**；**现行事实 = `NEXT_SHA`**（批 1–4、R-3 行尾归一与「第二批：harness 并入规范」之后；与 [rollout-status.md](rollout-status.md) §1 的基线为同一提交，同一时点）。上一档为 `1fe641e`（收口时点的现行事实，属正常前进两档：`df3a2d2`+`b56811b` 的 R-3 归一、本次第二批）。
 > - **核验命令**：单文件铁律自查见 §7.4；全仓 doc-drift 体检 `node src/scripts/check-doc-drift.mjs`（**只查行数声明漂移与锚点越界，不查内容错位**，见 §1.3）。
 
 **逐节状态（按 § 编号）**：
@@ -165,13 +165,13 @@ apps/viewer/src/core/pose.ts:9       export { wrapDeg, bspYawToCsYaw } from '../
 | debug | 8081（`apps/debug/play.cmd:7`） | `dist/index.html`（`apps/debug/play.cmd:65`、`:72`） | **是**（`apps/debug/play.cmd:8`；批 3 `32c2ddb` 统一） | 8080，`web/index.html`（`apps/debug/start-dev.cmd:7`、`:74`） | 8080（`apps/debug/package.json:15`） |
 | game | 8091（`apps/game/play.cmd:7`） | `dist/index.html`（`apps/game/play.cmd:65`、`:72`） | **是**（`apps/game/play.cmd:8`） | 无此入口 | 8090（`apps/game/package.json:15`） |
 | viewer | 8101（`apps/viewer/play.cmd:7`） | `index.html`（由 `dist/play.cmd` 服务；本工程 `apps/viewer/play.cmd:78` 调用它） | **是**（`apps/viewer/play.cmd:8`） | 无此入口 | 8100（`apps/viewer/package.json:18`） |
-| harness | 8080（`test/dual-mode-harness/play.cmd:6`） | `index.html`（`test/dual-mode-harness/play.cmd:63`） | 否 | 无此入口 | 8080（`test/dual-mode-harness/package.json:13`） |
+| harness | **8110**（`test/dual-mode-harness/play.cmd:7`，第二批已执行） | `index.html`（`test/dual-mode-harness/play.cmd:73` 的 `App:` 行；服务命令 `:82`） | 否 | 无此入口 | **8110**（`test/dual-mode-harness/package.json:13`） |
 
-`$ node -e "…逐文件正则匹配 ^set PORT=" …` 实测（当前行号与原文）：`apps/debug/play.cmd` 第 7 行 `set PORT=8081`、`apps/game/play.cmd` 第 7 行 `set PORT=8091`、`apps/viewer/play.cmd` 第 7 行 `set PORT=8101`、`test/dual-mode-harness/play.cmd` 第 6 行 `set PORT=8080`（harness 未按批 3 槽位表改为 8110，登记为遗留项 R-11）。
+`$ node -e "…逐文件正则匹配 ^set PORT=" …` 实测（当前行号与原文）：`apps/debug/play.cmd` 第 7 行 `set PORT=8081`、`apps/game/play.cmd` 第 7 行 `set PORT=8091`、`apps/viewer/play.cmd` 第 7 行 `set PORT=8101`、`test/dual-mode-harness/play.cmd` 第 7 行 `set PORT=8110`（**第二批已按槽位表改为 8110**，`R-11` 的 harness 半边就此闭环；行号由 6 → 7 是因第二批补了 `chcp 65001` 头部行）。
 
 两个直接后果（**批 3 `32c2ddb` 已处置**，下方保留审计当时的判断供追溯）：
 
-- ~~四个 `npm run dev` 全部写死 8080~~ → **批 3 已按端口槽位表分流**：debug 8080（`apps/debug/package.json:15`）、game 8090（`apps/game/package.json:15`）、viewer 8100（`apps/viewer/package.json:18`）、harness 8080（`test/dual-mode-harness/package.json:13`，与 harness 的 `play.cmd` 同端口属刻意复用）。**只剩 harness 与 debug dev 仍共用 8080**，且两者不会同时用（harness 随 R-11 另案）。
+- ~~四个 `npm run dev` 全部写死 8080~~ → **批 3 已按端口槽位表分流**：debug 8080（`apps/debug/package.json:15`）、game 8090（`apps/game/package.json:15`）、viewer 8100（`apps/viewer/package.json:18`）、harness 8110（`test/dual-mode-harness/package.json:13`，与 harness 的 `play.cmd` 同端口属**规范 §2.3 明文豁免**）。**第二批后四者端口互不冲突**（8080/8090/8100/8110），harness 与 debug dev 共用 8080 的遗留已消除。
 - debug 的 dev 目标页是 `web/index.html`（`apps/debug/start-dev.cmd:74` 打印并打开），而 `src/serve.py:58` 打印的是 `App: http://localhost:{PORT}/web/index.html`——两者一致；但 game/viewer 的 `npm run dev` 只能靠 README 手写提示，各写各的（`apps/viewer/README.md:30` 仍写 `http://localhost:8080/web/`，**批 3 后 viewer dev 端口已为 8100**，该行属待回改的文档面遗留）。
 
 ### 2.3 `package.json` scripts 对照（实测）
@@ -187,8 +187,8 @@ apps/viewer/src/core/pose.ts:9       export { wrapDeg, bspYawToCsYaw } from '../
 | `build:ts` | YES | YES | YES | YES | 实现不同，见下 |
 | `build:dist` | YES | YES | YES | YES | `node scripts/build-dist.mjs` |
 | `typecheck` | YES | YES | YES | YES | 均为 `tsc --noEmit` |
-| `dev` | YES | YES | YES | YES | **端口不同**：debug `python ../../src/serve.py 8080 .` / game `… 8090 .` / viewer `… 8100 .` / harness `… 8080 .`（批 3 `32c2ddb` 前四者全为 8080） |
-| `check:api` | YES | YES | **已补**（批 2 `fc3de84`） | YES | 四种实现：debug/game/viewer 为薄配置 + 共享引擎，harness 为独立实现 |
+| `dev` | YES | YES | YES | YES | **端口不同**：debug `python ../../src/serve.py 8080 .` / game `… 8090 .` / viewer `… 8100 .` / harness `… 8110 .`（批 3 `32c2ddb` 前四者全为 8080；harness 由第二批改为 8110） |
+| `check:api` | YES | YES | **已补**（批 2 `fc3de84`） | YES | **四份均为薄配置 + 共享引擎**（批 2 收敛三工程、第二批收敛 harness；见 §6.4 的 `I-10`） |
 | `test:*` / `bench:*` / `plot:*` / `count:*` | 9 个 | 2 个 | 2 个 | 1 个 | 命名混乱，见 §3.2 |
 
 `build:ts` 的实现实测有 3 种形态：
@@ -216,7 +216,7 @@ apps/viewer/src/core/pose.ts:9       export { wrapDeg, bspYawToCsYaw } from '../
 | game | `[0/5]`…`[5/5]` | npm + wasm-pack + node（`:18-31`，`[0/5]` 在 `:18`） | `call npm run check:api`（`:58`，`[3/5]` 在 `:57`） | `call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause`（`:36`） | 是 / 是 | `:2` |
 | viewer | `[0/5]`…`[5/5]` | npm + wasm-pack + node（`:16-29`，`[0/5]` 在 `:16`） | `call npm run check:api`（`:56`，`[3/5]` 在 `:55`） | `call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause`（`:34`） | 是 / 是 | `:2` |
 
-实测证据：`$ node -e "…逐文件正则匹配 chcp …"` → 三个工程的 `play.cmd` / `build-dist.cmd` / `start-dev.cmd` 共 **9 个入口 `.cmd` 全部** `chcp 65001 >nul` 在第 2 行（批 3 前 `debug/play.cmd`、`debug/build-dist.cmd` 无 `chcp`，game/viewer 的 `start-dev.cmd` 则尚不存在；唯一例外是 `test/dual-mode-harness/play.cmd`，harness 未收敛，随 R-2/R-11 另案）。
+实测证据：`$ node -e "…逐文件正则匹配 chcp …"` → 三个工程的 `play.cmd` / `build-dist.cmd` / `start-dev.cmd` 共 **9 个入口 `.cmd` 全部** `chcp 65001 >nul` 在第 2 行（批 3 前 `debug/play.cmd`、`debug/build-dist.cmd` 无 `chcp`，game/viewer 的 `start-dev.cmd` 则尚不存在；第二批前唯一例外是 `test/dual-mode-harness/play.cmd`（缺 `chcp`），**第二批已补齐**（`test/dual-mode-harness/play.cmd:2`），全部 13 个被跟踪 `.cmd` 现均为 `chcp 65001` + CRLF + 纯 ASCII）。
 `$ node -e "…逐文件统计 >127 的字节数与 BOM…"` → 8 个工程内 `.cmd` 全部 `nonASCIIbytes=0`、`BOM=false`（符合「`.cmd` 保持纯 ASCII」的既有实践）；`$ node -e "…统计 LF 与 CRLF…"` → 全部 `LF == CRLF`、`loneCR=false`。
 
 ### 2.5 退出码与暂停行为对照（实测）
@@ -482,7 +482,7 @@ harness 侧（`test/dual-mode-harness/`，目录层级为 `src/` + `src/panel/` 
 | 范围 | 口径 2（含 `ts-shared` 字面量） | 口径 1（真实 import 语句） |
 |---|---|---|
 | `src/**/*.ts`（共 11 个 `.ts`） | **8** | **7** |
-| `scripts/**/*.mjs`（共 12 个 `.mjs`） | **5** | 不适用（脚本用注释与路径字符串引用；harness 的 `check-wasm-api.mjs` / `build-dist.mjs` 仍是独立实现，未消费共享引擎——见 R-10/R-2） |
+| `scripts/**/*.mjs`（共 12 个 `.mjs`） | **5** | 不适用（脚本用注释与路径字符串引用；harness 的 `check-wasm-api.mjs` / `build-dist.mjs` **第二批已消费共享引擎/内核**（薄配置 64 行 / 薄入口 80 行）——见 §6.4 的 `I-10`/`I-12`） |
 | `docs/**/*.md`（共 10 篇 md，含 `archive/` 5 篇） | **8** | 不适用 |
 
 - 口径 1 的 7 个（`src/` 内）：`main.ts`、`shared-state.ts`、`renderer/tick-consumer.ts`、`renderer/tick-consumer.test.ts`、`worker-a.ts`、`worker-b.ts`、`worker/t4-chain.test.ts`。
@@ -535,19 +535,19 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | I-04 | 失效配置：`include` 指向不存在的目录 | `apps/debug/tsconfig.json:26` 的 `include` 含 `web/vendor`；`$ Test-Path apps/debug/web/vendor` → `False` | AGENTS.md §5.3「所有相对链接必须指向真实存在的文件或目录」的同类原则（配置路径同罪）。**（收口补注：批 4 `b5be059` 已删该失效 include，现值为 `["src","../../src/ts-shared/**/*.ts"]`；本行为审计当时快照。处置结论见 §6.4 的 `I-04`）** |
 | I-05 | 文档遗留已废弃路径 | `apps/viewer/README.md:45`「本地地图副本放仓库根 `maps/`（gitignored）」；`$ Test-Path maps` → `False`；根 `README.md:43` 已声明根 `maps/` 废弃 | AGENTS.md §5.3「与代码不一致时以代码为准并回改文档」 |
 | I-06 | `AGENTS.md:37` 的工程标准布局声称三工程都有 `start-dev.cmd`，实测 game/viewer/harness 均无 | `$ git ls-files "\*.cmd"` 实测结果中 `start-dev.cmd` 只出现一次：`apps/debug/start-dev.cmd`（§2.1 清单） | AGENTS.md §1.2 布局表 |
-| I-22 | 共享工具的相对路径层数写错：`apps/debug/scripts/install-wasm-bindgen.cmd` 位于 `scripts/` 下，却只用两层上溯（`..\..\` 落在 `apps/`），`src/scripts/cargo-env.cmd` 永远调不到，该脚本内的 `CARGO_HOME` / `WASM_PACK_CACHE` / `WASM_BINDGEN` **全部为空** | 该文件第 19 行 `call "%~dp0..\..\src\scripts\cargo-env.cmd"`；全仓 `%~dp0` 路径逐条实测：本条解析为 `apps/src/scripts/cargo-env.cmd`（`$ Test-Path` → `False`），其余 12 条同款调用（`apps/debug/build-dist.cmd:33`、`apps/debug/play.cmd:20`、`apps/debug/start-dev.cmd:20`、`apps/game/build-dist.cmd:33`、`apps/game/play.cmd:20`、`apps/game/start-dev.cmd:20`、`apps/viewer/build-dist.cmd:31`、`apps/viewer/play.cmd:20`、`apps/viewer/start-dev.cmd:20`、`test/dual-mode-harness/play.cmd:37` 等）全部解析成功——它们都位于工程根，`..\..\` 层数正确。正确写法是 `..\..\..\src\scripts\cargo-env.cmd`（三层）。**（收口补注：本行证据列为审计当时快照；该脚本已由批 2 `fc3de84` 上提至 `src/scripts/install-wasm-bindgen.cmd`，旧路径 `apps/debug/scripts/install-wasm-bindgen.cmd` 实测已不存在，故其中「第 19 行」等行号不再指向现行文件。处置结论见 §6.4 的 `I-22`）** | AGENTS.md §6「移动或改名文件后……各工程相对依赖路径（`crates/wasm` → `../../../../src` 一类，**层数易错**）」；与 I-03 同类 |
+| I-22 | 共享工具的相对路径层数写错：`apps/debug/scripts/install-wasm-bindgen.cmd` 位于 `scripts/` 下，却只用两层上溯（`..\..\` 落在 `apps/`），`src/scripts/cargo-env.cmd` 永远调不到，该脚本内的 `CARGO_HOME` / `WASM_PACK_CACHE` / `WASM_BINDGEN` **全部为空** | 该文件第 19 行 `call "%~dp0..\..\src\scripts\cargo-env.cmd"`；全仓 `%~dp0` 路径逐条实测：本条解析为 `apps/src/scripts/cargo-env.cmd`（`$ Test-Path` → `False`），其余 12 条同款调用（`apps/debug/build-dist.cmd:33`、`apps/debug/play.cmd:20`、`apps/debug/start-dev.cmd:20`、`apps/game/build-dist.cmd:33`、`apps/game/play.cmd:20`、`apps/game/start-dev.cmd:20`、`apps/viewer/build-dist.cmd:31`、`apps/viewer/play.cmd:20`、`apps/viewer/start-dev.cmd:20`、`test/dual-mode-harness/play.cmd:19`（第二批前为 `:37`）等）全部解析成功——它们都位于工程根，`..\..\` 层数正确。正确写法是 `..\..\..\src\scripts\cargo-env.cmd`（三层）。**（收口补注：本行证据列为审计当时快照；该脚本已由批 2 `fc3de84` 上提至 `src/scripts/install-wasm-bindgen.cmd`，旧路径 `apps/debug/scripts/install-wasm-bindgen.cmd` 实测已不存在，故其中「第 19 行」等行号不再指向现行文件。处置结论见 §6.4 的 `I-22`）** | AGENTS.md §6「移动或改名文件后……各工程相对依赖路径（`crates/wasm` → `../../../../src` 一类，**层数易错**）」；与 I-03 同类 |
 | I-21 | 上游 Apache-2.0 许可合规缺口：只有 debug 的 dist 拷贝许可证，game 的 dist（single 与 multi 皆然）不含任何 `LICENSE.*` / `NOTICE.*` | `apps/debug/scripts/build-dist.mjs:136-137` 拷贝 `LICENSE`/`NOTICE` → `dist/LICENSE.cs-movement`、`dist/NOTICE.cs-movement`（实测存在，11560 / 625 B）；`apps/game/dist/` 实测 3 项、无许可证文件，`apps/game/scripts/build-dist.mjs` 无对应代码，而 game 同样链接 `@unsurf/cs-movement` | 许可证合规是硬要求，不属「真实差异」，也不可豁免——按 §4.3 的分组应归入本节的**待修缺陷**。**（收口补注：批 3 `32c2ddb` 已按唯一源方案消除本缺口——许可源上提为 `src/phys/{LICENSE,NOTICE}` 单份，三工程 single/multi 均由 `copyLicensePair` 做产物级拷贝，故「只有 debug 拷贝、game 无对应代码」已不反映现状；本行为审计当时快照。处置结论见 §6.4 的 `I-21`）** |
 
 ### 6.2 需统一规范裁决（10 条）
 
 | # | 现象 | 证据 | 需裁决的问题 |
 |---|---|---|---|
-| I-07 | 端口分配无文档且互相冲突：8080 被「三处 dev + harness play」同时占用 | 见 §2.2；审计当时 `apps/debug/start-dev.cmd`（8080，`:11` 为 python 探测行）、`test/dual-mode-harness/play.cmd:6`（8080）、四个 `npm run dev`（8080）。**批 3 `32c2ddb` 已建立固定端口槽位表**：debug dev 8080 / debug play 8081 / game play 8091 / game dev 8090 / viewer play 8101 / viewer dev 8100（当前锚点：`apps/debug/play.cmd:7`、`apps/game/play.cmd:7`、`apps/viewer/play.cmd:7`、`apps/debug/start-dev.cmd:7`，以及四个 `package.json` 的 `dev` 行） | 是否建立固定端口表 + 冲突处理规则（**已落为规范 §2.3 端口表**） |
-| I-08 | `[N/M]` 步骤编号与横幅文案不一致（`[1/4]`/`[0/5]`/`[0/4]`/`[1/3]`）——**更正**：本条初稿末项写「无编号」，实测 `test/dual-mode-harness/play.cmd` **有**编号 `[1/3]`(:26)、`[2/3]`(:40)、`[3/3]`(:50)，五个入口的编号各写各的（`apps/debug/play.cmd` `/4`、`apps/debug/start-dev.cmd` `/3`、`apps/debug/build-dist.cmd` `/3`、`apps/game/build-dist.cmd` `/5`、`apps/viewer/build-dist.cmd` `/4`） | 见 §3.3 表 | 是否统一输出模板（含成功/失败逐字文案） |
+| I-07 | 端口分配无文档且互相冲突：8080 被「三处 dev + harness play」同时占用 | 见 §2.2；审计当时 `apps/debug/start-dev.cmd`（8080，`:11` 为 python 探测行）、`test/dual-mode-harness/play.cmd:6`（8080）、四个 `npm run dev`（8080）。**批 3 `32c2ddb` 已建立固定端口槽位表**，**第二批补齐 harness**：debug dev 8080 / debug play 8081 / game dev 8090 / game play 8091 / viewer dev 8100 / viewer play 8101 / harness dev+play 8110（当前锚点：`apps/debug/play.cmd:7`、`apps/game/play.cmd:7`、`apps/viewer/play.cmd:7`、`apps/debug/start-dev.cmd:7`、`test/dual-mode-harness/play.cmd:7`，以及四个 `package.json` 的 `dev` 行） | 是否建立固定端口表 + 冲突处理规则（**已落为规范 §2.3 端口表**） |
+| I-08 | `[N/M]` 步骤编号与横幅文案不一致（`[1/4]`/`[0/5]`/`[0/4]`/`[1/3]`）——**更正**：本条初稿末项写「无编号」，实测 `test/dual-mode-harness/play.cmd` **有**编号 `[1/3]`(:22)、`[2/3]`(:32 与就绪行 `:52`)、`[3/3]`(:54)（第二批后行号），五个入口的编号各写各的（`apps/debug/play.cmd` `/4`、`apps/debug/start-dev.cmd` `/3`、`apps/debug/build-dist.cmd` `/3`、`apps/game/build-dist.cmd` `/5`、`apps/viewer/build-dist.cmd` `/4`） | 见 §3.3 表 | 是否统一输出模板（含成功/失败逐字文案） |
 | I-09 | 失败前缀三套：`[ERROR]` / `*** ERROR: ***` / `[错误]`——**更正 1**：本条初稿写「viewer 中英文混排」，实测 `apps/viewer/play.cmd` 为**纯 ASCII**（bytes >127 计数 = 0），不是「viewer 入口中英混排」。**更正 2（本条）**：初稿据此进一步推断「中文标记散落在构建脚本与共享脚本中」并给出「中文标记 9 处」的计数——按 node 字节读实测，**源码内中文标记 0 处**，`apps/viewer/scripts/build-dist.mjs` 与 `src/serve.py` 里的 14 处**全部是英文** `[ERROR]`/`[HINT]`；故 I-09 的准确性质是「**失败/提示前缀三套并存**」，不是「中文标记散落」。初稿的计数与行号是 **Windows PowerShell 5.1 默认解码**造成的误读：该模式会**系统性丢行 → 行数与行号整体偏移 → 匹配到错误内容**（与匹配内容是中文还是英文无关，纯 ASCII 同样偏移；实测行数偏移：`apps/viewer/src/core/constants.ts` 41→38、`ts-shared/decoupled/decoupled-loop.ts` 449→409、`ts-shared/tick/tick-consumer.ts` 455→426、`apps/debug/scripts/check-wasm-api.mjs` 55→50；机制证据：PS 输出含 123 字符长行而文件字节体检为纯 LF）。核验一律用 **node 按字节读**（`Get-Content -Encoding UTF8` 行数正确，可用，但 node 路径不受该缺陷影响）。 | `apps/debug/play.cmd:26`（`[ERROR] npm install failed.`）、`apps/game/build-dist.cmd:80`、`apps/viewer/build-dist.cmd:76`（批 3 `32c2ddb` 前为 `*** ERROR: ***`，现为 `[ERROR] dist build failed.`）；英文标记实测 **14 处**：`apps/viewer/scripts/build-dist.mjs` **12 处**（`[ERROR]` :43、:107、:282；`[HINT]` :44、:108、:148、:191、:193、:194、:198、:199、:283）+ `src/serve.py` **2 处**（`[ERROR]` :52、`[HINT]` :53）；`apps/viewer/build-dist.cmd` 7 对（`[ERROR]` :10、:25、:36、:47、:58、:67、:76）、`apps/viewer/play.cmd` 5 对（`[ERROR]` :13、:26、:36、:47、:56）。**源码内中文标记实测 0 处**；**批 3 `32c2ddb` 后**三套前缀已统一为 `[ERROR]`/`[HINT]`（`*** ERROR: ***` 移除，viewer 内嵌模板与共享 `src/serve.py` 的中文标记归一） | 是否统一前缀与语言 |
-| I-10 | 「谁提供 WASM 契约检查」四样（**批 2 已收敛**：执行记录见 [rollout-plan.md](rollout-plan.md) §4 的 B2-3）：debug「导出符号 vs TS 导入动态比对」（**薄配置 55 行 + 共享引擎**）、game「硬编码 16 + 17 个 API 名字」（**薄配置 99 行 + 共享引擎**）、viewer「薄配置」（**批 2 补：1 类 + 1 API**，`npm run check:api` 实测 exit 0）、harness「硬编码 12 个方法」（未收敛） | `apps/debug/scripts/check-wasm-api.mjs:40-42` 输出 `WASM 导出符号 (12)`（原 `:109-126`，D-03 收敛后该文件由 127 行削至 55 行）；`apps/game/scripts/check-wasm-api.mjs:30-69` 的 `EXPORT_API`（`:30-48`）/`PHYS_API`（`:51-69`）两数组（D-03 收敛后由 `:25-64` 移到 `:30-69`）；共享引擎 `src/scripts/lib/wasm-api-contract.mjs`（203 行，纯函数：`:54` `extractExportNames`、`:77` `extractExportsFromPkgJs`、`:88` `extractExportsFromDts`、`:102` `readDtsApiNames`、`:127` `assertDtsExports`、`:152` `assertTsImportsCoveredByExports`） | 是统一为一个共享脚本，还是承认「导出集不同 → 检查项天然不同」（**已裁定并与 D-03 一致**：共享引擎 + 各工程薄配置；引擎不 import 任何工程 `pkg/*`） |
+| I-10 | 「谁提供 WASM 契约检查」四样（**批 2 已收敛**：执行记录见 [rollout-plan.md](rollout-plan.md) §4 的 B2-3）：debug「导出符号 vs TS 导入动态比对」（**薄配置 55 行 + 共享引擎**）、game「硬编码 16 + 17 个 API 名字」（**薄配置 99 行 + 共享引擎**）、viewer「薄配置」（**批 2 补：1 类 + 1 API**，`npm run check:api` 实测 exit 0）、harness「硬编码 12 个方法」（**第二批已收敛为薄配置 64 行 + 共享引擎**，`test/dual-mode-harness/scripts/check-wasm-api.mjs:16-19` 引引擎、`:26-39` 保留本工程 12 API 清单） | `apps/debug/scripts/check-wasm-api.mjs:40-42` 输出 `WASM 导出符号 (12)`（原 `:109-126`，D-03 收敛后该文件由 127 行削至 55 行）；`apps/game/scripts/check-wasm-api.mjs:30-69` 的 `EXPORT_API`（`:30-48`）/`PHYS_API`（`:51-69`）两数组（D-03 收敛后由 `:25-64` 移到 `:30-69`）；共享引擎 `src/scripts/lib/wasm-api-contract.mjs`（203 行，纯函数：`:54` `extractExportNames`、`:77` `extractExportsFromPkgJs`、`:88` `extractExportsFromDts`、`:102` `readDtsApiNames`、`:127` `assertDtsExports`、`:152` `assertTsImportsCoveredByExports`） | 是统一为一个共享脚本，还是承认「导出集不同 → 检查项天然不同」（**已裁定并与 D-03 一致**：共享引擎 + 各工程薄配置；引擎不 import 任何工程 `pkg/*`） |
 | I-11 | `chcp 65001` 有无不一致 | §2.4 实测表 | 是否统一（`play.cmd` 两者无、`viewer/play.cmd` 有……实测：debug/game 的 play 无 `chcp`，viewer 的 play 有） |
-| I-12 | Node 依赖引导三套：`ensure-node-deps.cmd`×2（字节全等）/ 内联 `if exist node_modules\esbuild` / 检测 `node_modules\.bin\tsc` | 审计当时锚点 `apps/debug/build-dist.cmd:54`、`apps/viewer/build-dist.cmd:60`（两处内联/副本）、`apps/debug/scripts/ensure-node-deps.cmd:13`、harness `play.cmd`（`node_modules\.bin\tsc`，当前 `:25`） | 是否上提为 `src/scripts/ensure-node-deps.cmd`（**批 2 `fc3de84` 已执行**：两份工程内副本已上提共享单份 `src/scripts/ensure-node-deps.cmd`，viewer 两处内联探针亦改为同一调用，**共 9 个入口调用点**；当前锚点 `src/scripts/ensure-node-deps.cmd`（63 行）与各入口的 `call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause`。**harness 半边仍未消费**，随 R-10/R-2 另案） |
+| I-12 | Node 依赖引导三套：`ensure-node-deps.cmd`×2（字节全等）/ 内联 `if exist node_modules\esbuild` / 检测 `node_modules\.bin\tsc` | 审计当时锚点 `apps/debug/build-dist.cmd:54`、`apps/viewer/build-dist.cmd:60`（两处内联/副本）、`apps/debug/scripts/ensure-node-deps.cmd:13`、harness `play.cmd`（`node_modules\.bin\tsc`，当前 `:25`） | 是否上提为 `src/scripts/ensure-node-deps.cmd`（**批 2 `fc3de84` 已执行**：两份工程内副本已上提共享单份 `src/scripts/ensure-node-deps.cmd`，viewer 两处内联探针亦改为同一调用，**共 9 个入口调用点**；当前锚点 `src/scripts/ensure-node-deps.cmd`（63 行）与各入口的 `call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause`。**harness 半边已由第二批消费**：`test/dual-mode-harness/play.cmd:23` 为 `call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause`，其 `node_modules\.bin\tsc` 探针已删除） |
 | I-13 | dist 形态（single/multi）在本地与 CI 不一致，且无 `--multi` 的本地入口 | §3.4；`.github/workflows/deploy-pages.yml:91,137,155` —— **审计当时的实测**（该三处现分别为注释行、`working-directory: apps/game`、步骤名），当前 CI 命令锚点为 `:92`/`:144`/`:175`；本地三份 `build-dist.cmd` 均接受可选首参 `[single/multi]` | 是否补 `build-dist-multi.cmd` / 参数化入口（**已落为规范 §5.2 R-15：参数化首参，viewer 声明 single-only 豁免**） |
 | I-14 | viewer 的 `dist/` 自带 `play.cmd`+`play.sh`+`serve.py`+`README.md`+`.nojekyll`，debug/game 的 dist 都没有 | `apps/viewer/dist/` 实测 9 项 vs debug 4 项 / game 3 项（§3.2） | 这是否是规范要求（可交付产物自带启动器）还是工程特例 |
 | I-15 | `ensure-node-deps.cmd` 字节全等重复两份（AGENTS.md §7.2.1 判「保持现状」） | SHA256 前 16 位均为 `EAB3496C3F1EE6FB`，各 1267 B | 需重新裁决：纯自举逻辑 + `src/scripts/` 已有先例 |
@@ -574,12 +574,12 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | I-04 | 已执行 | 批 4 `b5be059`（`apps/debug/tsconfig.json` 删 `web/vendor`） | 闭环 |
 | I-05 | 已执行 | 根 `README.md:43` 已统一为 `test/maps/`（并声明「仓库根 `maps/` 已废弃」，出处 `a4ed66f`）；`apps/viewer/README.md:45` 的旧表述（「本地地图副本放仓库根 `maps/`（gitignored）」）**已由收尾轮直接改为 `test/maps/` 并补指根 README §4**，viewer 半边闭环。收口期间该文件不在任务 inScope（`apps/` 属 out of scope），故当时只登记为「部分执行」并立 R-14 | 闭环（R-14 见 [rollout-status.md](rollout-status.md) §5） |
 | I-06 | 已执行（规范侧） | 规范 [framework-launch-structure.md](framework-launch-structure.md) §3.1 已把三件套写为「debug 有 `start-dev.cmd`，game/viewer 无」的差异表；批 3 `32c2ddb` 已为 game/viewer 补齐 `start-dev.cmd` | 闭环 |
-| I-07 | 已执行 | 批 3 `32c2ddb`（端口槽位表，见规范 §2.3） | 闭环（harness 8080 半边随 R-11） |
+| I-07 | 已执行 | 批 3 `32c2ddb`（端口槽位表，见规范 §2.3）+ **第二批**（harness `8080` → `8110`，`test/dual-mode-harness/play.cmd:7`、`package.json:13`） | 闭环（`R-11` 的 harness 半边同时闭合） |
 | I-08 | 已执行 | 批 3 `32c2ddb` + `2135056`（`[N/M]` 逐字模板） | 闭环 |
 | I-09 | 已执行 | 批 3 `32c2ddb`（三类前缀归一为 `[ERROR]`/`[HINT]`） | 闭环 |
-| I-10 | 部分执行 | 批 2 `fc3de84`（共享引擎 `src/scripts/lib/wasm-api-contract.mjs` + 三工程薄配置；见 `I-10` 行的证据列） | harness 半边随 R-10/R-2 |
+| I-10 | 已执行 | 批 2 `fc3de84`（共享引擎 `src/scripts/lib/wasm-api-contract.mjs` + 三工程薄配置）+ **第二批**（harness 薄配置 64 行，`test/dual-mode-harness/scripts/check-wasm-api.mjs`） | 闭环（`R-10` 的 check-wasm-api 半边） |
 | I-11 | 已执行 | 批 3 `32c2ddb`（9 个入口 `.cmd` 统一 `chcp 65001`） | 闭环（harness 除外，随 R-2） |
-| I-12 | 部分执行 | 批 2 `fc3de84`（上提共享单份 + 9 个调用点） | harness 半边随 R-10/R-2 |
+| I-12 | 已执行 | 批 2 `fc3de84`（上提共享单份 + 9 个调用点）+ **第二批**（harness `play.cmd:23` 为第 10 个调用点） | 闭环（`R-10` 的依赖引导半边） |
 | I-13 | 已执行 | 批 3 `32c2ddb`（`build-dist.cmd [single/multi]` 参数化） | 闭环 |
 | I-14 | 已执行（规范豁免） | 规范 §3.2/§8.2 记为 viewer 交付物真实需求（`cleanStale` + `KEEP` 保留自带启动器） | 闭环 |
 | I-15 | 已执行 | 批 2 `fc3de84`（`ensure-node-deps.cmd` 上提为 `src/scripts/` 单份） | 闭环 |
@@ -591,7 +591,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | I-21 | 已执行 | 批 3 `32c2ddb`（许可源唯一化 `src/phys/{LICENSE,NOTICE}` + 产物级拷贝；三工程一致） | 闭环 |
 | I-22 | 已执行 | 批 1 `fa5552e` 就地补层 → 批 2 `fc3de84` 上提 `src/scripts/install-wasm-bindgen.cmd`（105 行） | 闭环 |
 
-**仍未执行项的去向汇总**（与 [rollout-status.md](rollout-status.md) §5 逐条对应）：`I-02`(viewer 半边) / `I-10`(harness 半边) / `I-12`(harness 半边) → R-1、R-2、R-10；harness 端口 8080→8110 → R-11。
+**仍未执行项的去向汇总（已清空）**：原登记的 `I-02`(viewer 半边) / `I-10`(harness 半边) / `I-12`(harness 半边) / harness 端口 `8080→8110` 现均已闭环——`I-02` viewer 半边属**排除要求**（CI 从未含该步骤，批 3 `32c2ddb` 改名 `local:smoke`）、其余三项由**第二批**执行（`R-2`/`R-10`/`R-11`，见 [rollout-status.md](rollout-status.md) §5）。
 
 ## 7. 既有约定覆核（AGENTS.md §1.2 / §2 / §3 / §6）
 
@@ -679,7 +679,7 @@ exit=0
 | 条款 | 命题（二值可判定） | 判定方法 |
 |---|---|---|
 | R-01 | 每个模块工程提供且仅提供三个 Windows 双击入口：`play.cmd`（跑已构建产物）、`start-dev.cmd`（跑 dev 源）、`build-dist.cmd`（构建 dist，不启动服务）；缺失者必须补，不允许「只有两个」或「多一个第四入口」 | `$ git ls-files 'apps/*/*.cmd'` 去重后每个工程恰好这 3 个 |
-| R-02 | 端口按固定表分配且互不冲突：debug `start-dev`=8080、debug `play`=8081、game `play`=8137、viewer `play`=8090、harness `play`=8080（与 debug dev 同端口属刻意复用，须在规范中写明） | 逐文件 `Select-String 'set PORT='` 与固定表比对。**当前（批 3 `32c2ddb` 后）固定表**：debug dev 8080 / debug play 8081 / game dev 8090 / game play 8091 / viewer dev 8100 / viewer play 8101 / harness dev+play 8110（**harness 未执行，现仍 8080** → 遗留项 R-11）；已退役 `8137` 零命中 |
+| R-02 | 端口按固定表分配且互不冲突：debug `start-dev`=8080、debug `play`=8081、game `play`=8137、viewer `play`=8090、harness `play`=8080（与 debug dev 同端口属刻意复用，须在规范中写明） | 逐文件 `Select-String 'set PORT='` 与固定表比对。**当前（批 3 `32c2ddb` + 第二批后）固定表**：debug dev 8080 / debug play 8081 / game dev 8090 / game play 8091 / viewer dev 8100 / viewer play 8101 / harness dev+play 8110（**第二批已执行**，`test/dual-mode-harness/play.cmd:7`）；已退役 `8137` 零命中 |
 | R-03 | 所有 `play.cmd` 接受可选首参 `[port]` 覆盖默认端口（审计当时仅 viewer 支持） | `apps/<app>/play.cmd` 含 `if not "%~1"=="" set PORT=%~1`。**已执行（批 3 `32c2ddb`）**：debug `:8`、game `:8`、viewer `:8` 逐字一致 |
 | R-04 | 所有 `.cmd` 满足：行尾 CRLF、纯 ASCII（无 >127 字节）、无 BOM | `$ node -e "…统计 LF/CRLF 与 >127 字节…"` 全绿（当前 12/12 合规，见 §2.4） |
 | R-05 | 端口被占用时行为统一为「复用已运行实例并打开浏览器，退出码 0」；若要改为「报错退出」，三工程必须一致 | 三份 `play.cmd` 的端口检查分支逐行比对 |
@@ -724,7 +724,7 @@ exit=0
 | 条款 | 状态 | 依据 | 去向 |
 |---|---|---|---|
 | R-01 | 已执行 | 批 3 `32c2ddb`（`apps/game/start-dev.cmd`、`apps/viewer/start-dev.cmd` 新建；三工程各 3 个入口） | 闭环 |
-| R-02 | **部分执行** | 批 3 `32c2ddb` 建立端口槽位表并改 debug/game/viewer 四段；**harness 8080→8110 未执行** | 随 R-11 / R-2 另案 |
+| R-02 | 已执行 | 批 3 `32c2ddb` 建立端口槽位表并改 debug/game/viewer 四段；**第二批**改 harness `8080→8110`（`test/dual-mode-harness/play.cmd:7`、`package.json:13`） | 闭环 |
 | R-03 | 已执行 | 批 3 `32c2ddb`（三份 `play.cmd:8` 均为 `if not "%~1"=="" set PORT=%~1`） | 闭环 |
 | R-04 | 已执行（防回归） | 批 3 `32c2ddb` + `2135056` 已把 9 个入口 `.cmd` 统一为 CRLF / 纯 ASCII / 无 BOM；本次收口逐字节复核（`node` 按字节读全仓 `*.cmd`）：**13 个被跟踪 `.cmd` 全部合规**——BOM 0、孤立 CR 0、裸 LF 0（即全 CRLF）、字节 >127 计数 0；其中三工程 9 个入口为 `apps/{debug,game,viewer}/{play,build-dist,start-dev}.cmd`。另按规范 [framework-launch-structure.md](framework-launch-structure.md) §8.2（`各工程特有能力`，`:708`）与 §3.2（`一致性豁免表`，`:413`）登记：本项属**防回归**，不属豁免 | 防回归 |
 | R-05 | 已执行 | 批 3 `32c2ddb`（端口复用分支三工程一致，`exit /b 0`） | 闭环 |
@@ -732,7 +732,7 @@ exit=0
 | R-07 | 已执行（含豁免） | 批 3 `32c2ddb` 补 `start-dev.cmd`；豁免项（harness 无 `web/`、debug 无 `web/styles.css`）写进规范 §8.2 | 闭环 |
 | R-08 | 已执行 | 批 4 `b5be059`（删 `apps/debug/tsconfig.json` 的 `web/vendor`） | 闭环 |
 | R-09 | 已执行 | 批 4 `b5be059`（viewer 接入共享层并同步 include；三工程「引用 ⇔ include」两侧一致） | 闭环 |
-| R-10 | 部分执行 | 源码位置统一已成事实（工程 `scripts/*.mjs`、`test/*.ts`）；**harness 的 `scripts/*.mjs` 仍是独立实现** | 随 R-10/R-2 另案 |
+| R-10 | 已执行 | 源码位置统一已成事实（工程 `scripts/*.mjs`、`test/*.ts`）；**第二批**把 harness 的 `scripts/check-wasm-api.mjs`（薄配置）与 `scripts/build-dist.mjs`（薄入口）一并收敛 | 闭环 |
 | R-11 | 已执行 | 批 3 `32c2ddb`（`apps/viewer/package.json:10` 的 outfile 改为 `.tmp/replay-selftest/…`；两行 `blame` 均为 `32c2ddbf`） | 闭环 |
 | R-12 | 已执行 | 批 2 `fc3de84`（viewer 补 `check:api`，四工程必备脚本名齐备） | 闭环 |
 | R-13 | 已执行 | 批 1 `6da49ae`（孤儿脚本注册面收敛） | 闭环 |
@@ -745,12 +745,12 @@ exit=0
 | R-20 | 已执行 | 批 4 `b5be059`（viewer 关系由「正当隔离」改判为「已接入」，依据变了、判定随实测更新） | 闭环 |
 | R-21 | 已执行（例外表） | 规范 §8.2 已列例外表（五份 Cargo `[patch]`、四份模块 workspace 清单、四份 `wasm.d.ts`）；Cargo 侧保持不动 | 闭环 |
 
-**汇总**：`R-01..R-21` 中 **19 条已执行、2 条部分执行**（`R-02` 的 harness 端口、`R-10` 的 harness 源码位置），二者与 §6.4 的 `I-10`/`I-12` harness 半边同源，去向均为 R-2/R-10/R-11（[rollout-status.md](rollout-status.md) §5）。
+**汇总**：`R-01..R-21` **21 条全部已执行、0 条部分执行**——原「部分执行」的 `R-02`（harness 端口）与 `R-10`（harness 源码位置）连同 §6.4 的 `I-10`/`I-12` harness 半边已由**第二批**执行（[rollout-status.md](rollout-status.md) §5 的 R-2/R-10/R-11）。
 
 ## 9. 对下游任务的事实指引
 
 1. `launch-standardizer`（启动/结构规范）：直接消费 §2、§3、§4 的表与 `R-01..R-17`；`R-04`、`R-11` 当前已合规，规范里应写成「防回归」而非「待修」。
 2. `decoupling-architect`（解耦方案）：直接消费 §4.2、§4.3、§5；`pvs-manager.ts` 是唯一「近乎全等的 TS 重复实现」，`ensure-node-deps.cmd` 是唯一「近乎全等的 shell 重复实现」，两者判定依据不同（前者是算法重复，后者是自举逻辑重复），不要合并论证。`R-21` 的例外表必须先写，否则执行者会去动不该动的 Cargo 文件。
 3. `framework-reviewer`（验证/复核）：`R-n` 的判定方法列已给出可执行命令；`npm run test:jump-apex` 的失败是本轮实测基线，复核时不要把它当作「新引入的回归」。
-4. 本轮**只出规范、未改任何代码**（**审计当时的事实，不是当前状态**）：§6 的 22 条不一致（`I-01..I-22`）与 §7.5 的 4 项新增失败在审计当时仍是**待执行改造清单**，仓库代码状态与审计前一致（`$ git status --short` → 仅 `?? documents/framework-audit.md`）。**收口时点（`640da1a`）的实际状态**：批 1–4 已全部落地，`I-01..I-22` 的处置结论见 §6.4，`R-01..R-21` 见 §8.5；仍待执行的是 harness 半边（`I-10`/`I-12`/`R-02`/`R-10`）与 viewer 的 CI 口径（`I-02` 半边），去向见 [rollout-status.md](rollout-status.md) §5 的 R-1/R-2/R-10/R-11。
+4. 本轮**只出规范、未改任何代码**（**审计当时的事实，不是当前状态**）：§6 的 22 条不一致（`I-01..I-22`）与 §7.5 的 4 项新增失败在审计当时仍是**待执行改造清单**，仓库代码状态与审计前一致（`$ git status --short` → 仅 `?? documents/framework-audit.md`）。**收口时点（`640da1a`）的实际状态**：批 1–4 已全部落地，`I-01..I-22` 的处置结论见 §6.4，`R-01..R-21` 见 §8.5；harness 半边（`I-10`/`I-12`/`R-02`/`R-10`）已由**第二批「harness 并入规范」**执行完毕（端口 `8110`、共享引擎/内核接入、词表与模板对齐），viewer 的 CI 口径（`I-02` 半边）属**排除要求**；去向见 [rollout-status.md](rollout-status.md) §5 的 R-1/R-2/R-10/R-11。
 5. **§9 的四条指引已全部消费完毕**：`launch-standardizer` → [framework-launch-structure.md](framework-launch-structure.md)；`decoupling-architect` → [framework-decoupling.md](framework-decoupling.md)；`framework-reviewer` 的复核已由批 1–4 的多轮独立验证完成；本文件的「下游指引」自本节起只作历史记录，**不再派单**。

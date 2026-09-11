@@ -2,7 +2,7 @@
 
 > 定位：`apps/{debug,game,viewer}` 三个应用工程与验证工程 `test/dual-mode-harness` 的**启动方式 / 文件结构 / 构建产物 / 控制台输出**统一规范。照本文件可以从零搭出一个符合规范的新子工程（§7）。
 > 事实基线：[framework-audit.md](framework-audit.md)（t1 审计，含实测证据与 R-01…R-21 需求条款）。本文件逐条闭合 R-01…R-17，并对 R-18…R-21 给出交接口径（§9）。
-> 本轮边界：**只写规范，未改任何代码 / `package.json` / `.cmd` / `Cargo.toml` / CI**。§10 的文件级动作是**待执行**清单，不代表仓库已改。 **【落地状态（收口 `t9` 追加，2026-09-12）】**：§10.1 的 24 项与 §10.3 的三步排期**已由批 1–4 全部执行完毕**，各批提交为 批 1 `6da49ae`/`fa5552e`/`4523ef1`、批 2 `fc3de84`、批 3 `32c2ddb` + `2135056`、批 4 `b5be059` ∪ `3b16366` 内的 TS/许可产物 ∪ `32c2ddb` 内的 2 篇文档；逐条处置表（含 C 类旧路径与未落地项）见 [rollout-status.md](rollout-status.md) §1–§5。未落地项**保持「待执行」**，不得据此认为已全部完成：§4.3 的 `test:smoke` 改名 `local:smoke`、harness 端口 `8110`（§2.3 判据④）与 §6.2 的 CI 收敛中的 viewer 侧改动属 `test/dual-mode-harness` 与本轮外范围，见该文档 R-1/R-2/R-11。
+> 本轮边界：**只写规范，未改任何代码 / `package.json` / `.cmd` / `Cargo.toml` / CI**。§10 的文件级动作是**待执行**清单，不代表仓库已改。 **【落地状态（收口 `t9` 追加，2026-09-12）】**：§10.1 的 24 项与 §10.3 的三步排期**已由批 1–4 全部执行完毕**，各批提交为 批 1 `6da49ae`/`fa5552e`/`4523ef1`、批 2 `fc3de84`、批 3 `32c2ddb` + `2135056`、批 4 `b5be059` ∪ `3b16366` 内的 TS/许可产物 ∪ `32c2ddb` 内的 2 篇文档；逐条处置表（含 C 类旧路径与未落地项）见 [rollout-status.md](rollout-status.md) §1–§5。未落地项**保持「待执行」**，不得据此认为已全部完成：§4.3 的 `test:smoke` 改名 `local:smoke` 与 §6.2 的 CI 收敛中的 viewer 侧改动属该轮外范围（见该文档 R-1）；**harness 端口 `8110`（§2.3 端口表）已由第二批「harness 并入规范」执行**——`test/dual-mode-harness/play.cmd:7` 为 `set PORT=8110`、`package.json:13` 的 `dev` 同为 `8110`，`D-22` 的「本轮保留」随之作废（见该文档 R-2/R-10/R-11/R-12）。
 > 记号：**【必须】** 违反即缺陷；**【禁止】** 出现即缺陷；**【豁免】** 允许不同，但本文件必须有对应条目与理由。每条条文都带「判据」（可执行命令或 `文件:行号`）。
 
 ## 1. 定位、记号与边界
@@ -36,14 +36,14 @@
 
 | 入口 | debug | game | viewer | harness |
 |---|---|---|---|---|
-| `play.cmd` | 有，端口 `8081`，`[1/4]`…`[4/4]` | 有，端口 `8137`，`[1/4]`…`[4/4]` | 有，端口 `8090`，支持 `[port]`，`[1/3]`…`[3/3]` | 有，端口 `8080`，`[1/3]`…`[3/3]` |
-| `start-dev.cmd` | 有，端口 `8080`，`[1/3]`…`[3/3]` | **无** | **无** | **无** |
-| `build-dist.cmd` | 有，`[1/3]`…`[3/3]`，无工具链检查 | 有，`[0/5]`…`[5/5]` | 有，`[0/4]`…`[4/4]` | **无** |
-| `npm run dev` 端口 | `8080` | `8080` | `8080` | `8080` |
-| 端口占用行为 | 不检测（`play`）／复用+`cmd /k`（`start-dev`） | 不检测 | 复用并 `exit /b 0` | 不检测 |
-| 失败前缀 | `[ERROR]` | `[ERROR]` + `*** ERROR: ***` | `.cmd` 为 `[ERROR]`（文件纯 ASCII，>127 字节计数 0）；`[错误]`/`[提示]` 仅出现在其 `scripts/build-dist.mjs` 的生成物模板内（7 处） | `[ERROR]`（`.cmd` 纯 ASCII） |
+| `play.cmd` | 有，端口 `8081`，`[1/4]`…`[4/4]` | 有，端口 `8091`，`[1/4]`…`[4/4]` | 有，端口 `8101`，支持 `[port]`，`[1/4]`…`[4/4]` | 有，端口 `8110`，`[1/3]`…`[3/3]`（步骤号豁免见 §8.2） |
+| `start-dev.cmd` | 有，端口 `8080`，`[1/3]`…`[3/3]` | 有，端口 `8090`，`[1/3]`…`[3/3]` | 有，端口 `8100`，`[1/3]`…`[3/3]` | **无**（§2.2 豁免） |
+| `build-dist.cmd` | 有，`[0/5]`…`[5/5]`，含工具链检查 | 有，`[0/5]`…`[5/5]` | 有，`[0/5]`…`[5/5]` | **无**（§2.2 豁免） |
+| `npm run dev` 端口 | `8080` | `8090` | `8100` | `8110` |
+| 端口占用行为 | 检测并 `[SKIP]` 复用后 `exit /b 0` | 同左 | 同左 | 同左（第二批并入） |
+| 失败前缀 | `[ERROR]` / `[HINT]` 两行制 | 同左 | 同左 | 同左 |
 
-证据：各 `.cmd` 实测文本（`apps/*/play.cmd`、`apps/*/build-dist.cmd`、`apps/debug/start-dev.cmd`）与 [framework-audit.md](framework-audit.md) §2、§3.3；三工程 `npm run dev` 逐字为 `python ../../src/serve.py 8080 .`（`apps/debug/package.json:15`、`apps/game/package.json:15`、`apps/viewer/package.json:17`、`test/dual-mode-harness/package.json:13`）。
+证据：各 `.cmd` 实测文本（`apps/*/play.cmd`、`apps/*/build-dist.cmd`、`apps/debug/start-dev.cmd`）与 [framework-audit.md](framework-audit.md) §2、§3.3；四个 `npm run dev` 逐字为 `python ../../src/serve.py <seg> .`（`apps/debug/package.json:15`、`apps/game/package.json:15`、`apps/viewer/package.json:18`、`test/dual-mode-harness/package.json:13`）。
 
 ### 2.2 入口集合与语义（R-01）
 
@@ -59,7 +59,7 @@
 - **【禁止】**收到不支持的参数时静默忽略：必须打印 `[ERROR]` 行并以退出码 1 结束（例如 viewer 的 `build-dist.cmd multi`）。
 - `start-dev.cmd` 的必要性判据（**不是**「默认都加」）：同时满足三条才要求提供——① `web/index.html` 入库且为 dev 目标页；② dev 与 dist 的 WASM 加载路径**不同**（dev 外置文件、dist 内嵌 base64）；③ 工程有 `build:ts` 产出 `web/app.js`。
   实测：三工程 ①③ 均成立；② 逐工程成立（debug 走 `../pkg/websurf_wasm_bg.wasm`、game 走 `./websurf_wasm_bg.wasm`、viewer 走 `import.meta.url`，而三者 dist 均为 base64 内嵌）→ **三工程都必须提供 `start-dev.cmd`**。若某工程未来让 dev 与 dist 复用同一加载路径（② 不成立），必须先在本文件 §3.2 登记豁免，才允许删除该入口。
-- **【豁免】**验证工程 `test/dual-mode-harness/`：无 `web/` 目录（实测 `Test-Path test/dual-mode-harness/web` → `False`），其 `play.cmd` 服务工程根 `index.html`（`test/dual-mode-harness/play.cmd:72`），**不要求** `start-dev.cmd` 与 `build-dist.cmd`，也不得新增（避免为验证工程制造双份入口）。
+- **【豁免】**验证工程 `test/dual-mode-harness/`：无 `web/` 目录（实测 `Test-Path test/dual-mode-harness/web` → `False`），其 `play.cmd` 服务工程根 `index.html`（App 行 `test/dual-mode-harness/play.cmd:73`，服务命令 `:82`），**不要求** `start-dev.cmd` 与 `build-dist.cmd`，也不得新增（避免为验证工程制造双份入口）。
 - 判据：`git ls-files '*.cmd'` 去重后，每个应用工程恰好含 `play.cmd`、`start-dev.cmd`、`build-dist.cmd` 三个工程根入口（`scripts/*.cmd` 为子脚本，不计入）。
 
 ### 2.3 端口与路由分配表（R-02、R-03、R-05）
@@ -83,7 +83,7 @@
 | game `npm run dev` | `8080` | `8090` | **改** |
 | viewer `play` | `8090` | `8101` | **改**（`8090` 让位给 game 段） |
 | viewer `npm run dev` | `8080` | `8100` | **改** |
-| harness `play` | `8080` | `8110` | **改**（解除与 debug dev 的抢占） |
+| harness `play` | `8080` | `8110` | **改**（解除与 debug dev 的抢占；**第二批已执行**，`test/dual-mode-harness/play.cmd:7`） |
 
 条文：
 
@@ -149,8 +149,8 @@ call "%~dp0..\..\src\scripts\cargo-env.cmd"
 | `  [!] ` | 工具链逐项缺失（两空格缩进，**仅** §2.4.3 的 `[0/N]` 段） | `build-dist.cmd` |
 
 - **【登记例外（补 §2.5.1 词表）】**上表声明「唯一允许」，但共享脚本现有两组前缀未入表（批 2 产物，属 F-2 跟踪项）。本文件**只登记例外并扩展判据，不改 `src/scripts/*.cmd`**：
-  - `[deps] …` —— 来自 `src/scripts/ensure-node-deps.cmd`（文件内 **11 处** `echo [deps]`）。实测：`tsc` 已存在的常见路径向六个入口**各注入 5 行**（2 行 `[deps] ` + 60 个 `=` 分隔线、3 行文本）；`npm install` 分支另注入 4 行。**【更正】**t11 报告记为「6 行」，本轮实跑复测为 **5 行**（命令与输出见提交说明），以实测为准。
-  - `[wasm-bindgen] …` —— 来自 `src/scripts/install-wasm-bindgen.cmd`（**18 处发射点** = 16 × `echo` + 2 × PowerShell `Write-Host`）。仅 debug 的 WASM 步骤执行时注入（`pkg/<wasm>` 已存在则不调用）；已装路径输出 **2 行**（按代码分支判定，未实跑以避免触发网络下载）。
+  - `[deps] …` —— 来自 `src/scripts/ensure-node-deps.cmd`（文件内 **11 处** `echo [deps]`）。实测：`tsc` 已存在的常见路径向**每个调用入口各注入 5 行**（第二批后调用点共 **10 个**：三工程 9 个入口 + `test/dual-mode-harness/play.cmd:23`）（2 行 `[deps] ` + 60 个 `=` 分隔线、3 行文本）；`npm install` 分支另注入 4 行。**【更正】**t11 报告记为「6 行」，本轮实跑复测为 **5 行**（命令与输出见提交说明），以实测为准。
+  - `[wasm-bindgen] …` —— 来自 `src/scripts/install-wasm-bindgen.cmd`（**18 处发射点** = 16 × `echo` + 2 × PowerShell `Write-Host`）。仅 debug 的 WASM 步骤（`build-dist.cmd:50`、`start-dev.cmd:28`）与 `test/dual-mode-harness/play.cmd:36` 执行时注入（`pkg/<wasm>` 已存在则不调用）；已装路径输出 **2 行**（**第二批已实跑**：harness 探针在「已装」分支实测输出 2 行并 `exit /b 0`）。
   - **【约定方向】**按词表应归一为 `[INFO]`（`deps`/`wasm-bindgen` 保留为正文前缀、去掉方括号形式）；归一落地后**必须同时**把下方判据白名单里的 `deps|wasm-bindgen` 删除——例外自闭合，不留长期豁免。
   - **【影响面：诉求④（输出一致）】**`[deps]` 的 5 行直接进入三工程六个入口的真实控制台输出，`t11` 的逐字比对确认它与 §2.5.2/§2.5.3/§2.5.4 逐字模板的**差异清单只有这 1 项** —— 即「输出一致」当前唯一的未闭合点；`[wasm-bindgen]` 仅在该步骤执行时出现，属同族但触发面更小。
 
@@ -159,7 +159,7 @@ call "%~dp0..\..\src\scripts\cargo-env.cmd"
 - **【必须】**分隔线统一为 60 个 `=`，逐字为 `============================================================`。
 - **【必须】**每个 `[ERROR]` 后紧跟**恰好一条** `[HINT]`（诊断动作必须是可执行的单行命令或单步操作）。
 - 判据（**白名单式**，取代原先的黑名单列举——黑名单永远追不上新增项；白名单 = 词表 ∪ 上面的两个登记例外）：
-  - ① **`.cmd` echo 侧（可即时运行）**：`git grep -hoE 'echo[[:space:]]+\[[^]]+\]' -- 'apps/*/*.cmd' 'apps/*/scripts/*.cmd' 'src/scripts/*.cmd' | sed -E 's/.*(\[[^]]+\])/\1/' | sort -u | grep -vE '^\[([0-9]+/[0-9]+|ERROR|HINT|WARN|INFO|SKIP|!|deps|wasm-bindgen)\]$'` **空输出**即通过（注意：`grep -v` 无匹配时退出码为 1，故以**输出是否为空**为准、不看退出码；无可用 bash 时按同一规则用 node 按字节读实现等价判据）。实测（当前树）：抽出标记 **20 个 = 词表 18 + 登记例外 2**，**词表外 0**；把 `deps|wasm-bindgen` 从白名单移除后立即报 2 个 → 证明例外确实在判据中生效、而非静默放行。
+  - ① **`.cmd` echo 侧（可即时运行）**：`git grep -hoE 'echo[[:space:]]+\[[^]]+\]' -- 'apps/*/*.cmd' 'apps/*/scripts/*.cmd' 'src/scripts/*.cmd' 'test/dual-mode-harness/*.cmd' | sed -E 's/.*(\[[^]]+\])/\1/' | sort -u | grep -vE '^\[([0-9]+/[0-9]+|ERROR|HINT|WARN|INFO|SKIP|!|deps|wasm-bindgen)\]把 `deps|wasm-bindgen` 从白名单移除后立即报 2 个 → 证明例外确实在判据中生效、而非静默放行。` **空输出**即通过（注意：`grep -v` 无匹配时退出码为 1，故以**输出是否为空**为准、不看退出码；无可用 bash 时按同一规则用 node 按字节读实现等价判据）。实测（当前树，范围扩到 harness）：13 个 `.cmd` 抽出标记 **222 处 / 去重 20 个 = 词表 18 + 登记例外 2**（原 12 个 `.cmd` 为 202 处、去重同为 20），**词表外 0**；把 `deps|wasm-bindgen` 从白名单移除后立即报 2 个 → 证明例外确实在判据中生效、而非静默放行。
   - ② **入口输出侧（行首标记，白名单）**：对三工程六个入口的**真实控制台输出**逐行取行首标记 `^\s*\[[^]]+\]`（含两空格缩进的 `  [!]`），必须落在同一白名单内，否则为缺陷；采集法见 §3.5（本机实跑，或「进程内 PATH 桩 + 忠实副本」）。`t11` 实测：**唯一表外标记 = 5 行 `[deps] …`**（已登记为例外），其余**全部**命中词表——即诉求④的未闭合点，详见上面的【影响面】。
   - ③ 旧标记清零（保留为防回归）：`git grep -nE "\*\*\* ERROR|\[错误\]|\[提示\]|\[warn\]" -- apps src` 空输出（**目标：全仓 0 命中**；批 3 `32c2ddb`/`2135056` 后实测**已 0 命中**——判据保留为防回归；改造前为 `apps/viewer/scripts/build-dist.mjs` 7 处 + `src/serve.py` 2 处，处置见 §2.7 与 §10.1 第 10 条；`apps/*/play.cmd` 零命中）。
 - **【必须】**块内 echo 的括号转义校验必须以块深度追踪或探针实跑为准，不得用「行内是否含未转义括号」的静态判据（对 9 个 .cmd 会给出 11 处误报，命中行块深度均为 0）。
@@ -382,7 +382,7 @@ exit /b 0
 | `src/serve.py` | `:52`、`:53` 用词表外前缀 `[错误]`/`[提示]`（`apps/viewer/scripts/build-dist.mjs` 的内嵌副本同源） | 改为 `[ERROR]`/`[HINT]`（共享文件，与上一行同批；见 §10.1 第 10 条） | R-16 | `git grep -n "\[错误\]" -- src` 与 `git grep -n "\[提示\]" -- src` 均空输出 |
 | `apps/debug/scripts/build-dist.mjs`、`apps/game/scripts/build-dist.mjs` | 进度行与横幅未统一；仅 viewer 全量重建 `dist/` | 进度行前缀对齐 §2.5.4；`dist/` 必须全量重建 | R-16、R-15 | 见 §5.3 判据 |
 | `apps/*/package.json` 的 `dev` | 三份写死 `8080` | 改为 `<seg>`（§2.3） | R-02 | §2.3 判据 |
-| `test/dual-mode-harness/play.cmd` | 端口 `8080`；步骤为 `[1/3]`…`[3/3]`（与三工程模板的步骤语义不同，但**有**编号） | 端口改 `8110`；步骤编号保留 `[1/3]`…`[3/3]`（豁免见 §8.2，不强制改 `[1/4]`…`[4/4]`） | R-02 | §2.3 判据 |
+| `test/dual-mode-harness/play.cmd` | 端口 `8080`；步骤为 `[1/3]`…`[3/3]`（与三工程模板的步骤语义不同，但**有**编号） | 端口改 `8110`；步骤编号保留 `[1/3]`…`[3/3]`（豁免见 §8.2，不强制改 `[1/4]`…`[4/4]`）。**第二批已执行**：端口 `:7`、头部 5 行（`:2` `chcp`）、§2.5.5 `[SKIP]` 复用块 `:65`、六个失败块改两行制、`[IMPORTANT]`→`[INFO]` | R-02、R-16 | §2.3 判据；词表与 `[ERROR]`↔`[HINT]` 配对见 §2.5.1 判据①/② |
 
 ## 3. 统一文件结构（R-07、R-08、R-09、R-10、R-11）
 
@@ -438,8 +438,8 @@ exit /b 0
 | `apps/<app>/src/` | `app.ts`、`worker/main.ts` | 3 | — | `../../../src/ts-shared/…` | 正例：`apps/game/src/app.ts:18` |
 | `apps/<app>/crates/wasm/` | `Cargo.toml` | 4 | — | `../../../../src/…` | 正例：`apps/debug/crates/wasm/Cargo.toml:22`、`apps/viewer/crates/wasm/Cargo.toml:19` |
 | `apps/<app>/test/` | `replay-selftest.ts` | 3 | — | `../../../src/…` | — |
-| `test/dual-mode-harness/` | `play.cmd`、`package.json` | 2 | `..\..\src\…` | `../../src/…` | 正例：`test/dual-mode-harness/play.cmd:72` |
-| `test/dual-mode-harness/scripts/` | `*.mjs` | 3 | — | `../../../src/…` | — |
+| `test/dual-mode-harness/` | `play.cmd`、`package.json` | 2 | `..\..\src\…` | `../../src/…` | 正例：`test/dual-mode-harness/play.cmd:19`（`cargo-env.cmd`）、`:23`（`ensure-node-deps.cmd`）、`:36`（`install-wasm-bindgen.cmd`） |
+| `test/dual-mode-harness/scripts/` | `*.mjs` | 3 | — | `../../../src/…` | 正例：`test/dual-mode-harness/scripts/check-wasm-api.mjs:19`、`scripts/build-dist.mjs:28` |
 | `test/dual-mode-harness/crates/wasm/` | `Cargo.toml` | 4 | — | `../../../../src/…` | 正例：`test/dual-mode-harness/crates/wasm/Cargo.toml:19` |
 | `documents/**` | `*.md` | 3+ | — | 相对当前 md 的路径（[AGENTS.md](../AGENTS.md) §5.3） | 链接必须真实可达 |
 
@@ -556,7 +556,7 @@ git grep -nE "\.\.[\\/]" -- 'apps/*/*.cmd' 'apps/*/scripts/*.cmd' 'apps/*/packag
 | `apps/debug/` | `{single, multi}` | single | `build-dist.cmd multi` | 本地双击用 single；Pages 部署用 multi |
 | `apps/game/` | `{single, multi}` | single | `build-dist.cmd multi` | 同左 |
 | `apps/viewer/` | `{single}`（**声明为 single-only**） | single | **禁止**（收到 `multi` 必须 `[ERROR]` + 退出码 1） | 定位是 `file://` 双击 + 静态托管：classic `<script>`、wasm base64 内嵌、无 SAB/COOP 依赖（I-17、审计 §3.4） |
-| `test/dual-mode-harness/` | 无 `dist` 交付要求 | — | — | 不部署 |
+| `test/dual-mode-harness/` | 无 `dist` 交付要求 | — | — | 不部署 → R-17 的 dist 许可清单**不适用**（无交付）；如后续发布其 `dist/`，须补 `LICENSE.cs-movement`/`NOTICE.cs-movement`（`dist-pack.mjs` 的 `copyLicensePair` 可直接复用） |
 
 - **【必须】**`build-dist.cmd` 默认 single；`build-dist.cmd multi` 传 `--multi` 给 `scripts/build-dist.mjs`；单工程内的两种形态必须由同一脚本实现（禁止两份实现）。
 - **【必须】**`scripts/build-dist.mjs` 必须先删除再重建 `dist/`（禁止增量残留）；判据：三份脚本均含 `rm(`/`rmSync` 且目标为 `dist`。
@@ -713,7 +713,7 @@ apps/<new>/
 | viewer | 不依赖 `websurf-phys`、无 `web/textures.mtz`、`test/` 目录与 `test/**/*.ts` include | 无物理/纹理需求；自检脚本需要类型 |
 | debug | WASM 步骤内自动确保 `wasm-bindgen-cli 0.2.128`（作为 `[2/5]` 的子步骤，输出用 `[INFO]`，不占独立步骤号）；`check:api` 用导出/导入动态比对；`web/` 无 `styles.css`；`fixtures/`、`scripts/pages-index.html`（Pages 入口页） | 本机 Windows 首次构建体验；单文件调试页；CI 夹具与 Pages 首页 |
 | game | 无（本规范对 game 不产生任何豁免），但 `build-dist.mjs` 的 multi 分支是唯一 multi 参考实现 | — |
-| harness | 无 `web/`、无 `start-dev.cmd`/`build-dist.cmd`、wasm 拷到工程根、单条 `build:ts` 打三入口、`dev` 与 `play` 共用 `8110` | 验证工程不部署、页面在工程根 |
+| harness | 无 `web/`、无 `start-dev.cmd`/`build-dist.cmd`、wasm 拷到工程根、单条 `build:ts` 打三入口、`dev` 与 `play` 共用 `8110`、WASM 步骤内自动确保 wasm-bindgen-cli v0.2.128（与 debug 同款，输出用 `[INFO]`，不占独立步骤号） | 验证工程不部署、页面在工程根 |
 | 三工程共有 | 每工程独立 `Cargo.toml` workspace 与 `Cargo.lock`；5 份 `[patch.crates-io] vmdl` 声明；4 份 `src/wasm.d.ts` | Cargo/TS 语义决定，不可合并（R-21） |
 
 ### 8.3 禁止清单（不得以「统一」或「上提」为名改动）
@@ -778,7 +778,7 @@ apps/<new>/
 | 18 | `apps/game/package.json` | 端口；注册 13 个孤儿脚本 | R-02、R-13 |
 | 19 | `apps/viewer/package.json` | 端口；补 `check:api`；`test:smoke`→`local:smoke`；`test:replay` outfile 改 `.tmp/` | R-02、R-12、R-11、§4.3 |
 | 20 | `apps/viewer/scripts/check-wasm-api.mjs` | 新建薄配置，引擎取共享 `src/scripts/lib/wasm-api-contract.mjs`（D-03；与 §3.6 同一次动作，禁止先造出第 4 份副本） | R-12、D-03 |
-| 21 | `test/dual-mode-harness/play.cmd`、`package.json` | 端口 `8110` | R-02 |
+| 21 | `test/dual-mode-harness/play.cmd`、`package.json` | 端口 `8110`（**第二批已执行**：`play.cmd:7`、`package.json:13`） | R-02 |
 | 22 | `.github/workflows/deploy-pages.yml` | `npm run build:dist -- --multi`；补 game/viewer 的 `test:*` 步骤 | §6.2 |
 | 23 | `apps/*/README.md`、`documents/**/*.md` | 端口引用随 §2.3 更新 | §2.3 |
 | 24 | `CHANGELOG.md` | 记录本轮规范与后续改造 | [AGENTS.md](../AGENTS.md) §6 |

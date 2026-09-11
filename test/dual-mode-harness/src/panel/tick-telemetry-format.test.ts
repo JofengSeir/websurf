@@ -3,7 +3,7 @@
  *
  * 运行（与消费器套件同款链路）：
  *   cd game && npx esbuild src/panel/tick-telemetry-format.test.ts --bundle \
- *     --format=esm --outfile=temp/t8-panel-format.test.mjs && node temp/t8-panel-format.test.mjs
+ *     --format=esm --outfile=.tmp/t8-panel-format.test.mjs && node .tmp/t8-panel-format.test.mjs
  *
  * 覆盖：worker 账行字段映射与缺失语义（**不用 0 冒充**）/ 会话标签 / 复制载荷 /
  * 打点 FIFO 与导出 / 负控（未知字段、NaN、undefined）。
