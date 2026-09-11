@@ -27,7 +27,7 @@ import * as esbuild from 'esbuild';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEBUG = join(HERE, '..');
-const REPO = join(DEBUG, '..');
+const REPO = join(DEBUG, '..', '..');
 const PORT = Number(process.argv[2] ?? 8080);
 
 const SCRATCH = join(tmpdir(), 'websurf-jump-probe');

@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEBUG_DIR = join(HERE, '..');
-const REPO = join(DEBUG_DIR, '..');
+const REPO = join(DEBUG_DIR, '..', '..');
 const HARNESS_PKG = join(REPO, 'test', 'dual-mode-harness', 'pkg', 'websurf_test_wasm.js');
 const HARNESS_WASM = join(REPO, 'test', 'dual-mode-harness', 'pkg', 'websurf_test_wasm_bg.wasm');
 const CAL_BUNDLE = join(DEBUG_DIR, '.tmp', 'jump-apex', 'authority-calibrator.bundle.mjs');

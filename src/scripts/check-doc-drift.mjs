@@ -29,7 +29,7 @@ const ROOT = process.cwd();
 const EXT = 'ts|tsx|rs|mjs|js|py|cmd|json|md|toml|html|css|yml|yaml';
 
 const tracked = execFileSync('git', ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard'], { maxBuffer: 64 * 1024 * 1024 })
-  .toString('utf8').split('\n').filter(Boolean);
+  .toString('utf8').split(/\r?\n/).filter(Boolean);
 // 注意：ls-files 会包含「已删除但未暂存」的条目，必须过滤为磁盘上真实存在的文件
 const live = tracked.filter((f) => fs.existsSync(path.join(ROOT, f)));
 const wc = (rel) => { let n = 0; const b = fs.readFileSync(path.join(ROOT, rel)); for (const x of b) if (x === 10) n++; return n; };
@@ -82,7 +82,7 @@ const drift = [], badAnchor = [], missing = [];
 let claims = 0, anchors = 0, ambiguous = 0;
 
 for (const doc of mds) {
-  const lines = fs.readFileSync(path.join(ROOT, doc), 'utf8').split('\n');
+  const lines = fs.readFileSync(path.join(ROOT, doc), 'utf8').split(/\r?\n/);
   lines.forEach((line, i) => {
     const ln = i + 1;
     const found = [];
