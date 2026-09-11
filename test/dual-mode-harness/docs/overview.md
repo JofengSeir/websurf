@@ -98,8 +98,8 @@
 | WASM | `npm run build:wasm` | wasm-pack 构建 `crates/wasm`（release、LTO、opt-level 3，`Cargo.toml:21-24`；wasm-opt 关闭，`crates/wasm/Cargo.toml:40-42`）→ `pkg/`，并把 `websurf_test_wasm_bg.wasm` 复制到工程根（`package.json:8`） |
 | TS | `npm run build:ts` | `tsc --noEmit` 类型检查 + esbuild 三个入口 bundle 到工程根：`app.js`（main.ts）/ `worker-a.js` / `worker-b.js`（`package.json:10`；入口 URL `new URL('./worker-a.js', import.meta.url)`，`src/main.ts:83-84`） |
 | dev 运行 | `npm run dev` 或 `play.cmd` | `python ../../src/serve.py 8110 .`（serve.py 发 COOP/COEP 头启用 SAB，仓库根 `src/serve.py:32-34`）；`play.cmd` 一键引导「共享 `ensure-node-deps.cmd` → wasm（含共享 `install-wasm-bindgen.cmd`）→ ts」→ 端口占用检测 → 起服务开浏览器（端口 `8110`，与 `dev` 同端口属规范 §2.3 豁免） |
-| dist | `npm run build:dist` | `scripts/build-dist.mjs`（**薄入口 → 共享内核 `src/scripts/lib/dist-pack.mjs`**，`:23-28`）：多文件模式（index.html + app.js + worker-a.js + worker-b.js + 外置 wasm 共 5 文件，dev 与 dist 同构；无 single 内嵌模式——test 仅 HTTP 运行，`scripts/build-dist.mjs:13-14`） |
-| 契约检查 | `npm run check:api` | `scripts/check-wasm-api.mjs`（**薄配置 → 共享引擎 `src/scripts/lib/wasm-api-contract.mjs`**，`:16-19`）：断言 pkg d.ts 导出 PhysWorld + 12 个方法（build_world/tick/predict/respawn/teleport_to/set_params/set_hull/set_yaw_pitch/set_velocity/set_state/state/take_event，`scripts/check-wasm-api.mjs:26-39`） |
+| dist | `npm run build:dist` | `scripts/build-dist.mjs`（**本工程自带实现 76 行，不消费共享内核**——验证工程的构建脚本须与被验对象独立）：多文件模式（index.html + app.js + worker-a.js + worker-b.js + 外置 wasm 共 5 文件，dev 与 dist 同构；无 single 内嵌模式——test 仅 HTTP 运行，`scripts/build-dist.mjs:10-11`） |
+| 契约检查 | `npm run check:api` | `scripts/check-wasm-api.mjs`（**本工程自带实现 56 行，不引共享引擎**）：断言 pkg d.ts 导出 PhysWorld + 12 个方法（build_world/tick/predict/respawn/teleport_to/set_params/set_hull/set_yaw_pitch/set_velocity/set_state/state/take_event，`scripts/check-wasm-api.mjs:26-39`） |
 
 `.gitignore` 忽略工程根 dev 运行产物（app.js / worker-a.js / worker-b.js / websurf_test_wasm_bg.wasm 等）。
 
@@ -116,8 +116,8 @@
 | `render-loop-verify.mjs` | 180 | 渲染循环时序校验 v3（独立定时线程 + busy-wait 微秒级 rAF 节奏，`scripts/render-loop-verify.mjs:1-4`） |
 | `workerb-isolated.mjs` | 72 | WorkerB 隔离渲染能力上限测试（无物理竞争，`scripts/workerb-isolated.mjs:1-2`） |
 | `flicker-debug.mjs` | 707 | 屏闪根因排查（双缓冲协议压力测试 + 逐版本一致性断言，`scripts/flicker-debug.mjs:1-8`） |
-| `check-wasm-api.mjs` | 64 | WASM API 契约校验（薄配置 + 共享引擎，见 §5） |
-| `build-dist.mjs` | 80 | dist 构建（薄入口 + 共享内核，见 §5） |
+| `check-wasm-api.mjs` | 56 | WASM API 契约校验（**自带独立实现**，见 §5） |
+| `build-dist.mjs` | 76 | dist 构建（**自带独立实现**，见 §5） |
 | `trace-verify.mjs` | 99 | ⚠️ 历史残留：验证「TraceRecorder→main→TraceRenderer 3D 路径线」链路（`scripts/trace-verify.mjs:1-6`），但当前 `src/` 已无任何 Trace 代码（grep `Trace` 于 src/、index.html、package.json 均为空）——trace/FOV 已随最小集移除（`../CONCLUSION.md:119-124` 如实记录），此脚本仅作存档 |
 | `phys-smoke.mjs` 内的 PVS 镜像 | — | ⚠️ 同为历史残留：`PvsMirror` 头注自称「worker-b.ts PvsManager 完整镜像」（`scripts/phys-smoke.mjs:487-488`），但当前 worker-b.ts 已无 PVS 代码（PVS 不在最小集，`src/main.ts:170`）——该镜像块仅作独立回归保留 |
 

@@ -96,8 +96,8 @@ test/dual-mode-harness/
     renderer/         tick-consumer.ts（α 网格弦插值 + 六显示态 + Δ 控制器 + 断窗八类）+ 单测
     panel/            tick-telemetry-format.ts（tick 遥测 7 行格式化）+ 单测
   scripts/
-    build-dist.mjs        构建 dist（薄入口 → 共享内核 src/scripts/lib/dist-pack.mjs；multi 5 文件：app/worker-a/worker-b/wasm/index.html；test 无 single 内嵌模式）
-    check-wasm-api.mjs    WASM 契约校验（薄配置 → 共享引擎 src/scripts/lib/wasm-api-contract.mjs；薄导出层 12 API，缺一即败）
+    build-dist.mjs        构建 dist（**本工程自带实现，不消费共享内核**；multi 5 文件：app/worker-a/worker-b/wasm/index.html；test 无 single 内嵌模式）
+    check-wasm-api.mjs    WASM 契约校验（**本工程自带实现，不引共享引擎**；薄导出层 12 API，缺一即败）
     three-mode-verify.mjs **三模式运行时验证**（node 驱动构建产物 worker-a.js：补最小 Web Worker
                           宿主 → init-shared/auth-init/wasm-init/world-json → set-mode 三值，
                           断言 mode-ack 闭合 + 幂等 + 非法 mode 拒绝 + 每模式帧发布（V 前进）

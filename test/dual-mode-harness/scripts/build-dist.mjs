@@ -1,36 +1,24 @@
 /**
- * 构建 WebSurf-test dist/（multi 模式：dev 与 dist 同构，HTTP 运行）。
+ * 构建 WebSurf-test dist/（多文件模式：dev 与 dist 同构，HTTP 运行）。
  *
- * 薄入口（D-04 / T-04）：打包内核在共享层 `src/scripts/lib/dist-pack.mjs`；
- * esbuild 的 `build` 由本文件注入（内核不得 import esbuild）。
- *
- *   dist/index.html                — module script（原样拷贝）
- *   dist/app.js                    — ESM（主线程）
- *   dist/worker-a.js               — ESM（module worker，物理）
- *   dist/worker-b.js               — ESM（module worker，渲染）
+ *   dist/index.html            — module script（原样）
+ *   dist/app.js                — ESM（主线程）
+ *   dist/worker-a.js           — ESM（module worker，物理）
+ *   dist/worker-b.js           — ESM（module worker，渲染）
  *   dist/websurf_test_wasm_bg.wasm — WASM 外置（运行时 fetch './websurf_test_wasm_bg.wasm'）
  *
  * 与 dev（serve.py 服务 test 根目录）产物同构：相对路径 './worker-a.js' 等
  * 在 dist/ 下同样解析。无 single 内嵌模式（test 仅 HTTP 运行，SAB 恒定可用）。
  *
  * 用法：node scripts/build-dist.mjs
- * 退出码：0 = 成功，1 = 失败
  */
 import { build } from 'esbuild';
-import { copyFileSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import {
-  bundleEsm,
-  cleanDist,
-  cleanStale,
-  printTree,
-} from '../../../src/scripts/lib/dist-pack.mjs';
+import { readFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, '..'); // test/dual-mode-harness
-const DIST = join(ROOT, 'dist');
-const WASM_FILE = 'websurf_test_wasm_bg.wasm';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = join(__dirname, '..');
 
 const ENTRIES = [
   ['src/main.ts', 'app.js'],
@@ -38,43 +26,51 @@ const ENTRIES = [
   ['src/worker-b.ts', 'worker-b.js'],
 ];
 
-// 本形态的产物清单（cleanDist 已全量重建；cleanStale 把清单写成可执行断言）
-const KEEP = ['index.html', 'app.js', 'worker-a.js', 'worker-b.js', WASM_FILE];
-
 async function main() {
-  const wasmPath = join(ROOT, 'pkg', WASM_FILE);
+  console.log('=== WebSurf-test dist 构建（multi / HTTP 部署）===\n');
+
+  const wasmPath = join(root, 'pkg', 'websurf_test_wasm_bg.wasm');
   if (!existsSync(wasmPath)) {
-    throw new Error(`${wasmPath} 不存在（先运行 npm run build:wasm）`);
+    console.error('错误: pkg/websurf_test_wasm_bg.wasm 不存在。请先运行 npm run build:wasm');
+    process.exit(1);
   }
 
-  // 全量重建：先删后建（规范 §5.2 R-15，禁止增量残留）
-  await cleanDist(DIST);
+  const distDir = join(root, 'dist');
+  if (!existsSync(distDir)) mkdirSync(distDir, { recursive: true });
 
+  // 1. 三产物（app + 两个 worker）→ ESM
   console.log('[1/3] 打包 app / worker-a / worker-b (ESM)...');
   for (const [entry, out] of ENTRIES) {
-    await bundleEsm({
-      build,
-      entry: join(ROOT, entry),
-      outfile: join(DIST, out),
-      options: { logLevel: 'info' },
+    await build({
+      bundle: true,
+      target: 'es2022',
+      format: 'esm',
+      minify: true,
+      sourcemap: false,
+      legalComments: 'eof',
+      logLevel: 'info',
+      entryPoints: [join(root, entry)],
+      outfile: join(distDir, out),
     });
   }
+  console.log(`      app.js / worker-a.js / worker-b.js 已生成`);
 
+  // 2. 复制 WASM（外置，fetch 加载；与 dev 同相对路径 './websurf_test_wasm_bg.wasm'）
   console.log('[2/3] 复制 WASM...');
-  copyFileSync(wasmPath, join(DIST, WASM_FILE));
+  copyFileSync(wasmPath, join(distDir, 'websurf_test_wasm_bg.wasm'));
 
+  // 3. index.html（module script 原样）
   console.log('[3/3] 复制 index.html...');
-  copyFileSync(join(ROOT, 'index.html'), join(DIST, 'index.html'));
+  copyFileSync(join(root, 'index.html'), join(distDir, 'index.html'));
 
-  const removed = await cleanStale(DIST, KEEP);
-  if (removed.length) console.log(`[WARN] removed stale: ${removed.join(', ')}`);
-
-  console.log((await printTree(DIST)).join('\n'));
-  console.log('用 HTTP 服务 dist/（如 python ../../src/serve.py 8110 dist）后访问 dist/index.html。');
+  const total = ['app.js', 'worker-a.js', 'worker-b.js', 'websurf_test_wasm_bg.wasm', 'index.html']
+    .reduce((acc, f) => acc + (existsSync(join(distDir, f)) ? readFileSync(join(distDir, f)).length : 0), 0);
+  console.log('\n=== 构建完成（multi）===');
+  console.log(`总大小: ${(total / 1024 / 1024).toFixed(2)} MB（5 个文件）`);
+  console.log(`\n用 HTTP 服务 dist/（如 python ../../src/serve.py 8080 dist）后访问 dist/index.html。`);
 }
 
 main().catch((err) => {
-  console.error(`[ERROR] dist build failed: ${err?.message ?? err}`);
-  console.error('[HINT] See the message above, fix the input or toolchain, then retry.');
+  console.error('构建失败:', err);
   process.exit(1);
 });

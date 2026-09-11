@@ -2,7 +2,7 @@
 
 > 定位：`apps/{debug,game,viewer}` 三个应用工程与 `src/` 共享层之间「**什么该上提、什么必须留在工程内**」的判定准则、逐项裁决、目标结构与分批迁移顺序。逐条闭合 R-18…R-21。
 > 事实基线：[framework-audit.md](framework-audit.md)（t1 审计：实测证据与 R-01…R-21 条款）。结构/入口/端口/输出基线：[framework-launch-structure.md](framework-launch-structure.md)（t2 规范）。
-> 本轮边界：**只写规范，未搬迁任何代码或文件，未改 `package.json` / `tsconfig.json` / `Cargo.toml` / CI**。§3.3、§6、§7 的文件级动作全部是**待执行**清单，不代表仓库已改。 **【落地状态（收口 `t9` 追加，2026-09-12）】**：`D-01`/`D-02`/`D-03`（批 2 `fc3de84`）、`D-04`/`T-04` 内核与 `D-23`/`E-08` 许可唯一源（批 3 `32c2ddb` + `2135056`）、`D-08`/`D-09`/`D-10`/`D-16`（批 4 `b5be059` ∪ `3b16366`）**均已执行完毕**；`T-05` 门禁 `src/scripts/check-shared-sync.mjs` 并入批 4 落地。**「本轮保留」的 `D-22` 已由第二批（harness 并入规范）执行**——`test/dual-mode-harness` 的 `check-wasm-api.mjs` / `build-dist.mjs` 收敛为「薄配置/薄入口 + 共享引擎/内核」，另接入 `ensure-node-deps.cmd`/`install-wasm-bindgen.cmd` 并把端口与输出模板并入规范（[rollout-status.md](rollout-status.md) 的 R-2/R-10/R-11/R-12）；除该项外无未决项。逐条处置与遗留登记见 [rollout-status.md](rollout-status.md) §1–§5。
+> 本轮边界：**只写规范，未搬迁任何代码或文件，未改 `package.json` / `tsconfig.json` / `Cargo.toml` / CI**。§3.3、§6、§7 的文件级动作全部是**待执行**清单，不代表仓库已改。 **【落地状态（收口 `t9` 追加，2026-09-12）】**：`D-01`/`D-02`/`D-03`（批 2 `fc3de84`）、`D-04`/`T-04` 内核与 `D-23`/`E-08` 许可唯一源（批 3 `32c2ddb` + `2135056`）、`D-08`/`D-09`/`D-10`/`D-16`（批 4 `b5be059` ∪ `3b16366`）**均已执行完毕**；`T-05` 门禁 `src/scripts/check-shared-sync.mjs` 并入批 4 落地。**「本轮保留」的 `D-22` 已由第二批（harness 并入规范）部分执行**——`test/dual-mode-harness` 接入 `ensure-node-deps.cmd`/`install-wasm-bindgen.cmd`（引导类）并把端口与输出模板并入规范（[rollout-status.md](rollout-status.md) 的 R-2/R-10/R-11/R-12）；其 `check-wasm-api.mjs` / `build-dist.mjs` 则**按用户裁定保持自带独立实现、不收敛**（验证工程的门禁/构建脚本须与被验对象独立，详见 `D-22`）；除该项外无未决项。逐条处置与遗留登记见 [rollout-status.md](rollout-status.md) §1–§5。
 > 记号：**【必须】** 违反即缺陷；**【禁止】** 出现即缺陷；**【豁免】** 允许不同，但必须有对应条目与理由；【更正】/【补充】 表示对 t1 或 t2 文档的修正。
 > 每条裁决都带「依据」与「反向否决理由」（为什么**不**做相反的选择），不允许两边都说得通。
 
@@ -10,7 +10,7 @@
 
 ### 1.1 适用范围
 
-- 对象：`apps/debug/`、`apps/game/`、`apps/viewer/` 与共享层 `src/`；`test/dual-mode-harness/` 作为共享工具的**受益方**登记（本文件写作时其文件改造不在 inScope；**第二批已并入**，见 `D-22`）。
+- 对象：`apps/debug/`、`apps/game/`、`apps/viewer/` 与共享层 `src/`；`test/dual-mode-harness/` 作为共享工具的**受益方**登记（本文件写作时其文件改造不在 inScope；**第二批已部分并入**——引导脚本与端口/输出模板并入，门禁/构建脚本按裁定保持独立，见 `D-22`）。
 - 覆盖：共享**工具/脚本**（`.cmd` / `.mjs`）、共享 **TS 实现**、构建链公共部分、类型契约、常量与数据副本。
 - 不覆盖：启动入口与端口的条文（t2 §2）、目录必备清单（t2 §3.1）、`package.json` 九键（t2 §4.2）、dist 形态规则（t2 §5.2）。
 
@@ -116,8 +116,8 @@ R-18 原文：同一算法/常量在仓库内只允许一份实现；阈值为�
 |---|---|---|---|---|---|
 | D-01 | `apps/debug/scripts/ensure-node-deps.cmd`、`apps/game/scripts/ensure-node-deps.cmd` | **级别 A**：字节全等（各 1267 B，SHA256 前 16 位 `EAB3496C3F1EE6FB`） | **上提** → `src/scripts/ensure-node-deps.cmd` | ①重复度级别 A；②变更耦合：npm 引导逻辑任何修复必须双改；③R-19 直接命中；④先例：`src/scripts/cargo-env.cmd` 已是同类共享脚本；⑤t2 §8.3 已禁止两份并存 | 保留两份 → R-19 命题永久不成立，且出现「一半共享（`cargo-env.cmd`）一半复制（`ensure-node-deps.cmd`）」的认知负担；再遇第三工程即第三份 |
 | D-02 | `apps/debug/scripts/install-wasm-bindgen.cmd`（105 行，全仓单份） | 副本数 1，但**归属错位** | **上提** → `src/scripts/install-wasm-bindgen.cmd` | ①依赖方向：它已 `call` 共享 `src/scripts/cargo-env.cmd`（`apps/debug/scripts/install-wasm-bindgen.cmd:19`），而共享文件 `src/scripts/cargo-env.cmd:24` 的注释反向指向 `debug/scripts/install-wasm-bindgen.cmd`——共享层反向依赖工程内文件；②内容零工程特征（固定版本 `0.2.128`、固定 URL、缓存目录来自共享 env）；③它当前带 I-22 层数缺陷（**批 1 `fa5552e` 已就地修层，批 2 `fc3de84` 已上提**） | 保留在 debug → ①共享文件注释将永久指向工程内路径；②game/viewer 若需预装 wasm-bindgen 只能再复制一份（正是 R-19 要防的情形）；③就地补 `..`（t2 §10.1 第 13 条）只是修症状，归属仍错位 |
-| D-03 | `apps/debug/scripts/check-wasm-api.mjs`、`apps/game/scripts/check-wasm-api.mjs`、`test/dual-mode-harness/scripts/check-wasm-api.mjs` | **级别 B**：game(80 行) vs harness(56 行) `numstat 16 40`，除 dts 名与 API 表外逐句同构（存在性检查 → 正则 `\bname\s*\(` → missing 报告 → 退出码） | **合并到统一工具** → 引擎 `src/scripts/lib/wasm-api-contract.mjs` + 各工程薄配置 | ①重复度级别 B；②变更耦合：错误文案/提示语/退出码三处各自演化；③t2 §3.6、§10.1 第 20 条已要求 viewer 补该脚本——不统一则副本数 3→4 | **整份上提（含 API 清单）**：三工程契约面本就不同（debug 动态比对 12 个导出符号、game 16+17 项、harness 12 项），清单属**工程契约**；塞进共享层会让共享层必须按工程分支，且 Rust 导出层增删 API 时要改共享层。t2 §8.2 明确把 debug 的「导出/导入动态比对」列为工程特有能力，不得删除 |
-| D-04 | `apps/{debug,game,viewer}/scripts/build-dist.mjs`（7996 / 7351 / 11191 B；harness 第 4 份） | **级别 B**：debug vs game `numstat 145 171`，归一化行重合 0.58（`commonOptions`、preamble 注入、stale 清理、tree 打印四段同构） | **合并到统一工具** → 内核 `src/scripts/lib/dist-pack.mjs` + 各工程薄入口 | ①重复度级别 B；②变更耦合最强：`globalThis.__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` / `__VBSP_TEXTURES_MTZ_B64__` / `__VBSP_WASM_URL__` 是**跨工程构建契约**，现由 3 份实现各自拼装，改一个名字要改 3 处，写错只在运行时暴露 | **整份上提为单一构建器 → 构建可行性否决**：实测 `require.resolve('esbuild', {paths:['src/scripts/lib']})` → `MODULE_NOT_FOUND`（仓库根无 `package.json`、无 `node_modules`；而 `apps/debug/scripts/` 能解析到 `apps/debug/node_modules/esbuild`）。故共享内核**不得 import esbuild**，必须由工程侧注入 `build` 函数。整份上提必然失败 |
+| D-03 | `apps/debug/scripts/check-wasm-api.mjs`、`apps/game/scripts/check-wasm-api.mjs`、`test/dual-mode-harness/scripts/check-wasm-api.mjs` | **级别 B**：game(80 行) vs harness(56 行) `numstat 16 40`，除 dts 名与 API 表外逐句同构（存在性检查 → 正则 `\bname\s*\(` → missing 报告 → 退出码） | **合并到统一工具** → 引擎 `src/scripts/lib/wasm-api-contract.mjs` + 各工程薄配置 | ①重复度级别 B；②变更耦合：错误文案/提示语/退出码三处各自演化；③t2 §3.6、§10.1 第 20 条已要求 viewer 补该脚本——不统一则副本数 3→4 | **整份上提（含 API 清单）**：三工程契约面本就不同（debug 动态比对 12 个导出符号、game 16+17 项、harness 12 项），清单属**工程契约**；塞进共享层会让共享层必须按工程分支，且 Rust 导出层增删 API 时要改共享层。t2 §8.2 明确把 debug 的「导出/导入动态比对」列为工程特有能力，不得删除。**【第二批更正】**`test/dual-mode-harness/scripts/check-wasm-api.mjs` **不并入**该收敛：验证工程的门禁脚本须与被验对象独立（见 `D-22`） |
+| D-04 | `apps/{debug,game,viewer}/scripts/build-dist.mjs`（7996 / 7351 / 11191 B；harness 第 4 份） | **级别 B**：debug vs game `numstat 145 171`，归一化行重合 0.58（`commonOptions`、preamble 注入、stale 清理、tree 打印四段同构） | **合并到统一工具** → 内核 `src/scripts/lib/dist-pack.mjs` + 各工程薄入口 | ①重复度级别 B；②变更耦合最强：`globalThis.__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` / `__VBSP_TEXTURES_MTZ_B64__` / `__VBSP_WASM_URL__` 是**跨工程构建契约**，现由 3 份实现各自拼装，改一个名字要改 3 处，写错只在运行时暴露 | **整份上提为单一构建器 → 构建可行性否决**：实测 `require.resolve('esbuild', {paths:['src/scripts/lib']})` → `MODULE_NOT_FOUND`（仓库根无 `package.json`、无 `node_modules`；而 `apps/debug/scripts/` 能解析到 `apps/debug/node_modules/esbuild`）。故共享内核**不得 import esbuild**，必须由工程侧注入 `build` 函数。整份上提必然失败。**【第二批更正】**`test/dual-mode-harness/scripts/build-dist.mjs` **不并入**该内核，保持第 4 份自带实现（同 `D-22`） |
 | D-05 | `apps/debug/play.cmd`、`apps/game/play.cmd` | **级别 A 形状**：`numstat 3 5`（命中数值阈值） | **保留**（不上提） | ①R-18 边界 1：入口编排不是实现载体；②差异恰好是每工程参数（工程名横幅、端口、目标页 `dist/index.html`）；③t2 §2.2 定义其为「三件套入口」、§2.5 给出逐字模板，落点由 t2 定稿（t2 §1.3） | 上提为共享脚本 + 3 行转发 → ①双击入口的自我描述性消失（打开 `apps/game/play.cmd` 只见一行 `call`，排查时无法就地读出端口与目标页）；②与 t2 §2.5 的模板落点冲突；③工程参数仍需以参数传入，参数解析比 5 行差异更脆弱。**统一手段是模板，不是共享文件** |
 | D-06 | `apps/debug/src/physics/` 的 **5 文件**：`math/vec3.ts`、`param-defs.ts`、`physics-params.ts`、`prediction-params.ts`、`physics/Collision/Collision.types.ts`（该子树原有的 `LICENSE`/`NOTICE` 已从本条**剥离**并改判**上提** → 见 D-23） | 副本数 1（消费方仅 debug） | **保留**（5 文件） | ①`param-defs.ts`/`physics-params.ts` 是 debug 物理面板特性；②`math/vec3.ts`、`Collision.types.ts` 是 **vendored Apache-2.0 上游代码**，头部带 `@license`（`apps/debug/src/physics/math/vec3.ts:2-7`） | 上提 → ①与 `src/vendor/vmdl/` 已确立的「vendored 代码集中 `src/vendor/`」范式冲突；②`param-defs.ts` 默认值须与 Rust `PhysParams::default` 对齐，上提后 debug 面板改动变成共享层改动。**注**：本条「保留」**不含**许可证——`LICENSE`/`NOTICE` 的唯一源已由 captain 裁定上提到 `src/phys/`（D-23 / E-08），故清单由 7 文件收窄为 5 文件。**升级触发**：若第二工程需要这里的 vendored 源码/面板模型，改判为 `src/vendor/cs-movement/` + `src/ts-shared/phys/panel-params.ts` |
 | D-07 | `Vec3`：`apps/debug/src/physics/math/vec3.ts:11`（vendored）、`apps/game/src/world/types.ts:11,17`（`Vec3Like` + 别名） | 2 处定义（**级别 C**） | **保留** | ①TS 结构化类型下两份 `{x;y;z}` **互相赋值合法**，无编译期耦合（判据：两工程 `npm run typecheck` 均 exit 0）；②debug 那份属 vendored 上游（见 D-06） | 上提单一 `Vec3` → ①需改写 debug 侧 8 处 import（`pvs-manager`、`spawn-loader`、`teleport-manager`、`collider-adapter`、`game-state` 等）；②收益仅 3 行类型定义；③破坏 vendored 边界。【更正】t1 §4.2 记 `Vec3` 有 3 处定义（含 `apps/debug/src/world/types.ts`）；实测该文件不含 `Vec3` 字样（`Select-String 'Vec3' apps/debug/src/world/types.ts` 零命中），是从 `../physics/math/vec3.js` 导入 → 实为 **2 处** |
@@ -135,7 +135,7 @@ R-18 原文：同一算法/常量在仓库内只允许一份实现；阈值为�
 | D-19 | `apps/debug/.gitignore`（498 B）、`apps/game/.gitignore`（574 B）、`apps/viewer/.gitignore`（266 B） | 各自不同 | **保留** | 每工程忽略集不同（viewer 额外 `/temp/`；debug 涉及 `fixtures/` 例外的路径上下文） | 上提为单一根 `.gitignore` → 让「工程级例外」与「仓库级产物规则」混在一处，且根 `.gitignore` 已声明「各工程另有自身 `.gitignore` 补充特有排除」 |
 | D-20 | 三份 `package-lock.json`（17670 / 17808 / 17728 B） | 各自不同 | **保留** | ①各工程独立依赖闭包（viewer 独有 `ws`，debug 独有 `@types/node` 用法）；②CI 用 `cache-dependency-path: '**/package-lock.json'`（`.github/workflows/deploy-pages.yml:58`）已依赖四份独立锁 | 合并为根 lock → 要求重构为 npm workspace（新增根级 `package.json`），属架构级决策；与 t2 §8.3「不为统一而新增根级 `package.json`」同一口径 |
 | D-21 | `apps/debug/scripts/pages-index.html`（1842 B）、`apps/debug/fixtures/path/tick-on-render-prefix.json`（784 KB） | 单份 | **保留** | ①`pages-index.html` 的消费方是 **CI**（`.github/workflows/deploy-pages.yml:187` 拷为 `deploy/index.html`），不是工程内代码；②`fixtures/` 是 `test:path-acceptance` 的**故意失败**基线，根 `.gitignore` 有显式例外 `!apps/debug/fixtures/path/` | 上提 → ①CI 路径需同步改动，收益 1.8 KB；②`fixtures/` 上提到 `test/` 会破坏 `.gitignore` 例外路径与 [AGENTS.md](../AGENTS.md) §2 的既定归属「自动化夹具 → `apps/debug/fixtures/<主题>/`」。与 t2 §8.2/§8.3 一致 |
-| D-22 | `test/dual-mode-harness/scripts/*.mjs`（12 个） | — | **保留**（本轮）→ **第二批已并入**（政策变更） | 验证工程不参与部署（`.github/workflows/deploy-pages.yml` 头注）；其 `check-wasm-api.mjs` 与 `build-dist.mjs` 是 D-03/D-04 的**受益方** | 本轮不改造：`test/` 不在本任务 inScope，登记为共享工具上线后的第二轮接入对象（§6.2 T-03/T-04 的「可选消费方」）。**第二批执行该接入**：`check-wasm-api.mjs` → 薄配置 + 共享引擎；`build-dist.mjs` → 薄入口 + 共享内核；并接入 `ensure-node-deps.cmd`/`install-wasm-bindgen.cmd`、端口改 `8110` |
+| D-22 | `test/dual-mode-harness/scripts/*.mjs`（12 个） | — | **保留**（本轮）→ **第二批部分并入**（政策变更，2026-09-12） | 验证工程不参与部署（`.github/workflows/deploy-pages.yml` 头注）；其 `check-wasm-api.mjs` 与 `build-dist.mjs` 曾被列为 D-03/D-04 的**受益方** | 本轮不改造：`test/` 不在本任务 inScope，登记为共享工具上线后的第二轮接入对象（§6.2 T-03/T-04 的「可选消费方」）。**第二批执行结果（更正）**：接入 `ensure-node-deps.cmd`/`install-wasm-bindgen.cmd`（**引导类**）、端口改 `8110`、输出模板并入 §2.5；但 `check-wasm-api.mjs` 与 `build-dist.mjs` **不收敛**——二者是**门禁/构建脚本**，必须与被验对象独立，故保持自带实现。原「收敛为薄配置/薄入口」的裁定由用户在第二批执行中**否决**，理由：验证工程若依赖被验对象，共享层出缺陷时两边一起错，验证失效 |
 
 ### 3.3 上提项执行清单（真实路径）
 
@@ -143,8 +143,8 @@ R-18 原文：同一算法/常量在仓库内只允许一份实现；阈值为�
 |---|---|---|---|
 | D-01 | `src/scripts/ensure-node-deps.cmd` | 删 `apps/debug/scripts/ensure-node-deps.cmd`、`apps/game/scripts/ensure-node-deps.cmd` | 改 5 处调用点 + viewer 2 处内联判断（§6.2 T-01） |
 | D-02 | `src/scripts/install-wasm-bindgen.cmd` | 删 `apps/debug/scripts/install-wasm-bindgen.cmd` | 改 `apps/debug/build-dist.cmd:27`、`apps/debug/start-dev.cmd:26` 调用与 `:85`、`:79` 两处提示文案；改 `src/scripts/cargo-env.cmd:24` 注释 |
-| D-03 | `src/scripts/lib/wasm-api-contract.mjs` | 四份 `scripts/check-wasm-api.mjs` 收敛为薄配置（viewer 批 2 新建、harness 第二批收敛） | `package.json` 的 `check:api` 保持指向工程内薄配置（路径不变，CI 无需改） |
-| D-04 | `src/scripts/lib/dist-pack.mjs` | 四份 `build-dist.mjs` 收敛为薄入口（三工程 + harness，后者第二批） | 与 t2 §10.1 第 10/11/12 条合并执行（§7.5 排序约束） |
+| D-03 | `src/scripts/lib/wasm-api-contract.mjs` | **三份** `scripts/check-wasm-api.mjs` 收敛为薄配置（viewer 批 2 新建；**harness 除外**，按 `D-22` 保持自带实现） | `package.json` 的 `check:api` 保持指向工程内脚本（路径不变，CI 无需改） |
+| D-04 | `src/scripts/lib/dist-pack.mjs` | **三份** `build-dist.mjs` 收敛为薄入口（**harness 除外**，按 `D-22` 保持自带实现） | 与 t2 §10.1 第 10/11/12 条合并执行（§7.5 排序约束） |
 | D-08 | `src/ts-shared/phys/angles.ts` | `bspYawToCsYaw` 三处副本；`src/ts-shared/phys/world-builder.ts:99` 改为 import | viewer `apps/viewer/src/core/pose.ts` 保留 re-export 以不动其余 20 余处内部 import |
 | D-09 | `src/ts-shared/wasm/loader.ts` | **8 处**内联解码——三工程 6 处（`apps/viewer/src/core/bsp.ts`、`apps/game/src/renderer/renderer-main.ts`、`apps/game/src/world/pvs-manager.ts`、`apps/debug/src/main-wasm.ts`、`apps/debug/src/default-pack.ts`、`apps/debug/src/world/pvs-manager.ts`）+ 共享层 2 处（`src/ts-shared/auth/worker-dispatch.ts`、`src/ts-shared/phys/world-builder.ts`） | 各工程 `wasm` 初始化分支改为「共享 loader 取字节 + 本工程 `initSync`」；收敛后全仓仅 loader 自身保留 1 处 `atob` |
 | D-10 | `src/ts-shared/world/pvs-manager.ts`、`src/ts-shared/world/types.ts` | 删两份 `apps/<app>/src/world/pvs-manager.ts` | `apps/debug/src/world/types.ts:141` 与 `apps/game/src/world/types.ts:5` 的 PVS 三类改 `export type { … } from` re-export |
@@ -154,7 +154,7 @@ R-18 原文：同一算法/常量在仓库内只允许一份实现；阈值为�
 
 ### 3.4 保留项与例外（汇总）
 
-- 保留（不上提）：D-05、D-06、D-07、D-12、D-14、D-15、D-17、D-19、D-20、D-21；D-22 由第二批转为**已并入**（其「保留」仅适用于本文件写作时的轮次）。
+- 保留（不上提）：D-05、D-06、D-07、D-12、D-14、D-15、D-17、D-19、D-20、D-21；D-22 由第二批**部分并入**——引导/环境类共享脚本（`cargo-env`/`ensure-node-deps`/`install-wasm-bindgen`）与端口、输出模板已并入规范；**门禁/构建脚本（`check-wasm-api.mjs`、`build-dist.mjs`）保持自有独立实现**（验证工程不得依赖被验对象），登记见规范 §3.2 豁免表。
 - 保留 + 门禁：D-11。
 - 保留双份（豁免）：D-13 / E-05、D-18 / E-01。
 - 完整例外表见 §8.2。
@@ -279,8 +279,8 @@ src/
 |---|---|---|---|---|
 | T-01 | `src/scripts/ensure-node-deps.cmd` | 上提（D-01） | 4 个 `.cmd` + viewer 2 处内联点 | 批 2 |
 | T-02 | `src/scripts/install-wasm-bindgen.cmd` | 上提（D-02） | `apps/debug/build-dist.cmd`、`apps/debug/start-dev.cmd` | 批 2 |
-| T-03 | `src/scripts/lib/wasm-api-contract.mjs` | 新建引擎（D-03） | 三工程 + harness 的 `scripts/check-wasm-api.mjs`（第二批接入） | 批 2 |
-| T-04 | `src/scripts/lib/dist-pack.mjs` | 新建内核（D-04） | 三工程 + harness 的 `scripts/build-dist.mjs`（第二批接入） | 批 3 |
+| T-03 | `src/scripts/lib/wasm-api-contract.mjs` | 新建引擎（D-03） | 三工程（harness **不接入**，按 `D-22` 保持自带实现） | 批 2 |
+| T-04 | `src/scripts/lib/dist-pack.mjs` | 新建内核（D-04） | 三工程（harness **不接入**，按 `D-22` 保持第 4 份自带实现） | 批 3 |
 | T-05 | `src/scripts/check-shared-sync.mjs` | 新建门禁（D-11/D-16/E-01…） | CI（仓库根直接调用）+ 本地 | 批 3 |
 
 ### 6.2 逐项规格
@@ -315,7 +315,7 @@ if not exist "%APP_ROOT%\package.json" (
   1. `extractExportsFromPkgJs(pkgJsPath)` → `Set<string>`（现有 debug 的 6 类导出形态：`function`/`class`/`const`/命名 `export {}`/`as` 别名/`default`）；
   2. `assertDtsExports({ dtsPath, apiNames, extraClasses })` → `{ missing: string[] }`（现有 game/harness 的算法：存在性 → `\bname\s*\(`）；
   3. `assertTsImportsCoveredByExports({ tsRoot, pkgBasename, exports })` → `{ missing: string[] }`（debug 的动态比对）。
-- 被谁调用：`apps/<app>/scripts/check-wasm-api.mjs` 与 `test/dual-mode-harness/scripts/check-wasm-api.mjs`（薄配置，各约 30–100 行：声明本工程 pkg 名与 API 表 → 调用引擎 → 打印并 `process.exit`）。`package.json` 的 `check:api` **路径不变**，因此 **CI 无需改动**。
+- 被谁调用：`apps/<app>/scripts/check-wasm-api.mjs`（薄配置，各约 30–100 行：声明本工程 pkg 名与 API 表 → 调用引擎 → 打印并 `process.exit`）。`test/dual-mode-harness/scripts/check-wasm-api.mjs` **不调用本引擎**（按 `D-22` 保持自带实现 56 行）。`package.json` 的 `check:api` **路径不变**，因此 **CI 无需改动**。
 - 反向否决（把引擎放进 `src/ts-shared/`）：它不被 esbuild 打包（§5.2 判据），且 `src/ts-shared/` 被各工程 `tsconfig.include` 拉入编译范围——`.mjs` 混进去会污染 typecheck 范围。
 
 #### T-04 `src/scripts/lib/dist-pack.mjs`
@@ -358,10 +358,10 @@ import { bundleIife, writeEmbeddedPreamble } from '../../../src/scripts/lib/dist
 | 调用方（位置） | 示例真实路径 | 深度 `D` | **必须**写法 |
 |---|---|---|---|
 | 工程根三件套入口 | `apps/<app>/play.cmd`、`apps/<app>/build-dist.cmd`、`apps/<app>/start-dev.cmd` | `D=2` | `call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause` |
-| 工程 `scripts/` 下的校验薄配置 | `apps/<app>/scripts/check-wasm-api.mjs` | `D=3` | `../../../src/scripts/lib/wasm-api-contract.mjs` |
-| 工程 `scripts/` 下的构建薄入口 | `apps/<app>/scripts/build-dist.mjs` | `D=3` | `../../../src/scripts/lib/dist-pack.mjs` |
-| harness 入口（**第二批已接入**） | `test/dual-mode-harness/play.cmd` | `D=2` | `..\..\src\scripts\ensure-node-deps.cmd` |
-| harness 脚本（**第二批已接入**） | `test/dual-mode-harness/scripts/check-wasm-api.mjs`、`scripts/build-dist.mjs` | `D=3` | `../../../src/scripts/lib/…` |
+| 工程 `scripts/` 下的校验薄配置 | `apps/<app>/scripts/check-wasm-api.mjs` | `D=3` | `../../../src/scripts/lib/wasm-api-contract.mjs`（**harness 同深度但不引**，按 `D-22` 自带实现） |
+| 工程 `scripts/` 下的构建薄入口 | `apps/<app>/scripts/build-dist.mjs` | `D=3` | `../../../src/scripts/lib/dist-pack.mjs`（**harness 同深度但不引**，按 `D-22` 自带实现） |
+| harness 入口（**第二批已接入引导类**） | `test/dual-mode-harness/play.cmd` | `D=2` | `..\..\src\scripts\ensure-node-deps.cmd`（与 `apps/<app>/` **同为 `D=2`**；「harness 多一层 `test/`」的说法不成立，实测 `%~dp0` 引用 29/29 可达） |
+| harness 脚本（**不接入共享层**） | `test/dual-mode-harness/scripts/check-wasm-api.mjs`、`scripts/build-dist.mjs` | `D=3` | **不写**（自有独立实现，见 `D-22`；判据 `git grep -n "src/scripts" -- test/` 零命中） |
 | CI workflow | `.github/workflows/deploy-pages.yml` | `D=0` | **禁止**手写深度：用 `working-directory` |
 
 - **【禁止】**用绝对路径或 `cd` 跳出工程目录后再引用（t2 §3.3 同款条文）。
@@ -413,7 +413,7 @@ import { bundleIife, writeEmbeddedPreamble } from '../../../src/scripts/lib/dist
 | 动作 | 受影响对象 | 处置 |
 |---|---|---|
 | 三份 `build-dist.mjs` 收敛为薄入口（行数显著变化） | `documents/debug/overview.md`、`documents/game/overview.md`、`documents/viewer/overview.md`、`documents/viewer/differences.md`、`documents/debug/implementation/loading-pipeline.md`、`documents/architecture.md`、`documents/materials.md` 中指向 `build-dist.mjs` 的 **`文件:行号` 锚点与行数声明** | 落库后跑 `node src/scripts/check-doc-drift.mjs`（**须在允许子进程的环境**）并按 [AGENTS.md](../AGENTS.md) §5.3 回改 |
-| `check-wasm-api.mjs` 收敛为薄配置 | `documents/architecture.md` 明文断言「`check-wasm-api.mjs` 存在于 **debug / game / harness 三处**」 | 该断言在批 2 后**失真**（三处仍在，但实现变为薄配置 + 共享引擎）；收口轮 R-5 已按实测改写为「四工程各一份薄配置 + 共享引擎」，**第二批**把 harness 那份也收敛为薄配置（`test/dual-mode-harness/scripts/check-wasm-api.mjs:16-19` 引共享引擎） |
+| `check-wasm-api.mjs` 收敛为薄配置 | `documents/architecture.md` 明文断言「`check-wasm-api.mjs` 存在于 **debug / game / harness 三处**」 | 该断言在批 2 后**失真**（三处仍在，但实现变为薄配置 + 共享引擎）；收口轮 R-5 已按实测改写为「四工程各一份薄配置 + 共享引擎」；**第二批按用户裁定反转**——harness 那份**不收敛**，保持自有独立实现（`D-22`），`documents/architecture.md:105` 随之改为「三工程薄配置 + 共享引擎，harness 为自带独立实现」 |
 | `install-wasm-bindgen.cmd` 移动 | `documents/*` 中对该路径的引用（若有）、`src/scripts/cargo-env.cmd:24` 注释 | 全仓 `git grep -n "install-wasm-bindgen"` 后逐条改 |
 | 新增 `src/ts-shared/{wasm,world}/` 与 `src/scripts/lib/` | `src/scripts/check-doc-drift.mjs:48` 的 `SHARED_EXTRA` 候选表未含这些目录 | 本文件锚点用仓库根相对全路径，不依赖该表（D-12）；**若后续文档改用裸文件名引用新目录内文件**，必须把新目录加入 `SHARED_EXTRA`，否则会被解析到别处或计入「歧义未判」 |
 | CI | `working-directory` 机制不受相对路径层数影响；`check:api` 的 `package.json` 路径不变 | 批 2 **无需改 CI**；唯二需要 CI 的动作 = T-05 新增门禁步骤、t2 §6.2 的 CI 收敛 |
