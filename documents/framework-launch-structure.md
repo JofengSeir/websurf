@@ -227,7 +227,7 @@ call "%~dp0..\..\src\scripts\cargo-env.cmd"
 
 | 触发 | 逐字输出 |
 |---|---|
-| 工具链（§2.4.3） | `[ERROR] Toolchain incomplete.` / `[HINT] Install Node.js (npm + node) and wasm-pack, then retry.` |
+| 工具链（§2.4.3） | `[ERROR] Toolchain incomplete.` / `[HINT] Install Node.js ^(npm + node^) and wasm-pack, then retry.` |
 | `ensure-node-deps.cmd` 失败 | `[ERROR] npm install failed.` / `[HINT] Check network connectivity and package-lock.json, then retry.` |
 | `npm run build:wasm` 失败 | `[ERROR] WASM build failed.` / `[HINT] Delete crates\wasm\target\wasm32-unknown-unknown and retry ^(antivirus locks are the usual cause^).` |
 | `npm run check:api` 失败 | `[ERROR] WASM API contract check failed.` / `[HINT] Run npm run check:api, fix src/wasm.d.ts vs crates/wasm, then retry.` |
