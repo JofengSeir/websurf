@@ -37,7 +37,7 @@
 - 生成清单的已知陷阱（实测踩到）：**用 `pwsh` 管道把 `git ls-files` 喂给 `node` 时，PowerShell 会在流首插入一个 BOM**，使清单第一条（`--others` 的未跟踪文件）变成 `\uFEFFdocuments/...` 而 `existsSync` 失败、被静默跳过——实测该形态下体检输出「48 篇 md」而非「49 篇 md」，且不报任何错误。安全做法：`cmd /c "git ls-files … > list.txt"` 落盘后再读（实测无 BOM），或用 `Set-Content -Encoding ascii` 并确认首字节不是 `EF BB BF`。
 - 口径边界（重要）：沙箱内 `node` 无法 spawn 子进程，**任何**由本任务执行的体检都只能覆盖「清单可枚举到的文件」；新增的未跟踪文件必须显式确认已进入清单后，§3 的数字才成立。
 
-## 4. C 类「旧路径引用待回改」逐条处置（15 处）
+## 4. C 类「旧路径引用待回改」逐条处置（**实测 18 处**；计划书初记 15 处，差额为本次收口在 `rollout-status.md` 自身新增的 3 处路径引用——按工具口径计入，用途见第 16–18 行）
 
 | # | 位置 | 旧引用 | 性质判定 | 处置 |
 |---|---|---|---|---|
@@ -53,6 +53,7 @@
 | 11–12 | `rollout-plan.md:195`（`B4-4` 判据 2 处） | 同上 | 同上 | 同上 |
 | 13 | `rollout-plan.md:291`（§9.2） | `apps/debug/scripts/install-wasm-bindgen.cmd` | 历史叙述（规范原文引用） | 已补注「原文引用，路径已上提」 |
 | 14–15 | `rollout-plan.md:307`（§10.3 C 类清单 2 处） | `apps/*/src/world/pvs-manager.ts` | 计划内旧路径 | 已补注「批 4 已执行」 |
+| 16–18 | `rollout-status.md:44/:47/:50` | `apps/debug/scripts/install-wasm-bindgen.cmd`、`apps/*/src/world/pvs-manager.ts` | **引用原文**（§4 表自身的「旧引用」列） | 保持：这三处是本文档表格对旧路径的显式引用，用途即登记，不构成路径依赖 |
 | 附 | `architecture.md:202` | `debug/docs/overview.md` | **工具误报**（该行自述为刻意保留的历史记载） | 保持不动，注明为工具散文路径提取误报 |
 
 ## 5. 遗留项登记（逐条处置结论与去向）
