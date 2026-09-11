@@ -93,14 +93,14 @@ apps/viewer/src/core/pose.ts:9       export { wrapDeg, bspYawToCsYaw } from '../
 **核验清单（口径与结果）**：修正后按「node 按字节读 → 抽取全部行号引用（`文件:行号` 与同段内的裸 `:行号`）→ 读取被引文件对应行 → 判定『行存在且非空』」实跑，工具输出为：
 
 ```text
-锚点（行号级）总数=134 非空且在范围内=105 空行/越界=7（7 处逐类见下）
+锚点（行号级，口径 = 反引号内 `文件:行号`）总数=189 ｜ 非空且在范围内=181 ｜ 空行=1 ｜ 未能定位=7（8 处逐类见下；另有裸行号 190 处，须人工判读）
 ```
 
 两个数字都必须按口径读，否则会误判：
 
-- **机械口径**：本文全部行号引用共 409 处；按「反引号内的 `文件:行号` 锚点 + 同段内裸行号」抽检实跑，工具报出 **7 处**「空行/越界」，**没有一处指向现行事实**，逐类复核：① 刻意保留的历史行号 3 处（§3.2 的 debug `scripts/build-dist.mjs`、§6.1 的 debug `scripts/build-dist.mjs` 与 debug `scripts/check-wasm-api.mjs`）—— 为求「当时写在哪一行」可回溯而保留改造前原值，正文已就地标注「已不再指向原文」；其中 check-wasm-api 那一处属**越界**且落在空行，其余为「在范围内但内容不符」。② 裸行号被工具挂错文件 3 处：本节上表「实测」列写的是**改造前**行号（viewer 与 game 的 `play.cmd`），表中已有「文件限定」，工具挂到上一行出现的文件名上属口径限制。③ 1 处为 §2.4 表内裸行号（`apps/game/build-dist.cmd` 的 `:18-31` 与 `:18`）被工具挂到同段其它文件名上。以上均**不计入**「现行事实锚点」的验收面。
+- **机械口径（收口实测，可复现）**：抽取脚本 `node .tmp/anchor-audit.mjs`（与 `src/scripts/check-doc-drift.mjs` 同源正则，抽「文件:行号」并对每处解析到现行文件、判定该行**是否存在且非空**）实跑：**文件限定锚点共 189 处**（分布于 103 行）——**非空且在范围内 181 处，空行 1 处，未能定位 7 处**；另有**裸行号（反引号外的 `:NNN`，已剔除文件限定形式）190 处**，其归属须按上下文人工判读，不计入锚点验收面。8 处异常见下（原文所述「7 处」即此集合，按本次口径重测为 8 处）：① "documents/CONTRIBUTING.md":38 为**空行**（文件共 40 行）；②–④ "deploy-pages.yml":207、"apps/debug/scripts/ensure-node-deps.cmd":13、"apps/debug/scripts/install-wasm-bindgen.cmd":19 的**目标已上提**（现为 `.github/workflows/deploy-pages.yml`、`src/scripts/ensure-node-deps.cmd`、`src/scripts/install-wasm-bindgen.cmd`），属**历史定位**（三处路径按"文件:行号"原样书写但**不加反引号**，以免被 doc-drift 的 C 类扫码当成现行路径引用）；⑤–⑦ `bsp.ts:4`、`constants.ts:13`、`pose.ts:9`（§0.3 表内）为**裸文件名锚点**，须按 §0.3 的上下文消歧（实为 `apps/viewer/src/core/` 三处）。**⚠️ 口径限制**：以上结论均以**反引号内的 `文件:行号` 形态**为锚点口径；而本段曾据以判断的「§2.4 表内裸行号被挂到同段其它文件名上」与「debug `check-wasm-api.mjs` 属越界」两说**在此口径下不可复现**——实测 `apps/debug/scripts/check-wasm-api.mjs` 为 **55 行**，其最早被引用的 `:109-126` 落在**文件之外**故属越界，但该引用**未带文件名**（裸行号），按 doc-drift 同源算法消歧会命中 **`apps/game/scripts/check-wasm-api.mjs`（99 行）**，在该文件内**确实越界**；即**结论方向正确、归属与理由须按此改写**。以上均**不计入**「现行事实锚点」的验收面。
 - **语义口径（本节上表）**：19 组错位逐条给出「期望 vs 实测 vs 处置」，**全部按当前实测改正**；其中 14 组来自前序独立验证点名的位置（§2.2 端口表 6 组 + §3.3 控制台输出表 5 组 + CI / `pages-index` 2 组 + `CONTRIBUTING.md` 1 组），另 5 组为本次实测补齐（§2.5 失败块两组、§2.2 命令证据组、§2.2 debug dev 锚点、§7.4 `local:smoke`）。
-- **全仓门禁（本次实跑）**：等价口径 doc-drift 输出 `50 篇 md ｜ 行数声明 149（漂移 0）｜锚点 1888（越界 0）｜路径失效 18（C 类告警）｜歧义未判 410`，**退出码 0**；相对链接 100% 可达（本章末段口径）。
+- **全仓门禁（本次收口后复跑）**：等价口径 doc-drift 输出 `50 篇 md ｜ 行数声明 152（漂移 0）｜锚点 1917（越界 0）｜路径失效 18（C 类告警）｜歧义未判 419`，**退出码 0**（本轮 §0.2/§7.4 的收口修订新增声明与锚点；A/B 两类仍为 0）；相对链接 100% 可达（本章末段口径）。
 - **仍需人工判读的部分**：上表只覆盖本次修正的 19 组；其余被引文件的行号锚点已逐条实读、非空且在范围内，但**语义是否相符**仍须按 §0.1 的逐节状态区分「现行事实 / 历史快照」后判读——这正是本文保留「快照」标注而不改写历史叙述的原因。
 
 ## 1. 审计范围与方法
@@ -207,6 +207,8 @@ apps/viewer/src/core/pose.ts:9       export { wrapDeg, bspYawToCsYaw } from '../
 ### 2.4 三个 `build-dist.cmd` 的步骤骨架对照（实测）
 
 > **落地状态（批 3 `32c2ddb`）**：三份 `.cmd` 已重写为同一逐字模板，步骤号统一 `[0/5]`…`[5/5]`（viewer 原 `[0/4]`…`[4/4]`），**viewer 已补 `[3/5]` WASM 契约检查**，三者一律调用共享 `src/scripts/ensure-node-deps.cmd nopause`（viewer 原内联探针已删）。下表为**当前实测**。
+>
+> **口径注记（行号归属）**：下表每行的**裸行号**（如 `:18-31`、`:36`、`:69`）指的是**该行「工程」列所指的那一份 `build-dist.cmd`**，不是同段上一行出现过的其它文件——例如 debug 行的 `:18-31` = `apps/debug/build-dist.cmd:18-31`、game 行同号指 `apps/game/build-dist.cmd`、viewer 行则因头部少一行而是 `:16-29`。本节已于收口时逐条按内容复核（三份的 `[0/5]` 均在各自 `:18`/`:18`/`:16`，`check:api` 在 `:69`/`:58`/`:56`，`[3/5]` 在 `:68`/`:57`/`:55`，`ensure-node-deps` 在 `:36`/`:36`/`:34`），**全部与描述相符**。
 
 | 工程 | 步骤号范围 | 工具链检查 | WASM 契约检查 | Node 依赖引导 | CRLF / 纯 ASCII | `chcp 65001` |
 |---|---|---|---|---|---|---|
@@ -533,7 +535,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | I-04 | 失效配置：`include` 指向不存在的目录 | `apps/debug/tsconfig.json:26` 的 `include` 含 `web/vendor`；`$ Test-Path apps/debug/web/vendor` → `False` | AGENTS.md §5.3「所有相对链接必须指向真实存在的文件或目录」的同类原则（配置路径同罪） |
 | I-05 | 文档遗留已废弃路径 | `apps/viewer/README.md:45`「本地地图副本放仓库根 `maps/`（gitignored）」；`$ Test-Path maps` → `False`；根 `README.md:43` 已声明根 `maps/` 废弃 | AGENTS.md §5.3「与代码不一致时以代码为准并回改文档」 |
 | I-06 | `AGENTS.md:37` 的工程标准布局声称三工程都有 `start-dev.cmd`，实测 game/viewer/harness 均无 | `$ git ls-files "\*.cmd"` 实测结果中 `start-dev.cmd` 只出现一次：`apps/debug/start-dev.cmd`（§2.1 清单） | AGENTS.md §1.2 布局表 |
-| I-22 | 共享工具的相对路径层数写错：`apps/debug/scripts/install-wasm-bindgen.cmd` 位于 `scripts/` 下，却只用两层上溯（`..\..\` 落在 `apps/`），`src/scripts/cargo-env.cmd` 永远调不到，该脚本内的 `CARGO_HOME` / `WASM_PACK_CACHE` / `WASM_BINDGEN` **全部为空** | 该文件第 19 行 `call "%~dp0..\..\src\scripts\cargo-env.cmd"`；全仓 `%~dp0` 路径逐条实测：本条解析为 `apps/src/scripts/cargo-env.cmd`（`$ Test-Path` → `False`），其余 12 条同款调用（`apps/debug/build-dist.cmd:21`、`apps/debug/play.cmd:17,71`、`apps/debug/start-dev.cmd:20,63`、`apps/game/play.cmd:17,69`、`apps/viewer/build-dist.cmd:31`、`apps/viewer/play.cmd:20`、`test/dual-mode-harness/play.cmd:37,72`）全部解析成功——它们都位于工程根，`..\..\` 层数正确。正确写法是 `..\..\..\src\scripts\cargo-env.cmd`（三层） | AGENTS.md §6「移动或改名文件后……各工程相对依赖路径（`crates/wasm` → `../../../../src` 一类，**层数易错**）」；与 I-03 同类 |
+| I-22 | 共享工具的相对路径层数写错：`apps/debug/scripts/install-wasm-bindgen.cmd` 位于 `scripts/` 下，却只用两层上溯（`..\..\` 落在 `apps/`），`src/scripts/cargo-env.cmd` 永远调不到，该脚本内的 `CARGO_HOME` / `WASM_PACK_CACHE` / `WASM_BINDGEN` **全部为空** | 该文件第 19 行 `call "%~dp0..\..\src\scripts\cargo-env.cmd"`；全仓 `%~dp0` 路径逐条实测：本条解析为 `apps/src/scripts/cargo-env.cmd`（`$ Test-Path` → `False`），其余 12 条同款调用（`apps/debug/build-dist.cmd:33`、`apps/debug/play.cmd:20`、`apps/debug/start-dev.cmd:20`、`apps/game/build-dist.cmd:33`、`apps/game/play.cmd:20`、`apps/game/start-dev.cmd:20`、`apps/viewer/build-dist.cmd:31`、`apps/viewer/play.cmd:20`、`apps/viewer/start-dev.cmd:20`、`test/dual-mode-harness/play.cmd:37` 等）全部解析成功——它们都位于工程根，`..\..\` 层数正确。正确写法是 `..\..\..\src\scripts\cargo-env.cmd`（三层） | AGENTS.md §6「移动或改名文件后……各工程相对依赖路径（`crates/wasm` → `../../../../src` 一类，**层数易错**）」；与 I-03 同类 |
 | I-21 | 上游 Apache-2.0 许可合规缺口：只有 debug 的 dist 拷贝许可证，game 的 dist（single 与 multi 皆然）不含任何 `LICENSE.*` / `NOTICE.*` | `apps/debug/scripts/build-dist.mjs:136-137` 拷贝 `LICENSE`/`NOTICE` → `dist/LICENSE.cs-movement`、`dist/NOTICE.cs-movement`（实测存在，11560 / 625 B）；`apps/game/dist/` 实测 3 项、无许可证文件，`apps/game/scripts/build-dist.mjs` 无对应代码，而 game 同样链接 `@unsurf/cs-movement` | 许可证合规是硬要求，不属「真实差异」，也不可豁免——按 §4.3 的分组应归入本节的**待修缺陷** |
 
 ### 6.2 需统一规范裁决（10 条）
@@ -570,7 +572,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | I-02 | 已执行 | debug/game 半边：批 1 `6da49ae` 把 `test:*` 补进 CI（当前 `deploy-pages.yml:99/108/120/125/151/157`）；viewer 半边：批 3 `32c2ddb` 已把脚本改名 `local:smoke`（`apps/viewer/package.json:11`），而「是否入 CI」按规范 §4.3/§6.2 本属**排除要求**（CI 从未含该步骤）→ 无需动作 | 闭环 |
 | I-03 | 已执行 | 批 1 `fa5552e`（两脚本各补一层 `..`） | 闭环 |
 | I-04 | 已执行 | 批 4 `b5be059`（`apps/debug/tsconfig.json` 删 `web/vendor`） | 闭环 |
-| I-05 | 已执行 | 文档面收口（`README`/`viewer/README.md` 路径统一为 `test/maps/`） | 闭环 |
+| I-05 | **部分执行** | 根 `README.md:43` 已统一为 `test/maps/`（并声明「仓库根 `maps/` 已废弃」，出处 `a4ed66f`）；**`apps/viewer/README.md:45` 仍是旧表述**（「本地地图副本放仓库根 `maps/`（gitignored）」），实测未修 → viewer 半边**留待执行**。该文件不在本任务 inScope（`apps/` 属 out of scope），故**只登记不修** | 遗留项 R-14（见 [rollout-status.md](rollout-status.md) §5） |
 | I-06 | 已执行（规范侧） | 规范 [framework-launch-structure.md](framework-launch-structure.md) §3.1 已把三件套写为「debug 有 `start-dev.cmd`，game/viewer 无」的差异表；批 3 `32c2ddb` 已为 game/viewer 补齐 `start-dev.cmd` | 闭环 |
 | I-07 | 已执行 | 批 3 `32c2ddb`（端口槽位表，见规范 §2.3） | 闭环（harness 8080 半边随 R-11） |
 | I-08 | 已执行 | 批 3 `32c2ddb` + `2135056`（`[N/M]` 逐字模板） | 闭环 |
@@ -645,7 +647,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | `npm run test:three-mode`（harness） | `0` | 通过 |
 | `node src/scripts/check-doc-drift.mjs [任意参数]` | **`1`（沙箱限制，与参数无关）** | `Error: spawnSync git EPERM`（§1.3） |
 | 单文件铁律自查（纯 `fs`，沙箱内可跑，**本文的正式验收命令**） | `0` | 见本节末尾的三行输出 |
-| 等价替代（改读预生成 **LF** 文件列表，其余逻辑逐字不变） | `0` | 审计当时：`文档漂移体检：45 篇 md ｜ 行数声明 117（漂移 0）｜锚点 1431（越界 0）｜路径失效 1 ｜歧义未判 383`（首次全仓跑、本文尚未落盘时的结果）；本文落盘后全仓复跑为 46 篇 / 135 声明 / 1533 锚点 / 漂移 0 / 越界 0 / 路径失效 1 / 歧义 387。**现行（事实时点 `640da1a`，批 1–4 与本次修订后）**：`50 篇 md ｜ 行数声明 149（漂移 0）｜锚点 1888（越界 0）｜路径失效 18（C 类告警，不参与退出码）｜歧义未判 410`，退出码 **`0`**（较修订前 147/1818 的差额全部来自本次改动：§2.1 为两份已上提的共享脚本补了行数声明（+2），全文 409 处行号引用中的错位逐条改正并补齐文件限定，并新增 §0.2/§0.3 的实证锚点（锚点口径 +70），**越界仍为 0**） |
+| 等价替代（改读预生成 **LF** 文件列表，其余逻辑逐字不变） | `0` | 审计当时：`文档漂移体检：45 篇 md ｜ 行数声明 117（漂移 0）｜锚点 1431（越界 0）｜路径失效 1 ｜歧义未判 383`（首次全仓跑、本文尚未落盘时的结果）；本文落盘后全仓复跑为 46 篇 / 135 声明 / 1533 锚点 / 漂移 0 / 越界 0 / 路径失效 1 / 歧义 387。**现行（事实时点 `640da1a`，批 1–4 与本次修订后）**：`50 篇 md ｜ 行数声明 149（漂移 0）｜锚点 1888（越界 0）｜路径失效 18（C 类告警，不参与退出码）｜歧义未判 410`，退出码 **`0`**（较修订前 147/1818 的差额全部来自本次改动：§2.1 为两份已上提的共享脚本补了行数声明（+2），全文 189 处文件限定锚点（+ 190 处裸行号）中的错位逐条改正并补齐文件限定，并新增 §0.2/§0.3 的实证锚点（锚点口径 +70），**越界仍为 0**） |
 
 `AGENTS.md` §7.1 第 11 项记录的基线是「117 条行数声明与 1428 个锚点零漂移/零越界（383 处跨工程裸文件名歧义）」。仅替换 git 调用后的本次实测（未含本审计文档）为 **117 声明 / 0 漂移**、**1431 锚点 / 0 越界**、**383 歧义**——声明数与歧义数完全一致，锚点数 +3 属本轮新增文档引用所致，零漂移结论**成立**。
 
@@ -657,7 +659,7 @@ BOM: false loneCR: false trailingWS: false
 exit=0
 ```
 
-> **说明**：上文命令是「单文件铁律」的正式验收命令（只查 BOM / 孤立 CR / 行尾空白三项）。**行号锚点的内容级核验不在其内**：`check-doc-drift.mjs` 与本命令都只查「越界」，不查「该行是否与描述相符」；本次修订按「行号级引用的机械口径」实跑 **409 处**、按「内容级语义口径」逐条给出「期望 vs 实测」，两者与逐条清单见 §0.2。
+> **说明**：上文命令是「单文件铁律」的正式验收命令（只查 BOM / 孤立 CR / 行尾空白三项）。**行号锚点的内容级核验不在其内**：`check-doc-drift.mjs` 与本命令都只查「越界」，不查「该行是否与描述相符」；本次修订按「行号级引用的机械口径」实跑 **文件限定锚点 189 处（非空且在范围内 181 / 空行 1 / 未能定位 7）+ 裸行号 190 处**（抽取脚本与逐条清单见 §0.2）、按「内容级语义口径」逐条给出「期望 vs 实测」，两者与逐条清单见 §0.2。
 
 三项之外另行实测（同一纯 `fs` 思路）：审计落盘当时 `LF = CRLF = 567`、标题跳级 `0`、一级标题 `1`、代码围栏 `4`（成对）、表格列数异常 `0`、全部 `文件:行号` 锚点越界 `0`、相对链接 `0` 条故失效 `0`。**收口时点（`640da1a`，即本次修订后）复测**（同一纯 `fs` 判据实跑）：`BOM = false`、孤立 `CR = false`、行尾空白 `0`、`LF === CRLF`（无孤立 LF 行）、标题跳级 `0`、一级标题 `1`、代码围栏 `8`（成对）、表格列数异常 `0`、相对链接 `14` 条全部可达。**绝对行数刻意不写死**：行数随本文后续修订而变，写死即成漂移源；需要实时行数时跑本节末的命令。
 

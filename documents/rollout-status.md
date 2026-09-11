@@ -31,7 +31,7 @@
 
 | 体检项 | 命令 | 结果 |
 |---|---|---|
-| 文档漂移（A 行数声明 / B 锚点越界） | `node src/scripts/check-doc-drift.mjs`（成员沙箱内必然 `spawnSync git EPERM`，属环境限制；原命令实测 **exit 1**） | 等价口径实测（**收口完成后复跑**）：**50 篇 md ｜ 行数声明 150（漂移 0）｜锚点 1895（越界 0）｜路径失效 18 ｜歧义未判 410**，退出码 **0**。演进链（均实测）：批 4 收尾 `8879c15` 时为 147 声明 / 1818 锚点；t1 `6695447` 后为 149 / 1888；`5406e15` 后仍 149 / 1888；本次收口后为 **150 / 1895**（声明 +1 来自 `CHANGELOG.md` 新增的文档收口清单条目，锚点 +7 来自本文件与 `framework-audit.md` 的新增引用） |
+| 文档漂移（A 行数声明 / B 锚点越界） | `node src/scripts/check-doc-drift.mjs`（成员沙箱内必然 `spawnSync git EPERM`，属环境限制；原命令实测 **exit 1**） | 等价口径实测（**收口完成后复跑**）：**50 篇 md ｜ 行数声明 152（漂移 0）｜锚点 1917（越界 0）｜路径失效 18 ｜歧义未判 419**，退出码 **0**。演进链（均实测）：批 4 收尾 `8879c15` 时为 147 声明 / 1818 锚点；t1 `6695447` 后为 149 / 1888；`5406e15` 后仍 149 / 1888；`1fe641e`/`c83b4c0` 后为 150 / 1895；**本次追加修订（`I-05`/`I-22` 与 §0.2/§7.4 口径、R-14）后为 152 / 1917** |
 | 相对链接可达性 | 纯 `fs` 遍历全仓 md（跳过 `archive/`） | **受检 50 篇 ｜ 失效 0 ｜ 100% 可达**（含本次改动；收口前曾为「失效 1 篇」——`README.md:63` → `apps/debug/src/physics/NOTICE`，批 3 搬迁后未同步，已在 `8879c15` 系列修复） |
 
 - 路径失效 **18 处**均为 C 类**告警**（不影响退出码），逐条处置见 §4。
@@ -77,6 +77,7 @@
 | R-11 | 批 3 端口判据中 `test/dual-mode-harness` 仍为 8080 | **viewer 半边已执行（批 3 `32c2ddb`）**；harness 半边**留待执行**（随 R-2） | **viewer 半边**：`test:replay` 的输出已迁 `.tmp/`（`apps/viewer/package.json:10` 的 `outfile=.tmp/replay-selftest/replay-selftest.mjs`，出处同为 `32c2ddb`；`git blame -L 10,11` 两行均 `32c2ddbf`）——原登记写「批 4 `b5be059`」系归因错误，已在本表更正，同步更正 [framework-audit.md](framework-audit.md) §8.5 的 `R-11` 行。**harness 半边仍未落地**：规范 §2.3 要求 harness 用 8110（与 `dev` 共用），现状 `test/dual-mode-harness/play.cmd:6` 仍 `set PORT=8080`、其 `package.json` 的 `dev` 亦未改；因该目录不在任何实现批次的 inScope，随 R-2 另案处置 |
 | R-12 | **`[IMPORTANT]` 标记在词表之外**（本团队新发现） | 已登记（随 R-2，harness out-of-scope） | 实测全仓 `[IMPORTANT]` 仅 **1 处**：`test/dual-mode-harness/play.cmd:65`（`echo  [IMPORTANT] This window is the server. Keep it open while playing;`）。规范 §2.5 的唯一词表只含 `[0/5]`…`[N/M]`/`[ERROR]`/`[HINT]` 等，`[IMPORTANT]` **不在词表内**——三工程 9 个入口已按逐字模板清零词表外标记（批 3 `32c2ddb` + `2135056`），harness 是**唯一残留**。**处置结论**：该文件属 `test/dual-mode-harness/`，不在本轮任何 inScope → **不修改**，随 R-2 另案处置；届时改为词表内标记（如 `[INFO]`）并同步重跑输出模板判据 |
 | R-13 | **`Q4`：`build:dist` 的 WASM 内嵌机制由各工程自实现收敛为共享内核** | **已登记（非缺陷，不需修复）** | **现象**：批 3 落地的 `T-04` 把三份 `build-dist.mjs` 的 base64 内嵌注入收敛为共享内核 `src/scripts/lib/dist-pack.mjs`，由 `writeEmbeddedPreamble` 统一写出 `globalThis.__VBSP_WASM_B64__`（实测 `src/scripts/lib/dist-pack.mjs:107`；该函数签名含 `wasmB64` 于 `:98`），三工程 `build-dist.mjs` 以 `wasmB64` 调用它。**产物形态未变**：三工程 single 产物**仍然内嵌 WASM**（viewer 本就 single-only，同样内嵌），`file://` 双击可玩的既有能力零变化。**结论**：这是**重构**（机制收敛、实现去重），不是行为变更，**非缺陷、不需修复**。**登记缘由**：派单初稿曾把本项表述为「`build:dist` 产物不含内嵌 WASM」的**行为回退待确认**，经实测该前提**不成立**（`dist-pack.mjs:107` 的注入仍在生效），故在此如实登记为「重构、产物形态未变」，且**不写入**任何「产物无内嵌 WASM」的表述；如需改变产物形态，须另行裁定（本任务不修） |
+| R-14 | **`apps/viewer/README.md:45` 仍写「本地地图副本放仓库根 `maps/`」**（`I-05` 的 viewer 半边，收口时实测发现） | **已登记（本任务 out of scope，只登记不修）** | 实测 `apps/viewer/README.md:45` = 「更换地图」（拖拽 `.bsp` 仍全局可用）。本地地图副本放仓库根 `maps/`（gitignored）。而根 `README.md:43` 已统一为 **`test/maps/`** 并声明「仓库根 `maps/` 已废弃」（出处 `a4ed66f`）。**处置结论**：`apps/viewer/README.md` 属 `apps/` → **不在本任务 inScope**（t3 边界明文排除 `apps/`），故**只登记不修**；`framework-audit.md` §6.4 的 `I-05` 已相应由「已执行」改记为**「部分执行」**，viewer 半边留待执行。**去向**：与 R-2 同属「另案/harness 与工程内文档清理」，交后续任务或独立成批 |
 
 ## 6. 本次收口改动记录（`t9` 历史段 + `t3` 本次段）
 
@@ -106,9 +107,21 @@
 | 6 | 本文档 §1/§2/§3/§7 | 基线提交号、门禁四个数字改为**收口后复跑实测值**（`50 篇 ｜ 150 声明 ｜ 1895 锚点 ｜ 失效 18 ｜ 歧义 410`，exit 0）、等价口径说明改为「`.tmp/` 副本 + 动态 import，不碰被跟踪文件」、修正两个 `## 6` 重号标题为 §6/§7 | 复跑输出见 §3；`git diff --quiet -- src/scripts/check-doc-drift.mjs` 退出 0 |
 | 7 | `CHANGELOG.md` | 追加**本次收口**条目（含 `6695447` / `5406e15` / 本次收口提交与本表 1–6 的改动摘要） | 既有批 1–4 条目保持原文不动 |
 
+> 上表 1–7 为 `1fe641e` 批次；下表为 captain 追加裁定后的一次**极小追加修订**（同一工作区，未回退前笔）。
+
+| # | 文件 | 改动 | 判据 |
+|---|---|---|---|
+| 1 | `framework-audit.md` §0.2 | 删除不可复现的「行号引用共 **409** 处」，改为 `node .tmp/anchor-audit.mjs` 可复现口径：**文件限定锚点 189**（非空 181 / 空行 1 / 未能定位 7）+ **裸行号 190**；并将「7 处空行/越界」改写为**逐条可复核的 8 处** | 凡写数字必附口径命令；409 在任何正则下都测不出（实测组合为 189/190/379） |
+| 2 | `framework-audit.md` §0.2 | `check-wasm-api.mjs` 的定性按实测改写：该引用是**裸行号**（无文件名），按 doc-drift 同源算法消歧命中 **`apps/game/scripts/check-wasm-api.mjs`（99 行）**而非 debug 版（**55 行**），且**在该文件内确实越界** → 结论方向正确、归属与理由改写 | `node .tmp/anchor-audit.mjs`；两个文件实测行数 55 / 99 |
+| 3 | `framework-audit.md` §6.4 `I-05` | 「已执行」→ **「部分执行」**：根 `README.md:43` 已统一 `test/maps/`，但 `apps/viewer/README.md:45` 仍是旧表述且**实测未修** | 逐字节读 `apps/viewer/README.md:45`；该文件属 `apps/`（本任务 out of scope）→ 只登记不修，立 R-14 |
+| 4 | `framework-audit.md` §6.1 `I-22` | `%~dp0` 调用清单由改造前行号（`play.cmd:17,71` / `:17,69` 等）改为**当前实测**：三工程 `play.cmd:20`、`build-dist.cmd:33`（viewer `:31`）、`start-dev.cmd:20`、harness `play.cmd:37` | 逐条 node 按字节读；旧引用的 `:17` 现为**孤立 `)`** |
+| 5 | `framework-audit.md` §2.4 | 新增**口径注记**：表中裸行号归属「该行工程列所指的那一份文件」；并记录三份的 `[0/5]`/`check:api`/`[3/5]`/`ensure-node-deps` 锚点**逐条按内容复核全部相符**（§2.5 的 48 个失败块边界与 `exit /b 0` 锚点亦全部实测相符） | `node .tmp/check-24-25.mjs` 全绿；I-16 的 `apps/viewer/play.cmd:51-56` **经复核无误，未改** |
+| 6 | `framework-audit.md` §0.2/§7.4 + 本文档 §3/§7 | 门禁四个数字改为**本次复跑实测值**（`152 / 1917 / 18 / 419`，exit 0）；§0.2 新增的三处历史路径**去掉反引号/改引号书写**，使 C 类失效数**保持 18**（不因登记而新增） | 复跑前后均为 18；`git diff --quiet -- src/scripts/check-doc-drift.mjs` 退出 0 |
+| 7 | 本文档 §5 | 新增 **R-14**（`apps/viewer/README.md:45` 旧路径，只登记不修） | 与 §6.4 的 `I-05`「部分执行」一致 |
+
 
 ## 7. 使用约束
 
 - **本文档不改变任何规范条文的效力**：与三份规范冲突时以规范为准；与代码冲突时以代码为准并回改本文档。
-- 本文档的**行数/计数类数字**（50 篇 / 150 / 1895 / 71 等）是实测快照；新增或修改文档后必须重跑 §3 的命令并同步更新，否则会被 `check-doc-drift.mjs` 记为漂移。
+- 本文档的**行数/计数类数字**（50 篇 / 152 / 1917 / 71 等）是实测快照；新增或修改文档后必须重跑 §3 的命令并同步更新，否则会被 `check-doc-drift.mjs` 记为漂移。
 - **收口提交链（自引用说明）**：本次收口分两笔——`1fe641e`（内容收口：`framework-audit.md` 三处、本文件、`CHANGELOG.md` 追加）与其后一笔**极小追加提交**（把 §0.1 与本文档 §1 的「本次收口提交」替换为真实 sha `1fe641e`；该追加提交自身的 sha 记在它的提交信息里，**不在正文中自引用**，以免每次改写都改变自身标识）。因提交无法引用自身尚未生成的 sha，§0.1 的「现行事实」记为 **`1fe641e`**；两者是同一时点。
