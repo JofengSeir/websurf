@@ -418,7 +418,7 @@ exit /b 0
 | viewer | `web/` 无 `textures.mtz` | viewer 不做 MTZ 纹理包路径（只有 BSP→GLB + 录像回放），不需要该资产 | `Test-Path apps/viewer/web/textures.mtz` = `False`，且 `apps/viewer/src` 无 mtz 引用 |
 | viewer | `dist/` 多出 `play.cmd`、`play.sh`、`serve.py`、`README.md`、`.nojekyll`、`assets/` | 定位是「纯静态产物 + `file://` 双击可用」，产物自带启动器与说明（I-14） | `apps/viewer/scripts/build-dist.mjs:182` 起全量重建并写入这些文件 |
 | viewer | `crates/wasm/` 不依赖 `websurf-phys` | 无物理需求（I-18）；硬加会白增体积 | `apps/viewer/crates/wasm/Cargo.toml:19` 只有 `websurf-wasm-core` |
-| harness | 无 `web/` 目录、无 `start-dev.cmd`/`build-dist.cmd` | 验证工程，不部署；页面在工程根 | `Test-Path test/dual-mode-harness/web` = `False` |
+| harness | 无 `web/` 目录、无 `start-dev.cmd`/`build-dist.cmd`；`scripts/check-wasm-api.mjs` 与 `scripts/build-dist.mjs` 为**自有独立实现**（不引用共享层工具） | 验证工程，不部署；页面在工程根；**门禁/构建脚本必须与被验对象独立**——共享层出缺陷时两边一起错、验证失效（引导/环境类 `cargo-env.cmd`/`ensure-node-deps.cmd`/`install-wasm-bindgen.cmd` 仍共享） | `Test-Path test/dual-mode-harness/web` = `False`；`git grep -n "src/scripts" -- test/` 零命中 |
 | harness | `build:wasm` 把 wasm 拷到工程根 | 页面在工程根，无 `web/` | `test/dual-mode-harness/package.json:8` |
 | harness | 无 `build:worker`/`build:app` | 三个入口（`main`/`worker-a`/`worker-b`）由单条 `build:ts` 打包 | `test/dual-mode-harness/package.json:10` |
 | 三工程 | wasm 文件名不同（`<crate>_bg.wasm`） | 名称随 crate 名（`websurf-wasm` / `websurf-viewer-wasm`） | `pkg/` 产物名与 `crates/wasm/Cargo.toml` 的 `name` 一致 |
@@ -439,7 +439,7 @@ exit /b 0
 | `apps/<app>/crates/wasm/` | `Cargo.toml` | 4 | — | `../../../../src/…` | 正例：`apps/debug/crates/wasm/Cargo.toml:22`、`apps/viewer/crates/wasm/Cargo.toml:19` |
 | `apps/<app>/test/` | `replay-selftest.ts` | 3 | — | `../../../src/…` | — |
 | `test/dual-mode-harness/` | `play.cmd`、`package.json` | 2 | `..\..\src\…` | `../../src/…` | 正例：`test/dual-mode-harness/play.cmd:19`（`cargo-env.cmd`）、`:23`（`ensure-node-deps.cmd`）、`:36`（`install-wasm-bindgen.cmd`） |
-| `test/dual-mode-harness/scripts/` | `*.mjs` | 3 | — | `../../../src/…` | 正例：`test/dual-mode-harness/scripts/check-wasm-api.mjs:19`、`scripts/build-dist.mjs:28` |
+| `test/dual-mode-harness/scripts/` | `*.mjs` | 3 | — | **不引用共享层**（自有独立实现，登记于 §3.2 豁免表） | 判据：`git grep -n "src/scripts" -- test/` 零命中 |
 | `test/dual-mode-harness/crates/wasm/` | `Cargo.toml` | 4 | — | `../../../../src/…` | 正例：`test/dual-mode-harness/crates/wasm/Cargo.toml:19` |
 | `documents/**` | `*.md` | 3+ | — | 相对当前 md 的路径（[AGENTS.md](../AGENTS.md) §5.3） | 链接必须真实可达 |
 
@@ -556,7 +556,7 @@ git grep -nE "\.\.[\\/]" -- 'apps/*/*.cmd' 'apps/*/scripts/*.cmd' 'apps/*/packag
 | `apps/debug/` | `{single, multi}` | single | `build-dist.cmd multi` | 本地双击用 single；Pages 部署用 multi |
 | `apps/game/` | `{single, multi}` | single | `build-dist.cmd multi` | 同左 |
 | `apps/viewer/` | `{single}`（**声明为 single-only**） | single | **禁止**（收到 `multi` 必须 `[ERROR]` + 退出码 1） | 定位是 `file://` 双击 + 静态托管：classic `<script>`、wasm base64 内嵌、无 SAB/COOP 依赖（I-17、审计 §3.4） |
-| `test/dual-mode-harness/` | 无 `dist` 交付要求 | — | — | 不部署 → R-17 的 dist 许可清单**不适用**（无交付）；如后续发布其 `dist/`，须补 `LICENSE.cs-movement`/`NOTICE.cs-movement`（`dist-pack.mjs` 的 `copyLicensePair` 可直接复用） |
+| `test/dual-mode-harness/` | 无 `dist` 交付要求 | — | — | 不部署 → R-17 的 dist 许可清单**不适用**（无交付）；如后续发布其 `dist/`，须补 `LICENSE.cs-movement`/`NOTICE.cs-movement`（由该工程自带实现写入——按 §3.2 豁免，harness 的构建脚本不引用共享层内核） |
 
 - **【必须】**`build-dist.cmd` 默认 single；`build-dist.cmd multi` 传 `--multi` 给 `scripts/build-dist.mjs`；单工程内的两种形态必须由同一脚本实现（禁止两份实现）。
 - **【必须】**`scripts/build-dist.mjs` 必须先删除再重建 `dist/`（禁止增量残留）；判据：三份脚本均含 `rm(`/`rmSync` 且目标为 `dist`。
@@ -724,7 +724,7 @@ apps/<new>/
 - **【禁止】**给 viewer 的 `crates/wasm` 加 `websurf-phys`；给 debug 强加 `web/styles.css`；给 viewer 强加 `web/textures.mtz`。
 - **【禁止】**把 `.cmd` 文案改成中文（词表与 ASCII 约束优先于「文案友好」）。
 - **【禁止】**把 `ensure-node-deps.cmd`、`install-wasm-bindgen.cmd` 的内容在工程内留副本（R-19；落点见 D-01/D-02）；**【禁止】**合并 5 份 `Cargo.toml` 的 `[patch.crates-io]`（R-21）。
-- **【禁止】**为统一端口而新增根级 `package.json` 或跨工程共享的端口配置文件（端口表以本文件为唯一事实来源）。
+- **【禁止】**为统一端口而新增根级 `package.json` 或跨工程共享的端口配置文件（端口表以本文件为唯一事实来源）。**【禁止】**让 `test/dual-mode-harness/scripts/*.mjs` 引用共享层工具——验证工程的门禁/构建脚本必须与被验对象独立（登记于 §3.2 豁免表）。
 
 ## 9. R-n 条款落点映射（R-01…R-21）
 
