@@ -10,7 +10,7 @@
     "build:ts": "npm run typecheck && esbuild src/main.ts --bundle --outfile=app.js --format=esm --target=es2022 && esbuild src/worker-a.ts --bundle --outfile=worker-a.js --format=esm --target=es2022 && esbuild src/worker-b.ts --bundle --outfile=worker-b.js --format=esm --target=es2022",
     "build": "npm run build:wasm && npm run build:ts",
     "build:dist": "node scripts/build-dist.mjs",
-    "dev": "python ../../src/serve.py 8080 .",
+    "dev": "python ../../src/serve.py 8110 .",
     "check:api": "node scripts/check-wasm-api.mjs",
     "test:three-mode": "node scripts/three-mode-verify.mjs"
   },

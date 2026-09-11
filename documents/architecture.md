@@ -91,7 +91,7 @@ WASM/Worker/入口三者的页面接线：debug `apps/debug/web/index.html:621`�
 | debug | single（默认，全内嵌）+ `--multi` | multi | single 形态可用 | `apps/debug/scripts/build-dist.mjs:1-14`、`deploy-pages.yml:86-88` |
 | game | single（默认）+ `--multi` | multi | single 形态可用 | `apps/game/scripts/build-dist.mjs:26,55-58`（dispatch）与 `:9,121`（multi 注释）、`deploy-pages.yml:104-112` |
 | viewer | **仅 single**（multi 分支 2026-09 移除） | single | ✅ 双击可用（wasm base64 + Blob worker + classic script） | `apps/viewer/scripts/build-dist.mjs:5,13`、`deploy-pages.yml:120-126` |
-| harness | 多文件 dist（5 文件，无 single 内嵌） | 不部署 | 仅消息回退模式等价可用 | `test/dual-mode-harness/scripts/build-dist.mjs:10-11`、overview §5 |
+| harness | 多文件 dist（5 文件，无 single 内嵌；第二批收敛为薄入口 → 共享内核 `dist-pack.mjs`） | 不部署 | 仅消息回退模式等价可用 | `test/dual-mode-harness/scripts/build-dist.mjs:13-14`、`:23-28`、overview §5 |
 
 注意：`apps/viewer/web/app.js`、`web/worker.js` 与 wasm 产物**不入库**（`apps/viewer/.gitignore:2-4`、根 `.gitignore:9-12`）——git 只跟踪 `apps/viewer/web/index.html` + `styles.css`，页面打开前必须先构建（未构建时有 `web/index.html:91-107` 的 `#fatal` 兜底提示）。debug/game 的 `web/*.js` 同为构建产物；game 的现存 `web/*.js`/`dist/*` 可能是旧架构（v3）产物，运行前先重建（`documents/game/overview.md` §5 ⚠️ 注）。
 
@@ -102,12 +102,12 @@ WASM/Worker/入口三者的页面接线：debug `apps/debug/web/index.html:621`�
 
 ### 3.4 契约校验
 
-`check-wasm-api.mjs` 现为**四工程各自一份薄配置 + 共享引擎**（批 2 `fc3de84` 收敛）：`apps/debug/scripts/`（55 行）、`apps/game/scripts/`（99 行）、`apps/viewer/scripts/`（批 2 新建，61 行）、`test/dual-mode-harness/scripts/`（56 行，另案未收敛）；共享引擎为 `src/scripts/lib/wasm-api-contract.mjs`（203 行，纯函数、零工程依赖），四份薄配置只声明各自的「pkg 名 + 契约面」并调用引擎。`npm run check:api` 在 debug/game/viewer 三工程均存在（viewer 由批 2 补齐）。
+`check-wasm-api.mjs` 现为**四工程各自一份薄配置 + 共享引擎**（批 2 `fc3de84` 收敛）：`apps/debug/scripts/`（55 行）、`apps/game/scripts/`（99 行）、`apps/viewer/scripts/`（批 2 新建，61 行）、`test/dual-mode-harness/scripts/`（**第二批收敛为 64 行薄配置**）；共享引擎为 `src/scripts/lib/wasm-api-contract.mjs`（203 行，纯函数、零工程依赖），四份薄配置只声明各自的「pkg 名 + 契约面」并调用引擎。`npm run check:api` 在四工程均存在（viewer 由批 2 补齐、harness 随第二批接入）。
 **勘误（批 2 之前）**：本节曾写「存在于 debug / game / harness 三处、viewer 无此脚本」——该表述在批 2 后失真：viewer 已补薄配置（不再是「无此脚本」），且 debug/game 的实现已从整份实现变为薄配置。
 
 **debug 与 game 的契约面不同（不得抹平）**：debug 是「`pkg/<basename>.js` 导出面 vs `src/**/*.ts` 导入面」的动态比对（另有「声明面含 `class BspProcessor`/`class PhysWorld`」与「导入面不得为空」两条不变量），game 是「硬编码 `EXPORT_API`（16）+ `PHYS_API`（17）+ `class PhysWorld`」的声明面逐项断言（另加导入面 ⊆ 声明面的反向断言）。
 
-**harness 侧契约最严**：只锁 PhysWorld 12 API（`test/dual-mode-harness/scripts/check-wasm-api.mjs:26-39`，该文件未随批 2–4 改动）。
+**harness 侧契约最严**：只锁 PhysWorld 12 API（`test/dual-mode-harness/scripts/check-wasm-api.mjs:26-39`，该 12 项清单行未变；文件本身已由第二批收敛为薄配置 64 行，`:16-19` 引共享引擎）。
 
 ---
 

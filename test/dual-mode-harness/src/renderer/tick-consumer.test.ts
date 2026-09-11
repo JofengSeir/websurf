@@ -17,7 +17,7 @@
  * - i32 wrap-safe tick diff；yaw 最短弧；seqlock 冲突（−1）弃读不断流。
  *
  * 运行：cd game && npx esbuild src/renderer/tick-consumer.test.ts --bundle
- *       --format=esm --outfile=temp/tick-consumer.test.mjs && node temp/tick-consumer.test.mjs
+ *       --format=esm --outfile=.tmp/tick-consumer.test.mjs && node .tmp/tick-consumer.test.mjs
  */
 
 import {

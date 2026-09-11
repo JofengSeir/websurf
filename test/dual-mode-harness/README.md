@@ -96,8 +96,8 @@ test/dual-mode-harness/
     renderer/         tick-consumer.ts（α 网格弦插值 + 六显示态 + Δ 控制器 + 断窗八类）+ 单测
     panel/            tick-telemetry-format.ts（tick 遥测 7 行格式化）+ 单测
   scripts/
-    build-dist.mjs        构建 dist（multi 5 文件：app/worker-a/worker-b/wasm/index.html；test 无 single 内嵌模式）
-    check-wasm-api.mjs    WASM 契约校验（薄导出层 12 API，缺一即败）
+    build-dist.mjs        构建 dist（薄入口 → 共享内核 src/scripts/lib/dist-pack.mjs；multi 5 文件：app/worker-a/worker-b/wasm/index.html；test 无 single 内嵌模式）
+    check-wasm-api.mjs    WASM 契约校验（薄配置 → 共享引擎 src/scripts/lib/wasm-api-contract.mjs；薄导出层 12 API，缺一即败）
     three-mode-verify.mjs **三模式运行时验证**（node 驱动构建产物 worker-a.js：补最小 Web Worker
                           宿主 → init-shared/auth-init/wasm-init/world-json → set-mode 三值，
                           断言 mode-ack 闭合 + 幂等 + 非法 mode 拒绝 + 每模式帧发布（V 前进）
@@ -153,9 +153,9 @@ node scripts/race-wakeup.mjs  # 唤醒竞争
 ```
 
 **双击运行**：`play.cmd`（自动 `npm run build:ts` → 启动本地服务器 → 打开
-`http://localhost:8080/index.html`；依赖 Node.js + Python 3；窗口即服务器，关闭即停）。
+`http://localhost:8110/index.html`；依赖 Node.js + Python 3；窗口即服务器，关闭即停）。
 
-**手动运行**：`python ../../src/serve.py 8080 .` → 访问 `http://localhost:8080/index.html`
+**手动运行**：`python ../../src/serve.py 8110 .` → 访问 `http://localhost:8110/index.html`
 （需 HTTP + COOP/COEP 启用 SharedArrayBuffer；SAB 不可用时自动消息回退模式，HUD 提示通道模式）。
 
 **操作**：点击画布锁定指针 → WASD/方向键移动、空格跳、鼠标视角；R 重生；难度按钮切换
