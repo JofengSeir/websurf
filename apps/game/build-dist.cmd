@@ -45,7 +45,7 @@ REM Step 1: Node dependencies (auto npm install if node_modules missing)
 REM ------------------------------------------------------------
 echo.
 echo [1/5] Ensuring Node build dependencies (auto npm install if missing)...
-call "%~dp0scripts\ensure-node-deps.cmd" nopause
+call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
 if errorlevel 1 goto :deps_failed
 echo [1/5] Node dependencies ready.
 

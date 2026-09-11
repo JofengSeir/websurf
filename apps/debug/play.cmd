@@ -23,7 +23,7 @@ REM Role alignment: game/play.cmd + viewer/play.cmd (one-click run of dist).
 REM Note: 8080 belongs to start-dev.cmd (dev server for web/), play uses 8081.
 
 echo [1/4] Ensuring Node build dependencies (auto npm install if missing)...
-call "%~dp0scripts\ensure-node-deps.cmd" nopause
+call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
 if errorlevel 1 (
   echo [ERROR] npm install failed. Check network connectivity and package-lock.json.
   pause

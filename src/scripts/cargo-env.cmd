@@ -21,7 +21,7 @@ if not exist "%WASM_PACK_CACHE%" mkdir "%WASM_PACK_CACHE%"
 if not exist "%TMP%" mkdir "%TMP%"
 
 rem Prebuilt wasm-bindgen detection: pick the newest cargo-install copy under
-rem WASM_PACK_CACHE (installed by debug/scripts/install-wasm-bindgen.cmd),
+rem WASM_PACK_CACHE (installed by src/scripts/install-wasm-bindgen.cmd, same dir),
 rem falling back to CARGO_HOME\bin. Callers may rely on WASM_BINDGEN after this.
 if not defined WASM_BINDGEN for /d %%D in (%WASM_PACK_CACHE%\.wasm-bindgen-cargo-install-*) do (
     if exist "%%D\bin\wasm-bindgen.exe" set "WASM_BINDGEN=%%D\bin\wasm-bindgen.exe"

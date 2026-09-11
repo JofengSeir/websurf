@@ -1,13 +1,35 @@
 @echo off
 setlocal EnableExtensions
-REM Enter project root (parent of scripts/) so npm install runs in the right place
-cd /d "%~dp0.."
+REM ============================================================
+REM Shared Node dependency bootstrap (D-01 / T-01).
+REM
+REM CALLER CONTRACT: the caller must already be in the APP ROOT,
+REM i.e. every entrypoint does `cd /d "%~dp0"` before calling this
+REM script. This file no longer derives the app root from its own
+REM location (it lives in src/scripts/, so `%~dp0..` would resolve
+REM to src/ instead of the app root).
+REM
+REM Usage (from apps/<app>/build-dist.cmd etc.):
+REM   call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
+REM
+REM Exit codes: 0 = dependencies ready, 1 = not an app root / npm install failed.
+REM NOTE: keep this file pure ASCII with CRLF line endings.
+REM ============================================================
+
+set "APP_ROOT=%CD%"
+if not exist "%APP_ROOT%\package.json" (
+    echo [ERROR] ensure-node-deps: current directory is not an app root ^(package.json missing^): %APP_ROOT%
+    echo [HINT] cd into the app root first ^(every WebSurf entrypoint does "cd /d %%~dp0"^), then retry.
+    pause
+    exit /b 1
+)
 
 set "PAUSE_FLAG="
 if /i "%~1"=="nopause" set "PAUSE_FLAG=nopause"
 
 echo [deps] ============================================================
 echo [deps] Checking Node build dependencies (typescript / esbuild / three ...)
+echo [deps] Project root: %APP_ROOT%
 echo [deps] ============================================================
 
 if exist "node_modules\.bin\tsc" (

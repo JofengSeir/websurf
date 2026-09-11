@@ -21,7 +21,7 @@ REM Fresh-clone friendly: first click installs deps, builds WASM and dist
 REM (a few minutes), later clicks reuse pkg/ and only rebuild TS + dist.
 
 echo [1/4] Ensuring Node build dependencies (auto npm install if missing)...
-call "%~dp0scripts\ensure-node-deps.cmd" nopause
+call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
 if errorlevel 1 (
   echo [ERROR] npm install failed. Check network connectivity and package-lock.json.
   pause

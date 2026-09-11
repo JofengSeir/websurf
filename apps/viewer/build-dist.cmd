@@ -9,8 +9,8 @@ REM   WebSurf-viewer - Build dist package (single-file IIFE)
 REM   ASCII-only batch (avoid codepage issues). Double-click safe:
 REM   window stays open on both success and failure.
 REM   Step skeleton aligned with game\build-dist.cmd (R6): [0]
-REM   toolchain check -> [1] node deps (inline auto npm install,
-REM   viewer has no ensure-node-deps.cmd) -> [2] wasm release
+REM   toolchain check -> [1] node deps (shared src/scripts/ensure-node-deps.cmd,
+REM   D-01) -> [2] wasm release
 REM   (always rebuilt; dist embeds it as base64) -> [3] ts
 REM   typecheck + bundle -> [4] dist (direct node call, exit code
 REM   flows through). No WASM API contract check step: viewer has
@@ -54,16 +54,13 @@ REM ------------------------------------------------------------
 call "%~dp0..\..\src\scripts\cargo-env.cmd"
 
 REM ------------------------------------------------------------
-REM Step 1: Node dependencies (inline check - auto npm install only
-REM when node_modules is missing, same pattern as viewer\play.cmd)
+REM Step 1: Node dependencies (shared src/scripts/ensure-node-deps.cmd;
+REM it must be called with the app root as CWD, which this file does at :5)
 REM ------------------------------------------------------------
-if exist "node_modules\esbuild" goto :deps_done
-
 echo.
-echo [1/4] Installing Node dependencies (npm install, only when missing)...
-call npm install
+echo [1/4] Ensuring Node dependencies (auto npm install if missing)...
+call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
 if errorlevel 1 goto :deps_failed
-:deps_done
 echo [1/4] Node dependencies ready.
 
 REM ------------------------------------------------------------
