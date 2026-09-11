@@ -52,7 +52,7 @@ async function main() {
 		console.error('错误: pkg/websurf_wasm_bg.wasm 不存在。请先运行 npm run build:wasm');
 		process.exit(1);
 	}
-	const mtzPath = join(root, '..', 'src', 'materials', 'textures.mtz');
+	const mtzPath = join(root, '..', '..', 'src', 'materials', 'textures.mtz');
 	if (!existsSync(mtzPath)) {
 		console.error(`错误: 默认纹理包不存在（${mtzPath}）`);
 		process.exit(1);

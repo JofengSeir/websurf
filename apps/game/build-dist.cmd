@@ -94,7 +94,7 @@ if errorlevel 1 goto :dist_failed
 echo.
 echo ============================================================
 echo   Build complete.
-echo   Run dist via: play.cmd (or python ..\src\serve.py 8137 . + open
+echo   Run dist via: play.cmd (or python ..\..\src\serve.py 8137 . + open
 echo   http://localhost:8137/dist/index.html).
 echo   Note: file:// double-click does NOT work - SharedArrayBuffer
 echo   requires COOP/COEP headers from a local server.

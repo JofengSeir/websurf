@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # 共享解析层（仓库根 src/wasm-core/，websurf-wasm-core）
-websurf-wasm-core = { path = "../../../src/wasm-core" }
+websurf-wasm-core = { path = "../../../../src/wasm-core" }
 
 # WASM 绑定（与 websurf-phys 同一 wasm-bindgen 主版本，保证 glue 版本一致）
 wasm-bindgen = "0.2"

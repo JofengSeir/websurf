@@ -29,11 +29,11 @@ import type {
 	PhysicsEventMessage,
 	PlaneInfo,
 } from './worker/worker-types.js';
-import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../src/ts-shared/auth/shared-state.js';
-import type { SharedState } from '../../src/ts-shared/auth/shared-state.js';
-import { layerMouseDelta, qeEquivalentDx } from '../../src/ts-shared/input/input-layer.js';
-import { buildWorldBundle } from '../../src/ts-shared/phys/world-builder.js';
-import type { WorldMetadata } from '../../src/ts-shared/phys/world-builder.js';
+import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
+import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
+import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
+import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js';
+import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
 import { formatTime, GameState } from './game-state.js';
 // 物理控制面板：参数定义表（主线程渲染用，不含物理实现依赖）

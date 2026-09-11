@@ -42,7 +42,7 @@
  * 满则翻倍扩容；`{t,dx,dy,keys}` 对象**只在导出/载入时**构造。
  * 容量不设上限（用户明确要求「不限点数」），仅在 20 万帧后每 10 万帧 console.warn 一次。
  */
-import type { KeyState } from '../../../src/ts-shared/auth/shared-state.js';
+import type { KeyState } from '../../../../src/ts-shared/auth/shared-state.js';
 
 /** 载荷 schema 标识（字符串带版本号，导入时严格校验）。 */
 export const INPUT_REPLAY_SCHEMA = 'websurf-debug/input-replay@1';

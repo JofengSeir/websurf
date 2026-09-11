@@ -88,7 +88,7 @@ async function buildSingle(distDir, wasmPath) {
   const appCode = appResult.outputFiles[0].text;
 
   // 4. 生成 dist/
-  const mtzBytes = readFileSync(join(root, '..', 'src', 'materials', 'textures.mtz'));
+  const mtzBytes = readFileSync(join(root, '..', '..', 'src', 'materials', 'textures.mtz'));
   const mtzBase64 = mtzBytes.toString('base64');
   const embeddedPreamble =
     `/* WebSurf-game embedded build — auto-generated, do not edit */\n` +
@@ -156,7 +156,7 @@ async function buildMulti(distDir, wasmPath) {
   // 2. 复制 WASM + 默认纹理包（外置，fetch 加载；game 的运行时统一 fetch './websurf_wasm_bg.wasm'）
   console.log('[2/4] 复制 WASM / 默认纹理包...');
   copyFileSync(wasmPath, join(distDir, 'websurf_wasm_bg.wasm'));
-  copyFileSync(join(root, '..', 'src', 'materials', 'textures.mtz'), join(distDir, 'textures.mtz'));
+  copyFileSync(join(root, '..', '..', 'src', 'materials', 'textures.mtz'), join(distDir, 'textures.mtz'));
   console.log(`      websurf_wasm_bg.wasm / textures.mtz 已复制`);
 
   // 3. index.html（module script 原样）+ 外置样式表 + 清理旧单文件

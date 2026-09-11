@@ -18,14 +18,14 @@
 /// <reference lib="webworker" />
 
 import { PhysWorld, initSync } from '../../pkg/websurf_wasm.js';
-import type { ShmState, MsgState, RenderSample } from '../../../src/ts-shared/auth/shared-state.js';
+import type { ShmState, MsgState, RenderSample } from '../../../../src/ts-shared/auth/shared-state.js';
 import {
   createAuthLoop,
   type PhysWorldLike,
   type RenderTrajectorySource,
-} from '../../../src/ts-shared/auth/auth-loop.js';
-import { createWorkerDispatch } from '../../../src/ts-shared/auth/worker-dispatch.js';
-import { buildPhysicsParams } from '../../../src/ts-shared/phys/params.js';
+} from '../../../../src/ts-shared/auth/auth-loop.js';
+import { createWorkerDispatch } from '../../../../src/ts-shared/auth/worker-dispatch.js';
+import { buildPhysicsParams } from '../../../../src/ts-shared/phys/params.js';
 import { createConfig, applyConfigPatch } from '../config.js';
 import type { RuntimeConfig } from '../config.js';
 

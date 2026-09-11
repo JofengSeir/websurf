@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const viewerRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = join(viewerRoot, '..');
+const repoRoot = join(viewerRoot, '..', '..');
 const dist = join(viewerRoot, 'dist');
 
 const APP_SRC = join(viewerRoot, 'src/app.ts');

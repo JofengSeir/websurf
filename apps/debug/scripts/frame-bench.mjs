@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const debugDir = join(__dirname, '..');
-const repoRoot = join(debugDir, '..');
+const repoRoot = join(debugDir, '..', '..');
 
 const LABEL = process.argv[2] ?? 'run';
 const URL = process.argv[3] ?? 'http://localhost:8080/web/index.html';

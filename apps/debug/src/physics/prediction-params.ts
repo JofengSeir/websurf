@@ -10,7 +10,7 @@
  * 映射实现仍在 `src/ts-shared/phys/params.ts`（公共化 v1）：本文件只做
  * 「debug config 字段 → PhysicsParamsLike」的适配，字段来源见各处注释。
  */
-import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../../src/ts-shared/phys/params.js';
+import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../../../src/ts-shared/phys/params.js';
 import type { RuntimeConfig } from '../config.js';
 
 /**

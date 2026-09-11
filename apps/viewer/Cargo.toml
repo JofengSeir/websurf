@@ -10,7 +10,7 @@ resolver = "2"
 
 # 与 debug/game/test 同款 [patch.crates-io]（vmdl vendor 到共享目录 src/vendor/vmdl）
 [patch.crates-io]
-vmdl = { path = "../src/vendor/vmdl" }
+vmdl = { path = "../../src/vendor/vmdl" }
 
 # ============================================================
 # 性能优化配置（WASM 构建需启用 LTO + 优化 3）

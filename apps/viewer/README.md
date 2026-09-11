@@ -13,8 +13,8 @@
 | `src/core/` | 通用层：场景 / 飞行相机 / 位姿类型 / BSP 加载 / DOM 工具 / 常量 |
 | `src/ui/` | 地图页（信息 · 出生点）+ HUD/引导层/帮助浮层 + 录像信息条（`.replay` 头部元信息） |
 | `src/replay/` | 录像子系统：`.replay` 原生解析（含坐标定标映射）/ 导入 / 播放 / 可视化 / 时间轴 / 轨迹列表 / 坐标映射切换 / 调整工具 |
-| `../documents/viewer/implementation/shavit-replay-format.md` | Shavit `.replay` 二进制格式规格（replay-file.inc 对齐 + 真实文件逐字节验证） |
-| `../documents/viewer/replay-rule-ai.md` | 历史注记：`.js` 规则脚本通道已于 2026-09 移除（原稿存 `../documents/viewer/archive/`） |
+| `../../documents/viewer/implementation/shavit-replay-format.md` | Shavit `.replay` 二进制格式规格（replay-file.inc 对齐 + 真实文件逐字节验证） |
+| `../../documents/viewer/replay-rule-ai.md` | 历史注记：`.js` 规则脚本通道已于 2026-09 移除（原稿存 `../../documents/viewer/archive/`） |
 | `test/replay-selftest.ts` | 录像管线 Node 自检（`npm run test:replay`） |
 
 共享 `src/wasm-core/`（BSP 解析/GLB 导出），vmdl patch 同 debug/game/test。
@@ -27,7 +27,7 @@
 1. **安装依赖**：`npm install`
 2. **构建产物**：`npm run build:wasm`（wasm-pack release → `pkg/`，并拷贝 wasm 到 `web/`）
    + `npm run build:ts`（typecheck + esbuild 出 `web/app.js` 与 `web/worker.js`）；两步可合并为 `npm run build`
-3. **启动**：`npm run dev`（即 `python ../src/serve.py 8080 .`）→ 打开 <http://localhost:8080/web/>；
+3. **启动**：`npm run dev`（即 `python ../../src/serve.py 8080 .`）→ 打开 <http://localhost:8080/web/>；
    或者打包后**双击 `play.cmd`**（自动起服务器 + 开浏览器，见下节）
 
 自检（可选，改录像链路时建议跑）：
@@ -199,7 +199,7 @@ console.log(r.tracks(), r.meta());  // [{ id: 'track-1', … }], { time: 16.2, m
 | 页面显示「viewer 初始化失败」，提示缺 `app.js` / wasm | 未构建就打开了页面：在 `viewer/` 目录依次运行 `npm install` → `npm run build:wasm` → `npm run build:ts` 后刷新 |
 | 状态行报 `fetch wasm → 404` 或「缺少 WASM 产物」 | 缺 WASM 产物：先运行 `npm run build:wasm`（生成 `pkg/` 并拷贝 wasm 到 `web/`）再刷新 |
 | 「无法创建 WebGL 渲染上下文」 | 浏览器不支持/禁用了 WebGL、硬件加速关闭或显卡驱动过旧——换最新版 Chrome / Edge / Firefox 并开启硬件加速 |
-| `npm run dev` 报端口占用 | 8080 被其他进程占用：结束占用进程，或换端口启动 `python ../src/serve.py 8090 .` 后访问对应端口 |
+| `npm run dev` 报端口占用 | 8080 被其他进程占用：结束占用进程，或换端口启动 `python ../../src/serve.py 8090 .` 后访问对应端口 |
 | 按 `Ctrl` 下降时误触浏览器关闭标签页（Ctrl+W） | 浏览器级快捷键页面无法拦截：下降改用 `C` 键，或在 Firefox 中使用（按键拦截更宽松） |
 | 状态行闪现「鼠标锁定失败，请再点击一次画布重试」 | 指针锁定偶发失败（如 Esc 后立即点击）：按提示再点一次画布即可 |
 | 引导层报「这不是有效的（或暂不支持的）BSP 地图文件」 | 文件损坏或为暂不支持的 BSP 版本；确认选择的是 `.bsp`（拖入 `.bsp`/`.replay` 以外的文件也会被拒绝并提示） |

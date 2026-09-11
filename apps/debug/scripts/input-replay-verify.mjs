@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const debugDir = join(__dirname, '..');
-const repoRoot = join(debugDir, '..');
+const repoRoot = join(debugDir, '..', '..');
 
 const LABEL = process.argv[2] ?? 'run';
 const SECONDS = Number(process.argv[3] ?? 10);
