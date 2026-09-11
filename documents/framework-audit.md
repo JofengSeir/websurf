@@ -12,7 +12,7 @@
 
 本文自称「唯一事实基线」，但它同时是一座**审计快照**：正文里有的是**现行事实**（引用行号必须按当前代码核验），有的是**改造前历史快照**（记录当时实测，只作追溯，**不要求**与当前代码一致）。
 
-> - **事实时点**：**审计快照 = `a4ed66f`（2026-09-12，只读实测）**；**现行事实 = `640da1a`**（批 1–4 与全部文档收口提交之后；基线提交见 [rollout-status.md](rollout-status.md) §1）。
+> - **事实时点**：**审计快照 = `a4ed66f`（2026-09-12，只读实测）**；**现行事实 = 本次收口提交**（批 1–4 与全部文档收口提交之后；与 [rollout-status.md](rollout-status.md) §1 的基线为同一提交，为**紧随其后的一次极小追加提交**所钉定）。上一档为 `640da1a`（t1 写作时点的现行事实，属正常前进一档）。
 > - **核验命令**：单文件铁律自查见 §7.4；全仓 doc-drift 体检 `node src/scripts/check-doc-drift.mjs`（**只查行数声明漂移与锚点越界，不查内容错位**，见 §1.3）。
 
 **逐节状态（按 § 编号）**：
@@ -567,7 +567,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | # | 状态 | 依据 / 提交 | 去向 |
 |---|---|---|---|
 | I-01 | 已执行（脚本注册面收敛） | 批 1 `6da49ae`；未注册脚本清单与 `package.json` 的对应关系见 [rollout-plan.md](rollout-plan.md) §4 | 闭环 |
-| I-02 | 部分执行 | debug/game 半边：批 1 `6da49ae` 把 `test:*` 补进 CI（当前 `deploy-pages.yml:99/108/120/125/151/157`）；viewer 半边：脚本已改名 `local:smoke`（`apps/viewer/package.json:11`），**是否入 CI 仍待定** | 遗留项 R-1（`test/dual-mode-harness` 外的 CI 口径收尾） |
+| I-02 | 已执行 | debug/game 半边：批 1 `6da49ae` 把 `test:*` 补进 CI（当前 `deploy-pages.yml:99/108/120/125/151/157`）；viewer 半边：批 3 `32c2ddb` 已把脚本改名 `local:smoke`（`apps/viewer/package.json:11`），而「是否入 CI」按规范 §4.3/§6.2 本属**排除要求**（CI 从未含该步骤）→ 无需动作 | 闭环 |
 | I-03 | 已执行 | 批 1 `fa5552e`（两脚本各补一层 `..`） | 闭环 |
 | I-04 | 已执行 | 批 4 `b5be059`（`apps/debug/tsconfig.json` 删 `web/vendor`） | 闭环 |
 | I-05 | 已执行 | 文档面收口（`README`/`viewer/README.md` 路径统一为 `test/maps/`） | 闭环 |
@@ -731,7 +731,7 @@ exit=0
 | R-08 | 已执行 | 批 4 `b5be059`（删 `apps/debug/tsconfig.json` 的 `web/vendor`） | 闭环 |
 | R-09 | 已执行 | 批 4 `b5be059`（viewer 接入共享层并同步 include；三工程「引用 ⇔ include」两侧一致） | 闭环 |
 | R-10 | 部分执行 | 源码位置统一已成事实（工程 `scripts/*.mjs`、`test/*.ts`）；**harness 的 `scripts/*.mjs` 仍是独立实现** | 随 R-10/R-2 另案 |
-| R-11 | 已执行 | 批 4（`apps/viewer/package.json:10` 的 outfile 改为 `.tmp/replay-selftest/…`） | 闭环 |
+| R-11 | 已执行 | 批 3 `32c2ddb`（`apps/viewer/package.json:10` 的 outfile 改为 `.tmp/replay-selftest/…`；两行 `blame` 均为 `32c2ddbf`） | 闭环 |
 | R-12 | 已执行 | 批 2 `fc3de84`（viewer 补 `check:api`，四工程必备脚本名齐备） | 闭环 |
 | R-13 | 已执行 | 批 1 `6da49ae`（孤儿脚本注册面收敛） | 闭环 |
 | R-14 | 已执行 | 批 4 `b5be059`（dev 加载路径统一为 `./websurf_*_wasm_bg.wasm`；`apps/debug/package.json:8` 补 wasm 拷贝） | 闭环 |
