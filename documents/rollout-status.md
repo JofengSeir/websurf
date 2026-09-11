@@ -2,7 +2,7 @@
 
 > 定位：三份仓库框架规范（[framework-audit.md](framework-audit.md)、[framework-launch-structure.md](framework-launch-structure.md)、[framework-decoupling.md](framework-decoupling.md)）的**交付状态**与**遗留项登记**；逐文件施工清单见 [rollout-plan.md](rollout-plan.md)。
 > 本文档是**状态记录**，不是规范、不是施工计划；规范内容仍以那三份为准，与代码冲突时以代码为准并回改本文档。
-> 记录时点：基线提交 = **`NEXT_SHA`**（第二批「harness 并入规范」；同一提交亦记于 [framework-audit.md](framework-audit.md) §0.1 的「事实时点」字段，由紧随其后的极小追加提交钉定）。上一档为 `1fe641e`（批 1–4 收口）、`df3a2d2`+`b56811b`（R-3 行尾归一）。**本表随交付推进更新**，更新时必须同步 §1 的提交号与 §3 的实测数字。
+> 记录时点：基线提交 = **`790e102`**（第二批「harness 并入规范」；同一提交亦记于 [framework-audit.md](framework-audit.md) §0.1 的「事实时点」字段，由紧随其后的极小追加提交钉定）。上一档为 `1fe641e`（批 1–4 收口）、`df3a2d2`+`b56811b`（R-3 行尾归一）。**本表随交付推进更新**，更新时必须同步 §1 的提交号与 §3 的实测数字。
 > 记号：`已落地` = 代码在版本库内且可实测；`待执行` = 尚无对应提交；`已闭环` = 已确认无需动作；`已登记` = 明确留作后续任务。
 
 ## 1. 批次状态总表（按实际提交边界）
@@ -15,7 +15,7 @@
 | 批 4 | 共享层上提：`D-08` / `D-09` / `D-10` / `D-16` + viewer include + 共享一致性门禁 | 已落地 | `b5be059`（40 文件）∪ `3b16366` 内的 `src/ts-shared/**` 与 `src/phys/LICENSE`·`NOTICE` ∪ `32c2ddb` 内的 2 篇文档 |
 | 前置 | `t1` 逐文件施工计划 [rollout-plan.md](rollout-plan.md) | 已落地 | `c8ef88b`（349 行） |
 | 收口 | 规范落地状态与全文计数事实同步 | 已落地 | `f911ee7` ∪ `8879c15`（批 4 收尾锚点清空）∪ `9fd4b1f` / `785ddac` / `e558558` / `2f33b20` / `3656e22` / `691cd8f` / `18f33f4` / `23d1e00` / `640da1a`（§2.5.x 判据与 `.cmd` 括号块类）∪ `6695447` / `5406e15`（audit 内容级锚点与 `§0.3`）∪ **`1fe641e`**（本次收口：本文件、`framework-audit.md` 三处状态/时点、`CHANGELOG.md` 追加条目） |
-| 批 5 | harness 并入规范（本团队第二批）：`R-2`/`R-10`/`R-11`/`R-12`——端口 `8110` + 共享工具接入 + `check-wasm-api`/`build-dist` 薄化 + `[IMPORTANT]` 归一 + `.cmd` 模板对齐 | 已落地 | `NEXT_SHA`（代码 4 文件 + 本文件与三份规范、`architecture.md`、harness 文档、`CHANGELOG.md` 同步） |
+| 批 5 | harness 并入规范（本团队第二批）：`R-2`/`R-10`/`R-11`/`R-12`——端口 `8110` + 共享工具接入 + `check-wasm-api`/`build-dist` 薄化 + `[IMPORTANT]` 归一 + `.cmd` 模板对齐 | 已落地 | `790e102`（代码 4 文件 + 本文件与三份规范、`architecture.md`、harness 文档、`CHANGELOG.md` 同步） |
 
 **提交边界交叉（如实登记，不掩盖）**：`3b16366` 与 `32c2ddb` 的**文件归属跨了批次**——`3b16366`（标题为「修 t3 报出的三处 low 级缺陷」）同时携带了批 4 的产物（`src/ts-shared/phys/{angles,constants}.ts`、`src/ts-shared/wasm/loader.ts`、`src/ts-shared/world/{pvs-manager,types}.ts`、`src/phys/{LICENSE,NOTICE}`、`apps/debug/src/world/pvs-manager.ts`，共 11 文件），`32c2ddb`（标题为批 3）内另含批 4 的 2 篇文档（`documents/architecture.md`、`documents/decoupling` 侧引用）。系 captain 提交时**未复核暂存区**所致。**判据**：`git show --name-only 3b16366` 列出上述路径；故上表批 4 一行的提交列写作「∪」而非单一提交号。
 
@@ -151,4 +151,4 @@
 - **本文档不改变任何规范条文的效力**：与三份规范冲突时以规范为准；与代码冲突时以代码为准并回改本文档。
 - 本文档的**行数/计数类数字**（50 篇 / 152 / 1962 / 18 等）是实测快照；新增或修改文档后必须重跑 §3 的命令并同步更新，否则会被 `check-doc-drift.mjs` 记为漂移。
 - **收口提交链（自引用说明）**：本次收口分两笔——`1fe641e`（内容收口：`framework-audit.md` 三处、本文件、`CHANGELOG.md` 追加）与其后一笔**极小追加提交**（把 §0.1 与本文档 §1 的「本次收口提交」替换为真实 sha `1fe641e`；该追加提交自身的 sha 记在它的提交信息里，**不在正文中自引用**，以免每次改写都改变自身标识）。因提交无法引用自身尚未生成的 sha，§0.1 的「现行事实」记为 **`1fe641e`**；两者是同一时点。
-- **第二批提交链（自引用说明）**：`NEXT_SHA`（第二批内容提交：`test/dual-mode-harness/` 4 文件 + 三份规范 + 本文档 + `architecture.md` + harness 文档 + `CHANGELOG.md` 追加条目）与其后一笔**极小追加提交**（把本文件 §1 与 [framework-audit.md](framework-audit.md) §0.1 的 `NEXT_SHA` 占位替换为真实 sha；该追加提交自身的 sha 记在它的提交信息里，**不在正文中自引用**）。因提交无法引用自身尚未生成的 sha，第二批的「现行事实」记为该内容提交；两者是同一时点。
+- **第二批提交链（自引用说明）**：`790e102`（第二批内容提交：`test/dual-mode-harness/` 4 文件 + 三份规范 + 本文档 + `architecture.md` + harness 文档 + `CHANGELOG.md` 追加条目）与其后一笔**极小追加提交**（把本文件 §1 与 [framework-audit.md](framework-audit.md) §0.1 的 `790e102` 占位替换为真实 sha；该追加提交自身的 sha 记在它的提交信息里，**不在正文中自引用**）。因提交无法引用自身尚未生成的 sha，第二批的「现行事实」记为该内容提交；两者是同一时点。
