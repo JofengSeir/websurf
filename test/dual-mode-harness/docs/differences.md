@@ -17,7 +17,7 @@
 > 「harness **渲染通道** 192B vs game/debug 权威帧协议 512B」——harness 现在**另有一条 auth 通道**，
 > 直接用共享层 `ShmState`（512B，权威/解耦帧 + `I_A_SEG/I_A_TICK/I_A_EVT/I_A_PSEQ` 元数据三元组），
 > 三模式物理全部经它读写；`MirrorShmState` 再把帧镜像进 192B 渲染通道（`src/worker-a.ts:122-150`）。
-> 协议细节见 [./implementation/shared-layout.md](./implementation/shared-layout.md) 与 [../../../docs/ts-shared.md](../../../docs/ts-shared.md)。
+> 协议细节见 [./implementation/shared-layout.md](./implementation/shared-layout.md) 与 [../../../documents/ts-shared.md](../../../documents/ts-shared.md)。
 > 第 2 节「双实例」现为三实例，语义归属不变（解耦线 = 原模式A/B 的抽出地
 > `仓库根 src/ts-shared/decoupled/decoupled-loop.ts`）。
 
@@ -108,4 +108,4 @@ harness 作为验证工程，对共享解析层的消费是**裁剪过的最小�
 - 要理解**数据怎么流**（三线程、双槽唤醒、双缓冲）→ [./sequences.md](./sequences.md)。
 - 要理解**物理怎么做**（双实例、锚定、速度校准）→ [./implementation/dual-physics.md](./implementation/dual-physics.md)。
 - 要理解**布局与渲染细节**（192B 布局、分块合并、LOD）→ [./implementation/shared-layout.md](./implementation/shared-layout.md)。
-- 要对照**仓库全局**（workspace、共享层引用矩阵、其他工程）→ [../../../docs/architecture.md](../../../docs/architecture.md) 与 [../../../docs/ts-shared.md](../../../docs/ts-shared.md)。
+- 要对照**仓库全局**（workspace、共享层引用矩阵、其他工程）→ [../../../documents/architecture.md](../../../documents/architecture.md) 与 [../../../documents/ts-shared.md](../../../documents/ts-shared.md)。

@@ -1,8 +1,8 @@
 /**
  * tick 模式 F4-C scratch 乐观评估控制器（任务 t4 · 主案引擎）。
  *
- * 设计基线（全部落盘）：plan-discuss/t6-render-ahead-stance.md §8.1/§8.4/§8.5/
- * §10.1/§11.2/§11.3（F4-C 主案：worker 内第二实例乐观评估、权威实例零触碰零
+ * 设计基线（全部落盘）：t6 渲染先行立场件 §8.1/§8.4/§8.5/§10.1/§11.2/§11.3
+ * （原 plan-discuss/t6-render-ahead-stance.md，2026-09 清理；F4-C 主案：worker 内第二实例乐观评估、权威实例零触碰零
  * 写入、scratch 事件随意排空 + 权威真步确定性重放）；t3-memo §2.5（I_A_*
  * 槽语义 + AUTH_EVT 位表）；t2 契约（I_A_SEG/TICK/EVT 槽 + OPT 位 256 + f'
  * 发布序 shared-state.ts writeAuthoritative）。

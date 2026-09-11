@@ -257,9 +257,9 @@ mod tests {
     #[test]
     fn parse_s2_pillbig_phy() {
         // 从 surf_666.bsp 提取（与 probe 相同的路径约定）
-        let bsp = std::fs::read("../../maps/surf_666.bsp").ok();
+        let bsp = std::fs::read("../../test/maps/surf_666.bsp").ok();
         let Some(bsp) = bsp else {
-            eprintln!("跳过：maps/surf_666.bsp 不存在");
+            eprintln!("跳过：test/maps/surf_666.bsp 不存在");
             return;
         };
         // LUMP_PAKFILE = 40

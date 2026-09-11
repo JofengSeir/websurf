@@ -37,6 +37,7 @@ dist/
   「选择 BSP 地图…」/「选择录像文件…」按钮或直接拖入窗口。
 - HTTP 下额外支持 URL 深链（免点选文件，可分享）：
   `index.html?replay=assets/maps/surf_null_4.replay`
+  （该示例仅在本地 `test/maps/surf_null_4.replay` 存在时随 build 打包进 dist；缺失则深链不可用，但 file:// 下仍可用面板「选择录像文件…」加载任意本地 .replay）
   （`?bsp=` / `?replay=` 任意组合，相对路径相对页面解析，也支持带 CORS 头的绝对 URL）。
 
 ## 播放基准与坐标映射

@@ -106,11 +106,38 @@ export interface AuthLoopEnv {
    * 支路（tick_into + state_out 视图）。控制器全部方法自查模式——非 tick
    * 模式等价缺省。缺省 undefined = 引擎本体逐行不动（耦合/解耦零回归）。 */
   tickF4?: TickF4Controller;
+  /** 渲染轨迹采样源（可选，渲染轨迹采样扩展）：提供时**耦合模式**的权威发布
+   * 位置改为「渲染折线上按τ插值取点」——tick 折线成为渲染曲线的内接 ~64 边形
+   * （每个发布点都落在渲染 polyline 上）。
+   *
+   * 两条硬约束（设计裁定）：
+   * - R1：渲染预测仍是 input→display 最快响应者——本钩子只在**发布侧**被调用
+   *   （渲染的位置路径零新增读/等待/分配）；
+   * - R2：权威仍是速度之主——`calibrateVelocity` 每帧覆盖渲染速度是**有意**的
+   *   （玩法难度），本钩子不触碰它，也不经 set_state 反向注入位置。
+   *
+   * 缺省 undefined = 逐行保持今日行为（发布位置 = phys.state() 自身位置，
+   * 且 writePublishedTau 不被调用）——耦合/解耦/tick 既有路径字节级零回归。 */
+  renderTrajectory?: RenderTrajectorySource;
+}
+
+/**
+ * 渲染轨迹采样源（由 worker 装配侧实现；读侧只碰 Number，热路径零分配）。
+ *
+ * 语义：`tickInstantToTau` 把权威时钟瞬时值换算到**渲染时钟域** τ；`sampleAtTau`
+ * 在渲染折线上按 τ 线性插值取点（绝不外推）。两者任一不可用即返回 -1 / null，
+ * 调用方回退到自身物理位置（本 tick 不做投影）。
+ */
+export interface RenderTrajectorySource {
+  /** 权威时钟瞬时值(worker performance.now 域, ms) → 渲染时钟 τ(ms)；不可用返回 -1。 */
+  tickInstantToTau(workerInstMs: number): number;
+  /** 在渲染折线上按 τ 取点（线性插值，绝不外推）；不可用返回 null。 */
+  sampleAtTau(tauMs: number): { x: number; y: number; z: number } | null;
 }
 
 export interface AuthLoop {
   /** 固定步长（Hz；config.physics.tickRate 变更即时生效）。 */
-  setFixedDt(rate: number): void;
+  setFixedDt(rate: number): boolean;
   /** 清累积器/基准墙钟（world-json 重建后防新旧步长错配）。 */
   reset(): void;
   /** 启动自驱循环（幂等；wasm-init 就绪后调用一次）。 */
@@ -146,6 +173,24 @@ export function createAuthLoop(env: AuthLoopEnv): AuthLoop {
   /** 累积器：真实墙钟 → 固定步长推进（不设上限，低帧率不丢物理时间）。 */
   let acc = 0;
   let lastWall = 0;
+  /**
+   * 已模拟到的**墙钟刻度**（worker 时钟域，ms）——权威仿真时钟。
+   *
+   * 为什么需要它：原实现只用 `lastWall` 累积**增量**，任何一次 `reset()` 都会把
+   * 「累积器余数（均值 fixedDt/2）+ 上次唤醒到本次唤醒的整个区间」永久删掉，且
+   * 只跟踪"距上次唤醒的增量"，丢掉的墙钟时间再也回不来。
+   * 而 `input-bridge.ts` 把 `tickRate` 塞进**每一条** physics 配置消息 →
+   * `setFixedDt + reset()` 对任何物理面板改动都会触发：拖滑条（≈60 事件/秒）
+   * 实测每秒丢 ≈0.69s 仿真时间，**权威时钟只跑到墙钟的 31%** 且不可恢复。
+   * 改成以 `simMs` 为绝对基准重算欠账，任何区间都不会被静默删除。
+   */
+  let simMs = 0;
+  /**
+   * 欠账上限（ms）：显式有界，避免定时器节流后无限落后。
+   * 约束 `MAX_CATCHUP_MS ≤ 64 * fixedDt ≈ 955ms`，保证保留的欠账**一轮唤醒内可排空**
+   * （250 / 14.925 ≈ 16.8 < 64）。
+   */
+  const MAX_CATCHUP_MS = 250;
   let started = false;
 
   // 碰撞事件检测基准（tick 前快照）
@@ -268,9 +313,29 @@ export function createAuthLoop(env: AuthLoopEnv): AuthLoop {
     // {seg,tick,evt}；耦合/解耦 publishMeta 返回 undefined = meta 缺省语义
     // = I_A_* 槽零触碰（v7 字节级零回归）
     const meta = env.tickF4?.publishMeta();
+    // ── 渲染轨迹采样投影（渲染轨迹采样扩展；R1/R2 见 AuthLoopEnv.renderTrajectory）──
+    // 发布位置 = 渲染折线上 τ 处的一个采样点（tick 折线 = 渲染曲线的内接 ~64 边形）。
+    // 门控三重：钩子存在 ∧ 非 f4 支路（上文 258-283 早退）∧ 计算模式确为 coupled
+    // ——本分支同时是 tick 模式的回落路径，不 gate 会在 tick 模式误投影。
+    // holdStep / f4 支路 / publishCurrentState 三处**不投影**（各自早退或独立函数）。
+    // 钩子缺省（undefined）时 `rt !== undefined` 恒 false → pub 恒 null → 发布位置
+    // 表达式退化为 `{x:s.posX,y:s.posY,z:s.posZ}`（与旧字面量同值同序），
+    // tickInstantToTau/sampleAtTau 一次都不被调用；唯一可观察差异是下面那行
+    // writePublishedTau(0)（该行**仅对真实 ShmState/MsgState 生效**，且只写
+    // RT_PUB_TAU 一个此前从未被写过的槽——对未被接线的调用方零影响）。
+    const rt = env.renderTrajectory;
+    let pub: { x: number; y: number; z: number } | null = null;
+    let tau = 0;
+    if (rt !== undefined && (env.getComputeMode?.() ?? 'coupled') === 'coupled') {
+      tau = rt.tickInstantToTau(simMs);
+      if (tau >= 0) pub = rt.sampleAtTau(tau);
+    }
+    // τ 回写（微秒；主线程记录器用同一 τ 给 tick 节点打时标）：只有真的用了投影
+    // 才写非零；未投影写 0 = 主线程显式看到「本帧不是投影帧」。
+    shared.writePublishedTau?.(pub ? Math.round(tau * 1000) : 0);
     shared.writeAuthoritative(
       {
-        pos: { x: s.posX, y: s.posY, z: s.posZ },
+        pos: pub ? { x: pub.x, y: pub.y, z: pub.z } : { x: s.posX, y: s.posY, z: s.posZ },
         yaw: s.yaw,
         pitch: s.pitch,
         vel: { x: s.velX, y: s.velY, z: s.velZ },
@@ -323,16 +388,26 @@ export function createAuthLoop(env: AuthLoopEnv): AuthLoop {
     if (!resolveAuthGateOpen(env)) {
       lastWall = 0;
       acc = 0;
+      simMs = 0;
       return;
     }
     if (!env.shared || !env.getPhys()) return;
     const now = performance.now();
     if (lastWall === 0) {
       lastWall = now;
+      simMs = now;
       return;
     }
-    acc += (now - lastWall) / 1000;
+    // **绝对欠账**：由 (now, simMs) 直接重算，而不是累积增量——
+    // 这样任何墙钟区间都不会因为 reset/漏唤醒被静默删除。
+    acc = (now - simMs) / 1000;
     lastWall = now;
+    // 显式有界：定时器被节流（后台 ≥1s/次、深度节流 1 次/分钟）时，
+    // 超出上限的部分主动跳过并缩短 simMs，避免欠账无界增长。
+    if (acc * 1000 > MAX_CATCHUP_MS) {
+      simMs = now - MAX_CATCHUP_MS;
+      acc = MAX_CATCHUP_MS / 1000;
+    }
     // ── tick 模式 F4-C 乐观窗（t4 additive · 唯一新增调用点）：nextDue =
     // 本唤醒将触发的下一真实 tick 网格 due——由同一累积器相位推导（lastWall +
     // (fixedDt−acc)·1000），与真实网格零漂移；追赶爆发（acc≥fixedDt）时
@@ -345,18 +420,30 @@ export function createAuthLoop(env: AuthLoopEnv): AuthLoop {
     let guard = 0;
     while (acc >= fixedDt && guard < 64) {
       acc -= fixedDt;
+      simMs += fixedDt * 1000;
       stepPhysics(fixedDt);
       guard++;
     }
   }
 
   return {
-    setFixedDt(rate: number): void {
-      fixedDt = 1 / Math.max(rate, 1);
+    setFixedDt(rate: number): boolean {
+      const next = 1 / Math.max(rate, 1);
+      // **关键**：`input-bridge` 把 tickRate 塞进每一条 physics 配置消息，
+      // 而调用方原本在 setFixedDt 之后无条件 reset()。步长未变时返回 false，
+      // 调用方据此跳过 reset()，不再无谓删掉累积器余数与唤醒区间
+      // （原先每秒丢 ≈0.69s 仿真时间 = 用户报告的「tick 计算滑落」）。
+      if (next === fixedDt) return false;
+      // 换步长不丢时间：把当前余数折算进绝对时钟基准
+      simMs += acc * 1000;
+      acc = 0;
+      fixedDt = next;
+      return true;
     },
     reset(): void {
       acc = 0;
       lastWall = 0;
+      simMs = 0;
     },
     start(): void {
       if (started) return;

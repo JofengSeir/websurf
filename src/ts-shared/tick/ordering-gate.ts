@@ -1,8 +1,8 @@
 /**
  * 排序门（tick 模式 F4-C 乐观评估的发布协议门；任务 t2 落地，纯函数零分配）。
  *
- * 设计基线：plan-discuss/t6-render-ahead-stance.md §8.1/§8.4（终榜 F4-C 主案：
- * worker 内 scratch 第二实例乐观评估、权威实例零触碰零写入）。
+ * 设计基线：t6 渲染先行立场件 §8.1/§8.4（原 plan-discuss/t6-render-ahead-stance.md，
+ * 2026-09 清理；终榜 F4-C 主案：worker 内 scratch 第二实例乐观评估、权威实例零触碰零写入）。
  *
  * 排序不变量（§8.1）：`optimistic(k+1) 不得先于 authoritative(k) 发布`，
  * 静态充要条件 **δ + ε_max ≤ T**——

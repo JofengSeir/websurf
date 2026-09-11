@@ -31,15 +31,15 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 - **或**：双击 `start-dev.cmd`（dev 页面 `web/index.html`，端口 8080）
 - `file://` 双击 single 构建也可玩（MsgState 降级；SAB 高性能需 HTTP）
 
-## 文档（`debug/docs/`）
+## 文档（`documents/debug/`）
 
-- [overview.md](docs/overview.md) — 总览与工程结构
-- [sequences.md](docs/sequences.md) — 时序（启动/地图加载/双线程帧循环/物理面板）
-- [implementation/loading-pipeline.md](docs/implementation/loading-pipeline.md) — 加载管线
-- [implementation/physics-panel.md](docs/implementation/physics-panel.md) — 物理面板与计时挑战
-- [implementation/rendering.md](docs/implementation/rendering.md) — 渲染层
-- [differences.md](docs/differences.md) — 与 game/viewer/test 的架构取舍与共享层收敛
-- [archive/](docs/archive/) — 旧版文档归档
+- [overview.md](../documents/debug/overview.md) — 总览与工程结构
+- [sequences.md](../documents/debug/sequences.md) — 时序（启动/地图加载/双线程帧循环/物理面板）
+- [implementation/loading-pipeline.md](../documents/debug/implementation/loading-pipeline.md) — 加载管线
+- [implementation/physics-panel.md](../documents/debug/implementation/physics-panel.md) — 物理面板与计时挑战
+- [implementation/rendering.md](../documents/debug/implementation/rendering.md) — 渲染层
+- [differences.md](../documents/debug/differences.md) — 与 game/viewer/test 的架构取舍与共享层收敛
+- [archive/](../documents/debug/archive/) — 旧版文档归档
 
-> 公共架构见根 [../docs/architecture.md](../docs/architecture.md)；共享层 `src/ts-shared/`
+> 公共架构见根 [../documents/architecture.md](../documents/architecture.md)；共享层 `src/ts-shared/`
 > 与仓库级说明见根 [README.md](../README.md)。

@@ -1,8 +1,8 @@
 /**
  * Shavit `.replay` 二进制原生解析（replay-file.inc 规格）。
  *
- * 规格依据：viewer/docs/implementation/shavit-replay-format.md（t2 研究，已对照
- * 仓库真实文件 maps/surf_null_4.replay 逐字节验证）。支持 FINAL（0x01…0x0C）与 V2；
+ * 规格依据：documents/viewer/implementation/shavit-replay-format.md（t2 研究，已对照
+ * 仓库真实文件 test/maps/surf_null_4.replay 逐字节验证）。支持 FINAL（0x01…0x0C）与 V2；
  * 版本 > 0x0C、远古文本格式**明确报错**，不做静默错解。
  *
  * 与现有管线的对接：

@@ -27,9 +27,9 @@ const EDGE =
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = Number(process.env.SMOKE_PORT ?? 9333);
 const URL_ = process.env.SMOKE_URL ?? 'http://127.0.0.1:8080/web/index.html';
-// 真实录像：maps/surf_null_4.replay（仓库根；深链跑不需要文件选择）
+// 真实录像：test/maps/surf_null_4.replay（test/maps/；深链跑不需要文件选择）
 const LOCAL_REPLAY =
-  process.env.SMOKE_FILE_REPLAY ?? join(VIEWER_ROOT, '..', 'maps', 'surf_null_4.replay');
+  process.env.SMOKE_FILE_REPLAY ?? join(VIEWER_ROOT, '..', 'test', 'maps', 'surf_null_4.replay');
 
 async function loadWs() {
   try {
@@ -138,10 +138,16 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   check('dist 根无 worker.js / *.wasm', !existsSync(join(distRoot, 'worker.js')) && !existsSync(join(distRoot, 'websurf_viewer_wasm_bg.wasm')));
   check('dist/play.cmd 存在', existsSync(join(distRoot, 'play.cmd')));
   check('dist-multi/ 不存在（单一 dist）', !existsSync(join(VIEWER_ROOT, 'dist-multi')));
-  check(
-    'dist/assets/maps/surf_null_4.replay 存在（原生示例，HTTP 深链可用）',
-    existsSync(join(distRoot, 'assets', 'maps', 'surf_null_4.replay')),
-  );
+  // 本地源 test/maps/surf_null_4.replay 存在时，build 才会把示例打进 dist/assets/maps/；
+  // 本地无源则 build 也不会产出该文件，断言跳过（不误判）。
+  if (existsSync(LOCAL_REPLAY)) {
+    check(
+      'dist/assets/maps/surf_null_4.replay 存在（原生示例，HTTP 深链可用）',
+      existsSync(join(distRoot, 'assets', 'maps', 'surf_null_4.replay')),
+    );
+  } else {
+    console.log('  skip  dist/assets/maps/surf_null_4.replay（本地源 test/maps/surf_null_4.replay 不存在，build 未打包该示例）');
+  }
 
   const playCmd = readFileSync(join(distRoot, 'play.cmd'), 'utf8');
   check('play.cmd 含 serve.py', playCmd.includes('serve.py'));
@@ -307,18 +313,20 @@ try {
     ? '深链自动导入（?replay= 原生 .replay）'
     : `本地真实 .replay（CDP 文件选择：${LOCAL_REPLAY}）`;
   console.log(`\n[3] ${modeLabel}`);
+  const haveReplay = useDeepLink || existsSync(LOCAL_REPLAY);
   if (useDeepLink) {
     // URL 深链自动导入，无需操作
+  } else if (!haveReplay) {
+    // 夹具缺失：loud skip，不抛、不计入失败（照抄 [12b] BSP 缺失范式）
+    console.log(`[SKIP] 本地录像缺失（${LOCAL_REPLAY}）——跳过 [3] 真实录像导入及依赖它的 [3]-[11] 断言`);
   } else {
-    if (!existsSync(LOCAL_REPLAY)) {
-      throw new Error(`本地录像不存在：${LOCAL_REPLAY}（maps/surf_null_4.replay 未入库？）`);
-    }
     // CDP 直接把本地 .replay 塞进「选择录像文件」的 input，
     // 走与真实用户点击选择完全相同的 change → loadFile → 嗅探 → 解码链路
     await setFileInput(sessionId, '#pane-replay input[type=file]', LOCAL_REPLAY);
     await sleep(500);
   }
 
+  if (haveReplay) {
   const rows = await waitRows(sessionId, 1);
   check('轨迹列表出现 1 行', rows === 1, `rows=${rows}`);
   const trackCount = await evaluate(
@@ -703,6 +711,9 @@ try {
     sessionId,
   );
   check('follow(null) 回第一条', followBack === 'track-1', String(followBack));
+  } else {
+    console.log('[SKIP] 无真实录像可导入：[3]-[11] 依赖「已加载录像」的断言全部跳过（[12] 地图页 / [12b] BSP / [13] 控制台照常）');
+  }
 
   console.log('\n[12] 地图页（ReferenceGrid 已移除；出生点导航在位）');
   await evaluate("document.querySelector('.tab[data-tab=\"map\"]').click()", sessionId);
@@ -761,9 +772,9 @@ try {
         },
       ];
       for (const bspCase of bspCases) {
-        const bspPath = join(VIEWER_ROOT, '..', 'maps', bspCase.file);
+        const bspPath = join(VIEWER_ROOT, '..', 'test', 'maps', bspCase.file);
         if (!existsSync(bspPath)) {
-          console.log(`  skip  ${bspCase.file} 不存在（maps/），跳过本图断言`);
+          console.log(`  skip  ${bspCase.file} 不存在（test/maps/），跳过本图断言`);
           continue;
         }
         await setFileInput(bspSession, '#bspFile', bspPath);

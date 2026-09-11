@@ -82,14 +82,14 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 | scene-data | GLB + spawn/pvs 小 JSON（-95%） |
 | 消息协议 | 约 14 种（init/wasm-init/world-json/config/respawn/sync-render-state/set-spawn-points/teleport/teleport-to-pos/set-death-threshold/input/phys-frame/phys-event/error）——其中 `set-death-threshold`/`teleport-to-pos` 为共享层已定义但 **game 主线程实际未发送**（权威 Worker 死亡阈值恒为 Rust 默认 -100000，见 physics.md §8） |
 
-## 文档（`game/docs/`）
+## 文档（`documents/game/`）
 
-- [overview.md](docs/overview.md) — 总览与工程结构（v7 架构总图）
-- [sequences.md](docs/sequences.md) — 时序（启动/地图加载/双线程帧循环/校准与反向同步/SAB 协议）
-- [implementation/panel-and-input.md](docs/implementation/panel-and-input.md) — 输入采集链、键位录制、PointerLock、面板七模块
-- [implementation/gameplay.md](docs/implementation/gameplay.md) — 存点/出生点/渲染体验/死亡阈值/PVS 现状
-- [differences.md](docs/differences.md) — 与 debug/viewer/test 的架构取舍与共享层收敛
-- [archive/](docs/archive/) — 旧版文档（2026-09 重编纂归档，仅供历史对照）
+- [overview.md](../documents/game/overview.md) — 总览与工程结构（v7 架构总图）
+- [sequences.md](../documents/game/sequences.md) — 时序（启动/地图加载/双线程帧循环/校准与反向同步/SAB 协议）
+- [implementation/panel-and-input.md](../documents/game/implementation/panel-and-input.md) — 输入采集链、键位录制、PointerLock、面板七模块
+- [implementation/gameplay.md](../documents/game/implementation/gameplay.md) — 存点/出生点/渲染体验/死亡阈值/PVS 现状
+- [differences.md](../documents/game/differences.md) — 与 debug/viewer/test 的架构取舍与共享层收敛
+- [archive/](../documents/game/archive/) — 旧版文档（2026-09 重编纂归档，仅供历史对照）
 
-> 公共架构见根 [../docs/architecture.md](../docs/architecture.md)；时序见 [sequences.md](docs/sequences.md)、[../debug/docs/sequences.md](../debug/docs/sequences.md)；
+> 公共架构见根 [../documents/architecture.md](../documents/architecture.md)；时序见 [sequences.md](../documents/game/sequences.md)、[../documents/debug/sequences.md](../documents/debug/sequences.md)；
 > 验证工程（双模物理 + 帧信号渲染时序）见 [../test/dual-mode-harness/README.md](../test/dual-mode-harness/README.md) + [../test/dual-mode-harness/CONCLUSION.md](../test/dual-mode-harness/CONCLUSION.md)。

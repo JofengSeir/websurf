@@ -126,9 +126,9 @@
 ## 7. 文档导航
 
 - [./sequences.md](./sequences.md) —— 核心时序（维度 T）：启动链、三线程帧循环、双槽唤醒与双缓冲协议、BSP 加载、消息回退、**计算模式热切握手**。
-- [./implementation/dual-physics.md](./implementation/dual-physics.md) —— 解耦线物理（维度 I）；三模式总览见本文 §1/§2 与 [../../../docs/ts-shared.md](../../../docs/ts-shared.md)。
+- [./implementation/dual-physics.md](./implementation/dual-physics.md) —— 解耦线物理（维度 I）；三模式总览见本文 §1/§2 与 [../../../documents/ts-shared.md](../../../documents/ts-shared.md)。
 - [./implementation/shared-layout.md](./implementation/shared-layout.md) —— TestShared 192B 布局与 WorkerB 渲染（维度 I）。
 - [./differences.md](./differences.md) —— 与 debug/game/viewer 及共享层的取舍差异（维度 D）。
-- [../../../docs/architecture.md](../../../docs/architecture.md) —— 仓库总架构（workspace 布局、共享层引用矩阵）。
-- [../../../docs/phys.md](../../../docs/phys.md) / [../../../docs/wasm-core.md](../../../docs/wasm-core.md) / [../../../docs/ts-shared.md](../../../docs/ts-shared.md) —— 共享层文档（websurf-phys / websurf-wasm-core / ts-shared）。
+- [../../../documents/architecture.md](../../../documents/architecture.md) —— 仓库总架构（workspace 布局、共享层引用矩阵）。
+- [../../../documents/phys.md](../../../documents/phys.md) / [../../../documents/wasm-core.md](../../../documents/wasm-core.md) / [../../../documents/ts-shared.md](../../../documents/ts-shared.md) —— 共享层文档（websurf-phys / websurf-wasm-core / ts-shared）。
 - [../CONCLUSION.md](../CONCLUSION.md) —— 「64t 坡速 ≈ 无限制」会审结论与修复架构（历史背景，工程根）。

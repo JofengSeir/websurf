@@ -3222,8 +3222,8 @@ check(
   JSON.stringify(fP),
 );
 
-// 14. BspProcessor 冒烟：src/maps/surf_666.bsp → 导出 brush/tri/teleport/spawn/glb
-console.log('\n── BspProcessor 冒烟（src/maps/surf_666.bsp）──');
+// 14. BspProcessor 冒烟：test/maps/surf_666.bsp → 导出 brush/tri/teleport/spawn/glb
+console.log('\n── BspProcessor 冒烟（test/maps/surf_666.bsp）──');
 const BRUSH_FILTER_JSON = JSON.stringify({
   include_ladder: true,
   include_solid: true,
@@ -3231,7 +3231,7 @@ const BRUSH_FILTER_JSON = JSON.stringify({
   skip_sky: true,
   skip_nodraw: false,
 });
-const bspPath = join(root, '../../src/maps/surf_666.bsp'); // 仓库重构后地图位于仓库根 maps/（perf-bench 同路径）
+const bspPath = join(root, '../maps/surf_666.bsp'); // 本地数据统一放在仓库根 test/maps/（gitignored；perf-bench 同路径）
 const bspBytes = readFileSync(bspPath);
 check('读取 surf_666.bsp（字节 > 0）', bspBytes.length > 0, `${bspBytes.length} B`);
 

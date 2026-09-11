@@ -7,7 +7,7 @@
 > 含权威/解耦帧 + `I_A_SEG`/`I_A_TICK`/`I_A_EVT`/`I_A_PSEQ` 元数据三元组）。WorkerA 侧 `MirrorShmState`
 > 在每次发布时把帧镜像进本文的 192B 渲染通道，使耦合/解耦模式的 WorkerB 渲染路径**零改动**
 > （`src/worker-a.ts:122-150`）；tick 模式的 WorkerB 则直接经 `TickConsumer` 消费 auth 通道
-> （`src/worker-b.ts:227-233,719-733`）。auth 通道与三模式协议见 [../../../docs/ts-shared.md](../../../docs/ts-shared.md)，
+> （`src/worker-b.ts:227-233,719-733`）。auth 通道与三模式协议见 [../../../../documents/ts-shared.md](../../../../documents/ts-shared.md)，
 > 本工程总览见 [../overview.md](../overview.md) §2。
 
 # 第一部分：TestShared —— 渲染通道 192B SAB 布局（src/shared-state.ts）

@@ -10,7 +10,7 @@
 > - **本文描述的物理语义仍然成立**（解耦 = 1ms 无限制真理源 + 独立 64t tickPhys 速度校准 + 分叉锚定），
 >   但现在对应 `decoupled-loop.ts`；文中 `src/worker-a.ts:NNN` 行号**已随迁移漂移**，请以该文件为准。
 > - 本工程现支持三模式（`coupled`/`decoupled`/`tick`）运行时热切：总览见 [../overview.md](../overview.md) §1/§2，
->   三模式内核与协议见 [../../../../docs/ts-shared.md](../../../../docs/ts-shared.md)。
+>   三模式内核与协议见 [../../../../documents/ts-shared.md](../../../../documents/ts-shared.md)。
 >
 > 设计动机的历史推导（「64t 坡速 ≈ 无限制」会审、旧单实例实现的缺陷、四条用户要求）见工程根 [../../CONCLUSION.md](../../CONCLUSION.md)；本文只记录**当前代码**如何落地这些结论。
 
@@ -105,7 +105,7 @@ function tickDiverged(): boolean {
 
 **到达时序容错**：`world-json` 先于 wasm 初始化到达 → 暂存 `pendingWorld`，`startInit` 完成后应用（`:110-111,338-343,202-205`）。
 
-**PhysWorld API 使用面**：worker-a 只用 `set_hull / build_world / set_death_y / tick / set_velocity / set_state / state / respawn`（grep `phys.` 于 `src/worker-a.ts`）；`scripts/check-wasm-api.mjs:26-39` 固化的 12 API 契约（另含 predict/teleport_to/set_params/set_yaw_pitch/take_event）全部由共享 `websurf-phys` 提供（仓库根 `src/phys/mod.rs` 21 个导出方法，见 [../../../../docs/phys.md](../../../../docs/phys.md)）。
+**PhysWorld API 使用面**：worker-a 只用 `set_hull / build_world / set_death_y / tick / set_velocity / set_state / state / respawn`（grep `phys.` 于 `src/worker-a.ts`）；`scripts/check-wasm-api.mjs:26-39` 固化的 12 API 契约（另含 predict/teleport_to/set_params/set_yaw_pitch/take_event）全部由共享 `websurf-phys` 提供（仓库根 `src/phys/mod.rs` 21 个导出方法，见 [../../../../documents/phys.md](../../../../documents/phys.md)）。
 
 ## 7. 消息协议（WorkerA 侧）
 
