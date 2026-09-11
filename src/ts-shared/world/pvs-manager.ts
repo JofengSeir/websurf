@@ -1,13 +1,20 @@
 /**
- * PVS 可见性管理器
+ * PVS 可见性管理器（D-10，级别 A：两份 `numstat 2 2`，仅 import 来源不同）
  * 将 WASM parse_pvs_data 输出的 JSON 转换为运行时 PVS 管理器（坐标已旋转为 Y-up）。
  * 职责：维护 BSP 树节点 + 叶子（cluster 定位）、预解码 PVS 位图（Base64 → Uint8Array）、
  * update(pos) 找相机所在 leaf → 取 cluster → 解码可见集、isVisible(clusterId) 查询、getFaceCluster(faceIndex)。
  * 算法：findLeaf 递归比较分割平面；decodePvsRow 解码可见行；仅 cluster 变化时重算。
  */
 
-import type { Vec3 } from '../physics/math/vec3.js';
-import { type WasmPvsData, type WasmPvsNode, type WasmPvsLeaf } from './types.js';
+import type { WasmPvsData, WasmPvsNode, WasmPvsLeaf } from './types.js';
+import { base64ToBytes } from '../wasm/loader.js';
+
+/** 相机位置入参（结构等价于各工程自己的 `Vec3` / `Vec3Like`；D-07 不共享类型）。 */
+interface PvsVec3 {
+  x: number;
+  y: number;
+  z: number;
+}
 
 // ---------------------------------------------------------------------------
 // PvsManager
@@ -24,7 +31,7 @@ export interface PvsStats {
   /** 是否启用 PVS（地图无 PVS 数据时为 false）。 */
   hasPvs: boolean;
   /** 上次 cluster 变化时的检测坐标。 */
-  lastCheckPos: Vec3;
+  lastCheckPos: PvsVec3;
 }
 
 /**
@@ -44,7 +51,7 @@ export class PvsManager {
 
   private currentCluster = -1;
   private visibleSet: Set<number> = new Set();
-  private lastCheckPos: Vec3 = { x: 0, y: 0, z: 0 };
+  private lastCheckPos: PvsVec3 = { x: 0, y: 0, z: 0 };
 
   constructor(wasmJson: string) {
     const data: WasmPvsData = JSON.parse(wasmJson);
@@ -56,9 +63,9 @@ export class PvsManager {
     this.bytesPerRow = data.bytesPerRow;
     this.hasPvs = data.clusterCount > 0 && data.pvsBitsBase64.length > 0;
 
-    // Base64 解码 → Uint8Array
+    // Base64 解码 → Uint8Array（共享单点 src/ts-shared/wasm/loader.ts，D-09）
     this.pvsBits = this.hasPvs
-      ? base64ToUint8Array(data.pvsBitsBase64)
+      ? base64ToBytes(data.pvsBitsBase64)
       : new Uint8Array(0);
   }
 
@@ -73,7 +80,7 @@ export class PvsManager {
    * @param pos 世界坐标（Y-up）。
    * @returns leaf 索引，遍历失败返回 -1。
    */
-  private findLeaf(pos: Vec3): number {
+  private findLeaf(pos: PvsVec3): number {
     if (this.nodes.length === 0) {
       return -1;
     }
@@ -163,7 +170,7 @@ export class PvsManager {
    * @param pos 相机世界坐标（Y-up）。
    * @returns true 表示 cluster 发生变化（需要重新应用可见性）。
    */
-  update(pos: Vec3): boolean {
+  update(pos: PvsVec3): boolean {
     this.lastCheckPos = { x: pos.x, y: pos.y, z: pos.z };
 
     if (!this.hasPvs) {
@@ -199,7 +206,7 @@ export class PvsManager {
    * @param pos 世界坐标（Y-up）。
    * @returns cluster id（-1 = 固体/地图外）。
    */
-  getClusterAt(pos: Vec3): number {
+  getClusterAt(pos: PvsVec3): number {
     if (!this.hasPvs) {
       return -1;
     }
@@ -261,21 +268,4 @@ export class PvsManager {
   get visibleClusterCount(): number {
     return this.visibleSet.size;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Base64 解码辅助
-// ---------------------------------------------------------------------------
-
-/**
- * Base64 解码为 Uint8Array（浏览器原生 atob + 手动字节拷贝，比 TextEncoder 快）。
- */
-function base64ToUint8Array(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
 }

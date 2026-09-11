@@ -7,7 +7,7 @@ rem   .cargo-home       CARGO_HOME (registry cache + prebuilt wasm-bindgen)
 rem   .wasm-pack-cache  wasm-bindgen download / cargo-install cache
 rem   .tmp              TMP/TEMP for build tooling (bypasses system TEMP ACLs)
 rem Usage (from any app root script):
-rem   call "%~dp0..\src\scripts\cargo-env.cmd"
+rem   call "%~dp0..\..\src\scripts\cargo-env.cmd"
 rem NOTE: keep this file pure ASCII with CRLF line endings.
 
 for %%I in ("%~dp0..\..") do set "WSF_REPO_ROOT=%%~fI"
