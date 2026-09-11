@@ -1,9 +1,9 @@
 # WebSurf: 构建并部署到 GitHub Pages
 #
 # 仓库布局（三个同级应用工程 + 一个验证工程，共享仓库根 src/ Rust/TS 共享层）：
-#   debug/     = 主工程（Debug Build，共享 Rust 物理，多文件 dist）
-#   game/      = WebSurf-game（Game Build，共享 Rust 物理，多文件 dist）
-#   viewer/    = WebSurf-viewer（BSP 游览 + 录像回放，仅解析层，single dist）
+#   apps/debug/ = 主工程（Debug Build，共享 Rust 物理，多文件 dist）
+#   apps/game/ = WebSurf-game（Game Build，共享 Rust 物理，多文件 dist）
+#   apps/viewer/ = WebSurf-viewer（BSP 游览 + 录像回放，仅解析层，single dist）
 #   test/dual-mode-harness = 验证工程（仅构建验证，不部署）
 #
 # 各应用工程构建链路（与本地 build-dist.cmd 一致）：
@@ -51,7 +51,7 @@ jobs:
         with:
           # Node 20 已弃用（GH Actions 提示默认 24）；22 为 LTS 稳定线（esbuild/wasm-pack 兼容）
           node-version: 22
-          # 重构后 lock 文件在各工程（debug/package-lock.json、game/package-lock.json 等），
+          # 重构后 lock 文件在各工程（apps/debug/package-lock.json、apps/game/package-lock.json 等），
           # 根目录无锁文件——必须 glob 匹配，否则 cache: npm 报
           # "Dependencies lock file is not found"（8-09 CI 失败根因）
           cache: npm
@@ -74,24 +74,24 @@ jobs:
 
       # ── debug/ 主工程（Debug Build，调试测试页面）─────────────
       - name: Install debug dependencies
-        working-directory: debug
+        working-directory: apps/debug
         run: npm ci || npm ci
 
       - name: Build debug WASM
-        working-directory: debug
+        working-directory: apps/debug
         run: npm run build:wasm
 
       - name: "Build debug TypeScript (typecheck + bundle)"
-        working-directory: debug
+        working-directory: apps/debug
         run: npm run build:ts
 
       - name: Build debug dist package
-        working-directory: debug
+        working-directory: apps/debug
         # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常，体积更小
         run: node scripts/build-dist.mjs --multi
 
       - name: Verify debug optimizeScene (GLB 空间分块合并)
-        working-directory: debug
+        working-directory: apps/debug
         # 渲染性能回归门：面片规模的地图（实测 surf_666 GLB = 34409 primitive →
         # 未合并时场景 3.4 万 THREE.Mesh，每帧全量视锥剔除 + 逐 mesh draw call）
         # 必须走 optimizeScene 合并到 300~800 块。断言顶点守恒 + 块数区间。
@@ -103,7 +103,7 @@ jobs:
       # 63.6 tick/s 崩到 0.5 tick/s = 用户报告的「tick 计算滑落、拖累渲染」。
       # 断言：新契约下 tick 率与基线一致，且旧行为会复现缺陷。
       - name: 权威时钟验证（配置消息不得丢仿真时间）
-        working-directory: debug
+        working-directory: apps/debug
         run: npm run test:auth-clock
 
       # tick→渲染 路径垂距验收门：Worker 权威帧的**发布位置**必须是渲染轨迹上的一个
@@ -115,47 +115,47 @@ jobs:
       # 轨迹上"的缺陷。修好后的真实录制到手后再加一个 `--expect pass` 的夹具（见
       # debug/scripts/path-baseline.md 的两夹具语义）。
       - name: tick→render 路径垂距验收（稳态 p95 ≤ 2 HU）
-        working-directory: debug
+        working-directory: apps/debug
         run: npm run test:path-acceptance
 
       # ── game/ 独立工程（WebSurf-game，尝试游戏化）────────────────
       - name: Install game dependencies
-        working-directory: game
+        working-directory: apps/game
         run: npm ci || npm ci
 
       - name: Build game WASM
-        working-directory: game
+        working-directory: apps/game
         run: npm run build:wasm
 
       - name: "Build game TypeScript (typecheck + bundle: worker/app)"
-        working-directory: game
+        working-directory: apps/game
         run: npm run build:ts
 
       - name: Build game dist package
-        working-directory: game
+        working-directory: apps/game
         # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常
         run: node scripts/build-dist.mjs --multi
 
       # ── viewer/（WebSurf-viewer，BSP 游览 + 录像回放，single dist）──────
       - name: Install viewer dependencies
-        working-directory: viewer
+        working-directory: apps/viewer
         run: npm ci || npm ci
 
       - name: Build viewer WASM
-        working-directory: viewer
+        working-directory: apps/viewer
         run: npm run build:wasm
 
       - name: "Build viewer TypeScript (typecheck + bundle app/worker)"
-        working-directory: viewer
+        working-directory: apps/viewer
         run: npm run build:ts
 
       - name: Build viewer dist package
-        working-directory: viewer
+        working-directory: apps/viewer
         # single 模式（viewer 唯一产物形态）：IIFE + wasm base64 内嵌，HTTP/file:// 皆可用
         run: npm run build:dist
 
       - name: Run viewer replay selftest
-        working-directory: viewer
+        working-directory: apps/viewer
         run: npm run test:replay
 
       # ── test/ 验证工程（仅构建验证，不部署）────────────────────
@@ -177,14 +177,14 @@ jobs:
         # 驱动 build:ts 产物 worker-a.js）——game 侧模式切换已回退，此处为唯一运行面
         run: npm run test:three-mode
 
-      # ── 组装 Pages 部署目录（入口页 + debug/ + game/ + viewer/）──
+      # ── 组装 Pages 部署目录（入口页 + apps/{debug,game,viewer}）──
       - name: Assemble Pages deploy directory
         run: |
           mkdir -p deploy/debug deploy/game deploy/viewer
-          cp -r debug/dist/. deploy/debug/
-          cp -r game/dist/. deploy/game/
-          cp -r viewer/dist/. deploy/viewer/
-          cp debug/scripts/pages-index.html deploy/index.html
+          cp -r apps/debug/dist/. deploy/debug/
+          cp -r apps/game/dist/. deploy/game/
+          cp -r apps/viewer/dist/. deploy/viewer/
+          cp apps/debug/scripts/pages-index.html deploy/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
