@@ -17,15 +17,18 @@ REM NOTE: keep this file pure ASCII with CRLF line endings.
 REM ============================================================
 
 set "APP_ROOT=%CD%"
+
+REM ---- pause control: parsed BEFORE the guard below, so "nopause" also
+REM      suppresses the guard's pause (automated callers must never block) ----
+set "PAUSE_FLAG="
+if /i "%~1"=="nopause" set "PAUSE_FLAG=nopause"
+
 if not exist "%APP_ROOT%\package.json" (
     echo [ERROR] ensure-node-deps: current directory is not an app root ^(package.json missing^): %APP_ROOT%
     echo [HINT] cd into the app root first ^(every WebSurf entrypoint does "cd /d %%~dp0"^), then retry.
-    pause
+    if not defined PAUSE_FLAG pause
     exit /b 1
 )
-
-set "PAUSE_FLAG="
-if /i "%~1"=="nopause" set "PAUSE_FLAG=nopause"
 
 echo [deps] ============================================================
 echo [deps] Checking Node build dependencies (typescript / esbuild / three ...)
