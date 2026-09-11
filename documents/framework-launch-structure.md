@@ -2,7 +2,7 @@
 
 > 定位：`apps/{debug,game,viewer}` 三个应用工程与验证工程 `test/dual-mode-harness` 的**启动方式 / 文件结构 / 构建产物 / 控制台输出**统一规范。照本文件可以从零搭出一个符合规范的新子工程（§7）。
 > 事实基线：[framework-audit.md](framework-audit.md)（t1 审计，含实测证据与 R-01…R-21 需求条款）。本文件逐条闭合 R-01…R-17，并对 R-18…R-21 给出交接口径（§9）。
-> 本轮边界：**只写规范，未改任何代码 / `package.json` / `.cmd` / `Cargo.toml` / CI**。§10 的文件级动作是**待执行**清单，不代表仓库已改。
+> 本轮边界：**只写规范，未改任何代码 / `package.json` / `.cmd` / `Cargo.toml` / CI**。§10 的文件级动作是**待执行**清单，不代表仓库已改。 **【落地状态（收口 `t9` 追加，2026-09-12）】**：§10.1 的 24 项与 §10.3 的三步排期**已由批 1–4 全部执行完毕**，各批提交为 批 1 `6da49ae`/`fa5552e`/`4523ef1`、批 2 `fc3de84`、批 3 `32c2ddb` + `2135056`、批 4 `b5be059` ∪ `3b16366` 内的 TS/许可产物 ∪ `32c2ddb` 内的 2 篇文档；逐条处置表（含 C 类旧路径与未落地项）见 [rollout-status.md](rollout-status.md) §1–§5。未落地项**保持「待执行」**，不得据此认为已全部完成：§4.3 的 `test:smoke` 改名 `local:smoke`、harness 端口 `8110`（§2.3 判据④）与 §6.2 的 CI 收敛中的 viewer 侧改动属 `test/dual-mode-harness` 与本轮外范围，见该文档 R-1/R-2/R-11。
 > 记号：**【必须】** 违反即缺陷；**【禁止】** 出现即缺陷；**【豁免】** 允许不同，但本文件必须有对应条目与理由。每条条文都带「判据」（可执行命令或 `文件:行号`）。
 
 ## 1. 定位、记号与边界
@@ -424,7 +424,7 @@ exit /b 0
 | 仓库根 | `.github/workflows/deploy-pages.yml` | 0 | `apps/<app>/…` | `apps/<app>/…` | CI 用 `working-directory`，禁止手写深度 |
 | `src/` 内 | `src/scripts/cargo-env.cmd` | 1 | `..\serve.py` | — | — |
 | `apps/<app>/` 工程根 | `play.cmd`、`start-dev.cmd`、`build-dist.cmd`、`package.json` | 2 | `..\..\src\…` | `../../src/…` | 正例：`apps/debug/play.cmd:17`、`apps/debug/build-dist.cmd:21`、`apps/viewer/build-dist.cmd:54`、`apps/game/package.json:8`、`apps/viewer/package.json:17` |
-| `apps/<app>/scripts/` | `install-wasm-bindgen.cmd`、`*.mjs` | 3 | `..\..\..\src\…` | `../../../src/…` | **反例**：`apps/debug/scripts/install-wasm-bindgen.cmd:19` 写 `..\..\` → 实际解析为 `apps/src/scripts/cargo-env.cmd`（不存在） |
+| `apps/<app>/scripts/` | `install-wasm-bindgen.cmd`、`*.mjs` | 3 | `..\..\..\src\…` | `../../../src/…` | **反例（历史：`fa5552e` 已修层、`fc3de84` 已上提，该文件现位于 `src/scripts/`）**：`apps/debug/scripts/install-wasm-bindgen.cmd:19` 写 `..\..\` → 实际解析为 `apps/src/scripts/cargo-env.cmd`（不存在） |
 | `apps/<app>/src/` | `app.ts`、`worker/main.ts` | 3 | — | `../../../src/ts-shared/…` | 正例：`apps/game/src/app.ts:18` |
 | `apps/<app>/crates/wasm/` | `Cargo.toml` | 4 | — | `../../../../src/…` | 正例：`apps/debug/crates/wasm/Cargo.toml:22`、`apps/viewer/crates/wasm/Cargo.toml:19` |
 | `apps/<app>/test/` | `replay-selftest.ts` | 3 | — | `../../../src/…` | — |
