@@ -15,10 +15,11 @@
 | 调物理参数 / 调渲染 | [documents/debug/overview.md](./debug/overview.md)（物理面板/碰撞可视化/准星检查） |
 | 看图 / 放录像 | [documents/viewer/overview.md](./viewer/overview.md) + [shavit-replay-format.md](./viewer/implementation/shavit-replay-format.md)（`.replay` 格式规格） |
 | 验证物理时序 / 跑对照 | [test/dual-mode-harness/docs/overview.md](../test/dual-mode-harness/docs/overview.md) |
+| 建新子工程 / 统一启动方式与文件结构 / 判断什么该上提到 `src/` | [framework-launch-structure.md](./framework-launch-structure.md)（启动·结构·产物规范）+ [framework-decoupling.md](./framework-decoupling.md)（共享层解耦裁决）+ [framework-audit.md](./framework-audit.md)（现状事实基线） |
 
-## 2. 文档树（documents/ 下全量 24 篇，含本文 index.md 自身；test/dual-mode-harness/docs/ 5 篇验证工程文档另列；历史档案与过程讨论已移出版本库（2026-09-11））
+## 2. 文档树（documents/ 下全量 27 篇，含本文 index.md 自身；test/dual-mode-harness/docs/ 5 篇验证工程文档另列；历史档案与过程讨论已移出版本库（2026-09-11））
 
-### 根 documents/（6 篇：总架构 + 共享层四篇 + 本导航）
+### 根 documents/（9 篇：总架构 + 共享层四篇 + 三篇仓库框架规范 + 本导航）
 
 | 文档 | 覆盖 |
 |---|---|
@@ -27,6 +28,9 @@
 | [wasm-core.md](./wasm-core.md) | `websurf-wasm-core`：vbsp 修复、GLB 导出、模型合并、PAKFILE/phyfile/VTF、mosaic v4 DSL 与 MTZ 容器、各工程导出面差异 |
 | [ts-shared.md](./ts-shared.md) | TS 共享层：512B SAB 布局、KEY_MASK、v7 权威帧双线、buildWorldBundle 管线、Worker 消息表、校准四件套、harness 192B 对照 |
 | [materials.md](./materials.md) | 材质体系全景：VTF 解码/mosaic 字节码/MTZ 容器三件套、双端导出面、三条消费链（GLB 回退/画质切换/缺失比对）、默认纹理包装配 |
+| [framework-audit.md](./framework-audit.md) | 仓库框架现状审计（事实基线）：三工程启动/构建入口对照、产物与输出对照、文件结构对照、`src/` 共享层消费矩阵、`I-01..I-22` 不一致清单、`R-01..R-21` 规范需求条款 |
+| [framework-launch-structure.md](./framework-launch-structure.md) | 启动方式/文件结构/产物与输出统一规范：三件套入口语义、`start-dev.cmd` 三条件判据、10 端口段固定槽位、`.cmd` 输出逐字模板、相对路径层数对照表、豁免清单、新工程脚手架清单 |
+| [framework-decoupling.md](./framework-decoupling.md) | 共享层解耦方案：上提判定准则（级别 A/A′/B/C）、`D-01..D-23` 逐项裁决与反向否决理由、`src/` 目标结构、viewer 正当隔离专项、三批迁移顺序与回滚、`E-01..E-08` 例外表 |
 
 ### documents/debug/（6 篇：主工程）
 
