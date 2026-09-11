@@ -3,8 +3,14 @@
 export const DEG2RAD = Math.PI / 180;
 export const RAD2DEG = 180 / Math.PI;
 
-/** 固定站立眼高（HU，与 game EYE_STAND 一致）。pos 为脚底，相机 y = pos.y + EYE_STAND。 */
-export const EYE_STAND = 64.09;
+/**
+ * 固定站立眼高（HU）。pos 为脚底，相机 y = pos.y + EYE_STAND。
+ *
+ * D-16 上提后本模块**re-export** 共享单点（`src/ts-shared/phys/constants.ts`），
+ * 与 Rust 权威 `src/phys/player.rs` 的 `EYE_STAND` 逐位相等；
+ * 本文件不再持有字面量。`fly.ts` / `pose.ts` 的既有 import 路径保持不变。
+ */
+export { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
 
 /** FOV（度）。 */
 export const FOV = 73.6;

@@ -115,12 +115,25 @@ if (Math.abs(dy - expectStep) > 1.5) {
 }
 console.log('OK 基线锚定: 单子步位移 dy=' + dy.toFixed(2) + '（预期≈' + expectStep.toFixed(2) + '，无漂移）');
 
-// 7. eyeHeight（P0）：站立时应 ≈64.09（EYE_STAND），蹲下后降低
+// 7. eyeHeight（P0）：站立时应 ≈EYE_STAND（D-16 共享单点），蹲下后降低
+// 常量取自共享单源 src/ts-shared/phys/constants.ts：本脚本由 node 直接执行（未 bundle），
+// 无法 import .ts；故按行解析（解析失败即判 FAIL，不会静默用旧值），与共享单点同源。
+const EYE_STAND_SRC = join(__dirname, '..', '..', '..', 'src', 'ts-shared', 'phys', 'constants.ts');
+const EYE_STAND = (() => {
+  const m = /export const EYE_STAND = ([\d.]+);/.exec(readFileSync(EYE_STAND_SRC, 'utf8'));
+  if (!m) {
+    console.error(
+      'FAIL: 无法从共享单点 src/ts-shared/phys/constants.ts 解析 EYE_STAND（D-16 单源假定被破坏）',
+    );
+    process.exit(1);
+  }
+  return Number(m[1]);
+})();
 const e = new PhysWorld();
 e.build_world(brushJson, '[]', '{"teleports":[],"triggers":[]}', 0, 72, 0, 0);
 const eStand = e.tick(1 / 64, 0, 0, 0); // 站立
-if (Math.abs(eStand.eyeHeight - 64.09) > 0.5) {
-  console.error('FAIL: 站立 eyeHeight=' + eStand.eyeHeight.toFixed(2) + ' 预期≈64.09');
+if (Math.abs(eStand.eyeHeight - EYE_STAND) > 0.5) {
+  console.error('FAIL: 站立 eyeHeight=' + eStand.eyeHeight.toFixed(2) + ' 预期≈' + EYE_STAND);
   process.exit(1);
 }
 const eDuck = e.tick(1 / 64, 0x20, 0, 0); // duck 位 0x20

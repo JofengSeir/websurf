@@ -1,6 +1,7 @@
 /** BSP 加载：WASM 懒初始化 → metadata → spawn → GLB。消费顺序固定（GLB 必须最后）。 */
 
 import { BspProcessor, initSync } from '../../pkg/websurf_viewer_wasm.js';
+import { base64ToBytes, readEmbeddedWasmB64 } from '../../../../src/ts-shared/wasm/loader.js';
 
 export interface BspMeta {
   schema_version?: number;
@@ -41,12 +42,10 @@ let wasmReady: Promise<void> | null = null;
 export function ensureWasm(): Promise<void> {
   if (!wasmReady) {
     wasmReady = (async () => {
-      const g = globalThis as { __VBSP_WASM_B64__?: unknown };
-      if (typeof g.__VBSP_WASM_B64__ === 'string' && g.__VBSP_WASM_B64__.length > 0) {
-        const bin = atob(g.__VBSP_WASM_B64__);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        initSync({ module: bytes });
+      // 判定统一为「非空字符串」（共享 loader，D-09）：空串/非字符串注入不静默退回 fetch。
+      const embedded = readEmbeddedWasmB64();
+      if (embedded) {
+        initSync({ module: base64ToBytes(embedded) });
         return;
       }
       const url = new URL('./websurf_viewer_wasm_bg.wasm', import.meta.url);

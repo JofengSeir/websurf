@@ -30,6 +30,7 @@
 
 import type { ShmState, MsgState, AuthFrame } from '../auth/shared-state.js';
 import type { PhysWorldLike } from '../auth/auth-loop.js';
+import { EYE_STAND } from '../phys/constants.js';
 
 /** 计算模式（三值，plan-v2 §1.1 新增 tick——worker 单实例 raw 64Hz；类型唯一
  * 权威定义收敛 auth/compute-mode.ts，此处 re-export 保持既有导入点零改）。 */
@@ -161,7 +162,7 @@ export function createDecoupledLoop(env: DecoupledLoopEnv): DecoupledLoop {
   let started = false;
 
   // ── 慢字段缓存（eyeHeight/onGround；16ms 低频 state() 刷新）───────
-  let slowEyeHeight = 64.09; // EYE_STAND 兜底；首帧 publishCurrentState 即刷新
+  let slowEyeHeight = EYE_STAND; // 兜底；首帧 publishCurrentState 即刷新（D-16 共享单点）
   let slowOnGround = false;
   let lastSlowMs = 0;
 

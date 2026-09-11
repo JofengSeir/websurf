@@ -16,6 +16,7 @@
 
 import type { Vec3 } from '../physics/math/vec3.js';
 import { type WasmSpawnReport, type WasmSpawnPoint } from './types.js';
+import { bspYawToCsYaw } from '../../../../src/ts-shared/phys/angles.js';
 
 // ---------------------------------------------------------------------------
 // 加载结果
@@ -54,19 +55,6 @@ const DEFAULT_SPAWN: Vec3 = { x: 0, y: 100, z: 0 };
 const DEFAULT_YAW = 0;
 
 // ---------------------------------------------------------------------------
-// yaw 坐标系转换
-// ---------------------------------------------------------------------------
-
-/**
- * BSP 出生点实体 Source yaw → cs-movement yaw：wrap(src + 180)。
- * 与 ts-shared world-builder / viewer pose.ts bspYawToCsYaw 同口径
- * （推导见文件头；旧式 (270 − yaw) 为 det=−1 镜像，已废弃）。
- */
-function bspYawToCsYaw(bspYaw: number): number {
-  return (((bspYaw + 180) % 360) + 360) % 360;
-}
-
-// ---------------------------------------------------------------------------
 // 主加载函数
 // ---------------------------------------------------------------------------
 
@@ -93,7 +81,7 @@ export function loadSpawnPoints(wasmJson: string): SpawnLoadResult {
     (sp: WasmSpawnPoint) => ({
       classname: sp.classname,
       origin: { x: sp.origin[0], y: sp.origin[1], z: sp.origin[2] },
-      yaw: bspYawToCsYaw(sp.angles[1]), // wrap(+180) 定标（见文件头；与 ts-shared 同口径）
+      yaw: bspYawToCsYaw(sp.angles[1]), // 共享单点 src/ts-shared/phys/angles.ts（见文件头）
       angles: sp.angles,
     }),
   );

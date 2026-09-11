@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 import type { RuntimeConfig } from '../config.js';
-import type { PvsManager } from '../world/pvs-manager.js';
+import type { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 
 /** LOD 级别。 */
 export const LOD_LEVEL = {

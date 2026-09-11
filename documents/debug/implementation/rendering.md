@@ -87,10 +87,10 @@
 - `update(camPos, config, pvsManager)`：每 `config.lod.updateInterval`（默认 1）帧执行；PVS 优先（当前 cluster <0 时跳过 PVS 判定——相机不在任何叶/出生在固体时的安全保护），距离判定带 hysteresis；可见性变化返回 true。
 - `setCullDistance`：UI 滑块 clamp [0, maxCull]。
 
-**PvsManager**（`world/pvs-manager.ts`，281 行）：
+**PvsManager**（`src/ts-shared/world/pvs-manager.ts`，271 行；**D-10 批 4 上提**，debug 内 `world/pvs-manager.ts` 已删除、调用方改 import 共享单点）：
 
 - `findLeaf(pos)`：BSP 树游走，`d>0 → children[0]`，负值 = `~index` 叶（MAX_DEPTH 256 防环）；叶 cluster<0（solid）→ -1。
-- PVS 行解码：bit = `row[target >> 3] & (1 << (target & 7))`；`pvsBitsBase64` → atob → Uint8Array（`base64ToUint8Array`）。
+- PVS 行解码：bit = `row[target >> 3] & (1 << (target & 7))`；`pvsBitsBase64` → `base64ToBytes` → Uint8Array（**D-09 批 4 起解码走共享 `src/ts-shared/wasm/loader.ts`**，本文件内不再保留 `atob`）。
 - `update(camPos)`：仅 cluster 变化时重算可见集（缓存 lastClusterId）。
 - `getFaceCluster`：面级 cluster 表（WasmPvsData.faceClusters）辅助调试查询。
 

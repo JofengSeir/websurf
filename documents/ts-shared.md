@@ -13,24 +13,42 @@
 
 ## 1. 整体架构
 
-### 1.1 文件地图（14 源文件五域，`src/ts-shared/`，`wc -l` 实测共 5141 行；另有 4 个 `*.test.ts` 不计入）
+### 1.1 文件地图（23 文件 = 19 源文件 + 4 单元测试；`src/ts-shared/`，`wc -l` 实测共 7102 行）
+
+> 行数为 2026-09 批 4 落库后的 `wc -l` 实测（含 `\n` 计数）；旧表「14 源文件五域 / 5141 行」已过期，**旧值同时漏计了 4 个 `*.test.ts`**（本期口径改为全树计入并单列）。
+
+**源文件（19，按域）**
 
 | 文件 | 域 | 职责一句话 |
 |---|---|---|
 | `auth/shared-state.ts`(1033) | 通信 | 输入槽 + 权威帧双缓冲：`ShmState`（SAB 原子操作）与 `MsgState`（postMessage 回退）同接口双实现；双模式扩展解耦帧 S_D/V_D/WAKEUP 槽 + tick 模式元数据槽 I_A_SEG/I_A_TICK/I_A_EVT/I_A_PSEQ |
-| `auth/compute-mode.ts`(128) | 通信（三模式，新） | `ComputeMode` 三值唯一权威定义 + `isAuthLineMode`/`isDecoupledLineMode` 双线门谓词 + `resolveAuthTickRate` 步长解析 + `MODE_HANDOVER_MATRIX` 六行交接矩阵 |
+| `auth/compute-mode.ts`(128) | 通信（三模式） | `ComputeMode` 三值唯一权威定义 + `isAuthLineMode`/`isDecoupledLineMode` 双线门谓词 + `resolveAuthTickRate` 步长解析 + `MODE_HANDOVER_MATRIX` 六行交接矩阵 |
 | `auth/auth-loop.ts`(483) | 通信 | Worker 侧权威帧计算循环：4ms 自驱 + 固定步长累积器 + 碰撞事件推导 + 三值模式门 + tick 模式 F4-C 支路 |
-| `auth/tick-authority.ts`(618) | 通信（tick 模式，新） | F4-C tick 权威控制器：零分配权威推进 + scratch 乐观评估 + `publishMeta` 元数据发布 + 排序门接线 |
-| `auth/worker-dispatch.ts`(489) | 通信 | Worker 消息分发（init/wasm-init/world-json/config/set-mode/set-hold/…）+ 工程特有钩子注入点 |
-| `tick/ordering-gate.ts`(173) | 通信（tick 模式，新） | 发布排序门：δ≤T−ε_max 上限 + 双档等待（setTimeout/Atomics）+ 发布门/lead-miss；被 `auth/tick-authority.ts:53` 消费 |
-| `tick/tick-consumer.ts`(454) | 通信（tick 模式，新） | 主线程 α 确定性网格弦插值消费器：六显示态 + Δ 事件驱动控制器 + 断窗八类（共享层落盘版，当前无 import 点；运行时副本为 `test/dual-mode-harness/src/renderer/tick-consumer.ts`） |
-| `decoupled/decoupled-loop.ts`(448) | 物理（双模式扩展） | 解耦物理自驱循环：1ms 无限制真理源 + 64t tickPhys 速度校准 + 分叉锚定 + 背压（harness WorkerA 编排移植） |
+| `auth/tick-authority.ts`(618) | 通信（tick 模式） | F4-C tick 权威控制器：零分配权威推进 + scratch 乐观评估 + `publishMeta` 元数据发布 + 排序门接线 |
+| `auth/worker-dispatch.ts`(485) | 通信 | Worker 消息分发（init/wasm-init/world-json/config/set-mode/set-hold/…）+ 工程特有钩子注入点 |
+| `tick/ordering-gate.ts`(173) | 通信（tick 模式） | 发布排序门：δ≤T−ε_max 上限 + 双档等待（setTimeout/Atomics）+ 发布门/lead-miss；被 `auth/tick-authority.ts:53` 消费 |
+| `tick/tick-consumer.ts`(455) | 通信（tick 模式） | 主线程 α 确定性网格弦插值消费器：六显示态 + Δ 事件驱动控制器 + 断窗八类（共享层落盘版，当前无 import 点；运行时副本为 `test/dual-mode-harness/src/renderer/tick-consumer.ts`） |
+| `decoupled/decoupled-loop.ts`(449) | 物理（双模式扩展） | 解耦物理自驱循环：1ms 无限制真理源 + 64t tickPhys 速度校准 + 分叉锚定 + 背压（harness WorkerA 编排移植） |
 | `input/input-layer.ts`(40) | 输入 | 灵敏度乘入 + Q/E 键位折算等效鼠标增量 |
 | `input/mouse-buffer.ts`(128) | 输入（2026-09 上提共享） | 单事件绝对削平（CLAMP ±1000）+ discardNext（Pointer Lock 变化后丢首事件）；`process()` 为唯一活跃路径，`push/drain` 为遗留未用路径 |
 | `input/pointer-lock.ts`(154) | 输入（2026-09 上提共享） | Pointer Lock 请求（`unadjustedMovement:true` 禁 OS 加速）+ 旧浏览器 void 降级 + 3s 超时 + 锁定变化/错误回调 |
 | `phys/params.ts`(64) | 物理 | 前端配置 → Rust `set_params` snake_case 全量映射 |
-| `phys/world-builder.ts`(261) | 物理 | 地图加载管线：`BspProcessor` 字节级导出 → `WorldBundle` |
+| `phys/world-builder.ts`(248) | 物理 | 地图加载管线：`BspProcessor` 字节级导出 → `WorldBundle` |
 | `phys/authority-calibrator.ts`(668) | 物理 | 渲染主线 vs 权威帧的校准四件套（只读权威）+ 解耦消费外推纯函数 |
+| `phys/angles.ts`(38) | 物理（**D-08 批 4 新增**） | `wrapDeg` + `bspYawToCsYaw`（=`wrap(src+180)`）全 TS 侧单一份；语义归一口径取 viewer 版（带 `|| 0`，`-0` 归一为 `+0`） |
+| `phys/constants.ts`(19) | 物理（**D-16 批 4 新增**） | 标定常量 `EYE_STAND = 64.09` TS 单点；与 Rust 权威 `src/phys/player.rs:34` 逐位相等，由 `check-shared-sync.mjs` 的 `eye-stand` 门禁保证 |
+| `wasm/loader.ts`(72) | WASM（**D-09 批 4 新增**） | 字节获取三原语：`base64ToBytes`（**全仓唯一 `atob`**）+ `readEmbeddedWasmB64` + `fetchWasmBytes`；硬约束：不得 import 任何工程 `pkg/*`，`initSync` 留工程内 |
+| `world/types.ts`(52) | 世界（**D-10 批 4 新增**） | PVS 三类型（`WasmPvsNode`/`WasmPvsLeaf`/`WasmPvsData`）共享定义；**不**含共享 `Vec3`（D-07 判保留） |
+| `world/pvs-manager.ts`(271) | 世界（**D-10 批 4 新增**） | `PvsManager`：findLeaf + PVS 行 RLE 解码 + isVisible/getFaceCluster/getStats；解码走 `wasm/loader.ts`（D-09 是 D-10 前置） |
+
+**单元测试（4，不计入「源文件五域」口径）**
+
+| 文件 | 行数 | 覆盖 |
+|---|---|---|
+| `auth/compute-mode.test.ts` | 116 | 三值模式谓词与交接矩阵 |
+| `auth/shared-state.protocol.test.ts` | 345 | tick 协议槽位（SAB 布局 + 发布/读取语义）；`EYE_STAND` 断言已改引共享单点（D-16） |
+| `auth/tick-authority.test.ts` | 774 | F4-C 权威推进与元数据发布 |
+| `tick/ordering-gate.test.ts` | 289 | 排序门双档等待与发布门 |
 
 ### 1.2 被引用关系（grep import 实测）
 
@@ -38,10 +56,10 @@
 |---|---|---|
 | debug | **9 模块**（auth×3、phys×3、input×3；**不含** compute-mode / tick-authority / decoupled-loop——worker 侧未注入任何模式钩子，缺省即纯耦合线），相对路径 `../../../src/ts-shared/...`（各处按目录深度） | 引用点 16：`apps/debug/src/app.ts:9,10,32-36`、`src/input/input-recorder.ts:45`、`src/input/keyboard.ts:18`、`src/physics/prediction-params.ts:13`、`src/renderer/renderer-main.ts:19,20`、`src/worker/main.ts:27,32-34` |
 | game | **同为 9 模块同集**（与 debug 完全一致；`c4824e9` 回退后不再 import `decoupled/decoupled-loop.ts`） | 引用点 13：`apps/game/src/app.ts:18-22`、`src/config.ts:5`、`src/input/keyboard.ts:11`、`src/renderer/renderer-main.ts:20,21`、`src/worker/main.ts:21,26-28` |
-| viewer | **不 import**（无物理无双线程）；仅在本地复刻 `bspYawToCsYaw` 公式（wrap(src+180)，t2 统一口径） | `apps/viewer/src/core/pose.ts:23-25`（`grep ts-shared apps/viewer/src` 零命中——文档口径为「同式各自维护」，非注释互引） |
+| viewer | **3 个共享单点**（D-08/D-09/D-16 批 4 接入）：`phys/angles.ts`、`phys/constants.ts`、`wasm/loader.ts`；**其余七项仍正当隔离**（input/auth/tick/decoupled/phys-params/world-builder/pvs-manager，framework-decoupling §4.3） | `apps/viewer/src/core/pose.ts:9`（re-export angles）、`core/constants.ts:13`（re-export constants）、`core/bsp.ts:4`（import loader）——`grep -lE "from .*ts-shared" apps/viewer/src` 实测 3 文件 |
 | test/dual-mode-harness | **6 模块**：auth 通道与三模式物理内核全走共享层（`shared-state`/`auth-loop`/`worker-dispatch`/`tick-authority`/`decoupled-loop`/`compute-mode`；`tick/ordering-gate.ts` 经 `auth/tick-authority.ts:53` 间接引入）；另自建 192B `TestShared` 渲染通道，与本文 512B 权威帧协议**不是同一套**（`src/shared-state.ts:2-4` 头注） | `test/dual-mode-harness/src/worker-a.ts:32-56`、`src/main.ts:17-19`、`src/shared-state.ts:51`、`src/renderer/tick-consumer.ts:46` |
 
-编译期：debug/game 的 tsconfig `include` 均含 `../src/ts-shared/**/*.ts`（`debug/tsconfig.json:26`、`game/tsconfig.json:15`）；dual-mode-harness 也包含（`test/dual-mode-harness/tsconfig.json:23`），运行时 import 面见上表。
+编译期：debug/game 的 tsconfig `include` 均含 `../../src/ts-shared/**/*.ts`（`debug/tsconfig.json:26`、`game/tsconfig.json:15`）；**viewer 批 4 起也含**（`viewer/tsconfig.json:15`，因 §1.2 的 3 处真实 import —— 满足「当且仅当该工程 `src/` 内存在真实 `import ... from '...ts-shared/...'`」规则，t2 §3.4）；dual-mode-harness 也包含（`test/dual-mode-harness/tsconfig.json:23`），运行时 import 面见上表。
 
 ### 1.3 通信模型总览
 
@@ -78,9 +96,9 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 3. **权威线（Worker）**：`auth-loop.ts` `setTimeout(loop, 4)` 自驱（`:319`）+ 累积器（`acc >= fixedDt && guard < 64`，`:345-350`）；每步 `stepPhysics`（`:199`）：`takeInput(maxStep)`（`:216`/`:239`）→ `phys.tick(dt, mask, dx, dy)` → `writeAuthoritative`（`:221`/`:271`）→ land/blocked 事件 postMessage（`emitCollision :164`，判据 `:288-314`）。模式门 `resolveAuthGateOpen`（`:135-140`；loop 内早退 `:323-327`）：解耦期间关断墙钟早退，复入不补跑。
 4. **tick rate**：`fixedDt` 默认 1/64（`:145`），`setFixedDt(1/max(rate,1))` 动态覆盖（`:354-356`）——`config.physics.tickRate` 经 config 消息下发（game 耦合语义 = raw+3，`apps/game/src/worker/main.ts:29-32,86`；三模式步长解析单点在 `auth/compute-mode.ts:51-57` `resolveAuthTickRate`：tick=raw、coupled=+偏移）。
 
-### 2.2 地图加载管线：`buildWorldBundle`（`phys/world-builder.ts:103` 起）
+### 2.2 地图加载管线：`buildWorldBundle`（`phys/world-builder.ts:90` 起）
 
-主线程 handleLoadBsp 内执行，`stage(label)` 逐步回调 `onProgress` 并 `yieldUi` 让出主线程（入口 `buildWorldBundle` `phys/world-builder.ts:103`）：
+主线程 handleLoadBsp 内执行，`stage(label)` 逐步回调 `onProgress` 并 `yieldUi` 让出主线程（入口 `buildWorldBundle` `phys/world-builder.ts:90`）：
 
 1. **metadata** → `WorldMetadata`（debug 扩展字段按需并入，`:110-123`）；
 2. **出生点/传送点/PVS**：`parse_spawn_points` / `parse_teleports` / `parse_pvs_data`（`:125-128`）；
@@ -231,14 +249,14 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 | `collectMissingTextures` | true（缺失比对弹窗） | 不开启（调用未传） | debug `app.ts:1294`；game `app.ts:406-408` |
 | 进度回调 `onProgress` | `setStatus` | `advanceLoading`（两端都有，仅 UI 实现不同） | debug `app.ts:1296`；game `app.ts:408` |
 | `onWasmInit` 钩子 | 挂 mtzB64——**协议兼容保留**（Worker 已不再解析 BSP，纹理包不再使用） | 不使用 | debug `worker/main.ts:109-110`（含原注释） |
-| `onExtraMessage` 钩子 | 物理面板参数/快照消息 | 不使用 | `worker-dispatch.ts:124-125`、debug `worker/physics-worker.ts` |
-| **三模式装配** | 未注入（`tickPhys/scratch/decoupledLoop/getComputeMode/onSetMode/onSetHold/tickExternalBreak/onWorldRebuilt` 全缺省）→ 解耦/tick 面不激活，v7 行为零变化 | 同 debug：`apps/game/src/worker/main.ts:80-93` 只传通用钩子 + `getConfigTickRate`，**无任何模式钩子**（`c4824e9` 回退前曾全注入） | `worker-dispatch.ts:90-115`（可选钩子声明）、debug `worker/main.ts:94-120`、game `src/worker/main.ts:80-93`、harness `test/dual-mode-harness/src/worker-a.ts:331-340`（唯一全注入方） |
+| `onExtraMessage` 钩子 | 物理面板参数/快照消息 | 不使用 | `worker-dispatch.ts:133`（可选钩子声明）、`:483`（调用点）、debug `worker/physics-worker.ts` |
+| **三模式装配** | 未注入（`tickPhys/scratch/decoupledLoop/getComputeMode/onSetMode/onSetHold/tickExternalBreak/onWorldRebuilt` 全缺省）→ 解耦/tick 面不激活，v7 行为零变化 | 同 debug：`apps/game/src/worker/main.ts:80-93` 只传通用钩子 + `getConfigTickRate`，**无任何模式钩子**（`c4824e9` 回退前曾全注入） | `worker-dispatch.ts:85-110`（可选钩子声明）、debug `worker/main.ts:94-120`、game `src/worker/main.ts:80-93`、harness `test/dual-mode-harness/src/worker-a.ts:331-340`（唯一全注入方） |
 
 工程侧实现细节见 `documents/debug/`、`documents/game/`（另篇）；三模式运行时装配见 `test/dual-mode-harness/docs/`（另篇）。
 
-### 4.2 viewer：不使用本层
+### 4.2 viewer：接入 3 个共享单点，其余正当隔离
 
-viewer 无物理、无双线程、无输入协议——不 import ts-shared（§1.2）。唯一交集是 `bspYawToCsYaw` 公式的**本地复刻**（`apps/viewer/src/core/pose.ts:16-25`，`wrap(src + 180)`，t2 统一口径；`apps/viewer/src` 内 `ts-shared` 零出现，属同式各自维护而非注释互引）：录像回放的位姿换算需要同一 yaw 约定。公式修改时须多处同步（Rust `teleport.rs:31-38` 亦同式，全量同步点见 architecture.md 不变量 3）。
+viewer 无物理、无双线程、无输入协议——**不**因「共享层有同名模块」而批量接入（framework-decoupling §4.2/§8.3 第 1 条）。批 4（D-08/D-09/D-16）起它接入**恰好 3 个跨工程契约单点**：`phys/angles.ts`（`bspYawToCsYaw`，经 `core/pose.ts:9` re-export）、`phys/constants.ts`（`EYE_STAND`，经 `core/constants.ts:13` re-export）、`wasm/loader.ts`（`core/bsp.ts:4` import）；`input/auth/tick/decoupled/phys-params/world-builder/pvs-manager` 七项**仍正当隔离**（§4.3 逐项理由）。录像回放的位姿换算与 BSP 出生点朝向因此与 debug/game **同源**（不再靠「同式各自维护」）；仍各自维护的只有 Rust 同式 `teleport.rs:31-38`（跨语言无法共享符号，E-06）。
 
 ### 4.3 dual-mode-harness：三模式内核走共享层，另建 192B 渲染通道
 

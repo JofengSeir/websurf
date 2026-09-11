@@ -37,6 +37,7 @@ import {
   MsgState,
   type AuthPublishMeta,
 } from './shared-state.js';
+import { EYE_STAND } from '../phys/constants.js';
 
 let passed = 0;
 let failed = 0;
@@ -97,7 +98,7 @@ const F1 = {
   pitch: -45.5,
   vel: { x: 350.12, y: 7.89, z: -12.34 },
   onGround: true,
-  eyeHeight: 64.09,
+  eyeHeight: EYE_STAND,
   timeMs: 123456,
 };
 const F2 = {
@@ -136,7 +137,7 @@ expect(shm.readAuthoritativeInto(dstF, dstI) === 1, 'read into returns va=1');
 expect(dstF[0] === 100.5 && dstF[1] === -50.25 && dstF[2] === 3000.75, 'pos定点还原 (÷100)');
 expect(dstF[3] === 179.999 && dstF[4] === -45.5, 'yaw/pitch定点还原 (÷1000)');
 expect(dstF[5] === 350.12 && dstF[6] === 7.89 && dstF[7] === -12.34, 'vel定点还原 (÷100)');
-expect(dstF[8] === 64.09 && dstF[9] === 123456, 'eyeHeight/timeMs还原');
+expect(dstF[8] === EYE_STAND && dstF[9] === 123456, 'eyeHeight/timeMs还原（D-16 共享常量，非字面量）');
 expect(dstF[10] === 123.456 && dstF[11] === 123.456, 'dst beyond [0..9] untouched (契约 10 值)');
 expect(dstI[0] === 1 && dstI[1] === 1, 'onGround=1, va=1');
 expect(dstI[2] === 777 && dstI[3] === 888 && dstI[4] === 999, 'proto slots pass through (耦合期消费器不读)');

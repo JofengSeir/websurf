@@ -28,11 +28,11 @@
 
 推论：viewer 的"每帧确定性"只取决于录像 Clip 本身——回放不重演物理，**断网/慢机也不会跑歪轨迹**。
 
-## 3. TS 侧依赖：不引 ts-shared
+## 3. TS 侧依赖：3 个共享单点 import（2026-09 批 4 起；其余仍正当隔离）
 
-- `grep ts-shared apps/viewer/src` → 仅一条注释提及（`apps/viewer/src/core/pose.ts:11`"与 ts-shared bspYawToCsYaw 一致"），**零 import**。
-- debug/game 各引 7 个 ts-shared 模块（auth×3 / phys×3 / input×1；`grep "from '.*ts-shared'" apps/debug/src apps/game/src` 实测：`shared-state`、`worker-dispatch`、`auth-loop`、`world-builder`、`params`、`authority-calibrator`、`input-layer`）。
-- 为什么 viewer 不需要：它没有物理状态要同步、没有权威帧要校准、没有键位掩码要打包——自由飞行相机自己就是输入终点（`fly.ts:57-105`）。同值的常量（EYE_STAND 64.09）选择**复制并注释对齐**而不是跨工程 import（`constants.ts:6-7`，值源 `src/phys/player.rs:34`）。
+- `grep -lE "from .*ts-shared" apps/viewer/src` → **3 个文件**：`core/pose.ts`（re-export `wrapDeg`/`bspYawToCsYaw` ← `src/ts-shared/phys/angles.ts`，D-08）、`core/constants.ts`（re-export `EYE_STAND` ← `src/ts-shared/phys/constants.ts`，D-16）、`core/bsp.ts`（`base64ToBytes`/`readEmbeddedWasmB64` ← `src/ts-shared/wasm/loader.ts`，D-09）。**批 4 前为零 import**；本表口径取代旧「本地复刻」叙述。
+- debug/game 各引 7 个 ts-shared 模块（auth×3 / phys×3 / input×1；`grep "from '.*ts-shared'" apps/debug/src apps/game/src` 实测：`shared-state`、`worker-dispatch`、`auth-loop`、`world-builder`、`params`、`authority-calibrator`、`input-layer`）；批 4 另加 `phys/angles`、`phys/constants`、`wasm/loader`、`world/pvs-manager`（debug/game）共 4 个新单点。
+- 为什么 viewer **只接这三个单点**：它没有物理状态要同步、没有权威帧要校准、没有键位掩码要打包——自由飞行相机自己就是输入终点（`fly.ts:57-105`）；**input/auth/tick/decoupled/phys-params 七项仍正当隔离**（framework-decoupling §4.3/§4.4）。但这三项是**跨工程契约**而非工程实现：`EYE_STAND` 是物理标定常量（同值源 `src/phys/player.rs:34`）、`bspYawToCsYaw` 是同地图出生朝向、base64 解码是同一注入协议——故按 D-08/D-09/D-16 接入共享单点（不再是"复制并注释对齐"）。
 
 ## 4. 渲染对齐与刻意的差异
 
@@ -69,7 +69,7 @@
 ## 7. 与共享层的边界（避免误读）
 
 1. **`websurf-wasm-core` 是真依赖**：BSP 解析（`vbsp` 26 lump + LZMA + Leaves 排序修复）、GLB 导出（`bsp_to_gltf_core`）、模型整合（`model_integrator`）、PAKFILE 索引（`pakfile_models`）、VTF 解码（`texture_utils`）全部来自共享 crate——viewer 侧 `crates/wasm/src/lib.rs` 只是 wasm-bindgen 导出层 + PAKFILE 模型/材质提取的"viewer 版组装"（`lib.rs:1-9, 16-17`）。
-2. **`websurf-phys` / `ts-shared` 是"对齐"不是"依赖"**：共享的只有数值与约定（EYE_STAND 64.09、`bspYawToCsYaw = wrap(src + 180)`，t1/t2 于 2026-09 统一——旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射，surf_null primary srcYaw=180 应为 0° 旧式给 90°，评审 F6 已修）。同式多处各自维护：`apps/viewer/src/core/pose.ts:23-25`、`src/ts-shared/phys/world-builder.ts:99-100`、`src/phys/teleport.rs:31-38`（Rust 传送面向）、`apps/debug/src/world/spawn-loader.ts:65-66` 与 `apps/debug/src/world/teleport-manager.ts:42-44`——不 import 是有意为之（工程间零 import 原则），改公式需多处同步。该式服务 BSP 出生点/传送实体角路径（viewer 初始视角 `core/spawn.ts:47-50` + 面板跳转、ts-shared 出生点 yawDeg、Rust 传送后朝向），与 `.replay` 帧解码的实测定标（`yaw = wrap(src+180)`，`apps/viewer/src/replay/shavit-replay.ts:494-498`）**同一定标**——全链统一 +180 口径。
+2. **`websurf-phys` / `ts-shared`：三条"对齐"已升级为共享单点**：批 4 前共享的只有数值与约定（EYE_STAND 64.09、`bspYawToCsYaw = wrap(src + 180)`，t1/t2 于 2026-09 统一——旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射，surf_null primary srcYaw=180 应为 0° 旧式给 90°，评审 F6 已修）。**D-08/D-16/D-09 落地后** viewer 不再各自维护：公式与常量分别 import 共享单点（`apps/viewer/src/core/pose.ts` re-export `angles.ts`、`apps/viewer/src/core/constants.ts` re-export `constants.ts`、`apps/viewer/src/core/bsp.ts` import `wasm/loader.ts`）；仍各自维护的只剩 **Rust 侧**同式（`src/phys/teleport.rs:31-38`，跨语言无法共享符号，E-06）。该式服务 BSP 出生点/传送实体角路径（viewer 初始视角 `core/spawn.ts:47-50` + 面板跳转、ts-shared 出生点 yawDeg、Rust 传送后朝向），与 `.replay` 帧解码的实测定标（`yaw = wrap(src+180)`，`apps/viewer/src/replay/shavit-replay.ts:494-498`）**同一定标**——全链统一 +180 口径。
 3. **坐标系同一约定**：GLB 顶点/出生点都走 `[x,y,z]→[y,z,x]` Y-up 变换（`src/wasm-core/bsp_to_gltf_core/convert.rs:813-816`、`src/wasm-core/model_integrator/mod.rs:1041-1045`、`apps/viewer/crates/wasm/src/lib.rs:339-342`），所以 Shavit 录像帧的绝对世界坐标可直接与场景对齐——`.replay` 解码走同一 `[y,z,x]` 映射（`apps/viewer/src/replay/shavit-replay.ts:481`），HUD 包围盒外检查（`app.ts:157-188`）只用于暴露映射错误。
 4. **与 test/dual-mode-harness 的特殊关系**：viewer 的空间分块合并算法移植自 harness 的 `worker-b.ts`（`scene.ts:236-241` 注释自证）；viewer 的录像自检与 harness 的对照测试互补（管线 vs 物理）。
 

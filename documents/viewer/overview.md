@@ -21,7 +21,7 @@ viewer 是 WebSurf 四工程里**唯一不含物理系统**的工程，只做两
 - `apps/viewer/crates/wasm/Cargo.toml:5`（WASM crate 头部注释）："不含 websurf-phys（无物理）、不含 mosaic/缺失纹理/默认纹理包（纯视觉查看器）"；`:19` 依赖只有 `websurf-wasm-core = { path = "../../../../src/wasm-core" }`。
 - `apps/viewer/crates/wasm/src/lib.rs:1-9`（crate 头注）：运行时最小集 = `metadata()` / `parse_spawn_points()` / `export_glb_with_pakfile_models()` 三个方法，"自由视角查看器不需要 brush/模型碰撞/teleport/PVS/mosaic/默认纹理包，均不导出"。
 - TS 侧无 SAB/原子：`grep SharedArrayBuffer|Atomics apps/viewer/src apps/viewer/crates` → 空（对比 debug/game 的权威帧双线，见 [differences.md](differences.md) §2）。
-- TS 侧不引 ts-shared：`apps/viewer/src` 无任何 `ts-shared` import（唯一出现是 `apps/viewer/src/core/pose.ts:11` 注释里"与 ts-shared bspYawToCsYaw 一致"的对照说明——该函数仅服务 BSP 出生点路径，与 .replay 无关）。
+- TS 侧引 3 个共享单点（批 4 / D-08/D-09/D-16 起）：`core/pose.ts:9`（re-export `angles.ts` 的 `wrapDeg`/`bspYawToCsYaw`）、`core/constants.ts:13`（re-export `constants.ts` 的 `EYE_STAND`）、`core/bsp.ts:4`（import `wasm/loader.ts` 的字节原语）；`grep -lE "from .*ts-shared" apps/viewer/src` 实测 3 文件。**批 4 前为零 import**（当时的说法是「本地复刻并注释对齐」）。
 
 一切取舍以这两件事为标准：不做的功能直接不存在（如 fog、PVS、LOD、传送点、存点、计时）。
 
@@ -114,7 +114,7 @@ viewer 是 WebSurf 四工程里**唯一不含物理系统**的工程，只做两
 |---|---|---|
 | `src/wasm-core`（websurf-wasm-core） | **是**：BSP 解析 / GLB 导出 / 模型与纹理解析全部来自这里，viewer crate 只是 wasm-bindgen 薄导出层 | `apps/viewer/crates/wasm/src/lib.rs:16-17`（`use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, texture_utils, vbsp}`）、`apps/viewer/crates/wasm/Cargo.toml:18-19` |
 | `src/phys`（websurf-phys） | **否**：无物理 | `apps/viewer/crates/wasm/Cargo.toml:3-5` 注释 + 依赖表无此项；对比 `apps/debug/crates/wasm`、`apps/game/crates/wasm` 均 path 依赖 `../../../../src` |
-| `src/ts-shared` | **否**：TS 侧零 import | `grep ts-shared apps/viewer/src` → 仅 `core/pose.ts:11` 注释提及对齐（且该式仅 BSP 路径使用） |
+| `src/ts-shared` | **部分**：3 个跨工程契约单点（angles / constants / loader） | `core/pose.ts:9`、`core/constants.ts:13`、`core/bsp.ts:4`（批 4 D-08/D-09/D-16；其余七项正当隔离，见 [differences.md](differences.md) §3） |
 | `src/vendor/vmdl`（VTX 条带修复） | **是**（同款 patch） | `apps/viewer/Cargo.toml:11-13`（`[patch.crates-io] vmdl = { path = "../src/vendor/vmdl" }`，与根 `Cargo.toml:27-28` 同源） |
 | `src/serve.py` | **是**（dev 服务器 + dist 内置服务器） | `apps/viewer/package.json:16`、`apps/viewer/scripts/build-dist.mjs:32-95`（打包内嵌 serve.py 文本） |
 

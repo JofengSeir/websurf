@@ -6,7 +6,7 @@
  * `apps/game/src/world/pvs-manager.ts`、`apps/debug/src/main-wasm.ts`、
  * `apps/debug/src/default-pack.ts`、`apps/debug/src/world/pvs-manager.ts`、
  * `src/ts-shared/auth/worker-dispatch.ts`、`src/ts-shared/phys/world-builder.ts`。
- * 收敛后 `git grep -n "atob(" -- apps src` 恰好只剩本文件 1 处。
+ * 收敛后 `-- apps src` 口径下恰好只剩本文件 1 处（`base64ToBytes` 内）。
  *
  * **三个原语按「字节从哪来」分层**（全部返回 `Uint8Array`，零 `ArrayBuffer` 形态差异）：
  * - `base64ToBytes(b64)` —— 纯解码，**全仓唯一 `atob`**

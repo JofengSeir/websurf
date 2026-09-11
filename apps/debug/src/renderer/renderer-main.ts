@@ -19,7 +19,7 @@ import type { PlaneInfo, SceneDataMessage } from '../worker/worker-types.js';
 import type { SharedState } from '../../../../src/ts-shared/auth/shared-state.js';
 import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-calibrator.js';
 import type { Brush } from '../physics/physics/Collision/Collision.types.js';
-import { PvsManager } from '../world/pvs-manager.js';
+import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
 import { TeleportManager } from '../world/teleport-manager.js';
 import { adaptBrushes } from '../world/collider-adapter.js';

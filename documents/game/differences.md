@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | debug | 主工程（全功能调试台：物理参数实验室/渲染调试/计时挑战） | 双线同构（主线程渲染 + Worker 权威） | SAB 512B / MsgState | `apps/debug/package.json` description、`apps/debug/src/renderer/renderer-main.ts:138-139,441-447` |
 | game | 激进最小化游戏化（可玩优先） | 双线同构（同一套 ts-shared auth） | 同 debug | `apps/game/package.json:4`、本文 §2 |
-| viewer | BSP 游览 + 录像回放，仅解析层 | **无物理**（crate 不依赖 websurf-phys） | 无 SAB、无 ts-shared | `apps/viewer/crates/wasm/Cargo.toml`（注释"无物理"）、grep `apps/viewer/src` 无 PhysWorld/SharedArrayBuffer（仅 pose.ts:11 注释提到与 ts-shared 同款 yaw 公式） |
+| viewer | BSP 游览 + 录像回放，仅解析层 | **无物理**（crate 不依赖 websurf-phys） | 无 SAB；**3 个共享单点 import**（批 4 D-08/D-09/D-16：angles / constants / loader，无 auth 通道） | `apps/viewer/crates/wasm/Cargo.toml`（注释"无物理"）、grep `apps/viewer/src` 无 PhysWorld/SharedArrayBuffer；`grep -lE "from .*ts-shared" apps/viewer/src` → 3 文件 |
 | dual-mode-harness | 双物理时序验证台 | 双物理实例 + 速度校准（协议独立） | **SAB 192B 专属布局** | `test/dual-mode-harness/src/shared-state.ts:3,109-110`（`SHARED_BUFFER_SIZE=192`，头注明示"不是 ts-shared 那套"） |
 
 ## 2. game vs debug（同构中的最小化）
@@ -18,7 +18,7 @@
 
 - **Worker 权威线逐组件相同**：`auth-loop`（setTimeout 4ms + 固定步长累积器 + land/blocked 事件）、`worker-dispatch`（同一套消息分支）、`params`（sensitivity=1）、`shared-state`（512B 布局/MsgState）——两侧 import 同一批文件（`apps/game/src/worker/main.ts:21-24` 与 `apps/debug/src/worker/main.ts` 同款）。
 - **主线程渲染物理线同构**：debug `renderer-main.ts:441-447` 的 tick 与 game `renderer-main.ts:693-734` 六步一一对应（addInput → correctFromAuthority → calibrateVelocity → predPhys.tick → …→ render），权威校准都收敛 `src/ts-shared/phys/authority-calibrator.ts`。
-- **地图加载管线同构**：两侧都用 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:96`），game 传 `{decompressMtz, onProgress}`（`apps/game/src/app.ts:406-409`），debug 另有 colliderSource 面板档位。
+- **地图加载管线同构**：两侧都用 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:90`），game 传 `{decompressMtz, onProgress}`（`apps/game/src/app.ts:406-409`），debug 另有 colliderSource 面板档位。
 - **渲染子系统同源**：game 的 optimizeScene/近平面自适应/纹理画质切换注释明示"同步自主项目/主项目同法"（`apps/game/src/renderer/renderer-main.ts:127,808-816`）。
 
 ### 2.2 game 砍掉的（debug 特有，均经文件存在性核实）

@@ -4,7 +4,7 @@
  * Copyright 2026 unsurf
  * SPDX-License-Identifier: Apache-2.0
  */
-// Modified by WebSurf — see src/physics/NOTICE for modification details.
+// Modified by WebSurf — see src/phys/NOTICE for modification details.
 
 // 轻量可变向量工具——普通对象，热路径零分配。Y 轴朝上（Source 的 z 映射到 y）。
 

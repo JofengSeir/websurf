@@ -10,6 +10,7 @@
 
 import type { Vec3 } from '../physics/math/vec3.js';
 import { type WasmTeleportReport } from './types.js';
+import { bspYawToCsYaw } from '../../../../src/ts-shared/phys/angles.js';
 
 // ---------------------------------------------------------------------------
 // 触发器配置
@@ -34,15 +35,6 @@ export type TeleportTriggerMode =
   | 'start-touch'
   | 'start-touch-grounded';
 
-/**
- * BSP 实体 Source yaw → cs-movement yaw：wrap(src + 180)。
- * 与 ts-shared world-builder / viewer pose.ts bspYawToCsYaw 同口径；
- * 推导见 spawn-loader.ts 文件头（旧式 (270 − yaw) 为 det=−1 镜像，已废弃）。
- */
-function bspYawToCsYaw(bspYaw: number): number {
-  return (((bspYaw + 180) % 360) + 360) % 360;
-}
-
 // ---------------------------------------------------------------------------
 // 运行时类型
 // ---------------------------------------------------------------------------
@@ -58,7 +50,7 @@ export interface TeleportDestination {
   /** BSP 原始角度 `[pitch, yaw, roll]`。 */
   angles: [number, number, number];
   /** 转换后的 cs-movement yaw（度，逆时针，0=朝 -Z）。
-   * 由 BSP yaw（顺时针方位角）经 `bspYawToCsYaw` 转换而来。 */
+   * 由 BSP yaw（顺时针方位角）经共享单点 `bspYawToCsYaw`（src/ts-shared/phys/angles.ts）转换而来。 */
   yaw: number;
 }
 
