@@ -292,7 +292,7 @@ echo [2/5] Building WASM (release)...
 call npm run build:wasm
 if errorlevel 1 (
   echo [ERROR] WASM build failed.
-  echo [HINT] Delete crates\wasm\target\wasm32-unknown-unknown and retry (antivirus locks are the usual cause).
+  echo [HINT] Delete crates\wasm\target\wasm32-unknown-unknown and retry ^(antivirus locks are the usual cause^).
   pause
   exit /b 1
 )
@@ -329,11 +329,11 @@ if errorlevel 1 (
 )
 
 echo ============================================================
-echo  WebSurf-<app> - Build dist package: complete
-echo  Output:  dist/ (mode: %DIST_MODE%)
-echo  Run:     play.cmd
-if /i "%DIST_MODE%"=="multi" echo  Note:    multi mode needs the local HTTP server (play.cmd).
-if /i "%DIST_MODE%"=="single" echo  Note:    file:// double-click works (WASM embedded).
+echo   WebSurf-<app> - Build dist package: complete
+echo   Output:  dist/ (mode: %DIST_MODE%)
+echo   Run:     play.cmd
+if /i "%DIST_MODE%"=="multi" echo   Note:    multi mode needs the local HTTP server (play.cmd).
+if /i "%DIST_MODE%"=="single" echo   Note:    file:// double-click works (WASM embedded).
 echo ============================================================
 exit /b 0
 ```
