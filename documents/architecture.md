@@ -19,7 +19,7 @@
 | `test/dual-mode-harness/` | `websurf-test` | 三模式物理（耦合/解耦/tick，运行时热切）+ OffscreenCanvas 渲染时序验证工程 | `websurf-test-wasm` | `pkg/websurf_test_wasm.js` | `test/dual-mode-harness/package.json:2-3`、`crates/wasm/Cargo.toml:8` |
 | `src/` | —（无 npm 包） | 共享 Rust 物理系统 `websurf-phys` | `websurf-phys`（rlib） | — | `src/Cargo.toml:2` |
 | `src/wasm-core/` | —（无 npm 包） | 共享 BSP/GLB/模型解析导出 `websurf-wasm-core` | `websurf-wasm-core`（rlib，无 wasm-bindgen 导出） | — | `src/wasm-core/Cargo.toml:1`、`src/wasm-core/lib.rs:6` |
-| `src/ts-shared/` | —（无 npm 包） | TS 共享层（12 源文件五域，共 4171 行，`wc -l` 实测；含三模式物理内核 `auth/compute-mode.ts`、`auth/tick-authority.ts`、`tick/ordering-gate.ts`、`tick/tick-consumer.ts`、`decoupled/decoupled-loop.ts`） | — | — | `src/ts-shared/`（清单见 [ts-shared.md](./ts-shared.md) §1.1） |
+| `src/ts-shared/` | —（无 npm 包） | TS 共享层（18 源文件五域，共 6664 行，`wc -l` 实测；含三模式物理内核 `auth/compute-mode.ts`、`auth/tick-authority.ts`、`tick/ordering-gate.ts`、`tick/tick-consumer.ts`、`decoupled/decoupled-loop.ts`） | — | — | `src/ts-shared/`（清单见 [ts-shared.md](./ts-shared.md) §1.1） |
 
 ### 1.2 workspace 划界：两个刻意的决定
 

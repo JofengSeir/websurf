@@ -6,6 +6,15 @@
 
 ### 新增
 
+#### 仓库框架规范（审计 + 规范，2026-09-12）
+
+- **仓库框架现状审计（事实基线）**：新增 `documents/framework-audit.md`——对 `apps/{debug,game,viewer}` 与 `src/` 做全量实测审计，产出三工程启动/构建入口对照、产物与控制台输出对照、文件结构对照、`src/` 共享层消费矩阵，收敛出 `I-01..I-22` 共 22 条不一致与 `R-01..R-21` 共 21 条二值可判定规范需求条款。本轮实测新发现并被 CI 漏掉的既有缺陷：`apps/debug/scripts/jump-apex-verify.mjs:26-30` 的 `REPO` 少一层 `..`（`npm run test:jump-apex` 在干净检出上必然失败）、`apps/debug/scripts/install-wasm-bindgen.cmd:19` 的 `%~dp0..\..\` 少一层（全仓 13 条同款调用中唯一失败，且失败后仍 `pause` 让用户误以为成功）、game 的 `test:phys`/`test:seed-smoke` 与 viewer 的 `test:smoke` 未进 CI、game 的 dist 缺 `LICENSE.cs-movement`/`NOTICE.cs-movement`。
+- **启动方式与文件结构统一规范**：新增 `documents/framework-launch-structure.md`——统一三工程「三件套入口」语义与 `start-dev.cmd` 三条件必要性判据、`.cmd` 控制台输出唯一词表与逐字模板（`play` N=4 / `start-dev` N=3 / `build-dist` N=5）、10 端口段固定槽位（debug 8080/8081、game 8090/8091、viewer 8100/8101、harness 8110，取代原 8080/8081/8090/8137 的无文档分配）、10 层相对路径层数对照表、8 条一致性豁免（含 viewer single-only 与 `file://` 需求）、新子工程脚手架清单与逐文件职责。
+- **共享层解耦方案**：新增 `documents/framework-decoupling.md`——给出「什么该上提到 `src/`」的五维判定准则与分级（级别 A / A′ / B / C）、`D-01..D-23` 逐项裁决（含反向否决理由）、`src/` 目标结构与职责边界、viewer「正当隔离」专项、三批迁移顺序与回滚方式、`E-01..E-08` 例外表。裁定 `cs-movement` 许可证唯一源为 `src/phys/{LICENSE,NOTICE}`（`dist/` 内产物级副本合法且必需，禁止第二份**源码**副本）。
+- **`documents/index.md` 导航同步**：登记上述三篇并更新篇数统计（根 `documents/` 6 → 9 篇，全量 24 → 27 篇）。
+
+> 规范与审计本身**不改动任何代码**：上述 22 条不一致与两份规范中的 24 项文件级改造清单均为**待执行**项。其落地按批次推进，批 1 见下方「修复 / 批 1」。
+
 #### 查看器与回放（apps/viewer）
 
 - **最小 BSP 自由视角查看器（349ee26，2026-08-19）**：新增查看器工程——最小 BSP 自由视角查看器（WASM 解析 + Three.js 渲染，无玩法系统），以 path 依赖共享层 `../src`、dev 复用 `../src/serve.py`，自带 README 与 `docs/overview.md`（工程内 `docs/` 后于 2026-09 并入仓库根 `documents/`）。初始的位姿三通道（URL 参数 / `location.hash` / `window.viewer` 编程接口）已于 2026-09-06 核心化简化中移除，同时接入 Pages CI，随 debug / game 一同部署 single dist。
@@ -71,6 +80,16 @@
 - **本地数据与工具目录出库（5fdaf72 / 8e949e0 / 854fb27 / b8222dd，2026-09-05~10）**：工作区精简并增补 `.gitignore` 本地数据规则；地图与录像统一收口 `test/maps/`（仓库根 `maps/` 废弃），`*.bsp` / `*.dem` / `*.replay` 不入库，仅保留 `apps/debug/fixtures/path/` 这一 CI 验收夹具例外；智能体工具状态目录（`.agent-teams/` / `.code-review/`）移出版本库。
 
 ### 修复
+
+- **框架规范批 1（零行为变化，2026-09-12）**：落地 `documents/framework-audit.md` 的 `I-02`/`I-03`/`I-22` 与一项工具健壮性缺陷，均为审计/规范定稿后按批次执行的改动。
+  - **`I-03` 路径层数（真缺陷，CI 未覆盖）**：`apps/debug/scripts/jump-apex-verify.mjs` 的 `REPO` 由 `join(DEBUG_DIR, '..')` 改为 `join(DEBUG_DIR, '..', '..')`——原写法把仓库根算成 `apps/`，使 `npm run test:jump-apex` 在干净检出上必然 `ERR_MODULE_NOT_FOUND`；`apps/debug/scripts/jump-apex-serve.mjs` 同款错误一并修。验证：在 `apps/debug` 下 `npm run test:jump-apex` **exit 0**，输出 5 个渲染频率组 × 5 个变体共 25 块分析（改前 exit 1 + `ERR_MODULE_NOT_FOUND`）。
+  - **`I-22` 路径层数（真缺陷，失败被 `pause` 掩盖）**：`apps/debug/scripts/install-wasm-bindgen.cmd:19` 的 `%~dp0..\..\src\scripts\cargo-env.cmd` 少一层（该文件位于 `apps/debug/scripts/`，`..\..\` 落在 `apps/`），改为 `%~dp0..\..\..\`。原缺陷只在**单独执行**该脚本时暴露——`CARGO_HOME` 为空使 `copy` 静默失败、`INSTALL_DIR` 落到盘根，而脚本仍 `pause` 让用户以为成功；作为 `build-dist.cmd`/`start-dev.cmd` 子步骤时因父脚本已设好环境而不暴露，故 CI 与日常构建均未发现。验证：A/B 探针实测旧表达式三变量全空且 `INSTALL_DIR` 在盘根，新表达式 `CARGO_HOME`/`WASM_PACK_CACHE` 指向仓库根、预置 prebuilt 时 `WASM_BINDGEN` 非空，实跑后 `.cargo-home`/`.wasm-pack-cache` 落在仓库根、盘根零遗留。
+  - **CMD 括号块解析（真缺陷，脚本整体静默 no-op）**：同文件有 **4 处** `echo` 文案在 `if ... (` 括号块内使用了**未转义**的半角括号，破坏 cmd 的括号计数，导致块提前闭合。其中 `:35`（`... exit 0 (normal return, not an error) ===`，位于 `:30-38` 块内）后果最严重：在「二进制不存在」这一**正常路径**下，脚本从第 19 行后即静默结束——**输出 0 字节、退出码 0、不下载、不安装、`WASM_BINDGEN` 永远为空**，而调用它的 `build-dist.cmd`/`start-dev.cmd` 会误以为已就绪。另三处为未爆/潜在同类：`:67`（下载失败分支）、`:91`（解压失败分支，实测会以 `. was unexpected at this time` 终止）、`:102`（安装完成提示分支）。**四处均改为 `^(` / `^)`**（`^` 在 echo 的参数位置输出时被吞掉，控制台仍显示半角括号）。验证：修复前 `cmd /c "apps\debug\scripts\install-wasm-bindgen.cmd nopause"` → 0 字节 + RC 0；修复后 → 完整输出下载链路并以 **RC 1** 报「download failed」（本沙箱无网络，属预期），`INSTALL_DIR` 指向仓库根而非盘根。修复方式与 4 处清单由独立验证（t14）通过差分实验定位并复核。
+  - **工具健壮性（会静默掩盖全部漂移）**：`src/scripts/check-doc-drift.mjs` 读取 git 清单时用 `.split('\n')` 未剥离 `\r`，一旦清单为 CRLF（如调用方以 `Set-Content` 生成），每条路径带尾随 CR 致 `existsSync` 全失败，**输出「0 篇 md｜漂移 0」并 exit 0**。改为 `.split(/\r?\n/)`。验证：`git show HEAD:` 版 + CRLF 清单 → `0 篇 md`、exit 0（决定性复现掩盖行为）；修复版 + CRLF 清单 → `48 篇 md｜138 声明（漂移 0）｜1676 锚点（越界 0）`、exit 0。另把读文档正文的 `:85` 一并加固为 `.split(/\r?\n/)`（该处原判定无害：其后正则无 `$` 锚定、`^\|` 行首锚定不受行尾 `\r` 影响，实测剥离前后输出逐字相同；加固用于消除后续新增 `$`/`endsWith` 判定时的隐患），实测加固前后输出完全一致。
+  - **工具健壮性（会静默掩盖全部漂移）**：`src/scripts/check-doc-drift.mjs` 读取 git 清单时用 `.split('\n')` 未剥离 `\r`，一旦清单为 CRLF（如调用方以 `Set-Content` 生成），每条路径带尾随 CR 致 `existsSync` 全失败，**输出「0 篇 md｜漂移 0」并 exit 0**。改为 `.split(/\r?\n/)`。验证：HEAD 版 + CRLF 清单 → `0 篇 md`、exit 0（决定性复现掩盖行为）；修复版 + CRLF 清单 → `48 篇 md｜138 声明（漂移 0）｜1673 锚点（越界 0）`、exit 0。
+  - **`I-02` CI 门禁缺口**：`.github/workflows/deploy-pages.yml` 补 game 的 `test:phys` 与 `test:seed-smoke` 两个门禁（二者只读 `apps/game/pkg/…wasm`，CI 已先跑 `build:wasm`，零变红风险）。viewer 的 `test:smoke` **不加**：`apps/viewer/test/smoke-cdp.mjs` 依赖外部常驻 `npm run dev`、Edge/Chromium 与默认 8080 端口，CI 化须先改脚本，已登记为后续项；viewer 侧 `test:replay` 已在 CI 运行。
+  - **文档漂移**：`documents/architecture.md:22` 的 `src/ts-shared/` 声明由「12 源文件五域，共 4171 行」更正为「18 源文件五域，共 6664 行」（`\n` 计数，与 `wc -l` 同口径）。
+  - 全仓体检：`48 篇 md｜138 声明（漂移 0）｜1673 锚点（越界 0）｜路径失效 1`（即 `documents/architecture.md:202` 引述历史记录的代码段，三个 markdown 链接实测均可达，属工具散文路径提取误报，刻意保留），LF 与 CRLF 两种清单口径下均 exit 0。
 
 - **viewer 渲染方法与 game 对齐（2026-09-05）**：修复「部分场景渲染不全」，四处根因——① **分块合并丢几何（主因）**：`optimizeScene` 最终合并失败（GLB 内 indexed 与 non-indexed 几何混合致 `mergeGeometries` 属性不兼容）时兜底只保留第一块、其余几何被静默丢弃（surf_null 实测 60 个 cell 受影响，高空俯瞰大面积镂空），现对齐 game——失败时全部单独保留（零丢失）；② **雾与远平面截断**：原 `Fog(bg, far*0.4, far*0.9)` + far 钳制 65536 会吞掉远景并整体裁掉对角 > 32768 的地图，现改为无雾、`far = maxDim × 100`；③ **贴墙近平面裁剪**：原固定 `near=1`，现移植 game 的 `updateNearPlane`（每 2 帧 6 方向探测，`near = 最近距离 × 0.3`、下限 0.05，空旷恢复 `maxDim/1000`），灯光同步 game 三点光（ambient 0.6 + hemisphere + directional 0xfff4e0）；④ `optimizeScene` 遍历范围收敛到 BSP 模型子树（防回放轨迹与量测辅助对象被误合并）。验证：headless Edge 加载 surf_null.bsp 截图 A/B、CDP 冒烟、typecheck 均通过，`app.js` 与 `dist` 已重建。
 - **合并失败兜底修复真正落盘（8a8c21a，2026-09-05）**：上一轮恢复时误用备份，导致丢 39% 几何的 bug 版本入库，本次修正并确认落盘。
