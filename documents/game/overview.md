@@ -56,20 +56,20 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 | 路径 | 行数 | 职责（实测 wc -l） |
 |---|---|---|
 | `apps/game/src/app.ts` | 688 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
-| `apps/game/src/config.ts` | 181 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate`）+ `applyConfigPatch` + `buildPhysicsParams` |
+| `apps/game/src/config.ts` | 177 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate`）+ `applyConfigPatch` + `buildPhysicsParams` |
 | `apps/game/src/renderer/renderer-main.ts` | 1091 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、主线程物理 tick、权威校准入口、画质切换 |
-| `apps/game/src/worker/main.ts` | 444 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:429`，常量 `TICK_RATE_OFFSET` 在 `:36`） |
+| `apps/game/src/worker/main.ts` | 443 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:429`，常量 `TICK_RATE_OFFSET` 在 `:36`） |
 | `apps/game/src/worker/worker-types.ts` | 195 | 协议类型（⚠️ 部分注释落后于实现，运行时协议以 `src/ts-shared/auth/worker-dispatch.ts` 为准；`:6` 提到的 predictor-worker 文件已不存在，纯历史残留） |
 | `apps/game/src/input/input-bridge.ts` | 75 | 面板 → 双端物理的参数桥（sendConfig 双写、respawn/teleport） |
 | `apps/game/src/input/keyboard.ts` | 113 | `KeyboardInput`：锁定门控、`getState/getMask/reset`、面板 `setKeymap` 热更新 |
 | `apps/game/src/input/keymap.ts` | 112 | 默认键位 + 录制重绑 + localStorage（`STORAGE_KEY='websurf-game.keymap.v1'` `:42`） |
 | `src/ts-shared/input/mouse-buffer.ts` | 128 | `process()` 路径：discardNext + 单事件削平 ±1000（`MAX_DELTA` `:40`；`push/drain` 为遗留未用路径） |
 | `src/ts-shared/input/pointer-lock.ts` | 154 | `unadjustedMovement:true` 请求 + 旧浏览器 void 降级 + 3s 超时（`:71`） |
-| `apps/game/src/panel/panel-controller.ts` | 690 | ESC 两栏面板：通用/物理/体型/按键/操作/显示/视角七模块、控件绑定、偏好持久化、noclip、存点列表 |
+| `apps/game/src/panel/panel-controller.ts` | 684 | ESC 两栏面板：通用/物理/体型/按键/操作/显示/视角七模块、控件绑定、偏好持久化、noclip、存点列表 |
 | `apps/game/src/world/pvs-manager.ts` | —（批 4 已上提） | PVS 叶子查找 + 行 RLE 解码 + 可见集——**D-10 起实现在 `src/ts-shared/world/pvs-manager.ts`（271 行）**，本工程文件已删除（`renderer-main.ts` 改 import 共享单点） |
 | `apps/game/src/world/types.ts` | 17 | 最小化世界类型：`Vec3Like`/`Vec3` 留在本工程（D-07 判保留）；PVS 三类型批 4（D-10）起为 re-export 共享单点（对照 debug 198 行） |
 | `apps/game/src/savepoint.ts` | 106 | `SavePointStore`：按地图 localStorage（`websurf-game.savepoints.{mapName}`）、上限 50（`SAVEPOINT_MAX` `:27`）、latest/add/delete |
-| `apps/game/web/index.html` | 245 | 页面外壳（纯结构与挂载点）：80 元素 id / 14 data-* / 30 class 与 JS 绑定零改动（r1 复核 80/80、14/14、30/30）；不含任何行内样式，视觉层全在 styles.css |
+| `apps/game/web/index.html` | 243 | 页面外壳（纯结构与挂载点）：79 元素 id / 14 data-* / 30 class 与 JS 绑定零改动（r1 复核 80/80、14/14、30/30）；不含任何行内样式，视觉层全在 styles.css |
 | `apps/game/web/styles.css` | 571 | 独立视觉层（viewer S10 令牌体系）：:root 设计令牌 + 卡片化面板 + 悬停/激活交互态；可见性 class 钩子（`#panel.hidden`/`#error.show`/`.key-rec-hint(.show)`/`#crosshair.no-dot .ch-dot`）+ `.load-fill` 进度条 `var(--load-pct, 0%)` |
 | `apps/game/crates/wasm/src/lib.rs` | 2326 | WASM 导出层（见 §1） |
 

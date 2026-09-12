@@ -80,8 +80,8 @@ debug 的运行时由**两条物理线 + 一条状态通道**构成（v7 架构�
 | `world/spawn-loader.ts` | 120 | 出生点解析——**未接线预留工具**（全仓无 import，文件头自述"出生点实际加载走 ts-shared world-builder 管线"，`spawn-loader.ts:8-11`）；批 4（D-08）起 `bspYawToCsYaw` 改用共享单点 | [loading-pipeline](implementation/loading-pipeline.md) |
 | `world/types.ts` | 198 | WASM 导出 JSON 的 TS 契约（brush/spawn/teleport/metadata/ColliderFilter）；PVS 三类型批 4（D-10）起改为 re-export 共享单点 `src/ts-shared/world/types.ts` | [loading-pipeline](implementation/loading-pipeline.md) |
 | `game-state.ts` | 196 | 计时挑战状态机：idle→running→finished、检查点去重、死亡回退 | [sequences §6](sequences.md) |
-| `physics/param-defs.ts` | 108 | 物理面板参数定义表（13 项 PARAM_DEFS，默认值=Rust `PhysParams::default()`） | [physics-panel](implementation/physics-panel.md) |
-| `physics/physics-params.ts` | 163 | 参数管理器：applyOverride/归一化/tickRate 变更回调；`PARAM_TO_RUST` 映射 | [physics-panel](implementation/physics-panel.md) |
+| `physics/param-defs.ts` | 103 | 物理面板参数定义表（12 项 PARAM_DEFS，默认值=Rust `PhysParams::default()`） | [physics-panel](implementation/physics-panel.md) |
+| `physics/physics-params.ts` | 162 | 参数管理器：applyOverride/归一化/tickRate 变更回调；`PARAM_TO_RUST` 映射 | [physics-panel](implementation/physics-panel.md) |
 | `physics/math/vec3.ts`、`physics/physics/Collision/Collision.types.ts` | 101/49 | 平面/凸包碰撞类型与零分配 Vec3（collider-debug/plane-inspector/collider-adapter 消费；源自 @unsurf/cs-movement 约定） | [rendering](implementation/rendering.md) |
 | `input/`（input-bridge/keyboard/input-recorder） | 93/108/… | 工程侧输入三件：低频控制消息桥、键位捕获、输入录制；鼠标增量缓冲与指针锁定已上提共享层 `src/ts-shared/input/{mouse-buffer,pointer-lock}.ts` | [sequences §2](sequences.md) |
 

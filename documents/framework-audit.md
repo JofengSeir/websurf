@@ -431,13 +431,13 @@ viewer 是 single-only 并不只是「没实现 multi」：它的 `dist/index.ht
 | `auth/shared-state.protocol.test.ts` | 345 | 测试 |
 | `auth/tick-authority.ts` | 618 | tick 权威 |
 | `auth/tick-authority.test.ts` | 774 | 测试 |
-| `auth/worker-dispatch.ts` | 485 | Worker 消息派发 |
+| `auth/worker-dispatch.ts` | 484 | Worker 消息派发 |
 | `decoupled/decoupled-loop.ts` | 449 | 解耦循环 |
 | `input/input-layer.ts` | 40 | 灵敏度/等效鼠标量 |
 | `input/mouse-buffer.ts` | 128 | 鼠标缓冲 |
 | `input/pointer-lock.ts` | 154 | 指针锁定 |
 | `phys/authority-calibrator.ts` | 668 | 权威校准 |
-| `phys/params.ts` | 64 | 物理参数映射 |
+| `phys/params.ts` | 62 | 物理参数映射 |
 | `phys/world-builder.ts` | 248 | world bundle 组装 |
 | `tick/ordering-gate.ts` | 173 | 顺序门 |
 | `tick/ordering-gate.test.ts` | 289 | 测试 |
