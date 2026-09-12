@@ -57,7 +57,7 @@ debug 的运行时由**两条物理线 + 一条状态通道**构成（v7 架构�
 
 | 目录/文件 | 行数 | 职责 | 细分文档 |
 |---|---|---|---|
-| `app.ts` | 2499 | 主入口：main() 装配、handleLoadBsp 编排、输入循环（rAF）、UI 绑定、物理面板消息处理、计时挑战接线 | [loading-pipeline](implementation/loading-pipeline.md)、[physics-panel](implementation/physics-panel.md)、[sequences](sequences.md) |
+| `app.ts` | 2509 | 主入口：main() 装配、handleLoadBsp 编排、输入循环（rAF）、UI 绑定、物理面板消息处理、计时挑战接线 | [loading-pipeline](implementation/loading-pipeline.md)、[physics-panel](implementation/physics-panel.md)、[sequences](sequences.md) |
 | `config.ts` | 259 | `RuntimeConfig` **11 段**运行时配置（physics/player/movement/smoothing/teleport/lod/lighting/input/hud/debug/texture）与 `applyConfigPatch` | 本文 §5 |
 | `main-wasm.ts` | 43 | 主线程 WASM 懒初始化（内嵌 `__VBSP_WASM_B64__` → `initSync`，否则 fetch 同目录 wasm）；导出 `mosaic_decode`/`decompress_mtz` | [loading-pipeline](implementation/loading-pipeline.md) |
 | `default-pack.ts` | 42 | 默认纹理包 `textures.mtz` 加载（内嵌 base64 或 fetch），供缺失纹理比对 | [loading-pipeline](implementation/loading-pipeline.md) |
