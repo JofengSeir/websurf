@@ -121,16 +121,34 @@
 - `apply_friction`：只消耗水平分量，`control = max(speed, stopspeed)`；
 - `clip_velocity`：沿平面滑行；`overbounce_for`（`player.rs:338`）：法线 y∈(0.05, 0.7)（斜面）取 `OVERBOUNCE_SURF=1.0` 保留速度，其余 `1.001` 防重穿；附 CS:GO 二次修正步清残留法向分量（`player.rs:328-334`）。
 
-**主流程 `player_tick`**（`player.rs:1009` 起；主体步骤 `:1013-1039`，收尾杂项 `:1040-1057`）：
+**主流程 `player_tick`**（`player.rs:992` 起；主体步骤 `:996-1022`，收尾杂项 `:1024-1040`）：
 
-1. `ladder_cooldown` 递减 → `update_duck`（`player.rs:569`：空中蹲**从脚部往上缩** origin 上移 18 并以 `is_position_free` 守卫；地面起立头顶被挡则保持蹲）；
+1. `ladder_cooldown` 递减 → `update_duck`（`player.rs:567`：地面蹲/起立 origin 不动、仅换站立箱，头顶被挡则保持蹲；空中蹲**从脚部往上缩** origin 上移 18；**空中起立 = 放脚** origin 下移 18 并以站立箱扫掠判定，被挡即**不起立**——详见 §3.2.1）；
 2. `check_stuck`（卡住推出 `PUSH_OUT`）失败则跳过本帧移动；
-3. `check_ladder`（`player.rs:605`：冷却中不上梯；空中必抓，地面需 forward 且视线与梯面朝向点积 > 0.3）命中 → `ladder_move`（`player.rs:628`：完整 3D 视角基攀爬、双轴输入不归一化、上限 `LADDER_SPEED×√2`、垂直墙分量重定向到攀爬方向；jump 跳离 = facing×`LADDER_JUMP_OFF_SPEED` 270 + 冷却 0.25s）；
+3. `check_ladder`（`player.rs:611`：冷却中不上梯；空中必抓，地面需 forward 且视线与梯面朝向点积 > 0.3）命中 → `ladder_move`（`player.rs:634`：完整 3D 视角基攀爬、双轴输入不归一化、上限 `LADDER_SPEED×√2`、垂直墙分量重定向到攀爬方向；jump 跳离 = facing×`LADDER_JUMP_OFF_SPEED` 270 + 冷却 0.25s）；
 4. 否则 `check_jump`（`player.rs:536`：`jump_velocity = sqrt(2·g·jump_height)`；非 autobhop 时要求落地新按（`old_jump` 边沿）；`bhop_speed_clamp` 时起跳水平速钳 `1.1×maxspeed`）→ 在地 `walk_move` / 空中 `air_move`（空中先记 `fall_velocity`）；
 5. `categorize_position`（贴地/离地归类，`GROUND_TRACE_DIST=2`）；
 6. 尾部杂项：`detect_blocked_move`、落地冲击 `land_punch` 衰减、`old_jump = input.jump` 边沿记录、**duck_frac 插值**（空中/落地 tick 即时置位、地面按 `DUCK_LERP_TIME=0.1s` 渐变）。
 
 视角高度 `Player::eye_height`（`player.rs:193`）：按 `duck_frac` 在 `EYE_STAND`(64.09)/`EYE_DUCK`(46.04) 间插值，站/蹲箱高不同比例换算——空中蹲视角自然连续无跳变（`player.rs:191-197` 注释）。
+
+### 3.2.1 蹲姿与 surf：对齐 Source `CanUnduck()`
+
+Source 权威实现（`src/game/shared/gamemovement.cpp`）：
+
+- **有地面实体**：`newOrigin += (VEC_DUCK_HULL_MIN - VEC_HULL_MIN)`——CS:GO 两者 z 相同，故**原点不动**，
+  仅把碰撞箱换成站立箱；被挡则保持蹲（`FinishUnDuck`）。
+- **空中**：`viewDelta = (standHull - duckHull)` 取负 → **origin 下移 18（放脚、头顶不动）**；
+  以**站立箱**从当前 origin 扫掠到目标 origin，`start_solid || fraction != 1` 即**不起立**
+  （`CanUnduck` + `FinishUnDuck`）。
+
+推论（本仓库实测，`src/phys/duck_surf_tests.rs`）：贴坡 surf 时玩家脚底离坡面仅 **+0.03~0.13**
+（扫掠 trace 的 `DIST_EPSILON` 悬停间隙），放脚所需的 18u 必然撞进坡体 → **松开蹲键保持蹲姿，
+直到离坡或落地**。这是 CS:GO 原版行为，不是缺陷。
+
+> 反例（2026-09-13 移除）：曾在「放脚被挡」时兜底「原地站立箱可用即起立」（脚不动、头顶 +18）。
+> 该兜底偏离 Source，且依赖 `is_position_free` 在贴面间隙 ≈0 处的临界判定（容差 0、实测间隙 0.03），
+> 在多面交界或浮点抖动下会让同一段坡时而站得起、时而站不起。
 
 ### 3.3 传送与死亡（`src/phys/teleport.rs`）
 

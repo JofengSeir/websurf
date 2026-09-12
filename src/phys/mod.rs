@@ -22,6 +22,9 @@ mod seed;
 
 #[cfg(test)]
 mod p2_gate_tests;
+/// surf / 蹲姿语义回归（对齐 Source `CGameMovement::CanUnduck()`）。
+#[cfg(test)]
+mod duck_surf_tests;
 
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
