@@ -60,6 +60,7 @@ const KEEP_MULTI = [
   'worker.js',
   WASM_FILE,
   'textures.mtz',
+  'coi-serviceworker.js',
   'LICENSE.cs-movement',
   'NOTICE.cs-movement',
 ];
