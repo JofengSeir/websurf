@@ -1,11 +1,23 @@
 
-/* 权威健康控制台（面板内；等宽小字，最新在顶） */
-.health-log {
-  font: 11px/1.5 Consolas, 'Courier New', monospace;
+/* 权威健康信息卡（侧栏底部独立卡） */
+.health-card {
+  margin-top: 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,.03);
+  overflow: hidden;
+}
+.health-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.06); }
+.health-title { flex: 1; font-size: 12px; color: #e5e7eb; }
+.health-count { font-size: 11px; color: #9ca3af; }
+.health-clear { font-size: 11px; background: none; border: 1px solid rgba(255,255,255,.12);
+  color: #9ca3af; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.health-clear:hover { color: #e5e7eb; border-color: rgba(255,255,255,.25); }
+.health-log { font: 11px/1.5 Consolas, 'Courier New', monospace;
   white-space: pre-wrap;
   word-break: break-all;
   color: #9ca3af;
-  max-height: 180px;
+  max-height: 200px;
   overflow-y: auto;
-  margin: 0;
-}
+  margin: 0; padding: 8px 10px; }

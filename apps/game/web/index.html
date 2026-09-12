@@ -66,6 +66,15 @@
         </div>
       </div>
 
+      <!-- 权威健康控制台（Worker 健康探测消息，最近 30 条；不进 console） -->
+      <div class="health-card" id="health-card">
+        <div class="health-head">
+          <span class="health-title">权威健康</span>
+          <span class="health-count" id="health-count">0</span>
+          <button type="button" id="health-clear" class="health-clear">清空</button>
+        </div>
+        <pre id="health-log" class="health-log">（无消息）</pre>
+      </div>
       <!-- 右侧设置 -->
       <div class="body">
         <!-- 通用：地图加载 / 重生 -->
@@ -85,12 +94,6 @@
         </div>
 
         <!-- 物理 -->
-          <!-- 权威健康（Worker 健康探测消息，最近 30 条；不进 console） -->
-          <details id="health-console">
-            <summary>权威健康</summary>
-            <pre id="health-log" class="health-log">（无消息）</pre>
-          </details>
-
         <div class="mod-pane" data-pane="physics">
           <div class="pane-title">物理参数</div>
           <div class="pane-desc">权威物理 64Hz · Worker-B 预测联动 · 面板可调（计时玩法锁定）</div>
