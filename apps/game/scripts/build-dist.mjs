@@ -24,6 +24,7 @@
  */
 import { build } from 'esbuild';
 import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -144,11 +145,51 @@ async function buildMulti(wasmPath) {
   console.log('[5/5] 复制 WASM / 默认纹理包...');
   copyFileSync(wasmPath, join(DIST, WASM_FILE));
   copyFileSync(MTZ, join(DIST, 'textures.mtz'));  // COI serviceworker：静态托管上注入 COOP/COEP → crossOriginIsolated → SAB 可用
-  copyFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js'));
 
   console.log('[5/5] 复制 index.html / styles.css（module script 原样）...');
   copyFileSync(INDEX_HTML, join(DIST, 'index.html'));
   copyFileSync(STYLES, join(DIST, 'styles.css'));
+
+  // 生成预缓存清单并注入 SW（multi 模式专用）
+  const precacheManifest = [
+    './index.html',
+    './app.js',
+    './worker.js',
+    './' + WASM_FILE,
+    './textures.mtz',
+    './styles.css',
+    './coi-serviceworker.js',
+  ].filter((f) => existsSync(join(DIST, f.slice(2)))); // 仅存在的文件（去掉 './' 前缀）
+
+  const swTemplate = readFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), 'utf8');
+  // 缓存名按「预缓存内容哈希」派生：内容变 → SW 文件字节变 → 浏览器触发 install → 缓存刷新；
+  // 固定缓存名会导致 SW 字节不变、缓存永不更新，部署后用户长期拿到旧 app.js。
+  const cacheHash = createHash('sha256');
+  cacheHash.update(JSON.stringify(precacheManifest));
+  for (const entry of precacheManifest) {
+    const abs = join(DIST, entry.slice(2));
+    if (existsSync(abs)) { cacheHash.update(entry); cacheHash.update(readFileSync(abs)); }
+  }
+  const cacheName = 'websurf-coi-' + cacheHash.digest('hex').slice(0, 12);
+  const swWithManifest = swTemplate
+    .replace(
+      'const PRECACHE_MANIFEST =\n  typeof __PRECACHE_MANIFEST__ === "object" && __PRECACHE_MANIFEST__ ? __PRECACHE_MANIFEST__ : [];',
+      `const PRECACHE_MANIFEST = ${JSON.stringify(precacheManifest)};`
+    )
+    .replace(
+      'const CACHE_NAME = typeof __CACHE_NAME__ === "string" ? __CACHE_NAME__ : "websurf-coi-dev";',
+      `const CACHE_NAME = ${JSON.stringify(cacheName)};`
+    );
+  if (
+    swWithManifest.includes('typeof __PRECACHE_MANIFEST__') ||
+    swWithManifest.includes('typeof __CACHE_NAME__')
+  ) {
+    throw new Error(
+      '[build-dist] SW 占位符未被替换：web/coi-serviceworker.js 的声明行与构建脚本不一致'
+    );
+  }
+  writeFileSync(join(DIST, 'coi-serviceworker.js'), swWithManifest);
+  console.log(`[5/5] 注入 SW 预缓存清单: ${precacheManifest.length} 个资源`);
 }
 
 async function main() {
