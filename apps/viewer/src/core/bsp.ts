@@ -34,6 +34,16 @@ export interface BspLoadResult {
 
 let wasmReady: Promise<void> | null = null;
 
+/** 动态加载 classic script（wasm-embedded.js 内嵌回退用）。 */
+function loadScript(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error(`script 加载失败: ${src}`));
+    document.head.appendChild(s);
+  });
+}
 /**
  * 单文件（file:// 双击）构建时，WASM 以 base64 内嵌在 app.js 的
  * `globalThis.__VBSP_WASM_B64__` 里（见 scripts/build-dist.mjs single 模式）。
@@ -45,22 +55,33 @@ export function ensureWasm(): Promise<void> {
       // 判定统一为「非空字符串」（共享 loader，D-09）：空串/非字符串注入不静默退回 fetch。
       const embedded = readEmbeddedWasmB64();
       if (embedded) {
+        // single 构建（file:// 双击）：WASM base64 内嵌在 app.js，直接同步初始化。
         initSync({ module: base64ToBytes(embedded) });
         return;
       }
+      // ① 请求外置 WASM（multi 部署主路径；dev 同源亦可）。
       const url = new URL('./websurf_viewer_wasm_bg.wasm', import.meta.url);
-      let resp: Response;
       try {
-        resp = await fetch(url);
+        const resp = await fetch(url);
+        if (resp.ok) {
+          initSync({ module: await resp.arrayBuffer() });
+          return;
+        }
+        console.warn(`[wasm] 外置请求 ${resp.status}，回退内嵌副本…`);
       } catch {
-        throw new Error('WASM 文件请求失败：请确认通过 npm run dev 启动并访问 http://localhost:8080/');
+        console.warn('[wasm] 外置请求失败（file:// 或网络），回退内嵌副本…');
       }
-      if (!resp.ok) {
-        throw new Error(
-          `fetch wasm → ${resp.status}：缺少 WASM 产物，请在 viewer/ 目录先运行 npm run build:wasm`,
-        );
+      // ② 回退：动态加载 wasm-embedded.js（multi 构建生成的内嵌副本）。
+      await loadScript(new URL('./wasm-embedded.js', import.meta.url).href);
+      const fallback = readEmbeddedWasmB64();
+      if (fallback) {
+        initSync({ module: base64ToBytes(fallback) });
+        return;
       }
-      initSync({ module: await resp.arrayBuffer() });
+      // ③ 双路径都失败。
+      throw new Error(
+        'WASM 加载失败：外置请求与内嵌回退均不可用——请运行 npm run build:wasm 后重试',
+      );
     })();
   }
   return wasmReady;
