@@ -530,7 +530,17 @@ function pushHealthLog(message: string): void {
   if (healthLogLines.length > 30) healthLogLines.length = 30;
   const el = document.getElementById('health-log');
   if (el) el.textContent = healthLogLines.join('\n');
+  const cnt = document.getElementById('health-count');
+  if (cnt) cnt.textContent = String(healthLogLines.length);
 }
+const healthClearBtn = document.getElementById('health-clear');
+healthClearBtn?.addEventListener('click', () => {
+  healthLogLines.length = 0;
+  const el = document.getElementById('health-log');
+  if (el) el.textContent = '（无消息）';
+  const cnt = document.getElementById('health-count');
+  if (cnt) cnt.textContent = '0';
+});
 function setStatus(msg: string, cls: 'success' | 'error' | ''): void {
   if (dom.statusEl) {
     dom.statusEl.textContent = msg;

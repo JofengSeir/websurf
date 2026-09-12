@@ -145,6 +145,39 @@ function optCellKey(x: number, y: number, z: number, cellSize: number): string {
 }
 
 /** 非空 cell 计数（cell 大小自适应循环用）。 */
+/**
+ * 合并兼容性归一：同组 geometry 的 index 有无不一致 / BufferAttribute.gpuType
+ * 不一致会让 mergeGeometries/mergeAttributes 直接失败（three 内部 error 且返回
+ * null）——按需把组内统一为非索引 + f32。仅组内不一致时才转换（避免全图
+ * toNonIndexed 的内存放大）。
+ */
+function normalizeMergeGroup(geoms: THREE.BufferGeometry[]): THREE.BufferGeometry[] {
+  const hasIdx = geoms.some((g) => g.index !== null);
+  const allIdx = geoms.every((g) => g.index !== null);
+  let out = hasIdx && !allIdx ? geoms.map((g) => (g.index ? g.toNonIndexed() : g)) : geoms;
+  const gpuTypes = new Set<number>();
+  for (const g of out) {
+    for (const name of Object.keys(g.attributes)) {
+      const a = g.attributes[name] as THREE.BufferAttribute;
+      gpuTypes.add((a as unknown as { gpuType?: number }).gpuType ?? 0);
+    }
+  }
+  if (gpuTypes.size > 1) {
+    out = out.map((g) => {
+      const g2 = g.clone();
+      for (const name of Object.keys(g2.attributes)) {
+        const a = g2.attributes[name] as THREE.BufferAttribute;
+        g2.setAttribute(
+          name,
+          new THREE.BufferAttribute(new Float32Array(a.array as ArrayLike<number>), a.itemSize, a.normalized),
+        );
+      }
+      g2.dispose();
+      return g2;
+    });
+  }
+  return out;
+}
 function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
   const keys = new Set<string>();
   for (const it of infos) keys.add(optCellKey(it.cx, it.cy, it.cz, cellSize));
@@ -1607,7 +1640,8 @@ export class RendererMain {
       }
       const mergedGeoms: THREE.BufferGeometry[] = [];
       const mats: THREE.Material[] = [];
-      for (const [mat, geoms] of byMat) {
+      for (const [mat, geomsRaw] of byMat) {
+        const geoms = normalizeMergeGroup(geomsRaw);
         let merged: THREE.BufferGeometry[];
         if (geoms.length === 1) {
           merged = geoms;
@@ -1634,7 +1668,7 @@ export class RendererMain {
         chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
         drawCallEst++;
       } else {
-        const final = mergeGeometries(mergedGeoms, true);
+        const final = mergeGeometries(normalizeMergeGroup(mergedGeoms), true);
         if (final) {
           for (const g of mergedGeoms) if (g !== final) g.dispose();
           chunk = new THREE.Mesh(final, mats);
