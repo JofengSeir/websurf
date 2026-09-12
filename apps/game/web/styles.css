@@ -569,3 +569,14 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* 权威健康控制台（面板内；等宽小字，最新在顶） */
+.health-log {
+  font: 11px/1.5 Consolas, 'Courier New', monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #9ca3af;
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 0;
+}

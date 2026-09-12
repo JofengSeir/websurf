@@ -312,14 +312,17 @@ function noteWorldSpawn(spawnY: number, deathY: number | null): void {
 
 /** 权威 y 下坠地板：出生点优先 → 死亡阈值 → 兜底常数（channel 无关，纯本地状态）。 */
 function authYFloor(): number {
-  if (authSpawnY !== null) return authSpawnY - AUTH_Y_FLOOR_MARGIN;
+  // death_y（地图真实死亡线）优先：surf 的合法滑落落差远超「出生点−4096」，
+  // 出生点基准会把正常滑行误判为跑飞（2026-09-12 实测 y=10847 vs floor=11552）。
   if (authDeathY !== null) return authDeathY - AUTH_Y_FLOOR_MARGIN;
+  if (authSpawnY !== null) return authSpawnY - AUTH_Y_FLOOR_MARGIN;
   return AUTH_Y_FLOOR_FALLBACK;
 }
 
 /** 上报一条健康告警（复用既有 `error` 消息路径；主线程已有 console 消费）。 */
 function postHealth(msg: string): void {
-  postMessage({ type: 'error', message: `[authority-health] ${msg}` });
+  // health-log：面板内「权威健康」控制台消费，不进 console（用户裁定告警不上屏）。
+postMessage({ type: 'health-log', message: `[authority-health] ${msg}` });
 }
 
 /**
