@@ -82,6 +82,11 @@ async function main(): Promise<void> {
   // 0. 通道选择：crossOriginIsolated（本地 serve.py COOP/COEP）→ SAB 高性能；
   //    否则（线上静态部署无 COOP/COEP）→ MsgState postMessage 回退（功能等价可玩）
   const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
+if (isolated) {
+  console.log('[game] crossOriginIsolated 已启用，使用共享内存输入/物理通道');
+} else {
+  console.warn('[game] 未启用 crossOriginIsolated，回退 postMessage 输入通道（延迟较高）');
+}
   const canSab = isolated && typeof SharedArrayBuffer !== 'undefined';
   if (!canSab) {
     setStatus('兼容模式（无 SharedArrayBuffer）：功能可用，性能降级', '');
