@@ -12,6 +12,8 @@ const MAX_TRAIL_POINTS = 40000;
 interface TrackObjects {
   trackId: string;
   trail: THREE.Line;
+  /** 录像原始 tick 数据点（每 tick 帧一个方点，同 debug 的权威帧节点）。 */
+  tickNodes: THREE.Points;
   ghost: THREE.Group;
   startMark: THREE.Mesh;
   endMark: THREE.Mesh;
@@ -20,6 +22,8 @@ interface TrackObjects {
 export class ReplayVisuals {
   showTrail = true;
   showGhost = true;
+  /** tick 数据点显示（默认开启；timeline 的「tick 点」开关控制）。 */
+  showTickNodes = true;
 
   private objects: TrackObjects[] = [];
 
@@ -31,7 +35,7 @@ export class ReplayVisuals {
     for (const track of tracks) {
       const objs = buildTrackObjects(track);
       if (!objs) continue;
-      for (const o of [objs.trail, objs.ghost, objs.startMark, objs.endMark]) this.scene.add(o);
+      for (const o of [objs.trail, objs.tickNodes, objs.ghost, objs.startMark, objs.endMark]) this.scene.add(o);
       this.objects.push(objs);
     }
   }
@@ -46,6 +50,7 @@ export class ReplayVisuals {
       const entry = samples.find((s) => s.track.id === o.trackId);
       const visible = entry ? entry.track.visible : true;
       o.trail.visible = this.showTrail && visible;
+      o.tickNodes.visible = this.showTickNodes && visible;
       o.startMark.visible = visible;
       o.endMark.visible = visible;
 
@@ -74,13 +79,17 @@ export class ReplayVisuals {
     this.showGhost = v;
   }
 
+  setTickNodesVisible(v: boolean): void {
+    this.showTickNodes = v;
+  }
+
   hasTracks(): boolean {
     return this.objects.length > 0;
   }
 
   clear(): void {
     for (const o of this.objects) {
-      for (const obj of [o.trail, o.ghost, o.startMark, o.endMark]) {
+      for (const obj of [o.trail, o.tickNodes, o.ghost, o.startMark, o.endMark]) {
         this.scene.remove(obj);
         disposeTree(obj);
       }
@@ -94,6 +103,7 @@ function buildTrackObjects(track: Track): TrackObjects | null {
   if (clip.count === 0) return null;
 
   const trail = buildTrail(clip, track.color);
+  const tickNodes = buildTickNodes(clip, track.color);
   const ghost = buildGhost(track.color);
 
   const startMark = buildMark(track.color, 14, 0.95);
@@ -102,7 +112,7 @@ function buildTrackObjects(track: Track): TrackObjects | null {
   const last = (clip.count - 1) * 3;
   endMark.position.set(clip.pos[last], clip.pos[last + 1] + 16, clip.pos[last + 2]);
 
-  return { trackId: track.id, trail, ghost, startMark, endMark };
+  return { trackId: track.id, trail, tickNodes, ghost, startMark, endMark };
 }
 
 function buildTrail(clip: Clip, color: number): THREE.Line {
@@ -132,6 +142,29 @@ function buildTrail(clip: Clip, color: number): THREE.Line {
   return line;
 }
 
+/** tick 数据点：每录像原始 tick 帧一个方点（不抽稀——tick 密度就是信息量）。 */
+function buildTickNodes(clip: Clip, color: number): THREE.Points {
+  const total = clip.count;
+  const arr = new Float32Array(total * 3);
+  for (let i = 0; i < total; i++) {
+    arr[i * 3] = clip.pos[i * 3];
+    arr[i * 3 + 1] = clip.pos[i * 3 + 1] + 8;
+    arr[i * 3 + 2] = clip.pos[i * 3 + 2];
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  // 无贴图的 THREE.Points 渲染为方块——与 debug 权威帧方点同款观感
+  const mat = new THREE.PointsMaterial({
+    color,
+    size: 5,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.9,
+  });
+  const pts = new THREE.Points(geo, mat);
+  pts.frustumCulled = false;
+  return pts;
+}
 /** 幽灵：胶囊（近似玩家碰撞体 32×72）+ 朝向指示锥。 */
 function buildGhost(color: number): THREE.Group {
   const g = new THREE.Group();
