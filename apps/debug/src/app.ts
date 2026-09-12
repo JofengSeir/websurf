@@ -412,6 +412,9 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
 		case 'physics-event':
 			onPhysicsEvent(msg);
 			break;
+		case 'health-log':
+			pushHealthLog(msg.message);
+			break;
 		case 'error':
 			setError(msg.message);
 			break;
@@ -2465,6 +2468,15 @@ function syncFullConfig(): void {
 // UI 辅助
 // ---------------------------------------------------------------------------
 
+/** 权威健康消息缓冲（面板「权威健康」控制台；最新在顶，限 30 条）。 */
+const healthLogLines: string[] = [];
+function pushHealthLog(message: string): void {
+  const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  healthLogLines.unshift(`[${now}] ${message}`);
+  if (healthLogLines.length > 30) healthLogLines.length = 30;
+  const el = document.getElementById('health-log');
+  if (el) el.textContent = healthLogLines.join('\n');
+}
 function setStatus(msg: string, cls: 'success' | 'error' | ''): void {
 	if (dom.statusEl) {
 		dom.statusEl.textContent = msg;

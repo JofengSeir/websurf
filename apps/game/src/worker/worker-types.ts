@@ -115,6 +115,12 @@ export interface ErrorMessage {
   message: string;
 }
 
+/** Worker → 主线程：权威健康探测消息（面板「权威健康」控制台显示，不进 console）。 */
+export interface HealthLogMessage {
+  type: 'health-log';
+  message: string;
+}
+
 /** Worker-A → 主线程：位置重置事件（respawn/teleport；位置突变时通知）。 */
 export interface PlayerRespawnMessage {
   type: 'player-respawn';
@@ -175,7 +181,8 @@ export type MainMessage =
   | ErrorMessage
   | PlayerRespawnMessage
   | WorldJsonMessage
-  | PhysEventMessage;
+  | PhysEventMessage
+  | HealthLogMessage;
 
 // ── 输入状态（共享内存 keys 位掩码，与 Rust KEY_MASK 一致；掩码常量/转换
 //    收敛到 ts-shared auth/shared-state.ts，此处仅保留类型）─────

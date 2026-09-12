@@ -99,7 +99,9 @@ async function main(): Promise<void> {
   fixWorker.onmessage = (e: MessageEvent<{ type?: string }>) => {
     const msg = e.data;
     if (!msg || typeof msg !== 'object') return;
-    if (msg.type === 'error') {
+    if (msg.type === 'health-log') {
+      pushHealthLog((msg as { message?: string }).message ?? '');
+    } else if (msg.type === 'error') {
       setError((msg as { message?: string }).message ?? 'Worker 错误');
     } else if (msg.type === 'phys-event') {
       // 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染）
@@ -520,6 +522,15 @@ function syncFullConfig(): void {  if (!bridge) return;
   }
 }
 
+/** 权威健康消息缓冲（面板「权威健康」控制台；最新在顶，限 30 条）。 */
+const healthLogLines: string[] = [];
+function pushHealthLog(message: string): void {
+  const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  healthLogLines.unshift(`[${now}] ${message}`);
+  if (healthLogLines.length > 30) healthLogLines.length = 30;
+  const el = document.getElementById('health-log');
+  if (el) el.textContent = healthLogLines.join('\n');
+}
 function setStatus(msg: string, cls: 'success' | 'error' | ''): void {
   if (dom.statusEl) {
     dom.statusEl.textContent = msg;

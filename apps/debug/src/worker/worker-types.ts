@@ -222,13 +222,20 @@ export interface ErrorMessage {
   message: string;
 }
 
+/** Worker → 主线程：权威健康探测消息（面板「权威健康」控制台显示，不进 console）。 */
+export interface HealthLogMessage {
+  type: 'health-log';
+  message: string;
+}
+
 export type MainMessage =
   | ReadyMessage
   | PhysFrameMessage
   | PhysEventMessage
   | PhysicsSnapshotMessage
   | PhysicsEventMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | HealthLogMessage;
 
 /** 准星射线检测信息（hover 查看模型/实体平面/触发面；主线程渲染器本地计算）。 */
 export interface PlaneInfo {
