@@ -344,6 +344,16 @@ fn overbounce_for(normal: &V3) -> f64 {
 
 // -- WishDir / CurrentMaxSpeed -----------------------------------------------
 
+/// Source：`mv->m_flMaxSpeed = pPlayer->GetPlayerMaxSpeed()`（ProcessMovement 每
+/// usercmd 一次）；CS:GO 的 `GetPlayerMaxSpeed()` 在 `m_bDucked` 时返回蹲姿速度。
+/// 该值同时约束地面（`WalkMove`）与空中（`AirMove` 把 wishspeed 钳到 `m_flMaxSpeed`），
+/// 因此**蹲姿在空中同样生效**——不要"优化"成空中改用站立速度。
+///
+/// 后果（`air_accelerate`）：`accelspeed = airaccel × wishspeed × dt`，蹲姿上限
+/// = 150 × 85 / 64 ≈ 199.2，站姿 = 150 × 250 / 64 ≈ 585.9；仅当
+/// `addspeed = min(wishspeed, 30) − dot(vel, wishdir)` 超过该上限时才体现差异
+/// （高速反向 strafe，surf 后期常见）。Source 原版行为，回归见
+/// `src/phys/duck_surf_tests.rs::air_crouch_momentum_uses_crouch_params`。
 fn current_max_speed(p: &Player, params: &PhysParams) -> f64 {
     let speed = if p.ducked {
         params.crouch_speed

@@ -146,6 +146,21 @@ Source 权威实现（`src/game/shared/gamemovement.cpp`）：
 （扫掠 trace 的 `DIST_EPSILON` 悬停间隙），放脚所需的 18u 必然撞进坡体 → **松开蹲键保持蹲姿，
 直到离坡或落地**。这是 CS:GO 原版行为，不是缺陷。
 
+
+**动量参数（贴坡保持蹲姿时不可改）**：姿态虽保持蹲姿，动量仍按**空中蹲姿**数值计算——
+Source 在 `ProcessMovement` 每 usercmd 置 `mv->m_flMaxSpeed = GetPlayerMaxSpeed()`，
+CS:GO 的该函数在 `m_bDucked` 时返回蹲姿速度；`AirMove` 把 wishspeed 钳到该值，
+`AirAccelerate` 再用 `accel × wishspeed × frametime`。故：
+
+- 蹲姿空中加速度上限 = `AIR_ACCELERATE × crouch_speed × dt` = 150 × 85 / 64 ≈ **199.2/帧**；
+- 站姿 = 150 × 250 / 64 ≈ 585.9，但通常被 `addspeed = min(wishspeed,30) − dot(vel,wishdir)` 钳住。
+- ⇒ 仅当 `addspeed > 199.2`（即 `dot(vel, wishdir) < −169.2`，**高速反向 strafe**，surf 后期常见）
+  时蹲姿才低于站姿；低速或顺向时两者**完全相同**（`addspeed` 钳制占优）。
+
+这是 Source 原版行为，不要"优化"成空中改用站立速度；回归见
+`src/phys/duck_surf_tests.rs::air_crouch_momentum_uses_crouch_params`（实测
+addspeed=242.1320 / 蹲姿实测 199.2188 = 上限 / 站姿实测 242.1320 = addspeed）。
+
 > 反例（2026-09-13 移除）：曾在「放脚被挡」时兜底「原地站立箱可用即起立」（脚不动、头顶 +18）。
 > 该兜底偏离 Source，且依赖 `is_position_free` 在贴面间隙 ≈0 处的临界判定（容差 0、实测间隙 0.03），
 > 在多面交界或浮点抖动下会让同一段坡时而站得起、时而站不起。

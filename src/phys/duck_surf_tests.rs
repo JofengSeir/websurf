@@ -182,3 +182,68 @@ fn slope_sweep_release_keeps_crouch() {
         assert!(p.ducked, "normal.y={} 贴坡松开蹲键应保持蹲姿", ny);
     }
 }
+
+/// 空中蹲姿的动量参数：wishspeed 取**蹲姿速度**（Source 的 `m_flMaxSpeed`），
+/// 从而 `air_accelerate` 的加速度上限为 `AIR_ACCELERATE × crouch_speed × dt`。
+/// 贴坡 surf 无法起立时，玩家保持蹲姿 → 动量计算必须仍走这套"空中蹲姿"数值。
+#[test]
+fn air_crouch_momentum_uses_crouch_params() {
+    use crate::phys::player::{AIR_ACCELERATE, CROUCH_SPEED};
+
+    let params = PhysParams::default();
+    let dt = 1.0 / 64.0;
+
+    // 空世界（无碰撞）：isolate 出纯 air_accelerate 的差异
+    let step = |ducked: bool| {
+        let mut world = World::new();
+        world.build_index();
+        let mut p = create_player([0.0, 1000.0, 0.0], &params);
+        p.ducked = ducked;
+        p.duck_frac = if ducked { 1.0 } else { 0.0 };
+        p.velocity = [0.0, 0.0, 300.0];
+        p.yaw = 0.0;
+        p.input.forward = true;
+        p.input.right = true;
+        p.input.duck = ducked; // 蹲姿一路必须按住，否则空世界里立刻起立
+        let before = p.velocity;
+        player_tick(&mut world, &mut p, &params, dt);
+        [
+            p.velocity[0] - before[0],
+            p.velocity[1] - before[1],
+            p.velocity[2] - before[2],
+        ]
+    };
+
+    let dv_duck = step(true);
+    let dv_stand = step(false);
+    // 水平增量（去掉重力项 dv[1]）
+    let mag = |dv: [f64; 3]| (dv[0] * dv[0] + dv[2] * dv[2]).sqrt();
+    let m_duck = mag(dv_duck);
+    let m_stand = mag(dv_stand);
+
+    // 期望：wishdir = (1,0,-1)/√2；currentspeed = dot((0,0,300), wishdir) = -300/√2
+    // wishspd = min(wishspeed, 30) = 30 → addspeed = 30 + 300/√2 ≈ 242.13
+    let addspeed = 30.0 + 300.0 / 2.0_f64.sqrt();
+    let cap_duck = AIR_ACCELERATE * CROUCH_SPEED * dt;
+    let cap_stand = AIR_ACCELERATE * params.run_speed * dt;
+    println!(
+        "  addspeed={:.4} | 蹲姿上限={:.4} 实测={:.4} | 站姿上限={:.4} 实测={:.4}",
+        addspeed, cap_duck, m_duck, cap_stand, m_stand
+    );
+
+    // 蹲姿：被 crouch_speed 导出的上限钳住（不是 addspeed）
+    assert!(
+        (m_duck - cap_duck).abs() < 1e-6,
+        "蹲姿空中加速度应由 crouch_speed 导出上限钳住；期望 {:.6}，实测 {:.6}",
+        cap_duck,
+        m_duck
+    );
+    // 站姿：上限高于 addspeed → 由 addspeed 钳住
+    assert!(
+        (m_stand - addspeed).abs() < 1e-6,
+        "站姿空中加速度应由 addspeed 钳住；期望 {:.6}，实测 {:.6}",
+        addspeed,
+        m_stand
+    );
+    assert!(m_duck < m_stand, "蹲姿空中加速度上限应低于站姿（Source 行为）");
+}
