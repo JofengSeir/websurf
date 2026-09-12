@@ -71,7 +71,10 @@ impl<R: BinReaderExt + Read> LumpReader<R> {
         <T as BinRead>::Args<'static>: Clone,
     {
         // 已禁用：校验实际消费字节数 == size_of::<T>()（仅对不含堆分配的类型可靠，待研究）
-        let result = self.inner.read_le()?;
+        // 全限定调用：R 同时受 BinReaderExt + Read 约束，方法语法 `self.inner.read_le()`
+        // 会与 std 未来可能新增的同名方法撞车（unstable_name_collisions，rust#48919）。
+        // 不要改回方法调用语法。
+        let result = BinReaderExt::read_le(&mut self.inner)?;
         Ok(result)
     }
 
@@ -80,13 +83,13 @@ impl<R: BinReaderExt + Read> LumpReader<R> {
             return Ok(VisData::default());
         }
 
-        let cluster_count = self.inner.read_le()?;
+        let cluster_count: u32 = BinReaderExt::read_le(&mut self.inner)?;
         let mut pvs_offsets = Vec::with_capacity(min(cluster_count as usize, 1024));
         let mut pas_offsets = Vec::with_capacity(min(cluster_count as usize, 1024));
 
         for _ in 0..cluster_count {
-            pvs_offsets.push(self.inner.read_le()?);
-            pas_offsets.push(self.inner.read_le()?);
+            pvs_offsets.push(BinReaderExt::read_le(&mut self.inner)?);
+            pas_offsets.push(BinReaderExt::read_le(&mut self.inner)?);
         }
 
         // 【修复】vis lump 的 bitofs 是「相对整个 lump 起始（含 numclusters 头）」的偏移
