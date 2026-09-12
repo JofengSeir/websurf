@@ -55,7 +55,7 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 
 | 路径 | 行数 | 职责（实测 wc -l） |
 |---|---|---|
-| `apps/game/src/app.ts` | 709 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
+| `apps/game/src/app.ts` | 714 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
 | `apps/game/src/config.ts` | 177 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate`）+ `applyConfigPatch` + `buildPhysicsParams` |
 | `apps/game/src/renderer/renderer-main.ts` | 1091 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、主线程物理 tick、权威校准入口、画质切换 |
 | `apps/game/src/worker/main.ts` | 446 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:429`，常量 `TICK_RATE_OFFSET` 在 `:36`） |
