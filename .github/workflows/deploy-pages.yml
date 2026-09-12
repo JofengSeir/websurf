@@ -70,19 +70,20 @@ jobs:
 
           key: wasm-bindgen-cli-0.2.128-x86_64-linux
 
-      - name: Install wasm-bindgen-cli 0.2.128 (prebuilt, matches Cargo.lock; cached)
-
+      - name: Install wasm-bindgen-cli 0.2.128 (cache → cargo install fallback)
         shell: bash
-
         run: |
-
           set -euo pipefail
-
-          if [ -x "$HOME/.cargo/bin/wasm-bindgen" ]; then
-
-            echo "[cache hit] wasm-bindgen-cli cached, skip download"
-
+          if [ -x "$HOME/.cargo/bin/wasm-bindgen" ] &&
+             wasm-bindgen --version 2>/dev/null | grep -q '0.2.128'; then
+            echo "[cache hit] wasm-bindgen-cli 0.2.128 已就绪"
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            exit 0
+          fi
+          # release 下载端点不稳定（连续两次 CI 失败）→ 改用 cargo install 锁定版本
+          # （首次编译数分钟，actions/cache 之后秒级命中）
+          cargo install wasm-bindgen-cli --version 0.2.128 --locked
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
             exit 0
 
