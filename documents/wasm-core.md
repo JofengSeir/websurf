@@ -22,7 +22,7 @@
 
 | 模块 | 关键文件 | 职责（一句话） |
 |---|---|---|
-| `vbsp` | `vbsp/mod.rs`(622)、`bspfile.rs`(142)、`reader.rs`(144)、`data/*.rs`、`error.rs`(135)、`handle/mod.rs`(379) | BSP 二进制解析（crates.io vbsp 0.6.0 本地修复版） |
+| `vbsp` | `vbsp/mod.rs`(622)、`bspfile.rs`(142)、`reader.rs`(147)、`data/*.rs`、`error.rs`(135)、`handle/mod.rs`(379) | BSP 二进制解析（crates.io vbsp 0.6.0 本地修复版） |
 | `bsp_to_gltf_core` | `mod.rs`(151)、`convert.rs`(1045)、`materials.rs`(337)、`gltf_builder.rs`(202) | BSP → GLB（地图几何 + 材质 + 缺失资源清单） |
 | `model_integrator` | `model_integrator/mod.rs`(1045) | `.mdl/.vvd/.vtx` 模型合并进 GLB（放置/网格/光照） |
 | `pakfile_models` | `pakfile_models.rs`(271) | PAKFILE 模型的 VMT 材质解析 + 碰撞体数据准备 |
