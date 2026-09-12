@@ -142,7 +142,8 @@ async function buildMulti(wasmPath) {
 
   console.log('[5/5] 复制 WASM / 默认纹理包...');
   copyFileSync(wasmPath, join(DIST, WASM_FILE));
-  copyFileSync(MTZ, join(DIST, 'textures.mtz'));
+  copyFileSync(MTZ, join(DIST, 'textures.mtz'));  // COI serviceworker：静态托管上注入 COOP/COEP → crossOriginIsolated → SAB 可用
+  copyFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js'));
 
   console.log('[5/5] 复制 index.html / styles.css（module script 原样）...');
   copyFileSync(INDEX_HTML, join(DIST, 'index.html'));

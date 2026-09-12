@@ -1,7 +1,7 @@
 /**
  * viewer 打包：单文件（single）产物 → viewer/dist/（唯一产物目录）。薄入口（D-04 / T-04）。
  *
- * ── single（默认/唯一，本地双击 file:// 可用，也可 HTTP 服务/部署）→ viewer/dist/ ──
+ * ── single（本地双击 file://；wasm 内嵌 app.js）与 multi（--multi，Pages 部署；wasm 外置 + 内嵌回退）→ viewer/dist/ ──
  *   index.html — classic `<script>`（file:// 下 module script 被浏览器 CORS 拦截）
  *   app.js     — IIFE：内嵌 WASM(base64) + 录像解析 Worker 代码（Blob URL 启动）
  *   styles.css — web/styles.css 原样拷贝
@@ -10,9 +10,8 @@
  *   play.cmd / play.sh — 双击启动：起服务器 + 延时 1s 自动打开浏览器（python 缺失 → 提示 + npx serve 备选）
  *   README.md / .nojekyll
  *
- * 【豁免保留】（framework-launch-structure.md §3.2/§8.2）：viewer 是 **single-only** 工程，
- * `--multi` 必须显式报错退出 1，不得静默降级；dist/ 自带启动器与说明是其「纯静态产物 +
- * file:// 双击可用」交付形态，禁止为了整齐改成统一启动器。
+ * 【2026-09-12 维护者裁定解除 single-only】：Pages 部署改用 multi（外置 wasm 请求优先，
+ * 失败回退 wasm-embedded.js 内嵌副本）；single 保留为本地 file:// 双击形态。
  *
  * 打包内核（esbuild 注入、cleanDist 先删后建、__VBSP_* 拼装）：
  *   ../../../src/scripts/lib/dist-pack.mjs
@@ -39,16 +38,12 @@ const viewerRoot = join(HERE, '..'); // apps/viewer
 const repoRoot = join(viewerRoot, '..', '..'); // 仓库根
 const dist = join(viewerRoot, 'dist');
 
-if (process.argv.includes('--multi')) {
-  console.error('[ERROR] Unsupported argument: --multi');
-  console.error('[HINT] viewer is single-only (file:// double-click + static hosting): run build-dist.cmd without arguments.');
-  process.exit(1);
-}
+const multi = process.argv.includes('--multi');
 
 const APP_SRC = join(viewerRoot, 'src/app.ts');
 const WORKER_SRC = join(viewerRoot, 'src/worker/main.ts');
 const HEADER = '/* WebSurf-viewer single-file build — auto-generated, do not edit */\n';
-const KEEP = [
+const KEEP_SINGLE = [
   '.nojekyll',
   'README.md',
   'serve.py',
@@ -57,6 +52,14 @@ const KEEP = [
   'index.html',
   'app.js',
   'styles.css',
+];
+const KEEP_MULTI = [
+  ...KEEP_SINGLE.filter((f) => f !== 'index.html' && f !== 'app.js'),
+  'index.html',
+  'app.js',
+  'worker.js',
+  'websurf_viewer_wasm_bg.wasm',
+  'wasm-embedded.js',
 ];
 
 const SERVE_PY = `"""WebSurf-viewer 静态服务器（本地预览；部署时任意静态托管均可）。
@@ -222,6 +225,38 @@ async function rebuildDist() {
   await writeFile(join(dist, 'play.cmd'), PLAY_CMD.replace(/\n/g, '\r\n'));
   await writeFile(join(dist, 'play.sh'), PLAY_SH);
 
+  // ── 公共参考资源（示例深链；fixture 缺失时警告跳过）──────────────
+  await mkdir(join(dist, 'assets', 'maps'), { recursive: true });
+  for (const name of ['surf_null_4.replay']) {
+    const srcReplay = join(repoRoot, 'test', 'maps', name);
+    if (existsSync(srcReplay)) {
+      await copyFile(srcReplay, join(dist, 'assets/maps', name));
+    } else {
+      console.warn(`[WARN] 示例资产缺失，跳过: test/maps/${name}（dist 示例深链将不可用）`);
+    }
+  }
+
+  if (multi) {
+    // ── multi：ESM app/worker + 外置 wasm + 内嵌回退副本（Pages 部署）────
+    console.log('[multi] 复制 web/ 产物（app.js/worker.js/styles.css/index.html）…');
+    await copyFile(join(viewerRoot, 'web/index.html'), join(dist, 'index.html'));
+    await copyFile(join(viewerRoot, 'web/app.js'), join(dist, 'app.js'));
+    await copyFile(join(viewerRoot, 'web/worker.js'), join(dist, 'worker.js'));
+    await copyFile(join(viewerRoot, 'web/styles.css'), join(dist, 'styles.css'));
+    console.log('[multi] 复制外置 WASM …');
+    const wasmMulti = join(dist, 'websurf_viewer_wasm_bg.wasm');
+    await copyFile(join(viewerRoot, 'web/websurf_viewer_wasm_bg.wasm'), wasmMulti);
+    console.log('[multi] 生成 wasm-embedded.js（fetch 失败时的内嵌回退副本）…');
+    const wasmBytes = await readFile(join(viewerRoot, 'web/websurf_viewer_wasm_bg.wasm'));
+    await writeFile(
+      join(dist, 'wasm-embedded.js'),
+      `/* WebSurf-viewer WASM 内嵌回退副本（fetch 失败时由 bsp.ts 动态加载）—— auto-generated */\n` +
+        `globalThis.__VBSP_WASM_B64__ = "${wasmBytes.toString('base64')}";\n`,
+    );
+    await cleanStale(dist, KEEP_MULTI);
+    return;
+  }
+
   // ── single：app 打成 IIFE，WASM/WORKER 内嵌，classic script —— file:// 双击可用 ──
   console.log('[5/5] 编码 WASM → base64 …');
   const wasmBytes = await readFile(join(viewerRoot, 'web/websurf_viewer_wasm_bg.wasm'));
@@ -258,24 +293,12 @@ async function rebuildDist() {
   }
   await copyFile(join(viewerRoot, 'web/styles.css'), join(dist, 'styles.css'));
 
-  // 参考资源（HTTP 深链演示用；file:// 不能 fetch，载入走面板「选择录像文件…」）。
-  // 本地 fixture（test/maps/，gitignored）：存在时打包进 dist 示例深链（assets/maps/）；
-  // 缺失时警告跳过，不阻断构建（本地无源则 build 也不会产出该示例，深链不可用）。
-  for (const name of ['surf_null_4.replay']) {
-    const src = join(repoRoot, 'test', 'maps', name);
-    if (existsSync(src)) {
-      await copyFile(src, join(dist, 'assets/maps', name));
-    } else {
-      console.warn(`[WARN] 示例资产缺失，跳过: test/maps/${name}（dist 示例深链将不可用）`);
-    }
-  }
-
-  await cleanStale(dist, KEEP);
+  await cleanStale(dist, KEEP_SINGLE);
 }
 
 rebuildDist()
   .then(async () => {
-    console.log(`[5/5] single（本地 file:// 双击 + HTTP 均可）打包完成 → ${dist}`);
+    console.log(`[${multi ? 'multi（Pages 部署）' : 'single（file:// 双击）'}] 打包完成 → ${dist}`);
     console.log((await printTree(dist)).join('\n'));
   })
   .catch((err) => {
