@@ -37,7 +37,7 @@
 
 | game 特有 | 证据 |
 |---|---|
-| `PanelController` 独立类（七模块 + 偏好持久化 + 存点列表渲染） | `apps/game/src/panel/panel-controller.ts`（690 行）；debug 无 panel/ 目录（`ls apps/debug/src` 无 panel/ui，面板逻辑在 `apps/debug/src/app.ts` 直绑 HTML） |
+| `PanelController` 独立类（七模块 + 偏好持久化 + 存点列表渲染） | `apps/game/src/panel/panel-controller.ts`（684 行）；debug 无 panel/ 目录（`ls apps/debug/src` 无 panel/ui，面板逻辑在 `apps/debug/src/app.ts` 直绑 HTML） |
 | 存点系统（X 存 / C 按住冻结 / 面板任意读点） | `apps/game/src/savepoint.ts`、`apps/game/src/renderer/renderer-main.ts:601-633`（holdPoint 每帧 set_state 冻结语义） |
 | 键位录制重绑面板 | `apps/game/src/input/keymap.ts:42-65`（`websurf-game.keymap.v1`）+ `panel-controller.ts` 按键模块 |
 | TICK_RATE_OFFSET=3 隐藏偏移 | `apps/game/src/worker/main.ts:28-32,86`（面板显示原值，权威实际 +3）；grep `apps/debug/src` 无此常量 |

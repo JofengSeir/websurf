@@ -25,14 +25,14 @@
 | `auth/compute-mode.ts`(128) | 通信（三模式） | `ComputeMode` 三值唯一权威定义 + `isAuthLineMode`/`isDecoupledLineMode` 双线门谓词 + `resolveAuthTickRate` 步长解析 + `MODE_HANDOVER_MATRIX` 六行交接矩阵 |
 | `auth/auth-loop.ts`(483) | 通信 | Worker 侧权威帧计算循环：4ms 自驱 + 固定步长累积器 + 碰撞事件推导 + 三值模式门 + tick 模式 F4-C 支路 |
 | `auth/tick-authority.ts`(618) | 通信（tick 模式） | F4-C tick 权威控制器：零分配权威推进 + scratch 乐观评估 + `publishMeta` 元数据发布 + 排序门接线 |
-| `auth/worker-dispatch.ts`(485) | 通信 | Worker 消息分发（init/wasm-init/world-json/config/set-mode/set-hold/…）+ 工程特有钩子注入点 |
+| `auth/worker-dispatch.ts`(484) | 通信 | Worker 消息分发（init/wasm-init/world-json/config/set-mode/set-hold/…）+ 工程特有钩子注入点 |
 | `tick/ordering-gate.ts`(173) | 通信（tick 模式） | 发布排序门：δ≤T−ε_max 上限 + 双档等待（setTimeout/Atomics）+ 发布门/lead-miss；被 `auth/tick-authority.ts:53` 消费 |
 | `tick/tick-consumer.ts`(455) | 通信（tick 模式） | 主线程 α 确定性网格弦插值消费器：六显示态 + Δ 事件驱动控制器 + 断窗八类（共享层落盘版，当前无 import 点；运行时副本为 `test/dual-mode-harness/src/renderer/tick-consumer.ts`） |
 | `decoupled/decoupled-loop.ts`(449) | 物理（双模式扩展） | 解耦物理自驱循环：1ms 无限制真理源 + 64t tickPhys 速度校准 + 分叉锚定 + 背压（harness WorkerA 编排移植） |
 | `input/input-layer.ts`(40) | 输入 | 灵敏度乘入 + Q/E 键位折算等效鼠标增量 |
 | `input/mouse-buffer.ts`(128) | 输入（2026-09 上提共享） | 单事件绝对削平（CLAMP ±1000）+ discardNext（Pointer Lock 变化后丢首事件）；`process()` 为唯一活跃路径，`push/drain` 为遗留未用路径 |
 | `input/pointer-lock.ts`(154) | 输入（2026-09 上提共享） | Pointer Lock 请求（`unadjustedMovement:true` 禁 OS 加速）+ 旧浏览器 void 降级 + 3s 超时 + 锁定变化/错误回调 |
-| `phys/params.ts`(64) | 物理 | 前端配置 → Rust `set_params` snake_case 全量映射 |
+| `phys/params.ts`(62) | 物理 | 前端配置 → Rust `set_params` snake_case 全量映射 |
 | `phys/world-builder.ts`(248) | 物理 | 地图加载管线：`BspProcessor` 字节级导出 → `WorldBundle` |
 | `phys/authority-calibrator.ts`(668) | 物理 | 渲染主线 vs 权威帧的校准四件套（只读权威）+ 解耦消费外推纯函数 |
 | `phys/angles.ts`(38) | 物理（**D-08 批 4 新增**） | `wrapDeg` + `bspYawToCsYaw`（=`wrap(src+180)`）全 TS 侧单一份；语义归一口径取 viewer 版（带 `\|\| 0`，`-0` 归一为 `+0`） |
