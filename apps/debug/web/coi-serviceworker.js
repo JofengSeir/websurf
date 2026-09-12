@@ -28,7 +28,7 @@ if (typeof window === "undefined") {
   // ── 页面上下文 ─────────────────────────────────────────────────────
   if (!window.crossOriginIsolated && window.isSecureContext && "serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register(window.location.pathname)
+      .register('./coi-serviceworker.js')
       .then(() => navigator.serviceWorker.ready)
       .then(() => {
         // SW 激活（带隔离头）后重载一次页面；sessionStorage 标记防重载循环
