@@ -150,6 +150,15 @@ export class Timeline {
     ghostLabel.append(ghostInput, el('span', undefined, '幽灵'));
     opts.appendChild(ghostLabel);
 
+    const tickLabel = el('label', 'tl-opt');
+    const tickInput = el('input');
+    tickInput.type = 'checkbox';
+    tickInput.checked = true;
+    tickInput.title = '录像原始 tick 数据点（每 tick 帧一个方点，同 debug 权威帧节点）';
+    tickInput.addEventListener('change', () => this.visuals.setTickNodesVisible(tickInput.checked));
+    tickLabel.append(tickInput, el('span', undefined, 'tick 点'));
+    opts.appendChild(tickLabel);
+
     // A-B 区间（设置按钮在下行；区间带画在上行进度条上）
     const aBtn = el('button', 'btn small', 'A 起点', {
       type: 'button',
