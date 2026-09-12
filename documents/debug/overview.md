@@ -57,13 +57,13 @@ debug 的运行时由**两条物理线 + 一条状态通道**构成（v7 架构�
 
 | 目录/文件 | 行数 | 职责 | 细分文档 |
 |---|---|---|---|
-| `app.ts` | 2487 | 主入口：main() 装配、handleLoadBsp 编排、输入循环（rAF）、UI 绑定、物理面板消息处理、计时挑战接线 | [loading-pipeline](implementation/loading-pipeline.md)、[physics-panel](implementation/physics-panel.md)、[sequences](sequences.md) |
+| `app.ts` | 2499 | 主入口：main() 装配、handleLoadBsp 编排、输入循环（rAF）、UI 绑定、物理面板消息处理、计时挑战接线 | [loading-pipeline](implementation/loading-pipeline.md)、[physics-panel](implementation/physics-panel.md)、[sequences](sequences.md) |
 | `config.ts` | 259 | `RuntimeConfig` **11 段**运行时配置（physics/player/movement/smoothing/teleport/lod/lighting/input/hud/debug/texture）与 `applyConfigPatch` | 本文 §5 |
 | `main-wasm.ts` | 43 | 主线程 WASM 懒初始化（内嵌 `__VBSP_WASM_B64__` → `initSync`，否则 fetch 同目录 wasm）；导出 `mosaic_decode`/`decompress_mtz` | [loading-pipeline](implementation/loading-pipeline.md) |
 | `default-pack.ts` | 42 | 默认纹理包 `textures.mtz` 加载（内嵌 base64 或 fetch），供缺失纹理比对 | [loading-pipeline](implementation/loading-pipeline.md) |
 | `worker/main.ts` | 120 | Worker 入口：装配 ts-shared auth-loop + worker-dispatch，注入 debug 特有钩子（ready 回执、mtz 存取、面板消息） | [physics-panel](implementation/physics-panel.md)、[sequences](sequences.md) |
 | `worker/physics-worker.ts` | 114 | Worker 侧物理面板协调器：set_params/set_hull 应用 + physics-snapshot 回传 | [physics-panel](implementation/physics-panel.md) |
-| `worker/worker-types.ts` | 342 | 主线程↔Worker 消息类型全集（MainMessage/WorkerMessage/SceneDataMessage/PlaneInfo 等） | [physics-panel](implementation/physics-panel.md) |
+| `worker/worker-types.ts` | 349 | 主线程↔Worker 消息类型全集（MainMessage/WorkerMessage/SceneDataMessage/PlaneInfo 等） | [physics-panel](implementation/physics-panel.md) |
 | `worker/mtz-data.ts` | 19 | single 打包模式 Worker 侧内嵌 mtz base64 存取（`__VBSP_TEXTURES_MTZ_B64__`） | [loading-pipeline](implementation/loading-pipeline.md) |
 | `renderer/renderer-main.ts` | 1023 | 主线程渲染器 + 渲染物理线：rAF tick、GLB 场景装载、近平面自适应、纹理画质切换、权威校准接线 | [rendering](implementation/rendering.md) |
 | `renderer/camera-controller.ts` | 82 | yaw/pitch → quaternion（YXZ、pitch clamp、yaw 归一化） | [rendering](implementation/rendering.md) |
