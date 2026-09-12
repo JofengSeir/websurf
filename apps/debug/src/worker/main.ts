@@ -68,7 +68,6 @@ function syncParamsToWasm(): void {
       crouchSpeed: 85,
       autobhop: true,
       bhopSpeedClamp: true,
-      noPrestrafe: true,
       teleportGateTicks: p.teleportGateTicks,
     },
     {

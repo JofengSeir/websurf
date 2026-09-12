@@ -19,10 +19,9 @@
 | jumpHeight | 跳跃高度 | 57 | 20-120 | jump_height（起跳速度 = √(2·g·跳高)，随重力联动） |
 | autobhop | 自动连跳 | true | bool | autobhop |
 | bhopSpeedClamp | 连跳限速 | true | bool | bhop_speed_clamp |
-| noPrestrafe | 落地限速 | true | bool | no_prestrafe |
 | tickRate | 模拟频率 | 64 | 48-128 | **不进 Rust**——JS 驱动层参数（固定步长），走 `onTickRateChange` 回调 |
 
-- 12 项 name→snake_case 映射即 `PARAM_TO_RUST`（`physics/physics-params.ts:20-33`）；tickRate 唯独除外（`physics-params.ts:155-158`）。
+- 11 项 name→snake_case 映射即 `PARAM_TO_RUST`（`physics/physics-params.ts:20-33`）；tickRate 唯独除外（`physics-params.ts:155-158`）。
 - 参数来源三态 `ParamSource = 'mode-default' | 'manual' | 'map'`（`param-defs.ts:13`；'map' 为 worldspawn 键值预留，`physics-params.ts:94-98`）。
 
 ## 2. 参数管理器（`physics/physics-params.ts`，163 行，运行在 Worker）

@@ -69,7 +69,6 @@ pub struct PhysParams {
     pub crouch_speed: f64,
     pub autobhop: bool,
     pub bhop_speed_clamp: bool,
-    pub no_prestrafe: bool,
     pub sensitivity: f64,
     pub yaw_bind_speed: f64,
     /// noclip 自由视角移动速度（HU/s；默认 800 = 200×4 原行为，sprint 再 ×4）。
@@ -96,7 +95,6 @@ impl Default for PhysParams {
             crouch_speed: CROUCH_SPEED,
             autobhop: true,
             bhop_speed_clamp: true,
-            no_prestrafe: true,
             sensitivity: 1.5,
             yaw_bind_speed: 210.0,
             noclip_speed: 800.0,
@@ -899,29 +897,6 @@ fn walk_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64) {
 
     let wishspeed = compute_wish(p, params, &mut wish_dir);
     accelerate(&mut p.velocity, &wish_dir, wishspeed, params.accelerate, dt);
-
-    // nopre：落地速度硬钳到 runSpeed（防 bhop 预加速——从空中平落时的高速被钳）。
-    // **仅平地（ground_normal.y > 0.999）钳制**：坡面滑行/冲坡/出坡（ground_normal
-    // 倾斜）不钳——撞坡/冲坡的高速被钳到 runSpeed 会让出坡高度/距离与撞击速度无关
-    // （恒定 250 滑行——"出坡物理异常"根因：V 5 倍高度只 +4%）；地面 bhop 预加速照常钳
-    if params.no_prestrafe && p.ground_normal[1] > 0.999 {
-        let cap = current_max_speed(p, params);
-        if wishspeed > 0.0 && p.ground_ticks_since_landing > 0 {
-            let proj = p.velocity[0] * wish_dir[0] + p.velocity[2] * wish_dir[2];
-            if proj > cap {
-                let scale = cap / proj;
-                p.velocity[0] *= scale;
-                p.velocity[2] *= scale;
-            }
-        } else {
-            let speed = p.horizontal_speed();
-            if speed > cap {
-                let scale = cap / speed;
-                p.velocity[0] *= scale;
-                p.velocity[2] *= scale;
-            }
-        }
-    }
 
     if length_sq(&p.velocity) < 1e-6 {
         p.velocity = [0.0, 0.0, 0.0];

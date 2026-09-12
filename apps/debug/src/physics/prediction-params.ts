@@ -37,7 +37,6 @@ export function buildDebugPredictionParams(config: RuntimeConfig): Record<string
       crouchSpeed: 85,
       autobhop: true,
       bhopSpeedClamp: true,
-      noPrestrafe: true,
       teleportGateTicks: p.teleportGateTicks,
     },
     {
