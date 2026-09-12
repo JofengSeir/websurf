@@ -579,20 +579,28 @@ fn update_duck(world: &mut World, p: &mut Player) {
             }
         }
     } else if !want && p.ducked {
-        // tryUnduck：头顶被挡则保持蹲
         if p.on_ground {
+            // 地面起立（Source FinishUnDuck）：CS:GO 的 DUCK/HULL mins 相同 → origin
+            // 不动，仅把碰撞箱换成站立箱；头顶被挡则保持蹲。
             if world.is_position_free(&p.origin, &p.stand_mins, &p.stand_maxs) {
                 p.ducked = false;
             }
             return;
         }
-        // 空中站起：放脚（origin 下移），头顶位置不变
+        // 空中起立（Source CanUnduck + FinishUnDuck）：**放脚**——origin 下移
+        // (stand_hull - duck_hull)，头顶位置不变。以**站立箱**从当前 origin 扫掠到
+        // 目标 origin，命中（start_solid / fraction != 1）即**不起立**。
+        //
+        // ⇒ 贴坡 surf 时脚下没有 18u 空间（实测脚底离坡仅 +0.03~0.13），松开蹲键会
+        //   **保持蹲姿，直到离坡或落地**——这是 CS:GO 原版行为。
+        //   不要加「原地长高（脚不动、头顶 +18）」兜底：那会偏离 Source，且依赖
+        //   is_position_free 在贴面间隙 ≈0 处的临界判定（容差 0，实测间隙 0.03），
+        //   在多面交界处会抖动成"整段坡都站不起来/站得起来"的随机行为。
         let delta = p.stand_maxs[1] - p.duck_maxs[1];
-        let tmp = [p.origin[0], p.origin[1] - delta, p.origin[2]];
-        if world.is_position_free(&tmp, &p.stand_mins, &p.stand_maxs) {
+        let target = [p.origin[0], p.origin[1] - delta, p.origin[2]];
+        let tr = world.trace(&p.origin, &target, &p.stand_mins, &p.stand_maxs);
+        if !tr.start_solid && !tr.all_solid && tr.fraction == 1.0 {
             p.origin[1] -= delta;
-            p.ducked = false;
-        } else if world.is_position_free(&p.origin, &p.stand_mins, &p.stand_maxs) {
             p.ducked = false;
         }
     }
