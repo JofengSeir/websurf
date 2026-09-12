@@ -56,6 +56,7 @@ export function ensureWasm(): Promise<void> {
       const embedded = readEmbeddedWasmB64();
       if (embedded) {
         // single 构建（file:// 双击）：WASM base64 内嵌在 app.js，直接同步初始化。
+        console.log('[wasm] 路径：内嵌命中（single 构建的 app.js 内嵌）');
         initSync({ module: base64ToBytes(embedded) });
         return;
       }
@@ -64,6 +65,7 @@ export function ensureWasm(): Promise<void> {
       try {
         const resp = await fetch(url);
         if (resp.ok) {
+          console.log('[wasm] 路径：外置请求成功（multi 部署主路径）');
           initSync({ module: await resp.arrayBuffer() });
           return;
         }
@@ -75,6 +77,7 @@ export function ensureWasm(): Promise<void> {
       await loadScript(new URL('./wasm-embedded.js', import.meta.url).href);
       const fallback = readEmbeddedWasmB64();
       if (fallback) {
+        console.log('[wasm] 路径：内嵌回退副本命中（wasm-embedded.js）');
         initSync({ module: base64ToBytes(fallback) });
         return;
       }

@@ -32,6 +32,14 @@ const canvas = document.getElementById('game') as HTMLCanvasElement | null;
 if (!canvas) throw new Error('canvas#game 未找到');
 const gameCanvas: HTMLCanvasElement = canvas;
 
+// 部署环境状态提示（与 debug/game 的通道打印同款；viewer 无物理，不依赖此状态）。
+const crossOriginIsolatedViewer =
+  (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
+console.log(
+  `[viewer] crossOriginIsolated=${crossOriginIsolatedViewer}` +
+    (crossOriginIsolatedViewer ? '' : '（viewer 无物理，不依赖此状态——仅作部署环境参考）'),
+);
+
 const hud = new Hud();
 
 let scene: ViewerScene;
