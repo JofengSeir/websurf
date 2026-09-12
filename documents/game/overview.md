@@ -55,7 +55,7 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 
 | 路径 | 行数 | 职责（实测 wc -l） |
 |---|---|---|
-| `apps/game/src/app.ts` | 699 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
+| `apps/game/src/app.ts` | 709 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
 | `apps/game/src/config.ts` | 177 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate`）+ `applyConfigPatch` + `buildPhysicsParams` |
 | `apps/game/src/renderer/renderer-main.ts` | 1091 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、主线程物理 tick、权威校准入口、画质切换 |
 | `apps/game/src/worker/main.ts` | 446 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:429`，常量 `TICK_RATE_OFFSET` 在 `:36`） |
@@ -69,8 +69,8 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 | `apps/game/src/world/pvs-manager.ts` | —（批 4 已上提） | PVS 叶子查找 + 行 RLE 解码 + 可见集——**D-10 起实现在 `src/ts-shared/world/pvs-manager.ts`（271 行）**，本工程文件已删除（`renderer-main.ts` 改 import 共享单点） |
 | `apps/game/src/world/types.ts` | 17 | 最小化世界类型：`Vec3Like`/`Vec3` 留在本工程（D-07 判保留）；PVS 三类型批 4（D-10）起为 re-export 共享单点（对照 debug 198 行） |
 | `apps/game/src/savepoint.ts` | 106 | `SavePointStore`：按地图 localStorage（`websurf-game.savepoints.{mapName}`）、上限 50（`SAVEPOINT_MAX` `:27`）、latest/add/delete |
-| `apps/game/web/index.html` | 249 | 页面外壳（纯结构与挂载点）：80 元素 id / 14 data-* / 30 class 与 JS 绑定零改动（r1 复核 80/80、14/14、30/30）；不含任何行内样式，视觉层全在 styles.css |
-| `apps/game/web/styles.css` | 581 | 独立视觉层（viewer S10 令牌体系）：:root 设计令牌 + 卡片化面板 + 悬停/激活交互态；可见性 class 钩子（`#panel.hidden`/`#error.show`/`.key-rec-hint(.show)`/`#crosshair.no-dot .ch-dot`）+ `.load-fill` 进度条 `var(--load-pct, 0%)` |
+| `apps/game/web/index.html` | 252 | 页面外壳（纯结构与挂载点）：80 元素 id / 14 data-* / 30 class 与 JS 绑定零改动（r1 复核 80/80、14/14、30/30）；不含任何行内样式，视觉层全在 styles.css |
+| `apps/game/web/styles.css` | 593 | 独立视觉层（viewer S10 令牌体系）：:root 设计令牌 + 卡片化面板 + 悬停/激活交互态；可见性 class 钩子（`#panel.hidden`/`#error.show`/`.key-rec-hint(.show)`/`#crosshair.no-dot .ch-dot`）+ `.load-fill` 进度条 `var(--load-pct, 0%)` |
 | `apps/game/crates/wasm/src/lib.rs` | 2326 | WASM 导出层（见 §1） |
 
 ### 3.1 ts-shared 复用矩阵（import 实测）
