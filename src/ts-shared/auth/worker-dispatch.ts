@@ -35,7 +35,6 @@ const SNAKE_TO_CAMEL_PATCH_KEYS: Record<string, string> = {
   walk_speed: 'walkSpeed',
   crouch_speed: 'crouchSpeed',
   bhop_speed_clamp: 'bhopSpeedClamp',
-  no_prestrafe: 'noPrestrafe',
   teleport_gate_ticks: 'teleportGateTicks',
   yaw_bind_speed: 'yawBindSpeed',
   noclip_speed: 'noclipSpeed',

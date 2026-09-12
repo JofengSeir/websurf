@@ -23,7 +23,6 @@ export interface PhysicsParamsLike {
   crouchSpeed: number;
   autobhop: boolean;
   bhopSpeedClamp: boolean;
-  noPrestrafe: boolean;
   /** 传送触发落地稳定门槛（帧；Rust teleport_gate_ticks）。 */
   teleportGateTicks: number;
 }
@@ -53,7 +52,6 @@ export function buildPhysicsParams(
     crouch_speed: p.crouchSpeed,
     autobhop: p.autobhop,
     bhop_speed_clamp: p.bhopSpeedClamp,
-    no_prestrafe: p.noPrestrafe,
     // 灵敏度固定 1：真实灵敏度由主线程输入层应用（mousemove 时乘入角度增量），
     // 双端物理（权威 Worker + 主线程渲染）用同一份已缩放输入 → 改灵敏度不产生双端分叉
     sensitivity: 1,

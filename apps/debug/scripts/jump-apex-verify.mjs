@@ -71,7 +71,7 @@ const TELEPORT_JSON = '{"teleports":[],"triggers":[]}';
 const PARAMS = JSON.stringify({
   gravity: 800, accelerate: 10, friction: 4, stop_speed: 100,
   jump_height: 57, air_accelerate: 150, run_speed: 250,
-  autobhop: true, bhop_speed_clamp: true, no_prestrafe: true,
+  autobhop: true, bhop_speed_clamp: true,
 });
 const KEY_JUMP = 0x10; // shared-state.ts KEY_MASK.jump
 const GROUND_Y = 0;

@@ -112,7 +112,7 @@
 ### 3.2 玩家移动（`src/phys/player.rs`）
 
 **常量表**（`player.rs:16-53`）：`STANDABLE_NORMAL=0.7`、`GRAVITY=800`、`RUN_SPEED=250`、`WALK_SPEED=130`、`CROUCH_SPEED=85`、`AIR_ACCELERATE=150`、`AIR_SPEED_CAP=30`、`OVERBOUNCE_SURF=1.0`/`OVERBOUNCE_DEFAULT=1.001`、`M_YAW=0.022`、`PITCH_CLAMP=89`、hull 半宽/站高/蹲高 `16/72/54`、`EYE_STAND=64.09`、`EYE_DUCK=46.04`、`DUCK_LERP_TIME=0.1`、`JUMP_HEIGHT=57`、`BHOP_MAX_SPEED_FACTOR=1.1`、`LADDER_SPEED=200`、`LADDER_JUMP_OFF_SPEED=270`、`STEP_HEIGHT=18`、`MAX_CLIP_PLANES=8`、`PUSH_OUT=0.1`、`NON_JUMP_VELOCITY=180`、`GROUND_TRACE_DIST=2`。
-运行时可调项在 `PhysParams`（`player.rs:60`）：默认 `autobhop=true`、`bhop_speed_clamp=true`、`no_prestrafe=true`、`teleport_gate_ticks=3`（现 check 不再使用，仅签名兼容，`teleport.rs:176`）、`noclip_speed=800`、`sensitivity=1.5`（TS 层 `set_params` 时固定传 1，见 [ts-shared.md](./ts-shared.md) §3 params）。
+运行时可调项在 `PhysParams`（`player.rs:60`）：默认 `autobhop=true`、`bhop_speed_clamp=true`、`teleport_gate_ticks=3`（现 check 不再使用，仅签名兼容，`teleport.rs:176`）、`noclip_speed=800`、`sensitivity=1.5`（TS 层 `set_params` 时固定传 1，见 [ts-shared.md](./ts-shared.md) §3 params）。
 
 **基础公式**（`player.rs:262-345`）：
 

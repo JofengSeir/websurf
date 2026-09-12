@@ -428,7 +428,6 @@ impl PhysWorld {
             crouch_speed: Option<f64>,
             autobhop: Option<bool>,
             bhop_speed_clamp: Option<bool>,
-            no_prestrafe: Option<bool>,
             sensitivity: Option<f64>,
             yaw_bind_speed: Option<f64>,
             noclip_speed: Option<f64>,
@@ -467,9 +466,6 @@ impl PhysWorld {
         }
         if let Some(v) = p.bhop_speed_clamp {
             self.params.bhop_speed_clamp = v;
-        }
-        if let Some(v) = p.no_prestrafe {
-            self.params.no_prestrafe = v;
         }
         if let Some(v) = p.sensitivity {
             self.params.sensitivity = v;

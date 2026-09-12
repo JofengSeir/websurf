@@ -23,8 +23,6 @@ export interface PhysicsConfig {
   crouchSpeed: number;
   /** bhop 速度钳制（连跳不超 maxSpeed，默认 false = 不限速，可无限加速）。 */
   bhopSpeedClamp: boolean;
-  /** nopre：禁用预加速（落地速度硬钳到 runSpeed，默认 true）。 */
-  noPrestrafe: boolean;
   /** 传送触发落地稳定门槛（帧，默认 3）：落地持续 >= 该值才判定位于传送平面。 */
   teleportGateTicks: number;
 }
@@ -106,7 +104,6 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     walkSpeed: 130,
     crouchSpeed: 85,
     bhopSpeedClamp: false,
-    noPrestrafe: true,
     teleportGateTicks: 3,
   },
   input: {
@@ -170,7 +167,6 @@ export function buildPhysicsParams(config: RuntimeConfig): Record<string, unknow
       crouchSpeed: p.crouchSpeed,
       autobhop: p.autobhop,
       bhopSpeedClamp: p.bhopSpeedClamp,
-      noPrestrafe: p.noPrestrafe,
       teleportGateTicks: p.teleportGateTicks,
     },
     {

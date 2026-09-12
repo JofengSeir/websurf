@@ -296,11 +296,6 @@ export class PanelController {
       this.bridge.sendConfig('physics', { bhopSpeedClamp: v });
       this.pushPhysicsParams();
     });
-    this.bindCheckbox('noPrestrafe', (v) => {
-      this.config.physics.noPrestrafe = v;
-      this.bridge.sendConfig('physics', { noPrestrafe: v });
-      this.pushPhysicsParams();
-    });
     // 传送落地触发门槛（帧）
     this.bindSlider('teleportGateTicks', 1, 20, 1, (v) => {
       this.config.physics.teleportGateTicks = v;
@@ -584,7 +579,6 @@ export class PanelController {
     setVal('jumpSpeed', String(p.physics.jumpSpeed));
     setChecked('autobhop', p.physics.autobhop);
     setChecked('bhopSpeedClamp', p.physics.bhopSpeedClamp);
-    setChecked('noPrestrafe', p.physics.noPrestrafe);
     setVal('teleportGateTicks', String(p.physics.teleportGateTicks));
     // 体型
     setVal('hullHalfWidth', String(p.player.halfWidth));

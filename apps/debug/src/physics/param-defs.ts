@@ -91,11 +91,6 @@ export const PARAM_DEFS: ParamDef[] = [
     description: '起跳时水平速度钳制为 1.1×地速上限（sv_enablebunnyhopping 0 行为），防止连跳无限加速。',
   },
   {
-    name: 'noPrestrafe', label: '落地限速', unit: undefined,
-    kind: 'boolean', default: true,
-    description: '落地后地面速度硬性钳制到地速上限（空中积累的速度不能转化为地面速度）。',
-  },
-  {
     name: 'tickRate', label: '模拟频率', unit: 'Hz',
     kind: 'number', default: 64, min: 48, max: 128, step: 1,
     description: '物理模拟频率（固定步长 = 1/tickRate 秒，JS 驱动层参数，不进 Rust）。64=默认；调高更平滑但更吃 CPU，调低跳帧感增强。',

@@ -29,7 +29,6 @@ export const PARAM_TO_RUST: Record<string, string> = {
   jumpHeight: 'jump_height',
   autobhop: 'autobhop',
   bhopSpeedClamp: 'bhop_speed_clamp',
-  noPrestrafe: 'no_prestrafe',
 };
 
 /** 碰撞箱面板状态。 */
