@@ -344,18 +344,22 @@ fn overbounce_for(normal: &V3) -> f64 {
 
 // -- WishDir / CurrentMaxSpeed -----------------------------------------------
 
-/// Source：`mv->m_flMaxSpeed = pPlayer->GetPlayerMaxSpeed()`（ProcessMovement 每
-/// usercmd 一次）；CS:GO 的 `GetPlayerMaxSpeed()` 在 `m_bDucked` 时返回蹲姿速度。
-/// 该值同时约束地面（`WalkMove`）与空中（`AirMove` 把 wishspeed 钳到 `m_flMaxSpeed`），
-/// 因此**蹲姿在空中同样生效**——不要"优化"成空中改用站立速度。
+/// 动量速度上限（供 `compute_wish` → `accelerate` / `air_accelerate` 与起跳钳制使用）。
 ///
-/// 后果（`air_accelerate`）：`accelspeed = airaccel × wishspeed × dt`，蹲姿上限
-/// = 150 × 85 / 64 ≈ 199.2，站姿 = 150 × 250 / 64 ≈ 585.9；仅当
-/// `addspeed = min(wishspeed, 30) − dot(vel, wishdir)` 超过该上限时才体现差异
-/// （高速反向 strafe，surf 后期常见）。Source 原版行为，回归见
-/// `src/phys/duck_surf_tests.rs::air_crouch_momentum_uses_crouch_params`。
+/// **蹲姿降速只在地面生效**；空中（含贴坡 surf 松开蹲键却无法起立的蹲姿）一律按
+/// **站立速度**计算动量。
+///
+/// 与 Source 的差异（用户裁定 2026-09-13）：Source 在 `ProcessMovement` 里置
+/// `mv->m_flMaxSpeed = GetPlayerMaxSpeed()`，CS:GO 该函数在 `m_bDucked` 时返回蹲姿
+/// 速度，因此**空中蹲姿也会被降到 85**，令 `AirAccelerate` 的加速度上限变成
+/// `150 × 85 / 64 ≈ 199.2/帧`（站姿为 `150 × 250 / 64 ≈ 585.9`，通常被 addspeed 钳住）。
+/// 本仓库改为：姿态（碰撞箱/视角）保持蹲姿，但动量按站姿算——即只保留「坡上无法
+/// 起立」这一条，不引入蹲姿带来的动量损失。
+///
+/// 回归见 `src/phys/duck_surf_tests.rs::air_crouch_momentum_uses_standing_params`
+/// 与 `ground_crouch_uses_crouch_speed`。
 fn current_max_speed(p: &Player, params: &PhysParams) -> f64 {
-    let speed = if p.ducked {
+    let speed = if p.on_ground && p.ducked {
         params.crouch_speed
     } else if p.input.walk {
         params.walk_speed

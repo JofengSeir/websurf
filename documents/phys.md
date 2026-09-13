@@ -147,19 +147,19 @@ Source 权威实现（`src/game/shared/gamemovement.cpp`）：
 直到离坡或落地**。这是 CS:GO 原版行为，不是缺陷。
 
 
-**动量参数（贴坡保持蹲姿时不可改）**：姿态虽保持蹲姿，动量仍按**空中蹲姿**数值计算——
-Source 在 `ProcessMovement` 每 usercmd 置 `mv->m_flMaxSpeed = GetPlayerMaxSpeed()`，
-CS:GO 的该函数在 `m_bDucked` 时返回蹲姿速度；`AirMove` 把 wishspeed 钳到该值，
-`AirAccelerate` 再用 `accel × wishspeed × frametime`。故：
+**动量参数**：贴坡保持蹲姿时，**姿态（碰撞箱/视角）是蹲姿，但动量按站姿数值计算**——
+`current_max_speed`（`player.rs`）以 `p.on_ground && p.ducked` 为门槛：只有**地面蹲**才取
+`crouch_speed`(85)；空中（含贴坡 surf 松开蹲键却无法起立的蹲姿）一律取 `run_speed`(250)。
 
-- 蹲姿空中加速度上限 = `AIR_ACCELERATE × crouch_speed × dt` = 150 × 85 / 64 ≈ **199.2/帧**；
-- 站姿 = 150 × 250 / 64 ≈ 585.9，但通常被 `addspeed = min(wishspeed,30) − dot(vel,wishdir)` 钳住。
-- ⇒ 仅当 `addspeed > 199.2`（即 `dot(vel, wishdir) < −169.2`，**高速反向 strafe**，surf 后期常见）
-  时蹲姿才低于站姿；低速或顺向时两者**完全相同**（`addspeed` 钳制占优）。
+> 与 Source 的差异（用户裁定 2026-09-13，非 Source 原样）：Source 在 `ProcessMovement` 置
+> `mv->m_flMaxSpeed = GetPlayerMaxSpeed()`，CS:GO 该函数在 `m_bDucked` 时返回蹲姿速度，
+> 于是 `AirAccelerate`（`accelspeed = accel × wishspeed × frametime`）的上限在空中也被压到
+> `150 × 85 / 64 ≈ 199.2/帧`，而站姿为 `150 × 250 / 64 ≈ 585.9`（通常被 `addspeed` 钳住）。
+> 即 Source 的空中蹲姿会掉动量；本仓库**只保留「坡上无法起立」这一条**，不引入该损失。
 
-这是 Source 原版行为，不要"优化"成空中改用站立速度；回归见
-`src/phys/duck_surf_tests.rs::air_crouch_momentum_uses_crouch_params`（实测
-addspeed=242.1320 / 蹲姿实测 199.2188 = 上限 / 站姿实测 242.1320 = addspeed）。
+实测（`air_crouch_momentum_uses_standing_params`）：`addspeed = 242.1320`，空中蹲姿与站姿
+每 tick 速度增量**完全相同**（均为 242.1320）；地面蹲姿前进速度收敛到 85.000
+（`ground_crouch_uses_crouch_speed`）。
 
 > 反例（2026-09-13 移除）：曾在「放脚被挡」时兜底「原地站立箱可用即起立」（脚不动、头顶 +18）。
 > 该兜底偏离 Source，且依赖 `is_position_free` 在贴面间隙 ≈0 处的临界判定（容差 0、实测间隙 0.03），
