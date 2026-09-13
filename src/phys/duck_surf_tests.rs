@@ -183,11 +183,14 @@ fn slope_sweep_release_keeps_crouch() {
     }
 }
 
-/// 空中蹲姿的动量参数：wishspeed 取**蹲姿速度**（Source 的 `m_flMaxSpeed`），
-/// 从而 `air_accelerate` 的加速度上限为 `AIR_ACCELERATE × crouch_speed × dt`。
-/// 贴坡 surf 无法起立时，玩家保持蹲姿 → 动量计算必须仍走这套"空中蹲姿"数值。
+/// 空中蹲姿（含贴坡 surf 松开蹲键却无法起立的蹲姿）的动量按**站姿参数**计算：
+/// wishspeed 取 `run_speed`(250)，`air_accelerate` 的上限为
+/// `AIR_ACCELERATE × run_speed × dt`（≈585.9/帧），实际由 `addspeed` 钳制。
+///
+/// 与 Source 的差异（用户裁定 2026-09-13）：Source 空中也用蹲姿速度（上限 199.2），
+/// 本仓库只保留「坡上无法起立」，不引入蹲姿的动量损失。
 #[test]
-fn air_crouch_momentum_uses_crouch_params() {
+fn air_crouch_momentum_uses_standing_params() {
     use crate::phys::player::{AIR_ACCELERATE, CROUCH_SPEED};
 
     let params = PhysParams::default();
@@ -231,19 +234,60 @@ fn air_crouch_momentum_uses_crouch_params() {
         addspeed, cap_duck, m_duck, cap_stand, m_stand
     );
 
-    // 蹲姿：被 crouch_speed 导出的上限钳住（不是 addspeed）
+    // 蹲姿在空中：上限由 run_speed 导出（≈585.9）→ 实际被 addspeed 钳住
     assert!(
-        (m_duck - cap_duck).abs() < 1e-6,
-        "蹲姿空中加速度应由 crouch_speed 导出上限钳住；期望 {:.6}，实测 {:.6}",
-        cap_duck,
+        (m_duck - addspeed).abs() < 1e-6,
+        "空中蹲姿加速度应由 addspeed 钳住（站姿参数）；期望 {:.6}，实测 {:.6}",
+        addspeed,
         m_duck
     );
-    // 站姿：上限高于 addspeed → 由 addspeed 钳住
     assert!(
         (m_stand - addspeed).abs() < 1e-6,
         "站姿空中加速度应由 addspeed 钳住；期望 {:.6}，实测 {:.6}",
         addspeed,
         m_stand
     );
-    assert!(m_duck < m_stand, "蹲姿空中加速度上限应低于站姿（Source 行为）");
+    assert!(
+        (m_duck - m_stand).abs() < 1e-9,
+        "空中蹲姿与站姿的每 tick 速度增量必须完全相同；蹲 {:.6} vs 站 {:.6}",
+        m_duck,
+        m_stand
+    );
+    // 上限核算：站姿上限远高于 addspeed（故不受蹲姿拖累）
+    assert!(
+        cap_stand > addspeed,
+        "站姿上限 {:.4} 应高于 addspeed {:.4}",
+        cap_stand,
+        addspeed
+    );
+    println!("  空中：蹲姿 {:.4} == 站姿 {:.4}（均为 addspeed {:.4}）", m_duck, m_stand, addspeed);
+}
+
+/// 地面蹲姿仍使用蹲姿速度（`crouch_speed`=85）——与 CS:GO 地面行为一致，
+/// 只有"坡上无法起立"这一条被保留，地面降速不受影响。
+#[test]
+fn ground_crouch_uses_crouch_speed() {
+    use crate::phys::player::CROUCH_SPEED;
+
+    let params = PhysParams::default();
+    let mut world = world_with(floor());
+    let mut p = create_player([0.0, 1.0, 0.0], &params);
+
+    p.input.duck = true;
+    p.input.forward = true;
+    for _ in 0..40 {
+        player_tick(&mut world, &mut p, &params, DT);
+    }
+    assert!(p.on_ground, "前置：应在地面 on_ground={}", p.on_ground);
+    assert!(p.ducked, "前置：应已蹲下");
+
+    // 地面持续前进 → 水平速度收敛到蹲姿速度（而非 run_speed）
+    let spd = (p.velocity[0] * p.velocity[0] + p.velocity[2] * p.velocity[2]).sqrt();
+    println!("  地面蹲姿前进速度 = {:.3}（crouch_speed={}）", spd, CROUCH_SPEED);
+    assert!(
+        (spd - CROUCH_SPEED).abs() < 1.0,
+        "地面蹲姿速度应收敛到 crouch_speed；期望≈{}，实测 {:.3}",
+        CROUCH_SPEED,
+        spd
+    );
 }

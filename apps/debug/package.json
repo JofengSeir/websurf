@@ -17,6 +17,7 @@
     "count:glb-meshes": "node scripts/glb-mesh-count.mjs",
     "bench:frames": "node scripts/frame-bench.mjs",
     "test:optimize-scene": "esbuild src/renderer/renderer-main.ts --bundle --format=esm --platform=node --outfile=.tmp/opt-verify/renderer-main.bundle.mjs && node scripts/optimize-scene-verify.mjs",
+    "test:surf-crouch": "node scripts/phys-surf-crouch-smoke.mjs",
     "plot:path": "node scripts/plot-path.mjs",
     "test:path-acceptance": "node scripts/path-acceptance.mjs fixtures/path/tick-on-render-prefix.json --assert --expect fail",
     "test:auth-clock": "esbuild ../../src/ts-shared/auth/auth-loop.ts --bundle --format=esm --platform=node --outfile=.tmp/auth-clock/auth-loop.bundle.mjs && node scripts/auth-clock-verify.mjs",
