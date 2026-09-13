@@ -20,7 +20,14 @@ REM ---- shared cargo/wasm-pack env (root .cargo-home / .wasm-pack-cache / .tmp)
 call "%~dp0..\..\src\scripts\cargo-env.cmd"
 
 REM ---- dev serve target: web/ (<wasm> copy produced by build:wasm) ----
-if exist "pkg\websurf_wasm_bg.wasm" goto :wasm_done
+REM Rebuild only when Rust sources are newer than the wasm artifact (mtime
+REM check via shared src\scripts\wasm-stale-check.mjs; exit 0 = up-to-date).
+REM node missing / check error -> fall through to a full rebuild (safe side).
+where node >nul 2>nul
+if not errorlevel 1 (
+  node "%~dp0..\..\src\scripts\wasm-stale-check.mjs" "%~dp0pkg\websurf_wasm_bg.wasm" "%~dp0..\..\src" "%~dp0crates"
+  if not errorlevel 1 goto :wasm_done
+)
 echo [1/3] Building WASM (release)...
 call npm run build:wasm
 if errorlevel 1 (

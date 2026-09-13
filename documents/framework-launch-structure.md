@@ -52,7 +52,7 @@
 | 入口 | 语义 | 服务目标 | 成功退出码 | 失败退出码 |
 |---|---|---|---|---|
 | `play.cmd [port]` | 补齐缺失产物（deps → wasm → ts → dist）后，服务 **dist** 页面并打开浏览器 | `dist/index.html`（viewer 为 `dist/` 根的 `index.html`） | 0 | 1 |
-| `start-dev.cmd [port]` | 只构建 TS（不产 dist），服务 **web/** 源页面并打开浏览器 | `web/index.html` | 0 | 1 |
+| `start-dev.cmd [port]` | 按 mtime 判定构建 WASM（源比 pkg/ 产物新才重建，共享 `src/scripts/wasm-stale-check.mjs`）+ 构建 TS（不产 dist），服务 **web/** 源页面并打开浏览器 | `web/index.html` | 0 | 1 |
 | `build-dist.cmd [single\|multi]` | 只构建 dist，**不**启动服务 | 无 | 0 | 1 |
 
 - **【禁止】**第四个 `.cmd` 入口；multi 形态只能由 `build-dist.cmd multi` 表达，**禁止**新增 `build-dist-multi.cmd`、`play-dev.cmd` 之类平行入口。
