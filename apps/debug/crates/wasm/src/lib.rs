@@ -41,6 +41,9 @@ struct PakMaterials {
     textures: HashMap<String, Vec<u8>>,
     /// `材质名 → alpha_mode`（0 = Opaque，1 = Blend，2 = Mask）。
     alpha_modes: HashMap<String, u8>,
+    /// 自发光 / 无光照材质名集合（`$selfillum` / `UnlitGeneric`）：`InMemoryResources.material_unlit`
+    /// 的输入（共享层用 `extras.unlit` 标记这类图元；缺失会让自发光 prop 被当受光材质处理）。
+    unlit: std::collections::HashSet<String>,
 }
 
 /// 提取被 `static_props` 引用且 `.mdl/.vvd/.dx90.vtx` 齐全的模型。
@@ -57,14 +60,36 @@ fn collect_pakfile_models(
     }
 
     // 2. 枚举 PAKFILE 全部条目（zip 只锁一次）
+    //    顺手把 prop_static 的**逐顶点预烘焙光照**（`sp_<idx>.vhv` / `sp_hdr_<idx>.vhv`）读出来：
+    //    它是 Source 的第 1 级 prop 光照来源（见 `wasm_core::vhv`），与条目枚举共用同一遍扫描。
+    //    （2026-09-20 由 test/game-core 隔离副本回并到共享层，apps/debug 同步接入）
     let zip = bsp.pack.clone().into_zip();
     let mut zip_guard = zip
         .lock()
         .map_err(|e| JsValue::from_str(&format!("pakfile 锁定失败: {e}")))?;
     let mut entry_names: Vec<String> = Vec::with_capacity(zip_guard.len());
+    let mut vhv_blobs: std::collections::HashMap<usize, Vec<u8>> = std::collections::HashMap::new();
     for i in 0..zip_guard.len() {
-        if let Ok(entry) = zip_guard.by_index(i) {
-            entry_names.push(entry.name().to_string());
+        if let Ok(mut entry) = zip_guard.by_index(i) {
+            let name = entry.name().to_string();
+            let lower = name.to_ascii_lowercase();
+            // 只收 sp_<数字>.vhv（HDR 版优先，与 lightmap/ambient 的择一口径一致）
+            if lower.starts_with("sp_") && lower.ends_with(".vhv") {
+                let mid = &lower[3..lower.len() - 4];
+                let (idx_part, is_hdr) = match mid.strip_prefix("hdr_") {
+                    Some(rest) => (rest, true),
+                    None => (mid, false),
+                };
+                if let Ok(idx) = idx_part.parse::<usize>() {
+                    let mut buf = Vec::with_capacity(entry.size() as usize);
+                    if std::io::Read::read_to_end(&mut entry, &mut buf).is_ok() && !buf.is_empty() {
+                        if is_hdr || !vhv_blobs.contains_key(&idx) {
+                            vhv_blobs.insert(idx, buf);
+                        }
+                    }
+                }
+            }
+            entry_names.push(name);
         }
     }
     drop(zip_guard);
@@ -98,18 +123,83 @@ fn collect_pakfile_models(
     }
 
     // 4. static_props 放置表（GLB 节点与碰撞体共用）
+    //    逐实例挂上第 1 级逐顶点光照（`sp_<idx>.vhv`）与第 2 级 leaf ambient cube；
+    //    两者都缺失时由渲染端/集成层回退（`debug` 侧沿用同一份共享实现）。
+    let mut vhv_ok = 0usize;
+    let mut vhv_bad = 0usize;
     let static_props: Vec<StaticProp> = bsp
         .static_props()
         .enumerate()
-        .map(|(_i, prop)| StaticProp {
-            model: prop.model().to_string(),
-            origin: [prop.origin.x, prop.origin.y, prop.origin.z],
-            angles: prop.angles(),
-            solid: prop.solid as u8,
+        .map(|(i, prop)| {
+            let vertex_lighting =
+                match vhv_blobs.get(&i).and_then(|b| websurf_wasm_core::vhv::parse_vhv(b)) {
+                    Some(v) => {
+                        vhv_ok += 1;
+                        Some(v.colors)
+                    }
+                    None => {
+                        if vhv_blobs.contains_key(&i) {
+                            vhv_bad += 1;
+                        }
+                        None
+                    }
+                };
+            StaticProp {
+                model: prop.model().to_string(),
+                origin: [prop.origin.x, prop.origin.y, prop.origin.z],
+                angles: prop.angles(),
+                solid: prop.solid as u8,
+                ambient_cube: bsp.prop_ambient_cube(i),
+                vertex_lighting,
+            }
         })
         .collect();
+    if !vhv_blobs.is_empty() || !static_props.is_empty() {
+        eprintln!(
+            "[vhv] prop 逐顶点预烘焙光照：pakfile 命中 {} 个文件，解析成功 {} 个，解析失败 {} 个，共 {} 个 prop",
+            vhv_blobs.len(),
+            vhv_ok,
+            vhv_bad,
+            static_props.len()
+        );
+    }
 
     Ok((models, static_props, entry_names))
+}
+
+/// 收集 BSP 实体里的**真光源**（`light` / `light_spot` / `light_environment`）为集成器可消费的形式。
+///
+/// 共享层（`src/wasm-core` 回并后）的 `export_glb_with_pakfile_models_with_defaults_and_lights`
+/// 依赖它把光源写成 `KHR_lights_punctual`；apps/debug 与 apps/game 走同一份口径。
+fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> {
+    const LIGHT_CLASSNAMES: &[&str] = &["light", "light_spot", "light_environment"];
+    let mut out = Vec::new();
+    for ent in bsp.entities.iter() {
+        let Ok(classname) = ent.prop("classname") else {
+            continue;
+        };
+        if !LIGHT_CLASSNAMES.contains(&classname) {
+            continue;
+        }
+        let prop = |key: &'static str| ent.prop(key).ok().map(|s| s.to_string());
+        out.push(model_integrator::Entity {
+            properties: model_integrator::EntityProperties {
+                classname: classname.to_string(),
+                model: prop("model"),
+                origin: prop("origin"),
+                angles: prop("angles"),
+                scale: prop("scale"),
+                light: prop("_light"),
+                cone: prop("_cone"),
+                inner_cone: prop("_inner_cone"),
+                constant_attn: prop("_constant_attn"),
+                linear_attn: prop("_linear_attn"),
+                quadratic_attn: prop("_quadratic_attn"),
+                pitch: prop("pitch"),
+            },
+        });
+    }
+    out
 }
 
 /// 加载内存中的模型三件套为 `vmdl::Model`（任一环节失败即返回 `None`）。
@@ -186,6 +276,9 @@ fn resolve_pakfile_materials(
             }
 
             out.alpha_modes.insert(tex.name.clone(), info.alpha_mode);
+            if info.unlit {
+                out.unlit.insert(tex.name.clone());
+            }
 
             if !decode_textures {
                 continue;
@@ -308,7 +401,10 @@ pub fn parse_bsp(data: &[u8]) -> Result<String, JsValue> {
 /// 获取元数据。
 #[wasm_bindgen]
 pub struct BspProcessor {
-    bsp: Option<vbsp::Bsp>,
+    /// `Arc<Bsp>`：与共享层（`src/wasm-core` 回并后）的借用式移交口径一致 ——
+    /// `export_bsp*` 收 `Arc<Bsp>`，故内部持 `Arc`；本工程的导出入口仍按既有语义
+    /// **消费**实例（`take()`），不改 debug 侧的可重复导出行为。
+    bsp: Option<std::sync::Arc<vbsp::Bsp>>,
     /// 缓存的 pakfile 文件数，避免 metadata() 重复克隆 Packfile
     packed_files: usize,
 }
@@ -322,7 +418,7 @@ impl BspProcessor {
         // 一次性计算并缓存 packed_files，避免 metadata() 重复克隆 Packfile
         let packed_files = bsp.pack.clone().into_zip().lock().unwrap().len();
         Ok(BspProcessor {
-            bsp: Some(bsp),
+            bsp: Some(std::sync::Arc::new(bsp)),
             packed_files,
         })
     }
@@ -391,16 +487,10 @@ impl BspProcessor {
         let textures: HashMap<String, Vec<u8>> = serde_wasm_bindgen::from_value(textures_js)
             .map_err(|e| JsValue::from_str(&format!("纹理参数解析失败: {:?}", e)))?;
 
-        // 从 BSP 派生静态道具放置信息（位置/朝向/缩放）
-        let mut static_props = Vec::new();
-        for (_i, prop) in bsp.static_props().enumerate() {
-            static_props.push(StaticProp {
-                model: prop.model().to_string(),
-                origin: [prop.origin.x, prop.origin.y, prop.origin.z],
-                angles: prop.angles(),
-                solid: prop.solid as u8,
-            });
-        }
+        // 从 BSP 派生静态道具放置信息（位置/朝向/缩放），并带上两级 prop 烘焙光照
+        // （第 1 级 `sp_<idx>.vhv` 逐顶点 / 第 2 级 leaf ambient cube）——
+        // 复用 `collect_pakfile_models` 的同一份派生，避免此处漏掉光照字段。
+        let (_pak_models, static_props, _entries) = collect_pakfile_models(&bsp)?;
 
         let resources = InMemoryResources {
             models,
@@ -408,6 +498,7 @@ impl BspProcessor {
             static_props,
             textures,
             material_alpha_mode: std::collections::HashMap::new(),
+            material_unlit: std::collections::HashSet::new(),
             light_entities: Vec::new(),
         };
 
@@ -469,6 +560,7 @@ impl BspProcessor {
             static_props,
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
+            material_unlit: materials.unlit,
             light_entities: Vec::new(),
         };
 
@@ -495,6 +587,50 @@ impl BspProcessor {
         &mut self,
         defaults_json: &str,
     ) -> Result<Vec<u8>, JsValue> {
+        self.export_glb_with_defaults_opts(defaults_json, 0, false)
+    }
+
+    /// [`BspProcessor::export_glb_with_pakfile_models_with_defaults`] 的**阈值可覆盖**变体。
+    ///
+    /// `lightmap_max_atlas_area`：> 0 时覆盖单页图集面积上界（px），0 = 政策上界（4096×2048）。
+    /// **仅供 fail-visible 负控**（契约 `documents/game/implementation/console-fix-contract.md` §4.3）。
+    pub fn export_glb_with_pakfile_models_with_defaults_and_atlas_limit(
+        &mut self,
+        defaults_json: &str,
+        lightmap_max_atlas_area: f64,
+    ) -> Result<Vec<u8>, JsValue> {
+        let area = if lightmap_max_atlas_area.is_finite() && lightmap_max_atlas_area > 0.0 {
+            lightmap_max_atlas_area as u64
+        } else {
+            0
+        };
+        self.export_glb_with_defaults_opts(defaults_json, area, false)
+    }
+
+    /// 导出 GLB（含 PAKFILE 模型 + **默认纹理回退** + **BSP 光照**）。
+    ///
+    /// 组合入口：缺失纹理回退表 + `light`/`light_spot`/`light_environment` →
+    /// `KHR_lights_punctual`。此前二者互斥（一个收 defaults 不收 lights、一个收 lights 不收 defaults），
+    /// `world-builder`（共享 TS 层）只能调 `_with_defaults` ⇒ GLB 从未携带灯光。
+    pub fn export_glb_with_pakfile_models_with_defaults_and_lights(
+        &mut self,
+        defaults_json: &str,
+    ) -> Result<Vec<u8>, JsValue> {
+        self.export_glb_with_defaults_opts(defaults_json, 0, true)
+    }
+
+    /// 导出 GLB（含 PAKFILE 模型 + **BSP 光照**，不带默认纹理回退）。
+    pub fn export_glb_with_pakfile_models_with_lights(&mut self) -> Result<Vec<u8>, JsValue> {
+        self.export_glb_with_defaults_opts("{}", 0, true)
+    }
+
+    /// 三个 defaults 入口的共用实现（`lightmap_max_atlas_area` / `include_lights` 可调）。
+    fn export_glb_with_defaults_opts(
+        &mut self,
+        defaults_json: &str,
+        lightmap_max_atlas_area: u64,
+        include_lights: bool,
+    ) -> Result<Vec<u8>, JsValue> {
         let bsp = self
             .bsp
             .take()
@@ -507,10 +643,12 @@ impl BspProcessor {
         let options = |generate_missing_list: bool| bsp_to_gltf_core::ConvertOptions {
             missing_fallback: fallback.clone(),
             generate_missing_list,
+            lightmap_max_atlas_area,
             ..bsp_to_gltf_core::ConvertOptions::default()
         };
 
-        if models.is_empty() {
+        // 无模型且不要灯光时保持纯地图导出（与 [BspProcessor::export_glb] 同语义）
+        if models.is_empty() && !include_lights {
             let result = bsp_to_gltf_core::export_bsp(bsp, options(true))
                 .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
             let mut output: Vec<u8> = Vec::new();
@@ -529,9 +667,14 @@ impl BspProcessor {
             static_props,
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
-            light_entities: Vec::new(),
+            material_unlit: materials.unlit,
+            light_entities: if include_lights {
+                collect_light_entities(&bsp)
+            } else {
+                Vec::new()
+            },
         };
-        let integrator = ModelIntegrator::from_in_memory(resources, ExportOptions::default());
+        let integrator = ModelIntegrator::from_in_memory(resources, ExportOptions { include_lights });
         let result = bsp_to_gltf_core::export_bsp_with_models(bsp, options(true), Some(&integrator))
             .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
         let mut output: Vec<u8> = Vec::new();
