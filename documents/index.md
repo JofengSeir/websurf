@@ -14,12 +14,12 @@
 | 玩 / 改游戏体验 | [documents/game/overview.md](./game/overview.md)（存点/面板/键位/画质） |
 | 调物理参数 / 调渲染 | [documents/debug/overview.md](./debug/overview.md)（物理面板/碰撞可视化/准星检查） |
 | 看图 / 放录像 | [documents/viewer/overview.md](./viewer/overview.md) + [shavit-replay-format.md](./viewer/implementation/shavit-replay-format.md)（`.replay` 格式规格） |
-| 验证物理时序 / 跑对照 | [test/dual-mode-harness/docs/overview.md](../test/dual-mode-harness/docs/overview.md) |
+| 验证物理时序 / 跑对照 | [documents/dual-mode-harness/overview.md](./dual-mode-harness/overview.md) |
 | 建新子工程 / 统一启动方式与文件结构 / 判断什么该上提到 `src/` | [framework-launch-structure.md](./framework-launch-structure.md)（启动·结构·产物规范）+ [framework-decoupling.md](./framework-decoupling.md)（共享层解耦裁决）+ [framework-audit.md](./framework-audit.md)（现状事实基线） |
 
-## 2. 文档树（documents/ 下全量 29 篇，含本文 index.md 自身；test/dual-mode-harness/docs/ 5 篇验证工程文档另列；历史档案与过程讨论已移出版本库（2026-09-11））
+## 2. 文档树（documents/ 下全量 **41 篇** = 根 11 + `debug/` 7 + `game/` 8 + `viewer/` 8 + `dual-mode-harness/` 7，含本文 index.md 自身；历史档案与过程讨论已移出版本库（2026-09-11），仅工程内 `test/dual-mode-harness/docs/archive/` 5 篇留存、不作为事实来源）
 
-### 根 documents/（11 篇：总架构 + 共享层四篇 + 三篇仓库框架规范 + 本导航）
+### 根 documents/（11 篇：总架构 + 共享层四篇 + 仓库框架规范三篇 + 发布面两篇 + 本导航）
 
 | 文档 | 覆盖 |
 |---|---|
@@ -34,7 +34,7 @@
 | [rollout-plan.md](./rollout-plan.md) | 批 2/3/4 逐文件施工计划：动作表（动作/源路径/目标路径/同步改动/验收命令与判据/依据编号）、两条硬约束实测、esbuild 注入方案、文件冲突面与每批回滚 |
 | [rollout-status.md](./rollout-status.md) | 框架改造交付状态与遗留登记：批次状态总表（附提交号与实际提交边界）、C 类旧路径逐条处置、全仓体检实测、`R-n` 遗留项与去向 |
 
-### documents/debug/（6 篇：主工程）
+### documents/debug/（7 篇：主工程）
 
 | 文档 | 维度 |
 |---|---|
@@ -44,8 +44,9 @@
 | [implementation/rendering.md](./debug/implementation/rendering.md) | I：渲染与调试可视化 |
 | [implementation/physics-panel.md](./debug/implementation/physics-panel.md) | I：参数面板全链路 |
 | [differences.md](./debug/differences.md) | D：vs game/viewer/test 取舍、双端同参不变量 |
+| [README.md](./debug/README.md) | 工程说明（四维度之外）：键位 / 启动与打包 / 故障排查 |
 
-### documents/game/（5 篇：游戏工程）
+### documents/game/（8 篇：游戏工程）
 
 | 文档 | 维度 |
 |---|---|
@@ -53,9 +54,12 @@
 | [sequences.md](./game/sequences.md) | T：启动/加载/双线程帧循环/校准与反向同步/SAB 协议 |
 | [implementation/panel-and-input.md](./game/implementation/panel-and-input.md) | I：输入采集链、键位录制、PointerLock、面板七模块 |
 | [implementation/gameplay.md](./game/implementation/gameplay.md) | I：存点/出生点/渲染体验/死亡阈值/PVS 现状 |
+| [implementation/lighting-merge-plan.md](./game/implementation/lighting-merge-plan.md) | I：光照渲染合并计划（外部参照实现 lightmap → 副本，阶段 0–4 + 共享层边界 + 回并验收条件） |
+| [implementation/console-fix-contract.md](./game/implementation/console-fix-contract.md) | I：五项控制台问题的 r1 实施契约（复现/根因/光照图集页政策裁定/可失败判据） |
 | [differences.md](./game/differences.md) | D：vs debug（同构中的最小化）/viewer/test、共享层取舍 |
+| [README.md](./game/README.md) | 工程说明（四维度之外）：键位 / 启动与打包 / 故障排查 |
 
-### documents/viewer/（7 篇：游览与回放工程）
+### documents/viewer/（8 篇：游览与回放工程）
 
 | 文档 | 维度 |
 |---|---|
@@ -66,20 +70,23 @@
 | [implementation/shavit-replay-format.md](./viewer/implementation/shavit-replay-format.md) | I：Shavit `.replay` 二进制格式规格（replay-file.inc 对齐 + 真实文件逐字节验证 + 坐标定标） |
 | [replay-rule-ai.md](./viewer/replay-rule-ai.md) | 历史注记：`.js` 规则脚本通道已移除（原稿存 archive/，不再作为事实来源） |
 | [differences.md](./viewer/differences.md) | D：无物理/单线程/不引 ts-shared 的边界与反向印证 |
+| [README.md](./viewer/README.md) | 工程说明（四维度之外）：键位 / 打包部署 / 故障排查 |
 
 > 曾列于本表的 `phys-plan-discuss/`（4 篇：t2-bench-brief / t5-user-test-guide-consumer-engineer / t8-user-test-guide / tick-mode-handover）与 `discussion/`（1 篇：r3-memo-phys-researcher）已随工作区精简移出版本库，不再作为事实来源（见 git 历史）。
 
-### test/dual-mode-harness/docs/（5 篇：验证工程）
+### documents/dual-mode-harness/（7 篇：验证工程）
 
 | 文档 | 维度 |
 |---|---|
-| [overview.md](../test/dual-mode-harness/docs/overview.md) | A：三线程 + 一块共享内存、最小集取舍、阶段编号 |
-| [sequences.md](../test/dual-mode-harness/docs/sequences.md) | T：启动链、双槽唤醒与双缓冲协议、BSP 加载、消息回退 |
-| [implementation/dual-physics.md](../test/dual-mode-harness/docs/implementation/dual-physics.md) | I：WorkerA 双模物理 |
-| [implementation/shared-layout.md](../test/dual-mode-harness/docs/implementation/shared-layout.md) | I：TestShared 192B 布局与 WorkerB 渲染 |
-| [differences.md](../test/dual-mode-harness/docs/differences.md) | D：vs game/debug/viewer、192B vs 512B 对照 |
+| [overview.md](./dual-mode-harness/overview.md) | A：三线程 + 一块共享内存、最小集取舍、阶段编号 |
+| [sequences.md](./dual-mode-harness/sequences.md) | T：启动链、双槽唤醒与双缓冲协议、BSP 加载、消息回退 |
+| [implementation/dual-physics.md](./dual-mode-harness/implementation/dual-physics.md) | I：WorkerA 双模物理 |
+| [implementation/shared-layout.md](./dual-mode-harness/implementation/shared-layout.md) | I：TestShared 192B 布局与 WorkerB 渲染 |
+| [differences.md](./dual-mode-harness/differences.md) | D：vs game/debug/viewer、192B vs 512B 对照 |
+| [implementation/conclusion.md](./dual-mode-harness/implementation/conclusion.md) | 会审结论与修复架构（2026-08-11「64t 坡速 ≈ 无限制」事实基准） |
+| [README.md](./dual-mode-harness/README.md) | 工程说明（四维度之外）：操作 / 部署 / 故障排查 |
 
-> 工程根说明文档（操作/部署）：[apps/debug/README.md](../apps/debug/README.md) · [apps/game/README.md](../apps/game/README.md) · [apps/viewer/README.md](../apps/viewer/README.md) · [test/dual-mode-harness/README.md](../test/dual-mode-harness/README.md)（验证工程）。
+> 工程根说明文档（操作/部署）：[documents/debug/README.md](./debug/README.md) · [documents/game/README.md](./game/README.md) · [documents/viewer/README.md](./viewer/README.md) · [documents/dual-mode-harness/README.md](./dual-mode-harness/README.md)（验证工程）。
 > Agent 工作规范见根 [AGENTS.md](../AGENTS.md)。
 
 ## 3. 阅读路径建议
@@ -87,7 +94,7 @@
 - **新人通读**：architecture.md §1-§4 → 想深入哪个工程就进其 overview + sequences → 细分实现按需 → differences 收尾。
 - **改共享层**：phys.md / wasm-core.md / ts-shared.md → 对应工程 differences.md 的"共享层取舍"节 → 改后核对 architecture.md §5 不变量清单。
 - **放录像 / 调映射**：documents/viewer/implementation/shavit-replay-format.md（格式规格）→ documents/viewer/implementation/replay-system.md（实现细节）。
-- **排查时序问题**：documents/debug/sequences.md（权威帧双线）↔ test/dual-mode-harness/docs/sequences.md（对照系）。
+- **排查时序问题**：documents/debug/sequences.md（权威帧双线）↔ documents/dual-mode-harness/sequences.md（对照系）。
 
 ## 4. 归档说明
 

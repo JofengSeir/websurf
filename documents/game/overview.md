@@ -106,7 +106,7 @@ npm run build:dist   # scripts/build-dist.mjs：single（默认，内嵌 file://
 - **multi 构建**（`build-dist.mjs:129-174`）：`index.html + styles.css + app.js + worker.js + websurf_wasm_bg.wasm + textures.mtz` 共 6 文件（index/styles 拷贝 `:163-165`），用于 GitHub Pages（`.github/workflows/deploy-pages.yml` 头注 9-13 行：game 以 multi dist 部署）。
 - 一键：`apps/game/play.cmd` 四步自举（ensure-node-deps → wasm → ts → dist）后以共享 `src/serve.py` 起服务（**COOP/COEP + no-store**，`src/serve.py:31-36`，SAB 生效前提）自动打开 `http://localhost:8137/dist/index.html`（端口见 `apps/game/play.cmd:6`）。
 - dev 页面：`python ../../src/serve.py 8080 .` 后访问 `/web/index.html`（需先 `npm run build:ts`）。
-- ⚠️ 仓库内已有 `apps/game/web/*.js` 与 `apps/game/dist/*` 可能是旧架构（v3）产物——运行前先重建（`apps/game/README.md` 已明示）。
+- ⚠️ 仓库内已有 `apps/game/web/*.js` 与 `apps/game/dist/*` 可能是旧架构（v3）产物——运行前先重建（`documents/game/README.md` 已明示）。
 
 ## 6. WASM 契约（双端共用一个包）
 

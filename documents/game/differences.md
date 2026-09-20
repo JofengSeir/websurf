@@ -76,4 +76,4 @@
 | "v5 Worker=纯速度修正器"头注 | `apps/game/src/app.ts:4,7` | 代码为 v7 权威帧计算器（`apps/game/src/worker/main.ts:1-16`） |
 | predictor-worker 引用 | `apps/game/src/worker/worker-types.ts:6` | 该文件不存在（grep `apps/game/src` 与 `apps/debug/src` 均无 predictor-worker 文件）；v3 双 Worker 预测已废 |
 | 协议类型缺项 | `apps/game/src/worker/worker-types.ts` | 未收录 `set-spawn-points/sync-render-state/teleport-to-pos` 等现行消息；运行时协议以 `src/ts-shared/auth/worker-dispatch.ts:79-216` 为准 |
-| web/*.js、dist/* 旧产物 | `apps/game/web/`、`apps/game/dist/` | 可能是 v3 时代构建产物，运行前先 `npm run build:ts` / `build-dist.cmd`（`apps/game/README.md` 明示） |
+| web/*.js、dist/* 旧产物 | `apps/game/web/`、`apps/game/dist/` | 可能是 v3 时代构建产物，运行前先 `npm run build:ts` / `build-dist.cmd`（`documents/game/README.md` 明示） |

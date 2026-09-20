@@ -10,9 +10,9 @@
 > - **本文描述的物理语义仍然成立**（解耦 = 1ms 无限制真理源 + 独立 64t tickPhys 速度校准 + 分叉锚定），
 >   但现在对应 `decoupled-loop.ts`；文中 `src/worker-a.ts:NNN` 行号**已随迁移漂移**，请以该文件为准。
 > - 本工程现支持三模式（`coupled`/`decoupled`/`tick`）运行时热切：总览见 [../overview.md](../overview.md) §1/§2，
->   三模式内核与协议见 [../../../../documents/ts-shared.md](../../../../documents/ts-shared.md)。
+>   三模式内核与协议见 [ts-shared.md](../../ts-shared.md)。
 >
-> 设计动机的历史推导（「64t 坡速 ≈ 无限制」会审、旧单实例实现的缺陷、四条用户要求）见工程根 [../../CONCLUSION.md](../../CONCLUSION.md)；本文只记录**当前代码**如何落地这些结论。
+> 设计动机的历史推导（「64t 坡速 ≈ 无限制」会审、旧单实例实现的缺陷、四条用户要求）见 [conclusion.md](./conclusion.md)；本文只记录**当前代码**如何落地这些结论。
 
 ## 1. 双实例架构：两个 PhysWorld
 
@@ -76,7 +76,7 @@ phys.set_velocity(st.velX, st.velY, st.velZ);
 
 - **每 tick 边界执行**，三轴全写（含 vy）——独立实例的 vy 是自身 64t 重力演化结果，不存在「重复推进时间」问题，无需旧实现「vy 用模式A」的补救 hack（`src/worker-a.ts:18-20` 头注）。
 - **位置/角度绝不触碰**（`:267` 注释「位置/角度绝不触碰（用户要求 3）」）——模式A 的位置/角度只由自己推进。
-- **时刻对齐**：tick 实例只在边界推进，其状态时刻 = 边界时刻，校准注入的速度与模式A 位置**同刻**（消除旧单实例实现「在模式A 末端状态上再走 15.6ms、其速度对应 T+15.6ms 却注入 T 时刻」的「未来速度」伪差；`src/worker-a.ts:16-17` 头注、[../../CONCLUSION.md](../../CONCLUSION.md) §一.3）。
+- **时刻对齐**：tick 实例只在边界推进，其状态时刻 = 边界时刻，校准注入的速度与模式A 位置**同刻**（消除旧单实例实现「在模式A 末端状态上再走 15.6ms、其速度对应 T+15.6ms 却注入 T 时刻」的「未来速度」伪差；`src/worker-a.ts:16-17` 头注、[conclusion.md](./conclusion.md) §一.3）。
 
 ## 5. 分叉兜底锚定（TICK_ANCHOR_DIST = 64）
 
@@ -90,7 +90,7 @@ function tickDiverged(): boolean {
 ```
 
 - tick 边界**先检查后推进**：`if (tickDiverged()) alignTickPhys()`（`:259-261`）——与模式A 位置偏差平方 > 64² 视为「极限操作分叉」（死亡/传送/卡墙/坡缘等极限操作后校准速度脱离渲染上下文的「渲染混乱」根因），**全量 set_state 拉回模式A**（`:254-258` 注释）。
-- 正常演化偏差有界（≤ 数十 units）**不干预**——tick 保持自身 64t 离散演化，避免每边界强制锚定引入相位伪差（试错记录：强制锚定会导致 tick 着地判定错位 → 空中二次起跳/落地延迟/连跳梯度崩塌，已废弃，[../../CONCLUSION.md](../../CONCLUSION.md) §二「关键语义」末条）。
+- 正常演化偏差有界（≤ 数十 units）**不干预**——tick 保持自身 64t 离散演化，避免每边界强制锚定引入相位伪差（试错记录：强制锚定会导致 tick 着地判定错位 → 空中二次起跳/落地延迟/连跳梯度崩塌，已废弃，[conclusion.md](./conclusion.md) §二「关键语义」末条）。
 
 ## 6. 世界构建（world-json）
 
@@ -105,7 +105,7 @@ function tickDiverged(): boolean {
 
 **到达时序容错**：`world-json` 先于 wasm 初始化到达 → 暂存 `pendingWorld`，`startInit` 完成后应用（`:110-111,338-343,202-205`）。
 
-**PhysWorld API 使用面**：worker-a 只用 `set_hull / build_world / set_death_y / tick / set_velocity / set_state / state / respawn`（grep `phys.` 于 `src/worker-a.ts`）；`scripts/check-wasm-api.mjs:26-39` 固化的 12 API 契约（另含 predict/teleport_to/set_params/set_yaw_pitch/take_event）全部由共享 `websurf-phys` 提供（仓库根 `src/phys/mod.rs` 21 个导出方法，见 [../../../../documents/phys.md](../../../../documents/phys.md)）。
+**PhysWorld API 使用面**：worker-a 只用 `set_hull / build_world / set_death_y / tick / set_velocity / set_state / state / respawn`（grep `phys.` 于 `src/worker-a.ts`）；`scripts/check-wasm-api.mjs:26-39` 固化的 12 API 契约（另含 predict/teleport_to/set_params/set_yaw_pitch/take_event）全部由共享 `websurf-phys` 提供（仓库根 `src/phys/mod.rs` 21 个导出方法，见 [phys.md](../../phys.md)）。
 
 ## 7. 消息协议（WorkerA 侧）
 
@@ -121,7 +121,7 @@ function tickDiverged(): boolean {
 
 ## 8. 设计动机（当前结论的代码落点）
 
-「为什么双模、为什么稳态速度 tick 无关」的完整推导见 [../../CONCLUSION.md](../../CONCLUSION.md)；其物理层依据在共享 crate 中可逐条核对（仓库根 `src/phys/player.rs`）——摩擦 `drop = control × friction × dt`（`player.rs:312`）、地面/空中加速 `accelspeed = accel|airaccel × wishspeed × dt`（`player.rs:272,295`）、半隐式重力 `½g·dt` ×2（`player.rs:946-948`）、`clip_velocity` 精确剪裁（`player.rs:323`）：算子全部按 dt 标定 ⇒ sustained surf 稳态速度是 **tick 不变量**，64t 与 1ms 必然收敛到同一平衡速度。因此 harness 的双模价值不在稳态速度，而在**输入采样相位 + 离散施加点**（bhop 起跳延迟 ∈(0, tickDt]、转向台阶、碰撞/钳制相位）——这些正是 tick 边界采样（§3.2）与独立实例演化（§1）所承载的（预期行为声明：`src/worker-a.ts:28-29` 头注）。
+「为什么双模、为什么稳态速度 tick 无关」的完整推导见 [conclusion.md](./conclusion.md)；其物理层依据在共享 crate 中可逐条核对（仓库根 `src/phys/player.rs`）——摩擦 `drop = control × friction × dt`（`player.rs:312`）、地面/空中加速 `accelspeed = accel|airaccel × wishspeed × dt`（`player.rs:272,295`）、半隐式重力 `½g·dt` ×2（`player.rs:946-948`）、`clip_velocity` 精确剪裁（`player.rs:323`）：算子全部按 dt 标定 ⇒ sustained surf 稳态速度是 **tick 不变量**，64t 与 1ms 必然收敛到同一平衡速度。因此 harness 的双模价值不在稳态速度，而在**输入采样相位 + 离散施加点**（bhop 起跳延迟 ∈(0, tickDt]、转向台阶、碰撞/钳制相位）——这些正是 tick 边界采样（§3.2）与独立实例演化（§1）所承载的（预期行为声明：`src/worker-a.ts:28-29` 头注）。
 
 ## 9. 验证覆盖
 

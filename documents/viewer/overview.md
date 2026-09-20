@@ -4,7 +4,7 @@
 > 核心时序见 [sequences.md](sequences.md)，细分实现见 [implementation/](implementation/)，
 > 与 debug/game/test 及共享层的取舍差异见 [differences.md](differences.md)，
 > .replay 二进制格式规格见 [implementation/shavit-replay-format.md](implementation/shavit-replay-format.md)。
-> 使用说明（操作键位 / 打包部署 / 故障排查）见工程根 [../../apps/viewer/README.md](../../apps/viewer/README.md)。
+> 使用说明（操作键位 / 打包部署 / 故障排查）见工程根 [../../documents/viewer/README.md](./README.md)。
 
 ## 1. 定位：无物理的"看"工程
 
