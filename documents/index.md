@@ -17,7 +17,7 @@
 | 验证物理时序 / 跑对照 | [documents/dual-mode-harness/overview.md](./dual-mode-harness/overview.md) |
 | 建新子工程 / 统一启动方式与文件结构 / 判断什么该上提到 `src/` | [framework-launch-structure.md](./framework-launch-structure.md)（启动·结构·产物规范）+ [framework-decoupling.md](./framework-decoupling.md)（共享层解耦裁决）+ [framework-audit.md](./framework-audit.md)（现状事实基线） |
 
-## 2. 文档树（documents/ 下全量 **45 篇** = 根 11 + `debug/` 7 + `game/` 12 + `viewer/` 8 + `dual-mode-harness/` 7，含本文 index.md 自身；历史档案与过程讨论已移出版本库（2026-09-11），仅工程内 `test/dual-mode-harness/docs/archive/` 5 篇留存、不作为事实来源）
+## 2. 文档树（documents/ 下全量 **46 篇** = 根 11 + `debug/` 7 + `game/` 13 + `viewer/` 8 + `dual-mode-harness/` 7，含本文 index.md 自身；历史档案与过程讨论已移出版本库（2026-09-11），仅工程内 `test/dual-mode-harness/docs/archive/` 5 篇留存、不作为事实来源）
 
 ### 根 documents/（11 篇：总架构 + 共享层四篇 + 仓库框架规范三篇 + 发布面两篇 + 本导航）
 
