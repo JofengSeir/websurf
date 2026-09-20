@@ -6,6 +6,12 @@
 
 ### 新增
 
+#### HUD 与键位显示（2026-09-21）
+
+- **game 左下角按键簇（viewer 同款）+ 两侧统一加 Q/E、交换蹲跳位置**：`apps/game` 新增 `#keys`（8 键：Q/W/E/A/S/D/蹲/跳），布局与 viewer `#timeline` 右列的 `.tm-keys` 同款——3 列网格，**Q/W/E 上排**（Q、E 占据原先空缺的左上/右上位）· A/S/D 中排 · 下排 = **蹲（1 格）+ 跳（2 格）**。两侧同时把蹲/跳位置对调（宽度规则不变：蹲 1 格、跳 2 格）。
+  - **标签与面板一一对应**：标签不是写死的键名，而是取该动作**第一个绑定键**的显示名（`loadKeymap()` + `codeLabel()`，与面板「按键」模块同源）⇒ 面板里把「蹲」改到 Shift，HUD 就显示 `Shift`；某动作键位被删光（= 已禁用）则显示 `—` 并降透明度（`.off`）。`KeyboardInput` 新增 `onKeymapChange` 订阅，面板每次改键即时刷新标签。
+  - **高亮取实时输入**：game 侧逐帧比对输入掩码、**仅在状态变化时写 DOM**（静止零开销）；viewer 侧沿用 `Clip.buttons[index]` 的 IN_* 位掩码，新增转向位 `IN_TURNLEFT=1<<25` / `IN_TURNRIGHT=1<<26`（CS:GO `in_buttons.h`；回放不含转向位时 Q/E 保持暗态，不影响其余键）。
+  - 文档同步：`documents/game/overview.md`（4 处行数声明 + `#keys` 说明，并把 `index.html` 的「id 80 / data-* 14 / class 30」标注为 2026-09-12 的历史快照，实测更新为 93/24/41 并写明计数口径）、`documents/game/differences.md`、`documents/viewer/overview.md`、`documents/viewer/implementation/replay-system.md`（六键 → 八键）。
 #### 光照模式改为运行期切换 + viewer 接入 + debug 空屏根因修复（2026-09-21）
 
 - **`test/game-core` 转为本地工程（不入库）**：用户裁定不把该实验工程推到远端 —— 用 `git filter-branch --index-filter "git rm -r --cached --ignore-unmatch test/game-core" --prune-empty` 把该路径从 **未发布的 32 个提交**里整体剥离（远端 `a5cd4c2` 从未包含过它 ⇒ 仍是 **fast-forward**，无需 force）：未发布提交 **32 → 24**、文件 **226 → 76**、行数 **+59732 → +12784**。本地工程保留在工作区（12396 文件），仓库根 `.gitignore` 新增 `test/game-core/` 排除；`test:glb-contract` 把该工程标为 `optional`——本机有 ⇒ **4/4 PASS**，干净检出无此目录 ⇒ **SKIP + exit 0**（两条路径均实测）。备份：分支 `backup/pre-game-core-strip` + `.tmp/backup-test-game-core/`。登记见 `AGENTS.md` §7.3。

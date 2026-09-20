@@ -11,6 +11,7 @@
     DOM 结构 / ID / 类名 / data-* 与 JS 绑定（./app.js）完全不变，键位/物理/功能零改动。
     布局：canvas#preview 三维画布 · #status/#error 右上状态行（LED 呼吸灯）·
     #crosshair 准星（--ch-* 运行时可调）· #hud>#stats 速度 HUD（底部 24%）·
+    #keys 左下角按键簇（Q/W/E/A/S/D/蹲/跳，标签按当前键位动态写入，2026-09-21 新增）·
     #fps 左上帧率 · #loadingOverlay 加载进度引导层 · #panel>.win ESC 控制面板
     （左导航 + 右设置体）。
   -->
@@ -37,6 +38,20 @@
     <div class="ch-dot"></div>
   </div>
   <div id="hud"><div id="stats">0</div></div>
+
+  <!-- 左下角按键簇：结构在此（grid 位置见 styles.css），
+       标签由 app.ts 按当前键位写入（与面板「按键」模块一一对应），
+       高亮取实时输入状态。data-action = keymap 的动作名。 -->
+  <div id="keys" class="tm-keys" aria-hidden="true">
+    <span class="tm-key tm-key-q" data-action="yawLeft">Q</span>
+    <span class="tm-key tm-key-w" data-action="forward">W</span>
+    <span class="tm-key tm-key-e" data-action="yawRight">E</span>
+    <span class="tm-key tm-key-a" data-action="left">A</span>
+    <span class="tm-key tm-key-s" data-action="backward">S</span>
+    <span class="tm-key tm-key-d" data-action="right">D</span>
+    <span class="tm-key tm-key-duck" data-action="duck">蹲</span>
+    <span class="tm-key tm-key-jump" data-action="jump">跳</span>
+  </div>
 
   <!-- FPS 显示（左上角） -->
   <div id="fps">--</div>

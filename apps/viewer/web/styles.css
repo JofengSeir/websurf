@@ -303,7 +303,8 @@ code { font-family: var(--mono); color: var(--accent); }
 .telemetry .vsep { color: rgba(255, 255, 255, 0.35); margin: 0 8px; font-weight: 400; }
 .telemetry .tm-vert { color: var(--muted); }
 
-/* ── 按键簇：#timeline 右列（grid 布局，随时间轴显隐）────────────── */
+/* ── 按键簇：#timeline 右列（grid 布局，随时间轴显隐）
+   Q/W/E 上排（Q、E 占上排左右位）· A/S/D 中排 · 下排 = 蹲（1 格）+ 跳（2 格）── */
 #timeline { display: grid; grid-template-columns: 1fr auto; column-gap: 14px; }
 .tl-slider-row, .tl-controls, .tl-opts { grid-column: 1; }
 .tm-keys {
@@ -319,12 +320,14 @@ code { font-family: var(--mono); color: var(--accent); }
 .tm-key.on {
   color: #0f1115; background: var(--accent); border-color: var(--accent); font-weight: 600;
 }
+.tm-key-q { grid-area: 1 / 1; }
 .tm-key-w { grid-area: 1 / 2; }
+.tm-key-e { grid-area: 1 / 3; }
 .tm-key-a { grid-area: 2 / 1; }
 .tm-key-s { grid-area: 2 / 2; }
 .tm-key-d { grid-area: 2 / 3; }
-.tm-key-jump { grid-area: 3 / 1 / 4 / 3; }
-.tm-key-duck { grid-area: 3 / 3; }
+.tm-key-duck { grid-area: 3 / 1; }
+.tm-key-jump { grid-area: 3 / 2 / 4 / 4; }
 select.tl-select {
   font-family: inherit; font-size: 11.5px; color: var(--text);
   background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border);

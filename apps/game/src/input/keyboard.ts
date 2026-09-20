@@ -49,9 +49,18 @@ export class KeyboardInput {
     this.codeMap = buildCodeMap(keymap);
   }
 
-  /** 更新键位映射（面板录制后调用；立即生效）。 */
+  /** 键位变更订阅（面板改键后刷新使用方显示，如左下角按键簇标签；单订阅者足够）。 */
+  private keymapListener: (() => void) | null = null;
+
+  /** 注册键位变更回调（覆盖式；传 null 取消）。 */
+  onKeymapChange(fn: (() => void) | null): void {
+    this.keymapListener = fn;
+  }
+
+  /** 更新键位映射（面板录制后调用；立即生效并通知订阅者）。 */
   setKeymap(keymap: Record<BindableAction, string[]>): void {
     this.codeMap = buildCodeMap(keymap);
+    this.keymapListener?.();
   }
 
   /** 启用/禁用按键捕获（锁定启用；ESC 退锁/面板打开禁用）。 */

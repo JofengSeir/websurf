@@ -14,7 +14,8 @@ import type { RuntimeConfig } from './config.js';
 import { BspProcessor, decompress_mtz } from '../pkg/websurf_wasm.js';
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
-import { loadKeymap, type BindableAction } from './input/keymap.js';
+import { ACTION_LABELS, codeLabel, loadKeymap, type BindableAction } from './input/keymap.js';
+import type { KeyState } from './worker/worker-types.js';
 import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
@@ -31,6 +32,7 @@ const dom = {
   fileInput: document.getElementById('bspFile') as HTMLInputElement | null,
   statusEl: document.getElementById('status') as HTMLElement | null,
   statsEl: document.getElementById('stats') as HTMLElement | null,
+  keys: document.getElementById('keys') as HTMLElement | null,
   spawnSelect: document.getElementById('spawnSelect') as HTMLSelectElement | null,
   respawnBtn: document.getElementById('respawnBtn') as HTMLButtonElement | null,
   fpsEl: document.getElementById('fps') as HTMLElement | null,
@@ -50,6 +52,9 @@ const dom = {
 const keyboard = new KeyboardInput(loadKeymap());
 // 面板改键入口：暴露 KeyboardInput 实例（setKeymap）
 (globalThis as unknown as { __keyboardInput?: KeyboardInput }).__keyboardInput = keyboard;
+
+// 面板「按键」模块改键后 → 立即刷新左下角按键簇标签（保证与面板一一对应）
+keyboard.onKeymapChange(() => syncKeyHudLabels());
 export type { BindableAction };
 const mouseBuffer = new MouseBuffer();
 const pointerLock = new PointerLockController();
@@ -198,7 +203,8 @@ if (isolated) {
     },
   );
 
-  // 5. 输入绑定
+  // 5. 输入绑定（按键簇标签先就位，避免首帧显示 HTML 里的默认键名）
+  initKeyHud();
   bindInput();
   startInputLoop();
 }
@@ -378,7 +384,9 @@ function startInputLoop(): void {
     if (!bridge || !sceneReady) return;
     // 未锁定（面板打开）时强制输入为 0：面板内按键不进入物理（keyboard 已禁用，
     // 这里双保险防 ESC 前后按键状态残留）
-    const mask = pointerLock.isLocked() ? keysToMask(keyboard.getState()) : 0;
+    const keyState = keyboard.getState();
+    const mask = pointerLock.isLocked() ? keysToMask(keyState) : 0;
+    updateKeyHud(keyState); // 左下角按键簇高亮（仅状态变化时写 DOM）
     // 滚轮跳：仅锁定时并入本帧输入（消费一次即清）
     const maskWithWheel = pointerLock.isLocked() && wheelJumpPending ? mask | KEY_MASK.wheelJump : mask;
     wheelJumpPending = false;
@@ -415,6 +423,55 @@ function updateSpeedHud(): void {
         ? `${lateral.toFixed(0)}<span class="vsep">｜</span>${vertical.toFixed(0)}`
         : `${total.toFixed(0)}`;
   dom.statsEl.innerHTML = text;
+}
+
+// ── 左下角按键簇（#keys）：标签取自当前键位、高亮取实时输入 ─────────────
+/** 键簇覆盖的动作（与 index.html 的 data-action 一一对应）。 */
+const KEY_HUD_ACTIONS: readonly BindableAction[] = [
+  'yawLeft', 'forward', 'yawRight', 'left', 'backward', 'right', 'duck', 'jump',
+];
+const keyHudEls = new Map<BindableAction, HTMLElement>();
+
+/** 初始化：按 data-action 收集 8 个键位元素并写入首版标签。 */
+function initKeyHud(): void {
+  if (!dom.keys) return;
+  for (const el of Array.from(dom.keys.querySelectorAll<HTMLElement>('[data-action]'))) {
+    const action = el.dataset.action as BindableAction | undefined;
+    if (action && KEY_HUD_ACTIONS.includes(action)) keyHudEls.set(action, el);
+  }
+  syncKeyHudLabels();
+}
+
+/**
+ * 写入标签：取该动作**第一个绑定键**的显示名（与面板「按键」模块同源：
+ * `loadKeymap` + `codeLabel`）⇒ 面板里改成什么，HUD 就显示什么。
+ * 键位被删光 = 该动作已禁用 ⇒ 显示 "—" 并加 `.off`（与面板同语义）。
+ */
+function syncKeyHudLabels(): void {
+  if (keyHudEls.size === 0) return;
+  const keymap = loadKeymap();
+  for (const [action, el] of keyHudEls) {
+    const codes = keymap[action] ?? [];
+    if (codes.length === 0) {
+      el.textContent = '—';
+      el.classList.add('off');
+      el.title = `${ACTION_LABELS[action]}：未绑定（已禁用）`;
+    } else {
+      el.textContent = codeLabel(codes[0]);
+      el.classList.remove('off');
+      el.title = `${ACTION_LABELS[action]}（${codes.map(codeLabel).join(' / ')}）`;
+    }
+  }
+}
+
+/** 高亮：逐帧调用，但**仅在状态变化时写 DOM**（静止时零开销）。 */
+let keyHudMask = -1;
+function updateKeyHud(state: KeyState): void {
+  if (keyHudEls.size === 0 || !dom.keys) return;
+  const mask = keysToMask(state);
+  if (mask === keyHudMask) return;
+  keyHudMask = mask;
+  for (const [action, el] of keyHudEls) el.classList.toggle('on', state[action] === true);
 }
 
 /**

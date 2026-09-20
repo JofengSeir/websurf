@@ -223,9 +223,12 @@ JSON 时代的助手集已随脚本通道删除，只剩两个纯函数：`wrapD
 **速度 HUD**（`#telemetry`，apps/game/web 同款：距底 24%、单行裸数字 `横向｜竖向`，水平锚点 = **可视区域**中心——右面板开启时扣除 `--sidebar-w + 26px`（与 #dock 同参），面板收起（`.full`）回全屏居中；
 竖向取绝对值，无标签无单位卡片底；数据源 = 跟随轨道 `Clip.vel` 相邻帧差分：
 横向 = `hypot(vel[0],vel[2])`、竖向 = `|vel[1]|`）；
-**按键簇**（挂 `#timeline` grid 右列，随时间轴显隐）：六键 W/A/S/D/跳/蹲，按跟随轨道当前帧
+**按键簇**（挂 `#timeline` grid 右列，随时间轴显隐）：八键 Q/W/E/A/S/D/蹲/跳——3 列网格，
+Q/W/E 上排（Q、E 占上排左右位）· A/S/D 中排 · 下排 = 蹲 1 格 + 跳 2 格（2026-09-21 加 Q/E 并
+交换蹲/跳位置，与 game 左下角 `#keys` 同布局）。按跟随轨道当前帧
 `Clip.buttons[index]` IN_* 位掩码高亮（IN_JUMP=2、IN_DUCK=4、IN_FORWARD=8、IN_BACK=16、
-IN_MOVELEFT=512、IN_MOVERIGHT=1024，与 selftest `IN_FORWARD(8)`/`IN_MOVELEFT(512)` 断言同源）。
+IN_MOVELEFT=512、IN_MOVERIGHT=1024、IN_TURNLEFT=1<<25、IN_TURNRIGHT=1<<26；前六项与 selftest
+`IN_FORWARD(8)`/`IN_MOVELEFT(512)` 断言同源；回放不含转向位时 Q/E 保持暗态，不影响其余键）。
 驱动：`syncTracks` 控速度 HUD 显隐 + 帧循环 80ms 节拍内
 `update(sample(), followClip.buttons[index])`（app.ts 帧循环段）。
 

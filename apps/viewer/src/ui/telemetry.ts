@@ -4,9 +4,9 @@
  * 速度 = 单行裸数字「横向｜竖向」（无标签无单位，竖向取绝对值），位置横向居中、
  * 距底 24%——与 game/web/index.html 速度 HUD 同款（用户定调）。数据源 = 跟随轨道
  * Clip.vel 相邻帧差分（横向 = hypot(vel[0],vel[2])，竖向 = |vel[1]|）。
- * 按键 = 六键簇（W/A/S/D/跳/蹲），挂 #timeline 右列（grid），按跟随轨道当前帧
+ * 按键 = 八键簇（Q/W/E/A/S/D/蹲/跳），挂 #timeline 右列（grid），按跟随轨道当前帧
  * Clip.buttons[index] 的 IN_* 位掩码高亮（bit 值锚点见 types.ts 注释与 replay-selftest
- * 的 IN_FORWARD(8) / IN_MOVELEFT(512) 断言）。
+ * 的 IN_FORWARD(8) / IN_MOVELEFT(512) 断言；转向位 1<<25/1<<26 见下方常量）。
  */
 
 import { el } from '../core/dom.js';
@@ -19,6 +19,10 @@ const IN_FORWARD = 1 << 3; // 8
 const IN_BACK = 1 << 4; // 16
 const IN_MOVELEFT = 1 << 9; // 512
 const IN_MOVERIGHT = 1 << 10; // 1024
+/** 转向位取 CS:GO `in_buttons.h` 的 1<<25 / 1<<26（对应 +left/+right，即默认 Q/E）。
+ *  回放里没有这两个位时对应键位保持暗态（显示但不亮），不影响其余键。 */
+const IN_TURNLEFT = 1 << 25; // 33554432
+const IN_TURNRIGHT = 1 << 26; // 67108864
 
 interface KeyDef {
   readonly mask: number;
@@ -27,14 +31,16 @@ interface KeyDef {
   readonly title: string;
 }
 
-/** 展示六键：W/A/S/D + 跳（空格）+ 蹲（Ctrl）。 */
+/** 展示八键：Q/E（转向，占上排左右空缺位）+ W/A/S/D + 蹲（1 格）/ 跳（2 格）。 */
 const KEYS: readonly KeyDef[] = [
+  { mask: IN_TURNLEFT, label: 'Q', cls: 'tm-key-q', title: 'IN_TURNLEFT（+left / Q）' },
   { mask: IN_FORWARD, label: 'W', cls: 'tm-key-w', title: 'IN_FORWARD' },
+  { mask: IN_TURNRIGHT, label: 'E', cls: 'tm-key-e', title: 'IN_TURNRIGHT（+right / E）' },
   { mask: IN_MOVELEFT, label: 'A', cls: 'tm-key-a', title: 'IN_MOVELEFT' },
   { mask: IN_BACK, label: 'S', cls: 'tm-key-s', title: 'IN_BACK' },
   { mask: IN_MOVERIGHT, label: 'D', cls: 'tm-key-d', title: 'IN_MOVERIGHT' },
-  { mask: IN_JUMP, label: '跳', cls: 'tm-key-jump', title: 'IN_JUMP（空格）' },
   { mask: IN_DUCK, label: '蹲', cls: 'tm-key-duck', title: 'IN_DUCK（Ctrl）' },
+  { mask: IN_JUMP, label: '跳', cls: 'tm-key-jump', title: 'IN_JUMP（空格）' },
 ];
 
 export class TelemetryHud {
@@ -55,7 +61,7 @@ export class TelemetryHud {
     speedRoot.appendChild(sep);
     speedRoot.appendChild(this.vertEl);
 
-    // ── 按键簇：3 列网格（W 上排居中，A/S/D 中排，跳/蹲 下排），timeline 右列 ──
+    // ── 按键簇：3 列网格（Q/W/E 上排，A/S/D 中排，蹲 1 格 + 跳 2 格 下排），timeline 右列 ──
     const keys = el('div', 'tm-keys');
     const map = new Map<string, HTMLElement>();
     for (const k of KEYS) {

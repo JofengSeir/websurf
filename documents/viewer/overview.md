@@ -86,7 +86,7 @@ viewer 是 WebSurf 四工程里**唯一不含物理系统**的工程，只做两
 | ui | `src/ui/hud.ts` | 143 | 三行状态域（位姿/地图/录像）+ flash 语义 + 引导层/兜底卡/帮助浮层 | 同上 §5 |
 | ui | `src/ui/mapinfo.ts` | 208 | 地图信息面板 + **光照模式开关（预烘焙/纯纹理）** + 出生点导航（跳转即换位姿） | 同上 §6 |
 | ui | `src/ui/replaymeta.ts` | 107 | 录像信息条：`.replay` 头部元信息常驻展示（Clip.meta → 成绩/玩家/地图/tick/帧段/日期/格式） | [implementation/replay-system.md](implementation/replay-system.md) §7.4 |
-| ui | `src/ui/telemetry.ts` | 93 | 遥测：速度 HUD（game 同款距底 24%，单行 横向｜竖向，Clip.vel 差分）+ 按键簇（#timeline 右列，Clip.buttons IN_* 位掩码） | 同上 §7.5 |
+| ui | `src/ui/telemetry.ts` | 99 | 遥测：速度 HUD（game 同款距底 24%，单行 横向｜竖向，Clip.vel 差分）+ 按键簇（八键 Q/W/E/A/S/D/蹲/跳，挂 #timeline 右列，Clip.buttons IN_* 位掩码；转向位取 1<<25 / 1<<26） | 同上 §7.5 |
 | replay | `src/replay/types.ts` | 164 | 数据契约：RuleConfig v2（映射切换）/ ReplayHeaderMeta / Clip（含 buttons+meta）/ Track | 同上 §1 |
 | replay | `src/replay/shavit-replay.ts` | 585 | `.replay` 原生解析：嗅探/头部/帧解码/坐标定标映射/世界速度差分/V2 兼容 | 同上 §2 |
 | replay | `src/replay/helpers.ts` | 17 | 角度纯函数（wrapDeg / clampPitch） | 同上 §3.1 |
