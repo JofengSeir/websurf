@@ -839,12 +839,13 @@ $enc    = New-Object System.Text.UTF8Encoding($false)
 
 | # | 条件 | 结果 |
 |---|---|---|
-| 1 | 两工程 `check-wasm-api.mjs` 同一 blob；各自 exit 0 | **部分**：契约**引擎**仍单源于 `src/scripts/lib/wasm-api-contract.mjs`（未改）；`apps/game` 的薄配置清单补 `export_glb_with_pakfile_models_with_defaults_and_lights`；两工程 `check:api` 各自通过（debug 走其自有 F4 检查） |
+| 1 | 两工程 `check-wasm-api.mjs` 同一 blob；各自 exit 0 | **按后续规则修正**：契约**引擎**仍单源于 `src/scripts/lib/wasm-api-contract.mjs`（未改）；`apps/game` 的薄配置清单补 `export_glb_with_pakfile_models_with_defaults_and_lights`（99 → 100 行）。`test/game-core` 自 §2.1 隔离铁律（2026-09-18 新增，晚于本节 r1）起持**引擎隔离副本**，故「同一 blob」这一条被后续规则取代；两侧 `check:api` 各自通过（debug 走其自有 F4 检查） |
 | 2 | 两工程 `typecheck` / `build:ts` exit 0 | ✅ apps/game、apps/debug、apps/viewer 三工程各自 0 |
-| 3 | GLB 内容断言（TEXCOORD_1 / atlas / 图元顶点数 / extras.faceIndex） | 由各工程既有 `test:lightmap-*` 与 `test:verify-*` 脚本覆盖；本轮未新跑全量矩阵（登记为收尾待办） |
+| 3 | GLB 内容断言（TEXCOORD_1 / atlas / 图元顶点数 / extras.faceIndex） | ✅ **跨工程断言已入库**：`test/dual-mode-harness/scripts/cross-project-glb-contract.mjs`（`npm run test:glb-contract`）——四个工程各自导出 surf_666 后逐项断言，**4/4 通过且指标逐字一致**：atlas `textureIndex=0`（PNG）、119 个材质带 `__vbsp_lightmap__` 扩展、primitives 35202（含 `TEXCOORD_1` 34156，`hasLightmap` true 33716 / false 440 / 缺 0）、`faceIndex` 34156 个全唯一、连续两次导出字节相同（确定性）。**唯一差异**是各自入口：game/debug 走 `…_with_defaults_and_lights`、viewer 走 `…_with_pakfile_models` |
 | 4 | 同一地图两工程出图一致 | ✅ 逐像素比对：apps/game 出生点帧与迁移前副本帧差 **0.01%**（67/660352） |
 | 5 | 文档门禁零漂移 | ✅ `node src/scripts/check-doc-drift.mjs` A/B 计数为 0（C/D 为既有告警） |
 | 6 | 无临时产物混入 | ✅ `git ls-files -- '**/temp/**' '**/.tmp/**'` 为空 |
+| 7 | （附加）`test/game-core` 隔离硬指标（AGENTS.md §2.1） | ✅ 把仓库根 `src/` 整体移走后，该工程 `npm run typecheck`、`npm run build:ts`、`cargo check --target wasm32-unknown-unknown` **三项 exit 0**；移回后 89 个文件逐文件 sha256 **全等**（零改动） |
 
 ### 10.4 收口后的边界状态
 

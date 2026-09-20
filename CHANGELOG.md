@@ -13,6 +13,8 @@
 - **apps/debug 接入共享光照栈 + 同一面板切换（3eb471e、8c6c3b5）**：wasm 导出层按新共享 API 适配（`BspProcessor.bsp` 改 `Arc<Bsp>`、pakfile 枚举顺带收 `sp_<idx>.vhv`、`StaticProp` 补 `vertex_lighting`/`ambient_cube`、`PakMaterials` 补 `unlit`），并补 `export_glb_with_pakfile_models_with_defaults_and_lights` 等三个入口与 `collect_light_entities`；渲染端把 194 行的本地 lightmap 着色器换成共享版 1667 行（保留其路径记录 / 碰撞体调试 / 平面检查器 / LOD / PVS / light-manager 等既有调试能力），新增 `lighting.mode` 配置与面板 radio + 提示小字。浏览器实测：`→ texture` 后 35254 个 mesh 全走 fullbright；`→ baked` 后恢复 lightmap（2030 / hasLightmap=false 1538）。
 - **apps/viewer 共享层适配（9d342a9）**：同一组机械适配（Arc 借用式、vhv/ambient cube、material_unlit）。验证：`build:wasm` / `typecheck` / `build:ts` / `test:replay` 全通过。
 - **登记**：`AGENTS.md` §7.2.4（隔离副本回并闭环）与 §7.2.5（光照着色器上提 `src/ts-shared/render/` 的两个候选方案，待裁定）。
+- **跨工程 GLB 契约门禁（新增）**：`test/dual-mode-harness/scripts/cross-project-glb-contract.mjs`（`npm run test:glb-contract`）——`apps/{game,debug,viewer}` 与 `test/game-core` 各自导出 surf_666 后断言 lightmap 契约：**4/4 通过且指标逐字一致**（atlas `textureIndex=0` PNG、119 个材质带 `__vbsp_lightmap__`、primitives 35202 / 含 `TEXCOORD_1` 34156 / `hasLightmap` true 33716 false 440 缺 0、`faceIndex` 34156 个全唯一、连续两次导出字节相同）。
+- **`test/game-core` 隔离硬指标复验通过**：把仓库根 `src/` 整体移出后，该工程 `typecheck` / `build:ts` / `cargo check`（wasm32）三项 exit 0；移回后 89 个文件逐文件 sha256 全等（零改动）。
 
 #### 仓库框架规范（审计 + 规范，2026-09-12）
 

@@ -12,7 +12,8 @@
     "build:dist": "node scripts/build-dist.mjs",
     "dev": "python ../../src/serve.py 8110 .",
     "check:api": "node scripts/check-wasm-api.mjs",
-    "test:three-mode": "node scripts/three-mode-verify.mjs"
+    "test:three-mode": "node scripts/three-mode-verify.mjs",
+    "test:glb-contract": "node scripts/cross-project-glb-contract.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
