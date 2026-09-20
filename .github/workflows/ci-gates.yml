@@ -10,8 +10,9 @@
 # 门禁清单（与各工程 package.json 的 test:* 对齐，规范 §6.2「test:* ⊆ CI」）：
 #   rust-unit-tests — `cargo test -p websurf-phys`（共享层物理单测；含蹲姿/surf 回归、P2 幻影门）
 #   harness         — test/dual-mode-harness：wasm + ts + three-mode 运行时验证
-#   debug           — test:optimize-scene / test:auth-clock / test:path-acceptance / test:jump-apex
-#                     （jump-apex 读 test/dual-mode-harness/pkg，故排在同一 job 的 harness 之后）
+#   debug           — test:optimize-scene / test:auth-clock / test:path-acceptance / test:jump-apex /
+#                     test:surf-crouch（前两者打包时解析 `pkg/` ⇒ 本 job 先建 debug wasm；
+#                     jump-apex 另读 test/dual-mode-harness/pkg，故排在 harness 之后）
 #   game            — test:phys / test:seed-smoke / test:surf-crouch（都读 apps/game/pkg）
 #   viewer          — test:replay（纯 TS 自检，不依赖 pkg）
 #
@@ -19,8 +20,8 @@
 #   - `test:glb-contract`（test/dual-mode-harness）：它要同时加载 apps/{game,debug,viewer} 与
 #     `test/game-core` 四份 pkg，而 test/game-core 已于 9-21 转为本地工程（不入库）→ 在 CI 上
 #     无法成立，需重做或删掉该门。
-#   - `debug:test:surf-crouch`：与 game 侧脚本逐字节相同（同一份 wasm 端到端验证），
-#     为它单独编译一次 debug wasm 需 +150 s，收益为零，故只跑 game 侧。
+#   - （已纳入）`debug:test:surf-crouch`：与 game 侧脚本逐字节相同；debug 的 pkg 本就要为
+#     optimizeScene 门构建，故顺带跑掉这一道，边际成本为零。
 
 name: CI Gates
 
@@ -134,6 +135,13 @@ jobs:
         working-directory: apps/debug
         run: npm ci
 
+      - name: Build debug WASM
+        working-directory: apps/debug
+        # debug 的门禁会把 `src/renderer/renderer-main.ts`（及其 `../pkg/websurf_wasm.js`）
+        # 用 esbuild 打包成 Node bundle ⇒ **必须先有 pkg/**，否则 esbuild 直接报
+        # "Could not resolve ../../pkg/websurf_wasm.js"（2026-09-21 实测）。
+        run: npm run build:wasm
+
       # 渲染性能回归门：面片规模地图（surf_666 GLB = 34409 primitive）必须经 optimizeScene
       # 合并到 300~800 块（否则每帧 3.4 万次 draw call）。断言顶点守恒 + 块数区间。
       - name: Verify debug optimizeScene (GLB 空间分块合并)
@@ -154,6 +162,11 @@ jobs:
       - name: 跳跃顶点权威验证（jump apex）
         working-directory: apps/debug
         run: npm run test:jump-apex
+
+      - name: debug 贴坡蹲姿端到端（wasm 产物级）
+        working-directory: apps/debug
+        # 直读 apps/debug/pkg：贴坡松开蹲键保持蹲姿 / 落地即起立 / 空中蹲姿动量 == 站姿
+        run: npm run test:surf-crouch
 
   # ── game 门禁（都读 apps/game/pkg）────────────────────────────────
   game-gates:
