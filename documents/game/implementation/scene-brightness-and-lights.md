@@ -453,12 +453,82 @@ P1 之前 prop 走 fullbright（`× vec3(1.0)`）⇒ 偏亮；P1 之后 prop 真
 
 平价帧 mean luma 26.0 / 亮档帧 35.3（同机同视角，`luma<12` 分别 7.8% / 0.5%）。
 
-### 9.3 下一步（未做，优先级最高）：接上第 1 级逐顶点光照
+### 9.3 下一步（**已做**，2026-09-20 第四轮）：接上第 1 级逐顶点光照
 
-- 导出侧：按 prop 索引读 pakfile 的 `sp_hdr_<i>.vhv` → `sp_<i>.vhv`，解析后写 `COLOR_0`（或自定义属性）；
-- 渲染端：`lightitem = vLight^2.2`（因为末端还有一次 γ2.2 编码），即可与引擎逐顶点对齐；
+- 导出侧：按 prop 索引读 pakfile 的 `sp_hdr_<i>.vhv` → `sp_<i>.vhv`，解析后写自定义属性 `_VBSP_VLIGHT`；
+- 渲染端：`lightitem = vLight^(2.2/γ) × exposure`（末端还有一次 γ2.2 编码 ⇒ γ=2.2 时与引擎逐顶点口径一致）；
 - **顶点对应关系已核对**：vhv 各 mesh 顶点数**累加 = 模型顶点数**
   （idx 264：132 + 98 + 8 = **238** = GLB 每个 primitive 的顶点数；GLB 每个 primitive 都带全量顶点、用索引选面）
-  ⇒ 可按"模型顶点序号"直接挂；不一致时回退 leaf cube。
-- 预期收益：坡面恢复 0.113→0.757 的明暗梯度（引擎口径），**量级不变**（仍 ≈0.21）。
+  ⇒ 按"模型顶点序号"直接挂；不一致时回退 leaf cube。
+- 实施细节与实测数字见 §10。
+
+## 10. 收官（2026-09-20 第四轮）：第 1 级逐顶点预烘焙**全量接入**并实测
+
+### 10.1 数据链路（每一环都有仪器）
+
+| 环 | 实现 | 位置 |
+|---|---|---|
+| 读 pakfile | 单次遍历 zip 顺带收 `sp_<n>.vhv` / `sp_hdr_<n>.vhv`（HDR 优先） | `test/game-core/crates/wasm/src/lib.rs`（`collect_pakfile_models`） |
+| 解析 vhv | `parse_vhv` ⇒ `byte × 2/255` 倍率（对齐外部参照实现 `vVertexLighting = floor(enc) × 2/255`） | `test/game-core/crates/wasm-core/vhv.rs`（4 个单元测试，含 3 个负控） |
+| 进 GLB | 逐实例的 `_VBSP_VLIGHT`（f32×3，stride 12）+ `extras.vertexLighting=true` | `test/game-core/crates/wasm-core/model_integrator/mod.rs` |
+| 渲染 | `routeFullbright` 三级优先：`unlit` → **第 1 级 vlight** → 第 2 级 leaf cube | `test/game-core/src/renderer/lightmap-shader.ts` |
+
+⚠️ 两个踩过的坑（已写进代码注释）：glTF 属性名 `_VBSP_VLIGHT` 到运行时会被 `GLTFLoader`
+转小写成 `_vbsp_vlight`（常量 `VERTEX_LIGHTING_ATTR` 取小写）；`gltf-json` 的
+`Semantic::Extras(name)` 会**自动补前导下划线**（传 `"VBSP_VLIGHT"`）。
+
+### 10.2 穷尽审计：**零遗漏、零错位**
+
+`temp/eval-vlight-audit.mjs`（CDP 现场遍历全场景）：
+
+| 指标 | 值 |
+|---|---|
+| 场景 mesh 总数 | 2074 |
+| 带 `_vbsp_vlight` 的 mesh | **395**（顶点合计 157,235） |
+| 顶点数与 `POSITION` **不相等**的 mesh | **0** |
+| 走第 1 级（材质注入生效） | **356** |
+| 注入失败 | **0** |
+| 带属性但未注入 | **39 = 全部为 `extras.unlit` 的自发光 VMT**（`blue_neon` / `neon666_01_krazyneon_00041v` / `glow_red_001` / `glow_yellow_008` / `69_red01` / `purple_dev_neon` / `blue_dev_neon`）⇒ 按 Source `UnlitGeneric` 语义**本来就不吃光照**，属正确 |
+| **真漏网（非 unlit 且未注入）** | **0** |
+
+⇒ 诊断口径已相应拆成四项（`renderer-main.ts` 的 `[vertex-lighting]` 行），
+`真漏网 > 0` 时直接 `console.error`——避免以后把这 39 个误读成缺陷。
+
+导出侧（GLB 静态数据，只解析 JSON chunk）与运行时**逐顶点数交叉核对**：
+
+| 指标 | 值 |
+|---|---|
+| prop 节点 | **501**（其中 `vertexLighting=true` **473**，只有 `ambientCube` 的 28） |
+| 图元 | 1098（带 `_VBSP_VLIGHT` **1052** / 不带 46） |
+| GLB 侧属性顶点合计 | **157,235** |
+| 运行时 395 个 mesh 的属性顶点合计 | **157,235** ⇒ 两侧**精确相等**（数据无损送达） |
+
+⇒ 501 个 prop **无一裸奔**：473 个吃到第 1 级，其余 28 个（46 图元，无 vhv）吃第 2 级 cube。
+
+### 10.3 实测：`ramp_1`（`s1_ramp1b`）现在渲成什么颜色
+
+同一台机器、同一视角（相机在默认传送旁的坡上方 1250 单位俯视），量测方式 =
+网格射线命中 + 同步读回 `WebGLRenderTarget` 像素（`temp/eval-ramp-pixels2.mjs`）：
+
+| 表面 | 命中数 | 均值色 | luma p25 / **p50** / p75 | 最暗 / 最亮 |
+|---|---|---|---|---|
+| 第 1 级 vlight（`concrete01`，即坡体材质） | 79 | `#74584f` | 85 / **95** / 104 | `#41302b`（53） / `#8f6d63`（118） |
+| 同帧 world lightmap 面 | 81 | `#442e27` | 40 / **46** / 71 | `#1b110e`（20） / `#836148`（83） |
+
+（luma 值域到 175 的单点来自坡上被直射的高光顶点，不改变中位数结论。）
+
+逐样本可见**连续的明暗梯度**（同一行从左到右单调变暗：`#6f524a → #694d45 → #5c433d → #4f3833`），
+用户口径的目标色 `#624B42` **正落在实测区间内**（多行样本命中 `#634942` / `#634842` / `#60463f`）。
+
+⇒ 用户报的"整体一面一个颜色（`#37302C` / `#28201D`）"**已消除**：那是第 2 级 leaf cube
+"每 prop 一个平坦值"的必然结果；现在是逐顶点梯度，暗部随 vhv 真值自然衰减。
+
+### 10.4 未做 / 已知边界（诚实记账）
+
+| # | 项 | 现状 |
+|---|---|---|
+| 1 | 28 个 prop 无 vhv（653 个里 629 个有） | 走第 2 级 leaf cube 兜底（`extras.ambientCube`），符合 Source `StaticPropFlags.NoPerVertexLighting` 语义 |
+| 2 | `optimizeScene` 合并失败 **217** 次（`gpuType` / index 不一致） | **本轮之前就存在**（对比历史日志：vhv 上线前后计数完全一致 ⇒ 非本轮回退），后果是部分 mesh 未被按材质合并（多几个 draw call），**不影响颜色**。待单独处理 |
+| 3 | 显示侧仍是"被照亮的面 ≈ 贴图原色"（曝光 2.3 / γ 2.2） | 与外部参照实现平价（1.0 / 1.0）并存为两个一键挡位，见 §8.3 |
+
 

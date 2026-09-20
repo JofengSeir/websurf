@@ -2,7 +2,7 @@
 
 > 状态：已实现并独立复核（2026-09-19），**用户验收未通过（模型仍异常偏亮）**——本文保留全部机制、实测数据与后续方向，供续作参考。
 > **二次定位（2026-09-19）**：「不生效」已定位到渲染端两处硬断点 + 一处处量级坑，见 §8（§7 的 sprp `m_Lighting` 并非「不生效」的原因，只是精度提升项）。
-> 落点：`test/game-core`（绝对隔离工程，仓库根 `src/` 零引用，见 [AGENTS.md §2.1](../../AGENTS.md)）。
+> 落点：`test/game-core`（绝对隔离工程，仓库根 `src/` 零引用，见 [AGENTS.md §2.1](../../../AGENTS.md)）。
 > 参照物：外部参照实现（`../../../.tmp/外部参照实现-master/`，版本控制外）；上一轮背景见 [lighting-merge-plan.md](./lighting-merge-plan.md) 与 `.tmp/gamma-lights-parity-plan.md`、`.tmp/prop-lighting-fog-plan.md`（gitignore，不入库）。
 
 ---
@@ -279,7 +279,7 @@ Source 的显示口径是 `albedo × lightmap^(1/2.2)`（外部参照实现 `Lig
 
 ⇒ **第 2 级与第 1 级量级一致（≈0.24）**：暗不是"缺预烘焙"，而是地图烘焙本来就暗；
 缺的是第 1 级的**逐顶点梯度**（0.113~0.757，我们只有每 prop 一个平坦值）。
-完整判据与下一步见 [scene-brightness-and-lights.md](./scene-brightness-and-lights.md) §9。
+完整判据与下一步见 [scene-brightness-and-lights.md](./scene-brightness-and-lights.md) §9–§10。
 
 ### 回退 2：诊断导出 `export_model_attached_lights()` 已回退
 
@@ -402,5 +402,20 @@ exponent 字节实测：ambient 集中在 **236-247（i8 = -20..-9）**，lightm
 
 - 0.75 与 1.0 档在 8bit 输出下读数差 <1 级（暗部量化稀释）；若需更细量级分辨须 float 帧缓冲或高精度采集。
 - §7 的五条精度提升项（sprp `m_Lighting` 等）仍未实施，是「prop 与游戏内观感仍有差距」时的下一步。
+
+## 10. 口径变更（2026-09-20）：ambient cube 降为**第 2 级兜底**，第 1 级逐顶点预烘焙已接入
+
+Source 的 prop 静态光照本来就有两级（[scene-brightness-and-lights.md](./scene-brightness-and-lights.md) §9.1）。
+本文 §8–§9 的全部旋钮与校准都是针对**第 2 级 leaf ambient cube** 做的；第 1 级（`sp_<i>.vhv` 逐顶点）
+现已全量接入，**优先级高于本文的 cube 路径**：
+
+| 级 | 触发条件 | 实现 | 量级 |
+|---|---|---|---|
+| 0 | `extras.unlit`（`UnlitGeneric` / `$selfillum`） | 贴图原色，不吃光照 | 全亮 |
+| **1** | 几何带 `_vbsp_vlight`（629/653 prop 有 vhv） | `pow(vLight, 2.2/γ) × exposure` | 逐顶点 0.11~0.76 |
+| 2 | 其余（本文的 cube 路径，含 `NoPerVertexLighting`） | `cube × 2^2.2`（`PROP_CUBE_GAIN`） | 每 prop 一个平坦值 ≈0.25 |
+
+⇒ 本文的 `AMBIENT_SCALE` / `PROP_CUBE_GAIN` / cube 去重等结论**只作用于第 2 级**；
+实测 surf_666：395 个带属性 mesh 中 356 走第 1 级、39 为第 0 级 unlit、**真漏网 = 0**。
 
 > 续作提醒：动 Rust 侧后需 `npm run build:wasm`（wasm-pack）+ `build:dist`；`test:phys` 五指纹与 `test:lightmap-gltf` 82 断言是回归底线；临时产物只进 `test/game-core/temp/`。
