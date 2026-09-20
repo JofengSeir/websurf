@@ -45,7 +45,7 @@
 
 `apps/debug`（不在副本范围内）已经写好并**已接线**两件事，可直接搬进副本：
 
-- **lightmap atlas 解码着色器**：`apps/debug/src/renderer/lightmap-shader.ts`（224 行）。`vbsp_DecompressLightmapSample` 做 `exp = texel.a * 255.0 - 128.0; return texel.rgb * pow(2.0, exp)`（`:25-30`）；`vbsp_ApplyLightmap` 手动取 4 个最近邻、各自解码后再 `mix`（`:39-53`）；atlas 以 `NoColorSpace` + `NearestFilter` 上传（`:104-106`）；入口 `loadLightmapAtlas(gltf.parser, gltf)` 从 glTF `extras.lightmap.textureIndex` 取纹理（`:80-89`），`applyLightmapToMeshes(scene, atlasTexture)` 对带 `uv1`/`uv2` 的 mesh 施加（`:125-148`，其中 `:146-148` 把 r151+ 的 `uv1` 复制到 `uv2`，因为 three.js 的 lightMap 槽由 `uv2` 驱动）。
+- **lightmap atlas 解码着色器**：`apps/debug/src/renderer/lightmap-shader.ts`（**迁移前** 224 行；2026-09-20 回并后 apps/debug 改用共享版 1785 行，见 §10）。`vbsp_DecompressLightmapSample` 做 `exp = texel.a * 255.0 - 128.0; return texel.rgb * pow(2.0, exp)`（`:25-30`）；`vbsp_ApplyLightmap` 手动取 4 个最近邻、各自解码后再 `mix`（`:39-53`）；atlas 以 `NoColorSpace` + `NearestFilter` 上传（`:104-106`）；入口 `loadLightmapAtlas(gltf.parser, gltf)` 从 glTF `extras.lightmap.textureIndex` 取纹理（`:80-89`），`applyLightmapToMeshes(scene, atlasTexture)` 对带 `uv1`/`uv2` 的 mesh 施加（`:125-148`，其中 `:146-148` 把 r151+ 的 `uv1` 复制到 `uv2`，因为 three.js 的 lightMap 槽由 `uv2` 驱动）。
 - **接线位置**：`apps/debug/src/renderer/renderer-main.ts:505-508` 先 `loadLightmapAtlas` 再 `applyLightmapToMeshes`，注释（`:514-515`）明确要求在 `:516` 的 `optimizeScene` **之前**施加——因为 lightmap 按原 mesh 的材质/UV 施加，材质实例在合并中去重保留，映射关系不丢。
 
 `apps/debug` 的第三件事需要精确表述，避免高估：`LightManager` 的**基础三灯已接线**（`apps/debug/src/renderer/renderer-main.ts:383` 调 `applyLights`，其实现 `apps/debug/src/renderer/light-manager.ts:71-100`，读 `config.lighting`），配置段也存在（`apps/debug/src/config.ts:139` 声明、`:196-206` 默认值）。但**点光源池未接线**：`extractPointLights`（`apps/debug/src/renderer/light-manager.ts:108`）与 `updatePointLights`（`:152`）只有定义、无调用点，且 `applyLights` 签名不接收 glTF（`:71`），所以 `LightManager` 的 8 灯池（`MAX_POINT_LIGHTS = 8`，`:29`）当前恒为空转。**不要把它当作"已验证的真光源能力"**。
@@ -202,12 +202,12 @@ BSP LIGHTING/LIGHTING_HDR lump
 
 1. **必须进共享层 `src/wasm-core/` 的改动**：lump 读取（`src/wasm-core/vbsp/mod.rs:204-292` 读取链）、luxel/ambient 结构（`src/wasm-core/vbsp/`）、atlas 生成、UV 计算、GLB 字段写出（`src/wasm-core/bsp_to_gltf_core/`）。理由：这些是**跨工程**能力，`apps/debug`、`apps/game`、`apps/viewer`、`test/dual-mode-harness`、`test/game-core` 共用同一份共享 crate，放进副本会造成第 6 份重复实现。
 2. **只在副本 `test/game-core/` 内的改动**：渲染端施加逻辑（`test/game-core/src/renderer/`）、`RuntimeConfig.lighting` 段（副本 `RuntimeConfig` 见 `test/game-core/src/config.ts:77-88`，当前无 `lighting` 字段；`apps/debug` 的对应实现在 `apps/debug/src/config.ts:139`、`:196-206`）。
-3. **契约脚本同步面 = 四份，不含 harness**：`apps/debug/scripts/check-wasm-api.mjs`（55 行）、`apps/game/scripts/check-wasm-api.mjs`（99 行）、`apps/viewer/scripts/check-wasm-api.mjs`（61 行）、`test/game-core/scripts/check-wasm-api.mjs`（100 行）——这四份**都做导入面校验**（debug 在 `:38`、viewer 在 `:39-40`、game/game-core 在 `:78-83`）。**新增任何 TS 导入的 wasm 符号，都必须同步声明面**，否则会以「✗ TS 导入了声明面之外的符号」失败（失败文案见 `test/game-core/scripts/check-wasm-api.mjs:95-98`）。两级语义的共享实现在 `src/scripts/lib/wasm-api-contract.mjs`：声明面 `assertDtsExports`（`:127`，逐符号断言 `\b<name>\s*\(` 命中 `pkg/websurf_wasm.d.ts`），导入面 `assertTsImportsCoveredByExports`（`:152`，判据为「`pkg/websurf_wasm*` 的实际导入符号 ⊆ dts 导出集合」，默认导入计入 `default`）。
+3. **契约脚本同步面 = 四份，不含 harness**：`apps/debug/scripts/check-wasm-api.mjs`（55 行）、`apps/game/scripts/check-wasm-api.mjs`（100 行）、`apps/viewer/scripts/check-wasm-api.mjs`（61 行）、`test/game-core/scripts/check-wasm-api.mjs`（100 行）——这四份**都做导入面校验**（debug 在 `:38`、viewer 在 `:39-40`、game/game-core 在 `:78-83`）。**新增任何 TS 导入的 wasm 符号，都必须同步声明面**，否则会以「✗ TS 导入了声明面之外的符号」失败（失败文案见 `test/game-core/scripts/check-wasm-api.mjs:95-98`）。两级语义的共享实现在 `src/scripts/lib/wasm-api-contract.mjs`：声明面 `assertDtsExports`（`:127`，逐符号断言 `\b<name>\s*\(` 命中 `pkg/websurf_wasm.d.ts`），导入面 `assertTsImportsCoveredByExports`（`:152`，判据为「`pkg/websurf_wasm*` 的实际导入符号 ⊆ dts 导出集合」，默认导入计入 `default`）。
    **例外：`test/dual-mode-harness/scripts/check-wasm-api.mjs` 没有导入面校验**——它只断言 12 个物理方法（`:26-39`）与 `class PhysWorld`（`:42`），连 `BspProcessor` 与 GLB 导出都不断言。所以新增 lightmap 导出符号时它**不需要**同步声明面。
 4. **构建/输出影响面 = 五个模块工程全在，含 harness**：光注入链路是共享导出路径 `src/wasm-core/bsp_to_gltf_core/convert.rs:98` `export_bsp_with_models` → `:170` 注入点，而五个工程的 crate 都调用它——`apps/debug/crates/wasm/src/lib.rs:477`、`apps/game/crates/wasm/src/lib.rs:538`、`apps/viewer/crates/wasm/src/lib.rs:455`、`test/game-core/crates/wasm/src/lib.rs:538`、`test/dual-mode-harness/crates/wasm/src/lib.rs:1722`；harness 显式依赖共享 crate（`test/dual-mode-harness/crates/wasm/Cargo.toml:21` 的 `websurf-wasm-core = { path = "../../../../src/wasm-core" }`，`:19` 的 `websurf-phys`）。
    ⇒ **准确表述：harness 不在契约脚本同步面内（判据 3），但仍在共享 crate 的构建/输出影响面内（判据 4），属「门禁绿灯下静默变化」的盲区**——它的契约脚本与 `build:wasm` 都不会因光照相关输出变化而失败，必须靠 `npm run build:wasm` / `build:ts` 加它**自身的验证脚本**兜底。因此**回归面必须覆盖 harness**，列为明确验证动作（见 §5.1）。
 5. **同一处改动必须落两遍**：`apps/game/scripts/check-wasm-api.mjs` 与 `test/game-core/scripts/check-wasm-api.mjs` 是**同一个 git blob**（blob sha1 均为 `e3fbeca4ebb58389788a38309061204afba488f4`，sha256 均为 `fb8bc4cc4407c937cfbd30a404c571ad28ec6b13e1d889be399ef8966967545d`）⇒ 任一改动只落一份，另一工程即失败。（哈希口径说明：行文中的 sha1 与 sha256 是同一内容的两种摘要，不是互相矛盾的两个值。）
-6. **本仓库已有可复用资产在 `apps/debug`，不在副本**：`apps/debug/src/renderer/lightmap-shader.ts`（224 行）与 `apps/debug/src/renderer/light-manager.ts`（390 行）。移植而非直接跨工程引用——三个应用工程**互不引用**是本仓库的架构约束。
+6. **本仓库已有可复用资产在 `apps/debug`，不在副本**：`apps/debug/src/renderer/lightmap-shader.ts`（**迁移前** 224 行；2026-09-20 回并后 apps/debug 改用共享版 1785 行，见 §10）与 `apps/debug/src/renderer/light-manager.ts`（390 行）。移植而非直接跨工程引用——三个应用工程**互不引用**是本仓库的架构约束。
 
 ## 5. 风险与未知项
 
@@ -385,7 +385,7 @@ codegen-units = 1
 |---|---|---|
 | `test/game-core/crates/wasm-core/bsp_to_gltf_core/convert.rs` | 改 | 阶段 0/1/2 的实现位置（对应根 `src/wasm-core/bsp_to_gltf_core/convert.rs:170` 的注入点、`:1006` 的 `Semantic::TexCoords(0)`、`:1042` 的 `BspVertexData`） |
 | `test/game-core/crates/wasm-core/vbsp/**`、`bsp_to_gltf_core/**` | 改/增 | 阶段 1/2 的解析与 atlas 生成（对应根 `src/wasm-core/vbsp/mod.rs:204` 的读取链、`src/wasm-core/vbsp/data/mod.rs:375-378` 的零引用面字段） |
-| `test/game-core/src/renderer/lightmap-shader.ts` | 新增 | 从 `apps/debug/src/renderer/lightmap-shader.ts`（224 行）移植，保留 `loadLightmapAtlas`（`:80`）、`applyLightmapToMeshes`（`:125`）、`uv1→uv2` 复制（`:146-148`）、手写双线性（`:39-55`）、`NoColorSpace`+`NearestFilter`（`:104-107`） |
+| `test/game-core/src/renderer/lightmap-shader.ts` | 新增 | 从 `apps/debug/src/renderer/lightmap-shader.ts`（**迁移前** 224 行；2026-09-20 回并后 apps/debug 改用共享版 1785 行，见 §10）移植，保留 `loadLightmapAtlas`（`:80`）、`applyLightmapToMeshes`（`:125`）、`uv1→uv2` 复制（`:146-148`）、手写双线性（`:39-55`）、`NoColorSpace`+`NearestFilter`（`:104-107`） |
 | `test/game-core/src/renderer/renderer-main.ts` | 改 | 在 `:263`（`loadGlb` 之后）与 `:278`（`this.optimizeScene(scene, gltf.scene);`）**之间**插入调用；理由与 `apps/debug/src/renderer/renderer-main.ts:505-516` 一致（必须在分块合并前施加）。**落在 `:278` 之后即违反契约**（`mergeGeometries` 见 `:998`、`:1020`）。 |
 | `test/game-core/crates/wasm/src/lib.rs` | 改（仅注释） | `:19` 与 `:22` 的「共享自仓库根 src/…」表述必须改为如实反映「`websurf-wasm-core` 已副本化到 `crates/wasm-core`；`websurf-phys` 仍共享根部」 |
 | `test/game-core/package.json` | 改 | `:4` 的 `description` 现写「共享层仍以 ../../src 引用同一份 ts-shared / wasm-core / phys，**不重复实现共享逻辑**」——已不成立，必须改为如实描述（`wasm-core` 副本化、其余仍共享）；并注册新增的 `test:*` 脚本 |
@@ -807,3 +807,47 @@ $enc    = New-Object System.Text.UTF8Encoding($false)
 - 行尾 CRLF、UTF-8 无 BOM、无行尾空白；标题层级不跳级（`##` → `###`）。
 - 本章引用的全部 `文件:行号` 锚点均可在仓库内定位（`node src/scripts/check-doc-drift.mjs` 的 B 项越界计数为 0）。
 不修改任何代码或配置；本章施工前后 §9.8.1 的合取式 **⓪ ∧ (b)** 全部成立（(a) 摘要可选项，不作判据）。
+
+---
+
+## 10. 回并完成记录（2026-09-20）
+
+> 本章记录 §6.2「回并顺序」的**执行结果**与 §9.1 隔离例外的**收口**。执行前置：用户指示「现在可以将渲染以及物理相关的迁移到 src 以及 apps 三个子项目中了」。
+
+### 10.1 已回并（提交 `8d24b24`）
+
+| 文件 | 来源（副本） | 说明 |
+|---|---|---|
+| `src/wasm-core/bsp_to_gltf_core/{convert,gltf_builder,materials,mod}.rs` | `test/game-core/crates/wasm-core/**` | 逐一字节复制（`Copy-Item`，非文本管道） |
+| `src/wasm-core/bsp_to_gltf_core/lightmap.rs`、`src/wasm-core/vhv.rs` | 同上（副本新增文件） | atlas 生成与导出契约（669 行）；`sp_<i>.vhv` 逐顶点预烘焙解析（195 行） |
+| `src/wasm-core/{lib.rs,model_integrator/mod.rs,pakfile_models.rs,vbsp/**.rs}` | 同上 | 含 `vmt_stem_index`、材质回退、PAKFILE 模型、LIGHTING/GAME lump 解析 |
+| `src/phys/world.rs` | `test/game-core/crates/phys/phys/world.rs` | `TriEntry.mesh: Rc<TriMesh>` 共享、`BIG_CELL_LIMIT`、`GridCells` HashMap |
+| `src/ts-shared/phys/{world-builder,authority-calibrator}.ts` | `test/game-core/src/ts-shared/phys/` | 23 个 ts-shared 文件中**唯二**与副本不同的两个 |
+
+**未回并**：`test/game-core/crates/wasm-core/tests/vtf_probe.rs`（读副本本地 `temp/probe/*.vtf` 夹具，属副本取证工具，不属共享层能力）。
+**未改动**：`src/wasm-core/Cargo.toml`（依赖段与副本逐字节一致，副本仅改 version/description/头注）。
+
+### 10.2 三个模块工程的适配
+
+| 工程 | 提交 | 适配内容 |
+|---|---|---|
+| apps/game | `8d24b24` | `crates/wasm/src/lib.rs` 与整棵渲染/物理 TS 栈迁移；对 `ts-shared` 的 import 重写回根共享层（17 处）；面板「预烘焙 / 纯纹理」 |
+| apps/debug | `3eb471e`、`8c6c3b5` | 导出层适配（Arc / vhv / ambient cube / unlit + 3 个 defaults 入口）+ 渲染端共享光照栈 + 同一面板切换 |
+| apps/viewer | `9d342a9` | 导出层同一组机械适配 |
+
+### 10.3 §6.3 回并验收条件对照
+
+| # | 条件 | 结果 |
+|---|---|---|
+| 1 | 两工程 `check-wasm-api.mjs` 同一 blob；各自 exit 0 | **部分**：契约**引擎**仍单源于 `src/scripts/lib/wasm-api-contract.mjs`（未改）；`apps/game` 的薄配置清单补 `export_glb_with_pakfile_models_with_defaults_and_lights`；两工程 `check:api` 各自通过（debug 走其自有 F4 检查） |
+| 2 | 两工程 `typecheck` / `build:ts` exit 0 | ✅ apps/game、apps/debug、apps/viewer 三工程各自 0 |
+| 3 | GLB 内容断言（TEXCOORD_1 / atlas / 图元顶点数 / extras.faceIndex） | 由各工程既有 `test:lightmap-*` 与 `test:verify-*` 脚本覆盖；本轮未新跑全量矩阵（登记为收尾待办） |
+| 4 | 同一地图两工程出图一致 | ✅ 逐像素比对：apps/game 出生点帧与迁移前副本帧差 **0.01%**（67/660352） |
+| 5 | 文档门禁零漂移 | ✅ `node src/scripts/check-doc-drift.mjs` A/B 计数为 0（C/D 为既有告警） |
+| 6 | 无临时产物混入 | ✅ `git ls-files -- '**/temp/**' '**/.tmp/**'` 为空 |
+
+### 10.4 收口后的边界状态
+
+- `test/game-core` 的隔离副本**仍然存在**（AGENTS.md §2.1 铁律未变），但自此**共享层演进应落根部**，副本按需重新副本化；回并路径已在本章闭环，§9.1 的「隔离例外」不再有未回并的技术债。
+- `lightmap-shader.ts` 未上提共享层：**唯一阻碍**是共享层首个 npm 依赖（`three`）的解析（仓库根无 `package.json`/`node_modules`）。候选方案与裁定入口见 `AGENTS.md` §7.2.5。
+

@@ -113,7 +113,7 @@
 | # | 文件 | 改动 | 判据 |
 |---|---|---|---|
 | 1 | `framework-audit.md` §0.2 | 删除不可复现的「行号引用共 **409** 处」，改为 `node .tmp/anchor-audit.mjs` 可复现口径：**文件限定锚点 189**（非空 181 / 空行 1 / 未能定位 7）+ **裸行号 190**；并将「7 处空行/越界」改写为**逐条可复核的 8 处** | 凡写数字必附口径命令；409 在任何正则下都测不出（实测组合为 189/190/379） |
-| 2 | `framework-audit.md` §0.2 | `check-wasm-api.mjs` 的定性按实测改写：该引用是**裸行号**（无文件名），按 doc-drift 同源算法消歧命中 **`apps/game/scripts/check-wasm-api.mjs`（99 行）**而非 debug 版（**55 行**），且**在该文件内确实越界** → 结论方向正确、归属与理由改写 | `node .tmp/anchor-audit.mjs`；两个文件实测行数 55 / 99 |
+| 2 | `framework-audit.md` §0.2 | `check-wasm-api.mjs` 的定性按实测改写：该引用是**裸行号**（无文件名），按 doc-drift 同源算法消歧命中 **`apps/game/scripts/check-wasm-api.mjs`（100 行）**而非 debug 版（**55 行**），且**在该文件内确实越界** → 结论方向正确、归属与理由改写 | `node .tmp/anchor-audit.mjs`；两个文件实测行数 55 / 99 |
 | 3 | `framework-audit.md` §6.4 `I-05` | 「已执行」→ **「部分执行」**：根 `README.md:43` 已统一 `test/maps/`，但 `documents/viewer/README.md:45` 仍是旧表述且**实测未修** | 逐字节读 `documents/viewer/README.md:45`；该文件属 `apps/`（本任务 out of scope）→ 只登记不修，立 R-14 |
 | 4 | `framework-audit.md` §6.1 `I-22` | `%~dp0` 调用清单由改造前行号（`play.cmd:17,71` / `:17,69` 等）改为**当前实测**：三工程 `play.cmd:20`、`build-dist.cmd:33`（viewer `:31`）、`start-dev.cmd:20`、harness `play.cmd:37` | 逐条 node 按字节读；旧引用的 `:17` 现为**孤立 `)`** |
 | 5 | `framework-audit.md` §2.4 | 新增**口径注记**：表中裸行号归属「该行工程列所指的那一份文件」；并记录三份的 `[0/5]`/`check:api`/`[3/5]`/`ensure-node-deps` 锚点**逐条按内容复核全部相符**（§2.5 的 48 个失败块边界与 `exit /b 0` 锚点亦全部实测相符） | `node .tmp/check-24-25.mjs` 全绿；I-16 的 `apps/viewer/play.cmd:51-56` **经复核无误，未改** |

@@ -6,6 +6,14 @@
 
 ### 新增
 
+#### 共享层回并与三工程渲染/物理迁移（2026-09-20）
+
+- **`test/game-core` 隔离副本回并到共享层（8d24b24）**：按 `documents/game/implementation/lighting-merge-plan.md` §6.2 的回并顺序执行——`src/wasm-core/**` 逐字节回并（含新增 `bsp_to_gltf_core/lightmap.rs` 669 行 = lightmap atlas 生成与导出契约、`vhv.rs` 195 行 = `sp_<i>.vhv` 逐顶点预烘焙解析），`src/phys/world.rs`（`TriEntry.mesh` 改 `Rc<TriMesh>` 共享 ⇒ 权威线启动 4972ms → 135ms），`src/ts-shared/phys/{world-builder,authority-calibrator}.ts`。验证：根 workspace `cargo check` 通过、`cargo test -p websurf-phys` 10/10。
+- **apps/game 渲染/物理栈迁移 + 「预烘焙 / 纯纹理」切换（8d24b24）**：`crates/wasm/src/lib.rs` 与 `src/renderer/{renderer-main,lightmap-shader}.ts`、`src/panel/panel-controller.ts`、`src/app.ts`、`src/config.ts`、`src/worker/main.ts`、`web/index.html` 一并迁移（`lightmap-shader.ts` 1632 行首度进入 apps/game）；对 `ts-shared` 的 import 重写回根共享层（17 处）。面板「显示」模块新增 `#lightingMode`（预烘焙 / 纯纹理）+ 下方性能提示小字：预烘焙吃 lightmap atlas + vhv/ambient cube（**纹理多、进图与首帧更卡**），纯纹理只上漫反射贴图（**最快、但无明暗关系**）。切换按新模式**重建场景**（材质须在 `optimizeScene` 合并前施加），纯纹理模式不解码 atlas。浏览器实测：切 texture 后 `withLightMapSlot=0 / injectedMaterials=0 / atlasName=null`，切回 baked 恢复 2297；同机位均亮 35.5（预烘焙）vs 59.0（纯纹理）。
+- **apps/debug 接入共享光照栈 + 同一面板切换（3eb471e、8c6c3b5）**：wasm 导出层按新共享 API 适配（`BspProcessor.bsp` 改 `Arc<Bsp>`、pakfile 枚举顺带收 `sp_<idx>.vhv`、`StaticProp` 补 `vertex_lighting`/`ambient_cube`、`PakMaterials` 补 `unlit`），并补 `export_glb_with_pakfile_models_with_defaults_and_lights` 等三个入口与 `collect_light_entities`；渲染端把 194 行的本地 lightmap 着色器换成共享版 1667 行（保留其路径记录 / 碰撞体调试 / 平面检查器 / LOD / PVS / light-manager 等既有调试能力），新增 `lighting.mode` 配置与面板 radio + 提示小字。浏览器实测：`→ texture` 后 35254 个 mesh 全走 fullbright；`→ baked` 后恢复 lightmap（2030 / hasLightmap=false 1538）。
+- **apps/viewer 共享层适配（9d342a9）**：同一组机械适配（Arc 借用式、vhv/ambient cube、material_unlit）。验证：`build:wasm` / `typecheck` / `build:ts` / `test:replay` 全通过。
+- **登记**：`AGENTS.md` §7.2.4（隔离副本回并闭环）与 §7.2.5（光照着色器上提 `src/ts-shared/render/` 的两个候选方案，待裁定）。
+
 #### 仓库框架规范（审计 + 规范，2026-09-12）
 
 - **仓库框架现状审计（事实基线）**：新增 `documents/framework-audit.md`——对 `apps/{debug,game,viewer}` 与 `src/` 做全量实测审计，产出三工程启动/构建入口对照、产物与控制台输出对照、文件结构对照、`src/` 共享层消费矩阵，收敛出 `I-01..I-22` 共 22 条不一致与 `R-01..R-21` 共 21 条二值可判定规范需求条款。本轮实测新发现并被 CI 漏掉的既有缺陷：`apps/debug/scripts/jump-apex-verify.mjs:26-30` 的 `REPO` 少一层 `..`（`npm run test:jump-apex` 在干净检出上必然失败）、`apps/debug/scripts/install-wasm-bindgen.cmd:19` 的 `%~dp0..\..\` 少一层（全仓 13 条同款调用中唯一失败，且失败后仍 `pause` 让用户误以为成功）、game 的 `test:phys`/`test:seed-smoke` 与 viewer 的 `test:smoke` 未进 CI、game 的 dist 缺 `LICENSE.cs-movement`/`NOTICE.cs-movement`。
