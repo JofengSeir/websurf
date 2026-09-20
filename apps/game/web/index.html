@@ -233,12 +233,12 @@
               <option value="mini">压缩低清</option>
             </select></div>
           <h4>光照模式</h4>
-          <div class="row"><label title="预烘焙 = lightmap atlas + 逐顶点/ambient cube 烘焙光照；纯纹理 = 只上漫反射贴图">模式</label>
+          <div class="row"><label title="预烘焙 = 每像素采 lightmap atlas + 逐顶点/环境盒烘焙光照（每帧光照开销更大）；纯纹理 = 只上漫反射贴图（每帧光照开销最小）">模式</label>
             <select id="lightingMode">
               <option value="baked" selected>预烘焙</option>
               <option value="texture">纯纹理</option>
             </select></div>
-          <p class="hint" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，但移动/转视角时每帧开销更大、帧时间更容易跳变。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，移动时渲染速度更平稳，代价是画面没有明暗关系。切换即时生效（不重建场景、不打断操作）。</p>
+          <p class="hint" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
           <h4>近平面（防贴墙透视）</h4>
           <div class="row"><label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到，性能开销略增">探测距离</label>
             <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />

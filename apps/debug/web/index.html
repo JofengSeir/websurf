@@ -343,12 +343,12 @@
               <div class="ctrl-full acc-divider"></div>
               <div class="ctrl-full acc-section-title">光照模式</div>
 
-              <label title="预烘焙 = 每像素采 lightmap atlas + 逐顶点/ambient cube 烘焙光照（移动时每帧开销更大）；纯纹理 = 只上漫反射贴图（移动时更平稳）">光照模式</label>
+              <label title="预烘焙 = 每像素采 lightmap atlas + 逐顶点/ambient cube 烘焙光照（每帧光照开销更大）；纯纹理 = 只上漫反射贴图（每帧光照开销最小）">光照模式</label>
               <div class="ctrl-radio-group ctrl-full">
                 <label class="ctrl-radio"><input type="radio" name="lightingMode" value="baked" checked /><span>预烘焙</span></label>
                 <label class="ctrl-radio"><input type="radio" name="lightingMode" value="texture" /><span>纯纹理</span></label>
               </div>
-              <p class="hint ctrl-full" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，但移动/转视角时每帧开销更大、帧时间更容易跳变。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，移动时渲染速度更平稳，代价是画面没有明暗关系。切换即时生效（不重建场景、不打断操作）。</p>
+              <p class="hint ctrl-full" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
 
               <label title="场景环境光强度（AmbientLight，即时生效）">环境光强度</label>
               <input type="range" id="ambientIntensity" min="0" max="2" step="0.05" value="0.6" />
