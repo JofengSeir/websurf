@@ -39,6 +39,8 @@ struct PakMaterials {
     textures: HashMap<String, Vec<u8>>,
     /// `材质名 → alpha_mode`（0 = Opaque，1 = Blend，2 = Mask）。
     alpha_modes: HashMap<String, u8>,
+    /// 自发光 / 无光照材质名集合（`$selfillum` / `UnlitGeneric`）⇒ `InMemoryResources.material_unlit`。
+    unlit: std::collections::HashSet<String>,
 }
 
 /// 提取被 `static_props` 引用且 `.mdl/.vvd/.dx90.vtx` 齐全的模型。
@@ -60,9 +62,29 @@ fn collect_pakfile_models(
         .lock()
         .map_err(|e| JsValue::from_str(&format!("pakfile 锁定失败: {e}")))?;
     let mut entry_names: Vec<String> = Vec::with_capacity(zip_guard.len());
+    // 顺带收 prop_static 的逐顶点预烘焙光照（`sp_<idx>.vhv`，HDR 优先）：
+    // 共享层回并后 `StaticProp` 需要 `vertex_lighting` / `ambient_cube` 两字段。
+    let mut vhv_blobs: std::collections::HashMap<usize, Vec<u8>> = std::collections::HashMap::new();
     for i in 0..zip_guard.len() {
-        if let Ok(entry) = zip_guard.by_index(i) {
-            entry_names.push(entry.name().to_string());
+        if let Ok(mut entry) = zip_guard.by_index(i) {
+            let name = entry.name().to_string();
+            let lower = name.to_ascii_lowercase();
+            if lower.starts_with("sp_") && lower.ends_with(".vhv") {
+                let mid = &lower[3..lower.len() - 4];
+                let (idx_part, is_hdr) = match mid.strip_prefix("hdr_") {
+                    Some(rest) => (rest, true),
+                    None => (mid, false),
+                };
+                if let Ok(idx) = idx_part.parse::<usize>() {
+                    let mut buf = Vec::with_capacity(entry.size() as usize);
+                    if std::io::Read::read_to_end(&mut entry, &mut buf).is_ok() && !buf.is_empty() {
+                        if is_hdr || !vhv_blobs.contains_key(&idx) {
+                            vhv_blobs.insert(idx, buf);
+                        }
+                    }
+                }
+            }
+            entry_names.push(name);
         }
     }
     drop(zip_guard);
@@ -99,11 +121,16 @@ fn collect_pakfile_models(
     let static_props: Vec<StaticProp> = bsp
         .static_props()
         .enumerate()
-        .map(|(_i, prop)| StaticProp {
+        .map(|(i, prop)| StaticProp {
             model: prop.model().to_string(),
             origin: [prop.origin.x, prop.origin.y, prop.origin.z],
             angles: prop.angles(),
             solid: prop.solid as u8,
+            ambient_cube: bsp.prop_ambient_cube(i),
+            vertex_lighting: vhv_blobs
+                .get(&i)
+                .and_then(|b| websurf_wasm_core::vhv::parse_vhv(b))
+                .map(|v| v.colors),
         })
         .collect();
 
@@ -186,6 +213,9 @@ fn resolve_pakfile_materials(
             }
 
             out.alpha_modes.insert(tex.name.clone(), info.alpha_mode);
+            if info.unlit {
+                out.unlit.insert(tex.name.clone());
+            }
 
             let Some(base) = info.basetexture else {
                 continue;
@@ -265,7 +295,7 @@ impl BspMetadata {
 /// 其余借用方法（spawn 等）之后调用。
 #[wasm_bindgen]
 pub struct BspProcessor {
-    bsp: Option<vbsp::Bsp>,
+    bsp: Option<std::sync::Arc<vbsp::Bsp>>,
     /// 缓存的 pakfile 文件数，避免 metadata() 重复克隆 Packfile
     packed_files: usize,
 }
@@ -279,7 +309,7 @@ impl BspProcessor {
         // 一次性计算并缓存 packed_files，避免 metadata() 重复克隆 Packfile
         let packed_files = bsp.pack.clone().into_zip().lock().unwrap().len();
         Ok(BspProcessor {
-            bsp: Some(bsp),
+            bsp: Some(std::sync::Arc::new(bsp)),
             packed_files,
         })
     }
@@ -447,6 +477,7 @@ impl BspProcessor {
             static_props,
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
+            material_unlit: materials.unlit,
             light_entities: Vec::new(),
         };
 
