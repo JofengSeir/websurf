@@ -111,7 +111,7 @@
 
 ### 3.2 玩家移动（`src/phys/player.rs`）
 
-**常量表**（`player.rs:16-53`）：`STANDABLE_NORMAL=0.7`、`GRAVITY=800`、`RUN_SPEED=250`、`WALK_SPEED=130`、`CROUCH_SPEED=85`、`AIR_ACCELERATE=150`、`AIR_SPEED_CAP=30`、`OVERBOUNCE_SURF=1.0`/`OVERBOUNCE_DEFAULT=1.001`、`M_YAW=0.022`、`PITCH_CLAMP=89`、hull 半宽/站高/蹲高 `16/72/54`、`EYE_STAND=64.09`、`EYE_DUCK=46.04`、`DUCK_LERP_TIME=0.1`、`JUMP_HEIGHT=57`、`BHOP_MAX_SPEED_FACTOR=1.1`、`LADDER_SPEED=200`、`LADDER_JUMP_OFF_SPEED=270`、`STEP_HEIGHT=18`、`MAX_CLIP_PLANES=8`、`PUSH_OUT=0.1`、`NON_JUMP_VELOCITY=180`、`GROUND_TRACE_DIST=2`。
+**常量表**（`player.rs:16-53`）：`STANDABLE_NORMAL=0.7`、`GRAVITY=800`、`RUN_SPEED=250`、`WALK_SPEED=130`、`CROUCH_SPEED=85`、`AIR_ACCELERATE=150`、`AIR_SPEED_CAP=30`、`OVERBOUNCE_SURF=1.0`/`OVERBOUNCE_DEFAULT=1.001`、`M_YAW=0.022`、`PITCH_CLAMP=89`、hull 半宽/站高/蹲高 `16/72/54`、`EYE_STAND=64.09`、`EYE_DUCK=46.04`、`DUCK_LERP_TIME=0.2`（2026-09-21 由 0.1 放慢：0.1s 太快、站蹲切换没有过程感）、`AIR_DUCK_VIEW_LIFT=9`（空中蹲的**纯视角**抬升，见 §3.2.2）、`JUMP_HEIGHT=57`、`BHOP_MAX_SPEED_FACTOR=1.1`、`LADDER_SPEED=200`、`LADDER_JUMP_OFF_SPEED=270`、`STEP_HEIGHT=18`、`MAX_CLIP_PLANES=8`、`PUSH_OUT=0.1`、`NON_JUMP_VELOCITY=180`、`GROUND_TRACE_DIST=2`。
 运行时可调项在 `PhysParams`（`player.rs:60`）：默认 `autobhop=true`、`bhop_speed_clamp=true`、`teleport_gate_ticks=3`（现 check 不再使用，仅签名兼容，`teleport.rs:176`）、`noclip_speed=800`、`sensitivity=1.5`（TS 层 `set_params` 时固定传 1，见 [ts-shared.md](./ts-shared.md) §3 params）。
 
 **基础公式**（`player.rs:262-345`）：
@@ -128,9 +128,9 @@
 3. `check_ladder`（`player.rs:611`：冷却中不上梯；空中必抓，地面需 forward 且视线与梯面朝向点积 > 0.3）命中 → `ladder_move`（`player.rs:634`：完整 3D 视角基攀爬、双轴输入不归一化、上限 `LADDER_SPEED×√2`、垂直墙分量重定向到攀爬方向；jump 跳离 = facing×`LADDER_JUMP_OFF_SPEED` 270 + 冷却 0.25s）；
 4. 否则 `check_jump`（`player.rs:536`：`jump_velocity = sqrt(2·g·jump_height)`；非 autobhop 时要求落地新按（`old_jump` 边沿）；`bhop_speed_clamp` 时起跳水平速钳 `1.1×maxspeed`）→ 在地 `walk_move` / 空中 `air_move`（空中先记 `fall_velocity`）；
 5. `categorize_position`（贴地/离地归类，`GROUND_TRACE_DIST=2`）；
-6. 尾部杂项：`detect_blocked_move`、落地冲击 `land_punch` 衰减、`old_jump = input.jump` 边沿记录、**duck_frac 插值**（空中/落地 tick 即时置位、地面按 `DUCK_LERP_TIME=0.1s` 渐变）。
+6. 尾部杂项：`detect_blocked_move`、落地冲击 `land_punch` 衰减、`old_jump = input.jump` 边沿记录、**duck_frac 插值**（空中/落地 tick 即时置位、地面按 `DUCK_LERP_TIME=0.2s` 渐变）。
 
-视角高度 `Player::eye_height`（`player.rs:193`）：按 `duck_frac` 在 `EYE_STAND`(64.09)/`EYE_DUCK`(46.04) 间插值，站/蹲箱高不同比例换算——空中蹲视角自然连续无跳变（`player.rs:191-197` 注释）。
+视角高度 `Player::eye_height`（`player.rs:191`）：按 `duck_frac` 在 `EYE_STAND`(64.09)/`EYE_DUCK`(46.04) 间插值，站/蹲箱高不同比例换算；**空中蹲**再加 `AIR_DUCK_VIEW_LIFT`（见 §3.2.2）。
 
 ### 3.2.1 蹲姿与 surf：对齐 Source `CanUnduck()`
 
@@ -164,6 +164,13 @@ Source 权威实现（`src/game/shared/gamemovement.cpp`）：
 > 反例（2026-09-13 移除）：曾在「放脚被挡」时兜底「原地站立箱可用即起立」（脚不动、头顶 +18）。
 > 该兜底偏离 Source，且依赖 `is_position_free` 在贴面间隙 ≈0 处的临界判定（容差 0、实测间隙 0.03），
 > 在多面交界或浮点抖动下会让同一段坡时而站得起、时而站不起。
+
+### 3.2.2 空中蹲的视角抬升（纯视角，物理不动）
+
+**物理保持不变**（§3.2.1）：空中蹲 = 头顶世界位置不动、只收脚（origin 上移 `stand−duck = 18`）。
+⇒ 只收脚时眼高 = `origin+18 + 46.04 ≈ 64.04` ≈ 站立眼高 `64.09` ⇒ **视角与站立完全无差别**，玩家分不清自己蹲没蹲（用户实测反馈）。
+
+**视角层修正**（2026-09-21 定调）：`eye_height()` 在 `ducked && !on_ground` 时额外 **+9u**（`AIR_DUCK_VIEW_LIFT`，= 收脚高度的一半），**瞬时生效**（空中切换不插值）；落地或松开蹲键即回到蹲姿视高 46.04。物理（origin/碰撞箱）完全不受影响。
 
 ### 3.3 传送与死亡（`src/phys/teleport.rs`）
 
