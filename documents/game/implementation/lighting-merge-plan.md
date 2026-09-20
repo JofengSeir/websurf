@@ -852,3 +852,25 @@ $enc    = New-Object System.Text.UTF8Encoding($false)
 - `test/game-core` 的隔离副本**仍然存在**（AGENTS.md §2.1 铁律未变），但自此**共享层演进应落根部**，副本按需重新副本化；回并路径已在本章闭环，§9.1 的「隔离例外」不再有未回并的技术债。
 - `lightmap-shader.ts` 未上提共享层：**唯一阻碍**是共享层首个 npm 依赖（`three`）的解析（仓库根无 `package.json`/`node_modules`）。候选方案与裁定入口见 `AGENTS.md` §7.2.5。
 
+### 10.5 光照模式开关（预烘焙 / 纯纹理）的语义与实测代价
+
+面板开关（apps/game「显示」模块 `#lightingMode`、apps/debug「光照模式」区块 `input[name=lightingMode]`）
+对应 `config.lighting.mode`，两侧语义一致：
+
+| 模式 | 材质路径 | 代价 |
+|---|---|---|
+| `baked`（预烘焙，默认） | world 面吃 lightmap atlas（`applyLightmapToMeshes` 施加 `lightMap` + 注入解码 shader）；prop 吃 `sp_<i>.vhv` 逐顶点烘焙 / leaf ambient cube | **纹理多**：多一张 4096×2048 图集（PNG 解码 + 上传）＋ 33716 个图元的材质替换与 shader 注入 |
+| `texture`（纯纹理） | 全部图元按 fullbright 收敛（`MeshBasicMaterial` 仅漫反射贴图），**不调用 `loadLightmapAtlas`** | 纹理最少、材质替换最轻，但画面无明暗关系 |
+
+**实测（apps/game，同一页面内连续切换两轮，surf_666；日志时间戳取自 `[lighting]`/`[lightmap]` 两条相邻行）**：
+
+| 切换 | 材质环节耗时 | 日志证据 |
+|---|---|---|
+| → `texture` | **1.41 s** | `[lightmap] 光照模式=texture，atlas 0×0，施加 mesh=0` |
+| → `baked` | **2.54 s**（1.8×） | `[lightmap] 光照模式=baked，atlas 4096×2048，施加 mesh=33716` |
+
+配套差异（同一轮 `optimizeScene` 日志）：纯纹理 35254 mesh → **1975** 块 / draw call 估算 **2521**；
+预烘焙 → **2097** 块 / draw call 估算 **2619**（材质实例更多 ⇒ 块内按材质合并的粒度更细）。
+面板小字「预烘焙：加载光照图集与逐顶点烘焙数据，纹理更多，进图与首帧会卡顿几秒」即以此实测为据；
+切换本身按新模式**重建场景**（材质必须在 `optimizeScene` 合并前施加），代价与重新加载地图相当。
+

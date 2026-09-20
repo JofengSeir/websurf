@@ -15,6 +15,7 @@
 - **登记**：`AGENTS.md` §7.2.4（隔离副本回并闭环）与 §7.2.5（光照着色器上提 `src/ts-shared/render/` 的两个候选方案，待裁定）。
 - **跨工程 GLB 契约门禁（新增）**：`test/dual-mode-harness/scripts/cross-project-glb-contract.mjs`（`npm run test:glb-contract`）——`apps/{game,debug,viewer}` 与 `test/game-core` 各自导出 surf_666 后断言 lightmap 契约：**4/4 通过且指标逐字一致**（atlas `textureIndex=0` PNG、119 个材质带 `__vbsp_lightmap__`、primitives 35202 / 含 `TEXCOORD_1` 34156 / `hasLightmap` true 33716 false 440 缺 0、`faceIndex` 34156 个全唯一、连续两次导出字节相同）。
 - **`test/game-core` 隔离硬指标复验通过**：把仓库根 `src/` 整体移出后，该工程 `typecheck` / `build:ts` / `cargo check`（wasm32）三项 exit 0；移回后 89 个文件逐文件 sha256 全等（零改动）。
+- **光照模式开关的实测代价（支撑面板小字的性能提示）**：apps/game 同一页面内连续切换两轮（surf_666），材质环节 —— 切「纯纹理」**1.41 s**（`atlas 0×0`，不解码图集）、切「预烘焙」**2.54 s**（1.8×；`atlas 4096×2048`、施加 mesh=33716）；同一轮 `optimizeScene`：纯纹理 1975 块 / draw 估算 2521，预烘焙 2097 块 / 2619。
 
 #### 仓库框架规范（审计 + 规范，2026-09-12）
 
