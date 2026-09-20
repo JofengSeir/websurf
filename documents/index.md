@@ -17,7 +17,7 @@
 | 验证物理时序 / 跑对照 | [documents/dual-mode-harness/overview.md](./dual-mode-harness/overview.md) |
 | 建新子工程 / 统一启动方式与文件结构 / 判断什么该上提到 `src/` | [framework-launch-structure.md](./framework-launch-structure.md)（启动·结构·产物规范）+ [framework-decoupling.md](./framework-decoupling.md)（共享层解耦裁决）+ [framework-audit.md](./framework-audit.md)（现状事实基线） |
 
-## 2. 文档树（documents/ 下全量 **46 篇** = 根 11 + `debug/` 7 + `game/` 13 + `viewer/` 8 + `dual-mode-harness/` 7，含本文 index.md 自身；历史档案与过程讨论已移出版本库（2026-09-11），仅工程内 `test/dual-mode-harness/docs/archive/` 5 篇留存、不作为事实来源）
+## 2. 文档树（documents/ 下全量 **47 篇** = 根 11 + `debug/` 7 + `game/` 14 + `viewer/` 8 + `dual-mode-harness/` 7，含本文 index.md 自身；历史档案与过程讨论已移出版本库（2026-09-11），仅工程内 `test/dual-mode-harness/docs/archive/` 5 篇留存、不作为事实来源）
 
 ### 根 documents/（11 篇：总架构 + 共享层四篇 + 仓库框架规范三篇 + 发布面两篇 + 本导航）
 
@@ -46,7 +46,7 @@
 | [differences.md](./debug/differences.md) | D：vs game/viewer/test 取舍、双端同参不变量 |
 | [README.md](./debug/README.md) | 工程说明（四维度之外）：键位 / 启动与打包 / 故障排查 |
 
-### documents/game/（12 篇：游戏工程）
+### documents/game/（14 篇：游戏工程）
 
 | 文档 | 维度 |
 |---|---|
@@ -60,6 +60,8 @@
 | [implementation/prop-ambient-fix-plan.md](./game/implementation/prop-ambient-fix-plan.md) | I：prop 光照「不生效」修复方案（Group 断层 / VS 注入被 `#if` 剔除 / 解码量级三处断点的 P1-P3 施工步骤与验收判据） |
 | [implementation/prop-black-materials-root-cause.md](./game/implementation/prop-black-materials-root-cause.md) | I：模型/水面「发黑 → 完全透明」三轮根因（零灯 Standard 恒黑 / 中性占位 UV 采到图集原点 / **注入漏声明 uniform ⇒ fragment 编译失败 ⇒ 整批不渲染**）与验证 |
 | [implementation/authority-startup-sync.md](./game/implementation/authority-startup-sync.md) | I：权威线启动慢的根因与修复（`TriangleGrid::build` 逐三角形深克隆网格 = O(T×网格) ⇒ 改 `Rc` 共享；4972ms → 135ms，三段拆分计时方法） |
+| [implementation/scene-brightness-and-lights.md](./game/implementation/scene-brightness-and-lights.md) | I：场景亮度与光照（world/prop 三条光照路径的取值与校准、ramp 条纹取证、多 primitive 共享 buffer 陷阱） |
+| [implementation/materials-and-alpha.md](./game/implementation/materials-and-alpha.md) | I：材质与透明度（铁丝网/格栅「该透不透」四处丢失：回退包键=贴图路径 / 基名 VMT / alpha 语义保留 / 贴图镂空补判 MASK；含量测口径与已知限制） |
 | [differences.md](./game/differences.md) | D：vs debug（同构中的最小化）/viewer/test、共享层取舍 |
 | [README.md](./game/README.md) | 工程说明（四维度之外）：键位 / 启动与打包 / 故障排查 |
 
