@@ -27,7 +27,7 @@
   .ctrlw {
     margin-top: 28px; max-width: 640px; text-align: left;
     font-size: 12.5px; line-height: 1.85; color: #555;
-    background: #fffdf7; border: 1px solid #f0e3c8; border-left: 3px solid #e3a83c;
+    background: #fffdf7; border: 1px solid #f0e3c8;
     border-radius: 8px; padding: 14px 18px;
   }
   .ctrlw-h { font-size: 13.5px; font-weight: 600; color: #8a6116; margin-bottom: 6px; }
@@ -37,6 +37,7 @@
   .ctrlw a { color: #2b6cb0; text-decoration: none; }
   .ctrlw a:hover { text-decoration: underline; }
   .ctrlw-sub { color: #777; }
+  .ctrlw-cons { display: inline-block; margin-top: 4px; color: #8a5a00; }
   .ctrlw p.ctrlw-warn {
     color: #8a5a00; background: #fdf5e2; border-radius: 6px;
     padding: 8px 10px; margin: 10px 0 0;
@@ -76,13 +77,16 @@
         <a href="https://chromewebstore.google.com/detail/more-better-ctrl-w/fhgdipcimngeleeemdhkinodbkkmcgjm" target="_blank" rel="noopener">More Better Ctrl-W</a>，
         然后在地址栏打开 <code>chrome://extensions/shortcuts</code>，找到该扩展的
         <strong>Do absolutely nothing</strong> 一项，把它设为 <kbd>Ctrl</kbd> + <kbd>W</kbd>。
-        此后 <kbd>Ctrl</kbd> + <kbd>W</kbd> 不再关闭页面。
+        此后 <kbd>Ctrl</kbd> + <kbd>W</kbd> 不再关闭页面。<br>
+        <span class="ctrlw-cons">代价：这一改法会让「<strong>先按 Ctrl 蹲、再按 W 前进</strong>」
+        这个组合被阻断 1 秒以上（「先按 W 前进、再按 Ctrl 蹲」不受影响）。若你习惯先蹲后走，
+        用上面第 1 种方式改键位更合适。</span>
       </li>
     </ol>
     <p class="ctrlw-warn">
       <strong>注意：</strong>录快捷键时，输入框里直接按 <kbd>Ctrl</kbd> + <kbd>W</kbd>
       可能当场把设置页也一起关掉；Edge 实测可以<strong>先按 <kbd>W</kbd> 再按 <kbd>Ctrl</kbd></strong>
-      录进去。代价是它会阻断「先蹲后前进」这个组合 1 秒以上（「先前进后蹲」不受影响）。
+      录进去。
     </p>
   </div>
 
