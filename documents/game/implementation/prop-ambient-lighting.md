@@ -58,7 +58,7 @@ Source 引擎中 prop_static 的静态照明不来自 lightmap（prop 无 lightm
 | 查询 | `test/game-core/crates/wasm-core/vbsp/mod.rs:520` `prop_ambient_cube(prop_index)` | 见下方规则 |
 | 集成 | `test/game-core/crates/wasm-core/model_integrator/mod.rs:132`（node extras）、`:874`（StaticProp 字段）、`:893`（Placement 字段） | cube 写入 node extras `{"ambientCube": [18]}` |
 | 接线 | `test/game-core/crates/wasm/src/lib.rs`（collect 转换） | `ambient_cube: bsp.prop_ambient_cube(i)` |
-| 渲染 | `test/game-core/src/renderer/lightmap-shader.ts:704` `applyAmbientCubeIfAny` | fullbright 材质 + onBeforeCompile 注入法线平方加权；`extras.unlit`（VMT `UnlitGeneric` / `$selfillum`）**跳过** cube 相乘 ⇒ 全亮贴图原色 |
+| 渲染 | `test/game-core/src/renderer/lightmap-shader.ts:844` `applyAmbientCubeIfAny` | fullbright 材质 + onBeforeCompile 注入法线平方加权；`extras.unlit`（VMT `UnlitGeneric` / `$selfillum`）**跳过** cube 相乘 ⇒ 全亮贴图原色 |
 
 `prop_ambient_cube` 的四条规则（全部有实证背书）：
 
@@ -86,11 +86,178 @@ Source 引擎中 prop_static 的静态照明不来自 lightmap（prop 无 lightm
 
 按价值排序（第 1 条为最可能的正解）：
 
-1. **sprp per-prop lighting（`m_Lighting`）**：Source 引擎对 prop_static 的静态照明实际用 **VRAD 烘焙的 per-prop 4 采样光照**（写在该 prop 的 GameLump sprp 记录尾部，`StaticPropLump_t` v7+ 字段 `m_Lighting[4]`）——**leaf ambient cube 只是外部参照实现的近似**，外部参照实现与本工程都未解析 m_Lighting。续作方向：核对 sprp v10 的 64B 记录布局（`test/game-core/crates/wasm-core/vbsp/data/game.rs:253` 起的 `StaticPropLumpV10`）尾部是否存在未解析的 16B lighting 块，若有则解析并替代/混合 leaf ambient。
+1. **sprp per-prop lighting（`m_Lighting`）**：Source 引擎对 prop_static 的静态照明实际用 **VRAD 烘焙的 per-prop 4 采样光照**（写在该 prop 的 GameLump sprp 记录尾部，`StaticPropLump_t` v7+ 字段 `m_Lighting[4]`）——**leaf ambient cube 只是外部参照实现的近似**，外部参照实现与本工程都未解析 m_Lighting。
+   **✅ 已实测结案（2026-09-20）：本工程目标图没有这份数据。** 用 `vbsp` crate 的真实结构（`game.rs:88-138`）解 surf_666 的 GAME_LUMP：
+   - 子 lump `prps`（= `i32::from_be_bytes(*b"sprp")` 的小端落盘，**文件里读作 `prps` 而非 `sprp`**，这一点曾误导过一次排查）`version=10`，`dict=126 / leaves=2562 / props=653`；
+   - 记录区 `47016 B / 653 条 = 72 B/条`（**恰好铺满**，余 0），比 v10 已知字段 56 B **多 16 B** —— 看起来正合 `m_Lighting[4]`；
+   - 但**这 16 B 不是光照**：653 条记录里只有 **5 种取值**，尾 8 字节恒为 `00 00 80 3f 00 00 00 00 00 01 00 00`（`1.0f` + 常量），"指数候选"字节里 1959/2612 个为 0、其余恒为 63（不在 `exp+128` 合理区间）。VRAD 的逐 prop 光照必然随位置变化，不可能 653 个 prop 一模一样。
+   ⇒ **该图无可用 `m_Lighting`**（Source 2013 之后才有；本图是 v10），必须自己从已烘焙数据取。
 2. **sprp v11 `diff_modulation`**：CS:GO 后期记录含 `diff_modulation: u32`（`game.rs:277` 注释）——Source 的 prop diffuse 调制色，未消费。
 3. **顶点级采样**：当前 cube 为 per-prop 单点；若 leaf 内多采样点存在，可对 prop 顶点按世界位置加权插值多个采样点（外部参照实现标注 `TODO: interpolation` 未做）。
 4. **材质调制**：VMT 的 `$selfillum`、detail/光栅参数对 prop 亮度的贡献未建模。*（部分已闭环：`UnlitGeneric` / `$selfillum` 已由 `parse_vmt` 标注 `unlit`、经 `InMemoryResources.material_unlit` 写进 GLB `extras.unlit`，渲染端据此**跳过 ambient cube 相乘**走全亮 —— 见 [prop-black-materials-root-cause.md](prop-black-materials-root-cause.md)；detail/光栅参数仍未建模。）*
 5. **兜底策略**：中性灰 prop 可改乘「该图平均环境亮度」而非固定 0.214，减少观感突兀。
+
+## 7.1 已开工：改用**地图自带 lightmap 采样**（替代/并行于 leaf ambient）
+
+> ⚠️ **本节方案已于 2026-09-20 回退**（导出耗时 14.5×，收益未证实）——
+> 见 [§7.4 回退 1](#回退-1地图-lightmap-采样71-的-lightmapraysolver-已回退)。
+> 保留原文作为判据链；以下 `PROP_LIGHTMAP_CUBE_SCALE` / `ambientCubeSrc` /
+> `export_model_attached_lights()` 在当前代码里**都不存在**。
+
+`m_Lighting` 结案（无数据）之后，逐 prop 光照的更高精度来源就是**地图里那份 VRAD 烘焙的 world lightmap**：
+
+| 层 | 实现 | 位置 |
+|---|---|---|
+| 求解 | `Bsp::prop_lightmap_cube(prop_index, atlas)` → `[f32; 18]` | `test/game-core/crates/wasm-core/vbsp/mod.rs`（含 `LightmapRaySolver`：512 单位均匀网格剪枝 + Möller–Trumbore + 图集采样） |
+| 口径 | 从 prop 光照采样点（`flags & USE_LIGHTING_ORIGIN` 时用 `lighting_origin`）沿 6 轴向各打一条射线；命中**带 lightmap 的面**后取该 luxel 的 RGBExp32 解码值（`mantissa/255 × 2^exp`，**与渲染端同式**），权重 = `cos(面法线, 查询方向)` | 同上 |
+| 接线 | `collect_pakfile_models` 里一次性 `build_atlas`，逐 prop 优先取 lightmap cube、失败回退 leaf cube | `test/game-core/crates/wasm/src/lib.rs` |
+| 标记 | GLB node extras 增 `ambientCubeSrc: "lightmap" \| "leaf"`，渲染端据此决定是否套校准常数 | `model_integrator/mod.rs` + `lightmap-shader.ts` 的 `PROP_LIGHTMAP_CUBE_SCALE` |
+| 诊断 | 新增 wasm 导出 `export_model_attached_lights()`（**模型自带光源**：MDL 附件名以 `light` 开头者，含世界坐标与朝向） | `crates/wasm/src/lib.rs` |
+
+**为什么不需要另起一套烘焙**：地图的 lightmap 就是 VRAD 的产物，精度高于 leaf ambient cube（后者是 ~1.5 m 网格的单点近似）。渲染端 `vbspAmbientWeight()` 的法线平方加权对两者完全同构 ⇒ **零 shader 改动**。
+
+**两个量级域不同**：leaf ambient 已按 `AMBIENT_SCALE` 校准，lightmap luxel 是 LDR `0..1` 线性值 ⇒ 统一过一个量级系数 `PROP_CUBE_GAIN`（**最终取 16**，见下节）。
+
+## 7.2 第三轮：暗处 prop「像没有纹理」= 辐照度量级被直乘压死
+
+> ⚠️ 本节的放大系数（8/16/32）与「量级 p50」口径已被 [§7.4 更正 1/2](#74-收官2026-09-20三处更正--两项回退) 取代。
+
+用户第二轮反馈：**「暗的地方太暗，暗处的模型特别黑，像没有纹理一样」**（并给出 `ramp_1` 的目标色 `#40312A`）。
+
+### 判据（实测量化，非估计）
+
+`#40312A` 的线性值是 `0.0513/0.0307/0.0232`（**本身就是很暗的颜色**：线性亮度仅 0.0345）。
+把 cube 直接乘上去，实测结果：
+
+| 来源 | 数量 | cube 线性亮度 p10 / p50 / p90 | 直乘 `#40312A` 后的显示值 |
+|---|---|---|---|
+| lightmap 采样 | 334 prop | 2.77e-3 / **1.21e-2** / 3.32e-2 | p50 → **rgb(2,1,1)**；p10 → rgb(0,0,0) |
+| leaf ambient | 167 prop | 5.12e-3 / 1.09e-2 / 9.26e-2 | p50 → rgb(2,1,1) |
+
+⇒ 输出只剩 **1~2 个 8bit 台阶**、三通道差 <3 ⇒ 贴图的像素级细节被量化抹平。这就是「像没有纹理」。
+
+### 口径与修正
+
+Source 的显示口径是 `albedo × lightmap^(1/2.2)`（外部参照实现 `LightmappedBase.ts:66`）——**先提升再乘**。
+本工程的 gamma 提升由**着色器**承担（`vbspAmbientWeight()` 的 `pow(c, vbspLightGamma)`，由面板「光照 γ」驱动），
+故数据侧只需补**量级**：
+
+| 放大系数 g | p50 → 显示 | p90 → 显示 |
+|---|---|---|
+| 1（修复前） | rgb(2,1,1) | rgb(6,3,3) |
+| 8 | rgb(14,9,7) | rgb(40,28,23) |
+| **16（选定）** | **rgb(28,19,15)** | rgb(80,57,45)（不削顶） |
+| 32 | rgb(56,39,30) | rgb(152,109,86) ← 亮部过曝 |
+
+实现：`lightmap-shader.ts` 的 `PROP_CUBE_GAIN = 16.0`，在 `routeFullbright` 里对 cube 统一乘一次
+（**只作用于 ambient cube 路径**，`extras.unlit` 的霓虹/自发光 prop 不受影响，仍是贴图原色）。
+与面板三级旋钮（光照 γ / 曝光 / 模型亮度）相互独立：本系数是**数据口径**，那三个是显示侧用户旋钮。
+
+> ⚠️ 排查中确认的一个坑：`vbspAmbientWeight()` **已经**做了 `pow(c, vec3(vbspLightGamma))`，
+> 所以数据侧**绝不能再 pow 一次**（那样等于 γ²≈6.6，亮部削顶）。修正只做线性放大。
+
+## 7.3 第四轮（决定性）：**lightmap 量级未标定** → 「贴图被光照压掉、模型看不见」
+
+> ⚠️ 本节是在**「模型根本没渲染」**（GLSL 编译失败）的前提下做的分离实验：
+> 「只出贴图」那一帧的数据有效（贴图链路正常），但**由它推出的曝光 12 与
+> `PROP_CUBE_GAIN = 12` 均已作废** —— 见
+> [§7.4](#74-收官2026-09-20三处更正--两项回退) 与
+> [prop-black-materials-root-cause.md](./prop-black-materials-root-cause.md) §8。
+
+用户第三轮反馈：**「还是看不到，你的材质贴图直接看不到了」**。这轮用「只出材质」的分离实验定案。
+
+### 判据（真实出帧，同机同图）
+
+| 帧 | mean luma | `luma<32` 占比 | `luma<12` 占比 |
+|---|---|---|---|
+| `--stage off`（**只出贴图**，不施加 lightmap） | **56.7** | 5.3% | **0.0%** |
+| 施加 lightmap（旧标定：曝光 1 / γ 0.5） | **14.4** | 83% | 61.7% |
+| 施加 lightmap（新标定：曝光 12 / γ 2.2） | **66.2** | **4.3%** | **0.0%** |
+
+⇒ **贴图链路完全正常**；是 lightmap 项把它乘没了。
+
+### 两个叠加成因
+
+1. **量级未标定**：lightmap 解码值（RGBExp32 `mantissa/255 × 2^exp`）实测 `p50 = 1.21e-2`、
+   `p90 = 3.32e-2`；而「被照亮的表面」应接近 1.0 量级（= `albedo × 1.0`，即 `--stage off`
+   那一帧的观感）。直乘贴图（线性 0.1~0.3）后乘积 ≈ `1e-3` ⇒ **8bit 量化到 0**。
+   修：`config.ts` 的 `lighting.exposure` **1 → 12**（标定点 `p50 × 12 ≈ 0.145`、
+   `p90 × 12 ≈ 0.40`）；面板量程同步 `0.5~8 → 0.5~32`（旧上限覆盖不到新默认值）。
+
+2. **γ 口径在本轮被反转（自查发现的回归）**：着色器由 `pow(L, γ)` 改为 Source 口径的
+   `pow(L, 1/γ)` 后，`config.ts` 遗留的 `lightGamma = 0.5` 语义随之反转 ——
+   旧算式下它是 `pow(L,0.5)` 提亮，新算式下变成 **`pow(L,2)` 把暗部平方**
+   （`0.012 → 1.4e-4`）⇒ 更黑。
+   修：`lightGamma` **0.5 → 2.2**（严格 Source 平价）；面板量程 `0.30~1.00 → 1.00~4.00`
+   （新算式下 γ=1 才是中性）。
+
+### 保留项（同轮加入，与上述修复正交）
+
+> ⚠️ **本节与其上方 §7.1–§7.3 的系数取值均已被 [§7.4](#74-收官2026-09-20三处更正--两项回退) 取代**（那几轮是在
+> 「模型其实一个像素都没画」的前提下调出来的）。保留原文是为了留住判据链，**不要照抄其中的数字**。
+
+- `PROP_CUBE_GAIN = 12`：prop 走 ambient cube 路径（量级 p50 = 1.2e-2），补偿到与 world 路径同量级。
+- `vbspLightFloor = 0.004`：暗部**加法**下限（`0 × 任何数 = 0`，倍率救不回纯黑）。
+- 四个旋钮相互独立：**曝光/γ**（world 显示侧）、**模型亮度**（prop 显示侧）、
+  **暗部下限**（加法）、**prop 量级补偿**（数据侧）。
+
+## 7.4 收官（2026-09-20）：三处更正 + 两项回退
+
+> 本节的每一条都有**可复跑的工具与数字**。上一轮之所以全部走偏，是因为在一个
+> **「模型根本没渲染」**的画面里调系数 —— 根因是 GLSL 注入漏声明 uniform ⇒
+> fragment 编译失败 ⇒ `drawArrays` 全被拒（详见
+> [prop-black-materials-root-cause.md](./prop-black-materials-root-cause.md) §8）。
+
+### 更正 1：`PROP_CUBE_GAIN` 12 → **1.0**（原推理是单位混淆）
+
+§7.2/§7.3 拿「cube 原始解码值 ≈1.2e-2」去比「world 面**渲染后**的光照项 0.2–0.5」，
+得出"prop 比 world 暗 1~2 个数量级"—— **两边不是同一个量**：两条路径吃的是同一个变换
+（`pow(max(v, floor), 1/γ) × exposure`，cube 再多乘一个 `vbspAmbientScale`）。
+数据本身同量级：cube（leaf ambient）p50 ≈ 1.09e-2 vs world 图集在用 texel p50 = 4.40e-2。
+⇒ 12× 属**重复补偿**（叠在 exposure 上等效 27.6×），会把模型冲成白块。现取 1.0，
+模型亮度只由面板「模型光照」滑块（`setAmbientScale`）控制。
+
+### 更正 2：曝光 12 → **2.3**（改用图集全量分布标定）
+
+§7.3 的 `p50 = 1.21e-2` 是**运行期少数 prop 采样点**的中位数，不是全图中位。
+新工具 `scripts/lightmap-atlas-stats.mjs`（`npm run test:lightmap-atlas-stats`，**已入库的标定仪器**）
+直接从 GLB 取 4096×2048 图集、按渲染端同式解码，
+并**剔除 41.2% 的 `exp=-128` 未用填充**后统计 4,935,532 个在用 texel：
+
+| 分位 | p25 | p50 | p75 | p90 | p95 | p99 |
+|---|---|---|---|---|---|---|
+| luxel | 0.0177 | 0.0440 | 0.0860 | 0.1747 | 0.3809 | 0.7955 |
+
+标定：令 p75 的 lightitem ≈ 0.75 ⇒ `exposure = 0.75 / pow(0.086, 1/2.2) ≈ 2.29`。
+用户口径校验（「ramp_1 整体应在 `#40312A` 附近」）：p90 luxel ⇒ lightitem 1.04
+⇒ 线性 `0.0456 × 1.04` ⇒ 屏幕 ≈ `rgb(65,50,42)` ≈ `#40312A` ✓。
+面板量程同步 `0.5~32 → 0.1~8`。
+
+### 更正 3：GLSL 注入的 uniform 声明必须单一来源
+
+新增导出常量 `VBSP_LIGHTMAP_UNIFORM_DECLS` / `VBSP_AMBIENT_UNIFORM_DECLS`，
+两条注入路径共用；守卫脚本 §10 增加「注入单元自洽」断言（38/38）。
+
+### 回退 1：地图 lightmap 采样（§7.1 的 `LightmapRaySolver`）已回退
+
+| 判据 | 实测 |
+|---|---|
+| 导出耗时（同一脚本、同一地图 `temp/probe-glb-materials.mjs`） | **5,635 ms → 81,911 ms（14.5×）** |
+| 几何/材质产物 | 逐项不变（162,130,364 B vs 162,098,584 B；三角形同为 148,048 实例口径） |
+
+收益（更精确的逐 prop 光照）无法证明，代价是每次加载多 76 秒 ⇒ **回退**。
+`crates/wasm-core/vbsp/mod.rs` 的 `LightmapRaySolver` / `prop_lightmap_cube`、
+`model_integrator` 的 `ambient_cube_from_lightmap` / `ambientCubeSrc`、
+`lightmap-shader.ts` 的 `PROP_LIGHTMAP_CUBE_SCALE` 引用一并撤销。
+若将来要做「模型预烘焙」，需要的是**离线烘焙 + 缓存**（不在地图加载路径上），
+而不是每次加载现算 —— 那是一个独立课题。
+
+### 回退 2：诊断导出 `export_model_attached_lights()` 已回退
+
+同批加入（为查「模型自带光源」），无任何调用方 ⇒ 移除，wasm 导出恢复
+**17 + 物理 17**（`npm run check:api` 通过）。回退后 wasm 体积 3,827,034 → 3,779,293 B。
+
+
 
 ## 8. 二次定位：「不生效」的三处断点（2026-09-19 实测）
 
@@ -116,7 +283,7 @@ surf_666 实测（501 个带 cube 的 prop node 所指向 mesh 的 primitive 数
 ⇒ **366 个 node（73%）落成 Group**，cube 到此为止；只有 135 个（27%）直接是 Mesh。
 
 修复方向（任选，推荐第 1 条）：
-1. **导出端改写到 primitive extras** ⇒ 落到 `geometry.userData`，与 `hasLightmap` 同口径（该口径已在 `lightmap-shader.ts:18-20` 声明、并在 `:378-400` 生效），最稳；
+1. **导出端改写到 primitive extras** ⇒ 落到 `geometry.userData`，与 `hasLightmap` 同口径（该口径已在 `lightmap-shader.ts:18-20` 声明、并在 `:464-467` 生效），最稳；
 2. 渲染端向上回溯：`mesh.userData.ambientCube ?? mesh.parent?.userData.ambientCube`（Group 层级固定一层，成本低）；
 3. 加载后统一把 node extras 下发给子 Mesh（GLTF onLoad 遍历）。
 
