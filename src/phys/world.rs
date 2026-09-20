@@ -599,7 +599,13 @@ impl BrushGrid {
 /// 三角形空间索引条目。
 #[derive(Clone)]
 pub struct TriEntry {
-    pub mesh: TriMesh,
+    /// 三角形所属网格（**共享引用**）。
+    ///
+    /// ⚠️ 2026-09-20 修复：此处原为按值的 `TriMesh`，`TriangleGrid::build()` 里逐三角形
+    /// `mesh.clone()` ⇒ 每个三角形深克隆整份 vertices+indices = **O(三角形数 × 网格大小)**。
+    /// 实测：surf_666 权威世界构建 4972ms、surf_null 785ms（载荷只差 12% ⇒ 超线性），
+    /// 与三角形数平方相关。改 `Rc` 后每网格只深克隆一次。wasm 单线程 ⇒ `Rc` 足够。
+    pub mesh: std::rc::Rc<TriMesh>,
     pub a: u32,
     pub b: u32,
     pub c: u32,
@@ -639,6 +645,8 @@ impl TriangleGrid {
 
         let inv = 1.0 / cell_size;
         for mesh in meshes {
+            // 每网格**一次**深克隆（原实现是每个三角形一次 ⇒ O(T×网格) 的 memcpy 爆炸）
+            let shared = std::rc::Rc::new(mesh.clone());
             let v = &mesh.vertices;
             for [a, b, c] in &mesh.indices {
                 let va = v[*a as usize];
@@ -652,7 +660,7 @@ impl TriangleGrid {
                 let max_z = va[2].max(vb[2]).max(vc[2]);
                 let idx = self.entries.len();
                 self.entries.push(TriEntry {
-                    mesh: mesh.clone(),
+                    mesh: std::rc::Rc::clone(&shared),
                     a: *a,
                     b: *b,
                     c: *c,

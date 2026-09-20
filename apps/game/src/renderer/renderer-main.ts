@@ -22,6 +22,7 @@ import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-ca
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
+import { loadLightmapAtlas, applyLightmapToMeshes, fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, getVertexLightingRelaxStats, getPropVertexRelax, setPropVertexFlatten, getPropVertexFlatten, VERTEX_LIGHTING_ATTR, setLightingMode as setLightingModeInShader, getLightingMode, isTextureOnlyMode, type LightingMode } from './lightmap-shader.js';
 
 /** FOV 默认值（73.6；面板 hud.fov 可调，60-110）。 */
 const FOV_DEFAULT = 73.6;
@@ -147,8 +148,21 @@ export class RendererMain {
   private sampleEpoch = 0;
   /** mesh → { center, radius, clusterIds }（LOD/PVS 用；clusterIds 空间采样分配）。 */
   private lodItems: Array<{ mesh: THREE.Mesh; center: THREE.Vector3; radius: number; clusterIds: number[] }> = [];
-  /** 剔除距离（场景加载后校准）。 */
+  /** 剔除距离（场景加载后校准；0 配置 = 用 autoCullDistance）。 */
   private cullDistance = 12800;
+  /** 自动剔除距离 = 地图包围盒对角线 × 0.5（`renderDistance: 0` 时生效）。 */
+  private autoCullDistance = 12800;
+
+  /**
+   * 待执行的注入生效性统计（首帧渲染后跑一次）。
+   *
+   * 为什么延后：`applyLightmap` 在建场景时调用，此时 three **尚未编译材质** ⇒
+   * `onBeforeCompile` 未触发 ⇒ 统计必然得 0 ⇒ 误报"没有任何一个注入生效"。
+   * 必须在第一帧 `renderer.render()` 之后统计（材质已编译、记录已回填）。
+   */
+  private pendingInjectReport = false;
+  /** 注入生效性统计是否已跑（幂等保护）。 */
+  private injectReported = false;
 
   // ── 纹理画质切换（mosaic）──────────────────────────────────
   /** 画质 manifest：{ 纹理名(小写 basetexture): mosaic 字节码 }。 */
@@ -221,8 +235,27 @@ export class RendererMain {
     eyeHeight: number;
   }, teleport: boolean) => void) | null = null;
 
+  /**
+   * 最近一次 `loadScene` 的输入。光照模式切换（预烘焙 ⇄ 纯纹理）需要按新模式**重建场景**
+   * （见 `setLightingMode`）：需要在 `optimizeScene` 分块合并**之前**按新模式施加材质，
+   * 而合并会丢掉逐 primitive 的 `userData.hasLightmap` ⇒ 就地改材质无法正确切回预烘焙。
+   */
+  private lastSceneData: SceneDataMessage | null = null;
+
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
+    // 光照模式（面板「预烘焙 / 纯纹理」）：模块级开关，`applyLightmapToMeshes` 按它分流。
+    // 必须在加载地图前设定（纯纹理模式连 atlas 都不解码 ⇒ 更少纹理、进图更快）。
+    setLightingModeInShader(config.lighting?.mode ?? 'baked');
+    // 曝光（显示侧亮度）：默认 1.0 = 忠于 BSP 烘焙数据；config 值来自面板持久化。
+    setExposure(config.lighting?.exposure ?? 1);
+    // 光照项 gamma（shadow-lift）：0.85 = 对齐外部参照实现的 γ2.2 域乘算口径。
+    setLightGamma(config.lighting?.lightGamma ?? 0.5);
+    // 模型（prop）烘焙光照亮度：ambient cube 路径的独立档位（不动 world lightmap）
+    setAmbientScale(config.lighting?.ambientScale ?? 1.5);
+    // 第 1 级逐顶点光照的**重建平滑**次数（0 = 原样烘焙值；见 config 里的推导与实测）
+    setPropVertexRelax(config.lighting?.propVertexRelax ?? 1);
+    setPropVertexFlatten(config.lighting?.propVertexFlatten ?? 0.85);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
@@ -241,14 +274,21 @@ export class RendererMain {
     );
     this.camera.position.set(0, 100, 0);
 
-    // 固定三点光（替代原 LightManager）
-    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-    this.scene.add(ambient);
-    const hemi = new THREE.HemisphereLight(0xb0c4de, 0x404030, 0.4);
-    this.scene.add(hemi);
-    const dir = new THREE.DirectionalLight(0xfff4e0, 0.5);
-    dir.position.set(100, 200, 100);
-    this.scene.add(dir);
+    // 前烘焙时代的固定三点光（替代原 LightManager 的遗产）已按外部参照实现口径**停用**
+    // （gamma-parity 计划 §3.1b）：它们只影响无 lightmap 的 Standard 图元（平涂提亮，
+    // 亮度语义错误）；无 lightmap 面的外部参照实现口径是 fullbright 贴图原色
+    // （white texture 兜底），由 applyLightmapToMeshes 的 fullbright 统一路径承担。
+    // 需要临时恢复对比时置 true（勿以开启态入库）。
+    // 实验记录（2026-09-19）：临时置 true 出帧对比——surf_666 spawn 均值 19.425 vs
+    // 关闭态 19.424（直方图逐桶一致）⇒ **加灯零效果**已实测证实（材质全为 MeshBasic）。
+    const LEGACY_THREE_POINT_LIGHTS = false;
+    if (LEGACY_THREE_POINT_LIGHTS) {
+      this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+      this.scene.add(new THREE.HemisphereLight(0xb0c4de, 0x404030, 0.4));
+      const dir = new THREE.DirectionalLight(0xfff4e0, 0.5);
+      dir.position.set(100, 200, 100);
+      this.scene.add(dir);
+    }
 
     // 背景
     this.scene.background = new THREE.Color(0x222222);
@@ -257,6 +297,8 @@ export class RendererMain {
   /** 加载 Worker 传来的场景（GLB + spawn + pvs）。 */
   async loadScene(data: SceneDataMessage): Promise<void> {
     if (!this.scene || !this.camera) return;
+    // 记住输入：光照模式切换（预烘焙 ⇄ 纯纹理）按新模式重建场景时复用同一份 GLB。
+    this.lastSceneData = data;
     this.disposeScene();
 
     // 1. GLB → Scene
@@ -270,12 +312,75 @@ export class RendererMain {
     const size = bbox.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
 
+    // 1.1 中和 GLTFLoader 解析出的 KHR_lights_punctual 光源（**必须在挂进 this.scene 之前**）。
+    //     数据面：GLB 携带全部 light/light_spot/light_environment（surf_666=2118 盏、
+    //     surf_null=3067 盏）。渲染面：**不施加**（§3.3 唯一取舍）——烘焙 lightmap 已含这些
+    //     实体的贡献（VRAD），运行时再打就是重复计光；外部参照实现参照口径也是纯烘焙乘算。
+    //
+    //     ⚠️ 两处都必须对，缺一个就是**整批几何不渲染**（2026-09-20 真实出帧铁证）：
+    //       (1) **位置**：必须在 `this.scene.add(scene)` **之前**做完。rAF 渲染循环此刻已在跑，
+    //           若先挂进场景再中和，中间那一帧就会带着 2000+ 盏灯去编译材质 ⇒ 控制台刷屏
+    //           `FRAGMENT shader uniforms count exceeds MAX_FRAGMENT_UNIFORM_VECTORS(1024)`
+    //           + 数百条 `drawArrays: no valid shader program in use`（实测 +149.29s 一波）。
+    //       (2) **手段**：`removeFromParent()` 真正摘掉。只置 `visible = false` 虽也能让 three
+    //           跳过灯光收集（`three.module.js:29584`：`if ( object.visible === false ) return;`），
+    //           但 2000+ 个节点仍留在场景树里被反复 traverse，且任何一处未来把它置回 true
+    //           就会立刻炸掉全部受光材质的 program。摘掉才把这个不变量变成**结构性**的。
+    const lightsToRemove: THREE.Object3D[] = [];
+    scene.traverse((obj) => {
+      if ((obj as THREE.Light).isLight) lightsToRemove.push(obj);
+    });
+    for (const l of lightsToRemove) l.removeFromParent();
+    if (lightsToRemove.length > 0) {
+      console.info(
+        `[lights] GLB 携带 punctual 光源 ${lightsToRemove.length} 盏 → **已从场景树摘除**（不是仅 visible=false）。` +
+          '烘焙 lightmap 已含其贡献（VRAD），运行时再打会重复计光；' +
+          '且 2000+ 盏会把受光材质的 uniform 推到 1024 上限 ⇒ program 无效 ⇒ 该批 mesh 一个像素都不画。',
+      );
+    }
+
     this.scene.add(scene);
+
+    // 1.2 离线烘焙静态光照（lightmap atlas，阶段 3）：**必须**在 optimizeScene 之前施加。
+    //     理由与 apps/debug/src/renderer/renderer-main.ts:514-515 一致：lightmap 按原 mesh 的
+    //     材质/UV 施加，分块合并时材质实例被去重保留、映射关系不丢；放到合并之后就丢了。
+    await this.applyLightmap(scene, gltf);
+
+    // 1.3 （原「中和 punctual 光源」块已上移为 §1.1 —— 必须在挂进 this.scene **之前**做完，
+    //      否则 rAF 会带着 2000+ 盏灯编译一帧材质，program 超限后该批 mesh 不再渲染。）
 
     // 1.5 空间分块合并（GLB 挂载后、PVS/LOD 注册前）：3.4 万 mesh → ~300~800 空间块。
     //    必须在下方 traverse（lodItems 收集 + clusterIds 分配 = lodManager.setup/
     //    assignClusterIds 的主线程等价物）之前执行——setup 收集分块后的块 mesh。
     this.optimizeScene(scene, gltf.scene);
+
+    // 1.55 装配后终扫：把仍带**受光材质**的 mesh（GLTFLoader 给 prop/派生网格的
+    //      `MeshStandardMaterial`）收敛到 fullbright。本工程刻意不加任何灯（§3.3 唯一取舍）
+    //      ⇒ 受光材质只剩 emissive=[0,0,0]，恒渲染纯黑（实测 surf_666 有 122 个图元：
+    //      47 个 `extras.unlit=true` 的自发光霓虹 prop + 75 个水系/线框/派生网格）。
+    //      必须在 optimizeScene 之后（合并会重建 mesh/材质数组），compile 之前（避免白编译受光程序）。
+    const converged = fullbrightUnlitLitMaterials(this.scene);
+    if (converged > 0) {
+      console.info(
+        `[lightmap] 装配后终扫：${converged} 个 mesh 仍为受光材质 ⇒ 收敛为 fullbright 贴图原色` +
+          '（本工程不加灯，受光材质恒黑；unlit 图元不吃 ambient cube）',
+      );
+    }
+
+    // 1.6 预编译着色器程序：把「首次可见才编译」的卡顿挪到加载期。
+    //     背景：主线程 tick 的 dt 被 clamp 到 0.1s（`tick()` :832）⇒ 任何 >100ms 的
+    //     主线程卡顿都会让主线程预测物理表现为「慢动作」（传送点首次进入新区域最明显）。
+    //     失败不致命（three 仍会按需编译），故 try/catch + 计时日志。
+    try {
+      const renderer = this.renderer;
+      if (renderer) {
+        const compileT0 = performance.now();
+        renderer.compile(this.scene, this.camera);
+        console.info(`[render] 着色器程序预编译耗时 ${(performance.now() - compileT0).toFixed(0)}ms`);
+      }
+    } catch (err) {
+      console.warn('[render] 预编译着色器失败（不影响按需编译）:', err);
+    }
 
     // 2. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 updateNearPlane 收缩）
     this.defaultNear = Math.max(maxDim / 1000, RendererMain.CAMERA_NEAR_MIN);
@@ -319,8 +424,11 @@ export class RendererMain {
       });
     });
 
-    // 4. 视距剔除距离：对角线 × 0.5
-    this.cullDistance = Math.max(maxDim * 0.5, 1000);
+    // 4. 视距剔除距离：自动值 = 对角线 × 0.5；config.hud.renderDistance > 0 时覆盖
+    //    （面板「渲染距离」滑块；0 = 自动，保持改造前行为）
+    this.autoCullDistance = Math.max(maxDim * 0.5, 1000);
+    const cfgRenderDistance = this.config?.hud?.renderDistance ?? 0;
+    this.cullDistance = cfgRenderDistance > 0 ? cfgRenderDistance : this.autoCullDistance;
 
 
     // 5. 回传死亡阈值（场景最低 Y - 1000）
@@ -420,6 +528,9 @@ export class RendererMain {
     this.pendingDx = 0;
     this.pendingDy = 0;
     this.pendingKeys = 0;
+    // 换图：注入生效性统计需对新场景重跑（否则第二张图不再报告注入状态）
+    this.pendingInjectReport = false;
+    this.injectReported = false;
     // 权威帧校准状态清零（防跨地图残留权威帧注入新地图）
     this.calibrator.clear();
     // 换图：渲染采样流不连续 → 索引空间重启（代数 +1，Worker 丢弃旧图缓存）
@@ -507,6 +618,30 @@ export class RendererMain {
     if (!this.camera) return;
     this.camera.fov = fov;
     this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * 设置全局曝光（显示侧亮度倍率，面板调用；world lightmap 与 prop ambient 共用）。
+   * 共享 uniform ⇒ 立即生效，不触发材质重编译。1.0 = 忠于 BSP 数据。
+   */
+  setExposure(value: number): void {
+    setExposure(value);
+  }
+
+  /**
+   * 设置光照项 gamma（shadow-lift）。1.0 = 不修正；0.85 = 对齐外部参照实现 γ2.2 口径。
+   * 与曝光不同：只抬暗部，亮部不受影响 ⇒ 不会削顶。共享 uniform ⇒ 立即生效。
+   */
+  setLightGamma(value: number): void {
+    setLightGamma(value);
+  }
+
+  /**
+   * 设置模型（prop）烘焙光照亮度倍率（ambient cube 路径专用）。
+   * 1.0 = 忠于数据；0 = 模型全黑；>1 提亮模型。共享 uniform ⇒ 立即生效。
+   */
+  setAmbientScale(value: number): void {
+    setAmbientScale(value);
   }
 
   // ── 主线程唯一物理线 ───────────────────────────────────────
@@ -832,6 +967,205 @@ export class RendererMain {
 
     // 3. 渲染（快照就绪后无条件渲染，帧率跟随 rAF）
     this.renderer.render(this.scene, this.camera);
+
+    // 3b. 首帧后跑一次注入生效性统计（此刻材质已编译、onBeforeCompile 已回填）。
+    if (this.pendingInjectReport && !this.injectReported) {
+      this.injectReported = true;
+      this.pendingInjectReport = false;
+      this.reportInjectStatsOnce();
+    }
+  }
+
+  /**
+   * 注入生效性统计（**必须在首帧渲染之后**调用一次）。
+   *
+   * 判据口径按 `stage` 分类，不再把"跳过注入"误判成"注入失效"：
+   * - `auto`/`channel0`/`channel1`：注入应**生效**（`__vbspLightmapInjected === true`）
+   *   ⇒ 全部失效才算失败（`console.error` + 置全局失败标记，供出帧脚本非零退出）；
+   * - `broken`：**预期失败**（故意用失配字面量）⇒ 单列，不打 error、不置失败标记；
+   * - `native`：**预期跳过**（走 three 原生 lightmap）⇒ 单列，不打 error；
+   * - `off`：压根未施加材质（`applyLightmapToMeshes` 提前 return）⇒ 不进入本统计。
+   *
+   * 为什么按 stage 分类：原先只按 `applied` 真假二分，`native` 的 `applied` 为
+   * `null`/`undefined` ⇒ 落入"失效"分支 ⇒ 负控帧被打上"注入全失效"的**假 error**。
+   */
+  private reportInjectStatsOnce(): void {
+    if (!this.scene) return;
+    const stage = (globalThis as { __vbspLightmapStage?: unknown }).__vbspLightmapStage;
+    // 原样保留已知 stage 名（含 `channel0`/`channel1` 对照档与 `noinject` 可比负控）
+    // ——四态/对照矩阵的全部意义就在于**逐帧可归因**，把 channel 档记成 `auto`
+    // 会让日志与帧标签不一致（实测踩过）。
+    const KNOWN_STAGES = ['broken', 'native', 'off', 'channel0', 'channel1', 'noinject'];
+    const stageName = typeof stage === 'string' && KNOWN_STAGES.includes(stage) ? stage : 'auto';
+
+    let injectOk = 0;
+    let injectBad = 0;
+    let skipped = 0;
+    let expectedFail = 0;
+    const samples: unknown[] = [];
+    this.scene.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        const rec = (
+          mat as unknown as {
+            __vbspLightmapInject?: { applied?: boolean | null; skipped?: boolean; expectedFail?: boolean };
+            __vbspLightmapInjected?: boolean;
+          }
+        ).__vbspLightmapInject;
+        if (!rec) continue;
+        if (rec.skipped) skipped++;
+        else if (rec.expectedFail) expectedFail++;
+        else if (rec.applied) injectOk++;
+        else {
+          injectBad++;
+          if (samples.length < 3) samples.push(rec);
+        }
+      }
+    });
+
+    console.info(
+      `[lightmap] 注入生效性（首帧后统计，stage=${stageName}）：` +
+        `注入生效材质=${injectOk}，注入失效材质=${injectBad}，` +
+        `跳过=${skipped}，预期失败=${expectedFail}`,
+    );
+
+    // prop ambient cube 命中统计（P1 验收口径：hit/miss 按 mesh 调用计，
+    // nodes = 独立 cube 引用去重 = 带 cube 的 prop node 数）
+    const amb = (globalThis as { __vbspAmbientStats?: { hit: number; miss: number; nodes: Set<unknown> } })
+      .__vbspAmbientStats;
+    if (amb) {
+      console.info(
+        `[ambient-cube] 命中=${amb.hit} 未命中=${amb.miss} 节点=${amb.nodes.size}`,
+      );
+      // P2 验收口径：遍历材质统计 __vbspAmbientInject.applied
+      let ambOk = 0;
+      let ambBad = 0;
+      this.scene.traverse((obj) => {
+        const m = obj as THREE.Mesh;
+        if (!m.isMesh) return;
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        for (const mat of mats) {
+          const rec = (mat as unknown as { __vbspAmbientInject?: { applied?: boolean } })
+            .__vbspAmbientInject;
+          if (!rec) continue;
+          if (rec.applied) ambOk++;
+          else ambBad++;
+        }
+      });
+      console.info(`[ambient-cube] applied=${ambOk} 失败=${ambBad}`);
+    }
+
+    // 第 1 级 prop 光照（逐顶点预烘焙 `sp_<idx>.vhv` → `_VBSP_VLIGHT`）的接线校验。
+    // 判据：走第 1 级的 mesh 数（>0 才说明导出侧真的接上了）+ 注入是否生效 + 有无失败。
+    // ⚠️ 「带属性但未注入」必须**再分两类**（2026-09-20 穷尽审计的结论）：
+    //    ① `extras.unlit` 的自发光 VMT（`blue_neon` / `glow_*` / `neon666_*` …）⇒ 按 Source
+    //       `UnlitGeneric` 语义**本来就不吃光照**，带属性而不用是**正确**的；
+    //    ② 其余 ⇒ 真漏网，必须修。
+    //    实测 surf_666：带属性 395 个 mesh、顶点数**逐个与 POSITION 相等**（零错位），
+    //    其中 356 已注入 + 39 全为①（② = 0）。只报一个合计数会被误读成缺陷。
+    {
+      let vlOk = 0;
+      let vlBad = 0;
+      let vlUnlit = 0;
+      let vlMissed = 0;
+      this.scene.traverse((obj) => {
+        const m = obj as THREE.Mesh;
+        if (!m.isMesh) return;
+        const g = m.geometry as THREE.BufferGeometry | undefined;
+        const hasAttr = !!g?.getAttribute?.(VERTEX_LIGHTING_ATTR);
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        for (const mat of mats) {
+          const rec = (mat as unknown as { __vbspVertexLightingInject?: { applied?: boolean } })
+            .__vbspVertexLightingInject;
+          if (!rec) {
+            if (!hasAttr) continue;
+            const unlit = (mat?.userData as { unlit?: unknown } | undefined)?.unlit === true;
+            if (unlit) vlUnlit++;
+            else vlMissed++;
+            continue;
+          }
+          if (rec.applied) vlOk++;
+          else vlBad++;
+        }
+      });
+      if (vlOk + vlBad + vlUnlit + vlMissed > 0) {
+        const rs = getVertexLightingRelaxStats();
+        console.info(
+          `[vertex-lighting] 第 1 级（逐顶点预烘焙）注入：生效材质=${vlOk}，失败=${vlBad}，` +
+            `自发光 unlit（按 VMT 语义不吃光照，正确）=${vlUnlit}，**真漏网**=${vlMissed}`,
+        );
+        console.info(
+          `[vertex-lighting] 几何重建（${getPropVertexRelax() === 0 ? '**关闭**：原样使用烘焙值' : `平滑档 ${getPropVertexRelax()}`}）：` +
+            `mesh=${rs.meshes}，接缝焊接组=${rs.welded}，空间不一致顶点=${rs.medianFixed}，松弛遍数=${rs.relaxed}，` +
+            `方差压缩 mesh=${rs.flattened}（**跳过 ${rs.flattenSkipped}**：面内本来就一致 ⇒ 保留原样烘焙值，flatten=${getPropVertexFlatten()}），` +
+            `平均偏移=${(rs.meanAbsDelta * 100).toFixed(1)}%（单顶点最大 ${(rs.maxAbsDelta * 100).toFixed(1)}%，` +
+            `样本顶点=${rs.samples}）`,
+        );
+      }
+      if (vlMissed > 0) {
+        console.error(
+          `[vertex-lighting] 有 ${vlMissed} 个带 _VBSP_VLIGHT 的非 unlit mesh 没走到第 1 级材质 ⇒ 缺陷`,
+        );
+      }
+      // alpha 状态覆盖审计（铁丝网/格栅/玻璃这类材质的关键状态：
+      // 替换材质若丢掉 alphaTest/side，$alphatest 的孔洞会变成实心板、单面材质会少一半）
+      let aCut = 0;
+      let aBlend = 0;
+      let aDouble = 0;
+      this.scene.traverse((obj) => {
+        const m = obj as THREE.Mesh;
+        if (!m.isMesh) return;
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        for (const mat of mats) {
+          if (!mat) continue;
+          if ((mat as THREE.Material & { alphaTest?: number }).alphaTest &&
+            (mat as THREE.Material & { alphaTest?: number }).alphaTest! > 0) aCut++;
+          if (mat.transparent) aBlend++;
+          if ((mat as THREE.Material & { side?: number }).side === THREE.DoubleSide) aDouble++;
+        }
+      });
+      console.info(
+        `[alpha] 场景材质 alpha 状态：alphaTest>0 判 =${aCut}，transparent=${aBlend}，双面=${aDouble}` +
+          `（GLB 侧：MASK=8 / BLEND=11 / 无贴图=18；裁切/混合若在此丢失即为铁丝网、格栅、玻璃整片不透的根因）`,
+      );
+    }
+
+    if (stageName === 'broken') {
+      // 负控：预期注入失效 ⇒ 只做记录，不打 error（否则负控帧日志被污染）。
+      console.warn(
+        `[lightmap] stage=broken（负控）：注入预期失效 —— 预期失败材质=${expectedFail}、生效=${injectOk}。`,
+      );
+      return;
+    }
+    if (stageName === 'native') {
+      // native：按设计跳过自定义注入（走 three 原生 lightmap）⇒ 非失败。
+      return;
+    }
+    if (stageName === 'noinject') {
+      // 可比负控：材质照换、**仅不注入** ⇒ 本来就不会有 `__vbspLightmapInject` 记录，
+      // `injectOk=injectBad=0` 属**预期**，不得报"注入全失效"（否则负控帧被打上假 error）。
+      console.warn(
+        '[lightmap] stage=noinject（可比负控）：材质替换保留、仅停用 shader 注入 ⇒ ' +
+          '无注入记录属预期；画面预期退回无烘焙光照，且场景构成与 auto 相同（可比）。',
+      );
+      return;
+    }
+    if (injectOk === 0 && injectBad > 0) {
+      const message =
+        '[lightmap] 施加了材质但**没有任何一个注入生效** —— fragment 里找不到可替换的 ' +
+        'lightmap 块（three 版本漂移？）。地图将只剩贴图、无烘焙光照。样本：' +
+        JSON.stringify(samples);
+      (globalThis as { __vbspLightmapInjectFailed?: boolean }).__vbspLightmapInjectFailed = true;
+      console.error(message);
+    } else if (injectBad > 0) {
+      console.warn(
+        `[lightmap] 有 ${injectBad} 个材质注入失效（成功 ${injectOk} 个）。样本：` +
+          JSON.stringify(samples),
+      );
+    }
   }
 
   resize(width: number, height: number): void {
@@ -841,9 +1175,13 @@ export class RendererMain {
     this.camera.updateProjectionMatrix();
   }
 
-  setCullDistance(dist: number): void {
-    this.cullDistance = dist;
-
+  /**
+   * 渲染距离（LOD 剔除距离，世界单位）。
+   * `> 0` = 显式距离；`<= 0` = 恢复自动值（地图对角线的一半）。
+   * 生效点：`tick()` 的 LOD 遍历——`dist > cullDistance` 的块置 `visible = false`，不产生 draw call。
+   */
+  setRenderDistance(dist: number): void {
+    this.cullDistance = dist > 0 ? dist : this.autoCullDistance;
   }
 
   // ── GLB 加载 ───────────────────────────────────────────────
@@ -860,6 +1198,69 @@ export class RendererMain {
     } finally {
       URL.revokeObjectURL(url);
     }
+  }
+
+  /**
+   * 阶段 3：施加离线烘焙静态光照（lightmap atlas）。
+   *
+   * GLB 契约：`asset.extras.lightmap.textureIndex` 指向图集纹理（副本 wasm-core 的
+   * `bsp_to_gltf_core/lightmap.rs` 写出），图元带 `TEXCOORD_1` 与 `extras.hasLightmap`。
+   * 失败只告警、不阻断场景加载（与既有容错风格一致）；无 atlas 时给出明确日志而不是静默。
+   */
+  private async applyLightmap(scene: THREE.Scene, gltf: GLTF): Promise<void> {
+    try {
+      // 纯纹理模式：**不解码 atlas**（少一张 4096×2048 纹理 = 面板小字里说的「纹理少、进图快」），
+      // 所有图元按 fullbright 贴图原色收敛。
+      const atlas = isTextureOnlyMode() ? null : await loadLightmapAtlas(gltf.parser, gltf);
+      if (!atlas && !isTextureOnlyMode()) {
+        console.info('[lightmap] GLB 未携带 atlas（asset.extras.lightmap 缺失），跳过静态光照');
+        return;
+      }
+      const applied = applyLightmapToMeshes(scene, atlas);
+      const image = atlas?.image as { width?: number; height?: number } | undefined;
+      // ⚠️ **此处不做注入生效性统计**：本方法由 `loadScene` 在建场景时调用，此时 three
+      // **尚未编译任何材质** ⇒ `onBeforeCompile` 还没被调用 ⇒ `__vbspLightmapInject`
+      // 全是 `undefined`。此前在这里统计 ⇒ `注入生效材质=0` 恒成立 ⇒ 误报「没有任何一个
+      // 注入生效」（实测四态各打 2 次假 error，连 `native`/`broken` 负控帧都被污染）。
+      // ⇒ 统计移到**首帧渲染之后**（材质已编译、`onBeforeCompile` 已回填）：见 tick 中的
+      //   `reportInjectStatsOnce()`。诊断口径与 `__vbspFrameProbe.lightmapState()` 一致。
+      console.info(
+        `[lightmap] 光照模式=${getLightingMode()}，atlas ${image?.width ?? 0}×${image?.height ?? 0}，施加 mesh=${applied}`,
+      );
+      if (applied === 0 && !isTextureOnlyMode()) {
+        console.warn('[lightmap] atlas 存在但未施加到任何 mesh（无 TEXCOORD_1 或 hasLightmap 全为 false）');
+      }
+      // 首帧后统一统计（幂等；由 tick 调用）
+      this.pendingInjectReport = applied > 0;
+    } catch (err) {
+      console.error('[lightmap] 施加离线烘焙光照失败:', err);
+    }
+  }
+
+  /**
+   * 切换光照模式（面板「预烘焙 / 纯纹理」）：**按新模式重建场景**（与重新加载地图同一条链路）。
+   *
+   * 为什么必须重建而不是就地换材质：材质施加必须在 `optimizeScene` 分块合并**之前**完成
+   * （合并会丢掉逐 primitive 的 `userData.hasLightmap` / 材质实例映射），就地改无法正确切回
+   * 预烘焙。重建代价 = 一次场景重挂（数秒），这也正是面板小字提示「预烘焙更吃加载时间」的由来。
+   *
+   * @param mode `baked` = 预烘焙（atlas + vhv/ambient cube）；`texture` = 纯纹理（只上漫反射贴图）。
+   */
+  async setLightingMode(mode: LightingMode): Promise<void> {
+    if (getLightingMode() === mode) return;
+    setLightingModeInShader(mode);
+    const data = this.lastSceneData;
+    if (!data) {
+      console.info(`[lighting] 光照模式 → ${mode}（地图尚未加载，将在加载时生效）`);
+      return;
+    }
+    console.info(`[lighting] 光照模式 → ${mode}：按新模式重建场景…`);
+    await this.loadScene(data);
+  }
+
+  /** 当前光照模式（面板回填/诊断用）。 */
+  getLightingMode(): LightingMode {
+    return getLightingMode();
   }
 
   private resetRootRotations(gltf: GLTF): void {
@@ -925,6 +1326,15 @@ export class RendererMain {
       infos.push({ mesh: m, cx: center.x, cy: center.y, cz: center.z });
     });
     if (infos.length === 0) return;
+
+    // ①b 合并失败**不丢几何**（判据，非推断）：
+    //     `mergeGeometries()` 在属性集不一致时返回 null（实测本图控制台有若干条
+    //     `mergeGeometries() failed`），但本函数每一处失败分支都回退为「保留各自独立几何」
+    //     （④ 内三处 `if (!mg)` / `if (!final)`），不存在"合并失败 ⇒ 丢弃"的路径。
+    //     运行期实测（CDP 走真实加载链路 + **索引感知**三角形计数）：合并后场景三角形
+    //     实例总数 = 148048 = GLB 逐节点实例展开总数（prop 40431 + world 107617）⇒ 零丢失。
+    //     ⚠️ 计数必须用 `index.count/3`：GLB 几何是**索引化**的，用 `position.count/3`
+    //     会把顶点数当三角形数、虚高约 14%（本批量测先踩过这个坑）。
 
     // ② cell 大小自适应：cell = 世界包围盒对角线 / cbrt(目标块数)，再按非空 cell 数微调
     //    （非空 cell 偏少 → 缩小 cell，偏多 → 放大 cell，收敛到 300~800）
@@ -1087,5 +1497,267 @@ export class RendererMain {
         `draw call 估算 ${drawCallEst} | ` +
         `前向视锥可见块估算 ${visibleEst >= 0 ? `${visibleEst}/${chunkCount}` : 'N/A（camera 未就绪）'}`,
     );
+  }
+
+  // ── 出帧探针（验证仪器；out-of-band，不参与渲染逻辑）──────────────────
+  /**
+   * 安装 `globalThis.__vbspFrameProbe`：给自动化出帧脚本（scripts/lightmap-frame-capture.mjs）
+   * 提供**确定性相机位姿**与**lightmap 运行时状态**读取口。
+   *
+   * 为什么需要它：缺陷判据是「同一相机位姿下的出帧截图」。主线程把相机钉在物理状态上
+   * （tick 里每帧 `camera.position/rotation = predPhys.state()`），若只靠 spawn 默认朝向，
+   * 视野里大量是天空/远景，地图表面占比不可控 → before/after 亮度差被稀释、也不可复现。
+   * 本探针用 `setHoldPoint` 把物理状态**冻结**在指定位姿（既有机制：每帧 set_state 覆盖），
+   * 于是相机被确定性地锁住，且该路径本身就在生产代码里（"按住 C 读点"）。
+   *
+   * 生产路径零影响：只有自动化脚本显式调用 `applyPose` 才会冻结；正常游玩不会触发。
+   */
+  installFrameProbe(): void {
+    const self = this;
+    const probe = {
+      get ready(): boolean {
+        return self.predReady && self.scene !== null && self.camera !== null;
+      },
+      /** 当前相机的世界位姿（截图可复现性的直接证据）。 */
+      cameraPose(): {
+        pos: [number, number, number];
+        yawDeg: number;
+        pitchDeg: number;
+        fov: number;
+        near: number;
+        far: number;
+      } | null {
+        const cam = self.camera;
+        if (!cam) return null;
+        return {
+          pos: [cam.position.x, cam.position.y, cam.position.z],
+          yawDeg: +(cam.rotation.y / DEG2RAD).toFixed(4),
+          pitchDeg: +(cam.rotation.x / DEG2RAD).toFixed(4),
+          fov: cam.fov,
+          near: cam.near,
+          far: cam.far,
+        };
+      },
+      /** lightmap 施加结果的运行时快照（材质级，不是日志推断）。 */
+      lightmapState(): {
+        meshes: number;
+        withLightMapSlot: number;
+        withUv2: number;
+        uv1Only: number;
+        uv2Only: number;
+        bothUv: number;
+        neitherUv: number;
+        hasLightmapTrue: number;
+        hasLightmapFalse: number;
+        hasLightmapMissing: number;
+        atlasName: string | null;
+        atlasSize: [number, number] | null;
+        lightMapChannels: number[];
+        injectedMaterials: number;
+        atlasSizeUniformBound: number;
+      } | null {
+        if (!self.scene) return null;
+        let meshes = 0;
+        let withLightMapSlot = 0;
+        let withUv2 = 0;
+        let injectedMaterials = 0;
+        let atlasSizeUniformBound = 0;
+        let atlasName: string | null = null;
+        let atlasSize: [number, number] | null = null;
+        let lightMapChannels: number[] = [];
+        let uv1Only = 0;
+        let uv2Only = 0;
+        let bothUv = 0;
+        let neitherUv = 0;
+        let hasLightmapFalse = 0;
+        let hasLightmapTrue = 0;
+        let hasLightmapMissing = 0;
+        self.scene.traverse((obj) => {
+          const m = obj as THREE.Mesh;
+          if (!m.isMesh) return;
+          meshes++;
+          const g1 = !!m.geometry?.getAttribute('uv1');
+          const g2 = !!m.geometry?.getAttribute('uv2');
+          if (g2) withUv2++;
+          if (g1 && g2) bothUv++;
+          else if (g1) uv1Only++;
+          else if (g2) uv2Only++;
+          else neitherUv++;
+          // 与 applyLightmapToMeshes 同口径：primitive extras 落在 **geometry.userData**
+          // （GLTFLoader `assignExtrasToUserData( geometry, primitiveDef )`），geometry 优先。
+          const hlGeom = (m.geometry?.userData as { hasLightmap?: unknown } | undefined)?.hasLightmap;
+          const hlMesh = (m.userData as { hasLightmap?: unknown }).hasLightmap;
+          const hl = hlGeom !== undefined ? hlGeom : hlMesh;
+          if (hl === false) hasLightmapFalse++;
+          else if (hl === true) hasLightmapTrue++;
+          else hasLightmapMissing++;
+          const mats = Array.isArray(m.material) ? m.material : [m.material];
+          for (const mat of mats) {
+            if (!mat) continue;
+            const lm = (mat as unknown as { lightMap?: THREE.Texture | null }).lightMap;
+            if (!lm) continue;
+            withLightMapSlot++;
+            const ch = (lm as unknown as { channel?: number }).channel;
+            if (typeof ch === 'number' && !lightMapChannels.includes(ch)) lightMapChannels.push(ch);
+            if (!atlasName) {
+              atlasName = lm.name ?? null;
+              const img = lm.image as { width?: number; height?: number } | undefined;
+              if (img?.width && img?.height) atlasSize = [img.width, img.height];
+            }
+            // 注入标记：injectLightmapShader 在 onBeforeCompile 上留下的可辨识痕迹
+            if ((mat as unknown as { __vbspLightmapInjected?: boolean }).__vbspLightmapInjected) {
+              injectedMaterials++;
+            }
+            if (
+              (mat as unknown as { __vbspLightmapUniformBound?: boolean }).__vbspLightmapUniformBound
+            ) {
+              atlasSizeUniformBound++;
+            }
+          }
+        });
+        return {
+          meshes,
+          withLightMapSlot,
+          withUv2,
+          uv1Only,
+          uv2Only,
+          bothUv,
+          neitherUv,
+          hasLightmapTrue,
+          hasLightmapFalse,
+          hasLightmapMissing,
+          atlasName,
+          atlasSize,
+          lightMapChannels,
+          injectedMaterials,
+          atlasSizeUniformBound,
+        };
+      },
+      /**
+       * P3 取证：直读前 3 个 ambient 注入材质的 cube 值（mesh/parent userData）与注入记录。
+       * 「0.75 vs 1.0 不敏感」问题的定位仪器：确认材质手里的 cube 到底是什么值。
+       */
+      ambientProbe(): unknown {
+        if (!self.scene) return { count: 0, samples: [], note: 'no scene' };
+        const found: unknown[] = [];
+        const seen = new Set<THREE.Material>();
+        self.scene.traverse((obj) => {
+          const m = obj as THREE.Mesh;
+          if (!m.isMesh || found.length >= 3) return;
+          const mats = Array.isArray(m.material) ? m.material : [m.material];
+          for (const mat of mats) {
+            if (seen.has(mat)) continue;
+            const inject = (
+              mat as unknown as { __vbspAmbientInject?: unknown }
+            ).__vbspAmbientInject;
+            if (!inject) continue;
+            seen.add(mat);
+            const own = (m.userData as { ambientCube?: number[] }).ambientCube ?? [];
+            const parent = (m.parent?.userData as { ambientCube?: number[] }).ambientCube ?? [];
+            const cube = own.length ? own : parent;
+            found.push({
+              cubeHead: cube.slice(0, 6).map((v) => +(+v).toFixed(6)),
+              ownLen: own.length,
+              parentLen: parent.length,
+              inject,
+            });
+            break;
+          }
+        });
+        return { count: found.length, samples: found };
+      },
+      /**
+       * 应用确定性位姿并冻结物理（见本方法上方说明）。
+       * `surface`：出生点 + 俯视 -35°（视野以地图地表为主，lightmap 是否参与直接可见）；
+       * `spawn`  ：出生点原始朝向（对照口径）。
+       */
+      async applyPose(
+        preset: string,
+      ): Promise<{ ok: boolean; why?: string; preset?: string; pose?: unknown }> {
+        if (!self.predPhys || !self.scene) return { ok: false, why: '场景/物理未就绪' };
+        if (preset === 'spawn') {
+          self.holdPoint = null;
+          self.predPhys.respawn();
+          await new Promise((r) => setTimeout(r, 400));
+          return { ok: true, preset, pose: probe.cameraPose() };
+        }
+        if (preset !== 'surface') return { ok: false, why: `未知位姿预设：${preset}` };
+
+        // 先回出生点（拿权威 spawn 坐标），再把 pitch 压到 -35°（俯视地表）。
+        self.holdPoint = null;
+        self.predPhys.respawn();
+        await new Promise((r) => setTimeout(r, 400));
+        const st = self.predPhys.state() as {
+          posX: number; posY: number; posZ: number;
+          yaw: number; eyeHeight: number;
+        };
+        const PITCH_DEG = -35;
+        const freeze = {
+          x: st.posX,
+          y: st.posY,
+          z: st.posZ,
+          yaw: st.yaw,
+          pitch: PITCH_DEG,
+          onGround: true,
+        };
+        // setHoldPoint 是既有生产机制（按住 C 读点）：tick 每帧 set_state 覆盖，
+        // 位置/朝向被钉死、速度归零 → 相机确定性锁在该位姿。
+        self.setHoldPoint(freeze);
+        await new Promise((r) => setTimeout(r, 600));
+        return { ok: true, preset, pose: probe.cameraPose() };
+      },
+      /** 解除冻结（脚本收尾用；不解除也不影响截图，浏览器随后被关掉）。 */
+      release(): void {
+        self.holdPoint = null;
+      },
+
+      /**
+       * 「假亮」判别器：把所有 lightMap 纹理的 image 换成**常量图**（同色铺满）。
+       *
+       * 用途：若画面亮度随之**变得均匀**（方差塌缩）⇒ 之前的明暗来自 lightmap 采样
+       * （真光照）；若画面**几乎不变** ⇒ 明暗来自贴图/几何，lightmap 未真正参与。
+       * 这是纯验证手段，不参与生产逻辑。
+       */
+      replaceAtlasWithConstant(r: number, g: number, b: number): { replaced: number } {
+        if (!self.scene) return { replaced: 0 };
+        let replaced = 0;
+        const seen = new Set<THREE.Texture>();
+        self.scene.traverse((obj) => {
+          const m = obj as THREE.Mesh;
+          if (!m.isMesh) return;
+          const mats = Array.isArray(m.material) ? m.material : [m.material];
+          for (const mat of mats) {
+            if (!mat) continue;
+            const lm = (mat as unknown as { lightMap?: THREE.Texture | null }).lightMap;
+            if (!lm || seen.has(lm)) continue;
+            seen.add(lm);
+            const w = (lm.image as { width?: number } | undefined)?.width ?? 4;
+            const h = (lm.image as { height?: number } | undefined)?.height ?? 4;
+            const buf = new Uint8Array(w * h * 4);
+            for (let i = 0; i < w * h; i++) {
+              buf[i * 4] = r;
+              buf[i * 4 + 1] = g;
+              buf[i * 4 + 2] = b;
+              buf[i * 4 + 3] = 128; // α=128 ⇒ exp = 128*255/255-128 = 0 ⇒ 倍数 2^0 = 1
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              const img = ctx.createImageData(w, h);
+              img.data.set(buf);
+              ctx.putImageData(img, 0, 0);
+            }
+            lm.dispose();
+            lm.image = canvas;
+            lm.needsUpdate = true;
+            replaced++;
+          }
+        });
+        return { replaced };
+      },
+    };
+    (globalThis as unknown as { __vbspFrameProbe?: unknown }).__vbspFrameProbe = probe;
   }
 }

@@ -19,3 +19,4 @@ pub mod pakfile_models;
 pub mod phyfile;
 pub mod texture_utils;
 pub mod vbsp;
+pub mod vhv;
