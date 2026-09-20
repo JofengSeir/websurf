@@ -59,6 +59,7 @@
 | [implementation/prop-ambient-lighting.md](./game/implementation/prop-ambient-lighting.md) | I：prop 静态光照（leaf ambient cube 解析/查询/法线加权注入 + 组选择与 leaf 定位实证 + 验收未通过与后续方向） |
 | [implementation/prop-ambient-fix-plan.md](./game/implementation/prop-ambient-fix-plan.md) | I：prop 光照「不生效」修复方案（Group 断层 / VS 注入被 `#if` 剔除 / 解码量级三处断点的 P1-P3 施工步骤与验收判据） |
 | [implementation/prop-black-materials-root-cause.md](./game/implementation/prop-black-materials-root-cause.md) | I：模型/水面「发黑 → 完全透明」三轮根因（零灯 Standard 恒黑 / 中性占位 UV 采到图集原点 / **注入漏声明 uniform ⇒ fragment 编译失败 ⇒ 整批不渲染**）与验证 |
+| [implementation/authority-startup-sync.md](./game/implementation/authority-startup-sync.md) | I：权威线启动慢的根因与修复（`TriangleGrid::build` 逐三角形深克隆网格 = O(T×网格) ⇒ 改 `Rc` 共享；4972ms → 135ms，三段拆分计时方法） |
 | [differences.md](./game/differences.md) | D：vs debug（同构中的最小化）/viewer/test、共享层取舍 |
 | [README.md](./game/README.md) | 工程说明（四维度之外）：键位 / 启动与打包 / 故障排查 |
 
