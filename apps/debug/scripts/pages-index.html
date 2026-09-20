@@ -18,6 +18,29 @@
   .entry a { color: #2b6cb0; text-decoration: none; }
   .entry a:hover { text-decoration: underline; }
   .entry .desc { color: #888; font-size: 13px; }
+  kbd {
+    font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11.5px;
+    background: #fff; border: 1px solid #d5d5d5; border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 5px; color: #444; white-space: nowrap;
+  }
+  code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 11.5px; }
+  .ctrlw {
+    margin-top: 28px; max-width: 640px; text-align: left;
+    font-size: 12.5px; line-height: 1.85; color: #555;
+    background: #fffdf7; border: 1px solid #f0e3c8; border-left: 3px solid #e3a83c;
+    border-radius: 8px; padding: 14px 18px;
+  }
+  .ctrlw-h { font-size: 13.5px; font-weight: 600; color: #8a6116; margin-bottom: 6px; }
+  .ctrlw p { margin: 8px 0; }
+  .ctrlw ol { margin: 6px 0 10px; padding-left: 22px; }
+  .ctrlw li { margin: 7px 0; }
+  .ctrlw a { color: #2b6cb0; text-decoration: none; }
+  .ctrlw a:hover { text-decoration: underline; }
+  .ctrlw-sub { color: #777; }
+  .ctrlw p.ctrlw-warn {
+    color: #8a5a00; background: #fdf5e2; border-radius: 6px;
+    padding: 8px 10px; margin: 10px 0 0;
+  }
   .note { margin-top: 40px; font-size: 12.5px; color: #999; max-width: 560px; line-height: 1.8; }
   footer { margin-top: 16px; font-size: 12px; color: #bbb; }
 </style>
@@ -33,6 +56,35 @@
   </div>
 
   <div class="note">提示：Game Build 依赖 SharedArrayBuffer（需 COOP/COEP 响应头），GitHub Pages 不提供——线上可打开但功能受限（自动 MsgState 回退）；完整游玩请下载仓库后运行 <code>game/play.cmd</code>。</div>
+
+  <div class="ctrlw">
+    <div class="ctrlw-h">关于 Ctrl + W：页面被关掉不是闪退</div>
+    <p>
+      浏览器里 <kbd>Ctrl</kbd> + <kbd>W</kbd> 就是「关闭当前标签页」。本项目的默认蹲键也是
+      <kbd>Ctrl</kbd>，所以「蹲下 + 前进」时很容易顺手把页面关掉 ——
+      <strong>这不是闪退，也不是项目缺陷</strong>，是浏览器快捷键抢占。
+    </p>
+    <p class="ctrlw-sub">想彻底避免，下面两种方式任选其一：</p>
+    <ol>
+      <li>
+        <strong>改游戏内键位</strong>（推荐，不用装任何东西）：进入页面后按 <kbd>ESC</kbd>
+        打开面板 → <strong>按键</strong> → 把「蹲」从 <kbd>Ctrl</kbd> 改绑到别的键（例如
+        <kbd>Shift</kbd>）。改完 <kbd>Ctrl</kbd> + <kbd>W</kbd> 自然就不会再触发。
+      </li>
+      <li>
+        <strong>装浏览器扩展，把 Ctrl + W 改掉</strong>：安装
+        <a href="https://chromewebstore.google.com/detail/more-better-ctrl-w/fhgdipcimngeleeemdhkinodbkkmcgjm" target="_blank" rel="noopener">More Better Ctrl-W</a>，
+        然后在地址栏打开 <code>chrome://extensions/shortcuts</code>，找到该扩展的
+        <strong>Do absolutely nothing</strong> 一项，把它设为 <kbd>Ctrl</kbd> + <kbd>W</kbd>。
+        此后 <kbd>Ctrl</kbd> + <kbd>W</kbd> 不再关闭页面。
+      </li>
+    </ol>
+    <p class="ctrlw-warn">
+      <strong>注意：</strong>录快捷键时，输入框里直接按 <kbd>Ctrl</kbd> + <kbd>W</kbd>
+      可能当场把设置页也一起关掉；Edge 实测可以<strong>先按 <kbd>W</kbd> 再按 <kbd>Ctrl</kbd></strong>
+      录进去。代价是它会阻断「先蹲后前进」这个组合 1 秒以上（「先前进后蹲」不受影响）。
+    </p>
+  </div>
 
   <footer>由 GitHub Actions 自动构建部署</footer>
 </body>
