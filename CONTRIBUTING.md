@@ -36,4 +36,4 @@
 | apps/viewer | `test:replay`、`test:smoke` |
 | test/dual-mode-harness | `check:api`、`test:three-mode` |
 
-以上脚本同为 CI 门禁的组成部分，详见 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) 与 [README.md](README.md) 第 6 节。
+以上脚本同为 CI 门禁的组成部分，入口是 [`.github/workflows/ci-gates.yml`](.github/workflows/ci-gates.yml)；部署另有 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)（只构建/发布 apps，不跑门禁）。另见 [README.md](README.md) 第 6 节。

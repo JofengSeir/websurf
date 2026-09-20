@@ -41,14 +41,14 @@ crates.io vmdl 0.2.0 vendor 到 `src/vendor/vmdl/`（修复 Source VTX 三角形
 
 ### 1.5 CI 部署面
 
-`.github/workflows/deploy-pages.yml`：
+`.github/workflows/deploy-pages.yml`（**只构建/部署 apps**；2026-09-21 起所有测试门禁已移出到 `.github/workflows/ci-gates.yml`）：
 
 | 工程 | CI 处置 | 证据 |
 |---|---|---|
-| debug | 构建并部署，`node scripts/build-dist.mjs --multi`（多文件 dist） | `deploy-pages.yml:4`（头注"主工程…多文件 dist"）、`:86-88` |
-| game | 构建并部署，`--multi` | `deploy-pages.yml:104-112`（注释"multi 模式：多文件…HTTP 部署"） |
-| viewer | 构建并部署，`npm run build:dist`（**single 是唯一产物形态**，dist-multi 分支已移除） | `deploy-pages.yml:120-126`、`apps/viewer/scripts/build-dist.mjs:13` |
-| test/dual-mode-harness | **仅构建验证，不部署**（install + build WASM/TS） | `deploy-pages.yml:7`、`:134-144` |
+| debug | 构建并部署，`node scripts/build-dist.mjs --multi`（多文件 dist） | `deploy-pages.yml` 头注（三工程构建链路）、`build-app` 矩阵 job 的 `Build dist package` 步骤 |
+| game | 构建并部署，`--multi` | `deploy-pages.yml` 的 `build-app` 矩阵 job（三工程共用同一套步骤） |
+| viewer | 构建并部署，`npm run build:dist`（**single 是唯一产物形态**，dist-multi 分支已移除） | `deploy-pages.yml` 的 `build-app` 矩阵 job、`apps/viewer/scripts/build-dist.mjs:13` |
+| test/dual-mode-harness | **不参与部署**（install + build WASM/TS + `test:three-mode` 在 `ci-gates.yml`） | `ci-gates.yml` 的 `harness-and-debug-gates` job；`deploy-pages.yml` 已无 harness 步骤 |
 
 ---
 
@@ -88,9 +88,9 @@ WASM/Worker/入口三者的页面接线：debug `apps/debug/web/index.html:621`�
 
 | 工程 | 本地 dist 支持 | CI 部署形态 | file:// 可用 | 依据 |
 |---|---|---|---|---|
-| debug | single（默认，全内嵌）+ `--multi` | multi | single 形态可用 | `apps/debug/scripts/build-dist.mjs:1-14`、`deploy-pages.yml:86-88` |
-| game | single（默认）+ `--multi` | multi | single 形态可用 | `apps/game/scripts/build-dist.mjs:26,55-58`（dispatch）与 `:9,121`（multi 注释）、`deploy-pages.yml:104-112` |
-| viewer | **仅 single**（multi 分支 2026-09 移除） | single | ✅ 双击可用（wasm base64 + Blob worker + classic script） | `apps/viewer/scripts/build-dist.mjs:5,13`、`deploy-pages.yml:120-126` |
+| debug | single（默认，全内嵌）+ `--multi` | multi | single 形态可用 | `apps/debug/scripts/build-dist.mjs:1-14`、`deploy-pages.yml` 的 `build-app` 矩阵 job |
+| game | single（默认）+ `--multi` | multi | single 形态可用 | `apps/game/scripts/build-dist.mjs:26,55-58`（dispatch）与 `:9,121`（multi 注释）、`deploy-pages.yml` 的 `build-app` 矩阵 job |
+| viewer | **仅 single**（multi 分支 2026-09 移除） | single | ✅ 双击可用（wasm base64 + Blob worker + classic script） | `apps/viewer/scripts/build-dist.mjs:5,13`、`deploy-pages.yml` 的 `build-app` 矩阵 job |
 | harness | 多文件 dist（5 文件，无 single 内嵌；`build-dist.mjs` 为**本工程自带实现**，按 R-2 例外不消费共享内核 `dist-pack.mjs`） | 不部署 | 仅消息回退模式等价可用 | `test/dual-mode-harness/scripts/build-dist.mjs:10-11`、overview §5 |
 
 注意：`apps/viewer/web/app.js`、`web/worker.js` 与 wasm 产物**不入库**（`apps/viewer/.gitignore:2-4`、根 `.gitignore:9-12`）——git 只跟踪 `apps/viewer/web/index.html` + `styles.css`，页面打开前必须先构建（未构建时有 `web/index.html:91-107` 的 `#fatal` 兜底提示）。debug/game 的 `web/*.js` 同为构建产物；game 的现存 `web/*.js`/`dist/*` 可能是旧架构（v3）产物，运行前先重建（`documents/game/overview.md` §5 ⚠️ 注）。

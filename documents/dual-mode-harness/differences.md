@@ -11,7 +11,7 @@
 | 渲染位置 | **WorkerB**（OffscreenCanvas，主线程零取帧零等待，`src/main.ts:197-198`） | **主线程** canvas（rAF tick 内 renderer.render，`game/src/renderer/renderer-main.ts:700-734`） | 主线程 |
 | 物理 | WorkerA **三实例**：`phys` 权威（三模式共用）/ `tickPhys` 解耦 64t 校准线 / `scratch` tick 模式 F4-C 乐观评估（`src/worker-a.ts:96-110`）；双线互斥 gate + `set-mode`/`mode-ack` 热切 | Worker 权威 64Hz 单实例 + 主线程预测单实例（`仓库根 src/ts-shared/auth/auth-loop.ts:89`；`game/src/renderer/renderer-main.ts:700-710`） | 无（`viewer/crates/wasm/Cargo.toml:5` 注释明示「不含 websurf-phys（无物理）」，依赖表亦无此依赖） |
 | ts-shared 复用 | **2026-09-11 迁移后显著加深**：物理侧 6 模块（auth/shared-state、auth/auth-loop、auth/worker-dispatch、auth/tick-authority、decoupled/decoupled-loop、auth/compute-mode，`src/worker-a.ts:32-56`）+ 渲染侧 auth/shared-state + auth/compute-mode（`src/worker-b.ts:49-52`）；自建的只剩 192B 渲染通道协议（其键位掩码定义仍复用共享层 `src/shared-state.ts:51`） | 7 模块：auth-loop/shared-state/worker-dispatch + input-layer + authority-calibrator/params/world-builder（debug 与 game **同集**；grep 核实） | 无 import（`viewer/src/core/pose.ts:23-25` 本地复刻 `bspYawToCsYaw`，非注释互引） |
-| CI | 仅构建验证不部署 + 跑 `test:three-mode`（`仓库根 .github/workflows/deploy-pages.yml:7,134-150`） | 构建并部署 Pages | 构建并部署 Pages |
+| CI | 不参与部署 + 跑 `test:three-mode`（`仓库根 .github/workflows/ci-gates.yml` 的 `harness-and-debug-gates` job；2026-09-21 前挂在 `deploy-pages.yml`） | 构建并部署 Pages | 构建并部署 Pages |
 
 > **⚠ 2026-09-11 三模式迁移**：本文核对日期为 2026-09-07（迁移前）。**第一节 SAB 布局**的对照现应读作
 > 「harness **渲染通道** 192B vs game/debug 权威帧协议 512B」——harness 现在**另有一条 auth 通道**，

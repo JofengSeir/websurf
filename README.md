@@ -56,7 +56,9 @@ BSP 地图体积大，不随仓库分发（`.gitignore` 忽略 `*.bsp`、`*.dem`
 
 ## 6. CI 与部署
 
-[`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) 在 push 到 `main` 或手动触发时依次：构建四个工程（wasm-pack → 类型检查 → esbuild 打包）→ 运行验收门禁（`test:optimize-scene` 场景合并、`test:auth-clock` 权威时钟、`test:path-acceptance` tick→render 路径垂距、`test:replay` 回放自检、`test:three-mode` 三模式装配）→ 组装 `deploy/{debug,game,viewer}` 与入口页并发布到 GitHub Pages。debug / game 以 `--multi` 构建，viewer 以 single dist 构建，验证工程只构建不部署。
+[`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) 只负责**部署**：push 到 `main`（且改动落在 `apps/`、`src/`、`Cargo.*`）或手动触发时，`build-app` **矩阵 job 并行**构建 debug / game / viewer（wasm-pack → 类型检查 → esbuild 打包 → `npm run build:dist -- --multi`），再由 `deploy` job 组装 `deploy/{debug,game,viewer}` 与入口页并发布到 GitHub Pages。
+
+[`.github/workflows/ci-gates.yml`](.github/workflows/ci-gates.yml) 负责**门禁**（push `main` / PR，文档改动除外）：`cargo test -p websurf-phys`、harness 的 `test:three-mode`、debug 的 `test:optimize-scene` / `test:auth-clock` / `test:path-acceptance` / `test:jump-apex`、game 的 `test:phys` / `test:seed-smoke` / `test:surf-crouch`、viewer 的 `test:replay`。两个 workflow **互不阻塞**——门禁失败不再挡住发布，部署也不再为门禁多编译一份 wasm（详见 `.github/workflows/` 两个文件的头注）。
 
 ## 7. 第三方组件
 

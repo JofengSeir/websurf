@@ -610,9 +610,9 @@ git grep -nE "\.\.[\\/]" -- 'apps/*/*.cmd' 'apps/*/scripts/*.cmd' 'apps/*/packag
 
 ### 6.1 现状（实测）
 
-- 每个工程用 `working-directory` 分别执行：debug 段（`.github/workflows/deploy-pages.yml` 的 `:76-119`）、game 段（`:121-137`）、viewer 段（`:139-159`）、harness 段（`:161-178`）。
-- dist 形态：debug `node scripts/build-dist.mjs --multi`（`:91`）、game 同（`:137`）、viewer `npm run build:dist`（`:155`）。
-- 测试：debug 在 CI 跑 3 个 `test:*`（`test:optimize-scene`、`test:auth-clock`、`test:path-acceptance`；第 4 个 `test:jump-apex` 未进 CI 且当前有层数缺陷，见 §3.6）；viewer 只跑 `test:replay`；**game 段无任何 test 步骤**；viewer 的 `test:smoke` 从未进 CI。
+- 三个 app 由 `deploy-pages.yml` 的 `build-app` **矩阵 job** 并行构建（每工程 `working-directory: apps/<app>`，同一套步骤）；验证工程改由 `ci-gates.yml` 的 `harness-and-debug-gates` job 单独构建。**2026-09-21 重构**：旧行号（debug `:76-119`、game `:121-137`、viewer `:139-159`、harness `:161-178`）与「门禁挂在部署链路」一并失效。
+- dist 形态：三工程统一 `npm run build:dist -- --multi`（矩阵 job 的 `Build dist package` 步骤，走 `package.json` 唯一入口，禁止 CI 绕过 npm）。
+- 测试：**全部集中在 `ci-gates.yml`**（与部署解耦）——`cargo test -p websurf-phys`；debug `test:optimize-scene` / `test:auth-clock` / `test:path-acceptance` / `test:jump-apex`（后者读 harness pkg，故与 harness 同 job）；game `test:phys` / `test:seed-smoke` / `test:surf-crouch`；viewer `test:replay`。viewer 的 `test:smoke` 仍不进 CI（依赖常驻 dev server + 浏览器/8080 端口）。
 
 ### 6.2 收敛规则
 
@@ -779,7 +779,7 @@ apps/<new>/
 | 19 | `apps/viewer/package.json` | 端口；补 `check:api`；`test:smoke`→`local:smoke`；`test:replay` outfile 改 `.tmp/` | R-02、R-12、R-11、§4.3 |
 | 20 | `apps/viewer/scripts/check-wasm-api.mjs` | 新建薄配置，引擎取共享 `src/scripts/lib/wasm-api-contract.mjs`（D-03；与 §3.6 同一次动作，禁止先造出第 4 份副本） | R-12、D-03 |
 | 21 | `test/dual-mode-harness/play.cmd`、`package.json` | 端口 `8110`（**第二批已执行**：`play.cmd:7`、`package.json:13`） | R-02 |
-| 22 | `.github/workflows/deploy-pages.yml` | `npm run build:dist -- --multi`；补 game/viewer 的 `test:*` 步骤 | §6.2 |
+| 22 | `.github/workflows/deploy-pages.yml`、`.github/workflows/ci-gates.yml` | 部署统一 `npm run build:dist -- --multi`；`test:*` 集中到 `ci-gates.yml`（2026-09-21 拆出） | §6.2 |
 | 23 | `apps/*/README.md`、`documents/**/*.md` | 端口引用随 §2.3 更新 | §2.3 |
 | 24 | `CHANGELOG.md` | 记录本轮规范与后续改造 | [AGENTS.md](../AGENTS.md) §6 |
 

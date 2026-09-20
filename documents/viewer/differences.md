@@ -53,7 +53,7 @@
 | WASM 包名 | `websurf_viewer_wasm`（`apps/viewer/package.json:8`、`apps/viewer/src/wasm.d.ts:4`） | debug→`websurf_wasm`、game→`websurf_wasm`（同名不同包、各自相对引用；根 workspace 有意不收编 5 个同名 `websurf-wasm` crate，根 `Cargo.toml:5-28`） |
 | vmdl vendor patch | 同款 `[patch.crates-io]`（`apps/viewer/Cargo.toml:11-13` = 根 `Cargo.toml:27-28`） | 四工程一致（VTX 三角形条带修复，`src/vendor/vmdl/`） |
 | 缺失纹理回退 / 默认纹理包 | 不启用：`ConvertOptions::default()` 无 `missing_fallback`（`apps/viewer/crates/wasm/src/lib.rs:454`） | debug/game 有 mosaic/mtz 链（`apps/debug/crates/wasm/src/lib.rs:842-867`） |
-| dist 形态 | **single 唯一形态**（`apps/viewer/scripts/build-dist.mjs:13`，dist-multi 分支 2026-09 移除；CI 亦走 `npm run build:dist`——"single 模式（viewer 唯一产物形态）"，`.github/workflows/deploy-pages.yml:126-127`） | debug 本地支持 `--multi`（`apps/debug/scripts/build-dist.mjs:9,18,27`），CI 用 `--multi`（`deploy-pages.yml:106-109`） |
+| dist 形态 | **single 唯一形态**（`apps/viewer/scripts/build-dist.mjs:13`，dist-multi 分支 2026-09 移除；CI 亦走 `npm run build:dist`——"single 模式（viewer 唯一产物形态）"，`.github/workflows/deploy-pages.yml` 的 `build-app` 矩阵 job） | debug 本地支持 `--multi`（`apps/debug/scripts/build-dist.mjs:9,18,27`），CI 用 `--multi`（`deploy-pages.yml` 的 `build-app` 矩阵 job） |
 | file:// 兼容 | 内嵌 wasm base64 + Blob URL worker + classic script（`bsp.ts:44-51`、`importer.ts:41-50`、`build-dist.mjs:5`；断言 `smoke-cdp.mjs:128-143`） | debug/game 以 HTTP 部署为主 |
 
 ## 6. 交互与功能面
