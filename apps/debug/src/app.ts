@@ -96,6 +96,8 @@ const dom = {
 	spawnSelect: document.getElementById('spawnSelect') as HTMLSelectElement | null,
 	// 纹理画质（显示设置面板）
 	textureQualityRadios: document.querySelectorAll('input[name="textureQuality"]') as NodeListOf<HTMLInputElement>,
+	// 光照模式（预烘焙 / 纯纹理：预烘焙纹理多、进图更卡；纯纹理最快但无明暗）
+	lightingModeRadios: document.querySelectorAll('input[name="lightingMode"]') as NodeListOf<HTMLInputElement>,
 	// 缺失材质纹理确认弹窗
 	missingTexturesModal: document.getElementById('missingTexturesModal') as HTMLElement | null,
 	missingTexturesSummary: document.getElementById('missingTexturesSummary') as HTMLElement | null,
@@ -481,6 +483,10 @@ async function onSceneReadyUi(
 	// 纹理画质：同步 radio 状态
 	dom.textureQualityRadios.forEach((radio) => {
 		radio.checked = radio.value === config.texture.quality;
+	});
+	// 光照模式：同步 radio 状态（默认 baked；渲染器 init 时已按 config 设定模块级开关）
+	dom.lightingModeRadios.forEach((radio) => {
+		radio.checked = radio.value === (config.lighting.mode ?? 'baked');
 	});
 }
 
@@ -1705,6 +1711,18 @@ function bindUI(): void {
 			const quality = radio.value as 'original' | 'mini';
 			applyConfigPatch(config, 'texture', { quality });
 			rendererMain?.applyConfigPatch('texture', { quality });
+			saveUiPrefs();
+		});
+	});
+
+	// 光照模式（预烘焙 / 纯纹理）：渲染器按新模式重建场景（材质必须在分块合并前施加）。
+	// 纯纹理模式不解码 lightmap atlas ⇒ 纹理更少、进图更快；面板下方小字已写明性能影响。
+	dom.lightingModeRadios.forEach((radio) => {
+		radio.addEventListener('change', () => {
+			if (!radio.checked) return;
+			const mode = radio.value as 'baked' | 'texture';
+			applyConfigPatch(config, 'lighting', { mode });
+			void rendererMain?.setLightingMode(mode);
 			saveUiPrefs();
 		});
 	});

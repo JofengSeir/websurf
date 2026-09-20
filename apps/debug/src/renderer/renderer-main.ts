@@ -32,7 +32,7 @@ import type { DistStats } from './path-recorder.js';
 import type { InputReplayInitialState, InputReplayHull } from '../input/input-recorder.js';
 import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
-import { applyLightmapToMeshes, loadLightmapAtlas } from './lightmap-shader.js';
+import { applyLightmapToMeshes, loadLightmapAtlas, setLightingMode as setLightingModeInShader, getLightingMode, isTextureOnlyMode, type LightingMode } from './lightmap-shader.js';
 
 /**
  * 渲染采样传输契约（实现 = `src/ts-shared/auth/shared-state.ts` 的 ShmState/MsgState，
@@ -189,6 +189,12 @@ export class RendererMain {
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
+  /**
+   * 最近一次 `loadScene` 的输入。光照模式切换（预烘焙 ⇄ 纯纹理）需要按新模式**重建场景**
+   * （见 `setLightingMode`）：材质必须在 `optimizeScene` 分块合并前施加，而合并会丢掉逐 primitive 的
+   * `userData.hasLightmap` ⇒ 就地改材质无法正确切回预烘焙。
+   */
+  private lastSceneData: SceneDataMessage | null = null;
   private cameraController: CameraController | null = null;
   private pvsManager: PvsManager | null = null;
   private teleportManager: { getTriggers(): readonly TeleportTrigger[] } | null = null;
@@ -355,6 +361,9 @@ export class RendererMain {
   /** 初始化渲染器/场景/相机与子管理器。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
+    // 光照模式（面板「预烘焙 / 纯纹理」）：模块级开关，`applyLightmapToMeshes` 按它分流。
+    // 必须在加载地图前设定（纯纹理模式连 atlas 都不解码 ⇒ 更少纹理、进图更快）。
+    setLightingModeInShader(config.lighting?.mode ?? 'baked');
     // 阶段 1：SharedState 注入保留（后续阶段接 SAB 权威帧通道）；本阶段渲染直读本地物理，不再读其输出
     console.log(`[renderer] 跨线程通道: ${this.shared.isShared ? 'SAB' : 'MsgState'}（阶段 1 渲染直读本地物理）`);
     console.log(`[renderer] 渲染采样失效世代计数（本地诊断，非协议值）: ${this.sampleEpoch}`);
@@ -489,9 +498,35 @@ export class RendererMain {
     });
   }
 
+  /**
+   * 切换光照模式（面板「预烘焙 / 纯纹理」）：**按新模式重建场景**（与重新加载地图同一条链路）。
+   *
+   * 为什么必须重建而不是就地换材质：材质施加必须在 `optimizeScene` 分块合并**之前**完成
+   * （合并会丢掉逐 primitive 的 `userData.hasLightmap` / 材质实例映射），就地改无法正确切回预烘焙。
+   * 重建代价 = 一次场景重挂（数秒），这也正是面板小字提示「预烘焙更吃加载时间」的由来。
+   */
+  async setLightingMode(mode: LightingMode): Promise<void> {
+    if (getLightingMode() === mode) return;
+    setLightingModeInShader(mode);
+    const data = this.lastSceneData;
+    if (!data) {
+      console.info(`[lighting] 光照模式 → ${mode}（地图尚未加载，将在加载时生效）`);
+      return;
+    }
+    console.info(`[lighting] 光照模式 → ${mode}：按新模式重建场景…`);
+    await this.loadScene(data);
+  }
+
+  /** 当前光照模式（面板回填/诊断用）。 */
+  getLightingMode(): LightingMode {
+    return getLightingMode();
+  }
+
   /** 加载场景数据（GLB + PVS + 碰撞体 + 传送点 + lightmap + 雾；主线程本地数据）。 */
   async loadScene(data: SceneDataMessage): Promise<{ diagonal: number; defaultCull: number; maxCull: number } | null> {
     if (!this.scene || !this.camera) return null;
+    // 记住输入：光照模式切换（预烘焙 ⇄ 纯纹理）按新模式重建场景时复用同一份 GLB。
+    this.lastSceneData = data;
     this.disposeScene();
 
     const gltf = await this.loadGlb(data.glb);
@@ -502,8 +537,10 @@ export class RendererMain {
     this.collectMetadata(scene);
 
     // lightmap（存在时应用；主线程 GLB 解析期生成）
-    const atlasTexture = await loadLightmapAtlas(gltf.parser, gltf);
-    if (atlasTexture) {
+    // 「纯纹理」模式（面板切换）：**不解码 atlas**（少一张 4096×2048 纹理 = 面板小字里的「纹理少、进图快」），
+    // 所有图元按 fullbright 贴图原色收敛。
+    const atlasTexture = isTextureOnlyMode() ? null : await loadLightmapAtlas(gltf.parser, gltf);
+    if (atlasTexture || isTextureOnlyMode()) {
       applyLightmapToMeshes(scene, atlasTexture);
     }
     // 空间分块合并：3.4 万 mesh → 数百~数千块（渲染减负核心）。
