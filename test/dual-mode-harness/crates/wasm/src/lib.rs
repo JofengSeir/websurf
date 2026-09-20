@@ -54,6 +54,9 @@ struct PakMaterials {
     textures: HashMap<String, Vec<u8>>,
     /// `材质名 → alpha_mode`（0 = Opaque，1 = Blend，2 = Mask）。
     alpha_modes: HashMap<String, u8>,
+    /// 自发光 / 无光照材质名集合（`$selfillum` / `UnlitGeneric`）；导出写 GLB material
+    /// `extras.unlit`，渲染侧据此走全亮（对齐 Source UnlitGeneric 语义）。
+    unlit: std::collections::HashSet<String>,
 }
 
 /// 提取被 `static_props` 引用且 `.mdl/.vvd/.dx90.vtx` 齐全的模型。
@@ -75,9 +78,31 @@ fn collect_pakfile_models(
         .lock()
         .map_err(|e| JsValue::from_str(&format!("pakfile 锁定失败: {e}")))?;
     let mut entry_names: Vec<String> = Vec::with_capacity(zip_guard.len());
+    // 顺手把 prop_static 的逐顶点预烘焙光照（`sp_<idx>.vhv` / `sp_hdr_<idx>.vhv`）读出来：
+    // 与条目枚举共用同一遍扫描（共享层回并后 StaticProp 新增了该字段，见 model_integrator）。
+    let mut vhv_blobs: HashMap<usize, Vec<u8>> = HashMap::new();
     for i in 0..zip_guard.len() {
-        if let Ok(entry) = zip_guard.by_index(i) {
-            entry_names.push(entry.name().to_string());
+        if let Ok(mut entry) = zip_guard.by_index(i) {
+            let name = entry.name().to_string();
+            let lower = name.to_ascii_lowercase();
+            if lower.starts_with("sp_") && lower.ends_with(".vhv") {
+                let mid = &lower[3..lower.len() - 4];
+                let (idx_part, is_hdr) = match mid.strip_prefix("hdr_") {
+                    Some(rest) => (rest, true),
+                    None => (mid, false),
+                };
+                if let Ok(idx) = idx_part.parse::<usize>() {
+                    let mut buf = Vec::with_capacity(entry.size() as usize);
+                    if std::io::Read::read_to_end(&mut entry, &mut buf).is_ok() && !buf.is_empty()
+                    {
+                        // HDR 版覆盖 LDR 版（与 lightmap / ambient 的择一口径一致）
+                        if is_hdr || !vhv_blobs.contains_key(&idx) {
+                            vhv_blobs.insert(idx, buf);
+                        }
+                    }
+                }
+            }
+            entry_names.push(name);
         }
     }
     drop(zip_guard);
@@ -111,14 +136,23 @@ fn collect_pakfile_models(
     }
 
     // 4. static_props 放置表（GLB 节点与碰撞体共用）
+    // 逐实例挂上两级 prop 光照：第 1 级逐顶点 vhv（缺失/解析失败则 None 回退第 2 级 cube）。
     let static_props: Vec<StaticProp> = bsp
         .static_props()
         .enumerate()
-        .map(|(_i, prop)| StaticProp {
-            model: prop.model().to_string(),
-            origin: [prop.origin.x, prop.origin.y, prop.origin.z],
-            angles: prop.angles(),
-            solid: prop.solid as u8,
+        .map(|(i, prop)| {
+            let vertex_lighting = vhv_blobs
+                .get(&i)
+                .and_then(|b| websurf_wasm_core::vhv::parse_vhv(b))
+                .map(|v| v.colors);
+            StaticProp {
+                model: prop.model().to_string(),
+                origin: [prop.origin.x, prop.origin.y, prop.origin.z],
+                angles: prop.angles(),
+                solid: prop.solid as u8,
+                ambient_cube: bsp.prop_ambient_cube(i),
+                vertex_lighting,
+            }
         })
         .collect();
 
@@ -215,6 +249,9 @@ fn resolve_pakfile_materials(
             }
 
             out.alpha_modes.insert(tex.name.clone(), info.alpha_mode);
+            if info.unlit {
+                out.unlit.insert(tex.name.clone());
+            }
 
             if !decode_textures {
                 continue;
@@ -1694,7 +1731,7 @@ impl BspProcessor {
         // 4. 未打包任何模型 → 回退为纯地图导出（非破坏式）
         if models.is_empty() {
             let options = bsp_to_gltf_core::ConvertOptions::default();
-            let result = bsp_to_gltf_core::export_bsp(bsp, options)
+            let result = bsp_to_gltf_core::export_bsp(bsp.into(), options)
                 .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
             let mut output: Vec<u8> = Vec::new();
             result
@@ -1714,12 +1751,14 @@ impl BspProcessor {
             static_props,
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
+            material_unlit: materials.unlit,
             light_entities: Vec::new(),
         };
 
         let integrator = ModelIntegrator::from_in_memory(resources, ExportOptions::default());
         let options = bsp_to_gltf_core::ConvertOptions::default();
-        let result = bsp_to_gltf_core::export_bsp_with_models(bsp, options, Some(&integrator))
+        let result =
+            bsp_to_gltf_core::export_bsp_with_models(bsp.into(), options, Some(&integrator))
             .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
 
         let mut output: Vec<u8> = Vec::new();
