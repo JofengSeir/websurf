@@ -1,9 +1,9 @@
 # materials-and-alpha
 
 > 对象：`test/game-core`（游戏工程测试副本）。症状：**铁丝网 / 格栅 / 铁栏杆「理论上透明」却在实机里是实心**——
-> 孔洞被画成近黑块、`metalfence007a` 整片没有贴图、`wire_white` 变成一面纯白大墙。
-> 结论：这不是渲染端单点问题，而是**贴图来源 + 透明度语义**在导出链路上四处丢失；修复后 `MASK/BLEND`
-> 与世界面/模型侧全部对齐，无贴图材质 45 → 18。
+> 孔洞被画成近黑块、`metalfence007a` 整片没有贴图、`wire_white`（Source `Wireframe` 线框）变成一面灰墙。
+> 结论：这不是渲染端单点问题，而是**贴图来源 + 透明度语义**在导出链路上六处丢失；修复后 `MASK/BLEND`、
+> 线框语义与世界面/模型侧全部对齐，无贴图材质 45 → 18。
 >
 > 事实基准：2026-09-20，地图 `test/maps/surf_666.bsp`（BSP v20，pakfile 1500 条 / VMT 149 / VTF 76），
 > 默认纹理包 `test/game-core/web/textures.mtz`（9448 项）。
@@ -16,7 +16,7 @@
 | 同上（第二处） | `metal/metalgrate013b` 贴图 **11.8%** `alpha=0`，`OPAQUE` | 世界面 16 个 primitive |
 | 铁栏杆整片没有贴图 | prop 材质 `metalfence007a`（`$translucent 1`）导出无 `baseColorTexture`，源贴图 `metal/metalfence007a`（**17.6% 镂空**）就在默认纹理包里却没被取到 | prop 4 个实例 |
 | 格栅 `013a2` 既无贴图也无透明度 | `metal/metalgrate013a2`（世界面 **212 个 primitive**）无贴图、`OPAQUE` | 世界面 212 个 primitive |
-| 纯白大墙 | `dev_nyro/blends/wire_white`（`"Wireframe"` + `$color { 73 73 73 }`）被画成 `baseColor 1,1,1` 实体面，单面 768×512×768、近景占屏 > 60% | 世界面 8 个 |
+| 纯灰大墙 | `dev_nyro/blends/wire_white`（`"Wireframe"` + `$color { 73 73 73 }`）被画成 `baseColor 1,1,1` 实体面，单面 768×512×768、近景占屏 > 60%（Source 侧该着色器只画边线 = 看得穿） | 世界面 8 个 |
 
 ## 2. 根因（四处独立丢失 + 两处单位/语义问题）
 
@@ -64,7 +64,8 @@ glTF 的 `alphaCutoff` 是 [0,1] 的**阈值**语义（规范默认 0.5），Sou
 | ④ | 同上 alpha 归一 | `$alphatest` 的 reference ≥1.0 或 ≤0 时归一到 0.5 |
 | ⑤ | `bsp_to_gltf_core/gltf_builder.rs` `texture_has_alpha_holes` + `push_material` | 未声明透明的材质，若**贴图自带镂空**（`alpha<32` 像素占比 ≥1%）则补判 `MASK`（cutoff 0.5）——`alpha=0` 在 glTF 里只有裁掉或混合两种正当解释 |
 | ⑥ | `crates/wasm/src/lib.rs` `resolve_pakfile_materials` | PAKFILE 模型材质：pakfile 无 VTF 时按 **`$basetexture`** 查回退包（`fallback: Option<&HashMap>`，仅 `*_with_defaults*` 入口传入；碰撞体与 mosaic manifest 入口传 `None`，行为不变） |
-| ⑦ | `bsp_to_gltf_core/materials.rs` `parse_dollar_color` | 未识别着色器 / 无 `$basetexture` 时用作者声明的 `$color`，不再一律纯白 |
+| ⑦ | `bsp_to_gltf_core/materials.rs` `parse_dollar_color` / `parse_shader_name` + `gltf_builder.rs` extras | 未识别着色器 / 无 `$basetexture` 时用作者声明的 `$color`（不再一律纯白）；着色器名为 `Wireframe` 时导出 `extras.vbsp_wireframe` |
+| ⑧ | `src/renderer/lightmap-shader.ts` | 运行时材质替换（三个替换点 + world 侧 + **装配后终扫** `fullbrightUnlitLitMaterials`）统一走 `copyMaterialRenderState`；`extras.vbsp_wireframe` ⇒ `material.wireframe = true`；线框标志纳入三个缓存键 |
 
 **为什么不直接给这些材质补 VMT**：`metal/metalgrate013a` 等是 **stock HL2 材质**，其 VMT/VTF 都不在 pakfile 内
 （`materials/metal/metalgrate013a.vmt` 不存在，pakfile 只有 `materials/666/metalgrate013a.vmt`）。
@@ -79,6 +80,7 @@ glTF 的 `alphaCutoff` 是 [0,1] 的**阈值**语义（规范默认 0.5），Sou
 | `alphaMode` 变化 | 3 | `metal/metalgrate013a` `OPAQUE→MASK`；`metal/metalgrate013b` `OPAQUE→MASK`；`metal/metalgrate013a2` `OPAQUE→BLEND` |
 | 新增贴图 | 28 | 全部是「pakfile 无 VTF / 材质名 ≠ `$basetexture`」那一类（含 `metalfence007a`、`metalgrate013*`、`dev_concretefloor006a`、`stonewall032a` …） |
 | `baseColorFactor` 变化 | 1 | `dev_nyro/blends/wire_white` `1,1,1 → 0.286,0.286,0.286`（`$color { 73 73 73 }`） |
+| 新增 `extras` | 1 | `dev_nyro/blends/wire_white` 带 `extras.vbsp_wireframe = true`（其余 118 个材质无 extras；meshes 上零新增） |
 
 无贴图材质 **45 → 18**；`MASK=8 / BLEND=11 / OPAQUE=100`。
 **物理与碰撞零改动**：碰撞体入口 `resolve_pakfile_materials(..., false, None)` 与
@@ -114,14 +116,19 @@ npm run test:verify-alpha-materials        # ① 镂空贴图不得 OPAQUE ② �
 的像素占比。`metal/metalgrate013a` 的近距图（`temp/shots/ws_A_real.png`）可见规则品红方格阵列，
 即孔洞真的被裁掉。
 
-**门禁**：`typecheck` 0、`check:api` 17+17、`test:lightmap-guard` 40/40、`test:phys` 五指纹全绿。
+**运行时（`Wireframe` 语义）**：`dev_nyro/blends/wire_white` 的 2 块 mesh + 1 个材质，
+运行时 `material.wireframe=true`、`userData.vbsp_wireframe=true`；同机位只显示这两块 mesh 时，
+线框态与实体态的像素差 **3.80%**（165088 像素中 6266），线框图（`temp/shots/wf3_A_wireframe.png`）
+呈透视线框笼，实体态是整块灰面。
+
+**门禁**：`typecheck` 0、`check:api` 17+17、`test:lightmap-guard` 40/40、`test:phys` 五指纹全绿、
+`test:verify-alpha-materials` 断言全通过。
 
 ## 6. 已知限制
 
-1. **`Wireframe` 的线框语义未复现**：`dev_nyro/blends/wire_white`（世界面 8 个）现在按作者声明的
-   `$color 73 73 73` 画成深灰实体面；Source 侧该着色器只画多边形边线（近透明）。要在 three.js 复现需要
-   导出时给材质打标记 + 运行时 `material.wireframe`，本轮未做（它不声明 `$translucent`/`$alphatest`，
-   属于另一类缺陷）。
+1. **线框是 three 的三角边线**：Source `Wireframe` 画的是**多边形**边线，three 的 `material.wireframe`
+   画**三角形**边线（多出各面的对角线）。本图实测 `dev_nyro/blends/wire_white` 的 8 个面都是四边形，
+   因此画面会多出对角线；拓扑正确、密度略高，未做进一步对齐。
 2. **远景下格栅会被 mip 平均「糊实」**：`alphaTest=0.5` 对 mip 平均后的 alpha（孔洞 28% ⇒ 平均 ≈0.72）
    不再裁切，远处格栅看起来偏实。Source 的 alpha test 有同样行为；若要远景也透气，需要
    `alphaToCoverage` 或对镂空材质关闭 mipmap，属渲染口径变更，未做。
