@@ -31,6 +31,8 @@ export class PanelController {
   private keymap: Record<BindableAction, string[]>;
   /** 当前录制中的动作（null = 无录制）。 */
   private recordingAction: BindableAction | null = null;
+  /** 录制用的 keydown 监听器引用（供 stopRecording 带 capture 标志解绑）。 */
+  private recordingHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(
     private readonly config: RuntimeConfig,
@@ -166,9 +168,19 @@ export class PanelController {
     });
   }
 
-  /** 开始录制：监听下一次可绑定按键。 */
+  /**
+   * 开始录制：监听下一次可绑定按键。
+   *
+   * ⚠️ 2026-09-21 缺陷修复：`addEventListener(..., { capture: true })` 的监听器必须
+   * 用**同样的 capture 标志**才能 `removeEventListener` 掉。原写法是
+   * `add(..., {capture:true})` + `remove(...)` ⇒ 标志不匹配 ⇒ **监听器永远解不掉**：
+   * 录制一次之后，该监听器常驻 window 捕获阶段，此后**每一次 keydown 都被
+   * preventDefault + stopPropagation 吞掉**（KeyboardInput 收不到 ⇒ 再也动不了），
+   * 并且每次按键都会再次调用 finishRecording ⇒ 键位被反复改写、从其它动作里剔除。
+   */
   private startRecording(action: BindableAction, append = false): void {
-    if (this.recordingAction) return; // 已在录制
+    // 先解掉任何残留的录制监听（防御性；正常路径下 stopRecording 已在完成时调用）
+    this.stopRecording();
     this.recordingAction = action;
     const hint = document.getElementById('keyRecHint');
     if (hint) {
@@ -183,13 +195,34 @@ export class PanelController {
     const onKey = (e: KeyboardEvent): void => {
       e.preventDefault();
       e.stopPropagation();
-      window.removeEventListener('keydown', onKey);
+      this.stopRecording();
       this.finishRecording(e.code, action, append);
     };
+    this.recordingHandler = onKey;
     window.addEventListener('keydown', onKey, { capture: true });
   }
 
+  /** 结束录制并**可靠解绑**监听（capture 标志必须与注册时一致）。 */
+  private stopRecording(): void {
+    if (this.recordingHandler) {
+      window.removeEventListener('keydown', this.recordingHandler, { capture: true });
+      this.recordingHandler = null;
+    }
+  }
+
+  /** 取消录制（Esc / 关闭面板 / 窗口失焦）：清状态 + 解绑 + 清 UI，不改写键位。 */
+  private cancelRecording(): void {
+    this.stopRecording();
+    if (this.recordingAction === null) return;
+    this.recordingAction = null;
+    const hint = document.getElementById('keyRecHint');
+    if (hint) hint.classList.remove('show');
+    document.querySelectorAll('.key-chip').forEach((c) => c.classList.remove('recording'));
+  }
+
   private finishRecording(code: string, action: BindableAction, append: boolean): void {
+    // 非录制态到达这里 = 残留监听器的迟到的触发 ⇒ 直接忽略，绝不改写键位
+    if (this.recordingAction === null) return;
     this.recordingAction = null;
     const hint = document.getElementById('keyRecHint');
     if (hint) hint.classList.remove('show');
@@ -487,8 +520,12 @@ export class PanelController {
 
     // 关闭：直接隐藏面板（不请求指针锁定；锁定由点击画布触发）
     document.getElementById('panelClose')?.addEventListener('click', () => {
+      this.cancelRecording(); // 关闭面板时若仍在录制，必须取消（否则监听常驻吞键）
       this.root.classList.add('hidden');
     });
+
+    // 窗口失焦：录制中按到别的窗口会导致监听迟迟不触发 ⇒ 一并取消
+    window.addEventListener('blur', () => this.cancelRecording());
   }
 
   private sendHull(): void {

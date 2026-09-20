@@ -65,7 +65,7 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 | `apps/game/src/input/keymap.ts` | 112 | 默认键位 + 录制重绑 + localStorage（`STORAGE_KEY='websurf-game.keymap.v1'` `:42`） |
 | `src/ts-shared/input/mouse-buffer.ts` | 128 | `process()` 路径：discardNext + 单事件削平 ±1000（`MAX_DELTA` `:40`；`push/drain` 为遗留未用路径） |
 | `src/ts-shared/input/pointer-lock.ts` | 154 | `unadjustedMovement:true` 请求 + 旧浏览器 void 降级 + 3s 超时（`:71`） |
-| `apps/game/src/panel/panel-controller.ts` | 771 | ESC 两栏面板：通用/物理/体型/按键/操作/显示/视角七模块、控件绑定、偏好持久化、noclip、存点列表 |
+| `apps/game/src/panel/panel-controller.ts` | 808 | ESC 两栏面板：通用/物理/体型/按键/操作/显示/视角七模块、控件绑定、偏好持久化、noclip、存点列表 |
 | `apps/game/src/world/pvs-manager.ts` | —（批 4 已上提） | PVS 叶子查找 + 行 RLE 解码 + 可见集——**D-10 起实现在 `src/ts-shared/world/pvs-manager.ts`（271 行）**，本工程文件已删除（`renderer-main.ts` 改 import 共享单点） |
 | `apps/game/src/world/types.ts` | 17 | 最小化世界类型：`Vec3Like`/`Vec3` 留在本工程（D-07 判保留）；PVS 三类型批 4（D-10）起为 re-export 共享单点（对照 debug 198 行） |
 | `apps/game/src/savepoint.ts` | 106 | `SavePointStore`：按地图 localStorage（`websurf-game.savepoints.{mapName}`）、上限 50（`SAVEPOINT_MAX` `:27`）、latest/add/delete |
