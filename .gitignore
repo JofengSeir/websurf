@@ -45,6 +45,13 @@ test/maps/
 !apps/debug/fixtures/path/
 !apps/debug/fixtures/path/*.json
 
+# ── 本地实验工程（不入库）──────────────────
+# test/game-core：光照/物理实验用的隔离工程（自带 crates/wasm-core 副本）。
+# 2026-09-21 起**不入库**（用户裁定：不把该实验工程推到远端）——本地保留可继续用，
+# 但 git 不跟踪；如需重新入库，删掉下面这行并 `git add test/game-core`。
+# 注意：AGENTS.md §2.1 的 test/* 隔离铁律仍适用于该工程（本地形态）。
+test/game-core/
+
 # ── 临时 / 验证产物（任意层级）─────────────
 # **/temp/：各工程 temp/ 一次性试验产物（如 game/temp 的 wasm 备份/bench json）；
 # 注意根级 temp/* 不含内部斜杠只匹配根，必须用 **/temp/ 才能覆盖子工程。

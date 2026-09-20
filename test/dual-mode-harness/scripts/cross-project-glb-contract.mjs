@@ -43,7 +43,10 @@ const PROJECTS = [
     arg: 'none',
   },
   {
+    // ⚠️ `test/game-core` 是**本地实验工程**（2026-09-21 起不入库、由仓库根 `.gitignore` 排除）：
+    // 本机存在时照常参与断言；干净检出（无该目录）时整条跳过并标注原因，**不算失败**。
     name: 'test/game-core',
+    optional: true,
     pkg: 'test/game-core/pkg/websurf_wasm.js',
     wasm: 'test/game-core/pkg/websurf_wasm_bg.wasm',
     defaults: 'test/game-core/web/textures.mtz',
@@ -70,6 +73,10 @@ function parseGlb(buf) {
 async function runProject(p) {
   const pkgPath = join(ROOT, p.pkg);
   const wasmPath = join(ROOT, p.wasm);
+  // 未入库的本地工程（optional）：目录不在 ⇒ 跳过，不计失败
+  if (p.optional && !existsSync(join(ROOT, p.pkg.split('/')[0], p.pkg.split('/')[1]))) {
+    return { name: p.name, skipped: '本地工程未入库（.gitignore 排除；本机无此目录）' };
+  }
   if (!existsSync(pkgPath) || !existsSync(wasmPath)) {
     return { name: p.name, skipped: `缺 ${existsSync(pkgPath) ? p.wasm : p.pkg}（先 npm run build:wasm）` };
   }
