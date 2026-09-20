@@ -284,6 +284,81 @@ P1 之前 prop 走 fullbright（`× vec3(1.0)`）⇒ 偏亮；P1 之后 prop 真
 
 ⇒ 若要对齐外部参照实现观感，正确的旋钮不是曝光，而是**换输出曲线**（γ2.2 编码），或加一条 **shadow-lift 曲线**（只抬暗部、不动亮部）。本帧 99.7% 像素 < 64/255，全部落在「差最大」的区间，所以这一条对本图观感的贡献可能比曝光更大。
 
+## 8. 收官（2026-09-20）：全部亮度旋钮 = 外部参照实现平价 +「为什么这么暗」的定量归因
+
+### 8.1 定案：默认值 = 参照实现的默认值（不再"看着调"）
+
+要相等的是**光照项**（本工程 shader 的返回值）。本工程屏幕值 = `(albedo_linear × lightitem)^(1/2.2)`
+= `albedo_srgb × lightitem^(1/2.2)`（albedo→linear 由 three 的 sRGB 解码给、末端 `^(1/2.2)` 由我们把
+`colorspace_fragment` 换成 γ2.2 编码给、乘算来自 `three.module.js:14034` 的
+`reflectedLight.indirectDiffuse *= diffuseColor.rgb;`）。令它与外部参照实现逐项相等：
+
+| 路径 | 外部参照实现原文 | 本工程等价式 | 默认值 |
+|---|---|---|---|
+| world | `return inColor * pow(sample, vec3(1.0/2.2));`（`Shaders/LightmappedBase.ts:66`） | `lightitem = luxel` | 曝光 **1**、γ **1** |
+| prop | `linearToScreenGamma(cube)` = `255*cube^(1/2.2)` 打包进顶点色 → `vVertexLighting = floor(enc) * (2.0/255.0)`（`StudioModel.ts:96-98` + `Shaders/VertexLitGeneric.ts`） | `lightitem = 2^2.2 × cube = 4.5948 × cube` | `PROP_CUBE_GAIN` **4.5948** |
+
+其余：`lightFloor` **0**（外部参照实现无此项）、`ambientScale` **1**、面板三滑块默认全 **1**
+（γ 量程 `pow(L,1/γ)` 下改为 0.5~4，γ=1 中性）。
+
+> 历史值 12 / 24 / 2.3 / cube-gain 12/1.0 **全部作废**：
+> 12/24 是把画面冲成粉白的"看着调"；2.3 是在"模型其实一个像素都没渲染"的画面里标定的；
+> cube-gain 1.0 漏了外部参照实现顶点色编码里的那个 2×。
+
+### 8.2 「暗」是数据使然：三层独立证据
+
+1. **BSP 原始 lump（不经过我们的图集/渲染端）**：`scripts/verify/face_lightmap_stats.py`
+   （`npm run test:verify-face-lightmap-stats`，本批入库的地面真值仪器）在**真实出帧位置**
+   （Source 坐标 `-11520 -13536 15424`，由运行期 `cameraPose` 换算）半径 1200 内取到 134 个有光照面，
+   其 lightmap 块均值 p25 = 0.053 / **p50 = 0.097** / p90 = 0.240；最近的 8 个面 0.097–0.228。
+2. **外部参照实现平价倍率** = `luxel^(1/2.2)` ⇒ **0.35~0.51**，即表面渲成**贴图原色的 35%~51%**。
+3. **实测对撞**：贴图 `#61483F` × 0.42 ≈ **`#291E1A`** —— 就是用户报的 `#25201D` 那一档
+   （差异来自采样落在不同面）。⇒ **那个数字是参照实现的正确结果，不是缺陷。**
+
+同一帧（`temp/eval-surface-meter.mjs`：把场景渲进 `WebGLRenderTarget` 后 `readRenderTargetPixels`）
+的整幅统计：mean luma **21.1**、`luma<32` **83.3%**、`luma<12` **23.3%**；逐贴图命中点均值：
+
+| 贴图 | 路径 | 命中 n | 均值 | luma 区间 |
+|---|---|---|---|---|
+| stone/marblefloor001b | lightmap | 78 | `#241a17` | 21..57 |
+| brick/brickwall004a | lightmap | 60 | `#1c1210` | 12..35 |
+| dev/dev_concretefloor006a | lightmap | 48 | `#392620` | 36..49 |
+| glass/unbreakable | lightmap | 48 | `#120c0a` | 10..17 |
+| tile/tilefloor016a | lightmap | 40 | `#110c0a` | 7..31 |
+| glasswindow007a | cube（prop） | 8 | `#070504` | 3..7 |
+
+两条路径同量级 ✓（world 面 `luxel^(1/2.2)` 与 prop `2×cube^(1/2.2)` 都在 0.25~0.45）——
+这正是 §8.1 里那个 `2^2.2` 的依据。
+
+### 8.3 想更亮：两个旋钮的定量映射
+
+屏幕倍率 = `(pow(luxel, 1/γ) × 曝光)^(1/2.2)`：
+
+| 目标 | 设置 | 定量 |
+|---|---|---|
+| **外部参照实现平价（现默认）** | 曝光 1 / γ 1 | 亮面 = 贴图原色的 0.35~0.51 |
+| 「被照亮的面 ≈ 贴图原色」 | 曝光 **2.3** / γ **2.2** | luxel 0.097 ⇒ 倍率 **1.0**（= 2026-09-20 之前的默认） |
+| 只抬暗部（保亮部） | 曝光 1 / γ **2.2~4** | 暗部按 `luxel^(1/2.2)` 抬、`luxel≈1` 处几乎不动 |
+| 再亮一档 | 曝光 2 / γ 1 | 倍率 × `2^(1/2.2)` = 1.37 |
+
+⚠️ 面板「暗部提升（γ）」在平价默认（γ=1）下**确实生效**：指数是 `1/γ` ⇒ γ=1 中性、γ>1 抬暗部。
+§4.2 的旧口径（γ<1 提亮）已随 `pow(L, γ) → pow(L, 1/γ)` 的重写作废，量程与默认值同步改为 0.5~4 / 1。
+
+### 8.4 采样链路逐环已验证（这次的"没问题"有出处）
+
+| 环 | 本工程 | 参照（外部参照实现原文） | 结论 |
+|---|---|---|---|
+| 打包矩形 | `light_map_texture_size + 3`，落位后内缩 2 px | `LightmapLayout.cs:47-48` | 一致 |
+| 区域 → UV | `min=(x+0.5)/W`、`size=(w-1)/W` | `LightmapLayout.cs:150-155 GetUvs` | 逐行一致 |
+| 逐顶点 UV | `u = axis·pos + axis.w − LightMapTextureMinsInLuxels[u]`，`/ size`，再 `*size_x + min_x` | `Bsp/Geometry.cs:605-616` | 逐行一致 |
+| atlas 采样 | `uv*atlasSize − 0.5` 取整到 texel 中心 + 四点 mix（NearestFilter） | `Shaders/LightmappedBase.ts` 的 `ApplyLightmap` | 一致 |
+| RGBExp32 解码 | lightmap：`(byte/255)×2^(signed exp)` | shader 端 `sample.rgb*pow(2, a*255-128)`（图集已偏置） | 一致 |
+| prop cube 解码 | `byte × 2^(signed exp)` | `Utils.ts rgbExp32ToVector3` + `Structures.cs:512-517`（`Exponent` 是 `sbyte`，打包时 `+128`） | 一致 |
+| 乘算位置 | `reflectedLight.indirectDiffuse *= diffuseColor.rgb;`（注入替换掉了 `RECIPROCAL_PI`） | `inColor * ...`（外部参照实现无 1/π） | 一致 |
+
+⇒ 与 §7.3 的「UV 逐面对撞」互补：**链路每一环都对着参照实现核过，暗是数据使然。**
+
+
 #### 落地：光照项 gamma（shadow-lift）旋钮
 
 实现（只改渲染侧，不需重编 wasm）：对**解码后的线性辐射度**做 `pow(d, γ)`，world lightmap（`VBSP_APPLY_LIGHTMAP`）与 prop ambient（`vbspAmbientWeight()`）两条路径共用同一个共享 uniform `vbspLightGamma`。

@@ -208,20 +208,27 @@ Source 的显示口径是 `albedo × lightmap^(1/2.2)`（外部参照实现 `Lig
 > fragment 编译失败 ⇒ `drawArrays` 全被拒（详见
 > [prop-black-materials-root-cause.md](./prop-black-materials-root-cause.md) §8）。
 
-### 更正 1：`PROP_CUBE_GAIN` 12 → **1.0**（原推理是单位混淆）
+### 更正 1：`PROP_CUBE_GAIN` 12 → 1.0 → **4.5948**（= `2^2.2`，外部参照实现的顶点色编码口径）
 
 §7.2/§7.3 拿「cube 原始解码值 ≈1.2e-2」去比「world 面**渲染后**的光照项 0.2–0.5」，
-得出"prop 比 world 暗 1~2 个数量级"—— **两边不是同一个量**：两条路径吃的是同一个变换
-（`pow(max(v, floor), 1/γ) × exposure`，cube 再多乘一个 `vbspAmbientScale`）。
-数据本身同量级：cube（leaf ambient）p50 ≈ 1.09e-2 vs world 图集在用 texel p50 = 4.40e-2。
-⇒ 12× 属**重复补偿**（叠在 exposure 上等效 27.6×），会把模型冲成白块。现取 1.0，
-模型亮度只由面板「模型光照」滑块（`setAmbientScale`）控制。
+得出"prop 比 world 暗 1~2 个数量级"—— **两边不是同一个量**（先改成 1.0）。
+进而核对外部参照实现原文发现还漏了一层：它的 prop 光照走
+`StudioModel.sampleAmbientCube()` → `linearToScreenGamma(cube) = 255*cube^(1/2.2)` 打包进顶点色，
+再由 `Shaders/VertexLitGeneric.ts` 的 `vVertexLighting = floor(enc) * (2.0/255.0)` 还原
+⇒ **等效屏幕倍率 = `2 × cube^(1/2.2)`**。本工程屏幕 = `albedo × lightitem^(1/2.2)`
+⇒ `lightitem = 2^2.2 × cube = 4.5948 × cube`。
+自洽校验：world `0.0440^(1/2.2)` = 0.24、prop `2 × 0.0107^(1/2.2)` = 0.25 ⇒ **两条路径同量级** ✓
+（推导见 [scene-brightness-and-lights.md](./scene-brightness-and-lights.md) §8.1）。
 
-### 更正 2：曝光 12 → **2.3**（改用图集全量分布标定）
+### 更正 2：曝光 12 → 2.3 → **1.0**（外部参照实现平价）
 
-§7.3 的 `p50 = 1.21e-2` 是**运行期少数 prop 采样点**的中位数，不是全图中位。
-新工具 `scripts/lightmap-atlas-stats.mjs`（`npm run test:lightmap-atlas-stats`，**已入库的标定仪器**）
-直接从 GLB 取 4096×2048 图集、按渲染端同式解码，
+`lightitem` 的默认值最终定在 **曝光 1、γ 1**（= `lightitem = luxel`），见
+[scene-brightness-and-lights.md](./scene-brightness-and-lights.md) §8.1；2.3 是"让亮面≈贴图原色"的
+显示标定，不是参照实现的默认，已从默认值里撤下（仍可由面板拖到）。
+
+原标定判据（保留作量级参考）：§7.3 的 `p50 = 1.21e-2` 是**运行期少数 prop 采样点**的中位数，
+不是全图中位。新工具 `scripts/lightmap-atlas-stats.mjs`（`npm run test:lightmap-atlas-stats`，
+**已入库的标定仪器**）直接从 GLB 取 4096×2048 图集、按渲染端同式解码，
 并**剔除 41.2% 的 `exp=-128` 未用填充**后统计 4,935,532 个在用 texel：
 
 | 分位 | p25 | p50 | p75 | p90 | p95 | p99 |
