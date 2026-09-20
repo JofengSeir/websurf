@@ -2,8 +2,8 @@
 
 ## ⚠️ CI 夹具与两个夹具的语义（2026-09-11）
 
-CI 门 `npm run test:path-acceptance`（`.github/workflows/deploy-pages.yml` 内、
-`debug/` 块、紧跟「权威时钟验证」之后）跑的是
+CI 门 `npm run test:path-acceptance`（`.github/workflows/ci-gates.yml` 的 `harness-and-debug-gates` job、
+紧跟「权威时钟验证」之后；2026-09-21 前挂在 `deploy-pages.yml`）跑的是
 `node scripts/path-acceptance.mjs fixtures/path/tick-on-render-prefix.json --assert --expect fail`。
 
 ### 夹具 1：`tick-on-render-prefix.json` —— **缺陷存在时**的录制（当前 CI 输入）

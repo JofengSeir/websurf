@@ -61,7 +61,7 @@
 | G15 | §2.5 失败块 · viewer 行 | 五块 12-17 行起至 55-60 行（原为**裸行号**，按同一行内最后出现的文件名会被误解析为 `build-dist`/`start-dev` 等） | 实测 `apps/viewer/play.cmd` 的五块确为 `:12-17`、`:25-30`、`:35-40`、`:46-51`、`:55-60` | 补 `apps/viewer/play.cmd` 文件限定（该文件第 60 行为块结束的 `)`，非「调用 `dist\play.cmd`」——后者现在 `apps/viewer/play.cmd:78`） |
 | G16 | §2.5 失败块 · 三份 `build-dist.cmd` | 各文件的失败块区间 | debug 实测 8 块（12-15 行起至 90-95 行）；game 7 块（12-15 行起至 79-84 行）；viewer 7 块（10-13 行起至 75-80 行，原写 9-13 行起） | 全部改为当前实测区间，见 §2.5 表 |
 | G17 | §3.4 CI 行号表 | CI 的 `--multi` / single 命令行 | `# 走 package.json 唯一入口…` / `working-directory: apps/game` / 步骤名 | 改为 `:92` / `:144` / `:175`（命令形态同步改为 `npm run build:dist -- --multi`） |
-| G18 | §4.1 `pages-index.html` 证据 | CI 拷贝该文件的行 | `working-directory: test/dual-mode-harness` | 改为 `deploy-pages.yml:207` |
+| G18 | §4.1 `pages-index.html` 证据 | CI 拷贝该文件的行 | `working-directory: test/dual-mode-harness` | 改为 `deploy-pages.yml`（当时为 `:207`；**2026-09-21 该 workflow 重构后**，拷入口页改在 `deploy` job 的 `Assemble Pages deploy directory` 步骤） |
 | G19 | §7.4 `test:smoke` 行 | 脚本名 | 该脚本已改名 `local:smoke`（`apps/viewer/package.json:11`） | 行内标注改名事实 |
 
 **同批一并修正的当前事实类锚点**（不属上述错位，但同属「证据列失真」）：§2.1 入口清单与字节（批 3 后）与 `install-wasm-bindgen.cmd` 的上提补注；§2.3 的 `build:wasm` 形态、`dev` 端口分流、`check:api` 已补、`ws` 依赖行号；§2.4 三份 `build-dist.cmd` 的步骤骨架与 `chcp` 全量列；§3.1 产物字节；§3.2 内嵌序列与许可拷贝；§4.4 与 §7.3 的 `temp/`→`.tmp/`；§5.1 `src/scripts/` 清单；§6.1 的 `I-04`/`I-22`/`I-21` **三行的处置结论统一见 §6.4（本节只记错位与补注，不重复落地状态）**；§6.2 的 `I-07`/`I-12`/`I-13`；§8 的 `R-02`/`R-03`/`R-08`/`R-09`/`R-17`/`R-19`/`R-20`；§9 的下游指引状态。
@@ -314,7 +314,7 @@ debug 没有 `web/styles.css`，样式内联在 `apps/debug/web/index.html:7`（
 
 ### 3.4 `dist` 形态与 CI 的对齐（实测）
 
-CI 的构建命令（`.github/workflows/deploy-pages.yml`）：
+CI 的构建命令（`.github/workflows/deploy-pages.yml`；**下表行号是 2026-09-21 重构前的值**，重构后三工程统一由 `build-app` 矩阵 job 的 `Build dist package` 步骤执行）：
 
 | 工程 | CI 构建命令 | 行号（`.github/workflows/deploy-pages.yml`） |
 |---|---|---|
@@ -341,7 +341,7 @@ viewer 是 single-only 并不只是「没实现 multi」：它的 `dist/index.ht
 | `Cargo.toml` / `Cargo.lock` | 有 | 有 | 有 | 有 | 4 份模块 workspace |
 | `package.json` / `package-lock.json` / `tsconfig.json` | 有 | 有 | 有 | 有 | 4 份 |
 | `README.md` | 有（2967 B） | 有（6934 B） | 有（18504 B） | 有（13967 B） | `Get-ChildItem */README.md` |
-| `pages-index.html` | 有（`scripts/` 下，1842 B） | 无 | 无 | 无 | 由 `.github/workflows/deploy-pages.yml:207` 拷为 `deploy/index.html` |
+| `pages-index.html` | 有（`scripts/` 下，1842 B） | 无 | 无 | 无 | 由 `.github/workflows/deploy-pages.yml` 的 `deploy` job（`Assemble Pages deploy directory` 步骤）拷为 `deploy/index.html`（重写前为 `:207`） |
 
 **两处约定违反（实测）**：
 

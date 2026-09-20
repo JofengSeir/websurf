@@ -1,25 +1,36 @@
 # WebSurf: 构建并部署到 GitHub Pages
 #
-# 仓库布局（三个同级应用工程 + 一个验证工程，共享仓库根 src/ Rust/TS 共享层）：
-#   apps/debug/ = 主工程（Debug Build，共享 Rust 物理，多文件 dist）
-#   apps/game/ = WebSurf-game（Game Build，共享 Rust 物理，多文件 dist）
-#   apps/viewer/ = WebSurf-viewer（BSP 游览 + 录像回放，仅解析层，single dist）
-#   test/dual-mode-harness = 验证工程（仅构建验证，不部署）
+# 职责边界（2026-09-21 重构）：本 workflow **只做一件事**——把 apps/{debug,game,viewer}
+# 构建成 dist/ 并发布到 Pages。它不含任何测试门禁，也不构建 test/ 验证工程。
 #
-# 各应用工程构建链路（与本地 build-dist.cmd 一致）：
-#   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.128 与五份 Cargo.lock（4 模块工程 + 根）统一匹配；
-#      四个模块 workspace 各自保留 target/，根 workspace 的 target/ 位于仓库根，不再跨 workspace 复用编译缓存）
+# 为什么这样拆（实测证据）：
+#   上一次 Pages 构建（run 0ec7769）的 build job 共 12.6 min，其中 4 次 Rust wasm 编译
+#   占 150 + 147 + 151 + 140 s：
+#     - test/dual-mode-harness 的那次（147 s）**与站点产物毫无关系**，它的唯一用途是给
+#       debug 的 `test:jump-apex` 门提供 pkg。为了一道测试门，每次部署多等 2.5 分钟，
+#       而且它的编译失败会直接让部署失败（9-21 的 E0063/E0308 就是这条路径）。
+#     - 三个 app 的编译原本串行。改成 matrix 并行后，墙钟时间由「三者之和」降到「最慢那个」。
+#   测试门禁没有取消，而是移到 `.github/workflows/ci-gates.yml`，与部署互不阻塞。
+#
+# 三工程构建链路（与本地 build-dist.cmd 一致）：
+#   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.128 与五份 Cargo.lock 匹配）
 #   2. esbuild 打包 TypeScript（worker + app）
-#   3. scripts/build-dist.mjs --multi 生成多文件 dist/（app.js + worker.js + wasm 外置 + textures.mtz 外置，
-#      Pages HTTP 环境；single 模式仅本地 file:// 使用——viewer 例外，其 dist 为 single-only）
+#   3. scripts/build-dist.mjs --multi → dist/（app.js + worker.js + wasm/mtz 外置）
 #
-# 部署产物为 dist/（相对路径引用，兼容 Pages 的 /<repo>/ 子路径）。
+# 触发路径：只有会影响站点产物的路径才触发。文档、CHANGELOG、test/ 与门禁 workflow
+# 的改动不再触发重新部署（需要时用 workflow_dispatch 手动跑）。
 
 name: Build & Deploy to GitHub Pages
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'apps/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -34,9 +45,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  # ── 三个应用工程并行构建（互不阻塞：一个挂了不影响另两个的日志）──────
+  build-app:
+    name: build ${{ matrix.app }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [debug, game, viewer]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,207 +68,120 @@ jobs:
         with:
           # Node 20 已弃用（GH Actions 提示默认 24）；22 为 LTS 稳定线（esbuild/wasm-pack 兼容）
           node-version: 22
-          # 重构后 lock 文件在各工程（apps/debug/package-lock.json、apps/game/package-lock.json 等），
-          # 根目录无锁文件——必须 glob 匹配，否则 cache: npm 报
-          # "Dependencies lock file is not found"（8-09 CI 失败根因）
+          # lock 文件在各工程（apps/*/package-lock.json），根目录无锁文件——
+          # 必须 glob 匹配，否则 cache: npm 报 "Dependencies lock file is not found"
           cache: npm
           cache-dependency-path: '**/package-lock.json'
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
 
+      # wasm-bindgen-cli 的策略见 ci-gates.yml 同名步骤：缓存 → 预编译包 → cargo install 兜底。
+      # 三个矩阵 job 共用同一个 cache key（并发写入时后到者静默失败，不影响构建）。
       - name: Cache wasm-bindgen-cli
-
+        id: cache-wbg
         uses: actions/cache@v4
-
         with:
-
           path: ~/.cargo/bin/wasm-bindgen
-
           key: wasm-bindgen-cli-0.2.128-x86_64-linux
 
-      - name: Install wasm-bindgen-cli 0.2.128 (cache → cargo install fallback)
+      - name: Install wasm-bindgen-cli 0.2.128 (cache → prebuilt → cargo install)
         shell: bash
         run: |
           set -euo pipefail
           if [ -x "$HOME/.cargo/bin/wasm-bindgen" ] &&
-             wasm-bindgen --version 2>/dev/null | grep -q '0.2.128'; then
+             "$HOME/.cargo/bin/wasm-bindgen" --version 2>/dev/null | grep -q '0.2.128'; then
             echo "[cache hit] wasm-bindgen-cli 0.2.128 已就绪"
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
             exit 0
           fi
-          # release 下载端点不稳定（连续两次 CI 失败）→ 改用 cargo install 锁定版本
-          # （首次编译数分钟，actions/cache 之后秒级命中）
-          cargo install wasm-bindgen-cli --version 0.2.128 --locked
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-            exit 0
-
-          fi
-
+          # 优先下预编译包（秒级）；release 端点不稳定时再退回 cargo install（数分钟）
           VERSION=0.2.128
-
-          curl -fSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 \
-
-            -o /tmp/wbg.tar.gz \
-
-            "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
-
-          tar -xzf /tmp/wbg.tar.gz -C /tmp
-
-          mkdir -p "$HOME/.cargo/bin"
-
-          cp "/tmp/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" "$HOME/.cargo/bin/"
-
+          if curl -fSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 \
+               -o /tmp/wbg.tar.gz \
+               "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz"; then
+            tar -xzf /tmp/wbg.tar.gz -C /tmp
+            mkdir -p "$HOME/.cargo/bin"
+            cp "/tmp/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" "$HOME/.cargo/bin/"
+            echo "[prebuilt] wasm-bindgen-cli ${VERSION} 已就位"
+          else
+            echo "[warn] 预编译包下载失败，退回 cargo install（首次编译数分钟，之后走 cache）"
+            cargo install wasm-bindgen-cli --version "${VERSION}" --locked
+          fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      # ── debug/ 主工程（Debug Build，调试测试页面）─────────────
-      - name: Install debug dependencies
-        working-directory: apps/debug
-        run: npm ci || npm ci
+      - name: Install dependencies
+        working-directory: apps/${{ matrix.app }}
+        run: npm ci
 
-      - name: Build debug WASM
-        working-directory: apps/debug
+      - name: Build WASM
+        working-directory: apps/${{ matrix.app }}
         run: npm run build:wasm
 
-      - name: "Build debug TypeScript (typecheck + bundle)"
-        working-directory: apps/debug
+      - name: Build TypeScript (typecheck + bundle)
+        working-directory: apps/${{ matrix.app }}
         run: npm run build:ts
 
-      - name: Build debug dist package
-        working-directory: apps/debug
-        # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常，体积更小
-        # 走 package.json 唯一入口（规范 §6.2 禁止 CI 绕过 npm 直接调工程脚本）
+      - name: Build dist package
+        working-directory: apps/${{ matrix.app }}
+        # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常、体积更小。
+        # 走 package.json 唯一入口（规范 §6.2 禁止 CI 绕过 npm 直接调工程脚本）。
         run: npm run build:dist -- --multi
 
-      # ── dual-mode-harness WASM（jump-apex 门依赖其 pkg，需先构建）──
-      - name: Install dual-mode-harness dependencies
-        working-directory: test/dual-mode-harness
-        run: npm ci || npm ci
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.app }}
+          path: apps/${{ matrix.app }}/dist
+          if-no-files-found: error
 
-      - name: Build dual-mode-harness WASM
-        working-directory: test/dual-mode-harness
-        run: npm run build:wasm
+  # ── 组装 + 发布（三份 dist 齐了才跑）──────────────────────────────
+  deploy:
+    name: assemble & deploy
+    needs: build-app
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # 组装只需要 checkout 拿入口页模板（apps/debug/scripts/pages-index.html）。
+      - name: Checkout (entry page template)
+        uses: actions/checkout@v4
 
-      - name: Verify debug optimizeScene (GLB 空间分块合并)
-        working-directory: apps/debug
-        # 渲染性能回归门：面片规模的地图（实测 surf_666 GLB = 34409 primitive →
-        # 未合并时场景 3.4 万 THREE.Mesh，每帧全量视锥剔除 + 逐 mesh draw call）
-        # 必须走 optimizeScene 合并到 300~800 块。断言顶点守恒 + 块数区间。
-        run: npm run test:optimize-scene
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: deploy-tmp
 
-      # 权威时钟回归门：`input-bridge` 把 tickRate 塞进每一条 physics 配置消息，
-      # 而调用方原先无条件 `setFixedDt + reset()`；`reset()` 会永久丢弃累积器余数 +
-      # 一次唤醒区间。实测（确定性 Node 测试）在 4ms 间隔的配置消息下权威时钟从
-      # 63.6 tick/s 崩到 0.5 tick/s = 用户报告的「tick 计算滑落、拖累渲染」。
-      # 断言：新契约下 tick 率与基线一致，且旧行为会复现缺陷。
-      - name: 权威时钟验证（配置消息不得丢仿真时间）
-        working-directory: apps/debug
-        run: npm run test:auth-clock
-
-      # tick→渲染 路径垂距验收门：Worker 权威帧的**发布位置**必须是渲染轨迹上的一个
-      # 采样点（每个 tick 点到渲染折线的最短距离 ≈0）。度量 = 垂距（对线段投影钳位；
-      # 跳变 >100 HU 的段不参与），与面板"偏差梳"（时间对齐、含切向滞后）**不是同一个量**。
-      # 阈值（稳态总体，剔除传送邻近点）：p95 ≤ 2 HU / max ≤ 10 HU / 毛刺 ≤ 1% / 剔除 ≤ 10%。
-      # 当前夹具 = tick-on-render-prefix.json（**缺陷存在时**的真实录制，实测稳态 p95=36.52 HU），
-      # 配 `--expect fail` —— 即本步是**判别力自检**：证明这道门确实能识破"发布位置不在渲染
-      # 轨迹上"的缺陷。修好后的真实录制到手后再加一个 `--expect pass` 的夹具（见
-      # debug/scripts/path-baseline.md 的两夹具语义）。
-      - name: tick→render 路径垂距验收（稳态 p95 ≤ 2 HU）
-        working-directory: apps/debug
-        run: npm run test:path-acceptance
-
-      # 跳跃顶点权威验证门（批 1 修好层数缺陷后，规范 §6.2 要求 test:* ⊆ CI）
-      - name: 跳跃顶点权威验证（jump apex）
-        working-directory: apps/debug
-        run: npm run test:jump-apex
-
-      # ── game/ 独立工程（WebSurf-game，尝试游戏化）────────────────
-      - name: Install game dependencies
-        working-directory: apps/game
-        run: npm ci || npm ci
-
-      - name: Build game WASM
-        working-directory: apps/game
-        run: npm run build:wasm
-
-      - name: "Build game TypeScript (typecheck + bundle: worker/app)"
-        working-directory: apps/game
-        run: npm run build:ts
-
-      - name: Build game dist package
-        working-directory: apps/game
-        # multi 模式：多文件（app/worker/wasm/mtz 分离），HTTP 部署 fetch 正常
-        # 走 package.json 唯一入口（规范 §6.2 禁止 CI 绕过 npm 直接调工程脚本）
-        run: npm run build:dist -- --multi
-
-      # 物理冒烟门：game 的 Rust 物理（PhysWorld）基本行为回归。脚本直接读
-      # apps/game/pkg/websurf_wasm_bg.wasm（scripts/phys-smoke.mjs:7,13），
-      # 上面的 build:wasm 已生成 pkg/，无需浏览器。
-      - name: game 物理冒烟（PhysWorld 基本行为）
-        working-directory: apps/game
-        run: npm run test:phys
-
-      # 种子面冒烟门：确定性种子面契约（scripts/phys-seed-smoke.mjs:18,24，
-      # 与 test:phys 同源读 pkg/）。两条同为 CONTRIBUTING §4 登记的门禁。
-      - name: game 种子面冒烟（确定性种子契约）
-        working-directory: apps/game
-        run: npm run test:seed-smoke
-
-      # ── viewer/（WebSurf-viewer，BSP 游览 + 录像回放，single dist）──────
-      - name: Install viewer dependencies
-        working-directory: apps/viewer
-        run: npm ci || npm ci
-
-      - name: Build viewer WASM
-        working-directory: apps/viewer
-        run: npm run build:wasm
-
-      - name: "Build viewer TypeScript (typecheck + bundle app/worker)"
-        working-directory: apps/viewer
-        run: npm run build:ts
-
-      - name: Build viewer dist package
-        working-directory: apps/viewer
-        # single 模式（viewer 唯一产物形态）：IIFE + wasm base64 内嵌，HTTP/file:// 皆可用
-        run: npm run build:dist -- --multi
-
-      - name: Run viewer replay selftest
-        working-directory: apps/viewer
-        run: npm run test:replay
-
-      # ── test/ 验证工程（仅构建验证，不部署）────────────────────
-      - name: "Build dual-mode-harness TypeScript (main/worker-a/worker-b)"
-        working-directory: test/dual-mode-harness
-        run: npm run build:ts
-
-      - name: Run dual-mode-harness three-mode runtime verification
-        working-directory: test/dual-mode-harness
-        # 三模式（coupled/decoupled/tick）运行时装配 + 热切握手 + 遥测链路（14 断言，
-        # 驱动 build:ts 产物 worker-a.js）——game 侧模式切换已回退，此处为唯一运行面
-        run: npm run test:three-mode
-
-      # ── 组装 Pages 部署目录（入口页 + apps/{debug,game,viewer}）──
       - name: Assemble Pages deploy directory
         run: |
-          mkdir -p deploy/debug deploy/game deploy/viewer
-          cp -r apps/debug/dist/. deploy/debug/
-          cp -r apps/game/dist/. deploy/game/
-          cp -r apps/viewer/dist/. deploy/viewer/
+          set -euo pipefail
+          # download-artifact@v4 按 pattern 命中时，每个 artifact 解到 `<path>/<artifact 名>/`。
+          # 再下钻一层做兼容（万一产物多包了一层目录），并**断言入口页存在**——
+          # 宁可这里硬失败，也不要静默发布一个缺文件、点开就 404 的站点。
+          for app in debug game viewer; do
+            src="deploy-tmp/dist-${app}"
+            test -d "$src" || { echo "[error] 缺少 artifact dist-${app}"; exit 1; }
+            while [ ! -f "$src/index.html" ]; do
+              inner="$(find "$src" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+              [ -n "$inner" ] || break
+              src="$inner"
+            done
+            test -f "$src/index.html" || { echo "[error] dist-${app} 里找不到 index.html（src=$src）"; exit 1; }
+            mkdir -p "deploy/${app}"
+            cp -r "$src/." "deploy/${app}/"
+          done
           cp apps/debug/scripts/pages-index.html deploy/index.html
+          echo "[ok] deploy 目录："
+          du -sh deploy/* | sort -k2
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
           path: deploy
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5

@@ -19,7 +19,7 @@
 | `test/dual-mode-harness/` | 验证工程 | 三模式物理 + 渲染时序验证，**不参与 Pages 部署** |
 | `test/game-core/` | **本地实验工程（不入库）** | 光照/物理实验用的隔离工程（自带 `crates/wasm-core` 副本）。2026-09-21 起**不入库**（用户裁定），由仓库根 `.gitignore` 的 `test/game-core/` 排除；本机保留即可继续用，§2.1 隔离铁律仍适用于它。详见 §7.3 |
 | `documents/` | 文档树 | 根级 6 篇 + `debug/`、`game/`、`viewer/` 子树 |
-| `.github/` | CI 与模板 | `workflows/deploy-pages.yml`、Issue / PR 模板 |
+| `.github/` | CI 与模板 | `workflows/deploy-pages.yml`（部署，只构建 apps）、`workflows/ci-gates.yml`（测试门禁）、`workflows/doc-drift.yml`（文档漂移体检）、Issue / PR 模板 |
 | 根级 `.md` | 仓库级元文档 | `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`、`AGENTS.md`（本文件） |
 
 ### 1.2 每个工程的标准布局
