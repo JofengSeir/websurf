@@ -33,7 +33,17 @@ pub const DEFAULT_HULL_STAND_HEIGHT: f64 = 72.0;
 pub const DEFAULT_HULL_DUCK_HEIGHT: f64 = 54.0;
 pub const EYE_STAND: f64 = 64.09;
 pub const EYE_DUCK: f64 = 46.04;
-pub const DUCK_LERP_TIME: f64 = 0.1;
+/// 地面站 ⇄ 蹲的**视角**过渡时长（秒）。仅影响视角（碰撞箱是瞬时切换的）。
+/// 2026-09-21：0.1 → 0.2（用户实测 0.1s 太快、站蹲切换"没有过程感"）。
+/// 想再慢/再快只改这一个常量（如 0.15 / 0.3）。
+pub const DUCK_LERP_TIME: f64 = 0.2;
+/// 空中蹲的**视角抬升量**（单位 u，纯视角，不动物理）。
+///
+/// 空中蹲的物理保持不变：头顶世界位置不动、只收脚（origin 上移 stand−duck = 18u）。
+/// 只收脚时眼高 = origin+18+46.04 ≈ 站立 64.09 ⇒ 视角与站立**完全无差别**，
+/// 玩家分不清自己蹲没蹲。这里给空中蹲一个 +9u（= 收脚高度的一半）的视角抬升，
+/// 让"蹲下去了"这件事在画面上可感知；落地/松开蹲键即回到蹲姿视角（46.04）。
+pub const AIR_DUCK_VIEW_LIFT: f64 = 9.0;
 
 pub const JUMP_HEIGHT: f64 = 57.0;
 pub const BHOP_MAX_SPEED_FACTOR: f64 = 1.1;
@@ -186,12 +196,20 @@ impl Player {
         }
     }
 
-    /// 视角高度：统一按 duck_frac 插值——空中蹲视角也随姿态（0.1s 渐变到
-    /// 蹲姿），落地全程按蹲姿计算、无站立检测相位、无跳变。
+    /// 视角高度：按 duck_frac 在站立/蹲姿之间插值；**空中蹲**额外加
+    /// `AIR_DUCK_VIEW_LIFT`（纯视角抬升，物理不动——头顶世界位置不变、只收脚）。
+    ///
+    /// 地面：站立 ⇄ 蹲按 `DUCK_LERP_TIME` 渐变（0.2s）。
+    /// 空中：duck_frac 即时置位 + 抬升即时生效（用户定调 2026-09-21：空中切换要瞬时）。
     pub fn eye_height(&self) -> f64 {
         let stand = EYE_STAND * (self.stand_maxs[1] / DEFAULT_HULL_STAND_HEIGHT);
         let duck = EYE_DUCK * (self.duck_maxs[1] / DEFAULT_HULL_DUCK_HEIGHT);
-        stand + (duck - stand) * self.duck_frac
+        let base = stand + (duck - stand) * self.duck_frac;
+        if self.ducked && !self.on_ground {
+            base + AIR_DUCK_VIEW_LIFT
+        } else {
+            base
+        }
     }
 
     /// 水平速度（速度面板横向模式）。
