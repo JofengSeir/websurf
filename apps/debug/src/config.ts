@@ -62,6 +62,17 @@ export interface LightingConfig {
   dirAzimuth: number;
   dirElevation: number;
   bgColor: number;
+  /**
+   * 光照模式（面板「预烘焙 / 纯纹理」）：
+   * - `baked`（默认）：**预烘焙** —— 世界面吃 lightmap atlas（VRAD 烘焙）、prop 吃 `sp_<i>.vhv`
+   *   逐顶点烘焙 / leaf ambient cube。**纹理多**（atlas + 默认纹理包 + vhv 顶点属性）
+   *   ⇒ 进图与首帧材质编译更吃时间，会卡顿一下。
+   * - `texture`：**纯纹理** —— 只上漫反射贴图原色（`MeshBasicMaterial`），不解码 atlas、
+   *   不吃烘焙光照。纹理最少、进图最快，但画面没有明暗关系。
+   *
+   * 切换由面板发起（`renderer.setLightingMode`）：按新模式**重建场景**，代价与重新加载地图相当。
+   */
+  mode: 'baked' | 'texture';
 }
 
 export interface InputConfig {
@@ -204,6 +215,8 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     dirAzimuth: 45,
     dirElevation: 45,
     bgColor: 0x222222,
+    // 预烘焙（默认）：与迁移前的渲染逻辑一致；纯纹理由面板切换
+    mode: 'baked',
   },
   input: {
     // cs-movement 乘数模型：有效灵敏度 = sensitivity * m_yaw(0.022) deg/px
