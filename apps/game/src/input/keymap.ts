@@ -49,7 +49,9 @@ export function loadKeymap(): Record<BindableAction, string[]> {
     const parsed = JSON.parse(raw) as Partial<Record<BindableAction, string[]>>;
     const merged = structuredClone(DEFAULT_KEYMAP);
     for (const action of Object.keys(DEFAULT_KEYMAP) as BindableAction[]) {
-      if (Array.isArray(parsed[action]) && parsed[action]!.length > 0) {
+      // 允许**空数组**（用户把某个动作的键全删了 = 禁用该动作，如不需要慢走）。
+      // 旧实现要求 length > 0，会把"已禁用"的动作又恢复成默认键位。
+      if (Array.isArray(parsed[action])) {
         merged[action] = parsed[action]!;
       }
     }
@@ -103,10 +105,18 @@ export function codeLabel(code: string): string {
   return code;
 }
 
-/** 是否是可安全绑定的修饰键（阻止绑定，避免冲突）。 */
-const MODIFIER_CODES = new Set(['ControlLeft', 'ControlRight', 'ShiftLeft', 'ShiftRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight']);
+/**
+ * 不可绑定的 code。
+ *
+ * 2026-09-21 放开：Ctrl / Shift / Alt **允许绑定**（原实现把全部修饰键都禁了，
+ * 导致没法把蹲绑到 Shift——而默认蹲是 Ctrl，Ctrl+W 会被浏览器吃掉关标签页）。
+ * 仅保留两类不可绑：
+ * - `Escape`：录制取消键；
+ * - `MetaLeft/MetaRight`（Win/Super）：系统层面拦截，keydown 常常收不到或触发系统菜单。
+ */
+const UNBINDABLE_CODES = new Set(['Escape', 'MetaLeft', 'MetaRight']);
 
-/** 判定 code 是否可绑定（排除修饰键与 Esc）。 */
+/** 判定 code 是否可绑定。 */
 export function isBindableCode(code: string): boolean {
-  return !MODIFIER_CODES.has(code) && code !== 'Escape';
+  return !UNBINDABLE_CODES.has(code);
 }
