@@ -75,7 +75,7 @@ export class MapPanel {
     row.appendChild(el('span', 'field-label', '模式'));
     const select = el('select', 'field-input field-select', undefined, {
       id: 'lightingMode',
-      title: '预烘焙 = 每像素采 lightmap atlas + 逐顶点/环境盒烘焙光照；纯纹理 = 只上漫反射贴图（移动时更平稳）',
+      title: '预烘焙 = 每像素采 lightmap atlas + 逐顶点/环境盒烘焙光照（每帧光照开销更大）；纯纹理 = 只上漫反射贴图（每帧光照开销最小）',
     });
     for (const [value, label] of [
       ['baked', '预烘焙'],
@@ -91,9 +91,9 @@ export class MapPanel {
       el(
         'div',
         'note note-info',
-        '预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，但移动/转视角时每帧开销更大。' +
-          '纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，移动时渲染速度更平稳，代价是画面没有明暗关系。' +
-          '切换即时生效（不重建场景、不打断视角）。',
+        '预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。' +
+          '纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮' +
+          '（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断视角）。',
       ),
     );
   }
