@@ -259,6 +259,28 @@ Source 的显示口径是 `albedo × lightmap^(1/2.2)`（外部参照实现 `Lig
 若将来要做「模型预烘焙」，需要的是**离线烘焙 + 缓存**（不在地图加载路径上），
 而不是每次加载现算 —— 那是一个独立课题。
 
+### 更正 4（2026-09-20 第三轮）：prop 静态光照有**两级**来源，本工程只接了第 2 级
+
+外部参照实现的 prop 光照优先级：
+
+| 级 | 来源 | 参照实现 | 本工程 |
+|---|---|---|---|
+| 1 | **逐顶点烘焙** `sp_<idx>.vhv` / `sp_hdr_<idx>.vhv`（pakfile 内，VRAD 产出） | `Geometry.cs:855-895` + `ValveVertexLightingFile.cs` | ❌ **未实现** |
+| 2 | leaf ambient cube（无 vhv / `NoPerVertexLighting` 时兜底） | `StaticProp.ts:39` | ✅ `prop_ambient_cube` |
+
+实测（`scripts/verify/prop_vertex_lighting.py`，直读 pakfile）：
+
+| 项 | 值 |
+|---|---|
+| pakfile 内 `sp_*.vhv` | **633 个**（629/653 prop 有数据） |
+| 全图逐 prop 顶点亮度中位数 → `vVertexLighting = byte×2/255` | p10 0.121 / p25 0.181 / **p50 0.244** / p75 0.334 / p90 0.414 / max 0.885 |
+| `s1_ramp1b`（默认传送旁的坡，idx 264） | p10 0.113 / **p50 0.211** / p90 0.570 / max **0.757** |
+| 本工程 leaf-cube 路径（同 prop） | 0.23–0.40 |
+
+⇒ **第 2 级与第 1 级量级一致（≈0.24）**：暗不是"缺预烘焙"，而是地图烘焙本来就暗；
+缺的是第 1 级的**逐顶点梯度**（0.113~0.757，我们只有每 prop 一个平坦值）。
+完整判据与下一步见 [scene-brightness-and-lights.md](./scene-brightness-and-lights.md) §9。
+
 ### 回退 2：诊断导出 `export_model_attached_lights()` 已回退
 
 同批加入（为查「模型自带光源」），无任何调用方 ⇒ 移除，wasm 导出恢复
