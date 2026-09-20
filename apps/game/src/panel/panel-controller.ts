@@ -120,14 +120,16 @@ export class PanelController {
           <div class="key-row" data-action="${action}">
             <span class="kname">${ACTION_LABELS[action]}</span>
             <div class="kkeys">
-              ${this.keymap[action]
-                .map(
-                  (code) =>
-                    `<span class="key-chip" data-action="${action}" data-code="${code}">
-                       ${codeLabel(code)}<span class="x" data-del="${code}">✕</span>
-                     </span>`,
-                )
-                .join('')}
+              ${this.keymap[action].length === 0
+                ? '<span class="kempty">（已禁用）</span>'
+                : this.keymap[action]
+                    .map(
+                      (code) =>
+                        `<span class="key-chip" data-action="${action}" data-code="${code}">
+                           ${codeLabel(code)}<span class="x" data-del="${code}">✕</span>
+                         </span>`,
+                    )
+                    .join('')}
               <button class="key-add" data-action="${action}">+ 添加</button>
             </div>
           </div>`,
@@ -147,14 +149,13 @@ export class PanelController {
         this.startRecording(action);
       });
     });
-    // 点击 ✕ → 删除该键位（保留至少一个）
+    // 点击 ✕ → 删除该键位（**允许删光**：空数组 = 禁用该动作，如不需要慢走）
     list.querySelectorAll('.key-chip .x').forEach((x) => {
       x.addEventListener('click', (e) => {
         e.stopPropagation();
         const chip = (x as HTMLElement).closest('.key-chip') as HTMLElement;
         const action = chip.dataset.action as BindableAction;
         const code = (x as HTMLElement).dataset.del!;
-        if (this.keymap[action].length <= 1) return; // 至少保留一个
         this.keymap[action] = this.keymap[action].filter((c) => c !== code);
         this.commitKeymap();
       });
@@ -227,7 +228,7 @@ export class PanelController {
     const hint = document.getElementById('keyRecHint');
     if (hint) hint.classList.remove('show');
     document.querySelectorAll('.key-chip').forEach((c) => c.classList.remove('recording'));
-    if (code === 'Escape' || !isBindableCode(code)) return; // 取消或修饰键
+    if (code === 'Escape' || !isBindableCode(code)) return; // 取消 / 不可绑（Esc、Meta）
     // 从其他动作移除该键（避免冲突），再绑定
     for (const act of Object.keys(this.keymap) as BindableAction[]) {
       this.keymap[act] = this.keymap[act].filter((c) => c !== code);
