@@ -107,10 +107,15 @@ function applyPose(pose: Pose): void {
 
 const mapPanel =
   mapPane &&
-  new MapPanel(mapPane, (pose) => {
-    if (replayFirstPerson()) return;
-    applyPose(pose);
-  });
+  new MapPanel(
+    mapPane,
+    (pose) => {
+      if (replayFirstPerson()) return;
+      applyPose(pose);
+    },
+    // 光照模式（预烘焙 / 纯纹理）：运行期 uniform 切换，不重建场景（与 game/debug 同语义）
+    (mode) => scene?.setLightingMode(mode),
+  );
 
 // ── 录像 ────────────────────────────────────────────────────────────
 const importer = new ReplayImporter();

@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
 import { ensureMainWasm, mosaic_decode } from '../main-wasm.js';
 // 主线程唯一物理线：PhysWorld 与 BspProcessor 同模块（main-wasm 已 initSync）
@@ -32,7 +32,7 @@ import type { DistStats } from './path-recorder.js';
 import type { InputReplayInitialState, InputReplayHull } from '../input/input-recorder.js';
 import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
-import { applyLightmapToMeshes, loadLightmapAtlas, setLightingMode as setLightingModeInShader, getLightingMode, isTextureOnlyMode, type LightingMode } from './lightmap-shader.js';
+import { applyLightmapToMeshes, loadLightmapAtlas, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from './lightmap-shader.js';
 
 /**
  * 渲染采样传输契约（实现 = `src/ts-shared/auth/shared-state.ts` 的 ShmState/MsgState，
@@ -150,6 +150,15 @@ function optCellKey(x: number, y: number, z: number, cellSize: number): string {
  * 不一致会让 mergeGeometries/mergeAttributes 直接失败（three 内部 error 且返回
  * null）——按需把组内统一为非索引 + f32。仅组内不一致时才转换（避免全图
  * toNonIndexed 的内存放大）。
+ *
+ * ⚠️ **交错属性必须先解交错**（2026-09-21 定位的「debug 进图全空」根因）：
+ * `InterleavedBufferAttribute.array` 返回的是**整段 stride 缓冲**
+ * （`InterleavedBufferAttribute.js:29` ⇒ `data.array`，长度 = count × stride），而 `itemSize`
+ * 只是逻辑分量数 ⇒ 直接 `new BufferAttribute(new Float32Array(a.array), a.itemSize)` 会得到
+ * `count = 长度/itemSize` 的**非整数**顶点数（实测 496/3 = 165.33…）⇒ three 逐顶点读到
+ * `undefined` ⇒ 包围盒/包围球 NaN ⇒ LOD 的 `cullDistance` 也是 NaN（场景对角线 NaN）
+ * ⇒ **一个块都不渲染**（HUD `可见 0/1390 (cull=NaN)`，控制台 386 条 NaN 报错）。
+ * 修法：`deinterleaveGeometry`（three 自带）先把每个交错属性摊平，再重建为普通属性。
  */
 function normalizeMergeGroup(geoms: THREE.BufferGeometry[]): THREE.BufferGeometry[] {
   const hasIdx = geoms.some((g) => g.index !== null);
@@ -165,12 +174,24 @@ function normalizeMergeGroup(geoms: THREE.BufferGeometry[]): THREE.BufferGeometr
   if (gpuTypes.size > 1) {
     out = out.map((g) => {
       const g2 = g.clone();
+      // 交错属性 → 普通属性（否则下面的「按 itemSize 重建」会切出非整数顶点数）
+      if (Object.values(g2.attributes).some((a) => (a as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute)) {
+        deinterleaveGeometry(g2);
+      }
       for (const name of Object.keys(g2.attributes)) {
         const a = g2.attributes[name] as THREE.BufferAttribute;
-        g2.setAttribute(
-          name,
-          new THREE.BufferAttribute(new Float32Array(a.array as ArrayLike<number>), a.itemSize, a.normalized),
-        );
+        // 显式按 count×itemSize 拷一份：长度自洽（不依赖 `array.length/itemSize` 恰为整数）
+        const src = a.array as ArrayLike<number>;
+        const arr = new Float32Array(a.count * a.itemSize);
+        for (let i = 0; i < arr.length; i++) arr[i] = src[i] as number;
+        // 不变式护栏：本类缺陷曾静默产出「非整数顶点数 ⇒ NaN 包围盒 ⇒ 整图不渲染」，
+        // 一旦再出现（新属性类型/three 行为变化）必须**显式报错**而不是继续跑。
+        if (arr.length !== a.count * a.itemSize) {
+          console.error(
+            `[optimizeScene] 属性 ${name} 长度不自洽：array=${arr.length} count=${a.count} itemSize=${a.itemSize}`,
+          );
+        }
+        g2.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize, a.normalized));
       }
       g2.dispose();
       return g2;
@@ -189,12 +210,6 @@ export class RendererMain {
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
-  /**
-   * 最近一次 `loadScene` 的输入。光照模式切换（预烘焙 ⇄ 纯纹理）需要按新模式**重建场景**
-   * （见 `setLightingMode`）：材质必须在 `optimizeScene` 分块合并前施加，而合并会丢掉逐 primitive 的
-   * `userData.hasLightmap` ⇒ 就地改材质无法正确切回预烘焙。
-   */
-  private lastSceneData: SceneDataMessage | null = null;
   private cameraController: CameraController | null = null;
   private pvsManager: PvsManager | null = null;
   private teleportManager: { getTriggers(): readonly TeleportTrigger[] } | null = null;
@@ -499,22 +514,18 @@ export class RendererMain {
   }
 
   /**
-   * 切换光照模式（面板「预烘焙 / 纯纹理」）：**按新模式重建场景**（与重新加载地图同一条链路）。
+   * 切换光照模式（面板「预烘焙 / 纯纹理」）——**运行期性能旋钮**：只改共享 uniform，立即生效。
    *
-   * 为什么必须重建而不是就地换材质：材质施加必须在 `optimizeScene` 分块合并**之前**完成
-   * （合并会丢掉逐 primitive 的 `userData.hasLightmap` / 材质实例映射），就地改无法正确切回预烘焙。
-   * 重建代价 = 一次场景重挂（数秒），这也正是面板小字提示「预烘焙更吃加载时间」的由来。
+   * 2026-09-21 改定：旧实现是「按新模式重建场景」（`loadScene(lastSceneData)`）——面板切换会变成一次
+   * 1.4~2.5 s 的冻结，并把输入/物理一起打断（用户症状：进图/热切换后转不动视角、也走不动）。
+   * 现在的机制在 `lightmap-shader.setLightingMode`：全场景材质共享一个 `vbspBakedMix` uniform，
+   * 三条烘焙路径（world lightmap / 逐顶点 vhv / ambient cube）都按它分支 ⇒
+   * **零重编译、零重建、零输入中断**，也不改变分块与材质分组（两种模式 draw 数一致）。
    */
-  async setLightingMode(mode: LightingMode): Promise<void> {
+  setLightingMode(mode: LightingMode): void {
     if (getLightingMode() === mode) return;
     setLightingModeInShader(mode);
-    const data = this.lastSceneData;
-    if (!data) {
-      console.info(`[lighting] 光照模式 → ${mode}（地图尚未加载，将在加载时生效）`);
-      return;
-    }
-    console.info(`[lighting] 光照模式 → ${mode}：按新模式重建场景…`);
-    await this.loadScene(data);
+    console.info(`[lighting] 光照模式 → ${mode}（运行期 uniform 切换，未重建场景）`);
   }
 
   /** 当前光照模式（面板回填/诊断用）。 */
@@ -525,8 +536,6 @@ export class RendererMain {
   /** 加载场景数据（GLB + PVS + 碰撞体 + 传送点 + lightmap + 雾；主线程本地数据）。 */
   async loadScene(data: SceneDataMessage): Promise<{ diagonal: number; defaultCull: number; maxCull: number } | null> {
     if (!this.scene || !this.camera) return null;
-    // 记住输入：光照模式切换（预烘焙 ⇄ 纯纹理）按新模式重建场景时复用同一份 GLB。
-    this.lastSceneData = data;
     this.disposeScene();
 
     const gltf = await this.loadGlb(data.glb);
@@ -539,8 +548,10 @@ export class RendererMain {
     // lightmap（存在时应用；主线程 GLB 解析期生成）
     // 「纯纹理」模式（面板切换）：**不解码 atlas**（少一张 4096×2048 纹理 = 面板小字里的「纹理少、进图快」），
     // 所有图元按 fullbright 贴图原色收敛。
-    const atlasTexture = isTextureOnlyMode() ? null : await loadLightmapAtlas(gltf.parser, gltf);
-    if (atlasTexture || isTextureOnlyMode()) {
+    // ⚠️ atlas **两种模式都加载**（2026-09-21）：光照模式只是片元里的共享 uniform 分支
+    // （`vbspBakedMix`），纯纹理模式下 atlas 也必须在场——否则面板切回预烘焙又得重建场景。
+    const atlasTexture = await loadLightmapAtlas(gltf.parser, gltf);
+    if (atlasTexture) {
       applyLightmapToMeshes(scene, atlasTexture);
     }
     // 空间分块合并：3.4 万 mesh → 数百~数千块（渲染减负核心）。

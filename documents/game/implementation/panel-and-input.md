@@ -30,21 +30,22 @@ window.mousemove（仅锁定时）
 
 ### 2.2 默认键位与录制（`apps/game/src/input/keymap.ts`）
 
-- `BindableAction = Exclude<keyof KeyState,'wheelJump'>`（`:10-11`）——滚轮跳不可绑定（wheel 事件直接置位 `wheelJumpPending`，`apps/game/src/app.ts:255-257`）。
+- `BindableAction = Exclude<keyof KeyState,'wheelJump'>`（`:10-11`）——滚轮跳不可绑定（wheel 事件直接置位 `wheelJumpPending`，`apps/game/src/app.ts:295`）。
 - `DEFAULT_KEYMAP`（`:28`）与 cs-movement 契约一致；`loadKeymap/saveKeymap/resetKeymap` 走 localStorage `websurf-game.keymap.v1`（`STORAGE_KEY` `:42`，加载时逐字段校验防脏数据 `:45-61`）。
 - 面板「按键」模块录制：`KeyboardInput.setKeymap` 热更新（`apps/game/src/input/keyboard.ts:53-56`），`panel-controller.ts:12` 头注；`keyList/keyRecHint/keyReset` 控件（`apps/game/web/index.html` 80 个 id 之列）。录制提示 `keyRecHint` 显隐：初始隐藏由 CSS 基础规则承担（`.key-rec-hint{display:none}`，`apps/game/web/styles.css:552`，原 HTML 行内 `style="display:none"` 已摘除，index.html 零行内样式）；JS 现行 class 切换（`panel-controller.ts:162` `add('show')` / `:182` `remove('show')`）驱动 `.key-rec-hint.show` 钩子（`styles.css:553`）。
 
 ### 2.3 按键门控（`apps/game/src/input/keyboard.ts:41-113`）
 
 - `setEnabled(false)` 即 `reset()`（`:58-60`）——退锁/失焦清空状态；`bind(target)` 监听 keydown/keyup，仅 `enabled` 时记账。
-- 双保险：退锁后 rAF 输入循环 mask 恒 0（`app.ts:342`），面板内按键不进物理。
+- 双保险：退锁后 rAF 输入循环 mask 恒 0（`app.ts:214`），面板内按键不进物理。
 
 ## 3. PointerLock（`src/ts-shared/input/pointer-lock.ts`）
 
 - 标准路径：`requestPointerLock(target, {unadjustedMovement:true})` 禁用 OS 鼠标加速（Chromium 114+，`:83-87`，头注引 Three.js r175 PR #30687 同法）。
 - 旧浏览器 void 返回 → 依赖 pointerlockchange 事件判定（`:73` 注释降级路径）。
-- 3s 超时兜底 `setTimeout(done(false), 3000)`（`:71`）；锁定失败 UI 提示"再次点击画布"（`app.ts:196-200`）。
-- 锁定状态变化回调 → `mouseBuffer.onLockChange` + `keyboard.setEnabled` + 面板状态机（`app.ts:222-237`）。
+- 3s 超时兜底 `setTimeout(done(false), 3000)`（`:71`）；锁定失败 UI 提示"再次点击画布"（`app.ts:237`）。
+- **请求锁定的入口是 `document` 级点击，不是 canvas**（`app.ts:229-240`，2026-09-21 修）：命中 `#panel` / 按钮 / 弹窗（`UI_HIT_SELECTOR`）的点击不请求锁定，其余任意点击（含被 HUD 遮住但落点在 3D 区域上的点击）都请求。旧实现绑在 `#preview` 上 ⇒ 浮层盖住落点时事件不冒泡到 canvas ⇒ 永远拿不到锁定（症状："进图后转不动视角"）。
+- 锁定状态变化回调 → `mouseBuffer.onLockChange` + `keyboard.setEnabled` + 面板状态机（`app.ts:261-276`）。
 
 ## 4. InputBridge（面板 → 双端物理的参数桥，`apps/game/src/input/input-bridge.ts`）
 
@@ -63,9 +64,9 @@ window.mousemove（仅锁定时）
 
 `visible = !pointerLocked || !sceneReady`（`:5,70-75`）：
 - 初始（未加载地图）→ 面板必显（提供"加载地图"入口）；
-- 选地图 → `panel.hide()` → 加载覆盖层接管（`app.ts:396-397`）；
-- 点击画布锁定 → 隐藏；ESC 退锁 → 弹出；
-- 加载完成 → `panel.updateVisibility(true)`（`app.ts:472`）；面板「关闭」仅隐藏（M 键手动开关同 `updateVisibility`）。
+- 选地图 → `panel.hide()` → 加载覆盖层接管（`app.ts:436`）；
+- 点击 3D 区域锁定（`document` 级监听，面板内点击不触发）→ 隐藏；ESC 退锁 → 弹出；
+- 加载完成 → `panel.updateVisibility(true)`（`app.ts:528`）；面板「关闭」仅隐藏（M 键手动开关同 `updateVisibility`）。
 
 ### 5.2 七模块与绑定
 

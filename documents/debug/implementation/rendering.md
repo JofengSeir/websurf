@@ -1,6 +1,8 @@
 # 渲染子系统（维度 I）
 
 > 前置阅读：[../overview.md](../overview.md) §3、[../sequences.md](../sequences.md) §3。本文覆盖 RendererMain tick 全景、相机/近平面、场景装载、lightmap/雾/灯光、LOD/PVS、碰撞可视化、准星检查器、纹理画质。地图数据怎么来见 [loading-pipeline.md](loading-pipeline.md)。
+>
+> ⚠️ **行号基准说明（2026-09-21）**：本文 `renderer-main.ts` / `app.ts` 的行号锚点写于 debug 接入共享光照栈之前（当时 `renderer-main.ts` 约 1023 行，现为 **1792** 行），**已整体偏移数百行**，属已登记问题（`AGENTS.md` §7.3）。本轮只校准了与光照/场景装载直接相关的锚点；引用前请以代码为准。
 
 ## 1. RendererMain 的职责边界
 
@@ -45,7 +47,8 @@
 
 ## 5. 光照与 lightmap
 
-- **lightmap 解码**（`renderer/lightmap-shader.ts`，224 行）：VBSP lightmap 是 RGBExp32——`exp = a×255−128`、`rgb × 2^exp`（`VBSP_DECOMPRESS_LIGHTMAP_SAMPLE` chunk）；采样在 shader 内做**手动 4 邻域双线性** + `pow(1/2.2)` gamma（`VBSP_APPLY_LIGHTMAP` chunk），注入 `onBeforeCompile`；atlas 贴图 `NoColorSpace + NearestFilter`（无 mipmap，双线性自己做）；mesh `uv1`（lightmap UV 通道）拷贝到 `uv2` 供注入 shader 使用（`applyLightmapToMeshes`）。
+- **lightmap 解码**（`renderer/lightmap-shader.ts`，1815 行）：VBSP lightmap 是 RGBExp32——`exp = a×255−128`、`rgb × 2^exp`（`VBSP_DECOMPRESS_LIGHTMAP_SAMPLE` chunk）；采样在 shader 内做**手动 4 邻域双线性** + `pow(1/2.2)` gamma（`VBSP_APPLY_LIGHTMAP` chunk），注入 `onBeforeCompile`；atlas 贴图 `NoColorSpace + NearestFilter`（无 mipmap，双线性自己做）；mesh `uv1`（lightmap UV 通道）拷贝到 `uv2` 供注入 shader 使用（`applyLightmapToMeshes`）。
+- **光照模式（预烘焙 / 纯纹理，2026-09-21 改为运行期切换）**：共享 uniform `vbspBakedMix`（1/0）在三条烘焙路径（world lightmap / 逐顶点 vhv / ambient cube）上分支；面板 radio → `rendererMain.setLightingMode(mode)` 只改这一个 uniform ⇒ **零重编译、零场景重建、不打断视角与操作**（旧实现切模式要重建场景，实测 1.41 s / 2.54 s 冻结并打断输入）。语义 = **移动时的渲染速度**旋钮，不是进图速度开关；面板小字按此写。两种模式加载路径一致（都加载 atlas、都注入），切换实测同步耗时 0.3~0.6 ms、切换窗口无 >100 ms 帧、pointer lock 保持。详见 `documents/game/implementation/lighting-merge-plan.md` §10.6。
 - **基础灯光**（`renderer/light-manager.ts`）：Ambient + Hemisphere + Directional（azimuth/elevation 默认 45/45，方向光距 5000）；`syncFromConfig(config.lighting)` 实时应用 ambientIntensity 等滑块；背景色可配。
 - **点光池（预留未接线）**：`MAX_POINT_LIGHTS=8` 的 PointLight 池与 KHR_lights_punctual 提取逻辑（`extractPointLights`/`updatePointLights`）存在于 `light-manager.ts`，但全仓无调用方（grep 仅定义处命中）——当前版本灯光只来自基础三灯 + lightmap。文档如实记录：这是为 glTF 场景点光预留的能力。
 

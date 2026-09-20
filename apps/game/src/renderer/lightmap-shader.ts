@@ -73,6 +73,16 @@ vec3 vbsp_DecompressLightmapSample(vec4 texel) {
  */
 export const VBSP_APPLY_LIGHTMAP = /* glsl */ `
 vec3 vbsp_ApplyLightmap(sampler2D atlas, vec2 uv) {
+	// 纯纹理模式（vbspBakedMix = 0，2026-09-21）：**整条采样直接跳过**，返回 1.0 ⇒ 调用方那行
+	// indirectDiffuse += light × albedo 退化成 += albedo（外部参照实现 white 兜底口径）。
+	//
+	// 为什么是**运行时 uniform 分支**而不是"切模式重换材质"：uniform 分支在所有片元上一致（无 divergent
+	// 波前分裂），GPU 只跑活的那一侧 ⇒ **既不采 atlas、也不算解码**，同时**零重编译、零场景重建**
+	// ⇒ 面板切换不打断输入/物理，也不会让移动中的帧时间跳变（这正是面板小字承诺的语义）。
+	// 反之若靠 material.lightMap = null + needsUpdate 切，要重编几百个 program（实测 1.4~2.5 s 冻结）。
+	if (vbspBakedMix < 0.5) {
+		return vec3(1.0);
+	}
 	vec2 atlasSize = vbsp_AtlasSize;
 	vec2 px = uv * atlasSize - 0.5;
 	vec2 ipx = floor(px);
@@ -121,6 +131,7 @@ export const VBSP_LIGHTMAP_UNIFORM_DECLS = [
 	'uniform float vbspExposure;',
 	'uniform float vbspLightGamma;',
 	'uniform float vbspLightFloor;',
+	'uniform float vbspBakedMix;',
 ];
 
 /** ambient cube（prop / fullbright 兜底）路径**额外**需要的 uniform：cube 数组 + 模型亮度。 */
@@ -344,22 +355,37 @@ export async function loadLightmapAtlas(
 
 // ── 光照模式（面板「预烘焙 / 纯纹理」）──────────────────────────────────────
 /**
- * 光照模式：
- * - `baked`（预烘焙，默认）：世界面吃 lightmap atlas（VRAD 烘焙），prop 吃 `sp_<i>.vhv` 逐顶点烘焙 /
- *   leaf ambient cube。**纹理多**（atlas + 默认纹理包 + vhv 属性）⇒ 进图与首帧材质编译更吃时间。
- * - `texture`（纯纹理）：只上漫反射贴图（`MeshBasicMaterial` 原色），不加载 atlas、不吃任何烘焙光照。
- *   纹理更少、进图更快，但画面没有明暗关系（外部参照实现的 white 兜底口径）。
+ * 光照模式（面板「预烘焙 / 纯纹理」）——**运行期性能旋钮，不是进图开关**。
  *
- * 由面板切换（`renderer-main.setLightingMode` ⇒ 重新施加材质，无需重载地图）。
+ * 语义（2026-09-21 按用户口径改定）：两种模式**加载路径完全相同**（同一份 GLB、同一批注入材质、
+ * 同一套 atlas），差别只在**每帧片元代价**：
+ * - `baked`（预烘焙，默认）：世界面吃 lightmap atlas（VRAD 烘焙，每片元 4 次 atlas 采样 + 双线性解码），
+ *   prop 吃 `sp_<i>.vhv` 逐顶点烘焙 / leaf ambient cube（法线加权 6 面）⇒ 画面有明暗关系。
+ * - `texture`（纯纹理）：只上漫反射贴图 ⇒ **不采 atlas、不算解码/cube**，片元更省、纹理带宽更低。
+ *
+ * 因此它是给**人物移动时的渲染速度**用的：在移动/转视角时把每帧光照开销降下来，让帧时间**不要大幅跳变**
+ * （不是让地图加载更快——加载路径两者一致）。
+ *
+ * 由面板切换（`renderer-main.setLightingMode`）：只改 `bakedMixUniform`，**不重建场景、不重编译材质**。
  */
 export type LightingMode = 'baked' | 'texture';
 
 /** 当前光照模式（模块级：`applyLightmapToMeshes` / `routeFullbright` 都读它）。 */
 let lightingMode: LightingMode = 'baked';
 
-/** 设置光照模式（切换后需重新施加材质才生效，见 `renderer-main.setLightingMode`）。 */
+/**
+ * 光照模式的**运行期载体**：1 = 预烘焙（吃烘焙项）、0 = 纯纹理（烘焙项恒 1.0）。
+ *
+ * 全场景所有注入材质共享**同一个** uniform 对象 ⇒ `setLightingMode` 改一次值即全场景生效：
+ * 不重编译 program、不换材质、不重建场景。这是"切换面板不打断视角/移动"的**全部机制**
+ * （此前实现是切模式 ⇒ `loadScene` 重建，实测切换期间冻结 1.4~2.5 s 且会打断输入）。
+ */
+const bakedMixUniform: { value: number } = { value: 1 };
+
+/** 设置光照模式：改共享 uniform（运行期立即生效）+ 记模式（供 UI/日志）。 */
 export function setLightingMode(mode: LightingMode): void {
 	lightingMode = mode === 'texture' ? 'texture' : 'baked';
+	bakedMixUniform.value = lightingMode === 'baked' ? 1 : 0;
 }
 
 /** 当前光照模式。 */
@@ -381,12 +407,13 @@ export function isTextureOnlyMode(): boolean {
  * uv1 存在时复制到 uv2（lightMap slot 由 uv2 驱动），用 MeshBasicMaterial 替换原材质
  *（保留原 map/color），onBeforeCompile 注入解码 shader；无 lightmap UV 的 mesh 跳过。
  * `mesh.userData.hasLightmap === false` 的 mesh 也跳过（中性占位 UV，见文件头说明）。
- * @param scene Three.js 场景。
+ * @param scene Three.js 场景或 BSP 模型根（只用到 `traverse` ⇒ 类型放宽到 Object3D，
+ *   apps/viewer 挂的是自己的模型 Group 而不是 Scene）。
  * @param atlasTexture lightmap atlas 纹理（来自 loadLightmapAtlas）。
  * @returns 已应用 lightmap 的 mesh 数量。
  */
 export function applyLightmapToMeshes(
-	scene: THREE.Scene,
+	scene: THREE.Object3D,
 	atlasTexture: THREE.Texture | null,
 ): number {
 	// 负控阶段 `off`：完全不施加 lightmap（不换材质、不注入）——
@@ -399,9 +426,10 @@ export function applyLightmapToMeshes(
 	// "移除注入 ⇒ 应变暗"的正确负控；该负控由 `noinject` 承担（见下方注入处）。
 	const isNoInjectStage = readLightmapStage() === 'noinject';
 
-	// 纯纹理模式：**跳过 lightmap 分支**（atlas 为 null 也走这条），全部图元落到 fullbright 收敛点，
-	// 且那里的逐顶点/ambient cube 烘焙在纯纹理模式下也被跳过 ⇒ 只剩漫反射贴图原色。
-	const textureOnly = isTextureOnlyMode();
+	// ⚠️ **两种光照模式在这里走同一条路**（2026-09-21）：材质一律按"带烘焙项"构建并注入，
+	// 模式差异只由共享 uniform `vbspBakedMix` 在片元里决定（纯纹理时烘焙项分支直接返回 1.0）。
+	// 为什么不按模式分叉建材质：分叉后"纯纹理"加载出来的材质**没有注入**，
+	// 面板切回预烘焙就只能重建场景（旧实现，切换冻结 1.4~2.5 s 并打断输入）。
 
 	const atlasW = (atlasTexture?.image?.width as number) || 0;
 	const atlasH = (atlasTexture?.image?.height as number) || 0;
@@ -447,12 +475,6 @@ export function applyLightmapToMeshes(
 	 */
 	const routeFullbright = (mesh: THREE.Mesh): void => {
 		const unlit = isUnlit(mesh);
-		// 纯纹理模式：**不吃任何烘焙光照**（第 1 级逐顶点、第 2 级 ambient cube 全部跳过）⇒ 只剩贴图原色。
-		if (textureOnly) {
-			mesh.material = acquireFullbrightMaterial(mesh);
-			fullbright++;
-			return;
-		}
 		if (!unlit && hasVertexLightingAttr(mesh) && !readVertexLightingOff()) {
 			// 第 1 级：逐顶点预烘焙（属性在几何上 ⇒ 材质全场景共享）。
 			// ⚠️ 必须**显式赋值**给 mesh：`acquire*` 只建/取缓存实例，不做赋值
@@ -807,7 +829,7 @@ export function applyLightmapToMeshes(
 		const hlGeom = (geom.userData as { hasLightmap?: unknown } | undefined)?.hasLightmap;
 		const hlMesh = (mesh.userData as { hasLightmap?: unknown }).hasLightmap;
 		const hasLightmap = hlGeom !== undefined ? hlGeom : hlMesh;
-		if (textureOnly || hasLightmap === false || hasLightmap === undefined) {
+		if (hasLightmap === false || hasLightmap === undefined) {
 			// 占位 UV 面（契约 §9.6.1）⇒ 外部参照实现口径：white 兜底 = 贴图原色 fullbright
 			// prop 图元带 node extras.ambientCube（leaf ambient cube，见 vbsp::prop_ambient_cube）
 			// ⇒ 在 fullbright 基础上用法线加权混合 6 面 cube（外部参照实现 StudioModel 同语义）
@@ -996,7 +1018,7 @@ export function applyLightmapToMeshes(
  *
  * @returns 被收敛的 mesh 数（0 = 无需处理）。
  */
-export function fullbrightUnlitLitMaterials(scene: THREE.Scene): number {
+export function fullbrightUnlitLitMaterials(scene: THREE.Object3D): number {
 	let converted = 0;
 	scene.traverse((obj) => {
 		const mesh = obj as THREE.Mesh;
@@ -1049,6 +1071,8 @@ function injectLightmapShader(
 		shader.uniforms.vbspExposure = exposureUniform;
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
 		shader.uniforms.vbspLightFloor = lightFloorUniform;
+		// 模式开关的运行期载体（全场景共享同一对象，见 `bakedMixUniform`）
+		shader.uniforms.vbspBakedMix = bakedMixUniform;
 		(material as unknown as { __vbspLightmapUniformBound?: boolean }).__vbspLightmapUniformBound =
 			true;
 
@@ -1267,6 +1291,7 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.vbspExposure = exposureUniform;
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
+		shader.uniforms.vbspBakedMix = bakedMixUniform;
 		// 声明必须来自共享常量（守卫 §10 断言"注入单元自洽"）
 		const decls = VBSP_LIGHTMAP_UNIFORM_DECLS.join('\n');
 		// ⚠️ 这个数组进的是 **fragment** shader ⇒ **不能出现 `attribute`**
@@ -1276,6 +1301,8 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 		const fn = [
 			'varying vec3 vbspVLight;',
 			'vec3 vbspVertexLightTerm() {',
+			// 纯纹理模式：逐顶点烘焙项恒 1.0（= 贴图原色），与 world 路径同一开关语义
+			'	if (vbspBakedMix < 0.5) { return vec3(1.0); }',
 			'	float g = max(vbspLightGamma, 0.001);',
 			'	return pow(max(vbspVLight, vec3(0.0)), vec3(2.2 / g)) * vbspExposure;',
 			'}',
@@ -1357,6 +1384,7 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
 		shader.uniforms.vbspLightFloor = lightFloorUniform;
 		shader.uniforms.vbspAmbientScale = ambientScaleUniform;
+		shader.uniforms.vbspBakedMix = bakedMixUniform;
 		const vs = shader.vertexShader;
 		const vsA = vs.replace(
 			'#include <common>',
@@ -1390,6 +1418,8 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 			// （pow(0.13×0.012, 1/2.2) ≈ 0.019，而正确是 0.13 × pow(0.012,1/2.2) ≈ 0.0177... 的 7 倍），
 			// 表现就是「exposure 拖爆了暗处仍是 000000」。故此处只把**光照**做 `^(1/γ)`，albedo 留给上面那行乘。
 			"vec3 vbspAmbientWeight() {",
+			// 纯纹理模式：ambient cube 项恒 1.0（不吃烘焙光照），与另两条路径同一开关
+			"	if (vbspBakedMix < 0.5) { return vec3(1.0); }",
 			// 下限（加法）：同 `vbsp_ApplyLightmap` —— 纯黑必须靠加法解决，倍率救不回 0。
 			"	return pow( max(vbspAmbientRaw(), vec3(vbspLightFloor)), vec3(1.0 / max(vbspLightGamma, 0.001)) ) * vbspExposure * vbspAmbientScale;",
 			"}",

@@ -6,6 +6,18 @@
 
 ### 新增
 
+#### 光照模式改为运行期切换 + viewer 接入 + debug 空屏根因修复（2026-09-21）
+
+- **语义改定（用户口径）**：「预烘焙 / 纯纹理」是**人物移动时的渲染速度**旋钮（让移动/转视角时的每帧光照开销降下来、帧时间不要大幅跳变），**不是进图速度开关**。三端小字按此重写（`apps/game/web/index.html`、`apps/debug/web/index.html`、`apps/viewer/src/ui/mapinfo.ts`）：预烘焙 = 每像素采 lightmap 图集 + 逐顶点/环境盒烘焙项（有明暗关系、每帧更贵）；纯纹理 = 只上漫反射贴图（不采图集、不算烘焙项 ⇒ 移动更平稳）。上一版小字「加载光照图集…进图与首帧会卡顿几秒」「纯纹理进图最快」**已作废**。
+- **切换机制重做：运行期共享 uniform，不再重建场景**（`lightmap-shader.ts` 三端同源）。新增 `uniform float vbspBakedMix`（1 = 预烘焙、0 = 纯纹理），world lightmap / 逐顶点 vhv / ambient cube **三条烘焙路径各自按它分支**（纯纹理时直接返回 1.0 = 外部参照实现 white 兜底口径）；`setLightingMode` 只改这一个共享 uniform 对象 ⇒ 零重编译、零重建、不打断输入与物理。`applyLightmapToMeshes` 不再按模式分叉建材质、`renderer-main.applyLightmap` 两种模式都加载 atlas（否则切回又要重建）。**实测切换耗时 0.2~0.6 ms**（旧实现 1.41 s / 2.54 s），切换窗口内 rAF 帧间隔：game 中位 3.1 ms / 最大 5.6~12.9 ms、debug 中位 13.4 ms / 最大 34.4 ms、viewer 最大 46.4 ms，**三端 >100 ms 的长冻结帧均为 0**；pointer lock 全程保持，切换后不再出现 `[lightmap] 光照模式=… 施加 mesh=` 加载日志（= 未重建）。
+- **切换后输入可用性 A/B（同一机位逐像素对照，`temp/shots/ab-*`）**：viewer `modeEffect=182.7 / 回切损失 0 / 转视角 8.4 / 前进 137.6`；debug `18.1 / 3.5 / 8.8 / 34.3`；game `24.0 / 0.001 / 4.1 / 33.5`。噪声基线（同模式、无输入、间隔 1.6 s 两帧）game 0.007、viewer 0、debug 0.022；另跑**全程不切模式**的漂移对照（game，t0/t5/t10/t15 同机位）= 0.004~0.009 ⇒ 回切损失落在噪声/漂移量级内，即"切到纯纹理再切回"逐像素复原。⚠️ 探针坑：game 的面板偏好会持久化，上一轮停在「纯纹理」会让下一轮基线就是纯纹理（实测 `modeEffect=0.002` 的假阴性）⇒ 现每轮开头强制归位到 baked 并打印 `before=`。
+- **viewer 与 game 同出生点亮度对照**：把 viewer 相机跳到 game 用的出生点后，3D 区 baked/texture 亮度比 **0.591**，与 game 同图 **0.589** 一致（min 6.8 / max 231.3 = 动态范围完整）；`[viewer][lightmap] 光照模式=baked，atlas 4096×2048，施加 mesh=33716，终扫收敛=492` 与 game/debug 同数。
+- **点击即可取得视角锁定（game/debug）**：请求锁定的监听从 `#preview` 改到 `document`（面板/弹窗/按钮内的点击不抢锁定，其余任意点击即锁定）。旧实现绑在 canvas 上 ⇒ 任何浮层（game 的全屏 ESC 面板、debug 的缺失纹理弹窗）盖住落点时事件不冒泡到 canvas ⇒ **永远拿不到锁定**，用户症状即「进图/热切换后转不动视角」。
+- **debug「缺失纹理」弹窗不再困住视角**：它是 `position: fixed; inset: 0` 的全屏浮层，点弹窗外背板也会关闭（`apps/debug/src/app.ts`），关掉后点画面即可锁定。
+- **debug 进图整屏空白根因修复（`normalizeMergeGroup`，pre-existing）**：`InterleavedBufferAttribute.array` 返回的是整段 stride 缓冲（`InterleavedBufferAttribute.js:29`），而 `itemSize` 只是逻辑分量数 ⇒ 按 `new BufferAttribute(new Float32Array(a.array), a.itemSize)` 重建会得到**非整数顶点数**（实测 496/3 = 165.33…）⇒ three 逐顶点读到 `undefined` ⇒ 包围盒/包围球 NaN ⇒ 场景对角线 NaN ⇒ LOD `cullDistance` NaN ⇒ **一个块都不渲染**。实测对照：修复前 HUD `可见 0/1390 (cull=NaN)`、控制台 **386** 条 NaN 报错、FPS 56；修复后 `可见 368/1643 (cull=16400)`、**0** 条、FPS 321。修法 = `deinterleaveGeometry` 先摊平交错属性 + 逐属性按 `count×itemSize` 显式拷贝 + 长度不变式护栏（再犯即显式报错）。
+- **apps/viewer 接入光照栈（默认预烘焙 + 同款面板开关）**：`src/renderer/lightmap-shader.ts`（与 game/debug 逐字节同源）、`core/scene.ts` 在 `optimizeScene` **之前**施加静态光照（atlas → lightmap → 终扫 fullbright）、新增「光照模式」面板行（`#lightingMode`，默认预烘焙）与同款小字、`setLightingMode` 运行期切换、换图时释放 lightmap atlas。亮度参数**逐字对齐** `apps/game/src/config.ts:238-247` 的 `DEFAULT_CONFIG.lighting`（exposure 2.3 / lightGamma 2.2 / ambientScale 1 / propVertexRelax 1 / propVertexFlatten 0.85）——首版误填「外部参照实现平价」1/0.5 会把画面整体压暗（γ 0.5 ⇒ 指数 2 = 平方衰减）。
+- **静态守卫复检（`.tmp` 探针，未入库）**：三份同源副本逐项断言「声明含 `vbspBakedMix` / 声明过的 uniform 均有 `shader.uniforms.*` 绑定 / 三个注入单元的 `vbsp*` 标识符自带声明 / 分支恰好出现在三条烘焙路径 / 不再按模式分叉建材质」= **13×3 全通过**；`test/game-core` 既有注入守卫自检 **40/40 通过**。
+
 #### 共享层回并与三工程渲染/物理迁移（2026-09-20）
 
 - **`test/game-core` 隔离副本回并到共享层（8d24b24）**：按 `documents/game/implementation/lighting-merge-plan.md` §6.2 的回并顺序执行——`src/wasm-core/**` 逐字节回并（含新增 `bsp_to_gltf_core/lightmap.rs` 669 行 = lightmap atlas 生成与导出契约、`vhv.rs` 195 行 = `sp_<i>.vhv` 逐顶点预烘焙解析），`src/phys/world.rs`（`TriEntry.mesh` 改 `Rc<TriMesh>` 共享 ⇒ 权威线启动 4972ms → 135ms），`src/ts-shared/phys/{world-builder,authority-calibrator}.ts`。验证：根 workspace `cargo check` 通过、`cargo test -p websurf-phys` 10/10。

@@ -22,7 +22,7 @@ import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-ca
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
-import { loadLightmapAtlas, applyLightmapToMeshes, fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, getVertexLightingRelaxStats, getPropVertexRelax, setPropVertexFlatten, getPropVertexFlatten, VERTEX_LIGHTING_ATTR, setLightingMode as setLightingModeInShader, getLightingMode, isTextureOnlyMode, type LightingMode } from './lightmap-shader.js';
+import { loadLightmapAtlas, applyLightmapToMeshes, fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, getVertexLightingRelaxStats, getPropVertexRelax, setPropVertexFlatten, getPropVertexFlatten, VERTEX_LIGHTING_ATTR, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from './lightmap-shader.js';
 
 /** FOV 默认值（73.6；面板 hud.fov 可调，60-110）。 */
 const FOV_DEFAULT = 73.6;
@@ -235,17 +235,10 @@ export class RendererMain {
     eyeHeight: number;
   }, teleport: boolean) => void) | null = null;
 
-  /**
-   * 最近一次 `loadScene` 的输入。光照模式切换（预烘焙 ⇄ 纯纹理）需要按新模式**重建场景**
-   * （见 `setLightingMode`）：需要在 `optimizeScene` 分块合并**之前**按新模式施加材质，
-   * 而合并会丢掉逐 primitive 的 `userData.hasLightmap` ⇒ 就地改材质无法正确切回预烘焙。
-   */
-  private lastSceneData: SceneDataMessage | null = null;
-
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
-    // 光照模式（面板「预烘焙 / 纯纹理」）：模块级开关，`applyLightmapToMeshes` 按它分流。
-    // 必须在加载地图前设定（纯纹理模式连 atlas 都不解码 ⇒ 更少纹理、进图更快）。
+    // 光照模式（面板「预烘焙 / 纯纹理」）：**运行期性能旋钮**，只是共享 uniform 的初值。
+    // 两种模式加载路径完全一致（同一批注入材质 + 同一张 atlas）⇒ 这里早设只是让首帧就是所选模式。
     setLightingModeInShader(config.lighting?.mode ?? 'baked');
     // 曝光（显示侧亮度）：默认 1.0 = 忠于 BSP 烘焙数据；config 值来自面板持久化。
     setExposure(config.lighting?.exposure ?? 1);
@@ -297,8 +290,6 @@ export class RendererMain {
   /** 加载 Worker 传来的场景（GLB + spawn + pvs）。 */
   async loadScene(data: SceneDataMessage): Promise<void> {
     if (!this.scene || !this.camera) return;
-    // 记住输入：光照模式切换（预烘焙 ⇄ 纯纹理）按新模式重建场景时复用同一份 GLB。
-    this.lastSceneData = data;
     this.disposeScene();
 
     // 1. GLB → Scene
@@ -1209,10 +1200,10 @@ export class RendererMain {
    */
   private async applyLightmap(scene: THREE.Scene, gltf: GLTF): Promise<void> {
     try {
-      // 纯纹理模式：**不解码 atlas**（少一张 4096×2048 纹理 = 面板小字里说的「纹理少、进图快」），
-      // 所有图元按 fullbright 贴图原色收敛。
-      const atlas = isTextureOnlyMode() ? null : await loadLightmapAtlas(gltf.parser, gltf);
-      if (!atlas && !isTextureOnlyMode()) {
+      // ⚠️ atlas **两种模式都加载**（2026-09-21）：模式只是片元里的共享 uniform 分支
+      // （`vbspBakedMix`），所以纯纹理模式下 atlas 也必须在场——否则面板切回预烘焙又要重建场景。
+      const atlas = await loadLightmapAtlas(gltf.parser, gltf);
+      if (!atlas) {
         console.info('[lightmap] GLB 未携带 atlas（asset.extras.lightmap 缺失），跳过静态光照');
         return;
       }
@@ -1227,7 +1218,7 @@ export class RendererMain {
       console.info(
         `[lightmap] 光照模式=${getLightingMode()}，atlas ${image?.width ?? 0}×${image?.height ?? 0}，施加 mesh=${applied}`,
       );
-      if (applied === 0 && !isTextureOnlyMode()) {
+      if (applied === 0) {
         console.warn('[lightmap] atlas 存在但未施加到任何 mesh（无 TEXCOORD_1 或 hasLightmap 全为 false）');
       }
       // 首帧后统一统计（幂等；由 tick 调用）
@@ -1238,24 +1229,20 @@ export class RendererMain {
   }
 
   /**
-   * 切换光照模式（面板「预烘焙 / 纯纹理」）：**按新模式重建场景**（与重新加载地图同一条链路）。
+   * 切换光照模式（面板「预烘焙 / 纯纹理」）——**运行期性能旋钮**：只改共享 uniform，立即生效。
    *
-   * 为什么必须重建而不是就地换材质：材质施加必须在 `optimizeScene` 分块合并**之前**完成
-   * （合并会丢掉逐 primitive 的 `userData.hasLightmap` / 材质实例映射），就地改无法正确切回
-   * 预烘焙。重建代价 = 一次场景重挂（数秒），这也正是面板小字提示「预烘焙更吃加载时间」的由来。
+   * 2026-09-21 改定：旧实现是「按新模式重建场景」（`loadScene(lastSceneData)`）——那会把面板切换变成
+   * 一次 1.4~2.5 s 的冻结，并且重建期间输入/物理被一起打断（用户症状：热切换后转不动视角、也走不动）。
+   * 现在的机制在 `lightmap-shader.setLightingMode`：全场景材质共享一个 `vbspBakedMix` uniform，
+   * 三条烘焙路径（world lightmap / 逐顶点 vhv / ambient cube）都按它分支 ⇒
+   * **零重编译、零重建、零输入中断**，也不改变分块/材质分组（两种模式 draw 数完全一致）。
    *
-   * @param mode `baked` = 预烘焙（atlas + vhv/ambient cube）；`texture` = 纯纹理（只上漫反射贴图）。
+   * @param mode `baked` = 预烘焙（吃 atlas + vhv/ambient cube）；`texture` = 纯纹理（只上漫反射贴图）。
    */
-  async setLightingMode(mode: LightingMode): Promise<void> {
+  setLightingMode(mode: LightingMode): void {
     if (getLightingMode() === mode) return;
     setLightingModeInShader(mode);
-    const data = this.lastSceneData;
-    if (!data) {
-      console.info(`[lighting] 光照模式 → ${mode}（地图尚未加载，将在加载时生效）`);
-      return;
-    }
-    console.info(`[lighting] 光照模式 → ${mode}：按新模式重建场景…`);
-    await this.loadScene(data);
+    console.info(`[lighting] 光照模式 → ${mode}（运行期 uniform 切换，未重建场景）`);
   }
 
   /** 当前光照模式（面板回填/诊断用）。 */
