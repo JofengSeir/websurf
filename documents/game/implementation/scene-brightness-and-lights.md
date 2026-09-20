@@ -21,11 +21,11 @@
 
 三道闸门，逐道都是硬性的：
 
-1. **legacy 三点光已关**（`test/game-core/src/renderer/renderer-main.ts:256-268`）：`LEGACY_THREE_POINT_LIGHTS = false`，`AmbientLight` / `HemisphereLight` / `DirectionalLight` 根本没加进场景。
-2. **GLB 带的两千盏灯被中和**（同文件 `:297-319`）：GLB 已携带全部 `light` / `light_spot` / `light_environment`（surf_666 = 2118 盏、surf_null = 3067 盏，含 color / intensity / direction / range，见 `test/game-core/crates/wasm-core/model_integrator/mod.rs:578-634`），但渲染端统一 `visible = false`。
+1. **legacy 三点光已关**（`test/game-core/src/renderer/renderer-main.ts:271-278`）：`LEGACY_THREE_POINT_LIGHTS = false`，`AmbientLight` / `HemisphereLight` / `DirectionalLight` 根本没加进场景。
+2. **GLB 带的两千盏灯被中和**（同文件 `:300-324`，§1.1）：GLB 已携带全部 `light` / `light_spot` / `light_environment`（surf_666 = 2118 盏、surf_null = 3067 盏，含 color / intensity / direction / range，见 `test/game-core/crates/wasm-core/model_integrator/mod.rs:578-634`），渲染端**在挂进 `this.scene` 之前**把它们 `removeFromParent()` 从场景树摘除（**不是**只置 `visible = false`，也**不能**等挂载之后再中和 —— 两个坑的真实出帧证据见 [prop-black-materials-root-cause.md](prop-black-materials-root-cause.md) §8.4）。
 3. **决定性的一条：所有 mesh 都是 `MeshBasicMaterial`**。
-   `applyLightmapToMeshes`（`test/game-core/src/renderer/lightmap-shader.ts:293`，契约同文件 `:19`）对场景里**每一个** mesh 做二选一：
-   **只有** `geometry.userData.hasLightmap === true`（真实 luxel）才换成 Basic + 注入解码；`hasLightmap === false`（中性占位 UV，契约 §9.6.1）与无 lightmap UV 的两类**一律**换成 Basic(fullbright) 贴图原色（`routeFullbright`，`:339`）。
+   `applyLightmapToMeshes`（`test/game-core/src/renderer/lightmap-shader.ts:346`，契约同文件 `:18-20`）对场景里**每一个** mesh 做二选一：
+   **只有** `geometry.userData.hasLightmap === true`（真实 luxel）才换成 Basic + 注入解码；`hasLightmap === false`（中性占位 UV，契约 §9.6.1）与无 lightmap UV 的两类**一律**换成 Basic(fullbright) 贴图原色（`routeFullbright`，`:392`）。
    ⚠️ `hasLightmap === false` 的判定**必须在检测 uv1/uv2 之前**：导出侧（`crates/wasm-core/bsp_to_gltf_core/convert.rs:1004-1014`）对这类面**照样写 `TEXCOORD_1`**（值恒为中性常量 `(0,0)`，为保住几何合并的属性集一致）⇒ 若先判 uv1 就会把它们送进 lightmap 路径、全部采到图集原点那一个像素（2026-09-20 实测该像素 = `0,0,0` 纯黑 ⇒ 整片水面等 440 个图元发黑，见 [prop-black-materials-root-cause.md](prop-black-materials-root-cause.md)）。
    `MeshBasicMaterial` **不参与光照计算**（无 `NUM_POINT_LIGHTS`、无 `lights_fragment_begin`）⇒ 即使把那两千盏灯全部打开并恢复三点光，**画面零变化**。
 
@@ -55,7 +55,7 @@ P1 之前 prop 走 fullbright（`× vec3(1.0)`）⇒ 偏亮；P1 之后 prop 真
 ### 4.1 先排除一个误判：不是又算错了一次 gamma
 
 - 出帧均值 20~26/255 与「中灰 albedo × lightmap p50」的理论值（29~35/255）同量级 ⇒ 画面暗是**数据本身**的量级，不是多除了一次 π 或多做了一次 gamma。
-- `RECIPROCAL_PI` 不存在于本项目路径：注入把 three 的内联块整体替换掉了（`lightmap-shader.ts:72-76`，replacement 里没有 `RECIPROCAL_PI`）。
+- `RECIPROCAL_PI` 不存在于本项目路径：注入把 three 的内联块整体替换掉了（`lightmap-shader.ts:136-138`，replacement 里没有 `RECIPROCAL_PI`）。
 - ⚠️ 但有一处**残留旧口径**：`test/game-core/scripts/lightmap-decode-selftest.mjs:27-31` 的 `applyLightmapToColor` 仍在 `pow(decoded, 1/2.2)`（外部参照实现 sRGB 直出口径）。它**只存在于自测脚本**（渲染侧已在 gamma-parity 轮矫正、文件头有说明），不影响画面，但会误导后来的读者——建议下一轮清理。
 
 ### 4.2 曝光旋钮（S1 已落地）⚠️ 2026-09-19 复议：校准结论作废
@@ -213,7 +213,7 @@ P1 之前 prop 走 fullbright（`× vec3(1.0)`）⇒ 偏亮；P1 之后 prop 真
 
 ### S6（可选，低成本）天空背景
 
-用 GLB 里 `light_environment` 的颜色替换死灰背景 `new THREE.Color(0x222222)`（`src/renderer/renderer-main.ts:271`），让天空区域不再是纯灰，也顺便给画面一个色调基准。注意：只改 `scene.background`，**不要**顺手打开那两千盏 punctual 灯（§2 已论证：开了也是零效果，且污染 uniform 上限）。
+用 GLB 里 `light_environment` 的颜色替换死灰背景 `new THREE.Color(0x222222)`（`src/renderer/renderer-main.ts:281`），让天空区域不再是纯灰，也顺便给画面一个色调基准。注意：只改 `scene.background`，**不要**顺手打开那两千盏 punctual 灯（§2 已论证：开了也是零效果，且污染 uniform 上限）。
 
 > 回归底线不变：`test:phys` 五指纹（gravity -12.50/tick、landing tick 31、jump 289.49、crouch 46.04、teleport tick 24）与 `test:lightmap-gltf` 82 断言。
 > 顺序不可换的理由：先定曝光（世界亮度基线）→ 再定 P3（prop 与世界的关系）→ 最后修兜底与清理。反过来做会把两套判据搅在一起（曝光未定时「prop/world 比」虽然不变，但人眼判读会被整体亮度牵着走）。
@@ -233,7 +233,7 @@ P1 之前 prop 走 fullbright（`× vec3(1.0)`）⇒ 偏亮；P1 之后 prop 真
 | 关（现状） | **19.424** | 17 / 34 / 231 | 570900 \| 216388 \| 241 \| 114 \| 142 \| 343 \| 594 \| 46 |
 | 开（Ambient 0.6 + Hemi 0.4 + Dir 0.5） | **19.425** | 17 / 34 / 231 | 570898 \| 216384 \| 245 \| 112 \| 148 \| 341 \| 594 \| 46 |
 
-⇒ **零效果**（差值 0.001，来自物理漂移；直方图逐桶一致）。三层原因见 §2（材质全 `MeshBasicMaterial` / world 几何无 NORMAL / GLB punctual 灯 `visible=false`）。
+⇒ **零效果**（差值 0.001，来自物理漂移；直方图逐桶一致）。三层原因见 §2（材质全 `MeshBasicMaterial` / world 几何无 NORMAL / GLB punctual 灯已从场景树摘除）。
 ⇒ 结论修正：不是「忘了接灯」，而是「接了也接不上」。想让运行时灯真正生效，前置条件是 **给 world 几何补法线**（§5），那是一个独立大工程，不在本轮。
 
 ### 7.2 方向二：材质层 —— 「49% 无贴图」是我的测量假象，真实缺口 8%

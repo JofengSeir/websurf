@@ -2,14 +2,20 @@
 
 > 状态：**已修复并验证（构建级 + 断言级 + 数值级 + 真实浏览器运行期级）**。
 > 缺陷现象：用户第 15 轮原话「**亮面依旧还是黑的**」；第 18 轮追加线索「**默认传送底下那块地方，
-> 疑似模型或者水体相关的，还是黑的**」。本文件记录两轮根因的完整判据链。
+> 疑似模型或者水体相关的，还是黑的**」；第 23 轮「**模型还是看不见，完全看不到，完全透明的，
+> 但是有碰撞**」。本文件记录**三轮**根因的完整判据链。
+>
+> ⚠️ **先看 [§8](#8-第三轮根因最终2026-09-20注入单元漏声明-uniform--fragment-编译失败--模型整批不渲染)** ——
+> 那才是「模型完全透明」的根因（GLSL 编译失败 ⇒ 整批 mesh 一个像素都不画），
+> 前两轮（§0 零灯 Standard 材质恒黑、§1 中性占位 UV 采到图集原点）是**发黑**，
+> 本轮是**不渲染**，症状与判据都不同。
 
-## 0. 第二轮根因（2026-09-20 追加，先看这条）
+## 0. 第二轮根因（2026-09-20 追加）
 
 **`MeshStandardMaterial` + 零灯 ⇒ 恒渲染纯黑。**
 
 - 本工程**刻意不加任何灯**：三点光 `LEGACY_THREE_POINT_LIGHTS = false`，GLB 携带的 2000+ 盏
-  punctual 灯全部 `visible = false`（`renderer-main.ts` §1.3，理由见
+  punctual 灯全部从场景树摘除（`renderer-main.ts` §1.1，理由见
   [scene-brightness-and-lights.md](scene-brightness-and-lights.md) §2）。
 - 而 GLTFLoader 对**没有 `KHR_materials_unlit` 的 PBR 材质**一律给 `MeshStandardMaterial`；
   这类材质在零灯/无环境贴图下只剩 `emissive`，GLB 里是 `[0,0,0]` ⇒ **黑**。
@@ -34,7 +40,8 @@
 1. `python scripts/serve.py 8191 .` 起 dev 静态服务（`web/` 面，含 `#bspFile` 文件选择器）；
 2. 无头 Edge：`msedge.exe --headless=new --remote-debugging-port=9500 --user-data-dir=<temp>`
    （**本沙箱需更宽权限**：受限模式下 Chromium 报 `FATAL: mojo platform_channel.cc:183 拒绝访问`）；
-3. `node temp/real-shot.mjs --port 9500 --url http://127.0.0.1:8191/web/index.html \
+3. **一次性临时驱动**（`temp/` 下，不入库；等价在库工具 `npm run test:lightmap-frame` 在本沙箱对 CDP 无响应）：
+   `node temp/real-shot.mjs --port 9500 --url http://127.0.0.1:8191/web/index.html \
    --map ../maps/surf_666.bsp --evalfile temp/eval-mat-names.js --out temp/shots/x.png`
    —— 走真实用户链路（`DOM.setFileInputFiles` 塞 `.bsp`）→ 等 `__vbspFrameProbe.ready` → 截图 + 运行期清单。
 
@@ -123,7 +130,7 @@ npm run dev             # 或直接开 dist/index.html
 预期：水面（`dev/dev_water2`）与 `dev_nyro/blends/wire_white` 等恢复为**贴图原色（fullbright）**；
 控制台可见 `[lightmap] fullbright（…）mesh=N；其中 hasLightmap=false（中性占位 UV，必须跳过 lightmap 注入）=440`。
 
-## 7. 本轮附带记录（沙箱边界，供后续自动化参考）
+## 7. 沙箱边界（供后续自动化参考）
 
 - `npm run build:dist` 在本沙箱内**必失败**：其打包走 esbuild **JS API** + `write:false`
   （`scripts/lib/dist-pack.mjs` 的 `bundleIife` 读 `outputFiles[0].text`，即捕获子进程管道 stdio），
@@ -133,3 +140,101 @@ npm run dev             # 或直接开 dist/index.html
   其余步骤原样复用 `scripts/lib/dist-pack.mjs` 的官方 helper，顺序同 `build-dist.mjs` 的 `main()`。
   **未修改任何被追踪的构建脚本**。
 - Node 侧边界：脚本内再 `execFileSync` spawn 孙进程会 EPERM；由 PowerShell 直接调用则正常。
+- 等价的 TS 重出（`npm run build:ts` 的产物部分）在沙箱内可直接跑：
+  `node_modules/@esbuild/win32-x64/esbuild.exe src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022`
+  （`npm run build:app` 因 npm→node→esbuild 三级 spawn 会 EPERM；typecheck 单独可跑）。
+
+## 8. 第三轮根因（最终，2026-09-20）：注入单元漏声明 uniform ⇒ fragment 编译失败 ⇒ 模型整批不渲染
+
+> 症状（用户原话）：「**模型还是看不见，完全看不到，完全透明的，但是有碰撞**」。
+>
+> 结论：**不是亮度、不是贴图、不是合并丢几何** —— 是 **GLSL 编译失败**：
+> 该批 mesh 的 program 无效 ⇒ three 照样每帧发 draw call，但 `drawArrays` 被 GL 全部拒绝
+> ⇒ **一个像素都不画**（画面里透出的是 clear color）。几何与碰撞由 Rust 侧独立生成
+> ⇒ 正好是「看不见，但碰撞正常」。
+
+### 8.1 铁证（`renderer.info.programs[].diagnostics` + 真实出帧，非推断）
+
+```
+"fragLog": "ERROR: 0:90: 'vbspLightFloor' : undeclared identifier"
+"progLog": "Fragment shader is not compiled."
+```
+
+同一帧的旁证（无头 Edge + CDP 走真实加载链路，surf_666）：
+
+| 观测 | 修前 | 修后 |
+|---|---|---|
+| program 总数 / 失败数 | 14 / **8** | 14 / **0** |
+| `WebGL: INVALID_OPERATION: drawArrays: no valid shader program in use` | **数百条** | **0** |
+| `FRAGMENT shader uniforms count exceeds MAX_FRAGMENT_UNIFORM_VECTORS(1024)` | 4 条 | 0 |
+| 控制台总条数（同一条加载链路） | 585 | 320 |
+| 屏幕拾取命中材质 program 状态（画面中心下方的黑区） | **FAILED** | `ok` |
+| `[ambient-cube]` 注入统计 | 全部编译失败 | **applied=1046 失败=0** |
+
+⇒ 那块「黑」不是"画黑了"，是**根本没画**。
+
+### 8.2 为什么会漏（结构原因）
+
+`src/renderer/lightmap-shader.ts` 的 GLSL 注入是**两条互相独立的路径**，各自拼自己的片段：
+
+| 路径 | 入口 | 修前的声明来源 | 是否用到 `vbspLightFloor` |
+|---|---|---|---|
+| world lightmap | `injectLightmapShader` | 前置声明串（**已加**） | 是（`vbsp_ApplyLightmap`） |
+| ambient cube / fullbright | `applyAmbientCubeIfAny` 的 `ambFn` | 手写 3 条声明（**漏加**） | 是（`vbspAmbientWeight`） |
+
+`vbspLightFloor` 是本轮为「暗部纯黑」新增的 uniform，只加进了 world 路径。
+命中面 = **全部带 `ambientCube` 的 prop（模型本体）+ 走 fullbright 的水面/远地面**
+（实测 1046 个 mesh 材质），正是用户说的「模型 + 水体」。
+
+### 8.3 修法：单一事实来源 + 回归断言（不是"再补一行"）
+
+1. `lightmap-shader.ts` 新增两个导出常量 `VBSP_LIGHTMAP_UNIFORM_DECLS` /
+   `VBSP_AMBIENT_UNIFORM_DECLS`；两条路径**都从同一常量取声明**
+   （`ambFn` 用 `...VBSP_LIGHTMAP_UNIFORM_DECLS` 展开）⇒ 结构上消除"新增 uniform 漏改一条路径"。
+2. `scripts/lightmap-inject-guard-selftest.mjs` 新增 §10（5 条断言），核心一条：
+   **每个注入单元自己用到的 `vbsp*` 标识符，必须能在同一单元里找到声明**
+   （附反面对照：删掉声明后该断言**必须**报出来 ⇒ 证明不是恒真断言）。
+   该断言在修前为**红**，修后 **38/38 绿**。
+
+### 8.4 附带修正：punctual 光源中和的**时机**与**手段**
+
+`renderer-main.ts` 原先把中和写在 `applyLightmap` **之后**（且只置 `visible = false`、循环体里
+漏了 `push` ⇒ 后面的 `removeFromParent()` 是空转）。真实出帧显示这条路有两个坑：
+
+- **时机**：rAF 渲染循环在 `loadScene` 之前已启动，`this.scene.add(scene)` 之后、中和之前
+  的那一帧会带着 **2118 盏灯**去编译世界面的 `MeshStandardMaterial` ⇒ 直接撞 1024 uniform 上限
+  （实测 +149.29s 一波 `uniforms count exceeds` + 数百条 `no valid shader program`）。
+  故中和**必须移到 `this.scene.add(scene)` 之前**（现为 §1.1）。
+- **手段**：改 `removeFromParent()` 真正摘掉。只置 `visible=false` 虽也能让 three 跳过灯光收集
+  （`three.module.js:29584`：`if ( object.visible === false ) return;`），但 2000+ 节点仍留在
+  场景树里被反复 traverse，且任何一处未来置回 `true` 就会立刻炸掉全部受光材质的 program。
+
+### 8.5 验证（真实浏览器运行期，索引感知计数）
+
+工具：无头 Edge + CDP 的**一次性临时驱动**（`temp/` 下，不入库；等价在库工具是
+`npm run test:lightmap-frame`，本沙箱内它对 CDP 无响应，故改用临时驱动）+
+运行期清单 eval（同样临时）。
+
+| 判据 | 实测 |
+|---|---|
+| program 失败数 | **0**（14 个 program 全部 `runnable`） |
+| prop mesh（带 ambient cube 注入） | 1046 个，`progOk=1046 / progBad=0`；当前帧视锥内 300、可见 156、实测绘制 10324 三角形 |
+| 灯 | 场景内 `isLight` 节点 **0** |
+| **几何守恒** | 场景三角形实例总数 **148048 == GLB 逐节点实例展开总数 148048（delta 0）**；prop 40431 + world 107617 |
+| 非 Basic 材质残留 | 0（`fullbrightUnlitLitMaterials` 终扫生效） |
+
+> ⚠️ **计数口径**：三角形数必须走 `index.count/3`。GLB 几何是**索引化**的，用
+> `position.count/3` 会把顶点数当三角形数、虚高约 14%（168714 vs 148048）——本批量测
+> 先踩过这个坑，一度误以为合并丢了 2 万个三角形。
+
+### 8.6 用户复看
+
+```bash
+cd test/game-core
+build-dist.cmd      # 内含 build:ts（重出 web/app.js + dist/）；wasm 未改动，存在即跳过
+start-dev.cmd       # 服务 web/，浏览器开 http://localhost:8190/web/index.html
+```
+
+预期：控制台**没有** `Shader Error` / `no valid shader program`；
+有 `[ambient-cube] 命中=… 未命中=… 节点=…` + `[ambient-cube] applied=… 失败=0`；
+模型与水面恢复渲染（亮度语义仍受曝露/γ/模型亮度三个旋钮控制）。
