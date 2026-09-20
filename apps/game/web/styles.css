@@ -121,6 +121,34 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 }
 #stats .vsep { color: rgba(255, 255, 255, 0.35); margin: 0 8px; font-weight: 400; }
 
+/* ── 左下角按键簇（对照 viewer #timeline 右列的 .tm-keys，2026-09-21 新增）──
+   3 列网格：Q/W/E 上排 · A/S/D 中排 · 下排 = 蹲（1 格）+ 跳（2 格）。
+   标签由 app.ts 按当前键位写入（与面板「按键」模块一一对应）；键位被删光 =
+   该动作已禁用，显示 "—" 并降透明度。 */
+#keys {
+  position: absolute; left: 24px; bottom: 24px;
+  z-index: 4; pointer-events: none; user-select: none;
+  display: grid; grid-template-columns: repeat(3, 22px); grid-auto-rows: 22px; gap: 3px;
+}
+#keys .tm-key {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 400; color: var(--muted);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-strong);
+  border-radius: 4px; text-shadow: none;
+}
+#keys .tm-key.on {
+  color: #0f1115; background: var(--accent); border-color: var(--accent); font-weight: 600;
+}
+#keys .tm-key.off { opacity: 0.5; }
+#keys .tm-key-q { grid-area: 1 / 1; }
+#keys .tm-key-w { grid-area: 1 / 2; }
+#keys .tm-key-e { grid-area: 1 / 3; }
+#keys .tm-key-a { grid-area: 2 / 1; }
+#keys .tm-key-s { grid-area: 2 / 2; }
+#keys .tm-key-d { grid-area: 2 / 3; }
+#keys .tm-key-duck { grid-area: 3 / 1; }
+#keys .tm-key-jump { grid-area: 3 / 2 / 4 / 4; }
+
 /* ── 准星（--ch-* 运行时可调体系：panel-controller.ts 写入，语义勿动）── */
 #crosshair {
   position: absolute; left: 50%; top: 50%;
