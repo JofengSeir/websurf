@@ -369,3 +369,66 @@ impl From<StaticPropLumpV11> for StaticPropLump {
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Leaf Ambient Light（prop 静态光照数据源）
+//
+// 对齐外部参照实现：`ValveBsp/Structures.cs` 的 LeafAmbientLighting / LeafAmbientIndex，
+// 渲染语义见 `Resources/src/StudioModel.ts`（法线平方加权）与 `BspModel.ts:141-165`
+// （leaf 内多采样点取最近，未做插值）。查询 API 见 vbsp::Bsp::prop_ambient_cube。
+// ═══════════════════════════════════════════════════════════════════
+
+/// ColorRGBExp32（外部参照实现 `ColorRGBExp32`）：3 字节 mantissa + 1 字节指数。
+/// 有符号指数按 u8 位型存储（Source 语义为 sbyte）。
+#[derive(Debug, Clone, Copy, BinRead)]
+pub struct ColorRgbExp32 {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub exponent: u8,
+}
+
+impl ColorRgbExp32 {
+    /// lightmap 口径：mantissa/255 × 2^exp（与 lightmap shader 的 RGBExp32 解码同口径）。
+    /// **仅供 lightmap 数据**，leaf ambient cube 走 [`Self::decode_linear_ambient`]，不可混用。
+    pub fn decode_linear(&self) -> [f32; 3] {
+        let scale = 2.0f32.powf(self.exponent as i8 as f32) / 255.0;
+        [
+            self.r as f32 * scale,
+            self.g as f32 * scale,
+            self.b as f32 * scale,
+        ]
+    }
+
+    /// leaf ambient cube 口径：mantissa × 2^exp（**不除 255**）。
+    /// 依据：同图实测（surf_666 各抽 4 万条）ambient 解码值比 lightmap 暗 873~1362×，
+    /// 去掉 /255 后为 3.4~5.3×，与「ambient 只含间接光」的物理预期一致；
+    /// 外部参照实现 `Utils.ts:38-44` 同为「不除 255」（`r * exponentTable[exp]`）。
+    pub fn decode_linear_ambient(&self) -> [f32; 3] {
+        let scale = 2.0f32.powf(self.exponent as i8 as f32);
+        [
+            self.r as f32 * scale,
+            self.g as f32 * scale,
+            self.b as f32 * scale,
+        ]
+    }
+}
+
+/// `LUMP_LEAF_AMBIENT_LIGHTING(_HDR)` 采样记录：6 面 RGBExp32 cube
+/// + leaf 内相对位置（x,y,z ∈ [0,255]，按 leaf bounds 线性映射回世界空间）。
+#[derive(Debug, Clone, BinRead)]
+pub struct LeafAmbientSample {
+    /// 6 面 cube，face 序 [+X, -X, +Y, -Y, +Z, -Z]（与外部参照实现 sampleAmbientCube 一致）。
+    pub cube: [ColorRgbExp32; 6],
+    pub x: u8,
+    pub y: u8,
+    pub z: u8,
+    pub _padding: u8,
+}
+
+/// `LUMP_LEAF_AMBIENT_INDEX(_HDR)`：每 leaf 的采样区间。
+#[derive(Debug, Clone, BinRead)]
+pub struct LeafAmbientIndex {
+    pub ambient_sample_count: u16,
+    pub first_ambient_sample: u16,
+}

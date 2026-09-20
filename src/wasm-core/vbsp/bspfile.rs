@@ -52,6 +52,16 @@ impl<'a> BspFile<'a> {
         Ok(LumpReader::new(data, lump, lump_entry.version))
     }
 
+    /// 只读暴露 lump 目录项：`length` 是**盘上长度**，`ident` 非 0 时是 **LZMA 封装下的解压后长度**
+    /// （即 `get_lump` 的判据，见本文件 `:62-68`）。
+    ///
+    /// 用途：把「光照 lump 选了 LDR 还是 HDR」变成可观测证据——本地语料无法判别该规则
+    /// （surf_666 仅 LDR、ze_cursed 仅 HDR、surf_null 两条 lump 同 offset 同长度即同一份数据），
+    /// 故导出契约里要落两份目录项 + 选中项，供 t4 做替代断言。
+    pub fn lump_entry(&self, lump: LumpType) -> LumpEntry {
+        self.directories[lump]
+    }
+
     pub fn get_lump(&self, lump: LumpType) -> BspResult<Cow<'_, [u8]>> {
         let lump = &self.directories[lump];
         let raw_data = self

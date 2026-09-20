@@ -101,7 +101,17 @@ if (isolated) {
     ? new Worker(URL.createObjectURL(new Blob([embeddedWorkerJs], { type: 'text/javascript' })))
     : new Worker('./worker.js', { type: 'module' });
   fixWorker.onerror = (e) => setError(`Worker error: ${e.message}`);
-  fixWorker.onmessage = (e: MessageEvent<{ type?: string }>) => {
+  fixWorker.onmessage = (e: MessageEvent<{ type?: string; ms?: number }>) => {
+    // 诊断（2026-09-20，零行为改动）：Worker 侧"world-json 解析 + build_world"耗时。
+    // 与下面的 postMessage 耗时 + `[authority] 首个权威帧` 一起，把权威迟迟不活
+    // 拆成「结构化克隆传输」「Worker 内构建」「首帧调度」三段。
+    if (e.data?.type === 'world-build-ms') {
+      console.info(`[authority] Worker 内 world-json 处理（解析+build_world）= ${e.data.ms}ms`);
+    }
+    if (e.data?.type === 'world-parse-ms') {
+      const p = e.data as { brush?: number; tri?: number };
+      console.info(`[authority] JSON 解析（JS 代理）：brush=${p.brush}ms tri=${p.tri}ms`);
+    }
     const msg = e.data;
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'health-log') {
@@ -141,6 +151,9 @@ if (isolated) {
   };
   renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
   renderer.start();
+  // 出帧探针（自动化验证仪器；见 RendererMain.installFrameProbe 注释）。
+  // 只往 globalThis 挂一个对象，不改变任何渲染/物理行为。
+  renderer.installFrameProbe();
   // 主线程 wasm 初始化（BspProcessor + PhysWorld 同模块；dist 内嵌 base64）。
   // 保存 promise：handleLoadBsp 的 decompress_mtz 依赖 wasm 就绪（await 防竞态）。
   mainWasmReady = renderer.initPrediction('./websurf_wasm_bg.wasm', embeddedWasm).catch((err) => {
@@ -161,6 +174,13 @@ if (isolated) {
     (active) => renderer?.setPredictionNoclip(active),
     (quality) => void renderer?.applyTextureQuality(quality),
     (fov) => renderer?.setFov(fov),
+    (dist) => renderer?.setRenderDistance(dist),
+    (exposure) => renderer?.setExposure(exposure),
+    (gamma) => renderer?.setLightGamma(gamma),
+    (scale) => renderer?.setAmbientScale(scale),
+    // 光照模式（预烘焙 / 纯纹理）：渲染端按新模式重建场景（材质必须在分块合并前施加）。
+    // 面板偏好加载阶段也会回调一次 ⇒ **在加载地图之前**就把模式定下来（纯纹理模式跳过 atlas 解码）。
+    (mode) => void renderer?.setLightingMode(mode),
     // 存点列表：删除（无确认）→ 存储更新 + 回刷列表
     (i) => {
       const list = savePointStore.delete(i);
@@ -439,6 +459,21 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       spawn: bundle.spawn,
     });
     // Worker 权威物理世界（地图碰撞；独立固定步长权威帧计算）
+    //
+    // ⚠️ **顺序已回退为"主线程世界建完再发"**（2026-09-20 实测）：
+    // 曾尝试把本消息提前到 `buildPredictionWorld` 之前，让两端构建并行 —— 实测**更差**：
+    // Worker 内构建 3147ms → 3454ms、首个权威帧 22.19s → 22.57s（主线程与 Worker
+    // 抢 CPU/内存带宽）。瓶颈是 Worker 侧"JSON 解析 + build_world"本身（39k 面 ≈ 3s），
+    // 只能靠优化构建/换二进制载荷解决，**不是靠调整发送顺序**。
+    console.info(`[authority] world-json 已发送 @${performance.now().toFixed(0)}ms`);
+    // 诊断：载荷体积（决定 Worker 内耗时是"解析"还是"建结构"主导）
+    console.info(
+      `[authority] world-json 载荷：brush=${(bundle.brushJson.length / 1048576).toFixed(2)}MB ` +
+        `tri=${(bundle.triJson.length / 1048576).toFixed(2)}MB ` +
+        `teleport=${(bundle.teleportJson.length / 1024).toFixed(1)}KB（合计 ` +
+        `${((bundle.brushJson.length + bundle.triJson.length + bundle.teleportJson.length) / 1048576).toFixed(2)}MB）`,
+    );
+    const postT0 = performance.now();
     fixWorker?.postMessage({
       type: 'world-json',
       brushJson: bundle.brushJson,
@@ -446,6 +481,8 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       teleportJson: bundle.teleportJson,
       spawn: bundle.spawn,
     });
+    // 诊断：postMessage 内联做结构化克隆（三个大 JSON 字符串），耗时含在主线程阻塞里
+    console.info(`[authority] postMessage(world-json) 结构化克隆耗时 = ${(performance.now() - postT0).toFixed(1)}ms`);
     // 出生点列表（spawn 下拉切换用）：主线程渲染物理 + Worker 权威物理**双端**
     // 都要设置——否则权威侧 teleport_to_spawn 索引为空静默忽略，权威帧
     // >200 兜底会把传送点拉回（"一瞬间传送过去又被拉回"根因）

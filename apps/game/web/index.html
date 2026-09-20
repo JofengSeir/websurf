@@ -15,6 +15,12 @@
     （左导航 + 右设置体）。
   -->
   <link rel="stylesheet" href="./styles.css" />
+  <!-- ② favicon：显式声明，避免浏览器对 origin 根隐式请求 /favicon.ico 落空。
+       dev 服务器根 = apps/game/（package.json 的 `serve.py 8090 .`），页面在 /web/index.html，
+       故 origin 根的 /favicon.ico 也各放一份（apps/game/favicon.ico）——两条路径都不 404。
+       本行只新增声明，DOM 结构 / ID / 类名 / data-* 不变（见上方自述约定）。 -->
+  <link rel="icon" href="./favicon.ico" type="image/x-icon" />
+  <link rel="alternate icon" href="/favicon.ico" type="image/x-icon" />
 </head>
 <body>
 <div id="app">
@@ -201,6 +207,18 @@
           <div class="row"><label>视野 FOV</label>
             <input type="range" id="fov" min="60" max="110" step="0.1" value="73.6" />
             <div class="val"><input id="fovNum" type="number" min="60" max="110" value="73.6" /></div></div>
+          <div class="row"><label>亮度（曝光）</label>
+            <input type="range" id="exposure" min="0.1" max="8" step="0.01" value="2.3" />
+            <div class="val"><input id="exposureNum" type="number" min="0.1" max="8" step="0.01" value="2.3" /></div></div>
+          <div class="row"><label>暗部提升（γ）</label>
+            <input type="range" id="lightGamma" min="0.50" max="6.00" step="0.01" value="2.2" />
+            <div class="val"><input id="lightGammaNum" type="number" min="0.50" max="6.00" step="0.01" value="2.2" /></div></div>
+          <div class="row"><label>模型光照</label>
+            <input type="range" id="ambientScale" min="0" max="3" step="0.01" value="1" />
+            <div class="val"><input id="ambientScaleNum" type="number" min="0" max="3" step="0.01" value="1" /></div></div>
+          <div class="row"><label title="0 = 自动（按地图包围盒对角线的一半）；单位 ≈ 1 英寸。超出的空间块不渲染（省 draw call）">渲染距离</label>
+            <input type="range" id="renderDistance" min="0" max="60000" step="500" value="0" />
+            <div class="val"><input id="renderDistanceNum" type="number" min="0" max="60000" step="500" value="0" /></div></div>
           <h4>速度面板</h4>
           <div class="row"><label>模式</label>
             <select id="speedMode">
@@ -214,6 +232,13 @@
               <option value="original" selected>原始纹理</option>
               <option value="mini">压缩低清</option>
             </select></div>
+          <h4>光照模式</h4>
+          <div class="row"><label title="预烘焙 = lightmap atlas + 逐顶点/ambient cube 烘焙光照；纯纹理 = 只上漫反射贴图">模式</label>
+            <select id="lightingMode">
+              <option value="baked" selected>预烘焙</option>
+              <option value="texture">纯纹理</option>
+            </select></div>
+          <p class="hint" id="lightingModeHint">预烘焙：加载光照图集与逐顶点烘焙数据，纹理更多，进图与首帧会卡顿几秒；纯纹理：只加载漫反射贴图，进图最快，但画面没有明暗关系。切换会重建场景（与重新加载地图相当）。</p>
           <h4>近平面（防贴墙透视）</h4>
           <div class="row"><label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到，性能开销略增">探测距离</label>
             <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />

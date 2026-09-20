@@ -61,12 +61,21 @@ pub struct InMemoryResources {
     /// 材质名 → 透明度模式：0=不透明(默认)，1=半透明(Blend)，2=透明测试(Mask)。
     /// 用于 GLB 导出的材质 `alphaMode`，以及碰撞体生成时判断"透明可穿过"。
     pub material_alpha_mode: HashMap<String, u8>,
+    /// 自发光 / 无光照材质名集合：导出时写进 GLB material `extras.unlit = true`，
+    /// 渲染侧据此走**全亮**（不吃 lightmap / ambient cube），对齐 Source 的 UnlitGeneric 语义。
+    pub material_unlit: std::collections::HashSet<String>,
 }
 
 /// 模型整合器
 pub struct ModelIntegrator {
     in_memory: InMemoryResources,
     options: ExportOptions,
+    /// 贴图去重：纹理名 → `gltf.textures` 索引。
+    /// 同一模型可能被推多次（逐实例 vhv 不同 ⇒ 逐组一个 mesh），不去重就会把贴图数据
+    /// 在 GLB 里重复 N 份（实测 surf_666 bin 140 MB → 494 MB）。
+    texture_cache: std::cell::RefCell<HashMap<String, u32>>,
+    /// 材质去重：`材质名|alpha档|unlit` → `gltf.materials` 索引（理由同上）。
+    material_cache: std::cell::RefCell<HashMap<String, u32>>,
 }
 
 impl ModelIntegrator {
@@ -77,6 +86,8 @@ impl ModelIntegrator {
         Self {
             in_memory: resources,
             options,
+            texture_cache: std::cell::RefCell::new(HashMap::new()),
+            material_cache: std::cell::RefCell::new(HashMap::new()),
         }
     }
 
@@ -117,31 +128,56 @@ impl ModelIntegrator {
                 continue;
             }
 
-            // 推送模型几何（同一模型的多个实例共享同一 mesh，只上传一次顶点）
-            let mesh = self.push_model(buffer, gltf, &model, Path::new(&in_mem.name))?;
-            let mesh_index = gltf.meshes.len() as u32;
-            gltf.meshes.push(mesh);
+            // 推送模型几何。**按"逐顶点光照"分组**：同一模型的多个实例各有自己的
+            // `sp_<idx>.vhv`（prop_static 的逐顶点烘焙），必须各自成一个 mesh，
+            // 否则共用网格就只能各自带 cube（第 2 级）—— 那正是"一面一个颜色"的成因。
+            let groups = group_placements_by_vertex_lighting(&placements, model.vertices().len());
 
-            for (i, p) in placements.iter().enumerate() {
-                let node = Node {
-                    camera: None,
-                    children: None,
-                    extensions: Default::default(),
-                    extras: Default::default(),
-                    matrix: None,
-                    mesh: Some(Index::new(mesh_index)),
-                    name: Some(if i == 0 {
-                        model_filename.clone()
-                    } else {
-                        format!("{model_filename}#{i}")
-                    }),
-                    rotation: p.rotation.map(UnitQuaternion),
-                    scale: p.scale,
-                    translation: Some(p.translation),
-                    skin: None,
-                    weights: None,
-                };
-                gltf.nodes.push(node);
+            for (vlight, idxs) in &groups {
+                let mesh = self.push_model(
+                    buffer,
+                    gltf,
+                    &model,
+                    Path::new(&in_mem.name),
+                    vlight.as_deref(),
+                )?;
+                let mesh_index = gltf.meshes.len() as u32;
+                gltf.meshes.push(mesh);
+
+                for (seq, &pi) in idxs.iter().enumerate() {
+                    let p = &placements[pi];
+                    let mut extras = serde_json::Map::new();
+                    if let Some(c) = p.ambient_cube {
+                        extras.insert("ambientCube".into(), serde_json::json!(c));
+                    }
+                    if vlight.is_some() {
+                        // 第 1 级（逐顶点烘焙）已接线 ⇒ 渲染端优先用它，不再叠 cube
+                        extras.insert("vertexLighting".into(), serde_json::json!(true));
+                    }
+                    let node = Node {
+                        camera: None,
+                        children: None,
+                        extensions: Default::default(),
+                        matrix: None,
+                        mesh: Some(Index::new(mesh_index)),
+                        extras: serde_json::value::RawValue::from_string(
+                            serde_json::json!(extras).to_string(),
+                        )
+                        .ok(),
+                        name: Some(if pi == 0 {
+                            model_filename.clone()
+                        } else {
+                            format!("{model_filename}#{pi}")
+                        }),
+                        rotation: p.rotation.map(UnitQuaternion),
+                        scale: p.scale,
+                        translation: Some(p.translation),
+                        skin: None,
+                        weights: None,
+                    };
+                    gltf.nodes.push(node);
+                    let _ = seq;
+                }
             }
         }
 
@@ -185,16 +221,30 @@ impl ModelIntegrator {
     }
 
     /// 推送模型到GLTF
-    fn push_model(&self, buffer: &mut Vec<u8>, gltf: &mut Root, model: &VmdlModel, model_path: &Path) -> Result<json::Mesh, ModelIntegratorError> {
+    fn push_model(
+        &self,
+        buffer: &mut Vec<u8>,
+        gltf: &mut Root,
+        model: &VmdlModel,
+        model_path: &Path,
+        vlight: Option<&[[f32; 3]]>,
+    ) -> Result<json::Mesh, ModelIntegratorError> {
         let accessor_start = gltf.accessors.len() as u32;
-        self.push_vertices(buffer, gltf, model);
+        let vlight_accessor = self.push_vertices(buffer, gltf, model, vlight);
 
         // 获取第一个皮肤表
         let skin_table = model.skin_tables().next().ok_or(ModelIntegratorError::UnsupportedModelFormat("No skin table found".into()))?;
 
         let mut primitives = Vec::new();
         for mesh in model.meshes() {
-            primitives.push(self.push_primitive(buffer, gltf, &mesh, accessor_start, &skin_table)?);
+            primitives.push(self.push_primitive(
+                buffer,
+                gltf,
+                &mesh,
+                accessor_start,
+                &skin_table,
+                vlight_accessor,
+            )?);
         }
 
         Ok(json::Mesh {
@@ -207,7 +257,16 @@ impl ModelIntegrator {
     }
 
     /// 推送顶点到 GLTF
-    fn push_vertices(&self, buffer: &mut Vec<u8>, gltf: &mut Root, model: &VmdlModel) {
+    ///
+    /// `vlight`：逐顶点预烘焙光照（屏幕倍率，长度必须 = 模型顶点数）。给了就额外推
+    /// 一个 `_VBSP_VLIGHT`（VEC3 f32）属性 —— 渲染端据此走第 1 级路径。
+    fn push_vertices(
+        &self,
+        buffer: &mut Vec<u8>,
+        gltf: &mut Root,
+        model: &VmdlModel,
+        vlight: Option<&[[f32; 3]]>,
+    ) -> Option<u32> {
         let start = buffer.len() as u64;
         let view_start = gltf.buffer_views.len() as u32;
         let vertex_count = model.vertices().len() as u64;
@@ -280,10 +339,60 @@ impl ModelIntegrator {
         };
 
         gltf.accessors.extend([positions, uvs, normals]);
+
+        // ── 第 1 级：逐顶点预烘焙光照（`_VBSP_VLIGHT`）─────────────────────────
+        // 独立 buffer view（紧凑 f32×3），**不塞进 interleaved 的 ModelVertex**：
+        //   ① 只有 prop 需要它，world 面不付代价；② 改 ModelVertex 会动到所有导出路径。
+        // 长度必须等于模型顶点数；不等 ⇒ 报错返回 None（调用方回退 cube 路径，不静默错位）。
+        let vlight = vlight.filter(|v| v.len() == vertex_count as usize)?;
+        let vl_start = buffer.len() as u64;
+        for c in vlight {
+            for f in c {
+                buffer.extend_from_slice(&f.to_le_bytes());
+            }
+        }
+        let vl_view = json::buffer::View {
+            buffer: Index::new(0),
+            byte_length: USize64(buffer.len() as u64 - vl_start),
+            byte_offset: Some(USize64(vl_start)),
+            byte_stride: Some(json::buffer::Stride(12)),
+            extensions: Default::default(),
+            extras: Default::default(),
+            name: Some("VBSP_VLIGHT".into()),
+            target: Some(json::validation::Checked::Valid(json::buffer::Target::ArrayBuffer)),
+        };
+        gltf.buffer_views.push(vl_view);
+        let vl_accessor = json::Accessor {
+            buffer_view: Some(Index::new(gltf.buffer_views.len() as u32 - 1)),
+            byte_offset: Some(USize64(0)),
+            count: USize64(vertex_count),
+            component_type: json::validation::Checked::Valid(json::accessor::GenericComponentType(
+                json::accessor::ComponentType::F32,
+            )),
+            extensions: Default::default(),
+            extras: Default::default(),
+            type_: json::validation::Checked::Valid(json::accessor::Type::Vec3),
+            min: None,
+            max: None,
+            name: Some("VBSP_VLIGHT".into()),
+            normalized: false,
+            sparse: None,
+        };
+        let vl_index = gltf.accessors.len() as u32;
+        gltf.accessors.push(vl_accessor);
+        Some(vl_index)
     }
 
     /// 推送图元到 GLTF
-    fn push_primitive(&self, buffer: &mut Vec<u8>, gltf: &mut Root, mesh: &vmdl::Mesh, vertex_accessor_start: u32, skin: &vmdl::SkinTable) -> Result<json::mesh::Primitive, ModelIntegratorError> {
+    fn push_primitive(
+        &self,
+        buffer: &mut Vec<u8>,
+        gltf: &mut Root,
+        mesh: &vmdl::Mesh,
+        vertex_accessor_start: u32,
+        skin: &vmdl::SkinTable,
+        vlight_accessor: Option<u32>,
+    ) -> Result<json::mesh::Primitive, ModelIntegratorError> {
         let buffer_start = buffer.len() as u64;
         let view_start = gltf.buffer_views.len() as u32;
         let accessor_start = gltf.accessors.len() as u32;
@@ -344,6 +453,17 @@ impl ModelIntegrator {
                     json::validation::Checked::Valid(json::mesh::Semantic::Normals),
                     Index::new(vertex_accessor_start + 2),
                 );
+                // 自定义语义：gltf-json 的 `Semantic::Extras` 会**自动补一个前导 `_`**
+                // （glTF 规定自定义属性名须以 `_` 开头）⇒ 这里传 `VBSP_VLIGHT`，
+                // 落盘/上线后的名字是 `_VBSP_VLIGHT`（实测传 "_VBSP_VLIGHT" 会变成双下划线）。
+                if let Some(vl) = vlight_accessor {
+                    map.insert(
+                        json::validation::Checked::Valid(
+                            json::mesh::Semantic::Extras("VBSP_VLIGHT".into()),
+                        ),
+                        Index::new(vl),
+                    );
+                }
                 map
             },
             extensions: Default::default(),
@@ -360,6 +480,23 @@ impl ModelIntegrator {
         // 尝试获取纹理信息
         if let Some(texture_info) = skin.texture_info(material_index) {
             let material_name = texture_info.name.to_string();
+
+            // ── 材质去重 ──────────────────────────────────────────────────────
+            // 为什么会重复：同一模型可能被推**多次**（逐实例 vhv 不同 ⇒ 逐组一个 mesh，
+            // 见 `group_placements_by_vertex_lighting`）。没有这层缓存时，材质/贴图会被
+            // 逐次重推 —— 实测 surf_666：materials 319→1112、images 200→738、bin 140→494 MB。
+            // 键覆盖一切会改变材质产物的输入：材质名 + alpha 模式 + unlit 标注。
+            let unlit = self.in_memory.material_unlit.contains(&material_name);
+            let alpha_key = self
+                .in_memory
+                .material_alpha_mode
+                .get(&material_name)
+                .copied()
+                .unwrap_or(0u8);
+            let cache_key = format!("{material_name}|{alpha_key}|{unlit}");
+            if let Some(&idx) = self.material_cache.borrow().get(&cache_key) {
+                return Some(Index::new(idx));
+            }
 
             // 尝试加载纹理文件
             let texture_index = self.push_texture(buffer, gltf, &material_name);
@@ -397,10 +534,18 @@ impl ModelIntegrator {
                 ),
             };
 
+            // 自发光 / 无光照标注：写进 extras（GLTFLoader → material.userData.unlit）
+            // `json::Extras` = `Option<Box<RawValue>>` ⇒ 直接给原始 JSON 文本
+            let mut extras = json::Extras::default();
+            if self.in_memory.material_unlit.contains(&material_name) {
+                if let Ok(raw) = serde_json::value::RawValue::from_string("{\"unlit\":true}".to_string()) {
+                    extras = Some(raw);
+                }
+            }
             // 创建材质
             let material = gltf::json::Material {
                 extensions: Default::default(),
-                extras: Default::default(),
+                extras,
                 name: Some(material_name.clone()),
                 pbr_metallic_roughness: gltf::json::material::PbrMetallicRoughness {
                     base_color_factor: color,
@@ -427,6 +572,7 @@ impl ModelIntegrator {
 
             let index = gltf.materials.len() as u32;
             gltf.materials.push(material);
+            self.material_cache.borrow_mut().insert(cache_key, index);
             Some(Index::new(index))
         } else {
             None
@@ -464,8 +610,12 @@ impl ModelIntegrator {
         None
     }
 
-    /// 将已获取的纹理字节推入 GLTF 缓冲区
+    /// 将已获取的纹理字节推入 GLTF缓冲区
     fn push_texture_data(&self, buffer: &mut Vec<u8>, gltf: &mut Root, texture_name: &str, texture_data: &[u8]) -> Option<u32> {
+        // 贴图去重（同 `push_material` 的理由：同一模型可能被推多次）
+        if let Some(&idx) = self.texture_cache.borrow().get(texture_name) {
+            return Some(idx);
+        }
         // 推送纹理到缓冲区
         let start = buffer.len() as u64;
         buffer.extend_from_slice(texture_data);
@@ -507,6 +657,9 @@ impl ModelIntegrator {
         let texture_index = gltf.textures.len() as u32;
         gltf.textures.push(texture);
 
+        self.texture_cache
+            .borrow_mut()
+            .insert(texture_name.to_string(), texture_index);
         Some(texture_index)
     }
 
@@ -864,6 +1017,14 @@ pub struct StaticProp {
     pub origin: [f32; 3],
     pub angles: [f32; 3],
     pub solid: u8,
+    /// 该 prop 采样点的 6 面 ambient cube（线性 RGB，face 序 [+X,-X,+Y,-Y,+Z,-Z]）；
+    /// None = 无 ambient 数据（渲染端按中性灰兜底）。见 `vbsp::Bsp::prop_ambient_cube`。
+    pub ambient_cube: Option<[f32; 18]>,
+    /// **逐顶点预烘焙光照**（第 1 级来源）：来自 pakfile 的 `sp_<idx>.vhv` / `sp_hdr_<idx>.vhv`，
+    /// 逐顶点 RGB **屏幕倍率**（`byte × 2/255`，值域 [0,2]），长度 = 模型顶点数。
+    /// `None` = 该 prop 没有 vhv（回退第 2 级 leaf ambient cube）。见 `crate::vhv`。
+    #[serde(default)]
+    pub vertex_lighting: Option<Vec<[f32; 3]>>,
 }
 
 /// 单个模型实例的放置信息（坐标已转换到 `map_coords` = `[y,z,x]` 的 Y-up 空间）。
@@ -881,6 +1042,11 @@ pub struct Placement {
     /// 静态道具的 `solid`（`SolidType`）字段；`0 = SOLID_NONE` 表示明确无碰撞。
     /// 实体来源时为 `None`。
     pub solid: Option<u8>,
+    /// 该实例的 6 面 ambient cube（线性 RGB）；实体来源或无数据时为 `None`。
+    pub ambient_cube: Option<[f32; 18]>,
+    /// 该实例的**逐顶点预烘焙光照**（屏幕倍率，长度 = 模型顶点数）；无 vhv 时为 `None`。
+    /// 同一模型的多个实例各有自己的 vhv ⇒ 网格按它分组（见 `integrate`）。
+    pub vertex_lighting: Option<Vec<[f32; 3]>>,
 }
 
 /// 把 `"pitch yaw roll"`（度）转成四元数 `[x, y, z, w]`。
@@ -921,6 +1087,8 @@ pub fn resolve_placements(
         rotation: Some(angles_to_quat(prop.angles[0], prop.angles[1], prop.angles[2])),
         scale: Some([1.0, 1.0, 1.0]),
         solid: Some(prop.solid),
+        ambient_cube: prop.ambient_cube,
+        vertex_lighting: prop.vertex_lighting.clone(),
     };
 
     // 1. 完整路径精确匹配
@@ -970,9 +1138,50 @@ pub fn resolve_placements(
                 .as_ref()
                 .and_then(|s| parse_scale_str(s)),
             solid: None,
+            ambient_cube: None,
+            // 实体来源（prop_dynamic 等）没有 sp_*.vhv（那是 prop_static 的烘焙产物）
+            vertex_lighting: None,
         });
     }
     out
+}
+
+/// 把某个模型的放置实例按**逐顶点光照数据**分组。
+///
+/// 返回 `[(vlight, [placement 索引…]), …]`：
+/// - 有 vhv 且长度 = 模型顶点数 ⇒ 各自成一组（内容相同的实例合并，避免重复上传顶点）；
+/// - 无 vhv / 长度不符 ⇒ 全部归入 `None` 组（渲染端回退第 2 级 leaf ambient cube）。
+///
+/// 为什么必须分组：顶点属性挂在 **mesh** 上，而 vhv 是**逐实例**的（`sp_<propIndex>.vhv`）。
+/// 一个模型被多个 prop_static 引用时，若共用 mesh 就只能都走 cube ⇒ 每个朝向面一个平坦色，
+/// 实机观感即「一面一个颜色」。
+pub fn group_placements_by_vertex_lighting(
+    placements: &[Placement],
+    vertex_count: usize,
+) -> Vec<(Option<Vec<[f32; 3]>>, Vec<usize>)> {
+    let mut groups: Vec<(Option<Vec<[f32; 3]>>, Vec<usize>)> = Vec::new();
+    for (i, p) in placements.iter().enumerate() {
+        let vl = p
+            .vertex_lighting
+            .as_ref()
+            .filter(|v| v.len() == vertex_count);
+        match vl {
+            Some(v) => {
+                match groups
+                    .iter_mut()
+                    .find(|(g, _)| g.as_ref().is_some_and(|gv| gv == v))
+                {
+                    Some((_, idxs)) => idxs.push(i),
+                    None => groups.push((Some(v.clone()), vec![i])),
+                }
+            }
+            None => match groups.iter_mut().find(|(g, _)| g.is_none()) {
+                Some((_, idxs)) => idxs.push(i),
+                None => groups.push((None, vec![i])),
+            },
+        }
+    }
+    groups
 }
 
 /// 解析 `"x y z"` 形式的 origin 字符串并转换到 Y-up 空间。

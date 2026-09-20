@@ -46,6 +46,19 @@ export class PanelController {
     private readonly onTextureQualityChange?: (quality: 'original' | 'mini') => void,
     /** FOV 变更 → 主线程渲染器 setFov（相机透视矩阵即时更新）。 */
     private readonly onSyncFov?: (fov: number) => void,
+    /** 渲染距离（LOD 剔除距离）变更 → 主线程渲染器 setRenderDistance（即时生效）。 */
+    private readonly onSyncRenderDistance?: (dist: number) => void,
+    /** 曝光（显示侧亮度倍率）变更 → 主线程渲染器 setExposure（共享 uniform，即时生效）。 */
+    private readonly onSyncExposure?: (exposure: number) => void,
+    /** 暗部提升 γ（shadow-lift）变更 → 主线程渲染器 setLightGamma（共享 uniform，即时生效）。 */
+    private readonly onSyncLightGamma?: (gamma: number) => void,
+    /** 模型（prop）烘焙光照亮度变更 → 主线程渲染器 setAmbientScale（共享 uniform，即时生效）。 */
+    private readonly onSyncAmbientScale?: (scale: number) => void,
+    /**
+     * 光照模式变更（`baked` 预烘焙 / `texture` 纯纹理）→ 主线程渲染器 setLightingMode。
+     * 切换会**按新模式重建场景**（材质必须在分块合并前施加），因此是异步的、耗时与重载地图相当。
+     */
+    private readonly onSyncLightingMode?: (mode: 'baked' | 'texture') => void,
     /** 存点列表删除（索引；无确认直接删）→ app 更新存储并回刷列表。 */
     private readonly onSavePointDelete?: (index: number) => void,
     /** 存点列表读点（索引）→ app 恢复该存点（主线程 + 权威同步）。 */
@@ -391,10 +404,52 @@ export class PanelController {
       this.onSyncFov?.(v);
     });
 
+    // 渲染距离（LOD 剔除距离；0 = 自动 = 地图包围盒对角线的一半）
+    // 单位 ≈ 1 英寸；超出的空间块直接 visible=false ⇒ 不产生 draw call
+    this.bindSlider('renderDistance', 0, 60000, 500, (v) => {
+      this.config.hud.renderDistance = v;
+      this.onSyncRenderDistance?.(v);
+    });
+
+    // 曝光：world 光照项的显示侧倍率。
+    // **默认 2.3 = 「被照亮的面 ≈ 贴图原色」显示档**（见 config.ts 的二次定案）；
+    // **外部参照实现平价 = 曝光 1 / γ 1**（两个滑块各拖一下就切回来）。
+    // 量程 0.1~8：>2.3 起亮面开始削顶；<1 压暗。纯观感旋钮，不影响数据口径。
+    this.bindSlider('exposure', 0.1, 8, 0.01, (v) => {
+      this.config.lighting.exposure = v;
+      this.onSyncExposure?.(v);
+    });
+
+    // 暗部提升 γ：着色器对**光照项**做 `pow(L, 1/γ)`。
+    // **默认 2.2 = 配合曝光 2.3 的"亮面≈贴图原色"档**；**外部参照实现平价 = 1（中性）**。
+    // γ>1 抬暗部（γ=2.2 时暗部按 `L^0.4545` 提升）、γ<1 压暗部。量程 0.5~6。
+    this.bindSlider('lightGamma', 0.5, 6, 0.01, (v) => {
+      this.config.lighting.lightGamma = v;
+      this.onSyncLightGamma?.(v);
+    });
+
+    // 模型光照（prop ambient cube 亮度；只调模型、不动 world lightmap）
+    // **默认 1 = 外部参照实现平价**（prop 侧的 2× 已由 `PROP_CUBE_GAIN = 2^2.2` 承担）；
+    // 0 = 模型全黑（A/B 用）、3 = 最大提亮。
+    this.bindSlider('ambientScale', 0, 3, 0.01, (v) => {
+      this.config.lighting.ambientScale = v;
+      this.onSyncAmbientScale?.(v);
+    });
+
     // 速度面板模式（主线程本地 8Hz）
     const speedMode = document.getElementById('speedMode') as HTMLSelectElement | null;
     speedMode?.addEventListener('change', () => {
       this.config.hud.speedMode = speedMode.value as 'lateral' | 'lateral-vertical' | 'total';
+      this.savePanelPrefs();
+    });
+
+    // 光照模式（预烘焙 / 纯纹理）：切到纯纹理 = 不解码 lightmap atlas、不吃 vhv/ambient cube
+    // ⇒ 纹理更少、进图更快，但画面没有明暗关系（面板下方小字已写明性能影响）。
+    // 切换由渲染端按新模式重建场景（材质必须在分块合并前施加），故走 onSyncLightingMode 回调。
+    const lightingMode = document.getElementById('lightingMode') as HTMLSelectElement | null;
+    lightingMode?.addEventListener('change', () => {
+      this.config.lighting.mode = lightingMode.value === 'texture' ? 'texture' : 'baked';
+      this.onSyncLightingMode?.(this.config.lighting.mode);
       this.savePanelPrefs();
     });
 
@@ -508,8 +563,21 @@ export class PanelController {
         yawBindSpeed: p.input.yawBindSpeed,
         noclipSpeed: p.input.noclipSpeed,
       },
-      hud: { showCrosshair: p.hud.showCrosshair, speedMode: p.hud.speedMode, fov: p.hud.fov, crosshair: { ...p.hud.crosshair } },
+      hud: {
+        showCrosshair: p.hud.showCrosshair,
+        speedMode: p.hud.speedMode,
+        fov: p.hud.fov,
+        renderDistance: p.hud.renderDistance,
+        crosshair: { ...p.hud.crosshair },
+      },
       texture: { ...p.texture },
+      lighting: {
+        exposure: p.lighting.exposure,
+        lightGamma: p.lighting.lightGamma,
+        ambientScale: p.lighting.ambientScale,
+        // 光照模式（预烘焙 / 纯纹理）：随面板偏好持久化（重开页面保持同一档）
+        mode: p.lighting.mode,
+      },
     };
   }
 
@@ -547,6 +615,7 @@ export class PanelController {
       merge(this.config.input, prefs.input);
       merge(this.config.hud, prefs.hud);
       merge(this.config.texture, prefs.texture);
+      merge(this.config.lighting, prefs.lighting);
     } catch (err) {
       console.warn('[panel] 面板偏好加载失败:', err);
     }
@@ -595,6 +664,12 @@ export class PanelController {
     if (speedMode) speedMode.value = p.hud.speedMode;
     const textureQuality = document.getElementById('textureQuality') as HTMLSelectElement | null;
     if (textureQuality) textureQuality.value = p.texture.quality;
+    const lightingModeEl = document.getElementById('lightingMode') as HTMLSelectElement | null;
+    if (lightingModeEl) lightingModeEl.value = p.lighting.mode;
+    // 光照（显示侧）
+    setVal('exposure', String(p.lighting.exposure));
+    setVal('lightGamma', String(p.lighting.lightGamma));
+    setVal('ambientScale', String(p.lighting.ambientScale));
     // 准星
     setVal('chColor', p.hud.crosshair.color);
     setVal('chSize', String(p.hud.crosshair.size));
@@ -604,6 +679,7 @@ export class PanelController {
     setChecked('chDot', p.hud.crosshair.dot);
     // 视野
     setVal('fov', String(p.hud.fov));
+    setVal('renderDistance', String(p.hud.renderDistance));
   }
 
   /** 持久化加载后向双端（Worker 权威 + 主线程预测实例）推送全部偏好。 */
@@ -620,6 +696,17 @@ export class PanelController {
     this.sendHull();
     // 持久化加载后 FOV 应用（相机创建用 config.hud.fov，此处覆盖面板加载值）
     this.onSyncFov?.(p.hud.fov);
+    // 持久化加载后渲染距离应用（渲染侧默认取自动值，此处覆盖为持久化值）
+    this.onSyncRenderDistance?.(p.hud.renderDistance);
+    // 持久化加载后曝光应用（渲染侧默认 1.0，此处覆盖为持久化值）
+    this.onSyncExposure?.(p.lighting.exposure);
+    // 持久化加载后暗部提升 γ 应用（渲染侧默认 0.85，此处覆盖为持久化值）
+    this.onSyncLightGamma?.(p.lighting.lightGamma);
+    // 持久化加载后模型光照亮度应用（渲染侧默认 1.0，此处覆盖为持久化值）
+    this.onSyncAmbientScale?.(p.lighting.ambientScale);
+    // 持久化加载后光照模式应用（渲染侧默认 baked；**必须在加载地图前**设定，
+    // 纯纹理模式据此跳过 atlas 解码 ⇒ 面板小字承诺的「进图更快」才成立）
+    this.onSyncLightingMode?.(p.lighting.mode);
   }
 
   /** 应用准星风格到 DOM（CSS 变量 + 可见性）。 */

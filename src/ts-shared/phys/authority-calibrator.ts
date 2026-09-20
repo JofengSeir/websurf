@@ -168,6 +168,8 @@ export class AuthorityCalibrator {
   private syncInFlight = false;
   /** 上次兜底处理时间戳（同步或撤回；冷却内不重复处理）。 */
   private lastSyncAt = 0;
+  /** 首个权威帧诊断只打印一次（零行为改动的计时探针）。 */
+  private authFirstFrameLogged = false;
   /** 主线程渲染物理是否已用首个权威帧校准起点。 */
   private predStarted = false;
   /**
@@ -355,6 +357,13 @@ export class AuthorityCalibrator {
 
     if (auth.va === this.lastVa) return;
     this.lastVa = auth.va;
+    // 诊断（2026-09-20，**零行为改动**）：首个权威帧到达时刻。与 app.ts 的
+    // `[authority] world-json 已发送 @T` 相减 = Worker 侧"构建碰撞世界 + 首个 tick"的
+    // 端到端耗时（用户量到 ~1.5s，期望 ~0.2s；两者同为 performance.now 基准）。
+    if (!this.authFirstFrameLogged) {
+      this.authFirstFrameLogged = true;
+      console.info(`[authority] 首个权威帧 @${performance.now().toFixed(0)}ms（va=${auth.va}）`);
+    }
     // 记录**主线程**读到这一帧的时刻（同线程时钟）——calibrateVelocity 的帧龄基准。
     // 不能用 frame.timeMs：Worker 的 performance.now 与主线程不同基准（实测偏移 ≈1132ms）。
     this.authArrivedAtMs = performance.now();

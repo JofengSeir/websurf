@@ -422,7 +422,7 @@ const authLoop = createAuthLoop({
   renderTrajectory: renderTrajectorySource,
 });
 
-self.onmessage = createWorkerDispatch({
+const dispatch = createWorkerDispatch({
   shared,
   phys,
   authLoop,
@@ -433,8 +433,25 @@ self.onmessage = createWorkerDispatch({
     applyConfigPatch(config, section as keyof RuntimeConfig, patch),
   syncParamsToWasm,
   createPhysWorld: () => new PhysWorld(),
-  initSync,
+  // ① 弃用告警修复（本副本注入处，不改共享层 `src/ts-shared/auth/worker-dispatch.ts`）：
+  // dispatch 以 `env.initSync(<ArrayBuffer>)`（旧形态）调用，而 wasm-bindgen 胶水在实参
+  // 不是「普通对象」时才打 `using deprecated parameters for initSync()`（产物 worker.js:915）。
+  // 这里包一层把实参转成对象形态 `{ module }`（胶水官方非弃用形态），
+  // 调用点数量不变（dispatch 仍两次调用本注入）⇒ 不是靠删除 initSync 处理来消警告。
+  // 注：dispatch 的形参类型写的是 `ArrayBuffer`（共享层签名，本轮不改），故此处按接口做双重断言。
+  initSync: ((module: ArrayBuffer) =>
+    initSync({ module } as unknown as ArrayBuffer)) as (module: ArrayBuffer) => void,
   post: (msg) => postMessage(msg),
+  // 诊断（2026-09-20，零行为改动）：world-json 处理耗时（从 Worker **收到**该消息到
+  // 世界构建完成；与主线程的 postMessage 耗时配对，把"权威迟迟不活"拆成
+  // 「结构化克隆传输」与「Worker 内 JSON 解析 + build_world」两段）。
+  onWorldBuilt: () => {
+    if (worldJsonRecvAt > 0) {
+      const ms = performance.now() - worldJsonRecvAt;
+      worldJsonRecvAt = 0;
+      postMessage({ type: 'world-build-ms', ms: +ms.toFixed(1) });
+    }
+  },
   // 健康护栏：本图出生点 Y（越界地板基准）+ 已记忆的死亡阈值
   onWorldSpawn: (spawnY, deathY) => {
     noteWorldSpawn(spawnY, deathY);
@@ -444,3 +461,27 @@ self.onmessage = createWorkerDispatch({
     authDeathY = value;
   },
 });
+
+/**
+ * 诊断用（2026-09-20，零行为改动）：Worker **收到** `world-json` 的时刻。
+ * `onWorldBuilt` 用它算出"解析 + build_world"的 Worker 内耗时；
+ * 之所以在 Worker 内计时而不是跨线程相减：两端 `performance.now()` 基准不同（实测偏移 ≈1132ms）。
+ */
+let worldJsonRecvAt = 0;
+
+self.onmessage = (e: MessageEvent<unknown>): void => {
+  const d = e.data as { type?: string; brushJson?: string; triJson?: string } | null;
+  if (d?.type === 'world-json') {
+    worldJsonRecvAt = performance.now();
+    // 诊断（2026-09-20，零行为改动）：JSON **解析**耗时（JS 侧代理；Rust serde 同量级）。
+    // 与 `[authority] Worker 内 world-json 处理` 相减即得 build_world（含建索引）的净耗时。
+    const t0 = performance.now();
+    try { if (d.brushJson) JSON.parse(d.brushJson); } catch { /* 诊断用，忽略 */ }
+    const brushMs = performance.now() - t0;
+    const t1 = performance.now();
+    try { if (d.triJson) JSON.parse(d.triJson); } catch { /* 诊断用，忽略 */ }
+    const triMs = performance.now() - t1;
+    postMessage({ type: 'world-parse-ms', brush: +brushMs.toFixed(1), tri: +triMs.toFixed(1) });
+  }
+  dispatch(e);
+};

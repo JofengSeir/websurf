@@ -37,6 +37,7 @@ const EXPORT_API = [
   'export_model_phy_colliders',
   'export_glb_with_pakfile_models',
   'export_glb_with_pakfile_models_with_defaults',
+  'export_glb_with_pakfile_models_with_defaults_and_lights',
   'export_glb',
   'export_mosaic_manifest',
   'export_missing_textures',

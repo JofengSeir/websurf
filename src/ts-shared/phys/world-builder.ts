@@ -30,6 +30,7 @@ export interface BspProcessorLike {
   export_mosaic_manifest(): string;
   export_missing_textures(): string;
   export_glb_with_pakfile_models_with_defaults(defaultsJson: string): Uint8Array;
+  export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson: string): Uint8Array;
   export_glb_with_pakfile_models(): Uint8Array;
 }
 
@@ -199,7 +200,7 @@ export async function buildWorldBundle(
   }
   let glbBytes: Uint8Array;
   try {
-    glbBytes = proc.export_glb_with_pakfile_models_with_defaults(defaultsJson);
+    glbBytes = proc.export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson);
   } catch (e) {
     console.warn('[load-bsp] 带默认纹理回退的 GLB 导出失败，回退无回退导出:', e);
     glbBytes = proc.export_glb_with_pakfile_models();

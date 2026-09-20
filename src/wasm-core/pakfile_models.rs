@@ -41,6 +41,9 @@ pub struct VmtInfo {
     pub basetexture: Option<String>,
     /// 0 = 不透明；1 = Blend（`$translucent` / `$alpha<1`）；2 = Mask（`$alphatest`）。
     pub alpha_mode: u8,
+    /// 自发光 / 无光照：VMT 着色器为 `UnlitGeneric`（含大小写变体）或 `$selfillum != 0`。
+    /// Source 语义下这类材质**完全不吃光照**（只出贴图原色）；渲染侧据此走全亮。
+    pub unlit: bool,
     /// `Patch` 着色器的 `include` 目标（另一个 `.vmt` 的路径）。
     ///
     /// Source 的 `patch` 材质本身不含 `$basetexture`，只写
@@ -94,8 +97,14 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
     let mut info = VmtInfo::default();
     let mut translucent = false;
     let mut alphatest = false;
+    let mut unlit = false;
 
-    for raw in text.lines() {
+    // ⚠️ 行尾必须按 `\r` / `\n` **都切**：Valve 老工具产出的 VMT 会混用 CRLF 与
+    // **孤立 CR**（实测 `materials/666/blue_neon.vmt`：`$model 1 <CR>  "$basetexture" …`）。
+    // `str::lines()` 只按 `\n` 切 ⇒ 会把 `$model` 与 `$basetexture` 并成一行，
+    // 取 `toks[0]` 得到 `$model` ⇒ 永远拿不到 `$basetexture` ⇒ prop 材质落到回退色
+    // （表现即「霓虹/自发光亮面发黑」）。
+    for raw in text.split(['\n', '\r']) {
         // 去掉行尾 `//` 注释（VMT 不支持字符串内 `//`，直接截断即可）
         let line = match raw.find("//") {
             Some(i) => &raw[..i],
@@ -106,7 +115,16 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
             continue;
         }
         let toks = tokenize_kv(line);
+        // ⚠️ 纯 `{` / `}` 行经 tokenizer 会变成**空数组**（花括号被丢弃）⇒ 必须先挡空，        // 否则下面的 `toks[0]` 会 panic（wasm 里表现为 RuntimeError + 借用标志泄漏，        // 导致同一 BspProcessor 的后续调用报 `recursive use of an object`）。
+        if toks.is_empty() {
+            continue;
+        }
         if toks.len() < 2 {
+            // 首行的着色器名（如 `"UnlitGeneric"` / `UnlitGeneric {`）只有一个 token
+            let k = toks[0].to_ascii_lowercase();
+            if k.starts_with("unlit") {
+                unlit = true;
+            }
             continue;
         }
         let key = toks[0].trim().to_ascii_lowercase();
@@ -129,6 +147,11 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
             "$alphatest" => {
                 if val != "0" {
                     alphatest = true;
+                }
+            }
+            "$selfillum" => {
+                if val != "0" && !val.is_empty() {
+                    unlit = true;
                 }
             }
             "$alpha" => {
@@ -157,6 +180,7 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
         }
     }
 
+    info.unlit = unlit;
     info.alpha_mode = if translucent {
         1
     } else if alphatest {
@@ -268,4 +292,37 @@ pub fn place_point(
         rotated[1] + translation[1],
         rotated[2] + translation[2],
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_vmt;
+
+    /// 回归：Valve 老工具产出的 VMT 会在行间混用 **孤立 CR**（无 \n）。
+    /// `str::lines()` 只按 \n 切 ⇒ `$model 1 <CR> "$basetexture" …` 并成一行 ⇒ 取不到
+    /// `$basetexture` ⇒ prop 材质落到 0.3 回退色（实机表现：霓虹/自发光「亮面发黑」）。
+    /// 回归：纯 `{` / `}` 行分词后是空数组 ⇒ 不得索引 `toks[0]`（曾 panic）。
+    #[test]
+    fn brace_only_lines_do_not_panic() {
+        let vmt = "\"UnlitGeneric\"\r\n{\r\n  \"$basetexture\" \"devneons/blue_neon\"\r\n}\r\n";
+        let info = parse_vmt(vmt);
+        assert_eq!(info.basetexture.as_deref(), Some("devneons/blue_neon"));
+        assert!(info.unlit, "UnlitGeneric 应被标为自发光");
+    }
+
+    /// 回归：`$selfillum 1` 同样要标成自发光（不依赖着色器名）。
+    #[test]
+    fn selfillum_marks_unlit() {
+        let vmt = "\"LightmappedGeneric\"\n{\n\t\"$basetexture\" \"x/y\"\n\t\"$selfillum\" \"1\"\n}\n";
+        let info = parse_vmt(vmt);
+        assert!(info.unlit);
+        assert_eq!(info.basetexture.as_deref(), Some("x/y"));
+    }
+
+    #[test]
+    fn parses_basetexture_across_lone_cr() {
+        let vmt = "\"UnlitGeneric\"\r\n{\r\n\t$model 1 \r  \"$basetexture\" \"devneons/blue_neon\"\r\n  \"$selfillum\" 1\r\n}\r\n";
+        let info = parse_vmt(vmt);
+        assert_eq!(info.basetexture.as_deref(), Some("devneons/blue_neon"));
+    }
 }

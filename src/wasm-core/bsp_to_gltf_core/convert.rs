@@ -13,19 +13,68 @@ use std::borrow::Cow;
 use std::mem::size_of;
 use crate::vbsp::{Bsp, Entity};
 use crate::model_integrator::ModelIntegrator;
+use crate::bsp_to_gltf_core::lightmap::{self, LightmapAtlas};
+
+/// 阶段 2 的 lightmap 导出上下文：图集 + 其在 GLB `textures` 中的索引。
+struct LightmapExport {
+    atlas: LightmapAtlas,
+    texture_index: u32,
+}
+
+/// 构建 lightmap 图集与纹理；无光照 lump 时返回 `None`。
+///
+/// 失败一律向上报错（不静默产出无光照 GLB）：打包装不下、单面越界、面表不对齐都属可见失败。
+fn build_lightmap_export(
+    bsp: &Bsp,
+    buffer: &mut Vec<u8>,
+    root: &mut Root,
+    max_atlas_area_override: u64,
+) -> Result<Option<LightmapExport>, Error> {
+    let Some(lighting) = bsp.lighting.as_ref() else {
+        return Ok(None);
+    };
+    let atlas = lightmap::build_atlas(bsp, lighting, max_atlas_area_override)?;
+    let texture_index = lightmap::push_atlas_texture(buffer, root, &atlas)?.value() as u32;
+    Ok(Some(LightmapExport {
+        atlas,
+        texture_index,
+    }))
+}
+
+/// 写入阶段 2 的导出契约（`asset.extras.lightmap` / `materials[*].extensions.__vbsp_lightmap__`）。
+fn apply_lightmap_json(
+    json_string: String,
+    lightmap: Option<&LightmapExport>,
+) -> Result<String, Error> {
+    match lightmap {
+        Some(export) => {
+            lightmap::inject_lightmap_json(&json_string, export.texture_index, &export.atlas)
+        }
+        None => Ok(json_string),
+    }
+}
 
 /// 从 BSP 文件导出为 GLTF 格式（仅使用 BSP 文件内的资源）
-pub fn export_bsp(bsp: Bsp, options: ConvertOptions) -> Result<ExportResult, Error> {
+///
+/// `bsp` 收 `Arc<Bsp>`：导出链路**只在全部可失败阶段之后**才真正持有数据的所有权
+/// （`crates/wasm/src/lib.rs` 的调用侧据此实现「失败不消费 BSP」，见
+/// `documents/game/implementation/console-fix-contract.md` §3.1 ④）。
+pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<ExportResult, Error> {
+    let bsp: &Bsp = &bsp;
     let mut buffer = Vec::new();
     let mut missing_resources = Vec::new();
     let texture_collector = std::rc::Rc::new(std::cell::RefCell::new(crate::bsp_to_gltf_core::materials::TextureCollector::new()));
 
     let mut root = Root::default();
 
+    // 阶段 2：光照图集（无光照 lump 时为 None）。放在建模之前，使两条返回路径都带上它。
+    // `options.lightmap_max_atlas_area` 只作 fail-visible 负控的阈值覆盖（0 = 政策上界）。
+    let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
+
     // 只处理地图结构，不处理模型
     for (model, offset) in bsp_models(&bsp)? {
         let tc_clone = texture_collector.clone();
-        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, &options, &mut missing_resources, Some(tc_clone));
+        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
         root.nodes.push(node);
     }
 
@@ -70,6 +119,8 @@ pub fn export_bsp(bsp: Bsp, options: ConvertOptions) -> Result<ExportResult, Err
     });
 
     let json_string = json::serialize::to_string(&root).expect("Serialization error");
+    // 阶段 2：BSP-only 路径同样写入 lightmap 导出契约；必须在由 json_string.len() 推 header 长度之前
+    let json_string = apply_lightmap_json(json_string, lightmap.as_ref())?;
     let mut json_offset = json_string.len() as u32;
     align_to_multiple_of_four(&mut json_offset);
 
@@ -94,18 +145,22 @@ pub fn export_bsp(bsp: Bsp, options: ConvertOptions) -> Result<ExportResult, Err
     })
 }
 
-/// 从 BSP 文件导出为 GLTF 格式，并可选嵌入模型
-pub fn export_bsp_with_models(bsp: Bsp, options: ConvertOptions, model_integrator: Option<&ModelIntegrator>) -> Result<ExportResult, Error> {
+/// 从 BSP 文件导出为 GLTF 格式，并可选嵌入模型（`Arc<Bsp>` 口径同 [`export_bsp`]）
+pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions, model_integrator: Option<&ModelIntegrator>) -> Result<ExportResult, Error> {
+    let bsp: &Bsp = &bsp;
     let mut buffer = Vec::new();
     let mut missing_resources = Vec::new();
     let texture_collector = std::rc::Rc::new(std::cell::RefCell::new(crate::bsp_to_gltf_core::materials::TextureCollector::new()));
 
     let mut root = Root::default();
 
+    // 阶段 2：光照图集（无光照 lump 时为 None）。
+    let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
+
     // 1. 处理BSP结构
     for (model, offset) in bsp_models(&bsp)? {
         let tc_clone = texture_collector.clone();
-        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, &options, &mut missing_resources, Some(tc_clone));
+        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
         root.nodes.push(node);
     }
 
@@ -116,11 +171,11 @@ pub fn export_bsp_with_models(bsp: Bsp, options: ConvertOptions, model_integrato
             // 模型处理失败，返回 BSP 导出结果
             eprintln!("警告: 模型处理失败: {:?}", e);
             // 构建 BSP-only 结果
-            return build_export_result(root, buffer, missing_resources, texture_collector);
+            return build_export_result(root, buffer, missing_resources, texture_collector, lightmap.as_ref());
         }
     } else {
         // 没有模型，构建 BSP-only 结果
-        return build_export_result(root, buffer, missing_resources, texture_collector);
+        return build_export_result(root, buffer, missing_resources, texture_collector, lightmap.as_ref());
     }
 
     // 3. 构建根节点
@@ -165,12 +220,15 @@ pub fn export_bsp_with_models(bsp: Bsp, options: ConvertOptions, model_integrato
     // 4. 生成 GLB 文件
     let mut json_string = json::serialize::to_string(&root).expect("Serialization error");
 
-    // 若模型集成器启用了光照，添加光照信息
+    // 阶段 0：光照注入失败必须**可见**。
+    // 原实现 `if let Ok(modified_json) = ...` 会把 Err 静默吞掉，产出「语法合法但无光照」的
+    // GLB，现象是「场景变暗/退回假光照」，极难与「数据没到」区分。改为 `?` 传播。
     if let Some(integrator) = model_integrator {
-        if let Ok(modified_json) = integrator.add_lighting_to_gltf_json(&json_string) {
-            json_string = modified_json;
-        }
+        json_string = integrator.add_lighting_to_gltf_json(&json_string)?;
     }
+
+    // 阶段 2：写入 lightmap 导出契约（放在光照注入之后，保证最终字节含我们的字段）
+    json_string = apply_lightmap_json(json_string, lightmap.as_ref())?;
     
     let mut json_offset = json_string.len() as u32;
     align_to_multiple_of_four(&mut json_offset);
@@ -201,7 +259,8 @@ fn build_export_result(
     root: Root,
     buffer: Vec<u8>,
     missing_resources: Vec<MissingResource>,
-    texture_collector: std::rc::Rc<std::cell::RefCell<crate::bsp_to_gltf_core::materials::TextureCollector>>
+    texture_collector: std::rc::Rc<std::cell::RefCell<crate::bsp_to_gltf_core::materials::TextureCollector>>,
+    lightmap: Option<&LightmapExport>,
 ) -> Result<ExportResult, Error> {
     // 构建根节点
     let node_indices = 0..root.nodes.len();
@@ -246,6 +305,8 @@ fn build_export_result(
 
     // 生成 GLB 文件
     let json_string = json::serialize::to_string(&new_root).expect("Serialization error");
+    // 阶段 2：BSP-only 路径同样写入 lightmap 导出契约
+    let json_string = apply_lightmap_json(json_string, lightmap)?;
     let mut json_offset = json_string.len() as u32;
     align_to_multiple_of_four(&mut json_offset);
 
@@ -858,6 +919,7 @@ fn push_bsp_model_bsp(
     options: &ConvertOptions,
     missing_resources: &mut Vec<MissingResource>,
     texture_collector: Option<std::rc::Rc<std::cell::RefCell<crate::bsp_to_gltf_core::materials::TextureCollector>>>,
+    lightmap: Option<&LightmapExport>,
 ) -> Node {
     let mut primitives = Vec::new();
     // 枚举 face 在 model 中的位置，全局 face 索引 = model.first_face + 位置；
@@ -876,6 +938,7 @@ fn push_bsp_model_bsp(
             options,
             missing_resources,
             texture_collector.clone(),
+            lightmap,
         ));
     }
 
@@ -916,6 +979,7 @@ fn push_bsp_face_bsp(
     options: &ConvertOptions,
     missing_resources: &mut Vec<MissingResource>,
     texture_collector: Option<std::rc::Rc<std::cell::RefCell<crate::bsp_to_gltf_core::materials::TextureCollector>>>,
+    lightmap: Option<&LightmapExport>,
 ) -> gltf_json::mesh::Primitive {
     use bytemuck::cast;
 
@@ -926,6 +990,29 @@ fn push_bsp_face_bsp(
     let (min, max) = bounding_box(face.vertex_positions());
 
     let texture = face.texture();
+
+    // 阶段 2：lightmap UV（TEXCOORD_1）。无光照/图集时写中性常量，保证同块属性集一致
+    // （副本 renderer-main.ts 的 mergeGeometries(geoms, true) 要求属性集相同）。
+    let lightmap_region = lightmap.and_then(|export| {
+        export
+            .atlas
+            .regions
+            .get(face_index.max(0) as usize)
+            .copied()
+            .flatten()
+    });
+    let lightmap_uvs: Vec<[f32; 2]> = match (lightmap, lightmap_region) {
+        (Some(export), Some(region)) => {
+            let texinfo: &crate::vbsp::TextureInfo = &texture;
+            let vbsp_face: &crate::vbsp::Face = &face;
+            face.vertex_positions()
+                .map(|pos| lightmap::lightmap_uv(&export.atlas, region, vbsp_face, texinfo, pos))
+                .collect()
+        }
+        _ => vec![[0.0f32, 0.0f32]; vertex_count as usize],
+    };
+    let has_lightmap = lightmap_region.is_some();
+
     let vertices = face.vertex_positions().map(move |pos| BspVertexData {
         position: map_coords(pos),
         uv: texture.uv(pos),
@@ -981,6 +1068,40 @@ fn push_bsp_face_bsp(
     gltf.accessors.push(positions);
     gltf.accessors.push(uvs);
 
+    // 阶段 2：TEXCOORD_1 独立 buffer view + accessor（不改变 BspVertexData 的 stride，
+    // 避免给既有无光照路径增加每顶点 8 B 的几何开销）。
+    let lightmap_buffer_start = buffer.len() as u64;
+    buffer.extend_from_slice(bytemuck::cast_slice::<[f32; 2], u8>(&lightmap_uvs));
+    let lightmap_view = Index::new(gltf.buffer_views.len() as u32);
+    gltf.buffer_views.push(gltf_json::buffer::View {
+        buffer: Index::new(0),
+        byte_length: USize64(buffer.len() as u64 - lightmap_buffer_start),
+        byte_offset: Some(USize64(lightmap_buffer_start)),
+        byte_stride: None,
+        extensions: Default::default(),
+        extras: Default::default(),
+        name: None,
+        target: Some(gltf_json::validation::Checked::Valid(
+            gltf_json::buffer::Target::ArrayBuffer,
+        )),
+    });
+    gltf.accessors.push(gltf_json::Accessor {
+        buffer_view: Some(lightmap_view),
+        byte_offset: Some(USize64(0)),
+        count: USize64(vertex_count),
+        component_type: gltf_json::validation::Checked::Valid(
+            gltf_json::accessor::GenericComponentType(gltf_json::accessor::ComponentType::F32),
+        ),
+        extensions: Default::default(),
+        extras: Default::default(),
+        type_: gltf_json::validation::Checked::Valid(gltf_json::accessor::Type::Vec2),
+        min: None,
+        max: None,
+        name: None,
+        normalized: false,
+        sparse: None,
+    });
+
     let material_index = if options.textures {
         Some(push_or_get_material_bsp(
             buffer,
@@ -1006,11 +1127,15 @@ fn push_bsp_face_bsp(
                 gltf_json::validation::Checked::Valid(gltf_json::mesh::Semantic::TexCoords(0)),
                 Index::new(accessor_start + 1),
             );
+            map.insert(
+                gltf_json::validation::Checked::Valid(gltf_json::mesh::Semantic::TexCoords(1)),
+                Index::new(accessor_start + 2),
+            );
             map
         },
         extensions: Default::default(),
         extras: serde_json::value::RawValue::from_string(
-            format!(r#"{{"faceIndex":{}}}"#, face_index)
+            format!(r#"{{"faceIndex":{},"hasLightmap":{}}}"#, face_index, has_lightmap)
         ).ok(),
         indices: None,
         material: material_index,

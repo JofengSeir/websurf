@@ -7,7 +7,12 @@
 
 mod convert;
 mod gltf_builder;
+pub mod lightmap;
 pub(crate) mod materials;
+
+// 缺失纹理回退的表键与查表入口：供导出层（`crates/wasm`）对 PAKFILE 模型材质复用同一口径
+// （`materials` 模块保持 crate 私有，只门面式再导出这两项）。
+pub use materials::{fallback_key, fallback_texture_png};
 
 use thiserror::Error;
 use ahash::RandomState;
@@ -16,6 +21,11 @@ use std::hash::{BuildHasher, Hash, Hasher};
 
 /// 导出 BSP 文件为 GLTF 格式
 pub use convert::{export_bsp, export_bsp_with_models};
+/// 阶段 2：lightmap 图集与导出契约
+pub use lightmap::{
+    build_atlas, check_face_luxel_size, inject_lightmap_json, lightmap_faces, lightmap_uv,
+    LightmapAtlas, LightmapRect,
+};
 
 /// 资源类型
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +90,24 @@ pub struct ConvertOptions {
     /// 材质加载失败（BSP 内无 VMT/VTF）时查表 → 解码低清纹理嵌入 GLB。
     #[serde(default)]
     pub missing_fallback: std::collections::HashMap<String, String>,
+    /// pakfile 内 VMT 的**基名索引**：`基名小写` → `materials/` 前缀去扩展名的材质路径。
+    ///
+    /// 由导出入口用 `collect_pakfile_models` 的 `entry_names` 构建（`ConvertOptions::default()`
+    /// 下为空 ⇒ 不启用基名回退）。存在理由：世界面的贴图名来自 BSP texinfo（如
+    /// `METAL/METALGRATE013A2`），精确路径 `materials/metal/metalgrate013a2.vmt` 不在 pakfile 内时，
+    /// 作者**同一基名**的 VMT（`materials/666/metalgrate013a2.vmt`）仍携带权威的 `$basetexture`
+    /// 与 `$translucent`/`$alphatest` 声明 —— 实测 surf_666 有 14 种世界贴图（8400 面）属于此列。
+    #[serde(default)]
+    pub vmt_stem_index: std::collections::HashMap<String, String>,
+    /// 单页图集面积上界（px）的**显式覆盖**（默认 0 = 用政策上界 4096×2048 = 8,388,608）。
+    ///
+    /// 存在理由（契约 `documents/game/implementation/console-fix-contract.md` §4.3）：政策上界下，
+    /// 「装不下」这条失败路径对任何**真实** BSP 都不可能触发 —— 容量守卫与单面 256 上界共同保证
+    /// `packedArea ≤ (257/256)² × cap/4 < 8,388,608`（surf_666：≤ 7,318,032 px）。而 fail-visible
+    /// 分支**不得删除**、必须能用**仍会失败的输入**触发。该字段只改**判定阈值**，
+    /// 不改打包/落位/UV/像素口径，也不降采样、不截断。
+    #[serde(default)]
+    pub lightmap_max_atlas_area: u64,
 }
 
 impl ConvertOptions {
@@ -100,6 +128,8 @@ impl Default for ConvertOptions {
             texture_scale: 1.0,
             generate_missing_list: true,
             missing_fallback: std::collections::HashMap::new(),
+            vmt_stem_index: std::collections::HashMap::new(),
+            lightmap_max_atlas_area: 0,
         }
     }
 }

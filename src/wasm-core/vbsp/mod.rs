@@ -12,6 +12,10 @@ use crate::vbsp::bspfile::LumpType;
 pub use crate::vbsp::data::TextureFlags;
 pub use crate::vbsp::data::Vector;
 pub use crate::vbsp::data::*;
+
+/// prop ambient cube 的**唯一量级旋钮**（P3 校准用，decode_linear_ambient 结果统一乘它）。
+/// 1.0 = 外部参照实现口径（mantissa × 2^exp，不除 255）的原始值。
+pub(crate) const AMBIENT_SCALE: f32 = 1.0;
 use crate::vbsp::error::ValidationError;
 pub use crate::vbsp::handle::Handle;
 use binrw::io::Cursor;
@@ -166,6 +170,86 @@ impl<'a> IntoIterator for &'a mut Leaves {
     }
 }
 
+/// 光照 lump 数据（阶段 1）。
+///
+/// 覆盖 `LIGHTING`(8) 与 `LIGHTING_HDR`(53) 两个 lump，字节为
+/// `ColorRGBExp32` 样本序列（4 B/样本：R/G/B 尾数 u8 + 共享指数 i8）。
+///
+/// 择一规则**照抄外部参照实现的 `Lightmap.cs:55`**：以「HDR lump 是否非空」判定，
+/// 而不是比较长度（叶环境光走的是另一套「长度更大」规则，见 `AmbientCubes.cs:44`）。
+/// 注意本仓库 `BspFile::get_lump` 已按 lump 目录的 `ident != 0` 自动做 LZMA 解压
+/// （`vbsp/bspfile.rs:62-68`），故 `data.len()` 是**解压后**的真长
+/// （实测 surf_null.bsp：盘上 6,062,916 B → `data.len() == 22,961,620`）。
+#[derive(Debug, Clone)]
+pub struct LightingLump {
+    /// 是否取自 `LIGHTING_HDR`(53)。
+    pub is_hdr: bool,
+    /// 解压后的原始字节（每 4 字节一个 `ColorRGBExp32` 样本）。
+    pub data: Vec<u8>,
+    /// `LIGHTING`(8) 的目录项（选择证据，见 [`LightingLumpSource`]）。
+    pub ldr: LightingLumpSource,
+    /// `LIGHTING_HDR`(53) 的目录项（选择证据）。
+    pub hdr: LightingLumpSource,
+}
+
+/// 光照 lump 的目录项证据（**只记元数据，不额外持有另一份缓冲**）。
+///
+/// 判据来自 `get_lump`（`vbsp/bspfile.rs:62-68`）：`ident == 0` ⇒ 原始字节；
+/// `ident != 0` ⇒ Source `LZMA` 封装，且 `ident` 就是**期望解压长度**。
+/// 三图实测零反例（surf_null：LZMA 者 `ident == actualSize`、raw 者 `ident == 0`；
+/// surf_666 / ze_cursed：非空 lump 全 raw、`ident == 0`）。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LightingLumpSource {
+    /// lump 目录 `length`（盘上长度；LZMA 时是压缩流长度）。
+    pub dir_length: u32,
+    /// lump 目录 `ident`（0 = 未压缩；非 0 = LZMA 封装且值等于解压后字节数）。
+    pub ident: u32,
+}
+
+impl LightingLumpSource {
+    /// 解压后字节数：`ident != 0` 时取 `ident`，否则取盘上长度。
+    ///
+    /// **一切 luxel 预算/缓冲/页数都必须以它（而不是 `dir_length`）为分母**——
+    /// surf_null 用盘上长度会低估 3.8 倍（6,062,916 vs 22,961,620）。
+    pub fn decompressed_length(&self) -> u64 {
+        if self.ident != 0 {
+            self.ident as u64
+        } else {
+            self.dir_length as u64
+        }
+    }
+
+    pub fn is_compressed(&self) -> bool {
+        self.ident != 0
+    }
+
+    /// 空 lump（盘上长度 0）。
+    pub fn is_empty(&self) -> bool {
+        self.dir_length == 0
+    }
+}
+
+impl LightingLump {
+    /// 样本总数（= 解压后字节数 / 4）。要求字节数能被 4 整除，否则口径必错。
+    pub fn sample_count(&self) -> u64 {
+        (self.data.len() / 4) as u64
+    }
+
+    /// 解压后字节数（= 目录项 `ident`，二者必须一致；不一致说明解压口径有问题）。
+    pub fn decompressed_bytes(&self) -> u64 {
+        self.data.len() as u64
+    }
+
+    /// 选择依据的可读描述（写入导出契约，供 t4 做替代断言）。
+    pub fn chosen_kind(&self) -> &'static str {
+        if self.is_hdr {
+            "hdr"
+        } else {
+            "ldr"
+        }
+    }
+}
+
 // TODO: 将所有已分配对象内联存储以改善缓存利用率
 /// 已解析的 BSP 文件
 #[derive(Debug)]
@@ -189,6 +273,13 @@ pub struct Bsp {
     pub edges: Vec<Edge>,
     pub surface_edges: Vec<SurfaceEdge>,
     pub faces: Vec<Face>,
+    /// `FACES_HDR`(58) 面表；空表示该图没有独立的 HDR 面表。
+    ///
+    /// 外部参照实现的 `Lightmap.cs:65`：面光照使用 `FacesHdr` 非空则用 FacesHdr，
+    /// 否则用 Faces —— 必须与光照 lump 的择一规则同步，否则 `lightofs` 错位。
+    pub faces_hdr: Vec<Face>,
+    /// 光照 lump（`Lighting`/`LightingHdr`），两者都为空时为 `None`。
+    pub lighting: Option<LightingLump>,
     pub original_faces: Vec<Face>,
     pub vis_data: VisData,
     pub displacements: Vec<DisplacementInfo>,
@@ -197,6 +288,12 @@ pub struct Bsp {
     vertex_normals: Vec<VertNormal>,
     vertex_normal_indices: Vec<VertNormalIndex>,
     pub static_props: PropStaticGameLump,
+    /// Leaf ambient light cube（LDR/HDR 两组；空 = 该图无此 lump）。
+    /// prop 静态光照数据源（对齐外部参照实现的 ambient cube 机制，见 game.rs 注释）。
+    pub leaf_ambient_lighting: Vec<LeafAmbientSample>,
+    pub leaf_ambient_lighting_hdr: Vec<LeafAmbientSample>,
+    pub leaf_ambient_indices: Vec<LeafAmbientIndex>,
+    pub leaf_ambient_indices_hdr: Vec<LeafAmbientIndex>,
     pub pack: Packfile,
 }
 
@@ -265,6 +362,72 @@ impl Bsp {
         let faces = bsp_file
             .lump_reader(LumpType::Faces)?
             .read_vec(|r| r.read())?;
+        // FACES_HDR(58)：HDR 光照的面表（多数 v20 图为空）。读取失败时的处理与 Faces 一致。
+        let faces_hdr = bsp_file
+            .lump_reader(LumpType::FacesHdr)?
+            .read_vec(|r| r.read())?;
+        // 光照 lump 择一（外部参照实现 Lightmap.cs:55）：HDR 非空即 HDR，否则 LDR；
+        // 两者皆空 → None（该图无烘培光照）。get_lump 已自动 LZMA 解压，故此处拿到的是真长。
+        // 同时记录两条 lump 的目录项（dirLength/ident），让「选了哪个」可观测——
+        // 本地三图无法判别该规则（surf_666 仅 LDR、ze_cursed 仅 HDR、surf_null 两条同数据）。
+        let ldr_entry = bsp_file.lump_entry(LumpType::Lighting);
+        let hdr_entry = bsp_file.lump_entry(LumpType::LightingHdr);
+        let ldr_source = LightingLumpSource {
+            dir_length: ldr_entry.length,
+            ident: ldr_entry.ident,
+        };
+        let hdr_source = LightingLumpSource {
+            dir_length: hdr_entry.length,
+            ident: hdr_entry.ident,
+        };
+        let lighting = {
+            let hdr_raw = bsp_file.get_lump(LumpType::LightingHdr)?;
+            if !hdr_raw.is_empty() {
+                Some(LightingLump {
+                    is_hdr: true,
+                    data: hdr_raw.into_owned(),
+                    ldr: ldr_source,
+                    hdr: hdr_source,
+                })
+            } else {
+                let ldr_raw = bsp_file.get_lump(LumpType::Lighting)?;
+                if ldr_raw.is_empty() {
+                    None
+                } else {
+                    Some(LightingLump {
+                        is_hdr: false,
+                        data: ldr_raw.into_owned(),
+                        ldr: ldr_source,
+                        hdr: hdr_source,
+                    })
+                }
+            }
+        };
+        // 自检：解压后字节数必须等于目录项声明的解压后长度（ident != 0 时），且能被 4 整除。
+        if let Some(lighting) = &lighting {
+            let (source, lump_type) = if lighting.is_hdr {
+                (hdr_source, LumpType::LightingHdr)
+            } else {
+                (ldr_source, LumpType::Lighting)
+            };
+            let declared = source.decompressed_length();
+            if lighting.decompressed_bytes() != declared {
+                let got = lighting.decompressed_bytes() as u32;
+                let expected = declared as u32;
+                return Err(if source.is_compressed() {
+                    BspError::UnexpectedCompressedLumpSize { got, expected }
+                } else {
+                    BspError::UnexpectedUncompressedLumpSize { got, expected }
+                });
+            }
+            if lighting.decompressed_bytes() % 4 != 0 {
+                return Err(BspError::InvalidLumpSize {
+                    lump: lump_type,
+                    element_size: 4,
+                    lump_size: lighting.decompressed_bytes() as usize,
+                });
+            }
+        }
         let original_faces = bsp_file
             .lump_reader(LumpType::OriginalFaces)?
             .read_vec(|r| r.read())?;
@@ -290,6 +453,24 @@ impl Bsp {
         let static_props = game_lumps
             .find(data)
             .ok_or(ValidationError::NoStaticPropLump)??;
+        // Leaf ambient light（缺失/空 lump → 空 vec；多数图有，老图可能没有）。
+        // HDR 优先的择一口径与光照 lump 一致（见 prop_ambient_cube）。
+        let leaf_ambient_lighting_hdr = bsp_file
+            .lump_reader(LumpType::LeafAmbientLightingHdr)
+            .and_then(|mut r| r.read_vec(|r| r.read()))
+            .unwrap_or_default();
+        let leaf_ambient_lighting = bsp_file
+            .lump_reader(LumpType::LeafAmbientLighting)
+            .and_then(|mut r| r.read_vec(|r| r.read()))
+            .unwrap_or_default();
+        let leaf_ambient_indices_hdr = bsp_file
+            .lump_reader(LumpType::LeafAmbientIndexHdr)
+            .and_then(|mut r| r.read_vec(|r| r.read()))
+            .unwrap_or_default();
+        let leaf_ambient_indices = bsp_file
+            .lump_reader(LumpType::LeafAmbientIndex)
+            .and_then(|mut r| r.read_vec(|r| r.read()))
+            .unwrap_or_default();
 
         let bsp = Bsp {
             header: bsp_file.header().clone(),
@@ -310,6 +491,8 @@ impl Bsp {
             edges,
             surface_edges,
             faces,
+            faces_hdr,
+            lighting,
             original_faces,
             vis_data,
             displacements,
@@ -318,11 +501,116 @@ impl Bsp {
             vertex_normals,
             vertex_normal_indices,
             static_props,
+            leaf_ambient_lighting,
+            leaf_ambient_lighting_hdr,
+            leaf_ambient_indices,
+            leaf_ambient_indices_hdr,
             pack,
         };
         bsp.validate()?;
         Ok(bsp)
     }
+
+    /// prop 静态环境光：返回该 prop 采样点的 6 面 ambient cube（线性 RGB）。
+    ///
+    /// 对齐外部参照实现：
+    /// - 组选择：**HDR/LDR 长度比较**（AmbientCubes.cs:44 的 Hdr.Length > Lighting.Length 规则）才用
+    ///   HDR）——实测 surf_666 的 HDR 组全 0、LDR 组 99% 非零，非长度规则会选错组
+    /// - 查询点：flags 含 USE_LIGHTING_ORIGIN(0x2) 时用 `lighting_origin`，否则 `origin`（Source 坐标）
+    /// - leaf 定位：**BSP 树遍历**（对齐引擎 PointInLeaf / 外部参照实现 getLeafAt，
+    ///   线性扫 bounds 会命中错误的相邻 leaf）
+    /// - leaf 内多采样点：取距查询点最近的一个（BspModel.ts:141-165 为 nearest）
+    /// - 无数据 / 定位失败 / leaf 无采样 → 中性灰兜底（0.214 = 外部参照实现 0x7f 的线性值）
+    pub fn prop_ambient_cube(&self, prop_index: usize) -> Option<[f32; 18]> {
+        // 中性灰兜底：外部参照实现无 ambient 数据时顶点色写 0x7f（sRGB 0.5），
+        // 本工程在 linear 域工作，等价线性值 = ((0.5+0.055)/1.055)^2.4 ≈ 0.2139
+        // 中性灰兜底：新口径域（mantissa × 2^exp）下取实测 p50（surf_666 LDR 组
+        // p50 = 4.28e-5 × 255 ≈ 0.0109，见 prop-ambient-lighting.md §4.1），
+        // 与 AMBIENT_SCALE 联动 —— 保证兜底 prop 与正常 prop 同量级（P3 副判据）。
+        const NEUTRAL: [f32; 18] = [AMBIENT_SCALE * 0.0109; 18];
+        let Some(prop) = self.static_props.props.props.get(prop_index) else {
+            return Some(NEUTRAL);
+        };
+        let use_lighting_origin = (prop.flags.bits() & 0x2) != 0;
+        let lo = prop.lighting_origin;
+        let origin = prop.origin;
+        let p = if use_lighting_origin {
+            [lo.x, lo.y, lo.z]
+        } else {
+            [origin.x, origin.y, origin.z]
+        };
+        // 组选择：长度比较（HDR 组更长才用 HDR；两空时走 LDR 分支再由长度守卫拦下）
+        let use_hdr = self.leaf_ambient_lighting_hdr.len() > self.leaf_ambient_lighting.len();
+        let (indices, samples) = if use_hdr {
+            (&self.leaf_ambient_indices_hdr, &self.leaf_ambient_lighting_hdr)
+        } else {
+            (&self.leaf_ambient_indices, &self.leaf_ambient_lighting)
+        };
+        if indices.is_empty() || samples.is_empty() {
+            return Some(NEUTRAL);
+        }
+        // leaf 定位：BSP 树遍历（children[0]=正面，children<0 取反为 leaf 索引）
+        let mut node_idx: i32 = 0;
+        let mut leaf_idx: Option<usize> = None;
+        for _ in 0..256 {
+            let node = &self.nodes[node_idx as usize];
+            let plane = &self.planes[node.plane_index as usize];
+            let side = plane.normal.x * p[0] + plane.normal.y * p[1] + plane.normal.z * p[2]
+                - plane.dist;
+            let child = if side >= 0.0 { node.children[0] } else { node.children[1] };
+            if child >= 0 {
+                node_idx = child;
+            } else {
+                leaf_idx = Some((!child) as usize);
+                break;
+            }
+        }
+        let li = match leaf_idx {
+            Some(li) => li,
+            None => return Some(NEUTRAL),
+        };
+        let Some(index) = indices.get(li) else {
+            return Some(NEUTRAL);
+        };
+        if index.ambient_sample_count == 0 {
+            return Some(NEUTRAL);
+        }
+        let Some(leaf) = self.leaves.get(li) else {
+            return Some(NEUTRAL);
+        };
+        // 最近采样点（leaf 内相对位置 → 世界位置 → 距离平方最小者）
+        let mut best: Option<(f32, usize)> = None;
+        for k in 0..index.ambient_sample_count as usize {
+            let Some(s) = samples.get(index.first_ambient_sample as usize + k) else {
+                continue;
+            };
+            let rel = [s.x as f32 / 255.0, s.y as f32 / 255.0, s.z as f32 / 255.0];
+            let mut d2 = 0.0f32;
+            for a in 0..3 {
+                let w = leaf.mins[a] as f32 + rel[a] * (leaf.maxs[a] as f32 - leaf.mins[a] as f32);
+                let dd = w - p[a];
+                d2 += dd * dd;
+            }
+            if best.map_or(true, |(bd, _)| d2 < bd) {
+                best = Some((d2, index.first_ambient_sample as usize + k));
+            }
+        }
+        let Some((_, si)) = best else {
+            return Some(NEUTRAL);
+        };
+        let Some(s) = samples.get(si) else {
+            return Some(NEUTRAL);
+        };
+        let mut out = [0f32; 18];
+        for (j, face) in s.cube.iter().enumerate() {
+            let v = face.decode_linear_ambient();
+            out[j * 3] = v[0] * AMBIENT_SCALE;
+            out[j * 3 + 1] = v[1] * AMBIENT_SCALE;
+            out[j * 3 + 2] = v[2] * AMBIENT_SCALE;
+        }
+        Some(out)
+    }
+
 
     pub fn leaf(&self, n: usize) -> Option<Handle<'_, Leaf>> {
         self.leaves.get(n).map(|leaf| Handle::new(self, leaf))

@@ -58,8 +58,55 @@ fn get_material_index(materials: &[Material], path: &str) -> Option<Index<Materi
         .map(|i| Index::new(i as u32))
 }
 
+/// 贴图是否**自带真实镂空**（`alpha < 32` 的像素占比 ≥ 1%）。
+///
+/// 判据来自实机缺陷（2026-09-20 铁丝网/格栅）：`metal/metalgrate013a` 的贴图有 28.2% 像素
+/// `alpha == 0`、`metal/metalgrate013b` 有 11.8%，但二者在 BSP 内**没有**对应 VMT（stock 材质）
+/// ⇒ 导出为 `OPAQUE` ⇒ glTF 语义下这些像素只能被画成它们自己的 RGB（实测 ≈ `#131414` 近黑），
+/// 实机表现即「铁丝网的孔洞被涂成黑块」。
+///
+/// 反过来，`alpha == 0` 的像素在 glTF 里只有两种正当解释：`MASK` 裁掉，或 `BLEND` 混合。
+/// 全量核对（surf_666，219 个有贴图且有 primitive 的材质）：有孔洞的 12 个里 10 个已由 VMT/模型
+/// 标注为 MASK/BLEND，只有这 2 个漏标；其余 207 个 `alpha` 恒为 255 ⇒ 该判据的**影响面恰好
+/// 是漏标的那 2 个**，不会把任何不透明贴图变成镂空。
+///
+/// 阈值取 1% 且用 `alpha < 32`（比 `alphaCutoff 0.5` = `alpha < 128` 更保守）：滤掉边缘抗锯齿
+/// 与 mosaic 量化噪声，避免「一个像素半透明」就翻转整个材质。
+fn texture_has_alpha_holes(image: &image::DynamicImage) -> bool {
+    /// 视为「孔洞」的 alpha 上界（`alphaCutoff 0.5` 对应 128，这里更严）。
+    const HOLE_ALPHA: u8 = 32;
+    /// 孔洞像素占比下限（1%）。
+    const MIN_RATIO: f32 = 0.01;
+
+    if !image.color().has_alpha() {
+        return false;
+    }
+    let rgba = image.to_rgba8();
+    let raw = rgba.as_raw();
+    if raw.len() < 4 {
+        return false;
+    }
+    let total = raw.len() / 4;
+    let mut holes = 0usize;
+    let mut i = 3usize;
+    while i < raw.len() {
+        if raw[i] < HOLE_ALPHA {
+            holes += 1;
+        }
+        i += 4;
+    }
+    holes as f32 >= total as f32 * MIN_RATIO
+}
+
 /// 推送材质到 GLTF
 pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialData) -> Material {
+    // 贴图自带镂空？必须在 `material.texture` 被 `push_or_get_texture` 消费前判定。
+    let texture_has_holes = material
+        .texture
+        .as_ref()
+        .map(|tex| texture_has_alpha_holes(&tex.image))
+        .unwrap_or(false);
+
     let texture_index = material
         .texture
         .map(|tex| push_or_get_texture(buffer, gltf, tex));
@@ -68,6 +115,18 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
         (true, _) => AlphaMode::Blend,
         (false, true) => AlphaMode::Mask,
         _ => AlphaMode::Opaque,
+    };
+    // 未声明透明的材质，若**贴图自带镂空**则补判 MASK（见 `texture_has_alpha_holes`）：
+    // 没有这条，镂空像素会被当作实心 RGB 画出来（铁丝网孔洞变黑块）。
+    let alpha_mode = match alpha_mode {
+        AlphaMode::Opaque if texture_has_holes => AlphaMode::Mask,
+        other => other,
+    };
+    // `$alphatest` 未给数值时用 glTF 规范默认 0.5；MASK 必须带 cutoff 才能稳定裁切。
+    let alpha_cutoff = if alpha_mode == AlphaMode::Mask {
+        Some(material.alpha_test.map(AlphaCutoff).unwrap_or(AlphaCutoff(0.5)))
+    } else {
+        None
     };
 
     let transform = material.transform.map(|transform| TextureTransform {
@@ -82,10 +141,7 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
 
     Material {
         name: Some(material.name),
-        alpha_cutoff: material
-            .alpha_test
-            .map(AlphaCutoff)
-            .filter(|_| alpha_mode == AlphaMode::Mask),
+        alpha_cutoff,
         double_sided: material.no_cull,
         alpha_mode: Valid(alpha_mode),
         pbr_metallic_roughness: PbrMetallicRoughness {
@@ -107,6 +163,15 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
             metallic_factor: StrengthFactor(0.0),
             roughness_factor: StrengthFactor(1.0),
             ..PbrMetallicRoughness::default()
+        },
+        // `Wireframe` 着色器（只画边线）标记给运行时：three.js GLTFLoader 会把 material `extras`
+        // 放进 `material.userData`，替换材质时据此置 `wireframe = true`（见 lightmap-shader.ts）。
+        extras: if material.wireframe {
+            serde_json::value::to_raw_value(&serde_json::json!({ "vbsp_wireframe": true }))
+                .map(Some)
+                .unwrap_or_default()
+        } else {
+            Extras::default()
         },
         ..Material::default()
     }
