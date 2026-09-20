@@ -17,6 +17,7 @@
 | `apps/{debug,game,viewer}/` | 三个应用工程 | 各含完整前端与打包链，**互不引用** |
 | `src/` | 共享层 | Rust 物理（`phys/` = `websurf-phys`）、BSP 解析（`wasm-core/` = `websurf-wasm-core`）、TS 物理渲染共享（`ts-shared/`）、`materials/`、`vendor/vmdl/`、`serve.py`、`scripts/`（cargo 环境 + 文档漂移体检 `check-doc-drift.mjs`） |
 | `test/dual-mode-harness/` | 验证工程 | 三模式物理 + 渲染时序验证，**不参与 Pages 部署** |
+| `test/game-core/` | **本地实验工程（不入库）** | 光照/物理实验用的隔离工程（自带 `crates/wasm-core` 副本）。2026-09-21 起**不入库**（用户裁定），由仓库根 `.gitignore` 的 `test/game-core/` 排除；本机保留即可继续用，§2.1 隔离铁律仍适用于它。详见 §7.3 |
 | `documents/` | 文档树 | 根级 6 篇 + `debug/`、`game/`、`viewer/` 子树 |
 | `.github/` | CI 与模板 | `workflows/deploy-pages.yml`、Issue / PR 模板 |
 | 根级 `.md` | 仓库级元文档 | `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`、`AGENTS.md`（本文件） |
@@ -61,6 +62,10 @@ apps/<app>/
 ### 2.1 `test/*` 工程的绝对隔离铁律（2026-09-18 新增）
 
 `test/` 下的每个工程（如 `test/game-core`）必须**绝对隔离**：
+
+> ⚠️ 适用范围（2026-09-21）：`test/game-core` 已转为**本地工程**（不入库，`.gitignore` 排除）——
+> 本节铁律对它的**本地形态仍然有效**（不得引用仓库根 `src/`，需要共享层就逐字节副本化到工程内）；
+> 仓库内可入库的 `test/` 工程目前只有 `test/dual-mode-harness`。
 
 - 不得以任何形式（TS import / Rust path 依赖 / 脚本 import / 运行期引用 / 元数据声明）引用仓库根 `src/`；需要共享层的任何部分时，**逐字节副本化到工程内**（`fs.cpSync` / `Copy-Item`，禁止文本管道），副本就地演进。
 - 隔离验收的**唯一硬指标**：把仓库根 `src/` 整体移出工作区后，该工程的 `npm run typecheck`、`npm run build:ts`、`cargo check` 三项全部通过；实验后 `src/` 必须移回并以逐文件 sha256 证明字节零改动。
@@ -238,8 +243,22 @@ git status --short --untracked-files=all   # ?? 即「未追踪且未被忽略�
 | 7.2.2 | 代码注释引用已移出的规划文档 | `src/ts-shared/{auth,tick}/*.ts` 共 3 处引用 `temp/phys-plan-discuss/…`，均**已自带「2026-09 清理」标注**，属诚实记载，无需修改 |
 | 7.2.3 | `.agent-teams/` 工具状态目录留在工作区 | 已被 `.gitignore` 忽略；如不再使用可删除，删除前确认无运行中的编排流程 |
 | 7.2.4 | ~~共享层在 `test/game-core` 内的隔离副本（`crates/wasm-core` 0.1.0-fork）不随根部演进~~ **已闭环（2026-09-20）** | 回并按 [lighting-merge-plan.md](./documents/game/implementation/lighting-merge-plan.md) §6.2 执行：`src/wasm-core/**`（+ 新增 `lightmap.rs`/`vhv.rs`）、`src/phys/world.rs`、`src/ts-shared/phys/{world-builder,authority-calibrator}.ts` 逐字节回并（提交 `8d24b24`），随后三个模块工程按新共享 API 适配（`3eb471e` debug、`9d342a9` viewer、`8d24b24` game）。**剩余登记**：`test/game-core` 仍保留其隔离副本（AGENTS.md §2.1 铁律未变），但**后续共享层演进应落根部**、由副本按需重新副本化；`lightmap-shader.ts` 暂按工程各持一份（上提 `src/ts-shared/render/` 会引入共享层首个 npm 依赖 three，而仓库根无 `package.json`/`node_modules` ⇒ 需先裁定 tsc `paths` + esbuild `--alias` 方案，见 §7.2.5） |
-| 7.2.5 | 光照着色器未上提到共享层（待裁定） | `apps/{game,debug,viewer}` 各持一份 `src/renderer/lightmap-shader.ts`（**1815 行，三份逐字节同源**，sha256 `c7068015…`；viewer 副本于 2026-09-21 接入光照栈时新增）；上提到 `src/ts-shared/render/` 的**唯一阻碍**是 `import * as THREE from 'three'` 的解析：共享层位于仓库根下，而 `node_modules/three` 在各工程内。两条候选：① 仓库根加 `package.json`（npm workspace 或仅 devDependency three）；② 各工程 tsconfig `baseUrl`+`paths` 与 esbuild `--alias:three=<工程>/node_modules/three`。本轮保持工程内副本，未擅自选型。**另注**：`test/game-core` 的隔离副本仍是改动前的版本（其 `scripts/lightmap-inject-guard-selftest.mjs` 因此只覆盖旧代码；apps 三份由一次性探针逐项复检 13×3 条，见 `CHANGELOG.md` 2026-09-21 条目）——副本重新副本化的时机与方式待裁定 |
+| 7.2.5 | 光照着色器未上提到共享层（待裁定） | `apps/{game,debug,viewer}` 各持一份 `src/renderer/lightmap-shader.ts`（**1815 行，三份逐字节同源**，sha256 `c7068015…`；viewer 副本于 2026-09-21 接入光照栈时新增）；上提到 `src/ts-shared/render/` 的**唯一阻碍**是 `import * as THREE from 'three'` 的解析：共享层位于仓库根下，而 `node_modules/three` 在各工程内。两条候选：① 仓库根加 `package.json`（npm workspace 或仅 devDependency three）；② 各工程 tsconfig `baseUrl`+`paths` 与 esbuild `--alias:three=<工程>/node_modules/three`。本轮保持工程内副本，未擅自选型。**另注**：光照注入守卫自检 `test/game-core/scripts/lightmap-inject-guard-selftest.mjs` 位于**本地工程**内（不入库，见 §7.3），其覆盖的是该副本自己的版本；apps 三份由一次性探针逐项复检 13×3 条，见 `CHANGELOG.md` 2026-09-21 条目 |
 | 7.2.6 | `documents/debug/*` 的行号锚点整体过期 | debug 接入共享光照栈（2026-09-20 `3eb471e`）把 `renderer/renderer-main.ts` 从 ~1023 行扩到 ~1771 行、本轮 2026-09-21 到 **1792** 行，但 `documents/debug/{overview,implementation/loading-pipeline,implementation/rendering,differences,sequences}.md` 的 `renderer-main.ts:NNN` / `app.ts:NNN` 锚点仍是接入前的行号（实测样本：`rendering.md` 写 `loadScene, renderer-main.ts:328-408`，实际 `:516` 起）。`check-doc-drift.mjs` 只查「是否越界」⇒ 全在范围内、静默通过。本轮只校准了光照/装载相关锚点并在 `rendering.md` 顶部加了基准说明；**全量重锚**已登记待做 |
 | 7.2.7 | game 面板偏好会跨会话影响自动化基线 | `apps/game` 的「光照模式」写入 localStorage，上一轮自动化若停在「纯纹理」，下一轮的"预烘焙基线"其实就是纯纹理（实测 `modeEffect=0.002` 的假阴性）。探针已改为每轮开头强制归位并打印 `before=`；**产品行为正确**（偏好本就该持久化），仅提醒后续脚本注意 |
+
+### 7.3 `test/game-core` 转为本地工程（2026-09-21）
+
+用户裁定：**不把该实验工程推到远端**。执行与证据：
+
+| 项 | 事实 |
+|---|---|
+| 剥离方式 | `git filter-branch -f --index-filter "git rm -r --cached --ignore-unmatch test/game-core" --prune-empty a5cd4c2..HEAD`（只剥路径，保留每个提交里非该路径的改动） |
+| 结果 | 未发布提交 **32 → 24**（8 个「只动 test/game-core」的提交被 `--prune-empty` 剪掉）、文件 **226 → 76**、行数 **+59732 → +12784** |
+| 为什么不用 force | 远端 `a5cd4c2` **从未包含**该工程 ⇒ 新链仍以它为祖先，推送是 **fast-forward** |
+| 本地保留 | 工程目录仍在工作区（12396 文件）；仓库根 `.gitignore` 新增 `test/game-core/`（含注释说明如何恢复入库） |
+| 门禁适配 | `test/dual-mode-harness/scripts/cross-project-glb-contract.mjs` 把该工程标为 `optional`：本机有 ⇒ 照常断言（实测 **4/4 PASS**）；干净检出无此目录 ⇒ **SKIP + exit 0**（实测 3 PASS + 1 SKIP） |
+| 备份 | 分支 `backup/pre-game-core-strip`（= 剥离前的 `000752d` 原链）与 `.tmp/backup-test-game-core/`（工作树全量副本） |
+| 已知残留 | 若提交 message 含 `fix(game-core): …` 但内容只剩文档改动（如 `51e8035`、`0def733` 等），属剥离后的正常现象——代码改动随路径一并移除；需要改写 message 时另行处理 |
 
 > 处理本表任一问题后，请同步更新本表并（如涉及）补 `CHANGELOG.md` 条目。
