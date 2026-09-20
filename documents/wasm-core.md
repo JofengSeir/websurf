@@ -22,10 +22,10 @@
 
 | 模块 | 关键文件 | 职责（一句话） |
 |---|---|---|
-| `vbsp` | `vbsp/mod.rs`(622)、`bspfile.rs`(142)、`reader.rs`(147)、`data/*.rs`、`error.rs`(135)、`handle/mod.rs`(379) | BSP 二进制解析（crates.io vbsp 0.6.0 本地修复版） |
-| `bsp_to_gltf_core` | `mod.rs`(151)、`convert.rs`(1045)、`materials.rs`(337)、`gltf_builder.rs`(202) | BSP → GLB（地图几何 + 材质 + 缺失资源清单） |
-| `model_integrator` | `model_integrator/mod.rs`(1045) | `.mdl/.vvd/.vtx` 模型合并进 GLB（放置/网格/光照） |
-| `pakfile_models` | `pakfile_models.rs`(271) | PAKFILE 模型的 VMT 材质解析 + 碰撞体数据准备 |
+| `vbsp` | `vbsp/mod.rs`(910)、`bspfile.rs`(152)、`reader.rs`(147)、`data/*.rs`、`error.rs`(135)、`handle/mod.rs`(379) | BSP 二进制解析（crates.io vbsp 0.6.0 本地修复版） |
+| `bsp_to_gltf_core` | `mod.rs`(151)、`convert.rs`(1170)、`materials.rs`(475)、`gltf_builder.rs`(267) | BSP → GLB（地图几何 + 材质 + 缺失资源清单） |
+| `model_integrator` | `model_integrator/mod.rs`(1254) | `.mdl/.vvd/.vtx` 模型合并进 GLB（放置/网格/光照） |
+| `pakfile_models` | `pakfile_models.rs`(328) | PAKFILE 模型的 VMT 材质解析 + 碰撞体数据准备 |
 | `phyfile` | `phyfile.rs`(305) | `.phy`（vphysics）凸包碰撞解析 |
 | `texture_utils` | `vtf.rs`(409)、`image.rs`(179)、`mod.rs`(44) | VTF 解码（textracto BC 解压 → DynamicImage） |
 | `mosaic` | `mtz.rs`(910)、`encode.rs`(190)、`decode.rs`(159)、`manifest.rs`(79)、`mod.rs`(10) | 棋盘马赛克纹理字节码（v4 DSL）+ MTZ5/6 压缩容器 |
@@ -93,7 +93,7 @@ BSP bytes
 | 自适应 leaf | leaf 记录 32B（老版 v1 布局）vs 56B（标准）按树内最大 leaf 索引启发式选择 | `vbsp/reader.rs` `read_leaves(max_leaf_index)`；调用点 `vbsp/mod.rs:229-240` |
 | PVS 读取修复 | `read_visdata` 的 bitofs 相对 lump 起点而非当前位置——解压后需回卷 lump 头再读 | `vbsp/reader.rs` `read_visdata`（seek 回 0） |
 | 实体解析 | `read_entities` 全小写化；`Entities::iter` 以 `{...}` 扫描产出零拷贝 `RawEntity` | `vbsp/reader.rs`、`vbsp/data/entity.rs:13-46` |
-| 结构体全集 | `data/mod.rs`(1069)：Plane/Node/Leaf/Model/Brush(+`is_visible`)/BrushSide/Face(+displacement_index)/VisData(`visible_clusters` + `decode_pvs_row`)/Packfile(zip，`get/has/into_zip` Mutex 包裹)/Angles/Vector/FixedString；`data/game.rs`(371)：GameLumpHeader::find + static props（sprp）；`data/entity.rs`(915)：实体属性访问 | `vbsp/data/mod.rs:58-760`、`vbsp/data/game.rs:13-40` |
+| 结构体全集 | `data/mod.rs`(1069)：Plane/Node/Leaf/Model/Brush(+`is_visible`)/BrushSide/Face(+displacement_index)/VisData(`visible_clusters` + `decode_pvs_row`)/Packfile(zip，`get/has/into_zip` Mutex 包裹)/Angles/Vector/FixedString；`data/game.rs`(434)：GameLumpHeader::find + static props（sprp）；`data/entity.rs`(915)：实体属性访问 | `vbsp/data/mod.rs:58-760`、`vbsp/data/game.rs:13-40` |
 | 错误体系 | `BspError`（thiserror）+ ValidationError/InvalidNeighbourError/EntityParseError | `vbsp/error.rs:1-135` |
 | 借用句柄 | `Handle<'a,T>{bsp,data}` 包装 lump 数据与其宿主 Bsp 的借用关系 | `vbsp/handle/mod.rs` |
 

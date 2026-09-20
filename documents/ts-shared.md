@@ -33,8 +33,8 @@
 | `input/mouse-buffer.ts`(128) | 输入（2026-09 上提共享） | 单事件绝对削平（CLAMP ±1000）+ discardNext（Pointer Lock 变化后丢首事件）；`process()` 为唯一活跃路径，`push/drain` 为遗留未用路径 |
 | `input/pointer-lock.ts`(154) | 输入（2026-09 上提共享） | Pointer Lock 请求（`unadjustedMovement:true` 禁 OS 加速）+ 旧浏览器 void 降级 + 3s 超时 + 锁定变化/错误回调 |
 | `phys/params.ts`(62) | 物理 | 前端配置 → Rust `set_params` snake_case 全量映射 |
-| `phys/world-builder.ts`(248) | 物理 | 地图加载管线：`BspProcessor` 字节级导出 → `WorldBundle` |
-| `phys/authority-calibrator.ts`(668) | 物理 | 渲染主线 vs 权威帧的校准四件套（只读权威）+ 解耦消费外推纯函数 |
+| `phys/world-builder.ts`(249) | 物理 | 地图加载管线：`BspProcessor` 字节级导出 → `WorldBundle` |
+| `phys/authority-calibrator.ts`(677) | 物理 | 渲染主线 vs 权威帧的校准四件套（只读权威）+ 解耦消费外推纯函数 |
 | `phys/angles.ts`(38) | 物理（**D-08 批 4 新增**） | `wrapDeg` + `bspYawToCsYaw`（=`wrap(src+180)`）全 TS 侧单一份；语义归一口径取 viewer 版（带 `\|\| 0`，`-0` 归一为 `+0`） |
 | `phys/constants.ts`(19) | 物理（**D-16 批 4 新增**） | 标定常量 `EYE_STAND = 64.09` TS 单点；与 Rust 权威 `src/phys/player.rs:34` 逐位相等，由 `check-shared-sync.mjs` 的 `eye-stand` 门禁保证 |
 | `wasm/loader.ts`(72) | WASM（**D-09 批 4 新增**） | 字节获取三原语：`base64ToBytes`（**全仓唯一 `atob`**）+ `readEmbeddedWasmB64` + `fetchWasmBytes`；硬约束：不得 import 任何工程 `pkg/*`，`initSync` 留工程内 |
