@@ -233,7 +233,7 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 | hold 冻结 | `runHeldRound`：逐轮 `set_state(held, vel=0)` + 时间/输入丢弃 + tickPhys 同步冻结；松开 release = 多实例 set_state 全量恢复（worker 侧执行见 harness `src/worker-a.ts:301-323`） | `:274-295` |
 | 对齐/复位 API | `alignTickPhys`（tickPhys←phys 全量 set_state，`:172-190`）/ `resetSamplers(align?)`（acc/loAcc/tickDx/tickDy 清零 + lastNow 刷新，`:421-429`）/ `onTickRateChanged`（清采样器+对齐，速率值变化不重置主累积器，`:415-419`）/ `publishCurrentState`（`:430-432`）/ `start`（`:434-439`，幂等） | `:414-440` |
 
-**S_D 写入者唯一**：worker 侧解耦线是 S_D 槽唯一写入者——`writeDecoupled` 调用仅存在于 decoupled-loop（S_D 唯一写入侧，调用簇 `decoupled-loop.ts:229/:261/:286`，publishFromStateOut/publishFromState/runHeldRound 内），`:397-399` 为循环侧调用入口；主线程纯消费（§3.7 末行 + `test/dual-mode-harness/src/main.ts:125-126`「WorkerB 也持 auth 通道」）。热切交接时序见 harness [sequences.md](../test/dual-mode-harness/docs/sequences.md)。
+**S_D 写入者唯一**：worker 侧解耦线是 S_D 槽唯一写入者——`writeDecoupled` 调用仅存在于 decoupled-loop（S_D 唯一写入侧，调用簇 `decoupled-loop.ts:229/:261/:286`，publishFromStateOut/publishFromState/runHeldRound 内），`:397-399` 为循环侧调用入口；主线程纯消费（§3.7 末行 + `test/dual-mode-harness/src/main.ts:125-126`「WorkerB 也持 auth 通道」）。热切交接时序见 harness [sequences.md](./dual-mode-harness/sequences.md)。
 
 ---
 
@@ -252,7 +252,7 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 | `onExtraMessage` 钩子 | 物理面板参数/快照消息 | 不使用 | `worker-dispatch.ts:133`（可选钩子声明）、`:483`（调用点）、debug `worker/physics-worker.ts` |
 | **三模式装配** | 未注入（`tickPhys/scratch/decoupledLoop/getComputeMode/onSetMode/onSetHold/tickExternalBreak/onWorldRebuilt` 全缺省）→ 解耦/tick 面不激活，v7 行为零变化 | 同 debug：`apps/game/src/worker/main.ts:80-93` 只传通用钩子 + `getConfigTickRate`，**无任何模式钩子**（`c4824e9` 回退前曾全注入） | `worker-dispatch.ts:85-110`（可选钩子声明）、debug `worker/main.ts:94-120`、game `src/worker/main.ts:80-93`、harness `test/dual-mode-harness/src/worker-a.ts:331-340`（唯一全注入方） |
 
-工程侧实现细节见 `documents/debug/`、`documents/game/`（另篇）；三模式运行时装配见 `test/dual-mode-harness/docs/`（另篇）。
+工程侧实现细节见 `documents/debug/`、`documents/game/`（另篇）；三模式运行时装配见 `documents/dual-mode-harness/`（另篇）。
 
 ### 4.2 viewer：接入 3 个共享单点，其余正当隔离
 
@@ -262,7 +262,7 @@ viewer 无物理、无双线程、无输入协议——**不**因「共享层有
 
 harness 自建 **192B TestShared SAB**（布局：控制区 `[0]TICK_RATE`/`[1]WAKEUP`、BigInt64 输入槽 dxAcc/dyAcc（i64 索引 1/2）、`[6]keysMask`、`[7]RENDER_WAKEUP`（WorkerB 专用唤醒，与 WAKEUP 分离）、`[8]V` + 双缓冲 Float64 槽0[5..12]/槽1[13..20]（pos×3/vel×3/yaw/pitch），共 192B，`test/dual-mode-harness/src/shared-state.ts:5-21` 布局注释），头注明确「与 ts-shared 512B 权威帧协议**不是**同一套」（`:2-4`）。
 
-但**三模式物理不再走这条私有通道**：harness 另开 **auth 通道**（`ShmState`，512B，即本文协议，`src/main.ts:17-18,128-143`），三种模式的物理计算（auth-loop / decoupled-loop / tick-authority）全部经它消费输入、发布权威帧；192B 通道降为**渲染专用**——WorkerA 每次发布即镜像帧进 TestShared（`src/worker-a.ts:103-115`），WorkerB 渲染路径零改动（`src/worker-b.ts:737`）。因此 harness 对共享层的使用面 = **6 模块**（§1.2）+ `KEY_MASK` 位定义（`:51` import，注释「杜绝位定义漂移」），而非仅 KEY_MASK。两套协议的设计差异（双物理实例 + 双唤醒槽 vs 单权威 + V_A 版本号；CAS 消费输入 vs exchange 饱和截断）对照见 `test/dual-mode-harness/docs/`（另篇）。
+但**三模式物理不再走这条私有通道**：harness 另开 **auth 通道**（`ShmState`，512B，即本文协议，`src/main.ts:17-18,128-143`），三种模式的物理计算（auth-loop / decoupled-loop / tick-authority）全部经它消费输入、发布权威帧；192B 通道降为**渲染专用**——WorkerA 每次发布即镜像帧进 TestShared（`src/worker-a.ts:103-115`），WorkerB 渲染路径零改动（`src/worker-b.ts:737`）。因此 harness 对共享层的使用面 = **6 模块**（§1.2）+ `KEY_MASK` 位定义（`:51` import，注释「杜绝位定义漂移」），而非仅 KEY_MASK。两套协议的设计差异（双物理实例 + 双唤醒槽 vs 单权威 + V_A 版本号；CAS 消费输入 vs exchange 饱和截断）对照见 `documents/dual-mode-harness/`（另篇）。
 
 移植关系（历史与现状）：`decoupled/decoupled-loop.ts` 由 harness 早年的 **WorkerA 编排**（模式A 1ms 无限制真理源 + 模式B 64t tickPhys 速度校准 + 分叉锚定 + 背压）平移而来（§3.8，全序对照 `decoupled-loop.ts:10-15` 头注）；该共享实现随后被 game 的解耦模式装配使用，**game 已整体回退**（`c4824e9`），当前服务对象回到 harness 自身（`src/worker-a.ts:199-211`）。**WorkerB/OffscreenCanvas 渲染始终是 harness 专属，从未进共享层**。`consumeInput`（CAS 不限幅）与耦合线 `takeInput`（exchange 饱和截断）在 ts-shared 内并存，harness 的三模式装配同时使用两者。
 

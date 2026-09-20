@@ -2,7 +2,7 @@
 
 > **事实基准**：本文档最后核对 2026-09-11，以实际代码为准（`src/worker-a.ts` / `src/shared-state.ts`
 > / `src/worker-b.ts` / `src/main.ts`）。「64t 坡速 ≈ 无限制」成因分析、会审结论与修复架构详见
-> **[CONCLUSION.md](CONCLUSION.md)**（2026-08-11 会审 + 双模核心重构后的事实基准，两文档对齐）。
+> **[implementation/conclusion.md](./implementation/conclusion.md)**（2026-08-11 会审 + 双模核心重构后的事实基准，两文档对齐）。
 
 > 目的：验证一套独立的 输入 → 三模物理 → 帧信号渲染 循环：主线程仅输入转发 / UI → SAB 无锁
 > （WAKEUP/RENDER_WAKEUP 双唤醒槽 + 双缓冲状态槽）→ WorkerA 三模物理 → WorkerB OffscreenCanvas 渲染
@@ -62,7 +62,7 @@ WorkerB (src/worker-b.ts) — three.js 第一人称渲染（帧信号驱动）
      ★ 发布不 notify RENDER_WAKEUP（帧信号驱动渲染）；消息回退模式同 API 双实现（msg-*）
 ```
 
-## 二、关键语义（与 CONCLUSION.md 对齐）
+## 二、关键语义（与 [implementation/conclusion.md](./implementation/conclusion.md) 对齐）
 
 | 项 | 语义 |
 |---|---|
@@ -113,7 +113,7 @@ test/dual-mode-harness/
     workerb-isolated.mjs  WorkerB 隔离纯渲染上限测试
     trace-verify.mjs      trace 公共链路验证（Chrome headless + CDP：开始→保存→无错误）
     dual-compare.mjs      test 双模 vs game 双线数据对照（关键指标 <15%；旧名 tmp-dual-compare.mjs）
-  docs/                 源码解析文档（overview 总览 / sequences 时序 / implementation×2 细分 / differences 差异；旧档在 docs/archive/）
+  docs/                 仅余 archive/ 5 篇历史归档（正文文档已于 2026-09-13 收拢至 documents/dual-mode-harness/）
 ```
 
 > 注：`phys-smoke.mjs` 在 node 环境复制镜像 TestShared / ModeAB（核心逻辑与

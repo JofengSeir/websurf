@@ -254,7 +254,7 @@ node scripts/t13-ulp-sensitivity-control.mjs # 1 ULP 灵敏度阳性对照
 
 ### 4.3 与 dual-mode-harness 的关系
 
-harness 的双模物理（WorkerA 内两个 PhysWorld 实例 + `set_velocity` 速度校准通道）完全构建在本 crate 的 `tick/set_state/set_velocity` 原语上，不改动物理本身；其私有 SAB 协议（192B）与 ts-shared 权威帧协议（512B）是两套并存方案，对照见 [ts-shared.md](./ts-shared.md) §4.3 与 `test/dual-mode-harness/docs/`（另篇）。
+harness 的双模物理（WorkerA 内两个 PhysWorld 实例 + `set_velocity` 速度校准通道）完全构建在本 crate 的 `tick/set_state/set_velocity` 原语上，不改动物理本身；其私有 SAB 协议（192B）与 ts-shared 权威帧协议（512B）是两套并存方案，对照见 [ts-shared.md](./ts-shared.md) §4.3 与 `documents/dual-mode-harness/`（另篇）。
 
 ### 4.4 已知口径偏差
 

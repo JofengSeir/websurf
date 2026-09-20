@@ -9,7 +9,7 @@
 > **现行文档**：
 > - 管线与模块全貌 → [implementation/replay-system.md](implementation/replay-system.md)
 > - `.replay` 格式规格与坐标定标 → [implementation/shavit-replay-format.md](implementation/shavit-replay-format.md)
-> - 使用方式 → [../../apps/viewer/README.md](../../apps/viewer/README.md)
+> - 使用方式 → [../../documents/viewer/README.md](./README.md)
 >
 > 本文余下内容仅供历史参考：原来的 `.js` 单表达式规则写法契约、提示词模板与自家标准 JSON 格式说明。
 > 完整原稿（未删节）已移出版本库，可在 git 历史中追溯。

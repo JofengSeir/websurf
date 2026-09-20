@@ -89,7 +89,7 @@
 
 - harness 的 WorkerA/WorkerB 三线程协议与 ts-shared **不是同一套**：独立的 `TestShared` SAB（192B 布局，`test/dual-mode-harness/src/shared-state.ts`），背压 waitWakeup、MessageChannel 自续环、msg-main/msg-physics/msg-render 三角色消息回退。debug 用 ts-shared 512B 布局 + setTimeout 4ms 自驱，无背压。
 - ts-shared 消费面：harness 只 import `KEY_MASK`（键位掩码常量），其余全部自持。
-- harness 的价值是物理公平性对照实验（双模 tick/锚定拉回/速度校准细节见其自身文档 `test/dual-mode-harness/docs/overview.md`）；debug 不做锚定拉回，用的是速度外推 + 大偏差反向同步。
+- harness 的价值是物理公平性对照实验（双模 tick/锚定拉回/速度校准细节见其自身文档 `documents/dual-mode-harness/overview.md`）；debug 不做锚定拉回，用的是速度外推 + 大偏差反向同步。
 
 ## 6. 对共享层的取舍（debug 视角）
 

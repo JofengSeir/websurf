@@ -10,7 +10,7 @@
 > 因此本工程不再是「双模」而是「三模式 + 热切」；`src/worker-a.ts` 由双模循环本体变为**装配层**
 > （原 1ms+64t 循环已抽到 `decoupled-loop.ts`）。
 >
-> 背景材料（未经本文重复核验、仅供溯源）：[../CONCLUSION.md](../CONCLUSION.md)（2026-08-11 会审结论，其「双模」结论针对迁移前的 worker-a 双实例架构，物理结论仍然有效）、[./archive/README.md](./archive/README.md)（旧解析文档归档）。
+> 背景材料（未经本文重复核验、仅供溯源）：[implementation/conclusion.md](./implementation/conclusion.md)（2026-08-11 会审结论，其「双模」结论针对迁移前的 worker-a 双实例架构，物理结论仍然有效）、[./archive/README.md](../../test/dual-mode-harness/docs/archive/README.md)（旧解析文档归档）。
 
 ## 1. 工程定位
 
@@ -54,7 +54,7 @@
 
 ## 3. 时序图阶段编号（0/1/2/3/4）
 
-代码注释沿用统一时序图阶段编号（旧时序图见 [./archive/runtime-sequence.md](./archive/runtime-sequence.md)，当前实现以本文与 [./sequences.md](./sequences.md) 为准）：
+代码注释沿用统一时序图阶段编号（旧时序图见 [./archive/runtime-sequence.md](../../test/dual-mode-harness/docs/archive/runtime-sequence.md)，当前实现以本文与 [./sequences.md](./sequences.md) 为准）：
 
 | 阶段 | 内容 | 执行者 | 代码出处 |
 |---|---|---|---|
@@ -75,7 +75,7 @@
 | `src/renderer/tick-consumer.ts`（+`.test.ts`） | 885 | **迁自 game**：tick 模式渲染消费器——α 确定性网格弦插值、六显示态、Δ 事件驱动控制器、断窗八类（114 断言单测随迁） |
 | `src/panel/tick-telemetry-format.ts`（+`.test.ts`） | 98 | **迁自 game**：tick 遥测账行格式化（`formatWorkerStatsLine`/`buildTelemetryPayload`/`formatMarkers`；37 断言单测随迁） |
 | `src/worker/phys-instances.ts`（+`t4-chain.test.ts`） | 43 | **迁自 game**：三实例参数扇出（纯函数）+ 三模式链路装配单测（10 例，含 §P8 `set-mode` 三值分派与幂等） |
-| `src/wasm.d.ts` | 6 | WASM 类型入口：re-export wasm-pack 产物类型（`../pkg/websurf_test_wasm.js`） |
+| `src/wasm.d.ts` | 6 | WASM 类型入口：re-export wasm-pack 产物类型（`../../test/dual-mode-harness/pkg/websurf_test_wasm.js`） |
 | `crates/wasm/src/lib.rs` | 1941 | `websurf-test-wasm` 薄导出层：`pub use websurf_phys::phys::PhysWorld`（`:35`）+ `BspProcessor` 最小导出集（metadata/brushes/model 碰撞/spawn/GLB，`:322-1760`；teleport/pvs 保留 API 但主流程不调用，`:18-19`）；2026-09-11 重建后新增共享 `seed_from`/`set_state_ex`/`state_full_json` 导出（tick 模式 F4-C 前提） |
 | `index.html` | 122 | 页面骨架：canvas#game、HUD、难度按钮组（0/32/64/128/256/1000，默认 64）、**计算模式按钮组（耦合/解耦/tick）**、tick 遥测账行、BSP 加载栏；`<script type="module" src="./app.js">` |
 | `scripts/`（12 个 .mjs） | — | 验证脚本群（见 §6），含 **`three-mode-verify.mjs`（三模式运行时验证）** |
@@ -118,7 +118,7 @@
 | `flicker-debug.mjs` | 707 | 屏闪根因排查（双缓冲协议压力测试 + 逐版本一致性断言，`scripts/flicker-debug.mjs:1-8`） |
 | `check-wasm-api.mjs` | 56 | WASM API 契约校验（**自带独立实现**，见 §5） |
 | `build-dist.mjs` | 76 | dist 构建（**自带独立实现**，见 §5） |
-| `trace-verify.mjs` | 99 | ⚠️ 历史残留：验证「TraceRecorder→main→TraceRenderer 3D 路径线」链路（`scripts/trace-verify.mjs:1-6`），但当前 `src/` 已无任何 Trace 代码（grep `Trace` 于 src/、index.html、package.json 均为空）——trace/FOV 已随最小集移除（`../CONCLUSION.md:119-124` 如实记录），此脚本仅作存档 |
+| `trace-verify.mjs` | 99 | ⚠️ 历史残留：验证「TraceRecorder→main→TraceRenderer 3D 路径线」链路（`scripts/trace-verify.mjs:1-6`），但当前 `src/` 已无任何 Trace 代码（grep `Trace` 于 src/、index.html、package.json 均为空）——trace/FOV 已随最小集移除（`./implementation/conclusion.md:119-124` 如实记录），此脚本仅作存档 |
 | `phys-smoke.mjs` 内的 PVS 镜像 | — | ⚠️ 同为历史残留：`PvsMirror` 头注自称「worker-b.ts PvsManager 完整镜像」（`scripts/phys-smoke.mjs:487-488`），但当前 worker-b.ts 已无 PVS 代码（PVS 不在最小集，`src/main.ts:170`）——该镜像块仅作独立回归保留 |
 
 > 写作纪律示例：上述两条 ⚠️ 即「文档以当前代码为准」的落实——脚本头注与当前 src 不一致时，以 src 为准并注明残留。
@@ -126,9 +126,9 @@
 ## 7. 文档导航
 
 - [./sequences.md](./sequences.md) —— 核心时序（维度 T）：启动链、三线程帧循环、双槽唤醒与双缓冲协议、BSP 加载、消息回退、**计算模式热切握手**。
-- [./implementation/dual-physics.md](./implementation/dual-physics.md) —— 解耦线物理（维度 I）；三模式总览见本文 §1/§2 与 [../../../documents/ts-shared.md](../../../documents/ts-shared.md)。
+- [./implementation/dual-physics.md](./implementation/dual-physics.md) —— 解耦线物理（维度 I）；三模式总览见本文 §1/§2 与 [ts-shared.md](../ts-shared.md)。
 - [./implementation/shared-layout.md](./implementation/shared-layout.md) —— TestShared 192B 布局与 WorkerB 渲染（维度 I）。
 - [./differences.md](./differences.md) —— 与 debug/game/viewer 及共享层的取舍差异（维度 D）。
-- [../../../documents/architecture.md](../../../documents/architecture.md) —— 仓库总架构（workspace 布局、共享层引用矩阵）。
-- [../../../documents/phys.md](../../../documents/phys.md) / [../../../documents/wasm-core.md](../../../documents/wasm-core.md) / [../../../documents/ts-shared.md](../../../documents/ts-shared.md) —— 共享层文档（websurf-phys / websurf-wasm-core / ts-shared）。
-- [../CONCLUSION.md](../CONCLUSION.md) —— 「64t 坡速 ≈ 无限制」会审结论与修复架构（历史背景，工程根）。
+- [architecture.md](../architecture.md) —— 仓库总架构（workspace 布局、共享层引用矩阵）。
+- [phys.md](../phys.md) / [wasm-core.md](../wasm-core.md) / [ts-shared.md](../ts-shared.md) —— 共享层文档（websurf-phys / websurf-wasm-core / ts-shared）。
+- [implementation/conclusion.md](./implementation/conclusion.md) —— 「64t 坡速 ≈ 无限制」会审结论与修复架构（历史背景）。

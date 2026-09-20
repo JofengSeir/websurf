@@ -156,7 +156,7 @@ apps/viewer/src/core/pose.ts:9       export { wrapDeg, bspYawToCsYaw } from '../
 
 上述第 4、5 行原为 `apps/{debug,game}/scripts/…` 与 `apps/debug/scripts/…`（各工程内副本）；批 2 上提为共享单份后，该路径在仓库内**已不存在**，此处只作审计快照的追溯记录。
 
-`AGENTS.md:37` 明确宣称三个应用工程的 Windows 双击入口是 `play.cmd / build-dist.cmd / start-dev.cmd` 三件套（该行原文为 `├─ play.cmd / build-dist.cmd / start-dev.cmd   # Windows 双击入口`），而 game/viewer 实测无 `start-dev.cmd`（见 I-06；**批 3 `32c2ddb` 已为两者补齐**）。
+`AGENTS.md:37` 明确宣称三个应用工程的 Windows 双击入口是 `play.cmd / build-dist.cmd / start-dev.cmd` 三件套（该行原文为 `└─ play.cmd / build-dist.cmd / start-dev.cmd   # Windows 双击入口`；树形前缀 `├─`→`└─` 系 2026-09-13 §1.2 删去其下末项后渲染更正），而 game/viewer 实测无 `start-dev.cmd`（见 I-06；**批 3 `32c2ddb` 已为两者补齐**）。
 
 ### 2.2 端口与目标页（实测）
 
@@ -172,7 +172,7 @@ apps/viewer/src/core/pose.ts:9       export { wrapDeg, bspYawToCsYaw } from '../
 两个直接后果（**批 3 `32c2ddb` 已处置**，下方保留审计当时的判断供追溯）：
 
 - ~~四个 `npm run dev` 全部写死 8080~~ → **批 3 已按端口槽位表分流**：debug 8080（`apps/debug/package.json:15`）、game 8090（`apps/game/package.json:15`）、viewer 8100（`apps/viewer/package.json:18`）、harness 8110（`test/dual-mode-harness/package.json:13`，与 harness 的 `play.cmd` 同端口属**规范 §2.3 明文豁免**）。**第二批后四者端口互不冲突**（8080/8090/8100/8110），harness 与 debug dev 共用 8080 的遗留已消除。
-- debug 的 dev 目标页是 `web/index.html`（`apps/debug/start-dev.cmd:74` 打印并打开），而 `src/serve.py:58` 打印的是 `App: http://localhost:{PORT}/web/index.html`——两者一致；但 game/viewer 的 `npm run dev` 只能靠 README 手写提示，各写各的（`apps/viewer/README.md:30` 仍写 `http://localhost:8080/web/`，**批 3 后 viewer dev 端口已为 8100**，该行属待回改的文档面遗留）。
+- debug 的 dev 目标页是 `web/index.html`（`apps/debug/start-dev.cmd:74` 打印并打开），而 `src/serve.py:58` 打印的是 `App: http://localhost:{PORT}/web/index.html`——两者一致；但 game/viewer 的 `npm run dev` 只能靠 README 手写提示，各写各的（`documents/viewer/README.md:30` 仍写 `http://localhost:8080/web/`，**批 3 后 viewer dev 端口已为 8100**，该行属待回改的文档面遗留）。
 
 ### 2.3 `package.json` scripts 对照（实测）
 
@@ -348,7 +348,7 @@ viewer 是 single-only 并不只是「没实现 multi」：它的 `dist/index.ht
 1. `apps/debug/tsconfig.json:26` 的 `include` 里含 `web/vendor`，而 `apps/debug/web/vendor` **不存在**（`$ Test-Path apps/debug/web/vendor` → `False`），是一处失效 include。
    **更正（2026-09-12，captain 实测）**：本条初稿写作「`apps/viewer/tsconfig.json:15` 与 `apps/game/tsconfig.json:15` 均把 `../../src/ts-shared/**/*.ts` 纳入 `include`；viewer 却零引用，于是白列一整套文件」——**上半句不成立**。逐文件实测：审计当时 `apps/viewer/tsconfig.json:15` = `["src/**/*.ts","src/wasm.d.ts","test/**/*.ts"]`，**不含共享层**，与「零引用」自洽，属合规；`apps/game/tsconfig.json:15` 与 `apps/debug/tsconfig.json:26` 确实含 `../../src/ts-shared/**/*.ts`，且两者都有真实 import（口径 1：game 5 / debug 6），属正确配置。故「失效 include」在本仓库只有 `apps/debug/tsconfig.json:26` 的 `web/vendor` 一处，viewer 无配置冲突。
    **落地状态（批 4 `b5be059`）**：`apps/debug/tsconfig.json:26` 的 `web/vendor` 已移除（实测现为 `"include": ["src", "../../src/ts-shared/**/*.ts"]`）；viewer 已在批 4 上提共享层后**改为 include 共享层**（实测 `apps/viewer/tsconfig.json:15` 现为 `["src/**/*.ts", "src/wasm.d.ts", "test/**/*.ts", "../../src/ts-shared/**/*.ts"]`），与批 4 新增的 3 处 `ts-shared` 引用自洽——`R-09`/`R-20` 的「正当隔离」判定因此**在批 4 后被反转**，属刻意变更而非回归（**上面这条「更正」与 §5.3/`R-20` 的同类表述均已随之过期，机制与实证见 §0.3**）。
-2. `apps/viewer/README.md:45` 写「本地地图副本放仓库根 `maps/`（gitignored）」，而 `$ Test-Path maps` → `False`，根 `README.md:43` 已明确写「本地地图统一放入 **`test/maps/`**（仓库根 `maps/` 已废弃）」——属遗留路径未清理。
+2. `documents/viewer/README.md:45` 写「本地地图副本放仓库根 `maps/`（gitignored）」，而 `$ Test-Path maps` → `False`，根 `README.md:43` 已明确写「本地地图统一放入 **`test/maps/`**（仓库根 `maps/` 已废弃）」——属遗留路径未清理。
 
 ### 4.2 同名文件的近重复度（实测）
 
@@ -483,14 +483,14 @@ harness 侧（`test/dual-mode-harness/`，目录层级为 `src/` + `src/panel/` 
 |---|---|---|
 | `src/**/*.ts`（共 11 个 `.ts`） | **8** | **7** |
 | `scripts/**/*.mjs`（共 12 个 `.mjs`） | **5** | 不适用（脚本用注释与路径字符串引用；harness 的 `check-wasm-api.mjs` / `build-dist.mjs` **按 R-2 例外保持自带独立实现**（56 行 / 76 行），不消费共享引擎/内核——见 §6.4 的 `I-10`/`I-12`） |
-| `docs/**/*.md`（共 10 篇 md，含 `archive/` 5 篇） | **8** | 不适用 |
+| harness 文档 `documents/dual-mode-harness/`（正文 **7** 篇：README / overview / sequences / differences + `implementation/`×3）+ `test/dual-mode-harness/docs/archive/`（归档 5 篇），合计 12 篇 | **10** | 不适用 |
 
 - 口径 1 的 7 个（`src/` 内）：`main.ts`、`shared-state.ts`、`renderer/tick-consumer.ts`、`renderer/tick-consumer.test.ts`、`worker-a.ts`、`worker-b.ts`、`worker/t4-chain.test.ts`。
 - 口径 2 比口径 1 多 1 个：`panel/tick-telemetry-format.ts`（只有注释提及，不构成编译期依赖）。
 - 口径 2 的 5 个脚本：`scripts/flicker-debug.mjs`、`scripts/perf-bench.mjs`、`scripts/phys-smoke.mjs`、`scripts/surf-e2e-verify.mjs`、`scripts/three-mode-verify.mjs`。
 - 对照其他工程 `scripts/`：debug 4 个 `.mjs` 含该字面量（`auth-clock-verify.mjs`、`jump-apex-measure.mjs`、`jump-apex-serve.mjs`、`jump-apex-verify.mjs`），game 与 viewer 各 0 个。
 
-viewer 为 0 这一条三级口径一致，且是**全工程级**的（`apps/viewer/README.md`、`apps/viewer/tsconfig.json`、`apps/viewer/package.json` 均无 `ts-shared`；`apps/viewer/tsconfig.json:15` 的 `include` 亦**不含**共享层，与零引用自洽）——**更正**：本条初稿称「viewer `tsconfig.json:15` 却把共享层纳入编译范围」，经逐文件实测不成立（见 §4.1 第 1 条更正）；viewer 属「正当隔离」，不存在失效配置。
+viewer 为 0 这一条三级口径一致，且是**全工程级**的（`documents/viewer/README.md`、`apps/viewer/tsconfig.json`、`apps/viewer/package.json` 均无 `ts-shared`；`apps/viewer/tsconfig.json:15` 的 `include` 亦**不含**共享层，与零引用自洽）——**更正**：本条初稿称「viewer `tsconfig.json:15` 却把共享层纳入编译范围」，经逐文件实测不成立（见 §4.1 第 1 条更正）；viewer 属「正当隔离」，不存在失效配置。
 
 > **已随批 4 失效（口径 1：viewer `0 → 3`）**：批 4 `b5be059` 把三项共享单点反向暴露给 viewer 后，viewer 的口径 1 引用为 **3 个文件** —— `apps/viewer/src/core/bsp.ts:4`（`wasm/loader.js`）、`apps/viewer/src/core/constants.ts:13`（`phys/constants.js`）、`apps/viewer/src/core/pose.ts:9`（`phys/angles.js`），且 `apps/viewer/tsconfig.json:15` 已同步 `include` 共享层。故本节上表与上面这段的 viewer 列**均为 `a4ed66f` 快照**，现行值以 §0.3 为准；§5.3 的表**不逐格回改**（其余列同样是快照），只在此就地声明时点与差量。
 
@@ -533,7 +533,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | I-02 | 「验证脚本 = CI 门禁组成部分」这一定义与实现脱节：game 的 2 个、viewer 的 1 个验证脚本从未进 CI | `apps/game/package.json:17-18` 定义 `test:phys`、`test:seed-smoke`；`apps/viewer/package.json:11` 定义 `test:smoke`；`.github/workflows/deploy-pages.yml` 的 game 段落（`:121-137`）与 viewer 段落（`:139-159`）实测只有 `npm run test:replay`（`:159`），无任何 game 测试步骤、无 `test:smoke`。而 `CONTRIBUTING.md:38` 声称「以上脚本同为 CI 门禁的组成部分」，`README.md:59` 列举的 CI 门禁也只含 `test:replay` 与 `test:three-mode` | 二者必须改一个：或把未进 CI 的脚本从「门禁」表述中移出（仅本地可用），或把脚本补进 CI |
 | I-03 | 两处脚本把仓库根算成 `apps/`（少一层 `..`） | `apps/debug/scripts/jump-apex-verify.mjs:36-39`：`DEBUG_DIR = join(HERE,'..')`、`REPO = join(DEBUG_DIR,'..')` → `REPO` 实际是 `apps/`；`apps/debug/scripts/jump-apex-serve.mjs:29-30,53` 同一处错误（`mirror(join(REPO,'src'), …)` 指向 `apps/src`） | AGENTS.md §6「移动或改名文件后……各工程相对依赖路径（`crates/wasm` → `../../../../src` 一类，**层数易错**）」 |
 | I-04 | 失效配置：`include` 指向不存在的目录 | `apps/debug/tsconfig.json:26` 的 `include` 含 `web/vendor`；`$ Test-Path apps/debug/web/vendor` → `False` | AGENTS.md §5.3「所有相对链接必须指向真实存在的文件或目录」的同类原则（配置路径同罪）。**（收口补注：批 4 `b5be059` 已删该失效 include，现值为 `["src","../../src/ts-shared/**/*.ts"]`；本行为审计当时快照。处置结论见 §6.4 的 `I-04`）** |
-| I-05 | 文档遗留已废弃路径 | `apps/viewer/README.md:45`「本地地图副本放仓库根 `maps/`（gitignored）」；`$ Test-Path maps` → `False`；根 `README.md:43` 已声明根 `maps/` 废弃 | AGENTS.md §5.3「与代码不一致时以代码为准并回改文档」 |
+| I-05 | 文档遗留已废弃路径 | `documents/viewer/README.md:45`「本地地图副本放仓库根 `maps/`（gitignored）」；`$ Test-Path maps` → `False`；根 `README.md:43` 已声明根 `maps/` 废弃 | AGENTS.md §5.3「与代码不一致时以代码为准并回改文档」 |
 | I-06 | `AGENTS.md:37` 的工程标准布局声称三工程都有 `start-dev.cmd`，实测 game/viewer/harness 均无 | `$ git ls-files "\*.cmd"` 实测结果中 `start-dev.cmd` 只出现一次：`apps/debug/start-dev.cmd`（§2.1 清单） | AGENTS.md §1.2 布局表 |
 | I-22 | 共享工具的相对路径层数写错：`apps/debug/scripts/install-wasm-bindgen.cmd` 位于 `scripts/` 下，却只用两层上溯（`..\..\` 落在 `apps/`），`src/scripts/cargo-env.cmd` 永远调不到，该脚本内的 `CARGO_HOME` / `WASM_PACK_CACHE` / `WASM_BINDGEN` **全部为空** | 该文件第 19 行 `call "%~dp0..\..\src\scripts\cargo-env.cmd"`；全仓 `%~dp0` 路径逐条实测：本条解析为 `apps/src/scripts/cargo-env.cmd`（`$ Test-Path` → `False`），其余 12 条同款调用（`apps/debug/build-dist.cmd:33`、`apps/debug/play.cmd:20`、`apps/debug/start-dev.cmd:20`、`apps/game/build-dist.cmd:33`、`apps/game/play.cmd:20`、`apps/game/start-dev.cmd:20`、`apps/viewer/build-dist.cmd:31`、`apps/viewer/play.cmd:20`、`apps/viewer/start-dev.cmd:20`、`test/dual-mode-harness/play.cmd:19`（第二批前为 `:37`）等）全部解析成功——它们都位于工程根，`..\..\` 层数正确。正确写法是 `..\..\..\src\scripts\cargo-env.cmd`（三层）。**（收口补注：本行证据列为审计当时快照；该脚本已由批 2 `fc3de84` 上提至 `src/scripts/install-wasm-bindgen.cmd`，旧路径 `apps/debug/scripts/install-wasm-bindgen.cmd` 实测已不存在，故其中「第 19 行」等行号不再指向现行文件。处置结论见 §6.4 的 `I-22`）** | AGENTS.md §6「移动或改名文件后……各工程相对依赖路径（`crates/wasm` → `../../../../src` 一类，**层数易错**）」；与 I-03 同类 |
 | I-21 | 上游 Apache-2.0 许可合规缺口：只有 debug 的 dist 拷贝许可证，game 的 dist（single 与 multi 皆然）不含任何 `LICENSE.*` / `NOTICE.*` | `apps/debug/scripts/build-dist.mjs:136-137` 拷贝 `LICENSE`/`NOTICE` → `dist/LICENSE.cs-movement`、`dist/NOTICE.cs-movement`（实测存在，11560 / 625 B）；`apps/game/dist/` 实测 3 项、无许可证文件，`apps/game/scripts/build-dist.mjs` 无对应代码，而 game 同样链接 `@unsurf/cs-movement` | 许可证合规是硬要求，不属「真实差异」，也不可豁免——按 §4.3 的分组应归入本节的**待修缺陷**。**（收口补注：批 3 `32c2ddb` 已按唯一源方案消除本缺口——许可源上提为 `src/phys/{LICENSE,NOTICE}` 单份，三工程 single/multi 均由 `copyLicensePair` 做产物级拷贝，故「只有 debug 拷贝、game 无对应代码」已不反映现状；本行为审计当时快照。处置结论见 §6.4 的 `I-21`）** |
@@ -572,7 +572,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | I-02 | 已执行 | debug/game 半边：批 1 `6da49ae` 把 `test:*` 补进 CI（当前 `deploy-pages.yml:99/108/120/125/151/157`）；viewer 半边：批 3 `32c2ddb` 已把脚本改名 `local:smoke`（`apps/viewer/package.json:11`），而「是否入 CI」按规范 §4.3/§6.2 本属**排除要求**（CI 从未含该步骤）→ 无需动作 | 闭环 |
 | I-03 | 已执行 | 批 1 `fa5552e`（两脚本各补一层 `..`） | 闭环 |
 | I-04 | 已执行 | 批 4 `b5be059`（`apps/debug/tsconfig.json` 删 `web/vendor`） | 闭环 |
-| I-05 | 已执行 | 根 `README.md:43` 已统一为 `test/maps/`（并声明「仓库根 `maps/` 已废弃」，出处 `a4ed66f`）；`apps/viewer/README.md:45` 的旧表述（「本地地图副本放仓库根 `maps/`（gitignored）」）**已由收尾轮直接改为 `test/maps/` 并补指根 README §4**，viewer 半边闭环。收口期间该文件不在任务 inScope（`apps/` 属 out of scope），故当时只登记为「部分执行」并立 R-14 | 闭环（R-14 见 [rollout-status.md](rollout-status.md) §5） |
+| I-05 | 已执行 | 根 `README.md:43` 已统一为 `test/maps/`（并声明「仓库根 `maps/` 已废弃」，出处 `a4ed66f`）；`documents/viewer/README.md:45` 的旧表述（「本地地图副本放仓库根 `maps/`（gitignored）」）**已由收尾轮直接改为 `test/maps/` 并补指根 README §4**，viewer 半边闭环。收口期间该文件不在任务 inScope（`apps/` 属 out of scope），故当时只登记为「部分执行」并立 R-14 | 闭环（R-14 见 [rollout-status.md](rollout-status.md) §5） |
 | I-06 | 已执行（规范侧） | 规范 [framework-launch-structure.md](framework-launch-structure.md) §3.1 已把三件套写为「debug 有 `start-dev.cmd`，game/viewer 无」的差异表；批 3 `32c2ddb` 已为 game/viewer 补齐 `start-dev.cmd` | 闭环 |
 | I-07 | 已执行 | 批 3 `32c2ddb`（端口槽位表，见规范 §2.3）+ **第二批**（harness `8080` → `8110`，`test/dual-mode-harness/play.cmd:7`、`package.json:13`） | 闭环（`R-11` 的 harness 半边同时闭合） |
 | I-08 | 已执行 | 批 3 `32c2ddb` + `2135056`（`[N/M]` 逐字模板） | 闭环 |
@@ -643,7 +643,7 @@ Rust 侧的解耦**已经完成**：解析层与物理层都是单副本共享�
 | `npm run test:phys`（game） | `0` | 通过 |
 | `npm run test:seed-smoke`（game） | `0` | 通过 |
 | `npm run test:replay`（viewer） | `0` | 全部断言通过（含 V2/v6/v11 版本护栏） |
-| `npm run local:smoke`（viewer；审计当时名为 `test:smoke`，**批 3 `32c2ddb` 已改名**） | **`1`** | `skip  dist/ 未构建（先 npm run build:dist）；跳过静态断言` + `执行中断：Runtime.enable 超时`：需要另开 `npm run dev` 与 Edge/Chromium（`apps/viewer/README.md:40-41` 已声明前提），本次未满足前置条件 |
+| `npm run local:smoke`（viewer；审计当时名为 `test:smoke`，**批 3 `32c2ddb` 已改名**） | **`1`** | `skip  dist/ 未构建（先 npm run build:dist）；跳过静态断言` + `执行中断：Runtime.enable 超时`：需要另开 `npm run dev` 与 Edge/Chromium（`documents/viewer/README.md:40-41` 已声明前提），本次未满足前置条件 |
 | `npm run test:three-mode`（harness） | `0` | 通过 |
 | `node src/scripts/check-doc-drift.mjs [任意参数]` | **`1`（沙箱限制，与参数无关）** | `Error: spawnSync git EPERM`（§1.3） |
 | 单文件铁律自查（纯 `fs`，沙箱内可跑，**本文的正式验收命令**） | `0` | 见本节末尾的三行输出 |

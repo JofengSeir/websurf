@@ -23,7 +23,7 @@
 
 ### 1.2 workspace 划界：两个刻意的决定
 
-1. **根 workspace 只收共享层两个 crate**（`[workspace] members = ["src", "src/wasm-core"]`，`Cargo.toml:20-25`）。不收编模块工程的原因：debug/game 两者的 wasm crate **同名 `websurf-wasm`**（Cargo workspace 不允许同名成员），改名会连锁改 40+ 处产物名引用——因此模块 crate 各自保留 workspace（根 `Cargo.toml:5-11` 头注释明示；`test/dual-mode-harness/docs/differences.md` §5 同口径）。harness/viewer 的 crate 名（`websurf-test-wasm`/`websurf-viewer-wasm`）本无同名冲突，但同批留在各自 workspace。
+1. **根 workspace 只收共享层两个 crate**（`[workspace] members = ["src", "src/wasm-core"]`，`Cargo.toml:20-25`）。不收编模块工程的原因：debug/game 两者的 wasm crate **同名 `websurf-wasm`**（Cargo workspace 不允许同名成员），改名会连锁改 40+ 处产物名引用——因此模块 crate 各自保留 workspace（根 `Cargo.toml:5-11` 头注释明示；`documents/dual-mode-harness/differences.md` §5 同口径）。harness/viewer 的 crate 名（`websurf-test-wasm`/`websurf-viewer-wasm`）本无同名冲突，但同批留在各自 workspace。
 2. **各 workspace 各自保留 `target/`**：四个模块 workspace 的 `target/` 位于各工程目录内，根 workspace（共享层两 crate）的 `target/` 位于仓库根；不再跨 workspace 复用编译缓存。如仍需跨 workspace 复用编译缓存，可另配 `CARGO_TARGET_DIR`（`:10` 注释）。
 
 ### 1.3 工程间隔离：TS 互不引用
@@ -142,8 +142,8 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 
 | 族 | 布局 | 使用者 | 关键语义 | 详见 |
 |---|---|---|---|---|
-| 权威帧双线（512B SAB + MsgState 回退） | 输入槽 + V_A 双缓冲（pos/yaw/pitch/vel/eyeHeight/timeMs）+ 双模式扩展 V_D/S_D/WAKEUP（解耦帧同款双缓冲，模式互斥复用 onGround 槽）+ tick 模式元数据槽 I_A_SEG/I_A_TICK/I_A_EVT/I_A_PSEQ（`src/ts-shared/auth/shared-state.ts:131-148`） | debug、game（均为纯耦合线：只跑 V_A，未注入任何模式钩子）、test/dual-mode-harness（三模式全装配：同一 512B auth 通道上解耦线写 S_D、tick 线写 meta 四元组） | Worker 4ms 自驱 + 固定步长累积器（默认 1/64）；主线程渲染线每帧读权威校准；解耦期耦合线模式门早退、解耦线接管推进（仅 harness 装配） | [ts-shared.md](./ts-shared.md) §1.3/§2.1/§3.1/§3.8；debug [sequences.md](./debug/sequences.md)、harness [sequences.md](../test/dual-mode-harness/docs/sequences.md) |
-| 双模验证（192B TestShared） | 控制区 + 输入槽 + RENDER_WAKEUP + 双缓冲（8 值，无 eyeHeight/timeMs） | harness（渲染通道：WorkerA 三模式物理帧发布即镜像进 TestShared + 双槽唤醒 WAKEUP/RENDER_WAKEUP） | 主线程只转发输入；渲染在 WorkerB 按帧信号采样 | harness [shared-layout.md](../test/dual-mode-harness/docs/implementation/shared-layout.md)、[ts-shared.md](./ts-shared.md) §4.3 |
+| 权威帧双线（512B SAB + MsgState 回退） | 输入槽 + V_A 双缓冲（pos/yaw/pitch/vel/eyeHeight/timeMs）+ 双模式扩展 V_D/S_D/WAKEUP（解耦帧同款双缓冲，模式互斥复用 onGround 槽）+ tick 模式元数据槽 I_A_SEG/I_A_TICK/I_A_EVT/I_A_PSEQ（`src/ts-shared/auth/shared-state.ts:131-148`） | debug、game（均为纯耦合线：只跑 V_A，未注入任何模式钩子）、test/dual-mode-harness（三模式全装配：同一 512B auth 通道上解耦线写 S_D、tick 线写 meta 四元组） | Worker 4ms 自驱 + 固定步长累积器（默认 1/64）；主线程渲染线每帧读权威校准；解耦期耦合线模式门早退、解耦线接管推进（仅 harness 装配） | [ts-shared.md](./ts-shared.md) §1.3/§2.1/§3.1/§3.8；debug [sequences.md](./debug/sequences.md)、harness [sequences.md](./dual-mode-harness/sequences.md) |
+| 双模验证（192B TestShared） | 控制区 + 输入槽 + RENDER_WAKEUP + 双缓冲（8 值，无 eyeHeight/timeMs） | harness（渲染通道：WorkerA 三模式物理帧发布即镜像进 TestShared + 双槽唤醒 WAKEUP/RENDER_WAKEUP） | 主线程只转发输入；渲染在 WorkerB 按帧信号采样 | harness [shared-layout.md](./dual-mode-harness/implementation/shared-layout.md)、[ts-shared.md](./ts-shared.md) §4.3 |
 | 单线程（无共享内存协议） | — | viewer | 唯一 Worker 是录像解析（可回退主线程）；回放不重演物理，断网/慢机不跑歪 | viewer [sequences.md](./viewer/sequences.md) |
 
 两族共享的唯一常量是 `KEY_MASK` 位定义（harness 头注"杜绝位定义漂移"，`shared-state.ts:1-4,51`）。
@@ -163,7 +163,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 | PVS | 面板可控 | 代码在但 `ENABLE_PVS=false`（`renderer-main.ts:86`） | 无 | 排除（teleport/PVS 保留 API 不调用） |
 | CI/产物 | multi dist 部署 | multi dist 部署 | single dist 部署 | 仅构建验证 |
 
-细节对照（同构骨架、砍掉了什么、独有什么）逐工程见：debug [differences.md](./debug/differences.md)、game [differences.md](./game/differences.md)、viewer [differences.md](./viewer/differences.md)、harness [differences.md](../test/dual-mode-harness/docs/differences.md)。
+细节对照（同构骨架、砍掉了什么、独有什么）逐工程见：debug [differences.md](./debug/differences.md)、game [differences.md](./game/differences.md)、viewer [differences.md](./viewer/differences.md)、harness [differences.md](./dual-mode-harness/differences.md)。
 
 **贯穿全仓的设计不变量**（写代码/写文档都不要破坏）：
 
@@ -185,7 +185,7 @@ BSP bytes ─ vbsp::Bsp::read（一次解析，lump 常驻）
 | debug | [overview](./debug/overview.md) · [sequences](./debug/sequences.md) · [implementation×3](./debug/implementation/loading-pipeline.md) · [differences](./debug/differences.md) | 主工程四维度 |
 | game | [overview](./game/overview.md) · [sequences](./game/sequences.md) · [implementation×2](./game/implementation/panel-and-input.md) · [differences](./game/differences.md) | 游戏工程四维度 |
 | viewer | [overview](./viewer/overview.md) · [sequences](./viewer/sequences.md) · [implementation×3](./viewer/implementation/scene-core.md) · [differences](./viewer/differences.md) | 游览/回放工程四维度（含 `.replay` 格式规格；规则脚本规范已归档为历史注记） |
-| harness | [overview](../test/dual-mode-harness/docs/overview.md) · [sequences](../test/dual-mode-harness/docs/sequences.md) · [implementation×2](../test/dual-mode-harness/docs/implementation/dual-physics.md) · [differences](../test/dual-mode-harness/docs/differences.md) | 验证工程四维度 |
+| harness | [overview](./dual-mode-harness/overview.md) · [sequences](./dual-mode-harness/sequences.md) · [implementation×2](./dual-mode-harness/implementation/dual-physics.md) · [differences](./dual-mode-harness/differences.md) | 验证工程四维度 |
 
 历史分析文档曾分布于 5 处 `archive/`；当前版本库内**只保留 `test/dual-mode-harness/docs/archive/`**，其余（`documents/archive/`、`documents/{debug,game,viewer}/archive/`）已随工作区精简移出，仅作背景、不再作为事实来源（见 git 历史）。
 

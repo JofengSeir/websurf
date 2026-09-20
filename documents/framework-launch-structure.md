@@ -676,7 +676,7 @@ apps/<new>/
 | `crates/wasm/src/lib.rs` | 只导出，不实现 | 任一现有 `crates/wasm/src/lib.rs` |
 | `web/index.html`、`web/styles.css` | dev/dist 共用页面与样式 | 以 `apps/viewer/web/` 为基准 |
 | `.gitignore` | 追加工程特有产物（`dist/`、`pkg/`、`target/`、`web/app.js`、`web/worker.js`、`web/<wasm>`） | 以 `apps/game/.gitignore` 为基准 |
-| `README.md` | 端口、目标页、脚本清单、验证命令 | 以 `apps/game/README.md` 为基准 |
+| `README.md` | 端口、目标页、脚本清单、验证命令 | 以 `documents/game/README.md` 为基准 |
 
 ### 7.3 脚手架验收判据（新工程建成后逐条执行）
 

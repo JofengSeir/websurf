@@ -92,4 +92,4 @@ npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可
 - 旧版文档与过程材料已移出版本库（见 git 历史），不再作为事实来源
 
 > 公共架构见根 [../../documents/architecture.md](../../documents/architecture.md)；时序见 [sequences.md](../../documents/game/sequences.md)、[../../documents/debug/sequences.md](../../documents/debug/sequences.md)；
-> 验证工程（双模物理 + 帧信号渲染时序）见 [../../test/dual-mode-harness/README.md](../../test/dual-mode-harness/README.md) + [../../test/dual-mode-harness/CONCLUSION.md](../../test/dual-mode-harness/CONCLUSION.md)。
+> 验证工程（双模物理 + 帧信号渲染时序）见 [../dual-mode-harness/README.md](../dual-mode-harness/README.md) + [../dual-mode-harness/implementation/conclusion.md](../dual-mode-harness/implementation/conclusion.md)。
