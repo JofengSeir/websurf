@@ -1212,12 +1212,18 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		rendererMain?.feedInput(dx, dy, mask);
 	});
 
-	// Pointer Lock：点击 canvas 时请求锁定
-	canvas.addEventListener('click', () => {
-		if (!sceneReady) return;
-		if (!pointerLock.isLocked()) {
-			void pointerLock.requestLock(canvas);
-		}
+	// Pointer Lock：点击 3D 区域请求锁定（**监听 document**，不是 canvas）。
+	//
+	// 2026-09-21 修：旧实现绑在 canvas 上 ⇒ 只要有浮层（缺失纹理弹窗、面板）盖住落点，点击事件就不冒泡到
+	// canvas ⇒ **永远拿不到 pointer lock**，用户症状就是"debug 进去后转不动视角"（弹窗盖满画布时尤其明显）。
+	// 现在只要点击目标不在 UI 内（面板 / 弹窗 / 按钮）就请求锁定；UI 内点击不抢锁定。
+	const UI_HIT_SELECTOR =
+		'#panel, #panelClose, .mt-modal, .mt-modal-box, .mt-actions, .mt-ok, button, select, input, label, [data-ui-block-lock]';
+	document.addEventListener('click', (e) => {
+		if (!sceneReady || pointerLock.isLocked()) return;
+		const target = e.target as Element | null;
+		if (target && typeof target.closest === 'function' && target.closest(UI_HIT_SELECTOR)) return;
+		void pointerLock.requestLock(canvas);
 	});
 
 	// Pointer Lock 状态变化
@@ -1715,14 +1721,14 @@ function bindUI(): void {
 		});
 	});
 
-	// 光照模式（预烘焙 / 纯纹理）：渲染器按新模式重建场景（材质必须在分块合并前施加）。
-	// 纯纹理模式不解码 lightmap atlas ⇒ 纹理更少、进图更快；面板下方小字已写明性能影响。
+	// 光照模式（预烘焙 / 纯纹理）：**运行期 uniform 切换**，立即生效、不重建场景、不打断视角与操作。
+	// 语义是"移动时的渲染速度"旋钮（见面板小字），不是进图速度开关。
 	dom.lightingModeRadios.forEach((radio) => {
 		radio.addEventListener('change', () => {
 			if (!radio.checked) return;
 			const mode = radio.value as 'baked' | 'texture';
 			applyConfigPatch(config, 'lighting', { mode });
-			void rendererMain?.setLightingMode(mode);
+			rendererMain?.setLightingMode(mode);
 			saveUiPrefs();
 		});
 	});
@@ -1734,9 +1740,17 @@ function bindUI(): void {
 		inputBridge?.sendConfig('lighting', { ambientIntensity: v });
 	}, (v) => Math.round(v * 20) / 20);
 
-	// 缺失纹理确认弹窗关闭
+	// 缺失纹理确认弹窗关闭（两个入口：确认按钮 / 点击背板）。
+	//
+	// 2026-09-21 修：弹窗是**全屏浮层**（`position: fixed; inset: 0`）⇒ 盖住整个画布，
+	// 只有点「知道了，继续」才能回到 3D 视图；用户不知道这一层时症状就是"进 debug 后转不动视角"。
+	// 现在点弹窗外的任何位置也关闭（点背板 = 取消），且背板点击不触发锁定（见上面的 UI 命中表），
+	// 关掉后再点画面即可锁定。
 	dom.missingTexturesOk?.addEventListener('click', () => {
 		dom.missingTexturesModal?.classList.add('hidden');
+	});
+	dom.missingTexturesModal?.addEventListener('click', (e) => {
+		if (e.target === dom.missingTexturesModal) dom.missingTexturesModal?.classList.add('hidden');
 	});
 
 	// 显示设置：碰撞箱/传送触发器/准星信息

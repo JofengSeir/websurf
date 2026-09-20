@@ -9,6 +9,7 @@ import { el, foldBox, section } from '../core/dom.js';
 import { spawnPointAng } from '../core/spawn.js';
 import type { Pose } from '../core/pose.js';
 import type { BspLoadResult } from '../core/bsp.js';
+import type { LightingMode } from '../renderer/lightmap-shader.js';
 
 export interface WorldBox {
   min: [number, number, number];
@@ -40,6 +41,7 @@ export class MapPanel {
   constructor(
     root: HTMLElement,
     private readonly onJump: (pose: Pose) => void,
+    private readonly onLightingMode: (mode: LightingMode) => void = () => {},
   ) {
     // 更换地图：已加载地图后显示的换图入口（引导层按钮管首次加载）
     this.reloadWrap = el('label', 'filebtn map-reload');
@@ -54,11 +56,46 @@ export class MapPanel {
     });
     root.appendChild(this.reloadWrap);
 
+    this.buildLightingSection(root);
+
     this.infoBody = section(root, '地图信息');
     this.emptyNote = el('div', 'note note-info', '尚未加载地图');
     this.infoBody.appendChild(this.emptyNote);
 
     this.spawnBody = section(root, '出生点导航');
+  }
+
+  /**
+   * 光照模式（预烘焙 / 纯纹理）：与 apps/game、apps/debug 同名同语义的**运行期性能旋钮**，
+   * 默认预烘焙。小字按用户定调描述**移动时的渲染代价**（不是进图速度）。
+   */
+  private buildLightingSection(root: HTMLElement): void {
+    const body = section(root, '光照模式');
+    const row = el('label', 'field');
+    row.appendChild(el('span', 'field-label', '模式'));
+    const select = el('select', 'field-input field-select', undefined, {
+      id: 'lightingMode',
+      title: '预烘焙 = 每像素采 lightmap atlas + 逐顶点/环境盒烘焙光照；纯纹理 = 只上漫反射贴图（移动时更平稳）',
+    });
+    for (const [value, label] of [
+      ['baked', '预烘焙'],
+      ['texture', '纯纹理'],
+    ] as const) {
+      select.appendChild(el('option', undefined, label, { value }));
+    }
+    select.value = 'baked';
+    select.addEventListener('change', () => this.onLightingMode(select.value as LightingMode));
+    row.appendChild(select);
+    body.appendChild(row);
+    body.appendChild(
+      el(
+        'div',
+        'note note-info',
+        '预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，但移动/转视角时每帧开销更大。' +
+          '纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，移动时渲染速度更平稳，代价是画面没有明暗关系。' +
+          '切换即时生效（不重建场景、不打断视角）。',
+      ),
+    );
   }
 
   /** 出生点快照（世界坐标，脚底），供「出生点导航」跳转列表用。 */

@@ -238,7 +238,7 @@
               <option value="baked" selected>预烘焙</option>
               <option value="texture">纯纹理</option>
             </select></div>
-          <p class="hint" id="lightingModeHint">预烘焙：加载光照图集与逐顶点烘焙数据，纹理更多，进图与首帧会卡顿几秒；纯纹理：只加载漫反射贴图，进图最快，但画面没有明暗关系。切换会重建场景（与重新加载地图相当）。</p>
+          <p class="hint" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，但移动/转视角时每帧开销更大、帧时间更容易跳变。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，移动时渲染速度更平稳，代价是画面没有明暗关系。切换即时生效（不重建场景、不打断操作）。</p>
           <h4>近平面（防贴墙透视）</h4>
           <div class="row"><label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到，性能开销略增">探测距离</label>
             <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />

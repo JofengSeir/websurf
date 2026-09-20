@@ -178,9 +178,10 @@ if (isolated) {
     (exposure) => renderer?.setExposure(exposure),
     (gamma) => renderer?.setLightGamma(gamma),
     (scale) => renderer?.setAmbientScale(scale),
-    // 光照模式（预烘焙 / 纯纹理）：渲染端按新模式重建场景（材质必须在分块合并前施加）。
-    // 面板偏好加载阶段也会回调一次 ⇒ **在加载地图之前**就把模式定下来（纯纹理模式跳过 atlas 解码）。
-    (mode) => void renderer?.setLightingMode(mode),
+    // 光照模式（预烘焙 / 纯纹理）：**运行期 uniform 切换**，只改共享 uniform ⇒ 立即生效、
+    // 不重建场景、不重编译材质、不打断视角与移动（详见 lightmap-shader.setLightingMode）。
+    // 面板偏好加载阶段也会回调一次 ⇒ 只是把模式初值定下来（两种模式加载路径一致）。
+    (mode) => renderer?.setLightingMode(mode),
     // 存点列表：删除（无确认）→ 存储更新 + 回刷列表
     (i) => {
       const list = savePointStore.delete(i);
@@ -217,8 +218,19 @@ function bindInput(): void {
     renderer?.feedInput(dx, dy, mask); // 主线程渲染物理输入（RendererMain.tick 同写 SAB 权威端）
   });
 
-  dom.canvas.addEventListener('click', () => {
+  // 点击锁定视角（2026-09-21 修）：监听 **document**，不是 canvas。
+  //
+  // 旧实现绑在 `#preview` 上 ⇒ 面板/弹窗浮在画布之上时（面板是常驻覆盖层），点击落点其实是
+  // 面板元素、事件不冒泡到 canvas ⇒ **永远拿不到 pointer lock**。用户症状就是"进图后转不动视角"
+  // （尤其刚点过面板/刚热切换光照模式：视线在面板上，再点画面以为能转，其实什么都没发生）。
+  //
+  // 现在是「3D 区域点一下即锁定」：只要点击目标不在 UI 内（面板/按钮/弹窗），就请求锁定。
+  const UI_HIT_SELECTOR =
+    '#panel, #panelClose, .modal, .modal-box, .modal-backdrop, [data-ui-block-lock]';
+  document.addEventListener('click', (e) => {
     if (!sceneReady || pointerLock.isLocked()) return;
+    const target = e.target as Element | null;
+    if (target && typeof target.closest === 'function' && target.closest(UI_HIT_SELECTOR)) return;
     const p = pointerLock.requestLock(dom.canvas!);
     if (p instanceof Promise) {
       p.then((ok) => {

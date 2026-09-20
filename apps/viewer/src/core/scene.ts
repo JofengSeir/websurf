@@ -9,6 +9,19 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
+  applyLightmapToMeshes,
+  fullbrightUnlitLitMaterials,
+  loadLightmapAtlas,
+  setAmbientScale,
+  setExposure,
+  setLightGamma,
+  setLightingMode as setLightingModeInShader,
+  setPropVertexFlatten,
+  setPropVertexRelax,
+  getLightingMode,
+  type LightingMode,
+} from '../renderer/lightmap-shader.js';
+import {
   BG_COLOR,
   CAMERA_FAR_SCALE,
   CAMERA_INIT_FAR,
@@ -26,6 +39,8 @@ const OPT_CELL_MIN = 128;
 const OPT_CELL_MAX = 4096;
 /** 视锥外保留圈（frustum culling 包围球膨胀系数）：快移/猛转时新入视锥几何已预渲染。 */
 const FRUSTUM_PAD = 1.6;
+/** 默认光照模式：**预烘焙**（用户 2026-09-21 定调：viewer 默认预烘焙，面板可切纯纹理）。 */
+const DEFAULT_LIGHTING_MODE: LightingMode = 'baked';
 
 function optCellKey(x: number, y: number, z: number, cellSize: number): string {
   return Math.floor(x / cellSize) + '|' + Math.floor(y / cellSize) + '|' + Math.floor(z / cellSize);
@@ -63,6 +78,18 @@ export class ViewerScene {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    // 静态光照（预烘焙）参数：**逐字对齐 `apps/game/src/config.ts:238-247` 的 DEFAULT_CONFIG.lighting**
+    // （exposure 2.3 / lightGamma 2.2 / ambientScale 1 / propVertexRelax 1 / propVertexFlatten 0.85）。
+    // ⚠️ 这几个值直接决定画面亮度：早先按"外部参照实现平价"填 1 / 0.5 会让 viewer 的预烘焙画面
+    // 整体压暗（γ 0.5 ⇒ 指数 2 = 平方衰减，实测出生点均亮 9.6 vs 对齐后 ~40+）。
+    // 本工程无面板持久化 ⇒ 取 game 默认值，保证同一张地图两端观感一致。
+    setExposure(2.3);
+    setLightGamma(2.2);
+    setAmbientScale(1);
+    setPropVertexRelax(1);
+    setPropVertexFlatten(0.85);
+    setLightingModeInShader(DEFAULT_LIGHTING_MODE);
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(BG_COLOR);
@@ -145,9 +172,59 @@ export class ViewerScene {
     this.scene.add(root);
     this.modelRoot = root;
 
+    // 静态光照（预烘焙，默认）：**必须在 optimizeScene 之前施加** —— 分块合并按材质实例分组，
+    // 合并后再换材质会让合并失效，且逐 primitive 的 hasLightmap / TEXCOORD_1 映射会被丢掉。
+    await this.applyStaticLighting(gltf, root);
+
     // 渲染减负：空间分块合并（GLB 数千~数万 primitive Mesh → ~数百块）
     this.optimizeScene();
     this.fitCamera();
+  }
+
+  /**
+   * 施加离线烘焙静态光照（与 apps/game 同一条链路、同一份 GLB 契约）：
+   * - atlas 来自 `asset.extras.lightmap.textureIndex`（VRAD 烘焙图集）；
+   * - 世界面 → lightmap 采样；带 `_VBSP_VLIGHT` 的 prop → 逐顶点烘焙；其余 prop → leaf ambient cube；
+   * - 终扫把仍是「受光材质」（GLTF 原 Standard）的图元收敛为贴图原色（外部参照实现 white 兜底口径）。
+   *
+   * 失败只告警不阻断（与 game 一致的容错风格）：无 atlas 时地图仍是可看的（纯贴图原色）。
+   */
+  private async applyStaticLighting(gltf: GLTF, root: THREE.Object3D): Promise<void> {
+    try {
+      const atlas = await loadLightmapAtlas(gltf.parser, gltf);
+      if (!atlas) {
+        console.info('[viewer][lightmap] GLB 未携带 atlas（asset.extras.lightmap 缺失），跳过静态光照');
+        return;
+      }
+      const applied = applyLightmapToMeshes(root, atlas);
+      const swept = fullbrightUnlitLitMaterials(root);
+      const image = atlas.image as { width?: number; height?: number } | undefined;
+      console.info(
+        `[viewer][lightmap] 光照模式=${getLightingMode()}，atlas ${image?.width ?? 0}×${image?.height ?? 0}，` +
+          `施加 mesh=${applied}，终扫收敛=${swept}`,
+      );
+    } catch (err) {
+      console.error('[viewer][lightmap] 施加静态光照失败:', err);
+    }
+  }
+
+  /**
+   * 切换光照模式（面板「预烘焙 / 纯纹理」）——**运行期性能旋钮**：只改共享 uniform，立即生效。
+   *
+   * 语义与 apps/game、apps/debug 完全相同（见 `renderer/lightmap-shader.ts` 的 `LightingMode` 注释）：
+   * 预烘焙 = 每像素采 atlas + 算逐顶点/环境盒烘焙项（画面有明暗关系、每帧更贵）；
+   * 纯纹理 = 只上漫反射贴图（不采 atlas、不算烘焙项 ⇒ 移动时更平稳）。
+   * 两种模式加载路径一致 ⇒ 切换**不重建场景、不重编译材质、不打断视角**。
+   */
+  setLightingMode(mode: LightingMode): void {
+    if (getLightingMode() === mode) return;
+    setLightingModeInShader(mode);
+    console.info(`[viewer][lighting] 光照模式 → ${mode}（运行期 uniform 切换，未重建场景）`);
+  }
+
+  /** 当前光照模式（面板回填/诊断用）。 */
+  getLightingMode(): LightingMode {
+    return getLightingMode();
   }
 
   /**
@@ -397,8 +474,13 @@ export function disposeObject(obj: THREE.Object3D): void {
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const mat of materials) {
       if (!mat) continue;
-      const map = (mat as unknown as { map?: THREE.Texture | null }).map;
+      const holder = mat as unknown as { map?: THREE.Texture | null; lightMap?: THREE.Texture | null };
+      const map = holder.map;
       if (map?.isTexture) map.dispose();
+      // lightmap atlas 也要释放：viewer 是"反复换图"的工具，漏掉它每张图会多留一张
+      // 4096×2048 的图集在显存里（与 map 同为 GLTF 纹理，dispose 后再次加载会重新上传）。
+      const lightMap = holder.lightMap;
+      if (lightMap?.isTexture) lightMap.dispose();
       mat.dispose();
     }
   });

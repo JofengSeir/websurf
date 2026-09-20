@@ -55,9 +55,9 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 
 | 路径 | 行数 | 职责（实测 wc -l） |
 |---|---|---|
-| `apps/game/src/app.ts` | 751 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
+| `apps/game/src/app.ts` | 763 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层 |
 | `apps/game/src/config.ts` | 292 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate`）+ `applyConfigPatch` + `buildPhysicsParams` |
-| `apps/game/src/renderer/renderer-main.ts` | 1763 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、主线程物理 tick、权威校准入口、画质切换 |
+| `apps/game/src/renderer/renderer-main.ts` | 1750 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、主线程物理 tick、权威校准入口、画质切换、光照模式运行期切换 |
 | `apps/game/src/worker/main.ts` | 487 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:429`，常量 `TICK_RATE_OFFSET` 在 `:36`） |
 | `apps/game/src/worker/worker-types.ts` | 202 | 协议类型（⚠️ 部分注释落后于实现，运行时协议以 `src/ts-shared/auth/worker-dispatch.ts` 为准；`:6` 提到的 predictor-worker 文件已不存在，纯历史残留） |
 | `apps/game/src/input/input-bridge.ts` | 75 | 面板 → 双端物理的参数桥（sendConfig 双写、respawn/teleport） |
