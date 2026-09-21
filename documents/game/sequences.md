@@ -19,7 +19,7 @@ mousemove/keys ──▶ MouseBuffer ─▶ layerMouseDelta ─▶ feedInput ─
                     │      │ ⑥ 相机 + LOD/PVS + render          │
                     │      └────────────────────────────────────┘
                     ▼ SAB 512B（V_A/dxAcc/dyAcc/双缓冲）或 MsgState 回退
-┌──────────── Worker（固定步长 1/(tickRate+3)）────────────┐
+┌────────────── Worker（固定步长 1/tickRate）──────────────┐
 │ auth-loop: setTimeout 4ms 自驱 → takeInput → tick        │
 │   → writeAuthoritative（写空闲槽 → V_A++）               │
 │   → 碰撞事件 land/blocked postMessage                    │
@@ -63,7 +63,7 @@ mousemove/keys ──▶ MouseBuffer ─▶ layerMouseDelta ─▶ feedInput ─
   6 renderer.buildPredictionWorld({brushJson, triJson, teleportJson, spawn})
       ← 主线程 PhysWorld 就绪，渲染线物理开跑
   7 fixWorker.postMessage('world-json') → Worker build_world + syncParamsToWasm
-      + authLoop.setFixedDt(tickRate+3) + reset   ← 权威线物理开跑
+      + authLoop.setFixedDt(tickRate) + reset     ← 权威线物理开跑
       （worker-dispatch.ts:101-117）
   8 双端 set-spawn-points：renderer.setSpawnPoints + Worker 'set-spawn-points'
       （缺权威侧列表时 teleport_to_spawn 静默忽略 → 权威帧把传送点拉回，app.ts:442-446 注释记录该根因）
@@ -94,7 +94,7 @@ mousemove/keys ──▶ MouseBuffer ─▶ layerMouseDelta ─▶ feedInput ─
 | 自驱节拍 | `setTimeout(loop, 4)` | `auth-loop.ts:194` |
 | 累积器 | `dtAcc` 累积墙钟，≥ fixedDt 才步进；上限保护 `guard`（≤64 步/次防雪崩） | `auth-loop.ts:119-155,204` |
 | 单步输入上限 | `maxStep = MAX_INPUT_PER_STEP_BASE(1200) × dt / (1/64)`——`takeInput` 饱和截断防穿墙 | `auth-loop.ts:85,118`、`shared-state.ts:292-304` |
-| 固定步长 | `1/(tickRate+3)`：面板 64 → 权威 67Hz（`TICK_RATE_OFFSET=3` 不进 HUD）；面板改 tickRate 即时 `setFixedDt + reset` | `apps/game/src/worker/main.ts:36,431`、`worker-dispatch.ts:247,281`（行号 2026-09-21 实测：`:86` 曾是旧位置，现为无关的 `RT_OFFSET_WINDOW`） |
+| 固定步长 | `1/tickRate`：**面板值直译**（面板 64 → 权威 64Hz；2026-09-21 用户定调取消原隐藏偏移 +3）；面板改 tickRate 即时 `setFixedDt`，步长未变则不 reset（防丢仿真时间） | `apps/game/src/worker/main.ts:425`、`worker-dispatch.ts:247,281`（行号 2026-09-21 实测） |
 | 单步流程 | `takeInput` → `phys.tick(fixedDt, keys, dx, dy)` → `writeAuthoritative`（写空闲槽 → release `V_A++`） | `auth-loop.ts:119-158`、`shared-state.ts:316-334` |
 | 碰撞事件 | land = onGround 上升沿；blocked = 速度骤降（>250 u/s）且实际位移远小于应走位移 → postMessage 给主线程 | `auth-loop.ts:160-190` |
 

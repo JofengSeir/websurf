@@ -40,7 +40,7 @@
 | `PanelController` 独立类（七模块 + 偏好持久化 + 存点列表渲染） | `apps/game/src/panel/panel-controller.ts`（809 行）；debug 无 panel/ 目录（`ls apps/debug/src` 无 panel/ui，面板逻辑在 `apps/debug/src/app.ts` 直绑 HTML） |
 | 存点系统（X 存 / C 按住冻结 / 面板任意读点） | `apps/game/src/savepoint.ts`、`apps/game/src/renderer/renderer-main.ts:601-633`（holdPoint 每帧 set_state 冻结语义） |
 | 键位录制重绑面板 | `apps/game/src/input/keymap.ts:42-65`（`websurf-game.keymap.v1`）+ `panel-controller.ts` 按键模块 |
-| TICK_RATE_OFFSET=3 隐藏偏移 | `apps/game/src/worker/main.ts:33-36,431`（面板显示原值，权威实际 +3；行号 2026-09-21 实测）；grep `apps/debug/src` 无此常量 |
+| 无隐藏偏移（面板值直译） | `apps/game/src/worker/main.ts:425` `getConfigTickRate: () => config.physics.tickRate`（2026-09-21 用户定调取消原 +3 偏移；两侧一致）；`grep -rn TICK_RATE_OFFSET apps/game/src apps/debug/src` 现为空 |
 | lockTickRate 公平锁 | `apps/game/src/config.ts:81-93`、`panel-controller.ts:222` |
 
 > 近平面自适应（含面板参数）两侧同有：debug 同样面板化 nearProbeDist/nearRatio（`apps/debug/src/app.ts:116-119`），不算 game 特有——机制注释明示"同步自主项目"（`apps/game/src/renderer/renderer-main.ts:127`）。

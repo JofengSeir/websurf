@@ -114,6 +114,8 @@ check('B 明显优于 C（修复有效）', neo > old * 1.15,
 // 纯值、无运行时顶层 import；self/performance 仅在方法体内）可安全在 Node 桩环境 bundle。
 {
   console.log('\n=== 修复 2 接线层：dispatch config tickRate 分支 reset 门禁 ===\n');
+  // 非零偏移的**合成**注入（2026-09-21 起 game 已取消隐藏偏移、面板值直译）：此处刻意
+  // 保留非零值做防回归——dispatch 不得假设 `getConfigTickRate() === 面板值`。
   const TICK_RATE_OFFSET = 3;
   try {
     const wdBundlePath = resolve(HERE, '..', '.tmp', 'worker-dispatch', 'worker-dispatch.bundle.mjs');
@@ -175,13 +177,13 @@ check('B 明显优于 C（修复有效）', neo > old * 1.15,
     const batchResets = authLoop.resets - beforeBatch;
     check('1000 条同 tickRate config → reset 调用 0 次', batchResets === 0,
       `batchResets=${batchResets}`);
-    check('1000 条同 tickRate config → setFixedDt 全部同值（67）',
+    check('1000 条同 tickRate config → setFixedDt 全部同值（面板 64 + 合成偏移 3 = 67）',
       authLoop.fixedDts.slice(-1000).every((r) => r === INITIAL_PANEL + TICK_RATE_OFFSET),
       `fixedDts.length=${authLoop.fixedDts.length}`);
 
     // 2) 再发一条 tickRate 变值 → reset 恰好 1 次
     const beforeChange = authLoop.resets;
-    sendCfg(INITIAL_PANEL + 36); // 64 → 100，步长 67 → 103，真变化
+    sendCfg(INITIAL_PANEL + 36); // 面板 64 → 100（+ 合成偏移 3），步长 67 → 103，真变化
     const changeResets = authLoop.resets - beforeChange;
     check('变值 tickRate config → reset 恰好 1 次', changeResets === 1,
       `changeResets=${changeResets}`);
