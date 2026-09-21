@@ -55,9 +55,10 @@ import {
 } from '../../../src/ts-shared/decoupled/decoupled-loop.js';
 import { resolveAuthTickRate } from '../../../src/ts-shared/auth/compute-mode.js';
 
-/** 耦合权威线隐藏偏移（用户定调 2026-08-18）：实际步长 = 面板值 + 3。
- *  仅耦合线消费；tick 走 raw 直译、解耦 tickPhys 另读 raw（§3.4.D）。 */
-const TICK_RATE_OFFSET = 3;
+/** 耦合权威线偏移：**0**（2026-09-21 用户定调——game 取消隐藏偏移、面板值即权威步长，
+ *  harness 的 coupled 模式与之保持镜像）。参数位保留，仍经 `resolveAuthTickRate`
+ *  单点解析；tick 走 raw 直译、解耦 tickPhys 另读 raw（§3.4.D）。 */
+const TICK_RATE_OFFSET = 0;
 
 /** 默认 tickRate（harness 难度按钮默认 64；TestShared 未就绪时兜底）。 */
 const DEFAULT_TICK_RATE = 64;

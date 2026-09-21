@@ -5,7 +5,7 @@
  * - §P1 world-json 装配：G3 三实例（phys/tickPhys/scratch）同建同参 + 旧实例 free
  *   （P5 无泄漏）+ 首帧可见 + onWorldRebuilt（t4 钩子）；
  * - §P2 P-tick-6 周期解析：resolveAuthTickRate（**生产唯一实现源**，main.ts
- *   getConfigTickRate 的实体）tick = raw 直译（1/64 **精确**，防耦合 +3 渗入）、
+ *   getConfigTickRate 的实体）tick = raw 直译（1/64 **精确**，防偏移渗入）、
  *   coupled = 面板 + 3；world-json/config 两处生效点同步断言；
  * - §P3 W-GAP-1 参数链：snake→camel 键名归一 + jump_height 值反演 √(2gh)
  *   （零改键同引用=零分配）+ dispatch 应用归一 patch + 模式感知步长；
@@ -24,7 +24,7 @@
  *
  * 说明：game/src/worker/main.ts 在模块顶层注册 self.onmessage（无法在 node 直接
  * import），故本件以 dispatch 真实代码 + env 桩覆盖装配协议面；main.ts 与生产
- * 组装的同构关系：getConfigTickRate = resolveAuthTickRate(mode, panel, +3)
+ * 组装的同构关系：getConfigTickRate = resolveAuthTickRate(mode, panel, 偏移)（2026-09-21 起偏移 = 0）
  * （§P2 断言的即该生产函数本体）。
  *
  * 运行（node，禁浏览器）：
@@ -55,8 +55,8 @@ import {
 import { resolveAuthTickRate, type ComputeMode } from '../../../../src/ts-shared/auth/compute-mode.js';
 import { applyParamsToInstances } from './phys-instances.js';
 
-/** main.ts:63 同值（耦合权威线隐藏偏移）。 */
-const TICK_RATE_OFFSET = 3;
+/** 偏移夹具：**0**（2026-09-21 起 game 取消隐藏偏移、面板值即权威步长；与 main.ts 同值）。 */
+const TICK_RATE_OFFSET = 0;
 /** 面板默认 tickRate（game/src/config.ts:109）。 */
 const PANEL_RATE = 64;
 
@@ -341,14 +341,14 @@ test('§P1 world-json：G3 三实例同建同参 + 旧实例 free + 首帧/重�
 });
 
 // ── §P2 P-tick-6：周期解析（生产唯一实现源）──────────────────────────────
-test('§P2 P-tick-6：resolveAuthTickRate tick=raw 精确 / coupled=面板+3', () => {
+test('§P2 P-tick-6：resolveAuthTickRate tick=raw 精确 / coupled=面板值直译（偏移 0）', () => {
   assert.equal(resolveAuthTickRate('tick', 64, TICK_RATE_OFFSET), 64, 'tick raw 直译');
   assert.equal(1 / resolveAuthTickRate('tick', 64, TICK_RATE_OFFSET), 1 / 64, '1/64 精确成立');
-  assert.equal(resolveAuthTickRate('coupled', 64, TICK_RATE_OFFSET), 67, '耦合 = +3');
-  assert.equal(1 / resolveAuthTickRate('coupled', 64, TICK_RATE_OFFSET), 1 / 67, '耦合步长');
+  assert.equal(resolveAuthTickRate('coupled', 64, TICK_RATE_OFFSET), 64, '耦合 = 面板值直译（无偏移）');
+  assert.equal(1 / resolveAuthTickRate('coupled', 64, TICK_RATE_OFFSET), 1 / 64, '耦合步长 = 1/面板值');
   for (const r of [48, 64, 100, 128, 1750]) {
     assert.equal(resolveAuthTickRate('tick', r, TICK_RATE_OFFSET), r, `tick 恒 raw（面板 ${r}）`);
-    assert.equal(resolveAuthTickRate('coupled', r, TICK_RATE_OFFSET), r + 3, `耦合恒 +3（面板 ${r}）`);
+    assert.equal(resolveAuthTickRate('coupled', r, TICK_RATE_OFFSET), r, `耦合恒 = 面板值（面板 ${r}）`);
   }
   // 生效点同断言：world-json 在 tick/coupled 两模式下的步长
   const ht = makeHarness();

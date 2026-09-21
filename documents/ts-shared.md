@@ -94,7 +94,7 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 1. **输入路径**：主线程 rAF 输入循环（debug `app.ts:1710` `startInputLoop` / game `app.ts:326` 同名函数）→ `keysToMask` + wheelJump + Q/E 等效像素（`qeEquivalentDx`）→ `rendererMain.feedInput`。未锁定指针时 mask 强制 0（防 ESC 残留）。
 2. **渲染物理线（主线程 rAF 六步，耦合模式）**：debug `renderer-main.ts:441-453`（tick 入口 `:430`）/ game `renderer-main.ts:700-734`（六步 `:704-710`，校准 wrapper `:626-645`）——① `shared.addInput` 写输入槽 → ② `correctFromAuthority()`（权威帧到达处理 + 大偏差兜底）→ ③ `calibrateVelocity(now)`（速度外推，不覆盖位置）→ ④ `predPhys.tick(dt, keys, dx, dy)`（完整物理推进）→ ⑤ 消费 phys-event → ⑥ 按 `predPhys.state()` 设相机（度→弧度）。解耦/tick 模式整体停跑该六步（该分支当前只在 harness 装配），改走 T7' 消费（§3.7 末、§3.8）。
 3. **权威线（Worker）**：`auth-loop.ts` `setTimeout(loop, 4)` 自驱（`:319`）+ 累积器（`acc >= fixedDt && guard < 64`，`:345-350`）；每步 `stepPhysics`（`:199`）：`takeInput(maxStep)`（`:216`/`:239`）→ `phys.tick(dt, mask, dx, dy)` → `writeAuthoritative`（`:221`/`:271`）→ land/blocked 事件 postMessage（`emitCollision :164`，判据 `:288-314`）。模式门 `resolveAuthGateOpen`（`:135-140`；loop 内早退 `:323-327`）：解耦期间关断墙钟早退，复入不补跑。
-4. **tick rate**：`fixedDt` 默认 1/64（`:172`），`setFixedDt(1/max(rate,1))` 动态覆盖（`:430-441`）——`config.physics.tickRate` 经 config 消息下发（game 耦合语义 = raw+3，`apps/game/src/worker/main.ts:33-36,431`；三模式步长解析单点在 `auth/compute-mode.ts:51-57` `resolveAuthTickRate`：tick=raw、coupled=+偏移）。
+4. **tick rate**：`fixedDt` 默认 1/64（`:172`），`setFixedDt(1/max(rate,1))` 动态覆盖（`:430-441`）——`config.physics.tickRate` 经 config 消息下发（game 耦合语义 = **面板值直译**，`apps/game/src/worker/main.ts:425`；三模式步长解析单点在 `auth/compute-mode.ts:51-57` `resolveAuthTickRate(mode, panel, coupledOffset)`：tick=raw、coupled=panel+offset——game 与 harness 现均传 offset=0）。
 
 ### 2.2 地图加载管线：`buildWorldBundle`（`phys/world-builder.ts:90` 起）
 
@@ -224,7 +224,7 @@ SAB 前置条件：dev 服务器发出 COOP/COEP 头（`src/serve.py:33-34`：`C
 |---|---|---|
 | 调度 | `setTimeout(loop, active ? 0 : 4)`：解耦激活 0ms 急轮询；门关/未就绪 4ms 与 auth-loop 同节奏空转 | `:302-306` |
 | 常量 | `RENDER_DT=0.001 / MAX_DELTA=0.05 / MAX_STEPS_PER_ROUND=8 / MAX_ACC=0.02 / MAX_INPUT_DELTA=1000 / WAIT_THRESHOLD_MS=1 / MAX_WAIT_MS=4 / TICK_ANCHOR_DIST=64 / SLOW_FIELD_REFRESH_MS=16` | `:117-139` |
-| tickPhys 步长 | `config.physics.tickRate` **raw 原值**（无 +3 偏移——偏移仅耦合权威线语义）；`tickInputMax = 1000×(tickDt/0.001)` 窗口限幅 | `:141-143`；harness `worker-a.ts:205`（`getTickPhysRate = panelTickRate()`） |
+| tickPhys 步长 | `config.physics.tickRate` **raw 原值**（2026-09-21 起耦合权威线亦为 raw——隐藏偏移已取消，此处不再有「仅耦合带偏移」的差异）；`tickInputMax = 1000×(tickDt/0.001)` 窗口限幅 | `:141-143`；harness `worker-a.ts:205`（`getTickPhysRate = panelTickRate()`） |
 | 激活边沿 | `modeBActive = tickRate>0 && 1/rate>1ms`；停用→激活清采样器 + `alignTickPhys`，激活→停用仅清采样 | `:331-344` |
 | 单轮全序 | delta clamp（`:313-318`）→ hold 冻结轮（`:320-326`）→ tick 窗口（`peekKeys :355` + `tickDx/Dy clampAbs` → 分叉锚定 `tickDiverged :364-365` → `tickPhys.tick` → `phys.set_velocity :373`）→ 无限制步（`consumeInput :389` 不限幅 → `phys.tick_into(1ms) :396` → S_D 零分配发布 `:397-400` → acc 封顶 `:403`）→ 背压 `waitWakeup(min(idle,4ms)) :408-411` | `loop :298-412` |
 | 分叉锚定 | 位置偏差 > `TICK_ANCHOR_DIST=64` → `alignTickPhys()` 全量拉回（正常演化不干预，先检查后推进） | `:191-202,364-365` |

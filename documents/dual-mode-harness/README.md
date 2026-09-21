@@ -35,7 +35,7 @@ WorkerA (src/worker-a.ts) — 三模式物理核心（装配层；计算本体�
   │    tickPhys 第二实例（解耦=64t 速度校准线；tick 闲置不驱动不 free）
   │    scratch  第三实例（tick=F4-C 乐观评估执行体；权威实例零写入）
   ├─ 模式语义（唯一权威 src/ts-shared/auth/compute-mode.ts）：
-  │    coupled   auth 线 64Hz 权威（面板 tickRate + 3 隐藏偏移）——默认模式
+  │    coupled   auth 线 64Hz 权威（面板 tickRate 直译，无偏移——2026-09-21 起与 game 同）
   │    decoupled 1ms 无限制真理源 + 独立 64t tickPhys 速度校准 + 分叉锚定拉回
   │    tick      raw 64Hz 单实例权威 + F4-C scratch 乐观评估（排序门 + 内容封帽）
   ├─ 双线互斥 gate：auth-loop（coupled+tick 推进）+ decoupled-loop（解耦独占），
