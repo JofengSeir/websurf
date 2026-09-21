@@ -39,7 +39,7 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
   ─ sync-render-state：渲染主线大偏差时反向覆盖权威 + resetInput
 ```
 
-依据：`apps/game/src/worker/main.ts:1-16`（头注"权威帧计算器（v7）"+ `TICK_RATE_OFFSET = 3` 于 `:32`）、`apps/game/src/renderer/renderer-main.ts:96-113`（`predPhys` 主线程唯一物理 + `AuthorityCalibrator` 收敛 ts-shared）、`src/ts-shared/phys/authority-calibrator.ts:110-127`（"只读权威，绝不反写"+ 大偏差反向同步定调）。
+依据：`apps/game/src/worker/main.ts:1-16`（头注"权威帧计算器（v7）"+ `TICK_RATE_OFFSET = 3` 于 `:36`）、`apps/game/src/renderer/renderer-main.ts:96-113`（`predPhys` 主线程唯一物理 + `AuthorityCalibrator` 收敛 ts-shared）、`src/ts-shared/phys/authority-calibrator.ts:110-127`（"只读权威，绝不反写"+ 大偏差反向同步定调）。
 ⚠️ `apps/game/src/app.ts:4,7` 头注仍写"v5 …Worker = 纯速度修正器"，与现行 v7 代码不符——以 `worker/main.ts` 头注与实际消息流为准（历史残留，勿引用）。
 
 ### 2.1 双端同构（同一物理、同一输入）
@@ -58,7 +58,7 @@ Worker（权威帧计算器，固定步长 1/(tickRate+3)，TICK_RATE_OFFSET=3�
 | `apps/game/src/app.ts` | 820 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层、**左下角按键簇**（`initKeyHud`/`syncKeyHudLabels`/`updateKeyHud`：标签取当前键位、高亮取实时输入、仅状态变化时写 DOM） |
 | `apps/game/src/config.ts` | 292 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate`）+ `applyConfigPatch` + `buildPhysicsParams` |
 | `apps/game/src/renderer/renderer-main.ts` | 1750 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、主线程物理 tick、权威校准入口、画质切换、光照模式运行期切换 |
-| `apps/game/src/worker/main.ts` | 487 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:429`，常量 `TICK_RATE_OFFSET` 在 `:36`） |
+| `apps/game/src/worker/main.ts` | 487 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate + TICK_RATE_OFFSET`（`:431`，常量 `TICK_RATE_OFFSET` 在 `:36`） |
 | `apps/game/src/worker/worker-types.ts` | 202 | 协议类型（⚠️ 部分注释落后于实现，运行时协议以 `src/ts-shared/auth/worker-dispatch.ts` 为准；`:6` 提到的 predictor-worker 文件已不存在，纯历史残留） |
 | `apps/game/src/input/input-bridge.ts` | 75 | 面板 → 双端物理的参数桥（sendConfig 双写、respawn/teleport） |
 | `apps/game/src/input/keyboard.ts` | 122 | `KeyboardInput`：锁定门控、`getState/getMask/reset`、面板 `setKeymap` 热更新 + `onKeymapChange` 订阅（改键后通知使用方刷新显示） |

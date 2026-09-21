@@ -41,7 +41,7 @@
 ### 3.3 tickRate 语义（容易踩坑的差异）
 
 - debug：面板 tickRate = 权威固定步长，直传无偏移（`apps/debug/src/worker/main.ts:98` `getConfigTickRate: () => config.physics.tickRate`）。
-- game：**隐藏偏移 +3**——面板显示/输入原值，实际权威步长 = 原值+3（如 64 → 67Hz；`apps/game/src/worker/main.ts:32` `TICK_RATE_OFFSET = 3`、`:86` `getConfigTickRate: () => config.physics.tickRate + TICK_RATE_OFFSET`）。偏移是 game 侧"用户定调 2026-08-18"的产物，不体现在面板/HUD。
+- game：**隐藏偏移 +3**——面板显示/输入原值，实际权威步长 = 原值+3（如 64 → 67Hz；`apps/game/src/worker/main.ts:36` `TICK_RATE_OFFSET = 3`、`:431` `getConfigTickRate: () => config.physics.tickRate + TICK_RATE_OFFSET`，行号 2026-09-21 实测）。偏移是 game 侧"用户定调 2026-08-18"的产物，不体现在面板/HUD。
 - debug 没有 lockTickRate；game 的 tickRate 在 lockTickRate=true 时只读。
 
 ### 3.4 物理面板（debug 独有链路）
