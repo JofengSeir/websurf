@@ -27,10 +27,11 @@
 
 | 位置 | 状态 |
 |---|---|
-| 仓库根 `*.md` | **仅本文件**（根级四篇旧文档 README / CHANGELOG / 贡献 / 安全 已从工作区删除） |
+| 仓库根 `*.md` | 本文件 + `README.md` + `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`。后四篇于 2026-09-22 由 `.archive/` 归档原文**合并重建**（可读性改写：README 为总入口，CHANGELOG 分「当前状态 / 归档历史」两段，贡献与安全各一篇），细节源头仍是 `.archive/` |
 | `documents/` | **仅** `documents/plan/` 下**三篇**：两篇控制文件 + `progress-log.md`（进度台账，§7.1 历史移入）。**实测删除面**：`documents/` 下原 **47 篇** `.md`、根级 **4 篇** `.md`、退役 harness **39** 个路径（含 5 篇 `.md`）、apps/game 的 favicon.ico 1 个，合计 **91** 个路径（`git status` 实测） |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
-| `.ak/` | **不存在**（`.gitignore` 中的 `.ak/` 规则为历史遗留，当前无对应目录） |
+| `.archive/` | **存在**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇，保留相对路径）。**不作事实来源**，只用于历史追溯与本次根文档合并的素材；owner 定名 `.archive`（本文件早期写的 `.ak/` 为误记，以实际目录为准） |
+| `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
 | `.workbuddy/memory/**` | Agent 工作记忆（非文档树、不重编；仅作过程线索，不作事实来源） |
@@ -131,8 +132,8 @@ cd apps/<app> && npm run typecheck                # TS 侧
 
 | # | 事项 | 状态 |
 |---|---|---|
-| 1 | 根 README 已删除，仓库暂无 README —— 属预期（WG10 从源码重建）。是否需临时占位由 owner 决定 | 已知，非阻塞 |
-| 2 | 导航 index 已删除；导航在 WG10 按最终文件重建 | 已知，非阻塞 |
+| 1 | ~~根 README 已删除，仓库暂无 README~~ **已处置（2026-09-22）**：WG10 已重建 `README.md`；随后 owner 要求「根文档不齐全」⇒ 由 `.archive/` 合并重建四篇根文档（README / CHANGELOG / CONTRIBUTING / SECURITY），均已过漂移体检（锚点越界 0、路径失效 0） | **已结案** |
+| 2 | ~~导航 index 已删除~~ **已处置**：`documents/index.md` 已由 WG10 按实际文件树重建（49 篇、51 条链接全可解析） | **已结案** |
 | 3 | 旧 `AGENTS.md` 的通用工程规范（文件归属 / 临时区 / 产物 / 文档格式）**未在本文件复述** —— 重编期间以任务书为准；是否重建由 owner 在 WG10 决定 | **待 owner 裁决** |
 | 4 | ~~CI 与共享脚本仍引用已退役的 harness~~ **已处置（owner 裁决「清掉这些残留引用」）**：**6 个文件**全部清完 —— `ci-gates.yml` 删 4 步并把 job 改名为 `debug-gates`（steps 35→31、YAML 实测可解析）、`deploy-pages.yml` 去掉不可复核的旧实测数字、`PULL_REQUEST_TEMPLATE.md` 范围/测试项改写、`apps/debug/scripts/jump-apex-verify.mjs` 改读**本工程** `apps/debug/pkg/`（该门由「必然 SKIP 空转」变为**实跑**：`npm run test:jump-apex` exit 0、198 行、`[SKIP]` 0 次、跑满 25 格）、`src/scripts/{check-doc-drift,check-shared-sync}.mjs` 去掉退役路径（后者门禁由**恒失败转为四项全过**）。**全仓复扫 321 个文件**后仅剩根 `.gitignore` 的 `test/game-core/` 规则（配置项而非注释，按「只改注释」口径**刻意保留**） | **已结案**（本轮唯一的代码 / CI 改动，均经 owner 授权；逐件判据见台账两行） |
 | 5 | **apps/game 的 favicon.ico 被同一批删除波及**：该文件在库中唯一，而 `apps/game/web/index.html:22-23` 仍声明 `./favicon.ico` 与 `/favicon.ico` 两条链接（行号本轮实测复校）（同处注释承诺"两条路径都不 404"），现两条均落空 | **待 owner 裁决**是否恢复（与 harness 退役无逻辑关联，仅同批被删） |
