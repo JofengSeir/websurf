@@ -1,18 +1,25 @@
 /**
- * t13 输入面探针（float_roundtrip 影响半径实验的观测仪）：把「serde_json 解析结果」
- * 变成位级可观测的输出行为，覆盖三条既有输入路径。
+ * 输入面探针（脚本名 `t13-input-surface-probe`）：把「`serde_json` 的解析结果」变成位级可观测
+ * 的输出行为，覆盖四条输入路径。
  *
  * 设计要点（为什么这样能测出解析差异）：
- *   A build_world（brush JSON 平面 dist）：地板顶面 dist = literal。玩家从 literal+10 落体，
- *     静止后 posY 逐位 = 解析出的 dist（物理剩余偏移两构建同源）→ dist 的 1-ULP 差异可见。
- *   B set_params（run_speed = literal）：前进 60 tick 后的 velX 由 run_speed 决定 →
- *     解析差异传播到位级。
- *   C set_spawn_points（[[0, literal, 0, 0]]）→ teleport_to_spawn(0)：origin.y 直接 = 解析值
- *     （无物理遍历，故对极端量级/次正规/2^53+1 同样灵敏）→ 覆盖 A/B 无法覆盖的极端字面量。
- *   ref：JS Number(literal)（JS 解析=IEEE 正确舍入）作为参照位型，用于判读某一侧是否偏 ULP。
+ *   A `build_world` 的 brush JSON 平面 `dist`：地板顶面 `dist = literal`，玩家自 `literal + 10`
+ *     落体（出生 Y 用 JS 的 `Number(literal)` 算，不经 JSON），90 tick 后读 `state().posY`。
+ *     落点要过碰撞解算，分辨率被量化，故只对足够大的 dist 差可见——量化尺度见
+ *     `apps/game/scripts/t13-ulp-sensitivity-control.mjs` 的 A-threshold 扫描。
+ *   B `set_params` 的 `run_speed = literal`：前进 60 tick 后读 velX/velY/velZ/posX，由该值决定
+ *     → 解析差异传播到位级。
+ *   C `set_spawn_points` 的 `[[0, literal, 0, 0]]` → `teleport_to_spawn(0)` 后读 `state().posY`
+ *     （不经碰撞解算，故对极端量级/次正规/2^53+1 同样灵敏）。
+ *   D `build_world` 的 teleport JSON `origin`：`take_event()` 拿到的传送事件里 `origin` 即解析值
+ *     （`src/phys/mod.rs` 在 `check` 命中后用 `dest.origin` 组事件），与 C 同为精确回显面。
+ *   ref `JS Number(literal)`（JS 解析 = IEEE 正确舍入）作为参照位型，用于判读某一侧是否偏 ULP。
+ *
+ * 解析路径差异的来源：`serde_json` 的 `float_roundtrip` —— `src/Cargo.toml` 开启，
+ * `src/wasm-core/Cargo.toml` 与三工程 `crates/wasm/Cargo.toml` 取默认 features。
  *
  * 用法：node scripts/t13-input-surface-probe.mjs [--wasm-dir=<repo 相对目录>]
- *   缺省 --wasm-dir=game/pkg（当前构建）；OFF 实验传 --wasm-dir=<OFF 构建产物目录>。
+ *   缺省 --wasm-dir=apps/game/pkg（当前构建）；对比实验传 --wasm-dir=<另一构建的产物目录>。
  * 只读：不写任何文件（输出 JSON 到 stdout）。
  */
 import { readFileSync } from 'node:fs';
@@ -40,7 +47,7 @@ function b(x) {
 
 // ── A/B 面：量级可落体/可加速的字面量（含最短表示与超长表示对照）─────────
 const ADV = [
-  '10.478655362066775',                    // t3 实测 fast parser 1-ULP 案例
+  '10.478655362066775',                    // 与 apps/game/scripts/t13-ulp-sensitivity-control.mjs 的 A 面同基数
   '100.00000000000001',
   '1234.5678901234567',                    // 17 位（最短表示的极端长度）
   '0.1',
@@ -58,7 +65,7 @@ const ADV_EXTREME = [
   '1e23',
   '1.7976931348623157e308',                // f64 max
   '2.2250738585072014e-308',               // 最小正规数
-  '2.2250738585072011e-308',               // serde_json 文档点名的 fast 路径偏差候选
+  '2.2250738585072011e-308',               // 与上一行仅末位不同（最小正规数下侧的相邻十进制）
   '5e-324',                                // 最小次正规
   '-0.0',
   '0',
@@ -123,9 +130,10 @@ const out = {
 }
 
 // ── D：build_world 的 teleport JSON 解析 → 事件 origin 直读（精确回显面）────
-// 理由：brush 平面 dist 经碰撞解算后被量化（A 面对 1 ULP 不敏感，见 ulp-sensitivity-control），
-// 故补一条 build_world 输入面的**直读回显**通道：teleport 目的地 origin 由 JSON 解析后
-// 原样进事件对象（take_event），无物理遍历 → 对极端字面量同样逐位可见。
+// 理由：A 面的落点要过碰撞解算、分辨率被量化，故补一条同属 build_world 但**不经碰撞**的直读
+// 通道——目的地 origin 逐字段取自解析结果（`src/phys/teleport.rs` 的
+// `TeleportManager::from_json`），`check` 命中后由 `src/phys/mod.rs` 用 `dest.origin` 组事件，
+// 故 `take_event()` 读到的 origin 对极端字面量逐位可见。
 {
   const rows = [];
   for (const v of ADV_EXTREME) {

@@ -1,37 +1,33 @@
 /**
- * 单测：排序门 δ ≤ T − ε_max（任务 t2 验收 #3）。
+ * 单测：排序门的静态上限与运行时裁决。
  *
- * 覆盖（t6-render-ahead §8.1/§8.4）：
- * - 静态 cap 推导：setTimeout 档 7.625ms（§8.4 记 7.6）/ Atomics 档 14.625ms
- *   （记 14.6）；ε_max ≥ T 退化为 0；边界含等号（δ = cap 恰好满足 ≤）；
- * - 构造期钳制：δ=8 双量子（超 0.4ms）由排序门吸收到 cap（§8.4 严格值纪律）；
- * - 运行时发布门：排序违例 block-order（authoritative(k−1) 未发布/首 tick）、
- *   ε 尾 drop-late（now > due → lead-miss+1）、边界 now == due → publish；
- * - 实时语义演示：δ*+ε_max ≤ T 在 ε 抖动下的放行/丢弃分界。
+ * 覆盖七组（与 `src/ts-shared/tick/ordering-gate.ts` 的导出面一一对应）：
+ * 1. **常量与 cap 推导**：`TICK_PERIOD_MS = 15.625`、`EPSILON_MAX_SETTIMEOUT_MS = 8`、
+ *    `EPSILON_MAX_ATOMICS_MS = 1`；`deriveLeadCapMs` 给出 7.625 / 14.625；
+ *    `ε_max ≥ T` 与负 `ε_max` 都退化为 0。
+ * 2. **δ 合法性**：边界**含等号**（δ = cap 合法、超 1μs 即拒）；δ = 0 合法、δ < 0 非法；
+ *    并断言 cap 对 `ε_max` **单调不增**（合法域只收缩）。
+ * 3. **构造期钳制**：缺省档 cap/δ 均为 7.625；Atomics 档 14.625；显式越界 δ 被钳到 cap；
+ *    界内显式值原样保留；负 δ 钳到 0。
+ * 4. **运行时裁决**：无锚引导期 → `block-order` 且计入 `leadMiss`；锚到位后放行；
+ *    锚缺口（`authoritative(k−1)` 未发）→ `block-order` + `leadMiss`；
+ *    `now == due` → `publish`（丢弃条件取严格大于）；`now > due` → `drop-late` + `leadMiss`；
+ *    锚不早于本标号（真值抢先）→ `block-order` + `blockedOrder`；重复候选幂等且每次调用
+ *    恰命中一个计数器；标号按 i32 回绕时「前一 tick」判定仍成立。
+ * 5. **实时界演示**：把「评估提前量 + 发布延迟」与 due 对齐，演示恰好放行与越界丢弃。
+ * 6. **双链仿真（10k tick）**：跨链按墙钟归并后核对四条不变量——乐观帧必在
+ *    `auth(k−1)` 之后且 `auth(k)` 之前、auth 标号严格递增、三计数之和恒等于尝试数；
+ *    并带**非平凡探针**（三类判定都真实触发，防恒 `publish` 的假绿）。
+ * 7. **边界与分层注记**：补 `now == due` 与「真值抢先」两处的显式断言；并说明断窗检出、
+ *    内容封帽、帧元数据分别属编排层与 `writeAuthoritative` 的 meta 路径，不在本模块。
  *
- * protocol-engineer 42 例套件对拍映射（原 temp/phys-plan-discuss/
- * t2-sortgate-testcases-protocol-engineer.md，2026-09 清理；ref 42/42 独立参考实现交叉验证）：
- * - SG-C1→§1（T 常量；μs 整数域在 ref 验证，本件以 15.625ms 等价承载）
- *   SG-C2/C3→§1/§3  SG-C4/C5/C6→§2  SG-C7→§7（判定面拒+运行时钳制两层）
- *   SG-C8/C10/C11→§1/§2/§3  SG-C12→§2  SG-C9→§1（ε≥T→cap 0 防御形态）
- * - SG-P1→§4②  SG-P2→§4①  SG-P3→§4②  SG-P4→§4③  SG-P5/P6→§4⑤（同因互斥）
- *   SG-P9→§4④  SG-P10→§4⑥
- *   SG-P7【分档裁定】断窗检出=worker 编排（t4 合同），检出后不发乐观帧不经门
- *   ——gate 保持纯排序面（§7 注记）；SG-P8【裁定修正】now==due→publish：
- *   lead-miss ≡ P(停顿>δ) 严格大于——停顿==δ 非 miss；且 δ+ε_max≤T 充分性
- *   要求 ε==ε_max（now==due）必过，取等丢弃将使定理降级为严格不等（§7 注记）
- * - SG-E1..E4【分档】内容封帽=eval 期编排（t4 合同），被帽 tick 不触门不进
- *   leadMiss——门级等价断言=§6 仿真闭账（attempts ≡ published+leadMiss+
- *   blockedOrder = 门被咨询数；被帽 tick 不入尝试流，计数天然隔离）
- * - SG-M1/M2/M3/M4→shared-state.protocol.test.ts §2/§3（OPT 单向性/配对键
- *   载体/seg 沿用/传输透明）  SG-M5→门纯函数零传输依赖 + protocol §3/§5 双路径同值
- * - SG-S1→§6（10k 双链仿真 5 不变量+非平凡探针）  SG-S2→§6（故障形态由
- *   仿真剖面真实触发+§5 显式 ε 尾 demo）  SG-S2b→§5  SG-S3a/b→§4⑦  SG-S4→§2
+ * 运行（node，不需要浏览器）——**路径以本仓实际布局为准**：
+ *   cd apps/game && npx esbuild ../../src/ts-shared/tick/ordering-gate.test.ts \
+ *     --bundle --format=esm --platform=node --outfile=node_modules/.cache/t4-tests/ordering-gate.test.mjs \
+ *     && node node_modules/.cache/t4-tests/ordering-gate.test.mjs
  *
- * 运行（node，禁浏览器）：
- *   cd game && npx esbuild ../src/ts-shared/tick/ordering-gate.test.ts \
- *     --bundle --format=esm --platform=node --outfile=node_modules/.cache/t2-tests/ordering-gate.test.mjs \
- *     && node node_modules/.cache/t2-tests/ordering-gate.test.mjs
+ * 断言标签与 `console.log` 分组名里含「SG-xx」「§x.y」「t2/t4」这类历史编号，它们是
+ * **字符串字面量而非注释**，本次注释重编不改动（同 §7.3 #36 的处置口径）。
  */
 
 import {
@@ -75,14 +71,14 @@ expect(isLeadWithinCap(14.625, T, 1) === true, 'SG-C6 Atomics 档 δ = 14625μs 
 expect(isLeadWithinCap(14.626, T, 1) === false, 'SG-C6 Atomics 档 14626 > cap 拒');
 expect(isLeadWithinCap(0, T, 8) === true, 'SG-C10 δ = 0 合法（退化但合法：无领先无增益）');
 expect(isLeadWithinCap(-0.1, T, 8) === false, 'SG-C10 δ < 0 非法（delta-range）');
-// SG-C12 声明常量表自洽（防实现常量与文档漂移）：δ* 7.6 ≤ 7625 ∧ 14.6 ≤ 14625
+// 常量表自洽：声明用的两种档位取值都落在各自 cap 之内
 expect(
   isLeadWithinCap(7.6, T, 8) && isLeadWithinCap(14.6, T, 1),
   'SG-C12 声明值自洽：7600≤7625 ∧ 14600≤14625',
 );
-// SG-C8 ε=0（理想发布器）：δ ≤ T 全合法，整 tick 领先（cap=T）合法
+// ε=0（发布零延迟的理想档）：cap = 整个 tick，δ = T 合法
 expect(deriveLeadCapMs(T, 0) === 15.625 && isLeadWithinCap(15.625, T, 0) === true, 'SG-C8 ε=0 → cap=T=15.625（整 tick 领先合法，δ=T PASS）');
-// SG-S4 配置面单调性：ε_max 增大 → cap 单调不增（通过集只收缩不翻回）
+// cap 对 ε_max 单调不增：ε 越大，合法域只收缩、不会翻回
 expect(
   deriveLeadCapMs(T, 0) >= deriveLeadCapMs(T, 2) &&
     deriveLeadCapMs(T, 2) >= deriveLeadCapMs(T, 8) &&
@@ -106,41 +102,41 @@ const g5 = createOrderingGate({ leadDeltaMs: -2 });
 expect(g5.leadDeltaMs === 0, 'SG-C10 负 δ 钳到 0');
 
 // ── 4. 运行时发布门 ─────────────────────────────────────────
-// 分账（§8.5 对齐 + 裁定文档修订）：leadMiss = unordered + late 合账
-//（无锚引导期/停顿/自身 ε 尾）；blockedOrder = superseded 专账（真值抢先/
-// 锚回跳，稳态 0）。动作面恒三值：block-order/drop-late/publish。
+// 分账口径：leadMiss 收两类——无锚/锚缺口（unordered）与自身越 due（late）；
+// blockedOrder 只收「锚不早于本标号」（真值抢先）。动作面恒三值：
+// block-order / drop-late / publish，且每次调用恰命中一个计数器。
 console.log('[4] authorizeOptimistic / noteAuthoritative (SG-P1..P6, P8..P10)');
 const dueOf = (k: number, t0Ms: number): number => t0Ms + k * T;
 const t0 = 1000;
 const g = createOrderingGate();
-// ① 首 tick 前乐观发布必拒（无 authoritative(-1) 锚 → 引导期 unordered）
+// ① 无锚引导期：optimistic(0) 缺 authoritative(-1)，必拒且计入 leadMiss
 expect(g.authorizeOptimistic(0, dueOf(0, t0) - 7, dueOf(0, t0)) === 'block-order', 'SG-P2 optimistic(0) before any authoritative → block-order（无确认基线；首个合法乐观 label=1）');
 expect(g.stats.leadMiss === 1 && g.stats.blockedOrder === 0 && g.stats.optimisticPublished === 0, 'SG-P2 分账：引导期无锚 → leadMiss=1（unordered 主机制；blockedOrder 不动）');
-// ② authoritative(0) 后 optimistic(1) 放行（now < due）——首个合法乐观帧
+// ② auth(0) 到位后，optimistic(1) 在 due 之前 → 放行
 g.noteAuthoritative(0);
 expect(g.authorizeOptimistic(1, dueOf(1, t0) - 5, dueOf(1, t0)) === 'publish', 'SG-P3 optimistic(1) after authoritative(0) → publish（首个合法）');
 expect(g.stats.optimisticPublished === 1, 'SG-P3 optimisticPublished=1');
-// ③ 排序不变量：authoritative(1) 未发布即试 optimistic(2) → 拒（停顿越 δ 主机制）
+// ③ 锚缺口：auth(1) 未发就试 optimistic(2) → 拒且计入 leadMiss
 expect(g.authorizeOptimistic(2, dueOf(2, t0) - 7, dueOf(2, t0)) === 'block-order', 'SG-P4 optimistic(2) without authoritative(1) → block-order（ε 尾主机制：停顿杀死领先）');
 expect(g.stats.leadMiss === 2 && g.stats.blockedOrder === 0, 'SG-P4 分账：unordered → leadMiss=2（§8.5 P(停顿>δ)）；blockedOrder 仍 0');
-// ④ authoritative(1) 发布后 → 放行；ε 尾边界：now == due → publish；now > due → drop-late
+// ④ 边界：now == due → publish；now > due → drop-late + leadMiss
 g.noteAuthoritative(1);
 expect(g.authorizeOptimistic(2, dueOf(2, t0), dueOf(2, t0)) === 'publish', 'SG-P8（修正后）now == due → publish（边界含等号；收回原「保守取等」——与 lead-miss=P(停顿>δ) 严格大于自洽）');
 g.noteAuthoritative(2);
 expect(g.authorizeOptimistic(3, dueOf(3, t0) + 0.01, dueOf(3, t0)) === 'drop-late', 'SG-P9 now > due → drop-late (ε 尾严格迟到，乐观径次要机制)');
 expect(g.stats.leadMiss === 3, 'SG-E1/分账 leadMiss=3 累计（unordered×2 + late×1 合账）');
 expect(g.stats.blockedOrder === 0, 'SG-P5/P6 分账 blockedOrder=0（至此无 superseded）');
-// ⑤ superseded 专账：auth(3) 已发还试 optimistic(3) → block-order + blockedOrder
+// ⑤ 真值抢先：auth(3) 已发再试 optimistic(3) → 拒且计入 blockedOrder
 g.noteAuthoritative(3);
 expect(g.authorizeOptimistic(3, dueOf(3, t0) - 5, dueOf(3, t0)) === 'block-order', 'SG-P5 真值抢先：auth(n) 已发 → block-order（superseded 专账；迟到乐观帧=纯浪费 §8.5）');
 expect(g.stats.blockedOrder === 1, 'SG-P5/P6 分账 blockedOrder=1（superseded 与 unordered 不可同时真——同因互斥）');
-// ⑥ 幂等：同候选重放同裁决（每候选恰一终态，drop 即弃无重试路径）
+// ⑥ 幂等：同一候选重放得同一裁决，且每次调用各计一次（丢弃即弃，无重试路径）
 const gIdem = createOrderingGate();
 gIdem.noteAuthoritative(5);
 const r1 = gIdem.authorizeOptimistic(6, dueOf(6, t0) + 1, dueOf(6, t0));
 const r2 = gIdem.authorizeOptimistic(6, dueOf(6, t0) + 1, dueOf(6, t0));
 expect(r1 === 'drop-late' && r2 === 'drop-late' && gIdem.stats.leadMiss === 2, 'SG-P10 幂等：同候选重放同裁决、每调用恰一终态计数（drop 即弃）');
-// ⑦ i32 wrap（SG-S3a/b）：标签算术 wrap-safe——prev(i32min)=i32max
+// ⑦ i32 回绕：prev(i32min) = i32max，锚点判定不因回绕失效
 const gWrap = createOrderingGate();
 gWrap.noteAuthoritative(2147483647); // seen = i32max
 const wrapLabel = -2147483648; // tag = i32min（回绕）
@@ -164,16 +160,19 @@ const evalK7 = dueOf(6, t0) + 7.625; // t_6 + δ*
 expect(gr.authorizeOptimistic(7, evalK7 + 8.5, dueOf(7, t0)) === 'drop-late', 'SG-P9 δ*+ε=8.5 → 越 due 0.5ms（丢弃，lead-miss）');
 expect(gr.stats.leadMiss === 1, 'SG-P9 分账 lead-miss 计数=1（与 starvation 分列，§8.5）');
 
-// ── 6. 双链仿真不变量（t2 用例集 SG-S1 收编；Gate 2 对拍基线）──
+// ── 6. 双链仿真不变量 ────────────────────────────────────────
 console.log('[6] two-chain simulation invariants');
 /**
- * 10k tick 仿真：auth 链/opt 链各自单调（顺序发射），跨链按墙钟时间归并——
- * 排序违例/ε 尾在仿真中必须全部被门拦截。late 剖面（示意，非标定——标定
- * 剖面由 bench D-scan 出具）：两段量化 + 1% GC 尾。消费者日志不变量
- * （SG-S1 五条：①opt(k) 后于 auth(k−1) ②opt(k) 先于 auth(k) ③auth 标签单调
- * ∧ drop 原因互斥（superseded/unordered 不可同真——auth 单调发布）④闭账
- * published+leadMiss+blockedOrder ≡ 尝试数（分账完备，无帧悬空））+
- * 非平凡探针（drop 机制全部真实触发，防恒 publish 假绿）。
+ * 10k tick 仿真：auth 链与 opt 链各自链内单调（顺序发射），跨链按墙钟时间归并——
+ * 排序违例与 ε 尾必须全部被门拦下。剖面是**示意性**的（两段量化 + 1% 长尾，非标定），
+ * 目的是让三类判定都真实出现。
+ *
+ * 消费者侧不变量：
+ * ① opt(k) 在 auth(k−1) 之后；
+ * ② opt(k) 在 auth(k) 之前（若 auth(k) 出现过）；
+ * ③ auth 标号严格递增；
+ * ④ 闭账：published + leadMiss + blockedOrder 恒等于尝试数（分账完备，无帧悬空）。
+ * 另加**非平凡探针**：三类计数都 > 0，防「恒 publish」的假绿。
  */
 function simulateGate(ticks: number, seed: number): {
   ok: boolean;
@@ -235,7 +234,7 @@ function simulateGate(ticks: number, seed: number): {
   // ④：计数闭账（published + leadMiss + blockedOrder === 总尝试数）
   const attempts = gate.stats.optimisticPublished + gate.stats.leadMiss + gate.stats.blockedOrder;
   const inv4 = attempts === ticks;
-  // 非平凡探针：三类判定全部真实触发（GC 尾驱动 leadMiss；锚缺口驱动 blockOrder）
+  // 非平凡探针：三类判定全部真实触发（长尾驱动 leadMiss；锚缺口驱动 blockOrder）
   const nontrivial =
     gate.stats.leadMiss > 0 && gate.stats.blockedOrder > 0 && gate.stats.optimisticPublished > 0;
   return { ok: inv12 && inv3 && inv4 && nontrivial, stats: { ...gate.stats } };
@@ -249,16 +248,14 @@ function simulateGate(ticks: number, seed: number): {
   );
 }
 
-// ── 7. 语义收敛注记（t2 用例集 → 实现资产的对齐记录）──────────
+// ── 7. 边界补测与分层注记 ────────────────────────────────────
 console.log('[7] semantics convergence notes (case-set → implementation)');
-// SG-C7（δ=8 配置必须拒）：isLeadWithinCap(8,T,8)=false（判定面）+ 构造期钳制
-//（运行时防御）——两者互补，钳制不掩盖非法性报告。
+// δ=8 的两层处置互补：判定面 `isLeadWithinCap(8,T,8)=false`（非法性可被报告），
+// 构造期钳制到 cap（运行时不被越界配置带偏）——钳制不掩盖判定面的拒绝结论。
 expect(isLeadWithinCap(8, T, 8) === false, 'SG-C7 判定面：δ=8 越界（isLeadWithinCap=false）');
 expect(createOrderingGate({ leadDeltaMs: 8 }).leadDeltaMs === 7.625, 'SG-C7 运行时面：钳制吸收');
-// SG-P8 收回修正：now == due → publish（边界含等号）。理由：lead-miss 指标定义
-// = P(停顿 > δ) 严格大于——停顿 == δ 不算 miss；now==due 的 OPT 帧仍是真实
-// tick 输出、修订即撤收敛、显示价值≈0 但不为负 → 放行更忠实于「迟到」语义
-//（ε 尾丢弃 = 严格越 due）。原用例集「保守取等」与 lead-miss 定义自相矛盾。
+// now == due → publish（边界含等号）。理由：leadMiss 的语义是「发布晚于 due」，
+// 即严格越界；now == due 的乐观帧仍在网格点上，放行比丢弃更贴合该语义。
 expect(
   (() => {
     const g = createOrderingGate();
@@ -267,8 +264,9 @@ expect(
   })() === 'publish',
   'SG-P8（修正后）：now == due → publish（与 lead-miss=P(停顿>δ) 自洽）',
 );
-// superseded 并入 block-order：auth(k) 已发还试乐观(k)（lastAuthoritative ≥ k >
-// k−1）→ block-order（编排缺陷报警面）。行为面一致（拒发）；分账合并，稳态 0。
+// 真值抢先并入 block-order：auth(k) 已发还试乐观(k)（锚 = k ≠ k−1）→ 拒发，
+// 并计入 blockedOrder（编排缺陷报警面）。动作面与 unordered 相同（都是拒发），
+// 区别只在分账：稳态下 blockedOrder 应为 0。
 expect(
   (() => {
     const g = createOrderingGate();
@@ -278,10 +276,10 @@ expect(
   })() === 'block-order',
   'superseded 情形 → block-order（lastAuthoritative=6 ≠ 5；编排缺陷面）',
 );
-// SG-P7 orphan 分层：断窗检出（I_A_SEG 突变）在 worker 编排（t4 合同）——
-// 检出后不发乐观帧，不经本门；ordering-gate 保持纯排序面（无 breakPending 判据）。
-// SG-E/M 组分层：内容封帽 = t4 编排 eval 期；帧元数据 = writeAuthoritative meta
-// 路径（shared-state.protocol.test.ts 覆盖）。
+// 分层：断窗检出（`I_A_SEG` 突变）与内容封帽属**编排层**，检出后不产生乐观帧、不咨询本门；
+// ordering-gate 只做纯排序裁决，没有断窗判据。帧元数据的落盘走
+// `writeAuthoritative` 的 meta 路径，由 `src/ts-shared/auth/shared-state.ts` 与
+// `src/ts-shared/auth/shared-state.protocol.test.ts` 覆盖。
 
 console.log(`ordering-gate.test: ${passed} passed, ${failed} failed`);
 if (failed > 0) {

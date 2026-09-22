@@ -1,11 +1,22 @@
-//! WASM bindings for BSP parsing, GLB export and VTF decoding.
+//! `websurf-wasm`：把 BSP 解析、GLB 导出与纹理解码能力暴露给 JavaScript 的 wasm-bindgen 入口。
 //!
-//! 将 BSP 解析、GLB 导出、VTF 纹理解码暴露给 JavaScript，供浏览器直接预览/导出。
+//! 导出面（`#[wasm_bindgen]` 标注项）：
+//! - [`BspProcessor`]：持有已解析的 `Arc<vbsp::Bsp>`，逐方法产出元数据 JSON / GLB 字节 / 碰撞体 JSON；
+//!   构造与取用失败的报错文本由 `to_js_err` 或就地 `format!` 拼成。
+//! - [`mosaic_encode`] / [`mosaic_decode`] / [`decompress_mtz`]：马赛克图与 MTZ 字节码的独立函数，
+//!   不依赖 [`BspProcessor`] 实例。
 //!
-//! MVP 范围：
-//! - [`parse_bsp`]: 解析 BSP 字节数组，返回元数据 JSON（不持有 Bsp 实例）
-//! - [`BspProcessor`]: 持有已解析的 Bsp 实例，可调用 [`BspProcessor::export_glb`] 导出 GLB 字节
-//! - [`decode_vtf_to_png`]: 将 VTF 字节数组解码为 PNG 字节数组
+//! 内部辅助（非导出）：
+//! - `decode_vtf_to_png`：VTF 字节 → PNG 字节，由 `resolve_pakfile_materials` 在解析 PAKFILE 材质时调用；
+//! - `collect_pakfile_models` / `collect_light_entities`：装配 [`ModelIntegrator`] 的输入。
+//!
+//! 依赖分层（见 `apps/game/crates/wasm/Cargo.toml` 的 path 依赖）：
+//! - `websurf-wasm-core` = 仓库根 `src/wasm-core`，共享解析层，提供 `vbsp` / `bsp_to_gltf_core` /
+//!   `model_integrator` / `pakfile_models` / `phyfile` / `texture_utils` 各模块；
+//! - `websurf-phys` = 仓库根 `src`，共享物理层，其 `phys::PhysWorld` 由本 crate 转出。
+//!
+//! `apps/debug`、`apps/game`、`apps/viewer` 的 `crates/` 下各只有 `wasm` 一个 crate；解析层与物理层
+//! 由三个工程共用同一份源码，本工程内不存在隔离副本。
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -16,22 +27,18 @@ use model_integrator::{
     ExportOptions, InMemoryModel, InMemoryResources, ModelIntegrator, StaticProp,
 };
 
-// 解析层：本工程内的隔离副本 crates/wasm-core（仓库根 src/wasm-core/ 的逐字节副本，
-// websurf-wasm-core 0.1.0-fork；Cargo 包名与 Rust crate 名均不变）。副本化的授权、范围与
-// 回并路径见 documents/game/implementation/lighting-merge-plan.md §9.1 与 §6.2。
+// 共享解析层：仓库根 src/wasm-core（Cargo 包名 websurf-wasm-core）。
+// 注意 `model_integrator` 亦经此处引入 crate 根，上面的 `use model_integrator::{…}` 走同名条目。
 use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, phyfile, texture_utils, vbsp};
 
-// 物理系统：仍共享仓库根 src/（websurf-phys crate，原 game/crates/wasm/src/phys/ 已迁出）——
-// 本轮未副本化，保持指向根部同一份。
+// 共享物理层：仓库根 src（Cargo 包名 websurf-phys）；转出 PhysWorld 供 JS 直接构造物理世界。
 pub use websurf_phys::phys::PhysWorld;
-
-// 诊断探针：仅在 `cargo test` 下编译，复刻 export_model_colliders 管线 dump 中间产物。
 
 // ---------------------------------------------------------------------------
 // 错误处理辅助
 // ---------------------------------------------------------------------------
 
-/// 将任意错误转换为 JavaScript 错误。
+/// 把任意 `Debug` 错误拼成 `"{ctx}: {e:?}"` 文本的 [`JsValue`]，作为 JS 侧抛出的错误值。
 fn to_js_err<E: std::fmt::Debug>(e: E, ctx: &str) -> JsValue {
     JsValue::from_str(&format!("{}: {:?}", ctx, e))
 }
@@ -40,35 +47,35 @@ fn to_js_err<E: std::fmt::Debug>(e: E, ctx: &str) -> JsValue {
 // PAKFILE 内嵌模型：三件套提取 / 材质解析 / 碰撞体参数
 // ---------------------------------------------------------------------------
 
-/// 原始三角网格碰撞的路径预算（三角数上限）；超出回退 OBB 粗碰撞。
-///
-/// 不做共面合并后每个三角生成一个 brush，故用三角数卡护栏（比面数预算大得多）。
+/// PAKFILE 材质解析的产出，由 `resolve_pakfile_materials` 填充，再逐字段转交
+/// `InMemoryResources` 的 `textures` / `material_alpha_mode` / `material_unlit`。
 #[derive(Default)]
 struct PakMaterials {
-    /// `材质名 → PNG 字节`。键须与 `vmdl::TextureInfo::name` 逐字符一致，供 `push_texture` 查表。
+    /// `材质名 → PNG 字节`。键取 `vmdl::TextureInfo::name`，消费端按同名查表。
     textures: HashMap<String, Vec<u8>>,
-    /// `材质名 → alpha_mode`（0 = Opaque，1 = Blend，2 = Mask）。
+    /// `材质名 → alpha_mode`（1 = Blend 且双面，2 = Mask 且阈值 0.5，其余按 Opaque）。
     alpha_modes: HashMap<String, u8>,
-    /// 自发光 / 无光照材质名集合（`$selfillum` / `UnlitGeneric`）。
+    /// 自发光 / 无光照材质名集合（着色器名以 `unlit` 开头，或 `$selfillum` 取到非 `0` 的非空值）。
     unlit: std::collections::HashSet<String>,
 }
 
-/// 提取被 `static_props` 引用且 `.mdl/.vvd/.dx90.vtx` 齐全的模型。
+/// 提取被 `static_props` 引用且 `.mdl/.vvd/.dx90.vtx` 三件齐全的模型，并装配静态道具放置表。
 ///
-/// 返回 `(模型三件套, 静态道具放置表, PAKFILE 全部条目名)`；
-/// 第三项供 [`pakfile_models::PakIndex`] 复用，避免为找材质再遍历 zip。
+/// 返回 `(模型三件套, 静态道具放置表, PAKFILE 全部条目名)`；第三项供调用方交给
+/// [`pakfile_models::PakIndex::build`]，无需为找材质再遍历一遍 zip。
 fn collect_pakfile_models(
     bsp: &vbsp::Bsp,
 ) -> Result<(Vec<InMemoryModel>, Vec<StaticProp>, Vec<String>), JsValue> {
-    // 1. 被静态道具引用的模型路径集合
+    // 1. 收集被静态道具引用的模型路径
     let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
     for prop in bsp.static_props() {
         referenced.insert(prop.model().to_string());
     }
 
-    // 2. 枚举 PAKFILE 全部条目（zip 只锁一次）
-    //    顺手把 prop_static 的**逐顶点预烘焙光照**（`sp_<idx>.vhv` / `sp_hdr_<idx>.vhv`）读出来：
-    //    它是 Source 的第 1 级 prop 光照来源（见 `wasm_core::vhv`），与条目枚举共用同一遍扫描。
+    // 2. 枚举 PAKFILE 全部条目（整遍扫描共持有一把 zip 锁）
+    //    同一遍里顺带取出 `sp_<idx>.vhv` / `sp_hdr_<idx>.vhv` 两个 blob：它们是 prop 的逐顶点
+    //    预烘焙光照，解析器是共享层的 `websurf_wasm_core::vhv::parse_vhv`，产物落到
+    //    `StaticProp::vertex_lighting`（与 `Bsp::prop_ambient_cube` 给出的 ambient cube 并列）。
     let zip = bsp.pack.clone().into_zip();
     let mut zip_guard = zip
         .lock()
@@ -79,7 +86,7 @@ fn collect_pakfile_models(
         if let Ok(mut entry) = zip_guard.by_index(i) {
             let name = entry.name().to_string();
             let lower = name.to_ascii_lowercase();
-            // 只收 sp_<数字>.vhv（HDR 版优先，见下面择一）
+            // 只收 sp_<数字>.vhv；sp_hdr_<数字>.vhv 去掉 hdr_ 前缀后与前者同属一个下标
             if lower.starts_with("sp_") && lower.ends_with(".vhv") {
                 let mid = &lower[3..lower.len() - 4];
                 let (idx_part, is_hdr) = match mid.strip_prefix("hdr_") {
@@ -89,7 +96,7 @@ fn collect_pakfile_models(
                 if let Ok(idx) = idx_part.parse::<usize>() {
                     let mut buf = Vec::with_capacity(entry.size() as usize);
                     if std::io::Read::read_to_end(&mut entry, &mut buf).is_ok() && !buf.is_empty() {
-                        // HDR 版覆盖 LDR 版（与 lightmap/ambient 的择一口径一致）
+                        // 同一下标择一：HDR 版覆盖先到者，LDR 版不覆盖已存入的 HDR 版
                         if is_hdr || !vhv_blobs.contains_key(&idx) {
                             vhv_blobs.insert(idx, buf);
                         }
@@ -101,7 +108,7 @@ fn collect_pakfile_models(
     }
     drop(zip_guard);
 
-    // 3. 仅为被引用的模型提取三件套（缺任一件即跳过）
+    // 3. 只为被引用的模型提取三件套：按大小写不敏感判 .mdl，任一件取不到即跳过该模型
     let mut models: Vec<InMemoryModel> = Vec::new();
     for name in &entry_names {
         if !name.to_ascii_lowercase().ends_with(".mdl") || !referenced.contains(name) {
@@ -129,8 +136,8 @@ fn collect_pakfile_models(
         });
     }
 
-    // 4. static_props 放置表（GLB 节点与碰撞体共用）
-    //    逐实例挂上第 1 级逐顶点光照（`sp_<idx>.vhv`）；解析失败/缺失则留 None 回退 cube。
+    // 4. static_props 放置表（GLB 节点与碰撞体共用同一份）
+    //    逐实例挂上第 2 步取到的逐顶点光照；条目缺失或解析失败则留 None。
     let mut vhv_ok = 0usize;
     let mut vhv_bad = 0usize;
     let static_props: Vec<StaticProp> = bsp
@@ -171,10 +178,11 @@ fn collect_pakfile_models(
     Ok((models, static_props, entry_names))
 }
 
-/// BSP 光照实体（`light` / `light_spot` / `light_environment`）→ [`model_integrator::Entity`]。
+/// BSP 光照实体（classname ∈ `LIGHT_CLASSNAMES`）→ [`model_integrator::Entity`]。
 ///
-/// 只提取光照解析所需的属性子集（origin/angles/_light/_cone/衰减/pitch），
-/// 后续交给 [`ModelIntegrator`] 的 KHR_lights_punctual 管线（颜色/亮度/范围/锥角/方向）。
+/// 只搬运光照解析要用的属性子集：`model`/`origin`/`angles`/`scale` 与 `_light`/`_cone`/
+/// `_inner_cone`/三个衰减系数/`pitch`；取不到的属性一律留成 `None`，`classname` 取不到则跳过该实体。
+/// 消费端 [`ModelIntegrator`] 把这些实体写成 `KHR_lights_punctual` 扩展。
 fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> {
     const LIGHT_CLASSNAMES: &[&str] = &["light", "light_spot", "light_environment"];
     let mut out = Vec::new();
@@ -208,7 +216,8 @@ fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> {
 
 
 
-/// 内部 VTF → PNG 解码（GLB 材质贴图导出用；不导出为 wasm API）。
+/// VTF 字节 → PNG 字节：取最高分辨率图的第 0 帧重新编码。未标 `#[wasm_bindgen]`，
+/// 仅供本文件的 PAKFILE 材质解析调用。
 fn decode_vtf_to_png(data: &[u8]) -> Result<Vec<u8>, JsValue> {
     let vtf = texture_utils::from_bytes(data).map_err(|e| to_js_err(e, "VTF 解析失败"))?;
     let image = vtf
@@ -225,32 +234,33 @@ fn decode_vtf_to_png(data: &[u8]) -> Result<Vec<u8>, JsValue> {
 }
 
 // ---------------------------------------------------------------------------
-// 纹理画质切换（mosaic 共享模块：压缩/还原低清纹理）
+// 纹理画质切换：转发共享解析层 src/wasm-core/mosaic 的马赛克编解码与 MTZ 解压
 // ---------------------------------------------------------------------------
 
-/// PNG 字节 → mosaic v4 纹理字节码（压缩）。
+/// PNG 字节 → `#mosaic v4` 字节码文本；错误文本前缀 `mosaic_encode`。
 #[wasm_bindgen]
 pub fn mosaic_encode(png: &[u8], name: &str) -> Result<String, JsValue> {
     websurf_wasm_core::mosaic::encode::img_to_code(png, name)
         .map_err(|e| JsValue::from_str(&format!("mosaic_encode: {e}")))
 }
 
-/// mosaic v4 字节码 → PNG 字节（低清还原，最近邻放大 ×scale，默认 ×8）。
+/// `#mosaic v4` 字节码 → PNG 字节；`scale` 是最近邻放大倍数，错误文本前缀 `mosaic_decode`。
 #[wasm_bindgen]
 pub fn mosaic_decode(code: &str, scale: u32) -> Result<Vec<u8>, JsValue> {
     websurf_wasm_core::mosaic::decode::code_to_img(code, scale)
         .map_err(|e| JsValue::from_str(&format!("mosaic_decode: {e}")))
 }
 
-/// 解压默认配置纹理包（textures.mtz，MTZ5/6 容器）→ textures.json 文本。
-/// 纹理键 = `materials/xxx`（与 basetexture 一致），供缺失纹理回退/比对。
+/// MTZ 容器字节（魔数 `MTZ6`，兼容读 `MTZ5`）→ JSON 对象文本：`键 → "#mosaic v4 字节码"`。
+/// 键取条目 `B[名字:宽x高]` 的名段里 `|` 之前的一段（形如 `materials/buildings/antn00`）；
+/// 错误文本前缀 `decompress_mtz`，本工程由 `apps/game/src/app.ts` 注入 `buildWorldBundle`。
 #[wasm_bindgen]
 pub fn decompress_mtz(bytes: &[u8]) -> Result<String, JsValue> {
     websurf_wasm_core::mosaic::mtz::decompress_mtz(bytes)
         .map_err(|e| JsValue::from_str(&format!("decompress_mtz: {e}")))
 }
 
-/// 加载内存中的模型三件套为 `vmdl::Model`（任一环节失败即返回 `None`）。
+/// 内存中的 `.mdl`/`.vtx`/`.vvd` 三件字节 → `vmdl::Model`；任一步读取失败即返回 `None`。
 fn load_vmdl(m: &InMemoryModel) -> Option<vmdl::Model> {
     let mdl = vmdl::Mdl::read(&m.mdl).ok()?;
     let vtx = vmdl::Vtx::read(&m.vtx).ok()?;
@@ -261,15 +271,13 @@ fn load_vmdl(m: &InMemoryModel) -> Option<vmdl::Model> {
 
 
 
-/// 从 PAKFILE 条目名构建 VMT **基名索引**：`基名小写` → `materials/` 前缀去 `.vmt` 的路径
-/// （保留条目原始大小写，因为 `Packfile::get` 按名精确匹配）。
+/// 从 PAKFILE 条目名构建 VMT **基名索引**：`基名小写 → 去掉 materials/ 前缀与 .vmt 后缀的路径`。
 ///
-/// 用途见 `ConvertOptions::vmt_stem_index`：世界面的贴图名来自 BSP texinfo
-/// （`METAL/METALGRATE013A2`），精确路径不在包内时，作者**同一基名**的 VMT 是唯一的权威
-/// `$basetexture`/`$translucent`/`$alphatest` 来源。实测 surf_666：68 种世界贴图里 14 种
-/// （8400 面）只有基名命中，其中 13 种的 `$basetexture` 与材质名逐字符相同（作者对同一张贴图的重写）。
+/// 只收 `materials/` 下、以 `.vmt` 结尾的条目；值保留条目原始大小写（`Packfile::get` 按名精确
+/// 匹配）。产物填进 `bsp_to_gltf_core::ConvertOptions::vmt_stem_index`，供世界面的贴图名在精确
+/// 候选全部落空时按基名回退取 `$basetexture` 等标注。
 ///
-/// 同名多条时取**路径最短**者：`666/x.vmt` 优先于 `models/props/generated_prop/x.vmt`。
+/// 同名多条时取**路径最短**者；与当前值等长时保留先到的一条。
 fn build_vmt_stem_index(entry_names: &[String]) -> std::collections::HashMap<String, String> {
     let mut out: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for name in entry_names {
@@ -290,16 +298,17 @@ fn build_vmt_stem_index(entry_names: &[String]) -> std::collections::HashMap<Str
     out
 }
 
-/// 解析所有被引用模型的材质：从 PAKFILE 取 `.vmt` 得透明度标注，再按 `$basetexture` 取 `.vtf` 解码为 PNG。
+/// 解析被引用模型的材质标注与贴图：取 `.vmt` 得 `alpha_mode` / `unlit` / `$basetexture`，
+/// 再按 `$basetexture` 取 `.vtf` 解码为 PNG；`patch` 材质多跟一层 `include` 母材质。
 ///
-/// `decode_textures = false` 时只解析标注、跳过图像解码（碰撞体路径用此模式）。
+/// `decode_textures = false` 时只填 `alpha_modes` 与 `unlit`，跳过全部图像解码（碰撞体路径用此模式）。
 ///
-/// 材质路径解析顺序：`TextureInfo::search_paths` → `Mdl::texture_paths` → 裸材质名，
-/// 均交 [`pakfile_models::PakIndex`] 做大小写不敏感 + `materials/` 前缀补全匹配。
+/// VMT 候选路径按 `mdl.textures[].search_paths` 与 `mdl.texture_paths` 逐条拼上材质名，末尾补一条
+/// 裸材质名；查询一律走 [`pakfile_models::PakIndex::find`]。已解析过的材质名不再重复解析。
 ///
-/// `fallback` = 默认纹理包（`textures.mtz` 解压产物）：pakfile 内没有该 VTF（stock 贴图未打包）时
-/// 按 **`$basetexture` 路径**查包（键是源资源路径，不是材质名），把低清纹理（含 alpha 镂空）交给
-/// `ModelIntegrator`。`None`（碰撞体 / mosaic manifest 路径）保持历史行为：无 pakfile VTF 即无贴图。
+/// `fallback` = 默认纹理包（`textures.mtz` 解压产物，键形如 `materials/<小写路径>`）：pakfile 内
+/// 没有该 VTF 时，按 `$basetexture` 路径与材质名依次查包取低清纹理补位；传 `None` 即不回落，
+/// 此时没有 pakfile VTF 的材质没有贴图。
 fn resolve_pakfile_materials(
     bsp: &vbsp::Bsp,
     models: &[InMemoryModel],
@@ -371,7 +380,7 @@ fn resolve_pakfile_materials(
             let Some(base) = info.basetexture else {
                 continue;
             };
-            // ① pakfile 内的 VTF（原始分辨率）
+            // 先在 pakfile 内按 `$basetexture` 找同路径 VTF（原始分辨率），解出 PNG 即用
             if let Some(vtf_entry) = index.find(&base, "vtf") {
                 if let Ok(Some(vtf_bytes)) = bsp.pack.get(vtf_entry) {
                     if let Ok(png) = decode_vtf_to_png(&vtf_bytes) {
@@ -380,10 +389,10 @@ fn resolve_pakfile_materials(
                     }
                 }
             }
-            // ② pakfile 内没有这张 VTF（stock 贴图未打包）→ 查默认纹理包。
-            //    键必须是 **`$basetexture` 路径**而不是材质名：模型材质名常年是裸基名
-            //    （`metalfence007a`），包里的键是源资源路径（`materials/metal/metalfence007a`）
-            //    ——实测铁丝网 prop 正因此拿不到贴图（含 17.6% alpha 镂空的铁网全部丢失）。
+            // pakfile 内没有这张 VTF（stock 贴图未打包）时退到默认纹理包。
+            // 查表键经 `bsp_to_gltf_core::fallback_key` 归一成 `materials/<小写路径>`，故这里按
+            // `$basetexture` 路径与材质名依次试：模型材质名常是裸基名（`metalfence007a`），
+            // 包里的键却是源资源路径（`materials/metal/metalfence007a`）。
             if let Some(fallback) = fallback {
                 if let Some(png) = websurf_wasm_core::bsp_to_gltf_core::fallback_texture_png(
                     fallback,
@@ -400,22 +409,20 @@ fn resolve_pakfile_materials(
 }
 
 // ---------------------------------------------------------------------------
-// 全局初始化
+// 元数据 / 处理器入口
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// 元数据 / 解析入口
-// ---------------------------------------------------------------------------
-
-/// 顶层元数据，前端通过 `JSON.parse(parse_bsp(data))` 直接使用。
+/// 顶层元数据：各 lump 的条目计数与 BSP 魔术字。前端消费的是 [`BspProcessor::metadata`]
+/// 返回的 JSON 文本（`JSON.parse` 后即为本结构）。
 ///
-/// 普通 Rust 结构体（不标 `#[wasm_bindgen]`）：wasm_bindgen 导出要求字段实现 `Copy`，
-/// 而 `String` 字段不满足；经 `parse_bsp` / [`BspProcessor::metadata`] 序列化为 JSON 返回。
+/// 不标 `#[wasm_bindgen]`：那一侧要求导出结构体的字段实现 `Copy`，本结构含 `String` 字段，
+/// 故只经 `serde_json` 序列化成字符串返回；`schema_version` 固定写 1。
 #[derive(serde::Serialize)]
 pub struct BspMetadata {
     pub schema_version: u32,
-    /// BSP 魔术字（如 "VBSP"），由 header.v/b/s/p 拼成。
+    /// BSP 魔术字，由 header 的 `v`/`b`/`s`/`p` 四个字节按字符拼成（`VBSP` 地图）。
     pub magic: String,
+    /// 地图名：当前实现恒为空串，未从任何 lump 取值。
     pub map_name: String,
     pub num_models: usize,
     pub num_faces: usize,
@@ -430,13 +437,13 @@ pub struct BspMetadata {
     pub num_brushes: usize,
     pub num_leaves: usize,
     pub num_nodes: usize,
-    /// pakfile 中打包的文件数（VFS 资源数）。
+    /// PAKFILE 内的条目数（`ZipArchive::len`），在构造处理器时算一次并缓存。
     pub packed_files: usize,
 }
 
 impl BspMetadata {
-    // packed_files 由调用方传入：vbsp 0.6.0 的 Packfile.zip 为私有字段，
-    // into_zip() 消费 self，只能 clone 后取 len()；由 new 缓存避免 metadata() 重复克隆。
+    // packed_files 由调用方传入：`Packfile` 的 zip 字段私有，要拿条目数只能 clone 后走
+    // `Packfile::into_zip()`（消费 self）再 `len()`，克隆代价高 ⇒ 在处理器构造时算一次缓存。
     fn from_bsp(bsp: &vbsp::Bsp, packed_files: usize) -> Self {
         let num_entities = bsp.entities.iter().count();
         let num_static_props = bsp.static_props().count();
@@ -470,27 +477,22 @@ impl BspMetadata {
     }
 }
 
-/// 一次性解析 BSP 字节数组，返回元数据 JSON 字符串。
-///
-/// 这个函数不持有 Bsp 实例。如果需要导出 GLB，请使用 [`BspProcessor`]。
 #[wasm_bindgen]
 
 // ---------------------------------------------------------------------------
-// 处理器（持有 Bsp 实例，可重复导出 / 提取）
+// 处理器：持有 BSP 解析结果，借用式重复导出 / 提取
 // ---------------------------------------------------------------------------
 
-/// BSP 处理器：先调用 [`BspProcessor::new`] 解析字节数组，再调用
-/// [`BspProcessor::export_glb`] 导出 GLB，或 [`BspProcessor::metadata`]
-/// 获取元数据。
+/// BSP 处理器：`new` 里解析字节数组并存成 `Option<Arc<vbsp::Bsp>>`，此后可反复调用
+/// [`BspProcessor::metadata`] 取元数据 JSON，或调用各导出方法取 GLB 字节 / 碰撞体 JSON。
 ///
-/// **生命周期契约（契约 §3.1 ④）**：`bsp` 是 `Option<Arc<Bsp>>`。导出入口把 `Arc` 的引用计数
-/// **交出去但保留自己那一份**——于是「成功后再导出」与「失败后再导出」都不报「已被导出消费」，
-/// 真正的失败原因（光照图集打包、面表口径…）不会被误导性的「已消费 / 请重新 new」覆盖，
-/// 且失败不会毒化实例状态（借用类接口继续可用）。导出链路内部只读 `&Bsp`（见 `convert.rs`）。
+/// 导出入口 `take_bsp` 只克隆一份引用计数，处理器自己那份始终保留 ⇒ 导出成功或
+/// 失败都不消费实例，重复导出的字节一致；取不到句柄的唯一情形是构造失败（那时本就没有实例）。
+/// 导出侧 `bsp_to_gltf_core::export_bsp` 与 `export_bsp_with_models` 的形参都是 `Arc<Bsp>`。
 #[wasm_bindgen]
 pub struct BspProcessor {
     bsp: Option<std::sync::Arc<vbsp::Bsp>>,
-    /// 缓存的 pakfile 文件数，避免 metadata() 重复克隆 Packfile
+    /// 构造时缓存的 PAKFILE 条目数（`metadata()` 直接复用，不再克隆 Packfile）
     packed_files: usize,
 }
 
@@ -508,11 +510,10 @@ impl BspProcessor {
         })
     }
 
-    /// 取出可移交的 `Arc<Bsp>` 句柄（**不**清空 `self.bsp`）。
+    /// 克隆出 `Arc<Bsp>` 句柄（**不**清空 `self.bsp`）。
     ///
-    /// 命名沿用「take」，语义是**借用式移交**：调用方拿到一份引用计数，处理器仍持有原句柄
-    /// ⇒ 导出失败不消费、成功后可再次调用（见类型级文档）。真正的「未解析」只有一种情况：
-    /// 构造函数失败（`BspProcessor::new` 抛错时根本没有实例）——故这里的文本不再宣称「已消费」。
+    /// 导出成功或失败后处理器都仍持有原句柄，可再次调用；`bsp` 为 `None` 时返回文本为
+    /// `BSP 未解析` 的 [`JsValue`]。
     fn take_bsp(&self) -> Result<std::sync::Arc<vbsp::Bsp>, JsValue> {
         self.bsp
             .as_ref()
@@ -530,11 +531,11 @@ impl BspProcessor {
         metadata.to_json()
     }
 
-    /// 导出为 GLB 字节数组。
+    /// 导出为 GLB 字节数组：`bsp_to_gltf_core::export_bsp` + `ConvertOptions::default()`
+    /// ——不含 PAKFILE 模型、不注入光照、不回退缺失纹理。
     ///
-    /// **导出借用内部 Bsp**（`take_bsp()` 交出的是 `Arc<Bsp>` 克隆），**成功与失败均不消费实例**；
-    /// 实例在整个处理器生命周期内保持可用，可重复导出且字节一致。`export_bsp` 收到 `Arc<Bsp>`
-    /// 后只读 `&Bsp`。真正的「未解析」只有一种情形：`BspProcessor::new` 失败时根本没有实例。
+    /// 借用式导出：`self.bsp` 在成功与失败后都保留，可重复调用且字节一致；
+    /// 失败文本前缀 `GLB 导出失败` / `GLB 序列化失败`。
     pub fn export_glb(&mut self) -> Result<Vec<u8>, JsValue> {
         let bsp = self.take_bsp()?;
 
@@ -552,15 +553,16 @@ impl BspProcessor {
         Ok(output)
     }
 
-    /// 导出 GLB（含 PAKFILE 模型）+ **缺失纹理回退**：`defaults_json` 为默认纹理包
-    /// （`{ "materials/<材质路径小写>": "#mosaic v4 字节码" }`），材质缺失时直接在
-    /// 导出期解码低清纹理嵌入 GLB——渲染端拿到的即自包含场景，零后期处理。
+    /// 导出 GLB（含 PAKFILE 模型）+ **缺失纹理回退**：`defaults_json` 是默认纹理包文本
+    /// （`{ "materials/<材质路径小写>": "#mosaic v4 字节码" }`），解析失败即报
+    /// 「默认纹理包 JSON 解析失败」；pakfile 内没有该 VTF 的材质用它解码出的低清纹理补位。
     ///
-    /// 与 [`BspProcessor::export_glb_with_pakfile_models`] 同流程，仅注入回退表。
+    /// 与 [`BspProcessor::export_glb_with_pakfile_models`] 同一装配流程，差别只在注入回退表；
+    /// 内部按 `lightmap_max_atlas_area = 0`、`include_lights = false` 调
+    /// `export_glb_with_defaults_opts`。
     ///
-    /// **失败不消费**：`Arc<Bsp>` 为借用式移交，导出失败（例如光照图集打包面积装不下任何允许
-    /// 单页形状）时 `self.bsp` 仍为 `Some` ⇒ 同一实例可再次导出并报同一根因，借用类接口
-    /// （`metadata()` / `parse_spawn_points()` / `export_brushes_planes(…)` …）继续可用。
+    /// 失败不消费实例：失败后 `self.bsp` 仍为 `Some`，同一实例可再次导出，
+    /// `metadata()` / `parse_spawn_points()` / `export_brushes_planes(…)` 等借用类接口继续可用。
     pub fn export_glb_with_pakfile_models_with_defaults(
         &mut self,
         defaults_json: &str,
@@ -570,10 +572,10 @@ impl BspProcessor {
 
     /// [`BspProcessor::export_glb_with_pakfile_models_with_defaults`] 的**阈值可覆盖**变体。
     ///
-    /// `lightmap_max_atlas_area`：> 0 时覆盖单页图集面积上界（px），0 = 政策上界（4096×2048）。
-    /// **仅供 fail-visible 负控**（契约 `documents/game/implementation/console-fix-contract.md` §4.3）：
-    /// 政策上界下「装不下」不可由真实语料触发（容量守卫 + 单面 256 上界 ⇒ packedArea ≤ 7.32M < 8.39M），
-    /// 但该失败路径必须能被可红断言覆盖。它只改判定阈值，不改打包/落位/UV/像素口径。
+    /// `lightmap_max_atlas_area` > 0 时用作单页光照图集面积上界（px），0 表示沿用政策上界
+    /// 4096×2048 px（`src/wasm-core/bsp_to_gltf_core/lightmap.rs` 的 `MAX_ATLAS_PAGE_AREA`）；
+    /// 非有限值或 ≤ 0 一律按 0 处理。它只改这一条判定阈值，打包 / 落位 / UV / 像素口径都不变；
+    /// 本工程的 `.ts`/`.mjs` 无调用点，供显式压小上界以走「图集装不下」的失败路径。
     pub fn export_glb_with_pakfile_models_with_defaults_and_atlas_limit(
         &mut self,
         defaults_json: &str,
@@ -591,14 +593,13 @@ impl BspProcessor {
 
     /// 导出 GLB（含 PAKFILE 模型 + **默认纹理回退** + **BSP 光照**）。
     ///
-    /// 组合入口：[`BspProcessor::export_glb_with_pakfile_models_with_defaults`] 的
-    /// 缺失纹理回退表 + [`BspProcessor::export_glb_with_pakfile_models_with_lights`]
-    /// 的 `light`/`light_spot`/`light_environment` → `KHR_lights_punctual` 导出。
-    /// 此前二者互斥（一个收 defaults 不收 lights、一个收 lights 不收 defaults），
-    /// `world-builder` 只能调 `_with_defaults` ⇒ GLB 从未携带灯光。
+    /// 组合入口：默认纹理回退表（同 [`BspProcessor::export_glb_with_pakfile_models_with_defaults`]）
+    /// 与光照实体导出的 `KHR_lights_punctual`（同
+    /// [`BspProcessor::export_glb_with_pakfile_models_with_lights`]）。本工程的实际调用点是
+    /// `src/ts-shared/phys/world-builder.ts` 的 `buildWorldBundle`。
     ///
-    /// 无模型时与 `_with_lights` 同语义：仍走 integrator 路径（空模型无副作用，
-    /// 光照注入照常发生）。**导出借用内部 Bsp**，成功与失败均不消费实例。
+    /// 无模型时与 `_with_lights` 同语义：仍走整合器路径（空模型不产出节点，光照注入照常发生）。
+    /// 借用式导出：成功与失败都不消费 `self.bsp`。
     pub fn export_glb_with_pakfile_models_with_defaults_and_lights(
         &mut self,
         defaults_json: &str,
@@ -618,9 +619,9 @@ impl BspProcessor {
 
         let (models, static_props, entry_names) = collect_pakfile_models(&bsp)?;
 
-        // 世界面材质的**基名 VMT 回退**索引（见 `ConvertOptions::vmt_stem_index`）：
-        // texinfo 名 `METAL/METALGRATE013A2` 的精确 VMT 不在包内时，作者同一基名的
-        // `materials/666/metalgrate013a2.vmt` 提供权威 `$basetexture`/`$translucent`。
+        // 世界面材质的**基名 VMT 回退**索引（填进 `ConvertOptions::vmt_stem_index`）：
+        // texinfo 给的名字（如 `METAL/METALGRATE013A2`）在包内没有精确路径时，改按基名
+        // `metalgrate013a2.vmt` 命中作者写的 VMT，取其中的 `$basetexture` 等标注。
         let stem_index = build_vmt_stem_index(&entry_names);
 
         let options = |generate_missing_list: bool| bsp_to_gltf_core::ConvertOptions {
@@ -631,8 +632,8 @@ impl BspProcessor {
             ..bsp_to_gltf_core::ConvertOptions::default()
         };
 
-        // 无模型时：include_lights=false 保持历史纯 export_bsp 路径（行为不变）；
-        // include_lights=true 走 integrator 路径（与 _with_lights 语义一致）。
+        // 无模型且 include_lights=false：走不装配整合器的纯 `export_bsp` 路径；
+        // 只要 include_lights=true 就仍走整合器路径，光照注入照常发生。
         if models.is_empty() && !include_lights {
             let result = bsp_to_gltf_core::export_bsp(bsp, options(true))
                 .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
@@ -670,29 +671,22 @@ impl BspProcessor {
         Ok(output)
     }
 
-    /// 导出为 GLB，并将**内存中的模型**（.mdl/.vvd/.dx90.vtx 字节）直接合并进同一地图。
+    /// 导出为 GLB，并把 **PAKFILE 内嵌模型**（`.mdl`/`.vvd`/`.dx90.vtx` 三件套）合并进同一张地图。
     ///
-    /// 全程在 WASM 内存完成"模型 + 地图"合并，不依赖文件系统
-    /// （对应 EXPORT_GUIDE.md 的磁盘两步流程）。
+    /// 本方法不收 JS 侧参数：模型、放置信息与贴图全部从 BSP 自己取——只有被 `static_props`
+    /// 引用且三件齐全的模型才装配，origin/angles/solid 来自 static prop lump，
+    /// `.vmt`/`.vtf` 从 PAKFILE 现解（`decode_textures = true`）；不做默认纹理回退、不注入光照。
     ///
-    /// # 参数
-    /// - `models_js`: 模型字节数组。元素形如
-    ///   `{ "name": "…/crate.mdl", "mdl": Uint8Array, "vvd": Uint8Array, "vtx": Uint8Array }`；
-    ///   `name` 须能在 BSP 静态道具字典中找到，用于匹配世界坐标/朝向。
-    /// - `textures_js`: 可选纹理对象。键为纹理名（如 `"metal/crate"`），值为 PNG 字节。
-    ///
-    /// # 放置信息
-    /// 位置（origin）、朝向（angles）、默认缩放与类名均从 BSP 的 `static_props` lump 自动派生，无需外部 JSON。
-    ///
-    /// **导出借用内部 Bsp**（`Arc<Bsp>` 克隆），成功与失败均不消费实例；
-    /// 实例可重复导出且字节一致（见 [`BspProcessor::export_glb_with_pakfile_models_with_defaults`]）。
+    /// 一件模型都没取到时退回纯地图导出（`bsp_to_gltf_core::export_bsp`，不装配整合器）。
+    /// 借用式导出：成功与失败都不消费 `self.bsp`，可重复调用且字节一致
+    /// （对比 [`BspProcessor::export_glb_with_pakfile_models_with_defaults`]）。
     pub fn export_glb_with_pakfile_models(&mut self) -> Result<Vec<u8>, JsValue> {
         let bsp = self.take_bsp()?;
 
-        // 1~3. 提取被引用且三件套齐全的模型 + 放置表 + PAKFILE 条目清单
+        // 1~3 步（见 `collect_pakfile_models`）：模型三件套 + 静态道具放置表 + PAKFILE 条目清单
         let (models, static_props, entry_names) = collect_pakfile_models(&bsp)?;
 
-        // 4. 未打包任何模型 → 回退为纯地图导出（非破坏式）
+        // 4. 未打包任何模型 → 退回纯地图导出（不装配整合器）
         if models.is_empty() {
             let options = bsp_to_gltf_core::ConvertOptions::default();
             let result = bsp_to_gltf_core::export_bsp(bsp, options)
@@ -705,7 +699,7 @@ impl BspProcessor {
             return Ok(output);
         }
 
-        // 5. 解析 PAKFILE 内的 VMT/VTF：贴图字节 + 内置透明度标注
+        // 5. 解析 PAKFILE 内的 VMT/VTF：贴图 PNG 字节 + 透明度标注
         let index = pakfile_models::PakIndex::build(&entry_names);
         let materials = resolve_pakfile_materials(&bsp, &models, &index, true, None);
 
@@ -781,34 +775,29 @@ impl BspProcessor {
         Ok(output)
     }
 
-    /// 导出 **PAKFILE 内嵌模型**的碰撞体，输出与
-    /// [`BspProcessor::export_brushes_planes`] **同构**的 `WasmBrush[]` JSON 数组。
-    ///
-    /// 前端将其与地图 brush JSON 合并交给 `adaptBrushes` 即可，无新增数据契约。
+    /// 导出 **PAKFILE 内嵌模型**的三角形碰撞体，序列化成 JSON 数组：每个放置实例一个条目，
+    /// 字段为 `name` / `vertices`（世界空间顶点）/ `indices`（三角形下标）/ `min` / `max`。
     ///
     /// # 与显示几何一致
     ///
-    /// 显示与碰撞共用同一条顶点变换链 `map_coords(model.apply_root_transform(v))` → `scale` → `quat` → `translation`，
-    /// `quat`/`translation` 来自与 GLB 节点同一份 [`model_integrator::resolve_placements`]，无「看得到摸不着」偏移。
+    /// 局部顶点走 `model_integrator::map_coords(model.apply_root_transform(v.position))`，
+    /// 放置表来自与 GLB 节点同一份 [`model_integrator::resolve_placements`]，逐实例再用
+    /// `pakfile_models::place_point` 按 `translation`/`rotation`/`scale` 搬进世界空间。
+    /// 三角下标取自 `mesh.vertex_strip_indices()` 的三元组，越界下标丢弃；空网格不产出条目，
+    /// 一件模型都取不到时返回 `[]`。累计三角数达到 `MAX_TRI_TOTAL`（200 000）后不再展开新实例，
+    /// 已产出的条目保留。
     ///
-    /// 几何为「原始三角网格 → 逐三角沿法线反向挤出薄壳」，逐面贴合显示网格（surf 图 ramp 坡的硬要求）。
-    /// 不做共面合并（会把薄斜坡变成 quad + filler 面，致碰撞外观与显示不一致）。
-    /// 三角数超预算（`MAX_MODEL_TRIS`）时回退 OBB 粗碰撞，避免高模装饰件拖垮 `traceBox` 线性 broadphase。
+    /// # 碰撞门控
     ///
-    /// # 透明度门控（没有标注就默认有碰撞）
-    ///
-    /// Source 的透明度标注全部写在 `.vmt` 里，据此逐 mesh 判定：
-    ///
-    /// | 情形 | 判定 |
-    /// |---|---|
-    /// | `$translucent 1` / `$alpha < 1` | 真半透明 → **跳过碰撞** |
-    /// | `$alphatest 1`（铁丝网/栅栏镂空） | Source 中本是实体 → **保留碰撞** |
-    /// | VMT 未打包 / 无任何标注 | 按不透明 → **保留碰撞** |
-    /// | `static_prop.solid == 0`（`SOLID_NONE`） | 引擎级明确无碰撞 → **跳过** |
+    /// - `Placement::solid == Some(0)`（`SOLID_NONE`）的实例先被 `filter` 掉；
+    /// - 逐 mesh 查 PAKFILE 标注：`alpha_mode == 1`（`$translucent` 置位，或 `$alpha < 1`）跳过该 mesh，
+    ///   其余情形（`$alphatest` 的 2 与无标注的 0）保留。
     ///
     /// # 调用时机
     ///
-    /// 只**借用** BSP；导出入口（`export_glb*`）也只借用式移交 `Arc` ⇒ 本方法在导出前后都可调用。
+    /// 只按 `&self.bsp` 借用、不取走句柄 ⇒ 导出前后都可调用。产物由
+    /// `src/ts-shared/phys/world-builder.ts` 的 `buildWorldBundle` 放进 `triJson`，
+    /// 经 `src/ts-shared/auth/worker-dispatch.ts` 的 `build_world` 进 `src/phys` 的 `TriangleGrid`。
     pub fn export_model_tri_colliders(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -825,7 +814,7 @@ impl BspProcessor {
 
         let no_entities: Vec<model_integrator::Entity> = Vec::new();
 
-        /// 单个实例的三角形网格（世界空间，与显示逐位一致）。
+        /// 单个放置实例的三角形网格条目（世界空间极值 + 下标）。
         #[derive(serde::Serialize)]
         struct TriMeshOut {
             name: String,
@@ -835,7 +824,7 @@ impl BspProcessor {
             max: [f32; 3],
         }
 
-        /// 总三角形护栏（防止超大地图把所有 prop 都展开成百万三角形拖垮 trace）。
+        /// 累计三角形总护栏：达到上限后不再展开新的放置实例。
         const MAX_TRI_TOTAL: usize = 200_000;
 
         let mut out: Vec<TriMeshOut> = Vec::new();
@@ -870,7 +859,7 @@ impl BspProcessor {
                 continue;
             }
 
-            // ---- 展开三角（vendored vmdl 已修复条带展开），逐 mesh 做透明度门控 ----
+            // ---- 展开三角：条带索引展平成三元组，逐 mesh 做透明度门控 ----
             let skin = model.skin_tables().next();
             let mut tris: Vec<[u32; 3]> = Vec::new();
             for mesh in model.meshes() {
@@ -880,7 +869,7 @@ impl BspProcessor {
                     .and_then(|t| materials.alpha_modes.get(&t.name).copied())
                     .unwrap_or(0);
                 if alpha == 1 {
-                    continue; // 真半透明：可穿过
+                    continue; // alpha_mode == 1（Blend）：该 mesh 不参与碰撞
                 }
                 let idx: Vec<usize> = mesh.vertex_strip_indices().flatten().collect();
                 for c in idx.chunks_exact(3) {
@@ -895,7 +884,7 @@ impl BspProcessor {
                 continue;
             }
 
-            // ---- 每个放置实例：顶点搬移到世界空间（与 GLB 节点同一变换）----
+            // ---- 每个放置实例：顶点搬进世界空间（与 GLB 节点同一放置变换）----
             for p in &placements {
                 if tri_total >= MAX_TRI_TOTAL {
                     break;
@@ -937,19 +926,23 @@ impl BspProcessor {
 
     /// 导出 **PAKFILE 内嵌模型的「自带物理碰撞体」（`.phy`）** 为世界空间凸包三角形。
     ///
-    /// 与 [`BspProcessor::export_model_tri_colliders`]（可视网格）不同，本方法解析模型
-    /// 自己打包的 vphysics 碰撞体（`.phy`，Source 引擎实际使用的碰撞，凸包分解、更简化）。
-    /// 输出格式与三角形碰撞**同构**（`TriMesh` + `surfaceprop`），前端可复用同一套
-    /// `TriangleGrid` + `clipBoxToTriangle` 消费。
+    /// 与 [`BspProcessor::export_model_tri_colliders`]（可视网格）不同，本方法解析模型自己打包的
+    /// vphysics 碰撞体（`.phy`）；输出与三角形碰撞**同构**（同样的 `name` / `vertices` / `indices` /
+    /// `min` / `max`，另加 `surfaceprop`），消费端复用同一套 `src/phys` 的 `TriangleGrid`
+    /// 与 `clip_box_to_triangle` 扫掠。
     ///
-    /// 限制（首版）：
-    /// - 仅支持 `modelType == 0`（IVPCompactSurface 凸包）；MOPP/Ball/Virtual 报错跳过；
-    /// - 仅支持 `bone_index == 0` 的凸体（静态模型；带骨骼的动态模型顶点相对骨骼，
-    ///   需要骨骼变换矩阵，暂跳过）；
-    /// - 顶点米制 → HU（×39.3701），再经 `map_coords`（Z-up→Y-up）+ `place_point` 搬世界空间。
+    /// 逐模型的处理顺序：按 `static_props` 取放置表（`solid == Some(0)` 的实例过滤掉）→ 由
+    /// `.mdl` 路径换出 `.phy` 条目（缺失即跳过）→ `phyfile::parse_phy` 解析（失败打印一行
+    /// `⚠️ 跳过 PHY 解析失败` 后跳过）→ `model.apply_root_transform` → `map_coords` →
+    /// `place_point` 搬世界空间。顶点单位换算（米 → HU）与 `modelType` 校验都在
+    /// `phyfile::parse_phy` 内（只接受 `modelType == 0` 的凸包，其余取值直接报错）。
+    ///
+    /// 本方法内另有两处跳过条件：凸体的 `bone_index != 0`（顶点相对骨骼，需要骨骼变换矩阵）、
+    /// 以及解析后 `vertices`/`indices` 为空的模型。`surfaceprop` 取该模型第一个非空的取值，
+    /// 全空则为空串。累计三角数达到 `MAX_TRI_TOTAL`（200 000）后不再展开新实例。
     ///
     /// 输出 JSON：`[{ "name", "surfaceprop", "vertices": [[x,y,z]...], "indices": [[a,b,c]...],
-    /// "min": [...], "max": [...] }]`（每个放置实例一个条目）。
+    /// "min": [...], "max": [...] }]`（每个放置实例一个条目，无模型时 `[]`）。
     pub fn export_model_phy_colliders(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -981,7 +974,7 @@ impl BspProcessor {
             if tri_total >= MAX_TRI_TOTAL {
                 break;
             }
-            // 只解析被引用的模型（static_props 匹配）；无 .phy 或解析失败 → 跳过（前端 auto 回退）
+            // 只处理被 static_props 引用的模型；无 .phy 条目或解析失败即跳过该模型
             let placements =
                 model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
             let placements: Vec<_> = placements
@@ -1005,12 +998,12 @@ impl BspProcessor {
             if solids.is_empty() {
                 continue;
             }
-            // 加载模型（供 apply_root_transform 使用，与显示端同一根变换）
+            // 加载三件套：只为取 apply_root_transform（与显示端同一根骨骼变换）
             let Some(model) = load_vmdl(m) else {
                 continue;
             };
 
-            // 收集该模型全部 bone==0 凸体的三角形（局部空间，HU，Z-up）
+            // 收集该模型全部 bone_index == 0 凸体的顶点与三角形（局部空间，HU，Z-up）
             let mut local: Vec<[f32; 3]> = Vec::new();
             let mut tris: Vec<[u32; 3]> = Vec::new();
             let mut sprop = String::new();
@@ -1020,16 +1013,15 @@ impl BspProcessor {
                 }
                 for c in &s.convexes {
                     if c.bone_index != 0 {
-                        continue; // 动态骨骼：跳过
+                        continue; // bone_index != 0：顶点相对骨骼，缺变换矩阵时不参与
                     }
                     let base = local.len() as u32;
                     for v in &c.vertices {
-                        // 关键：PHY 顶点存的是 **IVP 坐标系**（vphysics 内部，Y-up 左手系），
-                        // Source 是 Z-up 右手系 —— 转换 = **绕 x 轴 90°：source = (x, z, -y)**
-                        // （det=+1 纯旋转；仅 y↔z 交换是 det=-1 镜像，会上下颠倒）。
-                        // 实测 79/87 模型尺寸映射 + 符号验证（probe_phy_mapping/orientation）。
+                        // PHY 顶点是 **IVP 坐标系**（vphysics 内部，Y-up 左手系），而 Source 是
+                        // Z-up 右手系：转换取 **绕 x 轴 90°**，即 source = (x, z, -y)
+                        // （det=+1 的纯旋转；只交换 y↔z 是 det=-1 的镜像，会上下颠倒）。
                         let ivp2src = [v[0], v[2], -v[1]];
-                        // 再施加与显示端相同的根骨骼变换（非 STATIC_PROP 时骨骼 0 带旋转）
+                        // 再施加与显示端相同的根骨骼变换
                         let rt = model.apply_root_transform(vmdl::Vector {
                             x: ivp2src[0],
                             y: ivp2src[1],
@@ -1086,19 +1078,21 @@ impl BspProcessor {
         serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化模型 PHY 碰撞失败"))
     }
 
-    /// 检查 BSP 是否仍持有（导出走借用式移交 ⇒ 除构造失败外恒为 true）。
+    /// 检查 BSP 是否仍持有：构造成功后恒为 `true`（导出只克隆句柄，不取走 `self.bsp`）；
+    /// 构造失败时没有实例，本方法无从调用。
     pub fn is_alive(&self) -> bool {
         self.bsp.is_some()
     }
 
-    /// 生成纹理画质 manifest：`{ 纹理名(小写 VMT 路径): mosaic v4 字节码 }` JSON。
+    /// 生成纹理画质 manifest：`{ 纹理名: "#mosaic v4 字节码" }` 的 JSON 文本。
     ///
-    /// 前端画质切换（原始/压缩低清）用：导出前后均可调用（`export_glb*` 只借用式移交 BSP），
-    /// 切换画质时用 `mosaic_decode` 还原低清 PNG 替换贴图，无需重载地图。
+    /// 键有两类来源：地图 face 纹理走 `websurf_wasm_core::mosaic::manifest::build_mosaic_manifest`
+    /// （键是加载后的 `texture.name` 小写形式，与 GLB 的 `texture.name` 同源），
+    /// PAKFILE 模型贴图在本方法内用 `mosaic::encode::img_to_code` 逐张编码后以材质名小写补齐；
+    /// 单张贴图取值或编码失败只跳过该张，同名键由后写入的模型贴图覆盖。
     ///
-    /// 覆盖两类纹理（与 GLB texture.name 对应）：
-    /// 1. 地图 face 纹理（key = basetexture 小写，如 "materials/xxx"）
-    /// 2. PAKFILE 模型贴图（key = 材质名小写，如 "maplebark"——修复 prop 墙面未压缩）
+    /// 供前端在不重载地图的前提下切换画质：按名查到字节码后用 `mosaic_decode` 还原低清 PNG 替换贴图。
+    /// 只借用 `&self.bsp`，导出前后均可调用。
     pub fn export_mosaic_manifest(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -1119,11 +1113,12 @@ impl BspProcessor {
         serde_json::to_string(&map).map_err(|e| to_js_err(e, "序列化 mosaic manifest 失败"))
     }
 
-    /// 导出缺失材质纹理列表（VMT/VTF 缺失或解码失败 → 占位色）JSON 字符串数组。
+    /// 导出缺失材质纹理列表（JSON 字符串数组）：判定与去重在
+    /// `websurf_wasm_core::mosaic::manifest::collect_missing_textures`——凡 face 材质加载
+    /// 报错（缺 VMT / 缺 VTF / 解码失败）都算缺失，顺序同 `collect_face_texture_names`。
     ///
-    /// 前端加载后与默认配置纹理包（textures.mtz 解压的键集合）比对；
-    /// 可覆盖的已在 GLB 导出期自动回退（见
-    /// [`BspProcessor::export_glb_with_pakfile_models_with_defaults`]）。
+    /// 供前端与默认纹理包的键集合比对；能在导出期回退的那部分已在
+    /// [`BspProcessor::export_glb_with_pakfile_models_with_defaults`] 里补上贴图。
     pub fn export_missing_textures(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -1133,14 +1128,15 @@ impl BspProcessor {
         serde_json::to_string(&missing).map_err(|e| to_js_err(e, "序列化缺失纹理列表失败"))
     }
 
-    /// 提取出生点实体（info_player_start / info_player_terrorist / info_player_counterterrorist 等）。
+    /// 提取出生点实体，输出 JSON：`{ "spawn_points": [{ classname, origin, angles, origin_raw,
+    /// angles_raw }], "total": N, "primary": M }`（`primary` 无值时为 `null`）。
     ///
-    /// 返回 JSON：`{ "spawn_points": [{ classname, origin: [x,y,z], angles: [p,y,r],
-    /// origin_raw, angles_raw }], "total": N, "primary": 0 }`。
-    /// `primary` 为推荐出生点索引（优先 info_player_start）。
+    /// 命中条件：classname 在 `SPAWN_CLASSNAMES` 内，或以 `info_player_` 开头；
+    /// `origin` 解析不出三个浮点数就跳过该实体，`angles` 缺失或解析失败则填 `[0.0, 0.0, 0.0]`。
+    /// `primary` 是第一个 `info_player_start` 的下标，没有该实体时退化为 0，一个出生点都没有时为 `null`。
     ///
-    /// **坐标转换**：BSP Z-up → Three.js Y-up（`[x,y,z]→[y,z,x]`，det=+1）。
-    /// `origin` 已旋转为 Y-up；`angles` 保持 BSP 原始 `[pitch, yaw, roll]`，前端按需转换。
+    /// **坐标转换**：`origin` 经 `rotate_yup` 转成 Y-up（`[x,y,z]→[y,z,x]`，det=+1 正交变换），
+    /// `angles` 保持 BSP 原始 `[pitch, yaw, roll]` 顺序不转。
     pub fn parse_spawn_points(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -1247,16 +1243,27 @@ impl BspProcessor {
         serde_json::to_string(&report).map_err(|e| to_js_err(e, "序列化出生点数据失败"))
     }
 
-    /// 解析 BSP 中所有实体（含属性和 outputs），用于调试 I/O 连接逻辑
-    /// （trigger_multiple / logic_relay / filter_* 等）。
+    /// 解析传送网络：传送目标点与传送触发器，并按 `target` → `targetname` 建立连接。
     ///
-    /// 输出 JSON 数组，每实体含：
-    /// - `classname`: 实体类型
-    /// - `targetname`: 实体名称（I/O 连接用）
-    /// - `props`: 所有键值属性（spawnflags, StartDisabled, target, model 等）
-    /// - `outputs`: 所有 outputs（OnStartTouch, OnTouch, OnTrigger 等）
-    /// - `origin`: 原始 origin 字符串
-    /// - `model`: 模型字符串（如 "*3"）
+    /// 输出 JSON：`{ teleports, triggers, links, total_triggers, total_dests, total_links,
+    /// orphan_triggers, orphan_dests }`。
+    ///
+    /// - `teleports[]`：`index`（实体序号）/ `targetname` / `origin`（Y-up）/ `angles`（原样）/
+    ///   `origin_raw` / `angles_raw`。只收 `info_teleport_destination` 与
+    ///   `info_teleport_destination_*`；缺 `targetname` 的不入列表，`origin` 解析失败按 `[0,0,0]` 计。
+    /// - `triggers[]`：`index` / `classname` / `target` / `origin`（Y-up）/ `model` /
+    ///   `model_mins` / `model_maxs`（世界 AABB，Y-up）/ `model_planes`（世界凸包平面
+    ///   `[nx,ny,nz,dist]`，朝外）/ `spawnflags` / `start_disabled` / `origin_raw` / `model_raw`。
+    ///   只收 `trigger_teleport` / `trigger_teleport_random` / `trigger_teleport_relative`；
+    ///   缺 `target` 的不入列表，`spawnflags` 缺失或解析失败按 1 计。
+    /// - `links[]`：`trigger_idx` → `dest_idx`，逐对比较 `trigger.target == dest.targetname`；
+    ///   `orphan_triggers` / `orphan_dests` 是两边各自没配上对的数量。
+    ///
+    /// 触发区域几何按 `model` 的 `*N` 取 BSP 模型：逐个 brush 单独算局部 AABB 与凸包平面，再按
+    /// 实体 origin 平移、按 Y-up 旋转成世界坐标——多个分散 brush 绑到同一实体时 `model.mins/maxs`
+    /// 只是总包围盒，直接当触发区会把盒内所有区域都算成触发区。每个 brush 区域产出**一个** trigger
+    /// 条目（共享 target/origin/标志位）；该模型一个 brush 都取不到时退回 `model.mins/maxs` 总包围盒
+    /// 且 `model_planes` 为 `None`；连总包围盒都没有时三个几何字段全为 `None`。
     pub fn parse_teleports(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -1365,14 +1372,15 @@ impl BspProcessor {
             ])
         }
 
-        /// 遍历 model.head_node 收集其全部 brush 的局部 AABB + 凸包平面（BSP Z-up 坐标）。
+        /// 遍历 `model.head_node` 收集该模型的全部 brush，逐个算局部 AABB 与凸包平面（BSP Z-up 坐标）。
         ///
-        /// **关键修复**：Hammer 可将多个分散 brush 绑定到同一实体（"Tie to entity"），
-        /// 此时 `model.mins/maxs` 只是**总包围盒**，若直接当触发区会把盒内所有区域都变成触发区
-        /// （test.bsp trigger_teleport *6 的实证）。正确做法：遍历 BSP 树，为每个 brush 单独算局部 AABB，各生成一个触发区域。
+        /// Hammer 可把多个分散的 brush 绑到同一实体（Tie to entity），此时 `model.mins/maxs` 只是
+        /// **总包围盒**：直接拿它当触发区会把盒内所有区域都算成触发区。故这里遍历 BSP 树，
+        /// 每个 brush 单独算局部 AABB，各生成一个触发区域；`head_node` 下多个 leaf 会覆盖到同一
+        /// brush，故用集合去重。
         ///
-        /// 返回 (局部 AABB min, 局部 AABB max, 局部凸包平面 [nx,ny,nz,dist])；
-        /// 凸包平面供 TS 端精确判定（楔形/斜面触发区不是 AABB）。
+        /// 返回 `(局部 AABB min, 局部 AABB max, 局部凸包平面 [nx,ny,nz,dist])`；凸包平面供消费端
+        /// 精确判定（楔形 / 斜面触发区不能只用 AABB）。平面数 < 4 或顶点数 < 4 的 brush 跳过。
         fn model_brush_aabbs(
             bsp: &vbsp::Bsp,
             model_idx: usize,
@@ -1483,8 +1491,8 @@ impl BspProcessor {
             let Ok(classname) = ent.prop("classname") else {
                 continue;
             };
-            // 严格过滤：只有 info_teleport_destination* 是传送目标点。
-            // info_target / info_player_teleport 等不是传送目标。
+            // 只认 info_teleport_destination 与 info_teleport_destination_<后缀> 两种名字；
+            // info_target 等同族实体不算传送目标点。
             if classname == "info_teleport_destination"
                 || classname.starts_with("info_teleport_destination_")
             {
@@ -1508,8 +1516,7 @@ impl BspProcessor {
                     angles_raw,
                 });
             }
-            // 严格过滤：trigger_multiple 是通用触发器，不算传送触发器（否则误传送）；
-            // 仅 trigger_teleport / _random / _relative 是传送触发器。
+            // 只收这三种 classname；通用触发器（trigger_multiple 等）不入列表。
             if classname == "trigger_teleport"
                 || classname == "trigger_teleport_random"
                 || classname == "trigger_teleport_relative"
@@ -1523,24 +1530,25 @@ impl BspProcessor {
                 let model_raw = ent.prop("model").ok().map(|s| s.to_string());
                 let model = model_raw.clone();
 
-                // spawnflags 默认 1 = Clients；不含 Clients bit 时对玩家不生效，TS 端会跳过
+                // spawnflags：缺失或解析不成 u32 时按 1（Clients 位）计，原样写进 JSON。
                 let spawnflags = ent
                     .prop("spawnflags")
                     .ok()
                     .and_then(|s| s.parse::<u32>().ok())
                     .unwrap_or(1);
 
-                // StartDisabled 默认 false=启用；disabled 不应触发传送，TS 端会跳过
+                // StartDisabled：键按**大写**传入，而实体文本在读入时已整体转小写
+                // （`src/wasm-core/vbsp/reader.rs` 的 `read_entities` 调 `to_ascii_lowercase`），
+                // `RawEntity::prop` 又是 `key == prop_key` 的逐字节比较 ⇒ 这里取不到该键，
+                // `.unwrap_or(false)` 把错误吞掉，`start_disabled` 恒为 false。
                 let start_disabled = ent
                     .prop("StartDisabled")
                     .map(|s| s == "1")
                     .unwrap_or(false);
 
                 // model 格式 "*N" 指向 bsp.models[N]，几何为局部坐标（相对实体 origin）。
-                //
-                // 【关键修复】trigger 可绑定多个分散 brush（Hammer "Tie to entity"），
-                // model.mins/maxs 只是**总包围盒**——直接用会把盒内所有区域变触发区。
-                // 改为遍历 BSP 树，按每个 brush 局部 AABB 生成独立触发区域。
+                // trigger 可把多个分散 brush 绑到同一实体（Hammer 的 Tie to entity），此时
+                // model.mins/maxs 只是总包围盒 ⇒ 逐个 brush 单独算区域。
                 let origin_yup = rotate_yup(origin);
 
                 // 每个 brush 一个区域（局部 AABB + 凸包平面，BSP Z-up）
@@ -1552,7 +1560,7 @@ impl BspProcessor {
                         .unwrap_or_default(),
                     _ => Vec::new(),
                 };
-                // 世界 AABB + 世界凸包平面（局部 + 实体 origin 平移，旋转为 Y-up）
+                // 世界 AABB 与世界凸包平面：局部值经 Y-up 旋转后加实体 origin 平移
                 let world_regions: Vec<([f32; 3], [f32; 3], Vec<[f32; 4]>)> =
                     if !regions.is_empty() {
                         regions
@@ -1588,7 +1596,7 @@ impl BspProcessor {
                             })
                             .collect()
                     } else {
-                        // 回退：model 下无 brush（虚拟实体/解析失败）→ 用 model 总包围盒
+                        // 回退：模型下一个 brush 都没取到 → 改用 model.mins/maxs 总包围盒
                         match model.as_deref() {
                             Some(m) if m.starts_with('*') => m[1..]
                                 .parse::<usize>()
@@ -1599,7 +1607,7 @@ impl BspProcessor {
                                         rotate_yup([md.mins.x, md.mins.y, md.mins.z]);
                                     let maxs_local =
                                         rotate_yup([md.maxs.x, md.maxs.y, md.maxs.z]);
-                                    // 回退路径无凸包平面（AABB 判定）
+                                    // 回退路径只有 AABB，凸包平面留空
                                     vec![(
                                         [
                                             origin_yup[0] + mins_local[0],
@@ -1620,7 +1628,7 @@ impl BspProcessor {
                     };
 
                 if world_regions.is_empty() {
-                    // 无区域信息：推入无 AABB 的 trigger（TS 端回退球形检测）
+                    // 连总包围盒都取不到：三个几何字段全为 None，推入一个裸 trigger 条目
                     triggers.push(TeleportTrigger {
                         index: idx,
                         classname: classname.to_string(),
@@ -1693,23 +1701,25 @@ impl BspProcessor {
         serde_json::to_string(&report).map_err(|e| to_js_err(e, "序列化传送门数据失败"))
     }
 
-    /// 导出 BSP PVS（Potentially Visible Set）数据用于遮挡检测。
+    /// 导出 BSP PVS（Potentially Visible Set）数据，供 Worker 端做遮挡剔除。
     ///
-    /// 利用编译期预计算的 PVS 位图，Worker 端可 O(1) 查表遮挡剔除：
-    /// 找相机所在 leaf → 取其 cluster → 查 PVS 表 → 仅渲染可见 cluster 的 mesh。
+    /// 输出 JSON（字段名经 `rename_all = "camelCase"`）：`{ rootNode, nodes, leaves, faceClusters,
+    /// pvsBitsBase64, clusterCount, bytesPerRow }`，其中 `rootNode` 当前恒为 0。
     ///
-    /// 返回 JSON：`{ root_node, nodes: [{normal, dist, children}],
-    /// leaves: [{cluster, mins, maxs, is_solid}], face_clusters: [...], pvs_bits_base64,
-    /// cluster_count, bytes_per_row }`。
+    /// - `nodes[]`：`normal` / `dist` / `children`；某节点的 `plane_index` 越界（损坏的 BSP）时
+    ///   该节点改用默认平面（法线 `(0, 0, 1)`、`dist = 0`），不中断整体导出。
+    /// - `leaves[]`：`cluster` / `mins` / `maxs` / `isSolid`（`cluster < 0` 即固体 leaf）；
+    ///   leaf 按 BSP 原始顺序输出，`nodes[].children` 里的负值取反即 leaf 下标。
+    /// - `faceClusters[]`：长度等于 face 数，初值 -1；按 leaf 顺序填**第一个**非固体 cluster，
+    ///   `leaf_faces` 区间越界或 face 下标越界都跳过。
+    /// - `pvsBitsBase64`：把 RLE 压缩的 PVS 逐簇解码成位图后整体 base64。第 `cluster` 行
+    ///   （长度 `bytesPerRow = (clusterCount + 7) / 8`）的第 `targetCluster` 位为 1 表示从
+    ///   `cluster` 可见 `targetCluster`。`clusterCount == 0` 或 `pvs_offsets` 为空时不做解码，
+    ///   `pvs_offsets` 用尽或偏移超出 `vis_data` 即停止/跳过该簇。
     ///
-    /// **坐标转换**：BSP Z-up → Three.js Y-up（`[x,y,z]→[y,z,x]`，det=+1，
-    /// 与 `export_brushes_planes` 一致）。plane normal 旋转，dist 不变；leaf mins/maxs 同样旋转。
-    ///
-    /// **face_cluster**：face_index → 主 cluster（-1 = 无 cluster/固体）；多 leaf 时取第一个非固体 cluster。
-    ///
-    /// **pvs_bits_base64**：预解码 PVS 位图，每行 cluster_count 位。
-    /// `pvs_bits[cluster * bytes_per_row + (target_cluster / 8)]` 的第 `(target_cluster % 8)` 位为 1
-    /// 表示从 `cluster` 可见 `target_cluster`。
+    /// **坐标转换**：BSP Z-up → Three.js Y-up（`[x,y,z]→[y,z,x]`，det=+1，与
+    /// [`BspProcessor::export_brushes_planes`] 一致）；plane normal 与 leaf `mins`/`maxs` 同样旋转，
+    /// plane `dist` 不变。
     pub fn parse_pvs_data(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -1759,7 +1769,7 @@ impl BspProcessor {
             .nodes
             .iter()
             .map(|node: &Node| {
-                // 边界检查：plane_index 可能越界（损坏的 BSP 文件）
+                // plane_index 越界（损坏的 BSP）时退回默认平面，不中断本次导出
                 let plane_idx = node.plane_index as usize;
                 let default_plane = Plane { normal: vbsp::Vector { x: 0.0, y: 0.0, z: 1.0 }, dist: 0.0, ty: 0 };
                 let plane = bsp.planes.get(plane_idx).unwrap_or(&default_plane);
@@ -1772,8 +1782,7 @@ impl BspProcessor {
             .collect();
 
         // ---- 2. 导出 leaves（cluster + 包围盒 + is_solid）----
-        // leaves 保持原始 BSP 顺序（vbsp 解析模块已修复排序 bug）；
-        // node.children 负数 → !index → 原始 leaf 索引
+        // leaves 按 BSP 原始顺序输出；`nodes[].children` 的负值取反即 leaf 下标。
         let leaves: Vec<PvsLeaf> = bsp
             .leaves
             .iter()
@@ -1789,12 +1798,12 @@ impl BspProcessor {
         let mut face_clusters = vec![-1i32; bsp.faces.len()];
         for leaf in bsp.leaves.iter() {
             if leaf.cluster < 0 {
-                continue; // 跳过固体 leaf（cluster == -1）
+                continue; // 固体 leaf（cluster < 0）不参与 face → cluster 映射
             }
             let start = leaf.first_leaf_face as usize;
             let count = leaf.leaf_face_count as usize;
             if start + count > bsp.leaf_faces.len() {
-                continue; // 防止越界
+                continue; // leaf_faces 区间越出表尾：跳过该 leaf
             }
             for fi in start..(start + count) {
                 let face_idx = bsp.leaf_faces[fi].face as usize;
@@ -1805,7 +1814,8 @@ impl BspProcessor {
         }
 
         // ---- 4. 预解码 PVS 位图 ----
-        // 直接解码 RLE 压缩的 PVS 数据；不用 visible_clusters()（无边界检查，越界 panic 会破坏 wasm-bindgen 状态）
+        // 逐簇调 `vbsp::decode_pvs_row`，不走 `VisData::visible_clusters`——后者是另一份独立
+        // RLE 循环，offset 越界时 panic，而 wasm 导出的 panic 会破坏 wasm-bindgen 状态。
         let cluster_count = bsp.vis_data.cluster_count;
         let bytes_per_row = ((cluster_count as usize) + 7) / 8;
         let mut pvs_bits = vec![0u8; (cluster_count as usize) * bytes_per_row];
@@ -1820,12 +1830,12 @@ impl BspProcessor {
                     break;
                 }
                 let offset = pvs_offsets[c_usize] as usize;
-                // 边界检查：offset 必须在 vis_data 范围内
+                // offset 超出 vis_data：跳过该簇
                 if offset >= vis_data.len() {
                     continue;
                 }
                 let row_offset = c_usize * bytes_per_row;
-                // RLE 解码（权威实现：vbsp::decode_pvs_row，含 `*8` 修复）
+                // RLE 解码：一次跳过覆盖 8 个簇，规则集中在 `vbsp::decode_pvs_row`
                 vbsp::decode_pvs_row(vis_data, offset, cluster_count, bytes_per_row, row_offset, &mut pvs_bits);
             }
         }
@@ -1848,11 +1858,21 @@ impl BspProcessor {
         serde_json::to_string(&pvs_data).map_err(|e| to_js_err(e, "序列化 PVS 数据失败"))
     }
 
-    /// 导出 BSP brush 的凸包碰撞体数据（无过滤，便捷方法）。
+    /// 导出 BSP brush 的凸包碰撞体：`WasmBrush[]` JSON 数组，每项含 `planes`（世界坐标 Y-up、
+    /// 法线朝外的平面）/ `min` / `max` / `is_ladder` / `is_solid`。
     ///
-    /// 等价于 `export_colliders_with_filter("{}")`，保留以兼容旧调用方；
-    /// 需要过滤 sky/nodraw/ladder/solid/小体积 brush 时用
-    /// [`BspProcessor::export_colliders_with_filter`]。
+    /// `filter_json` 是 `ColliderFilter` 的 JSON（字段全部可选，缺失取默认值）；文本解析失败一律
+    /// 退回 `ColliderFilter::default()`。过滤分两类——调用方开关（`skip_sky` / `skip_nodraw` /
+    /// `include_ladder` / `include_solid` / `min_brush_volume`），以及固定几何条件（既非玩家固体
+    /// 亦非 LADDER 的 brush、所属实体被 `entity_is_non_solid` 判为无碰撞、剔除 bevel 后平面数 < 4、
+    /// 顶点数 < 4）。已产出 brush 数达到 `MAX_BRUSHES` 时提前结束，剩余 brush 全部计入跳过计数。
+    ///
+    /// 结束时用 `web_sys::console::log_1` 打一行 `[BrushPlanes]` 统计：九个具名分支计数之和等于
+    /// `skipped` 且 `exported + skipped == total` 时末尾为 `ok`，否则为 `MISMATCH`。
+    ///
+    /// **平面约定**：BSP 读出的平面法线朝内（内部点 `dot(n,p)-dist >= 0`），本方法转到 Y-up 后取负
+    /// `normal` 与 `dist`，输出扫掠侧要的「法线朝外」平面；另对每条真实凸棱补一个 chamfer 平面后
+    /// 一并输出。
     pub fn export_brushes_planes(&self, filter_json: &str) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -1985,14 +2005,12 @@ impl BspProcessor {
         let sky_flags = vbsp::TextureFlags::SKY | vbsp::TextureFlags::SKY2D;
         let mut brushes_out: Vec<WasmBrush> = Vec::new();
         let mut skipped = 0;
-        // ⑤ 跳过计数的**分支分解**（契约 §3.1 ⑤）：单一 `skipped` 计数器无法自证，
-        // 故逐分支计数并保证「各分支之和 == skipped」，让「跳过是否预期」可核验。
-        // 三个具名分支 = 契约要求的 sky / nonPlayerSolid / planesLt4：
-        //   - 非玩家固体（既非 SOLID 族亦非 LADDER 的标志，或实体类名判定为无碰撞）
-        //   - SKY（MASK 命中 SKY|SKY2D）后被 `filter.skip_sky` 剔除
-        //   - 剔除 bevel 后平面数 < 4（`planesLt4`）
-        // 其余分支（调用方 filter 决定的两条 + nodraw/顶点/体积/上限截断）同样必须计数，
-        // 否则 `Σ分支 == skipped` 不闭合，分解就失去意义。
+        // 跳过计数的**分支分解**：单一 `skipped` 计数器无法自证，故逐分支计数并保证
+        // 「九个具名分支之和 == skipped」。九个分支依次是：
+        //   非玩家固体（既非 SOLID 族亦非 LADDER，或所属实体被判定为无碰撞）、SKY、
+        //   ladder 被排除、solid 被排除、nodraw、剔除 bevel 后平面数 < 4、顶点数 < 4、
+        //   体积不足、达到 MAX_BRUSHES 的早退。
+        // `bevel_sides_dropped` 是**侧**级计数，不属于 brush 级跳过，故不进分解。
         let mut skipped_non_player_solid = 0usize;
         let mut skipped_sky = 0usize;
         let mut skipped_planes_lt4 = 0usize;
@@ -2012,20 +2030,20 @@ impl BspProcessor {
                 continue;
             }};
         }
-        // 【修复】brush → 模型 world origin 映射（实体 brush 局部坐标 → 世界坐标）
+        // brush → 模型 world origin 映射（实体 brush 的平面是局部坐标，需平移到世界坐标）
         let brush_model_origins = build_brush_model_origins(bsp);
-        // 【修复】无碰撞实体（trigger_* / func_illusionary 等）的 brush 不导出为碰撞体，
-        // 否则玩家会在触发区域踩到透明空气墙（用户实测）。
+        // 无碰撞实体（trigger_* / func_illusionary 等）的 brush 不导出为碰撞体，
+        // 否则玩家会在触发区域撞到不可见的空气墙。
         let brush_models = brush_model_indices(bsp);
         let model_classes = model_classnames(bsp);
 
         for (brush_idx, brush) in bsp.brushes.iter().enumerate() {
             if brushes_out.len() >= MAX_BRUSHES {
-                // 早退（MAX_BRUSHES 上限截断）：同样计入分解，保证 total == exported + Σ分支
+                // 达到 MAX_BRUSHES 上限：剩余 brush 全部计入早退分支，保证 total == exported + Σ分支
                 skipped_early_exit = bsp.brushes.len() - brush_idx;
                 break;
             }
-            // MASK_PLAYERSOLID 语义同 export_colliders_with_filter：SOLID|WINDOW|GRATE|PLAYERCLIP|MOVEABLE
+            // 玩家固体掩码（MASK_PLAYERSOLID 同义）：SOLID|WINDOW|GRATE|PLAYERCLIP|MOVEABLE
             let player_solid_mask = BrushFlags::SOLID
                 | BrushFlags::WINDOW
                 | BrushFlags::GRATE
@@ -2051,8 +2069,8 @@ impl BspProcessor {
                 skip_branch!(skipped_solid_excluded);
             }
 
-            // 单次遍历 brush_sides 收集平面引用 + sky/nodraw 标志；
-            // 数组访问用 .get() 防 panic 破坏 wasm-bindgen 借用状态
+            // 单次遍历 brush_sides：收集平面引用与 sky/nodraw 标志；
+            // 逐项用 `.get()` 取值，越界即跳过（不在导出路径里 panic）
             let mut bsp_planes: Vec<&Plane> = Vec::new();
             let mut is_sky = false;
             let mut is_nodraw = false;
@@ -2062,7 +2080,8 @@ impl BspProcessor {
                 let Some(side) = bsp.brush_sides.get(start + i) else {
                     continue;
                 };
-                // 【遗弃 BSP bevel】剔除高悬 bevel 面（详见 debug/crates/wasm export_brushes_planes 说明）
+                // 剔除 BSP 自带的 bevel 面（`side.bevel != 0`），改由下面运行时补 chamfer；
+                // 同类处理见 apps/debug/crates/wasm/src/lib.rs 的同名导出。
                 if side.bevel != 0 {
                     bevel_sides_dropped += 1;
                     continue;
@@ -2092,9 +2111,8 @@ impl BspProcessor {
                 skip_branch!(skipped_planes_lt4);
             }
 
-            // 【修复】实体模型 brush 的 planes 是局部坐标（相对模型 origin），
-            // 平移模型 origin 到世界坐标，否则碰撞体全部堆在模型原点
-            // （nsz 169 个原点 brush 的实体部分、test.bsp 触发器碰撞箱堆积的根因）。
+            // 实体模型 brush 的平面是局部坐标（相对模型 origin）：按 origin 平移 `dist` 到世界坐标，
+            // 否则这些碰撞体全部堆在模型原点。
             let origin = brush_model_origins[brush_idx];
             let has_origin = origin[0] != 0.0 || origin[1] != 0.0 || origin[2] != 0.0;
             let owned_planes: Vec<Plane> = if has_origin {
@@ -2126,8 +2144,8 @@ impl BspProcessor {
             // 计算 BSP 坐标顶点（用于 AABB）
             let mut verts_bsp = compute_vertices(&bsp_plane_refs);
 
-            // 回退：顶点 < 4 时翻转法线重算（部分编辑器生成法线朝内的 brush）
-            // 与 export_colliders_with_filter 保持一致
+            // 回退：顶点数 < 4 时把全部平面法线与 `dist` 取负再算一次
+            // （部分编辑器生成的 brush 法线朝内）
             let flipped_planes: Vec<Plane> = if verts_bsp.len() < 4 {
                 bsp_plane_refs
                     .iter()
@@ -2176,10 +2194,11 @@ impl BspProcessor {
             }
 
             // =========================================================================
-            // 运行时棱边 chamfer(AddEdgeBevels 简化版) —— 替代被遗弃的 BSP bevel
-            // 与 debug/crates/wasm export_brushes_planes 完全同构。
-            // 对每条真实凸棱生成微小外切角平面：法线 = 两相邻面法线均值归一化，
-            // 并校验所有其它凸包顶点都在其外侧（不会挤压凸包、不破坏可站性）。
+            // 运行时棱边 chamfer（AddEdgeBevels 的简化版）：对每条真实凸棱生成微小外切角平面。
+            // 「真实棱」= 两平面法线不共线（`|dot| <= 0.999`）且至少共享 2 个凸包顶点；
+            // 平面法线取两法线均值归一化，并校验其余凸包顶点都落在该平面同一侧，
+            // 从而不挤压凸包、不改变可站性。
+            // 同类处理见 apps/debug/crates/wasm/src/lib.rs 的同名导出。
             // =========================================================================
             let mut chamfer_planes: Vec<Plane> = Vec::new();
             {
@@ -2280,16 +2299,14 @@ impl BspProcessor {
             }
             all_planes_src.extend(chamfer_planes);
 
-            // 旋转平面法线到 Y-up，并翻转法线方向（vbsp 内部约定 → cs-movement 约定）。
+            // 旋转平面法线到 Y-up，并翻转法线方向（vbsp 内部约定 → 扫掠侧约定）。
             //
-            // **法线方向转换（关键修复）**：vbsp 读取的平面为"法线朝内"约定
-            // （内部在正侧 `dot(n,p)-dist >= 0`，`compute_vertices` 的 `d < -1.0` 检查与此一致）；
-            // cs-movement 的 `traceBox` / `brushFromAABB` 用"法线朝外"（内部在负侧，`d1>0` 表示起点在外）。
-            // 直接导出会导致 cs-movement 误判内外，`traceBox` 永远返回 `fraction=1`（玩家穿透）。
-            //
-            // 修复：对每平面取负 `normal` 与 `dist`（`dot(-n,p)-(-dist) = -(dot(n,p)-dist)`，
-            // 内部点 d>=0 → d<=0，等价翻转半空间）。先旋转到 Y-up 再取负（二者可交换）。
-            // 统一从 all_planes_src（真实面 + 运行时 chamfer）构建，chamfer 一并输出
+            // **法线方向**：`vbsp` 读出的平面是「法线朝内」约定（内部点 `dot(n,p)-dist >= 0`，
+            // `compute_vertices` 的 `d < -1.0` 检查与此一致）；扫掠侧要「法线朝外」
+            // （`src/phys/world.rs` 的 `Brush`：内部 = `dot(normal, p) - dist <= 0`）。
+            // 故对每个平面取负 `normal` 与 `dist`：`dot(-n,p)-(-dist) = -(dot(n,p)-dist)`，
+            // 内部点由 d >= 0 变成 d <= 0，半空间等价翻转；先旋转到 Y-up 再取负，二者可交换。
+            // 统一从 all_planes_src（真实面 + 运行时 chamfer）构建，chamfer 一并输出。
             let planes_yup: Vec<WasmBrushPlane> = all_planes_src
                 .iter()
                 .map(|p| {
@@ -2310,10 +2327,8 @@ impl BspProcessor {
             });
         }
 
-        // ⑤ 跳过计数自证（契约 §3.1 ⑤）：单一 `skipped` 无法核验，故附**分支分解**。
-        // 判据（任一本地地图都必须成立）：`sky + nonPlayerSolid + planesLt4 + ladderExcluded
-        // + solidExcluded + nodraw + vertsLt4 + volume + earlyExit == skipped` 且
-        // `exported + skipped == total`。过滤语义本轮**未改**（只让计数自证）。
+        // 跳过计数自证：附**分支分解**，并断言九个具名分支之和 == `skipped`
+        // 且 `exported + skipped == total`；任一不成立，日志末尾就标 `MISMATCH`。
         let breakdown_sum = skipped_sky
             + skipped_non_player_solid
             + skipped_planes_lt4
@@ -2360,13 +2375,13 @@ impl BspProcessor {
 // 碰撞体导出过滤参数与辅助函数
 // ---------------------------------------------------------------------------
 
-/// 碰撞体导出过滤参数，由前端以 JSON 传入，控制 [`BspProcessor::export_colliders_with_filter`]
-/// 导出哪些 brush。所有字段可选，缺失时用默认值。字段名为 snake_case：
-/// - `include_ladder` / `include_solid` (默认 true): 是否导出 LADDER / SOLID brush
-/// - `min_brush_volume` (f32, 默认 0): 跳过 AABB 体积小于此值的 brush
-/// - `skip_sky` (默认 true): 跳过含 SKY 纹理的 brush（天空无碰撞）
-/// - `skip_nodraw` (默认 false): 跳过含 NODRAW 纹理的 brush。
-///   注意：NODRAW 只影响渲染不影响碰撞，故默认不跳过。
+/// 碰撞体导出过滤参数，由前端以 JSON 传给 [`BspProcessor::export_brushes_planes`]，控制导出哪些
+/// brush。字段全部可选，缺失时用默认值，字段名为 snake_case；自定义 `Default` 与 serde 默认值一致，
+/// 因此「不传」与「传 `{}`」得到同一套取值：
+/// - `include_ladder` / `include_solid`（默认 `true`）：是否导出 LADDER / SOLID brush；
+/// - `min_brush_volume`（`f32`，默认 `0.0`）：跳过 AABB 体积小于此值的 brush；
+/// - `skip_sky`（默认 `true`）：跳过含 SKY / SKY2D 纹理的 brush；
+/// - `skip_nodraw`（默认 `false`）：跳过含 NODRAW 纹理的 brush（NODRAW 只影响渲染，不影响碰撞）。
 ///
 /// 示例：`{"skip_sky": false, "min_brush_volume": 100.0}`
 #[derive(serde::Deserialize, Clone)]
@@ -2397,18 +2412,16 @@ impl Default for ColliderFilter {
     }
 }
 
+/// 供 serde 用作「字段缺省即 `true`」的默认值函数。
 fn default_true() -> bool {
     true
 }
 
-/// Source 引擎中**无物理碰撞**的实体（brush 只是触发/标记区域，玩家可穿过）。
+/// Source 引擎中**无物理碰撞**的实体（brush 只作触发或标记区域，玩家可穿过）。
 ///
-/// 这些实体 brush 不参与玩家碰撞（MASK_PLAYERSOLID 不包含 trigger 面）：
-/// - `trigger_*`：触发器（trigger_teleport / trigger_multiple / trigger_push / trigger_hurt…）
-/// - `func_illusionary`：幻觉实体（看得见摸不着）
-/// - `func_occluder` / `func_dustmotes` / `func_areaportal` / `func_precipitation`
-///
-/// 若导出为固体碰撞体，玩家会在触发区域踩到透明空气墙（用户实测的导出 bug）。
+/// 命中即判无碰撞：`trigger_` 前缀、`func_illusionary`、`func_occluder`、`func_dustmotes`、
+/// `func_areaportal`、`func_precipitation`。这些 brush 若导出成固体碰撞体，
+/// 玩家会在触发区域撞到不可见的空气墙。
 fn entity_is_non_solid(classname: &str) -> bool {
     classname.starts_with("trigger_")
         || classname == "func_illusionary"
@@ -2418,7 +2431,8 @@ fn entity_is_non_solid(classname: &str) -> bool {
         || classname == "func_precipitation"
 }
 
-/// 实体 → 模型 classname 映射（`model="*N"` 实体）；model[0]（worldspawn）为 None。
+/// 每个 BSP 模型对应的实体 classname：按实体的 `model="*N"` 键填表；model[0]（worldspawn）、
+/// 下标越界与已被更早实体占用的模型都留 `None`。
 fn model_classnames(bsp: &vbsp::Bsp) -> Vec<Option<String>> {
     let mut m: Vec<Option<String>> = vec![None; bsp.models.len()];
     for ent in bsp.entities.iter() {
@@ -2443,7 +2457,10 @@ fn model_classnames(bsp: &vbsp::Bsp) -> Vec<Option<String>> {
     m
 }
 
-/// brush → 模型索引映射（遍历 model.head_node 收集）；worldspawn 与无归属 brush 为 None。
+/// 每个 brush 归属的模型索引（遍历 `model.head_node` 下的 `leaf_brush` 收集）。
+///
+/// worldspawn（model[0]）的 brush 与不被任何模型引用的 brush 留 `None`；同一 brush 被多个模型
+/// 覆盖时只记首个命中的归属。
 fn brush_model_indices(bsp: &vbsp::Bsp) -> Vec<Option<usize>> {
     let mut map: Vec<Option<usize>> = vec![None; bsp.brushes.len()];
     for (mi, model) in bsp.models.iter().enumerate() {
@@ -2476,13 +2493,14 @@ fn brush_model_indices(bsp: &vbsp::Bsp) -> Vec<Option<usize>> {
     map
 }
 
-/// 确定每个 brush 应平移的模型 origin（Z-up 世界坐标）。
+/// 确定每个 brush 应平移的模型 origin（Z-up 世界坐标），返回长度与 `bsp.brushes` 等长的数组。
 ///
-/// **关键修复**：实体模型的 brush 几何以局部坐标存储（相对实体 origin），
-/// 而 `dmodel_t.origin` 字段在本工具链的 BSP 中不可靠（实测为垃圾值/0），
-/// 权威来源是 entities lump 中实体的 `origin` keyvalue（与 `parse_teleports` 一致）。
+/// 实体模型的 brush 几何以局部坐标存储（相对实体 origin），本函数一律取 entities lump 中该实体的
+/// `origin` 键作为平移量（`model="*N"`；缺该键或解析不成 `vbsp::Vector` 就不平移），
+/// 不读 BSP 模型自带的 origin 字段。
 ///
-/// worldspawn（model[0]）局部即世界，无需平移；无实体引用的 model 跳过。
+/// worldspawn（model[0]）局部即世界，保持零平移；未被任何实体引用的模型同样保持零平移；
+/// 同一模型被多个实体引用时取首个实体的 origin。
 fn build_brush_model_origins(bsp: &vbsp::Bsp) -> Vec<[f32; 3]> {
     let mut origins = vec![[0.0f32; 3]; bsp.brushes.len()];
 

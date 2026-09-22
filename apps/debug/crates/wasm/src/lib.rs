@@ -1,45 +1,84 @@
-//! WASM bindings for BSP parsing, GLB export and VTF decoding.
+//! debug 工程的 WASM 绑定层：把共享解析层（仓库根 `src/wasm-core/`，crate `websurf-wasm-core`）
+//! 与共享物理层（仓库根 `src/`，crate `websurf-phys`）的入口暴露给浏览器侧 JS。
+//! crate 名为 `websurf-wasm`，`crate-type` 同时出 `cdylib` 与 `rlib`。
 //!
-//! 将 BSP 解析、GLB 导出、VTF 纹理解码暴露给 JavaScript，供浏览器直接预览/导出。
+//! 上下游：
+//! - 上游：`websurf-wasm-core` 的 `vbsp`（BSP 解析）、`bsp_to_gltf_core`（GLB 装配）、
+//!   `model_integrator`（模型 / 静态道具集成）、`pakfile_models`（PAKFILE 条目索引与 VMT 解析）、
+//!   `texture_utils`（VTF 解码）、`mosaic`（图集编解码与 `.mtz` 解压）、`vhv`（prop 逐顶点光照）。
+//!   物理侧 `websurf_phys::phys::PhysWorld` 由本文件 `pub use` 原样再导出，本文件不加包装。
+//! - 下游：`apps/debug/src/main-wasm.ts` 取 `initSync` / `mosaic_decode` / `decompress_mtz`，
+//!   在主线程建一份与 Worker 互不影响、相互独立的 wasm 实例；`apps/debug/src/app.ts` 取
+//!   `BspProcessor` / `decompress_mtz`；`apps/debug/src/renderer/renderer-main.ts` 经
+//!   `apps/debug/src/main-wasm.ts` 取 `mosaic_decode`。共享层的
+//!   `src/ts-shared/phys/world-builder.ts` 按 `BspProcessorLike` 接口消费 `metadata` /
+//!   `parse_spawn_points` / `parse_teleports` / `parse_pvs_data` / `export_brushes_planes` /
+//!   `export_model_phy_colliders` / `export_model_tri_colliders` / `export_mosaic_manifest` /
+//!   `export_missing_textures` / `export_glb_with_pakfile_models_with_defaults_and_lights` /
+//!   `export_glb_with_pakfile_models`。
 //!
-//! MVP 范围：
-//! - [`parse_bsp`]: 解析 BSP 字节数组，返回元数据 JSON（不持有 Bsp 实例）
-//! - [`BspProcessor`]: 持有已解析的 Bsp 实例，可调用 [`BspProcessor::export_glb`] 导出 GLB 字节
-//! - [`decode_vtf_to_png`]: 将 VTF 字节数组解码为 PNG 字节数组
+//! 导出面的 TS 类型声明由 `apps/debug/src/wasm.d.ts` 手写维护，不是 wasm-bindgen 产物；
+//! 该声明落后于本文件的导出面，缺 `export_visleaf_pvs` 与 `BspProcessor` 的
+//! `export_glb_with_models` / `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` /
+//! `export_glb_with_pakfile_models_with_defaults_and_lights` /
+//! `export_glb_with_pakfile_models_with_lights` / `is_alive` / `parse_entities` /
+//! `list_pakfile` / `read_pakfile_file` / `read_pakfile_scripts` / `export_colliders` /
+//! `export_colliders_with_filter`，以及 `PhysWorld` 的 7 个方法。
+//!
+//! 导出面（`#[wasm_bindgen]` 标记）：
+//! - `parse_bsp`：一次性解析，只返回元数据 JSON，不持有 `Bsp`。
+//! - `BspProcessor`：持有 `Arc<Bsp>`，提供元数据、GLB 导出与实体 / 碰撞体 / 传送点 / PVS 提取。
+//! - `export_visleaf_pvs`：从 BSP 字节直接算出按 leaf 的 PVS 位图。
+//! - `decode_vtf_to_png` / `mosaic_encode` / `mosaic_decode` / `decompress_mtz`：纹理解码与图集编解码。
+//! - `start`：`#[wasm_bindgen(start)]`，模块装载时由 wasm-bindgen 自动调用。
+//!
+//! 不变量：
+//! - 导出错误统一经 `to_js_err` 转成 `JsValue` 字符串，形如 `"<上下文>: <错误的 Debug 输出>"`。
+//! - `BspProcessor` 的 GLB 导出入口用 `Option::take` 取走内部 `bsp`；取走后其余入口一律报
+//!   「BSP 未解析或已导出」，要再导出须重新构造处理器。
+//! - 二进制产物一律以 `Vec<u8>` 返回，由 wasm-bindgen 复制成 JS 侧的 `Uint8Array`。
+//! - 本文件不做字节级格式解析、不做 GLB 装配、不做 VTF 解码，全部转交上游 crate。
+//! - `init_panic_hook` 不是导出项：它没有 `#[wasm_bindgen]`，只被 `start` 调用，且仅 `wasm32` 编译。
 
 use std::collections::HashMap;
 use std::io::Cursor;
 
 use wasm_bindgen::prelude::*;
 
-// 解析层共享自仓库根 src/wasm-core/（websurf-wasm-core crate）
+// 共享解析层：仓库根 `src/wasm-core/`（crate `websurf-wasm-core`）
 use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, phyfile, texture_utils, vbsp};
 use model_integrator::{
     ExportOptions, InMemoryModel, InMemoryResources, ModelIntegrator, StaticProp,
 };
 
-// 物理系统：共享自仓库根 src/（websurf-phys crate）
+// 共享物理层：仓库根 `src/`（crate `websurf-phys`）；整类型原样再导出，本文件不另加包装
 pub use websurf_phys::phys::PhysWorld;
 
 // ---------------------------------------------------------------------------
-// 错误处理辅助
+// 错误处理辅助：Rust 错误 → JsValue
 // ---------------------------------------------------------------------------
 
-/// 将任意错误转换为 JavaScript 错误。
+/// 把错误拼成 JS 字符串，格式为 `"<ctx>: <错误的 Debug 输出>"`。
+///
+/// 泛型上界只要求 `std::fmt::Debug`，故错误类型不必实现 `Display`；`ctx` 由调用点按失败
+/// 环节写死（如 `"BSP 解析失败"`、`"GLB 导出失败"`），是 JS 侧区分失败阶段的唯一依据。
 fn to_js_err<E: std::fmt::Debug>(e: E, ctx: &str) -> JsValue {
     JsValue::from_str(&format!("{}: {:?}", ctx, e))
 }
 
 // ---------------------------------------------------------------------------
-// PAKFILE 内嵌模型：三件套提取 / 材质解析 / 碰撞体参数
+// PAKFILE 内嵌资源：模型三件套 / 光源实体 / 材质解析
+// 供 `BspProcessor` 的 GLB 导出、碰撞体导出、mosaic manifest 三组入口复用
 // ---------------------------------------------------------------------------
 
-/// PAKFILE 材质解析产物。
+/// PAKFILE 材质解析产物：三张按「材质名」索引的表，键都取自 `vmdl::TextureInfo::name`。
 #[derive(Default)]
 struct PakMaterials {
     /// `材质名 → PNG 字节`。键须与 `vmdl::TextureInfo::name` 逐字符一致，供 `push_texture` 查表。
+    /// 只收 `$basetexture` 命中、VTF 取到且解码成功的条目；`decode_textures = false` 时整表为空。
     textures: HashMap<String, Vec<u8>>,
     /// `材质名 → alpha_mode`（0 = Opaque，1 = Blend，2 = Mask）。
+    /// VMT 未打包或候选路径全未命中时写 0；与是否解码纹理无关，只要扫到材质就写。
     alpha_modes: HashMap<String, u8>,
     /// 自发光 / 无光照材质名集合（`$selfillum` / `UnlitGeneric`）：`InMemoryResources.material_unlit`
     /// 的输入（共享层用 `extras.unlit` 标记这类图元；缺失会让自发光 prop 被当受光材质处理）。
@@ -49,20 +88,23 @@ struct PakMaterials {
 /// 提取被 `static_props` 引用且 `.mdl/.vvd/.dx90.vtx` 齐全的模型。
 ///
 /// 返回 `(模型三件套, 静态道具放置表, PAKFILE 全部条目名)`；
-/// 第三项供 [`pakfile_models::PakIndex`] 复用，避免为找材质再遍历 zip。
+/// 第三项是**未过滤**的全部条目名，供 [`pakfile_models::PakIndex`] 复用，避免为找材质再遍历 zip。
+///
+/// 失败语义：zip 互斥锁被毒化时返回 `JsValue`（`"pakfile 锁定失败: ..."`），其余情况一律不失败 ——
+/// 单个条目读取出错、`sp_*.vhv` 解析失败、模型三件套缺件都只跳过该条目并计数。
 fn collect_pakfile_models(
     bsp: &vbsp::Bsp,
 ) -> Result<(Vec<InMemoryModel>, Vec<StaticProp>, Vec<String>), JsValue> {
-    // 1. 被静态道具引用的模型路径集合
+    // 1. 被静态道具引用的模型路径集合（原样字符串，后续按大小写敏感比较）
     let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
     for prop in bsp.static_props() {
         referenced.insert(prop.model().to_string());
     }
 
-    // 2. 枚举 PAKFILE 全部条目（zip 只锁一次）
-    //    顺手把 prop_static 的**逐顶点预烘焙光照**（`sp_<idx>.vhv` / `sp_hdr_<idx>.vhv`）读出来：
-    //    它是 Source 的第 1 级 prop 光照来源（见 `wasm_core::vhv`），与条目枚举共用同一遍扫描。
-    //    （2026-09-20 由 test/game-core 隔离副本回并到共享层，apps/debug 同步接入）
+    // 2. 枚举 PAKFILE 全部条目，zip 只锁一次
+    //    同一遍扫描顺手把 prop_static 的逐顶点预烘焙光照（`sp_<idx>.vhv` / `sp_hdr_<idx>.vhv`）
+    //    读进 `vhv_blobs`（键 = prop 下标）：它是第 1 级 prop 光照来源，交给
+    //    `websurf_wasm_core::vhv::parse_vhv` 解析；与条目枚举共用这次遍历，不额外开锁。
     let zip = bsp.pack.clone().into_zip();
     let mut zip_guard = zip
         .lock()
@@ -73,7 +115,10 @@ fn collect_pakfile_models(
         if let Ok(mut entry) = zip_guard.by_index(i) {
             let name = entry.name().to_string();
             let lower = name.to_ascii_lowercase();
-            // 只收 sp_<数字>.vhv（HDR 版优先，与 lightmap/ambient 的择一口径一致）
+            // 只收 sp_<数字>.vhv；HDR 版（sp_hdr_<数字>.vhv）优先且不被非 HDR 版覆盖
+            // 判据：条目名先整体小写，再要求 sp_ 前缀 + .vhv 后缀；中段剥掉 hdr_ 后须能
+            // 解析成 usize 下标；读出的字节非空才算命中。写入条件是
+            // `is_hdr || !contains_key(idx)`，故同一 idx 的两个版本同时存在时留下 HDR 版。
             if lower.starts_with("sp_") && lower.ends_with(".vhv") {
                 let mid = &lower[3..lower.len() - 4];
                 let (idx_part, is_hdr) = match mid.strip_prefix("hdr_") {
@@ -94,7 +139,10 @@ fn collect_pakfile_models(
     }
     drop(zip_guard);
 
-    // 3. 仅为被引用的模型提取三件套（缺任一件即跳过）
+    // 3. 仅为「名字以 .mdl 结尾且出现在 referenced 里」的条目取三件套；缺任一件即跳过该模型。
+    //    后两件的名字由 `.mdl` 子串整体替换而来（`str::replace` 替换全部出现处，非只改后缀）。
+    //    注意后缀判断走 `to_ascii_lowercase()`，而归属判断是原始条目名与 `prop.model()` 的
+    //    逐字符相等比较，大小写不一致时该模型不被提取。
     let mut models: Vec<InMemoryModel> = Vec::new();
     for name in &entry_names {
         if !name.to_ascii_lowercase().ends_with(".mdl") || !referenced.contains(name) {
@@ -122,9 +170,10 @@ fn collect_pakfile_models(
         });
     }
 
-    // 4. static_props 放置表（GLB 节点与碰撞体共用）
-    //    逐实例挂上第 1 级逐顶点光照（`sp_<idx>.vhv`）与第 2 级 leaf ambient cube；
-    //    两者都缺失时由渲染端/集成层回退（`debug` 侧沿用同一份共享实现）。
+    // 4. static_props 放置表：GLB 节点与碰撞体共用同一份派生，逐实例挂两级光照 ——
+    //    第 1 级是 `vhv_blobs` 里的逐顶点预烘焙光照（解析出 `colors` 才计成功），
+    //    第 2 级是 `bsp.prop_ambient_cube(i)` 的 leaf ambient cube；两者都取不到时字段为 `None`，
+    //    由集成层 / 渲染端自行回退。`solid` 直接透传实体的 solid 数值（`as u8`）。
     let mut vhv_ok = 0usize;
     let mut vhv_bad = 0usize;
     let static_props: Vec<StaticProp> = bsp
@@ -167,10 +216,14 @@ fn collect_pakfile_models(
     Ok((models, static_props, entry_names))
 }
 
-/// 收集 BSP 实体里的**真光源**（`light` / `light_spot` / `light_environment`）为集成器可消费的形式。
+/// 从 BSP 实体里挑出**真光源**（`light` / `light_spot` / `light_environment`），
+/// 转成 `model_integrator::Entity` 供集成器消费。
 ///
-/// 共享层（`src/wasm-core` 回并后）的 `export_glb_with_pakfile_models_with_defaults_and_lights`
-/// 依赖它把光源写成 `KHR_lights_punctual`；apps/debug 与 apps/game 走同一份口径。
+/// 只认这三个 `classname`（逐字符比较，实体文本已在解析期整体小写）；其余实体跳过。
+/// 每个命中实体取 `model` / `origin` / `angles` / `scale` 与 6 个光照键 `_light` / `_cone` /
+/// `_inner_cone` / `_constant_attn` / `_linear_attn` / `_quadratic_attn`，外加 `pitch`；
+/// 这些键缺失时对应字段为 `None`（`prop` 取不到即不下发）。消费方是共享层的
+/// `export_glb_with_pakfile_models_with_defaults_and_lights`，它据此写 `KHR_lights_punctual`。
 fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> {
     const LIGHT_CLASSNAMES: &[&str] = &["light", "light_spot", "light_environment"];
     let mut out = Vec::new();
@@ -202,7 +255,9 @@ fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> {
     out
 }
 
-/// 加载内存中的模型三件套为 `vmdl::Model`（任一环节失败即返回 `None`）。
+/// 把内存三件套读成 `vmdl::Model`：按 `Mdl` → `Vtx` → `Vvd` 顺序读，任一环节 `Err` 即返回 `None`。
+///
+/// 只判成败、不区分失败原因，故调用点无法分辨是哪一个文件坏了。
 fn load_vmdl(m: &InMemoryModel) -> Option<vmdl::Model> {
     let mdl = vmdl::Mdl::read(&m.mdl).ok()?;
     let vtx = vmdl::Vtx::read(&m.vtx).ok()?;
@@ -212,10 +267,17 @@ fn load_vmdl(m: &InMemoryModel) -> Option<vmdl::Model> {
 
 /// 解析所有被引用模型的材质：从 PAKFILE 取 `.vmt` 得透明度标注，再按 `$basetexture` 取 `.vtf` 解码为 PNG。
 ///
-/// `decode_textures = false` 时只解析标注、跳过图像解码（碰撞体路径用此模式）。
+/// `decode_textures = false` 时只填 `alpha_modes` / `unlit`、跳过图像解码（碰撞体路径用此模式）。
 ///
-/// 材质路径解析顺序：`TextureInfo::search_paths` → `Mdl::texture_paths` → 裸材质名，
-/// 均交 [`pakfile_models::PakIndex`] 做大小写不敏感 + `materials/` 前缀补全匹配。
+/// 每个材质名只处理一次（`alpha_modes` 已有该键就跳过），候选路径按
+/// `TextureInfo::search_paths` 接 `Mdl::texture_paths` 的顺序展开（反斜杠归一为 `/`、去首尾 `/`），
+/// 末尾再补一条裸材质名；逐条交 [`pakfile_models::PakIndex::find`] 查表，取**首个**命中。
+/// `find` 本身大小写不敏感，并按「原样 / `materials/` / `models/` / `materials/models/` 补后缀」
+/// 四个候选加一条「只按基名」回退依次试。
+///
+/// 容错：候选全不中时按 alpha_mode 0（不透明）记账并继续；`$basetexture` 缺失时只跟一层
+/// `include` 指向的母材质（母材质半透明而 `patch` 自身为 0 时继承母材质的 alpha_mode）；
+/// VTF 条目找不到或解码失败都只跳过图像，不产生错误返回。
 fn resolve_pakfile_materials(
     bsp: &vbsp::Bsp,
     models: &[InMemoryModel],
@@ -224,7 +286,7 @@ fn resolve_pakfile_materials(
 ) -> PakMaterials {
     let mut out = PakMaterials::default();
 
-    // 从 PAKFILE 取 VMT 文本
+    // 从 PAKFILE 取 VMT 文本并解析成标注（索引未命中或整包取不到字节都算未命中）
     let fetch_vmt = |path: &str| -> Option<pakfile_models::VmtInfo> {
         let entry = index.find(path, "vmt")?;
         let bytes = match bsp.pack.get(entry) {
@@ -235,17 +297,17 @@ fn resolve_pakfile_materials(
     };
 
     for m in models {
-        // 只读 .mdl 枚举材质（比 from_parts 便宜）
+        // 只读 .mdl 枚举材质（不走 from_parts，省掉 Vtx/Vvd 解析）
         let Ok(mdl) = vmdl::Mdl::read(&m.mdl) else {
             continue;
         };
 
         for tex in &mdl.textures {
             if out.alpha_modes.contains_key(&tex.name) {
-                continue; // 共享材质只解析一次
+                continue; // 同一材质名只解析一次
             }
 
-            // 候选路径：搜索目录 + 材质名，外加裸材质名
+            // 候选路径：搜索目录 + 材质名，末尾再补裸材质名
             let mut candidates: Vec<String> = Vec::new();
             for sp in tex.search_paths.iter().chain(mdl.texture_paths.iter()) {
                 let sp = sp.replace('\\', "/");
@@ -302,10 +364,13 @@ fn resolve_pakfile_materials(
 }
 
 // ---------------------------------------------------------------------------
-// 全局初始化
+// 全局初始化：panic 钩子
 // ---------------------------------------------------------------------------
 
-/// 在 WASM panic 时打印到控制台，便于调试。
+/// 把 panic 信息经 `web_sys::console::error_1` 打到控制台，前缀固定为 `"vbsp-wasm panic: "`。
+///
+/// 仅 `wasm32` 编译（非 wasm 目标下本函数不存在）。无 `#[wasm_bindgen]`，JS 侧无法直接调用，
+/// 唯一调用点是 `start`；重复调用会替换掉前一个钩子（`set_hook` 语义）。
 #[cfg(target_arch = "wasm32")]
 pub fn init_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
@@ -317,22 +382,29 @@ pub fn init_panic_hook() {
 // 元数据 / 解析入口
 // ---------------------------------------------------------------------------
 
-/// 顶层元数据，前端通过 `JSON.parse(parse_bsp(data))` 直接使用。
+/// 顶层元数据：由 `parse_bsp` 与 `BspProcessor::metadata` 序列化成 JSON 字符串返回，
+/// 前端 `JSON.parse` 后直接使用。字段名全部是 `snake_case`（无 `rename_all`）。
 ///
 /// 普通 Rust 结构体（不标 `#[wasm_bindgen]`）：wasm_bindgen 导出要求字段实现 `Copy`，
-/// 而 `String` 字段不满足；经 `parse_bsp` / [`BspProcessor::metadata`] 序列化为 JSON 返回。
+/// 而 `String` 字段不满足；故只能走 `serde_json` 字符串这条出口。
 #[derive(serde::Serialize)]
 pub struct BspMetadata {
+    /// 结构版本号，由 `from_bsp` 写死为 `1`；消费方按它判断字段集。
     pub schema_version: u32,
     /// BSP 魔术字（如 "VBSP"），由 header.v/b/s/p 拼成。
     pub magic: String,
+    /// 地图名。`from_bsp` 恒写空串，本结构没有别的写入点。
     pub map_name: String,
+    /// 以下计数一律取对应 lump 的长度（`Vec::len()`），不是 BSP 头里的声明值。
     pub num_models: usize,
     pub num_faces: usize,
+    /// 原始面数（`original_faces` lump），与 `num_faces` 是两个不同的 lump。
     pub num_original_faces: usize,
     pub num_vertices: usize,
     pub num_edges: usize,
+    /// 纹理数据条目数（`textures_data` lump）。
     pub num_textures_data: usize,
+    /// 纹理信息条目数（`textures_info` lump）。
     pub num_textures_info: usize,
     pub num_displacements: usize,
     pub num_entities: usize,
@@ -345,8 +417,8 @@ pub struct BspMetadata {
 }
 
 impl BspMetadata {
-    // packed_files 由调用方传入：vbsp 0.6.0 的 Packfile.zip 为私有字段，
-    // into_zip() 消费 self，只能 clone 后取 len()；由 new 缓存避免 metadata() 重复克隆。
+    // packed_files 由调用方传入，不在本函数内自取：`Packfile.zip` 是私有字段，
+    // `into_zip()` 消费 self，取 len 只能先 clone 再开锁；两个调用点各自算一次后复用。
     fn from_bsp(bsp: &vbsp::Bsp, packed_files: usize) -> Self {
         let num_entities = bsp.entities.iter().count();
         let num_static_props = bsp.static_props().count();
@@ -382,28 +454,30 @@ impl BspMetadata {
 
 /// 一次性解析 BSP 字节数组，返回元数据 JSON 字符串。
 ///
-/// 这个函数不持有 Bsp 实例。如果需要导出 GLB，请使用 [`BspProcessor`]。
+/// 不持有 `Bsp` 实例：解析出的 `Bsp` 在本函数结束时释放，故只要元数据时用这里更省内存；
+/// 要导出 GLB 或做各类提取，改用 [`BspProcessor`]。
+///
+/// 失败语义：`vbsp::Bsp::read` 失败 → `"BSP 解析失败: <Debug>"`；序列化失败 →
+/// `"序列化 BSP 元数据失败: <Debug>"`。
 #[wasm_bindgen]
 pub fn parse_bsp(data: &[u8]) -> Result<String, JsValue> {
     let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
-    // Packfile.zip 私有，clone 后取 len()
+    // Packfile.zip 私有，clone 后取 len()；此处只算一次
     let packed_files = bsp.pack.clone().into_zip().lock().unwrap().len();
     let metadata = BspMetadata::from_bsp(&bsp, packed_files);
     metadata.to_json()
 }
 
 // ---------------------------------------------------------------------------
-// 处理器（持有 Bsp 实例，可重复导出 / 提取）
+// 处理器：持有 Bsp 实例，元数据可重复取，GLB 导出会消费实例
 // ---------------------------------------------------------------------------
 
-/// BSP 处理器：先调用 [`BspProcessor::new`] 解析字节数组，再调用
-/// [`BspProcessor::export_glb`] 导出 GLB，或 [`BspProcessor::metadata`]
-/// 获取元数据。
+/// BSP 处理器：先 `new BspProcessor(bytes)` 解析，再调 `metadata()` 取元数据或
+/// `export_glb*` 系列导出 GLB；解析结果在实例内保留到第一次成功的 GLB 导出为止。
 #[wasm_bindgen]
 pub struct BspProcessor {
-    /// `Arc<Bsp>`：与共享层（`src/wasm-core` 回并后）的借用式移交口径一致 ——
-    /// `export_bsp*` 收 `Arc<Bsp>`，故内部持 `Arc`；本工程的导出入口仍按既有语义
-    /// **消费**实例（`take()`），不改 debug 侧的可重复导出行为。
+    /// `Arc<Bsp>`：与共享层的借用式移交口径对齐（`export_bsp*` 收 `Arc<Bsp>`）；
+    /// 但本文件的导出入口仍按既有语义**消费**实例（`Option::take`），故取走后变为 `None`。
     bsp: Option<std::sync::Arc<vbsp::Bsp>>,
     /// 缓存的 pakfile 文件数，避免 metadata() 重复克隆 Packfile
     packed_files: usize,
@@ -411,7 +485,7 @@ pub struct BspProcessor {
 
 #[wasm_bindgen]
 impl BspProcessor {
-    /// 创建处理器并立即解析 BSP 数据。
+    /// 创建处理器并立即解析 BSP 数据；失败语义同 `parse_bsp`（`"BSP 解析失败: <Debug>"`）。
     #[wasm_bindgen(constructor)]
     pub fn new(data: &[u8]) -> Result<BspProcessor, JsValue> {
         let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
@@ -423,7 +497,11 @@ impl BspProcessor {
         })
     }
 
-    /// 获取元数据 JSON 字符串（不消耗内部 Bsp 实例）。
+    /// 取元数据 JSON 字符串，字段集见 `BspMetadata`；只借用内部 `bsp`，不消费实例。
+    ///
+    /// 失败语义：实例已被某个 `export_*` 入口消费时返回 `JsValue` 字符串
+    /// `"BSP 未解析或已导出"`（导出入口用的是带「请重新 new」的另一条文案）；序列化失败走
+    /// `"序列化 BSP 元数据失败: <Debug>"`。
     pub fn metadata(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -433,9 +511,14 @@ impl BspProcessor {
         metadata.to_json()
     }
 
-    /// 导出为 GLB 字节数组。
+    /// 导出为 GLB 字节数组（纯地图，不带内嵌模型）。
     ///
-    /// 消耗内部 Bsp 实例（`export_bsp` 接收 `Bsp` 而非 `&Bsp`）；再次导出需重新 [`BspProcessor::new`]。
+    /// 用 `bsp_to_gltf_core::ConvertOptions::default()` 调 `export_bsp`，故不带缺失纹理回退、
+    /// 不生成缺失列表、不导出光源。
+    ///
+    /// 消费内部 `bsp`（`export_bsp` 收 `Arc<Bsp>` 且此处用 `take()`）：再次导出需重新
+    /// `new BspProcessor(bytes)`；已被消费时报 `"BSP 未解析或已被导出消费"`。
+    /// 其余失败语义：`"GLB 导出失败: <Debug>"` / `"GLB 序列化失败: <Debug>"`。
     pub fn export_glb(&mut self) -> Result<Vec<u8>, JsValue> {
         let bsp = self
             .bsp
@@ -456,21 +539,25 @@ impl BspProcessor {
         Ok(output)
     }
 
-    /// 导出为 GLB，并将**内存中的模型**（.mdl/.vvd/.dx90.vtx 字节）直接合并进同一地图。
+    /// 导出为 GLB，并把调用方传入的**内存模型**（`.mdl/.vvd/.dx90.vtx` 字节）合并进同一地图。
     ///
-    /// 全程在 WASM 内存完成"模型 + 地图"合并，不依赖文件系统
-    /// （对应 EXPORT_GUIDE.md 的磁盘两步流程）。
+    /// 模型字节由 JS 侧提供，本入口不读 PAKFILE，也不用其中的纹理或材质标注 —— 除
+    /// `static_props` 放置表外，`InMemoryResources` 其余字段都留空
+    /// （`entities` / `light_entities` 为空、两张材质表为空），故这条路径不导出灯光、
+    /// 也没有内置透明度标注，透明度只能靠 `textures_js` 之外的环节补齐。
     ///
     /// # 参数
-    /// - `models_js`: 模型字节数组。元素形如
+    /// - `models_js`: 逐元素反序列化成 `InMemoryModel`，形状为
     ///   `{ "name": "…/crate.mdl", "mdl": Uint8Array, "vvd": Uint8Array, "vtx": Uint8Array }`；
-    ///   `name` 须能在 BSP 静态道具字典中找到，用于匹配世界坐标/朝向。
-    /// - `textures_js`: 可选纹理对象。键为纹理名（如 `"metal/crate"`），值为 PNG 字节。
+    ///   解析失败报 `"模型参数解析失败: <Debug>"`。
+    /// - `textures_js`: 反序列化成 `HashMap<String, Vec<u8>>`；键为纹理名（如 `"metal/crate"`），
+    ///   值为 PNG 字节。解析失败报 `"纹理参数解析失败: <Debug>"`。
     ///
     /// # 放置信息
-    /// 位置（origin）、朝向（angles）、默认缩放与类名均从 BSP 的 `static_props` lump 自动派生，无需外部 JSON。
+    /// 位置（origin）、朝向（angles）、solid 与两级 prop 光照全部由
+    /// `bsp.static_props()` 派生（复用 `collect_pakfile_models`），不从入参取。
     ///
-    /// 注意：同样会**消耗**内部 Bsp 实例（与 [`BspProcessor::export_glb`] 一致）。
+    /// 同样**消费**内部 `bsp`，被消费后报 `"BSP 未解析或已被导出消费，请重新 new"`。
     pub fn export_glb_with_models(
         &mut self,
         models_js: JsValue,
@@ -481,15 +568,16 @@ impl BspProcessor {
             .take()
             .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
 
-        // 解析 JS 传入的内存模型与纹理
+        // 解析 JS 传入的内存模型与纹理表
         let models: Vec<InMemoryModel> = serde_wasm_bindgen::from_value(models_js)
             .map_err(|e| JsValue::from_str(&format!("模型参数解析失败: {:?}", e)))?;
         let textures: HashMap<String, Vec<u8>> = serde_wasm_bindgen::from_value(textures_js)
             .map_err(|e| JsValue::from_str(&format!("纹理参数解析失败: {:?}", e)))?;
 
-        // 从 BSP 派生静态道具放置信息（位置/朝向/缩放），并带上两级 prop 烘焙光照
+        // 从 BSP 派生静态道具放置信息（位置 / 朝向 / solid），并带上两级 prop 烘焙光照
         // （第 1 级 `sp_<idx>.vhv` 逐顶点 / 第 2 级 leaf ambient cube）——
-        // 复用 `collect_pakfile_models` 的同一份派生，避免此处漏掉光照字段。
+        // 与 PAKFILE 提取路径共用 `collect_pakfile_models` 的同一份派生。
+        // 本入口只取放置表：模型与条目名都丢弃（模型字节来自 `models_js`）。
         let (_pak_models, static_props, _entries) = collect_pakfile_models(&bsp)?;
 
         let resources = InMemoryResources {
@@ -516,18 +604,20 @@ impl BspProcessor {
         Ok(output)
     }
 
-    /// 自动从 BSP 的 **PAKFILE lump** 提取模型并合并进同一份地图 GLB。
+    /// 自动从 BSP 的 PAKFILE 提取模型并合并进同一份地图 GLB。
     ///
-    /// 许多 Source BSP 会把引用的 `.mdl/.vvd/.dx90.vtx` 打包进 PAKFILE，
-    /// 因此无需外部游戏资源即可在浏览器还原静态道具几何。
+    /// 流程：`collect_pakfile_models` 枚举 PAKFILE 取出被 `static_props` 引用且三件套齐全的模型
+    /// 与放置表 → 建 `pakfile_models::PakIndex` → `resolve_pakfile_materials` 解 VMT 标注并解 VTF
+    /// → 装 `InMemoryResources` → `ModelIntegrator::from_in_memory` → `export_bsp_with_models`。
     ///
-    /// 流程：收集 `static_props` 引用的模型路径 → 枚举 PAKFILE 提取三件套字节 →
-    /// 从 `static_props` 派生位置/朝向 → 调 [`bsp_to_gltf_core::export_bsp_with_models`] 合并导出。
+    /// 回退条件：提取到的模型表为空时（PAKFILE 里没有被引用的模型，或三件套不齐全）改用
+    /// `bsp_to_gltf_core::export_bsp` 输出纯地图，不报错、不产生区别对待的返回值。
     ///
-    /// 若 BSP 未打包任何被引用模型（依赖共享游戏资源，如多数 CS:S 官方图），
-    /// **自动回退为纯地图导出**，不报错、不降级。
+    /// 本入口不导出灯光（`light_entities` 留空、`ExportOptions` 用默认值），要带灯光用
+    /// `export_glb_with_pakfile_models_with_lights` 或 `..._with_defaults_and_lights`；也不注入
+    /// 缺失纹理回退表（`missing_fallback` 为空），要回退用 `..._with_defaults`。
     ///
-    /// 注意：此操作会消耗内部 Bsp 实例（与 [`BspProcessor::export_glb`] 一致）。
+    /// 消费内部 `bsp`；被消费后报 `"BSP 未解析或已被导出消费，请重新 new"`。
     pub fn export_glb_with_pakfile_models(&mut self) -> Result<Vec<u8>, JsValue> {
         let bsp = self
             .bsp
@@ -537,7 +627,7 @@ impl BspProcessor {
         // 1~3. 提取被引用且三件套齐全的模型 + 放置表 + PAKFILE 条目清单
         let (models, static_props, entry_names) = collect_pakfile_models(&bsp)?;
 
-        // 4. 未打包任何模型 → 回退为纯地图导出（非破坏式）
+        // 4. 模型表为空 → 改走纯地图导出；此处已消费 `bsp`，不能再回到模型路径
         if models.is_empty() {
             let options = bsp_to_gltf_core::ConvertOptions::default();
             let result = bsp_to_gltf_core::export_bsp(bsp, options)
@@ -550,7 +640,7 @@ impl BspProcessor {
             return Ok(output);
         }
 
-        // 5. 解析 PAKFILE 内的 VMT/VTF：贴图字节 + 内置透明度标注
+        // 5. 解 PAKFILE 内的 VMT/VTF：贴图 PNG 字节 + 材质透明度 / 无光照标注（`decode_textures = true`）
         let index = pakfile_models::PakIndex::build(&entry_names);
         let materials = resolve_pakfile_materials(&bsp, &models, &index, true);
 
@@ -578,11 +668,12 @@ impl BspProcessor {
         Ok(output)
     }
 
-    /// 导出 GLB（含 PAKFILE 模型）+ **缺失纹理回退**：`defaults_json` 为默认纹理包
-    /// （`{ "materials/<材质路径小写>": "#mosaic v4 字节码" }`），材质缺失时直接
-    /// 在导出期解码低清纹理嵌入 GLB——渲染端拿到的即自包含场景，零后期处理。
+    /// 导出 GLB（PAKFILE 模型）+ **缺失纹理回退**：`defaults_json` 是
+    /// `{ "materials/<材质路径小写>": "#mosaic v4 字节码" }` 形式的回退表，命中的材质在导出期
+    /// 就地解码低清纹理并嵌进 GLB（`ConvertOptions.missing_fallback`），渲染端拿到的是自包含场景。
     ///
-    /// 与 [`BspProcessor::export_glb_with_pakfile_models`] 同流程，仅注入回退表。
+    /// 与 `export_glb_with_pakfile_models` 同一实现，差异只有回退表与 `generate_missing_list`；
+    /// 图集面积上界取 0（= 共享层政策上界），且**不导出灯光**。
     pub fn export_glb_with_pakfile_models_with_defaults(
         &mut self,
         defaults_json: &str,
@@ -590,10 +681,14 @@ impl BspProcessor {
         self.export_glb_with_defaults_opts(defaults_json, 0, false)
     }
 
-    /// [`BspProcessor::export_glb_with_pakfile_models_with_defaults`] 的**阈值可覆盖**变体。
+    /// `export_glb_with_pakfile_models_with_defaults` 的**图集面积上界可覆盖**变体。
     ///
-    /// `lightmap_max_atlas_area`：> 0 时覆盖单页图集面积上界（px），0 = 政策上界（4096×2048）。
-    /// **仅供 fail-visible 负控**（契约 `documents/game/implementation/console-fix-contract.md` §4.3）。
+    /// `lightmap_max_atlas_area`（像素面积）：有限且 `> 0` 时经 `as u64` 截断后写入
+    /// `ConvertOptions.lightmap_max_atlas_area`；非有限值、0 或负数都归一成 0，即用共享层的
+    /// 政策上界。其余行为与 `_with_defaults` 相同（不含灯光）。
+    ///
+    /// 该变体在手写 TS 侧无调用点（只出现在 `apps/debug/src/wasm.d.ts` 未声明的导出面上），
+    /// 是公开导出里唯一能改写该阈值的入口。
     pub fn export_glb_with_pakfile_models_with_defaults_and_atlas_limit(
         &mut self,
         defaults_json: &str,
@@ -607,11 +702,12 @@ impl BspProcessor {
         self.export_glb_with_defaults_opts(defaults_json, area, false)
     }
 
-    /// 导出 GLB（含 PAKFILE 模型 + **默认纹理回退** + **BSP 光照**）。
+    /// 导出 GLB（PAKFILE 模型 + **缺失纹理回退** + **BSP 光照**）：回退表与灯光两条支路同时生效。
     ///
-    /// 组合入口：缺失纹理回退表 + `light`/`light_spot`/`light_environment` →
-    /// `KHR_lights_punctual`。此前二者互斥（一个收 defaults 不收 lights、一个收 lights 不收 defaults），
-    /// `world-builder`（共享 TS 层）只能调 `_with_defaults` ⇒ GLB 从未携带灯光。
+    /// 灯光来自 `collect_light_entities` 挑出的 `light` / `light_spot` / `light_environment` 实体，
+    /// 经 `ExportOptions { include_lights: true }` 写成 `KHR_lights_punctual`；图集面积上界取 0。
+    /// 共享层 `src/ts-shared/phys/world-builder.ts` 的 `buildWorldBundle` 首选本入口，
+    /// 失败时回退 `export_glb_with_pakfile_models`。
     pub fn export_glb_with_pakfile_models_with_defaults_and_lights(
         &mut self,
         defaults_json: &str,
@@ -619,12 +715,26 @@ impl BspProcessor {
         self.export_glb_with_defaults_opts(defaults_json, 0, true)
     }
 
-    /// 导出 GLB（含 PAKFILE 模型 + **BSP 光照**，不带默认纹理回退）。
+    /// 导出 GLB（PAKFILE 模型 + **BSP 光照**），不注入缺失纹理回退表。
+    ///
+    /// 实现上是 `export_glb_with_defaults_opts("{}", 0, true)`：回退表为空 map，
+    /// 故与 `..._with_defaults_and_lights` 只差一个非空回退表。手写 TS 侧无调用点。
     pub fn export_glb_with_pakfile_models_with_lights(&mut self) -> Result<Vec<u8>, JsValue> {
         self.export_glb_with_defaults_opts("{}", 0, true)
     }
 
-    /// 三个 defaults 入口的共用实现（`lightmap_max_atlas_area` / `include_lights` 可调）。
+    /// 四个 defaults 系列入口的共用实现（`lightmap_max_atlas_area` / `include_lights` 可调）。
+    ///
+    /// `defaults_json` 先整体反序列化成 `HashMap<String, String>`（失败即报
+    /// `"默认纹理包 JSON 解析失败: <Debug>"`，不进后续步骤），再经 `options` 闭包写进
+    /// `ConvertOptions` 的 `missing_fallback` / `generate_missing_list` / `lightmap_max_atlas_area`。
+    ///
+    /// 两条支路：模型表为空且 `include_lights == false` 时走 `export_bsp` 纯地图导出
+    /// （注意该支路照样传 `options(true)`，即仍会生成缺失纹理列表）；否则装
+    /// `InMemoryResources`（`light_entities` 仅当 `include_lights` 为真时由 `collect_light_entities` 填充）
+    /// 后走 `export_bsp_with_models`。
+    ///
+    /// 消费内部 `bsp`；失败语义同其它导出入口。
     fn export_glb_with_defaults_opts(
         &mut self,
         defaults_json: &str,
@@ -647,7 +757,8 @@ impl BspProcessor {
             ..bsp_to_gltf_core::ConvertOptions::default()
         };
 
-        // 无模型且不要灯光时保持纯地图导出（与 [BspProcessor::export_glb] 同语义）
+        // 无模型且不要灯光 → 纯地图导出（与 export_glb 同一条 `export_bsp` 路径，
+        // 但这里带上了 missing_fallback 与 generate_missing_list=true）
         if models.is_empty() && !include_lights {
             let result = bsp_to_gltf_core::export_bsp(bsp, options(true))
                 .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
@@ -685,21 +796,29 @@ impl BspProcessor {
         Ok(output)
     }
 
-    /// 导出 **PAKFILE 内嵌模型的「可视网格」作为碰撞网格**（世界空间三角形，零转化）。
+    /// 导出 PAKFILE 内嵌模型的**可视网格**当碰撞网格用（世界空间三角形，不做几何简化）。
     ///
-    /// 本方法**不做任何转化**：不挤出厚度、不共面合并、不凸包、不 OBB 回退 ——
-    /// 输出的三角形与 GLB 显示网格**逐位一致**（顶点 = 同一条变换链
-    /// `map_coords(apply_root_transform(v))` → `place_point`（scale/rot/translation），
-    /// 其中 `quat`/`translation` 来自与 GLB 节点同一份 `resolve_placements`）。
+    /// 本入口不做任何碰撞体转化：不挤出厚度、不共面合并、不凸包、不做 OBB 回退，
+    /// 逐顶点搬进世界空间后直接输出三角形。顶点链是
+    /// `map_coords(model.apply_root_transform(v))` → `pakfile_models::place_point`
+    /// （用 `placement` 的 `translation` / `rotation` / `scale` 就地烘进坐标）；
+    /// 其中 `placement` 与 GLB 显示路径同源，都来自 `model_integrator::resolve_placements`，
+    /// 但显示路径是把这组值写在 glTF 节点上（见 `src/wasm-core/model_integrator/mod.rs` 的
+    /// `add_models_to_gltf`），不在 CPU 侧改顶点，故两条路径的顶点数值一致、承载方式不同。
     ///
     /// 输出 JSON：`[{ "name", "vertices": [[x,y,z]...], "indices": [[a,b,c]...],
-    /// "min": [...], "max": [...] }]`（每个放置实例一个 mesh，世界坐标 Y-up）。
+    /// "min": [...], "max": [...] }]`，每个放置实例一个条目，世界坐标 Y-up。
     ///
-    /// 透明度门控与碰撞导出一致：真半透明（`$translucent`/`$alpha<1`）材质跳过；
-    /// `static_prop.solid == 0`（SOLID_NONE）实例跳过；无标注默认保留。
+    /// 门控：先在放置表上丢掉 `solid == Some(0)`（`vbsp` 的 `SolidType::None`）的实例；
+    /// 再逐 mesh 用 skin table 的 `texture_info.name` 查 `alpha_modes`，取不到按 0 算，
+    /// 只有 `alpha == 1`（Blend，真半透明）的 mesh 被跳过，`2`（Mask）保留。
+    ///
+    /// 规模护栏：累计三角形数达 `MAX_TRI_TOTAL`（200_000）后停止取新模型、并中止当前实例循环，
+    /// 已产出的条目照常返回；放置表为空或三件套不全的模型直接跳过。
     ///
     /// # 调用时机
-    /// 只借用 BSP，须在 [`BspProcessor::export_glb_with_pakfile_models`]（消费 BSP）之前调用。
+    /// 只借用 `bsp`，须在消费 `bsp` 的导出入口之前调用；被消费后报
+    /// `"BSP 未解析或已被导出消费，请重新 new"`。模型表为空时返回字符串 `"[]"`。
     pub fn export_model_tri_colliders(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -716,7 +835,7 @@ impl BspProcessor {
 
         let no_entities: Vec<model_integrator::Entity> = Vec::new();
 
-        /// 单个实例的三角形网格（世界空间，与显示逐位一致）。
+        /// 单个实例的三角形网格：`name` 是 PAKFILE 里的模型路径，顶点已是世界空间。
         #[derive(serde::Serialize)]
         struct TriMeshOut {
             name: String,
@@ -726,7 +845,7 @@ impl BspProcessor {
             max: [f32; 3],
         }
 
-        /// 总三角形护栏（防止超大地图把所有 prop 都展开成百万三角形拖垮 trace）。
+        /// 累计三角形数上限：超出后不再展开新模型 / 新实例，已产出的条目保留。
         const MAX_TRI_TOTAL: usize = 200_000;
 
         let mut out: Vec<TriMeshOut> = Vec::new();
@@ -749,7 +868,8 @@ impl BspProcessor {
 
             let Some(model) = load_vmdl(m) else { continue };
 
-            // ---- 局部空间顶点（Y-up，与 GLB 顶点同一变换链）----
+            // ---- 局部空间顶点：先过模型根骨骼变换，再 Z-up → Y-up ----
+            // 与显示路径对单个顶点用的是同一条 `map_coords(apply_root_transform(..))`
             let src = model.vertices();
             let mut local: Vec<[f32; 3]> = Vec::with_capacity(src.len());
             for v in src {
@@ -1208,7 +1328,7 @@ impl BspProcessor {
 
     /// 列出 pakfile 中所有打包文件名（不含内容）。
     ///
-    /// 用于快速检查 BSP 是否打包了 Lua/cfg/脚本等可能控制触发逻辑的资源。
+    /// 用于快速检查 BSP 是否打包了 Lua/cfg/脚本等参与触发逻辑的资源。
     /// 返回 JSON：`{ "files": ["path1", ...], "total": N }`
     pub fn list_pakfile(&self) -> Result<String, JsValue> {
         let bsp = self
@@ -1839,7 +1959,7 @@ impl BspProcessor {
             .nodes
             .iter()
             .map(|node: &Node| {
-                // 边界检查：plane_index 可能越界（损坏的 BSP 文件）
+                // 边界检查：plane_index 越界（损坏的 BSP 文件）时 `get` 返回 None，回落到朝上的默认平面
                 let plane_idx = node.plane_index as usize;
                 let default_plane = Plane { normal: vbsp::Vector { x: 0.0, y: 0.0, z: 1.0 }, dist: 0.0, ty: 0 };
                 let plane = bsp.planes.get(plane_idx).unwrap_or(&default_plane);

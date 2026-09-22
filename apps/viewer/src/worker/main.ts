@@ -1,10 +1,20 @@
 /**
- * 录像解析 Worker：Shavit `.replay` 原生解析，产出定型数组零拷贝回传。
+ * 录像解析 Worker 源码（`apps/viewer/package.json` 的 `build:worker` 用 esbuild 打成
+ * `web/worker.js`）。这是本工程的录像导入路径：进 `ParseRequest`、出 `ParseResponse`，
+ * 协议与字段见 `apps/viewer/src/replay/protocol.ts`，主线程侧对手是
+ * `apps/viewer/src/replay/importer.ts` 的 `ReplayImporter`。
  *
- * t4 起 JSON 解析通道已移除——这是唯一的录像导入路径：
- * 先按魔数嗅探（在 file.text() 之前——文本解码会破坏二进制），非 `.replay` 明确报错。
- * 缓存的只是原始字节，重导（改映射/变换）时重新解码，避免缓冲区被 transfer 后失效。
- * 没有 Worker 环境时，主线程 importer 会走同源回退路径。
+ * 关键不变量：
+ * - **魔数嗅探先于任何文本解码**：`.replay` 是二进制，先按 `fileLooksLikeShavitReplay` 判定，
+ *   非 `.replay` 直接回 `type: 'error'`（文本解码会破坏字节）；
+ * - 缓存的是**原始字节**（`cachedNativeBytes`）而不是解析结果：改映射/变换重导时重新解码，
+ *   同时避免 buffer 被 transfer 出去后本地失效；
+ * - 回传的定型数组 buffer 全部进 transfer 列表（`t`/`pos`/`ang` 必有，`vel`/`buttons` 存在
+ *   才加）⇒ 零拷贝，但发送后这些 buffer 在 Worker 侧已不可再用；
+ * - 进度只发 `'parse'` 阶段两条（0/1、1/1）；`ParseResponse` 声明的 `'map'` 阶段本文件不发；
+ * - 单条请求的异常在 `handle` 内收敛成 `type: 'error'` 响应，不会漏到 `onmessage`；
+ * - 本文件不做 Worker 能力检测：环境里起不了 Worker 时，由主线程侧
+ *   `apps/viewer/src/replay/importer.ts` 退回 `importOnMain` 做同源解析。
  */
 
 import {
@@ -22,19 +32,24 @@ interface WorkerCtx {
 
 const ctx = self as unknown as WorkerCtx;
 
-/** Shavit .replay 缓存（字节级；重导时重新解码，避免缓冲区被 transfer 后失效）。 */
+/** Shavit .replay 缓存：`cachedNativeFile` 是上次取字节的文件句柄，`cachedNativeBytes` 是其原始
+ *  字节；仅当本次请求的 `file` 与缓存句柄同一个对象时才复用字节，否则重新 `arrayBuffer()`。 */
 let cachedNativeFile: File | null = null;
 let cachedNativeBytes: ArrayBuffer | null = null;
 
+/** 薄封装：给 `ctx.postMessage` 一个确定签名（Worker 全局的 `postMessage` 无返回值的类型缺口）。 */
 function post(msg: ParseResponse, transfer?: Transferable[]): void {
   ctx.postMessage(msg, transfer);
 }
 
+/** Worker 入口：只挂 `onmessage`，不 await `handle`——异常已在 `handle` 内转成 `'error'` 响应。 */
 ctx.onmessage = (e: MessageEvent) => {
   const req = e.data as ParseRequest;
   void handle(req);
 };
 
+/** 单条请求的全流程：取文件（`req.file` 或缓存）→ 魔数嗅探 → 取字节并缓存 → 原生解析 →
+ *  生成 `Clip` → 带 transfer 列表回 `'done'`；任一步抛错都收敛为 `'error'` 响应。 */
 async function handle(req: ParseRequest): Promise<void> {
   const { id } = req;
   try {
@@ -92,6 +107,9 @@ async function handle(req: ParseRequest): Promise<void> {
   }
 }
 
+/** 逐字段构造 `ClipPayload`（见 `apps/viewer/src/replay/protocol.ts`）：显式列字段而不用展开，
+ *  返回对象与 `transfer` 里那些 buffer 同源；本函数无显式返回类型，形状由 `post` 处的
+ *  `ParseResponse` 逐字段校验。 */
 function clipToPayload(clip: Clip) {
   return {
     name: clip.name,

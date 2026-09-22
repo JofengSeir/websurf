@@ -1,13 +1,18 @@
 /**
- * WebSurf — 视距剔除（照搬 game 的语义）
- * - **唯一判据**：块中心到相机距离 > cullDistance → 隐藏；否则可见。
- * - **无 PVS、无 hysteresis、无 cluster**（2026-09-11 对齐 game：
- *   game/src/renderer/renderer-main.ts:746-763 就是这个单条距离判据，ENABLE_PVS=false）。
- *   原 PVS 判定实测在 surf_666 上可见集仅 153/8269 cluster、隐藏 1968/2221 块 → 面成片消失。
- * - update 每帧执行（updateCounter++ 无条件）确保 stats 正确
- * - 剔除滑块上限 = 场景对角线 ×4，默认值对齐 game 的 maxDim×0.5（不低于 12800）
- * 原 3 级 LOD 的中级（lightmap 降级 shader）已移除：cullDistance 恒小于 midDistance，
- * 物体在到达中级前已被视距剔除，该级永不生效。
+ * WebSurf — 视距剔除（debug 侧实现）。
+ *
+ * 判据（`update`）：块中心到相机的距离平方 > `cullDistance` 的平方 ⇒ 隐藏，否则可见。
+ * 只有这一条判据：`update` 不读 `clusterIds`、不读 `PvsManager`、无迟滞带。
+ *
+ * 帧节流：`update` 每次调用都 `updateCounter++`，但只有计数达到 `config.lod.updateInterval`
+ * 时才做判定并刷新 `stats`（`apps/debug/src/config.ts` 的 `lod.updateInterval` 默认 1）。
+ *
+ * 剔除距离取值（`setup`）：上限 `maxCull` = 场景对角线 ×4 上取整到 100 HU；默认
+ * `cullDistance` = min(对角线 ×2, max(12800, 最大边 ×0.5))，各项先上取整到 100 HU ⇒
+ * 小地图取对角线两倍全覆盖，大地图取最大边一半且不低于 12800。
+ *
+ * `PvsManager` 只被 `assignClusterIds` 用来把采样点映射成 cluster 集合，该结果当前无消费方；
+ * `LOD_LEVEL.PVS_HIDDEN` 与 `LodStats.pvsHidden` 不参与判定（`pvsHidden` 每次刷新写 0）。
  */
 
 import * as THREE from 'three';
@@ -16,9 +21,9 @@ import type { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js'
 
 /** LOD 级别。 */
 export const LOD_LEVEL = {
-	NEAR: 0, // 完整渲染
-	FAR: 2, // 隐藏（视距剔除）
-	PVS_HIDDEN: -1, // PVS 剔除隐藏
+	NEAR: 0, // 可见（距离判据通过）
+	FAR: 2, // 隐藏（距离超出 cullDistance）
+	PVS_HIDDEN: -1, // 预留档位：本文件零引用，update 从不写入
 } as const;
 
 /** 单个 mesh 的 LOD 注册项。 */
@@ -29,8 +34,8 @@ interface LodItem {
 	/** 包围球半径。 */
 	radius: number;
 	/**
-	 * mesh 覆盖的 cluster 集合（包围盒采样定位，去重）。
-	 * 空数组 = 无 PVS 信息（采样全部落在固体/地图外），PVS 判定跳过。
+	 * mesh 覆盖的 cluster 集合（由 assignClusterIds 采样定位并去重）。
+	 * 空数组 = 7 个采样点全部落在 solid/地图外（getClusterAt 返回负值）；本文件内无消费方。
 	 */
 	clusterIds: number[];
 	/** 当前是否可见。 */
@@ -47,9 +52,9 @@ export interface LodStats {
 	total: number;
 	/** 近级数量。 */
 	near: number;
-	/** 远级（已剔除）数量。 */
+	/** 远级（距离超出，已隐藏）数量。 */
 	far: number;
-	/** PVS 剔除数量。 */
+	/** PVS 剔除数量：update 每次刷新恒写 0。 */
 	pvsHidden: number;
 	/** 当前视距剔除距离。 */
 	cullDistance: number;
@@ -65,22 +70,19 @@ export interface SceneDiagonalInfo {
 	count: number;
 	/** 场景对角线。 */
 	diagonal: number;
-	/** 默认视距剔除距离（对角线 * 0.5）。 */
+	/** 默认视距剔除距离：min(对角线×2, max(12800, 最大边×0.5))，先上取整到 100 HU。 */
 	defaultCull: number;
-	/** 视距剔除上限（对角线 * 2）。 */
+	/** 视距剔除上限：场景对角线 ×4，上取整到 100 HU。 */
 	maxCull: number;
 }
 
 /**
  * LOD 管理器。
  *
- * 维护 mesh 的 LOD 注册项，每帧执行：
- * 1. updateCounter++ 无条件（确保 stats 正确）。
- * 2. 每 updateInterval 帧执行一次重的 PVS + 距离 LOD 判定。
- * 3. PVS 优先：cluster 不在可见集 → 隐藏(-1)。
- * 4. 距离 LOD（带 hysteresis）：
- *    - 当前可见：distSq > cullDistSq → 远(2)；else 近(0)
- *    - 当前不可见：distSq < cullHysteresisSq → 恢复近(0)；else 远(2)
+ * `setup` 收集全部有效 mesh（世界中心 + 包围球半径 + 场景对角线），`assignClusterIds`
+ * 为其采样 cluster，`update` 按相机距离逐块写 `mesh.visible` 并刷新 `stats`。
+ *
+ * `update` 的返回值为「本轮是否有块的可见性发生变化」，调用方据此决定是否重绘。
  */
 export class LodManager {
 	/** LOD 注册项。 */
@@ -107,14 +109,14 @@ export class LodManager {
 	};
 
 	/**
-	 * 遍历模型注册 LOD item。
+	 * 遍历模型注册 LOD 项。
 	 *
-	 * 计算每个 mesh 的世界中心 + 包围球半径。
-	 * 设置默认视距剔除距离 = 场景对角线 * 0.5，上限 = 场景对角线 * 2。
+	 * 只收 `boundingSphere` 存在、半径有限且 > 0 的 mesh；中心由包围球中心乘 `matrixWorld` 得到。
+	 * 注册后把 `updateCounter` 置为 `lod.updateInterval`，使下一次 `update` 立即做首帧判定。
 	 *
 	 * @param model 加载的 glTF 场景根节点。
-	 * @param config 运行时配置（读取 lod.updateInterval）。
-	 * @returns 场景对角线信息（用于 UI 滑块设置）。
+	 * @param config 运行时配置（只读 `lod.updateInterval`）。
+	 * @returns 场景对角线信息（`count` / `diagonal` / `defaultCull` / `maxCull`，供 UI 滑块使用）。
 	 */
 	setup(model: THREE.Object3D, config: RuntimeConfig): SceneDiagonalInfo {
 		this.items.length = 0;
@@ -144,15 +146,9 @@ export class LodManager {
 			count++;
 		});
 
-		// 场景对角线 → 视距上限（向上取整到 100 HU）
-		// 默认视距：小地图全可见（diag*2）；大地图与 game 口径对齐。
-		// 2026-09-11 修正：原为「大地图硬钳 12800」，但 game 用 maxDim×0.5——
-		//   实测 surf_666 世界 32152×32592×32624（maxDim=32624、diag=56217）：
-		//   game → 16312，debug 旧口径 → 12800（**近 21%**）。在 32k 宽的开放 surf 图上，
-		//   这会让远处平台比 game 早 ~3500 单位消失，是「面莫名消失」的第二个来源
-		//   （第一个是 PVS，已默认关闭，见 config.ts lod.pvsEnabled）。
-		//   现口径：min(diag*2, max(12800, maxDim*0.5))——小地图仍全可见，
-		//   大地图取 game 的 maxDim×0.5（且不低于 12800，不回退）。
+		// 场景对角线 → 剔除上限与默认值（均向上取整到 100 HU）
+		// 默认值 = min(diag*2, max(12800, maxDim*0.5))：小地图取对角线两倍全覆盖，
+		// 大地图取最大边一半，且不低于 12800。
 		const box = new THREE.Box3().setFromObject(model);
 		const size = box.getSize(new THREE.Vector3());
 		const diag = size.length();
@@ -176,12 +172,11 @@ export class LodManager {
 	/**
 	 * 为已注册的 mesh 建立 cluster 集合。
 	 *
-	 * 按 mesh 包围盒（中心 ± 半径）采样 7 个点（中心 + 6 面中点），
-	 * 逐点用 BSP 树定位 cluster 并去重。mesh 横跨多个 cluster 时全部收录，
-	 * PVS 判定时"任一 cluster 可见即可见"（保守方向正确，不会误剔大 mesh）。
+	 * 按 mesh 包围盒采样 7 个点（中心 + 6 个面中点，半径取 `max(radius, 1)`），逐点调
+	 * `PvsManager.getClusterAt`，把非负结果去重收进 `clusterIds`；已有非空 `clusterIds` 的项跳过。
 	 *
 	 * @param pvsManager PVS 管理器。
-	 * @returns 已映射 cluster 的 mesh 数量（clusterIds 非空）。
+	 * @returns 采到至少一个 cluster 的 mesh 数量。
 	 */
 	assignClusterIds(pvsManager: PvsManager): number {
 		let mapped = 0;
@@ -214,16 +209,15 @@ export class LodManager {
 	}
 
 	/**
-	 * 每帧更新：PVS 判定 + 距离 LOD（带 hysteresis）。
+	 * 每帧调用；每 `config.lod.updateInterval` 次做一轮判定。
 	 *
-	 * - updateCounter++ 无条件（确保 stats 显示正确）。
-	 * - 每 updateInterval 帧执行一次重的判定（默认 4 帧）。
-	 * - 返回 true 表示 LOD 发生变化（需要重新渲染）。
+	 * 判定：块中心到 `cameraPos` 的距离平方 <= `cullDistance` 的平方 ⇒ 可见（`NEAR`），
+	 * 否则隐藏（`FAR`）；仅当可见性翻转时写 `mesh.visible` / `lodLevel` 并把返回值置为 true。
+	 * 每轮判定后用当前结果重写 `stats`（`pvsHidden` 恒为 0）。
 	 *
 	 * @param cameraPos 相机世界坐标。
-	 * @param config 运行时配置。
-	 * @param pvsManager PVS 管理器（null 表示无 PVS）。
-	 * @returns 是否发生 LOD 变化。
+	 * @param config 运行时配置（读 `lod.updateInterval`）。
+	 * @returns 本次是否有块的可见性发生变化。
 	 */
 	update(cameraPos: THREE.Vector3, config: RuntimeConfig): boolean {
 		if (this.items.length === 0) return false;
@@ -234,11 +228,7 @@ export class LodManager {
 
 		let lodChanged = false;
 
-		// 2026-09-11 照搬 game 的剔除实现（game/src/renderer/renderer-main.ts:746-763）：
-		// **只按「块中心距离 > cullDistance」判可见性**——无 PVS、无迟滞、无 cluster。
-		// 原实现的两处额外机制已移除：
-		//   · PVS 判定（实测 surf_666 可见集仅 153/8269 cluster，隐藏 1968/2221 块 → 面成片消失）；
-		//   · 迟滞带（0.85×cull）——game 没有，去掉以保持两边完全同语义。
+		// 可见性判据只有「块中心距离 > cullDistance」这一条：不查 cluster、不带迟滞带。
 		const cullDistSq = this.cullDistance * this.cullDistance;
 
 		let nearCount = 0;
@@ -285,7 +275,7 @@ export class LodManager {
 	setCullDistance(dist: number): void {
 		this.cullDistance = Math.max(0, Math.min(dist, this.maxCull));
 		this.stats.cullDistance = this.cullDistance;
-		// 触发下一帧立即重算
+		// 触发下一帧立即判定（置 999 ≥ updateInterval）
 		this.updateCounter = 999;
 	}
 

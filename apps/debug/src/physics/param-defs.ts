@@ -1,39 +1,49 @@
 /**
- * 物理参数定义表（面板渲染与 Worker 参数管理共用）。
+ * 物理参数定义表：面板渲染与 Worker 参数管理共用同一份，本文件不 import 任何物理实现。
  *
- * 物理已迁移到共享 Rust 物理（websurf-phys）：参数子集 = Rust `PhysParams`
- * 支持的可调项（src/phys/player.rs）。默认值 = cs-movement/CS:S 基准，与
- * 共享 crate `PhysParams::default()` 一致。
+ * 消费点两处：主线程 `apps/debug/src/app.ts` 的 `initPhysicsPanel` 读全部字段渲染控件
+ * （`description` 落成参数行的 title 属性），Worker 侧 `apps/debug/src/physics/physics-params.ts`
+ * 读 `default` 与 `min`/`max` 做回退与钳制。
  *
- * 独立成文件：主线程 UI（app.ts）与 Worker（physics-params.ts）都需要它，
- * 但不能引入物理实现（避免主线程 bundle 膨胀）。
+ * 12 项里 11 项经 `PARAM_TO_RUST` 映射成 `src/phys/mod.rs` 的 `set_params` 键；`tickRate` 是
+ * JS 驱动层参数，不进 Rust。默认值与 `src/phys/player.rs` 的 `PhysParams::default` 逐项同值
+ * （`jumpHeight` 对应常量 `JUMP_HEIGHT`）。
  */
 
-/** 参数来源。 */
+/** 参数来源：定义默认值 / 面板手动 / 地图设置（面板标签见 `apps/debug/src/app.ts` 的 `SOURCE_LABEL`）。 */
 export type ParamSource = 'mode-default' | 'manual' | 'map';
 
-/** 参数定义。 */
+/** 单个参数的定义（不含当前值）。 */
 export interface ParamDef {
+  /** 参数名：面板 `data-param` 键，同时是 `PhysicsParams.overrides` 的键。 */
   name: string;
+  /** 面板显示名。 */
   label: string;
+  /** 单位后缀；布尔项与无量纲项不填。 */
   unit?: string;
+  /** 控件类型：boolean 渲染复选框，number 渲染 range 与 number 输入联动。 */
   kind: 'number' | 'boolean';
-  /** 默认值（= cs-movement/CS:S 基准，与 Rust PhysParams::default 一致）。 */
+  /** 默认值；未被覆盖时由 `PhysicsParams.snapshot` 上报。 */
   default: number | boolean;
+  /** 数值下限（number 型使用；同时写进 range 与 number 输入的 min 属性）。 */
   min?: number;
+  /** 数值上限（同上，写 max 属性）。 */
   max?: number;
+  /** range 控件的步长。 */
   step?: number;
-  /** 作用说明（面板 tooltip / 文档共用）。 */
+  /** 作用说明：渲染成参数行的 title 属性（tooltip）。 */
   description: string;
 }
 
-/** 参数当前状态（snapshot 回传项）。 */
+/** 参数定义 + 当前值 + 来源（`physics-snapshot` 的回传项）。 */
 export interface ParamState extends ParamDef {
+  /** 当前值（覆盖值或定义默认值）。 */
   value: number | boolean;
+  /** 当前来源。 */
   source: ParamSource;
 }
 
-/** 全部可调参数定义（面板顺序 = 本数组顺序）。 */
+/** 全部参数定义（12 项）；面板行与快照都按本数组顺序。 */
 export const PARAM_DEFS: ParamDef[] = [
   {
     name: 'maxSpeed', label: '地速上限', unit: 'u/s',
@@ -97,7 +107,7 @@ export const PARAM_DEFS: ParamDef[] = [
   },
 ];
 
-/** 根据参数名取定义。 */
+/** 按 `name` 线性查找定义；未命中返回 undefined。 */
 export function findParamDef(name: string): ParamDef | undefined {
   return PARAM_DEFS.find((p) => p.name === name);
 }

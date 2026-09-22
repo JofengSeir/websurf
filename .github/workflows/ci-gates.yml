@@ -1,27 +1,19 @@
 # WebSurf: 测试门禁（不含部署）
 #
-# 由来（2026-09-21）：原先所有门禁都挂在 deploy-pages.yml 的 build job 里，导致
-#   - 每次部署要额外编译 test/dual-mode-harness 的 wasm（147 s），只为给 debug 的
-#     `test:jump-apex` 提供 pkg；
-#   - 任何一个门禁失败都会让「部署」失败（9-21 的 E0063/E0308 就是这么挡住发布的）；
-#   - 三个 app 的 Rust 编译串行。
-# 现在把门禁整体移到这里，与部署解耦：部署只构建/发布 apps，门禁在 PR 与 main 上独立跑。
+# 结构：门禁与部署解耦——部署只构建/发布 apps（见 deploy-pages.yml 的 build job），门禁在 PR 与
+# main 上独立跑；三个 app 的 Rust 编译各在自己的 job 内进行。
 #
-# 门禁清单（与各工程 package.json 的 test:* 对齐，规范 §6.2「test:* ⊆ CI」）：
+# 门禁清单（与各工程 package.json 的 test:* 对齐）：
 #   rust-unit-tests — `cargo test -p websurf-phys`（共享层物理单测；含蹲姿/surf 回归、P2 幻影门）
-#   harness         — test/dual-mode-harness：wasm + ts + three-mode 运行时验证
 #   debug           — test:optimize-scene / test:auth-clock / test:path-acceptance / test:jump-apex /
-#                     test:surf-crouch（前两者打包时解析 `pkg/` ⇒ 本 job 先建 debug wasm；
-#                     jump-apex 另读 test/dual-mode-harness/pkg，故排在 harness 之后）
+#                     test:surf-crouch（五道都在 apps/debug 内跑：optimize-scene 会把
+#                     `src/renderer/renderer-main.ts` 及其 `../pkg/websurf_wasm.js` 打成 Node bundle，
+#                     jump-apex 与 surf-crouch 直读 `apps/debug/pkg/` ⇒ 本 job 先建 debug wasm）
 #   game            — test:phys / test:seed-smoke / test:surf-crouch（都读 apps/game/pkg）
-#   viewer          — test:replay（纯 TS 自检，不依赖 pkg）
+#   viewer          — test:replay（纯 TS 自检，不依赖 pkg ⇒ 本 job 不建 wasm）
 #
-# 已知未纳入（另案）：
-#   - `test:glb-contract`（test/dual-mode-harness）：它要同时加载 apps/{game,debug,viewer} 与
-#     `test/game-core` 四份 pkg，而 test/game-core 已于 9-21 转为本地工程（不入库）→ 在 CI 上
-#     无法成立，需重做或删掉该门。
-#   - （已纳入）`debug:test:surf-crouch`：与 game 侧脚本逐字节相同；debug 的 pkg 本就要为
-#     optimizeScene 门构建，故顺带跑掉这一道，边际成本为零。
+# 注：`debug:test:surf-crouch` 与 game 侧脚本逐字节相同；debug 的 pkg 本就要为 optimizeScene 门
+# 构建，故顺带跑掉这一道，边际成本为零。
 
 name: CI Gates
 
@@ -57,9 +49,9 @@ jobs:
       - name: cargo test -p websurf-phys
         run: cargo test -p websurf-phys
 
-  # ── 验证工程 + debug 门禁（jump-apex 需要 harness pkg，故同一 job 内先建 harness）──
-  harness-and-debug-gates:
-    name: harness + debug gates
+  # ── debug 门禁（五道都在 apps/debug 内跑，先建本工程 pkg）─────────────────
+  debug-gates:
+    name: debug gates
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -112,24 +104,6 @@ jobs:
             cargo install wasm-bindgen-cli --version "${VERSION}" --locked
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      # harness 的 pkg 是 debug `test:jump-apex` 的前置（缺 pkg 时该门会 [SKIP] 而非失败）。
-      - name: Install dual-mode-harness dependencies
-        working-directory: test/dual-mode-harness
-        run: npm ci
-
-      - name: Build dual-mode-harness WASM
-        working-directory: test/dual-mode-harness
-        run: npm run build:wasm
-
-      - name: Build dual-mode-harness TypeScript (main/worker-a/worker-b)
-        working-directory: test/dual-mode-harness
-        run: npm run build:ts
-
-      - name: dual-mode-harness 三模式运行时验证
-        working-directory: test/dual-mode-harness
-        # 三模式（coupled/decoupled/tick）运行时装配 + 热切握手 + 遥测链路（14 断言）
-        run: npm run test:three-mode
 
       - name: Install debug dependencies
         working-directory: apps/debug

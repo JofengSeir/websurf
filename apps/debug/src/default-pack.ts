@@ -1,21 +1,24 @@
 /**
- * 默认配置纹理包（textures.mtz）加载 — 共享给 app（缺失比对弹窗）与 renderer（构建期回退）。
+ * 默认配置纹理包（textures.mtz，MTZ 容器）的加载与解压。
  *
- * 幂等缓存；失败降级为 null（比对全部标"完全缺失"、回退不执行）。
- * 路径：dev = web/textures.mtz（serve root 下）；dist = 同目录 textures.mtz。
+ * 消费点一处：`apps/debug/src/app.ts` 的 `showMissingTextures` —— 把 WASM 报出的缺失材质名与
+ * 包内键比对，分成「可覆盖」与「缺失」两组展示。渲染侧的默认纹理回退不走本模块，那条路
+ * 由 `src/ts-shared/phys/world-builder.ts` 的 `buildWorldBundle` 自己读内嵌的 mtz base64。
+ *
+ * 装载路径两条：内嵌 base64（全局键 `__VBSP_TEXTURES_MTZ_B64__`）或按 `DEFAULT_TEXTURE_PACK_URL`
+ * fetch（dev 下由 `apps/debug/web/textures.mtz` 提供）。解压结果缓存进 `cachedPack`。
  */
 
 import { ensureMainWasm, decompress_mtz } from './main-wasm.js';
 import { base64ToBytes } from '../../../src/ts-shared/wasm/loader.js';
 
+/** 非内嵌路径下的取包地址（相对页面）。 */
 const DEFAULT_TEXTURE_PACK_URL = './textures.mtz';
 
-/** 默认纹理包解压结果缓存（{ 键: 字节码 }，键 = materials/xxx 小写）。 */
+/** 解压结果缓存：键为 `materials/<小写名>`，值为 mosaic 字节码；未加载或加载失败时为 null。 */
 let cachedPack: Record<string, string> | null = null;
 
-/** 加载默认纹理包（幂等；失败返回 null）。
- * single 打包（file://）：内嵌 base64（__VBSP_TEXTURES_MTZ_B64__，build-dist.mjs 注入）；
- * multi/dev（HTTP）：fetch './textures.mtz'。 */
+/** 加载并解压默认纹理包：已有缓存直接返回，任一步失败返回 null（失败不写缓存，下次调用会重试）。 */
 export async function loadDefaultTexturePack(): Promise<Record<string, string> | null> {
 	if (cachedPack) return cachedPack;
 	try {

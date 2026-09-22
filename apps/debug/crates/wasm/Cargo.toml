@@ -1,11 +1,14 @@
 # websurf — 单一 WASM crate
 #
-# 模块结构：
-# - lib.rs / pakfile_models.rs: WASM 绑定主体（BSP 解析/GLB 导出/brush 导出 API）
-# - src/vbsp/: BSP 文件解析模块（含 Leaves 排序修复）
-# - src/bsp_to_gltf_core/: GLB 导出核心
-# - src/model_integrator/: 模型/静态道具集成
-# - src/texture_utils/: 纹理解码（VTF/DDS → PNG）
+# 模块结构：本 crate 的唯一源文件是 apps/debug/crates/wasm/src/lib.rs（wasm-bindgen 导出层：
+# BSP 解析 / GLB 导出 / brush 平面导出等 JS 入口）；下列模块都在共享 crate websurf-wasm-core
+# 内（仓库根 src/wasm-core/），本目录不含它们的副本：
+# - src/wasm-core/vbsp/: BSP 文件解析模块（Leaves 另存一份按 cluster 排序的副本）
+# - src/wasm-core/bsp_to_gltf_core/: GLB 导出核心
+# - src/wasm-core/model_integrator/: 模型/静态道具集成
+# - src/wasm-core/texture_utils/: 纹理解码（VTF → PNG）
+# - src/wasm-core/pakfile_models.rs: PAKFILE 条目索引与 VMT 解析
+# - src/wasm-core/phyfile.rs、src/wasm-core/vhv.rs、src/wasm-core/mosaic/: .phy 碰撞解析、prop 顶点光照、mosaic 与 MTZ 编解码
 
 [package]
 name = "websurf-wasm"
@@ -18,12 +21,12 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# 共享物理系统（仓库根 src/，websurf-phys）
+# 共享物理系统：仓库根 src/（crate websurf-phys），phys::PhysWorld 由 apps/debug/crates/wasm/src/lib.rs 原样再导出
 websurf-phys = { path = "../../../../src" }
-# 共享解析层（仓库根 src/wasm-core/，websurf-wasm-core）
+# 共享解析层：仓库根 src/wasm-core/（crate websurf-wasm-core），上列解析与导出模块均由它提供
 websurf-wasm-core = { path = "../../../../src/wasm-core" }
 
-# WASM 核心绑定
+# WASM 绑定与数据编解码（apps/debug/crates/wasm/src/lib.rs 全部使用）
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = ["console"] }
 js-sys = "0.3"
@@ -32,23 +35,23 @@ serde_json = "1.0"
 base64 = "0.22"
 md5 = "0.8"
 
-# JS ↔ Rust 结构化数据反序列化（用于接收内存模型/纹理字节）
+# JS ↔ Rust 结构化数据反序列化（BspProcessor::export_glb_with_models 的入参 models_js / textures_js）
 serde-wasm-bindgen = "0.6"
 
-# 模型解析（wasm-bindings + bsp-to-gltf-core + model-integrator 共用）
+# 模型解析（vmdl 由 apps/debug/crates/wasm/src/lib.rs 与共享层 model_integrator 使用；vtf / vmt-parser / tf-asset-loader 的消费点在共享层 bsp_to_gltf_core）
 vmdl = "0.2"
 vtf = "0.3"
 vmt-parser = "0.2"
 tf-asset-loader = { version = "0.1.7", features = ["zip"] }
 
-# GLB 导出（bsp-to-gltf-core）
+# GLB 导出与 glTF 类型（消费点在共享层 bsp_to_gltf_core 与 model_integrator；本 crate 经 ConvertOptions 与 export_bsp / export_bsp_with_models 取 GLB 字节）
 gltf = "1.4.1"
 gltf-json = { version = "1.4.1", features = ["KHR_texture_transform", "extras"] }
 cgmath = "0.18.0"
 bytemuck = { version = "1.17.1", features = ["derive"] }
 miette = "7.2.0"
 
-# BSP 解析（src/vbsp/ 模块依赖）
+# BSP 解析与容器读取（消费点在共享层 src/wasm-core/vbsp/ 与 src/wasm-core/phyfile.rs）
 arrayvec = "0.7.6"
 binrw = "0.14.0"
 bitflags = "2.6.0"
@@ -61,30 +64,30 @@ thiserror = "2.0.11"
 vdf-reader = "0.2.0"
 zip = { version = "0.6.3", package = "zip-lzma", features = ["lzma"], default-features = false }
 
-# 纹理解码（texture-utils）
+# 纹理解码（消费点在共享层 src/wasm-core/texture_utils/）
 byteorder = "1.5.0"
 texpresso = "2.0.2"
 parse-display = "0.9.0"
 
-# image 库：仅启用 png 编解码器（WASM 下减小体积）
+# image：default-features = false + 只开 png feature；仓内使用点只有 PNG 编解码（PngEncoder / ImageFormat::Png / load_from_memory 的入参都是 PNG 字节）
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-# WASM 下的 getrandom 需要 js feature（0.2 用于直接依赖，0.3 用于 ahash 间接依赖）
+# getrandom：本 crate 显式声明两条 —— 0.2 开 js feature，0.3（重命名为 getrandom_03）开 wasm_js feature；0.3 是 ahash 的依赖，0.2 另被 const-random-macro 依赖
 getrandom = { version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
-# path-dedot 在 wasm32 下需要 use_unix_paths_on_wasm feature 才能编译 unix 模块
-# （被 tf-asset-loader 间接拉入但未启用此 feature）
+# path-dedot：由 tf-asset-loader 间接拉入（其消费点在共享层 bsp_to_gltf_core），
+# 本 crate 再直接声明一份以打开 use_unix_paths_on_wasm feature。
 path-dedot = { version = "3", features = ["use_unix_paths_on_wasm"] }
 
-# ahash 在 WASM 下需要禁用 runtime-rng（无 /dev/urandom）
+# ahash：default-features = false + compile-time-rng；使用点是共享层 vbsp 与 bsp_to_gltf_core 的 ahash::RandomState
 [dependencies.ahash]
 version = "0.8"
 default-features = false
 features = ["compile-time-rng"]
 
-# 本机 NODE_OPTIONS 含 --use-system-ca 会污染 wasm-opt（node 脚本）；LTO+opt3 已足够，
-# 跳过二次优化可显著加快 build:wasm（与 game 一致，2026-08 实测）。
-# 代价：dist 内嵌 WASM 体积略增（wasm-opt 通常再省 5-15%）。
+# wasm-pack 的 release profile：由下面的 wasm-opt = false 关掉 wasm-opt 二次优化；
+# 优化档位由本工程 workspace 根的 [profile.release] 给（apps/debug/Cargo.toml：
+# opt-level = 3 + lto = true + codegen-units = 1），构建入口是 npm run build:wasm。
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

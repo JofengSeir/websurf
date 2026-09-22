@@ -45,12 +45,12 @@
       flex: 0 0 300px; width: 300px;
       background: #252526; border-right: 1px solid #3c3c3c;
       overflow-y: auto; overflow-x: hidden;
-      /* 隐藏滚动条（保留滚动能力，视觉整洁） */
+      /* 隐藏侧栏滚动条：滚动能力保留（scrollbar-width: none 与 ::-webkit-scrollbar） */
       scrollbar-width: none;
       -ms-overflow-style: none;
     }
     #sidebar::-webkit-scrollbar { display: none; }
-    /* 紧凑布局：减少面板间距，让内容在无滚动条下尽量完整可见 */
+    /* 紧凑布局：收紧 details / summary / .acc-body 的间距与 .ctrl-grid 的行列间隔 */
     #sidebar details { border-bottom: 1px solid #2a2a2a; }
     #sidebar summary { padding: 5px 8px; }
     #sidebar .acc-body { padding: 3px 8px 6px 8px; }
@@ -134,7 +134,8 @@
       padding: 2px 0;
     }
     .ctrl-checkbox-row label { color: #d4d4d4; cursor: pointer; }
-    /* 参数数值输入框（允许范围内任意输入，与滑块双向同步） */
+    /* 参数数值框：与滑块双向同步——滑块 input 写回本框，本框 change 写回滑块（NaN 直接忽略；
+       见 `apps/debug/src/app.ts` 的 `bindSlider`） */
     .param-num {
       width: 56px;
       background: #1e1e1e; color: #4a90e2;
@@ -176,7 +177,7 @@
     }
     #hud .label { color: #888; }
     #hud .v { color: #4a90e2; }
-    /* 中心准星（风格化：CSS 变量驱动，面板可调） */
+    /* 中心准星：几何与配色全部由 --ch-* 变量驱动，变量由 `apps/debug/src/app.ts` 的 `applyCrosshair` 写入 */
     #crosshair {
       position: absolute; left: 50%; top: 50%;
       transform: translate(-50%, -50%);
@@ -196,7 +197,8 @@
     #crosshair .ch-line.outline {
       box-shadow: 0 0 0 1px rgba(0,0,0,0.85);
     }
-    /* 四条线均以容器中心为锚点 + translate 精确对称（容器 0×0，50% 即中心） */
+    /* 四条线都以容器中心为锚点：容器内只有绝对定位子元素（自身尺寸为 0）⇒ 50% 即中心，
+       再按 --ch-gap 做对称 translate */
     #crosshair .ch-t {
       width: var(--ch-thickness); height: var(--ch-size);
       transform: translate(-50%, calc(-100% - var(--ch-gap)));
@@ -229,7 +231,7 @@
       line-height: 1.5;
     }
 
-    /* 缺失材质纹理确认弹窗（与页面 VSCode 暗色风格一致） */
+    /* 缺失材质纹理确认弹窗：配色沿用本页暗色（#252526 底 / #3c3c3c 边框，与 #topbar、#sidebar 同值） */
     .mt-modal {
       position: fixed; inset: 0; z-index: 100;
       background: rgba(0, 0, 0, 0.5);
@@ -328,8 +330,8 @@
               <input type="range" id="cullDistance" min="1000" max="50000" step="1" value="12800" />
               <div class="val"><input type="number" id="cullDistanceNum" class="param-num" min="1000" max="100000" step="any" value="12800" /></div>
 
-              <!-- PVS 剔除开关已移除：2026-09-11 照搬 game 的剔除实现（仅距离判据，无 PVS）。
-                   实测 surf_666 的 PVS 可见集仅 153/8269 cluster、会隐藏 1968/2221 块 → 面成片消失。 -->
+              <!-- 本区不提供 PVS 开关：debug 侧剔除判据只有距离（`apps/debug/src/renderer/lod-manager.ts` 的 `update`），
+                   LodStats.pvsHidden 每轮刷新写 0，故 #cullStats 的「PVS」列不反映隐藏数。 -->
 
               <div class="ctrl-full acc-divider"></div>
               <div class="ctrl-full acc-section-title">纹理</div>
@@ -348,6 +350,7 @@
                 <label class="ctrl-radio"><input type="radio" name="lightingMode" value="baked" checked /><span>预烘焙</span></label>
                 <label class="ctrl-radio"><input type="radio" name="lightingMode" value="texture" /><span>纯纹理</span></label>
               </div>
+              <!-- 说明段：静态文本（该 id 无读取点）；实际切换由单选触发 `apps/debug/src/app.ts` 的监听，再落到 `apps/debug/src/renderer/renderer-main.ts` 的 `setLightingMode`。 -->
               <p class="hint ctrl-full" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
 
               <label title="场景环境光强度（AmbientLight，即时生效）">环境光强度</label>
@@ -368,7 +371,12 @@
           </div>
         </details>
 
-        <!-- 物理路径记录：同时记录两条物理计算线的脚底中心点 -->
+        <!-- 路径记录：两条物理计算线各记一串「脚底中心点」（PhysWorld 状态的原点 x/y/z；camY = posY + eyeHeight 才是眼睛位置）。
+             采样严格按各自的计算节点、不做定时轮询：渲染物理线取主线程 predPhys（每 rAF 物理步一节点），
+             tick 物理线取 Worker 权威帧（只在权威版本号变化时落点，节点率 = 权威固定步长的倒数，步长由面板 tickRate 交给
+             `src/ts-shared/auth/auth-loop.ts` 的 `AuthLoop.setFixedDt`）。节点之间直连直线段、不插值；相邻节点距离 > JUMP_BREAK（100 HU）处不连线。
+             tick 节点时间戳取「该帧发布所依据的渲染采样时刻 τ」，未投影时回落到轮询时刻。折角着色两档：≤20° 保持琥珀、>20° 染红
+             （`apps/debug/src/renderer/path-recorder.ts` 的 `turnColor`）。导出均为原始节点，带 t 供外部按时间对齐。 -->
         <details open>
           <summary>路径记录</summary>
           <div class="acc-body">
@@ -381,6 +389,7 @@
                 <span style="font-size:10px;color:#7a8398;">tick 节点时间戳 = 该帧发布所依据的<b>渲染时钟采样时刻 τ</b>（不是轮询时刻）；权威发布位置即渲染轨迹上的一个采样点 → 偏差梳与垂距都应 ≈0。</span><br />
               </div>
 
+              <!-- 构建标签：静态文本、无代码读写；本页不校验构建版本，与产物不符时页面不会提示。 -->
               <div class="ctrl-full" id="pathBuildTag" style="font-size:10px;color:#7a8398;margin-top:2px;">
                 实现版本 v4 · 节点直连段 + tick 时间戳=渲染时钟 τ + 垂距/偏差梳分列（若这里不是 v4，说明浏览器跑的是旧构建 → Ctrl+Shift+R 强刷）
               </div>
@@ -635,7 +644,7 @@
           </div>
         </details>
 
-        <!-- 权威健康（Worker 健康探测消息，最近 30 条） -->
+        <!-- 权威健康：Worker 侧 health-log 消息（`apps/debug/src/app.ts` 的 `handleWorkerMessage`），只保留最近 30 条 -->
         <details>
           <summary>权威健康</summary>
           <div class="acc-body">
@@ -681,8 +690,8 @@
     </div>
   </div>
 
-  <!-- 模块脚本 -->
-  <!-- app.js 由 esbuild 从 src/app.ts 打包生成（npm run build:app） -->
+  <!-- 脚本：COOP/COEP 由 coi-serviceworker.js 补响应头（classic script），应用入口是打包后的 app.js（module） -->
+  <!-- app.js 由 esbuild 从 src/app.ts 打包生成（`apps/debug/package.json` 的 `build:app`），不是本目录中的手写文件 -->
   <script src="./coi-serviceworker.js"></script>
     <script type="module" src="./app.js"></script>
 </body>

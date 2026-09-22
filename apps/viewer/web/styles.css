@@ -1,5 +1,8 @@
-/* WebSurf-viewer — 入口页样式（HUD / 引导层 / 侧栏面板 / 时间轴 / 帮助浮层）
- * S10：圆角/边框/悬停统一走变量；层级收敛：HUD 三行角色、面板分段折叠、两行轨道卡。 */
+/* WebSurf-viewer — 入口页样式（单文件）。
+ * 设计令牌定义在 body 上：--panel / --panel-solid / --border / --border-strong / --text /
+ * --muted / --accent / --accent-dim / --gold / --danger / --r-sm..lg / --sidebar-w(348px) /
+ * --ctrl-bg(-hover) / --mono；窄屏（max-width: 1000px）把 --sidebar-w 收到 320px。
+ * 以下按角色分节。 */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
@@ -34,7 +37,7 @@ kbd {
 }
 code { font-family: var(--mono); color: var(--accent); }
 
-/* ── HUD（左上，只读状态，不挡点击）─────────────────────────────── */
+/* ── HUD #hud（左上 14px）：三行只读状态（#pose / #bspStatus / #replayStatus），容器 pointer-events: none 不挡点击；后两行内容为空时由 :empty 隐藏 ── */
 #hud {
   position: absolute; top: 14px; left: 14px; z-index: 5;
   padding: 8px 12px; border-radius: var(--r-md);
@@ -48,7 +51,7 @@ code { font-family: var(--mono); color: var(--accent); }
 #bspStatus:empty, #replayStatus:empty { display: none; }
 #replayStatus { color: var(--muted); }
 
-/* ── 右上角工具条（瘦身：帮助 + 面板）──────────────────────────── */
+/* ── 右上角工具条 #topbar：帮助与面板两个 .iconbtn（首个加粗）；#bspFile 隐藏在此 ── */
 #topbar {
   position: absolute; top: 14px; right: 14px; z-index: 6;
   display: flex; align-items: center; gap: 6px;
@@ -67,7 +70,7 @@ code { font-family: var(--mono); color: var(--accent); }
 #topbar .iconbtn { padding: 4px 10px; font-size: 12px; }
 #topbar .iconbtn:first-child { font-weight: 700; }
 
-/* ── 帮助浮层（非模态，Esc 关闭）────────────────────────────────── */
+/* ── 帮助浮层 #help（非模态）：宽 400px、超高滚动；点击 #helpClose 或按 Esc 关闭，均由 apps/viewer/src/ui/hud.ts 处理 ── */
 #help {
   position: absolute; top: 50px; right: 14px; z-index: 7;
   width: 400px; max-width: calc(100vw - 28px); max-height: calc(100% - 66px);
@@ -92,7 +95,7 @@ code { font-family: var(--mono); color: var(--accent); }
 #help .help-h { font-weight: 600; color: var(--accent); margin-bottom: 2px; }
 #help p { color: var(--muted); }
 
-/* ── 侧栏面板（右）──────────────────────────────────────────────── */
+/* ── 侧栏面板 #sidebar（右侧，宽 --sidebar-w）：#tabs 两个标签按钮 + .tabpane（带 active 的那个显示）── */
 #sidebar {
   position: absolute; top: 62px; right: 14px; bottom: 14px; z-index: 6;
   width: var(--sidebar-w); display: flex; flex-direction: column;
@@ -116,14 +119,14 @@ code { font-family: var(--mono); color: var(--accent); }
 .tabpane::-webkit-scrollbar { width: 8px; }
 .tabpane::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
 
-/* ── 地图页顶部「更换地图」─────────────────────────────────────── */
+/* ── .map-reload：地图页顶部的「更换地图」行（label.filebtn，点击转发到 #bspFile；构造点见 apps/viewer/src/ui/mapinfo.ts）── */
 .map-reload {
   display: block; text-align: center; margin-bottom: 10px;
   background: var(--accent-dim); border-color: rgba(138, 180, 248, 0.35); color: var(--accent);
 }
 .map-reload:hover { background: rgba(138, 180, 248, 0.2); }
 
-/* ── 面板通用元件 ───────────────────────────────────────────────── */
+/* ── 面板通用元件：.sec 分段（.sec-title/.sec-body）、.field 行（label/input/check/num）、.note-info/warn/error 提示条、.mono 等宽块、.kv 键值行 ── */
 .sec { margin-bottom: 12px; }
 .sec-title {
   font-size: 12px; font-weight: 600; color: var(--accent);
@@ -157,7 +160,7 @@ code { font-family: var(--mono); color: var(--accent); }
 .kv .k { color: var(--muted); flex: 0 0 auto; }
 .kv .v { color: var(--text); text-align: right; word-break: break-all; }
 
-/* ── 可折叠分组（录像页折叠 / 地图统计明细）────────────────────── */
+/* ── 可折叠分组 .fold：details/summary 结构（apps/viewer/src/core/dom.ts 构造 fold-title/fold-name/fold-body），[open] 时箭头由 ▸ 变 ▾ ── */
 .fold {
   border: 1px solid var(--border); border-radius: var(--r-md);
   margin-bottom: 12px; background: rgba(255, 255, 255, 0.02);
@@ -178,7 +181,7 @@ code { font-family: var(--mono); color: var(--accent); }
 .fold-name { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .fold-body { padding: 2px 10px 8px; }
 
-/* 轨迹列表（多轨迹对比）：两行轨道卡 */
+/* 轨迹列表 .track-list / .track-row：每条轨道一张卡，卡内两行 .track-line（构造点见 apps/viewer/src/replay/trackpanel.ts） */
 .track-list { display: flex; flex-direction: column; gap: 5px; }
 .track-row {
   display: flex; flex-direction: column; gap: 3px;
@@ -214,7 +217,7 @@ code { font-family: var(--mono); color: var(--accent); }
 .track-btn.active { color: var(--gold); border-color: rgba(201, 160, 92, 0.55); background: rgba(201, 160, 92, 0.14); }
 .track-btn.danger:hover { color: var(--danger); border-color: rgba(255, 99, 71, 0.5); background: rgba(255, 99, 71, 0.12); }
 
-/* 出生点列表（单行 pill） */
+/* 出生点列表 .spawn-list / .spawn-item（单行：类名 .cls + 跳转按钮；推荐项加 .primary，构造点见 apps/viewer/src/ui/mapinfo.ts） */
 .spawn-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
 .spawn-item {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -231,7 +234,7 @@ code { font-family: var(--mono); color: var(--accent); }
 }
 .spawn-item button:hover { background: rgba(255, 255, 255, 0.16); }
 
-/* ── 底部 dock：录像信息条 + 时间轴控制条（三区布局的「元信息 + 控制」区）── */
+/* ── 底部 dock #dock：录像信息条 + 时间轴。右边界是 calc(--sidebar-w + 26px)，面板收起时加 .full 回到 14px；容器 pointer-events: none、直属子元素 auto ── */
 #dock {
   position: absolute; left: 14px; right: calc(var(--sidebar-w) + 26px); bottom: 14px; z-index: 6;
   display: flex; flex-direction: column; gap: 6px; pointer-events: none;
@@ -239,7 +242,7 @@ code { font-family: var(--mono); color: var(--accent); }
 #dock.full { right: 14px; }
 #dock > * { pointer-events: auto; }
 
-/* 录像信息条：.replay 头部元信息（消费 Clip.meta，静态字段，随跟随轨道切换） */
+/* 录像信息条 #replayMeta.replay-meta：.replay 头部元信息（apps/viewer/src/ui/replaymeta.ts 按 .meta-name / .mi / .mk / .mv 组装，成绩一项加 .headline） */
 .replay-meta {
   display: flex; align-items: center; flex-wrap: wrap; gap: 4px 18px;
   padding: 7px 12px; border-radius: var(--r-md);
@@ -256,7 +259,7 @@ code { font-family: var(--mono); color: var(--accent); }
 .mv { font-family: var(--mono); font-size: 11.5px; color: var(--text); }
 .mi.headline .mv { color: var(--gold); font-size: 14px; font-weight: 600; }
 
-/* 时间轴控制条（timeline.ts 构建：进度 / 主控制 / 显示开关三行） */
+/* 时间轴 #timeline：三行（.tl-slider-row 进度 / .tl-controls 主控制 / .tl-opts 显示开关），内容由 apps/viewer/src/replay/timeline.ts 构建；两列 grid 声明见下方按键簇一节 ── */
 #timeline {
   display: flex; flex-direction: column; gap: 6px;
   padding: 8px 12px; border-radius: var(--r-md);
@@ -286,10 +289,9 @@ code { font-family: var(--mono); color: var(--accent); }
 .tl-speed-select { flex: 0 0 auto; }
 .tl-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-/* ── 回放遥测 HUD：速度（game 同款：单行裸数字，距底 24%）──
- * 对照 game/web/index.html #hud/#stats：无卡片底、text-shadow、tabular-nums。
- * 水平锚点 = **可视区域**中心：右面板开启时扣除面板宽度（与 #dock 同参），
- * 面板收起（.full）后回全屏居中——用户定调：以可观看区域为中心。 */
+/* ── 回放遥测 HUD .telemetry：单行裸数字（无卡片底 + text-shadow + tabular-nums），距底 24%；
+ * 水平锚点按「可视区域」居中——左边界扣除 --sidebar-w + 26px（与 #dock 的右边界同参），
+ * 面板收起（.full）后改 left: 50% 全屏居中。 */
 .telemetry {
   position: absolute; bottom: 24%;
   left: calc((100% - (var(--sidebar-w) + 26px)) / 2);
@@ -303,8 +305,9 @@ code { font-family: var(--mono); color: var(--accent); }
 .telemetry .vsep { color: rgba(255, 255, 255, 0.35); margin: 0 8px; font-weight: 400; }
 .telemetry .tm-vert { color: var(--muted); }
 
-/* ── 按键簇：#timeline 右列（grid 布局，随时间轴显隐）
-   Q/W/E 上排（Q、E 占上排左右位）· A/S/D 中排 · 下排 = 蹲（1 格）+ 跳（2 格）── */
+/* ── 按键簇 .tm-keys：#timeline 的第 2 列（grid 跨 3 行，见下方 #timeline 两列声明）；
+   上排 Q/W/E · 中排 A/S/D · 下排 蹲（1 格）+ 跳（2 格）；高亮加 .on，
+   构造点见 apps/viewer/src/ui/telemetry.ts ── */
 #timeline { display: grid; grid-template-columns: 1fr auto; column-gap: 14px; }
 .tl-slider-row, .tl-controls, .tl-opts { grid-column: 1; }
 .tm-keys {
@@ -342,7 +345,7 @@ select.tl-select option { background: #16181d; }
 .tl-range { font-size: 11.5px; color: var(--muted); font-family: var(--mono); min-width: 150px; }
 .tl-range.active { color: var(--gold); }
 
-/* ── 引导层 / 拖拽 / 兜底 ────────────────────────────────────────── */
+/* ── 引导层 #guide（首访卡片 + #guideBtn + #guideError.show）· 拖拽高亮 #dropzone.active · 致命错误面板 #fatal.show（由 apps/viewer/src/ui/hud.ts 切换）── */
 #guide {
   position: absolute; inset: 0; z-index: 8;
   display: flex; align-items: center; justify-content: center;

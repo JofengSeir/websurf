@@ -1,10 +1,11 @@
-# websurf-wasm-core — 共享 WASM 解析/导出核心（debug/ 与 game/ 共用）
+# websurf-wasm-core — 共享 WASM 解析/导出核心（apps/debug、apps/game、apps/viewer 三工程共用）
 #
-# 模块来源：debug/ 与 game/ 的 crates/wasm（解析层已统一合并到此，
-# 两端 lib.rs 仅保留 wasm-bindgen 导出层与各自特色函数）。
+# 解析层模块全部在本 crate 内（pub mod 清单见 src/wasm-core/lib.rs）；三个工程各自的 wasm-bindgen
+# 导出层在 apps/debug/crates/wasm/src/lib.rs、apps/game/crates/wasm/src/lib.rs 与
+# apps/viewer/crates/wasm/src/lib.rs，另含各工程特有的提取与装配逻辑。
 #
-# 归属仓库根 Cargo workspace（与 websurf-phys、四个模块 wasm crate 同 workspace，
-# 共享根 Cargo.lock；target/ 位于各工程本地；曾为独立 workspace root，2026-09-06 合并）。
+# 归属仓库根 Cargo workspace：与 websurf-phys 同为仓库根 Cargo.toml 的 [workspace] members，
+# 共用仓库根 Cargo.lock 与仓库根 target/；三个工程的 wasm crate 各有自己的 workspace、Cargo.lock 与 target/。
 
 [package]
 name = "websurf-wasm-core"
@@ -21,20 +22,20 @@ path = "lib.rs"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# 模型解析（model-integrator / pakfile-models 共用）
+# 模型解析（vmdl 由 model_integrator 使用；vtf / vmt-parser / tf-asset-loader 由 bsp_to_gltf_core 使用）
 vmdl = "0.2"
 vtf = "0.3"
 vmt-parser = "0.2"
 tf-asset-loader = { version = "0.1.7", features = ["zip"] }
 
-# GLB 导出（bsp-to-gltf-core）
+# GLB 导出与 glTF 类型（bsp_to_gltf_core 与 model_integrator 使用；cgmath 另被 vbsp 使用）
 gltf = "1.4.1"
 gltf-json = { version = "1.4.1", features = ["KHR_texture_transform", "extras"] }
 cgmath = "0.18.0"
 bytemuck = { version = "1.17.1", features = ["derive"] }
 miette = "7.2.0"
 
-# BSP 解析（vbsp/ 模块依赖）
+# BSP 解析与容器读取（src/wasm-core/vbsp/ 与 phyfile.rs 使用）
 arrayvec = "0.7.6"
 binrw = "0.14.0"
 bitflags = "2.6.0"
@@ -47,23 +48,23 @@ thiserror = "2.0.11"
 vdf-reader = "0.2.0"
 zip = { version = "0.6.3", package = "zip-lzma", features = ["lzma"], default-features = false }
 
-# 纹理解码（texture-utils）
+# 纹理解码（src/wasm-core/texture_utils/ 使用）
 byteorder = "1.5.0"
 texpresso = "2.0.2"
 parse-display = "0.9.0"
 
-# image 库：仅启用 png 编解码器（WASM 下减小体积）
+# image：default-features = false + 只开 png feature；仓内使用点只有 PNG 编解码（PngEncoder / ImageFormat::Png / load_from_memory 的入参都是 PNG 字节）
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-# WASM 下的 getrandom 需要 js feature（0.2 用于直接依赖，0.3 用于 ahash 间接依赖）
+# getrandom：本 crate 显式声明两条 —— 0.2 开 js feature，0.3（重命名为 getrandom_03）开 wasm_js feature；0.3 是 ahash 的依赖，0.2 另被 const-random-macro 依赖
 getrandom = { version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
-# path-dedot 在 wasm32 下需要 use_unix_paths_on_wasm feature 才能编译 unix 模块
-# （被 tf-asset-loader 间接拉入但未启用此 feature）
+# path-dedot：由 tf-asset-loader 间接拉入（其消费点在 bsp_to_gltf_core），
+# 本 crate 再直接声明一份以打开 use_unix_paths_on_wasm feature。
 path-dedot = { version = "3", features = ["use_unix_paths_on_wasm"] }
 
-# ahash 在 WASM 下需要禁用 runtime-rng（无 /dev/urandom）
+# ahash：default-features = false + compile-time-rng；使用点在本 crate 的 vbsp 与 bsp_to_gltf_core（ahash::RandomState）
 [dependencies.ahash]
 version = "0.8"
 default-features = false

@@ -1,4 +1,31 @@
-//! 转换模块
+//! BSP → GLB 的装配与导出入口（`bsp_to_gltf_core` 的对外主路径）。
+//!
+//! 两个公开入口：
+//! - [`export_bsp`]：只用 BSP 自带资源导出；
+//! - [`export_bsp_with_models`]：同上，并在传入 `ModelIntegrator` 时把模型合并进同一个 GLB。
+//!
+//! 两者都收 `Arc<Bsp>`：调用侧（三工程 `crates/wasm/src/lib.rs`）交出的是 `Arc` 克隆，故
+//! **成功与失败都不消费实例**，同一个处理器可重复导出。
+//!
+//! 装配顺序（以 [`export_bsp_with_models`] 为准）：建根节点 → 光照图集
+//! （[`build_lightmap_export`]）→ 模型合并（`model_integrator` 的
+//! `ModelIntegrator::add_models_to_gltf`）→ 序列化成 JSON 字符串 → 光照注入
+//! （`ModelIntegrator::add_lighting_to_gltf_json`，失败用 `?` 传播）→ lightmap 契约注入
+//! （[`apply_lightmap_json`]）→ 按**最终** JSON 长度写 GLB 头。契约注入必须在序列化之后，
+//! 否则最终字节里不含这些字段。
+//!
+//! 关键不变量：
+//! - `BspVertexData` 是 `#[repr(C)]` 的逐顶点布局，[`push_bsp_face_bsp`] 按它写 buffer；
+//! - TEXCOORD_1（lightmap UV）走**独立** buffer view + accessor，不改变既有 stride；
+//! - 无光照或无图集时仍写中性常量 UV，保证同一块几何的属性集一致（下游合并要求属性集相同）。
+//!
+//! 边界：只做装配与导出。不解析 BSP 细节（`vbsp`）、不构建 GLTF 材质（`gltf_builder`）、
+//! 不算图集（`lightmap`）、不加载模型（`model_integrator`）。
+//!
+//! 死代码说明：[`merge_model_into_root`] / [`create_new_gltf_structure`] /
+//! [`merge_gltf_structures_improved`] 三函数在本仓**无调用点**（各带 `#[allow(dead_code)]`）。
+//!
+//! 测试归属：本文件无 `#[test]`。
 
 use gltf_json as json;
 use crate::bsp_to_gltf_core::gltf_builder::push_or_get_material_bsp;
@@ -15,7 +42,7 @@ use crate::vbsp::{Bsp, Entity};
 use crate::model_integrator::ModelIntegrator;
 use crate::bsp_to_gltf_core::lightmap::{self, LightmapAtlas};
 
-/// 阶段 2 的 lightmap 导出上下文：图集 + 其在 GLB `textures` 中的索引。
+/// lightmap 导出上下文：图集 + 它在 GLB `textures` 里的索引。
 struct LightmapExport {
     atlas: LightmapAtlas,
     texture_index: u32,
@@ -41,7 +68,8 @@ fn build_lightmap_export(
     }))
 }
 
-/// 写入阶段 2 的导出契约（`asset.extras.lightmap` / `materials[*].extensions.__vbsp_lightmap__`）。
+/// 把 lightmap 契约写进 GLB JSON（`asset.extras.lightmap` 与
+/// `materials[*].extensions.__vbsp_lightmap__`），返回改写后的 JSON 字符串。
 fn apply_lightmap_json(
     json_string: String,
     lightmap: Option<&LightmapExport>,
@@ -54,11 +82,11 @@ fn apply_lightmap_json(
     }
 }
 
-/// 从 BSP 文件导出为 GLTF 格式（仅使用 BSP 文件内的资源）
+/// 从 BSP 文件导出为 GLTF 格式（仅使用 BSP 文件内的资源）。
 ///
-/// `bsp` 收 `Arc<Bsp>`：导出链路**只在全部可失败阶段之后**才真正持有数据的所有权
-/// （`crates/wasm/src/lib.rs` 的调用侧据此实现「失败不消费 BSP」，见
-/// `documents/game/implementation/console-fix-contract.md` §3.1 ④）。
+/// `bsp` 收 `Arc<Bsp>`：调用侧交出的是一次 `Arc` 克隆而不是实例本身，故本函数**不消费**它，
+/// 失败路径也不会让调用方失去 BSP（三工程 `crates/wasm/src/lib.rs` 的导出入口据此保证
+/// 「成功与失败均可重复导出」）。
 pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<ExportResult, Error> {
     let bsp: &Bsp = &bsp;
     let mut buffer = Vec::new();
@@ -67,8 +95,9 @@ pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<E
 
     let mut root = Root::default();
 
-    // 阶段 2：光照图集（无光照 lump 时为 None）。放在建模之前，使两条返回路径都带上它。
-    // `options.lightmap_max_atlas_area` 只作 fail-visible 负控的阈值覆盖（0 = 政策上界）。
+    // 光照图集（无光照 lump 时为 None）。放在建模之前，使两条返回路径都带上它。
+    // `options.lightmap_max_atlas_area` 只覆盖单页面积上界（0 = 用默认上界），
+    // 见 `lightmap::effective_max_atlas_area`。
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
     // 只处理地图结构，不处理模型
@@ -119,7 +148,8 @@ pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<E
     });
 
     let json_string = json::serialize::to_string(&root).expect("Serialization error");
-    // 阶段 2：BSP-only 路径同样写入 lightmap 导出契约；必须在由 json_string.len() 推 header 长度之前
+    // BSP-only 路径同样写入 lightmap 契约；必须在用 json_string.len() 推 header 长度之前
+    // （否则 GLB 头里的 JSON 长度与实际字节数不符）
     let json_string = apply_lightmap_json(json_string, lightmap.as_ref())?;
     let mut json_offset = json_string.len() as u32;
     align_to_multiple_of_four(&mut json_offset);
@@ -154,7 +184,7 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
 
     let mut root = Root::default();
 
-    // 阶段 2：光照图集（无光照 lump 时为 None）。
+    // 光照图集（无光照 lump 时为 None）。
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
     // 1. 处理BSP结构
@@ -220,14 +250,13 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
     // 4. 生成 GLB 文件
     let mut json_string = json::serialize::to_string(&root).expect("Serialization error");
 
-    // 阶段 0：光照注入失败必须**可见**。
-    // 原实现 `if let Ok(modified_json) = ...` 会把 Err 静默吞掉，产出「语法合法但无光照」的
-    // GLB，现象是「场景变暗/退回假光照」，极难与「数据没到」区分。改为 `?` 传播。
+    // 光照注入失败必须**可见**：这里用 `?` 直接传播，不用 `if let Ok(...)` 把 Err 吞掉——
+    // 吞掉会产出「语法合法但没有光照」的 GLB，与「光照数据没到」难以区分。
     if let Some(integrator) = model_integrator {
         json_string = integrator.add_lighting_to_gltf_json(&json_string)?;
     }
 
-    // 阶段 2：写入 lightmap 导出契约（放在光照注入之后，保证最终字节含我们的字段）
+    // 写入 lightmap 契约（放在光照注入之后，保证最终字节里含这些字段）
     json_string = apply_lightmap_json(json_string, lightmap.as_ref())?;
     
     let mut json_offset = json_string.len() as u32;
@@ -305,7 +334,7 @@ fn build_export_result(
 
     // 生成 GLB 文件
     let json_string = json::serialize::to_string(&new_root).expect("Serialization error");
-    // 阶段 2：BSP-only 路径同样写入 lightmap 导出契约
+    // BSP-only 路径同样写入 lightmap 契约
     let json_string = apply_lightmap_json(json_string, lightmap)?;
     let mut json_offset = json_string.len() as u32;
     align_to_multiple_of_four(&mut json_offset);
@@ -332,14 +361,11 @@ fn build_export_result(
     })
 }
 
-/// 将模型数据合并到根结构中。
+/// 把模型数据**原地**并进 `root`：`root` 与 `buffer` 是 BSP 侧已建好的产物，
+/// `model_root` 与 `model_buffer` 作为输入被读走，返回 `()`。
 ///
-/// # 保留原因
-///
-/// 早期实现的合并策略之一，当前生产路径使用 [`merge_gltf_structures`]，但保留作：
-///   - 算法参考（原地修改 vs 构建新根）
-///   - 性能基准对比（buffer 复用 vs 拷贝）
-///   - 调试时切换合并实现的备选项
+/// **死代码**：本仓无调用点，仅靠 `#[allow(dead_code)]` 保留。线上合并路径不是本文件这三个
+/// 合并函数，而是 `model_integrator` 的 `ModelIntegrator::add_models_to_gltf`。
 #[allow(dead_code)]
 fn merge_model_into_root(
     root: &mut Root,
@@ -459,14 +485,10 @@ fn merge_model_into_root(
     root.nodes.extend(model_nodes);
 }
 
-/// 创建新的 GLTF 结构，提取所有实体并重新组织。
+/// 构建一个**全新**的根结构：BSP 侧与模型侧都作为输入，索引重映射后合并，返回
+/// `(Root, Vec<u8>)`。与 [`merge_model_into_root`] 的「原地修改」口径相反。
 ///
-/// # 保留原因
-///
-/// 与 [`merge_model_into_root`] 类似的另一合并策略实现：构建全新根结构而非原地修改。保留作：
-///   - 算法对比基准测试
-///   - 合并出问题时的回退方案
-///   - 教学参考（不同的索引重映射方式）
+/// **死代码**：本仓无调用点，仅靠 `#[allow(dead_code)]` 保留。
 #[allow(dead_code)]
 fn create_new_gltf_structure(
     bsp_root: Root,
@@ -663,15 +685,10 @@ fn create_new_gltf_structure(
     Ok((new_root, combined_buffer))
 }
 
-/// 改进的 GLTF 结构合并函数。
+/// 与 [`create_new_gltf_structure`] **签名相同**（同样吃 BSP 侧与模型侧的 `Root` / `Vec<u8>`，
+/// 同样返回 `(Root, Vec<u8>)`），是「构建新根」口径的另一份实现。
 ///
-/// # 保留原因
-///
-/// 第二代合并实现，在 [`create_new_gltf_structure`] 基础上优化了
-/// 缓冲区合并顺序与索引调整。保留作：
-///   - 不同合并策略的 A/B 对比
-///   - 退化时回退到该实现
-///   - 测试新合并算法时的基线参考
+/// **死代码**：本仓无调用点，仅靠 `#[allow(dead_code)]` 保留。
 #[allow(dead_code)]
 fn merge_gltf_structures_improved(
     bsp_root: Root,
@@ -858,25 +875,36 @@ fn merge_gltf_structures_improved(
     Ok((new_root, combined_buffer))
 }
 
-/// 对齐到 4 的倍数
+/// 把 `n` 就地向上取到 4 的倍数（已经是 4 的倍数时不变）。
 fn align_to_multiple_of_four(n: &mut u32) {
     *n = (*n + 3) & !3;
 }
 
-/// 填充字节向量到 4 的倍数
+/// 往 `vec` 尾部补 0 直到长度为 4 的倍数（glTF 要求 buffer view 偏移按 4 字节对齐）。
+/// 调用方若要记录真实数据长度，必须在调用**之前**取（`lightmap::push_atlas_texture` 与
+/// `gltf_builder` 都按这个次序写 `byte_length`）。
 pub fn pad_byte_vector(vec: &mut Vec<u8>) {
     while vec.len() % 4 != 0 {
         vec.push(0);
     }
 }
 
-/// 映射坐标
+/// BSP 轴序 → GLB 轴序：`[x, y, z] → [y, z, x]`（Z-up → Y-up 的循环置换，行列式 +1）。
+///
+/// 模型顶点、碰撞体顶点、灯光位置都经它搬进 GLB 坐标系；调用方必须与
+/// `model_integrator` 的放置链用同一套映射，否则碰撞体与显示模型会错位。
 pub fn map_coords<C: Into<[f32; 3]>>(vec: C) -> [f32; 3] {
     let vec = vec.into();
     [vec[1], vec[2], vec[0]]
 }
 
-/// 获取 BSP 模型
+/// 收集要导出的模型及其世界偏移：brush 实体各一个，**世界模型排最后**（origin 取 `(0,0,0)`）。
+///
+/// 只认四种 brush 实体（`Entity::Brush` / `BrushIllusionary` / `BrushWall` / `BrushWallToggle`），
+/// 其余实体一律跳过；模型的 `handle` 取自 `brush.model` 去掉首字符后的下标（`*1` 这类写法），
+/// 下标解析失败或越界时**静默丢弃该实例**（不报错）。
+///
+/// 一个模型都没有（`bsp.models()` 为空）时报 `Error::Other("No world model")`。
 fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Model>, crate::vbsp::Vector)>, Error> {
     let world_model = bsp
         .models()
@@ -909,7 +937,12 @@ fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Mod
     Ok(models)
 }
 
-/// 从 BSP 文件推送模型到 GLTF
+/// 把一个模型推成一个 GLB 节点：逐 face 生成 primitive（**只取 `face.is_visible()` 的面**），
+/// 返回该节点。
+///
+/// `face_index` 用 `model.first_face + 该 face 在模型内的序号`（序号按 `enumerate` 计，含被跳过的
+/// 不可见面，故与全局 face 表的下标一致）；它写进 primitive 的 `extras.faceIndex`，供渲染端
+/// PVS 遮挡剔除把图元映射回 face。
 fn push_bsp_model_bsp(
     buffer: &mut Vec<u8>,
     gltf: &mut Root,
@@ -969,7 +1002,15 @@ fn push_bsp_model_bsp(
     }
 }
 
-/// 从 BSP 文件推送面到 GLTF
+/// 把一个面推成一个 glTF `Primitive`：顶点属性、索引、材质与 extras 都在这里落。
+///
+/// 顶点属性按 `BspVertexData` 写（`position` 经 [`map_coords`]），语义表里
+/// `TEXCOORD_0` 与 `TEXCOORD_1` 分别绑到 `accessor_start + 1` 与 `accessor_start + 2`。
+/// TEXCOORD_1 是 lightmap UV：命中图集区域时用 `lightmap::lightmap_uv` 逐顶点算，
+/// 否则写中性常量 `[0, 0]`——**没有 lightmap 也要写**，否则同一块几何里的属性集不一致，
+/// 下游合并会失败。
+///
+/// `extras` 固定写 `{"faceIndex": <面序号>, "hasLightmap": <是否命中图集区域>}`。
 fn push_bsp_face_bsp(
     buffer: &mut Vec<u8>,
     gltf: &mut Root,
@@ -991,8 +1032,9 @@ fn push_bsp_face_bsp(
 
     let texture = face.texture();
 
-    // 阶段 2：lightmap UV（TEXCOORD_1）。无光照/图集时写中性常量，保证同块属性集一致
-    // （副本 renderer-main.ts 的 mergeGeometries(geoms, true) 要求属性集相同）。
+    // lightmap UV（TEXCOORD_1）。无光照或无图集时写中性常量，保证同一块几何的属性集一致
+    // （`apps/debug/src/renderer/renderer-main.ts` 与 `apps/game/src/renderer/renderer-main.ts`
+    // 的 `mergeGeometries(geoms, true)` 要求参与合并的几何属性集相同）。
     let lightmap_region = lightmap.and_then(|export| {
         export
             .atlas
@@ -1068,7 +1110,7 @@ fn push_bsp_face_bsp(
     gltf.accessors.push(positions);
     gltf.accessors.push(uvs);
 
-    // 阶段 2：TEXCOORD_1 独立 buffer view + accessor（不改变 BspVertexData 的 stride，
+    // TEXCOORD_1 走独立 buffer view + accessor（不改变 BspVertexData 的 stride，
     // 避免给既有无光照路径增加每顶点 8 B 的几何开销）。
     let lightmap_buffer_start = buffer.len() as u64;
     buffer.extend_from_slice(bytemuck::cast_slice::<[f32; 2], u8>(&lightmap_uvs));
@@ -1144,7 +1186,10 @@ fn push_bsp_face_bsp(
     }
 }
 
-/// 计算边界框
+/// 逐顶点求三个轴各自的 min / max，返回 `(min, max)`。
+///
+/// 初值取 `f32::MAX` / `f32::MIN`，故**迭代器为空时返回 `(MAX, MIN)` 这个反向退化框**
+/// （调用点只在有顶点的面上调用，不会走到）。
 fn bounding_box(vertices: impl IntoIterator<Item = crate::vbsp::Vector>) -> ([f32; 3], [f32; 3]) {
     let mut min = crate::vbsp::Vector::from([f32::MAX, f32::MAX, f32::MAX]);
     let mut max = crate::vbsp::Vector::from([f32::MIN, f32::MIN, f32::MIN]);
@@ -1161,7 +1206,10 @@ fn bounding_box(vertices: impl IntoIterator<Item = crate::vbsp::Vector>) -> ([f3
     (min.into(), max.into())
 }
 
-/// BSP 顶点数据
+/// 逐顶点写入顶点 buffer 的布局：`position`（3 × f32）+ `uv`（2 × f32），stride 20 B。
+///
+/// `#[repr(C)]` + `bytemuck::Pod` 使它可以直接 `cast` 成字节切片；两个字段都是**私有**的，
+/// 因此结构体虽然 `pub`，外部只能通过本模块的推送函数间接使用。
 #[derive(Copy, Clone, Debug, Default, Zeroable, Pod)]
 #[repr(C)]
 pub struct BspVertexData {

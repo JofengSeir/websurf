@@ -1,23 +1,28 @@
 #!/usr/bin/env node
 /**
- * 跳跃顶高分布分析（读 `jump-apex-measure.mjs` 的原始采样 JSON）。
+ * 跳跃顶高分布分析。数据源：`apps/debug/scripts/jump-apex-measure.mjs` 写出的
+ * `apps/debug/.tmp/jump-apex/<label>.json`（逐帧采样：渲染线 `t/dt/y/vy/g` + 权威帧只读快照
+ * `ay/avg/avy/avx/avz/ava`，权威取不到时后五项为 `null`）。
  *
- * 输入：debug/.tmp/jump-apex/<label>.json —— 每帧
- *   { t, dt, x,y,z, vy, g(渲染物理线 onGround), ay/avg/avy/ava(权威帧只读快照) }
+ * 分段锚点是**发射冲量**，不是 onGround 沿：
+ *   · 发射帧 L = 满足 `vy[L] − vy[L−1] ≥ LAUNCH_DVY`（150）的帧（正常起跳该跳变 ≈ +302，重力单帧最多 −13）；
+ *   · 顶点 iApex = 从 L+1 起向前看 `y` 的**严格**最大值（仅 `>` 时更新，无容差）；
+ *   · 段末 iEnd 取三者中先满足的一个：`j > iApex 且 y ≤ y(L) + 0.5`（0.5 HU 容差）/ 扫到下一个发射帧 /
+ *     扫到采样末尾；段之间有重叠保护（`L ≤ lastAnchor` 的段丢弃，`lastAnchor` 随段末推进）；
+ *   · 顶高 = `y(iApex) − y(L)`，低于 `APEX_MIN_HU`（3 HU）的段不计入统计。
  *
- * ⚠️ 为什么**不用 onGround 沿**切段：自动连跳（autobhop）下渲染线的着地窗口只有
- * 1–3 帧（318Hz 采样、0.75s 滞空），onGround 沿会把一次跳跃切成「0 高 + 真跳」两段。
- * 故改用**发射冲量**定锚：
- *   发射帧 L = 满足 `vy[L] − vy[L−1] ≥ 150`（check_jump 的赋值冲量 ≈ +302）的帧；
- *   顶点 = 从 L 起 y 单调上升到反转的那一帧；
- *   顶高 = y(apex) − y(发射帧)，上升时长 = t(apex) − t(发射帧)；
- *   峰值垂直速度 = 段内 max(vy)；段末 = y 回到 ≤ y(发射帧)+0.5 或再次冲量。
- * 另记：
- *   · 段内「渲染线 onGround=true 且 y 高于发射高度 ≥6 HU」帧（渲染侧 smoke gun）；
- *   · 权威侧「权威 onGround=true 且权威 y 高于自身地面基线 ≥6 HU」帧（权威侧 smoke gun，
- *     即 bug 的**直接机制**：权威在空中报着地 → check_jump 硬门被打开）。
+ * 另有一套**帧级**统计（不依赖分段，全时段）：
+ *   · 渲染侧 smoke gun：`g === 1` 且 `y ≥ 地面基线 + GROUND_BIAS_HU`（6 HU）的帧；
+ *   · 权威侧 smoke gun：`avg === 1` 且 `ay ≠ null` 且 `ay ≥ 地面基线 + 6 HU` 的帧——权威在空中报着地
+ *     就是 `check_jump` 硬门被打开的直接机制。
+ *   地面基线取全部 `y` 的 2% 分位数；两侧异常样本各最多留 40 条，打印前 10 条。
  *
- * 用法：node scripts/jump-apex-report.mjs <label> [<label2> ...]
+ * 汇总口径：`med` = 顶高中位数，超限判据是 `apexH > 1.5 × med`；理论单跳顶高按代码写死的
+ * `302.05 ** 2 / 1600`（v²/(2g) 形式）打印。
+ *
+ * 用法：`node scripts/jump-apex-report.mjs <label> [<label2> ...]`；不给 label 时打印用法并 exit 2。
+ * 环境变量 `JUMP_REPORT_OUT=<路径>`：把同一份输出再写一份 UTF-8 文件（避免 shell 重定向产出
+ * UTF-16/二进制），写完 exit 0；未设置时只写 stdout。
  */
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -53,7 +58,7 @@ function analyze(label) {
   const dts = S.map((s) => s.dt).filter((d) => d > 0 && d < 200);
   const meanDt = mean(dts);
 
-  // 地面基线：取 y 的低分位（平地站立时 y 基本恒定）
+  // 地面基线：全部 y 的 2% 分位数（平地站立段 y 基本恒定，低分位即地面）
   const ys = S.map((s) => s.y).sort((a, b) => a - b);
   const groundY = q(ys, 0.02);
 
@@ -69,7 +74,7 @@ function analyze(label) {
   for (const imp of impulses) {
     const L = imp.i;
     const y0 = S[L].y;
-    // 前视：找 y 的局部最大（apex）；允许 ±1 HU 抖动
+    // 前视：iApex 是 y 的严格最大值（`>` 才更新）；容差只出现在下面的段末判据里
     let iApex = L, vyPeak = S[L].vy, iEnd = L;
     let renderAirborneGroundFrames = 0, authAirborneGroundFrames = 0;
     const renderAnom = [], authAnom = [];
@@ -94,8 +99,8 @@ function analyze(label) {
       if (nextImp && j >= nextImp.i) { iEnd = j; break; }
       iEnd = j;
     }
-    if (L <= lastAnchor) continue; // 段重叠保护
-    lastAnchor = iEnd;
+    if (L <= lastAnchor) continue; // 段重叠保护：本段起点落在上一段之内则丢弃
+    lastAnchor = iEnd;             // 段末推进：后续段的起点必须晚于它
     const apexH = S[iApex].y - y0;
     if (apexH < APEX_MIN_HU) continue;
     jumps.push({
@@ -109,6 +114,7 @@ function analyze(label) {
   }
 
   // 全局帧级 smoke-gun 统计（不依赖分段）
+  // 全局帧级 smoke-gun 统计（不依赖分段）；两侧异常样本列表各封顶 40 条
   const renderGroundedFrames = S.filter((s) => s.g === 1).length;
   let renderGroundAboveBaseline = 0, authGroundAboveBaseline = 0;
   const renderGroundAboveSamples = [], authGroundAboveSamples = [];
@@ -128,10 +134,12 @@ function analyze(label) {
   const med = q(sorted, 0.5);
   const oversized = jumps.filter((j) => j.apexH > 1.5 * med);
 
+  // 权威发布节奏：`ava` 递增的相邻帧间隔（`ava` = 权威侧的帧序号）
   const authDts = [];
   for (let i = 1; i < n; i++) {
     if (S[i].ava !== null && S[i - 1].ava !== null && S[i].ava > S[i - 1].ava) authDts.push(S[i].t - S[i - 1].t);
   }
+  // 权威 onGround 的跳变次数与为真的帧数（只看 `avg` 非 null 的帧）
   let authGFlips = 0, authGTrue = 0;
   let prevAG = null;
   for (const s of S) {
@@ -141,6 +149,7 @@ function analyze(label) {
     prevAG = s.avg;
   }
 
+  // 时长与帧率由 dt 均值推算：meanDt 只统计 0 < dt < 200 的帧，seconds = meanDt × n
   return {
     label, file, S, n, groundY,
     seconds: (meanDt * n) / 1000, renderHz: 1000 / meanDt,
@@ -154,6 +163,8 @@ function analyze(label) {
   };
 }
 
+/** 打印单个 label 的明细。`trace` 为真时追加逐帧轨迹（超限跳取前 3 个 + 一个中位跳作对照）；
+ *  两个调用点都传 `true`，故该分支当前总会执行。 */
 function printDetail(r, trace) {
   console.log(`\n${'='.repeat(80)}`);
   console.log(`── ${r.label} ──   (${r.file.split(/[\\/]/).pop()})`);
@@ -216,6 +227,7 @@ function printDetail(r, trace) {
   }
 }
 
+// 逐个 label 分析：缺文件 / 解析失败只打印错误并跳过该 label，其余 label 继续
 const results = labels.map((l) => {
   try {
     return analyze(l);
@@ -225,7 +237,7 @@ const results = labels.map((l) => {
   }
 }).filter(Boolean);
 
-// 可选：把输出同时写入 UTF-8 文件（避免 shell 重定向产生 UTF-16/二进制）
+// 可选：把输出**同时**写成 UTF-8 文件（stdout 照常打印；避免 shell 重定向产出 UTF-16/二进制），写完 exit 0
 const OUT = process.env.JUMP_REPORT_OUT;
 if (OUT) {
   const chunks = [];

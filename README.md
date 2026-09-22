@@ -1,71 +1,113 @@
 # WebSurf
 
-浏览器中的 Counter-Strike 滑翔（Surf）地图游玩器：Rust/WASM 解析 BSP 与执行 CS 移动物理，Three.js 渲染。
+浏览器里运行 Counter-Strike: Source 风格的 **surf（滑翔）** 地图：物理由 Rust 编译成 wasm，渲染用 Three.js，输入与录像回放走同一套确定性链路。
 
-纯前端应用——无后端、无账号、不上传数据，地图与录像由用户从本地选择（见 [SECURITY.md](SECURITY.md)）。
+本仓库的**受控工程**是三个应用与共享层：
 
-## 1. 仓库结构
+| 工程 | 端口 | 定位 | 入口锚点 |
+|---|---|---|---|
+| `apps/debug` | 8080 | 调试与实验宿主：面板可调参数、路径记录、权威健康、调试线框 | `apps/debug/package.json:15` 的 `dev` |
+| `apps/game` | 8090 | 面向玩家的游戏形态：Worker 权威物理 + 面板 + 存档点 | `apps/game/package.json:15` 的 `dev` |
+| `apps/viewer` | 8100 | 纯查看器：地图与 `.replay` 录像回放、遥测与轨道面板（不含物理） | `apps/viewer/package.json:18` 的 `dev` |
+| `src/` | — | 共享层：`websurf-phys`（物理）、`websurf-wasm-core`（BSP/GLB/模型解析）、`ts-shared/**`（TS 侧共享） | `src/Cargo.toml:2`、`src/wasm-core/Cargo.toml:10` |
 
-仓库由三部分组成：**apps/ 下的三个应用工程**（各含完整前端与打包链，互不引用）、**共享层** [`src/`](src/)、**验证工程** [`test/`](test/)（不参与 Pages 部署）。
+## 仓库结构
 
-| 目录 | 定位 | 职责 |
-|---|---|---|
-| [`src/`](src/) | 共享层 | `phys/` Rust CS 物理（websurf-phys）、`wasm-core/` BSP v19~v29 解析与 GLB / 模型 / 纹理导出（websurf-wasm-core）、`ts-shared/` 权威帧 / 校准 / 输入层 / 三模式计算本体、`materials/textures.mtz` 默认纹理包、`vendor/vmdl/` vendored 单副本、`serve.py` 共享 dev 服务器 |
-| [`apps/debug/`](apps/debug/) | 主工程（Debug Build） | 全功能调试页：计时挑战、5 组碰撞可视化开关（brush / trigger / phy / vis / chamfer）与距离滑块、13 项力学参数面板、自定义传送点、准星射线、缺失纹理弹窗，以及仅 debug 导出的调试 API（`parse_entities` / `list_pakfile` / `read_pakfile_*` / `export_colliders*` / `export_visleaf_pvs`） |
-| [`apps/game/`](apps/game/) | WebSurf-game（Game Build） | 最小化游戏：主线程唯一物理渲染线 + 单 Worker 权威帧、ESC 面板与录制改键、存点系统（X 存点 / C 读点，按住冻结松开恢复）、加载进度覆盖层、空间分块合并渲染 |
-| [`apps/viewer/`](apps/viewer/) | WebSurf-viewer | 无物理的 BSP 自由视角查看器（349ee26 新增）：BSP→GLB 场景 + 自由飞行相机；仅接受 Shavit 原生 `.replay`（JSON 与规则脚本通道已移除），保留坐标映射与人工变换微调，带回放遥测 HUD 与播放控制 API `window.viewer.replay`（含 `meta()`） |
-| [`test/dual-mode-harness/`](test/dual-mode-harness/) | 验证工程（不部署） | 三模式物理（coupled / decoupled / tick，运行时热切）+ OffscreenCanvas 帧信号渲染时序验证 |
+| 路径 | 内容 |
+|---|---|
+| `Cargo.toml` | 仓库根 Cargo workspace：**只收**共享层两个 crate（`Cargo.toml:22` 的 `members`） |
+| `src/phys/**` | 共享物理系统 `websurf-phys`：世界容器、玩家移动语义、传送触发、种子面 |
+| `src/wasm-core/**` | 共享解析/导出核心 `websurf-wasm-core`：BSP、GLB、pakfile、材质与 mosaic |
+| `src/ts-shared/**` | TS 侧共享：权威循环、tick 消费者、共享状态通道、物理参数与角度、世界类型 |
+| `src/scripts/**` | 共享脚本：wasm 过期检查、文档漂移体检、共享层同步体检、分发打包 |
+| `apps/<app>/crates/wasm/**` | 各工程的 wasm-bindgen 导出层（debug/game 为 `websurf-wasm`，viewer 为 `websurf_viewer_wasm`） |
+| `apps/<app>/src/**`、`apps/<app>/web/**` | 前端源码与静态页面/样式（`web/app.js`、`web/worker.js` 是构建产物） |
+| `apps/<app>/scripts/**` | 各工程的构建与验收脚本（含 `build-dist.mjs`） |
+| `test/maps/**`、`test/replay/**` | 本地夹具：BSP 地图与录像样例（**均被 gitignore**，不入库） |
+| `documents/**` | 本仓库文档（见「文档地图」） |
+| `.github/workflows/**` | 三条 CI：文档漂移体检、门禁、Pages 部署 |
 
-Pages 入口页为 `apps/debug/scripts/pages-index.html`，由 CI 组装为 `./debug/`、`./game/`、`./viewer/` 三入口发布。
+## 快速开始
 
-## 2. 快速开始
-
-前置要求：Rust + wasm-pack、Node.js ≥ 18（CI 使用 Node 22）、Python 3（dev 服务器）。四个工程目录各自独立执行：
+每个应用是独立的 npm 工程（仓库根**没有** `package.json`）。以 `apps/debug` 为例：
 
 ```bash
-cd apps/debug          # 或 apps/game、apps/viewer、test/dual-mode-harness
-npm install
-npm run build          # 编译 WASM（共享 crate 自动参与）+ 类型检查 + 打包
-npm run dev            # 开发服务器，应用页 http://localhost:8080/web/index.html
+cd apps/debug
+npm ci
+npm run build:wasm     # wasm-pack 构建 crates/wasm → pkg/，并把 wasm 复制到 web/（package.json:8）
+npm run build:ts       # typecheck + esbuild 打包 worker 与 app（package.json:12）
+npm run dev            # python ../../src/serve.py 8080 .（package.json:15）
 ```
 
-Windows 下可直接双击：`apps/debug/start-dev.cmd`（dev 服务器 8080）、`apps/debug/build-dist.cmd`、`apps/debug/play.cmd`（dist + 本地服务器 8081）、`apps/game/play.cmd`、`apps/viewer/play.cmd`（构建后起服务器并打开浏览器）、`test/dual-mode-harness/play.cmd`。
+`apps/game`、`apps/viewer` 同构（端口 8090 / 8100；`build:ts`、`build:dist` 见各自 `package.json`）。
 
-## 3. 构建拓扑与产物
+- **共享层**：`cargo test -p websurf-phys`（物理单测）、`cargo check -p websurf-wasm-core`。
+- **静态服务**：`src/serve.py` 只做一件事——按正确 MIME 提供本地文件。端口取 `argv[1]`（默认 8080，`src/serve.py:18`），服务根取 `argv[2]`（默认脚本自身所在目录，`src/serve.py:19`），启动时 `os.chdir` 到该根（`src/serve.py:20`），并给所有响应加 COOP/COEP（页面因此可拿到 `SharedArrayBuffer`）。
+- **`.cmd` 入口**：`apps/<app>/{start-dev,play,build-dist}.cmd` 是手工/双击入口；实测**没有任何 `package.json` script 或其它 `.cmd` 转发到它们**（`dev`、`build:dist`、`check:api` 是并行路径），唯一例外是 `apps/viewer/play.cmd` 转发到产物里的 `dist/play.cmd`。
 
-- **产物不入库**：`pkg/`、`dist/`、`web/app.js`、`web/worker.js`、`web/*.wasm` 均为构建产物，克隆后需 `npm run build` 再生。
-- **五个 Cargo workspace**：根 `Cargo.toml` 只收共享层两个 crate；四个模块 wasm crate 保留各自 workspace，工程内各自保留 `target/`，不跨 workspace 复用编译缓存，根 workspace 的 `target/` 位于仓库根。
-- **依赖锁步**：五份 `Cargo.lock`（四个模块工程 + 根）统一锁 wasm-bindgen `0.2.128`，与 CI 的 wasm-bindgen-cli 一致。
-- **打包双模式**：`build-dist.mjs [--multi]` —— `single`（默认）为单文件 IIFE，WASM / Worker / 默认纹理包全部 base64 内嵌，`file://` 双击可玩；`multi` 为多文件 ESM（WASM 与 MTZ 外置），用于 HTTP 部署。viewer 的 dist 为 single-only。
+## 构建链
 
-## 4. 地图与本地数据
+1. `npm run build:wasm`：`wasm-pack build --release --target web --out-dir ../../pkg`，随后把 `pkg/…_bg.wasm` 复制到 `web/…_bg.wasm`（同一脚本内，见 `apps/debug/package.json:8`）。两份产物用途不同：`pkg/` 供 Node 侧脚本与 esbuild 解析，`web/` 供页面 `fetch`。
+2. `npm run build:ts`：`tsc --noEmit` + esbuild 打两个入口（`apps/debug/package.json:10` 的 `build:worker`、`apps/debug/package.json:11` 的 `build:app`）：`apps/debug/src/worker/main.ts` → `web/worker.js`，`apps/debug/src/app.ts` → `web/app.js`。
+3. `npm run build:dist`：`scripts/build-dist.mjs` 生成 `dist/`。single 形态只留 `KEEP_SINGLE` 列出的文件（`apps/game/scripts/build-dist.mjs:60`），multi 形态额外保留 worker、外置 wasm/纹理包与 COI service worker（`apps/game/scripts/build-dist.mjs:62`）。
 
-BSP 地图体积大，不随仓库分发（`.gitignore` 忽略 `*.bsp`、`*.dem`、`*.replay`）：本地地图统一放入 **`test/maps/`**（仓库根 `maps/` 已废弃）；单个 `.bsp` 超过 GitHub 50 MB 推荐限制 / 100 MB 硬限后无法推送；各页面通过文件选择器读取本地文件，不上传、不落盘。地图版权归原作者。
+## 验证与门禁
 
-## 5. 文档
+**本地**（与 CI 同一批脚本）：
 
-[`documents/`](documents/) 共 24 篇，入口为 [documents/index.md](documents/index.md)，阅读层次为 **总架构 → 共享层 → 工程总览 → 细分实现 → 差异对照**：
+```bash
+cargo test -p websurf-phys                       # 共享物理单测
+cd apps/<app> && npm run typecheck               # 类型检查
+cd apps/<app> && npm run test:<门>               # 见下表
+node src/scripts/check-doc-drift.mjs             # 文档漂移体检
+```
 
-- **顶层 6 篇**：[architecture.md](documents/architecture.md) 总架构、[phys.md](documents/phys.md) 物理内核、[wasm-core.md](documents/wasm-core.md) 解析与导出、[ts-shared.md](documents/ts-shared.md) TS 共享层、[materials.md](documents/materials.md) 材质体系、[index.md](documents/index.md) 导航
-- **工程子树**：[`debug/`](documents/debug/) 6 篇、[`game/`](documents/game/) 5 篇、[`viewer/`](documents/viewer/) 7 篇（含 `.replay` 格式规格），各含 overview / sequences / implementation / differences
-- **验证工程**：[`test/dual-mode-harness/docs/`](test/dual-mode-harness/docs/) 5 篇未并入 `documents/`，另有 `archive/` 5 篇
-- **工程说明**（四个工程均有根 README）：[apps/debug/README.md](apps/debug/README.md)、[apps/game/README.md](apps/game/README.md)、[apps/viewer/README.md](apps/viewer/README.md)、[test/dual-mode-harness/README.md](test/dual-mode-harness/README.md)
-- **协作规范**：[AGENTS.md](AGENTS.md)（Agent 工作规范：文件归属、临时区、生成物与文档格式）
+| 工程 | `test:*` 门禁（锚点：`.github/workflows/ci-gates.yml`） |
+|---|---|
+| `apps/debug` | `test:optimize-scene`、`test:auth-clock`、`test:path-acceptance`、`test:jump-apex`、`test:surf-crouch` |
+| `apps/game` | `test:phys`、`test:seed-smoke`、`test:surf-crouch` |
+| `apps/viewer` | `test:replay`（纯 TS 自检，不依赖 wasm 产物） |
 
-文档铁律：内容以实际代码为准，每篇标注 `文件:行号`；与代码不一致时以代码为准并回改文档。历史分析文档已从文档树移出，不再随仓库分发。
+**CI**：
 
-## 6. CI 与部署
+- `.github/workflows/doc-drift.yml`：PR 与 main 上跑 `node src/scripts/check-doc-drift.mjs`（`.github/workflows/doc-drift.yml:47`）。它查四类问题：行数声明、`文件:行号` 锚点越界、路径失效、裸文件名歧义；**能力边界**是「只查越界，不查该行内容与文档描述是否相符」。
+- `.github/workflows/ci-gates.yml`：四个 job——共享层 Rust 单测、debug 门禁、game 门禁、viewer 门禁。
+- `.github/workflows/deploy-pages.yml`：matrix 并行构建三个工程的 `npm run build:dist -- --multi`（`.github/workflows/deploy-pages.yml:129`），把三份 `dist/` 装到 `deploy/<app>/`，并用入口页模板 `apps/debug/scripts/pages-index.html` 生成站点首页（`.github/workflows/deploy-pages.yml:176`）。
 
-[`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) 只负责**部署**：push 到 `main`（且改动落在 `apps/`、`src/`、`Cargo.*`）或手动触发时，`build-app` **矩阵 job 并行**构建 debug / game / viewer（wasm-pack → 类型检查 → esbuild 打包 → `npm run build:dist -- --multi`），再由 `deploy` job 组装 `deploy/{debug,game,viewer}` 与入口页并发布到 GitHub Pages。
+## 共享层与依赖方向
 
-[`.github/workflows/ci-gates.yml`](.github/workflows/ci-gates.yml) 负责**门禁**（push `main` / PR，文档改动除外）：`cargo test -p websurf-phys`、harness 的 `test:three-mode`、debug 的 `test:optimize-scene` / `test:auth-clock` / `test:path-acceptance` / `test:jump-apex`、game 的 `test:phys` / `test:seed-smoke` / `test:surf-crouch`、viewer 的 `test:replay`。两个 workflow **互不阻塞**——门禁失败不再挡住发布，部署也不再为门禁多编译一份 wasm（详见 `.github/workflows/` 两个文件的头注）。
+- `apps/debug` 与 `apps/game` 的 wasm 导出层**同时**依赖两个共享 crate：`apps/debug/crates/wasm/Cargo.toml:22`（`websurf-phys`）与 `:24`（`websurf-wasm-core`）。
+- `apps/viewer` 的 wasm 导出层**只**依赖解析层：`apps/viewer/crates/wasm/Cargo.toml:19`（`websurf-wasm-core`）。
+- TS 侧一律用相对路径 import 共享层（例：`apps/debug/src/input/input-recorder.ts:47` 从 `src/ts-shared/auth/shared-state.ts` 取类型）；SAB 通道与 postMessage 回退的分派在 `src/ts-shared/auth/shared-state.ts:1022` 的 `createMainSharedState`。
 
-## 7. 第三方组件
+## 文档地图
 
-- [@unsurf/cs-movement](https://github.com/unsurf/cs-movement) — 移动物理引擎（已修改），Apache-2.0，见 [NOTICE](src/phys/NOTICE)
-- [vmdl](https://codeberg.org/icewind/vmdl) — Source 模型解析（vendored 于 [src/vendor/vmdl](src/vendor/vmdl)，已修改），MIT
-- [three.js](https://threejs.org/) — 3D 渲染，MIT
+| 文档 | 回答什么 |
+|---|---|
+| `documents/index.md` | **文档总导航**：按实际文件树列出全部文档（本表只是其中一段） |
+| `documents/architecture/overview.md` | 受控范围、共享层构成、依赖方向、入口锚点、启动链与帧链、不变量、构建产物 |
+| `documents/phys/overview.md` | 共享物理：世界容器、步进、玩家语义、传送、种子面 |
+| `documents/wasm-core/overview.md` | 共享解析层：BSP/GLB/材质/mosaic 的模块职责与主流程 |
+| `documents/ts-shared/overview.md` | TS 共享层：接口锚点、主流程、不变量、**未接线与零调用点清单**、测试与门禁 |
+| `documents/materials/overview.md` | 材质与纹理链路 |
+| `documents/debug/README.md` | `apps/debug` 子树入口：overview / sequences / differences + 9 篇 `implementation/` |
+| `documents/game/README.md` | `apps/game` 子树入口：overview / sequences / differences + 10 篇 `implementation/` |
+| `documents/viewer/README.md` | `apps/viewer` 子树入口：overview / sequences / differences + 8 篇 `implementation/` |
+| `documents/norms/annotation-and-verification.md` | 本仓库的注释书写规范与验收判据（含已验证的陷阱清单） |
+| `documents/plan/doc-rewrite-taskbook.md` | 文档/注释重编任务书（流程、规范、术语、任务拆分） |
+| `documents/plan/project-survey.md` | 读码事实基线（目录结构、模块划分、依赖矩阵、主流程与时序骨架） |
+| `documents/plan/progress-log.md` | 逐行进度台账与**全部已知缺口 / 待裁决项** |
 
-## 8. 许可证
+## 已知缺口（摘要）
 
-[MIT](LICENSE) © 2026 WebSurf contributors
+以下均为**读码所得、未修改代码**的登记项，逐条明细与证据见 `documents/plan/progress-log.md`：
+
+- **输入录制链路未接线**：`InputRecorder.record()` 在 `apps/debug/src` 内只有回放分支 `replayCapture` 一处调用点（`apps/debug/src/app.ts:2395`），用户录制器 `inputRecorder`（`apps/debug/src/app.ts:217`）不落样本 ⇒ `__wsInput.exportJson()` 的 frames 恒为空。
+- **零分配支路已实现但未装配**：`tick_into` / `state_out_ptr` / `seed_from` 仅被 `src/ts-shared/` 的控制器调用，而这些控制器在三个工程内都没有装配点；`set_yaw_pitch` 在 `apps/**` 与 `src/**` 内零调用点。
+- **`.cmd` 的 wasm 新鲜度门与被服务的产物不是同一份**：`start-dev.cmd` / `apps/viewer/play.cmd` 判的是 `pkg/…_bg.wasm`，页面与 dist 构建读的是 `web/…_bg.wasm`。
+
+## 许可与第三方
+
+- 根 `LICENSE`：MIT（Copyright (c) 2026 WebSurf contributors）。
+- `src/phys/LICENSE` 与 `src/phys/NOTICE`：共享物理派生自 cs-movement 的许可与声明（分发产物里的 `LICENSE.cs-movement` / `NOTICE.cs-movement` 即由 `build-dist.mjs` 的 `KEEP_SINGLE` 保留）。
+- `src/vendor/vmdl/LICENSE`：vendored 的 `vmdl` crate 许可（vendor 与 patch 的声明见根 `Cargo.toml`）。

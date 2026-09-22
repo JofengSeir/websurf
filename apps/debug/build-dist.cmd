@@ -44,8 +44,8 @@ echo [1/5] Node dependencies ready.
 
 if exist "pkg\websurf_wasm_bg.wasm" goto :wasm_done
 echo [2/5] Building WASM (release)...
-REM debug-specific ability (framework-launch-structure.md 8.2/8.3): ensure
-REM wasm-bindgen-cli as a [2/5] sub-step, reported with [INFO] lines only.
+REM [2/5] sub-step before npm run build:wasm: calls src/scripts/install-wasm-bindgen.cmd
+REM with nopause for wasm-bindgen-cli v0.2.128; errorlevel 1 -> pause + exit /b 1.
 echo [INFO] Ensuring wasm-bindgen-cli v0.2.128 is present (auto-install if missing)...
 call "%~dp0..\..\src\scripts\install-wasm-bindgen.cmd" nopause
 if errorlevel 1 (

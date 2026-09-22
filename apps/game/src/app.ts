@@ -1,12 +1,25 @@
 /**
- * WebSurf-game — 主线程入口。
+ * WebSurf-game — 主线程入口（`main` 装配全流程，文件末 `void main()` 触发）。
  *
- * 架构（2026-08-07 v5 定案）：
- * - **唯一物理渲染主线 = 主线程**：主线程解析 BSP、构建 PhysWorld（世界+碰撞+输入）、
- *   每帧 tick 推进并渲染，全速无限制
- * - Worker = 纯速度修正器：无 WASM/无地图/无按键/无碰撞，只读主线程状态槽，
- *   位置差分算"实际移动速度"写回修正槽；主线程仅在卡墙/异常时校准
- * - ESC 弹出式面板（PanelController）+ 速度面板 8Hz
+ * 装配顺序：
+ * 1. `#preview` 画布缺失即报错返回；否则判通道：`crossOriginIsolated` 且
+ *    `SharedArrayBuffer` 可用 → 新建 `SharedArrayBuffer(SHARED_BUFFER_SIZE)`，
+ *    否则该实参传 `null`，由 `createMainSharedState` 落到 postMessage 回退通道。
+ * 2. 建权威 Worker：`__VBSP_WORKER_JS__` 存在则把内嵌代码做成 Blob URL 装载
+ *    （module worker 在 `file://` 下被 CORS 拒绝），否则装载 `./worker.js`（module）。
+ * 3. `RendererMain` = 主线程物理+渲染线；`InputBridge` = 面板参数与传送/重生的发送口；
+ *    `PanelController` = ESC 面板，其构造回调直达 `RendererMain` 的对应 setter。
+ * 4. `bindInput` 绑 DOM 事件，`startInputLoop` 起 rAF 输入循环。
+ *
+ * 线程分工：Worker 独立跑固定步长权威模拟并回发权威帧与碰撞事件；主线程全速跑渲染物理。
+ * 两者消费同一份输入——`RendererMain.tick` 每帧把 `feedInput` 暂存的鼠标增量与键位掩码
+ * 写入共享输入槽，Worker 从该槽取。
+ *
+ * 主线程 → Worker：`init`、`wasm-init`、`world-json`、`set-spawn-points`、
+ * `sync-render-state`，以及经 `InputBridge` 发出的 `config`、`respawn`、`teleport`、
+ * `set-death-threshold`。
+ * Worker → 主线程：`phys-frame`（权威帧）、`phys-event`（落地/撞墙修正）、`health-log`、
+ * `error`、`world-build-ms`、`world-parse-ms`。
  */
 
 import { createConfig } from './config.js';
@@ -36,12 +49,12 @@ const dom = {
   spawnSelect: document.getElementById('spawnSelect') as HTMLSelectElement | null,
   respawnBtn: document.getElementById('respawnBtn') as HTMLButtonElement | null,
   fpsEl: document.getElementById('fps') as HTMLElement | null,
-  // 近平面贴墙自适应（实时生效）
+  // 近平面自适应控件：range 与 number 成对，bindNearParam 双向同步后交给渲染器
   nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
   nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
   nearRatioRange: document.getElementById('nearRatio') as HTMLInputElement | null,
   nearRatioNum: document.getElementById('nearRatioNum') as HTMLInputElement | null,
-  // 地图加载进度覆盖层
+  // 地图加载进度覆盖层（showLoading / advanceLoading / finishLoading / failLoading 操作这些元素）
   loadingOverlay: document.getElementById('loadingOverlay') as HTMLElement | null,
   loadingSub: document.getElementById('loadingSub') as HTMLElement | null,
   loadingFill: document.getElementById('loadingFill') as HTMLElement | null,
@@ -50,10 +63,10 @@ const dom = {
 } as const;
 
 const keyboard = new KeyboardInput(loadKeymap());
-// 面板改键入口：暴露 KeyboardInput 实例（setKeymap）
+// 面板改键入口：KeyboardInput 实例挂到 globalThis.__keyboardInput，面板提交键位时取它调 setKeymap
 (globalThis as unknown as { __keyboardInput?: KeyboardInput }).__keyboardInput = keyboard;
 
-// 面板「按键」模块改键后 → 立即刷新左下角按键簇标签（保证与面板一一对应）
+// 键位表变更 → 立即刷新左下角按键簇标签；HUD 与面板读同一份 loadKeymap()
 keyboard.onKeymapChange(() => syncKeyHudLabels());
 export type { BindableAction };
 const mouseBuffer = new MouseBuffer();
@@ -65,17 +78,17 @@ let renderer: RendererMain | null = null;
 let panel: PanelController | null = null;
 let sharedState: ReturnType<typeof createMainSharedState> | null = null;
 let sceneReady = false;
-/** 主线程 wasm 初始化 promise（handleLoadBsp 的 decompress_mtz 依赖就绪）。 */
+/** 主线程 wasm 初始化 promise：handleLoadBsp 调 buildWorldBundle 前 await 它（decompress_mtz 依赖）。 */
 let mainWasmReady: Promise<void> = Promise.resolve();
-/** 速度面板 8Hz 门控（0.125s）。 */
+/** 速度面板刷新门控时刻（ms）：输入循环间隔 ≥125ms 才调 updateSpeedHud。 */
 let speedUpdateAt = 0;
-/** 滚轮跳 pending（wheel 事件置位，下一帧消费并清除；与根工程语义一致）。 */
+/** 滚轮跳待消费标志：wheel 事件置位，输入循环下一帧把它并入键位掩码后清零。 */
 let wheelJumpPending = false;
-/** 当前地图名（去掉 .bsp 后缀；存点按地图持久化）。 */
+/** 当前地图名（handleLoadBsp 去掉 .bsp 后缀写入；SavePointStore 以它为持久化键）。 */
 let currentMapName = '';
-/** 存点存储（X 存点 / C 读点 / 面板列表；按地图持久化，上限 50）。 */
+/** 存点存储：X 存点、C 定身、面板列表三处共用；按地图持久化，容量 SAVEPOINT_MAX。 */
 const savePointStore = new SavePointStore();
-/** 按住 C 冻结中的存点（非空 = 冻结中，keyup 时恢复速度）。 */
+/** 按住 C 期间的冻结存点；非空即处于定身态，keyup 交给 endHoldPoint 释放。 */
 let holdPoint: SavePoint | null = null;
 
 async function main(): Promise<void> {
@@ -84,8 +97,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  // 0. 通道选择：crossOriginIsolated（本地 serve.py COOP/COEP）→ SAB 高性能；
-  //    否则（线上静态部署无 COOP/COEP）→ MsgState postMessage 回退（功能等价可玩）
+  // 0. 通道选择：crossOriginIsolated 且存在 SharedArrayBuffer 才建 SAB（需 COOP/COEP 响应头）；
+  //    否则 sharedBuffer 为 null，createMainSharedState 落到 MsgState postMessage 回退通道
   const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
 if (isolated) {
   console.log('[game] crossOriginIsolated 已启用，使用共享内存输入/物理通道');
@@ -98,18 +111,17 @@ if (isolated) {
   }
   const sharedBuffer = canSab ? new SharedArrayBuffer(SHARED_BUFFER_SIZE) : null;
 
-  // 1. 权威帧 Worker（加载地图碰撞、独立固定步长权威模拟，输出权威帧供渲染校准）
-  //    dist 内嵌模式（file:// 双击）：worker 代码内嵌 → Blob URL（module worker 在
-  //    file:// 下被 CORS 拦截）；dev 模式用 module worker（./worker.js）
+  // 1. 权威 Worker：经 world-json 拿到地图碰撞后，独立跑固定步长权威模拟并回发权威帧
+  //    内联脚本（__VBSP_WORKER_JS__）走 Blob URL —— file:// 下 module worker 被 CORS 拒绝；
+  //    否则装载 ./worker.js（type: module）
   const embeddedWorkerJs = (globalThis as { __VBSP_WORKER_JS__?: string }).__VBSP_WORKER_JS__;
   fixWorker = embeddedWorkerJs
     ? new Worker(URL.createObjectURL(new Blob([embeddedWorkerJs], { type: 'text/javascript' })))
     : new Worker('./worker.js', { type: 'module' });
   fixWorker.onerror = (e) => setError(`Worker error: ${e.message}`);
   fixWorker.onmessage = (e: MessageEvent<{ type?: string; ms?: number }>) => {
-    // 诊断（2026-09-20，零行为改动）：Worker 侧"world-json 解析 + build_world"耗时。
-    // 与下面的 postMessage 耗时 + `[authority] 首个权威帧` 一起，把权威迟迟不活
-    // 拆成「结构化克隆传输」「Worker 内构建」「首帧调度」三段。
+    // 耗时诊断：world-build-ms 覆盖 build_world 段、world-parse-ms 覆盖两个 JSON 的解析段，
+    // 与主线程 postMessage(world-json) 的耗时合看，可定位首个权威帧的延迟落在传输还是构建
     if (e.data?.type === 'world-build-ms') {
       console.info(`[authority] Worker 内 world-json 处理（解析+build_world）= ${e.data.ms}ms`);
     }
@@ -124,17 +136,17 @@ if (isolated) {
     } else if (msg.type === 'error') {
       setError((msg as { message?: string }).message ?? 'Worker 错误');
     } else if (msg.type === 'phys-event') {
-      // 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染）
+      // 权威碰撞事件：交给渲染器做碰撞修正（落地/撞墙瞬间微调位置并同步角度）
       const ev = msg as { kind: 'land' | 'blocked'; pos: number[]; yawDeg: number; pitchDeg: number; vel?: number[] };
       renderer?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg, ev.vel);
     } else if (msg.type === 'phys-frame') {
-      // MsgState 回退：Worker 权威帧消息 → 缓存（readAuthoritative 读取）
+      // 仅 MsgState 回退通道会出现此消息：权威帧交给 recvFrame 缓存，SAB 通道直接读共享槽
       const f = msg as { va: number; frame: { pos: { x: number; y: number; z: number }; yaw: number; pitch: number; vel: { x: number; y: number; z: number }; onGround: boolean; eyeHeight: number; timeMs: number } };
       (sharedState as { recvFrame?: (frame: unknown, va: number) => void })?.recvFrame?.(f.frame, f.va);
     }
   };
   fixWorker.postMessage({ type: 'init', shared: sharedBuffer });
-  // wasm-init：dist 内嵌 base64 → initSync（file:// 无法 fetch）；dev → fetch URL
+  // wasm-init：内联 base64（__VBSP_WASM_B64__）走 initSync —— file:// 下无法 fetch；否则给 wasmUrl
   const embeddedWasm = (globalThis as { __VBSP_WASM_B64__?: string }).__VBSP_WASM_B64__;
   if (embeddedWasm) {
     fixWorker.postMessage({ type: 'wasm-init', wasmB64: embeddedWasm });
@@ -142,7 +154,7 @@ if (isolated) {
     fixWorker.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
   }
 
-  // 通道创建（SAB / MsgState 同接口）
+  // 通道创建：sharedBuffer 非空即 ShmState，否则 MsgState；两者同接口
   sharedState = createMainSharedState(sharedBuffer, fixWorker);
   const shared = sharedState;
 
@@ -497,7 +509,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   sceneReady = false;
   setStatus(`正在加载 ${fileName}（主线程解析 BSP）...`, '');
   showLoading(fileName);
-  await new Promise((r) => setTimeout(r, 0)); // 让 UI 先更新（解析可能耗时）
+  await new Promise((r) => setTimeout(r, 0)); // 让 UI 先更新（解析耗时较长）
   try {
     const bundle = await buildWorldBundle(new BspProcessor(new Uint8Array(bytes)), {
       decompressMtz: decompress_mtz,
@@ -745,7 +757,7 @@ function showLoading(mapName: string): void {
   loadingAnim.target = 0;
   if (loadingOverlayEl) {
     loadingOverlayEl.classList.add('show');
-    // 清掉可能的错误态
+    // 清掉残留的错误态
     loadingOverlayEl.classList.remove('error');
   }
   // 进度条复位走 CSS 回落值（.load-fill width:var(--load-pct, 0%)）——清除自定义属性即回落 0%

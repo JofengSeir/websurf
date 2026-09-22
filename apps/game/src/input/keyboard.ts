@@ -1,17 +1,23 @@
 /**
- * 键盘输入映射 — 监听 keydown/keyup，维护 KeyState 状态。
+ * 键盘输入：监听 keydown / keyup，把 `KeyboardEvent.code` 映射成 `KeyState` 的布尔字段。
  *
- * 键位可配置：由 keymap.ts 提供 action → code[] 映射（默认 = cs-movement 契约，
- * 面板可录制重绑 + localStorage 持久化）。
+ * 映射方向：
+ * - 构造参数是 action → `code[]` 键位表（`apps/game/src/input/keymap.ts` 的
+ *   `DEFAULT_KEYMAP` 与 `loadKeymap`）；`buildCodeMap` 把它反转成 `code` → action 的反查表，
+ *   按键时一次查表即命中；
+ * - 位掩码不在本文件换算：`getMask()` 转调 `src/ts-shared/auth/shared-state.ts` 的
+ *   `keysToMask`，位常量 `KEY_MASK` 也定义在那里。
  *
- * 运行在主线程。Pointer Lock 退出时调用方应调用 reset() 清空状态。
+ * 运行在主线程，调用方是 `apps/game/src/app.ts`：构造时传 `loadKeymap()`，`bind(window)` 挂事件，
+ * Pointer Lock 状态变化时 `setEnabled(locked)` 并 `reset()`，窗口失焦时再 `reset()`；
+ * 面板改键经 `globalThis.__keyboardInput` 调 `setKeymap`，并由 `onKeymapChange` 回调刷新 HUD 标签。
  */
 
 import type { KeyState } from '../worker/worker-types.js';
 import { keysToMask } from '../../../../src/ts-shared/auth/shared-state.js';
 import type { BindableAction } from './keymap.js';
 
-/** 从 action→code[] 键位表构建 code→action 反查表。 */
+/** 由 action→code[] 键位表构建 code→action 反查表；同一 code 绑多个动作时后写者胜。 */
 function buildCodeMap(keymap: Record<BindableAction, string[]>): Map<string, BindableAction> {
   const m = new Map<string, BindableAction>();
   for (const action of Object.keys(keymap) as BindableAction[]) {
@@ -22,6 +28,7 @@ function buildCodeMap(keymap: Record<BindableAction, string[]>): Map<string, Bin
   return m;
 }
 
+/** 全 false 的初始键位状态（每个字段都必须显式列出）。 */
 function createEmptyKeyState(): KeyState {
   return {
     forward: false,
@@ -45,6 +52,7 @@ export class KeyboardInput {
   /** 是否接受按键事件（仅 Pointer Lock 锁定时 true；面板打开时忽略，防污染 WASD）。 */
   private enabled = false;
 
+  /** 键位表在构造时定稿；后续变更走 `setKeymap`。 */
   constructor(keymap: Record<BindableAction, string[]>) {
     this.codeMap = buildCodeMap(keymap);
   }
@@ -57,13 +65,13 @@ export class KeyboardInput {
     this.keymapListener = fn;
   }
 
-  /** 更新键位映射（面板录制后调用；立即生效并通知订阅者）。 */
+  /** 更新键位映射（面板录制后调用；立即重建反查表并通知订阅者）。 */
   setKeymap(keymap: Record<BindableAction, string[]>): void {
     this.codeMap = buildCodeMap(keymap);
     this.keymapListener?.();
   }
 
-  /** 启用/禁用按键捕获（锁定启用；ESC 退锁/面板打开禁用）。 */
+  /** 启用 / 禁用按键捕获；置为 false 时顺带清空键位状态。 */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     if (!enabled) this.reset();
@@ -74,7 +82,7 @@ export class KeyboardInput {
     const action = this.codeMap.get(e.code);
     if (action) {
       this.state[action] = true;
-      // 阻止 Space/方向键等默认行为（页面滚动）
+      // 命中的键阻止默认行为（Space / 方向键的页面滚动）
       e.preventDefault();
     }
   };
@@ -88,7 +96,7 @@ export class KeyboardInput {
     }
   };
 
-  /** 绑定 keydown/keyup 事件。重复调用会先解绑旧目标。 */
+  /** 绑定 keydown / keyup 到指定目标；重复调用会先解绑旧目标，不会重复挂钩。 */
   bind(target: EventTarget): void {
     this.unbind();
     this.target = target;
@@ -96,7 +104,7 @@ export class KeyboardInput {
     target.addEventListener('keyup', this.handleKeyUp as EventListener);
   }
 
-  /** 解绑事件。 */
+  /** 解绑两个监听并把目标置空（未绑定时为空操作）。 */
   unbind(): void {
     if (this.target) {
       this.target.removeEventListener('keydown', this.handleKeyDown as EventListener);
@@ -105,17 +113,17 @@ export class KeyboardInput {
     }
   }
 
-  /** 返回当前按键状态的浅拷贝。 */
+  /** 返回当前按键状态的浅拷贝（调用方改动不会回写内部状态）。 */
   getState(): KeyState {
     return { ...this.state };
   }
 
-  /** 返回当前按键位掩码（共享内存输入区写入用；实现收敛到 ts-shared keysToMask）。 */
+  /** 返回当前按键位掩码（由共享层 `keysToMask` 从 `state` 换算）。 */
   getMask(): number {
     return keysToMask(this.state);
   }
 
-  /** 清空所有按键状态（Pointer Lock 退出时调用）。 */
+  /** 清空全部按键状态（Pointer Lock 退出与窗口失焦时调用）。 */
   reset(): void {
     this.state = createEmptyKeyState();
   }

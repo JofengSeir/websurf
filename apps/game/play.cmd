@@ -7,7 +7,7 @@ cd /d "%~dp0"
 set PORT=8091
 if not "%~1"=="" set PORT=%~1
 
-REM ---- toolchain: python is required by the local server ----
+REM ---- toolchain gate: "where python" runs before src/serve.py is started ----
 where python >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Python not found.
@@ -16,10 +16,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM ---- shared cargo/wasm-pack env (root .cargo-home / .wasm-pack-cache / .tmp) ----
+REM ---- src/scripts/cargo-env.cmd: CARGO_HOME / WASM_PACK_CACHE / TMP + TEMP -> repo root ----
 call "%~dp0..\..\src\scripts\cargo-env.cmd"
 
-REM ---- bootstrap: deps -> wasm -> ts -> dist (auto when missing) ----
+REM ---- [1/4] deps -> [2/4] wasm unless pkg\websurf_wasm_bg.wasm exists -> [3/4] ts -> [4/4] dist ----
 echo [1/4] Ensuring Node build dependencies (auto npm install if missing)...
 call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
 if errorlevel 1 (
@@ -73,8 +73,8 @@ echo   App:     http://localhost:%PORT%/dist/index.html
 echo   Close this window to stop the server.
 echo ============================================================
 
-REM Open the browser after 1s (async) so the server is already listening.
+REM A detached "cmd /c" opens the page after timeout /t 1; the python call below blocks.
 start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/dist/index.html"
-REM Note: root arg uses "%~dp0." (trailing dot): "%~dp0" ends with a backslash,
-REM which CommandLineToArgvW parses as an escaped quote (root gets a trailing quote, os.chdir fails).
+REM src/serve.py takes its serve root from argv[2]; the literal here is "%~dp0." (this app
+REM root written with a trailing dot), and serve.py os.chdir()s to it before serving.
 python "%~dp0..\..\src\serve.py" %PORT% "%~dp0."

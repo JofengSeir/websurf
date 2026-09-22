@@ -1,6 +1,27 @@
 #!/usr/bin/env node
 /**
- * 快速冒烟测试：确认「掩码覆盖」真的让玩家在 headless 下连跳（不需要 45s）。
+ * 跳跃冒烟采样（headless Chromium + CDP）：按住跳键一段时间，打印渲染物理线的读数。
+ *
+ * 与 `apps/debug/scripts/jump-apex-measure.mjs` 的分工：本脚本不落盘、不做断言、不做就绪判定，
+ * 只把 3s 窗口的采样打到 stdout（后者默认采样 45s，并把逐帧样本写成 JSON 文件）。
+ *
+ * 前置（缺一即跑不通）：
+ *   · 页面由 `apps/debug/scripts/jump-apex-serve.mjs` 提供 —— 它在 OS 临时目录里的 app.ts 副本中
+ *     注入只读探针 `globalThis.__jumpProbe` 与按键掩码覆盖槽 `globalThis.__jumpMask`，
+ *     仓库内的源文件不被改动；
+ *   · 该服务默认监听 8080，故默认 URL 为 http://localhost:8080/web/index.html（argv[2] 可覆盖）。
+ *
+ * 流程：起 headless 浏览器（CDP 调试端口 9600 起随机 80 个）→ 给 `#bspFile` 注入
+ * <仓库根>/test/maps/surf_666.bsp → 轮询探针至多 120s（未就绪也继续，只是打印 probe ready: false）→
+ * 打印初始状态 → 置 `__jumpMask = 16`（`src/ts-shared/auth/shared-state.ts` 的 `KEY_MASK.jump`）→
+ * 页内 rAF 采样 3s，打印该窗口内最大 vy 与 y 的极值、样本数 → 掩码复位 → 关 WS、杀浏览器。
+ *
+ * 退出码：结尾无条件 `process.exit(0)`，结论不以退出码表达。
+ *
+ * 读数口径提醒（按当前代码）：本脚本从 `window.__jumpProbe.state()` 上取 `posY` / `velY`，
+ * 而该槽取的是 `apps/debug/src/renderer/renderer-main.ts` 的 `RendererMain.getCurrentState`，
+ * 其返回值是 `{ pos, yaw, pitch, vel, onGround }` —— 这两个字段嵌在 `pos` / `vel` 之下。
+ *
  * 用法：node scripts/jump-apex-smoke.mjs [url]
  */
 import { spawn } from 'node:child_process';
@@ -32,7 +53,7 @@ for (let i = 0; i < 120 && !page; i++) {
   try {
     const r = await fetch(`http://localhost:${PORT}/json/list`);
     if (r.ok) page = (await r.json()).find((t) => t.type === 'page');
-  } catch { /* retry */ }
+  } catch { /* retry */ } // 本轮 CDP 查询失败：忽略，交给循环下一轮 }
   if (!page) await sleep(250);
 }
 const ws = new WebSocket(page.webSocketDebuggerUrl);

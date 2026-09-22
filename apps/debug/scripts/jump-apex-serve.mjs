@@ -1,22 +1,40 @@
 #!/usr/bin/env node
 /**
- * 跳跃顶高 A/B 实测服务（**不改仓库任何源文件**）。
+ * 跳跃顶高 A/B 实测用的本地服务（**不改仓库任何源文件**）。
  *
- * 背景：headless 无法拿 pointer lock，`app.ts` 的输入循环会把按键掩码强制置 0，
- * 因此必须注入一个「输入覆盖槽 + 只读探针」。但把 hook 插进仓库文件会与其它 agent
- * 的工作冲突，故这里**全部在内存里打补丁**：
- *   · 按请求实时 esbuild 打包 src/app.ts / src/worker/main.ts；
- *   · 打包前把源码拷进 OS 临时目录（仓库外），在**副本**上做字符串补丁；
- *   · HTTP 层补齐 COOP/COEP（SharedArrayBuffer 必需）+ 正确 MIME。
+ * 为什么在临时目录里打补丁：headless 拿不到 pointer lock，`apps/debug/src/app.ts` 的输入循环
+ * 会把按键掩码置 0，而测量需要「只读探针 + 输入覆盖槽」；直接把 hook 写进仓库文件会与其它工作
+ * 冲突，因此补丁只落在 OS 临时目录的副本上。
  *
- * 变体（`X-Variant` 或 `?variant=`，默认 fixed）：
- *   fixed   = 现状（worker-dispatch.ts 的「常规重锚=只播位置」分支）
- *   reverted= 把该分支临时改回修复前的**全态注入**（只这一处；authority-calibrator 的
- *             land 门保持仓库现状）
+ * 镜像：`makeMirror` 把 `apps/debug/src`、`apps/debug/pkg` 与仓库根 `src` 递归拷进
+ * `<tmpdir>/websurf-jump-probe/<app|worker>/`，并保持相对层级，使副本里的相对 import 原样成立；
+ * 两份镜像分别供主线程入口（app.ts）与 Worker 入口（worker/main.ts）使用。
  *
- * 补丁标记会被写进产物（`JUMPPROBE_PATCH` / `JUMPREVERT_PATCH`），harness 可校验。
+ * 补丁一（改的是镜像里的 `apps/debug/src/app.ts` 副本；注入内容带标记 JUMPPROBE_PATCH）：
+ *   · 在 `createMainSharedState(...)` 之后挂 `globalThis.__jumpProbe`：`state()` 转发
+ *     `rendererMain?.getCurrentState()`，`auth()` 给出共享通道里权威帧的只读快照；
+ *   · 把按键掩码那一行改成「`globalThis.__jumpMask` 是数字就覆盖」；
+ *   · 把 `new Worker('./worker.js', …)` 改成带 `?variant=` 的 URL，使主页面的查询串透传给子 Worker。
+ *   三个锚点（`createMainSharedState` 的调用行、掩码行、Worker 构造行）任一未命中即抛错，不产出半成品。
  *
- * 用法：node scripts/jump-apex-serve.mjs [port]
+ * 补丁二（对象是仓库根 `src/ts-shared/auth/worker-dispatch.ts`；生成的替换块带标记 JUMPREVERT_PATCH）：
+ *   按**源码文本切片**生成回退版 —— 取最后一个 `if (sm.teleport === false) {` 到其后的
+ *   `if ((env.getComputeMode` 之间的整段，替换为「该分支同样做全量 set_state（位置/角度/速度/onGround）」
+ *   的块，并写到与原件同目录的 `worker-dispatch.reverted.ts`（同目录是为了它的相对 import 仍可解析）；
+ *   两个切片锚点任一缺失即抛错。esbuild 侧由 `redirectPlugin` 把 `worker-dispatch(.js|.ts)` 的导入
+ *   重定向到选定的那一份。
+ *
+ * 变体选择：只认查询串 `?variant=`，取值 `reverted` 或 `AoffB` 时用回退版，其余取值（含缺省）
+ * 一律用仓库现状那份。主线程 app.js 的产物与变体无关（变体只影响 Worker 的依赖），
+ * 两份产物仍按 `kind:variant` 分开缓存。
+ *
+ * 路由与响应头：`/web/app.js`、`/web/worker.js` 返回 esbuild 的内存产物（分别附 `X-Probe`/`X-Mask`
+ * 与 `X-Revert`，供测量脚本核对补丁是否真的生效）；其余路径按 `apps/debug` 下的真实文件返回
+ * （越界 403、不存在 404、异常 500）；所有响应都带 COOP `same-origin` + COEP `require-corp` +
+ * CORP `cross-origin` + `Cache-Control: no-store`。启动时先预热 app/fixed、worker/fixed、
+ * worker/reverted 三份产物，并把补丁报告打到 stdout。
+ *
+ * 用法：node scripts/jump-apex-serve.mjs [port]      （默认端口 8080）
  */
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync, mkdirSync, copyFileSync, writeFileSync, readdirSync } from 'node:fs';
@@ -33,7 +51,7 @@ const PORT = Number(process.argv[2] ?? 8080);
 const SCRATCH = join(tmpdir(), 'websurf-jump-probe');
 mkdirSync(SCRATCH, { recursive: true });
 
-/** 递归镜像目录（只拷文件，保留相对结构）。 */
+/** 递归把目录里的文件拷到目标（保留相对结构；既非目录又非普通文件的项跳过）。 */
 function mirror(from, to) {
   mkdirSync(to, { recursive: true });
   for (const e of readdirSync(from, { withFileTypes: true })) {
@@ -44,7 +62,7 @@ function mirror(from, to) {
   }
 }
 
-/** 镜像一张「仓库视图」：debug/ + src/ + pkg/，使相对 import 原样成立。 */
+/** 造一张「仓库视图」镜像：debug/src + debug/pkg + 仓库根 src，使相对 import 原样成立。 */
 function makeMirror(name) {
   const root = join(SCRATCH, name);
   mkdirSync(root, { recursive: true });
@@ -59,7 +77,7 @@ const WORKER_ROOT = makeMirror('worker');
 
 const patchReport = {};
 
-// ── app.ts 补丁 ────────────────────────────────────────────────────
+// ── 镜像里的 app.ts：探针 + 掩码覆盖 + Worker 变体透传 ─────────────
 {
   const p = join(APP_ROOT, 'debug', 'src', 'app.ts');
   let s = readFileSync(p, 'utf8');
@@ -90,7 +108,7 @@ $1// JUMPPROBE_PATCH: 测量脚本注入的按键掩码（绕过 pointer lock）
 $1{ const m = (globalThis as { __jumpMask?: number }).__jumpMask; if (typeof m === 'number') mask = m; }`,
     );
   }
-  // Worker 变体透传：主页面 ?variant=reverted → 子 Worker 也加载回退版
+  // Worker 变体透传：主页面查询串里的 variant 透传给子 Worker 的 URL
   const workerRe = /worker = new Worker\('\.\/worker\.js', \{ type: 'module' \}\);/;
   if (!workerRe.test(s)) throw new Error('app.ts Worker 构造锚点缺失');
   if (!s.includes('__workerVariantPatch')) {
@@ -110,7 +128,7 @@ $1{ const m = (globalThis as { __jumpMask?: number }).__jumpMask; if (typeof m =
   };
 }
 
-// ── worker 依赖（worker-dispatch.ts）补丁 ──────────────────────────
+// ── worker-dispatch.ts：按源码文本切片生成回退版 ──────────────────
 const WD = join(REPO, 'src', 'ts-shared', 'auth', 'worker-dispatch.ts');
 const WD_FIXED = readFileSync(WD, 'utf8');
 const startTok = 'if (sm.teleport === false) {';
@@ -136,7 +154,7 @@ const REVERTED_BLOCK = `if (sm.teleport === false) {
 const WD_REVERTED = WD_FIXED.slice(0, i0) + REVERTED_BLOCK + WD_FIXED.slice(i1);
 
 const WD_SCRATCH_FIXED = join(WORKER_ROOT, 'src', 'ts-shared', 'auth', 'worker-dispatch.ts');
-// 回退版**必须落在同一目录**（worker-dispatch.ts 自己还有 `./shared-state.js` 等同目录 import）
+// 回退版必须与原文件同目录：worker-dispatch.ts 还有 ./shared-state.js 这类同目录 import
 const WD_SCRATCH_REVERTED = join(WORKER_ROOT, 'src', 'ts-shared', 'auth', 'worker-dispatch.reverted.ts');
 writeFileSync(WD_SCRATCH_REVERTED, WD_REVERTED, 'utf8');
 patchReport.workerDispatch = {
@@ -145,7 +163,7 @@ patchReport.workerDispatch = {
   revertedHasMarker: WD_REVERTED.includes('__jumpRevertPatch'),
 };
 
-/** 把 worker-dispatch 依赖重定向到补丁副本的 esbuild 插件。 */
+/** esbuild 插件：把 worker-dispatch 的导入重定向到选定的那份副本。 */
 function redirectPlugin(scratchWd) {
   return {
     name: 'redirect-worker-dispatch',
@@ -165,7 +183,7 @@ const COMMON = {
   format: 'esm',
   target: 'es2022',
   logLevel: 'silent',
-  // 临时目录在仓库外 → 手动指回仓库的 node_modules（three 等）
+  // 临时目录在仓库外：手动把裸导入（three 等）指回 apps/debug/node_modules
   nodePaths: [join(DEBUG, 'node_modules')],
 };
 
@@ -181,8 +199,8 @@ async function bundle(kind, variant) {
       write: false,
     });
   } else {
-    // variant: fixed = 仓库现状（修复 A+B）；reverted = A 回退（B 保留）；
-    //          AfixedBon / AoffB = 同义别名，便于报告里对照
+    // variant：fixed 用仓库现状的 worker-dispatch；reverted 用切片生成的回退版；
+    //          AfixedBon / AoffB 是与二者同义的别名，便于报告里对照
     const useReverted = variant === 'reverted' || variant === 'AoffB';
     const wd = useReverted ? WD_SCRATCH_REVERTED : WD_SCRATCH_FIXED;
     result = await esbuild.build({
@@ -218,7 +236,7 @@ const MIME = {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const rawVariant = url.searchParams.get('variant') ?? 'fixed';
-  // 只有明确的「回退 A」变体才走回退产物；其余（含 AfixedBon/未知值）= 仓库现状
+  // 只把明确的回退取值映射到回退产物；其余取值与缺省一律走仓库现状
   const variant = rawVariant === 'reverted' || rawVariant === 'AoffB' ? 'reverted' : 'fixed';
   const headers = {
     'Cross-Origin-Opener-Policy': 'same-origin',
@@ -262,7 +280,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-// 预热两种变体（保证首个请求不超时）
+// 预热三份产物：让首个请求不再现打包，避免测量端超时
 await bundle('app', 'fixed');
 await bundle('worker', 'fixed');
 await bundle('worker', 'reverted');

@@ -1,24 +1,20 @@
 # WebSurf: 构建并部署到 GitHub Pages
 #
-# 职责边界（2026-09-21 重构）：本 workflow **只做一件事**——把 apps/{debug,game,viewer}
-# 构建成 dist/ 并发布到 Pages。它不含任何测试门禁，也不构建 test/ 验证工程。
+# 职责边界：本 workflow **只做一件事**——把 apps/{debug,game,viewer} 构建成 dist/ 并发布到
+# Pages。它不含任何测试门禁（门禁在 `.github/workflows/ci-gates.yml`，与部署互不阻塞）。
 #
-# 为什么这样拆（实测证据）：
-#   上一次 Pages 构建（run 0ec7769）的 build job 共 12.6 min，其中 4 次 Rust wasm 编译
-#   占 150 + 147 + 151 + 140 s：
-#     - test/dual-mode-harness 的那次（147 s）**与站点产物毫无关系**，它的唯一用途是给
-#       debug 的 `test:jump-apex` 门提供 pkg。为了一道测试门，每次部署多等 2.5 分钟，
-#       而且它的编译失败会直接让部署失败（9-21 的 E0063/E0308 就是这条路径）。
-#     - 三个 app 的编译原本串行。改成 matrix 并行后，墙钟时间由「三者之和」降到「最慢那个」。
-#   测试门禁没有取消，而是移到 `.github/workflows/ci-gates.yml`，与部署互不阻塞。
+# 为什么这样拆：
+#   - 三个 app 的 wasm 编译是相互独立的，用 matrix 并行构建：墙钟时间由「三者之和」
+#     降到「最慢那个」。
+#   - 测试门禁不放在这里（见 ci-gates.yml）：任一测试门失败都不应让站点发布失败。
 #
 # 三工程构建链路（与本地 build-dist.cmd 一致）：
 #   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.128 与五份 Cargo.lock 匹配）
 #   2. esbuild 打包 TypeScript（worker + app）
 #   3. scripts/build-dist.mjs --multi → dist/（app.js + worker.js + wasm/mtz 外置）
 #
-# 触发路径：只有会影响站点产物的路径才触发。文档、CHANGELOG、test/ 与门禁 workflow
-# 的改动不再触发重新部署（需要时用 workflow_dispatch 手动跑）。
+# 触发路径：只有会影响站点产物的路径才触发（apps/**、src/**、Cargo.toml、Cargo.lock 与本文件）。
+# 文档与门禁 workflow 的改动不触发重新部署（需要时用 workflow_dispatch 手动跑）。
 
 name: Build & Deploy to GitHub Pages
 

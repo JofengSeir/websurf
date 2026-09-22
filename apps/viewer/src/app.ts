@@ -1,9 +1,11 @@
 /**
- * WebSurf-viewer — BSP 地图预览 + 录像回放。
+ * WebSurf-viewer — BSP 地图预览 + Shavit `.replay` 回放。
  *
- * 主线程装配：场景 / 飞行相机 / 地图信息 / 出生点导航 / 录像导入与回放。
- * 纯视觉定位：不引入物理与碰撞，录像只做播放与观察。
- * 播放基准 = .replay 帧自身坐标（t4）：无强制起点锚定；平移/映射切换仅显式叠加。
+ * 主线程装配：场景 / 飞行相机 / 地图信息 / 出生点导航 / 录像导入与回放。本文件是 viewer 的入口
+ * （`apps/viewer/package.json` 的 `build:app` 用 esbuild 打成 `web/app.js`）。
+ * 定位是**纯视觉**：不引入物理与碰撞，录像只做播放与观察。
+ * 播放基准 = 录像帧自身坐标：默认不做起点锚定，坐标映射切换与平移/旋转变换只按用户显式操作叠加。
+ * 对外接口 = `globalThis.viewer` 的 `map`（只读内省）与 `replay`（内省 + 播放控制）。
  */
 
 import { DEG2RAD } from './core/constants.js';
@@ -32,7 +34,8 @@ const canvas = document.getElementById('game') as HTMLCanvasElement | null;
 if (!canvas) throw new Error('canvas#game 未找到');
 const gameCanvas: HTMLCanvasElement = canvas;
 
-// 部署环境状态提示（与 debug/game 的通道打印同款；viewer 无物理，不依赖此状态）。
+// 部署环境状态提示：viewer 不做通道选择（无物理、不需要 SharedArrayBuffer），只打印该状态供核对；
+// debug / game 的入口用同一标志决定走共享内存通道还是 postMessage 回退。
 const crossOriginIsolatedViewer =
   (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
 console.log(
@@ -166,18 +169,18 @@ if (replayPane) {
 
 const metaPanel = new ReplayMetaPanel(qs('replayMeta') ?? document.createElement('div'));
 const timeline = new Timeline(timelineEl ?? document.createElement('div'), player, visuals);
-// 遥测：速度 HUD 挂 #telemetry（game 同款位置）；按键簇挂 #timeline 右列
+// 遥测 HUD：速度读数挂顶层 `#telemetry`（定位由 CSS 决定），按键簇挂 `#timeline`（`#dock` 内，随时间轴一起显隐）
 const telemetry = new TelemetryHud(
   qs('telemetry') ?? document.createElement('div'),
   timelineEl ?? document.createElement('div'),
 );
 
 /**
- * 地图贴合检查，合并成一条 HUD 提醒（仅 #replayStatus，跨面提醒）。
+ * 地图贴合检查，合并成一条 HUD 提醒（只写 `#replayStatus`；用户未必停在录像页，故走跨面提醒）。
  *
- * 「轨迹整段落在地图包围盒外」暴露坐标系映射不对（t4 基准=帧自身坐标，正确的
- * .replay 若触发此提醒应修「坐标映射」切换而不是平移锚定），用户可能不在录像页，
- * 所以仍走 HUD，细节指引在录像页「坐标映射」分区。
+ * 判据：某条轨道的 `Clip.bbox` 与当前地图包围盒在**三轴全部**分离、且间隙超过 `pad`（512 HU）
+ * 时判「完全落在地图包围盒外」。这通常说明坐标映射选错了（`.replay` 的帧就是自身坐标，
+ * 应改录像页的「坐标映射」而不是靠平移把轨迹挪回去）。
  */
 function updateReplayMapStatus(): void {
   const tracks = player.tracks.tracks;
@@ -253,8 +256,8 @@ async function loadBsp(file: File): Promise<void> {
     } else {
       currentBox = null;
     }
-    // 初始视角回退解析（P2-4）需要几何 bbox，须在 worldBox 之后；
-    // 面板 ★ 推荐标记与初始视角同源（resolveInitialSpawn 单点）。
+    // 初始视角回退需要几何 bbox，故必须在 worldBox 之后解析；面板 ★ 推荐标记与初始视角同源
+    //（都走 resolveInitialSpawn 这一个入口）。
     const init = resolveInitialSpawn(result.spawnPoints, result.primary, currentBox);
     mapPanel?.setMap(result, currentBox, init?.index);
     updateReplayMapStatus();
@@ -288,8 +291,9 @@ async function loadBsp(file: File): Promise<void> {
 let lastSpawnSource: SpawnSource | null = null;
 
 /**
- * 应用初始视角（P2-4 回退策略，resolveInitialSpawn 单点解析：
- * spawn 实体 → bbox 内传送目标 → bbox 中心高位俯瞰）。
+ * 应用初始视角。来源解析收敛在 `resolveInitialSpawn` 单点：出生点实体 → bbox 内的
+ * `info_teleport_destination` → bbox 中心高位俯瞰（后者的 `index` 为 −1）。
+ * `init` 为 null 时视角保持不动。
  */
 function applyInitialPose(init: ResolvedSpawn | null): void {
   lastSpawnSource = init?.source ?? null;
@@ -344,7 +348,7 @@ window.addEventListener('drop', (e) => {
   else hud.flashStatus(msg, 5000);
 });
 
-// ── JS 接口：window.viewer.replay / window.viewer.map（只读内省 + 播放控制，外部脚本 / 自动化用）──
+// ── JS 接口：`globalThis.viewer.map`（只读内省）/ `.replay`（内省 + 播放控制），供外部脚本与 headless 冒烟断言用 ──
 (globalThis as unknown as { viewer?: unknown }).viewer = {
   /** 地图与相机位姿内省（headless 冒烟断言用；只读）。 */
   get map() {
@@ -366,7 +370,7 @@ window.addEventListener('drop', (e) => {
   },
   get replay() {
     return {
-      // 内省
+      // 内省字段（只读快照，取值即当前状态）
       trackCount: player.tracks.tracks.length,
       duration: player.duration,
       time: player.time,
@@ -374,6 +378,7 @@ window.addEventListener('drop', (e) => {
       speed: player.speed,
       mode: player.mode,
       followId: player.tracks.followId,
+      /** 场景根(`THREE.Scene`)的子节点数（冒烟断言用）。 */
       sceneObjects: scene.scene.children.length,
       /** 各轨道只读信息（id / 名 / 帧数 / 时长 / 偏移 / 显隐 / 配色 / 首帧坐标）。 */
       tracks: () =>
@@ -392,13 +397,14 @@ window.addEventListener('drop', (e) => {
         })),
       /** 跟随轨道的 .replay 头部元信息（Clip.meta；无轨道 / 无元信息 → null）。 */
       meta: () => player.tracks.follow?.clip.meta ?? null,
-      // 播放控制（时间单位 = 秒，主时钟；seek 会被 A-B 区间夹取）
+      // 播放控制（时间单位 = 秒，主时钟；seek 夹到当前区间 [rangeStart, rangeStop]）
       play: () => player.play(),
       pause: () => player.pause(),
       seek: (sec: number) => player.seek(sec),
       setSpeed: (x: number) => {
         player.speed = Math.max(0.1, Math.min(16, Number(x) || 1));
       },
+      /** 视角模式：只有 'third' 按第三人称处理，其余入参一律落到 'first'。 */
       setMode: (m: 'first' | 'third') => {
         player.mode = m === 'third' ? 'third' : 'first';
       },
@@ -471,7 +477,7 @@ let hudAt = 0;
 
 function frame(now: number): void {
   requestAnimationFrame(frame);
-  const dt = Math.min((now - lastNow) / 1000, 0.05);
+  const dt = Math.min((now - lastNow) / 1000, 0.05); // 帧间隔（秒），上限 50 ms
   lastNow = now;
 
   player.update(dt);
@@ -497,6 +503,7 @@ function frame(now: number): void {
     fly.applyTo(scene.camera);
   }
 
+  // 可视化每帧取**全部**轨道采样（含不可见轨道），显隐由 `apps/viewer/src/replay/visuals.ts` 按 Track.visible 过滤
   visuals.update(player.sampleAll(), player.mode, player.tracks.followId);
   scene.render();
 

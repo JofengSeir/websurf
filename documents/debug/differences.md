@@ -1,110 +1,52 @@
-# debug 与 game/viewer/test 的核心差异（维度 D）
+# apps/debug 与其它两工程的实测差异
 
-> debug 与 game 共享同一套物理内核与 TS 共享层，差异主要在"调参/调试工具"与"游玩体验"的取舍上。同构部分先讲清楚（§1-§2），再逐条讲差异（§3-§7）。同构与差异的全部论断都标注代码路径；两端文件未读的部分不写结论。
+本篇每条差异都**两侧各自实测**，证据给两侧锚点。凡未实测出差异的维度，条目里显式写明「本维度两工程实现一致」，同样给两侧锚点。
 
-## 1. 完全同构的骨架（不要在这上面找差异）
+## 差异总表
 
-| 层 | 两端实现 | 代码路径 |
-|---|---|---|
-| 双线架构 | 主线程渲染物理线 + Worker 权威线，v7 校准（首帧起点/速度外推/兜底反向同步/碰撞事件修正） | `apps/debug/src/renderer/renderer-main.ts:430-516` ≙ `apps/game/src/renderer/renderer-main.ts:693-768`；校准器共享 `src/ts-shared/phys/authority-calibrator.ts` |
-| 状态通道 | 同一 SAB 512B 布局 + MsgState 回退，同一工厂函数 | `src/ts-shared/auth/shared-state.ts:344-356`（两端都走 `createMainSharedState`） |
-| 权威循环 | 同一 setTimeout 4ms + 固定步长累积器 + land/blocked 事件 | `src/ts-shared/auth/auth-loop.ts`（两端各自 `createAuthLoop`，`apps/debug/src/worker/main.ts:81` ≙ `apps/game/src/worker/main.ts:72-78`） |
-| 消息分发 | 同一 worker-dispatch（通用消息集完全一致） | `src/ts-shared/auth/worker-dispatch.ts` |
-| 加载管线 | 同一 buildWorldBundle（metadata→碰撞→mosaic→GLB→spawn） | `src/ts-shared/phys/world-builder.ts`（两端 handleLoadBsp 消费，`apps/debug/src/app.ts:1292` ≙ `apps/game/src/app.ts:406`） |
-| 参数映射 | 同一 buildPhysicsParams（sensitivity 固定 1、jumpHeight²/2g） | `src/ts-shared/phys/params.ts`（`apps/debug/src/worker/main.ts:50-66` ≙ `apps/game/src/worker/main.ts:42-66`） |
-| 输入层 | 同一 layerMouseDelta + qeEquivalentDx（灵敏度只乘主线程一次） | `src/ts-shared/input/input-layer.ts` |
-| Rust 内核 | 两个 crate 同名 websurf-wasm，都 `pub use websurf_phys::phys::PhysWorld`，都含运行时 chamfer 生成 | `apps/debug/crates/wasm/src/lib.rs:22,2552` ≙ `apps/game/crates/wasm/src/lib.rs`（chamfer `:1973`） |
-| 输入层 | `mouse-buffer` / `pointer-lock` 已收敛为**共享单份**（`src/ts-shared/input/`），两端导入同一实现；`input-bridge` / `keyboard` 仍为各自实现（含工程特有内容：debug 有 `input-recorder`，game 有 `keymap`） | `src/ts-shared/input/{mouse-buffer,pointer-lock}.ts` ≙ 两端共用；`apps/{debug,game}/src/input/{input-bridge,keyboard}.ts` 各自维护 |
+| 维度 | 本工程 | 对比工程 | 证据（两侧锚点） |
+|---|---|---|---|
+| 渲染库 | three.js + `GLTFLoader` + `BufferGeometryUtils` 的 `mergeGeometries` | `apps/game`：同一套引入 | 本工程 `apps/debug/src/renderer/renderer-main.ts:23`；game `apps/game/src/renderer/renderer-main.ts:33` |
+| 渲染库 | 同上 | `apps/viewer`：同一套引入 | 本工程 `apps/debug/src/renderer/renderer-main.ts:24`；viewer `apps/viewer/src/core/scene.ts:26` |
+| 页面布局 | 左侧边栏（多个 `<details>` 分区）＋ 右侧预览区 | `apps/game`：全屏画布 + 单块 `#panel` 覆盖层 | 本工程 `apps/debug/web/index.html:292`（侧边栏）、`apps/debug/web/index.html:659`（预览区）；game `apps/game/web/index.html:72`（`#panel`）、`apps/game/web/index.html:27`（画布） |
+| 页面布局 | 同上 | `apps/viewer`：顶栏 + 侧栏标签页（`#tabs` / `#pane-map` / `#pane-replay`）+ 底部 `#dock` | 本工程 `apps/debug/web/index.html:292`；viewer `apps/viewer/web/index.html:52`（顶栏）、`apps/viewer/web/index.html:76`（侧栏）、`apps/viewer/web/index.html:86`（dock） |
+| 物理运行位置 | **Worker 权威物理** + **主线程渲染物理（`predPhys`）** 双线 | `apps/game`：同构双线（Worker 权威 + 主线程渲染物理） | 本工程 `apps/debug/src/worker/main.ts:455`、`apps/debug/src/renderer/renderer-main.ts:709`；game `apps/game/src/worker/main.ts:451`、`apps/game/src/renderer/renderer-main.ts:938` |
+| 物理运行位置 | 同上 | `apps/viewer`：**无物理**（离线解析 + 纯视觉），Worker 只做录像解析 | 本工程 `apps/debug/src/renderer/renderer-main.ts:30`（引入 `PhysWorld`）；viewer `apps/viewer/src/app.ts:6`（定位为纯视觉、不引入物理与碰撞） |
+| 共享状态通道 | `createMainSharedState`：SAB 通道优先，缺 `SharedArrayBuffer` 时落 postMessage 回退 | `apps/game`：同一函数、同一分支条件 | 本工程 `apps/debug/src/app.ts:325`、`apps/debug/src/app.ts:286`；game `apps/game/src/app.ts:158`、`apps/game/src/app.ts:102` |
+| 共享状态通道 | 同上 | `apps/viewer`：不做通道选择（无物理，不需要共享内存） | 本工程 `apps/debug/src/app.ts:325`；viewer `apps/viewer/src/app.ts:37` |
+| 配置来源 | 工程自带 `apps/debug/src/config.ts`：`DEFAULT_CONFIG` + `createConfig()` 深拷贝 | `apps/game`：同样自带 `apps/game/src/config.ts`（结构不同、字段集不同） | 本工程 `apps/debug/src/config.ts:205`、`apps/debug/src/config.ts:299`；game `apps/game/src/config.ts:176`、`apps/game/src/config.ts:239` |
+| 配置来源 | 同上 | `apps/viewer`：**无 config.ts**，常量集中在 `core/constants.ts`，且注释面逐值对齐另两工程的同名列 | 本工程 `apps/debug/src/config.ts:205`；viewer `apps/viewer/src/core/constants.ts:24`、`apps/viewer/src/core/constants.ts:11` |
+| 构建产物形态 | 两种形态同一入口，`--multi` 切换；`KEEP_SINGLE` **不含** `styles.css` | `apps/game`：同样两形态，但 `KEEP_SINGLE` **含** `styles.css` | 本工程 `apps/debug/scripts/build-dist.mjs:63`、`apps/debug/scripts/build-dist.mjs:75`；game `apps/game/scripts/build-dist.mjs:60` |
+| 构建产物形态 | 同上 | `apps/viewer`：`KEEP_SINGLE` 额外含 `.nojekyll` / `README.md` / `serve.py` / `play.cmd` / `play.sh`，`KEEP_MULTI` 额外含 `wasm-embedded.js` | 本工程 `apps/debug/scripts/build-dist.mjs:63`；viewer `apps/viewer/scripts/build-dist.mjs:51`、`apps/viewer/scripts/build-dist.mjs:61` |
+| 面板与 UI 结构 | 106 个页面 id，参数面板行由 `PARAM_DEFS` 动态渲染 | `apps/game`：93 个页面 id，面板由 `PanelController` 统一绑定 | 本工程 `apps/debug/web/index.html:494`（`#physicsParamList`）、`apps/debug/src/physics/param-defs.ts:47`；game `apps/game/web/index.html:72`、`apps/game/src/panel/panel-controller.ts:37` |
+| 面板与 UI 结构 | 同上 | `apps/viewer`：26 个页面 id，面板拆成标签页与 dock | 本工程 `apps/debug/web/index.html:292`；viewer `apps/viewer/web/index.html:77`（`#tabs`）、`apps/viewer/web/index.html:89`（`#timeline`） |
+| 测试与门禁脚本 | `package.json` 共 15 条 script，其中门禁类 7 条；`scripts/` 下另有 18 个 `.mjs` | `apps/game`：`package.json` 门禁类 4 条（`check:api` / `test:phys` / `test:seed-smoke` / `test:surf-crouch`），`scripts/` 下另有 20 个 `.mjs` | 本工程 `apps/debug/package.json:16`、`apps/debug/package.json:24`；game `apps/game/package.json:16`、`apps/game/package.json:19` |
+| 测试与门禁脚本 | 同上 | `apps/viewer`：门禁类 3 条（`test:replay` / `local:smoke` / `check:api`），另有独立 `test/` 目录 | 本工程 `apps/debug/package.json:16`；viewer `apps/viewer/package.json:10`、`apps/viewer/package.json:17` |
+| dev 端口 | `npm run dev` 监听 8080；`play.cmd` 默认 8081 | `apps/game`：`npm run dev` 监听 8090 | 本工程 `apps/debug/package.json:15`、`apps/debug/play.cmd:7`；game `apps/game/package.json:15` |
+| dev 端口 | 同上 | `apps/viewer`：`npm run dev` 监听 8100 | 本工程 `apps/debug/package.json:15`；viewer `apps/viewer/package.json:18` |
+| WASM 绑定层 | 自带 `crates/wasm`，crate 名 `websurf-wasm`，产物 `websurf_wasm_bg.wasm` | `apps/game`：自带 `crates/wasm`，产物同名 `websurf_wasm_bg.wasm` | 本工程 `apps/debug/package.json:8`；game `apps/game/package.json:8` |
+| WASM 绑定层 | 同上 | `apps/viewer`：自带 `crates/wasm`，产物名 `websurf_viewer_wasm_bg.wasm`（不同名） | 本工程 `apps/debug/package.json:8`；viewer `apps/viewer/package.json:8` |
+| 调试 API | 注册 `globalThis.__wsInput`（永久保留的无头驱动 API，20 余个方法） | `apps/game`：不注册同名 API（全仓 `__wsInput` 只在 debug 侧定义） | 本工程 `apps/debug/src/app.ts:1044`；game 侧零命中（`apps/game/src` 内无 `__wsInput`） |
 
-## 2. 双端同参不变量（差异的"锚"）
+## 维度覆盖核对
 
-- 两端 `buildPredictionParams`（主线程渲染实例）与 worker `syncParamsToWasm`（权威实例）都收敛到共享 `buildPhysicsParams`：`apps/debug/src/app.ts:1229-1253` + `apps/debug/src/worker/main.ts:50-77`；`apps/game/src/app.ts`（config 段）+ `apps/game/src/worker/main.ts:42-69`。
-- 物理默认值两端一致（gravity 800 / maxSpeed 250 / walkSpeed 130 / crouchSpeed 85 / tickRate 64 等）：`apps/debug/src/config.ts` DEFAULT_CONFIG ≙ `apps/game/src/config.ts:95-111`。
-- 因此差异只可能来自：**面板参数覆盖**（debug 有）、**hull 缩放**（debug 有）、**tickRate 语义**（§3.3）。
+模板要求覆盖的七个维度与上表的对应关系：
 
-## 3. debug vs game：逐条差异
+1. **渲染后端与布局** —— 上表第 1–4 行覆盖：渲染库三工程一致（两侧锚点已给）；布局三工程各不相同。
+2. **物理运行位置（主线程/Worker）** —— 上表第 5–6 行覆盖：debug 与 game 同构双线；viewer 无物理。
+3. **共享状态通道** —— 上表第 7–8 行覆盖：debug 与 game 同一函数同一分支；viewer 不做通道选择。
+4. **配置来源（默认值写在哪）** —— 上表第 9–10 行覆盖：debug 与 game 各有一份工程自带的 config.ts（`apps/debug/src/config.ts`、`apps/game/src/config.ts`）；viewer 用 `apps/viewer/src/core/constants.ts`。
+5. **构建产物形态（single/multi）** —— 上表第 11–12 行覆盖：三工程都支持两形态，`KEEP_SINGLE` 集合不同。
+6. **面板与 UI 结构** —— 上表第 13–14 行覆盖：三工程页面 id 数量与组织方式不同。
+7. **测试与门禁脚本** —— 上表第 15–16 行覆盖：三工程 `package.json` 的门禁脚本名与数量不同。
 
-### 3.1 定位与形态
+## 与 game 的实现一致项（显式声明）
 
-| | debug | game |
-|---|---|---|
-| 目标 | 调参/查碰撞/验时序 + 计时挑战 | 游玩（跑图）+ 存点练习 |
-| 面板形态 | 常驻侧栏（参数面板 + 调试可视化开关） | ESC 弹出式双栏面板（PanelController） |
-| 入口 | `app.ts`（2541 行） | `app.ts`（763 行）——debug 的 UI/面板/可视化代码量约为 game 的 3.3 倍 |
+- 渲染库与加载器一致：两侧都从 `three` 取 `THREE`、从 `three/examples/jsm/loaders/GLTFLoader.js` 取 `GLTFLoader`，并从 `BufferGeometryUtils` 取 `mergeGeometries`（本工程 `apps/debug/src/renderer/renderer-main.ts:24`、`apps/debug/src/renderer/renderer-main.ts:26`；game `apps/game/src/renderer/renderer-main.ts:34`、`apps/game/src/renderer/renderer-main.ts:36`）。
+- 通道选择条件一致：都以 `crossOriginIsolated === true` 且存在 `SharedArrayBuffer` 为建 SAB 的前提，否则落消息回退（本工程 `apps/debug/src/app.ts:286`；game `apps/game/src/app.ts:102`）。
+- 权威物理的装配方式一致：两侧 Worker 都用共享层 `createAuthLoop` 推进权威实例、都用 `createWorkerDispatch` 处理消息（本工程 `apps/debug/src/worker/main.ts:455`、`apps/debug/src/worker/main.ts:470`；game `apps/game/src/worker/main.ts:451`、`apps/game/src/worker/main.ts:462`）。
 
-### 3.2 配置体系（`config.ts` 对比）
+## 与 viewer 的实现一致项（显式声明）
 
-- debug：`RuntimeConfig` **11 段**（physics/player/movement/smoothing/teleport/lod/lighting/input/hud/debug/texture，`apps/debug/src/config.ts`）；`syncFullConfig` 发送 **10 段**（texture 除外，`apps/debug/src/app.ts:1768-1789`）。
-- game：`RuntimeConfig` **6 段**（lockTickRate + physics/input/player/hud/texture，`apps/game/src/config.ts:79-90`）；`syncFullConfig` 只发 physics/input/player/hud 4 段（`apps/game/src/app.ts:512-519`）。
-- debug 独有段承载调试能力：movement（movement 200 sprint×4）、smoothing、teleport（triggerRadius/cooldown）、lod（PVS/视距）、lighting（ambient）、debug（近平面/准星检查/碰撞可视化开关）、hud；game 独有：`lockTickRate`（V8/P2 计时玩法公平性——true 时面板 64Hz 只读，`apps/game/src/config.ts:80-84,93`）与 crosshair 风格化配置（颜色/长度/描边，`apps/game/src/config.ts:47-71`；debug 的准星是调试信息不是风格化对象）。
-
-### 3.3 tickRate 语义（容易踩坑的差异）
-
-- debug：面板 tickRate = 权威固定步长，直传无偏移（`apps/debug/src/worker/main.ts:98` `getConfigTickRate: () => config.physics.tickRate`）。
-- game：**无隐藏偏移（2026-09-21 用户定调取消）**——面板显示值、下发值、权威固定步长三者同值（`apps/game/src/worker/main.ts:425` `getConfigTickRate: () => config.physics.tickRate`）。此前为 2026-08-18 定调的「面板 + 3 隐藏偏移」（64 → 67Hz），现已移除；两侧语义一致。
-- debug 没有 lockTickRate；game 的 tickRate 在 lockTickRate=true 时只读。
-
-### 3.4 物理面板（debug 独有链路）
-
-- debug：13 项 `PARAM_DEFS` → `set-physics-param` 消息族 → Worker `PhysicsParams`（overrides + snapshot）→ `set_params` 单项 patch + `physics-snapshot` 回传 → 主线程回填并**镜像到渲染实例**（`apps/debug/src/physics/param-defs.ts`、`physics-worker.ts:50-85`、`app.ts:1630-1696`）。详见 [implementation/physics-panel.md](implementation/physics-panel.md)。
-- game：无面板参数消息——面板改的是 config，经 `bridge.sendConfig(section, patch)` 走通用 config 通道（`apps/game/src/input/input-bridge.ts:30`）。全仓 grep `set-physics-param` 仅 debug 命中。
-- 两侧的 `onExtraMessage`/`onWorldBuilt`/`onConfigApplied`/`onWasmInit`/`onInit` 钩子：debug 全部注入（`apps/debug/src/worker/main.ts:106-119`），game 一个都不用（`apps/game/src/worker/main.ts:80-93` 只传必需项）——共享分发器的工程扩展点实质上只有 debug 在用。
-
-### 3.5 玩法层：计时挑战 vs 存点
-
-- **debug 计时挑战**：`apps/debug/src/game-state.ts`（191 行，idle→running→finished、检查点 targetname 去重、死亡回退）+ `app.ts` 接线（onRenderPhysEvent `1471-1493`）；respawn 按钮语义"回最后检查点"（`app.ts:863-880`）。
-- **game 无计时挑战状态机**：全仓 grep `计时/challenge/checkpoint/game-state` 仅命中 lockTickRate 注释（`apps/game/src/config.ts:81,93`、`panel-controller.ts:222`），无对应状态文件——大纲遗留问题 #4 已核实。
-- **game 独有存点系统**：X 存点 / C 读点，`SavePointStore`（按地图 localStorage `websurf-game.savepoints.<map>`，上限 50 遗弃最早，`apps/game/src/savepoint.ts:27-30`）；按住 C 冻结——渲染 tick 每帧强制 `set_state(存点位置, 速度 0)`（`apps/game/src/renderer/renderer-main.ts:713-718`）。debug 无存点；debug 侧对应物是**自定义传送点**（`vbsp:customTeleports:<map>`，上限 50，`apps/debug/src/world/custom-teleports.ts`——语义是"跳到点"而非"恢复速度冻结"）。
-- **键位**：debug 固定键位（`keyboard.bind(window)`，KeyState 全键位，无改键 UI）；game 有完整改键系统（`apps/game/src/input/keymap.ts`：action→code[] 多绑定、localStorage `websurf-game.keymap.v1`、面板录制，`ACTION_LABELS`/`DEFAULT_KEYMAP`）。
-- **死亡阈值**：debug 把场景 minY 同步给权威（`set-death-threshold` 初发 + world-json 后重发，`apps/debug/src/app.ts:250-258,1362-1363`）→ 双线都判死。game 的 `InputBridge.sendSetDeathThreshold` 存在但**无调用方**（grep 全仓仅定义 `apps/game/src/input/input-bridge.ts:68-73`），`onSceneLoaded` 只设主线程 `setDeathY`（`apps/game/src/app.ts:129`）——game 权威线不判死（death_y 保持 Rust 默认 -100000），一致性靠渲染线死亡重生后的大偏差兜底同步。
-
-### 3.6 渲染器组织（debug 拆分 vs game 内联）
-
-- debug 把渲染职责拆成 8 个子管理器（camera-controller / lod-manager / fog-manager / light-manager / lightmap-shader / collider-debug / plane-inspector + world 层 pvs-manager/teleport-manager/collider-adapter），renderer-main 只做接线（`apps/debug/src/renderer/renderer-main.ts`）。
-- game 同一份 tick 逻辑**内联在单文件**：LOD/PVS 循环直接写在 renderer-main（`apps/game/src/renderer/renderer-main.ts:738-764`），相机直接 `camera.rotation.set(pitch, yaw, 0, 'YXZ')`（`:726`）不经过 CameraController 类。
-- debug 渲染是条件触发（`predReady || needsRender`，`apps/debug/src/renderer/renderer-main.ts:505-509`）；game 每帧无条件渲染（`apps/game/src/renderer/renderer-main.ts:766-767`）。
-- debug 独有的可视化/检查设施：ColliderDebug（凸包三色/chamfer/tri/触发器四色）、PlaneInspector、FogManager、LightManager（含未接线点光池）、cull 统计回传（emitCullStats）。game 全部没有——其渲染器头注自述"无 lightmap/雾/碰撞可视化/准星射线"（`apps/game/src/renderer/renderer-main.ts:10`），**lightmap 解码着色器注入（RGBExp32）为 debug 独有**（`apps/debug/src/renderer/lightmap-shader.ts`）。
-- 两端都有：近平面自适应、纹理画质切换（`applyTextureQuality`/`mosaic_decode`，`apps/game/src/renderer/renderer-main.ts:295,335` ≙ `apps/debug/src/renderer/renderer-main.ts:674-736`）两端同构。
-- 资源释放：debug `disposeObject` 覆盖 11 类纹理槽 + `disposeScene` 递归（`renderer-main.ts:294-325`）；game 只释放 `map` 一个槽位（`:676-689`）。
-
-### 3.7 加载体验与 UI
-
-- debug：侧栏状态行 + 缺失纹理比对弹窗（`collectMissingTextures: true` 传入 world-builder，`apps/debug/src/app.ts:1292-1298`；game 不传该选项）+ 视距滑块动态范围（`onSceneReadyUi`，`app.ts:350-359`）。
-- game：全屏进度覆盖层（阶段→百分比映射 + 动画，`apps/game/src/app.ts` showLoading/advanceLoading 段）。
-- 两端 handleLoadBsp 顺序同构（loadScene → buildPredictionWorld → world-json → spawnList 双端 → syncFullConfig），参数差异仅 collectMissingTextures/colliderSource 显式传参（game 用默认值）。
-
-### 3.8 工程杂项
-
-- 消息类型：debug `worker/worker-types.ts` 342 行（含 PlaneInfo/SceneDataMessage/PhysicsSnapshot 等调试类型）；game 版本较小，且头注仍提"Worker-B（预测）用独立协议（worker-types-predictor）"（`apps/game/src/worker/worker-types.ts:6`）——该文件在两工程都不存在（`apps/game/src/worker/` 只有 main.ts/worker-types.ts），属历史残留注释，不构成任何运行时行为。
-- 数据契约：debug `world/types.ts` 231 行（brush/spawn/teleport/PVS/metadata/ColliderFilter 全集）；game `world/types.ts` 仅 34 行 PVS 类型——因为 game 的渲染器不消费 brush/teleport JSON 的 TS 侧类型（碰撞体直接以字符串透传 wasm）。
-- 脚本：两端都有 build-dist.mjs + check-wasm-api.mjs；game 另有 9 个 `phys-*.mjs` 物理诊断脚本（`apps/game/scripts/`），debug 侧无对应物；debug 原有的 `verify:chamfer` 空引用入口（指向当时不存在的 `scripts/verify-chamfer.mjs`）已删除。
-
-## 4. debug vs viewer
-
-- viewer 不含物理：消费 WASM 薄导出（懒初始化 → metadata → spawn → GLB），无 Worker、无 PhysWorld、无权威帧（大纲 §2.3；`apps/viewer/src/core/bsp.ts`）。debug 是完整双线物理。
-- viewer 是回放器：录像驱动相机 + 自由飞行（fly），HUD 12.5Hz；debug 是交互模拟。两者 TS 无共享层 import（ts-shared 消费面 grep：debug/game 各 7 模块，viewer 0）。
-- 互不引用：`apps/debug/src` 与 `apps/viewer/src` 之间零 import（全仓 grep 验证，根 [documents/architecture.md](../architecture.md) 引用矩阵）。
-
-## 5. debug vs test/dual-mode-harness
-
-- harness 的 WorkerA/WorkerB 三线程协议与 ts-shared **不是同一套**：独立的 `TestShared` SAB（192B 布局，`test/dual-mode-harness/src/shared-state.ts`），背压 waitWakeup、MessageChannel 自续环、msg-main/msg-physics/msg-render 三角色消息回退。debug 用 ts-shared 512B 布局 + setTimeout 4ms 自驱，无背压。
-- ts-shared 消费面：harness 只 import `KEY_MASK`（键位掩码常量），其余全部自持。
-- harness 的价值是物理公平性对照实验（双模 tick/锚定拉回/速度校准细节见其自身文档 `documents/dual-mode-harness/overview.md`）；debug 不做锚定拉回，用的是速度外推 + 大偏差反向同步。
-
-## 6. 对共享层的取舍（debug 视角）
-
-| 共享层模块 | debug 使用方式 | game 是否同用 |
-|---|---|---|
-| `shared-state.ts` | SAB 512B + MsgState 回退，11 位 KEY_MASK | 是 |
-| `auth-loop.ts` | 权威自驱循环（无 game 的 +3 偏移） | 是（+3） |
-| `worker-dispatch.ts` | 5 个钩子全注入（面板/ready/mtz） | 0 钩子 |
-| `params.ts` | buildPhysicsParams（config 字段 + 面板参数双入口） | 是 |
-| `world-builder.ts` | 传 colliderSource + collectMissingTextures + onProgress | 只传 decompressMtz + onProgress |
-| `authority-calibrator.ts` | 校准 + resetTo（检查点回退复用） | 校准 + holdPoint 冻结不复用 resetTo |
-| `input-layer.ts` | layerMouseDelta + qeEquivalentDx | 同 |
-
-重复携带（共享层没有、两端各自实现）：chamfer 生成（`apps/debug/crates/wasm/src/lib.rs:2552` ≙ `apps/game/crates/wasm/src/lib.rs:1973`）、近平面探测、纹理画质切换、BspProcessor 导出面的 TS 封装（`apps/debug/src/world/collider-adapter.ts` 等 world 层文件 game 侧无对应——其碰撞体以 JSON 字符串直接透传 wasm）。这是"共享层只收敛协议与算法内核、工程各自保留 UI/渲染"原则的直接结果。
-
-## 7. 一句话总结
-
-debug = game 的物理骨架（ts-shared 7 模块 + websurf-phys 全量） + **参数面板/碰撞可视化/准星检查/近平面调参**四套调试设施 + **计时挑战状态机**；game 用省下的复杂度换**存点/改键/风格化准星/进度 UI**的游玩体验，并在 tickRate 上保留 +3 隐藏偏移与 lockTickRate 门槛。两者唯一的行为级物理差异是 tickRate 偏移（§3.3）与权威死亡阈值是否下发（§3.5），其余差异都在配置默认值与 UI 层。
+- 三工程的 `web/index.html` 都由构建脚本改写成 `single 产物` 的 classic script 形态，`multi 产物` 保留 module script；改写实现收敛在共享层 `src/scripts/lib/dist-pack.mjs`（本工程 `apps/debug/scripts/build-dist.mjs:43` 与 viewer `apps/viewer/scripts/build-dist.mjs:39` 都从该模块引入同一组打包辅助函数）。
+- 三工程的 dev 服务器都是共享的 `src/serve.py`，只是端口与服务根不同（本工程 `apps/debug/package.json:15`；viewer `apps/viewer/package.json:18`）。

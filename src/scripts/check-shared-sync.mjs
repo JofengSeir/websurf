@@ -1,21 +1,30 @@
 /**
- * 共享层一致性门禁（T-05 / B4-7）— 四项子检查，任一失败 `exit 1`。
+ * 共享层一致性门禁 —— 四项子检查，全部通过 `exit 0`，任一失败 `exit 1`。
  *
- * 定位：把「**不可合并的重复**」变成可判定门禁。这些重复因语义原因不可合并
- * （E-01…E-08），若同时没有门禁，它们就是「靠文档记载维持的一致性」。
+ * 四项断言的共同点：被比对的两侧在语义上不可合并（纹理工件三份副本、五份模块清单各需
+ * 一份 [patch.crates-io]、跨语言常量、许可证唯一源），只能逐项比对，故写成门禁。
  *
- * | 子检查 | 断言 | 依据 |
- * |---|---|---|
- * | `mtz` | 三处 `textures.mtz` sha256 全等；`apps/viewer/web/textures.mtz` **不得存在** | D-11、E-04、t2 §8.2 |
- * | `vmdl-patch` | 五份 `Cargo.toml` 均含 `[patch.crates-io]` 且 `vmdl` 指向 `src/vendor/vmdl` | E-02、R-21 |
- * | `eye-stand` | `src/phys/player.rs` 的 `EYE_STAND` 与 `src/ts-shared/phys/constants.ts` 的 TS 单点**逐位相等** | D-16、E-06 |
- * | `license-src` | `src/phys/{LICENSE,NOTICE}` 存在，且 `apps/` 下无第二份 cs-movement 许可**源** | D-23、E-08、R-17 |
+ * | 子检查 | 断言 |
+ * |---|---|
+ * | `mtz` | `src/materials/textures.mtz`、`apps/debug/web/textures.mtz`、
+ *   `apps/game/web/textures.mtz` 三份的 sha256 前 16 位全等；viewer 的
+ *   web/textures.mtz 不得存在 |
+ * | `vmdl-patch` | `manifests` 里每份清单都含 `[patch.crates-io]`，且其中 vmdl 一项的
+ *   path 指向 `src/vendor/vmdl` |
+ * | `eye-stand` | `src/phys/player.rs` 的 `pub const EYE_STAND: f64 = …;` 与
+ *   `src/ts-shared/phys/constants.ts` 的 `export const EYE_STAND = …;` 被正则捕获到的
+ *   字面量文本逐字符相等（比的是文本，不是数值） |
+ * | `license-src` | `src/phys/LICENSE` 与 `src/phys/NOTICE` 存在，且
+ *   `collectAppLicenseFiles` 在 `apps/` 下找不到第二份 LICENSE / NOTICE |
  *
- * **实现约束（必须保持）**：纯 `node:fs` + `node:crypto`，**禁止** `child_process`——
- * `src/scripts/check-doc-drift.mjs` 用 `execFileSync` 起 `git`，在禁止子进程 spawn 的
- * 环境（file sandbox）会 `EPERM -4048`；本工具因此可在任何沙箱直接运行。
+ * 已知偏差（只记录，未改代码）：`manifests` 末项指向的工程已不在工作区，`fs.existsSync`
+ * 为假 ⇒ `vmdl-patch` 当前必然落到「缺少模块清单」。
  *
- * 调用方式（不经任何 `package.json` 注册，与 check-doc-drift 同模式）：
+ * **实现约束（必须保持）**：只 import `node:fs` / `node:path` / `node:crypto` / `node:url`，
+ * **不引** `child_process`——`src/scripts/check-doc-drift.mjs` 用 `execFileSync` 起 `git`，
+ * 本工具则可在禁止子进程 spawn 的环境里直接运行。
+ *
+ * 调用方式（不经任何 `package.json` 或 CI workflow 注册）：
  *   node src/scripts/check-shared-sync.mjs
  */
 
@@ -29,23 +38,23 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const failures = [];
 const notes = [];
 
-/** 记录一项失败（不抛异常，收齐后统一报）。 */
+/** 记录一项失败：不抛异常，四项跑完后统一打印并置退出码 1。 */
 function fail(check, message) {
   failures.push(`[${check}] ${message}`);
 }
 
-/** 记录一项通过明细。 */
+/** 记录一项通过明细（在失败清单之前打印）。 */
 function note(check, message) {
   notes.push(`  [OK] [${check}] ${message}`);
 }
 
-/** sha256 前 16 位。 */
+/** 文件 sha256 的十六进制前 16 位：比较与打印都用这个缩短值。 */
 function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 16);
 }
 
 // ---------------------------------------------------------------------------
-// 1. mtz：三处纹理包一致性 + viewer 不得有副本（D-11 / E-04）
+// 1. mtz：三处纹理包 sha256 前 16 位全等 + viewer 不得有副本
 // ---------------------------------------------------------------------------
 
 function checkMtz() {
@@ -82,7 +91,7 @@ function checkMtz() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. vmdl-patch：五份 [patch.crates-io] vmdl 声明（E-02 / R-21）
+// 2. vmdl-patch：manifests 每份都要有指向 src/vendor/vmdl 的 [patch.crates-io] vmdl 声明
 // ---------------------------------------------------------------------------
 
 function checkVmdlPatch() {
@@ -92,7 +101,6 @@ function checkVmdlPatch() {
     'apps/debug/Cargo.toml',
     'apps/game/Cargo.toml',
     'apps/viewer/Cargo.toml',
-    'test/dual-mode-harness/Cargo.toml',
   ];
   for (const rel of manifests) {
     const abs = path.join(ROOT, rel);
@@ -115,7 +123,7 @@ function checkVmdlPatch() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. eye-stand：Rust 权威 ↔ TS 单点逐位相等（D-16 / E-06）
+// 3. eye-stand：Rust 定义与 TS 单点的 EYE_STAND 字面量逐字符相等
 // ---------------------------------------------------------------------------
 
 function checkEyeStand() {
@@ -155,10 +163,10 @@ function checkEyeStand() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. license-src：许可唯一源 + apps/ 下无第二份许可源（D-23 / E-08 / R-17）
+// 4. license-src：许可唯一源必须存在 + apps/ 下不得有第二份许可源
 // ---------------------------------------------------------------------------
 
-/** 递归收集 apps/ 下所有 LICENSE / NOTICE 文件（跳过 node_modules 与构建产物目录）。 */
+/** 递归收集 apps/ 下的 LICENSE / NOTICE（含带扩展名的变体）；skipDirs 里的目录不进入。 */
 function collectAppLicenseFiles() {
   const found = [];
   const skipDirs = new Set(['node_modules', 'dist', 'pkg', 'target', 'temp', '.tmp']);

@@ -1,95 +1,43 @@
-# WebSurf-game（最小化实现）
+# WebSurf-game 文档子树
 
-> 最后核对：2026-08-13。以实际代码为准（`apps/game/src/` + 共享 `src/ts-shared/`）。
+## 本子树范围
 
-WebSurf 的激进最小化实现（独立工程 `game/`）。物理栈整体下沉 Rust WASM，
-v7 定案：**主线程唯一物理渲染线 + 单 Worker 权威帧计算器**。
-
-## 架构
-
-```
-主线程 (src/app.ts + src/renderer/renderer-main.ts)
-  ├─ 输入采集（MouseBuffer CLAMP 1000）→ 灵敏度输入层 → SAB 输入槽（BigInt64 原子累加）
-  ├─ 每 rAF：写输入 → 读权威帧 → set_velocity 外推校准 → PhysWorld.tick（可变 dt 单步，上限 0.1s）→ 渲染直读 state()
-  ├─ ESC 两栏面板（左导航 + 右设置，七模块）＋ 按键自定义录制；lockTickRate 可锁定 64Hz（公平模式）
-  ├─ 渲染：LOD 距离剔除（cullDistance=maxDim×0.5；PVS 管线保留但默认禁用 ENABLE_PVS=false——surf_666 实测负收益）+ 近平面贴墙自适应（4 水平方向探测，每 2 帧）
-  └─ 速度 HUD 8Hz（PhysWorld.state().vel 采样，纯数字，居中偏下 24%）
-Worker (src/worker/main.ts，共享 ts-shared/auth)
-  ├─ setTimeout 4ms 自驱权威循环（auth-loop）
-  ├─ 固定步长 1/tickRate（**面板值直译**、无隐藏偏移：面板 64 → 权威 64Hz；面板 48-128 可调）
-  ├─ 消费 SAB 输入槽 → 完整物理（Rust PhysWorld）→ 碰撞事件（land/blocked）→ 写权威双缓冲 + V_A++
-  └─ 兜底同步（sync-render-state 三条件 + 250ms 冷却 + 在途回滚）
-```
-
-## SAB 布局（512B，src/ts-shared/auth/shared-state.ts）
-
-| 区 | 内容 |
+| 篇 | 回答什么问题 |
 |---|---|
-| Int32 控制区 | V_A / keys / A_GROUND |
-| BigInt64 输入槽 | dxAcc / dyAcc（原子累加，永不溢出） |
-| 权威双缓冲 | S_A[0] / S_A[1]（每槽 10 值定点：pos/vel×100、角度×1000；Worker 写空闲槽 → V_A++ → 主线程读 (V_A-1)&1） |
+| `documents/game/overview.md` | 工程定位、目录职责、依赖方向、构建产物与脚本、启动链、由代码保证的不变量 |
+| `documents/game/sequences.md` | 启动时序、帧链/主循环、消息与通道、异常与回退路径 |
+| `documents/game/differences.md` | 与 `apps/debug`、`apps/viewer` 的**实测**差异（逐条给两侧锚点） |
+| `documents/game/implementation/app-entry.md` | `apps/game/src/app.ts`：装配顺序、DOM 绑定、地图装载、加载进度覆盖层、HUD |
+| `documents/game/implementation/config.md` | `apps/game/src/config.ts`：七段配置、默认值、段级部分更新、物理参数映射 |
+| `documents/game/implementation/renderer.md` | `apps/game/src/renderer/**`：主线程渲染物理、场景装载、光照注入、剔除与出帧探针 |
+| `documents/game/implementation/worker.md` | `apps/game/src/worker/**`：Worker 权威物理装配、渲染轨迹采样、健康护栏、消息协议类型面 |
+| `documents/game/implementation/input.md` | `apps/game/src/input/**`：键位表与持久化、键盘状态、鼠标缓冲、面板参数下发桥 |
+| `documents/game/implementation/panel.md` | `apps/game/src/panel/**`：八分栏面板、控件接线、偏好持久化、存点列表渲染 |
+| `documents/game/implementation/savepoint.md` | `apps/game/src/savepoint.ts`：按地图分键的存点存储与容量上限 |
+| `documents/game/implementation/types.md` | `apps/game/src/world/types.ts` 与 `apps/game/src/wasm.d.ts`：本工程的类型出口 |
+| `documents/game/implementation/scripts.md` | `apps/game/scripts/**`：构建脚本与物理冒烟脚本、门禁覆盖面 |
+| `documents/game/implementation/wasm-crate.md` | `apps/game/crates/wasm/**`：本工程 wasm 绑定层与其 Cargo 配置 |
 
-> 关键设计：**双缓冲消除多字段撕裂**；权威帧只读（位置/角度由主线程预测物理线
-> 权威，Worker 角度仅经 phys-event 碰撞事件回传）；**无预测 Worker**（v3 时代的
-> 预测热待机已随 v7 移除）。无 COOP/COEP 时自动降级 MsgState（input/phys-frame 消息）。
+## 事实来源
 
-## 构建
+本子树全部结论取自当前源码，入口清单如下（行号随文件变动会漂，读时以符号名为准）：
 
-```bash
-npm install
-npm run build:wasm   # wasm-pack release（wasm-opt=false：本机 NODE_OPTIONS 污染 wasm-opt；并拷贝 wasm 到 web/）
-npm run build:ts     # typecheck + esbuild（app/worker 两产物）
-node scripts/check-wasm-api.mjs  # 契约校验（导出 16 + 物理 17 API）
-npm run test:phys                # Rust 物理冒烟（node 跑 WASM）
-npm run build:dist   # 默认 single（base64 内嵌 + Blob worker，file:// 可玩）；--multi 多文件（HTTP）
-```
+- `apps/game/package.json` 的 `scripts`（`apps/game/package.json:7`）：dev 端口、构建链与三个 node 冒烟脚本。
+- `apps/game/src/app.ts` 的 `main`（`apps/game/src/app.ts:94`）：主线程装配全流程，文件末 `void main()` 触发。
+- `apps/game/src/config.ts` 的 `DEFAULT_CONFIG`（`apps/game/src/config.ts:176`）：七段配置的唯一默认值来源。
+- `apps/game/src/worker/main.ts` 的 `createAuthLoop`（`apps/game/src/worker/main.ts:451`）：Worker 权威物理的装配点。
+- `apps/game/src/renderer/renderer-main.ts` 的 `tick`（`apps/game/src/renderer/renderer-main.ts:922`）：一帧内的物理、相机、剔除与绘制。
+- `apps/game/src/panel/panel-controller.ts` 的 `PanelController`（`apps/game/src/panel/panel-controller.ts:45`）：面板控件接线与偏好持久化。
+- `apps/game/src/input/input-bridge.ts` 的 `sendConfig`（`apps/game/src/input/input-bridge.ts:41`）：面板参数的双端下发口。
+- `apps/game/web/index.html` 的 `canvas#preview`（`apps/game/web/index.html:27`）：页面外壳与全部挂载点。
 
-**一键脚本**：
-- `build-dist.cmd`（双击）：wasm → 契约 → typecheck → dist，全分支 pause 防闪退
-- `play.cmd`（双击即玩）：起本地服务器（COOP/COEP 头）→ 自动打开 `dist/index.html`
+共享层侧只写「game 如何消费」三个入口：`src/ts-shared/auth/worker-dispatch.ts` 的 `createWorkerDispatch`（`src/ts-shared/auth/worker-dispatch.ts:207`）、`src/ts-shared/auth/shared-state.ts` 的 `createMainSharedState`（`src/ts-shared/auth/shared-state.ts:1022`）、`src/ts-shared/phys/world-builder.ts` 的 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:143`）。
 
-> dist 默认 **single 内嵌打包**（WASM base64 + Worker Blob URL），专门支持 file:// 双击
-> （无 fetch 能力；无 SAB 自动 MsgState 降级）。`--multi` 为多文件（app.js + worker.js +
-> wasm + textures.mtz），用于 GitHub Pages / HTTP 部署（SAB 高性能需 COOP/COEP）。
+## 阅读顺序
 
-## 运行
+1. `documents/game/overview.md`：先建立「这个工程由哪些目录构成、产物是什么、谁依赖谁」的骨架。
+2. `documents/game/sequences.md`：再看启动时序与一帧内的数据流，含 main↔Worker 的消息与载荷字段。
+3. `documents/game/implementation/*.md`：按模块读细节；每篇末节「已知缺口」逐条给锚点。
+4. `documents/game/differences.md`：最后看与另两个工程的实测差异，避免把某个工程的实现当成三工程通例。
 
-- **推荐**：双击 `play.cmd`（本地 HTTP + COOP/COEP，SAB 高性能）
-- **或**：`python ..\..\src\serve.py 8080 .` 后访问 `http://localhost:8080/dist/index.html`（dev 页面 `web/index.html`）
-- `file://` 双击 single 构建也可玩（MsgState 降级；SAB 高性能需 HTTP）
-
-> **注意（如实记录）**：仓库内 `web/*.js` 与 `dist/*` 为 2026-08-07 旧架构（v3：load-bsp
-> 协议、Worker-B 预测）构建产物，与当前 `src/`（v7 公共化）不匹配——**运行前请先
-> `npm run build:ts`（dev）或 `build-dist.cmd`（dist）重建**；`play.cmd` 已四步自举——首次双击自动完成依赖安装与 wasm/ts/dist 构建。
-> 另：`src/worker/worker-types.ts` 协议类型仍部分落后于实现——world-json / input 已补入
-> 联合类型，`set-spawn-points` / `sync-render-state` / `teleport-to-pos` 仍缺（运行时协议
-> 以 `src/ts-shared/auth/worker-dispatch.ts` 为准）。
-
-## 控制
-
-- WASD 移动 · 空格跳 · Ctrl 蹲 · Shift 慢走 · Q/E 转视角 · R 重生（**全部可自定义**，面板「按键」模块录制 + localStorage 持久化）
-- 点击 3D 区域（画面任意未被 UI 覆盖处）锁定；ESC 打开面板（未锁定时）；M 手动开关；面板「关闭」仅隐藏不锁定
-- 面板（两栏七模块）：**通用**（加载地图/重生/出生点）、物理（tickRate 48-128 联动、
-  重力/加速/空加/摩擦/autobhop）、体型（半宽/站高/蹲高）、按键、操作（灵敏度/Q-E）、
-  显示（准星/速度模式/纹理画质/近平面参数）、视角（noclip 切换 + 速度 200-3000，Shift 再 ×4）
-
-## 规模
-
-| 层 | 说明 |
-|---|---|
-| TS | ~3,062 行 / 14 文件（不含共享 src/ts-shared ~1,480 行，2026-08-11 实测） |
-| Rust 物理 | 2,821 行 / 4 文件（world/player/teleport/mod，共享仓库根 src/phys，2026-08-13 实测） |
-| scene-data | GLB + spawn/pvs 小 JSON（-95%） |
-| 消息协议 | 约 14 种（init/wasm-init/world-json/config/respawn/sync-render-state/set-spawn-points/teleport/teleport-to-pos/set-death-threshold/input/phys-frame/phys-event/error）——其中 `set-death-threshold`/`teleport-to-pos` 为共享层已定义但 **game 主线程实际未发送**（权威 Worker 死亡阈值恒为 Rust 默认 -100000，见 physics.md §8） |
-
-## 文档（`documents/game/`）
-
-- [overview.md](../../documents/game/overview.md) — 总览与工程结构（v7 架构总图）
-- [sequences.md](../../documents/game/sequences.md) — 时序（启动/地图加载/双线程帧循环/校准与反向同步/SAB 协议）
-- [implementation/panel-and-input.md](../../documents/game/implementation/panel-and-input.md) — 输入采集链、键位录制、PointerLock、面板七模块
-- [implementation/gameplay.md](../../documents/game/implementation/gameplay.md) — 存点/出生点/渲染体验/死亡阈值/PVS 现状
-- [differences.md](../../documents/game/differences.md) — 与 debug/viewer/test 的架构取舍与共享层收敛
-- 旧版文档与过程材料已移出版本库（见 git 历史），不再作为事实来源
-
-> 公共架构见根 [../../documents/architecture.md](../../documents/architecture.md)；时序见 [sequences.md](../../documents/game/sequences.md)、[../../documents/debug/sequences.md](../../documents/debug/sequences.md)；
-> 验证工程（双模物理 + 帧信号渲染时序）见 [../dual-mode-harness/README.md](../dual-mode-harness/README.md) + [../dual-mode-harness/implementation/conclusion.md](../dual-mode-harness/implementation/conclusion.md)。
+术语口径与另两棵子树对齐：共享物理 crate 写 `websurf-phys`（`src/phys/**`）；本工程的权威物理写「Worker 权威物理」；主线程物理写「主线程渲染物理（`predPhys`）」；通道写「SAB 通道」与「postMessage 回退」；产物形态写「single 产物」与「multi 产物」。

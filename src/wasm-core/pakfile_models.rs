@@ -1,32 +1,39 @@
-//! PAKFILE 内嵌模型的**材质解析**与**碰撞体数据准备**。
+//! PAKFILE 内嵌模型的**材质解析**与**世界空间变换**。
 //!
-//! Source BSP 会把地图用到的 `.mdl/.vvd/.vtx/.vmt/.vtf` 打进 PAKFILE lump。
-//! 本模块在**无外部游戏资源**前提下，仅凭 BSP 字节完成两件事：
+//! 本模块只做三件事，输入是 PAKFILE 条目的名字或字节：
 //!
-//! 1. **材质**：解析 `.vmt`（Source KeyValues 文本）取 `$basetexture` 与透明度标注，
-//!    再找对应 `.vtf` 解码成 PNG，交给 `model-integrator` 贴到 GLB 材质上。
-//! 2. **碰撞体数据**：为模型碰撞导出提供顶点/网格/透明度门控数据（三角碰撞与
-//!    .phy 凸包碰撞由各工程 `BspProcessor::export_model_*_colliders` 消费）。
+//! 1. **VMT 解析**（`parse_vmt`）：把 `.vmt` 文本扫成 `VmtInfo`——`$basetexture`、
+//!    透明度标注 `alpha_mode`、自发光标记 `unlit`、`patch` 的 `include` 目标。
+//! 2. **条目索引**（`PakIndex`）：PAKFILE 条目名的大小写不敏感查找，供调用方由材质名 /
+//!    贴图名定位 `.vmt` 与 `.vtf` 条目。
+//! 3. **世界空间变换**（`quat_rotate` / `place_point`）：把模型局部顶点按
+//!    `translation + q ⊗ (scale ⊙ v)` 搬到世界空间。
 //!
-//! ## 透明度的「内置标注」在哪
+//! 本模块**不做碰撞判定、不读 `.phy`、不展开网格、不碰 GLB**。下游：
+//! - 三工程 `crates/wasm/src/lib.rs` 的 `resolve_pakfile_materials`：调 `PakIndex` +
+//!   `parse_vmt`，产出 `材质名 → alpha_mode` 与 `纹理名 → PNG 字节`；
+//! - `apps/debug` 与 `apps/game` 的 `export_model_tri_colliders` /
+//!   `export_model_phy_colliders`（`apps/viewer` 无碰撞导出，不调这两个）：
+//!   用 `place_point` 搬顶点，并按 `alpha_mode` 与 `Placement::solid` 决定是否跳过碰撞；
+//! - `alpha_mode` 经 `model_integrator::InMemoryResources::material_alpha_mode` 决定 GLB
+//!   材质的 alphaMode；`unlit` 经同结构的 `material_unlit` 让材质走全亮。
 //!
-//! Source 的透明度标注全部写在 `.vmt` 里：
+//! ## `alpha_mode` 的判定口径
 //!
-//! | VMT 键 | 含义 | 本模块映射 |
+//! 只有两种标注能让材质变成非不透明，且 **Blend 优先于 Mask**：
+//!
+//! | VMT 键 | 触发条件 | alpha_mode |
 //! |---|---|---|
-//! | `$translucent 1` | 逐像素混合半透明（玻璃、水幕） | alpha_mode = 1（Blend） |
-//! | `$alpha <1` | 整体透明度 | alpha_mode = 1（Blend） |
-//! | `$alphatest 1` | 二值镂空（铁丝网、树叶） | alpha_mode = 2（Mask） |
-//! | 均未出现 | 不透明 | alpha_mode = 0（Opaque）→ **默认带碰撞** |
+//! | `$translucent` | 值 ≠ `"0"` | 1（Blend） |
+//! | `$alpha` | 能解析成 `f32` 且 < 0.999 | 1（Blend） |
+//! | `$alphatest` | 值 ≠ `"0"` | 2（Mask） |
+//! | 以上都没有 | —— | 0（Opaque） |
 //!
-//! 碰撞门控采用**保守**策略（没有标注就默认有碰撞）：
-//! - 仅当模型**所有**材质都是 `Blend`（真半透明）时才判定「可穿过」而跳过碰撞；
-//! - `$alphatest` 镂空材质（铁丝网/栅栏）在 Source 里本是实体，**保留碰撞**；
-//! - 未找到 `.vmt`（材质未打包）按**不透明**处理，即**保留碰撞**。
+//! `unlit` 有两条来路：着色器名以 `unlit` 开头，或 `$selfillum` 取到非 `"0"` 的非空值。
 //!
-//! 另外 `static_prop` lump 自带 `solid`（`SolidType`）字段，`0 = SOLID_NONE`
-//! 是**明确无歧义**的「此道具无碰撞」标注，本模块尊重它；其余取值在各版本间
-//! 语义不完全一致，故不用于门控（一律按有碰撞处理）。
+//! 碰撞门控不在本模块。调用点实测：`export_model_tri_colliders` 里
+//! `if alpha == 1 { continue; }`——**只有 Blend 跳过**，Mask 与 Opaque 都保留碰撞；
+//! `Placement::solid == Some(0)`（即 `SolidType::None`）的实例另由调用方 `filter` 掉。
 
 use std::collections::HashMap;
 
@@ -34,28 +41,33 @@ use std::collections::HashMap;
 // VMT（Source KeyValues 文本）解析
 // ---------------------------------------------------------------------------
 
-/// 单个 `.vmt` 解析结果。
+/// 单个 `.vmt` 的解析结果，字段全部来自 `parse_vmt` 的扁平扫描。
 #[derive(Debug, Clone, Default)]
 pub struct VmtInfo {
-    /// `$basetexture` 的值（已把 `\` 归一为 `/`，不含扩展名）。
+    /// `$basetexture` 的值：`\` 已归一为 `/`，首尾 `/` 已去掉，不含扩展名。
+    /// 同名键**首次命中即锁定**，后续重复键不覆盖。
     pub basetexture: Option<String>,
-    /// 0 = 不透明；1 = Blend（`$translucent` / `$alpha<1`）；2 = Mask（`$alphatest`）。
+    /// 0 = Opaque；1 = Blend（`$translucent` 或 `$alpha < 0.999`）；2 = Mask（`$alphatest`）。
+    /// Blend 与 Mask 同时命中时取 Blend。
     pub alpha_mode: u8,
-    /// 自发光 / 无光照：VMT 着色器为 `UnlitGeneric`（含大小写变体）或 `$selfillum != 0`。
-    /// Source 语义下这类材质**完全不吃光照**（只出贴图原色）；渲染侧据此走全亮。
+    /// 自发光 / 无光照：着色器名以 `unlit` 开头（不区分大小写），或 `$selfillum` 取到
+    /// 非 `"0"` 的非空值。消费方据此让材质走全亮（不吃 lightmap / ambient cube）。
     pub unlit: bool,
-    /// `Patch` 着色器的 `include` 目标（另一个 `.vmt` 的路径）。
+    /// `Patch` 着色器的 `include` 目标（另一个 `.vmt` 的路径）：`\` 已归一为 `/`，
+    /// 首尾 `/` 已去掉，`.vmt` 后缀已剥。首次命中即锁定。
     ///
-    /// Source 的 `patch` 材质本身不含 `$basetexture`，只写
-    /// `include "materials/xxx.vmt"` + 若干 `replace`/`insert` 覆盖项，
-    /// 调用方需再取一次被引用的 VMT 才能拿到真正的贴图。
+    /// `patch` 材质自身可以没有 `$basetexture`，只写 `include "materials/xxx.vmt"`
+    /// 加若干 `replace` / `insert` 覆盖项；调用方需再取一次被引用的 VMT 才能拿到贴图。
     pub include: Option<String>,
 }
 
-/// 把一行 KeyValues 切成 token，正确处理成对双引号。
+/// 把一行 KeyValues 切成 token，**成对双引号内**的空白不切分。
 ///
 /// `"$basetexture" "models/foo/bar"` → `["$basetexture", "models/foo/bar"]`
 /// `$basetexture models/foo/bar`     → `["$basetexture", "models/foo/bar"]`
+///
+/// 引号本身不入 token；引号外的 `{` 与 `}` **被丢弃**（既不成 token 也不当分隔符），
+/// 因此纯花括号行得到**空 `Vec`**。
 fn tokenize_kv(line: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut cur = String::new();
@@ -89,23 +101,24 @@ fn tokenize_kv(line: &str) -> Vec<String> {
     out
 }
 
-/// 解析 `.vmt` 文本，提取 `$basetexture` 与透明度标注。
+/// 解析 `.vmt` 文本，提取 `$basetexture`、透明度标注、自发光标记与 `include`。
 ///
-/// 只做**扁平扫描**（不建 KeyValues 树）：VMT 顶层参数几乎总在根块内，
-/// 子块（`Proxies`/`>=DX90`）里的同名键取首次命中即可，足够稳健。
+/// **扁平扫描，不建 KeyValues 树**：块结构（`Proxies`、`>=DX90` 等）被忽略，
+/// 块内的键与顶层键同等对待，同名键取**首次命中**。
+///
+/// 行切分同时按 `\n` 与 `\r`（`split(['\n', '\r'])`）——只按 `\n` 切会把孤立 CR
+/// 两侧的内容并成一行，见单元测试 `parses_basetexture_across_lone_cr`。
 pub fn parse_vmt(text: &str) -> VmtInfo {
     let mut info = VmtInfo::default();
     let mut translucent = false;
     let mut alphatest = false;
     let mut unlit = false;
 
-    // ⚠️ 行尾必须按 `\r` / `\n` **都切**：Valve 老工具产出的 VMT 会混用 CRLF 与
-    // **孤立 CR**（实测 `materials/666/blue_neon.vmt`：`$model 1 <CR>  "$basetexture" …`）。
-    // `str::lines()` 只按 `\n` 切 ⇒ 会把 `$model` 与 `$basetexture` 并成一行，
-    // 取 `toks[0]` 得到 `$model` ⇒ 永远拿不到 `$basetexture` ⇒ prop 材质落到回退色
-    // （表现即「霓虹/自发光亮面发黑」）。
+    // 行尾必须按 `\r` / `\n` **都切**：`str::lines()` 只认 `\n`，孤立 CR 会把相邻两行
+    // 并成一行，于是 `toks[0]` 变成前一行的键 ⇒ 取不到 `$basetexture`。本文件用
+    // `split(['\n', '\r'])` 规避，回归用例见 `parses_basetexture_across_lone_cr`。
     for raw in text.split(['\n', '\r']) {
-        // 去掉行尾 `//` 注释（VMT 不支持字符串内 `//`，直接截断即可）
+        // 行内**第一个** `//` 起全部截断；引号内的 `//` 也照截（VMT 里 `//` 只作注释）
         let line = match raw.find("//") {
             Some(i) => &raw[..i],
             None => raw,
@@ -115,12 +128,14 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
             continue;
         }
         let toks = tokenize_kv(line);
-        // ⚠️ 纯 `{` / `}` 行经 tokenizer 会变成**空数组**（花括号被丢弃）⇒ 必须先挡空，        // 否则下面的 `toks[0]` 会 panic（wasm 里表现为 RuntimeError + 借用标志泄漏，        // 导致同一 BspProcessor 的后续调用报 `recursive use of an object`）。
+        // 纯 `{` / `}` 行经分词得到空数组，必须先挡空：否则下面的 `toks[0]` 越界
         if toks.is_empty() {
             continue;
         }
         if toks.len() < 2 {
-            // 首行的着色器名（如 `"UnlitGeneric"` / `UnlitGeneric {`）只有一个 token
+            // 整行只剩一个 token 时才拿它当着色器名（`"UnlitGeneric"` 与
+            // `UnlitGeneric {` 都归一成 1 个 token）。同一行还写了别的键时走不到这里，
+            // 那种写法下着色器名不参与 unlit 判定。
             let k = toks[0].to_ascii_lowercase();
             if k.starts_with("unlit") {
                 unlit = true;
@@ -164,7 +179,8 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
             "include" => {
                 if info.include.is_none() {
                     let v = val.replace('\\', "/");
-                    // 去掉 `materials/` 前缀与 `.vmt` 扩展名，统一交给 PakIndex 处理
+                    // 只去首尾 `/` 与 `.vmt` 后缀；**不剥 `materials/` 前缀**——
+                    // 前缀补全由 PakIndex::find 的候选列表负责
                     let v = v.trim_matches('/');
                     let v = if v.to_ascii_lowercase().ends_with(".vmt") {
                         v[..v.len() - 4].to_string()
@@ -181,6 +197,7 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
     }
 
     info.unlit = unlit;
+    // 优先级：Blend 压过 Mask；两者都无才是 Opaque
     info.alpha_mode = if translucent {
         1
     } else if alphatest {
@@ -197,17 +214,17 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
 
 /// PAKFILE 内所有条目的大小写不敏感索引。
 ///
-/// Source 资源路径大小写混乱（编译器保留作者磁盘上的大小写，而 MDL 内记录的
-/// 材质名往往是小写），必须统一归一化才能可靠命中。
+/// 两侧都归一化后比较：`build` 存小写键，`find` 把查询串也转小写，因此条目名与查询串
+/// 的大小写差异不影响命中。两个表都是**首个写入者胜**——同名条目只留第一次出现的原文。
 pub struct PakIndex {
     /// `小写完整路径（含扩展名）` → 原始条目名
     by_path: HashMap<String, String>,
-    /// `小写基名（不含扩展名）.扩展名` → 原始条目名（同名取首个）
+    /// `小写基名（不含目录，含扩展名）` → 原始条目名（不同目录同名只留首个）
     by_stem: HashMap<String, String>,
 }
 
 impl PakIndex {
-    /// 从 PAKFILE 条目名列表构建索引。
+    /// 从 PAKFILE 条目名列表构建索引。不改动入参；表里存的是**原始**条目名。
     pub fn build(entry_names: &[String]) -> Self {
         let mut by_path = HashMap::new();
         let mut by_stem = HashMap::new();
@@ -227,7 +244,9 @@ impl PakIndex {
         Self { by_path, by_stem }
     }
 
-    /// 按「完整路径」查找（自动补 `materials/` 前缀并尝试多种写法）。
+    /// 按路径查条目：先试 4 个候选（原样 / `materials/` / `models/` / `materials/models/`，
+    /// 各补 `.{ext}`），都不中再退化成**只按基名**查（忽略目录层级）。
+    /// 返回 `None` 表示索引里没有这个条目。返回的是原始条目名（保留原始大小写）。
     pub fn find(&self, path_no_ext: &str, ext: &str) -> Option<&String> {
         let p = path_no_ext.replace('\\', "/").to_ascii_lowercase();
         let p = p.trim_matches('/');
@@ -248,6 +267,7 @@ impl PakIndex {
     }
 }
 
+/// 右手系叉积 `a × b`。仅供 `quat_rotate` 使用。
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
@@ -256,7 +276,11 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-/// 四元数（x, y, z, w）绕轴旋转向量。与 `model-integrator::parse_angles` 产出的四元数配套。
+/// 用四元数 `q = [x, y, z, w]`（实部在 `w`）旋转向量：`v' = v + 2·u×(u×v + s·v)`，
+/// 其中 `u` 是虚部、`s` 是实部。**不归一化 `q`**，直接按单位四元数公式代入。
+///
+/// 与 `model_integrator` 的 `parse_angles_str` 产出的四元数配套（同一分量序）。
+/// 调用点只有本文件的 `place_point`——`pub` 但工程侧无直接调用方。
 pub fn quat_rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
     let u = [q[0], q[1], q[2]];
     let s = q[3];
@@ -271,10 +295,15 @@ pub fn quat_rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
 }
 
 /// 把模型局部顶点搬到世界空间：`translation + q ⊗ (scale ⊙ v)`。
-
+/// `scale` 为 `None` 时取 `[1, 1, 1]`；`rotation` 为 `None` 时不旋转。
+///
 /// 变换链必须与 GLB 节点（`Node { translation, rotation, scale }`）**逐位一致**，
-/// 二者的输入都来自同一份 `crate::model_integrator::resolve_placements`，
-/// 因此碰撞体不会相对显示模型产生任何偏移。
+/// 二者的输入都来自同一份 `model_integrator::resolve_placements` 产出的 `Placement`
+/// （`src/wasm-core/model_integrator/mod.rs` 的 `Placement` 处写着这条不变量），
+/// 因此碰撞体不会相对显示模型产生偏移。
+///
+/// 调用方：两工程 `crates/wasm/src/lib.rs` 的 `export_model_tri_colliders` 与
+/// `export_model_phy_colliders` 覆盖全部放置实例。
 pub fn place_point(
     v: [f32; 3],
     translation: [f32; 3],
@@ -298,10 +327,8 @@ pub fn place_point(
 mod tests {
     use super::parse_vmt;
 
-    /// 回归：Valve 老工具产出的 VMT 会在行间混用 **孤立 CR**（无 \n）。
-    /// `str::lines()` 只按 \n 切 ⇒ `$model 1 <CR> "$basetexture" …` 并成一行 ⇒ 取不到
-    /// `$basetexture` ⇒ prop 材质落到 0.3 回退色（实机表现：霓虹/自发光「亮面发黑」）。
-    /// 回归：纯 `{` / `}` 行分词后是空数组 ⇒ 不得索引 `toks[0]`（曾 panic）。
+    /// 纯 `{` / `}` 行分词后是空数组，不得索引 `toks[0]`；同时验证
+    /// `UnlitGeneric` 被认成 unlit、`$basetexture` 被取到（CRLF 文本）。
     #[test]
     fn brace_only_lines_do_not_panic() {
         let vmt = "\"UnlitGeneric\"\r\n{\r\n  \"$basetexture\" \"devneons/blue_neon\"\r\n}\r\n";
@@ -310,7 +337,7 @@ mod tests {
         assert!(info.unlit, "UnlitGeneric 应被标为自发光");
     }
 
-    /// 回归：`$selfillum 1` 同样要标成自发光（不依赖着色器名）。
+    /// `$selfillum 1` 同样标成自发光——不依赖着色器名（着色器是 `LightmappedGeneric`）。
     #[test]
     fn selfillum_marks_unlit() {
         let vmt = "\"LightmappedGeneric\"\n{\n\t\"$basetexture\" \"x/y\"\n\t\"$selfillum\" \"1\"\n}\n";
@@ -319,6 +346,8 @@ mod tests {
         assert_eq!(info.basetexture.as_deref(), Some("x/y"));
     }
 
+    /// 行间混用**孤立 CR**（无 `\n`）时仍要取到 `$basetexture`：若只按 `\n` 切，
+    /// `$model 1` 会与 `"$basetexture" …` 并成一行，`toks[0]` 变成 `$model`。
     #[test]
     fn parses_basetexture_across_lone_cr() {
         let vmt = "\"UnlitGeneric\"\r\n{\r\n\t$model 1 \r  \"$basetexture\" \"devneons/blue_neon\"\r\n  \"$selfillum\" 1\r\n}\r\n";

@@ -1,15 +1,21 @@
 /**
- * WebSurf — Worker 物理协调器（阶段 2 缩减版：权威帧计算器模式）
+ * Worker 物理控制面板协调器（`PhysicsWorker`）。
  *
- * 阶段 2 架构：权威世界与固定步长循环在 main.ts（game 模式自驱 dispatch），
- * 本类只保留物理控制面板职责：
- * - 物理参数/碰撞箱（PhysicsParams → Rust set_params/set_hull → 权威 phys）
- * - physics-snapshot 回传（面板渲染；主线程 renderPhysicsSnapshot 同步镜像到
- *   渲染物理 predPhys —— 双端同参）
+ * 本类只承担「物理控制面板」这一条链路；权威物理的推进与发布由
+ * `src/ts-shared/auth/auth-loop.ts` 的 `createAuthLoop` 独立承担。三件事：
+ * - 持有 `PhysicsParams`（面板数据源与执行层）：参数写权威 `PhysWorld.set_params`、
+ *   碰撞箱写 `set_hull`；`tickRate` 属 JS 驱动层参数，`PhysicsParams.applyOverride`
+ *   对它改走 `onTickRateChange` 回调而不写 Rust，由 `apps/debug/src/worker/main.ts`
+ *   接到权威固定步长；
+ * - 接收主线程的面板消息 `set-physics-param` / `reset-physics-param` / `set-hull` /
+ *   `reset-hull` / `set-auto-restore-hull`，每条处理完立即回传一次 `physics-snapshot`；
+ * - `physics-snapshot` 的消费方是 `apps/debug/src/app.ts` 的 `renderPhysicsSnapshot`：
+ *   回填面板控件，并经同文件的 `mirrorSnapshotToPrediction` 把同一份参数镜像到主线程
+ *   渲染物理（双端同参）。
  *
- * 已删除（阶段 1/2 主线程本地化）：handleLoadBsp（BSP 解析/GLB 导出移主线程）、
- * handleFrame/physicsLoop（frame 信号驱动删除，改 setTimeout 4ms 自驱）、
- * stats/game-stats/player-pos 回传（HUD/计时挑战/自定义传送点保存位置均主线程本地）。
+ * 装配点（全仓唯一实例）：`apps/debug/src/worker/main.ts` 的 `physicsWorker`。
+ * `createWorkerDispatch` 的三个钩子分别调本类——`onWorldBuilt` → `attachWorld`、
+ * `onConfigApplied` → `reapplyParams`、`onExtraMessage` → `handleMessage`。
  */
 
 import { PhysicsParams } from '../physics/physics-params.js';
@@ -17,20 +23,22 @@ import type { PhysWorld } from '../../pkg/websurf_wasm.js';
 import type { MainMessage, WorkerMessage } from './worker-types.js';
 
 /**
- * Worker 物理面板协调器。
+ * Worker 侧物理面板协调器：参数/碰撞箱的变更写进权威实例，并把面板快照回传主线程。
  */
 export class PhysicsWorker {
   private readonly physicsParams = new PhysicsParams();
+  /** 权威实例槽；未收到 `world-json`（或已解绑）时为 `null`。 */
   private phys: PhysWorld | null = null;
 
-  /** tickRate 变更 → 权威固定步长（main.ts 注入）。 */
+  /** 面板参数管理器（`apps/debug/src/worker/main.ts` 经它挂 `onTickRateChange`）。 */
   get params(): PhysicsParams {
     return this.physicsParams;
   }
 
   /**
-   * 绑定权威 PhysWorld（main.ts world-json 构建后调用）：
-   * 应用已存在的面板覆盖 + 回传一次快照（主线程镜像到渲染物理）。
+   * 绑定权威 `PhysWorld`（`onWorldBuilt` 钩子传入，可为 `null`）：
+   * 写实例槽 → `PhysicsParams.attach` 重放已存在的面板覆盖（含 tickRate 回调）→
+   * 回传一次快照。
    */
   attachWorld(phys: PhysWorld | null): void {
     this.phys = phys;
@@ -39,14 +47,19 @@ export class PhysicsWorker {
   }
 
   /**
-   * 重新应用面板覆盖（main.ts config 消息全量 set_params/set_hull 后调用，
-   * 防全量参数覆盖掉面板手动值——"参数覆盖 > 配置默认"）。
+   * 重放面板覆盖（`onConfigApplied` 钩子调用）：`config` 消息已把全量配置参数写成权威
+   * 参数，此处再写一遍面板手动值、碰撞箱与面板 tickRate，使面板值优先于配置默认值。
    */
   reapplyParams(): void {
     this.physicsParams.attach(this.phys);
   }
 
-  /** 物理面板消息入口（返回是否已处理）。 */
+  /**
+   * 面板消息入口：命中下面五个 `case` 之一则处理后返回 `true`；`msg` 非对象、或 `type`
+   * 不在这五个之内（例如分发层没有分支、直接落到本入口的 `set-cull-distance`）返回
+   * `false`。返回值在唯一调用点 `src/ts-shared/auth/worker-dispatch.ts` 的
+   * `onExtraMessage` 处未被使用。
+   */
   handleMessage(msg: WorkerMessage | { type?: string }): boolean {
     if (!msg || typeof msg !== 'object') return false;
     switch (msg.type) {
@@ -85,10 +98,14 @@ export class PhysicsWorker {
   }
 
   // -------------------------------------------------------------------------
-  // 内部
+  // 内部实现
   // -------------------------------------------------------------------------
 
-  /** 回传物理参数快照（面板渲染；参数/碰撞箱变更后调用）。 */
+  /**
+   * 回传 `physics-snapshot`：参数表逐项只留 name/value/source（label、单位与取值范围
+   * 留在主线程 `apps/debug/src/physics/param-defs.ts` 的 `PARAM_DEFS`），另附碰撞箱
+   * 三项 + 来源 + 是否默认，以及自动恢复开关。
+   */
   private emitPhysicsSnapshot(): void {
     const snapshot = this.physicsParams.snapshot();
     const hullState = this.physicsParams.getHullState();
@@ -106,7 +123,7 @@ export class PhysicsWorker {
     });
   }
 
-  /** 发送消息到主线程。 */
+  /** 发往主线程：把 worker 全局 `postMessage` 收窄成 `MainMessage` 的类型化包装。 */
   private postMessage(msg: MainMessage): void {
     const pm = postMessage as (m: MainMessage) => void;
     pm(msg);

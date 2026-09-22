@@ -1,9 +1,19 @@
 /**
  * HUD、引导层、拖拽反馈、启动兜底卡、帮助浮层。
  *
- * 状态行角色（S9）：`#pose` 只读位姿读数；`#bspStatus` 地图域（解析进度/成功摘要/失败）；
- * `#replayStatus` 录像域（跨面提醒 + 录像临时消息）。临时消息走各自行的
- * flash 语义：显示 ms 毫秒后恢复该行的持久文本（'' 立即恢复，不残留）。
+ * 三条状态行的角色分工：
+ * - `#pose`：只读位姿读数（`apps/viewer/src/app.ts` 的 `poseText` 格式化后写入）；
+ * - `#bspStatus`：地图域（解析进度 / 成功摘要 / 失败提示）；
+ * - `#replayStatus`：录像域（跨面提醒 + 录像临时消息）。
+ * 两行临时消息走各自的 flash 语义：先写入临时文本，`ms` 毫秒后**只有该行仍是这条临时文本**
+ * 时才回写持久文本（期间被新的持久文本或新的 flash 改写则旧定时器不再回写）；
+ * 传空字符串则立即恢复持久文本。
+ *
+ * 元素句柄由构造函数用 `qs` 取一次（取不到即 null，各方法逐个判空，不抛错）。
+ * id 全部来自 `apps/viewer/web/index.html` 提供：pose / bspStatus / replayStatus / guide /
+ * guideError / dropzone / fatal / fatalDetail / help / helpBtn / helpClose。
+ * 显隐一律靠类名，样式在 `apps/viewer/web/styles.css`（`hidden`、`show`、`active`、`raw`）。
+ * 帮助浮层还挂了全局 `keydown`：任意 Escape 都会关闭它（不做其他按键处理）。
  */
 
 import { el, qs } from '../core/dom.js';
@@ -26,7 +36,7 @@ export class Hud {
   private replayPersistent = '';
 
   constructor() {
-    // 帮助浮层：顶栏「?」打开 / × 或 Esc 关闭（非模态，不拦其他点击）
+    // 帮助浮层：顶栏「?」打开（阻止冒泡）/ × 或 Esc 关闭；非模态，不拦其他点击
     this.helpBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       this.toggleHelp();
@@ -37,12 +47,12 @@ export class Hud {
     });
   }
 
-  // ── 位姿读数行 ──────────────────────────────────────────────────
+  // ── 位姿读数行（`#pose`）─────────────────────────────────────────
   setPose(text: string): void {
     if (this.poseEl) this.poseEl.textContent = text;
   }
 
-  // ── 地图状态行（持久文本；flash 只是临时插队）────────────────────
+  // ── 地图状态行（`#bspStatus`：持久文本 + 临时插队）───────────────
   setStatus(text: string): void {
     window.clearTimeout(this.statusTimer);
     this.statusTimer = 0;
@@ -50,12 +60,12 @@ export class Hud {
     if (this.statusEl) this.statusEl.textContent = text;
   }
 
-  /** 地图行当前文本（换图失败还原摘要用）。 */
+  /** 地图行当前文本（`apps/viewer/src/app.ts` 的 `loadBsp` 用它保存换图前的摘要）。 */
   statusText(): string {
     return this.statusEl?.textContent ?? '';
   }
 
-  /** 地图状态行临时闪现提示（约 ms 后恢复该行持久文本；空文本立即恢复）。 */
+  /** 地图状态行临时闪现：写入 `text`，`ms`（默认 3000）后按 flash 语义恢复持久文本。 */
   flashStatus(text: string, ms = 3000): void {
     if (!this.statusEl) return;
     window.clearTimeout(this.statusTimer);
@@ -72,7 +82,7 @@ export class Hud {
     }, ms);
   }
 
-  // ── 录像提醒行（跨面提醒 + 录像域临时消息）────────────────────────
+  // ── 录像提醒行（`#replayStatus`：跨面提醒 + 录像域临时消息）────────
   setReplayStatus(text: string): void {
     window.clearTimeout(this.replayTimer);
     this.replayTimer = 0;
@@ -80,7 +90,7 @@ export class Hud {
     if (this.replayEl) this.replayEl.textContent = text;
   }
 
-  /** 录像行临时消息（导入进度 / 工具结果）：空文本立即恢复持久内容。 */
+  /** 录像行临时消息（导入进度 / 工具结果）：空文本立即恢复持久内容（默认 8000 ms 后回退）。 */
   flashReplayStatus(text: string, ms = 8000): void {
     if (!this.replayEl) return;
     window.clearTimeout(this.replayTimer);
@@ -97,7 +107,7 @@ export class Hud {
     }, ms);
   }
 
-  // ── 帮助浮层 ────────────────────────────────────────────────────
+  // ── 帮助浮层（`#help`）──────────────────────────────────────────
   toggleHelp(): void {
     this.helpEl?.classList.toggle('hidden');
   }

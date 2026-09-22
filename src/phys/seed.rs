@@ -1,119 +1,175 @@
-//! 种子面 v2 — F4-C scratch 单向写入（t3；t6 §11.1 全量字段表 + t1 事实表修正）。
+//! 种子面 v2：`PhysWorld` 整实例状态的可序列化投影（`SEED_SCHEMA_VERSION = 2`）。
 //!
-//! 纪律（任务契约 + captain 背书范围校正：生效范围 = 仓库根 `src/phys/**` +
-//! `game/crates` 构建胶水 + web wasm 产物三件套）：
-//! - **Rust 只增不改**：本模块全部为新增代码；step_core / player_tick / teleport
-//!   检查链 / set_state(9 参) 等既有物理语义逐行不动。
-//! - **单向写入**：`apply_seed` 只写 self（scratch 实例），从不读自身状态做决策、
-//!   从不写权威实例；`extract_seed` 只读（`&self`）。
-//! - **t1 事实表收编**（原 plan/field-fidelity.md，2026-09 清理；22 相位 / rig 自检 22/22）：
-//!   · MUST 增补（行为级活性缺口，实证量化）：`ground_normal`(3×f64，nopre 钳制
-//!     唯一消费点 player.rs:907) / `contact_ticks`(u32，teleport B 路径 grounded 门) /
-//!     `ducked`(bool)+`duck_frac`(f64，半蹲态不可播种缺口)；
-//!   · 9 基础字段不动（平地/60°坡/跳跃/空中/预传送全域 EXACT 实证）；
-//!   · schema 覆盖 §11.1 全量表（惰性位照入：1 槽成本换未来语义保护，逐字段注记）；
-//!   · `teleport.cooldown` = 自 erase 死位（t1 §4：check 置 0.5 → 同 step 内
-//!     apply_teleport reset + fire 后 reset 归零，armed 态不跨 tick 存活）；
-//!     `teleport_gate_ticks` 不存在（check 形参 `_gate_ticks` 未接线）——勿找；
-//!   · **event 槽默认不入种子**（t1 §5 设计级裁定：F4-C scratch 自排空、authority
-//!     pending 事件走权威通道）；保留可选 event 键（F4-R / bench 审计能力）。
-//! - **位级保真**：f64 经 serde_json 往返精确——**依赖 `float_roundtrip` feature**
-//!   （t3 实测前提修复：serde_json 默认 fast parser 对部分 f64 有 1-ULP 往返偏差，
-//!   复现值 origin[2]=10.478655362066775 播种后变 …776；启用 feature 后 parse↔print
-//!   位级往返保证，见 src/Cargo.toml）。非有限值（NaN/Inf）在反序列化侧 FAIL LOUD
-//!   （`null`→f64 失败）——种子面拒绝非有限态，绝不静默损坏。
+//! 位置：本模块是 `mod.rs` 三个导出方法的实现体 —— `set_state_ex` 走 JSON 写、
+//! `state_full_json` 走 JSON 读、`seed_from` 走进程内的逐字段直拷（不经 JSON 文本）。
+//! 本文件的 `extract_seed` / `apply_seed` 都是 `pub(crate)`，不进 wasm 导出面。
 //!
-//! schema 版本 v=2；字段名与 Rust 命名一致（snake_case），与 t1 事实表口径对齐。
-//! 消费形态（t4 worker 集成）：`scratch.set_state_ex(authority.state_full_json(false))`
-//! 直通字符串，或零序列化 `scratch.seed_from(&authority)`。
+//! 一对互逆方法的契约：
+//! - `extract_seed(&self, include_event)` 只读：新建一份 `SeedState`，逐字段取
+//!   `self.player` 的同名字段，另加 `self.teleport` 的两个私有值
+//!   （`cooldown_value()` / `trigger_inside_vec()`）；`event` 只在 `include_event` 为真时带上。
+//! - `apply_seed(&mut self, s)` 只写 `self`：先三项校验（`v` / `triggers_inside` 长度 /
+//!   `on_ladder` 上界），再逐字段写 `Player`，再写 `teleport` 的两个隐藏值与事件槽，
+//!   最后把 `state_out` 预填成与状态一致（0-7 槽直写，8-21 槽交 `super::fill_state_out`）。
+//!   三项校验全部排在第一次赋值之前 —— 任一 `Err` 返回时本实例零改动。
+//!
+//! 覆盖面：`SeedState` 共 32 字段 = `Player` 的 28 个字段逐项镜像 + `v`
+//! + `teleport_cooldown` + `triggers_inside` + `event`。抽取与写回都是**逐字段枚举**，
+//! 没有自动映射：`Player` 新增字段不会自动进入种子面，必须在本文件补一行。
+//!
+//! **不在种子面**的 `PhysWorld` 字段（构建期或宿主配置）：`world` / `params` /
+//! `spawn` / `spawn_points` / `death_y` / `noclip` / `ready`。
+//! 其中 `world` 不可播种决定了播种前提：`triggers_inside` 的长度必须等于本实例
+//! `teleport.triggers` 的数量，`on_ladder` 必须落在本实例 `world.ladders` 下标范围内；
+//! 两条都是硬校验，超界返回 `Err` 而不夹取。`on_ladder` 只校验上界 —— 它指向本实例的
+//! 第几把梯子，由两实例的地图决定，故种子只在同图构建的实例之间有意义。
+//! `params` 侧的 `teleport_gate_ticks` 同样没有镜像字段：该键在 `TeleportManager::check`
+//! 内不被读取（形参名为 `_gate_ticks`），与 `mod.rs` 的 `set_params` 文档同一口径。
+//!
+//! 版本纪律：`apply_seed` 要求 `v == SEED_SCHEMA_VERSION`，不等即 `Err`。
+//! 容器级 `#[serde(default)]` 让缺省字段回退到 `Default for SeedState`，而该 `Default`
+//! 把 `v` 置成 `SEED_SCHEMA_VERSION` —— 故**缺 `v` 键的 JSON 按 v2 接受**，
+//! 只有显式写出 `v != 2` 才被拒。
+//!
+//! 数值保真：f64 全部走 serde_json 往返，`src/Cargo.toml` 给 serde_json 开了
+//! `float_roundtrip` feature（parse↔print 位级精确）。非有限值在导出侧被写成 `null`，
+//! 写回侧 `null → f64` 反序列化失败即报错，不做静默夹取。
+//!
+//! 字段在下一步的落点（逐条按源码核过，明细见各字段注）：
+//! 运动主态与蹲伏态是下一步的输入；`ground_normal` 在模拟内无读取点（摘取它的只有 `extract_seed`）；
+//! `input` 的 10 个布尔在 `tick` / `tick_into` / `predict` 入口被 `apply_input` 按键位掩码
+//! 整组覆写，故播种值不影响这三个入口的下一步；`prev_origin` / `prev_speed` 在 `player_tick`
+//! 开头被就地重赋，故播种值不跨 tick 存活；`contact_ticks` 与 `surfing` 的跨 tick 读取点都在
+//! 传送门（`TeleportManager::check` 的 grounded 判据与滑行早退）；`teleport_cooldown` 被同一个
+//! `check` 的冷却早退分支读取；`triggers_inside` 只经 `trigger_inside_vec()` 读出。
+//!
+//! 消费形态：`set_state_ex`（JSON 文本）或 `seed_from`（零序列化直拷）。
+//! 方向恒为 `src` → `self`：`extract_seed` 借 `&self`，`apply_seed` 只改 `self`。
 
 use super::{PhysEvent, PhysWorld};
 use serde::{Deserialize, Serialize};
 
-/// 种子 schema 版本（set_state_ex 校验，防版本漂移静默错种）。
+/// 种子 schema 版本（`apply_seed` 校验；不等即 `Err`）。
 pub(crate) const SEED_SCHEMA_VERSION: u32 = 2;
 
-/// §11.1 全量字段 + t1 修正的种子 schema（与 `state_full_json` 导出对称）。
+/// 整实例状态的镜像（与 `state_full_json` 导出、`set_state_ex` 写回同一 schema）。
+/// 字段顺序与 `Player` 的声明顺序一致，仅 `blocked_ticks` / `stuck_ticks` 次序互换。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub(crate) struct SeedState {
-    /// schema 版本；`v != 2` → Err（版本纪律）。
+    /// schema 版本；`v != SEED_SCHEMA_VERSION` → `Err`。缺键时由 `Default` 补成当前版本。
     v: u32,
 
-    // ---- 运动主态（9 基础字段域；t1 全域 EXACT）----
+    // ---- 运动主态 ----
     origin: [f64; 3],
     velocity: [f64; 3],
     yaw: f64,
     pitch: f64,
     on_ground: bool,
-    /// **MUST（t1 §3.1 物理承重）**：坡面着地带速态播种；fresh 默认 [0,1,0] 会
-    /// 误触发 nopre 钳制（player.rs:907）→ 单 tick 掉沿坡速 19-21% 持续发散。
+    /// 着地面法线。写点只有 `categorize_position`（不可站面时该字段保持旧值），
+    /// 而模拟内没有读取点 —— `create_player` 只给初值 `[0, 1, 0]`，摘取它的只有
+    /// 本文件的 `extract_seed`。播种本字段不改动任何行为，属字段镜像完整性。
     ground_normal: [f64; 3],
 
-    // ---- 蹲伏（**MUST**，t1 §3.3）----
-    /// 半蹲态不可播种缺口：fresh 恒从站立起步，持蹲键 ~6.4 tick 才追平；
-    /// 窗口内 hull 语义分歧（蹲箱 36 vs 站箱 72），顶低天花板有卡体风险。
+    // ---- 蹲伏 ----
+    /// 蹲姿开关。`mins()` / `maxs()` 按它二选一，这决定了后续碰撞箱；地面动量上限也看它。
+    /// `update_duck` 每个 tick 依据蹲键与站立箱可用性改写本字段。
     ducked: bool,
+    /// 蹲伏视角插值系数（0 站立 / 1 蹲下）。唯一读取点是 `eye_height()`：
+    /// 地面按 `DUCK_LERP_TIME`（0.2s）线性趋近，空中与落地 tick 直接置位。
+    /// 碰撞箱不看它 —— 箱体随 `ducked` 瞬时切换。
     duck_frac: f64,
 
-    // ---- 其余 §11.1 全量字段（惰性位照入，逐字段注记 t1 证据）----
-    /// 梯子索引（check_ladder 每 tick 重推导 :1024；播种为完整性；须与本实例
-    /// ladders 数量一致，错索引由后续 tick 路径消费——种子契约=同图构建）。
+    // ---- 梯子 / surf ----
+    /// 当前梯子（`world.ladders` 下标；None = 不在梯上）。
+    /// `check_ladder` 每 tick 重推导，并读旧值判断"已在梯上则保持"；
+    /// `ladder_move` 写 Some，跳离梯面时写回 None。播种时只校验上界。
     on_ladder: Option<usize>,
-    /// 每 tick :392 入口重置 + :455 几何重推导 = 派生态；跨 tick 仅 teleport 门
-    /// （mod.rs:246）读前值——触发器邻近 surf 态为与 s4b 同构风险，播种保真。
+    /// surf 滑行标志。`try_player_move` 在每次调用起点清零，撞到法线 y ∈ (0.05, 0.7) 的面时置位；
+    /// 本实例内不读它做分支，跨 tick 的读取点是传送门（滑行不触发传送）。
     surfing: bool,
-    /// 仅写无读（t1 §4）。
+    /// 本次离地以来是否滑行过。写点：`air_move` 在 `surfing` 时置位，起跳与 `respawn` 清零。
+    /// 模拟内没有读取点，摘取它的只有 `extract_seed`。
     surfed_since_grounded: bool,
-    /// Rust 内仅 :1043 指数衰减（t1 §4 无行为效应）。
+    /// 落地冲击量。`player_tick` 末尾按 `(1 - 10·dt).max(0)` 指数衰减，没有分支读它；
+    /// 导出侧不进 `state_out`，只进种子面。
     land_punch: f64,
-    /// 跳沿缓存（条件性活位：默认 autobhop=true 短路 :544；=false 时恢复活性，
-    /// t1 §4 / s3 jump-edge EXACT）。
+    /// 上一 tick 的跳跃键（`player_tick` 末尾由 `input.jump` 重赋）。
+    /// 两个读点：地面起跳的边沿判定（该读点只在 `params.autobhop == false` 时改变分支结果）
+    /// 与梯上跳离的边沿判定（不看 `autobhop`）。
     old_jump: bool,
+    /// 离梯冷却（秒）。大于 0 时 `check_ladder` 直接返回 None；每个 tick 递减 `dt`，
+    /// 梯上跳离时置 0.25。
     ladder_cooldown: f64,
-    /// 仅写（:631/:827/:1034，t1 §4）。
+    /// 下落速度（离地分支写入 `-velocity[1]`，上梯与着地时清零）。
+    /// crate 内没有分支读它；`fill_state_out` 把它写进 `state_out` 第 15 槽。
     fall_velocity: f64,
-    /// 读点 :909/:1051 在；t1 实测域内「两侧自 tick1 起 >0 → 分支同向」无行为
-    /// 分歧（t1 §4）——条件性活位，播种保真。
+    /// 落地后经过的 tick 数。写点：落地瞬间清零、地面 tick 自增、`respawn` 清零。
+    /// 读点：`duck_frac` 的"落地 tick 即时置位"判据与 `state_out` 第 10 槽。
     ground_ticks_since_landing: u32,
-    /// **MUST（t1 §3.2）**：teleport B 路径 grounded 门（mod.rs:241 传参；
-    /// fresh=0 时首 tick check 在自增前 → B 路径恰晚 1 tick）。
+    /// 接触帧计数。只在 `categorize_position` 判定为可站面（法线 y ≥ `STANDABLE_NORMAL`
+    /// 的实心命中）时自增，上升（`velocity[1] > NON_JUMP_VELOCITY`）与离地时清零。
+    /// 跨 tick 读取点是传送门：`check` 以 `ground_ticks > 0` 判 grounded，
+    /// A 路径的斜面 gap 与 B 路径的脚底下探都依赖它；`step_core` 传入的正是本字段，
+    /// 另外 `state_js` 的 `contactTicks` 与 `state_out` 第 11 槽也各导出一次。
     contact_ticks: u32,
-    /// 全仓无 read（t1 §4）。
+    /// 是否起跳过。起跳置位、`respawn` 清零；crate 内没有分支读它，
+    /// 导出侧只进 `state_out` 第 19 槽。
     has_jumped_before: bool,
-    /// 落地快照，:824 注释明示不消费（t1 §4）。
+    /// 落地瞬间的速度快照。crate 内没有分支读它；导出侧进 `state_out` 第 16-18 槽。
     landing_velocity: [f64; 3],
-    /// 卡体中态灰区（t1 未探测）：blocked ≥6 清零判定 :885-888（静态读点在，
-    /// 预测活性）；schema 当日即含，bench 可后补卡体类回归。
+    /// 冻结计数。`detect_blocked_move` 在"离地 + 速度 > 150 + 位移 < 0.05"时自增，
+    /// 累到 6 即清零速度并复位，任一条件不满足也清零。
+    /// 读点：该 `>= 6` 判据与 `state_out` 第 13 槽。
     blocked_ticks: u32,
-    /// check_stuck :848-872 全为写（t1 §4 / 未探测）。
+    /// 卡死计数。`check_stuck` 三处写：位置本就空闲清零、挤出成功清零、彻底卡死自增。
+    /// 除上述自增与 `extract_seed` 外没有读取点，也不进 `state_out`。
     stuck_ticks: u32,
 
-    /// InputState 十字段（player.rs:116-128）：tick 边界播种后即被 apply_input
-    /// 掩码重推导（t1 全域 EXACT 隐证）；入 schema 为全量表完整性。
+    /// `InputState` 的 10 个布尔镜像（与 `player.rs` 的 `InputState` 同名同序）。
+    /// **时效**：`tick` / `tick_into` / `predict` 都在步进前用 `apply_input` 按键位掩码
+    /// 整组覆写这 10 个值，故播种值不影响这三个入口的下一步；
+    /// 其中 `reset` 位在 `step_core` 内被消费为重生命令，`yaw_left` / `yaw_right`
+    /// 只被 `noclip_step` 读取。
     input: SeedInput,
 
-    // ---- 碰撞箱（apply_hull 派生；同参构建恒等；播种为全量表完整性）----
+    // ---- 碰撞箱（`apply_hull` 由 `params.hull_*` 派生）----
+    /// 四组 mins/maxs。`mins()` / `maxs()` 按 `ducked` 二选一，故播种值直接决定后续碰撞判定
+    /// 与 `eye_height()` 的基准（眼高按 `stand_maxs[1]` / `duck_maxs[1]` 与默认箱高的比值缩放）。
     stand_mins: [f64; 3],
     stand_maxs: [f64; 3],
     duck_mins: [f64; 3],
     duck_maxs: [f64; 3],
 
-    // ---- 诊断位（player_tick :1010-1011 每 tick 起点重赋 → 永不跨边界消费）----
+    // ---- 诊断位（`player_tick` 开头就地重赋，播种值不跨 tick 存活）----
+    /// 本 tick 起点位置。`player_tick` 开头重赋后在 `detect_blocked_move` 里与当前位置比较；
+    /// `mod.rs` 的 `apply_teleport` / `set_state` 也会把它同步到新位置。
     prev_origin: [f64; 3],
+    /// 本 tick 起点 3D 速度。`player_tick` 开头重赋；模拟内无读取点（`extract_seed` 会摘取它），
+    /// 导出侧也不进 `state_out`。
     prev_speed: f64,
 
-    // ---- PhysWorld 隐藏面（t6 §11.1 + t1 修正）----
-    /// teleport.cooldown（私有字段；t1 §4 自 erase 死位，播种为完整性）。
+    // ---- `PhysWorld` 隐藏面（不属于 `Player`）----
+    /// `TeleportManager::cooldown`（私有字段，只能经 `cooldown_value()` / `seed_cooldown()` 进出）。
+    /// `check` 在它大于 0 时先扣一个 `dt` 再返回 None；触发时置 `TRIGGER_COOLDOWN`（0.5）。
+    /// `step_core` 的触发分支在同一 step 内就调 `reset_cooldown` 归零，因此产生过触发的实例
+    /// 导出值恒为 0.0；播种一个正值会让后续 tick 继续走冷却早退分支。
     teleport_cooldown: f64,
-    /// triggers[].inside 逐位（t1 §4 仅复位写、全文件无读取点；播种为完整性；
-    /// 长度必须与本实例 triggers 一致，否则 Err）。
+    /// 每个 trigger 的 `inside` 位，顺序与 `teleport.triggers` 一致。
+    /// `teleport.rs` 内对 `inside` 只有写（构造置 false、`on_teleported()` 复位、
+    /// `seed_trigger_inside()` 写入），读出点只有 `trigger_inside_vec()`，调用者是本模块。
+    /// 长度必须等于本实例触发器数量，否则 `Err`。
     triggers_inside: Vec<bool>,
-    /// 可选 event 槽（**F4-C 默认不传**，t1 §5；导出面 include_event=true 才输出）。
+    /// 可选事件槽。缺省 / `null` → 写回时把本实例事件槽清空；显式给出 → 装入该事件。
+    /// 常规种子链（`state_full_json(false)` 与 `seed_from`）取 `extract_seed(false)`，
+    /// `event` 恒为 None，故链上不携带事件、且写入端会清空目标实例的事件槽；
+    /// `include_event = true` 才导出当前待取事件。
     event: Option<SeedEvent>,
 }
 
 impl Default for SeedState {
+    /// 全字段取零值 / 空值；两处例外：`v` 取 `SEED_SCHEMA_VERSION`，
+    /// `ground_normal` 取 `[0.0, 1.0, 0.0]`（与 `create_player` 的初值一致）。
     fn default() -> Self {
         SeedState {
             v: SEED_SCHEMA_VERSION,
@@ -152,7 +208,7 @@ impl Default for SeedState {
     }
 }
 
-/// InputState 十字段镜像（player.rs:116-128）。
+/// `InputState` 的 10 个布尔镜像（与 `player.rs` 的 `InputState` 同名同序）。
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub(crate) struct SeedInput {
@@ -168,7 +224,8 @@ pub(crate) struct SeedInput {
     yaw_right: bool,
 }
 
-/// 可选事件槽（F4-R / bench 审计用；F4-C 种子链默认 None，t1 §5）。
+/// 事件槽的可序列化形态，与 `PhysEvent` 的两个变体一一对应。
+/// 只在 `extract_seed(true)` 时导出；写回时由 `apply_seed` 还原成 `PhysEvent`。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) enum SeedEvent {
     Teleport {
@@ -180,7 +237,10 @@ pub(crate) enum SeedEvent {
 }
 
 impl PhysWorld {
-    /// 只读抽取：本实例 → 种子 schema（不改任何状态；event 按 include_event 决定）。
+    /// 只读抽取：本实例 → 种子。不改任何状态。
+    /// `v` 恒为 `SEED_SCHEMA_VERSION`；`event` 按 `include_event` 决定是否带上。
+    /// `Player` 的 28 个字段逐一镜像，`teleport` 的两个私有值经
+    /// `cooldown_value()` / `trigger_inside_vec()` 取出。
     pub(crate) fn extract_seed(&self, include_event: bool) -> SeedState {
         let p = &self.player;
         SeedState {
@@ -245,8 +305,11 @@ impl PhysWorld {
         }
     }
 
-    /// 单向写入：seed schema → 本实例（scratch）。只写 self；校验前置（Err 时
-    /// 实例零改动）。event 键缺省 = None（F4-C 语义，t1 §5）。
+    /// 单向写入：种子 → 本实例（只写 `self`，不读自身其余状态做决策）。
+    /// 顺序：① `v` 校验 → ② `triggers_inside` 长度校验 → ③ `on_ladder` 上界校验 →
+    /// ④ 逐字段写 `Player` → ⑤ 写 `teleport` 的 cooldown 与 inside 位 →
+    /// ⑥ 事件槽（缺省即清空）→ ⑦ 预填 `state_out`。
+    /// ①②③ 都在第一次赋值之前，故任一 `Err` 返回时本实例零改动。
     pub(crate) fn apply_seed(&mut self, s: &SeedState) -> Result<(), String> {
         if s.v != SEED_SCHEMA_VERSION {
             return Err(format!(
@@ -308,10 +371,10 @@ impl PhysWorld {
         p.duck_maxs = s.duck_maxs;
         p.prev_origin = s.prev_origin;
         p.prev_speed = s.prev_speed;
-        // PhysWorld 隐藏面（teleport.rs 种子通道，additive）
+        // PhysWorld 隐藏面：teleport 的 cooldown 与逐 trigger 的 inside 位（长度已在上方校验）
         self.teleport.seed_cooldown(s.teleport_cooldown);
         self.teleport.seed_trigger_inside(&s.triggers_inside)?;
-        // 可选 event 槽（F4-C 种子链不传 → None；t1 §5：事件不可播种的默认语义）
+        // 事件槽：Some → 装入该事件，None → 清空（本模块的种子链恒为后者）
         self.event = s.event.as_ref().map(|e| match e {
             SeedEvent::Teleport {
                 targetname,
@@ -324,7 +387,8 @@ impl PhysWorld {
             },
             SeedEvent::Death => PhysEvent::Death,
         });
-        // state_out 预填：种子时刻输出缓冲即刻与状态一致（tick_into 每 tick 全量覆写）。
+        // 预填 state_out：写入完成即让输出缓冲与状态一致（0-7 槽直写，8-21 槽交 fill_state_out）。
+        // tick_into 每 tick 全量覆写这 22 个槽。
         let o = &mut self.state_out;
         o[0] = p.origin[0];
         o[1] = p.origin[1];

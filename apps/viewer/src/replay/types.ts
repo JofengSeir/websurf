@@ -1,8 +1,10 @@
 /**
- * 录像（replay）数据契约。
+ * 录像（replay）数据契约：解析产物（`Clip` / `ReplayHeaderMeta`）、导入规则（`RuleConfig`）、
+ * 播放器采样（`Sample`）与多轨道（`Track` / `TrackSample`）。
  *
- * 管线：Shavit `.replay`（原生解析，t4 起 JSON 通道已移除）→ Clip（定型数组）→ 播放器。
- * 播放基准 = 帧自身坐标（解码时仅做坐标映射；任何平移/旋转都只能由用户显式叠加）。
+ * 管线：Shavit `.replay`（`apps/viewer/src/replay/shavit-replay.ts` 原生解析）→ `Clip`（定型数组）
+ * → `apps/viewer/src/replay/player.ts` 播放。播放基准 = 帧自身坐标：解码时只做坐标映射，
+ * 平移/旋转来自 `RuleConfig.transform`（仅用户显式设置时非恒等）。
  */
 
 // ── 规则配置（坐标映射切换 + 人工变换微调）──────────────────────────
@@ -21,34 +23,35 @@ export interface RuleTransform {
 
 /**
  * 坐标轴映射切换（解码层，非变换；录像与 viewer 坐标系不一致时的逃生口）。
- * - `shavit`（默认）：Source `[x,y,z]` → viewer `[y,z,x]`——与 wasm rotate_yup、
- *   地图 GLB 导出同一变换（det=+1），实测定标（test/replay-selftest.ts）。
+ * - `shavit`（默认）：Source `[x,y,z]` → viewer `[y,z,x]`——与 `apps/viewer/crates/wasm/src/lib.rs`
+ *   的 `rotate_yup`、地图 GLB 导出同一变换（坐标循环置换 ⇒ det=+1）。
  * - `raw`：`[x,y,z]` 直读（坐标序不合时的对照项）。
+ * 对照用例见 `apps/viewer/test/replay-selftest.ts` 的「坐标映射切换」组。
  */
 export type AxesMode = 'shavit' | 'raw';
 
 /**
- * 朝向轴切换（解码层，非变换）。
- * - `shavit`（默认）：yaw = wrap(srcYaw + 180)、pitch = −srcPitch（Source 正值=俯视）。
- *   实证：真实 run 段「视角·运动方向」平均 cos=0.9992；详见 shavit-replay.ts 头注释。
- * - `raw`：角度直读（yaw/pitch 原样），供角度约定本就一致的数据对照。
+ * 朝向轴切换（解码层，非变换）。实现在 `apps/viewer/src/replay/shavit-replay.ts` 的 `decodeFrames`：
+ * - `shavit`（默认）：`yaw = wrapDeg(srcYaw + 180)`（与 `src/ts-shared/phys/angles.ts` 的
+ *   `bspYawToCsYaw` 同一定标）、`pitch = clampPitch(−srcPitch)`（Source 正值 = 俯视）、roll 恒 0。
+ * - `raw`：`[yaw, pitch, 0]` 直读（角度约定本就一致的数据用）。
  */
 export type YawMode = 'shavit' | 'raw';
 
 export interface RuleConfig {
-  /** 版本，用于持久化兼容（v2 = 原生 .replay 结构化规则；v1 脚本规则已随 JSON 通道移除）。 */
+  /** 规则版本：字面量类型只接受 `2`（持久化兼容用）。 */
   version: 2;
   /** 规则名（持久化用）。 */
   name: string;
   /** 坐标轴映射切换（默认 shavit = 与地图 GLB 同构）。 */
   axesMode: AxesMode;
-  /** 朝向轴切换（默认 shavit = 实测定标映射）。 */
+  /** 朝向轴切换（默认 shavit = 定标映射）。 */
   yawMode: YawMode;
   /** 人工微调变换（缺省 = 恒等；仅用户显式设置时叠加）。 */
   transform?: RuleTransform;
 }
 
-/** 内置默认规则：直读帧坐标（标准轴序 + 实测朝向映射），零变换。 */
+/** 内置默认规则：标准轴序 + 定标朝向映射，不含人工变换（`transform` 不设）。 */
 export function defaultRule(): RuleConfig {
   return { version: 2, name: '内置默认', axesMode: 'shavit', yawMode: 'shavit' };
 }
@@ -56,8 +59,9 @@ export function defaultRule(): RuleConfig {
 // ── Shavit .replay 头部元信息（原生解析路径的元数据契约）──────────────
 
 /**
- * Shavit `.replay` 头部元信息（replay-file.inc FINAL 规格；V2 无对应字段 → 0/null）。
- * 字段/顺序/语义见 documents/viewer/implementation/shavit-replay-format.md。
+ * Shavit `.replay` 头部元信息。字段的读取顺序与逐字段版本门槛见
+ * `apps/viewer/src/replay/shavit-replay.ts` 的 `parseShavitReplay`（门槛由各 `has(n)` 分支与
+ * `cellsForVersion` 给出）；FINAL 有这些字段，V2 无对应字段 → 0 / null。
  */
 export interface ReplayHeaderMeta {
   /** FINAL 格式版本（1..0x0C）；V2 无版本概念 → 0。 */
@@ -87,9 +91,10 @@ export interface ReplayHeaderMeta {
   /** tick/s；V2 / <v5 头部没有该字段 → 估算值（见解析 warnings）。 */
   tickrate: number;
   /**
-   * zoneOffset：起点区/终点区的**亚 tick 份额**（∈[0,1]，非秒，§2.1）。
-   * 与 fTime 有闭环关系 fTime ≈ (frameCount + zo0 − (1 − zo1)) × tickInterval；
-   * <v8 无此字段 → [0,0]。
+   * 起点区 / 终点区的**亚 tick 份额**（非秒）：头部两个 f32，`<v8` 无该字段 → `[0, 0]`。
+   * 与头部 fTime 的关系 `fTime ≈ (frameCount + zo0 − (1 − zo1)) × tickInterval` 由
+   * `apps/viewer/test/replay-selftest.ts` 闭环校验；本仓唯一消费者是
+   * `apps/viewer/src/ui/replaymeta.ts`（值非零时并入 title，不上条面）。
    */
   zoneOffset: [number, number];
   /** stage（0 = 非 stage；<v10 无 → 0）。 */
@@ -114,7 +119,7 @@ export interface Clip {
   ang: Float32Array;
   /** 速度，3n；无速度数据为 null。 */
   vel: Float32Array | null;
-  /** 总时长（秒）= 末帧 t。 */
+  /** 总时长（秒）= 末帧 t；`count = 0` 时为 0。 */
   duration: number;
   bbox: { min: [number, number, number]; max: [number, number, number] };
   maxSpeed: number;
@@ -140,7 +145,7 @@ export interface Sample {
   index: number;
 }
 
-// ── 多轨迹（Q2：同时加载多条轨迹做对比）────────────────────────────
+// ── 多轨迹：同时加载多条做对比 ───────────────────────────────────────
 
 /** 一条轨道 = 一份 clip + 展示属性 + 时间对齐偏移。 */
 export interface Track {
@@ -157,7 +162,7 @@ export interface Track {
   offset: number;
 }
 
-/** 某条轨道在主时钟 t 时刻的采样结果；轨道已播完或未开始为 null。 */
+/** 某条轨道在主时钟 t 时刻的采样结果；未到该轨道片头时为 null，已播完则夹到末帧（停在终点）。 */
 export interface TrackSample {
   track: Track;
   sample: Sample | null;

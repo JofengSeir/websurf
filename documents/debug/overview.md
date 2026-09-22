@@ -1,120 +1,107 @@
-# debug 工程总览（WebSurf Debug Build）
+# apps/debug 工程总览
 
-> 本文是 debug 工程的**整体架构**篇（维度 A）。核心时序见 [sequences.md](sequences.md)，分模块实现见 [implementation/](implementation/loading-pipeline.md)，与 game/viewer/test 的取舍差异见 [differences.md](differences.md)。仓库级架构与共享层（phys / wasm-core / ts-shared / materials）见根文档 [documents/architecture.md](../architecture.md)、[documents/ts-shared.md](../ts-shared.md)。
+## 工程定位
 
-## 1. 定位
+`apps/debug` 是三工程里唯一暴露完整调试面板与永久无头调试 API 的工程：它把「解析 BSP → 双线物理（Worker 权威物理 + 主线程渲染物理）→ Three.js 渲染 → 参数面板 / 路径记录 / 输入录制回放」全部装在一个页面里，供开发者在不改代码的前提下复现与定位物理问题。
 
-debug 是五个工程中的**权威帧计算器 + 调试工作台**：加载任意 VBSP 地图，在浏览器里以「主线程渲染物理线 + Worker 权威物理线」双线模拟运行，并围绕这套双线架构提供物理参数面板、碰撞体可视化、准星平面检查、近平面自适应等调试工具，外加一个计时挑战状态机（检查点/死亡回退）。它与 game 工程共享同一套物理内核与 TS 共享层，但面向"调参、查碰撞、验时序"，而非"玩游戏"（差异见 [differences.md](differences.md)）。
+依据：
 
-- 运行形态：本地 `npm run dev`（`python ../src/serve.py 8080 .`，COOP/COEP 开启 SharedArrayBuffer）或 `npm run build:dist` 产出 `dist/`（single 模式 file:// 双击可用 / multi 模式 HTTP 部署）（`apps/debug/package.json` scripts；`apps/debug/scripts/build-dist.mjs:1-14`）。
-- 定位佐证：Worker 头注自称「权威帧计算器（公共化版）」（`apps/debug/src/worker/main.ts:1-16`）；渲染器头注「主线程渲染器（阶段 1：主线程解析/物理接管）」（`apps/debug/src/renderer/renderer-main.ts:1-7`）。
+- 入口是主线程装配函数 `apps/debug/src/app.ts:278` 的 `main`：它按固定顺序建共享缓冲、起 Worker、装渲染器、绑面板与输入循环。
+- `apps/debug/package.json:15` 的 `dev` 脚本把工程根目录交给共享静态服务器（端口 8080），页面入口是 `apps/debug/web/index.html`。
+- 调试 API 注册在 `apps/debug/src/app.ts:1044` 的 `globalThis.__wsInput`，注释面写明的契约见 `apps/debug/src/app.ts:984` 起的清单；同一份 API 在 `apps/game` 内不注册。
+- 工程自带一份 WASM 绑定层 `apps/debug/crates/wasm/src/lib.rs`（crate `websurf-wasm`），与 `apps/game`、`apps/viewer` 各自独立。
 
-## 2. 入口链与构建产物
+## 目录职责
 
-| 环节 | 文件 | 说明 |
+| 路径 | 职责 | 关键锚点 |
 |---|---|---|
-| 页面入口 | `apps/debug/web/index.html:621` | `<script type="module" src="./app.js">`；布局 = `#topbar` + `#main{#sidebar, #preview canvas}`（`index.html:280-290,586`） |
-| 主线程 bundle | `apps/debug/src/app.ts` → `apps/debug/web/app.js` | esbuild bundle：`npm run build:app`（`package.json` scripts） |
-| Worker bundle | `apps/debug/src/worker/main.ts` → `apps/debug/web/worker.js` | `npm run build:worker`，ESM、target es2022 |
-| WASM 产物 | `apps/debug/pkg/websurf_wasm.js` + `websurf_wasm_bg.wasm` | `npm run build:wasm`：`wasm-pack build --release --target web --out-dir ../../pkg` |
-| dist 双模式 | `apps/debug/scripts/build-dist.mjs` | single（默认）：classic script + IIFE，WASM/Worker/纹理包全部 base64 内嵌，file:// 双击可用；multi（`--multi`）：module script + 外置 wasm/mtz，供 HTTP 部署（`build-dist.mjs:1-14`） |
-| API 契约检查 | `apps/debug/scripts/check-wasm-api.mjs` | 构建期比对 `pkg/websurf_wasm.js` 导出符号与 TS 导入符号，要求 100% 匹配（`check-wasm-api.mjs:1-9`）；`npm run check:api` |
-| 类型检查 | `tsc --noEmit` | `npm run typecheck` |
+| `apps/debug/src/`（根级模块） | 主线程装配（`app.ts`）、运行时配置树（`config.ts`）、计时挑战状态机（`game-state.ts`）、默认纹理包（`default-pack.ts`）、主线程 wasm 懒初始化（`main-wasm.ts`）、手写 wasm 类型声明（`wasm.d.ts`） | `apps/debug/src/app.ts:278`、`apps/debug/src/config.ts:205`、`apps/debug/src/main-wasm.ts:28` |
+| `apps/debug/src/renderer/` | 主线程渲染器 `RendererMain` 与七个子管理器：相机、光照、雾、LOD 剔除、碰撞可视化、路径记录、准星射线；另有 lightmap 着色器注入模块 | `apps/debug/src/renderer/renderer-main.ts:219`、`apps/debug/src/renderer/lod-manager.ts:87`、`apps/debug/src/renderer/lightmap-shader.ts:482` |
+| `apps/debug/src/worker/` | Worker 入口装配（权威物理循环、消息分发、渲染轨迹采样、健康守护）、线程间消息类型面、物理面板协调器、内嵌纹理包暂存 | `apps/debug/src/worker/main.ts:455`、`apps/debug/src/worker/worker-types.ts:342`、`apps/debug/src/worker/physics-worker.ts:28` |
+| `apps/debug/src/input/` | 键盘采集、主线程→Worker 消息桥、输入录制/回放器（含回放捕获与丢帧语义） | `apps/debug/src/input/keyboard.ts:56`、`apps/debug/src/input/input-bridge.ts:16`、`apps/debug/src/input/input-recorder.ts:166` |
+| `apps/debug/src/world/` | WASM 导出 JSON 的类型面、brush 映射层、传送点数据层、自定义传送点 localStorage 层、出生点加载器（零调用点参考实现） | `apps/debug/src/world/types.ts:34`、`apps/debug/src/world/collider-adapter.ts:182`、`apps/debug/src/world/teleport-manager.ts:135` |
+| `apps/debug/src/physics/` | 面板参数定义表、参数管理器（写 `set_params` / `set_hull`）、config → Rust 参数映射、向量工具与 cs-movement 碰撞类型 | `apps/debug/src/physics/param-defs.ts:47`、`apps/debug/src/physics/physics-params.ts:54`、`apps/debug/src/physics/prediction-params.ts:23` |
+| `apps/debug/web/` | 页面骨架与全部 DOM id、样式、COOP/COEP 补丁脚本，以及构建产物落点（`app.js` / `worker.js` / `websurf_wasm_bg.wasm` / `textures.mtz`） | `apps/debug/web/index.html:283`、`apps/debug/web/styles.css:2`、`apps/debug/package.json:10` |
+| `apps/debug/scripts/` | 构建 dist、WASM API 契约门、无头验收与度量脚本、部署站入口页模板、路径基线资产 | `apps/debug/scripts/build-dist.mjs:63`、`apps/debug/scripts/check-wasm-api.mjs:1`、`apps/debug/scripts/input-replay-verify.mjs:1` |
+| `apps/debug/crates/wasm/` | 本工程的 WASM 绑定层：`BspProcessor` 全导出面 + 原样再导出共享层 `PhysWorld` | `apps/debug/crates/wasm/src/lib.rs:487`、`apps/debug/crates/wasm/src/lib.rs:55` |
+| `apps/debug/fixtures/` | 门禁脚本的输入夹具（不参与运行时） | `apps/debug/package.json:22` |
 
-注意：`package.json` 原有的 `verify:chamfer` 入口已删除（曾指向当时不存在的 `scripts/verify-chamfer.mjs`，空引用）；`apps/debug/scripts/` 内现仅 `build-dist.mjs`、`check-wasm-api.mjs`、两个 .cmd、`pages-index.html`。
+## 依赖方向
 
-## 3. 整体架构：两阶段权威帧计算器
+本工程的依赖分三层，全部是单向：`apps/debug` → 共享层，没有反向引用。
 
-debug 的运行时由**两条物理线 + 一条状态通道**构成（v7 架构定案，代码见 `apps/debug/src/renderer/renderer-main.ts:1-7` 头注与 `src/ts-shared/auth/shared-state.ts:1-32`）：
+| 依赖对象 | 声明处 | 消费点 |
+|---|---|---|
+| `websurf-phys`（`src/phys/**`） | `apps/debug/crates/wasm/Cargo.toml:22` 的 path 依赖 | 由 `apps/debug/crates/wasm/src/lib.rs:55` 的 `pub use websurf_phys::phys::PhysWorld` 原样再导出，JS 侧从 `apps/debug/pkg/websurf_wasm.js` 取 |
+| `websurf-wasm-core`（`src/wasm-core/**`） | `apps/debug/crates/wasm/Cargo.toml:24` 的 path 依赖 | `apps/debug/crates/wasm/src/lib.rs:49` 引入 `vbsp` / `bsp_to_gltf_core` / `model_integrator` / `pakfile_models` / `texture_utils` |
+| `src/ts-shared/**`（TypeScript 共享层） | `apps/debug/tsconfig.json:26` 的 `include` 把共享层的 `.ts` 纳入同一程序 | 主线程：`apps/debug/src/app.ts:33`（`shared-state`）、`apps/debug/src/app.ts:35`（`input-layer`）、`apps/debug/src/app.ts:36`（`world-builder`）；Worker：`apps/debug/src/worker/main.ts:27`（`auth-loop`）、`apps/debug/src/worker/main.ts:32`（`worker-dispatch`）、`apps/debug/src/worker/main.ts:33`（`phys/params`） |
+| 渲染侧三方库 `three` | `apps/debug/package.json:27` 的 dependencies | `apps/debug/src/renderer/renderer-main.ts:23` 起的 `THREE` 与 `examples/jsm` 引入 |
 
-```
-┌─ 主线程（渲染预测线）────────────────────────────┐
-│ app.ts 装配/加载/输入循环/HUD                      │
-│ renderer-main.ts: rAF tick                        │
-│   ① addInput 写 SAB 输入槽                        │
-│   ② correctFromAuthority（只读权威帧）             │
-│   ③ calibrateVelocity（权威速度外推校准）           │
-│   ④ predPhys.tick（主线程 PhysWorld 全速推进）      │
-│   ⑤ consumePhysEvents（teleport/death 事件）       │
-│   ⑥ 按 state() 设相机 → LOD/PVS → 渲染            │
-└──────────────┬───────────────────────────────────┘
-               │ SharedArrayBuffer 512B（COOP/COEP）
-               │   或 postMessage 回退（MsgState）
-┌──────────────▼───────────────────────────────────┐
-│ Worker（权威帧计算器）                             │
-│ auth-loop: setTimeout 4ms + 固定步长累积器(64Hz)   │
-│   takeInput → phys.tick → writeAuthoritative      │
-│   land/blocked 碰撞事件 postMessage 回传           │
-│ physics-worker: 物理面板参数管理（debug 特有）       │
-└───────────────────────────────────────────────────┘
-```
+两点与依赖面有关的事实：
 
-- **主线程持有第二个 `PhysWorld` 实例**（渲染物理线，随渲染帧率全速 tick），Worker 持权威实例（固定 64Hz 步长）。两个实例来自同一个 WASM 模块（`apps/debug/src/renderer/renderer-main.ts:14-15` 注释；`main-wasm.ts` ensureMainWasm）。
-- **Worker 只被"读取"，不被反写**：主线程每帧读权威帧做速度外推校准；大偏差异常时反过来把渲染主线全状态推给 Worker（`sync-render-state` 消息），见 `src/ts-shared/phys/authority-calibrator.ts:1-15` 与 [sequences.md §3](sequences.md)。
-- **输入同源**：鼠标/键盘在主线程合成（灵敏度在输入层乘入，物理两端 `sensitivity` 固定 1），写入 SAB 输入槽后双线消费同一份输入 → 角度天然不分叉（`src/ts-shared/input/input-layer.ts:1-10`、`src/ts-shared/phys/params.ts:57-59`）。
+- 本工程自带 `crates/wasm`，因此共享层的 Rust 代码通过 path 依赖进入本工程的 wasm 产物，而不是通过 npm 包。
+- `apps/debug/tsconfig.json:19` 起的五个路径别名（`@physics/*` / `@world/*` / `@renderer/*` / `@input/*` / `@worker/*`）在 `apps/debug/src` 内**零导入点**：全部内部引用都写成相对路径（例：`apps/debug/src/app.ts:38` 的 `'./renderer/renderer-main.js'`）。
 
-### 3.1 模块划分（apps/debug/src）
+## 构建产物与脚本
 
-| 目录/文件 | 行数 | 职责 | 细分文档 |
-|---|---|---|---|
-| `app.ts` | 2541 | 主入口：main() 装配、handleLoadBsp 编排、输入循环（rAF）、UI 绑定、物理面板消息处理、计时挑战接线、`document` 级视角锁定 | [loading-pipeline](implementation/loading-pipeline.md)、[physics-panel](implementation/physics-panel.md)、[sequences](sequences.md) |
-| `config.ts` | 259 | `RuntimeConfig` **11 段**运行时配置（physics/player/movement/smoothing/teleport/lod/lighting/input/hud/debug/texture）与 `applyConfigPatch` | 本文 §5 |
-| `main-wasm.ts` | 43 | 主线程 WASM 懒初始化（内嵌 `__VBSP_WASM_B64__` → `initSync`，否则 fetch 同目录 wasm）；导出 `mosaic_decode`/`decompress_mtz` | [loading-pipeline](implementation/loading-pipeline.md) |
-| `default-pack.ts` | 42 | 默认纹理包 `textures.mtz` 加载（内嵌 base64 或 fetch），供缺失纹理比对 | [loading-pipeline](implementation/loading-pipeline.md) |
-| `worker/main.ts` | 120 | Worker 入口：装配 ts-shared auth-loop + worker-dispatch，注入 debug 特有钩子（ready 回执、mtz 存取、面板消息） | [physics-panel](implementation/physics-panel.md)、[sequences](sequences.md) |
-| `worker/physics-worker.ts` | 114 | Worker 侧物理面板协调器：set_params/set_hull 应用 + physics-snapshot 回传 | [physics-panel](implementation/physics-panel.md) |
-| `worker/worker-types.ts` | 349 | 主线程↔Worker 消息类型全集（MainMessage/WorkerMessage/SceneDataMessage/PlaneInfo 等） | [physics-panel](implementation/physics-panel.md) |
-| `worker/mtz-data.ts` | 19 | single 打包模式 Worker 侧内嵌 mtz base64 存取（`__VBSP_TEXTURES_MTZ_B64__`） | [loading-pipeline](implementation/loading-pipeline.md) |
-| `renderer/renderer-main.ts` | 1792 | 主线程渲染器 + 渲染物理线：rAF tick、GLB 场景装载、静态光照（预烘焙）与**光照模式运行期切换**、近平面自适应、纹理画质切换、权威校准接线、分块合并且合并前的交错属性归一（`normalizeMergeGroup`） | [rendering](implementation/rendering.md) |
-| `renderer/camera-controller.ts` | 82 | yaw/pitch → quaternion（YXZ、pitch clamp、yaw 归一化） | [rendering](implementation/rendering.md) |
-| `renderer/lod-manager.ts` | 316 | 2 级 LOD + 视距剔除 + PVS + hysteresis（0.85） | [rendering](implementation/rendering.md) |
-| `renderer/collider-debug.ts` | 1087 | 碰撞体可视化：brush 凸包线框三色分类、chamfer 高亮、.phy/可视网格三角形线框、触发器四色 | [rendering](implementation/rendering.md) |
-| `renderer/plane-inspector.ts` | 376 | 准星射线检测（mesh > solid > ladder > trigger，每 6 帧限频，8192 HU） | [rendering](implementation/rendering.md) |
-| `renderer/light-manager.ts` | 390 | 基础三灯（Ambient/Hemisphere/Directional 球坐标）；8 个 PointLight 池预留（当前无调用方接线，见 [rendering §4](implementation/rendering.md)） | [rendering](implementation/rendering.md) |
-| `renderer/lightmap-shader.ts` | 224 | RGBExp32 lightmap 解码着色器注入（onBeforeCompile + 手动双线性） | [rendering](implementation/rendering.md) |
-| `renderer/fog-manager.ts` | 102 | 线性雾动态 near/far（随相机-场景中心距离外推） | [rendering](implementation/rendering.md) |
-| `world/collider-adapter.ts` | 287 | 碰撞体反腐败层：WasmBrush JSON → cs-movement `Brush[]`/`LadderVolume[]`（法线翻转已在 Rust 端完成） | [loading-pipeline](implementation/loading-pipeline.md) |
-| `world/pvs-manager.ts` | —（批 4 已上提） | PVS 位图解码 + findLeaf + isVisible（仅 cluster 变化重算）——**D-10 起实现在 `src/ts-shared/world/pvs-manager.ts`（271 行）**，本工程文件已删除 | [rendering](implementation/rendering.md) |
-| `world/teleport-manager.ts` | 326 | 传送触发器元数据（trigger/dest/链接/凸包平面）；`checkTeleport` 在 debug 无调用方（物理权威在 Rust 侧） | [loading-pipeline](implementation/loading-pipeline.md) |
-| `world/custom-teleports.ts` | 98 | 自定义传送点：localStorage 按地图分组（`vbsp:customTeleports:<map>`），上限 50 | [physics-panel](implementation/physics-panel.md) |
-| `world/spawn-loader.ts` | 120 | 出生点解析——**未接线预留工具**（全仓无 import，文件头自述"出生点实际加载走 ts-shared world-builder 管线"，`spawn-loader.ts:8-11`）；批 4（D-08）起 `bspYawToCsYaw` 改用共享单点 | [loading-pipeline](implementation/loading-pipeline.md) |
-| `world/types.ts` | 198 | WASM 导出 JSON 的 TS 契约（brush/spawn/teleport/metadata/ColliderFilter）；PVS 三类型批 4（D-10）起改为 re-export 共享单点 `src/ts-shared/world/types.ts` | [loading-pipeline](implementation/loading-pipeline.md) |
-| `game-state.ts` | 196 | 计时挑战状态机：idle→running→finished、检查点去重、死亡回退 | [sequences §6](sequences.md) |
-| `physics/param-defs.ts` | 103 | 物理面板参数定义表（12 项 PARAM_DEFS，默认值=Rust `PhysParams::default()`） | [physics-panel](implementation/physics-panel.md) |
-| `physics/physics-params.ts` | 162 | 参数管理器：applyOverride/归一化/tickRate 变更回调；`PARAM_TO_RUST` 映射 | [physics-panel](implementation/physics-panel.md) |
-| `physics/math/vec3.ts`、`physics/physics/Collision/Collision.types.ts` | 101/49 | 平面/凸包碰撞类型与零分配 Vec3（collider-debug/plane-inspector/collider-adapter 消费；源自 @unsurf/cs-movement 约定） | [rendering](implementation/rendering.md) |
-| `input/`（input-bridge/keyboard/input-recorder） | 93/108/… | 工程侧输入三件：低频控制消息桥、键位捕获、输入录制；鼠标增量缓冲与指针锁定已上提共享层 `src/ts-shared/input/{mouse-buffer,pointer-lock}.ts` | [sequences §2](sequences.md) |
+`apps/debug/package.json:7` 的 `scripts` 共 15 条，逐条作用：
 
-### 3.2 WASM 导出层（apps/debug/crates/wasm）
+| 脚本（行号） | 作用与产物 |
+|---|---|
+| `build:wasm`（`apps/debug/package.json:8`） | 进 `crates/wasm` 跑 `wasm-pack build --release --target web --out-dir ../../pkg`，再把 `pkg/websurf_wasm_bg.wasm` 复制成 `apps/debug/web/websurf_wasm_bg.wasm` |
+| `typecheck`（`apps/debug/package.json:9`） | `tsc --noEmit`，按 `apps/debug/tsconfig.json` 把 `src` 与共享层 `.ts` 一起检查 |
+| `build:worker`（`apps/debug/package.json:10`） | esbuild 把 `apps/debug/src/worker/main.ts` 打成 `apps/debug/web/worker.js`（ESM） |
+| `build:app`（`apps/debug/package.json:11`） | esbuild 把 `apps/debug/src/app.ts` 打成 `apps/debug/web/app.js`（ESM） |
+| `build:ts`（`apps/debug/package.json:12`） | 依次跑 `typecheck` → `build:worker` → `build:app` |
+| `build:dist`（`apps/debug/package.json:13`） | `node scripts/build-dist.mjs`，产出 `apps/debug/dist/`；带 `--multi` 时出 `multi 产物` |
+| `build`（`apps/debug/package.json:14`） | `build:wasm` + `build:ts` |
+| `dev`（`apps/debug/package.json:15`） | `python ../../src/serve.py 8080 .`，服务根 = 工程根目录，页面在 `/web/index.html` |
+| `check:api`（`apps/debug/package.json:16`） | `node scripts/check-wasm-api.mjs`：wasm 导出面 ↔ TS 导入面契约门 |
+| `count:glb-meshes`（`apps/debug/package.json:17`） | `node scripts/glb-mesh-count.mjs`：解析 BSP 导出的 GLB 并统计规模 |
+| `bench:frames`（`apps/debug/package.json:18`） | `node scripts/frame-bench.mjs`：headless 逐帧耗时实测 |
+| `test:optimize-scene`（`apps/debug/package.json:19`） | 先 esbuild 打包 `apps/debug/src/renderer/renderer-main.ts` 到 `.tmp/opt-verify/`，再 `node scripts/optimize-scene-verify.mjs` |
+| `test:surf-crouch`（`apps/debug/package.json:20`） | `node scripts/phys-surf-crouch-smoke.mjs`：直接对 `apps/debug/pkg` 的 wasm 产物跑贴坡蹲姿用例 |
+| `plot:path`（`apps/debug/package.json:21`） | `node scripts/plot-path.mjs`：把面板导出的物理路径 JSON 画成 PNG |
+| `test:path-acceptance`（`apps/debug/package.json:22`） | `node scripts/path-acceptance.mjs fixtures/path/tick-on-render-prefix.json --assert --expect fail` |
+| `test:auth-clock`（`apps/debug/package.json:23`） | 先打包 `src/ts-shared/auth/auth-loop.ts` 到 `.tmp/auth-clock/`，再 `node scripts/auth-clock-verify.mjs` |
+| `test:jump-apex`（`apps/debug/package.json:24`） | 先打包 `src/ts-shared/phys/authority-calibrator.ts` 到 `.tmp/jump-apex/`，再 `node scripts/jump-apex-verify.mjs` |
 
-- crate 名 `websurf-wasm`（与 game/viewer/test 同名约束见根 [documents/architecture.md](../architecture.md)），依赖共享层 `websurf-phys`（`path = "../../../../src"`）与 `websurf-wasm-core`（`path = "../../../../src/wasm-core"`）（`apps/debug/crates/wasm/Cargo.toml:20-24`）。
-- `lib.rs:22`：`pub use websurf_phys::phys::PhysWorld;` —— 物理世界本体来自共享层（21 个导出方法，见 [documents/phys.md](../phys.md)），debug crate 自身只做解析/导出绑定。
-- `BspProcessor` 全导出集：`metadata`、`parse_spawn_points`、`parse_teleports`、`parse_pvs_data`、`export_brushes_planes(filter)`、`export_model_tri_colliders`、`export_model_phy_colliders`、`export_mosaic_manifest`、`export_missing_textures`、`export_glb_with_pakfile_models(_with_defaults)` 等（`apps/debug/crates/wasm/src/lib.rs:293-2274` 方法清单）。
-- 工具函数：`mosaic_encode/mosaic_decode`、`decompress_mtz`、`decode_vtf_to_png`、`export_visleaf_pvs`（`lib.rs:2981-3204`）。
-- debug 特有绑定：`export_brushes_planes` 内运行时生成**棱边 chamfer 平面**（AddEdgeBevels 简化版，法线=两相邻面法线归一化均值，必须位于凸包外侧；`lib.rs:2551-2690`），既进物理碰撞也供调试线框——详见 [rendering §6](implementation/rendering.md)。game crate 携带同款实现（`apps/game/crates/wasm/src/lib.rs:1973`），共享 wasm-core 不含。
+产物落点：
 
-## 4. 消息协议与状态通道
+- `apps/debug/web/`：`app.js` 与 `worker.js` 是 esbuild 产物，`websurf_wasm_bg.wasm` 是 `build:wasm` 的副本（`apps/debug/package.json:8`），`textures.mtz` 是默认纹理包（离线资产）。
+- `apps/debug/pkg/`：wasm-pack 的输出目录，`apps/debug/scripts/build-dist.mjs:50` 从该目录取 wasm 文件名常量。
+- `apps/debug/dist/`：`apps/debug/scripts/build-dist.mjs:48` 定义的目标目录。`single 产物` 保留的清单是 `apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE`；`multi 产物` 的清单是 `apps/debug/scripts/build-dist.mjs:64` 的 `KEEP_MULTI`（多出 `worker.js` / wasm / `textures.mtz` / `coi-serviceworker.js`）。
+- 三个 `.cmd` 是并行的手工入口：`apps/debug/start-dev.cmd:7` 默认端口 8080 并自带工具链与 wasm 过期门，`apps/debug/play.cmd:7` 默认端口 8081 且先构建 `single 产物` 再服务，`apps/debug/build-dist.cmd:7` 默认 `single`、接受 `multi` 参数。
 
-- 消息类型全集定义在 `apps/debug/src/worker/worker-types.ts`（MainMessage 15 种 / WorkerMessage 8 种）。共享部分（init/wasm-init/world-json/config/respawn/teleport/…）由 ts-shared `worker-dispatch.ts` 统一分发；debug 特有消息（物理面板 5 种：`set-physics-param`/`reset-physics-param`/`set-hull`/`reset-hull`/`set-auto-restore-hull`）经 `onExtraMessage` 扩展点注入（`src/ts-shared/auth/worker-dispatch.ts:32-41`）。
-- 状态通道：`crossOriginIsolated`（`src/serve.py` 返回 COOP/COEP 头）时用 `SharedArrayBuffer(512)` + Atomics；否则 postMessage 回退（MsgState），接口统一（`apps/debug/src/app.ts:197-204`、`src/ts-shared/auth/shared-state.ts:344-356`）。SAB 512B 布局（控制区/输入槽/权威帧双缓冲每帧 10 值定点缩放）见 [documents/ts-shared.md](../ts-shared.md)。
-- Worker 头两条消息顺序有契约：`wasm-init` 必须先于 `world-json`（world-json 早于 wasm-init 就绪会被忽略，`src/ts-shared/auth/worker-dispatch.ts:45-47`）；debug 在 main() 里先行 postMessage `wasm-init`（`app.ts:221-234`）。
+## 启动链
 
-## 5. 配置与参数体系
+从 `npm run dev` 到页面可交互的链路（参与者 → 动作）：
 
-- `RuntimeConfig` 共 **11 段**：physics / player / movement / smoothing / teleport / lod / lighting / input / hud / debug / texture（`apps/debug/src/config.ts:16-249`）。主线程加载后经 `syncFullConfig` 把其中 **10 段**（不含 texture——纹理画质是渲染本地的，`app.ts:1768-1789`）逐段发给 Worker，Worker 用 `applyConfigPatch` 更新自己的 config 副本。
-- 关键默认值（`config.ts` DEFAULT_CONFIG）：gravity 800 / jumpSpeed 302 / maxSpeed 250 / friction 4 / accelerate 10 / airAccel 150 / stopSpeed 100 / tickRate 64 / teleportGateTicks 3 / hull 半宽 16、站高 72、蹲高 54 / cullDistance 12800 / sensitivity 1.5 / pitchLimit 89 / yawBindSpeed 210 / noclipSpeed 800。
-- **面板参数 ≠ config**：物理面板另有 13 项 `PARAM_DEFS`（param-defs.ts），经 `set-physics-param` 消息直接打 Rust `set_params`，优先级高于 config 同名段；tickRate 是唯一"JS 驱动层参数"（不进 Rust，改 `authLoop.setFixedDt`）。详见 [physics-panel.md](implementation/physics-panel.md)。
-- **双端同参不变量**：主线程 `buildPredictionParams`（`app.ts:1229-1253`）与 Worker `syncParamsToWasm`（`apps/debug/src/worker/main.ts:50-66`）都收敛到 ts-shared `buildPhysicsParams`（walkSpeed 130、crouchSpeed 85、autobhop/bhopSpeedClamp/noPrestrafe true、sensitivity 固定 1），保证双线物理参数逐字段一致。
+1. `npm run dev`（`apps/debug/package.json:15`）→ `src/serve.py` 以 8080 为端口、以工程根为服务根启动；浏览器打开 `/web/index.html`。
+2. 页面加载 COOP/COEP 补丁脚本（`apps/debug/web/index.html:695`）与打包后的 `app.js`（`apps/debug/web/index.html:696`）。
+3. `app.js` 执行到 `apps/debug/src/app.ts:278` 的 `main`：先取画布句柄，取不到直接返回（`apps/debug/src/app.ts:279`）。
+4. 通道选择：`crossOriginIsolated === true` 且存在 `SharedArrayBuffer` 时建 `SHARED_BUFFER_SIZE` 的共享缓冲，否则置 `null`（`apps/debug/src/app.ts:286`）。
+5. 建 Worker：有内嵌 Worker 源码（构建注入的 `__VBSP_WORKER_JS__`）则走 Blob URL，否则 `new Worker('./worker.js', { type: 'module' })`（`apps/debug/src/app.ts:298`）。
+6. 下发 wasm：内嵌时把 `wasmB64` 放进 `wasm-init`，否则改用 `wasmUrl`；两条分支都带 `mtzB64`（构建未注入该全局键时其值为 `undefined`）（`apps/debug/src/app.ts:315`）。
+7. 建共享状态与消息桥：`createMainSharedState(sharedBuffer, worker)`（`apps/debug/src/app.ts:325`）、`new InputBridge(worker)`（`apps/debug/src/app.ts:327`）并 `sendInit`（`apps/debug/src/app.ts:328`）。
+8. 建渲染器并注册四个回调：`onCullStats` / `onSceneLoaded` / `onSyncRenderState` / `onPhysEvent`，随后 `init` 与 `start`（`apps/debug/src/app.ts:336` 起）。
+9. 主线程 wasm 懒初始化 `ensureMainWasm()` 的结果存进 `mainWasmReady`（`apps/debug/src/app.ts:362`）。
+10. 绑输入与面板：`bindInput`（`apps/debug/src/app.ts:367`）、`loadUiPrefs` → `syncPrefsControls` → `applyCrosshairStyle` → `sendPrefsToWorker` → `bindUI`（`apps/debug/src/app.ts:369` 起）。
+11. 起输入循环 `startInputLoop`（`apps/debug/src/app.ts:380`），并刷新录制面板状态（`apps/debug/src/app.ts:382`）。
+12. Worker 侧 `init` 处理完后回 `ready`（`apps/debug/src/worker/main.ts:483`），主线程在 `apps/debug/src/app.ts:393` 的 `ready` 分支把状态栏改成「Worker 已就绪。请加载 .bsp 文件。」。
+13. 用户通过 `#bspFile` 选图 → `apps/debug/src/app.ts:1881` 的 `handleBspFile` → 主线程解析并装载世界。
 
-## 6. 与共享层及其他工程的关系
+## 不变量
 
-- **只依赖共享层，不依赖兄弟工程**：debug 的 TS 从 `../../src/ts-shared/*` 导入 7 个模块（shared-state / auth-loop / worker-dispatch / world-builder / params / authority-calibrator / input-layer），Rust 从仓库根 src 引 websurf-phys + websurf-wasm-core；与 game/viewer/test 之间零交叉 import（全仓 grep 验证，见根 [documents/architecture.md](../architecture.md) 引用矩阵）。
-- **对 ts-shared 的 debug 特有注入**：`onInit`（ready 回执）、`onWasmInit`（mtzB64 存取）、`onWorldBuilt`（physicsWorker.attachWorld）、`onConfigApplied`（面板参数重应用）、`onExtraMessage`（5 种面板消息）——game 侧全部不使用（`apps/debug/src/worker/main.ts:80-119` vs `apps/game/src/worker/main.ts:80-93`）。
-- **viewer / test 工程不共享本套时序**：viewer 无物理（薄导出三方法）；test/dual-mode-harness 用独立的 192B TestShared 协议（与 ts-shared 512B 不是同一套）。对照细节在 [differences.md](differences.md) §5。
+以下不变量由本工程代码保证，改动前需连带检查：
 
-## 7. 阅读路径
-
-1. 先读本文与 [sequences.md](sequences.md)（启动、双线 tick、加载、面板四条主时序）。
-2. 按需进入实现篇：[loading-pipeline.md](implementation/loading-pipeline.md)（地图怎么变成场景+两个物理世界）、[rendering.md](implementation/rendering.md)（渲染与调试可视化）、[physics-panel.md](implementation/physics-panel.md)（参数面板全链路）。
-3. 对照阅读 [differences.md](differences.md) 理解 debug 与 game 的取舍。
-4. 协议与算法细节下探到根文档：[documents/ts-shared.md](../ts-shared.md)（SAB 布局/权威循环/校准器）、[documents/phys.md](../phys.md)（Rust 物理内核）、[documents/wasm-core.md](../wasm-core.md)（BSP 解析/GLB 导出）、[documents/materials.md](../materials.md)（mtz/mosaic 材质体系）。
+1. **权威物理只有 Worker 一个推进者**：Worker 侧权威实例由 `apps/debug/src/worker/main.ts:455` 装配的 `createAuthLoop` 独占推进；主线程收到 `phys-frame` 只做缓存（`apps/debug/src/app.ts:397`），不 tick 权威实例。
+2. **固定步长来自面板 tickRate，且不进 Rust**：`tickRate` 变更经 `apps/debug/src/worker/main.ts:466` 的 `onTickRateChange` 调 `authLoop.setFixedDt`，仅在步长真的变化时才 `reset()`。
+3. **主线程每个渲染帧最多推进 1 个物理步**：`apps/debug/src/renderer/renderer-main.ts:709` 是 `tick` 内唯一的 `predPhys.tick` 调用点；单步闸门打开时每帧配额再减一（`apps/debug/src/renderer/renderer-main.ts:672`）。
+4. **回放步长是一次性载荷**：`apps/debug/src/renderer/renderer-main.ts:680` 在读走 `replayDtS` 后立即置 `null`，输入循环用 `replayDtS === null` 作为「上一帧已被消费」的握手信号（`apps/debug/src/app.ts:2372`）。
+5. **输入增量是累加语义、按键掩码是覆盖语义**：`apps/debug/src/renderer/renderer-main.ts:1175` 的 `feedInput` 对 `dx`/`dy` 累加、对 `keys` 直接赋值，消费后清零增量（`apps/debug/src/renderer/renderer-main.ts:710`）。
+6. **双端物理参数同源**：主线程与 Worker 都从同一份 config 出发，映射实现收敛在 `src/ts-shared/phys/params.ts`（`apps/debug/src/physics/prediction-params.ts:23`、`apps/debug/src/worker/main.ts:62`）。
+7. **主线程与 Worker 各持独立 wasm 实例**：主线程由 `apps/debug/src/main-wasm.ts:28` 的 `ensureMainWasm` 初始化，Worker 在自己的作用域内独立 `initSync`（`apps/debug/src/worker/main.ts:479`）。
+8. **剔除距离由场景对角线唯一确定**：`apps/debug/src/renderer/lod-manager.ts:155` 起三行给出上限、下限与默认值的算式，面板滑块只能在该上限内改写（`apps/debug/src/renderer/lod-manager.ts:276`）。
+9. **渲染轨迹采样与渲染节点一一对应**：同一帧同一三元组先落 `PathRecorder` 渲染节点、再写共享内存采样槽，`i0` 取同一次自增（`apps/debug/src/renderer/renderer-main.ts:721` 与 `apps/debug/src/renderer/renderer-main.ts:725`）。
+10. **权威帧版本号单调**：`va` 由发布方单调递增（`apps/debug/src/worker/worker-types.ts:248`），主线程按它去重（`apps/debug/src/renderer/renderer-main.ts:699`）。

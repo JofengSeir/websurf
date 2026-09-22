@@ -1,25 +1,30 @@
 /**
  * Clip 采样（纯函数，无状态）。
  *
- * 单独成模块是为了让 TrackSet 与 ReplayPlayer 都能用它而不互相 import——
- * 播放器持有轨道集、轨道集需要采样，直接互引会成环。
+ * 独立成模块是为了让两个消费方共用同一份实现：`apps/viewer/src/replay/tracks.ts` 取 sampleClip，
+ * `apps/viewer/src/replay/player.ts` 取 indexInClip / sampleClip / horizontalSpeed。而 player.ts
+ * 本身已 import tracks.ts，采样函数若放进其一，另一方就得反向 import。
  */
 
 import type { Clip, Sample } from './types.js';
 
-/** 角度最短弧插值（yaw/roll 用，避免 359°→1° 时绕远路）。 */
+/** 角度插值：按 360 取模走最短弧（`(b − a + 540) % 360 − 180`），再按 t 取份额；yaw 与 roll 用
+ *  （359° → 1° 得 +2°）。注意 JS 的 `%` 保留被除数符号：`b − a < −540` 时结果 < −180 即越出
+ *  [−180, 180)，本函数不钳制。 */
 export function lerpAngle(a: number, b: number, t: number): number {
   const diff = (((b - a + 540) % 360) - 180) * t;
   return a + diff;
 }
 
+/** 线性插值：t = 0 得 a、t = 1 得 b；不钳制 t。 */
 export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
 /**
- * 时间 → 帧序号（插值左端）。t 超出范围会被夹到首尾帧。
- * clip.t 单调不减（导入管线保证：t(i)=(i−preFrames)/tickrate），所以可以二分。
+ * 时间 → 帧下标（插值左端）：返回满足 clip.t[i] ≤ t 的最大 i；t 早于首帧得 0，晚于末帧得 n − 1。
+ * 用二分的前提是 clip.t 单调不减——.replay 路径由 t(i) = (i − preFrames) / tickrate（tickrate > 0）保证。
+ * count = 0 时返回 0。
  */
 export function indexInClip(clip: Clip, t: number): number {
   const n = clip.count;
@@ -37,7 +42,12 @@ export function indexInClip(clip: Clip, t: number): number {
   return lo;
 }
 
-/** 取 clip 在内部时间 t（秒，相对该 clip 片头）的插值位姿。 */
+/**
+ * 取 clip 在内部时间 t（秒，相对该 clip 片头）的插值位姿。
+ * 采样区间取 [i, i + 1]（i = indexInClip），插值系数夹在 [0, 1]；时间段长为 0（末帧或重复时间戳）时
+ * 系数取 0，直接返回第 i 帧的值。yaw 与 roll 走最短弧插值，pitch 与 pos 走线性插值；clip.vel 存在时
+ * 同样线性插值，否则 Sample.vel 为 null。count = 0 时返回 null；Sample.index 为左端帧号 i。
+ */
 export function sampleClip(clip: Clip, t: number): Sample | null {
   const n = clip.count;
   if (n === 0) return null;
@@ -73,7 +83,7 @@ export function sampleClip(clip: Clip, t: number): Sample | null {
   return { pos, ang, vel, index: i };
 }
 
-/** 水平速度（HU/s）；无速度数据返回 null。 */
+/** 水平速度（HU/s）：Y-up 下取 vel 的 X、Z 分量求模；vel 为 null 时返回 null。 */
 export function horizontalSpeed(s: Sample | null): number | null {
   if (!s?.vel) return null;
   return Math.hypot(s.vel[0], s.vel[2]);

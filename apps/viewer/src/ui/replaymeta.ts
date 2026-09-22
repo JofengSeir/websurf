@@ -1,9 +1,13 @@
 /**
- * 录像信息条（底部 dock 上层）：.replay 头部元信息的常驻展示位。
+ * 录像信息条（底部 dock 上层）：`.replay` 头部元信息的常驻展示位。
  *
- * 数据源 = t3 暴露的 `Clip.meta`（ReplayHeaderMeta，replay-file.inc FINAL 头部字段）。
- * 字段是静态的——只在轨道增删 / 跟随切换时重渲染，不进每帧刷新。
- * 文件里只有 steamID 没有人名（t2 规格）：玩家位显示 `[U:1:<id>]` 并用 title 说明。
+ * 数据源 = 跟随轨道的 `Clip.meta`（类型契约见 `apps/viewer/src/replay/types.ts` 的
+ * `ReplayHeaderMeta`，由 `apps/viewer/src/replay/shavit-replay.ts` 的 `parseShavitReplay` 产出）。
+ * 字段是静态的：只在轨道增删 / 跟随切换时整条重渲染，不进每帧刷新。
+ * 文件里没有玩家名、只有账号 ID——玩家位直接展示解析侧拼好的 `meta.steamIdDisplay`
+ * （形如 `[U:1:<id>]`），并用 title 说明该字段的来源。
+ * 类名契约（`meta-name` / `meta-dot` / `mi` / `mk` / `mv` / `headline`）在
+ * `apps/viewer/web/styles.css`；容器 `#replayMeta` 的显隐由本模块切 `hidden` 类。
  */
 
 import { el } from '../core/dom.js';
@@ -13,8 +17,9 @@ export class ReplayMetaPanel {
   constructor(private readonly root: HTMLElement) {}
 
   /**
-   * 轨道增删 / 跟随切换后调用（app.syncTracks）。
-   * 展示跟随轨道（无跟随回退第一条）的头部元信息；没有带元信息的轨道时整条隐藏。
+   * 轨道增删 / 跟随切换后调用（`apps/viewer/src/app.ts` 的 `syncTracks`）。
+   * 展示跟随轨道（`followId` 未命中时回退第一条）的头部元信息；无轨道或无 `meta` 时
+   * 清空内容并加 `hidden` 类。
    */
   setTracks(tracks: readonly Track[], followId: string | null): void {
     const follow = tracks.find((t) => t.id === followId) ?? tracks[0] ?? null;
@@ -28,7 +33,7 @@ export class ReplayMetaPanel {
     this.root.replaceChildren(this.buildName(follow), ...this.buildItems(meta));
   }
 
-  /** 色点 + 轨道名：标明这条信息是谁的（跟随轨道，与轨迹列表一致）。 */
+  /** 色点 + 轨道名：标明这份元信息属于哪条轨道（色值与轨迹列表同一来源）。 */
   private buildName(track: Track): HTMLElement {
     const wrap = el('span', 'meta-name');
     const dot = el('span', 'meta-dot');
@@ -40,7 +45,7 @@ export class ReplayMetaPanel {
     return wrap;
   }
 
-  /** 头部字段 → 标签值对；文件里没有的字段（人名 / V2 无成绩）不硬造，直接不出该项。 */
+  /** 头部字段 → 标签值对；`meta` 里没有的字段（玩家名、V2 无成绩等）不造值，直接不出该项。 */
   private buildItems(meta: ReplayHeaderMeta): HTMLElement[] {
     const items: HTMLElement[] = [];
     const add = (k: string, v: string, title?: string, headline = false): void => {
@@ -51,7 +56,7 @@ export class ReplayMetaPanel {
     };
 
     if (meta.time !== null) {
-      // zoneOffset（<v8 无 → [0,0]）是亚 tick 份额（非秒）：有值时并入 title，不上条面（视觉从简）
+      // zoneOffset（<v8 没有该字段 → [0,0]）是亚 tick 份额、不是秒：非零时并入 title，不上条面
       const [zo0, zo1] = meta.zoneOffset;
       const zoneDetail =
         zo0 !== 0 || zo1 !== 0
@@ -77,7 +82,7 @@ export class ReplayMetaPanel {
     add(
       '帧',
       `${meta.preFrames}+${meta.frameCount}+${meta.postFrames}`,
-      // stage>0 属跑段细节：进悬停 title，不占条面（t11 拍板③「从简」）
+      // stage>0 属跑段细节：只进悬停 title，不占条面
       `起跑前 + 正式跑 + 结束后（帧数，合计 ${meta.totalFrames}）；主时钟 0 = 起跑帧，prerun 不在播放区间` +
         (meta.stage > 0 ? `；stage 跑段 ${meta.stage}` : ''),
     );
@@ -87,7 +92,7 @@ export class ReplayMetaPanel {
     add(
       '格式',
       `v${meta.version}`,
-      // offsetsLength>0 属格式内部细节：进悬停 title，不占条面（t11 拍板③「从简」）
+      // offsetsLength>0 属格式内部细节：只进悬停 title，不占条面
       (meta.format === 'v2'
         ? 'V2 旧格式（带 tickrate 估算，见导入警告）'
         : `Shavit FINAL 格式版本 0x${meta.version.toString(16).toUpperCase().padStart(2, '0')}`) +
@@ -99,7 +104,7 @@ export class ReplayMetaPanel {
   }
 }
 
-/** Unix 秒 → 本地 YYYY-MM-DD。 */
+/** Unix 秒 → 本地时区的 YYYY-MM-DD（用 `Date` 的本地年 / 月 / 日取值）。 */
 function fmtDate(ts: number): string {
   const d = new Date(ts * 1000);
   const p = (n: number): string => String(n).padStart(2, '0');

@@ -1,8 +1,15 @@
 /**
- * 轨迹列表面板（Q2）：一条轨迹一张两行轨道卡——配色、重命名、显隐、
- * 时间偏移、跟随目标、移除。批量操作只在有轨道时出现。
+ * 轨迹列表面板：一条轨道一张卡（上行 = 配色点 / 名字 / 帧数与时长，下行 = 显隐 / 偏移 / 跟随 / 移除），
+ * 外加一行批量操作（全部显示 / 全部隐藏 / 偏移归零 / 清空全部）。
  *
- * 偏移用于对齐起跑时刻不同的两次跑法：offset 大的那条在主时钟上后起步。
+ * 职责边界：本文件只读写 `ReplayPlayer.tracks.tracks` 上的 `visible` / `offset` / `name` 三个字段
+ * 并经 `ReplayPlayer` 的 `followTrack` / `removeTrack` / `clearTracks` 改结构；3D 与时间轴的重建
+ * 由 `onChange` 回调交给 `apps/viewer/src/app.ts` 的 `syncTracks`。
+ *
+ * 关键不变量：
+ * - 任何一次改动都是「先改数据、再 `refresh()` 重绘、再 `opts.onChange()`」，没有局部更新路径；
+ * - `refresh` 在无轨道时隐藏备注行与批量行并显示引导文案；有轨道时按轨道数写总时长摘要；
+ * - 批量行与备注行都挂在分区内容容器下、不随每次 `refresh` 重建，故只切 `style.display`。
  */
 
 import { buttonRow, el, noteLine, section } from '../core/dom.js';
@@ -10,26 +17,38 @@ import type { ReplayPlayer } from './player.js';
 import type { Track } from './types.js';
 
 export interface TrackPanelOptions {
-  /** 轨道属性变化（显隐 / 偏移 / 重命名 / 移除 / 跟随）→ app 重建可视化。 */
+  /**
+   * 轨道属性变化（显隐 / 偏移 / 重命名 / 跟随 / 移除 / 位置归零）后回调，
+   * 供 `apps/viewer/src/app.ts` 重建 3D 可视化、时间轴与录像信息条；列表自身已由本类重绘。
+   */
   onChange: () => void;
-  /** 轨道数变化通知（0 ↔ n 切换时录像页组 2 折叠状态跟随）。 */
+  /** 轨道数变化通知（每次 `refresh` 都按当前轨道数回调）。本仓无调用方传入。 */
   onPresence?: (count: number) => void;
   /**
-   * 清空/清到零回调：接回 app 的 onClearAll（清播放器、重建可视化与时间轴、
-   * 清空 HUD 录像提醒行）。列表自身刷新仍由 TrackPanel
-   * 完成；缺省时保留本地自清兜底，TrackPanel 独立可用。
+   * 清空（含逐条移除到零）回调，接到 `apps/viewer/src/app.ts` 的 `onClearAll`
+   * （清播放器、重建可视化、清 HUD 录像提醒行）。缺省时走本类的本地自清兜底。
    */
   onCleared?: () => void;
 }
 
+/** 状态提示行的写入函数签名（`apps/viewer/src/core/dom.ts` 的 `noteLine` 返回值的形状）。 */
 type Note = (text: string, kind?: 'info' | 'warn' | 'error') => void;
 
 export class TrackPanel {
+  /** 卡片列表容器（每次 `refresh` 整表重建）。 */
   private readonly listEl: HTMLElement;
+  /** 轨道数 / 总时长的摘要行（无轨道时隐藏）。 */
   private readonly summaryEl: HTMLElement;
+  /** 批量操作按钮行（无轨道时隐藏）。 */
   private readonly batchRow: HTMLElement;
+  /** 底部提示行的写入口。 */
   private readonly note: Note;
 
+  /**
+   * 构造即建好四个分区元素并 `refresh` 一次。
+   * 批量按钮的 `onClick` 闭包引用 `this.note`，而 `this.note` 在本构造器后段才赋值；
+   * 点击回调只在构造返回之后执行，届时该字段已就绪。
+   */
   constructor(
     root: HTMLElement,
     private readonly player: ReplayPlayer,
@@ -82,13 +101,18 @@ export class TrackPanel {
     this.refresh();
   }
 
+  /** 批量设置全部轨道的显隐（不改跟随目标）。 */
   private setAllVisible(v: boolean): void {
     for (const t of this.player.tracks.tracks) t.visible = v;
     this.refresh();
     this.opts.onChange();
   }
 
-  /** 轨道增删改后重绘列表。 */
+  /**
+   * 按 `ReplayPlayer.tracks.tracks` 整表重绘：先清空列表容器，回调 `onPresence`；
+   * 无轨道时隐藏摘要行与批量行并挂一条引导文案后返回；
+   * 有轨道时先显示两行、写「N 条轨迹 + 主时钟总长」摘要（多条时追加一句说明），再逐条建卡。
+   */
   refresh(): void {
     const tracks = this.player.tracks.tracks;
     this.listEl.innerHTML = '';
@@ -113,6 +137,7 @@ export class TrackPanel {
     for (const track of tracks) this.listEl.appendChild(this.buildRow(track));
   }
 
+  /** 建一张轨道卡：上行（色点 / 名字 / 帧数与时长）+ 下行（显隐 / 偏移 / 跟随 / 移除）。 */
   private buildRow(track: Track): HTMLElement {
     const row = el('div', 'track-row');
     const tracks = this.player.tracks;

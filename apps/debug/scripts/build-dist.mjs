@@ -1,24 +1,30 @@
 /**
- * 构建 debug dist/，双模式（薄入口，D-04 / T-04）：
+ * 构建 apps/debug 的 dist/：同一入口出两种形态（薄入口，`--multi` 切换）。
  *
- * ── single（默认，本地双击 file://）─────────────────────────────
- *   dist/index.html — classic script（非 ES module；file:// 下 module 被 CORS 拦截）
- *   dist/app.js     — IIFE，内嵌 WASM(base64) + Worker 代码(Blob URL) + 默认纹理包(base64)
- *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 产物级许可证副本
- *   所有资源内嵌 → file:// 双击完整可用（含缺失纹理回退）
+ * ── single（默认，本地 file:// 双击）──────────────────────────────
+ *   dist/index.html — 由 web/index.html 改写而来：module script 换成 classic script
+ *   dist/app.js     — IIFE；前缀由 `src/scripts/lib/dist-pack.mjs` 的 `writeEmbeddedPreamble` 拼装：
+ *                     上游许可证 + 构建头注释 + `__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` /
+ *                     `__VBSP_TEXTURES_MTZ_B64__` 三个全局键（WASM、Worker 源码、默认纹理包全内嵌）；
+ *                     页面侧据此建 Blob URL 起 worker，并把 WASM 与纹理包交给 worker
+ *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证的产物级副本
  *
- * ── multi（--multi，GitHub Pages / HTTP 部署）─────────────────
- *   dist/index.html — module script
- *   dist/app.js     — ESM（前缀注入 __VBSP_WASM_URL__）
+ * ── multi（--multi，HTTP 部署）───────────────────────────────────
+ *   dist/index.html — 原样复制 web/index.html
+ *   dist/app.js     — ESM，文件头注入 `globalThis.__VBSP_WASM_URL__`（指向同目录的 wasm 文件）
  *   dist/worker.js  — ESM（module worker）
- *   dist/websurf_wasm_bg.wasm — WASM 外置（fetch）
- *   dist/textures.mtz         — 默认纹理包外置（fetch）
- *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 产物级许可证副本
+ *   dist/websurf_wasm_bg.wasm、dist/textures.mtz — 外置，页面侧 fetch
+ *   dist/coi-serviceworker.js — 由 web/coi-serviceworker.js 生成：把预缓存清单与按清单内容
+ *                     派生的缓存名写进脚本；两个占位符若有残留即抛错（不产出半成品）
+ *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证的产物级副本
  *
- * 打包内核（esbuild 注入、cleanDist 先删后建、__VBSP_* 拼装、许可证唯一源拷贝）：
- *   ../../../src/scripts/lib/dist-pack.mjs
+ * 共用内核：`src/scripts/lib/dist-pack.mjs`（esbuild 的 build 由本脚本注入；`cleanDist` 先删后建；
+ * `cleanStale` 按形态的 keep 名单清残留；许可证的唯一源是 `src/phys` 下的 LICENSE 与 NOTICE）。
+ * 顺序：校验输入 → 清空 dist/ → 打包 → 拷许可证 → 按名单清残留 → 打印产物树。
+ * 输入缺失（`apps/debug/pkg/websurf_wasm_bg.wasm` 或 `src/materials/textures.mtz`）即抛错，
+ * 顶层 catch 打印 `[ERROR]` 与 `[HINT]` 后以 1 退出。
  *
- * 用法：node scripts/build-dist.mjs [--multi]
+ * 用法：node scripts/build-dist.mjs [--multi]        （`npm run build:dist` 走默认 single）
  */
 import { build } from 'esbuild';
 import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
@@ -37,8 +43,8 @@ import {
 } from '../../../src/scripts/lib/dist-pack.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, '..'); // apps/debug
-const REPO = join(ROOT, '..', '..'); // 仓库根
+const ROOT = join(HERE, '..'); // 本工程目录 apps/debug
+const REPO = join(ROOT, '..', '..'); // 仓库根（apps/debug 的上两级）
 const DIST = join(ROOT, 'dist');
 const INDEX_HTML = join(ROOT, 'web', 'index.html');
 const WASM_FILE = 'websurf_wasm_bg.wasm';
@@ -79,7 +85,7 @@ function requireInputs() {
   return wasm;
 }
 
-/** single：单文件 IIFE，WASM/Worker/默认纹理包全内嵌（file:// 双击可用）。 */
+/** single 形态：单文件 IIFE，WASM / Worker 源码 / 默认纹理包全部内嵌。 */
 async function buildSingle(wasmPath) {
   console.log('[5/5] 编码 WASM (base64)...');
   const wasmB64 = readFileSync(wasmPath).toString('base64');
@@ -121,7 +127,7 @@ async function buildSingle(wasmPath) {
   console.log(`[5/5] dist/app.js: ${(bytes / 1024 / 1024).toFixed(2)} MB（single 全内嵌）`);
 }
 
-/** multi：多文件 ESM（HTTP 部署，fetch 正常，体积更小）。 */
+/** multi 形态：多文件 ESM，WASM 与纹理包外置，页面侧 fetch。 */
 async function buildMulti(wasmPath) {
   console.log('[5/5] 打包 app / worker (ESM)...');
   await bundleEsm({
@@ -137,7 +143,7 @@ async function buildMulti(wasmPath) {
     options: { logLevel: 'info' },
   });
 
-  // app.js 前缀注入 WASM URL（multi 模式下 fetch 相对 dist/ 的 wasm）
+  // 给 app.js 头部注入 WASM 地址：multi 形态由页面按该地址 fetch，不走 base64 内嵌
   const appPath = join(DIST, 'app.js');
   writeFileSync(
     appPath,
@@ -148,12 +154,12 @@ async function buildMulti(wasmPath) {
 
   console.log('[5/5] 复制 WASM / 默认纹理包...');
   copyFileSync(wasmPath, join(DIST, WASM_FILE));
-  copyFileSync(MTZ, join(DIST, 'textures.mtz'));  // COI serviceworker：静态托管上注入 COOP/COEP → crossOriginIsolated → SAB 可用
+  copyFileSync(MTZ, join(DIST, 'textures.mtz'));  // COI serviceworker：静态托管上补发 COOP/COEP 响应头，使页面处于 crossOriginIsolated
 
   console.log('[5/5] 复制 index.html（module script 原样，与 web/ 同构）...');
   copyFileSync(INDEX_HTML, join(DIST, 'index.html'));
 
-  // 生成预缓存清单并注入 SW（multi 模式专用）
+  // multi 专用：按 dist/ 里实际存在的文件生成预缓存清单，连同缓存名一起注入 SW
   const precacheManifest = [
     './index.html',
     './app.js',
@@ -161,11 +167,11 @@ async function buildMulti(wasmPath) {
     './' + WASM_FILE,
     './textures.mtz',
     './coi-serviceworker.js',
-  ].filter((f) => existsSync(join(DIST, f.slice(2)))); // 仅存在的文件（去掉 './' 前缀）
+  ].filter((f) => existsSync(join(DIST, f.slice(2)))); // 去掉 './' 前缀后探存在性，只把 dist/ 里确实有的项写进清单
 
   const swTemplate = readFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), 'utf8');
-  // 缓存名按「预缓存内容哈希」派生：内容变 → SW 文件字节变 → 浏览器触发 install → 缓存刷新；
-  // 固定缓存名会导致 SW 字节不变、缓存永不更新，部署后用户长期拿到旧 app.js。
+  // 缓存名由「预缓存清单 + 各文件字节」的 sha256 前 12 位派生：分发的文件一变，SW 自身字节就变，
+  // 浏览器随即重装 SW 并换缓存；缓存名固定时 SW 字节不变，旧的 app.js 会被长期命中。
   const cacheHash = createHash('sha256');
   cacheHash.update(JSON.stringify(precacheManifest));
   for (const entry of precacheManifest) {
@@ -197,13 +203,13 @@ async function buildMulti(wasmPath) {
 async function main() {
   const wasmPath = requireInputs();
 
-  // 全量重建：先删后建（规范 §5.2 R-15，禁止增量残留）
+  // 全量重建：先删 dist/ 再建，避免上一形态的产物残留
   await cleanDist(DIST);
 
   if (multi) await buildMulti(wasmPath);
   else await buildSingle(wasmPath);
 
-  // 许可证产物级副本：唯一源 src/phys/{LICENSE,NOTICE}（D-23 / E-08）
+  // 许可证：从唯一源 src/phys 拷出产物级副本，产物名带 .cs-movement 后缀
   await copyLicensePair({
     repoRoot: REPO,
     distDir: DIST,

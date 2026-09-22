@@ -1,154 +1,128 @@
-# game 核心时序（T）
+# WebSurf-game 时序
 
-> 核对基准：当前工作区代码（`apps/game/src/`、`src/ts-shared/`、`src/phys/`），所有时序步骤标注来源函数与路径。架构背景见 [overview.md](overview.md)；共享通道/校准实现在 [`../ts-shared.md`](../ts-shared.md) 展开，本文只写 game 视角的时序。
+## 启动时序
 
-## 0. 全景：两条物理线 + 一个通道
+下表按 `main()` 的实际执行顺序排列；「数据落点」一列写明该步改变了哪份状态。
 
-```
-                    ┌──────────── 主线程（144Hz rAF）────────────┐
-mousemove/keys ──▶ MouseBuffer ─▶ layerMouseDelta ─▶ feedInput ─┤
-                    │                                            ▼
-                    │                            pendingDx/Dy/Keys（帧内累积）
-                    │                                            │
-                    │      ┌─── RendererMain.tick 每帧六步 ─────┤
-                    │      │ ① shared.addInput（写 SAB 输入槽）  │
-                    │      │ ② correctFromAuthority（只读权威）  │
-                    │      │ ③ calibrateVelocity（外推校准）     │
-                    │      │ ④ predPhys.tick（完整物理推进）     │
-                    │      │ ⑤ holdPoint 冻结（C 键按住）        │
-                    │      │ ⑥ 相机 + LOD/PVS + render          │
-                    │      └────────────────────────────────────┘
-                    ▼ SAB 512B（V_A/dxAcc/dyAcc/双缓冲）或 MsgState 回退
-┌────────────── Worker（固定步长 1/tickRate）──────────────┐
-│ auth-loop: setTimeout 4ms 自驱 → takeInput → tick        │
-│   → writeAuthoritative（写空闲槽 → V_A++）               │
-│   → 碰撞事件 land/blocked postMessage                    │
-└──────────────────────────────────────────────────────────┘
-```
-
-双端跑**同一个**共享 `PhysWorld`（`apps/game/src/renderer/renderer-main.ts:483-519` 主线程构建；`src/ts-shared/auth/worker-dispatch.ts:101-117` Worker 构建），权威线固定步长、渲染线可变 dt。
-
-## 1. 启动时序（`apps/game/src/app.ts:63-176` main()）
-
-| 步 | 动作 | 代码 |
-|---|---|---|
-| 1 | 通道选择：`crossOriginIsolated === true` 且有 `SharedArrayBuffer` → `SAB(512B)`；否则 MsgState 并提示"兼容模式" | `app.ts:82-89` |
-| 2 | spawn 权威 Worker：dist 内嵌模式用 `__VBSP_WORKER_JS__` → Blob URL module worker（file:// 下 module worker 被 CORS 拦截）；dev 模式 `./worker.js` | `app.ts:94-97` |
-| 3 | 绑定 Worker 消息：`error` / `phys-event`（碰撞事件 → `renderer.applyCollisionCorrection`）/ `phys-frame`（MsgState 回退帧 → `sharedState.recvFrame`） | `app.ts:99-113` |
-| 4 | 依次 postMessage `init{shared}` → `wasm-init{wasmB64 或 wasmUrl}`（Worker 侧 `initWasm` 强制 `initSync({module})`） | `app.ts:114-121`、`src/ts-shared/auth/worker-dispatch.ts:94-100` |
-| 5 | `createMainSharedState(sharedBuffer, fixWorker)` 创建通道 | `app.ts:124` |
-| 6 | 创建 `RendererMain`：注册 `onSceneLoaded`（死亡阈值）、`onSyncRenderState`（反向同步兜底 → `sync-render-state`）、`init()`（Three.js 场景/相机/固定三点光）、`start()`；主线程 wasm `initPrediction('./websurf_wasm_bg.wasm', embeddedWasm)`（保存 promise，地图加载 `decompress_mtz` 依赖其就绪） | `app.ts:128-141`、`renderer-main.ts:163-175,177-208,469-480` |
-| 7 | `InputBridge` + `syncFullConfig()`（四段 config 双端全量下发）；`PanelController`（九个回调：onSyncPrediction/onSyncHull/onNoclipChange/onTextureQualityChange/onSyncFov/onSavePointDelete/onSavePointLoad…） | `app.ts:143-171` |
-| 8 | `bindInput()` + `startInputLoop()`（rAF 输入循环） | `app.ts:174-175` |
-
-此时两条 wasm 已就绪待命（Worker 权威 + 主线程渲染），等待地图。
-
-## 2. 地图加载管线（`apps/game/src/app.ts:387-479` handleLoadBsp）
-
-主线程独占解析（Worker 不参与加载），Worker 只收成品 JSON：
-
-```
-选文件(fileInput.change) → handleLoadBsp(name, bytes)
-  1 savePointStore.load(mapName)（按地图切存点列表） + panel.hide()
-  2 await mainWasmReady（decompress_mtz 依赖）
-  3 renderer.disposeScene()（清场景/物理/校准状态） + showLoading()
-  4 buildWorldBundle(new BspProcessor(bytes), { decompressMtz, onProgress })   ← 共享管线
-      metadata → spawn/teleport/pvs 借用导出 → 碰撞体(brush+模型三角)
-      → 默认纹理包回退(mtz) → GLB 导出(含 PAKFILE 模型) → 出生点解析
-      （src/ts-shared/phys/world-builder.ts:5-9,96-112；Bundle 字段 :51-68）
-  5 renderer.loadScene({glb, spawnJson, pvsJson, mosaicManifest, metadata, spawn, …})
-      GLB 加载 → optimizeScene 分块合并 → 相机 near/far → PVS/LOD 注册
-      → onSceneLoaded(bbox.min.y)（死亡阈值） → 纹理画质 manifest 应用
-      （renderer-main.ts:211-287）
-  6 renderer.buildPredictionWorld({brushJson, triJson, teleportJson, spawn})
-      ← 主线程 PhysWorld 就绪，渲染线物理开跑
-  7 fixWorker.postMessage('world-json') → Worker build_world + syncParamsToWasm
-      + authLoop.setFixedDt(tickRate) + reset     ← 权威线物理开跑
-      （worker-dispatch.ts:101-117）
-  8 双端 set-spawn-points：renderer.setSpawnPoints + Worker 'set-spawn-points'
-      （缺权威侧列表时 teleport_to_spawn 静默忽略 → 权威帧把传送点拉回，app.ts:442-446 注释记录该根因）
-  9 syncFullConfig()（双端参数同步，含灵敏度）
- 10 sceneReady=true；spawn 下拉填充；finishLoading()；panel.updateVisibility(true)
- 失败分支：setError + disposeScene + failLoading（覆盖层转错误态不自动消失，app.ts:473-478）
-```
-
-**加载覆盖层**（`app.ts:530-677`）：阶段名→百分比映射 `LOAD_STAGE_PCT`（`app.ts:535-543`）；`advanceLoading`（`:636-646`）设目标百分比，`tickLoading` rAF 补间驱动（ease-out 逼近 + 阶段内伪漂移防卡死感，`:583-606`，逐帧写 `--load-pct` 自定义属性（`setProperty`，`:600`））。显隐/错误态走 CSS class 钩子（`#loadingOverlay.show`/`#loadingOverlay.error`，`apps/game/web/styles.css:510,540`）；显示时进度条复位 `removeProperty('--load-pct')` 回落 0% 回落值（`app.ts:619-620`，`.load-fill` `width:var(--load-pct, 0%)`，`styles.css:530`）。
-
-## 3. 主线程帧循环（`apps/game/src/renderer/renderer-main.ts:693-768` tick）
-
-每 rAF 一帧，`predReady && predPhys` 后执行六步：
-
-1. **写输入** `shared.addInput(pendingDx, pendingDy, pendingKeys)`（`renderer-main.ts:703-704`）——权威 Worker 模拟与主线程同源同输入。
-2. **读权威帧** `correctFromAuthority()`（`:706`，实现在 `src/ts-shared/phys/authority-calibrator.ts:128-190`）——只读；首次帧以权威全状态作渲染起点；传送豁免期内反向同步权威（见 §5）。
-3. **速度外推** `calibrateVelocity(now)`（`:708`）——权威 67Hz 采样间隔内的速度外推，位置不覆盖。
-4. **物理推进** `predPhys.tick(dt, pendingKeys, pendingDx, pendingDy)`（`:710`）——`dt = min((now-last)/1000, 0.1)`（首帧 1/64，`:701`）。Rust `step_core`：apply_input → 角度 → 传送 → 死亡 → reset → `player_tick`（`src/phys/mod.rs:222-272`）；noclip 时走 `noclip_step`（无碰撞）。
-5. **holdPoint 冻结**（`:713-718`）——C 键按住期间每帧 `set_state`（位置/朝向=存点、速度 0）。
-6. **渲染**（`:720-767`）——相机 `rotation.set(pitch·DEG2RAD, yaw·DEG2RAD, 0, 'YXZ')`、`position = pos + eyeHeight`；近平面自适应每 2 帧（`updateNearPlane`，`:729-733,387-444`）；LOD 距离剔除（`cullDistance = maxDim×0.5`，`:276`；PVS 因 `ENABLE_PVS=false` 跳过，`:740-744`）；`renderer.render`（`:767`）。
-
-**输入循环**（独立 rAF，`apps/game/src/app.ts:326-362` startInputLoop）：FPS 计数 1Hz；未锁定时 mask 恒 0；滚轮跳 pending 并入本帧 mask（消费一次即清）；Q/E → `qeEquivalentDx(yawBindSpeed, dt)` 等效鼠标量（恒定角速度、不受灵敏度影响）；`renderer.feedInput(qeDx, 0, maskWithWheel)`；速度 HUD 8Hz 采样 `getCurrentVel`（`app.ts:356-359,364-379`）。
-
-## 4. Worker 权威循环（`src/ts-shared/auth/auth-loop.ts` + `apps/game/src/worker/main.ts:72-90`）
-
-| 要素 | 值 | 代码 |
-|---|---|---|
-| 自驱节拍 | `setTimeout(loop, 4)` | `auth-loop.ts:194` |
-| 累积器 | `dtAcc` 累积墙钟，≥ fixedDt 才步进；上限保护 `guard`（≤64 步/次防雪崩） | `auth-loop.ts:119-155,204` |
-| 单步输入上限 | `maxStep = MAX_INPUT_PER_STEP_BASE(1200) × dt / (1/64)`——`takeInput` 饱和截断防穿墙 | `auth-loop.ts:85,118`、`shared-state.ts:292-304` |
-| 固定步长 | `1/tickRate`：**面板值直译**（面板 64 → 权威 64Hz；2026-09-21 用户定调取消原隐藏偏移 +3）；面板改 tickRate 即时 `setFixedDt`，步长未变则不 reset（防丢仿真时间） | `apps/game/src/worker/main.ts:425`、`worker-dispatch.ts:247,281`（行号 2026-09-21 实测） |
-| 单步流程 | `takeInput` → `phys.tick(fixedDt, keys, dx, dy)` → `writeAuthoritative`（写空闲槽 → release `V_A++`） | `auth-loop.ts:119-158`、`shared-state.ts:316-334` |
-| 碰撞事件 | land = onGround 上升沿；blocked = 速度骤降（>250 u/s）且实际位移远小于应走位移 → postMessage 给主线程 | `auth-loop.ts:160-190` |
-
-## 5. 校准与反向同步（渲染 144Hz 为准，权威只读 + 兜底）
-
-`src/ts-shared/phys/authority-calibrator.ts`（实例化于 `renderer-main.ts:150-161`，deps：readAuth/getPhys/clearPendingInput/onSyncRenderState）：
-
-| 场景 | 行为 | 代码 |
-|---|---|---|
-| 首次权威帧 | 以权威全状态 `set_state` 作渲染物理起点 | `authority-calibrator.ts:184-190` |
-| 传送/重生豁免期（200ms） | 不让权威旧位置覆盖渲染新位置；反向 `onSyncRenderState` 把渲染新状态推给权威，`predStarted=true` 防豁免结束后又被拉回 | `authority-calibrator.ts:139-168`（TELEPORT_EXEMPT_MS） |
-| 新权威帧到达（V_A 变化） | 记录帧供外推；三条件 OR 兜底（位置差>500 强制；>300 且水平朝向一致；≤300 但视角差>45°）→ 渲染主线 `sync-render-state` 反向覆盖权威 + 双端清输入增量；250ms 冷却 + syncInFlight 在途回滚 | `authority-calibrator.ts:170-315`（SYNC_COOLDOWN_MS） |
-| 每帧速度校准 | `calibrateVelocity`：权威速度外推 + 大偏差衰减，位置不动 | `authority-calibrator.ts::calibrateVelocity` |
-| 碰撞事件（land/blocked） | 权威仅碰撞判断时可影响渲染：land = 权威全状态恢复（<60 units）；blocked = 仅位置/角度 | `authority-calibrator.ts:344-385`、`apps/game/src/app.ts:104-107` |
-| 权威侧收到同步 | `set_state(渲染帧)` + `resetInput()`（键位保留） | `worker-dispatch.ts:156-181` |
-
-## 6. 通道协议细节
-
-### 6.1 SAB 512B 布局（`src/ts-shared/auth/shared-state.ts:20-117`）
-
-| 区 | 索引 | 内容 |
-|---|---|---|
-| Int32 | `[0]` | V_A 权威版本号（release 递增） |
-| Int32 | `[1]` | I_KEYS 键位掩码（无条件 store，松手即 0） |
-| Int32 | `[2]` | I_A_GROUND 着地标志 |
-| BigInt64 | `[8]/[9]` | dxAcc/dyAcc 输入增量（Atomics.add 累加，×1000 定点；exchange 清空消费） |
-| BigInt64 | `[16..25]` | 帧 A：pos×3(×100)、yaw(×1000)、pitch(×1000)、vel×3(×100)、eyeHeight(×100)、timeMs |
-| BigInt64 | `[26..35]` | 帧 B（双缓冲：写 `V_A&1` 槽 → V_A++；读 `(V_A-1)&1` 槽，消除多字段撕裂） |
-
-### 6.2 MsgState 回退（`shared-state.ts:150-228`）
-
-无 COOP/COEP 时：主线程 `addInput` → postMessage `input`；Worker 消费缓冲；Worker 每步 `writeAuthoritative` → postMessage `phys-frame`；主线程 `recvFrame` 缓存（`apps/game/src/app.ts:108-112`）。接口与 SAB 完全同构，功能等价、性能降级。
-
-### 6.3 主线程 ↔ Worker 消息全集（实际生效）
-
-| 方向 | 消息 | 触发 | 处理 |
+| 参与者 | 步骤 | 数据落点 | 锚点 |
 |---|---|---|---|
-| 主→W | `init` / `wasm-init` | 启动 | worker-dispatch.ts:79-100 |
-| 主→W | `world-json` | 地图加载 | build_world + 参数同步 + 固定步长（:101-117） |
-| 主→W | `input` | 仅 MsgState 回退每帧 | recvInput 累积（:86-93） |
-| 主→W | `config` | 面板/启动 | applyConfigPatch + tickRate/set_hull/set_noclip（:118-150） |
-| 主→W | `respawn` / `teleport` | R 键按钮 / spawn 下拉 | respawn / teleport_to_spawn（:151-155,191-197） |
-| 主→W | `set-spawn-points` | 地图加载 | set_spawn_points（:182-190） |
-| 主→W | `sync-render-state` | 兜底同步 | set_state + resetInput（:156-181） |
-| W→主 | `phys-event` | land/blocked | applyCollisionCorrection（app.ts:104-107） |
-| W→主 | `phys-frame` | 仅 MsgState 回退每步 | recvFrame（app.ts:108-112） |
-| W→主 | `error` | wasm 加载失败 | setError（app.ts:102-103） |
+| 浏览器 | 加载页面外壳，先取 `./coi-serviceworker.js`，再以 module script 取 `./app.js` | DOM；SW 负责给静态托管补 COOP/COEP | `apps/game/web/index.html:290`、`apps/game/web/index.html:291` |
+| `main` | 取 `#preview` 画布；缺失即 `console.error` 并返回 | 无 | `apps/game/src/app.ts:95` |
+| `main` | 读 `crossOriginIsolated`，据此决定能否建 `SharedArrayBuffer` | 局部 `sharedBuffer`（`null` 表示走 postMessage 回退） | `apps/game/src/app.ts:102`、`apps/game/src/app.ts:108`、`apps/game/src/app.ts:112` |
+| `main` | `#status` 写兼容模式提示（仅在拿不到 SAB 时） | `#status` 文本 | `apps/game/src/app.ts:110` |
+| `main` | 建权威 Worker：内嵌 `__VBSP_WORKER_JS__` 走 Blob URL，否则装载 `./worker.js` | `fixWorker` | `apps/game/src/app.ts:117`、`apps/game/src/app.ts:118`、`apps/game/src/app.ts:120` |
+| `main` → Worker | 发 `init`（只带 `type` 与 `shared`） | Worker 侧 `shared.current` 槽 | `apps/game/src/app.ts:148` |
+| `main` → Worker | 发 `wasm-init`：内嵌 base64 分支或 URL 分支 | Worker 侧 wasm 实例与权威时钟启动 | `apps/game/src/app.ts:152`、`apps/game/src/app.ts:154` |
+| `main` | `createMainSharedState(sharedBuffer, fixWorker)` 建本端通道对象 | `sharedState` | `apps/game/src/app.ts:158` |
+| `main` | 建 `RendererMain` 并注册两个回调（`onSceneLoaded`、`onSyncRenderState`） | `renderer`；死亡阈值回调 | `apps/game/src/app.ts:162`、`apps/game/src/app.ts:163`、`apps/game/src/app.ts:166` |
+| `main` | `renderer.init(...)` 后 `start()`：写光照 uniform 初值、建 renderer/scene/camera、起 rAF | three 的 renderer / scene / camera；光照共享 uniform | `apps/game/src/app.ts:169`、`apps/game/src/app.ts:170` |
+| `main` | `installFrameProbe()`：挂 `globalThis.__vbspFrameProbe` | `globalThis` 一个对象 | `apps/game/src/app.ts:173` |
+| `main` | `initPrediction('./websurf_wasm_bg.wasm', embeddedWasm)`：内嵌走 `initSync`，否则 `fetch` | 主线程 wasm 实例；`mainWasmReady` promise | `apps/game/src/app.ts:176`、`apps/game/src/renderer/renderer-main.ts:671` |
+| `main` | 建 `InputBridge`，随后 `syncFullConfig()` 按四段各发一条 `config` | `bridge`；Worker 与本端 config 副本 | `apps/game/src/app.ts:181`、`apps/game/src/app.ts:182` |
+| `main` | 建 `PanelController`：加载偏好 → 回写控件 → 全量下发 → 应用准星 | 面板 DOM；`config`；localStorage | `apps/game/src/app.ts:185`、`apps/game/src/panel/panel-controller.ts:82` |
+| `main` | `initKeyHud()` → `bindInput()` → `startInputLoop()` | 键簇标签；DOM 事件；rAF 输入循环 | `apps/game/src/app.ts:219`、`apps/game/src/app.ts:220`、`apps/game/src/app.ts:221` |
+| 用户 | 点 `#loadMapBtn` → 隐藏的 `#bspFile` → `change` 事件 | `File` 字节 | `apps/game/src/app.ts:317`、`apps/game/src/app.ts:321` |
+| `handleLoadBsp` | 记录地图名、载入该地图存点、收起面板、等主线程 wasm 就绪 | `currentMapName`；`savePointStore`；面板可见性 | `apps/game/src/app.ts:501`、`apps/game/src/app.ts:502`、`apps/game/src/app.ts:507` |
+| `handleLoadBsp` | 释放上一张图 → `buildWorldBundle(...)` 解析并导出 | 场景释放；`WorldBundle` | `apps/game/src/app.ts:508`、`apps/game/src/app.ts:514` |
+| `handleLoadBsp` | `renderer.loadScene({...})`：GLB + spawn + PVS + mosaic manifest | three 场景；死亡阈值回调 | `apps/game/src/app.ts:521` |
+| `handleLoadBsp` | `renderer.buildPredictionWorld({...})`：主线程渲染物理世界 | `predPhys` | `apps/game/src/app.ts:536`、`apps/game/src/renderer/renderer-main.ts:689` |
+| `handleLoadBsp` → Worker | 发 `world-json`（三段 JSON + spawn） | Worker 侧权威实例 | `apps/game/src/app.ts:558` |
+| `handleLoadBsp` | 双端出生点列表：渲染端 `setSpawnPoints` + Worker `set-spawn-points` | 两端出生点列表 | `apps/game/src/app.ts:570`、`apps/game/src/app.ts:571` |
+| `handleLoadBsp` | 再 `syncFullConfig()`（世界重建后参数重放） | Worker 侧 `set_params` / `set_hull` | `apps/game/src/app.ts:573`、`apps/game/src/worker/main.ts:88` |
+| `handleLoadBsp` | `sceneReady = true`；填 `#spawnSelect`；启用 `#respawnBtn`；隐藏进度覆盖层 | 场景就绪标志；下拉与按钮 | `apps/game/src/app.ts:575`、`apps/game/src/app.ts:582`、`apps/game/src/app.ts:594`、`apps/game/src/app.ts:596` |
 
-> `teleport-to-pos` / `set-death-threshold` 在 worker-dispatch 中有处理分支（`:198-216`）但 **game 主线程从不发送**（grep `apps/game/src` 无调用；`apps/game/src/input/input-bridge.ts:68` `sendSetDeathThreshold` 定义后无调用点）——game 权威侧死亡阈值恒为 Rust 默认 −100000（`src/phys/mod.rs:92`），死亡判定实际只在渲染线生效（详见 [implementation/gameplay.md](implementation/gameplay.md) §4）。
+## 帧链/主循环
 
-## 7. 生命周期事件时序
+一帧由两条互不阻塞的循环组成，二者只经通道交换输入与帧。
 
-- **锁定/退锁**（`app.ts:222-237`）：`onLockChange` → `mouseBuffer.onLockChange`（清 buffer + discardNext）→ `keyboard.setEnabled/reset` → `renderer.clearPendingInput` + `bridge.addInput(0,0,0)` → `panel.updateVisibility`。面板打开（未锁定）时输入 mask 恒 0（`app.ts:342`），面板内按键不进物理。
-- **页面失焦**（`app.ts:243-251`）：`keyboard.reset()` + `sharedState.addInput(0,0,0)` 显式清权威键位（rAF 后台停摆会冻结 I_KEYS，Worker 会按旧键位继续移动）+ 清预测待喂输入。
-- **noclip 切换**（`panel-controller.ts:415-423`）：`sendConfig('physics',{mode})` → 双端 `set_noclip`（Worker dispatch :144-147；主线程 `renderer-main.ts:662-669`）。
-- **重生**：R/按钮 → `bridge.sendRespawn` → 双端 `respawn()`（`input-bridge.ts:57`、`renderer-main.ts:520-522`、dispatch :151-155）。
-- **存点 X / 按住 C**：见 [implementation/gameplay.md](implementation/gameplay.md)。
+主线程侧（`RendererMain.tick`，rAF 驱动）：
+
+1. 续帧并取景：`requestAnimationFrame(this.boundTick)`，renderer/scene/camera 任一缺失即返回（`apps/game/src/renderer/renderer-main.ts:924`、`apps/game/src/renderer/renderer-main.ts:925`）。
+2. 物理分支开门条件 `predReady && predPhys`（`apps/game/src/renderer/renderer-main.ts:928`）；`dt` 取与上一物理帧的间隔，首个物理帧取 1/64 秒、上限 0.1 秒（`apps/game/src/renderer/renderer-main.ts:929`）。
+3. 写共享输入槽：`shared.addInput(pendingDx, pendingDy, pendingKeys)`（`apps/game/src/renderer/renderer-main.ts:932`）——本工程唯一的输入写入点。
+4. 消费权威帧与校准速度：`correctFromAuthority()` 后 `calibrateVelocity(now)`（`apps/game/src/renderer/renderer-main.ts:934`、`apps/game/src/renderer/renderer-main.ts:936`）。
+5. 推进主线程渲染物理：`predPhys.tick(dt, keys, dx, dy)`，随后把 dx/dy 清零（键位保留为按住状态）（`apps/game/src/renderer/renderer-main.ts:938`、`apps/game/src/renderer/renderer-main.ts:939`）。
+6. 冻结分支：按住 C 期间每帧把物理写回存点位姿并把速度清零（`apps/game/src/renderer/renderer-main.ts:942`）。
+7. 取物理状态写渲染采样：`writeRenderSample(now, posX, posY, posZ, renderSampleIndex++)`，不传世代（`apps/game/src/renderer/renderer-main.ts:955`）。
+8. 相机跟随物理：角度按度转弧度写入 `rotation`（YXZ），位置 y 加 `eyeHeight`（`apps/game/src/renderer/renderer-main.ts:957`、`apps/game/src/renderer/renderer-main.ts:958`）。
+9. 每 2 帧一次近平面自适应（`apps/game/src/renderer/renderer-main.ts:961`）。
+10. 剔除：按 `cullDistance` 改 `mesh.visible`；PVS 分支由常量门控（`apps/game/src/renderer/renderer-main.ts:977`、`apps/game/src/renderer/renderer-main.ts:113`）。
+11. 绘制 `renderer.render(scene, camera)`；首帧后跑一次注入生效性统计（`apps/game/src/renderer/renderer-main.ts:998`、`apps/game/src/renderer/renderer-main.ts:1001`）。
+
+主线程输入循环（`startInputLoop` 的 rAF，与渲染循环相互独立）：
+
+1. 每秒刷新 `#fps`（`apps/game/src/app.ts:391`）。
+2. 未就绪（`!bridge || !sceneReady`）直接返回（`apps/game/src/app.ts:396`）。
+3. 未锁定时强制掩码为 0（`apps/game/src/app.ts:400`）；`updateKeyHud` 只在掩码变化时写 DOM（`apps/game/src/app.ts:401`）。
+4. 滚轮跳并入本帧掩码后立即清零待消费标志（`apps/game/src/app.ts:403`、`apps/game/src/app.ts:404`）。
+5. Q/E 转向折算等效鼠标增量，与真实鼠标走同一 `feedInput` 通道（`apps/game/src/app.ts:409`、`apps/game/src/app.ts:413`）。
+6. 速度面板按 125ms 门控刷新（`apps/game/src/app.ts:415`、`apps/game/src/app.ts:424`）。
+
+Worker 侧（`createAuthLoop`，定时器唤醒 + 固定步长累积器）：
+
+1. 每个真实步长先取一次 `getPhys`：`rtTickGate()` 做唤醒边界探测、`healthProbe()` 复用同一次调用（自带节流）（`apps/game/src/worker/main.ts:457`）。
+2. 单个步长的顺序由共享层固定：先 `takeInput` 消费输入、再推进物理、最后 `writeAuthoritative`（`src/ts-shared/auth/auth-loop.ts:22`、`src/ts-shared/auth/auth-loop.ts:382`、`src/ts-shared/auth/auth-loop.ts:431`）。
+3. 步长由 tickRate 折算：`getConfigTickRate()` 读 Worker 自己那份 config 的 `physics.tickRate`（`apps/game/src/worker/main.ts:468`），`setFixedDt` 初值 1/64 秒、未变时返回 false（`src/ts-shared/auth/auth-loop.ts:252`、`src/ts-shared/auth/auth-loop.ts:532`）。
+4. 发布位置可被渲染轨迹投影替换：`renderTrajectorySource`（`apps/game/src/worker/main.ts:302`）在渲染折线上按 τ 取点（`apps/game/src/worker/main.ts:284`），跨世代或配对陈旧时返回 `null`、回退权威自身位置（`apps/game/src/worker/main.ts:287`、`apps/game/src/worker/main.ts:291`）。
+5. 碰撞事件经 `post` 出口发出（`apps/game/src/worker/main.ts:458`），主线程在 `phys-event` 分支转给 `RendererMain.applyCollisionCorrection`（`apps/game/src/app.ts:141`、`apps/game/src/renderer/renderer-main.ts:859`）。
+
+## 消息与通道
+
+通道有两种实现，由 `createMainSharedState` 在启动期择一（`src/ts-shared/auth/shared-state.ts:1022`）：**SAB 通道**（`ShmState`，`src/ts-shared/auth/shared-state.ts:568`）与 **postMessage 回退**（`MsgState`，`src/ts-shared/auth/shared-state.ts:259`）。共享缓冲长度由 `SHARED_BUFFER_SIZE` 给定（`src/ts-shared/auth/shared-state.ts:209`）。SAB 通道下输入与权威帧走共享槽、不走消息；回退通道下二者分别走 `input` 与 `phys-frame` 消息。
+
+消息分派实现在共享层，`apps/game/src/worker/main.ts` 只做两件事：先给自己的 `world-json` 打诊断计时，再把事件整体交给 `dispatch`（`apps/game/src/worker/main.ts:506`、`apps/game/src/worker/main.ts:508`、`apps/game/src/worker/main.ts:520`）。
+
+主线程 → Worker（载荷字段以 `apps/game/src/worker/worker-types.ts` 的类型声明为准，实际收发点见表内第二组）：
+
+| type | 类型声明的载荷 | 声明锚点 | 实际发送点 | 声明与实际是否一致 |
+|---|---|---|---|---|
+| `wasm-init` | `{ type, wasmUrl? }` | `apps/game/src/worker/worker-types.ts:25` | `apps/game/src/app.ts:152`（`wasmB64`）、`apps/game/src/app.ts:154`（`wasmUrl`） | **不一致**：分发器接受 `wasmB64` / `wasmUrl` / `mtzB64` 三者（`src/ts-shared/auth/worker-dispatch.ts:297`），声明只列了 `wasmUrl` |
+| `init` | `{ type, shared, width, height, dpr }` | `apps/game/src/worker/worker-types.ts:33` | `apps/game/src/app.ts:148`（只发 `type` 与 `shared`） | **不一致**：`width` / `height` / `dpr` 既无发送方也无读取点，分发器只读 `shared`（`src/ts-shared/auth/worker-dispatch.ts:270`） |
+| `config` | `{ type, section, patch }` | `apps/game/src/worker/worker-types.ts:51` | `apps/game/src/input/input-bridge.ts:46`、`:53`、`:65` | 一致（段名与实际下发载荷的口径差异见下条） |
+| `respawn` | `{ type }` | `apps/game/src/worker/worker-types.ts:58` | `apps/game/src/input/input-bridge.ts:71` | 一致 |
+| `teleport` | `{ type, target }` | `apps/game/src/worker/worker-types.ts:63` | `apps/game/src/input/input-bridge.ts:77` | 一致 |
+| `set-death-threshold` | `{ type, value }` | `apps/game/src/worker/worker-types.ts:70` | `apps/game/src/input/input-bridge.ts:86` | 一致 |
+| `load-bsp` | `{ type, name, data }` | `apps/game/src/worker/worker-types.ts:43` | 无发送方 | **无发送方也无分发分支**：地图装载在主线程完成 |
+| `world-json` | `{ type, brushJson, triJson, teleportJson, spawn }` | `apps/game/src/worker/worker-types.ts:171` | `apps/game/src/app.ts:558` | 类型声明位置在「Worker → 主线程」分组里，实际方向相反（分发器在 `src/ts-shared/auth/worker-dispatch.ts:304` 接收） |
+| `input` | `{ type, dx, dy, keys }` | `apps/game/src/worker/worker-types.ts:182` | 无直接发送点（由 `MsgState.addInput` 发出） | 声明只列三个必填字段；回退通道实现还会附带渲染采样六字段（`src/ts-shared/auth/worker-dispatch.ts:280`） |
+
+Worker → 主线程：
+
+| type | 类型声明的载荷 | 声明锚点 | 实际接收点 | 声明与实际是否一致 |
+|---|---|---|---|---|
+| `health-log` | `{ type, message }` | `apps/game/src/worker/worker-types.ts:155` | `apps/game/src/app.ts:134` | 一致（发送方是 `apps/game/src/worker/main.ts:365` 的 `postHealth`） |
+| `error` | `{ type, message }` | `apps/game/src/worker/worker-types.ts:148` | `apps/game/src/app.ts:136` | 一致（发送方在共享层分发器的 `wasm-init` 失败分支，`src/ts-shared/auth/worker-dispatch.ts:299`） |
+| `phys-event` | `{ type, kind, pos, yawDeg, pitchDeg, vel?, timeMs }` | `apps/game/src/worker/worker-types.ts:211` | `apps/game/src/app.ts:138` | 一致 |
+| `phys-frame` | `{ type, va, frame: {...} }` | `apps/game/src/worker/worker-types.ts:193` | `apps/game/src/app.ts:142` | 一致；仅 postMessage 回退通道使用 |
+| `world-build-ms` | 未声明 | 无 | `apps/game/src/app.ts:125` | **缺声明**：发送方 `apps/game/src/worker/main.ts:486` |
+| `world-parse-ms` | 未声明 | 无 | `apps/game/src/app.ts:128` | **缺声明**：发送方 `apps/game/src/worker/main.ts:518` |
+| `mode-ack` | 未声明 | 无 | 本工程无接收点 | 分发器在 `src/ts-shared/auth/worker-dispatch.ts:534` 发出；本工程不发 `set-mode`，故不会收到 |
+
+两个联合类型的成员集都与实际收发不符：`WorkerMessage`（`apps/game/src/worker/worker-types.ts:78`）未列入 `input`、`world-json`、`sync-render-state`、`set-spawn-points`、`teleport-to-pos`、`set-mode`、`set-hold` 七条在用的消息，却列入了没有发送方的 `LoadBspMessage`；`MainMessage`（`apps/game/src/worker/worker-types.ts:226`）未列入 `phys-frame`、`mode-ack`、`world-build-ms`、`world-parse-ms`，且把方向相反的 `WorldJsonMessage` 列入其中。类型面只作形状记录：分发器按 `type` 字符串分派，不做运行时校验（`src/ts-shared/auth/worker-dispatch.ts:265`）。
+
+`KeyState` 的字段集在两侧同名同型：本工程声明在 `apps/game/src/worker/worker-types.ts:243`，共享层的位掩码与转换在 `src/ts-shared/auth/shared-state.ts:67` 的 `KEY_MASK` 与 `src/ts-shared/auth/shared-state.ts:81` 的 `keysToMask`；本工程不另设位常量。
+
+## 异常与回退路径
+
+| 失败点 | 回退行为 | 锚点 |
+|---|---|---|
+| 页面拿不到 `crossOriginIsolated` / `SharedArrayBuffer` | 输入与权威帧落到 **postMessage 回退**：`sharedBuffer` 传 `null`，`createMainSharedState` 返回 `MsgState`；`#status` 显示兼容模式提示 | `apps/game/src/app.ts:108`、`apps/game/src/app.ts:110`、`apps/game/src/app.ts:158`、`src/ts-shared/auth/shared-state.ts:1022` |
+| module worker 在 `file://` 下被 CORS 拒绝 | single 产物把 Worker 代码内嵌为 `__VBSP_WORKER_JS__`，启动时走 Blob URL 装载 | `apps/game/src/app.ts:117`、`apps/game/src/app.ts:119` |
+| `file://` 下无法 `fetch` wasm | single 产物内嵌 `__VBSP_WASM_B64__`，两条路径都走 `initSync` | `apps/game/src/app.ts:150`、`apps/game/src/renderer/renderer-main.ts:671` |
+| Worker 内 wasm 实例化失败 | 分发器把异常转成 `error` 消息回主线程（`ready` 保持 false），主线程经 `#error` 显示 | `src/ts-shared/auth/worker-dispatch.ts:299`、`apps/game/src/app.ts:136`、`apps/game/src/app.ts:823` |
+| `world-json` 在 wasm 就绪前到达 | 分发器直接丢弃该消息 | `src/ts-shared/auth/worker-dispatch.ts:311` |
+| 主线程 wasm 初始化失败 | `initPrediction` 的 rejection 被 `catch` 转成错误提示；后续 `handleLoadBsp` 仍会 `await mainWasmReady.catch(...)` 继续（纹理回退降级为占位色） | `apps/game/src/app.ts:176`、`apps/game/src/app.ts:507` |
+| BSP 解析或场景装载抛错 | `handleLoadBsp` 的 `catch` 里显示错误、释放场景、进度覆盖层转错误态（不消失） | `apps/game/src/app.ts:598`、`apps/game/src/app.ts:601`、`apps/game/src/app.ts:602` |
+| GLB 未携带 lightmap atlas | `loadLightmapAtlas` 返回 `null`，`applyLightmap` 只打日志并跳过整段光照施加；地图仍是贴图原色 | `apps/game/src/renderer/renderer-main.ts:1240`、`apps/game/src/renderer/renderer-main.ts:1242` |
+| 光照注入锚点失配 | `reportInjectStatsOnce` 在「有失效材质且一条注入都没生效」时置 `globalThis.__vbspLightmapInjectFailed` 并打 error（出帧脚本据此非零退出）；部分失效只告警 | `apps/game/src/renderer/renderer-main.ts:1176`、`apps/game/src/renderer/renderer-main.ts:1181` |
+| mosaic 贴图替换失败 | 只告警，保留原贴图（`map.dispose()` 之后才写新 image，失败时纹理未被替换） | `apps/game/src/renderer/renderer-main.ts:505` |
+| 预编译着色器失败 | 只告警，three 仍按需编译 | `apps/game/src/renderer/renderer-main.ts:390` |
+| 页面失焦（rAF 停摆） | 显式写 `keysMask=0` 清权威键位并清本端待喂输入 | `apps/game/src/app.ts:300`、`apps/game/src/app.ts:306`、`apps/game/src/app.ts:307` |
+| 退锁（ESC 打开面板） | 键盘禁用并复位、清渲染物理待喂输入、清滚轮跳待消费标志；权威键位由下一帧输入循环写 0 兜底 | `apps/game/src/app.ts:279`、`apps/game/src/app.ts:282`、`apps/game/src/app.ts:287`、`apps/game/src/app.ts:290` |
+| 指针锁定请求失败 | `requestLock` 返回的 promise 落 false 时写状态行提示重试 | `apps/game/src/app.ts:252`、`apps/game/src/app.ts:255` |
+| 权威状态非有限值或 y 越过地板 | 只发 `health-log` 告警：不 respawn、不改权威状态、不碰渲染（原因写在同处） | `apps/game/src/worker/main.ts:402`、`apps/game/src/worker/main.ts:409` |
+| 权威发布停滞或渲染采样停滞 | 各只告警一次，直到版本号 / 序号重新前进才复位 | `apps/game/src/worker/main.ts:432`、`apps/game/src/worker/main.ts:445` |
+| 渲染采样配对跨世代或陈旧 | `rtServeEpochOk` 复检失败即丢弃配对、本 tick 不投影，回退权威自身位置 | `apps/game/src/worker/main.ts:273`、`apps/game/src/worker/main.ts:291` |
+| 存点读写 localStorage 失败 | 读失败打 `console.error` 并清空内存列表；写失败打 `console.error` 且不影响内存列表 | `apps/game/src/savepoint.ts:62`、`apps/game/src/savepoint.ts:114` |
+| 面板偏好版本不匹配 | 不合并存档内容，以当前 config（默认值）写回新版本档 | `apps/game/src/panel/panel-controller.ts:651`、`apps/game/src/panel/panel-controller.ts:657` |
+| 键位持久化读失败 | 回落到默认表的深拷贝（逐动作合并，允许空数组即禁用该动作） | `apps/game/src/input/keymap.ts:56`、`apps/game/src/input/keymap.ts:64` |

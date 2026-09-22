@@ -1,67 +1,89 @@
 /**
- * Shavit `.replay` 二进制原生解析（replay-file.inc 规格）。
+ * Shavit `.replay` 二进制原生解析。
  *
- * 规格依据：documents/viewer/implementation/shavit-replay-format.md（t2 研究，已对照
- * 仓库真实文件 test/maps/surf_null_4.replay 逐字节验证）。支持 FINAL（0x01…0x0C）与 V2；
- * 版本 > 0x0C、远古文本格式**明确报错**，不做静默错解。
+ * 本模块只认 Shavit 的 `.replay` 格式：判据是头行标签里的魔数字面量 `{SHAVITREPLAYFORMAT}` 及其
+ * `{FINAL}` / `{V2}` 后缀。下面列出的段顺序、版本门槛、偏移与字节宽**全部取自本模块的读取代码**，
+ * 不引仓库外实现、不引行号。
  *
- * 与现有管线的对接：
- * - 解析产出 viewer 坐标系的定型数组，可独立驱动现有 Clip 结构（见 §坐标映射）；
- * - Worker/主线程导入前先用 looksLikeShavitReplay 嗅探（必须在 file.text() 之前——
- *   文本解码会破坏二进制），命中则走本模块；t4 起 JSON 规则脚本通道已移除，
- *   这是唯一的录像导入路径；
- * - 头部元信息放在 Clip.meta（UI 元信息面板数据源），逐帧按键放 Clip.buttons；
- * - ShavitParseOptions.mapping（t4）：坐标轴映射 / 朝向轴切换，默认即下方定标映射，
- *   仅影响解码输出。
+ * 文件四段（全部小端、无压缩）：
+ *   ① ASCII 头行 `"<数字>:<标签>\n"`：标签为 `{SHAVITREPLAYFORMAT}{FINAL}` 时数字 = 格式版本，
+ *      为 `{SHAVITREPLAYFORMAT}{V2}` 时数字 = 帧数（V2 无版本概念）。头行只在文件前
+ *      SHAVIT_SNIFF_BYTES 字节内查找；二进制段自换行符后一字节起。FINAL 版本必须落在
+ *      [1, SHAVIT_MAX_VERSION]；标签内含魔数但既非 FINAL 也非 V2 时明确报错。
+ *   ② FINAL 二进制头：字段按固定顺序读取，每个字段带版本门槛（门槛 = 该字段存在的起始版本，
+ *      版本不足则该字段不占字节、取默认值）。读取顺序与门槛（括号内为门槛）：
+ *        sMap          变长 NUL 结尾字符串（3）——逐字节 latin1 组装，扫描上限 NT_STRING_MAX
+ *        style         u8（3）
+ *        track         u8（3）
+ *        preFrames     i32（3）
+ *        frameCount    i32（无门槛）
+ *        time          f32（无门槛）
+ *        steamID       i32（4）
+ *        postFrames    i32（5）
+ *        tickrate      f32（5）
+ *        zoneOffset[0] f32（8）
+ *        zoneOffset[1] f32（8）
+ *        stage         u8（10）
+ *        timestamp     i32（12）
+ *        offsetsLength u8（11）——读取顺序排在 timestamp 之后
+ *   ③ fail-replay offsets 区：offsetsLength ≥ 2 时跳过 (offsetsLength − 1) × 12 B；否则不占字节。
+ *   ④ 帧区：totalFrames 个定长帧，每帧 cells × 4 B，cells 随版本增长（见 cellsForVersion）。
+ *      本模块读取的帧内字段（偏移相对帧首）：
+ *        +0 / +4 / +8   pos.x / pos.y / pos.z  f32 ×3
+ *        +12 / +16      pitch / yaw            f32 ×2
+ *        +20            buttons                i32（按键位掩码）
+ *        +24            flags                  u32（cells ≥ 8 才存在；按位型存入 Int32Array）
+ *      cells ≥ 10 时帧内另有第 9、10 个 cell（各 4 B），cells ≥ 11 时另有第 11 个 cell：
+ *      本模块不读取，也不产出对应输出。帧区之后多出的字节计入 warnings。
  *
- * 坐标/时间映射（以仓库既有定标为准，test/replay-selftest.ts [6] + 真实文件实测）：
- * - pos：Source `[x,y,z]` → viewer `[y,z,x]`——与 wasm `rotate_yup`（GLB 导出、
- *   出生点）同一变换，det=+1，无符号翻转；帧坐标是脚底绝对世界坐标（posIsEye=false）。
- * - yaw：viewer = wrap(source + 180)。viewer forward = (−sin yaw, −cos yaw)，在该轴
- *   映射下 Source 前向 (cos yaw, sin yaw) → viewer (sin yaw, cos yaw)，两者恒等式即
- *   +180。真实回放 run 段 1078 个有效帧上「视角·运动方向」平均 cos = 0.9992（
- *   BSP 出生点路径的 bspYawToCsYaw 现已统一为同一定标 wrap(src+180)，见 core/pose.ts；
- *   旧式 270−yaw 属 det=−1 镜像、同帧实测 ≈0.05，已废弃）。
- * - pitch：viewer = −source（Source 正值=俯视，types.ts 同一口径），限幅 ±89°；roll=0。
- * - t(i) = (i − preFrames) / tickrate：prerun 为负、单调；主时钟 0 = 起跑帧（t2 §8.3
- *   方案 A）。头部 fTime 是官方计时（含 zone 口径），展示成绩用它，播放对轴用帧推算。
- * - vel：相邻帧位置差分（中央差分，端点单侧）。packed vel 字段是按键 wishmove
- *   （forwardmove | sidemove<<16），**不能**当世界速度，本模块不解码输出。
+ * 读侧兼容修正（在头部字段读完、帧区定位之前）：
+ *   - preFrames < 0 归零；
+ *   - 版本 < 7 时 frameCount 减去 preFrames，版本 ≥ 5 时再减去 postFrames（修正后 frameCount 只含
+ *     正式跑帧，总帧数 = preFrames + frameCount + postFrames）；
+ *   - 修正后 frameCount < 1 报错。
  *
- * 布局（小端，无压缩）：
- *   [0..)      ASCII 第 1 行：`"<版本>:{SHAVITREPLAYFORMAT}{FINAL}\n"`（V2 为 `"<帧数>:…{V2}"`）
- *   [行尾..)   二进制头（字段按版本门槛逐个出现，见 readFinalHeader）
- *   [..+k*12)  fail-replay offsets 区（iOffsetsLength ≥ 2 时，k = iOffsetsLength−1，跳过）
- *   [帧区..)   N × cells × 4B 定长帧：pos[3], ang[2](pitch,yaw), buttons, flags, mt,
- *              mousexy, vel(packed), stage——cell 数随版本增加
+ * tickrate：版本 < 5 头部没有该字段 → 取 FALLBACK_TICKRATE 并写入 warning；字段存在但非有限
+ * 正数 → 报错。
+ *
+ * 坐标与时间映射（默认映射；ShavitParseOptions.mapping 可把轴序与朝向分别切成 raw 直读）：
+ *   - pos：Source [x, y, z] → viewer [y, z, x]，与 `apps/viewer/crates/wasm/src/lib.rs` 的
+ *     rotate_yup 同一变换（det = +1 的正交变换，BSP Z-up → Y-up）。
+ *   - yaw：wrap(src + 180)，与 `src/ts-shared/phys/angles.ts` 的 bspYawToCsYaw 同一定标
+ *     （`apps/viewer/src/core/pose.ts` 转发该实现）；pitch：−src，经 clampPitch 限幅；roll 恒 0。
+ *   - t(i) = (i − preFrames) / tickrate（秒）：prerun 段为负，主时钟 0 = 起跑帧。
+ *   - vel：相邻帧位置差分（中央差分 scale = tickrate / 2，两端点单侧差分 scale = tickrate），
+ *     单位 HU/s；帧数 < 2 时为 null。
+ *
+ * 对接：解析只产出定型数组（parseShavitReplay）；UI 导入链路用 clipFromShavitReplay 转成 Clip，
+ * 头部元信息落在 Clip.meta、逐帧按键落在 Clip.buttons。导入前先用 fileLooksLikeShavitReplay 嗅探
+ * （读字节切片，不经文本解码），命中的文件才走本模块的解析。
  */
 
 import { applyClipTransform } from './build.js';
 import { clampPitch, wrapDeg } from './helpers.js';
 import type { Clip, ReplayHeaderMeta, RuleConfig } from './types.js';
 
-/** 格式识别魔数（第 1 行内必含）。 */
+/** 格式识别魔数：嗅探在窗口内逐字节查找该串，头行解析要求冒号后的标签含它。 */
 export const SHAVIT_MAGIC = '{SHAVITREPLAYFORMAT}';
 
-/** viewer 支持的最高 FINAL 格式版本（0x0C = 12；更高版本明确拒绝）。 */
+/** viewer 支持的最高 FINAL 格式版本（0x0C = 12）：版本高于该值直接报错。 */
 export const SHAVIT_MAX_VERSION = 0x0c;
 
-/** 嗅探/头部行解析只看文件前 64 字节（RFC 读侧 ReadLine(64) 同宽）。 */
+/** 嗅探与头行解析共用的字节窗口：两者都只看文件前 64 字节（头行必须落在窗口内）。 */
 export const SHAVIT_SNIFF_BYTES = 64;
 
 /**
- * 头部没有 tickrate 字段（V2 / FINAL < 0x05）时的时间轴估算值。
- * 该字段旧格式不落盘、shavit 播放端按服务器实时 tickrate 取值，文件里无从得知——
- * 取 128（现代 bhop 服务器主流值）并产生明确 warning，不静默。
+ * 头部没有 tickrate 字段（V2 与 FINAL 版本 < 5）时的时间轴估算值：
+ * 取 128 并写入一条 warning，不静默给出时间轴。
  */
 const FALLBACK_TICKRATE = 128;
 
-/** 地图名长度上限（防损坏文件在 NUL 扫描上失控）。 */
+/** NUL 结尾字符串的扫描上限（字节）：达到该长度仍未遇到 NUL 即报错。 */
 const NT_STRING_MAX = 256;
 
 export type ShavitFormatKind = 'final' | 'v2';
 
-/** 嗅探结果：`{SHAVITREPLAYFORMAT}` 是否出现在前 64 字节。 */
+/** 嗅探：魔数是否出现在前 SHAVIT_SNIFF_BYTES 字节内（逐字节比较，不做文本解码）。 */
 export function looksLikeShavitReplay(head: Uint8Array): boolean {
   const n = Math.min(head.length, SHAVIT_SNIFF_BYTES);
   const m = SHAVIT_MAGIC;
@@ -79,7 +101,7 @@ export function looksLikeShavitReplay(head: Uint8Array): boolean {
   return false;
 }
 
-/** File 形态的嗅探（导入入口用；读取失败按「不是 .replay」处理，走既有 JSON 路径报错）。 */
+/** File 形态的嗅探（Worker 与主线程两条导入路径共用）：只切片读取前 SHAVIT_SNIFF_BYTES 字节；切片或读取抛错时按「不是 .replay」返回 false。 */
 export async function fileLooksLikeShavitReplay(file: File): Promise<boolean> {
   try {
     const head = new Uint8Array(await file.slice(0, SHAVIT_SNIFF_BYTES).arrayBuffer());
@@ -93,9 +115,9 @@ export async function fileLooksLikeShavitReplay(file: File): Promise<boolean> {
 
 interface ShavitLine {
   kind: ShavitFormatKind;
-  /** FINAL = 格式版本；V2 = 帧数（V2 无版本概念）。 */
+  /** FINAL 段为格式版本；V2 段为帧数（V2 无版本概念）。 */
   number: number;
-  /** 换行符所在字节下标（二进制头从 lineEnd+1 开始）。 */
+  /** 换行符所在字节下标：二进制段自 lineEnd + 1 起。 */
   lineEnd: number;
 }
 
@@ -111,10 +133,10 @@ function parseHeaderLine(head: Uint8Array): ShavitLine {
   if (lineEnd < 0) {
     throw new Error('不是有效的 Shavit .replay：前 64 字节内没有换行符（第 1 行缺失）');
   }
-  // 逐字节按 latin1 取字符：魔数是 ASCII，避免任何文本解码假设
+  // 逐字节按 latin1 组装头行：魔数全是 ASCII，避免引入文本解码假设
   let line = '';
   for (let i = 0; i < lineEnd; i++) line += String.fromCharCode(head[i]);
-  line = line.trim(); // RFC 读侧 TrimString 同语义
+  line = line.trim(); // 去首尾空白后按「<数字>:<标签>」切分
 
   const colon = line.indexOf(':');
   if (colon < 0) {
@@ -175,7 +197,7 @@ class ByteReader {
     return v;
   }
 
-  /** NUL 结尾字符串（sMap 写侧 = 字符串 + '\0'）。 */
+  /** NUL 结尾字符串：读到 0 字节为止（不含该字节），游标停在 0 之后；扫描上限 NT_STRING_MAX，超限或文件结束仍未遇 0 即报错。 */
   ntString(what: string): string {
     const start = this.p;
     let end = -1;
@@ -205,14 +227,14 @@ class ByteReader {
 
 export interface ShavitParseOptions {
   /**
-   * 时间戳兜底（Unix 秒）：版本 < 0x0C / V2 头部没有 iTimestamp 字段，
-   * shavit 读侧用文件 mtime——浏览器/Node 侧传 File.lastModified / stat.mtime。
+   * 时间戳兜底（Unix 秒）：FINAL 版本 < 12 与 V2 的头部没有 timestamp 字段时用它填充
+   * header.timestamp。Worker 与主线程回退两条导入路径都传 File.lastModified / 1000。
    */
   timestampFallback?: number | null;
   /**
-   * 坐标映射切换（t4：录像与 viewer 坐标系不一致时的逃生口）。
-   * 默认 shavit/shavit = 实测定标映射（pos [y,z,x]、yaw=wrap(src+180)、pitch 取反）；
-   * `raw` = Source 值直读。仅影响解码输出，不影响头部/时间轴。
+   * 坐标映射切换：录像与 viewer 坐标系不一致时的逃生口。
+   * 缺省 = shavit 定标映射（pos 取 [y, z, x]、yaw = wrap(src + 180)、pitch 取反）；
+   * `raw` = 帧内原始值直读。只影响解码输出，不影响头字段与时间轴。
    */
   mapping?: {
     axesMode?: 'shavit' | 'raw';
@@ -222,38 +244,42 @@ export interface ShavitParseOptions {
 
 export interface ShavitParseResult {
   header: ReplayHeaderMeta;
-  /** preFrames + frameCount + postFrames。 */
+  /** preFrames + frameCount + postFrames（解析保证 ≥ 1）。 */
   count: number;
-  /** t(i) = (i − preFrames) / tickrate，秒；主时钟 0 = 起跑帧。 */
+  /** t(i) = (i − preFrames) / tickrate（秒），长度 = count；prerun 段为负，主时钟 0 = 起跑帧。 */
   t: Float64Array;
-  /** viewer 世界坐标（mapping.axesMode 决定轴序，默认 shavit = [y,z,x]），3n。 */
+  /** 位置，3 × count；轴序由 mapping.axesMode 决定（缺省 = [y, z, x]）。 */
   pos: Float32Array;
-  /** [yaw, pitch, roll]，viewer 约定（mapping.yawMode 决定映射，默认实测定标），3n。 */
+  /** 朝向，3 × count，每帧 [yaw, pitch, roll]；映射由 mapping.yawMode 决定（缺省 = wrap(yaw + 180)、−pitch、roll 0）。 */
   ang: Float32Array;
-  /** 世界速度（相邻帧位置差分，HU/s），3n；单帧文件为 null。 */
+  /** 世界速度，3 × count，HU/s；由相邻帧位置差分算出，count < 2 时为 null。 */
   vel: Float32Array | null;
-  /** 逐帧按键位掩码（IN_*）。 */
+  /** 逐帧按键位掩码（帧内 +20 的 i32 原样存入）。 */
   buttons: Int32Array;
-  /** 逐帧实体 flags（按 u32 读，CS2 有高位 bit；Int32Array 保位型）。 */
+  /** 逐帧实体 flags（帧内 +24 的 u32；cells < 8 的版本恒 0）。存入 Int32Array 以保位型。 */
   flags: Int32Array;
-  /** 解析警告（非致命：估算值 / 尾部多余字节 / 脏帧兜底）。 */
+  /** 非致命问题的文本：tickrate 估算、帧区之后多余的字节、数值非有限的帧计数。 */
   warnings: string[];
-  /** 帧区起始字节偏移（诊断：frameStart + count×cells×4 应与文件大小闭合）。 */
+  /** 帧区起始字节偏移（诊断用：frameStart + count × cells × 4 与文件长度闭合）。 */
   frameStart: number;
 }
 
-/** 版本 → 每帧 cell 数（×4B）。 */
+/**
+ * 版本 → 每帧 cell 数（每 cell 4 B）。V2 恒 6；FINAL 随版本递增（版本 1 为 6，≥ 2 为 8，
+ * ≥ 6 为 10，≥ 10 为 11）。cells ≥ 8 时帧内 +24 处有 flags；多出的 cell 本模块不读取。
+ */
 function cellsForVersion(kind: ShavitFormatKind, version: number): number {
-  if (kind === 'v2') return 6; // pos3 + ang2 + buttons
-  if (version >= 10) return 11; // + stage
-  if (version >= 6) return 10; // + mousexy, vel（播放不用）
-  if (version >= 2) return 8; // + flags, mt
-  return 6; // 0x01
+  if (kind === 'v2') return 6; // pos×3 + ang×2 + buttons
+  if (version >= 10) return 11;
+  if (version >= 6) return 10;
+  if (version >= 2) return 8; // 起：帧内 +24 有 flags
+  return 6; // 版本 1
 }
 
 /**
- * 解析 Shavit `.replay`。只做解码与坐标/时间映射，不构造 Clip
- * （UI 导入链路用 clipFromShavitReplay）。
+ * 解析 Shavit `.replay`：只做解码与坐标/时间映射，不构造 Clip
+ * （UI 导入链路在 clipFromShavitReplay 里转会 Clip）。
+ * 数据结构非法时抛错；非致命问题进返回值的 warnings。
  */
 export function parseShavitReplay(
   data: ArrayBuffer | ArrayBufferView,
@@ -286,7 +312,7 @@ export function parseShavitReplay(
     throw new Error(`Shavit .replay 格式版本异常（${version}）——文件损坏`);
   }
 
-  // ── 二进制头（字段顺序与版本门槛逐条对齐 replay-file.inc 读侧）──
+  // ── 二进制头：字段按顺序读取，has(n) = 版本 ≥ n（顺序与门槛见文件头注释）──
   const has = (min: number): boolean => version >= min;
   const map = has(3) ? r.ntString('地图名') : '';
   const style = has(3) ? r.u8('style') : 0;
@@ -304,7 +330,7 @@ export function parseShavitReplay(
   const timestampRaw = has(12) ? r.i32('timestamp') : null;
   const offsetsLength = has(11) ? r.u8('offsetsLength') : 0;
 
-  // 读侧兼容修正（RFC:318-353）：负 prerun 归零；<0x07 的 frameCount 需减 pre（≥0x05 再减 post）
+  // 读侧兼容修正：负 prerun 归零；版本 < 7 时 frameCount 已把 pre 计入（版本 ≥ 5 时连 post 一并计入），需减去
   if (preFrames < 0) preFrames = 0;
   if (version < 7) {
     frameCount -= preFrames;
@@ -316,7 +342,7 @@ export function parseShavitReplay(
     );
   }
 
-  // ── tickrate：缺失（<v5）按 FALLBACK 估算并警告；存在但无效则报错 ──
+  // ── tickrate：版本 < 5 头部无该字段 → 按 FALLBACK_TICKRATE 估算并写入警告；字段存在但非有限正数 → 报错 ──
   let tickrate: number;
   if (tickrateRaw == null) {
     tickrate = FALLBACK_TICKRATE;
@@ -334,11 +360,12 @@ export function parseShavitReplay(
     );
   }
 
-  // ── offsets 区（iOffsetsLength ≥ 2 时存在 (n−1) 条 12B 记录；viewer 跳过）──
+  // ── offsets 区：offsetsLength ≥ 2 时占 (offsetsLength − 1) × 12 B，整段跳过（本模块不解析其内容）──
   if (offsetsLength >= 2) {
     r.skip((offsetsLength - 1) * 12, 'fail-replay offsets 区');
   }
 
+  // ── 帧区：起点取当前游标，长度按 totalFrames × cellBytes 校验（不足报错，多余只警告）──
   const cells = cellsForVersion('final', version);
   const cellBytes = cells * 4;
   const frameStart = r.pos;
@@ -382,7 +409,7 @@ export function parseShavitReplay(
   return { header, count: totalFrames, t, ...decoded, warnings, frameStart };
 }
 
-/** V2：`"<帧数>:{SHAVITREPLAYFORMAT}{V2}"` + 定长 6-cell 帧数组，无二进制头（RFC:383-386）。 */
+/** V2：头行数字即帧数，二进制头整段缺席（version 记 0，其余头字段取 0/null）+ 定长 6-cell 帧数组。 */
 function parseV2(
   dv: DataView,
   offset: number,
@@ -437,13 +464,18 @@ function parseV2(
   return { header, count: frameCount, t, ...decoded, warnings, frameStart };
 }
 
+/** 时间轴数组：t(i) = (i − preFrames) / tickrate（秒）。V2 路径传 preFrames = 0。 */
 function buildTimeArray(n: number, preFrames: number, tickrate: number): Float64Array {
   const t = new Float64Array(n);
   for (let i = 0; i < n; i++) t[i] = (i - preFrames) / tickrate;
   return t;
 }
 
-/** 帧解码 + 坐标映射 + 世界速度差分。脏数值沿用历史导入管线的兜底语义并计数。 */
+/**
+ * 帧解码 + 坐标映射 + 世界速度差分。
+ * 帧内 pos / pitch / yaw 出现非有限值（NaN、Inf）时沿用上一帧的值（首帧前值为 0）并计数，
+ * 计数在返回前写入 warnings。每帧只读 +0…+24 的字段，其余 cell 不读（见文件头布局说明）。
+ */
 function decodeFrames(
   dv: DataView,
   frameStart: number,
@@ -471,14 +503,14 @@ function decodeFrames(
     const pitch = dv.getFloat32(base + 12, true);
     const yaw = dv.getFloat32(base + 16, true);
     buttons[i] = dv.getInt32(base + 20, true);
-    // flags 按 u32 读（CS2 有高位 bit，如 0x80010002）；Int32Array 保位型
+    // flags 按 u32 读（高位 bit 不丢），再按位型存进 Int32Array
     flags[i] = cells >= 8 ? dv.getUint32(base + 24, true) | 0 : 0;
-    // cells ≥ 10 还有 mousexy/vel(packed)、≥ 11 还有 stage——t3 不输出（packed vel 是
-    // 按键 wishmove 不是世界速度；UI 取舍见 shavit-replay-format.md §9）
+    // cells ≥ 10 时帧内还有第 9、10 个 cell，cells ≥ 11 时还有第 11 个 cell：本模块不读取，
+    // 也不产出对应输出（速度一律由 pos 差分算出）
 
     if (Number.isFinite(sx) && Number.isFinite(sy) && Number.isFinite(sz)) {
-      // shavit（默认）：Source [x,y,z] → viewer [y,z,x]（与 wasm rotate_yup 同一变换）；
-      // raw：[x,y,z] 直读（坐标序不合时的对照项）
+      // 轴序：缺省 shavit = Source [x, y, z] → viewer [y, z, x]（与 wasm rotate_yup 同一变换）；
+      // raw = 帧内 [x, y, z] 直读
       const p: [number, number, number] = mapping.axes === 'raw' ? [sx, sy, sz] : [sy, sz, sx];
       pos[i * 3] = p[0];
       pos[i * 3 + 1] = p[1];
@@ -492,8 +524,8 @@ function decodeFrames(
     }
 
     if (Number.isFinite(pitch) && Number.isFinite(yaw)) {
-      // shavit（默认，实测定标）：yaw = wrap(src+180)（run 段 view·motion cos=0.9992）、
-      // pitch = −src（Source 正值=俯视）；raw：角度直读
+      // 朝向：缺省 = yaw 归一为 wrap(src + 180)、pitch 取 −src 并限幅（clampPitch）、roll 0；
+      // raw = 帧内 yaw/pitch 直读，roll 仍为 0
       const a: [number, number, number] =
         mapping.yaw === 'raw' ? [yaw, pitch, 0] : [wrapDeg(yaw + 180), clampPitch(-pitch), 0];
       ang[i * 3] = a[0];
@@ -511,7 +543,7 @@ function decodeFrames(
   if (badPos > 0) warnings.push(`${badPos} 帧位置数值无效（NaN/Inf），已沿用上一帧的值`);
   if (badAng > 0) warnings.push(`${badAng} 帧视角数值无效（NaN/Inf），已沿用上一帧的值`);
 
-  // 世界速度 = 位置差分 × tickrate（中央差分，端点单侧差分）
+  // vel = 位置差分 × tickrate：首末帧用单侧差分（scale = tickrate），中间帧用中央差分（scale = tickrate / 2）
   let vel: Float32Array | null = null;
   if (n >= 2) {
     vel = new Float32Array(n * 3);
@@ -529,10 +561,10 @@ function decodeFrames(
 }
 
 /**
- * 解析结果 → 现有 Clip 结构（含 rule.transform 后处理（applyClipTransform）：
- * 「调整工具」的平移/旋转对 .replay 原生轨道同样生效）。
- *
- * 接管的是 parsed 数组的**拷贝**（transform 原地后处理，parsed 结果保持原样可复用）。
+ * 解析结果 → Clip：先拷贝 parsed 的定型数组（后续 applyClipTransform 就地改写，parsed 保持原样
+ * 可复用），再按 pos 算 bbox、按 vel 算 maxSpeed、按末帧 t 算 duration。
+ * rule.transform 经 applyClipTransform 生效（「调整工具」的平移/旋转对 .replay 轨道同样生效）；
+ * resolvedPath 固定为 '.replay'，meta 取 parsed.header，warnings 原样透传。
  */
 export function clipFromShavitReplay(
   name: string,

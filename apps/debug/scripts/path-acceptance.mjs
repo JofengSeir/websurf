@@ -1,40 +1,54 @@
 #!/usr/bin/env node
 /**
- * tick→渲染折线 **垂距** 验收门 / 基线度量。
+ * tick 点到渲染折线的垂距验收门与基线度量。
  *
- * 度量定义（用户口径）：每个 tick 点到**渲染折线**的最短距离。
- *   d(p) = min over **合格线段** i of segDist(p, R[i], R[i+1])
- *   segDist = 把 p 投影到线段并**钳位** s∈[0,1] 后的三维距离
- *   合格线段 = 两端距离 ≤ JUMP_BREAK(100 HU)（渲染器不在跳变处连线）
- * 该度量对采样相位不敏感 —— 与面板"偏差梳"（按时间对齐、含切向滞后、会被传送
- * 放大成数千 HU）是**不同量**，不可混用。
+ * 度量定义：每个 tick 点到**渲染折线**的最短距离。
+ *   d(p) = 所有合格线段 i 上 segDist(p, R[i], R[i+1]) 的最小值；
+ *   segDist = 把 p 投影到线段、把投影参数钳位到 [0, 1] 之后的三维距离；
+ *   合格线段 = 两端距离不超过 `--jump-hu`（缺省 100 HU）的渲染相邻点对——渲染器在跳变处
+ *   不连线，故这里也不让跳变段参与候选（零长段同样跳过）。
+ * 该度量与「按同一时刻在渲染线上插值再比」的偏差梳是两件不同的事：垂距不含时间对齐误差，
+ * 也不含切向滞后，因此不会被一次传送放大成数千 HU。面板上的 `perpStats` 虽然也叫垂距，
+ * 但只扫 ±250ms 时间窗内的线段；本脚本扫全部合格线段。两者口径不同，不可互相引用数值。
  *
- * 关键实现要点（经实测确认）：
- *  1. **不能用时间窗筛候选线段**：渲染路径会绕回，实测最近线段的时间可差 5.5 秒。
- *     改用**对线段 AABB 的 BVH**（中位数切分 / 叶 8 / 按 AABB 距离剪枝），与暴力法逐位一致。
- *  2. **必须按时间剔除传送邻近点**：每个跳变（>D，D=max(100, 2×p99 间距)）前后
- *     ±EXCL_HALF_MS 内的 tick 点单独统计，否则一次传送会把总体 p95 抬到几十 HU。
- *  3. **垂距有固有地板**：渲染折线本身是弦近似，实测 sagitta 最大 ≈6 HU，
- *     因此**不对原始总体设硬 max**，只对剔除传送后的稳态总体设阈。
+ * 关键实现要点：
+ *  1. **不用时间窗筛候选线段**：渲染路径会绕回来，时间上相邻不等于空间上最近。
+ *     这里给全部合格线段的 AABB 建 BVH（按最宽轴中位数切分、叶容量 8、按 AABB 距离剪枝），
+ *     查询时取严格更小的距离。查询同时回传最近线段中点与本点的时间偏移 `dt`。
+ *  2. **按时间剔除传送邻近点**：跳变阈值 D = max(`--jump-hu`, 2 × 渲染相邻间距的 p99)
+ *     （由数据推出，避免手调）。渲染侧与 tick 侧所有超过 D 的跳变都取时间戳，各自开一个
+ *     ±`--excl-half-ms` 的窗，重叠的窗合并成若干个区间；落在任一区间内的 tick 点进
+ *     `excluded` 组，其余进 `steady` 组。门只看稳态组，但剔除占比本身也是一道门
+ *     （防止用剔除"刷分"）。
+ *  3. **只对稳态组设 max 门**：因为渲染折线本身是折线近似，垂距有固有地板。
+ *
+ * 判定（仅 `--assert` 时生效）：
+ *   · 每个输入文件依次比对四项门：稳态 p95 ≤ `--p95`（缺省 2.0）、稳态 max ≤ `--max`
+ *     （缺省 10.0）、稳态中垂距 > `--glitch-hu`（缺省 30）的占比 ≤ `--glitch-share`
+ *     （缺省 0.01）、剔除点占比 ≤ `--max-excluded`（缺省 0.10）；解析失败也算一项未过。
+ *   · 退出码由「门结果是否等于期望」决定，而不是由门本身是否通过决定：`--expect pass`
+ *     （缺省）要求四项门全过，`--expect fail` 要求四项门**至少有一项不过**——后者用于
+ *     验证这道门确实有判别力（拿一份已知有缺陷的录制喂进去，它必须报 FAIL）。
+ *
+ * CLI：位置参数里**凡以 `.json` 结尾**的都是输入文件（可给多个，至少一个）；
+ *   `--assert` 开启判定；`--expect pass|fail` 设期望；`--quiet` 只打印判定段；
+ *   `--json` 把逐文件的完整结果以 JSON 打印；`--write-baseline <路径>` 把汇总写成 Markdown
+ *   基线表（本脚本不会自动写 `apps/debug/scripts/path-baseline.md`，该文件是手工维护的资产）。
+ *
+ * 输入格式：`apps/debug/src/renderer/renderer-main.ts` 的 `exportPathJson` 写出的 JSON；
+ *   本脚本只读 `render` 与 `tick` 两个数组，且要求 render 至少 2 点、tick 至少 50 点、
+ *   两者时间戳都非递减，否则该文件记为数据不足/非法。`sampling` 键只用来打「新构建」标记
+ *   （见文件末尾附近的输出行）——该键在当前导出里是写死的说明性字符串，故标记恒为真。
  *
  * 用法：
  *   node scripts/path-acceptance.mjs <phys-path.json> [更多...] [选项]
- * 选项：
- *   --assert              按阈值判定并以非 0 退出（CI 门）
- *   --p95 2.0             稳态 p95 上限（HU）
- *   --max 10.0            稳态 max 上限（HU）
- *   --glitch-hu 30        "毛刺"阈值（HU）
- *   --glitch-share 0.01   稳态中 >glitch-hu 的占比上限
- *   --max-excluded 0.10   传送邻近点占比上限（防止用剔除"刷分"）
- *   --excl-half-ms 500    跳变前后剔除半窗（ms）
- *   --jump-hu 100         折线断点阈值（HU）
- *   --json / --quiet / --write-baseline <out.md>
  *
- * 退出码：0 = 全部通过；1 = 有门未过；2 = 用法/数据非法。
+ * 退出码：0 = 与 `--expect` 一致；1 = 与 `--expect` 不符，或（无 `--assert` 时）
+ *   数据不足/JSON 解析失败；2 = 用法非法（没给任何 .json 输入）。
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 
-// ── 参数 ──────────────────────────────────────────────────────
+// ── 参数：位置参数只认 .json 结尾者；选项取值不得以 `--` 开头（否则回落默认值）──
 const argv = process.argv.slice(2);
 const files = argv.filter((a) => !a.startsWith('--') && /\.json$/i.test(a));
 const opt = (n, d) => {
@@ -46,6 +60,7 @@ if (!files.length) {
   console.error('用法: node scripts/path-acceptance.mjs <phys-path.json> [更多...] [--assert]');
   process.exit(2);
 }
+// 四道阈值 + 两个几何量，全部可由 CLI 覆盖；括号内为缺省值
 const LIM_P95 = Number(opt('p95', 2.0));
 const LIM_MAX = Number(opt('max', 10.0));
 const GLITCH_HU = Number(opt('glitch-hu', 30));
@@ -54,16 +69,17 @@ const LIM_EXCLUDED_SHARE = Number(opt('max-excluded', 0.1));
 const EXCL_HALF_MS = Number(opt('excl-half-ms', 500));
 const JUMP_HU = Number(opt('jump-hu', 100));
 /**
- * 期望判定（仅 --assert 时生效）：
- *   pass（默认）= 门禁应通过；fail = 门禁应**失败**。
- * 用途：夹具是"某个构建下的录制"，它固化了那个构建的行为。改动前的录制即使代码修好
- * 也永远失败——因此用 `--expect fail` 把它当**度量判别力的自检**（证明该门能识破缺陷）；
- * 真正验收要用修好之后录制的夹具 + `--expect pass`。
+ * 期望判定（仅 `--assert` 时生效）：`pass` = 要求四项门全过，`fail` = 要求至少一项不过。
+ * 用途：夹具是「某次运行录下来的数据」，它固化的是录制当时那条链路的行为；同一份夹具喂给
+ * 改好之后的代码仍然会失败。因此可以用一份已知有缺陷的录制配 `--expect fail` 做**判别力
+ * 自检**（该门必须报 FAIL 才算有意义），另用一份录制正常的夹具配 `--expect pass` 做验收。
+ * `apps/debug` 的 `test:path-acceptance` 脚本用的是前者，只吃
+ * `apps/debug/fixtures/path/tick-on-render-prefix.json` 这**一个**文件。
  */
 const EXPECT = opt('expect', 'pass');
 const QUIET = has('quiet');
 
-// ── 小工具 ────────────────────────────────────────────────────
+// ── 小工具：定宽数字格式、均值、分位、分布统计 ──────────────────
 const f = (v, n = 2) => (Number.isFinite(v) ? v.toFixed(n) : '—');
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN);
 const pct = (sorted, p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : NaN);
@@ -75,7 +91,7 @@ const stats = (arr) => {
   };
 };
 
-// ── 线段准备（跳变处断开 = 不合格线段不参与）────────────────────
+// ── 线段准备：超过 JUMP_HU 的相邻点对只记跳变时刻、不进候选；零长段也跳过 ──
 function buildSegments(R) {
   const segs = [];
   const jumps = []; // 渲染侧跳变时刻（ms）
@@ -93,7 +109,8 @@ function buildSegments(R) {
   return { segs, jumps };
 }
 
-// ── BVH（线段 AABB，中位数切分）────────────────────────────────
+// ── BVH：对线段 AABB 建树。叶容量 8；内部节点按包围盒最宽轴、
+//    以线段中点为键做中位数切分（切分只重排 idx 数组，segs 本身不动）──
 function buildBVH(segs) {
   const idx = segs.map((_, i) => i);
   const nodes = [];
@@ -113,7 +130,7 @@ function buildBVH(segs) {
     const node = { bbox, i0, i1, left: -1, right: -1 };
     const id = nodes.push(node) - 1;
     if (i1 - i0 <= LEAF) return id;
-    // 以线段中点为切分依据，取最宽轴
+    // 切分轴 = 包围盒跨度最大的那一轴；键 = 线段两端在该轴上的中点
     const ex = bbox.maxx - bbox.minx, ey = bbox.maxy - bbox.miny, ez = bbox.maxz - bbox.minz;
     const axis = ex >= ey && ex >= ez ? 'x' : ey >= ez ? 'y' : 'z';
     const key = (i) => {
@@ -139,6 +156,7 @@ const distToAABB = (p, b) => {
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 };
 
+/** 点到线段的三维距离：投影参数钳位到 [0, 1]；退化线段（长度平方 ≤ 1e-12）按端点算。 */
 function segDist(p, s) {
   const abx = s.b.x - s.a.x, aby = s.b.y - s.a.y, abz = s.b.z - s.a.z;
   const l2 = abx * abx + aby * aby + abz * abz;
@@ -147,7 +165,8 @@ function segDist(p, s) {
   return Math.hypot(p.x - (s.a.x + abx * t), p.y - (s.a.y + aby * t), p.z - (s.a.z + abz * t));
 }
 
-/** 查询 p 到最近线段的距离，并回传最近线段的序号与其时间偏移。 */
+/** 查询 p 到最近线段的距离，并回传该线段中点与 p 的时间偏移 `dt`（ms，带符号）。 */
+
 function query(bvh, segs, p) {
   let best = Infinity, bestI = -1;
   const stack = [bvh.root];
@@ -171,7 +190,8 @@ function query(bvh, segs, p) {
   return { d: best, dt };
 }
 
-// ── 时间对齐偏差（面板"偏差梳"口径，仅作对照）───────────────────
+// ── 时间对齐偏差：对每个 tick 点，在渲染线上按时间二分定位并线性插值后求三维距离。
+//    这是面板偏差梳的口径，本脚本只用它做对照，不参与任何门。render 少于 2 点时返回空数组。──
 function timeAligned(T, R) {
   if (R.length < 2) return [];
   const samp = (t) => {
@@ -187,7 +207,7 @@ function timeAligned(T, R) {
   return T.map((p) => { const q = samp(p.t); return Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z); });
 }
 
-// ── 主分析 ────────────────────────────────────────────────────
+// ── 主分析：读文件 → 校验 → 建段与 BVH → 分组 → 出统计。返回对象里 error 非空即该文件不可用 ──
 function analyze(path) {
   const j = JSON.parse(readFileSync(path, 'utf8'));
   const R = j.render ?? [];
@@ -199,14 +219,14 @@ function analyze(path) {
   const { segs, jumps } = buildSegments(R);
   if (!segs.length) return { path, error: '无合格线段' };
 
-  // D = max(JUMP_HU, 2×p99 渲染节点间距)（由数据推导，避免手调）
+  // D 由数据推出：不小于 --jump-hu，且不小于渲染相邻间距 p99 的两倍
   const spac = [];
   for (let i = 1; i < R.length; i++) spac.push(Math.hypot(R[i].x - R[i - 1].x, R[i].y - R[i - 1].y, R[i].z - R[i - 1].z));
   spac.sort((a, b) => a - b);
   const p99spac = pct(spac, 0.99);
   const D = Math.max(JUMP_HU, 2 * p99spac);
 
-  // 剔除窗：渲染侧 + tick 侧所有 >D 的跳变，前后 ±EXCL_HALF_MS，重叠合并
+  // 剔除窗：渲染侧与 tick 侧所有超过 D 的跳变各开 ±EXCL_HALF_MS 的窗，首尾相接或相交的合并
   const evt = [];
   for (let i = 1; i < R.length; i++) {
     const d = Math.hypot(R[i].x - R[i - 1].x, R[i].y - R[i - 1].y, R[i].z - R[i - 1].z);
@@ -258,8 +278,8 @@ function analyze(path) {
 }
 
 // ── 输出 ──────────────────────────────────────────────────────
-const results = files.map(analyze);
-/** 个别门未过数（仅用于展示）。 */
+const results = files.map(analyze); // JSON 解析失败会在此抛出（进程以非 0 结束，无逐文件兜底）
+/** 累计未过的门数（含解析失败文件的 1 项）；只用于展示。 */
 let gateFail = 0;
 /** 与 --expect 不符数（**决定退出码**）。 */
 let mismatch = 0;
@@ -268,6 +288,7 @@ for (const r of results) {
   if (QUIET) continue;
   console.log(`\n=== ${r.path.split(/[\\/]/).pop()} ===`);
   if (r.error) { console.log(`  错误: ${r.error}`); continue; }
+  // 「(旧构建)」标记的判据是导出 JSON 里有没有 sampling 键；该键在当前导出里恒存在（写死的说明字符串）
   console.log(`  render ${r.renderPts} 点 / tick ${r.tickPts} 点 / 合格线段 ${r.segs} / 跳变 ${r.jumpSegs} / 时长 ${f(r.spanS, 1)}s${r.newBuild ? '' : '  (旧构建)'}`);
   console.log(`  D=${f(r.D, 1)} HU（p99 间距 ${f(r.p99spac)}）  剔除窗 ${r.windows} 个  剔除点 ${r.excluded.n} (${f(r.excluded.share * 100, 1)}%)`);
   console.log(`  **稳态垂距**: n=${r.steady.n} mean=${f(r.steady.mean)} p50=${f(r.steady.p50)} p90=${f(r.steady.p90)} p95=${f(r.steady.p95)} p99=${f(r.steady.p99)} max=${f(r.steady.max)}`);
@@ -278,6 +299,7 @@ for (const r of results) {
   console.log(`  残差: ${r.residual ? `n=${r.residual.n} mean=${f(r.residual.mean)} p95=${f(r.residual.p95)} max=${f(r.residual.max)}` : '（无 residual 字段）'}`);
 }
 
+// ── 判定段：仅 --assert 时打印；退出码只看「门结果是否等于 --expect」，不看门本身通过与否 ──
 if (has('assert')) {
   console.log('\n=== 判定 ===');
   for (const r of results) {
@@ -310,6 +332,7 @@ if (has('assert')) {
   }
 }
 
+// ── 基线表：仅显式给 --write-baseline <路径> 时才写；本脚本不会自动更新仓库里的基线文件 ──
 if (has('write-baseline')) {
   const out = opt('write-baseline');
   const L = [

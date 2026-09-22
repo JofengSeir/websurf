@@ -1,8 +1,22 @@
-//! 纹理字节码 → 图片(PNG 字节)（低清晰度还原）。
+//! `#mosaic v4` 纹理字节码 → PNG 字节（低清还原）。
 //!
-//! 提取自 materials-mini/code2img.rs，main 逻辑函数化（返回 PNG 字节而非写文件）。
-//! 还原流程：解析字节码 → 查自取样板 → 拼装 w×h 网格 → 最近邻放大（默认 ×8）→ PNG。
+//! 纯函数：入参是字节码文本，出参是 PNG 字节，函数体内不读写文件。
+//!
+//! 还原四步：解析字段 → 拼装 宽×高 网格（查 `C[` 调色板 + 叠 `A[` 透明掩码）→
+//! 最近邻放大 → `image` 编码 PNG（RGBA）。
+//!
+//! 调用方（三处）：
+//! - `bsp_to_gltf_core::materials` 的 `fallback_texture_png`——导出期把缺失贴图的
+//!   回退字节码解成 PNG 嵌进 GLB；
+//! - `apps/debug` 与 `apps/game` 的 wasm 层导出 `mosaic_decode`；
+//! - 两工程渲染端的 `replaceMapWithMosaic`，固定传 `scale = 8`。
+//!
+//! 校验范围：调色板色数（1..=8）、格数上限 100000、`R[` 与 `A[` 的字节长度。
+//! 与 `mosaic::mtz` 的 `parse_bytecode` 不同，本函数不校验 `宽 ≥ 1` / `高 ≥ 1`，
+//! 也不校验解出的索引是否落在调色板区间内——这两条由编码侧的不变量保证。
 
+/// base64url 解码（不要求 `=` 填充）。逐 6 bit 累积、满 8 bit 出一字节，
+/// 末尾不足 8 bit 的残余位直接丢弃。遇字母表外字符返回 `None`。
 fn unb64(s: &str) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     let mut acc: u32 = 0;
@@ -27,6 +41,7 @@ fn unb64(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// 6 位十六进制 → RGB。先 `trim`；长度不为 6、或任两位无法按 16 进制解析都返回 `None`。
 fn parse_hex(s: &str) -> Option<[u8; 3]> {
     let s = s.trim();
     if s.len() != 6 {
@@ -41,11 +56,11 @@ fn parse_hex(s: &str) -> Option<[u8; 3]> {
 
 /// `#mosaic v4` 字节码 → PNG 字节（RGBA，最近邻放大）。
 ///
-/// 输出尺寸对齐 **2 次幂**：网格长边 × scale 向上取 2 次幂（如 50×8=400 → 512）。
-/// 非 2 次幂纹理在 WebGL1（或 NPOT 受限环境）会被 three.js `floorPowerOfTwo`
-/// 钳到较小 2 次幂（400→256 = 常见 512 原纹理的一半）→ UV 0..1 内 Repeat 采样
-/// 出现 2×2 周期（"田字分隔"）并破坏 mipmap/边缘拼接。对齐后与任意原纹理
-/// 尺寸兼容（512/1024/256），不再触发 NPOT 钳制。
+/// `scale` 为 0 时按 8 处理（Rust 侧没有默认参数，0 即「取默认值」的约定）。
+///
+/// 输出宽高一律取 **2 的幂**：长边先按 `长边 × scale` 向上取幂（下限 2），短边按同一
+/// 比例缩放后再**各自独立**取幂——两轴取幂不同步，宽高比与网格存在 ≤1 格偏差。
+/// 取幂后的尺寸就是 PNG 尺寸；调用方在替换 `map.image` 前会先 `dispose()`。
 pub fn code_to_img(code: &str, scale: u32) -> Result<Vec<u8>, String> {
     let scale = if scale == 0 { 8 } else { scale };
     let line = code
@@ -53,12 +68,13 @@ pub fn code_to_img(code: &str, scale: u32) -> Result<Vec<u8>, String> {
         .find(|l| l.starts_with("B["))
         .ok_or_else(|| "未找到 B[ 条目行".to_string())?;
 
-    // 逐字段解析（字段以 ] 分隔，内容内不含 ]）
+    // 逐字段扫描：先按 ']' 切开，每段再从 '[' 分成「字段名 / 值」；未识别的字段名跳过，
+    // 因此字段缺失或多余都不影响解析（B/C/T/A/R 之外的扩展字段被忽略）
     let (mut name, mut w, mut h) = (String::new(), 0u32, 0u32);
     let mut colors: Vec<[u8; 3]> = Vec::new();
     let mut alpha: Option<Vec<u8>> = None;
     let mut packed: Option<Vec<u8>> = None;
-    // 半透明系数（T[opacity]，向后兼容扩展：无此字段 = 255）
+    // 全局不透明度：缺 T[ 时按 255（与 encode 侧「< 250 才写」的门限互补）
     let mut opacity: u8 = 255;
     for chunk in line.split(']') {
         let Some((field, rest)) = chunk.split_once('[') else { continue };
@@ -95,7 +111,8 @@ pub fn code_to_img(code: &str, scale: u32) -> Result<Vec<u8>, String> {
         return Err(format!("网格过大: {w}x{h}"));
     }
 
-    // 位宽与索引解包（MSB-first 行主序）
+    // 位宽由调色板色数反推（与 encode 同一张表）；缺 R[ 时索引保持全 0，
+    // 即整幅取 C[ 的首色
     let bits = match colors.len() {
         1 => 0,
         2..=4 => 2,
@@ -120,7 +137,8 @@ pub fn code_to_img(code: &str, scale: u32) -> Result<Vec<u8>, String> {
         }
     }
 
-    // 拼装 w×h 网格（查表填格 + 叠 alpha 掩码；不透明格 alpha = 半透明系数 opacity）
+    // 拼装 宽×高 网格：色取 C[索引]，alpha 由 A[ 掩码决定——命中（bit=1）为 0，
+    // 否则取全局不透明度；缺 A[ 时全格都用全局不透明度
     let mut grid = image::RgbaImage::new(w, h);
     for y in 0..h {
         for x in 0..w {
@@ -134,8 +152,8 @@ pub fn code_to_img(code: &str, scale: u32) -> Result<Vec<u8>, String> {
         }
     }
 
-    // 放大并对齐 2 次幂（防 NPOT 钳制 → "田字分隔"）：长边以 scale 为基准向上取
-    // 2 次幂；短边按同比例放大后独立对齐 2 次幂（比例偏差 ≤1 格，马赛克低清无感）
+    // 放大：长边目标 = (长边 × scale) 向上取 2 的幂（下限 2）；短边按同一比例缩放后
+    // 各自独立向上取 2 的幂；两轴取幂不同步，比例偏差 ≤1 格
     let long_edge = w.max(h);
     let target = (long_edge * scale).next_power_of_two().max(2);
     let s = target as f64 / long_edge as f64;
@@ -154,6 +172,7 @@ pub fn code_to_img(code: &str, scale: u32) -> Result<Vec<u8>, String> {
     image::DynamicImage::ImageRgba8(big)
         .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
         .map_err(|e| format!("保存 PNG 失败: {e}"))?;
+    // B[ 里的名字占位：本函数只还原像素，不返回名字
     let _ = name;
     Ok(out)
 }

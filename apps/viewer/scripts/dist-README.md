@@ -1,11 +1,12 @@
-# WebSurf-viewer — 打包产物（single，唯一）
+# WebSurf-viewer — 打包产物（`dist/`）
 
-`dist/` 是唯一产物目录（`npm run build:dist`，在 `viewer/` 下）。**纯静态产物，部署侧
+`dist/` 是唯一的产物目录，两种模式都写进这里：`npm run build:dist`（在 `viewer/` 下）产出
+**single**，`node scripts/build-dist.mjs --multi` 产出 **multi**。**纯静态产物，部署侧
 不需要 Node / Rust / wasm-pack。** 同一份产物两种用法：
 
 | 用法 | 说明 |
 |---|---|
-| **双击打开**（file://） | 直接双击 `index.html`——WASM + 解析 Worker 已内嵌，浏览器打开即可用 |
+| **双击打开**（file://，single） | 直接双击 `index.html`——WASM + 解析 Worker 已内嵌，浏览器打开即可用 |
 | **本地服务器 / 部署** | `play.cmd` / `play.sh`（起服务器 + 自动开浏览器）、`python serve.py 8101`、`npx serve -l 8101 .`、或任意静态托管 |
 
 ## 目录结构
@@ -13,7 +14,7 @@
 ```
 dist/
 ├── index.html                 应用页（classic script；双击或拖进浏览器均可）
-├── app.js                     单文件 IIFE：内嵌 WASM(base64) + 录像 Worker（Blob URL）
+├── app.js                     single 的单文件 IIFE：内嵌 WASM(base64) + 录像 Worker（Blob URL）
 ├── styles.css
 ├── assets/maps/               示例录像（HTTP 深链演示用；file:// 下走面板文件选择）
 │   └── surf_null_4.replay
@@ -23,13 +24,20 @@ dist/
 ├── README.md / .nojekyll
 ```
 
+single 与 multi 写进同一个 `dist/`，差别在 app / worker / wasm 的形态（后跑的那次会覆盖前一次）：
+
+- **single**：`app.js` 里内嵌 WASM(base64) 与录像解析 Worker；目录里没有 `worker.js`、也没有 `.wasm` 文件。
+- **multi**：另含 `worker.js`、`websurf_viewer_wasm_bg.wasm`、`wasm-embedded.js`（fetch 失败时的内嵌回退副本）
+  与 `coi-serviceworker.js`（预缓存清单与缓存名由 `scripts/build-dist.mjs` 注入）。
+
 ## 双击启动（play.cmd / play.sh）
 
 - Windows：双击 `play.cmd`；macOS/Linux：`bash play.sh`（或 `./play.sh`）。
 - 默认端口 8101，支持首参覆盖：`play.cmd 9000` / `./play.sh 9000`。
 - 启动后延时 1 秒自动打开浏览器；打印普通页与示例录像深链两种地址；关闭窗口即停服（Ctrl+C 亦可）。
-- **工具链**：优先 `python`；缺失时给出中文提示并自动改用 Node 备选 `npx --yes serve -l <port> .`
-  （自动安装运行，无需交互）；python 与 npx 都缺失时打印两条指引并退出。
+- **工具链**：优先 `python`；缺失时自动改用 Node 备选 `npx --yes serve -l <port> .`（自动安装运行，无需交互）；
+  python 与 npx 都缺失时打印指引并退出。缺失提示的文案在 `play.cmd` 里是 ASCII 英文（如 `python not found`），
+  在 `play.sh` 里是中文；两者分别写在 `scripts/build-dist.mjs` 的 `PLAY_CMD` / `PLAY_SH` 模板里。
 
 ## file:// 与 HTTP 的差异
 
@@ -81,6 +89,6 @@ server {
 
 ## 与源码版的差异
 
-- `dist/` 是 `src/app.ts` + `src/worker/main.ts` 的 esbuild 产物，single 额外内嵌
+- `dist/` 是 `apps/viewer/src/app.ts` + `apps/viewer/src/worker/main.ts` 的 esbuild 产物，single 额外内嵌
   WASM/Worker（见 `scripts/build-dist.mjs`）。
 - 深链自动加载（`?bsp= / ?replay=`）在 HTTP（dev、dist）下可用；file:// 下被浏览器拦截。

@@ -1,14 +1,13 @@
 /**
- * WASM 契约校验：确认 `pkg/websurf_viewer_wasm.d.ts` 导出了 viewer 实际使用的 API。
+ * WASM 契约检查：确认 `pkg/websurf_viewer_wasm.d.ts` 导出了 viewer 实际使用的 API。
  *
- * 本文件是**薄配置**（D-03 / T-03 要求 viewer 补 `check:api` 时**不得**再复制第 4 份实现）：
- * 引擎在共享层 `src/scripts/lib/wasm-api-contract.mjs`，本文件只声明本工程的 pkg 名与契约面。
+ * 本文件是**薄配置**：检查引擎在共享层 `src/scripts/lib/wasm-api-contract.mjs`，
+ * 本文件只声明本工程的 pkg 名（`websurf_viewer_wasm`）与契约清单。
  *
- * 为什么清单只有 BspProcessor + initSync：viewer 是单入口最小查看器，
- * 其 `src/` 对 pkg 的全部导入就是 `apps/viewer/src/core/bsp.ts:3` 的
- * `import { BspProcessor, initSync } from '../../pkg/websurf_viewer_wasm.js'`（实测），
- * 因此声明面清单**取自实际消费面**而非「和 game 对齐」——多列未使用的 API 会让契约失去含义。
- * 同时用 `assertTsImportsCoveredByExports` 反向断言：源码若新增导入而声明面未跟上，本检查会失败。
+ * 清单只有 `BspProcessor` + `initSync`：viewer 的 `src` 对 pkg 的全部导入就是
+ * `apps/viewer/src/core/bsp.ts` 里那一行 `import { BspProcessor, initSync } from ...`。
+ * 清单取自**实际消费面**，而非与其他工程对齐——多列未使用的 API 会让契约失去含义。
+ * 反向断言由 `assertTsImportsCoveredByExports` 完成：源码新增导入而清单未跟上时本检查失败。
  *
  * 用法：node scripts/check-wasm-api.mjs
  * 退出码：0 = 通过，1 = 不匹配

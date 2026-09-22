@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 /**
- * GLB 场景规模量化（诊断工具）— 用 debug 的 wasm pkg 在 node 里导出 BSP 的 GLB，
- * 解析其 JSON chunk，统计 mesh / primitive / node / material / 顶点数。
+ * GLB 场景规模量化（诊断工具：只读文件、只打印读数，不写任何产物）。
  *
- * 用途：为渲染性能问题提供硬数字。GLTFLoader 对**每个 primitive 生成一个
- * `THREE.Mesh`**，故「场景 Mesh 数 = primitive 数」——这个数直接决定每帧的
- * 对象遍历与 draw call 量级。据此判断某张地图是否需要空间分块合并
- * （`RendererMain.optimizeScene`；回归测试见 `scripts/optimize-scene-verify.mjs`）。
+ * 做什么：用 `apps/debug/pkg` 的 wasm 产物（`websurf_wasm.js` + `websurf_wasm_bg.wasm`，由
+ * `apps/debug/package.json` 的 `build:wasm` 生成）在 node 里解析一张 BSP，调
+ * `BspProcessor.export_glb_with_pakfile_models` 导出 GLB，再就地解析 GLB 的 JSON chunk，
+ * 统计 glTF 的 mesh / primitive / node / material 数与 POSITION 顶点总数、世界包围盒。
  *
- * 实测（surf_666.bsp）：117 glTF mesh / **34409 primitive** / 377385 顶点 / 319 材质 /
- * 515 nodes；GLB 136.0 MB。即未合并时场景约 3.4 万个 Mesh 对象。
+ * 为什么要这个数：GLTFLoader 对每个 primitive 生成一个 `THREE.Mesh`，于是「场景 Mesh 数 =
+ * primitive 数」，它决定每帧对象遍历、视锥剔除与逐 mesh draw call 的量级，用于判断某张地图
+ * 是否值得做空间分块合并 —— 合并的实现是 `apps/debug/src/renderer/renderer-main.ts` 的
+ * `RendererMain.optimizeScene`，其回归验证在 `apps/debug/scripts/optimize-scene-verify.mjs`。
  *
- * 用法：npm run count:glb-meshes            （默认 maps/surf_666.bsp）
+ * 输入：argv[2] 为地图路径，缺省 <仓库根>/test/maps/surf_666.bsp（`test/maps` 被 gitignore）。
+ * 输出：全部走 stdout，无断言、不落盘；结论不以退出码表达（只有抛异常才非 0）。
+ *
+ * 用法：npm run count:glb-meshes            （默认 test/maps/surf_666.bsp）
  *       npm run count:glb-meshes -- <path.bsp>
  */
 import { readFileSync } from 'node:fs';
@@ -40,7 +44,8 @@ const t2 = Date.now();
 const glb = proc.export_glb_with_pakfile_models();
 console.log(`GLB 导出完成 (${Date.now() - t2} ms)  ${(glb.byteLength / 1048576).toFixed(1)} MB`);
 
-// ── GLB 解析（magic u32 / version u32 / length u32，随后 chunk: len u32 + type u32 + data）──
+// GLB 头是 magic / version / length 三个 u32（本脚本只用 magic 判格式，长度字段不读）；
+// 首个 chunk 的头是 len u32 + type u32，JSON 数据紧接其后。
 const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
 const magic = dv.getUint32(0, true);
 if (magic !== 0x46546c67) throw new Error(`不是 GLB（magic=0x${magic.toString(16)}）`);
@@ -59,7 +64,7 @@ const accessors = json.accessors ?? [];
 let primitives = 0;
 let multiPrimMeshes = 0;
 let posVertices = 0;
-// 世界包围盒（POSITION accessor 的 min/max 聚合）——用于核对剔除/视距设置
+// 世界包围盒：把各 primitive 的 POSITION accessor 的 min/max 逐轴聚合（缺 min/max 的不参与）
 const gmin = [Infinity, Infinity, Infinity];
 const gmax = [-Infinity, -Infinity, -Infinity];
 for (const m of meshes) {

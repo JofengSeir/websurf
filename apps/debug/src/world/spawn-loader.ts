@@ -1,17 +1,15 @@
 /**
- * 出生点加载器
- * 将 WASM parse_spawn_points 输出的 JSON 转换为 cs-movement 的 Vec3 出生坐标与初始 yaw。
- * 坐标已旋转为 Y-up（[x,y,z]→[y,z,x]），TS 端不再二次重映射。
- * yaw 转换（关键）：本轴映射 [x,y,z]→[y,z,x] 为 det=+1 循环置换，Source 前向
- * (cos yaw, sin yaw) 置换后 → (sin yaw, cos yaw)；消费端 cs-movement yaw 0 = 朝 −Z
- * （fwd = (−sin, −cos)），故 cs_yaw = wrap(BSP_yaw + 180)。旧式 (270 − BSP_yaw)
- * 是 det=−1 镜像映射（t8 实证 surf_null primary yaw=180 应 0°，旧式给 90°），
- * 2026-09 与 ts-shared world-builder / viewer pose.ts 统一修正。
+ * 出生点加载器（坐标 / yaw 转换的参考实现）。
  *
- * ⚠️ 未接线（预留工具，勿误认为活跃加载链路）：全仓无任何 import 本模块；
- * 出生点实际加载走共享层 src/ts-shared/phys/world-builder.ts 的 parse_spawn_points
- * 管线（buildWorldBundle 直接消费其 JSON）。本文件保留作为坐标/yaw 转换的参考实现，
- * 公式推导另被 world/teleport-manager.ts 注释引用。
+ * 输入是 WASM `parse_spawn_points` 输出的 JSON，输出为 cs-movement 口径的出生坐标与初始 yaw：
+ * 坐标已按 [x,y,z] → [y,z,x] 旋转为 Y-up，TS 端不再二次重映射。
+ *
+ * yaw：直接调 `bspYawToCsYaw`（角度换算的 TS 侧唯一实现，见 `src/ts-shared/phys/angles.ts`）。
+ * 该轴映射是 det = +1 的循环置换，Source 前向 (cos yaw, sin yaw) 置换后成为 (sin yaw, cos yaw)，
+ * 而消费端 yaw = 0 对应的前向是 (−sin, −cos)，两者相差恰好 180°——故换算为加 180° 后归一到 [0, 360)。
+ *
+ * ⚠ 零调用点（预留参考实现）：全仓无模块 import 本文件；出生点加载的实际链路是共享层
+ * `src/ts-shared/phys/world-builder.ts` 消费 `parse_spawn_points` 的 JSON。
  */
 
 import type { Vec3 } from '../physics/math/vec3.js';
@@ -81,7 +79,7 @@ export function loadSpawnPoints(wasmJson: string): SpawnLoadResult {
     (sp: WasmSpawnPoint) => ({
       classname: sp.classname,
       origin: { x: sp.origin[0], y: sp.origin[1], z: sp.origin[2] },
-      yaw: bspYawToCsYaw(sp.angles[1]), // 共享单点 src/ts-shared/phys/angles.ts（见文件头）
+      yaw: bspYawToCsYaw(sp.angles[1]), // 角度换算唯一实现：src/ts-shared/phys/angles.ts
       angles: sp.angles,
     }),
   );

@@ -1,30 +1,32 @@
 /**
- * dist 打包内核（D-04 / T-04）——三个应用工程共用的唯一实现。
+ * dist 打包内核 —— 三个应用工程共用的唯一实现。
  *
- * 谁在用：
- *   apps/debug/scripts/build-dist.mjs   （single + multi）
- *   apps/game/scripts/build-dist.mjs    （single + multi）
- *   apps/viewer/scripts/build-dist.mjs  （single-only，dist 自带启动器与说明）
+ * 调用方（三份都从 '../../../src/scripts/lib/dist-pack.mjs' 导入）：
+ *   `apps/debug/scripts/build-dist.mjs`   `bundleIife` / `bundleEsm` /
+ *       `writeEmbeddedPreamble` / `rewriteIndexToClassicScript` / `cleanDist` /
+ *       `cleanStale` / `copyLicensePair` / `printTree`
+ *   `apps/game/scripts/build-dist.mjs`    同上八项
+ *   `apps/viewer/scripts/build-dist.mjs`  六项（不用 bundleEsm 与 copyLicensePair）
+ * `commonEsbuildOptions` 与 `assertBuildFunction` 也导出，但当前没有任何外部导入方
+ * （后者只被 `bundleIife` / `bundleEsm` 调用）。
  *
- * 硬约束（详见 documents/framework-decoupling.md D-04 / rollout-plan.md §3.2）：
- *   1. 本文件**不得** import esbuild —— 仓库根与 src/ 下都解析不到 esbuild
- *      （实测 require.resolve('esbuild', {paths:['src/scripts/lib']}) → MODULE_NOT_FOUND）。
- *      esbuild 的 build 函数由调用方（工程侧）作为参数注入；未注入时显式报错，
- *      绝不静默产出空产物。
- *   2. 本文件除 node: 内建外**零裸说明符**，也不得 import 任何 apps/* 路径：
- *      内核位置固定，工程差异（wasm 文件名、入口、产物集）全部由参数传入。
- *   3. 本文件的相对路径字符串只允许出现在注释里（判据：
- *      git grep -nE "apps/|\.\./\.\./\.\." -- src/scripts/lib 只命中注释）。
- *
- * 与规范的关系：framework-launch-structure.md §5.2/§5.3（形态与产物清单）、
- * §5.4（web/ 三产物与 dev 加载路径）、§7.2（新工程脚手架参考实现）、
- * framework-decoupling.md D-23 / §8.2 E-08（许可证唯一源 src/phys/）。
+ * 硬约束（必须保持）：
+ *   1. 本文件不 import esbuild：它只装在工程侧（各 apps/<app>/node_modules），仓库根与
+ *      src/ 下都没有 node_modules。build 函数由调用方注入，未注入时
+ *      `assertBuildFunction` 直接抛错，不静默产出空产物。
+ *   2. 除 `node:` 内建外零裸说明符，也不 import 任何 apps/ 路径：内核位置固定，
+ *      工程差异（wasm 文件名、入口、产物集）全部由参数传入。
+ *   3. 判据：`git grep -nE "apps/|\.\./\.\./\.\." -- src/scripts/lib` 只命中注释。
  */
 import { rm, mkdir, writeFile, readFile, copyFile, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-/** esbuild 公共配置（single/IIFE 与 multi/ESM 共用；不含 entry/format/outfile）。 */
+/**
+ * 两路打包共用的 esbuild 配置：bundle / target / minify / sourcemap / write /
+ * legalComments / logLevel。entryPoints、format 与写盘方式由 `bundleIife` /
+ * `bundleEsm` 各自补齐。
+ */
 export function commonEsbuildOptions({ logLevel = 'warning', inlineImportMetaUrl = false } = {}) {
   const options = {
     bundle: true,
@@ -32,18 +34,21 @@ export function commonEsbuildOptions({ logLevel = 'warning', inlineImportMetaUrl
     minify: true,
     sourcemap: false,
     write: false,
-    // 保留 @license 法律注释（@unsurf/cs-movement Apache-2.0 要求，勿移除）
+    // 法律注释搬到产物末尾保留：上游 @unsurf/cs-movement 为 Apache-2.0
+    // （全文见 src/phys/LICENSE，声明见 src/phys/NOTICE），勿改成 none
     legalComments: 'eof',
     logLevel,
   };
   if (inlineImportMetaUrl) {
-    // IIFE 不支持 import.meta.url；内嵌模式不走 fetch 路径，用占位符替换。
+    // 传 true 时用 define 把 import.meta.url 整体换成 JSON 字符串 'about:blank'：
+    // IIFE 形态没有模块上下文，内嵌形态也不走 fetch（读取侧见
+    // src/ts-shared/auth/worker-dispatch.ts）
     options.define = { 'import.meta.url': JSON.stringify('about:blank') };
   }
   return options;
 }
 
-/** 注入校验：build 必须是工程侧传入的 esbuild build 函数（硬约束 1 的负对照）。 */
+/** 注入校验：build 必须是工程侧传入的 esbuild build 函数，否则抛错（硬约束 1 的负对照）。 */
 export function assertBuildFunction(build) {
   if (typeof build !== 'function') {
     throw new Error('dist-pack: build 未注入（工程侧须 import { build } from \'esbuild\' 后传入）');
@@ -51,7 +56,7 @@ export function assertBuildFunction(build) {
   return build;
 }
 
-/** 打包为 IIFE，返回打包后的源码文本（不写盘）。 */
+/** 打包为 IIFE，返回 outputFiles 首项的 text（write:false，不写盘）。 */
 export async function bundleIife({ build, entry, options = {} }) {
   assertBuildFunction(build);
   const result = await build({
@@ -66,7 +71,7 @@ export async function bundleIife({ build, entry, options = {} }) {
   return file.text;
 }
 
-/** 打包为 ESM 并写盘（outfile），返回写入的路径。 */
+/** 打包为 ESM（write:false 取文本），先 mkdir -p 目标目录再写入 outfile，返回 outfile。 */
 export async function bundleEsm({ build, entry, outfile, options = {} }) {
   assertBuildFunction(build);
   const result = await build({
@@ -84,10 +89,17 @@ export async function bundleEsm({ build, entry, outfile, options = {} }) {
 }
 
 /**
- * 拼装并写出 single 模式的 app.js：
- *   [upstreamLicense] + headerComment + globalThis.__VBSP_* 前缀 + appCode
- * 唯一允许拼装 __VBSP_* 的地方（规范 §5.4：single = base64 内嵌）。
- * 返回 { path, bytes, preamble }（preamble 供自检比对，不参与运行）。
+ * 拼装并写出 single 形态的 app.js，片段顺序为
+ *   [upstreamLicense] + headerComment + globalThis.__VBSP_WASM_B64__ 赋值
+ *   + [globalThis.__VBSP_WORKER_JS__ 赋值] + [globalThis.__VBSP_TEXTURES_MTZ_B64__ 赋值]
+ *   + appCode
+ * upstreamLicense 为空串时整段不写；workerJs / mtzB64 为 null 时对应片段整体不写。
+ * 每个赋值都用 JSON.stringify 包装并以换行结尾。本函数不是全仓唯一的 __VBSP_* 拼装点：
+ * `apps/viewer/scripts/build-dist.mjs` 为 multi 形态生成的 wasm-embedded.js 自己写
+ * globalThis.__VBSP_WASM_B64__（fetch 失败时的内嵌回退副本）。
+ * 返回 { path, bytes, preamble }：bytes 取 text.length（UTF-16 码元数），
+ * apps/debug/scripts/build-dist.mjs 与 apps/game/scripts/build-dist.mjs 只取它打 MB；
+ * path 与 preamble 当前无外部消费方。
  */
 export async function writeEmbeddedPreamble({
   distDir,
@@ -116,8 +128,9 @@ export async function writeEmbeddedPreamble({
 }
 
 /**
- * 把 web/index.html 的 module script 改写为 classic script（file:// 下 module 被 CORS 拦截）
- * 并写入 dist/index.html。返回是否命中替换（false = 页面结构与预期不符，调用方须 [WARN]）。
+ * 把 web/index.html 里的 <script type="module" src="./app.js"></script> 改写成
+ * classic 的 <script src="./app.js"></script>（file:// 下 module script 被 CORS 拦），
+ * 写到 distIndex。返回是否命中替换（false = 页面结构与预期不符，调用方须告警）。
  */
 export async function rewriteIndexToClassicScript({ webIndex, distIndex }) {
   const html = await readFile(webIndex, 'utf8');
@@ -129,7 +142,7 @@ export async function rewriteIndexToClassicScript({ webIndex, distIndex }) {
   return distHtml !== html;
 }
 
-/** 全量重建 dist/：先删后建（规范 §5.2 R-15，禁止增量残留）。 */
+/** 全量重建 dist/：先 rm -r 再 mkdir，返回 distDir（不留增量残留）。 */
 export async function cleanDist(distDir) {
   await rm(distDir, { recursive: true, force: true });
   await mkdir(distDir, { recursive: true });
@@ -137,9 +150,8 @@ export async function cleanDist(distDir) {
 }
 
 /**
- * 删除 dist/ 顶层不在 keep 名单内的文件（目录不动），返回被删名单。
- * cleanDist 已保证全量重建；本函数把「本形态的产物清单」写成可执行断言，
- * 供自定义产物集（规范 §7 脚手架）与回归自检使用。
+ * 删除 distDir 顶层不在 keep 名单里的**文件**（子目录原样保留），返回被删名字。
+ * distDir 不存在时返回空数组。
  */
 export async function cleanStale(distDir, keep) {
   const keepSet = new Set(keep);
@@ -156,9 +168,10 @@ export async function cleanStale(distDir, keep) {
 }
 
 /**
- * 从许可证唯一源（src/phys/{LICENSE,NOTICE}，D-23 / E-08）拷贝产物级副本到 dist/。
- * dist/ 内的 LICENSE.cs-movement / NOTICE.cs-movement 是**产物级副本**（法律要求随
- * 产物分发），不是第二份源副本；源缺失即报错，不允许静默跳过。
+ * 从许可证唯一源 repoRoot/srcDir 下的 LICENSE 与 NOTICE 拷贝**产物级副本**到 distDir，
+ * 目标名由 targets 给定（LICENSE.cs-movement / NOTICE.cs-movement）。源缺失即抛错，
+ * 不静默跳过。dist/ 里的副本属产物内容：`src/scripts/check-shared-sync.mjs` 的
+ * `collectAppLicenseFiles` 跳过 dist 目录，故不会把它判成「apps/ 下的第二份许可源」。
  */
 export async function copyLicensePair({
   repoRoot,
@@ -181,7 +194,10 @@ export async function copyLicensePair({
   return written;
 }
 
-/** 目录树（名字 + KB），供打包完成后打印产物清单。 */
+/**
+ * 递归目录树：目录行 `  名字/` + 子项，文件行 `  名字  N KB`（N = size / 1024 取整）。
+ * 返回字符串数组，调用方 join 换行后打印。
+ */
 export async function printTree(dir) {
   const out = [];
   for (const name of (await readdir(dir)).sort()) {

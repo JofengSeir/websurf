@@ -1,33 +1,73 @@
-//! 传送检测（Rust 移植自 TS TeleportManager）。
+//! 传送触发检测 + 掉落死亡判定：本 crate 里唯一会把玩家瞬移走的判定来源。
 //!
-//! 触发检测：trigger_teleport 的几何范围由 model *N 指向的 brush 凸包平面定义
-//! （WASM parse_teleports 已输出 model_planes，法线朝外 Y-up）；凸包平面夹取
-//! 判定，无 planes 回退 AABB。
+//! 上下游位置：
+//! - 上游（建表）：`src/phys/mod.rs` 的 `PhysWorld::build_world` 调 `TeleportManager::from_json`，
+//!   吃的是各工程 wasm 层 `BspProcessor::parse_teleports`
+//!   （`apps/game/crates/wasm/src/lib.rs`）产出的 JSON —— trigger 的凸包平面与
+//!   AABB 都在那段 JSON 里。
+//! - 下游（每步消费）：`src/phys/mod.rs` 的 `PhysWorld::step_core` 在非 noclip 分支里先调
+//!   `check`，命中后组装事件并依次走 `apply_teleport`、`on_teleported`、`reset_cooldown`；
+//!   随后是 `check_death`。`check` 自己**不移动玩家**，落点由调用方写入。
 //!
-//! **检测语义（2026-08-09 用户定调，最终版）**：
-//! - **A 路径**（任意状态：落地/空中/半空）：玩家竖直线段 [脚底, 脚底+身高]
-//!   与 trigger 凸包区间相交（XZ 受凸包竖直平面约束；**仅"落地 && 斜面"时
-//!   脚底允许高于凸包顶 64**——跨斜面 origin 提升，其余 gap=0）；
-//! - **B 路径**（仅落地启用）：脚底往下 **8** 单位区间与凸包相交；
-//! - **滑行（surfing）不触发**；冷却 0.5s 防重复。
-//! 死亡判定并入：玩家 Y < death_y 阈值 → 回退到初始出生点。
+//! 触发几何：`TeleportTrigger.planes` 是 `[nx, ny, nz, dist]` 四元组，法线朝外、Y-up，
+//! 凸包内部 = `dot(n, p) - dist <= 0`；`planes` 为空时判定回退到 `mins` / `maxs` 的 AABB。
+//! 一个 trigger 对应模型的一个 brush 区域，`from_json` 把 `dest_index` 指向
+//! `destinations` 的**数组下标**（没有同名目标则为 -1）。
+//!
+//! 检测语义（三条，都在 `check` 里）：
+//! - **A 路径**（`in_trigger_zone`，任何状态）：玩家竖直线段
+//!   `[pos.y, pos.y + body_top]` 与凸包相交 —— XZ 由凸包的竖直平面约束
+//!   （`|ny| < 1e-9` 的那些），Y 方向解出交区间 `[lo, hi]`；**仅"落地且斜面"时**脚底
+//!   允许高于凸包顶 `TRIGGER_FACE_GAP`（64），其余 gap = 0。凸包全由竖直平面组成时
+//!   `[lo, hi]` 是 `[-inf, +inf]`，即该 trigger 在 Y 方向不设限。
+//! - **B 路径**（`probe_below_foot`，只有 `grounded` 才走）：脚底往下
+//!   `FOOT_PROBE_DEPTH`（8）的区间 `[pos.y - 8, pos.y]` 与凸包区间相交；它不加 gap。
+//! - 命中即写 `TRIGGER_COOLDOWN`（0.5 s）并返回目标点；冷却期内每 tick 递减 `dt`
+//!   后直接返回 `None`。
+//!
+//! 三个容易读错的地方：
+//! - 形参 `_gate_ticks` **完全不被使用**：`player::PhysParams::teleport_gate_ticks`
+//!   字段存在（默认 3）、`src/phys/mod.rs` 的 `PhysWorld::set_params` 可写该键、
+//!   同一文件的 `PhysWorld::step_core` 也确实把它传了进来，但函数体内零引用
+//!   —— 改这个键不改变任何行为。
+//! - `TeleportTrigger.inside` 不参与触发判定：它只在种子面接口里被读写。
+//! - `spawnflags` 为 0 的 trigger **不被跳过**（跳过条件要求"值非 0 且 0x01 / 0x40 两位
+//!   都不含"）；上游在字段缺失时给的是 1（`apps/game/crates/wasm/src/lib.rs` 的
+//!   `BspProcessor::parse_teleports`）。
+//!
+//! 其它导出面：`on_teleported`（把各 trigger 的 `inside` 清回 false，只有步内触发路径调）、
+//! `reset_cooldown`（冷却清零）、`check_death`（掉落死亡），以及给 `phys::seed` 的四个
+//! 通道（`seed_cooldown` / `cooldown_value` / `seed_trigger_inside` / `trigger_inside_vec`，
+//! 调用点都在 `src/phys/seed.rs` 的 `extract_seed` / `apply_seed`）。文件私有的 `in_aabb` 无调用点。
+//!
+//! 边界：不做 BSP 解析、不发事件（`PhysEvent` 由 `PhysWorld` 组装）、不写玩家状态、
+//! 不判落点是否悬空、不参与碰撞。
+//!
+//! 测试归属：本文件无 `#[test]`；`cargo test -p websurf-phys` 的 10 项来自
+//! `p2_gate_tests`（4）与 `duck_surf_tests`（6），都不覆盖本文件。
 
 use super::world::V3;
 
-/// 触发冷却时间（秒），防止同一触发器连续 tick 反复触发。
+/// 触发后的冷却时长（秒）：命中时把 `cooldown` 置成它，之后每 tick 递减 `dt`。
+/// 两个读点都在 `check` 的命中分支里；`reset_cooldown`（写 0.0）与 `seed_cooldown`
+/// （写任意值）都不经它。
 const TRIGGER_COOLDOWN: f64 = 0.5;
 
-/// 落地后脚底往下探测深度（units）：**8**——传送区域贴合玩家所站表面
-/// （2067 凸包贴表面 0.5、1240 贴 0.2——A 路径直接触发）；8 仅作浮点/
-/// 微小 gap 容差，防"传送区域埋在表面下方深处"的深下探误触。
+/// B 路径的下探深度（HU）：判定区间是 `[pos.y - FOOT_PROBE_DEPTH, pos.y]`，
+/// 即"脚底往下 8 单位内碰到传送区就算踩上"。
+/// 两个读点都在 `probe_below_foot`（凸包分支与 AABB 回退分支各一处）；A 路径不读它。
 const FOOT_PROBE_DEPTH: f64 = 8.0;
 
-/// BSP 实体 Source yaw → cs-movement yaw：wrap(bsp_yaw + 180)。
-/// 与 viewer pose.ts bspYawToCsYaw、ts-shared world-builder 同口径
-/// （[x,y,z]→[y,z,x] det=+1 轴映射下 Source 前向 (cos yaw, sin yaw) →
-/// (sin yaw, cos yaw)，恒等式即 +180；player.yaw 0 = 朝 −Z 同约定）。
-/// 旧式 (270 − yaw) 是 det=−1 镜像（t8 实证：surf_null primary spawn
-/// Source yaw=180 应为 0°，旧式给 90°），2026-09 修正。
+/// BSP 实体 yaw（Source 角度）→ 本物理口径的 yaw：`wrap(bsp_yaw + 180)`。
+///
+/// 结果落在 `[0, 360)`：`%` 对负被除数保留负号，故再补一次 `+ 360`。
+/// 例：180 → 0，270 → 90，-90 → 90。
+///
+/// 换算依据：BSP 导出走的轴映射 `[x, y, z] → [y, z, x]` 行列式为 +1，Source 前向
+/// `(cos yaw, sin yaw)` 置换后是 `(sin yaw, cos yaw)`；而本物理里 `yaw = 0` 指 −Z
+/// （移动与 noclip 的前向基都是 `(-sin, -cos)` 的 x/z 分量），恒等式即 +180。
+/// 同一换算在 TS 侧有一份独立实现：`src/ts-shared/phys/angles.ts` 的 `bspYawToCsYaw`
+/// （同样 `+ 180` 后归一到 `[0, 360)`）。
 fn bsp_yaw_to_cs_yaw(bsp_yaw: f64) -> f64 {
     let v = (bsp_yaw + 180.0) % 360.0;
     if v < 0.0 {
@@ -37,47 +77,86 @@ fn bsp_yaw_to_cs_yaw(bsp_yaw: f64) -> f64 {
     }
 }
 
-/// 传送目标点。
+/// 传送落点（`teleports[]` 的一项）：`origin` 已是 Y-up 世界坐标，`yaw` 已换算成本
+/// 物理口径。`targetname` 供 `src/phys/mod.rs` 的 `PhysWorld::step_core` 填传送事件；
+/// `index`（BSP 实体编号）当前工作区内无读取方。
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // index/targetname 为 parse_teleports JSON 契约字段
 pub struct TeleportDestination {
     pub index: usize,
     pub targetname: String,
     pub origin: V3,
-    /// 转换后的 cs-movement yaw（度，逆时针，0 = 朝 -Z）。
+    /// 换算后的 yaw（度，`[0, 360)`，0 = 朝 −Z），来源是 JSON 的 `angles[1]`。
     pub yaw: f64,
 }
 
-/// 传送触发器。
+/// 传送触发器（`triggers[]` 的一项）：一条 = 模型的一个 brush 区域。
+/// `planes` 非空时用凸包判定，为空时回退 `mins` / `maxs` 的 AABB。
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // index/classname/target/model 为 parse_teleports JSON 契约字段
 pub struct TeleportTrigger {
+    /// BSP 实体编号：同一实体的多个区域共享同一个 `index`。当前无读取方。
     pub index: usize,
+    /// 实体 classname。当前无读取方。
     pub classname: String,
+    /// 目标实体名：`from_json` 用它查 `dest_index`，之后不再被读。
     pub target: String,
+    /// 实体 origin（Y-up、HU）：当前无读取方（判定用的是 `planes` / `mins` / `maxs`）。
     pub origin: V3,
-    /// 凸包平面（法线朝外 Y-up；内部 dot(n,p) - dist <= 0）。空 = 无凸包。
+    /// 凸包平面（法线朝外、Y-up；内部 `dot(n,p) - dist <= 0`）。空 = 无凸包，
+    /// 判定回退 AABB。
+    /// 两处法线阈值：`|ny| < 1e-9` 视为竖直平面（只约束 XZ），
+    /// `|ny| ∈ (0.05, 0.95)` 视为斜面（`is_sloped`，A 路径 gap 的启用条件）。
     pub planes: Vec<[f64; 4]>, // [nx, ny, nz, dist] 紧凑 4 元组
+    /// 世界空间 AABB 下界（JSON 的 `model_mins`；缺失为 `None`）。
     pub mins: Option<V3>,
+    /// 世界空间 AABB 上界（JSON 的 `model_maxs`；缺失为 `None`）。
     pub maxs: Option<V3>,
+    /// `destinations` 的数组下标；-1 = 没有同名目标（孤儿 trigger，`check` 直接跳过）。
     pub dest_index: i32,
+    /// 客户端位掩码：`check` 在"值非 0，且 0x01 与 0x40 两位都不含"时跳过该 trigger；
+    /// JSON 缺该字段时 `from_json` 取 1。
     pub spawnflags: u32,
+    /// true = 该 trigger 从不参与判定（`check` 的第一道 `continue`）；
+    /// JSON 缺该字段时取 false。
     pub start_disabled: bool,
+    /// 是否已进入过该区域。**没有任何判定读它**：写入点只有 `from_json` 的初值 false、
+    /// `on_teleported` 的统一清零、以及种子面 `seed_trigger_inside`。
     pub inside: bool,
 }
 
-/// 传送管理器（A 进入区域 + B 落地脚底 8 下探双路径检测）。
+/// 一张地图的全部 trigger / destination，加一个共享的冷却计时器。
+/// `triggers` / `destinations` 公开可读；`cooldown` 私有，写路径只有 `check`（置 0.5
+/// 或递减）、`reset_cooldown`（写 0.0）、`seed_cooldown`（写任意值）三条。
 #[derive(Clone, Debug, Default)]
 pub struct TeleportManager {
     pub triggers: Vec<TeleportTrigger>,
     pub destinations: Vec<TeleportDestination>,
+    /// 冷却剩余时间（秒）。负数也会出现：`check` 只在 `> 0.0` 时递减，越过后就一直保持
+    /// 那个负值，直到下一次命中或 `reset_cooldown`。
     cooldown: f64,
 }
 
 impl TeleportManager {
-    /// 从 WASM parse_teleports JSON 构建（数组结构见 bsp-export-status.md §5）。
+    /// 从 wasm 层 `parse_teleports` 的 JSON 构建 trigger / destination 两张表。
+    ///
+    /// 输入顶层两个键：`teleports[]`（`index` / `targetname` / `origin` / `angles`）与
+    /// `triggers[]`（`index` / `classname` / `target` / `origin` / `model_mins?` /
+    /// `model_maxs?` / `model_planes?` / `spawnflags?` / `start_disabled?`）。
+    /// 反序列化结构在此内联定义，**多余字段被 serde 忽略**（例如 trigger 的 `model`）；
+    /// 缺字段的默认值：`model_planes` → 空（判定回退 AABB）、`spawnflags` → 1、
+    /// `start_disabled` → false。
+    ///
+    /// 链接规则：`dest_by_name` 的键是 `targetname`、值是**数组下标**（`enumerate` 得到，
+    /// 不是 BSP 实体的 `index` —— 后者是跳跃、非连续的编号，当数组下标会越界）；
+    /// trigger 用 `target` 查表，查不到则 `dest_index = -1`。
+    /// 同一个 `targetname` 出现多次时后者覆盖前者（HashMap 收集语义）。
+    ///
+    /// 参数：`json` 解析失败返回 `Err(String)`。返回值：两张表的顺序与 JSON 一致，
+    /// `cooldown = 0.0`、所有 `inside = false`。
+    /// 不做几何校验（凸包退化、AABB 颠倒都会按原值收下），也不校验 `target` 是否为空。
     pub fn from_json(json: &str) -> Result<Self, String> {
-        // 复用 serde_json 解析；WasmTeleportReport 结构在此内联定义
+        // serde_json 直接解析；WasmTeleportReport 的字段结构在此内联定义
         #[derive(serde::Deserialize)]
         struct WasmTeleport {
             index: usize,
@@ -91,7 +170,8 @@ impl TeleportManager {
             classname: String,
             target: String,
             origin: [f64; 3],
-            // model 字段不读（serde 默认忽略多余字段）；仅用 model_mins/maxs/planes
+            // `model` 不出现在这里 = 不读该字段（serde 默认忽略多余键）；
+            // 几何只认 model_mins / model_maxs / model_planes 三项
             model_mins: Option<[f64; 3]>,
             model_maxs: Option<[f64; 3]>,
             model_planes: Option<Vec<[f64; 4]>>,
@@ -116,9 +196,9 @@ impl TeleportManager {
                 yaw: bsp_yaw_to_cs_yaw(t.angles[1]),
             });
         }
-        // 注意：值必须是数组下标（enumerate），不能用 d.index——后者是 BSP 实体
-        // 原始编号（可能跳跃/非连续），当数组下标用会越界 → destinations.get 返回
-        // None → 触发但不传送（check 已设 cooldown 但返回 None）。
+        // 值必须是数组下标（enumerate 得到），不能用 d.index —— 那是 BSP 实体原始编号，
+        // 跳跃、非连续；当数组下标用会取到别的落点或越界。
+        // 缺目标名的 trigger 在下面落到 dest_index = -1，由 check 直接跳过。
         let dest_by_name: std::collections::HashMap<&str, usize> = destinations
             .iter()
             .enumerate()
@@ -159,16 +239,31 @@ impl TeleportManager {
         })
     }
 
-    /// 每 tick 检测：返回触发目标（若触发），否则 None。
-    /// `predict` 模式不检测传送（预测只填充中间帧，权威每帧校正）。
+    /// 单步检测：命中就返回目标点（克隆），否则 `None`。**本函数不移动玩家**。
     ///
-    /// **双路径检测（2026-08-09 用户定调，最终版）**：
-    /// - **A. 进入传送区域**（任何状态：落地/空中/半空/走过）：`in_trigger_zone`
-    ///   竖直线段 [脚底, 脚底+身高] 与凸包区间相交（XZ 受凸包竖直平面约束；
-    ///   **gap = 落地 && 斜面 ? 64 : 0**——跨斜面 origin 提升，空中/平面 0）→ 触发；
-    /// - **B. 落地脚底检测**（**落地才启用**，非触发事件本身）：落地时检测
-    ///   **脚底往下 8 单位区间**（`probe_below_foot`）与 trigger 相交 → 触发。
-    /// **滑行（surfing）不触发**；触发后 0.5s 冷却防重复。
+    /// 三道早退按固定顺序发生，顺序本身会影响可观测行为：
+    /// ① `predict == true` → `None`（预测步不做传送判定）；
+    /// ② `cooldown > 0.0` → 先 `cooldown -= dt` 再 `None` —— 冷却刚到期的那一 tick 同样
+    ///    返回 `None`，且递减后可以为负；此后 `cooldown` 不再被本函数改动（`≤ 0` 不进该
+    ///    分支），下一次命中或 `reset_cooldown` 才会改写它；
+    /// ③ `surfing == true` → `None`（贴坡滑行不算进入传送区）。
+    /// 随后取 `grounded = ground_ticks > 0`：它不是早退，只作 B 路径与 gap 的启用条件。
+    ///
+    /// 再逐个 trigger 过滤：`start_disabled`、`spawnflags` 非 0 且 0x01 / 0x40 两位都
+    /// 不含、`dest_index < 0`（孤儿）、`dest_index` 越界；四道过滤都没跳过它，才试 A 路径
+    /// （`in_trigger_zone`）、再试 B 路径（`grounded && probe_below_foot`）。
+    /// 命中即写 `cooldown = TRIGGER_COOLDOWN`（0.5 s）并返回目标点克隆。
+    ///
+    /// 参数语义：`pos` 是玩家 origin（HU、Y-up），A / B 两条路径都读它；
+    /// `ground_ticks` 唯一用途是算 `grounded`（调用方 `src/phys/mod.rs` 的
+    /// `PhysWorld::step_core` 传的是 `Player::contact_ticks`）；`dt` 只用于递减冷却
+    /// （秒，与调用方步长同单位）；
+    /// `body_top` 是碰撞箱上沿相对 origin 的高度（站立 72 / 蹲伏 54，调用方传
+    /// `Player::maxs()[1]`，同一处 `step_core`）。
+    /// **`_gate_ticks` 是惰性形参**：函数体内零引用，详见模块头。
+    ///
+    /// 命中时 `destinations.get(...)` 恒为 `Some`：越界已在过滤阶段排除。
+    /// 本函数不写 trigger 的 `inside`，不清速度、不改位置。
     pub fn check(
         &mut self,
         pos: &V3,
@@ -186,18 +281,20 @@ impl TeleportManager {
             self.cooldown -= dt;
             return None;
         }
-        // 滑行（surfing）不触发传送（贴坡滑行不算进入传送区域）
+        // 滑行中不算进入传送区（`surfing` 由 player 侧碰撞法线 0.05 < n.y < 0.7 置位）
         if surfing {
             return None;
         }
+        // 唯一的"落地"口径：调用方传进来的接触计数 > 0
         let grounded = ground_ticks > 0;
 
         for t in &mut self.triggers {
             if t.start_disabled {
                 continue;
             }
-            // 跳过非玩家触发器（spawnflags 不含 Clients 0x01 且非 Everything 0x40）；
-            // **显式 0 不跳过**——BSP 实体未配置 spawnflags 时导出为 0，应视为默认全客户端
+            // 客户端掩码过滤：值非 0 且 0x01、0x40 两位都不含 → 该 trigger 对玩家不生效。
+            // **值恰为 0 时不跳过**（0 绕过这一道过滤）；上游在键缺失或无法解析时给的是 1，
+            // 所以 0 只来自实体上显式配置的 spawnflags=0。
             if t.spawnflags != 0 && (t.spawnflags & 0x01) == 0 && (t.spawnflags & 0x40) == 0 {
                 continue;
             }
@@ -207,13 +304,12 @@ impl TeleportManager {
             if (t.dest_index as usize) >= self.destinations.len() {
                 continue; // 越界防御（dest_by_name 已用数组下标，正常不会触发）
             }
-            // A. 进入传送区域：身体线段与凸包相交（gap 仅斜面+落地生效；
-            //    空中严格相交——跳入区域才触发）
+            // A 路径：整条身体线段与凸包相交（gap 只在"落地 + 斜面"时生效）
             if in_trigger_zone(pos, body_top, t, grounded) {
                 self.cooldown = TRIGGER_COOLDOWN;
                 return self.destinations.get(t.dest_index as usize).cloned();
             }
-            // B. 落地时脚底往下探测（落地是检测启用条件，非触发本身）
+            // B 路径：落地才探测脚底下方（落地是启用条件，不是触发事件本身）
             if grounded && probe_below_foot(pos, t) {
                 self.cooldown = TRIGGER_COOLDOWN;
                 return self.destinations.get(t.dest_index as usize).cloned();
@@ -222,35 +318,50 @@ impl TeleportManager {
         None
     }
 
-    /// 传送后重置（cooldown 由调用方 reset_cooldown 处理；无 inside 边沿状态）。
+    /// 传送后的状态复位：把所有 trigger 的 `inside` 清回 false。
+    /// **不碰 `cooldown`** —— 冷却清零由 `reset_cooldown` 负责，步内触发时两个都会被调到
+    /// （同一处 `src/phys/mod.rs` 的 `PhysWorld::step_core`）。
+    ///
+    /// 唯一调用点是步内触发路径；`PhysWorld::teleport_to` / `teleport_to_spawn` 不走这里
+    /// （它们只经 `apply_teleport` → `reset_cooldown`）。
     pub fn on_teleported(&mut self) {
         for t in &mut self.triggers {
             t.inside = false;
         }
     }
 
-    /// 重置冷却（手动传送 / respawn 时）。
+    /// 冷却清零（直接写 0.0，不做递减）。
+    /// 调用点：步内触发传送后、掉落死亡后、`src/phys/mod.rs` 的 `PhysWorld::respawn` 与
+    /// `PhysWorld::apply_teleport`。
     pub fn reset_cooldown(&mut self) {
         self.cooldown = 0.0;
     }
 
     // ======================================================================
-    // 种子面通道（t3 additive：F4-C scratch 单向写入；不动任何既有语义）
+    // 种子面通道：给 phys::seed 的整实例投影用（scratch 实例单向写入）。
+    // 这里读写的两个字段都不参与 check 的判定，通道存在只为让状态投影完整。
     // ======================================================================
 
-    /// 种子面：写入隐藏字段 cooldown（t6 §11.1；t1 §4 实证为自 erase 死位——
-    /// check 置 0.5 → 同 step apply_teleport reset + fire 后 reset 归零，armed 态
-    /// 不跨 tick 存活；播种仅为全量表完整性）。
+    /// 种子面：直接写私有字段 `cooldown`，不做范围校验（负值、超过 0.5 的值都原样收下）。
+    /// 读取方是 `cooldown_value`，进出通道是 `seed::SeedState.teleport_cooldown`。
+    ///
+    /// **步进过程里这个值不会跨 tick 存活**：命中当 tick 就置 0.5，同一个 `step_core` 内
+    /// `apply_teleport` 又会 `reset_cooldown` 写回 0.0；下一步 `check` 只在 `> 0.0` 时递减，
+    /// 于是实例在两次 tick 之间读到的恒为 0。播种它只服务全量投影的字段完整性。
     pub fn seed_cooldown(&mut self, v: f64) {
         self.cooldown = v;
     }
 
-    /// 种子面：读取隐藏字段 cooldown 当前值（extract 用）。
+    /// 种子面：读私有字段 `cooldown` 的当前值（`src/phys/seed.rs` 的 `extract_seed` 导出用）。
+    /// 不做任何加工，冷却是负值也照样返回。
     pub fn cooldown_value(&self) -> f64 {
         self.cooldown
     }
 
-    /// 种子面：逐 trigger 写 inside 沿位（长度不匹配返回 Err，防错位播种）。
+    /// 种子面：按顺序逐 trigger 写 `inside` 位。`bits.len()` 必须等于 `self.triggers.len()`，
+    /// 否则返回 `Err(String)` 且**一位都不写**（防错位播种）。
+    /// 长度校验在调用链上出现两次：`src/phys/seed.rs` 的 `apply_seed` 先校验一次，
+    /// 这里是第二次。
     pub fn seed_trigger_inside(&mut self, bits: &[bool]) -> Result<(), String> {
         if bits.len() != self.triggers.len() {
             return Err(format!(
@@ -265,25 +376,38 @@ impl TeleportManager {
         Ok(())
     }
 
-    /// 种子面：读取全部 trigger inside 位（顺序与 triggers 数组一致）。
+    /// 种子面：按 `triggers` 的数组顺序导出全部 `inside` 位（`src/phys/seed.rs` 的
+    /// `extract_seed` 用）。只读，不改任何状态。
     pub fn trigger_inside_vec(&self) -> Vec<bool> {
         self.triggers.iter().map(|t| t.inside).collect()
     }
 }
 
-/// 落地脚底检测（B 路径）：**脚底往下 FOOT_PROBE_DEPTH（8）的区间**
-/// [pos.y-8, pos.y] 与 trigger 相交（**区间夹取，不依赖离散采样**）。
-/// 凸包平面夹取 > AABB 回退。
+/// B 路径：脚底往下 `FOOT_PROBE_DEPTH` 的**闭区间** `[pos.y - 8, pos.y]` 是否与 trigger
+/// 相交。落地与否由调用方判定（`check` 只在 `grounded` 时调进来），本函数不看落地状态、
+/// 也不加 `gap`。
+///
+/// 凸包分支：对每条平面解 `n1 * y = d - n0 * x - n2 * z`（竖直线段在 x / z 上是常数）。
+/// `|n1| < 1e-9` 的竖直平面只约束 XZ —— `rhs < -0.001` 直接 `false`，否则 `continue`；
+/// 其余平面收窄 Y 区间：`n1 > 0` 收 `hi`，`n1 < 0` 收 `lo`。初始 `lo = -inf`、`hi = +inf`，
+/// 全为竖直平面时区间不设限。判定式 `pos.y - 8 <= hi && pos.y >= lo`，是纯区间夹取，
+/// 不对线段做离散采样。
+///
+/// AABB 回退分支：`planes` 为空时用 `mins` / `maxs`（任一为 `None` 即 `false`）——
+/// XZ 必须落在盒内（含边界），且下探区间与盒的 Y 区间相交。
+///
+/// 只读参数与 trigger：不写状态、不看 `spawnflags` / `start_disabled` / `inside`
+/// （那些过滤在 `check`）。
 fn probe_below_foot(pos: &V3, t: &TeleportTrigger) -> bool {
     let mut lo = f64::NEG_INFINITY;
     let mut hi = f64::INFINITY;
     let mut has_planes = false;
     for p in &t.planes {
         has_planes = true;
-        // 竖直线 x,z 固定：n1*y = d - n0*x - n2*z
+        // 竖直线段上 x、z 固定：n1 * y = d - n0*x - n2*z
         let rhs = p[3] - p[0] * pos[0] - p[2] * pos[2];
         if p[1].abs() < 1e-9 {
-            // 竖直平面：XZ 必须在内侧（rhs = d-n0*x-n2*z ≥ 0）
+            // 竖直平面：只约束 XZ，必须在内侧（rhs = d - n0*x - n2*z ≥ 0），容差 0.001
             if rhs < -0.001 {
                 return false;
             }
@@ -297,7 +421,7 @@ fn probe_below_foot(pos: &V3, t: &TeleportTrigger) -> bool {
         }
     }
     if !has_planes {
-        // AABB 回退：下探区间与 AABB y 相交 + XZ 在 AABB 内
+        // 无凸包 → AABB 回退：XZ 落在盒内（含边界）且下探区间与盒的 Y 区间相交
         let (Some(min), Some(max)) = (&t.mins, &t.maxs) else {
             return false;
         };
@@ -308,13 +432,16 @@ fn probe_below_foot(pos: &V3, t: &TeleportTrigger) -> bool {
             && pos[1] - FOOT_PROBE_DEPTH <= max[1]
             && pos[1] >= min[1];
     }
-    // 下探区间 [pos.y - FOOT_PROBE_DEPTH, pos.y] 与凸包区间 [lo, hi] 相交
+    // 下探区间 [pos.y - FOOT_PROBE_DEPTH, pos.y] 与凸包 Y 区间 [lo, hi] 是否相交
     pos[1] - FOOT_PROBE_DEPTH <= hi && pos[1] >= lo
 }
 
-/// 玩家原点是否在 trigger 的 model AABB（mins/maxs）内。
-/// **当前未用于传送触发判定**（历史遗留：AABB 判定曾把触发位置抬高到
-/// "凸包与 AABB 之间的空区域"，已被凸包精确判定取代；保留供调试/回退）。
+/// 点（玩家 origin）是否落在 trigger 的 model AABB 内（三轴均为闭区间，含边界；
+/// `mins` / `maxs` 任一为 `None` 即 `false`）。
+///
+/// **当前工作区内零调用点**：`check` 的两条路径分别用 `in_trigger_zone` 与
+/// `probe_below_foot`，两者都带凸包优先、AABB 回退的逻辑，本函数不在链路上；
+/// `#[allow(dead_code)]` 就是为它挂的。
 #[allow(dead_code)]
 fn in_aabb(pos: &V3, t: &TeleportTrigger) -> bool {
     let (Some(min), Some(max)) = (&t.mins, &t.maxs) else {
@@ -328,26 +455,40 @@ fn in_aabb(pos: &V3, t: &TeleportTrigger) -> bool {
         && pos[2] <= max[2]
 }
 
-/// 贴面/跨斜面容差（units，**仅斜面 trigger + 落地状态生效**）：玩家物理
-/// origin（碰撞箱底中心）在斜面上因跨斜面效应高出表面 8~44（半宽 16 ×
-/// tan(坡角)）。落地时斜面传送允许脚底高于凸包顶 64（"站在斜面上"）；
-/// **空中不因容差触发**（严格身体相交——跳入区域才触发）；**平面传送
-/// 无容差**（不做任何抬高）。
+/// A 路径的贴面容差（HU，**只有"落地 + 斜面"才取这个值**，否则 gap = 0）：
+/// 命中判据的上界放宽为 `hi + 64`，即脚底允许高于凸包顶 64。
+///
+/// 唯一读点在 `in_trigger_zone`；"是不是斜面"由 `is_sloped` 判定（凸包中存在
+/// `|ny| ∈ (0.05, 0.95)` 的平面）。平面 trigger 与空中状态都不吃这个容差；
+/// B 路径也不读它。
+///
+/// 需要它的原因：判据里的 Y 是玩家 origin（盒底中心，`mins[1] = 0`），站在斜面上时
+/// origin 高于实际接触点；gap 固定为 0 时这类"已踩到区域"的落地判定会落空。
 const TRIGGER_FACE_GAP: f64 = 64.0;
 
-/// trigger 是否为斜面传送（planes 中存在倾斜面，|ny| ∈ (0.05, 0.95)）。
+/// trigger 的凸包里是否含倾斜面：存在平面满足 `0.05 < |ny| < 0.95`。
+/// 竖直平面（`|ny| ≈ 0`）与水平面（`|ny| ≈ 1`）都不算。
+/// 只看 `planes`，不看 AABB 回退路径；唯一调用点是 `in_trigger_zone` 的 gap 条件。
 fn is_sloped(t: &TeleportTrigger) -> bool {
     t.planes
         .iter()
         .any(|p| p[1].abs() > 0.05 && p[1].abs() < 0.95)
 }
 
-/// **A 路径区域判定**（"碰到传送区域才触发"）：玩家竖直线段
-/// （[pos.y, pos.y+body_top]）与 trigger **凸包**相交——XZ 受凸包竖直平面
-/// 约束（凸包 XZ 投影内）+ 垂直凸包区间相交。**gap 仅斜面 + 落地生效**
-/// （落地站在斜面上允许脚底高于凸包顶 64，覆盖跨斜面 origin 提升）；
-/// **空中 gap=0**（严格身体相交——跳入区域才触发，不因容差触发）；
-/// **平面传送 gap=0**（不做抬高）。
+/// A 路径：玩家竖直线段 `[pos.y, pos.y + body_top]` 是否与 trigger 相交。
+///
+/// 凸包夹取与 `probe_below_foot` 共用同一套解法（竖直平面约束 XZ、其余平面收窄
+/// Y 区间 `[lo, hi]`），差别只有两处：这里用整条身体线段（下界是
+/// `pos.y + body_top`），并且按 `grounded && is_sloped(t)` 决定是否加
+/// `TRIGGER_FACE_GAP` 的 gap。
+///
+/// gap **只加在判据上界**（`pos.y <= hi + gap`）；下界 `pos.y + body_top >= lo` 不加。
+/// 因此"落地 + 斜面"时脚底能高于凸包顶 64，空中与平面 trigger 都是严格相交。
+///
+/// `planes` 为空时回退 AABB：XZ 在盒内（含边界）+ 身体线段与盒的 Y 区间相交
+/// （上界同样含 gap）；`mins` / `maxs` 缺失返回 `false`。
+///
+/// 只读参数与 trigger：不写状态、不看 `spawnflags` / `start_disabled` / `inside`。
 fn in_trigger_zone(pos: &V3, body_top: f64, t: &TeleportTrigger, grounded: bool) -> bool {
     let mut lo = f64::NEG_INFINITY;
     let mut hi = f64::INFINITY;
@@ -370,14 +511,14 @@ fn in_trigger_zone(pos: &V3, body_top: f64, t: &TeleportTrigger, grounded: bool)
             lo = lo.max(yc);
         }
     }
-    // gap：仅斜面 + 落地（跨斜面 origin 提升）；其余（平面/空中）= 0
+    // gap：只有"落地 + 斜面"两点同时成立才抬高；平面 trigger 与空中都是 0
     let gap = if grounded && is_sloped(t) {
         TRIGGER_FACE_GAP
     } else {
         0.0
     };
     if !has_planes {
-        // AABB/球形回退：玩家竖直线段与 AABB 相交（含 gap）
+        // 无凸包 → AABB 回退：XZ 落在盒内（含边界）且身体线段与盒的 Y 区间相交
         let (Some(min), Some(max)) = (&t.mins, &t.maxs) else {
             return false;
         };
@@ -388,12 +529,15 @@ fn in_trigger_zone(pos: &V3, body_top: f64, t: &TeleportTrigger, grounded: bool)
             && pos[1] <= max[1] + gap
             && pos[1] + body_top >= min[1];
     }
-    // 身体线段与凸包区间相交（脚底允许高于凸包顶 gap）
+    // 身体线段与凸包 Y 区间相交：gap 只放宽上界（脚底可高于凸包顶），下界不放松
     pos[1] <= hi + gap && pos[1] + body_top >= lo
 }
 
-/// 死亡判定：玩家 Y 低于阈值 → 返回重生到初始出生点。
-/// 返回 Some(初始出生点) 表示死亡重生；None = 存活。
+/// 掉落死亡判定：`pos[1] < death_y` 时返回 `Some(*spawn)`，否则 `None`。
+///
+/// 严格小于（恰好等于阈值不算死亡）；返回的就是传进来的那个出生点。
+/// 本函数不移动玩家、不改冷却、不发事件 —— `src/phys/mod.rs` 的 `PhysWorld::step_core`
+/// 拿到 `Some` 之后自己置 `PhysEvent::Death`、调 `Player::respawn` 并复位冷却。
 pub fn check_death(pos: &V3, death_y: f64, spawn: &V3) -> Option<V3> {
     if pos[1] < death_y {
         Some(*spawn)
