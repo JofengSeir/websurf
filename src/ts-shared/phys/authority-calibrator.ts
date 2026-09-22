@@ -1,49 +1,84 @@
 /**
- * 权威校准四件套（公共化 v1）— correctFromAuthority / calibrateVelocity /
- * applyCollisionCorrection / resetTo + normalizeAngleDeg / computeAuthAccel。
+ * 主线程权威校准器：把 Worker 权威帧折算成渲染物理的速度耦合与起跳门槛，
+ * 并提供「渲染主线 → 权威」的反向同步出口与权威位姿外推纯函数。
  *
- * 由 game/debug 两端 renderer-main 收敛而来（debug 阶段 2 与 game 同构）：
- * - 只读权威（readAuth），绝不反写；权威对渲染的**唯一**影响是速度（`calibrateVelocity`
- *   逐帧 + `land` 事件瞬间，R2）与 `land` 事件里的 `onGround=true`（**仅当渲染自己
- *   已着地**——腾空时的权威 land 事件是双线相位差，写了会让渲染半空重新起跳，见
- *   `applyCollisionCorrection` 修复 B）
- * - **没有任何位置/角度通道**（缺陷修复 C，2026-09-11）：`applyCollisionCorrection`
- *   曾用 `phys.set_state(投影点, 权威 yaw/pitch, …)` 把渲染沿来路拖回最多 60 HU 并
- *   注入滞后朝向——那是渲染折线上 24 处方向反转（实测最狠 171° 回头）与"神秘碰撞"
- *   的根因；位置写与角度写已**全部删除**（见该方法头）。
- * - 兜底方向（用户定调）：渲染主线（144Hz 预测物理）精度高于权威（64Hz +
- *   消息延迟），大偏差时**以渲染主线为准反向同步权威**——同步内容 = 渲染主线
- *   帧那一刻的完整状态，同步瞬间清空主线程与权威侧未消费的鼠标/按键增量
- *   （onSyncRenderState 回调 → Worker sync-render-state；权威侧 resetInput）。
- *   **另有 routine 反向重锚**（缺陷修复 A）：常规游玩中定期把渲染当前状态
- *   重锚到权威，使权威的碰撞解算发生在玩家真正所在的位置（见 ROUTINE_ANCHOR_*）。
+ * 定位：共享层 `src/ts-shared/` 的物理侧模块。它不产生权威帧、不持有物理世界、
+ * 不接触渲染与相机：权威帧经 `CalibratorDeps` 的 `readAuth` 注入（两端实现是
+ * `src/ts-shared/auth/shared-state.ts` 的 `readAuthoritative`），渲染物理经
+ * `CalibratorDeps` 的 `getPhys` 注入，渲染 → 权威的出口是 `CalibratorDeps` 的
+ * `onSyncRenderState`。
  *
- * 抽象：主线程渲染物理（PhysWorldLike 子集）与 pending 输入清空经 deps 注入，
- * 两端 RendererMain 仅保留"喂入/喂出"接线。
+ * 上下游各一个调用点：
+ * - 上游（喂入）：`apps/game/src/renderer/renderer-main.ts` 的 `RendererMain.tick`
+ *   —— 每渲染帧在推进物理前依次调 `correctFromAuthority` 与 `calibrateVelocity`；
+ *   `apps/debug/src/renderer/renderer-main.ts` 的 `RendererMain.tick` 同序调用，且这两次
+ *   调用带 `!this.replayMode` 守卫（debug 独有的回放模式；game 侧无回放分支）。
+ *   两端的 `RendererMain` 构造函数各构造一份本类实例。
+ * - 下游（喂出）：`src/ts-shared/auth/worker-dispatch.ts` 的 `sync-render-state`
+ *   分支 —— 消费 `onSyncRenderState` 发出的渲染主线全状态；两端 `app.ts` 负责把
+ *   回调接成 `postMessage`。
  *
- * ── 位置投影时代的口径修正（本次修订）───────────────────────────────
- * Worker 侧权威**发布**的位置不再是权威物理自身的位置，而是
- * `env.renderTrajectory.sampleAtTau(τ)` 在**渲染折线上**取的一个采样点
- * （auth-loop `stepPhysics` 耦合支路；权威自持物理只有**速度**还是主）。
- * 后果：
- * ① 兜底的 `dist`（发布位置 vs 渲染位置）恒 ≈ v × 发布延迟（1300 HU/s 下
- *    ≈0–26 HU），永远到不了旧的 300/500 阈值 → 旧条件①②（dist>500、
- *    dist>300 且同向）**恒不成立**，已删除（保留会误导后来者）；
- * ② 旧条件③（dist ≤ 300 ∧ yawDiff > 45）退化成**只看 yaw**，而权威 yaw
- *    天生滞后渲染 yaw 一个 tick 的未消费鼠标增量（>~2900°/s 的快速甩视角就能
- *    触发），触发即 clearPendingInput() 丢掉**当帧鼠标增量** = 可见瞄准顿挫 →
- *    已改为「渲染 yaw 连续 N 帧静止仍分叉」判据（见 YAW_FAULT_FRAMES）。
- * 位置类硬约束不变：**渲染位置永不被本类的任何逻辑校正**——`correctFromAuthority`
- * 只把渲染状态**推给权威**（单向），`applyCollisionCorrection` 只写速度/着地。
- * 渲染位置发生变化只可能来自两条**显式**路径：`resetTo`（respawn/传送/检查点回退，
- * 用户主动的位置突变）与渲染物理自身 tick 的碰撞解算。
+ * 关键不变量（每条都能在代码里逐行核对）：
+ * 1. 单向读权威：权威帧只经 `readAuth` 读入，本文件从不写权威；唯一的
+ *    渲染 → 权威出口是 `onSyncRenderState`（`emitTeleportSync` 与
+ *    `routineReanchor` 各调用一次）。
+ * 2. 稳态不改渲染位置：`phys.set_state` 在本文件只出现三处 —— `resetTo`（写调用方
+ *    传入的位置/角度、速度清零、`onGround` 置真）、`correctFromAuthority` 的
+ *    `predStarted === false` 首帧分支（以权威帧全状态作渲染起点）、
+ *    `applyCollisionCorrection` 的 `land` 分支（写回刚从 `phys.state()` 读到的
+ *    同一组位置/角度，位置与角度都零变化）。
+ * 3. 帧龄基准是同线程时钟：`authArrivedAtMs` 记主线程 `performance.now()`，
+ *    `calibrateVelocity(now)` 的 `now` 由调用方传 rAF 时间戳；不使用
+ *    `AuthFrame.timeMs`（Worker 与主线程的时钟基准不同）。
+ * 4. 权威对渲染的稳态影响只有速度：`calibrateVelocity` 每渲染帧覆盖速度，
+ *    `applyCollisionCorrection` 的 `land` 分支覆盖落地速度；稳态下角度不被本文件
+ *    改写。
+ * 5. 每个公开方法都能空跑：`getPhys()` 或 `readAuth()` 返回 null 时立即返回，
+ *    不产生任何副作用。
+ *
+ * 边界与容错：
+ * - `onSyncRenderState` 是可选成员，缺省时经 `?.` 退化为空操作（本地状态照常推进）。
+ * - `readAuth()` 返回的 `va` 与 `lastVa` 相等即早退：同一权威帧被重复读到不产生动作。
+ * - 传送/重置豁免期（`performance.now() < teleportExemptUntilMs`）走独立分支，
+ *   不参与 `va` 递增判定，也不用权威帧的位置/角度覆盖渲染物理。
+ * - `computeAuthAccel` 在首帧、差分基准缺失（`prevAuthTimeMs <= 0`）、
+ *   `dt < 0.001s`、`dt > 0.5s` 或重锚抑制窗内返回零加速度；结果按分量 clamp 到
+ *   ±20000。
+ * - `calibrateVelocity` 在 `dt <= 0` 或 `dt > 0.1s` 时退化为直接写权威原始速度，
+ *   不做加速度外推。
+ * - `applyCollisionCorrection` 在 `kind !== 'land'` 或渲染自己 `onGround` 为假时
+ *   零写入（连速度也不写）。
+ * - `extrapolateAuthPose` 把外推时长 clamp 到 `[0, EXTRAP_MAX_MS]`：超限后输出不再
+ *   随 `nowMs` 变化，等于冻结在「权威帧位置 + 该上限对应的位移」。
+ *
+ * 测试归属：本文件无测试（`src/ts-shared/` 下的 `*.test.ts` 均不覆盖它）。唯一的
+ * 自动化消费方是 `apps/debug/scripts/jump-apex-verify.mjs`（由 `apps/debug` 的
+ * `test:jump-apex` 脚本用 esbuild 打包本文件后驱动）：它注入桩 `deps` 构造
+ * `AuthorityCalibrator`，并在关闭加速度外推的档位下覆写 `computeAuthAccel`。
+ *
+ * 与相邻文件的边界：物理常量与碰撞解算在 `src/phys/**`；碰撞事件种类的判定在
+ * `src/ts-shared/auth/auth-loop.ts` 的 `stepPhysics`；`teleport` 标志在 Worker 侧的
+ * 落地语义在 `src/ts-shared/auth/worker-dispatch.ts` 的 `sync-render-state` 分支；
+ * 渲染、相机与输入采样在两端 `renderer-main.ts`。本文件三者都不涉及。
  */
 
 import type { AuthFrame } from '../auth/shared-state.js';
 
-/** 主线程渲染物理（PhysWorld 结构性接口子集）。 */
+/**
+ * 主线程渲染物理的最小结构面：本文件只用下面三个方法。
+ *
+ * 满足者：两端 `renderer-main.ts` 的 `RendererMain.predPhys`（wasm `PhysWorld`，
+ * 见 `src/phys/mod.rs`），测试侧由桩对象满足。
+ */
 export interface CalibratorPhys {
+  /** 取当前全状态。声明为 `unknown` 是因为这是 wasm 绑定的返回类型；本文件统一
+   *  cast 到 `SyncPhysState` 后按字段读取。 */
   state(): unknown;
+  /** 用 9 个分量整体覆盖状态：位置、yaw、pitch、速度、着地。
+   *  调用点仅 `resetTo`、`correctFromAuthority` 的首帧分支、
+   *  `applyCollisionCorrection` 的 `land` 分支。
+   *  `src/phys/mod.rs` 的 `PhysWorld::set_state` 还会把 `prev_origin` 一并对齐到新
+   *  位置。 */
   set_state(
     posX: number,
     posY: number,
@@ -55,10 +90,21 @@ export interface CalibratorPhys {
     velZ: number,
     onGround: boolean,
   ): void;
+  /** 只覆盖速度三分量（HU/s），位置/朝向/着地不动。
+   *  调用点：`calibrateVelocity`（每渲染帧）与 `correctFromAuthority` 的同步在途
+   *  撤回分支。 */
   set_velocity(x: number, y: number, z: number): void;
 }
 
-/** 渲染主线 → 权威同步的全状态（app.ts 注册后发 sync-render-state 消息）。 */
+/**
+ * 反向同步载荷：渲染主线的 10 个字段。
+ *
+ * 由 `emitTeleportSync` / `routineReanchor` 从 `phys.state()` 逐字段拷贝构造
+ * （只取这 10 个键，渲染状态的其它字段不过线），经 `onSyncRenderState` 交给调用方；
+ * 两端 `app.ts` 把它作为 `sync-render-state` 消息的 `state` 发出。
+ * 无缺省字段：构造方必须给出全部 10 项（`eyeHeight` 由两端 `RendererMain`
+ * 从渲染物理状态里取）。
+ */
 export interface SyncRenderState {
   posX: number;
   posY: number;
@@ -73,60 +119,90 @@ export interface SyncRenderState {
 }
 
 /**
- * 渲染物理全状态（`CalibratorPhys.state()` 的结构性视图）。
- * 与 `SyncRenderState` 同字段——`state()` 返回 `unknown`，本类内部统一 cast 到它。
+ * `CalibratorPhys.state()` 返回值的结构性解读 —— 与 `SyncRenderState` 是同一个
+ * 类型（别名，不新声明接口），字段与含义完全一致。
+ *
+ * 别名的理由：两者描述同一份数据，区别只在角色 —— 此处指「本类刚从渲染物理读到的
+ * 状态」，`SyncRenderState` 指「要发给权威的同步载荷」。本类用它作 `emitTeleportSync`
+ * 与 `routineReanchor` 的形参类型，以及 `correctFromAuthority` 里两处 cast 的目标。
  */
 export type SyncPhysState = SyncRenderState;
 
+/** 本类的全部外部依赖（构造函数注入，无默认实现、无缺省分支）。 */
 export interface CalibratorDeps {
+  /** 取最新权威帧与版本号 `va`；尚无可用帧时返回 null。
+   *  调用点：`correctFromAuthority` 每次被调用时读一次。 */
   readAuth(): { frame: AuthFrame; va: number } | null;
+  /** 取当前渲染物理；未就绪（场景未加载/已销毁）时返回 null。
+   *  调用点：`correctFromAuthority`、`calibrateVelocity`、`resetTo`、
+   *  `applyCollisionCorrection`。 */
   getPhys(): CalibratorPhys | null;
-  /** 清空待喂输入（pendingDx/Dy/Keys；同步瞬间的旧增量不注入新状态）。 */
+  /** 丢弃主线程待喂输入（鼠标增量 + 按键位）。
+   *  调用点：`resetTo`（位置突变后残留方向/跳跃无意义）与 `correctFromAuthority` 的
+   *  yaw 分叉兜底分支。 */
   clearPendingInput(): void;
   /**
-   * 渲染主线全状态 → 权威（app.ts 注册后发 `sync-render-state` 消息；Worker 侧
-   * `set_state`）。
+   * 渲染主线全状态 → 权威；可选成员，未注册时调用方经 `?.` 静默跳过。
    *
-   * @param teleport true = **真位置突变**（传送/重生/换图，`teleportExemptUntilMs`
-   *   窗口内）——Worker 侧允许清未消费输入增量（旧增量对新位置无意义）；
-   *   false = **常规反向重锚**（缺陷修复 A，`routineReanchor`）——Worker 侧必须
-   *   **保留**输入增量，否则每几十毫秒丢一次鼠标增量 = 可见瞄准顿挫。
+   * @param s 渲染主线当前状态（10 字段）。
+   * @param teleport true = 真位置突变口径（`resetTo` 之后的豁免期同步、yaw 分叉兜底
+   *   同步）—— Worker 侧允许丢弃未消费输入增量；false = 常规反向重锚口径
+   *   （`routineReanchor`）—— Worker 侧保留输入增量，并保留权威自身的速度与着地。
+   *   消费点：`src/ts-shared/auth/worker-dispatch.ts` 的 `sync-render-state` 分支
+   *   （`teleport === false` 与其余值走两条不同分支）。
    */
   onSyncRenderState?(s: SyncRenderState, teleport: boolean): void;
 }
 
-/** 权威帧快照（A2；速度外推校准依据）。 */
+/** 本类内部持有的权威帧快照：`AuthFrame` 的字段，再加差分算出的 `accel`。 */
 interface AuthSnap {
   pos: { x: number; y: number; z: number };
   yaw: number;
   pitch: number;
   vel: { x: number; y: number; z: number };
-  /** 权威最近加速度（两权威帧速度差 / tick；外推校准用）。 */
+  /** 权威最近加速度（u/s²）：`computeAuthAccel` 用相邻两条权威帧的速度差除以两条帧
+   *  `timeMs` 之差得出；取不到基准时为零向量。 */
   accel: { x: number; y: number; z: number };
   eyeHeight: number;
-  /** 权威帧产生时刻（tick 结束时刻，ms）。 */
+  /** 权威帧自带的产生时刻（Worker 时钟，ms）。只用于加速度差分，不作帧龄
+   *  （帧龄见 `authArrivedAtMs`）。 */
   timeMs: number;
 }
 
-/** 角度归一化到 (-180, 180]：最小角差/旋转方向判断用（350° vs 0° → 10°）。 */
+/**
+ * 角度（度）归一化到 `[-180, 180)`：先 `(a + 180) % 360`，再 `+360`，再 `% 360`，
+ * 最后 `-180`。`%` 对负数保留符号，三步取模把负输入也拉回区间。
+ *
+ * 输入输出：数值进、数值出；`NaN` 进 `NaN` 出（实现无分支）。
+ * 端点行为：`normalizeAngleDeg(180)` 与 `normalizeAngleDeg(-180)` 都返回 -180，故
+ * +180 不会作为返回值出现；`-0` 归一为 `0`。等值输入（相差 360 的整数倍）得到同一
+ * 结果，故本函数可直接用于最小角差。
+ * 副作用：无（纯函数）。
+ * 调用点：`correctFromAuthority` —— 算渲染 yaw 与权威 yaw 的最小角差（取绝对值后与
+ * `YAW_FAULT_DEG` 比较），以及相邻两次消费之间渲染 yaw 的变化量（与 `YAW_STILL_DEG`
+ * 比较）。本仓其它文件不引用它。
+ */
 export function normalizeAngleDeg(a: number): number {
   return ((a + 180) % 360 + 360) % 360 - 180;
 }
 
-// ── 解耦消费外推（phys-mode-port §3.5 T7'，additive）──────────────
+// ── 权威位姿外推（纯函数）─────────────────────────────────────────────
 
-/** 外推输入帧（结构化最小面：AuthFrame / AuthSnap 均满足）。 */
+/** 外推输入帧的结构最小面：位置、速度、yaw、pitch、`eyeHeight`、`timeMs`。
+ *  `src/ts-shared/auth/shared-state.ts` 的 `AuthFrame` 与本文的 `AuthSnap` 都
+ *  结构性地满足它（多出的 `onGround` / `accel` 不参与外推）。 */
 export interface ExtrapolatableFrame {
   pos: { x: number; y: number; z: number };
   vel: { x: number; y: number; z: number };
   yaw: number;
   pitch: number;
   eyeHeight: number;
-  /** 权威帧产生时刻（ms）。 */
+  /** 权威帧产生时刻（ms），与 `nowMs` 必须同基准。 */
   timeMs: number;
 }
 
-/** 外推输出位姿（相机直用；角度保持度数，renderer 统一 DEG2RAD）。 */
+/** 外推输出位姿：世界坐标 + 角度（度）+ 眼高。本函数不做弧度换算：`yaw` / `pitch`
+ *  与输入同为度，`eyeHeight` 原样透传。 */
 export interface ExtrapolatedPose {
   x: number;
   y: number;
@@ -136,16 +212,25 @@ export interface ExtrapolatedPose {
   eyeHeight: number;
 }
 
-/** 解耦模式权威外推上限（ms）：超过视为权威线停滞，冻结在最后一帧位置
- * （防权威线卡死时幽灵漂移；phys-mode-port §3.5 T7' 冻结值 250）。 */
+/** 外推时长上限（ms）：`extrapolateAuthPose` 把 `nowMs - frame.timeMs` 先 clamp 到
+ *  `[0, 本值]`，因此权威帧停更后输出位姿不再随时间变化。 */
 export const EXTRAP_MAX_MS = 250;
 
 /**
- * 解耦消费外推纯函数（§3.5 冻结：位置 = 权威帧位置 + 权威速度 × dt 线性一阶，
- * 无加速度项——加速度项吸收自耦合线 computeAuthAccel 差分口径，作为常量开关
- * 留 t5 验收后评估启用；角度/眼高直读权威帧——权威帧已含全部输入语义）。
- * 耦合模式的 calibrateVelocity 算式由此改向承接（终审③：外推数学复用，
- * 反向同步链废弃——解耦语义 = 权威拉渲染单向，不回写权威）。
+ * 权威位姿一阶外推（纯函数，无副作用）：
+ *
+ *   t   = clamp(nowMs − frame.timeMs, 0, EXTRAP_MAX_MS) / 1000
+ *   pos = frame.pos + frame.vel × t
+ *   yaw / pitch / eyeHeight = frame 的对应字段（不做任何变换）
+ *
+ * 输入：`frame`（`ExtrapolatableFrame`）与 `nowMs`（毫秒时刻，需与 `frame.timeMs`
+ * 同基准）。输出：新对象，不修改 `frame`。
+ * 退化：`nowMs <= frame.timeMs` → `t = 0`，输出等于权威帧原位姿；
+ * `nowMs - frame.timeMs > EXTRAP_MAX_MS` → `t` 固定为 `EXTRAP_MAX_MS / 1000`，输出
+ * 成为常量，不再随 `nowMs` 增长。
+ * 无加速度项：位移只含 `frame.vel × t` 这一项（`frame` 上也没有加速度字段）。
+ * 调用点：本仓无调用点 —— `extrapolateAuthPose`、`EXTRAP_MAX_MS`、
+ * `ExtrapolatedPose`、`ExtrapolatableFrame` 四个导出只出现在本文件内。
  */
 export function extrapolateAuthPose(frame: ExtrapolatableFrame, nowMs: number): ExtrapolatedPose {
   const dtS = Math.max(0, Math.min(EXTRAP_MAX_MS, nowMs - frame.timeMs)) / 1000;
@@ -159,101 +244,115 @@ export function extrapolateAuthPose(frame: ExtrapolatableFrame, nowMs: number): 
   };
 }
 
+/**
+ * 权威校准器：每个主线程渲染帧调用一次，把权威帧转成渲染物理的速度耦合，并在判定
+ * 双端视角走散时经 `onSyncRenderState` 反向同步权威。
+ *
+ * 状态全部是本实例私有字段（权威帧快照、版本号、各类时间戳与计数）；`clear()` 把
+ * 它们整体复位，因此换图或重装物理实例之后必须调它。
+ * 不持有物理实例、不持有渲染资源：两者经 `CalibratorDeps` 注入，`getPhys()` 返回
+ * null 时全部方法空跑。
+ * 调用点：`apps/debug` 与 `apps/game` 的 `RendererMain` 各构造一份实例
+ * （`apps/viewer` 不引用本文件）。
+ */
 export class AuthorityCalibrator {
   private lastVa = -1;
   private curAuth: AuthSnap | null = null;
   private prevAuthVel: { x: number; y: number; z: number } | null = null;
   private prevAuthTimeMs = 0;
-  /** 渲染主线 → 权威同步在途（防权威追平前重复触发）。 */
+  /** 反向同步在途标志：置真后 `correctFromAuthority` 只做追平判定与撤回监视，不再
+   *  触发新的兜底同步。 */
   private syncInFlight = false;
-  /** 上次兜底处理时间戳（同步或撤回；冷却内不重复处理）。 */
+  /** 上次同步或撤回的时刻（`performance.now()`，ms）；`SYNC_COOLDOWN_MS` 冷却以此为
+   *  基准。0 = 本实例还没同步过。 */
   private lastSyncAt = 0;
-  /** 首个权威帧诊断只打印一次（零行为改动的计时探针）。 */
+  /** 首帧诊断日志只打印一次的哨兵；不参与任何状态迁移。 */
   private authFirstFrameLogged = false;
-  /** 主线程渲染物理是否已用首个权威帧校准起点。 */
+  /** 渲染物理是否已确立起点：false 时 `correctFromAuthority` 用权威帧全状态写渲染
+   *  起点，true 时权威帧不再决定渲染位置。 */
   private predStarted = false;
   /**
-   * 传送/重置后的权威豁免截止时间戳（performance.now()，ms）。
+   * 传送/重置豁免窗口的截止时刻（`performance.now()`，ms）；`resetTo` 把它设为
+   * `now + TELEPORT_EXEMPT_MS`。
    *
-   * 位置突变（respawn/teleport/noclip/检查点回退）的瞬间，权威 Worker 侧仍是
-   * 旧位置；若不豁免，`correctFromAuthority` 的首帧分支会用权威旧位置覆盖回去
-   * → 视觉上"传送/重置没生效"（位置类兜底条件已删除，但首帧起点校准仍在）。
-   * 豁免期内：只读权威速度供外推，绝不覆盖渲染物理位置；并把主线程新状态
-   * 同步给 Worker（onSyncRenderState），让权威侧追平到新位置。
+   * 窗口内 `correctFromAuthority` 走独立分支：照常记录权威帧（供 `calibrateVelocity`
+   * 外推速度）、把渲染当前状态以 `teleport = true` 反向同步给权威、置
+   * `predStarted = true`、把 `prevFrameRenderYaw` 对齐到渲染当前 yaw 并把
+   * `yawDivergedFrames` 清零；不使用权威帧的位置/角度覆盖渲染物理。
    */
   private teleportExemptUntilMs = 0;
 
+  /** 保存依赖引用；构造本身不读权威、不取物理、不注册回调。 */
   constructor(private readonly deps: CalibratorDeps) {}
 
-  /** 兜底处理冷却（ms）：同步/撤回后 250ms 内不再触发，防抖（用户调 2s→250ms）。 */
+  /** 兜底同步冷却（ms）：`lastSyncAt` 之后这么久内不触发新的兜底同步；同步在途的
+   *  追平与撤回判定不受它限制。 */
   static readonly SYNC_COOLDOWN_MS = 250;
 
   /**
-   * 主线程读到当前权威帧的时刻（`performance.now()`，同线程时钟）。
-   * `calibrateVelocity` 用 `now - authArrivedAtMs` 作为帧龄做加速度外推；
-   * 不能用 `AuthFrame.timeMs`（跨线程时钟基准不同，实测固定偏移 ≈1132ms）。
+   * 主线程读到最近一条权威帧的时刻（`performance.now()`，ms）。
+   *
+   * `calibrateVelocity` 以 `now - authArrivedAtMs` 作为帧龄做加速度外推；不使用
+   * `AuthFrame.timeMs`（Worker 与主线程的时钟基准不同）。
    */
   private authArrivedAtMs = 0;
 
-  // ── 条件③（yaw 分叉）故障判据状态 ─────────────────────────────
-  /** 上一条权威帧时刻的渲染 yaw（判「渲染 yaw 是否已静止」用）。 */
+  // ── yaw 分叉兜底判据的状态 ────────────────────────────────────────────
+  /** 上一条权威帧被消费时渲染物理的 yaw（度）；「渲染 yaw 是否已静止」判据的左端。 */
   private prevFrameRenderYaw = 0;
-  /** 渲染 yaw 连续静止、且与权威 yaw 分叉 > 阈值的权威帧计数。 */
+  /** 连续满足「渲染 yaw 静止且与权威 yaw 分叉超阈值」的权威帧计数；任一帧不满足即
+   *  清零。 */
   private yawDivergedFrames = 0;
 
-  /** 条件③判定：yaw 分叉必须**连续**这么多条权威帧都满足才视为故障（≈8×15.6ms≈125ms）。 */
+  /** yaw 分叉兜底的连续帧数门限：计数达到它才置 `syncInFlight` 并反向同步。 */
   static readonly YAW_FAULT_FRAMES = 8;
-  /** 条件③阈值：yaw 最小角差（度）超过它才算分叉（沿用旧 45°）。 */
+  /** yaw 分叉阈值（度）：渲染 yaw 与权威 yaw 的最小角差绝对值超过它才算分叉。 */
   static readonly YAW_FAULT_DEG = 45;
-  /** 「渲染 yaw 已静止」判据：相邻权威帧之间渲染 yaw 变化 < 本值（度）≈ 无横向输入。 */
+  /** 「渲染 yaw 已静止」阈值（度）：相邻两次消费之间渲染 yaw 的变化量绝对值小于它
+   *  才算静止。 */
   static readonly YAW_STILL_DEG = 1;
 
-  /** 残差位置校正已按用户硬约束移除（不得影响渲染响应）；保留占位说明见文件内注释。 */
+  /** 位置残差通道不存在：本类没有位置校正的量值、门限或计时字段，稳态下渲染位置
+   *  不由本类改写（见 `resetTo` 与 `correctFromAuthority` 的首帧分支）。 */
 
-  /** 传送/重置后权威豁免时长（ms）：约 12 个 64Hz 权威帧窗口，足够权威追平新位置。 */
+  /** 传送/重置豁免时长（ms）：`resetTo` 用它把 `teleportExemptUntilMs` 推到当前时刻
+   *  之后。 */
   static readonly TELEPORT_EXEMPT_MS = 200;
 
-  // ── 常规反向重锚（缺陷修复 A）──────────────────────────────────
+  // ── 常规反向重锚 ──────────────────────────────────────────────────────
   /**
-   * 常规重锚的「权威已跑偏」门限（HU）。
+   * 常规重锚的位置门限（HU）。
    *
-   * 判定量 = `|权威**自身**位置 − 渲染当前位置|`。为什么要减掉权威发布延迟：
-   * 权威帧在渲染帧 k 里被读到，此刻渲染已又走了 v×(k→k+1) 的距离（实测 8–22ms
-   * 往返 ≈ 10–30 HU @1300 HU/s），所以「权威自身位置」天生落后渲染当前位置
-   * 一个发布间隔——那段是**时钟滞后**，不是几何漂移。门限取 16 HU 即「超过约
-   * 半个发布间隔的额外偏移才算真漂移」。
+   * 判定量是 `routineReanchor` 用 `Math.hypot` 算出的「渲染当前位置 − 权威帧 `pos`」
+   * 三维距离。权威帧的 `pos` 是权威侧**发布**的位置，渲染主线在同一时刻已经又推进了
+   * 一段距离，因此这个差里含一部分**时钟滞后**而不全是几何漂移；门限取值即「只有
+   * 超出这一量级的偏移才值得立刻对齐」。
    *
-   * 为什么必须有 routine 重锚（而不是只在传送窗口里锚）：权威的碰撞解算用的是
-   * **它自己的**位置。修复 C 之前，`applyCollisionCorrection` 会把渲染位置反向
-   * 拖回 5–60 HU，双端偏差因此被不断"重造"（实测偏移 5–40 HU、尖峰 204 HU）；
-   * 而权威在**错位置**上算出的碰撞速度会经 `calibrateVelocity`（R2，每帧写渲染
-   * 速度）注入渲染——实测签名就是单帧、单分量（vy −71.6 → +5704.5 → −76.5，
-   * vx/vz 逐位不变）的速度尖峰 jog。把权威位置 routine 锚回渲染位置，碰撞解算
-   * 才发生在玩家真正所在的位置。
-   *
-   * 不影响 R2（权威仍是速度之主）：锚定只改权威**位置**，不改渲染速度、不改渲染
-   * 位置；权威速度仍由它自己的 `phys.tick` 产出并逐帧写进渲染。
+   * 重锚只经 `onSyncRenderState` 改权威侧的位置与角度，不触碰渲染物理：渲染速度仍由
+   * 渲染物理自身推进，权威速度仍由权威自己产出并逐帧经 `calibrateVelocity` 写进渲染。
    */
   static readonly ROUTINE_ANCHOR_HU = 16;
-  /** 两次常规重锚之间的最小间隔（ms）：防消息风暴（≈20/s 上限）。 */
+  /** 两次常规重锚之间的最小间隔（ms）：间隔不足时 `routineReanchor` 直接返回。 */
   static readonly ROUTINE_ANCHOR_MIN_GAP_MS = 50;
-  /** 常规重锚的兜底节拍（ms）：即使偏移始终小于门限也至少这么频繁地锚一次。 */
+  /** 常规重锚的兜底间隔（ms）：偏移未超门限但距上次重锚已达该间隔时，仍执行一次对齐。 */
   static readonly ROUTINE_ANCHOR_MAX_GAP_MS = 250;
 
-  /** 上次常规重锚时刻（performance.now()；-∞ = 尚未锚过）。 */
+  /** 上次常规重锚的时刻（`performance.now()`，ms）。初值 -Infinity 使首次调用必定通过
+   *  间隔判定。 */
   private lastRoutineAnchorAtMs = Number.NEGATIVE_INFINITY;
   /**
-   * 重锚后的加速度基准抑制帧数（2 帧）。
+   * 重锚后需要抑制加速度输出的次数（`routineReanchor` 置 2，`computeAuthAccel` 每被
+   *  调用一次减 1）。
    *
-   * 为什么需要：`set_state` 把权威位置瞬移 Δ，下一权威 tick 算出的位移里就多了
-   * 这个 Δ，`computeAuthAccel` 的差分 → 巨大加速度 → `calibrateVelocity` 外推把
-   * 它写进渲染速度（正是我们要消除的单帧速度尖峰）。故重锚把 `prevAuthVel` 清空
-   * （该帧 accel=0），随后**再**抑制一帧（重锚位移仍会体现在下一帧的速度差里），
-   * 两帧后恢复正常。
+   * 重锚把权威位置瞬移，下一条权威帧算出的速度差里含这段瞬移；不抑制的话
+   * `computeAuthAccel` 会把瞬移折算成加速度，再由 `calibrateVelocity` 写进渲染速度。
+   * 抑制期间 `computeAuthAccel` 照常刷新差分基准，只返回零加速度。
    */
   private accelSuppressFrames = 0;
 
-  /** 传送/重置豁免期内的反向同步（真正的位置突变；`resetInput` 语义保留）。 */
+  /** 以 `teleport = true` 发出渲染主线全状态（真位置突变口径）。
+   *  只调 `onSyncRenderState`，不触碰 `phys`；该回调未注册时整个调用经 `?.` 退化为
+   *  空操作。调用点：`correctFromAuthority` 的豁免期分支与 yaw 分叉兜底分支。 */
   private emitTeleportSync(st: SyncPhysState): void {
     this.deps.onSyncRenderState?.(
       {
@@ -262,22 +361,23 @@ export class AuthorityCalibrator {
         velX: st.velX, velY: st.velY, velZ: st.velZ,
         onGround: st.onGround, eyeHeight: st.eyeHeight,
       },
-      true, // teleport = true：这是真位置突变，允许清输入增量
+      true, // teleport = true：真位置突变口径（Worker 侧允许丢弃未消费输入增量）
     );
   }
 
   /**
-   * 常规反向重锚（缺陷修复 A 的实现）：把渲染**当前**状态推给权威，使权威的
-   * 碰撞解算落在玩家真正所在的位置。
+   * 常规反向重锚：按 `ROUTINE_ANCHOR_*` 节拍把渲染当前位置与角度推给权威。
    *
-   * 与传送豁免期的两点区别（都必须保住）：
-   * 1. `teleport = false` → Worker 侧**不清未消费输入增量**。常规重锚是每几十
-   *    毫秒一次的例行对齐，清输入会把正常甩视角的鼠标增量丢掉 = 可见瞄准顿挫。
-   *    输入清空只属于真传送（位置突变，旧增量对新位置无意义）。
-   * 2. 不置 `predStarted`（渲染起点早已校准）。
+   * 两道门（任一命中即返回，不写任何状态）：距上次重锚不足
+   * `ROUTINE_ANCHOR_MIN_GAP_MS`；或 `drift`（渲染当前位置与权威帧 `pos` 的三维距离）
+   * 未超 `ROUTINE_ANCHOR_HU` 且距上次重锚不足 `ROUTINE_ANCHOR_MAX_GAP_MS`。
    *
-   * 方向始终是**渲染 → 权威**：本方法只调 `onSyncRenderState` 回调，绝不碰
-   * `phys`——实时输入到显示零新增延迟（R1）。
+   * 通过门后依次：记下重锚时刻、清空速度差分基准（`prevAuthVel` / `prevAuthTimeMs`）、
+   * 把 `accelSuppressFrames` 置 2，然后以 `teleport = false` 发 `onSyncRenderState`。
+   *
+   * 副作用：写 `lastRoutineAnchorAtMs` / `prevAuthVel` / `prevAuthTimeMs` /
+   * `accelSuppressFrames`，并调一次回调。不触碰 `phys`，也不改 `predStarted`。
+   * 调用点：`correctFromAuthority`（每个渲染帧一次，在同步在途与冷却判定之前）。
    */
   private routineReanchor(st: SyncPhysState, authPos: { x: number; y: number; z: number }): void {
     const now = performance.now();
@@ -289,7 +389,7 @@ export class AuthorityCalibrator {
       return;
     }
     this.lastRoutineAnchorAtMs = now;
-    // 抑制重锚瞬移带来的假加速度（见 accelSuppressFrames）
+    // 清差分基准 + 抑制两次：重锚瞬移不折算成加速度（见 accelSuppressFrames）
     this.prevAuthVel = null;
     this.prevAuthTimeMs = 0;
     this.accelSuppressFrames = 2;
@@ -300,25 +400,29 @@ export class AuthorityCalibrator {
         velX: st.velX, velY: st.velY, velZ: st.velZ,
         onGround: st.onGround, eyeHeight: st.eyeHeight,
       },
-      false, // 常规重锚 = false：Worker 不清输入增量
+      false, // teleport = false：常规重锚口径（Worker 侧保留未消费输入增量）
     );
   }
 
   /**
-   * 权威帧消费（每渲染帧调用一次）—— **只读权威 + 速度校准，绝不改动渲染位置**
-   * （用户硬约束：渲染响应速度不得受影响）。
+   * 每个渲染帧消费一次权威帧 —— 只读权威 + 速度耦合，稳态下不写渲染位置。
    *
-   * 四段：
-   * ① 传送/重置豁免期（位置刚突变）：只记录权威帧供速度外推，并把渲染新状态
-   *    **反向同步**给权威（`teleport=true`，允许清输入）；
-   * ② 常规失败兜底：**仅 yaw 分叉**（渲染 yaw 连续 `YAW_FAULT_FRAMES` 条权威帧
-   *    静止仍与权威分叉 > `YAW_FAULT_DEG`）才反向同步；旧的 dist>500 /
-   *    dist>300+同向两条件因权威发布位置改为渲染折线采样点而恒不成立，已删除
-   *    （见模块头「位置投影时代的口径修正」）；
-   * ③ **常规反向重锚**（缺陷修复 A）：`ROUTINE_ANCHOR_*` 节拍内的例行对齐，
-   *    `teleport=false`、不清输入（见 routineReanchor）；
-   * ④ 首次权威帧（无渲染历史）：以权威全状态作为渲染物理起点（唯一的权威→渲染
-   *    位置通道；此后渲染位置只由 `resetTo` 与渲染物理自身碰撞改变）。
+   * 分支顺序：
+   * ① 豁免期（`performance.now() < teleportExemptUntilMs`）：记录权威帧快照、
+   *    取渲染当前状态、以 `teleport = true` 反向同步、置 `predStarted`、把
+   *    `prevFrameRenderYaw` 对齐到渲染当前 yaw 并清零 `yawDivergedFrames`，随后返回；
+   * ② `va` 与 `lastVa` 相等 → 没有新权威帧，返回；
+   * ③ 首帧（`predStarted === false`）：用权威帧全状态写渲染物理起点，随后返回；
+   * ④ 常规路径：算 `dist` 与 `yawDiff` → `routineReanchor` → 同步在途的追平/撤回 →
+   *    冷却判定 → yaw 分叉判据。
+   *
+   * 副作用：写 `lastVa` / `curAuth` / `authArrivedAtMs` / `predStarted` /
+   * `prevFrameRenderYaw` / `yawDivergedFrames` / `syncInFlight` / `lastSyncAt`；
+   * 按分支调 `phys.set_state`（只在前两处的首帧分支）、`phys.set_velocity`（只在同步
+   * 在途的撤回分支）、`routineReanchor`、`onSyncRenderState`、`clearPendingInput`。
+   * `getPhys()` 或 `readAuth()` 返回 null 时整体空跑。
+   * 调用点：两端 `RendererMain.tick`（每渲染帧，在 `calibrateVelocity` 与物理推进
+   * 之前；回放模式下跳过）。
    */
   correctFromAuthority(): void {
     const phys = this.deps.getPhys();
@@ -326,13 +430,11 @@ export class AuthorityCalibrator {
     const auth = this.deps.readAuth();
     if (!auth) return;
 
-    // ── 传送/重置豁免期：位置刚突变，权威侧仍可能是旧位置 ──
-    // 绝不把权威旧位置覆盖到渲染物理（覆盖 = 传送被拉回）。只刷新权威速度供
-    // calibrateVelocity 外推；同时把渲染物理当前（新）状态同步给权威 Worker，
-    // 让权威在豁免窗口内追平，避免豁免结束后首次权威帧（predStarted 已置位）
-    // 因 dist 过大再被 fallback 逻辑拉回。
+    // ── 豁免期（resetTo 之后的 TELEPORT_EXEMPT_MS 窗口）──
+    // 不把权威帧的位置/角度写进渲染物理；只刷新权威帧快照供 calibrateVelocity 外推
+    // 速度，并把渲染当前状态以 teleport=true 同步给权威，让权威侧在新位置追平。
     if (performance.now() < this.teleportExemptUntilMs) {
-      // 记录权威帧（供 calibrateVelocity 外推速度），但不覆盖渲染位置
+      // 记录权威帧快照（供 calibrateVelocity 外推速度），不写渲染物理
       this.lastVa = auth.va;
       const f = auth.frame;
       this.curAuth = {
@@ -344,12 +446,12 @@ export class AuthorityCalibrator {
         eyeHeight: f.eyeHeight,
         timeMs: f.timeMs,
       };
-      // 主线程新状态 → 权威（覆盖旧位置，防止权威把旧位置当起点拉回）
+      // 渲染当前状态 → 权威（teleport=true：允许 Worker 丢弃未消费输入增量）
       const st = phys.state() as unknown as SyncPhysState;
       this.emitTeleportSync(st);
-      // 视为主线程已校准起点，避免豁免结束后权威帧再 set_state 旧位置
+      // 置 predStarted：窗口结束后不再走首帧分支，权威帧不会覆盖渲染位置
       this.predStarted = true;
-      // yaw 分叉计数清零：豁免期内的权威 yaw 仍是旧朝向，不参与故障累计
+      // 分叉状态对齐到渲染当前值：窗口内权威 yaw 不参与分叉累计
       this.prevFrameRenderYaw = st.yaw;
       this.yawDivergedFrames = 0;
       return;
@@ -357,15 +459,15 @@ export class AuthorityCalibrator {
 
     if (auth.va === this.lastVa) return;
     this.lastVa = auth.va;
-    // 诊断（2026-09-20，**零行为改动**）：首个权威帧到达时刻。与 app.ts 的
-    // `[authority] world-json 已发送 @T` 相减 = Worker 侧"构建碰撞世界 + 首个 tick"的
-    // 端到端耗时（用户量到 ~1.5s，期望 ~0.2s；两者同为 performance.now 基准）。
+    // 诊断：首帧到达时刻（只打印一次，不改变任何状态迁移）。与两端 app.ts 的
+    // `[authority] world-json 已发送 @T` 相减 = Worker 侧「构建碰撞世界 + 首个 tick」
+    // 的端到端耗时（两者同为 performance.now 基准）。
     if (!this.authFirstFrameLogged) {
       this.authFirstFrameLogged = true;
       console.info(`[authority] 首个权威帧 @${performance.now().toFixed(0)}ms（va=${auth.va}）`);
     }
-    // 记录**主线程**读到这一帧的时刻（同线程时钟）——calibrateVelocity 的帧龄基准。
-    // 不能用 frame.timeMs：Worker 的 performance.now 与主线程不同基准（实测偏移 ≈1132ms）。
+    // 帧龄基准 = 主线程读到这一帧的时刻（同线程时钟）。
+    // 不用 frame.timeMs：那是 Worker 的 performance.now，与主线程不同基准。
     this.authArrivedAtMs = performance.now();
     const f = auth.frame;
     this.curAuth = {
@@ -378,7 +480,7 @@ export class AuthorityCalibrator {
       timeMs: f.timeMs,
     };
 
-    // 首次权威帧（或重载后）：以权威全状态作为渲染物理起点
+    // 首帧分支（含 clear() 之后）：以权威帧全状态作渲染物理起点
     if (!this.predStarted) {
       this.predStarted = true;
       phys.set_state(f.pos.x, f.pos.y, f.pos.z, f.yaw, f.pitch, f.vel.x, f.vel.y, f.vel.z, f.onGround);
@@ -387,38 +489,33 @@ export class AuthorityCalibrator {
     }
 
     const st = phys.state() as unknown as SyncPhysState;
-    // 实测距离仅保留在同步在途判定里使用（决定「权威是否已追平」）；触发条件
-    // 已与位置无关（见下）。旧①②用的转动方向量已删除——同向判据随①②一起作废。
+    // dist 只用于同步在途的追平与撤回判定；它不参与下方的兜底触发条件。
     const dist = Math.hypot(st.posX - f.pos.x, st.posY - f.pos.y, st.posZ - f.pos.z);
 
     const yawDiff = Math.abs(normalizeAngleDeg(st.yaw - f.yaw));
     const now = performance.now();
 
-    // ── ③ 常规反向重锚（缺陷修复 A）─────────────────────────────────────
-    // 放在 syncInFlight / 冷却早退**之前**：位置对齐与 yaw 兜底是两件事，重锚必须
-    // 每个渲染帧都有机会执行（否则 yaw 兜底在途或冷却期间权威又会跑偏）。
-    // 只推渲染状态给权威、绝不碰 phys —— 实时输入→显示零新增延迟（R1）。
+    // ── 常规反向重锚 ────────────────────────────────────────────────────
+    // 放在 syncInFlight 与冷却早退之前：位置对齐与 yaw 兜底互不影响，而重锚每个渲染
+    // 帧都要有机会执行，否则同步在途或冷却期间权威会持续跑偏。
+    // 本调用只把渲染状态推给权威，不碰 phys。
     this.routineReanchor(st, f.pos);
 
-    // 权威已追平（同步在途结束）：位置 < 300 且视角 ≤ 45° 视为收敛
+    // 追平判定（结束同步在途）：dist < 300 且 yawDiff <= 45°
     if (this.syncInFlight && dist < 300 && yawDiff <= 45) {
       this.syncInFlight = false;
     }
     if (this.syncInFlight) {
-      // 撤回监视：同步在途但再次大幅分叉（dist > 500 或 yaw > 45°）——
-      // 说明渲染侧在漂移/上次"渲染为准"的方向错误 → 撤回兜底。
+      // 撤回监视：同步在途期间若 dist > 500 或 yawDiff > 45°，视为同步未生效或渲染侧
+      // 继续漂移 → 结束在途状态并记冷却。
       //
-      // ⚠️ 本次修订（位置投影时代）：**不再写位置**。原先这里用权威帧位置
-      // `set_state(f.pos…)` 回滚渲染——权威发布位置如今是渲染折线上的一个采样点
-      // （一个**过去**的点），把它写回渲染等于把渲染拖回过去，直接违反硬约束
-      // 「渲染位置永不被校正」，并且会污染 Worker 正在采样的那条折线本身
-      // （自反馈）。保留下来的只有「速度重述」：权威是速度之主，把当前权威帧速度
-      // 直接落到渲染（与 calibrateVelocity 同值同语义，只是立刻生效而非等下一帧
-      // 外推）——这不消耗预测前瞻，也不产生位置跳变。
+      // 这里只重述速度（phys.set_velocity），不写位置：AuthFrame.pos 是权威侧发布的
+      // 位置，把它写回渲染物理等于把渲染拉向另一个时刻的采样点，并且会被 Worker 正在
+      // 采样的那条折线再次读走（自反馈）。速度重述与 calibrateVelocity 同值同语义，
+      // 只是立即生效而非等下一帧外推。
       //
-      // ⚠️ 这里**不再 clearPendingInput()**：清掉的正是渲染当帧的鼠标增量，
-      // 会把一次正常甩视角变成可见瞄准顿挫（旧代码在 term③ 下的真实症状）。
-      // 输入清空现在只在条件③（真·yaw 分叉且渲染已静止）这一处发生。
+      // 这里不调 clearPendingInput()：清掉的会是渲染当帧的鼠标增量。输入清空只发生在
+      // 下方的 yaw 分叉兜底分支。
       if (dist > 500 || yawDiff > 45) {
         phys.set_velocity(f.vel.x, f.vel.y, f.vel.z);
         this.syncInFlight = false;
@@ -429,40 +526,29 @@ export class AuthorityCalibrator {
       return;
     }
 
-    // 冷却：同步/撤回后冷却期内不重复兜底处理（防抖；正常游玩快速甩视角
-    // 或短暂分叉不会反复触发）
+    // 冷却门：上次同步或撤回之后 SYNC_COOLDOWN_MS 内不触发新的兜底同步。
     if (now - this.lastSyncAt < AuthorityCalibrator.SYNC_COOLDOWN_MS) return;
 
-    // ── 位置校正：**已按用户硬约束移除**（2026-09-11）─────────────────────
-    // 用户明确要求：不得做任何影响渲染的修改——「我的操作到显示必须是最新的，
-    // 渲染响应速度不得受任何影响」。任何把渲染位置朝权威拉的校正，都会直接消耗
-    // 预测前瞻、降低输入→显示的响应，因此这里**不再改动渲染位置**。
-    // 位置漂移改从源头解决：`auth-loop.ts` 的 `setFixedDt` 幂等 + 绝对有界欠账
-    // （权威时钟此前会在每次物理配置消息上 reset() 丢时间），以及 `calibrateVelocity`
-    // 的帧龄改用主线程到达时刻（修好被跨时钟偏移弄死的速度外推，使注入的速度**更新**）。
+    // ── 位置校正：本类不做 ───────────────────────────────────────────────
+    // 稳态下不把渲染位置朝权威拉：那会消耗渲染物理的前瞻量，直接表现为输入到显示的
+    // 延迟。位置偏差由本文件之外的两处收敛 —— `src/ts-shared/auth/auth-loop.ts` 的
+    // `setFixedDt` 在步长未变时返回 false，调用方据此跳过 `reset()`，权威时钟不再每次
+    // 物理配置消息都丢时间；以及 `calibrateVelocity` 的帧龄取主线程到达时刻，使写进
+    // 渲染的速度是外推后的新值。
 
-    // 兜底判定 —— 单条件（①② 已删除，见模块头「位置投影时代的口径修正」）：
-    // ① 位置差 > 500 → **恒不成立**（发布位置 = 渲染折线上的采样点，dist 恒
-    //    ≈ v × 发布延迟 ≈0–26 HU @1300 HU/s）——删除，保留会误导。
-    // ② 位置差 > 300 且同向 → 同上恒不成立——删除。
-    // ③ **yaw 分叉**才是仍需兜底的一类（权威是速度之主，但角度不该被它拖住）：
-    //    重写为「渲染 yaw 连续 YAW_FAULT_FRAMES 条权威帧静止不动、却仍与权威 yaw
-    //    分叉 > YAW_FAULT_DEG 度」。
+    // 兜底判据只有一条 —— yaw 分叉（位置类判据在本文件不存在）：
+    // 「渲染 yaw 连续 YAW_FAULT_FRAMES 条权威帧静止不动，却仍与权威 yaw 分叉超过
+    // YAW_FAULT_DEG 度」。
     //
-    // 为什么不是旧的 `dist <= 300 && yawDiff > 45`：权威 yaw 天生落后渲染 yaw
-    // 一个 tick 的**未消费鼠标增量**——快速甩视角（>~2900°/s 时单 tick Δyaw > 45°）
-    // 会让旧判据在完全正常的输入下开火；开火即 clearPendingInput() 丢掉渲染当帧
-    // 鼠标增量 + Worker resetInput()，玩家看到的是瞄准顿挫（本项目已知症状）。
-    // 现实测「渲染 yaw 是否还在被输入推动」作为判据：只要渲染 yaw 还在动，分叉就
-    // 是预期滞后（非故障）；渲染 yaw 静止（< YAW_STILL_DEG/frame）而权威仍分叉，
-    // 才说明双端视角真的走散（权威侧丢输入/被卡住）。连续 8 帧（≈125ms）防抖，
-    // 避免落地/撞墙瞬间的单帧抖动误判。
+    // 判据为什么先看「渲染 yaw 还动不动」：权威 yaw 落后渲染 yaw 一个 tick 的未消费
+    // 鼠标增量，因此只要渲染 yaw 仍在被输入推动，分叉就是双线相位的正常滞后；渲染
+    // yaw 静止（相邻两次消费之间变化 < YAW_STILL_DEG 度）而权威仍分叉，才是双端视角
+    // 真的走散（权威侧丢输入或被卡住）。连续帧数门限用于滤掉落地/撞墙瞬间的单帧抖动。
     //
-    // 备选判据（本文件作者无权实施，记录给未来）：直接检查两个 SAB 鼠标累加器
-    // （B_DX_ACC/B_DY_ACC，见 shared-state.ts takeInput）在权威 tick 后是否已排空
-    // ——那需要 Worker 侧把「排空」信号回传/暴露，属于 shared-state.ts 与 worker
-    // 装配面（其他 agent 所有），故未采用；本判据只用本文件已注入的 deps
-    // （getPhys/readAuth/clearPendingInput），零新增接口。
+    // 未被采用的做法（记录备查）：直接判断跨线程鼠标累加器在权威 tick 后是否已排空
+    // ——那需要 Worker 侧回传「已排空」信号，接口不在本文件。现判据只用已注入的 deps
+    // （getPhys / readAuth / clearPendingInput），零新增接口。
+    // 渲染 yaw 是否仍在被输入推动（相邻两次消费之间变化小于阈值 = 已静止）
     const yawStill =
       Math.abs(normalizeAngleDeg(st.yaw - this.prevFrameRenderYaw)) <
       AuthorityCalibrator.YAW_STILL_DEG;
@@ -476,21 +562,35 @@ export class AuthorityCalibrator {
     if (shouldSync) {
       this.syncInFlight = true;
       this.lastSyncAt = now;
-      // yaw 分叉兜底 = 真·双端视角走散（渲染已静止）→ 按传送口径发（允许清输入；
-      // 旧增量对已静止的视角无意义，且下面 clearPendingInput 语义本来就是它）
+      // 分叉兜底按传送口径发（teleport=true）：此时渲染视角已静止，未消费的鼠标增量
+      // 对新状态无意义。
       this.emitTeleportSync(st);
       // 清主线程待喂输入（同步瞬间的旧增量不注入新状态）
       this.deps.clearPendingInput();
+      // 计数不复位：它只由上方抽样逻辑（不满足分叉时）或同步在途的撤回分支清零。
     }
   }
 
-  /** 权威加速度 = 两权威帧速度差 / 帧间隔（u/s²）；首帧/间隔异常 → 0。 */
+  /**
+   * 权威最近加速度（u/s²）：相邻两条权威帧的速度差除以两条帧 `timeMs` 之差。
+   *
+   * 差分基准是 `prevAuthVel` / `prevAuthTimeMs`，且本方法**每次调用都刷新基准**
+   * （即使本次不输出加速度），因此基准的推进节奏由 `correctFromAuthority` 的调用
+   * 节奏决定。
+   * 返回零向量的场景：重锚抑制窗内（`accelSuppressFrames > 0`）、尚无基准
+   * （`prevAuthVel` 为 null 或 `prevAuthTimeMs <= 0`）、帧间隔 `< 0.001s` 或 `> 0.5s`。
+   * 非零时按分量 clamp 到 ±20000 u/s²。
+   * 副作用：写 `prevAuthVel` / `prevAuthTimeMs`，并在抑制窗内递减
+   * `accelSuppressFrames`。调用点：`correctFromAuthority` 的两处快照构造。
+   * 注意：方法名是外部脚本的接口 —— `apps/debug/scripts/jump-apex-verify.mjs` 会把它
+   * 整体替换成返回零向量的桩函数。
+   */
   private computeAuthAccel(
     vel: { x: number; y: number; z: number },
     timeMs: number,
   ): { x: number; y: number; z: number } {
-    // 重锚抑制窗（见 accelSuppressFrames）：重锚位移会污染一帧速度差，
-    // 期间**照常刷新**基准（prevAuthVel/prevAuthTimeMs）但不产出加速度。
+    // 抑制窗（见 accelSuppressFrames）：重锚瞬移会污染一帧速度差，期间照常刷新基准
+    // （prevAuthVel / prevAuthTimeMs）但不产出加速度。
     const suppress = this.accelSuppressFrames > 0;
     if (suppress) this.accelSuppressFrames--;
     const prev = this.prevAuthVel;
@@ -500,7 +600,8 @@ export class AuthorityCalibrator {
     if (suppress || !prev || prevT <= 0) return { x: 0, y: 0, z: 0 };
     const dt = (timeMs - prevT) / 1000;
     if (dt < 0.001 || dt > 0.5) return { x: 0, y: 0, z: 0 };
-    // clamp ±20000（重力 800；碰撞瞬间速度跳变可能巨大，防外推爆炸）
+    // 上下限 ±20000 u/s²：帧间隔最小 0.001s，故该上限等于「1ms 内速度变化 ±20 HU/s」；
+    // 超出这一量级的差分来自碰撞瞬间的速度跳变或帧间隔抖动，直接截断以防外推发散。
     const clamp = (v: number): number => Math.max(-20000, Math.min(20000, v));
     return {
       x: clamp((vel.x - prev.x) / dt),
@@ -510,28 +611,27 @@ export class AuthorityCalibrator {
   }
 
   /**
-   * 逐帧速度校准（每个渲染帧、tick 之前）—— 权威速度外推反馈。
+   * 每渲染帧的速度耦合：把权威帧速度 + 加速度外推写进渲染物理。
    *
-   * Worker 权威帧速度已考虑中途地图物理碰撞（卡坡/穿墙/落地）→ 用它修正
-   * 渲染物理速度，让渲染轨迹向权威对齐。权威帧到达滞后（64Hz vs 渲染帧）：
-   *   vel_target = vel_A + a × (t_now − t_A)
-   * a = 权威最近加速度；动态帧距（拿到权威帧的那一帧自动适配）。
-   * 垂直落体实测：锯齿 5.54≈理论 5.56，滞后偏差消除。
+   * 算式（`dt = (now - authArrivedAtMs) / 1000`，`a = curAuth`）：
+   *   vel = a.vel + a.accel × dt
+   * 命中条件：`dt > 0 && dt <= 0.1`。取不到 `curAuth` 或 `getPhys()` 返回 null 时直接
+   * 返回；`dt <= 0`（时间戳异常）或 `dt > 0.1s`（权威帧长时间未更新）时退化为直接写
+   * `a.vel`，不做外推。
    *
-   * **角度不校准**（用户定调）：权威帧不得影响渲染帧角度——角度由渲染物理
-   * 自己输入驱动（鼠标 + Q/E，144Hz 高精度），Q/E 速度等输入参数立即生效。
-   * 同理 `applyCollisionCorrection` 也**不再**写角度（缺陷修复 C）。
+   * 副作用：经 `phys.set_velocity` 覆盖渲染物理速度三分量；不改位置、不改角度、不改
+   * 着地。
+   * 调用点：两端 `RendererMain.tick`（每渲染帧，紧接 `correctFromAuthority`、在渲染
+   * 物理推进之前；回放模式下跳过）。`now` 必须与 `authArrivedAtMs` 同源，即调用方的
+   * rAF 时间戳。
    */
   calibrateVelocity(now: number): void {
     const phys = this.deps.getPhys();
     if (!phys || !this.curAuth) return;
     const a = this.curAuth;
-    // 帧龄用**主线程读到该权威帧的时刻**（同线程时钟）：
-    // 原来用 `a.timeMs`（Worker 的 performance.now）——两者时间基准不同，
-    // 实测固定偏移 ≈1132ms，于是 dt ≈ 1.13s，恒 > 0.1 的上限判断 →
-    // **加速度外推永远不生效**，速度退化成"一个 tick 之前的原始权威速度"，
-    // 渲染被钉死在滞后 ~15.6ms（1300 HU/s ≈ 20 HU）的速度上 = 用户报告的
-    // 「tick 计算滑落，把渲染拖住」。
+    // 帧龄基准是主线程读到该权威帧的时刻（同线程时钟）。
+    // 若改用 a.timeMs（Worker 的 performance.now），两个时钟基准不同，dt 会被一个固定
+    // 偏移顶到上限之外，加速度外推随之失效，速度退化为权威帧的原始速度。
     const dt = (now - this.authArrivedAtMs) / 1000;
     let v = a.vel;
     if (dt > 0 && dt <= 0.1) {
@@ -546,8 +646,17 @@ export class AuthorityCalibrator {
   }
 
   /**
-   * 位置突变归零（显式重置允许覆盖：respawn/teleport/noclip 切换/检查点回退）。
-   * 清空权威校准状态，防止旧权威帧把突变位置拉回。
+   * 显式位置突变：把渲染物理写到指定位置与角度（速度清零、`onGround` 置真），清空
+   * 权威校准状态，并把权威豁免窗口推到 `performance.now() + TELEPORT_EXEMPT_MS`。
+   *
+   * 入参：`pos` 取下标 0..2 作世界坐标（多余元素被忽略）；`yawDeg` / `pitchDeg` 为度，
+   * `pitchDeg` 缺省 0。出参：无。
+   * 副作用：`phys.set_state`（本文件唯一以新位置写渲染物理的入口）、
+   * `clearPendingInput()`、`clear()`、写 `teleportExemptUntilMs`。
+   * 失败/退化：`getPhys()` 返回 null 时整体空跑 —— 连 `clear()` 与豁免窗口都不设置。
+   * 调用点：本仓只有 `apps/debug` 侧经 `RendererMain.resetTo` 调用它（地图载入起点、
+   * 重生按钮的检查点回退与纯 Rust 重生、spawn 下拉切换、自定义传送点、死亡回退）；
+   * `apps/game` 的 `RendererMain.resetTo` 包装器在本仓无调用点。
    */
   resetTo(pos: number[], yawDeg: number, pitchDeg = 0): void {
     const phys = this.deps.getPhys();
@@ -556,12 +665,22 @@ export class AuthorityCalibrator {
     // 清待喂输入，防突变后残留方向/跳跃
     this.deps.clearPendingInput();
     this.clear();
-    // 传送/重置后设置权威豁免窗口：期间权威旧位置不得覆盖渲染物理，
-    // 并把主线程新位置同步给 Worker（由 correctFromAuthority 中豁免分支执行）。
+    // 开豁免窗口：窗口内由 correctFromAuthority 的豁免分支负责把渲染新状态同步给权威，
+    // 且权威帧的位置/角度不会写进渲染物理。
     this.teleportExemptUntilMs = performance.now() + AuthorityCalibrator.TELEPORT_EXEMPT_MS;
   }
 
-  /** 清空全部权威校准状态（disposeScene / buildPredictionWorld 跨地图重置用）。 */
+  /**
+   * 复位权威校准状态：`prevAuthVel` / `prevAuthTimeMs` / `prevFrameRenderYaw` /
+   * `yawDivergedFrames` / `syncInFlight` / `lastSyncAt` / `predStarted` / `curAuth` /
+   * `lastVa` / `lastRoutineAnchorAtMs` / `accelSuppressFrames` 回到构造时的值。
+   *
+   * 副作用：只写本实例字段 —— 不触碰物理、不发回调、不改 `teleportExemptUntilMs`。
+   * 未复位的字段：`authArrivedAtMs`（下一帧被覆写）、`authFirstFrameLogged`、
+   * `teleportExemptUntilMs`（后两者跨 `clear()` 保留）。
+   * 调用点：两端 `RendererMain` 的 `disposeScene` 与安装新 `predPhys` 的路径，以及本
+   * 文件的 `resetTo`。
+   */
   clear(): void {
     this.prevAuthVel = null;
     this.prevAuthTimeMs = 0;
@@ -572,55 +691,44 @@ export class AuthorityCalibrator {
     this.predStarted = false;
     this.curAuth = null;
     this.lastVa = -1;
-    // 常规重锚状态清零（新世界/新轨迹：旧节拍无意义）
+    // 重锚节拍与加速度抑制窗一并清零（新世界/新轨迹下两者都已无意义）
     this.lastRoutineAnchorAtMs = Number.NEGATIVE_INFINITY;
     this.accelSuppressFrames = 0;
   }
 
   /**
-   * 权威碰撞事件 → **纯提示**（phys-event 不再有位置/角度通道）。
+   * 权威碰撞事件入口 —— 只处理 `land`，且只写速度与着地。
    *
-   * ⚠️ **本方法曾经写渲染位置与角度，现已全部删除**（缺陷修复 C）。原因与实测：
+   * 入参：`kind` 为事件种类；`_pos` / `_yawDeg` / `_pitchDeg` 三个入参**未被读取**
+   * （它们仍由 `phys-event` 协议携带，调用方按原签名传参；`_` 前缀是 `apps/debug` 的
+   * `noUnusedParameters` 要求，`apps/game` 的 tsconfig 未开该选项）；`vel` 为权威碰撞
+   * 瞬间速度，缺省时回落渲染自身速度。
    *
-   * 1. **位置写 = 渲染折线上的倒退段**（主症状）。旧实现在这里调
-   *    `phys.set_state(corr…, yawDeg, pitchDeg, …)`：`corr` 来自「最近权威帧的
-   *    发布位置（渲染折线上的一个采样点）+ vel×帧龄」，但权威发布位置天生滞后
-   *    渲染当前位置 v×发布延迟（1300 HU/s 下 ≈20 HU，高速更甚），再加上外推误差
-   *    ——每次碰撞事件都把渲染**沿它自己的来路拖回去**最多 `COLLISION_GATE_HU`
-   *    （60 HU ≈ 1300 HU/s 下的 24 个渲染帧）。触发条件在 `auth-loop.ts` 里是
-   *    `!prevOnGround && onGround`（land）与
-   *    `curSpeed>80 && prevSpeed−curSpeed>250 && moved < expectedMove*0.3`
-   *    （blocked）——**普通 surf 贴坡/擦墙就会命中**，不需要真的"撞"。
-   *    实测（`debug/fixtures/path/tick-on-render-prefix.json`）：渲染线上
-   *    24 处方向反转（最狠一处 dot=−0.988 ≈ 171° 回头），稳态垂距 p95 = 36.52 HU。
-   * 2. **角度写 = 未加门的权威朝向注入**。权威 yaw/pitch 天生滞后渲染一个 tick 的
-   *    未消费鼠标增量；碰撞瞬间把它写进渲染物理，会让**下一个 tick 的 surf 加速
-   *    方向**按权威的旧朝向计算 → 玩家手感上的"神秘碰撞/乱转向"。
-   * 3. **距离门 `COLLISION_GATE_HU`（60 HU）失去意义**。它当时是用来限制"位置
-   *    单次跳变量"的；位置通道既然不存在，就只剩"事件离得远就不作为"这一副作用
-   *    ——而权威内部位置与渲染位置相差 5–40 HU（尖峰 204 HU）是**常态**，
-   *    保留它只会让本该生效的**速度**耦合随机失效（实测偏移尖峰 204 HU 已超过
-   *    60 HU 门）。故一并删除；`collisionProjectedPos` 及
-   *    `COLLISION_AGE_LIMIT_MS` 随其唯一消费者一起删除。
+   * 分支：
+   * - `getPhys()` 返回 null → 返回，零写入。
+   * - `kind !== 'land'`（即 `blocked`）→ 返回，零写入。
+   * - 渲染自己 `onGround` 为假 → 返回，零写入（连速度也不写）。
+   * - 否则 `phys.set_state(st.posX, st.posY, st.posZ, st.yaw, st.pitch, vx, vy, vz, true)`：
+   *   位置与角度写回的是刚从 `phys.state()` 读到的同一组值（两者零变化），速度取
+   *   `vel`（缺省用渲染自身速度），`onGround` 被置真。
    *
-   * 保留下来的两个通道（都**不碰位置、不碰角度**）：
-   * - `land` → 权威**碰撞处理后的速度**（`vel`）+ `onGround = true`——但**仅当渲染
-   *   自己此刻 `onGround` 已为真**（修复 B，2026-09-11：权威与渲染相位不重合，
-   *   权威落地时渲染常仍在空中，此时强写 onGround=true 会让渲染在半空重新起跳、
-   *   顶高 57→≈114 翻倍 —— 见方法后半段守卫注释与 `jump-apex-verify.mjs` 实测）。
-   *   速度是权威作为「速度之主」的合法耦合（R2；与逐帧 `calibrateVelocity`
-   *   同值同语义，只是落地瞬间立即生效）；`onGround` 用**渲染自己的当前位置/速度**
-   *   重述（`set_state(st.pos…, st.vel…, true)`——写回的就是刚从 `state()` 读到的
-   *   同一组值，位置零变化），不引入任何权威位置。渲染腾空时本分支退化为纯提示。
-   * - `blocked` → **什么都不写**。撞墙瞬间权威速度与渲染速度本就相差一个碰撞相位，
-   *   直接注入会造成可见抖动；跨墙后的方向由渲染物理自身演化、再由逐帧
-   *   `calibrateVelocity` 渐进收敛。本分支保留在协议里只为让 `auth-loop` 的事件流
-   *   仍是"可观测提示"（面板/HUD 用），对渲染**零影响**。
+   * 副作用：仅一次 `phys.set_state`；不发回调、不改本类任何字段。
    *
-   * `pos` / `yawDeg` / `pitchDeg` 三个入参**有意保留在签名里但不再使用**：
-   * 它们由 `phys-event` 消息协议携带（`AuthCollisionEvent`，worker 侧发），
-   * 删参数只会把"弃用"变成"协议变更"，对调用方没有任何好处。未使用参数以 `_`
-   * 前缀标注（debug tsconfig 开了 `noUnusedParameters`）。
+   * 为什么 `onGround` 必须由渲染自己的 `onGround` 把关：`src/phys/player.rs` 的
+   * `check_jump` 第一道门就是 `!p.on_ground` 即返回，随后把 `p.velocity[1]`
+   * **赋值**为 `sqrt(2 × gravity × jump_height)`（默认 800 / 57 → ≈302 HU/s，不是
+   * 叠加），且 `autobhop` 为真时连 `old_jump` 的边沿检查也跳过。因此渲染仍在空中时把
+   * `onGround` 写真的，等于在半空重赋一次完整起跳初速。权威侧的 `land` 判据
+   * （`src/ts-shared/auth/auth-loop.ts` 的 `stepPhysics`：`!prevOnGround && onGround`，
+   * 着地上升沿）与渲染自己的着地时刻不同源，两个条件不可互换。
+   *
+   * `blocked` 分支在此零写入：权威速度是权威侧碰撞解算的产物，与渲染侧同一时刻的
+   * 速度不同源；渲染速度的收敛由逐帧 `calibrateVelocity` 承担。该分支保留在签名里是
+   * 为了让事件仍可被调用方观测。
+   *
+   * 调用点：两端 `app.ts` 的 `phys-event` 消息处理（`kind` 由
+   * `src/ts-shared/auth/auth-loop.ts` 的 `emitCollision` 给出：`land` = 着地上升沿；
+   * `blocked` = 速度骤降且实际位移远小于速度对应的位移）。`apps/viewer` 不调用它。
    */
   applyCollisionCorrection(
     kind: 'land' | 'blocked',
@@ -631,7 +739,7 @@ export class AuthorityCalibrator {
   ): void {
     const phys = this.deps.getPhys();
     if (!phys) return;
-    // 撞墙（blocked）：纯提示，零写入（见方法头 2）。
+    // blocked：本文件不处理（零写入）。
     if (kind !== 'land') return;
 
     const st = phys.state() as {
@@ -645,33 +753,26 @@ export class AuthorityCalibrator {
       velZ: number;
       onGround: boolean;
     };
-    // ⚠️⚠️ **腾空时的 land 事件一律不采纳**（2026-09-11 修复 B，跳跃顶高翻倍根因）──
+    // ── 门：渲染自己未着地时不采纳 land 事件 ─────────────────────────────
     //
-    // 事件判据在**权威**侧是 `!prevOnGround && onGround`（auth-loop.ts:352），而
-    // 双线位置/相位并不重合（发布位置 = 渲染折线采样点、权威自持物理位置差常态
-    // 5–40 HU）：权威落地时**渲染常常还在空中**（实测 144Hz 平地连跳：29 次 land
-    // 事件里 17 次渲染在空）。此时把 onGround 强写 true，等于告诉渲染物理「你站在
-    // 地上」，而 `check_jump` 的唯一硬门就是 `on_ground`（player.rs:537），
-    // `p.velocity[1] = jump_velocity`（≈302，**赋值**，player.rs:560-561）——
-    // 按住空格（autobhop 下连 `old_jump` 边沿都不检查，player.rs:544）就会在**半空**
-    // 重赋一个完整 +302：从顶点附近起跳 → 顶高 57 → ≈114 **恰翻倍**。
-    // 实测（debug/scripts/jump-apex-verify.mjs，平地按住空格连跳 20s）：
-    //   144Hz 修复前 顶高 max 111.5 HU（= 2×55.8）、17 次腾空起跳；
-    //   本守卫落地后 顶高 max 59.7 HU、0 次腾空起跳（中位 56.2，抖动 ±3 HU）。
-    // 注：本守卫**不削弱**任何合法语义——渲染自己已 grounded 时照常重述（那时
-    // `st.onGround` 本就是 true，写入是幂等的），速度耦合（R2）也照常生效；
-    // 渲染腾空期间则退化为与 `blocked` 同级的**纯提示**（零写入）。
-    // 不能改成"以权威 onGround 为准"：权威位置与渲染位置不同源，它判定的落地
-    // 时刻对渲染没有意义（渲染的着地由渲染自己的 categorize_position 决定）。
+    // 事件判据在权威侧（`src/ts-shared/auth/auth-loop.ts` 的 `stepPhysics`：
+    // `!prevOnGround && onGround`），而双线并不重合：`AuthFrame.pos` 是权威侧发布的
+    // 位置（耦合模式下由 `renderTrajectory` 投影到渲染折线上），权威自持的碰撞解算
+    // 位置与之不同源。权威判定的落地时刻对渲染没有意义 —— 渲染的着地由渲染自己的
+    // 碰撞解算决定。此时若把 onGround 置真，`src/phys/player.rs` 的 `check_jump` 硬门
+    // 就被打开，`p.velocity[1]` 会被赋值成完整起跳初速（`autobhop` 为真时连
+    // `old_jump` 边沿也不检查）→ 半空重新起跳。
+    //
+    // 本门不削弱合法语义：渲染自己已着地时照常重述（此时 st.onGround 本就是真，写入
+    // 幂等），落地速度耦合照常生效；渲染腾空时本调用退化为与 blocked 同级的零写入。
     if (!st.onGround) return;
-    // 权威落地瞬间的速度（已过碰撞处理）——R2 的合法耦合；缺失则保留渲染速度。
+    // 权威落地瞬间的速度（权威侧已过碰撞解算）；vel 缺省时回落渲染自身速度。
     const vx = vel?.[0] ?? st.velX;
     const vy = vel?.[1] ?? st.velY;
     const vz = vel?.[2] ?? st.velZ;
-    // ⚠️ 位置/角度全部写回**渲染自己的**当前值（不是权威的 _pos/_yawDeg/_pitchDeg、
-    // 也不是任何投影点）：本调用唯一目的是把 onGround 置 true。位置零变化 ⇒ 渲染
-    // 折线不会出现倒退段；角度零变化 ⇒ surf 加速方向不被权威滞后朝向改写。
-    // （PhysWorld 没有单独的 set_on_ground；set_state 是唯一可写着地位的口。）
+    // 位置与角度全部写回渲染自己的当前值（不用 _pos / _yawDeg / _pitchDeg 这三个入参）：
+    // 本调用的唯一目的是把 onGround 置真，位置与角度都零变化。
+    // `src/phys/mod.rs` 的 `PhysWorld` 没有单独的置着地方法，set_state 是唯一入口。
     phys.set_state(st.posX, st.posY, st.posZ, st.yaw, st.pitch, vx, vy, vz, true);
   }
 }

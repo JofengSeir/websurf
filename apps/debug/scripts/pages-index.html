@@ -56,7 +56,7 @@
     <div><a href="./viewer/">Viewer</a> — BSP 地图游览 + 录像回放<span class="desc">（WebSurf-viewer）</span></div>
   </div>
 
-  <div class="note">提示：Game Build 依赖 SharedArrayBuffer（需 COOP/COEP 响应头），GitHub Pages 不提供——线上可打开但功能受限（自动 MsgState 回退）；完整游玩请下载仓库后运行 <code>game/play.cmd</code>。</div>
+  <div class="note">提示：Game Build 依赖 SharedArrayBuffer（需 COOP/COEP 响应头），GitHub Pages 不提供——线上可打开：功能可用、性能降级（自动回退到 MsgState 消息通道）；完整游玩请下载仓库后运行 <code>apps/game/play.cmd</code>。</div>
 
   <div class="ctrlw">
     <div class="ctrlw-h">关于 Ctrl + W：页面被关掉不是闪退</div>
@@ -85,8 +85,7 @@
     </ol>
     <p class="ctrlw-warn">
       <strong>注意：</strong>录快捷键时，输入框里直接按 <kbd>Ctrl</kbd> + <kbd>W</kbd>
-      可能当场把设置页也一起关掉；Edge 实测可以<strong>先按 <kbd>W</kbd> 再按 <kbd>Ctrl</kbd></strong>
-      录进去。
+      可能当场把设置页也一起关掉；若被占用录不进去，可试着<strong>先按 <kbd>W</kbd> 再按 <kbd>Ctrl</kbd></strong>。
     </p>
   </div>
 

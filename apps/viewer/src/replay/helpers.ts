@@ -1,14 +1,15 @@
 /**
- * 录像域公共角度工具（纯函数，无副作用）。
- * （t4：JSON 时代的脚本辅助函数集合已随 JSON 解析通道移除。）
+ * 录像域角度工具（纯函数，无副作用）：角度归一与 pitch 限幅的统一出口。
+ * 消费方：`apps/viewer/src/replay/shavit-replay.ts` 取 clampPitch 与 wrapDeg，
+ * `apps/viewer/src/replay/build.ts` 取 wrapDeg，`apps/viewer/test/replay-selftest.ts` 两者都取。
  */
 
 import { PITCH_LIMIT_DEG } from '../core/constants.js';
 
-/** 角度归一到 [0,360)。单点实现在 core/pose.ts（BSP 出生点路径与 .replay 路径共用），此处转发导出。 */
+/** 角度归一到 [0, 360)：实现在 `src/ts-shared/phys/angles.ts` 的 wrapDeg，经 `apps/viewer/src/core/pose.ts` 转发到此。 */
 export { wrapDeg } from '../core/pose.js';
 
-/** pitch 限幅 ±89°。 */
+/** pitch 限幅到 ±PITCH_LIMIT_DEG（89°）；非有限值（NaN、±Inf）返回 0。 */
 export function clampPitch(d: number): number {
   if (!Number.isFinite(d)) return 0;
   return Math.max(-PITCH_LIMIT_DEG, Math.min(PITCH_LIMIT_DEG, d));

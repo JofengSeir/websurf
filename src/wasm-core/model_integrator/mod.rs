@@ -1,7 +1,48 @@
-//! 模型整合器：把 `.mdl/.vvd/.dx90.vtx` 模型合并进地图 GLB。
+//! 模型整合器：把内存中的 `.mdl` / `.vvd` / `.dx90.vtx` 字节合并进地图 GLB。
 //!
-//! WASM 环境无文件系统，统一走 `from_in_memory` + [`InMemoryResources`] 路径；
-//! 磁盘模式（new-vbsp CLI 遗留的 `new()` / `export_map` / 目录遍历等）已清理移除。
+//! ## 在主流程中的位置
+//!
+//! 上游（都由所在工程的 wasm 导出层组装成 [`InMemoryResources`]）：
+//! - `crate::pakfile_models`：VMT → 透明度档位与 `unlit` 标注（`resolve_pakfile_materials`），
+//!   以及模型三件套在 pakfile 内的原始字节（`collect_pakfile_models`）；
+//! - `crate::vhv`：`sp_<idx>.vhv` / `sp_hdr_<idx>.vhv` → 逐顶点烘焙光照（`parse_vhv`）；
+//! - `crate::vbsp`：静态道具放置表与逐 prop 的 leaf ambient cube（`Bsp::prop_ambient_cube`）。
+//!
+//! 下游是 `src/wasm-core/bsp_to_gltf_core/convert.rs` 的 `export_bsp_with_models`：它先把 BSP 几何
+//! 写进同一个 `Root` 与同一个 bin `Vec<u8>`，再调 [`ModelIntegrator::add_models_to_gltf`] 追加模型，
+//! 序列化成 JSON 字符串后调 [`ModelIntegrator::add_lighting_to_gltf_json`] 注入光照。
+//! 放置表另有一条消费路径：碰撞/三角导出直接调 [`resolve_placements`] 与 [`map_coords`]，
+//! 与 GLB 节点共用同一份变换（`apps/game/crates/wasm/src/lib.rs` 与
+//! `apps/debug/crates/wasm/src/lib.rs` 的 `export_model_tri_colliders`）。
+//!
+//! ## 职责
+//!
+//! - 顶点：VVD 顶点 → 交错 [`ModelVertex`] 写进调用方的 `buffer`，并登记 buffer view / accessor；
+//! - 图元：每个 `vmdl::Mesh` 一个 primitive，索引统一 u32；
+//! - 材质与贴图：按名去重后建 `gltf.materials` / `images` / `textures`；
+//! - 放置：解析 static prop / entity 的 origin、angles、scale，产出 [`Placement`]，逐实例建节点；
+//! - 光照：逐实例 vhv → 自定义属性 `_VBSP_VLIGHT`；light 实体 → `KHR_lights_punctual`。
+//!
+//! ## 关键不变量
+//!
+//! - **顶点布局是交错的**：[`ModelVertex`] 为 `#[repr(C)]` 的 position(3×f32) + uv(2×f32)
+//!   + normal(3×f32)，共 **32** 字节；一个 buffer view 承载三个属性，`byteStride = 32`，
+//!   `POSITION` / `TEXCOORD_0` / `NORMAL` 的 `byteOffset` 依次为 **0 / 12 / 20**。
+//!   逐顶点光照相反：**独立** buffer view、紧凑 f32×3、`byteStride = 12`。
+//! - **坐标**：[`map_coords`] 做 `[x, y, z] → [y, z, x]`，即 `X_gltf = Y_src`、`Y_gltf = Z_src`、
+//!   `Z_gltf = X_src`（Source Z-up → glTF Y-up）。顶点位置、包围盒、光照方向、origin 走它；
+//!   `ModelVertex::from` 里的**法线不走**，原样取 VVD 的 `normal`。
+//! - **buffer 归属**：所有 buffer view 都写 `buffer: 0`，`byte_offset` 取调用时刻 `buffer.len()`；
+//!   本模块不建 `Root.buffers`，由 `export_bsp_with_models` 在合并完成后补 `byte_length`。
+//!   本模块追加的顶点 / VLIGHT / 索引三段长度都是 4 的倍数，贴图段不补齐（见 `push_texture_data`）。
+//! - **去重缓存**：键只有纹理名与 `材质名|alpha档|unlit`，不含 `Root` 身份 ⇒ 一个整合器只服务于
+//!   一次导出；三工程的装配点都是 `from_in_memory` 之后立刻导出。
+//!
+//! ## 边界
+//!
+//! 只写 glTF JSON 结构与 bin 字节。不做物理、不读文件系统、不解码图片（贴图按 PNG 原样搬运）、
+//! 不做模型动画/骨骼蒙皮（只取 LOD0 几何）。**本文件没有 `#[test]`，也没有 `static_assertions`
+//! 断言**；行为验证在三工程的导出链路上进行。
 
 use std::collections::HashMap;
 use std::mem;
@@ -17,7 +58,13 @@ use serde::Deserialize;
 use thiserror::Error;
 use vmdl::{Mdl, Model as VmdlModel, Vtx, Vvd};
 
-/// 模型整合错误
+/// 模型整合错误。
+///
+/// 四个变体的实际来源：[`ModelIntegratorError::Model`] 由 `load_model_from_bytes` 的三次解析
+/// （`Mdl::read` / `Vvd::read` / `Vtx::read`）产生，在 `add_models_to_gltf` 里被**捕获并只跳过该模型**；
+/// [`ModelIntegratorError::Json`] 由 `add_lighting_to_json` 的 `serde_json::from_str` / `to_string` 产生；
+/// [`ModelIntegratorError::UnsupportedModelFormat`] 只在 `push_model` 取不到皮肤表时构造。
+/// `Gltf` 变体由 `#[from]` 生成，本 crate 内没有构造点。
 #[derive(Error, Debug)]
 pub enum ModelIntegratorError {
     #[error("GLTF 错误: {0}")]
@@ -33,55 +80,96 @@ pub enum ModelIntegratorError {
     UnsupportedModelFormat(String),
 }
 
-/// 导出模型选项（WASM 下通常只用默认值）
+/// 导出模型选项。
+///
+/// `#[derive(Default)]` ⇒ `include_lights` 默认 `false`：不建光照节点，也不注入扩展。
+/// 三工程的装配点中，需要光照的路径显式写 `ExportOptions { include_lights }`
+/// （`apps/game/crates/wasm/src/lib.rs` 的 `export_glb_with_defaults_opts`），其余用 `ExportOptions::default()`。
 #[derive(Debug, Default)]
 pub struct ExportOptions {
-    /// 是否包含光照（light 实体 → KHR_lights_punctual 扩展）
+    /// 是否把 light 实体写成 `KHR_lights_punctual` 扩展。
+    ///
+    /// 开与关影响两处：`add_models_to_gltf` 里是否调 `process_lights` 建节点，
+    /// 以及 `add_lighting_to_gltf_json` 是否注入光源定义（关掉时原样返回输入字符串）。
     pub include_lights: bool,
 }
 
-/// 内存中的单个模型字节数据（替代磁盘 .mdl/.vvd/.dx90.vtx 三件套）
+/// 内存中的单个模型三件套：`.mdl` / `.vvd` / `.dx90.vtx` 的**原文整文件字节**。
+///
+/// 三个字段分别交给 `Mdl::read` / `Vvd::read` / `Vtx::read` 解析；本结构不校验三者是否同源。
 #[derive(Debug, Clone, Deserialize)]
 pub struct InMemoryModel {
-    /// 模型路径（需与 BSP 静态道具字典中的模型名一致，用于位置/朝向匹配）
+    /// pakfile 内的模型路径（如 `models/props/crate.mdl`）。
+    ///
+    /// 同时供三处使用：`resolve_placements` 的匹配键、mesh 名（`file_stem`）、节点名（`file_name`）。
+    /// 与静态道具字典里的 `model` 不同源时三级匹配全部落空 ⇒ 该模型静默不导出。
     pub name: String,
+    /// `.mdl` 字节（骨架、包围盒、纹理名表、皮肤表的来源）。
     pub mdl: Vec<u8>,
+    /// `.vvd` 字节（顶点位置 / 法线 / UV 的来源）。
     pub vvd: Vec<u8>,
+    /// `.dx90.vtx` 字节（三角形条带索引的来源）。
     pub vtx: Vec<u8>,
 }
 
-/// 内存资源集合（用于 WASM / 无文件系统环境，替代磁盘 resource_dir）
+/// 一次导出所需的全部内存资源；由所在工程的 wasm 导出层组装，本模块只读。
+///
+/// 各字段对应本模块的输入：模型三件套、静态道具放置表、实体、贴图字节、光照实体，
+/// 以及两张按材质名索引的标注表。`entities` 在三个工程的全部装配点都传空
+/// （`apps/game/crates/wasm/src/lib.rs` 的 `export_glb_with_defaults_opts`），因此 `resolve_placements` 的实体支路当前没有调用者。
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryResources {
+    /// 待合并的模型三件套；解析失败或没有任何放置实例的会被跳过。
     pub models: Vec<InMemoryModel>,
+    /// 实体来源的放置（`prop_dynamic` 等）；装配点当前全部传空。
     pub entities: Vec<Entity>,
+    /// 静态道具放置表；与碰撞 / 三角导出共用（`apps/debug/crates/wasm/src/lib.rs` 的 `export_model_tri_colliders`）。
     pub static_props: Vec<StaticProp>,
+    /// `纹理名 → PNG 字节`。键要与 `vmdl::TextureInfo::name` 逐字符一致；
+    /// 查表先试原名、再试 `{名}.png`（见 `push_texture`）。
     pub textures: HashMap<String, Vec<u8>>,
+    /// light / light_spot / light_environment 实体的属性子集；仅 `include_lights` 为真时被读。
     pub light_entities: Vec<Entity>,
-    /// 材质名 → 透明度模式：0=不透明(默认)，1=半透明(Blend)，2=透明测试(Mask)。
-    /// 用于 GLB 导出的材质 `alphaMode`，以及碰撞体生成时判断"透明可穿过"。
+    /// 材质名 → 透明度档位：`1` ⇒ Blend（且双面），`2` ⇒ Mask（`alphaCutoff = 0.5`，单面），
+    /// 其余（含缺键）⇒ Opaque。取值由 `pakfile_models::parse_vmt` 的优先级给出：
+    /// `$translucent` 或 `$alpha < 0.999` ⇒ 1，否则 `$alphatest` ⇒ 2，否则 0。
+    /// 碰撞 / 三角导出用的是**另一次**同名解析（`apps/game/crates/wasm/src/lib.rs` 的
+    /// `export_model_tri_colliders`），不读本字段。
     pub material_alpha_mode: HashMap<String, u8>,
-    /// 自发光 / 无光照材质名集合：导出时写进 GLB material `extras.unlit = true`，
-    /// 渲染侧据此走**全亮**（不吃 lightmap / ambient cube），对齐 Source 的 UnlitGeneric 语义。
+    /// 自发光 / 无光照材质名集合。命中时 `push_material` 往 material `extras` 写 `unlit`，
+    /// 渲染侧读 `material.userData.unlit` 走**全亮**（不吃 lightmap / ambient cube）
+    /// （`apps/game/src/renderer/lightmap-shader.ts` 的 `routeFullbright`）。
+    /// 来源是 `pakfile_models::parse_vmt`：着色器名以 `unlit` 开头，或 `$selfillum` 取非 `0` 的非空值。
     pub material_unlit: std::collections::HashSet<String>,
 }
 
-/// 模型整合器
+/// 模型整合器：一次导出期间持有内存资源与两张去重缓存。
+///
+/// 对外只暴露 `&self` 方法，两张缓存因此用 `RefCell` 包着（导出期间单线程访问）。
+/// 本结构不拥有 GLB：`Root` 与 bin `Vec<u8>` 都由调用方按 `&mut` 传入。
 pub struct ModelIntegrator {
+    /// 只读资源集合，`from_in_memory` 之后不再变更。
     in_memory: InMemoryResources,
+    /// 导出开关，构造后不变。
     options: ExportOptions,
     /// 贴图去重：纹理名 → `gltf.textures` 索引。
-    /// 同一模型可能被推多次（逐实例 vhv 不同 ⇒ 逐组一个 mesh），不去重就会把贴图数据
-    /// 在 GLB 里重复 N 份（实测 surf_666 bin 140 MB → 494 MB）。
+    ///
+    /// 同一模型会被推**多次**（逐实例 vhv 不同 ⇒ 逐组一个 mesh，见
+    /// `group_placements_by_vertex_lighting`）；没有这层缓存时每个 mesh 都会把同一份 PNG
+    /// 再追加一遍 bin，并新建 image / texture。键是 `push_texture` 传入的纹理名，
+    /// 原名与 `{名}.png` 两条查表路径共用同一个键。
     texture_cache: std::cell::RefCell<HashMap<String, u32>>,
-    /// 材质去重：`材质名|alpha档|unlit` → `gltf.materials` 索引（理由同上）。
+    /// 材质去重：`材质名|alpha档|unlit` → `gltf.materials` 索引（重复推送的理由同上）。
+    /// 键覆盖全部会改变材质产物的输入，三者的取值都在 `push_material` 里参与构造。
     material_cache: std::cell::RefCell<HashMap<String, u32>>,
 }
 
 impl ModelIntegrator {
-    /// 使用内存资源创建整合器（WASM / 无文件系统环境）。
+    /// 用内存资源创建整合器（本 crate 唯一的构造路径）。
     ///
-    /// 模型/纹理字节由调用方提供；静态道具位置/朝向由调用方预先填入 `static_props`。
+    /// `resources` 整体移入且之后不再变更；两张去重缓存初始为空。
+    /// 调用方须在调用前备齐模型三件套、贴图 PNG、静态道具放置表 —— 本模块不读文件系统，
+    /// 也不加工 `static_props`（位置 / 朝向 / 逐顶点光照全部取自该表）。
     pub fn from_in_memory(resources: InMemoryResources, options: ExportOptions) -> Self {
         Self {
             in_memory: resources,
@@ -482,7 +570,7 @@ impl ModelIntegrator {
             let material_name = texture_info.name.to_string();
 
             // ── 材质去重 ──────────────────────────────────────────────────────
-            // 为什么会重复：同一模型可能被推**多次**（逐实例 vhv 不同 ⇒ 逐组一个 mesh，
+            // 为什么会重复：同一模型会被推**多次**（逐实例 vhv 不同 ⇒ 逐组一个 mesh，
             // 见 `group_placements_by_vertex_lighting`）。没有这层缓存时，材质/贴图会被
             // 逐次重推 —— 实测 surf_666：materials 319→1112、images 200→738、bin 140→494 MB。
             // 键覆盖一切会改变材质产物的输入：材质名 + alpha 模式 + unlit 标注。
@@ -612,7 +700,7 @@ impl ModelIntegrator {
 
     /// 将已获取的纹理字节推入 GLTF缓冲区
     fn push_texture_data(&self, buffer: &mut Vec<u8>, gltf: &mut Root, texture_name: &str, texture_data: &[u8]) -> Option<u32> {
-        // 贴图去重（同 `push_material` 的理由：同一模型可能被推多次）
+        // 贴图去重（同 `push_material` 的理由：同一模型会被推多次）
         if let Some(&idx) = self.texture_cache.borrow().get(texture_name) {
             return Some(idx);
         }

@@ -1,13 +1,33 @@
 /**
- * 主线程渲染器（最小化版）— 客户端预测渲染。
+ * `apps/game` 主线程渲染器：物理、相机、场景与光照都在本线程，Worker 只跑权威物理。
  *
- * 架构（2026-08-07 v4.1）：
- * - 主线程持 wasm `PhysWorld` 预测实例：每 rAF 调 `tick(dt, keys, dx, dy)`
- *   做**真实物理模拟**（移动语义 + 碰撞），渲染预测结果（输入零延迟）
- * - Worker-A 权威物理每帧写全状态到 SAB → 主线程 `set_state` 修正预测基线
- *   （标准客户端预测：本地模拟即时响应，权威定期纠偏）
- * - respawn/teleport 位置突变：player-respawn 事件 → set_state 归零
- * - 无 lightmap/雾/碰撞可视化/准星射线。
+ * 职责（按调用顺序）：
+ * - `init`：建 `THREE.WebGLRenderer` / `THREE.Scene` / `THREE.PerspectiveCamera`，并把光照参数
+ *   初值写进 `apps/game/src/renderer/lightmap-shader.ts` 的共享 uniform；
+ * - `loadScene`：GLB → 场景（摘除 punctual 光源 → 施加 lightmap atlas → 空间分块合并 →
+ *   受光材质终扫 → 预编译 program）→ 相机 near/far → PVS/LOD 注册 → 画质 manifest；
+ * - `buildPredictionWorld`：用 `apps/game/pkg/websurf_wasm.js` 的 `PhysWorld` 建主线程物理世界；
+ * - `tick`：每 rAF 一次 —— 输入写共享槽 → 消费权威帧 → 推进主线程物理 → 写渲染采样 →
+ *   相机取物理状态 → LOD/PVS 剔除 → `renderer.render()`。
+ *
+ * 关键不变量：
+ * - 场景根（`userData.isBspModel`）由 `loadScene` 挂载、`disposeScene` 摘除；相机位姿只由 `tick`
+ *   从 `PhysWorld.state()` 写入（y = `posY + eyeHeight`）；
+ * - punctual 光源必须在挂进 `this.scene` **之前**摘除；施加 lightmap 必须早于空间分块合并
+ *   （lightmap 按原 mesh 的材质与 UV 通道施加，合并会重建几何与材质数组）；
+ * - 渲染采样与渲染状态读取同拍同源；采样流的失效世代由
+ *   `src/ts-shared/auth/shared-state.ts` 的 `resetRenderSample` 独占维护，调用方不传世代。
+ *
+ * 消息与数据流：
+ * - 上游：`apps/game/src/app.ts` 调 `init` / `loadScene` / `buildPredictionWorld` / `feedInput` /
+ *   `start` 等，并注册 `onSceneLoaded` 与 `onSyncRenderState` 两个回调；
+ * - 下行：`tick` 经 `shared.addInput` 把输入交给 Worker 权威帧；`onSyncRenderState` 由
+ *   `apps/game/src/app.ts` 转成 `sync-render-state` 消息；权威碰撞事件 `phys-event` 由该文件转成
+ *   `applyCollisionCorrection`；
+ * - 与共享层的边界：本文件只按同签名调用 `ShmState` / `MsgState` 的 `addInput` /
+ *   `readAuthoritative` / `writeRenderSample` / `resetRenderSample`（两者由
+ *   `src/ts-shared/auth/shared-state.ts` 的 `createMainSharedState` 选择）；写出的渲染采样又被
+ *   `apps/game/src/worker/main.ts` 读走，用于在渲染时钟上取点后发布权威位置。
  */
 
 import * as THREE from 'three';
@@ -24,46 +44,43 @@ import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
 import { loadLightmapAtlas, applyLightmapToMeshes, fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, getVertexLightingRelaxStats, getPropVertexRelax, setPropVertexFlatten, getPropVertexFlatten, VERTEX_LIGHTING_ATTR, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from './lightmap-shader.js';
 
-/** FOV 默认值（73.6；面板 hud.fov 可调，60-110）。 */
+/** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
 const DEG2RAD = Math.PI / 180;
 
 /**
- * 渲染采样传输契约（实现 = `src/ts-shared/auth/shared-state.ts` 的 ShmState/MsgState，
- * 两者同签名；本文件直接调 `this.shared.*`，由 typecheck 保证契约一致）：
+ * 渲染采样传输契约（两个实现见 `src/ts-shared/auth/shared-state.ts` 的 `ShmState` 与 `MsgState`，
+ * 签名一致；本文件只按契约调用，由 typecheck 保证）：
  * ```ts
- * writeRenderSample(tMs, x, y, z, i0, epoch): void; // 与渲染帧同拍同源
- * resetRenderSample(): void;                         // 失效世代 +1（Worker 丢弃缓存）
- * readPublishedTau(): number;                        // 最近一次权威发布所用的渲染时钟 τ（ms；0=未发布）
+ * writeRenderSample(tMs, x, y, z, i0): void; // 本帧渲染时刻 + 渲染位置 + 采样序号
+ * resetRenderSample(): void;                 // 失效世代 +1 并清样本槽（Worker 丢弃缓存）
  * ```
- * R1：写侧只有 5 个 f64 载荷 store + 一对 seqlock 原子戳（既有 i64 槽），
- * **无分配对象、无同步等待**（不阻塞渲染帧）。
+ * 载荷 = 4 个 f64（`tMs` / x / y / z）+ 采样序号与失效世代两个 i64 槽；写侧不加锁、不等对端，
+ * 用 seqlock 序号把一个写入周期包成「偶数 → 奇数 → 偶数」。
+ * 世代槽**不由本文件传入**：`resetRenderSample` 自增它、`writeRenderSample` 就地读它。
  */
 
-// ── 空间分块合并参数（optimizeScene：GLB 挂载后渲染减负）──────────
-// surf_666 GLB：117 meshes / 34409 primitives / 377385 顶点——GLTFLoader 每个 primitive
-// 生成一个 THREE.Mesh → 场景 ~3.4 万 Mesh 对象：每帧 three.js 遍历 3.4 万对象做剔除 +
-// 可见 mesh 逐个 draw call → 渲染耗时接近 vsync 帧间隔（120Hz=8.3ms）→ 合成器错过取帧 →
-// 视觉帧率减半。分块合并把 3.4 万对象 → ~300~800 空间块（块内按材质子合并，draw call =
-// 材质数而非 mesh 数）→ 渲染耗时 < 5ms。逻辑移植自 test/dual-mode-harness/src/worker-b.ts optimizeScene
-// （已验证 34409 mesh → 300~800 块），主线程差异见方法注释。
-/** 目标 cell 数（cell 大小 = 世界包围盒对角线 / cbrt(目标块数)，自适应微调区间 [300,800]）。 */
+// ── 空间分块合并参数（GLB 挂载后一次性执行；见 optimizeScene）──────────
+// GLTFLoader 按 GLB 的 primitive 逐个建 THREE.Mesh，图元多的地图因此会产生数万个 Mesh 对象：
+// 每帧都要遍历它们做剔除，可见的还要逐个 draw call。分块合并把这批 Mesh 收敛成数百个空间块
+// （块内先按材质实例分组，再合并成「每块一个 Mesh + 一份材质数组」），几何与材质实例不变；
+// 合并失败的分支逐块回退为保留独立几何。
+/** cell 大小自适应的目标块数：初值 = 世界包围盒对角线 / cbrt(本值)，随后按非空 cell 数微调。 */
 const OPT_TARGET_CELLS = 512;
-/** 非空 cell 数目标下限/上限（自适应微调）。 */
+/** 自适应接受的「非空 cell 数」区间；落进区间即停止调整（最多 6 轮）。 */
 const OPT_MIN_CELLS = 300;
 const OPT_MAX_CELLS = 800;
-/** cell 大小钳制（world units；surf_666 世界 ~16320 → cell ≈ 512~1024 数量级）。 */
+/** cell 边长钳制区间（世界单位）：初值与每轮微调都被夹在区间内。 */
 const OPT_CELL_MIN = 128;
 const OPT_CELL_MAX = 4096;
 /**
- * 视锥外保留圈（frustum culling 包围球膨胀系数）：three.js 每帧按 geometry.boundingSphere
- * 判定剔除——半径 ×FRUSTUM_PAD 后，视锥外约 (FRUSTUM_PAD-1)×半径 的块仍渲染（疯狂晃动/快速
- * 转动时，新进入视锥的几何上一帧已预渲染 → 边缘不空白；块包围球大者膨胀量自然大，覆盖一帧
- * 相机移动量）。同 test worker-b FRUSTUM_PAD。
+ * 视锥外保留圈的半径膨胀系数（分块结束时乘到每块的包围球半径上）。
+ * three 的视锥剔除按 geometry.boundingSphere 判定，膨胀后视锥外一圈的块仍参与渲染 ⇒
+ * 快速转动时新进入视野的块上一帧已在画，边缘不闪空。只影响剔除判定，不改几何与材质。
  */
 const FRUSTUM_PAD = 1.6;
 
-/** 分块收集的 mesh + 世界包围盒中心（分块键用；同 worker-b OptMeshInfo）。 */
+/** 分块收集项：mesh + 它的世界包围盒中心（分桶键用）。 */
 interface OptMeshInfo {
   mesh: THREE.Mesh;
   cx: number;
@@ -71,121 +88,124 @@ interface OptMeshInfo {
   cz: number;
 }
 
-/** cell 键：世界坐标 / cellSize 取整（字符串键；一次性分桶，无性能要求）。 */
+/** cell 键：世界坐标三分量各除以 cellSize 后向下取整，拼成字符串（一次性分桶）。 */
 function optCellKey(x: number, y: number, z: number, cellSize: number): string {
   return Math.floor(x / cellSize) + '|' + Math.floor(y / cellSize) + '|' + Math.floor(z / cellSize);
 }
 
-/** 非空 cell 计数（cell 大小自适应循环用）。 */
+/** 统计给定 cellSize 下的非空 cell 数（cell 大小自适应循环用）。 */
 function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
   const keys = new Set<string>();
   for (const it of infos) keys.add(optCellKey(it.cx, it.cy, it.cz, cellSize));
   return keys.size;
 }
 
-/** LOD 级别。 */
+/** LOD 档位（写进 mesh.userData.lodLevel）：近距可见 / 超出剔除距离 / PVS 判定不可见。 */
 const LOD_NEAR = 0;
 const LOD_FAR = 2;
 const LOD_PVS_HIDDEN = -1;
 /**
- * PVS 剔除开关：**当前禁用**（实证 surf_666 PVS 数据不可用：8269 cluster 平均可见率
- * 仅 1.6%（中位 1.3%、最大 5.1%）、spawn 点 cluster=-1——开放 surf 图 BSP leaf/PVS
- * 划分失效，可见集几乎为空 → 相邻区域被错误全剔（"必须穿过连接处才能看到"）+ 晃动
- * 穿越 cluster 边界时边缘消失）。分块合并后渲染量已由视锥剔除（FRUSTUM_PAD 膨胀）+ 
- * 距离 LOD（cullDistance）控制，PVS 为负收益。PVS 数据修复后可置 true 恢复。
+ * PVS 剔除总开关：false 时 `tick` 既不调 `PvsManager.update`，也不按 cluster 隐藏块，块可见性
+ * 只由距离档（`cullDistance`）决定；`loadScene` 仍会建 `pvsManager` 并给每块分配 `clusterIds`。
+ * 置 true 后启用：`update` 每帧刷新当前 cluster，`isVisible` 判定块的 cluster 是否可见；相机不在
+ * 任何 cluster（`currentClusterId < 0`）时 `tick` 跳过 PVS 只按距离判定，防可见集为空导致误剔。
  */
 const ENABLE_PVS = false;
 
+/** 主线程渲染器（职责与数据流见文件头）；实例由 `apps/game/src/app.ts` 创建并驱动。 */
 export class RendererMain {
+  /** three 渲染器（`init` 建）：`resize` 与每帧绘制用它。 */
   private renderer: THREE.WebGLRenderer | null = null;
+  /** 场景（`init` 建）：BSP 根由 `loadScene` 挂上、`disposeScene` 摘掉。 */
   private scene: THREE.Scene | null = null;
+  /** 透视相机（`init` 建）：位姿由 `tick` 写、FOV 由 `setFov` 写。 */
   private camera: THREE.PerspectiveCamera | null = null;
+  /** PVS 查询器（`loadScene` 用 `data.pvsJson` 建；`ENABLE_PVS` 为真时 `tick` 用它剔除）。 */
   private pvsManager: PvsManager | null = null;
-  /** 运行时配置（init 时注入；纹理画质等渲染侧配置读取）。 */
+  /** 运行时配置（`init` 注入）：光照初值、纹理画质、FOV、剔除距离都从它取。 */
   private config!: RuntimeConfig;
 
+  /** rAF 句柄（`start` 写入、`stop` 取消）；0 = 当前没有在途回调。 */
   private rafId = 0;
+  /** rAF 循环开关（`tick` 用它判断是否续帧）。 */
   private running = false;
 
   // ── 主线程唯一物理线 ───────────────────────────────────────
-  /** 主线程 PhysWorld 实例（唯一物理：完整世界+碰撞+输入；每帧 tick 推进并渲染）。 */
+  /** 主线程物理实例（`buildPredictionWorld` 建、`disposeScene` 置空）：世界、碰撞、传送、
+   *  死亡判定都在它内部，`tick` 每帧推进一次。 */
   private predPhys: PhysWorld | null = null;
-  /** 主线程物理就绪（world-json 构建完成）。 */
+  /** 主线程物理是否就绪（`tick` 的物理分支由它把关）。 */
   private predReady = false;
-  /** 按住 C 读点冻结目标（非空 = 冻结中：每帧强制 set_state 位置/朝向、速度 0）。 */
+  /** 按住 C 读点时的冻结目标（非空即冻结中：`tick` 每帧把物理写回该位姿并把速度清零）。 */
   private holdPoint: {
     x: number; y: number; z: number;
     yaw: number; pitch: number;
     onGround: boolean;
   } | null = null;
-  /** 待喂给物理实例的输入（app 事件回调累积）。 */
+  /** 待喂输入（`feedInput` 累加、`tick` 消费后把 dx/dy 清零）：dx/dy 为鼠标等效角度增量。 */
   private pendingDx = 0;
   private pendingDy = 0;
+  /** 键位掩码（覆盖写：每次 `feedInput` 都替换，`tick` 消费后**不清**——按住状态要延续）。 */
   private pendingKeys = 0;
-  /** 权威校准（公共化：correctFromAuthority 三条件 OR + 250ms 冷却 + syncInFlight
-   * 回滚、calibrateVelocity 外推、applyCollisionCorrection、resetTo 收敛到
-   * ts-shared AuthorityCalibrator）。 */
+  /** 权威帧校准器（`src/ts-shared/phys/authority-calibrator.ts` 的 `AuthorityCalibrator`）：
+   *  本类只做转发，并把读权威帧、取/写主线程物理、清待喂输入、`onSyncRenderState` 注入给它。 */
   private readonly calibrator: AuthorityCalibrator;
-  /** 渲染帧推进（dt 上限防异常）。 */
+  /** 上一物理帧的 rAF 时间戳（ms）；0 = 本帧是首个物理帧（dt 取 1/64）。 */
   private lastTickMs = 0;
 
-  // ── 渲染采样传输（Worker 权威发布位置 = 渲染轨迹上的一个采样点）──────
-  // 契约见文件头（writeRenderSample / resetRenderSample / readPublishedTau）。
-  /** 渲染采样序号（单调递增；与渲染帧同拍同源，供 Worker 标注"第几个采样点"）。
+  // ── 渲染采样传输（Worker 按渲染时钟 τ 在本折线上取点后发布权威位置）──────
+  // 契约见文件头（writeRenderSample / resetRenderSample）。
+  /** 渲染采样序号（每写一次 +1；Worker 用它标注样本身份）。
    *  仅在 resetSampleStream()（失效世代 +1，索引空间重启）时归零。 */
   private renderSampleIndex = 0;
   /**
-   * 采样流**失效世代**（渲染器侧本地计数器）：resetTo（respawn/传送/检查点回退）/
-   * loadSavepoint / 换图（buildPredictionWorld、disposeScene）/ noclip 切换时 +1，
-   * 并同时调用 `shared.resetRenderSample()` 让 Worker 丢弃旧代缓存（缓存里的渲染采样
-   * 对新位置毫无意义，继续投影会把权威位置钉在旧轨迹上）。
-   *
-   * ⚠️ **不再随 `writeRenderSample` 过线**（缺陷修复 · epoch 竞态）：权威世代槽由
-   * `shared-state.ts` 独占并自持，写入时就地读槽内值。此前渲染器把这份缓存当参数传
-   * 过去，任何在途/延迟的写入都会把 `resetRenderSample()` 刚自增的世代**写回旧值**，
-   * Worker 便继续在旧世界样本对上插值（详见 shared-state.ts 同名方法注释）。
+   * 渲染器侧的失效世代计数器：只在 `bumpSampleEpoch` 内自增，**本文件没有其它读取点**
+   * （真正生效的是 `src/ts-shared/auth/shared-state.ts` 的 `resetRenderSample`，它自增共享槽
+   * 里的世代，`writeRenderSample` 也不接收世代参数）。
    */
   private sampleEpoch = 0;
-  /** mesh → { center, radius, clusterIds }（LOD/PVS 用；clusterIds 空间采样分配）。 */
+  /** mesh → { 世界包围盒中心, 半径, clusterIds }（距离剔除与 PVS 判定用）。 */
   private lodItems: Array<{ mesh: THREE.Mesh; center: THREE.Vector3; radius: number; clusterIds: number[] }> = [];
-  /** 剔除距离（场景加载后校准；0 配置 = 用 autoCullDistance）。 */
+  /** 当前剔除距离（世界单位）：`loadScene` 按 `config.hud.renderDistance` 或自动值设定，
+   *  `setRenderDistance` 可实时改；`tick` 用它把更远的块置 `visible = false`。 */
   private cullDistance = 12800;
-  /** 自动剔除距离 = 地图包围盒对角线 × 0.5（`renderDistance: 0` 时生效）。 */
+  /** 自动剔除距离 = 场景包围盒对角线 × 0.5（下限 1000）；`renderDistance <= 0` 时用它。 */
   private autoCullDistance = 12800;
 
   /**
-   * 待执行的注入生效性统计（首帧渲染后跑一次）。
+   * 待跑一次的注入生效性统计（`applyLightmap` 施加成功时置位、`tick` 在首帧
+   * `renderer.render()` 之后消费一次）。
    *
-   * 为什么延后：`applyLightmap` 在建场景时调用，此时 three **尚未编译材质** ⇒
-   * `onBeforeCompile` 未触发 ⇒ 统计必然得 0 ⇒ 误报"没有任何一个注入生效"。
-   * 必须在第一帧 `renderer.render()` 之后统计（材质已编译、记录已回填）。
+   * 延后的原因：材质上的注入标记由 `apps/game/src/renderer/lightmap-shader.ts` 的
+   * `injectLightmapShader` 在 `onBeforeCompile` 里回填，而 `loadScene` 期间 three 还没编译材质，
+   * 那时统计只会得到全 0。
    */
   private pendingInjectReport = false;
-  /** 注入生效性统计是否已跑（幂等保护）。 */
+  /** 注入生效性统计是否已跑（幂等保护，跨地图由 `disposeScene` 复位）。 */
   private injectReported = false;
 
   // ── 纹理画质切换（mosaic）──────────────────────────────────
-  /** 画质 manifest：{ 纹理名(小写 basetexture): mosaic 字节码 }。 */
+  /** 画质 manifest（纹理名小写 → mosaic 字节码）；为空时整条画质切换链路短路。 */
   private mosaicManifest: Record<string, string> | null = null;
-  /** 原始贴图图像缓存（切换回 original 时恢复）。 */
+  /** 换成 mosaic 之前的原始贴图图像（键 = 纹理对象）；切回 `original` 时用它还原。 */
   private readonly origTextureImages = new Map<THREE.Texture, unknown>();
 
-  // ── 近平面贴墙自适应（防贴墙透视；同步自主项目 renderer-main）─────────
-  /** 近平面收缩探测距离默认（HU）：相机距墙最小距离 = 碰撞箱半宽 16，射线必须
-   * 能覆盖该距离才能探测到面前的墙——原固定 near=maxDim/1000（大地图 50+）
-   * 贴墙时墙被近平面裁剪 → 透视看到地图外面。
-   * 48 = 3×最小贴墙距离：配合 4 个水平探测方向（前/后/左/右），贴墙角度下
-   * 最近方向与墙面夹角足够小时斜距 ≤ 16/sinθ，垂直墙主要角度可探测。 */
+  // ── 近平面贴墙自适应（防贴墙时 near 裁掉墙面、透视看到地图外）─────────
+  /** 探测距离默认值（HU）：`updateNearPlane` 的射线长度上限与包围球粗筛半径都由它推出。 */
   private static readonly NEAR_PROBE_DIST_DEFAULT = 100;
+  /** near 允许的最小值（收缩与默认值都不得低于它）。 */
   private static readonly CAMERA_NEAR_MIN = 0.05;
-  /** near 收缩系数默认：near = 最近几何距离 × 此值。 */
+  /** near 收缩系数默认值：命中几何时 near = 命中距离 × 本值。 */
   private static readonly NEAR_RATIO_DEFAULT = 0.3;
-  /** 探测距离（HU）；↑ 更斜掠射也能命中，粗筛候选略增。面板可实时调。 */
+  /** 探测距离（HU，`setNearParams` 可改；面板「近平面探测距离」量程 16..128）。 */
   private nearProbeDist = RendererMain.NEAR_PROBE_DIST_DEFAULT;
-  /** near 收缩系数；↓ 更保守更不易裁墙。面板可实时调。 */
+  /** near 收缩系数（`setNearParams` 可改，只接受 (0, 1]；面板量程 0.1..1）。 */
   private nearRatio = RendererMain.NEAR_RATIO_DEFAULT;
+  /** 场景默认 near（`loadScene` 取 maxDim/1000，下限 CAMERA_NEAR_MIN）；探测无命中时恢复它。 */
   private defaultNear = 0.1;
+  /** 每 2 帧探测一次的开关（`tick` 里翻转）。 */
   private nearCheckToggle = false;
+  /** 复用的探测对象（避免每帧分配）：射线起点、粗筛用包围球、相机前/右方向、raycaster。 */
   private readonly _nearOrigin = new THREE.Vector3();
   private readonly _nearSphere = new THREE.Sphere();
   private readonly _nearDirF = new THREE.Vector3();
@@ -193,6 +213,7 @@ export class RendererMain {
   private readonly _nearRaycaster = new THREE.Raycaster();
 
 
+  /** 共享状态通道（SAB 实现或消息回退实现）；校准器从它读权威帧，`tick` 向它写输入与渲染采样。 */
   constructor(private readonly shared: ShmState | MsgState) {
     this.calibrator = new AuthorityCalibrator({
       readAuth: () => this.shared.readAuthoritative(),
@@ -206,26 +227,28 @@ export class RendererMain {
     });
   }
 
+  /** 场景装载完成回调（`loadScene` 用场景包围盒最小 Y 调用一次）；`apps/game/src/app.ts` 注册它
+   *  并转成 `setDeathY`。 */
   onSceneLoaded: ((deathThresholdY: number) => void) | null = null;
 
-  /** 失效世代 +1 + 通知 Worker 丢弃缓存（两者必须成对，见 sampleEpoch 注释）。 */
+  /** 失效世代 +1（本地计数器）并调 `shared.resetRenderSample()` 让 Worker 丢弃既有采样配对。 */
   private bumpSampleEpoch(): void {
     this.sampleEpoch++;
     this.shared.resetRenderSample();
   }
 
-  /** 采样索引空间重启（序号归零**必须**配失效世代 +1，否则新 i0 会与旧代同号项混淆）。 */
+  /** 采样索引空间重启：序号归零 + 失效世代 +1（两者必须同时做，否则新序号会与旧代同号项混淆）。 */
   private resetSampleStream(): void {
     this.renderSampleIndex = 0;
     this.bumpSampleEpoch();
   }
 
   /**
-   * 渲染主线 → 权威同步回调（兜底/常规重锚触发时携带渲染主线帧完整状态；app.ts
-   * 注册后发 `sync-render-state` 消息给 Worker 权威物理）。
+   * 渲染主线 → 权威同步回调（校准器在传送豁免期、常规反向重锚、yaw 分叉兜底三条路径上携带
+   * 渲染帧完整状态调用它）。`apps/game/src/app.ts` 注册后据此给 Worker 发 `sync-render-state`。
    *
-   * @param teleport true = 真位置突变（Worker 清未消费输入增量）；
-   *   false = 常规反向重锚（缺陷修复 A，Worker **保留**输入增量）。
+   * @param teleport true = 真位置突变（Worker 允许丢弃未消费输入增量）；
+   *   false = 常规反向重锚（Worker 保留输入增量）。
    */
   onSyncRenderState: ((s: {
     posX: number; posY: number; posZ: number;
@@ -235,18 +258,19 @@ export class RendererMain {
     eyeHeight: number;
   }, teleport: boolean) => void) | null = null;
 
+  /** 建 renderer/scene/camera 并把光照参数初值写进共享 uniform；必须在 `loadScene` 之前调用。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
-    // 光照模式（面板「预烘焙 / 纯纹理」）：**运行期性能旋钮**，只是共享 uniform 的初值。
-    // 两种模式加载路径完全一致（同一批注入材质 + 同一张 atlas）⇒ 这里早设只是让首帧就是所选模式。
+    // 光照模式（面板「预烘焙 / 纯纹理」）：只是共享 uniform 的初值——两种模式都加载同一批注入
+    // 材质与同一张 atlas，这里写初值只是让首帧就是所选模式（运行期切换见 setLightingMode）。
     setLightingModeInShader(config.lighting?.mode ?? 'baked');
-    // 曝光（显示侧亮度）：默认 1.0 = 忠于 BSP 烘焙数据；config 值来自面板持久化。
+    // 显示侧亮度倍率（接受窗口见本文的 setExposure 包装器）
     setExposure(config.lighting?.exposure ?? 1);
-    // 光照项 gamma（shadow-lift）：0.85 = 对齐外部参照实现的 γ2.2 域乘算口径。
+    // 光照项 gamma（shadow-lift）：缺省 0.5；接受窗口是 (0, 1]
     setLightGamma(config.lighting?.lightGamma ?? 0.5);
-    // 模型（prop）烘焙光照亮度：ambient cube 路径的独立档位（不动 world lightmap）
+    // prop（模型）烘焙光照亮度：ambient cube 路径的独立档位，不动 world lightmap
     setAmbientScale(config.lighting?.ambientScale ?? 1.5);
-    // 第 1 级逐顶点光照的**重建平滑**次数（0 = 原样烘焙值；见 config 里的推导与实测）
+    // 第 1 级逐顶点光照的几何重建档位：平滑遍数（0 = 原样使用烘焙值）与方差压缩上限
     setPropVertexRelax(config.lighting?.propVertexRelax ?? 1);
     setPropVertexFlatten(config.lighting?.propVertexFlatten ?? 0.85);
     this.renderer = new THREE.WebGLRenderer({
@@ -254,7 +278,7 @@ export class RendererMain {
       antialias: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(dpr, 2));
+    this.renderer.setPixelRatio(Math.min(dpr, 2)); // dpr 上限 2：高 DPI 下不再翻倍像素量
     this.renderer.setSize(width, height, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -262,18 +286,13 @@ export class RendererMain {
     this.camera = new THREE.PerspectiveCamera(
       this.config?.hud?.fov ?? FOV_DEFAULT,
       width / Math.max(height, 1),
-      0.1,
-      100000,
+      0.1, // 初始 near：loadScene 会按场景尺寸改写
+      100000, // 初始 far：loadScene 会改成 maxDim × 100
     );
-    this.camera.position.set(0, 100, 0);
+    this.camera.position.set(0, 100, 0); // 初始位姿；之后每帧由 tick 从物理状态覆盖
 
-    // 前烘焙时代的固定三点光（替代原 LightManager 的遗产）已按外部参照实现口径**停用**
-    // （gamma-parity 计划 §3.1b）：它们只影响无 lightmap 的 Standard 图元（平涂提亮，
-    // 亮度语义错误）；无 lightmap 面的外部参照实现口径是 fullbright 贴图原色
-    // （white texture 兜底），由 applyLightmapToMeshes 的 fullbright 统一路径承担。
-    // 需要临时恢复对比时置 true（勿以开启态入库）。
-    // 实验记录（2026-09-19）：临时置 true 出帧对比——surf_666 spawn 均值 19.425 vs
-    // 关闭态 19.424（直方图逐桶一致）⇒ **加灯零效果**已实测证实（材质全为 MeshBasic）。
+    // 三点光停用（常量恒 false，scene.add 分支不执行）：本工程不加任何灯，无 lightmap 的图元由
+    // applyLightmapToMeshes 的 fullbright 路径兜底。需要临时对照时把常量置 true。
     const LEGACY_THREE_POINT_LIGHTS = false;
     if (LEGACY_THREE_POINT_LIGHTS) {
       this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -287,7 +306,12 @@ export class RendererMain {
     this.scene.background = new THREE.Color(0x222222);
   }
 
-  /** 加载 Worker 传来的场景（GLB + spawn + pvs）。 */
+  /**
+   * 装载一张地图到渲染场景：GLB → 场景（摘灯 → lightmap → 分块合并 → 受光材质终扫 → 预编译）
+   * → 相机 near/far → PVS/LOD 注册 → 剔除距离 → `onSceneLoaded` → 画质 manifest 与当前档位。
+   * 入口先 `disposeScene`（换图释放上一张图）。`data` 由 `apps/game/src/app.ts` 用
+   * `buildWorldBundle` 的产物装配，本工程内没有其它发送方。
+   */
   async loadScene(data: SceneDataMessage): Promise<void> {
     if (!this.scene || !this.camera) return;
     this.disposeScene();
@@ -304,19 +328,15 @@ export class RendererMain {
     const maxDim = Math.max(size.x, size.y, size.z);
 
     // 1.1 中和 GLTFLoader 解析出的 KHR_lights_punctual 光源（**必须在挂进 this.scene 之前**）。
-    //     数据面：GLB 携带全部 light/light_spot/light_environment（surf_666=2118 盏、
-    //     surf_null=3067 盏）。渲染面：**不施加**（§3.3 唯一取舍）——烘焙 lightmap 已含这些
-    //     实体的贡献（VRAD），运行时再打就是重复计光；外部参照实现参照口径也是纯烘焙乘算。
+    //     渲染面不施加这些灯：烘焙 lightmap 已含这些实体的贡献，运行时再打就是重复计光。
     //
-    //     ⚠️ 两处都必须对，缺一个就是**整批几何不渲染**（2026-09-20 真实出帧铁证）：
-    //       (1) **位置**：必须在 `this.scene.add(scene)` **之前**做完。rAF 渲染循环此刻已在跑，
-    //           若先挂进场景再中和，中间那一帧就会带着 2000+ 盏灯去编译材质 ⇒ 控制台刷屏
-    //           `FRAGMENT shader uniforms count exceeds MAX_FRAGMENT_UNIFORM_VECTORS(1024)`
-    //           + 数百条 `drawArrays: no valid shader program in use`（实测 +149.29s 一波）。
-    //       (2) **手段**：`removeFromParent()` 真正摘掉。只置 `visible = false` 虽也能让 three
-    //           跳过灯光收集（`three.module.js:29584`：`if ( object.visible === false ) return;`），
-    //           但 2000+ 个节点仍留在场景树里被反复 traverse，且任何一处未来把它置回 true
-    //           就会立刻炸掉全部受光材质的 program。摘掉才把这个不变量变成**结构性**的。
+    //     两处都必须对，缺一个就是整批几何不渲染：
+    //       (1) 位置：必须在 `this.scene.add(scene)` 之前做完。rAF 渲染循环此刻已在跑，若先挂进
+    //           场景再中和，中间那一帧就会带着这批灯去编译材质，超出片元 uniform 上限后该批 mesh
+    //           一个像素都不画（本方法内的 console.info 文案记录了该后果）。
+    //       (2) 手段：用 `removeFromParent()` 真正摘掉，而不是只置 `visible = false`——后者仍留在
+    //           场景树里被反复 traverse（本方法后面的 `traverse` 与 `optimizeScene` 都会遍历到），
+    //           且任何一处把 visible 置回 true 就会让受光材质的程序失效。
     const lightsToRemove: THREE.Object3D[] = [];
     scene.traverse((obj) => {
       if ((obj as THREE.Light).isLight) lightsToRemove.push(obj);
@@ -330,26 +350,25 @@ export class RendererMain {
       );
     }
 
-    this.scene.add(scene);
+    this.scene.add(scene); // 挂进主场景：此时 punctual 光源已摘除
 
-    // 1.2 离线烘焙静态光照（lightmap atlas，阶段 3）：**必须**在 optimizeScene 之前施加。
-    //     理由与 apps/debug/src/renderer/renderer-main.ts:514-515 一致：lightmap 按原 mesh 的
-    //     材质/UV 施加，分块合并时材质实例被去重保留、映射关系不丢；放到合并之后就丢了。
+    // 1.2 离线烘焙静态光照（lightmap atlas）：**必须**在 optimizeScene 之前施加。
+    //     理由：lightmap 按原 mesh 的材质与 UV 通道施加并改写材质，而分块合并会重建几何与材质
+    //     数组；放到合并之后施加就找不到原来的材质映射。
     await this.applyLightmap(scene, gltf);
 
-    // 1.3 （原「中和 punctual 光源」块已上移为 §1.1 —— 必须在挂进 this.scene **之前**做完，
-    //      否则 rAF 会带着 2000+ 盏灯编译一帧材质，program 超限后该批 mesh 不再渲染。）
+    // 1.3 装配顺序的其余约束：摘灯 → 施加 lightmap → 分块合并 → 受光材质终扫（合并会重建材质
+    //     数组，所以终扫必须晚于合并、早于首次编译）。
 
-    // 1.5 空间分块合并（GLB 挂载后、PVS/LOD 注册前）：3.4 万 mesh → ~300~800 空间块。
-    //    必须在下方 traverse（lodItems 收集 + clusterIds 分配 = lodManager.setup/
-    //    assignClusterIds 的主线程等价物）之前执行——setup 收集分块后的块 mesh。
+    // 1.5 空间分块合并（GLB 挂载后、PVS/LOD 注册前）：数万 mesh → 数百空间块。
+    //     必须在下方 traverse（lodItems 收集 + clusterIds 分配）之前执行——那次 traverse 收集的是
+    //     合并之后的块 mesh。
     this.optimizeScene(scene, gltf.scene);
 
-    // 1.55 装配后终扫：把仍带**受光材质**的 mesh（GLTFLoader 给 prop/派生网格的
-    //      `MeshStandardMaterial`）收敛到 fullbright。本工程刻意不加任何灯（§3.3 唯一取舍）
-    //      ⇒ 受光材质只剩 emissive=[0,0,0]，恒渲染纯黑（实测 surf_666 有 122 个图元：
-    //      47 个 `extras.unlit=true` 的自发光霓虹 prop + 75 个水系/线框/派生网格）。
-    //      必须在 optimizeScene 之后（合并会重建 mesh/材质数组），compile 之前（避免白编译受光程序）。
+    // 1.55 装配后终扫：把仍带受光材质的 mesh（GLTFLoader 给 prop/派生网格的
+    //      `MeshStandardMaterial`）收敛到 fullbright。本工程不加任何灯 ⇒ 受光材质只剩
+    //      emissive=[0,0,0]，恒渲染纯黑。必须在 optimizeScene 之后（合并会重建 mesh/材质数组）、
+    //      首次编译之前。
     const converged = fullbrightUnlitLitMaterials(this.scene);
     if (converged > 0) {
       console.info(
@@ -359,9 +378,8 @@ export class RendererMain {
     }
 
     // 1.6 预编译着色器程序：把「首次可见才编译」的卡顿挪到加载期。
-    //     背景：主线程 tick 的 dt 被 clamp 到 0.1s（`tick()` :832）⇒ 任何 >100ms 的
-    //     主线程卡顿都会让主线程预测物理表现为「慢动作」（传送点首次进入新区域最明显）。
-    //     失败不致命（three 仍会按需编译），故 try/catch + 计时日志。
+    //     背景：`tick` 把主线程物理的 dt 夹在 0.1s 以内（上限见该方法的 dt 计算）⇒ 超过 100ms 的
+    //     主线程卡顿会让物理表现为慢动作。失败不致命（three 仍按需编译），故只告警。
     try {
       const renderer = this.renderer;
       if (renderer) {
@@ -389,8 +407,9 @@ export class RendererMain {
       if (!geom.boundingSphere) geom.computeBoundingSphere();
       const bs = geom.boundingSphere!;
       mesh.userData.lodLevel = LOD_NEAR;
-      // clusterIds：空间采样分配（与主项目 lodManager.assignClusterIds 同法；
-      // 不依赖 GLB extras.faceIndex——WASM 导出未写入该字段，原 getFaceCluster 恒 -1）
+      // clusterIds：空间采样分配——包围球中心与 6 个 ±r 轴上点各查一次 PvsManager.getClusterAt；
+      // 不走逐 face 映射（`src/ts-shared/world/pvs-manager.ts` 的 `getFaceCluster` 在本仓零调用点，
+      // 见该文件的成员说明）。
       const center = bs.center.clone().applyMatrix4(mesh.matrixWorld);
       const set = new Set<number>();
       const r = Math.max(bs.radius, 1);
@@ -415,14 +434,14 @@ export class RendererMain {
       });
     });
 
-    // 4. 视距剔除距离：自动值 = 对角线 × 0.5；config.hud.renderDistance > 0 时覆盖
-    //    （面板「渲染距离」滑块；0 = 自动，保持改造前行为）
+    // 4. 视距剔除距离：自动值 = 场景包围盒对角线 × 0.5（下限 1000）；config.hud.renderDistance > 0
+    //    时覆盖它（面板「渲染距离」滑块；0 = 自动）
     this.autoCullDistance = Math.max(maxDim * 0.5, 1000);
     const cfgRenderDistance = this.config?.hud?.renderDistance ?? 0;
     this.cullDistance = cfgRenderDistance > 0 ? cfgRenderDistance : this.autoCullDistance;
 
 
-    // 5. 回传死亡阈值（场景最低 Y - 1000）
+    // 5. 回传场景包围盒最小 Y（`onSceneLoaded` 的调用方把它当死亡阈值转给 setDeathY）
     this.onSceneLoaded?.(bbox.min.y);
 
     // 6. 纹理画质 manifest + 按当前画质应用（mosaic 切换数据源）
@@ -435,8 +454,9 @@ export class RendererMain {
   // ── 纹理画质切换（原始 / mosaic 压缩低清）────────────────────
 
   /**
-   * 按画质档位替换场景全部贴图：mini = mosaic 字节码还原低清 PNG；
-   * original = 恢复缓存的原图。即时生效（替换 texture.image），无需重载地图。
+   * 按画质档位替换场景全部贴图：`mini` = 查 manifest 里的 mosaic 字节码还原低清图；
+   * `original` = 还原 `origTextureImages` 缓存的原始 image。即时生效（只换 texture.image），
+   * 不重载地图；manifest 或场景缺失时整体空跑。
    */
   async applyTextureQuality(quality: 'original' | 'mini'): Promise<void> {
     const manifest = this.mosaicManifest;
@@ -457,7 +477,7 @@ export class RendererMain {
       if (quality === 'original') {
         const orig = this.origTextureImages.get(map);
         if (orig !== undefined) {
-          map.dispose(); // 尺寸可能变化（512 低清 → 原始），强制重建 GPU 纹理
+          map.dispose(); // 新旧尺寸不同，先释放让 three 按新尺寸重建 GPU 纹理
           map.image = orig;
           map.needsUpdate = true;
           this.origTextureImages.delete(map);
@@ -472,10 +492,9 @@ export class RendererMain {
     await Promise.all(jobs);
   }
 
-  /** 单个贴图：mosaic 字节码 → 低清 PNG → ImageBitmap 替换 image。
-   * 替换前必须 dispose()：three.js r152+ 对同一 texture 的 image 替换走增量
-   * glTexSubImage2D——新 image 尺寸与原 GPU 纹理不符会 GL_INVALID_VALUE 越界、
-   * 上传失败（纹理保持旧内容）。dispose 后重建 GPU 纹理（按新尺寸分配）。 */
+  /** 单个贴图：mosaic 字节码 → PNG 字节 → ImageBitmap 后替换 image。
+   * 替换前必须 dispose()：同一 texture 换 image 时 three 走增量上传，新旧尺寸不符会失败
+   * （纹理保持旧内容）；dispose 后按新尺寸重建 GPU 纹理。失败只告警，保留原贴图。 */
   private async replaceMapWithMosaic(map: THREE.Texture, code: string): Promise<void> {
     try {
       const png = mosaic_decode(code, 8);
@@ -488,12 +507,14 @@ export class RendererMain {
     }
   }
 
+  /** 启动 rAF 循环（重复调用无副作用：已在跑时直接返回）。 */
   start(): void {
     if (this.running) return;
     this.running = true;
     this.rafId = requestAnimationFrame(this.boundTick);
   }
 
+  /** 停止 rAF 循环并注销句柄（在途回调由 `tick` 开头的 `running` 判定自行退出）。 */
   stop(): void {
     this.running = false;
     if (this.rafId !== 0) {
@@ -502,6 +523,9 @@ export class RendererMain {
     }
   }
 
+  /** 释放当前地图：摘除并释放 BSP 场景根（`userData.isBspModel` 的子树）、清 PVS/LOD 与主线程
+   *  物理、丢弃待喂输入、复位注入统计开关与校准器、重启渲染采样流。
+   *  不销毁 renderer/scene/camera 本身——换图后由 `loadScene` 继续复用。 */
   disposeScene(): void {
     if (this.scene) {
       for (let i = this.scene.children.length - 1; i >= 0; i--) {
@@ -519,21 +543,21 @@ export class RendererMain {
     this.pendingDx = 0;
     this.pendingDy = 0;
     this.pendingKeys = 0;
-    // 换图：注入生效性统计需对新场景重跑（否则第二张图不再报告注入状态）
+    // 换图：注入生效性统计要对新场景重跑（否则第二张图不再报告注入状态）
     this.pendingInjectReport = false;
     this.injectReported = false;
-    // 权威帧校准状态清零（防跨地图残留权威帧注入新地图）
+    // 权威帧校准状态清零（防上一张图的权威帧注入新地图）
     this.calibrator.clear();
-    // 换图：渲染采样流不连续 → 索引空间重启（代数 +1，Worker 丢弃旧图缓存）
+    // 换图后渲染采样流不连续 → 索引空间重启（世代 +1，Worker 丢弃旧图缓存）
     this.resetSampleStream();
   }
 
   /**
-   * 近平面自适应（同步自主项目）：检测相机 4 方向（相机局部系，4 水平正交）
-   * NEAR_PROBE_DIST 内最近的 mesh，动态设置 camera.near。
-   * - 贴墙 → near = max(最近距离 × 0.8, CAMERA_NEAR_MIN)，墙面不被裁剪
-   * - 空旷 → 恢复场景默认
-   * 性能：包围球粗筛候选后做 6 方向 raycaster，每 2 帧一次。
+   * 近平面自适应：以 (px, py, pz) 为射线起点，沿相机局部系的前/后/左/右四个水平方向在
+   * `nearProbeDist` 内探测最近的 BSP mesh；命中则把 `camera.near` 收到
+   * max(命中距离 × nearRatio, CAMERA_NEAR_MIN)，无命中恢复 `defaultNear`。
+   * 粗筛：包围球中心到起点的距离 < 探测距离 × 2 + 球半径 的 mesh 才进入射线检测。
+   * 只写 `camera.near`（变化超过 0.001 才更新投影矩阵）；由 `tick` 每 2 帧调用一次。
    */
   private updateNearPlane(px: number, py: number, pz: number): void {
     const camera = this.camera;
@@ -594,7 +618,7 @@ export class RendererMain {
     }
   }
 
-  /** 实时调整近平面自适应参数（面板调用；下一帧探测即生效）。 */
+  /** 面板实时调整探测距离与收缩系数：两项都只在传入正数时写，ratio 还需 ≤ 1；下一帧探测生效。 */
   setNearParams(probeDist?: number, ratio?: number): void {
     if (probeDist !== undefined && probeDist > 0) {
       this.nearProbeDist = probeDist;
@@ -604,7 +628,7 @@ export class RendererMain {
     }
   }
 
-  /** 设置视野角 FOV（度，面板调用；相机透视矩阵即时更新）。 */
+  /** 设置视野角 FOV（度）：写相机并立刻更新投影矩阵；相机未建时忽略。 */
   setFov(fov: number): void {
     if (!this.camera) return;
     this.camera.fov = fov;
@@ -612,24 +636,26 @@ export class RendererMain {
   }
 
   /**
-   * 设置全局曝光（显示侧亮度倍率，面板调用；world lightmap 与 prop ambient 共用）。
-   * 共享 uniform ⇒ 立即生效，不触发材质重编译。1.0 = 忠于 BSP 数据。
+   * 全局曝光（显示侧亮度倍率）：转发给 `apps/game/src/renderer/lightmap-shader.ts` 的
+   * `setExposure` —— 改的是共享 uniform，立即生效、不重编译材质。该函数只接受有限正数，
+   * 其余值（含 0 与负数）被忽略。
    */
   setExposure(value: number): void {
     setExposure(value);
   }
 
   /**
-   * 设置光照项 gamma（shadow-lift）。1.0 = 不修正；0.85 = 对齐外部参照实现 γ2.2 口径。
-   * 与曝光不同：只抬暗部，亮部不受影响 ⇒ 不会削顶。共享 uniform ⇒ 立即生效。
+   * 光照项 gamma（shadow-lift）：转发给 `apps/game/src/renderer/lightmap-shader.ts` 的
+   * `setLightGamma`。接受窗口是 (0, 1]，窗口外的值被忽略（`apps/game/src/config.ts` 的
+   * `lighting.lightGamma` 默认 2.2 即落在窗口外，`init` 的那次写入不改变共享 uniform）。
    */
   setLightGamma(value: number): void {
     setLightGamma(value);
   }
 
   /**
-   * 设置模型（prop）烘焙光照亮度倍率（ambient cube 路径专用）。
-   * 1.0 = 忠于数据；0 = 模型全黑；>1 提亮模型。共享 uniform ⇒ 立即生效。
+   * prop（模型）烘焙光照亮度倍率（ambient cube 路径专用）：转发给
+   * `apps/game/src/renderer/lightmap-shader.ts` 的 `setAmbientScale`；接受有限非负数。
    */
   setAmbientScale(value: number): void {
     setAmbientScale(value);
@@ -637,10 +663,11 @@ export class RendererMain {
 
   // ── 主线程唯一物理线 ───────────────────────────────────────
 
-  /** 主线程初始化 wasm（PhysWorld 模块）。dist 内嵌模式传 wasmB64（file:// 无法 fetch）。
-   * 注意：用 initSync({module})——async init() 解构 {module_or_path}，传 {module} 会
-   * 解构出 undefined 走 new URL(import.meta.url) 路径（dist 下 import.meta.url 被
-   * define 为 about:blank → "Failed to construct 'URL'"，dev 下多余一次 fetch）。 */
+  /** 初始化 wasm 模块（`PhysWorld` 与 `mosaic_decode` 同模块，全工程只初始化一次）。
+   *  dist 内嵌模式传 wasmB64（file:// 下取不到 wasm）。
+   * 用 initSync({ module })：生成胶水的 async init(module_or_path) 会解构 `{ module_or_path }`，
+   * 传 `{ module }` 会解构出 undefined 并回落到 `new URL('websurf_wasm_bg.wasm', import.meta.url)`
+   * （dist 下 import.meta.url 被 define 成 about:blank ⇒ 构造 URL 抛错；dev 下多一次 fetch）。 */
   async initPrediction(wasmUrl: string, wasmB64?: string): Promise<void> {
     if (wasmB64) {
       const bytes = base64ToBytes(wasmB64);
@@ -652,7 +679,7 @@ export class RendererMain {
     initSync({ module: buf });
   }
 
-  /** world-json 到达：主线程构建 PhysWorld（唯一物理：世界+碰撞+输入+渲染）。 */
+  /** 建主线程物理世界（唯一物理线：世界 + 碰撞 + 输入 + 传送），并复位校准器与渲染采样流。 */
   buildPredictionWorld(world: {
     brushJson: string;
     triJson: string;
@@ -673,38 +700,39 @@ export class RendererMain {
     this.predReady = true;
     // 权威帧校准状态清零（首帧权威帧将作为新起点）
     this.calibrator.clear();
-    // 新世界：渲染采样流不连续 → 索引空间重启（代数 +1，Worker 丢弃旧世界缓存）
+    // 新世界：渲染采样流不连续 → 索引空间重启（世代 +1，Worker 丢弃旧世界缓存）
     this.resetSampleStream();
   }
 
-  /** 物理实例输入（app 事件回调喂入；唯一输入通道）。 */
+  /** 物理实例输入（app 事件回调喂入；dx/dy 为角度增量、keysMask 为键位掩码）：dx/dy 累加、
+   *  键位覆盖写。 */
   feedInput(dx: number, dy: number, keysMask: number): void {
     this.pendingDx += dx;
     this.pendingDy += dy;
     this.pendingKeys = keysMask;
   }
 
-  /** 清空待喂输入（Pointer Lock 退锁/重锁时调用，防残留输入污染）。 */
+  /** 清空待喂输入（退锁/重锁、读点、noclip 切换与校准器兜底同步时调用，防残留增量污染新状态）。 */
   clearPendingInput(): void {
     this.pendingDx = 0;
     this.pendingDy = 0;
     this.pendingKeys = 0;
   }
 
-  /** 重生（面板/按键；主线程物理直接 respawn，不经 Worker）。 */
+  /** 重生：直接让主线程物理调 `respawn`（不经 Worker），随后重启渲染采样流。 */
   respawn(): void {
     this.predPhys?.respawn();
-    // 位置突变：失效代数 +1（Worker 丢弃旧位置缓存）
+    // 位置突变 → 采样流不连续：世代 +1（Worker 丢弃旧位置缓存）
     this.bumpSampleEpoch();
   }
 
-  /** 传送至指定出生点索引（面板 spawn 下拉）。 */
+  /** 传送至指定出生点索引（面板 spawn 下拉；索引空间由 `setSpawnPoints` 设入）。 */
   teleportToSpawn(idx: number): void {
     this.predPhys?.teleport_to_spawn(idx);
     this.bumpSampleEpoch();
   }
 
-  /** 设置出生点列表（[[x,y,z,yaw], ...]，spawn 下拉切换用）。 */
+  /** 设置物理实例的出生点列表（`[[x, y, z, yaw], ...]`，序列化成 JSON 传入）；失败只打日志。 */
   setSpawnPoints(list: Array<[number, number, number, number]>): void {
     try {
       this.predPhys?.set_spawn_points(JSON.stringify(list));
@@ -713,19 +741,19 @@ export class RendererMain {
     }
   }
 
-  /** 设置死亡 Y 阈值（loadScene 后由 onSceneLoaded 回调传入）。 */
+  /** 设置掉落死亡 Y 阈值（`loadScene` 之后由 `onSceneLoaded` 的调用方转交）。 */
   setDeathY(y: number): void {
     this.predPhys?.set_death_y(y);
   }
 
-  /** 当前物理速度（速度面板 8Hz 采样）。 */
+  /** 读当前物理速度（面板速度显示按 8Hz 采样）；物理未建时返回零向量。 */
   getCurrentVel(): { x: number; y: number; z: number } {
     if (!this.predPhys) return { x: 0, y: 0, z: 0 };
     const st = this.predPhys.state() as { velX: number; velY: number; velZ: number };
     return { x: st.velX, y: st.velY, z: st.velZ };
   }
 
-  /** 存点用：完整物理状态（位置/朝向/速度/着地；X 键存点采样）。 */
+  /** 读完整物理状态（位置/朝向/速度/着地），X 键存点采样用；物理未建时返回全零。 */
   getFullState(): {
     x: number; y: number; z: number;
     yaw: number; pitch: number;
@@ -748,8 +776,10 @@ export class RendererMain {
     };
   }
 
-  /** 读点：恢复存点全状态（C 键/面板）。主线程 set_state 即时生效 + 同步权威
-   * （复用 sync-render-state 链路：权威 set_state 到存点并清双端输入增量）。 */
+  /** 读点：把存点全状态写进主线程物理，随后按传送口径处理——重启渲染采样流、清待喂输入，并以
+   * `teleport = true` 调 `onSyncRenderState`（`apps/game/src/app.ts` 据此发 `sync-render-state`，
+   * 让 Worker 也把权威状态置到存点并丢弃未消费输入增量）。
+   * `eyeHeight` 取当前姿态值（存点不含蹲伏态），物理未建时回落 `EYE_STAND`。 */
   loadSavepoint(sp: {
     x: number; y: number; z: number;
     yaw: number; pitch: number;
@@ -757,7 +787,7 @@ export class RendererMain {
     onGround: boolean;
   }): void {
     this.predPhys?.set_state(sp.x, sp.y, sp.z, sp.yaw, sp.pitch, sp.vx, sp.vy, sp.vz, sp.onGround);
-    // 位置突变：渲染采样流不连续 → 失效代数 +1（Worker 丢弃旧位置缓存）
+    // 位置突变 → 采样流不连续：世代 +1（Worker 丢弃旧位置缓存）
     this.bumpSampleEpoch();
     this.clearPendingInput();
     // 权威同步（复用 sync-render-state）：eyeHeight 取当前姿态值（存点不含蹲伏态）
@@ -772,14 +802,13 @@ export class RendererMain {
         onGround: sp.onGround,
         eyeHeight: cur?.eyeHeight ?? EYE_STAND,
       },
-      true, // 存点 load = 真位置突变：清双端未消费输入增量（旧增量对新位置无意义）
+      true, // 存点 load = 真位置突变：允许 Worker 丢弃未消费输入增量
     );
   }
 
   /**
-   * 按住 C 读点：冻结在存点（每帧 tick 强制 set_state——位置/朝向=存点、速度=0）。
-   * "按住定在点的那一刻不要给速度"：空中存点悬停、地面存点站定，物理/权威
-   * 被持续覆盖；松开（releaseHoldPoint）才恢复存点速度。
+   * 按住 C 读点：登记冻结目标；此后 `tick` 每帧把物理写回该位姿并把速度归零（空中悬停、地面站定）。
+   * 只写本类字段，不立即改物理；解除见 `releaseHoldPoint`。
    */
   setHoldPoint(sp: {
     x: number; y: number; z: number;
@@ -789,7 +818,7 @@ export class RendererMain {
     this.holdPoint = sp;
   }
 
-  /** 松开 C：解除冻结并恢复存点速度（loadSavepoint 全量恢复 + 同步权威）。 */
+  /** 松开 C：清冻结目标，并按存点全量恢复（含速度与权威同步，见 `loadSavepoint`）。 */
   releaseHoldPoint(sp: {
     x: number; y: number; z: number;
     yaw: number; pitch: number;
@@ -800,37 +829,38 @@ export class RendererMain {
     this.loadSavepoint(sp);
   }
 
-  /**
-   * 权威帧到达（A2）处理 / 速度外推校准 / 碰撞事件微调 / 位置突变归零。
-   * 公共化：实现收敛到 ts-shared AuthorityCalibrator（correctFromAuthority
-   * 三条件 OR + 250ms 冷却 + syncInFlight 回滚、calibrateVelocity 外推、
-   * applyCollisionCorrection <60 微调、resetTo 归零）。
-   */
+  /** 每帧消费一次权威帧（实现见 `src/ts-shared/phys/authority-calibrator.ts` 的
+   *  `AuthorityCalibrator`）：豁免期同步、首帧取起点、常规反向重锚、yaw 分叉兜底。 */
   private correctFromAuthority(): void {
     this.calibrator.correctFromAuthority();
   }
 
-  /** 逐帧速度校准（权威速度外推反馈；实现见 ts-shared AuthorityCalibrator）。 */
+  /** 用权威帧的速度与加速度把渲染物理速度外推到当前时刻；帧龄按读到该帧的时刻算（`now` 取同一
+   *  rAF 时间戳）。实现见 `src/ts-shared/phys/authority-calibrator.ts` 的 `calibrateVelocity`。 */
   private calibrateVelocity(now: number): void {
     this.calibrator.calibrateVelocity(now);
   }
 
-  /** 位置突变归零（显式重置允许覆盖：respawn/teleport/noclip 切换）。 */
+  /** 显式位置突变：把物理写到指定位置/角度（速度清零、置着地）、清待喂输入、复位校准状态、
+   *  开权威豁免窗口，并重启渲染采样流。
+   *  本工程内没有调用点（respawn / 传送 / 读点各走自己的路径，见 app.ts 的对应接线）。 */
   resetTo(pos: number[], yawDeg: number): void {
     this.calibrator.resetTo(pos, yawDeg);
-    // 位置突变：渲染采样流不连续 → 失效代数 +1（Worker 丢弃旧位置缓存）
+    // 位置突变 → 采样流不连续：世代 +1（Worker 丢弃旧位置缓存）
     this.bumpSampleEpoch();
   }
 
   /**
-   * 权威碰撞事件 → 位置微调 + 角度同步（权威仅在碰撞判断时可影响渲染角度；
-   * 实现见 ts-shared AuthorityCalibrator）。
+   * 权威碰撞事件入口（`apps/game/src/app.ts` 收到 `phys-event` 后调用）：只有 `land` 且渲染自身
+   * 已着地时才写物理——把 `onGround` 置真、速度取事件携带的权威速度（缺省回落渲染自身速度），
+   * 位置与角度写回刚读到的当前值（故零变化）。`blocked` 与三个位置/角度入参不生效，细节见
+   * `src/ts-shared/phys/authority-calibrator.ts` 的 `applyCollisionCorrection`。
    */
   applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number, vel?: number[]): void {
     this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg, vel);
   }
 
-  /** 面板参数实时同步到主线程物理实例（与 set_params 同字段）。 */
+  /** 面板参数实时同步到主线程物理实例（JSON 走 `set_params`）；失败只打日志。 */
   setPredictionParams(params: Record<string, unknown>): void {
     try {
       this.predPhys?.set_params(JSON.stringify(params));
@@ -840,9 +870,8 @@ export class RendererMain {
   }
 
   /**
-   * noclip 模式同步到主线程物理。
-   * Rust tick 在 noclip 下走 noclip_step（无碰撞纯移动 + Q/E 转向），
-   * 物理实例内部切换，无需额外渲染分支。
+   * noclip 开关同步到主线程物理（`set_noclip`，物理内部切换到无碰撞移动），随后重启渲染采样流
+   * 并清待喂输入（轨迹不连续）。渲染侧无额外分支——`tick` 照常读物理状态。
    */
   setPredictionNoclip(active: boolean): void {
     try {
@@ -850,16 +879,17 @@ export class RendererMain {
     } catch (err) {
       console.error('[renderer] set_noclip 失败:', err);
     }
-    // 模式切换 = 轨迹不连续（无碰撞纯移动会瞬间脱离渲染折线）→ 失效代数 +1
+    // 模式切换后轨迹不连续 → 世代 +1
     this.bumpSampleEpoch();
     this.clearPendingInput();
   }
 
-  /** 面板体型实时同步到主线程物理实例。 */
+  /** 面板体型（碰撞箱半宽 / 站立高 / 蹲下高）实时同步到主线程物理实例。 */
   setPredictionHull(halfWidth: number, standHeight: number, duckHeight: number): void {
     this.predPhys?.set_hull(halfWidth, standHeight, duckHeight);
   }
 
+  /** 释放子树：逐个 mesh 释放几何、材质上的 `map` 贴图与材质本身（`disposeScene` 用）。 */
   private disposeObject(obj: THREE.Object3D): void {
     obj.traverse((child) => {
       const mesh = child as THREE.Mesh;
@@ -875,51 +905,59 @@ export class RendererMain {
     });
   }
 
+  /** 绑定后的 rAF 回调（`start` 与 `tick` 都把它交给 rAF，避免每次 bind 产生新函数）。 */
   private readonly boundTick = this.tick.bind(this);
 
+  /**
+   * 每个 rAF 一次：先推进主线程物理并同步相机，再做剔除与绘制。
+   * - 物理分支（`predReady` 且 `predPhys` 非空）：dt = 与上一物理帧的间隔（首个物理帧取 1/64，
+   *   上限 0.1s）→ `shared.addInput` 把输入交给 Worker 权威帧 → `correctFromAuthority` →
+   *   `calibrateVelocity` → `predPhys.tick` → 把 dx/dy 清零（键位保留为按住状态）→ 冻结分支
+   *   （`holdPoint` 非空时每帧写回该位姿且速度 0）→ 读 `state()` → 写渲染采样 →
+   *   相机 rotation/position → 每 2 帧跑一次 `updateNearPlane`；
+   * - 剔除分支：按 `cullDistance`（`ENABLE_PVS` 为真时再叠加 PVS 可见性）改 `mesh.visible`；
+   * - 绘制：`renderer.render()`；若 `pendingInjectReport` 置位则在其后跑一次注入统计。
+   * 副作用：写共享槽（输入与渲染采样）、改主线程物理状态、改相机与 mesh 可见性。
+   */
   private tick(now: number): void {
     if (!this.running) return;
     this.rafId = requestAnimationFrame(this.boundTick);
     if (!this.renderer || !this.scene || !this.camera) return;
 
-    // 1. 主线程渲染物理线 + Worker 权威帧校准（v7）：
-    //    写输入 SAB（Worker 权威模拟同输入）→ 读权威帧 → 外推校准 → tick → 渲染
+    // 1. 主线程物理线：把输入交给 Worker 权威帧 → 消费权威帧 → 推进本地物理 → 取状态渲染
     if (this.predReady && this.predPhys) {
       const dt = this.lastTickMs === 0 ? 1 / 64 : Math.min((now - this.lastTickMs) / 1000, 0.1);
       this.lastTickMs = now;
-      // 输入 → SAB 输入槽（Worker 权威帧模拟消费；与主线程同输入）
+      // 输入 → 共享槽（Worker 权威帧与主线程消费同一份输入）
       this.shared.addInput(this.pendingDx, this.pendingDy, this.pendingKeys);
-      // 权威帧到达 → 记录（只读）；首次 set_state 起点；>200 异常兜底
+      // 消费权威帧（只读共享槽；首帧取起点、常规反向重锚、yaw 分叉兜底都在校准器内）
       this.correctFromAuthority();
-      // 权威速度外推校准（考虑中途地图碰撞后的正确速度；位置不覆盖）
+      // 权威速度外推校准（位置不由权威覆盖）
       this.calibrateVelocity(now);
-      // 完整物理推进：physics = 碰撞/传送/死亡/reset；noclip = noclip_step（无碰撞）
+      // 推进物理：碰撞/传送/死亡判定都在物理内部（noclip 时走无碰撞分支）
       this.predPhys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
       this.pendingDx = 0;
       this.pendingDy = 0;
-      // 按住 C 读点冻结：每帧强制 set_state（位置/朝向=存点、速度=0、着地=存点值）
-      // ——"按住定在点的那一刻不要给速度"，悬停直到松开（空中存点悬空、地面存点站定）
+      // 冻结分支：把物理写回存点位姿（位置/朝向 = 存点，速度 = 0，着地 = 存点值），悬停到解除
       if (this.holdPoint) {
         const h = this.holdPoint;
         this.predPhys.set_state(h.x, h.y, h.z, h.yaw, h.pitch, 0, 0, 0, h.onGround);
       }
-      // 渲染 = 主线程物理状态（连续无屏闪）
+      // 渲染 = 主线程物理状态（相机直接跟随，不另做平滑）
       const st = this.predPhys.state() as {
         posX: number; posY: number; posZ: number;
         yaw: number; pitch: number;
         eyeHeight: number;
       };
-      // 渲染采样传输（R1：写侧 4 个 f64 载荷 store + seqlock 戳，无同步等待）：
-      // 权威发布位置 = 本渲染轨迹上的一个采样点（Worker 按渲染时钟 τ 取点后发布）。
-      // 与渲染状态读取同拍同源，i0 单调递增（见 renderSampleIndex 注释）。
-      // ⚠️ 不传 epoch（缺陷修复 · epoch 竞态）：世代由 shared-state 独占并就地读，
-      // 传调用方缓存值会把 `bumpSampleEpoch()` 的自增写回旧值（详见 shared-state.ts）。
+      // 渲染采样：与渲染状态读取同拍同源，i0 每帧 +1（序号语义见 renderSampleIndex）。
+      // 不传世代：世代槽由 shared-state 的 resetRenderSample 独占并就地读，传调用方缓存值会把
+      // bumpSampleEpoch 刚做的自增写回旧值。
       this.shared.writeRenderSample(now, st.posX, st.posY, st.posZ, this.renderSampleIndex++);
       // Rust 输出角度为度 → 弧度
       this.camera.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
       this.camera.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);
 
-      // 近平面贴墙自适应（每 2 帧）：贴墙收缩 near 防近平面裁剪透视
+      // 近平面贴墙自适应（每 2 帧一次）：贴墙收缩 near，防近平面把墙面裁掉
       this.nearCheckToggle = !this.nearCheckToggle;
       if (this.nearCheckToggle) {
         this.updateNearPlane(st.posX, st.posY + st.eyeHeight, st.posZ);
@@ -928,12 +966,12 @@ export class RendererMain {
 
     const camPos = this.camera.position;
 
-    // 2. LOD/PVS 剔除
+    // 2. LOD/PVS 剔除：超距与（PVS 启用且相机 cluster 有效时）不可见的块置 visible = false
     if (this.lodItems.length > 0) {
       const pvs = this.pvsManager;
       if (ENABLE_PVS && pvs) pvs.update(camPos);
-      // PVS 安全保护（主项目同法）：相机不在任何 cluster（出生在固体/地图外）时
-      // 可见集为空，有 cluster 的 mesh 会被错误全剔 → 跳过 PVS，仅按距离 LOD
+      // 相机不在任何 cluster（出生在固体里/地图外）时可见集为空，会把有 cluster 的块错误全剔
+      // → 这种情况跳过 PVS，只按距离判定
       const pvsActive = ENABLE_PVS && pvs !== null && pvs.enabled;
       const pvsClusterValid = pvs !== null && pvs.currentClusterId >= 0;
       for (const item of this.lodItems) {
@@ -956,10 +994,10 @@ export class RendererMain {
       }
     }
 
-    // 3. 渲染（快照就绪后无条件渲染，帧率跟随 rAF）
+    // 3. 绘制（帧率跟随 rAF，不做节流）
     this.renderer.render(this.scene, this.camera);
 
-    // 3b. 首帧后跑一次注入生效性统计（此刻材质已编译、onBeforeCompile 已回填）。
+    // 3b. 首帧之后跑一次注入生效性统计（此刻材质已编译、onBeforeCompile 的回填已到位）
     if (this.pendingInjectReport && !this.injectReported) {
       this.injectReported = true;
       this.pendingInjectReport = false;
@@ -968,24 +1006,21 @@ export class RendererMain {
   }
 
   /**
-   * 注入生效性统计（**必须在首帧渲染之后**调用一次）。
+   * 注入生效性统计（由 `tick` 在首帧 `renderer.render()` 之后调用一次）。
    *
-   * 判据口径按 `stage` 分类，不再把"跳过注入"误判成"注入失效"：
-   * - `auto`/`channel0`/`channel1`：注入应**生效**（`__vbspLightmapInjected === true`）
-   *   ⇒ 全部失效才算失败（`console.error` + 置全局失败标记，供出帧脚本非零退出）；
-   * - `broken`：**预期失败**（故意用失配字面量）⇒ 单列，不打 error、不置失败标记；
-   * - `native`：**预期跳过**（走 three 原生 lightmap）⇒ 单列，不打 error；
-   * - `off`：压根未施加材质（`applyLightmapToMeshes` 提前 return）⇒ 不进入本统计。
-   *
-   * 为什么按 stage 分类：原先只按 `applied` 真假二分，`native` 的 `applied` 为
-   * `null`/`undefined` ⇒ 落入"失效"分支 ⇒ 负控帧被打上"注入全失效"的**假 error**。
+   * 统计口径：遍历场景材质上的 `__vbspLightmapInject` 记录，按 `skipped` / `expectedFail` /
+   * `applied` 分别计数，其余算失效并留最多 3 条样本。阶段名读 `globalThis.__vbspLightmapStage`：
+   * 命中 `KNOWN_STAGES` 就原样使用，否则一律按 `auto`。
+   * 阶段分支：`broken` 与 `noinject` 只告警，`native` 直接返回（走 three 原生 lightmap）；其余阶段
+   * 「有失效材质但一条注入都没生效」时置 `globalThis.__vbspLightmapInjectFailed` 并打 error
+   * （出帧脚本据此非零退出），只是部分失效则告警。
+   * 同一趟还会打印 ambient cube 与第 1 级逐顶点光照的接线统计，以及材质的 alpha 状态审计。
    */
   private reportInjectStatsOnce(): void {
     if (!this.scene) return;
     const stage = (globalThis as { __vbspLightmapStage?: unknown }).__vbspLightmapStage;
-    // 原样保留已知 stage 名（含 `channel0`/`channel1` 对照档与 `noinject` 可比负控）
-    // ——四态/对照矩阵的全部意义就在于**逐帧可归因**，把 channel 档记成 `auto`
-    // 会让日志与帧标签不一致（实测踩过）。
+    // 已知阶段名原样保留（`channel0` / `channel1` 是注入通道对照档、`noinject` 是可比负控）：
+    // 把对照档记成 `auto` 会让日志与出帧标签对不上
     const KNOWN_STAGES = ['broken', 'native', 'off', 'channel0', 'channel1', 'noinject'];
     const stageName = typeof stage === 'string' && KNOWN_STAGES.includes(stage) ? stage : 'auto';
 
@@ -1023,15 +1058,14 @@ export class RendererMain {
         `跳过=${skipped}，预期失败=${expectedFail}`,
     );
 
-    // prop ambient cube 命中统计（P1 验收口径：hit/miss 按 mesh 调用计，
-    // nodes = 独立 cube 引用去重 = 带 cube 的 prop node 数）
+    // prop ambient cube 命中统计（hit/miss 按 mesh 调用计；nodes = 去重后的 cube 引用数）
     const amb = (globalThis as { __vbspAmbientStats?: { hit: number; miss: number; nodes: Set<unknown> } })
       .__vbspAmbientStats;
     if (amb) {
       console.info(
         `[ambient-cube] 命中=${amb.hit} 未命中=${amb.miss} 节点=${amb.nodes.size}`,
       );
-      // P2 验收口径：遍历材质统计 __vbspAmbientInject.applied
+      // 材质级统计：遍历材质读 `__vbspAmbientInject.applied`
       let ambOk = 0;
       let ambBad = 0;
       this.scene.traverse((obj) => {
@@ -1049,14 +1083,9 @@ export class RendererMain {
       console.info(`[ambient-cube] applied=${ambOk} 失败=${ambBad}`);
     }
 
-    // 第 1 级 prop 光照（逐顶点预烘焙 `sp_<idx>.vhv` → `_VBSP_VLIGHT`）的接线校验。
-    // 判据：走第 1 级的 mesh 数（>0 才说明导出侧真的接上了）+ 注入是否生效 + 有无失败。
-    // ⚠️ 「带属性但未注入」必须**再分两类**（2026-09-20 穷尽审计的结论）：
-    //    ① `extras.unlit` 的自发光 VMT（`blue_neon` / `glow_*` / `neon666_*` …）⇒ 按 Source
-    //       `UnlitGeneric` 语义**本来就不吃光照**，带属性而不用是**正确**的；
-    //    ② 其余 ⇒ 真漏网，必须修。
-    //    实测 surf_666：带属性 395 个 mesh、顶点数**逐个与 POSITION 相等**（零错位），
-    //    其中 356 已注入 + 39 全为①（② = 0）。只报一个合计数会被误读成缺陷。
+    // 第 1 级 prop 光照（逐顶点预烘焙 → `_VBSP_VLIGHT` 几何属性）的接线校验：走这一级的材质数、
+    // 注入是否生效、有没有失败。带属性却没注入记录的分两类：材质标了 `userData.unlit === true`
+    // 的自发光 VMT 本就不吃光照（正确），其余算真漏网并打 error。
     {
       let vlOk = 0;
       let vlBad = 0;
@@ -1101,8 +1130,8 @@ export class RendererMain {
           `[vertex-lighting] 有 ${vlMissed} 个带 _VBSP_VLIGHT 的非 unlit mesh 没走到第 1 级材质 ⇒ 缺陷`,
         );
       }
-      // alpha 状态覆盖审计（铁丝网/格栅/玻璃这类材质的关键状态：
-      // 替换材质若丢掉 alphaTest/side，$alphatest 的孔洞会变成实心板、单面材质会少一半）
+      // alpha 状态审计（铁丝网/格栅/玻璃这类材质的关键状态：替换材质若丢掉 alphaTest/side，
+      // $alphatest 的孔洞会变成实心板、单面材质会少一半）
       let aCut = 0;
       let aBlend = 0;
       let aDouble = 0;
@@ -1125,19 +1154,19 @@ export class RendererMain {
     }
 
     if (stageName === 'broken') {
-      // 负控：预期注入失效 ⇒ 只做记录，不打 error（否则负控帧日志被污染）。
+      // broken：预期注入失效，只告警不打 error（免得出帧负控帧被污染）
       console.warn(
         `[lightmap] stage=broken（负控）：注入预期失效 —— 预期失败材质=${expectedFail}、生效=${injectOk}。`,
       );
       return;
     }
     if (stageName === 'native') {
-      // native：按设计跳过自定义注入（走 three 原生 lightmap）⇒ 非失败。
+      // native：按设计走 three 原生 lightmap 采样，不计失败
       return;
     }
     if (stageName === 'noinject') {
-      // 可比负控：材质照换、**仅不注入** ⇒ 本来就不会有 `__vbspLightmapInject` 记录，
-      // `injectOk=injectBad=0` 属**预期**，不得报"注入全失效"（否则负控帧被打上假 error）。
+      // noinject：材质照换、只是不注入 ⇒ 本来就没有 `__vbspLightmapInject` 记录，
+      // injectOk = injectBad = 0 属预期，不得报"注入全失效"
       console.warn(
         '[lightmap] stage=noinject（可比负控）：材质替换保留、仅停用 shader 注入 ⇒ ' +
           '无注入记录属预期；画面预期退回无烘焙光照，且场景构成与 auto 相同（可比）。',
@@ -1159,6 +1188,7 @@ export class RendererMain {
     }
   }
 
+  /** 画布尺寸变化：同步 renderer 尺寸与相机宽高比（高度为 0 时按 1 处理）。 */
   resize(width: number, height: number): void {
     if (!this.renderer || !this.camera) return;
     this.renderer.setSize(width, height, false);
@@ -1167,9 +1197,9 @@ export class RendererMain {
   }
 
   /**
-   * 渲染距离（LOD 剔除距离，世界单位）。
-   * `> 0` = 显式距离；`<= 0` = 恢复自动值（地图对角线的一半）。
-   * 生效点：`tick()` 的 LOD 遍历——`dist > cullDistance` 的块置 `visible = false`，不产生 draw call。
+   * 设置剔除距离（世界单位，面板「渲染距离」滑块）。
+   * `> 0` = 用该值；`<= 0` = 恢复自动值（场景包围盒对角线的一半，下限 1000）。
+   * 生效点：`tick` 的剔除遍历——距离超过它的块置 `visible = false`，不产生 draw call。
    */
   setRenderDistance(dist: number): void {
     this.cullDistance = dist > 0 ? dist : this.autoCullDistance;
@@ -1177,8 +1207,10 @@ export class RendererMain {
 
   // ── GLB 加载 ───────────────────────────────────────────────
 
+  /** 复用的 GLTFLoader（`loadGlb` 每次 `loadAsync`）。 */
   private readonly gltfLoader = new GLTFLoader();
 
+  /** GLB 字节 → GLTF：先把字节拷进新的 `Uint8Array` 再交给 Blob URL，`finally` 里注销该 URL。 */
   private async loadGlb(glbBytes: ArrayBuffer): Promise<GLTF> {
     const buffer = new Uint8Array(glbBytes.byteLength);
     buffer.set(new Uint8Array(glbBytes));
@@ -1192,16 +1224,19 @@ export class RendererMain {
   }
 
   /**
-   * 阶段 3：施加离线烘焙静态光照（lightmap atlas）。
+   * 施加离线烘焙静态光照（lightmap atlas）。
    *
-   * GLB 契约：`asset.extras.lightmap.textureIndex` 指向图集纹理（副本 wasm-core 的
-   * `bsp_to_gltf_core/lightmap.rs` 写出），图元带 `TEXCOORD_1` 与 `extras.hasLightmap`。
-   * 失败只告警、不阻断场景加载（与既有容错风格一致）；无 atlas 时给出明确日志而不是静默。
+   * 契约：图集纹理由 `src/wasm-core/bsp_to_gltf_core/lightmap.rs` 写进 GLB，位置由
+   * `apps/game/src/renderer/lightmap-shader.ts` 的 `loadLightmapAtlas` 解析（`asset.extras.lightmap`
+   * 或 `scene.userData.extras.lightmap` 的 `textureIndex`）；图元侧带 `TEXCOORD_1` 与
+   * `extras.hasLightmap`（落在 geometry.userData）。
+   * 没有图集时只打日志返回；施加数与 atlas 尺寸打日志；施加成功时置 `pendingInjectReport`，
+   * 把生效性统计留给首帧之后的 `tick`。异常只告警，不阻断场景加载。
    */
   private async applyLightmap(scene: THREE.Scene, gltf: GLTF): Promise<void> {
     try {
-      // ⚠️ atlas **两种模式都加载**（2026-09-21）：模式只是片元里的共享 uniform 分支
-      // （`vbspBakedMix`），所以纯纹理模式下 atlas 也必须在场——否则面板切回预烘焙又要重建场景。
+      // atlas 在两种光照模式下都要加载：模式只是片元里的共享 uniform 分支（`vbspBakedMix`），
+      // 纯纹理模式下若不带 atlas，面板切回预烘焙就得重建场景
       const atlas = await loadLightmapAtlas(gltf.parser, gltf);
       if (!atlas) {
         console.info('[lightmap] GLB 未携带 atlas（asset.extras.lightmap 缺失），跳过静态光照');
@@ -1209,12 +1244,9 @@ export class RendererMain {
       }
       const applied = applyLightmapToMeshes(scene, atlas);
       const image = atlas?.image as { width?: number; height?: number } | undefined;
-      // ⚠️ **此处不做注入生效性统计**：本方法由 `loadScene` 在建场景时调用，此时 three
-      // **尚未编译任何材质** ⇒ `onBeforeCompile` 还没被调用 ⇒ `__vbspLightmapInject`
-      // 全是 `undefined`。此前在这里统计 ⇒ `注入生效材质=0` 恒成立 ⇒ 误报「没有任何一个
-      // 注入生效」（实测四态各打 2 次假 error，连 `native`/`broken` 负控帧都被污染）。
-      // ⇒ 统计移到**首帧渲染之后**（材质已编译、`onBeforeCompile` 已回填）：见 tick 中的
-      //   `reportInjectStatsOnce()`。诊断口径与 `__vbspFrameProbe.lightmapState()` 一致。
+      // 这里不做注入生效性统计：本方法在建场景时调用，three 还没编译材质，onBeforeCompile 尚未
+      // 回填注入记录 ⇒ 统计只会得到全 0。统计放到首帧渲染之后，见 tick 里的 reportInjectStatsOnce，
+      // 口径与 __vbspFrameProbe.lightmapState() 一致。
       console.info(
         `[lightmap] 光照模式=${getLightingMode()}，atlas ${image?.width ?? 0}×${image?.height ?? 0}，施加 mesh=${applied}`,
       );
@@ -1229,15 +1261,13 @@ export class RendererMain {
   }
 
   /**
-   * 切换光照模式（面板「预烘焙 / 纯纹理」）——**运行期性能旋钮**：只改共享 uniform，立即生效。
+   * 切换光照模式（面板「预烘焙 / 纯纹理」）：只改共享 uniform，立即生效。
    *
-   * 2026-09-21 改定：旧实现是「按新模式重建场景」（`loadScene(lastSceneData)`）——那会把面板切换变成
-   * 一次 1.4~2.5 s 的冻结，并且重建期间输入/物理被一起打断（用户症状：热切换后转不动视角、也走不动）。
-   * 现在的机制在 `lightmap-shader.setLightingMode`：全场景材质共享一个 `vbspBakedMix` uniform，
-   * 三条烘焙路径（world lightmap / 逐顶点 vhv / ambient cube）都按它分支 ⇒
-   * **零重编译、零重建、零输入中断**，也不改变分块/材质分组（两种模式 draw 数完全一致）。
+   * 机制（见 `apps/game/src/renderer/lightmap-shader.ts` 的 `setLightingMode`）：全场景注入材质共用
+   * 同一个 `vbspBakedMix` uniform，world lightmap / 逐顶点光照 / ambient cube 三条烘焙路径都按它
+   * 分支 ⇒ 不重建场景、不重编译材质、不打断输入与物理，分块与材质分组也不变。
    *
-   * @param mode `baked` = 预烘焙（吃 atlas + vhv/ambient cube）；`texture` = 纯纹理（只上漫反射贴图）。
+   * @param mode `baked` = 预烘焙（吃 atlas + 逐顶点 + ambient cube）；`texture` = 纯纹理（只上漫反射贴图）。
    */
   setLightingMode(mode: LightingMode): void {
     if (getLightingMode() === mode) return;
@@ -1245,11 +1275,13 @@ export class RendererMain {
     console.info(`[lighting] 光照模式 → ${mode}（运行期 uniform 切换，未重建场景）`);
   }
 
-  /** 当前光照模式（面板回填/诊断用）。 */
+  /** 读当前光照模式（诊断用；转发给 `apps/game/src/renderer/lightmap-shader.ts` 的 `getLightingMode`）。 */
   getLightingMode(): LightingMode {
     return getLightingMode();
   }
 
+  /** 清零 GLB 根子节点的 rotation（有非零分量才写并立即刷新该子树的矩阵），最后整体更新 matrixWorld。
+   *  在包围盒与分块计算之前调用，保证后面的世界变换基准一致。 */
   private resetRootRotations(gltf: GLTF): void {
     for (const child of gltf.scene.children) {
       if (child.rotation.x !== 0 || child.rotation.y !== 0 || child.rotation.z !== 0) {
@@ -1260,25 +1292,22 @@ export class RendererMain {
     gltf.scene.updateMatrixWorld(true);
   }
 
-  // ── 空间分块合并（optimizeScene：GLB 挂载后执行一次）─────────────
-  // 渲染减负核心：3.4 万 Mesh（每帧遍历/剔除开销）→ ~300~800 空间块。
-  // 移植自 test/dual-mode-harness/src/worker-b.ts optimizeScene（已验证：34409 mesh → 300~800 块）。
-  // 与 test 的差异（Worker → 主线程）：
-  // - 载体：test 重建 modelRoot 组替换；本实现直接在 BSP 根（bspRoot，userData.isBspModel
-  //   保留不变）内替换内容——移除 gltf.scene、块 mesh 直接挂 BSP 根；
-  // - 时序：loadScene 中场景挂载（this.scene.add）之后、PVS/LOD 注册 traverse 之前执行——
-  //   下方 traverse 收集分块后的 mesh（lodItems + clusterIds 对块生效）；
-  // - 统计：前向视锥估算用 this.camera（非 Worker 模块级 camera）。
-  // 流程：① scene.updateMatrixWorld(true) → traverse 收集 Mesh（世界包围盒中心）
-  // ② cell 自适应（世界对角 / cbrt(目标块数)，微调落 [300,800]）
-  // ③ 顶点 applyMatrix4(matrixWorld) 烘焙世界空间（clone 后变换，勿动原 geometry）
-  // ④ 单 mesh cell 保留原 mesh（变换清零重挂）；多 mesh cell 块内按材质（实例恒等）子
-  //    合并 → mergeGeometries(useGroups=true) 最终合并（groups 保留材质索引）；多材质/
-  //    无材质 mesh 防御性烘焙保留；失败保持场景原状（计算先行、后替换）
-  // ⑤ console.log 统计：原 mesh 数 → 块数、平均顶点、draw call 估算、前向视锥可见块
+  // ── 空间分块合并（loadScene 里挂载完 GLB 后执行一次）─────────────
+  // 目的：把 GLTFLoader 逐 primitive 生成的数万个 Mesh 收敛成数百个空间块，降低每帧遍历与 draw call
+  // 数量。载体是 BSP 场景根（`userData.isBspModel` 保持不变）：块 mesh 直接挂到它下面，原 GLB 子树移除。
+  // 流程：
+  // ① 更新世界矩阵 → traverse 收集单材质 Mesh（记下世界包围盒中心）；多材质 Mesh 烘焙到世界空间后
+  //    整体保留、无材质 Mesh 原样跳过，两者都不参与分块；
+  // ② cell 边长自适应：世界包围盒对角线 / cbrt(OPT_TARGET_CELLS)，再按非空 cell 数微调（最多 6 轮）；
+  // ③ 按世界包围盒中心把 Mesh 分桶到 cell；
+  // ④ 逐 cell 合并：单 Mesh 的 cell 保留原 Mesh（几何烘焙到世界空间、变换清零）；多 Mesh 的 cell
+  //    先按材质实例分组子合并，再 mergeGeometries(useGroups = true) 合成一个 Mesh + 材质数组；
+  //    合并失败的分支回退为保留各自独立几何；
+  // ⑤ 替换场景内容，并给每块重算包围球后乘 FRUSTUM_PAD；
+  // ⑥ 打印统计与「前向视锥可见块」估算（用 this.camera 与当前 FOV 粗估，仅诊断）。
   private optimizeScene(bspRoot: THREE.Scene, gltfScene: THREE.Object3D): void {
-    // ① 收集：matrixWorld 更新后作为世界变换基准；多材质 mesh（GLB primitive 恒单材质，
-    //    防御性路径）与无材质 mesh 单独烘焙保留，不参与分块
+    // ① 收集：先刷新 matrixWorld 作为世界变换基准。多材质 mesh（GLB primitive 恒单材质，此处是
+    //    防御路径）烘焙到世界空间后保留；无材质 mesh 原样跳过。两者都不参与分块
     bspRoot.updateMatrixWorld(true);
     const infos: OptMeshInfo[] = [];
     const keptMeshes: THREE.Mesh[] = [];
@@ -1290,7 +1319,7 @@ export class RendererMain {
       if (!m.isMesh) return;
       if (!m.geometry || !m.geometry.attributes.position) return;
       if (Array.isArray(m.material) || !m.material) {
-        // 多材质/无材质：烘焙到世界空间后整体保留（不参与分块合并）
+        // 多材质：烘焙到世界空间后整体保留（不参与分块合并）
         if (Array.isArray(m.material)) {
           const baked = m.geometry.clone();
           baked.applyMatrix4(m.matrixWorld);
@@ -1314,17 +1343,11 @@ export class RendererMain {
     });
     if (infos.length === 0) return;
 
-    // ①b 合并失败**不丢几何**（判据，非推断）：
-    //     `mergeGeometries()` 在属性集不一致时返回 null（实测本图控制台有若干条
-    //     `mergeGeometries() failed`），但本函数每一处失败分支都回退为「保留各自独立几何」
-    //     （④ 内三处 `if (!mg)` / `if (!final)`），不存在"合并失败 ⇒ 丢弃"的路径。
-    //     运行期实测（CDP 走真实加载链路 + **索引感知**三角形计数）：合并后场景三角形
-    //     实例总数 = 148048 = GLB 逐节点实例展开总数（prop 40431 + world 107617）⇒ 零丢失。
-    //     ⚠️ 计数必须用 `index.count/3`：GLB 几何是**索引化**的，用 `position.count/3`
-    //     会把顶点数当三角形数、虚高约 14%（本批量测先踩过这个坑）。
+    // ①b 合并失败不丢几何：`mergeGeometries` 在属性集不一致时返回 null，而本函数每一处失败分支
+    //     都回退成「保留各自独立几何」，不存在"合并失败就丢弃"的路径。
 
-    // ② cell 大小自适应：cell = 世界包围盒对角线 / cbrt(目标块数)，再按非空 cell 数微调
-    //    （非空 cell 偏少 → 缩小 cell，偏多 → 放大 cell，收敛到 300~800）
+    // ② cell 边长自适应：初值取世界包围盒对角线 / cbrt(目标块数)，随后按非空 cell 数缩放（收敛到
+    //    OPT_MIN_CELLS..OPT_MAX_CELLS）
     const diag = Math.max(worldBox.getSize(new THREE.Vector3()).length(), 1);
     let cellSize = Math.min(Math.max(diag / Math.cbrt(OPT_TARGET_CELLS), OPT_CELL_MIN), OPT_CELL_MAX);
     for (let i = 0; i < 6; i++) {
@@ -1334,7 +1357,7 @@ export class RendererMain {
       cellSize = Math.min(Math.max(cellSize * scale, OPT_CELL_MIN), OPT_CELL_MAX);
     }
 
-    // ③ 分桶：每 mesh 世界包围盒中心归 cell（横跨多 cell 归中心所在 cell）
+    // ③ 分桶：按每个 mesh 的世界包围盒中心归 cell（横跨多 cell 的归中心所在 cell）
     const cells = new Map<string, OptMeshInfo[]>();
     for (const it of infos) {
       const key = optCellKey(it.cx, it.cy, it.cz, cellSize);
@@ -1346,9 +1369,9 @@ export class RendererMain {
       arr.push(it);
     }
 
-    // ④ 合并 + 替换：单 mesh cell 保留原 mesh（烘焙世界变换、移除原父变换）；
-    //    多 mesh cell 块内按材质子合并 → 最终 mergeGeometries(useGroups=true)（groups 保留
-    //    材质索引：材质去重收集 + 块内索引重映射）→ 每块一个 THREE.Mesh(mergedGeom, materials)
+    // ④ 合并 + 替换：单 mesh 的 cell 保留原 mesh（几何烘焙到世界空间、变换清零）；多 mesh 的 cell
+    //    先按材质实例子合并，再 mergeGeometries(useGroups = true) 合成一个 Mesh + 材质数组
+    //    （groups 与材质数组下标一一对应）
     const chunks: THREE.Mesh[] = [];
     let chunkCount = 0;
     let drawCallEst = 0;
@@ -1371,7 +1394,7 @@ export class RendererMain {
         continue;
       }
 
-      // 多 mesh cell：块内按材质（实例恒等）分组 → 同材质子合并 → 每材质一个几何
+      // 多 mesh cell：按材质实例分组，组内合并成一个几何（每组对应一个材质槽）
       const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
       for (const it of arr) {
         const m = it.mesh;
@@ -1397,7 +1420,7 @@ export class RendererMain {
             for (const g of geoms) g.dispose();
             merged = [mg];
           } else {
-            merged = geoms; // 属性不一致（防御）：保留单独几何，材质索引各自映射
+            merged = geoms; // 属性不一致（防御分支）：保留各自独立几何
           }
         }
         for (const g of merged) {
@@ -1435,19 +1458,18 @@ export class RendererMain {
       chunks.push(chunk);
     }
 
-    // ④b 替换：移除原 GLB 子树（旧 mesh 几何已逐个 dispose），块 mesh 直接挂 BSP 根
-    //    （bspRoot.userData.isBspModel 保留——disposeScene/updateNearPlane 依赖）；add()
-    //    自动使块 mesh 脱离原父节点
+    // ④b 替换：块 mesh 与保留 mesh 直接挂到 BSP 根（`add` 会自动让它们脱离原父节点），随后移除原
+    //     GLB 子树（旧几何已在上面逐个 dispose）。`bspRoot.userData.isBspModel` 保持不变——
+    //     disposeScene 与 updateNearPlane 都依赖它
     const totalMeshes = infos.length;
     for (const m of chunks) bspRoot.add(m);
     for (const m of keptMeshes) bspRoot.add(m);
     bspRoot.remove(gltfScene);
 
-    // ④c 视锥外保一圈：块 geometry.boundingSphere 半径 ×FRUSTUM_PAD。
-    //    必须强制 computeBoundingSphere（非 null 检查）：烘焙路径是 geometry.clone() +
-    //    applyMatrix4(matrixWorld)——克隆残留 GLB 局部空间的旧球（非 null 会被跳过）→
-    //    剔除按错误位置判定 → 眼前块被误剔不渲染。顶点已烘焙世界空间 → 重算球正确。
-    //    只影响剔除判定，不改变几何/包围盒；LOD/PVS（userData 数据）不受影响。
+    // ④c 视锥外保留一圈：给每块的包围球半径乘 FRUSTUM_PAD。必须无条件重算包围球（不能只判 null）：
+    //    烘焙路径是 geometry.clone() + applyMatrix4(matrixWorld)，克隆会带上 GLB 局部空间的旧球
+    //    （非 null，不重算就会被当成有效值）⇒ 剔除按错误位置判定、眼前的块被误剔。顶点已烘焙到世界
+    //    空间，重算才是对的。只影响剔除判定，不改几何与包围盒
     for (const child of bspRoot.children) {
       const g = (child as THREE.Mesh).geometry;
       if (!g) continue;
@@ -1455,7 +1477,7 @@ export class RendererMain {
       (g.boundingSphere as THREE.Sphere).radius *= FRUSTUM_PAD;
     }
 
-    // ⑤ 统计 + 前向视锥可见块估算（仅诊断：块包围盒中心与相机方向点积粗估，FOV 73.6°）
+    // ⑤ 统计 + 前向视锥可见块估算（块中心与相机方向的点积粗估，FOV 取 config.hud.fov）
     const chunkBox = new THREE.Box3();
     const chunkCenter = new THREE.Vector3();
     const toCam = new THREE.Vector3();
@@ -1486,26 +1508,25 @@ export class RendererMain {
     );
   }
 
-  // ── 出帧探针（验证仪器；out-of-band，不参与渲染逻辑）──────────────────
+  // ── 出帧探针（验证仪器；只往 globalThis 挂一个对象，不参与渲染逻辑）──────────────────
   /**
-   * 安装 `globalThis.__vbspFrameProbe`：给自动化出帧脚本（scripts/lightmap-frame-capture.mjs）
-   * 提供**确定性相机位姿**与**lightmap 运行时状态**读取口。
+   * 安装 `globalThis.__vbspFrameProbe`：给外部自动化脚本提供「确定性相机位姿」与「lightmap 运行时
+   * 状态」的读取口。
    *
-   * 为什么需要它：缺陷判据是「同一相机位姿下的出帧截图」。主线程把相机钉在物理状态上
-   * （tick 里每帧 `camera.position/rotation = predPhys.state()`），若只靠 spawn 默认朝向，
-   * 视野里大量是天空/远景，地图表面占比不可控 → before/after 亮度差被稀释、也不可复现。
-   * 本探针用 `setHoldPoint` 把物理状态**冻结**在指定位姿（既有机制：每帧 set_state 覆盖），
-   * 于是相机被确定性地锁住，且该路径本身就在生产代码里（"按住 C 读点"）。
+   * 用途：A/B 出帧对比要求同一相机位姿可复现。相机在 `tick` 里被钉在主线程物理状态上，只靠 spawn
+   * 默认朝向时视野里大量是天空与远景，地图表面占比不可控。本探针用 `setHoldPoint`（生产路径里的
+   * 「按住 C 读点」机制：`tick` 每帧把物理写回该位姿）把相机确定性地锁住。
    *
-   * 生产路径零影响：只有自动化脚本显式调用 `applyPose` 才会冻结；正常游玩不会触发。
+   * 生产路径零影响：只有显式调用 `applyPose` 才会冻结；正常游玩不触发。
    */
   installFrameProbe(): void {
     const self = this;
     const probe = {
+      /** 物理、场景与相机是否都已就绪（脚本据此判断探针可用时机）。 */
       get ready(): boolean {
         return self.predReady && self.scene !== null && self.camera !== null;
       },
-      /** 当前相机的世界位姿（截图可复现性的直接证据）。 */
+      /** 当前相机的世界位姿（截图可复现性的直接证据；角度已从弧度换回度）。 */
       cameraPose(): {
         pos: [number, number, number];
         yawDeg: number;
@@ -1525,7 +1546,7 @@ export class RendererMain {
           far: cam.far,
         };
       },
-      /** lightmap 施加结果的运行时快照（材质级，不是日志推断）。 */
+      /** lightmap 施加结果的运行时快照（材质级统计，不做日志推断）。 */
       lightmapState(): {
         meshes: number;
         withLightMapSlot: number;
@@ -1570,8 +1591,8 @@ export class RendererMain {
           else if (g1) uv1Only++;
           else if (g2) uv2Only++;
           else neitherUv++;
-          // 与 applyLightmapToMeshes 同口径：primitive extras 落在 **geometry.userData**
-          // （GLTFLoader `assignExtrasToUserData( geometry, primitiveDef )`），geometry 优先。
+          // 与 applyLightmapToMeshes 同口径：primitive 的 extras 落在 geometry.userData
+          // （GLTFLoader 的 assignExtrasToUserData 写进 geometry），故 geometry 优先于 mesh
           const hlGeom = (m.geometry?.userData as { hasLightmap?: unknown } | undefined)?.hasLightmap;
           const hlMesh = (m.userData as { hasLightmap?: unknown }).hasLightmap;
           const hl = hlGeom !== undefined ? hlGeom : hlMesh;
@@ -1591,7 +1612,7 @@ export class RendererMain {
               const img = lm.image as { width?: number; height?: number } | undefined;
               if (img?.width && img?.height) atlasSize = [img.width, img.height];
             }
-            // 注入标记：injectLightmapShader 在 onBeforeCompile 上留下的可辨识痕迹
+            // 注入标记：injectLightmapShader 在 onBeforeCompile 里留下的痕迹
             if ((mat as unknown as { __vbspLightmapInjected?: boolean }).__vbspLightmapInjected) {
               injectedMaterials++;
             }
@@ -1621,8 +1642,8 @@ export class RendererMain {
         };
       },
       /**
-       * P3 取证：直读前 3 个 ambient 注入材质的 cube 值（mesh/parent userData）与注入记录。
-       * 「0.75 vs 1.0 不敏感」问题的定位仪器：确认材质手里的 cube 到底是什么值。
+       * 直读前 3 个 ambient 注入材质的 cube 值（mesh 或父节点 userData）与注入记录。
+       * 「cube 取值是否真的影响画面」这类定位用的仪器。
        */
       ambientProbe(): unknown {
         if (!self.scene) return { count: 0, samples: [], note: 'no scene' };
@@ -1654,9 +1675,10 @@ export class RendererMain {
         return { count: found.length, samples: found };
       },
       /**
-       * 应用确定性位姿并冻结物理（见本方法上方说明）。
-       * `surface`：出生点 + 俯视 -35°（视野以地图地表为主，lightmap 是否参与直接可见）；
-       * `spawn`  ：出生点原始朝向（对照口径）。
+       * 应用确定性位姿并冻结物理（冻结机制见本方法上方说明）。
+       * `spawn`：回出生点并保持出生朝向；
+       * `surface`：回出生点后把 pitch 压到 -35°（俯视地表，能直接看出 lightmap 是否参与画面），
+       * 再用 `setHoldPoint` 冻结；其余取值返回失败原因。
        */
       async applyPose(
         preset: string,
@@ -1670,7 +1692,7 @@ export class RendererMain {
         }
         if (preset !== 'surface') return { ok: false, why: `未知位姿预设：${preset}` };
 
-        // 先回出生点（拿权威 spawn 坐标），再把 pitch 压到 -35°（俯视地表）。
+        // 先回出生点，再把 pitch 压到 -35°（俯视地表）
         self.holdPoint = null;
         self.predPhys.respawn();
         await new Promise((r) => setTimeout(r, 400));
@@ -1687,23 +1709,22 @@ export class RendererMain {
           pitch: PITCH_DEG,
           onGround: true,
         };
-        // setHoldPoint 是既有生产机制（按住 C 读点）：tick 每帧 set_state 覆盖，
-        // 位置/朝向被钉死、速度归零 → 相机确定性锁在该位姿。
+        // setHoldPoint 是生产路径里的机制（按住 C 读点）：tick 每帧覆盖位姿并把速度归零 ⇒
+        // 相机被确定性地锁在该位姿
         self.setHoldPoint(freeze);
         await new Promise((r) => setTimeout(r, 600));
         return { ok: true, preset, pose: probe.cameraPose() };
       },
-      /** 解除冻结（脚本收尾用；不解除也不影响截图，浏览器随后被关掉）。 */
+      /** 解除冻结（脚本收尾用）。 */
       release(): void {
         self.holdPoint = null;
       },
 
       /**
-       * 「假亮」判别器：把所有 lightMap 纹理的 image 换成**常量图**（同色铺满）。
+       * 「假亮」判别器：把所有 lightMap 纹理的 image 换成同色常量图。
        *
-       * 用途：若画面亮度随之**变得均匀**（方差塌缩）⇒ 之前的明暗来自 lightmap 采样
-       * （真光照）；若画面**几乎不变** ⇒ 明暗来自贴图/几何，lightmap 未真正参与。
-       * 这是纯验证手段，不参与生产逻辑。
+       * 用途：若画面亮度随之变得均匀（方差塌缩）⇒ 明暗来自 lightmap 采样；若画面几乎不变 ⇒ 明暗来自
+       * 贴图与几何，lightmap 未真正参与。纯验证手段，不参与生产逻辑。
        */
       replaceAtlasWithConstant(r: number, g: number, b: number): { replaced: number } {
         if (!self.scene) return { replaced: 0 };
@@ -1725,7 +1746,7 @@ export class RendererMain {
               buf[i * 4] = r;
               buf[i * 4 + 1] = g;
               buf[i * 4 + 2] = b;
-              buf[i * 4 + 3] = 128; // α=128 ⇒ exp = 128*255/255-128 = 0 ⇒ 倍数 2^0 = 1
+              buf[i * 4 + 3] = 128; // α=128：解码端 exp = 128*255/255−128 = 0 ⇒ 亮度倍数 2^0 = 1
             }
             const canvas = document.createElement('canvas');
             canvas.width = w;

@@ -5,8 +5,11 @@ edition = "2021"
 description = "WebSurf 共享物理系统（源自 game/ WebSurf-game 的 Rust 物理，被 debug/ 与 game/ 两工程共同引用）"
 license = "MIT"
 
-# 归属仓库根 Cargo workspace（与 websurf-wasm-core、四个模块 wasm crate 同 workspace，
-# 共享根 Cargo.lock；target/ 位于各工程本地；曾为独立 workspace root，2026-09-06 合并）。
+# 归属仓库根 Cargo workspace：仓库根 Cargo.toml 的 [workspace] members = ["src", "src/wasm-core"]，
+# 即本 crate 与 websurf-wasm-core 两个成员，共用仓库根 Cargo.lock 与仓库根 target/。
+# 三个工程的 wasm crate 不在本 workspace：apps/debug、apps/game、apps/viewer 各自的 Cargo.toml
+# 是一个 workspace 根，成员分别是 apps/debug/crates/wasm、apps/game/crates/wasm 与
+# apps/viewer/crates/wasm，各有自己的 Cargo.lock 与 target/。
 
 [lib]
 crate-type = ["rlib"]
@@ -16,6 +19,6 @@ path = "lib.rs"
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 serde = { version = "1.0", features = ["derive"] }
-# t3: float_roundtrip = parse↔print 位级精确往返（种子面 JSON 通道的位级契约前提；
-# 默认 fast parser 对部分 f64 有 1-ULP 往返偏差，实测 origin[2] 10.478655362066775 → …776）
+# float_roundtrip：f64 的 parse↔print 位级精确往返。种子面（src/phys/seed.rs 的
+# set_state_ex / state_full_json）按 JSON 文本传递整实例状态，数值一致靠该 feature。
 serde_json = { version = "1.0", features = ["float_roundtrip"] }

@@ -15,17 +15,18 @@ Fixes #(issue number)
 
 ## 影响范围
 
-- [ ] debug（主工程）
-- [ ] game（WebSurf-game）
-- [ ] test（WebSurf-test：`test/dual-mode-harness/`）
-- [ ] 共享层（src/，两端均受影响——需双端契约校验通过）
+- [ ] debug（`apps/debug`）
+- [ ] game（`apps/game`）
+- [ ] viewer（`apps/viewer`）
+- [ ] 共享层（`src/`，三个工程均受影响——需契约校验通过）
 
 ## 测试
 
-- [ ] 在对应工程目录（`debug/` / `game/` / `test/dual-mode-harness/`）`npm run build` 构建通过
-- [ ] 涉及共享层改动：`node scripts/check-wasm-api.mjs` 在 debug 与 game 两端通过
-- [ ] 涉及物理/时序改动：相关验证脚本通过（`game` 的 `npm run test:phys`、
-      `test/dual-mode-harness` 的 `node scripts/phys-smoke.mjs`）
+- [ ] 在对应工程目录（`apps/debug` / `apps/game` / `apps/viewer`）`npm run build` 构建通过
+- [ ] 涉及共享层改动：`apps/debug/scripts/check-wasm-api.mjs` 与
+      `apps/game/scripts/check-wasm-api.mjs` 两端均通过
+- [ ] 涉及物理/时序改动：相关验证脚本通过（`apps/game` 的 `npm run test:phys`、
+      `apps/game/scripts/phys-smoke.mjs`）
 - [ ] 本地验证通过
 
 ## 截图（可选）

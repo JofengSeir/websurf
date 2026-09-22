@@ -1,26 +1,27 @@
 #!/usr/bin/env node
 /**
- * debug 渲染帧耗时实测（headless Chromium + CDP，**真实 GPU**）。
+ * debug 渲染帧耗时实测（headless Chromium + CDP，走本机默认图形后端）。
  *
- * 目的：把「流畅度」从主观感受变成可复现的测量。headless Edge/Chrome 在本机走
- * ANGLE/D3D11 + 真实 GPU（非 SwiftShader 软渲染），故帧耗时具备参考性。
+ * 量什么：页内用 requestAnimationFrame 连采 `SAMPLES`(400) 个帧间隔（相邻 `performance.now()`
+ * 之差），排序后打印 样本数 / 平均 ms 与换算 FPS / p50 / p95 / p99 / max / >33ms / >50ms，
+ * 并额外给一行 `RESULT_JSON <json>` 便于机器读取。headless 下 rAF 不做 vsync 节流，
+ * 因此读数反映的是每帧处理耗时（吞吐），而不是锁帧后的显示帧率。
  *
- * 流程：启动 headless 浏览器 → 打开 debug 页面 → CDP `DOM.setFileInputFiles` 注入
- * .bsp（绕过人工选文件）→ 等地图就绪 → 页面内 rAF 采样帧间隔 → 输出统计。
+ * 流程：起 headless 浏览器（CDP 调试端口从 9251 起随机 60 个）→ 开页面 →
+ * `DOM.setFileInputFiles` 给 `#bspFile` 注入地图 → 等控制台出现含 `optimizeScene` 或 `分块合并`
+ * 的日志行（超过 `LOAD_TIMEOUT_MS`(90s) 未出现也继续，故合并关闭时同样能测）→ 打印 `#cullStats`
+ * 的文本 → 采样 → 统计。控制台里含 `optimizeScene` 的首行也会被回显。
  *
- * 前置：debug 静态服务已在跑（`cd debug && npm run dev` → 8080）；
- *       地图文件存在（默认 maps/surf_666.bsp）。
+ * 前置：debug 的静态服务已在跑（默认页面 http://localhost:8080/web/index.html，对应
+ * `apps/debug/package.json` 的 `dev`），且地图文件存在 —— 地图缺省取 <仓库根>/maps/surf_666.bsp，
+ * 而该路径当前不在工作区（地图实际放在 <仓库根>/test/maps/ 下），故不给第 4 个参数时会在
+ * 地图检查处打印「地图不存在」并以 2 退出。
+ *
+ * 退出码：未找到 Chrome/Edge，或地图不存在 → 2；页面里没有 `#bspFile` → 1；
+ * 采样结果为空（`window.__ft` 为空）→ 1；否则 0。
  *
  * 用法：npm run bench:frames
  *       npm run bench:frames -- <label> <url> <mapPath>
- *
- * 实测基线（surf_666.bsp，1280×720，本机 RTX 4060）：
- *   合并开启（当前实现）：mean 3.13ms（~319 FPS），p95 4.5ms，400 帧 0 次 >33ms
- *   合并关闭（OPTIMIZE_SCENE_ENABLED=false 复现旧路径）：mean 16.09ms（~62 FPS）
- *   → 约 5.1× 差距；旧路径 16.1ms 已贴住 16.7ms vsync 预算，任何抖动即掉帧。
- *
- * 提示：headless 下 rAF 不做 vsync 节流，因此读数反映**每帧处理耗时（吞吐）**，
- * 而非锁帧后的显示帧率——正是我们要比较的量。
  */
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -37,7 +38,7 @@ const MAP = process.argv[4] ?? join(repoRoot, 'maps', 'surf_666.bsp');
 const SAMPLES = 400;
 const LOAD_TIMEOUT_MS = 90000;
 
-// headless 浏览器：优先 Chrome，回退 Edge（均为 Chromium，CDP 同协议）
+// headless 浏览器候选：先 Chrome 后 Edge（都是 Chromium，CDP 协议一致）
 const CANDIDATES = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
@@ -80,7 +81,7 @@ async function waitForCdp() {
         if (page) return page;
       }
     } catch {
-      /* retry */
+      /* 本轮 CDP 查询失败：忽略，交给循环下一轮 */
     }
     await sleep(250);
   }
@@ -144,7 +145,7 @@ if (!nodeRes?.nodeId) {
 await send('DOM.setFileInputFiles', { nodeId: nodeRes.nodeId, files: [MAP] });
 console.log(`[${LABEL}] 已注入地图，等待加载…`);
 
-// 就绪判据：出现 optimizeScene 日志（合并开启时）；超时则继续（合并关闭时不会有该日志）
+// 就绪判据：控制台出现含 optimizeScene 或 分块合并 的行；超时也继续（合并关闭时没有该日志）
 const t0 = Date.now();
 let sawMarker = false;
 while (Date.now() - t0 < LOAD_TIMEOUT_MS) {
@@ -160,10 +161,12 @@ console.log(
 const optLine = consoleLines.find((l) => l.includes('optimizeScene'));
 if (optLine) console.log(`[${LABEL}] ${optLine}`);
 
-await sleep(3000); // 让 LOD/PVS 注册与首帧渲染稳定
+await sleep(3000); // 等 LOD 注册与首帧渲染稳定
 
-// 剔除统计（app.ts updateCullStatsUI → #cullStats）——面消失类问题的第一现场：
-// 重点看「隐藏 N」（PVS 错误剔除数）与「可见 X/Y」。PVS 关、视距对齐后应为 隐藏 0。
+// 剔除统计（app.ts 的 updateCullStatsUI 写 #cullStats）：面消失类问题的第一现场。
+// 文本口径：「可见 X/Y」与「LOD 近N/远M」出自 `apps/debug/src/renderer/lod-manager.ts` 的
+// `getStats`（「远」才是被剔除的块数），而「隐藏 N」是 pvs.pvsHidden —— `LodManager.update`
+// 每轮都把它写 0。
 const cullStats = await evalJs(`(document.getElementById('cullStats')?.textContent ?? '(无 #cullStats)')`);
 console.log(`[${LABEL}] 剔除: ${cullStats}`);
 

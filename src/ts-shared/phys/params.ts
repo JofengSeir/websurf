@@ -1,13 +1,18 @@
 /**
- * 物理参数映射（公共化 v1）— config → Rust set_params snake_case 全量参数。
+ * 物理参数映射：把各工程的 config 结构映射成 Rust `set_params` 接受的 snake_case 参数对象。
  *
- * 由 game/config.ts buildPhysicsParams 与 debug app.ts buildPredictionParams 收敛：
- * - 两端 config 字段名有差异（debug 用 gravity/jumpHeight/maxSpeed/...，
- *   game 同构），统一入参接口 PhysicsParamsLike + PhysicsInputLike，两端各自
- *   映射后调用（jumpSpeed → jump_height = jumpSpeed²/2g）
- * - sensitivity 固定 1：真实灵敏度由主线程输入层应用（mousemove 时乘入角度
- *   增量），双端物理（权威 Worker + 主线程渲染）用同一份已缩放输入 →
- *   改灵敏度不产生双端参数差异 → 角度永不分叉
+ * 上下游：两个工程的 Worker 直接调用本函数（`apps/game/src/worker/main.ts`、
+ * `apps/debug/src/worker/main.ts`）；各自的 config 层再包一层适配
+ * （`apps/game/src/config.ts`、`apps/debug/src/physics/prediction-params.ts`）。
+ * 主线程预测实例与权威 Worker 共用同一份映射结果，避免两端参数分叉。
+ *
+ * 两处必须守住的映射口径：
+ * - `jump_height` 不是透传：由 `jumpSpeed² / (2 × gravity)` 反算（config 给的是起跳速度）。
+ * - `sensitivity` 恒为 `1`：真实灵敏度由输入层在乘角度增量时应用一次
+ *   （`src/ts-shared/input/input-layer.ts`），物理侧再乘 1 等于不缩放——这样改灵敏度
+ *   不会让权威端与预测端拿到不同的物理参数。
+ *
+ * 不在本函数内：三项碰撞箱尺寸走 `set_hull`，不是 `set_params` 的键。
  */
 
 /** 物理参数统一入参（两端 config.physics 各自映射）。 */
@@ -35,7 +40,12 @@ export interface PhysicsInputLike {
   noclipSpeed: number;
 }
 
-/** 构造 Rust `set_params` 兼容的全量参数对象（权威 Worker 与主线程预测实例共用）。 */
+/**
+ * 构造 Rust `set_params` 兼容的参数对象：返回 **15 个键且恒为全量**（不是 patch），
+ * 与 Rust 侧可接受的 15 个键一一对应。调用方按 JSON 序列化后传给 `set_params`
+ * 或 `set_params` 对应通道。`jump_height` 在这里换算，`sensitivity` 在这里写死为 1
+ * （原因见文件头）。
+ */
 export function buildPhysicsParams(
   p: PhysicsParamsLike,
   input: PhysicsInputLike,
@@ -52,8 +62,8 @@ export function buildPhysicsParams(
     crouch_speed: p.crouchSpeed,
     autobhop: p.autobhop,
     bhop_speed_clamp: p.bhopSpeedClamp,
-    // 灵敏度固定 1：真实灵敏度由主线程输入层应用（mousemove 时乘入角度增量），
-    // 双端物理（权威 Worker + 主线程渲染）用同一份已缩放输入 → 改灵敏度不产生双端分叉
+    // 灵敏度恒为 1：真实灵敏度由输入层乘入角度增量（见 input-layer.ts），
+    // 物理侧再乘 1 等于不缩放，故权威端与预测端不会因灵敏度不同而分叉
     sensitivity: 1,
     yaw_bind_speed: input.yawBindSpeed,
     noclip_speed: input.noclipSpeed,

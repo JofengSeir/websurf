@@ -2,16 +2,22 @@
 /**
  * 权威时钟验证（确定性 Node 测试，无需浏览器）。
  *
- * 背景：`input-bridge` 把 `tickRate` 塞进**每一条** physics 配置消息，而调用方原先
- * 无条件执行 `setFixedDt + reset()`。`reset()` 会永久丢弃累积器余数 + 一次唤醒区间
- * （均值 ≈11.5ms）——拖滑条（≈60 事件/秒）会导致权威时钟只跑到墙钟的 ≈31%，
- * 即用户报告的「tick 计算滑落，拖累渲染」。
+ * 被测事实（均可在源码逐条核对）：
+ *   - `src/ts-shared/auth/auth-loop.ts` 的 `reset()` 把累积器余数 `acc`、唤醒基准
+ *     `lastWall`、仿真时钟 `simMs` 一并清零；`setFixedDt(同速率)` 返回 `false`，
+ *     且不触碰任何内部量。
+ *   - `src/ts-shared/auth/worker-dispatch.ts` 的 config/physics 分支只在
+ *     `setFixedDt(env.getConfigTickRate())` 返回 `true`（步长真变化）时才调 `reset()`。
+ *   - 面板 `tickRate` 有两条入口：`apps/debug/src/app.ts` 的滑块回调单发
+ *     `{ tickRate }`（经 `InputBridge.sendConfig`），以及录制回放路径发整段 `physics`
+ *     配置（其中含 `tickRate`）。
  *
- * 本测试直接驱动真实 `createAuthLoop`，对比三种情形下的**权威 tick 数**：
- *   A 基线：不发配置消息
- *   B 新契约：每 4ms 发一次配置（`setFixedDt(同速率)` 返回 false → 调用方跳过 reset）
- *   C 旧行为：每 4ms 发一次配置并**无条件** reset（模拟修复前的调用方）
- * 断言：B ≈ A（不丢时间）；C 显著低于 A（复现缺陷，证明测试有效）。
+ * 本测试直接驱动真实 `createAuthLoop`，对比三种注入方式下的权威 tick 数：
+ *   A 基线：不发配置消息；
+ *   B 生产语义：每 4ms 发一次配置，步长未变时不 reset；
+ *   C 对照组：每 4ms 发一次配置并**无条件** reset（脚本内构造，用于证明本测试确实
+ *     能区分两种调用方式）。
+ * 断言：B ≥ 0.9×A（不丢时间）；C < 0.75×A；B > 1.15×C。
  *
  * 用法：node scripts/auth-clock-verify.mjs
  */
@@ -67,10 +73,10 @@ async function phase(label, opts) {
 
   const spam = setInterval(() => {
     if (opts.newContract) {
-      // 修复后的调用方：只在步长真变化时才 reset
+      // 生产语义：setFixedDt 返回 true（步长真变化）时才 reset
       if (loop.setFixedDt(RATE)) loop.reset();
     } else if (opts.legacy) {
-      // 修复前的调用方：无条件 reset
+      // 对照组：无条件 reset（脚本内构造，非现存调用方的写法）
       loop.setFixedDt(RATE);
       loop.reset();
     }
@@ -107,15 +113,17 @@ check('B 明显优于 C（修复有效）', neo > old * 1.15,
   check('再次 setFixedDt(同速率) 返回 false', loop.setFixedDt(RATE + 3) === false);
 }
 
-// ── 修复 2 接线层覆盖：真实 createWorkerDispatch 的 config/physics/tickRate 分支 ──
-// 保留上方 A/B/C 对照实验不动；此处新增一段，直接驱动生产 dispatch 函数，验证
-// 「步长未变 → 不 reset；步长变化 → 恰好 reset 1 次」的接线语义（上方对照实验只验
-// auth-loop 契约，没覆盖 dispatch 调用方）。createWorkerDispatch 的依赖（shared-state
-// 纯值、无运行时顶层 import；self/performance 仅在方法体内）可安全在 Node 桩环境 bundle。
+// ── 接线层覆盖：真实 createWorkerDispatch 的 config/physics tickRate 分支 ──
+// 直接驱动生产 dispatch 函数（`src/ts-shared/auth/worker-dispatch.ts`），验证
+// 「步长未变 → 不 reset；步长变化 → 恰好 reset 1 次」的接线语义；上方 A/B/C 对照实验
+// 只验 auth-loop 自身的契约，不覆盖 dispatch 调用方。createWorkerDispatch 的依赖可在
+// Node 桩环境 bundle（shared-state 为纯值、无运行时顶层 import；self/performance 只在
+// 方法体内出现）。
 {
   console.log('\n=== 修复 2 接线层：dispatch config tickRate 分支 reset 门禁 ===\n');
-  // 非零偏移的**合成**注入（2026-09-21 起 game 已取消隐藏偏移、面板值直译）：此处刻意
-  // 保留非零值做防回归——dispatch 不得假设 `getConfigTickRate() === 面板值`。
+  // 合成长度偏移：本脚本让 `getConfigTickRate()` 返回 `面板值 + 3`，用于防回归——
+  // dispatch 不得假设 `getConfigTickRate() === 面板值`（实测两工程当前都注入
+  // `() => config.physics.tickRate`，即该差为 0）。
   const TICK_RATE_OFFSET = 3;
   try {
     const wdBundlePath = resolve(HERE, '..', '.tmp', 'worker-dispatch', 'worker-dispatch.bundle.mjs');
@@ -188,9 +196,9 @@ check('B 明显优于 C（修复有效）', neo > old * 1.15,
     check('变值 tickRate config → reset 恰好 1 次', changeResets === 1,
       `changeResets=${changeResets}`);
   } catch (err) {
-    // 桩环境无法构造 createWorkerDispatch 依赖时的替代覆盖说明（如实汇报，
-    // 不假通过）：生产接线语义已由 test/dual-mode-harness §P4 + 本文件 setFixedDt
-    // 契约 + worker-dispatch.ts 源码变更共同覆盖。
+    // 桩环境无法构造 createWorkerDispatch 依赖时的替代覆盖说明：本分支只如实登记
+    // 「该覆盖项未执行」，不把失败改判为通过。`setFixedDt` 的返回值契约已由上方
+    // 「同速率 false / 新速率 true」三条断言独立覆盖。
     check('dispatch 接线层覆盖（createWorkerDispatch 桩构造）', false,
       `无法构造依赖：${err?.stack ?? err}`);
     console.log('  替代覆盖：t4-chain.test.ts §P4 + worker-dispatch.ts L268-272 条件 reset');

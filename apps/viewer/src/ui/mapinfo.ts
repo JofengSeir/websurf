@@ -1,8 +1,19 @@
 /**
- * 地图信息面板 + 出生点导航（右侧「地图」标签页）。
+ * 地图信息面板 + 出生点导航（右侧「地图」标签页的内容，挂在 `#pane-map` 下）。
  *
- * 布局（S7）：顶部「更换地图」文件行；地图信息默认只显核心行，
- * 统计明细收进折叠；出生点条目为单行 pill（坐标全量在 title）。
+ * 构造函数按序建出四块：
+ * 1. 「更换地图」文件行（`filebtn map-reload`，`for="bspFile"`，点击转发 `#bspFile.click()`；
+ *    未加载地图时不显示）；
+ * 2. 光照模式分区（`select#lightingMode`，两档 baked / texture，初值 baked）；
+ * 3. 「地图信息」分区：默认只列文件 / 出生点数 / 世界尺寸三行，统计明细收进折叠容器；
+ * 4. 「出生点导航」分区：每个出生点一行（`spawn-item`，推荐项加 `primary` 类与 ★ 前缀），
+ *    行内「跳转」按钮把该点的位置与角度交给构造时传入的 `onJump`。
+ *
+ * 数据来源：`apps/viewer/src/core/bsp.ts` 的 `BspLoadResult`（文件名、元数据、出生点、耗时）
+ * 与 `ViewerScene.worldBox()` 的几何包围盒；角度换算复用
+ * `apps/viewer/src/core/spawn.ts` 的 `spawnPointAng`，故面板显示的角度与初始视角同源。
+ * 类名契约（`kv` / `k` / `v`、`spawn-list` / `spawn-item` / `primary` / `cls`、`note`、`field` 系列）
+ * 在 `apps/viewer/web/styles.css`。
  */
 
 import { el, foldBox, section } from '../core/dom.js';
@@ -35,7 +46,7 @@ export class MapPanel {
   private readonly spawnBody: HTMLElement;
   private readonly reloadWrap: HTMLElement;
   private readonly emptyNote: HTMLElement;
-  /** 出生点快照（世界坐标，脚底），供「出生点导航」跳转列表用。 */
+  /** 面板当前展示的出生点快照（`name` 已含 ★ 与坐标，`pos` 为脚底世界坐标）。 */
   private spawns: Array<{ name: string; pos: [number, number, number] }> = [];
 
   constructor(
@@ -43,13 +54,13 @@ export class MapPanel {
     private readonly onJump: (pose: Pose) => void,
     private readonly onLightingMode: (mode: LightingMode) => void = () => {},
   ) {
-    // 更换地图：已加载地图后显示的换图入口（引导层按钮管首次加载）
+    // 更换地图行：地图加载后才显示（首次加载由引导层按钮负责）
     this.reloadWrap = el('label', 'filebtn map-reload');
     this.reloadWrap.setAttribute('for', 'bspFile');
     this.reloadWrap.textContent = '更换地图…';
     this.reloadWrap.title = '选择新的 .bsp 地图文件（载入新地图会重建场景）';
     this.reloadWrap.style.display = 'none';
-    // 与引导按钮同一链路：#bspFile.click()（label 默认激活在部分浏览器对隐藏 input 不可靠）
+    // 与引导按钮同链路：显式转发到 #bspFile.click()（label 对隐藏 input 的默认激活不可靠）
     this.reloadWrap.addEventListener('click', (e) => {
       e.preventDefault();
       (document.getElementById('bspFile') as HTMLInputElement | null)?.click();
@@ -66,8 +77,9 @@ export class MapPanel {
   }
 
   /**
-   * 光照模式（预烘焙 / 纯纹理）：与 apps/game、apps/debug 同名同语义的**运行期性能旋钮**，
-   * 默认预烘焙。小字按用户定调描述**移动时的渲染代价**（不是进图速度）。
+   * 光照模式分区（预烘焙 / 纯纹理）：与 apps/game、apps/debug 同名同语义的运行期旋钮，
+   * 初值 baked。分区小字（代码字面量）说明两档在**移动时**的渲染代价，与进图速度无关。
+   * 变更经构造时传入的 `onLightingMode` 冒泡到 `ViewerScene.setLightingMode`。
    */
   private buildLightingSection(root: HTMLElement): void {
     const body = section(root, '光照模式');
@@ -98,20 +110,21 @@ export class MapPanel {
     );
   }
 
-  /** 出生点快照（世界坐标，脚底），供「出生点导航」跳转列表用。 */
+  /** 出生点快照的只读视图（本仓当前零外部调用点：跳转列表由 `renderSpawns` 直接建 DOM）。 */
   get spawnPoints(): ReadonlyArray<{ name: string; pos: [number, number, number] }> {
     return this.spawns;
   }
 
-  /** 换图载入中：禁用「更换地图」入口（引导按钮的 busy 由 app 管）。 */
+  /** 换图载入中：给「更换地图」入口加 `busy` 类（引导按钮的 busy 态由 app 管）。 */
   setLoadBusy(busy: boolean): void {
     this.reloadWrap.classList.toggle('busy', busy);
   }
 
   /**
-   * result（null = 清空）+ 几何包围盒 + 推荐出生点下标。
-   * primaryIndex 缺省用 wasm 的 result.primary；传入 app 侧 resolveInitialSpawn
-   * 的命中下标时，★ 标记与初始视角同源（P2-4 回退：推荐位可能不再是 wasm primary）。
+   * 渲染入口：`result`（null = 清空面板）+ 几何包围盒 + 推荐出生点下标。
+   * `primaryIndex` 缺省取 `result.primary`（wasm 口径），二者都缺时按 −1 处理（无 ★ 标记）；
+   * `apps/viewer/src/app.ts` 传入 `resolveInitialSpawn` 的命中下标，使 ★ 与初始视角同源。
+   * 本仓当前唯一调用点只传非 null 的 `result`。
    */
   setMap(result: BspLoadResult | null, box: WorldBox | null, primaryIndex?: number): void {
     this.reloadWrap.style.display = result ? '' : 'none';
@@ -127,7 +140,7 @@ export class MapPanel {
       return;
     }
     const m = result.meta;
-    // 默认核心行：文件 / 出生点数 / 世界尺寸
+    // 默认核心行：文件 / 出生点数 / 世界尺寸（更细的统计见下方折叠）
     kv(body, '文件', result.fileName, result.fileName);
     kv(body, '出生点数', fmt(result.spawnPoints.length));
     if (box) {
@@ -144,7 +157,7 @@ export class MapPanel {
       );
     }
 
-    // 统计明细（开发/排障用）收进折叠
+    // 统计明细（排障用）整段收进折叠容器
     const stats = foldBox(body, '统计明细');
     if (m.magic !== undefined) kv(stats.body, 'magic', m.magic ?? '—');
     kv(stats.body, 'brushes', fmt(m.num_brushes ?? Number.NaN));
@@ -178,7 +191,7 @@ export class MapPanel {
         pos,
       });
 
-      // 单行 pill：名 + 跳转；坐标/角度全量进 title（viewer 约定：yaw=wrap(src+180)、pitch=−src）
+      // 单行 pill：类名 + 跳转按钮；坐标与角度全量放 title（角度按 viewer 约定）
       const [vyaw, vpitch] = spawnPointAng(sp);
       const item = el('div', 'spawn-item' + (i === primaryIndex ? ' primary' : ''));
       const star = i === primaryIndex ? '★ ' : '';

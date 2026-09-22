@@ -1,81 +1,30 @@
-# viewer 核心差异（与 debug / game / test / 共享层）
+# WebSurf-viewer：与另两个工程的实测差异
 
-> 本文回答一个问题：viewer 在五个工程里为什么长这样。全部对照点都来自当前代码
-> （`文件:行号` 双侧标注）；共享层实现细节见根文档（[../index.md](../index.md)、
-> [../architecture.md](../architecture.md)，集成任务产出）。
-> 总览见 [overview.md](overview.md)。
+> 本文只写**实测**差异：每条都在本工程与对比工程两侧各自打开过代码，证据写在「证据（两侧锚点）」列里。不做跨工程类推；没有实测到差异的维度直接写「本维度各工程实现一致」并给出两侧锚点。
+> 对比对象是 `apps/debug` 与 `apps/game`。术语按统一口径：共享物理 crate 为 `websurf-phys`（`src/phys/**`），共享状态通道为「SAB 通道 / postMessage 回退」，构建产物形态为「single 产物 / multi 产物」。
 
-## 1. 一句话定位差异
+---
 
-| 工程 | 一句话 | 视角 |
-|---|---|---|
-| viewer | **看**：BSP 地图游览 + 录像回放，无物理 | 自由飞行相机 |
-| game | **玩**：计时挑战玩法，主线程物理 + 权威权威帧双线 | 第一人称受控 |
-| debug | **调**：物理调参 / 碰撞 / 传送 / PVS / 画质可视化 | 多面板调试台 |
-| test/dual-mode-harness | **验**：同一物理双运行模式（主线程/Worker）对照 | 测试台 |
+## 实测差异对照表
 
-（四工程 TS 侧互不 import，`grep from ".../../(debug|game|viewer|test)/"` 于各 src 为空——见大纲 §1 的验证记录。）
-
-## 2. 物理与并发模型：无物理、单线程、无 SAB
-
-| 维度 | viewer | debug / game |
-|---|---|---|
-| Rust 依赖 | 仅 `websurf-wasm-core`（`apps/viewer/crates/wasm/Cargo.toml:18-19`）；头注自证"不含 websurf-phys（无物理）"（`apps/viewer/crates/wasm/Cargo.toml:3-5`） | `websurf-phys = { path = "../../../../src" }` + re-export `pub use websurf_phys::phys::PhysWorld`（`apps/debug/crates/wasm/Cargo.toml:21-22` + `apps/debug/crates/wasm/src/lib.rs:22`；game 同款 `apps/game/crates/wasm/Cargo.toml:21-22` + `apps/game/crates/wasm/src/lib.rs:23`） |
-| WASM 导出面 | `grep 'pub fn'` 实测 **4**（构造 + metadata/spawn/GLB 三方法，`apps/viewer/crates/wasm/src/lib.rs:273-465`） | debug **29** / game **18**（同口径 grep，含 tick/predict/respawn/teleport/pvs/mosaic 等） |
-| SharedArrayBuffer / Atomics | **无**（grep `apps/viewer/src apps/viewer/crates` → 空） | debug/game 的 app.ts / input / worker-types 均引用（`grep -l SharedArrayBuffer apps/debug/src apps/game/src` → `apps/debug/src/app.ts`、`apps/debug/src/input/input-bridge.ts`、`apps/game/src/app.ts`、`apps/game/src/worker/worker-types.ts` 等） |
-| Worker | 唯一一个：**录像解析 Worker**（`apps/viewer/src/worker/main.ts:1-8` 头注："Shavit .replay 原生解析，产出定型数组零拷贝回传"），且可失效回退主线程同源链路（`importer.ts:106-109`） | 权威物理 Worker + 主线程双线（`apps/game/src/worker/`、ts-shared `auth-loop/worker-dispatch`） |
-| 渲染循环 | 单线程 `requestAnimationFrame`，每帧「主时钟 → 相机 → 可视化 → render」（`app.ts:413-449`） | 物理 tick 与渲染解耦的双线时序 |
-
-推论：viewer 的"每帧确定性"只取决于录像 Clip 本身——回放不重演物理，**断网/慢机也不会跑歪轨迹**。
-
-## 3. TS 侧依赖：3 个共享单点 import（2026-09 批 4 起；其余仍正当隔离）
-
-- `grep -lE "from .*ts-shared" apps/viewer/src` → **3 个文件**：`core/pose.ts`（re-export `wrapDeg`/`bspYawToCsYaw` ← `src/ts-shared/phys/angles.ts`，D-08）、`core/constants.ts`（re-export `EYE_STAND` ← `src/ts-shared/phys/constants.ts`，D-16）、`core/bsp.ts`（`base64ToBytes`/`readEmbeddedWasmB64` ← `src/ts-shared/wasm/loader.ts`，D-09）。**批 4 前为零 import**；本表口径取代旧「本地复刻」叙述。
-- debug/game 各引 7 个 ts-shared 模块（auth×3 / phys×3 / input×1；`grep "from '.*ts-shared'" apps/debug/src apps/game/src` 实测：`shared-state`、`worker-dispatch`、`auth-loop`、`world-builder`、`params`、`authority-calibrator`、`input-layer`）；批 4 另加 `phys/angles`、`phys/constants`、`wasm/loader`、`world/pvs-manager`（debug/game）共 4 个新单点。
-- 为什么 viewer **只接这三个单点**：它没有物理状态要同步、没有权威帧要校准、没有键位掩码要打包——自由飞行相机自己就是输入终点（`fly.ts:57-105`）；**input/auth/tick/decoupled/phys-params 七项仍正当隔离**（framework-decoupling §4.3/§4.4）。但这三项是**跨工程契约**而非工程实现：`EYE_STAND` 是物理标定常量（同值源 `src/phys/player.rs:34`）、`bspYawToCsYaw` 是同地图出生朝向、base64 解码是同一注入协议——故按 D-08/D-09/D-16 接入共享单点（不再是"复制并注释对齐"）。
-
-## 4. 渲染对齐与刻意的差异
-
-| 项 | viewer | game（对照面） | 性质 |
+| 维度 | 本工程（`apps/viewer`） | 对比工程（`apps/debug` / `apps/game`） | 证据（两侧锚点） |
 |---|---|---|---|
-| 三点光 | Ambient 0.6 + Hemisphere + Directional（`scene.ts:78-83`） | 同组合（game `renderer-main`） | **有意对齐**（注释自证） |
-| far | `maxDim × 100`（`scene.ts:165`、`constants.ts:14-15`） | 同法 | 有意对齐 |
-| 近平面自适应 | 6 方向（前/后/左/右/**上/下**，`scene.ts:169-233`） | 4 水平方向（`apps/game/src/renderer/renderer-main.ts:381-424`） | **刻意分叉**：viewer 自由飞行会贴地/贴顶，补垂直两向（`scene.ts:170-172` 注释自证） |
-| 几何合并失败兜底 | 最终合并失败 → 全部单独保留（`scene.ts:364-370`） | 同策略（"只留第一块会把该 cell 其余几何静默丢掉"，注释注明"与 game 同法"） | 有意对齐（修渲染不全根因） |
-| resetRootRotations | 同法清 GLB 根旋转（`scene.ts:407-416`） | 同名同法 | 有意对齐 |
-| 雾 / PVS / LOD / lightmap / 画质切换 | **无**（`scene.ts:1-5` 职责边界） | debug/game 具备（debug lib 有 `export_mosaic_manifest`，`apps/debug/crates/wasm/src/lib.rs:850`） | 取舍：看图不需要 |
+| 渲染后端 | three.js WebGL 渲染器：`antialias: true`、`powerPreference: 'high-performance'`、像素比上限 2、`SRGBColorSpace` 输出 | 本维度三工程实现一致：debug 与 game 的渲染器构造参数与像素比上限、输出色空间同款 | viewer `apps/viewer/src/core/scene.ts:95` 到 `apps/viewer/src/core/scene.ts:102`；debug `apps/debug/src/renderer/renderer-main.ts:408`、`apps/debug/src/renderer/renderer-main.ts:413`、`apps/debug/src/renderer/renderer-main.ts:415`；game `apps/game/src/renderer/renderer-main.ts:276`、`apps/game/src/renderer/renderer-main.ts:281`、`apps/game/src/renderer/renderer-main.ts:283` |
+| 页面布局 | 单画布 `#game` + 右侧 `#sidebar` 双标签页（`data-tab="map"` / `data-tab="replay"`）+ 底部 `#dock`（`#replayMeta` + `#timeline`）+ 顶层 `#telemetry` 速度读数 + `#help` 帮助浮层 | game：单画布 `#preview` + `#hud`（内含 `#stats`）+ `#keys` 按键簇 + `#fps` + 单页折叠式 `#panel` + `#loadingOverlay`；debug：`#app` 内的 `#sidebar` / `#status` 状态行 + `#preview` 画布 + `#hud` 容器（无标签页结构、无底部 dock） | viewer `apps/viewer/web/index.html:12`、`apps/viewer/web/index.html:50`、`apps/viewer/web/index.html:76`、`apps/viewer/web/index.html:86`；game `apps/game/web/index.html:27`、`apps/game/web/index.html:39`、`apps/game/web/index.html:44`、`apps/game/web/index.html:59`、`apps/game/web/index.html:72`；debug `apps/debug/web/index.html:282`、`apps/debug/web/index.html:660`、`apps/debug/web/index.html:668` |
+| 物理运行位置 | **无物理**：WASM crate 只依赖共享解析层 `websurf-wasm-core`，导出面只有 BSP 解析与 GLB 导出；本工程的 Worker 只把 `.replay` 字节解码成帧 | debug 与 game 的物理在 Worker 里跑（Worker 由各自入口创建，并配套「SAB 通道 / postMessage 回退」与共享物理 crate `websurf-phys`） | viewer `apps/viewer/crates/wasm/Cargo.toml:18`、`apps/viewer/crates/wasm/src/lib.rs:496`、`apps/viewer/src/worker/main.ts:53`；debug `apps/debug/src/app.ts:301`；game `apps/game/src/app.ts:119` |
+| 共享状态通道 | 不存在：入口只读 `crossOriginIsolated` 并打印一行供核对，不建 `SharedArrayBuffer`、不选通道 | debug 与 game 都按判据选通道：`crossOriginIsolated` 且 `SharedArrayBuffer` 可用才建 SAB，否则回落 postMessage 并打一条 warn | viewer `apps/viewer/src/app.ts:39` 到 `apps/viewer/src/app.ts:44`；debug `apps/debug/src/app.ts:286`、`apps/debug/src/app.ts:289`、`apps/debug/src/app.ts:292`；game `apps/game/src/app.ts:102`、`apps/game/src/app.ts:108`、`apps/game/src/app.ts:112` |
+| 主线程 / Worker 分工 | BSP 解析与 GLB 导出在**主线程**同步段内完成（导出前先让出一帧给绘制），Worker 侧无世界构建、无物理 | debug 与 game 的 Worker 侧承担世界构建与物理步进，主线程只做渲染与输入上行 | viewer `apps/viewer/src/core/bsp.ts:118`、`apps/viewer/src/core/bsp.ts:121`；debug `apps/debug/src/app.ts:301`；game `apps/game/src/app.ts:119` |
+| 配置来源 | **无 config 模块**：静态光照参数直接写在 `ViewerScene` 构造期（exposure 2.3 / lightGamma 2.2 / ambientScale 1 / propVertexRelax 1 / propVertexFlatten 0.85）；工程常量集中在 `apps/viewer/src/core/constants.ts`；唯一的持久化是录像规则的 localStorage 键 `websurf-viewer.replay-rule.v2` | game 与 debug 都有 `apps/game/src/config.ts` 与 `apps/debug/src/config.ts` 的 `DEFAULT_CONFIG` 单点（含光照段与全部可调物理参数），面板与 Worker 从它取默认值 | viewer `apps/viewer/src/core/scene.ts:110` 到 `apps/viewer/src/core/scene.ts:115`、`apps/viewer/src/core/constants.ts:38`、`apps/viewer/src/replay/panel.ts:26`；game `apps/game/src/config.ts:176`、`apps/game/src/config.ts:223`；debug `apps/debug/src/config.ts:205` |
+| 构建产物形态 | 两种形态由同一个脚本的 `--multi` 开关决定：single 默认，保留清单为 `.nojekyll` / `README.md` / `serve.py` / `play.cmd` / `play.sh` / `index.html` / `app.js` / `styles.css`；multi 另加 `worker.js` / 外置 wasm / `wasm-embedded.js` / `coi-serviceworker.js`。single 还会把 `index.html` 改写成 classic `<script>` | **开关与语义一致**（都由 `process.argv.includes('--multi')` 切换、都写同一个 `dist/`），**保留清单不同**：debug 与 game 的清单里带 `LICENSE.cs-movement` / `NOTICE.cs-movement`，且都不生成 `serve.py` / `play.cmd` / `play.sh` / `README.md` | viewer `apps/viewer/scripts/build-dist.mjs:46`、`apps/viewer/scripts/build-dist.mjs:51`、`apps/viewer/scripts/build-dist.mjs:61`、`apps/viewer/scripts/build-dist.mjs:335`；debug `apps/debug/scripts/build-dist.mjs:63`、`apps/debug/scripts/build-dist.mjs:64`、`apps/debug/scripts/build-dist.mjs:75`；game `apps/game/scripts/build-dist.mjs:60`、`apps/game/scripts/build-dist.mjs:62`、`apps/game/scripts/build-dist.mjs:74` |
+| 面板与 UI 模块划分 | 有独立 `apps/viewer/src/ui/` 目录：HUD/引导层、地图信息+出生点导航、录像信息条、遥测 HUD；面板 DOM 由 `apps/viewer/src/core/dom.ts` 的构件函数（`section` / `foldBox` / `numField` / `checkField` / `buttonRow` / `noteLine`）生成 | game：面板集中在 `apps/game/src/panel/` 与 `apps/game/src/savepoint.ts`；debug：**没有** `ui/` 或 `panel/` 目录（目录实测），面板与状态行写在 `apps/debug/src/app.ts` 内并直接操作 `apps/debug/web/index.html` 提供的 id | viewer `apps/viewer/src/core/dom.ts:48`、`apps/viewer/src/core/dom.ts:97`、`apps/viewer/src/ui/telemetry.ts:61`；game `apps/game/src/savepoint.ts`、`apps/game/src/config.ts:163`；debug `apps/debug/src/app.ts:1949` |
+| 测试与门禁脚本 | 三个：`test:replay`（esbuild + node 跑录像管线自检）、`local:smoke`（CDP 驱动本机 Edge 跑页面链路）、`check:api`（WASM 契约与 TS 导入反向覆盖） | debug 的 script 面最宽（`test:optimize-scene` / `test:surf-crouch` / `plot:path` / `test:path-acceptance` / `test:auth-clock` / `test:jump-apex` 等，另有 `bench:frames` / `count:glb-meshes`）；game 三个（`test:phys` / `test:seed-smoke` / `test:surf-crouch`），**没有**浏览器冒烟脚本 | viewer `apps/viewer/package.json:10`、`apps/viewer/package.json:11`、`apps/viewer/package.json:17`；debug `apps/debug/package.json:19` 到 `apps/debug/package.json:24`；game `apps/game/package.json:17` 到 `apps/game/package.json:19` |
+| TypeScript 编译面 | `types: []`（明确不引入 `@types/node`），`include` 含 `test/**/*.ts` 与 `../../src/ts-shared/**/*.ts`；Node 侧 API 由本工程的 `apps/viewer/test/node-shims.d.ts` 就地声明 | game 与本工程一致（同样 `types: []`、同样 include 形态）；debug 不同：不设 `types: []`、开 `noUnusedLocals` / `noUnusedParameters` / `noFallthroughCasesInSwitch` / `verbatimModuleSyntax`，`lib` 含 `WebWorker`，并用 `paths` 配了五组 `@xxx/*` 别名 | viewer `apps/viewer/tsconfig.json:13`、`apps/viewer/tsconfig.json:15`、`apps/viewer/test/node-shims.d.ts:7`；game `apps/game/tsconfig.json:13`、`apps/game/tsconfig.json:15`；debug `apps/debug/tsconfig.json:6`、`apps/debug/tsconfig.json:8`、`apps/debug/tsconfig.json:18` |
+| 依赖面 | 运行时依赖只有 `three`；devDependencies 含 `ws`（CDP 冒烟用），**不含** `@types/node` | debug 与 game 的 devDependencies 都含 `@types/node`，都不含 `ws` | viewer `apps/viewer/package.json:24`、`apps/viewer/package.json:29`；debug `apps/debug/package.json:30`；game `apps/game/package.json:25` |
+| dev 服务端口 | `dev` script 走共享 `src/serve.py`，端口 **8100**，服务根为工程根 | debug **8080**、game **8090**（同一个 `src/serve.py`，只换端口参数） | viewer `apps/viewer/package.json:18`；debug `apps/debug/package.json:15`；game `apps/game/package.json:15` |
+| 静态光照着色器模块 | 三工程各持一份同构副本，路径都是 `apps/<app>/src/renderer/lightmap-shader.ts`，彼此不 import；三份文件在本轮读码时用 SHA256 比对，**哈希相同** | 同上（同哈希）；副本内自述行与路径无关（「三份同构副本之一」，不点名工程），故三份都成立：`apps/debug/src/renderer/lightmap-shader.ts` | viewer `apps/viewer/src/renderer/lightmap-shader.ts:7`、`apps/viewer/src/renderer/lightmap-shader.ts:8`；debug `apps/debug/src/renderer/lightmap-shader.ts:7`、`apps/debug/src/renderer/lightmap-shader.ts:8`；game `apps/game/src/renderer/lightmap-shader.ts:7` |
+| 录像/回放能力 | 有完整的 `.replay` 播放链路：原生解析、多轨道时间对齐、A-B 区间、逐帧、倍速、三条 3D 呈现（轨迹线 / tick 点 / 幽灵）与对外播放控制 API | debug 有输入录制与回放（`InputRecorder`）但面向输入序列而非 Shavit 录像；game 无录像回放链路（其 `views`/回放能力不在 `src/` 目录实测范围内） | viewer `apps/viewer/src/replay/player.ts:193`、`apps/viewer/src/app.ts:371`；debug `apps/debug/src/input/input-recorder.ts` 的 `record`（该文件在 `apps/debug` 范围内，本工程只做只读比对）；game：`apps/game/src` 下无 `replay/` 目录（目录实测） |
 
-## 5. 解析层与产物形态
+## 附注
 
-| 项 | viewer | 参照 |
-|---|---|---|
-| 解析本体 | 共享 `websurf-wasm-core`（`apps/viewer/crates/wasm/Cargo.toml:18-19`）——**不是复制**，与其他工程同一份 crate | debug/game 同依赖 |
-| WASM 包名 | `websurf_viewer_wasm`（`apps/viewer/package.json:8`、`apps/viewer/src/wasm.d.ts:4`） | debug→`websurf_wasm`、game→`websurf_wasm`（同名不同包、各自相对引用；根 workspace 有意不收编 5 个同名 `websurf-wasm` crate，根 `Cargo.toml:5-28`） |
-| vmdl vendor patch | 同款 `[patch.crates-io]`（`apps/viewer/Cargo.toml:11-13` = 根 `Cargo.toml:27-28`） | 四工程一致（VTX 三角形条带修复，`src/vendor/vmdl/`） |
-| 缺失纹理回退 / 默认纹理包 | 不启用：`ConvertOptions::default()` 无 `missing_fallback`（`apps/viewer/crates/wasm/src/lib.rs:454`） | debug/game 有 mosaic/mtz 链（`apps/debug/crates/wasm/src/lib.rs:842-867`） |
-| dist 形态 | **single 唯一形态**（`apps/viewer/scripts/build-dist.mjs:13`，dist-multi 分支 2026-09 移除；CI 亦走 `npm run build:dist`——"single 模式（viewer 唯一产物形态）"，`.github/workflows/deploy-pages.yml` 的 `build-app` 矩阵 job） | debug 本地支持 `--multi`（`apps/debug/scripts/build-dist.mjs:9,18,27`），CI 用 `--multi`（`deploy-pages.yml` 的 `build-app` 矩阵 job） |
-| file:// 兼容 | 内嵌 wasm base64 + Blob URL worker + classic script（`bsp.ts:44-51`、`importer.ts:41-50`、`build-dist.mjs:5`；断言 `smoke-cdp.mjs:128-143`） | debug/game 以 HTTP 部署为主 |
-
-## 6. 交互与功能面
-
-| 项 | viewer | 参照 |
-|---|---|---|
-| 相机 | 自由飞行（WASD/Space/C/Shift×4 + 指针锁定，`fly.ts:57-105`）+ 回放第一/第三人称 | game：受控玩家；debug：调参视角 |
-| 键位掩码 / 输入槽 | 无（键鼠直接进 FlyCam） | ts-shared `input-layer`/`keysToMask`（debug/game） |
-| 面板 | 地图信息 + 出生点导航 + 录像页（导入/坐标映射/轨迹列表/调整工具 + 时间轴 + 录像信息条） | debug：物理参数/碰撞/传送/PVS/画质面板；game：玩法面板 + 存点（`apps/game/src/panel/`、`apps/game/src/savepoint.ts`） |
-| 存点 / 计时 | 无（定位即"看"） | game 具备 |
-| 外部控制 API | `window.viewer.replay`（内省 + `meta()` + 播放控制，`app.ts:343-398`）+ `window.viewer.map`（相机位姿/地图 bbox/初始视角来源内省，`app.ts:326-342`，P2-4 冒烟断言用），供自动化/冒烟 | game/debug 以面板与参数为主 |
-
-## 7. 与共享层的边界（避免误读）
-
-1. **`websurf-wasm-core` 是真依赖**：BSP 解析（`vbsp` 26 lump + LZMA + Leaves 排序修复）、GLB 导出（`bsp_to_gltf_core`）、模型整合（`model_integrator`）、PAKFILE 索引（`pakfile_models`）、VTF 解码（`texture_utils`）全部来自共享 crate——viewer 侧 `crates/wasm/src/lib.rs` 只是 wasm-bindgen 导出层 + PAKFILE 模型/材质提取的"viewer 版组装"（`lib.rs:1-9, 16-17`）。
-2. **`websurf-phys` / `ts-shared`：三条"对齐"已升级为共享单点**：批 4 前共享的只有数值与约定（EYE_STAND 64.09、`bspYawToCsYaw = wrap(src + 180)`，t1/t2 于 2026-09 统一——旧式 `(270 − yaw) mod 360` 是 det=−1 镜像映射，surf_null primary srcYaw=180 应为 0° 旧式给 90°，评审 F6 已修）。**D-08/D-16/D-09 落地后** viewer 不再各自维护：公式与常量分别 import 共享单点（`apps/viewer/src/core/pose.ts` re-export `angles.ts`、`apps/viewer/src/core/constants.ts` re-export `constants.ts`、`apps/viewer/src/core/bsp.ts` import `wasm/loader.ts`）；仍各自维护的只剩 **Rust 侧**同式（`src/phys/teleport.rs:31-38`，跨语言无法共享符号，E-06）。该式服务 BSP 出生点/传送实体角路径（viewer 初始视角 `core/spawn.ts:47-50` + 面板跳转、ts-shared 出生点 yawDeg、Rust 传送后朝向），与 `.replay` 帧解码的实测定标（`yaw = wrap(src+180)`，`apps/viewer/src/replay/shavit-replay.ts:494-498`）**同一定标**——全链统一 +180 口径。
-3. **坐标系同一约定**：GLB 顶点/出生点都走 `[x,y,z]→[y,z,x]` Y-up 变换（`src/wasm-core/bsp_to_gltf_core/convert.rs:813-816`、`src/wasm-core/model_integrator/mod.rs:1041-1045`、`apps/viewer/crates/wasm/src/lib.rs:339-342`），所以 Shavit 录像帧的绝对世界坐标可直接与场景对齐——`.replay` 解码走同一 `[y,z,x]` 映射（`apps/viewer/src/replay/shavit-replay.ts:481`），HUD 包围盒外检查（`app.ts:157-188`）只用于暴露映射错误。
-4. **与 test/dual-mode-harness 的特殊关系**：viewer 的空间分块合并算法移植自 harness 的 `worker-b.ts`（`scene.ts:236-241` 注释自证）；viewer 的录像自检与 harness 的对照测试互补（管线 vs 物理）。
-
-## 8. 若要在 viewer 上"加物理"会破坏什么（反向印证取舍）
-
-- 需要引入 websurf-phys + SAB/权威 Worker → 破坏"单线程、双击 dist 可用"（§2）；
-- 需要碰撞 → GLB 导出要补 brush 碰撞体（共享层已有该路径，viewer 未启用，`lib.rs:1-9`"brush/模型碰撞…均不导出"）；
-- 需要重演物理 → 录像回放要换成重模拟，与"原生 `.replay` 帧直读回放"（基准 = 帧自身坐标）的定位冲突——viewer 刻意不做重演。
-这就是 viewer 保持"无物理纯视觉"的原因：**每一项它不做的能力，都换来一条它独有的简单性**（file:// 双击、`.replay` 零配置直入、53 KB→1211 帧毫秒级解析，断网/慢机也不会跑歪轨迹）。
+- 上表中「本维度各工程实现一致」的判定只用于**逐参数比对过**的项（three 渲染器构造、`--multi` 开关语义、`types: []`）；其余维度一律按实测差异写。
+- 本工程与另两个工程共享同一套 `src/` 共享层，但**共享面不同**：本工程只消费 `src/ts-shared/wasm/loader.ts`、`src/ts-shared/phys/angles.ts`、`src/ts-shared/phys/constants.ts` 与 `src/wasm-core/**`；不消费 `websurf-phys`、输入层、tick/授权与解耦环（消费点见 `documents/viewer/overview.md` 的「依赖方向」）。

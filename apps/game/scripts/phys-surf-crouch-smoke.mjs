@@ -1,17 +1,29 @@
 /**
- * surf 坡面蹲姿回归（node 级，跑真实 wasm 产物，禁浏览器）。
+ * surf 坡面蹲姿回归（node 级，跑真实 wasm 产物，不需要浏览器）。
  *
- * 背景：物理跑在 wasm 里，`src/phys` 的 Rust 改动必须 `npm run build:wasm` 才生效；
- * 各工程的 start-dev.cmd 存在「wasm 已存在就跳过构建」的分支，容易出现
- * "改了源码但行为没变"。本脚本直接对 pkg 产物做端到端验证，
- * 避免只验 Rust 单测而漏掉产物陈旧。
- *
- * 验证：
- *   A 贴坡 surf：蹲下后松开蹲键 → **保持蹲姿**（对齐 Source CanUnduck 失败）
+ * 三件断言，任一不成立即打印 FAIL 行并以退出码 1 结束；三件全过时末行是 `全部通过：3/3`。
+ *   A 贴坡 surf：蹲下后松开蹲键 → 保持蹲姿
  *   B 落地后松开蹲键 → 起立（不是永久卡蹲）
- *   C 空中蹲姿的动量与站姿一致（站姿参数；addspeed 钳制下两者逐 tick 相同）
+ *   C 空中蹲姿的每 tick 动量增量与站姿一致（两者都按站姿参数算）
  *
- * 用法：node scripts/phys-surf-crouch-smoke.mjs（需先 npm run build:wasm）
+ * 判据出自 `src/phys/player.rs`：
+ * - `update_duck` 的起立分支：地面起立只要求原地站立箱空闲；空中（含贴坡）起立要把 origin
+ *   下移「站立箱高 − 蹲箱高」（默认 18 HU）并放脚，判据是站立箱从当前 origin 扫掠到目标位置的
+ *   `fraction == 1.0` 且非 `start_solid` / `all_solid`，不满足就保持蹲姿。
+ * - `air_accelerate`：`addspeed` 一侧把 wishspeed 钳到 `AIR_SPEED_CAP`（30 HU/s），
+ *   `accelspeed` 一侧用未钳制的 wishspeed 乘 `AIR_ACCELERATE`；`current_max_speed` 只在
+ *   地面看 `ducked`，故蹲姿不降低空中上限 —— 这就是 C 两条线逐 tick 相同的依据。
+ *
+ * 为什么要跑产物而不是只跑 Rust 单测：物理在 wasm 里，`src/phys` 的 Rust 改动必须先经
+ * `apps/game/package.json` 的 `build:wasm`（wasm-pack 输出到 `pkg/`，再把 wasm 复制进 `web/`）
+ * 才会反映到 `pkg/websurf_wasm_bg.wasm`；`apps/game/start-dev.cmd` 则按共享脚本
+ * `src/scripts/wasm-stale-check.mjs` 的 mtime 判定（产物不比 `src/` 与 `crates/` 下的
+ * Rust 源新即跳过重建）决定是否重跑 `build:wasm`。本脚本直接加载 `pkg/` 下的产物。
+ *
+ * 前置：`apps/game/pkg/websurf_wasm_bg.wasm` 已由 `npm run build:wasm` 产出。
+ * 用法：在 `apps/game` 下执行 `node scripts/phys-surf-crouch-smoke.mjs`
+ * （`apps/game/package.json` 的 `test:surf-crouch` 即该命令）。
+ * 无产物落盘。
  */
 import { initSync, PhysWorld } from '../pkg/websurf_wasm.js';
 import { readFileSync } from 'node:fs';
@@ -22,6 +34,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmBytes = readFileSync(join(__dirname, '..', 'pkg', 'websurf_wasm_bg.wasm'));
 initSync({ module: wasmBytes });
 
+// 步长与三个键位掩码（位定义见 `src/phys/mod.rs` 的 `apply_input`）
 const DT = 1 / 64;
 const K_FORWARD = 0x01;
 const K_RIGHT = 0x08;
@@ -65,6 +78,7 @@ const floor = JSON.stringify([
   },
 ]);
 
+// 三个小工具：建世界（空 tri、空传送）、读种子 JSON、按步长推进
 const emptyTele = '{"teleports":[],"triggers":[]}';
 const newWorld = (brush, sx, sy, sz) => {
   const w = new PhysWorld();
@@ -77,7 +91,7 @@ const tick = (w, keys) => w.tick(DT, keys, 0, 0);
 // ── A. 贴坡 surf：蹲下松开 → 保持蹲姿 ────────────────────────────────
 {
   const w = newWorld(surfRamp, 0, 40, 40);
-  // 自由落到坡面首次接触
+  // 自由落到坡面首次接触（surfing 置位）——这是本场景的前置条件
   let contact = -1;
   for (let i = 0; i < 240; i++) {
     tick(w, 0);
@@ -91,6 +105,7 @@ const tick = (w, keys) => w.tick(DT, keys, 0, 0);
   s0.velocity = [0, -400 * S, 400 * C];
   w.set_state_ex(JSON.stringify(s0));
 
+  // 按住蹲键 20 tick：空中/贴坡蹲下由 update_duck 处理
   for (let i = 0; i < 20; i++) tick(w, K_DUCK);
   const ducked = st(w);
   if (!ducked.ducked) fail('A: 按住蹲键后应处于蹲姿');
@@ -102,6 +117,7 @@ const tick = (w, keys) => w.tick(DT, keys, 0, 0);
     if (!st(w).ducked) { stoodAt = i; break; }
   }
   const end = st(w);
+  // 起立即判失败：贴坡时脚下放不下那 18 HU 的站立箱（update_duck 的空中起立分支）
   if (stoodAt >= 0) {
     fail(
       `A: 贴坡 surf 松开蹲键后不应起立（第 ${stoodAt} tick 站起；` +
@@ -114,10 +130,12 @@ const tick = (w, keys) => w.tick(DT, keys, 0, 0);
 // ── B. 落地后松开蹲键 → 起立 ─────────────────────────────────────────
 {
   const w = newWorld(floor, 0, 1, 0);
+  // 40 tick 按住蹲键：先落地、再进入蹲姿
   for (let i = 0; i < 40; i++) tick(w, K_DUCK);
   const g = st(w);
   if (!g.on_ground) fail('B: 前置——应已落地');
   if (!g.ducked) fail('B: 前置——应已蹲下');
+  // 松开蹲键后地面起立只要求原地站立箱空闲，应在有限 tick 内站起
   let stood = false;
   for (let i = 0; i < 20; i++) {
     tick(w, 0);

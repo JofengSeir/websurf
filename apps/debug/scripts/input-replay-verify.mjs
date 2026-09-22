@@ -2,23 +2,31 @@
 /**
  * 输入录制 / 确定性回放【无头验收】——用户不参与。
  *
- * 验的是什么（对应交付要求）：
- * 1. **逐帧输入一致**：录制期交给 `feedInput` 的 `(dx, dy, keys)` 序列，与回放期
- *    实际喂出去的序列**逐帧严格相等**（`===`，不是容差比较）。
- * 2. **逐帧位置一致**：录制期每个 rAF 帧的玩家位置，与回放期第 k 帧的位置相等
- *    （要求"位置差 ≤ 容差"，本脚本按 1e-9 HU 判等并报告实测最大值）。
- * 3. **帧数一致**：回放帧数 = 录制帧数（丢帧就要报出来，不许掩盖）。
+ * 验的是什么：
+ * 1. **逐帧输入一致**：录制载荷里的 `(dx, dy, keys)`，与回放期实际喂出去的序列逐帧严格相等
+ *    （`===`，不是容差比较）。两侧都是 `InputRecorder` 的样本：录制侧取 `__wsInput.exportJson`
+ *    （`apps/debug/src/app.ts` 的 `inputRecorder`），回放侧取 `__wsInput.captureText`
+ *    （同文件的 `replayCapture`：`setAlwaysOn(true)`，`record` 调用点在回放分支）。
+ * 2. **逐帧位置**：录制期采样的渲染物理位置与回放期同帧号位置求欧氏距离，报出最大值
+ *    `maxPosDiff` 与所在帧号，并按 `POS_TOL` 给出「位置判等」一行；轨迹差不参与通过判据。
+ * 3. **帧数一致**：回放捕获帧数 = 录制载荷声明帧数（`recCount === capCount`）。
  *
- * 怎么做到"录制/回放同一时间轴"：两边都由 `__wsInput` 驱动，缓存在页内——
- *   - 录制：`pushSynthetic()` 每帧注入一份合成输入（走**真实**输入路径：Q/E 合并 +
- *     滚轮位 + 录制点 + `feedInput`），排空队列即"这一帧已被物理消费"。
- *   - 回放：`tickReplay()` 每帧推进一步（等渲染主循环消费后再结算），天然逐帧对齐。
- * 页内循环执行（不是每个 rAF 一次 CDP evaluate），所以录制/回放速率只受页面 rAF 限制。
+ * 录制与回放同一时间轴的做法：两边都由页内的 `__wsInput` 驱动——
+ *   - 录制：`pushSynthetic()` 每帧入队一份 `{dx, dy, keys}`；输入循环的合成分支把它与
+ *     Q/E 等效鼠标量合并后交给 `apps/debug/src/renderer/renderer-main.ts` 的
+ *     `RendererMain.feedInput`（与实时路径同一处调用点），`counts().syntheticPending`
+ *     归零即该帧已被取走。
+ *   - 回放：`tickReplay()` 推进一帧，等渲染主循环把该帧消费完再结算
+ *     （见 `apps/debug/src/app.ts` 的 `replayAdvanceAndWait`）。
+ * 驱动循环都在页内跑（不是每个 rAF 一次 CDP evaluate），故速率只受页面 rAF 限制。
  *
  * 前置：无（本脚本自己起静态服务、自己起无头浏览器、自己收尾）。
  * 用法：node scripts/input-replay-verify.mjs [label] [seconds]
- * 产物：debug/.tmp/input-replay/<label>-recorded.json（录制文件）
- *       debug/.tmp/input-replay/<label>-replay.json（回放捕获 + 轨迹对照，全部数值）
+ * 产物：apps/debug/.tmp/input-replay/<label>-recorded.json（录制载荷，原样落盘）
+ *       apps/debug/.tmp/input-replay/<label>-replay.json（回放捕获 + 轨迹对照 + 对照实验）
+ *       apps/debug/.tmp/input-replay/<label>-external.json（仅 IR_EXTERNAL 分支产出）
+ * 环境变量：IR_EXTERNAL=<录像 JSON 路径> 触发两段外部录像相位（早期的方向自检 +
+ *           末尾的两遍回放与异常探测）；IR_MAX_FRAMES=<n> 限制每段帧数，0 = 全放。
  */
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -35,8 +43,8 @@ const MAP = join(repoRoot, 'test', 'maps', 'surf_666.bsp');
 const OUT_DIR = join(debugDir, '.tmp', 'input-replay');
 const PORT_HTTP = 8080;
 const LOAD_TIMEOUT_MS = 180000;
-/** 位置判等容差（HU）：物理是同一份 wasm + 同一输入 + 同一步长，应当逐位相等；
- *  留 1e-6 只为吸收"最后一位浮点"可能出现的平台差异，不是给分叉留余地。 */
+/** 位置判等容差（HU）：判据是 `posIdentical = maxPosDiff <= POS_TOL`，只决定报告里的
+ *  「位置判等」一行；通过判据不含轨迹差（见文件末的 `ok`）。 */
 const POS_TOL = 1e-6;
 
 const KEY = { forward: 1, left: 4, right: 8, jump: 16, duck: 32, wheelJump: 256, yawRight: 1024 };
@@ -60,14 +68,16 @@ if (!existsSync(MAP)) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ── 静态服务（本脚本自起自停；不要求人工先跑 dev）──────────────────────────
+// ── 静态服务（本脚本自起自停）──────────────────────────────────────────────
+// 参数与 `apps/debug/package.json` 的 `dev` 一致：`src/serve.py` + 端口 8080 + 工作目录 apps/debug。
 const server = spawn('python', [join(repoRoot, 'src', 'serve.py'), String(PORT_HTTP), '.'], {
   cwd: debugDir,
   stdio: 'ignore',
 });
 let serverAlive = true;
 
-// ── headless 浏览器 ────────────────────────────────────────────────────────
+// ── headless 浏览器（CDP）──────────────────────────────────────────────────
+// 可执行文件取 `CANDIDATES` 里第一个存在的；调试端口 = 9500 + 0..89 的随机数。
 const CDP_PORT = 9500 + Math.floor(Math.random() * 90);
 const browser = spawn(
   BROWSER,
@@ -199,7 +209,9 @@ if (!nodeRes?.nodeId) {
 await send('DOM.setFileInputFiles', { nodeId: nodeRes.nodeId, files: [MAP] });
 console.log(`[${LABEL}] 已注入地图，等待场景就绪…`);
 
-/** 场景就绪判据：物理实例可读（位置非零）+ 出生点列表已填充。 */
+/** 场景就绪判据：`__wsInput` 已注册 ∧ `replayState()` 的 `state` 非空 ∧ `state.pos.x` 非 null
+ *  ∧ `apps/debug/web/index.html` 的 `spawnSelect` 已有 option；超时 `LOAD_TIMEOUT_MS` 抛错，
+ *  等待期间每 15s 打一行诊断。 */
 async function waitSceneReady() {
   const t0 = Date.now();
   let lastDiag = 0;
@@ -231,13 +243,15 @@ const ready = await waitSceneReady();
 console.log(`[${LABEL}] 场景就绪（出生点 ${ready.spawns} 个，x=${Number(ready.x).toFixed(1)}）`);
 await sleep(1500); // 让 LOD/PVS 与物理首帧稳定
 
-// ── 可复用的页内脚本片段 ───────────────────────────────────────────────────
+// ── 可复用的页内脚本片段（`recordScript` / `replayScript` 两个模板函数）─────
 
 /**
- * 录制一段合成输入会话（走真实输入路径）+ 逐帧采样位置。
- * @param frames 帧数
- * @param authorityOff true = 同时关掉渲染器的"权威实时耦合"（`__wsInput.setReplayMode(true)`）
- *        ——用于对照实验 A：证明"同一输入 + 同一步长 → 同一轨迹"，与权威线噪声无关。
+ * 录制一段合成输入会话，并逐帧采样渲染物理位置（页内脚本文本）。
+ * @param frames 帧数（调用处传 `SECONDS * 60` 取整）
+ * @param authorityOff true = 录制期也调 `__wsInput.setReplayMode(true)`：关掉权威 → 渲染的
+ *        实时耦合与步长覆盖（见 `apps/debug/src/renderer/renderer-main.ts` 的 `setReplayMode`）。
+ *        对照实验 A（关耦合录制 → 立即回放）与 B（同一份录制连放两遍）都传 true。
+ * @returns 页内脚本的 JSON 文本：`counts` / `statusText` / `export` / `liveTraj` / `evs`
  */
 const recordScript = (frames, authorityOff) => `(async () => {
   const api = globalThis.__wsInput;
@@ -287,9 +301,12 @@ const recordScript = (frames, authorityOff) => `(async () => {
 })()`;
 
 /**
- * 回放一段录制并逐帧采样位置。
- * @param exportJsonText 录制导出 JSON 原文（作为 JS 对象字面量内联）
- * @param startDelayRafs 开始前等待的 rAF 数（换图后需要更多）
+ * 回放一段录制，并逐帧采样渲染物理位置（页内脚本文本）。
+ * @param exportJsonText 录制导出 JSON 原文，直接内联为 JS 对象字面量；`__wsInput.load`
+ *        接受 JSON 文本或已解析对象（见 `apps/debug/src/app.ts` 的 `loadPlaybackFromJson`）
+ * @param startDelayRafs `play(true)` 之前等待的 rAF 数（换图后需要多等）
+ * @returns 页内脚本的 JSON 文本：`loaded` / `started` / `startState` / `traj` / `errors` /
+ *          `counts` / `recDiag` / `capture` / `finalState` / `statusText`
  */
 const replayScript = (exportJsonText, startDelayRafs) => `(async () => {
   const api = globalThis.__wsInput;
@@ -330,7 +347,9 @@ const replayScript = (exportJsonText, startDelayRafs) => `(async () => {
   });
 })()`;
 
-/** 逐帧输入序列比对（dx/dy/keys 严格 ===）。 */
+/** 逐帧输入序列比对（dx/dy/keys 严格 ===）：`frames` 两种形态都接受——并行数组
+ *  （`apps/debug/src/input/input-recorder.ts` 的 `toCompactPayload`，两处导出都走这条）
+ *  与对象数组（`load` 的返回形态）。一致性判据 = 首个不一致帧 < 0 且两侧帧数相等。 */
 function compareInputs(recordedPayload, capPayload) {
   const at = (payload, i) => {
     const f = payload.frames;
@@ -358,7 +377,8 @@ function compareInputs(recordedPayload, capPayload) {
   return { n, capCount, firstMismatch, mismatchSamples, identical: firstMismatch < 0 && n === capCount };
 }
 
-/** 逐帧位置比对（按录制帧号索引）。 */
+/** 逐帧位置比对：按录制帧号 `i` 索引回放轨迹，逐帧求欧氏距离，报最大值与所在帧号；
+ *  回放缺的帧数计入 `missing`（调用方把它追加进 `replayResult.errors`）。 */
 function compareTraj(liveTraj, repTraj) {
   const byIndex = new Map(repTraj.map((p) => [p.i, p]));
   let max = 0;
@@ -376,9 +396,9 @@ function compareTraj(liveTraj, repTraj) {
   return { max, at, compared, missing };
 }
 
-// ── 早跑相位：在**用户真实录像**上测「移动方向 vs 画面朝向」──────────────────
-// 放在所有录制相位之前：录制功能已从产品中移除，后续相位必然失败并可能中断脚本，
-// 而本测量不依赖录制，必须在中断前完成。
+// ── 早跑相位：在外部录像上测「移动方向 vs 画面朝向」────────────────────────
+// 由 IR_EXTERNAL 触发，且必须排在其它相位之前：后续相位失败时会调 `finish()` 直接退出，
+// 本测量不依赖页面录制状态，放在最前才能保证跑完。
 if (process.env.IR_EXTERNAL) {
   const __text = readFileSync(process.env.IR_EXTERNAL, 'utf8');
   const __max = Number(process.env.IR_MAX_FRAMES ?? 0);
@@ -432,9 +452,9 @@ if (process.env.IR_EXTERNAL) {
 }
 
 // ── 相位 0：录制中状态行刷新自检 ───────────────────────────────────────────
-// 背景：曾经 updateInputRecUi() 只在 inputReplaying 分支里被调用，导致录制期间
-// 状态行**从不刷新**，永久冻结在点击「开始录制」那一刻的 "0 帧"——功能其实是好的，
-// 但看起来像"录不到东西"。本相位直接读 DOM 断言录制期间计数在涨。
+// 状态行文本取自 `apps/debug/src/app.ts` 的 `updateInputRecUi` 写入的 `inputRecStatus` 元素；
+// 输入循环在 `inputReplaying || inputRecorder.isRecording()` 时按 100ms 节流调用它。
+// 判据：录制 1.2s 后 `counts().frames > 0`，且状态行同时含「录制中」与数字。
 const liveUi = await evalJson(`(async () => {
   const api = globalThis.__wsInput;
   if (!api) return { ok: false, why: 'no __wsInput' };
@@ -472,11 +492,11 @@ if (!/录制中/.test(midText) || !/\d/.test(midText)) {
 }
 if (uiFail) process.exitCode = 1;
 
-// ── 相位 0b：**面板回放路径**自检（startPlayback，由 rAF 输入循环驱动）──────
-// 背景：输入循环原先只调 inputPlayer.next()，而 next() 的语义是"保持当前帧"
-// （游标只由 step()/stepReplay() 推进）。于是面板「载入并回放」永远停在第 0 帧——
-// 而无头路径走 tickReplay()→stepReplay()，恰好绕开了这个缺陷，所以旧验收全绿却
-// 掩盖了它。本相位**故意不调 tickReplay**，纯靠 rAF 驱动，直接看游标是否前进。
+// ── 相位 0b：**输入循环驱动的回放路径**自检（全程不调 tickReplay）──────────
+// 面板「载入并回放」回调与 `__wsInput.play()` 都进 `apps/debug/src/app.ts` 的 `startPlayback`，
+// 它把推进权交回输入循环（`externalReplayClock = false`），由 rAF 每帧调
+// `inputPlayer.stepReplay(1 / 64)` 前进游标。本相位只靠 rAF 观察 `counts().playerIndex`；
+// 判据：末值 > 首值 且 45 拍内出现过 ≥ 10 个不同帧号。
 const panelPlay = await evalJson(`(async () => {
   const api = globalThis.__wsInput;
   if (!api) return { ok: false, why: 'no __wsInput' };
@@ -520,11 +540,11 @@ if (ppIdxLast <= ppIdx0 || ppUniq < 10) {
 if (ppFail) process.exitCode = 1;
 
 // ── 相位 0c：**循环外输入（鼠标路径）必须被录到** ───────────────────────────
-// 背景：录制点原先挂在输入循环的 rAF 上，而鼠标走 mousemove 事件**直连 feedInput**、
-// 根本不经过输入循环 → 录到的 `dy` 恒为 0、`dx` 只有 Q/E 换算量。实测用户 2.5 分钟
-// 实机录像正是如此（dy 全零、dx 仅来自 yaw 键），回放从源头就不可能复现。
-// 录制点移到物理步后，循环外到达的输入必须同样入账。本相位注入等价于 mousemove 的
-// 设备级输入并断言它出现在录制里——旧实现下 `dy≠0` 不可能成立，故有判别力。
+// 鼠标走 `window` 的 mousemove → `apps/debug/src/renderer/renderer-main.ts` 的 `feedInput`，
+// 不经过输入循环；`__wsInput.feedDeviceInput` 是同一入口的设备级注入点。
+// 本相位在 900ms 内每拍注入固定 (dx, dy)，再从录制载荷统计：`dy != 0` 的帧数与 Σdy
+// （与注入合计对照）、带 dt（> 0）的帧数。
+// 判据：`dy != 0` 的帧数 > 0 且带 dt 的帧数 > 0。
 const MOUSE_DX = 0.5;
 const MOUSE_DY = -0.25;
 const mouseRec = await evalJson(`(async () => {
@@ -582,11 +602,11 @@ if (mouseRec?.ok) {
 console.log(`[${LABEL}] 循环外输入录制自检：${mouseSummary}`);
 if (mouseFail) process.exitCode = 1;
 
-// ── 相位 0d：**二次开始录制必须重置磁带（起点坐标唯一）** ────────────────────
-// 一份录制只有一个起点（meta.initialState / physSeed），而 startWithState 每次都用新
-// 起点覆盖旧起点。若沿用旧样本，导出文件就是「第 1 段的帧 + 第 2 段的起点」——回放从
-// 第一帧就错位（这正是"没考虑开始录制时的坐标"）。判据：第二次停止后的总帧数不得
-// 接近两段之和，而应≈单段。
+// ── 相位 0d：**第二次开始录制必须重置磁带（起点唯一）** ─────────────────────
+// `startWithState` 先 `clear()` 再写 `stateMeta`：一份载荷只有一个起点（见
+// `apps/debug/src/input/input-recorder.ts` 的 `InputRecorder.startWithState`）。
+// 本相位连录两段等长会话，取第二次停止后的 `counts().frames` 与导出载荷的声明帧数。
+// 判据：两段帧数都 > 0，且第二段 < 第一段 × 1.6（接近两段之和即表示沿用了旧样本）。
 const restartRec = await evalJson(`(async () => {
   const api = globalThis.__wsInput;
   const raf = () => new Promise((r) => requestAnimationFrame(r));
@@ -623,12 +643,15 @@ if (!(r1 > 0) || !(r2 > 0)) {
 }
 if (restartFail) process.exitCode = 1;
 
-// ── 相位 0e：**移动方向必须等于画面朝向**（传送后"斜向移动"回归）────────────
-// 症状：只按 W/S，画面却往左前/右后偏。
-// 机理：移动方向由**权威 yaw** 决定（calibrateVelocity 每帧把权威速度写进渲染），
-// 画面由**渲染 yaw** 决定。两侧 yaw 分叉 δ 时，按 W 就会偏 δ。
-// 度量：ground 且只有 W 输入时，wishdir = forward = (-sin yaw, 0, -cos yaw)，
-// 故速度方向反解出的 yaw = atan2(-velX, -velZ) 必须等于画面 yaw。
+// ── 相位 0e：**移动方向必须等于画面朝向** ──────────────────────────────────
+// 机理：权威对渲染的常规影响是速度——`apps/debug/src/renderer/renderer-main.ts` 的
+// `calibrateVelocity`（实现见 `src/ts-shared/phys/authority-calibrator.ts` 的
+// `AuthorityCalibrator.calibrateVelocity`）每渲染帧把权威速度写进渲染物理；
+// 画面朝向则取渲染物理自身的 yaw。两侧 yaw 分叉 δ 时，只按 W 就会偏 δ。
+// 度量：只按 W 且在地面、水平速度 ≥ 40 HU/s 的样本上，wishdir = forward = (-sin yaw, 0, -cos yaw)，
+// 故由速度反解 yaw = atan2(-velX, -velZ) 减画面 yaw、归一到 [-180, 180) 即偏差 δ；判据 |δ| ≤ 10°。
+// 流程：`spawnSelect` 选项多于 3 个时依次切到下标 1、5、12、2、30（越界下标跳过，每次转向 300ms）→
+// 按住 W+D（keys = 9）1.2s 建立横向速度 → 只按 W 采样 6s（recover）与 1.4s（after）。
 const axisRes = await evalJson(`(async () => {
   const api = globalThis.__wsInput;
   const raf = () => new Promise((r) => requestAnimationFrame(r));
@@ -709,7 +732,7 @@ if (!(axisWorst >= 0) || axisWorst > 10) {
   process.exitCode = 1;
 }
 
-// ── 相位 A：合成输入录制（走真实输入路径）──────────────────────────────────
+// ── 相位 A：合成输入录制（帧数 = SECONDS × 60 取整）────────────────────────
 const FRAME_COUNT = Math.round(SECONDS * 60);
 const recordResult = await evalJson(recordScript(FRAME_COUNT, false));
 
@@ -728,7 +751,8 @@ const recCount =
     ? recFrames.length
     : (recFrames?.t?.length ?? 0);
 
-// 载荷自检（schema / meta / 帧结构）
+// 载荷自检：`schema` / `meta.mapFile` / `meta.tickRate` / `meta.physics.autobhop` /
+// `meta.initialState` / `meta.hull` / `frames` 是否为 t/dx/dy/keys 四个等长并行数组
 const meta = recordedPayload.meta ?? {};
 const metaChecks = {
   schema: recordedPayload.schema,
@@ -749,7 +773,9 @@ console.log(
     `autobhop=${metaChecks.autobhop} 起点状态=${metaChecks.hasInitialState} 并行帧数组=${metaChecks.hasParallelFrames}`,
 );
 
-// ── 相位 B：**全新页面加载** + 确定性回放 ──────────────────────────────────
+// ── 相位 B：**整页重载**后重新注入地图，再确定性回放 ───────────────────────
+// `Page.reload` → 重新 `DOM.setFileInputFiles` → `waitSceneReady()` → `sleep(1500)`，
+// 然后 `replayScript(recordResult.export, 2)` 载入录制并 `play(true)` 逐帧推进。
 await send('Page.reload', { ignoreCache: true });
 await sleep(3000);
 const doc2 = await send('DOM.getDocument', { depth: -1 });
@@ -771,7 +797,7 @@ if (replayResult.error) {
   console.error(`[${LABEL}] 回放未能开始：${replayResult.error}`);
   console.error(`[${LABEL}] 诊断：`, JSON.stringify(replayResult.recDiag), JSON.stringify(replayResult.counts));
   finish(1);
-  throw new Error('aborted'); // finish() 之后不再执行下方比对（曾导致二次异常掩盖真因）
+  throw new Error('aborted'); // 已 finish()，抛出以终止后续比对，避免二次异常覆盖已打印的原因
 }
 const capPayload = JSON.parse(replayResult.capture);
 if (!capPayload.frames) {
@@ -789,7 +815,7 @@ const { firstMismatch, mismatchSamples, inputIdentical } = {
   inputIdentical: cmp.identical,
 };
 
-// ── 比对 2：逐帧位置（录制期 rAF 位置 vs 回放第 k 帧位置）─────────────────
+// ── 比对 2：逐帧位置（`compareTraj(liveTraj, repTraj)`，按录制帧号对齐）─────
 const liveTraj = recordResult.liveTraj;
 const repTraj = replayResult.traj;
 const repStart = replayResult.startState?.state ?? null;
@@ -798,7 +824,7 @@ const maxPosDiff = pc.max;
 const maxPosDiffAt = pc.at;
 const posCompared = pc.compared;
 if (pc.missing) replayResult.errors = [...(replayResult.errors ?? []), `回放轨迹缺 ${pc.missing} 帧`];
-// 起点核对：回放 arm 后的物理状态 vs 录制 meta.initialState
+// 起点核对：`repStart`（回放 arm 后的物理状态）与 `initState`（录制 `meta.initialState`）
 const initState = meta.initialState ?? null;
 const startDiff =
   initState && repStart
@@ -810,11 +836,11 @@ const startDiff =
     : null;
 const posIdentical = maxPosDiff !== null && maxPosDiff <= POS_TOL;
 
-// ── 对照实验 ──────────────────────────────────────────────────────────────
-// A：**同页**关权威耦合 录制 → 立即回放（同一物理实例、同一帧率）。
-//    这一拍把"输入录制/回放机制"与"世界状态对齐"单独隔离出来：若这里仍不逐帧
-//    相同，说明机制本身有问题；若相同，则差异只可能来自权威实时耦合/帧率差。
-// B：同页关权威耦合 录制 → 回放 → 再回放（同一录制放两遍），验"确定性回放可重复"。
+// ── 对照实验（都在同一页面内；录制期关掉权威实时耦合）──────────────────────
+// A：关耦合录制 → 立即回放。`compareInputs` 比输入序列，
+//    `compareTraj(controlA.liveTraj, replayA.traj)` 比录制轨迹 vs 回放轨迹。
+// B：同一份录制连放两遍（`replayA` / `replayA2`），
+//    `compareTraj(replayA.traj, replayA2.traj)` 看回放本身是否可重复。
 const controlA = await evalJson(recordScript(FRAME_COUNT, true));
 const replayA = await evalJson(replayScript(controlA.export, 2));
 const replayA2 = await evalJson(replayScript(controlA.export, 2));
@@ -830,7 +856,10 @@ const cmpA = compareInputs(JSON.parse(controlA.export), capA);
 const trajA = compareTraj(controlA.liveTraj, replayA.traj);
 const trajAA = compareTraj(replayA.traj, replayA2.traj);
 
-// ── 诊断：同一录制放两遍，找出**第一个分叉帧**与当时的 dt/速度 ──────────────
+// ── 诊断：同一录制放两遍（同页一次、重建世界再一次），找首个分叉帧与当时的 dt、速度 ──
+// `run()` 逐帧返回 `{i, dt, x, y, z, vx, vy, vz, g}` 与 arm 后的状态快照；
+// 输出含 `samePageRepeat`（不重建世界）、`afterReload`（`reloadForTest` 重建世界）、
+// `seedA` / `seedB`（两次 arm 的全量种子）与 `recInitial`（录制起点）。
 const divergence = await evalJson(`(async () => {
   const api = globalThis.__wsInput;
   const raf = () => new Promise((r) => requestAnimationFrame(r));
@@ -911,10 +940,10 @@ const divergence = await evalJson(`(async () => {
   });
 })()`);
 
-// ── 诊断 2：**同一全量种子 + 同一输入 + 同一步长**，物理步进结果是否位级相同 ──
-// 这是把"物理是否确定"与"回放接线是否正确"彻底分开的判据：
-// 在页内把同一个种子写回两次，各自喂同一条微型输入序列（固定 dt），比对结果。
-// 相同 → 物理确定，任何位置差都只能来自时序/权威耦合；不同 → 物理存在未播种状态。
+// ── 诊断 2：**同一全量种子各推进恰好 1 个物理步**，比对结果 ─────────────────
+// 用单步闸门把「物理步数」与「rAF 拍数」解耦（`setManualSteps(1)` 时渲染主循环本帧最多推 1 步），
+// 两次写回同一个种子（`physSeed` / `seedPhys`）各推 1 步，比对位置与速度。
+// 另做一次种子写回的立即回读（`echoMismatch`），把「写回失败或时机」与「步进不确定」分开。
 const engineProbe = await evalJson(`(async () => {
   const api = globalThis.__wsInput;
   const raf = () => new Promise((r) => requestAnimationFrame(r));
@@ -964,10 +993,10 @@ console.log(
 
 mkdirSync(OUT_DIR, { recursive: true });
 
-// ── 外部录制相位（IR_EXTERNAL=<path>）────────────────────────────────────────
-// 回放**外部提供**的录制（例如用户实机导出的 JSON）：连放两遍，比对键位序列与
-// 轨迹，并做异常探测（逐步位移突变 = 传送/重生/掉出地图）。放在正常相位之后，
-// 以便复用页面与浏览器、并让脚本正常收尾。
+// ── 外部录制相位（IR_EXTERNAL=<录像 JSON 路径>）─────────────────────────────
+// 同一份外部录制连放两遍（A / B），比对逐帧键位与轨迹，并做异常探测：
+// 逐步位移最大突变、轨迹 y 区间、首个分叉帧；结果写 `<label>-external.json`，
+// 键位出现不一致时置 `process.exitCode = 1`。IR_MAX_FRAMES 限制每段帧数（0 = 全放）。
 const EXTERNAL = process.env.IR_EXTERNAL ?? null;
 if (EXTERNAL) {
   const IR_MAX = Number(process.env.IR_MAX_FRAMES ?? 0); // 0 = 全放
@@ -1216,9 +1245,8 @@ if (consoleLines.length) {
   }
 }
 
-// 通过判据 = **输入流确定性**（本工具的硬承诺）：帧数一致 + 逐帧 dx/dy/keys 完全相同。
-// 轨迹一致性单独报告、不参与判据：起点已位级对齐（0.000e+0 HU）、输入已逐帧一致，
-// 但引擎单步即分叉（见"物理确定性探针"），故位置差是引擎侧限制，不是接线问题。
+// 通过判据 = 输入流确定性：帧数一致 ∧ 逐帧 dx/dy/keys 完全相同（`ok`）。
+// 轨迹差（`maxPosDiff` / `startDiff`）与「物理确定性探针」的读数只输出、不参与该判据。
 const ok = inputIdentical && recCount === capCount;
 console.log('');
 console.log(

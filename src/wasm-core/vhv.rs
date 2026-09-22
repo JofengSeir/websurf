@@ -1,18 +1,22 @@
-//! `prop_static` 的**逐顶点预烘焙光照**（`.vhv`）解析。
+//! `prop_static` 的逐顶点预烘焙光照（`.vhv`）解析。
 //!
-//! ## 为什么必须有这一层
+//! ## 为什么需要这一层
 //!
-//! Source 里 `prop_static` 的静态光照有**两级**来源（外部参照实现两个都实现了）：
+//! prop 的静态光照在本仓库里有**两条数据通路**，最终都挂到同一个 `StaticProp` 上：
 //!
-//! | 级 | 来源 | 参照实现 |
+//! | 通路 | 数据来源 | 产出字段 |
 //! |---|---|---|
-//! | 1 | **逐顶点烘焙**：VRAD 把每个 prop 的顶点光照写进 pakfile 的 `sp_<idx>.vhv` / `sp_hdr_<idx>.vhv` | `外部参照实现.WebExport/Bsp/Geometry.cs:855-895` + `外部参照实现/ValveVertexLightingFile.cs` |
-//! | 2 | leaf ambient cube（无 vhv 或置了 `StaticPropFlags.NoPerVertexLighting` 时的兜底） | `Resources/src/Entities/StaticProp.ts:39` |
+//! | 逐顶点烘焙 | pakfile 内的 `sp_<idx>.vhv` / `sp_hdr_<idx>.vhv`，由本模块解析 | `vertex_lighting: Option<Vec<[f32; 3]>>` |
+//! | leaf ambient cube | BSP 的 leaf ambient 数据（由 `vbsp` 侧解析） | `ambient_cube` |
 //!
-//! 只做第 2 级会丢掉**逐顶点梯度**：cube 是"每 prop 一个值"（按法线平方加权取面），
-//! 于是模型的每个朝向面各得一个**平坦**颜色 —— 实机观感正是「一面一个颜色、像没有光照」。
+//! 两者是**同时**填给渲染侧的——各工程 `crates/wasm` 组装 `StaticProp` 时既填
+//! `vertex_lighting`（本模块结果，失败为 `None`）也填 `ambient_cube`，由渲染侧按
+//! "有无顶点光照"选路径。本模块只负责第一条通路的解析。
 //!
-//! ## 文件格式（`ValveVertexLightingFile`，版本 2）
+//! 只保留 cube 通路会丢掉逐顶点梯度：cube 是"每个 prop 一个值"（按法线平方加权取面），
+//! 于是模型每个朝向面各得一个**平坦**颜色。
+//!
+//! ## 文件格式（版本 2）
 //!
 //! ```text
 //! u8   version_low  ┐ version_low == 0 时：后 3 字节缺失，base = -3（老工具产物）
@@ -27,12 +31,15 @@
 //! 各 mesh 的顶点数据在 vert_offset（+ base）
 //! ```
 //!
-//! ## 数值口径（与引擎 `VertexLitGeneric` 对齐）
+//! 三个必须守住的约束（都由 `parse_vhv` 的早期返回实现）：
+//! ① 版本必须等于 2；② `mesh_count ∈ (0, 4096]` 且 `vert_count ∈ (0, 4_000_000]`；
+//! ③ 顶点数据必须完整落在字节切片内——任何一条不满足都返回 `None`，不产出部分结果。
 //!
-//! 顶点色字节 `v` 是"整数部分=光照、小数部分=albedo 调制"的打包形式（本文件的字节是整数，
-//! 小数部分为 0 ⇒ 调制 = 1）。引擎取 `vVertexLighting = floor(v) * (2.0/255.0)`，
-//! 屏幕颜色 = `纹理色 × vVertexLighting`（外部参照实现 `Shaders/VertexLitGeneric.ts`）。
-//! 本模块直接产出**屏幕倍率** `v * 2/255`（每顶点 RGB，[0, 2]）。
+//! ## 数值口径
+//!
+//! 顶点色字节 `v` 是"整数部分 = 光照、小数部分 = albedo 调制"的打包形式；本文件读到的
+//! 是单个整数字节，故小数部分恒为 0（调制 = 1）。本模块直接产出**屏幕倍率**
+//! `v * 2/255`（常量 `K`），即每顶点 RGB，值域 [0, 2]。
 
 /// 解析结果：逐顶点屏幕倍率（RGB，值域 [0, 2]，按 mesh 顺序拼接 = 模型顶点顺序）。
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -44,7 +51,11 @@ pub struct PropVertexLighting {
 }
 
 impl PropVertexLighting {
-    /// 逐顶点亮度（0.299/0.587/0.114 加权），诊断/日志用。
+    /// 逐顶点亮度的统计量，诊断/日志用；亮度按 `0.299/0.587/0.114` 对 RGB 加权。
+    ///
+    /// 返回 `Some((中位数, 最大值))`：对全部顶点亮度排序后取中间项与末项
+    /// （顶点数为偶数时"中间项"取后半那个）。无顶点时返回 `None`。
+    /// 不做色彩空间转换——输入已经是线性倍率。
     pub fn luma_stats(&self) -> Option<(f32, f32)> {
         if self.colors.is_empty() {
             return None;
@@ -67,8 +78,15 @@ fn read_u32(b: &[u8], off: usize) -> Option<u32> {
     b.get(off..off + 4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
 }
 
-/// 解析 `.vhv`。任何结构不符（版本≠2、越界、顶点数为 0）都返回 `None`
-/// —— 调用方据此回退到 leaf ambient cube，**不静默产出错数据**。
+/// 解析 `.vhv` 字节，返回逐顶点屏幕倍率；任何结构不符一律 `None`。
+///
+/// 拒绝条件（全部早期返回，不产出部分结果）：空输入；版本 ≠ 2；
+/// `mesh_count` 不在 `(0, 4096]`；`vert_count` 不在 `(0, 4_000_000]`；
+/// 任一 mesh 的 `vert_count` / `vert_offset` 为负；顶点数据切片越界。
+///
+/// 返回 `None` 不等于"没有光照"：三个工程的调用方在拿不到本模块结果时，
+/// 仍会把 leaf ambient cube 一并交给渲染侧，由渲染侧回退（两条通路的分工见本模块头部）。
+/// 因此本方法**不做**任何兜底颜色。
 pub fn parse_vhv(bytes: &[u8]) -> Option<PropVertexLighting> {
     if bytes.is_empty() {
         return None;

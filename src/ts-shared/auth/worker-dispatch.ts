@@ -1,13 +1,60 @@
 /**
- * Worker 消息分发（公共化 v1）— init / wasm-init / world-json / config / respawn /
- * teleport / teleport-to-pos / set-spawn-points / set-death-threshold / sync-render-state
- * + 双模式扩展（phys-mode-port §3.4.A/C/D/E）：set-mode / mode-ack / set-hold、
- * tickRate 模式感知、config patch 键名归一（W-GAP-1 修复）、respawn/teleport 双实例化。
+ * Worker 侧消息分发的共享实现：把 `wasm-init` / `init` / `world-json` / `config` / `respawn` /
+ * `sync-render-state` / `teleport` 等消息协议翻译成权威物理实例调用与注入钩子回调。
  *
- * 两端消息集已对齐（debug 补充 teleport-to-pos / set-death-threshold，game 同步协议
- * 后共用）。工程特有消息（debug 物理面板 set-physics-param/set-hull 等）经
- * onExtraMessage 扩展点注入；工程特有副作用经 onInit/onWasmInit/onWorldBuilt/
- * onConfigApplied 钩子注入（debug 的 mtz 内嵌、ready 回执、面板参数覆盖等）。
+ * ## 定位
+ * 本文件是 Worker 线程的消息入口：`createWorkerDispatch` 的返回值直接挂到 `self.onmessage`
+ * （或在工程侧包一层转发后再转交），主线程与权威物理实例之间的翻译全部收敛在这里。
+ * 本文件不持有时钟、也不推进任何实例（全文没有 `tick` 调用）——推进属
+ * `src/ts-shared/auth/auth-loop.ts` 的 `createAuthLoop` 与
+ * `src/ts-shared/decoupled/decoupled-loop.ts`。
+ *
+ * ## 上下游
+ * - 上游调用点：`apps/debug/src/worker/main.ts` 与 `apps/game/src/worker/main.ts` 各自在
+ *   `self.onmessage` 装配处调用 `createWorkerDispatch`，并按工程注入 `WorkerDispatchEnv`。
+ * - 下游被驱动方：权威实例方法（`build_world` / `set_params` / `set_hull` / `set_state` /
+ *   `teleport_to` 等，结构面由 `src/ts-shared/auth/auth-loop.ts` 的 `PhysWorldLike` 声明）、
+ *   `src/ts-shared/auth/auth-loop.ts` 的 `AuthLoop`（`start` / `reset` / `setFixedDt`）、
+ *   `src/ts-shared/auth/shared-state.ts` 的 `createWorkerSharedState` 与 `AUTH_EVT` 事件位、
+ *   `src/ts-shared/wasm/loader.ts` 的字节获取原语。
+ *
+ * ## 关键不变量
+ * 1. **wasm 先行**：`ready` 只由 `initWasm` 成功置位，`world-json` 在 `ready` 之前一律丢弃；
+ *    两工程都在加载地图之前发出 `wasm-init` 消息。
+ * 2. **主实例恒在**：`env.phys` 是唯一必选实例槽；`tickPhys` / `scratch` 是可选并列槽，
+ *    凡改动实例参数或状态的分支都在 `phys` 之后按同一实参同步它们，避免同一世界出现参数分叉。
+ * 3. **死亡阈值跨世界重建存续**：`set-death-threshold` 的值由闭包变量记忆，`world-json`
+ *    重建实例后经 `reapplyDeathY` 重放（Rust 侧该字段不在种子面，重建即回默认值）。
+ * 4. **幂等**：`authLoop.start()` 由 `loopStarted` 守卫只执行一次；`set-mode` 与当前模式
+ *    相同时不调用 `onSetMode`，只回 `mode-ack`。
+ * 5. 未识别消息不抛错：落到 `onExtraMessage`，未注入即静默丢弃。
+ *
+ * ## 边界与容错
+ * - 非对象消息（`null` / 原始值）在入口直接返回。
+ * - 每个分支先做前置守卫（`ready` / `env.phys.current` / `typeof` 判定）再动实例，缺失即
+ *   静默 return，没有错误回执。
+ * - 可选槽与可选钩子统一走可选链，未注入即对应能力面整体不激活。
+ * - `initWasm` 是唯一异步分支：其 rejection 由 `wasm-init` 分支的 `.catch` 收敛为
+ *   `{ type: 'error' }` 消息回传主线程，失败后 `ready` 保持 false。
+ *
+ * ## 测试归属
+ * `src/ts-shared/auth/` 下没有与本文件同名的单测；行为覆盖落在 `apps/debug/scripts/` 的两个
+ * 脚本：`auth-clock-verify.mjs` 用 esbuild 打包本文件，以桩 `WorkerDispatchEnv` 驱动
+ * `createWorkerDispatch`（覆盖 `config` 分支的 tickRate 接线）；`jump-apex-verify.mjs` 与
+ * `jump-apex-serve.mjs` 以本文件的 `sync-render-state` 分支为对照面（后者按源码文本切片生成
+ * 回退版，故该分支的代码行文本形态被脚本依赖）。
+ *
+ * ## 与相邻文件的边界
+ * - `src/ts-shared/auth/shared-state.ts`：定义共享槽本体与读写语义；本文件只决定哪条消息
+ *   触发哪种读写。
+ * - `src/ts-shared/auth/auth-loop.ts`：定义权威时钟；本文件只透传 `setFixedDt` / `reset` /
+ *   `start`。
+ * - `src/ts-shared/auth/compute-mode.ts`：定义模式取值与交接矩阵；本文件只校验 `set-mode`
+ *   的值域并透传。
+ * - `src/ts-shared/decoupled/decoupled-loop.ts`：定义解耦循环本体；本文件只在世界重建、
+ *   respawn、tickRate 变化三处调用它的方法。
+ * - `src/ts-shared/wasm/loader.ts`：负责字节解码与 HTTP 取字节；本文件负责选分支并调用
+ *   `initSync`。
  */
 
 import { createWorkerSharedState, type ShmState, type MsgState } from './shared-state.js';
@@ -22,11 +69,13 @@ import type {
   SyncRenderStateLike,
 } from '../decoupled/decoupled-loop.js';
 
-/** W-GAP-1 键名归一表：InputBridge buildPhysicsParams snake_case patch →
- * game config camelCase 字段（snake 与 camel 同名键自动穿透，无需列出）。
- * 归一只改键名不改值——debug 端 patch 全 camel，本表零命中零影响（additive 安全）。
- * ⚠️ 唯一值语义例外 = jump_height（下方 normalizeConfigPatchKeys 值反演）：
- * 表内条目仅作存在性登记，实际转换走专用分支。 */
+/** 物理参数键名归一表：`src/ts-shared/phys/params.ts` 的 `buildPhysicsParams` 产出的
+ * snake_case 键 → 工程 config 的 camelCase 字段。
+ * 表内 10 项即两侧**不同形**的键；余下 5 个（`gravity` / `accelerate` / `friction` /
+ * `autobhop` / `sensitivity`）与 game 侧桥追加的 `tickRate` 两侧同形，不登记也能由未命中
+ * 分支原样穿透。
+ * 命中只换键名、值原样搬运；`jump_height` 一项只服务「值不是 number」的兜底路径——值形态
+ * 由 `normalizeConfigPatchKeys` 的专用分支先行接管。 */
 const SNAKE_TO_CAMEL_PATCH_KEYS: Record<string, string> = {
   stop_speed: 'stopSpeed',
   jump_height: 'jumpSpeed',
@@ -40,14 +89,26 @@ const SNAKE_TO_CAMEL_PATCH_KEYS: Record<string, string> = {
   noclip_speed: 'noclipSpeed',
 };
 
-/** config patch 键名归一（physics/input 段）：snake → camel，未知键原样保留。
- * jump_height 值反演（跳跃回归修复）：patch 的 jump_height 是 Rust 语义
- * （起跳跳高 HU，= v²/2g），config.jumpSpeed 是起跳速度 HU/s——纯改名会把
- * 「已换算的跳高」当「速度」存入 config，worker 侧 syncParamsToWasm 再走一次
- * v²/2g → 跳高 57²/2g=2.03 → Rust 脉冲 √(2·800·2.03)=57 < NON_JUMP_VELOCITY(180)
- * → categorize_position 永不判空中、贴地回吸，解耦模式跳不起来。
- * 反演 v=√(2·g·h) 后与主线程同参（302 → 脉冲 302 > 180 正常离地）。
- * gravity 取 patch 自带值（buildPhysicsParams 恒发），缺省回退 800（createConfig 默认）。 */
+/**
+ * `config` 消息里 physics / input 段的键名归一：snake_case → camelCase。
+ *
+ * 输入是注入方下发的 patch，输出是可直接喂 `applyConfigPatch` 的对象。未知键原样保留，
+ * 因此非 physics 语义的键（如 `mode`）也能安全穿过；同名键不查表、直接拷贝。
+ *
+ * `jump_height` 是唯一的**值语义**转换：patch 给的是跳高（HU），config 存的是起跳速度
+ * （HU/s），换算为 v = √(2·g·h)——与 `src/phys/player.rs` 的 `check_jump` 由
+ * `params.jump_height` 反推 `velocity[1]` 的算式互为逆运算，故纯改名会让权威端把「已换算
+ * 的跳高」再当速度算一次。重力取同一 patch 的 `gravity`，缺失或非 number 时回退 800
+ * （与 `apps/debug/src/config.ts`、`apps/game/src/config.ts` 的 `physics.gravity` 默认值同值）。
+ *
+ * 副作用：无——不触碰任何实例、不改入参。返回值有两种形态：发生过改名时是新对象，一个键都
+ * 没改时**返回入参本身**，调用方不应假定拿到副本。
+ *
+ * 退化行为：不做合法性校验——`gravity` 为 0 / 负值或跳高为负时算出 0 / NaN，同样写进
+ * `jumpSpeed`；patch 为 `undefined` 时 `Object.keys` 直接抛 TypeError。
+ *
+ * 调用点：本文件的 `config` 分支（`section` 为 `physics` 或 `input` 时）。
+ */
 export function normalizeConfigPatchKeys(patch: Record<string, unknown>): Record<string, unknown> {
   let renamed = false;
   const out: Record<string, unknown> = {};
@@ -69,79 +130,90 @@ export function normalizeConfigPatchKeys(patch: Record<string, unknown>): Record
   return renamed ? out : patch;
 }
 
+/** 装配面：本文件需要的全部外部能力都由调用方以槽对象与钩子的形式注入。 */
 export interface WorkerDispatchEnv {
-  /** 跨线程状态通道槽（init 消息写入；authLoop/同步共用）。 */
+  /** 跨线程状态通道槽：`init` 消息写入 `createWorkerSharedState` 的结果，收到 `init` 之前为 `null`。 */
   shared: { current: ShmState | MsgState | null };
-  /** 权威 PhysWorld 槽（world-json 构建后写入）。 */
+  /** 权威 PhysWorld 槽：`world-json` 构建后写入；多个分支以它作前置真值判断。 */
   phys: { current: PhysWorldLike | null };
+  /** 权威时钟：`world-json` 设步长并 reset，`initWasm` 成功后 start。 */
   authLoop: AuthLoop;
-  /** 当前 config.physics.tickRate（config 消息 applyConfigPatch 之后读）。 */
+  /** 当前权威固定步长（Hz）。`config` 消息应用 patch **之后**读取，故面板改值即时生效。 */
   getConfigTickRate(): number;
-  /** 部分更新自身 config 副本（applyConfigPatch，来自两端 config.ts）。 */
+  /** 部分更新自身 config 副本。physics / input 段收到的是**归一后**的 patch，其余段是原 patch。 */
   applyConfigPatch(section: string, patch: Record<string, unknown>): void;
-  /** 面板参数 → 权威 set_params/set_hull（经共享 buildPhysicsParams 映射）。 */
+  /** 面板参数 → 权威 `set_params` / `set_hull`（经 `src/ts-shared/phys/params.ts` 的
+   * `buildPhysicsParams` 映射）。调用点：`world-json` 尾部，以及非 `player` 段的 `config`。 */
   syncParamsToWasm(): void;
-  /** 新建权威 PhysWorld（两端 pkg 导入注入）。 */
+  /** 新建权威实例（注入方 `new PhysWorld()`）。`world-json` 按已注入的槽调用一至三次。 */
   createPhysWorld(): PhysWorldLike;
-  /** wasm 模块同步初始化（initSync，两端 pkg 导入注入）。 */
+  /** wasm 同步实例化。实参是字节缓冲（`Uint8Array.buffer`），不是胶水期望的 `{ module }`。 */
   initSync(module: ArrayBuffer): void;
-  /** 消息发送（Worker → 主线程）。 */
+  /** 消息发送（Worker → 主线程）。本文件只用它发 `error` 与 `mode-ack` 两种消息。 */
   post(msg: unknown): void;
-  // ── 双模式扩展（phys-mode-port §3.7 t10；全部可选——debug 不注入 = 解耦面整体不激活）──
-  /** 解耦第二实例槽（tickPhys 64t 校准线；world-json 与 phys 同建同参，G3/P9）。 */
+  // ── 可选扩展槽与钩子（未注入 = 对应能力面整体不激活）────────────────────
+  /** 并列第二实例槽：`world-json` 与 `phys` 同建同参，状态与参数分支同步它。 */
   tickPhys?: { current: PhysWorldLike | null };
-  /** F4-C scratch 第三实例槽（可选，t4 · t6 §10.1 主案：worker 内乐观评估
-   * 执行体；world-json 与 phys 同建同参 G3；仅 tick 模式被驱动，耦合/解耦
-   * 零触碰——debug 不注入 = F4-C 整面不激活）。 */
+  /** 并列第三实例槽：`world-json` 与 `phys` 同建同参，状态与参数分支同步它。
+   * 本文件从不推进它（无 tick 调用），只按 `phys` 的同一实参同步。 */
   scratch?: { current: PhysWorldLike | null };
-  /** 解耦循环句柄（respawn 首帧/publish、config tickRate 边沿处理用）。 */
+  /** 解耦循环句柄：本文件调它的 `publishCurrentState` / `resetSamplers` / `onTickRateChanged`。 */
   decoupledLoop?: DecoupledLoop;
-  /** 当前计算模式（worker 侧真相源；set-mode 翻转。三值——plan-v2 §1.1 新增
-   * tick。缺省恒 'coupled'——debug 零感知）。 */
+  /** 当前计算模式（worker 侧真相源）。缺省时本文件的模式判断一律按 `'coupled'` 处理。 */
   getComputeMode?(): ComputeMode;
-  /** set-mode 执行钩子（§3.4.C 步骤 a-f：gate 翻转 + set_state 状态注入 +
-   * tickPhys 对齐 + 采样器清零 + resetInput）。三值——tick 支路
-   * 交接语义见 auth/compute-mode.ts MODE_HANDOVER_MATRIX（t3-memo §2.2）。
-   * **装配侧实现**：当前唯一注入方 = `test/dual-mode-harness/src/worker-a.ts`
-   * 的 `applyModeSwitch`（game 侧注入随 c4824e9 回退移除，debug 未注入）。 */
+  /** `set-mode` 执行钩子：仅在消息 mode 通过三值校验**且与当前模式不同**时调用（同 mode
+   * 幂等跳过）；未注入时模式只影响本文件内部的判断分支。当前工作区内两个工程的注入对象都
+   * 未提供该钩子，故模式下发只产生 `mode-ack` 回执。 */
   onSetMode?(mode: ComputeMode, state?: SyncRenderStateLike): void;
-  /** set-hold 执行钩子（解耦 hold 冻结注入/解除（带存点全量恢复））。
-   * **装配侧实现**：当前唯一注入方 = harness `worker-a.ts` 的 `applySetHold`。 */
+  /** `set-hold` 执行钩子：`hold` 缺省归 `null`（解除冻结），`release` 非空时由实现做存点
+   * 全量恢复。未注入时整条消息被丢弃（该分支不做其他事）。当前工作区内无注入点。 */
   onSetHold?(hold: HoldState | null, release?: SavePointLike): void;
-  /** tick 模式外部断点钩子（可选，t4）：dispatch 侧 respawn/teleport/load 消息
-   * → 段序号 +1 + 事件位编码进下一帧（Rust 事件槽不含外部驱动断点——t3-memo
-   * §3.4.1 触发清单的 dispatch 面）。实现侧自查 tick 模式（非 tick no-op），
-   * 耦合/解耦零回归。 */
+  /** 外部断点钩子：`respawn` / `teleport` / `teleport-to-pos` 分别传 `AUTH_EVT.respawn` /
+   * `AUTH_EVT.teleport`，`sync-render-state` 的全态注入支路传 `AUTH_EVT.load`；
+   * `teleport === false` 的常规重锚支路不调用。未注入 = no-op。当前工作区内无注入点。 */
   tickExternalBreak?(evtBit: number): void;
-  /** 健康护栏：世界构建完成 → 上报本图出生点 Y（越界地板基准）与已记忆的死亡阈值。 */
+  /** `world-json` 尾部：上报本图出生点 Y 与已记忆的死亡阈值（无记忆时为 `null`）。 */
   onWorldSpawn?(spawnY: number, deathY: number | null): void;
-  /** 健康护栏：死亡阈值到达 → 记忆（无出生点信息时当地板用）。 */
+  /** `set-death-threshold` 收到数值时触发一次，早于写实例。 */
   onDeathThreshold?(value: number): void;
-  /** world-json 重建钩子（可选，t4）：tick 模式下 tick 标号归零 + 段 +1 +
-   * worldRebuild 位 + 排序门重建。非 tick 模式 no-op（实现侧自查）。 */
+  /** `world-json` 尾部触发一次（在 `onWorldSpawn` 之后）。未注入 = no-op。 */
   onWorldRebuilt?(): void;
-  /** init 消息处理钩子（debug：回执 `ready`；game 无）。 */
+  /** `init` 分支：写完 `shared` 槽之后调用，入参是原始消息。 */
   onInit?(msg: unknown): void;
-  /** wasm-init 消息处理钩子（debug：内嵌默认纹理包 mtzB64 存取）。 */
+  /** `wasm-init` 分支：`initWasm` 的第一步，早于解码与 `initSync`。入参是原始消息，故
+   * 与 wasm 无关的载荷（如内嵌纹理包字段）也能在此取用。 */
   onWasmInit?(msg: { wasmB64?: string; wasmUrl?: string; mtzB64?: string }): void;
-  /** world-json 世界构建完成钩子（debug：物理面板 attachWorld）。 */
+  /** `world-json` 尾部：入参是**主实例**（`tickPhys` / `scratch` 不回调）。 */
   onWorldBuilt?(phys: PhysWorldLike): void;
-  /** config 消息处理完成钩子（debug：面板手动参数覆盖重应用）。 */
+  /** `config` 分支末尾：入参是 `section` 与**未归一**的原始 patch。 */
   onConfigApplied?(section: string, patch: Record<string, unknown>): void;
-  /** 未识别消息扩展点（debug：物理面板消息；返回是否已处理）。 */
+  /** 未识别消息的扩展点。返回值本文件**不使用**：是否已处理不反馈给调用方。 */
   onExtraMessage?(msg: unknown): boolean;
 }
 
+/**
+ * 创建消息处理器。
+ *
+ * 返回值是可直接挂到 `self.onmessage` 的同步函数：内部持有闭包状态（死亡阈值记忆、wasm
+ * 就绪标志、时钟启动守卫），因此**一次装配只应创建一个**。
+ *
+ * 副作用：全部落在注入对象上——`env.shared.current` / `env.phys.current` / `env.tickPhys.current` /
+ * `env.scratch.current` 四个槽的写入、config 副本的部分更新、实例方法调用、`post` 发送、
+ * 以及各钩子回调。
+ *
+ * 失败行为：除 `initWasm` 的异步 rejection 被收敛为 error 消息外，处理函数不抛错；前置条件
+ * 不满足的消息被静默丢弃。
+ */
 export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<unknown>) => void {
   /**
    * 最近一次收到的死亡阈值（`set-death-threshold` 记忆）。
    *
-   * 为什么必须记忆：`world-json` 重建物理世界会 `authLoop.reset()` 并新建 PhysWorld，
-   * 而 Rust 的 `death_y` 默认是 -100_000（`src/phys/mod.rs`）——重建后若不重放，
-   * 判定阈值就退回默认值。故此处记忆 + `reapplyDeathY()` 重放。
+   * 必须记忆的原因：`world-json` 会重建全部实例，而 Rust 侧 `death_y` 不在种子面，重建后回到
+   * 初值（`src/phys/mod.rs` 的 `death_y` 初值为 -100_000.0）；不重放则判定阈值退回默认。
    */
   let lastDeathY: number | null = null;
-  /** 把记忆的死亡阈值重放到当前全部物理实例（world 重建 / 循环 reset 之后调用）。 */
+  /** 把记忆的死亡阈值重放到全部已注入实例（世界重建之后调用）。`lastDeathY` 为 `null` 时
+   * 不调用任何实例；`tickPhys` / `scratch` 未注入时跳过。 */
   const reapplyDeathY = (): void => {
     if (lastDeathY === null) return;
     env.phys.current?.set_death_y(lastDeathY);
@@ -149,18 +221,31 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     env.scratch?.current?.set_death_y(lastDeathY);
   };
 
-  /** wasm 就绪（wasm-init 成功；world-json 早于 wasm-init 则忽略——主线程 init
-   * 顺序保证 wasm 先行）。 */
+  /** wasm 就绪标志：仅 `initWasm` 成功置位；`world-json` 以它作前置守卫。 */
   let ready = false;
+  /** `authLoop.start()` 只允许执行一次的守卫。 */
   let loopStarted = false;
 
+  /**
+   * wasm 实例化：先回调 `onWasmInit`，再按「内嵌 base64 → fetch URL」的顺序择一实例化。
+   *
+   * 两条分支都走 `env.initSync`（同步实例化），实参统一为 `Uint8Array.buffer`。把裸
+   * `ArrayBuffer` 转成胶水期望的 `{ module }` 形态是注入方的职责：`apps/game/src/worker/main.ts`
+   * 的注入为此包了一层，`apps/debug/src/worker/main.ts` 直接注入胶水的 `initSync`。
+   * 本文件不调用胶水的异步 `init`，该路径缺省依赖 `import.meta.url` 解析模块 URL，而内嵌
+   * 构建把它置换为 `about:blank`（`src/scripts/lib/dist-pack.mjs` 的 `define`）。
+   *
+   * 分支边界：`wasmB64` 为真值时走解码分支（同步）；否则 `wasmUrl` 为真值时走 HTTP 分支
+   * （`await`，非 2xx 由 `src/ts-shared/wasm/loader.ts` 的 `fetchWasmBytes` 抛错）；两者都
+   * 缺席则直接返回，`ready` 保持 false。
+   *
+   * 成功后才置 `ready` 并启动权威时钟一次。`initSync` 抛错或取字节失败时异常向上冒泡，
+   * 由 `wasm-init` 分支的 `.catch` 转成 error 消息。
+   */
   const initWasm = async (m: { wasmB64?: string; wasmUrl?: string; mtzB64?: string }): Promise<void> => {
     env.onWasmInit?.(m);
-    // 注意：必须用 initSync({module})——async init() 解构的是 {module_or_path}，
-    // 传 {module} 会解构出 undefined → 走 new URL(import.meta.url) 路径，
-    // dist 下 import.meta.url 被 define 为 about:blank → "Failed to construct 'URL'"。
     if (m.wasmB64) {
-      // dist 内嵌模式（file:// 双击）：base64 → initSync（解码走共享单点 D-09）
+      // 内嵌 base64 分支：解码走 src/ts-shared/wasm/loader.ts 的 base64ToBytes
       env.initSync(base64ToBytes(m.wasmB64).buffer as ArrayBuffer);
     } else if (m.wasmUrl) {
       env.initSync((await fetchWasmBytes(m.wasmUrl)).buffer as ArrayBuffer);
@@ -174,23 +259,24 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     }
   };
 
+  /**
+   * 消息处理器：按 `msg.type` 分派。无返回值；未识别类型最后交给 `onExtraMessage`。
+   */
   return (e: MessageEvent<unknown>): void => {
     const msg = e.data;
     if (!msg || typeof msg !== 'object') return;
     const type = (msg as { type?: string }).type;
     if (type === 'init') {
       const init = msg as { shared?: SharedArrayBuffer | null };
-      // shared 为 null（线上静态无 COOP/COEP）→ MsgState 消息回退通道
+      // 无共享内存（主线程拿不到 SAB，如线上静态部署无 COOP/COEP）→ MsgState 消息回退通道
       env.shared.current = createWorkerSharedState(init.shared ?? null);
       env.onInit?.(msg);
       return;
     }
     if (type === 'input') {
-      // MsgState 回退：主线程每帧消息输入（SAB 模式无此消息）
-      // 修复 1：原分支把消息窄化为 {dx?,dy?,keys?}，丢弃 addInput 同拍携带的
-      // 6 个渲染采样字段（rt/rx/ry/rz/ri0/repoch）→ 非 COOP/COEP 部署（Pages）
-      // 下 Worker 侧 renderSample 恒 null、渲染轨迹投影静默失效。此处补齐全部
-      // 字段；recvInput 对 rt===undefined 天然 no-op → 旧形态消息零回归。
+      // MsgState 回退通道的每帧输入（SAB 模式不走此消息）。除三个必填字段外还承载可选的
+      // 渲染采样六字段：它们由 src/ts-shared/auth/shared-state.ts 的 MsgState.addInput 附带，
+      // 而 recvInput 只在 rt 有值时才写采样槽 ⇒ 旧形态消息（无该字段）天然零影响。
       const d = msg as {
         dx?: number;
         dy?: number;
@@ -209,6 +295,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     }
     if (type === 'wasm-init') {
       const m = msg as { wasmB64?: string; wasmUrl?: string; mtzB64?: string };
+      // 异步实例化：失败不抛出到消息循环，转成 error 消息回主线程（ready 保持 false）
       initWasm(m).catch((err) =>
         env.post({ type: 'error', message: `Worker wasm 加载失败: ${err}` }),
       );
@@ -221,70 +308,62 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         teleportJson: string;
         spawn: { x: number; y: number; z: number; yawDeg: number };
       };
-      if (!ready) return; // wasm 未就绪则忽略（主线程 init 顺序保证 wasm 先行）
-      // P5（phys-mode-port 前置修复）：重建前释放旧实例（wasm free）——世界
-      // 反复加载时旧 PhysWorld 泄漏，双实例时代泄漏翻倍
+      if (!ready) return; // wasm 未就绪：丢弃本消息（两工程都在加载地图前发 wasm-init）
+      // 重建前释放旧实例：free 在 PhysWorldLike 上是可选成员，缺省的注入实现自然跳过
       env.phys.current?.free?.();
       env.tickPhys?.current?.free?.();
-      env.scratch?.current?.free?.(); // t4 G3 三实例：scratch 随世界重建同步重建
+      env.scratch?.current?.free?.(); // 第三实例随世界重建同步释放
       const p = env.createPhysWorld();
       p.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
       env.phys.current = p;
-      // G3/P9（phys-mode-port §3.2）：tickPhys 与 phys 同建同参（harness
-      // applyWorld:132-135 双构建先例）——热切零延迟、双实例同步重建
+      // 并列实例与主实例同建同参：同一份世界 JSON、同一出生点 ⇒ 切换时无需补建
       if (env.tickPhys) {
         const t = env.createPhysWorld();
         t.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
         env.tickPhys.current = t;
       }
-      // t4 G3 三实例：scratch 同建同参（F4-C 乐观评估执行体；仅 tick 模式驱动）
+      // 第三实例同上（本文件不推进它，只保证参数与状态同源）
       if (env.scratch) {
         const sc = env.createPhysWorld();
         sc.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
         env.scratch.current = sc;
       }
-      env.syncParamsToWasm(); // 双/三实例同参（注入实现按槽内全部实例同步）
-      env.authLoop.setFixedDt(env.getConfigTickRate()); // 面板 tickRate 生效
+      env.syncParamsToWasm(); // 实例建好后重放参数（遍历范围由注入实现决定）
+      env.authLoop.setFixedDt(env.getConfigTickRate()); // 重建后同步当前面板步长
       env.authLoop.reset();
-      reapplyDeathY(); // world 重建 → 重放记忆的死亡阈值（否则退回 Rust 默认 -100_000）
-      env.decoupledLoop?.publishCurrentState(); // 首帧状态即刻可见（harness applyWorld:150 语义）
+      reapplyDeathY(); // 重放记忆的死亡阈值，避免退回 Rust 侧默认值
+      env.decoupledLoop?.publishCurrentState(); // 立刻发布一帧，首帧状态即刻可见
       env.onWorldBuilt?.(p);
-      env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 健康护栏：本图出生点 Y + 已记忆阈值
-      env.onWorldRebuilt?.(); // t4：tick 模式标号归零 + 段 +1 + worldRebuild 位（非 tick no-op）
+      env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 出生点 Y + 已记忆的阈值（可为 null）
+      env.onWorldRebuilt?.(); // 世界重建完成（非 tick 场景由实现自行忽略）
       return;
     }
     if (type === 'config') {
       const c = msg as { section: string; patch: Record<string, unknown> };
       if (!env.phys.current) return;
-      // W-GAP-1（phys-mode-port 前置修复）：InputBridge 以 buildPhysicsParams 的
-      // snake_case 键下发 patch，而 config/worker 全 camelCase——此前 Object.assign
-      // 直入，仅 gravity/accelerate/friction/autobhop/tickRate 五键同构生效，
-      // 其余 11 键在权威侧永远陈旧。归一后 patch 键与 config 字段对齐。
+      // physics / input 段的 patch 来自 buildPhysicsParams（snake_case），需归一成 config 的
+      // camelCase 字段名；其余段原样透传。归一只做键名与 jump_height 的值换算。
       const normalizedPatch =
         c.section === 'physics' || c.section === 'input'
           ? normalizeConfigPatchKeys(c.patch)
           : c.patch;
-      // 更新自身 config（v7 隐藏 bug 修复：之前从不应用 patch，权威一直用默认参数，
-      // 面板改任何参数（含灵敏度）双端都分叉）
+      // 先更新自身 config 副本：面板值必须落在 worker 侧，否则后续读 tickRate 等字段会读到旧值
       env.applyConfigPatch(c.section, normalizedPatch);
-      // tickRate → 模式感知生效（§3.4.D）：耦合 = 权威固定步长（+3 偏移）即时生效；
-      // 解耦 = tickPhys raw 速率 + 激活边沿处理（清 loAcc/tickDx/tickDy + align，
-      // 速率值变化不 reset 主累积器——网格相位按新步长自然延续）
+      // tickRate 的处理按模式分叉：解耦模式交给解耦循环处理激活边沿；其余模式改权威固定步长，
+      // 且只在步长**真变化**时清累积器——setFixedDt 步长未变返回 false，此时 reset 会丢掉
+      // 累积器余量。同一范式见 apps/debug/src/worker/main.ts 的 onTickRateChange。
       if (c.section === 'physics' && typeof normalizedPatch.tickRate === 'number') {
         if ((env.getComputeMode?.() ?? 'coupled') === 'decoupled') {
           env.decoupledLoop?.onTickRateChanged();
         } else {
-          // 修复 2：原支路无条件 setFixedDt + reset，而 input-bridge 把 tickRate
-          // 塞进每一条 physics config → 每条都清累积器、丢仿真时间（"tick 计算滑落"）。
-          // 正确范式（debug/src/worker/main.ts）：setFixedDt 步长未变返回 false，
-          // 此时跳过 reset()，仅步长真变化才清累积器（防新旧步长错配）。
           if (env.authLoop.setFixedDt(env.getConfigTickRate())) {
             env.authLoop.reset(); // 仅步长真变化才清累积器（防新旧步长错配）
           }
         }
       }
       if (c.section === 'player') {
-        // 两端碰撞箱字段名差异：game 用 halfWidth，debug 用 radius —— 统一归一化
+        // 碰撞箱字段名两工程不同形：game 的 patch 用 halfWidth（apps/game/src/input/input-bridge.ts），
+        // debug 的 config 用 radius（apps/debug/src/config.ts）——统一归一成半宽后再写实例
         const pl = c.patch as {
           halfWidth?: number;
           radius?: number;
@@ -294,19 +373,15 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         const hw = pl.halfWidth ?? pl.radius;
         if (hw !== undefined && pl.standHeight !== undefined && pl.duckHeight !== undefined) {
           env.phys.current.set_hull(hw, pl.standHeight, pl.duckHeight);
-          // G3 双实例同参（t14 修复 r1b-G1，G1 终裁定案 option 2 · 议题已关闭）：
-          // player fast-path 原漏同步 tickPhys hull——解耦会话内 64t 校准线持续以
-          // 旧 hull 算校准速度（alignTickPhys 只同步状态不同步参数）。纯 additive：
-          // 耦合期 tickPhys 闲置零影响、debug 不注入 tickPhys 时 optional chain
-          // 跳过、halfWidth/radius 归一与 partial-patch 三字段守卫原样保留
+          // 并列实例同步同一个 hull：否则会话内两侧会按不同碰撞箱算校准速度。
+          // 纯 additive——未注入的槽由可选链跳过，partial patch 的三字段守卫原样保留
           env.tickPhys?.current?.set_hull(hw, pl.standHeight, pl.duckHeight);
-          env.scratch?.current?.set_hull(hw, pl.standHeight, pl.duckHeight); // t4 G3 三实例
+          env.scratch?.current?.set_hull(hw, pl.standHeight, pl.duckHeight); // 第三实例同一实参
         }
       } else {
         env.syncParamsToWasm();
       }
-      // noclip 模式：与主线程渲染物理同步（G3：scratch 同步——noclip 不在种子面
-      // （§11.1 排除面「转换窗不可变」），双实例状态由 G3 同步保持恒等）
+      // noclip：只写主实例与第三实例（第二实例不参与本支路）
       if (typeof c.patch.mode === 'string') {
         env.phys.current.set_noclip(c.patch.mode === 'noclip');
         env.scratch?.current?.set_noclip(c.patch.mode === 'noclip');
@@ -315,29 +390,25 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       return;
     }
     if (type === 'respawn') {
-      // 纯 Rust 重生到初始出生点（计时挑战检查点回退已移主线程）
+      // 重生到 build_world 时给定的初始出生点；检查点回退是独立消息（teleport-to-pos）
       if ((env.getComputeMode?.() ?? 'coupled') === 'decoupled') {
-        // §3.4.E：解耦模式升级为双实例同步重置（respawn 同建同参 → 两实例同落
-        // 出生点天然对齐）+ 采样器清零 + writeDecoupled 首帧
+        // 解耦模式：主实例与第二实例一起重置（同建同参 ⇒ 同落出生点），并清采样器、发首帧
         env.phys.current?.respawn();
         env.tickPhys?.current?.respawn();
         env.decoupledLoop?.resetSamplers(false);
         env.decoupledLoop?.publishCurrentState();
       } else {
-        // 耦合模式维持 v7 单实例现状（tickPhys 空闲；复入解耦时 set-mode 对齐）
+        // 其余模式：主实例 + 第三实例（第二实例留待模式切换时对齐）
         env.phys.current?.respawn();
-        env.scratch?.current?.respawn(); // t4 G3：scratch 同落出生点（tick 模式种子等价）
+        env.scratch?.current?.respawn(); // 第三实例同落出生点，保证种子同源
       }
-      env.tickExternalBreak?.(AUTH_EVT.respawn); // tick 模式段 +1 + respawn 位（非 tick no-op）
+      env.tickExternalBreak?.(AUTH_EVT.respawn); // 外部驱动断点（非 tick 场景由实现忽略）
       return;
     }
     if (type === 'sync-render-state') {
-      // 渲染主线 → 权威同步（用户定调：渲染 144Hz 预测物理精度更高，大偏差时
-      // 以渲染主线为准反向校准权威）。同步瞬间清空权威侧未消费输入增量，
-      // 防止同步前的旧鼠标/按键残留注入新状态（键位保留——按住状态是实时的）。
-      // phys-mode-port §3.4.C/§3.5 升级：本消息原样保留并升级为**模式无关的
-      // 「主→worker 全态注入」通道**——解耦下 = phys.set_state + tickPhys 对齐
-      //（loop 采样器不清：仅热切才清，set-mode 分支负责）。
+      // 主线程 → 权威的全态注入通道。本消息按 `teleport` 分两支：显式 false 走「常规重锚」
+      // （见下），缺省或 true 走全态注入。写入前先清掉未消费的输入增量，避免同步前的旧鼠标 /
+      // 按键残留注入新状态（键位保留——按住状态是实时的）。
       const sm = msg as {
         state?: {
           posX: number;
@@ -355,27 +426,24 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       if (!env.phys.current || !sm.state) return;
       const s = sm.state;
       if (sm.teleport === false) {
-        // ── 常规反向重锚 = 位置 + 角度取渲染侧（`routineReanchor`）─────────────
-        // 位置**和 yaw/pitch** 一律以渲染为准；权威保留自己的**速度**与 on_ground。
+        // ── 常规重锚：位置与角度取渲染侧，速度与 on_ground 保留权威自身 ──────────────
+        // 位置**和 yaw/pitch** 一律以渲染状态为准；速度与 on_ground 从权威现读后原样写回
+        // （set_state 是全量覆盖接口，必须补齐这两项）。
         //
-        // 角度为什么必须取渲染侧：移动方向由**权威速度**决定（`calibrateVelocity`
-        // 每帧把权威速度写进渲染——用户定调"权威是速度之主"），而画面朝向是渲染
-        // yaw（renderer-main: `cc.setYawPitch(st.yaw …)`）。两侧 yaw 一旦分叉 δ，
-        // 玩家就会"只按 W/S、视角不动，却斜着走"，δ 就是偏角。
-        // 实测（debug/scripts/input-replay-verify.mjs 移动方向自检，同协议 A/B）：
-        // 修复前稳定偏差 **-3.115°/-3.444°**，补上 yaw/pitch 后 **0.000°**。
-        // 此前 yaw 分叉只有两条纠正路径——传送豁免期（`emitTeleportSync`），或
-        // `>45° 且渲染静止 8 帧`（authority-calibrator YAW_FAULT_DEG）——**0°~45°
-        // 区间无人纠正**，长时间按 W 就一直偏着。
+        // 角度为什么必须取渲染侧：画面朝向来自渲染状态（`apps/debug/src/renderer/renderer-main.ts`
+        // 的 `setYawPitch`），而移动方向由**权威速度**决定（`src/ts-shared/phys/authority-calibrator.ts`
+        // 的 `calibrateVelocity` 每渲染帧把权威速度写进渲染）——两侧 yaw 分叉即表现为
+        // 「视角不动却斜着走」。除本支路外，角度纠正只发生在传送豁免与兜底两处
+        // （authority-calibrator 的 `emitTeleportSync`、`YAW_FAULT_DEG` + `YAW_FAULT_FRAMES`）。
         //
-        // 绝不可把渲染的 onGround / 速度写进权威：
-        //  · 写 onGround 会在权威**实际腾空**时打开 `check_jump` 的唯一硬门
-        //    （player.rs:537 `if !p.on_ground { return; }`），而紧随其后的
-        //    `p.velocity[1] = jump_velocity`（≈302）是**赋值**而非累加——
-        //    于空中重赋即等于"中途再跳一次"，顶点附近触发会让顶高 57→≈114 **翻倍**。
-        //  · 写速度会**反转速度主从**（用户硬性要求：权威速度为准），
-        //    并构成"渲染被膨胀的速度 → 权威 → 再写回渲染"的正反馈。
-        // 回归门禁：`npm run test:jump-apex`（Fix A 的验收）+ `test:auth-clock`。
+        // 绝不可把渲染的 on_ground / 速度写进权威：
+        //  · 写 on_ground 会在权威**实际腾空**时打开 `src/phys/player.rs` 的 `check_jump`
+        //    硬门（该函数以 `if !p.on_ground { return; }` 开头），而紧随其后的
+        //    `p.velocity[1] = jump_velocity` 是**赋值**而非累加，空中重赋即等于再跳一次。
+        //  · 写速度会反转「权威是速度之主」的主从关系，并构成「渲染被膨胀的速度 → 权威 →
+        //    再写回渲染」的正反馈。
+        // 回归门禁：`apps/debug` 的 `test:jump-apex`（`apps/debug/scripts/jump-apex-verify.mjs`）
+        // 与 `test:auth-clock`（`apps/debug/scripts/auth-clock-verify.mjs`）。
         const cur = env.phys.current.state() as {
           velX: number;
           velY: number;
@@ -395,26 +463,26 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         s.velX, s.velY, s.velZ, s.onGround,
       );
       if ((env.getComputeMode?.() ?? 'coupled') === 'decoupled') {
-        // tickPhys 同注入（避免边界锚定把注入态拉走；§3.4.C-c 对齐语义）
+        // 解耦：第二实例同注入，避免边界锚定把注入态拉走
         env.tickPhys?.current?.set_state(
           s.posX, s.posY, s.posZ, s.yaw, s.pitch,
           s.velX, s.velY, s.velZ, s.onGround,
         );
       }
-      // t4：tick 模式存点 load = 断点（§3.4.1 存点 load 触发——LOAD 位 + 段 +1；
-      // 非 tick 模式 no-op——耦合大偏差校准不是断点）
+      // 全态注入 = 存点 load 语义的外部断点（非 tick 场景由实现忽略）
       env.tickExternalBreak?.(AUTH_EVT.load);
       env.shared.current?.resetInput();
       return;
     }
     if (type === 'set-spawn-points') {
-      // 权威物理出生点列表（spawn 下拉切换用；world-json 只设了初始 spawn，
-      // 缺此列表时 teleport_to_spawn 索引为空 → 静默忽略 → 传送被权威帧拉回）
+      // 权威出生点列表（JSON 文本），只影响 teleport_to_spawn 的可选目标：缺此列表时索引
+      // 越界会被静默忽略（`src/phys/mod.rs` 的 `teleport_to_spawn`）。它不改初始出生点——
+      // respawn 与掉落死亡重生仍回 build_world 给出的那个 spawn。
       const sm = msg as { json?: string };
       if (typeof sm.json === 'string' && env.phys.current) {
         env.phys.current.set_spawn_points(sm.json);
-        env.tickPhys?.current?.set_spawn_points(sm.json); // G3 双实例同参
-        env.scratch?.current?.set_spawn_points(sm.json); // t4 G3 三实例
+        env.tickPhys?.current?.set_spawn_points(sm.json); // 第二实例同一 JSON
+        env.scratch?.current?.set_spawn_points(sm.json); // 第三实例同一 JSON
       }
       return;
     }
@@ -422,46 +490,41 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       const tm = msg as { target?: number };
       if (typeof tm.target === 'number') {
         env.phys.current?.teleport_to_spawn(tm.target);
-        env.tickPhys?.current?.teleport_to_spawn(tm.target); // G3 双实例同步
-        env.scratch?.current?.teleport_to_spawn(tm.target); // t4 G3 三实例
-        env.tickExternalBreak?.(AUTH_EVT.teleport); // t4：tick 模式段 +1 + teleport 位
+        env.tickPhys?.current?.teleport_to_spawn(tm.target); // 第二实例同一索引
+        env.scratch?.current?.teleport_to_spawn(tm.target); // 第三实例同一索引
+        env.tickExternalBreak?.(AUTH_EVT.teleport); // 外部驱动断点
       }
       return;
     }
     if (type === 'teleport-to-pos') {
-      // 自定义传送点/检查点回退（yaw 缺省 = 保持当前朝向）
+      // 按坐标传送（自定义传送点 / 检查点回退）：yaw 缺省时保持**权威当前朝向**，
+      // 该朝向从主实例现读，再以同一组实参写给并列实例
       const tm = msg as { pos?: [number, number, number]; yaw?: number };
       if (!env.phys.current || !tm.pos) return;
       const cur = env.phys.current.state() as { yaw: number };
       const yaw = tm.yaw !== undefined ? tm.yaw : cur.yaw;
       env.phys.current.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw);
-      env.tickPhys?.current?.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw); // G3 双实例同步
-      env.scratch?.current?.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw); // t4 G3 三实例
-      env.tickExternalBreak?.(AUTH_EVT.teleport); // t4：tick 模式段 +1 + teleport 位
+      env.tickPhys?.current?.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw); // 第二实例同一实参
+      env.scratch?.current?.teleport_to(tm.pos[0], tm.pos[1], tm.pos[2], yaw); // 第三实例同一实参
+      env.tickExternalBreak?.(AUTH_EVT.teleport); // 外部驱动断点
       return;
     }
     if (type === 'set-death-threshold') {
-      // 主线程传场景包围盒 minY，直接作为 Rust 死亡阈值（check_death: pos.y < death_y），
-      // 与主线程渲染物理 setDeathY 同值——双端判定不因阈值差异分叉。G3 双实例同参。
+      // 掉落死亡阈值：权威与主线程渲染侧同值，避免双端判定因阈值差异分叉
+      //（`src/phys/teleport.rs` 的 `check_death` 判 `pos.y < death_y`）。全部实例写同一值。
       const dm = msg as { value?: number };
       if (typeof dm.value === 'number') {
-        lastDeathY = dm.value; // 记忆：world 重建后由 reapplyDeathY() 重放
-        env.onDeathThreshold?.(dm.value); // 健康护栏：无出生点信息时当地板用
+        lastDeathY = dm.value; // 记忆：世界重建后由 reapplyDeathY 重放
+        env.onDeathThreshold?.(dm.value);
         env.phys.current?.set_death_y(dm.value);
         env.tickPhys?.current?.set_death_y(dm.value);
-        env.scratch?.current?.set_death_y(dm.value); // t4 G3 三实例
+        env.scratch?.current?.set_death_y(dm.value); // 第三实例同一阈值
       }
       return;
     }
     if (type === 'set-mode') {
-      // 热切握手（§3.4.C/G2）：UI 触发 → worker 翻转 gate + 状态注入 → mode-ack。
-      // 幂等：同 mode 的 set-mode 直接回 ack（不重复执行步骤 a-f）——主线程
-      // 500ms 超时重发的兜底回执。
-      // tick 模式注册（任务 t2）：mode 联合类型三值化——四向交接矩阵
-      // （coupled↔decoupled 既有两向 + coupled→tick/decoupled→tick/tick→coupled/
-      // tick→decoupled 四向 tick 行，auth/compute-mode.ts MODE_HANDOVER_MATRIX）
-      // 全部经本入口；coupled→tick 必带 state（主线程 predPhys 全态 9 字段，
-      // 复用 coupled→decoupled 同款通道，t3-memo §2.2）。
+      // 模式握手：值域白名单校验（三值）→ 与当前模式不同才执行钩子 → 无条件回 mode-ack。
+      // 同 mode 重复到达只回 ack、不重复执行钩子；切换所需的状态载荷随消息一并透传给钩子。
       const sm = msg as { mode?: string; state?: SyncRenderStateLike };
       const mode = sm.mode;
       if (mode !== 'coupled' && mode !== 'decoupled' && mode !== 'tick') return;
@@ -472,13 +535,12 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       return;
     }
     if (type === 'set-hold') {
-      // 解耦模式 C 键 hold 冻结（worker 侧执行，§3.4.A）：hold=null = 解除
-      //（release 非空 = 按 loadSavepoint 全量恢复该存点，双实例 + 采样器清零）。
+      // 解耦 hold 冻结：hold 缺省归 null = 解除；release 非空时由钩子做存点全量恢复
       const hm = msg as { hold?: HoldState | null; release?: SavePointLike };
       if (env.onSetHold) env.onSetHold(hm.hold ?? null, hm.release);
       return;
     }
-    // 工程特有消息（物理面板等）
+    // 未识别消息的扩展点：工程特有消息（物理面板等）在此接管
     env.onExtraMessage?.(msg);
   };
 }

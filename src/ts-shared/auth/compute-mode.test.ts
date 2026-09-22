@@ -1,18 +1,24 @@
 /**
- * 单测：计算模式门谓词 + §3.2 四向交接矩阵（tick 行）+ auth-loop 三值化门入口。
+ * 单测：模式门谓词 + 交接矩阵 + `auth-loop` 的模式门入口。
  *
- * 覆盖（任务 t2 验收 #2/#4）：
- * - 门谓词三值化：auth 线 coupled/tick 推进、decoupled 早退；解耦线仅 decoupled；
- *   任意模式两谓词互斥且恰一为真（§3.2 单写者不变量）；
- * - 四向交接矩阵：tick 行①-④ + coupled↔decoupled 存档行的谓词一致性、
- *   互斥性质、stateInject 语义（t3-memo §2.2）、方向全覆盖；
- * - resolveAuthGateOpen：modeGate 优先（v7 二值注入零回归）→ getComputeMode
- *   三值缺省 → 全缺省恒开。
+ * 覆盖三组：
+ * 1. **谓词三值化**：`isAuthLineMode` 在 `coupled` / `tick` 为真、`decoupled` 为假；
+ *    `isDecoupledLineMode` 只在 `decoupled` 为真；并逐模式断言两者互斥且恰一为真
+ *    （同一时刻只有一条线驱动物理实例）。
+ * 2. **交接矩阵**：tick 相关的四行齐备（`coupled→tick`、`decoupled→tick`、`tick→coupled`、
+ *    `tick→decoupled`）；逐行核对 `authLineAfter` / `decoupledLineAfter` 等于对 `to`
+ *    调对应谓词的结果，且两者互斥；再逐行核对 `stateInject` 的期望取值。
+ * 3. **`resolveAuthGateOpen` 门入口**：`modeGate` 存在时以它为准（忽略 `getComputeMode`）；
+ *    否则用 `getComputeMode` 的值过 `isAuthLineMode`；两个钩子都不给时恒开。
  *
- * 运行（node，禁浏览器）：
- *   cd game && npx esbuild ../src/ts-shared/auth/compute-mode.test.ts \
- *     --bundle --format=esm --platform=node --outfile=node_modules/.cache/t2-tests/compute-mode.test.mjs \
- *     && node node_modules/.cache/t2-tests/compute-mode.test.mjs
+ * 运行（node，不需要浏览器）——**路径以本仓实际布局为准**：
+ *   cd apps/game && npx esbuild ../../src/ts-shared/auth/compute-mode.test.ts \
+ *     --bundle --format=esm --platform=node --outfile=node_modules/.cache/t4-tests/compute-mode.test.mjs \
+ *     && node node_modules/.cache/t4-tests/compute-mode.test.mjs
+ *
+ * 实测：45 passed / 0 failed（exit 0）。
+ * 断言标签与 `console.log` 分组名里含「§x.y」「t3」这类历史分节引用，它们是**字符串字面量
+ * 而非注释**，本次注释重编不改动（同 §7.3 #36 的处置口径）。
  */
 
 import {
@@ -51,7 +57,7 @@ for (const m of ALL_MODES) {
   expect(a !== d && (a || d), `exactly one line active in ${m} (§3.2 单写者)`);
 }
 
-// ── 2. 四向交接矩阵（tick 行补录）────────────────────────────
+// ── 2. 四向交接矩阵（tick 相关的四行）────────────────────────
 console.log('[2] §3.2 handover matrix (tick rows)');
 const tickRows = MODE_HANDOVER_MATRIX.filter((r) => r.from === 'tick' || r.to === 'tick');
 expect(tickRows.length === 4, 'four tick-direction rows present');
@@ -84,11 +90,11 @@ expect(
 );
 expect(byKey.get('tick->coupled')?.stateInject === false, 'tick→coupled 免注入（行③）');
 expect(byKey.get('tick->decoupled')?.stateInject === false, 'tick→decoupled 免注入（行④）');
-// 存档行零回归：既有两向语义不变
+// 既有两向（coupled↔decoupled）的 stateInject 语义保持不变
 expect(byKey.get('coupled->decoupled')?.stateInject === true, '存档行 coupled→decoupled 注入');
 expect(byKey.get('decoupled->coupled')?.stateInject === false, '存档行 decoupled→coupled 免注入');
 
-// ── 3. auth-loop 三值化门入口 ────────────────────────────────
+// ── 3. auth-loop 的模式门入口 ────────────────────────────────
 console.log('[3] resolveAuthGateOpen (auth-loop reuse entry)');
 expect(resolveAuthGateOpen({}) === true, 'both hooks absent → always open (v7 zero change)');
 expect(resolveAuthGateOpen({ modeGate: () => false }) === false, 'explicit modeGate wins (false)');

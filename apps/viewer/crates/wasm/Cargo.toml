@@ -15,23 +15,28 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# 共享解析层（仓库根 src/wasm-core/，websurf-wasm-core）
+# 共享解析层：仓库根 src/wasm-core/（crate websurf-wasm-core），解析与 GLB 装配都由它完成
 websurf-wasm-core = { path = "../../../../src/wasm-core" }
 
-# WASM 绑定（与 websurf-phys 同一 wasm-bindgen 主版本，保证 glue 版本一致）
+# WASM 绑定：本工程锁到 wasm-bindgen 0.2.128（apps/viewer/Cargo.lock），
+# wasm-bindgen-cli 由 src/scripts/install-wasm-bindgen.cmd 按同一版本安装。
 wasm-bindgen = "0.2"
 
-# BSP 导出 JSON / GLB 序列化
+# JSON 与 GLB 序列化：serde / serde_json 用在 BspMetadata 与出生点报告（apps/viewer/crates/wasm/src/lib.rs）；
+# gltf 在该文件内无直接引用 —— GLB 字节由共享层 bsp_to_gltf_core 产出。
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 gltf = "1.4.1"
 
-# PAKFILE 模型解析（load_vmdl）
+# PAKFILE 模型解析：vmdl 的 Mdl::read 是 resolve_pakfile_materials 的纹理名表来源（本 crate 无 load_vmdl）
 vmdl = "0.2"
 
-# VTF → PNG 解码（GLB 材质贴图；仅 png 编解码器，减小体积）
+# VTF → PNG 解码（GLB 材质贴图）：decode_vtf_to_png 走共享层 texture_utils，
+# image 在 apps/viewer/crates/wasm/src/lib.rs 里只用到 image::ImageFormat::Png（此处也只开 png feature）。
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-# 本机 NODE_OPTIONS 含 --use-system-ca 会污染 wasm-opt（node 脚本）；LTO+opt3 已足够，跳过二次优化
+# wasm-pack 的 release profile：由下面的 wasm-opt = false 关掉 wasm-opt 二次优化；
+# 优化档位由本工程 workspace 根的 [profile.release] 给（apps/viewer/Cargo.toml：
+# opt-level = 3 + lto = true + codegen-units = 1），构建入口是 npm run build:wasm。
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

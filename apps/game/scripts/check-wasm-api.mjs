@@ -1,13 +1,16 @@
 /**
- * WASM 契约校验：确认 `pkg/websurf_wasm.d.ts` 包含最小化实现所需的全部 API。
+ * WASM 契约检查：确认 `pkg/websurf_wasm.d.ts` 覆盖本工程实际使用的全部 API。
  *
- * 本文件是**薄配置**：引擎在共享层 `src/scripts/lib/wasm-api-contract.mjs`（D-03 / T-03），
- * 本文件只声明「本工程的 pkg 名 + 契约面」并把结果落到输出与退出码。
+ * 本文件是**薄配置**：检查引擎在共享层 `src/scripts/lib/wasm-api-contract.mjs`，
+ * 本文件只声明本工程的 pkg 名（`websurf_wasm`）与契约清单，并把结果落到 stdout 与退出码。
  *
- * 校验面分两级（与改造前保持同一契约范围）：
- *   1) 声明面 `EXPORT_API` / `PHYS_API`：逐项断言 `\b<name>\s*\(` 命中声明文件；
- *   2) 导入面：`src/**\/*.ts` 对 `pkg/websurf_wasm*` 的实际导入符号必须 ⊆ 声明面，
- *      防止「清单写全了但源码引用了克隆里已删的符号」这类静默漂移。
+ * 两级校验：
+ *   1) 声明面：`EXPORT_API` / `PHYS_API` 两张清单逐项断言声明文件里有同名成员；
+ *   2) 导入面：`src` 下全部 `.ts` 对 `pkg/websurf_wasm*` 的实际导入符号必须 ⊆ 声明面，
+ *      以拦住「清单写全了、源码却引用了声明里没有的符号」这类漂移。
+ *
+ * 已知覆盖缺口（只记录，未改清单）：`PHYS_API` 的项数少于 `src/phys/mod.rs` 的导出面，
+ * 差额与处置见根 `AGENTS.md` 的待决表。
  *
  * 用法：node scripts/check-wasm-api.mjs
  * 退出码：0 = 通过，1 = 不匹配

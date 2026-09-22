@@ -1,15 +1,16 @@
 /**
- * surf 坡面蹲姿回归（node 级，跑真实 wasm 产物，禁浏览器）。
+ * surf 坡面蹲姿回归（node 级，跑 `apps/debug/pkg` 的真实 wasm 产物，不启浏览器）。
  *
- * 背景：物理跑在 wasm 里，`src/phys` 的 Rust 改动必须 `npm run build:wasm` 才生效；
- * 各工程的 start-dev.cmd 存在「wasm 已存在就跳过构建」的分支，容易出现
- * "改了源码但行为没变"。本脚本直接对 pkg 产物做端到端验证，
- * 避免只验 Rust 单测而漏掉产物陈旧。
+ * 为什么直接验产物：物理在 wasm 里，`src/phys` 的 Rust 改动要经 `npm run build:wasm`
+ * （`apps/debug/package.json` 的 `build:wasm`：wasm-pack 输出到 `apps/debug/pkg`）才进产物；
+ * 本脚本对 `pkg` 产物跑端到端用例，验的是**产物**本身而不是 Rust 单测。
  *
- * 验证：
- *   A 贴坡 surf：蹲下后松开蹲键 → **保持蹲姿**（对齐 Source CanUnduck 失败）
- *   B 落地后松开蹲键 → 起立（不是永久卡蹲）
- *   C 空中蹲姿的动量与站姿一致（站姿参数；addspeed 钳制下两者逐 tick 相同）
+ * 三项用例（任一失败即打印 FAIL 并以 1 退出；全过则打印计数后正常退出）：
+ *   A 贴坡 surf：落到 60° 坡面进入 surf 态后按住蹲键、再松开 —— 必须**保持蹲姿**
+ *     （`src/phys/player.rs` 的 `try_player_move` 在命中面法线满足 0.05 < n.y < 0.7 时置 `surfing`）；
+ *   B 水平地面：落地并已蹲下后松开蹲键 —— 必须起立（不是永久卡蹲）；
+ *   C 空世界同一 tick：按住蹲与不按蹲的水平速度增量必须相同，且等于 `air_accelerate` 的
+ *     addspeed 值（`AIR_SPEED_CAP` 减去初速在 wishdir 上的投影，该投影此时为负）。
  *
  * 用法：node scripts/phys-surf-crouch-smoke.mjs（需先 npm run build:wasm）
  */
@@ -31,7 +32,8 @@ let passed = 0;
 const ok = (m) => { passed += 1; console.log('OK   ' + m); };
 const fail = (m) => { console.error('FAIL ' + m); process.exit(1); };
 
-// 60° surf 坡：法线 (0, 0.5, 0.866)，normal.y = 0.5 ∈ surf 区间 (0.05, 0.7)
+// 60° 坡：斜面法线 (0, 0.5, √3/2)，normal.y = 0.5 落在 surf 区间（0.05 < n.y < 0.7）内；
+// 其余五面围出实体盒，范围由下方 min / max 给出
 const S = Math.sqrt(3) / 2; // 0.8660254
 const C = 0.5;
 const surfRamp = JSON.stringify([
@@ -49,7 +51,7 @@ const surfRamp = JSON.stringify([
   },
 ]);
 
-// 水平地面（顶面 y = 0）
+// 水平地面：顶面是可站面（法线 (0, 1, 0)、dist 0），盒体范围由下方 min / max 给出
 const floor = JSON.stringify([
   {
     planes: [
@@ -74,10 +76,10 @@ const newWorld = (brush, sx, sy, sz) => {
 const st = (w) => JSON.parse(w.state_full_json(false));
 const tick = (w, keys) => w.tick(DT, keys, 0, 0);
 
-// ── A. 贴坡 surf：蹲下松开 → 保持蹲姿 ────────────────────────────────
+// ── A. 贴坡 surf：按住蹲再松开，必须保持蹲姿 ────────────────────────
 {
   const w = newWorld(surfRamp, 0, 40, 40);
-  // 自由落到坡面首次接触
+  // 自由落体直到首次进入 surf 态（最多 240 tick）
   let contact = -1;
   for (let i = 0; i < 240; i++) {
     tick(w, 0);
@@ -86,7 +88,7 @@ const tick = (w, keys) => w.tick(DT, keys, 0, 0);
   }
   if (contact < 0) fail('A: 未能进入 surf 接触态（前置条件失败）');
 
-  // 给沿坡切向速度（0, -0.866, 0.5）× 400，复刻稳定贴坡滑行
+  // 用 set_state_ex 写入沿坡面向下的切向速度（0, −400·S, +400·C），制造稳定贴坡滑行
   const s0 = st(w);
   s0.velocity = [0, -400 * S, 400 * C];
   w.set_state_ex(JSON.stringify(s0));
@@ -95,7 +97,7 @@ const tick = (w, keys) => w.tick(DT, keys, 0, 0);
   const ducked = st(w);
   if (!ducked.ducked) fail('A: 按住蹲键后应处于蹲姿');
 
-  // 松开蹲键，继续滑行
+  // 松开蹲键：90 tick 内一旦起立即判失败
   let stoodAt = -1;
   for (let i = 0; i < 90; i++) {
     tick(w, 0);
@@ -111,7 +113,7 @@ const tick = (w, keys) => w.tick(DT, keys, 0, 0);
   ok(`A: 贴坡 surf 松开蹲键保持蹲姿 ✓（90 tick 未起立，surfing=${end.surfing}）`);
 }
 
-// ── B. 落地后松开蹲键 → 起立 ─────────────────────────────────────────
+// ── B. 水平地面：落地且蹲下后松开蹲键，必须起立 ─────────────────────
 {
   const w = newWorld(floor, 0, 1, 0);
   for (let i = 0; i < 40; i++) tick(w, K_DUCK);
@@ -127,10 +129,10 @@ const tick = (w, keys) => w.tick(DT, keys, 0, 0);
   ok('B: 落地后松开蹲键起立 ✓');
 }
 
-// ── C. 空中蹲姿动量 == 站姿动量（站姿参数） ──────────────────────────
+// ── C. 空世界：蹲姿与站姿在同一 tick 内得到相同的水平速度增量 ──────
 {
   const run = (holdDuck) => {
-    // 空世界（无 brush）→ 纯 air_accelerate，去掉碰撞差异
+    // 无 brush 的世界：只走 air_accelerate，排除碰撞对速度的影响
     const w = new PhysWorld();
     w.build_world('[]', '[]', emptyTele, 0, 1000, 0, 0);
     const s = st(w);
@@ -143,7 +145,8 @@ const tick = (w, keys) => w.tick(DT, keys, 0, 0);
   };
   const dvDuck = run(true);
   const dvStand = run(false);
-  // 理论：wishdir=(1,0,-1)/√2；addspeed = 30 + 300/√2 ≈ 242.1320
+  // 期望值：yaw=0 且 forward+right 时 compute_wish 给出 wishdir=(1,0,−1)/√2，初速 (0,0,300) 在其上的
+  // 投影为 −300/√2 ⇒ addspeed = AIR_SPEED_CAP(30) + 300/√2；air_accelerate 的 accelspeed 远大于它，故按 addspeed 截断
   const addspeed = 30 + 300 / Math.SQRT2;
   if (Math.abs(dvDuck - dvStand) > 1e-6) {
     fail(`C: 空中蹲姿动量应等于站姿；蹲=${dvDuck.toFixed(6)} 站=${dvStand.toFixed(6)}`);

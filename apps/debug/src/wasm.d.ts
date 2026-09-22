@@ -1,72 +1,86 @@
 /**
- * WASM 模块类型声明 — 当 pkg/ 不存在时供 tsc 类型检查使用
- * 实际运行时由 wasm-pack 生成（crates/wasm → pkg/websurf_wasm.js）
+ * wasm 模块的环境声明：一条 `declare module` 通配声明，匹配任意前缀下的 pkg 入口文件。
+ *
+ * 实体声明是 wasm-pack 的产物（`npm run build:wasm` 生成到 `apps/debug/pkg/`）；本文件供该
+ * 产物缺失时 tsc 解析，随 `apps/debug/tsconfig.json` 的 `include` 进入程序。
+ *
+ * 本文件落后于源码，两处（只登记，不改声明）：
+ * - `PhysWorld` 只声明 17 个成员，而 `src/phys/mod.rs` 的 impl 块有 24 个 `pub fn`，缺
+ *   `tick_into` / `state_out_ptr` / `set_state_ex` / `state_full_json` / `seed_from` /
+ *   `gate_veto_count` / `debug_trace`；
+ * - `BspProcessor` 未声明 `export_glb_with_pakfile_models_with_defaults_and_lights`，而
+ *   `src/ts-shared/phys/world-builder.ts` 的 `BspProcessorLike` 要求该成员。
+ *
+ * 因第一处缺口，`apps/debug/src/renderer/renderer-main.ts` 的 `captureFullPhysState` 与
+ * `restoreFullPhysState` 只能先把实例收窄成 `as unknown as { … }`，再调 `state_full_json` /
+ * `set_state_ex`。
  */
 
 declare module '*/pkg/websurf_wasm.js' {
-  /** 初始化 WASM 模块（获取并实例化 .wasm 文件；可传 URL 或字节）。 */
+  /** 默认导出：取回并实例化 .wasm。本工程的调用点为零（两侧都直接走 `initSync`）。 */
   export default function init(
     module_or_path?: string | URL | Request | ArrayBuffer | Uint8Array,
   ): Promise<unknown>;
 
-  /** 同步初始化（wasm 字节 或 `{ module: bytes }` 两种形态均支持，与 pkg 生成的 initSync 一致）。 */
+  /** 同步初始化（wasm 字节，或 `{ module: 字节 }` 包装）。调用点：`apps/debug/src/main-wasm.ts` 与 `apps/debug/src/worker/main.ts`。 */
   export function initSync(
     module: ArrayBuffer | Uint8Array | { module: ArrayBuffer | Uint8Array },
   ): unknown;
 
-  /** 仅解析 BSP 元数据（不持有 Bsp 实例）。返回 BspMetadata JSON 字符串。 */
+  /** 一次性解析 BSP 并返回元数据 JSON（不持有解析器实例）。本工程调用点为零：主线程走 `BspProcessor` + `metadata()`。 */
   export function parse_bsp(data: Uint8Array | ArrayBuffer): string;
 
-  /** BSP 处理器：解析 BSP → 导出 GLB / 碰撞体 / 出生点 / 传送点 / PVS */
+  /** BSP 处理器：构造即解析，实例缓存解析结果供各导出方法复用。 */
   export class BspProcessor {
     constructor(data: Uint8Array | ArrayBuffer);
-    /** 元数据 JSON */
+    /** 元数据 JSON（消费点：`buildWorldBundle` 读 `mapName` 等字段）。 */
     metadata(): string;
-    /** 导出 GLB 字节数组（消费内部 Bsp 实例） */
+    /** 导出地图 GLB 字节（不含 PAKFILE 内嵌模型）。本工程调用点为零。 */
     export_glb(): Uint8Array;
-    /** 自动从 BSP PAKFILE lump 提取模型并合并进地图 GLB（消费内部 Bsp 实例） */
+    /** 导出地图 GLB 并把 PAKFILE 内嵌模型合并进去（不注入默认纹理包）。 */
     export_glb_with_pakfile_models(): Uint8Array;
-    /** 带默认纹理包回退的 GLB 导出（缺失材质 → 低清纹理，消费内部 Bsp 实例） */
+    /** 同上，另把缺失材质的回退纹理包（`defaultsJson`）注入。本工程实际走这条。 */
     export_glb_with_pakfile_models_with_defaults(defaultsJson: string): Uint8Array;
-    /** 画质切换 manifest JSON（消费前调用） */
+    /** 画质切换 manifest（mosaic 字节码表）JSON；须在导出 GLB 之前调用。 */
     export_mosaic_manifest(): string;
-    /** 导出 PAKFILE 内嵌模型的「可视网格」三角形碰撞 JSON（零转化，与 GLB 显示逐位一致；消费前调用） */
+    /** 内嵌模型的「可视网格」三角形碰撞 JSON（与显示网格逐位一致）；须在导出 GLB 之前调用。 */
     export_model_tri_colliders(): string;
-    /** 导出 PAKFILE 内嵌模型的「自带物理碰撞体」(.phy) 凸包三角形 JSON（引擎实际碰撞；消费前调用） */
+    /** 内嵌模型的「自带物理碰撞体」(.phy) 凸包三角形 JSON；须在导出 GLB 之前调用。 */
     export_model_phy_colliders(): string;
-    /** 出生点 JSON */
+    /** 出生点 JSON（消费点：`spawn-loader` 与 `buildWorldBundle`）。 */
     parse_spawn_points(): string;
-    /** 传送点 JSON */
+    /** 传送点 JSON（消费点：`apps/debug/src/world/teleport-manager.ts` 建目的地表与触发器表）。 */
     parse_teleports(): string;
-    /** PVS 数据 JSON */
+    /** PVS 数据 JSON（消费点：`src/ts-shared/world/pvs-manager.ts`）。 */
     parse_pvs_data(): string;
-    /** brush 平面列表 JSON（物理碰撞用） */
+    /** brush 平面列表 JSON，入参是 brush 过滤条件 JSON（物理碰撞体来源）。 */
     export_brushes_planes(filter_json: string): string;
-    /** 缺失材质纹理列表（VMT/VTF 缺失 → 占位色）JSON 字符串数组 */
+    /** 缺失材质纹理名列表 JSON（VMT/VTF 缺失 → 占位色）。 */
     export_missing_textures(): string;
   }
 
-  /** VTF → PNG 解码 */
+  /** VTF 字节 → PNG 字节。本工程调用点为零（Rust 侧在解析 PAKFILE 材质时内部调用）。 */
   export function decode_vtf_to_png(data: Uint8Array): Uint8Array;
 
-  /** PNG 字节 → mosaic v4 纹理字节码（压缩；画质切换 manifest 生成）。 */
+  /** PNG 字节 → mosaic 纹理字节码文本。本工程调用点为零（由离线脚本产出纹理包）。 */
   export function mosaic_encode(png: Uint8Array, name: string): string;
 
-  /** mosaic v4 字节码 → PNG 字节（低清还原，最近邻放大 ×scale，默认 ×8）。 */
+  /** mosaic 字节码 → PNG 字节（最近邻放大 ×scale）。调用点：`renderer-main` 的画质切换路径（经 `main-wasm` 转出）。 */
   export function mosaic_decode(code: string, scale: number): Uint8Array;
 
-  /** 解压默认配置纹理包（textures.mtz，MTZ5 容器）→ textures.json 文本。 */
+  /** 解压默认纹理包（MTZ 容器字节）→ 纹理表 JSON 文本。调用点：`apps/debug/src/app.ts` 与 `apps/debug/src/default-pack.ts`。 */
   export function decompress_mtz(bytes: Uint8Array): string;
 
   /**
-   * 物理世界（共享自仓库根 src/，websurf-phys；game 同源）。
-   * build_world 输入与 BspProcessor 的 export_brushes_planes /
-   * export_model_tri_colliders / export_model_phy_colliders / parse_teleports /
-   * parse_spawn_points 输出同构，无需中间转换。
+   * 物理世界（共享自仓库根 `src/phys/mod.rs`，websurf-phys）。
+   * `build_world` 的四个 JSON 入参与 `BspProcessor` 的 `export_brushes_planes` /
+   * `export_model_tri_colliders` / `export_model_phy_colliders` / `parse_teleports` /
+   * `parse_spawn_points` 输出同构，无需中间转换。
    */
   export class PhysWorld {
+    /** 构造空世界；世界数据由 `build_world` 灌入，出生朝向在 `build_world` 里由 `spawn_yaw` 设定。 */
     constructor();
-    /** 加载世界数据（brush JSON + tri JSON + teleport JSON + spawn 位置/朝向） */
+    /** 加载世界数据：brush JSON + 三角网格 JSON + 传送点 JSON + 出生位置与朝向（度）。 */
     build_world(
       brush_json: string,
       tri_json: string,
@@ -76,19 +90,19 @@ declare module '*/pkg/websurf_wasm.js' {
       spawn_z: number,
       spawn_yaw: number,
     ): void;
-    /** 物理步进（权威）：移动/碰撞/传送/死亡。返回状态对象 */
+    /** 权威步进一个固定步长：移动 / 碰撞 / 传送 / 死亡，返回状态对象（字段见 `state`）。 */
     tick(dt: number, keys_mask: number, dx: number, dy: number): any;
-    /** 预测微步（轻量预测，禁用传送/死亡副作用） */
+    /** 预测微步：只推进运动与碰撞，不产生传送与死亡副作用。 */
     predict(dt: number, keys_mask: number, dx: number, dy: number): any;
-    /** 重生到初始出生点 */
+    /** 重生到 `build_world` 给定的初始出生点。 */
     respawn(): void;
-    /** 传送到指定坐标 */
+    /** 传送到指定坐标（yaw 单位为度）。 */
     teleport_to(x: number, y: number, z: number, yaw: number): void;
-    /** 设置出生点列表（teleport_to_spawn 用） */
+    /** 覆盖出生点列表，JSON 形如 `[[x,y,z,yaw], …]`。 */
     set_spawn_points(json: string): void;
-    /** 传送到出生点列表第 idx 个 */
+    /** 传送到出生点列表的第 idx 个；越界时不做任何改动。 */
     teleport_to_spawn(idx: number): void;
-    /** 覆盖全状态（预测基线修正） */
+    /** 覆盖位置 / 朝向 / 速度 / 着地四项；其余状态字段保持实例当前值。 */
     set_state(
       pos_x: number,
       pos_y: number,
@@ -100,24 +114,25 @@ declare module '*/pkg/websurf_wasm.js' {
       vel_z: number,
       on_ground: boolean,
     ): void;
-    /** 只覆盖速度（每帧权威速度外推校准） */
+    /** 只覆盖速度三轴（位置与朝向不动）。 */
     set_velocity(vx: number, vy: number, vz: number): void;
-    /** 只覆盖朝向 */
+    /** 只覆盖 yaw / pitch（度）。本工程调用点为零。 */
     set_yaw_pitch(yaw: number, pitch: number): void;
-    /** 设置死亡 Y 阈值 */
+    /** 设置掉落死亡的 Y 阈值。 */
     set_death_y(y: number): void;
-    /** 参数 JSON patch（snake_case 字段，见共享 crate player.rs PhysParams） */
+    /** 参数 JSON patch：蛇形键名，逐字段覆盖，未出现的键保持原值。 */
     set_params(json: string): void;
-    /** 碰撞箱尺寸 */
+    /** 设置碰撞箱三围（半宽 / 站立高 / 蹲伏高，HU），即时生效。 */
     set_hull(half_width: number, stand_height: number, duck_height: number): void;
-    /** 自由视角开关 */
+    /** 开关 noclip：开启后步进不参与碰撞，也不触发传送与死亡判定。 */
     set_noclip(enabled: boolean): void;
-    /** 当前状态 {posX,posY,posZ,yaw,pitch,velX,velY,velZ,onGround,contactTicks,eyeHeight} */
+    /** 当前状态对象：`posX` / `posY` / `posZ`（HU）、`yaw` / `pitch`（度）、`velX` / `velY` / `velZ`（HU/s）、`onGround`、`contactTicks`、`eyeHeight`（HU）。 */
     state(): any;
-    /** 取最近一次物理事件（{kind:'teleport'|'death', ...}），无事件返回 null；一次性消费 */
+    /** 取最近一次物理事件（`{ kind: 'teleport', … }` 或 `{ kind: 'death' }`），无事件返回 null；一次性消费。 */
     take_event(): any;
   }
 }
+  /** 同上的 bg 侧入口（只有默认导出 init）。本仓无引用点。 */
 
 declare module '*/pkg/websurf_wasm_bg.js' {
   export default function init(): Promise<unknown>;

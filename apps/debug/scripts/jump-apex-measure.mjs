@@ -1,19 +1,51 @@
 #!/usr/bin/env node
 /**
- * 跳跃顶高【实测】harness（headless Chromium + CDP，真实渲染物理线 + 真实 Worker 权威）。
+ * 跳跃顶高实测脚本：headless Chromium + CDP，驱动**真实页面**（真 wasm 物理、真 Worker
+ * 权威、真共享内存通道、真 `AuthorityCalibrator`、真 `sync-render-state` 消息链路）。
  *
- * 与 `jump-apex-verify.mjs` 的区别：后者是 node 侧架构镜像（自己重写接线），本脚本
- * 跑**真页面**：真 wasm 物理、真 Worker 权威、真 SAB、真 AuthorityCalibrator、真
- * `sync-render-state` 消息链路——A/B 只需改 `src/ts-shared/auth/worker-dispatch.ts`。
+ * 与 `apps/debug/scripts/jump-apex-verify.mjs` 的分工：后者是 node 侧架构镜像（自己重写
+ * 接线、自己造权威帧），本脚本跑真页面——两者的读数来源与可控变量都不同。
  *
- * 流程：静态服务(8080) → headless Edge/Chrome → CDP 注入 surf_666.bsp →
- *   等 `window.__jumpProbe.state()` 出现 → 静置至落地 → `__jumpMask = 16`（jump 位，
- *   shared-state.ts KEY_MASK.jump）按住 → 页内 rAF 采样（渲染物理线 state + 权威帧
- *   只读 SAB）→ 松开 → 落地 → 导出 JSON。
+ * 流程：连浏览器 CDP → 导航到 URL → 给页面的 `#bspFile` 注入 BSP 文件触发加载 →
+ *   轮询就绪判据（脚本内含）→ 轮询至连续四帧满足「`onGround` 为真且 `velY` 绝对值小于 1」
+ *   （判据表达式见正文，60 秒上限）→ 装页内 rAF 采样器（每个采样点取渲染状态一次，并尝试取
+ *   一次权威帧只读快照）→ 置 `window.__jumpMask = 16`（跳键位）→ 采样 seconds 秒 →
+ *   掩码归零 → 再等 4 秒 → 读采样摘要与原始数组 → 写 JSON → 退出码 0。
  *
- * 前置：静态服务已跑（`cd debug && python ../../src/serve.py 8080 .`）。
+ * 读数口径（按代码，与就绪判据同源）：脚本从探针 `globalThis.__jumpProbe` 取两个入口——
+ *   · `state()` 取自 `apps/debug/src/renderer/renderer-main.ts` 的 `RendererMain.getCurrentState`，
+ *     返回 `{ pos, yaw, pitch, vel, onGround }`：位置三分量嵌在 `pos` 下、速度三分量嵌在
+ *     `vel` 下，只有 `yaw` / `pitch` / `onGround` 在顶层；
+ *   · `auth()` 取自 `src/ts-shared/auth/shared-state.ts` 的 `readAuthoritative` 返回的权威帧，
+ *     并经服务端补丁**压成扁平四项**（`posY` / `velY` / `onGround` / `timeMs`）。
+ *   **上述两个入口都由服务端补丁提供，仓库内没有 `__jumpProbe` 的定义**：预置入口的是
+ *   `apps/debug/scripts/jump-apex-serve.mjs`（它在 OS 临时目录的 `app.ts` 副本里注入探针与
+ *   按键掩码覆盖槽，仓库源文件不被改动）；探针不存在时，本脚本的 `#bspFile` 注入会失败。
+ *   读数口径不一致（如实登记，只记录不改代码）：`getCurrentState` 的返回结构里没有顶层
+ *   `posY` / `posX` / `posZ` / `velX` / `velY` / `velZ`，故就绪判据恒为假（轮询必然吃满
+ *   180 秒并 `finish(1)`，采样阶段到不了）；即便进到采样阶段，采样表达式读到的这几个字段
+ *   也恒为 `undefined`，`JSON.stringify` 会把它们整体丢弃，落盘样本只剩
+ *   `i` / `t` / `dt` / `g` 四个键；同一前缀使 `auth()` 的 `frame.posY` / `frame.velY`
+ *   也取不到值。同源问题另见 `apps/debug/scripts/jump-apex-smoke.mjs`。
+ *
+ * CLI：argv[2] 标签（缺省 `run`，决定输出文件名）；argv[3] 页面 URL（缺省
+ *   `http://localhost:8080/web/index.html`）；argv[4] BSP 路径（缺省
+ *   `test/maps/surf_666.bsp`）；argv[5] 采样时长秒数（缺省 45）。浏览器按 Chrome ×2 →
+ *   Edge ×2 的顺序取第一个存在的可执行文件，找不到即退出码 2；BSP 不存在同样退出码 2。
+ *
+ * 前置：静态服务已在 8080 提供 `apps/debug`（`src/serve.py` 的用法是
+ *   `python serve.py [port] [root_dir]`，在 `apps/debug` 下跑即 `python ../../src/serve.py 8080 .`，
+ *   也是该工程 `npm run dev` 的内容）。
+ *
+ * 输出：`apps/debug/.tmp/jump-apex/<label>.json`（`.tmp` 为 gitignore 的中间产物目录），
+ *   内容为逐帧样本数组，每项含 `i` / `t` / `dt` / `x,y,z` / `vx,vy,vz` / `g` 与权威侧
+ *   `ay` / `avg` / `avy` / `avx` / `avz` / `ava`。消费方是
+ *   `apps/debug/scripts/jump-apex-report.mjs`（按 label 读该目录）。
+ *
+ * 退出码：0 = 采样并落盘成功；1 = CDP 不可用、页面异常、探针超时或未捕获异常；
+ *   2 = 找不到浏览器 / BSP 不存在。
+ *
  * 用法：node scripts/jump-apex-measure.mjs <label> [url] [mapPath] [seconds]
- * 输出：debug/.tmp/jump-apex/<label>.json
  */
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -29,9 +61,9 @@ const URL_ = process.argv[3] || 'http://localhost:8080/web/index.html';
 const MAP = process.argv[4] || join(repoRoot, 'test', 'maps', 'surf_666.bsp');
 const SECONDS = Number(process.argv[5] || 45);
 const OUT_DIR = join(debugDir, '.tmp', 'jump-apex');
-const LOAD_TIMEOUT_MS = 180000;
+const LOAD_TIMEOUT_MS = 180000; // 就绪轮询上限：超时即 finish(1)
 
-const KEY_JUMP = 16; // src/ts-shared/auth/shared-state.ts KEY_MASK.jump
+const KEY_JUMP = 16; // 跳键位，取自 src/ts-shared/auth/shared-state.ts 的 KEY_MASK.jump
 
 const CANDIDATES = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -66,6 +98,7 @@ const browser = spawn(
 );
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** 轮询 CDP 的 `/json/list` 取第一个 page 目标；120 次 × 250ms 仍取不到即抛错（调用点转 finish(1)）。 */
 async function waitForCdp() {
   for (let i = 0; i < 120; i++) {
     try {
@@ -83,6 +116,7 @@ async function waitForCdp() {
 }
 
 const page = await waitForCdp();
+// 自建 CDP 通道：请求按自增 id 配对，单条请求 60 秒上限；控制台输出与页面异常各收一份到 consoleLines。
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r, j) => {
   ws.onopen = r;
@@ -140,6 +174,7 @@ const evalJs = async (expression) => {
   return r?.result?.value;
 };
 
+// 收尾只执行一次：关 WS、杀浏览器进程、按 code 退出。未捕获异常与未处理的 Promise 拒绝都走这里（码 1）。
 let finished = false;
 function finish(code) {
   if (finished) return;
@@ -157,6 +192,7 @@ process.on('uncaughtException', (e) => {
   finish(1);
 });
 
+// 三个域必须开：Runtime 供 page 内求值、Page 供导航、DOM 供 #bspFile 节点查询与置文件。
 await send('Runtime.enable');
 await send('Page.enable');
 await send('DOM.enable');
@@ -175,6 +211,7 @@ if (!nodeRes?.nodeId) {
 await send('DOM.setFileInputFiles', { nodeId: nodeRes.nodeId, files: [MAP] });
 console.log(`[${LABEL}] bsp injected, loading...`);
 
+// ── 就绪轮询：每 500ms 求值一次判据，每 10s 打印一行诊断；轮询期出错只重试不失败 ──
 const t0 = Date.now();
 let ready = false;
 let lastDiag = 0;
@@ -194,6 +231,9 @@ while (Date.now() - t0 < LOAD_TIMEOUT_MS) {
         metadata: ((document.getElementById('metadata') || {}).textContent || '').slice(0, 120),
       };
     })()`);
+    // 判据三项：探针存在、`state()` 取到对象、`state().posY` 为真值。
+    // 第三项与 `RendererMain.getCurrentState` 的嵌套返回结构不符（位置在 `state().pos.y`），
+    // 故按当前源码该判据恒不成立，轮询必然走到 LOAD_TIMEOUT_MS 上限。
     ok = !!(diag && diag.hasProbe && diag.hasState && diag.posY);
     if (!ok && Date.now() - lastDiag > 10000) {
       lastDiag = Date.now();
@@ -215,6 +255,7 @@ if (!ready) {
 }
 console.log(`[${LABEL}] physics ready (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 
+// ── 静置：连续 4 次读到「着地且竖直速度绝对值 < 1」即认为已稳定，60 秒上限 ──
 const settleT0 = Date.now();
 let settledFrames = 0;
 let settleInfo = null;
@@ -222,6 +263,7 @@ while (Date.now() - settleT0 < 60000) {
   settleInfo = await evalJs(
     `(() => { const s = window.__jumpProbe.state(); return s ? { y: s.posY, vy: s.velY, g: s.onGround } : null; })()`,
   );
+  // settleInfo 的三个键分别是 y / vy / g（见上面的表达式）；g 即 onGround、vy 来自 velY。
   if (settleInfo && settleInfo.g === true && Math.abs(settleInfo.vy) < 1) {
     settledFrames++;
     if (settledFrames >= 4) break;
@@ -232,6 +274,9 @@ while (Date.now() - settleT0 < 60000) {
 }
 console.log(`[${LABEL}] settled: ${JSON.stringify(settleInfo)}`);
 
+// 装页内 rAF 采样器：常驻自递归，只有 __jumpSamplerOn 为真时才记录；每记录一点就顺带读一次
+// 权威帧快照（`auth()` 抛错时该点的权威五项为 null）。`t` 用页面时钟 `performance.now()`，
+// `dt` 是相邻记录点之差（首点为 0）。
 await evalJs(`(() => {
   window.__jumpSamples = [];
   window.__jumpSamplerOn = false;
@@ -265,6 +310,7 @@ await evalJs(`(() => {
   return true;
 })()`);
 
+// ── 按住跳键采样：每 2 秒查一次已记录点数，为 0 时打一行告警（rAF 停摆）但不中断 ──
 console.log(`[${LABEL}] holding jump (mask=${KEY_JUMP}) for ${SECONDS}s ...`);
 try {
   await evalJs('(window.__jumpMask = ' + KEY_JUMP + ')');
@@ -284,6 +330,7 @@ await evalJs('(window.__jumpMask = 0)');
 console.log(`[${LABEL}] released jump, waiting for landing ...`);
 await sleep(4000);
 
+// 采样摘要：帧数、总时长、着地帧数、平均帧率与最大帧间隔、y 极值、取到权威帧的样本数、yaw。
 const summary = await evalJs(`(() => {
   const a = window.__jumpSamples || [];
   const n = a.length;
@@ -301,6 +348,7 @@ const summary = await evalJs(`(() => {
   });
 })()`);
 
+// 原始样本整串取一次（页面内序列化，避免逐点过 CDP 通道）；目录不存在则递归建。
 const raw = await evalJs('JSON.stringify(window.__jumpSamples)');
 mkdirSync(OUT_DIR, { recursive: true });
 const outFile = join(OUT_DIR, `${LABEL}.json`);

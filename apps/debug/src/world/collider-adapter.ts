@@ -1,10 +1,39 @@
 /**
- * 世界适配层：碰撞体反腐败层
- * 将 WASM export_brushes_planes 输出的 JSON（WasmBrush[]）转换为
- * cs-movement 原生类型 Brush[] / LadderVolume[]，填入 World.solids / World.ladders。
- * 坐标约定：Rust 端已统一旋转为 Y-up（[x,y,z]→[y,z,x]，det=+1），TS 端不再二次重映射。
- * 法线约定（关键）：vbsp 平面用"法线朝内"（内部 dot(n,p)-dist>=0），cs-movement 用"法线朝外"
- *（内部 dot(n,p)-dist<=0）；Rust export_brushes_planes 已对每平面取负 normal/dist 翻转，TS 端不再处理。
+ * brush 映射层：把 `BspProcessor::export_brushes_planes`（`apps/debug/crates/wasm/src/lib.rs`）
+ * 产出的 `WasmBrush[]` JSON 映射成 cs-movement 形状的 `Brush[]` / `LadderVolume[]`
+ *（类型定义在 `apps/debug/src/physics/physics/Collision/Collision.types.ts`）。
+ *
+ * ## 定位：主线程的本地副本，不参与物理
+ * 物理侧另有一份同源解析：worker 里的 `PhysWorld::build_world`（`src/phys/mod.rs`）吃
+ * **同一串** `brushJson`，在 Rust 内建 `World.solids` / `World.ladders` 并承担碰撞与梯子判定。
+ * 本文件的产出只填 `RendererMain` 的本地数组 `solids` / `ladders` / `colliders`
+ *（`apps/debug/src/renderer/renderer-main.ts` 的 `loadScene`），供
+ * `apps/debug/src/renderer/collider-debug.ts` 画 brush 线框与命中、
+ * `apps/debug/src/renderer/plane-inspector.ts` 做准星拾取。
+ *
+ * ## 输入约定（上游已做，本文件不做任何几何变换）
+ * - 坐标已是 Y-up：上游按 `[x,y,z] → [y,z,x]` 循环置换顶点（行列式 +1）。
+ * - 法线已翻成朝外：上游对每个平面取 `normal = -rotate_yup(n)`、`dist = -dist`，
+ *   使内部满足 `dot(normal, p) - dist <= 0`，与 `Collision.types.ts` 的 `Plane` 同口径。
+ * - `planes` = 该 brush 的原始面，加上上游运行时生成的棱边 chamfer 平面。
+ * - `min` / `max` = 凸包顶点旋转到 Y-up 后的逐轴极值。
+ *
+ * ## 本文件的分支与不变量
+ * - 顺序固定：既非 solid 又非 ladder → 平面数组为空 → 平面数 < `MIN_PLANES_PER_BRUSH`
+ *   → AABB 三轴尺寸不都大于 `MIN_AABB_SIZE`，任一命中即计入 `stats.skipped` 并跳过该 brush。
+ * - ladder 优先：`is_ladder` 与 `is_solid` 同时为真时只进 `ladders`，
+ *   与上游 `build_world` 的 `if is_ladder … else if is_solid` 分支顺序一致。
+ * - 输出顺序与输入顺序一致；`stats.total` 取输入数组长度，
+ *   `stats.solids + stats.ladders + stats.skipped` 恒等于它。
+ * - 本文件只读输入、只写自己的输出数组，不改入参、无全局状态。
+ *
+ * ## 失败语义
+ * `JSON.parse` 的异常不兜；`WasmBrush` 结构缺字段时在该字段的读取处抛错。
+ * 本文件不抛自有错误、不打印日志。
+ *
+ * ## 本工作区内零调用点的导出
+ * `verifyOutwardNormals` / `formatAdaptStats` 与 `AdaptedBrushes.stats` 全仓无消费点
+ *（`loadScene` 只取 `solids` / `ladders`）。
  */
 
 import type { Vec3 } from '../physics/math/vec3.js';
@@ -12,62 +41,67 @@ import type { Brush, LadderVolume, Plane } from '../physics/physics/Collision/Co
 import { type WasmBrush, type WasmBrushPlane } from './types.js';
 
 // ---------------------------------------------------------------------------
-// 适应度函数 F2：法线朝外验证
+// 法线朝外校验：结果类型
 // ---------------------------------------------------------------------------
 
-/** 单 brush 法线朝外验证结果。 */
+/** 单个 brush 的法线朝外校验结果（由 `verifyOutwardNormals` 逐 brush 产出）。 */
 export interface BrushNormalCheck {
-  /** brush 在 `solids` / `ladders` 数组中的索引（仅用于诊断）。 */
+  /** brush 在**入参数组**中的下标（入参通常是 solids 与 ladders 的合并顺序）。 */
   brushIndex: number;
-  /** 平面数。 */
+  /** 该 brush 的平面数。 */
   numPlanes: number;
-  /** AABB 中心。 */
+  /** AABB 中心（判定用的参考点，按 `min` / `max` 逐轴取中值，不是几何重心）。 */
   center: Vec3;
-  /** 朝外法线数（应为平面总数）。 */
+  /** 判为朝外的平面数。 */
   outwardCount: number;
-  /** 朝内法线数（应为 0）。 */
+  /** 判为朝内的平面数；与 `outwardCount` 之和恒为 `numPlanes`。 */
   inwardCount: number;
-  /** 朝内平面的索引列表（用于诊断）。 */
+  /** 判为朝内的平面在 `brush.planes` 中的下标（按扫描顺序）。 */
   inwardPlanes: number[];
-  /** 是否通过验证（outwardCount === numPlanes）。 */
+  /** `outwardCount === numPlanes`。平面数为 0 时循环不执行、两侧都是 0，故判为通过。 */
   passed: boolean;
 }
 
-/** 整批 brush 的法线朝外验证结果。 */
+/** 整批 brush 的法线朝外校验结果。 */
 export interface NormalCheckReport {
-  /** 总 brush 数。 */
+  /** 入参 brush 总数（= `brushes.length`）。 */
   total: number;
-  /** 通过验证的 brush 数。 */
+  /** `passed` 为真的 brush 数。 */
   passed: number;
-  /** 失败的 brush 数。 */
+  /** `passed` 为假的 brush 数；与 `passed` 之和恒为 `total`。 */
   failed: number;
-  /** 每个 brush 的详细验证结果。 */
+  /** 逐 brush 结果，顺序与入参一致。 */
   brushes: BrushNormalCheck[];
 }
 
 // ---------------------------------------------------------------------------
-// LadderVolume.facing 计算
+// ladder 面朝向
 // ---------------------------------------------------------------------------
 
 /**
- * 计算梯子 brush 的 facing 方向（水平、指向墙外）。
- * 启发式：BSP ladder brush 是薄片体（一面贴墙背面、对面可攀爬），
- * 1. 计算所有平面水平度（sqrt(nx²+nz²)）；
- * 2. 选水平度最高者为"正面候选"；
- * 3. 取其法线水平分量并归一化。
- * 限制：无法区分正/背面（水平度相同）；方向错误会朝墙内跳，可后续改进。
- * @param planes brush 平面列表（法线已旋转为 Y-up）。
- * @returns 归一化的水平 facing 方向。
+ * 求 ladder brush 的可攀爬面朝向（水平，y 分量恒为 0）。
+ *
+ * 逐平面算水平度 `sqrt(nx² + nz²)`，取**严格最大**者（并列时取先遇到的那个），
+ * 再把该面法线的 x / z 分量归一化；`planes` 为空、或选中面法线的水平分量
+ * `<= 1e-6` 时统一回退 `(0, 0, 1)`。
+ *
+ * 方向取决于选中面的法线符号：算法只按水平度选面，不区分同一薄片体的正反面。
+ * 同一算法在 Rust 侧另有一份实现（`src/phys/mod.rs` 的 `compute_ladder_facing`），
+ * 其结果写进 `world::LadderVolume.facing` 并被 `src/phys/player.rs` 的梯子逻辑读取；
+ * 本文件算出的 `facing` 在本工程内无读取点。
+ *
+ * @param planes brush 平面列表（法线朝外、Y-up）。
+ * @returns 单位化的水平朝向。
  */
 function computeLadderFacing(planes: Plane[]): Vec3 {
   if (planes.length === 0) {
-    return { x: 0, y: 0, z: 1 }; // 默认 +Z（任意安全方向）
+    return { x: 0, y: 0, z: 1 }; // 无平面：回退 +Z
   }
 
   let bestPlane = planes[0];
   let bestHoriz = -1;
   for (const p of planes) {
-    // 水平度：法线在 XZ 平面的投影长度
+    // 水平度 = 法线在 XZ 平面的投影长度
     const horiz = Math.sqrt(p.normal.x * p.normal.x + p.normal.z * p.normal.z);
     if (horiz > bestHoriz) {
       bestHoriz = horiz;
@@ -75,7 +109,7 @@ function computeLadderFacing(planes: Plane[]): Vec3 {
     }
   }
 
-  // 取水平分量并归一化（丢弃 Y 分量）
+  // 取水平分量归一化，丢弃 Y 分量
   let fx = bestPlane.normal.x;
   let fz = bestPlane.normal.z;
   const len = Math.sqrt(fx * fx + fz * fz);
@@ -83,7 +117,7 @@ function computeLadderFacing(planes: Plane[]): Vec3 {
     fx /= len;
     fz /= len;
   } else {
-    // 平面法线接近垂直（罕见），默认 +Z
+    // 选中面接近水平（法线接近竖直）：回退 +Z
     fx = 0;
     fz = 1;
   }
@@ -94,45 +128,56 @@ function computeLadderFacing(planes: Plane[]): Vec3 {
 // 主转换函数
 // ---------------------------------------------------------------------------
 
-/** `adaptBrushes` 的输出。 */
+/** `adaptBrushes` 的产出：两张 brush 表加转换统计。 */
 export interface AdaptedBrushes {
-  /** SOLID brush 列表，填入 `World.solids`。 */
+  /** SOLID brush 表（`is_ladder` 为假的那些）。 */
   solids: Brush[];
-  /** LADDER brush 列表（带 facing），填入 `World.ladders`。 */
+  /** LADDER brush 表（`is_ladder` 为真，附 `computeLadderFacing` 算出的 `facing`）。 */
   ladders: LadderVolume[];
-  /** 转换统计（用于诊断）。 */
+  /** 转换统计；本工作区内无消费点。 */
   stats: AdaptBrushStats;
 }
 
-/** 转换统计。 */
+/** 转换统计：总量、两类产出量与四类跳过原因的计数。 */
 export interface AdaptBrushStats {
-  /** 输入 brush 总数。 */
+  /** 输入 `WasmBrush[]` 的长度。 */
   total: number;
-  /** 转换为 solid 的数量。 */
+  /** 写入 `solids` 的数量。 */
   solids: number;
-  /** 转换为 ladder 的数量。 */
+  /** 写入 `ladders` 的数量。 */
   ladders: number;
-  /** 跳过的 brush 数（平面数 < 4 或 AABB 无效）。 */
+  /** 被跳过的总数 = `skipReasons` 四项之和。 */
   skipped: number;
-  /** 跳过原因明细。 */
+  /** 跳过原因明细，按闸门顺序；每个 brush 至多计入一项（命中即 `continue`）。 */
   skipReasons: {
-    emptyPlanes: number;
-    tooFewPlanes: number;
-    invalidAabb: number;
+    /** `is_solid` 与 `is_ladder` 同时为假。 */
     notSolidNotLadder: number;
+    /** `planes` 缺失或长度为 0。 */
+    emptyPlanes: number;
+    /** `planes.length < MIN_PLANES_PER_BRUSH`。 */
+    tooFewPlanes: number;
+    /** AABB 至少有一轴 `max - min <= MIN_AABB_SIZE`。 */
+    invalidAabb: number;
   };
 }
 
-/** 默认跳过阈值（planes < 4 视为退化 brush）。 */
+/** 平面数下限：低于它的 brush 视为退化，跳过（阈值与上游 `export_brushes_planes` 的
+ * `bsp_planes.len() < 4` 相同，但闸门位置不同——上游在收集 brush_sides 之后、
+ * 本文件在该 JSON 的平面数组上）。 */
 const MIN_PLANES_PER_BRUSH = 4;
 
-/** AABB 有效性的最小尺寸（HU，防止退化 brush）。 */
+/** AABB 有效性下限（HU）：三轴都要求 `max - min` 严格大于它。 */
 const MIN_AABB_SIZE = 0.001;
 
 /**
- * 将 WASM 输出的 WasmBrush[] JSON 转换为 cs-movement 原生类型。
- * @param wasmJson export_brushes_planes 返回的 JSON 字符串。
- * @returns { solids, ladders, stats }，分别填入 World.solids 与 World.ladders。
+ * 把 `export_brushes_planes` 的 `WasmBrush[]` JSON 映射成 cs-movement 形状的 brush。
+ *
+ * 逐 brush 走文件头列出的四道闸门；通过后把平面逐项映射成 `Plane`（只取 `normal` 与 `dist`，
+ * 上游 `WasmBrushPlane` 无其他字段），AABB 逐轴拷进 `Vec3`，
+ * 再按 `is_ladder` 分流（ladder 分支额外算 `facing`）。
+ *
+ * @param wasmJson `BspProcessor::export_brushes_planes(filterJson)` 返回的 JSON 文本。
+ * @returns `{ solids, ladders, stats }`；三个字段都新建，不复用入参对象。
  */
 export function adaptBrushes(wasmJson: string): AdaptedBrushes {
   const data: WasmBrush[] = JSON.parse(wasmJson);
@@ -153,26 +198,27 @@ export function adaptBrushes(wasmJson: string): AdaptedBrushes {
   };
 
   for (const wb of data) {
-    // 跳过既非 solid 又非 ladder 的 brush（不应出现，但防御性处理）
+    // 闸门一：两个标志都为假
     if (!wb.is_solid && !wb.is_ladder) {
       stats.skipped++;
       stats.skipReasons.notSolidNotLadder++;
       continue;
     }
 
-    // 平面数检查
+    // 闸门二：平面数组缺失或为空
     if (!wb.planes || wb.planes.length === 0) {
       stats.skipped++;
       stats.skipReasons.emptyPlanes++;
       continue;
     }
+    // 闸门三：平面数低于下限
     if (wb.planes.length < MIN_PLANES_PER_BRUSH) {
       stats.skipped++;
       stats.skipReasons.tooFewPlanes++;
       continue;
     }
 
-    // AABB 有效性检查
+    // 闸门四：AABB 三轴都必须严格大于 MIN_AABB_SIZE
     const aabbValid =
       wb.max[0] - wb.min[0] > MIN_AABB_SIZE &&
       wb.max[1] - wb.min[1] > MIN_AABB_SIZE &&
@@ -183,13 +229,13 @@ export function adaptBrushes(wasmJson: string): AdaptedBrushes {
       continue;
     }
 
-    // 转换平面（直接映射，坐标已在 Rust 端旋转）
+    // 平面逐项直映（坐标与法线方向已在 Rust 端处理完）
     const planes: Plane[] = wb.planes.map((wp: WasmBrushPlane) => ({
       normal: { x: wp.normal[0], y: wp.normal[1], z: wp.normal[2] },
       dist: wp.dist,
     }));
 
-    // 转换 AABB
+    // AABB 逐轴直映
     const min: Vec3 = { x: wb.min[0], y: wb.min[1], z: wb.min[2] };
     const max: Vec3 = { x: wb.max[0], y: wb.max[1], z: wb.max[2] };
 
@@ -207,15 +253,18 @@ export function adaptBrushes(wasmJson: string): AdaptedBrushes {
 }
 
 // ---------------------------------------------------------------------------
-// 适应度函数 F2：法线朝外批量验证
+// 法线朝外批量校验
 // ---------------------------------------------------------------------------
 
 /**
- * 验证一批 brush 的平面法线是否全部朝外（适应度函数 F2）。
- * 对每个 brush 检查 AABB 中心 c 满足 dot(n, c) - dist <= 0（中心在平面内侧 → 法线朝外）。
- * 假设 brush 为凸且中心在其内部；极端非凸 brush 可能误报。
- * @param brushes 待验证的 brush 列表（solids + ladders）。
- * @returns 验证报告，包含每个 brush 的详细结果。
+ * 校验一批 brush 的平面法线是否全部朝外。
+ *
+ * 逐 brush 取 AABB 中心 `c`，对每个平面算 `d = dot(n, c) - dist`：
+ * `d <= 1e-3` 计朝外，否则计朝内并记录平面下标；`passed` 要求朝外数等于平面总数。
+ * 判定把 AABB 中心当内部点，故对中心落在凸包外的退化 brush 会给出朝内的结论。
+ *
+ * @param brushes 待校验的 brush 列表（可传 `solids` 与 `ladders` 的合并数组）。
+ * @returns 报告；`total` / `passed` / `failed` 与 `brushes` 逐项对应。
  */
 export function verifyOutwardNormals(brushes: Brush[]): NormalCheckReport {
   const report: NormalCheckReport = {
@@ -241,7 +290,7 @@ export function verifyOutwardNormals(brushes: Brush[]): NormalCheckReport {
       const p = brush.planes[j];
       const d = p.normal.x * center.x + p.normal.y * center.y + p.normal.z * center.z - p.dist;
       if (d <= 1e-3) {
-        // 中心在平面内侧（含容差）→ 法线朝外
+        // 中心在平面内侧（含 1e-3 容差）→ 法线朝外
         outward++;
       } else {
         inward++;
@@ -270,11 +319,13 @@ export function verifyOutwardNormals(brushes: Brush[]): NormalCheckReport {
 }
 
 // ---------------------------------------------------------------------------
-// 诊断辅助：打印转换统计
+// 统计格式化
 // ---------------------------------------------------------------------------
 
 /**
- * 将转换统计格式化为可读字符串（用于 console.log）。
+ * 把转换统计拼成单行文本（供调用方自行 `console.log`，本文件不打印）。
+ * 字段顺序固定：`total` / `solids` / `ladders` / `skipped`，
+ * 括注内按 `empty` / `fewPlanes` / `badAabb` / `notSolidLadder` 排列。
  */
 export function formatAdaptStats(stats: AdaptBrushStats): string {
   const r = stats.skipReasons;

@@ -1,25 +1,26 @@
 /**
- * Clip 人工变换微调（rule.transform 的后端）。
+ * Clip 人工变换微调（rule.transform 的执行处）。
  *
- * t4 起 JSON 解析通道已移除，本模块只剩「变换调整」的后处理：
- * viewer 的播放基准 = 帧自身坐标；平移/旋转只能由用户显式设置（恒等变换直接跳过）。
+ * viewer 的播放基准 = 帧自身坐标：本模块只在 rule.transform 存在且非恒等时才就地改写 Clip
+ * （平移 + 绕 Y 旋转），随后重算 bbox。生产路径上的唯一调用点是
+ * `apps/viewer/src/replay/shavit-replay.ts` 的 clipFromShavitReplay。
  */
 
 import { wrapDeg } from './helpers.js';
 import type { Clip, RuleTransform } from './types.js';
 
-/** 超过该帧数的导入按「大文件」处理（提示合并/精度说明）。 */
+/** 帧数阈值：导入结果的 count ≥ 该值时，面板在摘要里追加「帧数较多，改映射/变换重新导入耗时较长」（`apps/viewer/src/replay/panel.ts` 的 runImport）。 */
 export const LARGE_CLIP_FRAMES = 100_000;
 
 /**
- * 人工变换微调（rule.transform）：作用于解码输出之后，恒等变换直接跳过。
- *
- * 绕 Y 旋转 θ（度）：pos/vel 用标准 Y 旋转 (x,z)→(x·cosθ+z·sinθ, −x·sinθ+z·cosθ)，
- * 该旋转把朝向 yaw φ 的方向变为 φ+θ——与「yaw 直接加 θ」自洽
- * （viewer 约定：yaw 0 面朝 −Z，逆时针为正）。bbox 全量重算。
- *
- * .replay 原生路径不走规则脚本，
- * 但「调整工具」的平移/旋转微调对原生轨道同样生效。
+ * 就地应用人工变换微调；tf 缺省或全零（恒等）时直接返回。
+ * - 平移：offset（缺省 [0,0,0]）加到每帧 pos 的三个分量上。
+ * - 绕 Y 旋转 θ 度（θ = yawDeg，缺省 0；θ = 0 时跳过旋转段）：pos 的 (x, z) 走
+ *   (x·cosθ + z·sinθ, −x·sinθ + z·cosθ)，vel 的 X/Z 分量走同一旋转，朝向只改 yaw
+ *   （ang[i*3] = wrapDeg(ang[i*3] + θ)），pitch 与 roll 不动。该旋转使 yaw = φ 的朝向变为 φ + θ，
+ *   与「yaw 直接加 θ」自洽；yaw 约定 0 = 面朝 −Z，相机 rotation 用 YXZ
+ *   （见 `apps/viewer/src/core/fly.ts` 的 writeCamera）。
+ * - 末尾按全部 pos 重算 clip.bbox；count = 0 时 min/max 全取 0。
  */
 export function applyClipTransform(clip: Clip, tf: RuleTransform | undefined): void {
   if (!tf) return;

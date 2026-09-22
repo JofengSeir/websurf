@@ -3,14 +3,17 @@
  * 目的：抓运行时异常——typecheck 与 Node 自检都覆盖不到 UI 接线。
  *
  * 前置：
- *   1. 另开终端 `npm run dev`（默认 8080；SMOKE_URL=file:///…dist/index.html 可改跑 dist 产物）
- *   2. 需要 `ws`（`npm i ws`，或用 WS_PATH 指向已有的安装）
+ *   1. 先起页面服务：`npm run dev`（viewer 的 dev 端口 8100，见 apps/viewer/package.json）；
+ *      脚本内置缺省 SMOKE_URL 是 http://127.0.0.1:8080/web/index.html，端口不同须用 SMOKE_URL 覆盖；
+ *      也可指向 dist 产物：SMOKE_URL=file:///…/dist/index.html
+ *   2. 需要 ws 包（`npm i ws`，或用 WS_PATH 指向已有的安装）
  *   3. 需要 Edge/Chromium（用 EDGE_PATH 覆盖默认路径）
  *
- * 用法：npm run test:smoke
+ * 用法：npm run local:smoke
  *   环境变量：EDGE_PATH / WS_PATH / SMOKE_URL / SMOKE_PORT / SMOKE_FILE_REPLAY
- *   默认导入本地真实 maps/surf_null_4.replay（CDP 塞进文件选择 input，
- *   与真实用户点选完全同链路）；SMOKE_URL 带 ?replay= 时走深链自动导入。
+ *   缺省用 CDP 把本地 test/maps/surf_null_4.replay 塞进「选择录像文件」input（与用户点选同链路）；
+ *   SMOKE_URL 带 ?replay= / ?bsp= 时改走深链自动导入。
+ *   夹具或地图缺失时 loud skip：打印 SKIP、不计入 failures。
  */
 
 import { spawn } from 'node:child_process';
@@ -27,7 +30,7 @@ const EDGE =
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = Number(process.env.SMOKE_PORT ?? 9333);
 const URL_ = process.env.SMOKE_URL ?? 'http://127.0.0.1:8080/web/index.html';
-// 真实录像：test/maps/surf_null_4.replay（test/maps/；深链跑不需要文件选择）
+// 缺省夹具：<仓库根>/test/maps/surf_null_4.replay（SMOKE_FILE_REPLAY 可覆盖）；深链跑不需要文件选择
 const LOCAL_REPLAY =
   process.env.SMOKE_FILE_REPLAY ?? join(VIEWER_ROOT, '..', '..', 'test', 'maps', 'surf_null_4.replay');
 
@@ -35,7 +38,7 @@ async function loadWs() {
   try {
     return (await import('ws')).default;
   } catch {
-    /* 落到隔离工作区的那份 */
+    /* 裸 ws 不可用：改用 WS_PATH 指向的副本 */
   }
   const p =
     process.env.WS_PATH ??
@@ -71,7 +74,7 @@ async function waitForDevtools() {
       const r = await fetch(`http://127.0.0.1:${PORT}/json/version`);
       if (r.ok) return await r.json();
     } catch {
-      /* 还没起来 */
+      /* 端口未就绪：继续轮询 */
     }
     await sleep(500);
   }
@@ -96,7 +99,8 @@ function send(method, params = {}, sessionId) {
 }
 
 async function evaluate(expr, sessionId) {
-  // send 已解出 msg.result，即 Runtime.evaluate 的 { result: {type, value}, exceptionDetails? }
+  // send 解出的是 msg.result：Runtime.evaluate 的 { result: { type, value }, exceptionDetails? }；
+  // 出现 exceptionDetails 时由本函数抛错（页面内异常按失败处理），否则返回 result.value
   const res = await send(
     'Runtime.evaluate',
     { expression: expr, awaitPromise: true, returnByValue: true },
@@ -123,7 +127,8 @@ function check(name, cond, extra = '') {
   }
 }
 
-// ── [0] 单一 dist 结构静态断言（§6.2.1/§6.2.5；dist 未构建时跳过，不误伤 dev-server 冒烟）──
+// ── [0] dist 结构静态断言：按 single 模式（file:// 双击）产物写 —— classic ./app.js、根目录无 worker.js/*.wasm；
+//     dist/index.html 缺失即整段跳过。--multi 产物不适用这几条（module script + 外置 wasm + 根目录 worker.js）──
 console.log('\n[0] dist 结构 + play.cmd 静态断言');
 const distRoot = join(VIEWER_ROOT, 'dist');
 if (!existsSync(join(distRoot, 'index.html'))) {
@@ -138,8 +143,8 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   check('dist 根无 worker.js / *.wasm', !existsSync(join(distRoot, 'worker.js')) && !existsSync(join(distRoot, 'websurf_viewer_wasm_bg.wasm')));
   check('dist/play.cmd 存在', existsSync(join(distRoot, 'play.cmd')));
   check('dist-multi/ 不存在（单一 dist）', !existsSync(join(VIEWER_ROOT, 'dist-multi')));
-  // 本地源 test/maps/surf_null_4.replay 存在时，build 才会把示例打进 dist/assets/maps/；
-  // 本地无源则 build 也不会产出该文件，断言跳过（不误判）。
+  // 示例录像 dist/assets/maps/surf_null_4.replay 由 build 从本地源 test/maps/surf_null_4.replay 复制；
+  // 源不存在时 build 只告警并跳过，本断言随之跳过（不误判为失败）。
   if (existsSync(LOCAL_REPLAY)) {
     check(
       'dist/assets/maps/surf_null_4.replay 存在（原生示例，HTTP 深链可用）',
@@ -153,10 +158,10 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   check('play.cmd 含 serve.py', playCmd.includes('serve.py'));
   check('play.cmd 含 http://localhost:', playCmd.includes('http://localhost:'));
   check('play.cmd 含 npx serve 备选', playCmd.includes('npx serve'));
-  // play.cmd 已 ASCII 化（cmd.exe 对非 ASCII + LF 批处理存在解析失步风险，2026-09-05）
+  // play.cmd 的 python 缺失提示是纯 ASCII 英文（断言取子串 python not found）
   check('play.cmd 含 python 缺失提示（ASCII）', playCmd.includes('python not found'));
   check('play.cmd 不含旧 start-local', !playCmd.includes('start-local'));
-  // JSON 通道资源已删：启动脚本不得再引用 .replay.json / .rule.json
+  // 启动脚本不得引用 .replay.json / .rule.json（两者在当前链路中不存在）
   check(
     'play.cmd 无 .replay.json/.rule.json 残留',
     !playCmd.includes('.replay.json') && !playCmd.includes('.rule.json'),
@@ -168,7 +173,7 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   );
 }
 
-/** 等轨迹行渲染出来（headless 下 DOM 渲染偶发滞后，轮询而不是固定 sleep）。 */
+/** 轮询等轨迹行数达到 want（headless 下 DOM 更新有滞后，不用固定 sleep）；超时返回最后一次计数。 */
 async function waitRows(sessionId, want, timeoutMs = 20000) {
   const t0 = Date.now();
   let rows = 0;
@@ -183,7 +188,7 @@ async function waitRows(sessionId, want, timeoutMs = 20000) {
   return rows;
 }
 
-/** CDP 设置本地文件到 `<input type=file>`（file:// 与 http 都走「选择录像文件」真实链路）。 */
+/** 用 CDP 把本地文件塞进 <input type=file>：change 由它触发，与用户点选同一链路（file:// 与 http 同）。 */
 async function setFileInput(sessionId, selector, filePath) {
   const { root } = await send('DOM.getDocument', {}, sessionId);
   const { nodeId } = await send(
@@ -203,7 +208,7 @@ try {
     socket.once('error', rej);
   });
 
-  // 日志按 session 归桶：[13] 只检查主页面；[12b] BSP 独立页面单独收集未捕获异常
+  // 日志按 session 归桶：主 session 进 logs/errors（[13] 检查）；[12b] 的独立 BSP target 只把 error 收进 bspErrors
   let mainSessionId = null;
   let bspSessionId = null;
   const bspErrors = [];
@@ -247,7 +252,7 @@ try {
     }
   });
 
-  // 复用已有的 page target（新建 target 再 attach 时导航有时不生效）
+  // 复用启动参数里的 about:blank page target：后续导航与事件都挂在这个 session 上
   const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
   const page = list.find((t) => t.type === 'page');
   if (!page) throw new Error('找不到 page target');
@@ -315,13 +320,13 @@ try {
   console.log(`\n[3] ${modeLabel}`);
   const haveReplay = useDeepLink || existsSync(LOCAL_REPLAY);
   if (useDeepLink) {
-    // URL 深链自动导入，无需操作
+    // 深链（?replay= / ?bsp=）由页面自身自动导入，本脚本不操作
   } else if (!haveReplay) {
-    // 夹具缺失：loud skip，不抛、不计入失败（照抄 [12b] BSP 缺失范式）
+    // 夹具缺失：只打印 SKIP，不抛错、不计入 failures（与 [12b] 的地图缺失处理一致）
     console.log(`[SKIP] 本地录像缺失（${LOCAL_REPLAY}）——跳过 [3] 真实录像导入及依赖它的 [3]-[11] 断言`);
   } else {
-    // CDP 直接把本地 .replay 塞进「选择录像文件」的 input，
-    // 走与真实用户点击选择完全相同的 change → loadFile → 嗅探 → 解码链路
+    // 把本地 .replay 塞进「选择录像文件」input：走与用户点选相同的
+    // change → loadFile → 嗅探 → 解码链路
     await setFileInput(sessionId, '#pane-replay input[type=file]', LOCAL_REPLAY);
     await sleep(500);
   }
@@ -358,7 +363,7 @@ try {
     sessionId,
   );
   console.log('  信息条：' + metaText);
-  // surf_null_4.replay 头部实测（t3/t4 selftest 同源数值）
+  // 以下数值取自 test/maps/surf_null_4.replay 头部，与 apps/viewer/test/replay-selftest.ts 的真实文件段同源
   check('信息条含成绩 16.21 s', metaText.includes('成绩') && metaText.includes('16.21 s'), metaText);
   check('信息条含玩家 [U:1:196340649]', metaText.includes('[U:1:196340649]'), metaText);
   check('信息条含地图 surf_null · Bonus 4', metaText.includes('surf_null') && metaText.includes('Bonus 4'), metaText);
@@ -416,7 +421,7 @@ try {
 
   console.log('\n[3c] 播放基准（帧自身坐标直读，无起点锚定）');
   const tracks0 = await evaluate('window.viewer.replay.tracks()', sessionId);
-  // 解析帧 0（prerun 真实位置）→ viewer [y,z,x]；锚定 bug 会把这里平移 ~10.7k HU
+  // 帧 0 是 prerun 首帧：坐标按 viewer 轴序 [y,z,x] 直读；若叠加了起点锚定，这里会整体平移
   const base0 = tracks0[0]?.firstPos;
   check(
     'firstPos = 帧自身坐标（12187.20, -1791.97, 2375.04）',
@@ -516,7 +521,7 @@ try {
 
   console.log('\n[7b] 多轨迹（Q2）：同一录像再选一次 → 追加第二条');
   if (useDeepLink) {
-    // 深链跑没有本地文件前置，但输入框路径同构：同样可再选一次本地文件
+    // 深链跑虽已自动导入，文件选择链路依旧可用：这里再选一次同一份本地文件 → 追加第二条
   }
   await setFileInput(sessionId, '#pane-replay input[type=file]', LOCAL_REPLAY);
   await sleep(2500);
@@ -582,7 +587,7 @@ try {
   check('trackCount = 3', stV2.trackCount === 3, JSON.stringify(stV2));
 
   console.log('\n[9b] 坐标映射切换（当前文件 = 合成 V2 → 替换 track-3）');
-  // 默认 shavit：Source[x,y,z]→viewer[y,z,x] → firstPos = [20,30,10]
+  // 默认 shavit 轴序：Source[x,y,z] → viewer[y,z,x] ⇒ firstPos = [20,30,10]
   const fpBeforeToggle = (await evaluate('window.viewer.replay.tracks()', sessionId))[2]?.firstPos;
   check(
     '默认轴序（shavit）：firstPos = [20,30,10]',
@@ -637,8 +642,8 @@ try {
     sessionId,
   );
   check('信息条跟随显示第二条名', metaNameAt2 === 'surf_null_4.replay', metaNameAt2);
-  // API 跟随切换 → 信息条必须重渲染（t11 修复：follow 路径补 syncTracks）。
-  // 注意 replay 是快照 getter：follow() 之后要**重新取快照**读 followId，同快照内读到的是旧值。
+  // API 跟随切换后信息条必须重渲染：follow 路径同样会刷新元信息行。
+  // window.viewer.replay 是快照 getter：变更后要重新取一次才能读到新值，同一次取值内读到的是旧值。
   await evaluate("window.viewer.replay.follow('track-3')", sessionId);
   await sleep(300);
   const followed3 = await evaluate('window.viewer.replay.followId', sessionId);
@@ -663,12 +668,12 @@ try {
   await sleep(500);
   const st5 = await evaluate('window.viewer.replay', sessionId);
   check('移除后回到 2 条', st5.trackCount === 2, JSON.stringify(st5));
-  // 移除的是非跟随轨道（跟随在 track-3）→ followId 保持不变（tracks.ts:60 仅在被移除轨道
-  // 是跟随目标时回退到第一条）
+  // 移除的是非跟随轨道（跟随目标在 track-3）⇒ followId 保持不变：
+  // apps/viewer/src/replay/tracks.ts 的 remove 只在被移除 id 等于 followId 时回退到 tracks[0]?.id ?? null
   check('移除非跟随轨道后跟随保持 track-3', st5.followId === 'track-3', String(st5.followId));
 
   console.log('\n[11] 播放控制 API（window.viewer.replay）');
-  // 先清掉 [5] 设下的 A-B 区间，seek 才能到绝对时间
+  // 先点「整段」清掉 [5] 设下的 A-B 区间：否则 seek 会被夹在区间内
   const rangeCleared = await evaluate(
     "(() => { const b = Array.from(document.querySelectorAll('#timeline button')).find(x => x.textContent.trim() === '整段'); if (!b) return false; b.click(); return true; })()",
     sessionId,
@@ -682,7 +687,7 @@ try {
     })()`,
     sessionId,
   );
-  // replay 是快照 getter：变更后再取一次快照读值
+  // window.viewer.replay 是快照 getter：变更后再取一次快照读值
   const api1 = await evaluate(
     "(() => { const r = window.viewer.replay; return { seeked: r.time, speed: r.speed, mode: r.mode }; })()",
     sessionId,
@@ -730,17 +735,17 @@ try {
   console.log('  地图页分区：' + JSON.stringify(mapSecs));
   check('「参考显示」（ReferenceGrid）已不存在', !mapSecs.includes('参考显示'), JSON.stringify(mapSecs));
   check('「出生点导航」分区在位', mapSecs.includes('出生点导航'), JSON.stringify(mapSecs));
-  // F6(info) 目检备注（已修复）：surf_null 无 info_player_start，出生点实体朝向原经
-  // pose.ts bspYawToCsYaw(270−yaw) 映射（det=−1 镜像），t1 已修为 wrapDeg(bspYaw+180)，
-  // 与 .replay 实测定标（srcYaw+180，cos=0.9992）口径一致。surf_null.bsp 实测（viewer wasm）：
-  // primary spawn Source yaw=180 → 初始 viewer yaw 旧 90° / 新 0°（+180 定标生效）。
+  // surf_null 的首个 info_player_* 是 Source yaw=180：viewer 侧出生朝向走
+  // apps/viewer/src/core/spawn.ts 的 spawnPointAng → bspYawToCsYaw（wrap(src+180)）⇒ 初始 yaw = 0°；
+  // pitch 取 −src（Source 正 = 俯视），该出生点 src pitch = 0。
+  // 出生点回退优先级见 apps/viewer/src/core/spawn.ts 的 resolveInitialSpawn。
   await evaluate("document.querySelector('.tab[data-tab=\"replay\"]').click()", sessionId);
 
-  // [12b] P2-4 验收断言持久化（t9）：真实 .bsp 走 #bspFile 用户链路，断言初始相机
-  // 与地图几何 bbox 相交、命中玩家出生点、yaw/pitch 符合 t1/t3 定标。
-  // 口径：yaw = wrap(src+180)、pitch = −src（Source 正=俯视）；回退优先级见 core/spawn.ts。
-  // 独立 target（新页面）：与主页面回放状态隔离——first-person 回放会逐帧覆盖 fly 相机，
-  // 在主页面加载 .bsp 读不到初始位姿；其 console 噪声也不进 [13] 主页面检查。
+  // [12b]：真实 .bsp 走 #bspFile 用户链路，断言初始相机落在地图几何 bbox 内、
+  // spawnSource 命中玩家出生点、yaw/pitch 符合出生点定标。
+  // 口径：yaw = wrap(src+180)、pitch = −src（Source 正=俯视）；回退链见 core/spawn.ts。
+  // 独立 target（新页面）：与主页面的回放状态隔离——第一人称回放会逐帧覆盖 fly 相机，
+  // 在主页面加载 .bsp 读不到初始位姿；该 target 的 console 噪声也不进 [13] 的主页面检查。
   console.log('\n[12b] BSP 加载：初始相机 bbox 相交断言（P2-4 回退 + t1 定标）');
   {
     const { targetId: bspTargetId } = await send('Target.createTarget', { url: URL_ });
@@ -778,7 +783,7 @@ try {
           continue;
         }
         await setFileInput(bspSession, '#bspFile', bspPath);
-        // 换图真正完成（HUD 状态行出现本文件名）再断言——避免拿到上一张图的位姿
+        // 等换图真正完成（HUD 状态行以本文件名开头）再断言，避免读到上一张图的位姿
         let loaded = false;
         for (let i = 0; i < 120 && !loaded; i++) {
           const st = await evaluate(
@@ -829,9 +834,9 @@ try {
           );
         }
       }
-      // 已知降级（pre-existing，非本次改动引入）：surf 系 GLB 静态 prop 几何混合
-      // indexed/non-indexed 触发 three mergeGeometries console.error，该批网格跳过合并
-      // 但其余网格正常渲染——只滤这一族，未捕获异常与其它 error 仍判定失败。
+      // 已知降级：surf 系 GLB 的静态 prop 几何混合 indexed/non-indexed，会让 three 的
+      // mergeGeometries 打 console.error；这批网格跳过合并、其余网格照常渲染——过滤只针对
+      // 这一族，未捕获异常与其它 error 仍判失败。
       const knownBspNoise = /^THREE\.BufferGeometryUtils: \.mergeGeometries\(\) failed/;
       const realBspErrors = bspErrors.filter((e) => !knownBspNoise.test(e));
       console.log(

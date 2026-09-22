@@ -1,15 +1,17 @@
 /**
  * 步长分区等价性（rate parity）实验 — 同一 wasm 物理在不同积分步长下的行为对比。
  *
- * 背景（原 documents/game/archive/timing-game-analysis.md 专题 C，该归档已移出版本库）：
- * - 渲染线（主线程预测，~144Hz 可变 dt）与权威线（Worker 64Hz 固定 dt）共用同一
- *   PhysWorld 代码；air_move 为半重力中点法（先半重力→move→后半重力）。
- * - 理论：纯弹道（无碰撞/无输入）下速度 Σg·dt 与位置（中点法对线性速度精确）
- *   均与步长分区无关 → 两线同刻差异应为 f64 舍入级。
- * - 实验：①自由落体 64 vs 144 vs 混合分区；②60° 直坡滑行；③坡顶入坡（凸角，
- *   间隙扫描）；④坡底接缝（坡→平地凹角）；⑤V 形槽谷底横切。
+ * 背景（均可回源码定位）：
+ * - 渲染线（主线程预测）与权威线（Worker）共用同一份 `PhysWorld`；`src/phys/player.rs` 的
+ *   `air_move` 是半重力中点法——`try_player_move` 前后各施加 `−0.5 × gravity × dt`，
+ *   合计每 tick `−gravity × dt`。
+ * - 由此纯弹道（无碰撞、无输入）下速度累加 `Σ g·dt` 与位置都与步长划分无关（中点法对线性
+ *   速度精确）⇒ 两档步长跑到同一时刻，差异应当只在 f64 舍入量级。
+ * - 实验：①自由落体 64 vs 144（同段另跑一条"混合分区"，其终态未参与比对，见该段注释）；
+ *   ②60° 直坡滑行；③坡顶入坡（凸角，离角间隙扫描）；④坡底接缝（坡→平顶块，两段的 z 覆盖
+ *   并不重合，见该段注释）；⑤V 形槽谷底横切。
  *
- * 用法：node scripts/phys-rate-parity.mjs
+ * 用法：node scripts/phys-rate-parity.mjs（无参数）
  */
 import { initSync, PhysWorld } from '../pkg/websurf_wasm.js';
 import { readFileSync } from 'fs';
@@ -19,10 +21,10 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 initSync({ module: readFileSync(join(__dirname, '..', 'pkg', 'websurf_wasm_bg.wasm')) });
 
-const TICK = 1 / 64;
-const FINE = 1 / 144;
-const G = 800;
-const X = 4000;
+const TICK = 1 / 64; // 步长档 A：1/64 s
+const FINE = 1 / 144; // 步长档 B：1/144 s（与档 A 之比 = 2.25）
+const G = 800; // 与 src/phys/player.rs 的 `GRAVITY`（800.0）一致；用于"该步重力预期"判据
+const X = 4000; // 世界盒远界面距离（±x 与 z 向平面的 dist）
 
 const P = (n, d) => ({ normal: n, dist: d });
 const brush = (planes, min, max) => ({ planes, min, max, is_ladder: false, is_solid: true });
@@ -41,7 +43,10 @@ function rampDown(theta, zEnd, yBottom) {
   );
 }
 
-/** 平顶块：顶面 y=topY，z ≤ zEdge。 */
+/** 平顶块：顶面 y=topY，z ≤ zEdge。
+ *  宽相位 AABB 取 `z ∈ [zEdge − 4000, zEdge]`、`y ∈ [−yBot, topY]`（`src/phys/world.rs` 的
+ *  候选筛选与空间网格都读它们），而平面本身允许 `z ≥ −4000` ⇒ `zEdge > 0` 时两者不一致：
+ *  实验④传 `zEdge = zEnd + 5000`，AABB 于是从 `z = zEnd + 1000` 起，接缝处那段不在索引内。 */
 function flatTop(topY, zEdge, yBot) {
   return brush(
     [
@@ -112,7 +117,8 @@ console.log('=== 实验①：自由落体步长分区等价性（1.0s，落地�
   );
   const a = run('64Hz ', [floor], [0, 500, 0], null, TICK, 64);
   const b = run('144Hz', [floor], [0, 500, 0], null, FINE, 144);
-  // 混合分区：交替 1/64 与 1/144×2（总时长近似 1s 的另一划分）
+  // 混合分区：交替 1/64 与 1/144×2，42 轮后再补一个 1/144（总时长 ≈ 1.2465 s，与其他两档
+  // 不同长）；终态 `c` 未参与下面的差值输出——本段只演示"另一条划分"。
   const w = makeWorld([floor], [0, 500, 0], null);
   for (let i = 0; i < 42; i++) { w.tick(TICK, 0, 0, 0); w.tick(FINE, 0, 0, 0); w.tick(FINE, 0, 0, 0); }
   const c = w.tick(FINE, 0, 0, 0);
@@ -147,7 +153,9 @@ console.log('\n=== 实验③：坡顶入坡（凸角）— 平顶台 + 60° 下�
 console.log('\n=== 实验④：坡底接缝（凹角）— 60° 坡滑入平地（4s）===');
 {
   const th = Math.PI / 3;
-  const zEnd = 1000 / Math.tan(th); // 表面到 y=-1000 处
+  const zEnd = 1000 / Math.tan(th); // 坡面降到 y = −1000 处的 z 坐标
+  // 见 `flatTop` 的注释：它的 AABB 从 `zEdge − 4000` 起，本次传 `zEdge = zEnd + 5000`
+  // ⇒ 平顶块只被索引到 `z ≥ zEnd + 1000`，接缝之后那 1000 u 内该块不进候选。
   const brushes = [rampDown(th, zEnd, 2500), flatTop(-1000, zEnd + 5000, 3500)];
   const surf = (z) => -z * Math.tan(th);
   const spawn = [0, surf(300) + 300, 300];

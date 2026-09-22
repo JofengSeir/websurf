@@ -1,68 +1,69 @@
 /**
- * 鼠标输入缓冲 — 安全削平（CLAMP）策略。
+ * 鼠标输入缓冲：Pointer Lock 首事件丢弃 + 增量削平（CLAMP）。
  *
- * 职责：
- * 1. discardNext — Pointer Lock 变化后丢弃下一个 mousemove 事件
- *    （cs-movement discardNextMouse 语义），防止首帧大位移视角跳变
- *    （Pointer Lock 初始跳变通常 2000-5000+ px，由 discardNext 丢弃）。
- * 2. 绝对削平 — 单次 mousemove |dx|/|dy| > MAX_DELTA 时削平到 MAX_DELTA，
- *    作为驱动异常/浏览器事件合并的兜底。用 CLAMP 而非 DISCARD：
- *    保留移动方向和大部分量级，避免"快速转动时突然停住"。
+ * ## 两条互斥的使用路径
+ * - **`process`（线上路径）**：每个 `mousemove` 事件调一次，过滤后立刻返回增量，**不累积**。
+ *   调用点：`apps/debug/src/app.ts` 与 `apps/game/src/app.ts` 的 `mousemove` 监听器；
+ *   两者都先判 `PointerLockController.isLocked()`，再把返回值交给
+ *   `src/ts-shared/input/input-layer.ts` 的 `layerMouseDelta` 乘灵敏度。
+ * - **`push` + `drain`（累积路径）**：`push` 累加多次增量，`drain` 一次取出并清零。
+ *   **本仓 `src/**` 与 `apps/**` 内零调用点**；`clear` 只被 `onLockChange` 内部调用。
  *
- * 为何不用 cs-movement 的 DISCARD 突变检测（350/8x/100/1200）：
- * - cs-movement 在事件回调中即时应用增量，单个 dx 是单次原始 DOM 事件
- *   （通常 1-50 px），dx=400 确是异常，丢弃只损失 ~1ms 用户无感知。
- * - 本项目在主线程 buffer 中累积事件、每 8ms drain 一次发往 Worker；
- *   mousemove 被节流到显示刷新率（60-144Hz），快速甩动时单事件可达
- *   200-600+ px（180° 甩动 5455px / 9 事件 ≈ 606px/事件）。DISCARD 会丢弃
- *   这些合法的快速移动事件，损失 60-100ms 旋转 → "突然停住一段时间"。
+ * ## 削平口径：CLAMP 而非 DISCARD
+ * 单轴增量超出 ±`MAX_DELTA` 时截到边界值，保留符号（方向）与阈值内的量级，
+ * 因此快速的合法甩动不会被整段丢弃。注意与 `src/ts-shared/input/input-layer.ts`
+ * 的 `INPUT_CLAMP` 是**两段**钳制：本文件作用于原始设备增量，那一段作用于乘过灵敏度的结果；
+ * 两个工程的 `config` 默认 `sensitivity = 1.5`，故 raw 增量超过约 667 px 的部分在第二段被截掉。
  *
- * 注意：drain() 返回的 dx/dy 为原始像素增量，不含 sensitivity。
- * 调用方负责将其累加到 yaw/pitch（公式：yaw -= dx * sens * m_yaw）。
+ * ## 首事件丢弃
+ * `onLockChange` 无条件置 `discardNext`，使锁定后的第一个事件被丢弃且不产生增量。
+ * 解锁时置位的该标志不会被消费——未锁定时 `process` / `push` 在更早的分支就返回了。
  */
 
+/** 过滤后的鼠标像素增量（不含灵敏度；符号即方向）。 */
 export interface MouseDelta {
 	dx: number;
 	dy: number;
 }
 
 /**
- * 单次 mousemove 事件的最大增量削平阈值（像素）。
+ * 单轴削平阈值（像素）。`process` 与 `push` 都经 `clampDelta` 走这个上限。
  *
- * - 有效灵敏度 = sensitivity(1.5) * m_yaw(0.022) = 0.033 deg/px
- * - 1000 px 事件 = 33° 旋转（显著但不致晕）
- * - 2000 px 事件 = 66° 旋转（致晕，应削平）
- * - Pointer Lock 初始跳变 2000-5000+ px 由 discardNext 处理，此处为兜底
- *
- * 正常快速游玩（400-3200 DPI 鼠标 + 60-144Hz 节流）的单事件增量
- * 通常 < 600 px，不会触发此削平。
+ * 与 `INPUT_CLAMP` 同值但阶段不同：这里是设备原始增量，那里是乘灵敏度之后的结果。
  */
 const MAX_DELTA = 1000;
 
+/** 鼠标增量缓冲；两条路径共用同一套门（未锁定 / `discardNext` / 削平）。 */
 export class MouseBuffer {
+	/** 累积路径的 X 累加器（只被 push / drain / clear 读写）。 */
 	private bufferX = 0;
+	/** 累积路径的 Y 累加器（只被 push / drain / clear 读写）。 */
 	private bufferY = 0;
+	/** 锁定状态；为 false 时 `process` 与 `push` 都不产生输出。 */
 	private locked = false;
-	/** Pointer Lock 变化后丢弃下一个事件（cs-movement discardNextMouse）。 */
+	/** 待丢弃的首事件标志：由 `onLockChange` 置位，被 `process` / `push` 消费一次。 */
 	private discardNext = false;
 
 	/**
-	 * 处理单个 mousemove 事件（共享内存极速输入链路）。
+	 * 处理单个 `mousemove` 增量并立即返回（不累积）。
 	 *
-	 * 不累积：经 locked / discardNext / 绝对削平过滤后立即返回增量
-	 * （null = 被丢弃/未锁定），调用方立刻写入共享内存输入区。
-	 * 消除旧链路 8ms 限流 + 批量化对输入断续的放大 → 甩动即时连续。
+	 * 判定顺序：未锁定 → `null`；`discardNext` 置位 → 消费该标志并返回 `null`；
+	 * 否则逐轴 `clampDelta` 后返回。
+	 *
+	 * @param movementX 事件的 `movementX`（原始像素）。
+	 * @param movementY 事件的 `movementY`（原始像素）。
+	 * @returns 过滤后的增量；`null` 表示本事件被丢弃。
 	 */
 	process(movementX: number, movementY: number): MouseDelta | null {
 		if (!this.locked) return null;
 
-		// discardNext：lock 变化后丢弃首个事件（Pointer Lock 初始跳变）
+		// 首事件：消费 discardNext，本次不产生增量
 		if (this.discardNext) {
 			this.discardNext = false;
 			return null;
 		}
 
-		// 绝对削平：保留移动方向和大部分量级（CLAMP 而非 DISCARD）
+		// 逐轴削平后直出（保留方向，不丢弃事件）
 		return {
 			dx: clampDelta(movementX),
 			dy: clampDelta(movementY),
@@ -70,30 +71,33 @@ export class MouseBuffer {
 	}
 
 	/**
-	 * 累加鼠标移动到 buffer（应用 discardNext + 绝对削平）。
+	 * 累积路径：按同一套门过滤后把增量累加进内部 buffer。
 	 *
-	 * - 非锁定状态下忽略（安全兜底）。
-	 * - lock 变化后丢弃首个事件（discardNext）。
-	 * - 其余事件削平到 ±MAX_DELTA 后累加（CLAMP，不丢弃）。
+	 * 未锁定时直接返回；`discardNext` 置位时消费标志并跳过本次累加。
+	 *
+	 * @param movementX 事件的 `movementX`（原始像素）。
+	 * @param movementY 事件的 `movementY`（原始像素）。
 	 */
 	push(movementX: number, movementY: number): void {
 		if (!this.locked) return;
 
-		// discardNext：lock 变化后丢弃首个事件（Pointer Lock 初始跳变）
+		// 首事件：消费 discardNext，本次不累加
 		if (this.discardNext) {
 			this.discardNext = false;
 			return;
 		}
 
-		// 绝对削平：防驱动异常/浏览器事件合并致晕；CLAMP 保留方向与大部分量级
+		// 削平后再累加：异常大的单次事件不会把总量一次顶穿
 		this.bufferX += clampDelta(movementX);
 		this.bufferY += clampDelta(movementY);
 	}
 
 	/**
-	 * 取出整个 buffer（不做平滑），并将 buffer 清零。
+	 * 取出累积量并把两个累加器清零（不做平滑、不求平均）。
 	 *
-	 * 主线程只做 discardNext + 削平过滤，原始 dx/dy 直传 Worker 写入 yaw/pitch。
+	 * 返回值为原始像素增量，不含灵敏度。
+	 *
+	 * @returns 自上次 `drain`（或 `clear`）以来的累加增量；无累积时为 `{dx: 0, dy: 0}`。
 	 */
 	drain(): MouseDelta {
 		const dx = this.bufferX;
@@ -103,15 +107,19 @@ export class MouseBuffer {
 		return { dx, dy };
 	}
 
-	/** 清空 buffer。 */
+	/** 清零两个累加器；不改动 `locked` 与 `discardNext`。 */
 	clear(): void {
 		this.bufferX = 0;
 		this.bufferY = 0;
 	}
 
 	/**
-	 * 锁定状态变化时调用：清空 buffer、置 discardNext。
-	 * 锁定时丢弃首个事件；解锁时清空残留输入。
+	 * 锁定状态变化时调用（两个工程都接在 `PointerLockController.onLockChange` 上）。
+	 *
+	 * 无条件清空累加器并置 `discardNext`：锁定后首个事件的增量不反映锁定后的真实移动，
+	 * 直接采纳会造成视角突跳。
+	 *
+	 * @param locked 新的锁定状态。
 	 */
 	onLockChange(locked: boolean): void {
 		this.locked = locked;
@@ -120,7 +128,7 @@ export class MouseBuffer {
 	}
 }
 
-/** 绝对削平：将增量限制在 ±MAX_DELTA，保留符号（方向），仅削减过大值。 */
+/** 单轴削平：超上限取上限、低下限取下限，范围内原样返回（保留符号）。 */
 function clampDelta(v: number): number {
 	if (v > MAX_DELTA) return MAX_DELTA;
 	if (v < -MAX_DELTA) return -MAX_DELTA;

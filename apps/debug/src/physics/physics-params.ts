@@ -1,22 +1,33 @@
 /**
- * 物理参数管理器（物理控制面板的数据源与执行层）。
+ * 物理参数管理器：物理控制面板的数据源与执行层。
  *
- * 物理已迁移到共享 Rust 物理（websurf-phys，PhysWorld）：
- * - 参数经 `set_params` JSON patch 应用（snake_case 字段，见 src/phys/player.rs PhysParams）
- * - 碰撞箱经 `set_hull` 应用
- * - tickRate 是 JS 驱动层参数（固定步长），不进 Rust，经 onTickRateChange 回调
+ * 两条写入通路：
+ * - 面板可调项经 `PARAM_TO_RUST` 映射成 snake_case 后写 `PhysWorld.set_params`；
+ * - `tickRate` 不是 Rust 键（JS 驱动层的固定步长），`applyOverride` 对它改走
+ *   `onTickRateChange` 回调。
+ * 碰撞箱走 `PhysWorld.set_hull`。
  *
- * 由 Worker（PhysicsWorker）持有；主线程经 set-physics-param / reset-physics-param
- * 消息操作，经 physics-snapshot 回传状态。
+ * 装配点：`apps/debug/src/worker/physics-worker.ts` 持有唯一实例，在 `attachWorld` 与
+ * `reapplyParams` 里调 `attach`。主线程经 `apps/debug/src/input/input-bridge.ts` 的
+ * `sendSetPhysicsParam` / `sendResetPhysicsParam` / `sendSetHull` / `sendResetHull` /
+ * `sendSetAutoRestoreHull` 操作；Worker 每条处理完回传一次 `physics-snapshot`。
  */
 
 import { findParamDef, PARAM_DEFS, type ParamSource, type ParamState } from './param-defs.js';
 import type { PhysWorld } from '../../pkg/websurf_wasm.js';
 
-/** 默认碰撞箱体型（cs-movement 基准，与共享 crate player.rs DEFAULT_HULL_* 一致）。 */
+/** 默认碰撞箱体型（HU）：与 `src/phys/player.rs` 的 `DEFAULT_HULL_HALF_WIDTH` / `DEFAULT_HULL_STAND_HEIGHT` / `DEFAULT_HULL_DUCK_HEIGHT` 同值。 */
 const DEFAULT_HULL = { halfWidth: 16, standHeight: 72, duckHeight: 54 };
 
-/** 面板参数名 → Rust set_params snake_case 字段名。 */
+/** 面板参数名 → Rust `set_params` 的 snake_case 键名（11 项）。
+ *
+ * 面板参数 `tickRate` 不在本表：它是 JS 驱动层的固定步长，不是 Rust 键。
+ *
+ * `src/phys/mod.rs` 的 `set_params` 共接受 15 个键；本表不含 `sensitivity`、
+ * `yaw_bind_speed`、`noclip_speed`、`teleport_gate_ticks` 四项 —— 它们由
+ * `src/ts-shared/phys/params.ts` 的 `buildPhysicsParams` 一次性写全（调用点见
+ * `apps/debug/src/worker/main.ts` 的 `syncParamsToWasm`，以及
+ * `apps/debug/src/physics/prediction-params.ts` 的 `buildDebugPredictionParams`）。 */
 export const PARAM_TO_RUST: Record<string, string> = {
   maxSpeed: 'run_speed',
   walkSpeed: 'walk_speed',
@@ -31,30 +42,36 @@ export const PARAM_TO_RUST: Record<string, string> = {
   bhopSpeedClamp: 'bhop_speed_clamp',
 };
 
-/** 碰撞箱面板状态。 */
+/** 碰撞箱面板状态（`getHullState` 的返回结构）。 */
 export interface HullState {
   hull: typeof DEFAULT_HULL;
   source: ParamSource;
-  /** 当前是否等于默认体型。 */
+  /** 当前三围是否与 `DEFAULT_HULL` 逐项相等。 */
   isDefault: boolean;
 }
 
+/** 面板参数与碰撞箱的唯一持有者（每实例一份覆盖表 + 一份箱体）。 */
 export class PhysicsParams {
-  /** 覆盖表：name → {value, source}；未覆盖 = mode-default。 */
+  /** 覆盖表：参数名 → {值, 来源}；表内没有的项按 `PARAM_DEFS` 的默认值与 `mode-default` 上报。 */
   private readonly overrides = new Map<string, { value: number | boolean; source: ParamSource }>();
+  /** 当前箱体三围（`setHull` / `resetHull` 写入，`getHullState` 读）。 */
   private hull: typeof DEFAULT_HULL = { ...DEFAULT_HULL };
+  /** 箱体来源（`setHull` 置 manual，`resetHull` 置 mode-default）。 */
   private hullSource: ParamSource = 'mode-default';
-  /** 碰撞箱自动恢复开关（Rust 物理已有 stuck 解卡，本开关保留为兼容占位）。 */
+  /** 碰撞箱自动恢复开关（初值 true）。写路径是 `set-auto-restore-hull` 消息，读路径只进
+   * `physics-snapshot`；`src/phys/` 内没有对应参数与读取点。 */
   autoRestoreHull = true;
 
+  /** 绑定的权威 `PhysWorld`；未 `attach` 或显式传 null 时为 null。 */
   private phys: PhysWorld | null = null;
 
   /**
-   * tickRate 变更回调（由 Worker 注入 → physicsLoop.setTickRate）。
+   * tickRate 变更回调（装配点 `apps/debug/src/worker/main.ts` 把它接到权威固定步长）。
+   * 未装配时 `applyOverride` 与 `attach` 都不产生副作用。
    */
   onTickRateChange: ((rate: number) => void) | null = null;
 
-  /** 绑定 PhysWorld 实例（Worker 构建世界后调用）；应用已存在的覆盖。 */
+  /** 绑定 PhysWorld 并重放覆盖：先按覆盖表组一次 `set_params` patch，再无条件 `set_hull`，最后补一次 tickRate 回调。 */
   attach(phys: PhysWorld | null): void {
     this.phys = phys;
     if (!phys) return;
@@ -67,20 +84,19 @@ export class PhysicsParams {
       phys.set_params(JSON.stringify(patch));
     }
     phys.set_hull(this.hull.halfWidth, this.hull.standHeight, this.hull.duckHeight);
-    // tickRate 覆盖（JS 驱动层参数，不进 Rust）：重新触发固定步长回调——
-    // world-json 构建后会按 config.physics.tickRate 重置 fixedDt，此处让
-    // 面板在进入地图前已调好的 tickRate 覆盖优先（防"面板显示 128 实际跑 64"）
+    // tickRate 不在 Rust 参数里：这里补一次回调，使面板在进图前调好的值
+    // 覆盖 world-json 构建时按 config.physics.tickRate 设下的固定步长
     const tickRate = this.overrides.get('tickRate');
     if (tickRate) {
       this.onTickRateChange?.(tickRate.value as number);
     }
   }
 
-  /** 手动设置参数（来源 = manual）。 */
+  /** 手动设置参数（来源记 manual）：按 `ParamDef` 的 min/max 钳制后写覆盖表并立即下发；名字不在 `PARAM_DEFS` 里时直接返回。 */
   setParam(name: string, value: number | boolean): void {
     const def = findParamDef(name);
     if (!def) return;
-    // 数值钳制到定义范围
+    // 只钳制 number 型
     let v = value;
     if (def.kind === 'number' && typeof v === 'number') {
       if (def.min !== undefined) v = Math.max(def.min, v);
@@ -90,13 +106,13 @@ export class PhysicsParams {
     this.applyOverride(name, v);
   }
 
-  /** 地图来源（预留：未来 worldspawn 键值 → source=map）。 */
+  /** 以 map 来源写入覆盖（不钳制、不查 `PARAM_DEFS`）。本仓无调用点。 */
   setParamFromMap(name: string, value: number | boolean): void {
     this.overrides.set(name, { value, source: 'map' });
     this.applyOverride(name, value);
   }
 
-  /** 恢复单个参数（缺省 = 全部）到 mode-default。 */
+  /** 恢复参数到 mode-default：给名字则删该条覆盖并回写定义默认值；不给名字则清空覆盖表并逐项回写默认值。 */
   resetParam(name?: string): void {
     if (name) {
       this.overrides.delete(name);
@@ -107,21 +123,21 @@ export class PhysicsParams {
     }
   }
 
-  /** 设置碰撞箱体型（来源 = manual）。 */
+  /** 设置碰撞箱三围（来源记 manual）并立即写 Rust。 */
   setHull(hull: typeof DEFAULT_HULL): void {
     this.hull = { ...hull };
     this.hullSource = 'manual';
     this.phys?.set_hull(hull.halfWidth, hull.standHeight, hull.duckHeight);
   }
 
-  /** 恢复默认碰撞箱。 */
+  /** 恢复 `DEFAULT_HULL` 并写 Rust，来源回 mode-default。 */
   resetHull(): void {
     this.hull = { ...DEFAULT_HULL };
     this.hullSource = 'mode-default';
     this.phys?.set_hull(DEFAULT_HULL.halfWidth, DEFAULT_HULL.standHeight, DEFAULT_HULL.duckHeight);
   }
 
-  /** 碰撞箱面板状态。 */
+  /** 取碰撞箱状态（返回箱体副本，调用方改它不影响内部）。 */
   getHullState(): HullState {
     return {
       hull: { ...this.hull },
@@ -133,7 +149,7 @@ export class PhysicsParams {
     };
   }
 
-  /** 全量快照（面板渲染用）。 */
+  /** 按 `PARAM_DEFS` 顺序生成全量快照：有覆盖取覆盖值与来源，否则取定义默认值 + mode-default。 */
   snapshot(): ParamState[] {
     return PARAM_DEFS.map((def) => {
       const o = this.overrides.get(def.name);
@@ -146,9 +162,10 @@ export class PhysicsParams {
   }
 
   // -------------------------------------------------------------------------
-  // 内部
+  // 内部实现
   // -------------------------------------------------------------------------
 
+  /** 单点下发：tickRate 走回调；其余查 `PARAM_TO_RUST`，查不到则不下发。值为 undefined 时直接返回。 */
   private applyOverride(name: string, value: number | boolean | undefined): void {
     if (value === undefined) return;
     if (name === 'tickRate') {

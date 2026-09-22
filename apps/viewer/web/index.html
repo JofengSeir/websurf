@@ -11,7 +11,7 @@
 <div id="app">
   <canvas id="game"></canvas>
 
-  <!-- 启动失败兜底（JS 检测到初始化错误时显示）-->
+  <!-- 启动失败兜底面板：`#fatal`，初始化出错时由 `apps/viewer/src/ui/hud.ts` 加上 `show` 类显示 -->
   <div id="fatal">
     <div class="card">
       <div class="ftitle">viewer 初始化失败</div>
@@ -19,7 +19,7 @@
     </div>
   </div>
 
-  <!-- 首访引导层（地图加载成功后隐藏）-->
+  <!-- 首访引导层：`#guide`（其中的 `#guideError` 由 `apps/viewer/src/ui/hud.ts` 写入）-->
   <div id="guide">
     <div class="card">
       <div class="gtitle">加载 BSP 地图，开始预览</div>
@@ -37,7 +37,7 @@
     </div>
   </div>
 
-  <!-- 拖拽高亮反馈 -->
+  <!-- 拖拽高亮反馈条：`#dropzone`，拖拽期间由 `apps/viewer/src/ui/hud.ts` 切换 `active` 类 -->
   <div id="dropzone">松开鼠标：.bsp 加载地图、.replay 导入录像</div>
 
   <div id="hud">
@@ -46,7 +46,7 @@
     <div class="hud-line" id="replayStatus"></div>
   </div>
 
-  <!-- 回放遥测 HUD（中心偏下）：横向/竖向速度 + 按键可视化（有录像时显示） -->
+  <!-- 回放遥测 HUD：速度读数挂本元素 `#telemetry`，按键簇挂 `#timeline` 右列（均由 `apps/viewer/src/ui/telemetry.ts` 填充；定位由 `apps/viewer/web/styles.css` 的 `.telemetry` 决定） -->
   <div id="telemetry" class="telemetry hidden"></div>
 
   <div id="topbar">
@@ -55,7 +55,7 @@
     <input id="bspFile" type="file" accept=".bsp" />
   </div>
 
-  <!-- 操作帮助浮层（非模态；Esc 关闭）-->
+  <!-- 操作帮助浮层 `#help`（非模态）：`apps/viewer/src/ui/hud.ts` 给 `#helpClose` 挂点击监听，并挂全局 `keydown`，任意 Escape 关闭 -->
   <div id="help" class="hidden" aria-label="操作帮助">
     <div class="help-title">操作帮助 <span class="help-close" id="helpClose" title="关闭（Esc）">×</span></div>
     <div class="help-sec">
@@ -82,15 +82,15 @@
     <div class="tabpane" id="pane-replay"></div>
   </aside>
 
-  <!-- 底部 dock（有录像时显示）：录像信息条（.replay 头部元信息）+ 时间轴控制条 -->
+  <!-- 底部 dock `#dock`：录像信息条 `#replayMeta`（`.replay` 头部元信息）+ 时间轴容器 `#timeline` -->
   <div id="dock">
     <div id="replayMeta" class="hidden replay-meta"></div>
-    <!-- 时间轴内容由 timeline.ts 构建 -->
+    <!-- `#timeline` 的内容由 `apps/viewer/src/replay/timeline.ts` 构建 -->
     <div id="timeline" class="hidden"></div>
   </div>
 </div>
 
-<!-- 资源加载兜底：app.js / wasm 缺失（未构建就打开页面）时给出可见指引 -->
+<!-- 资源加载兜底：在捕获阶段监听 script/link/img 的 `error`，按文件名是否含 `.wasm` 给出对应构建指引，并显示 `#fatal` -->
 <script>
   window.addEventListener('error', function (e) {
     var t = e && e.target;

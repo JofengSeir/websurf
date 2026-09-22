@@ -1,15 +1,44 @@
 #!/usr/bin/env node
 /**
- * 路径数据绘图 / 折角分析（常驻工具）。
+ * 物理路径绘图与折角分析（手工触发的常驻工具，不在任何门禁里）。
  *
- * 用途：把 debug 面板导出的 phys-path JSON 画成 PNG，并按「tick 节点尺度」放大，
- * 用于核对 64Hz tick 物理的折角与两线偏差——3D 视角下路径远、段被透视压缩，
- * 这里用 2D 正交投影 + 节点标记，节点结构不受相机影响。
+ * 用途：把 debug 面板导出的 phys-path JSON 画成 PNG，并按「tick 节点尺度」放大，用于核对
+ * tick 物理线的折角与两线偏差。3D 视角下路径离相机远、段被透视压缩，这里改用 2D 正交投影 +
+ * 节点标记，节点结构不受相机影响。
  *
- * 输出（默认写到 <jsonDir>/plot-<时间戳>/）：
- *   overview.png      俯视 X-Z + 侧视 Z-Y（切断 >JUMP 的跳变，只画最长连续段）
- *   zoom-<n>.png      折角最密的若干 1 秒窗口（render 细青 / tick 粗琥珀 / tick 节点方点）
- * 同时打印：采样率、段长、夹角分布、折角密集窗口。
+ * 输入：`apps/debug/src/renderer/renderer-main.ts` 的 `exportPathJson` 写出的 JSON（面板
+ *   「导出路径」按钮走 `apps/debug/src/app.ts` 的下载分支）。本脚本只读其中 `render` 与
+ *   `tick` 两个数组；每项需要 `t`（ms）、`x`、`y`、`z`（HU）四个字段，`residual` 等
+ *   其它字段本脚本不读。两个数组都非空才继续，否则打印错误并以 2 退出。
+ *
+ * 连续段切法：相邻节点距离超过 `--jump`（缺省 60 HU）即断段，段内不足 5 点的段被丢弃，
+ *   只在两端各取**最长的一段**参与统计与绘图（传送/重生会拉出上万 HU 的跳变，必须先断开）。
+ *
+ * CLI：第一个不以 `--` 开头的参数是输入 JSON（缺省即打印用法并退出码 2）；其余选项
+ *   `--out <dir>` 输出目录、`--zooms <n>` 画几个放大窗口（缺省 3）、`--jump <hu>` 断段阈值
+ *   （缺省 60）。输出目录缺省为「输入文件所在目录 / `plot-` + 输入文件名去掉 `.json`」，
+ *   即 `<jsonDir>/plot-<输入文件基名>/`（不是时间戳目录）。
+ *
+ * 产物（都落在输出目录）：
+ *   · `overview.png`：上半俯视（横轴 x、纵轴 z）、下半侧视（横轴 z、纵轴 y）；
+ *     render 线为 1px 青色、tick 线为 2px 琥珀色。
+ *   · `zoom-<n>-t<偏移>s.png`：折角最密的 1 秒窗口，同样上下两幅，额外叠加 4px 半径的
+ *     tick 节点方点（浅黄）。窗口以最长 tick 段的首个时间戳为原点、每 250ms 起一个新窗口、
+ *     每窗至少 10 点，按窗内折角均值降序取前若干个。
+ *   · `diagnostics.png`：上半是「tick 点到 render 线的**时间对齐**距离随时间的曲线」（品红，
+ *     在 render 线上按 `t` 二分插值后取三维距离），下半是「折角随时间的曲线」（琥珀）；
+ *     两幅都画 x 轴刻度线。
+ * PNG 由脚本用 `node:zlib` 的 deflate 手写（固定 1400×1000、24 位真彩）。仓库根的
+ * `.gitignore` 有一条针对「以 `plot-` 开头的目录」的通配规则，故输出目录不入库。
+ *
+ * 打印：两侧采样点数与平均频率、最长连续段点数、tick 段长与夹角的分位、逐阈值夹角占比、
+ *   折角最密的 10 个 1 秒窗口、诊断图里偏差最大与折角最大的 8 个时刻，最后是**滞后扫描**：
+ *   把每个 tick 点与「render 线在 t−Δ」比较，Δ 从 −20 扫到 +40（步长 0.5ms）取平均偏差最小
+ *   的 Δ，并列出 Δ ∈ {−7.8, 0, 7.8, 15.6, 23.4} 的几档；最优 Δ 使平均偏差降到 Δ=0 的一半
+ *   以下时打印「以权威帧龄为主」的判语，否则打印「真实物理分歧」的判语。该扫描的作用是把
+ *   「时间错位」与「两条线真的算得不一样」区分开。
+ *
+ * 退出码：0 = 正常产出；2 = 缺输入文件名、或 JSON 里 `render` 与 `tick` 有一个为空。
  *
  * 用法：node scripts/plot-path.mjs <phys-path.json> [--out <dir>] [--zooms 3] [--jump 60]
  */
@@ -17,7 +46,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { dirname, join, basename } from 'node:path';
 
-// ── 参数 ──
+// ── 参数：位置参数取第一个不以 `--` 开头的实参作输入文件；选项缺值即回落默认 ──
 const args = process.argv.slice(2);
 const file = args.find((a) => !a.startsWith('--'));
 if (!file) {
@@ -28,11 +57,13 @@ const opt = (name, dflt) => {
   const i = args.indexOf('--' + name);
   return i >= 0 && args[i + 1] ? args[i + 1] : dflt;
 };
-const JUMP = Number(opt('jump', 60));
-const ZOOMS = Number(opt('zooms', 3));
+const JUMP = Number(opt('jump', 60)); // 断段阈值（HU）
+const ZOOMS = Number(opt('zooms', 3)); // 最多画几个放大窗口
+// 输出目录缺省 = 输入文件同目录下的 plot-<输入基名（去掉 .json）>
 const OUTDIR = opt('out', join(dirname(file), 'plot-' + basename(file).replace(/\.json$/, '')));
 
 const j = JSON.parse(readFileSync(file, 'utf8'));
+// R = 渲染物理线节点、T = tick 物理线节点；两者都非空才继续（时间戳单位 ms，坐标单位 HU）
 const R = j.render ?? [];
 const T = j.tick ?? [];
 if (!R.length || !T.length) {
@@ -40,7 +71,7 @@ if (!R.length || !T.length) {
   process.exit(2);
 }
 
-// ── 统计 ──
+// ── 小工具与统计 ──
 /** 按 >jump 的跳变切连续段（respawn/teleport 会制造上万 HU 的跳变）。 */
 function segments(pts) {
   const out = [];
@@ -58,11 +89,13 @@ function segments(pts) {
   if (cur.length >= 5) out.push(cur);
   return out;
 }
+/** 取最长的一段（按点数）；结果为空数组时调用方按空段处理。 */
 const longest = (s) => s.slice().sort((a, b) => b.length - a.length)[0] ?? [];
 const LR = longest(segments(R));
 const LT = longest(segments(T));
 const dur = (a) => (a.length ? (a[a.length - 1].t - a[0].t) / 1000 : 0);
 const gaps = (a) => { const o = []; for (let i = 1; i < a.length; i++) o.push(Math.hypot(a[i].x-a[i-1].x, a[i].y-a[i-1].y, a[i].z-a[i-1].z)); return o; };
+/** 逐点折角（度）：用相邻两段的**水平投影**方向算夹角，超过 180° 的取补角（0…180）。 */
 const turns = (a) => {
   const o = [];
   for (let i = 2; i < a.length; i++) {
@@ -73,9 +106,11 @@ const turns = (a) => {
   }
   return o;
 };
+/** 分位数：先升序排序，取下标 `floor(len × p)`（上限 len−1）；空数组给 NaN。 */
 const pct = (a, p) => { if (!a.length) return NaN; const s = a.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * p))]; };
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN);
 
+// 采样率用「点数 ÷ 首末节点时间差」算（不是相邻间隔均值）。
 console.log('=== 采样 ===');
 console.log(`  render ${R.length} 点 / ${dur(R).toFixed(2)}s = ${(R.length / dur(R)).toFixed(1)} Hz`);
 console.log(`  tick   ${T.length} 点 / ${dur(T).toFixed(2)}s = ${(T.length / dur(T)).toFixed(1)} Hz`);
@@ -89,7 +124,7 @@ for (const th of [5, 10, 20, 45, 90]) {
   console.log(`  夹角 >${th}°: ${n} / ${aT.length} = ${(n / aT.length * 100).toFixed(1)}%`);
 }
 
-// ── 折角密集窗口 ──
+// ── 折角密集窗口：以最长 tick 段的首点时间为原点，步进 250ms、窗宽 1000ms ──
 const t0 = LT[0].t;
 const windows = [];
 for (let off = 0; off + 1000 <= LT[LT.length - 1].t - t0; off += 250) {
@@ -106,7 +141,8 @@ for (const w of windows.slice(0, 10)) {
   console.log(`  t=+${w.off.toFixed(2)}s  节点=${w.seg.length}  夹角均值=${w.mean.toFixed(2)}°  最大=${w.max.toFixed(1)}°  >10°=${w.over10}`);
 }
 
-// ── 画图（手写 PNG，无依赖）──
+// ── 画图：自建 24 位 RGB 缓冲 + zlib deflate 手写 PNG（不依赖任何图形库）──
+// 画布固定 1400×1000；CY 为 render 线颜色、AM 为 tick 线颜色、DOT 为 tick 节点方点颜色、BG 为底色。
 const W = 1400, H = 1000;
 const CY = [70, 220, 245], AM = [255, 170, 20], DOT = [255, 235, 120], BG = [16, 16, 20];
 
@@ -115,6 +151,7 @@ function newCanvas() {
   for (let i = 0; i < W * H; i++) { buf[i*3]=BG[0]; buf[i*3+1]=BG[1]; buf[i*3+2]=BG[2]; }
   return buf;
 }
+/** 把 RGB 缓冲写成 PNG：每行前置一个 filter 字节 0，再 deflate（level 6），最后自算 CRC32。 */
 function savePng(buf, out) {
   const raw = Buffer.alloc((W * 3 + 1) * H);
   for (let y = 0; y < H; y++) { raw[y*(W*3+1)] = 0; buf.copy(raw, y*(W*3+1)+1, y*W*3, (y+1)*W*3); }
@@ -124,17 +161,21 @@ function savePng(buf, out) {
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(W,0); ihdr.writeUInt32BE(H,4); ihdr[8]=8; ihdr[9]=2;
   writeFileSync(out, Buffer.concat([Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]), chunk('IHDR',ihdr), chunk('IDAT', deflateSync(raw,{level:6})), chunk('IEND', Buffer.alloc(0))]));
 }
+/** 单点写色；坐标越界直接返回（不裁剪到边界，也不报错）。 */
 function px(buf, x, y, c) { if (x<0||y<0||x>=W||y>=H) return; const o=(y*W+x)*3; buf[o]=c[0]; buf[o+1]=c[1]; buf[o+2]=c[2]; }
+/** 点集的三维包围盒；空点集返回六个 ±1e18 的极端值。 */
 function bbox(pts) {
   let x0=1e18,x1=-1e18,y0=1e18,y1=-1e18,z0=1e18,z1=-1e18;
   for (const p of pts) { x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);z0=Math.min(z0,p.z);z1=Math.max(z1,p.z); }
   return {x0,x1,y0,y1,z0,z1};
 }
+/** 造一个画幅映射：等比缩放（取横纵较小比例）并把内容居中；`s` 是缩放比、`ox`/`oy` 是原点。 */
 function mk(a0,a1,b0,b1,px0,py0,pw,ph) {
   const pad = 55;
   const s = Math.min((pw-2*pad)/Math.max(a1-a0,1e-6), (ph-2*pad)/Math.max(b1-b0,1e-6));
   return { s, ox: px0+pad+((pw-2*pad)-(a1-a0)*s)/2, oy: py0+pad+((ph-2*pad)-(b1-b0)*s)/2, a0, b0 };
 }
+/** 逐段画折线：每段用整数线性插值补齐中间点，线宽用「右侧 w 点 + 下方 w 点」近似。 */
 function line(buf, m, pts, col, w, sa, sb) {
   let prev = null;
   for (const p of pts) {
@@ -149,6 +190,7 @@ function line(buf, m, pts, col, w, sa, sb) {
     prev = [x, y];
   }
 }
+/** 每个点画一个 (2r+1)×(2r+1) 的实心方点。 */
 function dots(buf, m, pts, col, sa, sb, r) {
   for (const p of pts) {
     const x = Math.round(m.ox + (sa(p)-m.a0)*m.s), y = Math.round(m.oy + (m.b0-sb(p))*m.s);
@@ -158,7 +200,7 @@ function dots(buf, m, pts, col, sa, sb, r) {
 
 mkdirSync(OUTDIR, { recursive: true });
 
-// overview
+// overview：先按两条最长段合起来的三维包围盒定画幅，再上下两幅各画两条线
 {
   const bb = bbox([...LR, ...LT]);
   const buf = newCanvas();
@@ -172,7 +214,7 @@ mkdirSync(OUTDIR, { recursive: true });
   console.log(`\noverview 跨度 X=${(bb.x1-bb.x0).toFixed(0)} Y=${(bb.y1-bb.y0).toFixed(0)} Z=${(bb.z1-bb.z0).toFixed(0)}`);
 }
 
-// zoom windows
+// zoom windows：逐窗裁剪出「窗内的 render 点 + 该窗的 tick 段」，各自按本窗包围盒放大
 for (let i = 0; i < Math.min(ZOOMS, windows.length); i++) {
   const w = windows[i];
   const seg = w.seg;
@@ -192,7 +234,7 @@ for (let i = 0; i < Math.min(ZOOMS, windows.length); i++) {
   savePng(buf, f);
   console.log(`zoom-${i + 1} t=+${w.off.toFixed(2)}s 节点=${seg.length} 夹角均值=${w.mean.toFixed(2)}° max=${w.max.toFixed(1)}° -> ${f}`);
 }
-// ── diagnostics.png：偏差-时间 与 折角-时间 ──
+// ── diagnostics.png：上半偏差-时间、下半折角-时间（偏差按时间在 render 线上二分插值求）──
 {
   // 在 render 线上按时间插值（用于逐 tick 偏差）
   const rp = LR.map((p) => [p.x, p.y, p.z, p.t]);
@@ -253,9 +295,9 @@ for (let i = 0; i < Math.min(ZOOMS, windows.length); i++) {
   const topTurn = serie.slice().sort((a, b) => b.turn - a.turn).slice(0, 8);
   console.log(`  折角最大 8 个时刻: ${topTurn.map((s) => `+${(s.t/1000).toFixed(2)}s:${s.turn.toFixed(0)}°`).join('  ')}`);
 
-  // ── 滞后扫描：偏差是「物理分歧」还是「权威帧龄/延迟」？ ──
-  // 把 tick 节点与「渲染线在 t-Δ」比较，扫 Δ。若某个 Δ 让偏差大幅下降 → 是延迟；
-  // 扫不动 → 是真实物理分歧。这一步能避免把时间错位误读成分歧。
+  // ── 滞后扫描：平均偏差随对齐量 Δ 的变化 ──
+  // 把每个 tick 节点与「渲染线在 t−Δ」的插值位置比较，Δ 取 −20…+40ms（步长 0.5）逐个算平均偏差，
+  // 取最小者作最优 Δ；最优值把平均偏差压到 Δ=0 的一半以下时，判语归因于时间错位。
   const meanDiv = (dtMs) => {
     let sum = 0, n = 0;
     for (const p of LT) {
@@ -278,4 +320,5 @@ for (let i = 0; i < Math.min(ZOOMS, windows.length); i++) {
     : '    → 扫滞后降不下去：这是**真实的物理分歧**（不是时间错位假象）');
 }
 
+// 全部产物写完，最后把输出目录再打一遍（便于从日志里复制路径）。
 console.log(`\n输出目录: ${OUTDIR}`);

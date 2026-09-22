@@ -1,17 +1,26 @@
 /**
- * 传送 gate 回归测试：斜面滑行（surfing）不算落地 → 滑行中不触发传送，
- * 只有真正落地（可站面 normal.y >= 0.7）后才检测传送。
+ * 传送检测门槛回归（node 级，跑真实 wasm 产物）：两个场景各断言一组行为，任一断言不成立即
+ * 打印 FAIL 行并以退出码 1 结束。
  *
- * 背景 bug：contact_ticks 曾把斜面滑行也算"接触"→ 滑行中传送 gate 通过，
- * 坡底 trigger_teleport 被多点下探（0~48 units）命中 → 人还在坡上滑就被传送回家。
- * 修复：contact_ticks 仅真正落地累加（与 on_ground 同步），滑行中恒 0。
+ * 判定口径（`src/phys/teleport.rs` 的 `TeleportManager::check`）：
+ * - 三道早退，顺序固定：`predict` 为真、冷却 `cooldown > 0`、`surfing` 为真 → 直接不检测。
+ *   `surfing` 由 `src/phys/player.rs` 的 `try_player_move` 在命中面法线
+ *   `0.05 < normal.y < 0.7` 时置位，故贴坡滑行期间传送整体不生效。
+ * - `grounded` 取调用方传入的 `Player::contact_ticks > 0`：该计数只统计可站面
+ *   （`normal.y >= STANDABLE_NORMAL`，0.7）接触，唯一重算点是
+ *   `src/phys/player.rs` 的 `categorize_position`。它不是早退，只作后两条判定路径的启用条件。
+ * - A 路径 `in_trigger_zone`：整条身体线段（origin 到 origin + `body_top`）与 trigger 凸包
+ *   相交，落地与否只影响斜面 trigger 的 64 HU 贴面容差；B 路径 `probe_below_foot`：
+ *   脚底往下 8 HU 的区间与 trigger 相交，要求 `grounded`。
  *
- * 场景 1（surfing 语义）：玩家在 60° 坡面上方贴坡悬空、沿坡速度滑行，
- *   contactTicks 必须恒 0（旧代码会把 surfing 计入接触 → 1+），且不触发传送。
- * 场景 2（落地触发）：玩家在坡底 trigger 上方悬空下落 → 落地后 contactTicks
- *   累加 → gate 通过 → 探测命中坡底 trigger → 传送。
+ * 场景 1（surfing 语义）：60° 坡 + 有限厚地面，玩家贴坡悬空、速度沿坡最陡下降方向；
+ *   断言 10 个 tick 内 `contactTicks` 恒 0，且从未出现目的地坐标。
+ * 场景 2（落地先后）：只放地面 + 坡底 trigger，玩家在 trigger 上方悬空下落；断言最终触发
+ *   传送、接触计数出现过，且传送不早于首次接触。
  *
- * 用法：node scripts/phys-teleport-gate.mjs（需先 npm run build:wasm）
+ * 用法：在 `apps/game` 下执行 `node scripts/phys-teleport-gate.mjs`（需先 `npm run build:wasm`，
+ * 见 `apps/game/package.json`）。
+ * 退出码：0 = 两个场景全部通过；1 = 任一断言失败。
  */
 import { initSync, PhysWorld } from '../pkg/websurf_wasm.js';
 import { readFileSync } from 'fs';
@@ -25,25 +34,24 @@ initSync({ module: wasmBytes });
 const TICK = 1 / 64;
 
 // ---- 世界：60° 斜坡 + 地面 ----
-// 坡面（顶面）平面：0.866x + 0.5y = 86.6 → y = 173.2 - 1.732x（x=-100→y=346.4, x=100→y=0）
-// 坡面法线 y=0.5 ∈ (0.05, 0.7) → 属 surf 范围（不可站，滑行置 surfing）
-// 楔形斜面 brush（60°，x∈[-100,100]，坡面 y 从 346.4 降到 0）：
-// 内部 = 坡面下方 且 y>=0 且 x∈[-100,100] 且 z∈[-100,100]
+// 坡面：0.866x + 0.5y <= 86.6，即表面 y = 173.2 - 1.732x（x = -100 处 y = 346.4，x = 100 处 y = 0）
+// 面法线 (0.866, 0.5, 0) 的 y 分量是 0.5，落在 surf 区间 0.05 < normal.y < 0.7 内
+// 楔形 brush：内部 = 坡面下方 且 y >= 0 且 x ∈ [-100, 100] 且 z ∈ [-100, 100]
 const ramp = {
   planes: [
-    { normal: [0.866, 0.5, 0], dist: 86.6 }, // 坡面顶面（法线朝外朝上偏 x）
-    { normal: [0, -1, 0], dist: 0 },          // 底面 y>=0（法线朝下）
-    { normal: [-1, 0, 0], dist: 100 },        // 小端 x>=-100（法线朝 -x）
-    { normal: [1, 0, 0], dist: 100 },         // 大端 x<=100（法线朝 +x）
-    { normal: [0, 0, -1], dist: 100 },        // z>=-100
-    { normal: [0, 0, 1], dist: 100 },         // z<=100
+    { normal: [0.866, 0.5, 0], dist: 86.6 }, // 坡面：0.866x + 0.5y <= 86.6
+    { normal: [0, -1, 0], dist: 0 },          // 底面：y >= 0
+    { normal: [-1, 0, 0], dist: 100 },        // 小端：x >= -100
+    { normal: [1, 0, 0], dist: 100 },         // 大端：x <= 100
+    { normal: [0, 0, -1], dist: 100 },        // z >= -100
+    { normal: [0, 0, 1], dist: 100 },         // z <= 100
   ],
   min: [-100, 0, -100], max: [100, 346.4, 100],
   is_ladder: false, is_solid: true,
 };
-// 有限厚地面（y∈[-100,0]，法线朝外）：真实 BSP brush 是有限厚，Minkowski 膨胀
-// 后玩家 origin 在地面上方为外部 → 正常落地碰撞。无限厚地面（planes 底面 dist 大）
-// 会让膨胀 brush 覆盖玩家所有高度 → start_solid 卡死（测试构造错误）。
+// 有限厚地面：顶面 y <= 0、底面 y >= -100（厚 100 HU）。
+// 玩家 origin 即脚底（`src/phys/player.rs` 的 `apply_hull` 把 `stand_mins[1]` 置 0），
+// 箱体在 origin 上方 72 HU，故 origin 在地面之上时箱体与实体不相交 —— 这是落地碰撞的前提。
 const ground = {
   planes: [
     { normal: [0, 1, 0], dist: 0 },     // 顶面 y<=0（内部在下方）
@@ -59,6 +67,7 @@ const ground = {
 const brushJson = JSON.stringify([ground, ramp]);
 
 // ---- 坡底 trigger_teleport → 目的地 (50, 0, 30) ----
+// trigger 只给 model_mins / model_maxs（无凸包平面），触发区按 AABB 回退判定
 const teleportJson = JSON.stringify({
   teleports: [{ index: 0, targetname: 'tp_dest', origin: [50, 0, 30], angles: [0, 90, 0] }],
   triggers: [{
@@ -67,6 +76,7 @@ const teleportJson = JSON.stringify({
   }],
 });
 
+// 目的地 (50, 0, 30)：两轴各容差 1 HU 即认定已传送
 function isTeleported(s) {
   return Math.abs(s.posX - 50) < 1 && Math.abs(s.posZ - 30) < 1;
 }
@@ -78,10 +88,10 @@ function isTeleported(s) {
   const rampY = 173.2 - 1.732 * (-80); // 311.8（坡面中部 x=-80）
   const w = new PhysWorld();
   w.build_world(brushJson, '[]', teleportJson, -80, rampY + 36.5, 0, 0);
-  // 贴坡悬空 0.5 units + 沿坡速度（方向 (0.866, -0.5) × 500）
-  // vy 必须足够负（-1.732×vx）才不被 vx 甩离坡面：浅 vy 会悬空飞离 → 永不撞坡
-  // → surfing 不置位 → 旧代码也无法累加（测试无效）。平行坡面速度会逐渐穿入
-  // 坡面（碰撞信号 → surfing=true），此时新旧代码行为才分叉。
+  // 贴坡悬空：origin 距坡面的垂直距离是 36.5 × 0.5 = 18.25 HU（坡面法线 y 分量为 0.5，
+  // 而 origin 即脚底）。速度取沿坡最陡下降方向 (433, -750, 0)：坡面 y = 173.2 - 1.732x 的
+  // 下降方向 (1, -1.732) 归一化后是 (0.5, -0.866)，故 vy = -1.732 × vx 才贴着坡面走。
+  // 浅 vy 会被 vx 甩离坡面而永不接触，surfing 不置位，本场景就测不到「滑行中不触发传送」。
   w.set_state(-80, rampY + 36.5, 0, 0, 0, 433, -750, 0, false);
   let maxContact = 0;
   let teleported = false;
@@ -108,8 +118,8 @@ function isTeleported(s) {
   // 只含地面 + 坡底 trigger；玩家在 trigger 上方悬空下落
   const w = new PhysWorld();
   w.build_world(JSON.stringify([ground]), '[]', teleportJson, 110, 36.5, 0, 0);
-  // 玩家 (x=110) 在 trigger AABB [95,115]×[0,4] 正上方悬空 36.5，静止下落；
-  // 探测点 36 → y=0 ∈ trigger，但落地前 gate 不通过（contactTicks=0）
+  // 玩家 (x=110) 在 trigger AABB [95,115]×[0,4] 正上方悬空 36.5，静止下落：
+  // A 路径要身体线段够到 y <= 4，B 路径要 grounded，两条在落地前都不成立
   w.set_state(110, 36.5, 0, 0, 0, 0, 0, 0, false);
   let teleportedAt = -1;
   let firstContactTick = -1;

@@ -1,128 +1,93 @@
-# game（WebSurf-game）总览
+# WebSurf-game 工程总览
 
-> 核对基准：2026-09 当前工作区代码（`apps/game/src/`、`apps/game/crates/`、`apps/game/package.json`、共享 `src/ts-shared/`、`src/phys/`）。旧版文档已移出版本库（见 git 历史），本文为全新重写；所有关键论断标注来源代码路径。
-> 公共总架构见 [`../architecture.md`](../architecture.md)；共享物理细节见 [`../phys.md`](../phys.md)、解析层见 [`../wasm-core.md`](../wasm-core.md)、通道与校准见 [`../ts-shared.md`](../ts-shared.md)。
+## 工程定位
 
-## 1. 定位与工程形态
+`apps/game` 是受控范围内三个可运行工程之一，定位是**可玩闭环**：一张画布上跑「主线程渲染物理（`predPhys`）+ Worker 权威物理 + ESC 控制面板 + 存点 + 地图加载进度」。
 
-WebSurf 的**激进最小化游戏化实现**——物理栈整体下沉 Rust WASM，TS 侧只剩「输入采集 + 渲染 + 面板 + 存点」。
+- 工程自述与入口脚本：`apps/game/package.json:4` 的 `description`、`apps/game/package.json:7` 的 `scripts`。
+- 唯一入口模块：`apps/game/src/app.ts` 的 `main`（`apps/game/src/app.ts:94`），文件末 `void main()`（`apps/game/src/app.ts:832`）触发；画布缺失时直接返回（`apps/game/src/app.ts:95`）。
+- 两条物理线同时存在：Worker 侧由 `createAuthLoop` 驱动（`apps/game/src/worker/main.ts:451`），主线程侧由 `RendererMain.buildPredictionWorld` 建实例（`apps/game/src/renderer/renderer-main.ts:683`）并在每帧 `tick` 推进（`apps/game/src/renderer/renderer-main.ts:938`）。
+- 交互面：页面 `apps/game/web/index.html` 声明的挂载点由 `apps/game/src/app.ts` 的 `dom` 表（`apps/game/src/app.ts:43`）与 `PanelController`（`apps/game/src/panel/panel-controller.ts:37`）绑定；本次实测 `apps/game/src` 下 45 个 `getElementById` 字面量 id 在 `apps/game/web/index.html` 中全部存在，8 个选择器查询也各自有对应结构。
+- dev 端口 8090：`apps/game/package.json:15`。
 
-| 维度 | 事实 | 来源 |
+## 目录职责
+
+| 路径 | 职责 | 关键锚点 |
 |---|---|---|
-| 包名 | `websurf-game` v0.1.0，`"type": "module"`，描述"主线程唯一物理渲染线 + 单 Worker 权威帧 + Three.js 渲染" | `apps/game/package.json:2-5` |
-| workspace | `apps/game/Cargo.toml` 独立 `[workspace] members=["crates/wasm"]`，与仓库根 workspace 分离（debug/game 的 wasm crate 同名 `websurf-wasm`，不能同 workspace） | `apps/game/Cargo.toml:6-19` |
-| vmdl 补丁 | `[patch.crates-io] vmdl → ../src/vendor/vmdl`（共享 vendor，VTX 三角形条带展开修复） | `apps/game/Cargo.toml:13-18` |
-| 唯一 crate | `crates/wasm`（包名 `websurf-wasm`）：wasm-bindgen 导出层，物理/解析实现在共享 crate | `apps/game/crates/wasm/Cargo.toml:11,22-24`（`websurf-phys`→`../../../../src`、`websurf-wasm-core`→`../../../../src/wasm-core`） |
-| 依赖 | `three ^0.165.0`、esbuild、TypeScript（仅 dev）；运行时零 npm 依赖 | `apps/game/package.json` dependencies/devDependencies |
+| `apps/game/src/` | 主线程与 Worker 的 TypeScript 源码（`apps/game/src/app.ts`、`apps/game/src/config.ts`、`apps/game/src/savepoint.ts`、`apps/game/src/wasm.d.ts` 四个根文件） | `apps/game/src/app.ts:94` 的 `main` |
+| `apps/game/src/input/` | 键位表与持久化、键盘状态、面板参数下发桥 | `apps/game/src/input/input-bridge.ts:41` 的 `sendConfig` |
+| `apps/game/src/panel/` | ESC 面板控制器：导航切换、控件接线、偏好持久化、存点列表 | `apps/game/src/panel/panel-controller.ts:37` 的 `PanelController` |
+| `apps/game/src/renderer/` | 主线程渲染物理与场景：GLB 装载、光照注入、分块合并、剔除、出帧探针 | `apps/game/src/renderer/renderer-main.ts:116` 的 `RendererMain` |
+| `apps/game/src/worker/` | Worker 权威物理入口与消息协议类型声明 | `apps/game/src/worker/main.ts:451` 的 `createAuthLoop` |
+| `apps/game/src/world/` | 向量与 PVS 类型出口（转出共享层类型） | `apps/game/src/world/types.ts:12` 的类型转出 |
+| `apps/game/web/` | 手写页面资产（`index.html`、`styles.css`、`coi-serviceworker.js`）与 esbuild 产物落点 | `apps/game/web/index.html:27` 的 `canvas#preview` |
+| `apps/game/scripts/` | 构建脚本与物理冒烟脚本（`build-dist.mjs`、`check-wasm-api.mjs`、`phys-*.mjs`） | `apps/game/scripts/build-dist.mjs:60` 的 `KEEP_SINGLE` |
+| `apps/game/crates/wasm/` | 本工程唯一的 Rust crate：BSP 解析 / GLB 导出 / 物理的 wasm 绑定 | `apps/game/crates/wasm/Cargo.toml:22` 的 path 依赖 |
+| `apps/game/pkg/` | wasm-pack 产物目录（`--out-dir ../../pkg`），被 `.gitignore` 排除 | `apps/game/package.json:8` |
+| `apps/game/dist/` | 发行产物目录，由 `scripts/build-dist.mjs` 先删后建 | `apps/game/scripts/build-dist.mjs:215` 的 `cleanDist` |
+| `apps/game/temp/` | 构建日志文本（非代码、非文档树） | 无（不参与构建） |
 
-`apps/game/crates/wasm/src/lib.rs` 是薄导出层（约 2300 行）：
-- `pub use websurf_phys::phys::PhysWorld;` —— 物理类直接来自共享 crate，game 自己不实现物理（`apps/game/crates/wasm/src/lib.rs:23`）；
-- 本文件实现 BSP 导出面：`BspProcessor`（metadata / spawn / teleport / PVS 解析、GLB 导出、brush 平面导出、PAKFILE 模型收集）与独立函数 `mosaic_encode / mosaic_decode / decompress_mtz`；
-- 注意：BspProcessor 定义处有历史残留——孤儿文档注释 `/// 一次性解析 BSP 字节数组...`（已删除的 `parse_bsp` 提法，`lib.rs:364-366`）与其后悬挂的 `#[wasm_bindgen]`（`:367`）；实际结构体声明在 `:376-377`（`:367` 与 `:376` 两个属性叠加到同一 `pub struct BspProcessor`），实际入口是构造 `new BspProcessor(bytes)`。
+`.gitignore` 的排除面：`dist/`、`pkg/`、`target/`、`web/app.js`、`web/worker.js`、`web/websurf_wasm_bg.wasm`（`apps/game/.gitignore:4`）。
 
-## 2. v7 架构总图
+## 依赖方向
 
-**主线程唯一物理渲染线 + 单 Worker 权威帧计算器**（双端跑同一个共享 `PhysWorld`，各有独立 wasm 线性内存）：
+本工程依赖共享层 `src/**`，并自带一个 `crates/wasm`：
 
-```
-主线程（渲染 + 预测物理，rAF 可变 dt ≤0.1s）
-  app.ts ─ 输入采集(mousemove/keys) → MouseBuffer(CLAMP 1000) → layerMouseDelta(灵敏度×M_YAW)
-        ─ 每帧 shared.addInput(dx,dy,mask) → SAB 输入槽（或 MsgState postMessage）
-  RendererMain ─ predPhys.tick(dt,keys,dx,dy)（唯一物理：碰撞/传送/死亡/reset 全走主线程实例）
-              ─ AuthorityCalibrator：读权威帧(只读)→速度外推校准→异常兜底→反向同步权威
-  Three.js ─ 优化场景(分块合并) + LOD 距离剔除 + 近平面自适应 + 速度 HUD
+- 共享物理层 `websurf-phys`（`src/phys/**`）：`apps/game/crates/wasm/Cargo.toml:22` 的 path 依赖 `../../../../src`，由 `apps/game/crates/wasm/src/lib.rs:35` 的 `pub use websurf_phys::phys::PhysWorld` 转出。
+- 共享解析层 `websurf-wasm-core`（`src/wasm-core/**`）：`apps/game/crates/wasm/Cargo.toml:24`。
+- 共享 TS 层 `src/ts-shared/**`：`apps/game/tsconfig.json:15` 把 `../../src/ts-shared/**/*.ts` 列入 `include`。实际 import 面：
+  - `apps/game/src/app.ts:32-36`：`MouseBuffer`、`PointerLockController`、`createMainSharedState`/`SHARED_BUFFER_SIZE`/`keysToMask`/`KEY_MASK`、`layerMouseDelta`/`qeEquivalentDx`、`buildWorldBundle`。
+  - `apps/game/src/renderer/renderer-main.ts:40-44`：`ShmState`/`MsgState` 类型、`AuthorityCalibrator`、`PvsManager`、`base64ToBytes`、`EYE_STAND`。
+  - `apps/game/src/worker/main.ts:66-73`：`ShmState`/`MsgState`/`RenderSample` 类型、`createAuthLoop`、`createWorkerDispatch`、`buildPhysicsParams`。
+  - `apps/game/src/input/keyboard.ts:17` 与 `apps/game/src/input/keymap.ts:17`：`keysToMask` 与 `KeyState` 类型。
+- wasm 胶水：`apps/game/src/app.ts:27`、`apps/game/src/worker/main.ts:65`、`apps/game/src/renderer/renderer-main.ts:37` 三处直接 import `../pkg/websurf_wasm.js` 或 `../../pkg/websurf_wasm.js`；`apps/game/src/wasm.d.ts:16` 用一条 `export *` 转出同一声明，供类型检查兜底。
+- workspace 与补丁：`apps/game/Cargo.toml:7` 的 `members = ["crates/wasm"]`、`apps/game/Cargo.toml:13-14` 把 `vmdl` patch 到 `src/vendor/vmdl`。
 
-Worker（权威帧计算器，固定步长 1/tickRate——**面板值直译**，2026-09-21 起取消隐藏偏移）
-  worker/main.ts + ts-shared/auth/auth-loop.ts
-  ─ setTimeout 4ms 自驱 → takeInput(SAB/Msg) → PhysWorld.tick → writeAuthoritative(双缓冲+V_A++)
-  ─ 碰撞事件(land/blocked) postMessage → 主线程 applyCollisionCorrection 微调
-  ─ sync-render-state：渲染主线大偏差时反向覆盖权威 + resetInput
-```
+依赖方向是单向的：本工程 import 共享层，共享层不 import 本工程。
 
-依据：`apps/game/src/worker/main.ts:1-16`（头注"权威帧计算器（v7）"）、`apps/game/src/renderer/renderer-main.ts:96-113`（`predPhys` 主线程唯一物理 + `AuthorityCalibrator` 收敛 ts-shared）、`src/ts-shared/phys/authority-calibrator.ts:110-127`（"只读权威，绝不反写"+ 大偏差反向同步定调）。
-⚠️ `apps/game/src/app.ts:4,7` 头注仍写"v5 …Worker = 纯速度修正器"，与现行 v7 代码不符——以 `worker/main.ts` 头注与实际消息流为准（历史残留，勿引用）。
+## 构建产物与脚本
 
-### 2.1 双端同构（同一物理、同一输入）
+| script | 做什么 | 产物落点 | 锚点 |
+|---|---|---|---|
+| `build:wasm` | wasm-pack release 构建（`--target web`）并把 wasm 复制到 `web/` | `apps/game/pkg/`、`apps/game/web/websurf_wasm_bg.wasm` | `apps/game/package.json:8` |
+| `typecheck` | `tsc --noEmit`（`noEmit: true`） | 无 | `apps/game/package.json:9`、`apps/game/tsconfig.json:8` |
+| `build:worker` | esbuild 打包 Worker 入口为 ESM | `apps/game/web/worker.js` | `apps/game/package.json:10` |
+| `build:app` | esbuild 打包主线程入口为 ESM | `apps/game/web/app.js` | `apps/game/package.json:11` |
+| `build:ts` | `typecheck` → `build:worker` → `build:app` | 同三行 | `apps/game/package.json:12` |
+| `build:dist` | 发行打包（缺省 single、`--multi` 走 multi） | `apps/game/dist/` | `apps/game/package.json:13`、`apps/game/scripts/build-dist.mjs:74` |
+| `build` | `build:wasm` → `build:ts` | 同上 | `apps/game/package.json:14` |
+| `dev` | 起本地 HTTP 服务（`src/serve.py`，带 COOP/COEP 头） | 服务根 = 本工程目录 | `apps/game/package.json:15`、`src/serve.py:39` |
+| `check:api` | wasm 契约检查（声明面 + 导入面两级） | stdout + 退出码 | `apps/game/package.json:16`、`apps/game/scripts/check-wasm-api.mjs:81` |
+| `test:phys` | 物理冒烟（九段） | stdout + 退出码 | `apps/game/package.json:17` |
+| `test:seed-smoke` | 种子面 v2 回归 | stdout + 退出码 | `apps/game/package.json:18` |
+| `test:surf-crouch` | surf 蹲伏冒烟 | stdout + 退出码 | `apps/game/package.json:19` |
 
-- 双端各持一个 `PhysWorld`（`apps/game/src/renderer/renderer-main.ts:483-519` 主线程 `buildPredictionWorld`；`src/ts-shared/auth/worker-dispatch.ts:101-117` Worker `world-json` → `build_world`），都由 `buildPhysicsParams` 生成同一份 snake_case 参数（`apps/game/src/config.ts:158` + `src/ts-shared/phys/params.ts:40-59`，其中 `sensitivity: 1` 固定——灵敏度在主线程输入层乘入，双端消费同一份已缩放输入，角度永不因灵敏度分叉）。
-- Q/E 转向不进物理：输入层生成等效鼠标量 `qeEquivalentDx = yawBindSpeed/M_YAW×dt`（`src/ts-shared/input/input-layer.ts`；`apps/game/src/app.ts:346-354` 每帧并入 `feedInput`），Rust 侧仅收 dx/dy（`src/phys/mod.rs:222-233` step_core 注释明示"物理不再内部旋转"）。
+产物形态（`apps/game/scripts/build-dist.mjs:60` 与 `:62` 两份保留名单）：
 
-### 2.2 通道层
+- **single 产物**：`index.html`（改写成 classic script）、`app.js`（IIFE，前置 `__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` / `__VBSP_TEXTURES_MTZ_B64__` 三个内嵌全局）、`styles.css`、许可证两份。本次实测磁盘上的 `apps/game/dist/` 正是这 5 个文件。
+- **multi 产物**：额外产出 `worker.js`、`websurf_wasm_bg.wasm`、`textures.mtz`、`coi-serviceworker.js`（注入预缓存清单与内容哈希缓存名）。
+- 许可证副本的唯一来源是 `src/phys` 目录下的 `LICENSE` / `NOTICE`（`apps/game/scripts/build-dist.mjs:221-226`），缺源即抛错。
 
-`crossOriginIsolated`（serve.py 发 COOP/COEP）→ `SharedArrayBuffer(512B)` 高性能通道；否则 MsgState postMessage 回退（功能等价可玩）。创建于 `apps/game/src/app.ts:82-124`；接口统一在 `src/ts-shared/auth/shared-state.ts`（`ShmState`/`MsgState`，布局常量 `I_V_A/I_KEYS/I_A_GROUND/B_DX_ACC/B_DY_ACC/B_A0/B_A1` 于 `:104-117`，`SHARED_BUFFER_SIZE = 512` 于 `:117`）。
+## 启动链
 
-## 3. 目录结构与模块划分
+1. `npm run dev`（`apps/game/package.json:15`）→ `python ../../src/serve.py 8090 .`，服务根为工程目录；响应带 `Cross-Origin-Opener-Policy: same-origin` 与 `Cross-Origin-Embedder-Policy: require-corp`（`src/serve.py:39`），这是页面拿到 `crossOriginIsolated`、进而拿到 `SharedArrayBuffer` 的前提。
+2. 浏览器加载 `web/index.html`；页面先加载 `./coi-serviceworker.js`，再以 module script 加载构建产物 `./app.js`（`apps/game/web/index.html:290` 与 `:291`）。因此 dev 链路要求先跑过 `npm run build:ts`（`apps/game/package.json:12`）。
+3. `main()` 判通道：`crossOriginIsolated` 为真且 `SharedArrayBuffer` 存在才新建共享缓冲（`apps/game/src/app.ts:108`、`apps/game/src/app.ts:112`），否则该实参传 `null`（`apps/game/src/app.ts:112`）。
+4. 建 Worker 并立即发两条引导消息：`init`（`apps/game/src/app.ts:148`）与 `wasm-init`（`apps/game/src/app.ts:152` 内嵌 base64 分支、`apps/game/src/app.ts:154` URL 分支）。
+5. 建共享状态通道：`createMainSharedState(sharedBuffer, fixWorker)`（`apps/game/src/app.ts:158`）。
+6. 建 `RendererMain`（`apps/game/src/app.ts:162`）→ `init`（`apps/game/src/app.ts:169`）→ `start`（`apps/game/src/app.ts:170`，起 rAF 循环）→ `installFrameProbe`（`apps/game/src/app.ts:173`）→ 主线程 wasm 初始化 promise（`apps/game/src/app.ts:176`）。
+7. 建 `InputBridge`（`apps/game/src/app.ts:181`）并按四段下发一次全量配置（`apps/game/src/app.ts:182` 调 `syncFullConfig`，段表见 `apps/game/src/app.ts:642`）。
+8. 建 `PanelController`（`apps/game/src/app.ts:185`）：构造期依次 `loadPanelPrefs` → `bindEvents` → `bindModuleNav` → `renderKeyList` → `syncControlsFromConfig` → `sendAllPrefs` → `applyCrosshair`（`apps/game/src/panel/panel-controller.ts:82-90`）。
+9. 输入就位：`initKeyHud` → `bindInput` → `startInputLoop`（`apps/game/src/app.ts:219-221`）。此时页面可交互，但直到用户选图并解析完成前 `sceneReady` 仍为假（`apps/game/src/app.ts:80` 声明、`apps/game/src/app.ts:575` 置真）。
+10. 选图：`#loadMapBtn` 触发隐藏的 `#bspFile`（`apps/game/src/app.ts:317`），`change` 事件把文件字节交给 `handleLoadBsp`（`apps/game/src/app.ts:321` 与 `apps/game/src/app.ts:326`）。
 
-| 路径 | 行数 | 职责（实测 wc -l） |
-|---|---|---|
-| `apps/game/src/app.ts` | 820 | 入口 `main()`：通道选择、Worker/Renderer/桥/面板装配、输入绑定、地图加载 `handleLoadBsp`、存点 X/C、加载覆盖层、**左下角按键簇**（`initKeyHud`/`syncKeyHudLabels`/`updateKeyHud`：标签取当前键位、高亮取实时输入、仅状态变化时写 DOM） |
-| `apps/game/src/config.ts` | 292 | `DEFAULT_CONFIG`（physics/input/player/hud/texture 五段 + `lockTickRate`）+ `applyConfigPatch` + `buildPhysicsParams` |
-| `apps/game/src/renderer/renderer-main.ts` | 1750 | 渲染主线：Three.js 初始化、GLB 场景挂载、分块合并 optimizeScene、LOD/PVS、近平面自适应、主线程物理 tick、权威校准入口、画质切换、光照模式运行期切换 |
-| `apps/game/src/worker/main.ts` | 481 | Worker 装配：`createAuthLoop` + `createWorkerDispatch`，`getConfigTickRate = config.physics.tickRate`（`:425`；2026-09-21 起面板值直译、无隐藏偏移） |
-| `apps/game/src/worker/worker-types.ts` | 202 | 协议类型（⚠️ 部分注释落后于实现，运行时协议以 `src/ts-shared/auth/worker-dispatch.ts` 为准；`:6` 提到的 predictor-worker 文件已不存在，纯历史残留） |
-| `apps/game/src/input/input-bridge.ts` | 75 | 面板 → 双端物理的参数桥（sendConfig 双写、respawn/teleport） |
-| `apps/game/src/input/keyboard.ts` | 122 | `KeyboardInput`：锁定门控、`getState/getMask/reset`、面板 `setKeymap` 热更新 + `onKeymapChange` 订阅（改键后通知使用方刷新显示） |
-| `apps/game/src/input/keymap.ts` | 122 | 默认键位 + 录制重绑 + localStorage（`STORAGE_KEY='websurf-game.keymap.v1'` `:42`） |
-| `src/ts-shared/input/mouse-buffer.ts` | 128 | `process()` 路径：discardNext + 单事件削平 ±1000（`MAX_DELTA` `:40`；`push/drain` 为遗留未用路径） |
-| `src/ts-shared/input/pointer-lock.ts` | 154 | `unadjustedMovement:true` 请求 + 旧浏览器 void 降级 + 3s 超时（`:71`） |
-| `apps/game/src/panel/panel-controller.ts` | 809 | ESC 两栏面板：通用/物理/体型/按键/操作/显示/视角七模块、控件绑定、偏好持久化、noclip、存点列表 |
-| `apps/game/src/world/pvs-manager.ts` | —（批 4 已上提） | PVS 叶子查找 + 行 RLE 解码 + 可见集——**D-10 起实现在 `src/ts-shared/world/pvs-manager.ts`（271 行）**，本工程文件已删除（`renderer-main.ts` 改 import 共享单点） |
-| `apps/game/src/world/types.ts` | 17 | 最小化世界类型：`Vec3Like`/`Vec3` 留在本工程（D-07 判保留）；PVS 三类型批 4（D-10）起为 re-export 共享单点（对照 debug 198 行） |
-| `apps/game/src/savepoint.ts` | 106 | `SavePointStore`：按地图 localStorage（`websurf-game.savepoints.{mapName}`）、上限 50（`SAVEPOINT_MAX` `:27`）、latest/add/delete |
-| `apps/game/web/index.html` | 294 | 页面外壳（纯结构与挂载点）：不含任何行内样式，视觉层全在 styles.css。r1 迁移时记的「id 80 / data-* 14 / class 30、与 JS 绑定零改动」是 2026-09-12 的快照；**2026-09-21 新增左下角按键簇 `#keys`**（8 个 `.tm-key`，`data-action` 指向 keymap 动作名）后为 id 93 / data-* 24 / class 41（口径：`id="…"` 计数、`data-[a-z-]+=` 计数、class 取值去重） |
-| `apps/game/web/styles.css` | 615 | 独立视觉层（viewer S10 令牌体系）：:root 设计令牌 + 卡片化面板 + 悬停/激活交互态 + **左下角按键簇 `#keys`**（3 列网格 · `.tm-key` 键帽 · `.on` 高亮 · `.off` 已禁用）；可见性 class 钩子（`#panel.hidden`/`#error.show`/`.key-rec-hint(.show)`/`#crosshair.no-dot .ch-dot`）+ `.load-fill` 进度条 `var(--load-pct, 0%)` |
-| `apps/game/crates/wasm/src/lib.rs` | 2566 | WASM 导出层（见 §1） |
+## 不变量
 
-### 3.1 ts-shared 复用矩阵（import 实测）
-
-| 共享模块 | game 引用点 |
-|---|---|
-| `auth/shared-state.ts` | `apps/game/src/app.ts:20`（createMainSharedState/keysToMask/KEY_MASK）、`keyboard.ts:11`、`renderer-main.ts:20`、`worker/main.ts:21` |
-| `auth/auth-loop.ts` | `apps/game/src/worker/main.ts:22` |
-| `auth/worker-dispatch.ts` | `apps/game/src/worker/main.ts:23` |
-| `phys/params.ts` | `apps/game/src/config.ts:5`、`worker/main.ts:24` |
-| `phys/world-builder.ts` | `apps/game/src/app.ts:22` |
-| `phys/authority-calibrator.ts` | `apps/game/src/renderer/renderer-main.ts:21` |
-| `input/input-layer.ts` | `apps/game/src/app.ts:21` |
-
-## 4. 配置系统（最小化五段）
-
-`apps/game/src/config.ts:92-143` `DEFAULT_CONFIG`：`physics`（tickRate 64 / gravity 800 / jumpSpeed 302 / maxSpeed 250 / friction 4 / accelerate 10 / airAccel 150 / stopSpeed 100 / autobhop / walkSpeed 130 / crouchSpeed 85 / bhopSpeedClamp / noPrestrafe / teleportGateTicks 3）、`input`（sensitivity 1.5 / pitchLimit 89 / yawBindSpeed 210 / noclipSpeed 800）、`player`（半宽 16 / 站高 72 / 蹲高 54）、`hud`（fov 73.6、准星、速度模式）、`texture.quality`；外加 `lockTickRate`（默认 false；true 时锁定 64Hz 只读，为"计时玩法公平性"预留，`config.ts:81-93`、`panel-controller.ts:222`）。
-对比 debug 的十余段可调参数 + 物理参数定义库，game 把面板参数收敛为最小集合（差异详见 [differences.md](differences.md)）。
-
-## 5. 构建与运行链
-
-```bash
-npm install
-npm run build:wasm   # wasm-pack release → pkg/（wasm-opt=false，Cargo.toml package.metadata），并拷 wasm 到 web/
-npm run build:ts     # typecheck(tsc) + esbuild 双产物：web/worker.js + web/app.js（package.json:10-12）
-npm run check:api    # scripts/check-wasm-api.mjs：契约校验 = 导出层 16 + 物理层 17 API 全存在
-npm run test:phys    # scripts/phys-smoke.mjs：node 直跑 WASM 物理冒烟（落体→落地→跳）
-npm run build:dist   # scripts/build-dist.mjs：single（默认，内嵌 file:// 可玩）/ --multi（Pages）
-```
-
-- 产物引用：`apps/game/web/index.html`（245 行，纯结构与挂载点——`<link rel="stylesheet" href="./styles.css">` 于 `:17`、`<script type="module" src="./app.js">` 于 `:243`；80 元素 id / 14 data-* / 30 class 与 JS 绑定零改动，r1 复核 80/80、14/14、30/30）+ `apps/game/web/styles.css`（571 行独立视觉层，viewer S10 令牌体系：:root 令牌 + 卡片化面板 + 悬停/激活交互态；零行内样式）。
-- **single 构建**（`scripts/build-dist.mjs:66-126`）：wasm base64 + worker 代码 + mtz 全部内嵌进 `dist/app.js`（Blob URL module worker），`dist/index.html` + `dist/styles.css` 外置（copyFileSync `:110-111`，file:// 下 `<link>` 同样可加载），专门支持 `file://` 双击（无 fetch/无 SAB 自动 MsgState 降级）。
-- **multi 构建**（`build-dist.mjs:129-174`）：`index.html + styles.css + app.js + worker.js + websurf_wasm_bg.wasm + textures.mtz` 共 6 文件（index/styles 拷贝 `:163-165`），用于 GitHub Pages（`.github/workflows/deploy-pages.yml` 头注 9-13 行：game 以 multi dist 部署）。
-- 一键：`apps/game/play.cmd` 四步自举（ensure-node-deps → wasm → ts → dist）后以共享 `src/serve.py` 起服务（**COOP/COEP + no-store**，`src/serve.py:31-36`，SAB 生效前提）自动打开 `http://localhost:8137/dist/index.html`（端口见 `apps/game/play.cmd:6`）。
-- dev 页面：`python ../../src/serve.py 8080 .` 后访问 `/web/index.html`（需先 `npm run build:ts`）。
-- ⚠️ 仓库内已有 `apps/game/web/*.js` 与 `apps/game/dist/*` 可能是旧架构（v3）产物——运行前先重建（`documents/game/README.md` 已明示）。
-
-## 6. WASM 契约（双端共用一个包）
-
-`apps/game/pkg/websurf_wasm.js` 由 wasm-pack 生成，`apps/game/src/wasm.d.ts` 直接 re-export pkg 类型。契约由 `apps/game/scripts/check-wasm-api.mjs:17-53` 静态校验：
-
-- **导出层 16**：`metadata / parse_spawn_points / parse_teleports / parse_pvs_data / export_brushes_planes / export_model_tri_colliders / export_model_phy_colliders / export_glb(_with_pakfile_models(_with_defaults)) / export_mosaic_manifest / export_missing_textures / take_event / mosaic_encode / mosaic_decode / decompress_mtz`；
-- **物理层 17**：`build_world / tick / tick_into / predict / state / state_out_ptr / respawn / teleport_to / teleport_to_spawn / set_spawn_points / set_death_y / set_params / set_hull / set_noclip / set_state / set_velocity / set_yaw_pitch`（全部来自共享 `src/phys/mod.rs`）。
-- game 实际只用其中一部分：主线程 `tick/state/set_state/set_params/set_hull/set_noclip/set_death_y/build_world/set_spawn_points`（renderer-main），Worker `tick/build_world/respawn/teleport_to_spawn/set_spawn_points/sync 参数`（auth-loop/dispatch）；`tick_into/state_out_ptr/predict/debug_trace/gate_veto_count/take_event/set_velocity/set_yaw_pitch/teleport_to` 为共享层或验证工程接口，game 未调用（grep `apps/game/src` 无引用）。
-
-## 7. 文档导航
-
-| 文档 | 维度 | 内容 |
-|---|---|---|
-| [sequences.md](sequences.md) | T | 启动时序、地图加载管线、双线程帧循环、校准与反向同步、SAB/Msg 协议 |
-| [implementation/panel-and-input.md](implementation/panel-and-input.md) | I | 输入采集链、键位录制、PointerLock、参数桥、面板七模块 |
-| [implementation/gameplay.md](implementation/gameplay.md) | I | 存点/读点/按住冻结、出生点选择、渲染体验子系统、死亡阈值、PVS 现状 |
-| [differences.md](differences.md) | D | game vs debug/viewer/dual-mode-harness 的架构取舍与共享层收敛 |
-
-> 归档旧文档（v5 时代视角，仅供历史对照）已移出版本库，可在 git 历史中追溯。
+- **单写者（输入）**：每帧只有 `RendererMain.tick` 一处写共享输入槽（`apps/game/src/renderer/renderer-main.ts:932`）；`InputBridge.addInput` 是显式空实现（`apps/game/src/input/input-bridge.ts:30`），不退化成第二条写入路径。
+- **同源输入**：真实鼠标增量先经 `layerMouseDelta` 乘灵敏度（`apps/game/src/app.ts:235`，实现在 `src/ts-shared/input/input-layer.ts:25`），Q/E 转向经 `qeEquivalentDx`（`apps/game/src/app.ts:411`）；物理参数里的 `sensitivity` 恒为 1（`src/ts-shared/phys/params.ts:67`），因此改灵敏度不会让两条物理线拿到不同参数。
+- **固定步长**：Worker 权威物理的步长由 `setFixedDt` 按 tickRate 折算，初值 1/64 秒（`src/ts-shared/auth/auth-loop.ts:252`），步长未变时 `setFixedDt` 返回 false、调用方据此跳过累积器清零（`src/ts-shared/auth/worker-dispatch.ts:359`）。
+- **权威是速度之主**：主线程每帧依次调 `correctFromAuthority` 与 `calibrateVelocity`（`apps/game/src/renderer/renderer-main.ts:934`、`apps/game/src/renderer/renderer-main.ts:936`），稳态下权威只改渲染速度、不改渲染位置（`src/ts-shared/phys/authority-calibrator.ts:33` 的口径说明）。
+- **世代单调（渲染采样）**：位置突变时失效世代 +1（`apps/game/src/renderer/renderer-main.ts:235` 的 `bumpSampleEpoch`），换图与重建物理世界时索引空间重启（`apps/game/src/renderer/renderer-main.ts:241`），世代槽由共享层独占维护、调用方不传值（`apps/game/src/renderer/renderer-main.ts:955`）。
+- **装配顺序**：GLB 挂载 → 摘除 punctual 光源 → 施加 lightmap → 分块合并 → 受光材质终扫 → 预编译（`apps/game/src/renderer/renderer-main.ts:344`、`:358`、`:366`、`:372`、`:387`）；顺序被注释与实现共同固定，例如光源必须在 `scene.add` 之前摘除（`apps/game/src/renderer/renderer-main.ts:340`）。
+- **加载进度单调**：阶段名到百分比的映射是常量表（`apps/game/src/app.ts:679`），覆盖层用补间朝目标逼近（`apps/game/src/app.ts:727`）；失败时覆盖层转错误态而非直接消失（`apps/game/src/app.ts:803`）。
+- **键位单一来源**：HUD 标签与面板读同一份 `loadKeymap()`（`apps/game/src/app.ts:70` 注册刷新、`apps/game/src/app.ts:462` 写标签），改键后两边同步变化。

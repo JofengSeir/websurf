@@ -1,37 +1,88 @@
 /**
- * RGBExp32 lightmap 解码着色器注入（阶段 3）。
+ * 离线烘焙静态光照的 three.js 侧落地：RGBExp32 图集解码着色器注入 + prop 三级光照路由。
  *
- * 移植自 `apps/debug/src/renderer/lightmap-shader.ts`（本仓库既有实现；三工程互不引用，
- * 故按架构约定移植而非跨工程 import）。上游口径 = 外部参照实现的
- * `Resources/src/Shaders/LightmappedBase.ts:39-66`，但**显示 gamma 一项不照抄**（2026-09-18
- * gamma-parity 计划 §3.1a 矫正）：
- * - 指数在 **α 通道**：`exp = alpha * 255 - 128`，`rgb_linear = rgb * 2^exp`
- * - 纹理必须 `Nearest` + `NoColorSpace`（硬件插值会先混指数再解码，得到错误结果）
- * - **手写双线性**：先对 4 个 texel 各自解码再 `mix`，不依赖 GPU 过滤
- * - **解码保持线性**（`max(decoded, 0)`，不再 `pow(1/2.2)`）：RGBExp32 的 rgb 是线性辐射度，
- *   three 的 `colorspace_fragment`（linear→sRGB）承担显示 gamma。外部参照实现的
- *   `pow(1/2.2)` 是其 **sRGB 域直出**管线里的显示变换，照抄进 three 线性管线会构成
- *   **双重 gamma**（实测暗部 texel 提亮 +40%~+230%，全亮区一致 ⇒ 「整体偏亮、暗部发灰」）。
- *   修正后最终色 = `base_linear × decoded_linear`，与外部参照实现的残差仅 sRGB 曲线差（几个百分点）。
- * - r151+ 的 lightMap 槽 UV 由 `Texture.channel` 决定（本工程用 channel=1 读 uv1）
+ * ## 副本关系
  *
- * 与上游副本的差异（本轮新增，契约 §9.6.1 的 `extras.hasLightmap`）：
- * 图元 `extras.hasLightmap === false` 表示该图元只有中性占位 UV（无真实 luxel），
- * 此时**不施加** lightmap，避免用无意义 UV 去采图集里的别的面的数据。
+ * 三工程（`apps/debug`、`apps/game`、`apps/viewer`）各持一份**同构副本**，
+ * 路径都是 `src/renderer/lightmap-shader.ts`，彼此不 import、不跨工程引用；
+ * 本文件是上述三份同构副本之一（按所在工程目录定位）。改动只对所在工程生效。
+ *
+ * ## 上游（Rust/wasm 侧产出 GLB）
+ *
+ * - `src/wasm-core/bsp_to_gltf_core/lightmap.rs` 的 `build_atlas` 把 VRAD 烘焙结果打成一页
+ *   RGBA8 图集；`inject_lightmap_json` 把纹理下标写进 `asset.extras.lightmap.textureIndex`；
+ *   `lightmap_uv` 把每个顶点映射到图集内缩矩形（min 加半像素、size 取矩形边长减一）。
+ * - `src/wasm-core/bsp_to_gltf_core/convert.rs` 把该 UV 写进 `TEXCOORD_1`，并按面写图元
+ *   `extras.hasLightmap`（未命中图集区域的面写中性常量 UV）。
+ * - `src/wasm-core/model_integrator/mod.rs` 给 prop 写逐顶点烘焙属性 `_VBSP_VLIGHT`
+ *   （glTF 自定义语义，运行期键名见 `VERTEX_LIGHTING_ATTR`）与 node extras 的 `ambientCube`。
+ *
+ * ## 下游（本文件的消费点）
+ *
+ * - `apps/game/src/renderer/renderer-main.ts`：`loadLightmapAtlas` → `applyLightmapToMeshes`
+ *   → `fullbrightUnlitLitMaterials`，并读注入记录字段做统计。
+ * - `apps/debug/src/renderer/renderer-main.ts`：只调 `loadLightmapAtlas` / `applyLightmapToMeshes`
+ *   与 `setLightingMode` / `getLightingMode`，不做装配后终扫。
+ * - `apps/viewer/src/core/scene.ts`：`loadLightmapAtlas` / `applyLightmapToMeshes` /
+ *   `fullbrightUnlitLitMaterials`，传入的是模型根 Group 而非 `THREE.Scene`。
+ *
+ * ## 三条光照路径（都在片元里替换 three 的 lightmap 采样项）
+ *
+ * 1. **world 面**：图集 + 手写双线性 + RGBExp32 解码，函数体在 `VBSP_APPLY_LIGHTMAP`；
+ * 2. **prop 第 1 级**：几何属性 `_VBSP_VLIGHT` 的逐顶点烘焙值（`applyVertexLightingShader`）；
+ * 3. **prop 第 2 级**：node extras 的 leaf ambient cube，按法线平方加权（`applyAmbientCubeIfAny`）。
+ *
+ * `extras.unlit === true` 的图元不吃任何光照，直接贴图原色（`routeFullbright` 的首个分支）。
+ *
+ * ## 关键不变量
+ *
+ * - 图集纹理必须 `NoColorSpace` + `NearestFilter` + 不生成 mipmap：RGBExp32 的指数在 α 通道上，
+ *   硬件插值会先混指数再解码。双线性只在 `vbsp_ApplyLightmap` 里对**已解码**的值做。
+ * - 解码式：`exp = alpha * 255 - 128`、`rgb_linear = rgb * 2^exp`；rgb 是线性辐射度，
+ *   不做 `pow(1/2.2)`，显示变换由 `installGamma22Output` 统一在出口做一次。
+ * - lightMap 槽的 UV 由 `Texture.channel` 决定（three r151+ 起），必须显式置 1 才读 `uv1`，
+ *   否则回落到 `uv`（漫反射 UV），见 `resolveLightmapUvChannel`。
+ * - γ 只作用于**光照项**，不作用于 `albedo × 光照` 的乘积：注入后片元值为
+ *   `albedo_linear × 光照项`，出口再整体做 `^(1/2.2)`；若把 `^(1/2.2)` 挪到乘积上，
+ *   暗部会被额外压低一个量级（三条路径同此口径）。
+ * - 注入材质用到的贴图槽固定为 `map`、`lightMap`、`alphaMap`（后者由
+ *   `copyMaterialRenderState` 从原材质继承，可为空），不新增其它纹理槽。
+ * - `uniform` 声明只有 `VBSP_LIGHTMAP_UNIFORM_DECLS` / `VBSP_AMBIENT_UNIFORM_DECLS` 两个来源，
+ *   三条注入路径都从它们取；缺一条声明就是 GLSL 编译失败、整批 mesh 不绘制。
+ * - 图元 `extras.hasLightmap === false` 表示只有中性占位 UV（无真实 luxel），
+ *   此时不施加 lightmap，改走 fullbright，避免用无意义 UV 采到图集里别的面。
+ *
+ * ## 失败语义
+ *
+ * - `injectLightmapShader` 的两条替换通道都没命中时，除 `broken` 阶段外一律置
+ *   `globalThis.__vbspLightmapInjectFailed = true` 并 `throw`，使调用方非零退出。
+ * - `applyVertexLightingShader` / `applyAmbientCubeIfAny` 锚点失配时只 `console.error`
+ *   并把结果记在材质的注入记录字段上，渲染继续（fullbright 兜底）。
+ * - `loadLightmapAtlas` 在缺少 `textureIndex` 或加载（`parser.loadTexture`）失败时
+ *   返回 `null`；调用方在 `null` 时整段跳过 lightmap 施加，地图仍是贴图原色。
+ *
+ * ## 副作用
+ *
+ * 模块被 import 时即调用 `installGamma22Output()` 覆盖 three 的 `colorspace_fragment` 块，
+ * 早于任何材质编译；该覆盖是全局的、幂等的，可用 `globalThis.__vbspOutputGamma22 === false` 关闭。
  */
 
 import * as THREE from 'three';
 import type { GLTF, GLTFParser } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 // ---------------------------------------------------------------------------
-// GLSL 着色器片段
+// GLSL 片段：RGBExp32 解码 + 手写双线性采样
 // ---------------------------------------------------------------------------
 
 /**
- * 解码单个 RGBExp32 样本。
- * atlas 为 RGBA8（NoColorSpace，值 [0,1] = 原始字节/255）：
- * RGB = mantissa，A = exponent 偏移（exp+128）。
- * 解码：exp = alpha * 255 - 128; rgb * pow(2, exp)，与 Source RGBExp32 一致。
+ * 解码单个 RGBExp32 样本（只被 `VBSP_APPLY_LIGHTMAP` 调用）。
+ *
+ * 图集是 RGBA8 且纹理为 `NoColorSpace`，采样值域 [0,1]（= 原始字节 / 255）：
+ * `rgb` 是尾数、`a` 是指数偏移（`exp + 128`）。
+ * 解码 `exp = a * 255 - 128`、`rgb * 2^exp`，得到线性辐射度，不做钳制也不做显示变换。
+ *
+ * @param texel 图集纹素（RGBA8 归一化值）。
+ * @returns 线性 RGB（不裁剪负指数带来的极小值）。
  */
 export const VBSP_DECOMPRESS_LIGHTMAP_SAMPLE = /* glsl */ `
 vec3 vbsp_DecompressLightmapSample(vec4 texel) {
@@ -41,35 +92,22 @@ vec3 vbsp_DecompressLightmapSample(vec4 texel) {
 `;
 
 /**
- * 手动双线性采样 + RGBExp32 解码。
- * atlas 用 NearestFilter 保留 raw 字节（避免硬件插值破坏指数编码），
- * 故在 shader 中手动采样 4 个最近邻，每个样本先解码再 mix。
+ * 手写双线性采样 + RGBExp32 解码，返回**光照项**（不含 albedo）。
  *
- * ## ⚠️ 显示 gamma 必须套在 **lightmap 项**上，不能套在乘积上（2026-09-20 根因修复）
+ * 图集用 `NearestFilter`，故这里显式取 4 个最近邻纹素（坐标先 `- 0.5` 对齐纹素中心），
+ * 每个先解码再 `mix`，不依赖 GPU 过滤。
  *
- * three 原生 `MeshBasicMaterial` 的算式是 `outgoing = diffuseColor.rgb × lightMapTexel.rgb`
- * （`outgoingLight = diffuseColor.rgb * (1.0 + totalEmissiveRadiance)`，lightmap 经
- * `reflectedLight.indirectDiffuse` 并入）。本工程把 `lightMapTexel.rgb` 这一项换成
- * `vbsp_ApplyLightmap(...)` 的返回值 ⇒ **本函数返回什么，就直接等于「光照项」**。
+ * 返回值的语义：three 的 `MeshBasicMaterial` 片元里原本是
+ * `lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI`，本工程把它整段换成
+ * `vbsp_ApplyLightmap(...)` 的返回值，随后仍由 `reflectedLight.indirectDiffuse *= diffuseColor.rgb`
+ * 乘上 albedo ⇒ **本函数的返回值就是「光照项」本身**，显示 gamma 必须在此处施加
+ * （套在乘积之后会把暗部再压一个量级）。
  *
- * 此前本函数返回 `pow(decoded, 1/2.2) * vbspExposure`，即 gamma 被套在
- * **albedo × lightmap 的乘积**上。后果是暗部被压死：
+ * 分支与算式（`vbspBakedMix < 0.5` 即纯纹理模式时整条采样被跳过）：
+ * `max(decoded, vbspLightFloor)` → `pow(值, 1 / max(vbspLightGamma, 0.001))` → 乘 `vbspExposure`。
  *
- * | 量 | 值 |
- * |---|---|
- * | 暗部 lightmap 解码值 | ≈ 1.2e-2（实测 p50） |
- * | 正确口径 `pow(1.2e-2, 1/2.2)` | ≈ **0.136**（可见） |
- * | 错误口径 `pow(0.13 × 1.2e-2, 1/2.2)` | ≈ 0.019（≈ 正确值的 1/7） |
- *
- * 用户原话「亮度拖爆了，暗的地方就是黑的，000000 纯黑」即此——乘任何 exposure 都救不回
- * （0 乘任何数仍是 0）。**Source 的口径是 `albedo × pow(lightmap, 1/2.2)`**
- * （外部参照实现 `LightmappedBase.ts:66`：`inColor * pow(sample, 1/2.2)`），
- * 即 gamma 只作用于 lightmap 项 —— 与「PS 里把 lightmap 那层叠到材质上」同义。
- *
- * 因此本函数改为：**先对解码值做 `^(1/γ)` 提升，再返回**（调用方乘 albedo）。
- *
- * `vbspLightGamma`（默认 1.0）：作用在 lightmap项 上的 shadow-lift，兼作显示 gamma 旋钮
- * （>1 抬高暗部）。`vbspExposure`：全局倍率。两者都在 **lightmap 项**上、不碰 albedo。
+ * 依赖 uniform（声明见 `VBSP_LIGHTMAP_UNIFORM_DECLS`）：`vbsp_AtlasSize`、`vbspBakedMix`、
+ * `vbspLightFloor`、`vbspLightGamma`、`vbspExposure`。
  */
 export const VBSP_APPLY_LIGHTMAP = /* glsl */ `
 vec3 vbsp_ApplyLightmap(sampler2D atlas, vec2 uv) {
@@ -106,25 +144,23 @@ vec3 vbsp_ApplyLightmap(sampler2D atlas, vec2 uv) {
 `;
 
 /**
- * **光照项 uniform 声明的唯一事实来源**（2026-09-20 事故后立的规矩）。
+ * 光照项 `uniform` 声明的**唯一事实来源**。
  *
- * ## 为什么必须单一来源
+ * 三条注入路径（world lightmap / 逐顶点烘焙 / ambient cube）都在各自拼出的 GLSL 片段里
+ * 引用同一批 `vbsp*` uniform，声明必须一律取自本数组，不得在任一路径里手写副本。
+ * 漏改任一路径的后果不是「某个 uniform 取不到值」的软失败，而是
+ * `undeclared identifier` ⇒ GLSL 编译失败 ⇒ program 无效 ⇒ 该批 mesh 一个像素都不画；
+ * 几何与碰撞由 Rust 侧独立生成，因此症状是「模型看不见、碰撞正常」。
  *
- * 三条注入路径（world lightmap / ambient cube / fullbright 兜底）都在**各自拼出来的
- * GLSL 片段**里引用同一批 `vbsp*` uniform，而声明原先散落在各路径的字符串里。
- * 只要新增一个 uniform 时漏改任一路径，那条路径的 fragment shader 就是
- * **`undeclared identifier`** —— 这不是"某个 uniform 取不到值"的软失败，而是
- * **GLSL 编译失败 ⇒ program 无效 ⇒ `drawArrays: no valid shader program in use`
- * ⇒ 该批 mesh 一个像素都不画**。几何与碰撞在 Rust 侧独立生成 ⇒ 实机表现正是
- * 用户报的「模型完全看不见、完全透明，但碰撞正常」。
+ * 类型与取值来源（与各注入函数里写进 `shader.uniforms` 的对象一一对应）：
+ * - `vbsp_AtlasSize: vec2` ← 逐材质新建的 `THREE.Vector2`，值 = 图集像素尺寸；
+ * - `vbspExposure: float` ← `exposureUniform`；
+ * - `vbspLightGamma: float` ← `lightGammaUniform`；
+ * - `vbspLightFloor: float` ← `lightFloorUniform`；
+ * - `vbspBakedMix: float` ← `bakedMixUniform`。
  *
- * 本批实测（真实出帧 + `renderer.info.programs[].diagnostics`）：
- * `vbspLightFloor` 只加进了 world 路径的前置声明，**ambient cube 路径漏加**，于是
- * 全部带 `ambientCube` 的 prop（模型本体）与走 fullbright 的水面/远地面**整体消失**，
- * 失败 program 报 `ERROR: 0:90: 'vbspLightFloor' : undeclared identifier`。
- *
- * 回归护栏见 `scripts/lightmap-inject-guard-selftest.mjs` §10：断言「每个注入单元
- * 自己用到的 `vbsp*` 标识符，都能在同一单元里找到声明」。
+ * 声明了但某条路径不赋值的 uniform（如 `applyVertexLightingShader` 不设 `vbspLightFloor`）
+ * 不会被该路径生成的代码读取，GLSL 允许未使用的声明。
  */
 export const VBSP_LIGHTMAP_UNIFORM_DECLS = [
 	'uniform vec2 vbsp_AtlasSize;',
@@ -134,26 +170,42 @@ export const VBSP_LIGHTMAP_UNIFORM_DECLS = [
 	'uniform float vbspBakedMix;',
 ];
 
-/** ambient cube（prop / fullbright 兜底）路径**额外**需要的 uniform：cube 数组 + 模型亮度。 */
+/**
+ * ambient cube 路径在 `VBSP_LIGHTMAP_UNIFORM_DECLS` 之外**额外**需要的声明：
+ * `vbspAmbCube[6]`（`vec3` 数组，值 = 6 个 `THREE.Vector3`）与
+ * `vbspAmbientScale: float`（← `ambientScaleUniform`）。
+ *
+ * 下标含义由 `vbspAmbientRaw` 的写法固定：`0/1` = ±X、`2/3` = ±Y、`4/5` = ±Z，
+ * 与 `src/wasm-core/vbsp/data/game.rs` 里 `LeafAmbientSample::cube` 的 face 序一致。
+ */
 export const VBSP_AMBIENT_UNIFORM_DECLS = [
 	'uniform vec3 vbspAmbCube[6];',
 	'uniform float vbspAmbientScale;',
 ];
 
 /**
- * 第 1 级 prop 光照（逐顶点预烘焙）的几何属性名。
+ * 第 1 级 prop 光照（逐顶点预烘焙）的几何属性名，取的是**运行期**键名。
  *
  * 导出侧写在 GLB primitive 的自定义语义 `_VBSP_VLIGHT` 上（glTF 规定自定义属性须以 `_` 开头），
- * 但 **three 的 GLTFLoader 对未知属性名会转小写**
- * （`GLTFLoader.js`：`ATTRIBUTES[ name ] || name.toLowerCase()`）⇒ 运行期拿到的键是
- * `_vbsp_vlight`。这里的常量必须是**运行期**的名字，否则 `getAttribute` 恒为 null、
- * 整条第 1 级路径静默失效（本批实测踩过：日志里 `[vertex-lighting]` 一条都不打）。
- * 见 `crates/wasm-core/vhv.rs` 与 `model_integrator::push_vertices`。
+ * 而 three 的 `GLTFLoader` 对未知属性名会转小写
+ * （`ATTRIBUTES[ name ] || name.toLowerCase()`）⇒ 运行期键名是 `_vbsp_vlight`。
+ * 这里必须是运行期名字：写成大写原样时 `getAttribute` 恒为 `null`，
+ * `routeFullbright` 会整条跳过第 1 级路径。
+ *
+ * 写入侧见 `src/wasm-core/model_integrator/mod.rs` 的 `push_vertices`（由 `add_models_to_gltf` 调用）；
+ * 读取侧见本文件的 `hasVertexLightingAttr`。
  */
 export const VERTEX_LIGHTING_ATTR = '_vbsp_vlight';
 
-// MeshBasicMaterial 在 fragment shader 内联了 lightmap 采样块，替换为 vbsp_ApplyLightmap；
-// 同时防御性兼容 include <lightmap_fragment> 的材质（理论上 MeshBasicMaterial 不会）。
+// 注入用的替换锚点与替换文本。
+//
+// three 0.165.0 的 `meshbasic_frag` 在 `#ifdef USE_LIGHTMAP` 分支里**内联**了 lightmap 采样
+// （两行源码，中间是换行 + 两个制表符），`BASIC_INLINE_LIGHTMAP_SRC` 就是这两行的原样拼接，
+// 用作 `String.prototype.replace` 的锚点；替换后光照项由 `vbsp_ApplyLightmap` 提供。
+//
+// `CHUNK_*` 是给走 `#include <lightmap_fragment>` 的材质准备的防御性通道。
+// three 0.165.0 的 `ShaderChunk` 只导出 `lightmap_pars_fragment`，没有 `lightmap_fragment`，
+// 故此通道在本版本命中数恒为 0；命中数仍被统计，见 `injectLightmapShader`。
 const BASIC_INLINE_LIGHTMAP_SRC =
 	'vec4 lightMapTexel = texture2D( lightMap, vLightMapUv );\n\t\treflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;';
 
@@ -165,28 +217,20 @@ const CHUNK_LIGHTMAP_REPLACEMENT =
 	'reflectedLight.indirectDiffuse += vbsp_ApplyLightmap(lightMap, vLightMapUv);';
 
 // ---------------------------------------------------------------------------
-// 输出编码：纯 γ2.2（Source / 外部参照实现口径），替换 three 的分段 sRGB
+// 输出编码：纯 γ2.2，替换 three 的分段 sRGB
 // ---------------------------------------------------------------------------
 
 /**
- * three 的 `colorspace_fragment` 是**分段 sRGB**（带线性 toe：`x<0.0031` 时 `12.92x`），
- * 而 Source / 外部参照实现的 LDR 口径是**纯 γ2.2**：
- * `.tmp/外部参照实现-master/.../Shaders/LightmappedBase.ts:66` 的
- * `inColor * pow(sample, 1/2.2)`，代数上等价于「用 γ2.2 编码乘积」
- * （`StudioModel.ts:96-98` 对 ambient cube 用 `linearToScreenGamma` 同源）。
+ * 输出编码的替换目标与替换文本（`COLORSPACE_CHUNK_NAME` / `GAMMA22_OUTPUT`）。
  *
- * 二者**只在深暗部**分歧最大：sRGB 的线性 toe 把深暗部压低 2~3×，亮部几乎一致
- * （`scene-brightness-and-lights.md` §7.4 已量化：d=0.005 时 3.25×、d=0.878 时 1.00×）。
- * 这正是「室内（暗）死黑、露天（亮）正常」的成因 —— 室内那批贴图本身就暗
- * （实测 219 张贴图每张中位亮度 p50=75/255、p25=32/255），乘上中等 lightmap 后
- * 落进 sRGB 的线性 toe，被额外压掉约一半。
+ * three 0.165.0 的 `colorspace_fragment` 块内容是
+ * `gl_FragColor = linearToOutputTexel( gl_FragColor );`，`SRGBColorSpace` 走
+ * `sRGBTransferOETF` —— **分段**曲线：`x <= 0.0031308` 时 `12.92x`，否则
+ * `1.055 * x^(1/2.4) - 0.055`。本工程把整块换成**纯 γ2.2**：`pow(max(rgb, 0), 1/2.2)`
+ * （指数是 2.2，与 sRGB 的 2.4 不同；二者只在深暗部明显分歧）。
  *
- * 因此把三条受控材质路径（world lightmap / fullbright / prop ambient）的输出块
- * 整体换成纯 γ2.2 编码。**不动 `renderer.outputColorSpace`**：背景 clear color
- * 仍走 three 的 sRGB 路径，观感一致且不引入额外回归面。
- * 全部场景 mesh 都经 `applyLightmapToMeshes` 换上本文件的材质 ⇒ 覆盖面完整；
- * 诊断档（`--debug-albedo` / `noinject`）也必须同口径，否则 factor-decompose 的
- * 逐像素相除会混入输出曲线差。
+ * 只覆盖 `ShaderChunk` 里的**块文本**，不动 `renderer.outputColorSpace`：背景 clear color
+ * 仍走 three 的路径。三条注入路径与诊断档都经本文件的材质 ⇒ 覆盖面为全部受控材质。
  */
 const COLORSPACE_CHUNK_NAME = 'colorspace_fragment';
 const GAMMA22_OUTPUT =
@@ -199,16 +243,14 @@ function outputGamma22Enabled(): boolean {
 }
 
 /**
- * 全局安装 γ2.2 输出编码：把 three 的 `colorspace_fragment` **块内容**整体换掉（幂等）。
+ * 全局安装 γ2.2 输出编码：把 three 的 `colorspace_fragment` **块内容**整体换掉。
  *
- * 为什么用**全局 ShaderChunk 覆盖**而不是逐材质 `onBeforeCompile`：
- * three 的 `Material.customProgramCacheKey()` 默认返回 `onBeforeCompile.toString()`
- * （`node_modules/three/src/materials/Material.js:107-113`）⇒ 给材质**新设**
- * `onBeforeCompile` 会新增程序缓存键 ⇒ 新增着色器程序 ⇒ 首次可见时多一次编译；
- * 而主线程 tick 的 `dt = min(帧间隔, 0.1)`（`renderer-main.ts:832`）会把这种卡顿
- * 放大成「慢动作」（传送点首次进入新区域时最明显）。覆盖 ShaderChunk 只改「块的文本」、
- * 不改任何缓存键 ⇒ **零新增程序**，且对全场材质（world lightmap / fullbright /
- * prop ambient / 诊断档）一致生效。背景是纯 Color、走 `gl.clearColor` 而非材质，不受影响。
+ * 用**全局 ShaderChunk 覆盖**而不是逐材质 `onBeforeCompile` 的原因：
+ * three 的 `Material.customProgramCacheKey()` 默认返回 `onBeforeCompile.toString()`，
+ * 给材质新设 `onBeforeCompile` 会改变程序缓存键 ⇒ 新增着色器程序 ⇒ 首次可见时多一次编译；
+ * 覆盖 ShaderChunk 只改块的文本、不碰缓存键，对全部受控材质一致生效。
+ *
+ * 幂等：块文本已等于 `GAMMA22_OUTPUT` 时不重复写入；`outputGamma22Enabled()` 为假时整体跳过。
  */
 export function installGamma22Output(): void {
 	if (!outputGamma22Enabled()) return;
@@ -218,22 +260,26 @@ export function installGamma22Output(): void {
 	}
 }
 
-// 模块加载即安装（早于任何材质编译）
+// 模块加载即安装：早于任何材质编译 ⇒ 首个 program 就带 γ2.2 出口。
 installGamma22Output();
 
 // ---------------------------------------------------------------------------
-// 自动化对照的「阶段开关」（仅出帧验证脚本使用；正常游玩不受影响）
+// 出帧对照的阶段开关（仅诊断通道读取；正常游玩取兜底值 auto）
 // ---------------------------------------------------------------------------
 
 /**
- * 出帧对照的阶段开关（由 scripts/lightmap-frame-capture.mjs 在导航前经
- * `Page.addScriptToEvaluateOnNewDocument` 注入 `window.__vbspLightmapStage`）：
- * - `auto`（默认/未设）：按本文件正常逻辑注入；
- * - `off`：**不注入** shader、也不换材质（负控：地图理应重新变黑）；
- * - `broken`：强制用旧的「拼接成一行」失配字面量去 replace（**根因负控**：证明
- *   「字面量失配 ⇒ 注入静默失效 ⇒ 画面变黑」这条因果链）；
- * - `native`：跳过自定义注入，保留 three 原生 lightmap 采样（亮度对照上界）。
- * 读取时用类型断言，缺失字段即视为 `auto`。
+ * 出帧对照的阶段开关，读自 `globalThis.__vbspLightmapStage`。
+ *
+ * 正常运行时该全局不存在，`readLightmapStage()` 一律返回 `'auto'`。各值对本文件的影响：
+ * - `auto`：不在 `LIGHTMAP_STAGES` 里，是读取端对「未设 / 非法值」的兜底 ⇒ 按正常逻辑注入；
+ * - `off`：`applyLightmapToMeshes` 立刻返回 0，不换材质、不注入；
+ * - `broken`：内联锚点换成 `BASIC_INLINE_LIGHTMAP_SRC_LEGACY_MISMATCH`，
+ *   使 `applied === false` 成为**预期**结果（只告警不抛错）；
+ * - `native`：`injectLightmapShader` 记下 `applied: null` 后返回，保留 three 原生 lightmap 采样；
+ * - `channel0` / `channel1`：强制 lightmap UV 通道取 0 / 1，见 `resolveLightmapUvChannel`；
+ * - `noinject`：材质照常替换（分块与 draw 形态与 `auto` 相同），仅跳过 shader 注入。
+ *
+ * 读取端用类型断言，字段缺失或不是合法字符串时视为 `auto`。
  */
 export type LightmapStage =
 	| 'auto'
@@ -244,7 +290,7 @@ export type LightmapStage =
 	| 'channel1'
 	| 'noinject';
 
-/** 全部合法 stage（读取端校验 + 统计端分类共用，避免两处清单漂移）。 */
+/** 全部合法 stage 取值（不含兜底值 `auto`）；读取端用它校验全局字段。 */
 const LIGHTMAP_STAGES: readonly LightmapStage[] = [
 	'off',
 	'broken',
@@ -254,7 +300,7 @@ const LIGHTMAP_STAGES: readonly LightmapStage[] = [
 	'noinject',
 ];
 
-/** 读取全局阶段开关（无 `window` 时视为 auto）。 */
+/** 读取全局阶段开关；无 `window`、字段类型不对或值不在 `LIGHTMAP_STAGES` 里都返回 `auto`。 */
 export function readLightmapStage(): LightmapStage {
 	const g = globalThis as { __vbspLightmapStage?: unknown };
 	const v = g.__vbspLightmapStage;
@@ -263,34 +309,31 @@ export function readLightmapStage(): LightmapStage {
 		: 'auto';
 }
 
-/** 供统计端分类复用（导出以便 renderer-main 判定 `native`/`noinject` 等跳过类语义）。 */
+/** 该 stage 是否属于「跳过自定义光照」类（`native` 与 `noinject`）。 */
 export function isLightmapSkipStage(stage: string): boolean {
 	return stage === 'native' || stage === 'noinject';
 }
 
 /**
- * three 0.165.0 的 lightmap UV 通道**必须显式指定**。
+ * lightmap 采样应使用的 UV 通道号（正确值 = 1）。
  *
- * 依据（three 0.165.0 源码）：`WebGLPrograms.getParameters()` 里
- * `lightMapUv: getChannel( material.lightMap.channel )`，而
- * `getChannel(v) = v === 0 ? 'uv' : 'uv' + v`；
- * `Texture.channel` 的**默认值是 0** ⇒ 不显式设置时 `LIGHTMAP_UV === 'uv'`，
- * 即 **lightmap 会用漫反射 UV 采样**（错误的图集坐标）⇒ 采出来的是别处的
- * 纹素 → 表现为「黑 / 花 / 假亮」，而不是地图的真实明暗。
+ * three 0.165.0 的 lightmap UV 通道**必须显式指定**：`WebGLPrograms.getParameters()` 里
+ * `lightMapUv: HAS_LIGHTMAP && getChannel( material.lightMap.channel )`，而
+ * `getChannel(v)` 在 `v === 0` 时返回 `'uv'`、否则返回 `` `uv${v}` ``；
+ * `Texture.channel` 默认值是 0 ⇒ 不设置时 `LIGHTMAP_UV === 'uv'`，
+ * 即 lightmap 会用漫反射 UV 采样（采到图集里别处的纹素）。
  *
  * GLB 契约里 lightmap 坐标写在 `TEXCOORD_1`（GLTFLoader r151+ 映射到 `uv1`），
- * 故正确取值是 `channel = 1`（⇒ `LIGHTMAP_UV === 'uv1'`）。
- * 本工程既有的「把 uv1 复制到 uv2」是 r151 **之前**的旧约定，与 `channel` 并存
- * 只会让真正的采样通道继续是 0。
+ * 故取 `channel = 1` ⇒ `LIGHTMAP_UV === 'uv1'`。
  */
 export const LIGHTMAP_UV_CHANNEL_CORRECT = 1;
 
 /**
  * 解析本次运行应使用的 lightmap UV 通道。
- * `channel0` / `channel1` 两个 stage 是**负控/正控**开关（出帧对照用）：
- * - `channel0`（负控）：强制 0 = three 默认 = 用漫反射 uv 采样 ⇒ 预期画面变黑/花；
- * - `channel1`（正控）：强制 1 = 用 uv1 = lightmap 真坐标 ⇒ 预期画面出现真实明暗。
- * 其余 stage 取 `LIGHTMAP_UV_CHANNEL_CORRECT`。
+ * `channel0` / `channel1` 两个 stage 是出帧对照的正负控开关：
+ * - `channel0`：强制 0 = three 默认 = 用漫反射 uv 采样；
+ * - `channel1`：强制 1 = 用 uv1 = lightmap 真坐标。
+ * 其余 stage（含兜底 `auto`）一律取 `LIGHTMAP_UV_CHANNEL_CORRECT`。
  */
 export function resolveLightmapUvChannel(): number {
 	const stage = readLightmapStage();
@@ -300,11 +343,10 @@ export function resolveLightmapUvChannel(): number {
 }
 
 /**
- * 旧的失配字面量（**故意保留**：根因证据 + `broken` 阶段负控用）。
+ * 与 `BASIC_INLINE_LIGHTMAP_SRC` 对应的**失配**字面量：把 three 源码里分行的两行拼成一行
+ * （去掉了中间的换行与两个制表符）⇒ `String.prototype.replace` 命中 0 次 ⇒ 注入静默失效。
  *
- * three 0.165.0 的 MeshBasicMaterial fragment 里那两行是**分行**的，中间夹着
- * 一个换行 + 两个制表符；此处把它拼成一行 ⇒ `String.prototype.replace` **命中 0 次**
- * ⇒ 静默失效。见 `injectLightmapShader` 里的命中数断言。
+ * `broken` 阶段专门用它制造「锚点失配 ⇒ 注入不生效」的对照帧，故必须保留逐字形态。
  */
 const BASIC_INLINE_LIGHTMAP_SRC_LEGACY_MISMATCH =
 	'vec4 lightMapTexel = texture2D( lightMap, vLightMapUv );reflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;';
@@ -314,17 +356,26 @@ const BASIC_INLINE_LIGHTMAP_SRC_LEGACY_MISMATCH =
 // ---------------------------------------------------------------------------
 
 /**
- * 从 glTF extras.lightmap.textureIndex 异步加载 lightmap atlas 纹理。
- * 约束：NoColorSpace + NearestFilter（保留 raw 字节，双线性在 shader 中做）。
- * @param parser GLTFParser（gltf.parser）。
- * @param gltf GLTF 解析结果（读取 asset/scene extras 中的 textureIndex）。
- * @returns atlas 纹理；无 lightmap extras 则返回 null。
+ * 从 GLB 的 lightmap extras 加载图集纹理。
+ *
+ * 取值顺序：`asset.extras.lightmap.textureIndex` 优先，缺失时回落到
+ * `scene.userData.extras.lightmap.textureIndex`；两者都没有、或 `textureIndex < 0` 时返回 `null`。
+ *
+ * 拿到纹理后**就地**强制三件事（都是解码正确性的前提，改的是纹理对象本身）：
+ * `colorSpace = NoColorSpace`（采样值即原始字节 / 255，不做 sRGB 解码）、
+ * `minFilter` / `magFilter = NearestFilter`（避免硬件在指数域上插值）、`generateMipmaps = false`；
+ * 并置 `name` 供诊断识别。
+ *
+ * @param parser GLTFParser（调用方传 `gltf.parser`）。
+ * @param gltf GLTF 解析结果。
+ * @returns 图集纹理；无 `textureIndex` 或 `parser.loadTexture` 抛错时返回 `null`
+ *   （错误只 `console.error`，不向上抛；调用方在 `null` 时跳过整段光照施加）。
  */
 export async function loadLightmapAtlas(
 	parser: GLTFParser,
 	gltf: GLTF,
 ): Promise<THREE.Texture | null> {
-	// textureIndex 可能在 asset.extras.lightmap 或 scene.userData.extras.lightmap
+	// textureIndex 有两个可选位置：asset.extras.lightmap 与 scene.userData.extras.lightmap
 	const assetExtras = (gltf.asset?.extras ?? {}) as Record<string, unknown>;
 	const sceneExtras = (gltf.scene?.userData?.extras ?? {}) as Record<string, unknown>;
 	const assetLightmap = assetExtras.lightmap as { textureIndex?: number } | undefined;
@@ -355,34 +406,33 @@ export async function loadLightmapAtlas(
 
 // ── 光照模式（面板「预烘焙 / 纯纹理」）──────────────────────────────────────
 /**
- * 光照模式（面板「预烘焙 / 纯纹理」）——**运行期性能旋钮，不是进图开关**。
+ * 光照模式（面板「预烘焙 / 纯纹理」）——**运行期性能旋钮，不是加载开关**。
  *
- * 语义（2026-09-21 按用户口径改定）：两种模式**加载路径完全相同**（同一份 GLB、同一批注入材质、
- * 同一套 atlas），差别只在**每帧片元代价**：
- * - `baked`（预烘焙，默认）：世界面吃 lightmap atlas（VRAD 烘焙，每片元 4 次 atlas 采样 + 双线性解码），
- *   prop 吃 `sp_<i>.vhv` 逐顶点烘焙 / leaf ambient cube（法线加权 6 面）⇒ 画面有明暗关系。
- * - `texture`（纯纹理）：只上漫反射贴图 ⇒ **不采 atlas、不算解码/cube**，片元更省、纹理带宽更低。
+ * 两种模式的**加载路径相同**（同一份 GLB、同一批注入材质、同一张 atlas；调用方在
+ * `loadLightmapAtlas` 返回 `null` 时才整体跳过），差别只在**每帧片元代价**：
+ * - `baked`（预烘焙）：世界面采 atlas（每片元 4 次纹素采样 + 双线性解码），
+ *   prop 吃逐顶点烘焙值或 leaf ambient cube（法线平方加权 6 面）；
+ * - `texture`（纯纹理）：片元里的烘焙项恒为 1.0，等价于只上漫反射贴图
+ *   ⇒ 不采 atlas、不算解码与 cube。
  *
- * 因此它是给**人物移动时的渲染速度**用的：在移动/转视角时把每帧光照开销降下来，让帧时间**不要大幅跳变**
- * （不是让地图加载更快——加载路径两者一致）。
- *
- * 由面板切换（`renderer-main.setLightingMode`）：只改 `bakedMixUniform`，**不重建场景、不重编译材质**。
+ * 切换只改 `bakedMixUniform` 的值（`setLightingMode`）：不重建场景、不重编译材质、
+ * 不打断输入与物理。
  */
 export type LightingMode = 'baked' | 'texture';
 
-/** 当前光照模式（模块级：`applyLightmapToMeshes` / `routeFullbright` 都读它）。 */
+/** 当前光照模式（模块级；`applyLightmapToMeshes` 与 `isTextureOnlyMode` 读它）。 */
 let lightingMode: LightingMode = 'baked';
 
 /**
  * 光照模式的**运行期载体**：1 = 预烘焙（吃烘焙项）、0 = 纯纹理（烘焙项恒 1.0）。
  *
  * 全场景所有注入材质共享**同一个** uniform 对象 ⇒ `setLightingMode` 改一次值即全场景生效：
- * 不重编译 program、不换材质、不重建场景。这是"切换面板不打断视角/移动"的**全部机制**
- * （此前实现是切模式 ⇒ `loadScene` 重建，实测切换期间冻结 1.4~2.5 s 且会打断输入）。
+ * 不重编译 program、不换材质、不重建场景。三条注入路径都读它（见 `vbsp_ApplyLightmap`、
+ * `vbspVertexLightTerm`、`vbspAmbientWeight`）。
  */
 const bakedMixUniform: { value: number } = { value: 1 };
 
-/** 设置光照模式：改共享 uniform（运行期立即生效）+ 记模式（供 UI/日志）。 */
+/** 设置光照模式：改共享 uniform（下一次绘制即生效）+ 记模式（供 UI / 日志）。 */
 export function setLightingMode(mode: LightingMode): void {
 	lightingMode = mode === 'texture' ? 'texture' : 'baked';
 	bakedMixUniform.value = lightingMode === 'baked' ? 1 : 0;
@@ -393,7 +443,7 @@ export function getLightingMode(): LightingMode {
 	return lightingMode;
 }
 
-/** 是否纯纹理模式（`baked` 之外的一切都按纯纹理处理）。 */
+/** 是否纯纹理模式（只有 `'texture'` 为真）。 */
 export function isTextureOnlyMode(): boolean {
 	return lightingMode === 'texture';
 }
@@ -403,14 +453,31 @@ export function isTextureOnlyMode(): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * 对带 uv1/uv2 的 mesh 应用 lightmap atlas：
- * uv1 存在时复制到 uv2（lightMap slot 由 uv2 驱动），用 MeshBasicMaterial 替换原材质
- *（保留原 map/color），onBeforeCompile 注入解码 shader；无 lightmap UV 的 mesh 跳过。
- * `mesh.userData.hasLightmap === false` 的 mesh 也跳过（中性占位 UV，见文件头说明）。
- * @param scene Three.js 场景或 BSP 模型根（只用到 `traverse` ⇒ 类型放宽到 Object3D，
- *   apps/viewer 挂的是自己的模型 Group 而不是 Scene）。
- * @param atlasTexture lightmap atlas 纹理（来自 loadLightmapAtlas）。
- * @returns 已应用 lightmap 的 mesh 数量。
+ * 把 lightmap 施加到 `scene` 子树里的全部 mesh：逐图元路由到三条光照路径之一，
+ * 并把原材质换成注入过 shader 的 `MeshBasicMaterial`。
+ *
+ * 处理顺序（先命中的分支接手，同一次 traverse 里后续判据不再看该 mesh）：
+ * 1. `readLightmapStage() === 'off'` ⇒ 整个函数立刻返回 0（不换材质、不注入、不改UV）；
+ * 2. `geometry.userData.hasLightmap`（缺失时回落 `mesh.userData.hasLightmap`）为 `false`
+ *    或 `undefined` ⇒ `routeFullbright`，计入 `noLightmapRouted`；
+ * 3. 既无 `uv1` 也无 `uv2` ⇒ `routeFullbright`，同样计入 `noLightmapRouted`；
+ * 4. 其余（有 lightmap UV）⇒ 建/复用注入材质并换上，`applied` 加一，并把
+ *    `atlasTexture.channel` 写成 `resolveLightmapUvChannel()`（同一对象、同值，幂等）；
+ * 5. 第一次 `traverse` 结束后再扫一遍场景：材质类型仍不是 `MeshBasicMaterial` 的 mesh
+ *    （GLTFLoader 给 prop / 派生网格的 `MeshStandardMaterial` 等）一律走 `routeFullbright`，
+ *    计入 `fallbackRouted`。
+ *
+ * 材质去重：参数相同（map / color / transparent / opacity / alphaTest / side / depthWrite /
+ * alphaMap / 线框标记 / 诊断档）时复用同一材质实例，使 `optimizeScene` 按材质实例分组的合并
+ * 仍然成立。带 ambient cube 的 prop 是例外——cube 是逐 prop 的 uniform，必须逐 mesh 建材质。
+ *
+ * 边界：`atlasTexture` 为 `null` 时本函数自身不判空；三个调用点都在 `loadLightmapAtlas`
+ * 返回 `null` 时提前返回，故第 4 步执行时它非空。
+ *
+ * @param scene 只用到 `traverse`，故类型放宽到 `Object3D`：debug 传 `THREE.Scene`，
+ *   viewer 传自己的模型根 Group。
+ * @param atlasTexture lightmap 图集纹理（来自 `loadLightmapAtlas`）。
+ * @returns 换上注入材质（第 4 步）的 mesh 数；`off` 阶段恒为 0。
  */
 export function applyLightmapToMeshes(
 	scene: THREE.Object3D,
@@ -422,64 +489,63 @@ export function applyLightmapToMeshes(
 		console.warn('[lightmap] stage=off（负控）：跳过 lightmap 施加，画面预期回到无烘焙光照状态');
 		return 0;
 	}
-	// ⚠️ `off` **不可比**（连材质都不换 ⇒ 分块/draw 与其余帧不同）⇒ 它**不是**
-	// "移除注入 ⇒ 应变暗"的正确负控；该负控由 `noinject` 承担（见下方注入处）。
+	// `off` 不可比：它连材质都不换（分块与 draw 与其余帧不同），不能充当「移除注入 ⇒ 应变暗」
+	// 的负控；该负控由 `noinject` 承担（材质照换、仅跳过注入，见下方注入处）。
 	const isNoInjectStage = readLightmapStage() === 'noinject';
 
-	// ⚠️ **两种光照模式在这里走同一条路**（2026-09-21）：材质一律按"带烘焙项"构建并注入，
-	// 模式差异只由共享 uniform `vbspBakedMix` 在片元里决定（纯纹理时烘焙项分支直接返回 1.0）。
-	// 为什么不按模式分叉建材质：分叉后"纯纹理"加载出来的材质**没有注入**，
-	// 面板切回预烘焙就只能重建场景（旧实现，切换冻结 1.4~2.5 s 并打断输入）。
+	// 两种光照模式在这里走同一条路：材质一律按「带烘焙项」构建并注入，模式差异只由共享
+	// uniform `vbspBakedMix` 在片元里决定（纯纹理时烘焙项分支直接返回 1.0）。
+	// 不按模式分叉建材质的原因：分叉后纯纹理模式的材质没有注入，面板切回预烘焙只能重建场景。
 
 	const atlasW = (atlasTexture?.image?.width as number) || 0;
 	const atlasH = (atlasTexture?.image?.height as number) || 0;
 	const atlasSize = new THREE.Vector2(atlasW, atlasH);
 
 	let applied = 0;
-	// fullbright 统一路径计数：无 lightmap 图元换 Basic（贴图原色，外部参照实现 white 兜底口径）
+	// fullbright 统一路径计数：无 lightmap 的图元换 Basic、输出贴图原色。
 	let fullbright = 0;
 
-	// ── 材质去重（**性能关键**）──────────────────────────────────────────────
-	// `optimizeScene` 的块内合并按**材质实例恒等**分组（renderer-main.ts:1232 的
-	// `new Map<THREE.Material, …>`）⇒ 若每个 mesh 各拿一个新材质实例，合并完全失效：
-	// 3.4 万 mesh 一个都并不到（draw call 估算 ~28k），而 apps/game **不换材质**
-	// （其 renderer-main.ts 文件头即写明"无 lightmap"）⇒ 同材质 mesh 能并成 300~800 块
-	// （draw ~1.5k）。本工程因此比 apps/game 卡。
-	// 修法：把「参数完全相同」的新材质**复用同一实例**（同 map/color/transparent/opacity/
-	// 诊断档位），让 optimizeScene 的按材质合并重新成立。
+	// ── 材质去重（性能关键）────────────────────────────────────────────────
+	// `optimizeScene` 的块内合并按**材质实例恒等**分组（`new Map<THREE.Material, …>`）⇒
+	// 若每个 mesh 各拿一个新材质实例，合并完全失效。因此把「参数完全相同」的新材质
+	// 复用同一实例（同 map / color / transparent / opacity / alphaTest / side / depthWrite /
+	// alphaMap / 线框标记 / 诊断档位），让按材质合并重新成立。
 	//
 	// 例外：带 ambient cube 的 prop —— cube 是**逐 prop 的 uniform**（`vbspAmbCube`），
-	// 材质不可复用，必须逐 mesh（这类数量有限：surf_666 约 366~501 个）。
+	// 材质不可复用，必须逐 mesh（见 `applyAmbientCubeIfAny`）。
 	const lightmappedCache = new Map<string, THREE.MeshBasicMaterial>();
 	const fullbrightCache = new Map<string, THREE.MeshBasicMaterial>();
 	/**
 	 * 第 1 级（逐顶点预烘焙）材质的**共享**缓存。
-	 * 属性 `_VBSP_VLIGHT` 在**几何**上（逐实例烘进顶点）⇒ 这类 mesh 可共用同一材质实例。
-	 * ⚠️ 必须与 `fullbrightCache` 分开：让没有该属性的 mesh 共用它会把属性读成全 0 ⇒ 渲成黑。
+	 * 光照数据在**几何属性** `_VBSP_VLIGHT` 上 ⇒ 这类 mesh 共用同一材质实例是安全的。
+	 * 必须与 `fullbrightCache` 分开：没有该属性的 mesh 若共用它，属性会读成全 0（渲成黑）。
 	 */
 	const vertexLightingCache = new Map<string, THREE.MeshBasicMaterial>();
 	/** 走第 1 级（逐顶点烘焙）的 mesh 数（诊断口径）。 */
 	let vertexLightingRouted = 0;
-	/** 因「契约 §9.6.1：只有中性占位 UV」而改走 fullbright 的图元数（诊断口径）。 */
+	/** 因 `hasLightmap !== true`（只有中性占位 UV）而改走 fullbright 的图元数（诊断口径）。 */
 	let noLightmapRouted = 0;
 
 	/**
-	 * fullbright 唯一收敛点（三个入口共用：`hasLightmap===false` / 无 lightmap UV / 无 uv1&uv2）。
+	 * fullbright 的**唯一收敛点**（三个入口共用：`hasLightmap !== true` / 无 lightmap UV /
+	 * 装配后终扫兜底）。
 	 *
-	 * **三级优先**（对齐 Source/外部参照实现的 prop 光照来源优先级）：
-	 * 1. `extras.unlit`（VMT `UnlitGeneric` / `$selfillum`）⇒ 贴图原色，**不吃任何光照**；
-	 * 2. 几何带 `_VBSP_VLIGHT`（**第 1 级**：VRAD 逐顶点预烘焙，`sp_<idx>.vhv`）
-	 *    ⇒ 逐顶点光照，材质可**全场景共享**（属性在几何上，不需要逐 prop uniform）；
-	 * 3. 否则回退 **第 2 级** leaf ambient cube（逐 prop uniform ⇒ 材质不可复用）；
-	 *    无 cube 时走共享材质（保住 optimizeScene 的按材质合并）。
+	 * 三级优先：
+	 * 1. `extras.unlit === true` ⇒ 贴图原色，不吃任何光照（跳过 ambient cube）；
+	 * 2. 几何带 `_VBSP_VLIGHT` 且未被 `window.__vbspVertexLightingOff` 关掉
+	 *    ⇒ 第 1 级逐顶点烘焙，材质可全场景共享（数据在几何上，不需要逐 prop uniform）；
+	 * 3. 否则走第 2 级 leaf ambient cube（逐 prop uniform ⇒ 材质不可复用）；
+	 *    cube 不可用时退到共享材质，保住 `optimizeScene` 的按材质合并。
+	 *
+	 * 本函数只在 `traverse` 回调里被调用，晚于其后定义的 `hasVertexLightingAttr` /
+	 * `reconstructVertexLighting` / `acquireVertexLightingMaterial` 的初始化。
 	 */
 	const routeFullbright = (mesh: THREE.Mesh): void => {
 		const unlit = isUnlit(mesh);
 		if (!unlit && hasVertexLightingAttr(mesh) && !readVertexLightingOff()) {
-			// 第 1 级：逐顶点预烘焙（属性在几何上 ⇒ 材质全场景共享）。
-			// ⚠️ 必须**显式赋值**给 mesh：`acquire*` 只建/取缓存实例，不做赋值
-			// （`applyFullbrightBasic` 才内部赋值）。漏赋值 ⇒ 该 mesh 仍持旧材质，
-			// 随后被 `fullbrightUnlitLitMaterials` 终扫收敛成无光照的 Basic ⇒ 第 1 级静默失效。
+			// 第 1 级：逐顶点预烘焙（数据在几何上 ⇒ 材质全场景共享）。
+			// 必须**显式赋值**给 mesh：`acquire*` 只建/取缓存实例，不做赋值
+			// （只有 `applyFullbrightBasic` 内部赋值）。漏赋值 ⇒ 该 mesh 仍持旧材质。
 			reconstructVertexLighting(mesh);
 			mesh.material = acquireVertexLightingMaterial(mesh);
 			vertexLightingRouted++;
@@ -487,9 +553,9 @@ export function applyLightmapToMeshes(
 			return;
 		}
 		const rawCube = unlit ? undefined : resolveAmbientCube(mesh);
-		// 第 2 级：leaf ambient cube（逐 prop uniform ⇒ 材质不可复用）。量级补偿：
-		// 外部参照实现的 prop 顶点色编码含一个 2×（`vVertexLighting = floor(enc) * 2/255`），
-		// 本工程末端还有一次 γ2.2 编码 ⇒ 数据侧补 `2^2.2`（见 `PROP_CUBE_GAIN` 的推导）。
+		// 第 2 级：leaf ambient cube（逐 prop uniform ⇒ 材质不可复用）。
+		// 数据侧补偿：cube 的 18 个分量逐个乘 `effectivePropCubeGain()`（默认 `PROP_CUBE_GAIN`），
+		// 只在长度恰为 18 时做，否则原样传给 `applyAmbientCubeIfAny` 由其判为 miss。
 		const cube =
 			Array.isArray(rawCube) && rawCube.length === 18
 				? rawCube.map((v) => (typeof v === 'number' ? v * effectivePropCubeGain() : v))
@@ -502,17 +568,17 @@ export function applyLightmapToMeshes(
 		fullbright++;
 	};
 
-	/** 几何是否带第 1 级逐顶点烘焙光照属性（`extras.vertexLighting=true` 的 mesh 才有）。 */
+	/** 几何是否带第 1 级逐顶点烘焙属性（值来自 GLB 的 `_VBSP_VLIGHT`，见 `VERTEX_LIGHTING_ATTR`）。 */
 	const hasVertexLightingAttr = (mesh: THREE.Mesh): boolean => {
 		const g = mesh.geometry as THREE.BufferGeometry | undefined;
 		return !!g && !!g.getAttribute && !!g.getAttribute(VERTEX_LIGHTING_ATTR);
 	};
 
-	/** 已做过重建的几何（避免同一 geometry 被多次处理）。 */
+	/** 已做过重建的几何（同一 geometry 只重建一次）。 */
 	const reconstructedGeoms = new WeakSet<THREE.BufferGeometry>();
-	/** 已做过方差压缩的**属性**（多 primitive 共享同一份缓冲 ⇒ 必须按属性去重）。 */
+	/** 已做过方差压缩的**属性**（多 primitive 共享同一份缓冲 ⇒ 按属性去重而非按 geometry）。 */
 	const flattenedAttrs = new WeakSet<THREE.BufferAttribute>();
-	/** 重建统计（诊断口径；模块级，供 `getVertexLightingRelaxStats()` 读出）。 */
+	/** 重建统计（模块级，供 `getVertexLightingRelaxStats()` 读出）。 */
 	const relaxStats = vertexLightingRelaxStats;
 	/** 每次装配重置统计（同一页面可多次加载地图）。 */
 	vertexLightingRelaxStats.meshes = 0;
@@ -528,21 +594,17 @@ export function applyLightmapToMeshes(
 	/**
 	 * 第 1 级逐顶点光照的**几何侧重建设置**：接缝焊接 + Laplacian 松弛。
 	 *
-	 * 背景（实测，见 `scene-brightness-and-lights.md` §11）：`s1_ramp1b` 那种 2560×1196 的坡
-	 * 只有 50~66 个三角形（最长边 p50 = **747**、max 1473 HU），烘焙值只在 238 个顶点上采样。
-	 * 直接用顶点值做 Gouraud 插值 ⇒ 大三角形内部是大段线性渐变、三角形之间只有 C0 连续，
-	 * 观感即"一块一块的色阶"。**烘焙数据本身是平滑的**：小三角形（≤163 HU）内 Δluma 仅 0.035。
+	 * 适用面：烘焙值只落在**网格顶点**上，大三角形内部由 Gouraud 插值给出大段线性渐变，
+	 * 三角形之间只有 C0 连续 ⇒ 逐顶点场的分布与真实光照不一致时，观感是"一块一块的色阶"。
 	 *
 	 * 三步（都不改 pakfile 数据，只改渲染用的几何属性；`propVertexRelax = 0` 时整体跳过）：
 	 * 1. **接缝焊接**：位置相同且法线相同的顶点是同一个着色点（UV 接缝复制），
-	 *    引擎按点烘焙本应给同一个值 ⇒ 取均值（实测 ramp_1 上平均只动 0.039，最大 0.24）。
+	 *    按点烘焙本应给同一个值 ⇒ 取均值。
 	 * 2. **空间鲁棒滤波**（`propVertexRelax ≥ 1`，默认开）：与"同法线的 2 环空间邻域"的
-	 *    中位数相差超过 0.10 的顶点，判为与邻域不一致并拉回中位数。实测 ramp_1：
-	 *    36% 顶点被判不一致（v168=0.741 而近邻 0.124/0.205/0.165 这种），
-	 *    近邻平均 |Δluma| 0.161 → 0.057（−65%），且未判不一致的顶点**一个都不动**。
-	 *    观感上这正是"坡面一条条色带"的来源（用户实拍：游戏内同一坡是均匀的）。
+	 *    中位数相差超过 `MEDIAN_THRESHOLD` 的顶点，判为与邻域不一致并拉回中位数；
+	 *    未判不一致的顶点一个都不动。邻域要求法线同向（`dot > 0.9`）。
 	 * 3. **Laplacian 松弛**（`propVertexRelax ≥ 3`）：更"平"，但会整体偏离烘焙值，
-	 *    属口味档（标定表见 `scene-brightness-and-lights.md` §11.3）。
+	 *    属口味档（次数由 `propVertexRelaxPasses` 决定）。
 	 */
 	const reconstructVertexLighting = (mesh: THREE.Mesh): void => {
 		const passes = Math.max(0, Math.floor(readPropVertexRelax()));
@@ -585,10 +647,9 @@ export function applyLightmapToMeshes(
 		}
 
 		// ② 空间鲁棒滤波：把**与空间邻域不一致**的顶点拉回邻域中位数。
-		// 依据（`s1_ramp1b` 实测，数据侧）：36% 的顶点与"同法线的空间近邻"相差 >0.12
-		// （极端的如 v168=0.741 而近邻 0.124/0.205/0.165），近邻平均 |Δluma| 0.161 → 0.057。
-		// 观感上这正是"坡面一条条色带"的来源（用户实拍：游戏内同一坡是均匀的）。
-		// 邻域用**索引图 2 环**（O(E)，不做事先的空间哈希），要求法线同向（dot > 0.9），
+		// 判据：同法线（`dot > 0.9`）的 2 环邻域中位数与当前顶点的 Luma 相差超过
+		// `MEDIAN_THRESHOLD` ⇒ 该顶点不可信，拉回中位数（未超阈值的顶点不动）。
+		// 邻域用**索引图 2 环**（O(E)，不做事先的空间哈希），
 		// 且只有当偏差超过阈值才替换 ⇒ 真实的明暗梯度不会被抹平。
 		const index = g.getIndex();
 		const ring: number[][] = Array.from({ length: n }, () => []);
@@ -676,26 +737,18 @@ export function applyLightmapToMeshes(
 
 		// ④ 向**本 prop 的面积加权均值**收敛（`propVertexFlatten`，0..1）。
 		//
-		// 依据（2026-09-20 与用户游戏内实拍同靶标的像素量测，见
-		// `scene-brightness-and-lights.md` §11）：
-		//   · 坡面**均值**已经吻合：我们 #5c493e / 亮度 77.6，游戏 #5b4e40 / 亮度 80；
-		//   · 但**方差**差一个量级：我们 p10..p90 = 26..123，游戏实拍点仅 74..82（±5%）。
-		//   即：逐顶点场整体"量级对、分布错" ⇒ 观感是"一块一块的色阶"。
 		// 本步把场写成 `mean + (1-flatten)×(v-mean)`：均值严格不变，只有方差被压。
-		// flatten=1 等价于"该 prop 均匀受光"（游戏实拍就是这个观感）。
+		// flatten=1 等价于"该 prop 均匀受光"。逐顶点场"量级对、分布错"时，
+		// 观感是"一块一块的色阶"，本步正是压这个分布。
 		const flattenRaw = readPropVertexFlatten();
 		const flatten = Number.isFinite(flattenRaw) ? Math.min(1, Math.max(0, flattenRaw)) : 0;
 		if (flatten > 0 && !flattenedAttrs.has(attr)) {
-			// ⚠️ **按 prop 自适应**（2026-09-20 修正）：全局压方差会打到 92% 的正常 prop
-			// （实测：436/473 个 prop 的屏幕域改变 >20%，`kr_stairs` 甚至 171~387%）——
-			// 用户口径"预烘焙出问题了"就是它。
-			// 判据用**面内**亮度差（绝对值，中位数）：面内三点本该接近；
-			//   · `s1_ramp1b`（条纹型，问题坡）= 0.233 ⇒ 压平
-			//   · `kr_stairs`（面间差异大但面内一致，正常）= 0.023 ⇒ 不压
-			//   · `s1_roof`（跨度 0.56 但面内 0.000，正常）= 0.000 ⇒ 不压
-			// ⚠️ 判别必须在**原始烘焙值**上做：本函数第②步的鲁棒滤波会先把离群顶点拉回
-			// 邻域中位数，若在它之后判别，条纹型 prop（正是要修的那类）会被误判为"面内一致"
-			// ⇒ 实测坡面又回到 70/123（未被压平）。
+			// ⚠️ **按 prop 自适应**：全局压方差会把面内本来就一致的正常 prop 一起改掉。
+			// 判据用**面内**亮度差（Luma 的 max-min，取全体三角形的**中位数**）：
+			//   · 面内不一致（条纹型，该压）⇒ medianTri ≥ `PROP_FLATTEN_MIN_TRI_DELTA`（0.10）⇒ 压平
+			//   · 面间差异大但面内一致（正常）⇒ medianTri 低于阈值 ⇒ `flattenSkipped++`，保留原样
+			// ⚠️ 判别必须在**原始烘焙值**（`before` 快照）上做：本函数第②步的鲁棒滤波会把离群顶点
+			// 拉回邻域中位数，若在它之后判别，条纹型 prop 会被误判为"面内一致"而全部跳过压平。
 			let medianTri = 0;
 			if (index) {
 				const triDelta: number[] = [];
@@ -715,9 +768,9 @@ export function applyLightmapToMeshes(
 			if (medianTri < PROP_FLATTEN_MIN_TRI_DELTA) {
 				relaxStats.flattenSkipped++; // 面内本来就一致 ⇒ 保留原样烘焙值
 			} else {
-				// 按**属性**去重：glTF 多 primitive 共享同一份顶点缓冲（三个材质三条索引），
-				// 若按 geometry 去重会跑 3 次、每次用自己的索引范围均值 ⇒ **最后写入者获胜**
-				// （实测把坡面拽到别的块的均值上：亮度 77.6 → 43.6）。
+				// 按**属性**去重（`flattenedAttrs`）：glTF 多 primitive 共享同一份顶点缓冲
+				// （三个材质三条索引），若按 geometry 去重会跑 3 次、每次用自己的索引范围均值
+				// ⇒ **最后写入者获胜**。
 				// 取均值也必须用**整份缓冲**（= 该 prop 实例的整个模型），才是"该道具一个值"。
 				flattenedAttrs.add(attr);
 				const sum = [0, 0, 0];
@@ -816,43 +869,41 @@ export function applyLightmapToMeshes(
 		const geom = mesh.geometry as THREE.BufferGeometry;
 		if (!geom) return;
 
-		// 契约 §9.6.1：hasLightmap === false 表示该图元只有中性占位 UV，不得施加。
+		// `extras.hasLightmap === false` 表示该图元只有中性占位 UV，不得施加 lightmap。
 		//
 		// ⚠️ **判据必须从 `geometry.userData` 读，不能只读 `mesh.userData`** ✓：
 		// GLTFLoader 对 **primitive** 的 extras 走 `assignExtrasToUserData( geometry, primitiveDef )`
-		// （`three/examples/jsm/loaders/GLTFLoader.js:4710`）⇒ `extras.hasLightmap` 落在
-		// **geometry.userData** 上；mesh 级 extras 只有 meshDef 的 extras（本 GLB 没有）。
-		// 此前只读 `mesh.userData.hasLightmap` ⇒ 恒为 `undefined` ⇒ **该防护从未生效**
-		// （实测 `hasLightmapMissing=9289` 全部缺失、`True/False=0`；而 GLB 里实际
-		// `hasLightmap=true` 33716 个、`false` 440 个）⇒ 中性占位 UV 的图元被错误施加 lightmap。
-		// 两处都读（geometry 优先）以兼容不同加载路径/未来写法。
+		// ⇒ `extras.hasLightmap` 落在 **geometry.userData** 上；
+		// mesh 级 extras 只承载 meshDef 的 extras，与 primitive 的 extras 不同源。
+		// ⇒ 只读 `mesh.userData.hasLightmap` 时该值为 `undefined`，本分支恒不命中。
+		// 后果不是"少一次优化"：中性占位 UV 的图元会带着 `uv1` 落进下方的施加分支，
+		// 以 uv=(0,0) 采图集**同一个像素**，整面塌成图集原点那一色。
+		// 故两处都读（geometry 优先），使判据在 primitive 级与 mesh 级 extras 上都成立。
 		const hlGeom = (geom.userData as { hasLightmap?: unknown } | undefined)?.hasLightmap;
 		const hlMesh = (mesh.userData as { hasLightmap?: unknown }).hasLightmap;
 		const hasLightmap = hlGeom !== undefined ? hlGeom : hlMesh;
 		if (hasLightmap === false || hasLightmap === undefined) {
-			// 占位 UV 面（契约 §9.6.1）⇒ 外部参照实现口径：white 兜底 = 贴图原色 fullbright
+			// 占位 UV 面 ⇒ 外部参照实现口径：white 兜底 = 贴图原色 fullbright
 			// prop 图元带 node extras.ambientCube（leaf ambient cube，见 vbsp::prop_ambient_cube）
 			// ⇒ 在 fullbright 基础上用法线加权混合 6 面 cube（外部参照实现 StudioModel 同语义）
 			// ⚠️ ambient cube 是**逐 prop 的 uniform**（`vbspAmbCube`）⇒ 有 cube 的 prop 材质
 			// 必须逐 mesh（不可复用）；无 cube 才能用共享材质，否则 optimizeScene 合并不成立。
 			// 自发光/无光照材质（extras.unlit）**不吃环境光**：跳过 ambient 相乘 ⇒ 全亮贴图原色
 			//
-			// ⚠️ **`hasLightmap === false` 必须在「检测 uv1 / uv2」之前判**（2026-09-20 回归）：
-			// `bsp_to_gltf_core/convert.rs:1004-1014` 对 `lightmap_region == None`（`light_offset == -1`，
-			// 见 `lightmap.rs:326`）的面**照样写 `TEXCOORD_1`**，但每个顶点的值是**中性常量 (0,0)**
-			// （只为保住 `mergeGeometries(geoms, true)` 的属性集一致）。实测 surf_666：这类图元
-			// **440 个**（`dev/dev_water2` 176、`dev/dev_waterbeneath2` 175、`watersource/*` 42、
-			// `dev_nyro/blends/wire_white` 8、`metal/citadel_tilefloor016a` 15 等），且**全部带 uv1**
-			// ⇒ 原先只写在「无 uv1」分支里的防护**一次都没命中**，这些面全部以 uv=(0,0) 采图集
-			// **同一个像素** ⇒ 整面塌成图集原点那一色（实机表现：「亮面发黑」）。
+			// ⚠️ **`hasLightmap === false` 必须在「检测 uv1 / uv2」之前判**：
+			// `src/wasm-core/bsp_to_gltf_core/convert.rs` 的 `push_bsp_face_bsp` 对
+			// `lightmap_region == None`（`light_offset == -1`，判据在
+			// `src/wasm-core/bsp_to_gltf_core/lightmap.rs` 的 `build_atlas`）的面**照样写
+			// `TEXCOORD_1`**，但每个顶点的值是**中性常量 (0,0)**，只为保住
+			// `mergeGeometries(geoms, true)` 的属性集一致 ⇒ 这类图元带 `uv1`。
+			// ⇒ 把判据放到 uv 检测之后时，这些面全部以 uv=(0,0) 采图集**同一个像素**，
+			// 整面塌成图集原点那一色；判据置于其前才拦得住。
 			// ⚠️ 判据必须从 `geometry.userData` 读，不能只读 `mesh.userData` ✓：
 			// GLTFLoader 对 **primitive** 的 extras 走 `assignExtrasToUserData( geometry, primitiveDef )`
-			// （`three/examples/jsm/loaders/GLTFLoader.js:4710`）⇒ `extras.hasLightmap` 落在
-			// **geometry.userData** 上；mesh 级 extras 只有 meshDef 的 extras（本 GLB 没有）。
-			// 此前只读 `mesh.userData.hasLightmap` ⇒ 恒为 `undefined` ⇒ **该防护从未生效**
-			// （实测 `hasLightmapMissing=9289` 全部缺失、`True/False=0`；而 GLB 里实际
-			// `hasLightmap=true` 33716 个、`false` 440 个）⇒ 中性占位 UV 的图元被错误施加 lightmap。
-			// 两处都读（geometry 优先）以兼容不同加载路径/未来写法。
+			// ⇒ `extras.hasLightmap` 落在 **geometry.userData** 上；
+			// mesh 级 extras 只承载 meshDef 的 extras，与 primitive 的 extras 不同源。
+			// ⇒ 只读 `mesh.userData.hasLightmap` 时该值为 `undefined`，本分支恒不命中。
+			// 故两处都读（geometry 优先），使判据在 primitive 级与 mesh 级 extras 上都成立。
 			noLightmapRouted++;
 			routeFullbright(mesh);
 			return;
@@ -868,14 +919,12 @@ export function applyLightmapToMeshes(
 			return;
 		}
 
-		// UV 通道：**不再复制 uv1 → uv2**。
+		// UV 通道：**不复制 uv1 → uv2**。
 		//
-		// 原写法 `geom.setAttribute('uv2', geom.getAttribute('uv1'))`（注释称 "r151+ lightMap slot
-		// 由 uv2 驱动"）有两个问题：
+		// 原写法 `geom.setAttribute('uv2', geom.getAttribute('uv1'))` 有两个问题：
 		// 1. **多余**：three r151+ 的 lightMap UV 由 `material.lightMap.channel` 决定
 		//    （`getChannel(0)='uv'`、`getChannel(1)='uv1'`），不是写死的 `uv2` ⇒ 只要把
-		//    `atlasTexture.channel` 设为 1，就直接读 `uv1`，无需 `uv2`（见 loadLightmapAtlas）；
-		//    实测本 GLB 的图元本来 `uv1`+`uv2` 都有（`bothUv=9036`，`uv1Only=0`）⇒ 复制从不生效。
+		//    `atlasTexture.channel` 设为 1，就直接读 `uv1`，无需 `uv2`（见 loadLightmapAtlas）。
 		// 2. **有害**：`setAttribute` 传入的是**同一个 BufferAttribute 实例** ⇒ 凭空多出一份
 		//    顶点属性占位，在 optimizeScene 合并几何 / computeBoundingSphere 等路径徒增负担。
 
@@ -912,7 +961,7 @@ export function applyLightmapToMeshes(
 			String((firstOrig as THREE.Material & { alphaTest?: number }).alphaTest ?? 0),
 			String((firstOrig as THREE.Material & { side?: number }).side ?? 0),
 			String((firstOrig as THREE.Material & { depthWrite?: boolean }).depthWrite ?? true),
-			// `Wireframe` 着色器标记（world 侧也有：`dev_nyro/blends/wire_white` 8 个面）
+			// `Wireframe` 着色器标记：线框与实体面不能共用同一个替换材质
 			(firstOrig.userData as { vbsp_wireframe?: boolean } | undefined)?.vbsp_wireframe ? 'wf' : '-',
 			debugLightmapOnly ? 'lmonly' : 'map',
 			isNoInjectStage ? 'noinject' : readDebugAlbedoOnly() ? 'albonly' : 'inject',
@@ -936,8 +985,8 @@ export function applyLightmapToMeshes(
 			// 透明/颜色继承都照做 ⇒ `optimizeScene` 的合并形态与 `auto` **完全相同**），
 			// **仅跳过 shader 注入**。这样画面差异**只**来自"注入是否生效"这一个变量。
 			//
-			// 为什么需要它：原 `off` 阶段**提前 return**、连材质都不换 ⇒ 场景构成与其余帧
-			// 不同（实测 `meshes` 1162 vs 9289、draw 1493 vs 28757）⇒ **与原帧不可比** ✗，
+			// 为什么需要它：`off` 阶段在函数开头就 `return 0`，连材质都不换 ⇒ 场景构成与其余帧
+			// 不同（mesh 数与 draw 调用数都变了）⇒ **与原帧不可比** ✗，
 			// 不能充当"移除注入 ⇒ 应变暗"的负控。`noinject` 才是该负控的正确形态。
 			if (!isNoInjectStage && !readDebugAlbedoOnly()) {
 				injectLightmapShader(newMat, atlasSize);
@@ -949,13 +998,15 @@ export function applyLightmapToMeshes(
 		// resolveLightmapUvChannel 注释）。GLB 的 lightmap 坐标在 TEXCOORD_1。
 		//
 		// ⚠️ 不得在此处无条件回写 `newMat.lightMap = atlasTexture;`：
-		// 构造器里的 `lightMap: readDebugAlbedoOnly() ? null : atlasTexture` 是**唯一真源**。
-		// 历史缺陷（交接文档 §3「有效 lightmap 系数 ≈ 1.0」的根因）：这里曾无条件覆盖，
-		// 使 `--debug-albedo` 的 null 失效 ⇒ 该帧实际走 three 原生 lightmap 分支
-		// （`lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI`，采到的是**未解码的
-		// RGBExp32 尾数字节**，不是 albedo-only）⇒ `temp/factor-decompose.mjs` 的分母被压暗
-		// π/m ≈ 6.8×（线性）⇒ 量出「有效系数 1.058」的假象。该帧与 `--stage noinject`
-		// 在构造上等价（同为原生分支、同样跳过注入），故二者逐桶一致从来不是负控证据。
+		// 构造器里的 `lightMap: readDebugAlbedoOnly() ? null : atlasTexture` 是**唯一真源**，
+		// 回写会使 `--debug-albedo` 的 null 失效 ⇒ 该帧走 three 原生 lightmap 分支而不是
+		// 只输出 albedo：采到的是**未解码的 RGBExp32 尾数字节**
+		// （原生式 `lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI`）。
+		// 后果落在出帧分解上：该帧成为 `temp/factor-decompose.mjs` 的分母，分母被压暗
+		// π/m 倍（原生项含 `RECIPROCAL_PI = 1/π`，而 albedo-only 项是余弦加权的 `m ≈ 1`）
+		// ⇒ 商被等比抬高，量出「有效系数 ≈ 1」的假象。
+		// 该帧与 `--stage noinject` 在构造上等价（同为原生分支、同样跳过注入），
+		// 故二者逐桶一致不能充当负控生效的证据。
 		// 纯纹理模式 / 无 atlas 时这里根本不会走到（上方已提前 routeFullbright）。
 		atlasTexture!.channel = resolveLightmapUvChannel();
 
@@ -963,17 +1014,14 @@ export function applyLightmapToMeshes(
 		applied++;
 	});
 
-	// ── 兜底：未被上面任何分支接管的图元不得保留原材质（2026-09-20 第二轮回归）──
+	// ── 兜底：未被上面任何分支接管的图元不得保留原材质 ──
 	//
 	// 上面三条分支覆盖的是 `hasLightmap === false` / `=== true`（且带 uv1）/ 无 uv1&uv2。
 	// 但 GLB 里还有一类：`extras.hasLightmap` **完全缺失**（`undefined`）**且带 uv1** ——
 	// 例如从 prop 模型导出的自发光霓虹（`extras.unlit=true`）与部分无贴图的派生网格。
 	// 它们会从三个分支**全部漏下去**，原样保留 GLTFLoader 给的 `MeshStandardMaterial`。
-	// 而本工程**不加任何灯**（三点光与 2000+ 盏 punctual 灯都被刻意中和，见
-	// `scene-brightness-and-lights.md` §2）⇒ `MeshStandardMaterial` 在没有灯/环境贴图时
-	// 只剩 `emissive`（GLB 里是 `[0,0,0]`）⇒ **恒渲染成纯黑**。
-	// 实测 surf_666：这类图元 47 个 `unlit=true`（`blue_neon`×8、`neon666_01_krazyneon`×18、
-	// `glow_red_001`×5、`glow_yellow_008`×5…，共 16211 顶点）+ 64 个无贴图网格。
+	// 而本工程**不加任何灯**（三点光与 punctual 灯都被刻意中和）⇒ `MeshStandardMaterial`
+	// 在没有灯/环境贴图时只剩 `emissive`，GLB 里该值是 `[0,0,0]` ⇒ 这些图元**恒渲染成纯黑**。
 	// 修法：与既有 fullbright 口径一致 —— 换成 Basic 贴图原色（unlit 的不吃 ambient cube）。
 	let fallbackRouted = 0;
 	scene.traverse((obj) => {
@@ -1003,15 +1051,13 @@ export function applyLightmapToMeshes(
 /**
  * 装配后终扫：把**任何**仍带受光材质（`MeshStandardMaterial` 等）的 mesh 收敛到 fullbright。
  *
- * 为什么必须有这一层（2026-09-20 第二轮实测）：`applyLightmapToMeshes` 的三条分支 + 其内部兜底
+ * 为什么必须有这一层：`applyLightmapToMeshes` 的三条分支 + 其内部兜底
  * 跑在「GLB 刚挂载」这一刻；而 GLTFLoader 对 **prop 模型**（`extras.unlit=true` 的霓虹/发光）与
- * 部分派生网格给的 `MeshStandardMaterial` 在该时刻取不到可用的 `hasLightmap`/UV 判据，
- * 会整批漏过。本工程**刻意不加任何灯**（三点光 + 2000+ 盏 punctual 灯全部中和，见
- * `scene-brightness-and-lights.md` §2）⇒ 这些材质只剩 `emissive`（GLB 里是 `[0,0,0]`）
- * ⇒ **恒渲染成纯黑**：实测 surf_666 有 122 个图元（47 个 `unlit=true` 的自发光 prop：
- * `blue_neon`×8 / `neon666_01_krazyneon_00041v`×18 / `glow_red_001`×5 / `glow_yellow_008`×5 /
- * `purple_dev_neon`×4 / `blue_dev_neon`×4 / `69_red01` / `tree_deciduous_01a_branches`×2，
- * 外加 75 个水系/线框/派生网格）。
+ * 部分派生网格给的是 `MeshStandardMaterial`，在该时刻取不到可用的 `hasLightmap`/UV 判据，
+ * 会整批漏过。本工程**刻意不加任何灯**（三点光与 punctual 灯全部中和）⇒ 这些材质只剩
+ * `emissive`（GLB 里是 `[0,0,0]`）⇒ **恒渲染成纯黑**。
+ * 本层在装配完成后重扫一次场景，按**材质类型**（非 `MeshBasicMaterial`）而非 extras 判据收敛，
+ * 故与上述时点无关。
  *
  * 口径与 `applyLightmapToMeshes` 的 fullbright 路径一致：保留原 `map`/`color`/`transparent`/`opacity`，
  * `extras.unlit` 的图元不吃 ambient cube（Source `UnlitGeneric` 语义），其余按需乘 cube。
@@ -1034,11 +1080,10 @@ export function fullbrightUnlitLitMaterials(scene: THREE.Object3D): number {
 				color: src.color ? src.color.clone() : new THREE.Color(0xffffff),
 			});
 			basic.name = m.name;
-			// 必须走统一的 `copyMaterialRenderState`：这里此前手抄 `userData/transparent/opacity`，
-			// 于是 `side`/`depthWrite`/`alphaTest`/**`extras.vbsp_wireframe`** 全部丢失。
-			// 实测（2026-09-20）：`dev_nyro/blends/wire_white`（Source `Wireframe` 着色器，8 个世界面、
-			// 单面 768×512×768）正落在这一层 —— 材质带 `userData.vbsp_wireframe=true` 却仍 `wireframe=false`，
-			// 画面是一面实心墙。
+			// 材质渲染状态只有 `copyMaterialRenderState` 一个拷贝入口，三个替换点都必须走它；
+			// 手抄字段的写法会漏掉 `side`/`depthWrite`/`alphaTest`/`userData.vbsp_wireframe`。
+			// 例：Source `Wireframe` 着色器的世界图元在 GLB 里带 `userData.vbsp_wireframe=true`，
+			// 材质丢掉该标记就保持 `wireframe=false`，线框面被画成实心面。
 			copyMaterialRenderState(m, basic);
 			touched = true;
 			return basic;
@@ -1055,10 +1100,10 @@ export function fullbrightUnlitLitMaterials(scene: THREE.Object3D): number {
  * main 前插入两个函数、添加 uniform vbsp_AtlasSize、替换内联 lightmap 采样
  * 为 vbsp_ApplyLightmap，并防御性兼容 lightmap_fragment chunk。
  *
- * **不再静默**：两处 `replace` 各自统计命中数，并把结果写进
+ * 为什么必须有它：两处 `replace` 各自统计命中数，并把结果写进
  * `material.__vbspLightmapInject`；命中为 0 时 `console.error` 明确报出——
- * 这正是本批缺陷的根因形态（字面量失配 → 注入静默失效 → 画面变黑，
- * 此前只打「[lightmap] 施加 mesh=N」的成功日志，完全看不出注入没生效）。
+ * 字面量失配 ⇒ 注入未生效 ⇒ 片元仍走 three 原生采样路径。
+ * 只打「[lightmap] 施加 mesh=N」这条成功日志时，命中 0 与命中 1 的输出完全相同。
  */
 function injectLightmapShader(
 	material: THREE.MeshBasicMaterial,
@@ -1087,8 +1132,9 @@ function injectLightmapShader(
 		// ⇒ 正确标签是「原生路径对照，同样受 `channel` 影响」；只有 `auto` 才是修复证据。
 		if (stage === 'native') {
 			// `applied: null`：**刻意不是 `false`** —— native 按设计"跳过注入"，
-			// 既非成功也非失败。若留 undefined，下游 `if (rec.applied) … else 记为失效`
-			// 会把 undefined 误判成"注入失效"并打假 error（实测已发生）。
+			// 既非成功也非失败。留 `undefined` 时下游的
+			// `if (rec.applied) … else 记为失效` 会把它误判成"注入失效"并打假 error，
+			// 故这里显式给 `null`。
 			(material as unknown as { __vbspLightmapInject?: unknown }).__vbspLightmapInject = {
 				stage,
 				inlineHits: 0,
@@ -1160,8 +1206,9 @@ function injectLightmapShader(
 				'<lightmap_fragment> include（three 版本漂移？）——' +
 				`内联命中=${inlineHits}、include 命中=${chunkHits}、stage=${stage}。` +
 				'地图将只剩贴图、无烘焙光照。';
-			// **不再静默**：这是本批缺陷的根因形态（静默失配 ⇒ 画面压暗却只打成功日志）。
-			// 除 `broken`（预期失败）外一律抛错，使调用方/出帧脚本**非零退出**，
+			// 字面量失配只让片元回落到原生采样路径（画面压暗、日志仍打成功），
+			// 故此处除写 `__vbspLightmapInject` 外还置 `__vbspLightmapInjectFailed` 并抛错：
+			// 除 `broken`（预期失败）外一律抛，使调用方/出帧脚本**非零退出**，
 			// 而不是把失败藏在一条容易淹没的 console.error 里。
 			(
 				globalThis as { __vbspLightmapInjectFailed?: boolean }
@@ -1188,9 +1235,9 @@ function injectLightmapShader(
 }
 
 /**
- * 无 lightmap 图元的 fullbright 统一路径（gamma-parity 计划 §3.1c）。
- * 外部参照实现对无 lightmap 的世界面用 white texture 兜底（LightmappedBase.ts:71 的
- * `uLightmap.setDefault(getWhiteTexture)`）⇒ 最终色 = 贴图原色。本工程对应实现：
+ * 无 lightmap 图元的 fullbright 统一路径。
+ * 外部参照实现对无 lightmap 的世界面用 white texture 兜底（其 `uLightmap.setDefault(getWhiteTexture)`，
+ * 符号见 `Shaders/LightmappedBase.ts`）⇒ 最终色 = 贴图原色。本工程对应实现：
  * 换 MeshBasicMaterial 且**不设 lightMap 槽** ⇒ 命中 meshbasic 的 `#else vec3(1.0)`
  * 分支（`outgoing = base × 1.0`），不吃环境光/三点光/任何运行时灯。
  * 保留原 map / color / transparent / opacity；跳过 `off` 负控（调用方保证）。
@@ -1214,18 +1261,19 @@ function applyFullbrightBasic(mesh: THREE.Mesh): THREE.MeshBasicMaterial {
 /**
  * 把**渲染状态**从原材质拷到替换材质（`MeshBasicMaterial`）。
  *
- * 为什么必须有它（2026-09-20，用户口径「铁丝网/格栅这类透明材质看起来是这样的，很有问题」）：
- * 三个替换点（`applyFullbrightBasic` / `acquireFullbrightMaterial` / `acquireVertexLightingMaterial`）
- * 此前只拷 `map / color / transparent / opacity`，于是这些**全部丢失**：
+ * 为什么必须有它：三个替换点（`applyFullbrightBasic` / `acquireFullbrightMaterial` /
+ * `acquireVertexLightingMaterial`）都以本函数为**唯一**状态拷贝入口；逐字段手抄时下列状态会丢失，
+ * 而每一项都对应一个可见的几何/深度/混合后果：
  *
- * | 丢失项 | 后果（本图实测） |
+ * | 未拷贝的字段 | 代码事实与后果 |
  * |---|---|
- * | `alphaTest` | `metal_grate_07`（GLB `alphaMode=MASK`、cutoff 0.5）⇒ **整块实心板**，格栅孔洞没了 |
- * | `alphaMap` | 同上（alpha 走独立贴图时） |
- * | `side` | `glasswindow007a` / `metalfence007a`（GLB `doubleSided=true`）⇒ **单面**，从背面看不见 |
- * | `depthWrite` | 半透明排序错乱（`$translucent` 材质） |
- * | `blending` | 非普通混合模式（加色/乘算）失效 |
- * | `userData.unlit` | `isUnlit()` 读不到 ⇒ 诊断把自发光误计为普通材质 |
+ * | `alphaTest` | 保持 `MeshBasicMaterial` 默认 0 ⇒ `alphaTest > 0` 的 MASK 材质（镂空贴图）整块变实心 |
+ * | `alphaMap` | 保持 `null` ⇒ alpha 走独立贴图时抠图失效 |
+ * | `side` | 保持 `FrontSide` ⇒ 原 `DoubleSided` 的图元从背面不可见 |
+ * | `depthWrite` / `depthTest` | 保持 three 默认值 ⇒ 半透明图元的排序/遮挡关系改变 |
+ * | `blending` | 保持 `NormalBlending` ⇒ 原有加色/乘算混合失效 |
+ * | `polygonOffset*` | 保持关闭 ⇒ 贴花/共面图元的 z-fighting 防护失效 |
+ * | `userData` | 浅拷整块（含 `extras.unlit` 与 `extras.vbsp_wireframe`），供 `isUnlit()` 与线框复现读取 |
  */
 function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.MeshBasicMaterial): void {
 	if (!src) return;
@@ -1253,34 +1301,34 @@ function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.Mes
 	// unlit 旗标（`extras.unlit`）与其它 GLB 附加信息：整块浅拷，避免诊断口径失真
 	dst.userData = { ...(src.userData ?? {}) };
 	// `extras.vbsp_wireframe`（Source `Wireframe` 着色器：只画多边形边线）⇒ 用 three 的线框渲染复现。
-	// 实测 `dev_nyro/blends/wire_white`（世界面 8 个、单面 768×512×768，属 worldspawn）：不置线框就是一面实心墙。
+	// 不置 `wireframe` 时该图元按实心面绘制。
 	if ((src.userData as { vbsp_wireframe?: boolean } | undefined)?.vbsp_wireframe) {
 		dst.wireframe = true;
 	}
 	// `alphaTest > 0` 时 three 需要 `transparent` 与材质的 alphaTest 语义配合：
-	// MASK 材质在 glTF 里 `transparent=false` + `alphaTest=cutoff`（实测 GLTFLoader 行为），
+	// glTF 的 MASK 材质是 `transparent=false` + `alphaTest=cutoff`（GLTFLoader 的赋值形态），
 	// 这里保持原样即可（three 对 alphaTest 的处理与 transparent 独立）。
 }
 
 /**
  * **第 1 级 prop 光照**：逐顶点预烘焙（VRAD 的 `sp_<idx>.vhv`）→ 几何属性 `_VBSP_VLIGHT`。
  *
- * ## 为什么必须有它（2026-09-20，用户口径「一面一个颜色、像没有光照」）
+ * ## 为什么必须有它
  *
  * 第 2 级（leaf ambient cube）是**每 prop 一个值**、再按法线平方加权取面 ⇒ 模型的每个朝向面
- * 各得一个**平坦**颜色（"一面一个颜色"），而引擎用的是**逐顶点**烘焙值：
- * 外部参照实现 `Geometry.cs:855-895` 读 pakfile 的 `sp_<i>.vhv` → 顶点色 →
- * `Shaders/VertexLitGeneric.ts` 的 `mainSample.rgb * vVertexLighting`。
+ * 各得一个**平坦**颜色（"一面一个颜色"），而外部参照实现走的是**逐顶点**烘焙值：
+ * 它的几何处理读 pakfile 的 `sp_<i>.vhv` 写成顶点色，再由 `Shaders/VertexLitGeneric.ts` 的
+ * `mainSample.rgb * vVertexLighting` 还原。
  *
- * ## 口径（与引擎逐项对齐）
+ * ## 口径（与外部参照实现逐项对齐）
  *
- * 引擎：`屏幕 = 纹理色 × vVertexLighting`（`vVertexLighting = floor(byte) * 2/255`，
+ * 外部参照实现：`屏幕 = 纹理色 × vVertexLighting`（`vVertexLighting = floor(byte) * 2/255`，
  * 导出侧已按此换算成 [0,2] 的 f32 写进属性）。
  * 本工程：`屏幕 = 纹理色 × 光照项^(1/2.2)`（末端 `colorspace_fragment` 被换成纯 γ2.2 编码）
  * ⇒ 令 `光照项^(1/2.2) = vVertexLighting` ⇒ **`光照项 = vVertexLighting^2.2`**。
  *
  * 面板两个旋钮在此路径上的语义与 world 路径一致：
- * `光照项 = pow(vLight, 2.2/γ) × 曝光`（γ=1、曝光=1 时即引擎平价）。
+ * `光照项 = pow(vLight, 2.2/γ) × 曝光`（γ=1、曝光=1 时即平价；见 `vbspVertexLightTerm`）。
  *
  * ## 与第 2 级的差别（为什么它能共享材质）
  *
@@ -1292,11 +1340,11 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 		shader.uniforms.vbspExposure = exposureUniform;
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
 		shader.uniforms.vbspBakedMix = bakedMixUniform;
-		// 声明必须来自共享常量（守卫 §10 断言"注入单元自洽"）
+		// 声明必须来自共享常量（守卫断言"注入单元自洽"）
 		const decls = VBSP_LIGHTMAP_UNIFORM_DECLS.join('\n');
 		// ⚠️ 这个数组进的是 **fragment** shader ⇒ **不能出现 `attribute`**
-		// （GLSL 里 `attribute` 仅限 vertex 阶段；实测报
-		//  `ERROR: 0:81: 'attribute' : Illegal use of reserved word` ⇒ program 无效 ⇒ 模型不渲染）。
+		// （GLSL 里 `attribute` 仅限 vertex 阶段，出现在 fragment 里时编译报
+		//  `'attribute' : Illegal use of reserved word` ⇒ program 无效 ⇒ 模型不渲染）。
 		// 属性声明只在下面的 vertex 侧 `vsA` 里出现。
 		const fn = [
 			'varying vec3 vbspVLight;',
@@ -1355,13 +1403,13 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
  * - 无均匀缩放假设：prop scale=1；mat3(modelMatrix) 变换世界法线
  *
  * ⚠️ 这是**第 2 级**：几何带 `_VBSP_VLIGHT` 时优先走第 1 级（`applyVertexLightingShader`），
- * 因为 cube 是"每 prop 一个值"，无法表达逐顶点梯度（实机即"一面一个颜色"）。
+ * 因为 cube 是"每 prop 一个值"，无法表达逐顶点梯度（即"一面一个颜色"）。
  */
 function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): void {
-	// cube 写在 **node extras** 上（model_integrator/mod.rs:132），而 multi-primitive 的
-	// prop 被 GLTFLoader 包成 Group（GLTFLoader.js:3862-3882），extras 落在 Group 而非子
-	// Mesh（GLTFLoader.js:4280）⇒ 必须向上回溯。实测 surf_666 有 366/501（73%）的 prop
-	// 走这条路径，不回溯就永远拿不到 cube（= 纯 fullbright）。
+	// cube 写在 **node extras** 上（`src/wasm-core/model_integrator/mod.rs` 里把
+	// `ambient_cube` 写成 `extras.ambientCube` 的那一段），而 multi-primitive 的
+	// prop 被 GLTFLoader 包成 Group，extras 落在 Group 而非子 Mesh ⇒ 必须向上回溯，
+	// 否则 `resolveAmbientCube` 恒取不到 cube（= 纯 fullbright）。
 	const cube = resolveAmbientCube(mesh);
 	// 命中统计（首帧后由 renderer-main 的 reportInjectStatsOnce 打日志）：
 	// hit/miss 按 mesh 调用计；nodes 按独立 cube 引用去重（= 带 cube 的 prop node 数）
@@ -1397,10 +1445,9 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 		const vsChanged = vsB !== vs;
 		const fs = shader.fragmentShader;
 		const ambFn = [
-			// ⚠️ 声明必须来自共享常量（**不是**手写副本）——2026-09-20 事故：
-			// 本路径原先只声明 exposure/gamma/ambientScale，漏了 `vbspLightFloor`，
-			// 而 `vbspAmbientWeight()` 里用了它 ⇒ fragment 编译失败 ⇒ 带 cube 的 prop
-			// 与水/远地面**全部不渲染**（用户症状：模型完全透明但有碰撞）。
+			// ⚠️ 声明必须来自共享常量（**不是**手写副本）：本路径的 `vbspAmbientWeight()`
+			// 读了 `vbspLightFloor`，手写声明时漏掉它 ⇒ fragment 编译失败 ⇒ 带 cube 的 prop
+			// 与水/远地面**全部不渲染**（症状：模型完全透明但有碰撞）。
 			...VBSP_LIGHTMAP_UNIFORM_DECLS,
 			...VBSP_AMBIENT_UNIFORM_DECLS,
 			'varying vec3 vbspWNormal;',
@@ -1412,11 +1459,10 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 			"	c += vbspAmbCube[ n.z < 0.0 ? 5 : 4 ] * ( n.z * n.z );",
 			"	return max(c, vec3(0.0));",
 			"}",
-			// ⚠️ 显示 gamma 只能套在**光照项**上（2026-09-20 根因修复，与 vbsp_ApplyLightmap 同因）：
+			// ⚠️ 显示 gamma 只能套在**光照项**上（与 `vbsp_ApplyLightmap` 同因）：
 			// `reflectedLight.indirectDiffuse *= diffuseColor.rgb` 之后，indirectDiffuse 已含 albedo，
-			// 若在那里再 `pow()` 就等于 gamma 套在「albedo × light」的乘积上 —— 暗部会被压掉约 7 倍
-			// （pow(0.13×0.012, 1/2.2) ≈ 0.019，而正确是 0.13 × pow(0.012,1/2.2) ≈ 0.0177... 的 7 倍），
-			// 表现就是「exposure 拖爆了暗处仍是 000000」。故此处只把**光照**做 `^(1/γ)`，albedo 留给上面那行乘。
+			// 若在那里再 `pow()` 就等于 gamma 套在「albedo × light」的乘积上 —— 暗部会被额外压低一个量级，
+			// 下限也救不回（`exposure` 拖到很大时暗处仍为 0）。故此处只把**光照**做 `^(1/γ)`，albedo 留给上面那行乘。
 			"vec3 vbspAmbientWeight() {",
 			// 纯纹理模式：ambient cube 项恒 1.0（不吃烘焙光照），与另两条路径同一开关
 			"	if (vbspBakedMix < 0.5) { return vec3(1.0); }",
@@ -1460,20 +1506,19 @@ function resolveAmbientCube(mesh: THREE.Mesh): unknown {
 }
 
 /**
- * 全局曝光旋钮（scene-brightness-and-lights.md §4.2，S1）。
+ * 全局曝光旋钮。
  *
- * 语义：**显示侧亮度倍率，不是数据修正**。默认 1.0 = 忠于 BSP 烘焙数据
- * （已由动态范围体检佐证：surf_666 的 lightmap 上尾 p99.9 = 1.035、max = 2.09，
- * 量级本就正确；图的中位数暗是地图本身性质）。>3 起 p90 亮面在中灰贴图下开始削顶。
+ * 语义：**显示侧亮度倍率，不是数据修正**。默认 1.0 = 直接采用 BSP 烘焙数据的量级
+ * （`LIGHTMAP_EXPOSURE_DEFAULT`）；`>1` 整体提亮，暗部与亮部同比放大。
  *
  * **所有材质共享同一个 uniform 对象** ⇒ 面板拖动一次即全场景生效，无需重编译材质
  * （若每个材质各自 `{ value: ... }`，改值只能靠 `material.needsUpdate = true` 重编译，
  * 会让滑块手感变成"每次拖动重编几千个 program"）。
  */
 /**
- * **world 光照项默认曝光 = 1（外部参照实现平价，2026-09-20 定案）**。
+ * **world 光照项默认曝光 = 1（外部参照实现平价）**。
  *
- * ## 口径（两行代数，别再靠"看着调"）
+ * ## 口径（两行代数）
  *
  * 本工程屏幕值 = `(albedo_linear × lightitem)^(1/2.2)`；
  * 而 `albedo_linear = albedo_srgb^2.2`（three 的 sRGB 解码）⇒
@@ -1482,7 +1527,7 @@ function resolveAmbientCube(mesh: THREE.Mesh): unknown {
  * 屏幕值 = albedo_srgb × lightitem^(1/2.2)
  * ```
  *
- * 外部参照实现的 world 路径原文（`Shaders/LightmappedBase.ts:66`）：
+ * 外部参照实现的 world 路径原文（符号见 `Shaders/LightmappedBase.ts`）：
  *
  * ```glsl
  * return inColor * pow(sample, vec3(gamma, gamma, gamma));   // gamma = 1.0 / 2.2
@@ -1493,24 +1538,19 @@ function resolveAmbientCube(mesh: THREE.Mesh): unknown {
  * ⇒ 令两者逐项相等：`lightitem^(1/2.2) = luxel^(1/2.2)` ⇒ **`lightitem = luxel`**
  * ⇒ 本工程 shader 的 `pow(L, 1/γ) × 曝光` 取 **γ = 1、曝光 = 1**（pow 退化为恒等）。
  *
- * ## 量级参考（不是取值依据，只用于核对"看起来暗不暗"）
+ * ## 量级参考（不是取值依据）
  *
- * `npm run test:lightmap-atlas-stats` 实测图集在用 texel：
- * p25 0.0177 / p50 0.0440 / p75 0.0860 / p90 0.1747 / p99 0.7955 ⇒
- * 屏幕倍率 `luxel^(1/2.2)` = 0.18 / 0.24 / 0.33 / 0.45 / 0.90。
- * 也就是说**平价默认下"被照亮的面"本来就只有贴图原色的三成左右** —— 这是参照实现的语义，
- * 不是缺陷；嫌暗请用面板「亮度（曝光）」「暗部提升（γ）」两个旋钮，别改这里的默认值。
- *
- * ⚠️ 历史错误取法（已全部作废）：×12 / ×24 / 2.3 —— 都是"看着调"出来的，
- * 前两个把画面冲成粉白，2.3 则是在"模型根本没渲染"的画面里标定的。
+ * 图集在用 texel 的分布可用 `npm run test:lightmap-atlas-stats` 复算；
+ * 平价默认下**被照亮的面**本就只有贴图原色的三成左右 —— 这是参照实现的语义，
+ * 不是缺陷；嫌暗请用面板「亮度（曝光）」「暗部提升（γ）」两个旋钮，不要改这里的默认值。
  */
 const LIGHTMAP_EXPOSURE_DEFAULT = 1;
 
 const exposureUniform = { value: readExposureOverride() ?? LIGHTMAP_EXPOSURE_DEFAULT };
 
 /**
- * 光照项 gamma（shadow-lift）。1.0 = 不修正（现状，纯线性域）。
- * <1 抬高暗部、亮部基本不动；用来对齐外部参照实现的 γ2.2 域乘算（§7.4）。
+ * 光照项 gamma（shadow-lift）。1.0 = 不修正（纯线性域）。
+ * <1 抬高暗部、亮部基本不动；用来对齐外部参照实现的 γ2.2 域乘算。
  * 与曝光一样是**所有材质共享**的 uniform ⇒ 面板/出帧改一次全场景生效。
  */
 const lightGammaUniform = { value: readGammaOverride() ?? 1 };
@@ -1540,12 +1580,12 @@ const ambientScaleUniform = { value: readAmbientScaleOverride() ?? 1 };
 const lightFloorUniform = { value: readLightFloorOverride() ?? 0 };
 
 /**
- * **prop 光照基线倍率 = `2^2.2 = 4.5948`**（外部参照实现平价；2026-09-20 定案）。
+ * **prop 光照基线倍率 = `2^2.2 = 4.5948`**（外部参照实现平价）。
  *
  * ## 来历（不是"补偿"，是参照实现的编码口径）
  *
  * 外部参照实现的 prop 光照不走 lightmap，而是把 **leaf ambient cube** 经
- * `StudioModel.sampleAmbientCube()` 变成顶点色（`StudioModel.ts:96-98`）：
+ * `StudioModel.sampleAmbientCube()` 变成顶点色（符号见 `StudioModel.ts`）：
  *
  * ```ts
  * const r = ColorConversion.linearToScreenGamma(rgb.x);   // = 255 * cube^(1/2.2)（8bit）
@@ -1571,41 +1611,22 @@ const lightFloorUniform = { value: readLightFloorOverride() ?? 0 };
  * 而本工程 shader 的 prop 光照项是 `pow(cube, 1/γ) × 曝光 × 模型亮度`，
  * 默认（`lightGamma = 1`、`exposure = 1`、`ambientScale = 1`）⇒ 需要把数据侧乘 4.5948。
  *
- * ## 自洽校验（两条路径必须同量级）
- *
- * | 源 | 实测 p50 | 外部参照实现屏幕倍率 |
- * |---|---|---|
- * | world lightmap（图集在用 texel） | 0.0440 | `0.0440^(1/2.2)` = **0.24** |
- * | prop leaf ambient cube（501 prop） | 0.0107 | `2 × 0.0107^(1/2.2)` = **0.25** |
- *
- * ⇒ 两条路径落在同一亮度域 ✓（这正是那个 2× 的来历）。
- *
- * ⚠️ 历史错误值（已作废）：`12.0`（拿 cube 原始值比 world **渲染后**的值，单位混淆）、
- * `1.0`（只看数据同量级，漏了外部参照实现顶点色编码里的 2×）。
  * 临场微调用面板「模型光照」滑块（`setAmbientScale`），不要改这里。
  * 免重建 A/B：加载前注入 `window.__vbspPropCubeGain = N`。
  */
 /**
- * 量级补偿（cube 路径）。**已按游戏内实拍重标定（2026-09-20）**：
- *
- * - 靶标：`surf_666` 默认传送旁那个坡（`s1_ramp1b`）游戏内实拍取色
- *   `#5b4e40 / #605846 / #58483f`（亮度 ≈80、sRGB 0.30）；同一材质 `concrete01`
- *   的 albedo 在 sRGB≈0.55（线性≈0.25）⇒ **游戏内的光照倍率 ≈ 0.30**（屏幕域）。
- * - 本工程 cube 路径的屏幕倍率 ≈ `(gain × cube)^(1/2.2)`；实测 `cube`（`s1_ramp1b`
- *   的 leaf ambient，线性）≈0.030 ⇒ 旧值 `2^2.2 = 4.5948` 给出 **0.40**（比游戏亮 1.3×）。
- * - 由 `(gain_new × 0.030)^(1/2.2) = 0.30` 解出 **gain ≈ 0.30^2.2 / 0.030 = 2.44**。
- *
- * 为什么保留"2 的幂"历史值不再用：旧值是按 `vVertexLighting = byte×2/255` 的 2× 编码
- * 推的**上界**，从未与实拍比对；本轮用实拍靶标替换。
+ * 量级补偿（cube 路径）。cube 是**线性**值，本常量把数据侧抬到参照实现的
+ * `2 × cube^(1/2.2)` 顶点色编码域（推导见上一段 `PROP_CUBE_GAIN` 的口径）。
+ * 免重建 A/B：加载前注入 `window.__vbspPropCubeGain`（见 `readPropCubeGainOverride`）。
  */
 const PROP_CUBE_GAIN = 2.44;
 
 /**
  * 触发「方差压缩」的最小**面内**亮度差（中位数，lightitem 量纲 0..2）。
  *
- * 依据（离线审计全部 473 个带逐顶点光照的 prop）：条纹型（该压）面内 Δ 大
- * （`s1_ramp1b` = 0.233），而「面间差异大、面内一致」（正常，不该动）的很小
- * （`kr_stairs` = 0.023、`s1_roof` = 0.000）。取 0.10 把误伤面收到最小。
+ * 判据：`medianTri` 低于它时记为 `flattenSkipped` 并保留原样烘焙值，否则压平。
+ * `medianTri` 取每个三角形三个顶点 Luma 的 max-min、再对全体三角形取中位数，
+ * 故"面间差异大但面内一致"的正常 prop 落在阈值以下、不被改动。
  */
 const PROP_FLATTEN_MIN_TRI_DELTA = 0.1;
 
@@ -1673,7 +1694,8 @@ export function getPropVertexRelax(): number {
 
 /**
  * 第 1 级逐顶点光照的**方差压缩**（0..1）：`v ← mean + (1-flatten)·(v-mean)`，
- * 均值严格不变、只压方差。1 = 该 prop 均匀受光（= 用户游戏内实拍观感）。
+ * 均值严格不变、只压方差。1 = 该 prop 均匀受光（逐顶点梯度被完全抹平），
+ * 0 = 保留烘焙值的原始分布。
  * 由 `renderer-main` 从 `config.lighting.propVertexFlatten` 注入；
  * 免重建 A/B：加载前设 `window.__vbspPropVertexFlatten = 0|0.85|1`。
  */
@@ -1707,13 +1729,14 @@ function readPropVertexRelax(): number {
  * **免重建 A/B**：`window.__vbspVertexLightingOff = true`（需在加载前注入）⇒ 所有 prop 走
  * 第 2 级 leaf ambient cube，忽略 `sp_<i>.vhv`。
  *
- * 用途：判定"引擎是否真的用了这份逐顶点数据"。实测依据（2026-09-20）：
- * - `sp_264.vhv` 的 checksum = `s1_ramp1b.mdl` 的 studiohdr checksum（归属与下标都对）；
- * - 该 prop 的 sprp 记录 `m_Flags = 0x01`（只有 FADES，无 `USE_LIGHTMAP` / `NoPerVertexLighting`）
- *   ⇒ 按外部参照实现的读法应当走逐顶点；
- * - 但它的 `vertFlags = 4`（外部参照实现只特判 `== 2`，其余一律按 4 字节/顶点读），
- *   **引擎是否接受这个变体未经证实**；用户实拍的游戏内该坡是**均匀**的，与本工程的分块不符。
- * 所以留这个开关：切到 cube 后若观感与游戏一致，就说明引擎实际走的是 cube 兜底。
+ * 用途：把第 1 级与第 2 级的画面差异做成单变量对照（不重建场景、不重编译材质）。
+ * 相关的数据侧事实（读码可得）：
+ * - `sp_<idx>.vhv` / `sp_hdr_<idx>.vhv` 的解析与 `vert_flags` 分支在
+ *   `src/wasm-core/vhv.rs` 的 `parse_vhv`：`vert_flags == 2` ⇒ 每顶点 3 组 RGBA（取均值），
+ *   否则一律按 1 组 RGBA（4 字节/顶点）读；
+ * - 该解析结果经 `src/wasm-core/model_integrator/mod.rs` 写成 glTF 自定义属性
+ *   `_VBSP_VLIGHT`，本文件的第 1 级路径读它。
+ * ⇒ 该开关给出"第 1 级是否在起作用"的对照面。
  */
 function readVertexLightingOff(): boolean {
 	return (globalThis as { __vbspVertexLightingOff?: unknown }).__vbspVertexLightingOff === true;
@@ -1742,8 +1765,8 @@ function readDebugAlbedoOnly(): boolean {
 
 /**
  * 诊断：把 albedo 贴图当成**线性**数据（不做 sRGB→linear 解码）。
- * 用途：验证「贴图是否被二次解码」——若开关后画面显著变亮，说明 VTF→GLB 的像素
- * 已是线性值、three 又解了一次（经典双重解码 ⇒ 暗部被压到 sRGB≈0.2）。
+ * 用途：判据是「同一帧开/关该开关的像素差」——VTF→GLB 的像素若已是线性值，
+ * three 再解一次就是双重解码，暗部被额外压低；置 `LinearSRGBColorSpace` 即跳过这一次解码。
  */
 function readDebugTexLinear(): boolean {
 	return (globalThis as { __vbspDebugTexLinear?: unknown }).__vbspDebugTexLinear === true;
@@ -1785,7 +1808,7 @@ export function setExposure(value: number): void {
 	if (!Number.isFinite(value) || value <= 0) return;
 	// 出帧 A/B 覆盖优先：注入了 `window.__vbspExposure` 时**忽略**面板/config 写入。
 	// 否则面板构造时的 `sendAllPrefs → onSyncExposure(config.lighting.exposure)`
-	// 会把注入值立刻冲回默认值（实测：注入 24 → 被回写为 1，A/B 全档同帧）。
+	// 会把注入值立刻冲回 `LIGHTMAP_EXPOSURE_DEFAULT`，使 A/B 各档落在同一帧。
 	if (readExposureOverride() !== null) return;
 	exposureUniform.value = value;
 }

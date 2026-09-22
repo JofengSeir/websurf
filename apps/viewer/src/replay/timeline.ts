@@ -1,12 +1,13 @@
 /**
  * 录像时间轴（底部控制条）：进度条、播放控制、显示开关。
  *
- * t5 重排（三行结构）：上行 = 进度条（正式跑段高亮 + A-B 区间带叠加在轨道上）；
- * 中行 = 主控制（播放 / 停止 / 逐帧 / 时间·帧读数 / 倍速）；
- * 下行 = 视角与显示开关 + A-B 区间。（速度读数已迁至遥测 HUD：ui/telemetry.ts）
+ * 三行结构：上行 = 进度条（正式跑段高亮与 A-B 区间带都叠在滑杆上）；
+ * 中行 = 主控制（播放 / 停止 / 逐帧 / 时间·帧读数 / 倍速下拉）；
+ * 下行 = 视角切换、显示开关与 A-B 区间按钮。速度读数在遥测 HUD（`apps/viewer/src/ui/telemetry.ts`）。
  *
- * 主时钟 0 = 起跑帧（t3 方案 A：t(i)=(i−preFrames)/tickrate，prerun 帧在负时间轴、
- * 不在播放区间）；正式跑段高亮与帧读数的 run 段标注按跟随轨道的头部元信息（Clip.meta）。
+ * 主时钟 0 = 起跑帧（t(i) = (i − preFrames) / tickrate）：默认窗口是整条 clip，首帧落在 prerun
+ * 负段时窗口起点即片头（ReplayPlayer 的 applyFullRange）。正式跑段高亮与帧读数的 run 段标注取
+ * 跟随轨道的头部元信息（Clip.meta 的 preFrames / frameCount）。
  */
 
 import { el } from '../core/dom.js';
@@ -14,7 +15,7 @@ import type { Track } from './types.js';
 import type { PlayMode, ReplayPlayer } from './player.js';
 import type { ReplayVisuals } from './visuals.js';
 
-/** 倍速档（覆盖 window.viewer.replay.setSpeed 的 0.1–16 全范围）。 */
+/** 倍速下拉的档位（0.1× – 16×，与 window.viewer.replay.setSpeed 的钳制范围一致，见 `apps/viewer/src/app.ts` 的 replay）。 */
 const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4, 8, 16];
 
 export class Timeline {
@@ -25,16 +26,18 @@ export class Timeline {
   private readonly runZone: HTMLElement;
   private readonly abBand: HTMLElement;
   private readonly rangeEl: HTMLElement;
-  /** 有没有轨道（有才显示时间轴）。帧数等读数一律从播放器取，不缓存。 */
+  /** 是否有轨道：false 时整条时间轴加 hidden 类，refresh 与快捷键直接返回；读数一律现取，不缓存。 */
   private hasTracks = false;
+  /** 是否正在拖动滑杆：为 true 时 refresh 不回写滑杆值（避免与拖动抢夺）。 */
   private dragging = false;
 
+  /** root = 承载三行控件的容器；player 提供主时钟与区间；visuals 提供轨迹线 / 幽灵 / tick 点显隐。 */
   constructor(
     private readonly root: HTMLElement,
     private readonly player: ReplayPlayer,
     private readonly visuals: ReplayVisuals,
   ) {
-    // ── 上行：进度条（正式跑段高亮 + A-B 区间带画在轨道上）──
+    // ── 上行：进度条（正式跑段高亮与 A-B 区间带都叠加在滑杆上）──
     const sliderRow = el('div', 'tl-slider-row');
     const wrap = el('div', 'tl-sliderwrap');
 
@@ -111,7 +114,7 @@ export class Timeline {
 
     root.appendChild(controls);
 
-    // ── 下行：视角 / 显示开关 / A-B / 速度读数 ──
+    // ── 下行：视角切换 / 显示开关 / A-B 区间按钮与读数 ──
     const opts = el('div', 'tl-opts');
 
     const modeSel = el('select', 'tl-select');
@@ -159,7 +162,7 @@ export class Timeline {
     tickLabel.append(tickInput, el('span', undefined, 'tick 点'));
     opts.appendChild(tickLabel);
 
-    // A-B 区间（设置按钮在下行；区间带画在上行进度条上）
+    // A-B 区间：设置按钮在本行，区间带画在上行滑杆上
     const aBtn = el('button', 'btn small', 'A 起点', {
       type: 'button',
       title: '以当前时间作为区间起点（快捷键 I）',
@@ -191,7 +194,7 @@ export class Timeline {
 
     window.addEventListener('keydown', (e) => {
       if (!this.hasTracks) return;
-      // 别抢输入框的键——输入框里打 , . k i o 应该正常输入
+      // 输入控件持有焦点时不抢键：让 , . k i o 正常输入
       if (isTypingTarget(e.target)) return;
       if (e.code === 'KeyK') {
         e.preventDefault();
@@ -212,7 +215,7 @@ export class Timeline {
     });
   }
 
-  /** 设 A 点：终点未定或已失效时顶到片尾，保证区间立刻可用。 */
+  /** 设 A 点 = 当前主时钟时间：终点不晚于新起点（未设或已失效）时把终点顶到主时钟总长，保证区间立刻可用；随后 seek 到当前时间并刷新读数。 */
   private setRangeStart(): void {
     const p = this.player;
     p.rangeStart = p.time;
@@ -221,7 +224,7 @@ export class Timeline {
     this.refresh();
   }
 
-  /** 设 B 点：终点早于起点时把起点退回片头。 */
+  /** 设 B 点 = 当前主时钟时间：终点不晚于起点时把起点退回 0；随后 seek 到当前时间并刷新读数。 */
   private setRangeEnd(): void {
     const p = this.player;
     p.rangeEnd = p.time;
@@ -230,14 +233,14 @@ export class Timeline {
     this.refresh();
   }
 
-  /** 轨道增删后调用；传空数组即隐藏时间轴。 */
+  /** 轨道增删后调用：非空即显示时间轴（去掉 hidden 类），传空数组即隐藏，随后刷新读数。 */
   setTracks(tracks: readonly Track[]): void {
     this.hasTracks = tracks.length > 0;
     this.root.classList.toggle('hidden', !this.hasTracks);
     this.refresh();
   }
 
-  /** 每帧（或播放状态变化时）刷新读数。 */
+  /** 刷新读数：播放按钮文案与 active 态、时间文本、帧文本、滑杆值（拖动中不回写）、区间读数，最后刷新两条叠加带。无轨道时直接返回。 */
   refresh(): void {
     if (!this.hasTracks) return;
     const p = this.player;
@@ -257,7 +260,19 @@ export class Timeline {
     this.rangeEl.classList.toggle('active', inRange);
   }
 
-  /** 进度条叠加层：正式跑段高亮（跟随轨道的头部元信息）与 A-B 区间带。 */
+  /**
+   * 进度条叠加层：A-B 区间带 + 正式跑段高亮，位置一律按**当前播放窗口**换算成百分比
+   * （rel(t) = (t − rangeStart) / (rangeStop − rangeStart) × 100）。
+   *
+   * 区间带的分支条件 = 显式设了区间（rangeEnd > rangeStart）且窗口不是整段；其宽度算的是
+   * (min(rangeStop, duration) − rangeStart) / winLen，而窗口端点就是区间端点，故该值恒为 100，
+   * 落不进「width > 0.05 且 width < 99.95」这一绘制条件，该带实际不会被显示。
+   *
+   * 跑段高亮：左端 rel(track.offset)，宽度 (min(runEndLocal, clip.duration) − max(track.offset, winStart)) / winLen
+   * （被减数取的是轨道内部时间 `track.clip.t` 上的帧时间，减数里含全局 `track.offset` 且只出现一次；
+   * `offset` 非 0 时两项因此不同基准）；
+   * runEndLocal 取 meta.preFrames + meta.frameCount 处的帧时间，该下标越界时取 clip.duration。
+   */
   private refreshZones(): void {
     const p = this.player;
     const dur = p.duration;
@@ -268,10 +283,10 @@ export class Timeline {
       this.abBand.style.display = 'none';
       return;
     }
-    // 带状叠加一律按**当前播放窗口**映射（默认窗口 = 整条 clip，含 prerun 负段）
+    // 叠加带位置一律按当前播放窗口映射（默认窗口 = 整条 clip，含 prerun 负段）
     const rel = (t: number): number => ((t - winStart) / winLen) * 100;
 
-    // A-B 区间带（用户显式设的区间才画；默认整条窗口不画——整条滑杆就是它）
+    // A-B 区间带：只在用户显式设了区间且窗口不是整段时画（整段窗口下整条滑杆就是它）
     if (p.rangeEnd > p.rangeStart && !p.isFullWindow) {
       const left = Math.max(0, rel(p.rangeStart));
       const width = ((Math.min(p.rangeStop, dur) - p.rangeStart) / winLen) * 100;
@@ -286,8 +301,8 @@ export class Timeline {
       this.abBand.style.display = 'none';
     }
 
-    // 正式跑段高亮：[offset, offset + runEnd]；end 存在时直接读帧时间数组，
-    // 等价于 frameCount/tickrate（t(i)=(i−preFrames)/tickrate，t3 方案 A）。
+    // 正式跑段高亮：左端 = rel(track.offset)；宽度 = (min(runEndLocal, clip.duration) − max(track.offset, winStart)) / winLen，
+    // runEndLocal = idxEnd（= preFrames + frameCount）处的帧时间，idxEnd 越界时取 clip.duration。
     const track = p.tracks.follow;
     const meta = track?.clip.meta ?? null;
     if (track && meta && meta.frameCount > 0) {
@@ -296,7 +311,7 @@ export class Timeline {
       const runEndLocal = idxEnd < track.clip.count ? arr[idxEnd] : track.clip.duration;
       const left = rel(track.offset);
       const width = ((Math.min(runEndLocal, track.clip.duration) - Math.max(track.offset, winStart)) / winLen) * 100;
-      // 跑段占满/缺失窗口时高亮没有信息量，不画
+      // 跑段占满或缺失窗口时高亮无信息量，不画
       if (width > 0.05 && width < 99.95) {
         this.runZone.style.display = '';
         this.runZone.style.left = `${left}%`;
@@ -310,12 +325,17 @@ export class Timeline {
   }
 }
 
+/** 秒 → 两位小数字符串；非有限值按 '0.00' 输出。 */
 function fmtTime(t: number): string {
   if (!Number.isFinite(t)) return '0.00';
   return t.toFixed(2);
 }
 
-/** 帧读数：总序号 +（有头部元信息时）run 段定位——多轨 / pre 边界下语义明确。 */
+/**
+ * 帧读数文本：`idx = indexAt(主时钟)`，显示的总序号是 `idx + 1 / clip.count`；有 `Clip.meta` 时再标
+ * 段位——一律按 **idx** 比：`idx < preFrames` 标 pre，`[preFrames, preFrames + frameCount)` 标 run
+ * `idx − preFrames + 1 / frameCount`，其余标 post。无轨道或 `clip.count = 0` 时返回 '0/0 帧'。
+ */
 function frameText(p: ReplayPlayer): string {
   const clip = p.clip;
   const total = clip?.count ?? 0;
@@ -330,7 +350,7 @@ function frameText(p: ReplayPlayer): string {
   return `${idx + 1}/${total} 帧 · post`;
 }
 
-/** 焦点在可输入控件里时不该响应播放快捷键。 */
+/** 事件目标是否是可输入控件（INPUT / TEXTAREA / SELECT / contentEditable）——是则不响应播放快捷键；tagName 非字符串（window、document 等）按 false 处理。 */
 function isTypingTarget(target: EventTarget | null): boolean {
   const node = target as HTMLElement | null;
   if (!node || typeof node.tagName !== 'string') return false;

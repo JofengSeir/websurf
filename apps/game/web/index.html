@@ -4,22 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WebSurf-game</title>
-  <!--
-    WebSurf-game — 页面外壳（纯结构与挂载点）
-    样式：web/styles.css（viewer S10 令牌体系：--panel/--border/--accent/--gold/
-    --muted/--text + --r-sm..lg + 悬停/激活交互态）。本文件不含内联样式块；
-    DOM 结构 / ID / 类名 / data-* 与 JS 绑定（./app.js）完全不变，键位/物理/功能零改动。
-    布局：canvas#preview 三维画布 · #status/#error 右上状态行（LED 呼吸灯）·
-    #crosshair 准星（--ch-* 运行时可调）· #hud>#stats 速度 HUD（底部 24%）·
-    #keys 左下角按键簇（Q/W/E/A/S/D/蹲/跳，标签按当前键位动态写入，2026-09-21 新增）·
-    #fps 左上帧率 · #loadingOverlay 加载进度引导层 · #panel>.win ESC 控制面板
-    （左导航 + 右设置体）。
+    <!--
+    WebSurf-game — 页面外壳（纯结构与挂载点；不含内联样式块）。
+    样式：web/styles.css —— 设计令牌全部收敛在它的 :root（面板/边框/文本/强调/金色/
+    语义色/圆角三档等，见该文件头部注释）。
+    挂载点（JS 侧按 id / class / data-action 选取，见 src/app.ts）：
+    canvas#preview 三维画布 · #status 状态行（LED 呼吸灯类）· #error 错误行 ·
+    #crosshair 准星（行内 CSS 变量由 src/panel/panel-controller.ts 写入）·
+    #hud>#stats 速度读数（bottom: 24%）· #keys 按键簇（Q/W/E/A/S/D/蹲/跳，标签由
+    src/app.ts 按当前键位写首版、高亮随实时输入）· #fps 帧率 · #loadingOverlay 加载
+    进度覆盖层 · #panel>.win ESC 控制面板（左导航 + 右设置体）。
   -->
   <link rel="stylesheet" href="./styles.css" />
-  <!-- ② favicon：显式声明，避免浏览器对 origin 根隐式请求 /favicon.ico 落空。
-       dev 服务器根 = apps/game/（package.json 的 `serve.py 8090 .`），页面在 /web/index.html，
-       故 origin 根的 /favicon.ico 也各放一份（apps/game/favicon.ico）——两条路径都不 404。
-       本行只新增声明，DOM 结构 / ID / 类名 / data-* 不变（见上方自述约定）。 -->
+    <!-- favicon：两条声明分别指向 ./favicon.ico（页面同目录）与 /favicon.ico（dev 服务器根，
+       见 apps/game/package.json 的 dev 脚本：python ../../src/serve.py 8090 .）。注意本工程当前
+       没有 favicon.ico 文件，故这两条路径都会 404。 -->
   <link rel="icon" href="./favicon.ico" type="image/x-icon" />
   <link rel="alternate icon" href="/favicon.ico" type="image/x-icon" />
 </head>
@@ -39,9 +38,9 @@
   </div>
   <div id="hud"><div id="stats">0</div></div>
 
-  <!-- 左下角按键簇：结构在此（grid 位置见 styles.css），
-       标签由 app.ts 按当前键位写入（与面板「按键」模块一一对应），
-       高亮取实时输入状态。data-action = keymap 的动作名。 -->
+    <!-- 按键簇：结构与 data-action 在此，grid 位置见 web/styles.css 的 #keys .tm-key-* 规则；
+       8 个 data-action 与 src/input/keymap.ts 的动作名一一对应，标签由 src/app.ts 写入，
+       高亮按实时输入切 on / off 类。 -->
   <div id="keys" class="tm-keys" aria-hidden="true">
     <span class="tm-key tm-key-q" data-action="yawLeft">Q</span>
     <span class="tm-key tm-key-w" data-action="forward">W</span>
@@ -53,10 +52,10 @@
     <span class="tm-key tm-key-jump" data-action="jump">跳</span>
   </div>
 
-  <!-- FPS 显示（左上角） -->
+    <!-- #fps：帧率读数 -->
   <div id="fps">--</div>
 
-  <!-- 地图加载进度覆盖层 -->
+    <!-- #loadingOverlay：地图加载进度覆盖层 -->
   <div id="loadingOverlay">
     <div class="load-card">
       <div class="load-title">正在加载地图</div>
@@ -69,7 +68,7 @@
     </div>
   </div>
 
-  <!-- ESC 控制面板：桌面两栏 -->
+    <!-- #panel：ESC 控制面板（左导航 + 右设置体） -->
   <div id="panel">
     <div class="win">
       <!-- 左侧模块导航 -->

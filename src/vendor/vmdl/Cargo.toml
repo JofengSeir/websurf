@@ -1,11 +1,19 @@
 # vmdl — vendored from crates.io vmdl-0.2.0 (MIT, https://github.com/icewind1991/vmdl)
 #
-# 本项目为修复 Source VTX 三角形条带展开算法而 vendor 本 crate：
-# `Strip::indices()` 原实现奇数位公式错误（生成退化三角形）且循环多两次（末尾索引越界），
-# 导致条带每隔一个三角形丢失、条带端点出现跨条带杂散面（模型边角"多四角面"）。
-# 修复见 src/vtx/mod.rs::Strip::indices（公式 `[idx, idx+1+cw, idx+2-cw]` + `0..len-2`）。
+# 本仓 vendor 本 crate 以修复 Source VTX 条带展开；只保留库源码（上游的 examples / benches /
+# tests / CI / flake / README / 截图未 vendor），manifest 亦已精简：去掉 [[example]] / [[test]] /
+# [[bench]] 与全部 [dev-dependencies.*]，运行期 10 个依赖的版本与 feature 与上游一致。
+# 注：这 10 项里 `tracing` 在上游与本副本的库源码里都没有引用点（rustc 的 unused-crate-dependencies
+# 实测），本副本按上游原样保留该行。
 #
-# 通过两端工程 workspace 根 Cargo.toml 的 `[patch.crates-io] vmdl = { path = "../src/vendor/vmdl" }` 引用（共享单副本）。
+# 相对 crates.io vmdl-0.2.0，源码有 2 个文件被改写：
+# - `src/vendor/vmdl/src/vtx/mod.rs` 的 `Strip::indices`：循环边界 `0..len` 收紧为 `0..len.saturating_sub(2)`，
+#   索引公式 `[idx, idx+1-cw, idx+2-cw]` 改为 `[idx, idx+1+cw, idx+2-cw]`；
+# - `src/vendor/vmdl/src/lib.rs` 的两处返回类型补上生命周期标注（`SkinTable<'_>` / `Mesh<'_>`）。
+#
+# 引用方式：[patch.crates-io] 只对声明它的 workspace 生效，本仓共 4 处声明——仓库根 Cargo.toml
+# （`vmdl = { path = "src/vendor/vmdl" }`）与 apps/debug、apps/game、apps/viewer 各自的 Cargo.toml
+# （`vmdl = { path = "../../src/vendor/vmdl" }`），四者指向同一份副本。
 
 [workspace]
 

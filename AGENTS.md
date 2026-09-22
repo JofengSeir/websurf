@@ -1,264 +1,199 @@
-# AGENTS.md — 项目文件结构与 Agent 协作规范
+# AGENTS.md — 当前任务行为规范与进度纪要（文档/注释重编）
 
-> 面向在本仓库工作的 **AI / 自动化 Agent**。人类贡献者请看 [CONTRIBUTING.md](CONTRIBUTING.md)；
-> 本文件只回答三件事：**东西该放哪、什么不能动、改完怎么验**。
+> **本文件是当前唯一生效的 Agent 工作规范**，取代 2026-09-22 之前的旧 `AGENTS.md`。
+> **当前任务**：以**源码为唯一事实来源**，重写本仓库当前工况的全部文档与代码注释。
+> **控制文件**（均在 `documents/plan/` 下）：
+> - [doc-rewrite-taskbook.md](documents/plan/doc-rewrite-taskbook.md) —— 任务书（流程 / 规范 / 术语 / 任务拆分 / 上报约定），**执行细则以它为准**。
+> - [project-survey.md](documents/plan/project-survey.md) —— 读码事实基线（目录结构 / 模块划分 / 依赖矩阵 / **§12 主流程与时序骨架** / **§13 必读源码清单**）。
 >
-> 事实基准：2026-09-12 全量核对（`git ls-files` + `git check-ignore` + 相对链接校验脚本）。
-> 与代码/配置不一致时以实际为准，并回改本文件（同 [documents/index.md](documents/index.md) 的「文档铁律」）。
+> **工况基线（owner 定调）**：受控工程 = `apps/debug` + `apps/game` + `apps/viewer` + 共享层 `src/`。
+> `test/dual-mode-harness/` **已退役**：已从工作区移除（39 个文件，含 `src/**`、`crates/wasm/**`、`scripts/**`、`package.json`、`Cargo.toml`、`Cargo.lock`、`tsconfig.json`），**不恢复、不重编、不作事实来源**。
 
 ---
 
-## 1. 仓库布局（唯一权威）
+## 1. 三条硬禁令（违反即返工）
 
-### 1.1 顶层
-
-| 路径 | 定位 | 说明 |
+| # | 禁令 | 含义 |
 |---|---|---|
-| `apps/{debug,game,viewer}/` | 三个应用工程 | 各含完整前端与打包链，**互不引用** |
-| `src/` | 共享层 | Rust 物理（`phys/` = `websurf-phys`）、BSP 解析（`wasm-core/` = `websurf-wasm-core`）、TS 物理渲染共享（`ts-shared/`）、`materials/`、`vendor/vmdl/`、`serve.py`、`scripts/`（cargo 环境 + 文档漂移体检 `check-doc-drift.mjs`） |
-| `test/dual-mode-harness/` | 验证工程 | 三模式物理 + 渲染时序验证，**不参与 Pages 部署** |
-| `test/game-core/` | **本地实验工程（不入库）** | 光照/物理实验用的隔离工程（自带 `crates/wasm-core` 副本）。2026-09-21 起**不入库**（用户裁定），由仓库根 `.gitignore` 的 `test/game-core/` 排除；本机保留即可继续用，§2.1 隔离铁律仍适用于它。详见 §7.3 |
-| `documents/` | 文档树 | 根级 6 篇 + `debug/`、`game/`、`viewer/` 子树 |
-| `.github/` | CI 与模板 | `workflows/deploy-pages.yml`（部署，只构建 apps）、`workflows/ci-gates.yml`（测试门禁）、`workflows/doc-drift.yml`（文档漂移体检）、Issue / PR 模板 |
-| 根级 `.md` | 仓库级元文档 | `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`、`AGENTS.md`（本文件） |
+| **B1** | 禁以旧注释为依据 | 不得摘抄、复述、沿用任何现有代码注释——它们正是重写对象。语义只能从实现、调用点、测试取得 |
+| **B2** | 禁以旧文档为依据 | 旧文档已从工作区删除（仅存于 git 历史，**不得读取、不得引用、不得当作回滚依据**）；任务必须能在文档树为空时从源码重建 |
+| **B3** | 禁推测 | 无法在代码中定位的结论标 `[待确认]` 并停下上报；禁止"应该/可能/大概是/历史上" |
 
-### 1.2 每个工程的标准布局
-
-三个应用工程与验证工程遵循同一约定（细节略有差异）：
-
-```
-apps/<app>/
-├─ crates/wasm/         # wasm 导出层 crate（唯一保留的 Rust 侧，命名 websurf-wasm / websurf-viewer-wasm 等）
-├─ src/                 # TypeScript 源码（含 src/wasm.d.ts 手写契约桩）
-├─ scripts/             # 构建与验证脚本（*.mjs；build-dist.mjs 各工程必有一份）
-├─ web/                 # dev 页面：index.html / styles.css（入库）；app.js、worker.js、*.wasm（产物，不入库）
-├─ Cargo.toml/.lock     # 模块 workspace（各自独立，target/ 留在本工程目录内）
-├─ package.json         # scripts 为唯一入口：build:wasm / build:ts / build:dist / typecheck / check:api / test:*
-├─ tsconfig.json
-├─ play.cmd / build-dist.cmd / start-dev.cmd   # Windows 双击入口
-└─ README.md            # 工程说明（已入库，四个工程均有）
-```
-
-`apps/viewer/` 另有 `test/`（TS 自检源码，如 `replay-selftest.ts`）；`apps/debug/` 另有 `fixtures/`（见 §4）。
+**取证手段**：源码行、构建脚本、配置、以及 `cargo check` / `cargo test` / `npm run typecheck` / 漂移体检的**实际输出**。代码历史（`git log`/`blame`）可作线索，但最终以当前代码为准。
 
 ---
 
-## 2. 新增文件的归属（决策表）
+## 2. 目录现状（最后一次修订时复核）
 
-| 你要放的东西 | 位置 | 备注 |
-|---|---|---|
-| 产品代码（TS） | `apps/<app>/src/` | 三个工程共用或应共用的逻辑 → 上提到 `src/ts-shared/` |
-| WASM 导出层 | `apps/<app>/crates/wasm/src/lib.rs` | 只做导出；实现放 `src/`（共享层 crate） |
-| Rust 物理 / 解析实现 | `src/phys/`、`src/wasm-core/` | **禁止**在工程内复制共享实现 |
-| 验证 / 回归脚本 | 该工程 `scripts/`，并在 `package.json` 注册 `test:*` | 跨工程复现 → `test/dual-mode-harness/scripts/` |
-| 编译器 / 环境脚本 | `src/scripts/` | 如 `cargo-env.cmd` |
-| 自动化夹具（必须入库） | `apps/debug/fixtures/<主题>/` | 唯一允许入库的"数据"目录，见 §4 |
-| 架构 / 实现文档 | `documents/<app>/{overview,sequences,implementation/*,differences}.md` | 命名固定，见 §5 |
-| 历史归档文档 | 保持原处 + 标注 `superseded` | **新文档不得写入归档目录** |
-| 一次性实验产物 | 该工程临时区（§3） | **结论必须提升，产物不得入库** |
-
-> **上表「共用 → 上提 `src/ts-shared/`」「禁止在工程内复制共享实现」只适用于 `apps/*` 三个工程，不适用于 `test/*`。**
-
-### 2.1 `test/*` 工程的绝对隔离铁律（2026-09-18 新增）
-
-`test/` 下的每个工程（如 `test/game-core`）必须**绝对隔离**：
-
-> ⚠️ 适用范围（2026-09-21）：`test/game-core` 已转为**本地工程**（不入库，`.gitignore` 排除）——
-> 本节铁律对它的**本地形态仍然有效**（不得引用仓库根 `src/`，需要共享层就逐字节副本化到工程内）；
-> 仓库内可入库的 `test/` 工程目前只有 `test/dual-mode-harness`。
-
-- 不得以任何形式（TS import / Rust path 依赖 / 脚本 import / 运行期引用 / 元数据声明）引用仓库根 `src/`；需要共享层的任何部分时，**逐字节副本化到工程内**（`fs.cpSync` / `Copy-Item`，禁止文本管道），副本就地演进。
-- 隔离验收的**唯一硬指标**：把仓库根 `src/` 整体移出工作区后，该工程的 `npm run typecheck`、`npm run build:ts`、`cargo check` 三项全部通过；实验后 `src/` 必须移回并以逐文件 sha256 证明字节零改动。
-- 例外：指向 `test/` 内部（如 `test/maps/` 本地夹具）的相对路径**允许保留**。
-- 改动隔离边界时，必须同步本节与该工程 `package.json` 描述（不得出现「仍以 ../../src 引用仓库根」类表述）。
-
----
-
-## 3. 临时文件规范（重点）
-
-### 3.1 允许的临时区（唯一）
-
-仓库只认两类临时区，均已被 `.gitignore` 覆盖（`**/temp/`、`**/.tmp/`）：
-
-- `apps/<app>/temp/` —— 工程内实验、量测、中间产物
-- `apps/<app>/.tmp/` 或仓库根 `.tmp/` —— 构建/验证的中间产物
-
-**根目录不得新开临时目录**（除 `.tmp/`）；不得在 `src/`、`test/`、`documents/` 下散落临时文件。
-
-### 3.2 五条铁律
-
-1. **产物不入库**：临时区的任何内容都不得 `git add`。若 `git status` 显示临时区被追踪，视为缺陷并移除追踪。
-2. **临时区不是知识资产的存放地**：实验结论、验证数据、复现步骤必须提升到受控位置——
-   结论 → `documents/` 对应篇章或 `CHANGELOG.md`；脚本 → 工程 `scripts/` 或 `test/`；夹具 → `apps/debug/fixtures/`。
-3. **不得引用临时区路径**：任何入库文件（代码 / 文档 / 配置）都不允许把 `temp/`、`.tmp/` 当作事实来源或依赖。
-   脚本若需读写中间产物，路径必须由其自身在同一次运行内创建并在结束时清理。
-4. **临时区随时可被清空**：任何流程不得依赖临时区"已经存在"或"历史留存"。删除后 `npm run build` + 验证脚本必须仍能通过。
-5. **清理前先做提升检查**：删除临时区前，逐项确认没有未提升的结论或数据（对照 §3.4）。
-
-### 3.3 临时区实况（2026-09-12 清理后核对）
-
-**已清理**（清理前 105 文件 / 约 25 MB；全部先备份到仓库外 `D:\code\projects\websurf-cleanup-backup-2026-09-12\`）：
-
-| 路径 | 清理前 | 内容 | 判定依据 |
-|---|---|---|---|
-| `apps/debug/.tmp/` | 52 文件 / 12.5 MB | `test:*` 脚本的 esbuild 中间产物 | 由脚本按需重建 |
-| `apps/game/temp/` | 43 文件 / 11.8 MB | 物理实验全量产物（含 2 份 3.7 MB wasm 备份） | 结论与仪器已提升入库（`documents/phys.md` §3.5 + `apps/game/scripts/` 5 个脚本） |
-| `apps/viewer/temp/` | 7 文件 / 0.08 MB | 自检中间 bundle + 已废弃的一次性量测脚本 | `npm run test:replay` 可重建；量测已被 `apps/viewer/test/smoke-cdp.mjs` 取代 |
-| `.tmp/`（仓库根） | 1 文件 / 0.6 MB | `e2e-fixed.json` 一次性数据 | 无引用 |
-| `apps/debug/npm-ci-test.log` | 1 文件 | CI 排查日志 | 日志不入库 |
-
-**保留**（正常产物，可由构建再生）：`apps/*/{dist,pkg}/`、`test/dual-mode-harness/{pkg,app.js,worker-a.js,worker-b.js,websurf_test_wasm_bg.wasm}`、各工程 `web/{app.js,worker.js,*.wasm}`、`node_modules/`、仓库根 `target/`。
-
-**常态应为空**：清理后临时区只在需要时「按需创建」——`test:*` 脚本自建 `apps/debug/.tmp/`，`apps/game/scripts/wasm-hash-pin.mjs` 自建 `apps/game/temp/`（脚本内已 `mkdirSync`）。用完即删，不要留档。
-
-### 3.4 清理临时区前的检查清单
-
-```bash
-git status --ignored --short apps/          # 确认待删内容确实未入库
-git ls-files -- '**/temp/**' '**/.tmp/**'   # 期望输出为空
-```
-
-再逐条确认：**结论已写进 `documents/` 或 `CHANGELOG.md`？脚本已移入 `scripts/`？夹具已移入 `fixtures/`？**
-四项都确认后才可删除。
-
----
-
-## 4. 生成物与「勿手改 / 勿清理」清单
-
-**不要手改**（改源码后重建）：
-
-- `apps/*/web/app.js`、`apps/*/web/worker.js`、`apps/*/web/websurf_*_wasm_bg.wasm`、`test/dual-mode-harness/{app.js,worker-a.js,worker-b.js,*.wasm}`
-- `apps/*/{pkg,dist}/`、`test/dual-mode-harness/pkg/`、`target/`、`node_modules/`
-- `apps/viewer/dist/README.md`（由 `apps/viewer/scripts/dist-README.md` 生成）
-
-**不要清理**（看似临时但是资产）：
-
-- `test/maps/` —— 本地地图与录像（`*.bsp` / `*.dem` / `*.replay` 一律不入库，仅本地留存）
-- `apps/debug/fixtures/path/tick-on-render-prefix.json`（784 KB，已入库）—— CI 门禁 `test:path-acceptance` 的**故意失败**基线夹具。保留 `!apps/debug/fixtures/path/` 的 `.gitignore` 例外
-- 仓库根 `target/` —— 根 workspace（共享层两个 crate）的编译缓存
-- 各工程 `Cargo.lock` / `package-lock.json` —— 依赖锁定，必须入库
-
----
-
-## 5. 文档编写规范
-
-### 5.1 位置与命名
-
-- **仓库级 / 共享层** → `documents/` 顶层：`architecture.md`、`phys.md`、`wasm-core.md`、`ts-shared.md`、`materials.md`、`index.md`
-- **工程文档** → `documents/<app>/`，四维度固定命名：
-  `overview.md`（总览）、`sequences.md`（时序）、`implementation/<主题>.md`（细分实现）、`differences.md`（与其他工程的差异对照）
-- 一个主题一篇，**文件名用 kebab-case**；不要新建 `xxx-v2.md`、`xxx-new.md`，就地更新并在 CHANGELOG 记录
-- 新增 / 移动文档后，必须同步 `documents/index.md` 的导航与篇数统计
-
-### 5.2 结构与格式
-
-- 一级标题唯一且等于文件名主题；**标题层级不得跳级**（`#` → `##` → `###`）
-- 表格列数保持一致；代码块用围栏并标注语言
-- 长行不强制换行（与现有文档一致），但单行不要塞入两个以上并列主题
-- 行尾统一 **CRLF**、UTF-8 **无 BOM**（Windows 仓库约定，`core.autocrlf=true`）；不要引入行尾空白
-- **禁止 `CR CR LF`（多 CR）行尾**：2026-09-12 已清理 30 个此类文件（会误导按行解析的工具与编辑器）。体检（无输出即合规）：
-
-```bash
-node -e "const{execFileSync:e}=require(\"child_process\"),f=require(\"fs\");for(const p of e(\"git\",[\"ls-files\",\"*.md\",\"*.cmd\",\"*.ts\",\"*.mjs\",\"*.json\",\"*.rs\",\"*.py\",\"*.yml\"],{encoding:\"utf8\"}).split(\"\\n\").filter(Boolean)){let b;try{b=f.readFileSync(p)}catch{continue}for(let i=0;i<b.length;i++)if(b[i]===13&&b[i+1]!==10){console.log(\"多/孤立 CR: \"+p);break}}"
-```
-- 正文用中文；代码 / 路径 / 命令中的引号一律用 ASCII 直引号
-
-### 5.3 引用与链接（迁移后必查）
-
-**文档漂移体检**：`node src/scripts/check-doc-drift.mjs`（可在仓库根直接运行；可传单文件参数）
-
-- 校验 **A 行数声明**（`path`(NNN) / `| path | NNN |` 是否等于实测 `wc -l`）与 **B `文件:行号` 锚点是否越界**，A/B 非空即 `exit 1`（可接 CI）；同时列出 C 路径失效（告警，历史叙述里的旧路径属刻意保留）与 D 无法消歧的裸文件名（计数）。
-- **能力边界**：锚点只查「是否越界」，不查「该行内容是否与描述相符」——文件在锚点之前增删代码会造成「在范围内但错位」（2026-09-12 实测到一例：`apps/game/src/worker/main.ts:86` 实际已迁到 `:429`）。因此**改动被文档引用的文件后，必须回看该文件相关的锚点**，不能只依赖脚本。
-
-- 代码锚点统一写作 `` `文件:行号` ``，且**必须能在仓库内定位**；与代码不一致时以代码为准并回改文档
-- 所有相对链接必须指向真实存在的文件或目录；**移动目录（如工程迁入 `apps/`）后必须全量复校**
-- 提交前跑一次链接校验（本仓库已验证可用的脚本）：
-
-```js
-// node scripts 之外的一次性检查：校验指定 md 的相对链接是否可达
-import fs from 'node:fs';
-import path from 'node:path';
-const ROOT = process.cwd();
-for (const rel of process.argv.slice(2)) {
-  const abs = path.resolve(ROOT, rel);
-  const miss = [...fs.readFileSync(abs, 'utf8').matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)]
-    .map((m) => m[1])
-    .filter((t) => !/^(https?:|mailto:|#)/.test(t))
-    .filter((t) => t.split('#')[0])
-    .filter((t) => !fs.existsSync(path.resolve(path.dirname(abs), decodeURIComponent(t.split('#')[0]))));
-  console.log(`${rel}: ${miss.length ? '❌ ' + [...new Set(miss)].join(', ') : '✅'}`);
-}
-```
-
----
-
-## 6. Agent 工作流
-
-**改前**：读 [CONTRIBUTING.md](CONTRIBUTING.md) 的规范条款 → 确认目标文件归属（§2）→ 共享层改动先确认 `src/` 而非工程内。
-
-**改中**：
-
-- 涉及物理 / 时序 / 渲染的改动同步补验证脚本，不靠肉眼判断
-- 移动或改名文件后，同步：`package.json` / `.cmd` / CI `working-directory` / 文档链接 / 各工程相对依赖路径（`crates/wasm` → `../../../../src` 一类，**层数易错**）
-
-**改后**（缺一不可）：
-
-```bash
-npm run typecheck                     # 在受影响的工程目录
-npm run <对应 test:* 脚本>            # 见 CONTRIBUTING §4 的验证脚本表
-git status --short                    # 确认只有预期文件变动，无临时产物混入
-git ls-files -- '**/temp/**'          # 期望为空
-git status --short --untracked-files=all   # ?? 即「未追踪且未被忽略」→ 会被误提交，须逐条确认
-```
-
-**提交信息**：Conventional Commits（`type(scope): 摘要`），scope 用 `repo` / `apps` / `ci` / `debug` / `game` / `viewer` / `dual-mode-harness` / `phys` / `wasm-core`。
-
-**汇报要求**：结论给证据（命令、输出、`文件:行号`），不要只给判断；发现自己上一轮的结论有误时主动更正。
-
----
-
-## 7. 问题台账（核对于 2026-09-12）
-
-### 7.1 已闭环（2026-09-12 清理批次）
-
-| # | 问题 | 处置 |
-|---|---|---|
-| 1 | `apps/debug/README.md` 2 处失效链接 | `../../documents/debug/archive/` → 「已移出版本库」表述；`../README.md` → `../../README.md`；头部「独立工程 `debug/`」→ `apps/debug/` |
-| 2 | `apps/game/README.md` 3 处失效链接 + `..\src\serve.py` 少一层 | 链接与路径全部修正（`../../test/...`、`..\..\src\serve.py`） |
-| 3 | `documents/index.md`：8 处失效链接、篇数 29→24、根 5→6 篇、2 张指向已删目录的表 | 链接修正、计数更新、死表替换为「已移出版本库」说明 |
-| 4 | 另有 7 处失效链接（`documents/game/overview.md`、`documents/viewer/{overview,replay-rule-ai}.md`、`test/dual-mode-harness/docs/sequences.md` 等） | 全部修正 → **全仓 md 相对链接 100% 可达** |
-| 5 | 实验结论留在忽略目录（`apps/game/temp/phys-t13/t13-conclusion.md`） | 结论入库为 `documents/phys.md` §3.5；仪器提升为 `apps/game/scripts/{phys-seed-smoke,wasm-hash-pin,t13-input-surface-probe,t13-literal-sweep,t13-ulp-sensitivity-control}.mjs`——5 个脚本均实测可运行，种子面回归 **7/7 通过** |
-| 6 | 入库文档引用忽略目录（`architecture.md` 把 `apps/game/temp/` 列为产物位置） | 引用改为 `documents/game/`、`apps/game/web/`；pathspec 补 `apps/`；`materials.md` 的归档承接表述同步更新 |
-| 7 | 遗留重复文件 `apps/game/serve.py` | 删除（共享 `src/serve.py` 为超集：支持 `root_dir` 参数、`SO_REUSEADDR` 与友好报错） |
-| 8 | 30 个已入库文件存在 `CR CR LF` / `CR CR CR LF` 行尾 | 规范化为标准 CRLF；逐文件验证「去掉 CR 后与 HEAD 字节全等」，内容零变化 |
-| 9 | 临时区堆积 105 文件 / 约 25 MB | 清理并更新 §3.3；备份留存 `D:\code\projects\websurf-cleanup-backup-2026-09-12\` |
-| 11 | 文档「文件地图」漂移：10 处行数声明过期、2 处锚点越界、10 处遗留 `game/` / `debug/` / `viewer/` 前缀、1 处因删除 `apps/game/serve.py` 而失效的引用 | 全部按实测代码修正（行数取 `wc -l`、锚点定位到现行行号、前缀补 `apps/`、`serve.py` 引用改为共享 `src/serve.py:31-36`）；并新增体检工具 `src/scripts/check-doc-drift.mjs`（A/B 失败退出码 1），当前 117 条行数声明与 1428 个锚点**零漂移/零越界**（383 处跨工程裸文件名属固有歧义，脚本给出计数供人工判读） |
-| 10 | 被追踪的内容重复：`apps/{debug,game}/src/input/{mouse-buffer,pointer-lock}.ts` 字节全等（违反「勿在工程内复制共享实现」） | 上提为共享单份 `src/ts-shared/input/`，两端 `app.ts` 导入同源；文档与注释同步（`documents/{game/overview,game/implementation/panel-and-input,debug/sequences,debug/overview,debug/differences}` + `test/dual-mode-harness/src/main.ts`）；验证：两端 `typecheck` 与 `build:ts` 均 exit 0，产物 `web/app.js` 内含共享模块特征串 |
-
-### 7.2 仍需处理
-
-| # | 问题 | 证据 / 建议 |
-|---|---|---|
-| 7.2.1 | 被追踪的内容重复（余 2 组，判定为**设计使然**） | ① `apps/debug/Cargo.toml` == `apps/game/Cargo.toml`（各工程独立 workspace 清单）、② `apps/debug/scripts/ensure-node-deps.cmd` == `apps/game/scripts/ensure-node-deps.cmd`（fresh-clone 自举脚本按工程各存一份）——**建议保持现状**；输入层的重复已于 §7.1 第 10 项闭环 |
-| 7.2.2 | 代码注释引用已移出的规划文档 | `src/ts-shared/{auth,tick}/*.ts` 共 3 处引用 `temp/phys-plan-discuss/…`，均**已自带「2026-09 清理」标注**，属诚实记载，无需修改 |
-| 7.2.3 | `.agent-teams/` 工具状态目录留在工作区 | 已被 `.gitignore` 忽略；如不再使用可删除，删除前确认无运行中的编排流程 |
-| 7.2.4 | ~~共享层在 `test/game-core` 内的隔离副本（`crates/wasm-core` 0.1.0-fork）不随根部演进~~ **已闭环（2026-09-20）** | 回并按 [lighting-merge-plan.md](./documents/game/implementation/lighting-merge-plan.md) §6.2 执行：`src/wasm-core/**`（+ 新增 `lightmap.rs`/`vhv.rs`）、`src/phys/world.rs`、`src/ts-shared/phys/{world-builder,authority-calibrator}.ts` 逐字节回并（提交 `8d24b24`），随后三个模块工程按新共享 API 适配（`3eb471e` debug、`9d342a9` viewer、`8d24b24` game）。**剩余登记**：`test/game-core` 仍保留其隔离副本（AGENTS.md §2.1 铁律未变），但**后续共享层演进应落根部**、由副本按需重新副本化；`lightmap-shader.ts` 暂按工程各持一份（上提 `src/ts-shared/render/` 会引入共享层首个 npm 依赖 three，而仓库根无 `package.json`/`node_modules` ⇒ 需先裁定 tsc `paths` + esbuild `--alias` 方案，见 §7.2.5） |
-| 7.2.5 | 光照着色器未上提到共享层（待裁定） | `apps/{game,debug,viewer}` 各持一份 `src/renderer/lightmap-shader.ts`（**1815 行，三份逐字节同源**，sha256 `c7068015…`；viewer 副本于 2026-09-21 接入光照栈时新增）；上提到 `src/ts-shared/render/` 的**唯一阻碍**是 `import * as THREE from 'three'` 的解析：共享层位于仓库根下，而 `node_modules/three` 在各工程内。两条候选：① 仓库根加 `package.json`（npm workspace 或仅 devDependency three）；② 各工程 tsconfig `baseUrl`+`paths` 与 esbuild `--alias:three=<工程>/node_modules/three`。本轮保持工程内副本，未擅自选型。**另注**：光照注入守卫自检 `test/game-core/scripts/lightmap-inject-guard-selftest.mjs` 位于**本地工程**内（不入库，见 §7.3），其覆盖的是该副本自己的版本；apps 三份由一次性探针逐项复检 13×3 条，见 `CHANGELOG.md` 2026-09-21 条目 |
-| 7.2.6 | `documents/debug/*` 的行号锚点整体过期 | debug 接入共享光照栈（2026-09-20 `3eb471e`）把 `renderer/renderer-main.ts` 从 ~1023 行扩到 ~1771 行、本轮 2026-09-21 到 **1792** 行，但 `documents/debug/{overview,implementation/loading-pipeline,implementation/rendering,differences,sequences}.md` 的 `renderer-main.ts:NNN` / `app.ts:NNN` 锚点仍是接入前的行号（实测样本：`rendering.md` 写 `loadScene, renderer-main.ts:328-408`，实际 `:516` 起）。`check-doc-drift.mjs` 只查「是否越界」⇒ 全在范围内、静默通过。本轮只校准了光照/装载相关锚点并在 `rendering.md` 顶部加了基准说明；**全量重锚**已登记待做 |
-| 7.2.7 | game 面板偏好会跨会话影响自动化基线 | `apps/game` 的「光照模式」写入 localStorage，上一轮自动化若停在「纯纹理」，下一轮的"预烘焙基线"其实就是纯纹理（实测 `modeEffect=0.002` 的假阴性）。探针已改为每轮开头强制归位并打印 `before=`；**产品行为正确**（偏好本就该持久化），仅提醒后续脚本注意 |
-
-### 7.3 `test/game-core` 转为本地工程（2026-09-21）
-
-用户裁定：**不把该实验工程推到远端**。执行与证据：
-
-| 项 | 事实 |
+| 位置 | 状态 |
 |---|---|
-| 剥离方式 | `git filter-branch -f --index-filter "git rm -r --cached --ignore-unmatch test/game-core" --prune-empty a5cd4c2..HEAD`（只剥路径，保留每个提交里非该路径的改动） |
-| 结果 | 未发布提交 **32 → 24**（8 个「只动 test/game-core」的提交被 `--prune-empty` 剪掉）、文件 **226 → 76**、行数 **+59732 → +12784** |
-| 为什么不用 force | 远端 `a5cd4c2` **从未包含**该工程 ⇒ 新链仍以它为祖先，推送是 **fast-forward** |
-| 本地保留 | 工程目录仍在工作区（12396 文件）；仓库根 `.gitignore` 新增 `test/game-core/`（含注释说明如何恢复入库） |
-| 门禁适配 | `test/dual-mode-harness/scripts/cross-project-glb-contract.mjs` 把该工程标为 `optional`：本机有 ⇒ 照常断言（实测 **4/4 PASS**）；干净检出无此目录 ⇒ **SKIP + exit 0**（实测 3 PASS + 1 SKIP） |
-| 备份 | 分支 `backup/pre-game-core-strip`（= 剥离前的 `000752d` 原链）与 `.tmp/backup-test-game-core/`（工作树全量副本） |
-| 已知残留 | 若提交 message 含 `fix(game-core): …` 但内容只剩文档改动（如 `51e8035`、`0def733` 等），属剥离后的正常现象——代码改动随路径一并移除；需要改写 message 时另行处理 |
+| 仓库根 `*.md` | **仅本文件**（根级四篇旧文档 README / CHANGELOG / 贡献 / 安全 已从工作区删除） |
+| `documents/` | **仅** `documents/plan/` 下**三篇**：两篇控制文件 + `progress-log.md`（进度台账，§7.1 历史移入）。**实测删除面**：`documents/` 下原 **47 篇** `.md`、根级 **4 篇** `.md`、退役 harness **39** 个路径（含 5 篇 `.md`）、apps/game 的 favicon.ico 1 个，合计 **91** 个路径（`git status` 实测） |
+| `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
+| `.ak/` | **不存在**（`.gitignore` 中的 `.ak/` 规则为历史遗留，当前无对应目录） |
+| `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
+| `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
+| `.workbuddy/memory/**` | Agent 工作记忆（非文档树、不重编；仅作过程线索，不作事实来源） |
 
-> 处理本表任一问题后，请同步更新本表并（如涉及）补 `CHANGELOG.md` 条目。
+---
+
+## 3. 执行流程（六步法）
+
+| 步 | 动作 | 产出 | 验收 |
+|---|---|---|---|
+| **S0** | 骨架定位：确认文件在 `project-survey.md` §12 主流程中的位置 | 骨架标注 | 能给出上下游各一个调用点（带行号） |
+| **S1** | 读码（按 `project-survey.md` §13 入口清单逐个打开） | 读码笔记（临时区） | 覆盖每个导出项、常量、分支语义 |
+| **S2** | 记录事实：事实 → 证据（`文件:行号`） | 事实表 | 每条有锚点；无法定位标 `[待确认]` 并上报 |
+| **S3** | 重写（原地覆盖，禁止 `xxx-v2.md`） | 新稿 | 无推测措辞；术语统一；CRLF + UTF-8 无 BOM；**代码注释内一律不写行号**——同文件用符号名，跨文件用「相对仓库根路径 + 符号名」（原因见 `documents/plan/progress-log.md` 的「§7.3 规则与工具」#19）；文档仍按任务书 §11 写 `` `文件:行号` `` |
+| **S4** | 自检：漂移体检 + 来源审查 + 编译/类型检查 | 自检记录 | 见 §5 |
+| **S5** | 提交（单文件/单模块一次提交） | 一个 commit | 提交信息含事实来源、自检命令、遗留 `[待确认]` |
+
+**阶段 A0（强制第一步）**：任何文件重写前，先产出本范围的"架构与时序骨架"（数据流 / 时序 / 模块边界 / 关键不变量，全带锚点），通过主控评审才准动笔。
+
+---
+
+## 4. 范围与优先级
+
+| 级 | 内容 |
+|---|---|
+| P0 | `src/phys/**`、`src/wasm-core/**` 注释（共享层，起点注释密度最低：phys 16% / wasm-core 11%；phys 经 WG1 首件已升至 19%） |
+| P1 | `src/ts-shared/**`、三工程 `src/**` 与各 `crates/wasm/src/lib.rs` 注释 |
+| P2 | 共享层文档：phys / wasm-core / ts-shared / materials / architecture |
+| P3 | 三工程子树：overview / sequences / implementation / differences / README |
+| P4 | 根 README / CHANGELOG / 规范类篇 / **index 导航（最后按实际文件重建）** |
+
+**排除**：本文件与两篇控制文件、`node_modules/`、`target/`、`pkg/`、`dist/`、`web/app.js`、`web/worker.js`、`web/*.wasm`、`test/maps/`、`test/replay/`、`apps/debug/fixtures/**`、`Cargo.lock`、`package-lock.json`、`.github/**` 模板、`.workbuddy/`。
+
+---
+
+## 5. 自检命令（每个文件提交前必跑）
+
+```bash
+node src/scripts/check-doc-drift.mjs [文件]       # 0 漂移 / 0 越界
+grep -n -E "据文档|据注释|原设计|历史上|应该|可能|大概|似乎|推测" <新稿>   # 0 命中
+grep -n -E "test/game-core|dual-mode-harness" <新稿>   # 0 命中（两者均已不在工作区）
+cargo check -p websurf-phys                       # 或工程内 cargo check
+cd apps/<app> && npm run typecheck                # TS 侧
+```
+
+**全量闸门（WG11）**：全仓漂移体检 0 越界；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；README ↔ index ↔ 工程 README 口径一致。
+
+---
+
+## 6. 上报约定
+
+**六类必须停下上报**（不得"先写着"）：① 代码自相矛盾；② 疑似代码缺陷（只记录不修）；③ 文档断言无法在代码中定位；④ 锚点越界且无法判断指向；⑤ 需改代码/构建配置才能让文档成立；⑥ 涉及夹具、依赖锁、CI 配置。第七类：注释与代码冲突时按代码写，**不得把旧注释内容记入新稿**。
+
+上报后文件保持**未提交**；不得带 `[待确认]` 进入提交。升级路径：工作组 → 主控 → 仓库 owner。
+
+---
+
+## 7. 进度纪要
+
+> 规则：每次提交/阶段性完成后，**由执行者就地更新本节**（追加一行，不改历史行；已知错误记录另起一行更正）。状态取值：`未开始 / 进行中 / 已完成 / 阻塞 / 已撤销`。
+
+### 7.1 已完成 / 已发生
+
+> **完整历史台账已移至 [`documents/plan/progress-log.md`](documents/plan/progress-log.md)**（WG1–WG3 完成记录 + WG4/WG5/WG6 骨架与派发记录，共 52 行**逐行原样移出，内容未改**）。
+> **此后规则**：新进展**追加到该台账**；本文件只保留规范（§1–§6）、当前状态（§7.2）、待决项（§7.3）。
+> **移出原因**：本文件曾达 75 KB，超出工作区指令自动加载上限（65536 字节），尾部 §7.3 会被**静默截断**（见 `documents/plan/progress-log.md` 的「§7.3 已结案」#39）。**2026-09-22 二次瘦身**：§7.3 的 11 条「规则 / 工具说明 / 已解决项」（#17/#18/#19/#21/#23/#25/#35/#42/#44/#46/#56）**逐行原样**移入该文件的「§7.3 规则与工具」小节，本文件由 **56272 → 42521 字节**，回到安全区间。**2026-09-22 三次瘦身**：§7.3 的累积待裁决行 **#26–#69（28 条）逐行原样**移入台账的「§7.3 待裁决项」小节，本文件由 **60741 → 约 3 万字节**，再次回到安全区间（起因：本轮新增 #65–#69 后逼近 65536 截断线）。
+
+| 日期 | 最近进展（摘要，详见台账） |
+|---|---|
+| 2026-09-22 | WG1 `src/phys/**` **7/7**、WG2 `src/wasm-core/**` **26/26**、WG3 `src/ts-shared/**` **非测试件 19/19 + 测试件 4/4 全部完成**，均已通过主控独立复验 |
+| 2026-09-22 | WG4 `apps/debug`：**19 件经主控独立复验通过**；复验中修掉 8 处失败（5 件禁用词、3 件 bareLF 行尾）；新增两条**内容审查手段**与一条**新陷阱**（详见台账与 §7.3 #41/#42） | progress-log.md |
+
+
+### 7.2 工作组状态
+
+| 组 | 范围 | 状态 | 依赖 |
+|---|---|---|---|
+| WG-A0 | 全局架构与时序骨架（Q1–Q8） | **进行中**（骨架落在 survey §12/§13；已按三工程工况重划） | — |
+| WG1 | `src/phys/**` 注释 | **已完成（7/7）**：全部文件通过主控复验（代码逐行一致、来源审查 0 命中）。**本轮补做「去行号」**：该组 7 件的 `文件:行号` 锚点已全部改为符号引用，复扫锚点 0、复验 0/7 失败、`cargo test` 10 passed | A0 |
+| WG2 | `src/wasm-core/**` 注释 | **已完成（26/26）**：`src/wasm-core` 下 26 个 `.rs` **全部已改动、无一遗漏**；全量复验 26/26 exit 0（`stripTrail` 逐行 d0；`strict` 的 d4/d6/d8 经新判据确认为行尾注释改写）、禁用词 0、CRLF 无 BOM、`cargo check` exit 0、锚点扫描 0 违规。**遗留 3 项均已登记**：`lightmap.rs` 错误消息字符串里的 1 处外部引用（§7.3 #28）、`materials.rs` 空白行尾随空格归一（#33）、`convert.rs` 约 500 行死代码（#34）。**本轮补做「去行号」**：26 件的 `文件:行号` 锚点已全部改为符号引用，复扫锚点 0、复验 0/26 失败、`cargo check` exit 0 | A0 |
+| WG3 | `src/ts-shared/**` 注释 | **已完成（非测试件 19/19 + 测试件 4/4）**：非测试件 19 件一次跑 `verify.ps1` 0 失败；4 个 `*.test.ts` 由主控自做 3 件（`auth/compute-mode`、`tick/ordering-gate`、`auth/shared-state.protocol`）、子代理 1 件（`auth/tick-authority`），**全部经主控独立复验**：`stripTrail` 逐行 d0（89 / 193 / 268 / 636 行）、`anchor-scan` 违规 0、**esbuild + node 实跑 45 / 46 / 75 / 19 例全绿 exit 0**、三工程 typecheck exit 0。骨架 `.tmp/wg3/skeleton.md` | A0 |
+| WG4 | `apps/debug`（33 件源码 + 18 个脚本） | **已完成（源码 33/33 + 脚本 18/18）**。四道门全绿：`verify.ps1` **0 失败**（`stripTrail` 全 d0）、`anchor-scan` **锚点 0 / 违规 0**、`template-proof` **158 个模板字符串逐字节相同**、`apps/debug` typecheck **exit 0**、`cargo check`（`apps/debug/crates/wasm`）**exit 0**。**过程与 A/B/C 明细逐行见 [`documents/plan/progress-log.md`](documents/plan/progress-log.md)**（19 件子代理批、15 件小文件批、8 件脚本批、4 件脚本批、`renderer/lightmap-shader.ts` 三工程同构副本、脚本 5 件主控自做） | A0 + WG1–3 |
+| WG5 | `apps/game`（14 件源码 + 20 个脚本） | **源码已完成（14/14）**；脚本进度见 WG5b 行。四道门：`verify.ps1` **0 失败**（`stripTrail` 全 d0）、`anchor-scan` 锚点 0、`template-proof` 30 模板逐字节相同、`content-review` 全命中、`apps/game` typecheck **exit 0**、`cargo check`（`apps/game/crates/wasm`）**exit 0**。**A/B/C 明细与主控开箱复核记录逐行见台账**（含「`extras.faceIndex` 假断言」「γ 接受窗口」等） | 同上 |
+| WG6 | `apps/viewer`（29 件 + WG6b 5 件） | **已完成（29/29 + WG6b 5/5）**：`verify.ps1` **0 失败**（除 `dist-README.md` 这一 prose 资产按陷阱第 13 条判）、`stripTrail` 全 d0、`anchor-scan` 锚点 0、`template-proof` 全同、`content-review` 全命中、`apps/viewer` typecheck **exit 0**、`cargo check`（`websurf-viewer-wasm`）**exit 0**。**A/B/C 明细与独立审查员记录逐行见台账**；待决项见 §7.3 #54/#55/#58/#59/#61/#64 | 同上 |
+| WG4b | `apps/debug/scripts/**` 剩余脚本与资产 | **已完成（18/18）**：`pages-index.html` **已完成**（主控自做；实测为 `deploy-pages.yml` 消费的部署站入口页模板，按脚本资产处理——改写 2 处事实错误、删 1 处不可定位断言，四道门 + 新增「标签序列」结构门全绿，详见台账）；**4 件批已完成并复验（17/18）**：`jump-apex-measure`、`jump-apex-verify`、`plot-path`、`path-acceptance`（四件代码行与 HEAD 逐行相同、78 模板全同、`node --check` 4/4；其中 `jump-apex-verify` 的 `禁用路径=3/基线3` 促成 `verify.ps1` 判据升级为基线判，详见台账）；**末件 `input-replay-verify.mjs` 已完成并复验**（1228 → 1256 行；代码行 1061 逐行同 HEAD、2 处行尾注释改写、**126 个模板字符串逐字节相同**、`node --check` exit 0；**登记疑似缺陷 6 条 → §7.3 #66**，最重一条为**链路级**：全仓只有 `apps/debug/src/app.ts` 的 `replayCapture.record` 一处录制入口，本脚本等的却是 `inputRecorder` 的产物 ⇒ 录制载荷恒为 0 帧、A 段必然失败、脚本最终只打印「回放未能开始」）。`path-baseline.md` 按 §2 属**保留的脚本资产**（是否按源码校对待 owner 定） | WG4 |
+| WG5b | `apps/game/scripts/**`（20 件） | **已完成（20/20）**：`check-wasm-api.mjs` 已改；主控自做并复验 **`t13-literal-sweep` / `t13-ulp-sensitivity-control` / `t13-input-surface-probe`**；**11 件批已完成并复验**（`_dbg_keys`/`_dbg_floor`/`phys-p2-trace`/`wasm-hash-pin`/`phys-diag-flat`/`phys-gate-probe2`/`phys-p2-ground`/`phys-p2-regression`/`phys-teleport-gate`/`phys-surf-crouch-smoke`/`phys-smoke`）——tracked 9 件 `verify.ps1` **0/9**、锚点 0、30 模板逐字节相同、`content-review` 57 路径 + 30 符号全命中、`node --check` 11/11；两件 gitignored（`_dbg_*`）改用**编辑前快照比对**（`strict`/`stripTrail` 双 d0；规则见规范篇陷阱第 12 条）；**A 18 / B 3 / C 6**。**主控又完成 1 件**（`phys-rate-parity.mjs`：四道门 + `node --check` 全绿，A 类含「混合分区」时长/结果与 `flatTop` 的 AABB 覆盖不一致，见 §7.3 #62）⇒ **16/20**；**末批 4 件已完成并复验**（`phys-seed-smoke` 361→377、`build-dist` 220→237、`phys-rate-parity-v2` 202→219、`phys-dual-pipe` 199→209：`verify.ps1` **0/4**、`stripTrail` 全 d0、锚点 0、**76 个模板字符串逐字节相同**（9 件合跑）、`content-review` 33 路径 + 12 符号全命中、`node --check` 9/9；主控抽查「掩码 30 = 24+6」与「`KEEP_SINGLE` 缺 `coi-serviceworker.js`」两条断言均成立；**登记疑似缺陷 15 条 → §7.3 #67**） | WG5 |
+| WG6b | `apps/viewer/scripts/**` + `apps/viewer/test/**` | **已完成（5/5）**：`scripts/build-dist.mjs`（352 → 356）、`scripts/dist-README.md`（86 → 94，prose 资产，判据见规范篇陷阱第 13 条）、`apps/viewer/test/replay-selftest.ts`（837）、`apps/viewer/test/smoke-cdp.mjs`（875 → 880）、`apps/viewer/test/node-shims.d.ts`（9 → 10）；代码同一性判据 verify.ps1 **0/4**（四件 `strict`/`stripTrail` 全 d0）、`anchor-scan` 0、`template-proof` 80 模板逐字节相同、`content-review` 6 路径 + 1 符号全命中、`node --check` 2/2。**A 15 / B 3 / C 11 / X 14**；`replay-selftest.ts` 的已删文档引用已清；**登记疑似缺陷 5 条（→ §7.3 #64）**，最重一条是 `test/maps/surf_null_4.replay` 路径失效（跨 3 文件） | WG6 |
+| WG7 | ~~`test/dual-mode-harness`~~ | **已撤销**（工程已退役，不再重编） | — |
+| WG8 | 共享层文档 5 篇 | **已完成（5/5）+ 规范篇 1 篇**：已落 `documents/architecture/overview.md`（受控范围 / 共享层构成 / 依赖方向 / 入口锚点 / 启动链与帧链 / 不变量 / 构建产物）与 `documents/ts-shared/overview.md`（目录职责 / 接口锚点 / 主流程 / 不变量 / **未接线与零调用点清单** / 测试与门禁）。两篇均通过 `check-doc-drift`（**12 篇 md / 锚点 131 / 越界 0 / 路径失效 0 / exit 0**）。**另落规范篇 1 篇**：`documents/norms/annotation-and-verification.md`（事实来源与三条禁令 / 注释书写规范 / **四道门** / 内容审查两手段 / 7 条已验证陷阱 / 记录约定）。**5 篇全部落盘**：`documents/architecture/overview.md`、`documents/phys/overview.md`、`documents/wasm-core/overview.md`、`documents/ts-shared/overview.md`、`documents/materials/overview.md`。**主控逐篇开箱抽查锚点**（phys 11 个、materials 6 个、wasm-core 8 个）全部指向所述符号；体检实测 **16 篇 md / 锚点 193 / 越界 0 / 路径失效 0 / exit 0**；三篇新稿禁用词全 0。**另记一处自查踩坑**：`documents/phys/overview.md` 初稿把「测试模块 + 项数」写成表格行，被体检判为**行数声明漂移**（裸文件名 + 数字），已改为行文表述——这与 §7.3 #47 同源 | WG1–3（已具备） |
+| WG9 | 三工程子树 | **已完成（debug 13/13、game 14/14、viewer 12/12 共 39 篇，全部经主控独立复验）**：统一模板与验收口径在 `.tmp/wg9/TEMPLATE.md`（节标题固定 / 锚点格式 / 禁止跨工程类推 / 6 道门 / 报告六节），行尾归一器 `.tmp/wg9/normalize-crlf.mjs`。**viewer 复验实测**：12 篇全 `CRLF` 无 BOM、`content-review` **101 路径 + 11 符号全命中**、`anchor-scan` 违规 0、`link-check` 0 缺失、禁用词 0；抽样 **44 条**锚点逐条开箱全部命中所述符号（另复核 3 条实质断言）。**game 复验实测**：14 篇全 `CRLF` 无 BOM、`content-review` **90 路径 + 25 符号全命中**、`anchor-scan` 违规 0、`link-check` 0 缺失、禁用词 0；抽样 **45 条**锚点全部命中；**交付方另实跑 `cargo check --manifest-path apps/game/crates/wasm/Cargo.toml` exit 0** 与 `phys-p2-regression.mjs`（12 组 5 组发散、**exit 0** ⇒ 与 #63③ 一致）。**debug 复验实测**：13 篇全 `CRLF` 无 BOM、`content-review` **147 路径 + 17 符号全命中**、`anchor-scan` **75 锚点 / 20 完整路径目标 / 违规 0**、`link-check` 0 缺失、禁用词 0；抽样 **65 条**锚点全部命中。**⚠ 交付面须记**：三棵子树的 12 篇顶层文档（`{README,overview,sequences,differences}.md` ×3）落在 **HEAD 里存在旧文档的同名路径**上（`git status` 报 `M`），而旧 `implementation/*` 共 **17 个路径仍为 `D`（未重建，符合 B2）**、新增 `implementation/*` **27 篇为未跟踪**；**主控做了 B2 合规实测**（`.tmp/cap/b2-check.mjs`）：把 12 个路径的 HEAD 旧文实质行（共 **789 行**）与新稿逐行比对，**逐字命中 0 / 复用率 0.0%** ⇒ `B2-CLEAN`（新稿确为按代码重写，未复用旧文档）。**新增工具**：`.tmp/tools/anchor-open.mjs`（锚点开箱）、`.tmp/tools/link-check.mjs`（markdown 相对链接完整性，补上「没有任何门查链接」的缺口；首轮全仓 52 篇仅 1 处坏链已修）、`.tmp/tools/config-proof.mjs`（配置面判据） | WG4–6（代码已冻结） |
+| WG10 | 根 README / CHANGELOG / 规范类 / **index 重建** | **已完成**：根 `README.md`、`CHANGELOG.md`、`documents/index.md` 三篇落地并过门（漂移体检 **0 越界 / 0 路径失效**、`content-review` 全命中、`link-check` 全绿、行尾与禁用词全绿；三篇的 `文件:行号` 锚点已用 `.tmp/tools/anchor-open.mjs` 逐条开箱复核）。**`documents/index.md` 已按 WG9 落地后的实际文件树重建**：覆盖 `documents/` 下全部 **49 篇** md（共享层 5 篇 + 三棵应用子树 39 篇 + 规范篇 + 计划三篇 + 本页），**51 条相对链接全部可解析**；旧索引未沿用。**台账口径**：本表不再写这些文件的行数（行数会随修订漂移，写死必然被漂移体检判失败——本轮即因此修掉一次） | WG8 + WG9（已完成） |
+| WG11 | 全量复检 | **已完成（判定通过）**：静止期一次跑满四类判据 —— ① **代码 179 件**（`.ts`+`.mjs`+`.rs`，`verify.ps1` 分 5 批）**失败 0**（`strict` 差异全为行尾注释改写、`stripTrail` 全 `d0`）；② **文档**：`check-doc-drift` **58 篇 ｜ 行数声明 2（漂移 0）｜锚点 2909（越界 0）｜路径失效 0 ｜歧义 27**、`anchor-scan` 77 锚点 / 违规 0、`content-review` 401 路径 + 54 符号 `bad=0`、`link-check` 0 缺失；③ **资产**：`py-proof` / `cmd-proof` 9/9 / `html-struct-proof` 4/4 / `css-proof` 2/2 全绿；④ **编译**：`cargo check` + `cargo test -p websurf-phys` exit 0（**10 passed**）、三工程 typecheck 3/3 exit 0；⑤ **行尾**：新建 `.tmp/tools/eol-sweep.mjs` 全量 `scanned=249 problems=2`（两处为 HEAD 既有尾空白，按基线保留）。**过程中的一处假绿已更正**：首轮清单取自 `git status --porcelain`（不带 `-uall`），git 把 7 个完全未跟踪的目录折叠成目录路径 ⇒ 既产出 `EISDIR` 假失败行，又使这些目录内的全部 `.md` 整轮漏扫；已改用 `-uall` + 目录递归（即上述新工具），该坑记为规范篇陷阱第 **16** 条；同轮实修 `documents/phys/overview.md` 1 处新稿尾空白。**补检（同一盲区的第二个后果）**：台账 `documents/plan/progress-log.md` 也因此整篇没被 `content-review` 查过——直接跑后抓出 **30 条路径 + 6 条符号**不合格，逐条判读后**修掉 13 处路径文本与 2 处实测不存在的符号名**（`#64②` 的 `KEY_DEFS` → 真实标识符 `KEYS`；`keyboard.ts` 的 `control` → `ControlLeft`/`ControlRight`），另把 `#69④` 一处证据句写实；残余 17 路径 + 4 符号判为「已删文件的历史引用 / 引用的错误写法样本 / 工具名误配」三类非断言，判读口径已入规范篇 §4。**静止期末轮（含配置面 14 件与 owner 授权的代码/CI 处置）在冻结态重跑**：**265** 个落盘路径、漂移 **58 篇 ｜ 0 越界 ｜ 0 路径失效**、`anchor-scan` 79 锚点 / 违规 0、`link-check` 89 篇 / 63 链接 / 0 缺失、`content-review` 874（24 bad）+ 154（5 bad）**全部**落在台账三类非断言、四项资产证明全绿、`cargo check`/`cargo test` exit 0、三工程 typecheck 3/3 exit 0、`verify.ps1` 失败 **3 件**＝授权改动的三个 `.mjs`、行尾扫描 265 件 `problems=2`（HEAD 既有尾空白）。**文档/注释重编范围至此全部完成**，余下只有按「只记录不修」保留的疑似缺陷待裁决项。明细见台账 WG11 四行 | 全部 |
+| WG12 | **范围补漏**（`src/` 根与工具层、`apps/*/web` 资产、`.cmd`、配置面） | **已完成（21 件代码/资产 + 14 件配置面）**：① `src/scripts/cargo-env.cmd` **已完成**（注释按该文件自带的「pure ASCII」约束改写为英文，`cmd-proof` 命令行 14 = 14、`nonASCII=0`）；② `apps/viewer/web/index.html` **已完成**（8 条注释；`html-struct-proof` 标签 154 = 154）；③ `apps/game/web/index.html` **已完成**（6 条；标签 577 = 577；favicon 注释已如实写明该文件不在工作区 ⇒ 两条声明都 404，见 §7.3 #5）；④ `apps/viewer/web/styles.css` **已完成**（16 个块；新建 `.tmp/tools/css-proof.mjs` 证明规则文本 17198 = 17198 逐字符相同）；⑤ `apps/game/web/styles.css` **已完成**（44 块中 26 个纯分节标签核对无误后保留、18 个改写；修正一处事实错误——旧注称隐藏文件控件样式由 `#loadMapBtn` 承担，实测本文件无该 id 规则、外观是 `#panel .map-btn`；规则文本 21310 = 21310、代码行 521 = 521）；⑥ **`src/` 侧 8 件已完成并经主控独立复验**（`src/lib.rs` 12→19、`src/serve.py` 64→73、`src/scripts/{check-doc-drift,check-shared-sync,wasm-stale-check}.mjs` 117→127 / 229→238 / 69→77、`src/scripts/lib/{dist-pack,wasm-api-contract}.mjs` 194→210 / 203→213、`src/scripts/install-wasm-bindgen.cmd` 105→114）：`verify.ps1` **10/12**，唯二两件失败（`src/serve.py`、`install-wasm-bindgen.cmd`）**纯属工具盲区**——它只把 `//` 当注释，于是 Python 的 `#`/docstring 与 cmd 的 `REM` 被计入「代码行」；**主控自建替代判据** `.tmp/tools/py-proof.py`（`ast` 抹 docstring 后 `ast.dump` 相同 + `tokenize` 码流相同 + 真实代码行 41/41 相同）⇒ `PY-CODE-IDENTICAL`，cmd 复用 `cmd-proof` ⇒ `命令行 78 = 78 diff=0 nonASCII=0`；其余门全绿（锚点 0、76 模板逐字节相同、`content-review` 33 路径 + 12 符号全命中、`node --check` 9/9）；**登记疑似缺陷 10 条 → §7.3 #68**；⑦ `apps/debug/web/index.html` **已完成**（689 → 699 行；35 个注释块中 13 处改写、22 个纯分节标签核对后保留、**新增 2 条**（把 `lightingModeHint` 与 `pathBuildTag` 这两个**无任何代码读写的死 id** 如实标注）；删掉变更史式 PVS 说明与不可定位实测数字，折角着色按 `turnColor` 改为**两档**（旧注的「绿 ≤5°」在实现里不存在）；判据：`anchor-scan` 0 / `content-review` **9 路径 + 8 符号全命中** / `html-struct-proof` 标签 518 = 518 / **主控自建 `html-markup-proof.mjs`：标记+文本逐字符相同、属性值多重集 580 = 580** / `verify.ps1` 结构计数全绿；**另修掉该结构门的行尾陷阱**（属性值含 `>` 的标签被切成跨行记号，`git show` 是 LF 而工作区 CRLF ⇒ 曾误报 DIFF 4，已加行尾归一）；**登记待裁决 1 条**：同件 `title` 属性（代码字符串，未改）仍写三档着色，与实现不符）；⑧ **口径更正后已完成**：原先记「9 个工程 `.cmd` 实测 0 条注释」**是错的**——实测 7 件共 **48 条** `REM`/`::` 注释（`apps/debug/{start-dev,play,build-dist}` = 11/6/2、`apps/game/{start-dev,play}` = 9/6、`apps/viewer/{start-dev,play}` = 9/5），只有 `apps/{game,viewer}/build-dist.cmd` **确为 0 条**。7 件已改写并经主控复验（`cmd-proof` 9/9 `diff=0 nonASCII=0`；`git diff` **增删各 48 行、非 `REM` 行 = 0**；两件 0 注释件无 diff 行）；**主控裁决：两件 0 注释件不补头注**（原无则不加，禁止在注释改写之外增删结构）。**真正无对象**：`apps/debug/web/styles.css`（全文仅 `.health-log` 一条规则、无注释）、`src/scripts/ensure-node-deps.cmd`、三个 `package.json`；⑨ **配置面已完成（owner 裁决纳入）**：`Cargo.toml` **9 个** + `.gitignore` **5 个**（根、三工程、**外加 `src/.gitignore`**——此前记「4 个」时漏掉它）+ `tsconfig.json` **3 个（0 注释 ⇒ 无对象）**，本组共 **14 个文件**；判据 `config-proof.mjs`（行尾归一 + 剥 `#` 注释后逐字符比对配置文本）⇒ 9 个 `Cargo.toml` 全部**配置文本逐字符相同**（配置字符 187/173/173/173/1595/1595/517/382/1317 前后一致），根 `.gitignore` 的 DIFF **仍是本轮之前既有的 `+.ak/` 一行**（该文件规则 **52 行**经编辑前快照比对未变），`eol-sweep` 14 件 `problems=0`。**实测推翻的旧注**：「四个模块 wasm crate」→ **3 个**且都不在根 workspace；三工程 wasm crate 的「模块结构」头注列的 `src/vbsp/` 等**实际全在 `src/wasm-core/`**（那些 crate 目录下只有 `Cargo.toml` 与 `src/lib.rs`）；viewer 不依赖 `websurf-phys`（该包不在其 lock 内）；viewer 无 `load_vmdl`。**刻意保留**：根 `.gitignore` 的 `test/game-core/` 规则（配置项，按「只改注释」口径保留）。**本轮补做（配置面计 15 个文件）**：`src/vendor/vmdl/Cargo.toml` 的注释也在内——原写 patch 由「两端工程」引用且路径为 `../src/vendor/vmdl`，实测 **4 处**声明、路径是仓库根 `Cargo.toml` 的 `src/vendor/vmdl` 与三工程各自的 `../../src/vendor/vmdl`；并据上游 `vmdl-0.2.0.crate` 解包逐文件比对，把「副本差异」补全为 **2 个文件**（`src/vendor/vmdl/src/vtx/mod.rs` 的 `Strip::indices` + `src/vendor/vmdl/src/lib.rs` 的 2 处返回类型生命周期标注），5 个 manifest（vendored + 根 + 三工程）注释一并改写，`config-proof` 5/5、`content-review` 10 路径 + 4 符号全命中。明细见台账配置面行；⑪ **`.cmd` 实测出的 5 条疑似缺陷**（门/消费方 wasm 路径错配、viewer python 守卫使兜底不可达、端口占用分支的 dist 假定、`start-dev.cmd` 缺工具链守卫）→ §7.3 #69；⑫ **另实测**：这 9 个 `.cmd` **没有任何 `package.json` script 或 `.cmd` 转发**（`dev`/`build:dist`/`check:api` 是并行路径）⇒ 属手工/双击入口；⑩ **明确排除**：`src/vendor/vmdl/**`、`apps/game/temp/*.txt`、三个 `web/{app.js,worker.js}`、`web/coi-serviceworker.js`、`src/phys/{LICENSE,NOTICE}`、`package-lock.json` ×3。**盘点工具**：`.tmp/tools/coverage-scan.mjs`（未改动数已由 95 降到 77，余项均为上述 ⑧⑨⑩ 类） | WG4–6 |
+
+### 7.3 当前阻塞与待决
+
+> **已结案项已移入 [`documents/plan/progress-log.md`](documents/plan/progress-log.md) 的「§7.3 已结案（逐行原样移出）」小节**，共 **19** 条：#6、#12、#13、#14、#15、#16、#20、#22、#24、#29、#32、#33、#34、#37、#39、#45、#47、#48、#49。移出仅换存放位置、**内容未改**；本表只保留「仍生效的规则」与「待 owner 裁决项」。 **另**：以下 **11 条规则 / 工具说明 / 已解决项**——#17、#18、#19、#21、#23、#25、#35、#42、#44、#46、#56——同样**逐行原样**移入该文件的「§7.3 规则与工具（逐行原样移出）」小节；它们是**规则与工具文档**，不是待决项，本表只保留「仍生效的短规则」与「待 owner 裁决项」。
+
+| # | 事项 | 状态 |
+|---|---|---|
+| 1 | 根 README 已删除，仓库暂无 README —— 属预期（WG10 从源码重建）。是否需临时占位由 owner 决定 | 已知，非阻塞 |
+| 2 | 导航 index 已删除；导航在 WG10 按最终文件重建 | 已知，非阻塞 |
+| 3 | 旧 `AGENTS.md` 的通用工程规范（文件归属 / 临时区 / 产物 / 文档格式）**未在本文件复述** —— 重编期间以任务书为准；是否重建由 owner 在 WG10 决定 | **待 owner 裁决** |
+| 4 | ~~CI 与共享脚本仍引用已退役的 harness~~ **已处置（owner 裁决「清掉这些残留引用」）**：**6 个文件**全部清完 —— `ci-gates.yml` 删 4 步并把 job 改名为 `debug-gates`（steps 35→31、YAML 实测可解析）、`deploy-pages.yml` 去掉不可复核的旧实测数字、`PULL_REQUEST_TEMPLATE.md` 范围/测试项改写、`apps/debug/scripts/jump-apex-verify.mjs` 改读**本工程** `apps/debug/pkg/`（该门由「必然 SKIP 空转」变为**实跑**：`npm run test:jump-apex` exit 0、198 行、`[SKIP]` 0 次、跑满 25 格）、`src/scripts/{check-doc-drift,check-shared-sync}.mjs` 去掉退役路径（后者门禁由**恒失败转为四项全过**）。**全仓复扫 321 个文件**后仅剩根 `.gitignore` 的 `test/game-core/` 规则（配置项而非注释，按「只改注释」口径**刻意保留**） | **已结案**（本轮唯一的代码 / CI 改动，均经 owner 授权；逐件判据见台账两行） |
+| 5 | **apps/game 的 favicon.ico 被同一批删除波及**：该文件在库中唯一，而 `apps/game/web/index.html:22-23` 仍声明 `./favicon.ico` 与 `/favicon.ico` 两条链接（行号本轮实测复校）（同处注释承诺"两条路径都不 404"），现两条均落空 | **待 owner 裁决**是否恢复（与 harness 退役无逻辑关联，仅同批被删） |
+| 7 | **零分配支路已实现但未接线**：`tick_into` / `state_out_ptr` / `seed_from` 只被 `src/ts-shared/` 的 `tick-authority.ts`、`decoupled-loop.ts` 调用，而这两个控制器在三个工程内均无装配点（`createTickAuthority` 仅被其单测调用）→ 线上路径实际走 `tick()` 返回对象 | 已知，须在文档中如实写"已实现、未接线"，不得写成线上热路径 |
+| 8 | `apps/debug/src/wasm.d.ts:67-119` 的 `PhysWorld` 类型落后源码 7 个方法（缺 `tick_into` / `state_out_ptr` / `set_state_ex` / `state_full_json` / `seed_from` / `gate_veto_count` / `debug_trace`），debug 侧只能运行时 cast（`renderer-main.ts:1268`、`:1285`） | **待 owner 裁决**（改 .d.ts 属代码改动，未擅改） |
+| 9 | `apps/game/scripts/check-wasm-api.mjs:52-70` 的 `PHYS_API` 只列 **17 项**，缺 `new` / `state_full_json` / `set_state_ex` / `seed_from` / `gate_veto_count` / `debug_trace` → 对 24 个导出的契约覆盖不完整 | **待 owner 裁决**（门禁脚本改动，未擅改） |
+| 10 | `set_yaw_pitch` 在 `apps/**` 与 `src/**` 内**零调用点**；`predict` 仅被 `apps/game/scripts` 两个脚本调用 | 已知；注释已如实标注，是否保留导出由 owner 决定 |
+| 11 | `teleport_gate_ticks` 参数链已死：`set_params` 的 JSON 键可写、`player.rs` 有该字段（默认 3）、`step_core` 的传送检测调用点确实传入，但 `teleport.rs` 的 `check` 形参名为 `_gate_ticks` 且函数体从不读它 | 已知；注释已标注"该键不改变行为"，是否删字段由 owner 决定 |
+
+
+> **三次瘦身（2026-09-22）**：§7.3 的累积待裁决行 **#26–#69 共 28 条已逐行原样移入**
+> [`documents/plan/progress-log.md`](documents/plan/progress-log.md) 的「§7.3 待裁决项（逐行原样移出）」小节；
+> 本表只保留上方 #1–#11 的短规则与下方**一行一条的索引**（索引是为便于定位，**原文以台账为准**，索引与原文冲突时以原文为准）。
+
+| # | 事项（一行摘要；**完整原文已逐行原样移入台账**的「§7.3 待裁决项」小节） | 状态 |
+|---|---|---|
+| 26 | BSP 导出未把 `KHR_texture_transform` 登记进 `extensionsUsed` | 只记录不修 |
+| 27 | `vtf.rs` 4 条读写不一致 + 5 处死代码 | 只记录不修 |
+| 28 | `lightmap.rs` 错误串含外部实现引用 `Lightmap.cs:64` | 待裁决（改文案属代码） |
+| 30 | `mosaic/mtz.rs` 8 条编解码不一致 | 只记录不修 |
+| 31 | `vbsp/data/entity.rs` 6 条（含 `start_disabled` 恒 false 的跨工程实锤） | 待裁决（第①条） |
+| 36 | `compute-mode.ts` 的 `summary` 字面量含已删文档编号 | 待裁决（改字面量属代码） |
+| 38 | `jump-apex-verify.mjs` 内嵌「修复前行为」复刻；`jump-apex-serve.mjs` 依赖两处代码文本切片锚点 | 已知（切片锚点已实测未破坏） |
+| 40 | `tick-authority.test.ts` 断言标签含 `Q1` / `§8.5` | 待裁决（属代码） |
+| 41 | owner 指令：子代理并发 ≤3（含 19 并发被掐断的复盘） | 已生效 |
+| 43 | 旧文档篇数口径对撞（68 篇 vs 实测 56 篇） | 待终审 |
+| 50 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 待裁决 |
+| 51 | 规范篇里的禁用词是「引用对象」（全仓唯一允许出现处） | 已说明，非缺陷 |
+| 52 | `check-wasm-api.mjs` 输出标签 `F4` 无出处 | 待裁决 |
+| 53 | game 类型面/配置面 3 条（`worker-types.ts` 落后实际载荷等） | 待裁决 |
+| 54 | viewer `timeline.ts` 的 `title` 文案与 prerun 负段口径矛盾 | 待裁决（属代码） |
+| 55 | viewer 死支路 4 条（A-B 区间带恒不显示 / 零调用点 / 混基宽度） | 待裁决 |
+| 58 | viewer `core` + `ui` 9 条（含 `ensureWasm` 永久缓存失败） | 待裁决 |
+| 59 | viewer `replay/` 10 条（含 GPU 资源不释放、blob URL 泄漏） | 待裁决 |
+| 60 | debug 脚本 10 条（**jump-apex 采样链链路级**仍待裁决；其中「`test:jump-apex` 空转」**已于本轮处置**——该脚本改读本工程 `apps/debug/pkg/`，门由空转变实跑：exit 0 / 198 行 / 0 SKIP） | 待裁决（①属代码） |
+| 61 | viewer `crates/wasm` 6 条（`.MDL` 三件套替换隐患等） | 待裁决 |
+| 62 | game `phys-rate-parity` 4 条（混合分区时长/结果、`flatTop` AABB） | 待裁决 |
+| 63 | game 脚本 11 件 7 条（`_dbg_floor` 的 `onGround` 恒 undefined 等） | 待裁决（④属代码） |
+| 64 | WG6b 6 条（`test/maps/surf_null_4.replay` 跨 3 文件失效等） | 待裁决 |
+| 65 | 范围盘点（coverage-scan）+ **配置面口径冲突（已结案）**：件数实测更正为 **9 `Cargo.toml` / 5 `.gitignore`**（含 `src/.gitignore`，此前记 4 个时漏了它）、`tsconfig.json` 3 个 0 注释＝无对象；配置面 14 件已按 owner 裁决纳入并完成（`config-proof` 全部「配置文本逐字符相同」，见台账）。另：根 `.gitignore` 的 `.ak/` 规则注释已改写为「当前工作区无该目录，规则保留作归档位」（原注释声称旧 md 已移入该目录，而该目录不存在） | **已结案** |
+| 66 | `input-replay-verify.mjs` 5 条（`inputRecorder` 永不落样本、`f.dt` 字段不存在、页面缺 7 个 id 等） | 待裁决 |
+| 67 | WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 `coi-serviceworker.js` 等） | 待裁决 |
+| 68 | WG12 `src/` 侧 10 条（`check-shared-sync` 门禁恒失败**已于本轮处置**：退役路径出清单后四项子检查全过；余 `bytes=text.length` 等 9 条仍待裁决） | 待裁决（①已结案） |
+| 69 | 9 个 `.cmd` 5 条（门/消费方 wasm 路径错配、viewer python 守卫使兜底不可达等） | 待裁决 |
+| 70 | **依赖表「本 crate 无引用点」清单**（两法一致：源码引用面扫描 + `cargo check` 的 `-W unused-crate-dependencies`）：debug `websurf-wasm` **26 项**、game **29 项**、viewer **1 项**（`gltf`）；另 `websurf-wasm-core` **3 项**、vendored `vmdl` **1 项**（`tracing`，上游 manifest 同样声明）。判读：**无引用点 ≠ 可删**（`getrandom` / `getrandom_03` / `path_dedot` 是 **feature 开关**），故未动任何配置行；如需瘦身建议**逐项删 + 每次跑 `cargo check` 与 `npm run build:wasm`** 验证 | 待裁决（本轮只测不改） |
+
+### 7.4 下一步（建议顺序）
+
+1. **WG4 / WG5 / WG6 / WG6b 全部收尾**：四组均已 100% 完成并经主控独立复验（代码类走 13 项四道门；资产/配置类按各自专用判据——HTML 标签序列、CSS 规则文本、cmd 命令行、prose 按 §13 判）。
+2. **WG12 已完成**：21 件代码 / 资产已完成并复验（`src/` 侧 8 件、`apps/debug/web/index.html`、三工程 `web/{index.html,styles.css}` 6 件、`src/scripts/cargo-env.cmd`、7 个工程 `.cmd`）；**配置面 15 件（10 `Cargo.toml`（含 vendored `src/vendor/vmdl/Cargo.toml`）+ 5 `.gitignore`）已按 owner 裁决纳入并完成**（`config-proof` 全部「配置文本逐字符相同」）。余下只剩 §7.3 索引里各工作组登记的**疑似缺陷待裁决项**（按「只记录不修」口径保留）。
+3. **WG9（已完成）**：三工程子树文档（`documents/<app>/{README,overview,sequences,differences}.md` + `implementation/*.md`）共 **39 篇**已交付并经主控逐棵独立复验（统一模板与 6 道门见 `.tmp/wg9/TEMPLATE.md`）：`check-doc-drift` 0 漂移 / 0 越界 / 0 路径失效、`anchor-scan` 0 违规、`content-review` 全命中、行尾与禁用词全绿、三棵共 **154 条**锚点抽样开箱全部命中所述符号。**另做 B2 合规实测**：12 篇同名路径新稿与 HEAD 旧文逐行比对，复用率 **0.0%**。
+4. **WG10（已完成）**：根 `README.md`、`CHANGELOG.md`、`documents/index.md` 已落并过门；索引按 WG9 落地后的实际文件树重建（49 篇 md、51 条相对链接全可解析）。**口径一致性已完成**：`README.md` 的「文档地图」段已补入三棵应用子树的入口与 `documents/index.md` 本身，与索引口径一致。
+5. **WG11 全量复检（已完成）**：全仓四道门已跑满（`.tmp/tools/wg11-check.ps1` 五段：资产族证明 → 行尾/BOM 全扫 → 文档门 → 编译门 → `verify.ps1` 分批）；`check-doc-drift.mjs` 0 漂移 / 0 越界 / 0 路径失效；README ↔ index ↔ 工程文档口径一致。结论与计数见 §7.2 WG11 行，明细见台账。
+6. **静止期已跑完全量闸门并归档日志**（WG11 证据：`.tmp/gate/`）；**工具坑三条**：① 脚本末尾的 `exit` 会终止整个 pwsh 进程，用 `*>` 重定向时末行汇总可能丢失 ⇒ 判读改为过滤 `--- failing chunk` 与 `★代码部分不同`；② `git status --porcelain` 会折叠完全未跟踪的目录 ⇒ 清单必须带 `-uall`（规范篇陷阱 #16）；③ 管道截断（`| Select-Object -First`）会把 `$LASTEXITCODE` 变成 `-1`，取退出码前先重定向到文件（#7）。
+---
+
+## 附录 A：仓库构建与验证速查
+
+| 用途 | 命令 |
+|---|---|
+| 共享物理 | `cargo check -p websurf-phys`、`cargo test -p websurf-phys`（实测 10 项全过） |
+| 工程构建 | 各工程 `npm run typecheck` / `build:ts` / `build:dist`；改 Rust 后需 `npm run build:wasm` |
+| 文档体检 | `node src/scripts/check-doc-drift.mjs [文件]` |
+| dev 端口 | debug 8080 / game 8090 / viewer 8100 |

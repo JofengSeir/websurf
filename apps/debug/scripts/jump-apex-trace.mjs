@@ -1,9 +1,19 @@
 #!/usr/bin/env node
 /**
- * 定位「超限跳」的**真正起始**：从给定的超限跳时刻向前回溯，找到最近一次
- * 渲染 vy 由 <350 跃升到 ≥350 的那一帧（单跳 302 只到 302；≥350 说明发生了
- * 额外冲量注入），然后打印该帧起 ±window 的逐帧表。
- * 用法：node scripts/jump-apex-trace.mjs <label> <tMs> [windowMs]
+ * 定位「超限跳」的**真正起始**：从给定时刻向前回溯，找最近一次「渲染 vy 由 <350 跃升到 ≥350」
+ * 的帧，再打印该帧起的一段逐帧表（该帧标 `<<INJECT`）。
+ *
+ * 用法：`node scripts/jump-apex-trace.mjs <label> <tMs> [windowMs=60]`
+ * - 数据源：`apps/debug/scripts/jump-apex-measure.mjs` 写出的
+ *   `apps/debug/.tmp/jump-apex/<label>.json`；
+ * - `<tMs>` 是**相对首帧**的毫秒（对比 `apps/debug/scripts/jump-apex-window.mjs` 收的是
+ *   `performance.now()` 绝对毫秒）；
+ * - 350 是「单跳到不了」的判据：单跳起跳速度 302.05（同族
+ *   `apps/debug/scripts/jump-apex-report.mjs` 的理论顶高式），≥350 说明该帧有额外冲量注入；
+ * - 找不到跃升帧时退回「target 之后的第一帧」；两个分支都失败时 `start` 仍是 -1，随后
+ *   `S[start].t` 取到 `undefined` 会抛 TypeError（本脚本未处理该分支）；
+ * - 打印区间是 `i ∈ [start - round(win/3), start + win*3)`；`base` 取全部 `y` 的 2% 分位数，
+ *   `Δbase` 是相对它的高度；权威列 `ay`/`avg`/`avy` 取不到时为 `null`（显示 `—`）。
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

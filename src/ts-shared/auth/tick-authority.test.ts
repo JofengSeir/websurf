@@ -1,30 +1,42 @@
 /**
- * 单测：tick 模式 F4-C 控制器 + auth-loop additive 钩子（任务 t4）。
+ * 单测：`src/ts-shared/auth/tick-authority.ts` 的 `createTickAuthority` 与
+ * `src/ts-shared/auth/auth-loop.ts` 的 `createAuthLoop` 加性钩子。
  *
- * 覆盖（captain t4 指令 + t6-render-ahead §8.1/§8.4/§8.5/§10.1/§11.2/§11.3）：
- * - §1 peekInput 非消耗读 + maxStep 饱和钳制（单源输入台账：真实 tick 全窗消费）；
- * - §2 引导期 bootstrap（lastAuthLabel null → 纯历史回落）；
- * - §3 OPT happy path：种子投影 → 排序门 → OPT 帧（f' meta 三元组 + OPT 位 +
- *   timeMs=投影 due）+ 门闭账恒等式（⑧）；
- * - §4 div bulk 桶（非翻转 tick：硬界内 / 超界告警 / 均值累计）；
- *   §5 div flip 桶（接触字段翻转独立计数）；
- * - §6/§7 内容封帽（事件/on_ground/blocked/ladder/ducked/surfing）→ 孤发不经门；
- * - §8 key-edge gating；§9 窗外/地板/追爆无尝试（ε 尾由开火地板吸收 → 门分账
- *   不动；地板损失走门上游 `floorSkips` 显式记账 = lead-miss 全口径补全）；
- * - §10 同标签重发守卫；§11 R 键边沿断点；§12 权威事件排空（teleport/death →
- *   段 +1 + 位编码，一次性消费）；
- * - §13 hold 冻结（noteHoldTick → 投影作废 + holdTicks）；§14 world 重建（标号
- *   归零 + 门重建 → bootstrap 回归）；§15 外部断点（respawn/teleport/load）；
- * - §16 非 tick 模式零回归（meta undefined / 全钩子 no-op）；§17 MsgState 回退
- *   （F4 禁用 → 纯历史）；§18 动态周期 → 门重建（δ cap 随 T 重钳）；
- * - §20 红线审计（验收 #2）：乐观径零驱动权威实例 + authority 调用面 = 只读
- *   四方法（无 set_* 写面，结构性审计）；
- * - §19 auth-loop additive 钩子集成（真 timer）：tick 模式零分配支路自动推进 +
- *   每 tick meta 三元组；hold 顶置（帧定格 + 标号推进）；耦合回归（无钩子 =
-   * v7 行为：帧推进 + I_A_* 三槽零触碰）。
+ * 被测对象是控制器对「世界面」的唯一读取方式：`TickAuthorityEnv` 注入的
+ * `world.seed_from` / `world.state_out`，以及 `src/ts-shared/auth/shared-state.ts`
+ * 的 `ShmState` / `createWorkerSharedState` 提供的共享缓冲视图。
+ *
+ * 本测什么（按代码实际断言归纳）：
+ * - `peekInput` 为非消耗读、`maxStep` 饱和钳制，真实 tick 全窗消费输入台账；
+ * - 引导期：`lastAuthLabel` 为空时不投乐观帧，回落到纯历史；
+ * - 乐观帧：门通过后投出的帧同时满足 `meta` 三元组、位编码、`timeMs` 等于投影 due；
+ * - 门闭账恒等式：门每次裁决后投影侧与权威侧分账计数闭合；
+ * - 位移差分桶：非翻转 tick 落 bulk 桶（硬界内 / 超界告警 / 均值累计），
+ *   接触字段翻转的 tick 落独立 flip 桶；
+ * - 内容封帽：事件与 `on_ground` / `blocked` / `ladder` / `ducked` / `surfing`
+ *   字段的封帽，孤发帧不经门；
+ * - 窗外 / 地板 / 追爆不产生尝试，其损失记在门上游的 `floorSkips`，门分账不动；
+ * - 键边沿门控与 `R` 键边沿断点；
+ * - 同标签重发守卫；
+ * - 权威事件排空：`teleport` / `death` 使段号 +1 并写入位编码，且一次性消费；
+ * - `hold` 冻结：`noteHoldTick` 使投影作废并累计 `holdTicks`；
+ * - 外部断点：`respawn` / `teleport` / `load` 后重新进入引导期；
+ * - `world` 重建：标号归零、门重建，回到引导期语义；
+ * - `i32` 回绕：段号与标签在 `i32` 边界上的推进与比较不退化；
+ * - `MsgState` 回退：`F4` 禁用时退回纯历史；
+ * - 动态周期：`T` 变化触发门重建，`δ` cap 随 `T` 重钳；
+ * - 非 tick 模式零回归：`meta` 为 `undefined`、全部钩子 no-op；
+ * - 红线审计：乐观径不触碰权威实例的读取面之外，`authority` 侧只有只读方法、
+ *   无 `set_*` 写面（结构性审计）；
+ * - 与 `createAuthLoop` 的集成（真 timer）：tick 模式零分配支路自动推进且每 tick
+ *   带 `meta` 三元组；`hold` 顶置时帧定格而标号继续推进；不装钩子时帧照常推进、
+ *   `I_A_*` 三槽零触碰。
+ *
+ * 口径：断言标签、`console.log` 分组名与运行命令的输出路径中仍含历史编号，
+ * 它们都是**代码/路径文本**，本次注释重编不改动；重写范围仅为 `//` 与块注释文本。
  *
  * 运行（node，禁浏览器）：
- *   cd game && npx esbuild ../src/ts-shared/auth/tick-authority.test.ts \
+ *   cd apps/game && npx esbuild ../../src/ts-shared/auth/tick-authority.test.ts \
  *     --bundle --format=esm --platform=node --outfile=node_modules/.cache/t4-tests/tick-authority.test.mjs \
  *     && node node_modules/.cache/t4-tests/tick-authority.test.mjs
  */
@@ -43,11 +55,11 @@ import { createWorkerSharedState } from './shared-state.js';
 import { createTickAuthority, type TickAuthorityEnv } from './tick-authority.js';
 import { createAuthLoop, type PhysWorldLike } from './auth-loop.js';
 
-// 断言助手（与 shared-state.protocol.test.ts 同风格——node 类型不可用，就地定义）
+// 断言助手：node 类型不可用，故就地定义（不 import 任何断言库）
 function expect(cond: boolean, label: string): void {
   if (!cond) throw new Error(`[FAIL] ${label}`);
 }
-/** 非空收窄（null/undefined 即抛）。 */
+/** 非空收窄：`null` / `undefined` 一律抛 `[FAIL] <label>`。 */
 function def<T>(v: T | null | undefined, label: string): T {
   if (v === null || v === undefined) throw new Error(`[FAIL] ${label}`);
   return v;
@@ -63,11 +75,13 @@ const assert = {
 
 const T = 15.625;
 
-/** 确定性假物理实例（结构性满足 F4AuthorityWorld——state_out 即真实 wasm 语义：
- * 共享 ArrayBuffer 不同 byteOffset 的 Float64Array(22) 视图）。确定性规则：
- * pos.x += dx + dt·10；on_ground=keys&1；blocked_ticks+=keys&2?1:0；ducked=keys&8；
- * ladder=keys&16?5:−1；surfing=keys&32；teleport 事件=keys&4；death 事件=keys&64。
- * 写面仅有自身视图（F4AuthorityWorld 权限清单审计面同构）。 */
+/** 确定性假物理实例，结构性满足 `TickAuthorityEnv` 取到的权威世界形状。
+ * `view` 是共享 `ArrayBuffer` 指定 `byteOffset` 上的 `Float64Array(22)`——与真实
+ * wasm 侧 `state_out_ptr` 指向同一块内存的语义一致。`tick_into` 的确定性规则：
+ * `view[0] += dx + dt·10`；`view[21] = keys&1`；`view[13] += keys&2 ? 1 : 0`；
+ * `view[8] = keys&8`；`view[14] = keys&16 ? 5 : -1`；`view[12] = keys&32`；
+ * `keys&4` 入队 `teleport` 事件，`keys&64` 入队 `death` 事件。写面仅自身 `view`，
+ * `state_out_ptr` 只回自身 `byteOffset`，`seed_from` 只写自身 `view`。 */
 class FakeWorld {
   readonly view: Float64Array;
   private events: { kind: string }[] = [];
@@ -138,7 +152,8 @@ function makeCtx(): Ctx {
   return { sab, shm, auth, scratch, wasmBuf, env, c, posts, rawI32: new Int32Array(sab), dstF: new Float64Array(12), dstI: new Int32Array(6) };
 }
 
-/** 标准生命周期：enterMode → 首帧 meta 排空 → bootstrap 真实 tick（label 0）。 */
+/** 标准生命周期：`enterMode` → 排空首帧 `meta`（断言它是 `modeSwitch` 且 `tick` 为 0）
+ * → 再调一次 `publishMeta`，从而置上标签 0 的真实 tick，作为引导锚。 */
 function boot(ctx: Ctx): void {
   ctx.c.enterMode();
   const fm = def(ctx.c.firstFrameMeta(), 'firstFrameMeta 非空');
@@ -147,7 +162,7 @@ function boot(ctx: Ctx): void {
   ctx.c.publishMeta(); // label 0 真实 tick（引导锚）
 }
 
-/** 闭账恒等式断言（⑧）：published + leadMiss + blockedOrder ≡ 门尝试数。 */
+/** 闭账恒等式：门统计里已发布 + 漏接 + 乱序，三者和必须等于门尝试数。 */
 function assertClosureIdentity(ctx: Ctx, attempts: number, label: string): void {
   const g = ctx.c.gate.stats;
   assert.equal(g.optimisticPublished + g.leadMiss + g.blockedOrder, attempts, label);
@@ -161,7 +176,7 @@ function test(name: string, fn: () => void): void {
   names.push(name);
 }
 
-// ── §1 peekInput：非消耗读 + maxStep 饱和钳制 ─────────────────────────────
+// ── `ShmState.peekInput`：非消耗读 + `maxStep` 饱和钳制 ────────────────────
 test('§1 peekInput 非消耗读 + maxStep 钳制', () => {
   const ctx = makeCtx();
   ctx.shm.addInput(30, -10, 7);
@@ -182,7 +197,7 @@ test('§1 peekInput 非消耗读 + maxStep 钳制', () => {
   assert.equal(ctx.shm.takeInput(1200).dx, 1200);
 });
 
-// ── §2 引导期 bootstrap ──────────────────────────────────────────────────
+// 引导期：`lastAuthLabel` 尚无真实 tick 锚点时的跳过 ────────────────────────
 test('§2 引导期无锚 → 纯历史回落', () => {
   const ctx = makeCtx();
   ctx.c.enterMode();
@@ -197,7 +212,7 @@ test('§2 引导期无锚 → 纯历史回落', () => {
   assert.equal(ctx.c.isActive(), true);
 });
 
-// ── §3 OPT happy path ────────────────────────────────────────────────────
+// ── 乐观帧发布：`meta` 三元组 + 位编码 + 投影 due + 闭账恒等 ───────────────
 test('§3 OPT 发布：f′ meta 三元组 + OPT 位 + 投影 due + 闭账恒等', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -242,7 +257,7 @@ test('§3 OPT 发布：f′ meta 三元组 + OPT 位 + 投影 due + 闭账恒等
   assert.equal(ctx.c.stats.divFlip, 0);
 });
 
-// ── §4 div bulk 桶（2u 硬界内 + 超界告警面）───────────────────────────────
+// ── 位移差 bulk 桶：硬界内 + 超界告警 + 均值累计（非翻转 tick）─────────────
 test('§4 div bulk 桶：硬界内 + 超界告警 + 均值累计（非翻转 tick）', () => {
   /** 真侧姿态记录（x 取权威视图；接触字段恒基线 = 强制 bulk 分类）。 */
   const pose = (x: number) => ({
@@ -285,7 +300,7 @@ test('§4 div bulk 桶：硬界内 + 超界告警 + 均值累计（非翻转 tic
   assertClosureIdentity(ctx, 2, '两轮闭账恒等（published≡尝试）');
 });
 
-// ── §5 div flip 桶 ───────────────────────────────────────────────────────
+// ── 位移差 flip 桶：接触字段翻转独立计数 ─────────────────────────────────
 test('§5 div flip 桶：on_ground 翻转 / blocked 增量 → flip 独立计数', () => {
   // 场景 a：真侧 on_ground 翻转（OPT 期与真期接触判定不同——T3 类）
   const ctx = makeCtx();
@@ -333,7 +348,7 @@ test('§5 div flip 桶：on_ground 翻转 / blocked 增量 → flip 独立计数
   assert.equal(ctx2.c.stats.divBulk, 0);
 });
 
-// ── §6/§7 内容封帽 ───────────────────────────────────────────────────────
+// ── 内容封帽：事件与接触字段偏离基线即孤儿化（不经门）────────────────────
 test('§6 内容封帽：scratch 事件 → 孤发不经门', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -350,7 +365,7 @@ test('§6 内容封帽：scratch 事件 → 孤发不经门', () => {
   assert.equal(ctx.c.gate.stats.optimisticPublished, 0, '封帽=检出即不发');
   assertClosureIdentity(ctx, 0, '封帽不经门（闭账仍恒等）');
   assert.equal(ctx.shm.readAuthoritative(), null, '无 OPT 帧发布');
-  // scratch 事件被随意排空（§11.2）——不影响权威实例（真步重放同一事件）
+  // scratch 事件被丢弃（随该实例一起作废）——不影响权威实例（真实步会重放同一事件）
   assert.equal(ctx.scratch.take_event(), null, 'scratch 事件已排空');
   assert.equal(ctx.auth.take_event(), null, '权威实例零触碰（事件槽未动）');
 });
@@ -383,7 +398,7 @@ test('§7 内容封帽：blocked 增量 / ducked 翻转 / surfing 翻转 / ladde
   assert.equal(mk(1, { onGround: true, ducked: 0, surfing: 0, blockedTicks: 0, ladder: -1 }).c.gate.stats.optimisticPublished, 1, '无封帽 → 发布');
 });
 
-// ── §8 key-edge gating ───────────────────────────────────────────────────
+// ── 键沿守卫：键位掩码与上一真实帧有任何一位不同即跳过本 tick ─────────────
 test('§8 key-edge gating：键沿变化 → 跳过该 tick 乐观发布', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -411,7 +426,7 @@ test('§8 key-edge gating：键沿变化 → 跳过该 tick 乐观发布', () =>
   assert.equal(ctx.c.gate.stats.optimisticPublished, 1, '键位稳定 → 恢复发布');
 });
 
-// ── §9 窗外/地板/追爆 ─────────────────────────────────────────────────────
+// ── 窗外 / 地板 / 追爆：三种情形都不产生尝试 ─────────────────────────────
 test('§9 窗外（remaining > T−δ）/ 地板（remaining ≤ 1）/ 追爆（remaining ≤ 0）→ 无尝试', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -441,7 +456,7 @@ test('§9 窗外（remaining > T−δ）/ 地板（remaining ≤ 1）/ 追爆（
   assertClosureIdentity(ctx, 1, '闭账恒等');
 });
 
-// ── §10 同标签重发守卫 ────────────────────────────────────────────────────
+// ── 同标号守卫：该标号的乐观帧已发出，窗内重复唤醒不重发 ─────────────────
 test('§10 同标签重发守卫：窗内重复唤醒不重发', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -460,7 +475,7 @@ test('§10 同标签重发守卫：窗内重复唤醒不重发', () => {
   assertClosureIdentity(ctx, 1, '闭账恒等');
 });
 
-// ── §11 R 键边沿断点 ──────────────────────────────────────────────────────
+// ── `R` 键（位 128）边沿：段号 +1 并带 reset 位 ───────────────────────────
 test('§11 R 键（位 128）边沿 → seg+1 + reset 位入下帧；按住不重触发', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -476,7 +491,7 @@ test('§11 R 键（位 128）边沿 → seg+1 + reset 位入下帧；按住不�
   assert.equal(m2.seg, 2, '段不变');
 });
 
-// ── §12 权威事件排空 ──────────────────────────────────────────────────────
+// ── 权威事件排空：`teleport` / `death` 一次性消费 ─────────────────────────
 test('§12 权威 take_event（teleport/death）→ 段+1 + 位编码 + 一次性消费', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -495,7 +510,7 @@ test('§12 权威 take_event（teleport/death）→ 段+1 + 位编码 + 一次�
   assert.equal(m3.seg, 3);
 });
 
-// ── §13 hold 冻结 ────────────────────────────────────────────────────────
+// ── `hold` 冻结：`holdTicks` 累计 + 投影作废 ──────────────────────────────
 test('§13 noteHoldTick：holdTicks + 投影作废（真实帧不对账）', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -518,7 +533,7 @@ test('§13 noteHoldTick：holdTicks + 投影作废（真实帧不对账）', () 
   assert.equal(ctx.c.stats.holdTicks, 1);
 });
 
-// ── §14 world 重建 ───────────────────────────────────────────────────────
+// ── 世界重建：标号归零 + 门重建，回到引导期语义 ───────────────────────────
 test('§14 externalWorldRebuild：标号归零 + 段+1 + worldRebuild 位 + 门重建', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -540,7 +555,7 @@ test('§14 externalWorldRebuild：标号归零 + 段+1 + worldRebuild 位 + 门�
   assert.equal(m.evt, AUTH_EVT.worldRebuild);
 });
 
-// ── §15 外部断点 ─────────────────────────────────────────────────────────
+// ── 外部断点：`respawn` / `teleport` / `load` ────────────────────────────
 test('§15 externalBreak（respawn/teleport/load）→ 段+1 + 位编码', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -555,7 +570,7 @@ test('§15 externalBreak（respawn/teleport/load）→ 段+1 + 位编码', () =>
   assert.equal(m2.evt, AUTH_EVT.teleport | AUTH_EVT.load, '同帧多事件位并集');
 });
 
-// ── §16 非 tick 模式零回归 ────────────────────────────────────────────────
+// ── 非 tick 模式零回归：`meta` 为 `undefined` + 全部钩子 no-op ────────────
 test('§16 非 tick 模式：meta undefined + 全钩子 no-op（耦合/解耦零触碰）', () => {
   const ctx = makeCtx();
   // 不 enterMode
@@ -579,7 +594,7 @@ test('§16 非 tick 模式：meta undefined + 全钩子 no-op（耦合/解耦零
   assert.equal(ctx.c.firstFrameMeta(), undefined, 'exitMode 后 meta undefined');
 });
 
-// ── §17 MsgState 回退 ────────────────────────────────────────────────────
+// ── `MsgState` 回退：无 SAB / 无 `peekInput` ⇒ 纯历史 ─────────────────────
 test('§17 MsgState（无 SAB/peekInput）→ F4 禁用纯历史', () => {
   const ctx = makeCtx();
   const msgShared = createWorkerSharedState(null);
@@ -596,7 +611,7 @@ test('§17 MsgState（无 SAB/peekInput）→ F4 禁用纯历史', () => {
   assert.equal(ctx.c.isActive(), true);
 });
 
-// ── §18 动态周期 → 门重建 ────────────────────────────────────────────────
+// ── 动态 tick 周期：`T` 变化触发门重建，`δ` cap 随 `T` 重钳 ──────────────
 test('§18 动态 tick 周期：T=10 → 门重建 δ cap=2', () => {
   const ctx = makeCtx();
   (ctx.env as { getTickPeriodMs(): number }).getTickPeriodMs = () => 10;
@@ -605,13 +620,13 @@ test('§18 动态 tick 周期：T=10 → 门重建 δ cap=2', () => {
   ctx.c.publishMeta();
   ctx.c.onWake(1000, 1006); // 触发门重建（T 15.625→10；remaining=6 ∈ 新窗 (1,8]）
   assert.equal(ctx.c.gate.leadDeltaMs, 2, 'δ cap = T − ε_max = 2');
-  // 门重建后锚 null（bootstrap 语义 §8.5）→ 本窗尝试=leadMiss（纯历史一拍）
+  // 门重建后锚为 null（回到引导期语义）→ 本窗尝试落 leadMiss（纯历史一拍）
   assert.equal(ctx.c.gate.stats.optimisticPublished, 0, '重建后无锚 → 不发');
   assert.equal(ctx.c.gate.stats.leadMiss, 1, 'leadMiss 计入（§8.5 停顿语义）');
   assertClosureIdentity(ctx, 1, '重建后闭账恒等');
 });
 
-// ── §20 红线审计（t4 验收 #2：权威实例零触碰零写入，代码可审计）────────────
+// ── 红线审计：乐观径零驱动权威实例 + 调用面 = 只读四方法 ─────────────────
 test('§20 红线：乐观径零驱动权威 + authority 调用面 = 只读四方法', () => {
   const ctx = makeCtx();
   boot(ctx);
@@ -637,11 +652,11 @@ test('§20 红线：乐观径零驱动权威 + authority 调用面 = 只读四�
   assert.equal(surface.join(','), 'seed_from,state_out_ptr,take_event,tick_into', 'authority 面 = 只读四方法');
 });
 
-// ── §19 auth-loop additive 钩子集成（真 timer）────────────────────────────
+// ── 与 `createAuthLoop` 的加性钩子集成（真 timer）───────────────────────
 async function integrationTests(): Promise<void> {
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  // §19a tick 模式零分配支路：auth 线自动推进 + 每 tick meta 三元组
+  // tick 模式的零分配支路：auth 线自动推进 + 每 tick `meta` 三元组
   {
     const ctx = makeCtx();
     const physStub = {
@@ -681,7 +696,7 @@ async function integrationTests(): Promise<void> {
     assert.ok(ctx.auth.stepCount >= 2, '零分配支路 tick_into 已驱动');
   }
 
-  // §19b hold 顶置：帧定格 + 标号继续 + holdTicks 计数
+  // hold 顶置：帧定格 + 标号继续推进 + `holdTicks` 计数
   {
     const ctx = makeCtx();
     const physStub = {
@@ -725,7 +740,7 @@ async function integrationTests(): Promise<void> {
     assert.ok(ctx.c.stats.tickLabel >= 1, '冻结期标号继续');
   }
 
-  // §19c 耦合回归：不注入钩子 = v7 行为（帧推进 + I_A_* 三槽零触碰）
+  // 耦合模式：不注入 `tickF4` 钩子 ⇒ 帧照常推进，`I_A_*` 三槽零触碰
   {
     const sab = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
     const shm = new ShmState(sab);
@@ -761,13 +776,13 @@ async function integrationTests(): Promise<void> {
     assert.ok(rawI32[I_A_PSEQ] % 2 === 0, 'PSEQ 恒偶（seqlock 不变）');
   }
 
-  // 集成完成（auth-loop timer 常驻——显式退出）
+  // 集成测试完成：`createAuthLoop` 的 timer 常驻，故显式退出进程
   console.log(`\ntick-authority.test.ts: ${passed} 例全绿`);
   console.log(names.map((n) => `  ✓ ${n}`).join('\n'));
   (globalThis as unknown as { process?: { exit(c?: number): void } }).process?.exit(0);
 }
 
-// 顺序执行单测，再进集成
+// 先顺序跑完全部单测，再进入需要真 timer 的集成段
 integrationTests().catch((e) => {
   console.error(e);
   (globalThis as unknown as { process?: { exit(c?: number): void } }).process?.exit(1);

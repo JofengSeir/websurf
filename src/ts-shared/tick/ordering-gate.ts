@@ -1,55 +1,68 @@
 /**
- * 排序门（tick 模式 F4-C 乐观评估的发布协议门；任务 t2 落地，纯函数零分配）。
+ * 乐观发布排序门：在「乐观帧先发、权威帧后到」的双链下裁决每一次乐观发布尝试。
  *
- * 设计基线：t6 渲染先行立场件 §8.1/§8.4（原 plan-discuss/t6-render-ahead-stance.md，
- * 2026-09 清理；终榜 F4-C 主案：worker 内 scratch 第二实例乐观评估、权威实例零触碰零写入）。
+ * ## 定位与消费点
+ * 唯一生产消费方是 `src/ts-shared/auth/tick-authority.ts`：它用 `createOrderingGate`
+ * 建门（ε 取 `EPSILON_MAX_SETTIMEOUT_MS`），每发一帧权威结果调一次 `noteAuthoritative`，
+ * 每次要发乐观帧前调一次 `authorizeOptimistic`。测试见
+ * `src/ts-shared/tick/ordering-gate.test.ts`（`deriveLeadCapMs` / `isLeadWithinCap`
+ * 目前只有测试引用）。
+ * 本模块是纯函数 + 闭包计数：不注册计时器、不做 IO、每次调用不新建对象。
  *
- * 排序不变量（§8.1）：`optimistic(k+1) 不得先于 authoritative(k) 发布`，
- * 静态充要条件 **δ + ε_max ≤ T**——
- * - δ（leadDeltaMs）：乐观评估提前量——worker 在 t_{k-1}+δ 用「截断输入窗」
- *   乐观预计算 tick k，先发 rev=OPT 乐观帧；t_k 全窗真算后发修订帧（权威终
- *   序列，F4-C 修订流）；
- * - ε_max（epsilonMaxMs）：发布延迟上界——调度档位（t3-memo §3.1.1）：
- *   setTimeout(4) 自驱档 ≈ 8ms；Atomics.wait 精确唤醒档 < 1ms（严格界取 1）；
- * - T（tickPeriodMs）：raw tick 周期 1/64 s = 15.625 ms（用户裁定 tickRate=
- *   raw 64，无 +3 偏移）。
+ * ## 静态约束：δ + ε_max ≤ T
+ * 记 T = `tickPeriodMs`（raw tick 周期）、ε_max = `epsilonMaxMs`（发布延迟上界）、
+ * δ = `leadDeltaMs`（乐观评估提前量）。`deriveLeadCapMs` 给出 δ 的上界 `T − ε_max`；
+ * `isLeadWithinCap` 是同一判据的判定形式，**含等号**（δ 恰等于上界合法），且 δ < 0 非法。
+ * 构造期把显式传入的 δ 钳进 `[0, cap]`，不传则直接取 cap。
  *
- * 动态兜底（发布门，§8.1 ε 尾条款）：乐观发布尝试落在本 tick 网格 due 之后
- * （ε 尾溢出）→ 丢弃该乐观帧——该 tick 回落 pure-history 一拍，lead-miss
- * 计数 +1（lead-miss 率 = P(停顿 > δ)，与 starvation 分列预算，§8.5；
- * 丢弃红利：T0_est EMA 样本率仍翻倍）。
+ * ## 运行时裁决（`authorizeOptimistic(label, nowMs, dueMs)`）
+ * 按序三次判定，**每次调用恰好命中一个计数器**，故三计数之和恒等于调用次数：
+ * 1. 锚点必须是**正好**的前一 tick：`noteAuthoritative` 记录的最新 label 等于
+ *    `(label - 1) | 0`。不等则拒发 `'block-order'`，并再分两种账：
+ *    已有锚且锚不早于本 label（真值抢先 / 锚回跳）→ `blockedOrder`；
+ *    尚无锚或权威帧停顿未发 → `leadMiss`。
+ * 2. 过了锚点再看发布时刻：`nowMs > dueMs` 即已越过该 tick 网格 → `'drop-late'`，
+ *    `leadMiss` 自增（这是设计好的退化路径，不是错误）。
+ * 3. 其余 → `'publish'`，`optimisticPublished` 自增。
  *
- * 排序不变量被违（authoritative(label-1) 未发布即试图乐观发布）→ block-order
- * 拒发（动作面三值之一）。分账（§8.5 对齐，见 createOrderingGate 头注）：
- * unordered（auth(label−1) 停顿未发/引导期无锚）→ leadMiss（ε 尾主机制，
- * =「停顿杀死领先」P(停顿>δ)）；superseded（auth(label) 已发/锚回跳）→
- * blockedOrder（worker 侧编排缺陷的报警面，稳态设计值为 0）。
- *
- * 档位数值（§8.4）：δ cap = T − ε_max → setTimeout 档 7.625ms（§8.4 记 7.6）/
- * Atomics 档 14.625ms（记 14.6）；δ*=7.6ms 通用（§8.4「δ=8 双量子超 0.4ms，
- * 排序门吸收但严格值 7.6」——本模块取严格界，越界配置由构造期钳制吸收）。
+ * ## 标签算术按 i32 回绕
+ * `(label - 1) | 0` 与 `(lastAuthoritative - label) | 0` 都是 i32 运算，
+ * 因此 label 从 `2^31 − 1` 回绕到 `-2^31` 时「前一 tick」仍判得出来。
+ * `noteAuthoritative` 只在 `(label - last) | 0 > 0` 时前移锚点，重复或回退的标签被忽略。
  */
 
-/** raw 64Hz tick 周期（ms）。 */
+/** raw 64Hz 的 tick 周期（ms）。等价写法见 `src/ts-shared/tick/tick-consumer.ts` 的同名常量。 */
 export const TICK_PERIOD_MS = 1000 / 64; // 15.625
 
-/** setTimeout(4) 自驱档 ε_max（ms）：量化 <4ms + 事件循环迟到余量 ~4ms。 */
+/** 自驱档（setTimeout 唤醒）的发布延迟上界 ε_max（ms）：定时器量化 + 事件循环迟到余量。 */
 export const EPSILON_MAX_SETTIMEOUT_MS = 8;
 
-/** Atomics.wait 精确唤醒档 ε_max（ms）：ε<1ms——排序门取严格界 1ms。 */
+/** 精确唤醒档（Atomics 等待）的发布延迟上界 ε_max（ms）：取严格界 1。 */
 export const EPSILON_MAX_ATOMICS_MS = 1;
 
 /**
- * 排序门静态上界：δ ≤ T − ε_max（t6 §8.1 排序不变量的 δ cap 形态）。
- * ε_max ≥ T 或非有限（负数/NaN——无可靠上界即不授早窗）→ 返回 0
- * （退化为 pure-history）。
+ * 排序门的 δ 上界：`max(0, tickPeriodMs − epsilonMaxMs)`。
+ *
+ * 两个入参都先做「非有限即拒」的防御：`epsilonMaxMs` 为负或 NaN、或 `tickPeriodMs`
+ * 非正或 NaN 时返回 0，即不授予任何提前量。
+ *
+ * @param tickPeriodMs raw tick 周期 T（ms）。
+ * @param epsilonMaxMs 发布延迟上界 ε_max（ms）。
+ * @returns δ 的合法上界（ms）。
  */
 export function deriveLeadCapMs(tickPeriodMs: number, epsilonMaxMs: number): number {
   if (!(epsilonMaxMs >= 0) || !(tickPeriodMs > 0)) return 0;
   return Math.max(0, tickPeriodMs - epsilonMaxMs);
 }
 
-/** δ 合法性判定（含边界：δ = cap 恰好满足 ≤；δ < 0 非法）。 */
+/**
+ * δ 合法性判定：`δ ≥ 0` 且 `δ ≤ cap`（边界含等号）。
+ *
+ * @param leadDeltaMs 待判的提前量 δ（ms）。
+ * @param tickPeriodMs raw tick 周期 T（ms）。
+ * @param epsilonMaxMs 发布延迟上界 ε_max（ms）。
+ * @returns 是否落在合法区间内。
+ */
 export function isLeadWithinCap(
   leadDeltaMs: number,
   tickPeriodMs: number,
@@ -58,69 +71,65 @@ export function isLeadWithinCap(
   return leadDeltaMs >= 0 && leadDeltaMs <= deriveLeadCapMs(tickPeriodMs, epsilonMaxMs);
 }
 
-/** 乐观发布门裁决。 */
+/** `authorizeOptimistic` 的裁决结果（动作面只有这三个值）。 */
 export type OptimisticDecision =
-  /** 放行：乐观帧可发布（rev=OPT 位随 I_A_EVT 发布；消费器按 OPT 位走
-   * 直出+修订即撤路径）。 */
+  /** 放行：乐观帧可发布（随发布写入乐观标记位，消费端据此走「先直出、权威修订到达即撤」）。 */
   | 'publish'
-  /** ε 尾：发布已越本 tick due → 丢弃（该 tick 回落 pure-history 一拍，
-   * lead-miss+1；不是错误，是 §8.1 设计好的退化路径）。 */
+  /** 发布时刻已越过本 tick 网格：丢弃该乐观帧，该 tick 退回不带领先的路径，
+   * `leadMiss` 自增。 */
   | 'drop-late'
-  /** 排序违例：authoritative(label-1) 未发布 → 拒绝（协议违例报警，
-   * 稳态设计值 0；非零 = worker 编排缺陷）。 */
+  /** 排序违例：锚点不是正好前一 tick → 拒绝发布。稳态下应恒为 0，非零表示编排侧有缺陷。 */
   | 'block-order';
 
-/** 遥测计数器（预分配可变对象，面板直读零分配；div 双桶遥测的 lead-miss 源）。 */
+/** 遥测计数器：就地自增的可变对象，面板可直接读，不产生分配。 */
 export interface OrderingGateStats {
-  /** 已放行乐观发布数。 */
+  /** 已放行的乐观发布数。 */
   optimisticPublished: number;
-  /** ε 尾丢弃数（lead-miss——该 tick 回落 pure-history 一拍）。 */
+  /** ε 尾丢弃数 + 锚点未到数（两者合账，统称 lead-miss）。 */
   leadMiss: number;
-  /** 排序违例拒绝数（稳态设计值 0；非零 = worker 编排缺陷）。 */
+  /** 排序违例拒发数（真值抢先 / 锚回跳；稳态应为 0）。 */
   blockedOrder: number;
 }
 
+/** 建门参数；三项都可省，缺省值见 `createOrderingGate`。 */
 export interface OrderingGateOptions {
-  /** raw tick 周期 ms（缺省 15.625）。 */
+  /** raw tick 周期 ms（缺省 `TICK_PERIOD_MS`）。 */
   tickPeriodMs?: number;
-  /** 发布延迟上界 ms（缺省 setTimeout 档 8）。 */
+  /** 发布延迟上界 ms（缺省 `EPSILON_MAX_SETTIMEOUT_MS`）。 */
   epsilonMaxMs?: number;
-  /** 乐观评估提前量 ms（缺省 = cap = T−ε_max，早窗占比 δ/T ≈ 49%，§8.4）。 */
+  /** 乐观评估提前量 δ（ms）；缺省取 cap，显式越界值构造期钳到 cap。 */
   leadDeltaMs?: number;
 }
 
+/** 排序门实例。除 `stats` 外全部只读，`stats` 就地更新。 */
 export interface OrderingGate {
-  /** δ 静态上界 T−ε_max（ms）。 */
+  /** 本门生效的 δ 上界 `T − ε_max`（ms）。 */
   readonly capMs: number;
-  /** 实际配置的乐观提前量 δ（ms；构造期对 cap 钳制）。 */
+  /** 本门实际使用的 δ（ms，已按 cap 钳制）。 */
   readonly leadDeltaMs: number;
   /** 遥测计数器（就地更新，零分配）。 */
   readonly stats: OrderingGateStats;
-  /** 权威帧 label 已发布（worker 每 authoritative 发布后调用——排序锚）。 */
+  /** 记录一帧权威结果已发布，label 为它的 tick 标号（排序锚）。 */
   noteAuthoritative(label: number): void;
   /**
-   * 乐观发布门：label=k 的乐观帧在 nowMs 的发布尝试（dueMs = 该 tick 网格
-   * due 时刻 t_k）。判定序：①排序不变量（动态）②ε 尾发布门。
+   * 乐观发布门：label=k 的乐观帧在 nowMs 时刻尝试发布，dueMs 为该 tick 网格的应发时刻。
+   * 判定序见文件头（先锚点、后 ε 尾）。
    */
   authorizeOptimistic(label: number, nowMs: number, dueMs: number): OptimisticDecision;
 }
 
 /**
- * 构造排序门。δ 缺省 = cap（严格界内最大化早窗）；显式越界配置钳到 cap
- * （§8.4「双量子 8 由排序门吸收」同款纪律——硬约束不靠调用方自觉）。
+ * 构造排序门。
  *
- * 分账（§8.5 对齐，t2 裁定文档③修订——用例集 §2 管线计数器合账）：
- * - **leadMiss = unordered + late 合账**（=「停顿杀死领先」= P(停顿 > δ)）：
- *   auth(label−1) 发布停顿未发（unordered，主机制）+ 乐观径自身 ε 尾越 due
- *   （late，次要机制）。div 双桶遥测的 lead-miss 源。
- * - **blockedOrder = superseded 专账**（= 编排缺陷报警面，稳态设计值 0）：
- *   auth(label) 已发（真值抢先）或锚回跳——只在「auth(label−1) 已发且
- *   auth(label) 也已发」的不可达路径报警。引导期无锚（lastAuthoritative=null）
- *   归 leadMiss（自启动以来 auth 未到 = 停顿，回落 pure-history 一拍）。
- * - **同因互斥**（仿真不变量③）：auth 单调发布 ⇒ superseded 与 unordered
- *   不可同时真——分账完备（闭账 = published + leadMiss + blockedOrder ≡ 尝试数）。
- * - 动作面（返回值）保持三值不变：拒发统一 'block-order'（消费端按动作处理，
- *   分账走 stats 遥测，API 变更最小）。
+ * 缺省配置为自驱档：T = `TICK_PERIOD_MS`、ε_max = `EPSILON_MAX_SETTIMEOUT_MS`、
+ * δ = cap。显式传入的 δ 被钳进 `[0, cap]`——越界配置由构造期吸收，不依赖调用方自觉。
+ *
+ * 三个计数器从 0 起；锚点 `lastAuthoritative` 初值为 `null`，此时任何乐观发布都会被
+ * 判为 `'block-order'` 并计入 `leadMiss`（首个可放行的乐观 label 是 1，它需要
+ * `noteAuthoritative(0)` 先落地）。
+ *
+ * @param options 可选配置，见 `OrderingGateOptions`。
+ * @returns 排序门实例。
  */
 export function createOrderingGate(options: OrderingGateOptions = {}): OrderingGate {
   const tickPeriodMs = options.tickPeriodMs ?? TICK_PERIOD_MS;
@@ -131,37 +140,33 @@ export function createOrderingGate(options: OrderingGateOptions = {}): OrderingG
       ? capMs
       : Math.max(0, Math.min(capMs, options.leadDeltaMs));
   const stats: OrderingGateStats = { optimisticPublished: 0, leadMiss: 0, blockedOrder: 0 };
-  /** 最新已发布权威 tick label（null = 尚无权威帧——optimistic(0) 无
-   * authoritative(-1) 锚，必拒；首个可放行乐观 label = 1）。 */
+  /** 最新已发布的权威 tick 标号；null 表示尚无权威帧——此时乐观发布无锚可依，必拒。 */
   let lastAuthoritative: number | null = null;
   return {
     capMs,
     leadDeltaMs,
     stats,
     noteAuthoritative(label: number): void {
-      // 更新性判定 i32 wrap-safe：i32 距离 (label − last)|0 > 0 = 「更新」
-      //（SG-S3a：回绕后 i32min 仍正确接替 i32max；排除全量回绕歧义由
-      // >0 判定天然满足——全量回绕距离为负）。
+      // 只在 i32 意义上「更新」时前移：回绕后仍成立（i32min 可接替 i32max），
+      // 重复或更旧的标号不改变锚点。
       if (lastAuthoritative === null || ((label - lastAuthoritative) | 0) > 0) {
         lastAuthoritative = label;
       }
     },
     authorizeOptimistic(label: number, nowMs: number, dueMs: number): OptimisticDecision {
-      // ① 排序不变量（动态兜底）：authoritative(label-1) 必须已发布——
-      //    prev = (label−1)|0（i32 wrap-safe，SG-S3a：prev(i32min)=i32max）。
-      //    分账细分（§8.5）：superseded（auth(label) 已发 = i32 距离
-      //    (last − label)|0 ≥ 0）→ blockedOrder 专账；unordered（auth(label−1)
-      //    停顿未发 / 引导期无锚）→ leadMiss 主机制。
+      // ① 锚点判定：期望锚 = 前一 tick（i32 回绕安全：prev(i32min) = i32max）。
+      //    不等时按「锚是否已不早于本 label」分开计账：是 → 真值抢先/锚回跳（编排缺陷面）；
+      //    否 → 尚无锚或权威帧尚未发布（lead-miss 主机制）。
       const prev = (label - 1) | 0;
       if (lastAuthoritative === null || lastAuthoritative !== prev) {
         if (lastAuthoritative !== null && ((lastAuthoritative - label) | 0) >= 0) {
-          stats.blockedOrder++; // superseded：真值抢先/锚回跳（编排缺陷面，稳态 0）
+          stats.blockedOrder++; // 真值抢先 / 锚回跳（稳态应为 0）
         } else {
-          stats.leadMiss++; // unordered：auth(label−1) 停顿 / 引导期无锚（§8.5）
+          stats.leadMiss++; // 无锚引导期，或锚停在更早的标号
         }
         return 'block-order';
       }
-      // ② ε 尾发布门：乐观发布已越过本 tick 网格 due → 丢弃（回落 pure-history）
+      // ② ε 尾判定：发布时刻已过本 tick 网格 → 丢弃（该 tick 退回不带领先的路径）
       if (nowMs > dueMs) {
         stats.leadMiss++;
         return 'drop-late';

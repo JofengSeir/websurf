@@ -1,26 +1,25 @@
 /* ============================================================
- * WebSurf-game — 界面样式（全要素单文件）
+ * WebSurf-game — 界面样式（全要素单文件）。
  *
- * 风格语言迁移自 viewer/web/styles.css（S10 体系）：设计令牌 +
- * 卡片化面板 + 统一悬停/激活交互态。令牌全部收敛到 :root：
- *   --panel / --panel-solid / --border / --border-strong
- *   --text / --muted / --accent / --accent-dim / --gold
- *   --success / --danger / --warn（语义色，映射 viewer 调色板）
- *   --r-sm / --r-md / --r-lg（圆角三档）
- *   --ctrl-bg / --ctrl-bg-hover（控件悬停交互态）
+ * 设计令牌全部收敛在 :root（color-scheme: dark）：--bg-app / --panel / --panel-solid /
+ * --border / --border-strong / --text / --muted / --accent / --accent-dim / --gold /
+ * --success / --danger / --warn（语义色）/ --r-sm..lg（圆角三档）/ --ctrl-bg(-hover)
+ * / --mono（等宽栈）。
  *
- * 语义保留：
- *   · 状态行 LED 呼吸灯（ledBreath）：idle 呼吸 / success・error 常亮；
- *   · 准星 --ch-* 可调体系：运行时由 src/panel/panel-controller.ts
- *     写入 --ch-color/--ch-size/--ch-thickness/--ch-gap，勿改名；
- *   · JS 生成类（savepoint-row/key-chip/vsep 等）与键位/物理/功能
- *     绑定完全不变——本文件是纯视觉层。
+ * 与 JS 的接线（本文件只负责外观，显隐与取值都由类名或行内变量驱动）：
+ *   · 状态行 LED 呼吸灯 ledBreath（#status::before；.success/.error 时 animation: none）；
+ *   · 准星行内变量 --ch-color/--ch-size/--ch-thickness/--ch-gap 由
+ *     src/panel/panel-controller.ts 写入，变量名与 setProperty 调用一一对应，勿改名；
+ *   · 可见性钩子集中在文件末（#panel.hidden / #error.show / .key-rec-hint.show /
+ *     #crosshair.no-dot），各条注释里的优先级数字说明它为何能覆盖基础规则；
+ *   · JS 生成的类名（savepoint-row / key-chip / key-row / kempty / health-log 等）
+ *     在本文件都有对应规则。
  * ============================================================ */
 
 :root {
   color-scheme: dark;
 
-  /* ── viewer S10 设计令牌 ─────────────────────────────── */
+  /* ── 设计令牌（暗色底 + 面板 / 边框 / 文本 / 强调 / 金色）── */
   --bg-app: #0f1115;
   --panel: rgba(15, 17, 21, 0.82);
   --panel-solid: rgba(15, 17, 21, 0.96);
@@ -32,9 +31,9 @@
   --accent-dim: rgba(138, 180, 248, 0.12);
   --gold: #c9a05c;
 
-  /* 语义色：--danger 同 viewer；--success 为 viewer 调色板同层次
-     派生绿（viewer 无语义绿，保 LED 三态语义）；--warn 同 viewer
-     note-warn 文本色 */
+  /* 语义色：--danger 的取值与 apps/viewer/web/styles.css 的 --danger 相同（#ffb4a8）；
+     --warn 与该文件 .note-warn 的文本色相同（#ffd9a0）；--success（#9bd4a6）是本工程
+     自有的派生绿，只被 #status.success 使用（LED 三态语义）。 */
   --success: #9bd4a6;
   --danger: #ffb4a8;
   --warn: #ffd9a0;
@@ -66,7 +65,7 @@ body {
 #app { position: fixed; inset: 0; z-index: 1; }
 canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 
-/* 隐藏文件选择控件：加载地图按钮统一触发 click（样式由 #loadMapBtn 承担） */
+/* 隐藏的原生文件输入 #bspFile：点击由 src/app.ts 里 #loadMapBtn 的监听器转发；按钮外观由 #panel .map-btn 承担 */
 #bspFile { display: none; }
 
 /* ── FPS（左上角，数值读出 → gold）────────────────────── */
@@ -109,7 +108,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 #error { display: none; color: var(--danger); top: 62px; }
 @keyframes ledBreath { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 
-/* ── 速度 HUD（横向居中，距底部 24%；裸数字，对照 viewer telemetry）── */
+/* ── 速度 HUD #hud>#stats（横向居中、距底 24%）：裸数字 + text-shadow + tabular-nums，与 apps/viewer/web/styles.css 的 .telemetry 同一形态 ── */
 #hud { position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%);
   z-index: 4; text-align: center; pointer-events: none;
   font-variant-numeric: tabular-nums; }
@@ -121,10 +120,10 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 }
 #stats .vsep { color: rgba(255, 255, 255, 0.35); margin: 0 8px; font-weight: 400; }
 
-/* ── 左下角按键簇（对照 viewer #timeline 右列的 .tm-keys，2026-09-21 新增）──
+/* ── 左下角按键簇 #keys（与 apps/viewer/web/styles.css 的 .tm-keys 同构）──
    3 列网格：Q/W/E 上排 · A/S/D 中排 · 下排 = 蹲（1 格）+ 跳（2 格）。
-   标签由 app.ts 按当前键位写入（与面板「按键」模块一一对应）；键位被删光 =
-   该动作已禁用，显示 "—" 并降透明度。 */
+   标签由 src/app.ts 按当前键位写入；某动作键位被删光时显示 "—" 并加 .off
+   （面板侧同语义的占位是 .kempty「（已禁用）」，见 src/panel/panel-controller.ts）。 */
 #keys {
   position: absolute; left: 24px; bottom: 24px;
   z-index: 4; pointer-events: none; user-select: none;
@@ -149,7 +148,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 #keys .tm-key-duck { grid-area: 3 / 1; }
 #keys .tm-key-jump { grid-area: 3 / 2 / 4 / 4; }
 
-/* ── 准星（--ch-* 运行时可调体系：panel-controller.ts 写入，语义勿动）── */
+/* ── 准星 #crosshair：--ch-* 四个行内变量由 src/panel/panel-controller.ts 写入（变量名与 setProperty 调用一一对应，勿改名）── */
 #crosshair {
   position: absolute; left: 50%; top: 50%;
   transform: translate(-50%, -50%);
@@ -161,7 +160,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
   z-index: 4;
 }
 #crosshair.hidden { display: none; }
-/* dist 版：无子元素的简单圆点 */
+/* :empty 退化形态：容器无子元素时画单个圆点（3×3） */
 #crosshair:empty {
   width: 3px; height: 3px;
   background: rgba(74, 222, 128, 0.95); border-radius: 50%;
@@ -246,7 +245,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 }
 #panel .nav .mod:hover { background: var(--ctrl-bg); color: var(--text); }
 #panel .nav .mod:active { background: var(--ctrl-bg-hover); }
-/* 激活：accent-dim 底 + accent 文本（S10 .tab.active 交互态） */
+/* 激活态：accent-dim 底 + accent 文本（与 apps/viewer/web/styles.css 的 .tab.active 同款） */
 #panel .nav .mod.active {
   background: var(--accent-dim); color: var(--accent); font-weight: 500;
 }
@@ -266,7 +265,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 #panel .nav .footer button:hover { background: var(--ctrl-bg-hover); }
 #panel .nav .footer button:active { background: rgba(255, 255, 255, 0.18); }
 
-/* 通用模块：全宽主操作按钮（accent 实底，对照 viewer #guideBtn） */
+/* 通用模块：全宽主操作按钮 #panel .map-btn（accent 实底；与 apps/viewer/web/styles.css 的 #guideBtn 同款） */
 #panel .map-btn {
   display: flex; align-items: center; justify-content: center; gap: 9px;
   width: 100%; margin: 2px 0 8px; padding: 12px 12px;
@@ -306,7 +305,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
   border-bottom: 1px solid var(--border);
 }
 
-/* 小节标题：accent 着色 + 分隔线（S10 .sec-title） */
+/* 小节标题 #panel h4：accent 着色 + 下分隔线（与 apps/viewer/web/styles.css 的 .sec-title 同款） */
 #panel h4 {
   margin: 24px 0 10px; font-size: 12px; font-weight: 600;
   color: var(--accent); letter-spacing: .02em;
@@ -362,7 +361,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 #panel input[type="range"]:disabled::-webkit-slider-thumb { background: var(--muted); box-shadow: none; }
 #panel input[type="range"]:disabled::-moz-range-thumb { background: var(--muted); box-shadow: none; }
 
-/* 数值输入（viewer .field-input） */
+/* 数值输入 #panel .val（等宽 + tabular-nums；与 apps/viewer/web/styles.css 的 .field-input 同款） */
 #panel .val { flex: 0 0 74px; }
 #panel .val input {
   width: 100%; text-align: right; font-size: 13px; color: var(--text);
@@ -426,7 +425,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 #panel select:disabled { opacity: 0.45; cursor: default; }
 #panel select option { background: #16181d; color: var(--text); }
 
-/* 次级按钮（viewer .btn.small；.active = accent 交互态） */
+/* 次级按钮 #panel button.small（与 apps/viewer/web/styles.css 的 .btn.small 同款；.active = accent 交互态） */
 #panel button.small {
   font-family: inherit;
   font-size: 12.5px; color: #c8ccd4; padding: 6px 14px;
@@ -460,7 +459,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 #panel .key-chip:hover { background: var(--ctrl-bg-hover); }
-/* 录制态：warn 语义（viewer note-warn 调色）+ 呼吸脉冲 */
+/* 录制态 .key-chip.recording：warn 语义配色（同 apps/viewer/web/styles.css 的 .note-warn 文本色）+ recPulse 呼吸脉冲 */
 #panel .key-chip.recording {
   border-color: rgba(255, 176, 32, 0.35); background: rgba(255, 176, 32, 0.12);
   color: var(--warn); animation: recPulse 1.2s ease-in-out infinite;
@@ -486,7 +485,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
   border-radius: var(--r-sm); margin-bottom: 6px;
 }
 
-/* 说明信息卡（viewer .note-info） */
+/* 说明信息卡 #panel .hint（与 apps/viewer/web/styles.css 的 .note-info 同款） */
 #panel .hint {
   margin-top: 20px; font-size: 11.5px; color: var(--muted); line-height: 1.75;
   padding: 12px 14px;
@@ -519,7 +518,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 #panel .savepoint-row button.small {
   padding: 3px 9px; font-size: 11px;
 }
-/* 删除（danger 交互态，对照 viewer .track-btn.danger） */
+/* 删除按钮（danger 交互态；与 apps/viewer/web/styles.css 的 .track-btn.danger 同款） */
 #panel .savepoint-row button.danger {
   color: var(--danger); border-color: rgba(255, 99, 71, 0.5);
 }
@@ -529,7 +528,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 
 .mt-12 { margin-top: 12px; }
 
-/* ── 启动引导：地图加载进度覆盖层（viewer 卡片语言）────── */
+/* ── 启动引导 #loadingOverlay：地图加载进度覆盖层（卡片形态，与 apps/viewer/web/styles.css 的卡片一致）── */
 #loadingOverlay {
   display: none; position: fixed; inset: 0; z-index: 8000;
   background: var(--bg-app);
@@ -576,7 +575,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
   white-space: normal; word-break: break-all; color: var(--danger);
 }
 
-/* ── 可见性钩子：src 内联样式清零配套（JS 只切 class / 写 --load-pct，不再写 style.display）── */
+/* ── 可见性钩子：由 JS 切类名（进度值则写 --load-pct）驱动显隐；各条注释里的优先级数字说明为何能覆盖基础规则 ── */
 #panel.hidden { display: none; } /* 1-1-0 胜 #panel 基础 display:flex */
 #error.show { display: block; } /* 基础已是 display:none */
 .key-rec-hint { display: none; } /* 默认隐藏；.show 显形（录制提示） */
@@ -600,7 +599,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
-/* 权威健康 pane 内的日志控制台（S10 令牌） */
+/* 权威健康 pane 内的日志控制台 .health-log（等宽 + 预换行 + 可滚动） */
 .health-log {
   font: 11px/1.5 var(--mono);
   white-space: pre-wrap;

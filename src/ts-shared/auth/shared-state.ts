@@ -1,49 +1,45 @@
 /**
- * 共享状态层（公共化 v1）— 输入槽（主线程写）+ 权威帧双缓冲（Worker 写）。
+ * 跨线程状态通道：SAB 槽位布局 + 两个实现（`ShmState` 共享内存 / `MsgState` 消息回退）。
  *
- * 由 debug/game 两端收敛而来（game 原版 + debug 的 SharedState 联合类型），
- * 此后权威帧协议变更只改本文件一处。
+ * ## 定位
+ * 本文件是槽位常量（`I_*` / `B_*` / `RT_*`）与两份协议实现的**唯一定义处**，主线程与
+ * Worker 都从这里取通道：
+ * - 主线程创建：`createMainSharedState`（`apps/debug/src/app.ts`、`apps/game/src/app.ts`）
+ * - Worker 创建：`createWorkerSharedState`（`src/ts-shared/auth/worker-dispatch.ts` 的 `init` 分支）
+ * - 拿得到 `SharedArrayBuffer`（crossOriginIsolated）走 `ShmState`，拿不到走 `MsgState`
  *
- * 架构（v7 定案，用户核心思想）：
- * - **Worker = 权威帧计算器**：加载地图（物理碰撞）、独立模拟权威物理线
- *   （固定 64Hz tick，含碰撞/摩擦/重力），每 tick 输出**权威帧**
- *   （位置/朝向/速度/眼高/着地/时间戳）
- * - **主线程 = 渲染预测线**：全速物理+渲染；每帧读权威帧，
- *   用权威速度（考虑中途地图碰撞后的正确速度）外推校准渲染物理——
- *   位置不强制同步，速度渐进对齐
- * - 输入：主线程写 SAB 输入槽（keys/dx/dy），Worker takeInput 消费
- *   （权威帧模拟需要同输入）
+ * ## 两条数据流
+ * - **输入**：主线程写（`addInput`：定点增量原子累加 + 键位无条件覆盖），Worker 侧四种取法——
+ *   `takeInput` 饱和截断（权威线）、`consumeInput` 不限幅（解耦 1ms 线）、`peekInput` 非消耗投影
+ *   （乐观评估）、`peekKeys` 只读键位。
+ * - **帧**：Worker 写（`writeAuthoritative` 写空闲槽后递增版本号；解耦线另有 `writeDecoupled`），
+ *   主线程读（`readAuthoritative` 返回对象 / `readAuthoritativeInto` 零分配直填）。
  *
- * SAB 布局（512B）：
- *   Int32 控制区（字节 0-63）：
- *     [0] V_A      权威版本号（Worker release 递增；主线程 acquire 读）
- *     [1] I_KEYS   输入键位掩码（主线程 store / Worker load）
- *     [2] A_GROUND 权威 onGround（0/1）
- *     [3] V_D      解耦状态版本号（WorkerA release 递增；0=未开始）〔双模式扩展〕
- *     [4] WAKEUP   背压唤醒电平（主 rAF store(1)+notify；解耦线 wait+CAS 复位）〔双模式扩展〕
- *     [5] I_A_SEG  tick 段序号（断窗帧 +1，自愈式断窗主防线）〔tick 模式扩展〕
- *     [6] I_A_TICK tickIndex（仅真实 tick 递增；α 确定性网格载体）〔tick 模式扩展〕
- *     [7] I_A_EVT  事件位掩码（bit0-7 事件类型 + bit8 OPT 乐观帧标记）〔tick 模式扩展〕
- *     [8] I_A_PSEQ 发布序守卫（seqlock：proto 三元组读一致性）〔tick 模式扩展〕
- *     [9-15] 保留
- *   （tick 模式扩展槽全部落 20-63B 保留区；B_DX_ACC 在 i64[8]=字节 64 起，不冲突）
- *   BigInt64 输入槽（字节 64-127，index 8-9）：
- *     [8] dxAcc  [9] dyAcc —— BigInt64 原子累加（主线程 add / Worker exchange）
- *   BigInt64 权威帧双缓冲（字节 128-415，index 16-35）：
- *     S_A[0] = 16..25（10 值）  S_A[1] = 26..35（10 值）
- *   BigInt64 解耦帧双缓冲（字节 288-447，index 36-55）〔双模式扩展〕：
- *     S_D[0] = 36..45（10 值）  S_D[1] = 46..55（10 值）
- *   每帧 10 值：posX/Y/Z(×100) yaw(×1000) pitch(×1000) velX/Y/Z(×100) eyeHeight(×100) timeMs(×1)
- *   渲染采样尾槽（字节 448-511，index 56-63）〔渲染轨迹采样扩展，additive〕：
- *     f64[56..59] = x y z tMs     RT_SEQ(i64[60]) 单样本 seqlock（偶=稳定/奇=写入中）
- *     i64[61]=RT_I0（渲染节点序号） i64[62]=RT_EPOCH（失效世代）
- *     i64[63]=RT_PUB_TAU（最近发布所用渲染时钟 τ，微秒；0=未发布）
+ * ## SAB 布局（512 B；下标 = 字节 ÷ 视图元素宽度）
  *
- * 读写协议：
- * - Worker 写空闲槽 S_A[V_A&1] → release 递增 V_A
- * - 主线程读 S_A[(V_A-1)&1]（写者已离开的槽，无撕裂）
- * - 解耦帧同式（V_D/S_D；onGround 复用 i32[2]——模式互斥运行，同一槽位两模式
- *   顺序使用，无并发冲突）
+ * Int32 控制区（字节 0-63）：
+ * - `[0]` `I_V_A` 权威版本号（Worker 递增，主线程读）
+ * - `[1]` `I_KEYS` 键位掩码（主线程覆盖写，Worker 读）
+ * - `[2]` `I_A_GROUND` 权威 onGround（0/1；解耦帧复用同一槽，见 `writeDecoupled`）
+ * - `[3]` `I_V_D` 解耦帧版本号（0 = 未开始）
+ * - `[4]` `I_WAKEUP` 背压唤醒电平（`wake` 置 1 + notify，`waitWakeup` 消费）
+ * - `[5]` `I_A_SEG` 段序号 · `[6]` `I_A_TICK` tick 序号 · `[7]` `I_A_EVT` 事件位 ·
+ *   `[8]` `I_A_PSEQ` 发布序守卫（三者与守卫只由 tick 模式写者驱动，见各自常量）
+ * - `[9-15]` 保留
+ *
+ * 其余区（下标为 BigInt64 / Float64 元素号）：
+ * - `[8-9]` `B_DX_ACC` / `B_DY_ACC`：鼠标增量定点累加器（主线程 add，Worker exchange/load）
+ * - `[16-25]` `B_A0` · `[26-35]` `B_A1`：权威帧双缓冲，**字节 128-287**
+ * - `[36-45]` `B_D0` · `[46-55]` `B_D1`：解耦帧双缓冲，字节 288-447（与权威帧同款 10 值定点编码）
+ * - `[56-59]` `RT_X/RT_Y/RT_Z/RT_T`：渲染采样 4 个 f64 载荷 · `[60]` `RT_SEQ` 单样本 seqlock ·
+ *   `[61]` `RT_I0` 渲染节点序号 · `[62]` `RT_EPOCH` 失效世代 · `[63]` `RT_PUB_TAU` 发布所用 τ
+ *
+ * 每帧 10 值与其定点倍数：posX/Y/Z ×100、yaw ×1000、pitch ×1000、velX/Y/Z ×100、
+ * eyeHeight ×100、timeMs ×1。
+ *
+ * ## 读写协议（双缓冲 + 版本号，读者不见撕裂）
+ * - 写：填空闲槽 `S[V & 1]` → 递增版本号 `V`（状态先于版本号可见）
+ * - 读：取版本号 `V`，读槽 `(V - 1) & 1`——写者已离开该槽；`V = 0` 表示通道未开始，返回 null
  */
 
 // ── 按键状态（与 Rust KEY_MASK 一致；两端 keyboard 实现结构兼容）───────
@@ -119,41 +115,34 @@ export function maskToKeys(mask: number): KeyState {
 const I_V_A = 0;
 const I_KEYS = 1;
 const I_A_GROUND = 2;
-// 双模式扩展（phys-mode-port §3.3，additive——保留区启用，既有槽位零触碰）
+// 解耦线的两个控制槽（保留区启用，既有槽位不变）
 const I_V_D = 3;
 const I_WAKEUP = 4;
 
-// ── tick 模式协议槽（t3-memo §2.5 v1.4 + t6-render-ahead §8.1，additive——
-//    i32 保留区字节 20-63；既有槽位 i32[0-4] 与全部 i64 区零触碰）─────────
-// ⚠️ i64[4..7]（字节 32-63）**永久禁用作数据槽**（t2 裁定书②钉死）：字节 32-35
-// 已被 I_A_PSEQ 占用——未来若把 i64[4] 用作输入累加/数据区将直接踩 PSEQ 槽。
-// i32 保留区余量 = i32[9..15]（字节 36-63），后续扩展仍充足。
-// 可执行锁 = shared-state.protocol.test.ts [1]（i64 区字节核算）。
-/** [5] I_A_SEG 段序号（bytes 20-23）：状态不连续事件（八类断窗/world 重建/set-mode 交接）帧
- * +1，其余帧沿用——消费端「seg 变化」谓词 = 断窗判定（自愈式：任意后续帧暴露
- * 漏检，t2-bench-brief §9.1 G1c 主防线；几何兜底降为旁路自检）。 */
+// ── tick 模式协议槽：落在 i32 保留区（字节 20-63），i32[0-4] 与全部 i64 区不受影响 ──
+// ⚠️ i64[4..7]（字节 32-63）**不得用作数据槽**：字节 32-35 已被 I_A_PSEQ 占用，
+// 把 i64[4] 当输入累加/数据区会直接踩 PSEQ 槽。i32 保留区余量为 i32[9..15]。
+// 字节核算的可执行锁是 `src/ts-shared/auth/shared-state.protocol.test.ts` 的第 1 组断言。
+/** `[5]` 段序号（字节 20-23）：状态不连续事件帧 +1、其余帧沿用。消费端以「段号变化」判断窗；
+ * 这是自愈式主防线——任意后续帧都会暴露漏检，几何兜底降为旁路自检。 */
 export const I_A_SEG = 5;
-/** [6] I_A_TICK tickIndex（bytes 24-27）：仅真实 tick 递增；publishCurrentState 等非 tick 发布
- * 不递增（沿用）；world 重建归零 + 段号 +1。α 时间基准=确定性网格的载体
- * （t4-acceptance §1.3 裁定：发布墙钟抖动不进 α）。 */
+/** `[6]` tick 序号（字节 24-27）：仅真实 tick 递增，`publishCurrentState` 等非 tick 发布沿用；
+ * world 重建归零并把段号 +1。它是确定性时间网格的载体（发布墙钟抖动不进网格）。 */
 export const I_A_TICK = 6;
-/** [7] I_A_EVT 事件位掩码（bytes 28-31）：bit0-7=事件类型（双源合成——内核 take_event() 排空
- * 产 teleport/death 两类；控制面产 respawn/reset/holdRelease/load/modeSwitch/
- * worldRebuild 六类，t3-memo §13.1），bit8=OPT（乐观帧标记）。逐帧量非粘滞量：
- * tick 模式发布每帧显式写（无事件写 0），消费端按「本帧事件」语义消费。 */
+/** `[7]` 事件位掩码（字节 28-31）：低 8 位为事件类型（见 `AUTH_EVT`），bit8 为乐观帧标记
+ * （见 `AUTH_EVT_OPT`）。**逐帧量而非粘滞量**——tick 模式每帧显式写，无事件写 0，
+ * 消费端按「本帧事件」语义消费。 */
 export const I_A_EVT = 7;
-/** [8] I_A_PSEQ 发布序守卫（bytes 32-35；seqlock；本任务读侧一致性补强）：写者「store 奇数 →
- * 写 onGround+seg/tick/evt → store 偶数」；读者「偶值快照 → 读 → 复检不变才
- * 接受」。消除 catch-up 突发期消费器读到跨代混合三元组（帧 k + tick k+1 标签）
- * 的竞态——标签错配即 α 网格错相/伪断窗/幻影事件（Gate 2 断言假阳性源）。
- * 仅 tick 模式写者驱动（writeAuthoritative 带 meta 时）；耦合/解耦零触碰。
- * ⚠️ 本槽占用 i64[4] 视图前 4 字节（字节 32-35）——i64[4..7]（字节 32-63）
- * 永久禁用作数据槽（见上方区头注 + t2 裁定书②钉死）。 */
+/** `[8]` 发布序守卫（字节 32-35，seqlock）：写者「store 奇数 → 写 onGround 与三个协议槽 →
+ * store 偶数」，读者「偶值快照 → 读 → 复检不变才接受」。用于消除追赶突发期读到
+ * 「帧 k 的载荷 + tick k+1 的标签」这类跨代混合。仅 tick 模式写者驱动（`writeAuthoritative`
+ * 带 meta 时）；耦合与解耦路径不触碰它。
+ * ⚠️ 本槽占用 i64[4] 的前 4 字节（字节 32-35）——见上方区头注的禁用约束。 */
 export const I_A_PSEQ = 8;
 
-/** I_A_EVT 位定义（双源合成语义，t3-memo §13.1——内核源 teleport/death 两类；
- * 控制面源 respawn/reset/holdRelease/load/modeSwitch/worldRebuild 六类；
- * 位掩码≠内核事件计数：控制面六类不是内核泄漏，P-tick-7 断言须分源）。 */
+/** `I_A_EVT` 低 8 位的位定义。两类来源合成到同一掩码：物理内核（`teleport` / `death`）与
+ * 控制面（`respawn` / `reset` / `holdRelease` / `load` / `modeSwitch` / `worldRebuild`）。
+ * 掩码不是内核事件计数——同帧多事件按位并集。 */
 export const AUTH_EVT = {
   teleport: 1 << 0,
   death: 1 << 1,
@@ -165,15 +154,14 @@ export const AUTH_EVT = {
   worldRebuild: 1 << 7,
 } as const;
 
-/** I_A_EVT bit8（OPT 位，t6-render-ahead §8.1）：乐观帧标记——乐观帧置位且
- * 事件位恒 0；权威/修订帧不标记（消费器自持「已展示乐观 k」状态，MsgState
- * 节流下权威 k 即普通帧、天然鲁棒）。 */
+/** `I_A_EVT` 的 bit8：乐观帧标记。乐观帧置位且事件位恒 0；权威帧与修订帧不置位
+ * （消费器自持「已展示乐观 k」状态，消息回退通道下权威 k 即普通帧）。 */
 export const AUTH_EVT_OPT = 1 << 8;
 
-/** tick 模式发布元数据（writeAuthoritative 第三参，additive）。
- * 缺省（undefined）= 四个协议槽零触碰——耦合/解耦既有调用点字节级零回归。
- * 提供时：seg/tick 未给 = 沿用槽内当前值；evt 未给 = 写 0（事件位是逐帧量，
- * 粘滞残留会把旧事件复用成新帧事件）。 */
+/** `writeAuthoritative` 的可选第三参（发布元数据）。
+ * 缺省 `undefined` 时四个协议槽零触碰——耦合与解耦的既有调用点字节级不变。
+ * 提供时：`seg` / `tick` 未给 = 沿用槽内当前值；`evt` 未给 = 写 0（事件位是逐帧量，
+ * 沿用会把旧事件复用成新帧事件）。 */
 export interface AuthPublishMeta {
   /** 段序号：断窗帧传新段号（+1），普通帧传当前段（或省略=沿用）。 */
   seg?: number;
@@ -195,10 +183,10 @@ export const B_A1 = 26;
 export const B_D0 = 36;
 export const B_D1 = 46;
 
-// ── 渲染采样单样本 seqlock 槽（SAB 尾槽；additive——既有槽位零触碰）─────
-// 字节 448-511 = i64[56..63]，布局最后一个原用槽为 i64[55]（字节 448 之前），
-// 本区整体落在原「未使用尾槽」。视图协议与既有区一致：
-// - f64 视图整体建立（new Float64Array(buffer)）→ 索引 = 字节/8（56 = 448/8）；
+// ── 渲染采样单样本 seqlock 槽（SAB 尾槽；既有槽位不变）─────
+// 字节 448-511 = i64[56..63]；布局里最后一个原用槽是 i64[55]，本区整体落在原未使用尾槽。
+// 视图协议与既有区一致：
+// - f64 视图整体建立（new Float64Array(buffer)），索引 = 字节 ÷ 8（RT_X = 56 = 448 ÷ 8）；
 // - i64 协议槽走既有 BigInt64Array 视图（Atomics 要求 BigInt64Array）。
 /** f64[56] 渲染采样 x。 */
 export const RT_X = 56;
@@ -217,15 +205,16 @@ export const RT_EPOCH = 62;
 /** i64[63] RT_PUB_TAU 最近一次权威发布所用的渲染时钟 τ（微秒 i64；0=未发布）。 */
 export const RT_PUB_TAU = 63;
 
-/** SAB 总字节（512B 布局，实际使用至 512B——尾槽 448-511 已启用）。 */
+/** SAB 总字节：512 B 布局，尾槽 448-511 已启用，故实际用满 512 B。 */
 export const SHARED_BUFFER_SIZE = 512;
 
 /**
  * 渲染采样（渲染轨迹上的一个点；主线程写 / Worker 读）。
  *
- * `t` 为主线程渲染时钟域时刻（`performance.now()`，ms；与 path-recorder
- * `addRender` 同拍同源）；`i0` 为该采样对应的渲染节点序号（顶点对身份，无则 -1）；
- * `epoch` 为失效世代；`seq` 为样本序号（>0=有效样本；0=通道未开始）。
+ * `t` 是主线程渲染时钟域时刻（`performance.now()`，ms；与 `apps/debug` 的
+ * `path-recorder` 的 `addRender` 同拍同源）；`i0` 是该采样对应的渲染节点序号
+ * （顶点对身份，无则 -1）；`epoch` 为失效世代；`seq` 为样本序号（>0=有效样本；
+ * 0=通道未开始）。
  */
 export interface RenderSample {
   t: number;
@@ -249,7 +238,7 @@ export interface AuthFrame {
   timeMs: number;
 }
 
-/** 输入样本（Worker takeInput 返回值）。 */
+/** 输入样本（Worker 取输入的返回值）。 */
 export interface InputSample {
   dx: number;
   dy: number;
@@ -257,36 +246,35 @@ export interface InputSample {
 }
 
 /**
- * 消息通道回退（MsgState）——无 SharedArrayBuffer 环境（线上静态部署无 COOP/COEP 头）。
+ * 消息通道回退（`MsgState`）——用于拿不到 `SharedArrayBuffer` 的环境（静态部署无 COOP/COEP 头）。
  *
- * 与 ShmState 同接口（addInput/readAuthoritative/takeInput/writeAuthoritative），
- * 用 postMessage 消息实现：
- * - 主线程每帧 addInput → postMessage `input`（增量 + 当前键位；有序不丢）
- * - Worker onmessage `input` → 累积输入缓冲（takeInput exchange 清空，语义同 SAB）
- * - Worker 每 tick writeAuthoritative → postMessage `phys-frame`（权威帧 + va）
- * - 主线程 onmessage `phys-frame` → 缓存最新帧（readAuthoritative 返回）
+ * 与 `ShmState` 同接口，用 `postMessage` 消息实现：
+ * - 主线程每帧 `addInput` → `input` 消息（增量 + 当前键位；有序不丢）
+ * - Worker 收到 `input` → 累积到字段（`takeInput` 读后清零，语义同 SAB）
+ * - Worker 每 tick `writeAuthoritative` → `phys-frame` 消息（权威帧 + 版本号）
+ * - 主线程收到 `phys-frame` → 缓存最新帧（`readAuthoritative` 返回）
  *
- * 功能等价、性能降级（消息拷贝 vs 共享内存）；本地高性能游玩走 SAB 不受影响。
+ * 功能等价、性能降级（消息拷贝 vs 共享内存）；本机高性能游玩走 SAB 不受影响。
  */
 export class MsgState {
   readonly isShared = false;
 
-  /** 解耦帧发布间隔下限（ms）：物理仍 1ms 子步实时推进，仅发布节流到 ≈250Hz
-   * 防消息风暴（phys-mode-port §3.3；SAB 模式每子步发布无此限制）。 */
+  /** 解耦帧发布间隔下限（ms）：物理仍 1ms 子步实时推进，只把发布节流到约 250Hz
+   * 防消息风暴；SAB 模式每子步发布，无此限制。 */
   static readonly publishFloorMs = 4;
 
   // ── 主线程侧状态 ───────────────────────────────────────────
   private latest: { frame: AuthFrame; va: number } | null = null;
-  /** tick 协议三元组粘滞镜像（recvFrame 逐帧刷新；「槽内当前值」语义同 SAB——
-   * seg/tick 未提供的消息沿用旧值，evt 逐帧覆盖）。供 readAuthoritativeInto。 */
+  /** tick 协议三元组的粘滞镜像（`recvFrame` 逐帧刷新，语义对齐 SAB 的「槽内当前值」：
+   * seg/tick 未随消息提供则沿用旧值，evt 逐帧覆盖）。供 `readAuthoritativeInto` 读。 */
   private segCur = 0;
   private tickCur = 0;
   private evtCur = 0;
-  /** 解耦帧缓存（phys-mode-port：与 latest 同载荷——mode 内互斥运行保证
-   * phys-frame 读者语义单解，耦合期为耦合帧、解耦期为解耦帧）。 */
+  /** 解耦帧缓存：与 `latest` 同载荷——两条线互斥运行，故 `phys-frame` 读者语义单解
+   * （耦合期为耦合帧、解耦期为解耦帧）。 */
   private latestDecoupled: { frame: AuthFrame; vd: number } | null = null;
   // ── 渲染采样槽（无共享内存：普通字段，单线程无撕裂）───────────
-  /** 主线程最后一条渲染采样（writeRenderSample 覆写）。 */
+  /** 主线程最后一条渲染采样（`writeRenderSample` 覆写）。 */
   private renderSample: RenderSample | null = null;
   /** 样本序号（主线程自增；reset 归零 = 读侧「通道未开始」）。 */
   private renderSeq = 0;
@@ -299,7 +287,7 @@ export class MsgState {
   private dyAcc = 0;
   private keysMask = 0;
   private va = 0;
-  /** 解耦帧本地版本（writeDecoupled 递增；独立于耦合 va）。 */
+  /** 解耦帧本地版本（`writeDecoupled` 递增；与耦合 va 各自独立）。 */
   private vd = 0;
   /** 解耦发布节流基准（performance.now()）。 */
   private lastDecoupledPublishMs = 0;
@@ -321,14 +309,13 @@ export class MsgState {
 
   // ── 主线程侧 ───────────────────────────────────────────────
 
-  /** 输入 → postMessage `input`（每帧一次；增量累积由 Worker 端缓冲）。
-   * 渲染采样随本消息同拍携带（`rt/rx/ry/rz/ri0/repoch`，additive；缺省=消息形态
-   * 与旧版逐字节一致，旧 Worker 忽略未知字段）。
+  /** 输入 → `input` 消息（每帧一次；增量累积由 Worker 端缓冲）。渲染采样随本消息同拍携带
+   * （`rt/rx/ry/rz/ri0/repoch`）：缺省时消息形态与不带该组的版本逐字节一致，未知字段被忽略。
    *
-   * **采样来源**：显式参数优先；未传时**自动附带本对象最近一次 `writeRenderSample`
-   * 的结果**。这样渲染器保持既有的 3 参 `addInput(dx,dy,keys)` 调用即可让 MsgState
-   * 回退通道（非 crossOriginIsolated，如 Pages 部署）也拿到采样——无需改渲染器调用点，
-   * 也无需在 `SharedState = ShmState | MsgState` 联合类型上做窄化 cast。 */
+   * **采样来源**：显式参数优先；未传时自动附带本对象最近一次 `writeRenderSample` 的结果。
+   * 这样渲染器保持既有的 3 参 `addInput(dx, dy, keys)` 调用即可让消息回退通道
+   * （非 crossOriginIsolated，如 Pages 部署）拿到采样——既不用改渲染器调用点，
+   * 也不用在 `SharedState = ShmState | MsgState` 联合类型上做窄化 cast。 */
   addInput(
     dx: number,
     dy: number,
@@ -354,20 +341,22 @@ export class MsgState {
   }
 
   /**
-   * 主线程：每 rAF 写一条渲染采样（与 path-recorder.addRender 同拍同源）。
-   * MsgState 无共享内存（单线程）——存普通字段、无 seqlock；样本随下一条
-   * `input` 消息（addInput 的 rt/… 字段）跨线程，见 §D。
+   * 主线程：每 rAF 写一条渲染采样（与 `path-recorder` 的 `addRender` 同拍同源）。
+   * 消息通道是单线程的，故本实现只存普通字段、不做 seqlock；样本随下一条 `input`
+   * 消息跨线程（`addInput` 的 `rt/…` 字段）。
    *
-   * ⚠️ **不接收 epoch 参数**（缺陷修复 · epoch 竞态，与 ShmState 同因）：
-   * 世代由本对象持有、写入时就地读，绝不由调用方传入（详见 ShmState 同名方法）。
+   * 签名里**没有 epoch 参数**，世代由本对象持有并在写入时就地取值——
+   * 两个实现同因，理由详见 `ShmState.writeRenderSample`。
    */
   writeRenderSample(tMs: number, x: number, y: number, z: number, i0: number): void {
     this.renderSample = { t: tMs, x, y, z, i0, epoch: this.renderEpoch, seq: ++this.renderSeq };
   }
 
   /**
-   * Worker：读最新采样。>0 = 样本序号；0 = 通道未开始（无样本 / 已 reset）；
-   * -1 = 读写冲突（消息通道单线程，本路径不出现）。
+   * Worker：读最新采样。
+   *
+   * @returns >0 = 样本序号；0 = 通道未开始（无样本或已 reset）；
+   *          -1 = 读写冲突——消息通道单线程，本实现不会返回它（保留取值以对齐 `ShmState`）。
    */
   readRenderSample(out: RenderSample): number {
     const s = this.renderSample;
@@ -393,15 +382,14 @@ export class MsgState {
   }
 
   /**
-   * Worker：廉价读**失效世代**（RT_EPOCH 语义；1 次字段读，无载荷、无 seqlock）。
+   * Worker：廉价读失效世代（1 次字段读，不碰载荷、不进 seqlock）。
    *
-   * 用途（缺陷修复 · epoch 竞态）：Worker 缓存的一对渲染样本可能属于**旧世代**，
-   * 而主线程已在 `bumpSampleEpoch()`（resetTo/换图/noclip/respawn）里把世代 +1。
-   * 此时若仍按 τ 插值取点，就会发布一个**旧世界线上的**位置。故服务样本前先比
-   * 对本值（见 `debug/src/worker/main.ts` `rtSampleAtTau`）。
+   * 用途：Worker 缓存的一对渲染样本会因世界重建而属于旧世代，而主线程已经在
+   * `resetRenderSample()`（resetTo/换图/noclip/respawn）里把世代 +1。此时若仍按 τ
+   * 插值取点，就会发布一个旧世界线上的位置。故服务样本前先比对本值
+   * （实现见 `apps/debug/src/worker/main.ts` 的 `rtSampleAtTau`）。
    *
-   * MsgState 与 ShmState 差异：本实现无共享内存（单线程），世代是普通字段——
-   * 无撕裂可言，直接返回。
+   * 与 `ShmState` 的差异：本实现单线程、世代是普通字段，无撕裂可言，直接返回。
    */
   readRenderEpoch(): number {
     return this.renderEpoch;
@@ -421,10 +409,12 @@ export class MsgState {
   }
 
   /**
-   * 零分配读权威帧 + tick 协议三元组（布局契约同 ShmState.readAuthoritativeInto：
-   * dstF64[0..9]=pos×3/yaw/pitch/vel×3/eyeHeight/timeMs，dstI32[0..4]=onGround/
-   * va/seg/tick/evt）。MsgState 消息即快照，无跨线程读写竞态——返回契约对齐
-   * Shm（≥0；冲突返回值 −1 在本路径不出现）。
+   * 零分配读权威帧 + tick 协议三元组。填充布局与 `ShmState.readAuthoritativeInto`
+   * 相同：`dstF64[0..9]` = pos×3 / yaw / pitch / vel×3 / eyeHeight / timeMs，
+   * `dstI32[0..4]` = onGround / va / seg / tick / evt。
+   *
+   * 消息即快照，没有跨线程读写竞态，故本实现只返回 `>= 0` 的值；`ShmState` 用来
+   * 表示冲突的 −1 在本路径不会出现。
    */
   readAuthoritativeInto(dstF64: Float64Array, dstI32: Int32Array): number {
     const l = this.latest;
@@ -448,18 +438,18 @@ export class MsgState {
     return l.va;
   }
 
-  /** 读最新解耦帧（无新帧也返回最近帧；vd 不变——同 ShmState 语义）。 */
+  /** 读最新解耦帧（没有新帧时返回最近一帧，vd 不变——与 `ShmState` 同语义）。 */
   readDecoupled(): { frame: AuthFrame; vd: number } | null {
     return this.latestDecoupled;
   }
 
-  /** 主线程背压唤醒（MsgState 无阻塞原语，no-op——解耦循环由 setTimeout 自驱）。 */
+  /** 主线程背压唤醒：本实现无 SAB 原子原语，是空操作——解耦环由 setTimeout 自驱。 */
   wake(): void {
     /* MsgState 回退：无 SAB 原子原语可挂起/唤醒；解耦线 setTimeout 自驱，无需唤醒 */
   }
 
-  /** 主线程接收 `phys-frame`（app.ts onmessage 调用）。meta = tick 协议三元组
-   * （MsgState 回退双喂，plan-v2 §1.3.1；缺省=耦合/解耦消息零感知）。 */
+  /** 主线程接收 `phys-frame`（`apps/**` 的 `onmessage` 调用）。`meta` 为 tick 协议三元组
+   * （消息回退通道的双喂；缺省时耦合与解耦消息零感知）。 */
   recvFrame(frame: AuthFrame, va: number, meta?: AuthPublishMeta): void {
     if (meta !== undefined) {
       if (meta.seg !== undefined) this.segCur = meta.seg;
@@ -467,16 +457,16 @@ export class MsgState {
       this.evtCur = meta.evt ?? 0;
     }
     this.latest = { frame, va };
-    // 双模式扩展：同载荷喂解耦缓存（mode 内互斥运行——耦合期 readDecoupled 无消费者；
-    // 解耦期 phys-frame 即解耦帧，§3.3 复用现有消息形态）
+    // 同一载荷同时喂解耦缓存：两条线互斥运行——耦合期 readDecoupled 没有消费者，
+    // 解耦期 phys-frame 本身就是解耦帧，复用同一消息形态。
     this.latestDecoupled = { frame, vd: va };
   }
 
   // ── Worker 侧 ──────────────────────────────────────────────
 
-  /** Worker 接收 `input` 消息（dispatch 调用）：累积 + 键位覆盖（同 SAB 语义）。
-   * 渲染采样字段（rt/rx/ry/rz/ri0/repoch，additive）随同一条消息到达——
-   * 缺省 undefined = 旧版消息形态，采样槽零触碰。 */
+  /** Worker 接收 `input` 消息（`worker-dispatch` 调用）：增量累加 + 键位覆盖（同 SAB 语义）。
+   * 渲染采样字段（`rt/rx/ry/rz/ri0/repoch`）随同一条消息到达——全部缺省即旧版消息形态，
+   * 采样槽零触碰。 */
   recvInput(
     dx: number,
     dy: number,
@@ -504,7 +494,7 @@ export class MsgState {
     }
   }
 
-  /** 消耗输入（清空缓冲 + maxStep 截断，语义同 SAB takeInput）。 */
+  /** 消耗输入：读出后把两个累加器清零，分量按 `maxStep` 饱和截断（语义同 SAB 的 `takeInput`）。 */
   takeInput(maxStep: number): InputSample {
     const clamp = (v: number): number => Math.max(-maxStep, Math.min(maxStep, v));
     const dx = clamp(this.dxAcc);
@@ -514,12 +504,13 @@ export class MsgState {
     return { dx, dy, keysMask: this.keysMask };
   }
 
-  /** 非消耗读当前键位掩码（解耦 tickPhys 边界快照用；不消费增量）。 */
+  /** 非消耗读当前键位掩码（解耦线 tickPhys 边界快照用；不消费增量）。 */
   peekKeys(): number {
     return this.keysMask;
   }
 
-  /** 消耗输入（CAS 清零不限幅——解耦 1ms 真理源实时消费；与 takeInput(maxStep) 并存）。 */
+  /** 消耗输入：读出后清零，**不做截断**（解耦 1ms 线实时消费完整增量；与 `takeInput(maxStep)`
+   * 的饱和截断并存，各归各线）。 */
   consumeInput(): InputSample {
     const dx = this.dxAcc;
     const dy = this.dyAcc;
@@ -528,14 +519,14 @@ export class MsgState {
     return { dx, dy, keysMask: this.keysMask };
   }
 
-  /** 清空未消费输入增量（同步瞬间；键位保留，同 SAB resetInput）。 */
+  /** 清空未消费的输入增量（同步瞬间调用）；键位保留，同 SAB 的 `resetInput`。 */
   resetInput(): void {
     this.dxAcc = 0;
     this.dyAcc = 0;
   }
 
-  /** Worker 写权威帧 → postMessage `phys-frame`。meta 提供时消息附带
-   * seg/tick/evt（tick 协议双喂，plan-v2 §1.3.1）；缺省=既有消息形态零变化。 */
+  /** Worker 写权威帧 → `phys-frame` 消息。提供 `meta` 时消息附带 `seg/tick/evt`
+   * （tick 协议双喂）；缺省则消息形态与不带该组的版本一致。 */
   writeAuthoritative(a: Omit<AuthFrame, 'onGround'>, onGround: boolean, meta?: AuthPublishMeta): number {
     this.va++;
     const frame = { ...a, onGround };
@@ -554,8 +545,8 @@ export class MsgState {
     return this.va;
   }
 
-  /** Worker 写解耦帧 → postMessage `phys-frame`（同消息形态，publishFloorMs 节流；
-   * 被节流丢弃的间隔内物理照常推进，仅发布降频——§3.3）。 */
+  /** Worker 写解耦帧 → `phys-frame` 消息（同一消息形态，按 `publishFloorMs` 节流；
+   * 被节流丢弃的间隔内物理照常推进，只是发布降频）。 */
   writeDecoupled(frame: AuthFrame): void {
     const now = performance.now();
     if (now - this.lastDecoupledPublishMs < MsgState.publishFloorMs) return;
@@ -564,7 +555,7 @@ export class MsgState {
     this.post({ type: 'phys-frame', va: this.vd, frame });
   }
 
-  /** 背压挂起（MsgState 无 SAB 原子原语——立即返回未唤醒，循环由 setTimeout 自驱）。 */
+  /** 背压挂起：本实现没有 SAB 原子原语，立即返回「未唤醒」，循环由 setTimeout 自驱。 */
   waitWakeup(_timeoutMs: number): boolean {
     return false;
   }
@@ -572,9 +563,13 @@ export class MsgState {
 
 // ── 共享内存通道 ──────────────────────────────────────────────
 
+/** 基于 `SharedArrayBuffer` 的实现：三个视图都从同一 buffer 的 0 字节起建，
+ * 因此各视图的下标 = 字节 ÷ 该视图元素宽度。 */
 export class ShmState {
   readonly isShared = true;
+  /** i32 控制区视图。 */
   private readonly i32: Int32Array;
+  /** i64 槽视图（输入累加器、两个双缓冲、渲染尾槽的协议槽）。 */
   private readonly b64: BigInt64Array;
   /** 渲染采样 f64 视图（整体建立：索引 = 字节/8；RT_X=56 → 字节 448）。 */
   private readonly f64: Float64Array;
@@ -587,7 +582,8 @@ export class ShmState {
 
   // ── 主线程侧 ───────────────────────────────────────────────
 
-  /** 写入鼠标增量（BigInt64 原子累加）+ 键位（Worker 权威帧模拟消费）。 */
+  /** 写入鼠标增量（定点 ×1000 后原子累加；0 不写，省一次原子操作）+ 键位（无条件覆盖：
+   * 0 也写，松手即清零）。 */
   addInput(dx: number, dy: number, keysMask: number): void {
     const dxFixed = BigInt(Math.round(dx * 1000));
     const dyFixed = BigInt(Math.round(dy * 1000));
@@ -598,7 +594,7 @@ export class ShmState {
   }
 
   /**
-   * 读权威帧（双缓冲槽 (V_A-1)&1，无撕裂）。
+   * 读权威帧（双缓冲槽 `(V_A-1)&1`，无撕裂）。
    * @returns { frame, va } 权威帧 + 版本号；V_A=0（未开始）返回 null。
    */
   readAuthoritative(): { frame: AuthFrame; va: number } | null {
@@ -631,33 +627,29 @@ export class ShmState {
 
   // ── 渲染采样槽（主线程写 / Worker 读；单样本 seqlock）──────────
   //
-  // 一致性说明（为什么需要 seqlock）：f64 没有 Atomics 原语，5 个 f64 载荷
-  // （x/y/z/tMs）只能普通 store——写者中途被读者撞上就可能读到**撕裂**的
-  // (x,y,z) 三元组（半新半旧），而本槽的用途正是「权威发布位置 = 渲染折线上
-  // 的一个采样点」，撕裂三元组会直接把权威位置射到轨迹外。故沿用既有
-  // I_A_PSEQ 发布序守卫同款纪律（见 :141-147）：写者「store 奇数 → 写载荷 →
-  // store 偶数」；读者「偶值快照 → 读载荷 → 复检不变才接受」，复检翻转即弃读
-  // 重试，至多 2 次尝试后返回 -1（调用方本 tick 回退到自身物理位置，绝不外推）。
+  // 为什么要 seqlock：f64 没有 Atomics 原语，4 个 f64 载荷（x/y/z/tMs）只能普通 store，
+  // 写者中途被读者撞上就会读到撕裂的 (x,y,z) 三元组（半新半旧）。而本槽的用途正是
+  // 「权威发布位置 = 渲染折线上的一个采样点」，撕裂三元组会把权威位置射到轨迹外。
+  // 故沿用 I_A_PSEQ 同款纪律：写者「store 奇数 → 写载荷 → store 偶数」，
+  // 读者「偶值快照 → 读载荷 → 复检不变才接受」，复检翻转即弃读重试，
+  // 两次尝试都失败返回 -1（调用方本 tick 回退到自身物理位置，不做外推）。
   //
-  // 与 I_A_PSEQ 的差异：后者只需保护 i32 标量（可全 Atomics），本槽保护的是
-  // 不可原子的 f64 载荷——奇数态即「载荷写入中」的显式旗标，载荷本身无原子性
-  // 要求（stamp 才是同步点）。i64 元数据（RT_I0/RT_EPOCH）在载荷之后、偶值
-  // stamp 之前写入，读者读到偶值即保证元数据与载荷同拍。
+  // 与 I_A_PSEQ 的差异：那里保护的是可全 Atomics 的 i32 标量，这里保护的是不可原子的
+  // f64 载荷——奇数态就是「载荷写入中」的显式旗标，载荷本身无原子性要求（stamp 才是
+  // 同步点）。i64 元数据（RT_I0/RT_EPOCH）在载荷之后、偶值 stamp 之前写入，
+  // 故读者读到偶值即保证元数据与载荷同拍。
 
   /**
-   * 主线程：每 rAF 写一条渲染采样（与 path-recorder.addRender 同拍同源）。
+   * 主线程：每 rAF 写一条渲染采样（与 `path-recorder` 的 `addRender` 同拍同源）。
    *
-   * 写序：seq 奇数（写入中）→ 4 个 f64 载荷 + RT_I0 → seq 偶数（本代完整
-   * 可见，最后一步）。读者只在偶值窗口内接受载荷。
+   * 写序：seq 置奇（写入中）→ 4 个 f64 载荷 + RT_I0 → seq 置偶（本代完整可见）。
+   * 读者只在偶值窗口内接受载荷。
    *
-   * ⚠️ **不接收 epoch 参数**（缺陷修复 · epoch 竞态）：世代由本对象持有，写入时
-   * 就地读槽内当前值，**绝不由调用方传入**。旧签名把调用方缓存的 epoch 无条件
-   * 写进 RT_EPOCH —— `resetTo → bumpSampleEpoch()` 自增槽内世代之后，任何在途/
-   * 延迟的写入都会把**旧**世代写回槽里（世代被改回过去），Worker 侧
-   * `rtOut.epoch !== rtCur.epoch` 判据因此看不到世代变化，继续用旧世界的样本对
-   * 插值 → 发布点落在**旧世界线上**（实测跨图跳变被记成 1500+ HU tick 跳变、
-   * 「最近线段时间偏移 max」到 20565ms）。改成写时读槽内值后，任何方向的乱序都
-   * 不会让世代倒退（写入只可能原样保留或带上更新的世代）。
+   * 签名里**没有 epoch 参数**：世代由本对象独占，写入时就地读槽内当前值，
+   * 不由调用方传入。若让调用方传自己缓存的世代，`resetRenderSample()` 自增之后
+   * 任何在途或延迟的写入都会把旧世代写回槽里（世代倒退），Worker 侧的世代比对
+   * 就看不到变化，会继续用旧世界的样本对插值。改成写时读槽内值后，
+   * 任何方向的乱序都不会让世代倒退——写入要么原样保留、要么带上更新的世代。
    *
    * @param tMs 渲染时钟时刻（performance.now()，ms；与 addRender 同一 t）
    * @param i0  该采样对应的渲染节点序号（顶点对身份；无则 -1）
@@ -675,11 +667,11 @@ export class ShmState {
   }
 
   /**
-   * Worker：读最新渲染采样（零分配；载荷写入调用方预分配的 out）。
+   * Worker：读最新渲染采样（零分配；载荷写进调用方预分配的 `out`）。
    *
-   * @returns >0 = 样本序号（= RT_SEQ/2，单调递增）；0 = 通道未开始（seq=0，
-   *          out 未动）；-1 = 读写冲突（连两次撞发布；out 内容弃用——调用方
-   *          本 tick 回退）。
+   * @returns >0 = 样本序号（= RT_SEQ ÷ 2，单调递增）；0 = 通道未开始（seq=0，
+   *          `out` 未动）；-1 = 读写冲突（连续两次都撞上发布，`out` 内容弃用——
+   *          调用方本 tick 回退）。
    */
   readRenderSample(out: RenderSample): number {
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -716,20 +708,22 @@ export class ShmState {
   }
 
   /**
-   * Worker：廉价读**失效世代**（RT_EPOCH，1 次 Atomics.load——不进 seqlock 载荷窗）。
+   * Worker：廉价读失效世代（1 次 `Atomics.load`，不进 seqlock 载荷窗）。
    *
-   * 为什么单读一个 i64 就够（缺陷修复 · epoch 竞态）：主线程
-   * `resetRenderSample()` 的写序是「EPOCH store(+1) → SEQ=0 → I0=-1 → PUB_TAU=0
-   * → SEQ=0」，即**世代先落盘**，此后任何位置的写入都必然携带新世代。因此
-   * 「本值 ≠ 缓存样本对的 epoch」= 缓存对必属旧世界，必须丢弃——不可能出现
-   * 「读到新世代但其实位置还是旧的」（位置写入发生在世代之后）。
+   * 单读一个 i64 就够的理由：`resetRenderSample()` 的写序是
+   * 「EPOCH store(+1) → SEQ=0 → I0=-1 → PUB_TAU=0 → SEQ=0」，**世代先落盘**，
+   * 此后任何位置的写入都必然携带新世代。因此「本值 ≠ 缓存样本对的 epoch」
+   * 即等价于「缓存对属旧世界，必须丢弃」。
    */
   readRenderEpoch(): number {
     return Number(Atomics.load(this.b64, RT_EPOCH));
   }
 
   /** 重置渲染采样槽（世界重建/断窗）：世代 +1 + 样本清空 + 发布 τ 归零。
-   * 世代自增即「旧样本全部失效」——Worker 侧读到 epoch 变化立刻丢弃缓存配对。 */
+   * 世代自增即「旧样本全部失效」——Worker 侧读到 epoch 变化立刻丢弃缓存配对。
+   *
+   * 写序：先清 SEQ/I0/PUB_TAU，再自增 EPOCH，最后把 SEQ 显式归零
+   * （回归「通道未开始」，是最后一步）。 */
   resetRenderSample(): void {
     const e = Atomics.load(this.b64, RT_EPOCH);
     Atomics.store(this.b64, RT_SEQ, 0n);
@@ -742,7 +736,8 @@ export class ShmState {
   // ── Worker 侧 ──────────────────────────────────────────────
 
   /**
-   * 消耗输入（BigInt64 exchange 清空 + 饱和截断；maxStep 防穿墙）。
+   * 消耗输入：两个累加器原子 exchange 清零，分量按 `maxStep` 饱和截断（防穿墙）。
+   * 定点解码在 Number 转换后做除法——BigInt 除法会截断。
    * 仅 Worker 权威帧模拟调用。
    */
   takeInput(maxStep: number): InputSample {
@@ -760,28 +755,26 @@ export class ShmState {
   }
 
   /**
-   * 清空未消费的输入增量（渲染主线 → 权威同步瞬间调用）：丢弃同步前的
-   * 残留鼠标增量，防止旧输入注入新状态；键位（keysMask）保留——按键
-   * 按住状态是实时的，清掉会导致丢按键。
+   * 清空未消费的输入增量（渲染主线 → 权威同步瞬间调用）：丢弃同步前的残留鼠标增量，
+   * 防止旧输入注入新状态；键位（keysMask）保留——按住状态是实时的，清掉会丢按键。
    */
   resetInput(): void {
     Atomics.store(this.b64, B_DX_ACC, 0n);
     Atomics.store(this.b64, B_DY_ACC, 0n);
   }
 
-  // ── 双模式扩展（phys-mode-port §3.3/§3.4.B，additive）─────────
+  // ── 解耦线通道 ─────────────────────────────────────────────
 
-  /** 非消耗读当前键位掩码（解耦 tickPhys 边界快照用——键位是"当前状态"
-   * 覆盖写，读边界时刻的当前值 = 真实 64t 服务器语义）。 */
+  /** 非消耗读当前键位掩码（解耦线 tickPhys 边界快照用——键位是「当前状态」覆盖写，
+   * 读边界时刻的当前值即真实 64t 服务器语义）。 */
   peekKeys(): number {
     return Atomics.load(this.i32, I_KEYS);
   }
 
-  /** 非消耗读当前输入（F4-C scratch 乐观评估投影用，任务 t4）：读 B_DX/B_DY
-   * 累加器**不清零**——真实 tick 仍经 takeInput 全窗消费（Crux-1 输入台账单源：
-   * 乐观评估是 peek 投影、绝不成为第二消费者）。截断同 takeInput(maxStep)
-   * 饱和定点比较；键位读当前掩码。仅 ShmState（SAB）提供——MsgState 回退
-   * 无乐观路径（消费器回落 pure-history，t2 语义评审 F4 降级链）。 */
+  /** 非消耗读当前输入（乐观评估的投影用）：读两个累加器**不清零**——真实 tick 仍经
+   * `takeInput` 全窗消费，乐观评估只做 peek 投影、绝不成为第二消费者。截断口径与
+   * `takeInput(maxStep)` 相同（定点饱和比较）；键位读当前掩码。
+   * 只有本实现（SAB）提供——`MsgState` 没有乐观路径。 */
   peekInput(maxStep: number): InputSample {
     const dxFixed = Atomics.load(this.b64, B_DX_ACC);
     const dyFixed = Atomics.load(this.b64, B_DY_ACC);
@@ -797,8 +790,8 @@ export class ShmState {
     };
   }
 
-  /** 消耗输入（CAS 清零，不限幅——解耦 1ms 真理源实时消费完整帧增量；
-   * 与 takeInput(maxStep) 饱和截断并存，各归各线）。 */
+  /** 消耗输入：CAS 清零、**不限幅**——解耦 1ms 线实时消费完整帧增量；
+   * 与 `takeInput(maxStep)` 的饱和截断并存，各归各线。 */
   consumeInput(): InputSample {
     const dxFixed = this.exchangeZero(B_DX_ACC);
     const dyFixed = this.exchangeZero(B_DY_ACC);
@@ -809,7 +802,7 @@ export class ShmState {
     };
   }
 
-  /** CAS 清零：原子地"读出累加值并归零"，返回读出的定点增量。 */
+  /** CAS 循环清零：原子地「读出累加值并归零」，返回读出的定点增量。 */
   private exchangeZero(idx: number): bigint {
     let cur = Atomics.load(this.b64, idx);
     for (;;) {
@@ -820,9 +813,9 @@ export class ShmState {
   }
 
   /**
-   * Worker 写解耦帧：写空闲槽 S_D[V_D&1] → release 递增 V_D（协议同
-   * writeAuthoritative）；onGround 复用 i32[2]（模式互斥运行，同一槽位两模式
-   * 顺序使用——耦合线停写期间仅解耦线写它）。
+   * Worker 写解耦帧：写空闲槽 `S_D[V_D&1]` → 递增 `V_D`（协议同 `writeAuthoritative`）。
+   * `onGround` 复用 `i32[2]`：两条线互斥运行，同一槽位顺序使用——耦合线停写期间
+   * 只有解耦线写它。
    */
   writeDecoupled(frame: AuthFrame): void {
     const slot = Atomics.load(this.i32, I_V_D) & 1;
@@ -845,7 +838,7 @@ export class ShmState {
   }
 
   /**
-   * 读最新解耦帧（双缓冲槽 (V_D-1)&1，无撕裂；无新帧也返回最近帧）。
+   * 读最新解耦帧（双缓冲槽 `(V_D-1)&1`，无撕裂；没有新帧时返回最近一帧）。
    * @returns { frame, vd } 解耦帧 + 版本号；V_D=0（未开始）返回 null。
    */
   readDecoupled(): { frame: AuthFrame; vd: number } | null {
@@ -876,17 +869,21 @@ export class ShmState {
     };
   }
 
-  /** 主线程背压唤醒（rAF 每帧调用）：store(1) 电平 + notify 单等待者。 */
+  /** 主线程背压唤醒（rAF 每帧调用）：置电平 + notify 单个等待者。
+   * 注意当前本仓没有调用点——`waitWakeup` 只被未接线的解耦环使用。 */
   wake(): void {
     Atomics.store(this.i32, I_WAKEUP, 1);
     Atomics.notify(this.i32, I_WAKEUP, 1);
   }
 
   /**
-   * 解耦线物理背压：wait(WAKEUP, 0, timeoutMs) 挂起（可被 wake 提前唤醒）。
-   * 复位用 CAS(1→0)：'ok'/'not-equal' 时值必为 1（wake 已置位），CAS 消费本次唤醒；
-   * 'timed-out' 时跳过复位——超时窗口内新到的 store(1) 保留给下一轮立即消费
-   * （无条件 store(0) 会把窗口内新唤醒清掉，造成唤醒丢失；harness waitWakeup 同式）。
+   * 解耦线物理背压：`wait(WAKEUP, 0, timeoutMs)` 挂起（可被 `wake` 提前唤醒）。
+   *
+   * 复位用 CAS(1→0)：返回 'ok' / 'not-equal' 时值必为 1（`wake` 已置位），
+   * CAS 正好消费本次唤醒；返回 'timed-out' 时**跳过复位**——超时窗口内新到的
+   * store(1) 要留给下一轮立即消费，无条件 store(0) 会把窗口内的新唤醒清掉、
+   * 造成唤醒丢失。
+   *
    * @returns 是否被唤醒（'ok' 或 'not-equal'）；超时返回 false。
    */
   waitWakeup(timeoutMs: number): boolean {
@@ -897,15 +894,16 @@ export class ShmState {
   }
 
   /**
-   * Worker 写权威帧：写空闲槽 S_A[V_A&1] → release 递增 V_A。
+   * Worker 写权威帧：写空闲槽 `S_A[V_A&1]` → 递增 `V_A`。
    *
-   * tick 模式协议（meta 提供时，t3-memo §2.5 写序 + t2 语义评审 F1 成对修复
-   * 的 f' 序）：帧值 → PSEQ 奇数 → seg/tick/evt/ground（全 Atomics.store，F2）
-   * → release V_A → PSEQ 偶数（最后一步）。f' 序要点：VA release 挪到三元组
-   * 之后、PSEQ 偶之前——「PS 偶已稳定 ⇒ VA 已 ≥ 本代」恒成立，读侧 VA 复检
- * 据此封死「v1 陈旧 × 三元组已新代」的跨代混合接受窗口（F1 本体；单改任一
- * 边不完备，论证见原 temp/phys-plan-discuss/t2-semantic-review-protocol-engineer.md，2026-09 清理）。
-   * meta 缺省（耦合/解耦）：逐字节保持 v7 行为（PSEQ 与三槽零触碰，additive-only）。
+   * 带 `meta` 时走 tick 协议写序：帧值 → PSEQ 置奇 → seg/tick/evt/onGround
+   * （全部 `Atomics.store`）→ 递增 `V_A` → PSEQ 置偶（最后一步）。
+   * 要点是 `V_A` 的递增夹在三元组之后、PSEQ 偶值之前——于是「PSEQ 已是偶值 ⇒
+   * `V_A` 已 ≥ 本代」恒成立，读侧据此做代际复检，封死「旧 `V_A` × 新三元组」
+   * 这一跨代混合的接受窗口；写侧顺序与读侧复检必须成对，只改一边不足以封死。
+   *
+   * `meta` 缺省（耦合与解耦路径）：PSEQ 与三个协议槽零触碰，与不带 meta 的行为
+   * 逐字节一致。
    */
   writeAuthoritative(a: Omit<AuthFrame, 'onGround'>, onGround: boolean, meta?: AuthPublishMeta): number {
     const slot = Atomics.load(this.i32, I_V_A) & 1;
@@ -928,8 +926,8 @@ export class ShmState {
       Atomics.store(this.i32, I_V_A, va);
       return va;
     }
-    // tick 模式：seqlock 发布（写者侧，f' 序）——onGround 一并纳入守卫集；
-    // 协议槽写全 Atomics.store（F2：SAB 内存模型规范；耦合路径 621 行零触碰不动）
+    // tick 模式：seqlock 发布（写者侧）——onGround 一并纳入守卫集；
+    // 协议槽一律 Atomics.store（SAB 内存模型要求），耦合路径不进入本分支。
     const pseq = Atomics.load(this.i32, I_A_PSEQ);
     Atomics.store(this.i32, I_A_PSEQ, pseq + 1);
     if (meta.seg !== undefined) Atomics.store(this.i32, I_A_SEG, meta.seg);
@@ -942,33 +940,32 @@ export class ShmState {
   }
 
   /**
-   * 零分配读权威帧 + tick 协议三元组（tick 模式消费器热路径，t3-memo §3.2 #1）。
+   * 零分配读权威帧 + tick 协议三元组（tick 消费器热路径）。
    *
-   * dstF64[0..9] = posX,posY,posZ,yaw,pitch,velX,velY,velZ,eyeHeight,timeMs
+   * 填充布局：
+   * - `dstF64[0..9]` = posX,posY,posZ,yaw,pitch,velX,velY,velZ,eyeHeight,timeMs
    *   （定点还原：pos/vel/eyeHeight ÷100，yaw/pitch ÷1000，timeMs 原值 ms）
-   * dstI32[0..4] = onGround(0/1), va, segId, tickIndex, evtBits
+   * - `dstI32[0..4]` = onGround(0/1), va, 段号, tick 序号, 事件位
    *
-   * 一致性（t2 语义评审 F1 修复后）：帧值经双缓冲槽（写者只写空闲槽，读者槽
-   * 天然无撕裂）；onGround+seg/tick/evt 四元组经 I_A_PSEQ seqlock（Atomics.load
-   * 配对读，F3）——读窗口内有发布序翻转即弃读重试；PSEQ 复检后再加 V_A 代际
-   * 配对复检（「v1 读取早于写者 VA release、偶值快照晚于 PS 偶」窗口的唯一
-   * 守卫：PSEQ 已稳定新代偶值而 v1 陈旧 → 必须重试，防 va=X−1 + 第 X 帧三元组
-   * 跨代混合被接受）。写侧 f' 序（VA release 先于 PS 偶）+ 读侧 VA 复检成对
-   * 封死该窗口（单改任一边不完备）。
+   * 一致性：帧值走双缓冲槽（写者只写空闲槽，读者天然不见撕裂）；onGround 与三个协议槽
+   * 走 `I_A_PSEQ` seqlock，读窗口内发布序翻转即弃读重试。PSEQ 复检之后还要加一次
+   * 代际复检——`V_A` 必须与本轮读到的值相同：若 `V_A` 读取早于写者的 release、
+   * 而 PSEQ 偶值快照晚于写者的置偶，就会出现「PSEQ 已稳定在新代而 `V_A` 仍旧」的窗口，
+   * 此时返回会把「`va = X−1` 与第 X 帧的三元组」跨代混合。写侧顺序与本次复检成对封死它。
    *
-   * @returns va（≥1，成功）；0 = 通道未开始（V_A=0，dst 未动）；
-   *          −1 = 读写冲突（连两次撞发布，dst 内容弃用——消费器跳过本轮、
-   *          下一 rAF 重读；≠「通道未开始」，勿触发重引导）。
+   * @returns va（≥1 成功）；0 = 通道未开始（V_A=0，`dst` 未动）；
+   *          −1 = 读写冲突（连续两次撞发布，`dst` 内容弃用——消费器跳过本轮、
+   *          下一 rAF 重读；与「通道未开始」不同，不应触发重引导）。
    *
-   * @param probe 读侧一致性探针（仅测试接缝，生产恒 undefined）：单线程
-   *              node 单测无法真实交错写者，三处可选回调把「写者读中插入」
-   *              确定性注入；不传时行为与探针不存在完全一致（零开销热路径）。
+   * @param probe 读侧一致性探针（仅测试接缝，生产恒 `undefined`）：单线程 node 单测无法
+   *              真实交错写者，三处可选回调把「写者读中插入」确定性注入；不传时行为与
+   *              探针不存在完全一致（热路径零开销）。
    */
   readAuthoritativeInto(dstF64: Float64Array, dstI32: Int32Array, probe?: ReadProbe): number {
     for (let attempt = 0; attempt < 2; attempt++) {
       const va = Atomics.load(this.i32, I_V_A);
       if (va === 0) return 0;
-      probe?.afterVaLoad?.(); // 测试接缝（F1）：VA 读取后、偶值快照前（生产 undefined）
+      probe?.afterVaLoad?.(); // 测试接缝：VA 读取后、偶值快照前（生产 undefined）
       const pseq0 = Atomics.load(this.i32, I_A_PSEQ);
       if ((pseq0 & 1) !== 0) continue; // 写者正发布（奇数态）——重试
       probe?.afterEvenSnapshot?.(pseq0); // 测试接缝：模拟写者读中插入（生产 undefined）
@@ -985,14 +982,14 @@ export class ShmState {
       dstF64[7] = Number(b[base + 7]) / 100;
       dstF64[8] = Number(b[base + 8]) / 100;
       dstF64[9] = Number(b[base + 9]);
-      dstI32[0] = Atomics.load(this.i32, I_A_GROUND) === 1 ? 1 : 0; // F3：与写侧 Atomics.store 配对
+      dstI32[0] = Atomics.load(this.i32, I_A_GROUND) === 1 ? 1 : 0; // 与写侧 Atomics.store 配对
       dstI32[1] = va;
-      dstI32[2] = Atomics.load(this.i32, I_A_SEG); // F3：四元组原子读
+      dstI32[2] = Atomics.load(this.i32, I_A_SEG); // 四元组原子读
       dstI32[3] = Atomics.load(this.i32, I_A_TICK);
       dstI32[4] = Atomics.load(this.i32, I_A_EVT);
       probe?.beforeRecheck?.(); // 测试接缝：复检前注入发布（生产 undefined）
       if (Atomics.load(this.i32, I_A_PSEQ) !== pseq0) continue; // 发布序翻转——三元组弃用
-      if (Atomics.load(this.i32, I_V_A) !== va) continue; // 代际配对复检（F1 新增）
+      if (Atomics.load(this.i32, I_V_A) !== va) continue; // 代际配对复检
       return va;
     }
     return -1;
@@ -1000,14 +997,16 @@ export class ShmState {
 }
 
 /**
- * 读侧一致性探针（ShmState.readAuthoritativeInto 测试接缝；生产恒 undefined）。
- * 单线程 node 单测无法真实交错写者——三处回调把「写者读中插入」确定性注入：
- * - afterVaLoad()：V_A 读取后、偶值快照前（F1 场景：写者整段发布插入此窗 →
- *   v1 陈旧 × pseq0 已新代偶值 → 唯 VA 复检可拒，防跨代混合返回）；
- * - afterEvenSnapshot(pseq0)：偶值快照取得后、读值前（此后插入发布 → 复检必翻
- *   → 走重试路径，验证「弃旧代、取新代」防跨代混合核心语义）；
- * - beforeRecheck()：值读取完成后、复检前（同上，注入窗更窄）。
- * 各回调每 attempt 至多一次调用——测试侧用闭包状态控制只触发一次。
+ * 读侧一致性探针（`ShmState.readAuthoritativeInto` 的测试接缝；生产恒 `undefined`）。
+ *
+ * 单线程 node 单测无法真实交错写者，故用三处回调把「写者读中插入」确定性注入：
+ * - `afterVaLoad()`：`V_A` 读取后、偶值快照前。此时插入整段发布会造成
+ *   「旧 `V_A` × 新代偶值 PSEQ」——只有代际复检能拒，防跨代混合被返回；
+ * - `afterEvenSnapshot(pseq0)`：取得偶值快照后、读值前。此后插入发布必然让复检翻转，
+ *   走重试路径，验证「弃旧代、取新代」；
+ * - `beforeRecheck()`：值读完后、复检前（同上，注入窗更窄）。
+ *
+ * 各回调每 attempt 至多调用一次——测试侧用闭包状态控制只触发一次。
  */
 export interface ReadProbe {
   afterVaLoad?: () => void;
@@ -1018,8 +1017,8 @@ export interface ReadProbe {
 /** 跨线程状态通道（SAB / MsgState 统一类型）。 */
 export type SharedState = ShmState | MsgState;
 
-/** 主线程侧创建：crossOriginIsolated（本地 serve.py COOP/COEP）→ SAB 高性能；
- * 否则（线上静态部署无 COOP/COEP）→ MsgState postMessage 回退（功能等价，性能降级）。 */
+/** 主线程侧创建：`crossOriginIsolated`（本地 `src/serve.py` 带 COOP/COEP）→ SAB 高性能；
+ * 否则（静态部署无 COOP/COEP）→ `MsgState` 消息回退（功能等价，性能降级）。 */
 export function createMainSharedState(
   buffer: SharedArrayBuffer | null,
   worker: Worker,
@@ -1027,7 +1026,7 @@ export function createMainSharedState(
   return buffer ? new ShmState(buffer) : new MsgState(worker);
 }
 
-/** Worker 侧创建（init.shared 为 null = MsgState 回退）。 */
+/** Worker 侧创建（`init` 消息的 `shared` 为 null = MsgState 回退）。 */
 export function createWorkerSharedState(buffer: SharedArrayBuffer | null): ShmState | MsgState {
   return buffer ? new ShmState(buffer) : new MsgState(null);
 }

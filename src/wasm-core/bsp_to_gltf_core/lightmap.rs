@@ -1,22 +1,38 @@
-//! Lightmap atlas 生成与导出契约（阶段 2）。
+//! Lightmap atlas 生成与导出契约。
 //!
 //! 算法口径**照抄外部参照实现**（MIT，`Copyright (c) 2016 James King`；本文件不复制其代码，
-//! 只按下列行号重新实现其算法）：
-//! - 每面 luxel 数 = `(LightMapSizeX + 1) * (LightMapSizeY + 1)`（`Structures.cs:181`）
-//! - `lightofs` 是 lump 内**字节**偏移（`Lightmap.cs:75` 直接 Seek）
-//! - 打包矩形 = `LightMapSize + 3`（即 luxel + 2），落位后内缩 2 像素，有效矩形恰好 = luxel 数
-//!   （`LightmapLayout.cs:47-49`、`:67`）
-//! - 图集尺寸按面积向上取 2 的幂（`LightmapLayout.cs:61`、`:74-82`、`:115-129`）。
-//!   **本副本对单页上界的政策**（`documents/game/implementation/console-fix-contract.md` §4.2）：
-//!   沿用上游尺寸序列，单边上限 4096 px 且单页面积 ≤ 8,388,608 px（= 4096×2048）。
-//!   允许形状 = 序列里满足该两条的形状（≤2048 的 12 档 + 4096×2048 + 2048×4096），**不含 4096×4096**；
-//!   按页面积升序取第一个能装下全部矩形的形状（`surf_null`/`ze_cursed` 仍得 2048×2048，页形状不变）。
-//!   连允许的最大形状都装不下时**显式报错**（自报 packedArea / 允许最大形状 / 所需页数下界），
-//!   禁止静默截断、降采样、部分写入。
-//! - 像素编码 `R=mantissa_r, G=mantissa_g, B=mantissa_b, A=exp+128`（`Lightmap.cs:89-92`）
-//! - UV：`uv = axis·pos + axis.w - LightMapOffset`，除以 `LightMapSize`（**不是 +1**），
-//!   再映射进内缩矩形 + 半像素（`Geometry.cs:432`、`:600-608`；`LightmapLayout.cs:149-156`）
-//! - 单面读缓冲只有 256×256（`Lightmap.cs:64`），故 luxel 边长超 256 必须**报错**而非越界
+//! 只按同一口径重新实现）。下面每条都在本文件里有落点：
+//! - 每面 luxel 数 = `(LightMapSizeX + 1) * (LightMapSizeY + 1)`；打包矩形 = luxel + 2
+//!   （**两级**换算，不得合并）。见 `build_atlas` 的换算与 `packer_is_deterministic_and_in_bounds`
+//!   / `luxel_count_and_encoding_match_formula` 两个用例。
+//! - `lightofs` 是光照 lump 内的**字节**偏移；`-1` 表示该面无光照（`build_atlas` 直接跳过），
+//!   `0` 是**合法**偏移，不是哨兵。
+//! - 打包矩形落位后**内缩 2 像素**，使有效矩形恰好等于该面 luxel 数（见 `build_atlas` 的落位
+//!   与 `LightmapRect`）。
+//! - 页形状取 `size_width` / `size_height` 给出的尺寸序列（`1 << ((i + 1) >> 1)` 与
+//!   `1 << (i >> 1)`），按**面积升序**选第一个能装下全部矩形的**允许**形状。允许 = 单边 ≤
+//!   [`MAX_ATLAS_SIDE`] **且** 面积 ≤ [`MAX_ATLAS_PAGE_AREA`] ⇒ **4096×4096 不在允许集内**。
+//!   连允许的最大形状都装不下时**显式报错**，错误文本自报 packedArea / 允许的最大形状 /
+//!   所需页数下界；不静默截断、不降采样、不部分写入。
+//! - 像素编码 `R=mantissa_r, G=mantissa_g, B=mantissa_b, A=exp+128`（`exp` 是 `i8`，按 `u8`
+//!   回绕即 +128；见 `build_atlas` 写像素处）。
+//! - UV：`uv = axis·pos + axis.w - LightMapOffset`，除以 `LightMapSize`（**不是** luxel 数那一级），
+//!   再映射进内缩矩形并加半像素（见 `lightmap_uv`）。
+//! - 单面 luxel 边长上界 256：超限**报错**而非越界（见 [`MAX_LUXEL_SIDE`] 与
+//!   `check_face_luxel_size`——它被抽成纯函数，好让 257 这条分支有单测覆盖）。
+//!
+//! 上下游：上游是 `bsp_to_gltf_core` 的导出流程——它先决定用 `LIGHTING` 还是 `LIGHTING_HDR`，
+//! 把结果作为 `LightingLump` 传进来；本文件再 [`build_atlas`] 出图集与统计量、
+//! [`lightmap_faces`] 取面表、[`push_atlas_texture`] 把 PNG 写进 GLB，最后由
+//! [`inject_lightmap_json`] 注入 `asset.extras.lightmap`。下游渲染端只读
+//! `asset.extras.lightmap` 建图集。
+//!
+//! 边界：只做打包、落位、像素编码与导出契约注入。不解析 BSP、不选 HDR/LDR（由调用方决定并传入）。
+//!
+//! 测试归属：本文件 6 个 `#[test]`——`single_face_luxel_limit_is_enforced`、
+//! `pack_size_sequence_matches_upstream`、`page_shape_policy_is_bounded_both_sides`、
+//! `small_map_keeps_square_page`、`packer_is_deterministic_and_in_bounds`、
+//! `luxel_count_and_encoding_match_formula`。
 
 use crate::bsp_to_gltf_core::Error;
 use crate::vbsp::{Bsp, Face, LightingLump, TextureInfo, Vector};
@@ -26,29 +42,28 @@ use gltf_json::{Index, Root, Texture};
 use image::codecs::png::PngEncoder;
 use image::{ColorType, ImageEncoder};
 
-/// 单面 luxel 边长上界（外部参照实现的 `Lightmap.cs:64` 只分配 256*256 读缓冲）。
+/// 单面 luxel 边长上界：`check_face_luxel_size` 用它拦住 `luxel_x` 或 `luxel_y` 超过 256 的面。
 const MAX_LUXEL_SIDE: i32 = 256;
-/// 单页图集**单边**上界。
+/// 单页图集**单边**上界（px）。
 ///
-/// 上游 `LightmapLayout.cs:61` 是 2048（方形单页）；本副本按 r1 契约 §4.2 放宽到 4096，
-/// 使 `surf_666`（packedArea 6,598,518 px = 2048² 的 157.3%）能装进**单个 4096×2048 页**
-/// 而无需多纹理分页（渲染端零改动）。真正约束是下面两条：单边 ≤ 本常量 **且** 面积 ≤ [`MAX_ATLAS_PAGE_AREA`]。
+/// 约束是两条并列：单边 ≤ 本常量 **且** 面积 ≤ [`MAX_ATLAS_PAGE_AREA`]。只看单边会放行
+/// 4096×4096（16,777,216 px），它由面积上界挡掉。
 const MAX_ATLAS_SIDE: u32 = 4096;
-/// 单页图集**面积**上界（= 4096×2048）。4096×4096 = 16,777,216 px > 本值 ⇒ 不允许。
+/// 单页图集**面积**上界（px）= 4096 × 2048 = 8,388,608。
+/// 4096×4096 = 16,777,216 px > 本值 ⇒ 该形状不在允许集内。
 const MAX_ATLAS_PAGE_AREA: u64 = (MAX_ATLAS_SIDE as u64) * (MAX_ATLAS_SIDE as u64) / 2;
-/// 允许的最大页形状（仅用于错误文本自报，保持与 [`MAX_ATLAS_SIDE`]/[`MAX_ATLAS_PAGE_AREA`] 同步）。
+/// 允许的最大页形状名，**只用于错误文本自报**。
+///
+/// 它是 [`MAX_ATLAS_SIDE`] 与 [`MAX_ATLAS_PAGE_AREA`] 的**字符串副本**：改那两个数值时必须同步
+/// 改本串（`max_allowed_shape_name` 在上界 ≥ [`MAX_ATLAS_PAGE_AREA`] 时直接返回本串）。
 const MAX_ALLOWED_SHAPE: &str = "4096×2048";
 
-/// 单页面积上界的**显式覆盖**解析（`max_area_override > 0` 时用它，否则用政策上界）。
+/// 解析**生效的**单页面积上界：`override_area > 0` 时用它，否则用 [`MAX_ATLAS_PAGE_AREA`]。
 ///
-/// 为什么需要：在 8,388,608 px 的政策上界下，一张「能被容量守卫放行」的地图**不可能**装不下
-/// —— 容量约束 `Σluxel ≤ cap/4` 与「单面 luxel 边长 ≤ 256」共同保证
-/// `packedArea = Σ(sx+3)(sy+3) ≤ Σ(sx+1)(sy+1) × (257/256)² ≤ cap/4 × 1.00784 ≤ 8,024,000 px < 8,388,608`
-/// （surf_666：≤ 7,318,032 px）。也就是说「装不下」这条失败路径**在当前政策下不可由真实语料触发**
-/// （这正是 ③ 修好的含义），但契约 §4.3 要求 fail-visible 分支**不得删除**、必须能用**仍会失败的输入**
-/// 触发。于是 `ConvertOptions::lightmap_max_atlas_area` 允许把上界临时压小（例如 2048×2048 =
-/// 4,194,304），`surf_666`（packedArea 6,598,518）就仍是「装不下」的输入 ⇒ 失败路径与错误文本
-/// 可被可红断言覆盖。它只改**判定阈值**，不改打包/落位/UV/像素口径，也不降采样、不截断。
+/// 存在的理由是让 `build_atlas` 里「装不下」那条失败路径**可被触发**：默认上界下允许的最大
+/// 形状已经很宽，把上界临时压小（例如 2048×2048 = 4,194,304）就能让同一份语料落进显式失败
+/// 分支，从而覆盖失败路径与错误文本。它**只改判定阈值**——打包、落位、UV、像素编码一律不变，
+/// 也不降采样、不截断。入参来自 `ConvertOptions::lightmap_max_atlas_area`。
 fn effective_max_atlas_area(override_area: u64) -> u64 {
     if override_area > 0 {
         override_area
@@ -57,7 +72,7 @@ fn effective_max_atlas_area(override_area: u64) -> u64 {
     }
 }
 
-/// 页形状是否允许（契约 §4.2 第 1 条：单边 ≤ [`MAX_ATLAS_SIDE`] 且面积 ≤ 上界）。
+/// 页形状是否允许：单边 ≤ [`MAX_ATLAS_SIDE`] **且** 面积 ≤ `max_area`。
 fn is_allowed_page_shape(width: u32, height: u32, max_area: u64) -> bool {
     width <= MAX_ATLAS_SIDE && height <= MAX_ATLAS_SIDE && (width as u64) * (height as u64) <= max_area
 }
@@ -100,10 +115,11 @@ pub struct LightmapAtlas {
     pub is_hdr: bool,
     /// Σ (LightMapSizeX+1)*(LightMapSizeY+1)（仅 light_offset ≠ -1 的面）。
     pub luxel_count: u64,
-    /// 光照 lump 样本容量 = 解压后字节数 / 4。**与 luxel_count 分列**，二者不可互相替代。
+    /// 光照 lump 样本容量 = `lump_bytes / 4`（`ColorRgbExp32` 每条 4 B）。
+    /// **与 `luxel_count` 分列**，二者不可互相替代：本字段是容量，那个是被面引用的样本数之和。
     pub lump_capacity: u64,
-    /// 所选光照 lump 的**解压后**字节数（= `LIGHTING`/`LIGHTING_HDR` 目录项的 `ident`；
-    /// surf_null 实测 22,961,620，而盘上只有 6,062,916）。一切预算以此为分母。
+    /// 所选光照 lump 的**解压后**字节数（`LightingLump::decompressed_bytes`）。
+    /// `build_atlas` 会断言它与目录项声明的解压长度一致。预算类判定都以它为分母。
     pub lump_bytes: u64,
     /// 选择证据：`LIGHTING`(8) 目录项（盘上长度 / ident）。
     pub ldr_dir_length: u32,
@@ -117,11 +133,11 @@ pub struct LightmapAtlas {
     pub lit_face_count: usize,
     /// 面表条目总数（`primitives[*].extras.faceIndex` 的合法上界）。
     pub face_count: usize,
-    /// 面表来源（与光照 lump 选择同一条件）：`FACES(7)` 或 `FACES_HDR(58)`。
+    /// 面表来源（与光照 lump 的选择同一条件）：`FACES(7)` 或 `FACES_HDR(58)`。
     pub face_table: &'static str,
-    /// 所选面表 `lightofs` 列的 FNV-1a 64 摘要（供 t4 与独立探针逐值对齐）。
+    /// 所选面表 `lightofs` 列的 FNV-1a 64 摘要（口径见 `lightofs_digest`）。
     pub face_table_lightofs_digest: u64,
-    /// 实际出现的最大单面 luxel 边长（本地语料 8732 < 上限 256 ⇒ 上限分支本地不可触发）。
+    /// 实际出现的最大单面 luxel 边长。取值受 `check_face_luxel_size` 约束，**必 ≤ [`MAX_LUXEL_SIDE`]**。
     pub max_luxel_side: i32,
     /// `FACES(7)` 面表条目数（面表选择的证据）。
     pub faces_entry_count: usize,
@@ -129,20 +145,20 @@ pub struct LightmapAtlas {
     pub faces_hdr_entry_count: usize,
     /// 有光照面引用的最大字节末尾（`max(light_offset + 4*luxels)`）。
     pub bytes_referenced_end: u64,
-    /// live 面 `light_offset` 的最大值。口径探针：若面表选错致 lightofs 全 0，这里会是 0 ⇒ 可判据地失败。
+    /// live 面 `light_offset` 的最大值（live = `light_offset != -1`）。口径探针：面表选错会导致
+    /// 各面 `lightofs` 全为 0，本字段随之退化成 0。
     pub lightofs_max: i32,
 }
 
-/// 面光照使用的面表；**切换条件与光照 lump 的选择条件一致**（计划 §2.1 第 3 条）。
+/// 选光照面表：**切换条件与光照 lump 的选择条件一致**——只有光照 lump 选了 HDR **且**
+/// `FACES_HDR(58)` 非空时才用 HDR 面表，否则一律用 `FACES(7)`。
 ///
-/// 判据（port-verifier 独立实测，只有 ze_cursed 能暴露）：
-/// - `ze_cursed`(v21) 的 `FACES(7)` 与 `FacesHdr(58)` 是**两张不同的表**且同长度（1,219,344 B）：
-///   lump7 的 `lightofs`(@20) **全表 0、无一个 -1**；lump58 的 `lightofs` 有 3131 个 -1、live 18643、
-///   且 live 非单调数为 0 ⇒ **lump58 才是与 LIGHTING_HDR 配对的那张**。
-/// - 若只切光照 lump 不切面表，则每面 lightofs 都是 0 ⇒ 所有面采到同一份 4 字节，**静默出垃圾**。
-/// - 对照：`surf_null` 的 lump7/lump58 off/len/ident 完全相同、`surf_666` 的 lump58 len=0。
+/// 为什么必须同步切换：两张面表各有自己的 `lightofs` 列，取值可以完全不同。若只切光照 lump
+/// 而不切面表，每面的 `lightofs` 会指向错误位置（极端情况全为 0 ⇒ 所有面采到同一份 4 字节），
+/// 结果是**静默出垃圾**而不是报错。
 ///
-/// 返回 `(面表, 面表名)`；面表条目数不一致时显式失败（面序号无法对齐 ⇒ 必然错位）。
+/// 返回 `(面表, 面表名)`；选了 HDR 面表但两张表条目数不一致时显式失败——面序号无法对齐，
+/// 继续下去必然错位。
 pub fn lightmap_faces<'a>(
     bsp: &'a Bsp,
     lighting: &LightingLump,
@@ -162,8 +178,11 @@ pub fn lightmap_faces<'a>(
     Ok((&bsp.faces_hdr, "FACES_HDR(58)"))
 }
 
-/// `lightofs` 列的 FNV-1a 64 摘要：给 t4 一个可与独立探针逐值对齐的锚点
-/// （避免「面表选错 ⇒ 每面 lightofs 全 0 ⇒ 静默出垃圾」这类错误只靠肉眼看统计量）。
+/// `lightofs` 列的 FNV-1a 64 摘要：按面序逐面取 `light_offset` 的 4 个**小端**字节做哈希，
+/// offset basis `0xcbf29ce484222325`、prime `0x100000001b3`，输出 16 位小写十六进制。
+///
+/// 用途：给「面表是否与光照 lump 同条件切换」一个可**逐值对齐**的判据——否则
+/// 「面表选错 ⇒ 每面 `lightofs` 全 0 ⇒ 静默出垃圾」这类错误只能靠肉眼看统计量。
 fn lightofs_digest(faces: &[Face]) -> u64 {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
@@ -177,8 +196,10 @@ fn lightofs_digest(faces: &[Face]) -> u64 {
     hash
 }
 
-/// 单面 luxel 边长上界检查（抽成纯函数以便单元测试——本地语料最大单面仅 4400/1122/8732 luxel，
-/// **触发不了** 256 上限，只能靠单测证明该分支会显式报错而非静默越界）。
+/// 单面 luxel 边长上界检查：`luxel_x` 或 `luxel_y` 超过 [`MAX_LUXEL_SIDE`] 即返回 `Err`。
+///
+/// 抽成纯函数是为了让**超限分支**有单测覆盖：该分支只在某面的 luxel 边长 > 256 时才走到，
+/// 正常运行不一定遇到，而它必须**显式报错**而不是越界读取。
 pub fn check_face_luxel_size(luxel_x: i32, luxel_y: i32, face_index: usize) -> Result<(), Error> {
     if luxel_x > MAX_LUXEL_SIDE || luxel_y > MAX_LUXEL_SIDE {
         return Err(Error::Other(format!(
@@ -196,19 +217,21 @@ struct Packable {
     height: i32,
 }
 
-/// `LightmapLayout.cs:74-82` 的尺寸序列：`GetWidth = 1 << ((i+1)>>1)`、`GetHeight = 1 << (i>>1)`。
+/// 页尺寸序列的**宽**：`1 << ((index + 1) >> 1)`（`index` 从 1 起）。
+/// 与 `size_height` 配对给出逐档放大的页形状；`pack_size_sequence_matches_upstream` 逐项固定。
 fn size_width(index: u32) -> u32 {
     1u32 << ((index + 1) >> 1)
 }
 
+/// 页尺寸序列的**高**：`1 << (index >> 1)`，与 `size_width` 同一序列的另一半。
 fn size_height(index: u32) -> u32 {
     1u32 << (index >> 1)
 }
 
-/// 二叉分割式矩形打包节点（Jake Gordon 的 GrowingPacker 同类算法）。
+/// 二叉分割式矩形打包节点：在空闲矩形里找位（`find`），找到后把剩余空间二分（`split`）。
 ///
-/// 与上游 `LightmapLayout.cs:61` 的 `RectanglePacker`（同类"先找位再二分剩余空间"）等价，
-/// **不照抄货架(shelf)法**：实测货架法对 ze_cursed（面积可装进单页）会假失败。
+/// 与外部参照实现同类算法（先找位、再二分剩余空间）等价。本实现**不用货架(shelf)法**：
+/// 落位结果只由 `find` / `split` 决定，`try_pack` 在装不下时返回 `None`。
 #[derive(Debug)]
 struct PackNode {
     x: u32,
@@ -281,10 +304,11 @@ fn try_pack(packables: &[Packable], width: u32, height: u32) -> Option<Vec<(i32,
     Some(placed)
 }
 
-/// 构建 lightmap 图集：打包 → 内缩落位 → 填像素。
+/// 构建 lightmap 图集：选面表 → 逐面算 luxel 与打包矩形 → 打包 → 内缩落位 → 填像素。
 ///
-/// `max_atlas_area_override`：0 = 用政策上界（4096×2048），> 0 = 显式压小（见
-/// [`effective_max_atlas_area`]；供 fail-visible 负控）。
+/// `lighting` 已由调用方选定（HDR 或 LDR），本函数不再改选。
+/// `max_atlas_area_override`：`0` = 用 [`MAX_ATLAS_PAGE_AREA`]，`> 0` = 覆盖该上界
+/// （见 [`effective_max_atlas_area`]），用于让「装不下」的失败分支可被触发。
 pub fn build_atlas(
     bsp: &Bsp,
     lighting: &LightingLump,
@@ -293,15 +317,15 @@ pub fn build_atlas(
     let (faces, face_table) = lightmap_faces(bsp, lighting)?;
     let lump_capacity = lighting.sample_count();
 
-    // 便宜自检（口径探针）：容量必须以**解压后**字节数为分母，且能被 4 整除。
-    // 三图光照 lump 实测可整除：29,044,440→7,261,110 / 22,961,620→5,740,405 / 23,581,252→5,895,313。
+    // 两条口径自检：① 解压后字节数必须能被 4 整除（ColorRgbExp32 = 4 B/样本）；
+    // ② 解压后字节数必须等于所选目录项声明的解压长度——压缩条目的这两个值可以不同。
     if lighting.decompressed_bytes() % 4 != 0 {
         return Err(Error::Other(format!(
             "光照 lump 解压后 {} B 不能被 4 整除（ColorRGBExp32 = 4 B/样本），样本口径必错",
             lighting.decompressed_bytes()
         )));
     }
-    // 若采用了 LZMA 封装，解压后长度必须等于目录项 ident（零反例口径，见 bspfile.rs:62-68）
+    // ② 的期望值：所选目录项（HDR 或 LDR）声明的解压长度
     let declared = if lighting.is_hdr {
         lighting.hdr.decompressed_length()
     } else {
@@ -337,7 +361,7 @@ pub fn build_atlas(
         // luxel 数 = (LightMapSizeX+1)*(LightMapSizeY+1)，打包矩形 = luxel + 2（两级换算不得合并）
         let luxel_x = size_x + 1;
         let luxel_y = size_y + 1;
-        // ④ 单面 256 上限：必须显式报错而非静默越界（纯函数，单测覆盖 257 触发路径）
+        // 单面 256 上限：超限必须显式报错而非越界读取（纯函数，单测覆盖 257 这条路径）
         check_face_luxel_size(luxel_x, luxel_y, index)?;
         max_luxel_side = max_luxel_side.max(luxel_x).max(luxel_y);
         let samples = (luxel_x as u64) * (luxel_y as u64);
@@ -366,8 +390,8 @@ pub fn build_atlas(
         ));
     }
 
-    // 打包顺序：高优先（上游 LightmapLayout.cs:112 用 Width*65536+Height 降序；排序只影响
-    // 图集内布局、不影响契约判据，此处选对二叉分割打包更优的高优先+宽次优，已在 doc 注释说明）
+    // 打包顺序：高降序 → 宽降序 → 面序升序。排序只影响图集内布局，不参与任何判定；
+    // 带上 `index` 是为了让同一份输入必然得到同一份布局（确定性）。
     packables.sort_by(|a, b| {
         b.height
             .cmp(&a.height)
@@ -383,9 +407,9 @@ pub fn build_atlas(
     let allowed_max_area = effective_max_atlas_area(max_atlas_area_override);
     let min_pages: u64 = packed_area.div_ceil(allowed_max_area).max(1);
 
-    // 页选择（契约 §4.2 第 2 条）：按尺寸序列**面积升序**取第一个允许形状（单边 ≤ 4096 且
-    // 面积 ≤ 上界）中能装下全部矩形的那个 ⇒ 「能单页就单页」，且小图页形状不变。
-    // 面积下界先行（上游 `LightmapLayout.cs:115-129` 同口径）：面积不足的形状连试都不用试。
+    // 页选择：沿尺寸序列**升序**扫，取第一个「允许且装得下」的形状——允许 = `is_allowed_page_shape`
+    // （单边 ≤ MAX_ATLAS_SIDE 且面积 ≤ allowed_max_area）。序列单调放大，故首个命中的就是最小可用页。
+    // 面积先做下界判断：形状面积 < packed_area 时连试都不用试。
     let mut selected: Option<(u32, u32, Vec<(i32, i32)>)> = None;
     let mut last_allowed = (0u32, 0u32);
     for size_index in 1u32.. {
@@ -404,8 +428,8 @@ pub fn build_atlas(
         }
     }
     let Some((atlas_width, atlas_height, placements)) = selected else {
-        // 连允许的最大形状都装不下 ⇒ 显式失败（禁止静默截断/降采样/部分写入）。
-        // 错误文本按契约 §4.2 第 4 条自报 packedArea / 允许的最大形状 / 所需页数下界。
+        // 连允许的最大形状都装不下 ⇒ 显式失败，不静默截断/降采样/部分写入。
+        // 错误文本自报 packedArea / 允许的最大形状 / 所需页数下界，并带上选择证据。
         let max_shape = max_allowed_shape_name(allowed_max_area);
         return Err(Error::Other(format!(
             "Unable to pack lightmap! 打包面积 {packed_area} px 装不进任一允许的单页形状（单边上限 \
@@ -426,7 +450,7 @@ pub fn build_atlas(
     };
 
     for (packable, (x, y)) in packables.iter().zip(placements.iter()) {
-        // LightmapLayout.cs:67 —— 落位后内缩 2 像素（x+1, y+1, w-2, h-2）
+        // 落位后向里缩 2 像素（x+1, y+1, w-2, h-2）：打包矩形是 luxel + 2，缩回来正好等于 luxel 数
         regions[packable.index] = Some(LightmapRect {
             x: x + 1,
             y: y + 1,
@@ -451,7 +475,7 @@ pub fn build_atlas(
                 pixels[px] = r;
                 pixels[px + 1] = g;
                 pixels[px + 2] = b;
-                // Lightmap.cs:92 —— A = exp + 128（exp 是 i8，按 u8 回绕即 +128）
+                // A = exp + 128（exp 是 i8，按 u8 回绕即 +128）
                 pixels[px + 3] = e.wrapping_add(128);
             }
         }
@@ -483,10 +507,11 @@ pub fn build_atlas(
     })
 }
 
-/// 按上游口径计算某面某顶点的 lightmap UV（`Geometry.cs:600-608` + `LightmapLayout.cs:149-156`）。
+/// 计算某面某顶点在**图集**里的 lightmap UV（`[0, 1]` 归一化，可直接用于该图集纹理）。
 ///
-/// `u = axis·pos + axis.w`（lightmapVecs 的第 4 分量是常量偏移）→ 减 LightMapOffset →
-/// 除以 `LightMapSize`（**不是** luxel 数）→ 乘内缩矩形尺寸 + 半像素。
+/// 步骤：`u = axis·pos + axis.w`（两轴分别取 `TextureInfo` 的 `light_map_scale` 与
+/// `light_map_transform`，第 4 分量是常量偏移）→ 减该面的 `LightMapOffset` →
+/// 除以 `LightMapSize`（**不是** luxel 数那一级；除数取 `.max(1)` 防 0）→ 按内缩矩形映射进图集。
 pub fn lightmap_uv(
     atlas: &LightmapAtlas,
     region: LightmapRect,
@@ -507,7 +532,7 @@ pub fn lightmap_uv(
 
     let atlas_w = atlas.width as f32;
     let atlas_h = atlas.height as f32;
-    // LightmapLayout.cs:152-155 —— min 用 +0.5 半像素，size 用 (rect.Width - 1)
+    // 图集内映射：min 加半像素、size 用（矩形边长 - 1），见本函数 doc
     let min_x = (region.x as f32 + 0.5) / atlas_w;
     let min_y = (region.y as f32 + 0.5) / atlas_h;
     let size_x = (region.width as f32 - 1.0) / atlas_w;
@@ -516,10 +541,16 @@ pub fn lightmap_uv(
     [min_x + u * size_x, min_y + v * size_y]
 }
 
-/// 把图集以 PNG 写入 GLB 的 `buffer_views`/`images`/`textures`（+ 一个 Nearest/ClampToEdge sampler）。
+/// 把图集以 PNG 写进 GLB，返回 `texture` 索引。
 ///
-/// PNG 而非裸 RGBA：glTF 的 bufferView 图像只允许 `image/png` / `image/jpeg`，
-/// 裸 RGBA 会让渲染端的 ImageBitmap 解码失败；外部参照实现同样出 PNG（`Lightmap.cs:96-104`）。
+/// 追加四样东西：`buffer_view`（name `lightmap_atlas`）、`image`（`mime_type` = `image/png`）、
+/// sampler（mag / min 都是 `Nearest`，两个 wrap 都是 `ClampToEdge`）与 `texture`。
+///
+/// 出 PNG 而非裸 RGBA：`images` 走 `buffer_view` 时必须给 `mime_type`，而 `MimeType` 只有
+/// `image/png` 与 `image/jpeg` 两个取值。
+///
+/// 顺序不变量：`byte_length` 在 `pad_byte_vector`（4 字节对齐补零）**之前**取，故视图长度
+/// **不含**补零字节。
 pub fn push_atlas_texture(
     buffer: &mut Vec<u8>,
     gltf: &mut Root,
@@ -590,14 +621,17 @@ pub fn push_atlas_texture(
     Ok(Index::new(texture_index))
 }
 
-/// 阶段 2 的导出契约（JSON 级）：
+/// lightmap 导出契约的注入（JSON 文本级），返回改写后的 GLB JSON 字符串。
+///
+/// 注入三处：
 /// - `asset.extras.lightmap`（**承重项**：渲染端 `loadLightmapAtlas` 只读这里）
 /// - `materials[*].extensions.__vbsp_lightmap__ = { textureIndex }`
 /// - `extensionsUsed` 追加 `__vbsp_lightmap__`
 ///
-/// 之所以走 JSON 文本级注入：本工程锁定的 `gltf-json` 未启用 `extensions` feature，
-/// 其 `MaterialExtensions` 没有 `others` 兜底字段，自定义扩展无法经类型化 API 写出
-/// （实测 `cargo tree -i gltf-json -f "{p} {f}"` → `KHR_texture_transform,default,extras,names`）。
+/// 之所以走 JSON 文本级注入：本工程锁定的 `gltf-json` 未启用 `extensions` feature
+/// （`cargo tree -i gltf-json -f "{p} {f}"` 的 features 里只有
+/// `KHR_texture_transform,default,extras,names`），其 `MaterialExtensions` 没有兜底字段，
+/// 自定义扩展经类型化 API 写不出去。
 pub fn inject_lightmap_json(
     json: &str,
     texture_index: u32,
@@ -614,16 +648,14 @@ pub fn inject_lightmap_json(
         "textureIndex": texture_index,
         "kind": if atlas.is_hdr { "hdr" } else { "ldr" },
         "rule": "hdr-nonempty-first",
-        // 契约 §9.6.1 `:431` 的**承重替代断言**（唯一落点）：本次选了哪个光照 lump、其解压后字节数、
-        // 以及判定输入「HDR lump 是否非空」。字段名与语义按冻结契约，不可改名。
-        // 期望值（§:717）：surf_null → lumpIndex=53 / 22,961,620 B；surf_666 → 8 / 29,044,440 B；
-        //                    ze_cursed → 53 / 23,581,252 B。
+        // 选择证据：本次选了哪条光照 lump、其解压后字节数，以及判定输入「HDR lump 是否非空」。
+        // 字段名是渲染端与校验脚本的契约，**不可改名**。
         "source": {
             "lumpIndex": if atlas.is_hdr { 53 } else { 8 },
             "byteLength": atlas.lump_bytes,
             "hdrNonEmpty": atlas.hdr_dir_length > 0,
         },
-        // 选择证据（本地三图无法判别 HDR 优先规则，故把两条 lump 的目录项与选中项一起写出）
+        // 两条 lump 的目录项与选中项一并写出：只有选中项不足以复核选择是否正确
         "lump": {
             "chosen": if atlas.is_hdr { "hdr" } else { "ldr" },
             "chosenLumpType": if atlas.is_hdr { "LightingHdr(53)" } else { "Lighting(8)" },
@@ -640,23 +672,23 @@ pub fn inject_lightmap_json(
         "packedArea": atlas.packed_area,
         "litFaceCount": atlas.lit_face_count,
         "faceCount": atlas.face_count,
-        // 面表身份与 lightofs 摘要：让「面表是否与光照 lump 同条件切换」可被 t4 逐值对齐
+        // 面表身份与 lightofs 摘要：让「面表是否与光照 lump 同条件切换」可被逐值对齐
         "faceTable": atlas.face_table,
-        // 摘要口径：对所选面表**按面序**逐面取 light_offset 的 4 个小端字节，做 FNV-1a 64
-        //（offset basis 0xcbf29ce484222325 / prime 0x100000001b3），输出 16 位小写十六进制。
+        // 摘要口径见 `lightofs_digest`；这里固定成 16 位小写十六进制
         "faceTableLightofsDigest": format!("{:016x}", atlas.face_table_lightofs_digest),
         "faceTableLightofsDigestRecipe": "fnv1a64(le_bytes(face.light_offset) for face in chosen_table, in order)",
         "facesEntryCount": atlas.faces_entry_count,
         "facesHdrEntryCount": atlas.faces_hdr_entry_count,
-        // ④ 单面上限可观测：本地语料触发不了 257，故把实际上限与实测最大值一并写出
+        // 实际上限与本次实际出现的最大边长一并写出：上限分支正常输入走不到，靠这两个值复核
         "maxLuxelSide": atlas.max_luxel_side,
         "singleFaceLuxelLimit": MAX_LUXEL_SIDE,
         "bytesReferencedEnd": atlas.bytes_referenced_end,
-        // 口径探针：面表选错 ⇒ lightofs 全 0 ⇒ 这里为 0（脚本据此断言 > 0，可判据地失败）
+        // 口径探针：面表选错会让各面 lightofs 全为 0，本值随之退化成 0
         "lightofsMax": atlas.lightofs_max,
     });
 
-    // asset.extras.lightmap —— 渲染端实际读取位置（apps/debug lightmap-shader.ts:85-89）
+    // asset.extras.lightmap —— 渲染端读取位置（`apps/debug/src/renderer/lightmap-shader.ts`
+    // 的 `loadLightmapAtlas`；`apps/game` 与 `apps/viewer` 各有一份同构副本）
     let asset = root
         .entry("asset")
         .or_insert_with(|| serde_json::json!({ "version": "2.0" }));
@@ -716,8 +748,8 @@ pub fn inject_lightmap_json(
 mod tests {
     use super::*;
 
-    /// ④ 单面 256 上限：本地语料（最大单面 4400/1122/8732 luxel）触发不了，
-    /// 只能靠单测证明 257 会**显式报错**而不是静默越界。
+    /// 单面 256 上限：正常输入走不到这条分支，只能靠单测证明 257 会**显式报错**
+    /// 而不是越界读取。
     #[test]
     fn single_face_luxel_limit_is_enforced() {
         assert!(check_face_luxel_size(256, 256, 7).is_ok());
@@ -731,7 +763,7 @@ mod tests {
         assert!(err.contains("256×256"), "错误信息缺上界: {err}");
     }
 
-    /// 图集尺寸序列必须与上游 `LightmapLayout.cs:74-82` 的 `GetWidth/GetHeight` 一致。
+    /// 页尺寸序列必须与外部参照实现同式：宽 `1 << ((i+1)>>1)`、高 `1 << (i>>1)`。
     #[test]
     fn pack_size_sequence_matches_upstream() {
         assert_eq!((size_width(1), size_height(1)), (2, 1));
@@ -750,7 +782,7 @@ mod tests {
         );
     }
 
-    /// 页形状政策（契约 §4.2 第 1 条）：单边 ≤ 4096 **且** 面积 ≤ 4096×2048。
+    /// 页形状政策：单边 ≤ [`MAX_ATLAS_SIDE`] **且** 面积 ≤ [`MAX_ATLAS_PAGE_AREA`]。
     #[test]
     fn page_shape_policy_is_bounded_both_sides() {
         let a = MAX_ATLAS_PAGE_AREA;
@@ -761,7 +793,7 @@ mod tests {
         assert!(is_allowed_page_shape(size_width(1), size_height(1), a));
         assert_eq!(a, 8_388_608);
         assert!(MAX_ATLAS_SIDE as u64 * MAX_ATLAS_SIDE as u64 > a);
-        // 压小上界（负控口径）：允许集随之缩小，且自报的最大形状同步
+        // 压小上界后：允许集随之缩小，自报的最大形状同步（见 `max_allowed_shape_name`）
         let small = 4_194_304; // 2048×2048
         assert!(is_allowed_page_shape(2048, 2048, small));
         assert!(!is_allowed_page_shape(4096, 2048, small));

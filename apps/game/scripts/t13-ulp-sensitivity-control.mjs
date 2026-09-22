@@ -1,9 +1,19 @@
 /**
- * t13 灵敏度阳性对照：证明三条输入面在 **1 ULP 解析差异**下确实会产生位级可观测输出。
+ * 灵敏度阳性对照（脚本名 `t13-ulp-sensitivity-control`）：对三条输入面各喂「相差 1 ULP 的
+ * 两个相邻字面量」，看输出位型是否可分。
  *
- * 做法：对同一物理场景分别喂「相差 1 ULP 的两个相邻字面量」（第二个 = 第一个的下一个
- * double 的十进制展开），比较输出位型。若位型不同 → 该面灵敏度 = 1 ULP（可作为
- * ON/OFF 比对的阳性对照）；若位型相同 → 该面对 1 ULP 不敏感，须在结论中显式降权。
+ * 做法：对同一物理场景跑两遍，第二遍把该面的字面量换成第一遍的**下一个 double** 的十进制
+ * 展开（`nextUpDecimal` 对位型 +1，再用 `toPrecision(25)` 展开）。位型不同 ⇒ 该面在 1 ULP
+ * 尺度上可观测（可作解析路径对比实验的阳性对照）；位型相同 ⇒ 该面对 1 ULP 不敏感。
+ *
+ * 三条面与观测量：
+ *   A  `build_world` 的 brush 平面 `dist`  → `state()` 的 posY/velY/posX/onGround
+ *   B  `set_params` 的 `run_speed`         → `state()` 的 velX/velZ/posX
+ *   C  `set_spawn_points` + `teleport_to_spawn` 的 y → `state()` 的 posY
+ * 这些方法由 `src/phys/mod.rs` 的 `#[wasm_bindgen] impl PhysWorld` 导出，`apps/game/pkg`
+ * 的 `websurf_wasm` 由 `apps/game/crates/wasm` 构建（该 crate 依赖 `websurf-phys`）。
+ * 另有一组 A-threshold 扫描：把 A 面的相对差逐级放大（`1e-16 .. 1e-6`），给出「多大的差才会
+ * 改变输出位型」，用来把「1 ULP 尺度上不可分辨」量化成相对量级。
  *
  * 用法：node scripts/t13-ulp-sensitivity-control.mjs [--wasm-dir=<dir>]
  * 只读：只打印 JSON。
@@ -26,7 +36,8 @@ const DT = 1 / 64;
 const f64 = new Float64Array(1);
 const u64 = new BigUint64Array(f64.buffer);
 const b = (x) => { f64[0] = x; return u64[0].toString(16).padStart(16, '0'); };
-/** 相邻下一个 double（+1 ULP）的精确十进制表示。 */
+/** 相邻下一个 double：位型 +1（只对正数成立；本脚本三处基数 `10.478…`、`250`、
+ *  `100.00000000000001` 均为正），并给出其 25 位十进制展开。 */
 function nextUpDecimal(x) {
   f64[0] = x;
   u64[0] += 1n;
@@ -58,7 +69,7 @@ const out = { probe: 't13-ulp-sensitivity', wasmDir: relative(APP, WASM_DIR), co
   out.controls.build_world_plane = { loLiteral: String(base), hiLiteral: lit, lo, hi, sensitive: JSON.stringify(lo) !== JSON.stringify(hi), deltaDouble: up - base };
 }
 
-// ── B：run_speed 相差 1 ULP → velX 是否不同 ─────────────────────────────
+// ── B：`run_speed` 相差 1 ULP → 速度/位置位型是否变化 ────────────────────
 {
   const base = 250;
   const { lit } = nextUpDecimal(base);
@@ -78,7 +89,7 @@ const out = { probe: 't13-ulp-sensitivity', wasmDir: relative(APP, WASM_DIR), co
   out.controls.set_params_run_speed = { loLiteral: '250', hiLiteral: lit, lo, hi, sensitive: JSON.stringify(lo) !== JSON.stringify(hi) };
 }
 
-// ── C：spawn y 相差 1 ULP → origin.y 是否不同 ───────────────────────────
+// ── C：出生点 y 相差 1 ULP → `teleport_to_spawn` 后的 posY 是否不同 ──────
 {
   const base = 100.00000000000001;
   const { lit } = nextUpDecimal(base);
@@ -98,8 +109,8 @@ const out = { probe: 't13-ulp-sensitivity', wasmDir: relative(APP, WASM_DIR), co
 }
 
 // ── A-threshold：brush 平面 dist 的**行为分辨率**扫描 ────────────────────
-// A 面对 1 ULP 不敏感（碰撞解算量化）。本扫描给出「多大的 dist 差才会改变输出位型」，
-// 从而把「A 面不敏感」量化成行为分辨率（相对量级），而非笼统「测不出」。
+// A 面把 dist 改 1 ULP 时本扫描的 `sensitive` 若为 false，本段进一步给出「多大的相对差才会
+// 改变输出位型」（`firstChangedRel`），把「1 ULP 尺度测不出」量化成相对量级。
 {
   const base = 10.478655362066775;
   const run = (litStr) => {

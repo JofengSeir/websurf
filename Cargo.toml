@@ -2,20 +2,22 @@
 #
 # 本 workspace 只收共享层 crate：websurf-phys（src/）与 websurf-wasm-core（src/wasm-core）。
 #
-# ── 为什么四个模块 crate 不进来 ─────────────────────────────────────
-# debug / game 的 wasm crate 都叫 `websurf-wasm`（wasm-bindgen
-# 导出层有意各自维护，见 src/wasm-core/Cargo.toml 头注），Cargo workspace 不允许同名成员，
-# 而改名会连锁改 40+ 处产物名引用（pkg/websurf_wasm_bg.* 的 fetch/内嵌/校验脚本）。
-# 因此模块 crate 保留各自 workspace（debug/ 等 4 个，见各模块 Cargo.toml），
-# 各工程目录内各自保留 target/；根 workspace（共享层两 crate）的 target/ 位于仓库根，
-# 不再跨 workspace 复用编译缓存（如需集中可另配 CARGO_TARGET_DIR）。
+# ── 为什么三个工程的 wasm crate 不在本 workspace ─────────────────────
+# debug 与 game 的 crates/wasm 同名：apps/debug/crates/wasm/Cargo.toml 与
+# apps/game/crates/wasm/Cargo.toml 的 [package] name 都是 websurf-wasm，而 Cargo
+# 不允许同一 workspace 有两个同名成员。两工程的 wasm-pack 产物同为 websurf_wasm_bg.wasm，
+# 被 package.json 的 build:wasm、start-dev.cmd / play.cmd / build-dist.cmd 的存在性门与
+# src/scripts/wasm-stale-check.mjs 的入参引用。三个工程各自声明 [workspace]，故各自独立：
+# 加上本 workspace 共四个，target/ 分别在仓库根与 apps/debug、apps/game、apps/viewer 下。
 #
 # ── vmdl vendor patch ──────────────────────────────────────────────
-# vmdl 由 crates.io 0.2.0 vendor 到 src/vendor/vmdl，修复 Source VTX 三角形条带展开算法
-# （原实现奇数位生成退化三角形 + 末尾索引越界 → 模型边角出现杂散"四角面"）。
-# 详见 src/vendor/vmdl/Cargo.toml 与 src/vendor/vmdl/src/vtx/mod.rs::Strip::indices。
-# 注意：[patch] 只对"声明它的 workspace"生效——根这里管共享层两个 crate；
-# 各模块 workspace 的同款 patch 在 debug/game/viewer/test 各自的 Cargo.toml。
+# websurf-wasm-core 依赖 vmdl 0.2，本 workspace 用 [patch.crates-io] 把它换成仓库内副本
+# src/vendor/vmdl（该 manifest 自报 name = "vmdl"、version = "0.2.0"）。
+# 相对 crates.io vmdl-0.2.0，副本改写了 2 个文件：
+# - `src/vendor/vmdl/src/vtx/mod.rs` 的 `Strip::indices`（循环边界 0..len → 0..len.saturating_sub(2)，
+#   索引公式 idx+1-cw → idx+1+cw）；
+# - `src/vendor/vmdl/src/lib.rs` 的两处返回类型生命周期标注（`SkinTable<'_>` / `Mesh<'_>`）。
+# [patch] 只对声明它的 workspace 生效（根这份管 websurf-wasm-core）；三个工程各自一份同款。
 
 [workspace]
 resolver = "2"
@@ -28,7 +30,7 @@ members = [
 vmdl = { path = "src/vendor/vmdl" }
 
 # ============================================================
-# 性能优化配置（构建共享层本体时生效；模块各自 workspace 亦有一份）
+# 性能优化配置（只对本 workspace 的构建生效；三个工程各自的 Cargo.toml 也各有一份）
 # ============================================================
 [profile.release]
 opt-level = 3
