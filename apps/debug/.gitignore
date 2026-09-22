@@ -1,11 +1,13 @@
-# debug 主工程 .gitignore
+# apps/debug 工程级 .gitignore（本文件当前不含排除规则，只有说明）
 #
-# 构建产物大部分由根 .gitignore 全局覆盖：
-#   **/dist/ **/pkg/ **/node_modules/ **/target/ **/.cargo-home/ **/.tmp/ **/.wasm-pack-cache/
-#   **/web/app.js **/web/worker.js *.bsp .tmp-*
+# 构建产物与临时产物由根 .gitignore 全局覆盖：
+#   **/dist/ **/pkg/ **/target/ **/node_modules/ **/.cargo-home/ **/.wasm-pack-cache/
+#   **/.tmp/ **/temp/ **/plot-*/ __pycache__/ *.pyc
+#   **/web/app.js **/web/worker.js **/web/websurf_wasm_bg.wasm *.bsp *.dem *.replay
 #
-# 本文件补充本工程特有排除：
-# （当前无特有产物；dev 模式 WASM 走 ../pkg/，textures.mtz 为公共包副本需跟踪）
+# 本工程无特有产物，故没有补充排除规则；两条与 WASM 有关的路径分别是：
+#   · 主线程 wasm 胶水层由 `apps/debug/src/main-wasm.ts` 从 `../pkg/` 引入（`**/pkg/` 已排除）；
+#   · `apps/debug/web/websurf_wasm_bg.wasm` 是 `build:wasm` 复制到 `web/` 的产物（根 `.gitignore` 已排除）。
 #
 # 需要跟踪（勿加入排除）：
-#   web/index.html  web/textures.mtz  Cargo.lock  package-lock.json
+#   web/index.html  web/textures.mtz（公共默认纹理包副本）  Cargo.lock  package-lock.json

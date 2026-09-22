@@ -1,11 +1,8 @@
 # 共享层 crate（websurf-phys / websurf-wasm-core，归属仓库根 Cargo workspace）
 #
-# 本目录不再产生本地构建产物：各模块 target/ 位于各自工程目录内、根 workspace 的 target/ 位于仓库根，
-# 依赖版本由根 Cargo.lock 锁定。此排除规则保留作兜底。
+# 本目录当前没有需要排除的文件：本 crate 是仓库根 workspace 的成员，cargo 在仓库根运行 ⇒
+# 构建产物落在仓库根 target/（由根 .gitignore 的 **/target/ 覆盖），依赖版本由根 Cargo.lock 锁定。
 #
 # 需要跟踪（勿加入排除）：
 #   materials/textures.mtz（公共默认纹理包）
 #   vendor/vmdl/（vendored 源码）
-
-target/
-Cargo.lock
