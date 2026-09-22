@@ -1,92 +1,43 @@
-# WebSurf 仓库级 .gitignore（分层：各工程另有自身 .gitignore 补充特有排除）
+# WebSurf 仓库级 .gitignore
 #
-# 注意 gitignore 语义：
-# - 含内部斜杠的模式（如 web/app.js）只匹配仓库根层级 → 需用 **/ 前缀覆盖任意层级
-# - 无斜杠的模式（如 dist/、target/）匹配任意层级
-# - 后出现的规则覆盖先出现的（地图区块依此排序）
+# 收录范围（2026-09-22 按现工况精简）：① 当前工作区里**真实存在**且不入库的产物；
+# ② 本仓脚本**确实会生成**的产物（规则上方注明生成者）。空转规则已删除。
+# 分层：各工程/共享层另有自身 .gitignore 补充特有排除；规则按「后出现的覆盖先出现的」排序。
 
-# ── 构建产物（覆盖 debug/ 与 game/）──────────
-# 运行时 app.js/worker.js/wasm 均为构建产物：克隆后需 npm run build:wasm + build:ts 再生成
+# ── 构建产物（生成者：cargo / npm / wasm-pack / esbuild 与各工程 scripts/build-dist.mjs）──
 **/dist/
 **/pkg/
+**/target/
+**/node_modules/
 **/web/app.js
 **/web/worker.js
 **/web/websurf_wasm_bg.wasm
-# 注意：**/web/textures.mtz 不在此列——该文件是公共默认纹理包的副本（跟踪，服务运行必需）
+# 注意：**/web/textures.mtz 不在此列——apps/debug/web/textures.mtz 与 apps/game/web/textures.mtz 是
+# 公共默认纹理包 src/materials/textures.mtz 的副本（跟踪，服务运行必需）；apps/viewer 无该副本。
 
-# ── Rust / Cargo ─────────────────────────
-**/target/
+# ── Cargo / wasm-pack 缓存（生成者：src/scripts/cargo-env.cmd 的 CARGO_HOME / WASM_PACK_CACHE）──
 **/.cargo-home/
-**/.tmp/
 **/.wasm-pack-cache/
-**/.wasm-bindgen/
-# Cargo.lock 保留提交（debug/game/materials-mini 为应用项目，锁定依赖版本保证可复现构建；
-# 共享层 src/ 的 Cargo.lock 由 src/.gitignore 忽略——其依赖版本由两端 workspace lock 解析）
 
-# ── Node ─────────────────────────────────
-**/node_modules/
+# ── 临时 / 验证产物（生成者：本仓脚本默认写 .tmp/；各工程 temp/ 存一次性构建日志）──
+**/.tmp/
+**/temp/
+# 生成者：apps/debug/scripts/plot-path.mjs（输出目录为 <输入 json 目录>/plot-<输入基名>/）
+**/plot-*/
 
-# ── Python（src/serve.py 与各脚本工具链）────
+# ── Python 运行期（生成者：python src/serve.py，见各工程 start-dev.cmd 与 play.cmd）──
 __pycache__/
 *.pyc
 
-# ── 地图 / 录像 / 演示数据 ────────────────
-# BSP 地图体积大（surf_666.bsp 75MB 超 GitHub 50MB 推荐限制），一律不入库；
-# 本地数据统一放 test/maps/（仓库根 maps/ 已废弃），需要分享走网盘/直链。
+# ── test/ 夹具目录：只上传目录本身（.gitkeep 占位），内容留在本地不入库 ──
+# 地图与录像体积大（test/maps 下单个最大 144 MB，超 GitHub 单文件 100 MB 上限），且属本地数据
+test/maps/*
+!test/maps/.gitkeep
+test/replay/*
+!test/replay/.gitkeep
 *.bsp
 *.dem
 *.replay
-maps/*
-test/maps/
 
-# 例外：CI 验收夹具（debug/scripts/path-acceptance.mjs 的输入）必须入库——
-# 它是"修复前最差真实录制"，用于给 tick→render 垂距验收门留一条可复现的失败基线。
-# 放在地图区块之后：gitignore 后出现的规则覆盖先出现的（同上文排序约定）。
-!apps/debug/fixtures/path/
-!apps/debug/fixtures/path/*.json
-
-# ── 本地实验工程（不入库）──────────────────
-# test/game-core：光照/物理实验用的隔离工程（自带 crates/wasm-core 副本）。
-# 2026-09-21 起**不入库**（用户裁定：不把该实验工程推到远端）——本地保留可继续用，
-# 但 git 不跟踪；如需重新入库，删掉下面这行并 `git add test/game-core`。
-# 注意：AGENTS.md §2.1 的 test/* 隔离铁律仍适用于该工程（本地形态）。
-test/game-core/
-
-# ── 临时 / 验证产物（任意层级）─────────────
-# **/temp/：各工程 temp/ 一次性试验产物（如 game/temp 的 wasm 备份/bench json）；
-# 注意根级 temp/* 不含内部斜杠只匹配根，必须用 **/temp/ 才能覆盖子工程。
-**/temp/
-temp_*
-.tmp-*
-*.glb
-.dsh-shots/
-**/scripts/verify-*
-**/scripts/cdp-*
-# plot-path.mjs 的 PNG 输出目录（落在输入 json 同目录，如 debug/.tmp/.../plot-xxx/）
-**/plot-*/
-*.tsbuildinfo
-*.bak
-*~
-*.orig
-*.rej
-
-# ── 工具缓存 / 归档产物 ───────────────────
-**/coverage/
-**/.cache/
-.eslintcache
-*.zip
-*.7z
-*.mp4
-*.mov
-
-# ── 编辑器 / 系统 ────────────────────────
-**/.agent-teams/
-**/.code-review/
-**/.team-docs/
+# ── Agent 工作记忆（非文档树、不入库）──
 **/.workbuddy/
-**/.vscode/
-**/.idea/
-*.log
-.DS_Store
-Desktop.ini
-Thumbs.db

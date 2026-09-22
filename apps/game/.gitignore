@@ -1,6 +1,6 @@
-# game 独立工程（WebSurf-game）构建产物
-# esbuild / wasm-pack / cargo 产物，不应进入版本库（用 build-dist.cmd 重建）
-# 注：这些模式相对于 game/ 目录（无内部斜杠，匹配本工程任意层级）
+# apps/game 工程级 .gitignore（包名 websurf-game）构建产物
+# esbuild / wasm-pack / cargo 产物，不应进入版本库（用 apps/game/build-dist.cmd 重建）
+# 注：这些模式相对于 apps/game/ 目录（无内部斜杠，匹配本工程任意层级）
 dist/
 pkg/
 target/
@@ -9,8 +9,8 @@ web/worker.js
 web/websurf_wasm_bg.wasm
 
 # ── 临时 / 调试 ─────────────────────────
+# scripts/_*.mjs：本工程的一次性调试脚本（src 侧无引用，跑完即弃）
 scripts/_*.mjs
-_testmaps/
 
 # 需要跟踪（勿加入排除）：
 #   web/textures.mtz（公共默认纹理包副本）  Cargo.lock  package-lock.json
