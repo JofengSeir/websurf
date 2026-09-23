@@ -23,11 +23,11 @@
 
 **构建链**：`wasm-pack` 构建各工程 `crates/wasm` → `pkg/` 并复制到 `web/`；esbuild 打包 worker 与 app；`scripts/build-dist.mjs` 生成 single 或 multi 形态的 `dist/`。命令与锚点见 `README.md`「构建链」。
 
-**文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范、计划台账），篇目见 `README.md`「文档地图」与 `documents/index.md`。
+**文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范），篇目见 `README.md`「文档地图」与 `documents/index.md`。
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。
 
-**当前已知缺口**（逐条证据与处置状态见 `documents/plan/progress-log.md` §7.3）：输入录制链路未接线、零分配支路（`tick_into` / `state_out_ptr` / `seed_from`）与 `set_yaw_pitch` 无装配点、`.cmd` 的 wasm 新鲜度门与页面消费的产物不是同一份等。
+**当前已知缺口**（逐条证据与处置状态见根 `AGENTS.md` §7.3 待决索引；原进度台账已随 plan 目录退役删除）：输入录制链路未接线、零分配支路（`tick_into` / `state_out_ptr` / `seed_from`）与 `set_yaw_pitch` 无装配点、`.cmd` 的 wasm 新鲜度门与页面消费的产物不是同一份等。
 
 > 注：更早的条目（含已退役工程 `test/dual-mode-harness`、`test/game-core` 的时期）见 §2 归档历史；当前受控工程只有 `apps/{debug,game,viewer}` 与 `src/`。
 
@@ -37,10 +37,10 @@
 
 细节、实测数字与论证见 `.archive/CHANGELOG.md`。
 
-### 2026-09-22 · 文档与注释重编（进行中）
+### 2026-09-22 · 文档与注释重编（已完成）
 
 - 立项：以源码为唯一事实来源重写全部文档与代码注释；旧 `documents/**` 与根四份文档移入 `.archive/`。
-- 产出 `documents/plan/` 三篇控制文件（读码事实基线 / 任务书 / 进度台账）；根 `AGENTS.md` 改为当前任务的行为规范与进度纪要。
+- 产出 `documents/plan/` 三篇控制文件（读码事实基线 / 任务书 / 进度台账；2026-09-23 随任务完结删除，引用并入根 `AGENTS.md`）；根 `AGENTS.md` 改为当前任务的行为规范与进度纪要。
 - 文档树重组为 `architecture/ phys/ wasm-core/ ts-shared/ materials/ debug/ game/ viewer/ norms/ plan/`。
 
 ### 2026-09-21 · 光照与输入

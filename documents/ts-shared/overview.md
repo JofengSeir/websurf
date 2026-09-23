@@ -1,7 +1,7 @@
 # 共享 TS 运行时层（`src/ts-shared`）
 
 > 本文是**共享层文档**（P2）的一篇，内容全部来自当前源码实测；每个结论带「相对仓库根路径:行号」锚点，由 `node src/scripts/check-doc-drift.mjs` 校验。
-> 三工程与共享 Rust 层的关系见 `documents/architecture/overview.md`；术语见 `documents/plan/doc-rewrite-taskbook.md`。
+> 三工程与共享 Rust 层的关系见 `documents/architecture/overview.md`。
 
 ---
 
