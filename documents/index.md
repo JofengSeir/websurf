@@ -78,18 +78,15 @@
 | [`viewer/implementation/wasm.md`](viewer/implementation/wasm.md) | `crates/wasm/**`：本工程的 WASM 绑定层导出面 |
 | [`viewer/implementation/scripts-and-test.md`](viewer/implementation/scripts-and-test.md) | `scripts/**` 与 `test/**`：构建脚本、冒烟与自检 |
 
-## 规范与计划
+## 规范
 
 | 文档 | 回答什么 |
 |---|---|
 | [`norms/annotation-and-verification.md`](norms/annotation-and-verification.md) | 事实来源与三条禁令、注释书写规范、验收判据、**已验证的陷阱清单**、记录约定 |
-| [`plan/doc-rewrite-taskbook.md`](plan/doc-rewrite-taskbook.md) | 文档/注释重编任务书：流程、规范、术语、任务拆分与上报约定 |
-| [`plan/project-survey.md`](plan/project-survey.md) | 读码事实基线：目录结构、模块划分、依赖矩阵、主流程与时序骨架、必读源码清单 |
-| [`plan/progress-log.md`](plan/progress-log.md) | 逐行进度台账；**全部已结案项与待裁决项**（含疑似缺陷清单）都在这里 |
 
 ## 维护约定
 
 - **索引只列实际存在的文件**；新增或删除文档时同步更新本页，并跑 `node .tmp/tools/link-check.mjs documents` 复核链接。
-- 三棵应用子树的节标题由统一模板固定（模板与验收口径见 `documents/plan/progress-log.md` 中 WG9 相关条目），不得自创分节；三篇 `implementation/` 的主题按各工程**实际目录**划分，因此篇名与篇数天然不同（debug 9 / game 10 / viewer 8）。
+- 三棵应用子树的节标题由统一模板固定（模板已在重编期定稿并验收，三棵子树现有顶层文档即定稿形态），不得自创分节；三篇 `implementation/` 的主题按各工程**实际目录**划分，因此篇名与篇数天然不同（debug 9 / game 10 / viewer 8）。
 - 文档里的代码锚点写成 `` `文件路径:行号` ``；行号随代码变动，改代码后跑 `node src/scripts/check-doc-drift.mjs` 复核越界，并用 `node .tmp/tools/anchor-open.mjs <目录>` 抽样开箱确认锚点指向的内容与正文一致。
-- 应用子树的四篇顶层文档位于**旧文档的同名路径**上（旧文档树已从工作区删除、且按 B2 不重建）；正文全部按当前代码重写，与旧文档的逐字复用率为 0（实测见 `documents/plan/progress-log.md` 的 B2 合规行）。
+- 应用子树的四篇顶层文档位于**旧文档的同名路径**上（旧文档树已从工作区删除、且按 B2 不重建）；正文全部按当前代码重写，与旧文档的逐字复用率为 0（重编期实测；历史台账已退役删除，git 历史 commit `9dbdc58` 可查）。

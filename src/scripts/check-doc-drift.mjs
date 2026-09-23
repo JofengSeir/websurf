@@ -20,7 +20,7 @@
  *
  * 用法：
  *   node src/scripts/check-doc-drift.mjs                 # 全仓 md
- *   node src/scripts/check-doc-drift.mjs documents/plan/project-survey.md ...
+ *   node src/scripts/check-doc-drift.mjs documents/architecture/overview.md ...
  *
  * 退出码：A 或 B 非空 → 1；C 与 D 只打印、不影响退出码。
  * 调用方：`.github/workflows/doc-drift.yml` 的 `Run doc drift check` 步骤直接跑本脚本。

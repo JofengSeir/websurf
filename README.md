@@ -97,12 +97,11 @@ CI 三个 workflow（`.github/workflows/`）：
 | [materials/overview.md](documents/materials/overview.md) | 材质与纹理链路 |
 | [debug/README.md](documents/debug/README.md) · [game/README.md](documents/game/README.md) · [viewer/README.md](documents/viewer/README.md) | 三个工程的文档子树入口 |
 | [norms/annotation-and-verification.md](documents/norms/annotation-and-verification.md) | 注释书写规范与验收判据 |
-| [plan/project-survey.md](documents/plan/project-survey.md) · [plan/doc-rewrite-taskbook.md](documents/plan/doc-rewrite-taskbook.md) · [plan/progress-log.md](documents/plan/progress-log.md) | 重编任务：读码事实基线 / 任务书 / 进度台账 |
 | [AGENTS.md](AGENTS.md) | 当前任务的 Agent 行为规范与进度纪要 |
 
 ## 8. 已知缺口（摘要）
 
-以下均为**读码所得、未修改代码**的登记项，逐条明细与证据见 [plan/progress-log.md](documents/plan/progress-log.md)：
+以下均为**读码所得、未修改代码**的登记项，逐条明细与证据见 `AGENTS.md` §7.3 待决索引：
 
 - **输入录制链路未接线**：`InputRecorder.record()` 在 `apps/debug/src` 内只有回放分支 `replayCapture` 一处调用点（`apps/debug/src/app.ts:2395`），用户录制器 `inputRecorder`（同文件 `:217`）不落样本 ⇒ `__wsInput.exportJson()` 的 frames 恒为空。
 - **零分配支路已实现但未装配**：`tick_into` / `state_out_ptr` / `seed_from` 仅被 `src/ts-shared/` 的控制器调用，而这些控制器在三个工程内都没有装配点；`set_yaw_pitch` 在 `apps/**` 与 `src/**` 内零调用点。

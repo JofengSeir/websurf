@@ -42,6 +42,6 @@ npm run build          # build:wasm + typecheck + esbuild 打包
 
 ## 5. 文档
 
-文档当前处于**重编阶段**：以源码为唯一事实来源重写全部文档与代码注释，旧文档已移入 `.archive/`（不作事实来源）。
+文档已于 2026-09-22 完成**重编**（以源码为唯一事实来源重写全部文档与代码注释）；旧文档移入 `.archive/`（不作事实来源），重编控制文件已于 2026-09-23 随任务完结删除。
 
-改动文档或注释时，请遵循 `documents/plan/doc-rewrite-taskbook.md`（流程、规范、术语表）与 `documents/norms/annotation-and-verification.md`（注释书写规范与验收判据），并在提交前跑 `node src/scripts/check-doc-drift.mjs`（锚点越界必须为 0）。
+改动文档或注释时，请遵循 `documents/norms/annotation-and-verification.md`（注释书写规范与验收判据）与根 `AGENTS.md`（当前规范、任务待办与待决索引），并在提交前跑 `node src/scripts/check-doc-drift.mjs`（锚点越界必须为 0）。

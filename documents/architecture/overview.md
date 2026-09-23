@@ -1,7 +1,7 @@
 # 架构总览：受控工程与共享层
 
 > 本文是**共享层文档**（P2）的一篇，内容全部来自当前源码与构建配置的实测；每个结论都带「相对仓库根路径:行号」锚点，由 `node src/scripts/check-doc-drift.mjs` 校验。
-> 术语与流程见 `documents/plan/doc-rewrite-taskbook.md`；模块级事实清单见 `documents/plan/project-survey.md`。
+> 术语与书写规范见 `documents/norms/annotation-and-verification.md`；当前任务规范与待决项见根 `AGENTS.md`。
 
 ---
 
