@@ -926,13 +926,11 @@ export class RendererMain {
     this.needsRender = true;
   }
 
-  /** 整组路径折线的显隐。 */
-  setPathVisible(visible: boolean): void {
-    this.pathRecorder.setVisible(visible);
-    this.needsRender = true;
-  }
-
-  /** 单独显隐渲染物理线（两条线对比时可只留 tick 线）。 */
+  /** 单独显隐渲染物理线（两条线对比时可只留 tick 线）。
+   *
+   * 2026-09-26：原 `setPathVisible`（整组显隐）随其唯一调用方 `#pathVisibleChk` 一并删除
+   * ——该 id 在页面不存在，且四个分量开关（`setPathRenderVisible` / `setPathTickVisible` /
+   * `setPathDotsVisible` / `setPathDeviVisible`）已覆盖其语义。 */
   setPathRenderVisible(visible: boolean): void {
     this.pathRecorder.setRenderVisible(visible);
     this.needsRender = true;
@@ -987,11 +985,6 @@ export class RendererMain {
     residual: DistStats;
   } {
     return this.pathRecorder.deviStats();
-  }
-
-  /** 路径折线组当前是否可见。 */
-  isPathVisible(): boolean {
-    return this.pathRecorder.visible;
   }
 
   /** 两条线各自已落的点数。 */

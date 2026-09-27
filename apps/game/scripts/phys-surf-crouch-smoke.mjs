@@ -16,9 +16,9 @@
  *
  * 为什么要跑产物而不是只跑 Rust 单测：物理在 wasm 里，`src/phys` 的 Rust 改动必须先经
  * `apps/game/package.json` 的 `build:wasm`（wasm-pack 输出到 `pkg/`，再把 wasm 复制进 `web/`）
- * 才会反映到 `pkg/websurf_wasm_bg.wasm`；`apps/game/start-dev.cmd` 则按共享脚本
- * `src/scripts/wasm-stale-check.mjs` 的 mtime 判定（产物不比 `src/` 与 `crates/` 下的
- * Rust 源新即跳过重建）决定是否重跑 `build:wasm`。本脚本直接加载 `pkg/` 下的产物。
+ * 才会反映到 `pkg/websurf_wasm_bg.wasm`。2026-09-24 起三工程入口改为 `dev.cmd` / `build.cmd` /
+ * `start.cmd`：前两者**无条件**重跑 `build:wasm`（不再用 `src/scripts/wasm-stale-check.mjs`
+ * 的 mtime 判定），`start.cmd` 不做任何构建。本脚本直接加载 `pkg/` 下的产物。
  *
  * 前置：`apps/game/pkg/websurf_wasm_bg.wasm` 已由 `npm run build:wasm` 产出。
  * 用法：在 `apps/game` 下执行 `node scripts/phys-surf-crouch-smoke.mjs`

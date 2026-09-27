@@ -23,7 +23,6 @@ export interface PhysicsConfig {
   accelerate: number;
   airAccel: number;
   stopSpeed: number;
-  duckScale: number;
   groundAngle: number; // 弧度；可站立地面判据取 `Math.cos(groundAngle)`（collider-debug 的 groundAngleCos）
   slideAngle: number; // 弧度；斜坡滑行判据取 `Math.cos(slideAngle)`（collider-debug 的 slideAngleCos）
   /** 物理模拟频率（Hz）。JS 驱动层参数，不进 Rust：Worker 侧由
@@ -49,32 +48,15 @@ export interface PlayerConfig {
   eyeOffset: number;
 }
 
-/** 常规移动速度参数。两个字段在本仓无读取点（配置树保留）：debug 的地面速度上限由 `PhysicsConfig.maxSpeed` 经 `set_params` 的 `run_speed` 决定。 */
-export interface MovementConfig {
-  /** 基础移动速度（HU/s）。无读取点。 */
-  speed: number;
-  /** 冲刺倍率。无读取点。 */
-  sprintMultiplier: number;
-}
-
-/** 平滑参数。字段在本仓无读取点（配置树保留）。 */
-export interface SmoothingConfig {
-  /** 平滑速度。无读取点。 */
-  speed: number;
-}
-
-/** 传送触发参数。两个字段在本仓无读取点（配置树保留）：传送判定实际用的触发半径与冷却写在 `apps/debug/src/world/teleport-manager.ts` 的模块常量 `TRIGGER_RADIUS`（64 HU）与 `TRIGGER_COOLDOWN`（0.5 s）。 */
-export interface TeleportConfig {
-  /** 触发半径（HU）。无读取点。 */
-  triggerRadius: number;
-  /** 冷却时长（ms）。无读取点。 */
-  cooldownMs: number;
-}
-
-/** 视距剔除（LOD）参数；实现在 `apps/debug/src/renderer/lod-manager.ts`。 */
+/** 视距剔除（LOD）参数；实现在 `apps/debug/src/renderer/lod-manager.ts`。
+ *
+ * 2026-09-26 清理：原 `pvsEnabled`（PVS 开关）与本仓三条死段 `MovementConfig` /
+ * `SmoothingConfig` / `TeleportConfig` 一并删除——它们**既无读取点、页面也无控件**，
+ * 属"通路不通"的死链（审计见根 `AGENTS.md` §7.3 #74/#75）。传送判定实际用的半径与冷却
+ * 是 `apps/debug/src/world/teleport-manager.ts` 的模块常量 `TRIGGER_RADIUS`（64 HU）
+ * 与 `TRIGGER_COOLDOWN`（0.5 s）；地面速度上限由 `PhysicsConfig.maxSpeed` 经
+ * `set_params` 的 `run_speed` 决定。 */
 export interface LodConfig {
-  /** PVS 开关。默认 false；本仓剔除路径只有「块中心到相机距离 > cullDistance」一条判据，不读本字段（见 `LodManager.update`）。 */
-  pvsEnabled: boolean;
   /** 重判定间隔（帧）：`LodManager.setup` 与 `LodManager.update` 都从它取；只在计数达到该值时执行一次距离判定。 */
   updateInterval: number;
   /** 视距剔除距离（HU）：构造期默认值；`LodManager.setup` 返回校准值后由 `loadScene` 就地覆盖，面板滑块写的是覆盖后的值。 */
@@ -181,12 +163,6 @@ export interface RuntimeConfig {
   physics: PhysicsConfig;
   /** 玩家箱体三围与相机抬高量。 */
   player: PlayerConfig;
-  /** 常规移动参数，见 `MovementConfig`（无读取点）。 */
-  movement: MovementConfig;
-  /** 平滑参数，见 `SmoothingConfig`（无读取点）。 */
-  smoothing: SmoothingConfig;
-  /** 传送参数，见 `TeleportConfig`（无读取点）。 */
-  teleport: TeleportConfig;
   /** 视距剔除参数（渲染侧）。 */
   lod: LodConfig;
   /** 灯光参数，由 `LightManager.syncFromConfig` 整体读取。 */
@@ -213,7 +189,6 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     accelerate: 10,
     airAccel: 150,
     stopSpeed: 100,
-    duckScale: 0.34,
     groundAngle: (30 * Math.PI) / 180,
     slideAngle: (70 * Math.PI) / 180,
     tickRate: 64,
@@ -225,22 +200,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     duckHeight: 54,
     eyeOffset: 8,
   },
-  movement: {
-    speed: 200,
-    sprintMultiplier: 4,
-  },
-  smoothing: {
-    speed: 12,
-  },
-  teleport: {
-    triggerRadius: 64,
-    cooldownMs: 600,
-  },
   lod: {
-    // PVS 剔除默认关闭：本仓剔除路径（`apps/debug/src/renderer/lod-manager.ts` 的
-    // `update`）只按「块中心到相机距离 > cullDistance」判可见，不查 PVS 可见集；
-    // 面板保留该开关，改动只落进 config 与发往 Worker 的 `config` 消息。
-    pvsEnabled: false,
     updateInterval: 1,
     cullDistance: 12800, // 构造期默认视距；`loadScene` 之后被 lod-manager 的 `setup` 校准值覆盖
   },

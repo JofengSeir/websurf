@@ -92,7 +92,6 @@ const dom = {
 	pitchLimitNum: document.getElementById('pitchLimitNum') as HTMLInputElement | null,
 	cullDistRange: document.getElementById('cullDistance') as HTMLInputElement | null,
 	cullDistNum: document.getElementById('cullDistanceNum') as HTMLInputElement | null,
-	pvsEnabledChk: document.getElementById('pvsEnabled') as HTMLInputElement | null,
 	respawnBtn: document.getElementById('respawnBtn') as HTMLButtonElement | null,
 	spawnSelect: document.getElementById('spawnSelect') as HTMLSelectElement | null,
 	// 纹理画质（显示设置面板）
@@ -109,20 +108,11 @@ const dom = {
 	pathClearBtn: document.getElementById('pathClearBtn') as HTMLButtonElement | null,
 	pathExportJsonBtn: document.getElementById('pathExportJsonBtn') as HTMLButtonElement | null,
 	pathExportCsvBtn: document.getElementById('pathExportCsvBtn') as HTMLButtonElement | null,
-	pathVisibleChk: document.getElementById('pathVisibleChk') as HTMLInputElement | null,
 	pathRenderVisibleChk: document.getElementById('pathRenderVisibleChk') as HTMLInputElement | null,
 	pathTickVisibleChk: document.getElementById('pathTickVisibleChk') as HTMLInputElement | null,
 	pathDeviVisibleChk: document.getElementById('pathDeviVisibleChk') as HTMLInputElement | null,
 	pathDotsVisibleChk: document.getElementById('pathDotsVisibleChk') as HTMLInputElement | null,
 	pathCountsEl: document.getElementById('pathCounts') as HTMLElement | null,
-	// 输入录制 / 确定性回放（用户录一段，开发者无头复现）
-	inputRecStatusEl: document.getElementById('inputRecStatus') as HTMLElement | null,
-	inputRecToggleBtn: document.getElementById('inputRecToggleBtn') as HTMLButtonElement | null,
-	inputRecClearBtn: document.getElementById('inputRecClearBtn') as HTMLButtonElement | null,
-	inputRecExportBtn: document.getElementById('inputRecExportBtn') as HTMLButtonElement | null,
-	inputRecLoadBtn: document.getElementById('inputRecLoadBtn') as HTMLButtonElement | null,
-	inputRecStopPlayBtn: document.getElementById('inputRecStopPlayBtn') as HTMLButtonElement | null,
-	inputRecFile: document.getElementById('inputRecFile') as HTMLInputElement | null,
 	// 显示设置（显示设置面板）
 	showSolidsChk: document.getElementById('showSolids') as HTMLInputElement | null,
 	brushViewDistanceRange: document.getElementById('brushViewDistance') as HTMLInputElement | null,
@@ -205,17 +195,18 @@ let sceneDeathY: number | null = null;
 let teleportMapName = '';
 /** 最近一次加载的 BSP 文件（__wsInput.reloadForTest 重建世界用；诊断入口）。 */
 let lastBspFile: File | null = null;
-/** 最近一次加载的出生点列表 [x,y,z,yaw]：spawn 下拉切换与输入录制 meta 共用同一份。 */
-let loadedSpawnList: Array<[number, number, number, number]> = [];
 /** 滚轮连跳脉冲：滚轮事件置位，下一次输入循环并进按键掩码后清零。 */
 let wheelJumpPending = false;
 
-// ── 输入录制 / 确定性回放（用户录一段，开发者无头复现）─────────────────────
-// 录制/回放器实现见 apps/debug/src/input/input-recorder.ts；面板见 web/index.html 的「输入录制」区。
-// 常态（既不录制也不回放）下输入直接来自设备：鼠标由 mousemove 直连 rendererMain.feedInput，按键由输入循环合成。
-/** 用户录制器（面板按钮与 __wsInput 驱动；仅在录制状态落样本）。 */
-const inputRecorder = new InputRecorder();
-/** 回放期「实际喂出去的帧」捕获器（与用户录制器互不干扰；确定性自检用）。 */
+// ── 确定性回放（载入录制 JSON，开发者无头复现）───────────────────────────
+// 播放器实现见 apps/debug/src/input/input-recorder.ts。
+// 2026-09-26：原「用户录制器」链路（`inputRecorder` + 面板七个控件 + `__wsInput` 的
+// start/stop/clear/exportJson）整体删除——页面 `web/index.html` 从来没有那七个控件，
+// 且该录制器在全仓没有 `record` 调用点（导出恒为空载荷），属"通路不通"的死链
+// （见根 `AGENTS.md` §7.3 #72）。**保留**：回放捕获器 `replayCapture`（由回放分支落样本）
+// 与回放器 `inputPlayer`，`__wsInput.load` / `play` / `stopPlay` 等回放 API 照旧可用。
+// 常态（不回放）下输入直接来自设备：鼠标由 mousemove 直连 rendererMain.feedInput，按键由输入循环合成。
+/** 回放期「实际喂出去的帧」捕获器（确定性自检用）。 */
 const replayCapture = new InputRecorder();
 replayCapture.setAlwaysOn(true); // 常开落样本，不受录制状态门控
 /** 回放器（载入 JSON 后由输入循环或 __wsInput.tickReplay 驱动）。 */
@@ -236,8 +227,6 @@ let replayLoopFrames = 0;
 let lastFedReplayIndex = -2;
 /** 回放元数据（载入 JSON 时保存、可被 __wsInput.setPlaybackMeta 覆盖；armReplay 依它还原起点并核对地图名）。 */
 let playbackMeta: Partial<InputReplayMeta> = {};
-/** 录制/回放状态行的刷新节流：距上次重绘满 100ms 才更新一次。 */
-let lastRecUiAt = 0;
 /**
  * 确定性回放的等待计数（__wsInput.tickReplay → replayAdvanceAndWait）。
  * 0 = 可推进；1 = 已推进一帧、等输入循环消费后自减回 0；推进中再调返回 busy。
@@ -373,13 +362,10 @@ async function main(): Promise<void> {
 	bindUI();
 	// 3.3 初始控件状态（config 默认值 → 面板）
 	if (dom.colliderSourceSelect) dom.colliderSourceSelect.value = config.physics.colliderSource;
-	if (dom.pvsEnabledChk) dom.pvsEnabledChk.checked = config.lod.pvsEnabled;
 	if (dom.physicsModeSelect) dom.physicsModeSelect.value = config.physics.mode;
 
 	// 4. 输入循环（设备 / 回放 / 合成三条路径 → 主线程渲染物理 + SAB 权威端）
 	startInputLoop();
-	// 4.1 输入录制面板初始状态
-	updateInputRecUi();
 }
 
 // ---------------------------------------------------------------------------
@@ -450,13 +436,9 @@ async function onSceneReadyUi(
 		dom.cullDistNum.max = String(Math.ceil(diag.maxCull));
 		dom.cullDistNum.value = String(diag.defaultCull);
 	}
-	// 启用控件（进入地图前即可设置的：物理模式/碰撞来源/PVS/视距已在 HTML 初始可用）
+	// 启用控件（进入地图前即可设置的：物理模式/碰撞来源/视距已在 HTML 初始可用）
 	if (dom.respawnBtn) dom.respawnBtn.disabled = false;
 	if (dom.spawnSelect) dom.spawnSelect.disabled = false;
-	// PVS 剔除：复选框同步 config.lod.pvsEnabled
-	if (dom.pvsEnabledChk) {
-		dom.pvsEnabledChk.checked = config.lod.pvsEnabled;
-	}
 	// 自定义传送点：启用两个按钮并从 localStorage 刷新列表
 	if (dom.capturePosBtn) dom.capturePosBtn.disabled = false;
 	if (dom.addTeleportBtn) dom.addTeleportBtn.disabled = false;
@@ -707,10 +689,6 @@ dom.pathClearBtn?.addEventListener('click', () => {
 	updatePathCountsUI();
 });
 
-dom.pathVisibleChk?.addEventListener('change', () => {
-	rendererMain?.setPathVisible(dom.pathVisibleChk?.checked ?? true);
-});
-
 dom.pathRenderVisibleChk?.addEventListener('change', () => {
 	rendererMain?.setPathRenderVisible(dom.pathRenderVisibleChk?.checked ?? true);
 });
@@ -728,79 +706,13 @@ dom.pathDotsVisibleChk?.addEventListener('change', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 输入录制 / 确定性回放（面板 + 永久调试 API）
+// 确定性回放（调试 API；面板「输入录制」区已于 2026-09-26 随死链删除）
 //
-// 用法：用户录一段键鼠输入并导出 JSON，开发者在无头浏览器里逐帧回放同一段输入复现问题。
+// 用法：把录制 JSON 交给 `__wsInput.load`，再 `__wsInput.play` 逐帧复现。
 // 回放优先：回放期输入循环用回放样本覆盖设备输入，mousemove 处理器也直接返回。
-// 落样本：本文件里 InputRecorder.record 的调用点只有回放分支的 replayCapture；
-// 用户录制器 inputRecorder 在 apps/debug/src 内没有 record 调用点（导出即空载荷）。
+// 落样本：本文件里 `InputRecorder.record` 的调用点只有回放分支的 `replayCapture`
+// （`apps/debug/src/app.ts` 的回放喂值处），用户录制器已删除。
 // ---------------------------------------------------------------------------
-
-/** 刷新状态行与按钮文案（录制/回放启停时立即调；进行中由输入循环按 100ms 节流调）。 */
-function updateInputRecUi(): void {
-	const c = inputRecorder.counts();
-	const p = inputPlayer.state();
-	let text: string;
-	if (inputReplaying) {
-		const played = Math.max(0, p.index + 1);
-		text =
-			`<span style="color:#ffd926">● 回放中</span> ${played}/${p.total} 帧` +
-			(p.skipped > 0 ? `　<span style="color:#ff9f26">丢帧 ${p.skipped}</span>` : '') +
-			`　起点 ${inputPlayer.isSampleClock() ? '确定性逐帧' : '实时墙钟'}`;
-	} else if (inputRecorder.isRecording()) {
-		const secs = c.frames > 1 ? ((c.t1 - c.t0) / 1000).toFixed(1) : '0.0';
-		text = `<span style="color:#ff4444">● 录制中</span> ${c.frames} 帧（${secs}s）`;
-	} else if (c.frames > 0) {
-		const secs = c.frames > 1 ? ((c.t1 - c.t0) / 1000).toFixed(1) : '0.0';
-		text = `已停止 · ${c.frames} 帧（${secs}s）待导出`;
-	} else {
-		text = '未开始';
-	}
-	if (dom.inputRecStatusEl) dom.inputRecStatusEl.innerHTML = text;
-	if (dom.inputRecToggleBtn) {
-		dom.inputRecToggleBtn.textContent = inputRecorder.isRecording() ? '停止录制' : '开始录制';
-	}
-	if (dom.inputRecStopPlayBtn) dom.inputRecStopPlayBtn.disabled = !inputReplaying;
-}
-
-/** 录制导出的 meta：地图名、出生点、起点状态、物理参数与碰撞箱、灵敏度等复现前提。 */
-function buildReplayMeta(extra?: Partial<InputReplayMeta>): Partial<InputReplayMeta> {
-	const cap = rendererMain?.captureReplayState() ?? null;
-	const st = cap?.state ?? null;
-	const spawnIdx = dom.spawnSelect ? Number(dom.spawnSelect.value) : -1;
-	// 世界出生点（与 spawnIndex 对应；索引越界或列表未加载则为 null）。它不是录制起点——
-	// 录制起点记在 initialState.pos。
-	const sp = spawnIdx >= 0 ? loadedSpawnList[spawnIdx] : undefined;
-	return {
-		mapFile: teleportMapName,
-		spawnIndex: Number.isFinite(spawnIdx) ? spawnIdx : -1,
-		spawnPos: sp ? { x: sp[0], y: sp[1], z: sp[2] } : null,
-		tickRate: config.physics.tickRate,
-		physics: cap?.physics ?? {},
-		hull: cap?.hull ?? null,
-		initialState: st,
-		physSeed: cap?.seed ?? null,
-		spawnList: loadedSpawnList,
-		sensitivity: config.input.sensitivity,
-		devicePixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio : 1,
-		startedAt: new Date().toISOString(),
-		href: location.href,
-		...extra,
-	};
-}
-
-/** 开始录制（以当前状态作回放起点快照；正在回放则先收尾）。 */
-function startRecording(): void {
-	if (inputReplaying) endPlayback();
-	inputRecorder.startWithState(buildReplayMeta());
-	updateInputRecUi();
-}
-
-/** 停止录制（已录样本保留）。 */
-function stopRecording(): void {
-	inputRecorder.stop();
-	updateInputRecUi();
-}
 
 /** 合成输入入队（见 syntheticQueue 说明）。 */
 function enqueueSynthetic(dx: number, dy: number, keys: number): void {
@@ -861,7 +773,6 @@ function endPlayback(): void {
 	inputPlayer.stop();
 	rendererMain?.setReplayMode(false);
 	rendererMain?.clearPendingInput();
-	updateInputRecUi();
 }
 
 /**
@@ -878,7 +789,6 @@ function startPlayback(deterministic = true): boolean {
 	const init = playbackMeta.initialState;
 	if (!init) {
 		console.warn('[input-recorder] 该录制缺少 meta.initialState（起点状态）→ 无法对齐起点，拒绝回放。');
-		updateInputRecUi();
 		return false;
 	}
 	// 地图名不符只告警不阻断：换图后仍可回放，结果由调用方自行判断
@@ -901,56 +811,12 @@ function startPlayback(deterministic = true): boolean {
 	replayCapture.clear();
 	replayTickWait = 0;
 	lastFedReplayIndex = -2;
-	updateInputRecUi();
 	return true;
 }
 
-/** 面板「开始录制 / 停止录制」按钮。 */
-dom.inputRecToggleBtn?.addEventListener('click', () => {
-	if (inputRecorder.isRecording()) stopRecording();
-	else startRecording();
-});
-
-/** 面板「清空」按钮。 */
-dom.inputRecClearBtn?.addEventListener('click', () => {
-	inputRecorder.clear();
-	updateInputRecUi();
-});
-
-/** 面板「导出 JSON」按钮（与路径记录导出共用 downloadText）。 */
-dom.inputRecExportBtn?.addEventListener('click', () => {
-	downloadText(
-		`input-replay-${pathStamp()}.json`,
-		inputRecorder.toJson({ stoppedAt: new Date().toISOString() }),
-		'application/json',
-	);
-});
-
-/** 面板「载入并回放」按钮：先打开文件选择框。 */
-dom.inputRecLoadBtn?.addEventListener('click', () => {
-	dom.inputRecFile?.click();
-});
-
-dom.inputRecFile?.addEventListener('change', async () => {
-	const file = dom.inputRecFile?.files?.[0];
-	if (!file) return;
-	try {
-		const text = await file.text();
-		loadPlaybackFromJson(text, { mapFile: file.name.replace(/\.json$/i, '') });
-		if (!startPlayback(true)) setStatus('输入回放：载入成功但无法开始（缺起点状态？）', 'error');
-		else setStatus(`输入回放：已载入 ${file.name}，开始逐帧回放。`, 'success');
-	} catch (err) {
-		setError(`输入回放载入失败: ${err instanceof Error ? err.message : String(err)}`);
-	} finally {
-		// 复位 file input，便于重复选择同一个文件
-		if (dom.inputRecFile) dom.inputRecFile.value = '';
-	}
-});
-
-/** 面板「停止回放」按钮。 */
-dom.inputRecStopPlayBtn?.addEventListener('click', () => {
-	endPlayback();
-});
+/** 回放入口只剩调试 API：见 `__wsInput.load` / `play` / `stopPlay`。
+ * 面板「开始录制 / 停止录制 / 清空 / 导出 / 载入并回放 / 停止回放」六个按钮与其七个 id
+ * 已于 2026-09-26 随用户录制器链路一并删除（页面从未提供这些元素）。 */
 
 /**
  * 载入录制 JSON 到回放器（不自动开始；开始时机由面板或 __wsInput.play 决定）。
@@ -969,7 +835,6 @@ function loadPlaybackFromJson(text: string, override?: Partial<InputReplayMeta>)
 	}
 	inputPlayer.load(parsed);
 	playbackMeta = { ...(parsed.meta ?? {}), ...(override ?? {}) };
-	updateInputRecUi();
 	return inputPlayer.counts().total;
 }
 
@@ -1041,20 +906,11 @@ function replayAdvanceAndWait(): Promise<Record<string, unknown>> {
 	});
 }
 
+/** 永久调试 API（无头验证用）。2026-09-26：随用户录制器删除的旧成员有
+ * `start` / `stop` / `clear` / `isRecording` / `exportJson` / `status`，以及
+ * `counts()` 里的 `recording` / `frames`——它们依赖的录制器没有落样本调用点。 */
 (globalThis as unknown as { __wsInput?: Record<string, unknown> }).__wsInput = {
-	/** 开始录制并锚定当前状态为回放起点。 */
-	start: (): void => startRecording(),
-	/** 停止录制（样本保留）。 */
-	stop: (): void => stopRecording(),
-	/** 清空已录帧。 */
-	clear: (): void => {
-		inputRecorder.clear();
-		updateInputRecUi();
-	},
-	isRecording: (): boolean => inputRecorder.isRecording(),
 	isPlaying: (): boolean => inputReplaying,
-	/** 录制载荷 JSON（未录到帧时也返回合法空载荷，脚本可据 frames 判定）。 */
-	exportJson: (): string => inputRecorder.toJson({ stoppedAt: new Date().toISOString() }),
 	/** 载入录制 JSON（字符串）→ 返回帧数。 */
 	load: (text: string, meta?: Partial<InputReplayMeta>): number => loadPlaybackFromJson(text, meta),
 	/** 开始回放；deterministic=false 走墙钟实时（默认逐帧确定性）。 */
@@ -1063,9 +919,8 @@ function replayAdvanceAndWait(): Promise<Record<string, unknown>> {
 	stopPlay: (): void => endPlayback(),
 	/** 确定性推进一帧（无头验证用；见 replayAdvanceAndWait）。 */
 	tickReplay: replayAdvanceAndWait,
+	/** 回放期诊断计数。2026-09-26：随用户录制器删除，`recording` 与 `frames` 两项已移除。 */
 	counts: (): Record<string, unknown> => ({
-		recording: inputRecorder.isRecording(),
-		frames: inputRecorder.counts().frames,
 		playing: inputReplaying,
 		playerIndex: inputPlayer.state().index,
 		playerTotal: inputPlayer.state().total,
@@ -1102,9 +957,17 @@ function replayAdvanceAndWait(): Promise<Record<string, unknown>> {
 		syntheticQueue.length = 0;
 		return n;
 	},
-	/** 状态行文本（与面板同一口径）。 */
-	status: (): string => dom.inputRecStatusEl?.textContent ?? '',
-	/** 录制起点快照（诊断：确认 meta 会记下什么）。 */
+	/** 回放进度（与 `__wsInput.counts` 同源，供无头脚本断言）。 */
+	progress: (): { index: number; total: number; skipped: number; deterministic: boolean } => {
+		const s = inputPlayer.state();
+		return {
+			index: s.index,
+			total: s.total,
+			skipped: s.skipped,
+			deterministic: inputPlayer.isSampleClock(),
+		};
+	},
+	/** 回放起点快照（诊断：确认 meta 会记下什么）。 */
 	replayState: (): unknown => rendererMain?.captureReplayState() ?? null,
 	/** 渲染物理当前全量种子 JSON（诊断：直接搬运/播种用的位级状态）。 */
 	physSeed: (): string | null => rendererMain?.captureFullPhysState() ?? null,
@@ -1356,7 +1219,6 @@ function syncPrefsControls(): void {
 	setNum('tickRate', config.physics.tickRate);
 	setNum('ambientIntensity', config.lighting.ambientIntensity);
 	setNum('cullDistance', config.lod.cullDistance);
-	setChk('pvsEnabled', config.lod.pvsEnabled);
 	setChk('showSolids', config.debug.showSolids);
 	setChk('showTriggers', config.debug.showTriggers);
 	setChk('showChamfers', config.debug.showChamfers);
@@ -1474,14 +1336,6 @@ function bindUI(): void {
 		applyConfigPatch(config, 'lod', { cullDistance: val });
 		rendererMain?.setCullDistance(val);
 		inputBridge?.sendSetCullDistance(val);
-		saveUiPrefs();
-	});
-
-	// PVS 剔除开关
-	dom.pvsEnabledChk?.addEventListener('change', (e) => {
-		const enabled = (e.target as HTMLInputElement).checked;
-		applyConfigPatch(config, 'lod', { pvsEnabled: enabled });
-		inputBridge?.sendConfig('lod', { pvsEnabled: enabled });
 		saveUiPrefs();
 	});
 
@@ -1965,7 +1819,6 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 	// 兜底会把传送点拉回（"一瞬间传送过去又被拉回"根因）
 	const spawnList = bundle.spawnList;
 	rendererMain.setSpawnPoints(spawnList);
-	loadedSpawnList = spawnList; // 输入录制 meta（回放端可还原出生点列表）
 	// 初始物理参数/体型/模式同步主线程实例（面板参数经 physics-snapshot 镜像双端）
 	rendererMain.setPredictionParams(buildPredictionParams(config));
 	rendererMain.setPredictionHull(
@@ -2435,12 +2288,6 @@ function startInputLoop(): void {
 
 		// 回放跑完：自动收尾（把输入交还键盘鼠标，避免"卡在最后一帧"）
 		if (inputReplaying && inputPlayer.isExhausted()) endPlayback();
-		// 状态行刷新：回放中与**录制中**都要刷（录制期原本从不刷新 → 帧数冻结在
-		// 点击「开始录制」那一刻的 0，看起来像"录不到东西"，实际样本一直在累积）。
-		else if ((inputReplaying || inputRecorder.isRecording()) && now - lastRecUiAt >= 100) {
-			lastRecUiAt = now;
-			updateInputRecUi();
-		}
 
 		// 计时挑战：玩家移动（physics 模式）→ idle → running
 		if (config.physics.mode === 'physics') {
@@ -2473,9 +2320,6 @@ function syncFullConfig(): void {
 	const sections: Array<keyof RuntimeConfig> = [
 		'physics',
 		'player',
-		'movement',
-		'smoothing',
-		'teleport',
 		'lod',
 		'lighting',
 		'input',
