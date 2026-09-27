@@ -8,7 +8,7 @@
 
 - 入口是主线程装配函数 `apps/debug/src/app.ts:278` 的 `main`：它按固定顺序建共享缓冲、起 Worker、装渲染器、绑面板与输入循环。
 - `apps/debug/package.json:15` 的 `dev` 脚本把工程根目录交给共享静态服务器（端口 8080），页面入口是 `apps/debug/web/index.html`。
-- 调试 API 注册在 `apps/debug/src/app.ts:1044` 的 `globalThis.__wsInput`，注释面写明的契约见 `apps/debug/src/app.ts:984` 起的清单；同一份 API 在 `apps/game` 内不注册。
+- 调试 API 注册在 `apps/debug/src/app.ts:912` 的 `globalThis.__wsInput`，注释面写明的契约与「已删除成员」见 `apps/debug/src/app.ts:909` 起的清单；同一份 API 在 `apps/game` 内不注册。2026-09-26：随用户录制器删除的成员有 `start` / `stop` / `clear` / `isRecording` / `exportJson` / `status`（`status` 由新的 `progress` 取代）。
 - 工程自带一份 WASM 绑定层 `apps/debug/crates/wasm/src/lib.rs`（crate `websurf-wasm`），与 `apps/game`、`apps/viewer` 各自独立。
 
 ## 目录职责
@@ -71,7 +71,7 @@
 - `apps/debug/web/`：`app.js` 与 `worker.js` 是 esbuild 产物，`websurf_wasm_bg.wasm` 是 `build:wasm` 的副本（`apps/debug/package.json:8`），`textures.mtz` 是默认纹理包（离线资产）。
 - `apps/debug/pkg/`：wasm-pack 的输出目录，`apps/debug/scripts/build-dist.mjs:50` 从该目录取 wasm 文件名常量。
 - `apps/debug/dist/`：`apps/debug/scripts/build-dist.mjs:48` 定义的目标目录。`single 产物` 保留的清单是 `apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE`；`multi 产物` 的清单是 `apps/debug/scripts/build-dist.mjs:64` 的 `KEEP_MULTI`（多出 `worker.js` / wasm / `textures.mtz` / `coi-serviceworker.js`）。
-- 三个 `.cmd` 是并行的手工入口：`apps/debug/start-dev.cmd:7` 默认端口 8080 并自带工具链与 wasm 过期门，`apps/debug/play.cmd:7` 默认端口 8081 且先构建 `single 产物` 再服务，`apps/debug/build-dist.cmd:7` 默认 `single`、接受 `multi` 参数。
+- 三个 `.cmd` 是并行的手工入口（2026-09-24 起的 `dev` / `build` / `start` 三件，取代旧的 `start-dev` / `play` / `build-dist`）：`apps/debug/dev.cmd:7` 默认端口 8080，跑完整链条（工具链自检 → 依赖 → 强制重编译 wasm 与 TS → 五道测试门）后起服务并开浏览器；`apps/debug/build.cmd:7` 默认 `single`、接受 `multi` 参数，重编译后打包进 `dist/`；`apps/debug/start.cmd:7` 默认端口 8081，只服务已打包的 `dist/`（不做构建）。
 
 ## 启动链
 

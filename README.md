@@ -29,7 +29,15 @@ npm run build:ts       # typecheck + esbuild 打包 worker 与 app
 npm run dev            # python ../../src/serve.py 8080 .
 ```
 
-`apps/game`、`apps/viewer` 同构（端口 8090 / 8100）；三个工程各自 `npm ci` / `npm run build` / `npm run dev`。Windows 双击入口：`apps/<app>/{start-dev,play,build-dist}.cmd`。
+`apps/game`、`apps/viewer` 同构（端口 8090 / 8100）；三个工程各自 `npm ci` / `npm run build` / `npm run dev`。
+
+**Windows 双击入口**（三工程同名三件）：
+
+| 入口 | 做什么 | 端口 |
+|---|---|---|
+| `apps/<app>/dev.cmd` | **全链条**：工具链自检 → 依赖 → 强制重编译 WASM 与 TS → 跑本工程测试门 → 起 dev 服务并打开浏览器 | debug 8080 / game 8090 / viewer 8100 |
+| `apps/<app>/build.cmd` | **重编译并打包**：工具链自检 → 依赖 → WASM → 契约检查 → TS → `dist/`（`[single\|multi]`，viewer 为 single-only） | — |
+| `apps/<app>/start.cmd` | **只启动**，不做任何构建：服务已打包的 `dist/`（缺 `dist/` 会提示先跑 `build.cmd`）；viewer 存在 `dist\play.cmd` 时转给它 | debug 8081 / game 8091 / viewer 8101 |
 
 **静态服务**：`src/serve.py` 只做一件事——按正确 MIME 提供本地文件：端口取 `argv[1]`（默认 8080，`src/serve.py:18`），服务根取 `argv[2]`（`src/serve.py:19`），启动时 `os.chdir` 到该根（`src/serve.py:20`），并为所有响应加 COOP/COEP，页面才能拿到 `SharedArrayBuffer`。
 
@@ -105,7 +113,7 @@ CI 三个 workflow（`.github/workflows/`）：
 
 - **输入录制链路未接线**：`InputRecorder.record()` 在 `apps/debug/src` 内只有回放分支 `replayCapture` 一处调用点（`apps/debug/src/app.ts:2395`），用户录制器 `inputRecorder`（同文件 `:217`）不落样本 ⇒ `__wsInput.exportJson()` 的 frames 恒为空。
 - **零分配支路已实现但未装配**：`tick_into` / `state_out_ptr` / `seed_from` 仅被 `src/ts-shared/` 的控制器调用，而这些控制器在三个工程内都没有装配点；`set_yaw_pitch` 在 `apps/**` 与 `src/**` 内零调用点。
-- **`.cmd` 的 wasm 新鲜度门与被服务的产物不是同一份**：`start-dev.cmd` / `apps/viewer/play.cmd` 判的是 `pkg/…_bg.wasm`，页面与 dist 构建读的是 `web/…_bg.wasm`。
+- **wasm 有两份，只有 `build:wasm` 会同时刷新**：`pkg/…_bg.wasm`（打包脚本与门禁读取）与 `web/…_bg.wasm`（dev 页面加载）。`dev.cmd` / `build.cmd` 每次都跑 `build:wasm`，两份同步；**任何跳过 `build:wasm` 的路径（如直接 `npm run build:dist`）都会让其中一份变旧**。
 
 ## 9. 参与与许可
 

@@ -4,7 +4,8 @@
   - port：默认 8080
   - root_dir：服务根目录（默认 = 本脚本所在目录，即仓库根的 src/）。
     启动时 os.chdir 到该目录，之后由 SimpleHTTPRequestHandler 按当前工作目录取文件。
-    三个工程的 start-dev.cmd 与 debug/game 的 play.cmd 都传各自工程目录（"%~dp0."），
+    三个工程的 dev.cmd 都传各自工程目录（"%~dp0."，服务根 = 工程根 ⇒ /web/index.html 可访问）；
+    start.cmd 服务已打包的 dist/（debug/game 传工程根、页面走 /dist/index.html；viewer 传 dist 目录本身），
     三个 package.json 的 dev 脚本各传 "."，使 /web/index.html 能加载 /pkg 下的 WASM
     与 /web/worker.js。
 

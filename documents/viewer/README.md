@@ -19,7 +19,7 @@
 | `documents/viewer/implementation/renderer.md` | `apps/viewer/src/renderer/**`：静态光照着色器注入与 prop 三级光照路由（三工程同构副本） |
 | `documents/viewer/implementation/worker.md` | `apps/viewer/src/worker/main.ts`：录像解析 Worker 的源码侧实现 |
 | `documents/viewer/implementation/wasm.md` | `apps/viewer/crates/wasm/**` 与两份 `Cargo.toml`：WASM 薄导出层 |
-| `documents/viewer/implementation/scripts-and-test.md` | `apps/viewer/scripts/**`（打包与契约检查）、`apps/viewer/test/**`（Node 自检与 CDP 冒烟）、`apps/viewer/web/index.html`、`apps/viewer/{start-dev,play,build-dist}.cmd`、两份 `.gitignore` |
+| `documents/viewer/implementation/scripts-and-test.md` | `apps/viewer/scripts/**`（打包与契约检查）、`apps/viewer/test/**`（Node 自检与 CDP 冒烟）、`apps/viewer/web/index.html`、`apps/viewer/{dev,build,start}.cmd`、两份 `.gitignore` |
 
 主题划分取自代码目录本身：`apps/viewer/src` 下实际存在 `core/`、`replay/`、`ui/`、`renderer/`、`worker/` 五个子目录，另有入口文件 `app.ts` 与类型入口 `wasm.d.ts`（合为一篇 `app.md`），工程级资产 `crates/wasm/`、`scripts/`、`test/`、`web/`、`*.cmd` 各成一节或独立成篇。
 

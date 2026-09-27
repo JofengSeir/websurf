@@ -10,9 +10,10 @@
  * 退出码: 0 = 新鲜（可跳过重建）；1 = 产物缺失或已过期（需要重建）；2 = 用法错误
  *         （参数缺失）。
  *
- * 调用方: apps/debug/start-dev.cmd、apps/game/start-dev.cmd、apps/viewer/start-dev.cmd
- * 各传三条路径 —— 该工程 pkg 下的 *_bg.wasm、仓库根 src、该工程 crates；三处判据都是
- * `if not errorlevel 1 goto :wasm_done`，故退出码 1 与 2 都落到完整重建。
+ * 调用方: 原为三工程的 start-dev.cmd（各传三条路径 —— 该工程 pkg 下的 *_bg.wasm、
+ * 仓库根 src、该工程 crates；判据 `if not errorlevel 1 goto :wasm_done`，故退出码 1 与 2
+ * 都落到完整重建）。2026-09-24 起三工程入口改为 dev.cmd / build.cmd / start.cmd，前两者
+ * 无条件跑 `npm run build:wasm`，不再用本脚本做过期门；本脚本保留为手工判定工具。
  *
  * 设计约定:
  * - 递归 <source-root> 时按目录名排除 target/ 与 node_modules/，文件只收 .rs 与 .toml
