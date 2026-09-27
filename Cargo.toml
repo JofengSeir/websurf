@@ -6,8 +6,9 @@
 # debug 与 game 的 crates/wasm 同名：apps/debug/crates/wasm/Cargo.toml 与
 # apps/game/crates/wasm/Cargo.toml 的 [package] name 都是 websurf-wasm，而 Cargo
 # 不允许同一 workspace 有两个同名成员。两工程的 wasm-pack 产物同为 websurf_wasm_bg.wasm，
-# 被 package.json 的 build:wasm、start-dev.cmd / play.cmd / build-dist.cmd 的存在性门与
-# src/scripts/wasm-stale-check.mjs 的入参引用。三个工程各自声明 [workspace]，故各自独立：
+# 被 package.json 的 build:wasm、三工程 dev.cmd / build.cmd（无条件重编译）与
+# src/scripts/wasm-stale-check.mjs 的入参引用（dev.cmd / build.cmd 不再用存在性门判断，
+# 每次都跑 build:wasm ⇒ pkg/ 与 web/ 两份副本同步刷新）。三个工程各自声明 [workspace]，故各自独立：
 # 加上本 workspace 共四个，target/ 分别在仓库根与 apps/debug、apps/game、apps/viewer 下。
 #
 # ── vmdl vendor patch ──────────────────────────────────────────────

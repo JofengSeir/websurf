@@ -1,6 +1,6 @@
 # implementation/scripts-and-test：打包、门禁、自检、页面资产与启动脚本
 
-> 覆盖 `apps/viewer/scripts/**`（打包与 WASM 契约检查）、`apps/viewer/test/**`（Node 自检、CDP 冒烟、最小 Node 类型面）、`apps/viewer/web/**` 里入库的页面资产（`index.html`、`styles.css`、`coi-serviceworker.js`；`app.js` / `worker.js` / `*.wasm` 是产物，不入库）、`apps/viewer/{start-dev,play,build-dist}.cmd` 与两份 `.gitignore`。
+> 覆盖 `apps/viewer/scripts/**`（打包与 WASM 契约检查）、`apps/viewer/test/**`（Node 自检、CDP 冒烟、最小 Node 类型面）、`apps/viewer/web/**` 里入库的页面资产（`index.html`、`styles.css`、`coi-serviceworker.js`；`app.js` / `worker.js` / `*.wasm` 是产物，不入库）、`apps/viewer/{dev,build,start}.cmd` 与两份 `.gitignore`。
 
 ---
 
@@ -17,9 +17,9 @@
 | `apps/viewer/web/index.html` | 页面骨架：全部 DOM id、帮助浮层、资源 404 兜底脚本、module script 入口 | `apps/viewer/web/index.html:94`、`apps/viewer/web/index.html:111` |
 | `apps/viewer/web/styles.css` | 全部类名契约的样式实现（面板构件、轨迹卡、时间轴、遥测、叠层） | `apps/viewer/web/styles.css:30`、`apps/viewer/web/styles.css:278` |
 | `apps/viewer/web/coi-serviceworker.js` | 部署用 Service Worker 模板（占位符由 `build-dist.mjs` 的 multi 分支注入） | `apps/viewer/scripts/build-dist.mjs:274` |
-| `apps/viewer/start-dev.cmd` | 双击/手工入口：工具链门 → wasm 新鲜度门 → 依赖 → TS 构建 → 起 8100 服务 | `apps/viewer/start-dev.cmd:11`、`apps/viewer/start-dev.cmd:28`、`apps/viewer/start-dev.cmd:78` |
-| `apps/viewer/play.cmd` | 双击/手工入口：依赖 → wasm → TS → 构建 dist → 转发给 `dist/play.cmd` | `apps/viewer/play.cmd:32`、`apps/viewer/play.cmd:54`、`apps/viewer/play.cmd:78` |
-| `apps/viewer/build-dist.cmd` | 双击/手工入口：工具链自检 → 依赖 → wasm → 契约检查 → TS → 构建 dist | `apps/viewer/build-dist.cmd:16`、`apps/viewer/build-dist.cmd:56`、`apps/viewer/build-dist.cmd:74` |
+| `apps/viewer/dev.cmd` | 双击/手工入口（全链条）：四项工具链自检（`:17`）→ 依赖 → 强制 `build:wasm`（`:48`）→ `build:ts`（`:58`）→ 跑 `test:replay`（`:68`）→ 起 8100 服务（`:7`、`:98`） | `apps/viewer/dev.cmd:17`、`apps/viewer/dev.cmd:48`、`apps/viewer/dev.cmd:98` |
+| `apps/viewer/build.cmd` | 双击/手工入口（重编译打包）：工具链自检（`:22`）→ 依赖 → `build:wasm`（`:50`）→ 契约检查（`:59`）→ `build:ts`（`:69`）→ 构建 dist（`:78`）。**single-only**：只接受 `single` 或缺参 | `apps/viewer/build.cmd:22`、`apps/viewer/build.cmd:50`、`apps/viewer/build.cmd:78` |
+| `apps/viewer/start.cmd` | 双击/手工入口（只启动）：校验 `dist/index.html`（`:19`）→ 默认端口 8101（`:7`）；存在 `dist\play.cmd` 时转给它（`:42` 到 `:43`），否则用 `src/serve.py` 直接服务 `dist\`（`:51`） | `apps/viewer/start.cmd:19`、`apps/viewer/start.cmd:42`、`apps/viewer/start.cmd:51` |
 | `apps/viewer/.gitignore` | 忽略三个 dev 产物与自检中间产物目录 | `apps/viewer/.gitignore:2` 到 `apps/viewer/.gitignore:4`、`apps/viewer/.gitignore:6` |
 
 ## 关键流程与不变量
@@ -42,7 +42,7 @@
 | 冒烟的文件注入方式 | 用 CDP 把本地 `.replay` 塞进 `#pane-replay input[type=file]`，与用户点选同链路 | `apps/viewer/test/smoke-cdp.mjs:330` |
 | 页面资源 404 兜底 | 捕获阶段监听 `script` / `link` / `img` 的 `error`，按文件名是否含 `.wasm` 给不同构建指引并打开 `#fatal` | `apps/viewer/web/index.html:95` 到 `apps/viewer/web/index.html:107` |
 | 页面入口标签形态 | 入库版本是 `<script type="module" src="./app.js">`；single 产物由构建脚本改写为 classic | `apps/viewer/web/index.html:111`、`apps/viewer/scripts/build-dist.mjs:335` |
-| `.cmd` 与 package.json 并行 | 三个 `.cmd` 不通过任何 npm script 转发：`dev` / `build:dist` / `check:api` 是另一条等价路径 | `apps/viewer/package.json:18`、`apps/viewer/start-dev.cmd:78`、`apps/viewer/play.cmd:78` |
+| `.cmd` 与 package.json 并行 | 三个 `.cmd`（`dev` / `build` / `start`）不通过任何 npm script 转发：`npm run dev` / `build:dist` / `check:api` 是另一条等价路径 | `apps/viewer/package.json:18`、`apps/viewer/dev.cmd:98`、`apps/viewer/start.cmd:51` |
 | dev 产物不入库 | `web/app.js` / `web/worker.js` / `web/websurf_viewer_wasm_bg.wasm` 三条忽略规则 | `apps/viewer/.gitignore:2` 到 `apps/viewer/.gitignore:4` |
 
 ## 已知缺口
@@ -54,9 +54,9 @@
 5. **冒烟的三条静态断言只对 single 产物成立**：classic `./app.js`、无 `<script type="module"`、dist 根无 `worker.js` / `*.wasm`（`apps/viewer/test/smoke-cdp.mjs:138`、`apps/viewer/test/smoke-cdp.mjs:139`、`apps/viewer/test/smoke-cdp.mjs:143`），而 multi 产物的清单本来就要收 `worker.js` 与外置 wasm（`apps/viewer/scripts/build-dist.mjs:61`）⇒ 用 `--multi` 产物跑冒烟时这三条必失败。
 6. **`WS_PATH` 的兜底是本机绝对路径**（本次读码发现）：`apps/viewer/test/smoke-cdp.mjs:45` 写死了某个用户目录下的 `ws` 包路径；换机器或换用户时该兜底不可用，只能靠环境变量或本地 `npm i ws`（`apps/viewer/package.json:24`）。
 7. **`.gitignore` 的中间产物目录与脚本实际输出不一致**（本次读码发现）：工程级规则是 `/temp/`（`apps/viewer/.gitignore:6`）且实测 `apps/viewer/temp` 不存在，而 `test:replay` 实际写到 `.tmp/replay-selftest/`（`apps/viewer/package.json:10`，实测该目录存在）——后者由仓库根 `.gitignore` 的 `**/.tmp/` 规则覆盖（`.gitignore:24`），故功能上不漏，但工程级那条规则指向一个不存在的目录。
-8. **`build-dist.cmd` 无法产出 multi 产物**：包装脚本只接受 `single` 或缺参，其它参数直接报错并提示「single-only」（`apps/viewer/build-dist.cmd:8` 到 `apps/viewer/build-dist.cmd:13`），而底层脚本支持 `--multi`（`apps/viewer/scripts/build-dist.mjs:46`）⇒ multi 产物只能手工敲 node 命令。
-9. **`play.cmd` 的 wasm 门与消费方路径不一致**：门只判 `pkg\websurf_viewer_wasm_bg.wasm` 是否存在（`apps/viewer/play.cmd:32`），而后续构建 dist 读的是 `web/websurf_viewer_wasm_bg.wasm`（`apps/viewer/scripts/build-dist.mjs:310`）；`pkg/` 新鲜而 `web/` 副本缺失时门被跳过，随后在读取处失败。
-10. **`play.cmd` 的 python 守卫让兜底不可达**：守卫在转发 `dist\play.cmd` 之前就以 `exit /b 1` 退出（`apps/viewer/play.cmd:11` 到 `apps/viewer/play.cmd:17`），而 `dist/play.cmd` 模板里实现了 `npx --yes serve -l %PORT% .` 的 Node 兜底（`apps/viewer/scripts/build-dist.mjs:151` 到 `apps/viewer/scripts/build-dist.mjs:165`）⇒ 「有 Node 无 Python」的机器上工程根入口先死，兜底永远走不到。
-11. **`start-dev.cmd` 的 wasm 新鲜度门看的是另一份产物**：门把 `pkg\websurf_viewer_wasm_bg.wasm` 与源码时间戳比对（`apps/viewer/start-dev.cmd:28`），而被服务的页面加载的是 `web/websurf_viewer_wasm_bg.wasm`（`apps/viewer/src/core/bsp.ts:86`）⇒ `web/` 缺失或陈旧而 `pkg/` 新鲜时会跳过重建。同一脚本只守 `python`（`apps/viewer/start-dev.cmd:11`），没有 npm / wasm-pack 守卫（对比 `apps/viewer/build-dist.cmd:18` 到 `apps/viewer/build-dist.cmd:23` 的三项自检）。
+8. **`build.cmd` 无法产出 multi 产物**：入口只接受 `single` 或缺参，其它参数直接报错并提示「single-only」（`apps/viewer/build.cmd:8` 到 `apps/viewer/build.cmd:13`），而底层脚本支持 `--multi`（`apps/viewer/scripts/build-dist.mjs:46`）⇒ multi 产物只能手工敲 node 命令。
+9. ~~`play.cmd` 的 wasm 门与消费方路径不一致~~ **已消除（2026-09-24）**：`dev.cmd` / `build.cmd` 都无条件 `npm run build:wasm`（`apps/viewer/dev.cmd:48`、`apps/viewer/build.cmd:50`），不再有"产物存在就跳过"的分支 ⇒ `pkg/` 与 `web/` 两份同步刷新。**保留为不变量**：dist 构建读的是 `web/websurf_viewer_wasm_bg.wasm`（`apps/viewer/scripts/build-dist.mjs:310`），页面加载的也是 `web/` 那份（`apps/viewer/src/core/bsp.ts:86`），因此任何跳过 `build:wasm` 的路径都会用到旧产物。
+10. **`start.cmd` 的 python 守卫让兜底不可达**：守卫在转发 `dist\play.cmd` 之前就以 `exit /b 1` 退出（`apps/viewer/start.cmd:11` 到 `apps/viewer/start.cmd:17`），而 `dist/play.cmd` 模板里实现了 `npx --yes serve -l %PORT% .` 的 Node 兜底（`apps/viewer/scripts/build-dist.mjs:151` 到 `apps/viewer/scripts/build-dist.mjs:165`）⇒ 「有 Node 无 Python」的机器上工程根入口先死，兜底永远走不到。
+11. ~~`start-dev.cmd` 的 wasm 新鲜度门看的是另一份产物~~ **已消除（2026-09-24）**：`dev.cmd` 改为无条件重编译（不再比对时间戳，见 `apps/viewer/dev.cmd:48`）；工具链自检也从"只守 python"扩到 **npm / node / python / wasm-pack** 四项（`apps/viewer/dev.cmd:17` 起），`build.cmd` 另覆盖 npm / wasm-pack / node 三项（`apps/viewer/build.cmd:22` 起）。
 12. **single 分支的步骤编号是四段都写 `[5/5]`**（代码字符串）：`apps/viewer/scripts/build-dist.mjs:309`、`apps/viewer/scripts/build-dist.mjs:313`、`apps/viewer/scripts/build-dist.mjs:320`、`apps/viewer/scripts/build-dist.mjs:327` 四行日志用了同一个编号，而 multi 分支的日志用 `[multi]` 前缀（`apps/viewer/scripts/build-dist.mjs:247`）⇒ 输出里的进度编号不表达实际步序。
-13. **端口占用分支假定占用者服务的就是 dist**：`play.cmd` 在 8101 已被监听时直接打开 `http://localhost:%PORT%/index.html` 并退出（`apps/viewer/play.cmd:62` 到 `apps/viewer/play.cmd:66`），而端口上的服务由谁提供、根目录指向哪里都不由本脚本决定（对比 `apps/viewer/start-dev.cmd:63` 同样只拼 URL）；占用者若服务的是工程根而非 `dist/`，打开的是 dev 页面而不是打包产物页面。
+13. **端口占用分支假定占用者服务的就是 dist**：`start.cmd` 在 8101 已被监听时直接打开 `http://localhost:%PORT%/index.html` 并退出（`apps/viewer/start.cmd:26` 到 `apps/viewer/start.cmd:30`），而端口上的服务由谁提供、根目录指向哪里都不由本脚本决定（对比 `apps/viewer/dev.cmd:80` 同样只拼 URL）；占用者若服务的是工程根而非 `dist/`，打开的是 dev 页面而不是打包产物页面。

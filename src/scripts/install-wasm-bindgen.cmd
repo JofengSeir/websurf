@@ -14,7 +14,7 @@ REM root by src/scripts/cargo-env.cmd:
 REM   WASM_PACK_CACHE\.wasm-bindgen-cargo-install-<VERSION>\bin
 REM   CARGO_HOME\bin   (fallback search path)
 REM
-REM Called by apps/debug/start-dev.cmd and apps/debug/build-dist.cmd,
+REM Called by apps/debug/dev.cmd and apps/debug/build.cmd,
 REM both passing "nopause" as the first argument, so an automated
 REM build never blocks on a keypress (each pause below is guarded
 REM by NO_PAUSE).

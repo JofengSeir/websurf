@@ -1,21 +1,25 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableExtensions
-title WebSurf-debug - Build dist
+title WebSurf-viewer - Build
 cd /d "%~dp0"
 
-set "DIST_MODE=single"
-if /i "%~1"=="multi" set "DIST_MODE=multi"
+REM ---- viewer 是 single-only：底层 build-dist.mjs 支持 --multi，但本入口只接受 single ----
 if /i "%~1"=="" goto :mode_ok
 if /i "%~1"=="single" goto :mode_ok
-if /i "%~1"=="multi" goto :mode_ok
 echo [ERROR] Unsupported argument: %~1
-echo [HINT] Usage: build-dist.cmd [single^|multi]
+echo [HINT] viewer is single-only: usage: build.cmd [single]
 pause
 exit /b 1
 :mode_ok
 
-echo [0/5] Checking toolchain...
+echo ============================================================
+echo   WebSurf-viewer - build
+echo   重编译并打包：工具链 -^> 依赖 -^> WASM -^> 契约检查
+echo                -^> TS -^> dist 打包 ^(single only^)
+echo ============================================================
+
+echo [1/6] Checking toolchain...
 set "TOOLCHAIN_OK=1"
 where npm >nul 2>nul
 if errorlevel 1 (echo   [!] npm not found. Install Node.js and add it to PATH.& set "TOOLCHAIN_OK=0") else (echo   npm: OK)
@@ -32,7 +36,7 @@ if not "%TOOLCHAIN_OK%"=="1" (
 
 call "%~dp0..\..\src\scripts\cargo-env.cmd"
 
-echo [1/5] Ensuring Node build dependencies (auto npm install if missing)...
+echo [2/6] Ensuring Node build dependencies (auto npm install if missing)...
 call "%~dp0..\..\src\scripts\ensure-node-deps.cmd" nopause
 if errorlevel 1 (
   echo [ERROR] npm install failed.
@@ -40,21 +44,9 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo [1/5] Node dependencies ready.
+echo [2/6] Node dependencies ready.
 
-if exist "pkg\websurf_wasm_bg.wasm" goto :wasm_done
-echo [2/5] Building WASM (release)...
-REM [2/5] sub-step before npm run build:wasm: calls src/scripts/install-wasm-bindgen.cmd
-REM with nopause for wasm-bindgen-cli v0.2.128; errorlevel 1 -> pause + exit /b 1.
-echo [INFO] Ensuring wasm-bindgen-cli v0.2.128 is present (auto-install if missing)...
-call "%~dp0..\..\src\scripts\install-wasm-bindgen.cmd" nopause
-if errorlevel 1 (
-  echo [ERROR] wasm-bindgen-cli setup failed.
-  echo [HINT] Run the shared src\scripts\install-wasm-bindgen.cmd manually, then retry.
-  pause
-  exit /b 1
-)
-echo [INFO] wasm-bindgen-cli ready.
+echo [3/6] Rebuilding WASM (release)...
 call npm run build:wasm
 if errorlevel 1 (
   echo [ERROR] WASM build failed.
@@ -62,10 +54,9 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-:wasm_done
-echo [2/5] WASM ready (release).
+echo [3/6] WASM ready (release).
 
-echo [3/5] Checking WASM API contract...
+echo [4/6] Checking WASM API contract...
 call npm run check:api
 if errorlevel 1 (
   echo [ERROR] WASM API contract check failed.
@@ -74,7 +65,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [4/5] Building TypeScript (worker.js + app.js)...
+echo [5/6] Rebuilding TypeScript (typecheck + worker.js + app.js)...
 call npm run build:ts
 if errorlevel 1 (
   echo [ERROR] TypeScript build failed.
@@ -82,11 +73,10 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+echo [5/6] TypeScript ready.
 
-echo [5/5] Building dist package...
-set "DIST_ARG="
-if /i "%DIST_MODE%"=="multi" set "DIST_ARG=--multi"
-call node "%~dp0scripts\build-dist.mjs" %DIST_ARG%
+echo [6/6] Building dist package (single)...
+call node "%~dp0scripts\build-dist.mjs"
 if errorlevel 1 (
   echo [ERROR] dist build failed.
   echo [HINT] See the build-dist.mjs errors printed above, then retry.
@@ -95,10 +85,8 @@ if errorlevel 1 (
 )
 
 echo ============================================================
-echo   WebSurf-debug - Build dist package: complete
-echo   Output:  dist/ (mode: %DIST_MODE%)
-echo   Run:     play.cmd
-if /i "%DIST_MODE%"=="multi" echo   Note:    multi mode needs the local HTTP server (play.cmd).
-if /i "%DIST_MODE%"=="single" echo   Note:    file:// double-click works (WASM embedded).
+echo   WebSurf-viewer - build: complete
+echo   Output:  dist/ (single, WASM embedded)
+echo   Run:     start.cmd
 echo ============================================================
 exit /b 0
