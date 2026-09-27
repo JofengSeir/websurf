@@ -60,8 +60,8 @@
 ## 已知缺口
 
 1. **`apps/debug/web/styles.css` 在全工程零引用**：它定义的 `.health-log` 规则没有任何加载路径——`apps/debug/web/index.html` 既不 `<link>` 该文件，内联 `<style>` 段里也没有 `.health-log` 规则；`apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE` 与 `:64` 的 `KEEP_MULTI` 也都不含 `styles.css`。页面上的 `#health-log` 元素带 `class="health-log"`（`apps/debug/web/index.html:653`），但该类在本页无任何样式生效。
-2. **页面缺少被查询的九个 id**：`apps/debug/src/app.ts` 会查询 `inputRecStatus`、`inputRecToggleBtn`、`inputRecClearBtn`、`inputRecExportBtn`、`inputRecLoadBtn`、`inputRecStopPlayBtn`、`inputRecFile`、`pathVisibleChk`、`pvsEnabled` 九个 id（`apps/debug/src/app.ts:119` 起、`apps/debug/src/app.ts:112`、`apps/debug/src/app.ts:95`），页面的 106 个 id 中一个都没有，因此对应控件在页面上不存在（「输入录制」区整块缺失、路径总开关与 PVS 开关缺失）。
+2. ~~**页面缺少被查询的九个 id**~~ **已全部处置（2026-09-26）**：九个查询（`pathVisibleChk`、`pvsEnabled` 与录制面板七个）已随各自死链删除，脚本不再查询任何页面不存在的 id（见 `documents/debug/implementation/app.md` 已知缺口第 10–12 项）。页面侧结论不变：`web/index.html` 从未提供「输入录制」区与 PVS 开关。
 3. **两个 id 无任何代码读写**：`lightingModeHint`（说明段，`apps/debug/web/index.html:353`）与 `pathBuildTag`（构建标签，`apps/debug/web/index.html:392`）在 `apps/debug/src` 与 `apps/debug/scripts` 内零命中。其中构建标签不做构建版本校验，与产物不符时页面不会提示。
 4. **`#health-log` 的实际外观依赖内联样式之外的东西**：由于 1 中所述原因，该元素当前只有浏览器默认的 `<pre>` 外观。
-5. **PVS 开关不在本区**：页面「渲染与视距」区不提供 PVS 复选框（`apps/debug/web/index.html:333`），而脚本仍在查询 `pvsEnabled`（`apps/debug/src/app.ts:95`）。
+5. ~~**PVS 开关不在本区**~~ **已处置（2026-09-26）**：不再查询 `pvsEnabled`——该链（脚本查询 + config 字段 + 三处同步/监听）已整体删除，页面「渲染与视距」区维持不提供该开关（`apps/debug/web/index.html:333`）。剔除仍只有「块中心到相机距离 > `cullDistance`」一条判据。
 6. **`title` 属性与实际实现的口径**：`pathBuildTag` 所在区段的注释说明本页不校验构建版本（`apps/debug/web/index.html:392`），页面上也没有比较机制。

@@ -66,12 +66,8 @@
 
 ## 已知缺口
 
-1. **录制链路未接通（唯一调用点是回放捕获器）**：`InputRecorder.record`（`apps/debug/src/input/input-recorder.ts:297`）在 `apps/debug/src` 内只有一个调用点——`apps/debug/src/app.ts:2395` 的 `replayCapture.record(now, finalDx, finalDy, finalKeys)`，而 `replayCapture` 与 `inputRecorder` 是同文件里的两个不同实例（`apps/debug/src/app.ts:217`、`apps/debug/src/app.ts:219`）。因此用户录制器 `inputRecorder` 永不落样本。
-2. **依赖该链路的消费点全部取到 0 帧**：
-   - 面板状态行只会显示「未开始」（`apps/debug/src/app.ts:756`），因为 `inputRecorder.counts()` 的 `frames` 恒 0（`apps/debug/src/app.ts:741`）。
-   - 导出按钮与 `__wsInput.exportJson()` 导出的 `frames` 恒为空数组（`apps/debug/src/app.ts:924`、`apps/debug/src/app.ts:1057`）。
-   - `__wsInput.counts().frames` 恒 0（`apps/debug/src/app.ts:1068`）。
-   - 无头验收脚本 `apps/debug/scripts/input-replay-verify.mjs` 的录制相位依赖 `__wsInput.exportJson()`（`apps/debug/scripts/input-replay-verify.mjs:297`）与 `counts().frames`（`apps/debug/scripts/input-replay-verify.mjs:470`、`apps/debug/scripts/input-replay-verify.mjs:510`），两者都取到空载荷；该脚本还直接查询 `#inputRecStatus`（`apps/debug/scripts/input-replay-verify.mjs:461`），而该 id 在页面上不存在。
+1. ~~**录制链路未接通（唯一调用点是回放捕获器）**~~ **已处置（2026-09-26，删链）**：用户录制器 `inputRecorder`（原 `apps/debug/src/app.ts:215`）与其面板控件、`__wsInput` 的录制成员全部删除；页面只保留**回放**能力（`__wsInput.load` / `play` / `stopPlay` / `progress`）。`InputRecorder.record` 在 `apps/debug/src` 内**仍然只有一个调用点**——回放分支的 `replayCapture.record(...)`，故回放捕获链路不变。
+2. ~~**依赖该链路的消费点全部取到 0 帧**~~ **已处置（2026-09-26）**：原「面板状态行 / 导出按钮 / `__wsInput.exportJson` / `counts().frames`」四处消费点随链路删除。**遗留影响**：无头验收脚本 `apps/debug/scripts/input-replay-verify.mjs` 的录制相位依赖 `__wsInput.exportJson()`（`apps/debug/scripts/input-replay-verify.mjs:297`）与 `counts().frames`（`:470`、`:510`），并查询页面不存在的 `#inputRecStatus`（`:461`）⇒ **该脚本现已不可用**（它本就因空载荷必然失败），需改写为「由 `load` 载入外部录制 → `play` → 比对 `captureText` 与 `progress`」或删除。
 3. **`dtS` 在本仓调用点被省略**：唯一的 `record` 调用（`apps/debug/src/app.ts:2395`）没有传第 5 个实参，因此写进样本的 `dt` 恒为 0（`apps/debug/src/input/input-recorder.ts:289`、`apps/debug/src/input/input-recorder.ts:305`）。`InputFrame` 也没有 `dt` 字段（`apps/debug/src/input/input-recorder.ts:53`）；步长只存在于并行数组与 `toCompactPayload` 的 `dt` 数组里（`apps/debug/src/input/input-recorder.ts:370`）。
 4. **`keysFromMask` 无调用点**：`apps/debug/src/input/input-recorder.ts:772` 的导出在 `apps/debug/src` 与 `src` 内零调用点。
 5. **`set-cull-distance` 无接收方**：`sendSetCullDistance`（`apps/debug/src/input/input-bridge.ts:90`）发出的消息在 Worker 侧无人处理。

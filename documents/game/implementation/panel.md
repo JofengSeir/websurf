@@ -34,7 +34,7 @@
 - **数值框路径不回写自身文本**：滑块输入会把值同步到数值框（`apps/game/src/panel/panel-controller.ts:568`），但数值框输入只把**钳制结果写回滑块**（`:577`），数值框自身文本保持用户输入的越界值；被写入 config 的是钳制后的值（`:578`）。
 - **`applyCrosshair` 有一个死变量**：`const dot = el.querySelector('.ch-dot')` 声明后未被使用（`apps/game/src/panel/panel-controller.ts:773`），中心点显隐实际由 `no-dot` 类承担（`:774`）。
 - **渲染侧初值写两次**：`RendererMain.init` 先按 config 当时的值写一遍光照与 FOV（`apps/game/src/renderer/renderer-main.ts:266`、`:268`、`:270`、`:272`、`:274`、`:275`），`sendAllPrefs` 再用加载偏好后的 config 覆盖一次（`apps/game/src/panel/panel-controller.ts:750`、`:752`、`:753`、`:754`、`:755`）；两次都走共享 uniform，第二次对 γ 同样受接受窗口限制。
-- **只持久化部分输入段字段**：`collectPrefs` 的 `input` 段只写 `sensitivity` / `yawBindSpeed` / `noclipSpeed`（`apps/game/src/panel/panel-controller.ts:612`），`pitchLimit` 从不进存档（该字段在本工程也无读取点，见 `documents/game/implementation/config.md`）。
+- **只持久化部分输入段字段**：`collectPrefs` 的 `input` 段只写 `sensitivity` / `yawBindSpeed` / `noclipSpeed`（`apps/game/src/panel/panel-controller.ts:612`）。原 `pitchLimit` 从不进存档且全仓无读取点，已于 2026-09-26 从配置删除（见 `documents/game/implementation/config.md`）。
 - **面板不校验 DOM 是否存在**：`bindSlider` / `bindCheckbox` 在取不到元素时静默返回（`apps/game/src/panel/panel-controller.ts:561`、`:587`），控件缺失不会报错；`#panel` 缺失时构造期即抛出（`apps/game/src/panel/panel-controller.ts:78` 的断言）。
 - **存点列表形参含不参与渲染的字段**：`renderSavePoints` 的形参类型带 `yaw`（`apps/game/src/panel/panel-controller.ts:780`），方法体只渲染序号、坐标与速率（`:796`），`yaw` 未被使用。
 - **M 键与 ESC 两条全局监听不校验场景状态**：M 键的判据只有 `e.code === 'KeyM'`（`apps/game/src/panel/panel-controller.ts:265`），ESC 分支只判 `!getLocked()`（`:273`）；两者都不读 `sceneReady`，因此加载进度覆盖层显示期间这两条分支同样会被触发。

@@ -130,7 +130,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 1. **权威时钟只有一个来源**：`src/ts-shared/auth/auth-loop.ts:250` 的 `createAuthLoop`；其步长由 `setFixedDt` 改写，`reset()` 会把累积器、唤醒基准与仿真时钟一并清零。调用方只在步长**真变化**时 `reset`（`src/ts-shared/auth/worker-dispatch.ts:207` 的分支）。
 2. **零分配物理支路已实现、未接线**：`tick_into`（`src/phys/mod.rs:265`）、`state_out_ptr`、`seed_from` 的调用方只有 `src/ts-shared/auth/tick-authority.ts` 与 `src/ts-shared/decoupled/decoupled-loop.ts`，而这两个控制器在三个工程内**都没有装配点**。线上路径走的是 `tick`（返回状态对象）。
 3. **三份 `crates/wasm/src/lib.rs` 各自维护**：导出面不同，不构成同构副本。
-4. **默认关闭的能力**：debug 的 `lod.pvsEnabled` 默认 `false`；`LodManager.update` 只做「块中心到相机距离」这一条判据（不查 cluster、无迟滞带）。
+4. **剔除只有一条判据**：debug 的 `LodManager.update` 只做「块中心到相机距离 > `cullDistance`」（不查 cluster、无迟滞带）。原 `lod.pvsEnabled`（PVS 开关）于 2026-09-26 随死链删除——它既不参与判定、页面也无控件；`LodConfig` 现只含 `updateInterval` 与 `cullDistance`。
 5. **可执行门禁**：`cargo test -p websurf-phys`（物理门禁测试）、各工程 `npm run typecheck`、`node src/scripts/check-doc-drift.mjs`（文档锚点与路径）、`node src/scripts/check-shared-sync.mjs`（Rust 与 TS 两侧常量逐位比对）、`node src/scripts/wasm-stale-check.mjs`（wasm 产物新鲜度）。
 
 ---

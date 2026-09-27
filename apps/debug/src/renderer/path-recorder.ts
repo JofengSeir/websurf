@@ -680,12 +680,10 @@ export class PathRecorder {
     this.segDirectLen = 0;
   }
 
-  /** 整组显隐：一次切换两条线、tick 节点方点与偏差梳。 */
-  setVisible(visible: boolean): void {
-    this.group.visible = visible;
-  }
-
-  /** 单独控制 render 线显隐（关掉密集的 render 线，tick 线的折角更容易看清）。 */
+  /** 单独控制 render 线显隐（关掉密集的 render 线，tick 线的折角更容易看清）。
+   *
+   * 2026-09-26：原 `setVisible`（整组显隐）随其唯一调用方 `RendererMain.setPathVisible`
+   * 一并删除——入口 `#pathVisibleChk` 在页面不存在，分量开关已覆盖其语义。 */
   setRenderVisible(visible: boolean): void {
     this.renderBuf.object.visible = visible;
   }
@@ -703,11 +701,6 @@ export class PathRecorder {
   /** 单独控制 tick 节点方点显隐（方点密集时会在屏幕上连成链，可只留线）。 */
   setDotsVisible(visible: boolean): void {
     this.tickDots.object.visible = visible;
-  }
-
-  /** 组当前的可见性（`setVisible` 写的值）。 */
-  get visible(): boolean {
-    return this.group.visible;
   }
 
   /**

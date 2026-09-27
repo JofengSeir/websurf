@@ -65,9 +65,6 @@ export interface InputConfig {
    *  **不进入物理参数**：`src/ts-shared/phys/params.ts` 的 `buildPhysicsParams` 把
    *  `sensitivity` 固定写成 1，故改本字段不会造成双端物理参数分叉。 */
   sensitivity: number;
-  /** pitch 限位（度）。**本工程内零读取点**：只有接口声明与默认值，
-   *  `apps/game/src` 下没有任何读取者。 */
-  pitchLimit: number;
   /** Q/E 键 yaw 旋转速度（度/秒，turn bind）→ Rust `yaw_bind_speed`。
    *  读点：`worker/main.ts` 的 `syncParamsToWasm`、`apps/game/src/app.ts` 的 turn bind、
    *  面板控件（量程 0..720）。 */
@@ -194,7 +191,6 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   },
   input: {
     sensitivity: 1.5,
-    pitchLimit: 89,
     yawBindSpeed: 210,
     noclipSpeed: 800,
   },
