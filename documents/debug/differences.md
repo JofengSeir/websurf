@@ -20,13 +20,13 @@
 | 构建产物形态 | 同上 | `apps/viewer`：`KEEP_SINGLE` 额外含 `.nojekyll` / `README.md` / `serve.py` / `play.cmd` / `play.sh`，`KEEP_MULTI` 额外含 `wasm-embedded.js` | 本工程 `apps/debug/scripts/build-dist.mjs:63`；viewer `apps/viewer/scripts/build-dist.mjs:51`、`apps/viewer/scripts/build-dist.mjs:61` |
 | 面板与 UI 结构 | 106 个页面 id，参数面板行由 `PARAM_DEFS` 动态渲染 | `apps/game`：93 个页面 id，面板由 `PanelController` 统一绑定 | 本工程 `apps/debug/web/index.html:494`（`#physicsParamList`）、`apps/debug/src/physics/param-defs.ts:47`；game `apps/game/web/index.html:72`、`apps/game/src/panel/panel-controller.ts:37` |
 | 面板与 UI 结构 | 同上 | `apps/viewer`：26 个页面 id，面板拆成标签页与 dock | 本工程 `apps/debug/web/index.html:292`；viewer `apps/viewer/web/index.html:77`（`#tabs`）、`apps/viewer/web/index.html:89`（`#timeline`） |
-| 测试与门禁脚本 | `package.json` 共 15 条 script，其中门禁类 7 条；`scripts/` 下另有 18 个 `.mjs` | `apps/game`：`package.json` 门禁类 4 条（`check:api` / `test:phys` / `test:seed-smoke` / `test:surf-crouch`），`scripts/` 下另有 20 个 `.mjs` | 本工程 `apps/debug/package.json:16`、`apps/debug/package.json:24`；game `apps/game/package.json:16`、`apps/game/package.json:19` |
+| 测试与门禁脚本 | `package.json` 共 15 条 script，其中门禁类 7 条；`scripts/` 下 **11 个 `.mjs` 入库**（另 7 个一次性实验脚本于 2026-09-27 排除、仅本地保留） | `apps/game`：`package.json` 门禁类 4 条（`check:api` / `test:phys` / `test:seed-smoke` / `test:surf-crouch`），`scripts/` 下 **5 个 `.mjs` 入库**（另 13 个一次性脚本与 2 个 `_dbg_*` 不入库） | 本工程 `apps/debug/package.json:16`、`apps/debug/package.json:24`；game `apps/game/package.json:16`、`apps/game/package.json:19` |
 | 测试与门禁脚本 | 同上 | `apps/viewer`：门禁类 3 条（`test:replay` / `local:smoke` / `check:api`），另有独立 `test/` 目录 | 本工程 `apps/debug/package.json:16`；viewer `apps/viewer/package.json:10`、`apps/viewer/package.json:17` |
-| dev 端口 | `npm run dev` 监听 8080；`play.cmd` 默认 8081 | `apps/game`：`npm run dev` 监听 8090 | 本工程 `apps/debug/package.json:15`、`apps/debug/play.cmd:7`；game `apps/game/package.json:15` |
+| dev 端口 | `npm run dev` 监听 8080；`start.cmd` 默认 8081（只服务 `dist/`） | `apps/game`：`npm run dev` 监听 8090；`start.cmd` 默认 8091 | 本工程 `apps/debug/package.json:15`、`apps/debug/start.cmd:7`；game `apps/game/package.json:15`、`apps/game/start.cmd:7` |
 | dev 端口 | 同上 | `apps/viewer`：`npm run dev` 监听 8100 | 本工程 `apps/debug/package.json:15`；viewer `apps/viewer/package.json:18` |
 | WASM 绑定层 | 自带 `crates/wasm`，crate 名 `websurf-wasm`，产物 `websurf_wasm_bg.wasm` | `apps/game`：自带 `crates/wasm`，产物同名 `websurf_wasm_bg.wasm` | 本工程 `apps/debug/package.json:8`；game `apps/game/package.json:8` |
 | WASM 绑定层 | 同上 | `apps/viewer`：自带 `crates/wasm`，产物名 `websurf_viewer_wasm_bg.wasm`（不同名） | 本工程 `apps/debug/package.json:8`；viewer `apps/viewer/package.json:8` |
-| 调试 API | 注册 `globalThis.__wsInput`（永久保留的无头驱动 API，20 余个方法） | `apps/game`：不注册同名 API（全仓 `__wsInput` 只在 debug 侧定义） | 本工程 `apps/debug/src/app.ts:1044`；game 侧零命中（`apps/game/src` 内无 `__wsInput`） |
+| 调试 API | 注册 `globalThis.__wsInput`（永久保留的无头驱动 API，20 余个方法） | `apps/game`：不注册同名 API（全仓 `__wsInput` 只在 debug 侧定义） | 本工程 `apps/debug/src/app.ts:912`；game 侧零命中（`apps/game/src` 内无 `__wsInput`） |
 
 ## 维度覆盖核对
 

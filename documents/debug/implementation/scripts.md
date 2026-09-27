@@ -1,6 +1,8 @@
 # implementation：scripts
 
-主题对应 `apps/debug/scripts/**`（18 个 `.mjs` + 两个资产文件）与工程根三个 `.cmd` 手工入口。这些脚本不参与运行时，只承担构建、门禁与无头验收。
+主题对应 `apps/debug/scripts/**` 与工程根三个 `.cmd` 手工入口。这些脚本不参与运行时，只承担构建、门禁与无头验收。
+
+> **入库口径（2026-09-27）**：`scripts/**` 共 18 个 `.mjs`，其中 **11 个入库**（构建、契约门、npm script 驱动的门禁与度量），**7 个一次性实验脚本已从版本库排除、仅本地保留**（`jump-apex-serve` / `measure` / `auth-diag` / `report` / `trace` / `window` / `smoke`）——判据是它们既没有 npm script、也不进 CI（`ci-gates.yml` 的 `test:jump-apex` 只跑 `jump-apex-verify.mjs`），引用面只有同族互提及与本文档。下表中标 ⚑ 的行即这类文件：**锚点仅在本地有效**。
 
 ## 模块职责
 
@@ -25,30 +27,32 @@
 | `apps/debug/scripts/glb-mesh-count.mjs` | `npm run count:glb-meshes`（`apps/debug/package.json:17`） | 用 `apps/debug/pkg` 的 wasm 产物解析 BSP、导出 GLB、就地解析 GLB 的 JSON chunk 统计规模 |
 | `apps/debug/scripts/plot-path.mjs` | `npm run plot:path`（`apps/debug/package.json:21`） | 把面板导出的物理路径 JSON 画成 2D 正交投影 PNG 并做折角分析 |
 
-**jump-apex 采样链（六个脚本，互为上下游）**
+**jump-apex 采样链（八个脚本；⚑ = 一次性实验脚本，本地保留、不入库）**
 
 | 脚本 | 角色 |
 |---|---|
-| `apps/debug/scripts/jump-apex-serve.mjs` | 在 OS 临时目录里镜像 `apps/debug/src`、`apps/debug/pkg` 与仓库 `src`，给副本注入只读探针 `globalThis.__jumpProbe` 与按键掩码覆盖槽 `globalThis.__jumpMask`，**不改仓库源文件** |
-| `apps/debug/scripts/jump-apex-measure.mjs` | 真实页面实测：驱动 headless Chromium + CDP，注入 BSP、轮询就绪、按帧采样并落 `.tmp/jump-apex/<label>.json` |
-| `apps/debug/scripts/jump-apex-auth-diag.mjs` | 对 measure 落盘的样本做权威/渲染线统计 |
-| `apps/debug/scripts/jump-apex-report.mjs` | 顶高分布分析：以「发射冲量」为分段锚点算顶高 |
-| `apps/debug/scripts/jump-apex-trace.mjs` | 从给定时刻向前回溯定位「超限跳」的起始帧并打印逐帧表 |
-| `apps/debug/scripts/jump-apex-window.mjs` | 打印某时刻附近窗口的逐帧采样表 |
-| `apps/debug/scripts/jump-apex-smoke.mjs` | 冒烟采样：按住跳键一段时间后打印 3 秒窗口的读数，不落盘、不断言 |
+| ⚑ `apps/debug/scripts/jump-apex-serve.mjs` | 在 OS 临时目录里镜像 `apps/debug/src`、`apps/debug/pkg` 与仓库 `src`，给副本注入只读探针 `globalThis.__jumpProbe` 与按键掩码覆盖槽 `globalThis.__jumpMask`，**不改仓库源文件** |
+| ⚑ `apps/debug/scripts/jump-apex-measure.mjs` | 真实页面实测：驱动 headless Chromium + CDP，注入 BSP、轮询就绪、按帧采样并落 `.tmp/jump-apex/<label>.json` |
+| ⚑ `apps/debug/scripts/jump-apex-auth-diag.mjs` | 对 measure 落盘的样本做权威/渲染线统计 |
+| ⚑ `apps/debug/scripts/jump-apex-report.mjs` | 顶高分布分析：以「发射冲量」为分段锚点算顶高 |
+| ⚑ `apps/debug/scripts/jump-apex-trace.mjs` | 从给定时刻向前回溯定位「超限跳」的起始帧并打印逐帧表 |
+| ⚑ `apps/debug/scripts/jump-apex-window.mjs` | 打印某时刻附近窗口的逐帧采样表 |
+| ⚑ `apps/debug/scripts/jump-apex-smoke.mjs` | 冒烟采样：按住跳键一段时间后打印 3 秒窗口的读数，不落盘、不断言 |
 | `apps/debug/scripts/jump-apex-verify.mjs` | 确定性 node 镜像实验：自造时钟与虚拟权威帧队列，跑两组接线 × 多个渲染帧率的对照矩阵 |
 
 **资产**
 
 `apps/debug/scripts/path-baseline.md` 是路径垂距的基线记录（含 CI 夹具语义与历史基线数值），属脚本资产而非文档树。
 
-**三个 `.cmd` 手工入口**（与 npm script 并行，互不转发）
+**三个 `.cmd` 手工入口**（`dev` / `build` / `start`，与 npm script 并行，互不转发）
 
 | 文件 | 职责 |
 |---|---|
-| `apps/debug/start-dev.cmd` | 工具链守卫 → wasm 过期门（`node src/scripts/wasm-stale-check.mjs`，`:28`）→ 必要时重建 wasm 与 TS → 起 dev 服务器（默认端口 8080，`:7`） |
-| `apps/debug/play.cmd` | 依赖 → wasm（缺 `pkg/websurf_wasm_bg.wasm` 才建，`:32`）→ TS → `scripts/build-dist.mjs`（`:54`）→ 起服务器（默认端口 8081，`:7`） |
-| `apps/debug/build-dist.cmd` | 工具链自检（npm / wasm-pack / node，`:20` 起）→ 依赖 → wasm → `npm run check:api`（`:69`）→ TS → `build-dist.mjs [single\|multi]`（`:89`） |
+| `apps/debug/dev.cmd` | 全链条：四项工具链自检（`:17`）→ 依赖 → **强制** `npm run build:wasm`（`:48`）→ `npm run build:ts`（`:58`）→ 跑本工程五道测试门（`:68`）→ 起 dev 服务并开浏览器（默认端口 8080，`:7`，服务 `web/`） |
+| `apps/debug/build.cmd` | 重编译并打包：工具链自检（`:24`）→ 依赖 → `build:wasm`（`:52`）→ `npm run check:api`（`:61`）→ `build:ts`（`:71`）→ `build-dist.mjs`（`:80`）。参数 `[single\|multi]`（默认 `single`，`:7`、`:13`） |
+| `apps/debug/start.cmd` | **只启动**、不做任何构建：校验 `dist/index.html` 存在（`:19`）→ 起服务并开浏览器（默认端口 8081，`:7`，服务 `dist/`）；缺 `dist/` 时报错并提示先跑 `build.cmd` |
+
+> 三者分工：`dev` = 重编译 + 测试 + 打开（开发循环）；`build` = 重编译 + 打包；`start` = 单独启动已打包产物。旧的 `start-dev.cmd` / `play.cmd` / `build-dist.cmd` 已由这三个入口取代（2026-09-24）。
 
 ## 关键流程与不变量
 
@@ -71,8 +75,8 @@
 3. **`jump-apex-verify.mjs` 的内嵌复刻依赖已不在源码中的行为**：脚本自带一份「修复前行为」的 land 处理复刻作为对照面（`apps/debug/scripts/jump-apex-verify.mjs:27`）；`jump-apex-serve.mjs` 另用源码文本切片生成回退版，因此两处源码文本形态被脚本依赖。
 4. **`frame-bench.mjs` 的缺省地图路径不在工作区**：第 4 个参数缺省时取 `<仓库根>/maps/surf_666.bsp`（`apps/debug/scripts/frame-bench.mjs:37`），而该路径下没有文件，脚本随即打印「地图不存在」并以 2 退出（`apps/debug/scripts/frame-bench.mjs:54`）。地图实际位于 `test/maps/` 下，须显式传第 4 个参数。
 5. **`optimize-scene-verify.mjs` 用合成场景、不对当前 GLB 规模**：场景按固定常量合成（`MESH_COUNT` 个 primitive 装进若干容器，坐标由确定性随机数在 `WORLD` 尺度内生成），断言锚定脚本自身的可复现性；要复核当前 `apps/debug/pkg` 产物的真实规模须改用 `apps/debug/scripts/glb-mesh-count.mjs`（`apps/debug/scripts/optimize-scene-verify.mjs:15`、`:19`）。
-7. **`input-replay-verify.mjs` 依赖的录制载荷恒为空**：脚本从 `__wsInput.exportJson()` 取录制载荷（`apps/debug/scripts/input-replay-verify.mjs:297`），而该载荷在本页恒为空帧（原因见 `documents/debug/implementation/app.md` 的已知缺口）；脚本还查询页面上不存在的 `#inputRecStatus`（`apps/debug/scripts/input-replay-verify.mjs:461`）。
-8. **`start-dev.cmd` 的 wasm 过期门与被服务的 wasm 不是同一路径**：门检查 `apps/debug/pkg/websurf_wasm_bg.wasm`（`apps/debug/start-dev.cmd:28`），而页面实际加载 `apps/debug/web/websurf_wasm_bg.wasm`（`apps/debug/src/main-wasm.ts:23`）⇒ `web/` 缺失或陈旧而 `pkg/` 新鲜时会跳过重建。
-9. **`play.cmd` 的 wasm 存在性门只看 `pkg/`**：`apps/debug/play.cmd:32` 判断 `pkg\websurf_wasm_bg.wasm` 存在即跳过 `build:wasm`，而 `build-dist.mjs` 读的正是该路径（`apps/debug/scripts/build-dist.mjs:78`），因此两者一致；但 `web/` 侧的副本仍需 `build:wasm` 才会更新（`apps/debug/package.json:8`），单独跑 `play.cmd` 时 dev 页面用的那份不会刷新。
-10. **`start-dev.cmd` 只守 `python`**：只有 python 工具链守卫（`apps/debug/start-dev.cmd:11`），没有 npm / wasm-pack 守卫；后两者缺失要到各自的构建步骤才暴露，而 `build-dist.cmd` 有完整的三项工具链自检（`apps/debug/build-dist.cmd:20`）。
-11. **三个 `.cmd` 没有任何 npm script 或相互转发**：`dev` / `build:dist` / `check:api` 是与它们并行的独立入口，因此双击入口与命令行入口的环境准备步骤各写一套。
+7. **`input-replay-verify.mjs` 依赖的录制 API 已被删除（2026-09-26）**：脚本从 `__wsInput.exportJson()` 取录制载荷（`apps/debug/scripts/input-replay-verify.mjs:297`），而该 API 随用户录制器链路一并删除；它还查询页面上不存在的 `#inputRecStatus`（`:461`）。**该脚本现已不可用**（此前也因载荷恒空必然失败）；若要保留无头回放验收，应改为外部录制 JSON → `__wsInput.load` → `play` → 用 `__wsInput.captureText()` / `progress()` 比对。
+8. ~~`start-dev.cmd` 的 wasm 过期门与被服务的 wasm 不是同一路径~~ **已消除（2026-09-24）**：`dev.cmd` 不再用过期门判断，而是**无条件**跑 `npm run build:wasm`（`apps/debug/dev.cmd:48`），而 `build:wasm` 在构建后会把 `pkg/` 的 wasm 复制到 `web/`（`apps/debug/package.json:8`）⇒ `web/` 与 `pkg/` 同步刷新。**保留为不变量**：`web/websurf_wasm_bg.wasm` 仍只由 `build:wasm` 更新（页面加载的是 `web/` 那份，见 `apps/debug/src/main-wasm.ts:23`），任何跳过 `build:wasm` 的路径都会让 dev 页面用到旧产物。
+9. ~~`play.cmd` 的 wasm 存在性门只看 `pkg/`~~ **已消除（2026-09-24）**：`build.cmd` 同样无条件 `build:wasm`（`apps/debug/build.cmd:52`），不存在"产物存在就跳过重建"的分支 ⇒ 打包用的 `pkg/`（读取处 `apps/debug/scripts/build-dist.mjs:78`）与 dev 页面用的 `web/` 都由这一次重编译刷新。
+10. ~~`start-dev.cmd` 只守 `python`~~ **已消除（2026-09-24）**：`dev.cmd` 的工具链自检覆盖 **npm / node / python / wasm-pack** 四项（`apps/debug/dev.cmd:17` 起），`build.cmd` 覆盖 npm / wasm-pack / node 三项（`apps/debug/build.cmd:24` 起）。
+11. **三个 `.cmd` 没有任何 npm script 或相互转发**（`dev.cmd` / `build.cmd` / `start.cmd` 各自独立）：`npm run dev`、`npm run build:dist`、`npm run check:api` 是与它们并行的独立入口，因此双击入口与命令行入口的环境准备步骤各写一套；`start.cmd` 只服务 `dist/`，不会替你补构建。

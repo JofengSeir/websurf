@@ -44,3 +44,34 @@ test/replay/*
 
 # ── 归档文件──
 **/.archive/
+
+# ── 一次性实验 / 诊断脚本（本地保留、不入库）──
+# 判据：`package.json` 的 script、CI workflow、工程 `.cmd`、构建与门禁链**都不引用**它们；
+# 它们的引用面只有同族脚本之间的互提及与文档描述（2026-09-27 全仓引用面实测）。
+# 保留在本地是为了复现当时的实验；入库会把一次性探针变成"看起来要维护"的资产。
+# 同族约定：新建的临时调试脚本请以 `_` 前缀命名（`apps/game/.gitignore` 已有 `scripts/_*.mjs`）。
+apps/debug/scripts/jump-apex-auth-diag.mjs
+apps/debug/scripts/jump-apex-measure.mjs
+apps/debug/scripts/jump-apex-report.mjs
+apps/debug/scripts/jump-apex-serve.mjs
+apps/debug/scripts/jump-apex-smoke.mjs
+apps/debug/scripts/jump-apex-trace.mjs
+apps/debug/scripts/jump-apex-window.mjs
+apps/game/scripts/phys-diag-flat.mjs
+apps/game/scripts/phys-dual-pipe.mjs
+apps/game/scripts/phys-gate-probe2.mjs
+apps/game/scripts/phys-p2-ground.mjs
+apps/game/scripts/phys-p2-regression.mjs
+apps/game/scripts/phys-p2-trace.mjs
+apps/game/scripts/phys-rate-parity.mjs
+apps/game/scripts/phys-rate-parity-v2.mjs
+apps/game/scripts/phys-teleport-gate.mjs
+apps/game/scripts/t13-input-surface-probe.mjs
+apps/game/scripts/t13-literal-sweep.mjs
+apps/game/scripts/t13-ulp-sensitivity-control.mjs
+apps/game/scripts/wasm-hash-pin.mjs
+
+# ── 操作系统噪声（跨平台协作常带进来的文件）──
+.DS_Store
+Thumbs.db
+desktop.ini

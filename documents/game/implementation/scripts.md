@@ -2,7 +2,7 @@
 
 ## 模块职责
 
-本目录 20 个 `.mjs`，分三类：一个发行打包脚本、一个 wasm 契约检查脚本、十八个 node 直跑 wasm 产物的物理脚本。其中只有五个有 `package.json` 入口（`apps/game/package.json:13` 与 `:16`-`:19`），其余靠手工命令行调用。
+> **入库口径（2026-09-27）**：本目录 20 个 `.mjs` 中 **只有 5 个入库**——一个发行打包脚本、一个 wasm 契约检查脚本、三个有 `package.json` 入口的物理门禁（`:13`、`:16`-`:19`）。**13 个一次性实验/诊断脚本已从版本库排除、仅本地保留**：`phys-teleport-gate`、`phys-p2-regression`、`phys-p2-ground`、`phys-p2-trace`、`phys-gate-probe2`、`phys-diag-flat`、`phys-rate-parity`、`phys-rate-parity-v2`、`phys-dual-pipe`、`wasm-hash-pin` 与三个 `t13-*`；判据是无 npm script、无 CI 引用、无构建链调用。另两个 `_dbg_*` 本就被 `scripts/_*.mjs` 排除。下表标 ⚑ 的行**锚点仅在本地有效**。
 
 | 脚本 | 职责 | 入口 |
 |---|---|---|
@@ -11,12 +11,12 @@
 | `apps/game/scripts/phys-smoke.mjs` | 九段物理冒烟（逐段打印 OK / FAIL，任一段失败即退出码 1） | `apps/game/package.json:17` |
 | `apps/game/scripts/phys-seed-smoke.mjs` | 种子面回归：A–G 七段，含 `tick_into` 写出的 22 槽逐槽核对 | `apps/game/package.json:18` |
 | `apps/game/scripts/phys-surf-crouch-smoke.mjs` | surf 蹲伏冒烟 | `apps/game/package.json:19` |
-| `apps/game/scripts/phys-teleport-gate.mjs` | 传送门槛场景 | 手工 |
-| `apps/game/scripts/phys-p2-regression.mjs` | P2「4 档脚底高度 × 3 档 vz」速率一致性参考矩阵 | 手工 |
-| `apps/game/scripts/phys-p2-ground.mjs` / `phys-p2-trace.mjs` / `phys-gate-probe2.mjs` / `phys-diag-flat.mjs` | P2 相关诊断：地面速率、单次轨迹、门否决计数、平地基准 | 手工 |
-| `apps/game/scripts/phys-rate-parity.mjs` / `phys-rate-parity-v2.mjs` / `phys-dual-pipe.mjs` | 速率一致性对照与双管道复现 | 手工 |
-| `apps/game/scripts/wasm-hash-pin.mjs` | wasm 产物哈希固定 | 手工 |
-| `apps/game/scripts/t13-literal-sweep.mjs` / `t13-ulp-sensitivity-control.mjs` / `t13-input-surface-probe.mjs` | 字面量扫描、ULP 敏感性对照、输入面探测 | 手工 |
+| ⚑ `apps/game/scripts/phys-teleport-gate.mjs` | 传送门槛场景 | 手工 |
+| ⚑ `apps/game/scripts/phys-p2-regression.mjs` | P2「4 档脚底高度 × 3 档 vz」速率一致性参考矩阵 | 手工 |
+| ⚑ `apps/game/scripts/phys-p2-ground.mjs` / `phys-p2-trace.mjs` / `phys-gate-probe2.mjs` / `phys-diag-flat.mjs` | P2 相关诊断：地面速率、单次轨迹、门否决计数、平地基准 | 手工 |
+| ⚑ `apps/game/scripts/phys-rate-parity.mjs` / `phys-rate-parity-v2.mjs` / `phys-dual-pipe.mjs` | 速率一致性对照与双管道复现 | 手工 |
+| ⚑ `apps/game/scripts/wasm-hash-pin.mjs` | wasm 产物哈希固定 | 手工 |
+| ⚑ `apps/game/scripts/t13-literal-sweep.mjs` / `t13-ulp-sensitivity-control.mjs` / `t13-input-surface-probe.mjs` | 字面量扫描、ULP 敏感性对照、输入面探测 | 手工 |
 | `apps/game/scripts/_dbg_keys.mjs` / `_dbg_floor.mjs` | 调试脚本（被 `.gitignore` 的 `scripts/_*.mjs` 规则排除） | 手工 |
 
 ## 关键流程与不变量
