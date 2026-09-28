@@ -1,144 +1,122 @@
 /* ============================================================
- * WebSurf-game — 界面样式（全要素单文件）。
+ * WebSurf-game — 界面样式（单文件）。
  *
- * 设计令牌全部收敛在 :root（color-scheme: dark）：--bg-app / --panel / --panel-solid /
- * --border / --border-strong / --text / --muted / --accent / --accent-dim / --gold /
- * --success / --danger / --warn（语义色）/ --r-sm..lg（圆角三档）/ --ctrl-bg(-hover)
- * / --mono（等宽栈）。
+ * 设计基调：扁平素色的工具面板。全部容器为实色块 + 1px 边框，
+ * 不使用动画、过渡、渐变、投影与毛玻璃；唯一的强调色 --accent 用于
+ * 可交互态与实时读数，--ok / --err / --warn 三个语义色只表状态。
  *
- * 与 JS 的接线（本文件只负责外观，显隐与取值都由类名或行内变量驱动）：
- *   · 状态行 LED 呼吸灯 ledBreath（#status::before；.success/.error 时 animation: none）；
- *   · 准星行内变量 --ch-color/--ch-size/--ch-thickness/--ch-gap 由
- *     src/panel/panel-controller.ts 写入，变量名与 setProperty 调用一一对应，勿改名；
- *   · 可见性钩子集中在文件末（#panel.hidden / #error.show / .key-rec-hint.show /
- *     #crosshair.no-dot），各条注释里的优先级数字说明它为何能覆盖基础规则；
- *   · JS 生成的类名（savepoint-row / key-chip / key-row / kempty / health-log 等）
- *     在本文件都有对应规则。
+ * 与 JS 的接线（本文件只负责外观；显隐与取值由类名或行内变量驱动）：
+ *   · #crosshair 的 --ch-color / --ch-size / --ch-thickness / --ch-gap
+ *     由 apps/game/src/panel/panel-controller.ts 的 applyCrosshair 写入；
+ *     .load-fill 的 --load-pct 由 apps/game/src/app.ts 写入——
+ *     这五个变量名是代码契约，勿改名；
+ *   · 可见性钩子：#panel.hidden、#error.show、.key-rec-hint（默认隐，
+ *     .show 显）、#crosshair.hidden、#crosshair.no-dot、
+ *     #loadingOverlay.show 与 .error；
+ *   · JS 生成的类名（savepoint-row / key-chip / key-row / kempty /
+ *     health-log）在本文件都有对应规则。
  * ============================================================ */
 
 :root {
   color-scheme: dark;
 
-  /* ── 设计令牌（暗色底 + 面板 / 边框 / 文本 / 强调 / 金色）── */
-  --bg-app: #0f1115;
-  --panel: rgba(15, 17, 21, 0.82);
-  --panel-solid: rgba(15, 17, 21, 0.96);
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --text: #e2e8f0;
-  --muted: #9aa3b2;
-  --accent: #8ab4f8;
-  --accent-dim: rgba(138, 180, 248, 0.12);
-  --gold: #c9a05c;
+  /* ── 配色令牌（中性灰底 + 单强调色 + 三个语义色）── */
+  --bg: #121417;
+  --panel: #1b1e22;
+  --panel-trans: rgba(27, 30, 34, 0.92);
+  --overlay: rgba(14, 16, 18, 0.62);
+  --border: #363b42;
+  --border-strong: #4a5058;
+  --text: #d9dce0;
+  --muted: #8f959c;
+  --accent: #6ea3d8;
+  --accent-hover: #7fb2e2;
+  --accent-weak: rgba(110, 163, 216, 0.15);
+  --on-accent: #14171a;
+  --ok: #8cbd92;
+  --err: #d98076;
+  --warn: #d2a45f;
 
-  /* 语义色：--danger 的取值与 apps/viewer/web/styles.css 的 --danger 相同（#ffb4a8）；
-     --warn 与该文件 .note-warn 的文本色相同（#ffd9a0）；--success（#9bd4a6）是本工程
-     自有的派生绿，只被 #status.success 使用（LED 三态语义）。 */
-  --success: #9bd4a6;
-  --danger: #ffb4a8;
-  --warn: #ffd9a0;
-
-  /* 圆角三档 */
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-
-  /* 控件交互态 */
-  --ctrl-bg: rgba(255, 255, 255, 0.06);
-  --ctrl-bg-hover: rgba(255, 255, 255, 0.13);
-
-  /* 字体 */
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* 圆角两档；等宽栈（读数与坐标） */
+  --r: 4px;
+  --r-lg: 6px;
+  --mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
 }
 
 /* ── 基底 ─────────────────────────────────────────────── */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 13px; color: #e8e8e8; background: var(--bg-app);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  font-family: system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px; color: var(--text); background: var(--bg);
 }
-::selection { background: var(--accent-dim); color: #fff; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+::selection { background: var(--accent-weak); }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 #app { position: fixed; inset: 0; z-index: 1; }
-canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
+canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 
-/* 隐藏的原生文件输入 #bspFile：点击由 src/app.ts 里 #loadMapBtn 的监听器转发；按钮外观由 #panel .map-btn 承担 */
+/* 隐藏的原生文件输入 #bspFile：点击由 #loadMapBtn 的监听器转发；按钮外观由 #panel .map-btn 承担 */
 #bspFile { display: none; }
 
-/* ── FPS（左上角，数值读出 → gold）────────────────────── */
+/* ── 帧率（左上角）── */
 #fps {
-  position: absolute; top: 14px; left: 14px; z-index: 5;
-  font-size: 11.5px; padding: 8px 12px; border-radius: var(--r-md);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  color: var(--gold);
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: .03em;
-  pointer-events: none;
-  user-select: none;
+  position: absolute; top: 12px; left: 12px; z-index: 5;
+  font-family: var(--mono); font-size: 11.5px;
+  padding: 5px 10px;
+  background: var(--panel-trans); border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--muted); font-variant-numeric: tabular-nums;
+  pointer-events: none; user-select: none;
 }
 
-/* ── 状态行 LED（右上角）：idle 呼吸 / success・error 常亮 ── */
+/* ── 状态行 / 错误行（右上角）：前置圆点表三态，常亮不闪 ── */
 #status, #error {
-  position: absolute; top: 14px; right: 14px; z-index: 5;
-  font-size: 11.5px; padding: 7px 15px 7px 31px; border-radius: var(--r-md);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  font-family: var(--mono);
-  letter-spacing: .02em;
+  position: absolute; top: 12px; right: 12px; z-index: 5;
+  font-family: var(--mono); font-size: 11.5px;
+  padding: 5px 10px 5px 24px;
+  background: var(--panel-trans); border: 1px solid var(--border);
+  border-radius: var(--r);
 }
 #status::before {
-  content: ""; position: absolute; left: 14px; top: 50%;
-  width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%;
+  content: ""; position: absolute; left: 10px; top: 50%;
+  width: 6px; height: 6px; margin-top: -3px; border-radius: 50%;
   background: var(--muted);
-  animation: ledBreath 2.2s ease-in-out infinite;
 }
-#status.success { color: var(--success); }
-#status.success::before { background: var(--success); animation: none; }
-#status.error { color: var(--danger); }
-#status.error::before { background: var(--danger); animation: none; }
-#error { display: none; color: var(--danger); top: 62px; }
-@keyframes ledBreath { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+#status.success { color: var(--ok); }
+#status.success::before { background: var(--ok); }
+#status.error { color: var(--err); }
+#status.error::before { background: var(--err); }
+#error { display: none; top: 46px; color: var(--err); }
 
-/* ── 速度 HUD #hud>#stats（横向居中、距底 24%）：裸数字 + text-shadow + tabular-nums，与 apps/viewer/web/styles.css 的 .telemetry 同一形态 ── */
-#hud { position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%);
+/* ── 速度读数 #hud>#stats（横向居中、距底 24%）：裸数字；单层 1px 暗影只为在亮色天空下可读 ── */
+#hud {
+  position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%);
   z-index: 4; text-align: center; pointer-events: none;
-  font-variant-numeric: tabular-nums; }
-#stats {
-  font-size: 21px; font-weight: 600; letter-spacing: .5px;
-  color: var(--text);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.3);
-  transition: color 0.15s ease;
+  font-variant-numeric: tabular-nums;
 }
-#stats .vsep { color: rgba(255, 255, 255, 0.35); margin: 0 8px; font-weight: 400; }
+#stats {
+  font-size: 20px; font-weight: 600; color: #eef1f4;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+#stats .vsep { color: var(--muted); margin: 0 7px; font-weight: 400; }
 
-/* ── 左下角按键簇 #keys（与 apps/viewer/web/styles.css 的 .tm-keys 同构）──
-   3 列网格：Q/W/E 上排 · A/S/D 中排 · 下排 = 蹲（1 格）+ 跳（2 格）。
-   标签由 src/app.ts 按当前键位写入；某动作键位被删光时显示 "—" 并加 .off
-   （面板侧同语义的占位是 .kempty「（已禁用）」，见 src/panel/panel-controller.ts）。 */
+/* ── 左下角按键簇 #keys：3 列网格，Q/W/E 上排 · A/S/D 中排 · 蹲（1 格）+ 跳（2 格）；
+   标签由 src/app.ts 按当前键位写入；某动作键位被删光时显示 "—" 并加 .off ── */
 #keys {
-  position: absolute; left: 24px; bottom: 24px;
+  position: absolute; left: 20px; bottom: 20px;
   z-index: 4; pointer-events: none; user-select: none;
-  display: grid; grid-template-columns: repeat(3, 22px); grid-auto-rows: 22px; gap: 3px;
+  display: grid; grid-template-columns: repeat(3, 24px); grid-auto-rows: 24px; gap: 3px;
 }
 #keys .tm-key {
   display: flex; align-items: center; justify-content: center;
-  font-size: 10.5px; font-weight: 400; color: var(--muted);
-  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-strong);
-  border-radius: 4px; text-shadow: none;
+  font-size: 10.5px; color: var(--muted);
+  background: var(--panel-trans); border: 1px solid var(--border);
+  border-radius: var(--r);
 }
 #keys .tm-key.on {
-  color: #0f1115; background: var(--accent); border-color: var(--accent); font-weight: 600;
+  color: var(--on-accent); background: var(--accent); border-color: var(--accent);
 }
-#keys .tm-key.off { opacity: 0.5; }
+#keys .tm-key.off { opacity: 0.45; }
 #keys .tm-key-q { grid-area: 1 / 1; }
 #keys .tm-key-w { grid-area: 1 / 2; }
 #keys .tm-key-e { grid-area: 1 / 3; }
@@ -148,7 +126,8 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 #keys .tm-key-duck { grid-area: 3 / 1; }
 #keys .tm-key-jump { grid-area: 3 / 2 / 4 / 4; }
 
-/* ── 准星 #crosshair：--ch-* 四个行内变量由 src/panel/panel-controller.ts 写入（变量名与 setProperty 调用一一对应，勿改名）── */
+/* ── 准星 #crosshair：--ch-* 四个行内变量由 panel-controller 的 applyCrosshair 写入，
+   这里只给与 config 默认值一致的回落值 ── */
 #crosshair {
   position: absolute; left: 50%; top: 50%;
   transform: translate(-50%, -50%);
@@ -160,19 +139,19 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
   z-index: 4;
 }
 #crosshair.hidden { display: none; }
-/* :empty 退化形态：容器无子元素时画单个圆点（3×3） */
+/* :empty 退化形态：容器无子元素时画单个圆点 */
 #crosshair:empty {
   width: 3px; height: 3px;
-  background: rgba(74, 222, 128, 0.95); border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  background: #4ade80; border-radius: 50%;
 }
 #crosshair .ch-line {
   position: absolute;
   left: 50%; top: 50%;
   background: var(--ch-color);
 }
+/* .outline = 1px 硬描边（可读性，非发光） */
 #crosshair .ch-line.outline { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.85); }
-/* 四条线均以容器中心为锚点 + translate 精确对称（容器 0×0，50% 即中心） */
+/* 四条线均以容器中心为锚点 + translate 对称（容器 0×0，50% 即中心） */
 #crosshair .ch-t {
   width: var(--ch-thickness); height: var(--ch-size);
   transform: translate(-50%, calc(-100% - var(--ch-gap)));
@@ -192,411 +171,295 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
 #crosshair .ch-dot {
   width: calc(var(--ch-thickness) * 2.5); height: calc(var(--ch-thickness) * 2.5);
   transform: translate(-50%, -50%);
+  position: absolute; left: 50%; top: 50%;
   background: var(--ch-color); border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.85);
 }
 
-/* ── ESC 设置面板：遮罩 + 卡片窗口 ────────────────────── */
+/* ── ESC 设置面板：素色遮罩 + 实色窗口 ──────────────────── */
 #panel {
   position: absolute; inset: 0; z-index: 10;
   display: flex; align-items: center; justify-content: center;
   padding: 20px;
-  background: rgba(15, 17, 21, 0.55);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  animation: overlayIn 0.25s ease;
+  background: var(--overlay);
 }
-@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
-/* 卡片窗口：--panel-solid + 细边 + 深投影 + 轻进场 */
 #panel .win {
   width: 760px; max-width: 100%; height: 580px; max-height: 92vh;
   display: flex;
-  position: relative;
   border-radius: var(--r-lg); overflow: hidden;
-  background: var(--panel-solid);
+  background: var(--panel);
   border: 1px solid var(--border-strong);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  animation: winIn 0.3s ease-out;
-}
-@keyframes winIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
 }
 
 /* 左侧模块导航 */
 #panel .nav {
-  flex: 0 0 188px; display: flex; flex-direction: column;
-  padding: 28px 12px 16px;
-  position: relative; z-index: 1;
+  flex: 0 0 180px; display: flex; flex-direction: column;
+  padding: 20px 10px 12px;
   border-right: 1px solid var(--border);
 }
 #panel .nav h2 {
-  font-size: 15px; font-weight: 600; padding: 0 12px 22px;
-  color: var(--text); letter-spacing: .01em;
+  font-size: 14px; font-weight: 600; padding: 0 10px 16px;
 }
 #panel .nav .mod {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; margin: 1px 0;
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; margin: 1px 0;
   font-size: 13px; color: var(--muted);
-  border-radius: var(--r-sm); cursor: pointer; user-select: none;
-  transition: background 0.12s ease, color 0.12s ease;
+  border-radius: var(--r); cursor: pointer; user-select: none;
 }
-#panel .nav .mod:hover { background: var(--ctrl-bg); color: var(--text); }
-#panel .nav .mod:active { background: var(--ctrl-bg-hover); }
-/* 激活态：accent-dim 底 + accent 文本（与 apps/viewer/web/styles.css 的 .tab.active 同款） */
-#panel .nav .mod.active {
-  background: var(--accent-dim); color: var(--accent); font-weight: 500;
-}
+#panel .nav .mod:hover { background: var(--accent-weak); color: var(--text); }
+/* 激活态：accent-weak 底 + accent 文本 */
+#panel .nav .mod.active { background: var(--accent-weak); color: var(--accent); }
 #panel .nav .mod .ic {
-  width: 20px; display: inline-flex; align-items: center; justify-content: center;
-  flex: none; opacity: 0.9;
+  width: 18px; display: inline-flex; align-items: center; justify-content: center;
+  flex: none;
 }
-#panel .nav .mod .ic svg { width: 16px; height: 16px; display: block; }
-#panel .nav .footer { margin-top: auto; padding: 10px 12px 2px; }
+#panel .nav .mod .ic svg { width: 15px; height: 15px; display: block; }
+#panel .nav .footer { margin-top: auto; padding: 8px 4px 2px; }
 #panel .nav .footer button {
-  width: 100%; padding: 9px; font-size: 12.5px; font-weight: 500;
-  font-family: inherit; color: #c8ccd4;
-  background: var(--ctrl-bg);
-  border: 1px solid var(--border-strong); border-radius: var(--r-sm); cursor: pointer;
-  transition: background 0.12s ease;
+  width: 100%; padding: 7px; font-size: 12.5px; font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border-strong); border-radius: var(--r); cursor: pointer;
 }
-#panel .nav .footer button:hover { background: var(--ctrl-bg-hover); }
-#panel .nav .footer button:active { background: rgba(255, 255, 255, 0.18); }
+#panel .nav .footer button:hover { background: var(--accent-weak); }
 
-/* 通用模块：全宽主操作按钮 #panel .map-btn（accent 实底；与 apps/viewer/web/styles.css 的 #guideBtn 同款） */
+/* 通用模块：全宽主操作按钮 #panel .map-btn（accent 实底） */
 #panel .map-btn {
-  display: flex; align-items: center; justify-content: center; gap: 9px;
-  width: 100%; margin: 2px 0 8px; padding: 12px 12px;
-  font-size: 14px; font-weight: 600; font-family: inherit; text-align: center;
-  color: #0f1115;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; margin: 2px 0 8px; padding: 10px 12px;
+  font-size: 13.5px; font-weight: 600; font-family: inherit; text-align: center;
+  color: var(--on-accent);
   background: var(--accent);
-  border: none; border-radius: var(--r-sm); cursor: pointer;
-  transition: background 0.12s ease;
+  border: none; border-radius: var(--r); cursor: pointer;
 }
-#panel .map-btn:hover:not(:disabled) { background: #a5c6ff; }
-#panel .map-btn:active:not(:disabled) { background: #79a5e8; }
+#panel .map-btn:hover:not(:disabled) { background: var(--accent-hover); }
 #panel .map-btn:disabled { opacity: 0.45; pointer-events: none; }
 #panel .map-btn .ic { display: inline-flex; align-items: center; flex: none; }
-#panel .map-btn .ic svg { width: 16px; height: 16px; display: block; }
+#panel .map-btn .ic svg { width: 15px; height: 15px; display: block; }
 
 /* 右侧设置体 */
 #panel .body {
-  flex: 1; overflow-y: auto; padding: 32px 40px 30px;
-  position: relative; z-index: 1;
+  flex: 1; overflow-y: auto; padding: 24px 28px 24px;
   overscroll-behavior: contain;
-  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
-#panel .body::-webkit-scrollbar { width: 8px; }
-#panel .body::-webkit-scrollbar-track { background: transparent; }
-#panel .body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
-#panel .body::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
 
 #panel .mod-pane { display: none; }
-#panel .mod-pane.active { display: block; animation: paneIn 0.18s ease; }
-@keyframes paneIn { from { opacity: 0; } to { opacity: 1; } }
+#panel .mod-pane.active { display: block; }
 
-/* 页头层级：大标题 + 说明 + 分隔线 */
-#panel .pane-title { font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+/* 页头层级：标题 + 说明 + 分隔线 */
+#panel .pane-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
 #panel .pane-desc {
-  font-size: 12.5px; color: var(--muted); line-height: 1.65;
-  margin-bottom: 20px; padding-bottom: 18px;
+  font-size: 12px; color: var(--muted); line-height: 1.6;
+  margin-bottom: 16px; padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
 
-/* 小节标题 #panel h4：accent 着色 + 下分隔线（与 apps/viewer/web/styles.css 的 .sec-title 同款） */
+/* 小节标题 #panel h4：素色加重 + 下分隔线 */
 #panel h4 {
-  margin: 24px 0 10px; font-size: 12px; font-weight: 600;
-  color: var(--accent); letter-spacing: .02em;
-  padding: 4px 0 6px; border-bottom: 1px solid var(--border);
+  margin: 18px 0 8px; font-size: 12px; font-weight: 600;
+  color: var(--text);
+  padding: 2px 0 5px; border-bottom: 1px solid var(--border);
 }
 
 /* 控件行 */
 #panel .row {
-  display: flex; align-items: center; gap: 14px;
-  padding: 9px 12px; margin: 1px 0; border-radius: var(--r-sm);
-  transition: background 0.12s ease;
+  display: flex; align-items: center; gap: 12px;
+  padding: 7px 8px; margin: 1px 0;
 }
-#panel .row:hover { background: var(--ctrl-bg); }
+#panel .row:hover { background: var(--accent-weak); }
 #panel .row label { flex: 0 0 128px; font-size: 13px; color: var(--muted); }
 
-/* 滑块（accent 主题 + 悬停/激活柔光环） */
+/* 滑块：原生控件 + accent-color（素色基线，不自绘） */
 #panel input[type="range"] {
-  flex: 1; -webkit-appearance: none; appearance: none; height: 4px;
-  border-radius: 2px; outline: none; cursor: pointer;
-  background: rgba(255, 255, 255, 0.14);
-  transition: background 0.12s ease;
+  flex: 1; min-width: 0; height: 18px;
+  accent-color: var(--accent); cursor: pointer;
 }
-#panel input[type="range"]:hover { background: rgba(255, 255, 255, 0.2); }
-#panel input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
-  background: var(--accent);
-  border: 1px solid rgba(0, 0, 0, 0.25);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 0 var(--accent-dim);
-  cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-}
-#panel input[type="range"]::-webkit-slider-thumb:hover {
-  transform: scale(1.08);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 5px var(--accent-dim);
-}
-#panel input[type="range"]:active::-webkit-slider-thumb {
-  transform: scale(0.94);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 8px var(--accent-dim);
-}
-#panel input[type="range"]::-moz-range-thumb {
-  width: 17px; height: 17px; border-radius: 50%;
-  background: var(--accent);
-  border: 1px solid rgba(0, 0, 0, 0.25);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 0 var(--accent-dim);
-  cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-}
-#panel input[type="range"]::-moz-range-thumb:hover {
-  transform: scale(1.08);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 5px var(--accent-dim);
-}
-#panel input[type="range"]:active::-moz-range-thumb { transform: scale(0.94); }
-#panel input[type="range"]:disabled::-webkit-slider-thumb { background: var(--muted); box-shadow: none; }
-#panel input[type="range"]:disabled::-moz-range-thumb { background: var(--muted); box-shadow: none; }
 
-/* 数值输入 #panel .val（等宽 + tabular-nums；与 apps/viewer/web/styles.css 的 .field-input 同款） */
+/* 数值输入 #panel .val（等宽 + 右对齐；隐藏原生步进按钮避免窄框拥挤） */
 #panel .val { flex: 0 0 74px; }
 #panel .val input {
-  width: 100%; text-align: right; font-size: 13px; color: var(--text);
+  width: 100%; text-align: right; font-size: 12.5px; color: var(--text);
   font-variant-numeric: tabular-nums;
   font-family: var(--mono);
-  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border);
-  border-radius: var(--r-sm); padding: 5px 9px; outline: none;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 4px 8px; outline: none;
   -moz-appearance: textfield; appearance: textfield;
-  transition: border-color 0.12s ease, background 0.12s ease;
 }
 #panel .val input::-webkit-outer-spin-button,
 #panel .val input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-#panel .val input:hover { border-color: var(--border-strong); }
-#panel .val input:focus { border-color: rgba(138, 180, 248, 0.6); background: rgba(255, 255, 255, 0.07); }
+#panel .val input:focus { border-color: var(--accent); }
 
-/* 开关（拨杆；checked = accent） */
+/* 开关与颜色选择：原生控件 + accent-color */
 #panel input[type="checkbox"] {
-  appearance: none; -webkit-appearance: none;
-  width: 40px; height: 20px; border-radius: 10px;
-  background: rgba(255, 255, 255, 0.14);
-  position: relative; cursor: pointer; transition: background 0.15s ease;
-  flex: none;
+  width: 15px; height: 15px;
+  accent-color: var(--accent); cursor: pointer; flex: none;
 }
-#panel input[type="checkbox"]::after {
-  content: ""; position: absolute; top: 2px; left: 2px;
-  width: 16px; height: 16px; border-radius: 50%; background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  transition: transform 0.15s ease;
-}
-#panel input[type="checkbox"]:hover:not(:checked) { background: rgba(255, 255, 255, 0.2); }
-#panel input[type="checkbox"]:not(:checked):hover::after { transform: scale(1.06); }
-#panel input[type="checkbox"]:checked { background: var(--accent); }
-#panel input[type="checkbox"]:checked::after { transform: translateX(20px); }
-#panel input[type="checkbox"]:checked:hover { background: #a5c6ff; }
-#panel input[type="checkbox"]:checked:hover::after { transform: translateX(20px) scale(1.06); }
-
-/* 颜色选择器（准星颜色） */
 #panel input[type="color"] {
-  flex: 0 0 46px; height: 29px; padding: 2px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border); border-radius: var(--r-sm); cursor: pointer;
-  transition: border-color 0.12s ease;
+  flex: 0 0 44px; height: 26px; padding: 1px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r); cursor: pointer;
 }
-#panel input[type="color"]:hover { border-color: var(--border-strong); }
 
 /* 下拉框 */
 #panel select {
-  flex: 1; font-size: 13px; font-family: inherit; color: var(--text);
-  background-color: rgba(255, 255, 255, 0.05);
-  background-image:
-    linear-gradient(45deg, transparent 50%, rgba(255, 255, 255, 0.55) 50%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.55) 50%, transparent 50%);
-  background-position: calc(100% - 16px) 55%, calc(100% - 12px) 55%;
-  background-size: 4px 4px; background-repeat: no-repeat;
-  border: 1px solid var(--border); border-radius: var(--r-sm); padding: 7px 28px 7px 11px;
-  outline: none; cursor: pointer; appearance: none; -webkit-appearance: none;
-  transition: border-color 0.12s ease, background-color 0.12s ease;
+  flex: 1; min-width: 0; font-size: 12.5px; font-family: inherit; color: var(--text);
+  background-color: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--r); padding: 5px 8px;
+  cursor: pointer; outline: none;
 }
-#panel select:hover { border-color: var(--border-strong); }
-#panel select:focus { border-color: rgba(138, 180, 248, 0.6); background-color: rgba(255, 255, 255, 0.07); }
+#panel select:focus { border-color: var(--accent); }
 #panel select:disabled { opacity: 0.45; cursor: default; }
-#panel select option { background: #16181d; color: var(--text); }
 
-/* 次级按钮 #panel button.small（与 apps/viewer/web/styles.css 的 .btn.small 同款；.active = accent 交互态） */
+/* 次级按钮 #panel button.small（.active = accent 交互态） */
 #panel button.small {
   font-family: inherit;
-  font-size: 12.5px; color: #c8ccd4; padding: 6px 14px;
-  background: var(--ctrl-bg); border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm); cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  font-size: 12.5px; color: var(--text); padding: 5px 12px;
+  background: transparent; border: 1px solid var(--border-strong);
+  border-radius: var(--r); cursor: pointer;
 }
-#panel button.small:hover { background: var(--ctrl-bg-hover); color: var(--text); }
-#panel button.small:active { background: rgba(255, 255, 255, 0.18); }
+#panel button.small:hover { background: var(--accent-weak); }
 #panel button.small.active {
-  background: var(--accent-dim); border-color: rgba(138, 180, 248, 0.5); color: var(--accent);
+  background: var(--accent-weak); border-color: var(--accent); color: var(--accent);
 }
 #panel button.small:disabled { opacity: 0.45; pointer-events: none; }
 
 /* 按键模块 */
 #panel .key-row {
-  display: flex; align-items: center; gap: 14px;
-  padding: 10px 12px; margin: 1px 0; border-radius: var(--r-sm);
-  transition: background 0.12s ease;
+  display: flex; align-items: center; gap: 12px;
+  padding: 7px 8px; margin: 1px 0;
 }
-#panel .key-row:hover { background: var(--ctrl-bg); }
+#panel .key-row:hover { background: var(--accent-weak); }
 #panel .key-row .kname { flex: 0 0 128px; font-size: 13px; color: var(--muted); }
 #panel .key-row .kkeys { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 #panel .key-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--text); padding: 4px 10px;
+  font-size: 12px; color: var(--text); padding: 3px 9px;
   font-variant-numeric: tabular-nums;
   font-family: var(--mono);
-  background: rgba(255, 255, 255, 0.07); border: 1px solid var(--border-strong);
-  border-radius: 4px; cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: var(--r); cursor: pointer;
 }
-#panel .key-chip:hover { background: var(--ctrl-bg-hover); }
-/* 录制态 .key-chip.recording：warn 语义配色（同 apps/viewer/web/styles.css 的 .note-warn 文本色）+ recPulse 呼吸脉冲 */
+#panel .key-chip:hover { border-color: var(--accent); }
+/* 录制态 .key-chip.recording：warn 语义配色（静态，无脉冲） */
 #panel .key-chip.recording {
-  border-color: rgba(255, 176, 32, 0.35); background: rgba(255, 176, 32, 0.12);
-  color: var(--warn); animation: recPulse 1.2s ease-in-out infinite;
+  border-color: var(--warn); background: rgba(210, 164, 95, 0.12);
+  color: var(--warn);
 }
-@keyframes recPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 176, 32, 0.35); }
-  50% { box-shadow: 0 0 0 5px rgba(255, 176, 32, 0); }
-}
-#panel .key-chip .x { color: var(--danger); font-size: 11px; padding: 0 1px; }
-#panel .key-chip .x:hover { color: #fff; }
+#panel .key-chip .x { color: var(--err); font-size: 11px; padding: 0 1px; }
+#panel .key-chip .x:hover { color: var(--text); }
 #panel .key-add {
-  font-size: 12px; color: var(--muted); padding: 4px 10px;
-  background: transparent; border: 1px dashed rgba(255, 255, 255, 0.2);
-  border-radius: var(--r-sm); cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease;
+  font-size: 12px; color: var(--muted); padding: 3px 9px;
+  background: transparent; border: 1px dashed var(--border-strong);
+  border-radius: var(--r); cursor: pointer;
 }
 #panel .key-add:hover { border-color: var(--accent); color: var(--accent); }
 /* 键位被删光（动作已禁用）的占位提示 */
-#panel .kempty { font-size: 12px; color: var(--muted); opacity: 0.7; padding: 2px 4px; }
+#panel .kempty { font-size: 12px; color: var(--muted); padding: 2px 4px; }
 #panel .key-rec-hint {
-  font-size: 12px; color: var(--warn); padding: 8px 11px;
-  background: rgba(255, 176, 32, 0.1); border: 1px solid rgba(255, 176, 32, 0.3);
-  border-radius: var(--r-sm); margin-bottom: 6px;
+  font-size: 12px; color: var(--warn); padding: 6px 10px;
+  background: rgba(210, 164, 95, 0.1); border: 1px solid var(--warn);
+  border-radius: var(--r); margin-bottom: 6px;
 }
 
-/* 说明信息卡 #panel .hint（与 apps/viewer/web/styles.css 的 .note-info 同款） */
+/* 说明信息卡 #panel .hint */
 #panel .hint {
-  margin-top: 20px; font-size: 11.5px; color: var(--muted); line-height: 1.75;
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  margin-top: 14px; font-size: 11.5px; color: var(--muted); line-height: 1.7;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-strong);
 }
 
-/* 存点列表（通用 tab）：行 = 序号 + 坐标/速度摘要 + 读 + 删除（无确认） */
+/* 存点列表：行 = 序号 + 坐标/速度摘要 + 读 + 删除（无确认） */
 #panel .savepoint-list {
   display: flex; flex-direction: column; gap: 4px;
   max-height: 240px; overflow-y: auto; margin-top: 8px;
-  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
 #panel .savepoint-row {
   display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; font-size: 12px; color: var(--text);
-  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  transition: background 0.12s ease;
+  padding: 5px 8px; font-size: 12px; color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
 }
-#panel .savepoint-row:hover { background: rgba(255, 255, 255, 0.09); }
+#panel .savepoint-row:hover { border-color: var(--border-strong); }
 #panel .savepoint-row .sp-idx {
-  min-width: 22px; color: var(--muted); font-variant-numeric: tabular-nums;
+  min-width: 20px; color: var(--muted); font-variant-numeric: tabular-nums;
 }
 #panel .savepoint-row .sp-pos {
   flex: 1; font-family: var(--mono); font-size: 11px;
   color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #panel .savepoint-row button.small {
-  padding: 3px 9px; font-size: 11px;
+  padding: 2px 8px; font-size: 11px;
 }
-/* 删除按钮（danger 交互态；与 apps/viewer/web/styles.css 的 .track-btn.danger 同款） */
+/* 删除按钮（err 交互态） */
 #panel .savepoint-row button.danger {
-  color: var(--danger); border-color: rgba(255, 99, 71, 0.5);
+  color: var(--err); border-color: var(--err);
 }
 #panel .savepoint-row button.danger:hover {
-  background: rgba(255, 99, 71, 0.12); color: var(--danger);
+  background: rgba(217, 128, 118, 0.12);
 }
 
 .mt-12 { margin-top: 12px; }
 
-/* ── 启动引导 #loadingOverlay：地图加载进度覆盖层（卡片形态，与 apps/viewer/web/styles.css 的卡片一致）── */
+/* ── 启动引导 #loadingOverlay：地图加载进度覆盖层（素色全屏 + 实色卡片）── */
 #loadingOverlay {
   display: none; position: fixed; inset: 0; z-index: 8000;
-  background: var(--bg-app);
+  background: var(--bg);
   align-items: flex-start; justify-content: center;
   padding: 22vh 24px 0;
   color: var(--text);
 }
 #loadingOverlay.show { display: flex; }
 #loadingOverlay .load-card {
-  width: min(460px, 92vw); padding: 26px 30px; border-radius: var(--r-lg);
-  background: var(--panel-solid);
+  width: min(440px, 92vw); padding: 20px 24px;
+  background: var(--panel);
   border: 1px solid var(--border-strong);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  border-radius: var(--r-lg);
 }
 #loadingOverlay .load-title {
-  font-size: 15px; font-weight: 600;
-  color: var(--text); margin-bottom: 4px;
+  font-size: 14px; font-weight: 600; margin-bottom: 4px;
 }
 #loadingOverlay .load-sub {
-  font-size: 12px; color: var(--muted); margin-bottom: 18px;
+  font-size: 12px; color: var(--muted); margin-bottom: 14px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #loadingOverlay .load-track {
-  height: 6px; border-radius: 3px; overflow: hidden;
-  background: var(--ctrl-bg); border: 1px solid var(--border);
+  height: 6px; overflow: hidden;
+  background: var(--bg); border: 1px solid var(--border);
 }
 #loadingOverlay .load-fill {
-  height: 100%; width: var(--load-pct, 0%); border-radius: 3px;
-  background: linear-gradient(90deg, var(--accent), #a5c6ff);
-  box-shadow: 0 0 10px rgba(138, 180, 248, 0.45);
+  height: 100%; width: var(--load-pct, 0%);
+  background: var(--accent);
 }
 #loadingOverlay .load-meta {
-  display: flex; justify-content: space-between; margin-top: 10px;
+  display: flex; justify-content: space-between; margin-top: 8px;
   font-size: 11px; color: var(--muted); font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
-/* 加载失败态：填充转 danger，副文本超长换行以便查看原因 */
-#loadingOverlay.error .load-fill {
-  background: linear-gradient(90deg, #ff8c7d, var(--danger));
-  box-shadow: 0 0 10px rgba(255, 99, 71, 0.4);
-}
-#loadingOverlay.error .load-title { color: var(--danger); }
+/* 加载失败态：填充与文字转 err，副文本超长换行以便查看原因 */
+#loadingOverlay.error .load-fill { background: var(--err); }
+#loadingOverlay.error .load-title { color: var(--err); }
 #loadingOverlay.error .load-sub {
-  white-space: normal; word-break: break-all; color: var(--danger);
+  white-space: normal; word-break: break-all; color: var(--err);
 }
 
-/* ── 可见性钩子：由 JS 切类名（进度值则写 --load-pct）驱动显隐；各条注释里的优先级数字说明为何能覆盖基础规则 ── */
-#panel.hidden { display: none; } /* 1-1-0 胜 #panel 基础 display:flex */
-#error.show { display: block; } /* 基础已是 display:none */
-.key-rec-hint { display: none; } /* 默认隐藏；.show 显形（录制提示） */
+/* ── 可见性钩子：由 JS 切类名（进度值则写 --load-pct）驱动显隐 ── */
+#panel.hidden { display: none; }
+#error.show { display: block; }
+.key-rec-hint { display: none; }
 .key-rec-hint.show { display: block; }
-#crosshair.no-dot .ch-dot { display: none; } /* 1-1-1 胜 #crosshair .ch-dot */
+#crosshair.no-dot .ch-dot { display: none; }
 
 @media (max-width: 640px) {
   #panel { padding: 10px; }
-  #panel .nav { flex: 0 0 140px; padding: 18px 6px 12px; }
-  #panel .nav h2 { font-size: 13px; padding: 0 10px 16px; }
-  #panel .nav .mod { padding: 8px 9px; font-size: 12px; gap: 6px; }
-  #panel .nav .mod .ic { width: 16px; }
-  #panel .nav .mod .ic svg { width: 14px; height: 14px; }
-  #panel .body { padding: 22px 20px; }
-  #panel .pane-title { font-size: 17px; }
+  #panel .nav { flex: 0 0 132px; padding: 14px 6px 10px; }
+  #panel .nav h2 { font-size: 13px; padding: 0 8px 12px; }
+  #panel .nav .mod { padding: 7px 8px; font-size: 12px; gap: 6px; }
+  #panel .body { padding: 16px 14px; }
+  #panel .pane-title { font-size: 15px; }
   #panel .row label, #panel .key-row .kname { flex: 0 0 96px; font-size: 12px; }
-  #stats { font-size: 18px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  #stats { font-size: 17px; }
 }
 
 /* 权威健康 pane 内的日志控制台 .health-log（等宽 + 预换行 + 可滚动） */
@@ -605,10 +468,10 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg-app); }
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--muted);
-  background: var(--ctrl-bg);
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  padding: 10px 12px;
+  border-radius: var(--r);
+  padding: 8px 10px;
   max-height: 240px;
   overflow-y: auto;
   margin: 0;
