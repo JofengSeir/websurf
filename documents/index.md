@@ -59,6 +59,7 @@
 | [`game/implementation/savepoint.md`](game/implementation/savepoint.md) | 存档点数据结构与持久化 |
 | [`game/implementation/types.md`](game/implementation/types.md) | 类型面：`wasm.d.ts` 与 `world/types.ts` |
 | [`game/implementation/scripts.md`](game/implementation/scripts.md) | `scripts/**`：构建、门禁与物理验收脚本 |
+| [`game/implementation/ui-style-plan.md`](game/implementation/ui-style-plan.md) | `web/**` 界面风格改造：现状诊断、RhineLabUI 语彙提取、P1–P4 分期与待裁决项 |
 | [`game/implementation/wasm-crate.md`](game/implementation/wasm-crate.md) | `crates/wasm/**`：本工程的 WASM 绑定层导出面 |
 
 ### `apps/viewer`

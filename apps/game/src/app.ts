@@ -430,10 +430,10 @@ function updateSpeedHud(): void {
   const mode = config.hud.speedMode;
   const text =
     mode === 'lateral'
-      ? `${lateral.toFixed(0)}`
+      ? `${lateral.toFixed(0)}<span class="unit"> u/s</span>`
       : mode === 'lateral-vertical'
-        ? `${lateral.toFixed(0)}<span class="vsep">｜</span>${vertical.toFixed(0)}`
-        : `${total.toFixed(0)}`;
+        ? `${lateral.toFixed(0)}<span class="vsep">｜</span>${vertical.toFixed(0)}<span class="unit"> u/s</span>`
+        : `${total.toFixed(0)}<span class="unit"> u/s</span>`;
   dom.statsEl.innerHTML = text;
 }
 
