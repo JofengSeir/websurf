@@ -1,9 +1,11 @@
 /* ============================================================
  * WebSurf-game — 界面样式（单文件）。
  *
- * 设计基调：扁平素色的工具面板。全部容器为实色块 + 1px 边框，
- * 不使用动画、过渡、渐变、投影与毛玻璃；唯一的强调色 --accent 用于
- * 可交互态与实时读数，--ok / --err / --warn 三个语义色只表状态。
+ * 主题「深海冲浪」：深海黑绿底 + 浪尖青单强调色。全部容器为实色块 +
+ * 1px 发丝边，无动画、无渐变、无辉光；唯一允许的阴影是浮层（ESC 面板
+ * 窗口、加载卡）上那层 0 6px 20px 的软投影，用于把浮层从画布上托起。
+ * 与另两工程的区分：apps/debug 为石墨青「仪表」主题、apps/viewer 为
+ * 暖炭铜金「审片室」主题——三套令牌不共用色值。
  *
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名或行内变量驱动）：
  *   · #crosshair 的 --ch-color / --ch-size / --ch-thickness / --ch-gap
@@ -20,22 +22,22 @@
 :root {
   color-scheme: dark;
 
-  /* ── 配色令牌（中性灰底 + 单强调色 + 三个语义色）── */
-  --bg: #121417;
-  --panel: #1b1e22;
-  --panel-trans: rgba(27, 30, 34, 0.92);
-  --overlay: rgba(14, 16, 18, 0.62);
-  --border: #363b42;
-  --border-strong: #4a5058;
-  --text: #d9dce0;
-  --muted: #8f959c;
-  --accent: #6ea3d8;
-  --accent-hover: #7fb2e2;
-  --accent-weak: rgba(110, 163, 216, 0.15);
-  --on-accent: #14171a;
-  --ok: #8cbd92;
-  --err: #d98076;
-  --warn: #d2a45f;
+  /* ── 「深海冲浪」令牌 ── */
+  --bg: #0c1411;
+  --panel: #12201b;
+  --panel-trans: rgba(18, 32, 27, 0.92);
+  --overlay: rgba(6, 12, 10, 0.62);
+  --border: #23423a;
+  --border-strong: #34594e;
+  --text: #dcece4;
+  --muted: #7fa297;
+  --accent: #3fd0ad;
+  --accent-hover: #63dcbc;
+  --accent-weak: rgba(63, 208, 173, 0.13);
+  --on-accent: #07130f;
+  --ok: #8cc98f;
+  --err: #e2857b;
+  --warn: #d4b26a;
 
   /* 圆角两档；等宽栈（读数与坐标） */
   --r: 4px;
@@ -95,7 +97,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   font-variant-numeric: tabular-nums;
 }
 #stats {
-  font-size: 20px; font-weight: 600; color: #eef1f4;
+  font-size: 20px; font-weight: 600; color: #eef6f1;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 #stats .vsep { color: var(--muted); margin: 0 7px; font-weight: 400; }
@@ -176,7 +178,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.85);
 }
 
-/* ── ESC 设置面板：素色遮罩 + 实色窗口 ──────────────────── */
+/* ── ESC 设置面板：素色遮罩 + 实色窗口（浮层唯一允许的软投影）── */
 #panel {
   position: absolute; inset: 0; z-index: 10;
   display: flex; align-items: center; justify-content: center;
@@ -189,6 +191,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   border-radius: var(--r-lg); overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--border-strong);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
 /* 左侧模块导航 */
@@ -282,7 +285,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   width: 100%; text-align: right; font-size: 12.5px; color: var(--text);
   font-variant-numeric: tabular-nums;
   font-family: var(--mono);
-  background: var(--panel); border: 1px solid var(--border);
+  background: var(--bg); border: 1px solid var(--border);
   border-radius: var(--r); padding: 4px 8px; outline: none;
   -moz-appearance: textfield; appearance: textfield;
 }
@@ -343,7 +346,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel .key-chip:hover { border-color: var(--accent); }
 /* 录制态 .key-chip.recording：warn 语义配色（静态，无脉冲） */
 #panel .key-chip.recording {
-  border-color: var(--warn); background: rgba(210, 164, 95, 0.12);
+  border-color: var(--warn); background: rgba(212, 178, 106, 0.12);
   color: var(--warn);
 }
 #panel .key-chip .x { color: var(--err); font-size: 11px; padding: 0 1px; }
@@ -358,7 +361,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel .kempty { font-size: 12px; color: var(--muted); padding: 2px 4px; }
 #panel .key-rec-hint {
   font-size: 12px; color: var(--warn); padding: 6px 10px;
-  background: rgba(210, 164, 95, 0.1); border: 1px solid var(--warn);
+  background: rgba(212, 178, 106, 0.1); border: 1px solid var(--warn);
   border-radius: var(--r); margin-bottom: 6px;
 }
 
@@ -397,12 +400,12 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   color: var(--err); border-color: var(--err);
 }
 #panel .savepoint-row button.danger:hover {
-  background: rgba(217, 128, 118, 0.12);
+  background: rgba(226, 133, 123, 0.12);
 }
 
 .mt-12 { margin-top: 12px; }
 
-/* ── 启动引导 #loadingOverlay：地图加载进度覆盖层（素色全屏 + 实色卡片）── */
+/* ── 启动引导 #loadingOverlay：地图加载进度覆盖层（素色全屏 + 实色卡片，软投影同 .win）── */
 #loadingOverlay {
   display: none; position: fixed; inset: 0; z-index: 8000;
   background: var(--bg);
@@ -416,6 +419,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 #loadingOverlay .load-title {
   font-size: 14px; font-weight: 600; margin-bottom: 4px;
