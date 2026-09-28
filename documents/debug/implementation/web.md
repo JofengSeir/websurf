@@ -15,7 +15,7 @@
 | 文件输入 | `#bspFile` 等 | `apps/debug/web/index.html:297` |
 | 视角与操作 | 灵敏度 / Q-E / pitch 限位 | `apps/debug/web/index.html:305` |
 | 渲染与视距 | 光照模式、环境光、近平面、视距剔除 | `apps/debug/web/index.html:325` |
-| 路径记录 | 五个可见性复选框、导出按钮、`#pathCounts` | `apps/debug/web/index.html:380`、`:397` |
+| 路径记录 | 四个可见性复选框、导出按钮、`#pathCounts` | `apps/debug/web/index.html:380`、`:397` |
 | 物理 | 物理模式、碰撞来源、tickRate、出生点、碰撞箱三围 | `apps/debug/web/index.html:428`、`:456` |
 | 移动/力学参数（动态渲染） | `#physicsParamList` 由 `PARAM_DEFS` 生成 | `apps/debug/web/index.html:494` |
 | 出生点 | `#spawnSelect` | `apps/debug/web/index.html:506` |
@@ -44,17 +44,17 @@
 
 ## 关键流程与不变量
 
-**页面加载顺序**：先执行 classic 的隔离补丁，再执行 module 形式的应用入口（`apps/debug/web/index.html:695`、`apps/debug/web/index.html:696`）。补丁在 Service Worker 取得页面控制权后写一次 `sessionStorage` 标记并 `window.location.reload()`（`apps/debug/web/coi-serviceworker.js:68`）。隔离成功与否直接决定 `main` 走 SAB 通道还是 postMessage 回退（`apps/debug/src/app.ts:286`）。
+**页面加载顺序**：先执行 classic 的隔离补丁，再执行 module 形式的应用入口（`apps/debug/web/index.html:695`、`apps/debug/web/index.html:696`）。补丁在 Service Worker 取得页面控制权后写一次 `sessionStorage` 标记并 `window.location.reload()`（`apps/debug/web/coi-serviceworker.js:68`）。隔离成功与否直接决定 `main` 走 SAB 通道还是 postMessage 回退（`apps/debug/src/app.ts:277`）。
 
 **id 与句柄的对照关系**：所有控件句柄都由 `apps/debug/src/app.ts:61` 起的 `dom` 表经 `getElementById` 取得，取不到即 `null`，消费点一律用可选链判空。
 
-**面板行动态生成**：`#physicsParamList` 的内容由 `PARAM_DEFS` 逐项渲染（`apps/debug/src/physics/param-defs.ts:47`、`apps/debug/src/app.ts:2137`），因此页面本身不列参数行。
+**面板行动态生成**：`#physicsParamList` 的内容由 `PARAM_DEFS` 逐项渲染（`apps/debug/src/physics/param-defs.ts:47`、`apps/debug/src/app.ts:1990`），因此页面本身不列参数行。
 
 **不变量**：
 
-- `#cullStats` 的初始文本与运行期文本是同一口径（可见数 / PVS / LOD 三段，`apps/debug/web/index.html:670`、`apps/debug/src/app.ts:621`）。
-- 权威健康控制台的条数上限 30 由脚本保证，页面只提供容器与计数位（`apps/debug/src/app.ts:2502`）。
-- 预览 canvas 带 `tabindex`，键盘事件实际绑在 `window` 上（`apps/debug/web/index.html:660`、`apps/debug/src/app.ts:1192`）。
+- `#cullStats` 的初始文本与运行期文本是同一口径（可见数 / PVS / LOD 三段，`apps/debug/web/index.html:670`、`apps/debug/src/app.ts:603`）。
+- 权威健康控制台的条数上限 30 由脚本保证，页面只提供容器与计数位（`apps/debug/src/app.ts:2346`）。
+- 预览 canvas 带 `tabindex`，键盘事件实际绑在 `window` 上（`apps/debug/web/index.html:660`、`apps/debug/src/app.ts:1056`）。
 - 隔离补丁注册失败或浏览器不支持时静默跳过，调用方已有 postMessage 回退通道兜底（`apps/debug/web/coi-serviceworker.js:4`）。
 
 ## 已知缺口
