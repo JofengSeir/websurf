@@ -6,15 +6,18 @@
  *   · 菱角分明：全文件 border-radius 一律 0，仅螺丝（2 处）与服务孔
  *     （1 处）保留 50% 圆；准星圆点与状态 LED 改方形（菱角语彙延伸到
  *     HUD，游戏语义不变）；
- *   · 切角系统：全站唯一 10px 右上切角（clip-path polygon），只出现在
- *     主按钮、激活标签条、面板窗口右上角三处（与螺丝同位成组）；
+ *   · 切角系统：右上切角（clip-path polygon），**按尺度两级**——结构级
+ *     10px（主按钮、激活标签条、面板窗口右上角，与螺丝同位成组）、
+ *     嵌件级 4px（滑块游标；游标仅 10×14px，10px 切角会把它切没）；
+ *     两级之外不得再出现第三种切角尺寸；
  *   · 线宽系统：2px 结构线（窗口顶缘压槽沿、激活左条）/ 1px 分隔线
  *     （行组、节点、边框）/ 1px 点线（字段引导线，4px 节距）；
  *   · 档案元素成套：每 pane 档案编号（右上）+ 字段引导线（每行）+
  *     页脚署名（pane 名 + 版本短码）；硬件件计数固定：螺丝 2（窗口
  *     右上、加载卡左下）+ 服务孔 1（窗口左下，与右上螺丝对角）；
- *   · 布局：窗口高度内容驱动（auto/520px/92vh），行网格 168/1fr/88，
- *     滑块行读作「刻度 + 读数」（.val 去边框为读数区）；
+ *   · 布局：窗口高度**固定 580px**（R1.1 从内容驱动回退——七 pane 之间
+ *     高度差会让窗口在切换时跳动；稀疏 pane 的留白改由页脚署名收尾），
+ *     行网格 168/1fr/88，滑块行读作「刻度 + 读数」（.val 去边框为读数区）；
  *   · 收敛：装饰分结构/嵌件/硬件三层，同屏每类 ≥2 次且位置可预期，
  *     琥珀全屏 5 类（主按钮底、激活导航左条、滑块游标、页头编号、
  *     顶缘嵌片；同类多实例计 1 处）。
@@ -212,6 +215,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   width: 14px; height: 1px;
   background: var(--border-strong);
   transform: rotate(45deg);
+  z-index: 1; /* 压槽嵌片与螺丝都在 .win 层——边线必须抬到其上才可见 */
 }
 #panel .win {
   position: relative;
@@ -283,15 +287,21 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   flex: none;
 }
 #panel .nav .mod .ic svg { width: 15px; height: 15px; display: block; }
-/* 页脚（8.4-5）：刻线分隔 + 文字项（去全宽线框），关闭钮右对齐 */
+/* 页脚（8.4-5 修正）：设备署名（左，与 pane 页脚署名同格式成组）+
+   关闭文字项（右）；服务孔嵌在行首左侧 */
 #panel .nav .footer {
-  margin-top: auto; padding: 10px 4px 2px;
+  margin-top: auto; padding: 8px 10px 24px 26px;
   border-top: 1px solid var(--border);
-  display: flex; justify-content: flex-end;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+#panel .nav .footer::before {
+  content: "莱茵精工";
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  letter-spacing: 0.04em;
 }
 #panel .nav .footer button {
-  padding: 4px 8px; font-size: 12px; font-family: inherit;
-  color: var(--muted);
+  padding: 3px 8px; font-size: 12px; font-family: inherit;
+  color: var(--muted); white-space: nowrap;
   background: transparent; border: none; cursor: pointer;
 }
 #panel .nav .footer button:hover { color: var(--accent); }
