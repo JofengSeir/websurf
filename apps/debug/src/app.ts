@@ -1977,9 +1977,9 @@ function onRenderPhysEvent(ev: RenderPhysEvent): void {
 /** 参数来源标签（默认/手动/地图设置）。色值与页面内联样式的
  * .src-default / .src-manual 及 --warn 同源（index.html 的 <style> 块）。 */
 const SOURCE_LABEL: Record<ParamSource, { text: string; color: string }> = {
-	'mode-default': { text: '默认', color: '#8cbd92' },
-	manual: { text: '手动', color: '#6ea3d8' },
-	map: { text: '地图设置', color: '#d2a45f' },
+	'mode-default': { text: '默认', color: '#7fc98f' },
+	manual: { text: '手动', color: '#5bc0e8' },
+	map: { text: '地图设置', color: '#d4b26a' },
 };
 
 /** 面板渲染抑制（snapshot 回填时防触发 input 事件回发 Worker，防循环）。 */

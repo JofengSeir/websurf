@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WebSurf-viewer — BSP 地图预览与录像回放</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='4' width='24' height='24' rx='2' fill='%231b1e22'/%3E%3Cpath d='M9 20 L16 9 L23 20 Z' fill='none' stroke='%236ea3d8' stroke-width='2.2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='17' r='2.2' fill='%23d2a45f'/%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='4' width='24' height='24' rx='2' fill='%231b1815'/%3E%3Cpath d='M9 20 L16 9 L23 20 Z' fill='none' stroke='%23c9a15e' stroke-width='2.2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='17' r='2.2' fill='%23e6c990'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -69,7 +69,7 @@
     </div>
     <div class="help-sec">
       <div class="help-h">播放基准与坐标映射</div>
-      <p>录像以 <code>.replay</code> 帧自身坐标播放（默认直读，无起点锚定）。轨迹与地图对不上时用录像页「坐标映射」切换对照（轴序 / 朝向轴），仍差一点用「调整工具」显式平移 / 旋转 yaw。时间轴以起跑帧为 0（prerun 帧不在播放区间）；进度条淡蓝带 = 正式跑段、金色框 = A-B 区间。外部脚本可经 <code>window.viewer.replay</code> 控制播放：play / pause / seek(秒) / setSpeed / setMode / follow / tracks() / meta()。</p>
+      <p>录像以 <code>.replay</code> 帧自身坐标播放（默认直读，无起点锚定）。轨迹与地图对不上时用录像页「坐标映射」切换对照（轴序 / 朝向轴），仍差一点用「调整工具」显式平移 / 旋转 yaw。时间轴以起跑帧为 0（prerun 帧不在播放区间）；进度条淡金带 = 正式跑段、金框 = A-B 区间。外部脚本可经 <code>window.viewer.replay</code> 控制播放：play / pause / seek(秒) / setSpeed / setMode / follow / tracks() / meta()。</p>
     </div>
   </div>
 

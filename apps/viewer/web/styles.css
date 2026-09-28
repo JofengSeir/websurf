@@ -1,11 +1,13 @@
 /* ============================================================
  * WebSurf-viewer — 入口页样式（单文件）。
  *
- * 设计基调：扁平素色的工具面板（与 apps/game/web/styles.css 同一语言）。
- * 全部容器为实色块 + 1px 边框，不使用动画、过渡、渐变、投影与毛玻璃；
- * 唯一的强调色 --accent 用于可交互态与实时读数，--ok / --err / --warn
- * 三个语义色只表状态；时间轴上的正式跑段带用 accent、A-B 区间带用
- * warn（页面帮助文本按「淡蓝带 / 金色框」描述这两个语义，改色须同步）。
+ * 主题「审片室」：暖炭黑底 + 放映铜金单强调色，整站金一族（时间轴的
+ * 正式跑段带与 A-B 区间框也用金一族区分：淡金带 = 正式跑段、金框 =
+ * A-B 区间，与页面帮助文本的描述一致）。全部容器为实色块 + 1px 发丝边，
+ * 无动画、无渐变、无辉光；唯一允许的阴影是浮层（帮助卡、引导卡、致命
+ * 错误卡、底部两条 dock 芯片）上那层 0 6px 20px 的软投影，用于把浮层
+ * 从画布上托起。与另两工程的区分：apps/debug 为石墨青「仪表」主题、
+ * apps/game 为深海青「冲浪」主题——三套令牌不共用色值。
  *
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名驱动）：
  *   · 可见性钩子：.hidden、#help.hidden、#guideError.show、#dropzone.active、
@@ -19,21 +21,21 @@
 :root {
   color-scheme: dark;
 
-  /* ── 配色令牌（中性灰底 + 单强调色 + 三个语义色）── */
-  --bg: #121417;
-  --panel: #1b1e22;
-  --panel-trans: rgba(27, 30, 34, 0.92);
-  --border: #363b42;
-  --border-strong: #4a5058;
-  --text: #d9dce0;
-  --muted: #8f959c;
-  --accent: #6ea3d8;
-  --accent-hover: #7fb2e2;
-  --accent-weak: rgba(110, 163, 216, 0.15);
-  --on-accent: #14171a;
-  --ok: #8cbd92;
-  --err: #d98076;
-  --warn: #d2a45f;
+  /* ── 「审片室」令牌 ── */
+  --bg: #131110;
+  --panel: #1b1815;
+  --panel-trans: rgba(27, 24, 21, 0.92);
+  --border: #363028;
+  --border-strong: #4d453a;
+  --text: #e8e3d8;
+  --muted: #a29884;
+  --accent: #c9a15e;
+  --accent-hover: #d9b578;
+  --accent-weak: rgba(201, 161, 94, 0.14);
+  --on-accent: #171208;
+  --ok: #9cc08a;
+  --err: #e0857b;
+  --warn: #d4b26a;
   --r: 4px;
   --r-lg: 6px;
   --sidebar-w: 348px;
@@ -100,6 +102,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
   padding: 10px 12px;
   background: var(--panel); border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   font-size: 12px; line-height: 1.7;
   scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
@@ -145,7 +148,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
   display: block; text-align: center; margin-bottom: 10px;
   background: var(--accent-weak); border-color: var(--accent); color: var(--accent);
 }
-.map-reload:hover { background: rgba(110, 163, 216, 0.25); }
+.map-reload:hover { background: rgba(201, 161, 94, 0.25); }
 
 /* ── 面板通用元件：.sec 分段（.sec-title/.sec-body）、.field 行、.note 提示条、.mono 等宽块、.kv 键值行 ── */
 .sec { margin-bottom: 12px; }
@@ -172,8 +175,8 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
 
 .note { font-size: 11.5px; line-height: 1.6; padding: 5px 8px; border-radius: var(--r); word-break: break-all; }
 .note-info { color: var(--muted); border: 1px solid var(--border); }
-.note-warn { color: var(--warn); background: rgba(210, 164, 95, 0.1); border: 1px solid var(--warn); }
-.note-error { color: var(--err); background: rgba(217, 128, 118, 0.1); border: 1px solid var(--err); }
+.note-warn { color: var(--warn); background: rgba(212, 178, 106, 0.1); border: 1px solid var(--warn); }
+.note-error { color: var(--err); background: rgba(226, 133, 123, 0.1); border: 1px solid var(--err); }
 
 .mono { font-family: var(--mono); font-size: 11px; line-height: 1.55; }
 .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; line-height: 1.7; }
@@ -236,7 +239,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
 .track-btn:hover { color: var(--text); background: var(--accent-weak); }
 .track-btn.off { opacity: 0.45; }
 .track-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); }
-.track-btn.danger:hover { color: var(--err); border-color: var(--err); background: rgba(217, 128, 118, 0.12); }
+.track-btn.danger:hover { color: var(--err); border-color: var(--err); background: rgba(226, 133, 123, 0.12); }
 
 /* 出生点列表 .spawn-list / .spawn-item（单行：类名 .cls + 跳转按钮；推荐项加 .primary，构造点见 apps/viewer/src/ui/mapinfo.ts） */
 .spawn-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
@@ -257,7 +260,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
 .spawn-item button:hover { background: var(--accent-weak); }
 
 /* ── 底部 dock #dock：录像信息条 + 时间轴。右边界是 calc(--sidebar-w + 24px)，面板收起时加 .full 回到 12px；
-   容器不挡点击、直属子元素恢复 ── */
+   容器不挡点击、直属子元素恢复；两条芯片带浮层软投影 ── */
 #dock {
   position: absolute; left: 12px; right: calc(var(--sidebar-w) + 24px); bottom: 12px; z-index: 6;
   display: flex; flex-direction: column; gap: 6px; pointer-events: none;
@@ -271,6 +274,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
   padding: 5px 10px;
   background: var(--panel-trans); border: 1px solid var(--border);
   border-radius: var(--r);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 .meta-name {
   display: inline-flex; align-items: center; gap: 6px;
@@ -289,6 +293,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
   padding: 7px 10px;
   background: var(--panel-trans); border: 1px solid var(--border);
   border-radius: var(--r);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 .tl-slider-row, .tl-controls, .tl-opts { grid-column: 1; }
 .tl-slider-row { display: flex; align-items: center; gap: 10px; }
@@ -301,12 +306,13 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
   accent-color: var(--accent); cursor: pointer;
 }
 .tl-zone { position: absolute; top: 2px; bottom: 2px; border-radius: 2px; pointer-events: none; }
-/* 正式跑段带 = accent 淡底；A-B 区间带 = warn 淡底 + 两侧 1px warn 边（页面帮助文本按「淡蓝带 / 金色框」描述） */
+/* 正式跑段带 = 淡金底；A-B 区间带 = 金框（两侧 1px accent 边 + 加深一档的底），
+   页面帮助文本按「淡金带 / 金框」描述，改色须同步 */
 .tl-zone-run { background: var(--accent-weak); }
 .tl-zone-ab {
-  background: rgba(210, 164, 95, 0.18);
-  border-left: 1px solid var(--warn);
-  border-right: 1px solid var(--warn);
+  background: rgba(201, 161, 94, 0.24);
+  border-left: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
 }
 .tl-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn.playbtn { min-width: 70px; font-weight: 600; padding: 4px 13px; }
@@ -325,7 +331,7 @@ select.tl-select {
 }
 .tl-opt input { accent-color: var(--accent); cursor: pointer; }
 .tl-range { font-size: 11.5px; color: var(--muted); font-family: var(--mono); min-width: 150px; }
-.tl-range.active { color: var(--warn); }
+.tl-range.active { color: var(--accent); }
 
 /* 右列按键簇 .tm-keys：上排 Q/W/E · 中排 A/S/D · 下排 蹲（1 格）+ 跳（2 格）；
    高亮加 .on，构造点见 apps/viewer/src/ui/telemetry.ts */
@@ -360,7 +366,7 @@ select.tl-select {
   transform: translateX(-50%);
   z-index: 5; pointer-events: none; user-select: none;
   font-variant-numeric: tabular-nums;
-  font-size: 20px; font-weight: 600; color: #eef1f4;
+  font-size: 20px; font-weight: 600; color: #f2eee4;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 .telemetry.full { left: 50%; }
@@ -372,12 +378,13 @@ select.tl-select {
 #guide {
   position: absolute; inset: 0; z-index: 8;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(14, 16, 18, 0.85);
+  background: rgba(10, 9, 7, 0.85);
 }
 #guide .card {
   max-width: 430px; margin: 0 16px; padding: 22px 26px;
   border-radius: var(--r-lg); text-align: center;
   background: var(--panel); border: 1px solid var(--border-strong);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 #guide .gtitle { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
 #guide .gstep { font-size: 13px; color: var(--muted); line-height: 1.9; }
@@ -392,7 +399,7 @@ select.tl-select {
 #guideError {
   display: none; margin-top: 12px; padding: 7px 10px; text-align: left;
   font-size: 12px; line-height: 1.7; color: var(--err);
-  background: rgba(217, 128, 118, 0.1); border: 1px solid var(--err);
+  background: rgba(226, 133, 123, 0.1); border: 1px solid var(--err);
   border-radius: var(--r); word-break: break-all;
 }
 #guideError.show { display: block; }
@@ -410,13 +417,14 @@ select.tl-select {
 
 #fatal {
   position: absolute; inset: 0; z-index: 20; display: none;
-  align-items: center; justify-content: center; background: rgba(14, 16, 18, 0.96);
+  align-items: center; justify-content: center; background: rgba(10, 9, 7, 0.96);
 }
 #fatal.show { display: flex; }
 #fatal .card {
   max-width: 480px; margin: 0 16px; padding: 22px 26px;
   background: var(--panel); border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 #fatal .ftitle { font-size: 15px; font-weight: 600; color: var(--err); margin-bottom: 10px; }
 #fatal .fdetail { font-size: 12px; color: var(--muted); line-height: 1.8; white-space: pre-wrap; word-break: break-all; }
