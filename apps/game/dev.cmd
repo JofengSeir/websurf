@@ -79,20 +79,20 @@ echo [5/5] All test gates passed.
 
 netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul 2>&1
 if errorlevel 1 goto :start_server
-echo [SKIP] Port %PORT% is already in use - opening the browser to the running server.
-start "" http://localhost:%PORT%/web/index.html
-exit /b 0
-
-:start_server
 echo ============================================================
 echo   WebSurf-game - Dev Server (web/)
 echo   Server:  http://localhost:%PORT%/
 echo   App:     http://localhost:%PORT%/web/index.html
-echo   Close this window to stop the server.
 echo ============================================================
 
-REM A detached "cmd /c" opens the page after timeout /t 1; the python call below blocks.
+REM A detached "cmd /c" opens the page after timeout /t 1. The server itself runs in
+REM its OWN minimized window (title below, visible on the taskbar): closing this build
+REM window never kills the server, and the server can be stopped by closing that
+REM window (or Ctrl+C inside it) or by running stop.cmd in this folder.
 start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/web/index.html"
 REM src/serve.py takes its serve root from argv[2]; the literal here is "%~dp0." (this app
 REM root written with a trailing dot), and serve.py os.chdir()s to it before serving.
-python "%~dp0..\..\src\serve.py" %PORT% "%~dp0."
+start "WebSurf-game dev server :%PORT%" /min cmd /c python "%~dp0..\..\src\serve.py" %PORT% "%~dp0."
+echo [OK] Server launched in its own minimized window: "WebSurf-game dev server :%PORT%".
+echo      Stop it by closing that window or by running stop.cmd here.
+exit /b 0
