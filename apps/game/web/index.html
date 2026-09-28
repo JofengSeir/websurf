@@ -71,6 +71,10 @@
     <!-- #panel：ESC 控制面板（左导航 + 右设置体） -->
   <div id="panel">
     <div class="win">
+      <!-- 关闭控件：就是窗口右上角那颗螺丝（斜置 45°，9px→12px），既是硬件件也是按钮；
+           id 保持 #panelClose（面板控制器在 apps/game/src/panel/panel-controller.ts 绑定）。
+           兜底：点击 #panel 遮罩空白处同样关闭（同一入口，见该文件的 bindPanelClose）。 -->
+      <button class="win-close" id="panelClose" type="button" aria-label="关闭面板"></button>
       <!-- 左侧模块导航 -->
       <div class="nav">
         <h2>控制面板</h2>
@@ -82,9 +86,6 @@
         <div class="mod" data-mod="display"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M9.5 20.5h5M12 17v3.5"/></svg></span>显示</div>
         <div class="mod" data-mod="view"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v17M3.5 12h17"/><path d="M9.8 5.7 12 3.5l2.2 2.2M9.8 18.3l2.2 2.2 2.2-2.2M5.7 9.8 3.5 12l2.2 2.2M18.3 9.8l2.2 2.2-2.2 2.2"/></svg></span>视角</div>
         <div class="mod" data-mod="health"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-7 4 14 3-8H21"/></svg></span>权威健康</div>
-        <div class="footer">
-          <button id="panelClose">关闭</button>
-        </div>
       </div>
 
       <!-- 右侧设置 -->

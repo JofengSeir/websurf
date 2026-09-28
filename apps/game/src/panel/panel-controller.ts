@@ -530,14 +530,25 @@ export class PanelController {
       this.commitKeymap();
     });
 
-    // 「关闭」按钮：只加 `hidden` 类，不请求 Pointer Lock（锁定由画布点击触发，见 app.ts）
-    document.getElementById('panelClose')?.addEventListener('click', () => {
-      this.cancelRecording(); // 关闭时若仍在录制必须先取消——否则捕获阶段监听会继续吞 keydown
-      this.root.classList.add('hidden');
+    // 关闭入口（两处，同一个 closePanel）：① 窗口右上角的螺丝按钮 #panelClose
+    // ② 兜底——点击 #panel 遮罩空白处（点在 .win 内部不算）。只加 `hidden` 类，
+    // 不请求 Pointer Lock（锁定由画布点击触发，见 app.ts）。
+    document.getElementById('panelClose')?.addEventListener('click', () => this.closePanel());
+    this.root.addEventListener('click', (e) => {
+      if (e.target === this.root) this.closePanel();
     });
 
     // 窗口失焦：录制监听等不到下一次按键，直接取消
     window.addEventListener('blur', () => this.cancelRecording());
+  }
+
+  /**
+   * 关闭面板：先取消进行中的按键录制（否则捕获阶段的监听会继续吞 keydown），
+   * 再加 `hidden` 类。由 #panelClose（螺丝按钮）与遮罩空白点击共用。
+   */
+  private closePanel(): void {
+    this.cancelRecording();
+    this.root.classList.add('hidden');
   }
 
   private sendHull(): void {
