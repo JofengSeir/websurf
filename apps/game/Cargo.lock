@@ -2007,7 +2007,6 @@ dependencies = [
  "base64 0.22.1",
  "binrw 0.14.2",
  "bitflags",
- "bv",
  "bytemuck",
  "byteorder 1.5.0",
  "cgmath",

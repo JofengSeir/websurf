@@ -581,7 +581,11 @@ fn load_texture_bsp(
         })?;
 
     let vtf = vtf::vtf::VTF::read(&vtf_data)?;
-    let image = vtf.highres_image.decode(0)?;
+    // `vtf` crate 的 decode 对 4 通道未压缩格式（Bgra8888）返回「Rgb8 变体 + 多 25% 容量」的
+    // DynamicImage：`ImageBuffer::from_raw` 只查缓冲下界不查恰好，多余容量滞留容器，PNG 编码按
+    // `color()` 算期望长度即触发 image 0.25 的 Invalid-buffer-length 断言 panic。`into_rgba8()`
+    // 跨变体重建精确容器（Rgb8→逐像素复制、Rgba8→原样返回），对任何格式免疫；alpha 一并保留。
+    let image = DynamicImage::ImageRgba8(vtf.highres_image.decode(0)?.into_rgba8());
 
     if options.texture_scale != 1.0 {
         Ok(image.resize(
