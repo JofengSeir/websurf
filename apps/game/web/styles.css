@@ -7,6 +7,9 @@
  * 与另两工程的区分：apps/debug 为石墨青「仪表」主题、apps/viewer 为
  * 暖炭铜金「审片室」主题——三套令牌不共用色值。
  *
+ * 竞技面板元素（游戏感、克制不科幻）：ESC 窗口顶部 2px 强调色沿边 +
+ * 两只内嵌角标（::before/::after 的 L 形 1px 括角）、导航激活项左缘
+ * 2px 强调条、#fps 左缘强调条——全部是细线与实色，无发光无扫描线。
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名或行内变量驱动）：
  *   · #crosshair 的 --ch-color / --ch-size / --ch-thickness / --ch-gap
  *     由 apps/game/src/panel/panel-controller.ts 的 applyCrosshair 写入；
@@ -60,12 +63,13 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 /* 隐藏的原生文件输入 #bspFile：点击由 #loadMapBtn 的监听器转发；按钮外观由 #panel .map-btn 承担 */
 #bspFile { display: none; }
 
-/* ── 帧率（左上角）── */
+/* ── 帧率（左上角，左缘强调条 = 竞技芯片）── */
 #fps {
   position: absolute; top: 12px; left: 12px; z-index: 5;
   font-family: var(--mono); font-size: 11.5px;
-  padding: 5px 10px;
+  padding: 5px 10px 5px 9px;
   background: var(--panel-trans); border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
   border-radius: var(--r);
   color: var(--muted); font-variant-numeric: tabular-nums;
   pointer-events: none; user-select: none;
@@ -90,14 +94,15 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #status.error::before { background: var(--err); }
 #error { display: none; top: 46px; color: var(--err); }
 
-/* ── 速度读数 #hud>#stats（横向居中、距底 24%）：裸数字；单层 1px 暗影只为在亮色天空下可读 ── */
+/* ── 速度读数 #hud>#stats（横向居中、距底 24%）：裸数字 + 微字距；
+   单层 1px 暗影只为在亮色天空下可读 ── */
 #hud {
   position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%);
   z-index: 4; text-align: center; pointer-events: none;
   font-variant-numeric: tabular-nums;
 }
 #stats {
-  font-size: 20px; font-weight: 600; color: #eef6f1;
+  font-size: 20px; font-weight: 600; letter-spacing: 0.04em; color: #eef6f1;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 #stats .vsep { color: var(--muted); margin: 0 7px; font-weight: 400; }
@@ -178,7 +183,8 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.85);
 }
 
-/* ── ESC 设置面板：素色遮罩 + 实色窗口（浮层唯一允许的软投影）── */
+/* ── ESC 设置面板：素色遮罩 + 实色窗口（浮层唯一允许的软投影）。
+   竞技元素：顶部 2px 强调沿边 + 左上/右下两只 L 形角标（1px 细线）── */
 #panel {
   position: absolute; inset: 0; z-index: 10;
   display: flex; align-items: center; justify-content: center;
@@ -186,12 +192,28 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   background: var(--overlay);
 }
 #panel .win {
+  position: relative;
   width: 760px; max-width: 100%; height: 580px; max-height: 92vh;
   display: flex;
   border-radius: var(--r-lg); overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--border-strong);
+  border-top: 2px solid var(--accent);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+/* 角标：内嵌 1px 括角（细线，非科幻描边） */
+#panel .win::before,
+#panel .win::after {
+  content: ""; position: absolute; width: 14px; height: 14px; z-index: 2;
+  pointer-events: none;
+}
+#panel .win::before {
+  top: 8px; left: 8px;
+  border-left: 1px solid var(--accent); border-top: 1px solid var(--accent);
+}
+#panel .win::after {
+  bottom: 8px; right: 8px;
+  border-right: 1px solid var(--accent); border-bottom: 1px solid var(--accent);
 }
 
 /* 左侧模块导航 */
@@ -210,8 +232,11 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   border-radius: var(--r); cursor: pointer; user-select: none;
 }
 #panel .nav .mod:hover { background: var(--accent-weak); color: var(--text); }
-/* 激活态：accent-weak 底 + accent 文本 */
-#panel .nav .mod.active { background: var(--accent-weak); color: var(--accent); }
+/* 激活态：accent-weak 底 + 左缘 2px 强调条 + accent 文本 */
+#panel .nav .mod.active {
+  background: var(--accent-weak); color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 #panel .nav .mod .ic {
   width: 18px; display: inline-flex; align-items: center; justify-content: center;
   flex: none;
