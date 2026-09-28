@@ -269,22 +269,22 @@
     .row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
     .row label { color: var(--muted); }
 
-    /* 预览区悬浮元素 */
+    /* 预览区左上角读数（2026-09-28 起由右上移来）：四个子行由 app.ts 的 updateStatsUI /
+       updateCullStatsUI / updateGameStatsUI 写「标签+数值」span（.label 灰 / .v 亮）；planeInfo 保持纯文本 */
     #hud {
-      position: absolute; top: 8px; right: 8px;
+      position: absolute; top: 8px; left: 8px;
+      display: flex; flex-direction: column; gap: 3px;
       background: var(--panel-trans);
-      color: var(--text); padding: 4px 8px; border-radius: var(--r);
+      color: var(--text); padding: 6px 10px; border-radius: var(--r);
       font-size: 11px; font-family: var(--mono);
       pointer-events: none;
       border: 1px solid var(--border);
       line-height: 1.5;
-      min-width: 200px;
-      max-width: 400px;
-      white-space: pre;
+      min-width: 180px; max-width: 420px;
       font-variant-numeric: tabular-nums;
     }
     #hud .label { color: var(--muted); }
-    #hud .v { color: var(--accent); }
+    #hud .v { color: var(--text); }
     /* 中心准星：几何与配色全部由 --ch-* 变量驱动，变量由 `apps/debug/src/app.ts` 的 `applyCrosshair` 写入 */
     #crosshair {
       position: absolute; left: 50%; top: 50%;
