@@ -289,12 +289,23 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
 /* ── 时间轴 #timeline：左列三行（.tl-slider-row 进度 / .tl-controls 主控制 / .tl-opts 显示开关），
    右列为八键按键簇 .tm-keys（跨 3 行）；内容由 apps/viewer/src/replay/timeline.ts 构建 ── */
 #timeline {
+  position: relative;
   display: grid; grid-template-columns: 1fr auto; column-gap: 14px;
-  padding: 7px 10px;
+  padding: 13px 10px;
   background: var(--panel-trans); border: 1px solid var(--border);
   border-radius: var(--r);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
+/* 胶片齿孔：时间轴上下缘的输片孔条（硬停重复条纹，无渐变）——
+   审片室「看录像」的媒体语彙；孔距 13px、孔宽 5px，铜金底上镂空 */
+#timeline::before, #timeline::after {
+  content: ""; position: absolute; left: 10px; right: 10px; height: 5px;
+  background: repeating-linear-gradient(90deg,
+    var(--bg) 0 5px, transparent 5px 13px);
+  opacity: 0.9;
+}
+#timeline::before { top: 4px; }
+#timeline::after { bottom: 4px; }
 .tl-slider-row, .tl-controls, .tl-opts { grid-column: 1; }
 .tl-slider-row { display: flex; align-items: center; gap: 10px; }
 .tl-sliderwrap {
@@ -385,6 +396,14 @@ select.tl-select {
   border-radius: var(--r-lg); text-align: center;
   background: var(--panel); border: 1px solid var(--border-strong);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+/* 场记板顶条：卡片顶部的斜纹硬停条纹（铜金/深色相间，无渐变）——
+   审片室的导演板元素；上圆角与卡片同径，下缘留 16px 呼吸 */
+#guide .card::before {
+  content: ""; display: block; height: 10px; margin: -22px -26px 16px;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: repeating-linear-gradient(-45deg,
+    var(--accent) 0 12px, var(--bg) 12px 24px);
 }
 #guide .gtitle { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
 #guide .gstep { font-size: 13px; color: var(--muted); line-height: 1.9; }
