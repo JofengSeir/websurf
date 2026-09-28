@@ -103,9 +103,11 @@ impl<'a> VTFImage<'a> {
     /// 有分支的格式共 8 个：
     /// - `Dxt1` 与 `Dxt1Onebitalpha` → BC1、`Dxt3` → BC2、`Dxt5` → BC3，结果都是 RGBA8；
     /// - `Rgba8888` 原样按 RGBA8；`Rgb888` 原样按 RGB8；
-    /// - `Bgr888` 与 `Bgra8888` 先按 4 字节块交换 B/R（`convert_bgra`），再按 `ImageRgb8`
-    ///   解释。注意这两个格式的 `frame_size` 是 `w*h*3` 与 `w*h*4`，而 `ImageRgb8` 的缓冲
-    ///   是每像素 3 字节——长度口径并不一致；
+    /// - `Bgr888` 按 3 字节块交换 B/R（`convert_bgr`）后按 `ImageRgb8` 解释，缓冲与像素类型
+    ///   恰好匹配；
+    /// - `Bgra8888` 按 4 字节块交换 B/R（`convert_bgra`，得到 RGBA 布局）后按 **`ImageRgba8`**
+    ///   解释——4 通道缓冲不能配 `ImageRgb8`：`ImageBuffer::from_raw` 只查「够用」不查「恰好」，
+    ///   多出的 25% 容量会滞留容器，PNG 编码按 `color()` 算期望长度即 panic；
     /// - 其余格式（含 `Dxt1Onebitalpha` 之外的全部未列表格式）→ `UnsupportedImageFormat`。
     ///
     /// 不做：不选 mip 层（固定 0）、不做色彩空间转换、不处理 Bluescreen 变体。
@@ -133,30 +135,36 @@ impl<'a> VTFImage<'a> {
             }
             ImageFormat::Rgb888 => self.image_from_buffer(bytes.to_vec(), DynamicImage::ImageRgb8),
             ImageFormat::Bgr888 => {
-                let mut bgra = bytes.to_vec();
-                convert_bgra(&mut bgra);
-                self.image_from_buffer(bgra, DynamicImage::ImageRgb8)
+                let mut bgr = bytes.to_vec();
+                convert_bgr(&mut bgr);
+                self.image_from_buffer(bgr, DynamicImage::ImageRgb8)
             }
             ImageFormat::Bgra8888 => {
                 let mut bgra = bytes.to_vec();
                 convert_bgra(&mut bgra);
-                self.image_from_buffer(bgra, DynamicImage::ImageRgb8)
+                self.image_from_buffer(bgra, DynamicImage::ImageRgba8)
             }
             _ => Err(Error::UnsupportedImageFormat(self.format)),
         }
     }
 }
 
-/// 就地交换每 4 字节块里的 `[0]` 与 `[2]`（B ↔ R），第 3、4 字节原样写回。
+/// 就地交换 3 字节/像素缓冲里每像素的 `[0]` 与 `[2]`（B ↔ R）。
+///
+/// 用 `chunks_exact_mut(3)` 按像素对齐：不能沿用 4 字节块版（`convert_bgra`），否则块边界
+/// 会跨像素，交换结果交错错乱。
+fn convert_bgr(bgr: &mut [u8]) {
+    for px in bgr.chunks_exact_mut(3) {
+        px.swap(0, 2);
+    }
+}
+
+/// 就地交换 4 字节/像素缓冲里每像素的 `[0]` 与 `[2]`（B ↔ R），A 通道原位保留。
 ///
 /// 用 `chunks_exact_mut(4)`：长度不是 4 的倍数时，末尾不足 4 字节的尾巴**不处理**。
 fn convert_bgra(bgra: &mut [u8]) {
-    for src in bgra.chunks_exact_mut(4) {
-        let (blue, green, red, alpha) = (src[0], src[1], src[2], src[3]);
-        src[0] = red;
-        src[1] = green;
-        src[2] = blue;
-        src[3] = alpha;
+    for px in bgra.chunks_exact_mut(4) {
+        px.swap(0, 2);
     }
 }
 
