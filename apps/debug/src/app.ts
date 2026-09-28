@@ -541,9 +541,9 @@ function updateStatsUI(): void {
 	const cluster = rendererMain?.getPvsCluster() ?? -1;
 	const lateral = Math.hypot(st.vel.x, st.vel.z);
 	const text =
-		`FPS ${localFps}  位置 ${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}  ` +
-		`速度 ${lateral.toFixed(0)}  ${st.onGround ? '地面' : '空中'}  cluster ${cluster >= 0 ? cluster : '—'}`;
-	dom.statsEl.textContent = text;
+		`<span class="label">FPS</span> <span class="v">${localFps}</span>  <span class="label">位置</span> <span class="v">${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}</span>  ` +
+		`<span class="label">速度</span> <span class="v">${lateral.toFixed(0)}</span>  <span class="label">状态</span> <span class="v">${st.onGround ? '地面' : '空中'}</span>  <span class="label">cluster</span> <span class="v">${cluster >= 0 ? cluster : '—'}</span>`;
+	dom.statsEl.innerHTML = text;
 	if (dom.planeInfoEl) {
 		dom.planeInfoEl.textContent = formatPlaneInfo(rendererMain?.getPlaneInfo() ?? null);
 	}
@@ -600,10 +600,10 @@ function formatPlaneInfo(info: PlaneInfo | null): string {
 function updateCullStatsUI(msg: CullStatsLike): void {
 	if (dom.cullStatsEl) {
 		const p = msg.pvs;
-		dom.cullStatsEl.textContent =
-			`可见 ${msg.visible}/${msg.total} (cull=${msg.cullDist.toFixed(0)})  ` +
-			`PVS: cluster=${p.cluster >= 0 ? p.cluster : '—'} ` +
-			`${p.visibleClusters}/${p.totalClusters} 可见 隐藏${p.pvsHidden}  LOD 近${p.near}/远${p.far}`;
+		dom.cullStatsEl.innerHTML =
+			`<span class="label">可见</span> <span class="v">${msg.visible}/${msg.total}</span>  <span class="label">视距</span> <span class="v">${msg.cullDist.toFixed(0)}</span>  ` +
+			`<span class="label">cluster</span> <span class="v">${p.cluster >= 0 ? p.cluster : '—'}</span>  <span class="label">PVS</span> <span class="v">${p.visibleClusters}/${p.totalClusters} 隐藏${p.pvsHidden}</span>  ` +
+			`<span class="label">LOD</span> <span class="v">近${p.near}/远${p.far}</span>`;
 	}
 	updatePathCountsUI(); // 顺带刷新路径记录点数（~10Hz，够用）
 }
@@ -1032,8 +1032,8 @@ function updateGameStatsUI(): void {
 		? `${snap.checkpointCount}(${snap.lastCheckpointName})`
 		: '0';
 	const text =
-		`阶段 ${phaseLabel}  计时 ${timeLabel}  检查点 ${cpLabel}  死亡 ${snap.deaths}`;
-	dom.gameStatsEl.textContent = text;
+		`<span class="label">阶段</span> <span class="v">${phaseLabel}</span>  <span class="label">计时</span> <span class="v">${timeLabel}</span>  <span class="label">检查点</span> <span class="v">${escapeHtml(cpLabel)}</span>  <span class="label">死亡</span> <span class="v">${snap.deaths}</span>`;
+	dom.gameStatsEl.innerHTML = text;
 	// justDied 闪烁提示（500ms 后恢复）；色值取页面样式的 --err（index.html 的 <style> 块）
 	if (game.consumeJustDied()) {
 		dom.gameStatsEl.style.color = 'var(--err)';
