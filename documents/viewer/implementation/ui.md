@@ -33,7 +33,7 @@
 | `zoneOffset` 只进 title | 亚 tick 份额非零时并入成绩项的悬停说明，不上条面 | `apps/viewer/src/ui/replaymeta.ts:59` 到 `apps/viewer/src/ui/replaymeta.ts:65` |
 | 速度读数口径 | 横向 = `Math.hypot(vel[0], vel[2])`、竖向 = `Math.abs(vel[1])`，都取 0 位小数；无速度数据时两格写 `—` | `apps/viewer/src/ui/telemetry.ts:104` 到 `apps/viewer/src/ui/telemetry.ts:110` |
 | 按键高亮判据 | 八键各自的 IN_* 位掩码与当前帧掩码相与非 0 即加 `on` 类；`buttons` 为 null 时全灭 | `apps/viewer/src/ui/telemetry.ts:29` 到 `apps/viewer/src/ui/telemetry.ts:40`、`apps/viewer/src/ui/telemetry.ts:113` |
-| 八键布局 | Q / W / E 上排、A / S / D 中排、蹲 1 格 + 跳 2 格下排（位置由 CSS 网格区决定） | `apps/viewer/src/ui/telemetry.ts:50` 到 `apps/viewer/src/ui/telemetry.ts:59`、`apps/viewer/web/styles.css:326` 到 `apps/viewer/web/styles.css:333` |
+| 八键布局 | Q / W / E 上排、A / S / D 中排、蹲 1 格 + 跳 2 格下排（位置由 CSS 网格区决定） | `apps/viewer/src/ui/telemetry.ts:50` 到 `apps/viewer/src/ui/telemetry.ts:59`、`apps/viewer/web/styles.css:345` 到 `apps/viewer/web/styles.css:352` |
 | 速度行随轨道显隐 | `setTracks(false)` 给速度行父元素加 `hidden` 类 | `apps/viewer/src/ui/telemetry.ts:92` 到 `apps/viewer/src/ui/telemetry.ts:94` |
 
 ## 已知缺口

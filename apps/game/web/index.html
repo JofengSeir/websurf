@@ -6,10 +6,10 @@
   <title>WebSurf-game</title>
     <!--
     WebSurf-game — 页面外壳（纯结构与挂载点；不含内联样式块）。
-    样式：web/styles.css —— 设计令牌全部收敛在它的 :root（面板/边框/文本/强调/金色/
-    语义色/圆角三档等，见该文件头部注释）。
+    样式：web/styles.css —— 配色令牌收敛在它的 :root（扁平素色：面板/边框/文本/单强调色/
+    语义色等，无动画、无渐变、无投影，见该文件头部注释）。
     挂载点（JS 侧按 id / class / data-action 选取，见 src/app.ts）：
-    canvas#preview 三维画布 · #status 状态行（LED 呼吸灯类）· #error 错误行 ·
+    canvas#preview 三维画布 · #status 状态行（idle/success/error 三态类）· #error 错误行 ·
     #crosshair 准星（行内 CSS 变量由 src/panel/panel-controller.ts 写入）·
     #hud>#stats 速度读数（bottom: 24%）· #keys 按键簇（Q/W/E/A/S/D/蹲/跳，标签由
     src/app.ts 按当前键位写首版、高亮随实时输入）· #fps 帧率 · #loadingOverlay 加载
