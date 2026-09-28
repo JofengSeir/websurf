@@ -79,7 +79,7 @@
 
 ## 已知缺口
 
-1. **PVS 列不反映隐藏数**：`LodStats.pvsHidden` 在 `update` 的统计刷新里每轮恒写 0（`apps/debug/src/renderer/lod-manager.ts:262`），而面板剔除统计行把它作为「隐藏 N」打印（`apps/debug/src/app.ts:624`），页面 `#cullStats` 也带「PVS」列（`apps/debug/web/index.html:670`）。真正被隐藏的块数是 `far`（`apps/debug/src/renderer/lod-manager.ts:261`）。
+1. **PVS 列不反映隐藏数**：`LodStats.pvsHidden` 在 `update` 的统计刷新里每轮恒写 0（`apps/debug/src/renderer/lod-manager.ts:262`），而面板剔除统计行把它作为「隐藏 N」打印（`apps/debug/src/app.ts:624`），页面 `#cullStats` 也带「PVS」列（`apps/debug/web/index.html:767`）。真正被隐藏的块数是 `far`（`apps/debug/src/renderer/lod-manager.ts:261`）。
 2. **PVS 相关统计在本工程恒为缺省值**：`RendererMain` 只构造 `PvsManager`、把 `getClusterAt` 交给 `assignClusterIds` 用、并读 `getStats` / `currentClusterId`，**从不调 `update`**，因此剔除统计里的 `cluster` 恒 -1、`visibleClusters` 恒 0（`apps/debug/src/renderer/renderer-main.ts:88` 起、`apps/debug/src/renderer/renderer-main.ts:1572`）。
 3. **`LOD_LEVEL.PVS_HIDDEN` 是预留档位**：该常量在本文件内零引用，`update` 从不写入（`apps/debug/src/renderer/lod-manager.ts:26`）；`LodItem.clusterIds` 同样在本文件内无消费方（`apps/debug/src/renderer/lod-manager.ts:40`）。
 4. **`assignClusterIds` 的结果无消费方**：返回的「采到至少一个 cluster 的 mesh 数量」在 `loadScene` 里没有被使用（`apps/debug/src/renderer/lod-manager.ts:181`）。

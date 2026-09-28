@@ -111,7 +111,7 @@ CI 三个 workflow（`.github/workflows/`）：
 
 以下均为**读码所得、未修改代码**的登记项，逐条明细与证据见 `AGENTS.md` §7.3 待决索引：
 
-- **输入侧只有回放、没有用户录制**：落样本的只有回放分支 `replayCapture`（`apps/debug/src/app.ts:2248`），页面没有用户录制入口（录制器已随死链删除）——录制产物只能由外部工具生成，经 `__wsInput.load` / `play` / `stopPlay` 回放。
+- **输入侧只有回放、没有用户录制**：落样本的只有回放分支 `replayCapture`（`apps/debug/src/app.ts:2247`），页面没有用户录制入口（录制器已随死链删除）——录制产物只能由外部工具生成，经 `__wsInput.load` / `play` / `stopPlay` 回放。
 - **零分配支路已实现但未装配**：`tick_into` / `state_out_ptr` / `seed_from` 仅被 `src/ts-shared/` 的控制器调用，而这些控制器在三个工程内都没有装配点；`set_yaw_pitch` 在 `apps/**` 与 `src/**` 内零调用点。
 - **wasm 有两份，只有 `build:wasm` 会同时刷新**：`pkg/…_bg.wasm`（打包脚本与门禁读取）与 `web/…_bg.wasm`（dev 页面加载）。`dev.cmd` / `build.cmd` 每次都跑 `build:wasm`，两份同步；**任何跳过 `build:wasm` 的路径（如直接 `npm run build:dist`）都会让其中一份变旧**。
 
