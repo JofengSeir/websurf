@@ -17,9 +17,10 @@
 | `apps/viewer/web/index.html` | 页面骨架：全部 DOM id、帮助浮层、资源 404 兜底脚本、module script 入口 | `apps/viewer/web/index.html:94`、`apps/viewer/web/index.html:111` |
 | `apps/viewer/web/styles.css` | 全部类名契约的样式实现（面板构件、轨迹卡、时间轴、遥测、叠层） | `apps/viewer/web/styles.css:24`、`apps/viewer/web/styles.css:378` |
 | `apps/viewer/web/coi-serviceworker.js` | 部署用 Service Worker 模板（占位符由 `build-dist.mjs` 的 multi 分支注入） | `apps/viewer/scripts/build-dist.mjs:274` |
-| `apps/viewer/dev.cmd` | 双击/手工入口（全链条）：四项工具链自检（`:17`）→ 依赖 → 强制 `build:wasm`（`:48`）→ `build:ts`（`:58`）→ 跑 `test:replay`（`:68`）→ 起 8100 服务（`:7`、`:98`） | `apps/viewer/dev.cmd:17`、`apps/viewer/dev.cmd:48`、`apps/viewer/dev.cmd:98` |
+| `apps/viewer/dev.cmd` | 双击/手工入口（全链条）：四项工具链自检（`:17`）→ 依赖 → 强制 `build:wasm`（`:48`）→ `build:ts`（`:58`）→ 跑 `test:replay`（`:68`）→ 在独立最小化窗口起 8100 服务（`:7`、`:95`） | `apps/viewer/dev.cmd:17`、`apps/viewer/dev.cmd:48`、`apps/viewer/dev.cmd:95` |
 | `apps/viewer/build.cmd` | 双击/手工入口（重编译打包）：工具链自检（`:22`）→ 依赖 → `build:wasm`（`:50`）→ 契约检查（`:59`）→ `build:ts`（`:69`）→ 构建 dist（`:78`）。**single-only**：只接受 `single` 或缺参 | `apps/viewer/build.cmd:22`、`apps/viewer/build.cmd:50`、`apps/viewer/build.cmd:78` |
 | `apps/viewer/start.cmd` | 双击/手工入口（只启动）：校验 `dist/index.html`（`:19`）→ 默认端口 8101（`:7`）；存在 `dist\play.cmd` 时转给它（`:42` 到 `:43`），否则用 `src/serve.py` 直接服务 `dist\`（`:51`） | `apps/viewer/start.cmd:19`、`apps/viewer/start.cmd:42`、`apps/viewer/start.cmd:51` |
+| `apps/viewer/stop.cmd` | 双击/手工入口（停止服务）：按端口（8100 dev / 8101 start）找 LISTENING 进程、只杀 python；可选参数指定单端口。dev 服务的独立最小化窗口关窗或本脚本均可停止（2026-09-29 追加） |
 | `apps/viewer/.gitignore` | 忽略三个 dev 产物与自检中间产物目录 | `apps/viewer/.gitignore:2` 到 `apps/viewer/.gitignore:4`、`apps/viewer/.gitignore:6` |
 
 ## 关键流程与不变量
@@ -42,7 +43,7 @@
 | 冒烟的文件注入方式 | 用 CDP 把本地 `.replay` 塞进 `#pane-replay input[type=file]`，与用户点选同链路 | `apps/viewer/test/smoke-cdp.mjs:330` |
 | 页面资源 404 兜底 | 捕获阶段监听 `script` / `link` / `img` 的 `error`，按文件名是否含 `.wasm` 给不同构建指引并打开 `#fatal` | `apps/viewer/web/index.html:95` 到 `apps/viewer/web/index.html:107` |
 | 页面入口标签形态 | 入库版本是 `<script type="module" src="./app.js">`；single 产物由构建脚本改写为 classic | `apps/viewer/web/index.html:111`、`apps/viewer/scripts/build-dist.mjs:335` |
-| `.cmd` 与 package.json 并行 | 三个 `.cmd`（`dev` / `build` / `start`）不通过任何 npm script 转发：`npm run dev` / `build:dist` / `check:api` 是另一条等价路径 | `apps/viewer/package.json:18`、`apps/viewer/dev.cmd:98`、`apps/viewer/start.cmd:51` |
+| `.cmd` 与 package.json 并行 | 四个 `.cmd`（`dev` / `build` / `start` / `stop`）不通过任何 npm script 转发：`npm run dev` / `build:dist` / `check:api` 是另一条等价路径 | `apps/viewer/package.json:18`、`apps/viewer/dev.cmd:95`、`apps/viewer/start.cmd:51` |
 | dev 产物不入库 | `web/app.js` / `web/worker.js` / `web/websurf_viewer_wasm_bg.wasm` 三条忽略规则 | `apps/viewer/.gitignore:2` 到 `apps/viewer/.gitignore:4` |
 
 ## 已知缺口

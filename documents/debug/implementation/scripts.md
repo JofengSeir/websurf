@@ -51,8 +51,9 @@
 | `apps/debug/dev.cmd` | 全链条：四项工具链自检（`:17`）→ 依赖 → **强制** `npm run build:wasm`（`:48`）→ `npm run build:ts`（`:58`）→ 跑本工程五道测试门（`:68`）→ 起 dev 服务并开浏览器（默认端口 8080，`:7`，服务 `web/`） |
 | `apps/debug/build.cmd` | 重编译并打包：工具链自检（`:24`）→ 依赖 → `build:wasm`（`:52`）→ `npm run check:api`（`:61`）→ `build:ts`（`:71`）→ `build-dist.mjs`（`:80`）。参数 `[single\|multi]`（默认 `single`，`:7`、`:13`） |
 | `apps/debug/start.cmd` | **只启动**、不做任何构建：校验 `dist/index.html` 存在（`:19`）→ 起服务并开浏览器（默认端口 8081，`:7`，服务 `dist/`）；缺 `dist/` 时报错并提示先跑 `build.cmd` |
+| `apps/debug/stop.cmd` | **停止服务**：按端口（8080 dev / 8081 start）找 LISTENING 进程、只杀 python（防误伤同端口外部程序）；可选参数指定单端口。dev 服务运行在独立最小化窗口（标题 `WebSurf-debug dev server :8080`），关窗或本脚本均可停止 |
 
-> 三者分工：`dev` = 重编译 + 测试 + 打开（开发循环）；`build` = 重编译 + 打包；`start` = 单独启动已打包产物。旧的 `start-dev.cmd` / `play.cmd` / `build-dist.cmd` 已由这三个入口取代（2026-09-24）。
+> 四者分工：`dev` = 重编译 + 测试 + 打开（开发循环，服务在独立最小化窗口）；`build` = 重编译 + 打包；`start` = 单独启动已打包产物；`stop` = 按端口停掉 dev / start 的 python 服务。旧的 `start-dev.cmd` / `play.cmd` / `build-dist.cmd` 已由这些入口取代（2026-09-24，stop 为 2026-09-29 追加）。
 
 ## 关键流程与不变量
 
@@ -79,4 +80,4 @@
 8. ~~`start-dev.cmd` 的 wasm 过期门与被服务的 wasm 不是同一路径~~ **已消除（2026-09-24）**：`dev.cmd` 不再用过期门判断，而是**无条件**跑 `npm run build:wasm`（`apps/debug/dev.cmd:48`），而 `build:wasm` 在构建后会把 `pkg/` 的 wasm 复制到 `web/`（`apps/debug/package.json:8`）⇒ `web/` 与 `pkg/` 同步刷新。**保留为不变量**：`web/websurf_wasm_bg.wasm` 仍只由 `build:wasm` 更新（页面加载的是 `web/` 那份，见 `apps/debug/src/main-wasm.ts:23`），任何跳过 `build:wasm` 的路径都会让 dev 页面用到旧产物。
 9. ~~`play.cmd` 的 wasm 存在性门只看 `pkg/`~~ **已消除（2026-09-24）**：`build.cmd` 同样无条件 `build:wasm`（`apps/debug/build.cmd:52`），不存在"产物存在就跳过重建"的分支 ⇒ 打包用的 `pkg/`（读取处 `apps/debug/scripts/build-dist.mjs:78`）与 dev 页面用的 `web/` 都由这一次重编译刷新。
 10. ~~`start-dev.cmd` 只守 `python`~~ **已消除（2026-09-24）**：`dev.cmd` 的工具链自检覆盖 **npm / node / python / wasm-pack** 四项（`apps/debug/dev.cmd:17` 起），`build.cmd` 覆盖 npm / wasm-pack / node 三项（`apps/debug/build.cmd:24` 起）。
-11. **三个 `.cmd` 没有任何 npm script 或相互转发**（`dev.cmd` / `build.cmd` / `start.cmd` 各自独立）：`npm run dev`、`npm run build:dist`、`npm run check:api` 是与它们并行的独立入口，因此双击入口与命令行入口的环境准备步骤各写一套；`start.cmd` 只服务 `dist/`，不会替你补构建。
+11. **四个 `.cmd` 没有任何 npm script 或相互转发**（`dev.cmd` / `build.cmd` / `start.cmd` / `stop.cmd` 各自独立）：`npm run dev`、`npm run build:dist`、`npm run check:api` 是与它们并行的独立入口，因此双击入口与命令行入口的环境准备步骤各写一套；`start.cmd` 只服务 `dist/`，不会替你补构建。
