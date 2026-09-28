@@ -193,19 +193,29 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 }
 
 /* ── ESC 设置面板：素色遮罩 + 磨砂窗口（右上 10px 切角 = 菱角主语彙，
-   与右上螺丝同位成组；切角与外投影互斥——clip-path 会裁掉外投影，
-   取切角，窗口边缘由 1px 边与磨砂亮度对比定义）。
-   P3 壳体：顶缘压槽（外亮 1px + 内暗 1px，嵌片嵌在槽内）+ 内周边发丝。
-   布局（8.4-1）：高度内容驱动 auto/520px/92vh，内容少不留空白。 ── */
+   与右上螺丝同位成组）。切角斜边由 #panel::before 补 1px 边线（.win 的
+   两个伪元素已被嵌片与螺丝占用；线按固定 760×580 居中几何定位，
+   max-width:100% 的窄视口下不追随——本工程为桌面定宽场景）。
+   高度（owner 复核后定）：固定 580px——内容驱动的 auto 会随 pane
+   变来变去；稀疏 pane 的留白由页脚署名收尾（8.4-6）。 ── */
 #panel {
   position: absolute; inset: 0; z-index: 10;
   display: flex; align-items: center; justify-content: center;
   padding: 20px;
   background: var(--overlay);
 }
+/* 切角斜边 1px 边线：沿窗口右上切角内侧布置（几何 = 50%±380/290 居中
+   加切角中点偏移，rotate 45° 顺时针沿斜边） */
+#panel::before {
+  content: ""; position: absolute;
+  top: calc(50% - 284.8px); left: calc(50% + 367.3px);
+  width: 14px; height: 1px;
+  background: var(--border-strong);
+  transform: rotate(45deg);
+}
 #panel .win {
   position: relative;
-  width: 760px; max-width: 100%; height: auto; min-height: 460px; max-height: 92vh;
+  width: 760px; max-width: 100%; height: 580px; max-height: 92vh;
   display: flex;
   overflow: hidden;
   background: rgba(17, 24, 27, 0.85);
@@ -244,9 +254,9 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   padding: 20px 10px 12px;
   border-right: 1px solid var(--border);
 }
-/* 服务孔（窗口左下，5px 圆，与右上螺丝对角） */
+/* 服务孔（窗口左下，5px 圆，与右上螺丝对角；底部对齐页脚文字行） */
 #panel .nav::after {
-  content: ""; position: absolute; bottom: 10px; left: 10px;
+  content: ""; position: absolute; bottom: 13px; left: 12px;
   width: 5px; height: 5px; border-radius: 50%;
   background: var(--bg); border: 1px solid var(--border-strong);
 }
