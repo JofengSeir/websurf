@@ -128,20 +128,20 @@
             <div class="val"><input id="frictionNum" type="number" value="4" /></div></div>
           <div class="row"><label>最大速度</label>
             <input type="range" id="maxSpeed" min="100" max="1000" step="1" value="250" />
-            <div class="val"><input id="maxSpeedNum" type="number" value="250" /></div></div>
+            <div class="val"><input id="maxSpeedNum" type="number" value="250" /><span class="unit">u/s</span></div></div>
           <div class="row"><label>走路速度</label>
             <input type="range" id="walkSpeed" min="50" max="400" step="1" value="130" />
-            <div class="val"><input id="walkSpeedNum" type="number" value="130" /></div></div>
+            <div class="val"><input id="walkSpeedNum" type="number" value="130" /><span class="unit">u/s</span></div></div>
           <div class="row"><label>蹲走速度</label>
             <input type="range" id="crouchSpeed" min="30" max="300" step="1" value="85" />
-            <div class="val"><input id="crouchSpeedNum" type="number" value="85" /></div></div>
+            <div class="val"><input id="crouchSpeedNum" type="number" value="85" /><span class="unit">u/s</span></div></div>
           <div class="row"><label>停止速度</label>
             <input type="range" id="stopSpeed" min="10" max="400" step="1" value="100" />
-            <div class="val"><input id="stopSpeedNum" type="number" value="100" /></div></div>
+            <div class="val"><input id="stopSpeedNum" type="number" value="100" /><span class="unit">u/s</span></div></div>
           <h4>跳跃</h4>
           <div class="row"><label>跳跃速度</label>
             <input type="range" id="jumpSpeed" min="100" max="600" step="1" value="302" />
-            <div class="val"><input id="jumpSpeedNum" type="number" value="302" /></div></div>
+            <div class="val"><input id="jumpSpeedNum" type="number" value="302" /><span class="unit">u/s</span></div></div>
           <h4>行为</h4>
           <div class="row"><label>自动连跳</label>
             <input type="checkbox" id="autobhop" checked /></div>
@@ -150,7 +150,7 @@
           <h4>传送</h4>
           <div class="row"><label>落地触发门槛</label>
             <input type="range" id="teleportGateTicks" min="1" max="20" step="1" value="3" />
-            <div class="val"><input id="teleportGateTicksNum" type="number" value="3" /></div></div>
+            <div class="val"><input id="teleportGateTicksNum" type="number" value="3" /><span class="unit">帧</span></div></div>
           <div class="hint">传送门槛：落地稳定 ≥N 帧后才判定位于传送平面（防跳跃穿面误触）。</div>
         </div>
 
@@ -161,13 +161,13 @@
           <h4>碰撞箱</h4>
           <div class="row"><label>半宽</label>
             <input type="range" id="hullHalfWidth" min="4" max="32" step="1" value="16" />
-            <div class="val"><input id="hullHalfWidthNum" type="number" value="16" /></div></div>
+            <div class="val"><input id="hullHalfWidthNum" type="number" value="16" /><span class="unit">HU</span></div></div>
           <div class="row"><label>站高</label>
             <input type="range" id="hullStandHeight" min="36" max="144" step="1" value="72" />
-            <div class="val"><input id="hullStandHeightNum" type="number" value="72" /></div></div>
+            <div class="val"><input id="hullStandHeightNum" type="number" value="72" /><span class="unit">HU</span></div></div>
           <div class="row"><label>蹲高</label>
             <input type="range" id="hullDuckHeight" min="24" max="108" step="1" value="54" />
-            <div class="val"><input id="hullDuckHeightNum" type="number" value="54" /></div></div>
+            <div class="val"><input id="hullDuckHeightNum" type="number" value="54" /><span class="unit">HU</span></div></div>
           <div class="row"><label></label><button class="small" id="hullReset">恢复默认</button></div>
         </div>
 
@@ -193,7 +193,7 @@
           <h4>键盘视角</h4>
           <div class="row"><label>Q/E 旋转 (°/s)</label>
             <input type="range" id="yawBindSpeed" min="0" max="720" step="1" value="210" />
-            <div class="val"><input id="yawBindSpeedNum" type="number" value="210" /></div></div>
+            <div class="val"><input id="yawBindSpeedNum" type="number" value="210" /><span class="unit">°/s</span></div></div>
         </div>
 
         <!-- 显示 -->
@@ -207,20 +207,20 @@
             <input type="color" id="chColor" value="#4ade80" /></div>
           <div class="row"><label>线长</label>
             <input type="range" id="chSize" min="1" max="20" step="1" value="6" />
-            <div class="val"><input id="chSizeNum" type="number" min="1" max="20" value="6" /></div></div>
+            <div class="val"><input id="chSizeNum" type="number" min="1" max="20" value="6" /><span class="unit">px</span></div></div>
           <div class="row"><label>粗细</label>
             <input type="range" id="chThickness" min="1" max="8" step="1" value="2" />
-            <div class="val"><input id="chThicknessNum" type="number" min="1" max="8" value="2" /></div></div>
+            <div class="val"><input id="chThicknessNum" type="number" min="1" max="8" value="2" /><span class="unit">px</span></div></div>
           <div class="row"><label>中心间隙</label>
             <input type="range" id="chGap" min="0" max="16" step="1" value="4" />
-            <div class="val"><input id="chGapNum" type="number" min="0" max="16" value="4" /></div></div>
+            <div class="val"><input id="chGapNum" type="number" min="0" max="16" value="4" /><span class="unit">px</span></div></div>
           <div class="row"><label>描边</label>
             <input type="checkbox" id="chOutline" checked /></div>
           <div class="row"><label>中心点</label>
             <input type="checkbox" id="chDot" /></div>
           <div class="row"><label>视野 FOV</label>
             <input type="range" id="fov" min="60" max="110" step="0.1" value="73.6" />
-            <div class="val"><input id="fovNum" type="number" min="60" max="110" value="73.6" /></div></div>
+            <div class="val"><input id="fovNum" type="number" min="60" max="110" value="73.6" /><span class="unit">°</span></div></div>
           <div class="row"><label>亮度（曝光）</label>
             <input type="range" id="exposure" min="0.1" max="8" step="0.01" value="2.3" />
             <div class="val"><input id="exposureNum" type="number" min="0.1" max="8" step="0.01" value="2.3" /></div></div>
@@ -232,7 +232,7 @@
             <div class="val"><input id="ambientScaleNum" type="number" min="0" max="3" step="0.01" value="1" /></div></div>
           <div class="row"><label title="0 = 自动（按地图包围盒对角线的一半）；单位 ≈ 1 英寸。超出的空间块不渲染（省 draw call）">渲染距离</label>
             <input type="range" id="renderDistance" min="0" max="60000" step="500" value="0" />
-            <div class="val"><input id="renderDistanceNum" type="number" min="0" max="60000" step="500" value="0" /></div></div>
+            <div class="val"><input id="renderDistanceNum" type="number" min="0" max="60000" step="500" value="0" /><span class="unit">HU</span></div></div>
           <h4>速度面板</h4>
           <div class="row"><label>模式</label>
             <select id="speedMode">
@@ -271,7 +271,7 @@
             <button class="small" id="noclipToggle">自由视角</button></div>
           <div class="row"><label>移动速度</label>
             <input type="range" id="noclipSpeed" min="200" max="3000" step="1" value="800" />
-            <div class="val"><input id="noclipSpeedNum" type="number" value="800" /></div></div>
+            <div class="val"><input id="noclipSpeedNum" type="number" value="800" /><span class="unit">u/s</span></div></div>
         </div>
 
         <div class="mod-pane" data-pane="health">
