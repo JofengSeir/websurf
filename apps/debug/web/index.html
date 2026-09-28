@@ -5,29 +5,60 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WebSurf-debug</title>
   <style>
+    /* ============================================================
+     * WebSurf-debug — 页面样式（内联单块；构建契约：本工程 KEEP_SINGLE
+     * 不含外置 styles.css，故样式必须留在页面里，见 scripts/build-dist.mjs）。
+     *
+     * 设计基调：扁平素色的工具侧栏（与 apps/game、apps/viewer 的 web/styles.css
+     * 同一语言）。实色块 + 1px 边框 + 单强调色 --accent，无动画、无渐变、
+     * 无装饰性投影；--ok / --err / --warn 只表状态。
+     * 路径图例的三个色点（.lg-render / .lg-tick / .lg-break）与来源徽记色
+     * 是数据语义：它们镜像 apps/debug/src/renderer/path-recorder.ts 的
+     * 3D 线色与 apps/debug/src/app.ts 的 SOURCE_LABEL，改值须两侧同步。
+     * JS 契约：#error 的显隐由 apps/debug/src/app.ts 直接写 style.display；
+     * #crosshair 的 --ch-* 变量由 applyCrosshair 写入，变量名勿改。
+     * ============================================================ */
+    :root {
+      color-scheme: dark;
+      --bg: #121417;
+      --panel: #1b1e22;
+      --panel-trans: rgba(27, 30, 34, 0.92);
+      --overlay: rgba(14, 16, 18, 0.62);
+      --border: #363b42;
+      --border-strong: #4a5058;
+      --text: #d9dce0;
+      --muted: #8f959c;
+      --accent: #6ea3d8;
+      --accent-weak: rgba(110, 163, 216, 0.15);
+      --ok: #8cbd92;
+      --err: #d98076;
+      --warn: #d2a45f;
+      --r: 4px;
+      --mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+    }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       font-size: 12px;
-      color: #d4d4d4;
-      background: #1e1e1e;
+      color: var(--text);
+      background: var(--bg);
     }
     button {
       padding: 3px 10px;
       font-size: 12px;
-      border: 1px solid #3c3c3c;
-      background: #2d2d2d;
-      color: #d4d4d4;
-      border-radius: 2px;
+      border: 1px solid var(--border-strong);
+      background: transparent;
+      color: var(--text);
+      border-radius: var(--r);
       cursor: pointer;
     }
-    button:hover:not(:disabled) { background: #3a3a3a; border-color: #4a90e2; }
+    button:hover:not(:disabled) { background: var(--accent-weak); }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
-    input[type="file"] { font-size: 11px; color: #d4d4d4; }
+    input[type="file"] { font-size: 11px; color: var(--text); }
     input[type="file"]::-webkit-file-upload-button {
-      background: #2d2d2d; color: #d4d4d4; border: 1px solid #3c3c3c;
-      padding: 2px 8px; border-radius: 2px; cursor: pointer;
+      background: transparent; color: var(--text); border: 1px solid var(--border-strong);
+      padding: 2px 8px; border-radius: var(--r); cursor: pointer;
     }
 
     /* 整体布局 */
@@ -35,72 +66,64 @@
     #topbar {
       flex: 0 0 32px; height: 32px;
       display: flex; align-items: center; gap: 6px;
-      padding: 0 8px;
-      background: #252526; border-bottom: 1px solid #3c3c3c;
+      padding: 0 10px;
+      background: var(--panel); border-bottom: 1px solid var(--border);
     }
-    #topbar .title { font-size: 13px; font-weight: bold; color: #4a90e2; margin-right: 12px; white-space: nowrap; }
+    #topbar .title { font-size: 13px; font-weight: 600; color: var(--accent); margin-right: 12px; white-space: nowrap; }
     #topbar .spacer { flex: 1; }
     #main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
     #sidebar {
       flex: 0 0 300px; width: 300px;
-      background: #252526; border-right: 1px solid #3c3c3c;
+      background: var(--panel); border-right: 1px solid var(--border);
       overflow-y: auto; overflow-x: hidden;
-      /* 隐藏侧栏滚动条：滚动能力保留（scrollbar-width: none 与 ::-webkit-scrollbar） */
+      /* 滚动能力保留，滚动条隐藏 */
       scrollbar-width: none;
       -ms-overflow-style: none;
     }
     #sidebar::-webkit-scrollbar { display: none; }
-    /* 紧凑布局：收紧 details / summary / .acc-body 的间距与 .ctrl-grid 的行列间隔 */
-    #sidebar details { border-bottom: 1px solid #2a2a2a; }
-    #sidebar summary { padding: 5px 8px; }
-    #sidebar .acc-body { padding: 3px 8px 6px 8px; }
-    #sidebar .ctrl-grid { gap: 3px 8px; }
-    #previewArea { flex: 1; position: relative; overflow: hidden; background: #222; min-width: 0; }
+    #previewArea { flex: 1; position: relative; overflow: hidden; background: var(--bg); min-width: 0; }
     #preview { width: 100%; height: 100%; display: block; cursor: pointer; }
 
-    /* 状态栏 */
+    /* 状态行 / 错误行（侧栏顶部） */
     #status {
       padding: 6px 8px; font-size: 11px;
-      color: #888; border-bottom: 1px solid #2a2a2a;
-      background: #252526; font-style: italic;
+      color: var(--muted); border-bottom: 1px solid var(--border);
+      background: var(--panel);
     }
-    #status.success { color: #4a4; font-weight: bold; font-style: normal; }
-    #status.error { color: #f44; font-weight: bold; font-style: normal; }
+    #status.success { color: var(--ok); }
+    #status.error { color: var(--err); }
     #error {
-      color: #f44; font-weight: bold;
+      color: var(--err);
       padding: 6px 8px; font-size: 11px;
-      background: #2a1515; border-bottom: 1px solid #3c3c3c;
+      background: rgba(217, 128, 118, 0.1); border-bottom: 1px solid var(--border);
     }
 
     /* 手风琴（details/summary） */
-    details {
-      border-bottom: 1px solid #2a2a2a;
-    }
+    details { border-bottom: 1px solid var(--border); }
     summary {
       display: flex; align-items: center; gap: 6px;
       padding: 6px 8px; cursor: pointer;
-      font-size: 12px; font-weight: bold; color: #d4d4d4;
+      font-size: 12px; font-weight: 600; color: var(--text);
       user-select: none;
       list-style: none;
     }
     summary::-webkit-details-marker { display: none; }
     summary::before {
-      content: "\25B6"; color: #888; font-size: 10px;
+      content: "\25B6"; color: var(--muted); font-size: 10px;
       display: inline-block; width: 12px;
-      transition: transform 0.15s;
     }
     details[open] > summary::before { transform: rotate(90deg); }
-    summary:hover { background: #2d2d2d; }
+    summary:hover { background: var(--accent-weak); }
     .acc-body { padding: 4px 8px 8px 8px; }
 
     /* 手风琴内子分组标题 */
     .acc-section-title {
-      font-size: 11px; color: #9098b5; margin: 6px 0 4px;
+      font-size: 11px; color: var(--muted); margin: 6px 0 4px;
       letter-spacing: 0.02em;
     }
     .acc-section-title:first-child { margin-top: 0; }
     .acc-divider {
-      border-top: 1px solid #2a2d3a;
+      border-top: 1px solid var(--border);
       margin-top: 6px; padding-top: 6px;
     }
 
@@ -112,71 +135,156 @@
       align-items: center;
       font-size: 12px;
     }
-    .ctrl-grid label { color: #b0b0b0; }
-    .ctrl-grid input[type="range"] { width: 100%; accent-color: #4a90e2; }
+    .ctrl-grid label { color: var(--muted); }
+    .ctrl-grid input[type="range"] { width: 100%; accent-color: var(--accent); }
     .ctrl-grid .val {
       text-align: right;
       font-variant-numeric: tabular-nums;
-      color: #4a90e2;
-      font-weight: bold;
+      color: var(--text);
+      font-family: var(--mono);
       font-size: 11px;
     }
     .ctrl-grid select {
       width: 100%; padding: 2px 4px;
-      background: #1e1e1e; color: #d4d4d4;
-      border: 1px solid #3c3c3c; border-radius: 2px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--r);
       font-size: 11px;
     }
-    .ctrl-grid input[type="checkbox"] { accent-color: #4a90e2; width: 14px; height: 14px; }
+    .ctrl-grid input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
     .ctrl-full { grid-column: 1 / -1; }
     .ctrl-checkbox-row {
       display: flex; align-items: center; gap: 6px;
       padding: 2px 0;
     }
-    .ctrl-checkbox-row label { color: #d4d4d4; cursor: pointer; }
+    .ctrl-checkbox-row label { color: var(--text); cursor: pointer; }
+    /* 带说明的复选框行（路径记录四个分量开关；与 .ctrl-checkbox-row 同构，另加行距） */
+    .ctrl-check-row {
+      display: flex; align-items: center; gap: 6px;
+      margin-top: 2px; cursor: pointer; color: var(--text);
+    }
     /* 参数数值框：与滑块双向同步——滑块 input 写回本框，本框 change 写回滑块（NaN 直接忽略；
        见 `apps/debug/src/app.ts` 的 `bindSlider`） */
     .param-num {
       width: 56px;
-      background: #1e1e1e; color: #4a90e2;
-      border: 1px solid #3c3c3c; border-radius: 2px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--r);
       text-align: right; font-size: 11px;
       font-variant-numeric: tabular-nums;
+      font-family: var(--mono);
       padding: 1px 3px;
     }
-    .param-num:focus { outline: none; border-color: #4a90e2; }
-    .ctrl-hint { font-size: 11px; color: #9098b5; white-space: nowrap; }
+    .param-num:focus { outline: none; border-color: var(--accent); }
+    .ctrl-hint { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+    /* 单选组（纹理画质 / 光照模式） */
+    .ctrl-radio-group { display: flex; gap: 14px; }
+    .ctrl-radio {
+      display: inline-flex; align-items: center; gap: 4px;
+      color: var(--text); cursor: pointer;
+    }
+    .ctrl-radio input { accent-color: var(--accent); }
+
+    /* 说明段（.hint）与横排按钮行 */
+    .hint {
+      font-size: 11px; color: var(--muted); line-height: 1.7;
+      margin: 6px 0 0; padding: 2px 0 2px 8px;
+      border-left: 2px solid var(--border-strong);
+    }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+
+    /* 路径记录：图例 / 构建标签 / 计数行。三个色点是数据语义，
+       镜像 path-recorder 的 3D 线色（改值须与该文件同步） */
+    .path-legend { font-size: 11px; color: var(--muted); line-height: 1.6; }
+    .lg-render { color: #22d3ee; }
+    .lg-tick { color: #f59e0b; }
+    .lg-break { color: #ff2626; }
+    .path-legend-note { font-size: 10px; color: var(--muted); }
+    .path-build-tag { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .path-counts { font-size: 11px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+    /* 参数来源徽记（HTML 图例与 JS 写入的行内色共用这套语义：
+       默认 = --ok、手动 = --accent、地图设置 = --warn，见 SOURCE_LABEL） */
+    .src-note { font-size: 10px; color: var(--muted); }
+    .src-default { color: var(--ok); }
+    .src-manual { color: var(--accent); }
+    .param-footer {
+      display: flex; align-items: center; gap: 6px;
+      margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border);
+    }
 
     /* 元数据 KV */
     .kv { display: grid; grid-template-columns: 110px 1fr; gap: 2px 8px; font-size: 11px; }
     .kv-row { display: contents; }
-    .kv .k { color: #888; }
-    .kv .v { color: #d4d4d4; }
+    .kv .k { color: var(--muted); }
+    .kv .v { color: var(--text); }
 
     /* 出生点选择 */
     .spawn-select {
       width: 100%; padding: 2px 4px;
-      background: #1e1e1e; color: #d4d4d4;
-      border: 1px solid #3c3c3c; border-radius: 2px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--r);
       font-size: 11px;
       max-height: 200px;
     }
 
+    /* 自定义传送点：表单与列表（列表行由 apps/debug/src/app.ts 的
+       renderCustomTeleports 用 .tp-* 类生成） */
+    .tp-form { display: none; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+    .tp-form-grid { display: flex; gap: 4px; }
+    .tp-input {
+      width: 100%; box-sizing: border-box;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--r);
+      font-size: 11px; padding: 2px 4px;
+    }
+    .tp-input:focus { outline: none; border-color: var(--accent); }
+    .tp-form-actions { display: flex; gap: 6px; margin-top: 2px; }
+    #customTeleportList { font-size: 11px; color: var(--muted); line-height: 1.6; }
+    .tp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .tp-count { color: var(--muted); font-size: 10px; }
+    .tp-clear { padding: 1px 6px; font-size: 10px; }
+    .tp-row { display: flex; align-items: center; gap: 4px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+    .tp-go {
+      padding: 1px 6px; font-size: 11px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px;
+    }
+    .tp-pos { color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .tp-del { margin-left: auto; padding: 1px 6px; font-size: 11px; }
+
+    /* 权威健康日志（外置 web/styles.css 不被本页加载，样式在此承担） */
+    .health-log {
+      font: 11px/1.5 var(--mono);
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 8px 10px;
+      max-height: 220px;
+      overflow-y: auto;
+      margin: 6px 0 0;
+    }
+    /* 权威健康计数行（.row 仅此一处使用） */
+    .row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .row label { color: var(--muted); }
+
     /* 预览区悬浮元素 */
     #hud {
       position: absolute; top: 8px; right: 8px;
-      background: rgba(20, 20, 20, 0.75);
-      color: #ddd; padding: 4px 8px; border-radius: 2px;
-      font-size: 11px; font-family: ui-monospace, Consolas, monospace;
+      background: var(--panel-trans);
+      color: var(--text); padding: 4px 8px; border-radius: var(--r);
+      font-size: 11px; font-family: var(--mono);
       pointer-events: none;
-      border: 1px solid #3c3c3c;
+      border: 1px solid var(--border);
       line-height: 1.5;
       min-width: 200px;
       max-width: 400px;
       white-space: pre;
+      font-variant-numeric: tabular-nums;
     }
-    #hud .label { color: #888; }
-    #hud .v { color: #4a90e2; }
+    #hud .label { color: var(--muted); }
+    #hud .v { color: var(--accent); }
     /* 中心准星：几何与配色全部由 --ch-* 变量驱动，变量由 `apps/debug/src/app.ts` 的 `applyCrosshair` 写入 */
     #crosshair {
       position: absolute; left: 50%; top: 50%;
@@ -223,59 +331,48 @@
     }
     #hints {
       position: absolute; bottom: 8px; right: 8px;
-      background: rgba(20, 20, 20, 0.75);
-      color: #aaa; padding: 4px 8px; border-radius: 2px;
+      background: var(--panel-trans);
+      color: var(--muted); padding: 4px 8px; border-radius: var(--r);
       font-size: 11px;
       pointer-events: none;
-      border: 1px solid #3c3c3c;
+      border: 1px solid var(--border);
       line-height: 1.5;
     }
 
-    /* 缺失材质纹理确认弹窗：配色沿用本页暗色（#252526 底 / #3c3c3c 边框，与 #topbar、#sidebar 同值） */
+    /* 缺失材质纹理确认弹窗（素色遮罩 + 实色卡） */
     .mt-modal {
       position: fixed; inset: 0; z-index: 100;
-      background: rgba(0, 0, 0, 0.5);
+      background: var(--overlay);
       display: flex; align-items: center; justify-content: center;
     }
     .mt-modal.hidden { display: none; }
     .mt-modal-box {
       width: min(620px, 90vw); max-height: 72vh;
       display: flex; flex-direction: column;
-      background: #252526; border: 1px solid #3c3c3c; border-radius: 2px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+      background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--r);
       padding: 14px 16px 12px;
     }
     .mt-modal-box h3 {
       margin: 0 0 8px; padding-bottom: 8px;
-      font-size: 13px; font-weight: bold; color: #d4d4d4;
-      border-bottom: 1px solid #3c3c3c;
+      font-size: 13px; font-weight: 600;
+      border-bottom: 1px solid var(--border);
     }
     .mt-summary {
-      font-size: 12px; color: #b0b0b0; margin-bottom: 10px; line-height: 1.7;
+      font-size: 12px; color: var(--muted); margin-bottom: 10px; line-height: 1.7;
     }
-    .mt-summary b { color: #4a90e2; }
-    .mt-summary b.mt-ok-num { color: #4a4; }
-    .mt-summary b.mt-bad-num { color: #f44; }
+    .mt-summary b { color: var(--accent); }
+    .mt-summary b.mt-ok-num { color: var(--ok); }
+    .mt-summary b.mt-bad-num { color: var(--err); }
     .mt-list {
       overflow-y: auto; flex: 1;
-      font-family: Consolas, "Courier New", monospace; font-size: 12px;
-      border: 1px solid #3c3c3c; border-radius: 2px; padding: 6px 8px;
-      background: #1e1e1e;
+      font-family: var(--mono); font-size: 12px;
+      border: 1px solid var(--border); border-radius: var(--r); padding: 6px 8px;
+      background: var(--bg);
     }
-    .mt-list .mt-row { padding: 1px 0; color: #c8c8c8; white-space: nowrap; }
-    .mt-list .mt-row .mt-covered { color: #4a4; }
-    .mt-list .mt-row .mt-orphan { color: #f44; }
+    .mt-list .mt-row { padding: 1px 0; color: var(--text); white-space: nowrap; }
+    .mt-list .mt-row .mt-covered { color: var(--ok); }
+    .mt-list .mt-row .mt-orphan { color: var(--err); }
     .mt-actions { margin-top: 10px; text-align: right; }
-    .mt-ok {
-      padding: 3px 14px;
-      font-size: 12px;
-      border: 1px solid #3c3c3c;
-      background: #2d2d2d;
-      color: #d4d4d4;
-      border-radius: 2px;
-      cursor: pointer;
-    }
-    .mt-ok:hover { background: #3a3a3a; border-color: #4a90e2; }
   </style>
 </head>
 <body>
@@ -381,42 +478,42 @@
           <summary>路径记录</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
-              <div class="ctrl-full" style="font-size:11px;color:#9aa3b2;line-height:1.6;"
+              <div class="ctrl-full path-legend"
                    title="两条线都记录 PhysWorld 脚底中心点（origin 的 x/y/z），节点之间直连直线段（真实轨迹），跳变 >100 HU（respawn/传送）处自动断开不连线。采样严格按各自的计算节点：渲染物理 = 主线程 predPhys 每个 rAF 物理步一个节点（更新率 = 显示器刷新率）；tick 物理 = Worker 权威帧每来一帧新的（V_A 变化）一个节点（64 档 ≈ 67 节点/秒）。tick 段按折角着色：绿 ≤5° / 黄 ≤20° / 红 >20°。导出均为原始节点，带 t 供外部按时间对齐。">
-                <span style="color:#22d3ee">■</span> 渲染物理（主线程 predPhys，每 rAF）<br />
-                <span style="color:#f59e0b">■</span> tick 物理（Worker 权威帧，每新帧）
-                <span style="color:#ff2626">■</span> 硬折角(&gt;20°)<br />
-                <span style="font-size:10px;color:#7a8398;">tick 节点时间戳 = 该帧发布所依据的<b>渲染时钟采样时刻 τ</b>（不是轮询时刻）；权威发布位置即渲染轨迹上的一个采样点 → 偏差梳与垂距都应 ≈0。</span><br />
+                <span class="lg-render">■</span> 渲染物理（主线程 predPhys，每 rAF）<br />
+                <span class="lg-tick">■</span> tick 物理（Worker 权威帧，每新帧）
+                <span class="lg-break">■</span> 硬折角(&gt;20°)<br />
+                <span class="path-legend-note">tick 节点时间戳 = 该帧发布所依据的<b>渲染时钟采样时刻 τ</b>（不是轮询时刻）；权威发布位置即渲染轨迹上的一个采样点 → 偏差梳与垂距都应 ≈0。</span><br />
               </div>
 
               <!-- 构建标签：静态文本、无代码读写；本页不校验构建版本，与产物不符时页面不会提示。 -->
-              <div class="ctrl-full" id="pathBuildTag" style="font-size:10px;color:#7a8398;margin-top:2px;">
+              <div class="ctrl-full path-build-tag" id="pathBuildTag">
                 实现版本 v4 · 节点直连段 + tick 时间戳=渲染时钟 τ + 垂距/偏差梳分列（若这里不是 v4，说明浏览器跑的是旧构建 → Ctrl+Shift+R 强刷）
               </div>
 
-              <div class="ctrl-full" id="pathCounts" style="font-size:11px;color:#9aa3b2;margin-top:4px;"
+              <div class="ctrl-full path-counts" id="pathCounts"
                    title="两个度量口径不同，勿混用：①垂距 = 每个 tick 点到渲染折线的最短距离（投影钳位到线段；跳变 >100 HU 的段不参与）——对采样相位不敏感，是**验收口径**（面板为 ±250ms 近似窗，权威判定 = debug/scripts/path-acceptance.mjs，阈值 稳态 p95 ≤ 2 HU / max ≤ 10 HU）。②偏差梳 = 每个 tick 点与渲染线【同一时刻】插值位置的差——时间对齐、含切向滞后，会被 respawn/传送放大成数百 HU。">
                 未开始 · 渲染 0 点 / tick 0 点
               </div>
 
-              <div class="ctrl-full" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
-                <button id="pathToggleBtn" style="padding:3px 10px;">开始记录</button>
-                <button id="pathClearBtn" style="padding:3px 10px;">清除</button>
-                <button id="pathExportJsonBtn" style="padding:3px 10px;">导出 JSON</button>
-                <button id="pathExportCsvBtn" style="padding:3px 10px;">导出 CSV</button>
+              <div class="ctrl-full btn-row">
+                <button id="pathToggleBtn">开始记录</button>
+                <button id="pathClearBtn">清除</button>
+                <button id="pathExportJsonBtn">导出 JSON</button>
+                <button id="pathExportCsvBtn">导出 CSV</button>
               </div>
 
-              <label class="ctrl-full" style="margin-top:6px;">
+              <label class="ctrl-check-row">
                 <input type="checkbox" id="pathRenderVisibleChk" checked /> 显示渲染物理线（密，320Hz）
               </label>
-              <label class="ctrl-full" style="margin-top:2px;">
+              <label class="ctrl-check-row">
                 <input type="checkbox" id="pathTickVisibleChk" checked /> 显示 tick 物理线 + 节点（64Hz）
               </label>
-              <label class="ctrl-full" style="margin-top:2px;"
+              <label class="ctrl-check-row"
                      title="tick 节点方点（每 64Hz 一个）。方点在屏幕上密集时会连成一条'方链'、看起来不是线——此时可单独关掉它，只保留折线本身。">
                 <input type="checkbox" id="pathDotsVisibleChk" checked /> 显示 tick 节点方点
               </label>
-              <label class="ctrl-full" style="margin-top:2px;"
+              <label class="ctrl-check-row"
                      title="每个 tick 节点画一条洋红短线，连到渲染线在【同一时刻】的插值位置。两个物理计算的差异在 3D 里最难看（tick 段 22 HU 被透视压扁、又被密的渲染线盖住），偏差梳把它变成一根根看得见的短线，且不受相机朝向影响。">
                 <input type="checkbox" id="pathDeviVisibleChk" /> 显示偏差梳（tick→渲染 同时刻连线）
               </label>
@@ -448,7 +545,7 @@
               <input type="range" id="tickRate" min="48" max="128" step="1" value="64" />
               <div class="val"><input type="number" id="tickRateNum" class="param-num" min="48" max="128" step="any" value="64" /></div>
 
-              <div class="ctrl-full" style="margin-top:4px;">
+              <div class="ctrl-full btn-row">
                 <button id="respawnBtn" disabled>重生</button>
               </div>
             </div>
@@ -479,9 +576,9 @@
                   <input type="checkbox" id="autoRestoreHull" checked />
                   <label for="autoRestoreHull" title="体积被改大导致卡住时自动恢复默认体积">卡住自动恢复默认体积</label>
                 </div>
-                <div class="ctrl-full" style="display: flex; gap: 6px; align-items: center; margin-top: 2px;">
-                  <button id="resetHullBtn" style="padding: 2px 8px;">恢复默认体积</button>
-                  <span id="hullSourceBadge" style="font-size: 10px; color: #9098b5;"></span>
+                <div class="ctrl-full btn-row">
+                  <button id="resetHullBtn">恢复默认体积</button>
+                  <span id="hullSourceBadge" class="src-note"></span>
                 </div>
               </div>
             </div>
@@ -492,10 +589,10 @@
                 力学参数（地速 / 重力 / 加速 / 跳跃等，拖动实时生效）
               </div>
               <div id="physicsParamList" class="ctrl-grid"></div>
-              <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2d3a;">
-                <button id="resetAllPhysicsBtn" style="padding: 2px 8px;">恢复全部默认</button>
-                <span style="font-size: 10px; color: #6a6f8a;">
-                  来源：<span style="color:#4a4;">模式默认</span> / <span style="color:#4a90e2;">手动修改</span>
+              <div class="param-footer">
+                <button id="resetAllPhysicsBtn">恢复全部默认</button>
+                <span class="src-note">
+                  来源：<span class="src-default">模式默认</span> / <span class="src-manual">手动修改</span>
                 </span>
               </div>
             </div>
@@ -516,24 +613,24 @@
         <details id="customTeleportDetails">
           <summary>自定义传送点</summary>
           <div class="acc-body">
-            <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+            <div class="btn-row">
               <button id="capturePosBtn" disabled title="保存当前玩家位置为传送点">保存当前位置</button>
               <button id="addTeleportBtn" disabled title="手动输入坐标添加传送点">手动添加</button>
             </div>
-            <form id="addTeleportForm" style="display:none; flex-direction:column; gap:4px; margin-bottom:6px;">
-              <div style="display:flex; gap:4px;">
-                <input id="tpX" type="number" step="any" placeholder="X" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
-                <input id="tpY" type="number" step="any" placeholder="Y" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
-                <input id="tpZ" type="number" step="any" placeholder="Z" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
+            <form id="addTeleportForm" class="tp-form" style="display:none;">
+              <div class="tp-form-grid">
+                <input id="tpX" class="tp-input" type="number" step="any" placeholder="X" />
+                <input id="tpY" class="tp-input" type="number" step="any" placeholder="Y" />
+                <input id="tpZ" class="tp-input" type="number" step="any" placeholder="Z" />
               </div>
-              <input id="tpName" type="text" placeholder="名称（可选）" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
-              <input id="tpYaw" type="number" step="any" placeholder="yaw（可选，留空=保持当前朝向）" style="width:100%; box-sizing:border-box; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:2px; font-size:11px; padding:1px 3px;" />
-              <div style="display:flex; gap:6px; margin-top:2px;">
-                <button type="submit" style="padding:2px 10px;">添加</button>
-                <button type="button" id="tpCancel" style="padding:2px 10px;">取消</button>
+              <input id="tpName" class="tp-input" type="text" placeholder="名称（可选）" />
+              <input id="tpYaw" class="tp-input" type="number" step="any" placeholder="yaw（可选，留空=保持当前朝向）" />
+              <div class="tp-form-actions">
+                <button type="submit">添加</button>
+                <button type="button" id="tpCancel">取消</button>
               </div>
             </form>
-            <div id="customTeleportList" style="font-size: 11px; color: #888;">
+            <div id="customTeleportList">
               尚未添加传送点。保存当前位置或手动输入坐标，一键传送。
             </div>
           </div>

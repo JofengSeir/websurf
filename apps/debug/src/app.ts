@@ -1034,9 +1034,9 @@ function updateGameStatsUI(): void {
 	const text =
 		`阶段 ${phaseLabel}  计时 ${timeLabel}  检查点 ${cpLabel}  死亡 ${snap.deaths}`;
 	dom.gameStatsEl.textContent = text;
-	// justDied 闪烁提示（500ms 后恢复）
+	// justDied 闪烁提示（500ms 后恢复）；色值取页面样式的 --err（index.html 的 <style> 块）
 	if (game.consumeJustDied()) {
-		dom.gameStatsEl.style.color = '#f44';
+		dom.gameStatsEl.style.color = 'var(--err)';
 		dom.gameStatsEl.style.fontWeight = 'bold';
 		window.setTimeout(() => {
 			if (dom.gameStatsEl) {
@@ -1907,20 +1907,18 @@ function renderCustomTeleports(list?: CustomTeleport[]): void {
 		return;
 	}
 	dom.customTeleportList.innerHTML =
-		`<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">` +
-		`<span style="color:#9098b5; font-size:10px;">${items.length} 个传送点</span>` +
-		`<button id="clearTeleportsBtn" style="padding:1px 6px; font-size:10px;">清空全部</button>` +
+		`<div class="tp-head">` +
+		`<span class="tp-count">${items.length} 个传送点</span>` +
+		`<button id="clearTeleportsBtn" class="tp-clear">清空全部</button>` +
 		`</div>` +
 		items
 			.map(
 				(tp) =>
-					`<div style="display:flex; align-items:center; gap:4px; padding:3px 0; border-bottom:1px solid #2a2a2a;">` +
-					`<button data-tp-id="${tp.id}" data-action="go" title="传送到 ${fmtPos(tp.pos)}" ` +
-					`style="padding:1px 6px; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:150px;">` +
+					`<div class="tp-row">` +
+					`<button data-tp-id="${tp.id}" data-action="go" class="tp-go" title="传送到 ${fmtPos(tp.pos)}">` +
 					`▶ ${escapeHtml(tp.name)}</button>` +
-					`<span style="color:#6a6f8a; font-size:10px; white-space:nowrap;">${fmtPos(tp.pos)}</span>` +
-					`<button data-tp-id="${tp.id}" data-action="delete" title="删除此传送点" ` +
-					`style="padding:1px 6px; font-size:11px; margin-left:auto;">✕</button>` +
+					`<span class="tp-pos">${fmtPos(tp.pos)}</span>` +
+					`<button data-tp-id="${tp.id}" data-action="delete" class="tp-del" title="删除此传送点">✕</button>` +
 					`</div>`,
 			)
 			.join('');
@@ -1976,11 +1974,12 @@ function onRenderPhysEvent(ev: RenderPhysEvent): void {
 // 物理控制面板（阶段 4：参数迁主线程，snapshot 镜像双端）
 // ---------------------------------------------------------------------------
 
-/** 参数来源标签（默认/手动/地图设置）。 */
+/** 参数来源标签（默认/手动/地图设置）。色值与页面内联样式的
+ * .src-default / .src-manual 及 --warn 同源（index.html 的 <style> 块）。 */
 const SOURCE_LABEL: Record<ParamSource, { text: string; color: string }> = {
-	'mode-default': { text: '默认', color: '#4a4' },
-	manual: { text: '手动', color: '#4a90e2' },
-	map: { text: '地图设置', color: '#c9a84a' },
+	'mode-default': { text: '默认', color: '#8cbd92' },
+	manual: { text: '手动', color: '#6ea3d8' },
+	map: { text: '地图设置', color: '#d2a45f' },
 };
 
 /** 面板渲染抑制（snapshot 回填时防触发 input 事件回发 Worker，防循环）。 */

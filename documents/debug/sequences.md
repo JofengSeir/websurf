@@ -6,8 +6,8 @@
 
 | 参与者 | 步骤 | 数据落点 | 锚点 |
 |---|---|---|---|
-| 浏览器 | 拉取页面骨架（顶栏 / 侧边栏 / 预览区 / HUD / 弹窗） | DOM：共 106 个 id | `apps/debug/web/index.html:283` |
-| 浏览器 | 先执行 COOP/COEP 补丁脚本（classic），再执行应用入口（module） | 补丁脚本负责在响应头缺失时补上隔离头；入口是 esbuild 产物 | `apps/debug/web/index.html:695`、`apps/debug/web/index.html:696` |
+| 浏览器 | 拉取页面骨架（顶栏 / 侧边栏 / 预览区 / HUD / 弹窗） | DOM：共 106 个 id | `apps/debug/web/index.html:381` |
+| 浏览器 | 先执行 COOP/COEP 补丁脚本（classic），再执行应用入口（module） | 补丁脚本负责在响应头缺失时补上隔离头；入口是 esbuild 产物 | `apps/debug/web/index.html:792`、`apps/debug/web/index.html:793` |
 | 主线程 | `main` 取画布句柄；取不到即返回 | `dom.canvas` | `apps/debug/src/app.ts:268` |
 | 主线程 | 通道选择：`crossOriginIsolated` 为真且有 `SharedArrayBuffer` → 建 `SHARED_BUFFER_SIZE` 共享缓冲，否则置 `null` | `sharedBuffer` | `apps/debug/src/app.ts:277` |
 | 主线程 | 建 Worker：有构建注入的 Worker 源码走 Blob URL，否则 `new Worker('./worker.js', { type: 'module' })`；绑 `onmessage` / `onerror` | `worker` 与 `handleWorkerMessage` | `apps/debug/src/app.ts:290`、`apps/debug/src/app.ts:292` |
@@ -55,15 +55,15 @@
 6. ⑤ 渲染：物理就绪后每帧都渲染（`apps/debug/src/renderer/renderer-main.ts:771`）。
 7. ⑥ 剔除统计：至少间隔 100ms 下发一次（`apps/debug/src/renderer/renderer-main.ts:778`），经 `onCullStats` 落到 `#cullStats`（`apps/debug/src/app.ts:600`）。
 
-**B. 输入循环**（`apps/debug/src/app.ts:2190` 的 `startInputLoop`，rAF 回调 `tick`）：
+**B. 输入循环**（`apps/debug/src/app.ts:2189` 的 `startInputLoop`，rAF 回调 `tick`）：
 
-1. 登记下一帧并累计 FPS 计数，满 1 秒刷新一次（`apps/debug/src/app.ts:2196`、`apps/debug/src/app.ts:2198`）。
-2. 未就绪（缺消息桥 / 渲染器 / 场景）直接返回（`apps/debug/src/app.ts:2204`）。
-3. 本帧输入三选一：回放分支覆盖设备输入（`apps/debug/src/app.ts:2217`）、合成队列（`apps/debug/src/app.ts:2255`）、实时设备输入（`apps/debug/src/app.ts:2263` 起）。
-4. `feedInput` 只喂一次（同一回放样本的第二个 rAF 窗口不重复喂，`apps/debug/src/app.ts:2287`）。
-5. 回放跑完自动收尾：`isExhausted()` 即 `endPlayback()`，把输入交还键鼠（`apps/debug/src/app.ts:2290`）；回放进度经 `__wsInput.progress()` / `counts()` 报出。
-6. 计时挑战：物理模式下速度平方大于 1 时通知 `game.onPlayerMove()`（`apps/debug/src/app.ts:2296`）。
-7. HUD 本地采样 10Hz：`updateStatsUI` 与 `updateGameStatsUI`（`apps/debug/src/app.ts:2303`、`apps/debug/src/app.ts:2307`）。
+1. 登记下一帧并累计 FPS 计数，满 1 秒刷新一次（`apps/debug/src/app.ts:2195`、`apps/debug/src/app.ts:2197`）。
+2. 未就绪（缺消息桥 / 渲染器 / 场景）直接返回（`apps/debug/src/app.ts:2203`）。
+3. 本帧输入三选一：回放分支覆盖设备输入（`apps/debug/src/app.ts:2216`）、合成队列（`apps/debug/src/app.ts:2254`）、实时设备输入（`apps/debug/src/app.ts:2262` 起）。
+4. `feedInput` 只喂一次（同一回放样本的第二个 rAF 窗口不重复喂，`apps/debug/src/app.ts:2286`）。
+5. 回放跑完自动收尾：`isExhausted()` 即 `endPlayback()`，把输入交还键鼠（`apps/debug/src/app.ts:2289`）；回放进度经 `__wsInput.progress()` / `counts()` 报出。
+6. 计时挑战：物理模式下速度平方大于 1 时通知 `game.onPlayerMove()`（`apps/debug/src/app.ts:2295`）。
+7. HUD 本地采样 10Hz：`updateStatsUI` 与 `updateGameStatsUI`（`apps/debug/src/app.ts:2302`、`apps/debug/src/app.ts:2306`）。
 
 **C. Worker 权威循环**（`apps/debug/src/worker/main.ts:455` 装配的 `createAuthLoop`，每 4ms 唤醒一次）：
 
@@ -143,7 +143,7 @@
 | 录制载荷缺 `meta.initialState` | 拒绝回放并告警，不进入回放态 | `apps/debug/src/app.ts:791` |
 | 录制地图名与当前地图不符 | 只告警不阻断，结果由调用方判断 | `apps/debug/src/app.ts:795` |
 | 全量种子写回失败 | 退化为九参部分对齐（`setPredictionState`） | `apps/debug/src/app.ts:747`、`apps/debug/src/renderer/renderer-main.ts:1281` |
-| Pointer Lock 未锁定 | 键位掩码强制 0，防止 ESC 前后按键残留 | `apps/debug/src/app.ts:2268` |
+| Pointer Lock 未锁定 | 键位掩码强制 0，防止 ESC 前后按键残留 | `apps/debug/src/app.ts:2267` |
 | 窗口失焦导致 rAF 停摆 | 显式写一次 `addInput(0, 0, 0)` 清权威键位，并清渲染物理残留输入 | `apps/debug/src/app.ts:1118` |
 | 窗口尺寸变化 | 直接调 `rendererMain.resize`（不经 `resize` 消息——该消息无收发链路） | `apps/debug/src/app.ts:1107` |
 | 默认纹理包加载失败（下载或解压） | 返回 `null` 且不写缓存，下次调用重试；渲染侧的默认纹理回退不走本模块 | `apps/debug/src/default-pack.ts:22` |
