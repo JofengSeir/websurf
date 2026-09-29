@@ -34,7 +34,6 @@ __pycache__/
 test/maps/*
 !test/maps/.gitkeep
 test/replay/*
-test/project/*
 !test/replay/.gitkeep
 *.bsp
 *.dem

@@ -1,6 +1,6 @@
 # implementation/replay：录像解析、回放与面板
 
-> 覆盖 `apps/viewer/src/replay/` 下的模块：类型契约、Shavit `.replay` 原生解析、Source `.dem` 演示录像解析（`demo/` 下四个模块）、DEM→`Clip` 桥接（`apps/viewer/src/replay/democlip.ts`）、采样、多轨道容器、播放器、人工变换、角度工具、3D 呈现、导入器、Worker 协议、录像面板、轨迹列表、时间轴。
+> 覆盖 `apps/viewer/src/replay/` 下的十三个模块：类型契约、Shavit `.replay` 原生解析、采样、多轨道容器、播放器、人工变换、角度工具、3D 呈现、导入器、Worker 协议、录像面板、轨迹列表、时间轴。
 
 ---
 
@@ -76,5 +76,4 @@
 15. **进度回调里的 `'map'` 分支不可达**：`runImport` 的进度回调只对 `phase === 'parse'` 写状态行（`apps/viewer/src/replay/panel.ts:299`），而 Worker 侧只有两处进度发送且都写死 `phase: 'parse'`（`apps/viewer/src/worker/main.ts:66`、`apps/viewer/src/worker/main.ts:84`）⇒ 协议里声明的 `'map'` 阶段（`apps/viewer/src/replay/protocol.ts:47`）在本仓没有发送方。
 16. **`ImportResult.resolvedPath` 与导出类型无外部消费者**：`resolvedPath` 由 Worker 回包透传（`apps/viewer/src/replay/importer.ts:150`），`apps/viewer/src` 内无读取点；`ImportPhase` / `ProgressFn`（`apps/viewer/src/replay/importer.ts:35`、`apps/viewer/src/replay/importer.ts:37`）只作为本文件内部签名使用；`TRACK_PALETTE`（`apps/viewer/src/replay/tracks.ts:25`）只被同文件的 `add` 消费（`apps/viewer/src/replay/tracks.ts:51`）。
 17. **两处只能追到文字层面的引用**：tick 点开关的 `title`（代码字符串）写「同 debug 权威帧节点」（`apps/viewer/src/replay/timeline.ts:160`），而两个工程的节点样式之间没有共享代码或共享常量；朝向映射提示里的 `cos=0.9992`（`apps/viewer/src/replay/panel.ts:128`）在本仓找不到产出它的脚本或数据。
-18. **`panel.ts` 两处提示文案与实现口径不一致**（代码字符串）：平移输入框的 `hint` 写「默认 0」而同一处 `step` 给的是 10 HU（`apps/viewer/src/replay/panel.ts:143` 到 `apps/viewer/src/replay/panel.ts:144`）；文件选择按钮的 `title` 只提 `.replay`「零配置直入」（`apps/viewer/src/replay/panel.ts:100`），而 `accept` 已同时列 `.replay` 与 `.dem`（`apps/viewer/src/replay/panel.ts:87`），另两条入口（拖拽与 URL 深链）在 `apps/viewer/src/app.ts:340` 与 `apps/viewer/src/app.ts:446`。
-19. **Source `.dem` 路径的既有边界**：`ImportResult.clips` 可承载多份 `Clip`（Shavit 恒 1 份、`.dem` 每条实体轨迹 1 份，`apps/viewer/src/replay/importer.ts:159`），面板逐份建轨道（首份替换、其余追加）；`.dem` 分支在主线程执行、**不经 Worker**（`apps/viewer/src/replay/importer.ts:151` 到 `apps/viewer/src/replay/importer.ts:152`），故 Worker 协议里的 `payloads` 恒为单元素（`apps/viewer/src/worker/main.ts:95`）；`.dem` 产出的 `Clip` 没有速度（`vel = null`、`maxSpeed = 0`），遥测速度行对它显示空。
+18. **`panel.ts` 两处提示文案与实现口径不一致**（代码字符串）：平移输入框的 `hint` 写「默认 0」而同一处 `step` 给的是 10 HU（`apps/viewer/src/replay/panel.ts:143` 到 `apps/viewer/src/replay/panel.ts:144`）；文件选择按钮的 `title` 写「零配置直入」（`apps/viewer/src/replay/panel.ts:100`），而 `accept` 只列 `.replay`（`apps/viewer/src/replay/panel.ts:87`），另两条入口（拖拽与 URL 深链）在 `apps/viewer/src/app.ts:340` 与 `apps/viewer/src/app.ts:446`。

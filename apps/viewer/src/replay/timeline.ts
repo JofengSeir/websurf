@@ -18,29 +18,6 @@ import type { ReplayVisuals } from './visuals.js';
 /** 倍速下拉的档位（0.1× – 16×，与 window.viewer.replay.setSpeed 的钳制范围一致，见 `apps/viewer/src/app.ts` 的 replay）。 */
 const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4, 8, 16];
 
-/** 事件标记并簇的阈值（占全程比例）：相距小于它的点合成一簇，避免重叠成一团看不清。 */
-/** 花名册条目：一个圆的全部依据（rom/	o 是**全程 tick**，不是比例）。 */
-export interface PresenceEntry {
-  /** 花名册内的唯一键（同一实体可先后被多人占用，故不能用 entity 当键）。 */
-  key: number;
-  name: string;
-  isBot: boolean;
-  entity: number;
-  /** 进入 / 退出的全程 tick；	o 为 Infinity 表示直到录像结束都在场。 */
-  from: number;
-  to: number;
-}
-
-/**
- * 花名册最多画几组标记。
- *
- * **不再是 5**：`5` 是当年「圆簇堆在播放头处」时的上限，语义是"同屏最多几个圆"。
- * 现在标记**钉在各自加入时刻**上（占用事件粒度，这份录像有 11 条），上限若还是 5，
- * 就会把**后半段加入的记录机器人整批裁掉** —— 正是「中途加进来几位但没显示加入位置」的成因。
- * 标记按位置分开，拥挤与否交给 CSS，不该由数量上限决定谁被丢掉。
- */
-const MAX_PRESENCE = 64;
-
 export class Timeline {
   private readonly playBtn: HTMLButtonElement;
   private readonly timeEl: HTMLElement;
@@ -49,31 +26,8 @@ export class Timeline {
   private readonly runZone: HTMLElement;
   private readonly abBand: HTMLElement;
   private readonly rangeEl: HTMLElement;
-  /** 滑杆上的事件标记层（贴滑杆顶端的一排小圆点）。 */
-  private readonly marksLayer: HTMLElement;
-  /** 播放头处的人物圆簇容器（跟着主时钟走）。 */
-  private presence!: HTMLElement;
-  /** 由演示页提供的「此刻在场的人」查询；未设置则圆簇不出现。 */
-  private presenceOf: ((ratio: number) => ReadonlyArray<PresenceEntry>) | null = null;
-  private onPickEntity: ((entity: number) => void) | null = null;
-  /** 上一次圆簇的「位置 + 成员」签名：没变就不写 DOM，避免每帧重建打断悬停。 */
-  private presenceSig = '';
-  /** 当前视角人物的活跃区间（秒）；
-ull = 不画。 */
-  private activeSpan: [number, number] | null = null;
-  /** 悬停高亮区间（秒）；
-ull = 不画。 */
-  private hlSpan: [number, number] | null = null;
-  private activeZone!: HTMLElement;
-  private hlZone!: HTMLElement;
-  /** 全程总 tick：把花名册的 tick 区间换算成时间标注用（由演示页在 setPresence 时给出）。 */
-  private totalTicks = 1;
   /** 是否有轨道：false 时整条时间轴加 hidden 类，refresh 与快捷键直接返回；读数一律现取，不缓存。 */
   private hasTracks = false;
-  /** 是否演示（长会话）模式：为真时时间码按「录像内绝对时刻」显示，并收起 replay 专用控件。 */
-  private demoMode = false;
-  /** 是否已打过事件标记：演示录像载入后即成立（此时还没有轨道），时间轴也该保持可见、滑杆可拖。 */
-  private hasMarks = false;
   /** 是否正在拖动滑杆：为 true 时 refresh 不回写滑杆值（避免与拖动抢夺）。 */
   private dragging = false;
 
@@ -96,24 +50,6 @@ ull = 不画。 */
     this.abBand.style.display = 'none';
     this.abBand.title = 'A-B 播放区间（I / O 设置，整段按钮清除）';
     wrap.appendChild(this.abBand);
-
-    // 事件标记层：紧贴滑杆顶端，压在滑杆之下（滑杆 z-index 2），不吃指针事件（点由 .tl-mark 自己接）
-    // 两条区间带：当前视角人物的活跃区间 + 悬停高亮（都叠在滑杆上，与 replay 的跑段高亮同族）
-    this.activeZone = el('div', 'tl-zone tl-zone-active');
-    this.activeZone.style.display = 'none';
-    this.activeZone.title = '当前视角人物在这段录像里的活跃区间';
-    wrap.appendChild(this.activeZone);
-    this.hlZone = el('div', 'tl-zone tl-zone-hl');
-    this.hlZone.style.display = 'none';
-    wrap.appendChild(this.hlZone);
-
-    this.marksLayer = el('div', 'tl-marks hidden');
-    wrap.appendChild(this.marksLayer);
-
-    // 播放头处的人物圆簇：默认隐藏，演示页调 setPresence 后才出现
-    this.presence = el('div', 'tl-presence');
-    this.presence.hidden = true;
-    wrap.appendChild(this.presence);
 
     this.slider = el('input', 'tl-slider');
     this.slider.type = 'range';
@@ -148,11 +84,11 @@ ull = 不画。 */
     stopBtn.addEventListener('click', () => this.player.stop());
     controls.appendChild(stopBtn);
 
-    const prevBtn = el('button', 'btn small tl-only-replay', '◀ 帧', { type: 'button', title: '上一帧（,）' });
+    const prevBtn = el('button', 'btn small', '◀ 帧', { type: 'button', title: '上一帧（,）' });
     prevBtn.addEventListener('click', () => this.player.stepFrames(-1));
     controls.appendChild(prevBtn);
 
-    const nextBtn = el('button', 'btn small tl-only-replay', '帧 ▶', { type: 'button', title: '下一帧（.）' });
+    const nextBtn = el('button', 'btn small', '帧 ▶', { type: 'button', title: '下一帧（.）' });
     nextBtn.addEventListener('click', () => this.player.stepFrames(1));
     controls.appendChild(nextBtn);
 
@@ -160,7 +96,7 @@ ull = 不画。 */
     this.timeEl.title = '当前 / 总时长（秒，主时钟）；0 = 起跑帧，prerun 帧不在播放区间';
     controls.appendChild(this.timeEl);
 
-    this.frameEl = el('span', 'tl-frame tl-only-replay', '0/0 帧');
+    this.frameEl = el('span', 'tl-frame', '0/0 帧');
     this.frameEl.title = '帧序号（跟随轨道）；run = 正式跑段第 n 帧（头部 frameCount 为分母）';
     controls.appendChild(this.frameEl);
 
@@ -227,21 +163,21 @@ ull = 不画。 */
     opts.appendChild(tickLabel);
 
     // A-B 区间：设置按钮在本行，区间带画在上行滑杆上
-    const aBtn = el('button', 'btn small tl-only-replay', 'A 起点', {
+    const aBtn = el('button', 'btn small', 'A 起点', {
       type: 'button',
       title: '以当前时间作为区间起点（快捷键 I）',
     });
     aBtn.addEventListener('click', () => this.setRangeStart());
     opts.appendChild(aBtn);
 
-    const bBtn = el('button', 'btn small tl-only-replay', 'B 终点', {
+    const bBtn = el('button', 'btn small', 'B 终点', {
       type: 'button',
       title: '以当前时间作为区间终点（快捷键 O）',
     });
     bBtn.addEventListener('click', () => this.setRangeEnd());
     opts.appendChild(bBtn);
 
-    const clearRangeBtn = el('button', 'btn small tl-only-replay', '整段', {
+    const clearRangeBtn = el('button', 'btn small', '整段', {
       type: 'button',
       title: '清除区间，恢复整段播放',
     });
@@ -251,13 +187,13 @@ ull = 不画。 */
     });
     opts.appendChild(clearRangeBtn);
 
-    this.rangeEl = el('span', 'tl-range tl-only-replay', '整段');
+    this.rangeEl = el('span', 'tl-range', '整段');
     opts.appendChild(this.rangeEl);
 
     root.appendChild(opts);
 
     window.addEventListener('keydown', (e) => {
-      if (!this.hasTracks && !this.hasMarks) return;
+      if (!this.hasTracks) return;
       // 输入控件持有焦点时不抢键：让 , . k i o 正常输入
       if (isTypingTarget(e.target)) return;
       if (e.code === 'KeyK') {
@@ -300,155 +236,17 @@ ull = 不画。 */
   /** 轨道增删后调用：非空即显示时间轴（去掉 hidden 类），传空数组即隐藏，随后刷新读数。 */
   setTracks(tracks: readonly Track[]): void {
     this.hasTracks = tracks.length > 0;
-    // **有标记就不隐藏**：演示录像载入后没有轨道但有标记，此时必须留着胶片条与滑杆
-    // （否则 onLoaded 刚放出来，紧接着的 syncTracks 又把它藏回去）。
-    this.root.classList.toggle('hidden', !this.hasTracks && !this.hasMarks);
+    this.root.classList.toggle('hidden', !this.hasTracks);
     this.refresh();
-  }
-
-  /**
-   * **播放头处的人物圆簇 + 悬停上弹的视角选择块**（owner 定稿形态）。
-   *
-   * 滑杆当前位置上立一簇**较大的圆**，一个圆 = 一个此刻在场的人物；**最多 `MAX_PRESENCE` 个**，
-   * 超出时**先保真人**（脚本先被挤出），真人再溢出才用 `…` 收尾。
-   * **鼠标悬停到簇上**向上弹出选择块，块内逐行列出此刻在场的人；**点一行即切到那个人的视角**。
-   *
-   * 由 `refresh()` 每帧重画：簇要**跟着播放头走**，位置与内容都随主时钟变；
-   * 位置与成员都没变时零写入，避免每帧重建把悬停打断。
-   */
-  setPresence(
-    provider: (ratio: number) => ReadonlyArray<PresenceEntry>,
-    onPick?: (entity: number) => void,
-    totalTicks = 1,
-  ): void {
-    this.presenceOf = provider;
-    this.onPickEntity = onPick ?? null;
-    this.totalTicks = totalTicks;
-    // **条上不再画人物标记**（owner 定稿：太复杂）。花名册与在线态移到右侧看板，
-    // 条上只保留「当前视角人物的活跃区间」与「悬停某人时高亮他的区间」两条带。
-    this.presence.hidden = true;
-    this.presence.innerHTML = '';
-    this.hasMarks = true;
-    this.presence.hidden = false;
-    this.root.classList.remove('hidden');
-  }
-
-  /**
-   * **重画播放头处的花名册圆簇**。
-   *
-   * owner 定稿的语义（与"只显示此刻在场的人"不同）：
-   * - 圆簇是**一份稳定的花名册** —— 整条录像里出现过的每个人都占一个圆，**不随播放头增减**，
-   *   这样才看得出"谁什么时候进、谁什么时候退"；早先按"此刻在场"过滤，人一进出圆就跳变，数量对不上。
-   * - 每人三种状态：**未加入**（播放头还没到他的进入时刻）画成**虚像**（空心）；
-   *   **在场**画成实心；**已退出**画成**暗色 + 一道斜杠**，表示"这人已经走了"。
-   * - **只收录有有效视角的人**：`presenceWindows` 已按"有采样轨迹"过滤，故圆 = 一个可切过去的视角。
-   * - 超过上限时**先保真人**（脚本先被挤出），真人再溢出才用 `…` 收尾。
-   *
-   * 位置与成员都没变时零写入，避免每帧重建把悬停打断。
-   */
-  /**
-   * **在滑杆上按「真实进入时刻」摆人物标记**（owner 定稿的视觉形态）。
-   *
-   * 形态：`—|当前位置—— ①实像 ——|进入后上移—— ①虚像 ——|到这里后实像消失——`
-   * - 每个标记**钉在该人真实的进入时刻**上（不是跟着播放头跑）——这样才能一眼看出"谁在哪一刻进"；
-   * - **播放头还没到他的进入时刻** ⇒ **虚像**（空心虚线环，落在滑杆中线上）；
-   * - **播放头进入他的在场区间** ⇒ **实像**，并**抬到滑杆上方**（上移 = "这个人现在在场"）；
-   * - **播放头越过他的退出时刻** ⇒ 实像消失，只留一枚**暗色残影**（看得出他曾在这个位置进场过）。
-   *
-   * **为什么不整段重建 DOM**：早先每帧按「位置 + 成员」重写 `innerHTML`，播放时签名每帧都变 ⇒
-   * 鼠标刚移到弹出框上，节点就被换掉、hover 丢失，**根本点不到**（owner 实测）。现在拆成两件事：
-   * **成员变了才重建**；**状态变了只切 class**；悬停期间连位置都不动。
-   */
-  /**
-   * **条上只画两条区间带**（owner 定稿，取代此前那套人物标记）：
-   *
-   * 1. **当前视角人物的活跃区间**（`.tl-zone-active`）—— 就像 replay 的跑段高亮：你选了谁，
-   *    条上就标出「这个人在整场里的哪一段有数据」。时长按**整段录像**换算，不随选中而改变条长。
-   * 2. **悬停高亮**（`.tl-zone-hl`）—— 鼠标停在右侧看板某一行上时，把**那一行对应的区间**
-   *    画到条上；移开即清除。这样「进服顺序 / 谁什么时候在线」放在看板里看，
-   *    条上只在需要时临时显示某一个人的区间，不再堆二十几枚标记。
-   */
-  private refreshPresence(): void {
-    const p = this.player;
-    const win = p.rangeStop - p.rangeStart;
-    const dur = p.duration;
-    const put = (el2: HTMLElement, from: number, to: number): void => {
-      if (!(win > 0) || !(dur > 0)) {
-        el2.style.display = 'none';
-        return;
-      }
-      const left = clamp01((from - p.rangeStart) / win);
-      const right = clamp01((to - p.rangeStart) / win);
-      if (right - left <= 0.0005) {
-        el2.style.display = 'none';
-        return;
-      }
-      el2.style.display = '';
-      el2.style.left = (left * 100).toFixed(3) + '%';
-      el2.style.width = ((right - left) * 100).toFixed(3) + '%';
-    };
-    if (this.activeSpan) put(this.activeZone, this.activeSpan[0], this.activeSpan[1]);
-    else this.activeZone.style.display = 'none';
-    if (this.hlSpan) put(this.hlZone, this.hlSpan[0], this.hlSpan[1]);
-    else this.hlZone.style.display = 'none';
-  }
-
-  /** 设置**当前视角人物**的活跃区间（秒，整场时间轴口径）；传 `null` 表示不画。 */
-  setActiveSpan(span: [number, number] | null): void {
-    this.activeSpan = span;
-  }
-
-  /** 设置**悬停高亮**区间（秒）；传 `null` 清除。由右侧看板的行悬停驱动。 */
-  setHighlight(span: [number, number] | null): void {
-    this.hlSpan = span;
-  }
-  private fmtSpan(from: number, to: number): string {
-    const t = this.totalTicks;
-    const f = (x: number): string => {
-      const s = t > 0 ? (x / t) * this.player.duration : 0;
-      const m = Math.floor(s / 60);
-      return m + ':' + String(Math.floor(s % 60)).padStart(2, '0');
-    };
-    return f(from) + ' – ' + f(to);
-  }
-  /** 文本转义（圆簇与选择块里要写玩家名，名字来自录像、不可信）。 */
-  private esc(s: string): string {
-    return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c);
-  }
-
-  /**
-   * **演示（长会话）模式**：把只服务于 replay「严格比较记录」的控件收起来。
-   *
-   * owner 的判据：一段近一小时的录像要看的是「某个人这段时间在干什么」，而不是「两条记录谁快」——
-   * 所以 **A/B 区间与「整段」**（这三个都是**强制定义长度**的行为）、**帧步进与 `帧 · run` 读数**
-   * （比较用的精度）在这个 tab 里没有意义，直接不显示。
-   * 保留：播放 / 暂停 / 停止 / 拖拽当前位置 / 倍速 / 视角与显示开关。
-   */
-  setDemoMode(on: boolean): void {
-    this.root.classList.toggle('tl-demo', on);
-    this.demoMode = on;
-    // **进演示模式就把胶片放出来**：`.dem` 一解析完就该看见这条进度条，
-    // 而不是等播放头走到第一个人进场、`pickEntity` 建出轨道之后才出现
-    // （owner 实测到的「加载完成后没从 0s 播放、像先藏起来等机器人进来」）。
-    // 演示录像的时长由 `player.span` 兜底，此刻没有任何轨道也能显示与拖动。
-    if (on) {
-      this.hasMarks = true;
-      this.root.classList.remove('hidden');
-      this.refresh();
-    }
   }
 
   /** 刷新读数：播放按钮文案与 active 态、时间文本、帧文本、滑杆值（拖动中不回写）、区间读数，最后刷新两条叠加带。无轨道时直接返回。 */
   refresh(): void {
-    if (!this.hasTracks && !this.hasMarks) return;
+    if (!this.hasTracks) return;
     const p = this.player;
     this.playBtn.textContent = p.playing ? '暂停' : '播放';
     this.playBtn.classList.toggle('active', p.playing);
-    // 演示模式按**录像内绝对时刻**（`26:05 / 59:58`）显示：长会话里 `0.00 / 3598.00 s` 这种
-    // 秒计数读不出「第几分钟」，正是「只适合严格比较记录」的读法。
-    this.timeEl.textContent = this.demoMode
-      ? clock(p.time) + ' / ' + clock(p.duration)
-      : `${fmtTime(p.time)} / ${fmtTime(p.duration)} s`;
+    this.timeEl.textContent = `${fmtTime(p.time)} / ${fmtTime(p.duration)} s`;
     // 播放中时间码前缀亮 REC 红点（暂停/停止熄灭）——录制指示语彙
     this.timeEl.classList.toggle('rec', p.playing);
     this.frameEl.textContent = frameText(p);
@@ -456,7 +254,6 @@ ull = 不画。 */
       this.slider.value = String(Math.round(p.ratio * 1000));
     }
     this.refreshZones();
-    this.refreshPresence();
 
     const inRange = p.rangeEnd > p.rangeStart && !p.isFullWindow;
     this.rangeEl.textContent = inRange
@@ -533,12 +330,6 @@ ull = 不画。 */
 }
 
 /** 秒 → 两位小数字符串；非有限值按 '0.00' 输出。 */
-/** 秒 -> m:ss（演示模式的时间码：长会话读「第几分钟」比读秒直观）。 */
-function clock(t: number): string {
-  const s = Math.max(0, Math.round(t));
-  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
-}
-
 function fmtTime(t: number): string {
   if (!Number.isFinite(t)) return '0.00';
   return t.toFixed(2);
@@ -569,9 +360,4 @@ function isTypingTarget(target: EventTarget | null): boolean {
   if (!node || typeof node.tagName !== 'string') return false;
   const tag = node.tagName.toUpperCase();
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || node.isContentEditable === true;
-}
-
-/** 夹到 [0,1]。 */
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
 }

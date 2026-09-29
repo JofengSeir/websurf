@@ -92,7 +92,7 @@ async function handle(req: ParseRequest): Promise<void> {
       {
         id,
         type: 'done',
-        payloads: [clipToPayload(clip)],
+        payload: clipToPayload(clip),
         warnings,
         resolvedPath: clip.resolvedPath,
       },
