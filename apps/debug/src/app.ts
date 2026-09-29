@@ -1978,7 +1978,7 @@ function onRenderPhysEvent(ev: RenderPhysEvent): void {
  * .src-default / .src-manual 及 --warn 同源（index.html 的 <style> 块）。 */
 const SOURCE_LABEL: Record<ParamSource, { text: string; color: string }> = {
 	'mode-default': { text: '默认', color: '#7fc98f' },
-	manual: { text: '手动', color: '#5bc0e8' },
+	manual: { text: '手动', color: '#d9973f' },
 	map: { text: '地图设置', color: '#d4b26a' },
 };
 
