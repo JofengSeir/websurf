@@ -79,8 +79,7 @@ export interface DemoPanelOptions {
   currentTick?: () => number;
   /** **.dem 载入成功**后调用：外部据此放出胶片进度条并在滑杆上打事件标记（不必等建出轨道）。 */
   onLoaded?: () => void;
-  /** **悬停花名册某一行**时回调该行的活跃区间（秒）；移开传 
-ull。时间轴据此在条上临时画区间。 */
+  /** **悬停花名册某一行**时回调该行的活跃区间（秒）；移开传 null。时间轴据此在条上临时画区间。 */
   onHoverSpan?: (span: [number, number] | null) => void;
   /**
    * **按人物切换 tick 点**（`entity` = 实体号，`on` = 是否显示）。
@@ -89,6 +88,11 @@ ull。时间轴据此在条上临时画区间。 */
    * 所以改为**每个人物一份设置**，入口放在本面板的详情里（owner 要求）。
    */
   onTickToggle?: (entity: number, on: boolean) => void;
+  /**
+   * **「与视角绑定的那个人」的显示名变了**时回调。`.dem` 的记录机器人会随关卡改名，而信息条
+   * 显示的是跟随轨道的名字（建轨道那一刻定死）⇒ 外部据此改名并刷新信息条，否则名字会冻住。
+   */
+  onWhoName?: (entity: number, name: string) => void;
 }
 
 /** Source 把实体号 1..64 留给玩家槽位；更大的实体号是地图物件 / NPC，不是「人物视角」。 */
@@ -103,6 +107,10 @@ export class DemoPanel {
    * 与 3D 里那条轨迹**永远对不上**（owner 实测「还是乱的」）。这里改成**如实取那条轨道的色**。
    */
   private trackColor: number | null = null;
+  /** 最近一次被"点选/跟随"的实体号（详情名牌与信息条都以它为准）。 */
+  private lastPickedEntity: number | null = null;
+  /** 最近一次向外部通报的名字（去重用）。 */
+  private lastReportedName = '';
 
   /** 由 `app.ts` 在演示轨道建立/替换后调用，写入其真实配色并重渲染详情。 */
   setTrackColor(color: number): void {
@@ -286,12 +294,15 @@ export class DemoPanel {
       if (t.samples.length < 50) continue;
       // **只收录玩家实体**：`r.players` 里混着地图物件与 NPC（实测有 `CWorld #0`、`CBaseEntity #145`、
       // `CDynamicProp #148`、`CFuncRotating #149` 等），它们不是"人物视角"，列进花名册会让圆的数量
-      // 与人对不上（owner 实测到的"数量对不上"）。两点判据同时成立才算玩家：
-      //   ① 实体号 ≤ 64 —— Source 把 1..MAX_PLAYERS(64) 留给玩家槽位；
-      //   ② `userinfo` 里出现过该槽位 —— 真正连过服务器的人才有记录。
+      // 与人对不上（owner 实测到的"数量对不上"）。判据：实体号 ≤ 64 —— Source 把 1..MAX_PLAYERS(64)
+      // 留给玩家槽位。
       if (t.entityIndex > MAX_PLAYER_ENTITY) continue;
       const slot = t.entityIndex - 1;
-      if (this.nameAtSlot(slot, t.samples[t.samples.length - 1].tick).length === 0) continue;
+      // **不再要求该槽在 `userinfo` 里有名字**：原先这里有一条 `nameAtSlot(...) === '' ⇒ continue`，
+      // 而实测这些录像的 `userinfo` **只有槽 0（录制机器人）**（见 `documents/viewer/implementation/dem.md`
+      // §已知缺口 4）⇒ 真人全被滤掉、槽 0 那位又常无位姿轨迹 ⇒ **花名册整个为空** ⇒ 自动跟随选不出人
+      // ⇒ 信息条与详情名牌永远停在第一个人身上（owner 报的「滚动名称被锁死」）。
+      // 名字本来就不必是判据：下面一行就有兜底（`|| className #实体号`）。
       const from = t.samples[0].tick;
       const to = t.samples[t.samples.length - 1].tick;
       const name = this.nameAtSlot(slot, to) || t.className + ' #' + t.entityIndex;
@@ -403,6 +414,24 @@ export class DemoPanel {
       if (nameEl) {
         const nm = this.nameAtSlot(p.entity - 1, tick) || p.name;
         if (nameEl.textContent !== nm) nameEl.textContent = nm;
+      }
+    }
+    // **详情里的「人物名牌」也要跟着 tick 走**：它此前取建行时烘焙的 `row.info.name`，
+    // 于是花名册在换名、详情却停在上一个名字（owner 实测「滚动名称没起效、被锁死」）。
+    if (this.selected >= 0 && this.selected < this.rows.length) {
+      const row = this.rows[this.selected];
+      const nm = this.nameAtSlot(row.info.slot, tick) || row.info.name;
+      const shown = this.detail.querySelector<HTMLElement>('.dmp-who-name');
+      if (shown && nm.length > 0 && shown.textContent !== nm) shown.textContent = nm;
+      // **跟随中那个人改了名 ⇒ 通知外部**（信息条据此改跟随轨道名；去重，避免每帧刷新）
+      if (
+        this.lastPickedEntity !== null &&
+        row.info.entityIndex === this.lastPickedEntity &&
+        nm.length > 0 &&
+        nm !== this.lastReportedName
+      ) {
+        this.lastReportedName = nm;
+        this.opts.onWhoName?.(row.info.entityIndex, nm);
       }
     }
   }
@@ -546,7 +575,7 @@ export class DemoPanel {
     this.detail.innerHTML = `
       <div class="dmp-who-head">
         <span class="dmp-who-dot" style="background:${color}" title="轨迹配色（与录像页的轨迹点同源）"></span>
-        <span class="dmp-who-name">${this.esc(i.name || `槽 ${i.slot}`)}</span>
+        <span class="dmp-who-name">${this.esc(this.nameAtSlot(i.slot) || i.name || `槽 ${i.slot}`)}</span>
         <span class="dmp-who-tag${i.isBot ? '' : ' human'}">${tag}</span>
       </div>
       <div class="dmp-grid" title="解析内部量（排查用）：${this.esc(internals)}">
@@ -608,9 +637,30 @@ export class DemoPanel {
     // **详情面板要跟着换人**：`selected` 是 `renderDetail()` 唯一的取值来源，而它此前只在
     // `buildRows()` 里被设成 0、之后再没人改过 —— 于是无论点谁，「身份」那一栏始终显示第 0 行的
     // （owner 实测到的「显示的身份不是当前看的视角」）。这里按实体号把它同步过去。
+    // **记住"当前跟随的是谁"**：详情名牌与信息条都以它为准（见 `refreshRosterState`）。
+    this.lastPickedEntity = entityIndex;
+    this.lastReportedName = label;
     const idx = this.rows.findIndex((x) => x.info.entityIndex === entityIndex);
     if (idx >= 0) {
       this.selected = idx;
+      this.renderDetail();
+    } else {
+      // **userinfo 里没有这个人**（实测这些录像的 `userinfo` 只有槽 0 = 录制机器人）⇒
+      // 补一条兜底行：名字退回「#实体号 类别名」，其余项如实留空（槽号 -1 = 非 userinfo 来源）。
+      // 不补的话 `selected` 指不到他，详情名牌会停在上一个人身上，而视角已经切走了。
+      const h = this.result!.header;
+      const tickRate = h.playbackTicks > 0 ? h.playbackTime / h.playbackTicks : 0;
+      const s = track.samples;
+      this.rows.push({
+        info: { slot: -1, entityIndex, name: label, userId: 0, guid: '', isBot: false },
+        track,
+        span:
+          s.length > 0
+            ? { from: s[0].tick * tickRate, to: s[s.length - 1].tick * tickRate }
+            : null,
+        stats: trackStats(track),
+      });
+      this.selected = this.rows.length - 1;
       this.renderDetail();
     }
     const clip = trackToClip(track, r, rule, () => label);
