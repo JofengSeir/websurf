@@ -663,87 +663,84 @@ select.tl-select:focus { border-color: var(--text); }
   display: flex; align-items: center; justify-content: center;
   background: var(--overlay);
 }
-/* ── 引导卡 = 场记板（clapperboard，2026-09-29 v10 按 owner 提供的实物图重做）──
-   结构：顶部拍板条（左端黑色把手双铆钉 + 六色分段 45° 斜纹）+ 下板露边 +
-   白色亚克力板身（黑线字段格：片名行 / ROLL-SCENE-SHOT-TAKE 四列格 /
-   导演-摄影-日期三行，双语标签「英文粗大 + 中文小字」）。
-   白板是暗色页面上的一件道具，投影加强舞台感；guideError 用红马克笔语彙。 ── */
+/* ── 引导卡 = 导演板暗色版（v11：恢复暗色整体；拍板条按 owner 截图效果——
+   左端浅灰把手双铆钉 + 六色分段 45° 斜纹，视觉呈人字纹；板身恢复暗色行）── */
 #guide .card {
-  max-width: 430px; margin: 0 16px; padding: 0;
+  max-width: 430px; margin: 0 16px; padding: 0 0 18px;
   position: relative; text-align: left;
-  background: #f5f5f2; border: 1px solid #2a2a2a; border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  color: #1c1c1c; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 30px rgba(0, 0, 0, 0.5);
+  color: var(--text); overflow: hidden;
 }
-/* 拍板条：六色分段（绿/黄/蓝/红/白/灰，取自实物图顺序）+ 45° 半透明黑斜纹罩；
-   左端黑色把手块（圆角）由 ::before 承担，双铆钉由 ::after 承担 */
+/* 拍板条：六色分段（绿/黄/蓝/红/白/灰，取自实物图顺序）+ 45° 半透明黑斜纹罩
+   （斜纹罩叠彩段在窄条上视觉呈人字纹）；左端浅灰把手块（圆角）由 ::before、
+   双深灰铆钉由 ::after 承担（贴实物图：浅底深点） */
 .clapper {
   position: relative; height: 30px;
   background:
     repeating-linear-gradient(45deg, rgba(10, 10, 12, 0.32) 0 7px, transparent 7px 14px),
     linear-gradient(90deg,
       #58c25c 0 14.3%, #e6c35c 14.3% 28.6%, #4a6fd9 28.6% 42.9%, #d9564a 42.9% 57.2%,
-      #ececea 57.2% 71.5%, #9a9a9a 71.5% 100%);
+      #e8e8e4 57.2% 71.5%, #8a8a8a 71.5% 100%);
 }
 .clapper::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 58px;
-  background: #16181a; border-radius: 8px 0 0 8px;
+  background: linear-gradient(180deg, #cfd3d6, #b8bcc0);
+  border-radius: 6px 0 0 6px;
 }
 .clapper::after {
-  content: ""; position: absolute; left: 12px; top: 0; bottom: 0; width: 44px;
+  content: ""; position: absolute; left: 14px; top: 0; bottom: 0; width: 40px;
   background:
-    radial-gradient(circle at 8px 50%, #dfe3e6 0 2.5px, #4a4f55 2.6px 3.5px, transparent 3.6px) no-repeat,
-    radial-gradient(circle at 30px 50%, #dfe3e6 0 2.5px, #4a4f55 2.6px 3.5px, transparent 3.6px) no-repeat;
+    radial-gradient(circle at 8px 50%, #55595e 0 3px, transparent 3.6px) no-repeat,
+    radial-gradient(circle at 30px 50%, #55595e 0 3px, transparent 3.6px) no-repeat;
 }
-/* 下板露边：合拢状态下从拍板条下露出的第二片（同款分段、亮度压暗） */
+/* 下板露边：压暗的同款分段（合拢状态下露出的第二片） */
 .clapper-under {
-  height: 6px; margin: 0 10px 10px; border-radius: 0 0 6px 6px;
+  height: 6px; margin: 0 10px 12px; border-radius: 0 0 6px 6px;
   background:
-    repeating-linear-gradient(45deg, rgba(10, 10, 12, 0.2) 0 7px, transparent 7px 14px),
+    repeating-linear-gradient(45deg, rgba(10, 10, 12, 0.25) 0 7px, transparent 7px 14px),
     linear-gradient(90deg,
-      #4ea84f 0 14.3%, #c9ad50 14.3% 28.6%, #3f5fb8 28.6% 42.9%, #b84a40 42.9% 57.2%,
-      #d6d6d2 57.2% 71.5%, #858585 71.5% 100%);
+      #459548 0 14.3%, #b89f4a 14.3% 28.6%, #3a5795 28.6% 42.9%, #b0453c 42.9% 57.2%,
+      #bdbdb9 57.2% 71.5%, #727272 71.5% 100%);
 }
-/* 板身：白亚克力 + 黑线字段格（线宽 2px，贴实物黑线） */
-.board { padding: 6px 22px 20px; }
+/* 板身行（恢复暗色）：双语标签 + 内容；行间发丝分隔 */
 #guide .row, #guide .row.head {
-  display: grid; gap: 2px 12px; padding: 9px 0 12px;
-  border-bottom: 2px solid #1c1c1c;
+  display: grid; gap: 2px 12px; padding: 9px 20px 11px;
+  border-bottom: 1px solid var(--border);
 }
 #guide .row.head { grid-template-columns: 1fr; padding-top: 12px; }
 #guide .row:not(.head) { grid-template-columns: 150px 1fr; align-items: start; }
-/* 双语标签：中文小字在上、英文粗大在下（实物贴纸排版） */
-#guide .lab .cn { display: block; font-size: 12px; color: #1c1c1c; }
-#guide .lab .en { display: block; font-size: 17px; font-weight: 700; letter-spacing: 0.02em; color: #1c1c1c; }
-#guide .val { font-size: 14px; font-weight: 600; color: #1c1c1c; }
-#guide .gstep { font-size: 12.5px; color: #333; line-height: 1.8; }
-#guide .gstep code { color: #1c1c1c; font-weight: 600; }
-/* 四列格（ROLL/SCENE/SHOT/TAKE）：竖线分格，值区留白 = 未填写板面 */
+#guide .lab .cn { display: block; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+#guide .lab .en { display: block; font-size: 15px; font-weight: 700; color: var(--text); }
+#guide .val { font-size: 14px; font-weight: 600; color: var(--text); }
+#guide .gstep { font-size: 12.5px; color: var(--muted); line-height: 1.8; }
+#guide .gstep code { color: var(--text); font-weight: 600; }
+/* 四列格（ROLL/SCENE/SHOT/TAKE）：发丝边框弱化形式，值区留白 = 未填写板面 */
 #guide .grid4 {
   display: grid; grid-template-columns: repeat(4, 1fr);
-  border: 2px solid #1c1c1c; margin: 2px 0 4px;
+  border: 1px solid var(--border); margin: 2px 20px 4px;
 }
-#guide .grid4 .cell { padding: 6px 8px 22px; border-right: 2px solid #1c1c1c; }
+#guide .grid4 .cell { padding: 8px 8px 20px; border-right: 1px solid var(--border); }
 #guide .grid4 .cell:last-child { border-right: none; }
-#guide .grid4 .en { display: block; font-size: 16px; font-weight: 700; color: #1c1c1c; }
-#guide .grid4 .cn { display: block; font-size: 11px; color: #1c1c1c; }
-/* 主按钮 = 板面上的黑色马克笔填写区 */
+#guide .grid4 .en { display: block; font-size: 14px; font-weight: 700; color: var(--text); }
+#guide .grid4 .cn { display: block; font-size: 11px; color: var(--muted); }
+/* 主按钮 = 场记板白（与把手同语彙） */
 #guideBtn {
-  display: inline-block; margin-top: 10px; padding: 8px 18px;
-  font-family: inherit; font-size: 13px; font-weight: 600;
-  color: #f5f5f2; background: #1c1c1c; border: none; cursor: pointer;
+  display: inline-block; margin-top: 8px; padding: 7px 16px;
+  font-family: inherit; font-size: 12.5px; font-weight: 600;
+  color: #101012; background: var(--strip-light); border: 1px solid var(--border-strong);
+  cursor: pointer;
 }
-#guideBtn:hover { background: #000; }
+#guideBtn:hover { background: #ffffff; }
 #guideBtn.busy { opacity: 0.45; pointer-events: none; }
-/* 错误提示 = 白板上的红马克笔 */
 #guideError {
-  display: none; margin-top: 12px; padding: 7px 10px; text-align: left;
-  font-size: 12px; line-height: 1.7; color: #c23a2e;
-  background: rgba(224, 85, 72, 0.08); border: 1.5px solid #c23a2e;
+  display: none; margin: 10px 20px 0; padding: 7px 10px; text-align: left;
+  font-size: 12px; line-height: 1.7; color: var(--err);
+  background: rgba(224, 85, 72, 0.08); border: 1px solid var(--err);
   word-break: break-all;
 }
 #guideError.show { display: block; }
-#guideError .raw { display: block; margin-top: 4px; font-size: 11px; color: #8a8a8a; }
+#guideError .raw { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
 #dropzone {
   position: absolute; inset: 0; z-index: 9; display: none;
   align-items: center; justify-content: center;
