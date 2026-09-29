@@ -122,6 +122,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 | 2026-09-23 | **plan 目录退役（owner 裁决）**：原 `documents/plan/` 三篇控制文件（事实基线 / 任务书 / 进度台账）随重编任务完结删除，仅存 git 历史；全仓 9 个文件的引用同步清理（本文件 / README / CHANGELOG / CONTRIBUTING / documents 的 index·norms·architecture·ts-shared / src/scripts/check-doc-drift.mjs 注释），漂移体检复跑 0 失效。**此后任务待办只记录于本文件，不再写入 plan/ 台账** | AGENTS.md 等 9 个文件 |
 
 | 2026-09-29 | **ui-style-plan 退役（owner 裁决）**：风格计划系一次性工作件（P1–P4 已全部落地，执行记录见上两行），按「一次性产物不入库」口径从版本库移除，本地留档 `.tmp/`（gitignore 区）；`documents/index.md` 登记行同步删除，documents/ 回到 **46 篇** | documents/index.md、原风格计划文档（已删） |
+| 2026-09-30 | **事故与补救：bd46461 误提交夹带另一 agent 的未提交工作（DEM 回放 20+ 文件）并推送，5b2e470 已 revert**：根因 = 场记板样式提交时 git add -A 未核对暂存清单（同日 TS/start 碎片事故同根因，第二次）。补救：bd46461 全量快照备份于 .tmp/bd46461-backup/；revert 回退全部 24 文件；本轮有效的场记板样式（styles.css/index.html）已在 revert 提交中保留；被回退的他人工作（含 timeline/tracks 增量与 8 个新文件）已从备份恢复到工作区为**未提交**状态供原 agent 继续。**规则强化：git add -A 后必须核对暂存清单** | .tmp/bd46461-backup/、git 历史 bd46461/5b2e470 |
 ### 7.2 工作组状态
 
 | 组 | 范围 | 状态 | 依赖 |
