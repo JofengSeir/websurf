@@ -20,18 +20,21 @@
  *     （侧栏左下）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层至多
  *     1 件」适配，不套用 game 单窗口的 ≥2 口径；
  *   · **导演版条纹特色（owner 指定保留并强化，v3 扩展）**：时间轴上下缘
- *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**人字彩条**顶条（见 v8）、
+ *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**人字彩条**顶条（见 v14）、
  *     拖拽态上下缘黑白遮幅条、录像信息条左端**调色卡条**（黑/灰/白/
  *     时间码黄四段）、每个小节标题左端**调色卡竖条**（黑/白/黄三段）、
  *     （激活 = 场记板白底黑字，**不切角**——切角只留在大结构上）；
  *   · **影视语彙泛化（v4/v6）**：播放中时间码前缀 REC 红点、时间轴底部秒刻度尺、白竖线播放头、SMPTE 彩条、速度电平表、场记板黑白标签。
- *   · **引导卡场记板化（v8，按实物照片逐行实测同构）**：拍板条 = 左 7.4% **铰链板**
+ *   · **引导卡场记板化（v14，按实物照片逐行实测同构）**：拍板条 = 左 10.5% **铰链板**
  *     （浅灰盖片 + 黑搭接段 + 四颗圆点螺钉）+ **人字形彩条**（上下两层 52°/-52°
  *     硬停渐变在条高中央折成 V，色序照实测：左灰阶 / 青 / 黄 / 蓝 / 红 / 白 / 灰 /
  *     右暗阶）；板身 = **表格化单元格**（中英双语标签 + 1px 竖格线 + 行间格线），
  *     实物白板黑线按 owner 要求**反相**成深板白线；底部两枚按钮为板身末行。
  *     几何与配色的证据：`.tmp/audit/stripe-slope.py` 对照片逐行追踪色界所得
- *     （斜率 |dx/dy|=0.77、折点在条高中央、色带占条宽 8.4%）。
+ *     （斜率 |dx/dy|=0.77、折点在条高中央；各色带相对**条纹区**宽度：左灰阶 22.8 /
+ *     青 8.5 / 黄 10.5 / 蓝 8.8 / 红 9.6 / 白 9.0 / 灰 8.0 / 右暗阶 23.1）。
+ *     条高 44px、铰链盖片 52% ︱ 1px 暗缝 ︱ 黑段 48%，四颗螺钉取中灰 #6a6a73
+ *     （压在浅盖片与黑段上都有对比度）。
  *     v6/v7 的毛病：拍板条画成竖条只铺左半（读作进度条）、改成 78° 单斜（方向错）、
  *     `::after` 被重复定义成 1×3px 彩条（肉眼看到的"莫名其妙的绿点"）。
  *     仍为**平面化**：全部硬停色块，无受光高光、无材质渐变、无投影/圆角/贴图。
@@ -663,84 +666,128 @@ select.tl-select:focus { border-color: var(--text); }
   display: flex; align-items: center; justify-content: center;
   background: var(--overlay);
 }
-/* ── 引导卡 = 导演板暗色版（v11：恢复暗色整体；拍板条按 owner 截图效果——
-   左端浅灰把手双铆钉 + 六色分段 45° 斜纹，视觉呈人字纹；板身恢复暗色行）── */
+/* ── 引导卡 = 场记板（v14）：按 owner 提供的实物照片**逐行实测**同构 —— 暗色板身 +
+   人字形拍板条。证据：`.tmp/audit/stripe-slope.py` 对照片（861×573）逐行追踪色界——
+   色界是两条直线、斜率 |dx/dy|≈0.77（≈52°），且在**条高中央折一次**；色序与占比
+   照实测（相对条纹区）：左灰阶 22.8 / 青 8.5 / 黄 10.5 / 蓝 8.8 / 红 9.6 / 白 9.0 /
+   灰 8.0 / 右暗阶 23.1（我方实测与之逐段相差 ≤0.2 点）。
+   全部硬停色块：无受光高光、无材质渐变、无圆角（符合"不拟物"）。── */
 #guide .card {
-  max-width: 430px; margin: 0 16px; padding: 0 0 18px;
+  /* 板面整体放大（owner：大一些 + 空处多一些）：原 470 → 520px */
+  width: min(520px, calc(100vw - 32px));
   position: relative; text-align: left;
-  background: var(--panel); border: 1px solid var(--border-strong);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 30px rgba(0, 0, 0, 0.5);
-  color: var(--text); overflow: hidden;
+  background: #0d0d10;                                   /* 板身：实物白板的反相 */
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
-/* 拍板条：六色分段（绿/黄/蓝/红/白/灰，取自实物图顺序）+ 45° 半透明黑斜纹罩
-   （斜纹罩叠彩段在窄条上视觉呈人字纹）；左端浅灰把手块（圆角）由 ::before、
-   双深灰铆钉由 ::after 承担（贴实物图：浅底深点） */
-.clapper {
-  position: relative; height: 30px;
+/* 拍板条：44px 高；左 10.5% 铰链板，右侧人字彩条铺满剩余宽度 */
+.slate-stick {
+  display: flex; height: 44px;
+  background: #101015;
+  border-bottom: 2px solid #000;
+}
+/* 铰链板 = 照片最左的「浅灰盖片 ︱ 黑搭接段」：两者之间一条 1px 暗缝，
+   把它读成一块有分缝的金属件，而不是两个并排色块。占条宽 10.5%（照片实测 10.7%）。 */
+.slate-hinge {
+  position: relative; flex: 0 0 10.5%;
+  border-right: 1px solid #000;
+  background: #0a0a0c;
+}
+.slate-hinge::before {
+  content: ""; position: absolute; inset: 0;
+  /* 盖片（左 52%，照片里比黑段略宽）+ 1px 暗缝 + 黑搭接段；上下各留 5px 让板件"嵌"在条里 */
+  background: linear-gradient(90deg,
+    #bfbfc7 0 calc(52% - 1px), #000 calc(52% - 1px) 52%, #0a0a0c 52% 100%);
+  top: 5px; bottom: 5px;
+}
+/* 四颗螺钉：实心圆点 2×2，3.2px。颜色取**中灰 #6a6a73**——压在浅灰盖片上读作深点、
+   压在黑段上读作亮点，两列都看得清（上一版用 #d2d2da 时左侧几乎不可见：实测与盖片
+   #bfbfc7 只差 19 级）。仍是硬停圆点，非高光/非渐变。 */
+.slate-hinge::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 40px; height: 24px; transform: translate(-50%, -50%);
   background:
-    repeating-linear-gradient(45deg, rgba(10, 10, 12, 0.32) 0 7px, transparent 7px 14px),
-    linear-gradient(90deg,
-      #58c25c 0 14.3%, #e6c35c 14.3% 28.6%, #4a6fd9 28.6% 42.9%, #d9564a 42.9% 57.2%,
-      #e8e8e4 57.2% 71.5%, #8a8a8a 71.5% 100%);
+    radial-gradient(circle at 5px 5px, #6a6a73 0 3.2px, transparent 3.2px),
+    radial-gradient(circle at 34px 5px, #6a6a73 0 3.2px, transparent 3.2px),
+    radial-gradient(circle at 5px 19px, #6a6a73 0 3.2px, transparent 3.2px),
+    radial-gradient(circle at 34px 19px, #6a6a73 0 3.2px, transparent 3.2px);
 }
-.clapper::before {
-  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 58px;
-  background: linear-gradient(180deg, #cfd3d6, #b8bcc0);
-  border-radius: 6px 0 0 6px;
+/* 色条：**人字形（chevron）** —— 上下两层镜像角（52° / −52°）各占 50% 高度，
+   在条高中央折成 V。下半层必须**同时把色序反转**（[a,b] → [100−b,100−a]）：
+   推导上半 s_top=+sinA·u+K、下半 s_bot=−sinA·u+K'，两段在折点处 s_top+s_bot=L，
+   只有把下半的色序取反，同一条色带的 x 才连续；只镜像角度而不反转色序会让上下
+   两半整体错开一个带位（实测症状 = 同一条青带出现两次）。 */
+.slate-stripes {
+  flex: 1;
+  background-image:
+    linear-gradient(52deg,
+      #989bac 0 5%, #84879a 5% 13%, #7f7f8b 13% 18%, #7b7b87 18% 22.2%,
+      #7ebcaf 22.2% 30.5%,
+      #e7e290 30.5% 40.5%,
+      #69b9ee 40.5% 49%,
+      #d7475e 49% 58.4%,
+      #ececf4 58.4% 67.2%,
+      #918994 67.2% 75%,
+      #34323e 75% 81%, #2c2634 81% 87%, #1c192a 87% 92%, #202231 92% 97.4%),
+    linear-gradient(-52deg,
+      #202231 0 8%, #1c192a 8% 13%, #2c2634 13% 19%, #34323e 19% 25%,
+      #918994 25% 32.8%,
+      #ececf4 32.8% 41.6%,
+      #d7475e 41.6% 51%,
+      #69b9ee 51% 59.5%,
+      #e7e290 59.5% 69.5%,
+      #7ebcaf 69.5% 77.8%,
+      #7b7b87 77.8% 82%, #7f7f8b 82% 87%, #84879a 87% 95%, #989bac 95% 100%);
+  background-size: 100% 50%, 100% 50%;
+  background-position: 0 0, 0 100%;
+  background-repeat: no-repeat;
 }
-.clapper::after {
-  content: ""; position: absolute; left: 14px; top: 0; bottom: 0; width: 40px;
-  background:
-    radial-gradient(circle at 8px 50%, #55595e 0 3px, transparent 3.6px) no-repeat,
-    radial-gradient(circle at 30px 50%, #55595e 0 3px, transparent 3.6px) no-repeat;
+/* 板身行 = 场记板单元格：标签列（中文粗 / 英文等宽小字，竖向格线分隔）+ 值列；
+   行间 1px 白格线。格线与竖线是这块"板"的主要结构，不靠底色块表达分组。 */
+.slate-row, .gstep {
+  display: grid; grid-template-columns: 112px 1fr; gap: 0 18px; align-items: start;
+  /* 留白（owner：空处再多一些）——内边距与列间距一并放大 */
+  padding: 18px 26px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
 }
-/* 下板露边：压暗的同款分段（合拢状态下露出的第二片） */
-.clapper-under {
-  height: 6px; margin: 0 10px 12px; border-radius: 0 0 6px 6px;
-  background:
-    repeating-linear-gradient(45deg, rgba(10, 10, 12, 0.25) 0 7px, transparent 7px 14px),
-    linear-gradient(90deg,
-      #459548 0 14.3%, #b89f4a 14.3% 28.6%, #3a5795 28.6% 42.9%, #b0453c 42.9% 57.2%,
-      #bdbdb9 57.2% 71.5%, #727272 71.5% 100%);
+.glabel {
+  display: flex; flex-direction: column; gap: 2px;
+  padding-right: 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.28);
 }
-/* 板身行（恢复暗色）：双语标签 + 内容；行间发丝分隔 */
-#guide .row, #guide .row.head {
-  display: grid; gap: 2px 12px; padding: 9px 20px 11px;
-  border-bottom: 1px solid var(--border);
+.glabel .zh { font-size: 13.5px; font-weight: 600; color: rgba(255, 255, 255, 0.94); }
+.glabel .en {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em;
+  color: rgba(255, 255, 255, 0.55); text-transform: uppercase;
 }
-#guide .row.head { grid-template-columns: 1fr; padding-top: 12px; }
-#guide .row:not(.head) { grid-template-columns: 150px 1fr; align-items: start; }
-#guide .lab .cn { display: block; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
-#guide .lab .en { display: block; font-size: 15px; font-weight: 700; color: var(--text); }
-#guide .val { font-size: 14px; font-weight: 600; color: var(--text); }
-#guide .gstep { font-size: 12.5px; color: var(--muted); line-height: 1.8; }
-#guide .gstep code { color: var(--text); font-weight: 600; }
-/* 四列格（ROLL/SCENE/SHOT/TAKE）：发丝边框弱化形式，值区留白 = 未填写板面 */
-#guide .grid4 {
-  display: grid; grid-template-columns: repeat(4, 1fr);
-  border: 1px solid var(--border); margin: 2px 20px 4px;
+/* 抬头行用**时间码黄**把 片名 / 工程名 从板身里拎出来（板身其余部分保持中性白） */
+.slate-head { border-bottom: 1px solid rgba(255, 255, 255, 0.85); }
+.slate-head .glabel .zh { color: var(--accent); }
+.gvalue { font-size: 17px; font-weight: 600; color: var(--text); }
+.gtext { font-size: 14px; color: rgba(255, 255, 255, 0.78); line-height: 1.8; }
+.gtext code { font-size: 12px; color: var(--text); }
+/* 底部操作行：板身最后一行单元格。上缘的格线由上一行 `.gstep` 的 border-bottom
+   提供（此处不再画 border-top，否则两条 1px 线叠成 2px 的双线） */
+.gbtns {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  padding: 20px 26px 22px;
 }
-#guide .grid4 .cell { padding: 8px 8px 20px; border-right: 1px solid var(--border); }
-#guide .grid4 .cell:last-child { border-right: none; }
-#guide .grid4 .en { display: block; font-size: 14px; font-weight: 700; color: var(--text); }
-#guide .grid4 .cn { display: block; font-size: 11px; color: var(--muted); }
-/* 主按钮 = 场记板白（与把手同语彙） */
-#guideBtn {
-  display: inline-block; margin-top: 8px; padding: 7px 16px;
-  font-family: inherit; font-size: 12.5px; font-weight: 600;
-  color: #101012; background: var(--strip-light); border: 1px solid var(--border-strong);
-  cursor: pointer;
+.gbtns .filebtn { width: 100%; text-align: center; }
+/* 错误行 #guideError：默认不占位，`.show` 时作为板身最末一行（REC 红）。
+   这里以前**没有任何规则**——`apps/viewer/src/ui/hud.ts` 会加 `.show` 并写入人话说明
+   与 `.raw` 原文，没有样式 ⇒ 报错文本以裸 `div` 形态挤在按钮下方。 */
+#guideError { display: none; }
+#guideError.show {
+  display: block;
+  padding: 12px 26px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+  font-size: 12.5px; line-height: 1.7; color: var(--err);
 }
-#guideBtn:hover { background: #ffffff; }
-#guideBtn.busy { opacity: 0.45; pointer-events: none; }
-#guideError {
-  display: none; margin: 10px 20px 0; padding: 7px 10px; text-align: left;
-  font-size: 12px; line-height: 1.7; color: var(--err);
-  background: rgba(224, 85, 72, 0.08); border: 1px solid var(--err);
+#guideError .raw {
+  display: block; margin-top: 4px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
   word-break: break-all;
 }
-#guideError.show { display: block; }
-#guideError .raw { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
 #dropzone {
   position: absolute; inset: 0; z-index: 9; display: none;
   align-items: center; justify-content: center;
