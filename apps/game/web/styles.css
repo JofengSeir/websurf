@@ -7,11 +7,15 @@
  *     （1 处）保留 50% 圆；准星圆点与状态 LED 改方形（菱角语彙延伸到
  *     HUD，游戏语义不变）；
  *   · 切角系统：右上切角（clip-path polygon），**按尺度两级**——结构级
- *     10px（主按钮、激活标签条、面板窗口右上角，与螺丝同位成组）、
- *     嵌件级 4px（滑块游标；游标仅 10×14px，10px 切角会把它切没）；
- *     两级之外不得再出现第三种切角尺寸；
+ *     10px（主按钮、激活标签条、面板窗口右上角、加载卡右上角，与螺丝
+ *     同位成组）、嵌件级 4px（滑块游标；游标仅 10×14px，10px 切角会把它
+ *     切没）；两级之外不得再出现第三种切角尺寸；
  *   · 线宽系统：2px 结构线（窗口顶缘压槽沿、激活左条）/ 1px 分隔线
  *     （行组、节点、边框）/ 1px 点线（字段引导线，4px 节距）；
+ *   · 基础件细节：滚动条自绘（方角 thumb=分隔色、1px 轨道沿、hover 琥珀
+ *     为瞬时态）、::selection 琥珀弱底、禁用态统一 0.45、读数框 hover 显
+ *     下边线、导航标题用与 h4 同规格的分组刻度尺——全部沿用既有令牌，
+ *     不新增装饰层；
  *   · 档案元素成套：每 pane 档案编号（右上）+ 字段引导线（每行）+
  *     页脚署名（pane 名 + 版本短码）；硬件件计数固定：螺丝 2（窗口右上
  *     那颗**兼作关闭按钮** .win-close、加载卡左下纯装饰）+ 服务孔 1
@@ -51,7 +55,7 @@
   --muted: #a6b0b1;                       /* RhineLabUI 辅助 */
   --accent: #c5a16b;                      /* RhineLabUI 琥珀强调 */
   --accent-hover: #d4b27e;
-  --accent-weak: rgba(197, 161, 107, 0.14);
+  --accent-weak: rgba(197, 161, 107, 0.26); /* ::selection 底：0.14 在暗底上几乎不可见 */
   --on-accent: #17130c;
   --ok: #8cc98f;
   --err: #e2857b;
@@ -68,7 +72,7 @@ body {
   font-family: system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 13px; color: var(--text); background: var(--bg);
 }
-::selection { background: var(--accent-weak); }
+::selection { background: var(--accent-weak); color: var(--text); }
 :focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 #app { position: fixed; inset: 0; z-index: 1; }
 canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
@@ -295,9 +299,16 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   width: 5px; height: 5px; border-radius: 50%;
   background: var(--bg); border: 1px solid var(--border-strong);
 }
+/* 导航标题：与 h4 同规格的分组刻度尺（下分隔刻线 + 右端 3px 短竖刻度） */
 #panel .nav h2 {
+  position: relative;
   display: flex; align-items: center; gap: 8px;
   font-size: 14px; font-weight: 600; padding: 0 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+#panel .nav h2::after {
+  content: ""; position: absolute; right: 0; bottom: -3px;
+  width: 1px; height: 3px; background: var(--border-strong);
 }
 /* 导航项：36px 高；hover = 左缘 1px 分隔色刻度；激活 = 左缘 2px 琥珀结构线
    （R1-6/8.5：去色块，状态用刻线表达） */
@@ -338,9 +349,34 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   flex: 1; overflow-y: auto; padding: 24px 28px 24px;
   font-size: 14px;
   overscroll-behavior: contain;
-  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+  /* 注意勿设 scrollbar-width/color（标准属性）：Chromium 121+ 会因它们存在
+     而忽略下面的 ::-webkit-scrollbar 自绘。自绘全交给 webkit 伪元素。 */
+  scrollbar-gutter: stable; /* 窗口定高：滚动条出现与否不再让 pane 内容横跳 */
   display: flex; flex-direction: column;
 }
+/* 滚动条自绘（::-webkit-scrollbar，Edge/Chromium；勿与标准 scrollbar-width 并设，
+   否则 Chromium 121+ 走标准属性、忽略这里的全部自绘）：
+   方角 + thumb=分隔色 + 1px 轨道沿，hover 转琥珀（瞬时态）。与行组刻线同语彙 */
+#panel .body::-webkit-scrollbar,
+#panel .savepoint-list::-webkit-scrollbar,
+.health-log::-webkit-scrollbar { width: 10px; height: 10px; }
+#panel .body::-webkit-scrollbar-track,
+#panel .savepoint-list::-webkit-scrollbar-track,
+.health-log::-webkit-scrollbar-track {
+  background: var(--bg); border-left: 1px solid var(--border);
+}
+#panel .body::-webkit-scrollbar-thumb,
+#panel .savepoint-list::-webkit-scrollbar-thumb,
+.health-log::-webkit-scrollbar-thumb { background: var(--border-strong); }
+#panel .body::-webkit-scrollbar-thumb:hover,
+#panel .savepoint-list::-webkit-scrollbar-thumb:hover,
+.health-log::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+#panel .body::-webkit-scrollbar-button,
+#panel .savepoint-list::-webkit-scrollbar-button,
+.health-log::-webkit-scrollbar-button { display: none; }
+#panel .body::-webkit-scrollbar-corner,
+#panel .savepoint-list::-webkit-scrollbar-corner,
+.health-log::-webkit-scrollbar-corner { background: var(--bg); }
 
 #panel .mod-pane { display: none; position: relative; }
 #panel .mod-pane.active { display: flex; flex-direction: column; flex: 1; }
@@ -460,12 +496,14 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   width: 100%; min-width: 0; text-align: right; font-size: 13px; color: var(--text);
   font-family: var(--mono); font-variant-numeric: tabular-nums;
   background: transparent; border: none; outline: none;
+  caret-color: var(--accent);
   -moz-appearance: textfield; appearance: textfield;
   padding: 2px 0;
   border-bottom: 1px solid transparent;
 }
 #panel .val input::-webkit-outer-spin-button,
 #panel .val input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#panel .val input:hover:not(:focus) { border-bottom-color: var(--border-strong); }
 #panel .val input:focus { border-bottom: 1px solid var(--accent); }
 #panel .val .unit { font-size: 11px; color: var(--muted); flex: none; }
 
@@ -481,6 +519,11 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 #panel input[type="checkbox"]:hover { border-color: var(--accent); }
+
+/* 禁用态统一（与 .map-btn / select / button.small 的 0.45 同值同语彙） */
+#panel input[type="range"]:disabled,
+#panel input[type="checkbox"]:disabled,
+#panel input[type="color"]:disabled { opacity: 0.45; cursor: default; }
 
 /* 颜色选择（P2 自绘：细线小方框 + 内嵌 swatch，去原生内边距） */
 #panel input[type="color"] {
@@ -569,7 +612,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel .savepoint-list {
   display: flex; flex-direction: column; gap: 4px;
   max-height: 240px; overflow-y: auto; margin-top: 8px;
-  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
 #panel .savepoint-row {
   display: flex; align-items: center; gap: 8px;
@@ -614,6 +656,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   backdrop-filter: blur(12px) saturate(1.15);
   -webkit-backdrop-filter: blur(12px) saturate(1.15);
   border: 1px solid var(--border-strong);
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
     inset 0 2px 0 rgba(0, 0, 0, 0.55),
@@ -622,6 +665,19 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #loadingOverlay .load-card::before {
   content: ""; position: absolute; top: 0; left: 18px;
   width: 32px; height: 2px; background: var(--accent);
+}
+/* 切角斜边 1px 边线（与 #panel::before 同技法；卡片两个伪元素已被嵌片与
+   螺丝占用，借页面里的 <i class="load-chamfer"> 画线，几何 = 10px 切角中点） */
+#loadingOverlay .load-chamfer {
+  position: absolute; top: 4.5px; right: -2px; width: 14px; height: 1px;
+  background: var(--border-strong); transform: rotate(45deg);
+  pointer-events: none;
+}
+/* 档案编号（与 pane 页头编号同类：mono 12px 琥珀，右上、避开切角） */
+#loadingOverlay .load-code {
+  position: absolute; top: 10px; right: 14px;
+  font-family: var(--mono); font-size: 12px; color: var(--accent);
+  letter-spacing: 0.04em;
 }
 #loadingOverlay .load-title {
   font-size: 14px; font-weight: 600; margin-bottom: 4px;
@@ -646,7 +702,8 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   background: var(--accent);
 }
 #loadingOverlay .load-meta {
-  display: flex; justify-content: space-between; margin-top: 8px;
+  display: flex; justify-content: space-between; margin-top: 14px;
+  padding-top: 8px; border-top: 1px solid var(--border);
   font-size: 12px; color: var(--muted); font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }

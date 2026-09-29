@@ -71,7 +71,7 @@
 ## 启动链
 
 1. `npm run dev`（`apps/game/package.json:15`）→ `python ../../src/serve.py 8090 .`，服务根为工程目录；响应带 `Cross-Origin-Opener-Policy: same-origin` 与 `Cross-Origin-Embedder-Policy: require-corp`（`src/serve.py:39`），这是页面拿到 `crossOriginIsolated`、进而拿到 `SharedArrayBuffer` 的前提。
-2. 浏览器加载 `web/index.html`；页面先加载 `./coi-serviceworker.js`，再以 module script 加载构建产物 `./app.js`（`apps/game/web/index.html:290` 与 `:291`）。因此 dev 链路要求先跑过 `npm run build:ts`（`apps/game/package.json:12`）。
+2. 浏览器加载 `web/index.html`；页面先加载 `./coi-serviceworker.js`，再以 module script 加载构建产物 `./app.js`（`apps/game/web/index.html:294` 与 `:295`）。因此 dev 链路要求先跑过 `npm run build:ts`（`apps/game/package.json:12`）。
 3. `main()` 判通道：`crossOriginIsolated` 为真且 `SharedArrayBuffer` 存在才新建共享缓冲（`apps/game/src/app.ts:108`、`apps/game/src/app.ts:112`），否则该实参传 `null`（`apps/game/src/app.ts:112`）。
 4. 建 Worker 并立即发两条引导消息：`init`（`apps/game/src/app.ts:148`）与 `wasm-init`（`apps/game/src/app.ts:152` 内嵌 base64 分支、`apps/game/src/app.ts:154` URL 分支）。
 5. 建共享状态通道：`createMainSharedState(sharedBuffer, fixWorker)`（`apps/game/src/app.ts:158`）。

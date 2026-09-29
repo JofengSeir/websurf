@@ -26,11 +26,11 @@
 - **键位提交链路**：`saveKeymap` 落盘 → 经 `globalThis.__keyboardInput` 调 `setKeymap` → 重渲染列表（`apps/game/src/panel/panel-controller.ts:253`、`:256`、`:257`）。
 - **两个渲染侧 setter 与 config 各自下发**：FOV / 渲染距离 / 曝光 / γ / 模型光照 / 光照模式只走渲染器回调（`apps/game/src/panel/panel-controller.ts:451`、`:458`、`:465`、`:473`、`:480`、`:497`），不进 `config` 消息段表。
 - **控件 id 与页面一一对应**：本次实测 `apps/game/src` 内 45 个 `getElementById` 字面量 id 在 `apps/game/web/index.html` 中全部存在（含 `${id}Num` 之外的滑块、复选框、select 与列表容器）。
-- **导航分栏是静态声明**：八个 `data-mod` 与八个 `data-pane` 全在页面里（`apps/game/web/index.html:77` 起、`apps/game/web/index.html:93` 起），控制器只切 `active` 类。
+- **导航分栏是静态声明**：八个 `data-mod` 与八个 `data-pane` 全在页面里（`apps/game/web/index.html:84` 起、`apps/game/web/index.html:97` 起），控制器只切 `active` 类。
 
 ## 已知缺口
 
-- **γ 滑块量程大于着色器接受窗口**：滑块量程 0.5..6（`apps/game/src/panel/panel-controller.ts:471`、`apps/game/web/index.html:228`），而渲染端 `setLightGamma` 只接受 `(0, 1]`（`apps/game/src/renderer/lightmap-shader.ts:1789`）；拖到大于 1 时 config 已被写（`apps/game/src/panel/panel-controller.ts:472`）、画面不变。
+- **γ 滑块量程大于着色器接受窗口**：滑块量程 0.5..6（`apps/game/src/panel/panel-controller.ts:471`、`apps/game/web/index.html:231`），而渲染端 `setLightGamma` 只接受 `(0, 1]`（`apps/game/src/renderer/lightmap-shader.ts:1789`）；拖到大于 1 时 config 已被写（`apps/game/src/panel/panel-controller.ts:472`）、画面不变。
 - **数值框路径不回写自身文本**：滑块输入会把值同步到数值框（`apps/game/src/panel/panel-controller.ts:568`），但数值框输入只把**钳制结果写回滑块**（`:577`），数值框自身文本保持用户输入的越界值；被写入 config 的是钳制后的值（`:578`）。
 - **`applyCrosshair` 有一个死变量**：`const dot = el.querySelector('.ch-dot')` 声明后未被使用（`apps/game/src/panel/panel-controller.ts:773`），中心点显隐实际由 `no-dot` 类承担（`:774`）。
 - **渲染侧初值写两次**：`RendererMain.init` 先按 config 当时的值写一遍光照与 FOV（`apps/game/src/renderer/renderer-main.ts:266`、`:268`、`:270`、`:272`、`:274`、`:275`），`sendAllPrefs` 再用加载偏好后的 config 覆盖一次（`apps/game/src/panel/panel-controller.ts:750`、`:752`、`:753`、`:754`、`:755`）；两次都走共享 uniform，第二次对 γ 同样受接受窗口限制。

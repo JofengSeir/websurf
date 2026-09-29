@@ -6,7 +6,7 @@
 
 | 参与者 | 步骤 | 数据落点 | 锚点 |
 |---|---|---|---|
-| 浏览器 | 加载页面外壳，先取 `./coi-serviceworker.js`，再以 module script 取 `./app.js` | DOM；SW 负责给静态托管补 COOP/COEP | `apps/game/web/index.html:290`、`apps/game/web/index.html:291` |
+| 浏览器 | 加载页面外壳，先取 `./coi-serviceworker.js`，再以 module script 取 `./app.js` | DOM；SW 负责给静态托管补 COOP/COEP | `apps/game/web/index.html:294`、`apps/game/web/index.html:295` |
 | `main` | 取 `#preview` 画布；缺失即 `console.error` 并返回 | 无 | `apps/game/src/app.ts:95` |
 | `main` | 读 `crossOriginIsolated`，据此决定能否建 `SharedArrayBuffer` | 局部 `sharedBuffer`（`null` 表示走 postMessage 回退） | `apps/game/src/app.ts:102`、`apps/game/src/app.ts:108`、`apps/game/src/app.ts:112` |
 | `main` | `#status` 写兼容模式提示（仅在拿不到 SAB 时） | `#status` 文本 | `apps/game/src/app.ts:110` |
