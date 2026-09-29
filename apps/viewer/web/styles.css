@@ -218,8 +218,10 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
   position: relative;
   display: none; flex: 1; overflow-y: auto; overscroll-behavior: contain;
   padding: 10px 12px 14px;
-  scrollbar-gutter: stable; /* 自绘滚动条见文件尾 webkit 块；槽位常驻避免 tab 间横跳 */
+  /* 槽位只给会滚动的 pane：地图 pane 内容短，常驻槽位是一根不对称死条（owner 实测右侧偏宽）；
+     会滚动的 #pane-replay / #pane-demo 在下方单独保留槽位。自绘滚动条见文件尾 webkit 块。 */
 }
+#pane-replay, #pane-demo { scrollbar-gutter: stable; }
 .tabpane.active { display: flex; flex-direction: column; }
 
 /* 档案编号（tabpane 右上，时间码黄等宽 12px）与页脚署名（右下，中性；
@@ -239,7 +241,8 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
   color: var(--muted); letter-spacing: 0.04em;
 }
 #pane-map::after { content: "地图面板 · v0.1"; }
-#pane-replay::after { content: "录像面板 · v0.1"; }
+#pane-replay::after { content: "记录面板 · v0.1"; }
+#pane-demo::after { content: "录像面板 · v0.1"; }
 
 /* ── .map-reload：地图页顶部的「更换地图」行（label.filebtn，点击转发到 #bspFile；构造点见 apps/viewer/src/ui/mapinfo.ts）── */
 .map-reload {
@@ -887,13 +890,12 @@ select.tl-select:focus { border-color: var(--text); }
 .dmp-whobar { position: relative; display: block; height: 6px; background: rgba(255, 255, 255, 0.06); }
 .dmp-whobar i { position: absolute; top: 0; bottom: 0; background: var(--accent); }
 .dmp-whotime { font-size: 10px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
-/* ── 进度条两端更易点中（owner：区间开头/尾部不好点）────────────────────────────
-   原生 range 的滑块（thumb）在两端会内缩，`0%` 与 `100%` 附近实际上点不到最值。
-   外扩必须加在**共同父容器 `.tl-sliderwrap`** 上，不能只加在 `.tl-slider` 上：
-   区间带（`.tl-zone-*`）是按**父容器宽度**算 `left/width` 百分比的，若只把滑杆拉宽，
-   两者坐标系就错开，表现为「区间左右两侧没填满」（owner 实测）。
-   父容器统一外扩后，滑杆与所有叠加带共享同一坐标系。 */
-.tl-sliderwrap { margin: 0 -8px; }
+/* ── 滑杆与区间带共坐标系 ────────────────────────────────────────────
+   区间带（`.tl-zone-*`）按**父容器 `.tl-sliderwrap` 宽度**算 `left/width` 百分比，
+   滑杆在 wrap 内 100% 宽 ⇒ 两者共享同一坐标系。曾按「两端更易点中」给 wrap 加过
+   `0 -8px` 外扩，实测滑杆两端距容器边框只剩 2px、且比相邻行凸出（owner 2026-09-30
+   裁决撤外扩）；两端可点范围回到 thumb 半径内属已知代价。 */
+.tl-sliderwrap { margin: 0; }
 .tl-slider { height: 20px; }
 /* ── 演示看板：人物名牌（与「录像」页同一套语彙）──────────────────────────────
    原本这里是一个**裸复选框**，与看板其余部分（色点 / 标签 / 发丝线）不是一个语言。

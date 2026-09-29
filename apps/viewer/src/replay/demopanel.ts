@@ -140,15 +140,25 @@ export class DemoPanel {
     this.opts = opts;
     this.root = root;
     root.innerHTML = `
-      <div class="dmp-load">
-        <label class="filebtn" for="demoFile">载入录像（.dem）</label>
-        <input id="demoFile" type="file" accept=".dem" />
-        <label class="dmp-alt"><input id="demoAltOrder" type="checkbox" /> 运动优先（实验展平顺序）</label>
+      <div class="sec">
+        <div class="sec-title">载入与看板</div>
+        <div class="sec-body">
+          <div class="dmp-load">
+            <label class="filebtn" for="demoFile">载入录像（.dem）</label>
+            <input id="demoFile" type="file" accept=".dem" />
+            <label class="dmp-alt"><input id="demoAltOrder" type="checkbox" /> 运动优先（实验展平顺序）</label>
+          </div>
+          <div class="dmp-meta" id="demoMeta">尚未载入</div>
+          <div class="dmp-timeline" id="demoTimeline" hidden></div>
+          <div class="dmp-note" id="demoNote"></div>
+        </div>
       </div>
-      <div class="dmp-meta" id="demoMeta">尚未载入</div>
-      <div class="dmp-timeline" id="demoTimeline" hidden></div>
-      <div class="dmp-detail" id="demoDetail"></div>
-      <div class="dmp-note" id="demoNote"></div>`;
+      <div class="sec">
+        <div class="sec-title">详情与花名册</div>
+        <div class="sec-body">
+          <div class="dmp-detail" id="demoDetail"></div>
+        </div>
+      </div>`;
     this.input = root.querySelector<HTMLInputElement>('#demoFile')!;
     this.meta = root.querySelector<HTMLElement>('#demoMeta')!;
     this.track = root.querySelector<HTMLElement>('#demoTimeline')!;
