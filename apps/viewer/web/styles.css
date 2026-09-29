@@ -868,7 +868,8 @@ select.tl-select:focus { border-color: var(--text); }
 
 /* 侧栏的「在服名单」抬头：只在播放时逐帧更新文本（轮换），不放进度条本身 ——
    进度与事件标记统一在底部时间轴滑杆上（见 .tl-marks）。 */
-.dmp-live { font-size: 12px; color: var(--text); line-height: 1.5; margin: 2px 0 4px; }
+.dmp-live { font-size: 12px; color: var(--text); line-height: 1.5; }
+.dmp-grid .dmp-live { margin: 0; }
 /* ── 演示（长会话）模式：收起只服务于 replay「严格比较记录」的控件 ──────────────
    owner 判据：近一小时的录像要看「某个人这段时间在干什么」，不是「两条记录谁快」。
    所以 A/B 区间与「整段」（三个都是**强制定义长度**的行为）、帧步进与 `帧 · run` 读数
