@@ -22,17 +22,22 @@
   <!-- 首访引导层：`#guide`（其中的 `#guideError` 由 `apps/viewer/src/ui/hud.ts` 写入）-->
   <div id="guide">
     <div class="card">
-      <div class="gtitle">加载 BSP 地图，开始预览</div>
-      <div class="gstep">
-        ① 点击下方按钮选择 <code>.bsp</code> 地图文件，<br>或直接把 <code>.bsp</code> / <code>.replay</code> 拖进本窗口
-      </div>
-      <div class="gstep">
-        ② 加载后点击画面锁定鼠标即可自由飞行
-      </div>
-      <div class="gstep">
-        ③ 右侧面板：地图信息与出生点跳转、<br>录像回放（换图入口在地图页顶部）；右上角「?」打开帮助
-      </div>
-      <button id="guideBtn" type="button">选择 BSP 地图…</button>
+    <div class="slate-row slate-head">
+      <span class="glabel">PRODUCTION</span>
+      <span class="gvalue">WebSurf-viewer</span>
+    </div>
+    <div class="gstep">
+      <span class="glabel">STEP 01</span>
+      <span class="gtext">点击下方按钮选择 <code>.bsp</code> 地图文件，或直接把 <code>.bsp</code> / <code>.replay</code> 拖进本窗口</span>
+    </div>
+    <div class="gstep">
+      <span class="glabel">STEP 02</span>
+      <span class="gtext">加载后点击画面锁定鼠标即可自由飞行</span>
+    </div>
+    <div class="gstep">
+      <span class="glabel">STEP 03</span>
+      <span class="gtext">右侧面板：地图信息与出生点跳转、录像回放（换图入口在地图页顶部）；右上角「?」打开帮助</span>
+    </div>
       <div id="guideError"></div>
     </div>
   </div>
