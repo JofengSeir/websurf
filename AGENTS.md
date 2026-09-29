@@ -123,6 +123,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 
 | 2026-09-29 | **ui-style-plan 退役（owner 裁决）**：风格计划系一次性工作件（P1–P4 已全部落地，执行记录见上两行），按「一次性产物不入库」口径从版本库移除，本地留档 `.tmp/`（gitignore 区）；`documents/index.md` 登记行同步删除，documents/ 回到 **46 篇** | documents/index.md、原风格计划文档（已删） |
 | 2026-09-30 | **事故与补救：bd46461 误提交夹带另一 agent 的未提交工作（DEM 回放 20+ 文件）并推送，5b2e470 已 revert**：根因 = 场记板样式提交时 git add -A 未核对暂存清单（同日 TS/start 碎片事故同根因，第二次）。补救：bd46461 全量快照备份于 .tmp/bd46461-backup/；revert 回退全部 24 文件；本轮有效的场记板样式（styles.css/index.html）已在 revert 提交中保留；被回退的他人工作（含 timeline/tracks 增量与 8 个新文件）已从备份恢复到工作区为**未提交**状态供原 agent 继续。**规则强化：git add -A 后必须核对暂存清单** | .tmp/bd46461-backup/、git 历史 bd46461/5b2e470 |
+| 2026-09-30 | **远端入库面清理审查（owner：审查新推送、不该传的不传、`.gitignore` 收紧）**：远端引用面实测 = `main` 一条（与本地同指 e8dbf24）+ 标签 `v0.1.0`，三个 `backup/*` 分支仅在本地；**顶端 305 个跟踪文件逐类核过零违规**——无构建产物、无夹具二进制（`*.bsp`/`*.dem`/`*.replay` 全未跟踪）、无 `.tmp`/temp、无 9-27 清理类脚本入库、密钥扫描 0 命中，二进制仅 3 个 `textures.mtz`（有案公共纹理包，最大 5.9 MB）；历史侧 bd46461 已由 5b2e470 revert、DEM 功能后经 d2eb1ed 重新立项落库 ⇒ 内容本就属于库，历史重写（force-push）无收益，维持现状。**唯一入库缺口**：`apps/viewer/test/shot.mjs`（一次性 CDP 截图工具，观感验证用；全库引用面为零，判据同 9-27 脚本清理）此前随 bd46461 误入库、revert 后以未跟踪状态悬在工作区 ⇒ 补进根 `.gitignore` 一次性脚本区；插入点在文档既有锚点所指行之后，锚点不移位。**自检**：漂移体检 58 篇 / 越界 0 / 路径失效 0 / 漂移 0、exit 0；新增两行 CRLF 与全文件一致 | 根 `.gitignore`（+1 规则 +1 注释）、本文件 |
 ### 7.2 工作组状态
 
 | 组 | 范围 | 状态 | 依赖 |

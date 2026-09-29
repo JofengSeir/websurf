@@ -71,6 +71,8 @@ apps/game/scripts/t13-input-surface-probe.mjs
 apps/game/scripts/t13-literal-sweep.mjs
 apps/game/scripts/t13-ulp-sensitivity-control.mjs
 apps/game/scripts/wasm-hash-pin.mjs
+# apps/viewer/test/shot.mjs：一次性 CDP 截图工具（观感验证用；引用面为零，判据同上）
+apps/viewer/test/shot.mjs
 
 # ── 操作系统噪声（跨平台协作常带进来的文件）──
 .DS_Store
