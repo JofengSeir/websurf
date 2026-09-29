@@ -97,9 +97,16 @@
     <div id="tabs">
       <button class="tab active" data-tab="map" type="button">地图</button>
       <button class="tab" data-tab="replay" type="button">录像</button>
+      <button class="tab" data-tab="demo" type="button">演示</button>
     </div>
     <div class="tabpane active" id="pane-map"></div>
     <div class="tabpane" id="pane-replay"></div>
+    <!-- 演示页 `#pane-demo`：Source `.dem` 专用。内容由 `DemoPanel` 生成（时间线 + 玩家标注 + 详情），
+         与「录像」页的轨迹列表 / 播放控制**不共用**布局 —— `.dem` 给不出定长位姿，看板语义不同。
+         注（2026-09-30）：本按钮与容器在 5b2e470 那次 revert 里随 index.html 回退丢失过，
+         后两次修复都只补了引导卡，直到本次才补回；`apps/viewer/src/app.ts` 的
+         `activeTab`/`demoPane` 与 `replay/demopanel.ts` 一直按它存在来写。 -->
+    <div class="tabpane" id="pane-demo"></div>
   </aside>
 
   <!-- 底部 dock `#dock`：录像信息条 `#replayMeta`（`.replay` 头部元信息）+ 时间轴容器 `#timeline` -->
