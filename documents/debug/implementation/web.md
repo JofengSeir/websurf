@@ -6,27 +6,27 @@
 
 **`apps/debug/web/index.html`（页面骨架与全部 DOM id）**
 
-结构自 `apps/debug/web/index.html:444` 起：
+结构自 `apps/debug/web/index.html:481` 起：
 
 | 区段 | 内容 | 锚点 |
 |---|---|---|
-| 顶栏 | 标题与全局按钮 | `apps/debug/web/index.html:444` |
-| 主容器 / 侧边栏 | `#main` / `#sidebar`，侧边栏内 `#status` 与 `#error` | `apps/debug/web/index.html:450`、`:452` |
-| 文件输入 | `#bspFile` 等 | `apps/debug/web/index.html:460` |
-| 视角与操作 | 灵敏度 / Q-E / pitch 限位 | `apps/debug/web/index.html:466` |
-| 渲染与视距 | 光照模式、环境光、近平面、视距剔除 | `apps/debug/web/index.html:486` |
-| 路径记录 | 四个可见性复选框、导出按钮、`#pathCounts` | `apps/debug/web/index.html:541`、`:557` |
-| 物理 | 物理模式、碰撞来源、tickRate、出生点、碰撞箱三围 | `apps/debug/web/index.html:589`、`:619` |
-| 移动/力学参数（动态渲染） | `#physicsParamList` 由 `PARAM_DEFS` 生成 | `apps/debug/web/index.html:654` |
-| 出生点 | `#spawnSelect` | `apps/debug/web/index.html:667` |
-| 自定义传送点 | `#customTeleportDetails` / `#customTeleportList` | `apps/debug/web/index.html:676`、`:696` |
-| 准星与 HUD | `#hudVisible` / `#showCrosshair` / `#chColor` 等 | `apps/debug/web/index.html:704` |
-| 调试线框 | brush / 触发器 / 三角面 / chamfer 开关与视距 | `apps/debug/web/index.html:753` |
-| 元数据 | `#metadata` | `apps/debug/web/index.html:803` |
-| 权威健康 | `#health-count` / `#health-clear` / `#health-log` | `apps/debug/web/index.html:813` |
-| 预览区与 HUD | `#previewArea` / `#preview` canvas / `#hud` / `#stats` / `#cullStats` / `#gameStats` / `#planeInfo` | `apps/debug/web/index.html:819`、`:820`、`:828`、`:829`、`:830`、`:831`、`:832` |
-| 缺失材质纹理弹窗 | `#missingTexturesModal` 及三个子节点 | `apps/debug/web/index.html:842` |
-| 脚本 | 先 classic 的隔离补丁，再 module 的应用入口 | `apps/debug/web/index.html:855`、`:856` |
+| 顶栏 | 标题与全局按钮 | `apps/debug/web/index.html:481` |
+| 主容器 / 侧边栏 | `#main` / `#sidebar`，侧边栏内 `#status` 与 `#error` | `apps/debug/web/index.html:487`、`:489` |
+| 文件输入 | `#bspFile` 等 | `apps/debug/web/index.html:497` |
+| 视角与操作 | 灵敏度 / Q-E / pitch 限位 | `apps/debug/web/index.html:503` |
+| 渲染与视距 | 光照模式、环境光、近平面、视距剔除 | `apps/debug/web/index.html:523` |
+| 路径记录 | 四个可见性复选框、导出按钮、`#pathCounts` | `apps/debug/web/index.html:578`、`:594` |
+| 物理 | 物理模式、碰撞来源、tickRate、出生点、碰撞箱三围 | `apps/debug/web/index.html:626`、`:656` |
+| 移动/力学参数（动态渲染） | `#physicsParamList` 由 `PARAM_DEFS` 生成 | `apps/debug/web/index.html:691` |
+| 出生点 | `#spawnSelect` | `apps/debug/web/index.html:704` |
+| 自定义传送点 | `#customTeleportDetails` / `#customTeleportList` | `apps/debug/web/index.html:713`、`:733` |
+| 准星与 HUD | `#hudVisible` / `#showCrosshair` / `#chColor` 等 | `apps/debug/web/index.html:741` |
+| 调试线框 | brush / 触发器 / 三角面 / chamfer 开关与视距 | `apps/debug/web/index.html:790` |
+| 元数据 | `#metadata` | `apps/debug/web/index.html:840` |
+| 权威健康 | `#health-count` / `#health-clear` / `#health-log` | `apps/debug/web/index.html:850` |
+| 预览区与 HUD | `#previewArea` / `#preview` canvas / `#hud` / `#stats` / `#cullStats` / `#gameStats` / `#planeInfo` | `apps/debug/web/index.html:856`、`:857`、`:865`、`:866`、`:867`、`:868`、`:869` |
+| 缺失材质纹理弹窗 | `#missingTexturesModal` 及三个子节点 | `apps/debug/web/index.html:879` |
+| 脚本 | 先 classic 的隔离补丁，再 module 的应用入口 | `apps/debug/web/index.html:892`、`:893` |
 
 页面自身带一段内联 `<style>`（`apps/debug/web/index.html:7` 起），大部分外观写在其中；页面的全部 id 共 106 个。
 
@@ -40,11 +40,11 @@
 
 **构建产物落点**（都由脚本生成，不是手写文件）
 
-`app.js` 由 esbuild 从 `apps/debug/src/app.ts` 打包（`apps/debug/package.json:11`）；`worker.js` 同理来自 `apps/debug/src/worker/main.ts`（`apps/debug/package.json:10`）；`websurf_wasm_bg.wasm` 是 `wasm-pack` 产物从 `apps/debug/pkg/` 复制过来（`apps/debug/package.json:8`）；`textures.mtz` 是离线纹理包资产。页面注释面也写明 `app.js` 不是本目录的手写文件（`apps/debug/web/index.html:854`）。
+`app.js` 由 esbuild 从 `apps/debug/src/app.ts` 打包（`apps/debug/package.json:11`）；`worker.js` 同理来自 `apps/debug/src/worker/main.ts`（`apps/debug/package.json:10`）；`websurf_wasm_bg.wasm` 是 `wasm-pack` 产物从 `apps/debug/pkg/` 复制过来（`apps/debug/package.json:8`）；`textures.mtz` 是离线纹理包资产。页面注释面也写明 `app.js` 不是本目录的手写文件（`apps/debug/web/index.html:891`）。
 
 ## 关键流程与不变量
 
-**页面加载顺序**：先执行 classic 的隔离补丁，再执行 module 形式的应用入口（`apps/debug/web/index.html:855`、`apps/debug/web/index.html:856`）。补丁在 Service Worker 取得页面控制权后写一次 `sessionStorage` 标记并 `window.location.reload()`（`apps/debug/web/coi-serviceworker.js:68`）。隔离成功与否直接决定 `main` 走 SAB 通道还是 postMessage 回退（`apps/debug/src/app.ts:277`）。
+**页面加载顺序**：先执行 classic 的隔离补丁，再执行 module 形式的应用入口（`apps/debug/web/index.html:892`、`apps/debug/web/index.html:893`）。补丁在 Service Worker 取得页面控制权后写一次 `sessionStorage` 标记并 `window.location.reload()`（`apps/debug/web/coi-serviceworker.js:68`）。隔离成功与否直接决定 `main` 走 SAB 通道还是 postMessage 回退（`apps/debug/src/app.ts:277`）。
 
 **id 与句柄的对照关系**：所有控件句柄都由 `apps/debug/src/app.ts:61` 起的 `dom` 表经 `getElementById` 取得，取不到即 `null`，消费点一律用可选链判空。
 
@@ -52,16 +52,16 @@
 
 **不变量**：
 
-- `#cullStats` 的初始文本与运行期文本是同一口径（可见数 / PVS / LOD 三段，`apps/debug/web/index.html:830`、`apps/debug/src/app.ts:603`）。
+- `#cullStats` 的初始文本与运行期文本是同一口径（可见数 / PVS / LOD 三段，`apps/debug/web/index.html:867`、`apps/debug/src/app.ts:603`）。
 - 权威健康控制台的条数上限 30 由脚本保证，页面只提供容器与计数位（`apps/debug/src/app.ts:2345`）。
-- 预览 canvas 带 `tabindex`，键盘事件实际绑在 `window` 上（`apps/debug/web/index.html:820`、`apps/debug/src/app.ts:1056`）。
+- 预览 canvas 带 `tabindex`，键盘事件实际绑在 `window` 上（`apps/debug/web/index.html:857`、`apps/debug/src/app.ts:1056`）。
 - 隔离补丁注册失败或浏览器不支持时静默跳过，调用方已有 postMessage 回退通道兜底（`apps/debug/web/coi-serviceworker.js:4`）。
 
 ## 已知缺口
 
-1. **`apps/debug/web/styles.css` 在全工程零引用**：`apps/debug/web/index.html` 既不 `<link>` 该文件，`apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE` 与 `:64` 的 `KEEP_MULTI` 也都不含 `styles.css` ⇒ 该文件仍是死资产。`.health-log` 的实际样式自 2026-09-28 起由页面内联 `<style>` 块承担：`#health-log` 元素（`apps/debug/web/index.html:813`）的等宽、换行、限高与滚动外观都来自同文件样式块里的 `.health-log` 规则；外置文件里的同名规则依旧不生效。
+1. **`apps/debug/web/styles.css` 在全工程零引用**：`apps/debug/web/index.html` 既不 `<link>` 该文件，`apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE` 与 `:64` 的 `KEEP_MULTI` 也都不含 `styles.css` ⇒ 该文件仍是死资产。`.health-log` 的实际样式自 2026-09-28 起由页面内联 `<style>` 块承担：`#health-log` 元素（`apps/debug/web/index.html:850`）的等宽、换行、限高与滚动外观都来自同文件样式块里的 `.health-log` 规则；外置文件里的同名规则依旧不生效。
 2. ~~**页面缺少被查询的九个 id**~~ **已全部处置（2026-09-26）**：九个查询（`pathVisibleChk`、`pvsEnabled` 与录制面板七个）已随各自死链删除，脚本不再查询任何页面不存在的 id（见 `documents/debug/implementation/app.md` 已知缺口第 10–12 项）。页面侧结论不变：`web/index.html` 从未提供「输入录制」区与 PVS 开关。
-3. **两个 id 无任何代码读写**：`lightingModeHint`（说明段，`apps/debug/web/index.html:514`）与 `pathBuildTag`（构建标签，`apps/debug/web/index.html:553`）在 `apps/debug/src` 与 `apps/debug/scripts` 内零命中。其中构建标签不做构建版本校验，与产物不符时页面不会提示。
+3. **两个 id 无任何代码读写**：`lightingModeHint`（说明段，`apps/debug/web/index.html:551`）与 `pathBuildTag`（构建标签，`apps/debug/web/index.html:590`）在 `apps/debug/src` 与 `apps/debug/scripts` 内零命中。其中构建标签不做构建版本校验，与产物不符时页面不会提示。
 4. ~~**`#health-log` 的实际外观依赖内联样式之外的东西**~~ **已消除（2026-09-28）**：`.health-log` 的规则已写进页面内联 `<style>` 块（见第 1 项），该元素不再是浏览器默认的 `<pre>` 外观。
-5. ~~**PVS 开关不在本区**~~ **已处置（2026-09-26）**：不再查询 `pvsEnabled`——该链（脚本查询 + config 字段 + 三处同步/监听）已整体删除，页面「渲染与视距」区维持不提供该开关（`apps/debug/web/index.html:493`）。剔除仍只有「块中心到相机距离 > `cullDistance`」一条判据。
-6. **`title` 属性与实际实现的口径**：`pathBuildTag` 所在区段的注释说明本页不校验构建版本（`apps/debug/web/index.html:553`），页面上也没有比较机制。
+5. ~~**PVS 开关不在本区**~~ **已处置（2026-09-26）**：不再查询 `pvsEnabled`——该链（脚本查询 + config 字段 + 三处同步/监听）已整体删除，页面「渲染与视距」区维持不提供该开关（`apps/debug/web/index.html:530`）。剔除仍只有「块中心到相机距离 > `cullDistance`」一条判据。
+6. **`title` 属性与实际实现的口径**：`pathBuildTag` 所在区段的注释说明本页不校验构建版本（`apps/debug/web/index.html:590`），页面上也没有比较机制。

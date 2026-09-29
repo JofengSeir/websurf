@@ -31,7 +31,7 @@
 - `apps/debug/src/worker/main.ts:455` 的 `createAuthLoop` 装配：Worker 侧权威物理的唯一推进者。
 - `apps/debug/src/input/input-recorder.ts:166` 的 `InputRecorder`：录制 / 回放的数据模型与失败语义。
 - `apps/debug/crates/wasm/src/lib.rs:487` 的 `impl BspProcessor`：本工程 WASM 绑定层的导出面。
-- `apps/debug/web/index.html:444` 起的页面骨架：全部 DOM 句柄的来源。
+- `apps/debug/web/index.html:481` 起的页面骨架：全部 DOM 句柄的来源。
 - `apps/debug/scripts/build-dist.mjs:75` 的 `multi` 开关：`single 产物` / `multi 产物` 两种形态的分岔点。
 
 ## 阅读顺序

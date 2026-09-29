@@ -33,7 +33,7 @@
       --ok: #7fc98f;
       --err: #e0857b;
       --warn: #d4b26a;
-      --r: 4px;
+      --r: 2px;
       --mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
     }
     * { box-sizing: border-box; }
@@ -53,7 +53,7 @@
       border-radius: var(--r);
       cursor: pointer;
     }
-    button:hover:not(:disabled) { background: var(--accent-weak); }
+    button:hover:not(:disabled) { background: transparent; border-color: var(--accent); color: var(--accent); }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     input[type="file"] { font-size: 11px; color: var(--text); }
     input[type="file"]::-webkit-file-upload-button {
@@ -69,7 +69,7 @@
       padding: 0 10px;
       background: var(--panel); border-bottom: 1px solid var(--border);
     }
-    #topbar .title { font-size: 13px; font-weight: 600; color: var(--accent); margin-right: 12px; white-space: nowrap; }
+    #topbar .title { font-size: 13px; font-weight: 600; color: var(--accent); margin-right: 12px; white-space: nowrap; border-left: 2px solid var(--accent); padding-left: 8px; }
     #topbar .spacer { flex: 1; }
     #main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
     #sidebar {
@@ -113,13 +113,13 @@
       display: inline-block; width: 12px;
     }
     details[open] > summary::before { transform: rotate(90deg); }
-    summary:hover { background: var(--accent-weak); }
-    .acc-body { padding: 4px 8px 8px 8px; }
+    summary:hover { color: var(--accent); }
+    .acc-body { padding: 4px 8px 8px 20px; }
 
     /* 手风琴内子分组标题 */
     .acc-section-title {
-      font-size: 11px; color: var(--muted); margin: 6px 0 4px;
-      letter-spacing: 0.02em;
+      font-size: 11px; color: var(--muted); margin: 10px 0 6px;
+      letter-spacing: 0.02em; padding-bottom: 3px; border-bottom: 1px solid var(--border);
     }
     .acc-section-title:first-child { margin-top: 0; }
     .acc-divider {
@@ -278,7 +278,7 @@
       color: var(--text); padding: 6px 10px; border-radius: var(--r);
       font-size: 11px; font-family: var(--mono);
       pointer-events: none;
-      border: 1px solid var(--border);
+      border: 1px solid var(--border); border-left: 2px solid var(--accent);
       line-height: 1.5;
       min-width: 180px; max-width: 420px;
       font-variant-numeric: tabular-nums;
@@ -435,6 +435,43 @@
     .ctrl-grid input[type="range"]::-moz-range-thumb {
       width: 10px; height: 14px; background: var(--accent);
       border: 1px solid var(--bg); border-radius: 2px;
+    }
+    /* ── 面板观感 sharpen（2026-09-30）：区段编号 + 打开态结构线 + 从属缩进线 +
+       状态 LED，全部沿用既有令牌；无动效、无渐变 ── */
+    details { counter-increment: sec; }
+    details > summary { position: relative; }
+    /* 区段编号：每区段标题右端的 mono 序号（01 起），仪表档案语彙 */
+    details > summary::after {
+      content: counter(sec, decimal-leading-zero);
+      margin-left: auto;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--border-strong); letter-spacing: 0.04em;
+    }
+    details[open] > summary::after { color: var(--accent); }
+    /* 打开态：左缘 2px 天青结构线 + 标题转天青（与 HUD 左缘结构线同语彙） */
+    details[open] > summary {
+      color: var(--accent);
+      box-shadow: inset 2px 0 0 var(--accent);
+    }
+    details[open] > summary::before { color: var(--accent); }
+    /* 手风琴体：从属缩进线（1px 分隔色贯穿，读作区段从属；缩进由 .acc-body
+       padding-left 20px 让位） */
+    .acc-body { position: relative; }
+    .acc-body::before {
+      content: ""; position: absolute; left: 13px; top: 0; bottom: 4px;
+      width: 1px; background: var(--border);
+    }
+    /* 分组小标题右端 3px 竖刻度（与 game 的 h4 刻度尺同语彙；下刻线在该规则本体） */
+    .acc-section-title { position: relative; }
+    .acc-section-title::after {
+      content: ""; position: absolute; right: 0; bottom: -3px;
+      width: 1px; height: 3px; background: var(--border-strong);
+    }
+    /* 状态行前置方形 LED（currentColor 随 success/error 语义色，常亮不闪） */
+    #status::before {
+      content: ""; display: inline-block;
+      width: 6px; height: 6px; margin-right: 6px;
+      background: currentColor;
     }
   </style>
 </head>
