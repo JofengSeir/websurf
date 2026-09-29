@@ -144,26 +144,6 @@ export class TrackPanel {
 
     // 行 1：色点 + 名称 + 帧数/时长（元信息）
     const line1 = el('div', 'track-line');
-    const dot = el('span', 'track-dot');
-    dot.style.background = '#' + track.color.toString(16).padStart(6, '0');
-    dot.title = '轨迹配色（右侧色块 = 调色板，改色实时更新）';
-    line1.appendChild(dot);
-
-    // 调色板：type=color 改这条轨迹的展示色（change 而非 input——拖色过程不重建 3D）；
-    // onChange 上抛后由 visuals 按新色重建轨迹线 / tick 点 / 幽灵 / 起终点标
-    const colorInput = el('input', 'track-color');
-    colorInput.type = 'color';
-    colorInput.value = '#' + track.color.toString(16).padStart(6, '0');
-    colorInput.title = '轨迹颜色（调色板）';
-    colorInput.addEventListener('change', () => {
-      const n = Number.parseInt(colorInput.value.replace('#', ''), 16);
-      if (!Number.isFinite(n)) return;
-      track.color = n;
-      dot.style.background = colorInput.value;
-      this.opts.onChange();
-    });
-    line1.appendChild(colorInput);
-
     const name = el('input', 'track-name');
     name.type = 'text';
     name.value = track.name;
@@ -176,6 +156,20 @@ export class TrackPanel {
       this.opts.onChange();
     });
     line1.appendChild(name);
+
+    // 调色板：type=color 改这条轨迹的展示色（change 而非 input——拖色过程不重建 3D）；
+    // onChange 上抛后由 visuals 按新色重建轨迹线 / tick 点 / 幽灵 / 起终点标
+    const colorInput = el('input', 'track-color');
+    colorInput.type = 'color';
+    colorInput.value = '#' + track.color.toString(16).padStart(6, '0');
+    colorInput.title = '轨迹颜色（调色板）';
+    colorInput.addEventListener('change', () => {
+      const n = Number.parseInt(colorInput.value.replace('#', ''), 16);
+      if (!Number.isFinite(n)) return;
+      track.color = n;
+      this.opts.onChange();
+    });
+    line1.appendChild(colorInput);
 
     line1.appendChild(
       el(

@@ -23,7 +23,7 @@
  *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**黑白**斜纹顶条、
  *     拖拽态上下缘黑白遮幅条、录像信息条左端**调色卡条**（黑/灰/白/
  *     时间码黄四段）、每个小节标题左端**调色卡竖条**（黑/白/黄三段）、
- *     引导层四角**取景框角标**（淡白 L 形）；tab 为状态标签条形态
+ *     （激活 = 场记板白底黑字，**不切角**——切角只留在大结构上）；
  *     （激活 = 场记板白底黑字 + 右上 10px 切角）。
  *
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名驱动）：
@@ -54,7 +54,7 @@
   --ok: #8cc98f;                         /* 预留令牌：本工程当前无 success 态消费点 */
   /* --accent-hover / --on-accent 为预留令牌：主按钮走场记板白底黑字（--strip-*），无 hover/前景消费点 */
   --err: #e05548;                         /* REC 红：仅错误/危险 */
-  --warn: #e6c35c;                       /* 刻意与 --accent 同值：时间码黄兼任片场警示色 */
+  --warn: #e0955c;                       /* 警示橙：与时间码黄分离 */                       /* 刻意与 --accent 同值：时间码黄兼任片场警示色 */
 
   /* 黑白条（场记板 / 遮幅）：亮段 = 场记板白，暗段 = 影调黑 */
   --strip-light: #e8e8e4;
@@ -73,7 +73,7 @@ body {
   font-size: 13px; color: var(--text); background: var(--bg);
 }
 ::selection { background: var(--accent-weak); }
-:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+:focus-visible { outline: 1px solid var(--text); outline-offset: 1px; }
 #app { position: fixed; inset: 0; }
 #game { display: block; width: 100%; height: 100%; background: var(--bg); cursor: crosshair; }
 .hidden { display: none !important; }
@@ -82,7 +82,7 @@ kbd {
   border: 1px solid var(--border-strong);
   padding: 0 4px; margin: 0 1px;
 }
-code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 
 /* ── HUD #hud（左上角）：三行只读状态铭牌（#pose / #bspStatus / #replayStatus）；
    左缘 2px 白结构线（灰阶区不用彩）；容器不挡点击；
@@ -161,10 +161,10 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   overflow: hidden;
 }
-/* 顶缘时间码黄嵌片（32×2 短嵌片，与盖板齐平；电子标注位语彙） */
+/* 顶缘场记板白嵌片（32×2 短嵌片，与盖板齐平；黑白条语彙） */
 #sidebar::before {
   content: ""; position: absolute; top: 0; left: 18px;
-  width: 32px; height: 2px; background: var(--accent); z-index: 1;
+  width: 32px; height: 2px; background: var(--strip-light); z-index: 1;
 }
 /* 服务孔（侧栏左下 5px 圆，与右上切角对角） */
 #sidebar::after {
@@ -206,7 +206,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
 #pane-replay::before { content: "VW-02"; }
 .tabpane::before {
   position: absolute; top: 8px; right: 12px;
-  font-family: var(--mono); font-size: 12px; color: var(--accent);
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
   letter-spacing: 0.04em;
 }
 .tabpane::after {
@@ -255,7 +255,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
   background: var(--bg); border: 1px solid var(--border);
   padding: 3px 6px;
 }
-.field-input:focus { outline: none; border-color: var(--accent); }
+.field-input:focus { outline: none; border-color: var(--text); }
 .field-input.invalid { border-color: var(--err); }
 /* select.field-select（mapinfo.ts 构造）：自绘形态对齐 select.tl-select——
    细线框 + muted 色 data-URI 刻度箭头 + 聚焦琥珀边 */
@@ -267,7 +267,7 @@ select.field-select {
   border: 1px solid var(--border); padding: 3px 22px 3px 6px; cursor: pointer;
   appearance: none; -webkit-appearance: none;
 }
-select.field-select:focus { border-color: var(--accent); }
+select.field-select:focus { border-color: var(--text); }
 .field-num { max-width: 96px; flex: 0 0 auto; }
 .field-check { gap: 6px; cursor: pointer; }
 .field-check .field-label { min-width: 0; }
@@ -286,7 +286,7 @@ select.field-select:focus { border-color: var(--accent); }
 
 .note { font-size: 11.5px; line-height: 1.6; padding: 5px 8px; word-break: break-all; }
 .note-info { color: var(--muted); border: 1px solid var(--border); }
-.note-warn { color: var(--warn); background: rgba(230, 195, 92, 0.1); border: 1px solid var(--warn); }
+.note-warn { color: var(--warn); background: rgba(224, 149, 92, 0.1); border: 1px solid var(--warn); }
 .note-error { color: var(--err); background: rgba(224, 85, 72, 0.1); border: 1px solid var(--err); }
 
 .mono { font-family: var(--mono); font-size: 11px; line-height: 1.55; }
@@ -323,13 +323,12 @@ select.field-select:focus { border-color: var(--accent); }
 }
 .track-line { display: flex; align-items: center; gap: 5px; min-width: 0; }
 /* .track-line-ops（trackpanel.ts 的操作行变体）走本基础规则，无独立规则 */
-.track-dot { width: 9px; height: 9px; flex: 0 0 auto; }
 .track-name {
   flex: 1; min-width: 0; font-family: inherit; font-size: 12px; color: var(--text);
   background: transparent; border: 1px solid transparent; padding: 1px 4px;
 }
 .track-name:hover { border-color: var(--border); }
-.track-name:focus { outline: none; border-color: var(--accent); }
+.track-name:focus { outline: none; border-color: var(--text); }
 .track-meta { font-size: 10.5px; color: var(--muted); flex: 0 0 auto; }
 .track-off-label { font-size: 11px; color: var(--muted); flex: 0 0 auto; }
 /* 轨迹调色板（trackpanel.ts 的 type=color）：16×16 细线方框，色板原生弹层 */
@@ -344,7 +343,7 @@ select.field-select:focus { border-color: var(--accent); }
   background: var(--bg); border: 1px solid var(--border);
   padding: 1px 4px;
 }
-.track-off:focus { outline: none; border-color: var(--accent); }
+.track-off:focus { outline: none; border-color: var(--text); }
 .track-off.invalid { border-color: var(--err); }
 .track-off-unit { font-size: 10.5px; color: var(--muted); flex: 0 0 auto; margin-right: 2px; }
 .track-btn {
@@ -405,7 +404,11 @@ select.field-select:focus { border-color: var(--accent); }
 }
 .meta-dot { width: 9px; height: 9px; flex: 0 0 auto; }
 .mi { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
-.mk { font-size: 11px; color: var(--muted); }
+/* .mk 字段名 = 场记板标签栏（黑底白字小标签，Scene/Take 栏语彙） */
+.mk {
+  font-size: 10px; color: var(--strip-light);
+  background: var(--strip-dark); padding: 1px 5px; letter-spacing: 0.06em;
+}
 .mv { font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .mi.headline .mv { color: var(--accent); font-size: 14px; font-weight: 600; }
 
@@ -433,10 +436,32 @@ select.field-select:focus { border-color: var(--accent); }
 .tl-sliderwrap {
   position: relative; flex: 1; min-width: 160px; height: 18px;
   display: flex; align-items: center;
+  /* 秒刻度尺：底部短刻度（每 10% 一格） */
+  background-image: repeating-linear-gradient(90deg,
+    var(--border) 0 1px, transparent 1px 10%);
+  background-size: calc(100% - 1px) 5px;
+  background-position: left bottom;
+  background-repeat: no-repeat;
 }
+/* 播放头：自绘白竖线 thumb（剪辑 playhead 语彙）；webkit/moz 双轨 */
 .tl-slider {
   flex: 1; width: 100%; position: relative; z-index: 2; background: transparent;
-  accent-color: var(--text); cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+  height: 18px; cursor: pointer;
+}
+.tl-slider::-webkit-slider-runnable-track {
+  height: 2px; background: var(--border-strong);
+}
+.tl-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 3px; height: 16px; margin-top: -7px;
+  background: var(--strip-light); border: none;
+}
+.tl-slider::-moz-range-track {
+  height: 2px; background: var(--border-strong);
+}
+.tl-slider::-moz-range-thumb {
+  width: 3px; height: 16px; background: var(--strip-light); border: none; border-radius: 0;
 }
 .tl-zone { position: absolute; top: 2px; bottom: 2px; pointer-events: none; }
 /* 正式跑段带 = **斜纹灰白带 + 两端刻线**（剪辑软件「片段」语彙：斜纹 = 记录中，
@@ -457,7 +482,13 @@ select.field-select:focus { border-color: var(--accent); }
 .tl-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn.playbtn { min-width: 70px; font-weight: 600; padding: 4px 13px; }
 /* 时间码：监视器黄（本行唯一彩色，与 .tl-zone 灰阶刻意分离） */
+/* 时间码 = 时间码黄的核心消费位；播放中前缀 REC 红点（录制指示语彙） */
 .tl-time { font-family: var(--mono); font-size: 12px; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tl-time::before {
+  content: ""; display: none; width: 7px; height: 7px; margin-right: 6px;
+  background: var(--err); vertical-align: middle;
+}
+.tl-time.rec::before { display: inline-block; }
 .tl-frame { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
 .tl-speed-select { flex: 0 0 auto; }
 .tl-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -469,7 +500,7 @@ select.tl-select {
   border: 1px solid var(--border); padding: 2px 22px 2px 5px; cursor: pointer;
   appearance: none; -webkit-appearance: none;
 }
-select.tl-select:focus { border-color: var(--accent); }
+select.tl-select:focus { border-color: var(--text); }
 .tl-opt {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 11.5px; color: var(--muted); cursor: pointer; white-space: nowrap;
@@ -520,9 +551,19 @@ select.tl-select:focus { border-color: var(--accent); }
   transform: translateX(-50%);
   z-index: 5; pointer-events: none; user-select: none;
   font-variant-numeric: tabular-nums;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
   font-size: 20px; font-weight: 600; color: #ececec;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
+/* 速度电平表（telemetry.ts：12 段，水平速度 400u/s 满格；末 2 段点亮 = 高速过载红） */
+.telemetry-meter {
+  display: flex; gap: 2px;
+}
+.meter-seg {
+  width: 9px; height: 4px; background: var(--border);
+}
+.meter-seg.on { background: var(--muted); }
+.meter-seg.on.hot { background: var(--err); }
 .telemetry.full { left: 50%; }
 .telemetry .vsep { color: var(--muted); margin: 0 7px; font-weight: 400; }
 .telemetry .tm-vert { color: var(--muted); }
@@ -605,9 +646,11 @@ select.tl-select:focus { border-color: var(--accent); }
   pointer-events: none;
 }
 #dropzone::before, #dropzone::after {
-  content: ""; position: absolute; left: 0; right: 0; height: 6px;
-  background: repeating-linear-gradient(-45deg,
-    var(--strip-light) 0 12px, var(--strip-dark) 12px 24px);
+  content: ""; position: absolute; left: 0; right: 0; height: 8px;
+  /* SMPTE 七色彩条（白 75/黄/青/绿/紫/红/蓝，硬停分段）——影视测试信号语彙 */
+  background: linear-gradient(90deg,
+    #c8c8c8 0 14.28%, #e6c35c 14.28% 28.56%, #4fb3c4 28.56% 42.84%, #58c25c 42.84% 57.12%,
+    #b06fc4 57.12% 71.4%, #d9564a 71.4% 85.68%, #4a6fd9 85.68% 100%);
 }
 #dropzone::before { top: 12px; }
 #dropzone::after { bottom: 12px; }

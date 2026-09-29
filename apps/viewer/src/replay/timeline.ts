@@ -247,6 +247,8 @@ export class Timeline {
     this.playBtn.textContent = p.playing ? '暂停' : '播放';
     this.playBtn.classList.toggle('active', p.playing);
     this.timeEl.textContent = `${fmtTime(p.time)} / ${fmtTime(p.duration)} s`;
+    // 播放中时间码前缀亮 REC 红点（暂停/停止熄灭）——录制指示语彙
+    this.timeEl.classList.toggle('rec', p.playing);
     this.frameEl.textContent = frameText(p);
     if (!this.dragging) {
       this.slider.value = String(Math.round(p.ratio * 1000));
