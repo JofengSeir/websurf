@@ -7,4 +7,9 @@
 declare module 'node:fs' {
   /** 读文件为字节；运行时返回 `Buffer`（`Uint8Array` 的子类），故这里直接按 `Uint8Array` 声明。 */
   export function readFileSync(path: URL | string): Uint8Array;
+  /**
+   * 列目录条目名。自检用它**发现 `.dem` 夹具**（早先硬编码单个文件名，换夹具后整段静默跳过，
+   * 等于零覆盖）。只声明用到的最简形态：不带 `withFileTypes` 时返回名字字符串数组。
+   */
+  export function readdirSync(path: URL | string): string[];
 }

@@ -45,6 +45,15 @@ export class ReplayVisuals {
   /** tick 数据点总开关（时间轴的「tick 点」复选框写它）。 */
   showTickNodes = true;
 
+  /**
+   * **按轨道的 tick 点开关**（覆写全局 `showTickNodes`）。
+   *
+   * 为什么需要它：「录像」页与「演示」页共用同一个 `ReplayVisuals`，而 `showTickNodes` 是
+   * **全局单份** —— 在录像页关掉 tick 点，演示页的人物也跟着没了（owner 实测）。
+   * 这里让每条轨道可以有自己的取值；演示页按人物逐个设置，录像页继续用全局开关。
+   */
+  private readonly tickByTrack = new Map<string, boolean>();
+
   /** 已建对象表，下标与 `setTracks` 传入的顺序一致；`update` 靠 `trackId` 找回对应项。 */
   private objects: TrackObjects[] = [];
 
@@ -71,7 +80,7 @@ export class ReplayVisuals {
       const entry = samples.find((s) => s.track.id === o.trackId);
       const visible = entry ? entry.track.visible : true;
       o.trail.visible = this.showTrail && visible;
-      o.tickNodes.visible = this.showTickNodes && visible;
+      o.tickNodes.visible = (this.tickByTrack.get(o.trackId) ?? this.showTickNodes) && visible;
       o.startMark.visible = visible;
       o.endMark.visible = visible;
 
@@ -103,6 +112,11 @@ export class ReplayVisuals {
   }
 
   /** tick 数据点总开关（时间轴复选框的回调）。 */
+  /** 设置**某一条轨道**的 tick 点显隐（演示页按人物逐个设置）。 */
+  setTickNodesVisibleFor(trackId: string, v: boolean): void {
+    this.tickByTrack.set(trackId, v);
+  }
+
   setTickNodesVisible(v: boolean): void {
     this.showTickNodes = v;
   }
