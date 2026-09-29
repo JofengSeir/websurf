@@ -20,7 +20,7 @@
  *     （侧栏左下）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层至多
  *     1 件」适配，不套用 game 单窗口的 ≥2 口径；
  *   · **导演版条纹特色（owner 指定保留并强化，v3 扩展）**：时间轴上下缘
- *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**人字彩条**顶条（见 v15）、
+ *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**人字彩条**顶条（尾部单一深色，见 v17）、
  *     拖拽态上下缘黑白遮幅条、录像信息条左端**调色卡条**（黑/灰/白/
  *     时间码黄四段）、每个小节标题左端**调色卡竖条**（黑/白/黄三段）、
  *     （激活 = 场记板白底黑字，**不切角**——切角只留在大结构上）；
@@ -679,65 +679,64 @@ select.tl-select:focus { border-color: var(--text); }
   /* 板面整体放大（owner：大一些 + 空处多一些）：原 470 → 520px */
   width: min(520px, calc(100vw - 32px));
   position: relative; text-align: left;
-  background: #0d0d10;                                   /* 板身：实物白板的反相 */
+  /* 内容区 = **较浅的深色**（owner 定调）：与上方"单一深色"的拍板条形成两级明度 */
+  background: #17181d;
   border: 1px solid rgba(255, 255, 255, 0.24);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
-/* 拍板条：44px 高。**左段是纯黑铰链板**（照片里看起来发灰是抛光金属的反光——竖直剖面
-   实测亮度在 90–180 间大幅波动并夹着 3–36 的暗斑，即螺钉孔），板右缘**跟着人字折线**，
-   所以把它做成色条渐变的第一段（0 → 29.3%）。
-   **色带取等宽**（owner：至少等比）——黑板 29.3%，绿/黄/蓝/红/白/灰各 8.5%，
-   右暗阶 19.7%（4 等段）。 */
+/* 拍板条：44px 高。三段结构：**黑色铰链板**（色条渐变的第一段 0→28.6%）+
+   **人字彩条**（绿/黄/蓝/红/白/灰）+ **尾部单一深色**。
+   ⚠ 2026-09-30 更正：owner 说的"尾部改深色"指的是**尾部那几级不等比的深色渐变**
+   换成单一深色（那次几个色阶的宽度不成比例，看起来"不规则"）；我上一版误读成
+   "整条改单一深色"、把彩条全删了 —— 已恢复彩条，只把尾部收成一个色。
+   人字几何仍是实测值（上下两层 52°/-52° 镜像、色序反转，折点在条高中央）。 */
 .slate-stick {
   position: relative;
   height: 44px;
   background: #0a0a0c;
-  border-bottom: 2px solid #000;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
-/* 铰链的**真实结构**（照片复核）：上片（动片，拍板）1 颗螺钉、下片（定片，板身）2 颗，
-   两片之间一条**水平转轴分缝**——有分缝才谈得上"上下分离后转动"。
-   实测位置：上 1 颗 横 4.6% / 纵 23%；下 2 颗 横 4.2% 与 16.0% / 纵 76%；
-   分缝在纵 ~50%（照片纵 48–50% 处沿 x=224…291 有一串暗斑即缝）。
-   分缝用 1px 平涂线 #2e2e36（纯黑板上可辨），螺钉为平涂圆点 #3c3c45——都非高光/非渐变。 */
-.slate-screws {
-  position: absolute; inset: 0; pointer-events: none;
-  /* 第一层：转轴分缝（限黑板宽度 29.3%，居中 1px 线）；后四层：三颗螺钉 */
-  background:
-    linear-gradient(180deg, transparent calc(50% - 0.5px), #2e2e36 calc(50% - 0.5px) 50%, transparent 50%),
-    radial-gradient(circle at 4.6% 23%, #3c3c45 0 3px, transparent 3px),
-    radial-gradient(circle at 4.2% 76%, #3c3c45 0 3px, transparent 3px),
-    radial-gradient(circle at 16% 76%, #3c3c45 0 3px, transparent 3px);
-  background-repeat: no-repeat;
-  background-size: 29.3% 100%, auto, auto, auto;
-}
-/* 色条：**人字形（chevron）** —— 上下两层镜像角（52° / −52°）各占 50% 高度，
-   在条高中央折成 V（照片实测：色界斜率 |dx/dy|≈0.77，折点在条高中央）。
-   下半层必须**同时把色序反转**（[a,b] → [100−b,100−a]）：折点处 s_top+s_bot=L，
-   只有色序取反同一条色带的 x 才连续；只镜像角度不反转色序会整体错开一个带位。 */
+/* 彩条：上下两层镜像渐变在条高中央折成 V；下半层**同时反转色序**，色带才在折点处连续 */
 .slate-stripes {
   position: absolute; inset: 0;
   background-image:
     linear-gradient(52deg,
       #0a0a0c 0 28.6%,
-      #7ebcaf 28.6% 36.9%,
-      #e7e290 36.9% 45.2%,
-      #69b9ee 45.2% 53.5%,
-      #d7475e 53.5% 61.8%,
-      #ececf4 61.8% 70.1%,
-      #918994 70.1% 78.4%,
-      #34323e 78.4% 83.2%, #2c2634 83.2% 88%, #1c192a 88% 92.8%, #202231 92.8% 100%),
+      #7ebcaf 28.6% 36%,
+      #e7e290 36% 45.4%,
+      #69b9ee 45.4% 53.4%,
+      #d7475e 53.4% 60.5%,
+      #ececf4 60.5% 68.4%,
+      #918994 68.4% 76.2%,
+      #2c2c36 76.2% 100%),
     linear-gradient(-52deg,
-      #202231 0 7.2%, #1c192a 7.2% 12%, #2c2634 12% 16.8%, #34323e 16.8% 21.6%,
-      #918994 21.6% 29.9%,
-      #ececf4 29.9% 38.2%,
-      #d7475e 38.2% 46.5%,
-      #69b9ee 46.5% 54.8%,
-      #e7e290 54.8% 63.1%,
-      #7ebcaf 63.1% 71.4%,
+      #2c2c36 0 23.8%,
+      #918994 23.8% 31.6%,
+      #ececf4 31.6% 39.5%,
+      #d7475e 39.5% 46.6%,
+      #69b9ee 46.6% 54.6%,
+      #e7e290 54.6% 64%,
+      #7ebcaf 64% 71.4%,
       #0a0a0c 71.4% 100%);
-  background-size: 100% 50%, 100% 50%;
+  /* 两层各占 **51%** 而不是 50%：50% 在 43px 高上取整后会在折点留 1px 缝，
+     缝里露出条底色 ⇒ 实测折点整行被压暗约 50%（看起来像一道脏线）。
+     多出的 1% 由先列出的上层盖住，折点处色带连续。 */
+  background-size: 100% 51%, 100% 51%;
   background-position: 0 0, 0 100%;
   background-repeat: no-repeat;
+}
+/* 铰链：**水平转轴分缝**（限黑色板件宽度 28.6%）+ **三颗螺钉**（上片 1 + 下片 2）。
+   按 owner 反馈：左列对齐（原先上 4.6% / 下 4.2% 差 2px）、下面两颗拉近（16% → 12%）。 */
+.slate-screws {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(180deg,
+      transparent calc(50% - 0.5px), #2e2e36 calc(50% - 0.5px) 50%, transparent 50%),
+    radial-gradient(circle at 4.4% 23%, #3c3c45 0 3px, transparent 3px),
+    radial-gradient(circle at 4.4% 77%, #3c3c45 0 3px, transparent 3px),
+    radial-gradient(circle at 12% 77%, #3c3c45 0 3px, transparent 3px);
+  background-repeat: no-repeat;
+  background-size: 28.6% 100%, auto, auto, auto;
 }
 /* 板身行 = 场记板单元格：标签列（中文粗 / 英文等宽小字，竖向格线分隔）+ 值列；
    行间 1px 白格线。格线与竖线是这块"板"的主要结构，不靠底色块表达分组。 */
