@@ -24,6 +24,8 @@
  *     拖拽态上下缘黑白遮幅条、录像信息条左端**调色卡条**（黑/灰/白/
  *     时间码黄四段）、每个小节标题左端**调色卡竖条**（黑/白/黄三段）、
  *     （激活 = 场记板白底黑字，**不切角**——切角只留在大结构上）；
+ *   · **影视语彙泛化（v4/v6）**：播放中时间码前缀 REC 红点、时间轴底部秒刻度尺、白竖线播放头、SMPTE 彩条、速度电平表、场记板黑白标签。
+ *   · **引导卡场记板化（v6）**：直角板面 + 双道拍板条纹 + 白色格线信息栏——版式仿照场记板，无拟物材质。
  *     （激活 = 场记板白底黑字 + 右上 10px 切角）。
  *
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名驱动）：
@@ -72,7 +74,7 @@ body {
   font-family: system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 13px; color: var(--text); background: var(--bg);
 }
-::selection { background: var(--accent-weak); }
+::selection { background: rgba(232, 232, 228, 0.12); }
 :focus-visible { outline: 1px solid var(--text); outline-offset: 1px; }
 #app { position: fixed; inset: 0; }
 #game { display: block; width: 100%; height: 100%; background: var(--bg); cursor: crosshair; }
@@ -241,7 +243,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
   content: ""; position: absolute; left: 0; top: 3px;
   width: 3px; height: 15px;
   background: linear-gradient(180deg,
-    var(--border) 0 33%, var(--strip-light) 33% 66%, var(--accent) 66% 100%);
+    var(--border) 0 33%, var(--muted) 33% 66%, var(--strip-light) 66% 100%);
 }
 .sec-title::after {
   content: ""; position: absolute; right: 0; bottom: -3px;
@@ -516,7 +518,7 @@ select.tl-select:focus { border-color: var(--text); }
   box-shadow: inset 0 0 0 1px var(--text);
 }
 .tl-range { font-size: 11.5px; color: var(--muted); font-family: var(--mono); min-width: 150px; }
-.tl-range.active { color: var(--accent); }
+.tl-range.active { color: var(--text); }
 
 /* 右列按键簇 .tm-keys：上排 Q/W/E · 中排 A/S/D · 下排 蹲（1 格）+ 跳（2 格）；
    细线键帽（无圆角），高亮加 .on（白底黑字，键帽即黑白条语彙），
@@ -574,25 +576,13 @@ select.tl-select:focus { border-color: var(--text); }
 #guide {
   position: absolute; inset: 0; z-index: 8;
   display: flex; align-items: center; justify-content: center;
-  /* 四角取景框角标（淡白 L 形 8 段定位，预览器语彙）叠加在遮罩上 */
-  background:
-    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) 20px 20px / 26px 1px,
-    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) 20px 20px / 1px 26px,
-    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) calc(100% - 46px) 20px / 26px 1px,
-    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) calc(100% - 20px) 20px / 1px 26px,
-    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) 20px calc(100% - 46px) / 1px 26px,
-    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) 20px calc(100% - 20px) / 26px 1px,
-    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) calc(100% - 46px) calc(100% - 20px) / 26px 1px,
-    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) calc(100% - 20px) calc(100% - 46px) / 1px 26px,
-    var(--overlay);
-  background-repeat: no-repeat;
+  background: var(--overlay);
 }
 #guide .card {
   max-width: 430px; margin: 0 16px; padding: 22px 26px;
   position: relative;
   text-align: center;
   background: var(--panel); border: 1px solid var(--border-strong);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 6px 20px rgba(0, 0, 0, 0.35);
@@ -600,24 +590,29 @@ select.tl-select:focus { border-color: var(--text); }
 /* 场记板顶条：卡片顶部的斜纹硬停条纹——**黑白**相间（导演板本色，
    不用彩色），无渐变；上缘与切角卡片同高齐平，下缘留 16px 呼吸 */
 #guide .card::before {
-  content: ""; display: block; height: 10px; margin: -22px -26px 16px;
+  content: ""; display: block; height: 10px; margin: -22px -26px 3px;
   background: repeating-linear-gradient(-45deg,
     var(--strip-light) 0 12px, var(--strip-dark) 12px 24px);
 }
-/* 装饰螺丝（引导卡左下，9px 十字凹槽 + 齐平垫圈，同 game .load-card 语彙） */
 #guide .card::after {
-  content: ""; position: absolute; bottom: 10px; left: 10px;
-  width: 9px; height: 9px; border-radius: 50%;
-  background:
-    linear-gradient(var(--muted), var(--muted)) center / 7px 1px no-repeat,
-    linear-gradient(var(--muted), var(--muted)) center / 1px 7px no-repeat,
-    var(--panel);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 0 0 2px var(--panel);
+  content: ""; display: block; height: 8px; margin: 0 -26px 16px;
+  background: repeating-linear-gradient(-45deg,
+    var(--strip-dark) 0 12px, var(--strip-light) 12px 24px);
 }
-#guide .gtitle { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
-#guide .gstep { font-size: 13px; color: var(--muted); line-height: 1.9; }
-#guide .gstep code { font-size: 12px; }
+#guide .gtitle {
+  font-size: 16px; font-weight: 600; letter-spacing: 0.04em;
+  padding-bottom: 10px; margin-bottom: 0;
+  border-bottom: 2px solid rgba(232, 232, 228, 0.9);
+}
+/* 信息栏格线（场记板形式）：每步一行，下缘 2px 白格线分单元格 */
+#guide .gstep {
+  font-size: 13px; color: var(--muted); line-height: 1.9;
+  padding: 10px 2px;
+  border-bottom: 2px solid rgba(232, 232, 228, 0.9);
+  text-align: left;
+}
+#guide .gstep:last-of-type { border-bottom: none; }
+#guide .gstep code { font-size: 12px; color: var(--text); }
 /* 主按钮 = 场记板白板：白底黑字 + 右上 10px 切角（黑白条语彙的实体化） */
 #guideBtn {
   display: inline-block; margin-top: 16px; padding: 8px 20px;
@@ -672,4 +667,4 @@ select.tl-select:focus { border-color: var(--text); }
 }
 #fatal .ftitle { font-size: 15px; font-weight: 600; color: var(--err); margin-bottom: 10px; }
 #fatal .fdetail { font-size: 12px; color: var(--muted); line-height: 1.8; white-space: pre-wrap; word-break: break-all; }
-#fatal .fdetail code { color: var(--accent); }
+#fatal .fdetail code { color: var(--muted); }
