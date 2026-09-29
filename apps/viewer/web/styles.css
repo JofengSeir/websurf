@@ -700,36 +700,35 @@ select.tl-select:focus { border-color: var(--text); }
 .slate-stripes {
   position: absolute; inset: 0;
   background-image:
-    /* **黑白交替（上下同色）+ 末尾短黑 + 软边 + 上下板之间一条缝**（owner 2026-09-30 定稿）：
-       - 上下同色：撤回上一版的"上下板错色"（owner 定稿取消）；
-       - 每条色界两侧各留 **0.6px 过渡**（`calc(x% ∓ 0.6px)`）——斜边是 1px 硬停，
-         在 44px 高的条上会出现台阶（锯齿感）；0.6px 的线性过渡交给抗锯齿去抹平；
-       - 末尾短黑 3.5% 收尾（顶到右缘，切口融进深色背景）；
-       - 缝在 `#guide .slate-screws` 里画（见该规则），这里只管条面底色。
-       比例：黑板 23.5% ｜ 白/黑 交替 9 条（各 8.1%）｜ 短黑 3.5%。 */
+    /* **黑白交替（上下同色）+ 末尾短黑 5% + 软边**（owner 2026-09-30 定稿）
+       - 每条色界两侧各 0.6px 过渡（`calc(x% ∓ 0.6px)`）：斜边是 1px 硬停，在 44px 高的条上
+         会有台阶感（锯齿），亚像素过渡交给抗锯齿抹平；
+       - 末尾短黑由 3.5% 调到 **5%**（owner：又感觉小了）；
+       - 缝画在 `#guide .slate-screws`（见该规则），本规则只管条面底色。
+       比例：黑板 23.5% ｜ 白/黑 交替 9 条（各 7.94%）｜ 短黑 5%。 */
     linear-gradient(52deg,
       #0a0a0c 0 calc(22.7% - 0.6px),
-      #ececf4 calc(22.7% + 0.6px) calc(30.6% - 0.6px),
-      #0a0a0c calc(30.6% + 0.6px) calc(38.4% - 0.6px),
-      #ececf4 calc(38.4% + 0.6px) calc(46.3% - 0.6px),
-      #0a0a0c calc(46.3% + 0.6px) calc(54.1% - 0.6px),
-      #ececf4 calc(54.1% + 0.6px) calc(62% - 0.6px),
-      #0a0a0c calc(62% + 0.6px) calc(69.8% - 0.6px),
-      #ececf4 calc(69.8% + 0.6px) calc(77.7% - 0.6px),
-      #0a0a0c calc(77.7% + 0.6px) calc(85.5% - 0.6px),
-      #ececf4 calc(85.5% + 0.6px) calc(93.4% - 0.6px),
-      #0a0a0c calc(93.4% + 0.6px) 100%),
+      #ececf4 calc(22.7% + 0.6px) calc(30.4% - 0.6px),
+      #0a0a0c calc(30.4% + 0.6px) calc(38.1% - 0.6px),
+      #ececf4 calc(38.1% + 0.6px) calc(45.8% - 0.6px),
+      #0a0a0c calc(45.8% + 0.6px) calc(53.5% - 0.6px),
+      #ececf4 calc(53.5% + 0.6px) calc(61.2% - 0.6px),
+      #0a0a0c calc(61.2% + 0.6px) calc(68.9% - 0.6px),
+      #ececf4 calc(68.9% + 0.6px) calc(76.6% - 0.6px),
+      #0a0a0c calc(76.6% + 0.6px) calc(84.3% - 0.6px),
+      #ececf4 calc(84.3% + 0.6px) calc(92% - 0.6px),
+      #0a0a0c calc(92% + 0.6px) 100%),
     linear-gradient(-52deg,
-      #0a0a0c 0 calc(6.6% - 0.6px),
-      #ececf4 calc(6.6% + 0.6px) calc(14.5% - 0.6px),
-      #0a0a0c calc(14.5% + 0.6px) calc(22.3% - 0.6px),
-      #ececf4 calc(22.3% + 0.6px) calc(30.2% - 0.6px),
-      #0a0a0c calc(30.2% + 0.6px) calc(38% - 0.6px),
-      #ececf4 calc(38% + 0.6px) calc(45.9% - 0.6px),
-      #0a0a0c calc(45.9% + 0.6px) calc(53.7% - 0.6px),
-      #ececf4 calc(53.7% + 0.6px) calc(61.6% - 0.6px),
-      #0a0a0c calc(61.6% + 0.6px) calc(69.4% - 0.6px),
-      #ececf4 calc(69.4% + 0.6px) calc(77.3% - 0.6px),
+      #0a0a0c 0 calc(8% - 0.6px),
+      #ececf4 calc(8% + 0.6px) calc(15.7% - 0.6px),
+      #0a0a0c calc(15.7% + 0.6px) calc(23.4% - 0.6px),
+      #ececf4 calc(23.4% + 0.6px) calc(31.1% - 0.6px),
+      #0a0a0c calc(31.1% + 0.6px) calc(38.8% - 0.6px),
+      #ececf4 calc(38.8% + 0.6px) calc(46.5% - 0.6px),
+      #0a0a0c calc(46.5% + 0.6px) calc(54.2% - 0.6px),
+      #ececf4 calc(54.2% + 0.6px) calc(61.9% - 0.6px),
+      #0a0a0c calc(61.9% + 0.6px) calc(69.6% - 0.6px),
+      #ececf4 calc(69.6% + 0.6px) calc(77.3% - 0.6px),
       #0a0a0c calc(77.3% + 0.6px) 100%);
   background-size: 100% 51%, 100% 51%;
   background-position: 0 0, 0 100%;
@@ -740,8 +739,10 @@ select.tl-select:focus { border-color: var(--text); }
 .slate-screws {
   position: absolute; inset: 0; pointer-events: none;
   background:
+    /* 上下板之间的缝：**2px**、`#4b4b57`（原先 1px `#2e2e36` 在黑板段几乎看不出，
+       owner 实测要缩放到 125% 才辨认得出 —— 加粗并提对比，同时抵抗高 DPI 分数缩放） */
     linear-gradient(180deg,
-      transparent calc(50% - 0.5px), #2e2e36 calc(50% - 0.5px) 50%, transparent 50%),
+      transparent calc(50% - 1px), #4b4b57 calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)),
     radial-gradient(circle at 4.4% 23%, #3c3c45 0 3px, transparent 3px),
     radial-gradient(circle at 4.4% 77%, #3c3c45 0 3px, transparent 3px),
     radial-gradient(circle at 9.5% 77%, #3c3c45 0 3px, transparent 3px);
