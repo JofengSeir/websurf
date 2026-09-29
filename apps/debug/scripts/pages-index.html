@@ -14,8 +14,13 @@
   }
   h1 { font-size: 28px; font-weight: 600; margin: 0 0 4px; }
   .sub { font-size: 14px; color: #666; margin-bottom: 32px; }
-  .entry { font-size: 17px; line-height: 2.2; }
-  .entry a { color: #2b6cb0; text-decoration: none; }
+  /* 三行入口走三列网格：列宽按最宽内容取齐，三行的链接、破折号、说明逐列对齐 */
+  .entry {
+    display: inline-grid; grid-template-columns: max-content max-content max-content;
+    column-gap: 0.55em; align-items: baseline; text-align: left;
+    font-size: 17px; line-height: 2.2;
+  }
+  .entry a { color: #2b6cb0; text-decoration: none; white-space: nowrap; }
   .entry a:hover { text-decoration: underline; }
   .entry .desc { color: #888; font-size: 13px; }
   kbd {
@@ -24,26 +29,48 @@
     border-radius: 4px; padding: 1px 5px; color: #444; white-space: nowrap;
   }
   code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 11.5px; }
-  .ctrlw {
-    margin-top: 28px; max-width: 640px; text-align: left;
-    font-size: 12.5px; line-height: 1.85; color: #555;
-    background: #fffdf7; border: 1px solid #f0e3c8;
-    border-radius: 8px; padding: 14px 18px;
+  .note { margin-top: 40px; font-size: 12.5px; color: #999; max-width: 560px; line-height: 1.8; }
+  footer { margin-top: 16px; font-size: 12px; color: #bbb; }
+  /* ── 部署提示遮罩：每次部署弹一次，关闭按钮有 5s 阅读闸（逻辑见页尾脚本）── */
+  .overlay {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(15, 18, 22, 0.5);
+    display: flex; padding: 20px; overflow-y: auto;
   }
-  .ctrlw-h { font-size: 13.5px; font-weight: 600; color: #8a6116; margin-bottom: 6px; }
-  .ctrlw p { margin: 8px 0; }
-  .ctrlw ol { margin: 6px 0 10px; padding-left: 22px; }
-  .ctrlw li { margin: 7px 0; }
-  .ctrlw a { color: #2b6cb0; text-decoration: none; }
-  .ctrlw a:hover { text-decoration: underline; }
-  .ctrlw-sub { color: #777; }
-  .ctrlw-cons { display: inline-block; margin-top: 4px; color: #8a5a00; }
-  .ctrlw p.ctrlw-warn {
+  .overlay[hidden] { display: none; }
+  .modal {
+    margin: auto; width: 100%; max-width: 660px; max-height: 100%; overflow-y: auto;
+    background: #fff; color: #444; border-radius: 10px; padding: 20px 24px 16px;
+    box-shadow: 0 14px 44px rgba(0, 0, 0, 0.28);
+    text-align: left; font-size: 12.5px; line-height: 1.85;
+  }
+  .modal-h { font-size: 15.5px; font-weight: 600; color: #333; margin: 0 0 6px; }
+  .modal p { margin: 8px 0; }
+  .modal ol { margin: 6px 0 10px; padding-left: 22px; }
+  .modal li { margin: 7px 0; }
+  .modal a { color: #2b6cb0; text-decoration: none; }
+  .modal a:hover { text-decoration: underline; }
+  .modal-sub { color: #777; }
+  .modal-cons { display: inline-block; margin-top: 4px; color: #8a5a00; }
+  .modal .modal-warn {
     color: #8a5a00; background: #fdf5e2; border-radius: 6px;
     padding: 8px 10px; margin: 10px 0 0;
   }
-  .note { margin-top: 40px; font-size: 12.5px; color: #999; max-width: 560px; line-height: 1.8; }
-  footer { margin-top: 16px; font-size: 12px; color: #bbb; }
+  .modal .stale-tip {
+    color: #8a5a00; background: #fdf5e2; border-radius: 6px;
+    padding: 8px 10px; margin: 12px 0 0;
+  }
+  .modal-foot {
+    margin-top: 14px; padding-top: 10px; border-top: 1px solid #eee;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .modal-meta { margin-right: auto; color: #aaa; font-size: 11.5px; }
+  .modal-close {
+    font-size: 13.5px; padding: 7px 18px; border: 1px solid #2b6cb0;
+    border-radius: 6px; background: #2b6cb0; color: #fff; cursor: pointer;
+  }
+  .modal-close:disabled { opacity: 0.55; cursor: default; }
+  .modal-close:not(:disabled):hover { background: #22598f; }
 </style>
 </head>
 <body>
@@ -51,44 +78,133 @@
   <div class="sub">BSP 地图解析 / 物理碰撞 / 渲染的浏览器实现</div>
 
   <div class="entry">
-    <div><a href="./debug/">Debug Build</a> — 调试测试页面<span class="desc">（WebSurf-debug）</span></div>
-    <div><a href="./game/">Game Build</a> — 尝试游戏化<span class="desc">（WebSurf-game 最小实现）</span></div>
-    <div><a href="./viewer/">Viewer</a> — BSP 地图游览 + 录像回放<span class="desc">（WebSurf-viewer）</span></div>
+    <a href="./debug/?v=__DEPLOY_ID__">Debug Build</a><span>—</span><span>调试测试页面<span class="desc">（WebSurf-debug）</span></span>
+    <a href="./game/?v=__DEPLOY_ID__">Game Build</a><span>—</span><span>尝试游戏化<span class="desc">（WebSurf-game 最小实现）</span></span>
+    <a href="./viewer/?v=__DEPLOY_ID__">Viewer</a><span>—</span><span>BSP 地图游览 + 录像回放<span class="desc">（WebSurf-viewer）</span></span>
   </div>
 
   <div class="note">提示：Game Build 依赖 SharedArrayBuffer（需 COOP/COEP 响应头），GitHub Pages 不提供——线上可打开：功能可用、性能降级（自动回退到 MsgState 消息通道）；完整游玩请下载仓库后运行 <code>apps/game/build.cmd</code> 再运行 <code>apps/game/start.cmd</code>。</div>
 
-  <div class="ctrlw">
-    <div class="ctrlw-h">关于 Ctrl + W：页面被关掉不是闪退</div>
-    <p>
-      浏览器里 <kbd>Ctrl</kbd> + <kbd>W</kbd> 就是「关闭当前标签页」。本项目的默认蹲键也是
-      <kbd>Ctrl</kbd>，所以「蹲下 + 前进」时很容易顺手把页面关掉 ——
-      <strong>这不是闪退，也不是项目缺陷</strong>，是浏览器快捷键抢占。
-    </p>
-    <p class="ctrlw-sub">想彻底避免，下面两种方式任选其一：</p>
-    <ol>
-      <li>
-        <strong>改游戏内键位</strong>（推荐，不用装任何东西）：进入页面后按 <kbd>ESC</kbd>
-        打开面板 → <strong>按键</strong> → 把「蹲」从 <kbd>Ctrl</kbd> 改绑到别的键（例如
-        <kbd>Shift</kbd>）。改完 <kbd>Ctrl</kbd> + <kbd>W</kbd> 自然就不会再触发。
-      </li>
-      <li>
-        <strong>装浏览器扩展，把 Ctrl + W 改掉</strong>：安装
-        <a href="https://chromewebstore.google.com/detail/more-better-ctrl-w/fhgdipcimngeleeemdhkinodbkkmcgjm" target="_blank" rel="noopener">More Better Ctrl-W</a>，
-        然后在地址栏打开 <code>chrome://extensions/shortcuts</code>，找到该扩展的
-        <strong>Do absolutely nothing</strong> 一项，把它设为 <kbd>Ctrl</kbd> + <kbd>W</kbd>。
-        此后 <kbd>Ctrl</kbd> + <kbd>W</kbd> 不再关闭页面。<br>
-        <span class="ctrlw-cons">代价：这一改法会让「<strong>先按 Ctrl 蹲、再按 W 前进</strong>」
-        这个组合被阻断 1 秒以上（「先按 W 前进、再按 Ctrl 蹲」不受影响）。若你习惯先蹲后走，
-        用上面第 1 种方式改键位更合适。</span>
-      </li>
-    </ol>
-    <p class="ctrlw-warn">
-      <strong>注意：</strong>录快捷键时，输入框里直接按 <kbd>Ctrl</kbd> + <kbd>W</kbd>
-      可能当场把设置页也一起关掉；若被占用录不进去，可试着<strong>先按 <kbd>W</kbd> 再按 <kbd>Ctrl</kbd></strong>。
-    </p>
+  <footer>由 GitHub Actions 自动构建部署 · 部署 <span class="deploy-meta">__DEPLOY_ID__ · __DEPLOY_TIME__</span></footer>
+
+  <div class="overlay" id="noticeOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="noticeTitle">
+      <h2 class="modal-h" id="noticeTitle">关于 Ctrl + W：页面被关掉不是闪退</h2>
+      <p>
+        浏览器里 <kbd>Ctrl</kbd> + <kbd>W</kbd> 就是「关闭当前标签页」。本项目的默认蹲键也是
+        <kbd>Ctrl</kbd>，所以「蹲下 + 前进」时很容易顺手把页面关掉 ——
+        <strong>这不是闪退，也不是项目缺陷</strong>，是浏览器快捷键抢占。
+      </p>
+      <p class="modal-sub">想彻底避免，下面两种方式任选其一：</p>
+      <ol>
+        <li>
+          <strong>改游戏内键位</strong>（推荐，不用装任何东西）：进入页面后按 <kbd>ESC</kbd>
+          打开面板 → <strong>按键</strong> → 把「蹲」从 <kbd>Ctrl</kbd> 改绑到别的键（例如
+          <kbd>Shift</kbd>）。改完 <kbd>Ctrl</kbd> + <kbd>W</kbd> 自然就不会再触发。
+        </li>
+        <li>
+          <strong>装浏览器扩展，把 Ctrl + W 改掉</strong>：安装
+          <a href="https://chromewebstore.google.com/detail/more-better-ctrl-w/fhgdipcimngeleeemdhkinodbkkmcgjm" target="_blank" rel="noopener">More Better Ctrl-W</a>，
+          然后在地址栏打开 <code>chrome://extensions/shortcuts</code>，找到该扩展的
+          <strong>Do absolutely nothing</strong> 一项，把它设为 <kbd>Ctrl</kbd> + <kbd>W</kbd>。
+          此后 <kbd>Ctrl</kbd> + <kbd>W</kbd> 不再关闭页面。<br>
+          <span class="modal-cons">代价：这一改法会让「<strong>先按 Ctrl 蹲、再按 W 前进</strong>」
+          这个组合被阻断 1 秒以上（「先按 W 前进、再按 Ctrl 蹲」不受影响）。若你习惯先蹲后走，
+          用上面第 1 种方式改键位更合适。</span>
+        </li>
+      </ol>
+      <p class="modal-warn">
+        <strong>注意：</strong>录快捷键时，输入框里直接按 <kbd>Ctrl</kbd> + <kbd>W</kbd>
+        可能当场把设置页也一起关掉；若被占用录不进去，可试着<strong>先按 <kbd>W</kbd> 再按 <kbd>Ctrl</kbd></strong>。
+      </p>
+      <p class="stale-tip" id="staleTip" hidden>
+        <strong>检测到站点已发布新版本</strong>：本页是旧部署的浏览器缓存。关闭本提示后将自动刷新到新版。
+      </p>
+      <div class="modal-foot">
+        <span class="modal-meta deploy-meta">__DEPLOY_ID__ · __DEPLOY_TIME__</span>
+        <button type="button" class="modal-close" id="noticeClose" disabled>请阅读 5s</button>
+      </div>
+    </div>
   </div>
 
-  <footer>由 GitHub Actions 自动构建部署</footer>
+  <script>
+  (function () {
+    'use strict';
+    // 部署 id 由 deploy-pages.yml 在组装时以 sed 烙印（run_number + 短 SHA，每次部署必变）。
+    // 本地直接打开模板时占位符未替换，IS_DEPLOYED 为假，跳过远端核对、只走本地弹窗逻辑。
+    var DEPLOY_ID = '__DEPLOY_ID__';
+    var SEEN_KEY = 'ws-deploy-notice-seen';
+    var RELOAD_KEY = 'ws-deploy-stale-reloaded';
+    var GATE_SECONDS = 5;
+    var IS_DEPLOYED = DEPLOY_ID.indexOf('__') !== 0;
+
+    var overlay = document.getElementById('noticeOverlay');
+    var closeBtn = document.getElementById('noticeClose');
+    var staleTip = document.getElementById('staleTip');
+    var remoteId = null;
+    var stale = false;
+    var timer = null;
+
+    function seenId() {
+      try { return localStorage.getItem(SEEN_KEY); } catch (e) { return null; }
+    }
+    function markSeen(id) {
+      try { localStorage.setItem(SEEN_KEY, id); } catch (e) { /* 隐私模式等：每次访问都会再弹 */ }
+    }
+
+    function openModal(asStale) {
+      stale = asStale;
+      if (stale) staleTip.hidden = false;
+      overlay.hidden = false;
+      var left = GATE_SECONDS;
+      closeBtn.disabled = true;
+      closeBtn.textContent = '请阅读 ' + left + 's';
+      timer = setInterval(function () {
+        left -= 1;
+        if (left > 0) { closeBtn.textContent = '请阅读 ' + left + 's'; return; }
+        clearInterval(timer);
+        timer = null;
+        closeBtn.disabled = false;
+        closeBtn.textContent = '我已阅读，关闭';
+        closeBtn.focus();
+      }, 1000);
+    }
+
+    function tryReloadOnce() {
+      try {
+        // 守卫：一次会话最多为过期页自动刷新一次，避免「缓存页 ↔ 刷新」死循环。
+        if (sessionStorage.getItem(RELOAD_KEY) === '1') return;
+        sessionStorage.setItem(RELOAD_KEY, '1');
+      } catch (e) { return; }
+      location.reload();
+    }
+
+    function closeModal() {
+      if (closeBtn.disabled) return;
+      overlay.hidden = true;
+      // 过期路径把「已读」记到远端新 id 上：刷新后不再二弹，本次部署恰好完整读过一次。
+      markSeen(remoteId || DEPLOY_ID);
+      if (stale) tryReloadOnce();
+    }
+
+    function freshPage() {
+      try { sessionStorage.removeItem(RELOAD_KEY); } catch (e) { /* 忽略 */ }
+      if (seenId() !== DEPLOY_ID) openModal(false);
+    }
+
+    closeBtn.addEventListener('click', closeModal);
+
+    if (!IS_DEPLOYED) { freshPage(); return; }
+    // 缓存核对：bust 参数保证绕过浏览器缓存取到当前部署的 id；
+    // 与本页烙印 id 不一致 ⇒ 本页是旧部署的缓存 ⇒ 强制弹提示，关闭后自动刷新一次。
+    fetch('version.json?bust=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (v) {
+        if (v && v.id && v.id !== DEPLOY_ID) { remoteId = v.id; openModal(true); return; }
+        freshPage();
+      })
+      .catch(function () { freshPage(); });
+  })();
+  </script>
 </body>
 </html>
