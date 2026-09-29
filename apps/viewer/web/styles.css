@@ -667,12 +667,6 @@ select.tl-select:focus { border-color: var(--text); }
 #guide {
   position: absolute; inset: 0; z-index: 8;
   display: flex; align-items: center; justify-content: center;
-  /* **右侧让出侧栏宽度**：`#sidebar` 是 body 的直接子节点（z-index 6），而本层在 `#app`
-     （`position: fixed` 自成层叠上下文）内部 ⇒ **整棵 `#app` 子树都排在侧栏之下**，
-     本层的 z-index 再高也盖不过它。结果就是引导卡右端被 348px 宽的侧栏压住 ——
-     实测在 1100 宽视口下卡片 290..810、侧栏 716..1064 ⇒ **尾部那一段被盖住**，
-     看起来像"尾部颜色不对/不规则"。这里直接把卡片排在侧栏左侧，不再重叠。 */
-  padding-right: calc(var(--sidebar-w) + 24px);
   background: var(--overlay);
 }
 /* ── 引导卡 = 场记板（v15）：按 owner 提供的实物照片**逐行实测**同构 —— 暗色板身 +
