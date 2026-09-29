@@ -8,13 +8,13 @@
 
 ## 1. 三个应用 + 共享层
 
-> 受控工程只有 `apps/debug`、`apps/game`、`apps/viewer` 与共享层 `src/`。`test/` 下**只有本地夹具**（`test/maps/` 地图、`test/replay/` 录像，均不入库）——仓库内没有其它工程。
+> 受控工程只有 `apps/debug`、`apps/game`、`apps/viewer` 与共享层 `src/`。`test/` 下**只有本地数据**（`test/maps/` 地图、`test/replay/` 录像、`test/project/` 调研资料，均不入库）——仓库内没有其它工程。
 
 | 工程 | 端口 | 定位 | 入口锚点 |
 |---|---|---|---|
 | `apps/debug` | 8080 | 调试与实验宿主：面板可调参数、路径记录、权威健康、调试线框 | `apps/debug/package.json:15` 的 `dev` |
 | `apps/game` | 8090 | 面向玩家：Worker 权威物理 + 面板 + 存档点 | `apps/game/package.json:15` 的 `dev` |
-| `apps/viewer` | 8100 | 纯查看器：地图与 `.replay` 回放、遥测与轨道面板（**不含物理**） | `apps/viewer/package.json:18` 的 `dev` |
+| `apps/viewer` | 8100 | 纯查看器：地图游览、`.replay` 录像与 Source `.dem` 演示回放、遥测与轨道面板（**不含物理**） | `apps/viewer/package.json:18` 的 `dev` |
 | `src/` | — | 共享层：`websurf-phys`（物理）、`websurf-wasm-core`（BSP/GLB/模型解析）、`ts-shared/**`（TS 共享） | `src/Cargo.toml:2`、`src/wasm-core/Cargo.toml:10` |
 
 ## 2. 快速开始
@@ -31,7 +31,7 @@ npm run dev            # python ../../src/serve.py 8080 .
 
 `apps/game`、`apps/viewer` 同构（端口 8090 / 8100）；三个工程各自 `npm ci` / `npm run build` / `npm run dev`。
 
-**Windows 双击入口**（三工程同名三件）：
+**Windows 双击入口**（三工程同名四件）：
 
 | 入口 | 做什么 | 端口 |
 |---|---|---|
@@ -40,13 +40,13 @@ npm run dev            # python ../../src/serve.py 8080 .
 | `apps/<app>/start.cmd` | **只启动**，不做任何构建：服务已打包的 `dist/`（缺 `dist/` 会提示先跑 `build.cmd`）；viewer 存在 `dist\play.cmd` 时转给它 | debug 8081 / game 8091 / viewer 8101 |
 | `apps/<app>/stop.cmd` | **停止服务**：按端口（dev + start 两个）找 LISTENING 进程，只杀 python（不误伤同端口的外部程序）；可选参数指定单端口。dev 服务的独立最小化窗口（标题 `WebSurf-<app> dev server :<port>`）关窗或本脚本均可停止 | debug 8080+8081 / game 8090+8091 / viewer 8100+8101 |
 
-**静态服务**：`src/serve.py` 只做一件事——按正确 MIME 提供本地文件：端口取 `argv[1]`（默认 8080，`src/serve.py:18`），服务根取 `argv[2]`（`src/serve.py:19`），启动时 `os.chdir` 到该根（`src/serve.py:20`），并为所有响应加 COOP/COEP，页面才能拿到 `SharedArrayBuffer`。
+**静态服务**：`src/serve.py` 只做一件事——按正确 MIME 提供本地文件：端口取 `argv[1]`（默认 8080，`src/serve.py:19`），服务根取 `argv[2]`（`src/serve.py:20`），启动时 `os.chdir` 到该根（`src/serve.py:21`），并为所有响应加 COOP/COEP，页面才能拿到 `SharedArrayBuffer`。
 
 ## 3. 仓库结构
 
 | 路径 | 内容 |
 |---|---|
-| `Cargo.toml` | 仓库根 workspace：**只收**共享层两个 crate（`Cargo.toml:22` 的 `members`） |
+| `Cargo.toml` | 仓库根 workspace：**只收**共享层两个 crate（`Cargo.toml:25` 的 `members`） |
 | `src/phys/**` | `websurf-phys`：世界容器、玩家移动语义、传送触发、种子面 |
 | `src/wasm-core/**` | `websurf-wasm-core`：BSP、GLB、pakfile、材质与 mosaic |
 | `src/ts-shared/**` | TS 共享：权威循环、tick 消费者、共享状态通道、物理参数与角度、世界类型 |
@@ -54,7 +54,7 @@ npm run dev            # python ../../src/serve.py 8080 .
 | `apps/<app>/crates/wasm/**` | 各工程的 wasm-bindgen 导出层（debug/game 为 `websurf-wasm`，viewer 为 `websurf_viewer_wasm`） |
 | `apps/<app>/src/**`、`web/**` | 前端源码与静态页面（`web/app.js`、`web/worker.js` 是**构建产物**，不入库） |
 | `apps/<app>/scripts/**` | 各工程构建与验收脚本（含 `build-dist.mjs`） |
-| `test/maps/**`、`test/replay/**` | 本地夹具：地图与录像（**均 gitignore，不入库**） |
+| `test/maps/**`、`test/replay/**`、`test/project/**` | 本地数据：地图与录像夹具、DEM 调研资料（**均 gitignore，不入库**） |
 | `documents/**` | 文档（见 §7） |
 | `.archive/**` | 旧文档归档区，**不作事实来源** |
 
@@ -85,11 +85,11 @@ CI 三个 workflow（`.github/workflows/`）：
 
 - **`doc-drift.yml`**：跑 `check-doc-drift.mjs`，查行数声明、`文件:行号` 锚点越界、路径失效、裸文件名歧义。能力边界：**只查越界，不查该行内容与描述是否相符**。
 - **`ci-gates.yml`**（`.github/workflows/ci-gates.yml:36`）：四个 job —— `rust-unit-tests`（`cargo test -p websurf-phys`）、`debug-gates`（五道）、`game-gates`（三道）、`viewer-gates`（`test:replay`）。纯文档改动（`**.md`、`documents/**`）不触发门禁。
-- **`deploy-pages.yml`**：matrix 并行构建三工程的 `build:dist -- --multi`，装到 `deploy/<app>/`，用入口页模板生成站点首页（组装时烙印部署 id 并生成 `version.json`：入口页每次部署对每个浏览器弹一次部署提示，旧缓存页借 `version.json` 自检过期并自动刷新）。**与门禁互不阻塞**。
+- **`deploy-pages.yml`**：matrix 并行构建三工程的 `build:dist -- --multi`，装到 `deploy/<app>/`，用入口页模板生成站点首页。组装时给入口页烙印部署 id 并生成 `version.json`——入口页每次部署对每个浏览器弹一次部署提示，旧缓存页据此自检过期并自动刷新。**与门禁互不阻塞**。
 
 ## 6. 依赖方向与共享层
 
-- `apps/debug` 与 `apps/game` 的 wasm 导出层**同时**依赖两个共享 crate（`apps/debug/crates/wasm/Cargo.toml:22` 物理、`:24` 解析）。
+- `apps/debug` 与 `apps/game` 的 wasm 导出层**同时**依赖两个共享 crate（`apps/debug/crates/wasm/Cargo.toml:25` 物理、`:27` 解析）。
 - `apps/viewer` 的导出层**只**依赖解析层（`apps/viewer/crates/wasm/Cargo.toml:19`）。
 - TS 侧一律用相对路径 import 共享层（例：`apps/debug/src/input/input-recorder.ts:47`）；SAB 通道与 postMessage 回退的分派在 `src/ts-shared/auth/shared-state.ts:1022` 的 `createMainSharedState`。
 - 共享层一处改动多端生效：**不要在工程内复制共享实现**。
