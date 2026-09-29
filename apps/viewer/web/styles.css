@@ -168,7 +168,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 #help p { color: var(--muted); }
 
 /* ── 侧栏面板 #sidebar（右侧，宽 --sidebar-w）：**矩形无切角** + 顶缘
-   时间码黄嵌片；#tabs 两个标签按钮 + .tabpane（带 active 的那个显示）──
+   时间码黄嵌片；#tabs 三个标签按钮（地图 / 录像 / 演示）+ .tabpane（带 active 的那个显示）──
    切角已按 owner 要求去掉：这种方正的矩形观感更好，装饰性的切角元素不再需要。
    服务孔保留（它不与任何切角成对，只作件计数）。 */
 #sidebar {
