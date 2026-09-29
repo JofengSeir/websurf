@@ -1,25 +1,30 @@
 /* ============================================================
  * WebSurf-viewer — 入口页样式（单文件）。
  *
- * 主题「导演工作台」（2026-09-29 v2，向 game 的菱角语彙靠拢但**配色自立**）：
- * 配色取导演版语彙——影调黑中性灰阶为主体，黑白条（场记板/遮幅）为结构
- * 装饰，调色卡条（黑/灰/白/时间码黄四段）为媒体标识，时间码黄为唯一
- * 彩色强调（时间码 / 编号 / 主按钮），REC 红仅用于错误——不沿用 game
- * 「莱茵精工」琥珀、apps/viewer 中性灰阶「导演工作台」。
- * 「莱茵精工」琥珀、apps/viewer 中性灰阶「导演工作台」。
+ * 主题「导演工作台」（2026-09-29 v3，向 game 的菱角语彙靠拢但**配色自立**）：
+ * 配色取导演版语彙——中性灰阶为主体，黑白条（场记板/遮幅）为结构装饰，
+ * 调色卡条（黑/灰/白/时间码黄四段）为媒体标识，时间码黄为唯一彩色强调
+ * （时间码数字 / pane 编号 / 嵌片 / 调色卡末段），REC 红仅用于错误——
+ * 不沿用 game 的琥珀色板。--warn 与 --accent 同值属刻意（时间码黄兼任
+ * 片场警示惯例色，note-warn 的黄边黄字读作「片场警示」而非「强调」）。
+ * 三工程区分：apps/debug 石墨青「仪表」、apps/game 深青「莱茵精工」、
+ * apps/viewer 中性灰阶「导演工作台」。
  *   · 菱角分明：全文件 border-radius 一律 0，仅装饰螺丝（1 处）与服务孔
  *     （1 处）保留 50% 圆；轨迹色点 .track-dot / .meta-dot 方形化；
  *   · 切角系统：右上切角（clip-path polygon）结构级 10px（侧栏、帮助卡、
- *     引导卡、致命错误卡、主按钮）；本工程无嵌件级切角；
- *   · 线宽系统：2px 结构线（HUD 铭牌左缘、激活 tab 左条）/ 1px 发丝分隔 /
- *     1px 点线（小节标题右端 3px 短竖刻度，同 game h4）；
+ *     引导卡、致命错误卡、主按钮、**激活 tab**）；本工程无嵌件级切角；
+ *   · 线宽系统：2px 结构线（HUD 铭牌左缘）/ 1px 发丝分隔 / 1px 点线
+ *     （小节标题右端 3px 短竖刻度，同 game h4）；
  *   · 档案元素成套：两个 tabpane 档案编号（右上，VW-01 / VW-02，时间码黄）+
  *     页脚署名（右下）；硬件件计数：装饰螺丝 1（引导卡左下）+ 服务孔 1
  *     （侧栏左下）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层至多
  *     1 件」适配，不套用 game 单窗口的 ≥2 口径；
- *   · **导演版条纹特色（owner 指定保留并强化）**：时间轴上下缘胶片齿孔条
- *     （硬停重复条纹）、引导卡顶部场记板**黑白**斜纹顶条、拖拽态上下缘
- *     黑白遮幅条、录像信息条左端**调色卡条**（黑/灰/白/时间码黄四段）。
+ *   · **导演版条纹特色（owner 指定保留并强化，v3 扩展）**：时间轴上下缘
+ *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**黑白**斜纹顶条、
+ *     拖拽态上下缘黑白遮幅条、录像信息条左端**调色卡条**（黑/灰/白/
+ *     时间码黄四段）、每个小节标题左端**调色卡竖条**（黑/白/黄三段）、
+ *     引导层四角**取景框角标**（淡白 L 形）；tab 为状态标签条形态
+ *     （激活 = 场记板白底黑字 + 右上 10px 切角）。
  *
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名驱动）：
  *   · 可见性钩子：.hidden、#help.hidden、#guideError.show、#dropzone.active、
@@ -46,9 +51,10 @@
   --accent-hover: #f0d47e;
   --accent-weak: rgba(230, 195, 92, 0.12);
   --on-accent: #1a1505;
-  --ok: #8cc98f;
+  --ok: #8cc98f;                         /* 预留令牌：本工程当前无 success 态消费点 */
+  /* --accent-hover / --on-accent 为预留令牌：主按钮走场记板白底黑字（--strip-*），无 hover/前景消费点 */
   --err: #e05548;                         /* REC 红：仅错误/危险 */
-  --warn: #e6c35c;
+  --warn: #e6c35c;                       /* 刻意与 --accent 同值：时间码黄兼任片场警示色 */
 
   /* 黑白条（场记板 / 遮幅）：亮段 = 场记板白，暗段 = 影调黑 */
   --strip-light: #e8e8e4;
@@ -155,10 +161,10 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   overflow: hidden;
 }
-/* 顶缘结构嵌片（32×2 短嵌片，与盖板齐平；灰阶——时间码黄不进侧栏） */
+/* 顶缘时间码黄嵌片（32×2 短嵌片，与盖板齐平；电子标注位语彙） */
 #sidebar::before {
   content: ""; position: absolute; top: 0; left: 18px;
-  width: 32px; height: 2px; background: var(--text); z-index: 1;
+  width: 32px; height: 2px; background: var(--accent); z-index: 1;
 }
 /* 服务孔（侧栏左下 5px 圆，与右上切角对角） */
 #sidebar::after {
@@ -167,14 +173,26 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
   background: var(--bg); border: 1px solid var(--border-strong);
   z-index: 1; pointer-events: none;
 }
-#tabs { display: flex; border-bottom: 1px solid var(--border); }
+#tabs { display: flex; gap: 8px; padding: 10px 12px; }
+/* 标签 = 状态标签条形态（同 game 标签条：无圆角 1px 边；激活 = 场记板
+   白底黑字 + 右上 10px 切角） */
 .tab {
   font-family: inherit; font-size: 12.5px; color: var(--muted);
-  padding: 7px 14px; background: none; border: none;
+  padding: 5px 14px; background: none;
+  border: 1px solid var(--border-strong);
   cursor: pointer;
 }
-.tab:hover { color: var(--text); box-shadow: inset 2px 0 0 var(--border-strong); }
-.tab.active { color: var(--text); box-shadow: inset 2px 0 0 var(--text); }
+.tab:hover { color: var(--text); border-color: var(--text); }
+.tab.active {
+  color: var(--strip-dark); background: var(--strip-light);
+  border-color: var(--strip-light);
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+}
+/* 激活 tab 的聚焦指示：clip-path 会裁掉外部 outline，改内嵌 1px 暗线 */
+.tab.active:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
 .tabpane {
   position: relative;
   display: none; flex: 1; overflow-y: auto; overscroll-behavior: contain;
@@ -216,7 +234,15 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
 .sec-title {
   position: relative;
   font-size: 12px; font-weight: 600; letter-spacing: 0.06em;
-  padding: 2px 0 5px; border-bottom: 1px solid var(--border-strong); margin-bottom: 8px;
+  padding: 2px 0 5px 14px; border-bottom: 1px solid var(--border-strong); margin-bottom: 8px;
+}
+/* 左端调色卡竖条（影调黑/白/时间码黄三段，调色盘语彙扩展到每个小节；
+   右端仍为 3px 短竖刻度） */
+.sec-title::before {
+  content: ""; position: absolute; left: 0; top: 3px;
+  width: 3px; height: 15px;
+  background: linear-gradient(180deg,
+    var(--border) 0 33%, var(--strip-light) 33% 66%, var(--accent) 66% 100%);
 }
 .sec-title::after {
   content: ""; position: absolute; right: 0; bottom: -3px;
@@ -494,7 +520,18 @@ select.tl-select:focus { border-color: var(--accent); }
 #guide {
   position: absolute; inset: 0; z-index: 8;
   display: flex; align-items: center; justify-content: center;
-  background: var(--overlay);
+  /* 四角取景框角标（淡白 L 形 8 段定位，预览器语彙）叠加在遮罩上 */
+  background:
+    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) 20px 20px / 26px 1px,
+    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) 20px 20px / 1px 26px,
+    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) calc(100% - 46px) 20px / 26px 1px,
+    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) calc(100% - 20px) 20px / 1px 26px,
+    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) 20px calc(100% - 46px) / 1px 26px,
+    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) 20px calc(100% - 20px) / 26px 1px,
+    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) calc(100% - 46px) calc(100% - 20px) / 26px 1px,
+    linear-gradient(rgba(232, 232, 228, 0.4), rgba(232, 232, 228, 0.4)) calc(100% - 20px) calc(100% - 46px) / 1px 26px,
+    var(--overlay);
+  background-repeat: no-repeat;
 }
 #guide .card {
   max-width: 430px; margin: 0 16px; padding: 22px 26px;
