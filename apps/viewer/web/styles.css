@@ -9,14 +9,14 @@
  * 片场警示惯例色，note-warn 的黄边黄字读作「片场警示」而非「强调」）。
  * 三工程区分：apps/debug 石墨青「仪表」、apps/game 深青「莱茵精工」、
  * apps/viewer 中性灰阶「导演工作台」。
- *   · 菱角分明：全文件 border-radius 一律 0，仅装饰螺丝（1 处）与服务孔
+ *   · 菱角分明：全文件 border-radius 一律 0，仅服务孔（1 处，位于侧栏左下）
  *     （1 处）保留 50% 圆；轨迹色点 .track-dot / .meta-dot 方形化；
  *   · 切角系统：右上切角（clip-path polygon）结构级 10px（侧栏、帮助卡、
  *     引导卡、致命错误卡、主按钮、**激活 tab**）；本工程无嵌件级切角；
  *   · 线宽系统：2px 结构线（HUD 铭牌左缘）/ 1px 发丝分隔 / 1px 点线
  *     （小节标题右端 3px 短竖刻度，同 game h4）；
  *   · 档案元素成套：两个 tabpane 档案编号（右上，VW-01 / VW-02，时间码黄）+
- *     页脚署名（右下）；硬件件计数：装饰螺丝 1（引导卡左下）+ 服务孔 1
+ *     页脚署名（右下）；硬件件计数：服务孔 1（侧栏左下）——引导卡场记板化后不再放螺丝
  *     （侧栏左下）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层至多
  *     1 件」适配，不套用 game 单窗口的 ≥2 口径；
  *   · **导演版条纹特色（owner 指定保留并强化，v3 扩展）**：时间轴上下缘
@@ -587,52 +587,41 @@ select.tl-select:focus { border-color: var(--text); }
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 6px 20px rgba(0, 0, 0, 0.35);
 }
-/* 场记板顶条：卡片顶部的斜纹硬停条纹——**黑白**相间（导演板本色，
-   不用彩色），无渐变；上缘与切角卡片同高齐平，下缘留 16px 呼吸 */
+/* 场记板（clapperboard）版式（仿照真实场记板结构，非拟物）：
+   顶部一条黑白斜纹拍板（::before，左端 7px 铰链板 + 2px 白色分界线），
+   板身为「标签/值」两列网格（.slate-row / .gstep），白色格线分隔单元格。
+   板身保持暗色（全站一致的暗色演绎；现代场记板多为白色亚克力板身）。 */
+#guide .card {
+  max-width: 430px; margin: 0 16px; padding: 0 0 20px;
+  position: relative; text-align: left;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 6px 20px rgba(0, 0, 0, 0.35);
+}
+/* 拍板条：黑白斜纹（14/28px 周期）+ 左端 7px 白色铰链板 + 下缘 2px 白色分界线 */
 #guide .card::before {
-  content: ""; display: block; height: 10px; margin: -22px -26px 3px;
-  background: repeating-linear-gradient(-45deg,
-    var(--strip-light) 0 12px, var(--strip-dark) 12px 24px);
-}
-#guide .card::after {
-  content: ""; display: block; height: 8px; margin: 0 -26px 16px;
-  background: repeating-linear-gradient(-45deg,
-    var(--strip-dark) 0 12px, var(--strip-light) 12px 24px);
-}
-#guide .gtitle {
-  font-size: 16px; font-weight: 600; letter-spacing: 0.04em;
-  padding-bottom: 10px; margin-bottom: 0;
+  content: ""; display: block; height: 14px; margin: 0 0 10px;
+  background:
+    linear-gradient(90deg, var(--strip-light) 0 7px, transparent 7px),
+    repeating-linear-gradient(-45deg, var(--strip-light) 0 14px, var(--strip-dark) 14px 28px);
   border-bottom: 2px solid rgba(232, 232, 228, 0.9);
 }
-/* 信息栏格线（场记板形式）：每步一行，下缘 2px 白格线分单元格 */
-#guide .gstep {
-  font-size: 13px; color: var(--muted); line-height: 1.9;
-  padding: 10px 2px;
-  border-bottom: 2px solid rgba(232, 232, 228, 0.9);
-  text-align: left;
+/* 板身行：标签列 96px 等宽小字 + 值列；行间 1px 白格线（场记板单元格） */
+.slate-row, .gstep {
+  display: grid; grid-template-columns: 96px 1fr; gap: 0 14px; align-items: baseline;
+  padding: 9px 22px;
+  border-bottom: 1px solid rgba(232, 232, 228, 0.5);
 }
-#guide .gstep:last-of-type { border-bottom: none; }
-#guide .gstep code { font-size: 12px; color: var(--text); }
-/* 主按钮 = 场记板白板：白底黑字 + 右上 10px 切角（黑白条语彙的实体化） */
-#guideBtn {
-  display: inline-block; margin-top: 16px; padding: 8px 20px;
-  font-family: inherit; font-size: 13px; color: var(--strip-dark); font-weight: 600;
-  background: var(--strip-light); border: none; cursor: pointer;
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+.glabel {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+  color: var(--muted); text-align: left;
 }
-#guideBtn:hover { background: #ffffff; }
-#guideBtn.busy { opacity: 0.45; pointer-events: none; }
-#guideError {
-  display: none; margin-top: 12px; padding: 7px 10px; text-align: left;
-  font-size: 12px; line-height: 1.7; color: var(--err);
-  background: rgba(224, 85, 72, 0.1); border: 1px solid var(--err);
-  word-break: break-all;
-}
-#guideError.show { display: block; }
-#guideError .raw { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
-
-/* 拖拽高亮 #dropzone：底 = 淡白弱色；上下缘 6px **黑白遮幅条**（硬停重复，
-   letterbox 语彙），与场记板顶条同语彙成组 */
+.slate-head { border-bottom: 1px solid rgba(232, 232, 228, 0.85); }
+.slate-head .glabel { color: var(--strip-light); }
+.gvalue { font-size: 15px; font-weight: 600; color: var(--text); }
+.gtext { font-size: 13px; color: var(--muted); line-height: 1.8; }
+.gtext code { font-size: 12px; color: var(--text); }
 #dropzone {
   position: absolute; inset: 0; z-index: 9; display: none;
   align-items: center; justify-content: center;
