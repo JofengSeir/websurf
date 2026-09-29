@@ -103,7 +103,7 @@ export class ReplayPanel {
       },
     ]);
 
-    // ── 轨迹列表（多轨迹对比；清空全部也在这里）──
+    // ── 轨迹列表（多轨迹对比；清空全部也在这里）——分节由 TrackPanel 内建（section '轨迹列表'）──
     this.trackPanel = new TrackPanel(root, this.player, {
       onChange: () => this.opts.onTracksChanged(),
       onCleared: () => this.opts.onClearAll(),

@@ -15,7 +15,7 @@
 | `apps/viewer/test/smoke-cdp.mjs` | 用 CDP 驱动本机 Edge（headless + SwiftShader）跑页面链路，抓 typecheck 与 Node 自检覆盖不到的接线问题 | `apps/viewer/test/smoke-cdp.mjs:54`、`apps/viewer/test/smoke-cdp.mjs:122` |
 | `apps/viewer/test/node-shims.d.ts` | 最小 Node 类型面：只声明 `node:fs` 的 `readFileSync` | `apps/viewer/test/node-shims.d.ts:7` |
 | `apps/viewer/web/index.html` | 页面骨架：全部 DOM id、帮助浮层、资源 404 兜底脚本、module script 入口 | `apps/viewer/web/index.html:94`、`apps/viewer/web/index.html:111` |
-| `apps/viewer/web/styles.css` | 全部类名契约的样式实现（面板构件、轨迹卡、时间轴、遥测、叠层） | `apps/viewer/web/styles.css:24`、`apps/viewer/web/styles.css:378` |
+| `apps/viewer/web/styles.css` | 全部类名契约的样式实现（面板构件、轨迹卡、时间轴、遥测、叠层） | `apps/viewer/web/styles.css:24`、`apps/viewer/web/styles.css:380` |
 | `apps/viewer/web/coi-serviceworker.js` | 部署用 Service Worker 模板（占位符由 `build-dist.mjs` 的 multi 分支注入） | `apps/viewer/scripts/build-dist.mjs:274` |
 | `apps/viewer/dev.cmd` | 双击/手工入口（全链条）：四项工具链自检（`:17`）→ 依赖 → 强制 `build:wasm`（`:48`）→ `build:ts`（`:58`）→ 跑 `test:replay`（`:68`）→ 在独立最小化窗口起 8100 服务（`:7`、`:95`） | `apps/viewer/dev.cmd:17`、`apps/viewer/dev.cmd:48`、`apps/viewer/dev.cmd:95` |
 | `apps/viewer/build.cmd` | 双击/手工入口（重编译打包）：工具链自检（`:22`）→ 依赖 → `build:wasm`（`:50`）→ 契约检查（`:59`）→ `build:ts`（`:69`）→ 构建 dist（`:78`）。**single-only**：只接受 `single` 或缺参 | `apps/viewer/build.cmd:22`、`apps/viewer/build.cmd:50`、`apps/viewer/build.cmd:78` |
