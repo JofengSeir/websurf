@@ -700,46 +700,42 @@ select.tl-select:focus { border-color: var(--text); }
 .slate-stripes {
   position: absolute; inset: 0;
   background-image:
-    /* **黑白交替 + 末尾短黑收尾**（owner 2026-09-30 定稿）：
-       自左至右 = 铰链黑板 23.5%（结构件：三颗螺钉 + 转轴分缝在其上，保持不动）
-       + **9 条等比（各 8.1%）**白→黑→白→黑…（末条为白）
-       + **一条短黑（3.5%）顶到右缘**。
-       - 为什么末尾压短：条面右端是**硬切**（元素边缘）。末条取黑已让切口融进深色背景，
-         但 owner 反馈"最后一块还是碍眼" ⇒ 再把末条压短（7.65% → 3.5%），让它读作"收边"
-         而不是"多出来的一格"；省下的宽度平分给前面 9 条（仍等比）。
-       - 人字几何不变（上下两层 52°/-52° 镜像 + 下半层色序反转，折点在条高中央）；
-       - **下半层条纹区整体取反 ⇒ 上下板错色**（上白下黑 / 上黑下白），黑板段两侧同为黑。 */
+    /* **黑白交替（上下同色）+ 末尾短黑 + 软边 + 上下板之间一条缝**（owner 2026-09-30 定稿）：
+       - 上下同色：撤回上一版的"上下板错色"（owner 定稿取消）；
+       - 每条色界两侧各留 **0.6px 过渡**（`calc(x% ∓ 0.6px)`）——斜边是 1px 硬停，
+         在 44px 高的条上会出现台阶（锯齿感）；0.6px 的线性过渡交给抗锯齿去抹平；
+       - 末尾短黑 3.5% 收尾（顶到右缘，切口融进深色背景）；
+       - 缝在 `#guide .slate-screws` 里画（见该规则），这里只管条面底色。
+       比例：黑板 23.5% ｜ 白/黑 交替 9 条（各 8.1%）｜ 短黑 3.5%。 */
     linear-gradient(52deg,
-      #0a0a0c 0 22.7%,
-      #ececf4 22.7% 30.6%,
-      #0a0a0c 30.6% 38.4%,
-      #ececf4 38.4% 46.3%,
-      #0a0a0c 46.3% 54.1%,
-      #ececf4 54.1% 62%,
-      #0a0a0c 62% 69.8%,
-      #ececf4 69.8% 77.7%,
-      #0a0a0c 77.7% 85.5%,
-      #ececf4 85.5% 93.4%,
-      #0a0a0c 93.4% 100%),
+      #0a0a0c 0 calc(22.7% - 0.6px),
+      #ececf4 calc(22.7% + 0.6px) calc(30.6% - 0.6px),
+      #0a0a0c calc(30.6% + 0.6px) calc(38.4% - 0.6px),
+      #ececf4 calc(38.4% + 0.6px) calc(46.3% - 0.6px),
+      #0a0a0c calc(46.3% + 0.6px) calc(54.1% - 0.6px),
+      #ececf4 calc(54.1% + 0.6px) calc(62% - 0.6px),
+      #0a0a0c calc(62% + 0.6px) calc(69.8% - 0.6px),
+      #ececf4 calc(69.8% + 0.6px) calc(77.7% - 0.6px),
+      #0a0a0c calc(77.7% + 0.6px) calc(85.5% - 0.6px),
+      #ececf4 calc(85.5% + 0.6px) calc(93.4% - 0.6px),
+      #0a0a0c calc(93.4% + 0.6px) 100%),
     linear-gradient(-52deg,
-      /* **下半层条纹区整体取反**（owner：上下板需要错色）——上板白处下板黑、上板黑处下板白，
-         折缝两侧因此相反；黑板（铰链板）那一段两侧仍都是黑，不吃错色。 */
-      #ececf4 0 6.6%,
-      #0a0a0c 6.6% 14.5%,
-      #ececf4 14.5% 22.3%,
-      #0a0a0c 22.3% 30.2%,
-      #ececf4 30.2% 38%,
-      #0a0a0c 38% 45.9%,
-      #ececf4 45.9% 53.7%,
-      #0a0a0c 53.7% 61.6%,
-      #ececf4 61.6% 69.4%,
-      #0a0a0c 69.4% 77.3%,
-      #0a0a0c 77.3% 100%);
+      #0a0a0c 0 calc(6.6% - 0.6px),
+      #ececf4 calc(6.6% + 0.6px) calc(14.5% - 0.6px),
+      #0a0a0c calc(14.5% + 0.6px) calc(22.3% - 0.6px),
+      #ececf4 calc(22.3% + 0.6px) calc(30.2% - 0.6px),
+      #0a0a0c calc(30.2% + 0.6px) calc(38% - 0.6px),
+      #ececf4 calc(38% + 0.6px) calc(45.9% - 0.6px),
+      #0a0a0c calc(45.9% + 0.6px) calc(53.7% - 0.6px),
+      #ececf4 calc(53.7% + 0.6px) calc(61.6% - 0.6px),
+      #0a0a0c calc(61.6% + 0.6px) calc(69.4% - 0.6px),
+      #ececf4 calc(69.4% + 0.6px) calc(77.3% - 0.6px),
+      #0a0a0c calc(77.3% + 0.6px) 100%);
   background-size: 100% 51%, 100% 51%;
   background-position: 0 0, 0 100%;
   background-repeat: no-repeat;
 }
-/* 铰链：**水平转轴分缝**（限黑色板件宽度 22.7%）+ **三颗螺钉**（上片 1 + 下片 2）。
+/* 铰链：**贯通整条的水平缝**（上下板之间的缝，owner 定稿）+ **三颗螺钉**（上片 1 + 下片 2）。
    按 owner 反馈：左列对齐（原先上 4.6% / 下 4.2% 差 2px）、下面两颗拉近（16% → 12%）。 */
 .slate-screws {
   position: absolute; inset: 0; pointer-events: none;
@@ -750,7 +746,7 @@ select.tl-select:focus { border-color: var(--text); }
     radial-gradient(circle at 4.4% 77%, #3c3c45 0 3px, transparent 3px),
     radial-gradient(circle at 9.5% 77%, #3c3c45 0 3px, transparent 3px);
   background-repeat: no-repeat;
-  background-size: 22.7% 100%, auto, auto, auto;
+  background-size: 100% 100%, auto, auto, auto;
 }
 /* 板身行 = 场记板单元格：标签列（中文粗 / 英文等宽小字，竖向格线分隔）+ 值列；
    行间 1px 白格线。格线与竖线是这块"板"的主要结构，不靠底色块表达分组。 */
