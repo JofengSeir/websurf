@@ -9,8 +9,8 @@ if not "%~1"=="" set PORT=%~1
 
 echo ============================================================
 echo   WebSurf-viewer - dev
-echo   Full chain: toolchain check -> deps -> WASM rebuild -> TS rebuild
-echo          -> test gates -> start dev server and open browser
+echo   Full chain: toolchain check -^> deps -^> WASM rebuild -^> TS rebuild
+echo          -^> test gates -^> start dev server and open browser
 echo   Page:    http://localhost:%PORT%/web/index.html
 echo ============================================================
 
