@@ -61,6 +61,7 @@ const KEYS: readonly KeyDef[] = [
 export class TelemetryHud {
   private readonly horizEl: HTMLElement;
   private readonly vertEl: HTMLElement;
+  private readonly meterSegs: HTMLElement[] = [];
   private readonly keyEls: ReadonlyMap<string, HTMLElement>;
 
   /**
@@ -68,13 +69,21 @@ export class TelemetryHud {
    * @param keysRoot 按键簇容器（传 `#timeline`；按键块挂它的网格右列，随时间轴一起显隐）
    */
   constructor(speedRoot: HTMLElement, keysRoot: HTMLElement) {
-    // ── 速度：单行两个裸数字，中间夹一个全角竖线分隔符 ──
+    // ── 速度：单行两个裸数字，中间夹一个全角竖线分隔符；行下 12 段电平表 ──
     this.horizEl = el('span', 'tm-horiz', '—');
     const sep = el('span', 'vsep', '｜');
     this.vertEl = el('span', 'tm-vert', '—');
-    speedRoot.appendChild(this.horizEl);
-    speedRoot.appendChild(sep);
-    speedRoot.appendChild(this.vertEl);
+    const line = el('span', 'tm-line');
+    line.append(this.horizEl, sep, this.vertEl);
+    speedRoot.appendChild(line);
+    // 电平表：12 段，水平速度 400u/s 满格；末 2 段点亮时转红（高速过载）
+    const meter = el('div', 'telemetry-meter');
+    for (let i = 0; i < 12; i++) {
+      const seg = el('span', 'meter-seg');
+      meter.appendChild(seg);
+      this.meterSegs.push(seg);
+    }
+    speedRoot.appendChild(meter);
 
     // ── 按键簇：3 列网格（Q/W/E 上排、A/S/D 中排、蹲 1 格 + 跳 2 格下排），挂 timeline 右列 ──
     const keys = el('div', 'tm-keys');
@@ -102,11 +111,19 @@ export class TelemetryHud {
    */
   update(s: Sample | null, buttons: number | null): void {
     if (s?.vel) {
-      this.horizEl.textContent = Math.hypot(s.vel[0], s.vel[2]).toFixed(0);
+      const h = Math.hypot(s.vel[0], s.vel[2]);
+      this.horizEl.textContent = h.toFixed(0);
       this.vertEl.textContent = Math.abs(s.vel[1]).toFixed(0);
+      // 电平表：400u/s 满格钳制，末 2 段（11/12）点亮时加 hot 转 REC 红
+      const lit = Math.min(12, Math.round((h / 400) * 12));
+      this.meterSegs.forEach((seg, i) => {
+        seg.classList.toggle('on', i < lit);
+        seg.classList.toggle('hot', i < lit && i >= 10);
+      });
     } else {
       this.horizEl.textContent = '—';
       this.vertEl.textContent = '—';
+      this.meterSegs.forEach((seg) => seg.classList.remove('on', 'hot'));
     }
     for (const [cls, keyEl] of this.keyEls) {
       const def = KEYS.find((k) => k.cls === cls);
