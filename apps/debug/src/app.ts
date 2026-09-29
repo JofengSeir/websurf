@@ -2376,3 +2376,13 @@ function setError(msg: string): void {
 // ---------------------------------------------------------------------------
 
 void main();
+
+// ── 关闭确认兜底（Ctrl+W 防误关）─────────────────────────────────────
+// 浏览器不允许页面用 keydown preventDefault 拦截 Ctrl+W 这类浏览器快捷键，
+// 但 beforeunload 可以：标签页关闭 / 刷新 / 离开前弹**原生确认框**（「离开页面？」，
+// 文案由浏览器定、无法自定义；页面需先有过交互才弹——无激活时浏览器直接放行防滥用）。
+// BSP 长解析 / 长会话中途误关的页面在这里多一道反悔的机会。
+window.addEventListener('beforeunload', (e) => {
+  e.preventDefault();
+  e.returnValue = ''; // 触发确认框所必需（Chrome/Edge 约定）
+});
