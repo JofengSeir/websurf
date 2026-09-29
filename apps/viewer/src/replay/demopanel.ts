@@ -11,7 +11,7 @@
  * 玩家信息，`players` 为采到的玩家类轨迹）。信息不足时**如实留白并注明原因**，不做推测填充。
  */
 
-import { parseSourceDemo, type DemoParseResult, type DemoPlayerInfo, type PlayerTrack } from './demo/demo.js';
+import { isPlayerClass, parseSourceDemo, type DemoParseResult, type DemoPlayerInfo, type PlayerTrack } from './demo/demo.js';
 import { userinfoTimeline } from './demo/net.js';
 import { trackToClip } from './democlip.js';
 import { TRACK_PALETTE } from './tracks.js';
@@ -231,7 +231,8 @@ export class DemoPanel {
    * 也正是「看板东西太多」的来源之一。
    */
   refreshNames(): void {
-    const head = this.track.querySelector<HTMLElement>('.dmp-live');
+    // 「在服」行已挪进 demoMeta（owner：花名册不显示在线状态）⇒ 到 meta 里找它
+    const head = this.meta.querySelector<HTMLElement>('.dmp-live');
     if (!head || this.rows.length === 0) return;
     const now = this.opts.currentTick ? this.opts.currentTick() : 0;
     const live: string[] = [];
@@ -272,6 +273,7 @@ export class DemoPanel {
       <div class="dmp-grid">
         <span>时长</span><b>${(h.playbackTime / 60).toFixed(1)} 分钟</b>
         <span>玩家</span><b>${this.rows.length} 位</b>
+        <span>在服</span><b class="dmp-live" title="当前 tick 在服务器上的人（名字随录像轮换）">—</b>
       </div>
       <div class="dmp-grid dmp-internals" title="解析内部量（排查用）：文件 ${file.name}；tick 率 ${tickRate.toFixed(1)}/s；演示协议 ${h.demoprotocol} ／ 网络协议 ${h.networkprotocol}；字符串表 ${this.result!.stringTables.length} 张；服务器类别 ${this.result!.dataTables.classes.length} 个">
         <span>来源</span><b>${file.name}</b>
@@ -296,7 +298,12 @@ export class DemoPanel {
       // `CDynamicProp #148`、`CFuncRotating #149` 等），它们不是"人物视角"，列进花名册会让圆的数量
       // 与人对不上（owner 实测到的"数量对不上"）。判据：实体号 ≤ 64 —— Source 把 1..MAX_PLAYERS(64)
       // 留给玩家槽位。
-      if (t.entityIndex > MAX_PLAYER_ENTITY) continue;
+      // **实体号 0 必须排除**：Source 的 0 号实体是 worldspawn（世界本身），
+      // 旧判据只挡 `> 64`，于是 `CWorld #0` 混进了花名册（owner 实测）。
+      // 另用 `isPlayerClass` 挡掉道具 / NPC（`CBaseEntity` / `CDynamicProp` / `CFuncRotating` …）——
+      // 原注释里写了这条，但代码里并没有真的判类名。
+      if (t.entityIndex < 1 || t.entityIndex > MAX_PLAYER_ENTITY) continue;
+      if (!isPlayerClass(t.className)) continue;
       const slot = t.entityIndex - 1;
       // **不再要求该槽在 `userinfo` 里有名字**：原先这里有一条 `nameAtSlot(...) === '' ⇒ continue`，
       // 而实测这些录像的 `userinfo` **只有槽 0（录制机器人）**（见 `documents/viewer/implementation/dem.md`
@@ -341,7 +348,8 @@ export class DemoPanel {
       })
       .join('');
     // 抬头（`.dmp-live`）保留：`refreshNames()` 每帧往这里写在服名单 + 轮换后的名字。
-    this.track.innerHTML = '<div class="dmp-live"></div><div class="dmp-roster">' + rows + '</div>';
+    // **「在服」抬头已撤**（owner：不该显示在这里）——在线状态挪到 demoMeta 的 `#dmp-live` 显示。
+    this.track.innerHTML = '<div class="dmp-roster">' + rows + '</div>';
     this.track.hidden = false;
     for (const btn of Array.from(this.track.querySelectorAll<HTMLButtonElement>('.dmp-who'))) {
       const p = roster[Number(btn.dataset.who)];
