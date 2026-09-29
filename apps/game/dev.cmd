@@ -9,8 +9,8 @@ if not "%~1"=="" set PORT=%~1
 
 echo ============================================================
 echo   WebSurf-game - dev
-echo   全链条：工具链自检 -^> 依赖 -^> WASM 重编译 -^> TS 重编译
-echo          -^> 测试门 -^> 起 dev 服务并打开浏览器
+echo   Full chain: toolchain check -> deps -> WASM rebuild -> TS rebuild
+echo          -> test gates -> start dev server and open browser
 echo   Page:    http://localhost:%PORT%/web/index.html
 echo ============================================================
 
@@ -79,6 +79,7 @@ echo [5/5] All test gates passed.
 
 netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul 2>&1
 if errorlevel 1 goto :start_server
+:start_server
 echo ============================================================
 echo   WebSurf-game - Dev Server (web/)
 echo   Server:  http://localhost:%PORT%/
@@ -92,7 +93,7 @@ REM window (or Ctrl+C inside it) or by running stop.cmd in this folder.
 start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/web/index.html"
 REM src/serve.py takes its serve root from argv[2]; the literal here is "%~dp0." (this app
 REM root written with a trailing dot), and serve.py os.chdir()s to it before serving.
-start "WebSurf-game dev server :%PORT%" /min cmd /c python "%~dp0..\..\src\serve.py" %PORT% "%~dp0."
+start "WebSurf-game dev server :%PORT%" /min cmd /k python "%~dp0..\..\src\serve.py" %PORT% "%~dp0."
 echo [OK] Server launched in its own minimized window: "WebSurf-game dev server :%PORT%".
 echo      Stop it by closing that window or by running stop.cmd here.
 exit /b 0
