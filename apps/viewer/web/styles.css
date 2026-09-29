@@ -692,7 +692,9 @@ select.tl-select:focus { border-color: var(--text); }
    人字几何仍是实测值（上下两层 52°/-52° 镜像、色序反转，折点在条高中央）。 */
 .slate-stick {
   position: relative;
-  height: 44px;
+  /* 高度 44 → **51px**（owner：整体高度 +15%）。螺钉纵向位置（23%/77%）与缝（50%）
+     都是百分比定位，会随高度等比走；色带宽度是按条宽算的，不受高度影响。 */
+  height: 51px;
   background: #0a0a0c;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
