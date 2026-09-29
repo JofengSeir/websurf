@@ -739,10 +739,11 @@ select.tl-select:focus { border-color: var(--text); }
 .slate-screws {
   position: absolute; inset: 0; pointer-events: none;
   background:
-    /* 上下板之间的缝：**2px**、`#4b4b57`（原先 1px `#2e2e36` 在黑板段几乎看不出，
-       owner 实测要缩放到 125% 才辨认得出 —— 加粗并提对比，同时抵抗高 DPI 分数缩放） */
+    /* 上下板之间的缝：**1.5px**、`#4b4b57`。宽度定在 1~2px 之间：1px 在 125%/150% 分数缩放下
+       会被浏览器取整抹掉（owner 起初就是这么看不到的），2px 又偏粗；1.5px 保留辨识度且更细。
+       颜色沿用提对比后的 `#4b4b57`（比条底色亮 65 级），保证细也能看清。 */
     linear-gradient(180deg,
-      transparent calc(50% - 1px), #4b4b57 calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)),
+      transparent calc(50% - 0.75px), #4b4b57 calc(50% - 0.75px) calc(50% + 0.75px), transparent calc(50% + 0.75px)),
     radial-gradient(circle at 4.4% 23%, #3c3c45 0 3px, transparent 3px),
     radial-gradient(circle at 4.4% 77%, #3c3c45 0 3px, transparent 3px),
     radial-gradient(circle at 9.5% 77%, #3c3c45 0 3px, transparent 3px);
