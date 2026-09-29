@@ -309,7 +309,9 @@ export class Timeline {
       const idxEnd = meta.preFrames + meta.frameCount;
       const arr = track.clip.t;
       const runEndLocal = idxEnd < track.clip.count ? arr[idxEnd] : track.clip.duration;
-      const left = rel(track.offset);
+      // 左端钳 0：offset 在 prerun 段为负，rel 会给出负百分比把带子推出滑杆左缘；
+      // 宽度公式的右端已用 max(offset, winStart) 钳过，两端口径在此对齐
+      const left = Math.max(0, rel(track.offset));
       const width = ((Math.min(runEndLocal, track.clip.duration) - Math.max(track.offset, winStart)) / winLen) * 100;
       // 跑段占满或缺失窗口时高亮无信息量，不画
       if (width > 0.05 && width < 99.95) {

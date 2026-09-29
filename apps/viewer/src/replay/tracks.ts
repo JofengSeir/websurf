@@ -21,16 +21,18 @@
 import { sampleClip } from './sampling.js';
 import type { Clip, Sample, Track, TrackSample } from './types.js';
 
-/** 轨道配色表（八项）：`add` 取 `tracks.length % 长度`，即按当前轨道数循环取色。 */
+/** 轨道配色表（八项，导演工作台深底高区分度）：`add` 取 `tracks.length % 长度`，
+ *  即按当前轨道数循环取色——导入多个 .replay 时逐条自动分配不同颜色；
+ *  首位时间码黄与跟随主轨迹的语义对齐。 */
 export const TRACK_PALETTE: readonly number[] = [
-  0x8ab4f8, // 蓝：viewer 主色
-  0xf9a03f, // 橙
-  0x4ade80, // 绿
-  0xf87171, // 红
-  0xc084fc, // 紫
-  0x22d3ee, // 青
-  0xfacc15, // 黄
-  0xf472b6, // 粉
+  0xe6c35c, // 时间码黄（首条 / 主跟随）
+  0x5bc8db, // 青
+  0xe07b6c, // 珊瑚
+  0x7dd87d, // 绿
+  0xb48cf2, // 紫
+  0xf0955c, // 橙
+  0x6fa8f5, // 天蓝
+  0xe07bb0, // 洋红粉
 ];
 
 export class TrackSet {

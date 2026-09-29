@@ -186,7 +186,6 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
 .tab.active {
   color: var(--strip-dark); background: var(--strip-light);
   border-color: var(--strip-light);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
 }
 /* 激活 tab 的聚焦指示：clip-path 会裁掉外部 outline，改内嵌 1px 暗线 */
 .tab.active:focus-visible {
@@ -333,6 +332,13 @@ select.field-select:focus { border-color: var(--accent); }
 .track-name:focus { outline: none; border-color: var(--accent); }
 .track-meta { font-size: 10.5px; color: var(--muted); flex: 0 0 auto; }
 .track-off-label { font-size: 11px; color: var(--muted); flex: 0 0 auto; }
+/* 轨迹调色板（trackpanel.ts 的 type=color）：16×16 细线方框，色板原生弹层 */
+.track-color {
+  width: 16px; height: 16px; flex: 0 0 auto; padding: 0;
+  background: var(--bg); border: 1px solid var(--border-strong); cursor: pointer;
+}
+.track-color::-webkit-color-swatch-wrapper { padding: 1px; }
+.track-color::-webkit-color-swatch { border: none; }
 .track-off {
   width: 58px; flex: 0 0 auto; font-family: inherit; font-size: 11.5px; color: var(--text);
   background: var(--bg); border: 1px solid var(--border);
@@ -433,9 +439,16 @@ select.field-select:focus { border-color: var(--accent); }
   accent-color: var(--text); cursor: pointer;
 }
 .tl-zone { position: absolute; top: 2px; bottom: 2px; pointer-events: none; }
-/* 正式跑段带 = 灰白带；A-B 区间带 = 白框（两侧 1px 边 + 加深一档的底）——
+/* 正式跑段带 = **斜纹灰白带 + 两端刻线**（剪辑软件「片段」语彙：斜纹 = 记录中，
+   端线 = 入点/出点）；A-B 区间带 = 白框——两种带形态/纹理刻意区分，无需文字即可分辨；
    灰阶区间语彙（时间码黄只给数字，不给区间面），改色须同步帮助文本 */
-.tl-zone-run { background: rgba(232, 232, 228, 0.16); }
+.tl-zone-run {
+  background:
+    repeating-linear-gradient(-45deg, rgba(232, 232, 228, 0.2) 0 3px, transparent 3px 8px),
+    rgba(232, 232, 228, 0.13);
+  border-left: 1px solid var(--border-strong);
+  border-right: 1px solid var(--border-strong);
+}
 .tl-zone-ab {
   background: rgba(232, 232, 228, 0.26);
   border-left: 1px solid var(--text);
