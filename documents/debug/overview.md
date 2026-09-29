@@ -21,7 +21,7 @@
 | `apps/debug/src/input/` | 键盘采集、主线程→Worker 消息桥、输入录制/回放器（含回放捕获与丢帧语义） | `apps/debug/src/input/keyboard.ts:56`、`apps/debug/src/input/input-bridge.ts:16`、`apps/debug/src/input/input-recorder.ts:166` |
 | `apps/debug/src/world/` | WASM 导出 JSON 的类型面、brush 映射层、传送点数据层、自定义传送点 localStorage 层、出生点加载器（零调用点参考实现） | `apps/debug/src/world/types.ts:34`、`apps/debug/src/world/collider-adapter.ts:182`、`apps/debug/src/world/teleport-manager.ts:135` |
 | `apps/debug/src/physics/` | 面板参数定义表、参数管理器（写 `set_params` / `set_hull`）、config → Rust 参数映射、向量工具与 cs-movement 碰撞类型 | `apps/debug/src/physics/param-defs.ts:47`、`apps/debug/src/physics/physics-params.ts:54`、`apps/debug/src/physics/prediction-params.ts:23` |
-| `apps/debug/web/` | 页面骨架与全部 DOM id、样式、COOP/COEP 补丁脚本，以及构建产物落点（`app.js` / `worker.js` / `websurf_wasm_bg.wasm` / `textures.mtz`） | `apps/debug/web/index.html:381`、`apps/debug/web/styles.css:2`、`apps/debug/package.json:10` |
+| `apps/debug/web/` | 页面骨架与全部 DOM id、样式、COOP/COEP 补丁脚本，以及构建产物落点（`app.js` / `worker.js` / `websurf_wasm_bg.wasm` / `textures.mtz`） | `apps/debug/web/index.html:444`、`apps/debug/web/styles.css:2`、`apps/debug/package.json:10` |
 | `apps/debug/scripts/` | 构建 dist、WASM API 契约门、无头验收与度量脚本、部署站入口页模板、路径基线资产 | `apps/debug/scripts/build-dist.mjs:63`、`apps/debug/scripts/check-wasm-api.mjs:1`、`apps/debug/scripts/input-replay-verify.mjs:1` |
 | `apps/debug/crates/wasm/` | 本工程的 WASM 绑定层：`BspProcessor` 全导出面 + 原样再导出共享层 `PhysWorld` | `apps/debug/crates/wasm/src/lib.rs:487`、`apps/debug/crates/wasm/src/lib.rs:55` |
 | `apps/debug/fixtures/` | 门禁脚本的输入夹具（不参与运行时） | `apps/debug/package.json:22` |
@@ -78,7 +78,7 @@
 从 `npm run dev` 到页面可交互的链路（参与者 → 动作）：
 
 1. `npm run dev`（`apps/debug/package.json:15`）→ `src/serve.py` 以 8080 为端口、以工程根为服务根启动；浏览器打开 `/web/index.html`。
-2. 页面加载 COOP/COEP 补丁脚本（`apps/debug/web/index.html:792`）与打包后的 `app.js`（`apps/debug/web/index.html:793`）。
+2. 页面加载 COOP/COEP 补丁脚本（`apps/debug/web/index.html:855`）与打包后的 `app.js`（`apps/debug/web/index.html:856`）。
 3. `app.js` 执行到 `apps/debug/src/app.ts:278` 的 `main`：先取画布句柄，取不到直接返回（`apps/debug/src/app.ts:279`）。
 4. 通道选择：`crossOriginIsolated === true` 且存在 `SharedArrayBuffer` 时建 `SHARED_BUFFER_SIZE` 的共享缓冲，否则置 `null`（`apps/debug/src/app.ts:286`）。
 5. 建 Worker：有内嵌 Worker 源码（构建注入的 `__VBSP_WORKER_JS__`）则走 Blob URL，否则 `new Worker('./worker.js', { type: 'module' })`（`apps/debug/src/app.ts:298`）。

@@ -151,7 +151,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 6px 20px rgba(0, 0, 0, 0.35);
   font-size: 12px; line-height: 1.7;
-  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+  /* 滚动条自绘见文件尾 webkit 块（勿设标准 scrollbar-width，Chromium 121+ 会抢占） */
 }
 #help .help-title {
   display: flex; align-items: center; justify-content: space-between;
@@ -218,7 +218,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
   position: relative;
   display: none; flex: 1; overflow-y: auto; overscroll-behavior: contain;
   padding: 10px 12px 14px;
-  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable; /* 自绘滚动条见文件尾 webkit 块；槽位常驻避免 tab 间横跳 */
 }
 .tabpane.active { display: flex; flex-direction: column; }
 
@@ -909,3 +909,26 @@ select.tl-select:focus { border-color: var(--text); }
 .dmp-opt:hover { color: var(--text); }
 .dmp-opt input { appearance: none; -webkit-appearance: none; width: 13px; height: 13px; margin: 0; border: 1px solid var(--border-strong); background: transparent; cursor: pointer; }
 .dmp-opt input:checked { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--bg); }
+
+/* ── 滚动条自绘（::-webkit-scrollbar，Edge/Chromium）：方角 + thumb=分隔色 +
+   1px 轨道沿，hover 转铜金（瞬时态）。勿与标准 scrollbar-width 并设，
+   否则 Chromium 121+ 走标准属性、忽略这里的全部自绘 ── */
+#help::-webkit-scrollbar, .tabpane::-webkit-scrollbar, .spawn-list::-webkit-scrollbar,
+.dmp-jsonlist::-webkit-scrollbar, .dmp-events::-webkit-scrollbar, .dmp-roster::-webkit-scrollbar,
+.dmp-meta::-webkit-scrollbar, .dmp-detail::-webkit-scrollbar { width: 10px; height: 10px; }
+#help::-webkit-scrollbar-track, .tabpane::-webkit-scrollbar-track, .spawn-list::-webkit-scrollbar-track,
+.dmp-jsonlist::-webkit-scrollbar-track, .dmp-events::-webkit-scrollbar-track, .dmp-roster::-webkit-scrollbar-track,
+.dmp-meta::-webkit-scrollbar-track, .dmp-detail::-webkit-scrollbar-track {
+  background: var(--bg); border-left: 1px solid var(--border); }
+#help::-webkit-scrollbar-thumb, .tabpane::-webkit-scrollbar-thumb, .spawn-list::-webkit-scrollbar-thumb,
+.dmp-jsonlist::-webkit-scrollbar-thumb, .dmp-events::-webkit-scrollbar-thumb, .dmp-roster::-webkit-scrollbar-thumb,
+.dmp-meta::-webkit-scrollbar-thumb, .dmp-detail::-webkit-scrollbar-thumb { background: var(--border-strong); }
+#help::-webkit-scrollbar-thumb:hover, .tabpane::-webkit-scrollbar-thumb:hover, .spawn-list::-webkit-scrollbar-thumb:hover,
+.dmp-jsonlist::-webkit-scrollbar-thumb:hover, .dmp-events::-webkit-scrollbar-thumb:hover, .dmp-roster::-webkit-scrollbar-thumb:hover,
+.dmp-meta::-webkit-scrollbar-thumb:hover, .dmp-detail::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+#help::-webkit-scrollbar-button, .tabpane::-webkit-scrollbar-button, .spawn-list::-webkit-scrollbar-button,
+.dmp-jsonlist::-webkit-scrollbar-button, .dmp-events::-webkit-scrollbar-button, .dmp-roster::-webkit-scrollbar-button,
+.dmp-meta::-webkit-scrollbar-button, .dmp-detail::-webkit-scrollbar-button { display: none; }
+#help::-webkit-scrollbar-corner, .tabpane::-webkit-scrollbar-corner, .spawn-list::-webkit-scrollbar-corner,
+.dmp-jsonlist::-webkit-scrollbar-corner, .dmp-events::-webkit-scrollbar-corner, .dmp-roster::-webkit-scrollbar-corner,
+.dmp-meta::-webkit-scrollbar-corner, .dmp-detail::-webkit-scrollbar-corner { background: var(--bg); }
