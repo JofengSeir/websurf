@@ -45,5 +45,5 @@ export type ParseRequest = {
  */
 export type ParseResponse =
   | { id: number; type: 'progress'; phase: 'parse' | 'map'; done: number; total: number }
-  | { id: number; type: 'done'; payload: ClipPayload; warnings: string[]; resolvedPath: string }
+  | { id: number; type: 'done'; payloads: ClipPayload[]; warnings: string[]; resolvedPath: string }
   | { id: number; type: 'error'; message: string };

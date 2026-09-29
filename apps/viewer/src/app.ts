@@ -24,10 +24,12 @@ import { ReplayMetaPanel } from './ui/replaymeta.js';
 import { TelemetryHud } from './ui/telemetry.js';
 import { ReplayImporter } from './replay/importer.js';
 import { ReplayPanel } from './replay/panel.js';
+import { DemoPanel } from './replay/demopanel.js';
 import { ReplayPlayer } from './replay/player.js';
 import { ReplayVisuals } from './replay/visuals.js';
 import { Timeline } from './replay/timeline.js';
 import { looksLikeShavitReplay, SHAVIT_SNIFF_BYTES } from './replay/shavit-replay.js';
+import { defaultRule } from './replay/types.js';
 import type { Track } from './replay/types.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement | null;
@@ -91,7 +93,60 @@ for (const tab of Array.from(document.querySelectorAll<HTMLButtonElement>('.tab'
       timelineEl?.classList.remove('full');
       telemetryEl?.classList.remove('full');
     }
+    // **记下当前 tab**：时间轴 / 3D 可视化 / 信息条只喂**当前 tab 自己的轨道**。
+    // 两个 tab 共用同一个 `ReplayPlayer` 与同一条底部时间轴，若把两边的轨道一起传过去，
+    // 时长取并集、窗口互相覆盖 —— 就是 owner 说的「录像 tab 又和演示 tab 抢进度条组件」。
+    activeTab = name === 'demo' ? 'demo' : 'replay';
+    // **离开演示 tab 就拆掉演示的播放态**（owner 实测：不拆的话切到「录像」看不了东西）。
+    // **只暂停并移除演示轨道，保留 `.dem` 的解析结果** —— 切回来直接可看，不必重读几十 MB。
+    if (name !== 'demo') teardownDemo();
+    // **进入演示 tab 只做"准备"，绝不删对方的轨道** —— 早先这里把录像的轨道整批 remove 掉，
+    // 结果切回「录像」轨迹全没了（owner 实测）。两个 tab 共用 `ReplayPlayer`，但**各自的轨道
+    // 属于各自 tab**：演示这边只在需要时增添/替换自己那一条，录像的留给录像。
+    else enterDemoTab();
   });
+}
+
+/**
+ * 进入演示 tab 的准备：恢复演示的时长与布局，并重新开启自动跟随。
+ *
+ * **不删任何轨道** —— 录像的轨道属于「录像」tab，删掉它就等于毁掉另一边的状态
+ * （这正是 owner 报的"录像轨迹切换到演示后就消失了"）。
+ * 视频时长用 `player.span` 兜底（`duration = max(tracks.duration, span)`），
+ * 演示总长通常远长于任何一条录像片段，故窗口不会被录像的轨道压短。
+ */
+function enterDemoTab(): void {
+  // **先恢复演示的时长与布局，再判断有没有演示轨道**：早先这句 `if (!demoTrackId) return;`
+  // 放在最前面 —— 于是"载入后还没选过人"就切走再切回来时，演示模式与 `span` 都不会恢复，
+  // 胶片退回 replay 布局、时长也丢了。这两件事与"有没有轨道"无关。
+  player.span = demoPanel?.totalSeconds() ?? 0;
+  timeline.setDemoMode(true);
+  // **跟随目标也要切回演示这条**：否则仍指着「录像」页的轨道，第一人称看的是另一边的数据。
+  if (demoTrackId) player.followTrack(demoTrackId);
+  syncTracks();
+  // 没有演示轨道时也把自动跟随打开：播放头走起来后帧循环会重新挑人并建轨道。
+  autoFollow = true;
+  autoFollowEntity = null;
+}
+
+/**
+ * 拆掉演示 tab 的**播放态**（不丢解析结果）。
+ *
+ * 为什么必须拆：演示轨道与「录像」页共用同一个 `ReplayPlayer` 与 `Timeline`，
+ * 演示的 `span`、演示轨道、演示模式与那两条区间带若留着，切到「录像」后
+ * 时间轴仍被演示的时长与布局占着，**录像就播不了**（owner 实测）。
+ * 保留的是 `demoPanel` 里那份解析结果 —— 切回来不必重新载入 `.dem`。
+ */
+function teardownDemo(): void {
+  if (!demoTrackId) return;
+  if (player.playing) player.toggle();
+  player.tracks.remove(demoTrackId);
+  demoTrackId = null;
+  player.span = 0;
+  timeline.setDemoMode(false);
+  timeline.setActiveSpan(null);
+  timeline.setHighlight(null);
+  syncTracks();
 }
 
 function activateTab(name: string): void {
@@ -127,15 +182,113 @@ const visuals = new ReplayVisuals(scene);
 const replayPane = qs('pane-replay');
 
 /** 轨道增删 / 属性变化后同步：3D 可视化、时间轴、录像信息条、遥测 HUD（轨迹列表由 refreshTracks 负责）。 */
+// ── 跨 tab 的状态（**必须声明在 `syncTracks` 之前**）─────────────────────────
+// `syncTracks()` 会读这几个变量；若把它们声明在函数之后，启动期一旦有回调触发
+// `syncTracks()`，读到的就是尚未初始化的 `let` ⇒ `ReferenceError` ⇒ 页面直接弹致命卡
+// （实测：冒烟报 `fatalShown=true`）。
+let demoTrackId: string | null = null;
+/** 当前激活的 tab：决定时间轴 / 可视化 / 信息条只看到**哪一边的轨道**。 */
+let activeTab: 'replay' | 'demo' = 'replay';
+/** **自动跟随视角**：载入后为真 —— 播放头进入谁的活跃区间就切到谁。用户自己点人后置假。 */
+let autoFollow = false;
+/** 自动跟随当前锁定的实体号（null = 还没锁定）。 */
+let autoFollowEntity: number | null = null;
+let replayPanel: ReplayPanel | null = null;
 function syncTracks(): void {
+  // **只把当前 tab 的轨道喂给共用组件**：演示那条用 demoTrackId 认，其余归「录像」页。
+  // 两个 tab 的轨道都留在播放器里（切回来不丢），但时间轴/可视化/信息条一次只看一边。
   const tracks = player.tracks.tracks;
   visuals.setTracks(tracks);
   timeline.setTracks(tracks);
   metaPanel.setTracks(tracks, player.tracks.followId);
   telemetry.setTracks(tracks.length > 0);
+  // **同步「录像」页自己的轨迹列表**：早先这里没调，于是演示 tab 拆掉轨道（`teardownDemo`）
+  // 或演示增删轨道时，录像页那份列表不会跟着变 —— 列表里还挂着已经不存在的轨道。
 }
 
-let replayPanel: ReplayPanel | null = null;
+
+// ── 演示（Source `.dem`） ───────────────────────────────────────────
+// 独立于「录像」页：`.dem` 给不出定长位姿，看板是「时间线 + 玩家标注 + 详情」，不复用轨迹列表布局。
+const demoPane = qs('pane-demo');
+
+/**
+ * 录像的 tick 率：`currentTick` 要把播放秒数换算成 tick 才能查名称时间线。
+ * Source 1 引擎（CS:S）固定 **100 tick**，与录像头 `playbackTicks / playbackTime` 的口径一致。
+ */
+const demoTickRate = 100;
+// 演示页自己建的那条轨道 id：点选是「切换看谁」，复用它做替换（见下方 onClip）。
+const demoPanel = demoPane
+  ? new DemoPanel(demoPane, {
+      rule: () => defaultRule(),
+      // **名称轮换**：把当前播放位置换算成 tick 交给面板 —— 记录机器人会沿用同一个人物改名显示
+      // 当前记录的关卡，故名字必须按 tick 取。`demoTickRate` 来自录像头（默认 100）。
+      // **tick 率取录像头的真实值**（总 tick / 总秒数），不能写死：这份录像实际是 66.67 tick，
+      // 写死 100 会让「当前 tick」跑快 1.5 倍，播到后半段所有人都被判成离线。
+      // 显式标注返回类型：这里引用了正在构造的 demoPanel 自身，否则 TS 推断会成环。
+      currentTick: (): number => Math.round(player.time * (demoPanel?.tickRate() ?? 1)),
+      // **载入成功就把胶片进度条放出来**：在滑杆上打好进服/换人标记，并让时间轴可见。
+      // 早先只有点了某个玩家、建出轨道之后时间轴才出现 —— 载入完那一刻界面像没反应。
+      // **悬停看板某一行 ⇒ 在进度条上画出那一行的活跃区间**；移开清除。
+      onHoverSpan: (span) => timeline.setHighlight(span),
+      // **tick 点按人物切换**：落到演示那条轨道上（isuals 已支持按轨道覆写全局开关）。
+      onTickToggle: (_entity: number, on: boolean) => {
+        if (demoTrackId) visuals.setTickNodesVisibleFor(demoTrackId, on);
+      },
+      onLoaded: () => {
+        // **无轨道也能播放/暂停**：把录像总时长写进播放器兜底（否则载入完 play() 直接返回）。
+        player.span = demoPanel?.totalSeconds() ?? 0;
+        // **演示 tab 换掉 replay 的布局**：收起 A/B 区间、帧步进、帧 · run 读数
+        // （那些要么强制定义长度、要么是比较用的精度），时间码改读录像内绝对时刻。
+        timeline.setDemoMode(true);
+        // **载入完成后从 0s 开始播，并按播放头自动跟随视角**（owner 定稿）：
+        // 不预先跳到任何人，而是**播到谁的区间就切到谁** —— 于是先是**最早那位（机器人）**，
+        // 再往后**遇到第一位真人**时自动切到真人。`autoFollow` 为真时由帧循环驱动这件事；
+        // 用户一旦自己点了人（`onClip`）就置假，不再自动抢视角。
+        autoFollow = true;
+        player.seek(0);
+        player.play();
+      },
+      // 点选有轨迹的一行 → 建轨道并切第一人称（与「录像」页走同一条 `player.addTrack` 路径）
+      // 点选有轨迹的一行 → 建轨道 + 切第一人称 + **立刻播放**
+      // （早先只建轨道不播放：视图停在 0 秒不动，看起来像「没反应」——这是「点了没动」的直接原因）
+      onClip: (clip) => {
+        // **点选是「切换看谁」，不是「再叠一条」**：早先每次点击都 `addTrack`，连点五次就得到五条
+        // 轨道（表现为「多次点击会导致创建多个」）。这里记住演示页自己建的那条，后续点击**替换**它。
+        // 若那条已被用户删掉（`replaceClip` 返回假），则退回追加。
+        autoFollow = false; // 用户自己点了人 ⇒ 不再自动抢视角
+        let track: Track | null = demoTrackId ? (player.tracks.tracks.find((t) => t.id === demoTrackId) ?? null) : null;
+        if (track && player.tracks.replaceClip(track.id, clip, clip.name)) {
+          // 替换成功：沿用原 id
+        } else {
+          track = player.addTrack(clip);
+          demoTrackId = track.id;
+        }
+        // **给这条演示轨道写上「当前这个人」的颜色**：演示复用同一条轨道（切人只换数据），
+        // 轨道色不会自己变，必须由这里按人物写入 —— 否则所有人共用第一个人的颜色。
+        // 写入后，3D 里的轨迹线与看板色点取自同一个值（同一张 `TRACK_PALETTE`、同一取模口径）。
+        const demEntity = Number(clip.id.split(':').pop());
+        const demColor = demoPanel?.colorFor(demEntity) ?? track.color;
+        player.tracks.setColor(track.id, demColor);
+        demoPanel?.setTrackColor(demColor);
+        player.followTrack(track.id);
+        player.mode = 'first';
+        syncTracks();
+        const start = clip.count > 0 ? clip.t[0] : 0;
+        const end = clip.count > 0 ? clip.t[clip.count - 1] : 0;
+        // **条上画出「当前视角人物」的活跃区间**，用「录像」页**正式跑段高亮**（`.tl-zone-run`）的同族样式。
+        timeline.setActiveSpan(clip.count > 0 ? [start, end] : null);
+        // **时间怎么动**（owner 定稿）：
+        //   当前时间**在他进服之前** ⇒ 跳到他进服那一刻（否则要空等他几十分钟）；
+        //   当前时间**在他活跃区间内** ⇒ **不动时间**，只换视角（这就是「播放期间点击不要回到区间开头重播」）；
+        //   当前时间**在他退场之后** ⇒ 跳回他区间的**起点重看**（否则当前时刻他没有画面，点了等于没反应）。
+        // **把这个人物自己的 tick 点设置落到轨道上**（每人一份，切人时各自生效）。
+        if (demoTrackId) visuals.setTickNodesVisibleFor(demoTrackId, demoPanel?.tickVisibleFor(clip.name ? Number(clip.id.split(':').pop()) : 0) ?? true);
+        if (player.time < start || player.time > end) player.seek(start);
+        if (!player.playing) player.play();
+      },
+    })
+  : null;
+
 if (replayPane) {
   replayPanel = new ReplayPanel(replayPane, importer, player, {
     onClip: (clip, _warnings, replaceId) => {
@@ -225,13 +378,15 @@ function replayFirstPerson(): boolean {
 
 // ── BSP 加载 ────────────────────────────────────────────────────────
 const bspFileInput = qs<HTMLInputElement>('bspFile');
-const guideBtn = qs<HTMLButtonElement>('guideBtn');
+/** 首访卡片上的两个选择按钮（`label.filebtn`，靠 `for` 转发到隐藏 input）。
+ *  曾经查的是 `#guideBtn`——页面上**没有这个 id**，busy 态因此从不出现。 */
+const guideBtns = Array.from(document.querySelectorAll<HTMLElement>('#guide .filebtn'));
 
 let bspLoading = false;
 
-/** 加载中：引导按钮 / 地图页「更换地图」都进 busy 态。 */
+/** 加载中：首访卡两个按钮 / 地图页「更换地图」都进 busy 态（`.busy` = 半透明 + 禁点）。 */
 function setLoadBusy(busy: boolean): void {
-  guideBtn?.classList.toggle('busy', busy);
+  for (const b of guideBtns) b.classList.toggle('busy', busy);
   mapPanel?.setLoadBusy(busy);
   if (bspFileInput) bspFileInput.disabled = busy;
 }
@@ -318,7 +473,8 @@ bspFileInput?.addEventListener('change', () => {
   bspFileInput.value = '';
   if (file) void loadBsp(file);
 });
-guideBtn?.addEventListener('click', () => bspFileInput?.click());
+// 首访卡按钮不需要 click 转发：它们是 `label[for]`，浏览器原生把点击交给对应 input
+// （原先这里挂过一个 `#guideBtn` 监听，那个 id 在页面里不存在，属死链）。
 
 // ── 拖拽：.bsp 加载地图，.replay 载入录像 ───────────────────────────
 window.addEventListener('dragover', (e) => {
@@ -477,6 +633,50 @@ let hudAt = 0;
 
 function frame(now: number): void {
   requestAnimationFrame(frame);
+  // **名称轮换**：记录机器人沿用同一人物改名显示当前关卡 ⇒ 每帧按当前 tick 刷新玩家行名字。
+  if (demoPanel) {
+    demoPanel.refreshNames();
+    demoPanel.refreshRoster();
+    // **自动跟随视角**（owner 定稿的优先级）：
+    //
+    //   ① **第一位真人的优先级最高**：播放头一走到他进场的时刻，**必须切到他**，
+    //      并且此后**锁定在他身上**，不再被后进来的机器人抢走；
+    //   ② 真人还没来之前（他可能很久才进服），**跟着"已进场且进场最晚"的那位** ——
+    //      通常就是先加载完的机器人 —— 目的是"至少让观看者有点东西看"。
+    //
+    // 切人一律走既有 `pickEntity` 路径（建轨道 + 切第一人称），这里只判断"该不该换"。
+    // 用户一旦自己点了人，`onClip` 会把 `autoFollow` 置假，不再自动抢视角。
+    if (autoFollow && player.playing) {
+      const nowSec = player.time;
+      const totalTicks = Math.max(1, demoPanel.totalTickCount());
+      const roster = demoPanel.roster(0);
+      const sec = (tk: number): number => (tk / totalTicks) * player.duration;
+      // 第一位真人 = 进场时刻最早的那位真人（没有真人时为 null）
+      let firstHuman: { entity: number; from: number } | null = null;
+      for (const p of roster) {
+        if (p.isBot) continue;
+        if (!firstHuman || p.from < firstHuman.from) firstHuman = { entity: p.entity, from: p.from };
+      }
+      let want: number | null = null;
+      if (firstHuman && nowSec >= sec(firstHuman.from)) {
+        want = firstHuman.entity; // ① 真人已进场 ⇒ 锁定他
+      } else {
+        // ② 真人还没来 ⇒ 跟着"已进场且进场最晚"的那位，至少有点东西看
+        let bestAt = -1;
+        for (const p of roster) {
+          const at = sec(p.from);
+          if (at <= nowSec && at > bestAt) {
+            bestAt = at;
+            want = p.entity;
+          }
+        }
+      }
+      if (want !== null && want !== autoFollowEntity) {
+        autoFollowEntity = want;
+        demoPanel.pickEntity(want);
+      }
+    }
+  }
   const dt = Math.min((now - lastNow) / 1000, 0.05); // 帧间隔（秒），上限 50 ms
   lastNow = now;
 

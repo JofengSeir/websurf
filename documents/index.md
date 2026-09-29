@@ -72,6 +72,7 @@
 | [`viewer/implementation/app.md`](viewer/implementation/app.md) | 根级入口与页面装配 |
 | [`viewer/implementation/core.md`](viewer/implementation/core.md) | `core/**`：BSP 装载、场景、相机、DOM 工具 |
 | [`viewer/implementation/replay.md`](viewer/implementation/replay.md) | `replay/**`：录像解析、播放器、时间轴、轨道面板与可视化 |
+| [`viewer/implementation/dem.md`](viewer/implementation/dem.md) | `replay/demo/**` + `replay/democlip.ts`：Source `.dem` 演示录像解析与 DEM→`Clip` 桥接 |
 | [`viewer/implementation/ui.md`](viewer/implementation/ui.md) | `ui/**`：遥测 HUD、地图信息、录像元数据面板 |
 | [`viewer/implementation/renderer.md`](viewer/implementation/renderer.md) | `renderer/**`：静态光照着色器落地 |
 | [`viewer/implementation/worker.md`](viewer/implementation/worker.md) | `worker/**`：解析 Worker 与消息协议 |

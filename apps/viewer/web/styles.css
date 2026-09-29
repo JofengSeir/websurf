@@ -20,19 +20,28 @@
  *     （侧栏左下）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层至多
  *     1 件」适配，不套用 game 单窗口的 ≥2 口径；
  *   · **导演版条纹特色（owner 指定保留并强化，v3 扩展）**：时间轴上下缘
- *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**黑白**斜纹顶条、
+ *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**人字彩条**顶条（见 v8）、
  *     拖拽态上下缘黑白遮幅条、录像信息条左端**调色卡条**（黑/灰/白/
  *     时间码黄四段）、每个小节标题左端**调色卡竖条**（黑/白/黄三段）、
  *     （激活 = 场记板白底黑字，**不切角**——切角只留在大结构上）；
  *   · **影视语彙泛化（v4/v6）**：播放中时间码前缀 REC 红点、时间轴底部秒刻度尺、白竖线播放头、SMPTE 彩条、速度电平表、场记板黑白标签。
- *   · **引导卡场记板化（v6）**：直角板面 + 双道拍板条纹 + 白色格线信息栏——版式仿照场记板，无拟物材质。
+ *   · **引导卡场记板化（v8，按实物照片逐行实测同构）**：拍板条 = 左 7.4% **铰链板**
+ *     （浅灰盖片 + 黑搭接段 + 四颗圆点螺钉）+ **人字形彩条**（上下两层 52°/-52°
+ *     硬停渐变在条高中央折成 V，色序照实测：左灰阶 / 青 / 黄 / 蓝 / 红 / 白 / 灰 /
+ *     右暗阶）；板身 = **表格化单元格**（中英双语标签 + 1px 竖格线 + 行间格线），
+ *     实物白板黑线按 owner 要求**反相**成深板白线；底部两枚按钮为板身末行。
+ *     几何与配色的证据：`.tmp/audit/stripe-slope.py` 对照片逐行追踪色界所得
+ *     （斜率 |dx/dy|=0.77、折点在条高中央、色带占条宽 8.4%）。
+ *     v6/v7 的毛病：拍板条画成竖条只铺左半（读作进度条）、改成 78° 单斜（方向错）、
+ *     `::after` 被重复定义成 1×3px 彩条（肉眼看到的"莫名其妙的绿点"）。
+ *     仍为**平面化**：全部硬停色块，无受光高光、无材质渐变、无投影/圆角/贴图。
  *     （激活 = 场记板白底黑字 + 右上 10px 切角）。
  *
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名驱动）：
  *   · 可见性钩子：.hidden、#help.hidden、#guideError.show、#dropzone.active、
  *     #fatal.show、.tabpane.active、.tab.active、#dock.full、.telemetry.full、
  *     .track-btn.off/.active/.danger、.track-off.invalid、.field-input.invalid、
- *     .btn.busy、#guideBtn.busy、.tl-range.active；
+ *     .btn.busy、.filebtn.busy（首访卡两枚按钮）、.tl-range.active；
  *   · .track-dot 与 .meta-dot 的底色、.tl-zone-run / .tl-zone-ab 的
  *     left/width 由 apps/viewer/src 运行时写行内样式，这里只给静态外观。
  * ============================================================ */
@@ -152,23 +161,28 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 #help .help-h { font-weight: 600; margin-bottom: 2px; }
 #help p { color: var(--muted); }
 
-/* ── 侧栏面板 #sidebar（右侧，宽 --sidebar-w）：右上 10px 切角 + 顶缘
-   时间码黄嵌片 + 左下服务孔（与切角对角）；#tabs 两个标签按钮 +
-   .tabpane（带 active 的那个显示）── */
+/* ── 侧栏面板 #sidebar（右侧，宽 --sidebar-w）：**矩形无切角** + 顶缘
+   时间码黄嵌片；#tabs 两个标签按钮 + .tabpane（带 active 的那个显示）──
+   切角已按 owner 要求去掉：这种方正的矩形观感更好，装饰性的切角元素不再需要。
+   服务孔保留（它不与任何切角成对，只作件计数）。 */
 #sidebar {
   position: absolute; top: 56px; right: 12px; bottom: 12px; z-index: 6;
   width: var(--sidebar-w); display: flex; flex-direction: column;
   background: var(--panel-trans); border: 1px solid var(--border-strong);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   overflow: hidden;
 }
-/* 顶缘场记板白嵌片（32×2 短嵌片，与盖板齐平；黑白条语彙） */
+/* 顶缘嵌片（**SMPTE 七色条**，与 `#dropzone` / 场记板同一套影视测试信号语彙）：
+   本工程的彩色只出现在这类**细嵌片**上 —— 一行像素宽、硬停分段，不铺面、不做渐变过渡，
+   所以它读起来是"校准条"而不是装饰色块。 */
 #sidebar::before {
   content: ""; position: absolute; top: 0; left: 18px;
-  width: 32px; height: 2px; background: var(--strip-light); z-index: 1;
+  width: 56px; height: 3px; z-index: 1;
+  background: linear-gradient(90deg,
+    #c8c8c8 0 14.28%, #e6c35c 14.28% 28.56%, #4fb3c4 28.56% 42.84%, #58c25c 42.84% 57.12%,
+    #b06fc4 57.12% 71.4%, #d9564a 71.4% 85.68%, #4a6fd9 85.68% 100%);
 }
-/* 服务孔（侧栏左下 5px 圆，与右上切角对角） */
+/* 服务孔（侧栏左下 5px 圆；件计数之一） */
 #sidebar::after {
   content: ""; position: absolute; bottom: 13px; left: 12px;
   width: 5px; height: 5px; border-radius: 50%;
@@ -206,6 +220,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
    margin-top:auto 在内容不足时收尾填补空白）——编号/署名不占文档流 */
 #pane-map::before { content: "VW-01"; }
 #pane-replay::before { content: "VW-02"; }
+#pane-demo::before { content: "VW-03"; }
 .tabpane::before {
   position: absolute; top: 8px; right: 12px;
   font-family: var(--mono); font-size: 12px; color: var(--muted);
@@ -239,11 +254,17 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 }
 /* 左端调色卡竖条（影调黑/白/时间码黄三段，调色盘语彙扩展到每个小节；
    右端仍为 3px 短竖刻度） */
+/* 分区标记条：3×15px 竖嵌片，**硬停三段取 RGB 三原色**（红 / 绿 / 蓝）。
+   竖条只有 3px 宽，所以彩色在这里是"刻度"而不是"色块"—— 与嵌片语彙一致。
+   **取色与三块面板的编号标签同一套**（`#pane-map` 红 / `#pane-replay` 绿 / `#pane-demo` 蓝）：
+   全界面的彩色收成两套原色 —— 屏幕侧用 RGB（加色）、回放信息条用 CMYK（减色），
+   不再有第三种随手配的色组。（这里早先是黄/青/珊瑚三色，既非 RGB 也非 CMYK，
+   在本体系里是孤立的第三套，owner 指出后已并入 RGB。） */
 .sec-title::before {
   content: ""; position: absolute; left: 0; top: 3px;
   width: 3px; height: 15px;
   background: linear-gradient(180deg,
-    var(--border) 0 33%, var(--muted) 33% 66%, var(--strip-light) 66% 100%);
+    #e5484d 0 33.3%, #46c05a 33.3% 66.6%, #4a7fe0 66.6% 100%);
 }
 .sec-title::after {
   content: ""; position: absolute; right: 0; bottom: -3px;
@@ -397,8 +418,11 @@ select.field-select:focus { border-color: var(--text); }
 .replay-meta::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0;
   width: 5px;
+  /* **四原色 · 印刷（CMYK）**：青 / 品红 / 黄 / 黑，硬停四段。
+     与三块面板的**RGB 三原色**（屏幕）刻意区分：这里是"印出来的一册"，那边是"屏幕上的三块"。
+     两套减色/加色原色在同一界面上对位出现，是本面板的识记点。 */
   background: linear-gradient(180deg,
-    var(--strip-dark) 0 25%, var(--muted) 25% 50%, var(--strip-light) 50% 75%, var(--accent) 75% 100%);
+    #00b7c2 0 25%, #e0218a 25% 50%, #f2e14c 50% 75%, #131316 75% 100%);
 }
 .meta-name {
   display: inline-flex; align-items: center; gap: 6px;
@@ -425,7 +449,9 @@ select.field-select:focus { border-color: var(--text); }
 }
 /* 胶片齿孔：时间轴上下缘的输片孔条（硬停重复条纹，无渐变）——
    审片室「看录像」的媒体语彙，导演版特色保留项；孔距 13px、孔宽 5px，
-   影调黑底上镂空 */
+   影调黑底上镂空。
+   **已改回深灰镂空**（owner 裁决：早先那版读起来就是胶片，很好；我中途把它改成
+   七色循环孔条，反而失了胶片感 —— 彩色点缀归嵌片，孔条保持影调）。 */
 #timeline::before, #timeline::after {
   content: ""; position: absolute; left: 10px; right: 10px; height: 5px;
   background: repeating-linear-gradient(90deg,
@@ -435,6 +461,53 @@ select.field-select:focus { border-color: var(--text); }
 #timeline::after { bottom: 4px; }
 .tl-slider-row, .tl-controls, .tl-opts { grid-column: 1; }
 .tl-slider-row { display: flex; align-items: center; gap: 10px; }
+
+/* ── 滑杆上的事件标记（演示录像的「进服 / 换人」点）────────────────────────────
+   位置：贴滑杆顶端的一排小圆点，`left` 由 timeline.ts 按 ratio 写行内样式。
+   取舍：默认**只露点、不露字** —— 侧栏与滑杆都不堆信息，名字走浏览器原生悬停提示；
+   一簇超过 3 颗时收起其余为 `+N`，**鼠标移到簇上**才散开。纯 CSS 切换，无动画无渐变。
+   颜色：只用 `--accent`（本工程的唯一彩色强调）——真人 / 脚本的区分写在悬停提示里，
+   不为它引入第二种颜色。 */
+/* ── 滑杆上的人物标记（按**真实进入时刻**钉住，状态由播放头驱动）────────────────
+   形态：`—|当前位置——①实像——|进入——①虚像——|退出后实像消失——`
+   - `st-pending`（播放头还没到他的进入时刻）：**虚像** —— 空心 + 虚线环，落在滑杆中线上；
+   - `st-live`（播放头在其在场区间内）：**实像**，并**抬到滑杆上方**（上移，表示"这人现在在场"）；
+   - `st-left`（越过退出时刻）：实像消失，只留一枚**暗色残影**（看得出他曾在此处进场）。
+   颜色仍只用 `--accent`（唯一彩色强调），真人靠内嵌环区分，不引入第二种颜色。 */
+.tl-presence { position: absolute; left: 0; right: 0; bottom: 0; height: 18px; z-index: 4; pointer-events: none; }
+.tl-presence[hidden] { display: none; }
+/* **标记是一个 34px 高的悬停盒**：底端是圆点、上端是弹出框，中间的空隙也在这个盒子里。
+   早先弹出框与圆点之间有空隙、且每帧重建 DOM ⇒ 鼠标还没移到框上 hover 就丢了、根本点不到。
+   把空隙包进同一个 hover 区域后，鼠标沿盒子上移全程都算"悬停在标记上"。 */
+.tl-pmark { position: absolute; bottom: 0; width: 14px; height: 46px; margin-left: -7px; display: flex; align-items: flex-end; justify-content: center; pointer-events: auto; cursor: pointer; }
+/* **时刻杆**：从圆点向下拉到滑杆中线的一条细线。没有它，圆一抬起来就看不出它对应哪个时刻
+   （owner 的原始要求是"在进度条上实际的服务器进入时间上标记"——这条线就是那个"在"字）。
+   线长随状态变：在场时圆抬起，线跟着变长，视觉上仍是同一根指针。 */
+.tl-pmark::after { content: ''; position: absolute; left: 50%; bottom: 4px; width: 1px; height: 10px; background: var(--border-strong); transform: translateX(-50%); }
+.tl-pmark.st-live::after { height: 24px; }
+.tl-pmark:hover::after { background: var(--accent); }
+/* 圆点放大到 15px：11px 在 18px 高的胶片条上几乎看不见（owner 截图反馈"没有视觉效果"）。 */
+.tl-pdot { display: block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+.tl-pdot.human { box-shadow: inset 0 0 0 2px var(--bg), inset 0 0 0 3px var(--accent); }
+.tl-pmark.st-pending .tl-pdot { background: none; border: 2px dashed var(--muted); box-shadow: none; }
+.tl-pmark.st-live .tl-pdot { transform: translateY(-26px); }
+.tl-pmark.st-left .tl-pdot { background: none; border: 1px solid var(--border-strong); box-shadow: none; opacity: 0.45; }
+/* **退场标记**：独立的一枚窄标记，从一开头就画在"他退场的那一刻"上（owner 的
+   「退出服务器的位置没有提前显示」）。播放头没到时是**虚像**（预告"他在这里退"），
+   越过之后变成**已退场的暗环**。它没有圆点，只有一根短竖线 + 一个空心环。 */
+.tl-pmark-out { pointer-events: auto; }
+.tl-pmark-out::before { content: ''; position: absolute; left: 50%; bottom: 4px; width: 1px; height: 10px; background: var(--border-strong); transform: translateX(-50%); }
+.tl-pmark-out .tl-pdot, .tl-pmark-out > * { display: none; }
+.tl-pmark-out.st-pending::after { content: ''; position: absolute; left: 50%; bottom: 14px; width: 9px; height: 9px; border-radius: 50%; border: 1px dashed var(--muted); transform: translateX(-50%); }
+.tl-pmark-out.st-left::after { content: '×'; position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); font-size: 11px; line-height: 1; color: var(--border-strong); }
+.tl-pmark:hover { z-index: 6; }
+.tl-picks { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); min-width: 150px; padding: 4px 0; background: var(--panel); border: 1px solid var(--border-strong); }
+.tl-pmark:hover .tl-picks { display: block; }
+.tl-pick { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%; padding: 4px 8px; border: 0; background: none; text-align: left; font: inherit; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }
+.tl-pick:hover { background: var(--accent-weak); }
+.tl-pick i { font-style: normal; font-size: 10px; color: var(--muted); }
+.tl-pickname { overflow: hidden; text-overflow: ellipsis; }
+.tl-ell { position: absolute; right: 2px; bottom: 3px; font-size: 11px; line-height: 1; color: var(--muted); pointer-events: none; }
 .tl-sliderwrap {
   position: relative; flex: 1; min-width: 160px; height: 18px;
   display: flex; align-items: center;
@@ -476,6 +549,18 @@ select.field-select:focus { border-color: var(--text); }
   border-left: 1px solid var(--border-strong);
   border-right: 1px solid var(--border-strong);
 }
+/* 当前视角人物的**活跃区间**：沿用「录像」页**正式跑段**的同族样式（斜纹灰白带 + 两端刻线），
+   与「录像」tab 的语彙一致，不再自造一条淡黄带。owner 定稿：hover 才用橙色。 */
+.tl-zone-active { position: absolute; top: 3px; bottom: 3px; pointer-events: none;
+  background:
+    repeating-linear-gradient(-45deg, rgba(232, 232, 228, 0.2) 0 3px, transparent 3px 8px),
+    rgba(232, 232, 228, 0.13);
+  border-left: 1px solid var(--border-strong);
+  border-right: 1px solid var(--border-strong);
+}
+/* **悬停高亮**：鼠标停在右侧看板某一行上时，把该行对应的区间画到条上；移开即清除。
+   故意用**橙色**（`--accent`）与上面那条灰白斜纹带区分：一个表示"正在看的人"，一个表示"鼠标指的人"。 */
+.tl-zone-hl { position: absolute; top: 0; bottom: 0; background: rgba(230, 195, 92, 0.22); pointer-events: none; }
 .tl-zone-ab {
   background: rgba(232, 232, 228, 0.26);
   border-left: 1px solid var(--text);
@@ -571,62 +656,101 @@ select.tl-select:focus { border-color: var(--text); }
 .telemetry .tm-vert { color: var(--muted); }
 /* .tm-horiz（telemetry.ts 构造的分隔横杠）刻意走容器继承，无独立规则 */
 
-/* ── 引导层 #guide（首访卡片 + #guideBtn + #guideError.show）· 拖拽高亮 #dropzone.active ·
+/* ── 引导层 #guide（首访卡片 + #guideError.show）· 拖拽高亮 #dropzone.active ·
    致命错误面板 #fatal.show（由 apps/viewer/src/ui/hud.ts 切换）── */
 #guide {
   position: absolute; inset: 0; z-index: 8;
   display: flex; align-items: center; justify-content: center;
   background: var(--overlay);
 }
+/* ── 引导卡 = 场记板（clapperboard，2026-09-29 v10 按 owner 提供的实物图重做）──
+   结构：顶部拍板条（左端黑色把手双铆钉 + 六色分段 45° 斜纹）+ 下板露边 +
+   白色亚克力板身（黑线字段格：片名行 / ROLL-SCENE-SHOT-TAKE 四列格 /
+   导演-摄影-日期三行，双语标签「英文粗大 + 中文小字」）。
+   白板是暗色页面上的一件道具，投影加强舞台感；guideError 用红马克笔语彙。 ── */
 #guide .card {
-  max-width: 430px; margin: 0 16px; padding: 22px 26px;
-  position: relative;
-  text-align: center;
-  background: var(--panel); border: 1px solid var(--border-strong);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 6px 20px rgba(0, 0, 0, 0.35);
-}
-/* 场记板（clapperboard）版式（仿照真实场记板结构，非拟物）：
-   顶部一条黑白斜纹拍板（::before，左端 7px 铰链板 + 2px 白色分界线），
-   板身为「标签/值」两列网格（.slate-row / .gstep），白色格线分隔单元格。
-   板身保持暗色（全站一致的暗色演绎；现代场记板多为白色亚克力板身）。 */
-#guide .card {
-  max-width: 430px; margin: 0 16px; padding: 0 0 20px;
+  max-width: 430px; margin: 0 16px; padding: 0;
   position: relative; text-align: left;
-  background: var(--panel); border: 1px solid var(--border-strong);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 6px 20px rgba(0, 0, 0, 0.35);
+  background: #f5f5f2; border: 1px solid #2a2a2a; border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  color: #1c1c1c; overflow: hidden;
 }
-/* 拍板条：黑白斜纹（14/28px 周期）+ 左端 7px 白色铰链板 + 下缘 2px 白色分界线 */
-#guide .card::before {
-  content: ""; display: block; height: 14px; margin: 0 0 10px;
+/* 拍板条：六色分段（绿/黄/蓝/红/白/灰，取自实物图顺序）+ 45° 半透明黑斜纹罩；
+   左端黑色把手块（圆角）由 ::before 承担，双铆钉由 ::after 承担 */
+.clapper {
+  position: relative; height: 30px;
   background:
-    linear-gradient(90deg, var(--strip-light) 0 7px, transparent 7px),
-    repeating-linear-gradient(-45deg, var(--strip-light) 0 14px, var(--strip-dark) 14px 28px);
-  border-bottom: 2px solid rgba(232, 232, 228, 0.9);
+    repeating-linear-gradient(45deg, rgba(10, 10, 12, 0.32) 0 7px, transparent 7px 14px),
+    linear-gradient(90deg,
+      #58c25c 0 14.3%, #e6c35c 14.3% 28.6%, #4a6fd9 28.6% 42.9%, #d9564a 42.9% 57.2%,
+      #ececea 57.2% 71.5%, #9a9a9a 71.5% 100%);
 }
-/* 板身行：标签列 96px 等宽小字 + 值列；行间 1px 白格线（场记板单元格） */
-.slate-row, .gstep {
-  display: grid; grid-template-columns: 96px 1fr; gap: 0 14px; align-items: baseline;
-  padding: 9px 22px;
-  border-bottom: 1px solid rgba(232, 232, 228, 0.5);
+.clapper::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 58px;
+  background: #16181a; border-radius: 8px 0 0 8px;
 }
-.glabel {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
-  color: var(--muted); text-align: left;
+.clapper::after {
+  content: ""; position: absolute; left: 12px; top: 0; bottom: 0; width: 44px;
+  background:
+    radial-gradient(circle at 8px 50%, #dfe3e6 0 2.5px, #4a4f55 2.6px 3.5px, transparent 3.6px) no-repeat,
+    radial-gradient(circle at 30px 50%, #dfe3e6 0 2.5px, #4a4f55 2.6px 3.5px, transparent 3.6px) no-repeat;
 }
-.slate-head { border-bottom: 1px solid rgba(232, 232, 228, 0.85); }
-.slate-head .glabel { color: var(--strip-light); }
-.gvalue { font-size: 15px; font-weight: 600; color: var(--text); }
-.gtext { font-size: 13px; color: var(--muted); line-height: 1.8; }
-.gtext code { font-size: 12px; color: var(--text); }
+/* 下板露边：合拢状态下从拍板条下露出的第二片（同款分段、亮度压暗） */
+.clapper-under {
+  height: 6px; margin: 0 10px 10px; border-radius: 0 0 6px 6px;
+  background:
+    repeating-linear-gradient(45deg, rgba(10, 10, 12, 0.2) 0 7px, transparent 7px 14px),
+    linear-gradient(90deg,
+      #4ea84f 0 14.3%, #c9ad50 14.3% 28.6%, #3f5fb8 28.6% 42.9%, #b84a40 42.9% 57.2%,
+      #d6d6d2 57.2% 71.5%, #858585 71.5% 100%);
+}
+/* 板身：白亚克力 + 黑线字段格（线宽 2px，贴实物黑线） */
+.board { padding: 6px 22px 20px; }
+#guide .row, #guide .row.head {
+  display: grid; gap: 2px 12px; padding: 9px 0 12px;
+  border-bottom: 2px solid #1c1c1c;
+}
+#guide .row.head { grid-template-columns: 1fr; padding-top: 12px; }
+#guide .row:not(.head) { grid-template-columns: 150px 1fr; align-items: start; }
+/* 双语标签：中文小字在上、英文粗大在下（实物贴纸排版） */
+#guide .lab .cn { display: block; font-size: 12px; color: #1c1c1c; }
+#guide .lab .en { display: block; font-size: 17px; font-weight: 700; letter-spacing: 0.02em; color: #1c1c1c; }
+#guide .val { font-size: 14px; font-weight: 600; color: #1c1c1c; }
+#guide .gstep { font-size: 12.5px; color: #333; line-height: 1.8; }
+#guide .gstep code { color: #1c1c1c; font-weight: 600; }
+/* 四列格（ROLL/SCENE/SHOT/TAKE）：竖线分格，值区留白 = 未填写板面 */
+#guide .grid4 {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  border: 2px solid #1c1c1c; margin: 2px 0 4px;
+}
+#guide .grid4 .cell { padding: 6px 8px 22px; border-right: 2px solid #1c1c1c; }
+#guide .grid4 .cell:last-child { border-right: none; }
+#guide .grid4 .en { display: block; font-size: 16px; font-weight: 700; color: #1c1c1c; }
+#guide .grid4 .cn { display: block; font-size: 11px; color: #1c1c1c; }
+/* 主按钮 = 板面上的黑色马克笔填写区 */
+#guideBtn {
+  display: inline-block; margin-top: 10px; padding: 8px 18px;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  color: #f5f5f2; background: #1c1c1c; border: none; cursor: pointer;
+}
+#guideBtn:hover { background: #000; }
+#guideBtn.busy { opacity: 0.45; pointer-events: none; }
+/* 错误提示 = 白板上的红马克笔 */
+#guideError {
+  display: none; margin-top: 12px; padding: 7px 10px; text-align: left;
+  font-size: 12px; line-height: 1.7; color: #c23a2e;
+  background: rgba(224, 85, 72, 0.08); border: 1.5px solid #c23a2e;
+  word-break: break-all;
+}
+#guideError.show { display: block; }
+#guideError .raw { display: block; margin-top: 4px; font-size: 11px; color: #8a8a8a; }
 #dropzone {
   position: absolute; inset: 0; z-index: 9; display: none;
   align-items: center; justify-content: center;
-  background: rgba(232, 232, 228, 0.06);
-  font-size: 15px; font-weight: 600; color: var(--text);
+  /* **遮罩明显压暗**：早先只有 6% 的亮色薄雾，拖文件进来时几乎看不出进入了拖拽态。
+     改成暗色重遮罩（配合时间码黄文字），后面板与画面整体退到背景里。 */
+  background: rgba(9, 9, 11, 0.78);
+  font-family: var(--mono); font-size: 14px; letter-spacing: 0.08em; color: var(--accent);
   pointer-events: none;
 }
 #dropzone::before, #dropzone::after {
@@ -657,3 +781,76 @@ select.tl-select:focus { border-color: var(--text); }
 #fatal .ftitle { font-size: 15px; font-weight: 600; color: var(--err); margin-bottom: 10px; }
 #fatal .fdetail { font-size: 12px; color: var(--muted); line-height: 1.8; white-space: pre-wrap; word-break: break-all; }
 #fatal .fdetail code { color: var(--muted); }
+
+/* ── 演示页（Source `.dem`，`DemoPanel`） ─────────────────────────────
+   与「录像」页刻意不同：`.dem` 没有定长位姿，看板是「时间线 + 玩家标注」而非轨迹列表。
+   时间线一行一位玩家：有采到位姿则画强调色区间条，否则显示「位姿不可用」的弱化标记。 */
+.dmp-load { padding: 12px 0; }
+.dmp-load input { display: none; }
+.dmp-meta, .dmp-detail { padding: 10px 0; border-top: 1px solid var(--border); overflow-x: auto; }
+.dmp-title { color: var(--text); font-weight: 600; margin-bottom: 8px; }
+.dmp-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12px; }
+.dmp-grid span { color: var(--muted); }
+.dmp-grid b { color: var(--text); font-weight: 500; word-break: break-all; }
+.dmp-timeline { padding: 8px 0; border-top: 1px solid var(--border); }
+.dmp-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.dmp-lane { flex: 0 0 auto;
+  display: grid; grid-template-columns: 34% 1fr; align-items: center; gap: 8px;
+  width: 100%; padding: 3px 0; background: none; border: 0; cursor: pointer; text-align: left;
+}
+.dmp-lane:hover .dmp-name { color: var(--text); }
+.dmp-lane.on .dmp-name { color: var(--accent); }
+.dmp-name { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dmp-track { position: relative; display: block; height: 10px; background: var(--panel); border: 1px solid var(--border); }
+.dmp-bar { position: absolute; top: 0; bottom: 0; background: var(--accent); }
+.dmp-nobar { font-size: 10px; color: var(--muted); line-height: 10px; padding-left: 4px; }
+.dmp-note { padding: 8px 0 0; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.dmp-empty { color: var(--muted); font-size: 12px; padding: 10px 0; }.dmp-sub { padding: 10px 0 4px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); margin-top: 6px; }
+.dmp-lane.dmp-ent { cursor: default; }
+.dmp-bar.dmp-bar-ent { background: var(--muted); }.dmp-lane.dmp-ent:hover .dmp-name { color: var(--text); }
+.dmp-lane:active { background: rgba(232, 232, 228, 0.05); }.dmp-alt { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }.dmp-ratio { margin-left: 6px; font-weight: 400; color: var(--ok); font-size: 10px; }.dmp-jsonlist, .dmp-events { max-height: 260px; overflow-y: auto; }
+.dmp-events { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.dmp-ev b { color: var(--accent); font-family: var(--mono); margin-right: 6px; }
+
+/* 侧栏的「在服名单」抬头：只在播放时逐帧更新文本（轮换），不放进度条本身 ——
+   进度与事件标记统一在底部时间轴滑杆上（见 .tl-marks）。 */
+.dmp-live { font-size: 12px; color: var(--text); line-height: 1.5; margin: 2px 0 4px; }
+/* ── 演示（长会话）模式：收起只服务于 replay「严格比较记录」的控件 ──────────────
+   owner 判据：近一小时的录像要看「某个人这段时间在干什么」，不是「两条记录谁快」。
+   所以 A/B 区间与「整段」（三个都是**强制定义长度**的行为）、帧步进与 `帧 · run` 读数
+   （比较用的精度）在这个 tab 里不显示；保留 播放/暂停/停止/拖拽/倍速/视角与显示开关。 */
+.tl-demo .tl-only-replay { display: none; }
+/* ── 右侧看板的**花名册**（所有活跃过的人）──────────────────────────────────
+   每行：名字 + 一根按整场时长换算的活跃条 + `加入–退场` 时间。
+   **当前时刻在线** ⇒ 全不透明；**已离线 / 还没加入** ⇒ 半透明（owner 的要求）。
+   悬停某行 ⇒ 由 app 调 `Timeline.setHighlight` 把该行区间画到底部进度条上。 */
+.dmp-roster { display: flex; flex-direction: column; gap: 1px; max-height: 260px; overflow-y: auto; }
+.dmp-who { display: grid; grid-template-columns: 1fr 92px 84px; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border: 0; background: none; text-align: left; font: inherit; font-size: 12px; color: var(--text); cursor: pointer; }
+.dmp-who:hover { background: var(--accent-weak); }
+.dmp-who.off { opacity: 0.4; }
+.dmp-whoname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dmp-whobar { position: relative; display: block; height: 6px; background: rgba(255, 255, 255, 0.06); }
+.dmp-whobar i { position: absolute; top: 0; bottom: 0; background: var(--accent); }
+.dmp-whotime { font-size: 10px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+/* ── 进度条两端更易点中（owner：区间开头/尾部不好点）────────────────────────────
+   原生 range 的滑块（thumb）在两端会内缩，`0%` 与 `100%` 附近实际上点不到最值。
+   外扩必须加在**共同父容器 `.tl-sliderwrap`** 上，不能只加在 `.tl-slider` 上：
+   区间带（`.tl-zone-*`）是按**父容器宽度**算 `left/width` 百分比的，若只把滑杆拉宽，
+   两者坐标系就错开，表现为「区间左右两侧没填满」（owner 实测）。
+   父容器统一外扩后，滑杆与所有叠加带共享同一坐标系。 */
+.tl-sliderwrap { margin: 0 -8px; }
+.tl-slider { height: 20px; }
+/* ── 演示看板：人物名牌（与「录像」页同一套语彙）──────────────────────────────
+   原本这里是一个**裸复选框**，与看板其余部分（色点 / 标签 / 发丝线）不是一个语言。
+   现在拆成三件成套元素：**轨迹色点**（与 3D 里那条轨迹同色）+ **名字** + **角色标签**，
+   开关另起一行、沿用本工程的方框刻线样式，不再是浏览器默认控件的样子。 */
+.dmp-who-head { display: flex; align-items: center; gap: 7px; margin: 2px 0 8px; }
+.dmp-who-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.dmp-who-name { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dmp-who-tag { margin-left: auto; flex: 0 0 auto; padding: 1px 6px; font-size: 10px; letter-spacing: 0.06em; color: var(--muted); border: 1px solid var(--border-strong); }
+.dmp-who-tag.human { color: var(--accent); border-color: var(--accent); }
+.dmp-opts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.dmp-opt { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.dmp-opt:hover { color: var(--text); }
+.dmp-opt input { appearance: none; -webkit-appearance: none; width: 13px; height: 13px; margin: 0; border: 1px solid var(--border-strong); background: transparent; cursor: pointer; }
+.dmp-opt input:checked { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--bg); }

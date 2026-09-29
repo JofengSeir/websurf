@@ -21,6 +21,9 @@
 import { sampleClip } from './sampling.js';
 import type { Clip, Sample, Track, TrackSample } from './types.js';
 
+// 色板定义在本文件（`TRACK_PALETTE`），演示看板按人物取色时复用它 ——
+// 两边同源同算法，看板上的色点与 3D 里的轨迹线才是**同一个颜色值**。
+
 /** 轨道配色表（八项，导演工作台深底高区分度）：`add` 取 `tracks.length % 长度`，
  *  即按当前轨道数循环取色——导入多个 .replay 时逐条自动分配不同颜色；
  *  首位时间码黄与跟随主轨迹的语义对齐。 */
@@ -63,10 +66,14 @@ export class TrackSet {
    * 用新 clip 换掉某条轨道的内容，**只**写 `clip` 一个字段——配色 / 显隐 / 偏移 / 名字全部按原样留下，
    * 也不新增轨道。返回是否命中：id 不存在时返回 false 且不做任何改动。
    */
-  replaceClip(id: string, clip: Clip): boolean {
+  replaceClip(id: string, clip: Clip, name?: string): boolean {
     const track = this.tracks.find((t) => t.id === id);
     if (!track) return false;
     track.clip = clip;
+    // **名字只在调用方显式给出时才换**：`add` 里显式指定的名字是调用方的意图，替换片段不该悄悄改掉它
+    // （测试「替换保留名字」锁的就是这条）。演示页「切看谁」时**显式传入当前玩家名**——
+    // 否则录像信息条会一直挂着上一位玩家的名字（表现为「信息条名字不跟着换」）。
+    if (name && name.trim().length > 0) track.name = name;
     return true;
   }
 
@@ -97,6 +104,20 @@ export class TrackSet {
   /** 设置跟随目标；传入的 id 不存在时保留原值（`ReplayPlayer.followTrack` 转发到这里）。 */
   setFollow(id: string): void {
     if (this.tracks.some((t) => t.id === id)) this.followId = id;
+  }
+
+  /**
+   * **改某条轨道的配色**（演示页按人物逐个设置）。
+   *
+   * 为什么需要：演示只占**一条**轨道（切人时 `replaceClip` 换数据、不新增轨道），
+   * 于是 `color` 恒为 `TRACK_PALETTE[tracks.length % n]` —— 所有人共用同一个颜色。
+   * 这里让调用方按人物写入一个稳定色，3D 轨迹线与看板色点就取自同一个值。
+   */
+  setColor(id: string, color: number): boolean {
+    const t = this.tracks.find((x) => x.id === id);
+    if (!t || t.color === color) return false;
+    t.color = color;
+    return true;
   }
 
   /**
