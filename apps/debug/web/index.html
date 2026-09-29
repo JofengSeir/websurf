@@ -9,8 +9,9 @@
      * WebSurf-debug — 页面样式（内联单块；构建契约：本工程 KEEP_SINGLE
      * 不含外置 styles.css，故样式必须留在页面里，见 scripts/build-dist.mjs）。
      *
-     * 设计基调：「仪表」主题——石墨青黑底 + 示波器天青单强调色（apps/game 为深海青
-     * 「冲浪」、apps/viewer 为铜金「审片室」，三套令牌不共用色值）。实色块 +
+     * 设计基调：「仪表」主题——暖炭底 + 仪表橙单强调色（2026-09-30 owner 裁决撤
+     * 示波器天青的科幻感；apps/game 为琥珀「莱茵精工」、apps/viewer 为铜金
+     * 「审片室」，三套令牌不共用色值）。实色块 +
      * 1px 边框 + 单强调色 --accent，无动画、无渐变、无装饰性投影；语义色只表状态。
      * 路径图例的三个色点（.lg-render / .lg-tick / .lg-break）与来源徽记色
      * 是数据语义：它们镜像 apps/debug/src/renderer/path-recorder.ts 的
@@ -20,16 +21,16 @@
      * ============================================================ */
     :root {
       color-scheme: dark;
-      --bg: #0f1317;
-      --panel: #151b22;
-      --panel-trans: rgba(21, 27, 34, 0.92);
-      --overlay: rgba(8, 11, 14, 0.62);
-      --border: #2a3440;
-      --border-strong: #3d4b5c;
-      --text: #dbe3ec;
-      --muted: #8593a6;
-      --accent: #5bc0e8;
-      --accent-weak: rgba(91, 192, 232, 0.13);
+      --bg: #131211;
+      --panel: #1a1917;
+      --panel-trans: rgba(26, 25, 23, 0.92);
+      --overlay: rgba(10, 9, 8, 0.62);
+      --border: #302d2a;
+      --border-strong: #4a453f;
+      --text: #e3e0da;
+      --muted: #a39c91;
+      --accent: #d9973f;
+      --accent-weak: rgba(217, 151, 63, 0.13);
       --ok: #7fc98f;
       --err: #e0857b;
       --warn: #d4b26a;
@@ -374,7 +375,7 @@
     .mt-list .mt-row .mt-orphan { color: var(--err); }
     .mt-actions { margin-top: 10px; text-align: right; }
     /* ── 控件细节统一（对齐 game / viewer 的自绘语彙）──────────────────────
-       滚动条：方角、thumb=分隔色、1px 轨道沿、hover 天青为瞬时态（健康日志 /
+       滚动条：方角、thumb=分隔色、1px 轨道沿、hover 仪表橙为瞬时态（健康日志 /
        帧时间列表；侧栏 #sidebar 刻意隐藏滚动条，不动）。勿与标准 scrollbar-width
        并设——Chromium 121+ 会因标准属性存在而忽略 webkit 伪元素。── */
     .health-log::-webkit-scrollbar, .mt-list::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -392,12 +393,12 @@
       padding-right: 20px;
     }
     .ctrl-grid select:focus, .spawn-select:focus { outline: none; border-color: var(--accent); }
-    /* 数值框：去原生上下箭头（默认观感的主源）+ 天青 caret + hover 提边 */
+    /* 数值框：去原生上下箭头（默认观感的主源）+ 仪表橙 caret + hover 提边 */
     .param-num { -moz-appearance: textfield; appearance: textfield; caret-color: var(--accent); }
     .param-num::-webkit-outer-spin-button, .param-num::-webkit-inner-spin-button {
       -webkit-appearance: none; margin: 0; }
     .param-num:hover:not(:focus) { border-color: var(--border-strong); }
-    /* checkbox：自绘（checked = 天青 1px 内嵌刻线），替换 accent-color 原生渲染 */
+    /* checkbox：自绘（checked = 仪表橙 1px 内嵌刻线），替换 accent-color 原生渲染 */
     input[type="checkbox"] {
       appearance: none; -webkit-appearance: none;
       width: 14px; height: 14px; margin: 0; flex: none;
@@ -406,7 +407,7 @@
     }
     input[type="checkbox"]:checked { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
     input[type="checkbox"]:hover { border-color: var(--accent); }
-    /* radio：自绘圆点（checked = 天青心），替换 accent-color 原生渲染 */
+    /* radio：自绘圆点（checked = 仪表橙心），替换 accent-color 原生渲染 */
     input[type="radio"] {
       appearance: none; -webkit-appearance: none;
       width: 13px; height: 13px; margin: 0; flex: none;
@@ -418,7 +419,7 @@
       border-color: var(--accent); background: var(--accent);
       box-shadow: inset 0 0 0 3px var(--bg);
     }
-    /* range：2px 刻度轨道 + 天青圆角游标（webkit/moz 双轨） */
+    /* range：2px 刻度轨道 + 仪表橙圆角游标（webkit/moz 双轨） */
     .ctrl-grid input[type="range"] {
       -webkit-appearance: none; appearance: none;
       height: 16px; background: transparent; cursor: pointer;
@@ -448,7 +449,7 @@
       color: var(--border-strong); letter-spacing: 0.04em;
     }
     details[open] > summary::after { color: var(--accent); }
-    /* 打开态：左缘 2px 天青结构线 + 标题转天青（与 HUD 左缘结构线同语彙） */
+    /* 打开态：左缘 2px 仪表橙结构线 + 标题转仪表橙（与 HUD 左缘结构线同语彙） */
     details[open] > summary {
       color: var(--accent);
       box-shadow: inset 2px 0 0 var(--accent);
