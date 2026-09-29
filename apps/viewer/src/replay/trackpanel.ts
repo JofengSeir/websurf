@@ -19,14 +19,14 @@ import type { Track } from './types.js';
 export interface TrackPanelOptions {
   /**
    * 轨道属性变化（显隐 / 偏移 / 重命名 / 跟随 / 移除 / 位置归零）后回调，
-   * 供 `apps/viewer/src/app.ts` 重建 3D 可视化、时间轴与录像信息条；列表自身已由本类重绘。
+   * 供 `apps/viewer/src/app.ts` 重建 3D 可视化、时间轴与记录信息条；列表自身已由本类重绘。
    */
   onChange: () => void;
   /** 轨道数变化通知（每次 `refresh` 都按当前轨道数回调）。本仓无调用方传入。 */
   onPresence?: (count: number) => void;
   /**
    * 清空（含逐条移除到零）回调，接到 `apps/viewer/src/app.ts` 的 `onClearAll`
-   * （清播放器、重建可视化、清 HUD 录像提醒行）。缺省时走本类的本地自清兜底。
+   * （清播放器、重建可视化、清 HUD 记录提醒行）。缺省时走本类的本地自清兜底。
    */
   onCleared?: () => void;
 }
@@ -122,7 +122,7 @@ export class TrackPanel {
       this.summaryEl.style.display = 'none';
       this.batchRow.style.display = 'none';
       this.listEl.appendChild(
-        el('div', 'note note-info', '还没有轨迹——录像页「选择录像文件…」或直接把 .replay 拖进窗口'),
+        el('div', 'note note-info', '还没有轨迹——记录页「选择记录文件…」或直接把 .replay 拖进窗口'),
       );
       return;
     }
@@ -236,7 +236,7 @@ export class TrackPanel {
       this.player.removeTrack(track.id);
       this.refresh();
       this.opts.onChange();
-      // 逐条移除到零也接回 app 的清空回调（清可视化并清空 HUD 录像提醒行）
+      // 逐条移除到零也接回 app 的清空回调（清可视化并清空 HUD 记录提醒行）
       if (this.player.tracks.tracks.length === 0) this.opts.onCleared?.();
       this.note(`已移除「${track.name}」`, 'info');
     });

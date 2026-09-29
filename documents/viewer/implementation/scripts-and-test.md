@@ -11,7 +11,7 @@
 | `apps/viewer/scripts/build-dist.mjs` | 把 `web/` 产物与源码切片装配进 `apps/viewer/dist/`；single（默认）与 multi（`--multi`）两种形态 | `apps/viewer/scripts/build-dist.mjs:221`、`apps/viewer/scripts/build-dist.mjs:46` |
 | `apps/viewer/scripts/check-wasm-api.mjs` | WASM 契约检查：`pkg/websurf_viewer_wasm.d.ts` 导出面 + TS 导入反向覆盖；检查引擎在共享层 | `apps/viewer/scripts/check-wasm-api.mjs:30`、`apps/viewer/scripts/check-wasm-api.mjs:38` |
 | `apps/viewer/scripts/dist-README.md` | 产物说明（prose 资产），被 `build-dist.mjs` 复制成 `dist/README.md` | `apps/viewer/scripts/build-dist.mjs:228` |
-| `apps/viewer/test/replay-selftest.ts` | 录像管线核心链路自检（Node，无 DOM）：角度工具、真实文件解析、坐标映射、播放器采样与 A-B 区间、多轨迹、人工变换、异常输入 | `apps/viewer/test/replay-selftest.ts:31`、`apps/viewer/test/replay-selftest.ts:44` |
+| `apps/viewer/test/replay-selftest.ts` | 记录管线核心链路自检（Node，无 DOM）：角度工具、真实文件解析、坐标映射、播放器采样与 A-B 区间、多轨迹、人工变换、异常输入 | `apps/viewer/test/replay-selftest.ts:31`、`apps/viewer/test/replay-selftest.ts:44` |
 | `apps/viewer/test/smoke-cdp.mjs` | 用 CDP 驱动本机 Edge（headless + SwiftShader）跑页面链路，抓 typecheck 与 Node 自检覆盖不到的接线问题 | `apps/viewer/test/smoke-cdp.mjs:54`、`apps/viewer/test/smoke-cdp.mjs:122` |
 | `apps/viewer/test/node-shims.d.ts` | 最小 Node 类型面：只声明 `node:fs` 的 `readFileSync` | `apps/viewer/test/node-shims.d.ts:7` |
 | `apps/viewer/web/index.html` | 页面骨架：全部 DOM id、帮助浮层、资源 404 兜底脚本、module script 入口 | `apps/viewer/web/index.html:94`、`apps/viewer/web/index.html:111` |
@@ -31,9 +31,9 @@
 | 全量重建 | 先 `cleanDist` 清空 dist，写完再 `cleanStale` 删掉不在保留清单里的残留 | `apps/viewer/scripts/build-dist.mjs:223`、`apps/viewer/scripts/build-dist.mjs:344` |
 | 公共产物 | `.nojekyll`（空文件）、`README.md`（复制自 `scripts/dist-README.md`）、`serve.py`（内联模板，默认端口 8101）、`play.cmd` / `play.sh`（内联模板） | `apps/viewer/scripts/build-dist.mjs:227` 到 `apps/viewer/scripts/build-dist.mjs:232` |
 | `.cmd` 必须 CRLF | 写盘前把 `PLAY_CMD` 的换行统一成 `\r\n` | `apps/viewer/scripts/build-dist.mjs:231` |
-| single 内嵌 | WASM 转 base64、录像 Worker 打成 IIFE，经 `writeEmbeddedPreamble` 一起内嵌进 `app.js`；`index.html` 由 `rewriteIndexToClassicScript` 改写成 classic script | `apps/viewer/scripts/build-dist.mjs:310` 到 `apps/viewer/scripts/build-dist.mjs:338` |
+| single 内嵌 | WASM 转 base64、记录 Worker 打成 IIFE，经 `writeEmbeddedPreamble` 一起内嵌进 `app.js`；`index.html` 由 `rewriteIndexToClassicScript` 改写成 classic script | `apps/viewer/scripts/build-dist.mjs:310` 到 `apps/viewer/scripts/build-dist.mjs:338` |
 | multi 预缓存 | 预缓存清单只收 dist 里实际存在的文件；缓存名由「清单 + 各文件内容」的 sha256 前 12 位派生；占位符未被替换即抛错 | `apps/viewer/scripts/build-dist.mjs:264` 到 `apps/viewer/scripts/build-dist.mjs:300` |
-| 示例录像随构建复制 | 源路径取仓库根的 `test/maps/surf_null_4.replay`，不存在时告警并跳过（不使构建失败） | `apps/viewer/scripts/build-dist.mjs:236` 到 `apps/viewer/scripts/build-dist.mjs:243` |
+| 示例记录随构建复制 | 源路径取仓库根的 `test/maps/surf_null_4.replay`，不存在时告警并跳过（不使构建失败） | `apps/viewer/scripts/build-dist.mjs:236` 到 `apps/viewer/scripts/build-dist.mjs:243` |
 | 契约检查两面 | 正向：`pkg` 的 `.d.ts` 必须导出 `initSync` 与 `class BspProcessor`；反向：`src/` 里对 pkg 的导入符号必须都在导出面内 | `apps/viewer/scripts/check-wasm-api.mjs:38`、`apps/viewer/scripts/check-wasm-api.mjs:39` |
 | 自检的失败语义 | 每条 `check` 失败即累加 `failures`，末尾按 `failures === 0` 决定退出码；真实夹具缺失时打印 `SKIP` 且不计入失败 | `apps/viewer/test/replay-selftest.ts:31` 到 `apps/viewer/test/replay-selftest.ts:38`、`apps/viewer/test/replay-selftest.ts:177` 到 `apps/viewer/test/replay-selftest.ts:182` |
 | 自检覆盖的真实文件字段 | 头部逐字段常量比对（版本、地图基础名、轨道、三段帧数、成绩、steamID、tickrate、zoneOffset）与帧区起点、flags 取值 | `apps/viewer/test/replay-selftest.ts:193` 到 `apps/viewer/test/replay-selftest.ts:210`、`apps/viewer/test/replay-selftest.ts:233`、`apps/viewer/test/replay-selftest.ts:262` |
@@ -48,8 +48,8 @@
 
 ## 已知缺口
 
-1. **真实夹具路径跨三处失效**：自检的 `FIXTURE_URL` 指向 `test/maps/surf_null_4.replay`（`apps/viewer/test/replay-selftest.ts:58`），冒烟的 `LOCAL_REPLAY` 指向同一路径（`apps/viewer/test/smoke-cdp.mjs:35`），打包脚本的示例源同路径（`apps/viewer/scripts/build-dist.mjs:237`）；实测 `test/maps/` 下只有四个 `.bsp` 文件，同名同尺寸（53,365 B）的录像在 `test/replay/surf_null_4.replay`。后果：自检的「真实文件逐字节」段与依赖它的段落走 SKIP（`apps/viewer/test/replay-selftest.ts:181`）、冒烟的 `[3]` 起整段走 SKIP（`apps/viewer/test/smoke-cdp.mjs:326`）、构建打一条示例缺失告警（`apps/viewer/scripts/build-dist.mjs:241`）。
-2. **dist 里已有一份示例录像，但它无法由当前源码路径重新产出**（本次读码发现）：`apps/viewer/dist/assets/maps/surf_null_4.replay` 实际存在，尺寸与 `test/replay/surf_null_4.replay` 相同；而构建脚本只从 `test/maps/` 取源（`apps/viewer/scripts/build-dist.mjs:236` 到 `apps/viewer/scripts/build-dist.mjs:243`）⇒ 下一次 `npm run build:dist` 会告警跳过该示例并从 dist 中清掉它（`cleanDist` 先清空，`apps/viewer/scripts/build-dist.mjs:223`）。
+1. **真实夹具路径跨三处失效**：自检的 `FIXTURE_URL` 指向 `test/maps/surf_null_4.replay`（`apps/viewer/test/replay-selftest.ts:58`），冒烟的 `LOCAL_REPLAY` 指向同一路径（`apps/viewer/test/smoke-cdp.mjs:35`），打包脚本的示例源同路径（`apps/viewer/scripts/build-dist.mjs:237`）；实测 `test/maps/` 下只有四个 `.bsp` 文件，同名同尺寸（53,365 B）的记录在 `test/replay/surf_null_4.replay`。后果：自检的「真实文件逐字节」段与依赖它的段落走 SKIP（`apps/viewer/test/replay-selftest.ts:181`）、冒烟的 `[3]` 起整段走 SKIP（`apps/viewer/test/smoke-cdp.mjs:326`）、构建打一条示例缺失告警（`apps/viewer/scripts/build-dist.mjs:241`）。
+2. **dist 里已有一份示例记录，但它无法由当前源码路径重新产出**（本次读码发现）：`apps/viewer/dist/assets/maps/surf_null_4.replay` 实际存在，尺寸与 `test/replay/surf_null_4.replay` 相同；而构建脚本只从 `test/maps/` 取源（`apps/viewer/scripts/build-dist.mjs:236` 到 `apps/viewer/scripts/build-dist.mjs:243`）⇒ 下一次 `npm run build:dist` 会告警跳过该示例并从 dist 中清掉它（`cleanDist` 先清空，`apps/viewer/scripts/build-dist.mjs:223`）。
 3. **冒烟缺省 URL 指向另一个工程的 dev 端口**：缺省 `SMOKE_URL` 是 `http://127.0.0.1:8080/web/index.html`（`apps/viewer/test/smoke-cdp.mjs:32`），而本工程 `dev` 的端口是 8100（`apps/viewer/package.json:18`）⇒ 不设环境变量时只在导航处失败，报出的原因是「dev server 起了吗」而不是端口写错。
 4. **冒烟的按键断言与当前 UI 不一致**：断言面按键数为 6、标签集为 `{W,A,S,D,跳,蹲}`（`apps/viewer/test/smoke-cdp.mjs:415` 起），而遥测 HUD 实测渲染八键 Q / W / E / A / S / D / 蹲 / 跳（`apps/viewer/src/ui/telemetry.ts:50` 到 `apps/viewer/src/ui/telemetry.ts:59`）⇒ 该断言在当前 UI 下不成立。
 5. **冒烟的三条静态断言只对 single 产物成立**：classic `./app.js`、无 `<script type="module"`、dist 根无 `worker.js` / `*.wasm`（`apps/viewer/test/smoke-cdp.mjs:138`、`apps/viewer/test/smoke-cdp.mjs:139`、`apps/viewer/test/smoke-cdp.mjs:143`），而 multi 产物的清单本来就要收 `worker.js` 与外置 wasm（`apps/viewer/scripts/build-dist.mjs:61`）⇒ 用 `--multi` 产物跑冒烟时这三条必失败。

@@ -839,7 +839,7 @@ console.log('\n[8] Shavit .replay 异常输入（明确报错 / 兼容路径）'
 }
 
 console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
-// ── Source `.dem`（演示录像）路径 ──────────────────────────────────────
+// ── Source `.dem`（录像）路径 ──────────────────────────────────────
 // 夹具 test/replay/*.dem 是 gitignore 的样例，缺失时整段跳过（不影响其余用例）。
 {
   // 路径解析：`test:replay` 会先把本文件打包到 `apps/viewer/.tmp/replay-selftest/` 再跑，
@@ -894,13 +894,13 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
     if (dem) break;
   }
   if (!dem) {
-    console.log('（跳过 .dem 段：test/replay 下没有演示录像夹具）');
+    console.log('（跳过 .dem 段：test/replay 下没有录像夹具）');
   } else {
     const expect = demName ? DEM_EXPECT[demName] : undefined;
     const expectNote = expect ? '（已知夹具，走精确断言）' : '（未知夹具，只验通用不变量）';
     console.log('（.dem 夹具：' + demName + expectNote + '）');
     const r = parseSourceDemo(dem, { sampleMode: 'posed' });
-    check('DEM 演示协议 = 3', r.header.demoprotocol === 3, String(r.header.demoprotocol));
+    check('DEM 录像协议 = 3', r.header.demoprotocol === 3, String(r.header.demoprotocol));
     check('DEM 网络协议 = 24', r.header.networkprotocol === 24, String(r.header.networkprotocol));
     check('DEM 发送表非空', r.dataTables.tables.size > 200, String(r.dataTables.tables.size));
     if (expect) {

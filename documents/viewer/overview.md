@@ -6,7 +6,7 @@
 
 ## 工程定位
 
-`apps/viewer` 是受控范围（`apps/debug` + `apps/game` + `apps/viewer` + `src/`）里的**只读查看器**：把 `.bsp` 地图解析成 GLB 场景供自由飞行观察，并把 Shavit 原生 `.replay` 录像按帧自身坐标播放出来做对比。
+`apps/viewer` 是受控范围（`apps/debug` + `apps/game` + `apps/viewer` + `src/`）里的**只读查看器**：把 `.bsp` 地图解析成 GLB 场景供自由飞行观察，并把 Shavit 原生 `.replay` 记录按帧自身坐标播放出来做对比。
 
 它与其他两个工程的定位差别由三处实测界定：
 
@@ -22,14 +22,14 @@
 |---|---|---|
 | `apps/viewer/src/app.ts` | 主线程装配入口：画布、场景、飞行相机、面板、拖拽与 URL 深链、帧循环、`globalThis.viewer` 接口 | `apps/viewer/src/app.ts:33`、`apps/viewer/src/app.ts:478` |
 | `apps/viewer/src/core/` | BSP 加载与 WASM 懒初始化、three 场景与光照模式、自由飞行相机、位姿、常量、DOM 构件、出生点解析 | `apps/viewer/src/core/bsp.ts:74`、`apps/viewer/src/core/scene.ts:356`、`apps/viewer/src/core/fly.ts:84`、`apps/viewer/src/core/spawn.ts:96` |
-| `apps/viewer/src/replay/` | `.replay` 原生解析、导入与 Worker 协议、播放器与采样、多轨道容器、3D 呈现、录像面板、轨迹列表、时间轴、人工变换 | `apps/viewer/src/replay/shavit-replay.ts:284`、`apps/viewer/src/replay/player.ts:193`、`apps/viewer/src/replay/timeline.ts:276` |
-| `apps/viewer/src/ui/` | HUD 与引导层、地图信息与出生点导航、录像信息条、遥测 HUD | `apps/viewer/src/ui/hud.ts:21`、`apps/viewer/src/ui/mapinfo.ts:129`、`apps/viewer/src/ui/telemetry.ts:103` |
+| `apps/viewer/src/replay/` | `.replay` 原生解析、导入与 Worker 协议、播放器与采样、多轨道容器、3D 呈现、记录面板、轨迹列表、时间轴、人工变换 | `apps/viewer/src/replay/shavit-replay.ts:284`、`apps/viewer/src/replay/player.ts:193`、`apps/viewer/src/replay/timeline.ts:276` |
+| `apps/viewer/src/ui/` | HUD 与引导层、地图信息与出生点导航、记录信息条、遥测 HUD | `apps/viewer/src/ui/hud.ts:21`、`apps/viewer/src/ui/mapinfo.ts:129`、`apps/viewer/src/ui/telemetry.ts:103` |
 | `apps/viewer/src/renderer/` | 离线烘焙静态光照的 three 侧落地（RGBExp32 图集解码注入 + prop 三级光照路由） | `apps/viewer/src/renderer/lightmap-shader.ts:482`、`apps/viewer/src/renderer/lightmap-shader.ts:374` |
-| `apps/viewer/src/worker/` | 录像解析 Worker 源码（esbuild 打成 `web/worker.js`） | `apps/viewer/src/worker/main.ts:46` |
+| `apps/viewer/src/worker/` | 记录解析 Worker 源码（esbuild 打成 `web/worker.js`） | `apps/viewer/src/worker/main.ts:46` |
 | `apps/viewer/src/wasm.d.ts` | 把 `pkg/websurf_viewer_wasm.js` 的导出整体转出，供 `./wasm.js` 引用类型；本工程内零导入点 | `apps/viewer/src/wasm.d.ts:13` |
 | `apps/viewer/crates/wasm/` | WASM 薄导出层（Rust）：`BspProcessor` 类 | `apps/viewer/crates/wasm/src/lib.rs:327` |
 | `apps/viewer/scripts/` | 打包（single / multi）与 WASM 契约检查 | `apps/viewer/scripts/build-dist.mjs:221`、`apps/viewer/scripts/check-wasm-api.mjs:38` |
-| `apps/viewer/test/` | Node 侧录像管线自检、CDP 冒烟、最小 Node 类型面 | `apps/viewer/test/replay-selftest.ts:31`、`apps/viewer/test/smoke-cdp.mjs:122` |
+| `apps/viewer/test/` | Node 侧记录管线自检、CDP 冒烟、最小 Node 类型面 | `apps/viewer/test/replay-selftest.ts:31`、`apps/viewer/test/smoke-cdp.mjs:122` |
 | `apps/viewer/web/` | 页面骨架、样式、dev 运行产物（`app.js` / `worker.js` / `websurf_viewer_wasm_bg.wasm`）、`coi-serviceworker.js` | `apps/viewer/web/index.html:111`、`apps/viewer/web/styles.css:24` |
 | `apps/viewer/pkg/` | wasm-pack 产物（gitignore 覆盖，`apps/viewer/package.json:8` 生成） | `apps/viewer/src/core/bsp.ts:17` |
 | `apps/viewer/dist/` | 打包产物目录（`apps/viewer/scripts/build-dist.mjs:44`） | `apps/viewer/scripts/build-dist.mjs:223` |
@@ -71,7 +71,7 @@
 
 - dev 侧产物在 `apps/viewer/web/`，三个文件都被 `apps/viewer/.gitignore:2` 到 `apps/viewer/.gitignore:4` 覆盖。
 - 分发包在 `apps/viewer/dist/`，形态由 `apps/viewer/scripts/build-dist.mjs:46` 的 `--multi` 开关决定：默认 **single 产物**（依据 `apps/viewer/scripts/build-dist.mjs:51` 的 `KEEP_SINGLE`），加 `--multi` 出 **multi 产物**（依据 `apps/viewer/scripts/build-dist.mjs:61` 的 `KEEP_MULTI`）。两种形态都写同一个 `dist/`，后跑的那次覆盖前一次（`apps/viewer/scripts/build-dist.mjs:223` 的 `cleanDist`）。
-- single 产物内嵌 WASM(base64) 与录像 Worker 代码，`index.html` 被改写成 classic `<script>`（`apps/viewer/scripts/build-dist.mjs:335`）；multi 产物另写外置 wasm、`wasm-embedded.js` 与注入了预缓存清单的 `coi-serviceworker.js`（`apps/viewer/scripts/build-dist.mjs:274`）。
+- single 产物内嵌 WASM(base64) 与记录 Worker 代码，`index.html` 被改写成 classic `<script>`（`apps/viewer/scripts/build-dist.mjs:335`）；multi 产物另写外置 wasm、`wasm-embedded.js` 与注入了预缓存清单的 `coi-serviceworker.js`（`apps/viewer/scripts/build-dist.mjs:274`）。
 
 ## 启动链
 
@@ -97,5 +97,5 @@
 | 采样二分要求时间轴单调不减 | `.replay` 路径由 `t(i) = (i − preFrames) / tickrate` 与 `tickrate > 0` 保证（解析期校验） | `apps/viewer/src/replay/sampling.ts:26`、`apps/viewer/src/replay/shavit-replay.ts:350` |
 | 「Worker 坏掉」是单向的 | `ensureWorker` 一旦置 `workerBroken` 就不再重试，后续全部走主线程 | `apps/viewer/src/replay/importer.ts:78`、`apps/viewer/src/replay/importer.ts:104` |
 | Worker 回传后本地 buffer 失效 | `t` / `pos` / `ang` 的 buffer 必进 transfer 列表，`vel` / `buttons` 存在才加 | `apps/viewer/src/worker/main.ts:88` 到 `apps/viewer/src/worker/main.ts:90` |
-| 录像播放基准 = 帧自身坐标 | 解码只做轴序/朝向映射，平移与旋转只在 `RuleConfig.transform` 存在且非恒等时叠加 | `apps/viewer/src/replay/build.ts:29`、`apps/viewer/src/replay/types.ts:55` |
+| 记录播放基准 = 帧自身坐标 | 解码只做轴序/朝向映射，平移与旋转只在 `RuleConfig.transform` 存在且非恒等时叠加 | `apps/viewer/src/replay/build.ts:29`、`apps/viewer/src/replay/types.ts:55` |
 | 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `apps/viewer/src/renderer/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:245` |

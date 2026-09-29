@@ -15,9 +15,9 @@
 | `documents/viewer/implementation/app.md` | 主线程装配入口 `apps/viewer/src/app.ts` 与 wasm 类型入口 `apps/viewer/src/wasm.d.ts` |
 | `documents/viewer/implementation/core.md` | `apps/viewer/src/core/**`：BSP 加载、场景、自由飞行相机、位姿、常量、DOM 构件、出生点解析 |
 | `documents/viewer/implementation/replay.md` | `apps/viewer/src/replay/**`：`.replay` 原生解析、导入与 Worker 协议、播放器与采样、多轨道、3D 呈现、面板与时间轴 |
-| `documents/viewer/implementation/ui.md` | `apps/viewer/src/ui/**`：HUD 与引导层、地图信息与出生点导航、录像信息条、遥测 HUD |
+| `documents/viewer/implementation/ui.md` | `apps/viewer/src/ui/**`：HUD 与引导层、地图信息与出生点导航、记录信息条、遥测 HUD |
 | `documents/viewer/implementation/renderer.md` | `apps/viewer/src/renderer/**`：静态光照着色器注入与 prop 三级光照路由（三工程同构副本） |
-| `documents/viewer/implementation/worker.md` | `apps/viewer/src/worker/main.ts`：录像解析 Worker 的源码侧实现 |
+| `documents/viewer/implementation/worker.md` | `apps/viewer/src/worker/main.ts`：记录解析 Worker 的源码侧实现 |
 | `documents/viewer/implementation/wasm.md` | `apps/viewer/crates/wasm/**` 与两份 `Cargo.toml`：WASM 薄导出层 |
 | `documents/viewer/implementation/scripts-and-test.md` | `apps/viewer/scripts/**`（打包与契约检查）、`apps/viewer/test/**`（Node 自检与 CDP 冒烟）、`apps/viewer/web/index.html`、`apps/viewer/{dev,build,start}.cmd`、两份 `.gitignore` |
 
@@ -32,7 +32,7 @@
 | 工程清单 | `apps/viewer/package.json:7` | 11 个 script、依赖面、引擎要求、dev 端口 8100 |
 | 主线程入口 | `apps/viewer/src/app.ts:33` | 画布获取、装配顺序、帧循环、对外 `globalThis.viewer` 接口 |
 | 地图加载 | `apps/viewer/src/core/bsp.ts:74` | `ensureWasm` 三条取值路径、`loadBspFile` 三步顺序 |
-| 录像面板 | `apps/viewer/src/replay/panel.ts:281` | 导入入口 `runImport`、规则持久化、映射切换与变换微调 |
+| 记录面板 | `apps/viewer/src/replay/panel.ts:281` | 导入入口 `runImport`、规则持久化、映射切换与变换微调 |
 | 解析 Worker | `apps/viewer/src/worker/main.ts:46` | `ctx.onmessage` → `handle` → 带 transfer 列表回包 |
 | WASM 导出层 | `apps/viewer/crates/wasm/src/lib.rs:339` | `BspProcessor::new` 与三个方法 |
 | 打包脚本 | `apps/viewer/scripts/build-dist.mjs:221` | single / multi 两种产物形态与保留清单 |

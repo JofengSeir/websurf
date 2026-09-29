@@ -11,7 +11,7 @@
 | 页面布局 | 左侧边栏（多个 `<details>` 分区）＋ 右侧预览区 | `apps/game`：全屏画布 + 单块 `#panel` 覆盖层 | 本工程 `apps/debug/web/index.html:489`（侧边栏）、`apps/debug/web/index.html:856`（预览区）；game `apps/game/web/index.html:72`（`#panel`）、`apps/game/web/index.html:27`（画布） |
 | 页面布局 | 同上 | `apps/viewer`：顶栏 + 侧栏标签页（`#tabs` / `#pane-map` / `#pane-replay`）+ 底部 `#dock` | 本工程 `apps/debug/web/index.html:489`；viewer `apps/viewer/web/index.html:52`（顶栏）、`apps/viewer/web/index.html:76`（侧栏）、`apps/viewer/web/index.html:86`（dock） |
 | 物理运行位置 | **Worker 权威物理** + **主线程渲染物理（`predPhys`）** 双线 | `apps/game`：同构双线（Worker 权威 + 主线程渲染物理） | 本工程 `apps/debug/src/worker/main.ts:455`、`apps/debug/src/renderer/renderer-main.ts:709`；game `apps/game/src/worker/main.ts:451`、`apps/game/src/renderer/renderer-main.ts:938` |
-| 物理运行位置 | 同上 | `apps/viewer`：**无物理**（离线解析 + 纯视觉），Worker 只做录像解析 | 本工程 `apps/debug/src/renderer/renderer-main.ts:30`（引入 `PhysWorld`）；viewer `apps/viewer/src/app.ts:6`（定位为纯视觉、不引入物理与碰撞） |
+| 物理运行位置 | 同上 | `apps/viewer`：**无物理**（离线解析 + 纯视觉），Worker 只做回放解析 | 本工程 `apps/debug/src/renderer/renderer-main.ts:30`（引入 `PhysWorld`）；viewer `apps/viewer/src/app.ts:6`（定位为纯视觉、不引入物理与碰撞） |
 | 共享状态通道 | `createMainSharedState`：SAB 通道优先，缺 `SharedArrayBuffer` 时落 postMessage 回退 | `apps/game`：同一函数、同一分支条件 | 本工程 `apps/debug/src/app.ts:314`、`apps/debug/src/app.ts:277`；game `apps/game/src/app.ts:158`、`apps/game/src/app.ts:102` |
 | 共享状态通道 | 同上 | `apps/viewer`：不做通道选择（无物理，不需要共享内存） | 本工程 `apps/debug/src/app.ts:325`；viewer `apps/viewer/src/app.ts:37` |
 | 配置来源 | 工程自带 `apps/debug/src/config.ts`：`DEFAULT_CONFIG` + `createConfig()` 深拷贝 | `apps/game`：同样自带 `apps/game/src/config.ts`（结构不同、字段集不同） | 本工程 `apps/debug/src/config.ts:181`、`apps/debug/src/config.ts:259`；game `apps/game/src/config.ts:173`、`apps/game/src/config.ts:235` |

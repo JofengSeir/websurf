@@ -232,7 +232,7 @@ export interface ShavitParseOptions {
    */
   timestampFallback?: number | null;
   /**
-   * 坐标映射切换：录像与 viewer 坐标系不一致时的逃生口。
+   * 坐标映射切换：记录与 viewer 坐标系不一致时的逃生口。
    * 缺省 = shavit 定标映射（pos 取 [y, z, x]、yaw = wrap(src + 180)、pitch 取反）；
    * `raw` = 帧内原始值直读。只影响解码输出，不影响头字段与时间轴。
    */

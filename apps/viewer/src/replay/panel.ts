@@ -1,5 +1,5 @@
 /**
- * 录像面板（右侧「录像」标签页）：导入、坐标映射切换、轨迹列表、调整工具四段。
+ * 记录面板（右侧「记录」标签页）：导入、坐标映射切换、轨迹列表、调整工具四段。
  *
  * 职责边界：本文件负责人机交互与规则持久化，不做解析（交给
  * `apps/viewer/src/replay/importer.ts` 的 `ReplayImporter`）、不改轨道结构
@@ -86,7 +86,7 @@ export class ReplayPanel {
     fileInput.type = 'file';
     fileInput.accept = '.replay,.dem';
     fileInput.style.display = 'none';
-    // 引导层的「导入录像」按钮以 `for="replayFile"` 触发本输入（首访用户在引导层即可导入）
+    // 引导层的「导入记录」按钮以 `for="replayFile"` 触发本输入（首访用户在引导层即可导入）
     fileInput.id = 'replayFile';
     fileInput.addEventListener('change', () => {
       const f = fileInput.files?.[0];
@@ -97,9 +97,9 @@ export class ReplayPanel {
 
     buttonRow(fileBody, [
       {
-        label: '选择录像文件…',
+        label: '选择记录文件…',
         onClick: () => fileInput.click(),
-        title: '.replay = Shavit 原生录像，零配置直入（帧自身坐标直接播放）',
+        title: '.replay = Shavit 原生记录，零配置直入（帧自身坐标直接播放）',
       },
     ]);
 
@@ -256,7 +256,7 @@ export class ReplayPanel {
   // ── 导入 ──────────────────────────────────────────────────────────
 
   /**
-   * 载入一份录像文件：进行中（`busy`）则只写提示并返回；否则记下文件、把 `lastTrackId`
+   * 载入一份记录文件：进行中（`busy`）则只写提示并返回；否则记下文件、把 `lastTrackId`
    * 清空（于是本次导入追加新轨道），写两条「正在解析」提示后开始导入。
    * 面板按钮、主窗口拖拽（`apps/viewer/src/app.ts` 的 drop 处理）与 URL 深链共用本入口。
    */
@@ -267,8 +267,8 @@ export class ReplayPanel {
     }
     this.file = file;
     this.lastTrackId = null;
-    this.fileNote(`正在解析录像 ${file.name} …`);
-    this.opts.onStatus(`正在解析录像 ${file.name} …`);
+    this.fileNote(`正在解析记录 ${file.name} …`);
+    this.opts.onStatus(`正在解析记录 ${file.name} …`);
     await this.runImport(true);
   }
 
@@ -282,7 +282,7 @@ export class ReplayPanel {
    */
   private async runImport(explicit: boolean): Promise<void> {
     if (!this.file) {
-      if (explicit) this.fileNote('还没有选择录像文件', 'warn');
+      if (explicit) this.fileNote('还没有选择记录文件', 'warn');
       return;
     }
     if (this.busy) {
@@ -316,9 +316,9 @@ export class ReplayPanel {
       const big = result.clips.some((c) => c.count >= LARGE_CLIP_FRAMES);
       const extra = result.clips.length > 1 ? `，共 ${result.clips.length} 条轨迹` : '';
       const d = result.demo;
-      // Source `.dem`：另起一段列出解析出来的录像元信息与诊断（面板不替用户猜可信度，原样展示）
+      // Source `.dem`：另起一段列出解析出来的记录元信息与诊断（面板不替用户猜可信度，原样展示）
       const demoText = d
-        ? `【Source 演示录像】地图 ${d.map}（协议 ${d.networkProtocol}）｜` +
+        ? `【Source 录像】地图 ${d.map}（协议 ${d.networkProtocol}）｜` +
           `${d.seconds.toFixed(1)} s / ${d.ticks.toLocaleString('en-US')} tick（约 ${d.tickRate.toFixed(1)} tick/s）｜` +
           `字符串表 ${d.stringTables} 张、类别 ${d.classes} 个｜包解析 ` +
           `${d.packetOk.toLocaleString('en-US')}/${d.packetTotal.toLocaleString('en-US')}｜` +
@@ -339,7 +339,7 @@ export class ReplayPanel {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.fileNote(msg, 'error');
-      this.opts.onStatus('录像导入失败（见右侧面板）');
+      this.opts.onStatus('记录导入失败（见右侧面板）');
     } finally {
       this.busy = false;
     }

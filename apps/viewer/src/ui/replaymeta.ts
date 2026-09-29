@@ -1,5 +1,5 @@
 /**
- * 录像信息条（底部 dock 上层）：`.replay` 头部元信息的常驻展示位。
+ * 记录信息条（底部 dock 上层）：`.replay` 头部元信息的常驻展示位。
  *
  * 数据源 = 跟随轨道的 `Clip.meta`（类型契约见 `apps/viewer/src/replay/types.ts` 的
  * `ReplayHeaderMeta`，由 `apps/viewer/src/replay/shavit-replay.ts` 的 `parseShavitReplay` 产出）。
@@ -40,7 +40,7 @@ export class ReplayMetaPanel {
     dot.style.background = '#' + track.color.toString(16).padStart(6, '0');
     dot.title = '轨迹配色（与轨迹列表一致）';
     const name = el('span', undefined, track.name);
-    name.title = '录像信息条展示跟随轨道的头部元信息（轨迹列表「◎」可切换）';
+    name.title = '记录信息条展示跟随轨道的头部元信息（轨迹列表「◎」可切换）';
     wrap.append(dot, name);
     return wrap;
   }

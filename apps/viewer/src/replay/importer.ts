@@ -1,5 +1,5 @@
 /**
- * 录像导入入口：优先把解析交给 Worker（避免长时间占用主线程），Worker 不可用或启动失败时
+ * 回放导入入口：优先把解析交给 Worker（避免长时间占用主线程），Worker 不可用或启动失败时
  * 自动回退到主线程做同一套解析；两条路径都只接受 Shavit 原生 `.replay`。
  *
  * 数据流：`File` + `RuleConfig` → （Worker 或主线程）`parseShavitReplay` →
@@ -56,7 +56,7 @@ export interface ImportResult {
 
 /** Source `.dem` 的解析摘要（面板展示用；字段全部取自 `DemoParseResult`，不做二次推算）。 */
 export interface DemoImportInfo {
-  /** 演示录像内的地图名（`DemoHeader.mapName`）。 */
+  /** 录像内的地图名（`DemoHeader.mapName`）。 */
   map: string;
   /** 网络协议号（CS:S / Orange Box 为 24）。 */
   networkProtocol: number;
@@ -171,7 +171,7 @@ export class ReplayImporter {
   }
 
   /**
-   * 导入一份录像并生成 `Clip`：先试 Worker，`send` 抛哨兵错误或 `workerBroken` 已置位时
+   * 导入一份记录 / 录像并生成 `Clip`：先试 Worker，`send` 抛哨兵错误或 `workerBroken` 已置位时
    * 改走 `importOnMain`（同源解析）；其余异常原样上抛。
    *
    * `file` 为 null 时交由解析侧复用自己缓存的上一份文件——本仓唯一调用点
@@ -184,7 +184,7 @@ export class ReplayImporter {
     name: string,
     onProgress?: ProgressFn,
   ): Promise<ImportResult> {
-    // Source `.dem` 演示录像走独立的原生解析路径，且**不经 Worker**（Worker 协议只承载单一
+    // Source `.dem` 录像走独立的原生解析路径，且**不经 Worker**（Worker 协议只承载单一
     // Shavit 载荷）；嗅探只看 8 字节魔数 `HL2DEMO\0`，不影响 `.replay` 路径。
     if (file && (await fileLooksLikeSourceDemo(file))) {
       return this.importDemoOnMain(file, rule, name, onProgress);
@@ -253,7 +253,7 @@ export class ReplayImporter {
     }
     const h = result.header;
     warnings.unshift(
-      `Source 演示录像：协议 ${h.networkprotocol}、地图 ${h.mapName}、` +
+      `Source 录像：协议 ${h.networkprotocol}、地图 ${h.mapName}、` +
         `${h.playbackTicks} tick / ${h.playbackTime.toFixed(1)}s；` +
         `包 ${result.stats.packetsParsed}/${result.stats.packetsParsed + result.stats.packetsFailed} 解析成功；` +
         `采出 ${clips.length} 条实体轨迹`,

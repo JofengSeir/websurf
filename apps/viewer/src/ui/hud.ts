@@ -4,7 +4,7 @@
  * 三条状态行的角色分工：
  * - `#pose`：只读位姿读数（`apps/viewer/src/app.ts` 的 `poseText` 格式化后写入）；
  * - `#bspStatus`：地图域（解析进度 / 成功摘要 / 失败提示）；
- * - `#replayStatus`：录像域（跨面提醒 + 录像临时消息）。
+ * - `#replayStatus`：回放域（跨面提醒 + 导入临时消息）。
  * 两行临时消息走各自的 flash 语义：先写入临时文本，`ms` 毫秒后**只有该行仍是这条临时文本**
  * 时才回写持久文本（期间被新的持久文本或新的 flash 改写则旧定时器不再回写）；
  * 传空字符串则立即恢复持久文本。
@@ -82,7 +82,7 @@ export class Hud {
     }, ms);
   }
 
-  // ── 录像提醒行（`#replayStatus`：跨面提醒 + 录像域临时消息）────────
+  // ── 回放提醒行（`#replayStatus`：跨面提醒 + 回放域临时消息）────────
   setReplayStatus(text: string): void {
     window.clearTimeout(this.replayTimer);
     this.replayTimer = 0;
@@ -90,7 +90,7 @@ export class Hud {
     if (this.replayEl) this.replayEl.textContent = text;
   }
 
-  /** 录像行临时消息（导入进度 / 工具结果）：空文本立即恢复持久内容（默认 8000 ms 后回退）。 */
+  /** 回放行临时消息（导入进度 / 工具结果）：空文本立即恢复持久内容（默认 8000 ms 后回退）。 */
   flashReplayStatus(text: string, ms = 8000): void {
     if (!this.replayEl) return;
     window.clearTimeout(this.replayTimer);

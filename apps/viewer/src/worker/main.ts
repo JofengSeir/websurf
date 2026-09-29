@@ -1,6 +1,6 @@
 /**
- * 录像解析 Worker 源码（`apps/viewer/package.json` 的 `build:worker` 用 esbuild 打成
- * `web/worker.js`）。这是本工程的录像导入路径：进 `ParseRequest`、出 `ParseResponse`，
+ * 回放解析 Worker 源码（`apps/viewer/package.json` 的 `build:worker` 用 esbuild 打成
+ * `web/worker.js`）。这是本工程的回放导入路径：进 `ParseRequest`、出 `ParseResponse`，
  * 协议与字段见 `apps/viewer/src/replay/protocol.ts`，主线程侧对手是
  * `apps/viewer/src/replay/importer.ts` 的 `ReplayImporter`。
  *
@@ -59,7 +59,7 @@ async function handle(req: ParseRequest): Promise<void> {
     // 魔数嗅探必须在文本解码之前——Shavit .replay 是二进制，file.text() 会破坏它
     if (!(await fileLooksLikeShavitReplay(file))) {
       throw new Error(
-        `${req.name} 不是 Shavit .replay 录像文件——viewer 只支持 Shavit 原生 .replay（JSON/规则脚本通道已移除）`,
+        `${req.name} 不是 Shavit .replay 记录文件——viewer 只支持 Shavit 原生 .replay（JSON/规则脚本通道已移除）`,
       );
     }
 

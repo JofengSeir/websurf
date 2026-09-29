@@ -1,20 +1,20 @@
 # WebSurf
 
-浏览器里跑 Counter-Strike: Source 风格的 **surf（滑翔）** 地图：物理由 Rust 编译成 wasm，渲染用 Three.js，输入与录像回放走同一套确定性链路。
+浏览器里跑 Counter-Strike: Source 风格的 **surf（滑翔）** 地图：物理由 Rust 编译成 wasm，渲染用 Three.js，输入与记录 / 录像回放走同一套确定性链路。
 
-纯前端——**无后端、无账号、不上传数据**；地图与录像由用户从本地选择，在浏览器内解析（安全说明见 [SECURITY.md](SECURITY.md)）。
+纯前端——**无后端、无账号、不上传数据**；地图与记录 / 录像由用户从本地选择，在浏览器内解析（安全说明见 [SECURITY.md](SECURITY.md)）。
 
 ---
 
 ## 1. 三个应用 + 共享层
 
-> 受控工程只有 `apps/debug`、`apps/game`、`apps/viewer` 与共享层 `src/`。`test/` 下**只有本地数据**（`test/maps/` 地图、`test/replay/` 录像、`test/project/` 调研资料，均不入库）——仓库内没有其它工程。
+> 受控工程只有 `apps/debug`、`apps/game`、`apps/viewer` 与共享层 `src/`。`test/` 下**只有本地数据**（`test/maps/` 地图、`test/replay/` 记录、`test/project/` 调研资料，均不入库）——仓库内没有其它工程。
 
 | 工程 | 端口 | 定位 | 入口锚点 |
 |---|---|---|---|
 | `apps/debug` | 8080 | 调试与实验宿主：面板可调参数、路径记录、权威健康、调试线框 | `apps/debug/package.json:15` 的 `dev` |
 | `apps/game` | 8090 | 面向玩家：Worker 权威物理 + 面板 + 存档点 | `apps/game/package.json:15` 的 `dev` |
-| `apps/viewer` | 8100 | 纯查看器：地图游览、`.replay` 录像与 Source `.dem` 演示回放、遥测与轨道面板（**不含物理**） | `apps/viewer/package.json:18` 的 `dev` |
+| `apps/viewer` | 8100 | 纯查看器：地图游览、`.replay` 记录回放与 Source `.dem` 录像回放、遥测与轨道面板（**不含物理**） | `apps/viewer/package.json:18` 的 `dev` |
 | `src/` | — | 共享层：`websurf-phys`（物理）、`websurf-wasm-core`（BSP/GLB/模型解析）、`ts-shared/**`（TS 共享） | `src/Cargo.toml:2`、`src/wasm-core/Cargo.toml:10` |
 
 ## 2. 快速开始
@@ -54,7 +54,7 @@ npm run dev            # python ../../src/serve.py 8080 .
 | `apps/<app>/crates/wasm/**` | 各工程的 wasm-bindgen 导出层（debug/game 为 `websurf-wasm`，viewer 为 `websurf_viewer_wasm`） |
 | `apps/<app>/src/**`、`web/**` | 前端源码与静态页面（`web/app.js`、`web/worker.js` 是**构建产物**，不入库） |
 | `apps/<app>/scripts/**` | 各工程构建与验收脚本（含 `build-dist.mjs`） |
-| `test/maps/**`、`test/replay/**`、`test/project/**` | 本地数据：地图与录像夹具、DEM 调研资料（**均 gitignore，不入库**） |
+| `test/maps/**`、`test/replay/**`、`test/project/**` | 本地数据：地图夹具、记录 / 录像夹具、DEM 调研资料（**均 gitignore，不入库**） |
 | `documents/**` | 文档（见 §7） |
 | `.archive/**` | 旧文档归档区，**不作事实来源** |
 
