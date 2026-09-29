@@ -84,8 +84,10 @@ export class ReplayPanel {
     this.fileNote = noteLine(fileBody);
     const fileInput = el('input');
     fileInput.type = 'file';
-    fileInput.accept = '.replay';
+    fileInput.accept = '.replay,.dem';
     fileInput.style.display = 'none';
+    // 引导层的「导入录像」按钮以 `for="replayFile"` 触发本输入（首访用户在引导层即可导入）
+    fileInput.id = 'replayFile';
     fileInput.addEventListener('change', () => {
       const f = fileInput.files?.[0];
       fileInput.value = '';
@@ -299,13 +301,35 @@ export class ReplayPanel {
           if (phase === 'parse') this.opts.onStatus(`解析 .replay…${pct}`);
         },
       );
-      this.lastTrackId = this.opts.onClip(result.clip, result.warnings, this.lastTrackId);
-      const big = result.clip.count >= LARGE_CLIP_FRAMES;
+      // 多份 clip（Source `.dem` 每个实体一条轨迹）：首份替换当前轨道（沿用改映射重导入的语义），
+      // 其余一律追加（`replaceId = null`）；`lastTrackId` 始终记首份的轨道 id。
+      const prevTrackId = this.lastTrackId;
+      for (let i = 0; i < result.clips.length; i++) {
+        const id = this.opts.onClip(
+          result.clips[i],
+          i === 0 ? result.warnings : [],
+          i === 0 ? prevTrackId : null,
+        );
+        if (i === 0) this.lastTrackId = id;
+      }
+      const primary = result.clips[0];
+      const big = result.clips.some((c) => c.count >= LARGE_CLIP_FRAMES);
+      const extra = result.clips.length > 1 ? `，共 ${result.clips.length} 条轨迹` : '';
+      const d = result.demo;
+      // Source `.dem`：另起一段列出解析出来的录像元信息与诊断（面板不替用户猜可信度，原样展示）
+      const demoText = d
+        ? `【Source 演示录像】地图 ${d.map}（协议 ${d.networkProtocol}）｜` +
+          `${d.seconds.toFixed(1)} s / ${d.ticks.toLocaleString('en-US')} tick（约 ${d.tickRate.toFixed(1)} tick/s）｜` +
+          `字符串表 ${d.stringTables} 张、类别 ${d.classes} 个｜包解析 ` +
+          `${d.packetOk.toLocaleString('en-US')}/${d.packetTotal.toLocaleString('en-US')}｜` +
+          `采样口径 ${d.sampleMode === 'players' ? '玩家类' : '任意有坐标实体'}、轨迹 ${d.tracks} 条、` +
+          `玩家名 ${d.playerNames} 个。${d.note} `
+        : '';
       // warnings 与摘要合并为一条 note（warnings 若独占会被摘要立即覆盖）
       const summary =
-        `${this.file.name}：${result.clip.count.toLocaleString('en-US')} 帧，` +
-        `${result.clip.duration.toFixed(2)} s` +
-        (result.clip.vel ? `，最大速度 ${result.clip.maxSpeed.toFixed(0)} u/s` : '') +
+        `${demoText}${this.file.name}：${primary.count.toLocaleString('en-US')} 帧，` +
+        `${primary.duration.toFixed(2)} s${extra}` +
+        (primary.vel ? `，最大速度 ${primary.maxSpeed.toFixed(0)} u/s` : '') +
         (big ? ' —— 帧数较多，改映射/变换重新导入耗时较长' : '');
       this.fileNote(
         result.warnings.length > 0 ? result.warnings.join('；') + ' —— ' + summary : summary,

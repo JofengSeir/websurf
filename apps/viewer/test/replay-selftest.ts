@@ -9,7 +9,7 @@
  * 这些断言不计入 `failures`，也不因缺夹具而 exit 1；合成 fixture 段照常跑。
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { clampPitch, wrapDeg } from '../src/replay/helpers.js';
 import { applyClipTransform } from '../src/replay/build.js';
 import { ReplayPlayer } from '../src/replay/player.js';
@@ -21,6 +21,11 @@ import {
 } from '../src/replay/shavit-replay.js';
 import { defaultRule } from '../src/replay/types.js';
 import type { Clip, RuleConfig } from '../src/replay/types.js';
+import { parseSourceDemo } from '../src/replay/demo/demo.js';
+import { flattenSendTable } from '../src/replay/demo/tables.js';
+import { decodeProp } from '../src/replay/demo/net.js';
+import { BitReader } from '../src/replay/demo/bits.js';
+import { demoTracksToClips } from '../src/replay/democlip.js';
 
 let failures = 0;
 
@@ -834,4 +839,181 @@ console.log('\n[8] Shavit .replay 异常输入（明确报错 / 兼容路径）'
 }
 
 console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
+// ── Source `.dem`（演示录像）路径 ──────────────────────────────────────
+// 夹具 test/replay/*.dem 是 gitignore 的样例，缺失时整段跳过（不影响其余用例）。
+{
+  // 路径解析：`test:replay` 会先把本文件打包到 `apps/viewer/.tmp/replay-selftest/` 再跑，
+  // 故 `import.meta.url` 与源码位置不同；先试相对 cwd（npm 脚本的 cwd = apps/viewer），
+  // 再试打包位置与源码位置两种 `import.meta.url`。
+  // 夹具发现：优先用历史上一直在用的那份；找不到就**自动取目录里第一份 `*.dem`** ——
+  // 早先这里硬编码单个文件名，换夹具后整段**静默跳过**（等于 DEM 零覆盖），故改为发现式。
+  const DEM_PREFERRED = 't66-auto-20260902-1519-surf_pools.dem';
+  const demDirs = [
+    '../../test/replay',
+    new URL('../../../test/replay/', import.meta.url),
+    new URL('../../../../test/replay/', import.meta.url),
+  ];
+  const demDir = demDirs.find((d) => {
+    try {
+      readdirSync(typeof d === 'string' ? d : d);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  const demNames: string[] = [];
+  if (demDir) {
+    try {
+      const all = readdirSync(demDir).filter((f) => f.endsWith('.dem'));
+      if (all.includes(DEM_PREFERRED)) demNames.push(DEM_PREFERRED);
+      demNames.push(...all.filter((f) => f !== DEM_PREFERRED).sort());
+    } catch {
+      /* 目录读不到就走跳过分支 */
+    }
+  }
+  // 夹具相关的期望值：只有已知夹具才做精确断言，其余只验通用不变量并把实测值打印出来。
+  const DEM_EXPECT: Record<string, { map: string; classes: number; stringTables: number }> = {
+    [DEM_PREFERRED]: { map: 'surf_pools', classes: 197, stringTables: 19 },
+    'auto-20260925-171855-surf_fornax.dem': { map: 'surf_fornax', classes: 197, stringTables: 19 },
+  };
+
+  let dem: Uint8Array | null = null;
+  let demName: string | null = null;
+  for (const name of demNames) {
+    for (const cand of [`${demDir ?? demDirs[0]}/${name}`,
+                        new URL(`../../../test/replay/${name}`, import.meta.url),
+                        new URL(`../../../../test/replay/${name}`, import.meta.url)]) {
+      try {
+        dem = new Uint8Array(readFileSync(cand));
+        demName = name;
+        break;
+      } catch {
+        dem = null;
+      }
+    }
+    if (dem) break;
+  }
+  if (!dem) {
+    console.log('（跳过 .dem 段：test/replay 下没有演示录像夹具）');
+  } else {
+    const expect = demName ? DEM_EXPECT[demName] : undefined;
+    const expectNote = expect ? '（已知夹具，走精确断言）' : '（未知夹具，只验通用不变量）';
+    console.log('（.dem 夹具：' + demName + expectNote + '）');
+    const r = parseSourceDemo(dem, { sampleMode: 'posed' });
+    check('DEM 演示协议 = 3', r.header.demoprotocol === 3, String(r.header.demoprotocol));
+    check('DEM 网络协议 = 24', r.header.networkprotocol === 24, String(r.header.networkprotocol));
+    check('DEM 发送表非空', r.dataTables.tables.size > 200, String(r.dataTables.tables.size));
+    if (expect) {
+      check('DEM 地图 = ' + expect.map, r.header.mapName === expect.map, r.header.mapName);
+      check(
+        'DEM 类别数 = ' + expect.classes,
+        r.dataTables.classes.length === expect.classes,
+        String(r.dataTables.classes.length),
+      );
+    } else {
+      console.log(
+        '   （实测地图 ' + r.header.mapName + ' / 类别 ' + r.dataTables.classes.length +
+          ' / 发送表 ' + r.dataTables.tables.size + '）',
+      );
+    }
+
+    const packets = r.stats.packetsParsed + r.stats.packetsFailed;
+    check(
+      // 阈值按**实测**定：启用玩家类展平修正（`ENABLE_PLAYER_DROP`，玩家移动/朝向的前提）后，本夹具
+      // 实测 3337/3438 = 97.1%；不启用时是 3435/3438 = 99.9%，但那样玩家类属性全错、viewer 里人不动。
+      // 该修正会改动玩家类的属性位宽，使少量消息的实体流收尾对不齐——这是已知且已记录的代价
+      //（见 `tables.ts` 的 `PLAYER_DROP_INDEX`），不是随机回退；真录像上仍为 119919/119932 = 99.99%。
+      'DEM 包解析率 > 95%',
+      packets > 0 && r.stats.packetsParsed / packets > 0.95,
+      `${r.stats.packetsParsed}/${packets}`,
+    );
+
+    // dem_stringtables：解析终点应落在载荷末尾 0..7 位内（末字节按字节补齐）
+    const stTail = r.stats.stringTableBytes * 8 - r.stats.stringTableEndBit;
+    check('DEM dem_stringtables 恰好用尽（余 0..7 位）', stTail >= 0 && stTail <= 7, String(stTail));
+    if (expect) {
+      check(
+        'DEM dem_stringtables 表数 = ' + expect.stringTables,
+        r.stringTables.length === expect.stringTables,
+        String(r.stringTables.length),
+      );
+    } else {
+      console.log('   （实测 dem_stringtables 表数 ' + r.stringTables.length + '）');
+    }
+
+    // 逐类基线判据：instancebaseline 的位流必须被该类展平序列恰好解完（允许末字节补齐）。
+    // 这是「发送表展平 + 属性位图 + 属性值解码」三者同时正确的强判据。
+    const ib = r.stringTables.find((t) => t.name === 'instancebaseline');
+    let exact = 0;
+    let baseTotal = 0;
+    for (const [, e] of ib?.entries ?? []) {
+      if (!e.value) continue;
+      baseTotal++;
+      const cls = r.dataTables.classes.find((c) => c.id === Number(e.key));
+      const flat = cls ? flattenSendTable(cls.dtName, r.dataTables.tables) : [];
+      const totalBits = e.value.length * 8;
+      const br = new BitReader(e.value, 0, totalBits);
+      let index = -1;
+      let overrun = false;
+      while (!br.overflowed && br.pos < totalBits) {
+        if (br.bit() === 0) break;
+        index += 1 + br.uBitVar();
+        if (index >= flat.length) {
+          overrun = true;
+          break;
+        }
+        decodeProp(flat[index].prop, br, flat[index].elementProp, flat[index].vectorElems);
+      }
+      if (!overrun && totalBits - br.pos <= 7) exact++;
+    }
+    check('DEM 类别基线全部逐位吻合', baseTotal > 0 && exact === baseTotal, `${exact}/${baseTotal}`);
+
+    // 位姿采样 + DEM→Clip 桥接
+    const clips = demoTracksToClips(r, { rule: defaultRule() });
+    check('DEM 采出轨迹 >= 1 条', clips.length >= 1, String(clips.length));
+    // userinfo → 玩家名：条目键是槽号，实体号 = 槽号 + 1
+    check('DEM userinfo 解出玩家名', r.playerNames.size >= 1, String(r.playerNames.size));
+    check(
+      'DEM 玩家名映射到实体号（槽 0 → 实体 1）',
+      r.playerNames.has(1),
+      [...r.playerNames.entries()].map(([k, v]) => `${k}=${v}`).join(','),
+    );
+    if (clips.length > 0) {
+      const c = clips[0];
+      const shapesOk =
+        c.t.length === c.count && c.pos.length === c.count * 3 && c.ang.length === c.count * 3;
+      check('DEM Clip 各定型数组长度自洽', shapesOk, `${c.count}/${c.t.length}/${c.pos.length}`);
+      check(
+        'DEM Clip 时长 = 末帧 t',
+        c.count > 0 && Math.abs(c.duration - c.t[c.count - 1]) < 1e-9,
+        String(c.duration),
+      );
+      const src = r.players[0];
+      check(
+        'DEM 坐标映射 = Source[y,z,x]',
+        Math.abs(c.pos[0] - src.samples[0].pos[1]) < 1e-3 &&
+          Math.abs(c.pos[1] - src.samples[0].pos[2]) < 1e-3 &&
+          Math.abs(c.pos[2] - src.samples[0].pos[0]) < 1e-3,
+        `${c.pos[0]},${c.pos[1]},${c.pos[2]}`,
+      );
+      check(
+        'DEM Clip 坐标有限',
+        Number.isFinite(c.pos[0]) && Number.isFinite(c.pos[1]) && Number.isFinite(c.pos[2]),
+        `${c.pos[0]},${c.pos[1]},${c.pos[2]}`,
+      );
+      // 采样最多的那条可能是 CWorld（世界实体，坐标恒为原点），故「地图尺度」按全部轨迹判：
+      // 至少要有一条落在非原点的世界坐标上。
+      check(
+        'DEM 至少一条轨迹坐标为非零地图尺度',
+        clips.some(
+          (x) => Math.abs(x.pos[0]) > 100 || Math.abs(x.pos[1]) > 100 || Math.abs(x.pos[2]) > 100,
+        ),
+        clips.map((x) => x.pos[0].toFixed(0)).join(','),
+      );
+      check('DEM Clip 元信息带地图名', c.meta?.map === r.header.mapName, String(c.meta?.map));
+      check('DEM Clip tick 率合理（30..200）', (c.meta?.tickrate ?? 0) > 30 && (c.meta?.tickrate ?? 0) < 200, String(c.meta?.tickrate));
+    }
+  }
+}
+
 process.exit(failures === 0 ? 0 : 1);
