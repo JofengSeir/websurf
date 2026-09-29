@@ -187,6 +187,8 @@ const replayPane = qs('pane-replay');
 // `syncTracks()`，读到的就是尚未初始化的 `let` ⇒ `ReferenceError` ⇒ 页面直接弹致命卡
 // （实测：冒烟报 `fatalShown=true`）。
 let demoTrackId: string | null = null;
+/** 演示轨道当前呈现的**实体号**（取自 `clip.id` 尾段）——改名时用它判断该不该改。 */
+let demoTrackEntity: number | null = null;
 /** 当前激活的 tab：决定时间轴 / 可视化 / 信息条只看到**哪一边的轨道**。 */
 let activeTab: 'replay' | 'demo' = 'replay';
 /** **自动跟随视角**：载入后为真 —— 播放头进入谁的活跃区间就切到谁。用户自己点人后置假。 */
@@ -234,6 +236,13 @@ const demoPanel = demoPane
       onTickToggle: (_entity: number, on: boolean) => {
         if (demoTrackId) visuals.setTickNodesVisibleFor(demoTrackId, on);
       },
+      // **信息条的名字要跟着播放头走**：`.dem` 的记录机器人会把名字改成「当前记录的关卡」，
+      // 而信息条显示的是**跟随轨道的名字**（建轨道那一刻定死）⇒ 面板检测到「跟随中那个人」
+      // 改名时通知这里：改轨道名 + `syncTracks()` 重渲染信息条（未真变时 rename 返回假，跳过刷新）。
+      onWhoName: (entity: number, name: string) => {
+        if (!demoTrackId || entity !== demoTrackEntity) return;
+        if (player.tracks.rename(demoTrackId, name)) syncTracks();
+      },
       onLoaded: () => {
         // **无轨道也能播放/暂停**：把录像总时长写进播放器兜底（否则载入完 play() 直接返回）。
         player.span = demoPanel?.totalSeconds() ?? 0;
@@ -267,6 +276,7 @@ const demoPanel = demoPane
         // 轨道色不会自己变，必须由这里按人物写入 —— 否则所有人共用第一个人的颜色。
         // 写入后，3D 里的轨迹线与看板色点取自同一个值（同一张 `TRACK_PALETTE`、同一取模口径）。
         const demEntity = Number(clip.id.split(':').pop());
+        demoTrackEntity = demEntity;
         const demColor = demoPanel?.colorFor(demEntity) ?? track.color;
         player.tracks.setColor(track.id, demColor);
         demoPanel?.setTrackColor(demColor);

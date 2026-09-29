@@ -113,6 +113,19 @@ export class TrackSet {
    * 于是 `color` 恒为 `TRACK_PALETTE[tracks.length % n]` —— 所有人共用同一个颜色。
    * 这里让调用方按人物写入一个稳定色，3D 轨迹线与看板色点就取自同一个值。
    */
+  /**
+   * 改一条轨道的显示名。**演示页的「滚动名称」要用它**：`.dem` 里的记录机器人会把自己的名字
+   * 改成「当前记录的关卡」，而演示页复用同一条轨道（切人只换数据）⇒ 轨道名是**时变**的，
+   * 必须按播放位置改名并让信息条重渲染。返回是否真的变了（未变返回假，调用方可跳过刷新）。
+   */
+  rename(id: string, name: string): boolean {
+    const t = this.tracks.find((x) => x.id === id);
+    const next = name.trim();
+    if (!t || next.length === 0 || t.name === next) return false;
+    t.name = next;
+    return true;
+  }
+
   setColor(id: string, color: number): boolean {
     const t = this.tracks.find((x) => x.id === id);
     if (!t || t.color === color) return false;
