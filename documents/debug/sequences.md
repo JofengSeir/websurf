@@ -6,8 +6,8 @@
 
 | 参与者 | 步骤 | 数据落点 | 锚点 |
 |---|---|---|---|
-| 浏览器 | 拉取页面骨架（顶栏 / 侧边栏 / 预览区 / HUD / 弹窗） | DOM：共 106 个 id | `apps/debug/web/index.html:444` |
-| 浏览器 | 先执行 COOP/COEP 补丁脚本（classic），再执行应用入口（module） | 补丁脚本负责在响应头缺失时补上隔离头；入口是 esbuild 产物 | `apps/debug/web/index.html:855`、`apps/debug/web/index.html:856` |
+| 浏览器 | 拉取页面骨架（顶栏 / 侧边栏 / 预览区 / HUD / 弹窗） | DOM：共 106 个 id | `apps/debug/web/index.html:481` |
+| 浏览器 | 先执行 COOP/COEP 补丁脚本（classic），再执行应用入口（module） | 补丁脚本负责在响应头缺失时补上隔离头；入口是 esbuild 产物 | `apps/debug/web/index.html:892`、`apps/debug/web/index.html:893` |
 | 主线程 | `main` 取画布句柄；取不到即返回 | `dom.canvas` | `apps/debug/src/app.ts:268` |
 | 主线程 | 通道选择：`crossOriginIsolated` 为真且有 `SharedArrayBuffer` → 建 `SHARED_BUFFER_SIZE` 共享缓冲，否则置 `null` | `sharedBuffer` | `apps/debug/src/app.ts:277` |
 | 主线程 | 建 Worker：有构建注入的 Worker 源码走 Blob URL，否则 `new Worker('./worker.js', { type: 'module' })`；绑 `onmessage` / `onerror` | `worker` 与 `handleWorkerMessage` | `apps/debug/src/app.ts:290`、`apps/debug/src/app.ts:292` |

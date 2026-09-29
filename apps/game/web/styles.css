@@ -17,10 +17,11 @@
  *     下边线、导航标题用与 h4 同规格的分组刻度尺——全部沿用既有令牌，
  *     不新增装饰层；
  *   · 档案元素成套：每 pane 档案编号（右上）+ 字段引导线（每行）+
- *     页脚署名（pane 名 + 版本短码）；硬件件计数固定：螺丝 2（窗口右上
- *     那颗**兼作关闭按钮** .win-close、加载卡左下纯装饰）+ 服务孔 1
- *     （导航左下，与右上螺丝对角）；导航不再有页脚（关闭上移到螺丝钮，
- *     兜底 = 点击 #panel 遮罩空白处，见 panel-controller 的 closePanel）；
+ *     页脚署名（pane 名 + 版本短码）；硬件件计数：螺丝 1（窗口右上那颗
+ *     **兼作关闭按钮** .win-close）+ 服务孔 1（导航左下，与右上螺丝对角）；
+ *     加载卡装饰螺丝已按 owner 2026-09-30 裁决撤下（点缀收敛）；导航不再有
+ *     页脚（关闭上移到螺丝钮，兜底 = 点击 #panel 遮罩空白处，见
+ *     panel-controller 的 closePanel）；
  *   · 布局：窗口高度**固定 580px**（R1.1 从内容驱动回退——七 pane 之间
  *     高度差会让窗口在切换时跳动；稀疏 pane 的留白改由页脚署名收尾），
  *     行网格 168/1fr/88，滑块行读作「刻度 + 读数」（.val 去边框为读数区）；
@@ -243,21 +244,9 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   content: ""; position: absolute; top: 0; left: 18px;
   width: 32px; height: 2px; background: var(--accent);
 }
-/* 装饰螺丝只剩加载卡左下这一处（窗口右上角那颗已改成关闭按钮，见 .win-close） */
-#loadingOverlay .load-card::after {
-  content: ""; position: absolute; bottom: 10px; left: 10px;
-  width: 9px; height: 9px; border-radius: 50%;
-  background:
-    linear-gradient(var(--muted), var(--muted)) center / 7px 1px no-repeat,
-    linear-gradient(var(--muted), var(--muted)) center / 1px 7px no-repeat,
-    var(--panel);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 0 0 2px var(--panel);
-}
-/* 关闭控件 = 右上角那颗螺丝：斜置 45°（十字槽转成正交的 ×，读作关闭），
-   9px → 12px（略微放大以便点击），垫圈环 + 1px 边；hover/focus 转琥珀。
-   与 .load-card 的装饰螺丝同一语彙，因此"螺丝 2 处"的计数不变——只是右上角
-   这颗同时承担关闭功能。 */
+/* 关闭控件 = 右上角那颗螺丝（全屏唯一硬件螺丝）：斜置 45°（十字槽转成正交的 ×，
+   读作关闭），9px → 12px（略微放大以便点击），垫圈环 + 1px 边；hover/focus 转琥珀。
+   加载卡的纯装饰螺丝已撤（owner 2026-09-30：点缀收敛），本颗承担全部关闭功能。 */
 #panel .win .win-close {
   position: absolute; top: 9px; right: 9px; z-index: 3;
   width: 12px; height: 12px; padding: 0; border-radius: 50%;
