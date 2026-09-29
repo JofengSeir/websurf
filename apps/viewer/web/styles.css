@@ -700,36 +700,37 @@ select.tl-select:focus { border-color: var(--text); }
 .slate-stripes {
   position: absolute; inset: 0;
   background-image:
-    /* **黑白交替、绝对等比、以黑收尾**（owner 2026-09-30 定稿）：
+    /* **黑白交替 + 末尾短黑收尾**（owner 2026-09-30 定稿）：
        自左至右 = 铰链黑板 23.5%（结构件：三颗螺钉 + 转轴分缝在其上，保持不动）
-       + 其余 76.5% 等分为 **10 条各 7.65%**，**白→黑→白→黑…以黑收尾**。
-       为什么必须是偶数条、以黑收尾：条面在右端是**硬切**（元素边缘），
-       若最后一条是白，就会被垂直切出一个白色方块 —— owner 实测"最后一块很碍眼"；
-       以黑收尾时切口与深色背景融为一体，看不出断茬。
-       人字几何不变（上下两层 52°/-52° 镜像 + 下半层色序反转，折点在条高中央）。 */
+       + **9 条等比（各 8.1%）**白→黑→白→黑…（末条为白）
+       + **一条短黑（3.5%）顶到右缘**。
+       - 为什么末尾压短：条面右端是**硬切**（元素边缘）。末条取黑已让切口融进深色背景，
+         但 owner 反馈"最后一块还是碍眼" ⇒ 再把末条压短（7.65% → 3.5%），让它读作"收边"
+         而不是"多出来的一格"；省下的宽度平分给前面 9 条（仍等比）。
+       - 人字几何不变（上下两层 52°/-52° 镜像 + 下半层色序反转，折点在条高中央）。 */
     linear-gradient(52deg,
       #0a0a0c 0 22.7%,
-      #ececf4 22.7% 30.1%,
-      #0a0a0c 30.1% 37.6%,
-      #ececf4 37.6% 45%,
-      #0a0a0c 45% 52.4%,
-      #ececf4 52.4% 59.8%,
-      #0a0a0c 59.8% 67.2%,
-      #ececf4 67.2% 74.6%,
-      #0a0a0c 74.6% 82%,
-      #ececf4 82% 89.4%,
-      #0a0a0c 89.4% 100%),
+      #ececf4 22.7% 30.6%,
+      #0a0a0c 30.6% 38.4%,
+      #ececf4 38.4% 46.3%,
+      #0a0a0c 46.3% 54.1%,
+      #ececf4 54.1% 62%,
+      #0a0a0c 62% 69.8%,
+      #ececf4 69.8% 77.7%,
+      #0a0a0c 77.7% 85.5%,
+      #ececf4 85.5% 93.4%,
+      #0a0a0c 93.4% 100%),
     linear-gradient(-52deg,
-      #0a0a0c 0 10.6%,
-      #ececf4 10.6% 18%,
-      #0a0a0c 18% 25.4%,
-      #ececf4 25.4% 32.8%,
-      #0a0a0c 32.8% 40.2%,
-      #ececf4 40.2% 47.6%,
-      #0a0a0c 47.6% 55%,
-      #ececf4 55% 62.4%,
-      #0a0a0c 62.4% 69.9%,
-      #ececf4 69.9% 77.3%,
+      #0a0a0c 0 6.6%,
+      #ececf4 6.6% 14.5%,
+      #0a0a0c 14.5% 22.3%,
+      #ececf4 22.3% 30.2%,
+      #0a0a0c 30.2% 38%,
+      #ececf4 38% 45.9%,
+      #0a0a0c 45.9% 53.7%,
+      #ececf4 53.7% 61.6%,
+      #0a0a0c 61.6% 69.4%,
+      #ececf4 69.4% 77.3%,
       #0a0a0c 77.3% 100%);
   background-size: 100% 51%, 100% 51%;
   background-position: 0 0, 0 100%;
@@ -744,7 +745,7 @@ select.tl-select:focus { border-color: var(--text); }
       transparent calc(50% - 0.5px), #2e2e36 calc(50% - 0.5px) 50%, transparent 50%),
     radial-gradient(circle at 4.4% 23%, #3c3c45 0 3px, transparent 3px),
     radial-gradient(circle at 4.4% 77%, #3c3c45 0 3px, transparent 3px),
-    radial-gradient(circle at 12% 77%, #3c3c45 0 3px, transparent 3px);
+    radial-gradient(circle at 9.5% 77%, #3c3c45 0 3px, transparent 3px);
   background-repeat: no-repeat;
   background-size: 22.7% 100%, auto, auto, auto;
 }
