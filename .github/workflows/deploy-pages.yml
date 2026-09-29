@@ -15,6 +15,11 @@
 #
 # 触发路径：只有会影响站点产物的路径才触发（apps/**、src/**、Cargo.toml、Cargo.lock 与本文件）。
 # 文档与门禁 workflow 的改动不触发重新部署（需要时用 workflow_dispatch 手动跑）。
+#
+# 入口页版本烙印：组装时把 apps/debug/scripts/pages-index.html 的 __DEPLOY_ID__ / __DEPLOY_TIME__
+# 占位符替换为本次部署 id（run_number + 短 SHA，每次部署必变）与 UTC 时间，并生成 deploy/version.json。
+# 用途：① 入口页每次新部署对每个浏览器弹一次部署提示（localStorage 记到部署 id 上）；
+#      ② 旧缓存页启动时 fetch version.json（bust 参数绕缓存）核对 id，不一致即自检过期并刷新。
 
 name: Build & Deploy to GitHub Pages
 
@@ -170,6 +175,15 @@ jobs:
             cp -r "$src/." "deploy/${app}/"
           done
           cp apps/debug/scripts/pages-index.html deploy/index.html
+          # 入口页版本烙印 + version.json（用途见文件头注）。烙印后断言无残留占位符——
+          # 宁可这里硬失败，也不要发布一个每次访问都显示占位符文本的首页。
+          DEPLOY_ID="r${{ github.run_number }}-${GITHUB_SHA::7}"
+          DEPLOY_TIME="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          sed -i "s|__DEPLOY_ID__|${DEPLOY_ID}|g; s|__DEPLOY_TIME__|${DEPLOY_TIME}|g" deploy/index.html
+          if grep -q '__DEPLOY_' deploy/index.html; then
+            echo "[error] 入口页占位符未替换干净"; exit 1
+          fi
+          printf '{"id":"%s","time":"%s"}\n' "${DEPLOY_ID}" "${DEPLOY_TIME}" > deploy/version.json
           echo "[ok] deploy 目录："
           du -sh deploy/* | sort -k2
 
