@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebSurf-viewer — BSP 地图预览与录像回放</title>
+  <title>WebSurf-viewer — BSP 地图预览与记录 / 录像回放</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='4' width='24' height='24' fill='%23161619'/%3E%3Cpath d='M9 20 L16 9 L23 20 Z' fill='none' stroke='%23e8e8e4' stroke-width='2.2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='17' r='2.2' fill='%23e6c35c'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -45,11 +45,11 @@
       </div>
       <div class="gstep">
         <span class="glabel"><span class="zh">第三步</span><span class="en">STEP 03</span></span>
-        <span class="gtext">右侧面板：地图信息与出生点跳转、录像回放（换图入口在地图页顶部）；右上角「?」打开帮助</span>
+        <span class="gtext">右侧面板：地图信息与出生点跳转、记录 / 录像回放（换图入口在地图页顶部）；右上角「?」打开帮助</span>
       </div>
       <div class="gbtns">
         <label class="filebtn" for="bspFile">选择地图（.bsp）</label>
-        <label class="filebtn" for="replayFile">导入录像（.replay / .dem）</label>
+        <label class="filebtn" for="replayFile">导入记录 / 录像（.replay / .dem）</label>
       </div>
       <div id="guideError"></div>
     </div>
@@ -57,7 +57,7 @@
 </div>
 
 <!-- 拖拽高亮反馈条：`#dropzone`，拖拽期间由 `apps/viewer/src/ui/hud.ts` 切换 `active` 类 -->
-  <div id="dropzone">松开鼠标：.bsp 加载地图、.replay 导入录像</div>
+  <div id="dropzone">松开鼠标：.bsp 加载地图、.replay 导入记录、.dem 导入录像</div>
 
   <div id="hud">
     <div class="hud-line" id="pose">位姿 —</div>
@@ -80,35 +80,35 @@
     <div class="help-sec">
       <div class="help-h">鼠标与键盘</div>
       <p>点击画面锁定鼠标后自由飞行：<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移、<kbd>空格</kbd>/<kbd>C</kbd> 升降、<kbd>Shift</kbd> 加速（×4）、<kbd>Esc</kbd> 解锁。</p>
-      <p>录像回放：<kbd>K</kbd> 播放 / 暂停，<kbd>,</kbd> / <kbd>.</kbd> 逐帧，<kbd>I</kbd> / <kbd>O</kbd> 设区间 A / B。输入框内这些键不生效。</p>
+      <p>记录回放：<kbd>K</kbd> 播放 / 暂停，<kbd>,</kbd> / <kbd>.</kbd> 逐帧，<kbd>I</kbd> / <kbd>O</kbd> 设区间 A / B。输入框内这些键不生效。</p>
     </div>
     <div class="help-sec">
-      <div class="help-h">载入地图与录像</div>
-      <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。录像：录像页「选择录像文件…」、拖入 <code>.replay</code>（自动切到录像页）；URL 深链 <code>?bsp=&amp;replay=</code> 可直接打开配套资源。导入后底部显示「录像信息条」——<code>.replay</code> 头部元信息：成绩 / 玩家 / 地图 / 轨道 / tick / 帧段 / 日期。</p>
+      <div class="help-h">载入地图与记录 / 录像</div>
+      <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。记录（.replay）：记录页「选择记录文件…」、拖入 <code>.replay</code>（自动切到记录页）；录像（.dem）：录像页「载入录像」；URL 深链 <code>?bsp=&amp;replay=</code> 可直接打开配套资源。导入后底部显示「记录信息条」——<code>.replay</code> 头部元信息：成绩 / 玩家 / 地图 / 轨道 / tick / 帧段 / 日期。</p>
     </div>
     <div class="help-sec">
       <div class="help-h">播放基准与坐标映射</div>
-      <p>录像以 <code>.replay</code> 帧自身坐标播放（默认直读，无起点锚定）。轨迹与地图对不上时用录像页「坐标映射」切换对照（轴序 / 朝向轴），仍差一点用「调整工具」显式平移 / 旋转 yaw。时间轴以起跑帧为 0（prerun 帧不在播放区间）；进度条淡金带 = 正式跑段、金框 = A-B 区间。外部脚本可经 <code>window.viewer.replay</code> 控制播放：play / pause / seek(秒) / setSpeed / setMode / follow / tracks() / meta()。</p>
+      <p>记录以 <code>.replay</code> 帧自身坐标播放（默认直读，无起点锚定）。轨迹与地图对不上时用记录页「坐标映射」切换对照（轴序 / 朝向轴），仍差一点用「调整工具」显式平移 / 旋转 yaw。时间轴以起跑帧为 0（prerun 帧不在播放区间）；进度条淡金带 = 正式跑段、金框 = A-B 区间。外部脚本可经 <code>window.viewer.replay</code> 控制播放：play / pause / seek(秒) / setSpeed / setMode / follow / tracks() / meta()。</p>
     </div>
   </div>
 
   <aside id="sidebar">
     <div id="tabs">
       <button class="tab active" data-tab="map" type="button">地图</button>
-      <button class="tab" data-tab="replay" type="button">录像</button>
-      <button class="tab" data-tab="demo" type="button">演示</button>
+      <button class="tab" data-tab="replay" type="button">记录</button>
+      <button class="tab" data-tab="demo" type="button">录像</button>
     </div>
     <div class="tabpane active" id="pane-map"></div>
     <div class="tabpane" id="pane-replay"></div>
-    <!-- 演示页 `#pane-demo`：Source `.dem` 专用。内容由 `DemoPanel` 生成（时间线 + 玩家标注 + 详情），
-         与「录像」页的轨迹列表 / 播放控制**不共用**布局 —— `.dem` 给不出定长位姿，看板语义不同。
+    <!-- 录像页 `#pane-demo`：Source `.dem` 专用。内容由 `DemoPanel` 生成（时间线 + 玩家标注 + 详情），
+         与「记录」页的轨迹列表 / 播放控制**不共用**布局 —— `.dem` 给不出定长位姿，看板语义不同。
          注（2026-09-30）：本按钮与容器在 5b2e470 那次 revert 里随 index.html 回退丢失过，
          后两次修复都只补了引导卡，直到本次才补回；`apps/viewer/src/app.ts` 的
          `activeTab`/`demoPane` 与 `replay/demopanel.ts` 一直按它存在来写。 -->
     <div class="tabpane" id="pane-demo"></div>
   </aside>
 
-  <!-- 底部 dock `#dock`：录像信息条 `#replayMeta`（`.replay` 头部元信息）+ 时间轴容器 `#timeline` -->
+  <!-- 底部 dock `#dock`：记录信息条 `#replayMeta`（`.replay` 头部元信息）+ 时间轴容器 `#timeline` -->
   <div id="dock">
     <div id="replayMeta" class="hidden replay-meta"></div>
     <!-- `#timeline` 的内容由 `apps/viewer/src/replay/timeline.ts` 构建 -->

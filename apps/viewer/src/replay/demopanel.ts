@@ -1,5 +1,5 @@
 /**
- * Source 演示录像（`.dem`）专用面板。
+ * Source 录像（`.dem`）专用面板。
  *
  * 与「录像」页（`.replay` / Shavit 计时赛）**分开**：`.dem` 能给出的东西与 `.replay` 不同 ——
  * 前者有地图名、时长、tick 率、字符串表、类别基线、玩家名单（`player_info_s`），但**玩家逐帧位姿
@@ -84,7 +84,7 @@ export interface DemoPanelOptions {
   /**
    * **按人物切换 tick 点**（`entity` = 实体号，`on` = 是否显示）。
    *
-   * tick 点原先是「录像」页与「演示」页**共用的一个全局开关**，在一边关掉另一边也跟着没，
+   * tick 点原先是「录像」页与「录像」页**共用的一个全局开关**，在一边关掉另一边也跟着没，
    * 所以改为**每个人物一份设置**，入口放在本面板的详情里（owner 要求）。
    */
   onTickToggle?: (entity: number, on: boolean) => void;
@@ -100,10 +100,10 @@ const MAX_PLAYER_ENTITY = 64;
 export class DemoPanel {
   private readonly opts: DemoPanelOptions;
   /**
-   * **当前演示轨道的真实配色**（由 `app.ts` 在建/换轨道后写入）。
+   * **当前录像轨道的真实配色**（由 `app.ts` 在建/换轨道后写入）。
    *
    * 为什么不能自己算：轨迹颜色是 `TrackList` 按**轨道下标**取模分配的，**与实体号无关** ——
-   * 演示只占一条轨道，它的颜色是固定的；早先我按实体号另算一套色板，于是看板上的点
+   * 录像只占一条轨道，它的颜色是固定的；早先我按实体号另算一套色板，于是看板上的点
    * 与 3D 里那条轨迹**永远对不上**（owner 实测「还是乱的」）。这里改成**如实取那条轨道的色**。
    */
   private trackColor: number | null = null;
@@ -112,7 +112,7 @@ export class DemoPanel {
   /** 最近一次向外部通报的名字（去重用）。 */
   private lastReportedName = '';
 
-  /** 由 `app.ts` 在演示轨道建立/替换后调用，写入其真实配色并重渲染详情。 */
+  /** 由 `app.ts` 在录像轨道建立/替换后调用，写入其真实配色并重渲染详情。 */
   setTrackColor(color: number): void {
     if (this.trackColor === color) return;
     this.trackColor = color;
@@ -141,7 +141,7 @@ export class DemoPanel {
     this.root = root;
     root.innerHTML = `
       <div class="dmp-load">
-        <label class="filebtn" for="demoFile">载入演示录像（.dem）</label>
+        <label class="filebtn" for="demoFile">载入录像（.dem）</label>
         <input id="demoFile" type="file" accept=".dem" />
         <label class="dmp-alt"><input id="demoAltOrder" type="checkbox" /> 运动优先（实验展平顺序）</label>
       </div>
@@ -275,7 +275,7 @@ export class DemoPanel {
         <span>玩家</span><b>${this.rows.length} 位</b>
         <span>在服</span><b class="dmp-live" title="当前 tick 在服务器上的人（名字随录像轮换）">—</b>
       </div>
-      <div class="dmp-grid dmp-internals" title="解析内部量（排查用）：文件 ${file.name}；tick 率 ${tickRate.toFixed(1)}/s；演示协议 ${h.demoprotocol} ／ 网络协议 ${h.networkprotocol}；字符串表 ${this.result!.stringTables.length} 张；服务器类别 ${this.result!.dataTables.classes.length} 个">
+      <div class="dmp-grid dmp-internals" title="解析内部量（排查用）：文件 ${file.name}；tick 率 ${tickRate.toFixed(1)}/s；录像协议 ${h.demoprotocol} ／ 网络协议 ${h.networkprotocol}；字符串表 ${this.result!.stringTables.length} 张；服务器类别 ${this.result!.dataTables.classes.length} 个">
         <span>来源</span><b>${file.name}</b>
       </div>`;
   }
@@ -447,7 +447,7 @@ export class DemoPanel {
   /**
    * **供底部时间轴使用的占用标记**：每个「进服 / 换人」点一条，带那一刻的在场名单。
    *
-   * 位置按**整条录像**的 tick 归一（`ratio = tick / 总 tick`）—— 演示片段在时间轴上就是整段窗口，
+   * 位置按**整条录像**的 tick 归一（`ratio = tick / 总 tick`）—— 录像片段在时间轴上就是整段窗口，
    * 故该比例与滑杆的 `0..1` 位置一一对应。
    */
   /**
@@ -464,7 +464,7 @@ export class DemoPanel {
   /**
    * **录像的真实 tick 率**（总 tick / 总秒数）。
    *
-   * 演示页把「当前时间」换算成 tick 时必须用它 —— 早先在 pp.ts 里把 tick 率写死成 100，
+   * 录像页把「当前时间」换算成 tick 时必须用它 —— 早先在 pp.ts 里把 tick 率写死成 100，
    * 而这份录像实际是 66.67，于是「当前 tick」跑得比真实快 1.5 倍：播到后半段 currentTick`r
    * 早已超过 	otalTicks，花名册里**所有在线的人都被判成离线**（owner 实测）。
    */

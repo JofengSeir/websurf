@@ -38,8 +38,8 @@
 | 相机单一写者 | 回放第一人称段把 `drivesCamera` / `allowMove` 置假并用 `applyToWithRoll` 写相机，其余帧由 `FlyCam` 写 | `apps/viewer/src/app.ts:486` 到 `apps/viewer/src/app.ts:503` |
 | 帧间隔上限 | dt 取 `min(now - lastNow, 0.05)`，避免切标签页回来时时间跳变 | `apps/viewer/src/app.ts:480` |
 | HUD 节流 | 位姿行、时间轴、遥测按 ≥ 80 ms 的间隔刷新，不每帧重排 DOM | `apps/viewer/src/app.ts:510` |
-| 拖拽分派 | `.bsp` → 地图；`.replay` → 切到录像页并交给面板；其余提示只支持这两种 | `apps/viewer/src/app.ts:336` 到 `apps/viewer/src/app.ts:348` |
-| URL 深链 | `?bsp=` 与 `?replay=` 可任意组合；录像先按魔数嗅探再交给面板，非 Shavit 直接报错 | `apps/viewer/src/app.ts:434` 到 `apps/viewer/src/app.ts:457` |
+| 拖拽分派 | `.bsp` → 地图；`.replay` → 切到记录页并交给面板；其余提示只支持这两种 | `apps/viewer/src/app.ts:336` 到 `apps/viewer/src/app.ts:348` |
+| URL 深链 | `?bsp=` 与 `?replay=` 可任意组合；记录先按魔数嗅探再交给面板，非 Shavit 直接报错 | `apps/viewer/src/app.ts:434` 到 `apps/viewer/src/app.ts:457` |
 | `crossOriginIsolated` 只读不选路 | viewer 无物理、不需要 `SharedArrayBuffer`，该标志只打印供部署核对 | `apps/viewer/src/app.ts:39` 到 `apps/viewer/src/app.ts:44` |
 
 ## 已知缺口
@@ -48,4 +48,4 @@
 2. **贴合检查的文案与数据不同源**（本次读码发现）：判据收集了全部越界轨道，提示串里也列出全部名字，但括号里的 bbox 只取 `outside[0]` 一条（`apps/viewer/src/app.ts:206` 到 `apps/viewer/src/app.ts:211`），多条越界时读数只对应第一条。
 3. **`wasm.d.ts` 是零导入点的类型面**：`apps/viewer/src/wasm.d.ts:13` 只做整体转出，本工程内无引用，仅被 `apps/viewer/tsconfig.json:15` 的 `include` 收进编译程序。
 4. **`viewer.replay.setSpeed` 的钳制下限在正常入参下不可达**：表达式 `Math.max(0.1, Math.min(16, Number(x) || 1))`（`apps/viewer/src/app.ts:405`）先用 `|| 1` 把 0 / NaN 归成 1，只有传负数才会落到 0.1 下限；时间轴下拉的档位下限是 0.1（`apps/viewer/src/replay/timeline.ts:19`），两者不冲突，但接口文档化的下半区实际只有负数能触发。
-5. **`updateReplayMapStatus` 只在 `currentBox` 非空时做检查**：`?replay=` 深链先导入录像而地图尚未加载时该函数直接跳过检查（`apps/viewer/src/app.ts:193`），贴合问题要等地图加载后由 `loadBsp` 末尾再次调用才会被报出（`apps/viewer/src/app.ts:263`）。
+5. **`updateReplayMapStatus` 只在 `currentBox` 非空时做检查**：`?replay=` 深链先导入记录而地图尚未加载时该函数直接跳过检查（`apps/viewer/src/app.ts:193`），贴合问题要等地图加载后由 `loadBsp` 末尾再次调用才会被报出（`apps/viewer/src/app.ts:263`）。

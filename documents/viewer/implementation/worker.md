@@ -1,4 +1,4 @@
-# implementation/worker：录像解析 Worker
+# implementation/worker：记录解析 Worker
 
 > 覆盖 `apps/viewer/src/worker/main.ts`。它被两条构建路径消费：`apps/viewer/package.json:12` 的 `build:worker` 打成 `apps/viewer/web/worker.js`（dev / multi 产物按 module worker 装载），`apps/viewer/scripts/build-dist.mjs:314` 用 IIFE 再打一份内嵌进 single 产物的 `app.js`（运行时由 `apps/viewer/src/replay/importer.ts:83` 读 `globalThis.__VBSP_WORKER_JS__` 起 Blob Worker）。
 

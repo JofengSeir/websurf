@@ -1,6 +1,6 @@
 # implementation/ui：HUD、面板与读数
 
-> 覆盖 `apps/viewer/src/ui/` 下的四个模块：`hud.ts`（HUD 与引导层）、`mapinfo.ts`（地图信息 + 出生点导航）、`replaymeta.ts`（录像信息条）、`telemetry.ts`（回放遥测 HUD）。
+> 覆盖 `apps/viewer/src/ui/` 下的四个模块：`hud.ts`（HUD 与引导层）、`mapinfo.ts`（地图信息 + 出生点导航）、`replaymeta.ts`（记录信息条）、`telemetry.ts`（回放遥测 HUD）。
 
 ---
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | `apps/viewer/src/ui/hud.ts` | 三条状态行（`#pose` / `#bspStatus` / `#replayStatus`）、引导层、拖拽反馈、启动兜底卡、帮助浮层；元素句柄构造期取一次，取不到即 null 且各方法逐个判空 | 类 `Hud`（`apps/viewer/src/ui/hud.ts:21`） |
 | `apps/viewer/src/ui/mapinfo.ts` | 「地图」标签页内容：更换地图入口、光照模式分区、地图信息（核心三行 + 折叠统计明细）、出生点导航（推荐项 ★ 与跳转按钮） | 接口 `WorldBox`（`apps/viewer/src/ui/mapinfo.ts:25`）、类 `MapPanel`（`apps/viewer/src/ui/mapinfo.ts:44`） |
-| `apps/viewer/src/ui/replaymeta.ts` | 底部 dock 上层的录像信息条：把跟随轨道的 `Clip.meta` 渲染成「成绩 / 玩家 / 地图 / 风格 / tick / 帧段 / 日期 / 格式」标签值对 | 类 `ReplayMetaPanel`（`apps/viewer/src/ui/replaymeta.ts:16`） |
+| `apps/viewer/src/ui/replaymeta.ts` | 底部 dock 上层的记录信息条：把跟随轨道的 `Clip.meta` 渲染成「成绩 / 玩家 / 地图 / 风格 / tick / 帧段 / 日期 / 格式」标签值对 | 类 `ReplayMetaPanel`（`apps/viewer/src/ui/replaymeta.ts:16`） |
 | `apps/viewer/src/ui/telemetry.ts` | 速度双读数（横向 = 水平速度模、竖向 = 绝对值）与八键按键簇；按键簇挂 `#timeline` 右列，随时间轴一起显隐 | 类 `TelemetryHud`（`apps/viewer/src/ui/telemetry.ts:61`） |
 
 ## 关键流程与不变量

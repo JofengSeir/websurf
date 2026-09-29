@@ -1,5 +1,5 @@
 /**
- * 录像时间轴（底部控制条）：进度条、播放控制、显示开关。
+ * 时间轴（底部控制条）：进度条、播放控制、显示开关。
  *
  * 三行结构：上行 = 进度条（正式跑段高亮与 A-B 区间带都叠在滑杆上）；
  * 中行 = 主控制（播放 / 停止 / 逐帧 / 时间·帧读数 / 倍速下拉）；
@@ -53,7 +53,7 @@ export class Timeline {
   private readonly marksLayer: HTMLElement;
   /** 播放头处的人物圆簇容器（跟着主时钟走）。 */
   private presence!: HTMLElement;
-  /** 由演示页提供的「此刻在场的人」查询；未设置则圆簇不出现。 */
+  /** 由录像页提供的「此刻在场的人」查询；未设置则圆簇不出现。 */
   private presenceOf: ((ratio: number) => ReadonlyArray<PresenceEntry>) | null = null;
   private onPickEntity: ((entity: number) => void) | null = null;
   /** 上一次圆簇的「位置 + 成员」签名：没变就不写 DOM，避免每帧重建打断悬停。 */
@@ -66,13 +66,13 @@ ull = 不画。 */
   private hlSpan: [number, number] | null = null;
   private activeZone!: HTMLElement;
   private hlZone!: HTMLElement;
-  /** 全程总 tick：把花名册的 tick 区间换算成时间标注用（由演示页在 setPresence 时给出）。 */
+  /** 全程总 tick：把花名册的 tick 区间换算成时间标注用（由录像页在 setPresence 时给出）。 */
   private totalTicks = 1;
   /** 是否有轨道：false 时整条时间轴加 hidden 类，refresh 与快捷键直接返回；读数一律现取，不缓存。 */
   private hasTracks = false;
-  /** 是否演示（长会话）模式：为真时时间码按「录像内绝对时刻」显示，并收起 replay 专用控件。 */
+  /** 是否录像（长会话）模式：为真时时间码按「录像内绝对时刻」显示，并收起 replay 专用控件。 */
   private demoMode = false;
-  /** 是否已打过事件标记：演示录像载入后即成立（此时还没有轨道），时间轴也该保持可见、滑杆可拖。 */
+  /** 是否已打过事件标记：录像载入后即成立（此时还没有轨道），时间轴也该保持可见、滑杆可拖。 */
   private hasMarks = false;
   /** 是否正在拖动滑杆：为 true 时 refresh 不回写滑杆值（避免与拖动抢夺）。 */
   private dragging = false;
@@ -110,7 +110,7 @@ ull = 不画。 */
     this.marksLayer = el('div', 'tl-marks hidden');
     wrap.appendChild(this.marksLayer);
 
-    // 播放头处的人物圆簇：默认隐藏，演示页调 setPresence 后才出现
+    // 播放头处的人物圆簇：默认隐藏，录像页调 setPresence 后才出现
     this.presence = el('div', 'tl-presence');
     this.presence.hidden = true;
     wrap.appendChild(this.presence);
@@ -300,7 +300,7 @@ ull = 不画。 */
   /** 轨道增删后调用：非空即显示时间轴（去掉 hidden 类），传空数组即隐藏，随后刷新读数。 */
   setTracks(tracks: readonly Track[]): void {
     this.hasTracks = tracks.length > 0;
-    // **有标记就不隐藏**：演示录像载入后没有轨道但有标记，此时必须留着胶片条与滑杆
+    // **有标记就不隐藏**：录像载入后没有轨道但有标记，此时必须留着胶片条与滑杆
     // （否则 onLoaded 刚放出来，紧接着的 syncTracks 又把它藏回去）。
     this.root.classList.toggle('hidden', !this.hasTracks && !this.hasMarks);
     this.refresh();
@@ -417,7 +417,7 @@ ull = 不画。 */
   }
 
   /**
-   * **演示（长会话）模式**：把只服务于 replay「严格比较记录」的控件收起来。
+   * **录像（长会话）模式**：把只服务于 replay「严格比较记录」的控件收起来。
    *
    * owner 的判据：一段近一小时的录像要看的是「某个人这段时间在干什么」，而不是「两条记录谁快」——
    * 所以 **A/B 区间与「整段」**（这三个都是**强制定义长度**的行为）、**帧步进与 `帧 · run` 读数**
@@ -427,10 +427,10 @@ ull = 不画。 */
   setDemoMode(on: boolean): void {
     this.root.classList.toggle('tl-demo', on);
     this.demoMode = on;
-    // **进演示模式就把胶片放出来**：`.dem` 一解析完就该看见这条进度条，
+    // **进录像模式就把胶片放出来**：`.dem` 一解析完就该看见这条进度条，
     // 而不是等播放头走到第一个人进场、`pickEntity` 建出轨道之后才出现
     // （owner 实测到的「加载完成后没从 0s 播放、像先藏起来等机器人进来」）。
-    // 演示录像的时长由 `player.span` 兜底，此刻没有任何轨道也能显示与拖动。
+    // 录像的时长由 `player.span` 兜底，此刻没有任何轨道也能显示与拖动。
     if (on) {
       this.hasMarks = true;
       this.root.classList.remove('hidden');
@@ -444,7 +444,7 @@ ull = 不画。 */
     const p = this.player;
     this.playBtn.textContent = p.playing ? '暂停' : '播放';
     this.playBtn.classList.toggle('active', p.playing);
-    // 演示模式按**录像内绝对时刻**（`26:05 / 59:58`）显示：长会话里 `0.00 / 3598.00 s` 这种
+    // 录像模式按**录像内绝对时刻**（`26:05 / 59:58`）显示：长会话里 `0.00 / 3598.00 s` 这种
     // 秒计数读不出「第几分钟」，正是「只适合严格比较记录」的读法。
     this.timeEl.textContent = this.demoMode
       ? clock(p.time) + ' / ' + clock(p.duration)
@@ -533,7 +533,7 @@ ull = 不画。 */
 }
 
 /** 秒 → 两位小数字符串；非有限值按 '0.00' 输出。 */
-/** 秒 -> m:ss（演示模式的时间码：长会话读「第几分钟」比读秒直观）。 */
+/** 秒 -> m:ss（录像模式的时间码：长会话读「第几分钟」比读秒直观）。 */
 function clock(t: number): string {
   const s = Math.max(0, Math.round(t));
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');

@@ -1,9 +1,9 @@
 /**
  * WebSurf-viewer — BSP 地图预览 + Shavit `.replay` 回放。
  *
- * 主线程装配：场景 / 飞行相机 / 地图信息 / 出生点导航 / 录像导入与回放。本文件是 viewer 的入口
+ * 主线程装配：场景 / 飞行相机 / 地图信息 / 出生点导航 / 记录 / 录像导入与回放。本文件是 viewer 的入口
  * （`apps/viewer/package.json` 的 `build:app` 用 esbuild 打成 `web/app.js`）。
- * 定位是**纯视觉**：不引入物理与碰撞，录像只做播放与观察。
+ * 定位是**纯视觉**：不引入物理与碰撞，记录与录像只做播放与观察。
  * 播放基准 = 录像帧自身坐标：默认不做起点锚定，坐标映射切换与平移/旋转变换只按用户显式操作叠加。
  * 对外接口 = `globalThis.viewer` 的 `map`（只读内省）与 `replay`（内省 + 播放控制）。
  */
@@ -95,46 +95,46 @@ for (const tab of Array.from(document.querySelectorAll<HTMLButtonElement>('.tab'
     }
     // **记下当前 tab**：时间轴 / 3D 可视化 / 信息条只喂**当前 tab 自己的轨道**。
     // 两个 tab 共用同一个 `ReplayPlayer` 与同一条底部时间轴，若把两边的轨道一起传过去，
-    // 时长取并集、窗口互相覆盖 —— 就是 owner 说的「录像 tab 又和演示 tab 抢进度条组件」。
+    // 时长取并集、窗口互相覆盖 —— 就是 owner 说的「录像 tab 又和录像 tab 抢进度条组件」。
     activeTab = name === 'demo' ? 'demo' : 'replay';
-    // **离开演示 tab 就拆掉演示的播放态**（owner 实测：不拆的话切到「录像」看不了东西）。
-    // **只暂停并移除演示轨道，保留 `.dem` 的解析结果** —— 切回来直接可看，不必重读几十 MB。
+    // **离开录像 tab 就拆掉录像的播放态**（owner 实测：不拆的话切到「录像」看不了东西）。
+    // **只暂停并移除录像轨道，保留 `.dem` 的解析结果** —— 切回来直接可看，不必重读几十 MB。
     if (name !== 'demo') teardownDemo();
-    // **进入演示 tab 只做"准备"，绝不删对方的轨道** —— 早先这里把录像的轨道整批 remove 掉，
+    // **进入录像 tab 只做"准备"，绝不删对方的轨道** —— 早先这里把录像的轨道整批 remove 掉，
     // 结果切回「录像」轨迹全没了（owner 实测）。两个 tab 共用 `ReplayPlayer`，但**各自的轨道
-    // 属于各自 tab**：演示这边只在需要时增添/替换自己那一条，录像的留给录像。
+    // 属于各自 tab**：录像这边只在需要时增添/替换自己那一条，录像的留给录像。
     else enterDemoTab();
   });
 }
 
 /**
- * 进入演示 tab 的准备：恢复演示的时长与布局，并重新开启自动跟随。
+ * 进入录像 tab 的准备：恢复录像的时长与布局，并重新开启自动跟随。
  *
  * **不删任何轨道** —— 录像的轨道属于「录像」tab，删掉它就等于毁掉另一边的状态
- * （这正是 owner 报的"录像轨迹切换到演示后就消失了"）。
+ * （这正是 owner 报的"录像轨迹切换到录像后就消失了"）。
  * 视频时长用 `player.span` 兜底（`duration = max(tracks.duration, span)`），
- * 演示总长通常远长于任何一条录像片段，故窗口不会被录像的轨道压短。
+ * 录像总长通常远长于任何一条录像片段，故窗口不会被录像的轨道压短。
  */
 function enterDemoTab(): void {
-  // **先恢复演示的时长与布局，再判断有没有演示轨道**：早先这句 `if (!demoTrackId) return;`
-  // 放在最前面 —— 于是"载入后还没选过人"就切走再切回来时，演示模式与 `span` 都不会恢复，
+  // **先恢复录像的时长与布局，再判断有没有录像轨道**：早先这句 `if (!demoTrackId) return;`
+  // 放在最前面 —— 于是"载入后还没选过人"就切走再切回来时，录像模式与 `span` 都不会恢复，
   // 胶片退回 replay 布局、时长也丢了。这两件事与"有没有轨道"无关。
   player.span = demoPanel?.totalSeconds() ?? 0;
   timeline.setDemoMode(true);
-  // **跟随目标也要切回演示这条**：否则仍指着「录像」页的轨道，第一人称看的是另一边的数据。
+  // **跟随目标也要切回录像这条**：否则仍指着「录像」页的轨道，第一人称看的是另一边的数据。
   if (demoTrackId) player.followTrack(demoTrackId);
   syncTracks();
-  // 没有演示轨道时也把自动跟随打开：播放头走起来后帧循环会重新挑人并建轨道。
+  // 没有录像轨道时也把自动跟随打开：播放头走起来后帧循环会重新挑人并建轨道。
   autoFollow = true;
   autoFollowEntity = null;
 }
 
 /**
- * 拆掉演示 tab 的**播放态**（不丢解析结果）。
+ * 拆掉录像 tab 的**播放态**（不丢解析结果）。
  *
- * 为什么必须拆：演示轨道与「录像」页共用同一个 `ReplayPlayer` 与 `Timeline`，
- * 演示的 `span`、演示轨道、演示模式与那两条区间带若留着，切到「录像」后
- * 时间轴仍被演示的时长与布局占着，**录像就播不了**（owner 实测）。
+ * 为什么必须拆：录像轨道与「录像」页共用同一个 `ReplayPlayer` 与 `Timeline`，
+ * 录像的 `span`、录像轨道、录像模式与那两条区间带若留着，切到「录像」后
+ * 时间轴仍被录像的时长与布局占着，**录像就播不了**（owner 实测）。
  * 保留的是 `demoPanel` 里那份解析结果 —— 切回来不必重新载入 `.dem`。
  */
 function teardownDemo(): void {
@@ -187,7 +187,7 @@ const replayPane = qs('pane-replay');
 // `syncTracks()`，读到的就是尚未初始化的 `let` ⇒ `ReferenceError` ⇒ 页面直接弹致命卡
 // （实测：冒烟报 `fatalShown=true`）。
 let demoTrackId: string | null = null;
-/** 演示轨道当前呈现的**实体号**（取自 `clip.id` 尾段）——改名时用它判断该不该改。 */
+/** 录像轨道当前呈现的**实体号**（取自 `clip.id` 尾段）——改名时用它判断该不该改。 */
 let demoTrackEntity: number | null = null;
 /** 当前激活的 tab：决定时间轴 / 可视化 / 信息条只看到**哪一边的轨道**。 */
 let activeTab: 'replay' | 'demo' = 'replay';
@@ -197,19 +197,19 @@ let autoFollow = false;
 let autoFollowEntity: number | null = null;
 let replayPanel: ReplayPanel | null = null;
 function syncTracks(): void {
-  // **只把当前 tab 的轨道喂给共用组件**：演示那条用 demoTrackId 认，其余归「录像」页。
+  // **只把当前 tab 的轨道喂给共用组件**：录像那条用 demoTrackId 认，其余归「录像」页。
   // 两个 tab 的轨道都留在播放器里（切回来不丢），但时间轴/可视化/信息条一次只看一边。
   const tracks = player.tracks.tracks;
   visuals.setTracks(tracks);
   timeline.setTracks(tracks);
   metaPanel.setTracks(tracks, player.tracks.followId);
   telemetry.setTracks(tracks.length > 0);
-  // **同步「录像」页自己的轨迹列表**：早先这里没调，于是演示 tab 拆掉轨道（`teardownDemo`）
-  // 或演示增删轨道时，录像页那份列表不会跟着变 —— 列表里还挂着已经不存在的轨道。
+  // **同步「录像」页自己的轨迹列表**：早先这里没调，于是录像 tab 拆掉轨道（`teardownDemo`）
+  // 或录像增删轨道时，录像页那份列表不会跟着变 —— 列表里还挂着已经不存在的轨道。
 }
 
 
-// ── 演示（Source `.dem`） ───────────────────────────────────────────
+// ── 录像（Source `.dem`） ───────────────────────────────────────────
 // 独立于「录像」页：`.dem` 给不出定长位姿，看板是「时间线 + 玩家标注 + 详情」，不复用轨迹列表布局。
 const demoPane = qs('pane-demo');
 
@@ -218,7 +218,7 @@ const demoPane = qs('pane-demo');
  * Source 1 引擎（CS:S）固定 **100 tick**，与录像头 `playbackTicks / playbackTime` 的口径一致。
  */
 const demoTickRate = 100;
-// 演示页自己建的那条轨道 id：点选是「切换看谁」，复用它做替换（见下方 onClip）。
+// 录像页自己建的那条轨道 id：点选是「切换看谁」，复用它做替换（见下方 onClip）。
 const demoPanel = demoPane
   ? new DemoPanel(demoPane, {
       rule: () => defaultRule(),
@@ -232,7 +232,7 @@ const demoPanel = demoPane
       // 早先只有点了某个玩家、建出轨道之后时间轴才出现 —— 载入完那一刻界面像没反应。
       // **悬停看板某一行 ⇒ 在进度条上画出那一行的活跃区间**；移开清除。
       onHoverSpan: (span) => timeline.setHighlight(span),
-      // **tick 点按人物切换**：落到演示那条轨道上（isuals 已支持按轨道覆写全局开关）。
+      // **tick 点按人物切换**：落到录像那条轨道上（isuals 已支持按轨道覆写全局开关）。
       onTickToggle: (_entity: number, on: boolean) => {
         if (demoTrackId) visuals.setTickNodesVisibleFor(demoTrackId, on);
       },
@@ -246,7 +246,7 @@ const demoPanel = demoPane
       onLoaded: () => {
         // **无轨道也能播放/暂停**：把录像总时长写进播放器兜底（否则载入完 play() 直接返回）。
         player.span = demoPanel?.totalSeconds() ?? 0;
-        // **演示 tab 换掉 replay 的布局**：收起 A/B 区间、帧步进、帧 · run 读数
+        // **录像 tab 换掉 replay 的布局**：收起 A/B 区间、帧步进、帧 · run 读数
         // （那些要么强制定义长度、要么是比较用的精度），时间码改读录像内绝对时刻。
         timeline.setDemoMode(true);
         // **载入完成后从 0s 开始播，并按播放头自动跟随视角**（owner 定稿）：
@@ -262,7 +262,7 @@ const demoPanel = demoPane
       // （早先只建轨道不播放：视图停在 0 秒不动，看起来像「没反应」——这是「点了没动」的直接原因）
       onClip: (clip) => {
         // **点选是「切换看谁」，不是「再叠一条」**：早先每次点击都 `addTrack`，连点五次就得到五条
-        // 轨道（表现为「多次点击会导致创建多个」）。这里记住演示页自己建的那条，后续点击**替换**它。
+        // 轨道（表现为「多次点击会导致创建多个」）。这里记住录像页自己建的那条，后续点击**替换**它。
         // 若那条已被用户删掉（`replaceClip` 返回假），则退回追加。
         autoFollow = false; // 用户自己点了人 ⇒ 不再自动抢视角
         let track: Track | null = demoTrackId ? (player.tracks.tracks.find((t) => t.id === demoTrackId) ?? null) : null;
@@ -272,7 +272,7 @@ const demoPanel = demoPane
           track = player.addTrack(clip);
           demoTrackId = track.id;
         }
-        // **给这条演示轨道写上「当前这个人」的颜色**：演示复用同一条轨道（切人只换数据），
+        // **给这条录像轨道写上「当前这个人」的颜色**：录像复用同一条轨道（切人只换数据），
         // 轨道色不会自己变，必须由这里按人物写入 —— 否则所有人共用第一个人的颜色。
         // 写入后，3D 里的轨迹线与看板色点取自同一个值（同一张 `TRACK_PALETTE`、同一取模口径）。
         const demEntity = Number(clip.id.split(':').pop());
@@ -324,7 +324,7 @@ if (replayPane) {
     // 轨道属性变化（显隐 / 偏移 / 跟随 / 重命名）：TrackPanel 自己重绘列表，这里重建 3D、时间轴与信息条
     onTracksChanged: () => syncTracks(),
     onStatus: (text) => {
-      // 录像域临时消息（导入进度 / 工具结果）走 HUD 提醒行；'' 立即恢复持久内容
+      // 回放域临时消息（导入进度 / 工具结果）走 HUD 提醒行；'' 立即恢复持久内容
       hud.flashReplayStatus(text, 8000);
     },
   });

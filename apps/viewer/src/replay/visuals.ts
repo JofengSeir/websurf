@@ -1,5 +1,5 @@
 /**
- * 录像的 3D 呈现层：为每条轨道建一组「轨迹线 + tick 数据点 + 幽灵实体 + 起终点标记」。
+ * 回放的 3D 呈现层：为每条轨道建一组「轨迹线 + tick 数据点 + 幽灵实体 + 起终点标记」。
  *
  * 职责边界：本文件只把采样结果写进 `three` 对象，不做时间换算（在
  * `apps/viewer/src/replay/tracks.ts` 的 `TrackSet`）、不管播放状态（在
@@ -48,9 +48,9 @@ export class ReplayVisuals {
   /**
    * **按轨道的 tick 点开关**（覆写全局 `showTickNodes`）。
    *
-   * 为什么需要它：「录像」页与「演示」页共用同一个 `ReplayVisuals`，而 `showTickNodes` 是
-   * **全局单份** —— 在录像页关掉 tick 点，演示页的人物也跟着没了（owner 实测）。
-   * 这里让每条轨道可以有自己的取值；演示页按人物逐个设置，录像页继续用全局开关。
+   * 为什么需要它：「录像」页与「录像」页共用同一个 `ReplayVisuals`，而 `showTickNodes` 是
+   * **全局单份** —— 在录像页关掉 tick 点，录像页的人物也跟着没了（owner 实测）。
+   * 这里让每条轨道可以有自己的取值；录像页按人物逐个设置，录像页继续用全局开关。
    */
   private readonly tickByTrack = new Map<string, boolean>();
 
@@ -112,7 +112,7 @@ export class ReplayVisuals {
   }
 
   /** tick 数据点总开关（时间轴复选框的回调）。 */
-  /** 设置**某一条轨道**的 tick 点显隐（演示页按人物逐个设置）。 */
+  /** 设置**某一条轨道**的 tick 点显隐（录像页按人物逐个设置）。 */
   setTickNodesVisibleFor(trackId: string, v: boolean): void {
     this.tickByTrack.set(trackId, v);
   }

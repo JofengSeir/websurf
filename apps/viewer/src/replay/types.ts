@@ -1,5 +1,5 @@
 /**
- * 录像（replay）数据契约：解析产物（`Clip` / `ReplayHeaderMeta`）、导入规则（`RuleConfig`）、
+ * 记录（replay）数据契约：解析产物（`Clip` / `ReplayHeaderMeta`）、导入规则（`RuleConfig`）、
  * 播放器采样（`Sample`）与多轨道（`Track` / `TrackSample`）。
  *
  * 管线：Shavit `.replay`（`apps/viewer/src/replay/shavit-replay.ts` 原生解析）→ `Clip`（定型数组）
@@ -22,7 +22,7 @@ export interface RuleTransform {
 }
 
 /**
- * 坐标轴映射切换（解码层，非变换；录像与 viewer 坐标系不一致时的逃生口）。
+ * 坐标轴映射切换（解码层，非变换；记录与 viewer 坐标系不一致时的逃生口）。
  * - `shavit`（默认）：Source `[x,y,z]` → viewer `[y,z,x]`——与 `apps/viewer/crates/wasm/src/lib.rs`
  *   的 `rotate_yup`、地图 GLB 导出同一变换（坐标循环置换 ⇒ det=+1）。
  * - `raw`：`[x,y,z]` 直读（坐标序不合时的对照项）。

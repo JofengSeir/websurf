@@ -1,5 +1,5 @@
 /**
- * 录像域角度工具（纯函数，无副作用）：角度归一与 pitch 限幅的统一出口。
+ * 记录域角度工具（纯函数，无副作用）：角度归一与 pitch 限幅的统一出口。
  * 消费方：`apps/viewer/src/replay/shavit-replay.ts` 取 clampPitch 与 wrapDeg，
  * `apps/viewer/src/replay/build.ts` 取 wrapDeg，`apps/viewer/test/replay-selftest.ts` 两者都取。
  */

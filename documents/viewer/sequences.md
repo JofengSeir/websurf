@@ -50,7 +50,7 @@
 
 ## 消息与通道
 
-本工程只有一条 postMessage 通道：**主线程 ↔ 录像解析 Worker**。协议类型单点在 `apps/viewer/src/replay/protocol.ts`，两侧实现分别是 `apps/viewer/src/replay/importer.ts` 的 `ReplayImporter` 与 `apps/viewer/src/worker/main.ts`。
+本工程只有一条 postMessage 通道：**主线程 ↔ 记录解析 Worker**。协议类型单点在 `apps/viewer/src/replay/protocol.ts`，两侧实现分别是 `apps/viewer/src/replay/importer.ts` 的 `ReplayImporter` 与 `apps/viewer/src/worker/main.ts`。
 
 | 方向 | 消息（以类型声明为准） | 载荷字段 | 锚点 |
 |---|---|---|---|
@@ -88,10 +88,10 @@
 | 施加静态光照中途抛错 | 只 `console.error`，不阻断挂载 | `apps/viewer/src/core/scene.ts:231` |
 | 块内几何合并失败 | 保留全部子块（不丢几何）；最终合并失败时逐块建 Mesh | `apps/viewer/src/core/scene.ts:455`、`apps/viewer/src/core/scene.ts:478` |
 | Worker 构造抛错或 `onerror` | `workerBroken` 置位、终止并丢弃 Worker、用同一个错误拒绝全部未结算请求；此后每次导入直接走主线程 | `apps/viewer/src/replay/importer.ts:102` 到 `apps/viewer/src/replay/importer.ts:110` |
-| 主线程回退的魔数嗅探失败 | 抛「不是 Shavit .replay 录像文件」错误，经面板 note 显示 | `apps/viewer/src/replay/importer.ts:185` |
+| 主线程回退的魔数嗅探失败 | 抛「不是 Shavit .replay 记录文件」错误，经面板 note 显示 | `apps/viewer/src/replay/importer.ts:185` |
 | Worker 收到消息但永不回包 | `import` 不设超时：promise 永不结算，面板 `busy` 保持为真，后续导入被丢弃 | `apps/viewer/src/replay/importer.ts:135`、`apps/viewer/src/replay/panel.ts:286` |
 | 拖入非 `.bsp` / 非 `.replay` | 已加载地图时 HUD 临时提示 5 s，未加载地图时写引导层错误 | `apps/viewer/src/app.ts:346` 到 `apps/viewer/src/app.ts:348` |
-| URL 深链 fetch 失败或不是 Shavit 录像 | 无地图时打开引导层并显示错误；已有地图时 HUD 临时提示 6 s | `apps/viewer/src/app.ts:459` 到 `apps/viewer/src/app.ts:468` |
+| URL 深链 fetch 失败或不是 Shavit 记录 | 无地图时打开引导层并显示错误；已有地图时 HUD 临时提示 6 s | `apps/viewer/src/app.ts:459` 到 `apps/viewer/src/app.ts:468` |
 | 规则存档缺失 / 版本不符 / 解析抛错 | 保留内置默认规则 `defaultRule()`；读不到时顺手清掉旧版键 | `apps/viewer/src/replay/panel.ts:189`、`apps/viewer/src/replay/types.ts:55` |
 | `localStorage` 写入失败 | `saveRule` 静默忽略（隐私模式等） | `apps/viewer/src/replay/panel.ts:215` |
 | 数字输入非法 | `numField` 打 `invalid` 类并回调 `onInput(NaN, false)`；变换侧遇非有限值直接返回、不改规则也不重导 | `apps/viewer/src/core/dom.ts:105`、`apps/viewer/src/replay/panel.ts:334` |

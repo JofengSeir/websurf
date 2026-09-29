@@ -1,6 +1,6 @@
-# implementation/replay：录像解析、回放与面板
+# implementation/replay：记录 / 录像解析、回放与面板
 
-> 覆盖 `apps/viewer/src/replay/` 下的模块：类型契约、Shavit `.replay` 原生解析、Source `.dem` 演示录像解析（`demo/` 下四个模块）、DEM→`Clip` 桥接（`apps/viewer/src/replay/democlip.ts`）、采样、多轨道容器、播放器、人工变换、角度工具、3D 呈现、导入器、Worker 协议、录像面板、轨迹列表、时间轴。
+> 覆盖 `apps/viewer/src/replay/` 下的模块：类型契约、Shavit `.replay` 原生解析、Source `.dem` 录像解析（`demo/` 下四个模块）、DEM→`Clip` 桥接（`apps/viewer/src/replay/democlip.ts`）、采样、多轨道容器、播放器、人工变换、角度工具、3D 呈现、导入器、Worker 协议、记录面板、轨迹列表、时间轴。
 
 ---
 
@@ -14,11 +14,11 @@
 | `apps/viewer/src/replay/tracks.ts` | 多轨迹容器与主时钟 → 轨道内部时间的换算 | `TRACK_PALETTE`（`apps/viewer/src/replay/tracks.ts:25`）、`TrackSet`（`apps/viewer/src/replay/tracks.ts:36`） |
 | `apps/viewer/src/replay/player.ts` | 播放器：主时钟、倍速、A-B 区间、循环、逐帧、采样转发 | `PlayMode`（`apps/viewer/src/replay/player.ts:15`）、`ReplayPlayer`（`apps/viewer/src/replay/player.ts:17`） |
 | `apps/viewer/src/replay/build.ts` | 人工变换微调（平移 + 绕 Y 旋转）与包围盒重算 | `LARGE_CLIP_FRAMES`（`apps/viewer/src/replay/build.ts:13`）、`applyClipTransform`（`apps/viewer/src/replay/build.ts:25`） |
-| `apps/viewer/src/replay/helpers.ts` | 录像域角度工具的统一出口 | 再导出 `wrapDeg`（`apps/viewer/src/replay/helpers.ts:10`）、`clampPitch`（`apps/viewer/src/replay/helpers.ts:13`） |
+| `apps/viewer/src/replay/helpers.ts` | 记录域角度工具的统一出口 | 再导出 `wrapDeg`（`apps/viewer/src/replay/helpers.ts:10`）、`clampPitch`（`apps/viewer/src/replay/helpers.ts:13`） |
 | `apps/viewer/src/replay/visuals.ts` | 每条轨道五个 three 对象（轨迹线 / tick 点 / 幽灵 / 起终点标记）的建、更、清 | `ReplayVisuals`（`apps/viewer/src/replay/visuals.ts:40`） |
 | `apps/viewer/src/replay/importer.ts` | 导入入口：优先 Worker，失败回退主线程；两条路径对调用方同形 | `ImportPhase`（`apps/viewer/src/replay/importer.ts:35`）、`ProgressFn`（`apps/viewer/src/replay/importer.ts:37`）、`ImportResult`（`apps/viewer/src/replay/importer.ts:39`）、`ReplayImporter`（`apps/viewer/src/replay/importer.ts:53`） |
 | `apps/viewer/src/replay/protocol.ts` | 主线程 ↔ 解析 Worker 的消息类型单点 | `ClipPayload`（`apps/viewer/src/replay/protocol.ts:12`）、`ParseRequest`（`apps/viewer/src/replay/protocol.ts:29`）、`ParseResponse`（`apps/viewer/src/replay/protocol.ts:46`） |
-| `apps/viewer/src/replay/panel.ts` | 录像面板四段：导入、轨迹列表、坐标映射、调整工具；规则持久化 | `ReplayPanelOptions`（`apps/viewer/src/replay/panel.ts:28`）、`ReplayPanel`（`apps/viewer/src/replay/panel.ts:43`） |
+| `apps/viewer/src/replay/panel.ts` | 记录面板四段：导入、轨迹列表、坐标映射、调整工具；规则持久化 | `ReplayPanelOptions`（`apps/viewer/src/replay/panel.ts:28`）、`ReplayPanel`（`apps/viewer/src/replay/panel.ts:43`） |
 | `apps/viewer/src/replay/trackpanel.ts` | 轨迹列表：逐条卡片（显隐 / 偏移 / 跟随 / 移除）与批量操作 | `TrackPanelOptions`（`apps/viewer/src/replay/trackpanel.ts:19`）、`TrackPanel`（`apps/viewer/src/replay/trackpanel.ts:37`） |
 | `apps/viewer/src/replay/timeline.ts` | 底部时间轴三行：进度条（两条叠加带）、主控制、显示开关与 A-B 区间 | `Timeline`（`apps/viewer/src/replay/timeline.ts:21`） |
 
@@ -64,7 +64,7 @@
 3. **`sampling.ts` 的两个插值原语只在本文件内使用**：`lerpAngle`（`apps/viewer/src/replay/sampling.ts:14`）与 `lerp`（`apps/viewer/src/replay/sampling.ts:20`）虽被导出，但全仓的消费点都在同文件的 `sampleClip` 内（`apps/viewer/src/replay/sampling.ts:64` 到 `apps/viewer/src/replay/sampling.ts:80`）。
 4. **时间轴两条 `title` 文案与默认播放窗口矛盾**（代码字面量级，改注释解决不了）：`runZone` 与时间读数行的文案写「prerun 不在播放区间」（`apps/viewer/src/replay/timeline.ts:46`、`apps/viewer/src/replay/timeline.ts:96`），而默认窗口起点取 `Math.min(0, t[0])`（`apps/viewer/src/replay/player.ts:124`）、时间轴起点即该值（`apps/viewer/src/replay/player.ts:106`），`localTime` 只在早于片头时返回 null（`apps/viewer/src/replay/tracks.ts:118`）⇒ prerun 帧会被采样并按第一人称播放；自检夹具的 `preFrames` 实测为 113（`apps/viewer/test/replay-selftest.ts:198`），其 `t[0]` 按公式为负（`apps/viewer/src/replay/shavit-replay.ts:470`）。
 5. **正式跑段高亮的宽度混基**：左端用 `rel(track.offset)`（主时钟基准），宽度算式里被减数是轨道内部时间 `track.clip.t` 上的帧时间、减数却含全局 `track.offset` 且只出现一次（`apps/viewer/src/replay/timeline.ts:312` 到 `apps/viewer/src/replay/timeline.ts:313`）⇒ `Track.offset ≠ 0`（轨迹面板的偏移输入框可写，`apps/viewer/src/replay/trackpanel.ts:200`）时位置与宽度会偏。
-6. **`disposeTree` 不释放轨迹线与 tick 点**：`clear()` 对每条轨道的五个对象都调 `disposeTree`（`apps/viewer/src/replay/visuals.ts:118`），而该函数只处理 `isMesh` 的节点（`apps/viewer/src/replay/visuals.ts:242`）⇒ `THREE.Line`（轨迹线）与 `THREE.Points`（tick 点）的几何与材质在每次 `setTracks` 重建时都不释放，反复换录像会累积 GPU 资源。
+6. **`disposeTree` 不释放轨迹线与 tick 点**：`clear()` 对每条轨道的五个对象都调 `disposeTree`（`apps/viewer/src/replay/visuals.ts:118`），而该函数只处理 `isMesh` 的节点（`apps/viewer/src/replay/visuals.ts:242`）⇒ `THREE.Line`（轨迹线）与 `THREE.Points`（tick 点）的几何与材质在每次 `setTracks` 重建时都不释放，反复换记录会累积 GPU 资源。
 7. **`createObjectURL` 未配对 `revokeObjectURL`**：以 Blob URL 起 Worker 时创建的对象 URL 没有回收点（`apps/viewer/src/replay/importer.ts:87`），每次重新起 Worker 泄漏一个 blob URL。
 8. **导入没有超时与取消**：`postMessage` 成功而 Worker 不回消息时 `import` 的 Promise 永不结算（`apps/viewer/src/replay/importer.ts:135`），面板 `busy` 保持为真，后续导入请求全部被丢弃（`apps/viewer/src/replay/panel.ts:286`）。
 9. **`ReplayImporter.dispose()` 零调用点**：`apps/viewer/src/replay/importer.ts:159` 提供终止 Worker 与清空 pending 表的能力，本工程没有调用者（页面卸载也不清理）。

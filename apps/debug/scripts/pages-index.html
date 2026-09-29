@@ -14,12 +14,8 @@
   }
   h1 { font-size: 28px; font-weight: 600; margin: 0 0 4px; }
   .sub { font-size: 14px; color: #666; margin-bottom: 32px; }
-  /* 三行入口走三列网格：列宽按最宽内容取齐，三行的链接、破折号、说明逐列对齐 */
-  .entry {
-    display: inline-grid; grid-template-columns: max-content max-content max-content;
-    column-gap: 0.55em; align-items: baseline; text-align: left;
-    font-size: 17px; line-height: 2.2;
-  }
+  /* 三行入口整体居中：每行作为一行完整文案居中排布（owner 定稿） */
+  .entry { font-size: 17px; line-height: 2.2; }
   .entry a { color: #2b6cb0; text-decoration: none; white-space: nowrap; }
   .entry a:hover { text-decoration: underline; }
   .entry .desc { color: #888; font-size: 13px; }
@@ -78,9 +74,9 @@
   <div class="sub">BSP 地图解析 / 物理碰撞 / 渲染的浏览器实现</div>
 
   <div class="entry">
-    <a href="./debug/?v=__DEPLOY_ID__">Debug Build</a><span>—</span><span>调试测试页面<span class="desc">（WebSurf-debug）</span></span>
-    <a href="./game/?v=__DEPLOY_ID__">Game Build</a><span>—</span><span>尝试游戏化<span class="desc">（WebSurf-game 最小实现）</span></span>
-    <a href="./viewer/?v=__DEPLOY_ID__">Viewer</a><span>—</span><span>BSP 地图游览 + 录像回放<span class="desc">（WebSurf-viewer）</span></span>
+    <div><a href="./debug/?v=__DEPLOY_ID__">Debug Build</a> — 调试测试页面<span class="desc">（WebSurf-debug）</span></div>
+    <div><a href="./game/?v=__DEPLOY_ID__">Game Build</a> — 游戏化<span class="desc">（WebSurf-game）</span></div>
+    <div><a href="./viewer/?v=__DEPLOY_ID__">Viewer Build</a> — BSP 地图游览 + 录像 Demo + 记录回放<span class="desc">（WebSurf-viewer）</span></div>
   </div>
 
   <div class="note">提示：Game Build 依赖 SharedArrayBuffer（需 COOP/COEP 响应头），GitHub Pages 不提供——线上可打开：功能可用、性能降级（自动回退到 MsgState 消息通道）；完整游玩请下载仓库后运行 <code>apps/game/build.cmd</code> 再运行 <code>apps/game/start.cmd</code>。</div>
