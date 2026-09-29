@@ -20,40 +20,43 @@
   </div>
 
   <!-- 首访引导层：`#guide`（其中的 `#guideError` 由 `apps/viewer/src/ui/hud.ts` 写入）-->
-<div id="guide">
-  <div class="card">
-    <div class="clapper"><i class="pin"></i></div>
-    <div class="clapper-under"></div>
-    <div class="board">
-      <div class="row head">
-        <div class="lab"><span class="cn">片名</span><span class="en">PRODUCTION</span></div>
-        <div class="val">WebSurf-viewer</div>
+<!-- 首访引导层：`#guide`（其中的 `#guideError` 由 `apps/viewer/src/ui/hud.ts` 写入）
+       结构 = 场记板：拍板条（铰链板 + 人字彩条）+ 表格化板身（中英双语单元格 + 格线）
+       + 底部两枚按钮（`label[for]` 原生转发到隐藏 input，不需要 click 监听） -->
+  <div id="guide">
+    <div class="card">
+      <!-- 拍板条：左端铰链板（浅灰盖片 ︱ 黑搭接段 + 四颗螺钉），右侧人字彩条
+           ——上下两层镜像渐变在条高中央折成 V，按实物照片逐行实测重建 -->
+      <div class="slate-stick">
+        <span class="slate-hinge"></span>
+        <span class="slate-stripes"></span>
       </div>
-      <div class="grid4">
-        <div class="cell"><span class="en">ROLL</span><span class="cn">卷号</span></div>
-        <div class="cell"><span class="en">SCENE</span><span class="cn">场号</span></div>
-        <div class="cell"><span class="en">SHOT</span><span class="cn">镜号</span></div>
-        <div class="cell"><span class="en">TAKE</span><span class="cn">次数</span></div>
+      <div class="slate-row slate-head">
+        <span class="glabel"><span class="zh">片名</span><span class="en">PRODUCTION</span></span>
+        <span class="gvalue">WebSurf-viewer</span>
       </div>
-      <div class="row">
-        <div class="lab"><span class="cn">导演</span><span class="en">DIRECTOR</span></div>
-        <div class="gstep">点击下方按钮选择 <code>.bsp</code> 地图文件，或把 <code>.bsp</code> / <code>.replay</code> 直接拖进本窗口</div>
-        <button id="guideBtn" type="button">选择 BSP 地图…</button>
+      <div class="gstep">
+        <span class="glabel"><span class="zh">第一步</span><span class="en">STEP 01</span></span>
+        <span class="gtext">选择 <code>.bsp</code> 地图文件，或把 <code>.bsp</code> / <code>.replay</code> / <code>.dem</code> 拖进本窗口</span>
       </div>
-      <div class="row">
-        <div class="lab"><span class="cn">摄影</span><span class="en">CAMERA</span></div>
-        <div class="gstep">右侧面板：地图信息与出生点跳转、录像回放（换图入口在地图页顶部）</div>
+      <div class="gstep">
+        <span class="glabel"><span class="zh">第二步</span><span class="en">STEP 02</span></span>
+        <span class="gtext">加载后点击画面锁定鼠标即可自由飞行</span>
       </div>
-      <div class="row">
-        <div class="lab"><span class="cn">日期</span><span class="en">DATE</span></div>
-        <div class="gstep">点击画面锁定鼠标即可自由飞行；右上角「?」打开操作帮助</div>
+      <div class="gstep">
+        <span class="glabel"><span class="zh">第三步</span><span class="en">STEP 03</span></span>
+        <span class="gtext">右侧面板：地图信息与出生点跳转、录像回放（换图入口在地图页顶部）；右上角「?」打开帮助</span>
+      </div>
+      <div class="gbtns">
+        <label class="filebtn" for="bspFile">选择地图（.bsp）</label>
+        <label class="filebtn" for="replayFile">导入录像（.replay / .dem）</label>
       </div>
       <div id="guideError"></div>
     </div>
   </div>
 </div>
 
-  <!-- 拖拽高亮反馈条：`#dropzone`，拖拽期间由 `apps/viewer/src/ui/hud.ts` 切换 `active` 类 -->
+<!-- 拖拽高亮反馈条：`#dropzone`，拖拽期间由 `apps/viewer/src/ui/hud.ts` 切换 `active` 类 -->
   <div id="dropzone">松开鼠标：.bsp 加载地图、.replay 导入录像</div>
 
   <div id="hud">
