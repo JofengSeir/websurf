@@ -859,10 +859,19 @@ try {
   }
 
   console.log('\n[13] 控制台（累计）');
+  // 两条**已知的、非缺陷**的噪声，逐条列明理由（否则这条断言会永久为红、失去意义）：
+  //  ① favicon 缺失 —— 页面未提供该文件，浏览器自行请求后报 404；
+  //  ② beforeunload 确认框被阻止 —— 三站都加了关闭确认守卫（见 AGENTS.md §7.1 的
+  //     「三站关闭确认兜底」行）。本脚本的 evaluate 不带 userGesture，浏览器因此**拒绝**
+  //     弹出原生确认框并把这件事记进 error 日志。**守卫行为本身是正确的**（真实按键路径
+  //     下确认框正常弹出、重载被拦截，那轮已用 CDP 实测过），这里只是脚本触发的假阳性。
   const realErrors = errors.filter(
-    (e) => !/favicon|Failed to load resource.*favicon/i.test(e),
+    (e) =>
+      !/favicon|Failed to load resource.*favicon/i.test(e) &&
+      !/beforeunload/i.test(e) &&
+      !/Blocked attempt to show a 'beforeunload'/i.test(e),
   );
-  if (realErrors.length === 0) console.log('  无 error 级日志 / 未捕获异常');
+  if (realErrors.length === 0) console.log('  无 error 级日志 / 未捕获异常（已滤 favicon 与 beforeunload 两条已知噪声）');
   else realErrors.forEach((e) => console.log('  ERR ' + e));
   check('无运行时错误', realErrors.length === 0, realErrors.join(' | '));
 } catch (e) {

@@ -127,6 +127,8 @@ export class DemoPanel {
   private readonly track: HTMLElement;
   private readonly detail: HTMLElement;
   private readonly note: HTMLElement;
+  /** 对话区容器（录像内的文本消息）。 */
+  private readonly chat: HTMLElement;
   private rows: DemoPlayerRow[] = [];
   private result: DemoParseResult | null = null;
   private duration = 0;
@@ -149,7 +151,6 @@ export class DemoPanel {
             <label class="dmp-alt"><input id="demoAltOrder" type="checkbox" /> 运动优先（实验展平顺序）</label>
           </div>
           <div class="dmp-meta" id="demoMeta">尚未载入</div>
-          <div class="dmp-timeline" id="demoTimeline" hidden></div>
           <div class="dmp-note" id="demoNote"></div>
         </div>
       </div>
@@ -157,13 +158,27 @@ export class DemoPanel {
         <div class="sec-title">详情与花名册</div>
         <div class="sec-body">
           <div class="dmp-detail" id="demoDetail"></div>
+          <!-- **花名册必须落在这个 sec 里**：它原先渲染进「载入与看板」的 dmp-timeline，
+               于是本节标题写着"花名册"、内容却是空的（owner 实测）。 -->
+          <div class="dmp-roster-list" id="demoRoster" hidden></div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-title">对话</div>
+        <div class="sec-body">
+          <!-- 录像内的文本消息（svc_Print / svc_StringCmd / svc_Disconnect）。
+               注意：**玩家聊天在 Source 里主要走 svc_UserMessage 的 SayText2**，
+               而本工程的解析器尚未解它 —— 所以这一节现在只显示服务端打印类文本，
+               多数录像里会是空的（本仓现有那份实测 0 条）。缺口已在 AGENTS.md §7.3 登记。 -->
+          <div class="dmp-chat" id="demoChat"></div>
         </div>
       </div>`;
     this.input = root.querySelector<HTMLInputElement>('#demoFile')!;
     this.meta = root.querySelector<HTMLElement>('#demoMeta')!;
-    this.track = root.querySelector<HTMLElement>('#demoTimeline')!;
+    this.track = root.querySelector<HTMLElement>('#demoRoster')!;
     this.detail = root.querySelector<HTMLElement>('#demoDetail')!;
     this.note = root.querySelector<HTMLElement>('#demoNote')!;
+    this.chat = root.querySelector<HTMLElement>('#demoChat')!;
     const alt = root.querySelector<HTMLInputElement>('#demoAltOrder');
     alt?.addEventListener('change', () => {
       setAltPriorityOrder(alt.checked);
@@ -200,6 +215,7 @@ export class DemoPanel {
     this.renderMeta(file);
     this.renderTimeline();
     this.renderDetail();
+    this.renderChat();
     // **载入成功即通知外部**：底部那条胶片进度条要立刻放出来（并在滑杆上打好事件标记），
     // 而不是等用户点了某个玩家、建出第一条轨道之后才出现 —— 那时进度条才冒出来会显得"没加载成功"。
     this.opts.onLoaded?.();
@@ -297,10 +313,10 @@ export class DemoPanel {
    * 因此从它看不出「谁退服了」。轨迹是逐帧采样的，**采样停了就是人走了**——
    * 这是本仓库里唯一可测的在/离场依据。名字取窗口末端那一刻的名字（同一窗内可能改过名）。
    */
-  private presenceWindows(): Array<{ slot: number; name: string; isBot: boolean; from: number; to: number }> {
+  private presenceWindows(): Array<{ slot: number; name: string; isBot: boolean; from: number; to: number; moving: number }> {
     const r = this.result;
     if (!r) return [];
-    const out: Array<{ slot: number; name: string; isBot: boolean; from: number; to: number }> = [];
+    const out: Array<{ slot: number; name: string; isBot: boolean; from: number; to: number; moving: number }> = [];
     for (const t of r.players) {
       // **只收录有有效视角的轨迹**：采样点太少的实体切过去也看不出动作，不该占一个圆。
       if (t.samples.length < 50) continue;
@@ -324,7 +340,31 @@ export class DemoPanel {
       const to = t.samples[t.samples.length - 1].tick;
       const name = this.nameAtSlot(slot, to) || t.className + ' #' + t.entityIndex;
       const guidIsBot = r.playerInfos.find((p) => p.slot === slot)?.isBot ?? true;
-      out.push({ slot, name, isBot: guidIsBot, from, to });
+      // **运动量**（世界包围盒对角线）：给自动跟随当判据用。
+      //
+      // 为什么需要它：录制机器人自己也是一个**合法占用者** —— 实测实体 #1 就是
+      // `ERDY-SURF Recorder`，它有名字、有 `playerInfo`、有一条覆盖全场的轨道，
+      // 但它**是观察者、全程挂机不动**。自动跟随若选中它，速度读数恒为 `0｜0`、
+      // 电平表与按键永远不亮（owner 实测）。而"按进场时间"或"按有无名字"都分不开它
+      // 与真人（真人 `Mon3tr` 26:05 才进场，之前那段只能从机器人里挑）。
+      // 唯一分得开的是**它到底动没动**：静物的包围盒是 0，冲浪的人动辄几千单位。
+      let dx = 0;
+      let dy = 0;
+      let dz = 0;
+      {
+        const p0 = t.samples[0].pos;
+        let minX = p0[0], minY = p0[1], minZ = p0[2];
+        let maxX = minX, maxY = minY, maxZ = minZ;
+        for (let i = 1; i < t.samples.length; i++) {
+          const p = t.samples[i].pos;
+          if (p[0] < minX) minX = p[0]; else if (p[0] > maxX) maxX = p[0];
+          if (p[1] < minY) minY = p[1]; else if (p[1] > maxY) maxY = p[1];
+          if (p[2] < minZ) minZ = p[2]; else if (p[2] > maxZ) maxZ = p[2];
+        }
+        dx = maxX - minX; dy = maxY - minY; dz = maxZ - minZ;
+      }
+      const moving = Math.round(Math.hypot(dx, dy, dz));
+      out.push({ slot, name, isBot: guidIsBot, from, to, moving });
     }
     return out;
   }
@@ -384,6 +424,99 @@ export class DemoPanel {
   }
 
   /** 供帧循环调用：刷新看板每行的在线/离线态。 */
+  /**
+   * **按「当前时刻谁真的在动」挑一个人**，给自动跟随用。返回实体号，无人可选时 null。
+   *
+   * 为什么不能用静态属性（实测教训，三条判据都试过）：
+   *   · 「按进场时刻」—— 记录机器人的四个槽位区间完全相同（都是 0:03–59:57），分不开；
+   *   · 「按有无名字」—— 只能排除槽 0（它没有 `userinfo` 名字、显示为类名兜底），剩四个仍分不开；
+   *   · 「按峰值速度」—— 四条轨道峰值都在 3585~4991，同样分不开。
+   * 唯一随时间变化、且真正有意义的是**此刻的运动状态**：同一个记录机器人轮流占用不同槽位，
+   * 某一时刻只有其中一个在跑。跟错槽位就会出现「速度读数恒 0、电平表与按键永不亮」。
+   *
+   * @param tick 当前播放头对应的 tick
+   * @param preferNamed 为真时优先在「有真名」的候选里挑（排除类名兜底串）
+   */
+  fastestAt(tick: number, preferNamed: boolean): number | null {
+    const r = this.result;
+    if (!r) return null;
+    const tickRate = this.tickRate();
+    let bestEntity: number | null = null;
+    let bestSpeed = -1;
+    let bestNamedEntity: number | null = null;
+    let bestNamedSpeed = -1;
+    for (const t of r.players) {
+      if (t.samples.length < 2) continue;
+      if (t.entityIndex < 1 || t.entityIndex > MAX_PLAYER_ENTITY) continue;
+      if (!isPlayerClass(t.className)) continue;
+      // 当前时刻所在采样（二分定位）
+      let lo = 0;
+      let hi = t.samples.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (t.samples[mid].tick <= tick) lo = mid;
+        else hi = mid - 1;
+      }
+      if (lo < 1) continue;
+      // **速度要跨「上一次位置真正变化」的采样算，不能只看相邻一条。**
+      // `sampleMode: 'posed'` 下每个实体逐 tick 都有采样，但姿态只在少数帧更新，
+      // 其余是原样重复（`Δpos = 0`）。按相邻帧差分会让**所有实体**都算出 ≈0 的速度，
+      // 于是这个判据完全失去区分力、等于随机挑一个 —— 这正是「按速度挑人」上一轮无效的原因。
+      let j = lo - 1;
+      while (
+        j > 0 &&
+        t.samples[j].pos[0] === t.samples[lo].pos[0] &&
+        t.samples[j].pos[1] === t.samples[lo].pos[1] &&
+        t.samples[j].pos[2] === t.samples[lo].pos[2]
+      ) {
+        j--;
+      }
+      const a = t.samples[j];
+      const b = t.samples[lo];
+      const dt = (b.tick - a.tick) / tickRate;
+      if (!(dt > 1e-6)) continue;
+      const speed = Math.hypot((b.pos[0] - a.pos[0]) / dt, (b.pos[1] - a.pos[1]) / dt);
+      if (speed > 6000) continue; // 瞬移样本不算「在动」
+      const nm = this.nameAtSlot(t.entityIndex - 1, tick) || t.className + ' #' + t.entityIndex;
+      const named = !/^[A-Za-z_]+ #\d+$/.test(nm);
+      if (speed > bestSpeed) {
+        bestSpeed = speed;
+        bestEntity = t.entityIndex;
+      }
+      if (named && speed > bestNamedSpeed) {
+        bestNamedSpeed = speed;
+        bestNamedEntity = t.entityIndex;
+      }
+    }
+    if (preferNamed && bestNamedEntity !== null) return bestNamedEntity;
+    return bestEntity;
+  }
+
+  /**
+   * 渲染**对话区**：录像内的文本消息（`svc_Print` / `svc_StringCmd` / `svc_Disconnect`，
+   * 由 `apps/viewer/src/replay/demo/demo.ts` 收进 `chatLines`，上限 4000 条）。
+   *
+   * **如实说明缺口**：Source 里**玩家聊天主要走 `svc_UserMessage` 的 `SayText2`**，
+   * 而解析器尚未解它 —— 所以这一节只覆盖服务端打印类文本，多数录像会是空的
+   * （本仓现有那份实测 `chatLines` 长 0）。空态里把这件事写清楚，
+   * 免得看的人以为"这录像没人说话"。
+   */
+  private renderChat(): void {
+    const r = this.result;
+    const lines = r?.chatLines ?? [];
+    if (lines.length === 0) {
+      this.chat.innerHTML =
+        '<div class="dmp-chat-empty">本录像没有服务端文本消息' +
+        '<span class="dmp-chat-hint">（玩家聊天走 svc_UserMessage 的 SayText2，解析器尚未解它 —— ' +
+        '所以这里看不到聊天，不等于那局没人说话）</span></div>';
+      return;
+    }
+    // 与看板其余部分同一套语彙：等宽小字、行间发丝线、不铺色块。
+    this.chat.innerHTML = lines
+      .map((l) => '<div class="dmp-chat-line">' + this.esc(l) + '</div>')
+      .join('');
+  }
+
   /**
    * **该实体的轨迹配色**：与「录像」页的轨迹点同一种分配口径（按序号取模），
    * 这样看板上的色点与 3D 视口里那条轨迹颜色一致，不用读文字就能对上号。
@@ -500,7 +633,7 @@ export class DemoPanel {
    *   没有下一次的（他一直在场到录像结束）记到片尾。
    * - **只保留有有效视角的**：该槽位对应的实体必须有一条可用轨迹，否则切过去看不到东西。
    */
-  roster(ratio: number): Array<{ key: number; name: string; isBot: boolean; entity: number; from: number; to: number }> {
+  roster(ratio: number): Array<{ key: number; name: string; isBot: boolean; entity: number; from: number; to: number; moving: number }> {
     void ratio;
     // **区间取「实际活跃窗口」= 该实体轨迹的首末采样帧，而不是 `userinfo` 的进服事件。**
     //
@@ -518,6 +651,7 @@ export class DemoPanel {
         entity: p.slot + 1,
         from: p.from,
         to: p.to,
+        moving: p.moving,
       }))
       .sort((a, b) => a.from - b.from);
   }

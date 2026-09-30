@@ -19,6 +19,12 @@ import type { Clip, ReplayHeaderMeta, RuleConfig } from './types.js';
 import { defaultRule } from './types.js';
 import type { DemoParseResult, PlayerTrack } from './demo/demo.js';
 
+/**
+ * 瞬移判据（单位/秒）：相邻两帧的速率超过它就不当作速度（重生 / 换图 / 观察者跳转）。
+ * CS:S 正常冲刺量级 250~3000 u/s，实测这份录像的相邻位移离群点达 ≈92 万 u/s，两者之间留足余量。
+ */
+const TELEPORT_SPEED = 5000;
+
 /** 桥接选项。 */
 export interface DemoClipOptions {
   /** 只保留采样点不少于该值的轨迹（缺省 2：单点轨迹无法播放）。 */
@@ -119,6 +125,62 @@ export function trackToClip(
     offsetsLength: 0,
   };
 
+  // **速度由位置差分补出**：`.dem` 的实体流只给位姿，没有速度字段，而下游有三处依赖它——
+  // 遥测的速度读数与电平表（`apps/viewer/src/ui/telemetry.ts` 的 `update` 以 `s?.vel` 为门）、
+  // 以及按键反推（`apps/viewer/src/replay/keyguess.ts`）。
+  //
+  // **差分必须跨"上一次位置真正变化"的采样，不能只看相邻一条。**
+  // 实测（`sampleMode: 'posed'`）：每个实体逐 tick 都记一条采样，但姿态只在**约 1.2%** 的帧
+  // 真正更新，其余帧是**原样重复**（`Δpos = 0`）。若按相邻帧差分，98.8% 的帧会得到 0 速度
+  // —— 表现就是「速度读数恒为 0｜0、电平表与按键永不亮」（owner 实测，也是这一摊问题的总根源）。
+  // 口径：位置没变 ⇒ 沿用上一帧的速度（保持"此刻仍在以该速度运动"的语义）；
+  // 位置变了 ⇒ 用「上次变化点到本次」的时间跨度求平均速度。
+  const vel = new Float32Array(n * 3);
+  let maxSpeed = 0;
+  let anchor = 0; // 上一次位置真正变化的下标
+  for (let i = 1; i < n; i++) {
+    const same =
+      pos[i * 3] === pos[(i - 1) * 3] &&
+      pos[i * 3 + 1] === pos[(i - 1) * 3 + 1] &&
+      pos[i * 3 + 2] === pos[(i - 1) * 3 + 2];
+    if (same) {
+      // 重复帧：继承上一帧的速度
+      vel[i * 3] = vel[(i - 1) * 3];
+      vel[i * 3 + 1] = vel[(i - 1) * 3 + 1];
+      vel[i * 3 + 2] = vel[(i - 1) * 3 + 2];
+      continue;
+    }
+    const dt = t[i] - t[anchor];
+    if (!(dt > 1e-6)) {
+      anchor = i;
+      continue;
+    }
+    const vx = (pos[i * 3] - pos[anchor * 3]) / dt;
+    const vy = (pos[i * 3 + 1] - pos[anchor * 3 + 1]) / dt;
+    const vz = (pos[i * 3 + 2] - pos[anchor * 3 + 2]) / dt;
+    anchor = i;
+    // **传送过滤**：实测相邻位移中位数 60 单位，而重生/换图/观察者跳转会到 27,580
+    // （≈92 万 u/s）。超阈值按"没有速度"处理（写 0），免得一个瞬移把电平表打到满格。
+    if (
+      Math.abs(vx) > TELEPORT_SPEED ||
+      Math.abs(vy) > TELEPORT_SPEED ||
+      Math.abs(vz) > TELEPORT_SPEED
+    ) {
+      continue;
+    }
+    vel[i * 3] = vx;
+    vel[i * 3 + 1] = vy;
+    vel[i * 3 + 2] = vz;
+    const h = Math.hypot(vx, vy);
+    if (h > maxSpeed) maxSpeed = h;
+  }
+  // 首帧没有前一帧可差，沿用第二帧的值（否则起点那一帧显示 0 速度，看着像"站着不动"）。
+  if (n > 1) {
+    vel[0] = vel[3];
+    vel[1] = vel[4];
+    vel[2] = vel[5];
+  }
+
   return {
     id: `dem:${result.header.mapName}:${track.entityIndex}`,
     name: nameOf ? nameOf(track) : `${track.className} #${track.entityIndex}`,
@@ -126,10 +188,10 @@ export function trackToClip(
     t,
     pos,
     ang,
-    vel: null,
+    vel,
     duration: t[n - 1],
     bbox: { min, max },
-    maxSpeed: 0,
+    maxSpeed,
     resolvedPath: `${result.header.mapName}.dem`,
     rule,
     buttons: null,
