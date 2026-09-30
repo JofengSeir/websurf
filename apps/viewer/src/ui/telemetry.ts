@@ -68,7 +68,11 @@ export class TelemetryHud {
    * @param speedRoot 速度读数容器（`apps/viewer/src/app.ts` 传 `#telemetry`；定位由 CSS 决定）
    * @param keysRoot 按键簇容器（传 `#timeline`；按键块挂它的网格右列，随时间轴一起显隐）
    */
+  /** 速度读数与电平表的宿主（#telemetry）；显隐由 setTracks 控制。 */
+  private readonly speedRoot: HTMLElement;
+
   constructor(speedRoot: HTMLElement, keysRoot: HTMLElement) {
+    this.speedRoot = speedRoot;
     // ── 速度：单行两个裸数字，中间夹一个全角竖线分隔符；行下 12 段电平表 ──
     this.horizEl = el('span', 'tm-horiz', '—');
     const sep = el('span', 'vsep', '｜');
@@ -99,7 +103,7 @@ export class TelemetryHud {
 
   /** 轨道增删后调用（`apps/viewer/src/app.ts` 的 `syncTracks`）：无轨道时给速度行加 `hidden` 类（按键随 `#timeline` 自身显隐）。 */
   setTracks(hasTracks: boolean): void {
-    (this.horizEl.parentElement as HTMLElement).classList.toggle('hidden', !hasTracks);
+    this.speedRoot.classList.toggle('hidden', !hasTracks);
   }
 
   /**

@@ -26,6 +26,7 @@ import { ReplayImporter } from './replay/importer.js';
 import { ReplayPanel } from './replay/panel.js';
 import { DemoPanel } from './replay/demopanel.js';
 import { ReplayPlayer } from './replay/player.js';
+import { guessKeys } from './replay/keyguess.js';
 import { ReplayVisuals } from './replay/visuals.js';
 import { Timeline } from './replay/timeline.js';
 import { looksLikeShavitReplay, SHAVIT_SNIFF_BYTES } from './replay/shavit-replay.js';
@@ -175,6 +176,12 @@ const mapPanel =
     (mode) => scene?.setLightingMode(mode),
   );
 
+// **启动时先渲染一次「无地图」空态**：`MapPanel` 的两个子渲染都有「尚未加载地图」的占位分支，
+// 但此前**没有任何调用点在启动时走到它们** —— 于是「出生点导航」分节一直是"只有标题、
+// 底下什么都没有"，看起来像坏了（审计实测：0 子元素 / 0 文字）。`setMap(null, null)`
+// 正是为这个空态准备的分支（`renderInfo` 与 `renderSpawns` 都处理 null）。
+mapPanel?.setMap(null, null);
+
 // ── 录像 ────────────────────────────────────────────────────────────
 const importer = new ReplayImporter();
 const player = new ReplayPlayer();
@@ -192,6 +199,13 @@ let demoTrackEntity: number | null = null;
 /** 当前激活的 tab：决定时间轴 / 可视化 / 信息条只看到**哪一边的轨道**。 */
 let activeTab: 'replay' | 'demo' = 'replay';
 /** **自动跟随视角**：载入后为真 —— 播放头进入谁的活跃区间就切到谁。用户自己点人后置假。 */
+/**
+ * 自动跟随的「在动」阈值（世界单位，轨道包围盒对角线）：低于它视为挂机实体。
+ * 录制机器人自己也是一条合法轨道（实测实体 #1 = `ERDY-SURF Recorder`，全程不动），
+ * 跟它会得到恒零速度、遥测与按键永不亮 —— 详见帧循环里自动跟随那段的说明。
+ */
+const MOVING_MIN = 200;
+
 let autoFollow = false;
 /** 自动跟随当前锁定的实体号（null = 还没锁定）。 */
 let autoFollowEntity: number | null = null;
@@ -671,15 +685,21 @@ function frame(now: number): void {
       if (firstHuman && nowSec >= sec(firstHuman.from)) {
         want = firstHuman.entity; // ① 真人已进场 ⇒ 锁定他
       } else {
-        // ② 真人还没来 ⇒ 跟着"已进场且进场最晚"的那位，至少有点东西看
-        let bestAt = -1;
-        for (const p of roster) {
-          const at = sec(p.from);
-          if (at <= nowSec && at > bestAt) {
-            bestAt = at;
-            want = p.entity;
-          }
+        // ② 真人还没来 ⇒ 跟着「此刻真的在动」的那位，至少有点东西看。
+        // **判据只能是运动状态**（实测教训）：记录机器人的四个槽位区间完全相同（都是 0:03–59:57）、
+        // 峰值速度也都在 3585~4991，按进场时刻 / 有无名字 / 峰值速度**都分不开**；而某一时刻
+        // 只有一个槽位在跑。跟错槽位就会出现「速度读数恒 0、电平表与按键永不亮」。
+        // 先只看**当前时刻谁的速度最大**，不加"要有真名"的偏好 ——
+        // 实测（t=61/241/421/601/781/961 六个时刻）：静止的 `#1`/`#2` 恒为 0 u/s，
+        // 而 `#3`/`#4` 有 397~3293 u/s。加"要有真名"的偏好反而会把 `#3` 排除掉
+        // （它的 `nameAtSlot` 在某些 tick 返回空 ⇒ 回退成 `CCSPlayer #3` ⇒ 被判无名），
+        // 于是选中静止的 `#2` —— 这正是「按键与电平表永不亮」的最后一道原因。
+        const fast = demoPanel.fastestAt(Math.round(nowSec * demoPanel.tickRate()), false);
+        if (fast !== null && fast !== autoFollowEntity) {
+          autoFollowEntity = fast;
+          demoPanel.pickEntity(fast);
         }
+        want = null; // 已就地处理，跳过下面的通用切换
       }
       if (want !== null && want !== autoFollowEntity) {
         autoFollowEntity = want;
@@ -725,8 +745,18 @@ function frame(now: number): void {
     const follow = player.tracks.follow;
     const frameButtons = follow?.clip.buttons ?? null;
     const fi = player.indexAt(player.time);
-    telemetry.update(player.sample(), frameButtons ? frameButtons[fi] ?? null : null);
-  }
+    // **按键来源分两条，显示位只有一个**：
+    //   · 记录（`.replay`）带**真实**按键位 ⇒ 直接用 `clip.buttons[fi]`；
+    //   · 录像（`.dem`）在 `democlip.ts` 里被置成 `buttons: null`（引擎只记录录制者本人的
+    //     输入流，而本工程的录像多由观察者机器人录制，实测 `dem_usercmd` 0 条）
+    //     ⇒ 这里**由运动学反推**顶上，见 `apps/viewer/src/replay/keyguess.ts`。
+    // 反推的语义是「看起来在按什么」，不是「确实按了什么」；它只能得出方向键与跳跃，
+    // 得不出鼠标键（那不改变速度矢量），故对应位恒不亮。
+    const guessed =
+      !frameButtons && follow
+        ? guessKeys(fi, follow.clip.pos, follow.clip.ang, follow.clip.t)
+        : null;
+    telemetry.update(player.sample(), frameButtons ? frameButtons[fi] ?? null : guessed);  }
 }
 
 // 出生点/位姿跳转后立刻刷新一次 HUD
