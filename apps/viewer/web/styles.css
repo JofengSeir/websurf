@@ -451,7 +451,11 @@ select.field-select:focus { border-color: var(--text); }
    右列为八键按键簇 .tm-keys（跨 3 行）；内容由 apps/viewer/src/replay/timeline.ts 构建 ── */
 #timeline {
   position: relative;
-  display: grid; grid-template-columns: 1fr auto; column-gap: 14px;
+  /* 左列上限 680px：滑杆曾随窗口无限拉长（1600px 窗下 1078px，owner 观感「过长」），
+     收窄后滑杆保持可用的 scrub 长度；space-between 让倍速/开关组靠右、
+     中段留白不挤占滑杆。窄窗下 minmax(0, 680px) 自然让位，行为与旧 1fr 一致。 */
+  display: grid; grid-template-columns: minmax(0, 680px) auto; column-gap: 14px;
+  justify-content: space-between;
   padding: 13px 10px;
   background: var(--panel-trans); border: 1px solid var(--border);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
