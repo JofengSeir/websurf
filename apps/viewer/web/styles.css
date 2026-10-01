@@ -974,6 +974,12 @@ select.tl-select:focus { border-color: var(--text); }
   border: 1px solid var(--border); background: var(--panel); cursor: pointer; }
 .dmp-cf input:checked { background: var(--accent); border-color: var(--accent); }
 .dmp-cf-n { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+/* 兜底读数：只在「有消息没命中任何具体判据」时出现 —— 换个没见过的服/语言时它会涨，
+   提示有新写法要补判据（悬停写明）。用警示色，但不抢四类勾选框的视线。 */
+.dmp-cf-fb {
+  padding: 0 5px; font-family: var(--mono); font-size: 10px; line-height: 1.7;
+  color: var(--warn, var(--accent)); border: 1px dashed var(--warn, var(--accent));
+}
 /* 勾上的那一类：标签加删除线 + 压暗，读数保持可读（用户还要看「滤掉了几条」） */
 .dmp-cf.off .dmp-cf-name { text-decoration: line-through; color: var(--muted); }
 .dmp-cf.off .dmp-cf-n { opacity: 0.7; }

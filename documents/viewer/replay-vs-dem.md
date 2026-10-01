@@ -68,7 +68,7 @@ dock 之外的 HUD 与遥测读数（`apps/viewer/src/app.ts:126`）。
 | `meta` | 文件头 20 项 | **恒 `null`**（`apps/viewer/src/replay/democlip.ts:189`） | 跑段带与信息条对 `null` 走自己的缺省分支：不画带、整条隐藏（`apps/viewer/src/ui/replaymeta.ts:26`） |
 | `buttons` | 逐帧真实按键位 | **恒 `null`** 且不反推 | 按键簇整组熄灭；录像档的时间轴上不建按键簇 |
 | `vel` | 头部速度字段 | 位置差分补出（`apps/viewer/src/replay/democlip.ts:122`） | 同一契约，遥测速度读数与电平表通吃 |
-| `name` | 文件名 | 实体名 / `类名 #实体号`，随播放头轮换 | 轮换只发生在录像会话内部（`apps/viewer/src/replay/demopanel.ts:526` 的 `nameAtSlot`、`apps/viewer/src/replay/demopanel.ts:554` 的 `refreshNames`） |
+| `name` | 文件名 | 实体名 / `类名 #实体号`，随播放头轮换 | 轮换只发生在录像会话内部（`apps/viewer/src/replay/demopanel.ts:528` 的 `nameAtSlot`、`apps/viewer/src/replay/demopanel.ts:556` 的 `refreshNames`） |
 | `id` / `pos` / `ang` / `duration` / `bbox` / `maxSpeed` / `resolvedPath` / `rule` | — | — | 两条链路含义相同，`Track` / `TrackSet` / `visuals` / `player` 这些共享模块只消费这一组 |
 
 **共享边界**（拆分不越过这条线）：`Track` / `TrackSet` / `Timeline` 组件本体 / `ReplayPlayer` /
@@ -124,7 +124,7 @@ dock 之外的 HUD 与遥测读数（`apps/viewer/src/app.ts:126`）。
 | C3 | `Clip.t` 的零点两链路不同，靠 UI 侧规避 | **已提升到能力档**：`clock` + 统一的窗口公式（§2 / §3） |
 | C4 | `Clip.count` 的单位两链路不同 | 帧步进与帧读数只建在记录档；阈值判定只在记录页 |
 | C5 | `ReplayImporter` 里的 `.dem` 分支从 UI 不可达 | **已删除**：`importDemoOnMain`、三级采样口径回退与 `DemoImportInfo` 整段移除（`apps/viewer/src/replay/importer.ts`） |
-| C6 | 采样口径两套策略（三级回退 vs 固定 `playerPosed`） | **只剩一套**：录像页固定 `'playerPosed'`（`apps/viewer/src/replay/demopanel.ts:494`） |
+| C6 | 采样口径两套策略（三级回退 vs 固定 `playerPosed`） | **只剩一套**：录像页固定 `'playerPosed'`（`apps/viewer/src/replay/demopanel.ts:496`） |
 | C7 | `ImportResult.clips` 的份数契约自相矛盾（注释 vs 代码） | **已消除**：契约收敛为单份 `clip`（`apps/viewer/src/replay/importer.ts:45`），Worker 侧本就只回一个载荷（`apps/viewer/src/worker/main.ts:95`） |
 | C8 | 记录页文案/判据只覆盖 `.replay` | `.dem` 不再进记录页，相关分支与文案随之删除 |
 | C9 | `DemoImportInfo.note` 的两条陈述已不成立 | 随 C5 一起删除（那段面向用户的说明文字不再存在） |
@@ -144,7 +144,7 @@ dock 之外的 HUD 与遥测读数（`apps/viewer/src/app.ts:126`）。
 - 录像链路首次消费一批此前无消费点的 `.dem` 字段：`DemoHeader.serverName` / `clientName` /
   `gameDirectory` / `playbackFrames` / `signonLength`（看板与悬停提示）、
   `PlayerSample.team` / `health` / `lifeState`（队伍标签、生命区间、阵亡次数与时刻，
-  `apps/viewer/src/replay/demopanel.ts:116` 的 `trackFacts`）、
+  `apps/viewer/src/replay/demopanel.ts:118` 的 `trackFacts`）、
   `PlayerTrack.classId` / `dtName` 与 `entityCount` / `classCounts` / `playerPropNames` /
   `DemoParseStats`（详情与看板的悬停提示）。
   **阵亡一度做成滑杆上的刻度层（`Timeline.setMarks` + `.tl-marks`），已按 owner 判定整套撤除**：
@@ -177,7 +177,7 @@ dock 之外的 HUD 与遥测读数（`apps/viewer/src/app.ts:126`）。
     内容向上长、新的一条从底部顶上来）。「该显示哪几条」抽成了纯函数 `visibleChat`，
     好在 Node 侧用合成数据钉住那三条规则（真实夹具 15 秒窗口内最多 4 条，测不出「>5 条」那支）。
 - **花名册按「身份」去重**（owner 实测：同一台机器人被复用做回放时反复重连，名单摊成十几行）：
-  `occupancyIdentities()`（`apps/viewer/src/replay/demopanel.ts:1323`）把「占用会话」按
+  `occupancyIdentities()`（`apps/viewer/src/replay/demopanel.ts:1346`）把「占用会话」按
   **guid 不是 `BOT` ⇒ 按 guid、是 `BOT` ⇒ 按槽位**合并 —— 后者是因为 `BOT` 是所有机器人的公共
   guid，无法区分具体哪一台，而同一槽位上的多次重连正是「同一台被复用」的场景。实测本仓夹具的
   `userinfo` 更新流给出 **11 条占用事件、真实身份只有 5 个**（3 台回放机器人各重连 3 次 +
@@ -195,7 +195,7 @@ dock 之外的 HUD 与遥测读数（`apps/viewer/src/app.ts:126`）。
   在线态与悬停高亮也都按段判断。实测本仓夹具的 `LuoXuan` 正是这种：两段在场（槽 6 早段 ≈ 5–74 s、
   槽 4 后段 ≈ 276–714 s），对应实体 **#7** 与 **#5**。
 - **自动跟随于是也改成「逐段」判断**（`apps/viewer/src/app.ts`）：`spanAt(entity, tick)`
-  （`apps/viewer/src/replay/demopanel.ts:852`）给出「他**此刻**在不在场、在哪一段」，判定顺序是：
+  （`apps/viewer/src/replay/demopanel.ts:854`）给出「他**此刻**在不在场、在哪一段」，判定顺序是：
   **① 在场 ⇒ 跟这一段**；**② 他退出了、但我们一直在看他、而且他后面还会回来 ⇒ 不切别人，直接把
   播放头跳到他重进那一刻接着看**（`hud.flashStatus` 提示「已跳过 … 不在场的一段，接上他重进的 m:ss」；
   `autoFollowSkippedTo` 记住该段起点 ⇒ **同一段只跳一次**，手动把播放头拖回缺口不会被再次弹走）；

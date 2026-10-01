@@ -29,7 +29,9 @@ import { BitReader } from '../src/replay/demo/bits.js';
 import { visibleChat } from '../src/ui/chatoverlay.js';
 import {
   classifyChat,
+  classifyChatDetailed,
   countByKind,
+  countFallback,
   filterChat,
   parseChatRecord,
   parseDuration,
@@ -1126,6 +1128,27 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
     );
     check('四类全勾 ⇒ 一条不剩', hideAll.length === 0, String(hideAll.length));
     check('一条都不勾 ⇒ 原样 40 条', filterChat(r.chat, {}).length === 40, String(filterChat(r.chat, {}).length));
+
+    // **判据归属**（哪条规则命中的）：看板把每条消息的判据写进 data-rule 与悬停提示，
+    // 所以纯函数这一层也要能被断言 —— 只断「类别」的话，判据被改坏成兜底也发现不了。
+    check('判据归属：▲ 起头那条算 join-arrow', classifyChatDetailed(lineJoin).rule === 'join-arrow', JSON.stringify(classifyChatDetailed(lineJoin)));
+    check('判据归属：带标签的玩家对话算 chat-speaker', classifyChatDetailed(lineChat).rule === 'chat-speaker', JSON.stringify(classifyChatDetailed(lineChat)));
+    check('判据归属：带标签的服务器播报算 announce-shape', classifyChatDetailed(lineAnnounce).rule === 'announce-shape', JSON.stringify(classifyChatDetailed(lineAnnounce)));
+    check('判据归属：过关记录算 record-cn', classifyChatDetailed(lineRecord).rule === 'record-cn', JSON.stringify(classifyChatDetailed(lineRecord)));
+    // 兜底：既不是进服/过关、也不是「[ 标签 ] - 正文」形状，又看不出说话人 ⇒ 归公告并**被计数**
+    const stranger = 'Some server print without any known shape 12345';
+    check('判据归属：不认识的写法落到 fallback（仍归服务器公告）', classifyChatDetailed(stranger).kind === 'announce' && classifyChatDetailed(stranger).rule === 'fallback', JSON.stringify(classifyChatDetailed(stranger)));
+    check('真实语料里**没有**兜底行（40 条全部命中具体判据）', countFallback(r.chat) === 0, String(countFallback(r.chat)));
+    check('兜底计数认得出合成的那条', countFallback([...r.chat, { tick: 1, text: stranger }]) === 1, String(countFallback([...r.chat, { tick: 1, text: stranger }])));
+    // **泛化档的过关写法**（English / 变体中文）：尚无真实语料核对，但既然判据里认它们，
+    // 就用合成句子把「认得出 + 用时取得对」钉住（免得哪天改正则悄悄失效）。
+    const enRec = parseChatRecord('SurferX finished the map in 12.345 seconds');
+    check('泛化：英文 finished … in <秒> 能解析出用时', enRec !== null && Math.abs(enRec.durationSec - 12.345) < 1e-9, JSON.stringify(enRec));
+    const enRec2 = parseChatRecord('SurferX completed Bonus 1 with a time of 1:23.456');
+    check('泛化：英文 with a time of <m:ss.mmm> 能解析出用时', enRec2 !== null && Math.abs(enRec2.durationSec - 83.456) < 1e-6, JSON.stringify(enRec2));
+    const cnRec = parseChatRecord('[ Timer ] - LuoXuan 完成 [ 奖励关4 ] 用时 18.714');
+    check('泛化：中文「完成 … 用时 <秒>」也能解析', cnRec !== null && Math.abs(cnRec.durationSec - 18.714) < 1e-6, JSON.stringify(cnRec));
+    check('泛化不会把普通播报误判成过关（含数字但无完成字样/无排名读数）', parseChatRecord('[ Timer ] - 地图剩余时间: 20 分钟。') === null, JSON.stringify(parseChatRecord('[ Timer ] - 地图剩余时间: 20 分钟。')));
     // 录制者机位（`democmdinfo`）：每条 `dem_signon` / `dem_packet` 头部一份 ⇒ 条数应等于包数；
     // 本夹具（SourceTV 观察者录像）全部为 0 ⇒「没有第一人称机位可用」是记录本身没记，不是漏读。
     check(
