@@ -202,7 +202,7 @@ async function main() {
     }
     if (!version) await sleep(500);
   }
-  if (!version) skip('Edge 调试端口没起来（本机策略可能禁止 headless 浏览器创建 IPC 通道）');
+  if (!version) skip('Edge 调试端口没起来（本机策略有时会禁止 headless 浏览器创建 IPC 通道）');
 
   socket = new WebSocket(version.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
   await new Promise((r, j) => {
@@ -474,6 +474,115 @@ async function main() {
   check('「在服」行三段齐全，且角标人数与名单条数一致', board.tag === '在服' && new RegExp('^' + nameCount + ' 人$').test(board.badge.trim()), JSON.stringify({ tag: board.tag, badge: board.badge, nameCount }));
   check('载入区给出拖拽提示', /拖进窗口/.test(board.drop), JSON.stringify(board.drop));
   check('「运动优先（实验展平顺序）」开关与文案已撤除', board.altBox === false && board.altText === false, JSON.stringify({ box: board.altBox, text: board.altText }));
+
+  console.log('\n[C-chat] 消息过滤（四类）+ 过关记录点击跳转');
+  const chatBox = await evaluate(
+    `(() => {
+      const q = (s) => document.querySelector(s);
+      const cats = Array.from(document.querySelectorAll('#demoChatFilter .dmp-cf')).map((l) => ({
+        kind: l.dataset.kind,
+        label: (l.querySelector('.dmp-cf-name') || {}).textContent || '',
+        n: (l.querySelector('.dmp-cf-n') || {}).textContent || '',
+        checked: !!(l.querySelector('input') || {}).checked,
+      }));
+      const rows = Array.from(document.querySelectorAll('#demoChat .dmp-chat-line'));
+      const jumps = Array.from(document.querySelectorAll('#demoChat .dmp-chat-jump'));
+      return {
+        cats,
+        lineCount: rows.length,
+        kinds: rows.map((r) => r.dataset.kind),
+        recRows: rows.filter((r) => r.classList.contains('dmp-chat-rec')).length,
+        jumpCount: jumps.length,
+        firstJump: jumps.length > 0 ? { to: Number(jumps[0].dataset.jump), label: jumps[0].textContent, player: jumps[0].dataset.player, level: jumps[0].dataset.level, dur: Number(jumps[0].dataset.dur), title: jumps[0].title } : null,
+      };
+    })()`,
+    sessionId,
+  );
+  console.log('  ' + JSON.stringify({ cats: chatBox.cats, kinds: chatBox.lineCount, rec: chatBox.recRows, jump: chatBox.firstJump }));
+  check('过滤行 = 四个类别，顺序与标签固定', JSON.stringify(chatBox.cats.map((c) => c.kind)) === JSON.stringify(['chat', 'join', 'announce', 'record']) && chatBox.cats.map((c) => c.label).join('/') === '玩家对话/进服公告/服务器公告/过关记录', JSON.stringify(chatBox.cats.map((c) => c.label)));
+  check('每类都带实时条数读数（本夹具 1 / 5 / 30 / 4）', chatBox.cats.map((c) => c.n).join(',') === '×1,×5,×30,×4', chatBox.cats.map((c) => c.n).join(','));
+  check('缺省一个都不勾（不过滤）', chatBox.cats.every((c) => c.checked === false) && chatBox.lineCount === 40, JSON.stringify({ checked: chatBox.cats.map((c) => c.checked), lines: chatBox.lineCount }));
+  check('每一行都带类别标记，且 40 行的类别分布与读数一致', chatBox.kinds.length === 40 && chatBox.kinds.filter((k) => k === 'announce').length === 30 && chatBox.kinds.filter((k) => k === 'record').length === 4, JSON.stringify(chatBox.kinds.reduce((a, k) => (a[k] = (a[k] || 0) + 1, a), {})));
+  check('过关记录行单独标了 dmp-chat-rec 并带跳转按钮', chatBox.recRows === 4 && chatBox.jumpCount === 4, JSON.stringify({ rec: chatBox.recRows, jump: chatBox.jumpCount }));
+  check(
+    '跳转目标是「播报 − 用时 − 5 秒」（首条实测 576.556s）',
+    chatBox.firstJump !== null && Math.abs(chatBox.firstJump.to - 576.556) < 0.05 && chatBox.firstJump.player === 'LuoXuan' && /奖励关4/.test(chatBox.firstJump.level),
+    JSON.stringify(chatBox.firstJump),
+  );
+  check('按钮与悬停都写明算式', chatBox.firstJump !== null && /9:37/.test(chatBox.firstJump.label) && /用时 18.714 秒 − 5 秒缓冲 = 9:37/.test(chatBox.firstJump.title), JSON.stringify(chatBox.firstJump));
+
+  // 勾上「服务器公告」+「进服公告」：行数应只剩 过关记录 + 玩家对话，且标签加删除线
+  await evaluate(
+    `(() => {
+      for (const k of ['announce', 'join']) {
+        const box = document.querySelector('#demoChatFilter input[data-kind="' + k + '"]');
+        box.checked = true;
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return true;
+    })()`,
+    sessionId,
+  );
+  await sleep(300);
+  const filtered = await evaluate(
+    `(() => {
+      const rows = Array.from(document.querySelectorAll('#demoChat .dmp-chat-line'));
+      const off = Array.from(document.querySelectorAll('#demoChatFilter .dmp-cf.off')).map((l) => l.dataset.kind);
+      return {
+        lines: rows.length,
+        kinds: rows.map((r) => r.dataset.kind),
+        off,
+        overlay: Array.from(document.querySelectorAll('#chatOverlay .co-line')).map((l) => l.textContent),
+      };
+    })()`,
+    sessionId,
+  );
+  console.log('  ' + JSON.stringify({ 滤后行数: filtered.lines, 类别: filtered.kinds.reduce((a, k) => (a[k] = (a[k] || 0) + 1, a), {}), 删除线: filtered.off }));
+  check('勾掉两类后只剩 5 行（1 对话 + 4 过关），且一条 announce / join 都不剩', filtered.lines === 5 && filtered.kinds.every((k) => k === 'chat' || k === 'record'), JSON.stringify(filtered.kinds));
+  check('被勾掉的类别标签加删除线（.off）', filtered.off.join(',') === 'join,announce', JSON.stringify(filtered.off));
+
+  // 点第一条过关记录的跳转按钮：播放头必须落到那个时刻（先切视角、最后 seek —— 顺序反了会被切视角的 seek 覆盖）
+  await evaluate(
+    `(() => { const d = window.viewer.demo; d.pause(); d.seek(560); return true; })()`,
+    sessionId,
+  );
+  await sleep(400);
+  const jumped = await evaluate(
+    `(() => {
+      const b = document.querySelector('#demoChat .dmp-chat-jump');
+      const want = Number(b.dataset.jump);
+      b.click();
+      return { want };
+    })()`,
+    sessionId,
+  );
+  await sleep(600);
+  const afterJump = await evaluate(
+    `({ time: window.viewer.demo.time, playing: window.viewer.demo.playing, status: (document.getElementById('bspStatus') || {}).textContent || '' })`,
+    sessionId,
+  );
+  console.log('  ' + JSON.stringify({ 目标: Math.round(jumped.want * 100) / 100, 落点: Math.round(afterJump.time * 100) / 100, 状态: afterJump.status }));
+  check(
+    '点过关记录 ⇒ 播放头落到算好的时刻（±0.2s，不被切视角的 seek 覆盖）',
+    Math.abs(afterJump.time - jumped.want) < 0.2,
+    `${afterJump.time.toFixed(2)} vs ${jumped.want.toFixed(2)}`,
+  );
+  check('点跳转不改播放态（暂停着点完仍暂停）', afterJump.playing === false, String(afterJump.playing));
+  check('状态行写明跳转与算式', /跳到 LuoXuan/.test(afterJump.status) && /5 秒缓冲/.test(afterJump.status), JSON.stringify(afterJump.status));
+
+  // 复原：把两个勾去掉（后面的段落按「40 行都在」的前提复核对话节）
+  await evaluate(
+    `(() => {
+      for (const k of ['announce', 'join']) {
+        const box = document.querySelector('#demoChatFilter input[data-kind="' + k + '"]');
+        box.checked = false;
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return true;
+    })()`,
+    sessionId,
+  );
+  await sleep(200);
 
   console.log('\n[C1c] 录像信息条：`.dem` 独有事实，且不碰记录条');
   console.log('  ' + JSON.stringify({ labels: afterDemo.demoInfoLabels, text: afterDemo.demoInfoText }));

@@ -960,9 +960,34 @@ select.tl-select:focus { border-color: var(--text); }
    （`.chat-overlay`，见下方浮层段）。三节的类名（`sec-load` / `sec-roster` / `sec-chat`）
    保留作**结构标记**，布局不再依赖它们。 */
 .dmp-chat { display: flex; flex-direction: column; }
+/* ── 消息过滤（四个类别各一个勾选框，**勾上 = 这一类不显示**）────────────────────
+   类别判据见 `apps/viewer/src/replay/demo/chatkind.ts`：进服 / 过关 / 服务器公告 / 玩家对话。
+   每个框后面跟该类共几条（`×N`），勾上后标签加删除线并压暗 —— 让「我滤掉的是不是我以为的那类」
+   一眼可核对。整行允许折行（四个类别 + 读数在窄侧栏里放不下一行）。 */
+.dmp-chat-filter {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  padding: 6px 0 7px; border-bottom: 1px solid var(--border);
+}
+.dmp-cf-title { font-size: 11px; color: var(--muted); }
+.dmp-cf { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text); cursor: pointer; }
+.dmp-cf input { appearance: none; -webkit-appearance: none; width: 12px; height: 12px; margin: 0;
+  border: 1px solid var(--border); background: var(--panel); cursor: pointer; }
+.dmp-cf input:checked { background: var(--accent); border-color: var(--accent); }
+.dmp-cf-n { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+/* 勾上的那一类：标签加删除线 + 压暗，读数保持可读（用户还要看「滤掉了几条」） */
+.dmp-cf.off .dmp-cf-name { text-decoration: line-through; color: var(--muted); }
+.dmp-cf.off .dmp-cf-n { opacity: 0.7; }
 /* 已发生的对话 = 正常亮度；未发生的压暗（透明度作用于整行，时间前缀更弱一档） */
 .dmp-chat-line { padding: 4px 0; font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--text); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; opacity: 0.32; }
 .dmp-chat-line.dmp-chat-on { opacity: 1; }
+/* 过关记录：左侧一条强调色发丝线把它与播报区分开（可点击跳转的那一类） */
+.dmp-chat-line.dmp-chat-rec { border-left: 2px solid var(--accent); padding-left: 6px; }
+/* 「跳到这一跑」按钮：贴在该行正文后，等宽小字 —— 它显示**算好的目标时刻**（m:ss） */
+.dmp-chat-jump {
+  margin-left: 6px; padding: 0 5px; font-family: var(--mono); font-size: 10px; line-height: 1.7;
+  color: var(--accent); background: none; border: 1px solid var(--accent); cursor: pointer;
+}
+.dmp-chat-jump:hover { background: var(--accent); color: var(--bg); }
 .dmp-chat-t { color: var(--muted); margin-right: 6px; font-variant-numeric: tabular-nums; }
 .dmp-chat-x { color: inherit; }
 .dmp-chat-empty { padding: 6px 0; font-size: 12px; color: var(--muted); line-height: 1.7; }
