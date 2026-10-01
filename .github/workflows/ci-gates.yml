@@ -105,6 +105,11 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      # renderer-shared（共享渲染层）依赖 three，three 的单实例装在仓库根 node_modules
+      # —— 必须先装根级，再装工程级（工程 package.json 已不含 three）。
+      - name: Install root shared dependencies
+        run: npm ci
+
       - name: Install debug dependencies
         working-directory: apps/debug
         run: npm ci
@@ -196,6 +201,10 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      # 根级 three（renderer-shared 依赖）：与 debug-gates 同理，先根后工程。
+      - name: Install root shared dependencies
+        run: npm ci
+
       - name: Install game dependencies
         working-directory: apps/game
         run: npm ci
@@ -233,6 +242,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: '**/package-lock.json'
+
+      # 根级 three（renderer-shared 依赖）：与 debug-gates 同理，先根后工程。
+      - name: Install root shared dependencies
+        run: npm ci
 
       - name: Install viewer dependencies
         working-directory: apps/viewer

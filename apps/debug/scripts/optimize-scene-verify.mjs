@@ -6,7 +6,7 @@
  * `apps/debug/src/renderer/renderer-main.ts` 打成 ESM bundle（落在 `apps/debug/.tmp/opt-verify/`），
  * 本脚本再 import 该 bundle 并直接调用 `RendererMain.optimizeScene` —— TS 的 private 只是编译期
  * 约束，运行时可调，因此测的是产品代码本身而不是算法副本；缺 bundle 时打印补救命令并以 2 退出。
- * THREE 另外直接取自 `apps/debug/node_modules/three` 的构建产物（与 bundle 里的那份各自独立）。
+ * THREE 另外直接取自仓库根 `node_modules/three` 的构建产物（与 bundle 里的那份各自独立）。
  *
  * 为什么测它：GLTFLoader 为 GLB 的每个 primitive 建一个 `THREE.Mesh`，未合并时每帧要遍历数万个
  * 对象做视锥剔除与逐 mesh draw call，`apps/debug/src/renderer/lod-manager.ts` 的 `LodManager.update`
@@ -49,9 +49,9 @@ if (!existsSync(bundlePath)) {
   process.exit(2);
 }
 
-// ── 载入 THREE（直接取 node_modules 的构建产物）与被打包的 RendererMain ──
+// ── 载入 THREE（直接取仓库根 node_modules 的构建产物——three 单实例已上收根级）与被打包的 RendererMain ──
 const THREE = await import(
-  pathToFileURL(join(debugDir, 'node_modules', 'three', 'build', 'three.module.js')).href
+  pathToFileURL(join(debugDir, '..', '..', 'node_modules', 'three', 'build', 'three.module.js')).href
 );
 const mod = await import(pathToFileURL(bundlePath).href);
 const RendererMain = mod.RendererMain;

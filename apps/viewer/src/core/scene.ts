@@ -39,7 +39,7 @@ import {
   setPropVertexRelax,
   getLightingMode,
   type LightingMode,
-} from '../renderer/lightmap-shader.js';
+} from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import {
   BG_COLOR,
   CAMERA_FAR_SCALE,
@@ -207,7 +207,7 @@ export class ViewerScene {
   /**
    * 施加离线烘焙静态光照（与 apps/game 同一条链路、同一份 GLB 契约）：
    * - 图集来自 `asset.extras.lightmap.textureIndex`，缺失时回落 `scene.userData.extras`，
-   *   解析单点是 `apps/viewer/src/renderer/lightmap-shader.ts` 的 `loadLightmapAtlas`；
+   *   解析单点是 `src/renderer-shared/shader/lightmap-shader.ts` 的 `loadLightmapAtlas`；
    * - `applyLightmapToMeshes` 逐图元路由：世界面走 lightmap 采样、带 `_VBSP_VLIGHT` 的 prop
    *   走逐顶点烘焙、其余 prop 走 leaf ambient cube；
    * - 终扫由 `fullbrightUnlitLitMaterials` 把仍是 GLTF 原 Standard 材质的图元收敛为贴图原色。
@@ -236,7 +236,7 @@ export class ViewerScene {
   /**
    * 切换光照模式（面板「预烘焙 / 纯纹理」）：只改共享 uniform，下一次绘制即生效。
    *
-   * 语义与 `apps/viewer/src/renderer/lightmap-shader.ts` 的 `LightingMode` 一致：
+   * 语义与 `src/renderer-shared/shader/lightmap-shader.ts` 的 `LightingMode` 一致：
    * 预烘焙 = 每像素采图集并算逐顶点 / 环境盒烘焙项（有明暗关系，每帧开销更大）；
    * 纯纹理 = 只上漫反射贴图（不采图集、不算烘焙项，移动时更平稳）。
    * 两种模式共用同一条加载路径 ⇒ 切换不重建场景、不重编译材质、不打断视角；

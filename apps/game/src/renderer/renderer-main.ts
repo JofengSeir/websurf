@@ -3,7 +3,7 @@
  *
  * 职责（按调用顺序）：
  * - `init`：建 `THREE.WebGLRenderer` / `THREE.Scene` / `THREE.PerspectiveCamera`，并把光照参数
- *   初值写进 `apps/game/src/renderer/lightmap-shader.ts` 的共享 uniform；
+ *   初值写进 `src/renderer-shared/shader/lightmap-shader.ts` 的共享 uniform；
  * - `loadScene`：GLB → 场景（摘除 punctual 光源 → 施加 lightmap atlas → 空间分块合并 →
  *   受光材质终扫 → 预编译 program）→ 相机 near/far → PVS/LOD 注册 → 画质 manifest；
  * - `buildPredictionWorld`：用 `apps/game/pkg/websurf_wasm.js` 的 `PhysWorld` 建主线程物理世界；
@@ -42,7 +42,7 @@ import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-ca
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
-import { loadLightmapAtlas, applyLightmapToMeshes, fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, getVertexLightingRelaxStats, getPropVertexRelax, setPropVertexFlatten, getPropVertexFlatten, VERTEX_LIGHTING_ATTR, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from './lightmap-shader.js';
+import { loadLightmapAtlas, applyLightmapToMeshes, fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, getVertexLightingRelaxStats, getPropVertexRelax, setPropVertexFlatten, getPropVertexFlatten, VERTEX_LIGHTING_ATTR, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -176,7 +176,7 @@ export class RendererMain {
    * 待跑一次的注入生效性统计（`applyLightmap` 施加成功时置位、`tick` 在首帧
    * `renderer.render()` 之后消费一次）。
    *
-   * 延后的原因：材质上的注入标记由 `apps/game/src/renderer/lightmap-shader.ts` 的
+   * 延后的原因：材质上的注入标记由 `src/renderer-shared/shader/lightmap-shader.ts` 的
    * `injectLightmapShader` 在 `onBeforeCompile` 里回填，而 `loadScene` 期间 three 还没编译材质，
    * 那时统计只会得到全 0。
    */
@@ -636,7 +636,7 @@ export class RendererMain {
   }
 
   /**
-   * 全局曝光（显示侧亮度倍率）：转发给 `apps/game/src/renderer/lightmap-shader.ts` 的
+   * 全局曝光（显示侧亮度倍率）：转发给 `src/renderer-shared/shader/lightmap-shader.ts` 的
    * `setExposure` —— 改的是共享 uniform，立即生效、不重编译材质。该函数只接受有限正数，
    * 其余值（含 0 与负数）被忽略。
    */
@@ -645,7 +645,7 @@ export class RendererMain {
   }
 
   /**
-   * 光照项 gamma（shadow-lift）：转发给 `apps/game/src/renderer/lightmap-shader.ts` 的
+   * 光照项 gamma（shadow-lift）：转发给 `src/renderer-shared/shader/lightmap-shader.ts` 的
    * `setLightGamma`。接受窗口是 (0, 1]，窗口外的值被忽略（`apps/game/src/config.ts` 的
    * `lighting.lightGamma` 默认 2.2 即落在窗口外，`init` 的那次写入不改变共享 uniform）。
    */
@@ -655,7 +655,7 @@ export class RendererMain {
 
   /**
    * prop（模型）烘焙光照亮度倍率（ambient cube 路径专用）：转发给
-   * `apps/game/src/renderer/lightmap-shader.ts` 的 `setAmbientScale`；接受有限非负数。
+   * `src/renderer-shared/shader/lightmap-shader.ts` 的 `setAmbientScale`；接受有限非负数。
    */
   setAmbientScale(value: number): void {
     setAmbientScale(value);
@@ -1227,7 +1227,7 @@ export class RendererMain {
    * 施加离线烘焙静态光照（lightmap atlas）。
    *
    * 契约：图集纹理由 `src/wasm-core/bsp_to_gltf_core/lightmap.rs` 写进 GLB，位置由
-   * `apps/game/src/renderer/lightmap-shader.ts` 的 `loadLightmapAtlas` 解析（`asset.extras.lightmap`
+   * `src/renderer-shared/shader/lightmap-shader.ts` 的 `loadLightmapAtlas` 解析（`asset.extras.lightmap`
    * 或 `scene.userData.extras.lightmap` 的 `textureIndex`）；图元侧带 `TEXCOORD_1` 与
    * `extras.hasLightmap`（落在 geometry.userData）。
    * 没有图集时只打日志返回；施加数与 atlas 尺寸打日志；施加成功时置 `pendingInjectReport`，
@@ -1263,7 +1263,7 @@ export class RendererMain {
   /**
    * 切换光照模式（面板「预烘焙 / 纯纹理」）：只改共享 uniform，立即生效。
    *
-   * 机制（见 `apps/game/src/renderer/lightmap-shader.ts` 的 `setLightingMode`）：全场景注入材质共用
+   * 机制（见 `src/renderer-shared/shader/lightmap-shader.ts` 的 `setLightingMode`）：全场景注入材质共用
    * 同一个 `vbspBakedMix` uniform，world lightmap / 逐顶点光照 / ambient cube 三条烘焙路径都按它
    * 分支 ⇒ 不重建场景、不重编译材质、不打断输入与物理，分块与材质分组也不变。
    *
@@ -1275,7 +1275,7 @@ export class RendererMain {
     console.info(`[lighting] 光照模式 → ${mode}（运行期 uniform 切换，未重建场景）`);
   }
 
-  /** 读当前光照模式（诊断用；转发给 `apps/game/src/renderer/lightmap-shader.ts` 的 `getLightingMode`）。 */
+  /** 读当前光照模式（诊断用；转发给 `src/renderer-shared/shader/lightmap-shader.ts` 的 `getLightingMode`）。 */
   getLightingMode(): LightingMode {
     return getLightingMode();
   }

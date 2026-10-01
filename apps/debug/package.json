@@ -23,12 +23,9 @@
     "test:auth-clock": "esbuild ../../src/ts-shared/auth/auth-loop.ts --bundle --format=esm --platform=node --outfile=.tmp/auth-clock/auth-loop.bundle.mjs && node scripts/auth-clock-verify.mjs",
     "test:jump-apex": "esbuild ../../src/ts-shared/phys/authority-calibrator.ts --bundle --format=esm --platform=node --outfile=.tmp/jump-apex/authority-calibrator.bundle.mjs && node scripts/jump-apex-verify.mjs"
   },
-  "dependencies": {
-    "three": "^0.165.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^26.1.2",
-    "@types/three": "^0.165.0",
     "esbuild": "^0.23.0",
     "typescript": "~5.7.2"
   },

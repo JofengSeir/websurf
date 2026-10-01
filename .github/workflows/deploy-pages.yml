@@ -69,8 +69,8 @@ jobs:
         with:
           # Node 20 已弃用（GH Actions 提示默认 24）；22 为 LTS 稳定线（esbuild/wasm-pack 兼容）
           node-version: 22
-          # lock 文件在各工程（apps/*/package-lock.json），根目录无锁文件——
-          # 必须 glob 匹配，否则 cache: npm 报 "Dependencies lock file is not found"
+          # lock 文件在各工程（apps/*/package-lock.json）与仓库根（renderer-shared 的
+          # three 单实例）——必须 glob 匹配，否则 cache: npm 报 "Dependencies lock file is not found"
           cache: npm
           cache-dependency-path: '**/package-lock.json'
 
@@ -110,6 +110,11 @@ jobs:
             cargo install wasm-bindgen-cli --version "${VERSION}" --locked
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      # 根级 three：renderer-shared（共享渲染层）的单实例 three 装在仓库根 node_modules，
+      # 各工程 package.json 已不含 three —— build:ts（typecheck + esbuild）前必须先装根级。
+      - name: Install root shared dependencies
+        run: npm ci
 
       - name: Install dependencies
         working-directory: apps/${{ matrix.app }}

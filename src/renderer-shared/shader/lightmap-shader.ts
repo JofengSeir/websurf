@@ -1,11 +1,11 @@
 /**
  * 离线烘焙静态光照的 three.js 侧落地：RGBExp32 图集解码着色器注入 + prop 三级光照路由。
  *
- * ## 副本关系
+ * ## 归属
  *
- * 三工程（`apps/debug`、`apps/game`、`apps/viewer`）各持一份**同构副本**，
- * 路径都是 `src/renderer/lightmap-shader.ts`，彼此不 import、不跨工程引用；
- * 本文件是上述三份同构副本之一（按所在工程目录定位）。改动只对所在工程生效。
+ * 渲染共享层 `src/renderer-shared/` 的单实例（2026-10-02 起由三工程各自 `src/renderer/` 下的
+ * 三份同构副本合并而来，旧副本已删除）。三工程经 tsconfig include 跨目录收编本文件，
+ * import 走深层相对路径；行为与合并前的 game 版本一致（三份副本本就逐字节相同）。
  *
  * ## 上游（Rust/wasm 侧产出 GLB）
  *
