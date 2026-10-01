@@ -33,7 +33,7 @@
 | [`debug/sequences.md`](debug/sequences.md) | 启动时序与一帧内的链路、线程间消息、异常与回退路径 |
 | [`debug/differences.md`](debug/differences.md) | 与 `apps/game`、`apps/viewer` 的实测差异（两侧锚点） |
 | [`debug/implementation/app.md`](debug/implementation/app.md) | 根级装配模块：面板接线、调试 API、配置树、计时状态机、默认纹理包、主线程 wasm 装载 |
-| [`debug/implementation/renderer.md`](debug/implementation/renderer.md) | `renderer/**`：主线程渲染循环与七个子管理器 |
+| [`debug/implementation/renderer.md`](debug/implementation/renderer.md) | `renderer/**` + 渲染共享层着色器：主线程渲染循环与七个子管理器（lightmap 着色器已下沉 `src/renderer-shared/`） |
 | [`debug/implementation/worker.md`](debug/implementation/worker.md) | `worker/**`：Worker 入口装配、消息类型面、物理面板协调器 |
 | [`debug/implementation/input.md`](debug/implementation/input.md) | `input/**`：键鼠采集、消息桥、录制/回放器 |
 | [`debug/implementation/world.md`](debug/implementation/world.md) | `world/**`：brush 映射、传送点数据层、出生点加载器、WASM JSON 类型面 |
@@ -52,7 +52,7 @@
 | [`game/differences.md`](game/differences.md) | 与 `apps/debug`、`apps/viewer` 的实测差异（两侧锚点） |
 | [`game/implementation/app-entry.md`](game/implementation/app-entry.md) | 根级入口装配与主线程链路 |
 | [`game/implementation/config.md`](game/implementation/config.md) | 配置树、默认值与 `applyConfigPatch` |
-| [`game/implementation/renderer.md`](game/implementation/renderer.md) | `renderer/**`：渲染主循环与静态光照着色器落地 |
+| [`game/implementation/renderer.md`](game/implementation/renderer.md) | `renderer/**` + 渲染共享层着色器：渲染主循环（lightmap 着色器已下沉 `src/renderer-shared/`） |
 | [`game/implementation/worker.md`](game/implementation/worker.md) | `worker/**`：Worker 入口、权威物理装配与消息类型面 |
 | [`game/implementation/input.md`](game/implementation/input.md) | `input/**`：输入桥、键位与存档点 |
 | [`game/implementation/panel.md`](game/implementation/panel.md) | `panel/**`：面板控制器与控件接线 |
@@ -74,7 +74,7 @@
 | [`viewer/implementation/replay.md`](viewer/implementation/replay.md) | `replay/**`：录像解析、播放器、时间轴、轨道面板与可视化 |
 | [`viewer/implementation/dem.md`](viewer/implementation/dem.md) | `replay/demo/**` + `replay/democlip.ts`：Source `.dem` 演示录像解析与 DEM→`Clip` 桥接 |
 | [`viewer/implementation/ui.md`](viewer/implementation/ui.md) | `ui/**`：遥测 HUD、地图信息、录像元数据面板 |
-| [`viewer/implementation/renderer.md`](viewer/implementation/renderer.md) | `renderer/**`：静态光照着色器落地 |
+| [`viewer/implementation/renderer.md`](viewer/implementation/renderer.md) | 渲染共享层单实例 `src/renderer-shared/shader/lightmap-shader.ts`：静态光照着色器落地（viewer 的 `src/renderer/` 已随之清空） |
 | [`viewer/implementation/worker.md`](viewer/implementation/worker.md) | `worker/**`：解析 Worker 与消息协议 |
 | [`viewer/implementation/wasm.md`](viewer/implementation/wasm.md) | `crates/wasm/**`：本工程的 WASM 绑定层导出面 |
 | [`viewer/implementation/scripts-and-test.md`](viewer/implementation/scripts-and-test.md) | `scripts/**` 与 `test/**`：构建脚本、冒烟与自检 |

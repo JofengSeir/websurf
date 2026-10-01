@@ -69,7 +69,7 @@
 
 ## 已知缺口
 
-1. **光照模式下拉只写不回填**：`<select>` 的初值是写死的字符串 `'baked'`（`apps/viewer/src/ui/mapinfo.ts:98`），而运行期真实模式由共享 uniform 侧决定（`apps/viewer/src/renderer/lightmap-shader.ts:442`）；任何绕过下拉的写入（例如外部脚本调用 `ViewerScene.setLightingMode`，`apps/viewer/src/core/scene.ts:245`）都不会回填到控件，下拉显示会与实况脱节。同一默认值在本工程存在两处来源（另一处是 `apps/viewer/src/core/scene.ts:65`）。
+1. **光照模式下拉只写不回填**：`<select>` 的初值是写死的字符串 `'baked'`（`apps/viewer/src/ui/mapinfo.ts:98`），而运行期真实模式由共享 uniform 侧决定（`src/renderer-shared/shader/lightmap-shader.ts:442`）；任何绕过下拉的写入（例如外部脚本调用 `ViewerScene.setLightingMode`，`apps/viewer/src/core/scene.ts:245`）都不会回填到控件，下拉显示会与实况脱节。同一默认值在本工程存在两处来源（另一处是 `apps/viewer/src/core/scene.ts:65`）。
 2. **`MapPanel.spawnPoints` getter 零调用点**：`apps/viewer/src/ui/mapinfo.ts:114` 暴露的出生点快照（含 ★ 前缀与坐标）在 `apps/viewer/src` 内无读取者，跳转列表由 `renderSpawns` 直接建 DOM（`apps/viewer/src/ui/mapinfo.ts:176`）。
 3. **`setMap(null)` 的清空路径只在启动空态被触发，导航里没有「卸载地图」入口**：`setMap` 支持 `result` 为 null 的清空路径（`apps/viewer/src/ui/mapinfo.ts:130`、`apps/viewer/src/ui/mapinfo.ts:138`），调用点共两处 —— 启动时先渲染一次「无地图」空态（`apps/viewer/src/app.ts:227` 传 `null`）与换图成功时传非 null（`apps/viewer/src/app.ts:558`）。故清空路径本身是活的（`reloadWrap` 的隐藏分支会被启动那次触发），缺的是**用户可点的卸载入口**：面板一旦载入过地图就回不到空态。（`apps/viewer/src/ui/mapinfo.ts:127` 的注释写「本仓当前唯一调用点只传非 null 的 `result`」，与 `apps/viewer/src/app.ts:227` 不符 —— 按 §6 只记录、未改源码。）
 4. **遥测 HUD 自算水平速度，与采样模块的导出重复**：`apps/viewer/src/ui/telemetry.ts:122` 现场算 `Math.hypot(s.vel[0], s.vel[2])`，而同一口径已有现成实现 `apps/viewer/src/replay/sampling.ts:87`（并被 `apps/viewer/src/replay/player.ts:292` 到 `apps/viewer/src/replay/player.ts:296` 转发，两者都无调用点）⇒ 同一语义存在两份代码。

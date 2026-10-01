@@ -50,7 +50,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 | 反向依赖不存在 | 共享层两个 crate 均不引用 `apps/**`；`src/wasm-core/Cargo.toml` 的依赖里没有 `websurf-phys` |
 | TS 侧以相对路径引用共享层 | 例：`apps/debug/src/world/spawn-loader.ts` 以 `'../../../../src/ts-shared/phys/angles.js'` 引入 `bspYawToCsYaw`（来源文件是 `src/ts-shared/phys/angles.ts`，import 说明符按 ESM 规则写 `.js`） |
 
-**不要**把三工程当成彼此的副本：`apps/{debug,game,viewer}/src/renderer/lightmap-shader.ts` 在三工程内各有一份**同构副本**（内容由本仓维护、可逐字节比对），而 `apps/<app>/crates/wasm/src/lib.rs`、`apps/<app>/src/renderer/renderer-main.ts`、`apps/<app>/src/app.ts` 三份**各自独立实现**，行数与导出面都不同。
+**不要**把三工程当成彼此的副本：静态光照着色器曾是三工程内各一份的同构副本（`apps/{debug,game,viewer}/src/renderer/lightmap-shader.ts`），2026-10-02 起已下沉为渲染共享层单实例 `src/renderer-shared/shader/lightmap-shader.ts`（三工程经 tsconfig include 收编同一文件）；而 `apps/<app>/crates/wasm/src/lib.rs`、`apps/<app>/src/renderer/renderer-main.ts`、`apps/<app>/src/app.ts` 三份**各自独立实现**，行数与导出面都不同。
 
 ---
 

@@ -30,7 +30,7 @@
 
 ## 已知缺口
 
-- **γ 滑块量程大于着色器接受窗口**：滑块量程 0.5..6（`apps/game/src/panel/panel-controller.ts:471`、`apps/game/web/index.html:231`），而渲染端 `setLightGamma` 只接受 `(0, 1]`（`apps/game/src/renderer/lightmap-shader.ts:1789`）；拖到大于 1 时 config 已被写（`apps/game/src/panel/panel-controller.ts:472`）、画面不变。
+- **γ 滑块量程大于着色器接受窗口**：滑块量程 0.5..6（`apps/game/src/panel/panel-controller.ts:471`、`apps/game/web/index.html:231`），而渲染端 `setLightGamma` 只接受 `(0, 1]`（`src/renderer-shared/shader/lightmap-shader.ts:1789`）；拖到大于 1 时 config 已被写（`apps/game/src/panel/panel-controller.ts:472`）、画面不变。
 - **数值框路径不回写自身文本**：滑块输入会把值同步到数值框（`apps/game/src/panel/panel-controller.ts:568`），但数值框输入只把**钳制结果写回滑块**（`:577`），数值框自身文本保持用户输入的越界值；被写入 config 的是钳制后的值（`:578`）。
 - **`applyCrosshair` 有一个死变量**：`const dot = el.querySelector('.ch-dot')` 声明后未被使用（`apps/game/src/panel/panel-controller.ts:773`），中心点显隐实际由 `no-dot` 类承担（`:774`）。
 - **渲染侧初值写两次**：`RendererMain.init` 先按 config 当时的值写一遍光照与 FOV（`apps/game/src/renderer/renderer-main.ts:266`、`:268`、`:270`、`:272`、`:274`、`:275`），`sendAllPrefs` 再用加载偏好后的 config 覆盖一次（`apps/game/src/panel/panel-controller.ts:750`、`:752`、`:753`、`:754`、`:755`）；两次都走共享 uniform，第二次对 γ 同样受接受窗口限制。

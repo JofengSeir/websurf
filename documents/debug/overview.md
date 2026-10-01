@@ -16,7 +16,7 @@
 | 路径 | 职责 | 关键锚点 |
 |---|---|---|
 | `apps/debug/src/`（根级模块） | 主线程装配（`app.ts`）、运行时配置树（`config.ts`）、计时挑战状态机（`game-state.ts`）、默认纹理包（`default-pack.ts`）、主线程 wasm 懒初始化（`main-wasm.ts`）、手写 wasm 类型声明（`wasm.d.ts`） | `apps/debug/src/app.ts:278`、`apps/debug/src/config.ts:205`、`apps/debug/src/main-wasm.ts:28` |
-| `apps/debug/src/renderer/` | 主线程渲染器 `RendererMain` 与七个子管理器：相机、光照、雾、LOD 剔除、碰撞可视化、路径记录、准星射线；另有 lightmap 着色器注入模块 | `apps/debug/src/renderer/renderer-main.ts:219`、`apps/debug/src/renderer/lod-manager.ts:87`、`apps/debug/src/renderer/lightmap-shader.ts:482` |
+| `apps/debug/src/renderer/` | 主线程渲染器 `RendererMain` 与七个子管理器：相机、光照、雾、LOD 剔除、碰撞可视化、路径记录、准星射线（lightmap 着色器注入模块已于 2026-10-02 下沉到渲染共享层，本目录不再持有） | `apps/debug/src/renderer/renderer-main.ts:219`、`apps/debug/src/renderer/lod-manager.ts:87`、`src/renderer-shared/shader/lightmap-shader.ts:482` |
 | `apps/debug/src/worker/` | Worker 入口装配（权威物理循环、消息分发、渲染轨迹采样、健康守护）、线程间消息类型面、物理面板协调器、内嵌纹理包暂存 | `apps/debug/src/worker/main.ts:455`、`apps/debug/src/worker/worker-types.ts:342`、`apps/debug/src/worker/physics-worker.ts:28` |
 | `apps/debug/src/input/` | 键盘采集、主线程→Worker 消息桥、输入录制/回放器（含回放捕获与丢帧语义） | `apps/debug/src/input/keyboard.ts:56`、`apps/debug/src/input/input-bridge.ts:16`、`apps/debug/src/input/input-recorder.ts:166` |
 | `apps/debug/src/world/` | WASM 导出 JSON 的类型面、brush 映射层、传送点数据层、自定义传送点 localStorage 层、出生点加载器（零调用点参考实现） | `apps/debug/src/world/types.ts:34`、`apps/debug/src/world/collider-adapter.ts:182`、`apps/debug/src/world/teleport-manager.ts:135` |
@@ -35,7 +35,7 @@
 | `websurf-phys`（`src/phys/**`） | `apps/debug/crates/wasm/Cargo.toml:22` 的 path 依赖 | 由 `apps/debug/crates/wasm/src/lib.rs:55` 的 `pub use websurf_phys::phys::PhysWorld` 原样再导出，JS 侧从 `apps/debug/pkg/websurf_wasm.js` 取 |
 | `websurf-wasm-core`（`src/wasm-core/**`） | `apps/debug/crates/wasm/Cargo.toml:24` 的 path 依赖 | `apps/debug/crates/wasm/src/lib.rs:49` 引入 `vbsp` / `bsp_to_gltf_core` / `model_integrator` / `pakfile_models` / `texture_utils` |
 | `src/ts-shared/**`（TypeScript 共享层） | `apps/debug/tsconfig.json:26` 的 `include` 把共享层的 `.ts` 纳入同一程序 | 主线程：`apps/debug/src/app.ts:33`（`shared-state`）、`apps/debug/src/app.ts:35`（`input-layer`）、`apps/debug/src/app.ts:36`（`world-builder`）；Worker：`apps/debug/src/worker/main.ts:27`（`auth-loop`）、`apps/debug/src/worker/main.ts:32`（`worker-dispatch`）、`apps/debug/src/worker/main.ts:33`（`phys/params`） |
-| 渲染侧三方库 `three` | `apps/debug/package.json:27` 的 dependencies | `apps/debug/src/renderer/renderer-main.ts:23` 起的 `THREE` 与 `examples/jsm` 引入 |
+| 渲染侧三方库 `three` | 仓库根 `package.json:6` 的 dependencies（2026-10-02 上收为单实例；`apps/debug/package.json:26` 的 dependencies 已清空） | `apps/debug/src/renderer/renderer-main.ts:23` 起的 `THREE` 与 `examples/jsm` 引入 |
 
 两点与依赖面有关的事实：
 
