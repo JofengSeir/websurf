@@ -345,6 +345,39 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * `SayText2` 载荷 → 可读文本（`dispatch` 的 UserMessage 分支用，CS:S 用户消息号 4）。
+ *
+ * 载荷内串按字节组织、但消息起点是任意位偏移，故首段解出的可能是残余位——好在那是
+ * 少量控制/非打印字节，落在控制字节边界上被切掉；`\x07` 后固定 6 字节颜色码（丢弃），
+ * 其余 <0x20 的控制字节替换为单个空格，正文按 UTF-8 解码（玩家名与聊天含多字节字符）。
+ */
+function decodeSayText2(bytes: Uint8Array): string {
+  const dec = new TextDecoder('utf-8', { fatal: false });
+  let out = '';
+  let run: number[] = [];
+  const flush = (): void => {
+    if (run.length > 0) {
+      out += dec.decode(new Uint8Array(run));
+      run = [];
+    }
+  };
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    if (b < 0x20) {
+      flush();
+      if (b === 7) {
+        i += 6; // `\x07` + 6 字节 RGB 颜色码，整段丢弃
+      }
+      out += ' ';
+    } else {
+      run.push(b);
+    }
+  }
+  flush();
+  return out.trim().replace(/ {2,}/g, ' ');
+}
+
 /** 判断 `[from, limit)` 区间是否全为 0 位（包尾填充）。 */
 function restIsZero(r: BitReader, limit: number): boolean {
   for (let i = r.pos; i < limit; i++) if (r.bitAt(i) !== 0) return false;
@@ -445,8 +478,25 @@ function dispatch(type: number, r: BitReader, ctx: NetContext, stats: DemoParseS
       return !r.overflowed;
     }
     case NetMsgType.UserMessage: {
-      r.u(8); // 消息类型
-      r.skip(r.u(11));
+      const umId = r.u(8); // 消息类型
+      const umBits = r.u(11);
+      // **`SayText2`（CS:S 用户消息号 4）解码进 `chatLines`**：玩家聊天与 SourceMod 的
+      // 连接/掉线/计时播报都走它。实测（`test/replay/auto-20261001-050330-surf_gigapede.dem`）：
+      // 全录像 `svc_Print` / `svc_StringCmd` 为 0 条，而 id=4 出现 40 条，内容为带颜色码的聊天
+      // 文本。载荷是**位流**：内部按字节组织（客户端号 + 布尔 + 串），`\x07` 后跟 6 字节颜色码，
+      // 其余 <0x20 的控制字节（`\x01` 等）作分隔——按「控制字节边界切 UTF-8 段」解码即可得到
+      // 可读文本（颜色码丢弃）。其它 id 的布局随 mod 而异，维持整段跳过。
+      if (umId === 4) {
+        const pos0 = r.pos;
+        const wasOvf = r.overflowed;
+        const bytes = r.readBytes(Math.min(Math.ceil(umBits / 8), 512));
+        r.overflowed = wasOvf; // 载荷截断只影响本条文本，不能拖垮整包
+        const text = decodeSayText2(bytes);
+        if (text.length > 0 && ctx.chatLines.length < CHAT_LINE_LIMIT) ctx.chatLines.push(text);
+        r.seek(pos0 + umBits);
+        return !r.overflowed;
+      }
+      r.skip(umBits);
       return !r.overflowed;
     }
     case NetMsgType.EntityMessage: {
@@ -1152,27 +1202,14 @@ function decodePacketEntities(
       continue;
     }
   }
-  // **不读「删除表」**。权威实现（`demoinfocs-golang` v3 的 `pkg/demoinfocs/net_messages.go`
-  // `handlePacketEntities`）在实体循环之后**直接结束**，没有任何显式删除表：
-  //   for i := 0; i < pe.GetUpdatedEntries(); i++ { entityIndex += 1 + ReadUBitInt(); A=ReadBit(); ... }
-  // 本工程早先凭推测在循环后多读了一张「`1` + 11 位实体号、遇 `0` 结束」的表 —— 那是**凭空多读**，
-  // 正是「多读恒为 3～7 位」的来源之一。删除（`FHDR_DELETE`）由记录内的标志位表达，不在末尾另表。
-  // **恢复「显式删除表」**。权威 Source 1 实现（`tf2-demo-parser` 的 `src/demo/message/packetentities.rs`）`r
-  // `PacketEntitiesMessage::parse` 末尾明确有：`r
-  // ` `r
-  // if delta.is_some() { while data.read()? { removed_entities.push(data.read_sized::<u32>(11)?.into()) } }
-  // ` `r
-  // ⇒ 增量包在实体循环之后**有一张以 1 位结尾的删除表，每项 11 位实体号**。`r
-  // 早先我照 CS:GO 分支（`demoinfocs`）把它删了 —— **那份是 CS:GO，没有这张表**；本工程面对的是 Source 1，`r
-  // 有。此处按 Source 1 权威实现恢复。
-  if (isDelta && !r.overflowed) {
-    for (let guard = 0; guard < maxEntries + 1; guard++) {
-      if (r.bit() === 0) break;
-      const gone = r.u(ctx.edictBits);
-      ctx.entityClass.delete(gone);
-      ctx.entityProps.delete(gone);
-    }
-  }
+  // **不读「显式删除表」，也不读终止位。** 这块位流的历史裁决经过三轮：
+  //   ① 凭空多读一张「`1` + 11 位实体号、遇 `0` 结束」的表（错）；② 按 tf2-demo-parser 的
+  //   `PacketEntitiesMessage::parse` 恢复同一张表（对本协议同样是错的）；③ 现状：**不读**。
+  // 实证（2026-10-01，`test/replay/auto-20261001-050330-surf_gigapede.dem`，CS:S networkprotocol=24，
+  // 工具 `test/replay/dem-probe.html`）：`svc_PacketEntities` 的实体载荷**恰好结束在头部声明的
+  // `dataBits` 上**，其后是字节对齐填充（0..7 位）或紧接下一条消息——把「终止位/删除表」读掉会
+  // 净消费 1+ 位，使同包后续消息全部错位：59,951 包实测，读表 = 24,378 包中止，不读 = 2 包。
+  // 实体删除由记录内的 `FHDR_DELETE` / LeavePVS 标志表达，删除不在包尾另表。
   if (r.overflowed) exitReason = 'readerOverflow';
   if (ctx.trace && stats.entityMessages <= 8) {
     // 判据用：**声明条数 vs 实读条数**、载荷终点与残差、循环出口原因。
@@ -1236,7 +1273,7 @@ export let updateStringTableEntries = 0;
 export const updateStringTableNames = new Map<string, number>();
 
 /** 诊断：类别号位宽的三个候选来源实测值。 */
-export const classBitsDiag = { maxClasses: -1, n: -1, classes: -1, bits: -1 };
+export const classBitsDiag = { maxClasses: -1, n: -1, classes: -1, bits: -1 };
 
 /** **名称时间线**：记录机器人会**共用同一人物、改名显示当前关卡** ⇒ 名字是时变属性，
  * 必须按 (tick, 槽位) 记录成历史，面板按当前 tick 取用，而不是只留一张快照。 */

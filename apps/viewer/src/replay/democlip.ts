@@ -125,9 +125,9 @@ export function trackToClip(
     offsetsLength: 0,
   };
 
-  // **速度由位置差分补出**：`.dem` 的实体流只给位姿，没有速度字段，而下游有三处依赖它——
-  // 遥测的速度读数与电平表（`apps/viewer/src/ui/telemetry.ts` 的 `update` 以 `s?.vel` 为门）、
-  // 以及按键反推（`apps/viewer/src/replay/keyguess.ts`）。
+  // **速度由位置差分补出**：`.dem` 的实体流只给位姿，没有速度字段，而下游依赖它——
+  // 遥测的速度读数与电平表（`apps/viewer/src/ui/telemetry.ts` 的 `update` 以 `s?.vel` 为门）。
+  // 按键不在此列：`.dem` 路径 `buttons` 恒为 null 且不做反推（owner 裁定，见 `app.ts` 帧循环注释）。
   //
   // **差分必须跨"上一次位置真正变化"的采样，不能只看相邻一条。**
   // 实测（`sampleMode: 'posed'`）：每个实体逐 tick 都记一条采样，但姿态只在**约 1.2%** 的帧
