@@ -12,13 +12,16 @@
  * 实体解码（`decodePacketEntities`）：
  * 1. 载荷位流按「属性位图」描述被改动的属性。位图读取器状态为「当前属性下标」：
  *      读 1 位 = 0 → 下标 +1；= 1 → 下标 = `uBitVar()` + 1（跳读）。
- * 2. 每条实体记录：
- *      索引增量：读 1 位 = 0 → 实体号 +1；= 1 → 实体号 = `uBitVar()`；
- *      更新类型：2 位（0 = 离开 PVS、1 = 进入 PVS、2 = 保留、3 = 增量更新）；
- *      进入 PVS 时再读类别号（`classIdBits` 位）与序号（10 位）；
- *      离开 PVS 无属性位图；
- *    增量/进入时按属性位图逐项读值。
+ * 2. 每条实体记录（**引擎侧权威实现**：`engine/baseclientstate.cpp` 的 `CL_ParseDeltaHeader`）：
+ *      实体号：`新号 = 上一条的号 + 1 + uBitVar()`（**没有"先读 1 位决定 +1 还是 uBitVar"这一步**）；
+ *      标志 2 位：先读 1 位 —— 为 `0` 时再读 1 位（`1` ⇒ 进入 PVS）；为 `1` 时 ⇒ 离开 PVS，
+ *                 再读 1 位（`1` ⇒ 一并删除）。四种组合即 {增量、进入 PVS、离开 PVS、离开并删除}；
+ *      进入 PVS 时再读类别号（`classIdBits` 位）与序号（10 位）；离开 PVS 无属性位图；
+ *      增量/进入时按属性位图逐项读值。
  * 3. 读到的值写回该实体的属性表（进入 PVS 时以类别基线重建，增量时在旧值上覆盖）。
+ * 4. **增量消息在实体记录之后还有一张「显式删除表」**（同一引擎文件末尾的 `ReadDeletions`，调用条件是
+ *    `u.m_bAsDelta && u.m_UpdateType == Finished`）——全量更新没有。形如 `1` 位 + 11 位实体号，重复，
+ *    遇 `0` 位结束；**空表 = 恰好 1 位**。见 `decodePacketEntities` 的收尾段。
  *
  * 属性值解码规则（`decodeProp`，与 `test/project/source-sdk-2013-master` 的
  * `src/public/dt_send.cpp` 里 `SendPropFloat` / `SendPropInt` 的写入侧约定对应）：
@@ -99,7 +102,7 @@ const SP_MODEL_INDEX_BITS = 11;
 const MAX_TABLES = 32;
 /** 字符串表条目 userdata 的最大位宽（引擎 `MAX_USERDATA_BITS`）。 */
 const MAX_USERDATA_BITS = 14;
-/** 留档的文本消息条数上限（`NetContext.chatLines`）。 */
+/** 留档的文本消息条数上限（`NetContext.chat`）。 */
 const CHAT_LINE_LIMIT = 4000;
 /** 单条字符串表更新最多读取的条目数（数据段另有位长上限，这里只是防御性上限）。 */
 const MAX_UPDATE_ENTRIES = 512;
@@ -109,6 +112,21 @@ const MAX_UPDATE_ENTRIES = 512;
 const OVERFLOW_WARN_LIMIT = 20;
 
 export type EntityProps = Map<string, number | number[] | string>;
+/** `svc_ServerInfo` 解出的服务器身份（录像页信息条展示；`skyName` 在 `.dem` 里的唯一来源）。 */
+export interface DemoServerInfo {
+  /** 引擎协议号（本工程实现 3 的**演示协议**外层；这里是消息内层协议，实测 24）。 */
+  protocol: number;
+  /** 游戏目录（`cstrike`）。 */
+  gameDir: string;
+  /** 服务器自报的地图名（与文件头 `mapName` 对照）。 */
+  mapName: string;
+  /** 天空盒名（实测 `Clear_night_sky`）——`.dem` 里只有这一处记它。 */
+  skyName: string;
+  /** 服务器自报的主机名（实测与文件头 `serverName` 不同）。 */
+  hostName: string;
+  /** 服务器类别数上限（用于推类别号位宽；实测 197 与真实类别数一致）。 */
+  maxClasses: number;
+}
 /** 一次 `.dem` 解析的统计与诊断。 */
 export interface DemoParseStats {
   /** 解析成功的包数。 */
@@ -119,6 +137,14 @@ export interface DemoParseStats {
   failureByType: Record<string, number>;
   /** 每个消息号被成功处理的次数（诊断用）。 */
   seenByType: Record<string, number>;
+  /**
+   * `svc_UserMessage` 的**逐 id 直方图**（id → 次数）。
+   *
+   * 为什么留它：用户消息的布局随 mod 而异，本工程只解 `SayText2`（CS:S id 4，进 `ctx.chat`）；
+   * 其余 id 只能整段跳过。直方图把「录像里到底有哪些自定义消息、各多少条」如实摊开
+   * —— 排查「为什么聊天是空的 / 为什么没有击杀提示」时，这是唯一不靠猜的入口。
+   */
+  userMessageById: Record<number, number>;
   /** 累计的 `svc_PacketEntities` 消息数。 */
   entityMessages: number;
   /** 累计的实体更新记录数。 */
@@ -131,6 +157,10 @@ export interface DemoParseStats {
   entityUnknownClass: number;
   /** 实体号越界次数（含被限量抑制的部分）。 */
   entityOverflow: number;
+  /** 从「显式删除表」（增量消息尾部，见 `decodePacketEntities`）读到的删除条目数。 */
+  entityDeletes: number;
+  /** `svc_UpdateStringTable` 的条目解码读越界、被按声明长度跳过的次数（见 `readUpdateStringTable`）。 */
+  updateEntryOverflow: number;
   /**
    * **多读**了声明位数的消息数（`实读 > 声明`）。这是当前的核心错误指标。
    *
@@ -168,6 +198,15 @@ export interface DemoParseStats {
 
 /** 解析上下文：发送表、类别、字符串表、实体表都在这里累积。 */
 export class NetContext {
+  /**
+   * `svc_ServerInfo` 解出的服务器身份（协议 / 游戏目录 / 地图 / 天空盒 / 主机名 / 服务器类别数）。
+   *
+   * 为什么留它：这条消息早先只把字段拼成一行 `stats.warnings` 文本就丢掉，于是录像页能展示的
+   * 「服务器是谁」只剩文件头那份 `DemoHeader.serverName` —— 而实测两者**并不相同**
+   * （本仓夹具：文件头 = `[CN] ERDY's Surf Server #1 | T66`、`svc_ServerInfo.hostName` =
+   * `ERDY-SURF Recorder`），天空盒名更是只有这里才有。
+   */
+  serverInfo: DemoServerInfo | null = null;
   /** 每类别展平后的属性序列（按需缓存）。 */
   private readonly flatByClass = new Map<number, FlatProp[]>();
   /** 实体号 → 类别 id。 */
@@ -178,8 +217,15 @@ export class NetContext {
   readonly stringTables = new Map<string, Map<number, { key: string; value: Uint8Array | null }>>();
   /** 各字符串表的 `maxEntries`（`svc_CreateStringTable` 头部的 u16）——更新条目时用它定下标位宽。 */
   readonly stringTableMaxEntries = new Map<string, number>();
-  /** 留档的文本消息（`svc_Print` / `svc_StringCmd` / `svc_Disconnect`），容量见 `CHAT_LINE_LIMIT`。 */
-  readonly chatLines: string[] = [];
+  /**
+   * 留档的文本消息（`svc_Print` / `svc_StringCmd` / `svc_Disconnect`，以及 `svc_UserMessage` 的
+   * SayText2），容量见 `CHAT_LINE_LIMIT`。
+   *
+   * **每条都带它出现的 tick**：侧栏「对话」区要按播放头把**已发生**的条目标亮、未发生的压暗，
+   * 并实时滚动到当前那条（owner 要求：进度走到哪儿、光打到哪儿，且那条必须在视野里）。
+   * 只留文本的话这件事没有任何依据可算 —— 时间戳与文本一样是解析产物。
+   */
+  readonly chat: Array<{ tick: number; text: string }> = [];
   /**
    * 字符串表**序号 → 表名**（按 `dem_stringtables` 的创建顺序）。
    *
@@ -251,6 +297,14 @@ export class NetContext {
   overrunTraced = 0;
   /** 诊断计数：已留痕的近失配消息数（见 `[NEAR]`）。 */
   nearMissTraced = 0;
+
+  /**
+   * 诊断计数：已留痕的「载荷对不上」消息数（上限 40）。
+   *
+   * 动机：`entityPayloadExact` 只给总数，无法回答**第一次失步发生在哪条消息**——而实体表的错误
+   * 会跨消息累积（类别号读错 ⇒ 后续属性位宽全错），所以「第一条对不上的消息」才是根因所在。
+   */
+  peMismatchTraced = 0;
   /** 诊断计数：已留痕的字符串表更新消息数（见 `[UPD]`）。 */
   updateTraced = 0;
   /** 诊断计数：已留痕的极小 PE 消息数（见 `[SMALLPE]`）。 */
@@ -413,7 +467,7 @@ function dispatch(type: number, r: BitReader, ctx: NetContext, stats: DemoParseS
       // 文本消息：内含服务器打印/聊天/连接公告（「X connected」之类），是**不依赖实体流**的
       // 玩家名单来源，故留档供上层取用（限量，避免长录像把内存吃光）。
       const text = r.str();
-      if (ctx.chatLines.length < CHAT_LINE_LIMIT) ctx.chatLines.push(text);
+      if (ctx.chat.length < CHAT_LINE_LIMIT) ctx.chat.push({ tick: currentTickRef.tick, text });
       return !r.overflowed;
     }
     case NetMsgType.ServerInfo:
@@ -480,7 +534,8 @@ function dispatch(type: number, r: BitReader, ctx: NetContext, stats: DemoParseS
     case NetMsgType.UserMessage: {
       const umId = r.u(8); // 消息类型
       const umBits = r.u(11);
-      // **`SayText2`（CS:S 用户消息号 4）解码进 `chatLines`**：玩家聊天与 SourceMod 的
+      stats.userMessageById[umId] = (stats.userMessageById[umId] ?? 0) + 1;
+      // **`SayText2`（CS:S 用户消息号 4）解码进 `ctx.chat`**：玩家聊天与 SourceMod 的
       // 连接/掉线/计时播报都走它。实测（`test/replay/auto-20261001-050330-surf_gigapede.dem`）：
       // 全录像 `svc_Print` / `svc_StringCmd` 为 0 条，而 id=4 出现 40 条，内容为带颜色码的聊天
       // 文本。载荷是**位流**：内部按字节组织（客户端号 + 布尔 + 串），`\x07` 后跟 6 字节颜色码，
@@ -492,7 +547,7 @@ function dispatch(type: number, r: BitReader, ctx: NetContext, stats: DemoParseS
         const bytes = r.readBytes(Math.min(Math.ceil(umBits / 8), 512));
         r.overflowed = wasOvf; // 载荷截断只影响本条文本，不能拖垮整包
         const text = decodeSayText2(bytes);
-        if (text.length > 0 && ctx.chatLines.length < CHAT_LINE_LIMIT) ctx.chatLines.push(text);
+        if (text.length > 0 && ctx.chat.length < CHAT_LINE_LIMIT) ctx.chat.push({ tick: currentTickRef.tick, text });
         r.seek(pos0 + umBits);
         return !r.overflowed;
       }
@@ -581,9 +636,12 @@ function readServerInfo(r: BitReader, ctx: NetContext, stats: DemoParseStats): b
   r.u(8);
   const gameDir = r.str();
   const mapName = r.str();
-  r.str();
+  const skyName = r.str();
   const hostName = r.str();
   r.bit();
+  // **如实收进上下文**（此前只拼一行 warnings 文本就丢掉）：录像页信息条要用这几个字段，
+  // 而 `skyName` 在整个 `.dem` 里**只有**这一处来源。
+  ctx.serverInfo = { protocol, gameDir, mapName, skyName, hostName, maxClasses };
   stats.warnings.push(`#serverinfo protocol=${protocol} game=${gameDir} map=${mapName} host=${hostName}`);
   return !r.overflowed;
 }
@@ -686,6 +744,8 @@ function readUpdateStringTable(r: BitReader, ctx: NetContext, stats: DemoParseSt
   const tableId = r.u(5);
   const changed = r.bit() === 1 ? r.u(16) : 1;
   const dataBits = r.u(20);
+  /** 本条消息进入条目解码前的越界标记（用于区分「本就越界」与「本条解码读出的越界」，见文末处理）。 */
+  const wasOvf = r.overflowed;
   // 表号 → 表名：优先用 `dem_stringtables` 的表名序列（权威创建顺序），其次退回 `ctx.stringTables`
   // 里已有的键。解析出的更新写入**同一张命名表**，这样 `readPlayerNames` 才能看到中途加入的玩家。
   const name = ctx.stringTableIdNames[tableId] ?? [...ctx.stringTables.keys()][tableId];
@@ -762,14 +822,44 @@ function readUpdateStringTable(r: BitReader, ctx: NetContext, stats: DemoParseSt
   // 本工程尚未定死，若一并按此读会把位流读飞、连带把实体流传坏（实测后果：玩家类轨迹整批消失、
   // 导入退回 `posed` 口径）。故其它表**只按（夹住后的）长度跳过**，不解析内容。
   if (updateEntryShift !== 0) r.skip(updateEntryShift);
-  if (decodeUpdateEntries) {
+  // **只有 `userinfo` 的更新条目形态已定死**（键已建好、更新只带 `player_info_s` 数据）。其它表的
+  // 更新条目流本工程尚未解对（见上文 717~721 行的三次实测），硬解会读越界 ⇒ `r.overflowed` 置位
+  // ⇒ 本函数返回 false ⇒ **整包放弃**。代价不只是少读这条消息：**同包中位于其后的
+  // `svc_PacketEntities` 会被一并丢掉**，于是该 tick 内 EnterPVS 的实体在本工程里从未登记类别，
+  // 之后每条引用它的增量记录都因「类别未知」而跳过属性位 —— 位流从此整段失步。
+  // 实测（`test/replay/auto-20261001-050330-surf_gigapede.dem`）：正是这样一次放弃（某个非
+  // `userinfo` 表的更新）让第 105 个包起「载荷对不上」的消息从 0 涨到 3300+。
+  // ⇒ 非 `userinfo` 的表**只按（夹住后的）长度跳过**，不解析内容。
+  if (decodeUpdateEntries && name === 'userinfo') {
     // **改用与创建期完全相同的条目解码器** —— 权威 Source 1 实现就是这么做的
     // （`parse_string_table_update` 与建表共用 `read_table_entry`），条目数取头部读到的 `changed`。
     // 注：**不要给读取器加"限界到载荷"** —— 实测那样做之后条目一条都解不出来（`userinfo` 的更新映射
     // 变空、`playerInfos` 仍为 1），故"u14 长度读越出本消息"这条假设**已被实测否掉**，维持不限界。
     readStringTableEntries(r, dataBits, changed, table, maxEntries, false, 0, signonBuilt ? 4 : 0, 14);
   }
-  if (r.pos < dataEnd) r.seek(dataEnd);
+  // **条目解码越界不得拖垮整包**：`svc_UpdateStringTable` 的**消息长度是权威的**（头部 `dataBits`），
+  // 条目流只是其内容 —— 内容解不出来时仍按长度跳过并继续读本包后续消息。
+  //
+  // 不这样做的代价实测是灾难性的：条目解码一旦读越界就置 `r.overflowed`，本函数返回 false，调用方
+  // `dispatch` 放弃**整个包** —— 于是同包中位于其后、本该被读到的 `svc_PacketEntities` 一并丢失。
+  // 那个 tick 里 EnterPVS 的实体因此从未登记类别，其后每条引用它的增量记录都因「类别未知」而跳过
+  // 属性位，位流整段失步。实测（`test/replay/auto-20261001-050330-surf_gigapede.dem`）：第 105 个包
+  // 之前只有 1 条这样的放弃，而它让其后 3300+ 条实体消息全部对不上（`entityPayloadExact` 停在 99）。
+  //
+  // 注意这里**不是**把错误藏起来：越界次数另计（`DemoParseStats.updateEntryOverflow`）并进警告，
+  // 条目布局本身的缺口仍按原样留档在 `documents/viewer/implementation/dem.md`。
+  if (r.overflowed && !wasOvf) {
+    stats.updateEntryOverflow++;
+    if (stats.updateEntryOverflow <= 4) {
+      stats.warnings.push(
+        `包 ${ctx.packetIndex}：字符串表 ${name} 的更新条目解码越界，已按声明长度 ${dataBits} 位跳过`,
+      );
+    }
+    r.overflowed = false;
+  }
+  // **无条件对齐到声明终点**：条目解码可能读得比 `dataEnd` 多（早期实现只在 `r.pos < dataEnd` 时前移，
+  // 多读时把游标留在数据段之外，同样会让后续消息错位）。
+  if (r.pos !== dataEnd) r.seek(dataEnd);
   // **名称时间线**：每次 userinfo 更新后快照一次（tick + 条目值），供面板按时间轮换显示。
   if (name === 'userinfo' && userinfoTimeline.length < 4000) {
     const snap: Array<{ idx: number; value: Uint8Array }> = [];
@@ -1202,14 +1292,35 @@ function decodePacketEntities(
       continue;
     }
   }
-  // **不读「显式删除表」，也不读终止位。** 这块位流的历史裁决经过三轮：
-  //   ① 凭空多读一张「`1` + 11 位实体号、遇 `0` 结束」的表（错）；② 按 tf2-demo-parser 的
-  //   `PacketEntitiesMessage::parse` 恢复同一张表（对本协议同样是错的）；③ 现状：**不读**。
-  // 实证（2026-10-01，`test/replay/auto-20261001-050330-surf_gigapede.dem`，CS:S networkprotocol=24，
-  // 工具 `test/replay/dem-probe.html`）：`svc_PacketEntities` 的实体载荷**恰好结束在头部声明的
-  // `dataBits` 上**，其后是字节对齐填充（0..7 位）或紧接下一条消息——把「终止位/删除表」读掉会
-  // 净消费 1+ 位，使同包后续消息全部错位：59,951 包实测，读表 = 24,378 包中止，不读 = 2 包。
-  // 实体删除由记录内的 `FHDR_DELETE` / LeavePVS 标志表达，删除不在包尾另表。
+  // **增量消息的实体载荷之后还有一张「显式删除表」**。引擎侧的证据在
+  // `engine/baseclientstate.cpp` 的 `CBaseClientState::ReadPacketEntities` 末尾：
+  //
+  //     // Now process explicit deletes
+  //     if ( u.m_bAsDelta && u.m_UpdateType == Finished ) { ReadDeletions( u ); }
+  //
+  // 注意调用条件 —— **只有增量消息有这张表，全量更新没有**。
+  //
+  // 位布局（由本条消息的位消耗反推）：`1` 位「还有删除」+ 11 位实体号（`MAX_EDICT_BITS`），
+  // 重复；遇 `0` 位结束。**空表 = 恰好 1 位**。
+  //
+  // 实测（2026-10-01，`test/replay/auto-20261001-050330-surf_gigapede.dem`，CS:S
+  // networkprotocol=24）：按「实体记录 + 这张表」对账后，残差（声明位数 − 实读位数）呈 `12k + 1`
+  // ——全量更新恒 **0**（表不存在，其余 4 条记录也逐条对上）、增量消息恒 **1**（空表），出现删除
+  // 条目时为 **25**（k = 2）等。整条 64 位增量载荷 = 1 条实体记录（63 位）+ 空删除表（1 位）。
+  //
+  // 历史误判的来历：早先据 tf2 系解析器试读过这张表，得到「读表 24,378 包中止 / 不读 2 包」，
+  // 据此判「本协议没有这张表」。该实验的前提不成立 —— 那时实体循环本身已有 87% 的消息
+  // `overflowBreak`（位流在记录层就已错位），在一段错位的位置上再去读表，只是把既有错位放大成
+  // 整包失败。**这张表一直都在。**
+  if (isDelta) {
+    let deleteGuard = 0;
+    while (!r.overflowed && r.bit() === 1 && deleteGuard++ < MAX_EDICT_COUNT) {
+      const deleted = r.u(MAX_EDICT_BITS);
+      ctx.entityClass.delete(deleted);
+      ctx.entityProps.delete(deleted);
+      stats.entityDeletes++;
+    }
+  }
   if (r.overflowed) exitReason = 'readerOverflow';
   if (ctx.trace && stats.entityMessages <= 8) {
     // 判据用：**声明条数 vs 实读条数**、载荷终点与残差、循环出口原因。
@@ -1224,6 +1335,14 @@ function decodePacketEntities(
     stats.entityPayloadMismatch++;
     const res = end - r.pos;
     if (res < 0) stats.entityOverread++;
+    // 「第一次失步」留痕：残差非零的前 40 条消息逐条记下（见 `NetContext.peMismatchTraced`）。
+    if (ctx.trace && ctx.peMismatchTraced < 40) {
+      ctx.peMismatchTraced++;
+      ctx.trace.push(
+        `  [PEMIS] 包 ${ctx.packetIndex} isDelta=${isDelta ? 1 : 0} 声明=${numUpdated} 实读=${decoded} ` +
+          `dataBits=${dataBits} 窗口=[${dataStart}..${end}] 末位=${r.pos} 残差=${res} 出口=${exitReason}`,
+      );
+    }
     // 残差极小（|res| ≤ 6 位）的消息留痕：这类消息的每条记录至多差 1～2 位，是定位
     // 「字段边界差 1 位」的最小样本 —— 逐条位区间摊开后可直接对账。
     if (ctx.trace && Math.abs(res) <= 6 && ctx.nearMissTraced < 10) {

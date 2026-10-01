@@ -1,10 +1,16 @@
 /**
- * 回放导入入口：优先把解析交给 Worker（避免长时间占用主线程），Worker 不可用或启动失败时
- * 自动回退到主线程做同一套解析；两条路径都只接受 Shavit 原生 `.replay`。
+ * 记录（`.replay`）导入入口：优先把解析交给 Worker（避免长时间占用主线程），Worker 不可用或
+ * 启动失败时自动回退到主线程做同一套解析；两条路径都只接受 Shavit 原生 `.replay`。
  *
  * 数据流：`File` + `RuleConfig` → （Worker 或主线程）`parseShavitReplay` →
  * `clipFromShavitReplay` → `Clip`。Worker 消息与载荷类型见
  * `apps/viewer/src/replay/protocol.ts`，Worker 侧实现见 `apps/viewer/src/worker/main.ts`。
+ *
+ * **本文件不碰 Source `.dem`**：录像链路有自己的解析器与自己的会话（`parseSourceDemo` →
+ * `trackToClip` → `apps/viewer/src/replay/session.ts` 的录像会话），与本文件没有调用关系。
+ * 早先这里还挂过一条 `.dem` 主线程分支（含三级采样口径回退），但记录页的文件框只收 `.replay`、
+ * `routeFile` 把 `.dem` 交给录像页，那条分支从 UI 不可达 —— 且它带来的第二套采样口径会让
+ * 「同一份 `.dem` 经两条路径得到不同轨迹集」。已整段删除（2026-10-02）。
  *
  * 关键不变量：
  * - 「Worker 坏掉」是**单向**的：`ensureWorker` 一旦置 `workerBroken`（抛异常或被 `onerror` 捕获），
@@ -30,8 +36,6 @@ import type {
   ParseResponse,
 } from './protocol.js';
 import type { Clip, RuleConfig } from './types.js';
-import { fileLooksLikeSourceDemo, parseSourceDemo } from './demo/demo.js';
-import { demoTracksToClips } from './democlip.js';
 
 /** 进度阶段取值：`'parse'` = 解析 `.replay`，`'map'` = 规则映射；当前只有 `'parse'` 会被发出。 */
 export type ImportPhase = 'parse' | 'map';
@@ -40,51 +44,17 @@ export type ProgressFn = (phase: ImportPhase, done: number, total: number) => vo
 
 export interface ImportResult {
   /**
-   * 本次导入产出的全部 `Clip`。Shavit `.replay` 恒为 1 份；Source `.dem` 是「每个被采出位姿的
-   * 实体一份」（多人录像即多份）。调用方按顺序建轨道（首份替换当前轨道，其余追加）。
+   * 本次导入产出的 `Clip`。
+   *
+   * **恒为一份**：Shavit `.replay` 是一段单人计时跑的定长帧序列，一份文件就是一条轨道
+   * （Worker 侧也按 `payloads: [clip]` 单元素回传）。早先这里声明成「`.dem` 每个实体一份」的
+   * 数组、并在记录页里逐份建轨道，那是两条链路共用一个导入入口时的产物；`.dem` 归录像页之后
+   * 这条契约收敛回单份（2026-10-02）。
    */
-  clips: Clip[];
+  clip: Clip;
   warnings: string[];
-  /** 导入来源标识；Shavit 路径为 `.replay`，DEM 路径为 `<地图>.dem`（取自首份 `Clip.resolvedPath`）。 */
+  /** 导入来源标识：`.replay` 的路径（取自 `Clip.resolvedPath`）。 */
   resolvedPath: string;
-  /**
-   * 仅 Source `.dem` 路径携带：解析出来的录像元信息与诊断计数，供面板如实展示。
-   * Shavit `.replay` 路径为 `undefined`（该格式没有这些概念）。
-   */
-  demo?: DemoImportInfo;
-}
-
-/** Source `.dem` 的解析摘要（面板展示用；字段全部取自 `DemoParseResult`，不做二次推算）。 */
-export interface DemoImportInfo {
-  /** 录像内的地图名（`DemoHeader.mapName`）。 */
-  map: string;
-  /** 网络协议号（CS:S / Orange Box 为 24）。 */
-  networkProtocol: number;
-  /** 录像总 tick 数。 */
-  ticks: number;
-  /** 录像总时长（秒）。 */
-  seconds: number;
-  /** 推出的 tick 率（`ticks / seconds`）。 */
-  tickRate: number;
-  /** `dem_stringtables` 解出的字符串表张数。 */
-  stringTables: number;
-  /** `dem_datatables` 解出的服务器类别数。 */
-  classes: number;
-  /** `svc_PacketEntities` 包解析成功数。 */
-  packetOk: number;
-  /** `svc_PacketEntities` 包总数。 */
-  packetTotal: number;
-  /** 位姿采样口径：`'players'` 玩家类且必须有朝向；`'playerPosed'` 玩家类、朝向可缺（记 0）；`'posed'` 任意有坐标的实体。 */
-  sampleMode: 'players' | 'playerPosed' | 'posed';
-  /** 采出的轨迹条数。 */
-  tracks: number;
-  /** 从 `userinfo` 字符串表解出的玩家名条数。 */
-  playerNames: number;
-  /**
-   * 玩家位姿可信度的如实说明。实测：实体流「记录边界」尚未完全校准，玩家类实体的
-   * `m_vecOrigin` / `m_angEyeAngles` 可能取不到或不可用——这句话原样展示给用户，不隐藏。
-   */
-  note: string;
 }
 
 /** pending 表的一项：响应到达时结算的 resolver / rejecter，外加本次请求的进度回调。 */
@@ -171,8 +141,8 @@ export class ReplayImporter {
   }
 
   /**
-   * 导入一份记录 / 录像并生成 `Clip`：先试 Worker，`send` 抛哨兵错误或 `workerBroken` 已置位时
-   * 改走 `importOnMain`（同源解析）；其余异常原样上抛。
+   * 导入一份 Shavit `.replay` 并生成 `Clip`：先试 Worker，`send` 抛哨兵错误或 `workerBroken`
+   * 已置位时改走 `importOnMain`（同源解析）；其余异常原样上抛。
    *
    * `file` 为 null 时交由解析侧复用自己缓存的上一份文件——本仓唯一调用点
    * （`apps/viewer/src/replay/panel.ts` 的 `ReplayPanel.runImport`）保证非空。
@@ -184,17 +154,14 @@ export class ReplayImporter {
     name: string,
     onProgress?: ProgressFn,
   ): Promise<ImportResult> {
-    // Source `.dem` 录像走独立的原生解析路径，且**不经 Worker**（Worker 协议只承载单一
-    // Shavit 载荷）；嗅探只看 8 字节魔数 `HL2DEMO\0`，不影响 `.replay` 路径。
-    if (file && (await fileLooksLikeSourceDemo(file))) {
-      return this.importDemoOnMain(file, rule, name, onProgress);
-    }
     try {
       const res = await this.send({ id: ++this.seq, type: 'import', file, rule, name }, onProgress);
       if (res.type === 'error') throw new Error(res.message);
       if (res.type !== 'done') throw new Error('导入返回了意外的响应类型');
+      const payload = res.payloads[0];
+      if (!payload) throw new Error('导入返回了空载荷');
       return {
-        clips: res.payloads.map((p) => payloadToClip(p, rule)),
+        clip: payloadToClip(payload, rule),
         warnings: res.warnings,
         resolvedPath: res.resolvedPath,
       };
@@ -202,85 +169,6 @@ export class ReplayImporter {
       if (isNoWorker(e) || this.workerBroken) return this.importOnMain(file, rule, name, onProgress);
       throw e;
     }
-  }
-
-  /**
-   * Source `.dem` 的主线程导入路径：解析容器/发送表/实体流，采出实体位姿轨迹，再按
-   * `apps/viewer/src/replay/democlip.ts` 的桥接规则转成 `Clip`。
-   *
-   * **单 clip 契约**：`ImportResult` 只承载一份 `Clip`，而一份 `.dem` 天然会产出多条轨迹
-   * （录像里有几个会动的实体就有几条）。这里取**采样点最多**的那条作为本次导入的 clip，其余
-   * 条数与名字写进 `warnings` 供面板显示——多人轨道要等导入契约扩成多 clip 后再放开。
-   *
-   * 采样口径先按 `'players'`（只采玩家类）；一条都没有时退回 `'posed'`（采任何有世界坐标的
-   * 实体），并在 `warnings` 里说明——空服自动录像只有后者能采出东西。
-   */
-  private async importDemoOnMain(
-    target: File,
-    rule: RuleConfig,
-    name: string,
-    onProgress?: ProgressFn,
-  ): Promise<ImportResult> {
-    onProgress?.('parse', 0, 1);
-    const bytes = await target.arrayBuffer();
-    let result = parseSourceDemo(new Uint8Array(bytes), { sampleMode: 'players' });
-    const warnings: string[] = [];
-    let clips = demoTracksToClips(result, { rule });
-    let sampleMode: 'players' | 'playerPosed' | 'posed' = 'players';
-    if (clips.length === 0) {
-      // 第二档：玩家类 + 有坐标即可（朝向缺失记 0）。实测 `m_angEyeAngles` 在真录像里极少下发，
-      // 若直接跳到 `posed` 会把玩家轨迹淹没在各种服务器实体里，用户看不到真人走位。
-      sampleMode = 'playerPosed';
-      result = parseSourceDemo(new Uint8Array(bytes), { sampleMode });
-      clips = demoTracksToClips(result, { rule });
-      if (clips.length > 0) {
-        warnings.push(
-          `玩家类实体没有下发朝向（m_angEyeAngles），已按「玩家类 + 世界坐标」口径采出 ${clips.length} 条轨迹（朝向记 0）`,
-        );
-      }
-    }
-    if (clips.length === 0) {
-      sampleMode = 'posed';
-      result = parseSourceDemo(new Uint8Array(bytes), { sampleMode });
-      clips = demoTracksToClips(result, { rule });
-      warnings.push(
-        `录像里没有玩家类实体的位姿轨迹，已改用「任意有世界坐标的实体」口径（采出 ${clips.length} 条）`,
-      );
-    }
-    onProgress?.('parse', 1, 1);
-    if (clips.length === 0) {
-      throw new Error(`${name} 里没有可播放的位姿轨迹（没有实体被发送过世界坐标）`);
-    }
-    const h = result.header;
-    warnings.unshift(
-      `Source 录像：协议 ${h.networkprotocol}、地图 ${h.mapName}、` +
-        `${h.playbackTicks} tick / ${h.playbackTime.toFixed(1)}s；` +
-        `包 ${result.stats.packetsParsed}/${result.stats.packetsParsed + result.stats.packetsFailed} 解析成功；` +
-        `采出 ${clips.length} 条实体轨迹`,
-    );
-    // 采样多的排前面（面板按顺序建轨道，首条替换当前轨道）
-    clips = [...clips].sort((a, b) => b.count - a.count);
-    if (name) clips[0].name = name;
-    const seconds = h.playbackTime;
-    const demo: DemoImportInfo = {
-      map: h.mapName,
-      networkProtocol: h.networkprotocol,
-      ticks: h.playbackTicks,
-      seconds,
-      tickRate: seconds > 0 ? h.playbackTicks / seconds : 0,
-      stringTables: result.stringTables.length,
-      classes: result.dataTables.classes.length,
-      packetOk: result.stats.packetsParsed,
-      packetTotal: result.stats.packetsParsed + result.stats.packetsFailed,
-      sampleMode,
-      tracks: clips.length,
-      playerNames: result.playerNames.size,
-      note:
-        result.playerNames.size === 0
-          ? '录像开始时的 userinfo 里没有真人玩家（只有录制机器人），且中途加入的玩家走 svc_UpdateStringTable、本工程尚未解条目；实体流的记录边界也还没完全校准，故玩家位姿暂不可用。'
-          : '实体流的记录边界尚未完全校准，玩家位姿可能不完整——下方轨迹数与帧数以实际解出的为准。',
-    };
-    return { clips, warnings, resolvedPath: clips[0].resolvedPath, demo };
   }
 
   /** 终止 Worker 并清空未结算请求表（不置 `workerBroken`，下次 `import` 会重新起 Worker）；本仓无调用点。 */
@@ -331,7 +219,7 @@ export class ReplayImporter {
     });
     onProgress?.('parse', 1, 1);
     const { clip, warnings } = clipFromShavitReplay(name, parsed, rule);
-    return { clips: [clip], warnings, resolvedPath: clip.resolvedPath };
+    return { clip, warnings, resolvedPath: clip.resolvedPath };
   }
 }
 

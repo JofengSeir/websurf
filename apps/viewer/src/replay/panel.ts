@@ -4,6 +4,8 @@
  * 职责边界：本文件负责人机交互与规则持久化，不做解析（交给
  * `apps/viewer/src/replay/importer.ts` 的 `ReplayImporter`）、不改轨道结构
  * （进出的 clip 交给 `onClip`，由 `apps/viewer/src/app.ts` 决定追加还是替换轨道）。
+ * 本页**只收 `.replay`**：入口按内容复核（`apps/viewer/src/core/filekind.ts`），
+ * 选到别的类型一律经 `onForeignFile` 交回 `apps/viewer/src/app.ts` 的 `routeFile` 改送。
  *
  * 关键不变量：
  * - 导入基准是**帧自身坐标**：轴序与朝向映射只随 `RuleConfig` 的 `axesMode` / `yawMode` 走，
@@ -15,6 +17,7 @@
  */
 
 import { buttonRow, checkField, el, foldBox, noteLine, numField, section } from '../core/dom.js';
+import { FILE_KIND_LABEL, sniffFileKind } from '../core/filekind.js';
 import { TrackPanel } from './trackpanel.js';
 import type { ReplayImporter } from './importer.js';
 import type { ReplayPlayer } from './player.js';
@@ -32,6 +35,11 @@ export interface ReplayPanelOptions {
    * `replaceId` 为 null 表示没有可替换的轨道（换文件 / 轨道已被移除）。
    */
   onClip: (clip: Clip, warnings: string[], replaceId: string | null) => string;
+  /**
+   * 入口收到**不是 `.replay`** 的文件时把原文件转发出去（由 `apps/viewer/src/app.ts` 的
+   * `routeFile` 按内容改送到对应页面）。未提供该回调时本面板只写一条错误提示、不做任何解析。
+   */
+  onForeignFile?: (file: File) => void;
   /** 清空全部轨迹（面板的「清空全部」与「移除到零」都走它）。 */
   onClearAll: () => void;
   /** 轨道属性变化（显隐 / 偏移 / 重命名 / 移除 / 跟随）→ 重建可视化、时间轴与信息条。 */
@@ -84,7 +92,8 @@ export class ReplayPanel {
     this.fileNote = noteLine(fileBody);
     const fileInput = el('input');
     fileInput.type = 'file';
-    fileInput.accept = '.replay,.dem';
+    // 本页只收记录：`.dem` 归「录像」页。误选不会在本页被解析 —— `loadFile` 按内容复核后转发
+    fileInput.accept = '.replay';
     fileInput.style.display = 'none';
     // 引导层的「导入记录」按钮以 `for="replayFile"` 触发本输入（首访用户在引导层即可导入）
     fileInput.id = 'replayFile';
@@ -256,13 +265,32 @@ export class ReplayPanel {
   // ── 导入 ──────────────────────────────────────────────────────────
 
   /**
-   * 载入一份记录文件：进行中（`busy`）则只写提示并返回；否则记下文件、把 `lastTrackId`
-   * 清空（于是本次导入追加新轨道），写两条「正在解析」提示后开始导入。
-   * 面板按钮、主窗口拖拽（`apps/viewer/src/app.ts` 的 drop 处理）与 URL 深链共用本入口。
+   * 载入一份记录文件。
+   *
+   * 进行中（`busy`）则只写提示并返回；否则**先按内容复核**（`sniffFileKind`，不看扩展名）：
+   * 不是 `.replay` 就交给 `onForeignFile` 转发（是 `.dem` / `.bsp` 时由 `routeFile` 改送到
+   * 对应页面），本页不留任何解析动作。确认是 `.replay` 后记下文件、把 `lastTrackId` 清空
+   * （于是本次导入追加新轨道），写两条「正在解析」提示后开始导入。
+   *
+   * 面板按钮、主窗口拖拽与引导层输入（都走 `apps/viewer/src/app.ts` 的 `routeFile`）
+   * 共用本入口。
    */
   async loadFile(file: File): Promise<void> {
     if (this.busy) {
       this.fileNote('上一次导入还在进行，请稍候再试', 'warn');
+      return;
+    }
+    const kind = await sniffFileKind(file);
+    if (kind !== 'replay') {
+      if (this.opts.onForeignFile) {
+        // 去向与文案都归 `routeFile`（本页不替它决定是录像页还是地图）
+        this.opts.onForeignFile(file);
+        return;
+      }
+      this.fileNote(
+        `${file.name} 不是 ${FILE_KIND_LABEL.replay}文件（识别为 ${FILE_KIND_LABEL[kind]}）——本页只收 .replay`,
+        'error',
+      );
       return;
     }
     this.file = file;
@@ -274,8 +302,8 @@ export class ReplayPanel {
 
   /**
    * 走一次导入：没有目标文件时只有显式请求才提示；`busy` 期间的请求直接丢弃（不排队，
-   * 显式请求会写「本次改动未生效」）；其余情况置 `busy`，调 `importer.import` 并把结果交给
-   * `onClip`（返回值存回 `lastTrackId`），随后写摘要与警告、清状态行；异常写错误提示；
+   * 显式请求会写「本次改动未生效」）；其余情况置 `busy`，调 `importer.import` 并把产出那一份
+   * clip 交给 `onClip`（返回值存回 `lastTrackId`），随后写摘要与警告、清状态行；异常写错误提示；
    * `finally` 复位 `busy`。
    *
    * 摘要里 `LARGE_CLIP_FRAMES` 的判定只影响文案与提示级别（帧数多时提示重导较慢）。
@@ -301,35 +329,16 @@ export class ReplayPanel {
           if (phase === 'parse') this.opts.onStatus(`解析 .replay…${pct}`);
         },
       );
-      // 多份 clip（Source `.dem` 每个实体一条轨迹）：首份替换当前轨道（沿用改映射重导入的语义），
-      // 其余一律追加（`replaceId = null`）；`lastTrackId` 始终记首份的轨道 id。
-      const prevTrackId = this.lastTrackId;
-      for (let i = 0; i < result.clips.length; i++) {
-        const id = this.opts.onClip(
-          result.clips[i],
-          i === 0 ? result.warnings : [],
-          i === 0 ? prevTrackId : null,
-        );
-        if (i === 0) this.lastTrackId = id;
-      }
-      const primary = result.clips[0];
-      const big = result.clips.some((c) => c.count >= LARGE_CLIP_FRAMES);
-      const extra = result.clips.length > 1 ? `，共 ${result.clips.length} 条轨迹` : '';
-      const d = result.demo;
-      // Source `.dem`：另起一段列出解析出来的记录元信息与诊断（面板不替用户猜可信度，原样展示）
-      const demoText = d
-        ? `【Source 录像】地图 ${d.map}（协议 ${d.networkProtocol}）｜` +
-          `${d.seconds.toFixed(1)} s / ${d.ticks.toLocaleString('en-US')} tick（约 ${d.tickRate.toFixed(1)} tick/s）｜` +
-          `字符串表 ${d.stringTables} 张、类别 ${d.classes} 个｜包解析 ` +
-          `${d.packetOk.toLocaleString('en-US')}/${d.packetTotal.toLocaleString('en-US')}｜` +
-          `采样口径 ${d.sampleMode === 'players' ? '玩家类' : '任意有坐标实体'}、轨迹 ${d.tracks} 条、` +
-          `玩家名 ${d.playerNames} 个。${d.note} `
-        : '';
+      // 一份 `.replay` = 一条轨道。重新导入（改映射 / 改变换）时把上次那条轨道 id 当作替换目标，
+      // 由 `onClip` 决定替换还是追加；它把实际承载的轨道 id 返回回来。
+      this.lastTrackId = this.opts.onClip(result.clip, result.warnings, this.lastTrackId);
+      const clip = result.clip;
+      const big = clip.count >= LARGE_CLIP_FRAMES;
       // warnings 与摘要合并为一条 note（warnings 若独占会被摘要立即覆盖）
       const summary =
-        `${demoText}${this.file.name}：${primary.count.toLocaleString('en-US')} 帧，` +
-        `${primary.duration.toFixed(2)} s${extra}` +
-        (primary.vel ? `，最大速度 ${primary.maxSpeed.toFixed(0)} u/s` : '') +
+        `${this.file.name}：${clip.count.toLocaleString('en-US')} 帧，` +
+        `${clip.duration.toFixed(2)} s` +
+        (clip.vel ? `，最大速度 ${clip.maxSpeed.toFixed(0)} u/s` : '') +
         (big ? ' —— 帧数较多，改映射/变换重新导入耗时较长' : '');
       this.fileNote(
         result.warnings.length > 0 ? result.warnings.join('；') + ' —— ' + summary : summary,

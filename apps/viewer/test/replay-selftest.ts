@@ -13,6 +13,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { clampPitch, wrapDeg } from '../src/replay/helpers.js';
 import { applyClipTransform } from '../src/replay/build.js';
 import { ReplayPlayer } from '../src/replay/player.js';
+import { FILE_KIND_LABEL, kindOfHead, sniffFileKind } from '../src/core/filekind.js';
 import {
   clipFromShavitReplay,
   looksLikeShavitReplay,
@@ -25,6 +26,7 @@ import { parseSourceDemo } from '../src/replay/demo/demo.js';
 import { flattenSendTable } from '../src/replay/demo/tables.js';
 import { decodeProp } from '../src/replay/demo/net.js';
 import { BitReader } from '../src/replay/demo/bits.js';
+import { visibleChat } from '../src/ui/chatoverlay.js';
 import { demoTracksToClips } from '../src/replay/democlip.js';
 
 let failures = 0;
@@ -838,6 +840,91 @@ console.log('\n[8] Shavit .replay 异常输入（明确报错 / 兼容路径）'
   }
 }
 
+// ── [9] 文件类型识别 ────────────────────────────────────────────────
+// 入口分派的判据全在 `apps/viewer/src/core/filekind.ts` 的 `kindOfHead`：只看文件头魔数，
+// 不看扩展名。合成头覆盖四种取值与「互不误判」，真实夹具证明判据在真文件上成立。
+console.log('\n[9] 文件类型识别（按魔数分派，不看扩展名）');
+{
+  const ascii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
+  /** 把魔数放到一个够长的（80 字节）缓冲区头部，模拟真实文件的开头。 */
+  const head = (b: number[]): Uint8Array => {
+    const out = new Uint8Array(80);
+    out.set(b);
+    return out;
+  };
+  const shavitHead = head(ascii('12:{SHAVITREPLAYFORMAT}{FINAL}\n'));
+  const demHead = head([...ascii('HL2DEMO'), 0]);
+  const bspHead = head([...ascii('VBSP'), 20, 0, 0, 0]);
+
+  check('VBSP 头 → bsp', kindOfHead(bspHead) === 'bsp', kindOfHead(bspHead));
+  check('HL2DEMO\\0 头 → demo', kindOfHead(demHead) === 'demo', kindOfHead(demHead));
+  check('Shavit 头行 → replay', kindOfHead(shavitHead) === 'replay', kindOfHead(shavitHead));
+  check('PNG 头 → unknown', kindOfHead(head([0x89, 0x50, 0x4e, 0x47])) === 'unknown');
+  check('空头 → unknown', kindOfHead(new Uint8Array(0)) === 'unknown');
+  check('长度不足（VBS）→ unknown', kindOfHead(new Uint8Array(ascii('VBS'))) === 'unknown');
+  // 交叉误判是本次缺陷的根因形态（旧实现按扩展名 / 按「点的是哪个面板」决定去向），
+  // 这三条把判据钉死在内容上。
+  check('Shavit 头不会被判成 demo', kindOfHead(shavitHead) !== 'demo');
+  check('HL2DEMO 头不会被判成 replay', kindOfHead(demHead) !== 'replay');
+  check(
+    '展示名齐全（四种取值都有文案）',
+    (['bsp', 'replay', 'demo', 'unknown'] as const).every(
+      (k) => typeof FILE_KIND_LABEL[k] === 'string' && FILE_KIND_LABEL[k].length > 0,
+    ),
+  );
+
+  // 真实夹具：`.dem` 取 test/replay 下第一份（发现式，与末尾「Source .dem」段同口径）；
+  // `.replay` 取 test/maps/surf_null_4.replay。两者缺失都 loud skip，不计入 failures。
+  const demDirs = [
+    new URL('../../../test/replay/', import.meta.url),
+    new URL('../../../../test/replay/', import.meta.url),
+  ];
+  let realDem: Uint8Array | null = null;
+  for (const d of demDirs) {
+    try {
+      const names = readdirSync(d).filter((f) => f.endsWith('.dem')).sort();
+      if (names.length === 0) continue;
+      realDem = new Uint8Array(readFileSync(new URL(names[0], d)));
+      console.log(`     （真实 .dem 夹具 ${names[0]}）`);
+      break;
+    } catch {
+      /* 换下一个候选路径 */
+    }
+  }
+  if (realDem) check('真实 .dem 夹具 → demo', kindOfHead(realDem) === 'demo', kindOfHead(realDem));
+  else console.log('  SKIP 真实 .dem 夹具缺失（test/replay 下没有 .dem）');
+
+  let realReplay: Uint8Array | null = null;
+  for (const cand of [
+    FIXTURE_URL,
+    new URL('../../../../test/maps/surf_null_4.replay', import.meta.url),
+    '../../test/maps/surf_null_4.replay',
+  ]) {
+    try {
+      realReplay = new Uint8Array(readFileSync(cand));
+      break;
+    } catch {
+      realReplay = null;
+    }
+  }
+  if (realReplay) {
+    check('真实 .replay 夹具 → replay', kindOfHead(realReplay) === 'replay', kindOfHead(realReplay));
+  } else {
+    console.log('  SKIP 真实 .replay 夹具缺失（test/maps/surf_null_4.replay）');
+  }
+
+  // 面板与拖拽实际调用的是 `sniffFileKind(File)`（按需切片，不整份读入）。
+  // Node ≥ 20 才有全局 `File`；更老的 Node 上 loud skip。
+  if (!realDem) {
+    console.log('  SKIP sniffFileKind(File)：缺少 .dem 夹具');
+  } else if (typeof File !== 'function') {
+    console.log('  SKIP sniffFileKind(File)：当前 Node 没有全局 File（需 ≥ 20）');
+  } else {
+    const kind = await sniffFileKind(new File([realDem], 'probe.dem'));
+    check('sniffFileKind(File) → demo', kind === 'demo', kind);
+  }
+}
+
 console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
 // ── Source `.dem`（录像）路径 ──────────────────────────────────────
 // 夹具 test/replay/*.dem 是 gitignore 的样例，缺失时整段跳过（不影响其余用例）。
@@ -845,7 +932,7 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
   // 路径解析：`test:replay` 会先把本文件打包到 `apps/viewer/.tmp/replay-selftest/` 再跑，
   // 故 `import.meta.url` 与源码位置不同；先试相对 cwd（npm 脚本的 cwd = apps/viewer），
   // 再试打包位置与源码位置两种 `import.meta.url`。
-  // 夹具发现：优先用历史上一直在用的那份；找不到就**自动取目录里第一份 `*.dem`** ——
+  // 夹具发现：优先用长期在用的那份；找不到就**自动取目录里第一份 `*.dem`** ——
   // 早先这里硬编码单个文件名，换夹具后整段**静默跳过**（等于 DEM 零覆盖），故改为发现式。
   const DEM_PREFERRED = 't66-auto-20260902-1519-surf_pools.dem';
   const demDirs = [
@@ -899,7 +986,10 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
     const expect = demName ? DEM_EXPECT[demName] : undefined;
     const expectNote = expect ? '（已知夹具，走精确断言）' : '（未知夹具，只验通用不变量）';
     console.log('（.dem 夹具：' + demName + expectNote + '）');
-    const r = parseSourceDemo(dem, { sampleMode: 'posed' });
+    // **口径取 `'players'`（生产默认），不取 `'posed'`**：`'posed'` 会给每个有坐标的实体逐 tick
+    // 建采样，在 11.8 MB / 30 分钟的真实夹具上约 227 条 × 6 万帧 ≈ 2 GB，Node 默认堆直接 OOM。
+    // 本段要验的是**解析正确性**，与采样口径无关；`'players'` 顺带覆盖了「玩家位姿采得出来」。
+    const r = parseSourceDemo(dem, { sampleMode: 'players' });
     check('DEM 录像协议 = 3', r.header.demoprotocol === 3, String(r.header.demoprotocol));
     check('DEM 网络协议 = 24', r.header.networkprotocol === 24, String(r.header.networkprotocol));
     check('DEM 发送表非空', r.dataTables.tables.size > 200, String(r.dataTables.tables.size));
@@ -926,6 +1016,70 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
       'DEM 包解析率 > 95%',
       packets > 0 && r.stats.packetsParsed / packets > 0.95,
       `${r.stats.packetsParsed}/${packets}`,
+    );
+
+    // **实体载荷的强判据**：每条 `svc_PacketEntities` 的实体记录 + 增量删除表应当**恰好用尽**头部声明的
+    // `dataBits`。这是「消息头 → 逐条记录 → 属性位图 → 属性值 → 增量删除表」五层同时正确的唯一单点判据。
+    //
+    // 回归背景（2026-10-01）：一次 `svc_UpdateStringTable` 的条目解码读越界会让**整包**被放弃，连带丢掉
+    // 同包之后的 `svc_PacketEntities` —— 那个 tick 里 EnterPVS 的实体从此没有类别，其后每条引用它的增量
+    // 记录都因「类别未知」跳过属性位，位流整段失步。修前实测 `exact = 1 / mismatch = 59,929`、
+    // `unknownClass = 113,215`；修后 `exact = 59,948 / mismatch = 0`、`unknownClass = 0`。
+    check(
+      'DEM 实体载荷恰好用尽（exact / 全部 PE 消息 > 95%）',
+      r.stats.entityMessages > 0 &&
+        r.stats.entityPayloadExact / r.stats.entityMessages > 0.95,
+      `${r.stats.entityPayloadExact}/${r.stats.entityMessages}（mismatch=${r.stats.entityPayloadMismatch}）`,
+    );
+    check(
+      'DEM 无「类别未知」的实体记录',
+      r.stats.entityUnknownClass === 0,
+      String(r.stats.entityUnknownClass),
+    );
+    check('DEM 无实体号越界', r.stats.entityOverflow === 0, String(r.stats.entityOverflow));
+
+    // `svc_ServerInfo`：解析层**必须把它收下来**（此前只拼一行 warnings 文本就丢掉）。
+    // `skyName` 在整个 `.dem` 里只有这一处来源，录像信息条的天空盒就靠它（见 ui/demometa.ts）。
+    check(
+      'DEM 收到 svc_ServerInfo 且天空盒非空',
+      r.serverInfo !== null && r.serverInfo.skyName.length > 0,
+      JSON.stringify(r.serverInfo),
+    );
+    if (expect) {
+      check(
+        'DEM svc_ServerInfo 的地图名与文件头一致',
+        r.serverInfo?.mapName === r.header.mapName,
+        `${r.serverInfo?.mapName} vs ${r.header.mapName}`,
+      );
+    }
+    // `svc_UserMessage` 逐 id 直方图：id4 = SayText2，条数必须与解出的聊天行数**对得上**
+    // （每条 id4 要么解出文本、要么被解码器判为空串 —— 前者进 chat 且**带它出现的 tick**）。
+    check(
+      'DEM 用户消息直方图含 id4 且每条聊天都带 tick',
+      (r.stats.userMessageById[4] ?? 0) >= r.chat.length && r.chat.length > 0 && r.chat.every((m) => m.tick > 0),
+      `id4=${r.stats.userMessageById[4] ?? 0} chat=${r.chat.length} 首条 tick=${r.chat[0]?.tick ?? -1}`,
+    );
+    // **画面左下角浮层的窗口规则**（`apps/viewer/src/ui/chatoverlay.ts` 的纯函数）：
+    // 真实夹具 15 秒窗口内最多 4 条 ⇒ 「>5 条就丢最早的」那条分支只能靠合成数据钉住。
+    const mk = (times: number[]): Array<{ t: number; text: string }> => times.map((t, i) => ({ t, text: `m${i}` }));
+    check('浮层窗口：只取「已发生且未满 15 秒」的条目', visibleChat(mk([0, 10, 20]), 16).map((l) => l.t).join(',') === '10', visibleChat(mk([0, 10, 20]), 16).map((l) => l.t).join(','));
+    check('浮层窗口：15 秒整还在、超过就丢', visibleChat(mk([0]), 15).length === 1 && visibleChat(mk([0]), 15.001).length === 0, `${visibleChat(mk([0]), 15).length}/${visibleChat(mk([0]), 15.001).length}`);
+    check('浮层窗口：未发生的（未来）一条都不显示', visibleChat(mk([30, 40]), 10).length === 0, String(visibleChat(mk([30, 40]), 10).length));
+    // 短时间内来了 8 条（都在 15 秒窗口内）⇒ 只留**最后 5 条**（最早的被挤掉），且按时间升序
+    const burst = visibleChat(mk([0, 1, 2, 3, 4, 5, 6, 7]), 7);
+    check('浮层窗口：短时间超过 5 条 ⇒ 只留最后 5 条（最早那条被挤掉）', burst.length === 5 && burst[0].t === 3 && burst[4].t === 7, burst.map((l) => l.t).join(','));
+    check('浮层窗口：返回顺序自早到晚（渲染时最底下就是最晚的）', burst.every((l, i) => i === 0 || l.t > burst[i - 1].t), burst.map((l) => l.t).join(','));
+    // 录制者机位（`democmdinfo`）：每条 `dem_signon` / `dem_packet` 头部一份 ⇒ 条数应等于包数；
+    // 本夹具（SourceTV 观察者录像）全部为 0 ⇒「没有第一人称机位可用」是记录本身没记，不是漏读。
+    check(
+      'DEM 录制机位条数 = 包数（每条包一个 democmdinfo）',
+      r.cameraSamples.samples === r.stats.packetsParsed + r.stats.packetsFailed && r.cameraSamples.samples > 0,
+      `${r.cameraSamples.samples} vs ${r.stats.packetsParsed + r.stats.packetsFailed}`,
+    );
+    check(
+      'DEM 该夹具的录制机位全 0（记录本身未记视角）',
+      r.cameraSamples.nonZero === 0 && r.cameraSamples.first !== null,
+      JSON.stringify(r.cameraSamples),
     );
 
     // dem_stringtables：解析终点应落在载荷末尾 0..7 位内（末字节按字节补齐）
@@ -1010,8 +1164,13 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
         ),
         clips.map((x) => x.pos[0].toFixed(0)).join(','),
       );
-      check('DEM Clip 元信息带地图名', c.meta?.map === r.header.mapName, String(c.meta?.map));
-      check('DEM Clip tick 率合理（30..200）', (c.meta?.tickrate ?? 0) > 30 && (c.meta?.tickrate ?? 0) < 200, String(c.meta?.tickrate));
+      // **`.dem` 的 `Clip.meta` 必须恒为 `null`**。`Clip.meta` 的契约是 Shavit `.replay` 的**文件头**，
+      // `.dem` 里没有这样一份头（无官方计时 / 无 prerun、run、post 三段 / 无风格、赛道、stage、zone 口径）。
+      // 早先按该形状**伪造**过一份（`time` 取末帧时间、`frameCount` 取采样条数），下游据此渲染出五项假信息：
+      // 进度条上多一条横跨全场的「正式跑段」带（`apps/viewer/src/replay/timeline.ts` 按 `meta.frameCount > 0` 画）、
+      // 帧读数把每帧标成 `run n/n`、信息条多出「成绩」「风格 0」「帧 0+n+0」「格式 v0」。
+      check('DEM Clip 元信息为 null（`.dem` 没有 Shavit 文件头）', c.meta === null, String(c.meta));
+      check('DEM Clip 计数与各定长数组等长', c.count === c.pos.length / 3 && c.count === c.ang.length / 3, `${c.count}`);
     }
   }
 }

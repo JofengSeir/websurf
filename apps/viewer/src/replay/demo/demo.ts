@@ -23,7 +23,7 @@
  */
 
 import { BitReader } from './bits.js';
-import { currentTickRef, type EntityProps, NetContext, parsePacket, type DemoParseStats } from './net.js';
+import { currentTickRef, type DemoServerInfo, type EntityProps, NetContext, parsePacket, userinfoTimeline, type DemoParseStats } from './net.js';
 import { readDataTables, type DataTables } from './tables.js';
 
 /** 文件头字段（`demoheader_t`）。 */
@@ -53,7 +53,7 @@ export interface PlayerSample {
   health: number | null;
   /** 队伍号；未发送时为 null。 */
   team: number | null;
-  /** 生命状态（2 = 存活）；未发送时为 null。 */
+  /** 生命状态（0 = 存活 / 2 = 已死，Source `LifeState_t` 口径）；未发送时为 null。 */
   lifeState: number | null;
 }
 
@@ -92,11 +92,13 @@ export interface DemoParseResult {
    */
   playerNames: Map<number, string>;
   /**
-   * 录像内出现过的**文本消息**（`svc_Print` / `svc_StringCmd` / `svc_Disconnect`），按出现顺序。
-   * 这里面含服务器打印、聊天与「X connected / disconnected」公告 —— 是**不依赖实体流**的
-   * 玩家名单来源（容量上限见 `demo/net.ts` 的 `CHAT_LINE_LIMIT`）。
+   * 录像内出现过的**文本消息**（`svc_Print` / `svc_StringCmd` / `svc_Disconnect`，以及
+   * `svc_UserMessage` 的 SayText2），按出现顺序，**每条带它出现的 tick**。
+   * 这里面含服务器打印、聊天与「X connected / disconnected」公告 —— 既是**不依赖实体流**的
+   * 玩家名单来源，也是侧栏「对话」区按播放头点亮 / 压暗的依据（容量上限见 `demo/net.ts` 的
+   * `CHAT_LINE_LIMIT`）。
    */
-  chatLines: string[];
+  chat: Array<{ tick: number; text: string }>;
   /** 录像里的玩家信息（按已验证的 `player_info_s` 布局解码；见 `readPlayerInfos`）。 */
   playerInfos: DemoPlayerInfo[];
   /** 解析结束时每个玩家实体的属性快照（诊断用，仅取关注字段）。 */
@@ -109,6 +111,16 @@ export interface DemoParseResult {
   classCounts: Record<string, number>;
   /** 玩家类实体上实际解出的属性名（类名 → 属性名，诊断用）。 */
   playerPropNames: Record<string, string[]>;
+  /**
+   * `svc_ServerInfo` 解出的服务器身份（协议 / 游戏目录 / 地图 / **天空盒** / 主机名 / 服务器类别数）。
+   * 整份录像里没出现这条消息时为 `null`。天空盒名在 `.dem` 里**只有**这一处来源。
+   */
+  serverInfo: DemoServerInfo | null;
+  /**
+   * 录制者机位（`democmdinfo` 里的 `viewOrigin` / `viewAngles`）**诊断**：录了几条、多少条非零、
+   * 首末两条的值。实测本仓夹具每条都是 0 ⇒ 这份录像没有记录录制者视角（不是解析漏读）。
+   */
+  cameraSamples: { samples: number; nonZero: number; first: DemoCameraSample | null; last: DemoCameraSample | null };
 }
 
 /** `.dem` 文件头固定长度（字节）。 */
@@ -126,6 +138,26 @@ const DEMO_CMDINFO_BYTES = 76;
 
 /** 诊断：`dem_usercmd`（cmd 5）的载荷长度分布 —— 用来判断按键信息是否存在。 */
 export const usercmdDiag = { count: 0, maxLen: 0, samples: [] as number[] };
+
+/** 一条 `democmdinfo` 的机位（录制者的视角；`origin` = viewOrigin、`angles` = viewAngles，单位与引擎一致）。 */
+export interface DemoCameraSample {
+  origin: [number, number, number];
+  angles: [number, number, number];
+}
+/**
+ * 诊断：每条 `dem_signon` / `dem_packet` 头部那 76 字节 `democmdinfo` 里的**录制者机位**。
+ *
+ * 为什么留它：这 76 字节此前被整段跳过（`scanMessages` 里只做 `p += 76 + 8`），于是「这份录像有没有
+ * 记录录制者视角」在结果里无从回答。实测本仓夹具（SourceTV 观察者录像）**每条都是 0**，因此
+ * 「拿不到第一人称机位」是**记录本身没记**，而不是解析漏读 —— 这两者的区别只有读出来才知道；
+ * 玩家视角与它无关，由实体流采出的轨迹给（见 `samplePlayers`）。
+ */
+export const cmdInfoDiag: { samples: number; nonZero: number; first: DemoCameraSample | null; last: DemoCameraSample | null } = {
+  samples: 0,
+  nonZero: 0,
+  first: null,
+  last: null,
+};
 
 /** 嗅探：文件头魔数是否为 `HL2DEMO`。 */
 export function looksLikeSourceDemo(head: Uint8Array): boolean {
@@ -216,12 +248,27 @@ export function parseSourceDemo(bytes: Uint8Array, opts: DemoParseOptions = {}):
   if (header.demoprotocol !== 3) {
     throw new Error(`不支持的演示协议版本 ${header.demoprotocol}（本工程只实现 3）`);
   }
+  // **每次解析都清掉上一次的跨包累积量**：这两份是模块级、随解析逐包增长的诊断/时间线缓存
+  // （`userinfoTimeline` = 名称轮换的时间线、`usercmdDiag` = 录制者输入载荷的长度分布），
+  // 它们的 tick 坐标是**相对本份录像**的。不清的话，在同一页里载入第二份 `.dem` 时，
+  // 旧录像的条目会与新录像的混在一条时间线上 ⇒ 名字/在线态按错误的 tick 取（表现为「换了一份
+  // 录像，花名册里的名字还是上一场的」）。
+  userinfoTimeline.length = 0;
+  usercmdDiag.count = 0;
+  usercmdDiag.maxLen = 0;
+  usercmdDiag.samples.length = 0;
+  // 机位诊断同样是跨包累积量：同一页载入第二份 `.dem` 时必须清零，否则首末机位是上一份的
+  cmdInfoDiag.samples = 0;
+  cmdInfoDiag.nonZero = 0;
+  cmdInfoDiag.first = null;
+  cmdInfoDiag.last = null;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const stats: DemoParseStats = {
     packetsParsed: 0,
     packetsFailed: 0,
     failureByType: {},
     seenByType: {},
+    userMessageById: {},
     entityMessages: 0,
     entityUpdates: 0,
     entityPayloadExact: 0,
@@ -229,6 +276,8 @@ export function parseSourceDemo(bytes: Uint8Array, opts: DemoParseOptions = {}):
     entityUnknownClass: 0,
     entityOverread: 0,
     entityOverflow: 0,
+    entityDeletes: 0,
+    updateEntryOverflow: 0,
     loopExit: new Map(),
     entityResidual: new Map(),
     entityResidualFull: new Map(),
@@ -274,7 +323,7 @@ export function parseSourceDemo(bytes: Uint8Array, opts: DemoParseOptions = {}):
     if (res.overflowed) stats.warnings.push('dem_stringtables 解析越界');
   }
   ctx.stringTableIdNames = stringTables.map((t) => t.name);
-  const chatLines = ctx.chatLines;
+  const chat = ctx.chat;
   // 类别基线灌进解析上下文：实体进入 PVS 时要「先套基线再叠 delta」
   for (const t of stringTables) {
     if (t.name !== 'instancebaseline') continue;
@@ -418,7 +467,7 @@ export function parseSourceDemo(bytes: Uint8Array, opts: DemoParseOptions = {}):
 
   return {
     header,
-    chatLines,
+    chat,
     playerInfos,
     dataTables,
     stats,
@@ -433,6 +482,8 @@ export function parseSourceDemo(bytes: Uint8Array, opts: DemoParseOptions = {}):
     entityCount: ctx.entityClass.size,
     classCounts,
     playerPropNames,
+    serverInfo: ctx.serverInfo,
+    cameraSamples: { samples: cmdInfoDiag.samples, nonZero: cmdInfoDiag.nonZero, first: cmdInfoDiag.first, last: cmdInfoDiag.last },
   };
 }
 
@@ -691,6 +742,21 @@ function scanMessages(bytes: Uint8Array, dv: DataView, stats: DemoParseStats): D
       if (p + DEMO_CMDINFO_BYTES + 12 > bytes.length) {
         stats.warnings.push(`消息链 @${offset}：文件在 cmd=${cmd} 的消息头处截断，停止扫描`);
         break;
+      }
+      // **录制者机位**（`democmdinfo`：flags i32 + 6 个三轴 float = viewOrigin / viewAngles /
+      // localViewAngles）此前被整段跳过，于是「这份录像有没有记录录制者视角」无从回答。
+      // 如实收一份诊断：录了几条、其中多少条机位非零、首末两条的机位值。
+      // 实测本仓夹具（SourceTV 观察者录像）**全部为 0** —— 这正是「.dem 没有第一人称机位可用」的
+      // 直接证据；玩家视角是另一回事，由实体流采出的轨迹给（`playerPosed`）。
+      if (p + DEMO_CMDINFO_BYTES + 8 <= bytes.length) {
+        const cam: DemoCameraSample = {
+          origin: [dv.getFloat32(p + 4, true), dv.getFloat32(p + 8, true), dv.getFloat32(p + 12, true)],
+          angles: [dv.getFloat32(p + 16, true), dv.getFloat32(p + 20, true), dv.getFloat32(p + 24, true)],
+        };
+        cmdInfoDiag.samples++;
+        if (cam.origin.some((v) => v !== 0) || cam.angles.some((v) => v !== 0)) cmdInfoDiag.nonZero++;
+        if (!cmdInfoDiag.first) cmdInfoDiag.first = cam;
+        cmdInfoDiag.last = cam;
       }
       p += DEMO_CMDINFO_BYTES + 8; // democmdinfo + seqIn/seqOut
       const len = dv.getInt32(p, true);

@@ -11,11 +11,20 @@
  * - 坐标：Source `[x,y,z]` → viewer `[y,z,x]`（与地图 GLB 导出的 `rotate_yup` 同构）；
  * - 朝向：`yaw = wrapDeg(srcYaw + 180)`、`pitch = −srcPitch`（Source 俯仰正值为俯视）、roll 恒 0。
  *
- * 一条实体轨迹 → 一份 `Clip`；`meta` 复用 `ReplayHeaderMeta` 形状（地图/时长/tick 率等），
- * 使 `apps/viewer/src/ui/replaymeta.ts` 无需改动即可显示 DEM 的元信息。
+ * 一条实体轨迹 → 一份 `Clip`。**`meta` 恒为 `null`**（不是"省事"，是语义）：`Clip.meta` 的契约是
+ * Shavit `.replay` 的**文件头**（`ReplayHeaderMeta`），而 `.dem` 里没有这样一份头 —— 它没有官方计时、
+ * 没有 prerun/run/post 三段结构、没有风格 / 赛道 / stage / zone 口径。
+ *
+ * 早先这里按 `ReplayHeaderMeta` 的形状**伪造**了一份（`time` 取末帧时间、`frameCount` 取采样条数），
+ * 后果是下游按"真有这份头"渲染，凭空多出五项假信息：进度条上多出一条横跨全场的**「正式跑段」**带
+ * （`apps/viewer/src/replay/timeline.ts` 按 `meta.frameCount > 0` 画）、帧读数把每一帧都标成
+ * `run n/n`、信息条上多出**「成绩」**（把末帧时刻当成绩）、**「风格 0」**、**「帧 0+n+0（起跑前 + 正式跑 + 结束后）」**
+ * 与**「格式 v0」**。`.dem` 真实的元信息（地图 / 时长 / 玩家）由**录像页看板**自己展示
+ *（`apps/viewer/src/replay/demopanel.ts` 的 `renderMeta`），不需要借用 `.replay` 的信息条；
+ * 信息条对 `meta === null` 的既有行为就是**整条隐藏**（`apps/viewer/src/ui/replaymeta.ts` 的 `setTracks`）。
  */
 
-import type { Clip, ReplayHeaderMeta, RuleConfig } from './types.js';
+import type { Clip, RuleConfig } from './types.js';
 import { defaultRule } from './types.js';
 import type { DemoParseResult, PlayerTrack } from './demo/demo.js';
 
@@ -105,25 +114,6 @@ export function trackToClip(
     ang[i * 3 + 2] = 0;
   }
 
-  const meta: ReplayHeaderMeta = {
-    version: 0,
-    format: 'final',
-    map: result.header.mapName,
-    style: 0,
-    track: 0,
-    preFrames: 0,
-    frameCount: n,
-    postFrames: 0,
-    totalFrames: n,
-    time: t[n - 1],
-    steamId: null,
-    steamIdDisplay: null,
-    tickrate: tickInterval > 0 ? 1 / tickInterval : 0,
-    zoneOffset: [0, 0],
-    stage: 0,
-    timestamp: null,
-    offsetsLength: 0,
-  };
 
   // **速度由位置差分补出**：`.dem` 的实体流只给位姿，没有速度字段，而下游依赖它——
   // 遥测的速度读数与电平表（`apps/viewer/src/ui/telemetry.ts` 的 `update` 以 `s?.vel` 为门）。
@@ -195,7 +185,8 @@ export function trackToClip(
     resolvedPath: `${result.header.mapName}.dem`,
     rule,
     buttons: null,
-    meta,
+    // 见文件头注释：`.dem` 没有 Shavit 文件头，`meta` 恒 null。
+    meta: null,
   };
 }
 

@@ -13,13 +13,16 @@
  * `vsep` 类；两侧的元素与结构不同——game 是 `#hud > #stats` 单个数字，本工程是 `#telemetry`
  * 内的两个数字。
  *
- * 按键：八键簇（Q / W / E 上排，A / S / D 中排，蹲 1 格 + 跳 2 格下排），挂在 `#timeline` 的网格
- * 右列，随时间轴一起显隐。高亮判据是 `Clip.buttons[index]` 的 IN_* 位掩码与各键 `mask` 相与非 0，
+ * 按键：八键簇（Q / W / E 上排，A / S / D 中排，蹲 1 格 + 跳 2 格下排），挂在**记录会话**那条
+ * 时间轴的网格右列（`apps/viewer/src/replay/session.ts` 的记录会话），随时间轴一起显隐。
+ * 高亮判据是 `Clip.buttons[index]` 的 IN_* 位掩码与各键 `mask` 相与非 0，
  * 掩码值见下方常量（与 `apps/viewer/src/replay/types.ts` 的 `Clip.buttons` 注释、
  * `apps/viewer/test/replay-selftest.ts` 里 IN_FORWARD 记 8、IN_MOVELEFT 记 512 两条断言同源）。
+ * **录像会话的 `Clip.buttons` 恒 `null`**（Source 只把录制者本人的输入写进 `usercmd`），
+ * 故那条时间轴上根本不建按键簇 —— 不摆一排永远不亮的灯。
  *
- * 刷新时机：`apps/viewer/src/app.ts` 帧循环里每约 80 ms 一次，传入跟随轨道采样与当前帧掩码；
- * 无轨道时由 `setTracks(false)` 隐藏速度行。
+ * 刷新时机：`apps/viewer/src/app.ts` 帧循环里每约 80 ms 一次，传入**当前上场会话**的跟随轨道
+ * 采样与当前帧掩码；该会话没有内容时由 `setTracks(false)` 隐藏速度行与电平表。
  */
 
 import { el } from '../core/dom.js';
@@ -66,7 +69,8 @@ export class TelemetryHud {
 
   /**
    * @param speedRoot 速度读数容器（`apps/viewer/src/app.ts` 传 `#telemetry`；定位由 CSS 决定）
-   * @param keysRoot 按键簇容器（传 `#timeline`；按键块挂它的网格右列，随时间轴一起显隐）
+   * @param keysRoot 按键簇容器（传**记录会话**那条时间轴的根元素；按键块挂它的网格右列，
+   *   随时间轴一起显隐。本类不校验该容器属于哪个会话 —— 调用方只传记录会话的那一个）
    */
   /** 速度读数与电平表的宿主（#telemetry）；显隐由 setTracks 控制。 */
   private readonly speedRoot: HTMLElement;
@@ -101,7 +105,7 @@ export class TelemetryHud {
     keysRoot.appendChild(keys);
   }
 
-  /** 轨道增删后调用（`apps/viewer/src/app.ts` 的 `syncTracks`）：无轨道时给速度行加 `hidden` 类（按键随 `#timeline` 自身显隐）。 */
+  /** 会话状态变化后调用（`apps/viewer/src/app.ts` 的 `syncTelemetry`）：本会话没有内容时给速度行加 `hidden` 类（按键簇随记录会话那条 `#timeline` 自身显隐）。 */
   setTracks(hasTracks: boolean): void {
     this.speedRoot.classList.toggle('hidden', !hasTracks);
   }

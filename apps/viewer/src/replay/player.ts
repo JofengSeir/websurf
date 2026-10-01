@@ -42,41 +42,41 @@ export class ReplayPlayer {
   }
 
   /**
-   * **长度兜底**（秒）：录像载入后、用户还没点任何玩家时，轨道是空的、`tracks.duration` 为 0，
-   * 于是 `play()` 直接返回、滑杆也拖不动 —— 表现为"载入完不能播放/暂停"。
-   * 由录像页在解析成功后写入录像总时长；有轨道时不影响（取两者较大值）。
-   */
-  private spanValue = 0;
-
-  /**
-   * **会话总长兜底**（秒）。录像页在 `.dem` 解析完成后写入（= 整段录像时长），离开录像 tab 时清 0。
+   * **会话时长兜底**（秒）：会话已经有整段长度、但还没有任何轨道时用它撑起主时钟。
    *
-   * **必须是访问器**：`applyFullRange()` 算窗口用的就是它，而 `rangeEnd` 是在**加轨道那一刻**
-   * 算出来并缓存的 —— 早先 `span` 是个裸字段，写它**不会让窗口重算**，于是出现
-   * 「`duration` 已经是 3598，但 `rangeStop` 还停在残留录像轨道的 100 秒」这种半截状态，
-   * 正是 owner 报的「实际时间长度是 replay 的」（`rangeStop` 才是滑杆真正映射到的终点）。
+   * 为什么需要：录像（`.dem`）载入后、用户还没点任何玩家时轨道是空的、`tracks.duration` 为 0，
+   * 于是 `play()` 直接返回、滑杆也拖不动 —— 表现为"载入完不能播放/暂停"。录像会话在解析成功后
+   * 把整段时长写进这里。
+   *
+   * **只作用于本会话**：记录（`.replay`）会话不写它（恒 0），故记录会话的总长完全由自己的轨道决定。
+   * 早先这个字段叫 `span`，并且**被当成"这是录像会话"的会话类型标志**（`span > 0` 时总长与窗口
+   * 都无视轨道）—— 那是两个 tab 共用一个播放器时的权宜之计：一旦播放器里残留了另一边的轨道，
+   * 主时钟就会被它撑长/压短。两条链路拆成各自独立的会话之后，这个字段回归它的字面语义。
+   *
+   * **必须是访问器**：`applyFullRange()` 算窗口用的就是它，而窗口是在**加轨道那一刻**算出来并
+   * 缓存的 —— 裸字段直接赋值不会让窗口重算，会出现「`duration` 已经是 3598，但 `rangeStop`
+   * 还停在 100 秒」这种半截状态（`rangeStop` 才是滑杆真正映射到的终点）。
    */
-  get span(): number {
-    return this.spanValue;
+  private sessionLengthValue = 0;
+
+  get sessionLength(): number {
+    return this.sessionLengthValue;
   }
 
-  set span(v: number) {
-    if (this.spanValue === v) return;
-    this.spanValue = v;
+  set sessionLength(v: number) {
+    if (this.sessionLengthValue === v) return;
+    this.sessionLengthValue = v;
     this.applyFullRange();
     this.notify();
   }
 
   /**
-   * 主时钟总长。
-   *
-   * **`span > 0` 时就是 `span`**（录像会话：总长 = `.dem` 整段时长，与播放器里残留的轨道无关）；
-   * 否则取各轨道 `(offset + 自身时长)` 的最大值（replay 会话）。
-   * 早先是 `max(tracks.duration, span)` —— 那个写法的毛病是：一旦播放器里残留了**比录像更长**的
-   * 录像轨道，主时钟就会被那条轨道撑长，录像的时间轴随之失真。
+   * 主时钟总长（秒）= max(各轨道 `offset + clip.duration` 的最大值, `sessionLength`)。
+   * 记录会话的 `sessionLength` 恒 0，故总长 = 轨道总长；录像会话有整段时长兜底，
+   * 某条玩家轨迹只覆盖他自己在场的那一段，不会把整场长度压短。
    */
   get duration(): number {
-    return this.span > 0 ? this.span : this.tracks.duration;
+    return Math.max(this.tracks.duration, this.sessionLength);
   }
 
   /** 有效播放区间末端：设了区间取 min(rangeEnd, duration)，未设取 duration。 */
@@ -106,11 +106,28 @@ export class ReplayPlayer {
     this.notify();
   }
 
-  /** 追加一条轨道并返回它；当它是第一条时同样复位区间（走 resetRange）。 */
+  /**
+   * 追加一条轨道并返回它；当它是第一条时同样复位区间（走 `resetRange`）。
+   *
+   * **但不能因此把播放态改掉**：`resetRange()` 里带着「暂停」（区间复位语义），而**录像页自动跟随
+   * 第一次切人**正是走「加第一条轨道」这条路 ⇒ 它会把正在播放的录像**停住**。owner 实测症状：
+   * 「任由其加载后自动播放，replay 或 dem 都会莫名其妙自己暂停」（进度条应当一直动，
+   * 只有用户主动暂停才停）。所以这里记下进入时的播放态并**原样恢复**；
+   * 「什么时候开始播」由调用方决定（载入完 `play()` / 用户点人 `play()`），加轨道不改它。
+   */
   addTrack(clip: Clip, name?: string): Track {
+    const wasPlaying = this.playing;
     const first = this.tracks.isEmpty;
     const track = this.tracks.add(clip, name);
-    if (first) this.resetRange();
+    if (first) {
+      // 正在播放时**只把窗口拉成整段**：不动主时钟、不改播放态（见上面的说明）。
+      if (wasPlaying) {
+        this.applyFullRange();
+        this.clampTime();
+      } else {
+        this.resetRange();
+      }
+    }
     this.notify();
     return track;
   }
@@ -151,25 +168,17 @@ export class ReplayPlayer {
   }
 
   /**
-   * 整段窗口：起点 = 0（录像会话）或 `min(0, 首轨道首帧时间)`（replay 的 prerun 负段），
-   * 终点 = 主时钟总长。
+   * 整段窗口：起点 = `min(0, 首轨道首帧时间)`，终点 = 主时钟总长。
    *
-   * **`span > 0` 时窗口严格等于 `span`，完全不看轨道**：
-   * `span` 由录像页写入（= `.dem` 整段总长），它一旦非零就表示"这是一场录像会话"。
-   * 此时若还去取 `max(tracks.duration, span)`，播放器里**残留的录像轨道**（通常很短）会与
-   * 录像的轨道一起参与，窗口被压短 —— 表现就是 owner 实测的
-   * 「进度条速度特别快、实际时间长度是 replay 的」。
+   * 两条链路各自在一个独立会话里，共用同一个公式而不会互相干扰：
+   * - 记录（`.replay`）的帧时间是**相对起跑帧**的（prerun 为负）⇒ 起点落在片头、终点 = 末帧；
+   * - 录像（`.dem`）的帧时间是**录像内绝对时刻**（首帧 > 0）⇒ 起点 0、终点 = `sessionLength`（整场）。
    */
   private applyFullRange(): void {
     const first = this.tracks.tracks[0]?.clip;
     const t0 = first && first.count > 0 ? first.t[0] : 0;
-    if (this.span > 0) {
-      this.rangeStart = 0;
-      this.rangeEnd = this.span;
-      return;
-    }
     this.rangeStart = Math.min(0, t0);
-    this.rangeEnd = Math.max(this.tracks.duration, this.span);
+    this.rangeEnd = Math.max(this.tracks.duration, this.sessionLength);
   }
 
   /** 当前窗口是否等于默认整段（时间轴据此显示「整段」而不是区间读数）。 */
@@ -179,15 +188,15 @@ export class ReplayPlayer {
     return (
       this.rangeEnd > this.rangeStart &&
       this.rangeStart === Math.min(0, t0) &&
-      Math.abs(this.rangeEnd - Math.max(this.tracks.duration, this.span)) < 1e-9
+      Math.abs(this.rangeEnd - this.duration) < 1e-9
     );
   }
 
   // ── 播放控制 ────────────────────────────────────────────────────
 
-  /** 开始播放：无轨道时不动；主时钟已在区间末端（1e-6 容差内）时先退回区间起点。 */
+  /** 开始播放：既无轨道又无会话时长时不动；主时钟已在区间末端（1e-6 容差内）时先退回区间起点。 */
   play(): void {
-    if (this.tracks.isEmpty && this.span <= 0) return;
+    if (this.tracks.isEmpty && this.sessionLength <= 0) return;
     if (this.time >= this.rangeStop - 1e-6) this.time = this.rangeStart;
     this.playing = true;
     this.notify();
@@ -238,7 +247,7 @@ export class ReplayPlayer {
 
   /** 按 dt 推进主时钟（dt × speed）：到区间末端时回绕或停在末端并暂停。 */
   update(dt: number): void {
-    if (!this.playing || (this.tracks.isEmpty && this.span <= 0)) return;
+    if (!this.playing || (this.tracks.isEmpty && this.sessionLength <= 0)) return;
     const len = this.rangeLength;
     if (len <= 0) return;
     this.time += dt * this.speed;

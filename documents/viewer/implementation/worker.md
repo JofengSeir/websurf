@@ -1,6 +1,6 @@
 # implementation/worker：记录解析 Worker
 
-> 覆盖 `apps/viewer/src/worker/main.ts`。它被两条构建路径消费：`apps/viewer/package.json:12` 的 `build:worker` 打成 `apps/viewer/web/worker.js`（dev / multi 产物按 module worker 装载），`apps/viewer/scripts/build-dist.mjs:314` 用 IIFE 再打一份内嵌进 single 产物的 `app.js`（运行时由 `apps/viewer/src/replay/importer.ts:83` 读 `globalThis.__VBSP_WORKER_JS__` 起 Blob Worker）。
+> 覆盖 `apps/viewer/src/worker/main.ts`。它被两条构建路径消费：`apps/viewer/package.json:13` 的 `build:worker` 打成 `apps/viewer/web/worker.js`（dev / multi 产物按 module worker 装载），`apps/viewer/scripts/build-dist.mjs:314` 用 IIFE 再打一份内嵌进 single 产物的 `app.js`（运行时由 `apps/viewer/src/replay/importer.ts:97` 读 `globalThis.__VBSP_WORKER_JS__` 起 Blob Worker）。
 
 ---
 
@@ -26,8 +26,8 @@
 
 ## 已知缺口
 
-1. **两条进度只覆盖 `'parse'`**：本文件只有两处进度回包且 `phase` 都写死 `'parse'`（`apps/viewer/src/worker/main.ts:66`、`apps/viewer/src/worker/main.ts:84`），协议里声明的 `'map'` 阶段没有发送方（`apps/viewer/src/replay/protocol.ts:47`）⇒ 面板侧按阶段判分支的写法实际恒真（`apps/viewer/src/replay/panel.ts:299`）。
-2. **没有心跳，请求侧无法区分「在解析」与「已失联」**：本文件对一条请求只回 `done` 或 `error` 两种包（`apps/viewer/src/worker/main.ts:91`、`apps/viewer/src/worker/main.ts:102`），解析期间不发任何中间信号；请求侧也没有超时（`apps/viewer/src/replay/importer.ts:135`），因此大文件解析与 Worker 静默失效在调用方看来同形。
+1. **两条进度只覆盖 `'parse'`**：本文件只有两处进度回包且 `phase` 都写死 `'parse'`（`apps/viewer/src/worker/main.ts:66`、`apps/viewer/src/worker/main.ts:84`），协议里声明的 `'map'` 阶段没有发送方（`apps/viewer/src/replay/protocol.ts:47`）⇒ 面板侧按阶段判分支的写法实际恒真（`apps/viewer/src/replay/panel.ts:327`）。
+2. **没有心跳，请求侧无法区分「在解析」与「已失联」**：本文件对一条请求只回 `done` 或 `error` 两种包（`apps/viewer/src/worker/main.ts:91`、`apps/viewer/src/worker/main.ts:102`），解析期间不发任何中间信号；请求侧也没有超时（`apps/viewer/src/replay/importer.ts:151`），因此大文件解析与 Worker 静默失效在调用方看来同形。
 3. **`WorkerCtx` 是手写的全局面**：本工程 `apps/viewer/tsconfig.json:6` 的 `lib` 只有 `ES2022` / `DOM` / `DOM.Iterable`，没有 `WebWorker`，故文件内用 `self as unknown as WorkerCtx` 断言拿到 `postMessage`（`apps/viewer/src/worker/main.ts:33`），`post` 只是给它一个确定签名的薄封装（`apps/viewer/src/worker/main.ts:41`）⇒ Worker 全局类型面不受编译器保护，成员写错只在运行期暴露。
 4. **`clipToPayload` 没有显式返回类型**：函数体只返回对象字面量（`apps/viewer/src/worker/main.ts:113`），其形状靠调用点 `post` 的形参类型 `ParseResponse` 做结构化校验（`apps/viewer/src/worker/main.ts:41`）⇒ 字段名写错时的报错位置在调用点而非定义点。
 5. **`req.rule` 缺少防御**：`handle` 直接读 `req.rule.axesMode` / `req.rule.yawMode`（`apps/viewer/src/worker/main.ts:82`），请求缺该字段时抛 TypeError 并被 catch 成 `'error'` 响应（`apps/viewer/src/worker/main.ts:101`）；错误文本是运行期的属性访问错误，与「文件损坏」类错误同形，面板无法据此判断是调用方漏传字段。
