@@ -44,11 +44,11 @@
 
 导出 `CameraController`（`apps/debug/src/renderer/camera-controller.ts:21`）：构造（`:39`）、`update`（`:46`）、`setYawPitch`（`:69`）、`setPosition`（`:80`）、`applyInputConfig`（`:85`）。
 
-**`apps/debug/src/renderer/lightmap-shader.ts`**
+**`src/renderer-shared/shader/lightmap-shader.ts`**（渲染共享层单实例，2026-10-02 由三工程各自 `apps/<app>/src/renderer/lightmap-shader.ts` 的三份同构副本合并而来，本工程经 tsconfig include 收编、深层相对路径 import；不再是本工程目录内的文件）
 
-本工程内最重的渲染模块，导出面分四类：
+本工程消费的最重渲染模块，导出面分四类：
 
-- GLSL 片段与属性名：`VBSP_DECOMPRESS_LIGHTMAP_SAMPLE`（`apps/debug/src/renderer/lightmap-shader.ts:87`）、`VBSP_APPLY_LIGHTMAP`（`:112`）、`VBSP_LIGHTMAP_UNIFORM_DECLS`（`:165`）、`VBSP_AMBIENT_UNIFORM_DECLS`（`:181`）、`VERTEX_LIGHTING_ATTR`（`:198`）。
+- GLSL 片段与属性名：`VBSP_DECOMPRESS_LIGHTMAP_SAMPLE`（`src/renderer-shared/shader/lightmap-shader.ts:87`）、`VBSP_APPLY_LIGHTMAP`（`:112`）、`VBSP_LIGHTMAP_UNIFORM_DECLS`（`:165`）、`VBSP_AMBIENT_UNIFORM_DECLS`（`:181`）、`VERTEX_LIGHTING_ATTR`（`:198`）。
 - 装配入口：`loadLightmapAtlas`（`:374`）、`applyLightmapToMeshes`（`:482`）、`fullbrightUnlitLitMaterials`（`:1067`）、`installGamma22Output`（`:255`）。
 - 光照模式：`LightingMode`（`:421`）、`setLightingMode`（`:436`）、`getLightingMode`（`:442`）、`isTextureOnlyMode`（`:447`）。
 - 诊断 / A-B 覆盖：`LightmapStage` 与 `readLightmapStage` / `isLightmapSkipStage`（`:284`、`:304`、`:313`）、`LIGHTMAP_UV_CHANNEL_CORRECT` 与 `resolveLightmapUvChannel`（`:329`、`:338`）、`getVertexLightingRelaxStats`（`:1674`）、`setPropVertexRelax` / `getPropVertexRelax`（`:1686` / `:1691`）、`setPropVertexFlatten` / `getPropVertexFlatten`（`:1705` / `:1710`）、`setLightFloor` / `getLightFloor`（`:1752` / `:1757`）、`setLightGamma` / `getLightGamma`（`:1788` / `:1795`）、`setExposure` / `getExposure`（`:1807` / `:1817`）、`setAmbientScale` / `getAmbientScale`（`:1829` / `:1836`）。
@@ -75,7 +75,7 @@
 
 **回放模式的边界**：`setReplayMode(true)` 只关掉权威→渲染方向的两项实时耦合（`correctFromAuthority` 与 `calibrateVelocity`），共享内存输入槽照写、渲染与路径记录逻辑不动（`apps/debug/src/renderer/renderer-main.ts:1186` 起）。
 
-**lightmap 着色器**：光照模式切换不重建场景、不重编译材质，只改一个全场景共享 uniform（`apps/debug/src/config.ts:101`）；图集加载在两种模式下完全一致（`apps/debug/src/config.ts:101`）。三个工程各有一份自己的 `lightmap-shader.ts` 副本（`apps/debug/src/renderer/lightmap-shader.ts`、`apps/game/src/renderer/lightmap-shader.ts`、`apps/viewer/src/renderer/lightmap-shader.ts`）。
+**lightmap 着色器**：光照模式切换不重建场景、不重编译材质，只改一个全场景共享 uniform（`apps/debug/src/config.ts:101`）；图集加载在两种模式下完全一致（`apps/debug/src/config.ts:101`）。着色器本体是渲染共享层单实例 `src/renderer-shared/shader/lightmap-shader.ts`（2026-10-02 由三工程各自一份的同构副本合并而来，旧副本已删除，三工程消费同一文件）。
 
 ## 已知缺口
 
@@ -85,5 +85,5 @@
 4. **`assignClusterIds` 的结果无消费方**：返回的「采到至少一个 cluster 的 mesh 数量」在 `loadScene` 里没有被使用（`apps/debug/src/renderer/lod-manager.ts:181`）。
 5. **tick 线的时间戳在无发布时钟时回落墙钟**：`readPublishedTau()` 返回 0 时用 rAF 时间戳 `now`（`apps/debug/src/renderer/renderer-main.ts:695`），两条线的时间基准在此时不同源。
 6. **权威 post-tick 位置差（residual）恒不记录**：`addTick` 的第六个实参固定传 `undefined`（`apps/debug/src/renderer/renderer-main.ts:704`），该组统计的样本数保持 0（`apps/debug/src/renderer/path-recorder.ts:648`）。
-7. **`lightmap-shader.ts` 的诊断覆盖只从全局键读**：`window.__vbsp*` 系列覆盖（如 `apps/debug/src/renderer/lightmap-shader.ts:1745` 的 `readLightFloorOverride`）在模块初始化时就固化成 uniform 初值（`apps/debug/src/renderer/lightmap-shader.ts:1549`、`:1556`、`:1563`、`:1580`），运行期注入不改变已创建的 uniform。
+7. **`lightmap-shader.ts` 的诊断覆盖只从全局键读**：`window.__vbsp*` 系列覆盖（如 `src/renderer-shared/shader/lightmap-shader.ts:1745` 的 `readLightFloorOverride`）在模块初始化时就固化成 uniform 初值（`src/renderer-shared/shader/lightmap-shader.ts:1549`、`:1556`、`:1563`、`:1580`），运行期注入不改变已创建的 uniform。
 8. **准星射线是限流采样**：每 `PLANE_INSPECT_INTERVAL` 帧才检测一次，关闭开关时只清空上次结果，不做新检测（`apps/debug/src/renderer/renderer-main.ts:760`）。

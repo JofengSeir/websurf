@@ -31,7 +31,7 @@
 | 近平面自适应 | 每 2 帧一次（`nearCheckToggle` 交替）：先按包围球粗筛 `modelRoot` 子树，再沿相机局部系的 6 个方向各打一条射线；命中则 `near = max(距离 × NEAR_RATIO, CAMERA_NEAR_MIN)`，全空则复位 `defaultNear` | `apps/viewer/src/core/scene.ts:158`、`apps/viewer/src/core/scene.ts:290`、`apps/viewer/src/core/scene.ts:332` |
 | far 按地图尺寸 | `fitCamera` 取包围盒最大边长：`far = max(maxDim × 100, CAMERA_INIT_FAR)`、`near = max(maxDim / 1000, CAMERA_NEAR_MIN)` | `apps/viewer/src/core/scene.ts:266` 到 `apps/viewer/src/core/scene.ts:269` |
 | 分块合并 | 只遍历 `modelRoot` 子树；块边长从 `diag / 立方根(OPT_TARGET_CELLS)` 起步，最多迭代 6 次逼近 `[OPT_MIN_CELLS, OPT_MAX_CELLS]`；块内按材质实例子合并；合并后逐块重算包围球并把半径乘 `FRUSTUM_PAD` | `apps/viewer/src/core/scene.ts:364`、`apps/viewer/src/core/scene.ts:401`、`apps/viewer/src/core/scene.ts:407`、`apps/viewer/src/core/scene.ts:440`、`apps/viewer/src/core/scene.ts:491` |
-| 光照模式运行期切换 | `setLightingMode` 与当前值相同时提前返回，否则只改共享 uniform，不重建场景、不重编译材质 | `apps/viewer/src/core/scene.ts:246`、`apps/viewer/src/renderer/lightmap-shader.ts:436` |
+| 光照模式运行期切换 | `setLightingMode` 与当前值相同时提前返回，否则只改共享 uniform，不重建场景、不重编译材质 | `apps/viewer/src/core/scene.ts:246`、`src/renderer-shared/shader/lightmap-shader.ts:436` |
 | 显存释放 | `disposeObject` 逐个 Mesh 释放几何、材质、`map` 与 `lightMap` 两张纹理；非 Mesh 节点跳过 | `apps/viewer/src/core/scene.ts:510` 到 `apps/viewer/src/core/scene.ts:527` |
 | 相机单写者 | `FlyCam` 只在 `drivesCamera` 为真时写相机（`applyTo`），`applyToWithRoll` 不检查该开关（回放第一人称专用） | `apps/viewer/src/core/fly.ts:196`、`apps/viewer/src/core/fly.ts:222` |
 | 位移键集合 | 只有 `MOVE_KEYS` 内的键会被 `preventDefault` 并记入状态；左右 Shift 决定速度档，Space 升、C 与左右 Ctrl 降 | `apps/viewer/src/core/fly.ts:119`、`apps/viewer/src/core/fly.ts:176` 到 `apps/viewer/src/core/fly.ts:188`、`apps/viewer/src/core/fly.ts:236` |
@@ -43,7 +43,7 @@
 
 ## 已知缺口
 
-1. **构造期 γ 写入落在着色器接受窗口之外**：`ViewerScene` 构造时调用 `setLightGamma(2.2)`（`apps/viewer/src/core/scene.ts:111`），而 `setLightGamma` 在 `value <= 0 || value > 1` 时直接返回（`apps/viewer/src/renderer/lightmap-shader.ts:1789`）⇒ 这次写入被忽略，γ 共享 uniform 保持自身初值 1；同一组五参数里其余四项都落在各自窗口内（`apps/viewer/src/core/scene.ts:110` 到 `apps/viewer/src/core/scene.ts:114`）。`apps/game/src/config.ts:228` 的默认 `lightGamma` 同为 2.2，是同一码值来源。
+1. **构造期 γ 写入落在着色器接受窗口之外**：`ViewerScene` 构造时调用 `setLightGamma(2.2)`（`apps/viewer/src/core/scene.ts:111`），而 `setLightGamma` 在 `value <= 0 || value > 1` 时直接返回（`src/renderer-shared/shader/lightmap-shader.ts:1789`）⇒ 这次写入被忽略，γ 共享 uniform 保持自身初值 1；同一组五参数里其余四项都落在各自窗口内（`apps/viewer/src/core/scene.ts:110` 到 `apps/viewer/src/core/scene.ts:114`）。`apps/game/src/config.ts:228` 的默认 `lightGamma` 同为 2.2，是同一码值来源。
 2. **`ensureWasm` 把首次失败永久缓存**：模块级 `wasmReady` 只在为 null 时创建（`apps/viewer/src/core/bsp.ts:75`），被 reject 后没有任何重置点，之后每次调用都返回同一个 rejected Promise（`apps/viewer/src/core/bsp.ts:112`）⇒ 一次瞬时 fetch 失败后本次页面会话无法自愈，只能刷新。
 3. **`allowPointerLock` 是无写无读的字段**：声明在 `apps/viewer/src/core/fly.ts:68`，`attach` 的 click 处理只判 `locked`（`apps/viewer/src/core/fly.ts:88`），`apps/viewer/src` 内既无写入点也无读取点。
 4. **`onLockChange` 无赋值点**：字段声明与调用都在 `apps/viewer/src/core/fly.ts:80` 与 `apps/viewer/src/core/fly.ts:104`，本工程只给 `FlyCam` 赋过 `onLockError`（`apps/viewer/src/app.ts:74`）⇒ 锁定状态变化回调永不触发。

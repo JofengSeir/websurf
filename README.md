@@ -15,13 +15,14 @@
 | `apps/debug` | 8080 | 调试与实验宿主：面板可调参数、路径记录、权威健康、调试线框 | `apps/debug/package.json:15` 的 `dev` |
 | `apps/game` | 8090 | 面向玩家：Worker 权威物理 + 面板 + 存档点 | `apps/game/package.json:15` 的 `dev` |
 | `apps/viewer` | 8100 | 纯查看器：地图游览、`.replay` 记录回放与 Source `.dem` 录像回放、遥测与轨道面板（**不含物理**） | `apps/viewer/package.json:18` 的 `dev` |
-| `src/` | — | 共享层：`websurf-phys`（物理）、`websurf-wasm-core`（BSP/GLB/模型解析）、`ts-shared/**`（TS 共享） | `src/Cargo.toml:2`、`src/wasm-core/Cargo.toml:10` |
+| `src/` | — | 共享层：`websurf-phys`（物理）、`websurf-wasm-core`（BSP/GLB/模型解析）、`ts-shared/**`（TS 共享）、`renderer-shared/**`（渲染共享层） | `src/Cargo.toml:2`、`src/wasm-core/Cargo.toml:10` |
 
 ## 2. 快速开始
 
-每个应用是**独立的 npm 工程**（仓库根没有 `package.json`）。以 `apps/debug` 为例：
+每个应用是**独立的 npm 工程**；仓库根另有一个 `package.json`（2026-10-02 起，只承载跨工程共享的 npm 依赖——渲染共享层的 `three` 单实例，不含脚本）。以 `apps/debug` 为例：
 
 ```bash
+npm ci                  # 仓库根先装一次（renderer-shared 的 three 单实例）
 cd apps/debug
 npm ci
 npm run build:wasm     # wasm-pack 构建 → pkg/，并把 wasm 复制到 web/
@@ -29,7 +30,7 @@ npm run build:ts       # typecheck + esbuild 打包 worker 与 app
 npm run dev            # python ../../src/serve.py 8080 .
 ```
 
-`apps/game`、`apps/viewer` 同构（端口 8090 / 8100）；三个工程各自 `npm ci` / `npm run build` / `npm run dev`。
+`apps/game`、`apps/viewer` 同构（端口 8090 / 8100）；三个工程各自 `npm ci` / `npm run build` / `npm run dev`（根级 `npm ci` 每次克隆后跑一次即可）。
 
 **Windows 双击入口**（三工程同名四件）：
 

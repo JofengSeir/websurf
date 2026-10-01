@@ -14,7 +14,7 @@
 - **不参与共享状态通道**：入口只打印 `crossOriginIsolated` 供核对，不建 `SharedArrayBuffer`、不选通道（`apps/viewer/src/app.ts:54`）。
 - **有独立的解析 Worker**：Worker 只做 `.replay` 字节 → 结构化帧的解码（`apps/viewer/src/worker/main.ts:53` 的 `handle`），不做物理、不常驻状态机。
 
-依据：`apps/viewer/package.json:7` 的 scripts（`build:wasm` / `typecheck` / `test:replay` / `test:sessions` / `local:smoke` / `build:worker` / `build:app` / `build:ts` / `build` / `build:dist` / `check:api` / `dev`），以及 `apps/viewer/package.json:30` 的运行时依赖只有 `three`。
+依据：`apps/viewer/package.json:7` 的 scripts（`build:wasm` / `typecheck` / `test:replay` / `test:sessions` / `local:smoke` / `build:worker` / `build:app` / `build:ts` / `build` / `build:dist` / `check:api` / `dev`），以及运行时依赖**已清空**、`three` 由仓库根 `package.json:6` 单实例承载（2026-10-02 上收，本工程 `package.json` 不再声明）。
 
 ## 目录职责
 
@@ -24,7 +24,7 @@
 | `apps/viewer/src/core/` | BSP 加载与 WASM 懒初始化、three 场景与光照模式、自由飞行相机、位姿、常量、DOM 构件、出生点解析、导入文件的类型识别 | `apps/viewer/src/core/bsp.ts:74`、`apps/viewer/src/core/scene.ts:356`、`apps/viewer/src/core/fly.ts:84`、`apps/viewer/src/core/spawn.ts:96`、`apps/viewer/src/core/filekind.ts:62` |
 | `apps/viewer/src/replay/` | 记录（`.replay`）/ 录像（`.dem`）两条链路各持一份**独立回放会话**（`session.ts` 的 `ReplaySession`）、`.replay` 原生解析、导入与 Worker 协议、播放器与采样、多轨道容器、3D 呈现、记录 / 录像面板、轨迹列表、时间轴、人工变换 | `apps/viewer/src/replay/shavit-replay.ts:284`、`apps/viewer/src/replay/session.ts:62`、`apps/viewer/src/replay/player.ts:17`、`apps/viewer/src/replay/timeline.ts:52` |
 | `apps/viewer/src/ui/` | HUD 与引导层、地图信息与出生点导航、记录信息条、**录像信息条**、遥测 HUD | `apps/viewer/src/ui/hud.ts:21`、`apps/viewer/src/ui/mapinfo.ts:129`、`apps/viewer/src/ui/demometa.ts:33`、`apps/viewer/src/ui/telemetry.ts:64` |
-| `apps/viewer/src/renderer/` | 离线烘焙静态光照的 three 侧落地（RGBExp32 图集解码注入 + prop 三级光照路由） | `apps/viewer/src/renderer/lightmap-shader.ts:482`、`apps/viewer/src/renderer/lightmap-shader.ts:374` |
+| `src/renderer-shared/`（仓库根，跨工程共享层） | 静态光照着色器单实例：RGBExp32 图集解码注入 + prop 三级光照路由（2026-10-02 由三工程各自的 `apps/<app>/src/renderer/lightmap-shader.ts` 合并而来，viewer 的 `src/renderer/` 目录因此清空） | `src/renderer-shared/shader/lightmap-shader.ts:482`、`src/renderer-shared/shader/lightmap-shader.ts:374` |
 | `apps/viewer/src/worker/` | 记录解析 Worker 源码（esbuild 打成 `web/worker.js`） | `apps/viewer/src/worker/main.ts:46` |
 | `apps/viewer/src/wasm.d.ts` | 把 `pkg/websurf_viewer_wasm.js` 的导出整体转出，供 `./wasm.js` 引用类型；本工程内零导入点 | `apps/viewer/src/wasm.d.ts:13` |
 | `apps/viewer/crates/wasm/` | WASM 薄导出层（Rust）：`BspProcessor` 类 | `apps/viewer/crates/wasm/src/lib.rs:327` |
@@ -43,11 +43,12 @@
 | 共享 TS 运行时 `src/ts-shared/wasm/loader.ts` | 相对路径 import | `apps/viewer/src/core/bsp.ts:18` 取 `base64ToBytes` 与 `readEmbeddedWasmB64` |
 | 共享 TS 角度实现 `src/ts-shared/phys/angles.ts` | 相对路径再导出 | `apps/viewer/src/core/pose.ts:22` 再导出 `wrapDeg` / `bspYawToCsYaw`，再由 `apps/viewer/src/replay/helpers.ts:10` 与 `apps/viewer/src/core/spawn.ts:27` 消费 |
 | 共享眼高常量 `src/ts-shared/phys/constants.ts` | 相对路径再导出 | `apps/viewer/src/core/constants.ts:35` 再导出 `EYE_STAND` |
-| `three` 运行时 | `apps/viewer/package.json:30` | 场景、相机、材质、`GLTFLoader`、`mergeGeometries`（`apps/viewer/src/core/scene.ts:26`） |
-| TypeScript 程序面 | `apps/viewer/tsconfig.json:15` 的 `include` 含 `../../src/ts-shared/**/*.ts` | 共享层 TS 文件参与本工程 `tsc --noEmit` |
+| 共享渲染层 `src/renderer-shared/shader/lightmap-shader.ts` | tsconfig include 跨目录收编 + 深层相对路径 import | `apps/viewer/src/core/scene.ts:42`（运行时导入）与 `apps/viewer/src/ui/mapinfo.ts:23`（仅 `LightingMode` 类型）；three 依赖由根级 `package.json:6` 声明 |
+| `three` 运行时 | 仓库根 `package.json:6`（单实例，2026-10-02 上收） | 场景、相机、材质、`GLTFLoader`、`mergeGeometries`（`apps/viewer/src/core/scene.ts:26`） |
+| TypeScript 程序面 | `apps/viewer/tsconfig.json:15` 的 `include` 含 `../../src/ts-shared/**/*.ts` 与 `../../src/renderer-shared/**/*.ts` | 共享层 TS 文件参与本工程 `tsc --noEmit` |
 | vendored `vmdl` | `apps/viewer/Cargo.toml:12` 的 `[patch.crates-io]` | `apps/viewer/crates/wasm/Cargo.toml:30` 的 `vmdl = "0.2"`（PAKFILE 内嵌模型解析） |
 
-依赖方向单向：`apps/viewer → src/**` 与 `apps/viewer → three`；本工程不引另外两个工程的任何文件（三份 `lightmap-shader.ts` 是同构副本，彼此不 import，见 `apps/viewer/src/renderer/lightmap-shader.ts:7`）。
+依赖方向单向：`apps/viewer → src/**`（含共享渲染层 `src/renderer-shared/**`）与 `apps/viewer → three`（依赖声明在仓库根 `package.json`）；本工程不引另外两个工程的任何文件（静态光照着色器是共享单实例，三工程经 tsconfig include 收编同一文件，见 `src/renderer-shared/shader/lightmap-shader.ts:6`）。
 
 ## 构建产物与脚本
 
@@ -99,4 +100,4 @@
 | 「Worker 坏掉」是单向的 | `ensureWorker` 一旦置 `workerBroken` 就不再重试，后续全部走主线程 | `apps/viewer/src/replay/importer.ts:71`、`apps/viewer/src/replay/importer.ts:91` |
 | Worker 回传后本地 buffer 失效 | `t` / `pos` / `ang` 的 buffer 必进 transfer 列表，`vel` / `buttons` 存在才加 | `apps/viewer/src/worker/main.ts:88` 到 `apps/viewer/src/worker/main.ts:90` |
 | 记录播放基准 = 帧自身坐标 | 解码只做轴序/朝向映射，平移与旋转只在 `RuleConfig.transform` 存在且非恒等时叠加 | `apps/viewer/src/replay/build.ts:29`、`apps/viewer/src/replay/types.ts:55` |
-| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `apps/viewer/src/renderer/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:245` |
+| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:245` |
