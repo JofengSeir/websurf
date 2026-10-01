@@ -11,7 +11,7 @@
 它与其他两个工程的定位差别由三处实测界定：
 
 - **没有物理**：WASM 侧只暴露 BSP 解析与 GLB 导出（`apps/viewer/crates/wasm/src/lib.rs:339` 的 `BspProcessor::new` 之后只有 `metadata` / `parse_spawn_points` / `export_glb_with_pakfile_models` 三个方法），crate 依赖里没有 `websurf-phys`（`apps/viewer/crates/wasm/Cargo.toml:18`）。
-- **不参与共享状态通道**：入口只打印 `crossOriginIsolated` 供核对，不建 `SharedArrayBuffer`、不选通道（`apps/viewer/src/app.ts:39`）。
+- **不参与共享状态通道**：入口只打印 `crossOriginIsolated` 供核对，不建 `SharedArrayBuffer`、不选通道（`apps/viewer/src/app.ts:41`）。
 - **有独立的解析 Worker**：Worker 只做 `.replay` 字节 → 结构化帧的解码（`apps/viewer/src/worker/main.ts:53` 的 `handle`），不做物理、不常驻状态机。
 
 依据：`apps/viewer/package.json:7` 的 scripts（`build:wasm` / `typecheck` / `test:replay` / `local:smoke` / `build:worker` / `build:app` / `build:ts` / `build` / `build:dist` / `check:api` / `dev`），以及 `apps/viewer/package.json:29` 的运行时依赖只有 `three`。
@@ -20,7 +20,7 @@
 
 | 路径 | 职责 | 关键锚点 |
 |---|---|---|
-| `apps/viewer/src/app.ts` | 主线程装配入口：画布、场景、飞行相机、面板、拖拽与 URL 深链、帧循环、`globalThis.viewer` 接口 | `apps/viewer/src/app.ts:33`、`apps/viewer/src/app.ts:478` |
+| `apps/viewer/src/app.ts` | 主线程装配入口：画布、场景、飞行相机、面板、拖拽与 URL 深链、帧循环、`globalThis.viewer` 接口 | `apps/viewer/src/app.ts:36`、`apps/viewer/src/app.ts:540` |
 | `apps/viewer/src/core/` | BSP 加载与 WASM 懒初始化、three 场景与光照模式、自由飞行相机、位姿、常量、DOM 构件、出生点解析 | `apps/viewer/src/core/bsp.ts:74`、`apps/viewer/src/core/scene.ts:356`、`apps/viewer/src/core/fly.ts:84`、`apps/viewer/src/core/spawn.ts:96` |
 | `apps/viewer/src/replay/` | `.replay` 原生解析、导入与 Worker 协议、播放器与采样、多轨道容器、3D 呈现、记录面板、轨迹列表、时间轴、人工变换 | `apps/viewer/src/replay/shavit-replay.ts:284`、`apps/viewer/src/replay/player.ts:193`、`apps/viewer/src/replay/timeline.ts:276` |
 | `apps/viewer/src/ui/` | HUD 与引导层、地图信息与出生点导航、记录信息条、遥测 HUD | `apps/viewer/src/ui/hud.ts:21`、`apps/viewer/src/ui/mapinfo.ts:129`、`apps/viewer/src/ui/telemetry.ts:103` |
@@ -77,12 +77,12 @@
 
 1. `npm run dev` 起静态服务（`apps/viewer/package.json:18`，端口 8100），页面路径是 `/web/index.html`。
 2. `apps/viewer/web/index.html:111` 以 `<script type="module" src="./app.js">` 加载 esbuild 产物；`apps/viewer/web/index.html:94` 的捕获阶段 `error` 监听在资源 404 时显示 `#fatal` 卡片。
-3. `apps/viewer/src/app.ts:33` 取 `canvas#game`，取不到即抛错（`apps/viewer/src/app.ts:34`）。
+3. `apps/viewer/src/app.ts:35` 取 `canvas#game`，取不到即抛错（`apps/viewer/src/app.ts:36`）。
 4. `apps/viewer/src/app.ts:50` 建 `ViewerScene`（WebGL 渲染器 + 相机 + 三点光），失败时经 `Hud.showFatal` 提示后重抛（`apps/viewer/src/app.ts:52`）。
-5. `apps/viewer/src/app.ts:59` 建 `FlyCam` 并 `attach` 到画布（注册 pointer lock、mousemove、keydown/keyup、blur）。
-6. 侧栏标签页与 dock 取句柄并绑事件（`apps/viewer/src/app.ts:64` 到 `apps/viewer/src/app.ts:99`）；`MapPanel`（`apps/viewer/src/app.ts:111`）、`ReplayPanel`（`apps/viewer/src/app.ts:140`）、`ReplayMetaPanel` / `Timeline` / `TelemetryHud`（`apps/viewer/src/app.ts:170` 到 `apps/viewer/src/app.ts:176`）依次装配。
-7. 对外接口挂到 `globalThis.viewer`（`apps/viewer/src/app.ts:352`）；URL 深链 `?bsp=` / `?replay=` 在启动末尾异步加载（`apps/viewer/src/app.ts:470`）。
-8. `requestAnimationFrame(frame)` 起主循环（`apps/viewer/src/app.ts:524`）；WASM 直到用户真的选地图时才初始化（`apps/viewer/src/core/bsp.ts:116` 的 `await ensureWasm()`）。
+5. `apps/viewer/src/app.ts:62` 建 `FlyCam` 并 `attach` 到画布（注册 pointer lock、mousemove、keydown/keyup、blur）。
+6. 侧栏标签页与 dock 取句柄并绑事件（`apps/viewer/src/app.ts:67` 到 `apps/viewer/src/app.ts:100`）；`MapPanel`（`apps/viewer/src/app.ts:170`）、`ReplayPanel`（`apps/viewer/src/app.ts:318`）、`ReplayMetaPanel` / `Timeline` / `TelemetryHud`（`apps/viewer/src/app.ts:349` 到 `apps/viewer/src/app.ts:355`）依次装配。
+7. 对外接口挂到 `globalThis.viewer`（`apps/viewer/src/app.ts:540`）；URL 深链 `?bsp=` / `?replay=` 在启动末尾异步加载（`apps/viewer/src/app.ts:620`）。
+8. `requestAnimationFrame(frame)` 起主循环（`apps/viewer/src/app.ts:767`）；WASM 直到用户真的选地图时才初始化（`apps/viewer/src/core/bsp.ts:116` 的 `await ensureWasm()`）。
 
 ## 不变量
 
@@ -92,7 +92,7 @@
 | `loadBspFile` 的三步顺序固定为 metadata → spawn → GLB | 前两步是借用方法、第三步消耗实例 | `apps/viewer/src/core/bsp.ts:122` 到 `apps/viewer/src/core/bsp.ts:125` |
 | 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序写在 `mountGlb` 里 | `apps/viewer/src/core/scene.ts:200`、`apps/viewer/src/core/scene.ts:203` |
 | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / `updateNearPlane` / `optimizeScene` / 换图释放的唯一范围 | `apps/viewer/src/core/scene.ts:77`、`apps/viewer/src/core/scene.ts:146` |
-| 相机每帧只被一个写者写 | 回放第一人称段把 `fly.drivesCamera` 与 `fly.allowMove` 置假并用 `applyToWithRoll` 写相机；其余情况由 `FlyCam.update` + `applyTo` 写 | `apps/viewer/src/app.ts:488` 到 `apps/viewer/src/app.ts:503`、`apps/viewer/src/core/fly.ts:196` |
+| 相机每帧只被一个写者写 | 回放第一人称段把 `fly.drivesCamera` 与 `fly.allowMove` 置假并用 `applyToWithRoll` 写相机；其余情况由 `FlyCam.update` + `applyTo` 写 | `apps/viewer/src/app.ts:725` 到 `apps/viewer/src/app.ts:739`、`apps/viewer/src/core/fly.ts:196` |
 | 位姿角一律用度、弧度只在 `FlyCam` 内部 | `Pose.ang` 是度；`setPose` / `setWorld` 在边界处换算 | `apps/viewer/src/core/pose.ts:27`、`apps/viewer/src/core/fly.ts:207` |
 | 采样二分要求时间轴单调不减 | `.replay` 路径由 `t(i) = (i − preFrames) / tickrate` 与 `tickrate > 0` 保证（解析期校验） | `apps/viewer/src/replay/sampling.ts:26`、`apps/viewer/src/replay/shavit-replay.ts:350` |
 | 「Worker 坏掉」是单向的 | `ensureWorker` 一旦置 `workerBroken` 就不再重试，后续全部走主线程 | `apps/viewer/src/replay/importer.ts:78`、`apps/viewer/src/replay/importer.ts:104` |
