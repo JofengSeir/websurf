@@ -39,7 +39,7 @@ import { TeleportManager } from '../world/teleport-manager.js';
 import { adaptBrushes } from '../world/collider-adapter.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
-import { LightManager } from './light-manager.js';
+import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
 import { LodManager } from './lod-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';

@@ -42,6 +42,9 @@ test/project/*
 
 # ── Agent 工作记忆（非文档树、不入库）──
 **/.workbuddy/
+# ZCode 会话的工作区（计划文件 .zcode/plans/** 等，工具自动生成；漂移体检不应扫描它们）
+.zcode/
+.zcodeignore
 
 # ── 归档文件──
 **/.archive/

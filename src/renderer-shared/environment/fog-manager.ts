@@ -2,6 +2,9 @@
  * 线性雾（`THREE.Fog`）的 near / far 计算：按场景半径与相机到场景中心的距离逐帧外推，
  * 使相机远离场景时近裁剪面同步后移，场景不被整片雾化。
  *
+ * 归属：渲染共享层 `src/renderer-shared/environment/`（2026-10-02 自 debug 工程
+ * `apps/debug/src/renderer/fog-manager.ts` 原样下沉，逻辑零改动）。
+ *
  * 本类在本仓无装配点：`apps/debug/src/renderer/renderer-main.ts` 的 `loadScene` 不创建
  * `scene.fog`，也没有其他文件 import 它。
  */
