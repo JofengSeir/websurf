@@ -36,6 +36,7 @@ import {
   parseChatRecord,
   parseDuration,
   recordJumpSeconds,
+  stripChatPrefixes,
 } from '../src/replay/demo/chatkind.js';
 import { demoTracksToClips } from '../src/replay/democlip.js';
 
@@ -1140,6 +1141,46 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
     check('判据归属：不认识的写法落到 fallback（仍归服务器公告）', classifyChatDetailed(stranger).kind === 'announce' && classifyChatDetailed(stranger).rule === 'fallback', JSON.stringify(classifyChatDetailed(stranger)));
     check('真实语料里**没有**兜底行（40 条全部命中具体判据）', countFallback(r.chat) === 0, String(countFallback(r.chat)));
     check('兜底计数认得出合成的那条', countFallback([...r.chat, { tick: 1, text: stranger }]) === 1, String(countFallback([...r.chat, { tick: 1, text: stranger }])));
+    // **第二轮语料（owner 提供的更多 dem）补上的三个族**，都抄自真实录像
+    // （auto-20261001-182125-surf_ezclap.dem 90 分钟 / 356 条；auto-20261001-142251-surf_entropy_finalv2.dem 8 条过关）。
+    // ① 观战 / 队伍 / 身份前缀**可以叠加**，最里面才是「说话人: 正文」——
+    //    早先只剥一层标签，实测有 46 条这类行全落到兜底（它们其实是玩家在说话）。
+    check(
+      '观战前缀叠加：*SPEC* [yuzusoft] Name: 正文 认成玩家对话',
+      classifyChatDetailed('*SPEC* [yuzusoft] GalgameEnjoyer1337: 666').rule === 'chat-speaker',
+      JSON.stringify(classifyChatDetailed('*SPEC* [yuzusoft] GalgameEnjoyer1337: 666')),
+    );
+    check(
+      '(Spectator) 前缀叠加同样认成玩家对话',
+      classifyChatDetailed('(Spectator) [yuzusoft] GalgameEnjoyer1337: 能一遍过不').kind === 'chat',
+      JSON.stringify(classifyChatDetailed('(Spectator) [yuzusoft] GalgameEnjoyer1337: 能一遍过不')),
+    );
+    check(
+      '字间带空格的标签 + 带数字的中文名也认得出说话人',
+      stripChatPrefixes('*SPEC* [ V e t e r a n ] 经验过载刷2143别踢: ?') === '经验过载刷2143别踢: ?',
+      JSON.stringify(stripChatPrefixes('*SPEC* [ V e t e r a n ] 经验过载刷2143别踢: ?')),
+    );
+    check(
+      '剥前缀不许把 [ Timer ] - 地图剩余时间: … 变成聊天',
+      classifyChatDetailed('[ Timer ] - 地图剩余时间: 20 分钟。').rule === 'announce-shape',
+      JSON.stringify(classifyChatDetailed('[ Timer ] - 地图剩余时间: 20 分钟。')),
+    );
+    // ② 用时可以是 m:ss.mmm（实测 2:47.781 / 7:53.102）
+    const cnLong = parseChatRecord('[ Timer ] - 蓝鹿鹿 在 Normal模式 下以用时 2:47.781 完成了 [ 阶段 3 ]。 排名: 1/1');
+    check(
+      '中文过关记录的用时支持 m:ss.mmm（2:47.781 ⇒ 167.781s），玩家与关卡取对',
+      cnLong !== null && Math.abs(cnLong.durationSec - 167.781) < 1e-6 && cnLong.player === '蓝鹿鹿' && cnLong.level === '阶段 3',
+      JSON.stringify(cnLong),
+    );
+    // ③ 关卡名会是**英文**（[ Stage 1 ]）：早先按「纯 ASCII 就不是关卡名」跳掉了，实测会丢关卡名
+    const enLevel = parseChatRecord(
+      '[ Timer ] - GenShinEnjoyer8267 在 Normal模式 下以用时 12.308 完成了 [ Stage 1 ]。 (SR: +0.718 | PB: +0.317 )',
+    );
+    check(
+      '英文关卡名 [ Stage 1 ] 不再被当成标签丢掉',
+      enLevel !== null && enLevel.level === 'Stage 1' && Math.abs(enLevel.durationSec - 12.308) < 1e-6,
+      JSON.stringify(enLevel),
+    );
     // **泛化档的过关写法**（English / 变体中文）：尚无真实语料核对，但既然判据里认它们，
     // 就用合成句子把「认得出 + 用时取得对」钉住（免得哪天改正则悄悄失效）。
     const enRec = parseChatRecord('SurferX finished the map in 12.345 seconds');

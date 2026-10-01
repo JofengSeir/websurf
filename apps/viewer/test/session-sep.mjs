@@ -38,17 +38,28 @@ const EDGE =
 const CDP_PORT = Number(process.env.SESSIONS_CDP_PORT ?? 9444);
 const HTTP_PORT = Number(process.env.SESSIONS_HTTP_PORT ?? 8123);
 
-/** 缺省夹具：`<仓库根>/test/replay` 下的第一份 `.dem`（`SMOKE_FILE_DEM` 可覆盖）。 */
+/** 缺省夹具：`<仓库根>/test/replay` 下的**语料基准**那份 `.dem`（`SMOKE_FILE_DEM` 可覆盖）。 */
 function findDemFixture() {
   if (process.env.SMOKE_FILE_DEM) return process.env.SMOKE_FILE_DEM;
   const dir = join(REPO_ROOT, 'test', 'replay');
   if (!existsSync(dir)) return null;
-  const hit = readdirSync(dir).find((f) => f.toLowerCase().endsWith('.dem'));
+  const all = readdirSync(dir)
+    .filter((f) => f.toLowerCase().endsWith('.dem'))
+    .sort();
+  // **优先挑「语料基准」那份**：本脚本的消息条数 / 四类读数 / 跳转目标都照它写死，
+  // 而 test/replay 下会陆续出现更多录像（owner 提供的测试集）—— 挑错就会让断言全体失配。
+  const hit = all.find((f) => /surf_gigapede/.test(f)) ?? all[0];
   return hit ? join(dir, hit) : null;
 }
 const DEMO_PATH = findDemFixture();
 /** 页面里的相对取法：从 `/apps/viewer/web/` 出发回到仓库根。 */
 const DEMO_REL = DEMO_PATH ? relative(REPO_ROOT, DEMO_PATH).replace(/\\/g, '/') : null;
+
+// 计数类断言（40 条消息 / ×1×5×30×4 / 跳转 576.556s）只对**语料基准**那份成立；
+// 目录里只有别的录像时**大声跳过**，而不是拿它去撞断言（换了夹具却报一堆红，没人看得懂）。
+if (!process.env.SMOKE_FILE_DEM && DEMO_PATH && !/surf_gigapede/.test(DEMO_PATH)) {
+  skip('test/replay 里没有语料基准夹具 auto-20261001-050330-surf_gigapede.dem —— 本脚本的计数类断言按它写死；可用 SMOKE_FILE_DEM 指定别的录像（那类断言会失配）');
+}
 
 const URL_ = `http://127.0.0.1:${HTTP_PORT}/apps/viewer/web/index.html`;
 
