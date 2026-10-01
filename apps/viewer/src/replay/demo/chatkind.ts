@@ -106,13 +106,16 @@ export function parseDuration(text: string): number | null {
   return total;
 }
 
-/** 关卡名：取最后一个不像是「标签」的 `[ … ]`（`[ Timer ]` 那种纯字母标签跳过）。 */
+/** 关卡名：取 `[ … ]` 里的**最后一个**（`[ Timer ]` 这种外壳在调用前已由 `stripLeadTag` 剥掉）。 */
 function levelFrom(body: string): string {
   const groups = [...body.matchAll(/[[［]\s*([^\]］]{1,24}?)\s*[\]］]/g)].map((m) => m[1]);
   for (let i = groups.length - 1; i >= 0; i--) {
     const g = groups[i];
     if (g.length === 0) continue;
-    if (/^[\x20-\x7e]+$/.test(g)) continue; // `Timer` / `SM` / `SR: +0.0` 这类纯 ASCII 标签不是关卡名
+    // 只跳过「明显是标签」的那几个词：`StripLeadTag` 之后一般不会剩下它们，
+    // 留一道保险免得把 `[ SM ]` 当成关卡名。**不能再按「纯 ASCII」跳** ——
+    // 实测英文服把关卡写成 `[ Stage 1 ]`，早先那条 ASCII 规则会把关卡名吞掉（本轮实测）。
+    if (/^(timer|sm|server|sourcemod|admin|vip|spec|spectator)$/i.test(g)) continue;
     return g;
   }
   return '';
@@ -126,6 +129,36 @@ function levelFrom(body: string): string {
  */
 export function stripLeadTag(text: string): string {
   return text.replace(RE_LEAD_TAG, '').replace(/^\s*[-–—]\s*/, '');
+}
+
+/**
+ * 剥掉**玩家对话**会叠着好几层的前缀。
+ *
+ * 真实语料（`test/replay/auto-20261001-182125-surf_ezclap.dem`，90 分钟 / 356 条消息）里有这些写法：
+ *   `*SPEC* [yuzusoft] GalgameEnjoyer1337: 666`
+ *   `(Spectator) [yuzusoft] GalgameEnjoyer1337: 能一遍过不`
+ *   `*SPEC* [ V e t e r a n ] 经验过载刷2143别踢: 需要沉淀的太多了`
+ *   `[ V e t e r a n ] 经验过载刷2143别踢: ?`
+ * 即「**观战标记 / 队伍标记 / 身份标签可以叠加**，最里面才是 `说话人: 正文`」。
+ * 早先只剥一层 `[ 标签 ]`，于是带 `*SPEC*` 的那些行全落到兜底（实测 46 条）——
+ * 这一族是**玩家在说话**，必须认成「玩家对话」而不是服务器播报。
+ *
+ * 循环剥 6 轮（前缀层数有限，避免病态输入上打转）：`*SPEC*` / `*DEAD*` → `(Spectator)` / `(CT)` →
+ * `[ 标签 ]` → 标签后的分隔短横。
+ */
+export function stripChatPrefixes(text: string): string {
+  let s = text.trim();
+  for (let i = 0; i < 6; i++) {
+    const before = s;
+    s = s.replace(/^\*[^*]{1,16}\*\s*/, ''); // *SPEC* / *DEAD*
+    s = s.replace(/^\([^)]{1,16}\)\s*/, ''); // (Spectator) / (CT) / (T)
+    // 方括号两边都**必须转义**：JS 里 `[]]` 会被解析成「空字符类 + 字面量 ]」⇒ 永不匹配
+    // （这一版就是踩了这个：`*SPEC*` 剥掉了、`[ 标签 ]` 没剥掉，于是聊天全落到兜底 —— 实测 62 条）
+    s = s.replace(/^\[[^\]]{1,24}\]\s*/, ''); // [ 标签 ]（含 [ V e t e r a n ] 这种字间带空格的）
+    s = s.replace(/^\s*[-–—]\s*/, ''); // 标签后的分隔短横
+    if (s === before) break;
+  }
+  return s;
 }
 
 /** 说话人：剥壳后取「`用时` 之前紧邻的那个人名」（中英两套句式共用）。 */
@@ -205,9 +238,11 @@ export function classifyChatDetailed(text: string): { kind: ChatKind; rule: Chat
   if (RE_JOIN_WORDS.test(text)) return { kind: 'join', rule: 'join-words' };
   if (parseChatRecord(text)) return { kind: 'record', rule: RE_RECORD_CN.test(text) ? 'record-cn' : 'record-en' };
   if (RE_ANNOUNCE_SHAPE.test(text)) return { kind: 'announce', rule: 'announce-shape' };
-  // 玩家对话：剥掉前缀标签后是「说话人: 正文」；说话人里允许 `*DEAD*` / `(CT)` / `<Owner>` 之类的装饰
-  const body = stripLeadTag(text);
-  if (/^\s*(?:\*?[A-Za-z ]{0,12}\*?\s*)?(?:\([^)]{1,8}\)\s*)?[^:：<>[\]]{1,32}\s*[:：]\s*\S/.test(body)) {
+  // 玩家对话：剥掉**可叠加的**前缀（`*SPEC*` / `(Spectator)` / `[ 标签 ]`）后是「说话人: 正文」。
+  // 注意顺序：带标签的服务器播报（`[ Timer ] - 正文`）在上面已被 announce-shape 认走，
+  // 所以这里剥到「`地图剩余时间: 20 分钟。`」也不会被误判成聊天。
+  const body = stripChatPrefixes(text);
+  if (/^[^:：<>[\]]{1,32}\s*[:：]\s*\S/.test(body)) {
     return { kind: 'chat', rule: 'chat-speaker' };
   }
   return { kind: 'announce', rule: 'fallback' };
