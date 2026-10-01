@@ -1,0 +1,11 @@
+{
+  "name": "websurf",
+  "private": true,
+  "description": "WebSurf 仓库根：只承载跨工程共享的 npm 依赖（src/renderer-shared 等共享层由此解析 three），不含脚本与工作区。",
+  "dependencies": {
+    "three": "^0.165.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.165.0"
+  }
+}

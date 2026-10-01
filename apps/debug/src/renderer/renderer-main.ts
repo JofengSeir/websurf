@@ -11,7 +11,7 @@
  * 由 `apps/debug/src/app.ts` 的 `handleLoadBsp` 经 `buildWorldBundle`
  * （`src/ts-shared/phys/world-builder.ts`）在主线程解析后传入。GLB 交 `GLTFLoader`，
  * 碰撞体交 `adaptBrushes`、可见集交 `PvsManager`、传送触发器交 `TeleportManager`、
- * 光照图图集交 `loadLightmapAtlas`（`apps/debug/src/renderer/lightmap-shader.ts`）。
+ * 光照图图集交 `loadLightmapAtlas`（`src/renderer-shared/shader/lightmap-shader.ts`）。
  *
  * 子管理器全部由本类持有：`CameraController`（视角输入）、`LightManager`（灯光/阴影/雾）、
  * `LodManager`（分块与剔除距离）、`ColliderDebug`（碰撞体与触发器可视化）、
@@ -46,7 +46,7 @@ import type { DistStats } from './path-recorder.js';
 import type { InputReplayInitialState, InputReplayHull } from '../input/input-recorder.js';
 import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
-import { applyLightmapToMeshes, loadLightmapAtlas, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from './lightmap-shader.js';
+import { applyLightmapToMeshes, loadLightmapAtlas, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」

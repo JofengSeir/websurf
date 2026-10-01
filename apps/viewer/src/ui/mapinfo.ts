@@ -20,7 +20,7 @@ import { el, foldBox, section } from '../core/dom.js';
 import { spawnPointAng } from '../core/spawn.js';
 import type { Pose } from '../core/pose.js';
 import type { BspLoadResult } from '../core/bsp.js';
-import type { LightingMode } from '../renderer/lightmap-shader.js';
+import type { LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 export interface WorldBox {
   min: [number, number, number];

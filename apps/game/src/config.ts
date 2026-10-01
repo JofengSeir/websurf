@@ -13,7 +13,7 @@
  * 读点分布（各字段注释逐项标注）：面板控件初值与偏好持久化在
  * `apps/game/src/panel/panel-controller.ts`；双端下发在 `apps/game/src/input/input-bridge.ts`
  * 与 `apps/game/src/worker/main.ts` 的 `syncParamsToWasm`；渲染侧消费在
- * `apps/game/src/renderer/renderer-main.ts` 与 `apps/game/src/renderer/lightmap-shader.ts`；
+ * `apps/game/src/renderer/renderer-main.ts` 与 `src/renderer-shared/shader/lightmap-shader.ts`；
  * 输入与 HUD 在 `apps/game/src/app.ts`。
  */
 
@@ -128,7 +128,7 @@ export interface TextureConfig {
 export interface LightingConfig {
   /** 全局曝光（显示侧亮度倍率，world lightmap 与 prop ambient 共用同一旋钮）。
    *  读点：`renderer-main.ts` 初始化装配的 `setExposure`、
-   *  `apps/game/src/renderer/lightmap-shader.ts` 的 `setExposure`（写共享 uniform）、
+   *  `src/renderer-shared/shader/lightmap-shader.ts` 的 `setExposure`（写共享 uniform）、
    *  面板控件（量程 0.1..8）。接受窗口：`setExposure` 只接受有限正数，非正数直接忽略。 */
   exposure: number;
   /** 光照项 gamma（shadow-lift）：对解码后的线性辐射度做 `pow(d, γ)`，只抬暗部。

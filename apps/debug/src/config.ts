@@ -81,7 +81,7 @@ export interface LightingConfig {
    * - `texture`：材质改走 `MeshBasicMaterial` 原色，片元不采 atlas、不算解码。
    *
    * 两条路径的加载完全一致：atlas 一律照 `loadLightmapAtlas` 解码并应用，差别只在
-   * `apps/debug/src/renderer/lightmap-shader.ts` 的 `setLightingMode` 改一个全场景共享的
+   * `src/renderer-shared/shader/lightmap-shader.ts` 的 `setLightingMode` 改一个全场景共享的
    * uniform（`bakedMixUniform`）——不重建场景、不重编译材质。面板切换经
    * `rendererMain.setLightingMode` 落到该函数。
    */

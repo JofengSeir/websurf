@@ -19,15 +19,11 @@
     "dev": "python ../../src/serve.py 8100 ."
   },
   "devDependencies": {
-    "@types/three": "^0.165.0",
     "esbuild": "^0.23.0",
     "typescript": "~5.7.2",
     "ws": "^8.18.0"
   },
   "engines": {
     "node": ">=18"
-  },
-  "dependencies": {
-    "three": "^0.165.0"
   }
 }

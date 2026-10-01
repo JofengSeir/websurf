@@ -66,7 +66,7 @@ export class PanelController {
     private readonly onSyncAmbientScale?: (scale: number) => void,
     /**
      * 光照模式（`baked` 预烘焙 / `texture` 纯纹理）→ 渲染器 `setLightingMode`：
-     * `apps/game/src/renderer/lightmap-shader.ts` 用全场景共享的一个 uniform 承载该开关，
+     * `src/renderer-shared/shader/lightmap-shader.ts` 用全场景共享的一个 uniform 承载该开关，
      * 改值即全场景生效（不重建场景、不重编译材质）；模式未变化时渲染器 `setLightingMode` 直接返回。
      */
     private readonly onSyncLightingMode?: (mode: 'baked' | 'texture') => void,

@@ -18,12 +18,9 @@
     "test:seed-smoke": "node scripts/phys-seed-smoke.mjs",
     "test:surf-crouch": "node scripts/phys-surf-crouch-smoke.mjs"
   },
-  "dependencies": {
-    "three": "^0.165.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^26.1.2",
-    "@types/three": "^0.165.0",
     "esbuild": "^0.23.0",
     "typescript": "~5.7.2"
   },
