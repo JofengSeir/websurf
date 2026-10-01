@@ -410,7 +410,7 @@ const demoPanel = demoPane
        *    不该被强行播起来，与「换绑不许改播放态」是同一条规矩）；
        * ② **顺手把视角切到过的那个人**（按名字认人：`.dem` 里同名很少见；认不到就只跳时间）。
        */
-      onRecordJump: (toSec, player, level, durationSec) => {
+      onRecordJump: (toSec, announceSec, player, level, durationSec) => {
         const who = player.trim();
         const row = who.length > 0 ? demoPanel?.roster(0).find((p) => p.name.trim() === who) : undefined;
         // **顺序不能反**：先切视角、**最后**再定位播放头。
@@ -423,6 +423,15 @@ const demoPanel = demoPane
           autoPickInFlight = false;
         }
         demo.player.seek(toSec);
+        // 进度条上把「刚跳到的那一段」画出来（落点 → 播报时刻）；播放头走过它就消失（帧循环负责清）。
+        demo.timeline.setJumpSpan({
+          from: toSec,
+          to: announceSec,
+          title:
+            `刚跳到 ${player || '这一跑'}${level ? ' · ' + level : ''}：用时 ${durationSec.toFixed(3)} 秒` +
+            `（播报 ${fmtClock(announceSec)} − 用时 − 5 秒缓冲 = ${fmtClock(toSec)}）` +
+            ' —— 播放头走过这一段它就消失',
+        });
         hud.flashStatus(
           `跳到 ${player || '这一跑'}${level ? ' · ' + level : ''} 的起点 ${fmtClock(toSec)}` +
             `（播报 − ${durationSec.toFixed(3)} 秒 − 5 秒缓冲）`,
@@ -843,6 +852,10 @@ function frame(now: number): void {
     // **画面左下角的对话浮层**：同一帧里按当前播放头推进（15 秒淡出 / 最多 5 条 / 超出丢最早的）。
     // 只有录像会话上场时才推 —— 记录（`.replay`）没有对话数据，浮层保持空。
     chatOverlay.update(s.player.time);
+    // **一次性「跳到这一跑」区间带**（owner：在进度条上把刚跳到的那一段画出来，**过掉就消失**）：
+    // 播放头走过区间的末端（+0.2s 容差）就撤掉；还在这一段里（哪怕用户往回拖了一点）就一直留着。
+    const jumpSeg = demo.timeline.jumpSpanRange;
+    if (jumpSeg && s.player.time > jumpSeg.to + 0.2) demo.timeline.setJumpSpan(null);
 
     const nowSec = s.player.time;
     const nowTick = Math.round(nowSec * demoPanel.tickRate());

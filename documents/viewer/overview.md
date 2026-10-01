@@ -20,7 +20,7 @@
 
 | 路径 | 职责 | 关键锚点 |
 |---|---|---|
-| `apps/viewer/src/app.ts` | 主线程装配入口：画布、场景、飞行相机、面板、按内容的导入分派 `routeFile`、URL 深链、帧循环、`globalThis.viewer` 接口 | `apps/viewer/src/app.ts:48`、`apps/viewer/src/app.ts:603`、`apps/viewer/src/app.ts:741` |
+| `apps/viewer/src/app.ts` | 主线程装配入口：画布、场景、飞行相机、面板、按内容的导入分派 `routeFile`、URL 深链、帧循环、`globalThis.viewer` 接口 | `apps/viewer/src/app.ts:48`、`apps/viewer/src/app.ts:612`、`apps/viewer/src/app.ts:750` |
 | `apps/viewer/src/core/` | BSP 加载与 WASM 懒初始化、three 场景与光照模式、自由飞行相机、位姿、常量、DOM 构件、出生点解析、导入文件的类型识别 | `apps/viewer/src/core/bsp.ts:74`、`apps/viewer/src/core/scene.ts:356`、`apps/viewer/src/core/fly.ts:84`、`apps/viewer/src/core/spawn.ts:96`、`apps/viewer/src/core/filekind.ts:62` |
 | `apps/viewer/src/replay/` | 记录（`.replay`）/ 录像（`.dem`）两条链路各持一份**独立回放会话**（`session.ts` 的 `ReplaySession`）、`.replay` 原生解析、导入与 Worker 协议、播放器与采样、多轨道容器、3D 呈现、记录 / 录像面板、轨迹列表、时间轴、人工变换 | `apps/viewer/src/replay/shavit-replay.ts:284`、`apps/viewer/src/replay/session.ts:62`、`apps/viewer/src/replay/player.ts:17`、`apps/viewer/src/replay/timeline.ts:52` |
 | `apps/viewer/src/ui/` | HUD 与引导层、地图信息与出生点导航、记录信息条、**录像信息条**、遥测 HUD | `apps/viewer/src/ui/hud.ts:21`、`apps/viewer/src/ui/mapinfo.ts:129`、`apps/viewer/src/ui/demometa.ts:33`、`apps/viewer/src/ui/telemetry.ts:64` |
@@ -82,8 +82,8 @@
 4. `apps/viewer/src/app.ts:64` 建 `ViewerScene`（WebGL 渲染器 + 相机 + 三点光），失败时经 `Hud.showFatal` 提示后重抛（`apps/viewer/src/app.ts:65` 到 `apps/viewer/src/app.ts:70`）。
 5. `apps/viewer/src/app.ts:74` 建 `FlyCam` 并 `attach` 到画布（注册 pointer lock、mousemove、keydown/keyup、blur）。
 6. 侧栏 / dock / 标签页取句柄并绑事件（`apps/viewer/src/app.ts:79` 到 `apps/viewer/src/app.ts:90`），tab 点击统一进唯一的切换点 `switchTab`（`apps/viewer/src/app.ts:175`）；随后两个回放会话各自构造（`apps/viewer/src/app.ts:100`），各自建自己的时间轴与信息条 —— 记录条在会话内建（`apps/viewer/src/replay/session.ts:86`），录像条由 `apps/viewer/src/app.ts:135` 单独建；两条各占 dock 的一层（记录层 = `#replayMeta` + `#timeline`，录像层 = `#demoInfo` + `#timelineDemo`，DOM 见 `apps/viewer/web/index.html:132`、`apps/viewer/web/index.html:136`），再按遥测 `TelemetryHud`（`apps/viewer/src/app.ts:127`）、`MapPanel`（`apps/viewer/src/app.ts:212`）、`ReplayPanel`（`apps/viewer/src/app.ts:283` 到 `apps/viewer/src/app.ts:314`）依次装配。
-7. 对外接口挂到 `globalThis.viewer`（`apps/viewer/src/app.ts:741`）；URL 深链 `?bsp=` / `?replay=` 在启动末尾异步加载（`apps/viewer/src/app.ts:779` 到 `apps/viewer/src/app.ts:816`）。
-8. `requestAnimationFrame(frame)` 起主循环（`apps/viewer/src/app.ts:1007`）；WASM 直到用户真的选地图时才初始化（`apps/viewer/src/core/bsp.ts:116` 的 `await ensureWasm()`）。
+7. 对外接口挂到 `globalThis.viewer`（`apps/viewer/src/app.ts:750`）；URL 深链 `?bsp=` / `?replay=` 在启动末尾异步加载（`apps/viewer/src/app.ts:788` 到 `apps/viewer/src/app.ts:825`）。
+8. `requestAnimationFrame(frame)` 起主循环（`apps/viewer/src/app.ts:1020`）；WASM 直到用户真的选地图时才初始化（`apps/viewer/src/core/bsp.ts:116` 的 `await ensureWasm()`）。
 
 ## 不变量
 
@@ -93,7 +93,7 @@
 | `loadBspFile` 的三步顺序固定为 metadata → spawn → GLB | 前两步是借用方法、第三步消耗实例 | `apps/viewer/src/core/bsp.ts:122` 到 `apps/viewer/src/core/bsp.ts:125` |
 | 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序写在 `mountGlb` 里 | `apps/viewer/src/core/scene.ts:200`、`apps/viewer/src/core/scene.ts:203` |
 | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / `updateNearPlane` / `optimizeScene` / 换图释放的唯一范围 | `apps/viewer/src/core/scene.ts:77`、`apps/viewer/src/core/scene.ts:146` |
-| 相机每帧只被一个写者写 | 只有**上场会话**给得出第一人称采样（`ReplaySession.cameraSample()` 对下场的会话恒返回 `null`，`apps/viewer/src/replay/session.ts:161`）：有采样时把 `fly.drivesCamera` 与 `fly.allowMove` 置假并用 `applyToWithRoll` 写相机；否则由 `FlyCam.update` + `applyTo` 写 | `apps/viewer/src/app.ts:961` 到 `apps/viewer/src/app.ts:980`、`apps/viewer/src/core/fly.ts:196` |
+| 相机每帧只被一个写者写 | 只有**上场会话**给得出第一人称采样（`ReplaySession.cameraSample()` 对下场的会话恒返回 `null`，`apps/viewer/src/replay/session.ts:161`）：有采样时把 `fly.drivesCamera` 与 `fly.allowMove` 置假并用 `applyToWithRoll` 写相机；否则由 `FlyCam.update` + `applyTo` 写 | `apps/viewer/src/app.ts:974` 到 `apps/viewer/src/app.ts:993`、`apps/viewer/src/core/fly.ts:196` |
 | 位姿角一律用度、弧度只在 `FlyCam` 内部 | `Pose.ang` 是度；`setPose` / `setWorld` 在边界处换算 | `apps/viewer/src/core/pose.ts:27`、`apps/viewer/src/core/fly.ts:207` |
 | 采样二分要求时间轴单调不减 | `.replay` 路径由 `t(i) = (i − preFrames) / tickrate` 与 `tickrate > 0` 保证（解析期校验） | `apps/viewer/src/replay/sampling.ts:26`、`apps/viewer/src/replay/shavit-replay.ts:350` |
 | 「Worker 坏掉」是单向的 | `ensureWorker` 一旦置 `workerBroken` 就不再重试，后续全部走主线程 | `apps/viewer/src/replay/importer.ts:71`、`apps/viewer/src/replay/importer.ts:91` |

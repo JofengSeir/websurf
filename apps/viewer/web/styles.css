@@ -552,6 +552,17 @@ select.field-select:focus { border-color: var(--text); }
 }
 .tl-zone-hl { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; }
 .tl-zone-hl > .tl-seg { position: absolute; top: 0; bottom: 0; background: rgba(230, 195, 92, 0.22); }
+/* **一次性「跳到这一跑」带**（owner 要求）：点过关记录的跳转按钮后，在滑杆上画出「你即将看到的
+   那一段」（落点 → 播报时刻），**播放头走过它就消失**（清除在 app 的帧循环里，见 `setJumpSpan`）。
+   与上面两条带刻意分开：**橙色实心描边 + 左端一道竖线**（起点一眼可见），带内用极淡的橙填充 ——
+   「人物活跃区间」是灰白斜纹、「悬停高亮」是橙色淡填充，三者叠在一起也分得清。
+   它单独一层、自己撑满整条（left/right: 0），**不参与** `.tl-zone-active` 的段池。 */
+.tl-zone-jump {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none;
+  background: rgba(230, 195, 92, 0.14);
+  border: 1px solid var(--accent);
+  border-left-width: 3px;
+}
 /* **悬停高亮**：鼠标停在右侧看板某一行上时，把该行对应的区间画到条上；移开即清除。
    故意用**橙色**（`--accent`）与上面那条灰白斜纹带区分：一个表示"正在看的人"，一个表示"鼠标指的人"。 */
 .tl-zone-ab {

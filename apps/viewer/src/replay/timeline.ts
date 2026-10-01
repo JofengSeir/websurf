@@ -63,6 +63,9 @@ export class Timeline {
   private hlSpans: Array<[number, number]> | null = null;
   private readonly activeZone: HTMLElement | null;
   private readonly hlZone: HTMLElement | null;
+  /** 一次性「跳到这一跑」区间带（见 setJumpSpan）；无内容时 display:none。 */
+  private readonly jumpZone: HTMLElement | null;
+  private jumpSpan: { from: number; to: number; title?: string } | null = null;
   /**
    * 本会话是否已有可播放的内容（记录 = 有轨道；录像 = 已载入整段）。
    * 为假时整条时间轴加 `hidden` 类、`refresh` 与快捷键直接返回。
@@ -120,6 +123,10 @@ export class Timeline {
       this.activeZone.title = '当前视角人物在这段录像里的活跃区间（他中途退出又进来的话，这里是分开的几段）';
       wrap.appendChild(this.activeZone);
     }
+    // 一次性「跳到这一跑」带：两条链路都建（记录会话用不到，但代价只是一个隐藏 div）
+    this.jumpZone = el('div', 'tl-zone tl-zone-jump');
+    this.jumpZone.style.display = 'none';
+    wrap.appendChild(this.jumpZone);
     this.hlZone = profile.personZones ? el('div', 'tl-zone tl-zone-hl') : null;
     if (this.hlZone) {
       this.hlZone.style.display = 'none';
@@ -355,7 +362,7 @@ export class Timeline {
    * 设置**当前视角人物**的活跃区间（秒，整场时间轴口径，**可多段**）；传 `null` / 空数组表示不画。
    * 仅 `personZones` 档使用。
    *
-   * 为什么是列表：同一个人可能**中途退出又进来**（`userinfo` 更新流里是两段在场），
+   * 为什么是列表：同一个人会**中途退出又进来**（`userinfo` 更新流里是两段在场），
    * 压成一段连贯区间就把「他退过服」这件事抹掉了 —— 段与段之间必须留断口。
    */
   setActiveSpan(spans: Array<[number, number]> | null): void {
@@ -365,6 +372,54 @@ export class Timeline {
   /** 设置**悬停高亮**区间（秒，可多段）；传 `null` 清除。由右侧看板的行悬停驱动。仅 `personZones` 档使用。 */
   setHighlight(spans: Array<[number, number]> | null): void {
     this.hlSpans = spans && spans.length > 0 ? spans : null;
+  }
+
+  /**
+   * **一次性的「跳到这一跑」区间带**（owner 要求）：点过关记录的跳转按钮时，在滑杆上画出
+   * 你即将看到的那一段 `[跳转落点, 播报时刻]`，**播放头走完这一段就自己消失**
+   * （清除由 app 的帧循环负责调 `setJumpSpan(null)`）。
+   *
+   * 与「人物活跃区间」的区别（两者能叠在一起，但语义不同）：
+   * 人物带说的是「这个人在整场里什么时候在场」（常驻，随视角人物变），
+   * 这条说的是「我刚点了这一跑、接下来这几分钟是它」（**一次性**，过掉就没）。
+   * `title` 带上关卡名与用时，鼠标停在带上就能读到「跳的是哪一跑」。
+   */
+  setJumpSpan(span: { from: number; to: number; title?: string } | null): void {
+    this.jumpSpan = span && span.to > span.from ? span : null;
+    this.refreshJumpZone();
+  }
+
+  /** 当前那一次性区间带（app 的帧循环据此判断「播放头是否已走过这一段」）。 */
+  get jumpSpanRange(): { from: number; to: number } | null {
+    return this.jumpSpan ? { from: this.jumpSpan.from, to: this.jumpSpan.to } : null;
+  }
+
+  /**
+   * 把一次性区间带按**当前播放窗口**换算成滑杆上的百分比。
+   *
+   * 单独一条刷新路径（而不是塞进 `refreshPersonZones`）：`setJumpSpan` 之后窗口未必已经变，
+   * 需要立刻画出来给用户反馈；而 `refresh()` 里每帧也会调它，窗口一变（拉 A-B / 换录像）就跟着走。
+   */
+  private refreshJumpZone(): void {
+    const zone = this.jumpZone;
+    if (!zone) return;
+    const span = this.jumpSpan;
+    const p = this.player;
+    const win = p.rangeStop - p.rangeStart;
+    if (!span || !(win > 0) || !(p.duration > 0)) {
+      zone.style.display = 'none';
+      return;
+    }
+    const left = clamp01((span.from - p.rangeStart) / win);
+    const right = clamp01((span.to - p.rangeStart) / win);
+    if (right - left <= 0.0005) {
+      zone.style.display = 'none';
+      return;
+    }
+    zone.style.display = '';
+    zone.title = span.title ?? '刚跳过来的那一跑（播放头走过它就消失）';
+    zone.style.left = (left * 100).toFixed(3) + '%';
+    zone.style.width = ((right - left) * 100).toFixed(3) + '%';
   }
 
   /** 刷新读数：播放按钮文案与 active 态、时间文本、帧文本、滑杆值（拖动中不回写）、区间读数，最后刷新叠加带。无内容时直接返回。 */
@@ -387,6 +442,7 @@ export class Timeline {
     }
     this.refreshZones();
     this.refreshPersonZones();
+    this.refreshJumpZone();
 
     if (this.rangeEl) {
       const inRange = p.rangeEnd > p.rangeStart && !p.isFullWindow;
@@ -403,7 +459,7 @@ export class Timeline {
     const p = this.player;
     const win = p.rangeStop - p.rangeStart;
     const dur = p.duration;
-    // 容器 + 按需增删的段元素：段数随会话给的区间列表变化（一个人可能进进出出好几回）。
+    // 容器 + 按需增删的段元素：段数随会话给的区间列表变化（一个人会进进出出好几回）。
     const sync = (container: HTMLElement | null, spans: Array<[number, number]> | null): void => {
       if (!container) return;
       if (!spans || spans.length === 0 || !(win > 0) || !(dur > 0)) {
