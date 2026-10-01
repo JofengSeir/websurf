@@ -1,6 +1,6 @@
 # implementation/core：地图、场景、相机与位姿
 
-> 覆盖 `apps/viewer/src/core/` 下的七个模块：`bsp.ts`（BSP 加载与 WASM 懒初始化）、`scene.ts`（three 场景与光照片段装配）、`fly.ts`（自由飞行相机）、`pose.ts`（位姿与角度再导出）、`constants.ts`（常量单点）、`dom.ts`（面板 DOM 构件）、`spawn.ts`（出生点解析）。
+> 覆盖 `apps/viewer/src/core/` 下的八个模块：`bsp.ts`（BSP 加载与 WASM 懒初始化）、`scene.ts`（three 场景与光照片段装配）、`fly.ts`（自由飞行相机）、`pose.ts`（位姿与角度再导出）、`constants.ts`（常量单点）、`dom.ts`（面板 DOM 构件）、`spawn.ts`（出生点解析）、`filekind.ts`（导入文件的类型识别）。
 
 ---
 
@@ -15,6 +15,7 @@
 | `apps/viewer/src/core/constants.ts` | 本工程常量单点（`EYE_STAND` 从共享层再导出） | `DEG2RAD`（`apps/viewer/src/core/constants.ts:24`）、`RAD2DEG`（`apps/viewer/src/core/constants.ts:25`）、`EYE_STAND`（`apps/viewer/src/core/constants.ts:35`）、`FOV`（`apps/viewer/src/core/constants.ts:38`）、`CAMERA_INIT_NEAR` / `CAMERA_INIT_FAR`（`apps/viewer/src/core/constants.ts:40`）、`CAMERA_FAR_SCALE`（`apps/viewer/src/core/constants.ts:43`）、`CAMERA_NEAR_MIN`（`apps/viewer/src/core/constants.ts:45`）、`NEAR_PROBE_DIST`（`apps/viewer/src/core/constants.ts:47`）、`NEAR_RATIO`（`apps/viewer/src/core/constants.ts:49`）、`BG_COLOR`（`apps/viewer/src/core/constants.ts:50`）、`FLY_SPEED` / `FLY_SPEED_FAST`（`apps/viewer/src/core/constants.ts:53`）、`MOUSE_SENS`（`apps/viewer/src/core/constants.ts:57`）、`PITCH_LIMIT`（`apps/viewer/src/core/constants.ts:58`）、`MOUSE_MAX_DELTA`（`apps/viewer/src/core/constants.ts:64`）、`PITCH_LIMIT_DEG`（`apps/viewer/src/core/constants.ts:67`） |
 | `apps/viewer/src/core/dom.ts` | 面板 DOM 构件：查询、建元素、分区、折叠组、数字/勾选输入行、按钮行、提示行 | `qs`（`apps/viewer/src/core/dom.ts:23`）、`el`（`apps/viewer/src/core/dom.ts:29`）、`section`（`apps/viewer/src/core/dom.ts:48`）、`foldBox`（`apps/viewer/src/core/dom.ts:64`）、`numField`（`apps/viewer/src/core/dom.ts:97`）、`checkField`（`apps/viewer/src/core/dom.ts:118`）、`buttonRow`（`apps/viewer/src/core/dom.ts:137`）、`noteLine`（`apps/viewer/src/core/dom.ts:157`） |
 | `apps/viewer/src/core/spawn.ts` | 出生点实体 → 初始视角（四级优先级），并与面板 ★ 标记同源 | 类型 `Box3Like`（`apps/viewer/src/core/spawn.ts:31`）、`SpawnSource`（`apps/viewer/src/core/spawn.ts:36`）、`ResolvedSpawn`（`apps/viewer/src/core/spawn.ts:38`）；函数 `spawnPointAng`（`apps/viewer/src/core/spawn.ts:57`）、`bboxVantagePos`（`apps/viewer/src/core/spawn.ts:65`）、`resolveInitialSpawn`（`apps/viewer/src/core/spawn.ts:96`） |
+| `apps/viewer/src/core/filekind.ts` | 导入文件的类型识别：只看文件头魔数（`VBSP` / `HL2DEMO\0` / `{SHAVITREPLAYFORMAT}`），不看扩展名；只依赖两个纯 TS 解析模块，可在 Node 自检里直接跑 | 类型 `FileKind`（`apps/viewer/src/core/filekind.ts:33`）；常量 `BSP_MAGIC`（`apps/viewer/src/core/filekind.ts:30`）、`FILE_KIND_LABEL`（`apps/viewer/src/core/filekind.ts:39`）；函数 `kindOfHead`（`apps/viewer/src/core/filekind.ts:54`）、`sniffFileKind`（`apps/viewer/src/core/filekind.ts:62`） |
 
 ## 关键流程与不变量
 
@@ -45,10 +46,10 @@
 1. **构造期 γ 写入落在着色器接受窗口之外**：`ViewerScene` 构造时调用 `setLightGamma(2.2)`（`apps/viewer/src/core/scene.ts:111`），而 `setLightGamma` 在 `value <= 0 || value > 1` 时直接返回（`apps/viewer/src/renderer/lightmap-shader.ts:1789`）⇒ 这次写入被忽略，γ 共享 uniform 保持自身初值 1；同一组五参数里其余四项都落在各自窗口内（`apps/viewer/src/core/scene.ts:110` 到 `apps/viewer/src/core/scene.ts:114`）。`apps/game/src/config.ts:228` 的默认 `lightGamma` 同为 2.2，是同一码值来源。
 2. **`ensureWasm` 把首次失败永久缓存**：模块级 `wasmReady` 只在为 null 时创建（`apps/viewer/src/core/bsp.ts:75`），被 reject 后没有任何重置点，之后每次调用都返回同一个 rejected Promise（`apps/viewer/src/core/bsp.ts:112`）⇒ 一次瞬时 fetch 失败后本次页面会话无法自愈，只能刷新。
 3. **`allowPointerLock` 是无写无读的字段**：声明在 `apps/viewer/src/core/fly.ts:68`，`attach` 的 click 处理只判 `locked`（`apps/viewer/src/core/fly.ts:88`），`apps/viewer/src` 内既无写入点也无读取点。
-4. **`onLockChange` 无赋值点**：字段声明与调用都在 `apps/viewer/src/core/fly.ts:80` 与 `apps/viewer/src/core/fly.ts:104`，本工程只给 `FlyCam` 赋过 `onLockError`（`apps/viewer/src/app.ts:61`）⇒ 锁定状态变化回调永不触发。
+4. **`onLockChange` 无赋值点**：字段声明与调用都在 `apps/viewer/src/core/fly.ts:80` 与 `apps/viewer/src/core/fly.ts:104`，本工程只给 `FlyCam` 赋过 `onLockError`（`apps/viewer/src/app.ts:74`）⇒ 锁定状态变化回调永不触发。
 5. **`core/pose.ts` 的两个函数零调用点**：`pitchClampedRad`（`apps/viewer/src/core/pose.ts:36`）与 `eyeHeight`（`apps/viewer/src/core/pose.ts:47`）在 `apps/viewer/src` 内无调用者——限幅与眼高分别由 `FlyCam.update` / `setPose` / `setWorld` 与 `FlyCam.writeCamera` / `applyToWithRoll` 各自实现（`apps/viewer/src/core/fly.ts:172`、`apps/viewer/src/core/fly.ts:203`）。
 6. **`RAD2DEG` 在 `apps/viewer/src` 内零调用点**：`apps/viewer/src/core/constants.ts:25` 导出后无人消费（本工程只有度→弧度的单向换算需求）。
 7. **`ViewerScene.model` getter 零调用点**：`apps/viewer/src/core/scene.ts:141` 暴露的只读地图根在本工程内没有读取者（`worldBox` 走内部 `modelRoot`，回放可视化走 `add` / `remove`）。
-8. **`numField` 把空串当合法 0**：`Number('')` 得 0 且 `Number.isFinite(0)` 为真（`apps/viewer/src/core/dom.ts:107`），于是清空输入框会走有效分支把 0 写进变换；两个消费点都只在非有限值时提前返回（`apps/viewer/src/replay/panel.ts:334`），因此空串的语义等同「把该分量设为 0」。
+8. **`numField` 把空串当合法 0**：`Number('')` 得 0 且 `Number.isFinite(0)` 为真（`apps/viewer/src/core/dom.ts:107`），于是清空输入框会走有效分支把 0 写进变换；两个消费点都只在非有限值时提前返回（`apps/viewer/src/replay/panel.ts:367`），因此空串的语义等同「把该分量设为 0」。
 9. **`optimizeScene` 的选块包围盒只统计部分 Mesh**：`worldBox` 只累计「材质不是数组且存在、有 `position` 属性」的 Mesh（`apps/viewer/src/core/scene.ts:368`、`apps/viewer/src/core/scene.ts:384`），被搬进 `keptMeshes` 的数组材质 / 缺失材质 Mesh 不参与统计（`apps/viewer/src/core/scene.ts:377`）⇒ 块边长由子集推出，极端地图（大量数组材质 Mesh）下块数与目标区间会有偏差。
 10. **回退脚本加载没有超时**：第 ③ 条取值路径用 `loadScript` 动态插 `<script>` 并等 `onload` / `onerror`（`apps/viewer/src/core/bsp.ts:52` 到 `apps/viewer/src/core/bsp.ts:60`）；两个事件都没发生时该 Promise 不结算，`ensureWasm` 的 await 会一直挂着（没有超时分支），且插入的 `<script>` 标签在成功路径上也不移除（`apps/viewer/src/core/bsp.ts:58`）。

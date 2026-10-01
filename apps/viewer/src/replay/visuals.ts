@@ -13,8 +13,8 @@
  *   幽灵受 `showGhost`，三者的位姿/可见性都再与 `Track.visible` 相与；只有幽灵会因
  *   「第一人称且正是跟随目标」额外隐藏（它贴在相机上会挡满屏），轨迹线、tick 点与起终点标记不受影响。
  *
- * 交互方：`apps/viewer/src/app.ts` 构造唯一实例并在 `syncTracks` 里调 `setTracks`、
- * 在渲染循环里每帧调 `update`；`apps/viewer/src/replay/timeline.ts` 的三个复选框经
+ * 交互方：每个回放会话（`apps/viewer/src/replay/session.ts` 的 `ReplaySession`）持有一个实例，
+ * 由会话在轨道变化时调 `setTracks`、在帧循环里每帧调 `update`；`Timeline` 的三个复选框经
  * `setTrailVisible` / `setGhostVisible` / `setTickNodesVisible` 写三个开关位。
  */
 
@@ -48,16 +48,45 @@ export class ReplayVisuals {
   /**
    * **按轨道的 tick 点开关**（覆写全局 `showTickNodes`）。
    *
-   * 为什么需要它：「录像」页与「录像」页共用同一个 `ReplayVisuals`，而 `showTickNodes` 是
-   * **全局单份** —— 在录像页关掉 tick 点，录像页的人物也跟着没了（owner 实测）。
-   * 这里让每条轨道可以有自己的取值；录像页按人物逐个设置，录像页继续用全局开关。
+   * 为什么需要它：`showTickNodes` 是**本实例内全局单份**的，而录像会话按人物逐个开关
+   * tick 点（详情里的复选框）—— 没有这条覆盖，「关掉某一个人的点」会把本会话全部轨道的
+   * 点一起关掉。记录会话继续用全局开关（它那条时间轴上的复选框）。
+   * 两个会话各有自己的实例，故两边即使轨道 id 重名（都从 `track-1` 起）也不会串。
    */
   private readonly tickByTrack = new Map<string, boolean>();
 
   /** 已建对象表，下标与 `setTracks` 传入的顺序一致；`update` 靠 `trackId` 找回对应项。 */
   private objects: TrackObjects[] = [];
 
+  /**
+   * **本会话是否上场**。
+   *
+   * 记录（`.replay`）与录像（`.dem`）各持一个实例、各自只建自己那条链路的轨道对象，两个实例
+   * 的对象都留在同一个 `three` 场景里；切换 tab 只改这个开关，**不销毁另一边的几何**
+   * （切回来即刻可见，也不必为几十万采样点重建 BufferGeometry）。
+   * 为假时 `update` 直接把全部对象熄灭后返回。
+   */
+  private active = true;
+
   constructor(private readonly scene: ViewerScene) {}
+
+  /** 本会话上场 / 下场；上场时立刻按当前采样重算一次显隐，不等下一帧。 */
+  setActive(on: boolean, samples?: readonly TrackSample[], mode: PlayMode = 'first', followId: string | null = null): void {
+    this.active = on;
+    if (on) this.update(samples ?? [], mode, followId);
+    else this.hideAll();
+  }
+
+  /** 把本会话的全部对象熄灭（下场时调用）。 */
+  private hideAll(): void {
+    for (const o of this.objects) {
+      o.trail.visible = false;
+      o.tickNodes.visible = false;
+      o.ghost.visible = false;
+      o.startMark.visible = false;
+      o.endMark.visible = false;
+    }
+  }
 
   /** 按传入顺序整体重建：先 `clear` 再逐条建。`Clip.count = 0` 的轨道被跳过（建不出几何）。 */
   setTracks(tracks: readonly Track[]): void {
@@ -68,6 +97,7 @@ export class ReplayVisuals {
       for (const o of [objs.trail, objs.tickNodes, objs.ghost, objs.startMark, objs.endMark]) this.scene.add(o);
       this.objects.push(objs);
     }
+    if (!this.active) this.hideAll();
   }
 
   /**
@@ -76,11 +106,18 @@ export class ReplayVisuals {
    * 幽灵旋转用 `'YXZ'` 序（与第一人称相机一致），三轴角度都乘 `DEG2RAD`。
    */
   update(samples: readonly TrackSample[], mode: PlayMode, followId: string | null): void {
+    if (!this.active) {
+      this.hideAll();
+      return;
+    }
     for (const o of this.objects) {
       const entry = samples.find((s) => s.track.id === o.trackId);
       const visible = entry ? entry.track.visible : true;
       o.trail.visible = this.showTrail && visible;
-      o.tickNodes.visible = (this.tickByTrack.get(o.trackId) ?? this.showTickNodes) && visible;
+      // **总开关是权威**：`showTickNodes`（时间轴「tick 点」复选框）与「这条轨道自己有没有被关掉」
+      // 是**相与**关系。早先写成 `tickByTrack.get(...) ?? showTickNodes`（覆写），而录像会话每次切人都会
+      // 写一条 per-track 的「显示」⇒ 总开关**永远轮不到**生效，那个复选框点了没反应（owner 实测：像装饰品）。
+      o.tickNodes.visible = this.showTickNodes && (this.tickByTrack.get(o.trackId) ?? true) && visible;
       o.startMark.visible = visible;
       o.endMark.visible = visible;
 

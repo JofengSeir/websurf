@@ -264,26 +264,16 @@ export interface FlattenOptions {
 export let flatDropIndex = -1;
 
 /**
- * 实验开关：展平排序改用 `demoinfocs-golang` v3 的「优先级升序 + 交换式选择」。
+ * **曾经的实验开关「运动优先（实验展平顺序）」已删除**（owner：用不上了）。
  *
- * **已被官方 SDK 证伪，勿用。** `source-sdk-2013` 的 `src/public/dt_common.h` 对
- * `SPROP_CHANGES_OFTEN`（`1<<10`）的注释写得很明确：
- *
- * ` `r
- * // this is an often changed field, moved to head of sendtable so it gets a small index
- * ` `r
- *
- * ⇒ 引擎**就是把这类属性搬到发送表头部**（即本工程缺省顺序）；权威实现那套「按优先级升序、
- * 排到最后」是 **CS:GO 的 protobuf 扩展**（同一 SDK 的 `dt_send.h` 里 `SendProp` **根本没有
- * priority 字段**）。实测也印证：改用该顺序后「类别基线逐位吻合」从 7/7 掉到 5/7。
- * 保留此开关仅供对照复现。
+ * 它当时把展平排序换成 `demoinfocs-golang` v3 的「优先级升序 + 交换式选择」（即把
+ * `SPROP_CHANGES_OFTEN` 排到**最后**）。该顺序已被官方 SDK 证伪：`source-sdk-2013` 的
+ * `src/public/dt_common.h` 对 `SPROP_CHANGES_OFTEN`（`1<<10`）写明「often changed field,
+ * moved to head of sendtable so it gets a small index」⇒ 引擎**就是把这类属性搬到发送表头部**
+ * （即本工程现在的唯一顺序）；权威实现那套「按优先级升序、排到最后」是 CS:GO 的 protobuf
+ * 扩展（同一 SDK 的 `dt_send.h` 里 `SendProp` 没有 priority 字段）。实测同样印证：改用该顺序
+ * 后「类别基线逐位吻合」从 7/7 掉到 5/7。开关与其分支一并删除后，展平顺序只剩这一条确定路径。
  */
-export let altPriorityOrder = false;
-
-/** 设置实验展平顺序（见 ltPriorityOrder）。 */
-export function setAltPriorityOrder(v: boolean): void {
-  altPriorityOrder = v;
-}
 
 /** 设置要删除的展平项下标（见 `flatDropIndex`）。 */
 export function setFlatDropIndex(v: number): void {
@@ -505,33 +495,6 @@ export function flattenSendTable(
         flat[placed] = flat[i];
         flat[i] = tmp;
         placed++;
-      }
-    }
-  }
-  // **实验开关**（缺省关，见 `altPriorityOrder`）：换成权威实现的「优先级升序 + 交换式选择」，
-  // 即 `SPROP_CHANGES_OFTEN` 排**最后**。实测它让实体包围盒变得各不相同且三维都有跨度（更像真运动），
-  // 但会把「类别基线逐位吻合」从 7/7 打到 5/7 —— 故只在用户显式打开时启用，默认路径不变。
-  if (altPriorityOrder) {
-    const prios = new Set<number>([64]);
-    for (const e of flat) prios.add(e.prop.priority ?? 0);
-    const sorted = [...prios].sort((a, b) => a - b);
-    let start = 0;
-    for (const prio of sorted) {
-      for (;;) {
-        let cp = start;
-        for (; cp < flat.length; cp++) {
-          const pr = flat[cp].prop;
-          if ((pr.priority ?? 0) === prio || (prio === 64 && (pr.flags & SPROP.CHANGES_OFTEN) !== 0)) {
-            if (start !== cp) {
-              const tmp = flat[start];
-              flat[start] = flat[cp];
-              flat[cp] = tmp;
-            }
-            start++;
-            break;
-          }
-        }
-        if (cp === flat.length) break;
       }
     }
   }

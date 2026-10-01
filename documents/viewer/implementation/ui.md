@@ -1,6 +1,6 @@
 # implementation/ui：HUD、面板与读数
 
-> 覆盖 `apps/viewer/src/ui/` 下的四个模块：`hud.ts`（HUD 与引导层）、`mapinfo.ts`（地图信息 + 出生点导航）、`replaymeta.ts`（记录信息条）、`telemetry.ts`（回放遥测 HUD）。
+> 覆盖 `apps/viewer/src/ui/` 下的六个模块：`hud.ts`（HUD 与引导层）、`mapinfo.ts`（地图信息 + 出生点导航）、`replaymeta.ts`（记录信息条）、`demometa.ts`（录像信息条）、`chatoverlay.ts`（画面左下角的对话浮层）、`telemetry.ts`（回放遥测 HUD）；另记底部 dock 的两层会话容器（记录层 = 信息条 + 时间轴，录像层 = 录像信息条 + 时间轴）与两条时间轴的能力档差异（UI 层的呈现口径）。
 
 ---
 
@@ -11,7 +11,9 @@
 | `apps/viewer/src/ui/hud.ts` | 三条状态行（`#pose` / `#bspStatus` / `#replayStatus`）、引导层、拖拽反馈、启动兜底卡、帮助浮层；元素句柄构造期取一次，取不到即 null 且各方法逐个判空 | 类 `Hud`（`apps/viewer/src/ui/hud.ts:21`） |
 | `apps/viewer/src/ui/mapinfo.ts` | 「地图」标签页内容：更换地图入口、光照模式分区、地图信息（核心三行 + 折叠统计明细）、出生点导航（推荐项 ★ 与跳转按钮） | 接口 `WorldBox`（`apps/viewer/src/ui/mapinfo.ts:25`）、类 `MapPanel`（`apps/viewer/src/ui/mapinfo.ts:44`） |
 | `apps/viewer/src/ui/replaymeta.ts` | 底部 dock 上层的记录信息条：把跟随轨道的 `Clip.meta` 渲染成「成绩 / 玩家 / 地图 / 风格 / tick / 帧段 / 日期 / 格式」标签值对 | 类 `ReplayMetaPanel`（`apps/viewer/src/ui/replaymeta.ts:16`） |
-| `apps/viewer/src/ui/telemetry.ts` | 速度双读数（横向 = 水平速度模、竖向 = 绝对值）与八键按键簇；按键簇挂 `#timeline` 右列，随时间轴一起显隐 | 类 `TelemetryHud`（`apps/viewer/src/ui/telemetry.ts:61`） |
+| `apps/viewer/src/ui/demometa.ts` | 底部 dock 录像层（`#session-demo`）的**录像信息条**：把 `DemoParseResult` 渲染成 `.dem` 独有的条面 12 项（服务器 / 地图 / 天空 / 协议 / 时长 / **录制机位** / 实体流 / 玩家 / 事件 / 聊天 / 字符串表 / 包；「天空」只在收到 `svc_ServerInfo` 时出现）；长的与逐项的（文件头 `serverName` vs `svc_ServerInfo.hostName`、用户消息逐 id 直方图、字符串表清单、包失败分类、实体流诊断、机位首末值）全进悬停 `title`；载入完成时整条重建，不进每帧刷新 | 类 `DemoMetaStrip`（`apps/viewer/src/ui/demometa.ts:33`）、接口 `DemoMetaInfo`（`apps/viewer/src/ui/demometa.ts:24`） |
+| `apps/viewer/src/ui/telemetry.ts` | 速度双读数（横向 = 水平速度模、竖向 = 绝对值）与八键按键簇；按键簇挂**记录会话**那条时间轴（`#timeline`）的右列，随时间轴一起显隐 | 类 `TelemetryHud`（`apps/viewer/src/ui/telemetry.ts:64`） |
+| `apps/viewer/src/ui/chatoverlay.ts` | 画面左下角的**对话浮层** `#chatOverlay`（录像页专属）：只显示「当前这一刻」附近的几条聊天 —— 出现 15 秒后淡出、同屏最多 5 条、短时间内超过 5 条就把最早那条快速丢出去；顺序自早到晚、**最底下是最晚的**。数据由 `app.ts` 的 `onParsed` 一次性推入（会话内秒），时间由帧循环推进 | 接口 `ChatLine`（`apps/viewer/src/ui/chatoverlay.ts:19`）、常量 `CHAT_LIFE_SEC`（`apps/viewer/src/ui/chatoverlay.ts:25`）/ `CHAT_MAX_LINES`（`apps/viewer/src/ui/chatoverlay.ts:27`）、纯函数 `visibleChat`（`apps/viewer/src/ui/chatoverlay.ts:38`）、类 `ChatOverlay`（`apps/viewer/src/ui/chatoverlay.ts:43`） |
 
 ## 关键流程与不变量
 
@@ -19,30 +21,58 @@
 |---|---|---|
 | 两条状态行的 flash 语义 | 先写临时文本，`ms` 后**只有该行仍是这条临时文本**时才回写持久文本；空串立即恢复持久内容 | `apps/viewer/src/ui/hud.ts:69` 到 `apps/viewer/src/ui/hud.ts:82`、`apps/viewer/src/ui/hud.ts:94` 到 `apps/viewer/src/ui/hud.ts:107` |
 | 持久写入会取消未决 flash | `setStatus` / `setReplayStatus` 先 `clearTimeout` 并把自己记为持久文本 | `apps/viewer/src/ui/hud.ts:57`、`apps/viewer/src/ui/hud.ts:87` |
-| 地图行旧摘要可回读 | `statusText()` 供换图失败时还原旧摘要 | `apps/viewer/src/ui/hud.ts:64`、`apps/viewer/src/app.ts:244` |
+| 地图行旧摘要可回读 | `statusText()` 供换图失败时还原旧摘要 | `apps/viewer/src/ui/hud.ts:64`、`apps/viewer/src/app.ts:498` |
 | 元素缺失不抛错 | 除 `showFatal` 需要两个元素同时存在外（`apps/viewer/src/ui/hud.ts:121`），其余方法一律 `?.` | `apps/viewer/src/ui/hud.ts:112`、`apps/viewer/src/ui/hud.ts:130`、`apps/viewer/src/ui/hud.ts:151` |
 | 帮助浮层关闭路径 | 顶栏「?」开关（阻止冒泡）、`#helpClose` 点击、全局 `keydown` 的 Escape 三条 | `apps/viewer/src/ui/hud.ts:40`、`apps/viewer/src/ui/hud.ts:44`、`apps/viewer/src/ui/hud.ts:45` |
 | 引导层错误分两行 | 人话一行 + 原始信息 `span.raw` 一行；清空用重设 `innerHTML` | `apps/viewer/src/ui/hud.ts:140` 到 `apps/viewer/src/ui/hud.ts:143` |
 | 光照模式分区初值 | `<select id="lightingMode">` 的两档写死 `baked` / `texture`，初值设 `'baked'`；变更经构造参数冒泡到 `ViewerScene.setLightingMode` | `apps/viewer/src/ui/mapinfo.ts:92` 到 `apps/viewer/src/ui/mapinfo.ts:99` |
 | 更换地图入口 | `<label for="bspFile">` 另挂 click 并 `preventDefault`，显式转发 `#bspFile.click()` | `apps/viewer/src/ui/mapinfo.ts:64` 到 `apps/viewer/src/ui/mapinfo.ts:67` |
 | 信息面板两段 | 核心三行（文件 / 出生点数 / 世界尺寸）常显，统计明细整段收进折叠容器 | `apps/viewer/src/ui/mapinfo.ts:144` 到 `apps/viewer/src/ui/mapinfo.ts:173` |
-| ★ 与初始视角同源 | 推荐下标由调用方传入（`apps/viewer/src/app.ts:262` 传 `resolveInitialSpawn` 的命中下标），缺省时回落 `result.primary` | `apps/viewer/src/ui/mapinfo.ts:132`、`apps/viewer/src/core/spawn.ts:96` |
+| ★ 与初始视角同源 | 推荐下标由调用方传入（`apps/viewer/src/app.ts:515` 到 `apps/viewer/src/app.ts:516` 传 `resolveInitialSpawn` 的命中下标），缺省时回落 `result.primary` | `apps/viewer/src/ui/mapinfo.ts:132`、`apps/viewer/src/core/spawn.ts:96` |
 | 出生点行内容 | 单行 pill：`#i classname`（推荐项带 ★）+「跳转」按钮；坐标与角度全量进 `title`，角度走 `spawnPointAng` | `apps/viewer/src/ui/mapinfo.ts:190`、`apps/viewer/src/ui/mapinfo.ts:195` 到 `apps/viewer/src/ui/mapinfo.ts:201` |
-| 信息条只重渲染、不进帧循环 | `setTracks` 在轨道增删 / 跟随切换时整条重建；无轨道或无 `meta` 时清空并加 `hidden` | `apps/viewer/src/ui/replaymeta.ts:24` 到 `apps/viewer/src/ui/replaymeta.ts:33` |
+| 信息条只重渲染、不进帧循环 | `setTracks` 在轨道增删 / 跟随切换时整条重建；无轨道或无 `meta` 时清空并加 `hidden`。**`.dem` 录像走的正是这条分支**——`.dem` 的 `Clip.meta` 恒为 `null`（详见 `documents/viewer/implementation/dem.md`），故载入 `.dem` 时信息条整条隐藏，不会出现凭空的「成绩 / 风格 / 格式」 | `apps/viewer/src/ui/replaymeta.ts:24` 到 `apps/viewer/src/ui/replaymeta.ts:33` |
 | 缺字段不造值 | `meta.time` / `steamIdDisplay` / `map` / `timestamp` 为空时对应项不出现 | `apps/viewer/src/ui/replaymeta.ts:58`、`apps/viewer/src/ui/replaymeta.ts:67`、`apps/viewer/src/ui/replaymeta.ts:70`、`apps/viewer/src/ui/replaymeta.ts:89` |
 | `zoneOffset` 只进 title | 亚 tick 份额非零时并入成绩项的悬停说明，不上条面 | `apps/viewer/src/ui/replaymeta.ts:59` 到 `apps/viewer/src/ui/replaymeta.ts:65` |
-| 速度读数口径 | 横向 = `Math.hypot(vel[0], vel[2])`、竖向 = `Math.abs(vel[1])`，都取 0 位小数；无速度数据时两格写 `—` | `apps/viewer/src/ui/telemetry.ts:104` 到 `apps/viewer/src/ui/telemetry.ts:110` |
-| 按键高亮判据 | 八键各自的 IN_* 位掩码与当前帧掩码相与非 0 即加 `on` 类；`buttons` 为 null 时全灭 | `apps/viewer/src/ui/telemetry.ts:29` 到 `apps/viewer/src/ui/telemetry.ts:40`、`apps/viewer/src/ui/telemetry.ts:113` |
-| 八键布局 | Q / W / E 上排、A / S / D 中排、蹲 1 格 + 跳 2 格下排（位置由 CSS 网格区决定） | `apps/viewer/src/ui/telemetry.ts:50` 到 `apps/viewer/src/ui/telemetry.ts:59`、`apps/viewer/web/styles.css:353` 到 `apps/viewer/web/styles.css:360` |
-| 速度行随轨道显隐 | `setTracks(false)` 给速度行父元素加 `hidden` 类 | `apps/viewer/src/ui/telemetry.ts:92` 到 `apps/viewer/src/ui/telemetry.ts:94` |
+| 两条信息条各一条、互不写对方 | 记录条 = `#replayMeta` + `ReplayMetaPanel`（读跟随轨道的 `Clip.meta`）；录像条 = `#demoInfo` + `DemoMetaStrip`（读 `DemoParseResult`，由 `apps/viewer/src/app.ts:135` 单独构造 —— 它不属于 `ReplaySession`，那个会话的 `meta` 恒为 null）。两条**位置同、视觉同**（共用 `.info-strip` 与 `.mi` / `.mk` / `.mv` 类名契约：条体在 `apps/viewer/web/styles.css:428`、左端 CMYK 调色卡条在 `apps/viewer/web/styles.css:435`），但**两个元素、两个写者** —— 谁也不会写对方的容器 | `apps/viewer/src/ui/demometa.ts:33`、`apps/viewer/src/ui/replaymeta.ts:16`、`apps/viewer/src/app.ts:135`、`apps/viewer/src/app.ts:390` 到 `apps/viewer/src/app.ts:397` |
+| 录像信息条只渲一次 | `set(info \| null)` 一次性重建整条（`replaceChildren`）：这些量在一份录像里解析完成即定，故不进每帧刷新；传 `null`（还没载入 / 解析失败）时清空内容并加 `hidden` 类，不摆一排空标签 | `apps/viewer/src/ui/demometa.ts:40` 到 `apps/viewer/src/ui/demometa.ts:48` |
+| 速度读数口径 | 横向 = `Math.hypot(vel[0], vel[2])`、竖向 = `Math.abs(vel[1])`，都取 0 位小数；无速度数据时两格写 `—` | `apps/viewer/src/ui/telemetry.ts:121` 到 `apps/viewer/src/ui/telemetry.ts:134` |
+| 按键高亮判据 | 八键各自的 IN_* 位掩码与当前帧掩码相与非 0 即加 `on` 类；`buttons` 为 null 时全灭 | `apps/viewer/src/ui/telemetry.ts:34` 到 `apps/viewer/src/ui/telemetry.ts:37`、`apps/viewer/src/ui/telemetry.ts:116` 到 `apps/viewer/src/ui/telemetry.ts:119` |
+| 八键布局 | Q / W / E 上排、A / S / D 中排、蹲 1 格 + 跳 2 格下排（位置由 CSS 网格区决定） | `apps/viewer/src/ui/telemetry.ts:52` 到 `apps/viewer/src/ui/telemetry.ts:62`、`apps/viewer/web/styles.css:606` 到 `apps/viewer/web/styles.css:628` |
+| 速度行随轨道显隐 | `setTracks(false)` 给速度行父元素加 `hidden` 类 | `apps/viewer/src/ui/telemetry.ts:108` 到 `apps/viewer/src/ui/telemetry.ts:111` |
+| 人物叠加带是**容器 + 多段** | `personZones` 档的两条带（`activeZone` = 当前视角人物活跃区间、`hlZone` = 悬停高亮）不再是「一个带一个区间」的元素：`setActiveSpan` / `setHighlight` 的入参是**区间数组**（`Array<[number, number]> \| null`），`refreshPersonZones` 按段数**增删 `.tl-seg` 子元素**并逐段写行内 left/width。为什么必须是列表：同一个人**中途退出又进来**时，压成一段连贯区间就把「他退过服」这件事抹掉了 —— 段与段之间必须留断口。颜色与描边随之从容器移到 `> .tl-seg` 上（容器只负责定位），`.tl-zone-active` / `.tl-zone-hl` 自身不吃指针事件（滑杆拖动要从带上起手）。记录会话不建这两条带（能力档 `personZones`），故 `.tl-seg` 只出现在录像档 | `apps/viewer/src/replay/timeline.ts:361`、`apps/viewer/src/replay/timeline.ts:366`、`apps/viewer/src/replay/timeline.ts:401` 到 `apps/viewer/src/replay/timeline.ts:439`、`apps/viewer/web/styles.css:544` 到 `apps/viewer/web/styles.css:554` |
+| 侧栏「对话」区**只做明暗**（面板回归整列滚动） | 录像面板 `#pane-demo` 的三节各带类名 —— `sec-load`（载入与看板）/ `sec-roster`（详情与花名册）/ `sec-chat`（对话）；三个类名**只作结构标记**，布局不再依赖它们（本轮的「网格分高、剩余全给对话」已按 owner 复核整段撤销）。`.dmp-chat` 回到 `display:flex; flex-direction:column`（**不设自己的滚动条**、不伸展）；对话行 `.dmp-chat-line` 默认压暗（`opacity: 0.32`），**已发生**的行由 `.dmp-chat-line.dmp-chat-on` 提到正常亮度，点亮判据在 `apps/viewer/src/replay/demopanel.ts` 的 `refreshChatState`（见 `documents/viewer/implementation/dem.md` 的「对话区与时间轴绑定」一行）。面板这一份是**完整留档**，「当前这一刻说了什么」由左下角浮层负责 | `apps/viewer/src/replay/demopanel.ts:362`、`apps/viewer/src/replay/demopanel.ts:374`、`apps/viewer/src/replay/demopanel.ts:383`、`apps/viewer/src/replay/demopanel.ts:939` 到 `apps/viewer/src/replay/demopanel.ts:944`、`apps/viewer/web/styles.css:964` 到 `apps/viewer/web/styles.css:965` |
+| 画面左下角的**对话浮层** | 元素 `#chatOverlay`（`class="chat-overlay"`，`aria-live="polite"`，位置在 `#telemetry` 与 `#topbar` 之间），由 `apps/viewer/src/ui/chatoverlay.ts` 的 `ChatOverlay` 填充，**不属于任何会话**（记录页上场时隐藏、数据留着）。规则：每条**出现 15 秒后淡出**（`CHAT_LIFE_SEC`）、**同屏最多 5 条**（`CHAT_MAX_LINES`）、短时间内超过 5 条就把**最早那条快速丢出去**（被挤掉 140 ms / 正常 420 ms）、**顺序自早到晚、最底下是最晚的**（`.chat-overlay` 是 `left:18px` + `bottom` 由 JS 按 `#dock` 高度写 ⇒ 内容**向上长**、新的一条从底部顶上来）；`pointer-events:none` 不挡画面上的鼠标操作。「该显示哪几条」抽成纯函数 `visibleChat`，可见性按帧差量增删 DOM（新增的那条下一帧才加 `co-on`，否则同帧不会触发过渡）。数据接线全在 `apps/viewer/src/app.ts`：构造 `apps/viewer/src/app.ts:140`、`onParsed` 一次性换算成会话内秒推入 `apps/viewer/src/app.ts:394`、帧循环 `apps/viewer/src/app.ts:812`、`setActiveSession` 里 `setShown` `apps/viewer/src/app.ts:161`。**注意一处有意的例外**：`.co-line` 用了 `transition: opacity 420ms linear` —— owner 要的「渐渐消失」只能用过渡表达；实测 `apps/viewer/web/styles.css` 里**只有这一处** `transition` 声明（CSS 注释里写明了理由） | `apps/viewer/web/index.html:79`、`apps/viewer/web/styles.css:979` 到 `apps/viewer/web/styles.css:982`、`apps/viewer/web/styles.css:984` 到 `apps/viewer/web/styles.css:991`、`apps/viewer/src/ui/chatoverlay.ts:38`、`apps/viewer/src/ui/chatoverlay.ts:61`、`apps/viewer/src/ui/chatoverlay.ts:71`、`apps/viewer/src/ui/chatoverlay.ts:79` |
+| 时间轴的**用户拖动通报面** | 两个会话各持一份 `Timeline`，类上新增两个对外成员：`onUserSeek?: () => void`（`apps/viewer/src/replay/timeline.ts:89`，拖动中的每一次 `input` 调一次）与只读的 `get scrubbing(): boolean`（`apps/viewer/src/replay/timeline.ts:350`，`pointerdown` 到 `pointerup` 之间为真）。判据只认**用户亲手拖滑杆** —— 程序内部的 `seek`（深链 / 载入回零 / A-B 循环）不触发该钩子；只有录像会话在构造期把它接到 `userSeekAt`（`apps/viewer/src/app.ts:322` 到 `apps/viewer/src/app.ts:324`）并在帧循环里读 `scrubbing` 算出「用户正在拖」这一帧（`apps/viewer/src/app.ts:872`），记录会话不接（它的链路没有「按区间换绑视角」这回事）。让开的是自动跟随的**方向**，见 `documents/viewer/implementation/app.md` 的「用户拖滑杆时自动跟随让开方向」一行 | `apps/viewer/src/replay/timeline.ts:89`、`apps/viewer/src/replay/timeline.ts:143`、`apps/viewer/src/replay/timeline.ts:350`、`apps/viewer/src/app.ts:322` 到 `apps/viewer/src/app.ts:324`、`apps/viewer/src/app.ts:872` |
+
+## 会话层与时间轴能力档
+
+底部 dock 从「一层共用」拆成**两个会话各占一层**：`#session-replay`（记录，`.replay`）内含信息条 `#replayMeta` 与时间轴 `#timeline`，`#session-demo`（录像，`.dem`）内含**录像信息条 `#demoInfo`** 与时间轴 `#timelineDemo`（DOM 见 `apps/viewer/web/index.html:130` 到 `apps/viewer/web/index.html:139`）；同一时刻只有带 `.active` 的那层可见。两条时间轴各是一个 `Timeline` 实例、各读自己那条 `ReplayPlayer`，彼此没有共享字段（结构见 `apps/viewer/src/replay/session.ts` 的 `ReplaySession`）。容器元素与时间轴根在 `apps/viewer/src/app.ts:100` 到 `apps/viewer/src/app.ts:115` 构造，`setActiveSession`（`apps/viewer/src/app.ts:154`）只加 / 去 `.active` 并调 `ReplaySession.activate` / `deactivate`——**下场只停表，不销毁轨道 / 时间 / 区间 / 显示开关**，切回来即刻续看。记录条由 `ReplaySession` 在构造期按 `metaRoot` 建（`apps/viewer/src/replay/session.ts:86`），录像条**不在会话里**：它是 `apps/viewer/src/app.ts:135` 直接构造的独立写者，内容由录像看板的 `onParsed` 推入。
+
+一条时间轴有哪些控件**在构造期由能力档定死**（`apps/viewer/src/replay/session.ts:43` 的 `SESSION_PROFILES` 是全仓唯一一处声明），不再有运行期开关，也不再有两套类名（`.tl-demo` / `.tl-only-replay`）：
+
+| 能力（`TimelineProfile`） | 记录（`.replay`） | 录像（`.dem`） |
+|---|---|---|
+| `clock` | `run`：秒计数，主时钟 0 = 起跑帧 | `wall`：`m:ss`，主时钟 0 = 录像开头 |
+| `frameStep` | 建帧步进按钮与「帧 · run」读数 | **不建**（`.dem` 没有定长帧序列与段位） |
+| `abRange` | 建 A 起点 / B 终点 / 整段三枚按钮与区间读数 | **不建**（长会话录像里没有意义） |
+| `runZone` | 画正式跑段高亮带（读 `Clip.meta.frameCount`） | **不画**（`.dem` 的 `Clip.meta` 恒 `null`） |
+| `personZones` | 不画 | 画「当前视角人物活跃区间」与悬停高亮两条带 —— 两条都做成**容器 + 按需增删的 `.tl-seg` 子元素**，同一个人中途退出又进来就是**分开的两段**（中间留断口） |
+
+**录像档没有事件标记层**：早先还有一档 `eventMarks`（把各玩家的阵亡时刻画成滑杆上的一排刻度，`DemoPanel.deathMarks()` → `Timeline.setMarks`，上限 300 枚），owner 判定不必要，整套已撤除 —— `TimelineProfile` 无该字段、`setMarks` 与 `.tl-marks` / `.tl-mark` 两条 CSS 规则均已删除，录像档比记录档**只多 `personZones` 的两条人物叠加带**。生命体征本身仍在用：花名册行贴队伍标签、时间读数后接「阵亡 N」，详情列生命区间与阵亡时刻（判据见 `documents/viewer/implementation/dem.md` 的 `trackFacts` 一行）。
+
+按键簇只挂在记录会话那条时间轴上：录像档的 `Clip.buttons` 恒 `null`（Source 只把录制者本人的输入写进 `usercmd`），故录像档**不建**按键簇，而不是建出来全灭。
+
+两条影带的**高度都定死 106px**（`apps/viewer/web/styles.css:491` 的 `.timeline { height: 106px; align-content: space-between }`，两条共用 `.timeline` 一个类）：定死是为了不再随内容折行 / 窗口宽度抖动高度，余量由 `space-between` 均匀摊到三行之间（不堆在底部）。数值取自 owner 的窗口宽度；窗口窄到控件折更多行时内容会高过这个定值（那时把 106 调大）。
+
+「tick 点」开关两条影带都管用：它是**总开关**，与「某条轨道自己被关掉」的逐条覆盖**相与**（`apps/viewer/src/replay/visuals.ts` 的 `showTickNodes && (tickByTrack.get(id) ?? true) && Track.visible`，见 `docs` 同篇已知缺口与 `replay.md` 的同名条目）—— 早先是逐条覆盖**取代**总开关，而录像会话每次切人都会写一条覆盖 ⇒ 录像页那个复选框点了没反应。另外**详情面板里原先那个逐人的「tick 采样点」复选框已撤除**（与这里的开关重复且互相打架，owner 要求移除），逐人显隐现在只保留 `DemoPanel.tickVisibleFor()`（`apps/viewer/src/replay/demopanel.ts:972`）这个默认值入口。
 
 ## 已知缺口
 
 1. **光照模式下拉只写不回填**：`<select>` 的初值是写死的字符串 `'baked'`（`apps/viewer/src/ui/mapinfo.ts:98`），而运行期真实模式由共享 uniform 侧决定（`apps/viewer/src/renderer/lightmap-shader.ts:442`）；任何绕过下拉的写入（例如外部脚本调用 `ViewerScene.setLightingMode`，`apps/viewer/src/core/scene.ts:245`）都不会回填到控件，下拉显示会与实况脱节。同一默认值在本工程存在两处来源（另一处是 `apps/viewer/src/core/scene.ts:65`）。
 2. **`MapPanel.spawnPoints` getter 零调用点**：`apps/viewer/src/ui/mapinfo.ts:114` 暴露的出生点快照（含 ★ 前缀与坐标）在 `apps/viewer/src` 内无读取者，跳转列表由 `renderSpawns` 直接建 DOM（`apps/viewer/src/ui/mapinfo.ts:176`）。
-3. **`setMap(null)` 的清空分支无调用点**：`setMap` 支持 `result` 为 null 的清空路径（`apps/viewer/src/ui/mapinfo.ts:130`、`apps/viewer/src/ui/mapinfo.ts:138`），而唯一调用点只传非 null（`apps/viewer/src/app.ts:262`）⇒ 面板没有「卸载地图」入口，`reloadWrap` 的隐藏分支（`apps/viewer/src/ui/mapinfo.ts:130`）同样不会被触发。
-4. **遥测 HUD 自算水平速度，与采样模块的导出重复**：`apps/viewer/src/ui/telemetry.ts:105` 现场算 `Math.hypot(s.vel[0], s.vel[2])`，而同一口径已有现成实现 `apps/viewer/src/replay/sampling.ts:87`（并被 `apps/viewer/src/replay/player.ts:239` 转发，两者都无调用点）⇒ 同一语义存在两份代码。
-5. **`setTracks` 对父元素做强转**：`apps/viewer/src/ui/telemetry.ts:93` 把 `this.horizEl.parentElement` 断言为 `HTMLElement` 后直接调 `classList`；容器已脱离文档或速度行未挂载时该断言为 null 会抛 TypeError。当前构造路径保证速度行已 `appendChild` 到传入容器（`apps/viewer/src/ui/telemetry.ts:75`），但调用方若传入脱离文档的元素（`apps/viewer/src/app.ts:174` 的兜底分支就是 `document.createElement`）则该前提不成立。
-6. **按键簇渲染八键，标签集含 Q / E**：`KEYS` 实测八项（`apps/viewer/src/ui/telemetry.ts:50` 到 `apps/viewer/src/ui/telemetry.ts:59`），与 CDP 冒烟脚本里「按键数 = 6、标签集为 {W,A,S,D,跳,蹲}」的断言不一致（测试侧见 `documents/viewer/implementation/scripts-and-test.md`），当前 UI 下该断言不成立。
+3. **`setMap(null)` 的清空路径只在启动空态被触发，导航里没有「卸载地图」入口**：`setMap` 支持 `result` 为 null 的清空路径（`apps/viewer/src/ui/mapinfo.ts:130`、`apps/viewer/src/ui/mapinfo.ts:138`），调用点共两处 —— 启动时先渲染一次「无地图」空态（`apps/viewer/src/app.ts:227` 传 `null`）与换图成功时传非 null（`apps/viewer/src/app.ts:516`）。故清空路径本身是活的（`reloadWrap` 的隐藏分支会被启动那次触发），缺的是**用户可点的卸载入口**：面板一旦载入过地图就回不到空态。（`apps/viewer/src/ui/mapinfo.ts:127` 的注释写「本仓当前唯一调用点只传非 null 的 `result`」，与 `apps/viewer/src/app.ts:227` 不符 —— 按 §6 只记录、未改源码。）
+4. **遥测 HUD 自算水平速度，与采样模块的导出重复**：`apps/viewer/src/ui/telemetry.ts:122` 现场算 `Math.hypot(s.vel[0], s.vel[2])`，而同一口径已有现成实现 `apps/viewer/src/replay/sampling.ts:87`（并被 `apps/viewer/src/replay/player.ts:292` 到 `apps/viewer/src/replay/player.ts:296` 转发，两者都无调用点）⇒ 同一语义存在两份代码。
+5. **`setTracks` 对父元素做强转**：`apps/viewer/src/ui/telemetry.ts:110` 把 `this.horizEl.parentElement` 断言为 `HTMLElement` 后直接调 `classList`；容器已脱离文档或速度行未挂载时该断言为 null 会抛 TypeError。当前构造路径保证速度行已 `appendChild` 到传入容器（`apps/viewer/src/ui/telemetry.ts:86`），但调用方若传入脱离文档的元素（`apps/viewer/src/app.ts:128` 的兜底分支就是 `document.createElement`）则该前提不成立。
+6. **按键簇渲染八键，标签集含 Q / E**：`KEYS` 实测八项（`apps/viewer/src/ui/telemetry.ts:53` 到 `apps/viewer/src/ui/telemetry.ts:62`），与 CDP 冒烟脚本里「按键数 = 6、标签集为 {W,A,S,D,跳,蹲}」的断言不一致（测试侧见 `documents/viewer/implementation/scripts-and-test.md`），当前 UI 下该断言不成立。
 7. **信息条自己重找跟随轨道**：`ReplayMetaPanel.setTracks` 在收到的轨道数组里按 `followId` 再查一次并回退第一条（`apps/viewer/src/ui/replaymeta.ts:25`），与 `TrackSet.follow` 的同一策略（`apps/viewer/src/replay/tracks.ts:92`）重复；两处若口径分叉，信息条会与第一人称相机跟随不同的轨道。
-8. **`el()` 的属性写入限制了 id 型契约**：面板里需要被外部查询的控件靠 `attrs.id` 落地（例：`apps/viewer/src/ui/mapinfo.ts:89` 的 `id: 'lightingMode'`、`apps/viewer/src/replay/panel.ts:147` 的三个平移输入），而 `el()` 对 `undefined` / `false` 值跳过、对 `true` 写空串（`apps/viewer/src/core/dom.ts:39` 到 `apps/viewer/src/core/dom.ts:42`）⇒ 传 `id: undefined` 时控件静默无 id，外部按 id 取值的路径（深链、冒烟脚本、外部脚本）会取到 null。
+8. **`el()` 的属性写入限制了 id 型契约**：面板里需要被外部查询的控件靠 `attrs.id` 落地（例：`apps/viewer/src/ui/mapinfo.ts:89` 的 `id: 'lightingMode'`、`apps/viewer/src/replay/panel.ts:158` 的三个平移输入），而 `el()` 对 `undefined` / `false` 值跳过、对 `true` 写空串（`apps/viewer/src/core/dom.ts:39` 到 `apps/viewer/src/core/dom.ts:42`）⇒ 传 `id: undefined` 时控件静默无 id，外部按 id 取值的路径（深链、冒烟脚本、外部脚本）会取到 null。

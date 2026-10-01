@@ -1,6 +1,6 @@
 # WebSurf-viewer 文档子树
 
-> 本子树只覆盖 `apps/viewer`（BSP 地图预览 + Shavit `.replay` 回放查看器）。全部结论以当前源码、构建脚本与配置为唯一来源；引用代码一律写成「相对仓库根路径:行号」并同时给出符号名。
+> 本子树只覆盖 `apps/viewer`（BSP 地图预览 + Shavit `.replay` 记录 / Source `.dem` 录像两条链路的回放查看器）。全部结论以当前源码、构建脚本与配置为唯一来源；引用代码一律写成「相对仓库根路径:行号」并同时给出符号名。
 > 术语：本工程**无权威物理**，只有「离线解析（`websurf-wasm-core`）」；不含「Worker 权威物理」与「主线程渲染物理（`predPhys`）」。
 
 ---
@@ -11,6 +11,7 @@
 |---|---|
 | `documents/viewer/overview.md` | 工程定位、目录职责、依赖方向、`package.json` 每个 script 的职责、启动链、由代码保证的不变量 |
 | `documents/viewer/sequences.md` | 启动时序、主循环一帧内的动作、主线程↔解析 Worker 的消息与载荷字段、异常与回退路径 |
+| `documents/viewer/replay-vs-dem.md` | 两条导入链路（Shavit `.replay` / Source `.dem`）的**产物与消费面差异**：`Clip` 字段权属矩阵、被缝在同一组契约上的位置清单（含文档与代码相互矛盾之处）、以及建议的分离契约（拆分依据） |
 | `documents/viewer/differences.md` | 与 `apps/debug`、`apps/game` 的**逐条实测**差异（渲染后端与布局、物理运行位置、共享状态通道、配置来源、产物形态、面板与 UI 结构、测试与门禁脚本） |
 | `documents/viewer/implementation/app.md` | 主线程装配入口 `apps/viewer/src/app.ts` 与 wasm 类型入口 `apps/viewer/src/wasm.d.ts` |
 | `documents/viewer/implementation/core.md` | `apps/viewer/src/core/**`：BSP 加载、场景、自由飞行相机、位姿、常量、DOM 构件、出生点解析 |
@@ -29,10 +30,10 @@
 
 | 入口 | 锚点 | 提供了什么 |
 |---|---|---|
-| 工程清单 | `apps/viewer/package.json:7` | 11 个 script、依赖面、引擎要求、dev 端口 8100 |
-| 主线程入口 | `apps/viewer/src/app.ts:33` | 画布获取、装配顺序、帧循环、对外 `globalThis.viewer` 接口 |
+| 工程清单 | `apps/viewer/package.json:7` | 12 个 script（含 `test:sessions` → `npm run test:sessions`：`apps/viewer/test/session-sep.mjs` 驱动的记录 / 录像两条链路**分离**端到端 CDP 回归，缺夹具 / 浏览器时 loud skip）、依赖面、引擎要求、dev 端口 8100 |
+| 主线程入口 | `apps/viewer/src/app.ts:48` | 画布获取、装配顺序、帧循环、对外 `globalThis.viewer` 接口 |
 | 地图加载 | `apps/viewer/src/core/bsp.ts:74` | `ensureWasm` 三条取值路径、`loadBspFile` 三步顺序 |
-| 记录面板 | `apps/viewer/src/replay/panel.ts:281` | 导入入口 `runImport`、规则持久化、映射切换与变换微调 |
+| 记录面板 | `apps/viewer/src/replay/panel.ts:311` | 导入入口 `runImport`、规则持久化、映射切换与变换微调 |
 | 解析 Worker | `apps/viewer/src/worker/main.ts:46` | `ctx.onmessage` → `handle` → 带 transfer 列表回包 |
 | WASM 导出层 | `apps/viewer/crates/wasm/src/lib.rs:339` | `BspProcessor::new` 与三个方法 |
 | 打包脚本 | `apps/viewer/scripts/build-dist.mjs:221` | single / multi 两种产物形态与保留清单 |
@@ -45,4 +46,5 @@
 1. `documents/viewer/overview.md` —— 先建立工程边界与构建面的整体认识。
 2. `documents/viewer/sequences.md` —— 再看「谁在什么时候调用谁、数据落在哪个结构上」。
 3. `documents/viewer/implementation/*.md` —— 逐主题看模块职责、导出清单与已知缺口；`replay.md` 是本工程体量最大的一条链路，建议在 `core.md` 之后读。
-4. `documents/viewer/differences.md` —— 最后读，用于把本工程与另两个工程区分开（每条差异都带两侧锚点，不做跨工程类推）。
+4. `documents/viewer/replay-vs-dem.md` —— 若要改「导入产物 → 展示」这一段（新增展示项、拆链路、动 `Clip` 契约），先读它：它把两条链路各自的产物与消费面、以及当前缝合点逐条钉死。
+5. `documents/viewer/differences.md` —— 最后读，用于把本工程与另两个工程区分开（每条差异都带两侧锚点，不做跨工程类推）。

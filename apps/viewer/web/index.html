@@ -49,7 +49,10 @@
       </div>
       <div class="gbtns">
         <label class="filebtn" for="bspFile">选择地图（.bsp）</label>
-        <label class="filebtn" for="replayFile">导入记录 / 录像（.replay / .dem）</label>
+        <!-- 这一枚不预设类型：选到的文件由 `apps/viewer/src/app.ts` 的 `routeFile` 按文件头魔数分派
+             （`.replay` → 记录页、`.dem` → 录像页）。它**不指向记录页的 #replayFile** —— 那会
+             把 `.dem` 一起导进记录页（旧缺陷）。 -->
+        <label class="filebtn" for="importFile">导入记录 / 录像（.replay / .dem）</label>
       </div>
       <div id="guideError"></div>
     </div>
@@ -68,10 +71,20 @@
   <!-- 回放遥测 HUD：速度读数挂本元素 `#telemetry`，按键簇挂 `#timeline` 右列（均由 `apps/viewer/src/ui/telemetry.ts` 填充；定位由 `apps/viewer/web/styles.css` 的 `.telemetry` 决定） -->
   <div id="telemetry" class="telemetry hidden"></div>
 
+  <!-- 画面左下角的**对话浮层** `#chatOverlay`：只显示当前时间点附近的几条聊天 —— 出现 15 秒后淡出、
+       同屏最多 5 条、短时间内超过 5 条就把最早那条快速丢出去；顺序自早到晚、**最底下是最晚的**
+       （容器贴着左下角按底边定位，新的一条从底部顶上来）。由 `apps/viewer/src/ui/chatoverlay.ts`
+       的 `ChatOverlay` 填充，数据源 = 录像解析出的 `DemoParseResult.chat`（每条带 tick）；
+       `bottom` 由它按 dock 高度动态让位（否则会被底部那条时间轴压住）。 -->
+  <div id="chatOverlay" class="chat-overlay" aria-live="polite"></div>
+
   <div id="topbar">
     <button class="iconbtn" id="helpBtn" type="button" title="操作帮助：键位 / 载入 / 播放基准">?</button>
     <button class="iconbtn" id="sidebarToggle" type="button" title="显示 / 隐藏右侧面板">面板</button>
     <input id="bspFile" type="file" accept=".bsp" />
+    <!-- 引导层「导入记录 / 录像」用的隐藏输入：类型由内容判定，不由 accept 决定去向
+         （`accept` 只影响系统对话框的默认过滤项）；`routeFile` 见 `apps/viewer/src/app.ts` -->
+    <input id="importFile" type="file" accept=".replay,.dem" />
   </div>
 
   <!-- 操作帮助浮层 `#help`（非模态）：`apps/viewer/src/ui/hud.ts` 给 `#helpClose` 挂点击监听，并挂全局 `keydown`，任意 Escape 关闭 -->
@@ -84,7 +97,7 @@
     </div>
     <div class="help-sec">
       <div class="help-h">载入地图与记录 / 录像</div>
-      <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。记录（.replay）：记录页「选择记录文件…」、拖入 <code>.replay</code>（自动切到记录页）；录像（.dem）：录像页「载入录像」；URL 深链 <code>?bsp=&amp;replay=</code> 可直接打开配套资源。导入后底部显示「记录信息条」——<code>.replay</code> 头部元信息：成绩 / 玩家 / 地图 / 轨道 / tick / 帧段 / 日期。</p>
+      <p>地图：引导层按钮；加载后地图页顶部「更换地图」；或把 <code>.bsp</code> 拖进窗口（换图会重建场景）。记录 / 录像：引导层「导入记录 / 录像」、记录页「选择记录文件…」（只收 <code>.replay</code>）、录像页「载入录像（.dem）」、或直接把文件拖进窗口 —— 四种入口都按**文件内容**分派，误选也会自动切到对应页面；URL 深链 <code>?bsp=&amp;replay=</code> 可直接打开配套资源。导入后底部显示「记录信息条」——<code>.replay</code> 头部元信息：成绩 / 玩家 / 地图 / 轨道 / tick / 帧段 / 日期；载入录像则显示「录像信息条」——<code>.dem</code> 独有事实：服务器 / 天空盒 / 协议 / 时长 / 事件 / 实体流规模 / 字符串表 / 包走读（逐项的诊断细节在悬停提示里）。</p>
     </div>
     <div class="help-sec">
       <div class="help-h">播放基准与坐标映射</div>
@@ -108,11 +121,21 @@
     <div class="tabpane" id="pane-demo"></div>
   </aside>
 
-  <!-- 底部 dock `#dock`：记录信息条 `#replayMeta`（`.replay` 头部元信息）+ 时间轴容器 `#timeline` -->
+  <!-- 底部 dock `#dock`：**两个回放会话各占一层**，同一时刻只有一层 `.active` 可见。
+       记录（`.replay`）层 = 信息条 `#replayMeta`（`.replay` 文件头）+ 时间轴 `#timeline`；
+       录像（`.dem`）层 = 信息条 `#demoInfo`（`.dem` 独有事实：服务器 / 天空盒 / 协议 / 事件 / 实体流 / 字符串表 / 包走读）+ 时间轴 `#timelineDemo`。
+       两条信息条位置与视觉相同（共用 `.info-strip` 类），但**是各自会话的元素、各由自己的写者填**（`ReplayMetaPanel` / `DemoMetaStrip`）；
+       两层各持自己的播放器 / 轨道 / 3D 呈现 / 时间轴控件，互不共享状态（见 `replay/session.ts`）。
+       注：`#timeline` 这个 id 是记录会话时间轴的稳定锚点（外部脚本与冒烟脚本按它断言）。 -->
   <div id="dock">
-    <div id="replayMeta" class="hidden replay-meta"></div>
-    <!-- `#timeline` 的内容由 `apps/viewer/src/replay/timeline.ts` 构建 -->
-    <div id="timeline" class="hidden"></div>
+    <div id="session-replay" class="session-pane active">
+      <div id="replayMeta" class="hidden info-strip"></div>
+      <div id="timeline" class="timeline hidden"></div>
+    </div>
+    <div id="session-demo" class="session-pane">
+      <div id="demoInfo" class="hidden info-strip"></div>
+      <div id="timelineDemo" class="timeline hidden"></div>
+    </div>
   </div>
 </div>
 
