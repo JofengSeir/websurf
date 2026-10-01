@@ -1,6 +1,6 @@
 # implementation：renderer
 
-主题对应 `apps/debug/src/renderer/**`，共九个模块：主渲染器 `RendererMain` 与八个子模块（相机、雾、光照、lightmap 着色器、LOD 剔除、路径记录、准星射线、碰撞可视化）。
+主题对应 `apps/debug/src/renderer/**` 与渲染共享层的环境/着色器模块，共九个模块：本目录六个（主渲染器 `RendererMain` 与五个子模块——相机、LOD 剔除、路径记录、准星射线、碰撞可视化），渲染共享层三个（lightmap 着色器、光照管理器、雾管理器——2026-10-02 起下沉到 `src/renderer-shared/{shader,environment}/`，本目录不再持有）。
 
 ## 模块职责
 
@@ -32,13 +32,13 @@
 
 导出 `PlaneInspector`（`apps/debug/src/renderer/plane-inspector.ts:50`），唯一公开方法是 `cast`（`:71`）：先对 GLB 场景做 mesh 射线，再对 solid / ladder brush 求交，最后测传送触发器 AABB。常量 `DEFAULT_MAX_DISTANCE`（`:38`）与 `EPS`（`:44`）；AABB 求交在 `apps/debug/src/renderer/plane-inspector.ts:403`。
 
-**`apps/debug/src/renderer/light-manager.ts`**
+**`src/renderer-shared/environment/light-manager.ts`**（渲染共享层，2026-10-02 自本工程 `apps/debug/src/renderer/light-manager.ts` 下沉；入参类型由应用侧 `RuntimeConfig` 换为文件内结构等价的 `ConfigWithLighting`——共享层不反向依赖 `apps/**`，调用点与逻辑零改动）
 
-导出 `LightingUpdateParams`（`apps/debug/src/renderer/light-manager.ts:36`）与 `LightManager`（`:62`）。公开面：`applyLights`（`:101`）、`extractPointLights`（`:145`）、`updatePointLights`（`:198`）、`updateLighting`（`:252`）、`syncFromConfig`（`:295`）、`activePointLightCount`（`:330`）、`dispose`（`:341`）。上限 `MAX_POINT_LIGHTS` 与平行光距离 `DIR_LIGHT_DISTANCE` 在 `apps/debug/src/renderer/light-manager.ts:50` / `:53`。
+导出 `LightingUpdateParams`（`src/renderer-shared/environment/light-manager.ts:61`）与 `LightManager`（`:87`）。公开面：`applyLights`（`:126`）、`extractPointLights`（`:170`）、`updatePointLights`（`:223`）、`updateLighting`（`:277`）、`syncFromConfig`（`:320`）、`activePointLightCount`（`:355`）、`dispose`（`:366`）。上限 `MAX_POINT_LIGHTS` 与平行光距离 `DIR_LIGHT_DISTANCE` 在 `src/renderer-shared/environment/light-manager.ts:75` / `:78`。
 
-**`apps/debug/src/renderer/fog-manager.ts`**
+**`src/renderer-shared/environment/fog-manager.ts`**（渲染共享层，2026-10-02 自本工程 `apps/debug/src/renderer/fog-manager.ts` 原样下沉；本类在全仓无装配点——没有文件 import 它）
 
-导出 `FogManager`（`apps/debug/src/renderer/fog-manager.ts:18`）：`init`（`:37`）、`update`（`:58`）、`setColor`（`:77`）、`setEnabled`（`:87`）、`isEnabled`（`:95`）、`currentSceneRadius`（`:100`）、`dispose`（`:105`）；默认雾色 `DEFAULT_FOG_COLOR` 在 `apps/debug/src/renderer/fog-manager.ts:12`。
+导出 `FogManager`（`src/renderer-shared/environment/fog-manager.ts:21`）：`init`（`:40`）、`update`（`:61`）、`setColor`（`:80`）、`setEnabled`（`:90`）、`isEnabled`（`:98`）、`currentSceneRadius`（`:103`）、`dispose`（`:108`）；默认雾色 `DEFAULT_FOG_COLOR` 在 `src/renderer-shared/environment/fog-manager.ts:15`。
 
 **`apps/debug/src/renderer/camera-controller.ts`**
 

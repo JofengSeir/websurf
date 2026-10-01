@@ -33,7 +33,7 @@
 | [`debug/sequences.md`](debug/sequences.md) | 启动时序与一帧内的链路、线程间消息、异常与回退路径 |
 | [`debug/differences.md`](debug/differences.md) | 与 `apps/game`、`apps/viewer` 的实测差异（两侧锚点） |
 | [`debug/implementation/app.md`](debug/implementation/app.md) | 根级装配模块：面板接线、调试 API、配置树、计时状态机、默认纹理包、主线程 wasm 装载 |
-| [`debug/implementation/renderer.md`](debug/implementation/renderer.md) | `renderer/**` + 渲染共享层着色器：主线程渲染循环与七个子管理器（lightmap 着色器已下沉 `src/renderer-shared/`） |
+| [`debug/implementation/renderer.md`](debug/implementation/renderer.md) | `renderer/**` + 渲染共享层（shader / environment）：主线程渲染循环与五个子管理器（lightmap 着色器与雾/光照管理器已下沉 `src/renderer-shared/`） |
 | [`debug/implementation/worker.md`](debug/implementation/worker.md) | `worker/**`：Worker 入口装配、消息类型面、物理面板协调器 |
 | [`debug/implementation/input.md`](debug/implementation/input.md) | `input/**`：键鼠采集、消息桥、录制/回放器 |
 | [`debug/implementation/world.md`](debug/implementation/world.md) | `world/**`：brush 映射、传送点数据层、出生点加载器、WASM JSON 类型面 |
