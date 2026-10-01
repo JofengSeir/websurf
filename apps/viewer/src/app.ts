@@ -26,7 +26,6 @@ import { ReplayImporter } from './replay/importer.js';
 import { ReplayPanel } from './replay/panel.js';
 import { DemoPanel } from './replay/demopanel.js';
 import { ReplayPlayer } from './replay/player.js';
-import { guessKeys } from './replay/keyguess.js';
 import { ReplayVisuals } from './replay/visuals.js';
 import { Timeline } from './replay/timeline.js';
 import { looksLikeShavitReplay, SHAVIT_SNIFF_BYTES } from './replay/shavit-replay.js';
@@ -91,7 +90,10 @@ for (const tab of Array.from(document.querySelectorAll<HTMLButtonElement>('.tab'
     if (name === 'replay' && sidebarEl?.classList.contains('hidden')) {
       sidebarEl.classList.remove('hidden');
       sidebarToggle?.classList.add('active');
-      timelineEl?.classList.remove('full');
+      // 侧栏重新出现时把「收起态」的两处加宽一并还原：dock 全宽（与 sidebarToggle 的
+      // toggle 成对）与速度 HUD 的全屏居中。原先误写 `timelineEl`（它从未加过 `full`），
+      // 导致 dock 保持全宽、与重新出现的侧栏在右下角重叠。
+      dockEl?.classList.remove('full');
       telemetryEl?.classList.remove('full');
     }
     // **记下当前 tab**：时间轴 / 3D 可视化 / 信息条只喂**当前 tab 自己的轨道**。
@@ -500,7 +502,7 @@ bspFileInput?.addEventListener('change', () => {
 // 首访卡按钮不需要 click 转发：它们是 `label[for]`，浏览器原生把点击交给对应 input
 // （原先这里挂过一个 `#guideBtn` 监听，那个 id 在页面里不存在，属死链）。
 
-// ── 拖拽：.bsp 加载地图，.replay 载入录像 ───────────────────────────
+// ── 拖拽：.bsp 加载地图，.replay 载入记录，.dem 载入录像 ──────────────
 window.addEventListener('dragover', (e) => {
   e.preventDefault();
   hud.setDropActive(true);
@@ -523,7 +525,13 @@ window.addEventListener('drop', (e) => {
     void replayPanel?.loadFile(file);
     return;
   }
-  const msg = `未加载：${file.name} 不是 .bsp / .replay（viewer 只支持 Shavit 原生 .replay 录像）`;
+  if (/\.dem$/i.test(file.name)) {
+    // Source 演示录像：转发给「录像」面板（与面板内文件输入同一入口 `DemoPanel.load`）
+    activateTab('demo');
+    void demoPanel?.load(file);
+    return;
+  }
+  const msg = `未加载：${file.name} 不是 .bsp / .replay / .dem（viewer 支持 Shavit .replay 与 Source .dem）`;
   if (!scene.hasModel()) hud.showGuideError(msg);
   else hud.flashStatus(msg, 5000);
 });
@@ -745,18 +753,13 @@ function frame(now: number): void {
     const follow = player.tracks.follow;
     const frameButtons = follow?.clip.buttons ?? null;
     const fi = player.indexAt(player.time);
-    // **按键来源分两条，显示位只有一个**：
-    //   · 记录（`.replay`）带**真实**按键位 ⇒ 直接用 `clip.buttons[fi]`；
-    //   · 录像（`.dem`）在 `democlip.ts` 里被置成 `buttons: null`（引擎只记录录制者本人的
-    //     输入流，而本工程的录像多由观察者机器人录制，实测 `dem_usercmd` 0 条）
-    //     ⇒ 这里**由运动学反推**顶上，见 `apps/viewer/src/replay/keyguess.ts`。
-    // 反推的语义是「看起来在按什么」，不是「确实按了什么」；它只能得出方向键与跳跃，
-    // 得不出鼠标键（那不改变速度矢量），故对应位恒不亮。
-    const guessed =
-      !frameButtons && follow
-        ? guessKeys(fi, follow.clip.pos, follow.clip.ang, follow.clip.t)
-        : null;
-    telemetry.update(player.sample(), frameButtons ? frameButtons[fi] ?? null : guessed);  }
+    // **按键只有一条来源：`clip.buttons` 真值**。记录（`.replay`）逐帧带真实按键位；
+    // 录像（`.dem`）在 `democlip.ts` 里置 `buttons: null` 且**不做任何反推**——Source 引擎
+    // 只把录制者本人的输入写进 `dem_usercmd`（观察者/SourceTV 录像实测 0 条），其他玩家的
+    // 原始按键不在文件里，由运动学「猜」出来的按键与真实输入存在系统性偏差（owner 裁定
+    // 撤除：宁可不显示，也不显示猜的，见 AGENTS.md §7.3 #88/#92）。无真值时按键簇整组熄灭。
+    telemetry.update(player.sample(), frameButtons ? frameButtons[fi] ?? null : null);
+  }
 }
 
 // 出生点/位姿跳转后立刻刷新一次 HUD

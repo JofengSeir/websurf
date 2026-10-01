@@ -166,10 +166,9 @@ export class DemoPanel {
       <div class="sec">
         <div class="sec-title">对话</div>
         <div class="sec-body">
-          <!-- 录像内的文本消息（svc_Print / svc_StringCmd / svc_Disconnect）。
-               注意：**玩家聊天在 Source 里主要走 svc_UserMessage 的 SayText2**，
-               而本工程的解析器尚未解它 —— 所以这一节现在只显示服务端打印类文本，
-               多数录像里会是空的（本仓现有那份实测 0 条）。缺口已在 AGENTS.md §7.3 登记。 -->
+          <!-- 录像内的文本消息（svc_Print / svc_StringCmd / svc_Disconnect，以及
+               svc_UserMessage 的 SayText2——玩家聊天与 SourceMod 播报走它，
+               由解析层按「控制字节边界 + UTF-8」解出可读文本）。 -->
           <div class="dmp-chat" id="demoChat"></div>
         </div>
       </div>`;
@@ -493,22 +492,19 @@ export class DemoPanel {
   }
 
   /**
-   * 渲染**对话区**：录像内的文本消息（`svc_Print` / `svc_StringCmd` / `svc_Disconnect`，
-   * 由 `apps/viewer/src/replay/demo/demo.ts` 收进 `chatLines`，上限 4000 条）。
-   *
-   * **如实说明缺口**：Source 里**玩家聊天主要走 `svc_UserMessage` 的 `SayText2`**，
-   * 而解析器尚未解它 —— 所以这一节只覆盖服务端打印类文本，多数录像会是空的
-   * （本仓现有那份实测 `chatLines` 长 0）。空态里把这件事写清楚，
-   * 免得看的人以为"这录像没人说话"。
+   * 渲染**对话区**：录像内的文本消息，来源两条——`svc_Print` / `svc_StringCmd` /
+   * `svc_Disconnect`，以及 `svc_UserMessage` 的 **SayText2**（CS:S 用户消息号 4，玩家聊天与
+   * SourceMod 的连接/掉线/计时播报走它）。两者都由 `apps/viewer/src/replay/demo/demo.ts`
+   * 收进 `chatLines`（上限 4000 条）；SayText2 由解析层按「控制字节边界 + UTF-8」解出
+   * 可读文本（颜色码丢弃）。
    */
   private renderChat(): void {
     const r = this.result;
     const lines = r?.chatLines ?? [];
     if (lines.length === 0) {
       this.chat.innerHTML =
-        '<div class="dmp-chat-empty">本录像没有服务端文本消息' +
-        '<span class="dmp-chat-hint">（玩家聊天走 svc_UserMessage 的 SayText2，解析器尚未解它 —— ' +
-        '所以这里看不到聊天，不等于那局没人说话）</span></div>';
+        '<div class="dmp-chat-empty">本录像没有文本消息' +
+        '<span class="dmp-chat-hint">（服务端打印与玩家聊天都为空，才是真的没人说话）</span></div>';
       return;
     }
     // 与看板其余部分同一套语彙：等宽小字、行间发丝线、不铺色块。
