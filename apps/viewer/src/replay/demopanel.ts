@@ -16,6 +16,17 @@
  */
 
 import { isPlayerClass, parseSourceDemo, type DemoParseResult, type DemoPlayerInfo, type PlayerTrack } from './demo/demo.js';
+import {
+  CHAT_KINDS,
+  CHAT_KIND_HINT,
+  CHAT_KIND_LABEL,
+  classifyChat,
+  countByKind,
+  filterChat,
+  parseChatRecord,
+  recordJumpSeconds,
+  type ChatKind,
+} from './demo/chatkind.js';
 import { userinfoTimeline } from './demo/net.js';
 import { trackToClip } from './democlip.js';
 import { TRACK_PALETTE } from './tracks.js';
@@ -189,6 +200,20 @@ export interface DemoPanelOptions {
   /** **悬停花名册某一行**时回调该行的活跃区间（秒，**多段全给**）；移开传 null。时间轴据此在条上临时画区间。 */
   onHoverSpan?: (spans: Array<[number, number]> | null) => void;
   /**
+   * **点了一个「过关记录」行** ⇒ 跳到那一跑（`toSec` = 会话内秒，已算好「播报时刻 − 用时 − 5 秒缓冲」）。
+   *
+   * `player` / `level` / `durationSec` 一并给出来，让 app 侧能顺手把视角切到过的那个人
+   * （名字重复很少见，按名字认人足够；认不出来就只跳时间、不动视角）。
+   */
+  onRecordJump?: (toSec: number, player: string, level: string, durationSec: number) => void;
+  /**
+   * **消息过滤（四个类别勾选框）变了** ⇒ 通知外部按新的可见集合重推一次消息。
+   *
+   * 浮层（`apps/viewer/src/ui/chatoverlay.ts`）吃的是同一份消息，过滤要一起生效：
+   * 面板只负责算出「过滤后还剩哪些」并通报，谁消费谁自己取。
+   */
+  onChatFilter?: () => void;
+  /**
    * **按人物切换 tick 点**（`entity` = 实体号，`on` = 是否显示）。
    *
    * tick 点原先是「录像」页与「录像」页**共用的一个全局开关**，在一边关掉另一边也跟着没，
@@ -237,7 +262,7 @@ function fmtSize(bytes: number): string {
    * 该行的**主实体号**：**点选跳转与轨迹配色**取它 —— 主实体 = 他**最早那一段**的实体，
    * 于是「点这个人」= 从头看他，不会被他采样最长的那一段拽到中途（owner 实测过那版的问题）。
    * 生命体征（`team` / `deaths`）另取**采样最长**的那段轨迹统计（数据更多，见 `roster`）。
-   * 一行可能对应多个实体（同一身份先后占过多个槽位，见 `entities` / `spans`）。
+   * 一行可对应多个实体（同一身份先后占过多个槽位，见 `entities` / `spans`）。
    */
   entity: number;
   /**
@@ -332,6 +357,13 @@ export class DemoPanel {
   private readonly note: HTMLElement;
   /** 对话区容器（录像内的文本消息）。 */
   private readonly chat: HTMLElement;
+  /** 消息过滤的四个勾选框（`renderChat` 里顺带刷新每类的实时条数）。 */
+  private readonly chatFilter: HTMLElement;
+  /**
+   * 四个类别里**被勾选要过滤掉**的那些（缺省全不勾 = 一条都不滤）。
+   * 语义按 owner 的说法：「过滤掉…相关的」——**勾上 = 不显示这一类**。
+   */
+  private chatHidden: Record<ChatKind, boolean> = { chat: false, join: false, announce: false, record: false };
   private rows: DemoPlayerRow[] = [];
   private result: DemoParseResult | null = null;
   private duration = 0;
@@ -383,12 +415,18 @@ export class DemoPanel {
       <div class="sec sec-chat">
         <div class="sec-title">对话</div>
         <div class="sec-body">
+          <!-- 消息过滤（owner 要求）：四个类别各一个复选框，**勾上 = 这一类过滤掉（不显示）**。
+               类别判据在 apps/viewer/src/replay/demo/chatkind.ts（纯函数，按真实语料定的顺序：
+               进服 → 过关 → 服务器公告 → 玩家对话 → 兜底算公告）。
+               这一行同时是**实时读数**：每个框后面跟「已隐藏 / 共几条」。 -->
+          <div class="dmp-chat-filter" id="demoChatFilter"></div>
           <!-- 录像内的文本消息（svc_Print / svc_StringCmd / svc_Disconnect，以及
                svc_UserMessage 的 SayText2——玩家聊天与 SourceMod 播报走它，
                由解析层按「控制字节边界 + UTF-8」解出可读文本）。
                **与时间轴绑定，但只做明暗**：已发生的行正常亮度、未发生的压暗（见 refreshChatState）；
                这一份是**完整留档**，不自动滚动、不设自己的滚动条 —— 「当前这一刻说了什么」贴在
                画面左下角的浮层上（ui/chatoverlay.ts，元素 #chatOverlay）。
+               过关记录那几行会多一个「跳到这一跑」的按钮（见 renderChat）。
                本节类名 sec-chat 只作结构标记，布局不依赖它（面板仍是整列滚动）。
                注意：本段在模板字符串里，注释内一律不写反引号（否则会截断它）。 -->
           <div class="dmp-chat" id="demoChat"></div>
@@ -400,6 +438,8 @@ export class DemoPanel {
     this.detail = root.querySelector<HTMLElement>('#demoDetail')!;
     this.note = root.querySelector<HTMLElement>('#demoNote')!;
     this.chat = root.querySelector<HTMLElement>('#demoChat')!;
+    this.chatFilter = root.querySelector<HTMLElement>('#demoChatFilter')!;
+    this.buildChatFilter();
     // 注：**「运动优先（实验展平顺序）」开关已撤除**（owner：用不上了）。它当时只切换
     // `demo/tables.ts` 里的属性展平顺序实验分支（`SPROP_CHANGES_OFTEN` 排头还是排尾），
     // 默认路径本来就是「排头」，撤掉开关后该分支一并删除，属性展平只剩一条确定路径。
@@ -514,7 +554,7 @@ export class DemoPanel {
   refreshNames(): void {
     // 「在服」行已挪进 demoMeta（owner：花名册不显示在线状态）⇒ 到 meta 里找它。
     // 看板那一行是「标签 + 名单 + 计数」三段（`dmp-live-tag` / `dmp-live` / `dmp-live-n`），
-    // 名字列表可能很长（本仓夹具最多 5 位、真服上更多）⇒ **名单允许换行**，
+    // 名字列表会很长（本仓夹具最多 5 位、真服上更多）⇒ **名单允许换行**，
     // 计数单独一格，这样长名单不会把标签挤走、也不会把行高撑成一条歪的。
     const head = this.meta.querySelector<HTMLElement>('.dmp-live');
     const count = this.meta.querySelector<HTMLElement>('.dmp-live-n');
@@ -788,7 +828,7 @@ export class DemoPanel {
   }
 
   /**
-   * 取某实体所属的**花名册行**（同一身份可能占过多个实体，故 `entity` 与 `entities` 都要查）；没有则 `null`。
+   * 取某实体所属的**花名册行**（同一身份可占过多个实体，故 `entity` 与 `entities` 都要查）；没有则 `null`。
    *
    * 供 `apps/viewer/src/app.ts` 在「跟随某人」时取他的**全部在场区间**（画人物叠加带用）——
    * 一个人中途退出又进来时，条上必须是分开的几段。
@@ -896,6 +936,46 @@ export class DemoPanel {
   }
 
   /**
+   * 建**消息过滤**那一行：四个类别各一个复选框（**勾上 = 这一类过滤掉**），后面跟该类共几条。
+   *
+   * 为什么把「几条」摆在框里：分类是有判据的（见 `apps/viewer/src/replay/demo/chatkind.ts`），
+   * 摆出条数用户一眼就能核对自己想滤掉的是不是真的被认成了那一类；勾上后标签加删除线（`.off`）。
+   */
+  private buildChatFilter(): void {
+    this.chatFilter.innerHTML =
+      '<span class="dmp-cf-title" title="勾上 = 这一类不显示（四个类别都按 apps/viewer/src/replay/demo/chatkind.ts 的判据分类）">过滤</span>' +
+      CHAT_KINDS.map(
+        (k) =>
+          '<label class="dmp-cf" data-kind="' +
+          k +
+          '" title="' +
+          this.esc(CHAT_KIND_HINT[k]) +
+          '"><input type="checkbox" data-kind="' +
+          k +
+          '" /><span class="dmp-cf-name">' +
+          this.esc(CHAT_KIND_LABEL[k]) +
+          '</span><span class="dmp-cf-n" data-n="' +
+          k +
+          '"></span></label>',
+      ).join('');
+    for (const box of Array.from(this.chatFilter.querySelectorAll<HTMLInputElement>('input[data-kind]'))) {
+      box.addEventListener('change', () => {
+        const k = box.dataset.kind as ChatKind;
+        this.chatHidden[k] = box.checked;
+        this.renderChat(); // 重画列表时一并刷新每类条数与删除线
+        this.opts.onChatFilter?.(); // 浮层吃同一份消息，过滤要一起生效
+      });
+    }
+  }
+
+  /**
+   * 过滤后的消息（浮层与「当前这一刻说了什么」都用这一份）；`tick` 原样保留，口径不变。
+   */
+  filteredChat(): ReadonlyArray<{ tick: number; text: string }> {
+    return filterChat(this.result?.chat ?? [], this.chatHidden);
+  }
+
+  /**
    * 渲染**对话区**：录像内的文本消息，来源两条——`svc_Print` / `svc_StringCmd` /
    * `svc_Disconnect`，以及 `svc_UserMessage` 的 **SayText2**（CS:S 用户消息号 4，玩家聊天与
    * SourceMod 的连接/掉线/计时播报走它）。两者都由 `apps/viewer/src/replay/demo/demo.ts`
@@ -905,10 +985,23 @@ export class DemoPanel {
    * 帧循环按当前播放头给**已发生的行**加 `.dmp-chat-on`（正常亮度）、**未发生的行**压暗
    * （见 `refreshChatState`）。这一份是**完整留档**，**不自动滚动、不设自己的滚动条** ——
    * 「当前这一刻说了什么」由画面左下角的浮层负责（`apps/viewer/src/ui/chatoverlay.ts`）。
+   *
+   * **本轮新增两件事**：① 按 `chatkind.ts` 的分类过滤（勾上的类别不渲染）；
+   * ② **过关记录那几行多一个「跳到这一跑」按钮** —— 服务器是跑完才播报的，所以目标时刻 =
+   * 播报时刻 − 这一跑用时 − 5 秒缓冲（`recordJumpSeconds`），点击经 `onRecordJump` 交 app 去 seek。
    */
   private renderChat(): void {
     const r = this.result;
     const msgs = r?.chat ?? [];
+    // 每类的条数（读数与删除线）：即使一条都没渲染也要刷新，否则过滤行会一直显示上一份录像的数
+    const counts = countByKind(msgs);
+    for (const k of CHAT_KINDS) {
+      const n = this.chatFilter.querySelector<HTMLElement>('[data-n="' + k + '"]');
+      if (n) n.textContent = counts[k] > 0 ? '×' + counts[k] : '';
+      this.chatFilter
+        .querySelector<HTMLElement>('label[data-kind="' + k + '"]')
+        ?.classList.toggle('off', this.chatHidden[k]);
+    }
     if (msgs.length === 0) {
       this.chat.innerHTML =
         '<div class="dmp-chat-empty">本录像没有文本消息' +
@@ -917,15 +1010,70 @@ export class DemoPanel {
     }
     // 与看板其余部分同一套语彙：等宽小字、行间发丝线、不铺色块。
     // `data-at` 是**会话内秒数**（与时间轴同一口径）；正文原样转义，不解析颜色码。
-    this.chat.innerHTML = msgs
-      .map(
-        (m) =>
-          '<div class="dmp-chat-line" data-at="' + this.secAt(m.tick).toFixed(3) + '">' +
-          '<span class="dmp-chat-t">' + this.fmtClock(this.secAt(m.tick)) + '</span>' +
-          '<span class="dmp-chat-x">' + this.esc(m.text) + '</span>' +
+    const rows: string[] = [];
+    let shown = 0;
+    for (const m of msgs) {
+      const kind = classifyChat(m.text);
+      if (this.chatHidden[kind]) continue;
+      shown++;
+      const sec = this.secAt(m.tick);
+      const rec = kind === 'record' ? parseChatRecord(m.text) : null;
+      let jump = '';
+      if (rec) {
+        const to = recordJumpSeconds(sec, rec.durationSec);
+        jump =
+          '<button type="button" class="dmp-chat-jump" data-jump="' +
+          to.toFixed(3) +
+          '" data-player="' +
+          this.esc(rec.player) +
+          '" data-level="' +
+          this.esc(rec.level) +
+          '" data-dur="' +
+          rec.durationSec +
+          '" title="跳到这一跑：播报 ' +
+          this.fmtClock(sec) +
+          ' − 用时 ' +
+          rec.durationSec.toFixed(3) +
+          ' 秒 − 5 秒缓冲 = ' +
+          this.fmtClock(to) +
+          (rec.level ? '（' + this.esc(rec.level) + '）' : '') +
+          '">↦ ' +
+          this.fmtClock(to) +
+          '</button>';
+      }
+      rows.push(
+        '<div class="dmp-chat-line' +
+          (rec ? ' dmp-chat-rec' : '') +
+          '" data-at="' +
+          sec.toFixed(3) +
+          '" data-kind="' +
+          kind +
+          '">' +
+          '<span class="dmp-chat-t">' +
+          this.fmtClock(sec) +
+          '</span>' +
+          '<span class="dmp-chat-x">' +
+          this.esc(m.text) +
+          '</span>' +
+          jump +
           '</div>',
-      )
-      .join('');
+      );
+    }
+    this.chat.innerHTML =
+      shown > 0
+        ? rows.join('')
+        : '<div class="dmp-chat-empty">四个类别都被过滤掉了' +
+          '<span class="dmp-chat-hint">（把上面的勾去掉就能看到）</span></div>';
+    for (const b of Array.from(this.chat.querySelectorAll<HTMLButtonElement>('.dmp-chat-jump'))) {
+      b.addEventListener('click', () => {
+        this.opts.onRecordJump?.(
+          Number(b.dataset.jump ?? '0'),
+          b.dataset.player ?? '',
+          b.dataset.level ?? '',
+          Number(b.dataset.dur ?? '0'),
+        );
+      });
+    }
   }
 
   /**
@@ -1067,7 +1215,7 @@ export class DemoPanel {
    * ① **占用身份**（`userinfo` 更新流 → `occupancyIdentities`）：这是「这段录像里有谁」的**唯一真相**
    *    —— 签名表只给开局名单，中途加入的人只有在更新流里才看得见（实测本仓夹具：真人 `LuoXuan`
    *    就是中途加入，只出现在更新流里）。**按身份合并**，因为同一台机器人被复用做回放时会反复
-   *    重连（实测 3 台各重连 3 次 = 9 条占用事件），同一个真人也可能先后占两个槽位。
+   *    重连（实测 3 台各重连 3 次 = 9 条占用事件），同一个真人也曾先后占两个槽位。
    * ② **可用轨迹**（`presenceWindows`：有采样、玩家类、1..64 号）：有轨迹的行把区间换成
    *    **采样首末帧**——这与 `jumpTo` 抛出的 `clip.t[0]` 同口径，看板与点击后起点才对得上。
    *

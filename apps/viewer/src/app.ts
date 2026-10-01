@@ -390,9 +390,42 @@ const demoPanel = demoPane
       onParsed: (result, file, rosterCount) => {
         demoInfo.set(result ? { fileName: file.name, result, rosterCount } : null);
         // **画面左下角的对话浮层**：数据就是同一份解析产物里的 `chat`（每条带 tick），
-        // 在这里一次性换算成**会话内秒**交给浮层；解析失败（`result === null`）⇒ 清空。
-        chatOverlay.set(
-          result ? result.chat.map((m) => ({ t: demoPanel?.secondsAt(m.tick) ?? 0, text: m.text })) : null,
+        // 在这里一次性换算成**会话内秒**交给浮层；解析失败（`result === null`）⇒ 清空
+        // （清空这一步不能交给 `feedChatOverlay()`：面板里还留着上一份的 `result`）。
+        if (!result) {
+          chatOverlay.set(null);
+          return;
+        }
+        // 过滤（面板上那四个勾选框）走 `feedChatOverlay()` —— 它取的是**面板过滤后**的那一份。
+        feedChatOverlay();
+      },
+      // **勾选框变了 ⇒ 浮层跟着换一份**（浮层与侧栏列表必须同一口径，否则「滤掉了却还在飘」）。
+      onChatFilter: () => feedChatOverlay(),
+      /**
+       * **点了一条过关记录 ⇒ 跳到那一跑**（owner 要求）。
+       *
+       * `toSec` 由面板算好（播报时刻 − 用时 − 5 秒缓冲，见 `chat/demo/chatkind.ts` 的
+       * `recordJumpSeconds`）；这里只负责落两件事：
+       * ① **把播放头跳过去**（`seek` 夹在区间内，运行状态不动 —— 用户在暂停看录像时点跳转，
+       *    不该被强行播起来，与「换绑不许改播放态」是同一条规矩）；
+       * ② **顺手把视角切到过的那个人**（按名字认人：`.dem` 里同名很少见；认不到就只跳时间）。
+       */
+      onRecordJump: (toSec, player, level, durationSec) => {
+        const who = player.trim();
+        const row = who.length > 0 ? demoPanel?.roster(0).find((p) => p.name.trim() === who) : undefined;
+        // **顺序不能反**：先切视角、**最后**再定位播放头。
+        // `pickEntity` 会走到「播放头不在这个人的区间里就 seek 到区间起点」那条路（`jumpTo`），
+        // 于是它自己会动播放头 —— 先 seek 再切视角的话，我们算好的目标时刻会被它覆盖
+        // （本轮实测：点 9:37 的过关记录，播放头落到了他这一段开头的 4:36）。
+        if (row && row.hasTrack) {
+          autoPickInFlight = true;
+          demoPanel?.pickEntity(row.entity);
+          autoPickInFlight = false;
+        }
+        demo.player.seek(toSec);
+        hud.flashStatus(
+          `跳到 ${player || '这一跑'}${level ? ' · ' + level : ''} 的起点 ${fmtClock(toSec)}` +
+            `（播报 − ${durationSec.toFixed(3)} 秒 − 5 秒缓冲）`,
         );
       },
       onLoaded: () => {
@@ -437,7 +470,7 @@ const demoPanel = demoPane
         const start = clip.count > 0 ? clip.t[0] : 0;
         const end = clip.count > 0 ? clip.t[clip.count - 1] : 0;
         // **条上画出「当前视角人物」的活跃区间**（录像会话时间轴的 `.tl-zone-active`）。
-        // **按身份给全部区间**：同一个人可能中途退出又进来（两段甚至更多），压成一段会把那个断口抹掉；
+        // **按身份给全部区间**：同一个人会中途退出又进来（两段甚至更多），压成一段会把那个断口抹掉；
         // 拿不到身份行时退回这条轨道自己的区间（那是「这条轨迹在这段时间有位姿」的口径）。
         const who = demoPanel?.rosterFor(demEntity);
         const whoSpans = who && who.spans.length > 0 ? who.spans : null;
@@ -818,7 +851,7 @@ function frame(now: number): void {
     //
     // owner 定稿：「我只要进入我在看这个人的区间，我就要看到他在这个区间内正在活跃的视角」。
     // 于是判据是**播放头 + 这个人的区间列表**，而不是「刚才跳过一次」这种一次性事件：
-    //   · 同一身份可能有多段（进服 / 退出 / 再进），**每一段各是一条独立轨迹**（实体号不同）；
+    //   · 同一身份可有多段（进服 / 退出 / 再进），**每一段各是一条独立轨迹**（实体号不同）；
     //   · 播放头落进哪一段，视角就绑到**那一段的轨迹**上 —— 手动拖进度条、暂停着看、自动播放，
     //     三种情形一视同仁（早先这段逻辑只写在「自动跟随 + 正在播放」里，于是**暂停时拖到第二段
     //     视角还留在第一段**，owner 实测报的就是这个）；
@@ -840,7 +873,7 @@ function frame(now: number): void {
     //   ① **第一位真人的优先级最高**：播放头走到他**在场**的时刻就切到他，并且不再被后进来的机器人抢走；
     //   ② 他**不在场**时（还没进服，或中途退出去了）跟着「此刻真的在动」的那位，至少让观看者有点东西看。
     //
-    // 「在场」是**逐段**判断的（`DemoPanel.spanAt`）：真人可能进过一次服、退出、又进来，
+    // 「在场」是**逐段**判断的（`DemoPanel.spanAt`）：真人会进过一次服、退出、又进来，
     // 只看行的并集区间会让他「第一次进场」那一刻就把视角锁在第一段的轨迹上，等到第二段进场也不会切过去。
     //
     // 切人一律走既有 `pickEntity` 路径（建轨道 + 切第一人称），这里只判断"该不该换"。
@@ -858,7 +891,7 @@ function frame(now: number): void {
         if (!p.human || !p.hasTrack) continue;
         if (!firstHuman || p.from < firstHuman.from) firstHuman = { entity: p.entity, from: p.from };
       }
-      // **他现在到底在不在场**（逐段判断，不看行的并集区间）：真人可能中途退出又进来。
+      // **他现在到底在不在场**（逐段判断，不看行的并集区间）：真人会中途退出又进来。
       const here = firstHuman ? demoPanel.spanAt(firstHuman.entity, nowTick) : null;
       // **我们是不是「一直在看这位真人」**（上一次自动跟的就是他，任一段的实体），
       // 以及**他后面还会不会回来**（下一段的起点）。
@@ -977,6 +1010,22 @@ requestAnimationFrame(frame);
 function fmtClock(sec: number): string {
   const s = Math.max(0, Math.round(sec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/**
+ * 把**面板过滤后**的消息推给画面左下角的浮层（`#chatOverlay`）。
+ *
+ * 为什么要有这一层：浮层与侧栏「对话」区吃的是**同一份** `DemoParseResult.chat`，
+ * 而过滤勾选框在面板上 ⇒ 两边必须同一口径（否则会出现「侧栏滤掉了、浮层还在飘」）。
+ * 面板解析失败时（`result === null`）浮层要清空 —— 这一步由 `onParsed` 自己处理，
+ * 本函数只在**确实有一份解析产物**时被调用。
+ */
+function feedChatOverlay(): void {
+  if (!demoPanel) {
+    chatOverlay.set(null);
+    return;
+  }
+  chatOverlay.set(demoPanel.filteredChat().map((m) => ({ t: demoPanel!.secondsAt(m.tick), text: m.text })));
 }
 
 /** 位姿读数行格式化（唯一实现，frame 循环与启动刷新共用）。 */

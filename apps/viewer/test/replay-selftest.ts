@@ -27,6 +27,14 @@ import { flattenSendTable } from '../src/replay/demo/tables.js';
 import { decodeProp } from '../src/replay/demo/net.js';
 import { BitReader } from '../src/replay/demo/bits.js';
 import { visibleChat } from '../src/ui/chatoverlay.js';
+import {
+  classifyChat,
+  countByKind,
+  filterChat,
+  parseChatRecord,
+  parseDuration,
+  recordJumpSeconds,
+} from '../src/replay/demo/chatkind.js';
 import { demoTracksToClips } from '../src/replay/democlip.js';
 
 let failures = 0;
@@ -1069,6 +1077,55 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
     const burst = visibleChat(mk([0, 1, 2, 3, 4, 5, 6, 7]), 7);
     check('浮层窗口：短时间超过 5 条 ⇒ 只留最后 5 条（最早那条被挤掉）', burst.length === 5 && burst[0].t === 3 && burst[4].t === 7, burst.map((l) => l.t).join(','));
     check('浮层窗口：返回顺序自早到晚（渲染时最底下就是最晚的）', burst.every((l, i) => i === 0 || l.t > burst[i - 1].t), burst.map((l) => l.t).join(','));
+
+    // ── 消息分类 / 过滤 / 过关跳转（apps/viewer/src/replay/demo/chatkind.ts，纯函数）────────
+    // 判据全部来自**本夹具的真实 40 条消息**（下面每类各取一条原文当用例）：照抄真实语料，
+    // 是为了让「分类规则被改动」必然撞到这些断言，而不是撞到我自己编的句子。
+    console.log('\n[11] 消息分类 / 过滤 / 过关跳转');
+    const real = r.chat.map((m) => m.text);
+    const counts = countByKind(r.chat);
+    console.log('  ' + JSON.stringify(counts));
+    check(
+      '真实语料四类齐全且总数对得上（1 对话 / 5 进服 / 30 公告 / 4 过关）',
+      counts.chat === 1 && counts.join === 5 && counts.announce === 30 && counts.record === 4 && real.length === 40,
+      JSON.stringify(counts) + ' total=' + real.length,
+    );
+    const lineJoin = real.find((t) => t.startsWith('▲')) ?? '';
+    const lineChat = real.find((t) => /LuoXuan: /.test(t)) ?? '';
+    const lineAnnounce = real.find((t) => t.includes('地图剩余时间')) ?? '';
+    const lineRecord = real.find((t) => t.includes('完成了')) ?? '';
+    check('进服公告：▲ 起头那条被认成 join', classifyChat(lineJoin) === 'join', lineJoin);
+    check('玩家对话：带前缀标签的「说话人: 正文」被认成 chat', classifyChat(lineChat) === 'chat', lineChat);
+    check(
+      '服务器公告：有冒号的那条（地图剩余时间: …）仍认成 announce，不会被误判成聊天',
+      classifyChat(lineAnnounce) === 'announce',
+      lineAnnounce,
+    );
+    check('过关记录：认成 record（而不是 announce）', classifyChat(lineRecord) === 'record', lineRecord);
+    const rec = parseChatRecord(lineRecord);
+    check(
+      '过关记录解析出 玩家 + 关卡 + 用时',
+      rec !== null && rec.player === 'LuoXuan' && rec.level === '奖励关4' && Math.abs(rec.durationSec - 18.714) < 1e-6,
+      JSON.stringify(rec),
+    );
+    check('用时支持 m:ss.mmm 写法', parseDuration('1:23.456') === 83.456, String(parseDuration('1:23.456')));
+    // **跳转口径**（owner 定稿）：播报时刻 − 用时 − 5 秒缓冲，夹在 [0, 播报时刻]
+    check(
+      '跳转 = 播报 − 用时 − 5 秒（600.3 / 18.714 ⇒ 576.586）',
+      Math.abs(recordJumpSeconds(600.3, 18.714) - 576.586) < 1e-6,
+      String(recordJumpSeconds(600.3, 18.714)),
+    );
+    check('跳转不会为负（用时比播报还长时夹到 0）', recordJumpSeconds(10, 30) === 0, String(recordJumpSeconds(10, 30)));
+    check('缓冲可调（0 缓冲 = 正好播报 − 用时）', Math.abs(recordJumpSeconds(100, 20, 0) - 80) < 1e-9, String(recordJumpSeconds(100, 20, 0)));
+    const hideAnn = filterChat(r.chat, { announce: true });
+    const hideAll = filterChat(r.chat, { chat: true, join: true, announce: true, record: true });
+    check(
+      '过滤「服务器公告」⇒ 40 条剩 10 条，且一条 announce 都不剩',
+      hideAnn.length === 40 - counts.announce && hideAnn.every((m) => classifyChat(m.text) !== 'announce'),
+      String(hideAnn.length),
+    );
+    check('四类全勾 ⇒ 一条不剩', hideAll.length === 0, String(hideAll.length));
+    check('一条都不勾 ⇒ 原样 40 条', filterChat(r.chat, {}).length === 40, String(filterChat(r.chat, {}).length));
     // 录制者机位（`democmdinfo`）：每条 `dem_signon` / `dem_packet` 头部一份 ⇒ 条数应等于包数；
     // 本夹具（SourceTV 观察者录像）全部为 0 ⇒「没有第一人称机位可用」是记录本身没记，不是漏读。
     check(
@@ -1155,7 +1212,7 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
         Number.isFinite(c.pos[0]) && Number.isFinite(c.pos[1]) && Number.isFinite(c.pos[2]),
         `${c.pos[0]},${c.pos[1]},${c.pos[2]}`,
       );
-      // 采样最多的那条可能是 CWorld（世界实体，坐标恒为原点），故「地图尺度」按全部轨迹判：
+      // 采样最多的那条常是 CWorld（世界实体，坐标恒为原点），故「地图尺度」按全部轨迹判：
       // 至少要有一条落在非原点的世界坐标上。
       check(
         'DEM 至少一条轨迹坐标为非零地图尺度',
