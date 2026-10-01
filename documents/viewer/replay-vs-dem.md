@@ -87,11 +87,11 @@ dock 之外的 HUD 与遥测读数（`apps/viewer/src/app.ts:126`）。
 - **下场**：**只停表** —— 暂停主时钟、熄灭本会话全部 3D 对象、**交还快捷键**，轨道 / 时间 / 区间 /
   显示开关原样留着（`apps/viewer/src/replay/session.ts:124`）。切回来即刻续看，没有任何东西需要「拆」；
   「交还快捷键」是必须的：两条时间轴各绑一份 `window` 的 `keydown`，只有上场的那条响应
-  （`apps/viewer/src/replay/timeline.ts:333` 的 `setOnStage`）—— 否则在看录像时按 `K` / `,` / `.` /
+  （`apps/viewer/src/replay/timeline.ts:340` 的 `setOnStage`）—— 否则在看录像时按 `K` / `,` / `.` /
   `I` / `O`，记录会话的播放态、帧号与 A-B 区间会被一起改掉（本轮实测抓到的真实串位，
   回归断言在 `apps/viewer/test/session-sep.mjs` 的 `[C2]` 段）；
 - **切到「地图」页不改会话**：底部 dock 仍停在上一个回放会话上、相机也仍由它驱动（与改造前一致）；
-- **帧循环只驱动活动会话**（`apps/viewer/src/app.ts:791` 的 `frame`，只对它调 `apps/viewer/src/app.ts:899` 的 `s.tick(dt)`）：另一个会话的 `update` 不被调用，
+- **帧循环只驱动活动会话**（`apps/viewer/src/app.ts:800` 的 `frame`，只对它调 `apps/viewer/src/app.ts:912` 的 `s.tick(dt)`）：另一个会话的 `update` 不被调用，
   于是它的时间不会自己走；录像页看板的逐帧刷新（名称轮换 / 在线态 / 自动跟随）也只在本会话上场时执行。
 
 录像看板点到某个人时，建轨道 / 换人物 / 定时长**全部落在录像会话自己的对象上**
@@ -177,7 +177,7 @@ dock 之外的 HUD 与遥测读数（`apps/viewer/src/app.ts:126`）。
     内容向上长、新的一条从底部顶上来）。「该显示哪几条」抽成了纯函数 `visibleChat`，
     好在 Node 侧用合成数据钉住那三条规则（真实夹具 15 秒窗口内最多 4 条，测不出「>5 条」那支）。
 - **花名册按「身份」去重**（owner 实测：同一台机器人被复用做回放时反复重连，名单摊成十几行）：
-  `occupancyIdentities()`（`apps/viewer/src/replay/demopanel.ts:1346`）把「占用会话」按
+  `occupancyIdentities()`（`apps/viewer/src/replay/demopanel.ts:1351`）把「占用会话」按
   **guid 不是 `BOT` ⇒ 按 guid、是 `BOT` ⇒ 按槽位**合并 —— 后者是因为 `BOT` 是所有机器人的公共
   guid，无法区分具体哪一台，而同一槽位上的多次重连正是「同一台被复用」的场景。实测本仓夹具的
   `userinfo` 更新流给出 **11 条占用事件、真实身份只有 5 个**（3 台回放机器人各重连 3 次 +
@@ -191,7 +191,7 @@ dock 之外的 HUD 与遥测读数（`apps/viewer/src/app.ts:126`）。
   叠加带都看不出那个断口，自动跟随也会在他第二段进场时停在他第一段的实体上（必须手动再点一次）。
   现在 `RosterRow.spans` 给的是**逐次在场的区间列表**（相邻/重叠已并段，**真断开的两段留着断口**），
   每段带自己的实体号；花名册行逐段画条、读数前缀「N 段」、悬停提示列出各段时刻，叠加带按段建
-  `.tl-seg`（`apps/viewer/src/replay/timeline.ts:344` 的 `setActiveSpan` 入参已是**区间数组**），
+  `.tl-seg`（`apps/viewer/src/replay/timeline.ts:339` 的 `setActiveSpan` 入参已是**区间数组**），
   在线态与悬停高亮也都按段判断。实测本仓夹具的 `LuoXuan` 正是这种：两段在场（槽 6 早段 ≈ 5–74 s、
   槽 4 后段 ≈ 276–714 s），对应实体 **#7** 与 **#5**。
 - **自动跟随于是也改成「逐段」判断**（`apps/viewer/src/app.ts`）：`spanAt(entity, tick)`

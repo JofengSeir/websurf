@@ -204,10 +204,10 @@ export interface DemoPanelOptions {
   /**
    * **点了一个「过关记录」行** ⇒ 跳到那一跑（`toSec` = 会话内秒，已算好「播报时刻 − 用时 − 5 秒缓冲」）。
    *
-   * `player` / `level` / `durationSec` 一并给出来，让 app 侧能顺手把视角切到过的那个人
+   * `announceSec` 是这一行的会话内秒（= 播报时刻，区间带的右端）、`player` / `level` / `durationSec` 一并给出来，让 app 侧能顺手把视角切到过的那个人
    * （名字重复很少见，按名字认人足够；认不出来就只跳时间、不动视角）。
    */
-  onRecordJump?: (toSec: number, player: string, level: string, durationSec: number) => void;
+  onRecordJump?: (toSec: number, announceSec: number, player: string, level: string, durationSec: number) => void;
   /**
    * **消息过滤（四个类别勾选框）变了** ⇒ 通知外部按新的可见集合重推一次消息。
    *
@@ -1043,6 +1043,10 @@ export class DemoPanel {
         jump =
           '<button type="button" class="dmp-chat-jump" data-jump="' +
           to.toFixed(3) +
+          // 播报时刻（这一行的会话内秒）也挂到按钮上：点它时要拿它当**区间带的右端**，
+          // 而 data-at 只在**行**上、按钮读不到（本轮实测：读成 0 ⇒ 区间被判成空、画不出来）。
+          '" data-at="' +
+          sec.toFixed(3) +
           '" data-player="' +
           this.esc(rec.player) +
           '" data-level="' +
@@ -1091,6 +1095,7 @@ export class DemoPanel {
       b.addEventListener('click', () => {
         this.opts.onRecordJump?.(
           Number(b.dataset.jump ?? '0'),
+          Number(b.dataset.at ?? '0'), // 播报时刻 = 这一行的会话内秒（区间带的右端）
           b.dataset.player ?? '',
           b.dataset.level ?? '',
           Number(b.dataset.dur ?? '0'),

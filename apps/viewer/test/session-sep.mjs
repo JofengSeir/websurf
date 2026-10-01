@@ -598,6 +598,51 @@ async function main() {
   check('点跳转不改播放态（暂停着点完仍暂停）', afterJump.playing === false, String(afterJump.playing));
   check('状态行写明跳转与算式', /跳到 LuoXuan/.test(afterJump.status) && /5 秒缓冲/.test(afterJump.status), JSON.stringify(afterJump.status));
 
+  // **进度条上的「一次性区间带」**（owner 要求：把刚跳到的那一段画出来，过掉就消失）
+  const jumpBand = await evaluate(
+    `(() => {
+      const z = document.querySelector('#timelineDemo .tl-zone-jump');
+      if (!z) return { missing: true };
+      const box = z.getBoundingClientRect();
+      const slider = document.querySelector('#timelineDemo .tl-slider').getBoundingClientRect();
+      return {
+        shown: getComputedStyle(z).display !== 'none',
+        left: z.style.left,
+        width: z.style.width,
+        title: z.title,
+        px: Math.round(box.width),
+        sliderPx: Math.round(slider.width),
+        time: window.viewer.demo.time,
+      };
+    })()`,
+    sessionId,
+  );
+  console.log('  ' + JSON.stringify(jumpBand));
+  // 落点 576.556s、播报 600.3s、整场 1798.6s ⇒ 区间带应从 32.06% 起、宽 1.32%
+  const bandLeft = jumpBand.missing ? NaN : Number(String(jumpBand.left).replace('%', ''));
+  const bandWidth = jumpBand.missing ? NaN : Number(String(jumpBand.width).replace('%', ''));
+  check(
+    '点跳转 ⇒ 进度条上出现一次性区间带（落点 → 播报时刻）',
+    jumpBand.missing !== true && jumpBand.shown === true && bandLeft > 31.9 && bandLeft < 32.2 && bandWidth > 1.2 && bandWidth < 1.5,
+    JSON.stringify({ left: jumpBand.left, width: jumpBand.width }),
+  );
+  check('区间带不是零宽（真的画出来了）', jumpBand.missing !== true && jumpBand.px > 3 && jumpBand.sliderPx > 100, JSON.stringify({ px: jumpBand.px, sliderPx: jumpBand.sliderPx }));
+  check('区间带悬停写明「跳的是哪一跑」', jumpBand.missing !== true && /刚跳到 LuoXuan/.test(jumpBand.title) && /5 秒缓冲/.test(jumpBand.title), JSON.stringify(jumpBand.title));
+  // **过掉就消失**：把播放头推到播报时刻之后（这一段之外），带子应被帧循环清掉
+  await evaluate(
+    `(() => { const d = window.viewer.demo; d.seek(660); return true; })()`,
+    sessionId,
+  );
+  await sleep(500);
+  const afterPass = await evaluate(
+    `(() => {
+      const z = document.querySelector('#timelineDemo .tl-zone-jump');
+      return { display: z ? getComputedStyle(z).display : 'missing', range: window.viewer.demo.timeline ? null : null };
+    })()`,
+    sessionId,
+  );
+  check('播放头走过这一段 ⇒ 区间带自动消失（过掉就消失）', afterPass.display === 'none', JSON.stringify(afterPass));
+
   // 复原：把两个勾去掉（后面的段落按「40 行都在」的前提复核对话节）
   await evaluate(
     `(() => {
