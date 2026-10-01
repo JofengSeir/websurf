@@ -29,7 +29,7 @@
 | `apps/viewer/src/wasm.d.ts` | 把 `pkg/websurf_viewer_wasm.js` 的导出整体转出，供 `./wasm.js` 引用类型；本工程内零导入点 | `apps/viewer/src/wasm.d.ts:13` |
 | `apps/viewer/crates/wasm/` | WASM 薄导出层（Rust）：`BspProcessor` 类 | `apps/viewer/crates/wasm/src/lib.rs:327` |
 | `apps/viewer/scripts/` | 打包（single / multi）与 WASM 契约检查 | `apps/viewer/scripts/build-dist.mjs:221`、`apps/viewer/scripts/check-wasm-api.mjs:38` |
-| `apps/viewer/test/` | Node 侧记录管线自检、CDP 冒烟、最小 Node 类型面 | `apps/viewer/test/replay-selftest.ts:42`、`apps/viewer/test/smoke-cdp.mjs:122` |
+| `apps/viewer/test/` | Node 侧记录管线自检、CDP 冒烟、最小 Node 类型面 | `apps/viewer/test/replay-selftest.ts:44`、`apps/viewer/test/smoke-cdp.mjs:122` |
 | `apps/viewer/web/` | 页面骨架、样式、dev 运行产物（`app.js` / `worker.js` / `websurf_viewer_wasm_bg.wasm`）、`coi-serviceworker.js` | `apps/viewer/web/index.html:12`、`apps/viewer/web/styles.css:24` |
 | `apps/viewer/pkg/` | wasm-pack 产物（gitignore 覆盖，`apps/viewer/package.json:8` 生成） | `apps/viewer/src/core/bsp.ts:17` |
 | `apps/viewer/dist/` | 打包产物目录（`apps/viewer/scripts/build-dist.mjs:44`） | `apps/viewer/scripts/build-dist.mjs:223` |

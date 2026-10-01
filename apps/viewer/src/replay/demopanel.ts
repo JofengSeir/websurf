@@ -20,8 +20,10 @@ import {
   CHAT_KINDS,
   CHAT_KIND_HINT,
   CHAT_KIND_LABEL,
-  classifyChat,
+  CHAT_RULE_HINT,
+  classifyChatDetailed,
   countByKind,
+  countFallback,
   filterChat,
   parseChatRecord,
   recordJumpSeconds,
@@ -940,6 +942,8 @@ export class DemoPanel {
    *
    * 为什么把「几条」摆在框里：分类是有判据的（见 `apps/viewer/src/replay/demo/chatkind.ts`），
    * 摆出条数用户一眼就能核对自己想滤掉的是不是真的被认成了那一类；勾上后标签加删除线（`.off`）。
+   * 末尾另有一个**兜底读数**（`.dmp-cf-fb`，只在非零时显示）：它是「没命中任何具体规则、
+   * 按服务端打印归到公告」的条数 —— 新录像里出现没见过的写法时它会涨，拿那些行去补判据最快。
    */
   private buildChatFilter(): void {
     this.chatFilter.innerHTML =
@@ -957,7 +961,8 @@ export class DemoPanel {
           '</span><span class="dmp-cf-n" data-n="' +
           k +
           '"></span></label>',
-      ).join('');
+      ).join('') +
+      '<span class="dmp-cf-fb" data-fb hidden></span>';
     for (const box of Array.from(this.chatFilter.querySelectorAll<HTMLInputElement>('input[data-kind]'))) {
       box.addEventListener('change', () => {
         const k = box.dataset.kind as ChatKind;
@@ -1002,6 +1007,19 @@ export class DemoPanel {
         .querySelector<HTMLElement>('label[data-kind="' + k + '"]')
         ?.classList.toggle('off', this.chatHidden[k]);
     }
+    // 兜底读数：没命中任何具体规则、被归到「服务器公告」的条数（非零才显示）——
+    // 新录像里出现没见过的写法时它会涨，悬停能读到「拿这些行去补判据」的提示。
+    const fbEl = this.chatFilter.querySelector<HTMLElement>('[data-fb]');
+    if (fbEl) {
+      const fb = countFallback(msgs);
+      fbEl.hidden = fb === 0;
+      fbEl.textContent = fb > 0 ? `兜底 ${fb}` : '';
+      fbEl.title =
+        fb > 0
+          ? `${fb} 条消息没命中任何具体判据（既不是进服/过关，也不是「[ 标签 ] - 正文」形状，又看不出说话人），` +
+            '按服务端打印归到了「服务器公告」。换新录像后这个数变大就说明有没见过的写法 —— 把这些行发我即可补判据。'
+          : '';
+    }
     if (msgs.length === 0) {
       this.chat.innerHTML =
         '<div class="dmp-chat-empty">本录像没有文本消息' +
@@ -1013,7 +1031,8 @@ export class DemoPanel {
     const rows: string[] = [];
     let shown = 0;
     for (const m of msgs) {
-      const kind = classifyChat(m.text);
+      const det = classifyChatDetailed(m.text);
+      const kind = det.kind;
       if (this.chatHidden[kind]) continue;
       shown++;
       const sec = this.secAt(m.tick);
@@ -1048,6 +1067,10 @@ export class DemoPanel {
           sec.toFixed(3) +
           '" data-kind="' +
           kind +
+          '" data-rule="' +
+          det.rule +
+          '" title="' +
+          this.esc(CHAT_KIND_LABEL[kind] + '：' + CHAT_RULE_HINT[det.rule]) +
           '">' +
           '<span class="dmp-chat-t">' +
           this.fmtClock(sec) +

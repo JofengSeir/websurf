@@ -474,6 +474,23 @@ async function main() {
   check('「在服」行三段齐全，且角标人数与名单条数一致', board.tag === '在服' && new RegExp('^' + nameCount + ' 人$').test(board.badge.trim()), JSON.stringify({ tag: board.tag, badge: board.badge, nameCount }));
   check('载入区给出拖拽提示', /拖进窗口/.test(board.drop), JSON.stringify(board.drop));
   check('「运动优先（实验展平顺序）」开关与文案已撤除', board.altBox === false && board.altText === false, JSON.stringify({ box: board.altBox, text: board.altText }));
+  const ruleInfo = await evaluate(
+    `(() => {
+      const rows = Array.from(document.querySelectorAll('#demoChat .dmp-chat-line'));
+      const fb = document.querySelector('#demoChatFilter .dmp-cf-fb');
+      return {
+        rules: rows.map((r) => r.dataset.rule),
+        titles: rows.slice(0, 3).map((r) => r.getAttribute('title') || ''),
+        fbHidden: fb ? fb.hidden : null,
+        fbText: fb ? fb.textContent : '',
+      };
+    })()`,
+    sessionId,
+  );
+  console.log('  ' + JSON.stringify({ 判据: ruleInfo.rules.reduce((a, k) => (a[k] = (a[k] || 0) + 1, a), {}), 兜底: ruleInfo.fbText, 隐藏: ruleInfo.fbHidden }));
+  check('每一行都写出命中的判据（data-rule），且没命中具体规则的会显示出来', ruleInfo.rules.length === 40 && ruleInfo.rules.every((r) => typeof r === 'string' && r.length > 0), JSON.stringify(ruleInfo.rules.slice(0, 4)));
+  check('悬停提示写明「类别：判据」（可核对分类依据）', ruleInfo.titles.length === 3 && ruleInfo.titles.every((t) => /：/.test(t)), JSON.stringify(ruleInfo.titles));
+  check('本夹具 40 条全部命中具体判据 ⇒ 兜底读数不显示', ruleInfo.fbHidden === true && ruleInfo.fbText === '', JSON.stringify({ hidden: ruleInfo.fbHidden, text: ruleInfo.fbText }));
 
   console.log('\n[C-chat] 消息过滤（四类）+ 过关记录点击跳转');
   const chatBox = await evaluate(

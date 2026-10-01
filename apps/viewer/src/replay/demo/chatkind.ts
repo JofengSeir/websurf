@@ -65,11 +65,23 @@ const RE_JOIN_ARROW = /^\s*[▲▼●○]/;
 const RE_JOIN_WORDS =
   /(has joined|connected from|disconnected|joined the game|left the game|已连接|已断开|加入了?游戏|加入服务器|离开服务器|进入服务器|退出服务器)/i;
 
-/** 过关记录：中英各一套「用时 + 完成」。 */
-const RE_RECORD_CN = /以用时\s*([0-9]+(?::[0-9]+)?(?:\.[0-9]+)?)/;
-const RE_RECORD_CN_DONE = /(完成了|通关了|过关了)/;
-const RE_RECORD_EN = /(?:finished|completed|cleared)[^0-9]{0,24}?(?:in|用时)\s*([0-9]+(?::[0-9]+)?(?:\.[0-9]+)?)/i;
-const RE_RECORD_EN_DONE = /(finished|completed|cleared)/i;
+/**
+ * 过关记录：中英各一套「用时 + 完成」。
+ *
+ * **语料来源分两档**（写清楚，免得后人以为全是实测）：
+ * - **实测档**：`以用时 18.714 完成了 [ 奖励关4 ]`（本仓夹具 4 条）—— 下面第一条 CN 规则；
+ * - **泛化档**（**尚无真实语料核对**，只是同一族计时器插件的常见写法）：`用时 18.714 完成…`、
+ *   `完成 [ 关卡 ] 用时 18.714`、英文的 `finished|completed|cleared … in|with a time of|time: 12.345`。
+ *   它们都还要过 `RE_RECORD_*_DONE` 或 `RE_RECORD_EXTRA` 这两道闸（见 `parseChatRecord`），
+ *   所以即便泛化档命中的是别的行，也只会落到「有完成字样 / 有排名读数」的那类播报上。
+ *   等 owner 的更多 `.dem` 到位后，按真实写法收窄或补全。
+ */
+const RE_RECORD_CN = /(?:以)?用时\s*([0-9]+(?::[0-9]+)?(?:\.[0-9]+)?)/;
+const RE_RECORD_CN2 = /([0-9]+(?::[0-9]+)?(?:\.[0-9]+)?)\s*(?:秒|s)\s*(?:内)?\s*(?:完成|通关)/;
+const RE_RECORD_CN_DONE = /(完成了|完成|通关了|通关|过关了)/;
+const RE_RECORD_EN =
+  /(?:finished|completed|cleared|beat)\b.{0,32}?(?:in|with(?:\s+a)?\s+time\s+of|time\s*[:：]?)\s*([0-9]+(?::[0-9]+)?(?:\.[0-9]+)?)/i;
+const RE_RECORD_EN_DONE = /(finished|completed|cleared|beat)/i;
 /** `(SR: +0.045 | PB: +0.045 )` / `排名: 1/1` —— 过关记录特有的追加读数（兜底判据）。 */
 const RE_RECORD_EXTRA = /(\(\s*SR\s*:|排名\s*:|P?B\s*:\s*[+-])/;
 
@@ -137,12 +149,14 @@ function playerFrom(body: string, durationText: string): string {
 /**
  * 解析一条**过关记录**；不是过关记录返回 `null`。
  *
- * 判据：出现「用时 + 完成」组合，**或** `finished/completed/cleared` + 时长，
- * **或**过关记录特有的读数（`排名:` / `(SR: … | PB: … )`）且能取到时长。
+ * 判据（按顺序试）：中文「(以)用时 <秒>」→ 中文「<秒> 秒内完成」→ 英文
+ * `finished|completed|cleared|beat … in|with a time of|time: <秒>`；
+ * 另外还要求**有完成字样**或**过关记录特有的读数**（`排名:` / `(SR: … | PB: … )`）之一，
+ * 这样「播报里恰好出现一个数字」不会被当成过关（见 `RE_RECORD_*_DONE` / `RE_RECORD_EXTRA`）。
  * 只要拿到时长就返回（`用时` 就是那一跑的时长，跳转要用它）。
  */
 export function parseChatRecord(text: string): ChatRecord | null {
-  let m = text.match(RE_RECORD_CN);
+  let m = text.match(RE_RECORD_CN) ?? text.match(RE_RECORD_CN2);
   let done = RE_RECORD_CN_DONE.test(text);
   if (!m) {
     const en = text.match(RE_RECORD_EN);
@@ -154,10 +168,49 @@ export function parseChatRecord(text: string): ChatRecord | null {
   if (!m) return null;
   const durationSec = parseDuration(m[1]);
   if (durationSec === null) return null;
-  // 「用时」字样本身已经足够（中文服的写法）；英文那支上面已置 done；除此之外还认追加读数
+  // 「用时 / 完成」字样本身已经足够（中文服的写法）；英文那支上面已置 done；除此之外还认追加读数
   if (!done && !RE_RECORD_EXTRA.test(text)) return null;
   const body = stripLeadTag(text);
   return { player: playerFrom(body, m[1]), level: levelFrom(body), durationSec };
+}
+
+/**
+ * **判据名字**（哪一条规则命中的）。看板把每条消息 `data-rule` 与悬停提示写出来 ——
+ * 这样「这条为什么算公告 / 为什么算过关」是可核对、可追责的，而不是黑箱；
+ * 新录像里出现没见过的写法时，看板上的「兜底 N」读数会把它指出来（见 `countFallback`）。
+ */
+export type ChatRule =
+  | 'join-arrow'
+  | 'join-words'
+  | 'record-cn'
+  | 'record-en'
+  | 'announce-shape'
+  | 'chat-speaker'
+  | 'fallback';
+
+/** 判据的可读说明（悬停提示直接用）。 */
+export const CHAT_RULE_HINT: Record<ChatRule, string> = {
+  'join-arrow': '▲ / ▼ 起头的连接播报',
+  'join-words': '正文含 has joined / connected from / disconnected / 已断开 等连接用语',
+  'record-cn': '中文计时器：「以用时 <秒> 完成了 [ 关卡 ]」或 <秒> + 完成 的近似写法',
+  'record-en': '英文计时器：finished / completed / cleared … in|with a time of <秒>',
+  'announce-shape': '服务器播报形状：「[ 标签 ] - 正文」',
+  'chat-speaker': '玩家对话：剥掉前缀标签后是「说话人: 正文」',
+  fallback: '没命中任何具体规则 ⇒ 按服务端打印归到「服务器公告」（新录像里这类行值得补判据）',
+};
+
+/** 分类结果 + 命中的判据（`classifyChat` 是它的薄封装）。 */
+export function classifyChatDetailed(text: string): { kind: ChatKind; rule: ChatRule } {
+  if (RE_JOIN_ARROW.test(text)) return { kind: 'join', rule: 'join-arrow' };
+  if (RE_JOIN_WORDS.test(text)) return { kind: 'join', rule: 'join-words' };
+  if (parseChatRecord(text)) return { kind: 'record', rule: RE_RECORD_CN.test(text) ? 'record-cn' : 'record-en' };
+  if (RE_ANNOUNCE_SHAPE.test(text)) return { kind: 'announce', rule: 'announce-shape' };
+  // 玩家对话：剥掉前缀标签后是「说话人: 正文」；说话人里允许 `*DEAD*` / `(CT)` / `<Owner>` 之类的装饰
+  const body = stripLeadTag(text);
+  if (/^\s*(?:\*?[A-Za-z ]{0,12}\*?\s*)?(?:\([^)]{1,8}\)\s*)?[^:：<>[\]]{1,32}\s*[:：]\s*\S/.test(body)) {
+    return { kind: 'chat', rule: 'chat-speaker' };
+  }
+  return { kind: 'announce', rule: 'fallback' };
 }
 
 /**
@@ -167,13 +220,19 @@ export function parseChatRecord(text: string): ChatRecord | null {
  * 既有冒号又有方括号 —— 先把进服与过关捞出来，剩下的才轮到「带标签的广播」和「说话人: 正文」。
  */
 export function classifyChat(text: string): ChatKind {
-  if (RE_JOIN_ARROW.test(text) || RE_JOIN_WORDS.test(text)) return 'join';
-  if (parseChatRecord(text)) return 'record';
-  if (RE_ANNOUNCE_SHAPE.test(text)) return 'announce';
-  // 玩家对话：剥掉前缀标签后是「说话人: 正文」；说话人里允许 `*DEAD*` / `(CT)` / `<Owner>` 之类的装饰
-  const body = stripLeadTag(text);
-  if (/^\s*(?:\*?[A-Za-z ]{0,12}\*?\s*)?(?:\([^)]{1,8}\)\s*)?[^:：<>[\]]{1,32}\s*[:：]\s*\S/.test(body)) return 'chat';
-  return 'announce';
+  return classifyChatDetailed(text).kind;
+}
+
+/**
+ * **走了兜底判据的条数**（既不是进服 / 过关，也不是「[ 标签 ] - 正文」形状，又看不出说话人）。
+ *
+ * 看板把非零的它显示成一个小标记：新录像（尤其别的服 / 别的语言）里一出现没见过的写法，
+ * 这里就会涨 —— 拿那些行去补判据，比事后翻几十条消息快得多。
+ */
+export function countFallback(lines: readonly { text: string }[]): number {
+  let n = 0;
+  for (const l of lines) if (classifyChatDetailed(l.text).rule === 'fallback') n++;
+  return n;
 }
 
 /**
