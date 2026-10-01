@@ -1,5 +1,10 @@
 /**
- * WebSurf — 灯光管理器（debug 工程主线程）
+ * WebSurf — 灯光管理器
+ *
+ * 归属：渲染共享层 `src/renderer-shared/environment/`（2026-10-02 自 debug 工程
+ * `apps/debug/src/renderer/light-manager.ts` 下沉；唯二改动 = 头注归属说明 +
+ * 入参类型从应用侧 `RuntimeConfig` 换成本文件的结构等价接口 `ConfigWithLighting`，
+ * 逻辑零改动）。当前唯一消费方仍是 `apps/debug/src/renderer/renderer-main.ts`。
  *
  * 持有一场景的全部灯光：
  * - 三盏基础灯 `THREE.AmbientLight` / `THREE.HemisphereLight` / `THREE.DirectionalLight`，
@@ -27,10 +32,30 @@
 
 import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { RuntimeConfig } from '../config.js';
 
 /** 颜色入参的两种形态：`number` 直接当十六进制色值，字符串按 `#rrggbb` 解析。 */
 type ColorInput = number | string;
+
+/**
+ * `applyLights` / `syncFromConfig` 的入参形状：本文件只消费配置树里的 `lighting` 段
+ * （`mode` 不在消费范围）。声明为结构等价的本地接口而不 import 应用侧 config——
+ * 共享层不得反向依赖 `apps/**`（单向流动）；应用侧的 `RuntimeConfig` 对本接口
+ * 结构化兼容，调用点无需改动。
+ */
+interface ConfigWithLighting {
+  lighting: {
+    ambientColor: number;
+    ambientIntensity: number;
+    hemiSkyColor: number;
+    hemiGroundColor: number;
+    hemiIntensity: number;
+    dirColor: number;
+    dirIntensity: number;
+    dirAzimuth: number;
+    dirElevation: number;
+    bgColor: number;
+  };
+}
 
 /** `updateLighting` 的入参：十个字段全可选，未出现的字段保持当前值不动。 */
 export interface LightingUpdateParams {
@@ -98,7 +123,7 @@ export class LightManager {
 	 * @param scene 目标场景，登记为 `this.scene`（后续参数更新都要求它非空）。
 	 * @param config 运行时配置，只读 `lighting` 段。
 	 */
-	applyLights(scene: THREE.Scene, config: RuntimeConfig): void {
+	applyLights(scene: THREE.Scene, config: ConfigWithLighting): void {
 		this.scene = scene;
 		const lc = config.lighting;
 
@@ -292,7 +317,7 @@ export class LightManager {
 	 * 只读配置不改写配置；`lighting.mode`（预烘焙/纯纹理）不属本方法范围，
 	 * 它由 `apps/debug/src/renderer/renderer-main.ts` 的 `setLightingMode` 走 uniform 切换。
 	 */
-	syncFromConfig(config: RuntimeConfig): void {
+	syncFromConfig(config: ConfigWithLighting): void {
 		const lc = config.lighting;
 		this.updateLighting({
 			ambientColor: lc.ambientColor,
