@@ -31,9 +31,6 @@
  */
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
@@ -42,7 +39,11 @@ import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-ca
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
-import { loadLightmapAtlas, applyLightmapToMeshes, fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, getVertexLightingRelaxStats, getPropVertexRelax, setPropVertexFlatten, getPropVertexFlatten, VERTEX_LIGHTING_ATTR, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { optimizeScene } from './scene-optimizer.js';
+import { reportInjectStatsOnce } from './inject-stats.js';
+import { buildMapScene, applyLightmap } from './scene-builder.js';
+import { NearPlaneController } from './near-plane.js';
+import { fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -60,45 +61,6 @@ const DEG2RAD = Math.PI / 180;
  * 世代槽**不由本文件传入**：`resetRenderSample` 自增它、`writeRenderSample` 就地读它。
  */
 
-// ── 空间分块合并参数（GLB 挂载后一次性执行；见 optimizeScene）──────────
-// GLTFLoader 按 GLB 的 primitive 逐个建 THREE.Mesh，图元多的地图因此会产生数万个 Mesh 对象：
-// 每帧都要遍历它们做剔除，可见的还要逐个 draw call。分块合并把这批 Mesh 收敛成数百个空间块
-// （块内先按材质实例分组，再合并成「每块一个 Mesh + 一份材质数组」），几何与材质实例不变；
-// 合并失败的分支逐块回退为保留独立几何。
-/** cell 大小自适应的目标块数：初值 = 世界包围盒对角线 / cbrt(本值)，随后按非空 cell 数微调。 */
-const OPT_TARGET_CELLS = 512;
-/** 自适应接受的「非空 cell 数」区间；落进区间即停止调整（最多 6 轮）。 */
-const OPT_MIN_CELLS = 300;
-const OPT_MAX_CELLS = 800;
-/** cell 边长钳制区间（世界单位）：初值与每轮微调都被夹在区间内。 */
-const OPT_CELL_MIN = 128;
-const OPT_CELL_MAX = 4096;
-/**
- * 视锥外保留圈的半径膨胀系数（分块结束时乘到每块的包围球半径上）。
- * three 的视锥剔除按 geometry.boundingSphere 判定，膨胀后视锥外一圈的块仍参与渲染 ⇒
- * 快速转动时新进入视野的块上一帧已在画，边缘不闪空。只影响剔除判定，不改几何与材质。
- */
-const FRUSTUM_PAD = 1.6;
-
-/** 分块收集项：mesh + 它的世界包围盒中心（分桶键用）。 */
-interface OptMeshInfo {
-  mesh: THREE.Mesh;
-  cx: number;
-  cy: number;
-  cz: number;
-}
-
-/** cell 键：世界坐标三分量各除以 cellSize 后向下取整，拼成字符串（一次性分桶）。 */
-function optCellKey(x: number, y: number, z: number, cellSize: number): string {
-  return Math.floor(x / cellSize) + '|' + Math.floor(y / cellSize) + '|' + Math.floor(z / cellSize);
-}
-
-/** 统计给定 cellSize 下的非空 cell 数（cell 大小自适应循环用）。 */
-function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
-  const keys = new Set<string>();
-  for (const it of infos) keys.add(optCellKey(it.cx, it.cy, it.cz, cellSize));
-  return keys.size;
-}
 
 /** LOD 档位（写进 mesh.userData.lodLevel）：近距可见 / 超出剔除距离 / PVS 判定不可见。 */
 const LOD_NEAR = 0;
@@ -189,28 +151,11 @@ export class RendererMain {
   private mosaicManifest: Record<string, string> | null = null;
   /** 换成 mosaic 之前的原始贴图图像（键 = 纹理对象）；切回 `original` 时用它还原。 */
   private readonly origTextureImages = new Map<THREE.Texture, unknown>();
-
-  // ── 近平面贴墙自适应（防贴墙时 near 裁掉墙面、透视看到地图外）─────────
-  /** 探测距离默认值（HU）：`updateNearPlane` 的射线长度上限与包围球粗筛半径都由它推出。 */
-  private static readonly NEAR_PROBE_DIST_DEFAULT = 100;
-  /** near 允许的最小值（收缩与默认值都不得低于它）。 */
-  private static readonly CAMERA_NEAR_MIN = 0.05;
-  /** near 收缩系数默认值：命中几何时 near = 命中距离 × 本值。 */
-  private static readonly NEAR_RATIO_DEFAULT = 0.3;
-  /** 探测距离（HU，`setNearParams` 可改；面板「近平面探测距离」量程 16..128）。 */
-  private nearProbeDist = RendererMain.NEAR_PROBE_DIST_DEFAULT;
-  /** near 收缩系数（`setNearParams` 可改，只接受 (0, 1]；面板量程 0.1..1）。 */
-  private nearRatio = RendererMain.NEAR_RATIO_DEFAULT;
-  /** 场景默认 near（`loadScene` 取 maxDim/1000，下限 CAMERA_NEAR_MIN）；探测无命中时恢复它。 */
-  private defaultNear = 0.1;
-  /** 每 2 帧探测一次的开关（`tick` 里翻转）。 */
+  // 近平面贴墙自适应：字段与逻辑在 ./near-plane.ts 的 NearPlaneController（tick 每 2 帧调 update）。
+  private readonly nearPlane = new NearPlaneController();
+  /** 每 2 帧探测一次的开关（tick 里翻转）。 */
   private nearCheckToggle = false;
-  /** 复用的探测对象（避免每帧分配）：射线起点、粗筛用包围球、相机前/右方向、raycaster。 */
-  private readonly _nearOrigin = new THREE.Vector3();
-  private readonly _nearSphere = new THREE.Sphere();
-  private readonly _nearDirF = new THREE.Vector3();
-  private readonly _nearDirR = new THREE.Vector3();
-  private readonly _nearRaycaster = new THREE.Raycaster();
+
 
 
   /** 共享状态通道（SAB 实现或消息回退实现）；校准器从它读权威帧，`tick` 向它写输入与渲染采样。 */
@@ -316,46 +261,20 @@ export class RendererMain {
     if (!this.scene || !this.camera) return;
     this.disposeScene();
 
-    // 1. GLB → Scene
-    const gltf = await this.loadGlb(data.glb);
-    const scene = new THREE.Scene();
-    scene.userData.isBspModel = true;
-    this.resetRootRotations(gltf);
-    scene.add(gltf.scene);
-    scene.updateMatrixWorld(true);
-    const bbox = new THREE.Box3().setFromObject(scene);
-    const size = bbox.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-
-    // 1.1 中和 GLTFLoader 解析出的 KHR_lights_punctual 光源（**必须在挂进 this.scene 之前**）。
-    //     渲染面不施加这些灯：烘焙 lightmap 已含这些实体的贡献，运行时再打就是重复计光。
-    //
-    //     两处都必须对，缺一个就是整批几何不渲染：
-    //       (1) 位置：必须在 `this.scene.add(scene)` 之前做完。rAF 渲染循环此刻已在跑，若先挂进
-    //           场景再中和，中间那一帧就会带着这批灯去编译材质，超出片元 uniform 上限后该批 mesh
-    //           一个像素都不画（本方法内的 console.info 文案记录了该后果）。
-    //       (2) 手段：用 `removeFromParent()` 真正摘掉，而不是只置 `visible = false`——后者仍留在
-    //           场景树里被反复 traverse（本方法后面的 `traverse` 与 `optimizeScene` 都会遍历到），
-    //           且任何一处把 visible 置回 true 就会让受光材质的程序失效。
-    const lightsToRemove: THREE.Object3D[] = [];
-    scene.traverse((obj) => {
-      if ((obj as THREE.Light).isLight) lightsToRemove.push(obj);
-    });
-    for (const l of lightsToRemove) l.removeFromParent();
-    if (lightsToRemove.length > 0) {
-      console.info(
-        `[lights] GLB 携带 punctual 光源 ${lightsToRemove.length} 盏 → **已从场景树摘除**（不是仅 visible=false）。` +
-          '烘焙 lightmap 已含其贡献（VRAD），运行时再打会重复计光；' +
-          '且 2000+ 盏会把受光材质的 uniform 推到 1024 上限 ⇒ program 无效 ⇒ 该批 mesh 一个像素都不画。',
-      );
-    }
+    // 1. GLB → 子场景（新建 + isBspModel 标记 + 清根 rotation + 包围盒 + 摘 punctual 灯，
+    //    顺序约束详见 scene-builder.buildMapScene 的文档）：两处都必须对，缺一个就是整批几何不渲染——
+    //    (1) 摘灯必须在挂进主场景之前（rAF 已在跑，先挂再摘会让中间帧带灯编译材质，uniform 超限
+    //        ⇒ 该批 mesh 一个像素都不画）；(2) 必须 removeFromParent 真摘，visible=false 仍会被
+    //        traverse 且程序失效。
+    const { gltf, scene, bbox, maxDim } = await buildMapScene(data.glb);
 
     this.scene.add(scene); // 挂进主场景：此时 punctual 光源已摘除
 
     // 1.2 离线烘焙静态光照（lightmap atlas）：**必须**在 optimizeScene 之前施加。
     //     理由：lightmap 按原 mesh 的材质与 UV 通道施加并改写材质，而分块合并会重建几何与材质
-    //     数组；放到合并之后施加就找不到原来的材质映射。
-    await this.applyLightmap(scene, gltf);
+    //     数组；放到合并之后施加就找不到原来的材质映射。返回值落账 pendingInjectReport
+    //     （首帧后由 tick 统一统计注入生效性）。
+    this.pendingInjectReport = await applyLightmap(scene, gltf);
 
     // 1.3 装配顺序的其余约束：摘灯 → 施加 lightmap → 分块合并 → 受光材质终扫（合并会重建材质
     //     数组，所以终扫必须晚于合并、早于首次编译）。
@@ -363,7 +282,7 @@ export class RendererMain {
     // 1.5 空间分块合并（GLB 挂载后、PVS/LOD 注册前）：数万 mesh → 数百空间块。
     //     必须在下方 traverse（lodItems 收集 + clusterIds 分配）之前执行——那次 traverse 收集的是
     //     合并之后的块 mesh。
-    this.optimizeScene(scene, gltf.scene);
+    optimizeScene(scene, gltf.scene, this.camera, this.config?.hud?.fov ?? FOV_DEFAULT);
 
     // 1.55 装配后终扫：把仍带受光材质的 mesh（GLTFLoader 给 prop/派生网格的
     //      `MeshStandardMaterial`）收敛到 fullbright。本工程不加任何灯 ⇒ 受光材质只剩
@@ -391,9 +310,10 @@ export class RendererMain {
       console.warn('[render] 预编译着色器失败（不影响按需编译）:', err);
     }
 
-    // 2. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 updateNearPlane 收缩）
-    this.defaultNear = Math.max(maxDim / 1000, RendererMain.CAMERA_NEAR_MIN);
-    this.camera.near = this.defaultNear;
+    // 2. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 NearPlaneController.update 收缩）
+    const defaultNear = NearPlaneController.defaultNearForScene(maxDim);
+    this.nearPlane.setDefaultNear(defaultNear);
+    this.camera.near = defaultNear;
     this.camera.far = maxDim * 100;
     this.camera.updateProjectionMatrix();
 
@@ -552,81 +472,11 @@ export class RendererMain {
     this.resetSampleStream();
   }
 
-  /**
-   * 近平面自适应：以 (px, py, pz) 为射线起点，沿相机局部系的前/后/左/右四个水平方向在
-   * `nearProbeDist` 内探测最近的 BSP mesh；命中则把 `camera.near` 收到
-   * max(命中距离 × nearRatio, CAMERA_NEAR_MIN)，无命中恢复 `defaultNear`。
-   * 粗筛：包围球中心到起点的距离 < 探测距离 × 2 + 球半径 的 mesh 才进入射线检测。
-   * 只写 `camera.near`（变化超过 0.001 才更新投影矩阵）；由 `tick` 每 2 帧调用一次。
-   */
-  private updateNearPlane(px: number, py: number, pz: number): void {
-    const camera = this.camera;
-    if (!camera || !this.scene) return;
-    const probe = this.nearProbeDist;
-    this._nearOrigin.set(px, py, pz);
-
-    // 1. 包围球粗筛（BSP 模型子树）
-    const candidates: THREE.Mesh[] = [];
-    for (const root of this.scene.children) {
-      if (!root.userData?.isBspModel) continue;
-      root.traverse((obj) => {
-        if (!(obj as THREE.Mesh).isMesh) return;
-        const mesh = obj as THREE.Mesh;
-        const geom = mesh.geometry as THREE.BufferGeometry | null;
-        if (!geom) return;
-        if (!geom.boundingSphere) geom.computeBoundingSphere();
-        const bs = geom.boundingSphere;
-        if (!bs) return;
-        this._nearSphere.copy(bs).applyMatrix4(mesh.matrixWorld);
-        if (this._nearSphere.center.distanceTo(this._nearOrigin) < probe * 2 + this._nearSphere.radius) {
-          candidates.push(mesh);
-        }
-      });
-    }
-
-    // 2. 相机局部基向量 + 4 方向（4 水平正交）探测最近几何
-    let minD = Infinity;
-    if (candidates.length > 0) {
-      const q = camera.quaternion;
-      this._nearDirF.set(0, 0, -1).applyQuaternion(q);
-      const right = this._nearDirR.set(1, 0, 0).applyQuaternion(q);
-      const dirs = [
-        this._nearDirF,
-        this._nearDirF.clone().negate(),
-        right.clone(),
-        right.clone().negate(),
-      ];
-      for (const dir of dirs) {
-        this._nearRaycaster.set(this._nearOrigin, dir);
-        this._nearRaycaster.near = 0;
-        this._nearRaycaster.far = probe;
-        const hits = this._nearRaycaster.intersectObjects(candidates, false);
-        if (hits.length > 0 && hits[0].distance < minD) {
-          minD = hits[0].distance;
-        }
-      }
-    }
-
-    // 3. 设定 near（贴墙收缩，空旷恢复默认）
-    const target =
-      isFinite(minD)
-        ? Math.max(minD * this.nearRatio, RendererMain.CAMERA_NEAR_MIN)
-        : this.defaultNear;
-    if (Math.abs(camera.near - target) > 0.001) {
-      camera.near = target;
-      camera.updateProjectionMatrix();
-    }
-  }
-
-  /** 面板实时调整探测距离与收缩系数：两项都只在传入正数时写，ratio 还需 ≤ 1；下一帧探测生效。 */
+  /** 面板实时调整探测距离与收缩系数：转发 NearPlaneController.setParams（判据见该文件）。 */
   setNearParams(probeDist?: number, ratio?: number): void {
-    if (probeDist !== undefined && probeDist > 0) {
-      this.nearProbeDist = probeDist;
-    }
-    if (ratio !== undefined && ratio > 0 && ratio <= 1) {
-      this.nearRatio = ratio;
-    }
+    this.nearPlane.setParams(probeDist, ratio);
   }
+
 
   /** 设置视野角 FOV（度）：写相机并立刻更新投影矩阵；相机未建时忽略。 */
   setFov(fov: number): void {
@@ -914,7 +764,7 @@ export class RendererMain {
    *   上限 0.1s）→ `shared.addInput` 把输入交给 Worker 权威帧 → `correctFromAuthority` →
    *   `calibrateVelocity` → `predPhys.tick` → 把 dx/dy 清零（键位保留为按住状态）→ 冻结分支
    *   （`holdPoint` 非空时每帧写回该位姿且速度 0）→ 读 `state()` → 写渲染采样 →
-   *   相机 rotation/position → 每 2 帧跑一次 `updateNearPlane`；
+   *   相机 rotation/position → 每 2 帧调一次 NearPlaneController.update；
    * - 剔除分支：按 `cullDistance`（`ENABLE_PVS` 为真时再叠加 PVS 可见性）改 `mesh.visible`；
    * - 绘制：`renderer.render()`；若 `pendingInjectReport` 置位则在其后跑一次注入统计。
    * 副作用：写共享槽（输入与渲染采样）、改主线程物理状态、改相机与 mesh 可见性。
@@ -960,7 +810,7 @@ export class RendererMain {
       // 近平面贴墙自适应（每 2 帧一次）：贴墙收缩 near，防近平面把墙面裁掉
       this.nearCheckToggle = !this.nearCheckToggle;
       if (this.nearCheckToggle) {
-        this.updateNearPlane(st.posX, st.posY + st.eyeHeight, st.posZ);
+        this.nearPlane.update(this.camera, this.scene, st.posX, st.posY + st.eyeHeight, st.posZ);
       }
     }
 
@@ -1001,192 +851,10 @@ export class RendererMain {
     if (this.pendingInjectReport && !this.injectReported) {
       this.injectReported = true;
       this.pendingInjectReport = false;
-      this.reportInjectStatsOnce();
+      reportInjectStatsOnce(this.scene);
     }
   }
 
-  /**
-   * 注入生效性统计（由 `tick` 在首帧 `renderer.render()` 之后调用一次）。
-   *
-   * 统计口径：遍历场景材质上的 `__vbspLightmapInject` 记录，按 `skipped` / `expectedFail` /
-   * `applied` 分别计数，其余算失效并留最多 3 条样本。阶段名读 `globalThis.__vbspLightmapStage`：
-   * 命中 `KNOWN_STAGES` 就原样使用，否则一律按 `auto`。
-   * 阶段分支：`broken` 与 `noinject` 只告警，`native` 直接返回（走 three 原生 lightmap）；其余阶段
-   * 「有失效材质但一条注入都没生效」时置 `globalThis.__vbspLightmapInjectFailed` 并打 error
-   * （出帧脚本据此非零退出），只是部分失效则告警。
-   * 同一趟还会打印 ambient cube 与第 1 级逐顶点光照的接线统计，以及材质的 alpha 状态审计。
-   */
-  private reportInjectStatsOnce(): void {
-    if (!this.scene) return;
-    const stage = (globalThis as { __vbspLightmapStage?: unknown }).__vbspLightmapStage;
-    // 已知阶段名原样保留（`channel0` / `channel1` 是注入通道对照档、`noinject` 是可比负控）：
-    // 把对照档记成 `auto` 会让日志与出帧标签对不上
-    const KNOWN_STAGES = ['broken', 'native', 'off', 'channel0', 'channel1', 'noinject'];
-    const stageName = typeof stage === 'string' && KNOWN_STAGES.includes(stage) ? stage : 'auto';
-
-    let injectOk = 0;
-    let injectBad = 0;
-    let skipped = 0;
-    let expectedFail = 0;
-    const samples: unknown[] = [];
-    this.scene.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const mat of mats) {
-        if (!mat) continue;
-        const rec = (
-          mat as unknown as {
-            __vbspLightmapInject?: { applied?: boolean | null; skipped?: boolean; expectedFail?: boolean };
-            __vbspLightmapInjected?: boolean;
-          }
-        ).__vbspLightmapInject;
-        if (!rec) continue;
-        if (rec.skipped) skipped++;
-        else if (rec.expectedFail) expectedFail++;
-        else if (rec.applied) injectOk++;
-        else {
-          injectBad++;
-          if (samples.length < 3) samples.push(rec);
-        }
-      }
-    });
-
-    console.info(
-      `[lightmap] 注入生效性（首帧后统计，stage=${stageName}）：` +
-        `注入生效材质=${injectOk}，注入失效材质=${injectBad}，` +
-        `跳过=${skipped}，预期失败=${expectedFail}`,
-    );
-
-    // prop ambient cube 命中统计（hit/miss 按 mesh 调用计；nodes = 去重后的 cube 引用数）
-    const amb = (globalThis as { __vbspAmbientStats?: { hit: number; miss: number; nodes: Set<unknown> } })
-      .__vbspAmbientStats;
-    if (amb) {
-      console.info(
-        `[ambient-cube] 命中=${amb.hit} 未命中=${amb.miss} 节点=${amb.nodes.size}`,
-      );
-      // 材质级统计：遍历材质读 `__vbspAmbientInject.applied`
-      let ambOk = 0;
-      let ambBad = 0;
-      this.scene.traverse((obj) => {
-        const m = obj as THREE.Mesh;
-        if (!m.isMesh) return;
-        const mats = Array.isArray(m.material) ? m.material : [m.material];
-        for (const mat of mats) {
-          const rec = (mat as unknown as { __vbspAmbientInject?: { applied?: boolean } })
-            .__vbspAmbientInject;
-          if (!rec) continue;
-          if (rec.applied) ambOk++;
-          else ambBad++;
-        }
-      });
-      console.info(`[ambient-cube] applied=${ambOk} 失败=${ambBad}`);
-    }
-
-    // 第 1 级 prop 光照（逐顶点预烘焙 → `_VBSP_VLIGHT` 几何属性）的接线校验：走这一级的材质数、
-    // 注入是否生效、有没有失败。带属性却没注入记录的分两类：材质标了 `userData.unlit === true`
-    // 的自发光 VMT 本就不吃光照（正确），其余算真漏网并打 error。
-    {
-      let vlOk = 0;
-      let vlBad = 0;
-      let vlUnlit = 0;
-      let vlMissed = 0;
-      this.scene.traverse((obj) => {
-        const m = obj as THREE.Mesh;
-        if (!m.isMesh) return;
-        const g = m.geometry as THREE.BufferGeometry | undefined;
-        const hasAttr = !!g?.getAttribute?.(VERTEX_LIGHTING_ATTR);
-        const mats = Array.isArray(m.material) ? m.material : [m.material];
-        for (const mat of mats) {
-          const rec = (mat as unknown as { __vbspVertexLightingInject?: { applied?: boolean } })
-            .__vbspVertexLightingInject;
-          if (!rec) {
-            if (!hasAttr) continue;
-            const unlit = (mat?.userData as { unlit?: unknown } | undefined)?.unlit === true;
-            if (unlit) vlUnlit++;
-            else vlMissed++;
-            continue;
-          }
-          if (rec.applied) vlOk++;
-          else vlBad++;
-        }
-      });
-      if (vlOk + vlBad + vlUnlit + vlMissed > 0) {
-        const rs = getVertexLightingRelaxStats();
-        console.info(
-          `[vertex-lighting] 第 1 级（逐顶点预烘焙）注入：生效材质=${vlOk}，失败=${vlBad}，` +
-            `自发光 unlit（按 VMT 语义不吃光照，正确）=${vlUnlit}，**真漏网**=${vlMissed}`,
-        );
-        console.info(
-          `[vertex-lighting] 几何重建（${getPropVertexRelax() === 0 ? '**关闭**：原样使用烘焙值' : `平滑档 ${getPropVertexRelax()}`}）：` +
-            `mesh=${rs.meshes}，接缝焊接组=${rs.welded}，空间不一致顶点=${rs.medianFixed}，松弛遍数=${rs.relaxed}，` +
-            `方差压缩 mesh=${rs.flattened}（**跳过 ${rs.flattenSkipped}**：面内本来就一致 ⇒ 保留原样烘焙值，flatten=${getPropVertexFlatten()}），` +
-            `平均偏移=${(rs.meanAbsDelta * 100).toFixed(1)}%（单顶点最大 ${(rs.maxAbsDelta * 100).toFixed(1)}%，` +
-            `样本顶点=${rs.samples}）`,
-        );
-      }
-      if (vlMissed > 0) {
-        console.error(
-          `[vertex-lighting] 有 ${vlMissed} 个带 _VBSP_VLIGHT 的非 unlit mesh 没走到第 1 级材质 ⇒ 缺陷`,
-        );
-      }
-      // alpha 状态审计（铁丝网/格栅/玻璃这类材质的关键状态：替换材质若丢掉 alphaTest/side，
-      // $alphatest 的孔洞会变成实心板、单面材质会少一半）
-      let aCut = 0;
-      let aBlend = 0;
-      let aDouble = 0;
-      this.scene.traverse((obj) => {
-        const m = obj as THREE.Mesh;
-        if (!m.isMesh) return;
-        const mats = Array.isArray(m.material) ? m.material : [m.material];
-        for (const mat of mats) {
-          if (!mat) continue;
-          if ((mat as THREE.Material & { alphaTest?: number }).alphaTest &&
-            (mat as THREE.Material & { alphaTest?: number }).alphaTest! > 0) aCut++;
-          if (mat.transparent) aBlend++;
-          if ((mat as THREE.Material & { side?: number }).side === THREE.DoubleSide) aDouble++;
-        }
-      });
-      console.info(
-        `[alpha] 场景材质 alpha 状态：alphaTest>0 判 =${aCut}，transparent=${aBlend}，双面=${aDouble}` +
-          `（GLB 侧：MASK=8 / BLEND=11 / 无贴图=18；裁切/混合若在此丢失即为铁丝网、格栅、玻璃整片不透的根因）`,
-      );
-    }
-
-    if (stageName === 'broken') {
-      // broken：预期注入失效，只告警不打 error（免得出帧负控帧被污染）
-      console.warn(
-        `[lightmap] stage=broken（负控）：注入预期失效 —— 预期失败材质=${expectedFail}、生效=${injectOk}。`,
-      );
-      return;
-    }
-    if (stageName === 'native') {
-      // native：按设计走 three 原生 lightmap 采样，不计失败
-      return;
-    }
-    if (stageName === 'noinject') {
-      // noinject：材质照换、只是不注入 ⇒ 本来就没有 `__vbspLightmapInject` 记录，
-      // injectOk = injectBad = 0 属预期，不得报"注入全失效"
-      console.warn(
-        '[lightmap] stage=noinject（可比负控）：材质替换保留、仅停用 shader 注入 ⇒ ' +
-          '无注入记录属预期；画面预期退回无烘焙光照，且场景构成与 auto 相同（可比）。',
-      );
-      return;
-    }
-    if (injectOk === 0 && injectBad > 0) {
-      const message =
-        '[lightmap] 施加了材质但**没有任何一个注入生效** —— fragment 里找不到可替换的 ' +
-        'lightmap 块（three 版本漂移？）。地图将只剩贴图、无烘焙光照。样本：' +
-        JSON.stringify(samples);
-      (globalThis as { __vbspLightmapInjectFailed?: boolean }).__vbspLightmapInjectFailed = true;
-      console.error(message);
-    } else if (injectBad > 0) {
-      console.warn(
-        `[lightmap] 有 ${injectBad} 个材质注入失效（成功 ${injectOk} 个）。样本：` +
-          JSON.stringify(samples),
-      );
-    }
-  }
 
   /** 画布尺寸变化：同步 renderer 尺寸与相机宽高比（高度为 0 时按 1 处理）。 */
   resize(width: number, height: number): void {
@@ -1205,60 +873,6 @@ export class RendererMain {
     this.cullDistance = dist > 0 ? dist : this.autoCullDistance;
   }
 
-  // ── GLB 加载 ───────────────────────────────────────────────
-
-  /** 复用的 GLTFLoader（`loadGlb` 每次 `loadAsync`）。 */
-  private readonly gltfLoader = new GLTFLoader();
-
-  /** GLB 字节 → GLTF：先把字节拷进新的 `Uint8Array` 再交给 Blob URL，`finally` 里注销该 URL。 */
-  private async loadGlb(glbBytes: ArrayBuffer): Promise<GLTF> {
-    const buffer = new Uint8Array(glbBytes.byteLength);
-    buffer.set(new Uint8Array(glbBytes));
-    const blob = new Blob([buffer], { type: 'model/gltf-binary' });
-    const url = URL.createObjectURL(blob);
-    try {
-      return await this.gltfLoader.loadAsync(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  }
-
-  /**
-   * 施加离线烘焙静态光照（lightmap atlas）。
-   *
-   * 契约：图集纹理由 `src/wasm-core/bsp_to_gltf_core/lightmap.rs` 写进 GLB，位置由
-   * `src/renderer-shared/shader/lightmap-shader.ts` 的 `loadLightmapAtlas` 解析（`asset.extras.lightmap`
-   * 或 `scene.userData.extras.lightmap` 的 `textureIndex`）；图元侧带 `TEXCOORD_1` 与
-   * `extras.hasLightmap`（落在 geometry.userData）。
-   * 没有图集时只打日志返回；施加数与 atlas 尺寸打日志；施加成功时置 `pendingInjectReport`，
-   * 把生效性统计留给首帧之后的 `tick`。异常只告警，不阻断场景加载。
-   */
-  private async applyLightmap(scene: THREE.Scene, gltf: GLTF): Promise<void> {
-    try {
-      // atlas 在两种光照模式下都要加载：模式只是片元里的共享 uniform 分支（`vbspBakedMix`），
-      // 纯纹理模式下若不带 atlas，面板切回预烘焙就得重建场景
-      const atlas = await loadLightmapAtlas(gltf.parser, gltf);
-      if (!atlas) {
-        console.info('[lightmap] GLB 未携带 atlas（asset.extras.lightmap 缺失），跳过静态光照');
-        return;
-      }
-      const applied = applyLightmapToMeshes(scene, atlas);
-      const image = atlas?.image as { width?: number; height?: number } | undefined;
-      // 这里不做注入生效性统计：本方法在建场景时调用，three 还没编译材质，onBeforeCompile 尚未
-      // 回填注入记录 ⇒ 统计只会得到全 0。统计放到首帧渲染之后，见 tick 里的 reportInjectStatsOnce，
-      // 口径与 __vbspFrameProbe.lightmapState() 一致。
-      console.info(
-        `[lightmap] 光照模式=${getLightingMode()}，atlas ${image?.width ?? 0}×${image?.height ?? 0}，施加 mesh=${applied}`,
-      );
-      if (applied === 0) {
-        console.warn('[lightmap] atlas 存在但未施加到任何 mesh（无 TEXCOORD_1 或 hasLightmap 全为 false）');
-      }
-      // 首帧后统一统计（幂等；由 tick 调用）
-      this.pendingInjectReport = applied > 0;
-    } catch (err) {
-      console.error('[lightmap] 施加离线烘焙光照失败:', err);
-    }
-  }
 
   /**
    * 切换光照模式（面板「预烘焙 / 纯纹理」）：只改共享 uniform，立即生效。
@@ -1280,233 +894,7 @@ export class RendererMain {
     return getLightingMode();
   }
 
-  /** 清零 GLB 根子节点的 rotation（有非零分量才写并立即刷新该子树的矩阵），最后整体更新 matrixWorld。
-   *  在包围盒与分块计算之前调用，保证后面的世界变换基准一致。 */
-  private resetRootRotations(gltf: GLTF): void {
-    for (const child of gltf.scene.children) {
-      if (child.rotation.x !== 0 || child.rotation.y !== 0 || child.rotation.z !== 0) {
-        child.rotation.set(0, 0, 0);
-        child.updateMatrixWorld();
-      }
-    }
-    gltf.scene.updateMatrixWorld(true);
-  }
 
-  // ── 空间分块合并（loadScene 里挂载完 GLB 后执行一次）─────────────
-  // 目的：把 GLTFLoader 逐 primitive 生成的数万个 Mesh 收敛成数百个空间块，降低每帧遍历与 draw call
-  // 数量。载体是 BSP 场景根（`userData.isBspModel` 保持不变）：块 mesh 直接挂到它下面，原 GLB 子树移除。
-  // 流程：
-  // ① 更新世界矩阵 → traverse 收集单材质 Mesh（记下世界包围盒中心）；多材质 Mesh 烘焙到世界空间后
-  //    整体保留、无材质 Mesh 原样跳过，两者都不参与分块；
-  // ② cell 边长自适应：世界包围盒对角线 / cbrt(OPT_TARGET_CELLS)，再按非空 cell 数微调（最多 6 轮）；
-  // ③ 按世界包围盒中心把 Mesh 分桶到 cell；
-  // ④ 逐 cell 合并：单 Mesh 的 cell 保留原 Mesh（几何烘焙到世界空间、变换清零）；多 Mesh 的 cell
-  //    先按材质实例分组子合并，再 mergeGeometries(useGroups = true) 合成一个 Mesh + 材质数组；
-  //    合并失败的分支回退为保留各自独立几何；
-  // ⑤ 替换场景内容，并给每块重算包围球后乘 FRUSTUM_PAD；
-  // ⑥ 打印统计与「前向视锥可见块」估算（用 this.camera 与当前 FOV 粗估，仅诊断）。
-  private optimizeScene(bspRoot: THREE.Scene, gltfScene: THREE.Object3D): void {
-    // ① 收集：先刷新 matrixWorld 作为世界变换基准。多材质 mesh（GLB primitive 恒单材质，此处是
-    //    防御路径）烘焙到世界空间后保留；无材质 mesh 原样跳过。两者都不参与分块
-    bspRoot.updateMatrixWorld(true);
-    const infos: OptMeshInfo[] = [];
-    const keptMeshes: THREE.Mesh[] = [];
-    const worldBox = new THREE.Box3();
-    const box = new THREE.Box3();
-    const center = new THREE.Vector3();
-    bspRoot.traverse((obj) => {
-      const m = obj as THREE.Mesh;
-      if (!m.isMesh) return;
-      if (!m.geometry || !m.geometry.attributes.position) return;
-      if (Array.isArray(m.material) || !m.material) {
-        // 多材质：烘焙到世界空间后整体保留（不参与分块合并）
-        if (Array.isArray(m.material)) {
-          const baked = m.geometry.clone();
-          baked.applyMatrix4(m.matrixWorld);
-          m.geometry.dispose();
-          m.geometry = baked;
-          m.position.set(0, 0, 0);
-          m.rotation.set(0, 0, 0);
-          m.scale.set(1, 1, 1);
-          m.updateMatrix();
-          keptMeshes.push(m);
-        }
-        return;
-      }
-      const g = m.geometry;
-      if (!g.boundingBox) g.computeBoundingBox();
-      if (!g.boundingBox) return;
-      box.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
-      worldBox.union(box);
-      box.getCenter(center);
-      infos.push({ mesh: m, cx: center.x, cy: center.y, cz: center.z });
-    });
-    if (infos.length === 0) return;
-
-    // ①b 合并失败不丢几何：`mergeGeometries` 在属性集不一致时返回 null，而本函数每一处失败分支
-    //     都回退成「保留各自独立几何」，不存在"合并失败就丢弃"的路径。
-
-    // ② cell 边长自适应：初值取世界包围盒对角线 / cbrt(目标块数)，随后按非空 cell 数缩放（收敛到
-    //    OPT_MIN_CELLS..OPT_MAX_CELLS）
-    const diag = Math.max(worldBox.getSize(new THREE.Vector3()).length(), 1);
-    let cellSize = Math.min(Math.max(diag / Math.cbrt(OPT_TARGET_CELLS), OPT_CELL_MIN), OPT_CELL_MAX);
-    for (let i = 0; i < 6; i++) {
-      const n = optCountCells(infos, cellSize);
-      if (n >= OPT_MIN_CELLS && n <= OPT_MAX_CELLS) break;
-      const scale = Math.min(Math.max(Math.cbrt(n / OPT_TARGET_CELLS), 0.55), 1.8);
-      cellSize = Math.min(Math.max(cellSize * scale, OPT_CELL_MIN), OPT_CELL_MAX);
-    }
-
-    // ③ 分桶：按每个 mesh 的世界包围盒中心归 cell（横跨多 cell 的归中心所在 cell）
-    const cells = new Map<string, OptMeshInfo[]>();
-    for (const it of infos) {
-      const key = optCellKey(it.cx, it.cy, it.cz, cellSize);
-      let arr = cells.get(key);
-      if (!arr) {
-        arr = [];
-        cells.set(key, arr);
-      }
-      arr.push(it);
-    }
-
-    // ④ 合并 + 替换：单 mesh 的 cell 保留原 mesh（几何烘焙到世界空间、变换清零）；多 mesh 的 cell
-    //    先按材质实例子合并，再 mergeGeometries(useGroups = true) 合成一个 Mesh + 材质数组
-    //    （groups 与材质数组下标一一对应）
-    const chunks: THREE.Mesh[] = [];
-    let chunkCount = 0;
-    let drawCallEst = 0;
-    let vertsTotal = 0;
-    for (const arr of cells.values()) {
-      if (arr.length === 1) {
-        const m = arr[0].mesh;
-        const baked = m.geometry.clone();
-        baked.applyMatrix4(m.matrixWorld);
-        m.geometry.dispose();
-        m.geometry = baked;
-        m.position.set(0, 0, 0);
-        m.rotation.set(0, 0, 0);
-        m.scale.set(1, 1, 1);
-        m.updateMatrix();
-        chunks.push(m);
-        chunkCount++;
-        drawCallEst++;
-        vertsTotal += baked.attributes.position.count;
-        continue;
-      }
-
-      // 多 mesh cell：按材质实例分组，组内合并成一个几何（每组对应一个材质槽）
-      const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
-      for (const it of arr) {
-        const m = it.mesh;
-        const mat = m.material as THREE.Material;
-        const baked = m.geometry.clone();
-        baked.applyMatrix4(m.matrixWorld);
-        let list = byMat.get(mat);
-        if (!list) {
-          list = [];
-          byMat.set(mat, list);
-        }
-        list.push(baked);
-      }
-      const mergedGeoms: THREE.BufferGeometry[] = [];
-      const mats: THREE.Material[] = [];
-      for (const [mat, geoms] of byMat) {
-        let merged: THREE.BufferGeometry[];
-        if (geoms.length === 1) {
-          merged = geoms;
-        } else {
-          const mg = mergeGeometries(geoms, false);
-          if (mg) {
-            for (const g of geoms) g.dispose();
-            merged = [mg];
-          } else {
-            merged = geoms; // 属性不一致（防御分支）：保留各自独立几何
-          }
-        }
-        for (const g of merged) {
-          mergedGeoms.push(g);
-          mats.push(mat);
-        }
-      }
-      if (mergedGeoms.length === 0) {
-        for (const it of arr) it.mesh.geometry.dispose();
-        continue;
-      }
-      let chunk: THREE.Mesh;
-      if (mergedGeoms.length === 1) {
-        chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
-        drawCallEst++;
-      } else {
-        const final = mergeGeometries(mergedGeoms, true);
-        if (final) {
-          for (const g of mergedGeoms) if (g !== final) g.dispose();
-          chunk = new THREE.Mesh(final, mats);
-          drawCallEst += final.groups.length;
-        } else {
-          // 最终合并失败（极端防御）：每个材质单独一块
-          chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
-          for (let i = 1; i < mergedGeoms.length; i++) {
-            chunks.push(new THREE.Mesh(mergedGeoms[i], mats[i]));
-            chunkCount++;
-            drawCallEst++;
-          }
-        }
-      }
-      for (const it of arr) it.mesh.geometry.dispose();
-      chunkCount++;
-      for (const g of mergedGeoms) vertsTotal += g.attributes.position.count;
-      chunks.push(chunk);
-    }
-
-    // ④b 替换：块 mesh 与保留 mesh 直接挂到 BSP 根（`add` 会自动让它们脱离原父节点），随后移除原
-    //     GLB 子树（旧几何已在上面逐个 dispose）。`bspRoot.userData.isBspModel` 保持不变——
-    //     disposeScene 与 updateNearPlane 都依赖它
-    const totalMeshes = infos.length;
-    for (const m of chunks) bspRoot.add(m);
-    for (const m of keptMeshes) bspRoot.add(m);
-    bspRoot.remove(gltfScene);
-
-    // ④c 视锥外保留一圈：给每块的包围球半径乘 FRUSTUM_PAD。必须无条件重算包围球（不能只判 null）：
-    //    烘焙路径是 geometry.clone() + applyMatrix4(matrixWorld)，克隆会带上 GLB 局部空间的旧球
-    //    （非 null，不重算就会被当成有效值）⇒ 剔除按错误位置判定、眼前的块被误剔。顶点已烘焙到世界
-    //    空间，重算才是对的。只影响剔除判定，不改几何与包围盒
-    for (const child of bspRoot.children) {
-      const g = (child as THREE.Mesh).geometry;
-      if (!g) continue;
-      g.computeBoundingSphere();
-      (g.boundingSphere as THREE.Sphere).radius *= FRUSTUM_PAD;
-    }
-
-    // ⑤ 统计 + 前向视锥可见块估算（块中心与相机方向的点积粗估，FOV 取 config.hud.fov）
-    const chunkBox = new THREE.Box3();
-    const chunkCenter = new THREE.Vector3();
-    const toCam = new THREE.Vector3();
-    let visibleEst = -1;
-    const camera = this.camera;
-    if (camera) {
-      camera.updateMatrixWorld(true);
-      const camDir = new THREE.Vector3();
-      camera.getWorldDirection(camDir);
-      const cosHalfFov = Math.cos(((this.config?.hud?.fov ?? FOV_DEFAULT) / 2) * DEG2RAD);
-      visibleEst = 0;
-      for (const child of bspRoot.children) {
-        const mesh = child as THREE.Mesh;
-        chunkBox.setFromObject(mesh);
-        if (chunkBox.isEmpty()) continue;
-        chunkBox.getCenter(chunkCenter);
-        toCam.subVectors(chunkCenter, camera.position);
-        const dist = toCam.length();
-        if (dist < camera.far && toCam.dot(camDir) / dist > cosHalfFov) visibleEst++;
-      }
-    }
-    console.log(
-      `[optimizeScene] 分块合并: ${totalMeshes} mesh → ${chunkCount} 块` +
-        `（cellSize=${cellSize.toFixed(1)}、非空 cell=${cells.size}）| ` +
-        `平均顶点/块 ${(vertsTotal / Math.max(chunkCount, 1)).toFixed(0)}（总顶点 ${vertsTotal}）| ` +
-        `draw call 估算 ${drawCallEst} | ` +
-        `前向视锥可见块估算 ${visibleEst >= 0 ? `${visibleEst}/${chunkCount}` : 'N/A（camera 未就绪）'}`,
-    );
-  }
 
   // ── 出帧探针（验证仪器；只往 globalThis 挂一个对象，不参与渲染逻辑）──────────────────
   /**
