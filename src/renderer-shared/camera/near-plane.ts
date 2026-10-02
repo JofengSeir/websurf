@@ -1,8 +1,8 @@
 /**
  * 近平面贴墙自适应控制器：防贴墙时 near 裁掉墙面、透视看到地图外。
  *
- * 2026-10-02 自 apps/game/src/renderer/renderer-main.ts 的 updateNearPlane 私有方法与
- * nearProbeDist / nearRatio / defaultNear 字段及五个复用探测对象原样抽出（逻辑零改动；
+ * 2026-10-02 自 apps/game/src/renderer/renderer-main.ts 的 updateNearPlane 私有方法与（现居渲染共享层，
+ * game 经 tsconfig include 收编）nearProbeDist / nearRatio / defaultNear 字段及五个复用探测对象原样抽出（逻辑零改动；
  * camera / scene 由调用方每次传入，不再读渲染器类字段）。由 renderer-main 的 `tick`
  * 每 2 帧调用一次 `update`（节流开关留在调用方）。
  */

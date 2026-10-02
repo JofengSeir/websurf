@@ -5,7 +5,7 @@
  */
 
 import * as THREE from 'three';
-import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, getPropVertexFlatten } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, getPropVertexFlatten } from '../shader/lightmap-shader.js';
   /**
    * 注入生效性统计（由 renderer-main 的 `tick` 在首帧 `renderer.render()` 之后调用一次；2026-10-02 自同名私有方法原样抽出，入参 = 渲染场景）。
    *

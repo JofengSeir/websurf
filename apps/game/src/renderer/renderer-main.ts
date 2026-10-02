@@ -39,10 +39,10 @@ import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-ca
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
-import { optimizeScene } from './scene-optimizer.js';
-import { reportInjectStatsOnce } from './inject-stats.js';
-import { buildMapScene, applyLightmap } from './scene-builder.js';
-import { NearPlaneController } from './near-plane.js';
+import { optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inject-stats.js';
+import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
+import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
 import { fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
