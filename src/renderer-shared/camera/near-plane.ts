@@ -15,6 +15,12 @@ const NEAR_PROBE_DIST_DEFAULT = 100;
 /** near 收缩系数默认值：命中几何时 near = 命中距离 × 本值。 */
 const NEAR_RATIO_DEFAULT = 0.3;
 
+/** `update` 的可选参数：`roots` 给出候选收集的根子树（省略时按 game 口径取 `scene.children` 里带 `isBspModel` 标记的根）；`vertical` 为 true 时补上/下两个垂直探测方向（自由飞行相机要贴地/贴顶，viewer 用）。 */
+export interface NearPlaneOptions {
+  roots?: THREE.Object3D[];
+  vertical?: boolean;
+}
+
 export class NearPlaneController {
   /** 探测距离（HU，`setParams` 可改；面板「近平面探测距离」量程 16..128）。 */
   private nearProbeDist = NEAR_PROBE_DIST_DEFAULT;
@@ -56,15 +62,16 @@ export class NearPlaneController {
    * 粗筛：包围球中心到起点的距离 < 探测距离 × 2 + 球半径 的 mesh 才进入射线检测。
    * 只写 `camera.near`（变化超过 0.001 才更新投影矩阵）；由 `tick` 每 2 帧调用一次。
    */
-  update(camera: THREE.PerspectiveCamera | null, scene: THREE.Scene | null, px: number, py: number, pz: number): void {
+  update(camera: THREE.PerspectiveCamera | null, scene: THREE.Scene | null, px: number, py: number, pz: number, opts?: NearPlaneOptions): void {
     if (!camera || !scene) return;
     const probe = this.nearProbeDist;
     this._nearOrigin.set(px, py, pz);
 
-    // 1. 包围球粗筛（BSP 模型子树）
+    // 1. 包围球粗筛（game：scene.children 里带 isBspModel 标记的根；viewer：opts.roots 直通，
+    //    通常是地图 modelRoot 子树——不要求 isBspModel 标记）
     const candidates: THREE.Mesh[] = [];
-    for (const root of scene.children) {
-      if (!root.userData?.isBspModel) continue;
+    const collectRoots = opts?.roots ?? Array.from(scene.children).filter((r) => r.userData?.isBspModel);
+    for (const root of collectRoots) {
       root.traverse((obj) => {
         if (!(obj as THREE.Mesh).isMesh) return;
         const mesh = obj as THREE.Mesh;
@@ -80,7 +87,8 @@ export class NearPlaneController {
       });
     }
 
-    // 2. 相机局部基向量 + 4 方向（4 水平正交）探测最近几何
+    // 2. 相机局部基向量 + 4 水平正交方向探测最近几何；opts.vertical 为 true 时补上/下两向
+    //    （自由飞行相机会贴地/贴顶——viewer 用；game 只探水平，保持 4 向）
     let minD = Infinity;
     if (candidates.length > 0) {
       const q = camera.quaternion;
@@ -92,6 +100,10 @@ export class NearPlaneController {
         right.clone(),
         right.clone().negate(),
       ];
+      if (opts?.vertical) {
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+        dirs.push(up, up.clone().negate());
+      }
       for (const dir of dirs) {
         this._nearRaycaster.set(this._nearOrigin, dir);
         this._nearRaycaster.near = 0;

@@ -9,13 +9,14 @@
  *   `MOUSE_MAX_DELTA` 单位 px，是**单次事件**的绝对值上限（`FlyCam.delta`）。
  *
  * 跨工程对齐（逐值核对 apps/game 与 apps/debug 的同名量）：
- * `FOV` 73.6 对齐 `apps/game/src/config.ts` 的 `fov` 默认值；`CAMERA_NEAR_MIN` 0.05、
- * `NEAR_PROBE_DIST` 100、`NEAR_RATIO` 0.3、`CAMERA_FAR_SCALE` 100 分别对齐
- * `apps/game/src/renderer/renderer-main.ts` 的 `CAMERA_NEAR_MIN`、`NEAR_PROBE_DIST_DEFAULT`、
- * `NEAR_RATIO_DEFAULT` 与 `far = maxDim * 100`；`CAMERA_INIT_NEAR` 0.1、
- * `CAMERA_INIT_FAR` 100000 与 `BG_COLOR` 0x0d1b2a 只属本工程。
+ * `FOV` 73.6 对齐 `apps/game/src/config.ts` 的 `fov` 默认值；`CAMERA_FAR_SCALE` 100 对齐
+ * `apps/game/src/renderer/renderer-main.ts` 的 `far = maxDim * 100`；近平面三参数
+ * （near 下限 0.05、探测距离 100、收缩系数 0.3）2026-10-03 起由渲染共享层
+ * `src/renderer-shared/camera/near-plane.ts` 的默认值承载（数值与这里曾写的一致），本文件
+ * 不再重复声明；`CAMERA_INIT_NEAR` 0.1、`CAMERA_INIT_FAR` 100000 与 `BG_COLOR` 0x0d1b2a
+ * 只属本工程。
  *
- * 消费点：`apps/viewer/src/core/scene.ts`（相机、背景、near/far 与探测参数）、
+ * 消费点：`apps/viewer/src/core/scene.ts`（相机、背景、near/far）、
  * `apps/viewer/src/core/fly.ts`（速度、灵敏度、pitch 限幅）、
  * `apps/viewer/src/replay/helpers.ts`（`PITCH_LIMIT_DEG`）。
  * `RAD2DEG` 在本仓 `apps/viewer/src` 内零调用点。
@@ -41,12 +42,6 @@ export const CAMERA_INIT_NEAR = 0.1;
 export const CAMERA_INIT_FAR = 100000;
 /** 地图加载后 far = maxDim × 此值，再与 `CAMERA_INIT_FAR` 取大（`ViewerScene.fitCamera`）。 */
 export const CAMERA_FAR_SCALE = 100;
-/** near 下限（HU）：`ViewerScene.fitCamera` 与 `updateNearPlane` 收缩 near 时都不得低于它。 */
-export const CAMERA_NEAR_MIN = 0.05;
-/** 近平面探测距离默认（HU）：`updateNearPlane` 的射线 far，也是包围球粗筛的距离基数。 */
-export const NEAR_PROBE_DIST = 100;
-/** near 收缩系数默认：near = 最近命中距离 × 此值，再与 `CAMERA_NEAR_MIN` 取大。 */
-export const NEAR_RATIO = 0.3;
 export const BG_COLOR = 0x0d1b2a;
 
 /** 自由飞行速度（HU/s）：`FlyCam.update` 每帧位移 = 归一化方向 × 速度 × dt；`FLY_SPEED_FAST` 为 ×4（按住左右 Shift）。 */

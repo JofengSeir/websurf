@@ -21,7 +21,7 @@
 | 路径 | 职责 | 关键锚点 |
 |---|---|---|
 | `apps/viewer/src/app.ts` | 主线程装配入口：画布、场景、飞行相机、面板、按内容的导入分派 `routeFile`、URL 深链、帧循环、`globalThis.viewer` 接口 | `apps/viewer/src/app.ts:48`、`apps/viewer/src/app.ts:612`、`apps/viewer/src/app.ts:750` |
-| `apps/viewer/src/core/` | BSP 加载与 WASM 懒初始化、three 场景与光照模式、自由飞行相机、位姿、常量、DOM 构件、出生点解析、导入文件的类型识别 | `apps/viewer/src/core/bsp.ts:74`、`apps/viewer/src/core/scene.ts:356`、`apps/viewer/src/core/fly.ts:84`、`apps/viewer/src/core/spawn.ts:96`、`apps/viewer/src/core/filekind.ts:62` |
+| `apps/viewer/src/core/` | BSP 加载与 WASM 懒初始化、three 场景与光照模式、自由飞行相机、位姿、常量、DOM 构件、出生点解析、导入文件的类型识别 | `apps/viewer/src/core/bsp.ts:74`、`apps/viewer/src/core/scene.ts:35`（ViewerScene，装配/光照/合并/近平面 2026-10-03 起走渲染共享层）、`apps/viewer/src/core/fly.ts:84`、`apps/viewer/src/core/spawn.ts:96`、`apps/viewer/src/core/filekind.ts:62` |
 | `apps/viewer/src/replay/` | 记录（`.replay`）/ 录像（`.dem`）两条链路各持一份**独立回放会话**（`session.ts` 的 `ReplaySession`）、`.replay` 原生解析、导入与 Worker 协议、播放器与采样、多轨道容器、3D 呈现、记录 / 录像面板、轨迹列表、时间轴、人工变换 | `apps/viewer/src/replay/shavit-replay.ts:284`、`apps/viewer/src/replay/session.ts:62`、`apps/viewer/src/replay/player.ts:17`、`apps/viewer/src/replay/timeline.ts:52` |
 | `apps/viewer/src/ui/` | HUD 与引导层、地图信息与出生点导航、记录信息条、**录像信息条**、遥测 HUD | `apps/viewer/src/ui/hud.ts:21`、`apps/viewer/src/ui/mapinfo.ts:129`、`apps/viewer/src/ui/demometa.ts:33`、`apps/viewer/src/ui/telemetry.ts:64` |
 | `src/renderer-shared/`（仓库根，跨工程共享层） | 静态光照着色器单实例：RGBExp32 图集解码注入 + prop 三级光照路由（2026-10-02 由三工程各自的 `apps/<app>/src/renderer/lightmap-shader.ts` 合并而来，viewer 的 `src/renderer/` 目录因此清空） | `src/renderer-shared/shader/lightmap-shader.ts:482`、`src/renderer-shared/shader/lightmap-shader.ts:374` |
@@ -43,8 +43,8 @@
 | 共享 TS 运行时 `src/ts-shared/wasm/loader.ts` | 相对路径 import | `apps/viewer/src/core/bsp.ts:18` 取 `base64ToBytes` 与 `readEmbeddedWasmB64` |
 | 共享 TS 角度实现 `src/ts-shared/phys/angles.ts` | 相对路径再导出 | `apps/viewer/src/core/pose.ts:22` 再导出 `wrapDeg` / `bspYawToCsYaw`，再由 `apps/viewer/src/replay/helpers.ts:10` 与 `apps/viewer/src/core/spawn.ts:27` 消费 |
 | 共享眼高常量 `src/ts-shared/phys/constants.ts` | 相对路径再导出 | `apps/viewer/src/core/constants.ts:35` 再导出 `EYE_STAND` |
-| 共享渲染层 `src/renderer-shared/shader/lightmap-shader.ts` | tsconfig include 跨目录收编 + 深层相对路径 import | `apps/viewer/src/core/scene.ts:42`（运行时导入）与 `apps/viewer/src/ui/mapinfo.ts:23`（仅 `LightingMode` 类型）；three 依赖由根级 `package.json:6` 声明 |
-| `three` 运行时 | 仓库根 `package.json:6`（单实例，2026-10-02 上收） | 场景、相机、材质、`GLTFLoader`、`mergeGeometries`（`apps/viewer/src/core/scene.ts:26`） |
+| 共享渲染层 `src/renderer-shared/{shader,scene,camera}/` | tsconfig include 跨目录收编 + 深层相对路径 import（2026-10-03 起 viewer 消费 shader + scene-builder/scene-optimizer + near-plane） | `apps/viewer/src/core/scene.ts:14` 到 `apps/viewer/src/core/scene.ts:26`（导入面）与 `apps/viewer/src/ui/mapinfo.ts:23`（仅 `LightingMode` 类型）；three 依赖由根级 `package.json:6` 声明 |
+| `three` 运行时 | 仓库根 `package.json:6`（单实例，2026-10-02 上收） | 场景、相机、材质、`GLTFLoader`（viewer 场景面：`apps/viewer/src/core/scene.ts:13`；`mergeGeometries` 已随合并下沉共享 scene-optimizer） |
 | TypeScript 程序面 | `apps/viewer/tsconfig.json:15` 的 `include` 含 `../../src/ts-shared/**/*.ts` 与 `../../src/renderer-shared/**/*.ts` | 共享层 TS 文件参与本工程 `tsc --noEmit` |
 | vendored `vmdl` | `apps/viewer/Cargo.toml:12` 的 `[patch.crates-io]` | `apps/viewer/crates/wasm/Cargo.toml:30` 的 `vmdl = "0.2"`（PAKFILE 内嵌模型解析） |
 
@@ -92,12 +92,12 @@
 |---|---|---|
 | GLB 导出必须是 `BspProcessor` 的最后一次调用 | `export_glb_with_pakfile_models` 取走内部 `Bsp`，之后再调另两个方法返回错误 | `apps/viewer/crates/wasm/src/lib.rs:496`、`apps/viewer/crates/wasm/src/lib.rs:351` |
 | `loadBspFile` 的三步顺序固定为 metadata → spawn → GLB | 前两步是借用方法、第三步消耗实例 | `apps/viewer/src/core/bsp.ts:122` 到 `apps/viewer/src/core/bsp.ts:125` |
-| 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序写在 `mountGlb` 里 | `apps/viewer/src/core/scene.ts:200`、`apps/viewer/src/core/scene.ts:203` |
-| 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / `updateNearPlane` / `optimizeScene` / 换图释放的唯一范围 | `apps/viewer/src/core/scene.ts:77`、`apps/viewer/src/core/scene.ts:146` |
+| 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序由共享 buildMapScene/applyLightmap 与 mountGlb 的编排共同固定 | `apps/viewer/src/core/scene.ts:148`、`apps/viewer/src/core/scene.ts:154` |
+| | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / 近平面候选 / 分块合并 / 换图释放的唯一范围（2026-10-03 起根仍是 Scene（共享 buildMapScene 产物），替换走 `mountGlb`） | `apps/viewer/src/core/scene.ts:41`、`apps/viewer/src/core/scene.ts:143` 到 `apps/viewer/src/core/scene.ts:144` |
 | 相机每帧只被一个写者写 | 只有**上场会话**给得出第一人称采样（`ReplaySession.cameraSample()` 对下场的会话恒返回 `null`，`apps/viewer/src/replay/session.ts:161`）：有采样时把 `fly.drivesCamera` 与 `fly.allowMove` 置假并用 `applyToWithRoll` 写相机；否则由 `FlyCam.update` + `applyTo` 写 | `apps/viewer/src/app.ts:974` 到 `apps/viewer/src/app.ts:993`、`apps/viewer/src/core/fly.ts:196` |
 | 位姿角一律用度、弧度只在 `FlyCam` 内部 | `Pose.ang` 是度；`setPose` / `setWorld` 在边界处换算 | `apps/viewer/src/core/pose.ts:27`、`apps/viewer/src/core/fly.ts:207` |
 | 采样二分要求时间轴单调不减 | `.replay` 路径由 `t(i) = (i − preFrames) / tickrate` 与 `tickrate > 0` 保证（解析期校验） | `apps/viewer/src/replay/sampling.ts:26`、`apps/viewer/src/replay/shavit-replay.ts:350` |
 | 「Worker 坏掉」是单向的 | `ensureWorker` 一旦置 `workerBroken` 就不再重试，后续全部走主线程 | `apps/viewer/src/replay/importer.ts:71`、`apps/viewer/src/replay/importer.ts:91` |
 | Worker 回传后本地 buffer 失效 | `t` / `pos` / `ang` 的 buffer 必进 transfer 列表，`vel` / `buttons` 存在才加 | `apps/viewer/src/worker/main.ts:88` 到 `apps/viewer/src/worker/main.ts:90` |
 | 记录播放基准 = 帧自身坐标 | 解码只做轴序/朝向映射，平移与旋转只在 `RuleConfig.transform` 存在且非恒等时叠加 | `apps/viewer/src/replay/build.ts:29`、`apps/viewer/src/replay/types.ts:55` |
-| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:245` |
+| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:177` |

@@ -2,6 +2,10 @@
  * 空间分块合并（scene optimizer）：把 GLTFLoader 逐 primitive 生成的数万 Mesh 收敛成数百个
  * 空间块，降低每帧遍历与 draw call 数量。2026-10-02 自 apps/game/src/renderer/renderer-main.ts
  * 的同名私有方法原样抽出、现居渲染共享层（game 经 tsconfig include 收编；逻辑零改动；this.camera / config.hud.fov 两个诊断读数改为入参传入）。
+ *
+ * 2026-10-03 Phase 3c 拆成「共享核 + 调用方包装」：mergeIntoChunks 是不改根、不挂载、不打日志的
+ * 纯收集合并核（game 与 viewer 共用同一份算法）；root 挂载方式与诊断日志留在各调用方——game 的
+ * optimizeScene 包装与拆分前逐行等价（先收集合并，再挂回 bspRoot、移除 GLB 子树、垫包围球、打统计）。
  */
 
 import * as THREE from 'three';
@@ -46,34 +50,33 @@ function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
   return keys.size;
 }
 
-// ── 空间分块合并（loadScene 里挂载完 GLB 后执行一次）─────────────
-// 目的：把 GLTFLoader 逐 primitive 生成的数万个 Mesh 收敛成数百个空间块，降低每帧遍历与 draw call
-// 数量。载体是 BSP 场景根（`userData.isBspModel` 保持不变）：块 mesh 直接挂到它下面，原 GLB 子树移除。
-// 流程：
-// ① 更新世界矩阵 → traverse 收集单材质 Mesh（记下世界包围盒中心）；多材质 Mesh 烘焙到世界空间后
-//    整体保留、无材质 Mesh 原样跳过，两者都不参与分块；
-// ② cell 边长自适应：世界包围盒对角线 / cbrt(OPT_TARGET_CELLS)，再按非空 cell 数微调（最多 6 轮）；
-// ③ 按世界包围盒中心把 Mesh 分桶到 cell；
-// ④ 逐 cell 合并：单 Mesh 的 cell 保留原 Mesh（几何烘焙到世界空间、变换清零）；多 Mesh 的 cell
-//    先按材质实例分组子合并，再 mergeGeometries(useGroups = true) 合成一个 Mesh + 材质数组；
-//    合并失败的分支回退为保留各自独立几何；
-// ⑤ 替换场景内容，并给每块重算包围球后乘 FRUSTUM_PAD；
-// ⑥ 打印统计与「前向视锥可见块」估算（用入参 camera 与 fovDeg 粗估，仅诊断）。
-export function optimizeScene(
-  bspRoot: THREE.Scene,
-  gltfScene: THREE.Object3D,
-  camera: THREE.PerspectiveCamera | null,
-  fovDeg: number,
-): void {
+/** mergeIntoChunks 的产物：chunks / keptMeshes 由调用方自行挂载，统计字段供诊断日志用。 */
+export interface MergeResult {
+  infos: OptMeshInfo[];
+  keptMeshes: THREE.Mesh[];
+  chunks: THREE.Mesh[];
+  cellSize: number;
+  cellsCount: number;
+  chunkCount: number;
+  vertsTotal: number;
+  drawCallEst: number;
+}
+
+/**
+ * 收集与合并核：traverse `collectRoot` 收集单材质 Mesh → cell 边长自适应 → 分桶 → 逐 cell 合并。
+ * 不改根、不挂载、不打日志（root 处理与诊断是调用方的事）；infos 为空时 chunks/keptMeshes
+ * 的收集（多材质烘焙）已经完成，调用方按各自语义处理空集路径。
+ */
+export function mergeIntoChunks(collectRoot: THREE.Object3D): MergeResult {
   // ① 收集：先刷新 matrixWorld 作为世界变换基准。多材质 mesh（GLB primitive 恒单材质，此处是
   //    防御路径）烘焙到世界空间后保留；无材质 mesh 原样跳过。两者都不参与分块
-  bspRoot.updateMatrixWorld(true);
+  collectRoot.updateMatrixWorld(true);
   const infos: OptMeshInfo[] = [];
   const keptMeshes: THREE.Mesh[] = [];
   const worldBox = new THREE.Box3();
   const box = new THREE.Box3();
   const center = new THREE.Vector3();
-  bspRoot.traverse((obj) => {
+  collectRoot.traverse((obj) => {
     const m = obj as THREE.Mesh;
     if (!m.isMesh) return;
     if (!m.geometry || !m.geometry.attributes.position) return;
@@ -100,7 +103,9 @@ export function optimizeScene(
     box.getCenter(center);
     infos.push({ mesh: m, cx: center.x, cy: center.y, cz: center.z });
   });
-  if (infos.length === 0) return;
+  if (infos.length === 0) {
+    return { infos, keptMeshes, chunks: [], cellSize: 0, cellsCount: 0, chunkCount: 0, vertsTotal: 0, drawCallEst: 0 };
+  }
 
   // ①b 合并失败不丢几何：`mergeGeometries` 在属性集不一致时返回 null，而本函数每一处失败分支
   //     都回退成「保留各自独立几何」，不存在"合并失败就丢弃"的路径。
@@ -128,8 +133,8 @@ export function optimizeScene(
     arr.push(it);
   }
 
-  // ④ 合并 + 替换：单 mesh 的 cell 保留原 mesh（几何烘焙到世界空间、变换清零）；多 mesh 的 cell
-  //    先按材质实例子合并，再 mergeGeometries(useGroups = true) 合成一个 Mesh + 材质数组
+  // ④ 合并：单 mesh 的 cell 保留原 mesh（几何烘焙到世界空间、变换清零）；多 mesh 的 cell
+  //    先按材质实例分组子合并，再 mergeGeometries(useGroups = true) 合成一个 Mesh + 材质数组
   //    （groups 与材质数组下标一一对应）
   const chunks: THREE.Mesh[] = [];
   let chunkCount = 0;
@@ -217,26 +222,50 @@ export function optimizeScene(
     chunks.push(chunk);
   }
 
-  // ④b 替换：块 mesh 与保留 mesh 直接挂到 BSP 根（`add` 会自动让它们脱离原父节点），随后移除原
-  //     GLB 子树（旧几何已在上面逐个 dispose）。`bspRoot.userData.isBspModel` 保持不变——
-  //     disposeScene 与 updateNearPlane 都依赖它
-  const totalMeshes = infos.length;
-  for (const m of chunks) bspRoot.add(m);
-  for (const m of keptMeshes) bspRoot.add(m);
-  bspRoot.remove(gltfScene);
+  return { infos, keptMeshes, chunks, cellSize, cellsCount: cells.size, chunkCount, vertsTotal, drawCallEst };
+}
 
-  // ④c 视锥外保留一圈：给每块的包围球半径乘 FRUSTUM_PAD。必须无条件重算包围球（不能只判 null）：
-  //    烘焙路径是 geometry.clone() + applyMatrix4(matrixWorld)，克隆会带上 GLB 局部空间的旧球
-  //    （非 null，不重算就会被当成有效值）⇒ 剔除按错误位置判定、眼前的块被误剔。顶点已烘焙到世界
-  //    空间，重算才是对的。只影响剔除判定，不改几何与包围盒
-  for (const child of bspRoot.children) {
+/**
+ * 视锥外保留一圈：给 root 下每个 mesh 的包围球半径乘 FRUSTUM_PAD。必须无条件重算包围球（不能只判
+ * null）：烘焙路径是 geometry.clone() + applyMatrix4(matrixWorld)，克隆会带上 GLB 局部空间的旧球
+ * （非 null，不重算就会被当成有效值）⇒ 剔除按错误位置判定、眼前的块被误剔。顶点已烘焙到世界
+ * 空间，重算才是对的。只影响剔除判定，不改几何与包围盒。game 与 viewer 共用。
+ */
+export function padBoundingSpheres(root: THREE.Object3D): void {
+  for (const child of root.children) {
     const g = (child as THREE.Mesh).geometry;
     if (!g) continue;
     g.computeBoundingSphere();
     (g.boundingSphere as THREE.Sphere).radius *= FRUSTUM_PAD;
   }
+}
 
-  // ⑤ 统计 + 前向视锥可见块估算（块中心与相机方向的点积粗估，FOV 取入参 fovDeg）
+// ── game 包装：签名与行为与抽取前逐行一致（loadScene 里挂载完 GLB 后执行一次）─────────────
+// 目的：把 GLTFLoader 逐 primitive 生成的数万个 Mesh 收敛成数百个空间块，降低每帧遍历与 draw call
+// 数量。载体是 BSP 场景根（`userData.isBspModel` 保持不变）：块 mesh 直接挂到它下面，原 GLB 子树移除。
+// 流程：
+// ① 收集与合并（mergeIntoChunks：收集单材质 Mesh、多材质烘焙保留、cell 自适应、逐 cell 合并）；
+// ② 替换场景内容，并给每块重算包围球后乘 FRUSTUM_PAD；
+// ③ 打印统计与「前向视锥可见块」估算（用入参 camera 与 fovDeg 粗估，仅诊断）。
+export function optimizeScene(
+  bspRoot: THREE.Scene,
+  gltfScene: THREE.Object3D,
+  camera: THREE.PerspectiveCamera | null,
+  fovDeg: number,
+): void {
+  const r = mergeIntoChunks(bspRoot);
+  if (r.infos.length === 0) return;
+
+  // 替换：块 mesh 与保留 mesh 直接挂到 BSP 根（`add` 会自动让它们脱离原父节点），随后移除原
+  // GLB 子树（旧几何已在上面逐个 dispose）。`bspRoot.userData.isBspModel` 保持不变——
+  // disposeScene 与近平面自适应都依赖它
+  const totalMeshes = r.infos.length;
+  for (const m of r.chunks) bspRoot.add(m);
+  for (const m of r.keptMeshes) bspRoot.add(m);
+  bspRoot.remove(gltfScene);
+  padBoundingSpheres(bspRoot);
+
+  // 统计 + 前向视锥可见块估算（块中心与相机方向的点积粗估，FOV 取入参 fovDeg）
   const chunkBox = new THREE.Box3();
   const chunkCenter = new THREE.Vector3();
   const toCam = new THREE.Vector3();
@@ -258,10 +287,10 @@ export function optimizeScene(
     }
   }
   console.log(
-    `[optimizeScene] 分块合并: ${totalMeshes} mesh → ${chunkCount} 块` +
-      `（cellSize=${cellSize.toFixed(1)}、非空 cell=${cells.size}）| ` +
-      `平均顶点/块 ${(vertsTotal / Math.max(chunkCount, 1)).toFixed(0)}（总顶点 ${vertsTotal}）| ` +
-      `draw call 估算 ${drawCallEst} | ` +
-      `前向视锥可见块估算 ${visibleEst >= 0 ? `${visibleEst}/${chunkCount}` : 'N/A（camera 未就绪）'}`,
+    `[optimizeScene] 分块合并: ${totalMeshes} mesh → ${r.chunkCount} 块` +
+      `（cellSize=${r.cellSize.toFixed(1)}、非空 cell=${r.cellsCount}）| ` +
+      `平均顶点/块 ${(r.vertsTotal / Math.max(r.chunkCount, 1)).toFixed(0)}（总顶点 ${r.vertsTotal}）| ` +
+      `draw call 估算 ${r.drawCallEst} | ` +
+      `前向视锥可见块估算 ${visibleEst >= 0 ? `${visibleEst}/${r.chunkCount}` : 'N/A（camera 未就绪）'}`,
   );
 }

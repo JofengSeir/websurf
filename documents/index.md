@@ -74,7 +74,7 @@
 | [`viewer/implementation/replay.md`](viewer/implementation/replay.md) | `replay/**`：录像解析、播放器、时间轴、轨道面板与可视化 |
 | [`viewer/implementation/dem.md`](viewer/implementation/dem.md) | `replay/demo/**` + `replay/democlip.ts`：Source `.dem` 演示录像解析与 DEM→`Clip` 桥接 |
 | [`viewer/implementation/ui.md`](viewer/implementation/ui.md) | `ui/**`：遥测 HUD、地图信息、录像元数据面板 |
-| [`viewer/implementation/renderer.md`](viewer/implementation/renderer.md) | 渲染共享层单实例 `src/renderer-shared/shader/lightmap-shader.ts`：静态光照着色器落地（viewer 的 `src/renderer/` 已随之清空） |
+| [`viewer/implementation/renderer.md`](viewer/implementation/renderer.md) | 渲染共享层消费面（shader + scene-builder/scene-optimizer + near-plane）：静态光照着色器落地与 3c 对齐（viewer 的 `src/renderer/` 已清空） |
 | [`viewer/implementation/worker.md`](viewer/implementation/worker.md) | `worker/**`：解析 Worker 与消息协议 |
 | [`viewer/implementation/wasm.md`](viewer/implementation/wasm.md) | `crates/wasm/**`：本工程的 WASM 绑定层导出面 |
 | [`viewer/implementation/scripts-and-test.md`](viewer/implementation/scripts-and-test.md) | `scripts/**` 与 `test/**`：构建脚本、冒烟与自检 |
