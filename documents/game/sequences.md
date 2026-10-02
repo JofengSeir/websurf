@@ -45,7 +45,7 @@
 6. 冻结分支：按住 C 期间每帧把物理写回存点位姿并把速度清零（`apps/game/src/renderer/renderer-main.ts:792`）。
 7. 取物理状态写渲染采样：`writeRenderSample(now, posX, posY, posZ, renderSampleIndex++)`，不传世代（`apps/game/src/renderer/renderer-main.ts:805`）。
 8. 相机跟随物理：角度按度转弧度写入 `rotation`（YXZ），位置 y 加 `eyeHeight`（`apps/game/src/renderer/renderer-main.ts:807`、`apps/game/src/renderer/renderer-main.ts:808`）。
-9. 每 2 帧一次近平面自适应（`apps/game/src/renderer/renderer-main.ts:811`、`src/renderer-shared/camera/near-plane.ts:59`）。
+9. 每 2 帧一次近平面自适应（`apps/game/src/renderer/renderer-main.ts:811`、`src/renderer-shared/camera/near-plane.ts:65`）。
 10. 剔除：按 `cullDistance` 改 `mesh.visible`；PVS 分支由常量门控（`apps/game/src/renderer/renderer-main.ts:830`、`apps/game/src/renderer/renderer-main.ts:75`）。
 11. 绘制 `renderer.render(scene, camera)`；首帧后跑一次注入生效性统计（`apps/game/src/renderer/renderer-main.ts:848`、`apps/game/src/renderer/renderer-main.ts:854`）。
 
