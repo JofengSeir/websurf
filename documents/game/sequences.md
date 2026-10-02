@@ -17,7 +17,7 @@
 | `main` | 建 `RendererMain` 并注册两个回调（`onSceneLoaded`、`onSyncRenderState`） | `renderer`；死亡阈值回调 | `apps/game/src/app.ts:162`、`apps/game/src/app.ts:163`、`apps/game/src/app.ts:166` |
 | `main` | `renderer.init(...)` 后 `start()`：写光照 uniform 初值、建 renderer/scene/camera、起 rAF | three 的 renderer / scene / camera；光照共享 uniform | `apps/game/src/app.ts:169`、`apps/game/src/app.ts:170` |
 | `main` | `installFrameProbe()`：挂 `globalThis.__vbspFrameProbe` | `globalThis` 一个对象 | `apps/game/src/app.ts:173` |
-| `main` | `initPrediction('./websurf_wasm_bg.wasm', embeddedWasm)`：内嵌走 `initSync`，否则 `fetch` | 主线程 wasm 实例；`mainWasmReady` promise | `apps/game/src/app.ts:176`、`apps/game/src/renderer/renderer-main.ts:671` |
+| `main` | `initPrediction('./websurf_wasm_bg.wasm', embeddedWasm)`：内嵌走 `initSync`，否则 `fetch` | 主线程 wasm 实例；`mainWasmReady` promise | `apps/game/src/app.ts:176`、`apps/game/src/renderer/renderer-main.ts:521` |
 | `main` | 建 `InputBridge`，随后 `syncFullConfig()` 按四段各发一条 `config` | `bridge`；Worker 与本端 config 副本 | `apps/game/src/app.ts:181`、`apps/game/src/app.ts:182` |
 | `main` | 建 `PanelController`：加载偏好 → 回写控件 → 全量下发 → 应用准星 | 面板 DOM；`config`；localStorage | `apps/game/src/app.ts:185`、`apps/game/src/panel/panel-controller.ts:82` |
 | `main` | `initKeyHud()` → `bindInput()` → `startInputLoop()` | 键簇标签；DOM 事件；rAF 输入循环 | `apps/game/src/app.ts:219`、`apps/game/src/app.ts:220`、`apps/game/src/app.ts:221` |
@@ -25,7 +25,7 @@
 | `handleLoadBsp` | 记录地图名、载入该地图存点、收起面板、等主线程 wasm 就绪 | `currentMapName`；`savePointStore`；面板可见性 | `apps/game/src/app.ts:501`、`apps/game/src/app.ts:502`、`apps/game/src/app.ts:507` |
 | `handleLoadBsp` | 释放上一张图 → `buildWorldBundle(...)` 解析并导出 | 场景释放；`WorldBundle` | `apps/game/src/app.ts:508`、`apps/game/src/app.ts:514` |
 | `handleLoadBsp` | `renderer.loadScene({...})`：GLB + spawn + PVS + mosaic manifest | three 场景；死亡阈值回调 | `apps/game/src/app.ts:521` |
-| `handleLoadBsp` | `renderer.buildPredictionWorld({...})`：主线程渲染物理世界 | `predPhys` | `apps/game/src/app.ts:536`、`apps/game/src/renderer/renderer-main.ts:689` |
+| `handleLoadBsp` | `renderer.buildPredictionWorld({...})`：主线程渲染物理世界 | `predPhys` | `apps/game/src/app.ts:536`、`apps/game/src/renderer/renderer-main.ts:533` |
 | `handleLoadBsp` → Worker | 发 `world-json`（三段 JSON + spawn） | Worker 侧权威实例 | `apps/game/src/app.ts:558` |
 | `handleLoadBsp` | 双端出生点列表：渲染端 `setSpawnPoints` + Worker `set-spawn-points` | 两端出生点列表 | `apps/game/src/app.ts:570`、`apps/game/src/app.ts:571` |
 | `handleLoadBsp` | 再 `syncFullConfig()`（世界重建后参数重放） | Worker 侧 `set_params` / `set_hull` | `apps/game/src/app.ts:573`、`apps/game/src/worker/main.ts:88` |
@@ -37,17 +37,17 @@
 
 主线程侧（`RendererMain.tick`，rAF 驱动）：
 
-1. 续帧并取景：`requestAnimationFrame(this.boundTick)`，renderer/scene/camera 任一缺失即返回（`apps/game/src/renderer/renderer-main.ts:924`、`apps/game/src/renderer/renderer-main.ts:925`）。
-2. 物理分支开门条件 `predReady && predPhys`（`apps/game/src/renderer/renderer-main.ts:928`）；`dt` 取与上一物理帧的间隔，首个物理帧取 1/64 秒、上限 0.1 秒（`apps/game/src/renderer/renderer-main.ts:929`）。
-3. 写共享输入槽：`shared.addInput(pendingDx, pendingDy, pendingKeys)`（`apps/game/src/renderer/renderer-main.ts:932`）——本工程唯一的输入写入点。
-4. 消费权威帧与校准速度：`correctFromAuthority()` 后 `calibrateVelocity(now)`（`apps/game/src/renderer/renderer-main.ts:934`、`apps/game/src/renderer/renderer-main.ts:936`）。
-5. 推进主线程渲染物理：`predPhys.tick(dt, keys, dx, dy)`，随后把 dx/dy 清零（键位保留为按住状态）（`apps/game/src/renderer/renderer-main.ts:938`、`apps/game/src/renderer/renderer-main.ts:939`）。
-6. 冻结分支：按住 C 期间每帧把物理写回存点位姿并把速度清零（`apps/game/src/renderer/renderer-main.ts:942`）。
-7. 取物理状态写渲染采样：`writeRenderSample(now, posX, posY, posZ, renderSampleIndex++)`，不传世代（`apps/game/src/renderer/renderer-main.ts:955`）。
-8. 相机跟随物理：角度按度转弧度写入 `rotation`（YXZ），位置 y 加 `eyeHeight`（`apps/game/src/renderer/renderer-main.ts:957`、`apps/game/src/renderer/renderer-main.ts:958`）。
-9. 每 2 帧一次近平面自适应（`apps/game/src/renderer/renderer-main.ts:961`）。
-10. 剔除：按 `cullDistance` 改 `mesh.visible`；PVS 分支由常量门控（`apps/game/src/renderer/renderer-main.ts:977`、`apps/game/src/renderer/renderer-main.ts:113`）。
-11. 绘制 `renderer.render(scene, camera)`；首帧后跑一次注入生效性统计（`apps/game/src/renderer/renderer-main.ts:998`、`apps/game/src/renderer/renderer-main.ts:1001`）。
+1. 续帧并取景：`requestAnimationFrame(this.boundTick)`，renderer/scene/camera 任一缺失即返回（`apps/game/src/renderer/renderer-main.ts:774`、`apps/game/src/renderer/renderer-main.ts:775`）。
+2. 物理分支开门条件 `predReady && predPhys`（`apps/game/src/renderer/renderer-main.ts:778`）；`dt` 取与上一物理帧的间隔，首个物理帧取 1/64 秒、上限 0.1 秒（`apps/game/src/renderer/renderer-main.ts:779`）。
+3. 写共享输入槽：`shared.addInput(pendingDx, pendingDy, pendingKeys)`（`apps/game/src/renderer/renderer-main.ts:782`）——本工程唯一的输入写入点。
+4. 消费权威帧与校准速度：`correctFromAuthority()` 后 `calibrateVelocity(now)`（`apps/game/src/renderer/renderer-main.ts:784`、`apps/game/src/renderer/renderer-main.ts:786`）。
+5. 推进主线程渲染物理：`predPhys.tick(dt, keys, dx, dy)`，随后把 dx/dy 清零（键位保留为按住状态）（`apps/game/src/renderer/renderer-main.ts:788`、`apps/game/src/renderer/renderer-main.ts:789`）。
+6. 冻结分支：按住 C 期间每帧把物理写回存点位姿并把速度清零（`apps/game/src/renderer/renderer-main.ts:792`）。
+7. 取物理状态写渲染采样：`writeRenderSample(now, posX, posY, posZ, renderSampleIndex++)`，不传世代（`apps/game/src/renderer/renderer-main.ts:805`）。
+8. 相机跟随物理：角度按度转弧度写入 `rotation`（YXZ），位置 y 加 `eyeHeight`（`apps/game/src/renderer/renderer-main.ts:807`、`apps/game/src/renderer/renderer-main.ts:808`）。
+9. 每 2 帧一次近平面自适应（`apps/game/src/renderer/renderer-main.ts:811`、`apps/game/src/renderer/near-plane.ts:59`）。
+10. 剔除：按 `cullDistance` 改 `mesh.visible`；PVS 分支由常量门控（`apps/game/src/renderer/renderer-main.ts:830`、`apps/game/src/renderer/renderer-main.ts:75`）。
+11. 绘制 `renderer.render(scene, camera)`；首帧后跑一次注入生效性统计（`apps/game/src/renderer/renderer-main.ts:848`、`apps/game/src/renderer/renderer-main.ts:854`）。
 
 主线程输入循环（`startInputLoop` 的 rAF，与渲染循环相互独立）：
 
@@ -64,7 +64,7 @@ Worker 侧（`createAuthLoop`，定时器唤醒 + 固定步长累积器）：
 2. 单个步长的顺序由共享层固定：先 `takeInput` 消费输入、再推进物理、最后 `writeAuthoritative`（`src/ts-shared/auth/auth-loop.ts:22`、`src/ts-shared/auth/auth-loop.ts:382`、`src/ts-shared/auth/auth-loop.ts:431`）。
 3. 步长由 tickRate 折算：`getConfigTickRate()` 读 Worker 自己那份 config 的 `physics.tickRate`（`apps/game/src/worker/main.ts:468`），`setFixedDt` 初值 1/64 秒、未变时返回 false（`src/ts-shared/auth/auth-loop.ts:252`、`src/ts-shared/auth/auth-loop.ts:532`）。
 4. 发布位置可被渲染轨迹投影替换：`renderTrajectorySource`（`apps/game/src/worker/main.ts:302`）在渲染折线上按 τ 取点（`apps/game/src/worker/main.ts:284`），跨世代或配对陈旧时返回 `null`、回退权威自身位置（`apps/game/src/worker/main.ts:287`、`apps/game/src/worker/main.ts:291`）。
-5. 碰撞事件经 `post` 出口发出（`apps/game/src/worker/main.ts:458`），主线程在 `phys-event` 分支转给 `RendererMain.applyCollisionCorrection`（`apps/game/src/app.ts:141`、`apps/game/src/renderer/renderer-main.ts:859`）。
+5. 碰撞事件经 `post` 出口发出（`apps/game/src/worker/main.ts:458`），主线程在 `phys-event` 分支转给 `RendererMain.applyCollisionCorrection`（`apps/game/src/app.ts:141`、`apps/game/src/renderer/renderer-main.ts:709`）。
 
 ## 消息与通道
 
@@ -113,10 +113,10 @@ Worker → 主线程：
 | `world-json` 在 wasm 就绪前到达 | 分发器直接丢弃该消息 | `src/ts-shared/auth/worker-dispatch.ts:311` |
 | 主线程 wasm 初始化失败 | `initPrediction` 的 rejection 被 `catch` 转成错误提示；后续 `handleLoadBsp` 仍会 `await mainWasmReady.catch(...)` 继续（纹理回退降级为占位色） | `apps/game/src/app.ts:176`、`apps/game/src/app.ts:507` |
 | BSP 解析或场景装载抛错 | `handleLoadBsp` 的 `catch` 里显示错误、释放场景、进度覆盖层转错误态（不消失） | `apps/game/src/app.ts:598`、`apps/game/src/app.ts:601`、`apps/game/src/app.ts:602` |
-| GLB 未携带 lightmap atlas | `loadLightmapAtlas` 返回 `null`，`applyLightmap` 只打日志并跳过整段光照施加；地图仍是贴图原色 | `apps/game/src/renderer/renderer-main.ts:1240`、`apps/game/src/renderer/renderer-main.ts:1242` |
-| 光照注入锚点失配 | `reportInjectStatsOnce` 在「有失效材质且一条注入都没生效」时置 `globalThis.__vbspLightmapInjectFailed` 并打 error（出帧脚本据此非零退出）；部分失效只告警 | `apps/game/src/renderer/renderer-main.ts:1176`、`apps/game/src/renderer/renderer-main.ts:1181` |
-| mosaic 贴图替换失败 | 只告警，保留原贴图（`map.dispose()` 之后才写新 image，失败时纹理未被替换） | `apps/game/src/renderer/renderer-main.ts:505` |
-| 预编译着色器失败 | 只告警，three 仍按需编译 | `apps/game/src/renderer/renderer-main.ts:390` |
+| GLB 未携带 lightmap atlas | `loadLightmapAtlas` 返回 `null`，`applyLightmap` 只打日志并跳过整段光照施加；地图仍是贴图原色 | `apps/game/src/renderer/scene-builder.ts:120`、`apps/game/src/renderer/scene-builder.ts:121` |
+| 光照注入锚点失配 | `reportInjectStatsOnce` 在「有失效材质且一条注入都没生效」时置 `globalThis.__vbspLightmapInjectFailed` 并打 error（出帧脚本据此非零退出）；部分失效只告警 | `apps/game/src/renderer/inject-stats.ts:177`、`apps/game/src/renderer/inject-stats.ts:182` |
+| mosaic 贴图替换失败 | 只告警，保留原贴图（`map.dispose()` 之后才写新 image，失败时纹理未被替换） | `apps/game/src/renderer/renderer-main.ts:426` |
+| 预编译着色器失败 | 只告警，three 仍按需编译 | `apps/game/src/renderer/renderer-main.ts:310` |
 | 页面失焦（rAF 停摆） | 显式写 `keysMask=0` 清权威键位并清本端待喂输入 | `apps/game/src/app.ts:300`、`apps/game/src/app.ts:306`、`apps/game/src/app.ts:307` |
 | 退锁（ESC 打开面板） | 键盘禁用并复位、清渲染物理待喂输入、清滚轮跳待消费标志；权威键位由下一帧输入循环写 0 兜底 | `apps/game/src/app.ts:279`、`apps/game/src/app.ts:282`、`apps/game/src/app.ts:287`、`apps/game/src/app.ts:290` |
 | 指针锁定请求失败 | `requestLock` 返回的 promise 落 false 时写状态行提示重试 | `apps/game/src/app.ts:252`、`apps/game/src/app.ts:255` |

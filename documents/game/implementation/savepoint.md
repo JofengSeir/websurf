@@ -17,7 +17,7 @@
 - **读写失败都不抛出**：读失败打 `console.error` 并清空内存列表（`apps/game/src/savepoint.ts:61`）；写失败打 `console.error`、内存列表不受影响（`apps/game/src/savepoint.ts:113`）。
 - **`load('')` 与空地图名不落盘**：地图名为空时 `load` 只清内存不读存储（`apps/game/src/savepoint.ts:52`），`persist` 直接返回（`apps/game/src/savepoint.ts:111`）。
 - **读取路径**：X 键存点写完整状态加时间戳（`apps/game/src/app.ts:610`）；按住 C 取 `latest()` 并冻结（`apps/game/src/app.ts:619`、`apps/game/src/app.ts:625`），松开 C 恢复速度并向权威同步（`apps/game/src/app.ts:632`）；面板列表的「读」按索引取 `all()` 的第 i 项（`apps/game/src/app.ts:209`）。
-- **状态来源单一**：存点字段直接来自渲染物理的 `state()`（`apps/game/src/renderer/renderer-main.ts:757`），读点时经 `set_state` 全量写回（`apps/game/src/renderer/renderer-main.ts:789`）。
+- **状态来源单一**：存点字段直接来自渲染物理的 `state()`（`apps/game/src/renderer/renderer-main.ts:607`），读点时经 `set_state` 全量写回（`apps/game/src/renderer/renderer-main.ts:639`）。
 
 ## 已知缺口
 

@@ -15,7 +15,7 @@
 - **PVS 类型的定义点唯一**：三个 PVS 类型只在共享层定义（`src/ts-shared/world/types.ts`），本文件用 `export type { … } from` 转出（`apps/game/src/world/types.ts:12`），不重写成员。
 - **`wasm.d.ts` 的生效方式靠 tsconfig 显式列出**：`apps/game/tsconfig.json:15` 的 `include` 把 `apps/game/src/wasm.d.ts` 与 `../../src/ts-shared/**/*.ts` 一起列入。
 - **声明面与实现同源**：`apps/game/src/wasm.d.ts` 不手写成员，pkg 的 `websurf_wasm.d.ts` 由 wasm-pack 生成（`apps/game/package.json:8`），因此类型面随 Rust 导出面同步变化。
-- **工程内三个 pkg 导入方都直接写路径**：`apps/game/src/app.ts:27`、`apps/game/src/worker/main.ts:65`、`apps/game/src/renderer/renderer-main.ts:37`；`wasm.d.ts` 只作类型兜底，不被 import。
+- **工程内三个 pkg 导入方都直接写路径**：`apps/game/src/app.ts:27`、`apps/game/src/worker/main.ts:65`、`apps/game/src/renderer/renderer-main.ts:34`；`wasm.d.ts` 只作类型兜底，不被 import。
 
 ## 已知缺口
 
