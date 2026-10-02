@@ -52,7 +52,7 @@
 | [`game/differences.md`](game/differences.md) | 与 `apps/debug`、`apps/viewer` 的实测差异（两侧锚点） |
 | [`game/implementation/app-entry.md`](game/implementation/app-entry.md) | 根级入口装配与主线程链路 |
 | [`game/implementation/config.md`](game/implementation/config.md) | 配置树、默认值与 `applyConfigPatch` |
-| [`game/implementation/renderer.md`](game/implementation/renderer.md) | `renderer/**` 五模块（2026-10-02 拆分）：renderer-main 编排 + scene-builder / scene-optimizer / inject-stats / near-plane；着色器本体在 `src/renderer-shared/` |
+| [`game/implementation/renderer.md`](game/implementation/renderer.md) | `renderer/**` 编排 + 渲染共享层 scene/camera 四模块（2026-10-02 拆分并下沉）；着色器本体在 `src/renderer-shared/shader/` |
 | [`game/implementation/worker.md`](game/implementation/worker.md) | `worker/**`：Worker 入口、权威物理装配与消息类型面 |
 | [`game/implementation/input.md`](game/implementation/input.md) | `input/**`：输入桥、键位与存档点 |
 | [`game/implementation/panel.md`](game/implementation/panel.md) | `panel/**`：面板控制器与控件接线 |

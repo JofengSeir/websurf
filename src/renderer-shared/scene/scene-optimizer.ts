@@ -1,7 +1,7 @@
 /**
  * 空间分块合并（scene optimizer）：把 GLTFLoader 逐 primitive 生成的数万 Mesh 收敛成数百个
  * 空间块，降低每帧遍历与 draw call 数量。2026-10-02 自 apps/game/src/renderer/renderer-main.ts
- * 的同名私有方法原样抽出（逻辑零改动；this.camera / config.hud.fov 两个诊断读数改为入参传入）。
+ * 的同名私有方法原样抽出、现居渲染共享层（game 经 tsconfig include 收编；逻辑零改动；this.camera / config.hud.fov 两个诊断读数改为入参传入）。
  */
 
 import * as THREE from 'three';

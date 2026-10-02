@@ -45,7 +45,7 @@
 6. 冻结分支：按住 C 期间每帧把物理写回存点位姿并把速度清零（`apps/game/src/renderer/renderer-main.ts:792`）。
 7. 取物理状态写渲染采样：`writeRenderSample(now, posX, posY, posZ, renderSampleIndex++)`，不传世代（`apps/game/src/renderer/renderer-main.ts:805`）。
 8. 相机跟随物理：角度按度转弧度写入 `rotation`（YXZ），位置 y 加 `eyeHeight`（`apps/game/src/renderer/renderer-main.ts:807`、`apps/game/src/renderer/renderer-main.ts:808`）。
-9. 每 2 帧一次近平面自适应（`apps/game/src/renderer/renderer-main.ts:811`、`apps/game/src/renderer/near-plane.ts:59`）。
+9. 每 2 帧一次近平面自适应（`apps/game/src/renderer/renderer-main.ts:811`、`src/renderer-shared/camera/near-plane.ts:59`）。
 10. 剔除：按 `cullDistance` 改 `mesh.visible`；PVS 分支由常量门控（`apps/game/src/renderer/renderer-main.ts:830`、`apps/game/src/renderer/renderer-main.ts:75`）。
 11. 绘制 `renderer.render(scene, camera)`；首帧后跑一次注入生效性统计（`apps/game/src/renderer/renderer-main.ts:848`、`apps/game/src/renderer/renderer-main.ts:854`）。
 
@@ -113,8 +113,8 @@ Worker → 主线程：
 | `world-json` 在 wasm 就绪前到达 | 分发器直接丢弃该消息 | `src/ts-shared/auth/worker-dispatch.ts:311` |
 | 主线程 wasm 初始化失败 | `initPrediction` 的 rejection 被 `catch` 转成错误提示；后续 `handleLoadBsp` 仍会 `await mainWasmReady.catch(...)` 继续（纹理回退降级为占位色） | `apps/game/src/app.ts:176`、`apps/game/src/app.ts:507` |
 | BSP 解析或场景装载抛错 | `handleLoadBsp` 的 `catch` 里显示错误、释放场景、进度覆盖层转错误态（不消失） | `apps/game/src/app.ts:598`、`apps/game/src/app.ts:601`、`apps/game/src/app.ts:602` |
-| GLB 未携带 lightmap atlas | `loadLightmapAtlas` 返回 `null`，`applyLightmap` 只打日志并跳过整段光照施加；地图仍是贴图原色 | `apps/game/src/renderer/scene-builder.ts:120`、`apps/game/src/renderer/scene-builder.ts:121` |
-| 光照注入锚点失配 | `reportInjectStatsOnce` 在「有失效材质且一条注入都没生效」时置 `globalThis.__vbspLightmapInjectFailed` 并打 error（出帧脚本据此非零退出）；部分失效只告警 | `apps/game/src/renderer/inject-stats.ts:177`、`apps/game/src/renderer/inject-stats.ts:182` |
+| GLB 未携带 lightmap atlas | `loadLightmapAtlas` 返回 `null`，`applyLightmap` 只打日志并跳过整段光照施加；地图仍是贴图原色 | `src/renderer-shared/scene/scene-builder.ts:120`、`src/renderer-shared/scene/scene-builder.ts:121` |
+| 光照注入锚点失配 | `reportInjectStatsOnce` 在「有失效材质且一条注入都没生效」时置 `globalThis.__vbspLightmapInjectFailed` 并打 error（出帧脚本据此非零退出）；部分失效只告警 | `src/renderer-shared/scene/inject-stats.ts:177`、`src/renderer-shared/scene/inject-stats.ts:182` |
 | mosaic 贴图替换失败 | 只告警，保留原贴图（`map.dispose()` 之后才写新 image，失败时纹理未被替换） | `apps/game/src/renderer/renderer-main.ts:426` |
 | 预编译着色器失败 | 只告警，three 仍按需编译 | `apps/game/src/renderer/renderer-main.ts:310` |
 | 页面失焦（rAF 停摆） | 显式写 `keysMask=0` 清权威键位并清本端待喂输入 | `apps/game/src/app.ts:300`、`apps/game/src/app.ts:306`、`apps/game/src/app.ts:307` |

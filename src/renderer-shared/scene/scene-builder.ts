@@ -1,9 +1,9 @@
 /**
  * 场景装配前置段（scene builder）：GLB 字节 → three 场景子树。
  *
- * 2026-10-02 自 apps/game/src/renderer/renderer-main.ts 的 loadScene 前置段与三个私有成员
+ * 2026-10-02 自 apps/game/src/renderer/renderer-main.ts 的 loadScene 前置段与三个私有成员抽出、
  * 原样抽出（逻辑零改动；applyLightmap 由「写 this.pendingInjectReport」改为返回布尔值，由
- * 调用方落账）。导出两个能力：
+ * 现居渲染共享层（game 经 tsconfig include 收编）。逻辑零改动；applyLightmap 由「写 this.pendingInjectReport」改为返回布尔值，由调用方落账。导出两个能力：
  * - buildMapScene：GLB → 子场景（新建 Scene + isBspModel 标记 + 清根 rotation + 包围盒 + 摘 punctual 灯）；
  * - applyLightmap：施加离线烘焙静态光照（lightmap atlas），返回是否施加到 mesh；
  * 装配顺序约束见 buildMapScene 文档与 renderer-main.loadScene 的编排注释。
@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { loadLightmapAtlas, applyLightmapToMeshes, getLightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { loadLightmapAtlas, applyLightmapToMeshes, getLightingMode } from '../shader/lightmap-shader.js';
 
 /** 复用的 GLTFLoader（buildMapScene 每次 loadAsync）。 */
 const gltfLoader = new GLTFLoader();
