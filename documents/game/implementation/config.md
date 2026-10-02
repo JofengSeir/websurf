@@ -32,7 +32,7 @@
 
 - **`physics.mode` 零读取点**：字段只有声明与默认值（`apps/game/src/config.ts:27`），本工程内没有读取者。权威侧的模式判定读的是消息里的 `patch.mode`（`src/ts-shared/auth/worker-dispatch.ts:385`），不是这份 config 的字段。
 - ~~**`input.pitchLimit` 零读取点**~~ **已处置（2026-09-26，删字段）**：该字段已从 `InputConfig` 与 `DEFAULT_CONFIG` 移除（原声明 `apps/game/src/config.ts:70`、默认值 `:197`）。pitch 限幅实际由 Rust 侧承担；对比 debug 的同名键有 UI 且被读（`apps/debug/src/app.ts:1355`），两端本就不同。
-- **`lighting.lightGamma` 的默认值落在着色器接受窗口之外**：默认 2.2（`apps/game/src/config.ts:228`），而 `setLightGamma` 只接受 `(0, 1]`，窗口外的值直接返回、不写共享 uniform（`src/renderer-shared/shader/lightmap-shader.ts:1789`）。因此 `init` 阶段那次初始化写入被忽略（`apps/game/src/renderer/renderer-main.ts:270`），共享 uniform 保持其自身初值（`src/renderer-shared/shader/lightmap-shader.ts:1556`）。
+- **`lighting.lightGamma` 的默认值落在着色器接受窗口之外**：默认 2.2（`apps/game/src/config.ts:228`），而 `setLightGamma` 只接受 `(0, 1]`，窗口外的值直接返回、不写共享 uniform（`src/renderer-shared/shader/lightmap-shader.ts:1789`）。因此 `init` 阶段那次初始化写入被忽略（`apps/game/src/renderer/renderer-main.ts:215`），共享 uniform 保持其自身初值（`src/renderer-shared/shader/lightmap-shader.ts:1556`）。
 - **面板滑块量程与该接受窗口不一致**：滑块量程 0.5..6（`apps/game/src/panel/panel-controller.ts:471`、`apps/game/web/index.html:231`），拖到大于 1 时 `config.lighting.lightGamma` 变了、画面不变。
 - **`applyConfigPatch` 照写未知键的副作用**：把非 `physics` / `input` 段的消息载荷原样写入对应段（`apps/game/src/config.ts:252`、`src/ts-shared/auth/worker-dispatch.ts:351`）；本工程对 `hud` 段下发的其实是全量物理参数（`apps/game/src/input/input-bridge.ts:65`），于是 Worker 的 `config.hud` 会被并入 `gravity` / `run_speed` 等键（`src/ts-shared/phys/params.ts:49`）。Worker 不读 `hud` 段，静态看无行为影响。
 - **段表与 `RuntimeConfig` 的段数不等**：顶层有七段（`apps/game/src/config.ts:163`），下发表只有四段（`apps/game/src/app.ts:642`）；`texture` / `lighting` / `lockTickRate` 不进 `config` 消息，改这三处的效果只在本端可见。

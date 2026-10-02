@@ -4,13 +4,13 @@
 
 | 维度 | 本工程（`apps/game`） | 对比工程 | 证据（两侧锚点） |
 |---|---|---|---|
-| 渲染后端 | three.js `WebGLRenderer`，`antialias: true` + `powerPreference: 'high-performance'` | `apps/debug` 同为 three.js `WebGLRenderer` | 本维度两工程实现一致：`apps/game/src/renderer/renderer-main.ts:276`、`apps/debug/src/renderer/renderer-main.ts:408` |
-| 渲染后端 | 同上 | `apps/viewer` 同为 three.js `WebGLRenderer` | 本维度两工程实现一致：`apps/game/src/renderer/renderer-main.ts:276`、`apps/viewer/src/core/scene.ts:95` |
+| 渲染后端 | three.js `WebGLRenderer`，`antialias: true` + `powerPreference: 'high-performance'` | `apps/debug` 同为 three.js `WebGLRenderer` | 本维度两工程实现一致：`apps/game/src/renderer/renderer-main.ts:221`、`apps/debug/src/renderer/renderer-main.ts:408` |
+| 渲染后端 | 同上 | `apps/viewer` 同为 three.js `WebGLRenderer` | 本维度两工程实现一致：`apps/game/src/renderer/renderer-main.ts:221`、`apps/viewer/src/core/scene.ts:95` |
 | 页面布局 | 单画布 `#preview` + 覆盖层（`#hud`、`#keys`、`#fps`、`#loadingOverlay`、`#panel` 常驻覆盖层）；样式外置为 `web/styles.css` | `apps/debug` 为 flex 纵向布局：`#app` 列布局 + `#topbar` 顶栏，样式**内联**在页面 `<style>` 里 | `apps/game/web/index.html:27`、`apps/game/web/index.html:18`；`apps/debug/web/index.html:65`、`apps/debug/web/index.html:66`、`apps/debug/web/index.html:7` |
 | 页面布局 | 同上 | `apps/viewer` 画布 id 是 `game`（不是 `preview`），样式外置为 `web/styles.css` | `apps/game/web/index.html:27`；`apps/viewer/web/index.html:12`、`apps/viewer/web/index.html:8` |
 | 物理运行位置（权威） | Worker 权威物理由 `createAuthLoop` 装配，主线程侧另有「主线程渲染物理（`predPhys`）」 | `apps/debug` 同为 Worker 权威物理装配 | 本维度两工程实现一致（装配入口同名同形）：`apps/game/src/worker/main.ts:451`、`apps/debug/src/worker/main.ts:455` |
-| 物理运行位置（本端） | 主线程持一个 `PhysWorld` 作「主线程渲染物理（`predPhys`）」，每帧 `tick` 推进 | `apps/debug` 同样在主线程建 `PhysWorld` | 本维度两工程实现一致：`apps/game/src/renderer/renderer-main.ts:689`、`apps/debug/src/renderer/renderer-main.ts:1126` |
-| 物理运行位置（本端） | 同上 | `apps/viewer` **无任何物理实例**：`apps/viewer/src` 内 `PhysWorld` 零匹配，只有离线解析（`websurf-wasm-core`） | `apps/game/src/renderer/renderer-main.ts:689`；`apps/viewer/src/core/bsp.ts:121` 只构造 `BspProcessor`，且 `apps/viewer/crates/wasm/Cargo.toml` 无 `websurf-phys` 依赖行（该文件 `apps/viewer/crates/wasm/Cargo.toml:5` 写明不含物理） |
+| 物理运行位置（本端） | 主线程持一个 `PhysWorld` 作「主线程渲染物理（`predPhys`）」，每帧 `tick` 推进 | `apps/debug` 同样在主线程建 `PhysWorld` | 本维度两工程实现一致：`apps/game/src/renderer/renderer-main.ts:533`、`apps/debug/src/renderer/renderer-main.ts:1126` |
+| 物理运行位置（本端） | 同上 | `apps/viewer` **无任何物理实例**：`apps/viewer/src` 内 `PhysWorld` 零匹配，只有离线解析（`websurf-wasm-core`） | `apps/game/src/renderer/renderer-main.ts:533`；`apps/viewer/src/core/bsp.ts:121` 只构造 `BspProcessor`，且 `apps/viewer/crates/wasm/Cargo.toml` 无 `websurf-phys` 依赖行（该文件 `apps/viewer/crates/wasm/Cargo.toml:5` 写明不含物理） |
 | 物理依赖声明 | `websurf-phys = { path = "../../../../src" }` | `apps/debug` 同一声明 | 本维度两工程实现一致：`apps/game/crates/wasm/Cargo.toml:22`、`apps/debug/crates/wasm/Cargo.toml:22` |
 | 共享状态通道 | `SharedArrayBuffer` 可用时建 SAB 通道，否则 `null` 落入 postMessage 回退；两端各建一次 | `apps/debug` 同一机制、同一入口函数 | 本维度两工程实现一致：`apps/game/src/app.ts:112`、`apps/game/src/app.ts:158`；`apps/debug/src/app.ts:277`、`apps/debug/src/app.ts:314` |
 | 共享状态通道 | 同上 | `apps/viewer` 不用通道：不改写物理、不需要 `SharedArrayBuffer`，只在启动时打印该状态 | `apps/game/src/app.ts:158`；`apps/viewer/src/app.ts:50`，且 `apps/viewer/src` 内 `createMainSharedState` 零匹配 |

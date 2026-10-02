@@ -26,7 +26,7 @@
 - `apps/game/src/app.ts` 的 `main`（`apps/game/src/app.ts:94`）：主线程装配全流程，文件末 `void main()` 触发。
 - `apps/game/src/config.ts` 的 `DEFAULT_CONFIG`（`apps/game/src/config.ts:176`）：七段配置的唯一默认值来源。
 - `apps/game/src/worker/main.ts` 的 `createAuthLoop`（`apps/game/src/worker/main.ts:451`）：Worker 权威物理的装配点。
-- `apps/game/src/renderer/renderer-main.ts` 的 `tick`（`apps/game/src/renderer/renderer-main.ts:922`）：一帧内的物理、相机、剔除与绘制。
+- `apps/game/src/renderer/renderer-main.ts` 的 `tick`（`apps/game/src/renderer/renderer-main.ts:772`）：一帧内的物理、相机、剔除与绘制。
 - `apps/game/src/panel/panel-controller.ts` 的 `PanelController`（`apps/game/src/panel/panel-controller.ts:45`）：面板控件接线与偏好持久化。
 - `apps/game/src/input/input-bridge.ts` 的 `sendConfig`（`apps/game/src/input/input-bridge.ts:41`）：面板参数的双端下发口。
 - `apps/game/web/index.html` 的 `canvas#preview`（`apps/game/web/index.html:27`）：页面外壳与全部挂载点。
