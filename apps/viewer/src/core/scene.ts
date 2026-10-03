@@ -21,6 +21,7 @@ import {
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { applyLightmap, buildMapScene } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
 import {
   BG_COLOR,
@@ -139,6 +140,8 @@ export class ViewerScene {
       disposeObject(this.modelRoot);
       this.scene.remove(this.modelRoot);
       this.modelRoot = null;
+      // three.js 渲染列表缓存按旧地图几何缓存条目，换图后清掉（2026-10-04 自 debug 对齐）
+      this.renderer.renderLists.dispose();
     }
     this.scene.add(mapRoot);
     this.modelRoot = mapRoot;
@@ -219,29 +222,4 @@ export class ViewerScene {
     this.scene.add(optRoot);
     this.modelRoot = optRoot;
   }
-}
-
-/**
- * 释放模型几何 / 材质 / 纹理（换图前先调它，防显存泄漏）。
- * 每个材质释放 `map` 与 `lightMap` 两张纹理（dispose 后再次加载会重新上传），再 dispose
- * 材质本身；非 Mesh 节点跳过。本仓当前只在 `mountGlb` 换图时调用。
- */
-export function disposeObject(obj: THREE.Object3D): void {
-  obj.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    mesh.geometry?.dispose();
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const mat of materials) {
-      if (!mat) continue;
-      const holder = mat as unknown as { map?: THREE.Texture | null; lightMap?: THREE.Texture | null };
-      const map = holder.map;
-      if (map?.isTexture) map.dispose();
-      // lightmap 图集同样要释放：viewer 是反复换图的工具，漏掉它每张图都会多留一份图集
-      // 纹理占用显存（与 map 同为 GLTF 纹理，dispose 后再次加载会重新上传）。
-      const lightMap = holder.lightMap;
-      if (lightMap?.isTexture) lightMap.dispose();
-      mat.dispose();
-    }
-  });
 }
