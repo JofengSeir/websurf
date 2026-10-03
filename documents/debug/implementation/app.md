@@ -19,7 +19,7 @@
 导出 10 个接口 + 3 个值：
 
 - 段接口：`PhysicsConfig`（`apps/debug/src/config.ts:12`）、`PlayerConfig`（`apps/debug/src/config.ts:40`）、`LodConfig`（`apps/debug/src/config.ts:59`）、`LightingConfig`（`apps/debug/src/config.ts:66`）、`InputConfig`（`apps/debug/src/config.ts:92`）、`CrosshairConfig`（`apps/debug/src/config.ts:105`）、`HudConfig`（`apps/debug/src/config.ts:120`）、`DebugConfig`（`apps/debug/src/config.ts:129`）、`TextureConfig`（`apps/debug/src/config.ts:155`）、`RuntimeConfig`（`apps/debug/src/config.ts:161`）。原 `MovementConfig` / `SmoothingConfig` / `TeleportConfig` 三段已随 2026-09-26 的死链清理整体删除（删除说明见 `LodConfig` 上方 `apps/debug/src/config.ts:51` 起的注释）。
-- 值：`DEFAULT_CONFIG`（`apps/debug/src/config.ts:181`）、`createConfig`（`apps/debug/src/config.ts:259`，`structuredClone` 深拷贝）、`applyConfigPatch`（`apps/debug/src/config.ts:264`，按段 `Object.assign`）。
+- 值：`DEFAULT_CONFIG`（`apps/debug/src/config.ts:181`）、`createConfig`（`apps/debug/src/config.ts:262`，`structuredClone` 深拷贝）、`applyConfigPatch`（`apps/debug/src/config.ts:267`，按段 `Object.assign`）。
 
 **`apps/debug/src/game-state.ts`（计时挑战状态机）**
 
@@ -49,8 +49,8 @@
 
 **不变量**：
 
-- `DEFAULT_CONFIG` 是冻结前的唯一真值源，任何调用方拿到的是深拷贝（`apps/debug/src/config.ts:259`），改自己的副本不会污染默认值。
-- `applyConfigPatch` 只做段级浅合并，段不存在或非对象时直接返回（`apps/debug/src/config.ts:270`）。
+- `DEFAULT_CONFIG` 是冻结前的唯一真值源，任何调用方拿到的是深拷贝（`apps/debug/src/config.ts:262`），改自己的副本不会污染默认值。
+- `applyConfigPatch` 只做段级浅合并，段不存在或非对象时直接返回（`apps/debug/src/config.ts:273`）。
 - 主线程 wasm 初始化的 Promise 只在成功时保留；失败时置回 `null` 以便重试（`apps/debug/src/main-wasm.ts:38`）。
 - `game` 的状态迁移只由两处驱动：输入循环里速度平方大于 1 时 `onPlayerMove`（`apps/debug/src/app.ts:2295`），以及渲染物理事件回调 `onRenderPhysEvent` 里的 `onTeleport` / `onDeath`（`apps/debug/src/app.ts:1949`）。
 
@@ -62,7 +62,7 @@
    - `pvsEnabled`：三个消费者（初始同步 / 场景就绪同步 / change 监听）与 `config.lod.pvsEnabled` 字段及其默认值一并删除；页面「渲染与视距」区不提供该开关（`apps/debug/web/index.html:531`）。
 2. **`clearTeleportsBtn` 不是缺失 id**：它在 `renderCustomTeleports` 里由 `innerHTML` 动态生成（`apps/debug/src/app.ts:1912`），随后才被查询并绑定（`apps/debug/src/app.ts:1926`）。列表为空时该函数提前返回（`apps/debug/src/app.ts:1907`），因此该按钮在无传送点时不存在。
 3. ~~**录制链路未接通**~~ **已处置（2026-09-26，删链）**：`InputRecorder.record` 在 `apps/debug/src` 内唯一的调用点始终是回放分支的 `replayCapture.record(...)`（`apps/debug/src/app.ts:2247`），用户录制器 `inputRecorder` 从不落样本 ⇒ 随链路一并删除（连同 `updateInputRecUi`、`startRecording` / `stopRecording`、`buildReplayMeta`、面板六个按钮监听、`__wsInput` 的 `start` / `stop` / `clear` / `isRecording` / `exportJson` / `status`）。**现状**：录制产物只能由外部工具生成，本页只承担**回放**（`__wsInput.load` → `play` → `stopPlay`，进度看 `__wsInput.progress()`）；回放捕获器 `replayCapture` 仍由回放分支落样本，供确定性自检比对。
-4. **`wasm.d.ts` 的 `PhysWorld` 声明落后于源码**：声明里只有 17 个成员（`apps/debug/src/wasm.d.ts:80` 起），而 `src/phys/mod.rs` 的 `impl` 有 24 个 `pub fn`。缺 `tick_into`、`state_out_ptr`、`set_state_ex`、`state_full_json`、`seed_from`、`gate_veto_count`、`debug_trace` 七项。因此调用 `state_full_json` / `set_state_ex` 只能先做运行时收窄（`apps/debug/src/renderer/renderer-main.ts:1078`、`apps/debug/src/renderer/renderer-main.ts:1095`）。
+4. **`wasm.d.ts` 的 `PhysWorld` 声明落后于源码**：声明里只有 17 个成员（`apps/debug/src/wasm.d.ts:80` 起），而 `src/phys/mod.rs` 的 `impl` 有 24 个 `pub fn`。缺 `tick_into`、`state_out_ptr`、`set_state_ex`、`state_full_json`、`seed_from`、`gate_veto_count`、`debug_trace` 七项。因此调用 `state_full_json` / `set_state_ex` 只能先做运行时收窄（`apps/debug/src/renderer/renderer-main.ts:1109`、`apps/debug/src/renderer/renderer-main.ts:1126`）。
 5. **`tick_into` / `state_out_ptr` / `seed_from` 在本工程无装配点**：三者在 `apps/debug/src` 内零出现；全仓唯一的调用方是共享层 `src/ts-shared/auth/tick-authority.ts` 与 `src/ts-shared/decoupled/decoupled-loop.ts`，而这两个控制器在三个工程内都没有装配点。本工程的零分配路径未接线，实际走 `tick()` 返回对象。
 6. **`set_yaw_pitch` 零调用点**：`apps/debug/src/wasm.d.ts:120` 只有一行类型声明，`apps/debug/src` 与 `src` 内都没有调用点（`src/phys/mod.rs` 的该导出同样无调用方）。
 7. ~~**`MovementConfig` / `SmoothingConfig` / `TeleportConfig` 三个段在本仓无读取点**~~ **已处置（2026-09-26，删字段）**：三段当时在 `apps/debug/src` 与 `src` 内零读取点、页面也无控件，已从 `apps/debug/src/config.ts` 整体删除（接口定义与 `DEFAULT_CONFIG` 条目一并移除），`syncFullConfig` 不再下发它们；删除说明见 `LodConfig` 上方 `apps/debug/src/config.ts:51` 起的注释。传送判定实际用的半径与冷却见第 11 项。

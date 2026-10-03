@@ -36,7 +36,7 @@
  */
 
 import { bspYawToCsYaw } from './angles.js';
-import { base64ToBytes, fetchWasmBytes } from '../wasm/loader.js';
+import { loadDefaultsJson } from '../materials/defaults.js';
 
 /**
  * 本函数用到的 `BspProcessor` 结构面（各工程 `pkg` 的 `BspProcessor` 都满足）。
@@ -224,24 +224,10 @@ export async function buildWorldBundle(
 
   // 默认纹理包：注入 decompressMtz 才走这段；两路取字节（内嵌 base64 或 fetch），
   // 解出的 JSON 交给 Rust 侧在导出 GLB 时替换缺失材质——渲染端不做后期处理。
+  // （2026-10-04 起两路取值抽到 src/ts-shared/materials/defaults.ts，viewer 的 GLB 导出共用。）
   let defaultsJson = '{}';
   if (options.decompressMtz) {
-    try {
-      const embeddedMtz = (globalThis as unknown as { __VBSP_TEXTURES_MTZ_B64__?: string })
-        .__VBSP_TEXTURES_MTZ_B64__;
-      if (embeddedMtz) {
-        // single 打包（file://）：内嵌 base64
-        const mtzBytes = base64ToBytes(embeddedMtz);
-        defaultsJson = options.decompressMtz(mtzBytes);
-        console.log('[load-bsp] 默认纹理包已加载（内嵌，缺失纹理回退可用）');
-      } else {
-        const mtzBytes = await fetchWasmBytes('./textures.mtz');
-        defaultsJson = options.decompressMtz(mtzBytes);
-        console.log('[load-bsp] 默认纹理包已加载（缺失纹理回退可用）');
-      }
-    } catch (e) {
-      console.warn('[load-bsp] 默认纹理包加载失败（缺失纹理保持占位色）:', e);
-    }
+    defaultsJson = await loadDefaultsJson(options.decompressMtz);
   }
   let glbBytes: Uint8Array;
   try {

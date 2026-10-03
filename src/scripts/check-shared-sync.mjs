@@ -7,8 +7,9 @@
  * | 子检查 | 断言 |
  * |---|---|
  * | `mtz` | `src/materials/textures.mtz`、`apps/debug/web/textures.mtz`、
- *   `apps/game/web/textures.mtz` 三份的 sha256 前 16 位全等；viewer 的
- *   web/textures.mtz 不得存在 |
+ *   `apps/game/web/textures.mtz`、`apps/viewer/web/textures.mtz` 四份的 sha256 前 16 位
+ *   全等（viewer 副本 2026-10-04 owner 裁决加入：缺失纹理回退链路对齐 game 后，dev 形态
+ *   需要 fetch ./textures.mtz 命中；dist 由各自 build-dist 从仓库根共享资产注入/拷贝） |
  * | `vmdl-patch` | `manifests` 里每份清单都含 `[patch.crates-io]`，且其中 vmdl 一项的
  *   path 指向 `src/vendor/vmdl` |
  * | `eye-stand` | `src/phys/player.rs` 的 `pub const EYE_STAND: f64 = …;` 与
@@ -54,7 +55,7 @@ function sha256(file) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. mtz：三处纹理包 sha256 前 16 位全等 + viewer 不得有副本
+// 1. mtz：四处纹理包 sha256 前 16 位全等（含 viewer——2026-10-04 owner 裁决加入为受控副本）
 // ---------------------------------------------------------------------------
 
 function checkMtz() {
@@ -63,6 +64,7 @@ function checkMtz() {
     'src/materials/textures.mtz',
     'apps/debug/web/textures.mtz',
     'apps/game/web/textures.mtz',
+    'apps/viewer/web/textures.mtz',
   ];
   const digests = [];
   for (const rel of triple) {
@@ -76,17 +78,10 @@ function checkMtz() {
   if (digests.length === triple.length && new Set(digests.map((d) => d[1])).size !== 1) {
     fail(
       check,
-      `三处 textures.mtz 不一致: ${digests.map((d) => `${d[0]}=${d[1]}(${d[2]}B)`).join(' | ')}`,
+      `四处 textures.mtz 不一致: ${digests.map((d) => `${d[0]}=${d[1]}(${d[2]}B)`).join(' | ')}`,
     );
   } else if (digests.length === triple.length) {
-    note(check, `三处 textures.mtz sha256 全等 = ${digests[0][1]}（各 ${digests[0][2]} B）`);
-  }
-
-  const viewerMtz = path.join(ROOT, 'apps/viewer/web/textures.mtz');
-  if (fs.existsSync(viewerMtz)) {
-    fail(check, 'apps/viewer/web/textures.mtz 存在（t2 §8.2 声明 viewer 无该副本）');
-  } else {
-    note(check, 'apps/viewer/web/textures.mtz 不存在（符合声明）');
+    note(check, `四处 textures.mtz sha256 全等 = ${digests[0][1]}（各 ${digests[0][2]} B）`);
   }
 }
 

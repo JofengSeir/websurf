@@ -27,7 +27,7 @@
 
 - `apps/debug/package.json:7` 的 `scripts`：dev 端口、构建链与全部门禁脚本的调用名。
 - `apps/debug/src/app.ts:278` 的 `main`：主线程装配入口（DOM 句柄 → 共享缓冲 → Worker → 渲染器 → 面板）。
-- `apps/debug/src/renderer/renderer-main.ts:579` 的 `tick`：一帧内的物理 / 剔除 / 可视化 / 渲染顺序。
+- `apps/debug/src/renderer/renderer-main.ts:610` 的 `tick`：一帧内的物理 / 剔除 / 可视化 / 渲染顺序。
 - `apps/debug/src/worker/main.ts:455` 的 `createAuthLoop` 装配：Worker 侧权威物理的唯一推进者。
 - `apps/debug/src/input/input-recorder.ts:166` 的 `InputRecorder`：录制 / 回放的数据模型与失败语义。
 - `apps/debug/crates/wasm/src/lib.rs:487` 的 `impl BspProcessor`：本工程 WASM 绑定层的导出面。

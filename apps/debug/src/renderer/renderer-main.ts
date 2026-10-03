@@ -9,9 +9,10 @@
  *
  * 场景数据来源：`loadScene` 收 `apps/debug/src/worker/worker-types.ts` 的 `SceneDataMessage`，
  * 由 `apps/debug/src/app.ts` 的 `handleLoadBsp` 经 `buildWorldBundle`
- * （`src/ts-shared/phys/world-builder.ts`）在主线程解析后传入。GLB 交 `GLTFLoader`，
- * 碰撞体交 `adaptBrushes`、可见集交 `PvsManager`、传送触发器交 `TeleportManager`、
- * 光照图图集交 `loadLightmapAtlas`（`src/renderer-shared/shader/lightmap-shader.ts`）。
+ * （`src/ts-shared/phys/world-builder.ts`）在主线程解析后传入。GLB 装配走共享
+ * `buildMapScene`（`src/renderer-shared/scene/scene-builder.ts`：清根旋转 + 世界包围盒 +
+ * 摘 punctual 灯，2026-10-04 起与 game/viewer 同一条链路），碰撞体交 `adaptBrushes`、
+ * 可见集交 `PvsManager`、传送触发器交 `TeleportManager`、静态光照交共享 `applyLightmap`。
  *
  * 子管理器全部由本类持有：`CameraController`（视角输入）、`LightManager`（灯光/阴影/雾）、
  * `LodManager`（分块与剔除距离）、`ColliderDebug`（碰撞体与触发器可视化）、
@@ -21,8 +22,6 @@
  */
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
 import { ensureMainWasm, mosaic_decode } from '../main-wasm.js';
@@ -49,8 +48,12 @@ import type { InputReplayInitialState, InputReplayHull } from '../input/input-re
 import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
 import { optimizeScene as optimizeSceneShared } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import {
+  applyLightmap,
+  buildMapScene,
+} from '../../../../src/renderer-shared/scene/scene-builder.js';
+import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
-import { applyLightmapToMeshes, loadLightmapAtlas, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」
@@ -350,6 +353,15 @@ export class RendererMain {
     // 光照模式（面板「预烘焙 / 纯纹理」）：模块级开关，交由 lightmap-shader 的
     // applyLightmapToMeshes 分流；在加载地图前设定，使该图的所有材质从一开始就按同一模式注入。
     setLightingModeInShader(config.lighting?.mode ?? 'baked');
+    // 静态光照（预烘焙）显示参数：与 game 的 init 装配同值（2026-10-04 起三应用同一基线；
+    // 数值出处是 `apps/game/src/config.ts` 的 `DEFAULT_CONFIG.lighting`）。
+    // 注意 `setLightGamma` 只接受 (0, 1] 的入参 ⇒ 2.2 会被它忽略、共享 uniform 保持初值 1
+    // （与 game/viewer 同一码值行为，非本文件特有）。
+    setExposure(2.3);
+    setLightGamma(2.2);
+    setAmbientScale(1);
+    setPropVertexRelax(1);
+    setPropVertexFlatten(0.85);
     // 跨线程通道形态与本地采样世代计数（诊断用；世代不参与协议，见 sampleEpoch）
     console.log(`[renderer] 跨线程通道: ${this.shared.isShared ? 'SAB' : 'MsgState'}（阶段 1 渲染直读本地物理）`);
     console.log(`[renderer] 渲染采样失效世代计数（本地诊断，非协议值）: ${this.sampleEpoch}`);
@@ -471,27 +483,48 @@ export class RendererMain {
     if (!this.scene || !this.camera) return null;
     this.disposeScene();
 
-    const gltf = await this.loadGlb(data.glb);
-    const scene = new THREE.Scene();
-    gltf.scene.userData.isBspModel = true;
-    this.resetRootRotations(gltf);
-    scene.add(gltf.scene);
-    this.collectMetadata(scene);
+    // 共享装配核（2026-10-04 起与 game/viewer 同一条链路）：GLB 字节 → 子场景（isBspModel 标记 +
+    // 清根 rotation + 世界包围盒 + **摘 punctual 灯**）。此前本工程自持 loadGlb + 手工装配、
+    // GLB 内嵌的灯全部保留进场景——重复计光且推高 uniform，是三应用观感分歧的来源之一。
+    const { gltf, scene: mapRoot, bbox: boundingBox, maxDim } = await buildMapScene(data.glb);
+    this.collectMetadata(mapRoot);
 
-    // lightmap：atlas 由 GLB extras 的 textureIndex 解出，**与光照模式无关地一律加载并应用**
-    // （两种模式的差别只在片元里的共享 uniform 分支，见 lightmap-shader 的 setLightingMode）。
-    const atlasTexture = await loadLightmapAtlas(gltf.parser, gltf);
-    if (atlasTexture) {
-      applyLightmapToMeshes(scene, atlasTexture);
+    // lightmap（共享链路，与 game 同一份）：atlas 由 GLB extras 的 textureIndex 解出，
+    // **与光照模式无关地一律加载并应用**；必须先于分块合并（合并按材质实例分组）。
+    const applied = await applyLightmap(mapRoot, gltf);
+    if (!applied) {
+      console.info('[debug][lightmap] 未施加静态光照（无 atlas 或施加失败），地图为贴图原色');
     }
     // 空间分块合并：必须在下面的 updateMatrixWorld / boundingBox 以及 LOD·PVS 注册
     //（lodManager.setup 与 assignClusterIds）之前执行——块几何已烘焙到世界空间，包围盒与
     // 相机 near/far 要按块重算，LOD 项与 clusterId 也要注册到分块后的 mesh。
     // 放在 lightmap 之后：lightmap 按原 mesh 的材质/UV 施加，材质实例在合并中按实例去重保留。
-    if (OPTIMIZE_SCENE_ENABLED) this.optimizeScene(scene, gltf.scene);
-    scene.updateMatrixWorld(true);
-    const boundingBox = new THREE.Box3().setFromObject(scene);
-    const size = boundingBox.getSize(new THREE.Vector3());
+    if (OPTIMIZE_SCENE_ENABLED) this.optimizeScene(mapRoot, gltf.scene);
+
+    // 合并后终扫（2026-10-04 起与 game 同序：终扫必须晚于合并——合并会重建 mesh/材质数组）：
+    // 把仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程默认不加灯，受光材质恒黑）
+    const converged = fullbrightUnlitLitMaterials(mapRoot);
+    if (converged > 0) {
+      console.info(
+        `[lightmap] 装配后终扫：${converged} 个 mesh 仍为受光材质 ⇒ 收敛为 fullbright 贴图原色` +
+          '（默认不加灯，受光材质恒黑；unlit 图元不吃 ambient cube）',
+      );
+    }
+
+    // 预编译着色器程序（2026-10-04 起与 game 同款）：把「首次可见才编译」的卡顿挪到加载期。
+    // 失败不致命（three 仍按需编译），故只告警。
+    try {
+      const renderer = this.renderer;
+      if (renderer) {
+        const compileT0 = performance.now();
+        renderer.compile(this.scene, this.camera);
+        console.info(`[render] 着色器程序预编译耗时 ${(performance.now() - compileT0).toFixed(0)}ms`);
+      }
+    } catch (err) {
+      console.warn('[render] 预编译着色器失败（不影响按需编译）:', err);
+    }
+
+    mapRoot.updateMatrixWorld(true);
 
     // 摘除旧的 BSP 模型子树引用（资源已由开头的 disposeScene 释放，这里只防场景里叠加两份）
     for (let i = this.scene.children.length - 1; i >= 0; i--) {
@@ -500,11 +533,9 @@ export class RendererMain {
         this.scene.remove(child);
       }
     }
-    scene.userData.isBspModel = true;
-    this.bspModelScene = scene;
-    this.scene.add(scene);
+    this.bspModelScene = mapRoot;
+    this.scene.add(mapRoot);
 
-    const maxDim = Math.max(size.x, size.y, size.z);
     const defaultNear = NearPlaneController.defaultNearForScene(maxDim);
     this.nearPlane.setDefaultNear(defaultNear);
     this.camera.near = defaultNear;
@@ -512,7 +543,7 @@ export class RendererMain {
     this.camera.updateProjectionMatrix();
 
     // LOD 与 PVS：setup 收集块并按对角线定剔除距离，随后用 PVS 给每个块分配 clusterId
-    const diagInfo = this.lodManager.setup(scene, this.config);
+    const diagInfo = this.lodManager.setup(mapRoot, this.config);
     this.pvsManager = new PvsManager(data.pvsJson);
     this.lodManager.assignClusterIds(this.pvsManager);
 
@@ -1299,37 +1330,8 @@ export class RendererMain {
     };
   }
 
-  // ── GLB 加载（SceneBuilder 主线程版）──────────────────────
-
-  private readonly gltfLoader = new GLTFLoader();
-
-  private async loadGlb(glbBytes: ArrayBuffer): Promise<GLTF> {
-    const buffer = new Uint8Array(glbBytes.byteLength);
-    buffer.set(new Uint8Array(glbBytes));
-    const blob = new Blob([buffer], { type: 'model/gltf-binary' });
-    const blobUrl = URL.createObjectURL(blob);
-    try {
-      return await this.gltfLoader.loadAsync(blobUrl);
-    } finally {
-      URL.revokeObjectURL(blobUrl);
-    }
-  }
-
-  /** 重置 GLB 根节点旋转，统一坐标系（与 Worker 侧碰撞体一致）。 */
-  private resetRootRotations(gltf: GLTF): void {
-    for (const child of gltf.scene.children) {
-      const r = child.rotation;
-      if (r.x !== 0 || r.y !== 0 || r.z !== 0) {
-        console.log(
-          `[renderer-main] 重置根节点 "${child.name || '(unnamed)'}" 旋转: ` +
-            `(${r.x.toFixed(3)}, ${r.y.toFixed(3)}, ${r.z.toFixed(3)}) → (0, 0, 0)`,
-        );
-        child.rotation.set(0, 0, 0);
-        child.updateMatrixWorld();
-      }
-    }
-    gltf.scene.updateMatrixWorld(true);
-  }
+  // ── GLB 加载：2026-10-04 起走共享 buildMapScene（src/renderer-shared/scene/scene-builder.ts），
+  //    私有 loadGlb / resetRootRotations 副本随装配链对齐一并删除。
 
   /** 遍历 mesh 存储 userData 元数据（材质/纹理分类，供调试/剔除）。 */
   private collectMetadata(scene: THREE.Scene): void {
