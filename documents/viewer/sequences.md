@@ -25,7 +25,7 @@
 | 主线程 | 首刷位姿读数并 `requestAnimationFrame(frame)` | 主循环启动 | `apps/viewer/src/app.ts:999` 到 `apps/viewer/src/app.ts:1020` |
 | 用户 | 点引导按钮「选择地图」/ 地图页换图入口 → `#bspFile` 的 change → `loadBsp(file)` | `bspLoading` 与 busy 类 | `apps/viewer/src/app.ts:612` 到 `apps/viewer/src/app.ts:616`、`apps/viewer/src/app.ts:535` |
 | 用户 | 拖拽 / 引导层「导入记录 / 录像」/ 两个面板的文件框 → `routeFile(file)`：按文件头魔数判类型，命中即切到对应 tab | 无（纯分派，不落状态） | `apps/viewer/src/app.ts:626` 到 `apps/viewer/src/app.ts:644`、`apps/viewer/src/app.ts:618` 到 `apps/viewer/src/app.ts:622`、`apps/viewer/src/app.ts:663` 到 `apps/viewer/src/app.ts:666` |
-| 主线程 + WASM | `ensureWasm()` → `new BspProcessor(bytes)` → `metadata()` → `parse_spawn_points()` → `export_glb_with_pakfile_models()`（顺序被借用语义固死） | `BspLoadResult`：meta / spawnPoints / primary / glbBytes / elapsedMs | `apps/viewer/src/core/bsp.ts:116`、`apps/viewer/src/core/bsp.ts:121` 到 `apps/viewer/src/core/bsp.ts:125` |
+| 主线程 + WASM | `ensureWasm()` → `new BspProcessor(bytes)` → `metadata()` → `parse_spawn_points()` → `loadDefaultsJson` → `export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson)`（顺序被借用语义固死；导出失败回退裸导出。2026-10-04 起与 game 同款） | `BspLoadResult`：meta / spawnPoints / primary / glbBytes / elapsedMs | `apps/viewer/src/core/bsp.ts:123`、`apps/viewer/src/core/bsp.ts:128` 到 `apps/viewer/src/core/bsp.ts:125` |
 | 主线程 | `scene.mountGlb(glbBytes)`：共享 buildMapScene（摘 punctual 灯）→ 施加静态光照 → 空间分块合并 → 合并后终扫 → `fitCamera(maxDim)` | `modelRoot`（共享装配产出的子场景根）、相机 near/far | `apps/viewer/src/core/scene.ts:134`、`apps/viewer/src/core/scene.ts:137` 到 `apps/viewer/src/core/scene.ts:166` |
 | 主线程 | `resolveInitialSpawn(spawnPoints, primary, box)` 定初始视角；`mapPanel.setMap(...)` 填面板；`updateReplayMapStatus()` 做贴合检查 | `currentBox`、`lastSpawnSource`、面板 DOM | `apps/viewer/src/app.ts:557` 到 `apps/viewer/src/app.ts:559`、`apps/viewer/src/core/spawn.ts:96` |
 | 用户 | 记录页文件框 / 深链 → `ReplayPanel.loadFile(file)`：先按内容复核，非 `.replay` 经 `onForeignFile` 交回 `routeFile` 改送 | `file` 字段、`lastTrackId` 清空为 null | `apps/viewer/src/replay/panel.ts:278`、`apps/viewer/src/replay/panel.ts:283` |
@@ -84,10 +84,10 @@
 |---|---|---|
 | `canvas#game` 缺失 | 抛错，页面停留在静态骨架（`<script>` 之后的代码不执行） | `apps/viewer/src/app.ts:48` 到 `apps/viewer/src/app.ts:49` |
 | WebGL 上下文创建失败 | `Hud.showFatal` 打开 `#fatal` 卡片并给出建议文案，随后重抛 | `apps/viewer/src/app.ts:63` 到 `apps/viewer/src/app.ts:71`、`apps/viewer/src/ui/hud.ts:120` |
-| WASM 三条取值路径全不通 | 抛「WASM 加载失败」错误，文案带 `npm run build:wasm` 提示 | `apps/viewer/src/core/bsp.ts:107` |
-| WASM 外置请求非 2xx | 打一条 `warn` 后回退到内嵌副本路径 | `apps/viewer/src/core/bsp.ts:94` |
-| WASM 首次失败后再试 | 模块级 Promise 已被 rejected 且不重置 ⇒ 同一次页面会话内不会重新尝试（见 `documents/viewer/implementation/core.md` 的「已知缺口」） | `apps/viewer/src/core/bsp.ts:75` |
-| BSP 解析 / 导出抛错 | `humanizeBspError` 按 message 归成四类文案；无地图时显示引导层错误详情，已有地图时临时提示 5 s 并还原旧摘要 | `apps/viewer/src/core/bsp.ts:148`、`apps/viewer/src/app.ts:568` 到 `apps/viewer/src/app.ts:579` |
+| WASM 三条取值路径全不通 | 抛「WASM 加载失败」错误，文案带 `npm run build:wasm` 提示 | `apps/viewer/src/core/bsp.ts:114` |
+| WASM 外置请求非 2xx | 打一条 `warn` 后回退到内嵌副本路径 | `apps/viewer/src/core/bsp.ts:101` |
+| WASM 首次失败后再试 | 模块级 Promise 已被 rejected 且不重置 ⇒ 同一次页面会话内不会重新尝试（见 `documents/viewer/implementation/core.md` 的「已知缺口」） | `apps/viewer/src/core/bsp.ts:82` |
+| BSP 解析 / 导出抛错 | `humanizeBspError` 按 message 归成四类文案；无地图时显示引导层错误详情，已有地图时临时提示 5 s 并还原旧摘要 | `apps/viewer/src/core/bsp.ts:163`、`apps/viewer/src/app.ts:568` 到 `apps/viewer/src/app.ts:579` |
 | GLB 未携带光照图集 | 共享 applyLightmap 返回 false，viewer 打一条「未施加」说明；地图仍可看（贴图原色） | `apps/viewer/src/core/scene.ts:152` 到 `apps/viewer/src/core/scene.ts:154` |
 | 施加静态光照中途抛错 | 共享 applyLightmap 的 catch 只 `console.error` 并返回 false，不阻断挂载 | `src/renderer-shared/scene/scene-builder.ts:131` 到 `src/renderer-shared/scene/scene-builder.ts:133` |
 | 块内几何合并失败 | 保留全部子块（不丢几何）；最终合并失败时逐块建 Mesh（共享核，game/viewer 同一份） | `src/renderer-shared/scene/scene-optimizer.ts:187`、`:204`、`:213` |

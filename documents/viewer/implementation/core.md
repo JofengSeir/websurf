@@ -8,7 +8,7 @@
 
 | 模块 | 职责 | 导出清单 |
 |---|---|---|
-| `apps/viewer/src/core/bsp.ts` | 字节 → 结构化结果：WASM 懒初始化、`BspProcessor` 三次调用、错误人话化；不碰 UI、不碰相机 | 类型 `BspMeta`（`apps/viewer/src/core/bsp.ts:20`）、`SpawnPoint`（`apps/viewer/src/core/bsp.ts:32`）、`BspLoadResult`（`apps/viewer/src/core/bsp.ts:38`）；函数 `ensureWasm`（`apps/viewer/src/core/bsp.ts:74`）、`loadBspFile`（`apps/viewer/src/core/bsp.ts:115`）、`humanizeBspError`（`apps/viewer/src/core/bsp.ts:148`） |
+| `apps/viewer/src/core/bsp.ts` | 字节 → 结构化结果：WASM 懒初始化、`BspProcessor` 三次调用、错误人话化；不碰 UI、不碰相机 | 类型 `BspMeta`（`apps/viewer/src/core/bsp.ts:27`）、`SpawnPoint`（`apps/viewer/src/core/bsp.ts:39`）、`BspLoadResult`（`apps/viewer/src/core/bsp.ts:45`）；函数 `ensureWasm`（`apps/viewer/src/core/bsp.ts:81`）、`loadBspFile`（`apps/viewer/src/core/bsp.ts:122`）、`humanizeBspError`（`apps/viewer/src/core/bsp.ts:163`） |
 | `apps/viewer/src/core/scene.ts` | WebGL 渲染器 / 场景 / 相机装配与 mountGlb 编排（2026-10-03 Phase 3c 起装配/光照/合并/近平面全用渲染共享层实现，构造器不再自带三点光——owner 裁决采纳 game 光照纪律） | 类 `ViewerScene`（`apps/viewer/src/core/scene.ts:36`）；`disposeObject` 自渲染共享层导入（2026-10-04 起：`src/renderer-shared/scene/dispose.ts:16`，本文件不再自有实现） |
 | `apps/viewer/src/core/fly.ts` | 自由飞行相机：位姿状态、pointer lock、键鼠输入、写相机 | 类 `FlyCam`（`apps/viewer/src/core/fly.ts:41`） |
 | `apps/viewer/src/core/pose.ts` | 位姿契约（脚底 + 度）与角度工具再导出 | 接口 `Pose`（`apps/viewer/src/core/pose.ts:25`）；函数 `pitchClampedRad`（`apps/viewer/src/core/pose.ts:36`）、`eyeHeight`（`apps/viewer/src/core/pose.ts:47`）；再导出 `wrapDeg` 与 `bspYawToCsYaw`（`apps/viewer/src/core/pose.ts:22`） |
@@ -21,11 +21,11 @@
 
 | 流程 / 不变量 | 说明 | 锚点 |
 |---|---|---|
-| WASM 三条取值路径 | ① `globalThis.__VBSP_WASM_B64__` 命中（single 产物内嵌）→ `initSync`；② `fetch` 同目录 `websurf_viewer_wasm_bg.wasm`（multi 部署主路径）；③ 动态插 `<script>` 加载 `wasm-embedded.js` 后重读同一全局键；三条都不通才抛错 | `apps/viewer/src/core/bsp.ts:78`、`apps/viewer/src/core/bsp.ts:86`、`apps/viewer/src/core/bsp.ts:99`、`apps/viewer/src/core/bsp.ts:107` |
-| 内嵌判定口径 | 走共享层 `readEmbeddedWasmB64`：非空字符串才算命中 | `apps/viewer/src/core/bsp.ts:78`、`src/ts-shared/wasm/loader.ts:63` |
-| 解析三步顺序 | `metadata()` → `parse_spawn_points()`（都是借用方法）→ `export_glb_with_pakfile_models()`（消耗内部 `Bsp`，必须最后） | `apps/viewer/src/core/bsp.ts:122` 到 `apps/viewer/src/core/bsp.ts:125` |
-| 导出前让出一帧 | `loadBspFile` 在同步解析前 `await new Promise(r => setTimeout(r, 0))`，让浏览器有机会画出「正在解析」状态 | `apps/viewer/src/core/bsp.ts:118` |
-| 错误分类 | `humanizeBspError` 依次匹配「解析类 → WASM/网络类 → 内存类」，全不中给通用文案；第二返回值始终是原始信息 | `apps/viewer/src/core/bsp.ts:150` 到 `apps/viewer/src/core/bsp.ts:159` |
+| WASM 三条取值路径 | ① `globalThis.__VBSP_WASM_B64__` 命中（single 产物内嵌）→ `initSync`；② `fetch` 同目录 `websurf_viewer_wasm_bg.wasm`（multi 部署主路径）；③ 动态插 `<script>` 加载 `wasm-embedded.js` 后重读同一全局键；三条都不通才抛错 | `apps/viewer/src/core/bsp.ts:85`、`apps/viewer/src/core/bsp.ts:93`、`apps/viewer/src/core/bsp.ts:106`、`apps/viewer/src/core/bsp.ts:114` |
+| 内嵌判定口径 | 走共享层 `readEmbeddedWasmB64`：非空字符串才算命中 | `apps/viewer/src/core/bsp.ts:85`、`src/ts-shared/wasm/loader.ts:63` |
+| 解析顺序 | `metadata()` → `parse_spawn_points()`（都是借用方法）→ `loadDefaultsJson`（共享层，两路装载 textures.mtz）→ `export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson)`（取走内部 `Bsp`，必须最后；失败回退裸 `export_glb_with_pakfile_models()`。2026-10-04 起与 game 同款，缺失材质用默认纹理包补位） | `apps/viewer/src/core/bsp.ts:129` 到 `apps/viewer/src/core/bsp.ts:125` |
+| 导出前让出一帧 | `loadBspFile` 在同步解析前 `await new Promise(r => setTimeout(r, 0))`，让浏览器有机会画出「正在解析」状态 | `apps/viewer/src/core/bsp.ts:125` |
+| 错误分类 | `humanizeBspError` 依次匹配「解析类 → WASM/网络类 → 内存类」，全不中给通用文案；第二返回值始终是原始信息 | `apps/viewer/src/core/bsp.ts:165` 到 `apps/viewer/src/core/bsp.ts:174` |
 | 挂载顺序 | `mountGlb`：共享 `buildMapScene`（GLB→子场景 + 摘 punctual 灯）→ 释放旧根并挂新根 → 共享 `applyLightmap` → 分块合并（共享核 + viewer 根重建）→ 合并后 fullbright 终扫（game 同序）→ `fitCamera(maxDim)` | `apps/viewer/src/core/scene.ts:137`、`apps/viewer/src/core/scene.ts:146`、`apps/viewer/src/core/scene.ts:151`、`apps/viewer/src/core/scene.ts:157`、`apps/viewer/src/core/scene.ts:161`、`apps/viewer/src/core/scene.ts:166` |
 | 静态光照失败不阻断 | 共享 `applyLightmap`（`src/renderer-shared/scene/scene-builder.ts:108`）整段包在 `try/catch` 里：无图集或异常时返回 false，viewer 据此打一条「未施加」说明 | `apps/viewer/src/core/scene.ts:151` 到 `apps/viewer/src/core/scene.ts:155` |
 | 近平面自适应 | 实现在共享 `NearPlaneController`（`src/renderer-shared/camera/near-plane.ts:24`）：viewer 每 2 帧一次（`nearCheckToggle` 交替），传 `{ roots: [modelRoot], vertical: true }`——候选取 modelRoot 子树且探 6 向（game 默认 scene.children 的 isBspModel 根、4 向）；命中则收缩、全空复位 `defaultNear` | `apps/viewer/src/core/scene.ts:111` 到 `apps/viewer/src/core/scene.ts:119`、`src/renderer-shared/camera/near-plane.ts:65` |
@@ -38,13 +38,13 @@
 | pointer lock 失败降级 | 先试 `requestPointerLock({unadjustedMovement:true})`；返回 Promise 被拒或同步抛出时回退无参调用；`pointerlockerror` 触发 `onLockError` | `apps/viewer/src/core/fly.ts:144`、`apps/viewer/src/core/fly.ts:146`、`apps/viewer/src/core/fly.ts:91` |
 | 位姿单位约定 | `Pose.ang` 是度；弧度只在 `FlyCam` 内部；`setPose` 用 `DEG2RAD` 换算并把 pitch 夹到 `PITCH_LIMIT` | `apps/viewer/src/core/pose.ts:27`、`apps/viewer/src/core/fly.ts:209` |
 | 出生点四级优先级 | ① primary 下标指向的 `info_player_start`；② 实体序第一个 `info_player_start`；③ 实体序第一个 `info_player_*`；④ bbox 内的第一个 `info_teleport_destination`；都不可用时回落 bbox 中心高位俯瞰（`index = −1`）；`box` 为 null 时第 ④⑤ 步不执行并返回 null | `apps/viewer/src/core/spawn.ts:102` 到 `apps/viewer/src/core/spawn.ts:117` |
-| 出生点角度换算 | `yaw = bspYawToCsYaw(angles[1])`、`pitch = −angles[0]`（wasm 的 `angles` 保持 BSP 原始 `[pitch, yaw, roll]` 次序） | `apps/viewer/src/core/spawn.ts:58`、`apps/viewer/crates/wasm/src/lib.rs:369` |
+| 出生点角度换算 | `yaw = bspYawToCsYaw(angles[1])`、`pitch = −angles[0]`（wasm 的 `angles` 保持 BSP 原始 `[pitch, yaw, roll]` 次序） | `apps/viewer/src/core/spawn.ts:58`、`apps/viewer/crates/wasm/src/lib.rs:456` |
 | `EYE_STAND` 单点 | 本工程不持有该字面量，从共享层再导出；相机 y = `pos.y + EYE_STAND` | `apps/viewer/src/core/constants.ts:35`、`apps/viewer/src/core/fly.ts:203` |
 
 ## 已知缺口
 
 1. **构造期 γ 写入落在着色器接受窗口之外**：`ViewerScene` 构造时调用 `setLightGamma(2.2)`（`apps/viewer/src/core/scene.ts:65`），而 `setLightGamma` 在 `value <= 0 || value > 1` 时直接返回（`src/renderer-shared/shader/lightmap-shader.ts:1789`）⇒ 这次写入被忽略，γ 共享 uniform 保持自身初值 1；同一组五参数里其余四项都落在各自窗口内（`apps/viewer/src/core/scene.ts:64` 到 `apps/viewer/src/core/scene.ts:69`）。`apps/game/src/config.ts:228` 的默认 `lightGamma` 同为 2.2，是同一码值来源。
-2. **`ensureWasm` 把首次失败永久缓存**：模块级 `wasmReady` 只在为 null 时创建（`apps/viewer/src/core/bsp.ts:75`），被 reject 后没有任何重置点，之后每次调用都返回同一个 rejected Promise（`apps/viewer/src/core/bsp.ts:112`）⇒ 一次瞬时 fetch 失败后本次页面会话无法自愈，只能刷新。
+2. **`ensureWasm` 把首次失败永久缓存**：模块级 `wasmReady` 只在为 null 时创建（`apps/viewer/src/core/bsp.ts:82`），被 reject 后没有任何重置点，之后每次调用都返回同一个 rejected Promise（`apps/viewer/src/core/bsp.ts:119`）⇒ 一次瞬时 fetch 失败后本次页面会话无法自愈，只能刷新。
 3. **`allowPointerLock` 是无写无读的字段**：声明在 `apps/viewer/src/core/fly.ts:68`，`attach` 的 click 处理只判 `locked`（`apps/viewer/src/core/fly.ts:88`），`apps/viewer/src` 内既无写入点也无读取点。
 4. **`onLockChange` 无赋值点**：字段声明与调用都在 `apps/viewer/src/core/fly.ts:80` 与 `apps/viewer/src/core/fly.ts:104`，本工程只给 `FlyCam` 赋过 `onLockError`（`apps/viewer/src/app.ts:74`）⇒ 锁定状态变化回调永不触发。
 5. **`core/pose.ts` 的两个函数零调用点**：`pitchClampedRad`（`apps/viewer/src/core/pose.ts:36`）与 `eyeHeight`（`apps/viewer/src/core/pose.ts:47`）在 `apps/viewer/src` 内无调用者——限幅与眼高分别由 `FlyCam.update` / `setPose` / `setWorld` 与 `FlyCam.writeCamera` / `applyToWithRoll` 各自实现（`apps/viewer/src/core/fly.ts:172`、`apps/viewer/src/core/fly.ts:203`）。
@@ -52,4 +52,4 @@
 7. **`ViewerScene.model` getter 零调用点**：`apps/viewer/src/core/scene.ts:92` 暴露的只读地图根在本工程内没有读取者（`worldBox` 走内部 `modelRoot`，回放可视化走 `add` / `remove`）。
 8. **`numField` 把空串当合法 0**：`Number('')` 得 0 且 `Number.isFinite(0)` 为真（`apps/viewer/src/core/dom.ts:107`），于是清空输入框会走有效分支把 0 写进变换；两个消费点都只在非有限值时提前返回（`apps/viewer/src/replay/panel.ts:367`），因此空串的语义等同「把该分量设为 0」。
 9. **分块的选块包围盒只统计部分 Mesh**（共享核行为，game/viewer 同此口径）：`worldBox` 只累计「材质不是数组且存在、有 `position` 属性」的 Mesh（`src/renderer-shared/scene/scene-optimizer.ts:102`），被搬进 `keptMeshes` 的数组材质 / 缺失材质 Mesh 不参与统计（`src/renderer-shared/scene/scene-optimizer.ts:94`）⇒ 块边长由子集推出，极端地图（大量数组材质 Mesh）下块数与目标区间会有偏差。
-10. **回退脚本加载没有超时**：第 ③ 条取值路径用 `loadScript` 动态插 `<script>` 并等 `onload` / `onerror`（`apps/viewer/src/core/bsp.ts:52` 到 `apps/viewer/src/core/bsp.ts:60`）；两个事件都没发生时该 Promise 不结算，`ensureWasm` 的 await 会一直挂着（没有超时分支），且插入的 `<script>` 标签在成功路径上也不移除（`apps/viewer/src/core/bsp.ts:58`）。
+10. **回退脚本加载没有超时**：第 ③ 条取值路径用 `loadScript` 动态插 `<script>` 并等 `onload` / `onerror`（`apps/viewer/src/core/bsp.ts:59` 到 `apps/viewer/src/core/bsp.ts:67`）；两个事件都没发生时该 Promise 不结算，`ensureWasm` 的 await 会一直挂着（没有超时分支），且插入的 `<script>` 标签在成功路径上也不移除（`apps/viewer/src/core/bsp.ts:65`）。

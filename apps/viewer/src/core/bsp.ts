@@ -1,10 +1,16 @@
 /**
- * BSP 加载：WASM 懒初始化 → 元数据 → 出生点 → GLB 导出。
+ * BSP 加载：WASM 懒初始化 → 元数据 → 出生点 → 默认纹理包 → GLB 导出。
  *
- * `loadBspFile` 的三步顺序被 wasm 侧的借用语义固死：`BspProcessor` 的 `metadata()` 与
- * `parse_spawn_points()` 都是**借用**方法，而 `export_glb_with_pakfile_models()` 会
- * **消耗**内部 Bsp 实例，故 GLB 导出必须是最后一步（约束写在
- * `apps/viewer/crates/wasm/src/lib.rs` 的 `export_glb_with_pakfile_models` 文档注释里）。
+ * `loadBspFile` 的步骤顺序被 wasm 侧的借用语义固死：`BspProcessor` 的 `metadata()` 与
+ * `parse_spawn_points()` 都是**借用**方法，而两个 `export_glb_*` 都会**取走**内部 Bsp 实例，
+ * 故 GLB 导出必须是最后一步（约束写在
+ * `apps/viewer/crates/wasm/src/lib.rs` 的导出方法文档注释里）。
+ *
+ * GLB 导出走 `export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson)`
+ * （2026-10-04 起与 game 同款：缺失材质用 textures.mtz 回退表补低清纹理、GLB 自带灯实体——
+ * 渲染端 buildMapScene 会摘除）；defaultsJson 由共享层 `src/ts-shared/materials/defaults.ts`
+ * 的 `loadDefaultsJson` 两路装载（内嵌 base64 / fetch `./textures.mtz`），失败回落 `'{}'`。
+ * 导出本身失败时回退裸 `export_glb_with_pakfile_models()`（无回退表，仅保加载不断）。
  *
  * 结构映射：`BspMeta` 是 `metadata()` JSON 的宽松映射（字段全部可选），
  * `SpawnPoint` 与 `BspLoadResult` 分别对应 `parse_spawn_points()` 的元素与本次加载的汇总。
@@ -14,8 +20,9 @@
  * 只做「字节 → 结构化结果」。
  */
 
-import { BspProcessor, initSync } from '../../pkg/websurf_viewer_wasm.js';
+import { BspProcessor, decompress_mtz, initSync } from '../../pkg/websurf_viewer_wasm.js';
 import { base64ToBytes, readEmbeddedWasmB64 } from '../../../../src/ts-shared/wasm/loader.js';
+import { loadDefaultsJson } from '../../../../src/ts-shared/materials/defaults.js';
 
 export interface BspMeta {
   schema_version?: number;
@@ -120,9 +127,17 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const t0 = performance.now();
   const proc = new BspProcessor(new Uint8Array(await file.arrayBuffer()));
   const meta = JSON.parse(proc.metadata()) as BspMeta;
-  // parse_spawn_points 是借用方法，必须在消耗 Bsp 实例的 GLB 导出之前调用
+  // parse_spawn_points 是借用方法，必须在取走 Bsp 实例的 GLB 导出之前调用
   const spawnJson = proc.parse_spawn_points();
-  const glb = proc.export_glb_with_pakfile_models();
+  // 缺失纹理回退（与 game 同款）：装载失败回落 '{}'（无回退表），导出失败回落裸导出
+  const defaultsJson = await loadDefaultsJson(decompress_mtz);
+  let glb: Uint8Array;
+  try {
+    glb = proc.export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson);
+  } catch (e) {
+    console.warn('[bsp] 带默认纹理回退的 GLB 导出失败，回退无回退导出:', e);
+    glb = proc.export_glb_with_pakfile_models();
+  }
   const glbBytes = glb.buffer.slice(
     glb.byteOffset,
     glb.byteOffset + glb.byteLength,

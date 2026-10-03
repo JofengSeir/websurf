@@ -1,20 +1,25 @@
 //! WebSurf-viewer 的 WASM 薄导出层。
 //!
-//! 唯一导出类型是 [`BspProcessor`]：`new` 解析 BSP 字节，之后用三个方法取元数据、取出生点、
+//! 唯一导出类型是 [`BspProcessor`]：`new` 解析 BSP 字节，之后用各方法取元数据、取出生点、
 //! 导出 GLB。解析与合并全部落在共享解析层 `src/wasm-core/`（crate `websurf-wasm-core`，由本
 //! crate 的 `Cargo.toml` 以路径依赖引入），本文件只做参数搬运与错误翻译。
 //!
-//! 三个方法与 JS 侧的对应关系（消费方 `apps/viewer/src/core/bsp.ts`）：
+//! 方法与 JS 侧的对应关系（消费方 `apps/viewer/src/core/bsp.ts`）：
 //! - `metadata()`：地图元数据 JSON（magic / 各 lump 计数 / pakfile 条目数）；
 //! - `parse_spawn_points()`：出生点报告 JSON（该工程的初始视角与面板 ★ 标记都读它）；
-//! - `export_glb_with_pakfile_models()`：把 PAKFILE 内被引用的模型并进地图后的 GLB 字节。
+//! - `export_glb_with_pakfile_models_with_defaults_and_lights(defaults_json)`：主导出入口——
+//!   PAKFILE 模型并进地图 + **缺失材质回退**（defaults_json = textures.mtz 解压产物，pakfile
+//!   内没有的 VTF 用默认纹理包低清纹理补位，2026-10-04 起与 game 同款，消除 viewer 材质纯色）
+//!   + `KHR_lights_punctual` 灯实体（渲染端 `buildMapScene` 会摘除，导出端带上只为 GLB 自包含）；
+//! - `export_glb_with_pakfile_models()`：无回退的裸导出，仅作主导出失败时的 TS 侧回退路径；
+//! - `decompress_mtz()`：MTZ 容器解压（TS 侧构建 defaults_json 用）。
 //!
-//! 导出面刻意压到最小：viewer 不做物理与碰撞，故不导出 brush、模型三角形碰撞、teleport、
-//! PVS、mosaic、默认纹理包相关接口。TS 侧唯一导入 `pkg/` 的地方是
-//! `apps/viewer/src/core/bsp.ts`（只要 `BspProcessor` 与 `initSync` 两个名字），契约清单由
-//! `apps/viewer/scripts/check-wasm-api.mjs` 守着（取自实际消费面，另带反向覆盖断言）。
+//! 早期「导出面刻意压到最小、不导出默认纹理包相关接口」的口径已在 2026-10-04 owner 裁决
+//! （三应用渲染对齐 game）后放开；物理/碰撞类接口仍然不导出。TS 侧唯一导入 `pkg/` 的地方是
+//! `apps/viewer/src/core/bsp.ts`，契约清单由 `apps/viewer/scripts/check-wasm-api.mjs` 守着
+//! （取自实际消费面，另带反向覆盖断言）。
 //!
-//! 顺序契约：`export_glb_with_pakfile_models` 会取走内部 `Bsp` 实例，必须排在另外两个方法之后；
+//! 顺序契约：两个 `export_glb_*` 都会取走内部 `Bsp` 实例，必须排在另外两个方法之后；
 //! 取走之后再调那两个方法一律得到错误，而不是旧值。
 
 use std::collections::HashMap;
@@ -173,15 +178,21 @@ fn decode_vtf_to_png(data: &[u8]) -> Result<Vec<u8>, JsValue> {
     Ok(output)
 }
 
-/// 解析所有被引用模型用到的材质，产出三张表：贴图字节、透明度档位、无光照名集合。
-/// 链路：`.mdl` 的纹理名表 → 按搜索目录拼候选路径找 `.vmt` → 必要时跟一层 `patch` 的 include 取
-/// 母材质的 `$basetexture` → 用 `$basetexture` 找 `.vtf` 并解码成 PNG。
-/// 边界：`.mdl` 读不出、VMT 找不到、`$basetexture` 缺失、VTF 取不到或解码失败，都只跳过对应项，
-/// 不返回错误；VMT 找不到时该材质按 Opaque 记一笔，供渲染侧按不透明处理。
+/// 解析被引用模型的材质标注与贴图：取 `.vmt` 得 `alpha_mode` / `unlit` / `$basetexture`，
+/// 再按 `$basetexture` 取 `.vtf` 解码为 PNG；`patch` 材质多跟一层 `include` 母材质。
+///
+/// VMT 候选路径按 `mdl.textures[].search_paths` 与 `mdl.texture_paths` 逐条拼上材质名，末尾补一条
+/// 裸材质名；查询一律走 [`pakfile_models::PakIndex::find`]。已解析过的材质名不再重复解析。
+///
+/// `fallback` = 默认纹理包（`textures.mtz` 解压产物，键形如 `materials/<小写路径>`）：pakfile 内
+/// 没有该 VTF 时，按 `$basetexture` 路径与材质名依次查包取低清纹理补位；传 `None` 即不回落，
+/// 此时没有 pakfile VTF 的材质没有贴图。（与 game crate 同签名同语义；2026-10-04 起 viewer 的
+/// 主导出路径传入回退表。）
 fn resolve_pakfile_materials(
     bsp: &vbsp::Bsp,
     models: &[InMemoryModel],
     index: &pakfile_models::PakIndex,
+    fallback: Option<&std::collections::HashMap<String, String>>,
 ) -> PakMaterials {
     let mut out = PakMaterials::default();
 
@@ -244,18 +255,94 @@ fn resolve_pakfile_materials(
             let Some(base) = info.basetexture else {
                 continue;
             };
-            let Some(vtf_entry) = index.find(&base, "vtf") else {
-                continue;
-            };
-            let Ok(Some(vtf_bytes)) = bsp.pack.get(vtf_entry) else {
-                continue;
-            };
-            if let Ok(png) = decode_vtf_to_png(&vtf_bytes) {
-                out.textures.insert(tex.name.clone(), png);
+            // 先在 pakfile 内按 `$basetexture` 找同路径 VTF（原始分辨率），解出 PNG 即用
+            if let Some(vtf_entry) = index.find(&base, "vtf") {
+                if let Ok(Some(vtf_bytes)) = bsp.pack.get(vtf_entry) {
+                    if let Ok(png) = decode_vtf_to_png(&vtf_bytes) {
+                        out.textures.insert(tex.name.clone(), png);
+                        continue;
+                    }
+                }
+            }
+            // pakfile 内没有这张 VTF（stock 贴图未打包）时退到默认纹理包。
+            // 查表键经 `bsp_to_gltf_core::fallback_key` 归一成 `materials/<小写路径>`，故这里按
+            // `$basetexture` 路径与材质名依次试：模型材质名常是裸基名（`metalfence007a`），
+            // 包里的键却是源资源路径（`materials/metal/metalfence007a`）。
+            if let Some(fallback) = fallback {
+                if let Some(png) = websurf_wasm_core::bsp_to_gltf_core::fallback_texture_png(
+                    fallback,
+                    &[base.as_str(), tex.name.as_str()],
+                    8,
+                ) {
+                    out.textures.insert(tex.name.clone(), png);
+                }
             }
         }
     }
 
+    out
+}
+
+/// BSP 光照实体（classname ∈ `LIGHT_CLASSNAMES`）→ [`model_integrator::Entity`]。
+///
+/// 只搬运光照解析要用的属性子集：`model`/`origin`/`angles`/`scale` 与 `_light`/`_cone`/
+/// `_inner_cone`/三个衰减系数/`pitch`；取不到的属性一律留成 `None`，`classname` 取不到则跳过该实体。
+/// 消费端 [`ModelIntegrator`] 把这些实体写成 `KHR_lights_punctual` 扩展（渲染端 buildMapScene 摘除）。
+fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> {
+    const LIGHT_CLASSNAMES: &[&str] = &["light", "light_spot", "light_environment"];
+    let mut out = Vec::new();
+    for ent in bsp.entities.iter() {
+        let Ok(classname) = ent.prop("classname") else {
+            continue;
+        };
+        if !LIGHT_CLASSNAMES.contains(&classname) {
+            continue;
+        }
+        let prop = |key: &'static str| ent.prop(key).ok().map(|s| s.to_string());
+        out.push(model_integrator::Entity {
+            properties: model_integrator::EntityProperties {
+                classname: classname.to_string(),
+                model: prop("model"),
+                origin: prop("origin"),
+                angles: prop("angles"),
+                scale: prop("scale"),
+                light: prop("_light"),
+                cone: prop("_cone"),
+                inner_cone: prop("_inner_cone"),
+                constant_attn: prop("_constant_attn"),
+                linear_attn: prop("_linear_attn"),
+                quadratic_attn: prop("_quadratic_attn"),
+                pitch: prop("pitch"),
+            },
+        });
+    }
+    out
+}
+
+/// 从 PAKFILE 条目名构建 VMT **基名索引**：`基名小写 → 去掉 materials/ 前缀与 .vmt 后缀的路径`。
+///
+/// 只收 `materials/` 下、以 `.vmt` 结尾的条目；值保留条目原始大小写（`Packfile::get` 按名精确
+/// 匹配）。产物填进 `bsp_to_gltf_core::ConvertOptions::vmt_stem_index`，供世界面的贴图名在精确
+/// 候选全部落空时按基名回退取 `$basetexture` 等标注。
+///
+/// 同名多条时取**路径最短**者；与当前值等长时保留先到的一条。
+fn build_vmt_stem_index(entry_names: &[String]) -> std::collections::HashMap<String, String> {
+    let mut out: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for name in entry_names {
+        let norm = name.replace('\\', "/");
+        let lower = norm.to_ascii_lowercase();
+        if !lower.starts_with("materials/") || !lower.ends_with(".vmt") {
+            continue;
+        }
+        let path = &norm["materials/".len()..norm.len() - ".vmt".len()];
+        let stem = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+        match out.get(&stem) {
+            Some(prev) if prev.len() <= path.len() => {}
+            _ => {
+                out.insert(stem, path.to_string());
+            }
+        }
+    }
     out
 }
 
@@ -515,9 +602,9 @@ impl BspProcessor {
             return Ok(output);
         }
 
-        // 5. VMT/VTF → 贴图字节 + 透明度档位 + 无光照名集合
+        // 5. VMT/VTF → 贴图字节 + 透明度档位 + 无光照名集合（裸导出无回退表）
         let index = pakfile_models::PakIndex::build(&entry_names);
-        let materials = resolve_pakfile_materials(&bsp, &models, &index);
+        let materials = resolve_pakfile_materials(&bsp, &models, &index, None);
 
         let resources = InMemoryResources {
             models,
@@ -542,4 +629,92 @@ impl BspProcessor {
 
         Ok(output)
     }
+
+    /// 导出 GLB（含 PAKFILE 模型 + **默认纹理回退** + BSP 光照实体）——viewer 的主导出入口。
+    ///
+    /// `defaults_json` 是默认纹理包文本（`{ "materials/<材质路径小写>": "#mosaic v4 字节码" }`，
+    /// TS 侧由 `textures.mtz` 经 [`decompress_mtz`] 解出），解析失败即报「默认纹理包 JSON 解析失败」；
+    /// pakfile 内没有该 VTF 的材质用它解码出的低清纹理补位。世界面另经 `vmt_stem_index`（基名
+    /// VMT 回退）命中作者写的 VMT。与 game crate 的同名方法同一实现（2026-10-04 对齐，owner
+    /// 裁决三应用渲染以 game 为基准）。
+    ///
+    /// 失败不消费实例：失败后 `self.bsp` 仍为 `Some`，同一实例可再次导出（TS 侧失败时回退裸导出）。
+    pub fn export_glb_with_pakfile_models_with_defaults_and_lights(
+        &mut self,
+        defaults_json: &str,
+    ) -> Result<Vec<u8>, JsValue> {
+        let bsp = self
+            .bsp
+            .take()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
+        // 失败不消费实例：实现核拿的是 Arc 克隆，失败时把原 Arc 放回，TS 侧可回退裸导出
+        match Self::export_glb_with_defaults_impl(bsp.clone(), defaults_json, true) {
+            Ok(result) => {
+                let mut output: Vec<u8> = Vec::new();
+                result
+                    .glb
+                    .to_writer(&mut output)
+                    .map_err(|e| to_js_err(e, "GLB 序列化失败"))?;
+                Ok(output)
+            }
+            Err(e) => {
+                self.bsp = Some(bsp);
+                Err(e)
+            }
+        }
+    }
+
+    /// [`BspProcessor::export_glb_with_pakfile_models_with_defaults_and_lights`] 的实现核
+    /// （消费传入的 `Bsp`；`include_lights` 决定是否注入 `KHR_lights_punctual` 灯实体）。
+    fn export_glb_with_defaults_impl(
+        bsp: std::sync::Arc<vbsp::Bsp>,
+        defaults_json: &str,
+        include_lights: bool,
+    ) -> Result<bsp_to_gltf_core::ExportResult, JsValue> {
+        let fallback: std::collections::HashMap<String, String> =
+            serde_json::from_str(defaults_json)
+                .map_err(|e| to_js_err(e, "默认纹理包 JSON 解析失败"))?;
+
+        let (models, static_props, entry_names) = collect_pakfile_models(&bsp)?;
+
+        // 世界面材质的基名 VMT 回退索引（texinfo 给的贴图名在包内无精确路径时按基名命中）
+        let stem_index = build_vmt_stem_index(&entry_names);
+
+        let options = bsp_to_gltf_core::ConvertOptions {
+            missing_fallback: fallback.clone(),
+            vmt_stem_index: stem_index,
+            ..bsp_to_gltf_core::ConvertOptions::default()
+        };
+
+        // 无模型时仍走整合器路径（空模型不产出节点，光照注入照常发生）——与 game 同语义
+        let index = pakfile_models::PakIndex::build(&entry_names);
+        let materials = resolve_pakfile_materials(&bsp, &models, &index, Some(&fallback));
+        let resources = InMemoryResources {
+            models,
+            entities: Vec::new(),
+            static_props,
+            textures: materials.textures,
+            material_alpha_mode: materials.alpha_modes,
+            material_unlit: materials.unlit,
+            light_entities: if include_lights {
+                collect_light_entities(&bsp)
+            } else {
+                Vec::new()
+            },
+        };
+        let integrator =
+            ModelIntegrator::from_in_memory(resources, ExportOptions { include_lights });
+        bsp_to_gltf_core::export_bsp_with_models(bsp, options, Some(&integrator))
+            .map_err(|e| to_js_err(e, "GLB 导出失败"))
+    }
+}
+
+/// MTZ 容器字节（魔数 `MTZ6`，兼容读 `MTZ5`）→ JSON 对象文本：`键 → "#mosaic v4 字节码"`。
+/// 键取条目 `B[名字:宽x高]` 的名段里 `|` 之前的一段（形如 `materials/buildings/antn00`）；
+/// 错误文本前缀 `decompress_mtz`，本工程由 `apps/viewer/src/core/bsp.ts` 构建 defaults_json 用
+/// （2026-10-04 起，与 game/debug 同款）。
+#[wasm_bindgen]
+pub fn decompress_mtz(bytes: &[u8]) -> Result<String, JsValue> {
+    websurf_wasm_core::mosaic::mtz::decompress_mtz(bytes)
+        .map_err(|e| JsValue::from_str(&format!("decompress_mtz: {e}")))
 }

@@ -163,6 +163,16 @@ export class ViewerScene {
       console.info(`[viewer][lightmap] 装配后终扫：${swept} 个 mesh 收敛为 fullbright 贴图原色`);
     }
 
+    // 预编译着色器程序（2026-10-04 起与 game/debug 同款）：把「首次可见才编译」的卡顿挪到加载期。
+    // 失败不致命（three 仍按需编译），故只告警。
+    try {
+      const compileT0 = performance.now();
+      this.renderer.compile(this.scene, this.camera);
+      console.info(`[viewer][render] 着色器程序预编译耗时 ${(performance.now() - compileT0).toFixed(0)}ms`);
+    } catch (err) {
+      console.warn('[viewer][render] 预编译着色器失败（不影响按需编译）:', err);
+    }
+
     this.fitCamera(maxDim);
   }
 

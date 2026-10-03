@@ -32,11 +32,11 @@
 |---|---|---|
 | 工程清单 | `apps/viewer/package.json:7` | 12 个 script（含 `test:sessions` → `npm run test:sessions`：`apps/viewer/test/session-sep.mjs` 驱动的记录 / 录像两条链路**分离**端到端 CDP 回归，缺夹具 / 浏览器时 loud skip）、依赖面、引擎要求、dev 端口 8100 |
 | 主线程入口 | `apps/viewer/src/app.ts:48` | 画布获取、装配顺序、帧循环、对外 `globalThis.viewer` 接口 |
-| 地图加载 | `apps/viewer/src/core/bsp.ts:74` | `ensureWasm` 三条取值路径、`loadBspFile` 三步顺序 |
+| 地图加载 | `apps/viewer/src/core/bsp.ts:81` | `ensureWasm` 三条取值路径、`loadBspFile` 三步顺序 |
 | 记录面板 | `apps/viewer/src/replay/panel.ts:311` | 导入入口 `runImport`、规则持久化、映射切换与变换微调 |
 | 解析 Worker | `apps/viewer/src/worker/main.ts:46` | `ctx.onmessage` → `handle` → 带 transfer 列表回包 |
-| WASM 导出层 | `apps/viewer/crates/wasm/src/lib.rs:339` | `BspProcessor::new` 与三个方法 |
-| 打包脚本 | `apps/viewer/scripts/build-dist.mjs:221` | single / multi 两种产物形态与保留清单 |
+| WASM 导出层 | `apps/viewer/crates/wasm/src/lib.rs:426` | `BspProcessor::new` 与三个方法 |
+| 打包脚本 | `apps/viewer/scripts/build-dist.mjs:223` | single / multi 两种产物形态与保留清单 |
 | 页面骨架 | `apps/viewer/web/index.html:12` | 全部 DOM id 与脚本标签形态 |
 
 共享层只被本工程**消费**（不修改）：`src/ts-shared/wasm/loader.ts`、`src/ts-shared/phys/angles.ts`、`src/ts-shared/phys/constants.ts`、`src/wasm-core/**`——消费点见 `documents/viewer/overview.md` 的「依赖方向」。

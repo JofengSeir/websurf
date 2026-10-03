@@ -33,7 +33,7 @@
 
 - **加载阶段表里有一个没有生产者的键**：`LOAD_STAGE_PCT` 含 `'正在加载地图': 0`（`apps/game/src/app.ts:680`），而实际会传给 `advanceLoading` 的阶段名只有四个来自 `buildWorldBundle` 的 `onProgress`（`src/ts-shared/phys/world-builder.ts:155`、`:172`、`:177`、`:207`）与两个由本文件直接给出（`apps/game/src/app.ts:520`、`apps/game/src/app.ts:535`）。该键永远不会命中，进度条的 0% 展示由 `showLoading` 复位承担（`apps/game/src/app.ts:764`）。
 - **未在表内的阶段只改文字、不推进百分比**：`advanceLoading` 对未识别的阶段名只写 `#loadingStage`（`apps/game/src/app.ts:787`），此时进度停在上一阶段的目标值上。
-- **主线程 wasm 失败不阻断加载**：`initPrediction` 的 rejection 只被转成错误行（`apps/game/src/app.ts:176`），随后 `handleLoadBsp` 用 `.catch(() => undefined)` 吞掉同一个 promise 继续走（`apps/game/src/app.ts:507`），此时的后果是默认纹理包解压不可用、缺失纹理降级为占位色（`src/ts-shared/phys/world-builder.ts:243`）。
+- **主线程 wasm 失败不阻断加载**：`initPrediction` 的 rejection 只被转成错误行（`apps/game/src/app.ts:176`），随后 `handleLoadBsp` 用 `.catch(() => undefined)` 吞掉同一个 promise 继续走（`apps/game/src/app.ts:507`），此时的后果是默认纹理包解压不可用、缺失纹理降级为占位色（`src/ts-shared/materials/defaults.ts:38`）。
 - **可选的 DOM 依赖静默降级**：`#loadMapBtn`、`#bspFile`、`#respawnBtn`、`#spawnSelect` 全部走可选链（`apps/game/src/app.ts:317`、`apps/game/src/app.ts:321`、`apps/game/src/app.ts:329`、`apps/game/src/app.ts:342`），元素缺失时既无报错也无提示，只是点击无反应。
 - **未锁定前不请求指针锁定**：`document` 的点击处理器在 `!sceneReady` 时直接返回（`apps/game/src/app.ts:249`），因此选图前点击画布没有任何反馈；只有 `requestLock` 返回失败的 promise 时才写状态行（`apps/game/src/app.ts:255`）。
 - **速度读数用 `innerHTML` 写入**：`updateSpeedHud` 通过 `dom.statsEl.innerHTML` 写值（`apps/game/src/app.ts:437`），其中竖线分隔符是写死的 `<span class="vsep">` 片段（`apps/game/src/app.ts:435`）；数值本身来自本端物理速度与 `config.hud.speedMode` 分支。

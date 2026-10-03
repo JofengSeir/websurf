@@ -26,8 +26,8 @@ const ROOT = join(HERE, '..');
 const PKG_BASE = 'websurf_viewer_wasm';
 const DTS = join(ROOT, 'pkg', `${PKG_BASE}.d.ts`);
 
-// viewer 消费面：BSP 解析类 + wasm 同步初始化
-const VIEWER_API = ['initSync'];
+// viewer 消费面：BSP 解析类 + wasm 同步初始化 + MTZ 解压（2026-10-04 起缺失纹理回退链路）
+const VIEWER_API = ['initSync', 'decompress_mtz'];
 
 const read = readDtsApiNames({ dtsPath: DTS });
 if (!read.ok) {

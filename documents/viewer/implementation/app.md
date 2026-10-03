@@ -24,7 +24,7 @@
 | `viewer.replay.follow(trackId \| null)` | 切换跟随目标（null = 回到第一条轨道），并按需刷新信息条与轨迹列表 | `apps/viewer/src/app.ts:733` |
 | `viewer.session` | 当前上场的会话与两侧就绪情况：`{ active, replay: { active, ready, trackCount }, demo: { … } }` | `apps/viewer/src/app.ts:778` 到 `apps/viewer/src/app.ts:784` |
 
-`apps/viewer/src/wasm.d.ts` 只有一行 `export * from '../pkg/websurf_viewer_wasm.js'`（`apps/viewer/src/wasm.d.ts:13`），用途是让本工程可按 `./wasm.js` 引用 wasm 侧类型；它在 `apps/viewer/src` 内**零导入点**（真正导入 wasm 的是 `apps/viewer/src/core/bsp.ts:17` 的 `BspProcessor` 与 `initSync`）。
+`apps/viewer/src/wasm.d.ts` 只有一行 `export * from '../pkg/websurf_viewer_wasm.js'`（`apps/viewer/src/wasm.d.ts:13`），用途是让本工程可按 `./wasm.js` 引用 wasm 侧类型；它在 `apps/viewer/src` 内**零导入点**（真正导入 wasm 的是 `apps/viewer/src/core/bsp.ts:23` 的 `BspProcessor` 与 `initSync`）。
 
 ## 关键流程与不变量
 
