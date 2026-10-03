@@ -37,23 +37,23 @@
 
 一个渲染帧由两条 rAF 循环加一条 Worker 定时循环组成，三者的注册顺序在主线程是**渲染先、输入后**（`RendererMain.start` 在 `startInputLoop` 之前调用：`apps/debug/src/app.ts:349` 早于 `apps/debug/src/app.ts:368`）。
 
-**A. 渲染主循环**（`apps/debug/src/renderer/renderer-main.ts:662` 的 `tick`，内部顺序固定）：
+**A. 渲染主循环**（`apps/debug/src/renderer/renderer-main.ts:615` 的 `tick`，内部顺序固定）：
 
-1. 登记下一帧（`apps/debug/src/renderer/renderer-main.ts:664`）。
-2. ① 物理段，仅当 `predReady` 且单步闸门有余量时执行（`apps/debug/src/renderer/renderer-main.ts:672`）：
-   - 取本帧步长：回放模式取一次性 `replayDtS`，否则取墙钟间隔（首帧取 1/64，上限 0.1 秒），取走即置空（`apps/debug/src/renderer/renderer-main.ts:676`、`apps/debug/src/renderer/renderer-main.ts:680`）；
-   - 本帧输入写共享内存输入槽（`apps/debug/src/renderer/renderer-main.ts:683`）；
-   - 非回放模式下做权威帧校准与权威速度外推（`apps/debug/src/renderer/renderer-main.ts:685`、`apps/debug/src/renderer/renderer-main.ts:687`）；
-   - 路径记录 tick 线：只在权威版本号 `va` 变化时落点，时间戳取发布时钟 τ（`apps/debug/src/renderer/renderer-main.ts:693` 起）；
-   - 推进渲染物理 `predPhys.tick(dt, keys, dx, dy)`，随后清零鼠标增量（`apps/debug/src/renderer/renderer-main.ts:709`、`apps/debug/src/renderer/renderer-main.ts:710`）；
-   - 消费 Rust 侧 `take_event`（`apps/debug/src/renderer/renderer-main.ts:713` → `apps/debug/src/renderer/renderer-main.ts:1412`）；
-   - 取状态摆相机：渲染节点落 `PathRecorder`、写共享内存渲染采样、相机 yaw/pitch 与眼睛高度（`apps/debug/src/renderer/renderer-main.ts:721`、`apps/debug/src/renderer/renderer-main.ts:725`、`apps/debug/src/renderer/renderer-main.ts:727`、`apps/debug/src/renderer/renderer-main.ts:730`）；
-   - 隔帧近平面探测（`apps/debug/src/renderer/renderer-main.ts:734`）。
-3. ② 视距剔除：`LodManager.update` 返回真表示有块可见性翻转（`apps/debug/src/renderer/renderer-main.ts:746`）。
-4. ③ 碰撞体 / 触发器 / 三角面 / chamfer 可视化（`apps/debug/src/renderer/renderer-main.ts:753`）。
-5. ④ 准星射线：计数器满 `PLANE_INSPECT_INTERVAL` 才检测一次；关闭时清掉上次结果（`apps/debug/src/renderer/renderer-main.ts:760`）。
-6. ⑤ 渲染：物理就绪后每帧都渲染（`apps/debug/src/renderer/renderer-main.ts:771`）。
-7. ⑥ 剔除统计：至少间隔 100ms 下发一次（`apps/debug/src/renderer/renderer-main.ts:778`），经 `onCullStats` 落到 `#cullStats`（`apps/debug/src/app.ts:600`）。
+1. 登记下一帧（`apps/debug/src/renderer/renderer-main.ts:617`）。
+2. ① 物理段，仅当 `predReady` 且单步闸门有余量时执行（`apps/debug/src/renderer/renderer-main.ts:625`）：
+   - 取本帧步长：回放模式取一次性 `replayDtS`，否则取墙钟间隔（首帧取 1/64，上限 0.1 秒），取走即置空（`apps/debug/src/renderer/renderer-main.ts:629`、`apps/debug/src/renderer/renderer-main.ts:633`）；
+   - 本帧输入写共享内存输入槽（`apps/debug/src/renderer/renderer-main.ts:636`）；
+   - 非回放模式下做权威帧校准与权威速度外推（`apps/debug/src/renderer/renderer-main.ts:638`、`apps/debug/src/renderer/renderer-main.ts:640`）；
+   - 路径记录 tick 线：只在权威版本号 `va` 变化时落点，时间戳取发布时钟 τ（`apps/debug/src/renderer/renderer-main.ts:651` 起）；
+   - 推进渲染物理 `predPhys.tick(dt, keys, dx, dy)`，随后清零鼠标增量（`apps/debug/src/renderer/renderer-main.ts:662`、`apps/debug/src/renderer/renderer-main.ts:663`）；
+   - 消费 Rust 侧 `take_event`（`apps/debug/src/renderer/renderer-main.ts:666` → `apps/debug/src/renderer/renderer-main.ts:1296`）；
+   - 取状态摆相机：渲染节点落 `PathRecorder`、写共享内存渲染采样、相机 yaw/pitch 与眼睛高度（`apps/debug/src/renderer/renderer-main.ts:674`、`apps/debug/src/renderer/renderer-main.ts:678`、`apps/debug/src/renderer/renderer-main.ts:680`、`apps/debug/src/renderer/renderer-main.ts:684`）；
+   - 隔帧近平面探测（`apps/debug/src/renderer/renderer-main.ts:689`）。
+3. ② 视距剔除：`LodManager.update` 返回真表示有块可见性翻转（`apps/debug/src/renderer/renderer-main.ts:700`）。
+4. ③ 碰撞体 / 触发器 / 三角面 / chamfer 可视化（`apps/debug/src/renderer/renderer-main.ts:706`）。
+5. ④ 准星射线：计数器满 `PLANE_INSPECT_INTERVAL` 才检测一次；关闭时清掉上次结果（`apps/debug/src/renderer/renderer-main.ts:713`）。
+6. ⑤ 渲染：物理就绪后每帧都渲染（`apps/debug/src/renderer/renderer-main.ts:726`）。
+7. ⑥ 剔除统计：至少间隔 100ms 下发一次（`apps/debug/src/renderer/renderer-main.ts:733`），经 `onCullStats` 落到 `#cullStats`（`apps/debug/src/app.ts:600`）。
 
 **B. 输入循环**（`apps/debug/src/app.ts:2189` 的 `startInputLoop`，rAF 回调 `tick`）：
 
@@ -74,9 +74,9 @@
 
 **三者的时间耦合**：
 
-- 主线程渲染物理每帧推进一次，权威物理按固定步长推进；两者的对齐由 `correctFromAuthority` 与 `calibrateVelocity` 完成（`apps/debug/src/renderer/renderer-main.ts:1383`、`apps/debug/src/renderer/renderer-main.ts:1388`）。
+- 主线程渲染物理每帧推进一次，权威物理按固定步长推进；两者的对齐由 `correctFromAuthority` 与 `calibrateVelocity` 完成（`apps/debug/src/renderer/renderer-main.ts:1269`、`apps/debug/src/renderer/renderer-main.ts:1274`）。
 - 权威帧的位置不是权威自身的 post-tick 位置，而是渲染折线上的采样点；主线程每帧写一条渲染采样，Worker 读它并取点（`apps/debug/src/renderer/renderer-main.ts:52` 起、`apps/debug/src/worker/main.ts:12`）。
-- 路径记录的两条线因此可以按同一时间基准比较：tick 线用发布时钟 τ，渲染线用 rAF 时间戳（`apps/debug/src/renderer/renderer-main.ts:688` 起）。
+- 路径记录的两条线因此可以按同一时间基准比较：tick 线用发布时钟 τ，渲染线用 rAF 时间戳（`apps/debug/src/renderer/renderer-main.ts:651` 起）。
 
 ## 消息与通道
 

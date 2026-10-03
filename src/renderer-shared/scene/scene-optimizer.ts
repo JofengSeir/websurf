@@ -50,6 +50,11 @@ function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
   return keys.size;
 }
 
+/** 合并可选钩子：`normalizeGroup` 在两处合并入参前调用（debug 传其 `normalizeMergeGroup`——混合 indexed/非 indexed 与混合 gpuType 的归一；game/viewer 不传 ⇒ 行为与无钩子完全一致）。 */
+export interface MergeOptions {
+  normalizeGroup?: (geoms: THREE.BufferGeometry[]) => THREE.BufferGeometry[];
+}
+
 /** mergeIntoChunks 的产物：chunks / keptMeshes 由调用方自行挂载，统计字段供诊断日志用。 */
 export interface MergeResult {
   infos: OptMeshInfo[];
@@ -67,7 +72,7 @@ export interface MergeResult {
  * 不改根、不挂载、不打日志（root 处理与诊断是调用方的事）；infos 为空时 chunks/keptMeshes
  * 的收集（多材质烘焙）已经完成，调用方按各自语义处理空集路径。
  */
-export function mergeIntoChunks(collectRoot: THREE.Object3D): MergeResult {
+export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions): MergeResult {
   // ① 收集：先刷新 matrixWorld 作为世界变换基准。多材质 mesh（GLB primitive 恒单材质，此处是
   //    防御路径）烘焙到世界空间后保留；无材质 mesh 原样跳过。两者都不参与分块
   collectRoot.updateMatrixWorld(true);
@@ -174,7 +179,8 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D): MergeResult {
     }
     const mergedGeoms: THREE.BufferGeometry[] = [];
     const mats: THREE.Material[] = [];
-    for (const [mat, geoms] of byMat) {
+    for (const [mat, geomsRaw] of byMat) {
+      const geoms = opts?.normalizeGroup ? opts.normalizeGroup(geomsRaw) : geomsRaw;
       let merged: THREE.BufferGeometry[];
       if (geoms.length === 1) {
         merged = geoms;
@@ -201,7 +207,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D): MergeResult {
       chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
       drawCallEst++;
     } else {
-      const final = mergeGeometries(mergedGeoms, true);
+      const final = mergeGeometries(opts?.normalizeGroup ? opts.normalizeGroup(mergedGeoms) : mergedGeoms, true);
       if (final) {
         for (const g of mergedGeoms) if (g !== final) g.dispose();
         chunk = new THREE.Mesh(final, mats);
@@ -252,8 +258,9 @@ export function optimizeScene(
   gltfScene: THREE.Object3D,
   camera: THREE.PerspectiveCamera | null,
   fovDeg: number,
+  opts?: MergeOptions,
 ): void {
-  const r = mergeIntoChunks(bspRoot);
+  const r = mergeIntoChunks(bspRoot, opts);
   if (r.infos.length === 0) return;
 
   // 替换：块 mesh 与保留 mesh 直接挂到 BSP 根（`add` 会自动让它们脱离原父节点），随后移除原

@@ -16,7 +16,7 @@
 | 路径 | 职责 | 关键锚点 |
 |---|---|---|
 | `apps/debug/src/`（根级模块） | 主线程装配（`app.ts`）、运行时配置树（`config.ts`）、计时挑战状态机（`game-state.ts`）、默认纹理包（`default-pack.ts`）、主线程 wasm 懒初始化（`main-wasm.ts`）、手写 wasm 类型声明（`wasm.d.ts`） | `apps/debug/src/app.ts:278`、`apps/debug/src/config.ts:205`、`apps/debug/src/main-wasm.ts:28` |
-| `apps/debug/src/renderer/` | 主线程渲染器 `RendererMain` 与五个子管理器：相机、LOD 剔除、碰撞可视化、路径记录、准星射线（lightmap 着色器与雾/光照管理器已于 2026-10-02 下沉到渲染共享层，本目录不再持有） | `apps/debug/src/renderer/renderer-main.ts:219`、`apps/debug/src/renderer/lod-manager.ts:87`、`src/renderer-shared/shader/lightmap-shader.ts:482`、`src/renderer-shared/environment/light-manager.ts:87` |
+| `apps/debug/src/renderer/` | 主线程渲染器 `RendererMain` 与五个子管理器：相机、LOD 剔除、碰撞可视化、路径记录、准星射线（lightmap 着色器与雾/光照管理器已于 2026-10-02 下沉到渲染共享层，本目录不再持有） | `apps/debug/src/renderer/renderer-main.ts:183`、`apps/debug/src/renderer/lod-manager.ts:87`、`src/renderer-shared/shader/lightmap-shader.ts:482`、`src/renderer-shared/environment/light-manager.ts:87` |
 | `apps/debug/src/worker/` | Worker 入口装配（权威物理循环、消息分发、渲染轨迹采样、健康守护）、线程间消息类型面、物理面板协调器、内嵌纹理包暂存 | `apps/debug/src/worker/main.ts:455`、`apps/debug/src/worker/worker-types.ts:342`、`apps/debug/src/worker/physics-worker.ts:28` |
 | `apps/debug/src/input/` | 键盘采集、主线程→Worker 消息桥、输入录制/回放器（含回放捕获与丢帧语义） | `apps/debug/src/input/keyboard.ts:56`、`apps/debug/src/input/input-bridge.ts:16`、`apps/debug/src/input/input-recorder.ts:166` |
 | `apps/debug/src/world/` | WASM 导出 JSON 的类型面、brush 映射层、传送点数据层、自定义传送点 localStorage 层、出生点加载器（零调用点参考实现） | `apps/debug/src/world/types.ts:34`、`apps/debug/src/world/collider-adapter.ts:182`、`apps/debug/src/world/teleport-manager.ts:135` |
