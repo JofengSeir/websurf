@@ -27,7 +27,7 @@
 
 **`apps/debug/src/default-pack.ts`**
 
-只导出 `loadDefaultTexturePack`（`apps/debug/src/default-pack.ts:22`）：取内嵌 base64 或按 `DEFAULT_TEXTURE_PACK_URL` fetch，再调 `decompress_mtz` 解出「材质名 → mosaic 字节码」表并缓存。唯一消费点是缺失纹理弹窗（`apps/debug/src/app.ts:509`）。
+只导出 `loadDefaultTexturePack`（`apps/debug/src/default-pack.ts:22`）：取内嵌 base64 或按 `DEFAULT_TEXTURE_PACK_URL` fetch，再调 `decompress_mtz` 解出「材质名 → mosaic 字节码」表并缓存。唯一消费点是缺失纹理弹窗（`apps/debug/src/app.ts:491`）。
 
 **`apps/debug/src/main-wasm.ts`**
 
@@ -59,10 +59,10 @@
 1. ~~**`dom` 表里被查询的 id 有九个在页面上不存在**~~ **已全部处置（2026-09-26）**：`pathVisibleChk`、`pvsEnabled` 与录制面板七个 id 三条死链均已删除（见本节已知缺口第 10–12 项）。`apps/debug/src/app.ts:61` 起的 `dom` 表通过 `document.getElementById` 取句柄，实测页面 `apps/debug/web/index.html` 共 106 个 id；原缺的九个查询（全部标了 `| null`，故只表现为控件失效）连同句柄与消费者一并删除，以下按删除时的符号留档（代码已不在，行号从略）：
    - 录制面板七个：`inputRecStatus` / `inputRecToggleBtn` / `inputRecClearBtn` / `inputRecExportBtn` / `inputRecLoadBtn` / `inputRecStopPlayBtn` / `inputRecFile`，其消费者 `updateInputRecUi`、四个按钮监听与 `__wsInput.status()` / `__wsInput.clear()` 同步删除。
    - `pathVisibleChk`：唯一的消费者是其 change 监听（永不触发）；页面上的路径显隐实际由四个分量复选框承担（`apps/debug/web/index.html:607`、`apps/debug/web/index.html:610`、`apps/debug/web/index.html:614`、`apps/debug/web/index.html:618`）。
-   - `pvsEnabled`：三个消费者（初始同步 / 场景就绪同步 / change 监听）与 `config.lod.pvsEnabled` 字段及其默认值一并删除；页面「渲染与视距」区不提供该开关（`apps/debug/web/index.html:530`）。
+   - `pvsEnabled`：三个消费者（初始同步 / 场景就绪同步 / change 监听）与 `config.lod.pvsEnabled` 字段及其默认值一并删除；页面「渲染与视距」区不提供该开关（`apps/debug/web/index.html:531`）。
 2. **`clearTeleportsBtn` 不是缺失 id**：它在 `renderCustomTeleports` 里由 `innerHTML` 动态生成（`apps/debug/src/app.ts:1912`），随后才被查询并绑定（`apps/debug/src/app.ts:1926`）。列表为空时该函数提前返回（`apps/debug/src/app.ts:1907`），因此该按钮在无传送点时不存在。
 3. ~~**录制链路未接通**~~ **已处置（2026-09-26，删链）**：`InputRecorder.record` 在 `apps/debug/src` 内唯一的调用点始终是回放分支的 `replayCapture.record(...)`（`apps/debug/src/app.ts:2247`），用户录制器 `inputRecorder` 从不落样本 ⇒ 随链路一并删除（连同 `updateInputRecUi`、`startRecording` / `stopRecording`、`buildReplayMeta`、面板六个按钮监听、`__wsInput` 的 `start` / `stop` / `clear` / `isRecording` / `exportJson` / `status`）。**现状**：录制产物只能由外部工具生成，本页只承担**回放**（`__wsInput.load` → `play` → `stopPlay`，进度看 `__wsInput.progress()`）；回放捕获器 `replayCapture` 仍由回放分支落样本，供确定性自检比对。
-4. **`wasm.d.ts` 的 `PhysWorld` 声明落后于源码**：声明里只有 17 个成员（`apps/debug/src/wasm.d.ts:80` 起），而 `src/phys/mod.rs` 的 `impl` 有 24 个 `pub fn`。缺 `tick_into`、`state_out_ptr`、`set_state_ex`、`state_full_json`、`seed_from`、`gate_veto_count`、`debug_trace` 七项。因此调用 `state_full_json` / `set_state_ex` 只能先做运行时收窄（`apps/debug/src/renderer/renderer-main.ts:1154`、`apps/debug/src/renderer/renderer-main.ts:1171`）。
+4. **`wasm.d.ts` 的 `PhysWorld` 声明落后于源码**：声明里只有 17 个成员（`apps/debug/src/wasm.d.ts:80` 起），而 `src/phys/mod.rs` 的 `impl` 有 24 个 `pub fn`。缺 `tick_into`、`state_out_ptr`、`set_state_ex`、`state_full_json`、`seed_from`、`gate_veto_count`、`debug_trace` 七项。因此调用 `state_full_json` / `set_state_ex` 只能先做运行时收窄（`apps/debug/src/renderer/renderer-main.ts:1149`、`apps/debug/src/renderer/renderer-main.ts:1166`）。
 5. **`tick_into` / `state_out_ptr` / `seed_from` 在本工程无装配点**：三者在 `apps/debug/src` 内零出现；全仓唯一的调用方是共享层 `src/ts-shared/auth/tick-authority.ts` 与 `src/ts-shared/decoupled/decoupled-loop.ts`，而这两个控制器在三个工程内都没有装配点。本工程的零分配路径未接线，实际走 `tick()` 返回对象。
 6. **`set_yaw_pitch` 零调用点**：`apps/debug/src/wasm.d.ts:120` 只有一行类型声明，`apps/debug/src` 与 `src` 内都没有调用点（`src/phys/mod.rs` 的该导出同样无调用方）。
 7. ~~**`MovementConfig` / `SmoothingConfig` / `TeleportConfig` 三个段在本仓无读取点**~~ **已处置（2026-09-26，删字段）**：三段当时在 `apps/debug/src` 与 `src` 内零读取点、页面也无控件，已从 `apps/debug/src/config.ts` 整体删除（接口定义与 `DEFAULT_CONFIG` 条目一并移除），`syncFullConfig` 不再下发它们；删除说明见 `LodConfig` 上方 `apps/debug/src/config.ts:51` 起的注释。传送判定实际用的半径与冷却见第 11 项。
