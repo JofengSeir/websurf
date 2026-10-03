@@ -23,7 +23,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { mergeGeometries, deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
 import { ensureMainWasm, mosaic_decode } from '../main-wasm.js';
 // 主线程唯一物理线：PhysWorld 与 BspProcessor 同模块（main-wasm 已 initSync）
@@ -46,6 +46,8 @@ import type { DistStats } from './path-recorder.js';
 import type { InputReplayInitialState, InputReplayHull } from '../input/input-recorder.js';
 import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
+import { optimizeScene as optimizeSceneShared } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
 import { applyLightmapToMeshes, loadLightmapAtlas, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 /**
@@ -69,17 +71,6 @@ import { applyLightmapToMeshes, loadLightmapAtlas, setLightingMode as setLightin
 const FOV = 73.6;
 /** 准星射线检测间距（帧）：`planeInspectCounter` 计满该值才调一次 `inspectPlane` 并清零。 */
 const PLANE_INSPECT_INTERVAL = 6;
-/** 相机 `near` 下限（HU）：`loadScene` 给 `defaultNear` 兜底，`updateNearPlane` 给收缩
- * 结果兜底——只改投影矩阵，相机位置不动。 */
-const CAMERA_NEAR_MIN = 0.05;
-/** 近平面探测距离默认值（HU）：包围球粗筛半径用 `probe × 2 + 球半径`，射线 `far` 直接用
- * `probe`；命中距离记入 `minD`。
- * 运行期由面板经 `setNearParams` 改写（只接受 > 0），下一帧探测即生效。 */
-const NEAR_PROBE_DIST_DEFAULT = 100;
-/** near 收缩系数默认值：`near` = 4 方向最近命中距离 × 该值，再与 `CAMERA_NEAR_MIN` 取大；
- * 无命中（`minD` 非有限）时恢复 `defaultNear`。
- * 运行期由面板经 `setNearParams` 改写（只接受区间 (0, 1]）。 */
-const NEAR_RATIO_DEFAULT = 0.3;
 
 /** HUD 剔除统计（`emitCullStats` 组装，交给 app.ts 注册的 `onCullStats`）。
  * `visible/total/cullDist` 与 `pvs.near/far/pvsHidden` 取自 `LodManager.getStats`——
@@ -116,41 +107,15 @@ export interface RenderPhysEvent {
   yaw?: number;
 }
 
-// ── 空间分块合并参数（optimizeScene：GLB 挂载后执行一次）──────────
+// ── 空间分块合并（optimizeScene：GLB 挂载后执行一次；算法与参数在渲染共享核 ──
 // 动机：GLTFLoader 对 GLB 的每个 primitive 建一个 THREE.Mesh，未合并时每帧三处开销都随
 // Mesh 数线性增长——renderer.render 的视锥剔除与逐 mesh draw call、LodManager.update 的
-// 逐项距离判定、updateNearPlane 的整树 traverse + 包围球测试。合并把对象压成「块」：
-// 单 mesh cell 直接复用原 mesh，多 mesh cell 在块内按材质实例分组后合并，一块的 draw
-// call 数 = 该块的材质数。
-// 载体：在 BSP 根内替换内容（移除 gltf.scene，块 mesh 直接挂 BSP 根，userData.isBspModel 保留）。
-/** 目标 cell 数：cell 边长初值 = 世界包围盒对角线 / cbrt(该值)。 */
-const OPT_TARGET_CELLS = 512;
+// 逐项距离判定、近平面自适应的整树 traverse + 包围球测试。合并把对象压成「块」，一块的
+// draw call 数 = 该块的材质数。载体与归一钩子见 `optimizeScene` 薄委托与 `normalizeMergeGroup`。
+
+
 /** 分块合并总开关：false 时 `loadScene` 不调 `optimizeScene`，保留 GLTFLoader 原始场景图。 */
 const OPTIMIZE_SCENE_ENABLED = true;
-/** 非空 cell 数目标区间：自适应循环最多 6 轮，落进区间即停。 */
-const OPT_MIN_CELLS = 300;
-const OPT_MAX_CELLS = 800;
-/** cell 边长钳制（世界单位）：初值与每轮缩放结果都夹在该区间内。 */
-const OPT_CELL_MIN = 128;
-const OPT_CELL_MAX = 4096;
-/**
- * 视锥外保留圈：`optimizeScene` 末尾把每个块的 `geometry.boundingSphere.radius` 乘上该
- * 系数。three.js 每帧按包围球判剔除，膨胀后视锥外一圈几何仍参与渲染。
- */
-const FRUSTUM_PAD = 1.6;
-
-/** 分块收集项：mesh 与它的世界包围盒中心（后者用于算 cell 键）。 */
-interface OptMeshInfo {
-  mesh: THREE.Mesh;
-  cx: number;
-  cy: number;
-  cz: number;
-}
-
-/** cell 键：世界坐标按 cellSize 向下取整后拼串（一次性分桶，不做性能优化）。 */
-function optCellKey(x: number, y: number, z: number, cellSize: number): string {
-  return Math.floor(x / cellSize) + '|' + Math.floor(y / cellSize) + '|' + Math.floor(z / cellSize);
-}
 
 /**
  * 合并前归一：让同组 geometry 的属性布局一致，否则 `mergeGeometries` 直接失败返回 null。
@@ -207,12 +172,6 @@ function normalizeMergeGroup(geoms: THREE.BufferGeometry[]): THREE.BufferGeometr
   return out;
 }
 
-/** 非空 cell 计数：把所有收集项换算成 cell 键后取集合大小（cell 边长自适应循环的判据）。 */
-function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
-  const keys = new Set<string>();
-  for (const it of infos) keys.add(optCellKey(it.cx, it.cy, it.cz, cellSize));
-  return keys.size;
-}
 
 /** 主线程渲染器：持有 WebGL 渲染器、场景、相机与全部子管理器。相机不再本地插值——
  * 每个渲染帧由 `tick` 用 `predPhys.state()` 直接摆放。 */
@@ -231,7 +190,7 @@ export class RendererMain {
   private ladders: Brush[] = [];
   /** 传送触发器（`TeleportManager.getTriggers` 的快照；可视化与准星射线共用）。 */
   private triggers: TeleportTrigger[] = [];
-  /** BSP 模型场景根（`loadScene` 挂到 `scene` 下；`optimizeScene`、`updateNearPlane`、
+  /** BSP 模型场景根（`loadScene` 挂到 `scene` 下；`optimizeScene`、近平面候选收集、
    * `inspectPlane`、`applyTextureQuality` 都从它开始遍历）。 */
   private bspModelScene: THREE.Object3D | null = null;
 
@@ -251,10 +210,8 @@ export class RendererMain {
   private lastPlaneInfo: PlaneInfo | null = null;
 
   // ── 近平面贴墙自适应（面板可实时调节）────────────────────
-  /** 当前探测距离（HU）：初值 `NEAR_PROBE_DIST_DEFAULT`，由 `setNearParams` 改写。 */
-  private nearProbeDist = NEAR_PROBE_DIST_DEFAULT;
-  /** 当前 near 收缩系数：初值 `NEAR_RATIO_DEFAULT`，由 `setNearParams` 改写。 */
-  private nearRatio = NEAR_RATIO_DEFAULT;
+  /** 近平面贴墙自适应：实现在渲染共享层 `src/renderer-shared/camera/near-plane.ts`（面板经 setNearParams 调参）。 */
+  private readonly nearPlane = new NearPlaneController();
 
   /** 运行期配置（`init` 赋值；`applyConfigPatch` 就地改写其子段）。 */
   private config: RuntimeConfig = null as unknown as RuntimeConfig;
@@ -331,18 +288,8 @@ export class RendererMain {
     this.shared.resetRenderSample();
   }
 
-  // ── 近平面自适应（不移动相机，只改投影矩阵的 near）────────
-  /** 复用的射线/向量/球对象（`updateNearPlane` 每轮重用，避免逐帧分配）。 */
-  private readonly _nearRaycaster = new THREE.Raycaster();
-  private readonly _nearOrigin = new THREE.Vector3();
-  private readonly _nearDirF = new THREE.Vector3();
-  private readonly _nearDirR = new THREE.Vector3();
-  private readonly _nearSphere = new THREE.Sphere();
   /** 探测节拍：每个物理帧翻转一次，只在为真（隔帧）时执行一次近平面探测。 */
   private nearCheckToggle = false;
-  /** 场景默认 near = max(世界最大边长 / 1000, `CAMERA_NEAR_MIN`)，`loadScene` 计算；
-   * 探测无命中时 `updateNearPlane` 把 near 恢复成它。 */
-  private defaultNear = CAMERA_NEAR_MIN;
 
   /** 剔除统计回调（app.ts 注册为 HUD 刷新；`emitCullStats` 最多每 100ms 触发一次）。 */
   onCullStats: ((stats: CullStatsLike) => void) | null = null;
@@ -589,8 +536,9 @@ export class RendererMain {
     this.scene.add(scene);
 
     const maxDim = Math.max(size.x, size.y, size.z);
-    this.defaultNear = Math.max(maxDim / 1000, CAMERA_NEAR_MIN);
-    this.camera.near = this.defaultNear;
+    const defaultNear = NearPlaneController.defaultNearForScene(maxDim);
+    this.nearPlane.setDefaultNear(defaultNear);
+    this.camera.near = defaultNear;
     this.camera.far = maxDim * 100;
     this.camera.updateProjectionMatrix();
 
@@ -733,7 +681,7 @@ export class RendererMain {
       // 近平面自适应：隔帧执行一次；noclip 下位置不受碰撞约束，跳过探测
       this.nearCheckToggle = !this.nearCheckToggle;
       if (this.nearCheckToggle && !this.noclipActive && this.bspModelScene) {
-        this.updateNearPlane(st.posX, camY, st.posZ);
+        this.nearPlane.update(this.camera, this.bspModelScene, st.posX, camY, st.posZ, { roots: [this.bspModelScene] });
       }
     } else if (this.stepGated) {
       // 闸门跳过物理的帧也要推进墙钟基准，否则闸门恢复时会拿到一个异常大的 dt
@@ -799,77 +747,10 @@ export class RendererMain {
     );
   }
 
-  /**
-   * 近平面自适应：先用包围球粗筛出 `probe × 2 + 球半径` 内的 mesh，再从相机沿 4 个水平
-   * 正交方向（相机局部 ±forward / ±right）各投一条长度 `probe` 的射线，取最近命中距离 minD。
-   * 有命中 → near = max(minD × nearRatio, CAMERA_NEAR_MIN)；无命中 → 恢复 defaultNear。
-   * 与当前 near 相差超过 0.001 才写入并更新投影矩阵；相机位置始终不动。
-   */
-  private updateNearPlane(px: number, py: number, pz: number): void {
-    const camera = this.camera;
-    const scene = this.bspModelScene;
-    if (!camera || !scene) return;
-    this._nearOrigin.set(px, py, pz);
-    const probe = this.nearProbeDist;
-
-    // 1. 粗筛：包围球（缺则先算）平移到世界空间，球心到相机的距离小于 probe × 2 + 半径才入选
-    const candidates: THREE.Mesh[] = [];
-    scene.traverse((obj) => {
-      if (!(obj as THREE.Mesh).isMesh) return;
-      const mesh = obj as THREE.Mesh;
-      const geom = mesh.geometry as THREE.BufferGeometry | null;
-      if (!geom) return;
-      if (!geom.boundingSphere) geom.computeBoundingSphere();
-      const bs = geom.boundingSphere;
-      if (!bs) return;
-      this._nearSphere.copy(bs).applyMatrix4(mesh.matrixWorld);
-      if (this._nearSphere.center.distanceTo(this._nearOrigin) < probe * 2 + this._nearSphere.radius) {
-        candidates.push(mesh);
-      }
-    });
-
-    // 2. 4 个相机局部水平方向各投一条射线（far = probe），取最近命中距离
-    let minD = Infinity;
-    if (candidates.length > 0) {
-      const q = camera.quaternion;
-      this._nearDirF.set(0, 0, -1).applyQuaternion(q);
-      const right = this._nearDirR.set(1, 0, 0).applyQuaternion(q);
-      const dirs = [
-        this._nearDirF,
-        this._nearDirF.clone().negate(),
-        right.clone(),
-        right.clone().negate(),
-      ];
-      for (const dir of dirs) {
-        this._nearRaycaster.set(this._nearOrigin, dir);
-        this._nearRaycaster.near = 0;
-        this._nearRaycaster.far = probe;
-        const hits = this._nearRaycaster.intersectObjects(candidates, false);
-        if (hits.length > 0 && hits[0].distance < minD) {
-          minD = hits[0].distance;
-        }
-      }
-    }
-
-    // 3. 写 near：命中则收缩并夹下限，未命中恢复默认；差值超过 0.001 才更新投影矩阵
-    const target =
-      isFinite(minD)
-        ? Math.max(minD * this.nearRatio, CAMERA_NEAR_MIN)
-        : this.defaultNear;
-    if (Math.abs(camera.near - target) > 0.001) {
-      camera.near = target;
-      camera.updateProjectionMatrix();
-    }
-  }
-
-  /** 面板实时调整近平面参数：`probeDist` 只接受 > 0，`ratio` 只接受区间 (0, 1]；两者都可缺省。 */
+  /** 面板实时调整近平面参数：转发共享控制器（判据见 `src/renderer-shared/camera/near-plane.ts`）；
+   * debug 的按需渲染标记照旧置位。 */
   setNearParams(probeDist?: number, ratio?: number): void {
-    if (probeDist !== undefined && probeDist > 0) {
-      this.nearProbeDist = probeDist;
-    }
-    if (ratio !== undefined && ratio > 0 && ratio <= 1) {
-      this.nearRatio = ratio;
-    }
+    this.nearPlane.setParams(probeDist, ratio);
     this.needsRender = true;
   }
 
@@ -1578,208 +1459,11 @@ export class RendererMain {
   // 载体与 game 一致：直接在 BSP 根（bspRoot，userData.isBspModel 保留不变）内替换内容——
   // 移除 gltf.scene、块 mesh 直接挂 BSP 根。
   // 时序：loadScene 中 scene.add(gltf.scene) + lightmap 之后、updateMatrixWorld / boundingBox /
-  // LOD·PVS 注册（lodManager.setup + assignClusterIds）之前——下方遍历收集分块后的 mesh。
-  // 流程：① scene.updateMatrixWorld(true) → traverse 收集 Mesh（世界包围盒中心）
-  // ② cell 自适应（世界对角 / cbrt(目标块数)，微调落 [300,800] 非空 cell）
-  // ③ 顶点 applyMatrix4(matrixWorld) 烘焙世界空间（clone 后变换，勿动原 geometry）
-  // ④ 单 mesh cell 保留原 mesh（变换清零重挂）；多 mesh cell 块内按材质（实例恒等）子
-  //    合并 → mergeGeometries(useGroups=true) 最终合并（groups 保留材质索引）；多材质/
-  //    无材质 mesh 防御性烘焙保留；失败保持场景原状（计算先行、后替换）
-  // ⑤ console.log 统计：原 mesh 数 → 块数、平均顶点、draw call 估算、前向视锥可见块
+  // LOD·PVS 注册之前的空间分块合并：算法已下沉渲染共享核（`src/renderer-shared/scene/scene-optimizer.ts`，
+  // 与 game 同一份），本方法只保留入口与 debug 特有的合并前归一（`normalizeMergeGroup`：混合
+    // indexed/非 indexed 与混合 gpuType 的归一，经 `normalizeGroup` 钩子注入共享核）。
   private optimizeScene(bspRoot: THREE.Scene, gltfScene: THREE.Object3D): void {
-    // ① 收集：matrixWorld 更新后作为世界变换基准；多材质 mesh（GLB primitive 恒单材质，
-    //    防御性路径）与无材质 mesh 单独烘焙保留，不参与分块
-    bspRoot.updateMatrixWorld(true);
-    const infos: OptMeshInfo[] = [];
-    const keptMeshes: THREE.Mesh[] = [];
-    const worldBox = new THREE.Box3();
-    const box = new THREE.Box3();
-    const center = new THREE.Vector3();
-    bspRoot.traverse((obj) => {
-      const m = obj as THREE.Mesh;
-      if (!m.isMesh) return;
-      if (!m.geometry || !m.geometry.attributes.position) return;
-      if (Array.isArray(m.material) || !m.material) {
-        // 多材质/无材质：烘焙到世界空间后整体保留（不参与分块合并）
-        if (Array.isArray(m.material)) {
-          const baked = m.geometry.clone();
-          baked.applyMatrix4(m.matrixWorld);
-          m.geometry.dispose();
-          m.geometry = baked;
-          m.position.set(0, 0, 0);
-          m.rotation.set(0, 0, 0);
-          m.scale.set(1, 1, 1);
-          m.updateMatrix();
-          keptMeshes.push(m);
-        }
-        return;
-      }
-      const g = m.geometry;
-      if (!g.boundingBox) g.computeBoundingBox();
-      if (!g.boundingBox) return;
-      box.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
-      worldBox.union(box);
-      box.getCenter(center);
-      infos.push({ mesh: m, cx: center.x, cy: center.y, cz: center.z });
-    });
-    if (infos.length === 0) return;
-
-    // ② cell 大小自适应：cell = 世界包围盒对角线 / cbrt(目标块数)，再按非空 cell 数微调
-    const diag = Math.max(worldBox.getSize(new THREE.Vector3()).length(), 1);
-    let cellSize = Math.min(Math.max(diag / Math.cbrt(OPT_TARGET_CELLS), OPT_CELL_MIN), OPT_CELL_MAX);
-    for (let i = 0; i < 6; i++) {
-      const n = optCountCells(infos, cellSize);
-      if (n >= OPT_MIN_CELLS && n <= OPT_MAX_CELLS) break;
-      const scale = Math.min(Math.max(Math.cbrt(n / OPT_TARGET_CELLS), 0.55), 1.8);
-      cellSize = Math.min(Math.max(cellSize * scale, OPT_CELL_MIN), OPT_CELL_MAX);
-    }
-
-    // ③ 分桶：每 mesh 世界包围盒中心归 cell（横跨多 cell 归中心所在 cell）
-    const cells = new Map<string, OptMeshInfo[]>();
-    for (const it of infos) {
-      const key = optCellKey(it.cx, it.cy, it.cz, cellSize);
-      let arr = cells.get(key);
-      if (!arr) {
-        arr = [];
-        cells.set(key, arr);
-      }
-      arr.push(it);
-    }
-
-    // ④ 合并 + 替换
-    const chunks: THREE.Mesh[] = [];
-    let chunkCount = 0;
-    let drawCallEst = 0;
-    let vertsTotal = 0;
-    for (const arr of cells.values()) {
-      if (arr.length === 1) {
-        const m = arr[0].mesh;
-        const baked = m.geometry.clone();
-        baked.applyMatrix4(m.matrixWorld);
-        m.geometry.dispose();
-        m.geometry = baked;
-        m.position.set(0, 0, 0);
-        m.rotation.set(0, 0, 0);
-        m.scale.set(1, 1, 1);
-        m.updateMatrix();
-        chunks.push(m);
-        chunkCount++;
-        drawCallEst++;
-        vertsTotal += baked.attributes.position.count;
-        continue;
-      }
-
-      // 多 mesh cell：块内按材质（实例恒等）分组 → 同材质子合并 → 每材质一个几何
-      const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
-      for (const it of arr) {
-        const m = it.mesh;
-        const mat = m.material as THREE.Material;
-        const baked = m.geometry.clone();
-        baked.applyMatrix4(m.matrixWorld);
-        let list = byMat.get(mat);
-        if (!list) {
-          list = [];
-          byMat.set(mat, list);
-        }
-        list.push(baked);
-      }
-      const mergedGeoms: THREE.BufferGeometry[] = [];
-      const mats: THREE.Material[] = [];
-      for (const [mat, geomsRaw] of byMat) {
-        const geoms = normalizeMergeGroup(geomsRaw);
-        let merged: THREE.BufferGeometry[];
-        if (geoms.length === 1) {
-          merged = geoms;
-        } else {
-          const mg = mergeGeometries(geoms, false);
-          if (mg) {
-            for (const g of geoms) g.dispose();
-            merged = [mg];
-          } else {
-            merged = geoms; // 属性不一致（防御）：保留单独几何，材质索引各自映射
-          }
-        }
-        for (const g of merged) {
-          mergedGeoms.push(g);
-          mats.push(mat);
-        }
-      }
-      if (mergedGeoms.length === 0) {
-        for (const it of arr) it.mesh.geometry.dispose();
-        continue;
-      }
-      let chunk: THREE.Mesh;
-      if (mergedGeoms.length === 1) {
-        chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
-        drawCallEst++;
-      } else {
-        const final = mergeGeometries(normalizeMergeGroup(mergedGeoms), true);
-        if (final) {
-          for (const g of mergedGeoms) if (g !== final) g.dispose();
-          chunk = new THREE.Mesh(final, mats);
-          drawCallEst += final.groups.length;
-        } else {
-          // 最终合并失败（极端防御）：每个材质单独一块
-          chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
-          for (let i = 1; i < mergedGeoms.length; i++) {
-            chunks.push(new THREE.Mesh(mergedGeoms[i], mats[i]));
-            chunkCount++;
-            drawCallEst++;
-          }
-        }
-      }
-      for (const it of arr) it.mesh.geometry.dispose();
-      chunkCount++;
-      for (const g of mergedGeoms) vertsTotal += g.attributes.position.count;
-      chunks.push(chunk);
-    }
-
-    // ④b 替换：移除原 GLB 子树（旧 mesh 几何已逐个 dispose），块 mesh 直接挂 BSP 根
-    const totalMeshes = infos.length;
-    for (const m of chunks) bspRoot.add(m);
-    for (const m of keptMeshes) bspRoot.add(m);
-    bspRoot.remove(gltfScene);
-
-    // ④c 视锥外保一圈：块 geometry.boundingSphere 半径 ×FRUSTUM_PAD。
-    //    必须强制 computeBoundingSphere（非 null 检查）：烘焙路径是 geometry.clone() +
-    //    applyMatrix4(matrixWorld)——克隆残留 GLB 局部空间的旧球（非 null 会被跳过）→
-    //    剔除按错误位置判定 → 眼前块被误剔不渲染。
-    for (const child of bspRoot.children) {
-      const g = (child as THREE.Mesh).geometry;
-      if (!g) continue;
-      g.computeBoundingSphere();
-      (g.boundingSphere as THREE.Sphere).radius *= FRUSTUM_PAD;
-    }
-
-    // ⑤ 统计 + 前向视锥可见块估算（仅诊断；debug FOV 固定 73.6）
-    const chunkBox = new THREE.Box3();
-    const chunkCenter = new THREE.Vector3();
-    const toCam = new THREE.Vector3();
-    let visibleEst = -1;
-    const camera = this.camera;
-    if (camera) {
-      camera.updateMatrixWorld(true);
-      const camDir = new THREE.Vector3();
-      camera.getWorldDirection(camDir);
-      const cosHalfFov = Math.cos(((FOV / 2) * Math.PI) / 180);
-      visibleEst = 0;
-      for (const child of bspRoot.children) {
-        const mesh = child as THREE.Mesh;
-        chunkBox.setFromObject(mesh);
-        if (chunkBox.isEmpty()) continue;
-        chunkBox.getCenter(chunkCenter);
-        toCam.subVectors(chunkCenter, camera.position);
-        const dist = toCam.length();
-        if (dist < camera.far && toCam.dot(camDir) / dist > cosHalfFov) visibleEst++;
-      }
-    }
-    console.log(
-      `[optimizeScene] 分块合并: ${totalMeshes} mesh → ${chunkCount} 块` +
-        `（cellSize=${cellSize.toFixed(1)}、非空 cell=${cells.size}）| ` +
-        `平均顶点/块 ${(vertsTotal / Math.max(chunkCount, 1)).toFixed(0)}（总顶点 ${vertsTotal}）| ` +
-        `draw call 估算 ${drawCallEst} | ` +
-        `前向视锥可见块估算 ${visibleEst >= 0 ? `${visibleEst}/${chunkCount}` : 'N/A（camera 未就绪）'}`,
-    );
+    optimizeSceneShared(bspRoot, gltfScene, this.camera, FOV, { normalizeGroup: normalizeMergeGroup });
   }
 
   // 复用向量

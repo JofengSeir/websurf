@@ -62,7 +62,7 @@ export class NearPlaneController {
    * 粗筛：包围球中心到起点的距离 < 探测距离 × 2 + 球半径 的 mesh 才进入射线检测。
    * 只写 `camera.near`（变化超过 0.001 才更新投影矩阵）；由 `tick` 每 2 帧调用一次。
    */
-  update(camera: THREE.PerspectiveCamera | null, scene: THREE.Scene | null, px: number, py: number, pz: number, opts?: NearPlaneOptions): void {
+  update(camera: THREE.PerspectiveCamera | null, scene: THREE.Object3D | null, px: number, py: number, pz: number, opts?: NearPlaneOptions): void {
     if (!camera || !scene) return;
     const probe = this.nearProbeDist;
     this._nearOrigin.set(px, py, pz);

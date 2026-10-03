@@ -8,7 +8,7 @@
 |---|---|---|
 | `renderer-main.ts` | 编排：Renderer/Scene/Camera 装配、loadScene 编排、rAF 帧循环（tick）、主线程预测物理、LOD/PVS 剔除、纹理画质（mosaic）、画面旋钮转发、出帧探针 | `RendererMain`（`apps/game/src/renderer/renderer-main.ts:78`） |
 | 共享层 `scene/scene-builder.ts` | GLB 字节 → 地图子场景：loadGlb、清根 rotation、摘 punctual 灯、施加 lightmap atlas | `buildMapScene`（`src/renderer-shared/scene/scene-builder.ts:61`）、`applyLightmap`（`:108`） |
-| 共享层 `scene/scene-optimizer.ts` | 空间分块合并：数万 mesh → 数百空间块（cell 自适应、按材质实例分组、失败逐块回退） | `optimizeScene(bspRoot, gltfScene, camera, fovDeg)`（`src/renderer-shared/scene/scene-optimizer.ts:250`；2026-10-03 内部拆为共享核 `mergeIntoChunks`（`:70`，不改根不挂载不打日志）+ 本包装，行为与拆分前逐行等价） |
+| 共享层 `scene/scene-optimizer.ts` | 空间分块合并：数万 mesh → 数百空间块（cell 自适应、按材质实例分组、失败逐块回退） | `optimizeScene(bspRoot, gltfScene, camera, fovDeg)`（`src/renderer-shared/scene/scene-optimizer.ts:256`；2026-10-03 内部拆为共享核 `mergeIntoChunks`（`:70`，不改根不挂载不打日志）+ 本包装，行为与拆分前逐行等价） |
 | 共享层 `scene/inject-stats.ts` | lightmap 注入生效性统计（首帧后一次性诊断，只读场景与 globalThis） | `reportInjectStatsOnce(scene)`（`src/renderer-shared/scene/inject-stats.ts:20`） |
 | 共享层 `camera/near-plane.ts` | 近平面贴墙自适应：4 水平方向射线探测，贴墙收缩 near | `NearPlaneController`（`src/renderer-shared/camera/near-plane.ts:24`；`update` 的 `opts` 支持 roots 直通与 `vertical` 六向——viewer 用，game 默认四向不变） |
 
@@ -39,8 +39,8 @@
 - **光照三路径与 fullbright 收敛**：world 面走 atlas、prop 第 1 级走几何属性 `_VBSP_VLIGHT`、第 2 级走 leaf ambient cube；无 lightmap 的图元统一收敛到 fullbright（`src/renderer-shared/shader/lightmap-shader.ts:543`）；`extras.unlit === true` 的图元跳过光照（`src/renderer-shared/shader/lightmap-shader.ts:830`）。
 - **`hasLightmap` 的读取源**：判据优先读 `geometry.userData`、回落 `mesh.userData`（`src/renderer-shared/shader/lightmap-shader.ts:882`、`:883`）；`== false` 的图元必须在「检测 uv1/uv2」之前拦下（`src/renderer-shared/shader/lightmap-shader.ts:885`）。
 - **材质去重**：按 map / color / transparent / opacity / alphaTest / side / depthWrite / alphaMap / 线框标记组成键复用材质实例，使分块合并的按材质分组仍然成立（`src/renderer-shared/shader/lightmap-shader.ts:516`、`src/renderer-shared/shader/lightmap-shader.ts:794`）。
-- **分块合并的失败语义**：任一步合并失败都回退为「保留各自独立几何」，不存在「合并失败即丢弃」的路径（`src/renderer-shared/scene/scene-optimizer.ts:187`、`:204`、`:213`）。
-- **视锥外保留圈**：块几何的包围球半径统一乘 `FRUSTUM_PAD`，且必须无条件重算（克隆几何会带上局部空间的旧球）（`src/renderer-shared/scene/scene-optimizer.ts:31`、`padBoundingSpheres :234`、`:239`）。
+- **分块合并的失败语义**：任一步合并失败都回退为「保留各自独立几何」，不存在「合并失败即丢弃」的路径（`src/renderer-shared/scene/scene-optimizer.ts:193`、`:210`、`:219`）。
+- **视锥外保留圈**：块几何的包围球半径统一乘 `FRUSTUM_PAD`，且必须无条件重算（克隆几何会带上局部空间的旧球）（`src/renderer-shared/scene/scene-optimizer.ts:31`、`padBoundingSpheres :240`、`:245`）。
 - **出帧探针只读不写**：`installFrameProbe` 往 `globalThis.__vbspFrameProbe` 挂一个对象（`apps/game/src/renderer/renderer-main.ts:910`），其 `applyPose` 复用生产路径的冻结机制（`setHoldPoint`）而新增任何渲染分支（`apps/game/src/renderer/renderer-main.ts:1071`、`:1102`）。
 - **注入生效性统计延后到首帧之后**：`applyLightmap` 返回「是否施加到 mesh」，`loadScene` 用它落账 `pendingInjectReport`；统计由 `tick` 在首帧 `render()` 之后跑一次（`apps/game/src/renderer/renderer-main.ts:277`、`:854`；实现在 `src/renderer-shared/scene/inject-stats.ts:20`）。
 

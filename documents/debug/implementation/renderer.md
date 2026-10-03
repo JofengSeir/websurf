@@ -6,15 +6,15 @@
 
 **`apps/debug/src/renderer/renderer-main.ts`**
 
-导出 `CullStatsLike`（`apps/debug/src/renderer/renderer-main.ts:92`）、`RenderPhysEvent`（`apps/debug/src/renderer/renderer-main.ts:109`）、`RendererMain`（`apps/debug/src/renderer/renderer-main.ts:219`）。类内公开面按用途分五组：
+导出 `CullStatsLike`（`apps/debug/src/renderer/renderer-main.ts:85`）、`RenderPhysEvent`（`apps/debug/src/renderer/renderer-main.ts:102`）、`RendererMain`（`apps/debug/src/renderer/renderer-main.ts:183`）。类内公开面按用途分五组：
 
-- 生命周期：`init`（`apps/debug/src/renderer/renderer-main.ts:399`）、`disposeScene`（`apps/debug/src/renderer/renderer-main.ts:460`）、`loadScene`（`apps/debug/src/renderer/renderer-main.ts:554`）、`start` / `stop`（`apps/debug/src/renderer/renderer-main.ts:638` / `:645`）、`resize`（`apps/debug/src/renderer/renderer-main.ts:884`）。
-- 物理线：`buildPredictionWorld`（`apps/debug/src/renderer/renderer-main.ts:1120`）、`feedInput`（`apps/debug/src/renderer/renderer-main.ts:1168`）、`setPredictionState`（`apps/debug/src/renderer/renderer-main.ts:1233`）、`setPredictionParams` / `setPredictionHull` / `setPredictionNoclip`（`apps/debug/src/renderer/renderer-main.ts:1294` 起）、`respawn` / `teleportToSpawn` / `teleportToPos`（`apps/debug/src/renderer/renderer-main.ts:1321` 起）、`setSpawnPoints` / `setDeathY`（`apps/debug/src/renderer/renderer-main.ts:1343` / `:1352`）、`getCurrentVel` / `getCurrentState`（`apps/debug/src/renderer/renderer-main.ts:1358` / `:1422`）、`resetTo`（`apps/debug/src/renderer/renderer-main.ts:1396`）、`applyCollisionCorrection`（`apps/debug/src/renderer/renderer-main.ts:1406`）、`syncCameraToCurrentState`（`apps/debug/src/renderer/renderer-main.ts:1156`）、`clearPendingInput`（`apps/debug/src/renderer/renderer-main.ts:1219`）。
-- 回放相关（debug 专属）：`setReplayMode` / `isReplayMode`（`apps/debug/src/renderer/renderer-main.ts:1188` / `:1195`）、`setManualSteps`（`apps/debug/src/renderer/renderer-main.ts:1208`）、`captureReplayState`（`apps/debug/src/renderer/renderer-main.ts:1461`）、`captureFullPhysState` / `restoreFullPhysState`（`apps/debug/src/renderer/renderer-main.ts:1264` / `:1281`）。
-- 路径记录：`startPathRecording` / `stopPathRecording` / `isPathRecording` / `clearPath`（`apps/debug/src/renderer/renderer-main.ts:904` 起）、四个分量显隐开关 `setPathRenderVisible` / `setPathTickVisible` / `setPathDeviVisible` / `setPathDotsVisible`（`apps/debug/src/renderer/renderer-main.ts:934` 起）、`getPathShapeStats` / `getPathDeviStats` / `getPathCounts`（`apps/debug/src/renderer/renderer-main.ts:958` 起）、`exportPathJson` / `exportPathCsv`（`apps/debug/src/renderer/renderer-main.ts:996` / `:1001`）。**2026-09-26**：原 `setPathVisible` / `isPathVisible`（整组显隐与其查询）与唯一入口 `#pathVisibleChk` 一并删除——入口 id 在页面不存在，四个分量开关已覆盖其语义；`PathRecorder` 的 `setVisible` 与 `visible` getter 同步删除。
-- 渲染侧配置：`applyConfigPatch`（`apps/debug/src/renderer/renderer-main.ts:1008`）、`applyTextureQuality`（`apps/debug/src/renderer/renderer-main.ts:1049`）、`setLightingMode` / `getLightingMode`（`apps/debug/src/renderer/renderer-main.ts:541` / `:548`）、`setCullDistance`（`apps/debug/src/renderer/renderer-main.ts:893`）、`setNearParams`（`apps/debug/src/renderer/renderer-main.ts:866`）、`getPlaneInfo`（`apps/debug/src/renderer/renderer-main.ts:879`）、`getPvsCluster`（`apps/debug/src/renderer/renderer-main.ts:1446`）。
+- 生命周期：`init`（`apps/debug/src/renderer/renderer-main.ts:351`）、`disposeScene`（`apps/debug/src/renderer/renderer-main.ts:412`）、`loadScene`（`apps/debug/src/renderer/renderer-main.ts:506`）、`start` / `stop`（`apps/debug/src/renderer/renderer-main.ts:591` / `:598`）、`resize`（`apps/debug/src/renderer/renderer-main.ts:770`）。
+- 物理线：`buildPredictionWorld`（`apps/debug/src/renderer/renderer-main.ts:1006`）、`feedInput`（`apps/debug/src/renderer/renderer-main.ts:1054`）、`setPredictionState`（`apps/debug/src/renderer/renderer-main.ts:1119`）、`setPredictionParams` / `setPredictionHull` / `setPredictionNoclip`（`apps/debug/src/renderer/renderer-main.ts:1180` 起）、`respawn` / `teleportToSpawn` / `teleportToPos`（`apps/debug/src/renderer/renderer-main.ts:1207` 起）、`setSpawnPoints` / `setDeathY`（`apps/debug/src/renderer/renderer-main.ts:1229` / `:1238`）、`getCurrentVel` / `getCurrentState`（`apps/debug/src/renderer/renderer-main.ts:1244` / `:1308`）、`resetTo`（`apps/debug/src/renderer/renderer-main.ts:1282`）、`applyCollisionCorrection`（`apps/debug/src/renderer/renderer-main.ts:1292`）、`syncCameraToCurrentState`（`apps/debug/src/renderer/renderer-main.ts:1042`）、`clearPendingInput`（`apps/debug/src/renderer/renderer-main.ts:1105`）。
+- 回放相关（debug 专属）：`setReplayMode` / `isReplayMode`（`apps/debug/src/renderer/renderer-main.ts:1074` / `:1081`）、`setManualSteps`（`apps/debug/src/renderer/renderer-main.ts:1094`）、`captureReplayState`（`apps/debug/src/renderer/renderer-main.ts:1347`）、`captureFullPhysState` / `restoreFullPhysState`（`apps/debug/src/renderer/renderer-main.ts:1150` / `:1167`）。
+- 路径记录：`startPathRecording` / `stopPathRecording` / `isPathRecording` / `clearPath`（`apps/debug/src/renderer/renderer-main.ts:790` 起）、四个分量显隐开关 `setPathRenderVisible` / `setPathTickVisible` / `setPathDeviVisible` / `setPathDotsVisible`（`apps/debug/src/renderer/renderer-main.ts:820` 起）、`getPathShapeStats` / `getPathDeviStats` / `getPathCounts`（`apps/debug/src/renderer/renderer-main.ts:844` 起）、`exportPathJson` / `exportPathCsv`（`apps/debug/src/renderer/renderer-main.ts:882` / `:887`）。**2026-09-26**：原 `setPathVisible` / `isPathVisible`（整组显隐与其查询）与唯一入口 `#pathVisibleChk` 一并删除——入口 id 在页面不存在，四个分量开关已覆盖其语义；`PathRecorder` 的 `setVisible` 与 `visible` getter 同步删除。
+- 渲染侧配置：`applyConfigPatch`（`apps/debug/src/renderer/renderer-main.ts:894`）、`applyTextureQuality`（`apps/debug/src/renderer/renderer-main.ts:935`）、`setLightingMode` / `getLightingMode`（`apps/debug/src/renderer/renderer-main.ts:493` / `:500`）、`setCullDistance`（`apps/debug/src/renderer/renderer-main.ts:779`）、`setNearParams`（`apps/debug/src/renderer/renderer-main.ts:757`，转发共享控制器）、`getPlaneInfo`（`apps/debug/src/renderer/renderer-main.ts:765`）、`getPvsCluster`（`apps/debug/src/renderer/renderer-main.ts:1332`）。
 
-本文件还持有四个模块级常量与一组分块合并参数：`FOV`（`apps/debug/src/renderer/renderer-main.ts:69`）、`PLANE_INSPECT_INTERVAL`（`apps/debug/src/renderer/renderer-main.ts:71`）、`CAMERA_NEAR_MIN`（`apps/debug/src/renderer/renderer-main.ts:74`）、`NEAR_PROBE_DIST_DEFAULT` / `NEAR_RATIO_DEFAULT`（`apps/debug/src/renderer/renderer-main.ts:78` / `:82`）、`OPT_TARGET_CELLS` 起的六个分块常量（`apps/debug/src/renderer/renderer-main.ts:127` 起）、`FRUSTUM_PAD`（`apps/debug/src/renderer/renderer-main.ts:140`）、`DEG2RAD`（`apps/debug/src/renderer/renderer-main.ts:1789`）。
+本文件还持有三个模块级常量：`FOV`（`apps/debug/src/renderer/renderer-main.ts:71`）、`PLANE_INSPECT_INTERVAL`（`apps/debug/src/renderer/renderer-main.ts:73`）、`DEG2RAD`（`apps/debug/src/renderer/renderer-main.ts:1478`）。近平面三参数（near 下限 0.05 / 探测距离 100 / 收缩系数 0.3）与分块合并参数（cell 目标/区间/钳制、FRUSTUM_PAD）2026-10-03 起由渲染共享层承载（`src/renderer-shared/camera/near-plane.ts` 与 `src/renderer-shared/scene/scene-optimizer.ts`，数值与原 debug 常量一致）。
 
 **`apps/debug/src/renderer/lod-manager.ts`**
 
@@ -55,35 +55,35 @@
 
 ## 关键流程与不变量
 
-**一帧的固定顺序**：物理段 → 视距剔除 → 碰撞可视化 → 限流准星射线 → 渲染 → 剔除统计（`apps/debug/src/renderer/renderer-main.ts:658` 起；各步锚点见 `documents/debug/sequences.md` 的帧链一节）。
+**一帧的固定顺序**：物理段 → 视距剔除 → 碰撞可视化 → 限流准星射线 → 渲染 → 剔除统计（`apps/debug/src/renderer/renderer-main.ts:615` 起；各步锚点见 `documents/debug/sequences.md` 的帧链一节）。
 
-**相机位姿唯一来源是渲染物理**：`tick` 每帧从 `predPhys.state()` 取 `posX/posY/posZ`、`yaw`、`pitch`、`eyeHeight`，yaw/pitch 由度换弧度后交给 `CameraController.setYawPitch`，相机位置取「脚底 + 眼高」（`apps/debug/src/renderer/renderer-main.ts:715`、`apps/debug/src/renderer/renderer-main.ts:727`、`apps/debug/src/renderer/renderer-main.ts:730`）。主线程不保留插值副本。
+**相机位姿唯一来源是渲染物理**：`tick` 每帧从 `predPhys.state()` 取 `posX/posY/posZ`、`yaw`、`pitch`、`eyeHeight`，yaw/pitch 由度换弧度后交给 `CameraController.setYawPitch`，相机位置取「脚底 + 眼高」（`apps/debug/src/renderer/renderer-main.ts:680`、`apps/debug/src/renderer/renderer-main.ts:681`、`apps/debug/src/renderer/renderer-main.ts:684`）。主线程不保留插值副本。
 
-**近平面自适应只改投影矩阵**：`updateNearPlane` 先用包围球粗筛，再沿 4 个水平正交方向各投一条长度为 probe 的射线取最近命中，命中则 `near = max(minD × ratio, CAMERA_NEAR_MIN)`，无命中回到默认值；与当前值相差超过 0.001 才写入（`apps/debug/src/renderer/renderer-main.ts:808`）。
+**近平面自适应只改投影矩阵**：实现在共享 `NearPlaneController.update`（`src/renderer-shared/camera/near-plane.ts:65`，2026-10-03 起本工程不再持有副本）：候选 `roots` 直通 `bspModelScene` 子树（等价于旧的 scene.traverse），沿 4 个水平正交方向各投一条长度为 probe 的射线取最近命中，命中则 `near = max(minD × ratio, CAMERA_NEAR_MIN)`，无命中回到 `defaultNear`；与当前值相差超过 0.001 才写入。调用点（`apps/debug/src/renderer/renderer-main.ts:689`）保留了 noclip 跳过与隔帧节拍；`setNearParams`（`apps/debug/src/renderer/renderer-main.ts:757`）转发共享控制器并照旧置 `needsRender`。
 
 **LOD 剔除的判据与取值**：判据只有「块中心到相机距离平方 > `cullDistance` 的平方」一条，不带迟滞、不查 PVS（`apps/debug/src/renderer/lod-manager.ts:231`）；每 `lod.updateInterval` 帧才判一轮（`apps/debug/src/renderer/lod-manager.ts:226`），只有可见性翻转时才写 `mesh.visible` 并把返回值置真（`apps/debug/src/renderer/lod-manager.ts:246`）。距离取值：上限 = 对角线 ×4 上取整到 100 HU，默认 = min(对角线 ×2, max(12800, 最大边 ×0.5))（`apps/debug/src/renderer/lod-manager.ts:155` 起）。
 
 **路径记录两条线与两种度量**：
 
-- 渲染线 = 每个 rAF 物理步一点，取脚底坐标（`apps/debug/src/renderer/renderer-main.ts:721`）；tick 线 = 权威版本号 `va` 变化时一点，时间戳取发布时钟 τ（`apps/debug/src/renderer/renderer-main.ts:693` 起）。
+- 渲染线 = 每个 rAF 物理步一点，取脚底坐标（`apps/debug/src/renderer/renderer-main.ts:674`）；tick 线 = 权威版本号 `va` 变化时一点，时间戳取发布时钟 τ（`apps/debug/src/renderer/renderer-main.ts:651` 起）。
 - 垂距与偏差梳是两个不同度量：垂距是 tick 点到渲染折线的最短距离，偏差梳是同一时刻两点之差；面板上分开标注（`apps/debug/src/app.ts:641` 起）。
 - 折线自检按长度比给出：直连为 1.000，超过 1.15 标红（`apps/debug/src/app.ts:653` 起）。
 
-**分块合并（`optimizeScene`）**：GLB 挂载后执行一次，把 GLTFLoader 的逐 primitive Mesh 合并成空间块；单 mesh cell 复用原 mesh，多 mesh cell 在块内按材质实例分组后合并；顺序固定在 lightmap 应用之后、LOD/PVS 注册之前（`apps/debug/src/renderer/renderer-main.ts:1596`）。
+**分块合并（`optimizeScene`）**：GLB 挂载后执行一次（`OPTIMIZE_SCENE_ENABLED` gating，`apps/debug/src/renderer/renderer-main.ts:123`、调用点 `:524`），把 GLTFLoader 的逐 primitive Mesh 合并成空间块；算法在共享核 `src/renderer-shared/scene/scene-optimizer.ts:75`（与 game 同一份），本工程私有方法（`:1470`）只做薄委托并经 `normalizeGroup` 钩子注入 `normalizeMergeGroup`（混合 indexed/非 indexed 与混合 gpuType 的合并前归一——debug 特有健壮化，game/viewer 不传钩子）；顺序固定在 lightmap 应用之后、LOD/PVS 注册之前。
 
-**渲染采样传输**：同一帧先落 `PathRecorder` 渲染节点、再写共享内存渲染采样槽，`i0` 用同一次自增，保证「渲染节点下标 = 采样下标」（`apps/debug/src/renderer/renderer-main.ts:721`、`apps/debug/src/renderer/renderer-main.ts:725`）。
+**渲染采样传输**：同一帧先落 `PathRecorder` 渲染节点、再写共享内存渲染采样槽，`i0` 用同一次自增，保证「渲染节点下标 = 采样下标」（`apps/debug/src/renderer/renderer-main.ts:674`、`apps/debug/src/renderer/renderer-main.ts:678`）。
 
-**回放模式的边界**：`setReplayMode(true)` 只关掉权威→渲染方向的两项实时耦合（`correctFromAuthority` 与 `calibrateVelocity`），共享内存输入槽照写、渲染与路径记录逻辑不动（`apps/debug/src/renderer/renderer-main.ts:1186` 起）。
+**回放模式的边界**：`setReplayMode(true)` 只关掉权威→渲染方向的两项实时耦合（`correctFromAuthority` 与 `calibrateVelocity`），共享内存输入槽照写、渲染与路径记录逻辑不动（`apps/debug/src/renderer/renderer-main.ts:1074` 起）。
 
 **lightmap 着色器**：光照模式切换不重建场景、不重编译材质，只改一个全场景共享 uniform（`apps/debug/src/config.ts:101`）；图集加载在两种模式下完全一致（`apps/debug/src/config.ts:101`）。着色器本体是渲染共享层单实例 `src/renderer-shared/shader/lightmap-shader.ts`（2026-10-02 由三工程各自一份的同构副本合并而来，旧副本已删除，三工程消费同一文件）。
 
 ## 已知缺口
 
 1. **PVS 列不反映隐藏数**：`LodStats.pvsHidden` 在 `update` 的统计刷新里每轮恒写 0（`apps/debug/src/renderer/lod-manager.ts:262`），而面板剔除统计行把它作为「隐藏 N」打印（`apps/debug/src/app.ts:624`），页面 `#cullStats` 也带「PVS」列（`apps/debug/web/index.html:867`）。真正被隐藏的块数是 `far`（`apps/debug/src/renderer/lod-manager.ts:261`）。
-2. **PVS 相关统计在本工程恒为缺省值**：`RendererMain` 只构造 `PvsManager`、把 `getClusterAt` 交给 `assignClusterIds` 用、并读 `getStats` / `currentClusterId`，**从不调 `update`**，因此剔除统计里的 `cluster` 恒 -1、`visibleClusters` 恒 0（`apps/debug/src/renderer/renderer-main.ts:88` 起、`apps/debug/src/renderer/renderer-main.ts:1572`）。
+2. **PVS 相关统计在本工程恒为缺省值**：`RendererMain` 只构造 `PvsManager`、把 `getClusterAt` 交给 `assignClusterIds` 用、并读 `getStats` / `currentClusterId`，**从不调 `update`**，因此剔除统计里的 `cluster` 恒 -1、`visibleClusters` 恒 0（`apps/debug/src/renderer/renderer-main.ts:190` 起、`apps/debug/src/renderer/renderer-main.ts:552`）。
 3. **`LOD_LEVEL.PVS_HIDDEN` 是预留档位**：该常量在本文件内零引用，`update` 从不写入（`apps/debug/src/renderer/lod-manager.ts:26`）；`LodItem.clusterIds` 同样在本文件内无消费方（`apps/debug/src/renderer/lod-manager.ts:40`）。
 4. **`assignClusterIds` 的结果无消费方**：返回的「采到至少一个 cluster 的 mesh 数量」在 `loadScene` 里没有被使用（`apps/debug/src/renderer/lod-manager.ts:181`）。
-5. **tick 线的时间戳在无发布时钟时回落墙钟**：`readPublishedTau()` 返回 0 时用 rAF 时间戳 `now`（`apps/debug/src/renderer/renderer-main.ts:695`），两条线的时间基准在此时不同源。
-6. **权威 post-tick 位置差（residual）恒不记录**：`addTick` 的第六个实参固定传 `undefined`（`apps/debug/src/renderer/renderer-main.ts:704`），该组统计的样本数保持 0（`apps/debug/src/renderer/path-recorder.ts:648`）。
+5. **tick 线的时间戳在无发布时钟时回落墙钟**：`readPublishedTau()` 返回 0 时用 rAF 时间戳 `now`（`apps/debug/src/renderer/renderer-main.ts:642`），两条线的时间基准在此时不同源。
+6. **权威 post-tick 位置差（residual）恒不记录**：`addTick` 的第六个实参固定传 `undefined`（`apps/debug/src/renderer/renderer-main.ts:655`），该组统计的样本数保持 0（`apps/debug/src/renderer/path-recorder.ts:648`）。
 7. **`lightmap-shader.ts` 的诊断覆盖只从全局键读**：`window.__vbsp*` 系列覆盖（如 `src/renderer-shared/shader/lightmap-shader.ts:1745` 的 `readLightFloorOverride`）在模块初始化时就固化成 uniform 初值（`src/renderer-shared/shader/lightmap-shader.ts:1549`、`:1556`、`:1563`、`:1580`），运行期注入不改变已创建的 uniform。
-8. **准星射线是限流采样**：每 `PLANE_INSPECT_INTERVAL` 帧才检测一次，关闭开关时只清空上次结果，不做新检测（`apps/debug/src/renderer/renderer-main.ts:760`）。
+8. **准星射线是限流采样**：每 `PLANE_INSPECT_INTERVAL` 帧才检测一次，关闭开关时只清空上次结果，不做新检测（`apps/debug/src/renderer/renderer-main.ts:713`）。
