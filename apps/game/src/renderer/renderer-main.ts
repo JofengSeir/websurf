@@ -42,6 +42,8 @@ import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
 import { optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inject-stats.js';
 import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
+import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
+import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
 import { fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
@@ -376,55 +378,16 @@ export class RendererMain {
   /**
    * 按画质档位替换场景全部贴图：`mini` = 查 manifest 里的 mosaic 字节码还原低清图；
    * `original` = 还原 `origTextureImages` 缓存的原始 image。即时生效（只换 texture.image），
-   * 不重载地图；manifest 或场景缺失时整体空跑。
+   * 不重载地图；manifest 或场景缺失时整体空跑。算法本体在共享核
+   * `src/renderer-shared/scene/texture-quality.ts`（2026-10-04 合并 debug 同源副本而来）；
+   * game 侧包装保持合并前形态：无诊断日志、无 `needsRender` 置位（逐帧渲染）、
+   * 不传 `ensureWasm`（wasm 未就绪时解码失败走告警并保留原贴图）。
    */
   async applyTextureQuality(quality: 'original' | 'mini'): Promise<void> {
-    const manifest = this.mosaicManifest;
-    if (!manifest || !this.scene) return;
-    const maps = new Set<THREE.Texture>();
-    this.scene.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-      if (!mat) return;
-      const list = Array.isArray(mat) ? mat : [mat];
-      for (const m of list) {
-        const map = (m as unknown as { map?: THREE.Texture | null }).map;
-        if (map) maps.add(map);
-      }
+    if (!this.mosaicManifest || !this.scene) return;
+    await applyTextureQuality(this.scene, this.mosaicManifest, quality, this.origTextureImages, {
+      decode: mosaic_decode,
     });
-    const jobs: Promise<void>[] = [];
-    for (const map of maps) {
-      if (quality === 'original') {
-        const orig = this.origTextureImages.get(map);
-        if (orig !== undefined) {
-          map.dispose(); // 新旧尺寸不同，先释放让 three 按新尺寸重建 GPU 纹理
-          map.image = orig;
-          map.needsUpdate = true;
-          this.origTextureImages.delete(map);
-        }
-        continue;
-      }
-      const code = manifest[(map.name ?? '').toLowerCase()];
-      if (!code) continue;
-      if (!this.origTextureImages.has(map)) this.origTextureImages.set(map, map.image);
-      jobs.push(this.replaceMapWithMosaic(map, code));
-    }
-    await Promise.all(jobs);
-  }
-
-  /** 单个贴图：mosaic 字节码 → PNG 字节 → ImageBitmap 后替换 image。
-   * 替换前必须 dispose()：同一 texture 换 image 时 three 走增量上传，新旧尺寸不符会失败
-   * （纹理保持旧内容）；dispose 后按新尺寸重建 GPU 纹理。失败只告警，保留原贴图。 */
-  private async replaceMapWithMosaic(map: THREE.Texture, code: string): Promise<void> {
-    try {
-      const png = mosaic_decode(code, 8);
-      const bitmap = await createImageBitmap(new Blob([png], { type: 'image/png' }));
-      map.dispose();
-      map.image = bitmap;
-      map.needsUpdate = true;
-    } catch (e) {
-      console.warn('[renderer] mosaic 贴图替换失败:', e);
-    }
   }
 
   /** 启动 rAF 循环（重复调用无副作用：已在跑时直接返回）。 */
@@ -451,11 +414,13 @@ export class RendererMain {
       for (let i = this.scene.children.length - 1; i >= 0; i--) {
         const child = this.scene.children[i];
         if (child.userData?.isBspModel) {
-          this.disposeObject(child);
+          disposeObject(child);
           this.scene.remove(child);
         }
       }
     }
+    // three.js 渲染列表缓存按旧场景几何缓存条目，换图后清掉（2026-10-04 自 debug 对齐）
+    this.renderer?.renderLists?.dispose();
     this.pvsManager = null;
     this.lodItems.length = 0;
     this.predPhys = null;
@@ -737,22 +702,6 @@ export class RendererMain {
   /** 面板体型（碰撞箱半宽 / 站立高 / 蹲下高）实时同步到主线程物理实例。 */
   setPredictionHull(halfWidth: number, standHeight: number, duckHeight: number): void {
     this.predPhys?.set_hull(halfWidth, standHeight, duckHeight);
-  }
-
-  /** 释放子树：逐个 mesh 释放几何、材质上的 `map` 贴图与材质本身（`disposeScene` 用）。 */
-  private disposeObject(obj: THREE.Object3D): void {
-    obj.traverse((child) => {
-      const mesh = child as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      mesh.geometry?.dispose();
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const mat of materials) {
-        if (!mat) continue;
-        const tex = (mat as unknown as Record<string, unknown>).map as THREE.Texture | undefined;
-        if (tex?.isTexture) tex.dispose();
-        mat.dispose();
-      }
-    });
   }
 
   /** 绑定后的 rAF 回调（`start` 与 `tick` 都把它交给 rAF，避免每次 bind 产生新函数）。 */

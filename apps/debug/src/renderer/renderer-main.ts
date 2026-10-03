@@ -39,6 +39,8 @@ import { TeleportManager } from '../world/teleport-manager.js';
 import { adaptBrushes } from '../world/collider-adapter.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
+import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
+import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
 import { LodManager } from './lod-manager.js';
 import { PathRecorder } from './path-recorder.js';
@@ -410,7 +412,7 @@ export class RendererMain {
       for (let i = this.scene.children.length - 1; i >= 0; i--) {
         const child = this.scene.children[i];
         if (child.userData?.isBspModel) {
-          this.disposeObject(child);
+          disposeObject(child);
           this.scene.remove(child);
         }
       }
@@ -445,39 +447,6 @@ export class RendererMain {
     // 换图使采样流不连续 → 采样失效世代 +1
     this.bumpSampleEpoch();
     this.needsRender = true;
-  }
-
-  /** 递归释放子树里每个 mesh 的 geometry、材质及其引用的贴图。 */
-  private disposeObject(obj: THREE.Object3D): void {
-    obj.traverse((child) => {
-      const mesh = child as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      mesh.geometry?.dispose();
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const mat of materials) {
-        if (!mat) continue;
-        // 释放材质引用的各张贴图（列表覆盖 map/lightMap/emissive 等常用槽位；重复 dispose 幂等）
-        for (const key of [
-          'map',
-          'lightMap',
-          'emissiveMap',
-          'normalMap',
-          'roughnessMap',
-          'metalnessMap',
-          'aoMap',
-          'alphaMap',
-          'bumpMap',
-          'specularMap',
-          'envMap',
-        ]) {
-          const tex = (mat as unknown as Record<string, unknown>)[key] as
-            | THREE.Texture
-            | undefined;
-          if (tex?.isTexture) tex.dispose();
-        }
-        mat.dispose();
-      }
-    });
   }
 
   /**
@@ -926,6 +895,9 @@ export class RendererMain {
   /**
    * 按画质档位替换场景全部贴图：mini = mosaic 字节码还原低清 PNG；
    * original = 恢复缓存的原图。即时生效（替换 texture.image），无需重载地图。
+   * 算法本体在共享核 `src/renderer-shared/scene/texture-quality.ts`（2026-10-04 与 game
+   * 的同源副本合并而来）；debug 侧包装保留诊断日志（消息与合并前一致）、
+   * `ensureMainWasm` 钩子与 `needsRender` 置位（按需渲染）。
    */
   async applyTextureQuality(quality: 'original' | 'mini'): Promise<void> {
     const manifest = this.mosaicManifest;
@@ -933,62 +905,19 @@ export class RendererMain {
       `[renderer] 画质切换 → ${quality}，manifest ${manifest ? Object.keys(manifest).length : 0} 条，bspModelScene=${!!this.bspModelScene}`,
     );
     if (!manifest || !this.bspModelScene) return;
-    const maps = new Set<THREE.Texture>();
-    this.bspModelScene.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-      if (!mat) return;
-      const list = Array.isArray(mat) ? mat : [mat];
-      for (const m of list) {
-        const map = (m as unknown as { map?: THREE.Texture | null }).map;
-        if (map) maps.add(map);
-      }
-    });
-    console.log(`[renderer] 场景贴图 ${maps.size} 个`);
-    const jobs: Promise<void>[] = [];
-    let matched = 0;
-    const noMatch: string[] = [];
-    for (const map of maps) {
-      if (quality === 'original') {
-        const orig = this.origTextureImages.get(map);
-        if (orig !== undefined) {
-          map.dispose(); // 低清 512 与原始图幅不同 ⇒ 强制重建 GPU 纹理
-          map.image = orig;
-          map.needsUpdate = true;
-          this.origTextureImages.delete(map);
-        }
-        continue;
-      }
-      const code = manifest[(map.name ?? '').toLowerCase()];
-      if (!code) {
-        noMatch.push(map.name ?? '(无名)');
-        continue;
-      }
-      matched++;
-      if (!this.origTextureImages.has(map)) this.origTextureImages.set(map, map.image);
-      jobs.push(this.replaceMapWithMosaic(map, code));
-    }
-    console.log(`[renderer] mini 匹配 ${matched}/${maps.size}；未匹配:`, noMatch.slice(0, 12));
-    await Promise.all(jobs);
+    const stats = await applyTextureQuality(
+      this.bspModelScene,
+      manifest,
+      quality,
+      this.origTextureImages,
+      { decode: mosaic_decode, ensureWasm: ensureMainWasm },
+    );
+    console.log(`[renderer] 场景贴图 ${stats.mapCount} 个`);
+    console.log(
+      `[renderer] mini 匹配 ${stats.matched}/${stats.mapCount}；未匹配:`,
+      stats.noMatch.slice(0, 12),
+    );
     this.needsRender = true;
-  }
-
-  /** 单个贴图：mosaic 字节码 → 低清 PNG → ImageBitmap 替换 image。
-   * 替换前必须 dispose()：three.js r152+ 对同一 texture 的 image 替换走增量
-   * glTexSubImage2D（allocateMemory 仅首次为 true）——新 image 尺寸与原 GPU
-   * 纹理不符会 GL_INVALID_VALUE 越界、上传失败（纹理保持旧内容 = "没生效"）。
-   * dispose 后下次渲染重建 GPU 纹理（按新尺寸 texStorage2D）。 */
-  private async replaceMapWithMosaic(map: THREE.Texture, code: string): Promise<void> {
-    try {
-      await ensureMainWasm();
-      const png = mosaic_decode(code, 8);
-      const bitmap = await createImageBitmap(new Blob([png], { type: 'image/png' }));
-      map.dispose();
-      map.image = bitmap;
-      map.needsUpdate = true;
-    } catch (e) {
-      console.warn('[renderer] mosaic 贴图替换失败:', e);
-    }
   }
 
   // ── 缺失材质纹理回退 ───────────────────────────────────────

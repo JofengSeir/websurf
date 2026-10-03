@@ -16,7 +16,7 @@
 | 路径 | 职责 | 关键锚点 |
 |---|---|---|
 | `apps/debug/src/`（根级模块） | 主线程装配（`app.ts`）、运行时配置树（`config.ts`）、计时挑战状态机（`game-state.ts`）、默认纹理包（`default-pack.ts`）、主线程 wasm 懒初始化（`main-wasm.ts`）、手写 wasm 类型声明（`wasm.d.ts`） | `apps/debug/src/app.ts:278`、`apps/debug/src/config.ts:205`、`apps/debug/src/main-wasm.ts:28` |
-| `apps/debug/src/renderer/` | 主线程渲染器 `RendererMain` 与五个子管理器：相机、LOD 剔除、碰撞可视化、路径记录、准星射线（lightmap 着色器与雾/光照管理器已于 2026-10-02 下沉到渲染共享层，本目录不再持有） | `apps/debug/src/renderer/renderer-main.ts:178`、`apps/debug/src/renderer/lod-manager.ts:87`、`src/renderer-shared/shader/lightmap-shader.ts:482`、`src/renderer-shared/environment/light-manager.ts:87` |
+| `apps/debug/src/renderer/` | 主线程渲染器 `RendererMain` 与五个子管理器：相机、LOD 剔除、碰撞可视化、路径记录、准星射线（lightmap 着色器与雾/光照管理器已于 2026-10-02 下沉到渲染共享层，本目录不再持有） | `apps/debug/src/renderer/renderer-main.ts:180`、`apps/debug/src/renderer/lod-manager.ts:87`、`src/renderer-shared/shader/lightmap-shader.ts:482`、`src/renderer-shared/environment/light-manager.ts:87` |
 | `apps/debug/src/worker/` | Worker 入口装配（权威物理循环、消息分发、渲染轨迹采样、健康守护）、线程间消息类型面、物理面板协调器、内嵌纹理包暂存 | `apps/debug/src/worker/main.ts:455`、`apps/debug/src/worker/worker-types.ts:342`、`apps/debug/src/worker/physics-worker.ts:28` |
 | `apps/debug/src/input/` | 键盘采集、主线程→Worker 消息桥、输入录制/回放器（含回放捕获与丢帧语义） | `apps/debug/src/input/keyboard.ts:56`、`apps/debug/src/input/input-bridge.ts:16`、`apps/debug/src/input/input-recorder.ts:166` |
 | `apps/debug/src/world/` | WASM 导出 JSON 的类型面、brush 映射层、传送点数据层、自定义传送点 localStorage 层、出生点加载器（零调用点参考实现） | `apps/debug/src/world/types.ts:34`、`apps/debug/src/world/collider-adapter.ts:182`、`apps/debug/src/world/teleport-manager.ts:135` |
@@ -97,11 +97,11 @@
 
 1. **权威物理只有 Worker 一个推进者**：Worker 侧权威实例由 `apps/debug/src/worker/main.ts:455` 装配的 `createAuthLoop` 独占推进；主线程收到 `phys-frame` 只做缓存（`apps/debug/src/app.ts:397`），不 tick 权威实例。
 2. **固定步长来自面板 tickRate，且不进 Rust**：`tickRate` 变更经 `apps/debug/src/worker/main.ts:466` 的 `onTickRateChange` 调 `authLoop.setFixedDt`，仅在步长真的变化时才 `reset()`。
-3. **主线程每个渲染帧最多推进 1 个物理步**：`apps/debug/src/renderer/renderer-main.ts:657` 是 `tick` 内唯一的 `predPhys.tick` 调用点；单步闸门打开时每帧配额再减一（`apps/debug/src/renderer/renderer-main.ts:622`）。
-4. **回放步长是一次性载荷**：`apps/debug/src/renderer/renderer-main.ts:628` 在读走 `replayDtS` 后立即置 `null`，输入循环用 `replayDtS === null` 作为「上一帧已被消费」的握手信号（`apps/debug/src/app.ts:2224`）。
-5. **输入增量是累加语义、按键掩码是覆盖语义**：`apps/debug/src/renderer/renderer-main.ts:1049` 的 `feedInput` 对 `dx`/`dy` 累加、对 `keys` 直接赋值，消费后清零增量（`apps/debug/src/renderer/renderer-main.ts:658`）。
+3. **主线程每个渲染帧最多推进 1 个物理步**：`apps/debug/src/renderer/renderer-main.ts:626` 是 `tick` 内唯一的 `predPhys.tick` 调用点；单步闸门打开时每帧配额再减一（`apps/debug/src/renderer/renderer-main.ts:591`）。
+4. **回放步长是一次性载荷**：`apps/debug/src/renderer/renderer-main.ts:597` 在读走 `replayDtS` 后立即置 `null`，输入循环用 `replayDtS === null` 作为「上一帧已被消费」的握手信号（`apps/debug/src/app.ts:2224`）。
+5. **输入增量是累加语义、按键掩码是覆盖语义**：`apps/debug/src/renderer/renderer-main.ts:978` 的 `feedInput` 对 `dx`/`dy` 累加、对 `keys` 直接赋值，消费后清零增量（`apps/debug/src/renderer/renderer-main.ts:627`）。
 6. **双端物理参数同源**：主线程与 Worker 都从同一份 config 出发，映射实现收敛在 `src/ts-shared/phys/params.ts`（`apps/debug/src/physics/prediction-params.ts:23`、`apps/debug/src/worker/main.ts:62`）。
 7. **主线程与 Worker 各持独立 wasm 实例**：主线程由 `apps/debug/src/main-wasm.ts:28` 的 `ensureMainWasm` 初始化，Worker 在自己的作用域内独立 `initSync`（`apps/debug/src/worker/main.ts:479`）。
 8. **剔除距离由场景对角线唯一确定**：`apps/debug/src/renderer/lod-manager.ts:155` 起三行给出上限、下限与默认值的算式，面板滑块只能在该上限内改写（`apps/debug/src/renderer/lod-manager.ts:276`）。
-9. **渲染轨迹采样与渲染节点一一对应**：同一帧同一三元组先落 `PathRecorder` 渲染节点、再写共享内存采样槽，`i0` 取同一次自增（`apps/debug/src/renderer/renderer-main.ts:669` 与 `apps/debug/src/renderer/renderer-main.ts:673`）。
-10. **权威帧版本号单调**：`va` 由发布方单调递增（`apps/debug/src/worker/worker-types.ts:248`），主线程按它去重（`apps/debug/src/renderer/renderer-main.ts:646`）。
+9. **渲染轨迹采样与渲染节点一一对应**：同一帧同一三元组先落 `PathRecorder` 渲染节点、再写共享内存采样槽，`i0` 取同一次自增（`apps/debug/src/renderer/renderer-main.ts:638` 与 `apps/debug/src/renderer/renderer-main.ts:642`）。
+10. **权威帧版本号单调**：`va` 由发布方单调递增（`apps/debug/src/worker/worker-types.ts:248`），主线程按它去重（`apps/debug/src/renderer/renderer-main.ts:615`）。
