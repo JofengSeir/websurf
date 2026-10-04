@@ -33,7 +33,8 @@
 **brush 映射的输入约定（上游已做，本层不做几何变换）**（`apps/debug/src/world/collider-adapter.ts:14` 起）：
 
 - 坐标已是 Y-up；法线已翻成朝外（上游对每个平面取 `normal = -rotate_yup(n)`、`dist = -dist`），使内部满足 `dot(normal, p) - dist <= 0`，与 `Collision.types.ts` 的 `Plane` 同口径。
-- `planes` = 该 brush 的原始面加上游运行期生成的 chamfer 平面，每个平面另带 `is_real_face`（该平面在凸包上是否构成有面积的真实面，判据见 `apps/debug/crates/wasm/src/lib.rs` 的 `plane_is_real_face`）；`min` / `max` = 凸包顶点旋转到 Y-up 后逐轴极值。**`is_real_face` 是「是否影响运动」的唯一权威**，渲染端只认它，不得用「面上有几个顶点」之类启发式反推——chamfer 平面零面积，不构成任何能站能撞的表面。
+- `planes` = 该 brush 的**真实面，且仅此而已**。上游曾按 AddEdgeBevels 简化版为每条凸棱补一张切角平面（chamfer），2026-10-05 整路撤除——切平面过棱、无内缩量，削减体积为零（实测 surf_666 的 2664 个 chamfer 全部相切），对碰撞**几何**零贡献；但它进了平面表就参与 `clip_planes` 的 `enter_frac` 竞选，而 `on_ground` / `surfing` 只读单一 `tr.normal`，于是「哪张平面赢了竞选」顶替了「局部倾角」当起地面判据。实测 `surf_666` 的一个 52°/52° 刀刃脊（x -13984..-13088、y 13952..14560）：7 张真实面**无一**满足物理的有符号判据 `n[1] >= 0.7`，玩家能站在脊上**唯一**因为脊上恰好躺着一张 `n=(0,1,0)` 的 chamfer；该 chamfer 与两张屋面过同一条线、`d1≈0`，胜负由浮点噪声决定，输了就 `on_ground=false` → 走 `air_move` → 被弹飞。撤除后 `tr.normal` 恒为真实面法线，站立判据回到「真实面局部倾角」。
+- 每个平面另带 `is_real_face`（该平面在凸包上是否构成有面积的真实面，判据见 `apps/debug/crates/wasm/src/lib.rs` 的 `plane_is_real_face`：面上凸包顶点 ≥ 3 且不共线，取直径最远一对作基线、其余点垂距最大值 ≥ 0.5 HU）。**不能用 Newell 多边形面积判**——它要求顶点按边界环序排列，而顶点是 `compute_vertices` 按平面三元组下标枚举产出的、不是环序，叉积互相抵消使面积恒算成 0（实测五棱柱 7 张真实面被误判 5 张）。撤除 chamfer 后该字段当前恒为 true；保留它是为了让「渲染端不得猜」的契约在数据形状上仍显式存在。`min` / `max` = 凸包顶点旋转到 Y-up 后逐轴极值。
 
 **映射的分支与不变量**：顺序固定——既非 solid 又非 ladder 的 brush 直接跳过；平面数组为空或平面数低于 `MIN_PLANES_PER_BRUSH` 时跳过；AABB 任一边小于 `MIN_AABB_SIZE` 时跳过（`apps/debug/src/world/collider-adapter.ts:167` 起）。`verifyOutwardNormals` 提供独立的正反校验并输出 `NormalCheckReport`（`apps/debug/src/world/collider-adapter.ts:269`）。
 

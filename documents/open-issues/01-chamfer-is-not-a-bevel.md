@@ -19,6 +19,9 @@ owner 的判断是：**黄线框宣称的是一条物理棱边被倒角，但实
 
 ### 2.1 生成侧：chamfer 平面从棱上「穿过去」，没有内缩量
 
+> ⚠️ **本节描述的是 2026-10-05 之前的历史代码，该生成块已整段删除**（§7）。行号一律失效，
+> 保留原文只为留档「当初错在哪」。现役代码里 `export_brushes_planes` 的碰撞平面集就是真实面本身。
+
 `apps/debug/crates/wasm/src/lib.rs` 的 chamfer 生成块（`:2815`-`:2939`）对每一对相邻真实面：
 
 - 找出同时落在两面上的凸包顶点 `shared`（`:2866`-`:2871`，判定容差 `eps_plane = 0.1`，`:2834`）；
@@ -89,12 +92,12 @@ chamfer planes generated : 2664
 
 - **debug 可视化**：黄线框暗示存在物理倒角，实际没有 ⇒ 直接对应 owner 的「否则 debug 就只是个
   忽悠人的工具」。
-- **物理**：`src/phys` 不受影响（结果等价）。但若将来有人依赖「棱边有引导」的行为去调
-  盒角手感，会发现调不出来，因为从来没有生效过。
+- **物理**：⚠️ **本节原写「`src/phys` 不受影响（结果等价）」，该结论已于 2026-10-05 被实测推翻。**
+  削减体积为零只保证**碰撞几何**不变，不保证**报告出的法线**不变——见 §7。
 - **文档**：`collider-debug.ts:258`-`:260` 的头注把「既进物理碰撞，也进本模块的线框显示」写成
   既成事实；`lib.rs:2817`-`:2823` 的两处能力声称同样需要按实测改写。
 
-## 5. 建议处置（待裁决，三选一）
+## 5. 建议处置（2026-10-05 已裁决，取 B，见 §7；原文保留）
 
 **A. 真做倒角**（推荐）。给 chamfer 加倒角宽度（HU），令
 `dist_final = dot(nch_final, anchor) - width`，宽度取相对 brush 尺寸的量级（例如棱长的一个百分比，
@@ -107,24 +110,83 @@ chamfer planes generated : 2664
 **C. 先撤显示**。在 A/B 定案前，把 `showChamfers` 默认关掉（`config.ts:252` 现在是 `false`，
 但页面复选框在本次实测里是勾上的），并在 UI 上注明「切角面当前无碰撞作用」。
 
-> 无论选哪个，01 与 [02](debug-chamfer-visualization-guesswork.md) 建议同一次改动落地：
+> 无论选哪个，01 与 [02](02-chamfer-visualization-guesswork.md) 建议同一次改动落地：
 > 只改可视化不改物理，等于把一个会骗人的图画得更精细。
-## 6. 处置结果（2026-10-05，已完成）
+## 6. 处置结果 · 第一轮（2026-10-05，仅显示端）
 
 owner 裁定：**所有 debug 显示端的面高亮必须真实反映物理系统实际影响运动的面，否则不得显示。**
 据此按 §5 的 **C（先撤显示）** 落地，并把「谁是真面」的判据上移到物理侧：
 
 | 改动 | 文件 |
 |---|---|
-| 新增 plane_is_real_face：面上凸包顶点 ≥ 3（容差 ON_PLANE_EPS = 0.1）且 Newell 多边形面积 ≥ MIN_FACE_AREA = 0.05 HU² 才算真面 | pps/debug/crates/wasm/src/lib.rs |
+| 新增 plane_is_real_face：面上凸包顶点 ≥ 3（容差 ON_PLANE_EPS = 0.1）且 Newell 多边形面积 ≥ MIN_FACE_AREA = 0.05 HU² 才算真面 | apps/debug/crates/wasm/src/lib.rs |
 | WasmBrushPlane 增加 is_real_face 字段并随 planes_yup 输出 | 同上 |
-| Plane 增加 isRealFace?: boolean，daptBrushes 直传不重算 | pps/debug/src/world/collider-adapter.ts、pps/debug/src/physics/physics/Collision/Collision.types.ts |
-| orderedFaces 只放行 isRealFace === true（缺字段按「未知即不画」） | pps/debug/src/renderer/collider-debug.ts |
+| Plane 增加 isRealFace?: boolean，adaptBrushes 直传不重算 | apps/debug/src/world/collider-adapter.ts、apps/debug/src/physics/physics/Collision/Collision.types.ts |
+| orderedFaces 只放行 isRealFace === true（缺字段按「未知即不画」） | apps/debug/src/renderer/collider-debug.ts |
 | 删除 computeChamferStrips / ebuildChamfers / 黄色线框 Group / setChamferDebugFlags | 同上 |
-| 删除 showChamfers / chamferViewDistance 两个配置字段与页面上的复选框 + 滑块 | pps/debug/src/config.ts、pps/debug/web/index.html |
+| 删除 showChamfers / chamferViewDistance 两个配置字段与页面上的复选框 + 滑块 | apps/debug/src/config.ts、apps/debug/web/index.html |
 
 **未做**：§5 的方案 A（真实倒角宽度）。它是物理行为变更，需要独立回归，不在本次规则范围内。
 
-**验证**：cargo check + wasm-pack build --release 通过；pps/debug typecheck exit 0；
+**验证**：cargo check + wasm-pack build --release 通过；apps/debug typecheck exit 0；
 浏览器实测（surf_666.bsp，(-13540, 14503, -8402) 附近）黄色 chamfer 线框整体消失，
 只余绿色地面面与橙色 .phy 碰撞盒；控制台不再出现 [collider-debug] chamfer 重建 一行。
+
+> ⚠️ **本轮的清理工作在下面这段留下三处错误，已在 §7 全部更正：**
+> ① `plane_is_real_face` 当时用 **Newell 多边形面积**判退化，而 Newell 要求顶点按边界环序
+> 排列、顶点却是 `compute_vertices` 按平面三元组下标枚举产出 ⇒ 叉积互相抵消、面积恒算成 0，
+> 实测一个五棱柱 7 张真实面被误判 5 张。
+> ② 「削减体积为零 ⇒ 碰撞不变」只覆盖**碰撞几何**，不覆盖**报告出的法线**——而 `on_ground`
+> 与 `surfing` 恰恰只读单一 `tr.normal`。这是本篇最初漏掉的那一层。
+> ③ 本篇 §2.1 与 §3 引用的行号随生成块删除一并失效，正文已加失效标注（按 AGENTS 的注释规范，
+> 文档锚点本应写符号名，此处保留历史行号只为留档）。
+> 另：本篇正文原有 8 处 `apps/` 被写成了 `0x07 + 'pps/'`（`a` 被 BEL 控制字符顶替），
+> 已修正。
+
+## 7. 处置结果 · 第二轮（2026-10-05，物理侧一并撤除）
+
+owner 报「surf 坡走到坡顶被弹飞、并被传送走」。实测路径（`surf_666.bsp`，owner 提供的
+`phys-path-*.json`）显示前 2.9 s 在 y=14560.031 平走，随后**单个 16.7 ms 采样内 +8.49 HU**
+（509 HU/s 垂直、方向与垂直成 26.2°），此后一路下滑 617 HU。
+
+用真实 wasm 导出（`export_brushes_planes`，6900 个碰撞体）查落点半径 60 HU，**只有 1 个碰撞体**
+（x -13984..-13088、y 13952..-14560 的五棱柱），其 22 张平面按物理的有符号判据 `n[1] >= 0.7` 分：
+
+| 类别 | 张数 | 法线 y | 可站？ |
+|---|---|---|---|
+| 真实面 | 4 | 0（侧墙） | 否 |
+| 真实面 | 1 | **−1.0**（**实体底面**，不是顶面） | 否 |
+| 真实面 | 2 | +0.614（52.1° 屋面，两面相交成刀刃脊） | 否 |
+| chamfer | 15 | 其中 1 张 **+1.0** | **是** |
+
+⇒ **7 张真实面无一可站；玩家能站在那条 52°/52° 刀刃脊上，唯一原因是脊上恰好躺着
+一张 `n=(0,1,0)` 的 chamfer。** 该 chamfer 与两张 52° 屋面**过同一条线**，`d1 ≈ 0`，
+`enter_frac` 竞选的胜负由浮点噪声决定：赢了能站，输了立刻 `on_ground=false` → 走 `air_move`
+→ 无摩擦、无 step、无 `stay_on_ground` → 被弹飞；`contact_ticks` 随之归零，又触发
+`step_core` 的传送检测 ⇒ 「弹到旁边传送走了」。
+
+**这就是「阈值不一致 / 坡顶站不住」的机制**：站立判据不是「局部倾角 45.57°」，而是
+「这条棱上哪张平面赢了 `enter_frac` 竞选」。
+
+**处置**：按 §5 的 **B** 落地——chamfer 平面从碰撞体平面表里整段删除（生成块本身一并删除，
+它已无任何消费者）。
+
+**改动**（全在 `apps/debug/crates/wasm/src/lib.rs`）：
+- 删除 chamfer 生成块与 `all_planes_src.extend(chamfer_planes)`；`export_brushes_planes` 内
+  `side.bevel != 0` 处的注释改写为「BSP 原生 bevel 与运行时 chamfer 都不进碰撞」；
+  `ON_PLANE_EPS` 注释不再引用已删的 `eps_plane`；`planes_yup` 处注释改写为
+  「只含真实面，`is_real_face` 当前恒 true 但保留契约，让『渲染端不得猜』在数据形状上显式存在」。
+- **连带修正**：`plane_is_real_face` 的 Newell 面积判据换成**与顶点顺序无关**的
+  「取直径最远一对作基线、其余点垂距最大值 ≥ `MIN_FACE_WIDTH = 0.5` HU」。
+
+**验证**：`cargo test -p websurf-phys` 10 passed；wasm-pack build --release 通过；
+apps/debug typecheck exit 0；`check:api` F4 通过；`test:optimize-scene` 5/5 passed；
+`check-doc-drift` 0 越界 0 失效。同一碰撞体的平面数由 22 降到 7，`is_real_face` 由 2 张修正为 7 张。
+
+**仍开放（未擅动）**：
+- **45° 坡只剩 1% 余量**。`STANDABLE_NORMAL = 0.7` 对应 45.573°，而 `surf_666` 在同一片区域的
+  **视觉**面大量存在 `n.y = ±0.707`（正好 45°）的 face，余量 0.0071。要不要调阈值、或改用
+  Source 的多面法线求和归一化，取决于是否追求 Source 平价——本仓无对照源码，未擅动。
+- **碰撞与视觉是否一致未逐面核对**：同一 8 HU 邻域里碰撞体是 52.1° 屋面，视觉面却有 45° face
+  与一张 y=14560 的水平 face。是否指同一片几何，需要 owner 指认"你当时看到的那个坡"的具体位置
+  再比对。

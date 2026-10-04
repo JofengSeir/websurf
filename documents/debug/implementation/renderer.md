@@ -24,7 +24,7 @@
 
 导出 `ColliderDebug`（`apps/debug/src/renderer/collider-debug.ts:397`），公开面：`init`（`:436`）、`setTriMeshes`（`:460`）、`setTriggers`（`:467`）、`setDebugFlags`（`:474`）、`setTriDebugFlags`（`:504`）、`update`（`:541`）、`hasDebugWork`（`:582`）、`clearAll`（`:900`）、`dispose`（`:908`）。可视化预算由常量给出：`DEBUG_Y_EXTENT`（`:40`）、`MAX_DEBUG_COLLIDERS`（`:42`）、`REBUILD_INTERVAL`（`:44`）、`TRI_REBUILD_INTERVAL`（`:46`）、`MAX_TRI_LINES`（`:48`）、`FILL_OPACITY`（`:50`）、七个语义颜色（`:59` 起）、两个 spawnflag 掩码（`:72`、`:73`）、两个几何容差（`:80`、`:82`）。
 
-**面高亮只画物理真实面**：`orderedFaces`（`:189`）只接受上游按凸包顶点数 + 多边形面积判定为 `isRealFace` 的平面；过棱的切平面（chamfer）零面积、不构成任何影响运动的表面，因此既不进线框也不进填充面。2026-10-04 起原「显示chamfer切角面」一路（`setChamferDebugFlags` 与页面对应控件）整体删除，理由与实测见 `documents/open-issues/01-chamfer-is-not-a-bevel.md`。
+**面高亮只画物理真实面**：`orderedFaces`（`:189`）只接受上游标记 `isRealFace` 的平面（判据是「面上凸包顶点 ≥ 3 且不共线」，见 `documents/debug/implementation/world.md`），字段缺失一律不画。2026-10-05 起碰撞平面集里已不再有过棱的切平面（chamfer），故高亮面与碰撞平面集逐张对应；原「显示chamfer切角面」一路（`setChamferDebugFlags` 与页面对应控件）已于 2026-10-04 整体删除。取证与实测见 `documents/open-issues/01-chamfer-is-not-a-bevel.md`。
 
 **`apps/debug/src/renderer/path-recorder.ts`**
 

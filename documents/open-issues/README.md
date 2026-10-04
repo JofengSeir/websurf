@@ -17,11 +17,11 @@
 
 | # | 篇 | 一句话 | 状态 |
 |---|---|---|---|
-| 01 | [debug-chamfer-is-not-a-bevel.md](debug-chamfer-is-not-a-bevel.md) | chamfer 平面**不切任何几何**，黄线框画的不是物理面 | **已处置** |
-| 02 | [debug-chamfer-visualization-guesswork.md](debug-chamfer-visualization-guesswork.md) | 黄线框靠**重新猜**平面得到，与物理侧用的平面表不是同一套判据 | **已处置** |
-| 03 | [renderer-merge-normal-attribute.md](renderer-merge-normal-attribute.md) | `mergeGeometries` 因 `normal` 属性不一致失败，三应用合批静默失效 | 待修 |
-| 04 | [wasm-untextured-surface-color.md](wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白/粉 | 待裁决 |
-| 05 | [wasmcore-bevel-doc-vs-code.md](wasmcore-bevel-doc-vs-code.md) | `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用 | 待修 |
+| 01 | [01-chamfer-is-not-a-bevel.md](01-chamfer-is-not-a-bevel.md) | chamfer 平面**不切任何几何**，却**决定了地面法线** → 坡顶站不住 / 被弹飞 | **已处置** |
+| 02 | [02-chamfer-visualization-guesswork.md](02-chamfer-visualization-guesswork.md) | 黄线框靠**重新猜**平面得到，与物理侧用的平面表不是同一套判据 | **已处置** |
+| 03 | [03-renderer-merge-normal-attribute.md](03-renderer-merge-normal-attribute.md) | `mergeGeometries` 因 `normal` 属性不一致失败，三应用合批静默失效 | 待修 |
+| 04 | [04-wasm-untextured-surface-color.md](04-wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白/粉 | 待裁决 |
+| 05 | [05-wasmcore-bevel-doc-vs-code.md](05-wasmcore-bevel-doc-vs-code.md) | `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用 | 待修 |
 
 ## 与既有台账的关系
 
@@ -39,13 +39,26 @@
 落地方式三步：
 
 1. **物理侧给真相**：`export_brushes_planes` 逐平面输出 `is_real_face`，判据由物理侧自己算
-   （`plane_is_real_face`：面上凸包顶点 ≥ 3，且多边形面积 ≥ `MIN_FACE_AREA`）。
+   （`plane_is_real_face`：面上凸包顶点 ≥ 3，且**不共线**——取直径最远一对作基线、其余点垂距
+   最大值 ≥ `MIN_FACE_WIDTH = 0.5` HU）。
    渲染端从此不必、也不允许再猜。
 2. **渲染端只放行真面**：`orderedFaces` 只接受 `isRealFace === true`；触发器那条路没有这个
    字段，按「未知即不画」处理。
-3. **不真实的直接撤掉**：`computeChamferStrips` / `rebuildChamfers` / 黄色 chamfer 线框整路删除，
-   配置字段、页面复选框与可视距离滑块一并撤除（chamfer 平面零面积，本就不该出现）。
+3. **不真实的直接撤掉**：先撤显示（`computeChamferStrips` / `rebuildChamfers` / 黄色 chamfer
+   线框 / 配置字段 / 页面控件），**再撤平面本身**——chamfer 生成块整段删除。
 
-物理侧行为**零变更**——01 已证明 chamfer 削减体积为零，删掉那层显示不会改变任何碰撞结果。
-01 的**方案 A（加真实倒角宽度）没有做**：那是行为变更、需要独立物理回归，不在「显示端必须真实」
-这条规则的范围内。
+### 4.1 第一轮的三个错误（第二轮已更正，勿照抄）
+
+第一轮落地时写下「物理侧行为零变更」并用 Newell 面积判真面，**两处都错**，代价是白改一轮：
+
+| 错误 | 后果 | 更正 |
+|---|---|---|
+| 用 **Newell 多边形面积**判退化 | Newell 要求顶点环序，顶点却是按平面三元组枚举产出的 ⇒ 面积恒 0，五棱柱 7 张真实面误判 5 张 | 改为与顶点顺序无关的「直径 + 垂距」判据 |
+| 「削减体积为零 ⇒ 碰撞不变」 | 只覆盖**碰撞几何**，不覆盖**报告出的法线**。`on_ground` / `surfing` 只读单一 `tr.normal`，而切平面照样在 `enter_frac` 竞选里 | 切平面从碰撞平面表整段删除（01 §7） |
+| 判据文档写「面积 ≥ `MIN_FACE_AREA`」 | 与代码不符 | 同步改写为宽度判据 |
+
+**教训**：几何不变量（体积不变）**推不出**行为不变——只要下游读的是"哪个平面赢了"这种**选择结果**，
+等价的候选集合也会产出不等价的选择。验收要盯**下游消费的那一个量**。
+
+01 的**方案 A（加真实倒角宽度）仍未做**：那是行为变更、需要独立物理回归。
+另外「45° 坡只剩 1% 余量」与「碰撞 52.1° / 视觉 45° 是否指同一片几何」两条仍开放，见 01 §7 末。
