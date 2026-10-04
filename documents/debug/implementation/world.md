@@ -33,7 +33,7 @@
 **brush 映射的输入约定（上游已做，本层不做几何变换）**（`apps/debug/src/world/collider-adapter.ts:14` 起）：
 
 - 坐标已是 Y-up；法线已翻成朝外（上游对每个平面取 `normal = -rotate_yup(n)`、`dist = -dist`），使内部满足 `dot(normal, p) - dist <= 0`，与 `Collision.types.ts` 的 `Plane` 同口径。
-- `planes` = 该 brush 的原始面加上游运行期生成的 chamfer 平面；`min` / `max` = 凸包顶点旋转到 Y-up 后逐轴极值。
+- `planes` = 该 brush 的原始面加上游运行期生成的 chamfer 平面，每个平面另带 `is_real_face`（该平面在凸包上是否构成有面积的真实面，判据见 `apps/debug/crates/wasm/src/lib.rs` 的 `plane_is_real_face`）；`min` / `max` = 凸包顶点旋转到 Y-up 后逐轴极值。**`is_real_face` 是「是否影响运动」的唯一权威**，渲染端只认它，不得用「面上有几个顶点」之类启发式反推——chamfer 平面零面积，不构成任何能站能撞的表面。
 
 **映射的分支与不变量**：顺序固定——既非 solid 又非 ladder 的 brush 直接跳过；平面数组为空或平面数低于 `MIN_PLANES_PER_BRUSH` 时跳过；AABB 任一边小于 `MIN_AABB_SIZE` 时跳过（`apps/debug/src/world/collider-adapter.ts:167` 起）。`verifyOutwardNormals` 提供独立的正反校验并输出 `NormalCheckReport`（`apps/debug/src/world/collider-adapter.ts:269`）。
 

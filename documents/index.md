@@ -85,6 +85,17 @@
 |---|---|
 | [`norms/annotation-and-verification.md`](norms/annotation-and-verification.md) | 事实来源与三条禁令、注释书写规范、验收判据、**已验证的陷阱清单**、记录约定 |
 
+## 待解决问题
+
+| 文档 | 回答什么 |
+|---|---|
+| [`open-issues/README.md`](open-issues/README.md) | 已取证未修复问题的索引、状态口径与关闭约定 |
+| [`open-issues/01-chamfer-is-not-a-bevel.md`](open-issues/01-chamfer-is-not-a-bevel.md) | debug 的 chamfer 平面削减体积为零，黄线框画的不是物理面 |
+| [`open-issues/02-chamfer-visualization-guesswork.md`](open-issues/02-chamfer-visualization-guesswork.md) | 黄线框靠重新猜平面得到，朝向用 AABB 中心而非凸包 |
+| [`open-issues/03-renderer-merge-normal-attribute.md`](open-issues/03-renderer-merge-normal-attribute.md) | `mergeGeometries` 因 `normal` 属性不一致失败，三应用合批静默失效 |
+| [`open-issues/04-wasm-untextured-surface-color.md`](open-issues/04-wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白 |
+| [`open-issues/05-wasmcore-bevel-doc-vs-code.md`](open-issues/05-wasmcore-bevel-doc-vs-code.md) | `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用 |
+
 ## 维护约定
 
 - **索引只列实际存在的文件**；新增或删除文档时同步更新本页，并跑 `node .tmp/tools/link-check.mjs documents` 复核链接。

@@ -126,9 +126,6 @@ const dom = {
 	showVisChk: document.getElementById('showVis') as HTMLInputElement | null,
 	visViewDistanceRange: document.getElementById('visViewDistance') as HTMLInputElement | null,
 	visViewDistanceNum: document.getElementById('visViewDistanceNum') as HTMLInputElement | null,
-	showChamfersChk: document.getElementById('showChamfers') as HTMLInputElement | null,
-	chamferViewDistanceRange: document.getElementById('chamferViewDistance') as HTMLInputElement | null,
-	chamferViewDistanceNum: document.getElementById('chamferViewDistanceNum') as HTMLInputElement | null,
 	showPlaneInfoChk: document.getElementById('showPlaneInfo') as HTMLInputElement | null,
 	planeInfoEl: document.getElementById('planeInfo') as HTMLElement | null,
 	// 贴墙近平面自适应：两张滑块分别写 rendererMain.setNearParams 的探测距离与收缩系数
@@ -456,9 +453,6 @@ async function onSceneReadyUi(
 	if (dom.showVisChk) dom.showVisChk.checked = config.debug.showVis;
 	if (dom.visViewDistanceRange) dom.visViewDistanceRange.value = String(config.debug.visViewDistance);
 	if (dom.visViewDistanceNum) dom.visViewDistanceNum.value = String(config.debug.visViewDistance);
-	if (dom.showChamfersChk) dom.showChamfersChk.checked = config.debug.showChamfers;
-	if (dom.chamferViewDistanceRange) dom.chamferViewDistanceRange.value = String(config.debug.chamferViewDistance);
-	if (dom.chamferViewDistanceNum) dom.chamferViewDistanceNum.value = String(config.debug.chamferViewDistance);
 	if (dom.showPlaneInfoChk) dom.showPlaneInfoChk.checked = config.debug.showPlaneInfo;
 	// 纹理画质：按 config.texture.quality 勾选对应 radio
 	dom.textureQualityRadios.forEach((radio) => {
@@ -1221,7 +1215,6 @@ function syncPrefsControls(): void {
 	setNum('cullDistance', config.lod.cullDistance);
 	setChk('showSolids', config.debug.showSolids);
 	setChk('showTriggers', config.debug.showTriggers);
-	setChk('showChamfers', config.debug.showChamfers);
 	setChk('showPlaneInfo', config.debug.showPlaneInfo);
 	if (dom.hudVisibleChk) dom.hudVisibleChk.checked = config.hud.visible;
 	if (dom.showCrosshairChk) dom.showCrosshairChk.checked = config.hud.showCrosshair;
@@ -1656,21 +1649,6 @@ function bindUI(): void {
 	}, (v) => Math.round(v / 64) * 64);
 	bindSlider(dom.visViewDistanceRange, dom.visViewDistanceNum, (v) => {
 		applyTriDebug({ visViewDistance: v });
-	}, (v) => Math.round(v / 64) * 64);
-
-	// 显示设置：chamfer 切角平面线框（黄色）独立开关 + 可视距离滑块
-	const applyChamferDebug = (patch: Record<string, unknown>): void => {
-		applyConfigPatch(config, 'debug', patch);
-		rendererMain?.applyConfigPatch('debug', patch);
-		inputBridge?.sendConfig('debug', patch);
-		saveUiPrefs();
-	};
-	dom.showChamfersChk?.addEventListener('change', (e) => {
-		const enabled = (e.target as HTMLInputElement).checked;
-		applyChamferDebug({ showChamfers: enabled });
-	});
-	bindSlider(dom.chamferViewDistanceRange, dom.chamferViewDistanceNum, (v) => {
-		applyChamferDebug({ chamferViewDistance: v });
 	}, (v) => Math.round(v / 64) * 64);
 
 	// 近平面自适应参数（滑块 ↔ 输入框双向同步 + 渲染器实时生效）

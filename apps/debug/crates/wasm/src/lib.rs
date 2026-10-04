@@ -2545,10 +2545,91 @@ impl BspProcessor {
 
         use vbsp::{BrushFlags, Plane};
 
+        // 顶点"落在某平面上"的判定容差（HU）：与本文件 chamfer 生成段的 `eps_plane` 同值，
+        // 使"物理认为的面"与"生成 chamfer 时看到的棱"用同一把尺。
+        const ON_PLANE_EPS: f32 = 0.1;
+        // 面最小宽度（HU）：面上顶点到直径连线的最大垂距低于此值即判退化（顶点全共线）。
+        // 偏保守是刻意的——判成"非面"的后果只是不显示，判成"面"的后果是显示一张假面。
+        const MIN_FACE_WIDTH: f32 = 0.5;
+
+        /// 该平面在 `verts`（本 brush 的物理凸包顶点）上是否构成一张有面积的真实面。
+        ///
+        /// 判据两条，都要满足才算真面：
+        /// 1. 落在平面上的顶点 ≥ 3（容差 [`ON_PLANE_EPS`]）；
+        /// 2. 这些顶点**不共线**：取直径最远的一对作基线，其余点到该基线的垂距最大值
+        ///    ≥ [`MIN_FACE_WIDTH`]。
+        ///
+        /// ⚠️ **不能用 Newell 多边形面积**：它要求顶点按边界环序排列，而这里的 `on` 是按
+        /// `compute_vertices` 的枚举顺序收集的（它按平面三元组下标遍历产出，不是环序）⇒
+        /// 叉积互相抵消、面积恒算成 0。实测 `surf_666` 的五棱柱 brush 有 5 个真实面被这样
+        /// 误判成"非面"。直径+垂距是**与顶点顺序无关**的判据。
+        ///
+        /// 为什么物理侧要自己给这个结论：碰撞按平面逐条裁剪，**过棱的切平面同样会进裁剪循环**
+        /// （它只在恰好落在棱上的点上起作用，是零面积集合）。渲染端若靠"面上有几个顶点"
+        /// 之类的启发式反推，就得复制一份凸包计算、还得和自己的容差保持一致 —— 那是 debug
+        /// 骗人的根源。所以判据放在这里，由渲染端直接读。
+        fn plane_is_real_face(plane: &Plane, verts: &[[f32; 3]]) -> bool {
+            if verts.len() < 3 {
+                return false;
+            }
+            let n = &plane.normal;
+            let mut on: Vec<[f32; 3]> = Vec::new();
+            for v in verts {
+                let d = n.x * v[0] + n.y * v[1] + n.z * v[2] - plane.dist;
+                if d.abs() < ON_PLANE_EPS {
+                    on.push([v[0], v[1], v[2]]);
+                }
+            }
+            if on.len() < 3 {
+                return false;
+            }
+            // 直径最远的一对作基线
+            let mut ai = 0usize;
+            let mut bi = 1usize;
+            let mut best = -1.0f32;
+            for x in 0..on.len() {
+                for y in (x + 1)..on.len() {
+                    let dx = on[x][0] - on[y][0];
+                    let dy = on[x][1] - on[y][1];
+                    let dz = on[x][2] - on[y][2];
+                    let d = (dx * dx + dy * dy + dz * dz).sqrt();
+                    if d > best {
+                        best = d;
+                        ai = x;
+                        bi = y;
+                    }
+                }
+            }
+            if best < MIN_FACE_WIDTH {
+                return false;
+            }
+            let a = on[ai];
+            let b = on[bi];
+            let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let mut width = 0.0f32;
+            for (i, p) in on.iter().enumerate() {
+                if i == ai || i == bi {
+                    continue;
+                }
+                let ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
+                let cx = ab[1] * ap[2] - ab[2] * ap[1];
+                let cy = ab[2] * ap[0] - ab[0] * ap[2];
+                let cz = ab[0] * ap[1] - ab[1] * ap[0];
+                width = width.max((cx * cx + cy * cy + cz * cz).sqrt() / best);
+            }
+            width >= MIN_FACE_WIDTH
+        }
+
         #[derive(serde::Serialize)]
         struct WasmBrushPlane {
             normal: [f32; 3],
             dist: f32,
+            /// 该平面在**本 brush 的物理凸包**上是否构成一张有面积的真实面。
+            ///
+            /// 物理按平面逐条裁剪（`src/phys/world.rs` 的 `clip_planes` / `box_in_brush`
+            /// 都直接遍历 `planes`），所以「参与了裁剪循环」不等于「是一张影响运动的面」。
+            /// 判据由物理侧自己给出，渲染端不得再猜：见本函数内 `plane_is_real_face`。
+            is_real_face: bool,
         }
         #[derive(serde::Serialize)]
         struct WasmBrush {
@@ -2994,6 +3075,7 @@ impl BspProcessor {
                     WasmBrushPlane {
                         normal: [-r[0], -r[1], -r[2]],
                         dist: -p.dist,
+                        is_real_face: plane_is_real_face(p, &verts_bsp),
                     }
                 })
                 .collect();

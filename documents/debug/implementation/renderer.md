@@ -14,7 +14,7 @@
 - 路径记录：`startPathRecording` / `stopPathRecording` / `isPathRecording` / `clearPath`（`apps/debug/src/renderer/renderer-main.ts:785` 起）、四个分量显隐开关 `setPathRenderVisible` / `setPathTickVisible` / `setPathDeviVisible` / `setPathDotsVisible`（`apps/debug/src/renderer/renderer-main.ts:815` 起）、`getPathShapeStats` / `getPathDeviStats` / `getPathCounts`（`apps/debug/src/renderer/renderer-main.ts:839` 起）、`exportPathJson` / `exportPathCsv`（`apps/debug/src/renderer/renderer-main.ts:877` / `:851`）。**2026-09-26**：原 `setPathVisible` / `isPathVisible`（整组显隐与其查询）与唯一入口 `#pathVisibleChk` 一并删除——入口 id 在页面不存在，四个分量开关已覆盖其语义；`PathRecorder` 的 `setVisible` 与 `visible` getter 同步删除。
 - 渲染侧配置：`applyConfigPatch`（`apps/debug/src/renderer/renderer-main.ts:889`）、`applyTextureQuality`（`apps/debug/src/renderer/renderer-main.ts:933`——2026-10-04 起算法本体在共享核 `src/renderer-shared/scene/texture-quality.ts:48`，本方法只保留诊断日志、`ensureMainWasm` 钩子与 `needsRender` 置位）、`setLightingMode` / `getLightingMode`（`apps/debug/src/renderer/renderer-main.ts:469` / `:464`）、`setCullDistance`（`apps/debug/src/renderer/renderer-main.ts:774`）、`setNearParams`（`apps/debug/src/renderer/renderer-main.ts:752`，转发共享控制器）、`getPlaneInfo`（`apps/debug/src/renderer/renderer-main.ts:760`）、`getPvsCluster`（`apps/debug/src/renderer/renderer-main.ts:1287`）。
 
-本文件还持有三个模块级常量：`FOV`（`apps/debug/src/renderer/renderer-main.ts:76`）、`PLANE_INSPECT_INTERVAL`（`apps/debug/src/renderer/renderer-main.ts:78`）、`DEG2RAD`（`apps/debug/src/renderer/renderer-main.ts:1404`）。近平面三参数（near 下限 0.05 / 探测距离 100 / 收缩系数 0.3）与分块合并参数（cell 目标/区间/钳制、FRUSTUM_PAD）2026-10-03 起由渲染共享层承载（`src/renderer-shared/camera/near-plane.ts` 与 `src/renderer-shared/scene/scene-optimizer.ts`，数值与原 debug 常量一致）。
+本文件还持有三个模块级常量：`FOV`（`apps/debug/src/renderer/renderer-main.ts:76`）、`PLANE_INSPECT_INTERVAL`（`apps/debug/src/renderer/renderer-main.ts:78`）、`DEG2RAD`（`apps/debug/src/renderer/renderer-main.ts:1396`）。近平面三参数（near 下限 0.05 / 探测距离 100 / 收缩系数 0.3）与分块合并参数（cell 目标/区间/钳制、FRUSTUM_PAD）2026-10-03 起由渲染共享层承载（`src/renderer-shared/camera/near-plane.ts` 与 `src/renderer-shared/scene/scene-optimizer.ts`，数值与原 debug 常量一致）。
 
 **`apps/debug/src/renderer/lod-manager.ts`**
 
@@ -22,7 +22,9 @@
 
 **`apps/debug/src/renderer/collider-debug.ts`**
 
-导出 `ColliderDebug`（`apps/debug/src/renderer/collider-debug.ts:474`），公开面：`init`（`:523`）、`setTriMeshes`（`:552`）、`setTriggers`（`:559`）、`setDebugFlags`（`:566`）、`setTriDebugFlags`（`:596`）、`setChamferDebugFlags`（`:629`）、`update`（`:647`）、`hasDebugWork`（`:698`）、`clearAll`（`:1109`）、`dispose`（`:1120`）。可视化预算由常量给出：`DEBUG_Y_EXTENT`（`:34`）、`MAX_DEBUG_COLLIDERS`（`:36`）、`REBUILD_INTERVAL`（`:38`）、`TRI_REBUILD_INTERVAL`（`:40`）、`MAX_TRI_LINES`（`:42`）、`FILL_OPACITY`（`:44`）、七个语义颜色（`:53` 起）、两个 spawnflag 掩码（`:66`、`:67`）、三个几何容差（`:74`、`:76`、`:78`）、chamfer 两个常量（`:277`、`:279`）。
+导出 `ColliderDebug`（`apps/debug/src/renderer/collider-debug.ts:397`），公开面：`init`（`:436`）、`setTriMeshes`（`:460`）、`setTriggers`（`:467`）、`setDebugFlags`（`:474`）、`setTriDebugFlags`（`:504`）、`update`（`:541`）、`hasDebugWork`（`:582`）、`clearAll`（`:900`）、`dispose`（`:908`）。可视化预算由常量给出：`DEBUG_Y_EXTENT`（`:40`）、`MAX_DEBUG_COLLIDERS`（`:42`）、`REBUILD_INTERVAL`（`:44`）、`TRI_REBUILD_INTERVAL`（`:46`）、`MAX_TRI_LINES`（`:48`）、`FILL_OPACITY`（`:50`）、七个语义颜色（`:59` 起）、两个 spawnflag 掩码（`:72`、`:73`）、两个几何容差（`:80`、`:82`）。
+
+**面高亮只画物理真实面**：`orderedFaces`（`:189`）只接受上游按凸包顶点数 + 多边形面积判定为 `isRealFace` 的平面；过棱的切平面（chamfer）零面积、不构成任何影响运动的表面，因此既不进线框也不进填充面。2026-10-04 起原「显示chamfer切角面」一路（`setChamferDebugFlags` 与页面对应控件）整体删除，理由与实测见 `documents/open-issues/01-chamfer-is-not-a-bevel.md`。
 
 **`apps/debug/src/renderer/path-recorder.ts`**
 

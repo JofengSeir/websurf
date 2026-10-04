@@ -78,7 +78,7 @@
 从 `npm run dev` 到页面可交互的链路（参与者 → 动作）：
 
 1. `npm run dev`（`apps/debug/package.json:15`）→ `src/serve.py` 以 8080 为端口、以工程根为服务根启动；浏览器打开 `/web/index.html`。
-2. 页面加载 COOP/COEP 补丁脚本（`apps/debug/web/index.html:892`）与打包后的 `app.js`（`apps/debug/web/index.html:893`）。
+2. 页面加载 COOP/COEP 补丁脚本（`apps/debug/web/index.html:885`）与打包后的 `app.js`（`apps/debug/web/index.html:886`）。
 3. `app.js` 执行到 `apps/debug/src/app.ts:278` 的 `main`：先取画布句柄，取不到直接返回（`apps/debug/src/app.ts:279`）。
 4. 通道选择：`crossOriginIsolated === true` 且存在 `SharedArrayBuffer` 时建 `SHARED_BUFFER_SIZE` 的共享缓冲，否则置 `null`（`apps/debug/src/app.ts:286`）。
 5. 建 Worker：有内嵌 Worker 源码（构建注入的 `__VBSP_WORKER_JS__`）则走 Blob URL，否则 `new Worker('./worker.js', { type: 'module' })`（`apps/debug/src/app.ts:292`）。

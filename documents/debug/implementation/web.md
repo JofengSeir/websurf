@@ -21,12 +21,12 @@
 | 出生点 | `#spawnSelect` | `apps/debug/web/index.html:704` |
 | 自定义传送点 | `#customTeleportDetails` / `#customTeleportList` | `apps/debug/web/index.html:713`、`:733` |
 | 准星与 HUD | `#hudVisible` / `#showCrosshair` / `#chColor` 等 | `apps/debug/web/index.html:741` |
-| 调试线框 | brush / 触发器 / 三角面 / chamfer 开关与视距 | `apps/debug/web/index.html:790` |
+| 调试线框 | brush / 触发器 / 三角面 开关与视距 | `apps/debug/web/index.html:791` |
 | 元数据 | `#metadata` | `apps/debug/web/index.html:840` |
 | 权威健康 | `#health-count` / `#health-clear` / `#health-log` | `apps/debug/web/index.html:850` |
 | 预览区与 HUD | `#previewArea` / `#preview` canvas / `#hud` / `#stats` / `#cullStats` / `#gameStats` / `#planeInfo` | `apps/debug/web/index.html:856`、`:857`、`:865`、`:866`、`:867`、`:868`、`:869` |
 | 缺失材质纹理弹窗 | `#missingTexturesModal` 及三个子节点 | `apps/debug/web/index.html:879` |
-| 脚本 | 先 classic 的隔离补丁，再 module 的应用入口 | `apps/debug/web/index.html:892`、`:893` |
+| 脚本 | 先 classic 的隔离补丁，再 module 的应用入口 | `apps/debug/web/index.html:885`、`:886` |
 
 页面自身带一段内联 `<style>`（`apps/debug/web/index.html:7` 起），大部分外观写在其中；页面的全部 id 共 106 个。
 
@@ -40,11 +40,11 @@
 
 **构建产物落点**（都由脚本生成，不是手写文件）
 
-`app.js` 由 esbuild 从 `apps/debug/src/app.ts` 打包（`apps/debug/package.json:11`）；`worker.js` 同理来自 `apps/debug/src/worker/main.ts`（`apps/debug/package.json:10`）；`websurf_wasm_bg.wasm` 是 `wasm-pack` 产物从 `apps/debug/pkg/` 复制过来（`apps/debug/package.json:8`）；`textures.mtz` 是离线纹理包资产。页面注释面也写明 `app.js` 不是本目录的手写文件（`apps/debug/web/index.html:891`）。
+`app.js` 由 esbuild 从 `apps/debug/src/app.ts` 打包（`apps/debug/package.json:11`）；`worker.js` 同理来自 `apps/debug/src/worker/main.ts`（`apps/debug/package.json:10`）；`websurf_wasm_bg.wasm` 是 `wasm-pack` 产物从 `apps/debug/pkg/` 复制过来（`apps/debug/package.json:8`）；`textures.mtz` 是离线纹理包资产。页面注释面也写明 `app.js` 不是本目录的手写文件（`apps/debug/web/index.html:884`）。
 
 ## 关键流程与不变量
 
-**页面加载顺序**：先执行 classic 的隔离补丁，再执行 module 形式的应用入口（`apps/debug/web/index.html:892`、`apps/debug/web/index.html:893`）。补丁在 Service Worker 取得页面控制权后写一次 `sessionStorage` 标记并 `window.location.reload()`（`apps/debug/web/coi-serviceworker.js:68`）。隔离成功与否直接决定 `main` 走 SAB 通道还是 postMessage 回退（`apps/debug/src/app.ts:277`）。
+**页面加载顺序**：先执行 classic 的隔离补丁，再执行 module 形式的应用入口（`apps/debug/web/index.html:885`、`apps/debug/web/index.html:886`）。补丁在 Service Worker 取得页面控制权后写一次 `sessionStorage` 标记并 `window.location.reload()`（`apps/debug/web/coi-serviceworker.js:68`）。隔离成功与否直接决定 `main` 走 SAB 通道还是 postMessage 回退（`apps/debug/src/app.ts:277`）。
 
 **id 与句柄的对照关系**：所有控件句柄都由 `apps/debug/src/app.ts:61` 起的 `dom` 表经 `getElementById` 取得，取不到即 `null`，消费点一律用可选链判空。
 

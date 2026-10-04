@@ -143,10 +143,10 @@ export interface DebugConfig {
   showVis: boolean;
   /** 可视网格线框可视距离（HU，0 = 全量）：`setTriDebugFlags` 的第四个实参。 */
   visViewDistance: number;
-  /** 显示 brush 棱边 chamfer 切角平面（`colliderDebug.setChamferDebugFlags` 的第一个实参）。 */
-  showChamfers: boolean;
-  /** chamfer 平面可视距离（HU，0 = 全量）：`setChamferDebugFlags` 的第二个实参。 */
-  chamferViewDistance: number;
+  // 原先此处有 `showChamfers` / `chamferViewDistance` 两个字段，与页面上「显示chamfer切角面」
+  // + 「chamfer 可视距离」一组控件一并删除（2026-10-04）：那路黄线框画的是过棱的切平面，
+  // 零面积、不构成任何影响运动的表面，属于「debug 画出不存在的物理面」。判定与理由见
+  // `documents/open-issues/01-chamfer-is-not-a-bevel.md`。
   /** 准星射线检测开关（写进 `RendererMain.planeInfoEnabled`）。 */
   showPlaneInfo: boolean;
 }
@@ -249,8 +249,6 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     phyViewDistance: 4096,
     showVis: false,
     visViewDistance: 1024,
-    showChamfers: false,
-    chamferViewDistance: 512,
     showPlaneInfo: false,
   },
   texture: {

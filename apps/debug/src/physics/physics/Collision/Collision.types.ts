@@ -12,6 +12,16 @@ import type { Vec3 } from '../../math/vec3.js';
 export interface Plane {
   normal: Vec3; // 朝外的单位法线（内部满足 dot(n, p) − dist <= 0）
   dist: number; // 平面常数项 = dot(normal, 平面上一点)
+  /**
+   * 该平面在本 brush 的物理凸包上是否构成一张有面积的真实面。
+   *
+   * 由上游 `export_brushes_planes` 的 `plane_is_real_face` 给出，**只被渲染端读**：
+   * 物理侧 `src/phys/world.rs` 的 `clip_planes` / `box_in_brush` 按平面逐条裁剪，不看它。
+   *
+   * 可选是因为触发器那条路（`rebuildTriggers`）的平面来自触发器数据、没有这个标志；
+   * 此时消费端按「未知」处理，不因为缺字段就当成真面。
+   */
+  isRealFace?: boolean;
 }
 
 /** 凸包 brush：一组平面 + 其 AABB 角点。 */

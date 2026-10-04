@@ -10,11 +10,17 @@
  *   本模块按 `TriMesh.surfaceprop`（`apps/debug/src/physics/physics/Collision/Collision.types.ts`）
  *   是否存在拆成 .phy 与可视网格两条路径。
  *
- * 五个 Group 与五个开关彼此独立，各有自己的可视距离：
+ * 四个 Group 与四个开关彼此独立，各有自己的可视距离：
  * - `showSolids`  实体碰撞体凸包线框，逐面按法线着色（地面绿 / 斜坡黄 / 墙红）；
  * - `showTriggers` 触发器凸包或 AABB 线框（青=已链接 / 紫=孤儿 / 灰=初始禁用 / 橙=非玩家）；
- * - `showPhy` / `showVis` 模型三角形线框（橙 / 紫）；
- * - `showChamfers` brush 平面里"只过棱、不构成面"的 chamfer 切角平面（黄）。
+ * - `showPhy` / `showVis` 模型三角形线框（橙 / 紫）。
+ *
+ * **面高亮纪律（本模块最高优先级）**：debug 画的必须是物理系统**实际影响运动**的面，
+ * 画不出来就不画。判据唯一来源是上游 `export_brushes_planes` 逐平面给出的 `is_real_face`
+ * （`plane_is_real_face`：面上凸包顶点 ≥ 3 且多边形面积非零），见 `orderedFaces`。
+ * 本模块**不得**用「面上有几个顶点」「共不共线」之类启发式自己反推 —— 碰撞是按平面逐条裁剪的，
+ * 过棱的切平面（chamfer）同样会进裁剪循环，但它是零面积集合、不构成任何能站能撞的表面。
+ * 2026-10-04 之前本模块有一路黄色 chamfer 线框，正是靠反推把这类平面画成了"面"；该路已删除。
  *
  * 不变量与边界：
  * - 只创建 `THREE.Group` 与线/面对象，不创建相机与灯光，不改动 scene 的其它成员；
@@ -34,7 +40,7 @@ import type { TeleportTrigger } from '../world/teleport-manager.js';
 const DEBUG_Y_EXTENT = 300;
 /** 实体碰撞箱单帧最多装配的 brush 数（超出按收集顺序截断）。 */
 const MAX_DEBUG_COLLIDERS = 800;
-/** 实体碰撞箱与 chamfer 的重建限流周期（帧）：计数累加到该值才重建一次。 */
+/** 实体碰撞箱的重建限流周期（帧）：计数累加到该值才重建一次。 */
 const REBUILD_INTERVAL = 6;
 /** 模型三角形线框（.phy / 可视网格）共用的重建限流周期（帧），比 brush 更长。 */
 const TRI_REBUILD_INTERVAL = 30;
@@ -72,7 +78,8 @@ const SPAWNFLAG_EVERYTHING = 0x40;
 
 /** 三平面交点"落在凸包内侧"的校验容差（HU；WASM 侧同判据取 1.0）。 */
 const HULL_EPS = 0.5;
-/** 顶点"落在某平面上"的判定容差（HU）：面内顶点收集与 chamfer 判定共用。 */
+/** 顶点"落在某平面上"的判定容差（HU）：仅用于把凸包顶点归到已由 `isRealFace` 放行的面上，
+ *  不参与"是不是面"的判断（那是物理侧 `plane_is_real_face` 的职责）。 */
 const FACE_EPS = 0.5;
 /** 顶点去重阈值（HU²）：间距小于 0.1 HU 视为同一顶点。 */
 const VERT_DUP_SQ = 0.01;
@@ -171,7 +178,13 @@ interface OrderedFace {
 /**
  * 对 brush 的每个平面，收集落在该平面上的顶点下标（|d| < `FACE_EPS`），按绕法线的极角排序成
  * 凸多边形，并带上该平面法线。落在平面上的顶点少于 3 个、或面内正交基退化（|u| < 1e-6）时
- * 跳过该平面。只看顶点数与极角，不判多边形面积，故共线的三点以上也会形成一个退化多边形。
+ * 跳过该平面。
+ *
+ * ⚠️ **只画物理侧标了 `isRealFace` 的平面**。这是本页最重要的一条纪律：debug 画的必须是物理
+ * 实际影响运动的面，而「是否是真面」由上游 `plane_is_real_face` 按凸包顶点数 + 多边形面积
+ * 判定（见 `apps/debug/crates/wasm/src/lib.rs`）。本页**不再**用「面上有几个顶点」反推——
+ * 那样判既和物理侧不是同一把尺，也会把过棱的切平面（chamfer，零面积）画成面：
+ * 那正是「debug 画出不存在的物理面」的根源。
  */
 function orderedFaces(
 	brush: Brush,
@@ -179,6 +192,9 @@ function orderedFaces(
 ): OrderedFace[] {
 	const faces: OrderedFace[] = [];
 	for (const p of brush.planes) {
+		// 物理侧的真实面闸门：false 明确不是面；undefined 表示该平面没带标志
+		// （触发器那条路），此时不因缺字段而放行——按「未知即不画」处理，与本页整体纪律一致。
+		if (p.isRealFace !== true) continue;
 		const n = p.normal;
 		// 收集落在该平面上的顶点（含共线点）
 		const face: number[] = [];
@@ -250,99 +266,6 @@ function classifyNormal(
 	if (ny > groundAngleCos) return COLOR_GROUND;
 	if (ny > slideAngleCos) return COLOR_SLOPE;
 	return COLOR_WALL;
-}
-
-// ---------------------------------------------------------------------------
-// chamfer（切角）平面可视化（黄色）
-// ---------------------------------------------------------------------------
-// chamfer 平面由 WASM 导出层为每条真实凸棱生成：`apps/debug/crates/wasm/src/lib.rs` 的
-// `export_brushes_planes` 取两相邻面法线的归一化均值作平面法线、按"凸包外侧"校验方向，
-// 再把它们与真实面一起并入同一个 planes 数组输出 —— 既进物理碰撞，也进本模块的线框显示。
-// 本模块把这类平面单独标黄：它只经过一条棱，落在其上的凸包顶点可少至 2 个或全部共线，
-// 因而不构成真实面。注意判据不完全重合：`computeChamferStrips` 允许 ≥ 2 个顶点加共线校验，
-// 而 `orderedFaces` 只按"顶点数 ≥ 3"筛选，故共线三点以上的 chamfer 平面也会进入线框
-// （退化成沿棱的线段）。
-// 绘制：以棱为一条边，沿"平面内 ⊥ 棱 ∧ 背离 brush AABB 中心"方向外推 `CHAMFER_QUAD_LEN`，
-// 角平分线 chamfer 呈现为贴坡倒角、水平过棱的 chamfer 呈现为贴面帽盖。
-// 黄色线段用 depthTest:false 绘制，嵌在几何内部或被遮挡时同样可见。
-
-/** chamfer 线段：平面上相距最远的两个凸包顶点（a、b）与该平面的法线 n。 */
-interface ChamferStrip {
-	a: [number, number, number];
-	b: [number, number, number];
-	n: [number, number, number];
-}
-
-/** 四边形沿平面内外推的长度（HU）：只影响可视化尺寸，不参与任何判定。 */
-const CHAMFER_QUAD_LEN = 16;
-/** 共线判定容差（HU）：面上顶点到棱线的垂直距离大于此值即判为真实面。 */
-const CHAMFER_COLLINEAR_EPS = 0.5;
-
-/** 三维向量差（返回新数组）。 */
-function chVecSub(a: [number, number, number], b: [number, number, number]): [number, number, number] {
-	return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-}
-
-/** 三维两点距离。 */
-function chVecDist(a: [number, number, number], b: [number, number, number]): number {
-	const d = chVecSub(a, b);
-	return Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-}
-
-/**
- * 提取 brush 的全部 chamfer 平面线段。逐平面判定：面上顶点少于 2 个 → 跳过；取其中相距最远
- * 的两点作棱，棱长 < 0.01 HU → 跳过；其余面上顶点到棱线的垂直距离（|ap × ab| / |ab|）全部
- * 不超过 `CHAMFER_COLLINEAR_EPS` → 只过棱、不构成面 → 收作 chamfer。
- * 凸包顶点少于 4 个（退化）时整体返回空数组。
- */
-function computeChamferStrips(brush: Brush): ChamferStrip[] {
-	const verts = computeBrushHull(brush);
-	if (verts.length < 4) return [];
-	const strips: ChamferStrip[] = [];
-	for (const p of brush.planes) {
-		// 收集落在该平面上的凸包顶点
-		const on: number[] = [];
-		for (let vi = 0; vi < verts.length; vi++) {
-			const v = verts[vi];
-			const d = p.normal.x * v[0] + p.normal.y * v[1] + p.normal.z * v[2] - p.dist;
-			if (Math.abs(d) < FACE_EPS) on.push(vi);
-		}
-		if (on.length < 2) continue;
-		// 双重循环取相距最远的一对，作为棱的两端
-		let ai = on[0], bi = on[1], best = -1;
-		for (let x = 0; x < on.length; x++) {
-			for (let y = x + 1; y < on.length; y++) {
-				const d = chVecDist(verts[on[x]], verts[on[y]]);
-				if (d > best) { best = d; ai = on[x]; bi = on[y]; }
-			}
-		}
-		const a = verts[ai], b = verts[bi];
-		if (chVecDist(a, b) < 0.01) continue;
-		// 共线判定：其余面上顶点到棱线的垂直距离
-		let collinear = true;
-		const ab = chVecSub(b, a);
-		const abLen = Math.sqrt(ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2]);
-		for (const vi of on) {
-			if (vi === ai || vi === bi) continue;
-			const ap = chVecSub(verts[vi], a);
-			const cp = [
-				ab[1] * ap[2] - ab[2] * ap[1],
-				ab[2] * ap[0] - ab[0] * ap[2],
-				ab[0] * ap[1] - ab[1] * ap[0],
-			];
-			if (Math.sqrt(cp[0] * cp[0] + cp[1] * cp[1] + cp[2] * cp[2]) / abLen > CHAMFER_COLLINEAR_EPS) {
-				collinear = false;
-				break;
-			}
-		}
-		if (!collinear) continue; // 有顶点偏离棱线 ⇒ 是真实面，不是 chamfer
-		strips.push({
-			a: [a[0], a[1], a[2]],
-			b: [b[0], b[1], b[2]],
-			n: [p.normal.x, p.normal.y, p.normal.z],
-		});
-	}
-	return strips;
 }
 
 /**
@@ -466,8 +389,8 @@ function pushAabbEdges(
 // ---------------------------------------------------------------------------
 
 /**
- * 碰撞体可视化：五个 Group 与五个开关，由 `renderer-main` 的每帧循环驱动。
- * `update` 内部按各自的限流计数重建：实体碰撞箱与 chamfer 每 `REBUILD_INTERVAL` 帧、模型三角形
+ * 碰撞体可视化：四个 Group 与四个开关，由 `renderer-main` 的每帧循环驱动。
+ * `update` 内部按各自的限流计数重建：实体碰撞箱每 `REBUILD_INTERVAL` 帧、模型三角形
  * 每 `TRI_REBUILD_INTERVAL` 帧（开关或距离变更时 `phyDirty` 立即触发）、触发器每帧重建。
  * `update` 的返回值表示本帧是否装配过对象，调用方据此置 `needsRender`。
  */
@@ -480,8 +403,6 @@ export class ColliderDebug {
 	private phyGroup: THREE.Group | null = null;
 	/** 可视网格三角形线框（紫，受 showVis 控制）。 */
 	private visGroup: THREE.Group | null = null;
-	/** chamfer 切角平面线框（黄，受 showChamfers 控制）。 */
-	private chamferGroup: THREE.Group | null = null;
 	/** 触发器线框（按触发类型着色，受 showTriggers 控制）。 */
 	private triggerGroup: THREE.Group | null = null;
 	/** 实体碰撞箱开关。 */
@@ -496,22 +417,14 @@ export class ColliderDebug {
 	private showPhy = false;
 	/** 可视网格三角形开关（紫色线框）。 */
 	private showVis = false;
-	/** chamfer 平面开关（黄色线框）。 */
-	private showChamfers = false;
 	/** .phy 可视距离（HU；<= 0 = 全量）。初始化后由 config.debug.phyViewDistance 覆盖。 */
 	private phyViewDistance = 2048;
 	/** 可视网格可视距离（HU）。本路径没有"全量"分支：取 0 时仅相机落在 mesh AABB 内才通过粗筛。 */
 	private visViewDistance = 512;
-	/** chamfer 可视距离（HU；<= 0 = 全量）。 */
-	private chamferViewDistance = 512;
 	/** 模型三角形需立即重建标记：`setTriDebugFlags` 检测到开关或距离变化时置位。 */
 	private phyDirty = false;
 	/** 实体碰撞箱重建限流计数（只在开关打开时累加）。 */
 	private frameCounter = 0;
-	/** chamfer 重建限流计数（与实体碰撞箱同周期）。 */
-	private chamferFrameCounter = 0;
-	/** chamfer 线段缓存（按 Brush 引用缓存，凸包分类只算一次）；`clearAll` 换图时整体重置。 */
-	private chamferCache = new WeakMap<Brush, ChamferStrip[]>();
 	/** 模型三角形重建限流计数（.phy 与可视网格共用）。 */
 	private triFrameCounter = 0;
 	/** 触发器列表（`renderer-main` 由 `TeleportManager.getTriggers` 注入，非 Worker 来源）。 */
@@ -536,11 +449,6 @@ export class ColliderDebug {
 		this.visGroup.name = '__model_vis_collider_debug__';
 		this.visGroup.visible = false;
 		scene.add(this.visGroup);
-
-		this.chamferGroup = new THREE.Group();
-		this.chamferGroup.name = '__vbsp_chamfer_debug__';
-		this.chamferGroup.visible = false;
-		scene.add(this.chamferGroup);
 
 		this.triggerGroup = new THREE.Group();
 		this.triggerGroup.name = '__vbsp_trigger_debug__';
@@ -623,21 +531,7 @@ export class ColliderDebug {
 	}
 
 	/**
-	 * 设置 chamfer 线框的开关与可视距离。关闭时清空 Group；并把限流计数推到上限，
-	 * 使下一次 `update` 立即重建一次。
-	 */
-	setChamferDebugFlags(showChamfers: boolean, chamferViewDistance: number): void {
-		this.showChamfers = showChamfers;
-		this.chamferViewDistance = chamferViewDistance;
-		if (this.chamferGroup) {
-			this.chamferGroup.visible = showChamfers;
-			if (!showChamfers) this.clearGroup(this.chamferGroup);
-		}
-		this.chamferFrameCounter = REBUILD_INTERVAL;
-	}
-
-	/**
-	 * 每帧入口：按五个开关分别重建四类内容，顺序为实体碰撞箱 → 模型三角形 → chamfer → 触发器。
+	 * 每帧入口：按四个开关分别重建四类内容，顺序为实体碰撞箱 → 模型三角形 → 触发器。
 	 * @param cameraPos 相机世界坐标，用作距离筛选中心与"相机是否在 brush 内部"的判据。
 	 * @param colliders 实体碰撞体（`renderer-main` 传 solids 与 ladders 的合并数组）。
 	 * @param config 运行时配置（取玩家体高/眼偏移与地面、斜坡两个角度阈值）。
@@ -675,16 +569,6 @@ export class ColliderDebug {
 			}
 		}
 
-		// 1.6 chamfer 线框：与实体碰撞箱同限流周期；线段有缓存，重建只做筛选与装配
-		if (this.showChamfers && this.chamferGroup) {
-			this.chamferFrameCounter++;
-			if (this.chamferFrameCounter >= REBUILD_INTERVAL) {
-				this.chamferFrameCounter = 0;
-				this.rebuildChamfers(cameraPos, colliders, config);
-				rebuilt = true;
-			}
-		}
-
 		// 2. 触发碰撞箱：开关打开即每帧重建（数量少，不限流）
 		if (this.showTriggers && this.triggerGroup) {
 			this.rebuildTriggers(cameraPos);
@@ -694,9 +578,9 @@ export class ColliderDebug {
 		return rebuilt;
 	}
 
-	/** 五个开关中任一为真即返回 true；`renderer-main` 据此决定本帧是否调用 `update`。 */
+	/** 四个开关中任一为真即返回 true；`renderer-main` 据此决定本帧是否调用 `update`。 */
 	get hasDebugWork(): boolean {
-		return this.showSolids || this.showTriggers || this.showPhy || this.showVis || this.showChamfers;
+		return this.showSolids || this.showTriggers || this.showPhy || this.showVis;
 	}
 
 	/**
@@ -907,98 +791,6 @@ export class ColliderDebug {
 	}
 
 	/**
-	 * 重建 chamfer 线框（黄色）。距离筛选与实体碰撞箱同口径（先 Y 窗口、后 XZ 半径；<= 0 = 全量），
-	 * 但不受 `MAX_DEBUG_COLLIDERS` 限制。
-	 * chamfer 线段按 Brush 引用缓存在 `chamferCache` 里，`computeChamferStrips` 每个 brush 只跑一次，
-	 * 后续重建只做筛选与装配；`clearAll` 时缓存整体重置。
-	 * 四边形以棱为一条边，沿"平面内 ⊥ 棱 ∧ 背离 brush AABB 中心"方向外推，用 depthTest:false
-	 * 绘制，故贴在几何内或背面的 chamfer 同样可见。
-	 * 无论是否收集到线段都会打印一条 console.log。
-	 */
-	private rebuildChamfers(
-		cameraPos: THREE.Vector3,
-		colliders: Brush[],
-		config: RuntimeConfig,
-	): void {
-		const group = this.chamferGroup!;
-		this.clearGroup(group);
-		if (colliders.length === 0) return;
-
-		const pos = cameraPos;
-		const playerHeight = config.player.standHeight;
-		const feetY = pos.y - playerHeight + config.player.eyeOffset;
-		const minY = feetY - DEBUG_Y_EXTENT;
-		const maxY = feetY + playerHeight + DEBUG_Y_EXTENT;
-		const full = this.chamferViewDistance <= 0;
-		const radiusSq = this.chamferViewDistance * this.chamferViewDistance;
-
-		const positions: number[] = [];
-		let drawn = 0;
-		for (const brush of colliders) {
-			if (brush.max.y < minY || brush.min.y > maxY) continue;
-			if (!full) {
-				const nx = Math.max(brush.min.x, Math.min(pos.x, brush.max.x));
-				const nz = Math.max(brush.min.z, Math.min(pos.z, brush.max.z));
-				const dx = pos.x - nx;
-				const dz = pos.z - nz;
-				if (dx * dx + dz * dz > radiusSq) continue;
-			}
-			let strips = this.chamferCache.get(brush);
-			if (!strips) {
-				strips = computeChamferStrips(brush);
-				this.chamferCache.set(brush, strips);
-			}
-			for (const s of strips) {
-				// 四边形：以棱为一条边，在 chamfer 平面内朝背离 brush 中心的一侧外推
-				const ex = s.b[0] - s.a[0];
-				const ey = s.b[1] - s.a[1];
-				const ez = s.b[2] - s.a[2];
-				// 平面内且 ⊥ 棱的方向 = n × e（n 为平面法线，e 为棱向量）
-				let dx = s.n[1] * ez - s.n[2] * ey;
-				let dy = s.n[2] * ex - s.n[0] * ez;
-				let dz = s.n[0] * ey - s.n[1] * ex;
-				const dLen = Math.hypot(dx, dy, dz);
-				if (dLen < 1e-6) continue;
-				dx /= dLen; dy /= dLen; dz /= dLen;
-				// 定号：该方向若指向 brush 的 AABB 中心一侧则整体取反，保证朝外
-				const mdx = (s.a[0] + s.b[0]) / 2 - (brush.min.x + brush.max.x) / 2;
-				const mdy = (s.a[1] + s.b[1]) / 2 - (brush.min.y + brush.max.y) / 2;
-				const mdz = (s.a[2] + s.b[2]) / 2 - (brush.min.z + brush.max.z) / 2;
-				if (dx * mdx + dy * mdy + dz * mdz < 0) {
-					dx = -dx; dy = -dy; dz = -dz;
-				}
-				const a2: [number, number, number] = [
-					s.a[0] + dx * CHAMFER_QUAD_LEN,
-					s.a[1] + dy * CHAMFER_QUAD_LEN,
-					s.a[2] + dz * CHAMFER_QUAD_LEN,
-				];
-				const b2: [number, number, number] = [
-					s.b[0] + dx * CHAMFER_QUAD_LEN,
-					s.b[1] + dy * CHAMFER_QUAD_LEN,
-					s.b[2] + dz * CHAMFER_QUAD_LEN,
-				];
-				positions.push(
-					s.a[0], s.a[1], s.a[2], s.b[0], s.b[1], s.b[2],
-					s.a[0], s.a[1], s.a[2], a2[0], a2[1], a2[2],
-					s.b[0], s.b[1], s.b[2], b2[0], b2[1], b2[2],
-					a2[0], a2[1], a2[2], b2[0], b2[1], b2[2],
-				);
-				drawn++;
-			}
-		}
-		console.log(`[collider-debug] chamfer 重建: 距离=${this.chamferViewDistance} 平面=${drawn}`);
-
-		if (positions.length === 0) return;
-		const geom = new THREE.BufferGeometry();
-		geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-		const mat = new THREE.LineBasicMaterial({
-			color: 0xfffb14,
-			depthTest: false, // 不参与深度测试：嵌在几何内或被遮挡时也可见
-		});
-		group.add(new THREE.LineSegments(geom, mat));
-	}
-
-	/**
 	 * 往指定 Group 追加一组三角形线框。positions 的排布是"每三角形 3 条边 × 每条边 2 个端点 ×
 	 * 每端点 3 个分量"，即每个三角形 18 个 float；空数组直接返回，不产生对象。
 	 * 材质单色、不透明（transparent 未置位），并关闭深度测试使其始终可见。
@@ -1103,34 +895,28 @@ export class ColliderDebug {
 	}
 
 	/**
-	 * 清空全部 5 个 Group 的内容，并把 `chamferCache` 换成新的空 WeakMap（换图后 brush 引用整体更新，
-	 * 旧缓存随之失效）。保留 Group 本身与 scene 引用，也不改五个开关字段。
+	 * 清空全部 4 个 Group 的内容。保留 Group 本身与 scene 引用，也不改四个开关字段。
 	 */
 	clearAll(): void {
 		if (this.solidGroup) this.clearGroup(this.solidGroup);
 		if (this.phyGroup) this.clearGroup(this.phyGroup);
 		if (this.visGroup) this.clearGroup(this.visGroup);
-		if (this.chamferGroup) this.clearGroup(this.chamferGroup);
 		if (this.triggerGroup) this.clearGroup(this.triggerGroup);
-		// brush 对象随地图刷新整体更换，旧条目不再被引用
-		this.chamferCache = new WeakMap();
 	}
 
-	/** 清空 5 个 Group、从 scene 摘除并置空全部引用（含 scene）。之后 `update` 因 scene 为 null 恒返回 false；五个开关字段保持不变，`hasDebugWork` 仍可为 true。 */
+	/** 清空 4 个 Group、从 scene 摘除并置空全部引用（含 scene）。之后 `update` 因 scene 为 null 恒返回 false；四个开关字段保持不变，`hasDebugWork` 仍可为 true。 */
 	dispose(): void {
 		this.clearAll();
 		if (this.scene) {
 			if (this.solidGroup) this.scene.remove(this.solidGroup);
 			if (this.phyGroup) this.scene.remove(this.phyGroup);
 			if (this.visGroup) this.scene.remove(this.visGroup);
-			if (this.chamferGroup) this.scene.remove(this.chamferGroup);
 			if (this.triggerGroup) this.scene.remove(this.triggerGroup);
 		}
 		this.scene = null;
 		this.solidGroup = null;
 		this.phyGroup = null;
 		this.visGroup = null;
-		this.chamferGroup = null;
 		this.triggerGroup = null;
 	}
 }

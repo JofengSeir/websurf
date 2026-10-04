@@ -7,7 +7,7 @@
 | 参与者 | 步骤 | 数据落点 | 锚点 |
 |---|---|---|---|
 | 浏览器 | 拉取页面骨架（顶栏 / 侧边栏 / 预览区 / HUD / 弹窗） | DOM：共 106 个 id | `apps/debug/web/index.html:481` |
-| 浏览器 | 先执行 COOP/COEP 补丁脚本（classic），再执行应用入口（module） | 补丁脚本负责在响应头缺失时补上隔离头；入口是 esbuild 产物 | `apps/debug/web/index.html:892`、`apps/debug/web/index.html:893` |
+| 浏览器 | 先执行 COOP/COEP 补丁脚本（classic），再执行应用入口（module） | 补丁脚本负责在响应头缺失时补上隔离头；入口是 esbuild 产物 | `apps/debug/web/index.html:885`、`apps/debug/web/index.html:886` |
 | 主线程 | `main` 取画布句柄；取不到即返回 | `dom.canvas` | `apps/debug/src/app.ts:268` |
 | 主线程 | 通道选择：`crossOriginIsolated` 为真且有 `SharedArrayBuffer` → 建 `SHARED_BUFFER_SIZE` 共享缓冲，否则置 `null` | `sharedBuffer` | `apps/debug/src/app.ts:277` |
 | 主线程 | 建 Worker：有构建注入的 Worker 源码走 Blob URL，否则 `new Worker('./worker.js', { type: 'module' })`；绑 `onmessage` / `onerror` | `worker` 与 `handleWorkerMessage` | `apps/debug/src/app.ts:290`、`apps/debug/src/app.ts:292` |
@@ -50,7 +50,7 @@
    - 取状态摆相机：渲染节点落 `PathRecorder`、写共享内存渲染采样、相机 yaw/pitch 与眼睛高度（`apps/debug/src/renderer/renderer-main.ts:669`、`apps/debug/src/renderer/renderer-main.ts:673`、`apps/debug/src/renderer/renderer-main.ts:675`、`apps/debug/src/renderer/renderer-main.ts:679`）；
    - 隔帧近平面探测（`apps/debug/src/renderer/renderer-main.ts:684`）。
 3. ② 视距剔除：`LodManager.update` 返回真表示有块可见性翻转（`apps/debug/src/renderer/renderer-main.ts:695`）。
-4. ③ 碰撞体 / 触发器 / 三角面 / chamfer 可视化（`apps/debug/src/renderer/renderer-main.ts:702`）。
+4. ③ 碰撞体 / 触发器 / 三角面 可视化（`apps/debug/src/renderer/renderer-main.ts:696`）。
 5. ④ 准星射线：计数器满 `PLANE_INSPECT_INTERVAL` 才检测一次；关闭时清掉上次结果（`apps/debug/src/renderer/renderer-main.ts:712`）。
 6. ⑤ 渲染：物理就绪后每帧都渲染（`apps/debug/src/renderer/renderer-main.ts:721`）。
 7. ⑥ 剔除统计：至少间隔 100ms 下发一次（`apps/debug/src/renderer/renderer-main.ts:728`），经 `onCullStats` 落到 `#cullStats`（`apps/debug/src/app.ts:600`）。

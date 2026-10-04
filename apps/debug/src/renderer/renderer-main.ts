@@ -205,7 +205,7 @@ export class RendererMain {
   private readonly pathRecorder = new PathRecorder();
   /** 分块可见性管理器：`setup` 收集块、`assignClusterIds` 借 PVS 定位 cluster、`update` 按相机距离判可见。 */
   private readonly lodManager = new LodManager();
-  /** 碰撞体/触发器/三角面/chamfer 可视化；`hasDebugWork` 为假时 `tick` 跳过它的 `update`。 */
+  /** 碰撞体/触发器/三角面可视化；`hasDebugWork` 为假时 `tick` 跳过它的 `update`。 */
   private readonly colliderDebug = new ColliderDebug();
   /** 准星射线检测器：从相机前方发射，与 mesh/碰撞体/触发器求交，结果经 `getPlaneInfo` 给 HUD。 */
   private readonly planeInspector = new PlaneInspector();
@@ -400,10 +400,6 @@ export class RendererMain {
       config.debug.showVis,
       config.debug.phyViewDistance,
       config.debug.visViewDistance,
-    );
-    this.colliderDebug.setChamferDebugFlags(
-      config.debug.showChamfers,
-      config.debug.chamferViewDistance,
     );
     this.planeInfoEnabled = config.debug.showPlaneInfo;
 
@@ -697,7 +693,7 @@ export class RendererMain {
       }
     }
 
-    // ③ 碰撞体/触发器/三角面/chamfer 可视化
+    // ③ 碰撞体/触发器/三角面可视化
     if (this.colliderDebug.hasDebugWork) {
       if (this.colliderDebug.update(camPos, this.colliders, this.config)) {
         this.needsRender = true;
@@ -905,10 +901,6 @@ export class RendererMain {
         this.config.debug.showVis,
         this.config.debug.phyViewDistance,
         this.config.debug.visViewDistance,
-      );
-      this.colliderDebug.setChamferDebugFlags(
-        this.config.debug.showChamfers,
-        this.config.debug.chamferViewDistance,
       );
       this.planeInfoEnabled = this.config.debug.showPlaneInfo;
       this.needsRender = true;

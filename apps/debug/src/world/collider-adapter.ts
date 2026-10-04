@@ -230,9 +230,13 @@ export function adaptBrushes(wasmJson: string): AdaptedBrushes {
     }
 
     // 平面逐项直映（坐标与法线方向已在 Rust 端处理完）
+    //
+    // `isRealFace` 一并直传、不在此处重算：它由物理侧按凸包顶点数 + 多边形面积判定，
+    // 是「这张面是否影响运动」的唯一权威。渲染端要画物理面时只认它。
     const planes: Plane[] = wb.planes.map((wp: WasmBrushPlane) => ({
       normal: { x: wp.normal[0], y: wp.normal[1], z: wp.normal[2] },
       dist: wp.dist,
+      isRealFace: wp.is_real_face,
     }));
 
     // AABB 逐轴直映

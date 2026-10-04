@@ -51,6 +51,12 @@ export interface WasmBrushPlane {
   /** 平面常数项 `dot(normal, pointOnPlane)`；上游对原值取负，与 `normal` 的取负配合，
    * 把半空间约定从「内部 `dot(n, p) - dist >= 0`」翻成「内部 `dot(n, p) - dist <= 0`」。 */
   dist: number;
+  /** 该平面在**本 brush 的物理凸包**上是否构成一张有面积的真实面（上游 `plane_is_real_face`）。
+   *
+   * **这是「是否影响运动」的唯一权威**：碰撞按平面逐条裁剪，所以过棱的切平面（chamfer）同样
+   * 会进裁剪循环，但它是零面积集合、不构成任何能站能撞的表面。渲染端要画「物理面」时只认这个
+   * 标志，**不得**用「面上有几个顶点」之类启发式自己反推。 */
+  is_real_face: boolean;
 }
 
 /** 一个 BSP brush（对应上游 `WasmBrush`）。 */
