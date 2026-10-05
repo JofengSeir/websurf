@@ -414,6 +414,92 @@ impl PhysWorld {
         ]
     }
 
+    /// 归属诊断：报"哪些碰撞体把这个盒体判成实心"。
+    ///
+    /// 返回 18 个数：
+    ///
+    /// ```text
+    /// [0]     空闲（1）/ 不空闲（0）—— 与 debug_position_probe[0] 同义，便于单看本表
+    /// [1]     brush 命中数
+    /// [2]     三角形命中数
+    /// [3..5]  第一个实心 brush 的 AABB min xyz；无 brush 命中时全为 0
+    /// [6..8]  第一个实心 brush 的 AABB max xyz；无 brush 命中时全为 0
+    /// [9]     有三角形命中（1/0）
+    /// [10]    三角形所属网格在 tri_meshes 的下标（`TriEntry::mesh_index`）；无命中时为 -1
+    /// [11..13] 第一个实心三角形的 AABB min xyz
+    /// [14..16] 第一个实心三角形的 AABB max xyz
+    /// [17]    该三角形在网格 indices 里的首个顶点下标（b / c 未导出，定位靠 AABB）
+    /// ```
+    ///
+    /// 两个计数都是**逐个候选**判实心的数量，不是 broadphase 候选数。
+    /// 碰撞箱取玩家**当前**箱，与 [`PhysWorld::debug_trace`] 同口径；不推进物理、不改状态。
+    /// 名字经 [`PhysWorld::debug_tri_mesh_name`] 按下标 10 取。
+    ///
+    /// 用途：`documents/open-issues/07` 的待裁决第 ① 条 —— 查明把玩家判成实心的到底是
+    /// 世界 brush 还是某个模型的 .phy 三角网格，以及是哪一个模型。
+    #[wasm_bindgen]
+    pub fn debug_collide_attrib(&mut self, x: f64, y: f64, z: f64) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        let a = self.world.collide_attrib(&[x, y, z], &mins, &maxs);
+        let mut out = vec![if a.free { 1.0 } else { 0.0 }, a.brush_hits as f64, a.tri_hits as f64];
+        match a.first_brush_aabb {
+            Some((lo, hi)) => {
+                out.extend_from_slice(&lo);
+                out.extend_from_slice(&hi);
+            }
+            // 无 brush 命中：补 6 个 0（与 Some 分支的 3+3 等长，保持返回长度恒为 18）
+            None => out.extend(std::iter::repeat(0.0).take(6)),
+        }
+        match a.first_tri {
+            Some(t) => {
+                out.push(1.0);
+                out.push(t.mesh_index as f64);
+                out.extend_from_slice(&t.aabb.0);
+                out.extend_from_slice(&t.aabb.1);
+                out.push(t.verts[0] as f64);
+            }
+            // 同上：9 个占位（1 + 1 + 3 + 3 + 1）
+            None => out.extend_from_slice(&[0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        }
+        out
+    }
+
+    /// 取 `World::tri_meshes` 第 `index` 个网格的模型名；下标越界返回空串。
+    ///
+    /// 供 [`PhysWorld::debug_collide_attrib`] 的下标 12 配套使用。名字来自 tri JSON 的
+    /// `name` 字段（形如 `models/props/666/s1_ramp1b.mdl`）。
+    #[wasm_bindgen]
+    pub fn debug_tri_mesh_name(&self, index: usize) -> String {
+        self.world
+            .tri_meshes
+            .get(index)
+            .map(|m| m.name.clone())
+            .unwrap_or_default()
+    }
+
+    /// 卡死挤出的只读重放（见 [`player::stuck_probe`] 的完整文档）。
+    ///
+    /// 返回 13 个数：`[0]` 该点是否空闲；`[1..4]` 会选中候选的位移 dx/dy/dz
+    /// （无胜出为 -999）；`[5]` 该候选的 dist（无胜出为 -1）；`[6]` 该候选在
+    /// `STUCK_DIRS` 里的下标（无胜出为 -1）；`[7]` 试了几个候选才成功；
+    /// `[8..12]` dist=1 时 +y / +x / -x / +z / -z 各自是否空闲（1/0）。
+    ///
+    /// 三个坐标就是试探点，**不需要先把玩家挪过去**；碰撞箱仍取玩家**当前**箱。
+    /// 省略三个坐标则等价于用玩家当前 `origin`（与 `check_stuck` 的输入一致）。
+    ///
+    /// **纯诊断，不改任何状态** —— 不挪 `origin`、不写 `stuck_ticks`、不动 `velocity`，
+    /// 因此可以在任意 tick 上反复调用。它复用的枚举顺序与 `check_stuck` 完全一致，
+    /// 所以它选中什么就是 `check_stuck` 会选中什么。
+    #[wasm_bindgen]
+    pub fn debug_stuck_probe(&mut self, x: Option<f64>, y: Option<f64>, z: Option<f64>) -> Vec<f64> {
+        let at = match (x, y, z) {
+            (Some(a), Some(b), Some(c)) => Some([a, b, c]),
+            _ => None,
+        };
+        player::stuck_probe(&mut self.world, &self.player, at).to_vec()
+    }
+
     /// `tick` / `tick_into` 共用的核心步进：
     /// 输入 → 角度 → （noclip 分支 ｜ 传送/死亡/reset → 碰撞移动）。
     ///
@@ -884,7 +970,7 @@ fn parse_brushes(json: &str) -> Result<Vec<PhysBrush>, JsValue> {
         .collect())
 }
 
-/// 解析 `TriMesh[]` JSON（`vertices` / `indices` / `min` / `max`）。
+/// 解析 `TriMesh[]` JSON（`name` / `vertices` / `indices` / `min` / `max`）。
 /// 空串或纯空白按"无三角形碰撞"处理，返回空列表而非错误。
 fn parse_tri_meshes(json: &str) -> Result<Vec<TriMesh>, JsValue> {
     if json.trim().is_empty() {
@@ -892,6 +978,11 @@ fn parse_tri_meshes(json: &str) -> Result<Vec<TriMesh>, JsValue> {
     }
     #[derive(serde::Deserialize)]
     struct WasmTriMesh {
+        /// 模型名，**可选**：`export_model_tri_colliders` 之类的生产者若不带该字段，
+        /// serde 按 `default` 填空串而不是整批解析失败 —— 归属诊断读不到名字时只会
+        /// 看到空串，碰撞判定不受影响。
+        #[serde(default)]
+        name: String,
         vertices: Vec<[f64; 3]>,
         indices: Vec<[u32; 3]>,
         min: [f64; 3],
@@ -902,6 +993,7 @@ fn parse_tri_meshes(json: &str) -> Result<Vec<TriMesh>, JsValue> {
     Ok(data
         .into_iter()
         .map(|m| TriMesh {
+            name: m.name,
             vertices: m.vertices,
             indices: m.indices,
             min: m.min,

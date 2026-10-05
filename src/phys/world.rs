@@ -90,8 +90,17 @@ pub struct LadderVolume {
 /// 模型三角形碰撞网格：`vertices` 是世界空间顶点，`indices` 是三元组下标。
 /// 顶点与索引按 JSON 原样收下，本文件不重采样、不做坐标变换、不合并三角形。
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // min/max 为 tri JSON 契约字段（TriangleGrid 用 TriEntry 过滤）
+#[allow(dead_code)] // min/max/name 见各字段注释
 pub struct TriMesh {
+    /// 模型名（来自 tri JSON 的 `name` 字段，如 `models/props/666/s1_ramp1b.mdl`）。
+    ///
+    /// **只用于诊断归属**：`World::collide_attrib` 报「哪个碰撞体挡住了玩家」时经
+    /// `PhysWorld::debug_tri_mesh_name` 把它交给 JS。碰撞判定本身不读它。
+    ///
+    /// 此前该字段在 `parse_tri_meshes` 的 `WasmTriMesh` 上**没有声明**，serde 按默认行为
+    /// 忽略未知字段，于是 `export_model_phy_colliders` 明明吐了 `name`、落地后却查不到
+    /// 「这条三角形属于哪个模型」——`documents/open-issues/07` 的待裁决第 ① 条就是它。
+    pub name: String,
     /// 顶点表（Y-up、HU）。
     pub vertices: Vec<V3>,
     /// 三角形顶点下标（相对 `vertices`）。
@@ -858,6 +867,14 @@ pub struct TriEntry {
     /// 拷贝量随"三角形数 × 网格大小"增长。
     /// 约束：`Rc` 不是线程安全的，此处只适用于 wasm 单线程。
     pub mesh: std::rc::Rc<TriMesh>,
+    /// 本三角形所属网格在 `World::tri_meshes` 里的下标。
+    ///
+    /// **诊断用途**：`World::collide_attrib` 靠它把命中归属报给 JS，再经
+    /// `PhysWorld::debug_tri_mesh_name` 取到模型名。
+    ///
+    /// 之所以不用 `Rc` 指针反查：`mesh` 是 `Rc::new(mesh.clone())` 克隆出来的，
+    /// 地址与 `World::tri_meshes` 里的原对象**必然不同**，按 `as_ptr` 比对永远失配。
+    pub mesh_index: usize,
     pub a: u32,
     pub b: u32,
     pub c: u32,
@@ -912,7 +929,7 @@ impl TriangleGrid {
         self.entries.reserve(total);
 
         let inv = 1.0 / cell_size;
-        for mesh in meshes {
+        for (mesh_index, mesh) in meshes.iter().enumerate() {
             // 本网格只深克隆这一次：三角形条目共享同一个 Rc，不再逐三角形 clone
             let shared = std::rc::Rc::new(mesh.clone());
             let v = &mesh.vertices;
@@ -929,6 +946,7 @@ impl TriangleGrid {
                 let idx = self.entries.len();
                 self.entries.push(TriEntry {
                     mesh: std::rc::Rc::clone(&shared),
+                    mesh_index,
                     a: *a,
                     b: *b,
                     c: *c,
@@ -1023,6 +1041,37 @@ pub struct World {
     pub tri_meshes: Vec<TriMesh>,
     grid: BrushGrid,
     tri_grid: TriangleGrid,
+}
+
+/// 单个三角形的命中归属（`World::collide_attrib` 报的第一个三角形命中）。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TriHit {
+    /// 所属网格在 `World::tri_meshes` 里的下标（`TriEntry::mesh_index`，建索引时写入）。
+    /// 名字经 `World::tri_mesh_name` / `PhysWorld::debug_tri_mesh_name` 取。
+    pub mesh_index: usize,
+    /// 该三角形在网格 `indices` 里的三个顶点下标。
+    pub verts: [u32; 3],
+    /// 该三角形的 AABB（`TriangleGrid::build` 入格时现算）。
+    pub aabb: (V3, V3),
+}
+
+/// 盒体在给定位置的碰撞归属汇总（`World::collide_attrib` 的返回值）。
+///
+/// 字段语义：`free` 是 `!is_position_free` 的等价复述（由两个命中计数推出），
+/// 两个 `*_hits` 是**逐个候选**判实心的数量，不是 broadphase 候选数。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CollideAttrib {
+    /// 无任何碰撞体把该盒体判成实心 —— 等价于 `is_position_free` 返回 `true`。
+    pub free: bool,
+    /// 判该盒体实心的 brush 个数。
+    pub brush_hits: usize,
+    /// 判该盒体实心的三角形个数。
+    pub tri_hits: usize,
+    /// 第一个实心 brush 的 AABB。brush 不带名字（`Brush` 只有 `planes` / `min` / `max`），
+    /// 归属靠 AABB 人工比对。
+    pub first_brush_aabb: Option<(V3, V3)>,
+    /// 第一个实心三角形的归属。
+    pub first_tri: Option<TriHit>,
 }
 
 impl World {
@@ -1127,6 +1176,64 @@ impl World {
             }
         }
         true
+    }
+
+    /// 归属诊断：给定盒体位置，报"哪些碰撞体把它判成实心"。
+    ///
+    /// 与 [`World::is_position_free`] 的**判决谓词完全一致** —— 它同样是逐个候选单独调
+    /// `trace_box` / `trace_box_tri_entries` 并看 `start_solid`，只是每次只传一个候选。
+    /// 谓词一致是刻意的：若这里改用 `box_in_brush` 之类另一套判定，报出的归属可能与
+    /// `is_position_free` 的实际判决对不上，那这份诊断就不可信了。
+    ///
+    /// 代价是 O(候选数) 次扫掠而非 1 次 —— **仅供诊断调用**，`is_position_free` 的热路径
+    /// 不经过它。
+    ///
+    /// 宽phase 的候选查询盒沿用 `is_position_free` 的 ±1.0 膨胀，保证候选集相同。
+    pub fn collide_attrib(&mut self, origin: &V3, mins: &V3, maxs: &V3) -> CollideAttrib {
+        let q_min = [
+            origin[0] + mins[0] - 1.0,
+            origin[1] + mins[1] - 1.0,
+            origin[2] + mins[2] - 1.0,
+        ];
+        let q_max = [
+            origin[0] + maxs[0] + 1.0,
+            origin[1] + maxs[1] + 1.0,
+            origin[2] + maxs[2] + 1.0,
+        ];
+        let mut out = CollideAttrib::default();
+
+        let mut candidates: Vec<&Brush> = Vec::new();
+        self.grid.query_refs(&q_min, &q_max, &mut candidates);
+        for b in candidates {
+            if trace_box(origin, origin, mins, maxs, &[b]).start_solid {
+                out.brush_hits += 1;
+                if out.first_brush_aabb.is_none() {
+                    out.first_brush_aabb = Some((b.min, b.max));
+                }
+            }
+        }
+
+        if !self.tri_meshes.is_empty() {
+            let mut tri_candidates: Vec<&TriEntry> = Vec::new();
+            self.tri_grid.query_refs(&q_min, &q_max, &mut tri_candidates);
+            for e in tri_candidates {
+                if trace_box_tri_entries(origin, origin, mins, maxs, &[e]).start_solid {
+                    out.tri_hits += 1;
+                    if out.first_tri.is_none() {
+                        out.first_tri = Some(TriHit {
+                            mesh_index: e.mesh_index,
+                            verts: [e.a, e.b, e.c],
+                            aabb: (
+                                [e.min_x, e.min_y, e.min_z],
+                                [e.max_x, e.max_y, e.max_z],
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+        out.free = out.brush_hits == 0 && out.tri_hits == 0;
+        out
     }
 
     /// 盒（盒心 `origin` + 偏移 `mins` / `maxs`）命中的**第一个**梯子下标，无命中返回 `None`。

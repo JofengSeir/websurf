@@ -1352,6 +1352,81 @@ fn check_stuck(world: &mut World, p: &mut Player) -> bool {
     true
 }
 
+/// 卡死挤出的**只读**重放：把 `check_stuck` 的候选枚举原样跑一遍，报出会选中哪个候选。
+///
+/// 纯诊断，**不改任何状态**（不挪 `origin`、不写 `stuck_ticks`、不动 `velocity`）。
+/// 它与 `check_stuck` 共用同一份 `STUCK_DIRS` 与同一组距离常量，所以「它选中什么」就是
+/// 「`check_stuck` 会选中什么」—— 若两者日后分叉，本函数的可信度随之失效，需同步改。
+///
+/// `at` 是要试探的盒心。传 `None` 用玩家当前 `origin`（等价于 `check_stuck` 的输入）；
+/// 传 `Some` 则在该点重放同一套枚举 —— 这样才能在不挪动玩家的情况下探任意位置，
+/// 也让「抬高探针看哪个高度开始空闲」这类扫描成为可能。
+///
+/// 返回 13 个数（顺序见 `PhysWorld::debug_stuck_probe` 的文档）：
+///
+/// ```text
+/// [0] origin 本身是否空闲（1/0）
+/// [1..4] 胜出候选的位移 dx, dy, dz；无胜出时全为 -999
+/// [5] 胜出候选用的 dist；无胜出时 -1
+/// [6] 胜出候选的 `STUCK_DIRS` 下标；无胜出时 -1
+/// [7] 试到第几个候选才成功（含命中的那一个，从 1 起）；无胜出时为尝试总数
+/// [8..12] dist=1 时五个轴向候选（+y / +x / -x / +z / -z）各自是否空闲（1/0）
+/// ```
+///
+/// 为什么要它：`STUCK_DIRS[0]` 就是上方向，所以"被推向侧面"这一症状本身已经说明
+/// **上方向在所试的距离上都不空闲** —— 但到底卡在第几个距离、横向又是第几个距离才通，
+/// 原先只能靠猜。本函数把这张表直接打出来。
+pub(crate) fn stuck_probe(world: &mut World, p: &Player, at: Option<V3>) -> [f64; 13] {
+    let mins = p.mins();
+    let maxs = p.maxs();
+    let origin = at.unwrap_or(p.origin);
+    let mut out = [0.0f64; 13];
+    out[1..4].fill(-999.0);
+    out[5] = -1.0;
+    out[6] = -1.0;
+
+    if world.is_position_free(&origin, &mins, &maxs) {
+        out[0] = 1.0;
+        out[8..13].fill(1.0);
+        return out;
+    }
+
+    // dist=1 的五个轴向候选单独先算一遍，给"上方向被堵到什么距离"提供读数。
+    for (k, dir) in [(0usize, STUCK_DIRS[0]), (1, STUCK_DIRS[1]), (2, STUCK_DIRS[2]), (3, STUCK_DIRS[3]), (4, STUCK_DIRS[4])] {
+        let tmp = [
+            origin[0] + dir[0],
+            origin[1] + dir[1],
+            origin[2] + dir[2],
+        ];
+        out[8 + k] = if world.is_position_free(&tmp, &mins, &maxs) { 1.0 } else { 0.0 };
+    }
+
+    let mut tried = 0usize;
+    'outer: for dist in [1, 2, 4, 8, 16, 34] {
+        for (i, dir) in STUCK_DIRS.iter().enumerate() {
+            tried += 1;
+            let tmp = [
+                origin[0] + dir[0] * dist as f64,
+                origin[1] + dir[1] * dist as f64,
+                origin[2] + dir[2] * dist as f64,
+            ];
+            if world.is_position_free(&tmp, &mins, &maxs) {
+                out[1] = dir[0] * dist as f64;
+                out[2] = dir[1] * dist as f64;
+                out[3] = dir[2] * dist as f64;
+                out[5] = dist as f64;
+                out[6] = i as f64;
+                out[7] = tried as f64;
+                break 'outer;
+            }
+        }
+    }
+    if out[6] < 0.0 {
+        out[7] = tried as f64;
+    }
+    out
+}
+
 /// 冻结检测：有速度却没位移时按 tick 累计，连续 6 tick 才把速度清零。
 ///
 /// 判据（三条同时成立）：不在可站面上（`!on_ground`）、3D 速率 > 150 HU/s、
