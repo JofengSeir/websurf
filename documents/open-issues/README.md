@@ -23,7 +23,7 @@
 | 04 | [04-wasm-untextured-surface-color.md](04-wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白/粉 | 待裁决 |
 | 05 | [05-wasmcore-bevel-doc-vs-code.md](05-wasmcore-bevel-doc-vs-code.md) | `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用 | 待修 |
 | 06 | [06-phy-hull-facet-jump.md](06-phy-hull-facet-jump.md) | `.phy` 凸包把曲面坡近似成大平面，facet 交界处一帧抬升 11.55 HU | 待修 |
-| 07 | [07-is-position-free-vs-trace.md](07-is-position-free-vs-trace.md) | `check_stuck` 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死（盒高零影响）；真凶 = `s1_ramp1b` 的 .phy 凸包；修法 B / E 已否，首选 A | 待修 |
+| 07 | [07-is-position-free-vs-trace.md](07-is-position-free-vs-trace.md) | `check_stuck` 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死；**已用修法 A 修复**（着地时跳过判定），回归 2 项；B / E 已实测否 | 主体已修 |
 
 ## 与既有台账的关系
 

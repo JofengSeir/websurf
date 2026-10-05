@@ -68,6 +68,9 @@ mod ridge_contact_tests;
 /// 台阶移动抬升闸门回归（2 项）：头顶无障碍时不得把玩家抬起来。
 #[cfg(test)]
 mod step_gate_tests;
+/// 卡死判据着地门回归（2 项）：前方地面更高时不得原地抖动。
+#[cfg(test)]
+mod stuck_gate_tests;
 
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
