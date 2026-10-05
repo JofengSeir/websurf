@@ -95,6 +95,7 @@
 | [`open-issues/03-renderer-merge-normal-attribute.md`](open-issues/03-renderer-merge-normal-attribute.md) | `mergeGeometries` 因 `normal` 属性不一致失败，三应用合批静默失效 |
 | [`open-issues/04-wasm-untextured-surface-color.md`](open-issues/04-wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白 |
 | [`open-issues/05-wasmcore-bevel-doc-vs-code.md`](open-issues/05-wasmcore-bevel-doc-vs-code.md) | `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用 |
+| [`open-issues/06-phy-hull-facet-jump.md`](open-issues/06-phy-hull-facet-jump.md) | `.phy` 凸包表达不了曲面坡，玩家在 facet 交界处被一帧抬升十几 HU（待修） |
 
 ## 维护约定
 
