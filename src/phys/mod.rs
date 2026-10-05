@@ -62,6 +62,9 @@ mod p2_gate_tests;
 /// surf 坡面与蹲姿释放回归（6 项）：含地面/空中起立判定与蹲姿限速。
 #[cfg(test)]
 mod duck_surf_tests;
+/// 棱线接触回归（4 项）：凸棱上多张面同时接触时的平均法线与逐面最陡判据。
+#[cfg(test)]
+mod ridge_contact_tests;
 
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};

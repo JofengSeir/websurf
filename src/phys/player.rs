@@ -1193,12 +1193,23 @@ fn categorize_position(world: &mut World, p: &mut Player) {
         &mins,
         &maxs,
     );
-    // 接触计数：仅真正落地（可站面，normal.y >= STANDABLE_NORMAL）才累加。
-    // 贴坡滑行的命中法线落在 0.05~0.7，不计接触——两个消费方（传送检测的 grounded 判据、
-    // state_out 第 11 槽）要的都是"站在可站面上"，而不是"碰到任何面"。
-    if tr.fraction < 1.0
-        && !tr.start_solid
-        && tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL)
+    // 接触计数：仅真正落地才累加。判据是**两条同时成立**，缺一不可：
+    //
+    // 1. **没有任何接触面陡过阈值**（读 `steepest_normal`，逐面判定）。这条与哪张面
+    //    "赢得" enter_frac 竞赛无关，所以站在棱线上时判定稳定——旧口径下 45° 坡的
+    //    `n.y = 0.70711` 只比阈值 `0.7` 高 0.0071，赢的那张面若是邻面的 52° 就直接翻成
+    //    滑行，同一个位置能站着也能被弹走。
+    // 2. **平均法线可站**（读 `normal`）。凸棱/凹谷上两张斜面平均出的是"这一处的实际
+    //    支撑方向"，45°/45° 棱平均成 `n.y = 1.0` ⇒ 可站，这正是"逐渐翘起的脊能一路走到
+    //    45° 才滑"想要的行为。
+    //
+    // 只用平均法线（没有第 1 条）会把 52°/52° 棱也平均成 `n.y = 1.0` 而误判可站；
+    // 只用最陡面（没有第 2 条）则回到"抽签"。两条合起来：陡→滑、平处→站、脊→按平均站。
+    //
+    // 两个消费方（传送检测的 grounded 判据、state_out 第 11 槽）要的都是"站在可站面上"，
+    // 不是"碰到任何面"，故贴坡滑行（命中法线落在 0.05~0.7）不计接触。
+    let all_contacts_standable = tr.steepest_normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL);
+    if tr.fraction < 1.0 && !tr.start_solid && all_contacts_standable && tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL)
     {
         let was_airborne = !p.on_ground;
         p.on_ground = true;

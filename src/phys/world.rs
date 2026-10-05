@@ -112,9 +112,23 @@ pub struct TraceResult {
     /// 终点 = `start + (end - start) * fraction`。`TraceResult::new` 先写成 `end`，
     /// 命中（`fraction < 1.0`）后由追踪函数按分数反算覆盖。
     pub end_pos: V3,
-    /// 被采纳的那条进入平面的法线（朝外，未重新归一化）。进入分数被夹取到 0.0 时照样
-    /// 写入；没有任何平面被采纳时保持 `None`。
+    /// 被采纳的接触面法线（朝外，已归一化）。同分数接触取平均，见 `clip_planes` 内的
+    /// `CONTACT_FRAC_TIE`。进入分数被夹取到 0.0 时照样写入；没有任何平面被采纳时保持
+    /// `None`。
     pub normal: Option<V3>,
+    /// 本次命中里**最陡**的那张接触面法线（`normal[1]` 最小者），已归一化。
+    ///
+    /// 为什么必须和 [`TraceResult::normal`] 分开带：`normal` 是**平均**法线，在凸棱/凹谷
+    /// 上会把两张斜面平均成一个"看着像平地"的法线（45°/45° 棱 → `n.y = 1.0`）。这正是
+    /// 要的；但同一招会把 52°/52° 棱也平均成 `n.y = 1.0`，真正陡的坡就被判成可站。
+    /// 所以站立判据拆成两条、缺一不可：
+    /// 1. **没有任何接触面陡过阈值**（读本字段，不读 `normal`）——逐面判定，与哪张面
+    ///    "赢得" enter_frac 竞赛**无关**，从而消掉棱线上的浮点抽签；
+    /// 2. 平均法线本身可站（读 `normal`）——决定"是否算站在地面上"。
+    ///
+    /// 只有真正挡住盒子的面才可能是进入面（贴墙时墙面 `d1 <= 0 && d2 <= 0`，直接跳过），
+    /// 故这条不会因为"旁边有堵墙"而误判。
+    pub steepest_normal: Option<V3>,
     /// 起点落在实体内：`clip_planes` 的 `start_out == false` 分支且通过了盒-AABB 必要
     /// 校验。**不钉住追踪** —— 该实体的裁剪整段返回，`fraction` 不因此变小；是否清零
     /// 速度由移动方决定。
@@ -125,12 +139,13 @@ pub struct TraceResult {
 
 impl TraceResult {
     /// 无命中初值：`fraction = 1.0`、`end_pos = end`、`normal = None`、
-    /// `start_solid` / `all_solid` 均为 `false`。
+    /// `steepest_normal = None`、`start_solid` / `all_solid` 均为 `false`。
     pub fn new(end: V3) -> Self {
         TraceResult {
             fraction: 1.0,
             end_pos: end,
             normal: None,
+            steepest_normal: None,
             start_solid: false,
             all_solid: false,
         }
@@ -187,6 +202,15 @@ fn plane_offset(n: &V3, mins: &V3, maxs: &V3) -> f64 {
 ///    `(d1 + DIST_EPSILON) / (d1 - d2)` 的 Minkowski 悬停间隙；
 /// ③ `aabb_overlaps_at` 内局部常量 `EPS`（= `DIST_EPSILON / 8.0`）的除数。
 const DIST_EPSILON: f64 = 0.03125;
+
+/// 进入分数的"同处一地"容差：两次进入分数之差小于它即视为**同时接触**，法线一并计入
+/// 平均（见 `clip_planes`）。
+///
+/// 取值理由：玩家沿坡上行时 tick 位移 ~0.3 HU，盒半高 ~16 HU；真正"同一处"的多个面
+/// （棱、谷、台阶棱）彼此的分数差是浮点级（两条面 `d1 ≈ 0` ⇒ `f_true ≈ 0`），而不同
+/// 几何处的接触分数差至少是 `盒尺寸 / 位移` 量级。故 1e-4 足以覆盖棱线、又不至于把
+/// 相邻两级台阶的不同面混成一组。
+const CONTACT_FRAC_TIE: f64 = 1e-4;
 
 /// 盒-AABB 必要校验的否决计数（`AtomicU32`，初值 0）。**只增不减、无复位入口**，
 /// 且是模块级静态量：同一 wasm 模块内所有 `PhysWorld` 实例读到的是同一份计数，
@@ -276,7 +300,10 @@ fn clip_planes(
 ) {
     let mut enter_frac = -1.0f64;
     let mut leave_frac = 1.0f64;
-    let mut clip_plane: Option<&Plane> = None;
+    // 命中分数处的接触面法线累加（同分数 = 同一处同时接触，如棱/谷），以及其中最陡的一张。
+    let mut contact_sum = [0.0f64; 3];
+    let mut contact_n = 0usize;
+    let mut steepest: Option<V3> = None;
     let mut start_out = false;
     let mut get_out = false;
 
@@ -310,9 +337,33 @@ fn clip_planes(
             // 保留该实体更晚的真实接触——整实体否决会丢接触。
             // 注意 else 同时覆盖"校验通过但该进入分数不比如今最优更近"，两件事都计数。
             let f_true = d1 / (d1 - d2);
-            if aabb_overlaps_at(bmin, bmax, start, end, mins, maxs, f_true) && f > enter_frac {
+            if !aabb_overlaps_at(bmin, bmax, start, end, mins, maxs, f_true) {
+                // 无限平面造成的假进入（坡面端盖、沿平台顶悬停滑行撞上坡前缘）。
+                GATE_VETO_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            } else if contact_n == 0 || f > enter_frac + CONTACT_FRAC_TIE {
+                // 明显更近的接触：另起一组。
                 enter_frac = f;
-                clip_plane = Some(p);
+                contact_sum = p.normal;
+                contact_n = 1;
+                steepest = Some(p.normal);
+            } else if f > enter_frac - CONTACT_FRAC_TIE {
+                // 与当前最优**同处一地**（进入分数之差在 `CONTACT_FRAC_TIE` 内，**含略低
+                // 的那一张**）：棱线、谷底、台阶棱等处多张面同时接触。累加求平均，而不是让
+                // 浮点抽签决定谁赢。必须对称地收略低的那张——对称棱上两张面谁大谁小纯属
+                // 浮点噪声，只收"更大"的等价于按噪声分组。
+                if f > enter_frac {
+                    enter_frac = f;
+                }
+                contact_sum = [
+                    contact_sum[0] + p.normal[0],
+                    contact_sum[1] + p.normal[1],
+                    contact_sum[2] + p.normal[2],
+                ];
+                contact_n += 1;
+                steepest = Some(match steepest {
+                    Some(s) if s[1] <= p.normal[1] => s,
+                    _ => p.normal,
+                });
             } else {
                 GATE_VETO_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
@@ -343,8 +394,21 @@ fn clip_planes(
 
     if enter_frac < leave_frac && enter_frac > -1.0 && enter_frac < result.fraction {
         result.fraction = if enter_frac < 0.0 { 0.0 } else { enter_frac };
-        if let Some(cp) = clip_plane {
-            result.normal = Some(cp.normal);
+        if contact_n > 0 {
+            let len =
+                (contact_sum[0] * contact_sum[0] + contact_sum[1] * contact_sum[1]
+                    + contact_sum[2] * contact_sum[2])
+                    .sqrt();
+            result.normal = Some(if len > 1e-9 {
+                [
+                    contact_sum[0] / len,
+                    contact_sum[1] / len,
+                    contact_sum[2] / len,
+                ]
+            } else {
+                contact_sum
+            });
+            result.steepest_normal = steepest;
         }
     }
 }
