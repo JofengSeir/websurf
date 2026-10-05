@@ -5,6 +5,10 @@
 **复现地图**：`test/maps/surf_666.bsp`
 **涉及对象**：`models/props/666/s1_ramp1b.mdl`（.phy 凸包，走 `triJson` / `trace_box_tri_entries`）
 
+**同一条坡上的后续问题**：[`07-is-position-free-vs-trace.md`](07-is-position-free-vs-trace.md) ——
+本条（弹飞）修好后，玩家在同一位置改为**原地抖动卡死**（`check_stuck` 每 tick 被 `is_position_free`
+判为不空并挤出玩家）。两条是同一处 `.phy` 凸包几何的两个侧面，**成因不同、修法不同，需一并评估**。
+
 ## 1. 症状
 
 沿 −z 方向走过 `s1_ramp1b` 这条坡，走到模型末端附近时被**一帧抬升 11.55 HU**，随后悬空约 9 tick
