@@ -376,6 +376,44 @@ impl PhysWorld {
         vec![r.fraction, n[0], n[1], n[2]]
     }
 
+    /// 诊断：**在给定点上并置两种碰撞查询**，判定它们是否一致。
+    ///
+    /// 返回 6 个数：
+    /// `[0] is_position_free（true=1 / false=0）`、
+    /// `[1] 原地向下扫掠 1 HU 的 fraction`、
+    /// `[2..4] 该扫掠命中的法线`、
+    /// `[5] stuck_ticks`。
+    ///
+    /// 为什么要并置：移动走 `World::trace`，而 `player::check_stuck` 走
+    /// `World::is_position_free` —— **两个不同的查询**。若某处 `is_position_free` 说
+    /// 「不空」而 `trace` 说「通畅」，`check_stuck` 就会把玩家判成卡死：60 个挤出候选
+    /// 全失败 → `stuck_ticks` 自增、速度清零、返回 true → `player_tick` **跳过本 tick
+    /// 全部移动与落地判定**，表现为「有速度、周围无障碍、却完全不动」。
+    ///
+    /// 实测触发场景（`surf_666`，`models/props/666/s1_ramp1b.mdl` 的 .phy 三角网格）：
+    /// 玩家在 `(x=-13536.41, y=14560.03, z=-9786.37)` 卡住 3.5 秒，同位置 60 HU 的水平
+    /// 扫掠 `debug_trace` 全部 `fraction = 1.0`（畅通），但本方法会报
+    /// `is_position_free = 0` ⇒ 卡死分支。
+    ///
+    /// 扫掠盒取玩家**当前**碰撞箱，与 [`PhysWorld::debug_trace`] 同口径。不推进物理、
+    /// 不改任何状态。
+    #[wasm_bindgen]
+    pub fn debug_position_probe(&mut self, x: f64, y: f64, z: f64) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        let free = self.world.is_position_free(&[x, y, z], &mins, &maxs);
+        let r = self.world.trace(&[x, y, z], &[x, y - 1.0, z], &mins, &maxs);
+        let n = r.normal.unwrap_or([0.0, 0.0, 0.0]);
+        vec![
+            if free { 1.0 } else { 0.0 },
+            r.fraction,
+            n[0],
+            n[1],
+            n[2],
+            self.player.stuck_ticks as f64,
+        ]
+    }
+
     /// `tick` / `tick_into` 共用的核心步进：
     /// 输入 → 角度 → （noclip 分支 ｜ 传送/死亡/reset → 碰撞移动）。
     ///

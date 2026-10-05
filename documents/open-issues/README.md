@@ -23,6 +23,7 @@
 | 04 | [04-wasm-untextured-surface-color.md](04-wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白/粉 | 待裁决 |
 | 05 | [05-wasmcore-bevel-doc-vs-code.md](05-wasmcore-bevel-doc-vs-code.md) | `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用 | 待修 |
 | 06 | [06-phy-hull-facet-jump.md](06-phy-hull-facet-jump.md) | `.phy` 凸包把曲面坡近似成大平面，facet 交界处一帧抬升 11.55 HU | 待修 |
+| 07 | [07-is-position-free-vs-trace.md](07-is-position-free-vs-trace.md) | is_position_free 与 trace 在 .phy 三角网格上不一致，check_stuck 每 tick 挤出玩家 => 原地抖动 | 待修 |
 
 ## 与既有台账的关系
 

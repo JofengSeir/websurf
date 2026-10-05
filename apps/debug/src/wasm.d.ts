@@ -7,7 +7,7 @@
  * 本文件落后于源码，两处（只登记，不改声明）：
  * - `PhysWorld` 只声明 17 个成员，而 `src/phys/mod.rs` 的 impl 块有 24 个 `pub fn`，缺
  *   `tick_into` / `state_out_ptr` / `set_state_ex` / `state_full_json` / `seed_from` /
- *   `gate_veto_count` / `debug_trace`；
+ *   `gate_veto_count` / `debug_trace` / `debug_position_probe`；
  * - `BspProcessor` 未声明 `export_glb_with_pakfile_models_with_defaults_and_lights`，而
  *   `src/ts-shared/phys/world-builder.ts` 的 `BspProcessorLike` 要求该成员。
  *
