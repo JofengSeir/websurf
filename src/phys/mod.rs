@@ -500,6 +500,67 @@ impl PhysWorld {
         player::stuck_probe(&mut self.world, &self.player, at).to_vec()
     }
 
+    /// 取玩家**当前**碰撞箱的六个分量：`[min_x, min_y, min_z, max_x, max_y, max_z]`。
+    ///
+    /// 只读诊断。存在的理由：`set_hull(half_width, stand_height, duck_height)` 的**第三个
+    /// 参数是蹲下高度，不是 z 向伸长** —— `player::apply_hull` 把 z 半伸直接取成
+    /// `half_width`，所以 `set_hull(16, 72, 54)` 的站立盒是 **32 × 72 × 32**（x × y × z），
+    /// 蹲下盒是 32 × 54 × 32。这个参数含义容易被误读成「向前探 54 HU」，本绑定给出真值。
+    #[wasm_bindgen]
+    pub fn debug_hull(&self) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        vec![
+            mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2],
+        ]
+    }
+
+    /// 卡死判据的盒尺寸敏感性扫描：给定脚底位置，把盒高与 z 半伸扫成一张表。
+    ///
+    /// 每个格子是一次独立的 `World::is_position_free`。盒的**底面**钉在 `feet_y`：
+    /// `origin` 取 `[x, feet_y, z]`，`mins = [-half_x, 0, -hz]`、`maxs = [half_x, h, hz]`，
+    /// 于是盒恰好跨 y 从 `feet_y` 到 `feet_y + h`。**不推进物理、不改任何状态。**
+    ///
+    /// 返回 `(max_h + 1) * (max_hz + 1)` 个 0/1，**行优先**：
+    /// 第 `hi * (max_hz + 1) + zi` 格 = 盒高 `hi`、z 半伸 `zi` 时是否空闲（1 = 空）。
+    /// JS 侧按下式还原坐标轴：`hi = floor(i / (max_hz + 1))`、`zi = i % (max_hz + 1)`。
+    ///
+    /// **为什么需要它**：`player::check_stuck` 判"卡住"用的是**整个身体盒**
+    /// （`set_hull(16, 72, 54)` ⇒ 高 72、z 半伸 54）。而玩家盒 z 半伸 54 意味着身体向前
+    /// 探出 54 HU —— 在任何一个"前方地面比脚下高"的坡上，那 54 HU 内的坡面都会落进身体盒，
+    /// 于是判据必然报"卡在实体里"。本表把"多小的盒才不误报"直接量出来，
+    /// 使 `documents/open-issues/07` §7 第 ④ 条（判据是否选错盒）可裁决。
+    #[wasm_bindgen]
+    pub fn debug_free_table(
+        &mut self,
+        x: f64,
+        feet_y: f64,
+        z: f64,
+        half_x: f64,
+        max_h: usize,
+        max_hz: usize,
+    ) -> Vec<f64> {
+        let cols = max_hz + 1;
+        let mut out = Vec::with_capacity((max_h + 1) * cols);
+        for hi in 0..=max_h {
+            let h = hi as f64;
+            let mins = [-half_x, 0.0, 0.0];
+            let maxs = [half_x, h, 0.0];
+            for zi in 0..=max_hz {
+                let hz = zi as f64;
+                let mut mm = mins;
+                let mut xx = maxs;
+                mm[2] = -hz;
+                xx[2] = hz;
+                let ok = self
+                    .world
+                    .is_position_free(&[x, feet_y, z], &mm, &xx);
+                out.push(if ok { 1.0 } else { 0.0 });
+            }
+        }
+        out
+    }
+
     /// `tick` / `tick_into` 共用的核心步进：
     /// 输入 → 角度 → （noclip 分支 ｜ 传送/死亡/reset → 碰撞移动）。
     ///
