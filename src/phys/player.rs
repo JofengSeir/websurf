@@ -1100,7 +1100,14 @@ fn step_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64) {
         &mins,
         &maxs,
     );
-    if !tr.start_solid && !tr.all_solid {
+    // 只在**真的撞到上方东西**时才用抬升后的位置。`trace` 无命中时把 `end_pos` 设为扫掠
+    // 终点，若照单全收就等于每 tick 把玩家无条件抬 `STEP_HEIGHT`(18 HU)——平地上紧接着
+    // 被下面的落回扫掠拉回来所以看不出来，但只要"新位置的地面比原地高"，抬升就会胜出：
+    // 实测 `surf_666` 的 `models/props/666/s1_ramp1b.mdl`（.phy 凸包），沿 −z 走到
+    // z ≈ −9789 处地面追踪换到相邻 facet（真坡面 14571.59，玩家脚下 14560.03），玩家被
+    // **一帧抬 11.55 HU**（+693 HU/s），随后悬空 9 tick 落回，触发传送检测。与 owner 路径
+    // 文件 `z = −9790.87, +9.70 HU` 同一位置同一量级。
+    if tr.fraction < 1.0 && !tr.start_solid && !tr.all_solid {
         p.origin = tr.end_pos;
     }
     try_player_move(world, p, params, dt);

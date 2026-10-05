@@ -65,6 +65,9 @@ mod duck_surf_tests;
 /// 棱线接触回归（4 项）：凸棱上多张面同时接触时的平均法线与逐面最陡判据。
 #[cfg(test)]
 mod ridge_contact_tests;
+/// 台阶移动抬升闸门回归（2 项）：头顶无障碍时不得把玩家抬起来。
+#[cfg(test)]
+mod step_gate_tests;
 
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
