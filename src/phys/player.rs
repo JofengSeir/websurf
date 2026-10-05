@@ -1193,33 +1193,88 @@ fn categorize_position(world: &mut World, p: &mut Player) {
         &mins,
         &maxs,
     );
-    // 接触计数：仅真正落地才累加。判据是**两条同时成立**，缺一不可：
+    // ── 地面法线：**多点探针求和归一化** ────────────────────────────────────────────
     //
-    // 1. **没有任何接触面陡过阈值**（读 `steepest_normal`，逐面判定）。这条与哪张面
-    //    "赢得" enter_frac 竞赛无关，所以站在棱线上时判定稳定——旧口径下 45° 坡的
-    //    `n.y = 0.70711` 只比阈值 `0.7` 高 0.0071，赢的那张面若是邻面的 52° 就直接翻成
-    //    滑行，同一个位置能站着也能被弹走。
-    // 2. **平均法线可站**（读 `normal`）。凸棱/凹谷上两张斜面平均出的是"这一处的实际
-    //    支撑方向"，45°/45° 棱平均成 `n.y = 1.0` ⇒ 可站，这正是"逐渐翘起的脊能一路走到
-    //    45° 才滑"想要的行为。
+    // 为什么不能只看上面那个整箱 trace 的 `tr.normal`：它只给出**一张**赢了 enter_frac 的
+    // 面。走到**尖脊**上时，脊两侧的面在 Minkowski 意义下并不是"同时进入"——整箱沿两个法线
+    // 的支撑偏移不同（`(±0.79, 0.61, 0)` × 箱半宽 16 / 半高 72），于是两张面的进入分数差
+    // `f_A - f_B = diff / (0.61 · 落差)`，实测落差 1 HU 时差 **3～165**，而 `CONTACT_FRAC_TIE`
+    // 只有 1e-4 ⇒ `world.rs` 里的"同处一地"分支在刀刃上**永远不会触发**，平面平均救不了。
     //
-    // 只用平均法线（没有第 1 条）会把 52°/52° 棱也平均成 `n.y = 1.0` 而误判可站；
-    // 只用最陡面（没有第 2 条）则回到"抽签"。两条合起来：陡→滑、平处→站、脊→按平均站。
+    // 正确做法（也是 Source 的做法）：在脚底投影上取多个**小探针**，各判各的接触面，把朝上
+    // 的法线求和归一化。于是：
+    // - 站在刀刃脊上：踩到 +x 面的探针给 `(0.79, 0.61, 0)`，踩到 −x 面的给 `(−0.79, 0.61, 0)`，
+    //   压在棱上的给竖直分量 ⇒ 和的方向接近竖直 ⇒ 判为可站。**这正是"逐渐翘起的脊能一路走
+    //   上去"要的行为。**
+    // - 站在单面陡坡上：所有探针都只碰到同一张面 ⇒ 和就是它自己 ⇒ 照常按倾角滑行。
+    // - 站在平地上：所有法线都是 `(0,1,0)` ⇒ 不变。
     //
-    // 两个消费方（传送检测的 grounded 判据、state_out 第 11 槽）要的都是"站在可站面上"，
-    // 不是"碰到任何面"，故贴坡滑行（命中法线落在 0.05~0.7）不计接触。
-    let all_contacts_standable = tr.steepest_normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL);
-    if tr.fraction < 1.0 && !tr.start_solid && all_contacts_standable && tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL)
-    {
+    // 探针盒刻意取小（半宽 1 HU）：这样**单个探针**跨在棱上时，它自己碰到的两张面进入分数
+    // 几乎相等，`world.rs` 的平面平均分支才有机会生效，两层机制叠加。
+    //
+    // **整箱 trace 仍然负责脚底高度与贴地吸附**（`tr.end_pos`），没有被改动——那部分有
+    // `p2_gate_tests` 的 4 项回归护着。多点探针只参与"能不能站"与 `ground_normal`。
+    let hw = maxs[0];
+    let inset = (hw - 2.0).max(0.0);
+    let probe_offsets: [[f64; 3]; 5] = [
+        [0.0, 0.0, 0.0],
+        [inset, 0.0, inset],
+        [-inset, 0.0, inset],
+        [inset, 0.0, -inset],
+        [-inset, 0.0, -inset],
+    ];
+    let probe_mins = [-1.0, 0.0, -1.0];
+    let probe_maxs = [1.0, 1.0, 1.0];
+    let mut nsum = [0.0f64; 3];
+    let mut probe_hits = 0usize;
+    for o in probe_offsets {
+        let s = [p.origin[0] + o[0], p.origin[1], p.origin[2] + o[2]];
+        let e = [s[0], s[1] - GROUND_TRACE_DIST, s[2]];
+        let ptr = world.trace(&s, &e, &probe_mins, &probe_maxs);
+        if ptr.fraction >= 1.0 || ptr.start_solid {
+            continue;
+        }
+        let Some(pn) = ptr.normal else { continue; };
+        // 只收朝上的面：墙与天花不提供支撑，`n.y <= 0` 一律不计入求和。
+        if pn[1] <= 0.0 {
+            continue;
+        }
+        nsum[0] += pn[0];
+        nsum[1] += pn[1];
+        nsum[2] += pn[2];
+        probe_hits += 1;
+    }
+    let ground_n: Option<V3> = if probe_hits == 0 {
+        None
+    } else {
+        let len = (nsum[0] * nsum[0] + nsum[1] * nsum[1] + nsum[2] * nsum[2]).sqrt();
+        if len > 1e-9 {
+            Some([nsum[0] / len, nsum[1] / len, nsum[2] / len])
+        } else {
+            None
+        }
+    };
+    let multi_probe_standable = ground_n.map_or(false, |n| n[1] >= STANDABLE_NORMAL);
+    // 旧口径（整箱 trace 的单张法线）保留：它是多点探针全数失效时的兜底，也保证单面陡坡
+    // 与平地的行为与改动前逐位一致。
+    let single_plane_standable =
+        tr.fraction < 1.0 && !tr.start_solid && tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL);
+
+    // 接触计数：真正落地才累加。两个消费方（传送检测的 grounded 判据、state_out 第 11 槽）
+    // 要的都是"站在可站面上"，不是"碰到任何面"，故贴坡滑行（法线落在 0.05~0.7）不计接触。
+    if multi_probe_standable || single_plane_standable {
         let was_airborne = !p.on_ground;
         p.on_ground = true;
         p.contact_ticks = p.contact_ticks.saturating_add(1);
-        p.ground_normal = tr.normal.unwrap_or([0.0, 1.0, 0.0]);
+        // 支撑法线优先用多点探针的平均值；探针全灭时退回整箱 trace 的单张法线。
+        let n = ground_n
+            .or(tr.normal)
+            .unwrap_or([0.0, 1.0, 0.0]);
+        p.ground_normal = n;
         p.origin = tr.end_pos;
         // 贴地投影：把速度中指向地面的分量（dot < 0）移掉。平地（n = (0,1,0)）等价于只清 vy；
         // 坡面则保留沿坡分量，于是贴坡加速不会被泄压、出坡瞬间速度仍带斜上分量。
         // 投影只发生在贴地判定的这一支里，try_player_move 的剪裁不碰它。
-        let n = tr.normal.unwrap_or([0.0, 1.0, 0.0]);
         let ground_dot = p.velocity[0] * n[0] + p.velocity[1] * n[1] + p.velocity[2] * n[2];
         if ground_dot < 0.0 {
             p.velocity[0] -= n[0] * ground_dot;
