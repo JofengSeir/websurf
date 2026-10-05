@@ -96,7 +96,7 @@
 | [`open-issues/04-wasm-untextured-surface-color.md`](open-issues/04-wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白 |
 | [`open-issues/05-wasmcore-bevel-doc-vs-code.md`](open-issues/05-wasmcore-bevel-doc-vs-code.md) | `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用 |
 | [`open-issues/06-phy-hull-facet-jump.md`](open-issues/06-phy-hull-facet-jump.md) | `.phy` 凸包表达不了曲面坡，玩家在 facet 交界处被一帧抬升十几 HU（待修） |
-| [open-issues/07-is-position-free-vs-trace.md](open-issues/07-is-position-free-vs-trace.md) | check_stuck 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死（盒高零影响）；真凶 = s1_ramp1b 的 .phy 凸包 |
+| [open-issues/07-is-position-free-vs-trace.md](open-issues/07-is-position-free-vs-trace.md) | check_stuck 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死；真凶 = s1_ramp1b 的 .phy 凸包；修法 B / E 已否，首选 A |
 
 ## 维护约定
 

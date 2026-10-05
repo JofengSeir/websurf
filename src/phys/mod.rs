@@ -561,6 +561,46 @@ impl PhysWorld {
         out
     }
 
+    /// 「沿指定方向能否脱身」的扫描：`documents/open-issues/07` §8 修法 **E** 的实测入口。
+    ///
+    /// 对 `d = 1 ..= max_d` 每个整数距离，逐步做两件事并各记一个数：
+    /// ① 用 `World::trace` 把当前盒体沿 `(nx,ny,nz)` 扫 `d` HU，取 `fraction`；
+    /// ② 扫掠终点用 `World::is_position_free` 判是否空闲（1/0）。
+    ///
+    /// 返回 `2 * max_d` 个数，成对存放：**第 `2*(d-1)` 项是 fraction、第 `2*(d-1)+1` 项是
+    /// 终点空闲标记**。`fraction = 1.0` 表示这一步**没被任何东西挡住**。
+    ///
+    /// 盒取玩家**当前**箱；不推进物理、不改任何状态。
+    ///
+    /// **为什么两个数都要**：只有 fraction = 1 不够 —— 沿法线抬起来可能仍落在实体里
+    /// （`documents/open-issues/07` §7 实测：卡死点沿 +y 抬 1~8 HU 全部仍不空闲）。
+    /// 只有终点空闲也不够 —— 终点可能恰好在实体的另一侧，中间隔着材料。
+    /// **两个同时成立**才等于「这一步真的能脱身」。
+    #[wasm_bindgen]
+    pub fn debug_normal_escape(
+        &mut self,
+        x: f64,
+        y: f64,
+        z: f64,
+        nx: f64,
+        ny: f64,
+        nz: f64,
+        max_d: usize,
+    ) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        let start = [x, y, z];
+        let mut out = Vec::with_capacity(2 * max_d);
+        for d in 1..=max_d {
+            let end = [x + nx * d as f64, y + ny * d as f64, z + nz * d as f64];
+            let tr = self.world.trace(&start, &end, &mins, &maxs);
+            let free = self.world.is_position_free(&end, &mins, &maxs);
+            out.push(tr.fraction);
+            out.push(if free { 1.0 } else { 0.0 });
+        }
+        out
+    }
+
     /// `tick` / `tick_into` 共用的核心步进：
     /// 输入 → 角度 → （noclip 分支 ｜ 传送/死亡/reset → 碰撞移动）。
     ///
