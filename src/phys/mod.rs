@@ -74,6 +74,9 @@ mod stuck_gate_tests;
 /// 贴面推开的步长无关性回归（2 项）：高刷屏步长下贴墙不得被"每次撞面都推"推着走。
 #[cfg(test)]
 mod contact_push_tests;
+/// BSP 原生 bevel 承担「刀刃脊可站」的回归（2 项）：停靠面由 bevel 决定，撤掉即楔进斜面。
+#[cfg(test)]
+mod bevel_rest_tests;
 
 #[cfg(test)]
 mod slope_speed_tests;

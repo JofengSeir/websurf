@@ -90,7 +90,7 @@
 | 文档 | 回答什么 |
 |---|---|
 | [`open-issues/README.md`](open-issues/README.md) | 已取证未修复问题的索引、状态口径与关闭约定 |
-| [`open-issues/01-chamfer-is-not-a-bevel.md`](open-issues/01-chamfer-is-not-a-bevel.md) | debug 的 chamfer 平面削减体积为零，却决定了地面法线 → 坡顶站不住 / 被弹飞（已处置） |
+| [`open-issues/01-chamfer-is-not-a-bevel.md`](open-issues/01-chamfer-is-not-a-bevel.md) | debug 的 chamfer 平面削减体积为零，却决定了地面法线 → 坡顶站不住 / 被弹飞（已处置；2026-10-07 运行时合成整段撤除、原生 bevel 接管，见 §9） |
 | [`open-issues/02-chamfer-visualization-guesswork.md`](open-issues/02-chamfer-visualization-guesswork.md) | 黄线框靠重新猜平面得到，朝向用 AABB 中心而非凸包（已处置） |
 | [`open-issues/03-renderer-merge-normal-attribute.md`](open-issues/03-renderer-merge-normal-attribute.md) | `mergeGeometries` 因 `normal` 属性不一致失败，三应用合批静默失效 |
 | [`open-issues/04-wasm-untextured-surface-color.md`](open-issues/04-wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白 |

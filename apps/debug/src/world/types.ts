@@ -53,16 +53,17 @@ export interface WasmBrushPlane {
   dist: number;
   /** 该平面在**本 brush 的物理凸包**上是否构成一张有面积的真实面（上游 `plane_is_real_face`）。
    *
-   * **这是「是否影响运动」的唯一权威**：碰撞按平面逐条裁剪，所以过棱的切平面（chamfer）同样
-   * 会进裁剪循环，但它是零面积集合、不构成任何能站能撞的表面。渲染端要画「物理面」时只认这个
+   * **这是「是否影响运动」的唯一权威**：碰撞按平面逐条裁剪，BSP 原生 bevel 平面同样进裁剪循环；
+   * 它大多不与凸包顶点构成有面积的面（判 `false`），少数构成可量多边形的照实判 `true`。
+   * 渲染端要画「物理面」时只认这个
    * 标志，**不得**用「面上有几个顶点」之类启发式自己反推。 */
   is_real_face: boolean;
 }
 
 /** 一个 BSP brush（对应上游 `WasmBrush`）。 */
 export interface WasmBrush {
-  /** 平面数组。上游在收集 brush_sides 后剔除平面少于 4 个的 brush，并追加运行时生成的
-   * 棱边 chamfer 平面，故其产物至少 4 项；消费端 `adaptBrushes` 仍再判一次空与 `< 4`。 */
+  /** 平面数组。上游在收集 brush_sides（含 BSP 原生 bevel side）后剔除平面少于 4 个的 brush，
+   * 故其产物至少 4 项；消费端 `adaptBrushes` 仍再判一次空与 `< 4`。 */
   planes: WasmBrushPlane[];
   /** brush 凸包顶点的 AABB 下界（Y-up）。 */
   min: [number, number, number];

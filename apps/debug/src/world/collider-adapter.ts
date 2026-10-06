@@ -15,7 +15,7 @@
  * - 坐标已是 Y-up：上游按 `[x,y,z] → [y,z,x]` 循环置换顶点（行列式 +1）。
  * - 法线已翻成朝外：上游对每个平面取 `normal = -rotate_yup(n)`、`dist = -dist`，
  *   使内部满足 `dot(normal, p) - dist <= 0`，与 `Collision.types.ts` 的 `Plane` 同口径。
- * - `planes` = 该 brush 的原始面，加上上游运行时生成的棱边 chamfer 平面。
+ * - `planes` = 该 brush 的原始面，加上 BSP 原生 bevel side（编译器为"盒子别卡在棱上"生成的过棱小平面）。
  * - `min` / `max` = 凸包顶点旋转到 Y-up 后的逐轴极值。
  *
  * ## 本文件的分支与不变量

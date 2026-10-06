@@ -1864,15 +1864,15 @@ impl BspProcessor {
     /// `filter_json` 是 `ColliderFilter` 的 JSON（字段全部可选，缺失取默认值）；文本解析失败一律
     /// 退回 `ColliderFilter::default()`。过滤分两类——调用方开关（`skip_sky` / `skip_nodraw` /
     /// `include_ladder` / `include_solid` / `min_brush_volume`），以及固定几何条件（既非玩家固体
-    /// 亦非 LADDER 的 brush、所属实体被 `entity_is_non_solid` 判为无碰撞、剔除 bevel 后平面数 < 4、
+    /// 亦非 LADDER 的 brush、所属实体被 `entity_is_non_solid` 判为无碰撞、平面数 < 4、
     /// 顶点数 < 4）。已产出 brush 数达到 `MAX_BRUSHES` 时提前结束，剩余 brush 全部计入跳过计数。
     ///
     /// 结束时用 `web_sys::console::log_1` 打一行 `[BrushPlanes]` 统计：九个具名分支计数之和等于
     /// `skipped` 且 `exported + skipped == total` 时末尾为 `ok`，否则为 `MISMATCH`。
     ///
     /// **平面约定**：BSP 读出的平面法线朝内（内部点 `dot(n,p)-dist >= 0`），本方法转到 Y-up 后取负
-    /// `normal` 与 `dist`，输出扫掠侧要的「法线朝外」平面；另对每条真实凸棱补一个 chamfer 平面后
-    /// 一并输出。
+    /// `normal` 与 `dist`，输出扫掠侧要的「法线朝外」平面；BSP 原生 bevel side（编译器为
+    /// "盒子别卡在棱上"生成的过棱小平面）照常进平面表（owner 裁决：刀刃脊可站由它承担）。
     pub fn export_brushes_planes(&self, filter_json: &str) -> Result<String, JsValue> {
         let bsp = self
             .bsp
@@ -2008,9 +2008,8 @@ impl BspProcessor {
         // 跳过计数的**分支分解**：单一 `skipped` 计数器无法自证，故逐分支计数并保证
         // 「九个具名分支之和 == skipped」。九个分支依次是：
         //   非玩家固体（既非 SOLID 族亦非 LADDER，或所属实体被判定为无碰撞）、SKY、
-        //   ladder 被排除、solid 被排除、nodraw、剔除 bevel 后平面数 < 4、顶点数 < 4、
+        //   ladder 被排除、solid 被排除、nodraw、平面数 < 4、顶点数 < 4、
         //   体积不足、达到 MAX_BRUSHES 的早退。
-        // `bevel_sides_dropped` 是**侧**级计数，不属于 brush 级跳过，故不进分解。
         let mut skipped_non_player_solid = 0usize;
         let mut skipped_sky = 0usize;
         let mut skipped_planes_lt4 = 0usize;
@@ -2020,8 +2019,6 @@ impl BspProcessor {
         let mut skipped_verts_lt4 = 0usize;
         let mut skipped_volume = 0usize;
         let mut skipped_early_exit = 0usize;
-        // bevel 侧被剔除的总数（仅作诊断：它是**侧**级而非 brush 级，故不进 `skipped` 分解）
-        let mut bevel_sides_dropped = 0usize;
         /// 单分支跳过计数：`skipped` 与具名分支**同时**自增，避免两处手写不一致。
         macro_rules! skip_branch {
             ($branch:ident) => {{
@@ -2080,12 +2077,8 @@ impl BspProcessor {
                 let Some(side) = bsp.brush_sides.get(start + i) else {
                     continue;
                 };
-                // 剔除 BSP 自带的 bevel 面（`side.bevel != 0`），改由下面运行时补 chamfer；
+                // BSP 原生 bevel side（`side.bevel != 0`）照常进平面表；
                 // 同类处理见 apps/debug/crates/wasm/src/lib.rs 的同名导出。
-                if side.bevel != 0 {
-                    bevel_sides_dropped += 1;
-                    continue;
-                }
                 if let Some(plane) = bsp.planes.get(side.plane as usize) {
                     bsp_planes.push(plane);
                 }
@@ -2193,98 +2186,7 @@ impl BspProcessor {
                 }
             }
 
-            // =========================================================================
-            // 运行时棱边 chamfer（AddEdgeBevels 的简化版）：对每条真实凸棱生成微小外切角平面。
-            // 「真实棱」= 两平面法线不共线（`|dot| <= 0.999`）且至少共享 2 个凸包顶点；
-            // 平面法线取两法线均值归一化，并校验其余凸包顶点都落在该平面同一侧，
-            // 从而不挤压凸包、不改变可站性。
-            // 同类处理见 apps/debug/crates/wasm/src/lib.rs 的同名导出。
-            // =========================================================================
-            let mut chamfer_planes: Vec<Plane> = Vec::new();
-            {
-                let eps_plane = 0.1f32;
-                let n_planes = bsp_plane_refs.len();
-                let mut vert_planes: Vec<Vec<usize>> = Vec::with_capacity(verts_bsp.len());
-                for v in &verts_bsp {
-                    let mut on: Vec<usize> = Vec::new();
-                    for (pi, p) in bsp_plane_refs.iter().enumerate() {
-                        let d = p.normal.x * v[0] + p.normal.y * v[1] + p.normal.z * v[2] - p.dist;
-                        if d.abs() < eps_plane {
-                            on.push(pi);
-                        }
-                    }
-                    vert_planes.push(on);
-                }
-                for i in 0..n_planes {
-                    for j in (i + 1)..n_planes {
-                        let ni = [
-                            bsp_plane_refs[i].normal.x,
-                            bsp_plane_refs[i].normal.y,
-                            bsp_plane_refs[i].normal.z,
-                        ];
-                        let nj = [
-                            bsp_plane_refs[j].normal.x,
-                            bsp_plane_refs[j].normal.y,
-                            bsp_plane_refs[j].normal.z,
-                        ];
-                        let ndot = ni[0] * nj[0] + ni[1] * nj[1] + ni[2] * nj[2];
-                        if ndot.abs() > 0.999 {
-                            continue; // 共面/平行，无真实棱
-                        }
-                        let mut shared: Vec<usize> = Vec::new();
-                        for (vi, on) in vert_planes.iter().enumerate() {
-                            if on.contains(&i) && on.contains(&j) {
-                                shared.push(vi);
-                            }
-                        }
-                        if shared.len() < 2 {
-                            continue;
-                        }
-                        let mut nch = [ni[0] + nj[0], ni[1] + nj[1], ni[2] + nj[2]];
-                        let len = (nch[0] * nch[0] + nch[1] * nch[1] + nch[2] * nch[2]).sqrt();
-                        if len < 1e-6 {
-                            continue;
-                        }
-                        nch = [nch[0] / len, nch[1] / len, nch[2] / len];
-                        let anchor = &verts_bsp[shared[0]];
-                        let dist = nch[0] * anchor[0] + nch[1] * anchor[1] + nch[2] * anchor[2];
-                        let mut first_side: Option<f32> = None;
-                        let mut valid = true;
-                        for (vi0, v) in verts_bsp.iter().enumerate() {
-                            if shared.contains(&vi0) {
-                                continue;
-                            }
-                            let d = nch[0] * v[0] + nch[1] * v[1] + nch[2] * v[2] - dist;
-                            match first_side {
-                                None => first_side = Some(if d > 0.0 { 1.0 } else { -1.0 }),
-                                Some(s) => {
-                                    if d * s < -0.001 {
-                                        valid = false;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        if !valid {
-                            continue;
-                        }
-                        let radj = first_side.unwrap_or(1.0);
-                        let nch_final = if radj > 0.0 { nch } else { [-nch[0], -nch[1], -nch[2]] };
-                        let dist_final =
-                            nch_final[0] * anchor[0] + nch_final[1] * anchor[1] + nch_final[2] * anchor[2];
-                        chamfer_planes.push(Plane {
-                            normal: vbsp::Vector {
-                                x: nch_final[0],
-                                y: nch_final[1],
-                                z: nch_final[2],
-                            },
-                            dist: dist_final,
-                            ty: 0,
-                        });
-                    }
-                }
-            }
-            // 合并真实面 + chamfer（先取 flipped 或 bsp 平面，统一与 chamfer 一起序列化）
+            // 合并平面表（真实面 + BSP 原生 bevel side，先取 flipped 或 bsp 平面，统一序列化）
             let mut all_planes_src: Vec<Plane> = Vec::new();
             if !flipped_planes.is_empty() {
                 all_planes_src.extend(flipped_planes.iter().cloned());
@@ -2297,8 +2199,6 @@ impl BspProcessor {
                     });
                 }
             }
-            all_planes_src.extend(chamfer_planes);
-
             // 旋转平面法线到 Y-up，并翻转法线方向（vbsp 内部约定 → 扫掠侧约定）。
             //
             // **法线方向**：`vbsp` 读出的平面是「法线朝内」约定（内部点 `dot(n,p)-dist >= 0`，
@@ -2306,7 +2206,7 @@ impl BspProcessor {
             // （`src/phys/world.rs` 的 `Brush`：内部 = `dot(normal, p) - dist <= 0`）。
             // 故对每个平面取负 `normal` 与 `dist`：`dot(-n,p)-(-dist) = -(dot(n,p)-dist)`，
             // 内部点由 d >= 0 变成 d <= 0，半空间等价翻转；先旋转到 Y-up 再取负，二者可交换。
-            // 统一从 all_planes_src（真实面 + 运行时 chamfer）构建，chamfer 一并输出。
+            // 统一从 all_planes_src（真实面 + BSP 原生 bevel）构建，全部输出。
             let planes_yup: Vec<WasmBrushPlane> = all_planes_src
                 .iter()
                 .map(|p| {
@@ -2342,7 +2242,7 @@ impl BspProcessor {
             &format!(
                 "[BrushPlanes] total={}, exported={}, skipped={}, sky={}, nonPlayerSolid={}, \
                  planesLt4={}, ladderExcluded={}, solidExcluded={}, nodraw={}, vertsLt4={}, \
-                 volume={}, earlyExit={}, breakdownSum={}, bevelSidesDropped={}, cover={}",
+                 volume={}, earlyExit={}, breakdownSum={}, cover={}",
                 bsp.brushes.len(),
                 brushes_out.len(),
                 skipped,
@@ -2356,7 +2256,6 @@ impl BspProcessor {
                 skipped_volume,
                 skipped_early_exit,
                 breakdown_sum,
-                bevel_sides_dropped,
                 if breakdown_sum == skipped && brushes_out.len() + skipped == bsp.brushes.len() {
                     "ok"
                 } else {

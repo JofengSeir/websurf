@@ -472,7 +472,10 @@ bitflags! {
 }
 
 /// brush 的一个面：`plane` 是 `Bsp.planes` 下标；`texture_info` 是 `Bsp.textures_info` 下标
-/// （负值 = 该侧无纹理，导出层按 `>= 0` 判）；`bevel` 非 0 表示倒角面，导出层会把它剔除。
+/// （负值 = 该侧无纹理，导出层按 `>= 0` 判）；`bevel` 非 0 表示倒角面（编译器为
+/// "盒子别卡在棱上"生成的过棱小平面）。共享导出层自身不读它；各 app 的碰撞体导出
+/// （`apps/debug` / `apps/game` 的 `export_brushes_planes`）把 bevel side **保留**进
+/// 碰撞平面表——刀刃脊可站由它承担（owner 裁决，见 `documents/open-issues/01` §9）。
 ///
 /// `displacement_info` 本仓无读取点。
 #[derive(Debug, Clone, BinRead)]

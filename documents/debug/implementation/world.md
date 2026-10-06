@@ -33,8 +33,8 @@
 **brush 映射的输入约定（上游已做，本层不做几何变换）**（`apps/debug/src/world/collider-adapter.ts:14` 起）：
 
 - 坐标已是 Y-up；法线已翻成朝外（上游对每个平面取 `normal = -rotate_yup(n)`、`dist = -dist`），使内部满足 `dot(normal, p) - dist <= 0`，与 `Collision.types.ts` 的 `Plane` 同口径。
-- `planes` = 该 brush 的真实面**加上游为每条凸棱生成的切角平面（chamfer）**。chamfer 过棱、无内缩量 ⇒ 削减体积为零（实测 surf_666 的 2664 个 chamfer 全部相切），对碰撞**几何**零贡献；但它**不是没有作用**：整箱 trace 停在哪由「enter_frac 最大的那张面」决定，而刀刃脊上脊侧两面在 Minkowski 意义下不是同时进入（实测进入分数差 3～165），只有脊上那张法线 `(0,1,0)` 的水平 chamfer 会因 d1 最大而必然赢得竞选，使整箱停在**脊顶**。删掉它的实测后果：站在 52°/52° 刀刃脊上的人沿单张斜面停在脊线以下 6 HU、半陷进实体（`start_solid`），`on_ground` 永远为 false ⇒ 滑落并触发传送检测。**故 chamfer 留在碰撞里**。
-- 每个平面另带 `is_real_face`（该平面在凸包上是否构成有面积的真实面，判据见 `apps/debug/crates/wasm/src/lib.rs` 的 `plane_is_real_face`：面上凸包顶点 ≥ 3 且不共线，取直径最远一对作基线、其余点垂距最大值 ≥ `MIN_FACE_WIDTH = 0.5` HU）。**不能用 Newell 多边形面积判**——它要求顶点按边界环序排列，而顶点是 `compute_vertices` 按平面三元组下标枚举产出的、不是环序，叉积互相抵消使面积恒算成 0（实测五棱柱 7 张真实面被误判 5 张）。**运行时 chamfer 恒为 `false`** ⇒ 显示端照 owner 的规则（面高亮必须真实反映物理实际影响运动的面）一律不画它们，但它们照旧参与碰撞。`min` / `max` = 凸包顶点旋转到 Y-up 后逐轴极值。
+- `planes` = 该 brush 的**真实面 + BSP 原生 bevel side**（`side.bevel != 0`，编译器为"盒子别卡在棱上"生成的过棱小平面）。运行时合成切角平面的旧机制已整段撤除（owner 裁决，见 `documents/open-issues/01` §9）：bevel 平面过棱、与斜面的半空间交集在脊下方完全重合 ⇒ 不放大实体体积；`surf_666` 实测 bevel side 18157 条（4278 个 brush），撤合成改保留后平面总数 124939 → 58575，刀刃脊站立与三出生点行为逐位不变。
+- 每个平面另带 `is_real_face`（该平面在凸包上是否构成有面积的真实面，判据见 `apps/debug/crates/wasm/src/lib.rs` 的 `plane_is_real_face`：面上凸包顶点 ≥ 3 且不共线，取直径最远一对作基线、其余点垂距最大值 ≥ `MIN_FACE_WIDTH = 0.5` HU）。**不能用 Newell 多边形面积判**——它要求顶点按边界环序排列，而顶点是 `compute_vertices` 按平面三元组下标枚举产出的、不是环序，叉积互相抵消使面积恒算成 0（实测五棱柱 7 张真实面被误判 5 张）。bevel 平面大多不与凸包顶点构成有面积的面而判 `false`（显示端不画），少数构成可量多边形的照实判 `true`——它们确实参与逐平面裁剪，显示与物理一致。`min` / `max` = 凸包顶点旋转到 Y-up 后逐轴极值。
 
 **映射的分支与不变量**：顺序固定——既非 solid 又非 ladder 的 brush 直接跳过；平面数组为空或平面数低于 `MIN_PLANES_PER_BRUSH` 时跳过；AABB 任一边小于 `MIN_AABB_SIZE` 时跳过（`apps/debug/src/world/collider-adapter.ts:167` 起）。`verifyOutwardNormals` 提供独立的正反校验并输出 `NormalCheckReport`（`apps/debug/src/world/collider-adapter.ts:269`）。
 
