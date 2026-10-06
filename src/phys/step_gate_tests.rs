@@ -71,11 +71,20 @@ fn two_level_world() -> World {
     w
 }
 
-/// 头顶无障碍时不得发生整段抬升：走向 12 HU 的平台，**任何单 tick 上升不得超过 1 HU**。
+/// **走向不高于 `STEP_HEIGHT` 的台阶必须走上去**（起源语义），且单 tick 抬幅不超过台阶高。
 ///
-/// 修前这一条会失败在约 +12 HU（一帧）。
+/// 依据：起源 `CGameMovement::StepMove`（
+/// `test/project/source-sdk-2013-master/src/game/shared/gamemovement.cpp:1515`）在直接移动被挡后
+/// **总是**尝试"抬 `stepsize + DIST_EPSILON` → 滑 → 落回"，落点可站就采用 —— 它**不要求头顶
+/// 有东西**；参考实现同夹具实测：12 HU 台阶被走上，单 tick 净抬 **+12.00 HU**、水平速度保持
+/// 260（`.tmp/ledge-ref.mjs`）。
+///
+/// 本测试同时封住"每 tick 无条件抬 18 HU"那个真缺陷的另一面：**平地上 400 tick 不得有任何
+/// 净上升**（抬升与落回必须抵消），否则说明抬升不再受落点判据约束。
 #[test]
-fn unobstructed_headroom_must_not_lift_onto_ledge() {
+fn walking_into_a_step_high_ledge_steps_onto_it() {
+    use crate::phys::player::{DIST_EPSILON, STEP_HEIGHT};
+
     let mut world = two_level_world();
     let params = PhysParams::default();
     let mut p = create_player([0.0, 1.0, 0.0], &params);
@@ -88,6 +97,7 @@ fn unobstructed_headroom_must_not_lift_onto_ledge() {
     let mut prev = p.origin[1];
     let mut worst_rise: f64 = 0.0;
     for _ in 0..400 {
+        p.input.forward = true;
         player_tick(&mut world, &mut p, &params, DT);
         let rise = p.origin[1] - prev;
         if rise > worst_rise {
@@ -96,16 +106,54 @@ fn unobstructed_headroom_must_not_lift_onto_ledge() {
         prev = p.origin[1];
     }
     assert!(
-        worst_rise <= 1.0,
-        "头顶无障碍时不得被抬升：走向 12 HU 平台，实际最大单 tick 上升 +{:.2} HU（修前约 +{:.0}）",
+        worst_rise <= STEP_HEIGHT + DIST_EPSILON + 0.1,
+        "单 tick 抬幅不得超过台阶高：实际最大 +{:.3} HU（上限 {:.3}）",
         worst_rise,
-        STEP_UP
+        STEP_HEIGHT + DIST_EPSILON
     );
     assert!(
-        p.origin[1] < STEP_UP,
-        "修后应停在低地（y < {:.0}），实际 y={:.2}",
+        p.origin[1] >= STEP_UP - 0.5,
+        "不高于 STEP_HEIGHT 的台阶必须走上去：应到 y ≈ {:.0}，实际 y={:.2}（最大单 tick 上升 +{:.2}）",
         STEP_UP,
-        p.origin[1]
+        p.origin[1],
+        worst_rise
+    );
+
+    // 平地对照：不得有任何净上升（封"每 tick 无条件抬 18 HU"）
+    let mut flat = World::new();
+    flat.solids.push(low_ground());
+    flat.build_index();
+    let mut q = create_player([0.0, 1.0, 0.0], &params);
+    // 朝 +z 走：`low_ground()` 只在 z ∈ [LEDGE_Z, LEDGE_Z+400] 有地板（−z 方向 40 HU 就到头，
+    // 走 −z 会走出地面掉下去，测不到"平地不得净上升"）。
+    q.yaw = 180.0;
+    for _ in 0..40 {
+        q.input.forward = true;
+        player_tick(&mut flat, &mut q, &params, DT);
+    }
+    let base = q.origin[1];
+    let mut flat_worst: f64 = 0.0;
+    let mut flat_prev = q.origin[1];
+    // 60 tick（≈234 HU）足够暴露"每 tick 无条件抬 18 HU"这类缺陷，又不至于走出地板。
+    for _ in 0..60 {
+        q.input.forward = true;
+        player_tick(&mut flat, &mut q, &params, DT);
+        let rise = q.origin[1] - flat_prev;
+        if rise > flat_worst {
+            flat_worst = rise;
+        }
+        flat_prev = q.origin[1];
+    }
+    assert!(
+        flat_worst <= 0.05,
+        "平地上不得出现净上升：实际最大单 tick +{:.3} HU",
+        flat_worst
+    );
+    assert!(
+        (q.origin[1] - base).abs() <= 0.05,
+        "平地上 60 tick 后高度应不变：起点 {:.3}，终点 {:.3}",
+        base,
+        q.origin[1]
     );
 }
 

@@ -137,6 +137,10 @@ pub const LADDER_JUMP_OFF_SPEED: f64 = 270.0;
 /// 台阶高（HU）：`step_move` 的"上抬 / 下探"距离，也是 `stay_on_ground` 的贴地下探距离。
 pub const STEP_HEIGHT: f64 = 18.0;
 
+/// 起源的接触短打量（`DIST_EPSILON = 0.03125`）：`StepMove` 的抬升与落下各多走这一点，
+/// 避免"正好贴面"时 trace 判成无命中或 `startsolid`（`gamemovement.cpp:1542`、`:1558`）。
+pub const DIST_EPSILON: f64 = 0.03125;
+
 /// 单个 tick 内累积的剪裁平面上限。`try_player_move` 在推入新平面**之前**检查：
 /// 已满 8 个就把速度整体清零并结束本次移动。
 pub const MAX_CLIP_PLANES: usize = 8;
@@ -1096,18 +1100,21 @@ fn step_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64) {
     let maxs = p.maxs();
     let mut tr = world.trace(
         &p.origin,
-        &[p.origin[0], p.origin[1] + STEP_HEIGHT, p.origin[2]],
+        &[p.origin[0], p.origin[1] + STEP_HEIGHT + DIST_EPSILON, p.origin[2]],
         &mins,
         &maxs,
     );
-    // 只在**真的撞到上方东西**时才用抬升后的位置。`trace` 无命中时把 `end_pos` 设为扫掠
-    // 终点，若照单全收就等于每 tick 把玩家无条件抬 `STEP_HEIGHT`(18 HU)——平地上紧接着
-    // 被下面的落回扫掠拉回来所以看不出来，但只要"新位置的地面比原地高"，抬升就会胜出：
-    // 实测 `surf_666` 的 `models/props/666/s1_ramp1b.mdl`（.phy 凸包），沿 −z 走到
-    // z ≈ −9789 处地面追踪换到相邻 facet（真坡面 14571.59，玩家脚下 14560.03），玩家被
-    // **一帧抬 11.55 HU**（+693 HU/s），随后悬空 9 tick 落回，触发传送检测。与 owner 路径
-    // 文件 `z = −9790.87, +9.70 HU` 同一位置同一量级。
-    if tr.fraction < 1.0 && !tr.start_solid && !tr.all_solid {
+    // **无"头顶有东西"这个条件**（起源 `CGameMovement::StepMove`，
+    // `test/project/source-sdk-2013-master/src/game/shared/gamemovement.cpp:1538`~`:1549`：
+    // 抬 `stepsize + DIST_EPSILON`，`!startsolid && !allsolid` 就收下 `trace.endpos` ——
+    // 未命中时 `endpos` 正好是抬升终点，照收即抬满一个台阶）。
+    //
+    // 这里曾加过一道 `tr.fraction < 1.0` 闸门（2026-10-05），为修"每 tick 无条件抬 18 HU"
+    // 导致的弹飞。那道闸门修错了对象：起源对这个缺陷的答案是**下面的择优**（抬完落不回可站面
+    // 就退回"地面滑"的结果），而"走进开阔斜坡、头顶空无一物"恰恰是最该抬台阶的场合 ——
+    // 闸门把正常台阶路径整体关掉后，爬坡只剩速度的竖直分量可依赖，斜坡上的水平速度随之掉到
+    // `maxspeed·cosθ`（40.5° 夹具实测 220.28，真图更陡处 190，owner 2026-10-06 报）。
+    if !tr.start_solid && !tr.all_solid {
         p.origin = tr.end_pos;
     }
     try_player_move(world, p, params, dt);
@@ -1116,20 +1123,24 @@ fn step_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64) {
     let maxs = p.maxs();
     tr = world.trace(
         &p.origin,
-        &[p.origin[0], p.origin[1] - STEP_HEIGHT, p.origin[2]],
+        &[p.origin[0], p.origin[1] - STEP_HEIGHT - DIST_EPSILON, p.origin[2]],
         &mins,
         &maxs,
     );
-    let stepped_onto_steep =
-        tr.fraction < 1.0 && tr.normal.map_or(false, |n| n[1] < STANDABLE_NORMAL);
-    if !tr.start_solid && !tr.all_solid && !stepped_onto_steep {
-        p.origin = tr.end_pos;
-    }
-
-    if stepped_onto_steep {
+    // 落不回**可站面**就退回"地面滑"的结果（起源 `gamemovement.cpp:1563`~`:1574`）。判据只看
+    // 下探命中面的法线：`normal[2] < 0.7` 即退回；**未命中同样退回** —— 起源里未命中的
+    // `trace_t` 是被清零的（`plane.normal == 0`），语义就是"不许落到空中"。
+    // 旧实现写成 `tr.fraction < 1.0 && n[1] < STANDABLE_NORMAL`，于是"什么都没探到"被当成
+    // "落点可站"，把玩家留在抬升后的位置（可能已在空中）。
+    let landed_standable = tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL);
+    if !landed_standable {
         p.origin = down_origin;
         p.velocity = down_vel;
         return;
+    }
+
+    if !tr.start_solid && !tr.all_solid {
+        p.origin = tr.end_pos;
     }
 
     let dx_up = p.origin[0] - start_origin[0];
@@ -1279,14 +1290,18 @@ fn categorize_position(world: &mut World, p: &mut Player) {
             .unwrap_or([0.0, 1.0, 0.0]);
         p.ground_normal = n;
         p.origin = tr.end_pos;
-        // 贴地投影：把速度中指向地面的分量（dot < 0）移掉。平地（n = (0,1,0)）等价于只清 vy；
-        // 坡面则保留沿坡分量，于是贴坡加速不会被泄压、出坡瞬间速度仍带斜上分量。
-        // 投影只发生在贴地判定的这一支里，try_player_move 的剪裁不碰它。
-        let ground_dot = p.velocity[0] * n[0] + p.velocity[1] * n[1] + p.velocity[2] * n[2];
-        if ground_dot < 0.0 {
-            p.velocity[0] -= n[0] * ground_dot;
-            p.velocity[1] -= n[1] * ground_dot;
-            p.velocity[2] -= n[2] * ground_dot;
+        // **起源的 `CategorizePosition` 不剪地面速度**：落到地面时只把**向下**的竖直分量清零
+        // （`if (mv->m_vecVelocity[2] < 0) mv->m_vecVelocity[2] = 0;`），水平分量一个数都不动。
+        // 这正是"斜坡上任何方向的水平速度都保持 `maxspeed`"的来源：参考实现实测 40.5° 上坡的
+        // 水平位移与平地**逐位相同**（`test/surf-phys-reference/reference.mjs`，对照脚本
+        // `.tmp/slope-ref.mjs`），爬升量 `tanθ × 水平位移` 是白送的。
+        //
+        // 旧实现把速度整体投影到地面平面（`dot < 0` 就投影整向量）：上坡时地面法线的水平分量
+        // 指向**身后** ⇒ 每 tick 把水平速度乘一次 `cos²θ`，而 `accelerate` 每 tick 最多只补
+        // `accel × maxspeed × dt ≈ 39 HU/s` ⇒ 水平速度停在 140.24（40.5° 夹具），真图更陡处
+        // 即 owner 2026-10-06 读到的 190。
+        if p.velocity[1] < 0.0 {
+            p.velocity[1] = 0.0;
         }
         if was_airborne {
             p.ground_ticks_since_landing = 0;
@@ -1509,6 +1524,15 @@ fn walk_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64) {
     apply_friction(&mut p.velocity, params.friction, params.stop_speed, dt);
 
     let wishspeed = compute_wish(p, params, &mut wish_dir);
+    // **地面上的速度是纯水平的**：起源 `CGameMovement::WalkMove` 在 `Accelerate` 前后各写一次
+    // `mv->m_vecVelocity[2] = 0`（`gamemovement.cpp:1958`、`:1960`），落地后再写一次
+    // "If we are on ground, no downward velocity"（`:2073`~`:2076`）；surfd 参考实现在落地
+    // 分支末尾同样 `if (e.grounded) e.velocity.z = 0`（`test/surf-phys-reference/physics.mjs:642`）。
+    //
+    // 竖直分量若留在地面速度里，下一 tick 的 `accelerate` 只能按**水平投影**算 addspeed
+    // （`currentspeed = dot(velocity, wishdir)`，wishdir 恒为水平）⇒ 斜坡上的水平速度停在
+    // `maxspeed·cos²θ` 附近（40.5° 夹具实测 140.24）而不是 `maxspeed`。
+    p.velocity[1] = 0.0;
     accelerate(&mut p.velocity, &wish_dir, wishspeed, params.accelerate, dt);
 
     if length_sq(&p.velocity) < 1e-6 {
@@ -1661,6 +1685,14 @@ pub fn player_tick(world: &mut World, p: &mut Player, params: &PhysParams, dt: f
                 air_move(world, p, params, dt);
             }
             categorize_position(world, p);
+            // "If we are on ground, no downward velocity"（起源 `CGameMovement::FullWalkMove`，
+            // `gamemovement.cpp:2073`~`:2076`；surfd 参考实现同位置 `physics.mjs:642`）。
+            // **必须在这里清**：`categorize_position` 会按地面法线重写竖直分量，在 `walk_move`
+            // 里清会被它覆盖。跳起当帧 `categorize_position` 会因 `velocity[1] > NON_JUMP_VELOCITY`
+            // 判为离地（`on_ground = false`），故这条不会吃掉起跳速度。
+            if p.on_ground {
+                p.velocity[1] = 0.0;
+            }
         }
     }
 

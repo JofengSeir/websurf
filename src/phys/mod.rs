@@ -72,6 +72,9 @@ mod step_gate_tests;
 #[cfg(test)]
 mod stuck_gate_tests;
 
+#[cfg(test)]
+mod slope_speed_tests;
+
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
 use world::{Brush, LadderVolume, TriMesh, World};
