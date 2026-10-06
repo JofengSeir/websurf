@@ -29,7 +29,10 @@
  *   ⑤ 空转帧（0 ms 间隔）不推进物理，且 `alpha` 单调不减到接近 1；
  *   ⑥ 反例（修复被撤掉的形态）：把「每帧一步、步长取墙钟间隔」还原成等价算式后，320 Hz 与
  *      64 Hz 在同样 1 s 内给出的**物理时间**相差 5 倍 —— 断言这条差异确实存在（否则本门禁
- *      失去意义：它必须能区分「定步」与「每帧一步」）。
+ *      失去意义：它必须能区分「定步」与「每帧一步」）；
+ *   ⑦⑧⑨ 视角补偿三连：算式与物理 `step_core` 同号（⑦）、「物理 yaw + 未消费增量补偿 ==
+ *      累计鼠标量」在 320/144/64/30 Hz 下恒成立（⑧，即"视角逐帧立即生效、不重复计"），
+ *      以及只读物理 yaw 的反例滞后量（⑨，64 Hz 下 200°/s = 3.125°）。
  *
  * 用法：npm run test:prediction-step   （先 esbuild 打包再运行本脚本）
  *      或手动：npx esbuild src/renderer/prediction-step.ts --bundle --format=esm \
@@ -53,7 +56,7 @@ if (!existsSync(bundlePath)) {
   process.exit(2);
 }
 
-const { planPredSteps } = await import(pathToFileURL(bundlePath).href);
+const { planPredSteps, viewDeltaDeg, M_YAW } = await import(pathToFileURL(bundlePath).href);
 
 let passed = 0;
 let failed = 0;
@@ -164,6 +167,55 @@ check('反例：每帧一步的旧算式在 320 Hz 下物理时间是 64 Hz 的 
   const ratio = simTime / realTime;
   assert(Math.abs(ratio - 5) < 1e-9, `期望 5 倍，实得 ${ratio}`);
   return `旧口径 1 s 内推进 ${frames} 步 = ${simTime.toFixed(0)}ms 物理时间（真时间 ${realTime.toFixed(0)}ms）`;
+});
+
+// ⑦ 视角补偿：算式必须与物理 step_core 同号同系数
+check('视角补偿式与物理同式（yaw -= dx × sensitivity × M_YAW）', () => {
+  const s = 1.5;
+  const a = viewDeltaDeg(10, 0, s);
+  const b = viewDeltaDeg(0, -4, s);
+  assert(Math.abs(a.yawDeg - -10 * s * M_YAW) < 1e-12, `yaw 补偿不符：${a.yawDeg}`);
+  assert(Math.abs(a.pitchDeg) < 1e-12, `dx 不该影响 pitch：${a.pitchDeg}`);
+  assert(Math.abs(b.pitchDeg - 4 * s * M_YAW) < 1e-12, `pitch 补偿不符：${b.pitchDeg}`);
+  return `dx=10 → yaw ${a.yawDeg.toFixed(4)}°；dy=-4 → pitch ${b.pitchDeg.toFixed(4)}°（M_YAW=${M_YAW}）`;
+});
+
+// ⑧ 视角恒等式：任意帧率下「物理 yaw + 未消费增量补偿」== 全部鼠标量对应的角度
+//    （既不吃掉输入，也不与下一步重复计 —— 这就是"视角逐帧立即生效"的定义）
+check('视角恒等式：物理 yaw + 未消费补偿 == 累计鼠标量（帧率无关、不重复计）', () => {
+  const s = 1.5;
+  const k = s * M_YAW;
+  for (const [hz, stepHz] of [[320, 64], [144, 64], [64, 64], [30, 64]]) {
+    const stepMs = 1000 / stepHz;
+    const frameMs = 1000 / hz;
+    let fed = 0; // 累计喂入的鼠标像素
+    let pending = 0; // 物理还没吃掉的像素
+    let physYaw = 0;
+    let acc = 0;
+    let worst = 0;
+    for (let i = 0; i < Math.round(hz * 2); i++) {
+      const dx = 3; // 每帧 3 像素
+      fed += dx;
+      pending += dx;
+      const plan = planPredSteps(acc, frameMs, stepMs, 3);
+      acc = plan.restMs;
+      for (let st = 0; st < plan.steps; st++) {
+        physYaw += viewDeltaDeg(pending, 0, s).yawDeg;
+        pending = 0;
+      }
+      const shownYaw = physYaw + viewDeltaDeg(pending, 0, s).yawDeg;
+      worst = Math.max(worst, Math.abs(shownYaw - -fed * k));
+    }
+    assert(worst < 1e-9, `${hz} Hz 下视角与累计鼠标量偏差 ${worst}`);
+  }
+  return `320/144/64/30 Hz 各 2 s：偏差 < 1e-9°（视角始终等于累计鼠标量）`;
+});
+
+// ⑨ 反例对照：相机只读物理 yaw（不做补偿）会滞后多少 —— 定下"为什么必须补偿"
+check('反例：相机只读物理 yaw 时，200°/s 转向在 64 Hz 下滞后一个 tick = 3.125°', () => {
+  const lagDeg = 200 / TICK;
+  assert(Math.abs(lagDeg - 3.125) < 1e-9, `期望 3.125°，实得 ${lagDeg}`);
+  return `滞后 ${lagDeg.toFixed(3)}°（= 200°/s × 1/64 s）：转向类身法正是在这个量级上失手`;
 });
 
 console.log(`\n预测定步推进计划：${passed} passed, ${failed} failed`);

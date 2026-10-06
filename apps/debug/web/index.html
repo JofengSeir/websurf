@@ -713,7 +713,7 @@
 
                 <div class="ctrl-checkbox-row ctrl-full">
                   <input type="checkbox" id="predInterp" />
-                  <label for="predInterp" title="相机与渲染采样在最近两个物理步之间按累加器余数插值：显示频率与物理频率解耦（代价 = 显示滞后一个物理步 ≈15.6 ms）。关掉则直读物理状态，定步后表现为 64 Hz 阶梯">渲染插值（显示与物理解耦）</label>
+                  <label for="predInterp" title="位置插值：把相机位置在最近两个物理步之间插值，画面更平滑，代价 = 位置显示滞后一个物理步（约 15.6 ms）。默认关（起源的本地玩家按最新预测状态绘制）。视角不受它影响 —— 鼠标转向一律逐帧立即生效">位置插值（更平滑，代价一个 tick 延迟）</label>
                 </div>
               </div>
             </div>

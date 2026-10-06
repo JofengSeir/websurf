@@ -81,9 +81,13 @@ export interface PredictionConfig {
    * 多少帧率（默认 3 ⇒ 21.3 fps；取 2 ⇒ 32 fps）。低于该帧率时预测按比例慢于权威（每个卡顿帧
    * 丢弃超出一个步长的欠账，欠账因此有界、不会雪崩），面板可实时调高。 */
   maxStepsPerFrame: number;
-  /** ② 渲染插值：为真时相机与渲染采样位置/朝向取「最近两个物理步之间」按累加器余数的
-   * 插值（代价 = 显示滞后一个物理步 ≈ 15.6 ms，换来显示频率与物理频率解耦）；
-   * 为假时直读物理状态（定步后表现为 64 Hz 的阶梯）。 */
+  /** ② 渲染插值（**只作用于位置**）：为真时把相机与渲染采样的位置在「最近两个物理步之间」
+   * 插值，显示更平滑，代价 = 位置显示滞后一个物理步（≈15.6 ms）。
+   *
+   * **默认关**：起源的本地玩家按**最新**预测状态绘制（插值只用于远端实体），开它等于给本地操作
+   * 加一个 tick 的延迟 —— 对转向/跳跃类身法（旋转跳、连跳）是负收益。
+   * 视角（yaw / pitch）**不受本开关影响**：一律按「物理还没吃掉的鼠标增量」逐帧补偿，
+   * 见 `apps/debug/src/renderer/prediction-step.ts` 的 `viewDeltaDeg`。 */
   interp: boolean;
 }
 
@@ -231,14 +235,16 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     cullDistance: 12800, // 构造期默认视距；`loadScene` 之后被 lod-manager 的 `setup` 校准值覆盖
   },
   prediction: {
-    // ① 定步 + ② 插值默认开。`maxStepsPerFrame` 默认 3 的理由：预测的补步能力 =
+    // ① 定步默认开。`maxStepsPerFrame` 默认 3 的理由：预测的补步能力 =
     // `maxStepsPerFrame × 帧率`，必须 ≥ `tickRate`(64) 才能在不丢时间的前提下跟上权威 ——
     // 3 把「64 Hz 精确」保到 21.3 fps；取 2 则低于 32 fps 时预测会按比例慢于权威
     // （30 fps 只跑到 60 Hz），而权威侧并无对应降速。高帧率（≥64）下 2 与 3 完全无差别，
     // 只是低帧率/卡顿帧里单帧最多多跑一步。
     fixedStep: true,
     maxStepsPerFrame: 3,
-    interp: true,
+    // ② 位置插值默认**关**：定步已经让"一帧可能没有物理步"，再叠一个 tick 的显示滞后会明显伤
+    // 手感（视角不受它影响，逐帧跟随鼠标）。要更平滑的画面时在面板上打开。
+    interp: false,
   },
   lighting: {
     ambientColor: 0xffffff,

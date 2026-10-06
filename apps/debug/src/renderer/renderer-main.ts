@@ -31,7 +31,7 @@ import type { RuntimeConfig } from '../config.js';
 import type { PlaneInfo, SceneDataMessage } from '../worker/worker-types.js';
 import type { SharedState } from '../../../../src/ts-shared/auth/shared-state.js';
 import { AuthorityCalibrator, normalizeAngleDeg } from '../../../../src/ts-shared/phys/authority-calibrator.js';
-import { planPredSteps } from './prediction-step.js';
+import { planPredSteps, viewDeltaDeg } from './prediction-step.js';
 import type { Brush } from '../physics/physics/Collision/Collision.types.js';
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
@@ -252,6 +252,15 @@ export class RendererMain {
   private pendingDy = 0;
   /** 待喂按键掩码（`feedInput` 直接覆盖）。 */
   private pendingKeys = 0;
+  /**
+   * 自上次物理步以来**出现过**的键位（OR 累积）。
+   *
+   * 存在的理由：定步之后一帧不一定有物理步（320 fps 下 5 帧才 1 步），而输入层里有**只存在
+   * 一帧的脉冲**——`apps/debug/src/app.ts` 的滚轮跳（`wheelJumpPending`，消费一次即清）。
+   * 只看"本帧键位"会把这些脉冲按帧率吞掉（命中率 ≈ 帧率 ÷ tickRate 的倒数），滚轮连跳
+   * （bhop 身法）因此基本失效。掩码在**物理步消费后**才清零，保证任何一次按下都被至少一步看到。
+   */
+  private pendingKeyLatch = 0;
   /** noclip 标记（`setPredictionNoclip` 写入并透传 Rust `set_noclip`）：为真时 `tick` 跳过近平面探测。 */
   private noclipActive = false;
   /** 上一物理步的墙钟毫秒（0 表示本帧用 1/64 秒兜底）。 */
@@ -260,6 +269,9 @@ export class RendererMain {
   // ── 预测定步（①）与渲染插值（②），见 config.ts 的 PredictionConfig ──────
   /** 定步累加器（毫秒）：每帧加进墙钟间隔，每个物理步扣掉一个步长；余数即插值系数。 */
   private predAccMs = 0;
+  /** 物理步累计计数（只增）：`advancePrediction` 每推进一步 +1。
+   *  app 的输入层用它判定"一帧脉冲是否已被物理看到"（滚轮跳，见 `pendingKeyLatch`）。 */
+  private physicsStepCount = 0;
   /** 上一物理步结束时的显示快照（`null` = 尚无快照，直读物理状态）。 */
   private interpPrev: RenderPose | null = null;
   /** 最近一个物理步结束时的显示快照。 */
@@ -680,19 +692,23 @@ export class RendererMain {
       // 回放 / 单步闸门 / 关掉定步时退回「每帧一步、步长取录制步长或墙钟间隔」的旧口径。
       const predCfg = this.config.prediction;
       const fixedStep = !this.replayMode && !this.stepGated && predCfg.fixedStep;
+      // 本帧键位：最新按住态 + 自上次步进以来出现过的脉冲位（滚轮跳等，见 pendingKeyLatch）
+      const stepKeys = this.pendingKeys | this.pendingKeyLatch;
       let alpha = 0;
       if (fixedStep) {
         const stepMs = 1000 / tickRate;
         // 步数与插值系数由纯函数给出（`prediction-step.ts`，node 门 `test:prediction-step` 锁定其不变量）
         const plan = planPredSteps(this.predAccMs, frameMs, stepMs, predCfg.maxStepsPerFrame);
-        for (let i = 0; i < plan.steps; i++) this.advancePrediction(stepMs / 1000);
+        for (let i = 0; i < plan.steps; i++) this.advancePrediction(stepMs / 1000, stepKeys);
         this.predAccMs = plan.restMs;
         alpha = plan.alpha;
       } else {
         const dt = replayPending !== null ? replayPending : frameMs / 1000;
         this.predAccMs = 0;
-        this.advancePrediction(dt);
+        this.advancePrediction(dt, stepKeys);
       }
+      // 脉冲锁存已随本帧的物理步交出去（本帧没有步则留到下一帧）
+      this.pendingKeyLatch = 0;
       // 事件消费：把 Rust 侧这一帧产生的 teleport/death 事件交给回调（app.ts 的计时挑战状态机）
       this.consumePhysEvents();
       // 取物理状态摆放相机（Rust 输出的角度是度，这里换成弧度）
@@ -701,10 +717,20 @@ export class RendererMain {
         yaw: number; pitch: number;
         eyeHeight: number;
       };
-      // 显示位姿：定步 + 插值开启时取最近两个物理步之间的插值（②），否则直读物理状态
-      const shown = fixedStep && predCfg.interp
+      // 显示位姿：位置按需插值（②），**视角一律立即**（见下）。
+      // 位置插值只在开启时用，代价是显示滞后一个物理步；视角不参与插值 —— 起源的本地玩家视角
+      // 是逐帧跟随鼠标的，把视角也滞后一个 tick 会毁掉转向类身法（旋转跳 / 空中转向）。
+      const pose = fixedStep && predCfg.interp
         ? this.interpolatedPose(st, alpha)
         : { x: st.posX, y: st.posY, z: st.posZ, yaw: st.yaw, pitch: st.pitch, eyeHeight: st.eyeHeight };
+      // 视角 = 物理 yaw/pitch + **物理还没吃掉**的那部分鼠标增量（同一算式，符号一致）。
+      // 下一步消费掉这些增量后补偿量自然归零，因此既不延迟一个 tick，也不会重复计一次。
+      const pendingView = viewDeltaDeg(this.pendingDx, this.pendingDy, this.config.input.sensitivity);
+      const shown = {
+        ...pose,
+        yaw: pose.yaw + pendingView.yawDeg,
+        pitch: pose.pitch + pendingView.pitchDeg,
+      };
       // 路径记录 —— 渲染物理线：每个 rAF 一个节点，采样点是**显示**位置的脚底
       // （下面的相机 Y 还要再加 eyeHeight）
       this.pathRecorder.addRender(now, shown.x, shown.y, shown.z);
@@ -779,12 +805,15 @@ export class RendererMain {
    *
    * 快照只服务显示（`interpolatedPose`），绝不写回物理：物理状态始终是 `PhysWorld` 自己的
    * 积分结果，插值只决定相机与渲染采样取在哪一刻。
+   *
+   * @param keysMask 本步用的键位掩码（由 `tick` 传入，含一帧脉冲的锁存位）。
    */
-  private advancePrediction(dt: number): void {
+  private advancePrediction(dt: number, keysMask: number): void {
     const phys = this.predPhys;
     if (!phys) return;
-    phys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
-    // keys/dx/dy 传完后立即清零增量（按键掩码由下一次 feedInput 覆盖）
+    phys.tick(dt, keysMask, this.pendingDx, this.pendingDy);
+    this.physicsStepCount++;
+    // keys/dx/dy 传完后立即清零增量（按键掩码由下一次 feedInput 覆盖，脉冲锁存由 tick 清）
     this.pendingDx = 0;
     this.pendingDy = 0;
     const st = phys.state() as {
@@ -839,6 +868,8 @@ export class RendererMain {
     this.predAccMs = 0;
     this.interpPrev = null;
     this.interpCur = null;
+    // 位置突变时丢掉滞留的脉冲锁存（传送/重生前的按键不该带到新位置）
+    this.pendingKeyLatch = 0;
   }
 
   /** 准星射线检测：从相机位置沿相机前方发射，与 BSP mesh、碰撞体与触发器求交，
@@ -1114,11 +1145,20 @@ export class RendererMain {
     this.needsRender = true;
   }
 
-  /** 物理实例输入（app 事件回调喂入；唯一输入通道）。 */
+  /** 物理实例输入（app 事件回调喂入；唯一输入通道）。
+   *
+   * 鼠标增量**累加**、键位取**最新按住态并同时 OR 进脉冲锁存**（见 `pendingKeyLatch`）：
+   * 定步下一帧可能没有物理步，只存在一帧的按键脉冲必须留到被某一步消费为止。 */
   feedInput(dx: number, dy: number, keysMask: number): void {
     this.pendingDx += dx;
     this.pendingDy += dy;
     this.pendingKeys = keysMask;
+    this.pendingKeyLatch |= keysMask;
+  }
+
+  /** 物理步累计计数：app 的输入层用它在"确认脉冲已被物理消费"后清自己的待发标志。 */
+  getPhysicsStepCount(): number {
+    return this.physicsStepCount;
   }
 
   // ── 输入回放模式（debug 专属；见 input/input-recorder.ts）──────────────────

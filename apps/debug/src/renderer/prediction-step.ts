@@ -11,6 +11,30 @@
  * 实测为「权威已停死、预测仍以 16 HU/s 下滑」。定步把预测拉回与权威同频。
  */
 
+/**
+ * 视角立即生效用的换算（纯函数）：把**尚未被物理步吃掉**的鼠标增量换成角度补偿量。
+ *
+ * 为什么需要它：起源的本地玩家视角是**逐帧**跟随鼠标的（`viewangles` 每帧更新），而物理解算按
+ * 固定 tick 消费 `usercmd`（本移植里 `src/phys/mod.rs` 的 `step_core` 用同一算式
+ * `yaw -= dx × sensitivity × M_YAW`）。定步之后若把相机直接摆在物理 `yaw` 上，视角就被量化到
+ * `tickRate`（64 Hz）—— 鼠标手感凭空多出最多一个 tick 的延迟，转向类身法（旋转跳 / 空中转向）
+ * 直接做不出来。把"物理还没吃的那部分增量"按同一算式补到视角上：视角与帧率同步，且
+ * **不会与物理重复计** —— 下一步消费掉这些增量后，补偿量自然归零。
+ *
+ * 与 `src/phys/player.rs` 的 `M_YAW` 必须同值（跨文件引用按符号名，不写行号）。
+ */
+export const M_YAW = 0.022;
+
+/** 视角补偿量（度）：`yaw -= dx × sensitivity × M_YAW`，`pitch` 同式（与 `step_core` 同号）。 */
+export function viewDeltaDeg(
+  dx: number,
+  dy: number,
+  sensitivity: number,
+): { yawDeg: number; pitchDeg: number } {
+  const k = sensitivity * M_YAW;
+  return { yawDeg: -dx * k, pitchDeg: -dy * k };
+}
+
 /** 一帧的推进计划：步数 + 渲染插值系数 + 留给下一帧的累加器余量。 */
 export interface PredStepPlan {
   /** 本帧应推进的物理步数（0 = 本帧不推进，只更新显示插值）。 */
