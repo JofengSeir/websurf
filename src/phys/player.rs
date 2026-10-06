@@ -214,13 +214,19 @@ pub struct PhysParams {
     pub hull_stand_height: f64,
     /// 蹲箱高（HU）。同时是 `eye_height()` 缩放 `EYE_DUCK` 的比例基准。
     pub hull_duck_height: f64,
+    /// 撞面后的推开距离（HU）：见 `try_player_move` 的"贴面解死锁"段。默认 `PUSH_OUT`(0.1)。
+    pub push_out: f64,
+    /// true = 推开**只在起点已嵌入实体时**执行（`tr.start_solid`）；false = 每次撞面都推
+    /// （旧口径）。默认 true。
+    pub push_out_only_when_solid: bool,
 }
 
 /// 默认值：9 项直接取模块常量（gravity / jump_height / air_accelerate / run_speed /
 /// walk_speed / crouch_speed / hull_half_width / hull_stand_height / hull_duck_height），
-/// 另 9 项是字面量：accelerate 10.0、friction 4.0、stop_speed 100.0、sensitivity 1.5、
-/// yaw_bind_speed 210.0、noclip_speed 800.0、teleport_gate_ticks 3，
-/// 以及两个默认打开的开关 autobhop / bhop_speed_clamp。
+/// 另 10 项是字面量或本文件常量：accelerate 10.0、friction 4.0、stop_speed 100.0、
+/// sensitivity 1.5、yaw_bind_speed 210.0、noclip_speed 800.0、teleport_gate_ticks 3、
+/// `push_out = PUSH_OUT`，以及三个默认打开的开关 autobhop / bhop_speed_clamp /
+/// `push_out_only_when_solid`。
 ///
 /// 本 crate 内参数默认值的唯一来源：`src/phys/mod.rs` 的 `PhysWorld::new` 用它建实例参数，
 /// `PhysWorld::build_world` 再拿同一份实例参数重建玩家（两处都经 `create_player`）。
@@ -245,6 +251,8 @@ impl Default for PhysParams {
             hull_half_width: DEFAULT_HULL_HALF_WIDTH,
             hull_stand_height: DEFAULT_HULL_STAND_HEIGHT,
             hull_duck_height: DEFAULT_HULL_DUCK_HEIGHT,
+            push_out: PUSH_OUT,
+            push_out_only_when_solid: true,
         }
     }
 }
@@ -748,9 +756,19 @@ fn try_player_move(world: &mut World, p: &mut Player, _params: &PhysParams, dt: 
         }
 
         // 撞击后沿法线推开（贴面解死锁）
-        p.origin[0] += n[0] * PUSH_OUT;
-        p.origin[1] += n[1] * PUSH_OUT;
-        p.origin[2] += n[2] * PUSH_OUT;
+        //
+        // **只在"起点已在实体内"时推**（`push_out_only_when_solid`）：这是推开原本要解决的场合
+        // （贴面死锁 = 玩家嵌进几何、trace 一出发就是 `startsolid`）。普通的"滑行中擦到面"也推
+        // 就是每帧固定 0.1 HU 的位移 —— 与 dt 无关、与速度无关，高刷屏下每帧都推一次
+        // （320 Hz ⇒ 32 HU/s），这正是抵墙时"往墙里挤一下又被弹回"的来源。
+        let push = if !_params.push_out_only_when_solid || tr.start_solid {
+            _params.push_out
+        } else {
+            0.0
+        };
+        p.origin[0] += n[0] * push;
+        p.origin[1] += n[1] * push;
+        p.origin[2] += n[2] * push;
 
         time_left -= time_left * tr.fraction;
 

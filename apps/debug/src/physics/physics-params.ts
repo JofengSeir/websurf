@@ -19,11 +19,11 @@ import type { PhysWorld } from '../../pkg/websurf_wasm.js';
 /** 默认碰撞箱体型（HU）：与 `src/phys/player.rs` 的 `DEFAULT_HULL_HALF_WIDTH` / `DEFAULT_HULL_STAND_HEIGHT` / `DEFAULT_HULL_DUCK_HEIGHT` 同值。 */
 const DEFAULT_HULL = { halfWidth: 16, standHeight: 72, duckHeight: 54 };
 
-/** 面板参数名 → Rust `set_params` 的 snake_case 键名（11 项）。
+/** 面板参数名 → Rust `set_params` 的 snake_case 键名（13 项）。
  *
  * 面板参数 `tickRate` 不在本表：它是 JS 驱动层的固定步长，不是 Rust 键。
  *
- * `src/phys/mod.rs` 的 `set_params` 共接受 15 个键；本表不含 `sensitivity`、
+ * `src/phys/mod.rs` 的 `set_params` 共接受 17 个键；本表不含 `sensitivity`、
  * `yaw_bind_speed`、`noclip_speed`、`teleport_gate_ticks` 四项 —— 它们由
  * `src/ts-shared/phys/params.ts` 的 `buildPhysicsParams` 一次性写全（调用点见
  * `apps/debug/src/worker/main.ts` 的 `syncParamsToWasm`，以及
@@ -40,6 +40,8 @@ export const PARAM_TO_RUST: Record<string, string> = {
   jumpHeight: 'jump_height',
   autobhop: 'autobhop',
   bhopSpeedClamp: 'bhop_speed_clamp',
+  pushOut: 'push_out',
+  pushOutOnlyWhenSolid: 'push_out_only_when_solid',
 };
 
 /** 碰撞箱面板状态（`getHullState` 的返回结构）。 */

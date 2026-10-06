@@ -71,6 +71,9 @@ mod step_gate_tests;
 /// 卡死判据着地门回归（2 项）：前方地面更高时不得原地抖动。
 #[cfg(test)]
 mod stuck_gate_tests;
+/// 贴面推开的步长无关性回归（2 项）：高刷屏步长下贴墙不得被"每次撞面都推"推着走。
+#[cfg(test)]
+mod contact_push_tests;
 
 #[cfg(test)]
 mod slope_speed_tests;
@@ -778,10 +781,11 @@ impl PhysWorld {
 
     /// 按 JSON patch 覆盖物理参数：**只处理出现过的键**，未出现的键保持原值。
     ///
-    /// 可接受的键（与下方 `Patch` 结构逐字对应，共 15 个）：`gravity` / `accelerate` /
+    /// 可接受的键（与下方 `Patch` 结构逐字对应，共 17 个）：`gravity` / `accelerate` /
     /// `friction` / `stop_speed` / `jump_height` / `air_accelerate` / `run_speed` /
     /// `walk_speed` / `crouch_speed` / `autobhop` / `bhop_speed_clamp` / `sensitivity` /
-    /// `yaw_bind_speed` / `noclip_speed` / `teleport_gate_ticks`。
+    /// `yaw_bind_speed` / `noclip_speed` / `teleport_gate_ticks` / `push_out` /
+    /// `push_out_only_when_solid`。
     ///
     /// 三项碰撞箱尺寸不在这里，走 `set_hull`。
     /// `teleport_gate_ticks` 会被写进 `params`，但 `src/phys/teleport.rs` 的
@@ -805,6 +809,8 @@ impl PhysWorld {
             yaw_bind_speed: Option<f64>,
             noclip_speed: Option<f64>,
             teleport_gate_ticks: Option<u32>,
+            push_out: Option<f64>,
+            push_out_only_when_solid: Option<bool>,
         }
         let p: Patch = serde_json::from_str(json).map_err(|e| to_js_err(e, "set_params"))?;
         if let Some(v) = p.gravity {
@@ -851,6 +857,12 @@ impl PhysWorld {
         }
         if let Some(v) = p.teleport_gate_ticks {
             self.params.teleport_gate_ticks = v;
+        }
+        if let Some(v) = p.push_out {
+            self.params.push_out = v;
+        }
+        if let Some(v) = p.push_out_only_when_solid {
+            self.params.push_out_only_when_solid = v;
         }
         Ok(())
     }
