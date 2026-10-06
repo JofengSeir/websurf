@@ -58,6 +58,10 @@ export interface WasmBrushPlane {
    * 渲染端要画「物理面」时只认这个
    * 标志，**不得**用「面上有几个顶点」之类启发式自己反推。 */
   is_real_face: boolean;
+  /** 该平面是否来自 BSP 原生 bevel side（`side.bevel != 0`）：编译器为"盒子别卡在棱上"
+   * 生成的辅助碰撞平面，VBSP 在 winding 裁剪时跳过它 ⇒ 不构成实体表面。与
+   * `is_real_face` 正交，供显示端把"辅助碰撞面"与实体表面分开画。 */
+  is_bevel: boolean;
 }
 
 /** 一个 BSP brush（对应上游 `WasmBrush`）。 */

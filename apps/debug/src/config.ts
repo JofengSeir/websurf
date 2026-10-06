@@ -129,6 +129,9 @@ export interface HudConfig {
 export interface DebugConfig {
   /** 显示 brush 碰撞箱线框（`colliderDebug.setDebugFlags` 的第一个实参；改动经 `applyConfigPatch` 的 debug 分支重设）。 */
   showSolids: boolean;
+  /** 显示 BSP 原生 bevel 辅助碰撞面线框（白，`colliderDebug.setBevelVisible`；可视距离复用 brushViewDistance）。
+   * bevel 平面由编译器为"盒子别卡在棱上"生成、不构成实体表面，单独一路以区别于实体面线框。 */
+  showBevel: boolean;
   /** brush 线框可视距离（HU，0 = 全量）：`setDebugFlags` 的第四个实参。 */
   brushViewDistance: number;
   /** 显示传送触发区线框（`setDebugFlags` 的第二个实参）。 */
@@ -241,6 +244,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   },
   debug: {
     showSolids: false,
+    showBevel: false,
     brushViewDistance: 512,
     showTriggers: false,
     triggerViewDistance: 0,

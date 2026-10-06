@@ -795,6 +795,10 @@
                 <input type="checkbox" id="showSolids" />
                 <label for="showSolids" title="玩家附近碰撞箱线框：地面绿/斜坡黄/墙红">显示brush碰撞</label>
               </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showBevel" />
+                <label for="showBevel" title="BSP 原生 bevel 辅助碰撞面线框（白）：编译器为「盒子别卡在棱上」生成的过棱平面，不构成实体表面、只在盒体扩张后的碰撞凸包里补支撑角；可视距离跟随 brush 可视距离">显示bevel辅助面</label>
+              </div>
               <label title="brush 碰撞线框显示可视距离（HU）：0 = 全量显示">brush 可视距离</label>
               <input type="range" id="brushViewDistance" min="0" max="16384" step="64" value="512" />
               <div class="val"><input type="number" id="brushViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="512" /></div>

@@ -115,6 +115,7 @@ const dom = {
 	pathCountsEl: document.getElementById('pathCounts') as HTMLElement | null,
 	// 显示设置（显示设置面板）
 	showSolidsChk: document.getElementById('showSolids') as HTMLInputElement | null,
+	showBevelChk: document.getElementById('showBevel') as HTMLInputElement | null,
 	brushViewDistanceRange: document.getElementById('brushViewDistance') as HTMLInputElement | null,
 	brushViewDistanceNum: document.getElementById('brushViewDistanceNum') as HTMLInputElement | null,
 	showTriggersChk: document.getElementById('showTriggers') as HTMLInputElement | null,
@@ -1636,6 +1637,10 @@ function bindUI(): void {
 		inputBridge?.sendConfig('debug', patch);
 		saveUiPrefs();
 	};
+	dom.showBevelChk?.addEventListener('change', (e) => {
+		const enabled = (e.target as HTMLInputElement).checked;
+		applyTriDebug({ showBevel: enabled });
+	});
 	dom.showPhyChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyTriDebug({ showPhy: enabled });

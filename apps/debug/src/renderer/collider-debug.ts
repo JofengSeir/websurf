@@ -10,10 +10,11 @@
  *   本模块按 `TriMesh.surfaceprop`（`apps/debug/src/physics/physics/Collision/Collision.types.ts`）
  *   是否存在拆成 .phy 与可视网格两条路径。
  *
- * 四个 Group 与四个开关彼此独立，各有自己的可视距离：
+ * 五个 Group 与五个开关彼此独立，各有自己的可视距离：
  * - `showSolids`  实体碰撞体凸包线框，逐面按法线着色（地面绿 / 斜坡黄 / 墙红）；
  * - `showTriggers` 触发器凸包或 AABB 线框（青=已链接 / 紫=孤儿 / 灰=初始禁用 / 橙=非玩家）；
- * - `showPhy` / `showVis` 模型三角形线框（橙 / 紫）。
+ * - `showPhy` / `showVis` 模型三角形线框（橙 / 紫）；
+ * - `showBevel` BSP 原生 bevel 辅助碰撞面线框（白，画 bevel 平面与凸包的相交轮廓）。
  *
  * **面高亮纪律（本模块最高优先级）**：debug 画的必须是物理系统**实际影响运动**的面，
  * 画不出来就不画。判据唯一来源是上游 `export_brushes_planes` 逐平面给出的 `is_real_face`
@@ -390,7 +391,7 @@ function pushAabbEdges(
 // ---------------------------------------------------------------------------
 
 /**
- * 碰撞体可视化：四个 Group 与四个开关，由 `renderer-main` 的每帧循环驱动。
+ * 碰撞体可视化：五个 Group 与五个开关，由 `renderer-main` 的每帧循环驱动。
  * `update` 内部按各自的限流计数重建：实体碰撞箱每 `REBUILD_INTERVAL` 帧、模型三角形
  * 每 `TRI_REBUILD_INTERVAL` 帧（开关或距离变更时 `phyDirty` 立即触发）、触发器每帧重建。
  * `update` 的返回值表示本帧是否装配过对象，调用方据此置 `needsRender`。
@@ -406,12 +407,17 @@ export class ColliderDebug {
 	private visGroup: THREE.Group | null = null;
 	/** 触发器线框（按触发类型着色，受 showTriggers 控制）。 */
 	private triggerGroup: THREE.Group | null = null;
+	/** bevel 辅助碰撞面线框（白）：画的是 BSP 原生 bevel 平面与凸包的相交轮廓，
+	 * 与实体面线框（solidGroup，按法线分类取色）区分开。 */
+	private bevelGroup: THREE.Group | null = null;
 	/** 实体碰撞箱开关。 */
 	private showSolids = false;
 	/** 实体碰撞箱可视距离（HU，XZ 平面内点到 brush AABB 的距离；<= 0 = 全量）。 */
 	private brushViewDistance = 512;
 	/** 触发器开关。 */
 	private showTriggers = false;
+	/** bevel 辅助碰撞面开关（默认关）：独立于 showSolids，可视距离复用 brushViewDistance。 */
+	private showBevel = false;
 	/** 触发器可视距离（HU；<= 0 = 全量）。 */
 	private triggerViewDistance = 0;
 	/** .phy 三角形开关（橙色线框）。 */
@@ -455,6 +461,11 @@ export class ColliderDebug {
 		this.triggerGroup.name = '__vbsp_trigger_debug__';
 		this.triggerGroup.visible = false;
 		scene.add(this.triggerGroup);
+
+		this.bevelGroup = new THREE.Group();
+		this.bevelGroup.name = '__vbsp_bevel_debug__';
+		this.bevelGroup.visible = false;
+		scene.add(this.bevelGroup);
 	}
 
 	/** 注入模型三角形网格，并置 `phyDirty`、把限流计数推到上限，使下次 `update` 立即重建。 */
@@ -493,6 +504,19 @@ export class ColliderDebug {
 		if (this.triggerGroup) {
 			this.triggerGroup.visible = showTriggers;
 			if (!showTriggers) this.clearGroup(this.triggerGroup);
+		}
+		this.frameCounter = REBUILD_INTERVAL;
+	}
+
+	/**
+	 * 设置 bevel 辅助碰撞面线框（白）开关。开启或关闭都把限流计数推到上限，
+	 * 下一次 `update` 必定重建/清空一次；可视距离复用 `brushViewDistance`。
+	 */
+	setBevelVisible(showBevel: boolean): void {
+		this.showBevel = showBevel;
+		if (this.bevelGroup) {
+			this.bevelGroup.visible = showBevel;
+			if (!showBevel) this.clearGroup(this.bevelGroup);
 		}
 		this.frameCounter = REBUILD_INTERVAL;
 	}
@@ -547,12 +571,18 @@ export class ColliderDebug {
 		if (!this.scene) return false;
 		let rebuilt = false;
 
-		// 1. 实体碰撞箱：开关打开才累加计数，达到 REBUILD_INTERVAL 才真正重建
-		if (this.showSolids && this.solidGroup) {
+		// 1. 实体碰撞箱 + bevel 辅助面：共用限流计数（bevel 的筛选口径与 solids 相同），
+		//    达到 REBUILD_INTERVAL 才真正重建
+		if ((this.showSolids || this.showBevel) && this.solidGroup) {
 			this.frameCounter++;
 			if (this.frameCounter >= REBUILD_INTERVAL) {
 				this.frameCounter = 0;
-				this.rebuildSolids(cameraPos, colliders, config);
+				if (this.showSolids && this.solidGroup) {
+					this.rebuildSolids(cameraPos, colliders, config);
+				}
+				if (this.showBevel && this.bevelGroup) {
+					this.rebuildBevel(cameraPos, colliders);
+				}
 				rebuilt = true;
 			}
 		}
@@ -581,7 +611,7 @@ export class ColliderDebug {
 
 	/** 四个开关中任一为真即返回 true；`renderer-main` 据此决定本帧是否调用 `update`。 */
 	get hasDebugWork(): boolean {
-		return this.showSolids || this.showTriggers || this.showPhy || this.showVis;
+		return this.showSolids || this.showBevel || this.showTriggers || this.showPhy || this.showVis;
 	}
 
 	/**
@@ -689,6 +719,120 @@ export class ColliderDebug {
 			depthTest: true,
 		});
 		this.solidGroup!.add(new THREE.LineSegments(geom, mat));
+	}
+
+	/**
+	 * 重建 bevel 辅助碰撞面线框（白）：对附近 brush 的每一条 `isBevel` 平面，取落在该
+	 * 平面上的凸包顶点作为它与凸包的相交轮廓——恰 2 个顶点画一条线段（bevel 平面过棱
+	 * 的典型形态），≥3 个按平面内绕质心的角度排序画闭合环，0/1 个顶点无轮廓可画即跳过
+	 * （这类平面只服务盒体扩张后的宽阶段，与凸包本身不相交）。
+	 *
+	 * 原理（VBSP `AddBrushBevels`，见 SDK `src/utils/vbsp/map.cpp`）：box bevel 补齐
+	 * brush 缺失的轴向面、edge bevel 沿非轴向棱生成"斜切轴面"，二者都要求凸包全部顶点
+	 * 落在平面内侧；且 `MakeBrushWindings` 在计算各侧 winding 时跳过 bevel 侧 ⇒ 它们
+	 * 不构成实体表面，只让引擎按盒体扩张碰撞凸包时在棱处得到贴合的支撑面。
+	 * 筛选口径与 `rebuildSolids` 相同（`brushViewDistance` 的 XZ 粗筛 + 上限截断）。
+	 */
+	private rebuildBevel(cameraPos: THREE.Vector3, colliders: Brush[]): void {
+		this.clearGroup(this.bevelGroup!);
+		if (colliders.length === 0) return;
+
+		const pos = cameraPos;
+		const full = this.brushViewDistance <= 0;
+		const radiusSq = this.brushViewDistance * this.brushViewDistance;
+		const nearby: Brush[] = [];
+		for (const brush of colliders) {
+			if (!full) {
+				const nx = Math.max(brush.min.x, Math.min(pos.x, brush.max.x));
+				const nz = Math.max(brush.min.z, Math.min(pos.z, brush.max.z));
+				const dx = pos.x - nx;
+				const dz = pos.z - nz;
+				if (dx * dx + dz * dz > radiusSq) continue;
+			}
+			nearby.push(brush);
+			if (nearby.length >= MAX_DEBUG_COLLIDERS) break;
+		}
+
+		const positions: number[] = [];
+		let bevelPlanes = 0;
+		let outlined = 0;
+		for (const brush of nearby) {
+			const hull = computeBrushHull(brush);
+			if (hull.length < 3) continue;
+			for (const plane of brush.planes) {
+				if (plane.isBevel !== true) continue;
+				bevelPlanes++;
+				const on = hull.filter(
+					(v) =>
+						Math.abs(
+							v[0] * plane.normal.x + v[1] * plane.normal.y + v[2] * plane.normal.z - plane.dist,
+						) < FACE_EPS,
+				);
+				if (on.length < 2) continue;
+				outlined++;
+				if (on.length === 2) {
+					positions.push(on[0][0], on[0][1], on[0][2], on[1][0], on[1][1], on[1][2]);
+					continue;
+				}
+				// ≥3 个顶点：按平面内绕质心的极角排序，画闭合环
+				let cx = 0;
+				let cy = 0;
+				let cz = 0;
+				for (const v of on) {
+					cx += v[0];
+					cy += v[1];
+					cz += v[2];
+				}
+				cx /= on.length;
+				cy /= on.length;
+				cz /= on.length;
+				const n = plane.normal;
+				// 平面内正交基：取与法线最不正交的坐标轴参与叉乘，避免退化
+				const ref = Math.abs(n.x) > Math.abs(n.y) && Math.abs(n.x) > Math.abs(n.z)
+					? [1, 0, 0]
+					: Math.abs(n.y) >= Math.abs(n.z)
+						? [0, 1, 0]
+						: [0, 0, 1];
+				let ux = n.y * ref[2] - n.z * ref[1];
+				let uy = n.z * ref[0] - n.x * ref[2];
+				let uz = n.x * ref[1] - n.y * ref[0];
+				const ul = Math.hypot(ux, uy, uz) || 1;
+				ux /= ul;
+				uy /= ul;
+				uz /= ul;
+				const vx = n.y * uz - n.z * uy;
+				const vy = n.z * ux - n.x * uz;
+				const vz = n.x * uy - n.y * ux;
+				const ordered = on
+					.map((v) => {
+						const dx = v[0] - cx;
+						const dy = v[1] - cy;
+						const dz = v[2] - cz;
+						return { v, ang: Math.atan2(dx * vx + dy * vy + dz * vz, dx * ux + dy * uy + dz * uz) };
+					})
+					.sort((a, b) => a.ang - b.ang)
+					.map((e) => e.v);
+				for (let i = 0; i < ordered.length; i++) {
+					const a = ordered[i];
+					const b = ordered[(i + 1) % ordered.length];
+					positions.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+				}
+			}
+		}
+
+		if (positions.length === 0) return;
+		const geom = new THREE.BufferGeometry();
+		geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+		const mat = new THREE.LineBasicMaterial({
+			color: 0xffffff,
+			transparent: true,
+			opacity: 0.9,
+			depthTest: false, // 始终可见：bevel 轮廓贴着实体表面，深度测试会与线框互相吃线
+		});
+		this.bevelGroup!.add(new THREE.LineSegments(geom, mat));
+		console.log(
+			`[collider-debug] bevel 重建: 距离=${this.brushViewDistance} brush=${nearby.length} bevel平面=${bevelPlanes} 有轮廓=${outlined} 段=${positions.length / 6}`,
+		);
 	}
 
 	/**
@@ -900,6 +1044,7 @@ export class ColliderDebug {
 	 */
 	clearAll(): void {
 		if (this.solidGroup) this.clearGroup(this.solidGroup);
+		if (this.bevelGroup) this.clearGroup(this.bevelGroup);
 		if (this.phyGroup) this.clearGroup(this.phyGroup);
 		if (this.visGroup) this.clearGroup(this.visGroup);
 		if (this.triggerGroup) this.clearGroup(this.triggerGroup);
@@ -910,12 +1055,14 @@ export class ColliderDebug {
 		this.clearAll();
 		if (this.scene) {
 			if (this.solidGroup) this.scene.remove(this.solidGroup);
+			if (this.bevelGroup) this.scene.remove(this.bevelGroup);
 			if (this.phyGroup) this.scene.remove(this.phyGroup);
 			if (this.visGroup) this.scene.remove(this.visGroup);
 			if (this.triggerGroup) this.scene.remove(this.triggerGroup);
 		}
 		this.scene = null;
 		this.solidGroup = null;
+		this.bevelGroup = null;
 		this.phyGroup = null;
 		this.visGroup = null;
 		this.triggerGroup = null;

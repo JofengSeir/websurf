@@ -22,6 +22,15 @@ export interface Plane {
    * 此时消费端按「未知」处理，不因为缺字段就当成真面。
    */
   isRealFace?: boolean;
+  /**
+   * 该平面是否来自 BSP 原生 bevel side（`side.bevel != 0`，编译器为"盒子别卡在棱上"
+   * 生成的辅助碰撞平面；VBSP 在 `MakeBrushWindings` 里跳过 bevel 侧的 winding 裁剪，
+   * 故它不构成实体表面，只服务引擎盒体扩张后的凸包补角）。
+   *
+   * 同样**只被渲染端读**；可选性与 `isRealFace` 同理（触发器路径没有这个标志）。
+   * 与 `isRealFace` 正交：bevel 平面大多不构成有面积的面，少数照实构成。
+   */
+  isBevel?: boolean;
 }
 
 /** 凸包 brush：一组平面 + 其 AABB 角点。 */

@@ -401,6 +401,7 @@ export class RendererMain {
       config.debug.phyViewDistance,
       config.debug.visViewDistance,
     );
+    this.colliderDebug.setBevelVisible(config.debug.showBevel);
     this.planeInfoEnabled = config.debug.showPlaneInfo;
 
     this.needsRender = true;
@@ -902,6 +903,7 @@ export class RendererMain {
         this.config.debug.phyViewDistance,
         this.config.debug.visViewDistance,
       );
+      this.colliderDebug.setBevelVisible(this.config.debug.showBevel);
       this.planeInfoEnabled = this.config.debug.showPlaneInfo;
       this.needsRender = true;
     } else if (section === 'input' && this.cameraController) {

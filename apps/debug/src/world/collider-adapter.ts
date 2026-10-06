@@ -237,6 +237,7 @@ export function adaptBrushes(wasmJson: string): AdaptedBrushes {
       normal: { x: wp.normal[0], y: wp.normal[1], z: wp.normal[2] },
       dist: wp.dist,
       isRealFace: wp.is_real_face,
+      isBevel: wp.is_bevel,
     }));
 
     // AABB 逐轴直映

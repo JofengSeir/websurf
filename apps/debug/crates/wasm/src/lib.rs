@@ -2550,6 +2550,10 @@ impl BspProcessor {
             /// 有面积的面而判 `false`；少数与凸包顶点构成可量多边形的照实判 `true`
             /// （它们确实参与逐平面裁剪，显示端画出来与物理一致）。
             is_real_face: bool,
+            /// 该平面是否来自 BSP 原生 bevel side（`side.bevel != 0`，编译器为"盒子别卡在
+            /// 棱上"生成的辅助碰撞平面；winding 裁剪时被 VBSP 跳过，不构成实体表面）。
+            /// 与 `is_real_face` 正交：bevel 平面大多判非面，少数照实判面。
+            is_bevel: bool,
         }
 
         // 顶点"落在某平面上"的判定容差（HU）。凸包顶点由 `plane_intersect` 从三元组交点直接
@@ -2782,6 +2786,7 @@ impl BspProcessor {
             // 数组访问用 .get() 防 panic 破坏 wasm-bindgen 借用状态
             // （bevel side 照常收集，见 collect_planes_and_flags 的说明）
             let mut bsp_planes: Vec<&Plane> = Vec::new();
+            let mut bsp_bevels: Vec<bool> = Vec::new();
             let mut is_sky = false;
             let mut is_nodraw = false;
             let start = brush.brush_side as usize;
@@ -2792,6 +2797,7 @@ impl BspProcessor {
                 };
                 if let Some(plane) = bsp.planes.get(side.plane as usize) {
                     bsp_planes.push(plane);
+                    bsp_bevels.push(side.bevel != 0);
                 }
                 if side.texture_info >= 0 {
                     if let Some(ti) = bsp.textures_info.get(side.texture_info as usize) {
@@ -2848,6 +2854,8 @@ impl BspProcessor {
                 // 浅克隆引用（Vec<&Plane>），后续 planes_yup 仍需借用 bsp_planes
                 bsp_planes.clone()
             };
+            // 与 bsp_plane_refs 逐位对齐的 bevel 旗标（origin 平移不改顺序）
+            let plane_bevels: Vec<bool> = bsp_bevels;
 
         // 计算 BSP 坐标顶点（用于 AABB）
         let mut verts_bsp = compute_vertices(&bsp_plane_refs);
@@ -2879,17 +2887,26 @@ impl BspProcessor {
             continue;
         }
 
-        // 合并平面表（真实面 + BSP 原生 bevel side，统一 rotate+flip 后序列化）
-        let mut all_planes_src: Vec<Plane> = Vec::new();
+        // 合并平面表（真实面 + BSP 原生 bevel side，统一 rotate+flip 后序列化；
+        // 每条平面连同它的 bevel 旗标一起搬运，flipped 法线翻转不改旗标）
+        let mut all_planes_src: Vec<(Plane, bool)> = Vec::new();
         if !flipped_planes.is_empty() {
-            all_planes_src.extend(flipped_planes.iter().cloned());
+            all_planes_src.extend(
+                flipped_planes
+                    .iter()
+                    .cloned()
+                    .zip(plane_bevels.iter().copied()),
+            );
         } else {
-            for p in &bsp_plane_refs {
-                all_planes_src.push(Plane {
-                    normal: p.normal.clone(),
-                    dist: p.dist,
-                    ty: p.ty,
-                });
+            for (p, bevel) in bsp_plane_refs.iter().zip(plane_bevels.iter().copied()) {
+                all_planes_src.push((
+                    Plane {
+                        normal: p.normal.clone(),
+                        dist: p.dist,
+                        ty: p.ty,
+                    },
+                    bevel,
+                ));
             }
         }
             // 体积过滤（基于 AABB 体积估算）
@@ -2926,15 +2943,17 @@ impl BspProcessor {
             // 修复：对每平面取负 `normal` 与 `dist`（`dot(-n,p)-(-dist) = -(dot(n,p)-dist)`，
             // 内部点 d>=0 → d<=0，等价翻转半空间）。先旋转到 Y-up 再取负（二者可交换）。
             // 统一从 all_planes_src（真实面 + BSP 原生 bevel）构建，全部输出：
-            // 既进物理碰撞也进 debug 线框显示（bevel 由 is_real_face 判为非面、不被画成"面"）。
+            // 既进物理碰撞也进 debug 线框显示；is_bevel 随平面透传，供显示端把
+            // "辅助碰撞面"与实体表面分开画（is_real_face 的几何判据保持不变）。
             let planes_yup: Vec<WasmBrushPlane> = all_planes_src
                 .iter()
-                .map(|p| {
+                .map(|(p, is_bevel)| {
                     let r = rotate_yup(&p.normal);
                     WasmBrushPlane {
                         normal: [-r[0], -r[1], -r[2]],
                         dist: -p.dist,
                         is_real_face: plane_is_real_face(p, &verts_bsp),
+                        is_bevel: *is_bevel,
                     }
                 })
                 .collect();
