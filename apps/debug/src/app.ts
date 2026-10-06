@@ -128,6 +128,11 @@ const dom = {
 	visViewDistanceNum: document.getElementById('visViewDistanceNum') as HTMLInputElement | null,
 	showPlaneInfoChk: document.getElementById('showPlaneInfo') as HTMLInputElement | null,
 	planeInfoEl: document.getElementById('planeInfo') as HTMLElement | null,
+	// 预测推进（主线程渲染侧：定步 / 最大补步 / 插值）
+	predFixedStepChk: document.getElementById('predFixedStep') as HTMLInputElement | null,
+	predMaxStepsPerFrameRange: document.getElementById('predMaxStepsPerFrame') as HTMLInputElement | null,
+	predMaxStepsPerFrameNum: document.getElementById('predMaxStepsPerFrameNum') as HTMLInputElement | null,
+	predInterpChk: document.getElementById('predInterp') as HTMLInputElement | null,
 	// 贴墙近平面自适应：两张滑块分别写 rendererMain.setNearParams 的探测距离与收缩系数
 	nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
 	nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
@@ -1135,6 +1140,7 @@ function collectUiPrefs(): Record<string, unknown> {
 		hud: { ...config.hud, crosshair: { ...config.hud.crosshair } },
 		debug: { ...config.debug },
 		lod: { ...config.lod },
+		prediction: { ...config.prediction },
 		player: { ...config.player },
 		texture: { ...config.texture },
 	};
@@ -1172,6 +1178,7 @@ function loadUiPrefs(): void {
 		merge('hud', prefs.hud);
 		merge('debug', prefs.debug);
 		merge('lod', prefs.lod);
+		merge('prediction', prefs.prediction);
 		merge('player', prefs.player);
 		merge('texture', prefs.texture);
 	} catch (err) {
@@ -1216,6 +1223,10 @@ function syncPrefsControls(): void {
 	setChk('showSolids', config.debug.showSolids);
 	setChk('showTriggers', config.debug.showTriggers);
 	setChk('showPlaneInfo', config.debug.showPlaneInfo);
+	setChk('predFixedStep', config.prediction.fixedStep);
+	setChk('predInterp', config.prediction.interp);
+	setNum('predMaxStepsPerFrame', config.prediction.maxStepsPerFrame);
+	setNum('predMaxStepsPerFrameNum', config.prediction.maxStepsPerFrame);
 	if (dom.hudVisibleChk) dom.hudVisibleChk.checked = config.hud.visible;
 	if (dom.showCrosshairChk) dom.showCrosshairChk.checked = config.hud.showCrosshair;
 	if (dom.chColor) dom.chColor.value = config.hud.crosshair.color;
@@ -1650,6 +1661,23 @@ function bindUI(): void {
 	bindSlider(dom.visViewDistanceRange, dom.visViewDistanceNum, (v) => {
 		applyTriDebug({ visViewDistance: v });
 	}, (v) => Math.round(v / 64) * 64);
+
+	// 预测推进（主线程渲染侧）：改档只经 config + rendererMain，不下发 Worker
+	// （Worker 权威侧固定步长由 `physics.tickRate` 决定，与本段无关）
+	const applyPrediction = (patch: Record<string, unknown>): void => {
+		applyConfigPatch(config, 'prediction', patch);
+		rendererMain?.applyConfigPatch('prediction', patch);
+		saveUiPrefs();
+	};
+	dom.predFixedStepChk?.addEventListener('change', (e) => {
+		applyPrediction({ fixedStep: (e.target as HTMLInputElement).checked });
+	});
+	dom.predInterpChk?.addEventListener('change', (e) => {
+		applyPrediction({ interp: (e.target as HTMLInputElement).checked });
+	});
+	bindSlider(dom.predMaxStepsPerFrameRange, dom.predMaxStepsPerFrameNum, (v) => {
+		applyPrediction({ maxStepsPerFrame: v });
+	}, (v) => Math.max(1, Math.min(5, Math.round(v))));
 
 	// 近平面自适应参数（滑块 ↔ 输入框双向同步 + 渲染器实时生效）
 	bindNearParamControls();
@@ -2309,6 +2337,8 @@ function syncFullConfig(): void {
 		// 渲染相关段（lighting/debug/input/lod）同步到主线程渲染器
 		rendererMain?.applyConfigPatch(section, patch);
 	}
+	// 预测推进段只作用于主线程渲染侧（Worker 无读取点）：不进上面的下发循环，只同步渲染器
+	rendererMain?.applyConfigPatch('prediction', { ...config.prediction });
 }
 
 // ---------------------------------------------------------------------------

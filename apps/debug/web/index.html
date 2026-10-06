@@ -697,6 +697,26 @@
                 </span>
               </div>
             </div>
+            <!-- 预测推进（主线程渲染侧；与权威 Worker 的 tickRate 同频） -->
+            <div class="acc-divider">
+              <div class="acc-section-title">
+                预测推进（定步 / 插值，主线程渲染侧）
+              </div>
+              <div class="ctrl-grid">
+                <div class="ctrl-checkbox-row ctrl-full">
+                  <input type="checkbox" id="predFixedStep" />
+                  <label for="predFixedStep" title="为真时主线程预测按 1/tickRate（默认 64 Hz）固定步长推进；关掉回到「每渲染帧一步、步长取墙钟间隔」。回放与单步闸门两条诊断路径不受影响">预测定步（与权威同频）</label>
+                </div>
+                <label title="低帧率下每帧最多追赶的物理步数：封顶防一帧内雪崩式补步。补步能力 = 本值 × 帧率，需 ≥ tickRate(64) 才能不丢时间地跟上权威 —— 3 覆盖到 21.3 fps，2 覆盖到 32 fps（更低帧率下预测会按比例慢于权威）；≥64 fps 时本值不起作用。达到上限时只保留至多一个步长的欠账">每帧最大补步</label>
+                <input type="range" id="predMaxStepsPerFrame" min="1" max="5" step="1" value="3" />
+                <div class="val"><input type="number" id="predMaxStepsPerFrameNum" class="param-num" min="1" max="5" step="any" value="3" /></div>
+
+                <div class="ctrl-checkbox-row ctrl-full">
+                  <input type="checkbox" id="predInterp" />
+                  <label for="predInterp" title="相机与渲染采样在最近两个物理步之间按累加器余数插值：显示频率与物理频率解耦（代价 = 显示滞后一个物理步 ≈15.6 ms）。关掉则直读物理状态，定步后表现为 64 Hz 阶梯">渲染插值（显示与物理解耦）</label>
+                </div>
+              </div>
+            </div>
           </div>
         </details>
 

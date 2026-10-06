@@ -63,6 +63,30 @@ export interface LodConfig {
   cullDistance: number;
 }
 
+/** 主线程预测推进参数（只作用于渲染侧；唯一读取点是
+ * `apps/debug/src/renderer/renderer-main.ts` 的 `RendererMain.tick`，Worker 侧无读取点，
+ * 因此不经 `inputBridge.sendConfig` 下发）。
+ *
+ * 背景：`PhysicsConfig.tickRate` 是**权威**（Worker）的固定步长，而主线程预测原先每渲染帧
+ * 推进一步、步长取墙钟间隔。移动解算里含**逐调用离散动作**（`step_move` 的抬升-滑-落择优、
+ * `stay_on_ground` 吸附、落地判定、`check_stuck` 挤出），调用次数不同即与权威分叉 ——
+ * 高刷屏上实测为「抵墙时权威已停死、预测仍以 16 HU/s 下滑」。本段即把预测拉回与权威同频。 */
+export interface PredictionConfig {
+  /** ① 预测定步：为真时预测按 `1 / physics.tickRate` 的固定步长推进（累加器补步），
+   * 为假时回到「每渲染帧一步、步长取墙钟间隔」的旧口径（对照实验用）。
+   * 回放（`replayMode`）与单步闸门（`stepGated`）两条诊断路径不受本开关影响，始终一帧一步。 */
+  fixedStep: boolean;
+  /** ① 每渲染帧最多追赶的物理步数（1~5）。判据不是「随手取个 2」：补步能力 = 本值 × 渲染帧率，
+   * 必须 ≥ `physics.tickRate` 才能在不丢时间的前提下跟上权威 —— 所以它决定「64 Hz 精确」能保到
+   * 多少帧率（默认 3 ⇒ 21.3 fps；取 2 ⇒ 32 fps）。低于该帧率时预测按比例慢于权威（每个卡顿帧
+   * 丢弃超出一个步长的欠账，欠账因此有界、不会雪崩），面板可实时调高。 */
+  maxStepsPerFrame: number;
+  /** ② 渲染插值：为真时相机与渲染采样位置/朝向取「最近两个物理步之间」按累加器余数的
+   * 插值（代价 = 显示滞后一个物理步 ≈ 15.6 ms，换来显示频率与物理频率解耦）；
+   * 为假时直读物理状态（定步后表现为 64 Hz 的阶梯）。 */
+  interp: boolean;
+}
+
 export interface LightingConfig {
   ambientColor: number;
   ambientIntensity: number;
@@ -157,7 +181,7 @@ export interface TextureConfig {
   quality: 'original' | 'mini';
 }
 
-/** 全量运行时配置。子段按消费方分组：`physics` / `input` / `player` 进 Rust 参数与箱体，`lod` / `debug` / `lighting` / `texture` 只走渲染侧。 */
+/** 全量运行时配置。子段按消费方分组：`physics` / `input` / `player` 进 Rust 参数与箱体，`lod` / `prediction` / `debug` / `lighting` / `texture` 只走渲染侧。 */
 export interface RuntimeConfig {
   /** 物理参数（进 Rust `set_params` / `set_noclip` 与 `set_hull`）。 */
   physics: PhysicsConfig;
@@ -165,6 +189,8 @@ export interface RuntimeConfig {
   player: PlayerConfig;
   /** 视距剔除参数（渲染侧）。 */
   lod: LodConfig;
+  /** 主线程预测推进参数（渲染侧，见 `PredictionConfig`）。 */
+  prediction: PredictionConfig;
   /** 灯光参数，由 `LightManager.syncFromConfig` 整体读取。 */
   lighting: LightingConfig;
   /** 输入层参数（主线程鼠标增量 + Q/E 折算 + Rust 两键）。 */
@@ -203,6 +229,16 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   lod: {
     updateInterval: 1,
     cullDistance: 12800, // 构造期默认视距；`loadScene` 之后被 lod-manager 的 `setup` 校准值覆盖
+  },
+  prediction: {
+    // ① 定步 + ② 插值默认开。`maxStepsPerFrame` 默认 3 的理由：预测的补步能力 =
+    // `maxStepsPerFrame × 帧率`，必须 ≥ `tickRate`(64) 才能在不丢时间的前提下跟上权威 ——
+    // 3 把「64 Hz 精确」保到 21.3 fps；取 2 则低于 32 fps 时预测会按比例慢于权威
+    // （30 fps 只跑到 60 Hz），而权威侧并无对应降速。高帧率（≥64）下 2 与 3 完全无差别，
+    // 只是低帧率/卡顿帧里单帧最多多跑一步。
+    fixedStep: true,
+    maxStepsPerFrame: 3,
+    interp: true,
   },
   lighting: {
     ambientColor: 0xffffff,

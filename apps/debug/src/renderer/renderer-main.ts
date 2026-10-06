@@ -30,7 +30,8 @@ import { PhysWorld } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { PlaneInfo, SceneDataMessage } from '../worker/worker-types.js';
 import type { SharedState } from '../../../../src/ts-shared/auth/shared-state.js';
-import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-calibrator.js';
+import { AuthorityCalibrator, normalizeAngleDeg } from '../../../../src/ts-shared/phys/authority-calibrator.js';
+import { planPredSteps } from './prediction-step.js';
 import type { Brush } from '../physics/physics/Collision/Collision.types.js';
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
@@ -112,7 +113,21 @@ export interface RenderPhysEvent {
   yaw?: number;
 }
 
-// ── 空间分块合并（optimizeScene：GLB 挂载后执行一次；算法与参数在渲染共享核 ──
+// ── 显示位姿（渲染插值用）────────────────────────────────────────────────
+/**
+ * 一个物理步结束时的**显示**位姿：`tick` 每步从 `PhysWorld.state()` 取一份，供渲染插值在
+ * 相邻两步之间取值。`yaw` / `pitch` 是度（与 `state()` 同单位），插值走最小角差。
+ */
+interface RenderPose {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  eyeHeight: number;
+}
+
+/** 空间分块合并（optimizeScene：GLB 挂载后执行一次；算法与参数在渲染共享核 ──
 // 动机：GLTFLoader 对 GLB 的每个 primitive 建一个 THREE.Mesh，未合并时每帧三处开销都随
 // Mesh 数线性增长——renderer.render 的视锥剔除与逐 mesh draw call、LodManager.update 的
 // 逐项距离判定、近平面自适应的整树 traverse + 包围球测试。合并把对象压成「块」，一块的
@@ -242,6 +257,14 @@ export class RendererMain {
   /** 上一物理步的墙钟毫秒（0 表示本帧用 1/64 秒兜底）。 */
   private lastTickMs = 0;
 
+  // ── 预测定步（①）与渲染插值（②），见 config.ts 的 PredictionConfig ──────
+  /** 定步累加器（毫秒）：每帧加进墙钟间隔，每个物理步扣掉一个步长；余数即插值系数。 */
+  private predAccMs = 0;
+  /** 上一物理步结束时的显示快照（`null` = 尚无快照，直读物理状态）。 */
+  private interpPrev: RenderPose | null = null;
+  /** 最近一个物理步结束时的显示快照。 */
+  private interpCur: RenderPose | null = null;
+
   // ── 输入回放模式（debug 专属确定性复现工具；见 input/input-recorder.ts）──────
   /**
    * 回放期本帧的物理步长（秒）：由 app.ts 每帧写入，`tick` 消费后立刻置回 null。
@@ -291,6 +314,8 @@ export class RendererMain {
   private bumpSampleEpoch(): void {
     this.sampleEpoch++;
     this.shared.resetRenderSample();
+    // 位置突变点同样是显示位姿的不连续点：清掉定步累加器与插值快照（见 resetPredictionClocks）
+    this.resetPredictionClocks();
   }
 
   /** 探测节拍：每个物理帧翻转一次，只在为真（隔帧）时执行一次近平面探测。 */
@@ -600,9 +625,10 @@ export class RendererMain {
   private readonly boundTick = this.tick.bind(this);
 
   /** 一个渲染帧的全部工作，顺序固定：① 物理段——输入写共享内存 → 权威帧校准 → 推进本地
-   * 物理 → 消费物理事件 → 写渲染采样 → 摆放相机 → 隔帧近平面探测；② 视距剔除；③ 碰撞可视化
-   * 更新；④ 限流的准星射线；⑤ 渲染；⑥ 每 100ms 一次的剔除统计。物理段只在 `predReady` 为真
-   * 且单步闸门有余量时执行，其余各步每帧都跑。 */
+   * 物理（`prediction.fixedStep` 为真时按 `1 / physics.tickRate` 定步补步）→ 消费物理事件 →
+   * 按显示位姿（`prediction.interp` 为真时取相邻两步的插值）写渲染采样 → 摆放相机 → 隔帧近平面
+   * 探测；② 视距剔除；③ 碰撞可视化更新；④ 限流的准星射线；⑤ 渲染；⑥ 每 100ms 一次的剔除统计。
+   * 物理段只在 `predReady` 为真且单步闸门有余量时执行，其余各步每帧都跑。 */
   private tick(now: number): void {
     if (!this.running) return;
     this.rafId = requestAnimationFrame(this.boundTick);
@@ -616,10 +642,11 @@ export class RendererMain {
     if (this.predReady && this.predPhys && (!this.stepGated || this.stepQuota > 0)) {
       // 单步闸门：打开时每帧最多推进一个物理步（配额见 setManualSteps），配额耗尽即跳过本帧物理。
       if (this.stepGated) this.stepQuota--;
-      // 步长：有录制步长就用它，否则用墙钟间隔（首帧 lastTickMs 为 0 时取 1/64 秒），上限 0.1 秒。
-      const dt = replayPending !== null
-        ? replayPending
-        : (this.lastTickMs === 0 ? 1 / 64 : Math.min((now - this.lastTickMs) / 1000, 0.1));
+      // 本帧墙钟间隔（秒与毫秒两用；首帧 lastTickMs 为 0 时取一个 tick，上限 0.1 秒）。
+      const tickRate = this.config.physics.tickRate > 0 ? this.config.physics.tickRate : 64;
+      const frameMs = this.lastTickMs === 0
+        ? 1000 / tickRate
+        : Math.min(now - this.lastTickMs, 100);
       // 录制步长是一次性载荷：用掉即清，等待回放端下一帧再提供
       this.replayDtS = null;
       this.lastTickMs = now;
@@ -649,10 +676,23 @@ export class RendererMain {
           );
         }
       }
-      // 推进本地物理：keys/dx/dy 传完后立即清零增量（按键掩码由下一次 feedInput 覆盖）
-      this.predPhys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
-      this.pendingDx = 0;
-      this.pendingDy = 0;
+      // 推进本地物理：定步（①）时按 `1 / physics.tickRate` 补步，累加器余数即插值系数；
+      // 回放 / 单步闸门 / 关掉定步时退回「每帧一步、步长取录制步长或墙钟间隔」的旧口径。
+      const predCfg = this.config.prediction;
+      const fixedStep = !this.replayMode && !this.stepGated && predCfg.fixedStep;
+      let alpha = 0;
+      if (fixedStep) {
+        const stepMs = 1000 / tickRate;
+        // 步数与插值系数由纯函数给出（`prediction-step.ts`，node 门 `test:prediction-step` 锁定其不变量）
+        const plan = planPredSteps(this.predAccMs, frameMs, stepMs, predCfg.maxStepsPerFrame);
+        for (let i = 0; i < plan.steps; i++) this.advancePrediction(stepMs / 1000);
+        this.predAccMs = plan.restMs;
+        alpha = plan.alpha;
+      } else {
+        const dt = replayPending !== null ? replayPending : frameMs / 1000;
+        this.predAccMs = 0;
+        this.advancePrediction(dt);
+      }
       // 事件消费：把 Rust 侧这一帧产生的 teleport/death 事件交给回调（app.ts 的计时挑战状态机）
       this.consumePhysEvents();
       // 取物理状态摆放相机（Rust 输出的角度是度，这里换成弧度）
@@ -661,23 +701,28 @@ export class RendererMain {
         yaw: number; pitch: number;
         eyeHeight: number;
       };
-      // 路径记录 —— 渲染物理线：每个 rAF 物理步一个节点，采样点是脚底（下面的相机 Y 还要再加 eyeHeight）
-      this.pathRecorder.addRender(now, st.posX, st.posY, st.posZ);
+      // 显示位姿：定步 + 插值开启时取最近两个物理步之间的插值（②），否则直读物理状态
+      const shown = fixedStep && predCfg.interp
+        ? this.interpolatedPose(st, alpha)
+        : { x: st.posX, y: st.posY, z: st.posZ, yaw: st.yaw, pitch: st.pitch, eyeHeight: st.eyeHeight };
+      // 路径记录 —— 渲染物理线：每个 rAF 一个节点，采样点是**显示**位置的脚底
+      // （下面的相机 Y 还要再加 eyeHeight）
+      this.pathRecorder.addRender(now, shown.x, shown.y, shown.z);
       // 同一帧、同一三元组写入渲染采样传输（Worker 把权威发布位置投影到这条轨迹上）；
       // `i0` 即刚落点的渲染节点下标，故与 addRender 一一对应。
       // 不传世代：世代槽由 shared-state 在写入时就地读取。
-      this.shared.writeRenderSample(now, st.posX, st.posY, st.posZ, this.renderSampleIndex++);
+      this.shared.writeRenderSample(now, shown.x, shown.y, shown.z, this.renderSampleIndex++);
       const cc = this.cameraController;
-      cc.setYawPitch(st.yaw * DEG2RAD, st.pitch * DEG2RAD, false);
+      cc.setYawPitch(shown.yaw * DEG2RAD, shown.pitch * DEG2RAD, false);
       cc.update();
       // 相机放在眼睛高度（脚底 + eyeHeight），不做任何位置修正
-      const camY = st.posY + st.eyeHeight;
-      cc.setPosition(st.posX, camY, st.posZ);
+      const camY = shown.y + shown.eyeHeight;
+      cc.setPosition(shown.x, camY, shown.z);
 
       // 近平面自适应：隔帧执行一次；noclip 下位置不受碰撞约束，跳过探测
       this.nearCheckToggle = !this.nearCheckToggle;
       if (this.nearCheckToggle && !this.noclipActive && this.bspModelScene) {
-        this.nearPlane.update(this.camera, this.bspModelScene, st.posX, camY, st.posZ, { roots: [this.bspModelScene] });
+        this.nearPlane.update(this.camera, this.bspModelScene, shown.x, camY, shown.z, { roots: [this.bspModelScene] });
       }
     } else if (this.stepGated) {
       // 闸门跳过物理的帧也要推进墙钟基准，否则闸门恢复时会拿到一个异常大的 dt
@@ -727,6 +772,74 @@ export class RendererMain {
 
   /** 上次下发剔除统计的墙钟毫秒。 */
   private lastStatsAt = 0;
+
+  /**
+   * 推进一个物理步（定步与旧口径共用）：喂本帧键鼠增量 → 步末取一份显示快照推入
+   * `(interpPrev, interpCur)`。
+   *
+   * 快照只服务显示（`interpolatedPose`），绝不写回物理：物理状态始终是 `PhysWorld` 自己的
+   * 积分结果，插值只决定相机与渲染采样取在哪一刻。
+   */
+  private advancePrediction(dt: number): void {
+    const phys = this.predPhys;
+    if (!phys) return;
+    phys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
+    // keys/dx/dy 传完后立即清零增量（按键掩码由下一次 feedInput 覆盖）
+    this.pendingDx = 0;
+    this.pendingDy = 0;
+    const st = phys.state() as {
+      posX: number; posY: number; posZ: number;
+      yaw: number; pitch: number; eyeHeight: number;
+    };
+    this.interpPrev = this.interpCur;
+    this.interpCur = {
+      x: st.posX, y: st.posY, z: st.posZ,
+      yaw: st.yaw, pitch: st.pitch, eyeHeight: st.eyeHeight,
+    };
+  }
+
+  /**
+   * 显示位姿（②）：在「上一物理步」与「本物理步」两个快照之间按累加器余数 `alpha` 插值。
+   *
+   * `alpha ∈ [0, 1)` 由 `tick` 的定步累加器给出：0 = 刚完成一个物理步、1 = 即将完成下一个。
+   * 因此显示永远落在**已完成的**两步之间 —— 代价是显示滞后一个物理步（64 Hz 下 ≈15.6 ms），
+   * 换来显示频率与物理频率解耦（高刷屏不再把 64 Hz 的阶梯画出来）。
+   *
+   * 位置 / pitch / eyeHeight 线性插值；yaw 走**最小角差**（跨 ±180° 不绕远路）。快照缺失
+   * （首帧、传送/换图后）时回落到直读物理状态的 `st`。
+   */
+  private interpolatedPose(
+    st: { posX: number; posY: number; posZ: number; yaw: number; pitch: number; eyeHeight: number },
+    alpha: number,
+  ): RenderPose {
+    const cur = this.interpCur;
+    const prev = this.interpPrev;
+    if (!cur || !prev) {
+      return { x: st.posX, y: st.posY, z: st.posZ, yaw: st.yaw, pitch: st.pitch, eyeHeight: st.eyeHeight };
+    }
+    const t = Math.max(0, Math.min(1, alpha));
+    const lerp = (a: number, b: number): number => a + (b - a) * t;
+    return {
+      x: lerp(prev.x, cur.x),
+      y: lerp(prev.y, cur.y),
+      z: lerp(prev.z, cur.z),
+      yaw: prev.yaw + normalizeAngleDeg(cur.yaw - prev.yaw) * t,
+      pitch: lerp(prev.pitch, cur.pitch),
+      eyeHeight: lerp(prev.eyeHeight, cur.eyeHeight),
+    };
+  }
+
+  /**
+   * 丢弃定步累加器与插值快照：位置突变（传送/重生/换图/noclip 切换/回放起点对齐）之后必须
+   * 调它，否则相机与渲染采样会在突变前后两点之间插值 —— 表现为"从传送起点滑过去"。
+   *
+   * 调用点：`bumpSampleEpoch`（所有位置突变路径都经它），以及 `prediction` 段配置变更。
+   */
+  private resetPredictionClocks(): void {
+    this.predAccMs = 0;
+    this.interpPrev = null;
+    this.interpCur = null;
+  }
 
   /** 准星射线检测：从相机位置沿相机前方发射，与 BSP mesh、碰撞体与触发器求交，
    * 结果存 `lastPlaneInfo` 供 HUD 读取。 */
@@ -881,7 +994,8 @@ export class RendererMain {
 
   /** 应用配置 patch：先按 `section` 把字段并进 `config[section]`，再做该段的联动——
    * `lighting` 同步灯光、`debug` 重灌三组可视化开关与准星开关、`input` 交给相机控制器、
-   * `texture` 触发一次画质应用、`lod` 只需重渲一帧。段不存在或不是对象时直接返回。 */
+   * `prediction` 清定步累加器与插值快照、`texture` 触发一次画质应用、`lod` 只需重渲一帧。
+   * 段不存在或不是对象时直接返回。 */
   applyConfigPatch(section: keyof RuntimeConfig, patch: Record<string, unknown>): void {
     const target = this.config[section];
     if (!target || typeof target !== 'object') return;
@@ -908,6 +1022,9 @@ export class RendererMain {
       this.cameraController.applyInputConfig(this.config.input);
     } else if (section === 'lod') {
       this.needsRender = true;
+    } else if (section === 'prediction') {
+      // 定步/插值参数变更：清累加器与快照，避免用旧余数喂新档位
+      this.resetPredictionClocks();
     } else if (section === 'texture') {
       void this.applyTextureQuality(this.config.texture.quality);
     }
