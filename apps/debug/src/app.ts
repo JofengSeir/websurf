@@ -128,11 +128,6 @@ const dom = {
 	visViewDistanceNum: document.getElementById('visViewDistanceNum') as HTMLInputElement | null,
 	showPlaneInfoChk: document.getElementById('showPlaneInfo') as HTMLInputElement | null,
 	planeInfoEl: document.getElementById('planeInfo') as HTMLElement | null,
-	// 预测推进（主线程渲染侧：定步 / 最大补步 / 插值）
-	predFixedStepChk: document.getElementById('predFixedStep') as HTMLInputElement | null,
-	predMaxStepsPerFrameRange: document.getElementById('predMaxStepsPerFrame') as HTMLInputElement | null,
-	predMaxStepsPerFrameNum: document.getElementById('predMaxStepsPerFrameNum') as HTMLInputElement | null,
-	predInterpChk: document.getElementById('predInterp') as HTMLInputElement | null,
 	// 贴墙近平面自适应：两张滑块分别写 rendererMain.setNearParams 的探测距离与收缩系数
 	nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
 	nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
@@ -199,12 +194,6 @@ let teleportMapName = '';
 let lastBspFile: File | null = null;
 /** 滚轮连跳脉冲：滚轮事件置位，下一次输入循环并进按键掩码后清零。 */
 let wheelJumpPending = false;
-/** 滚轮跳请求发出时的渲染物理步计数：输入循环在它递增（= 该脉冲已被某一步消费）后清 `wheelJumpPending`。 */
-let wheelJumpStepAtRequest = 0;
-/** 滚轮跳请求发出时的权威版本号 `va`：同样要等它递增，才算 Worker 那一步也看到了这一位。 */
-let wheelJumpVaAtRequest = 0;
-/** 滚轮跳脉冲的兜底时刻（ms）：某条线不在跑（回放/无 Worker）时不许把跳跃位卡住。 */
-let wheelJumpDeadlineMs = 0;
 
 // ── 确定性回放（载入录制 JSON，开发者无头复现）───────────────────────────
 // 播放器实现见 apps/debug/src/input/input-recorder.ts。
@@ -1106,11 +1095,6 @@ function bindInput(canvas: HTMLCanvasElement): void {
 	window.addEventListener('wheel', () => {
 		if (!pointerLock.isLocked()) return;
 		wheelJumpPending = true;
-		// 记下请求时的两条线计数与兜底时刻：输入循环据此判定"这一步已被两条线消费"
-		// （见那里的说明）。重复滚轮只刷新兜底时刻，不重置已消费判定。
-		wheelJumpStepAtRequest = rendererMain?.getPhysicsStepCount() ?? 0;
-		wheelJumpVaAtRequest = sharedState?.readAuthoritative()?.va ?? 0;
-		wheelJumpDeadlineMs = performance.now() + 250;
 	}, { passive: true });
 
 	// 窗口尺寸变化 → 主线程渲染器 resize
@@ -1151,7 +1135,6 @@ function collectUiPrefs(): Record<string, unknown> {
 		hud: { ...config.hud, crosshair: { ...config.hud.crosshair } },
 		debug: { ...config.debug },
 		lod: { ...config.lod },
-		prediction: { ...config.prediction },
 		player: { ...config.player },
 		texture: { ...config.texture },
 	};
@@ -1189,7 +1172,6 @@ function loadUiPrefs(): void {
 		merge('hud', prefs.hud);
 		merge('debug', prefs.debug);
 		merge('lod', prefs.lod);
-		merge('prediction', prefs.prediction);
 		merge('player', prefs.player);
 		merge('texture', prefs.texture);
 	} catch (err) {
@@ -1234,10 +1216,6 @@ function syncPrefsControls(): void {
 	setChk('showSolids', config.debug.showSolids);
 	setChk('showTriggers', config.debug.showTriggers);
 	setChk('showPlaneInfo', config.debug.showPlaneInfo);
-	setChk('predFixedStep', config.prediction.fixedStep);
-	setChk('predInterp', config.prediction.interp);
-	setNum('predMaxStepsPerFrame', config.prediction.maxStepsPerFrame);
-	setNum('predMaxStepsPerFrameNum', config.prediction.maxStepsPerFrame);
 	if (dom.hudVisibleChk) dom.hudVisibleChk.checked = config.hud.visible;
 	if (dom.showCrosshairChk) dom.showCrosshairChk.checked = config.hud.showCrosshair;
 	if (dom.chColor) dom.chColor.value = config.hud.crosshair.color;
@@ -1672,23 +1650,6 @@ function bindUI(): void {
 	bindSlider(dom.visViewDistanceRange, dom.visViewDistanceNum, (v) => {
 		applyTriDebug({ visViewDistance: v });
 	}, (v) => Math.round(v / 64) * 64);
-
-	// 预测推进（主线程渲染侧）：改档只经 config + rendererMain，不下发 Worker
-	// （Worker 权威侧固定步长由 `physics.tickRate` 决定，与本段无关）
-	const applyPrediction = (patch: Record<string, unknown>): void => {
-		applyConfigPatch(config, 'prediction', patch);
-		rendererMain?.applyConfigPatch('prediction', patch);
-		saveUiPrefs();
-	};
-	dom.predFixedStepChk?.addEventListener('change', (e) => {
-		applyPrediction({ fixedStep: (e.target as HTMLInputElement).checked });
-	});
-	dom.predInterpChk?.addEventListener('change', (e) => {
-		applyPrediction({ interp: (e.target as HTMLInputElement).checked });
-	});
-	bindSlider(dom.predMaxStepsPerFrameRange, dom.predMaxStepsPerFrameNum, (v) => {
-		applyPrediction({ maxStepsPerFrame: v });
-	}, (v) => Math.max(1, Math.min(5, Math.round(v))));
 
 	// 近平面自适应参数（滑块 ↔ 输入框双向同步 + 渲染器实时生效）
 	bindNearParamControls();
@@ -2282,19 +2243,9 @@ function startInputLoop(): void {
 				// 双保险防 ESC 前后按键状态残留（与 game startInputLoop 同法）
 				const keys = keyboard.getState();
 				const mask = pointerLock.isLocked() ? keysToMask(keys) : 0;
-				// 滚轮跳：仅锁定时并入本帧输入。**脉冲要按住到两条线都真的消费过它**：
-				// 渲染物理推进过至少一步（`getPhysicsStepCount` 递增）**且**权威发布过新帧
-				// （`va` 递增 ⇒ Worker 那一步的输入快照里含这一位）。定步下一帧不一定有物理步
-				// （320 fps 时 5 帧 1 步），按"消费一次即清"会把这个一帧脉冲按帧率吞掉，
-				// 滚轮连跳（bhop 身法）随之失效。250ms 兜底：某条线不在跑时不许卡住跳跃位。
-				const authVa = sharedState?.readAuthoritative()?.va ?? 0;
-				const wheelConsumed =
-					(rendererMain?.getPhysicsStepCount() ?? 0) > wheelJumpStepAtRequest &&
-					authVa > wheelJumpVaAtRequest;
-				if (wheelJumpPending && (wheelConsumed || now > wheelJumpDeadlineMs)) {
-					wheelJumpPending = false;
-				}
-				const maskWithWheel = wheelJumpPending && pointerLock.isLocked() ? mask | KEY_MASK.wheelJump : mask;
+				// 滚轮跳：仅锁定时并入本帧输入（消费一次即清）
+				const maskWithWheel = pointerLock.isLocked() && wheelJumpPending ? mask | KEY_MASK.wheelJump : mask;
+				wheelJumpPending = false;
 
 				// Q/E 键 → 等效鼠标像素（与 game 输入层同法：yaw_bind_speed/M_YAW × dt，
 				// 独立增量不受灵敏度影响；实现收敛到 ts-shared qeEquivalentDx），并入本帧输入
@@ -2358,8 +2309,6 @@ function syncFullConfig(): void {
 		// 渲染相关段（lighting/debug/input/lod）同步到主线程渲染器
 		rendererMain?.applyConfigPatch(section, patch);
 	}
-	// 预测推进段只作用于主线程渲染侧（Worker 无读取点）：不进上面的下发循环，只同步渲染器
-	rendererMain?.applyConfigPatch('prediction', { ...config.prediction });
 }
 
 // ---------------------------------------------------------------------------
