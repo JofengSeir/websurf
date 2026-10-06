@@ -271,6 +271,45 @@ function classifyNormal(
 }
 
 /**
+ * 凸多边形（平面内 [u, v] 坐标）沿一条 AABB 半空间裁剪（Sutherland–Hodgman 单步）。
+ * 半空间判据：`sign * 世界坐标[axis] <= sign * bound`（sign=1 裁到 max 侧、-1 裁到 min 侧）。
+ * 平面到世界的映射由 (p; u, v) 基给出；返回仍是平面内坐标，顶点顺序保持。
+ */
+function clipPolyAxis(
+	poly: [number, number][],
+	ux: number, uy: number, uz: number,
+	vx: number, vy: number, vz: number,
+	px: number, py: number, pz: number,
+	axis: 'x' | 'y' | 'z',
+	sign: 1 | -1,
+	bound: number,
+): [number, number][] {
+	const world = (pt: [number, number]): [number, number, number] => [
+		px + ux * pt[0] + vx * pt[1],
+		py + uy * pt[0] + vy * pt[1],
+		pz + uz * pt[0] + vz * pt[1],
+	];
+	const ai = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
+	const side = (pt: [number, number]): number => {
+		const w = world(pt);
+		return sign * w[ai] - sign * bound;
+	};
+	const out: [number, number][] = [];
+	for (let i = 0; i < poly.length; i++) {
+		const cur = poly[i];
+		const nxt = poly[(i + 1) % poly.length];
+		const dCur = side(cur);
+		const dNxt = side(nxt);
+		if (dCur <= 0) out.push(cur);
+		if ((dCur < 0 && dNxt > 0) || (dCur > 0 && dNxt < 0)) {
+			const t = dCur / (dCur - dNxt);
+			out.push([cur[0] + (nxt[0] - cur[0]) * t, cur[1] + (nxt[1] - cur[1]) * t]);
+		}
+	}
+	return out;
+}
+
+/**
  * 把凸包按面画成线框：每个面沿其有序顶点闭合连边（相邻顶点两两成段，末点连回首点）。
  * 每条线段按该面法线调用 `classify` 单独取色，故同一 brush 的不同面可以是不同颜色；
  * 位置与颜色都按"两个端点"写入（顶点色渲染要求逐顶点显式给出）。
@@ -722,15 +761,18 @@ export class ColliderDebug {
 	}
 
 	/**
-	 * 重建 bevel 辅助碰撞面线框（白）：对附近 brush 的每一条 `isBevel` 平面，取落在该
-	 * 平面上的凸包顶点作为它与凸包的相交轮廓——恰 2 个顶点画一条线段（bevel 平面过棱
-	 * 的典型形态），≥3 个按平面内绕质心的角度排序画闭合环，0/1 个顶点无轮廓可画即跳过
-	 * （这类平面只服务盒体扩张后的宽阶段，与凸包本身不相交）。
+	 * 重建 bevel 辅助碰撞面线框（白）：对附近 brush 的每一条 `isBevel` 平面，画
+	 * **该平面被 brush AABB 截出的截面**（沿法线外移 0.5 HU），半透明填充 + 描边。
+	 *
+	 * 为什么画 AABB 截面而不是凸包相交轮廓：bevel 平面与凸包的交集通常只是棱线上的
+	 * 一条线段/退化点，贴着凸包画出来与实体面线框无法区分；而它作为"辅助碰撞面"的
+	 * 真实形态是「参与盒体扩张后的支撑」——斜面 brush 的 AABB 截面天然溢出实体材质
+	 * 之外，这正是 bevel 在碰撞里承担的角色（`src/phys/bevel_rest_tests.rs`：撤掉
+	 * bevel，盒按斜面扩张面提前触停、虚浮在脊线上方约 20.5 HU）。
 	 *
 	 * 原理（VBSP `AddBrushBevels`，见 SDK `src/utils/vbsp/map.cpp`）：box bevel 补齐
-	 * brush 缺失的轴向面、edge bevel 沿非轴向棱生成"斜切轴面"，二者都要求凸包全部顶点
-	 * 落在平面内侧；且 `MakeBrushWindings` 在计算各侧 winding 时跳过 bevel 侧 ⇒ 它们
-	 * 不构成实体表面，只让引擎按盒体扩张碰撞凸包时在棱处得到贴合的支撑面。
+	 * brush 缺失的轴向面、edge bevel 沿非轴向棱生成"斜切轴面"，二者都要求凸包全部
+	 * 顶点落在平面内侧；`MakeBrushWindings` 跳过 bevel 侧 ⇒ 不构成实体表面。
 	 * 筛选口径与 `rebuildSolids` 相同（`brushViewDistance` 的 XZ 粗筛 + 上限截断）。
 	 */
 	private rebuildBevel(cameraPos: THREE.Vector3, colliders: Brush[]): void {
@@ -753,40 +795,27 @@ export class ColliderDebug {
 			if (nearby.length >= MAX_DEBUG_COLLIDERS) break;
 		}
 
-		const positions: number[] = [];
+		const outline: number[] = [];
+		const fill: number[] = [];
 		let bevelPlanes = 0;
-		let outlined = 0;
+		let drawn = 0;
+		const OFFSET = 0.5; // 沿法线外移量（HU）：让截面与实体表面脱开、可见
 		for (const brush of nearby) {
-			const hull = computeBrushHull(brush);
-			if (hull.length < 3) continue;
+			// AABB 对角线的一半：截面四边形的基础半径（保证覆盖平面与 AABB 的整个截面）
+			const radius =
+				Math.hypot(brush.max.x - brush.min.x, brush.max.y - brush.min.y, brush.max.z - brush.min.z) / 2;
+			const cx = (brush.min.x + brush.max.x) / 2;
+			const cy = (brush.min.y + brush.max.y) / 2;
+			const cz = (brush.min.z + brush.max.z) / 2;
 			for (const plane of brush.planes) {
 				if (plane.isBevel !== true) continue;
 				bevelPlanes++;
-				const on = hull.filter(
-					(v) =>
-						Math.abs(
-							v[0] * plane.normal.x + v[1] * plane.normal.y + v[2] * plane.normal.z - plane.dist,
-						) < FACE_EPS,
-				);
-				if (on.length < 2) continue;
-				outlined++;
-				if (on.length === 2) {
-					positions.push(on[0][0], on[0][1], on[0][2], on[1][0], on[1][1], on[1][2]);
-					continue;
-				}
-				// ≥3 个顶点：按平面内绕质心的极角排序，画闭合环
-				let cx = 0;
-				let cy = 0;
-				let cz = 0;
-				for (const v of on) {
-					cx += v[0];
-					cy += v[1];
-					cz += v[2];
-				}
-				cx /= on.length;
-				cy /= on.length;
-				cz /= on.length;
 				const n = plane.normal;
+				// 截面中心 = AABB 中心在该平面上的投影
+				const dn = n.x * cx + n.y * cy + n.z * cz - plane.dist;
+				const px = cx - n.x * dn;
+				const py = cy - n.y * dn;
+				const pz = cz - n.z * dn;
 				// 平面内正交基：取与法线最不正交的坐标轴参与叉乘，避免退化
 				const ref = Math.abs(n.x) > Math.abs(n.y) && Math.abs(n.x) > Math.abs(n.z)
 					? [1, 0, 0]
@@ -803,36 +832,69 @@ export class ColliderDebug {
 				const vx = n.y * uz - n.z * uy;
 				const vy = n.z * ux - n.x * uz;
 				const vz = n.x * uy - n.y * ux;
-				const ordered = on
-					.map((v) => {
-						const dx = v[0] - cx;
-						const dy = v[1] - cy;
-						const dz = v[2] - cz;
-						return { v, ang: Math.atan2(dx * vx + dy * vy + dz * vz, dx * ux + dy * uy + dz * uz) };
-					})
-					.sort((a, b) => a.ang - b.ang)
-					.map((e) => e.v);
-				for (let i = 0; i < ordered.length; i++) {
-					const a = ordered[i];
-					const b = ordered[(i + 1) % ordered.length];
-					positions.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+				// 初始四边形（覆盖半径 radius），逐条 AABB 半空间裁剪（Sutherland–Hodgman）
+				let poly: [number, number][] = [
+					[-radius, -radius],
+					[radius, -radius],
+					[radius, radius],
+					[-radius, radius],
+				];
+				const axes: ['x' | 'y' | 'z', 1 | -1][] = [
+					['x', 1], ['x', -1], ['y', 1], ['y', -1], ['z', 1], ['z', -1],
+				];
+				for (const [axis, sign] of axes) {
+					const bound = sign === 1 ? brush.max[axis] : brush.min[axis];
+					poly = clipPolyAxis(poly, ux, uy, uz, vx, vy, vz, px, py, pz, axis, sign, bound);
+					if (poly.length < 3) break;
+				}
+				if (poly.length < 3) continue; // 平面与 AABB 不相交
+				drawn++;
+				// 外移 + 展开成世界坐标
+				const world = poly.map(([a, b]) => [
+					px + ux * a + vx * b + n.x * OFFSET,
+					py + uy * a + vy * b + n.y * OFFSET,
+					pz + uz * a + vz * b + n.z * OFFSET,
+				]);
+				for (let i = 0; i < world.length; i++) {
+					const a = world[i];
+					const b = world[(i + 1) % world.length];
+					outline.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+				}
+				// 扇形三角化填充（顶点数 ≥ 3；poly 是凸多边形——凸半空间交截的结果）
+				for (let i = 1; i < world.length - 1; i++) {
+					fill.push(world[0][0], world[0][1], world[0][2]);
+					fill.push(world[i][0], world[i][1], world[i][2]);
+					fill.push(world[i + 1][0], world[i + 1][1], world[i + 1][2]);
 				}
 			}
 		}
 
-		if (positions.length === 0) return;
-		const geom = new THREE.BufferGeometry();
-		geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-		const mat = new THREE.LineBasicMaterial({
-			color: 0xffffff,
-			transparent: true,
-			opacity: 0.9,
-			depthTest: false, // 始终可见：bevel 轮廓贴着实体表面，深度测试会与线框互相吃线
-		});
-		this.bevelGroup!.add(new THREE.LineSegments(geom, mat));
-		console.log(
-			`[collider-debug] bevel 重建: 距离=${this.brushViewDistance} brush=${nearby.length} bevel平面=${bevelPlanes} 有轮廓=${outlined} 段=${positions.length / 6}`,
-		);
+		if (fill.length > 0) {
+			const fgeom = new THREE.BufferGeometry();
+			fgeom.setAttribute('position', new THREE.Float32BufferAttribute(fill, 3));
+			const fmat = new THREE.MeshBasicMaterial({
+				color: 0xffffff,
+				transparent: true,
+				opacity: 0.14,
+				side: THREE.DoubleSide,
+				depthWrite: false,
+			});
+			this.bevelGroup!.add(new THREE.Mesh(fgeom, fmat));
+		}
+		if (outline.length > 0) {
+			const geom = new THREE.BufferGeometry();
+			geom.setAttribute('position', new THREE.Float32BufferAttribute(outline, 3));
+			const mat = new THREE.LineBasicMaterial({
+				color: 0xffffff,
+				transparent: true,
+				opacity: 0.9,
+				depthTest: false, // 始终可见：辅助面语义上是覆盖层
+			});
+			this.bevelGroup!.add(new THREE.LineSegments(geom, mat));
+			console.log(
+				`[collider-debug] bevel 重建: 距离=${this.brushViewDistance} brush=${nearby.length} bevel平面=${bevelPlanes} 截面=${drawn} 三角形=${fill.length / 9}`,
+			);
+		}
 	}
 
 	/**
@@ -991,10 +1053,14 @@ export class ColliderDebug {
 					color = COLOR_TRIGGER_LINKED;
 				}
 			}
-			// 有 >= 4 个凸包平面即按平面重建凸包（楔形/斜面触发器显示真实形状），解不出顶点再回退 AABB
+			// 有 >= 4 个凸包平面即按平面重建凸包（楔形/斜面触发器显示真实形状），解不出顶点再回退 AABB。
+			// 触发器平面必须显式标 isRealFace: true：触发器体积本来就是整只凸包、每张平面都是
+			// 它的真实面，而上游判据只作用于世界 brush（触发器路径没有这个字段）；
+			// 漏标会被 orderedFaces 的「未知即不画」闸门整条滤掉（回归：触发器线框整体消失，
+			// 2026-10-07 修）。
 			if (trigger.planes && trigger.planes.length >= 4) {
 				const brushLike: Brush = {
-					planes: trigger.planes as PlaneLike[],
+					planes: trigger.planes.map((p) => ({ ...p, isRealFace: true })),
 					min: trigger.mins,
 					max: trigger.maxs,
 				};

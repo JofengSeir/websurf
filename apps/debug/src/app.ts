@@ -952,6 +952,9 @@ function replayAdvanceAndWait(): Promise<Record<string, unknown>> {
 		syntheticQueue.length = 0;
 		return n;
 	},
+	/** 渲染器与碰撞可视化句柄（无头验证用，只读探查）：取 RendererMain 实例引用，
+	 * 供 CDP 脚本数各线框 Group 的子对象、读开关状态；调用方不得借它改动渲染状态。 */
+	renderer: (): unknown => rendererMain,
 	/** 回放进度（与 `__wsInput.counts` 同源，供无头脚本断言）。 */
 	progress: (): { index: number; total: number; skipped: number; deterministic: boolean } => {
 		const s = inputPlayer.state();
