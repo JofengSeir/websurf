@@ -1727,7 +1727,7 @@
       "src/renderer-shared/environment/miniature-sky.ts:1:1~2": "8d64a30d",
       "src/renderer-shared/shader/lightmap-shader.ts:1408:1408": "809c03b3",
       "src/wasm-core/vbsp/data/game.rs:327:327": "42967d45",
-      "src/wasm-core/vbsp/data/mod.rs:1175:1175": "baa0c897",
+      "apps/debug/crates/wasm/src/lib.rs:3657:3657": "c6219fff",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -5046,6 +5046,14 @@
   "rebaselines": [
     {
       "path": "TODO.md",
+      "at": "2026-10-07T23:19:17.307Z",
+      "by": "agent",
+      "reason": "T-427 证据列改为新探针导出",
+      "changed": 2,
+      "total": 184
+    },
+    {
+      "path": "TODO.md",
       "at": "2026-10-07T22:51:44.860Z",
       "by": "agent",
       "reason": "T-427 登记",
@@ -5355,14 +5363,6 @@
       "reason": "T-410: 新增 materials.rs:448 锚点",
       "changed": 1,
       "total": 9
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-07T17:21:51.156Z",
-      "by": "owner(强推脱敏处理)",
-      "reason": "脱敏重写后的连带同步：新增规范篇与 [P] 门禁、文档 SHA 重映射、T-606/D-014 登记",
-      "changed": 2,
-      "total": 166
     }
   ]
 }

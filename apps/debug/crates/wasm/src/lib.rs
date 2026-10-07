@@ -3649,3 +3649,35 @@ impl BspProcessor {
         serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化 .phy 补面失败"))
     }
 }
+
+
+/// 探查：位移顶点 `alpha`（Source `CDispVert.m_flAlpha`）分布 —— `WorldVertexTransition`
+/// 的两贴图混合权重。返回分桶直方图，用于验证「雪/岩混合」是否有可用数据。
+#[wasm_bindgen]
+pub fn disp_vertex_alpha_stats(data: &[u8]) -> Result<String, JsValue> {
+    let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
+    let verts = &bsp.displacement_vertices;
+    let mut buckets = [0usize; 10];
+    let mut zeros = 0usize;
+    let mut ones = 0usize;
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    let mut sum = 0f64;
+    for v in verts.iter() {
+        let a = v.alpha;
+        sum += f64::from(a);
+        min = min.min(a);
+        max = max.max(a);
+        if a <= 0.0 {
+            zeros += 1;
+        }
+        if a >= 1.0 {
+            ones += 1;
+        }
+        let idx = ((a.clamp(0.0, 0.999) * 10.0) as usize).min(9);
+        buckets[idx] += 1;
+    }
+    let n = verts.len().max(1) as f64;
+    Ok(format!("{{\"count\":{},\"zeros\":{},\"ones\":{},\"min\":{:.3},\"max\":{:.3},\"mean\":{:.3},\"buckets\":{:?}}}",
+        verts.len(), zeros, ones, if verts.is_empty() { 0.0 } else { min }, if verts.is_empty() { 0.0 } else { max }, sum / n, buckets))
+}
