@@ -98,6 +98,7 @@ const mds = (targets.length ? targets : live.filter((f) => f.endsWith('.md')))
   .filter((f) => !/archive\//.test(f)); // 快照目录（本行正则）不参与：其定位即「不作为事实来源」
 const drift = [], badAnchor = [], missing = [], broken = [];
 let claims = 0, anchors = 0, ambiguous = 0;
+const ambByDoc = {};
 
 for (const doc of mds) {
   const lines = fs.readFileSync(path.join(ROOT, doc), 'utf8').split(/\r?\n/);
@@ -117,13 +118,14 @@ for (const doc of mds) {
       const hi = f.n2 ?? f.n;
       const r = resolve(f.p, doc, hi);
       if (r.missing) { missing.push(`${doc}:${ln} ${f.p}`); continue; }
-      if (r.ambiguous) { ambiguous++; continue; }
+      if (r.ambiguous) { ambiguous++; ambByDoc[doc] = (ambByDoc[doc] || 0) + 1; continue; }
       const total = LINES.get(r.rel);
       if (f.kind === 'claim') {
         if (total !== f.n) drift.push(`  ${doc}:${ln}  ${f.p} → ${r.rel}  声明 ${f.n} / 实测 ${total} (差 ${total - f.n})`);
       } else if (hi > total + 1) {
         badAnchor.push(`  ${doc}:${ln}  ${f.raw} → ${r.rel}（共 ${total} 行）`);
       }
+    }
 
     // [E] 坏链：相对链接必须能在磁盘上解析（围栏内的伪链接跳过）
     if (!fence) {
@@ -136,7 +138,6 @@ for (const doc of mds) {
         try { decoded = decodeURIComponent(raw); } catch { decoded = raw; }
         if (!fs.existsSync(path.resolve(ROOT, path.dirname(doc), decoded))) broken.push(`  ${doc}:${ln}  → ${m[1]}`);
       }
-    }
     }
   });
 }
@@ -183,7 +184,7 @@ console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims
 if (drift.length) console.log('\n[A] 行数声明漂移（失败）：\n' + drift.join('\n'));
 if (badAnchor.length) console.log('\n[B] 锚点越界（失败）：\n' + badAnchor.join('\n'));
 if (missing.length) console.log('\n[C] 路径失效（告警，可能是刻意保留的历史路径）：\n' + [...new Set(missing)].map((s) => '  ' + s).join('\n'));
-if (ambiguous) console.log(`\n[D] 歧义 ${ambiguous} 处（跨工程文档的裸文件名，需人工判读；非错误）`);
+if (ambiguous) { const inProg = Object.entries(ambByDoc).filter(([k]) => k.startsWith(`progress/`)).reduce((s, [, v]) => s + v, 0); console.log(`\n[D] 歧义 ${ambiguous} 处（跨工程文档的裸文件名，需人工判读；非错误）｜规范面 ${ambiguous - inProg} 处、progress/ 过程记录 ${inProg} 处`); }
 if (broken.length) console.log('\n[E] 坏链（失败）：\n' + broken.join('\n'));
 if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set(eolBad)].join('\n'));
 if (dangling.length || statusClaim.length || dupRows.length) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim].join('\n'));
