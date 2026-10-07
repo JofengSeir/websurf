@@ -96,14 +96,15 @@ CI 三个 workflow（`.github/workflows/`）：
 
 ## 7. 文档地图
 
-完整导航见 [documents/index.md](documents/index.md)（按实际文件树维护）；**待办与状态只在一处**：根 [TODO.md](TODO.md)。
+完整导航见 [documents/index.md](documents/index.md)（按实际文件树维护）；**待办与状态只在一处**：根 [TODO.md](TODO.md)；**需要 owner 拍板的决定只在一处**：根 [OWNER.md](OWNER.md)。
 
 | 入口 | 回答什么 |
 |---|---|
 | [TODO.md](TODO.md) | **唯一待办看板**：状态、类型、归属、证据锚点、详情 |
+| [OWNER.md](OWNER.md) | **owner 决策队列**：待你拍板的决定（优先级 / 选项 / 我的建议 / 不定的后果）与已决留痕 |
 | [documents/index.md](documents/index.md) | 全部文档的总导航（共享层 / 三工程子树 / 规范 / 过程记录） |
 | [documents/norms/annotation-and-verification.md](documents/norms/annotation-and-verification.md) | 注释书写规范与验收判据、已验证的陷阱清单 |
-| [AGENTS.md](AGENTS.md) | 仓库级规范（三条禁令 / 六步法 / 自检 / 上报）与进度纪要 |
+| [AGENTS.md](AGENTS.md) | 仓库级规范：三禁令 / §0.1 看板规程 / §0.2 日常流程 / §0.3 决策登记 / 自检 / 上报 |
 ## 8. 已知缺口（摘要）（状态见 TODO.md）
 
 以下均为**读码所得、未修改代码**的登记项，逐条明细与证据见 `TODO.md`（零分配支路与 `set_yaw_pitch` 见 T-006、T-009；用户录制缺口见 T-041）：

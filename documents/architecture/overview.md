@@ -1,7 +1,7 @@
 # 架构总览：受控工程与共享层
 
 > 本文是**共享层文档**（P2）的一篇，内容全部来自当前源码与构建配置的实测；每个结论都带「相对仓库根路径:行号」锚点，由 `node src/scripts/check-doc-drift.mjs` 校验。
-> 术语与书写规范见 `documents/norms/annotation-and-verification.md`；任务流程与待决项见根 `AGENTS.md` §0 与 `TODO.md`。
+> 术语与书写规范见 `documents/norms/annotation-and-verification.md`；任务流程见根 `AGENTS.md` §0，待办与状态见 `TODO.md`，待 owner 拍板的决定见 `OWNER.md`。
 
 ---
 
