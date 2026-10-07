@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "policy": {
+    "readonly": [
+      "README.md",
+      "CONTRIBUTING.md",
+      "SECURITY.md",
+      "documents/norms/**",
+      ".github/**/*.md",
+      "skills/**/SKILL.md"
+    ],
+    "candidates": [
+      [
+        "AGENTS.md",
+        "§7.1 每次收尾要追加滚动索引行 ⇒ 提升前须先把该索引移出本文件"
+      ],
+      [
+        "TODO.md",
+        "唯一状态源，agent 每次认领/结案都要改 ⇒ 只锁「新建/删除」而非「改行」才有意义"
+      ],
+      [
+        "OWNER.md",
+        "§0.3 规定 agent 要写 D-### 决策行 ⇒ 同上"
+      ]
+    ]
+  },
+  "pins": {
+    "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
+    "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
+    "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
+    "skills/websurf-env-traps/SKILL.md": "bbb5cbb6b5afaf1e1a93bb10108720525f9b9bd91e4fc181fd8255e63d45cbac",
+    "documents/norms/annotation-and-verification.md": "0ce02e206be9cbb643b143f8f3ccde20d85a32604d4abb3a057cecc920b2d6d5",
+    "documents/norms/scripts-and-ci.md": "acdd75599cfb483285c9d62d69c6a9240598bbc5416d3e28cdc4582869c275c2",
+    ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
+    ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
+    ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
+    ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd"
+  },
+  "approvals": [
+    {
+      "path": "CONTRIBUTING.md",
+      "by": "owner(本轮指示)",
+      "reason": "建立 docflow 基线",
+      "at": "2026-10-07",
+      "task": "D-docflow",
+      "consumed": true
+    },
+    {
+      "path": "SECURITY.md",
+      "by": "owner(本轮指示)",
+      "reason": "建立 docflow 基线",
+      "at": "2026-10-07",
+      "task": "D-docflow",
+      "consumed": true
+    },
+    {
+      "path": "skills/websurf-env-traps/SKILL.md",
+      "by": "owner(本轮指示)",
+      "reason": "建立 docflow 基线",
+      "at": "2026-10-07",
+      "task": "D-docflow",
+      "consumed": true
+    },
+    {
+      "path": "documents/norms/annotation-and-verification.md",
+      "by": "owner(本轮指示)",
+      "reason": "建立 docflow 基线",
+      "at": "2026-10-07",
+      "task": "D-docflow",
+      "consumed": true
+    },
+    {
+      "path": "documents/norms/scripts-and-ci.md",
+      "by": "owner(本轮指示)",
+      "reason": "建立 docflow 基线",
+      "at": "2026-10-07",
+      "task": "D-docflow",
+      "consumed": true
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "by": "owner(本轮指示)",
+      "reason": "建立 docflow 基线",
+      "at": "2026-10-07",
+      "task": "D-docflow",
+      "consumed": true
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "by": "owner(本轮指示)",
+      "reason": "建立 docflow 基线",
+      "at": "2026-10-07",
+      "task": "D-docflow",
+      "consumed": true
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/other.md",
+      "by": "owner(本轮指示)",
+      "reason": "建立 docflow 基线",
+      "at": "2026-10-07",
+      "task": "D-docflow",
+      "consumed": true
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "by": "owner(本轮指示)",
+      "reason": "建立 docflow 基线",
+      "at": "2026-10-07",
+      "task": "D-docflow",
+      "consumed": true
+    },
+    {
+      "path": "README.md",
+      "by": "owner(测试)",
+      "reason": "探针",
+      "at": "2026-10-07",
+      "task": "",
+      "consumed": true
+    }
+  ],
+  "cochange": [],
+  "claim": null
+}

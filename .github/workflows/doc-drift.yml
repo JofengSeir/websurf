@@ -24,7 +24,9 @@
 #     「证据」文件里都必须真的 0 命中；`-- <路径>` 指错目录会让判据永远满足（实例 T-129 / T-132）
 #   N 脚本与部署链契约 —— 三工程 scripts/** 引用面非零（否则登记进 documents/norms/scripts-and-ci.md §1.1）；
 #     deploy-pages.yml 的 matrix.app 与装配循环必须与 apps/ 目录三者一致；.cmd 须 @echo off + exit /b 且不写死用户目录
-# A / B / E / F / G / L / M / N 任一非空即脚本 exit 1 → 本 workflow 失败（C 与 D 仅告警）。
+#   O 文档契约（docflow）—— 调 node src/scripts/docflow.mjs check：只读 md 漂移 / 未落实审批 / 联动 /
+#     只读类新建与删除（划分与 approve·sync·claim·verify 见该脚本头注与 docflow.json）
+# A / B / E / F / G / L / M / N / O 任一非空即脚本 exit 1 → 本 workflow 失败（C 与 D 仅告警）。
 #
 # 同批还跑 src/scripts/check-board-touch.mjs（看板使用规程的**软提示**，AGENTS.md §0.1）：
 #   改了 src/ apps/ documents/ 却没动 TODO.md、提交信息也没有 T-### 或「无待办影响」时打印警告；

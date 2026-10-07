@@ -35,9 +35,10 @@
 1. **改三类资产前另读一篇**：动 `apps/*/scripts/**`、三工程 `*.cmd`、`.github/workflows/**` 时，先读 `documents/norms/scripts-and-ci.md`——引用面非零、`.cmd` 形状、部署链 app 列表同源，体检 `[N]` 硬查。
 2. **挑活**：从 `TODO.md` 的「未结项」里挑**一条**。顺序：`待修` → `已取证待立项` 拆出的子项 → 其余；**`待裁决` 不要自取**（等 owner 结论）。同一时刻只做一条。
 3. **留痕**：开工先只改那一行（`状态` 写成 `进行中 · <agent> · <YYYY-MM-DD>`，即认领）——用本次改动的第一个提交带上，避免多个 agent 抢同一条。
-4. **先读本模块文档，再读码定位**：先看本模块在 `documents/` 的文档（定位 / 边界 / 时序 / 已知缺口）拿上下文，再按导出项与调用点读码；**事实一律以代码为准**，结论必须落到 `文件:行号`，落不到就标 `[待确认]` 并停下上报（§1）。
-5. **验收判据（必填）**：判据写在 `TODO.md` 总表的「判据」列，内容 = **可执行命令 + 期望输出**；详情页有判据就照它，没有就**先补判据再动手**——没有判据的活不开工。
-6. **收尾（同一提交）**：更新该行 `状态`（→ `已结案`）与 `证据`（`文件:行号`），提交信息写 `T-###`；文档增删 ⇒ 同提交更新 `documents/index.md`（体检 `[G]⑧` 硬查覆盖）；用户可见变化 ⇒ 同提交更新 `CHANGELOG.md`；**该条在 `documents/**` 有「已知缺口」段落 ⇒ 同提交打上 ~~原断言~~ +「已消除（YYYY-MM-DD）：原因」（体检 `[L]` 硬查，删掉整段也算合格）；结案前先用「证据」文件本身复核断言是否真的不成立——判据的 `-- <路径>` 指错目录会导致假结案（体检 `[M]` 拦）**；跑 §5 自检；进展按 §0.1 第 6 条写进「当前写入目标」那一卷，并在 §7.1 与 `progress/index.md` 的索引各补一行。
+4. **认领即锁结束条件**：`node src/scripts/docflow.mjs claim --task T-### --may <本次会动的文件> [--must <必须动的文件>]`——把「这次允许改什么、必须改什么」写成契约；收尾跑 `node src/scripts/docflow.mjs verify`（`must` 未改、越界改动、只读漂移都会拦）。一次只允许一条认领，换任务先 `release`。
+5. **先读本模块文档，再读码定位**：先看本模块在 `documents/` 的文档（定位 / 边界 / 时序 / 已知缺口）拿上下文，再按导出项与调用点读码；**事实一律以代码为准**，结论必须落到 `文件:行号`，落不到就标 `[待确认]` 并停下上报（§1）。
+6. **验收判据（必填）**：判据写在 `TODO.md` 总表的「判据」列，内容 = **可执行命令 + 期望输出**；详情页有判据就照它，没有就**先补判据再动手**——没有判据的活不开工。
+7. **收尾（同一提交）**：更新该行 `状态`（→ `已结案`）与 `证据`（`文件:行号`），提交信息写 `T-###`；文档增删 ⇒ 同提交更新 `documents/index.md`（体检 `[G]⑧` 硬查覆盖）；用户可见变化 ⇒ 同提交更新 `CHANGELOG.md`；**该条在 `documents/**` 有「已知缺口」段落 ⇒ 同提交打上 ~~原断言~~ +「已消除（YYYY-MM-DD）：原因」（体检 `[L]` 硬查，删掉整段也算合格）；结案前先用「证据」文件本身复核断言是否真的不成立——判据的 `-- <路径>` 指错目录会导致假结案（体检 `[M]` 拦）**；跑 §5 自检；进展按 §0.1 第 6 条写进「当前写入目标」那一卷，并在 §7.1 与 `progress/index.md` 的索引各补一行。 **只读 md 不得直接改**（清单见 `node src/scripts/docflow.mjs report`：`documents/norms/**`、`README`、`.github/**/*.md`、`skills/**/SKILL.md` 等）：须 owner 先 `approve --path … --by … --reason …`、改完 `sync` 重钉；新建/删除只读类文件同理。
 
 ### 0.3 需要真人拍板的事 → 根 `OWNER.md`
 
@@ -146,8 +147,9 @@
 ## 5. 自检命令（每个文件提交前必跑）
 
 ```bash
-node src/scripts/check-doc-drift.mjs [文件]       # A–N 全 0（行数声明 / 锚点 / 路径 / 坏链 / 行尾与 BOM / 待办同源 / 体积 / 分卷可达 / 注释纪律 / 上级覆盖 / 缺口↔看板 / 假结案 / 脚本契约）
+node src/scripts/check-doc-drift.mjs [文件]       # A–O 全 0（行数声明 / 锚点 / 路径 / 坏链 / 行尾与 BOM / 待办同源 / 体积 / 分卷可达 / 注释纪律 / 上级覆盖 / 缺口↔看板 / 假结案 / 脚本契约 / 文档契约）
 node src/scripts/check-board-touch.mjs --staged   # 改了 src/ / apps/ / documents/ 却没动 TODO.md 时提示（软提示，不拦提交）
+node src/scripts/docflow.mjs check                     # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
 grep -n -E "据文档|据注释|原设计|历史上|应该|可能|大概|似乎|推测" <新稿>   # 0 命中
 grep -n -E "test/game-core|dual-mode-harness" <新稿>   # 0 命中（两者均已不在工作区）
 cargo check -p websurf-phys                       # 或工程内 cargo check
@@ -156,7 +158,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 
 > **提交与体检必须串成一步、红灯即终止**：先跑体检，非 0 就停（不要用「无论成败都继续」的链式命令把体检和 `git commit` 连在一起）。2026-10-07 两次红灯入库都出在这个写法上。
 
-**全量闸门**：全仓漂移体检（A–N）全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；README ↔ `documents/index.md` 口径一致。
+**全量闸门**：全仓漂移体检（A–O）全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；README ↔ `documents/index.md` 口径一致。
 
 ---
 
@@ -177,7 +179,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 > **历史进度已移出本文件**：逐条原文见 `progress/monthly/2026-09-*.md`、`progress/monthly/2026-10-*.md`（过程记录，不作事实来源）。
 > 下表只作**索引**（日期 + 一句话 + 明细行号）；新增进展追加到对应月度文件，本表同步加一行。
 
-> **全量索引（96 条）见 `progress/index.md` 的「进展索引」**；为控制入口体积（§0.4：`AGENTS.md` ≤ 32 KB），本节只留最近 10 条。
+> **全量索引（97 条）见 `progress/index.md` 的「进展索引」**；为控制入口体积（§0.4：`AGENTS.md` ≤ 32 KB），本节只留最近 10 条。
 
 | 日期 | 摘要 | 明细 |
 |---|---|---|
@@ -193,6 +195,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 | 2026-10-07 | T-169 viewer 接入 KSF/gokz `.rec`（gokz-rec.ts 解析器 + 四类魔数分派 + 184 项自检全绿 + 体检等价实现全 0）… | progress/monthly/2026-10-4.md:28 |
 | 2026-10-07 | skill 链进 `~/.agents/skills`（junction 指向仓库，skill 工具可解析）＋ `.archify/` 进 `.gitignore`… | progress/monthly/2026-10-4.md:30 |
 | 2026-10-07 | 三工程脚本 / `.cmd` / 部署链约束层：引用面实测出唯一孤儿 input-replay-verify.mjs（59 KB，T-035 待裁决）＋ 新规范篇 ＋ 体检 `[N]`（两次故障注入验证）… | progress/monthly/2026-10-4.md:31 |
+| 2026-10-07 | 文档契约 docflow：只读 10 / 可编辑 69 ＋ 哈希钉住 ＋ 审批（approve→sync）＋ 认领锁结束条件（claim→verify）＋ 体检 `[O]`；AGENTS.md 因 §7.1 滚动索引列为候选提升… | progress/monthly/2026-10-4.md:32 |
 
 ### 7.2 工作组状态
 
