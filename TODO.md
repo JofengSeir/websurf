@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（175 条）
+## 未结项（174 条）
 
 ### 待裁决（63）
 
@@ -100,7 +100,7 @@
 - **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
 - **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 
-### 待修（111）
+### 待修（110）
 
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -204,7 +204,6 @@
 - **T-408** `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de…　`shared`
 - **T-503** mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效　`shared`
 - **T-419** 贴图取不到：VTF 格式（Bgra4444 / Ia88）不受支持 + 两条 VTF 解码路径判定不一致（boreas 4+1 / 666 +1）　`shared`
-- **T-421** 【S2】Source 3D 天空盒（微缩景观）未实现：`sky_camera` 只作雾参数，微缩几何未按 scale 分离渲染　`shared`
 - **T-422** 【S3】surf_boreas 无雪盖（雾色偏冬但世界几何无雪覆盖）　`shared`
 
 ### 已取证待立项（2）
@@ -401,7 +400,7 @@
 | T-418 | 【W9·补强】`collect_missing_textures` 只报 VMT 解析 `Err`：「VMT 解析成功但 .vtf 不在包内」在 materials.rs 静默回退、不计缺失 ⇒ 缺失观测有盲区（详见任务书 W9） | 缺陷 | shared | 已结案 | src/wasm-core/mosaic/manifest.rs:49 | 本行即全部 | 判据：修后 @BT@collect_missing_textures@BT@ 把「basetexture 指向的 .vtf 不在 pakfile」也计入缺失；@BT@node .tmp/mapsurvey/probe2.mjs test/maps/surf_boreas.bsp@BT@ 缺失数 ≥ 修前且新增项可逐条回溯到具体材质；surf_666 不回归 | — |
 | T-419 | 贴图仍取不到的 5 个材质（surf_boreas）：4 个 VTF 格式不受支持（Bgra4444 / Ia88）、1 个 VTF 未打包；另有 surf_666 的 pk02_floor10_a 被 texture_utils 解出而 GLB 路径（load_texture_bsp 走 vtf crate）取不到 ⇒ 两条 VTF 解码路径判定不一致 | 缺陷 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/materials.rs:583 | progress/monthly/2026-10-5.md | 判据：@BT@node .tmp/mapsurvey/verify-w9.mjs test/maps/surf_boreas.bsp@BT@ 的 vtfDecodeFail 由 4 降为 0，或明确列为不支持并文档化；两条解码路径对同一 VTF 判定一致 | — |
 | T-420 | 【S1】天空盒六面槽位映射错误：up/dn 落在 ±X、四个侧面互串（`SUFFIX_SLOT` 写成 up→px…），且极面未按 GL 约定做面内旋转 ⇒ 天空被错误拼接 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/skybox.ts:29 | 本行即全部 | 判据：① 轴约定读码确认（世界顶点 `map_coords`=[y,z,x]，渲染端清根旋转）⇒ 应为 ft→pz/bk→nz/lf→px/rt→nx/up→py/dn→ny；② `node .tmp/mapsurvey/seamtest.mjs` ⇒ 四侧面在 ft→lf→bk→rt 环序下平均缝差 0.82（错误环序 28~35）；③ `node .tmp/mapsurvey/polerot-verify.mjs` ⇒ up 转 90°CW、dn 转 90°CCW 后 0° 为最低分；④ debug `npm run typecheck`/`build:app` 通过，截图 .tmp/mapsurvey/cj-horizon.png、cj-up.png | — |
-| T-421 | 【S2】Source 3D 天空盒（微缩景观）未实现：`sky_camera` 只被读作雾参数，微缩几何未按 scale 分离渲染 ⇒ 地图外景缺失 | 缺陷 | shared | 待修 | src/renderer-shared/environment/skybox.ts:1 | progress/monthly/2026-10-5.md | 判据：先找到**确实含微缩几何**的测试图（按 `sky_camera.origin` 邻域探测），再实现「第二相机 + 按 `sky_camera.scale` 缩放的微缩场景」并截图核对缩放/位置；surf_boreas 已实测无该几何（T-415），不能作验收图 | — |
+| T-421 | 【S2】Source 3D 天空盒（微缩景观）未实现：`sky_camera` 只被读作雾参数，微缩几何未按 scale 分离渲染 ⇒ 地图外景缺失 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:1 | 判据：① `node .tmp/mapsurvey/mini-recon.mjs <map>` 证明夹具无可分离微缩区（boreas：相机在包围盒外 1281 HU、3000 HU 内 0 网格；concretejungle：2000 HU 内 26%、分布平滑）；② 隐藏地图后 A/B（`mini-ab.mjs ... 0 hidemap` + `mini-diff.mjs`）⇒ 差异 9.26%（分带 6~9 = 山脊）；③ 带地图、在 owner 指定视点（-12048,14736,12768）⇒ 0.17%（山脊从地形上方露一条带）。**实现**：`src/renderer-shared/environment/miniature-sky.ts` 合成三层山脊，挂场景根（`userData.isMiniatureSky`），随图释放；**限制**：该视点显著性不足，要更明显需调高度/距离或做第二相机视差 | 判据：① `node .tmp/mapsurvey/mini-recon.mjs <map>` 证明夹具无可分离微缩区（boreas：相机在包围盒外 1281 HU、3000 HU 内 0 网格；concretejungle：2000 HU 内 26%、分布平滑）；② 隐藏地图后的 A/B ⇒ `node .tmp/mapsurvey/mini-ab.mjs <bsp> <out.png> <url> 0 hidemap` + `node .tmp/mapsurvey/mini-diff.mjs` ⇒ 差异 9.26%（分带 6~9 = 山脊）；③ 带地图、在 owner 指定视点 ⇒ 0.17%（山脊从地形上方露一条带） | — |
 | T-422 | 【S3】surf_boreas 无雪盖：`worldspawn.skyname=tendies_sky`、雾色偏冬，但世界几何未体现雪覆盖 | 缺陷 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/materials.rs:1 | progress/monthly/2026-10-5.md | 判据：先取证——surf_boreas 世界材质里是否存在雪贴图/雪材质（雪盖在贴图还是几何层面）；再给出可见方案，且不影响非雪图 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |

@@ -43,6 +43,8 @@
 
 **天空盒拼接**：六面槽位映射此前按错误的轴约定书写（`up` 落在 +X、四个侧面互串），且极面未按 GL 立方体贴图约定做面内旋转；现按 `map_coords` 的真实轴约定改为 `ft→pz / bk→nz / lf→px / rt→nx / up→py / dn→ny`，并把 `up`/`dn` 各转 90°（相邻边连续性实测确认）。
 
+**微缩外景（Source 3D 天空盒的替代实现）**：夹具里没有可分离的地图自带微缩区，故在可达范围之外合成三层低多边形山脊作「到不了的外景」（`src/renderer-shared/environment/miniature-sky.ts`，逐层向雾色混合出大气透视，材质不吃地图雾以免被整片吃掉）；debug 已接线并随换图释放。
+
 **文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范），篇目见 `README.md`「文档地图」与 `documents/index.md`。
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。
