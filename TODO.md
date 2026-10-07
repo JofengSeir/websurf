@@ -16,9 +16,9 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（130 条）
+## 未结项（178 条）
 
-### 待裁决（88）
+### 待裁决（136）
 
 - **T-003** 旧 AGENTS.md 的通用工程规范（文件归属 / 临时区 / 产物 / 文档格式）未在本文件复述 —— 重编期间以任务书为准　`docs`
 - **T-005** apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html…　`game`
@@ -84,6 +84,19 @@
 - **T-151** BspMetadata 与 TS 契约靠约定对齐，无编译期校验　`viewer`
 - **T-152** Worker 没有心跳，请求侧无法区分「在解析」与「已失联」　`viewer`
 - **T-153** WorkerCtx 是手写的全局面（tsconfig lib 缺 WebWorker）　`viewer`
+- **T-156** `wasm.d.ts` 是零导入点的类型面　`viewer`
+- **T-157** `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达　`viewer`
+- **T-158** `core/pose.ts` 的两个函数零调用点　`viewer`
+- **T-159** `RAD2DEG` 在 `apps/viewer/src` 内零调用点　`viewer`
+- **T-160** `ViewerScene.model` getter 零调用点　`viewer`
+- **T-161** 六个导出在本工程内零调用点　`viewer`
+- **T-162** `setLightFloor` 在本工程内零调用点　`viewer`
+- **T-163** `ReplayPlayer` 两个成员零调用点　`viewer`
+- **T-164** `ReplayImporter.dispose()` 零调用点　`viewer`
+- **T-165** `ReplayVisuals.hasTracks()` 零调用点　`viewer`
+- **T-166** `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点　`viewer`
+- **T-167** 进度回调里的 `'map'` 分支不可达　`viewer`
+- **T-168** `MapPanel.spawnPoints` getter 零调用点　`viewer`
 - **T-201** 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色　`game`
 - **T-203** 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈　`game`
 - **T-204** `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指）　`game`
@@ -99,12 +112,47 @@
 - **T-220** `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加　`game`
 - **T-222** 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出　`game`
 - **T-223** single 产物引用了不在保留名单里的 `coi-serviceworker.js`、dist 同目录无该文件　`game`
+- **T-225** `physics.mode` 零读取点　`game`
+- **T-226** `sendSetDeathThreshold` 零调用点　`game`
+- **T-227** 共享层的累积路径无消费方　`game`
+- **T-228** `sampleEpoch` 字段只写不读　`game`
+- **T-229** `applyCollisionCorrection` 的入参有三个不被读取　`game`
+- **T-230** 光照模块内多个导出在本工程零导入点　`game`
+- **T-231** `SavePoint.t` 只写不读　`game`
+- **T-232** `getMap()` 零调用点　`game`
+- **T-233** `clear()` 零调用点　`game`
+- **T-234** `mtzB64` 与契约清单都指向了没有直接调用点的字段　`game`
+- **T-235** `apps/game/src/world/types.ts` 在本工程零导入点　`game`
+- **T-236** `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：…　`game`
+- **T-237** `map_name` 恒为空串　`game`
+- **T-238** `InitMessage` 有三个字段既无发送方也无读取点　`game`
+- **T-239** `worker-types.ts` 里多条声明在本工程无发送方且无接收点　`game`
 - **T-302** 面板 `PARAM_DEFS` 与 `config.ts` 两套默认值来源、无交叉校验（`jumpHeight` 57 与 `jumpSpeed` 302 同写 `jump_height`）　`debug`
 - **T-303** 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1　`debug`
 - **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
 - **T-308** 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套　`debug`
 - **T-309** 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24）　`debug`
 - **T-310** `set-auto-restore-hull` 只改面板侧标记，`src/phys/**` 无对应参数与读取点，开关不写物理实例　`debug`
+- **T-312** `tsconfig.json` 的五个路径别名零导入点　`debug`
+- **T-313** `keysFromMask` 无调用点　`debug`
+- **T-314** `InputPlayer.adopt` / `seekTo` / `setRealtime` 的调用面窄　`debug`
+- **T-315** `vec3.ts` 的 13 个函数零调用点　`debug`
+- **T-316** `setParamFromMap` 零调用点　`debug`
+- **T-317** `TraceResult` 与 `V3Tuple` 的消费面不在本目录　`debug`
+- **T-318** `LOD_LEVEL.PVS_HIDDEN` 是预留档位　`debug`
+- **T-319** `assignClusterIds` 的结果无消费方　`debug`
+- **T-320** 默认导出与 `parse_bsp` 在本工程零调用点　`debug`
+- **T-321** `apps/debug/web/styles.css` 在全工程零引用　`debug`
+- **T-322** `TeleportManager` 的六项成员零调用点　`debug`
+- **T-323** `spawn-loader.ts` 整模块零调用点　`debug`
+- **T-324** `types.ts` 里有一批零引用类型　`debug`
+- **T-402** `compute-mode` 的三模式接线　`shared`
+- **T-403** `MouseBuffer.push` / `drain`　`shared`
+- **T-404** `ShmState.wake`　`shared`
+- **T-405** `maskToKeys`　`shared`
+- **T-406** `PvsManager.getFaceCluster` / `visibleClusterCount`　`shared`
+- **T-407** `world/types.ts` 的 `rootNode` 字段　`shared`
+- **T-408** `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de…　`shared`
 - **T-504** 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉　`shared`
 - **T-506** 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果）　`shared`
 - **T-507** check_stuck 的修法 D / C 未实施　`shared`
@@ -159,7 +207,7 @@
 
 > 另有 已记录 21 条、已结案 15 条见下表（保留 ID 供追溯，编号不复用）。
 
-## 总表（166 条）
+## 总表（214 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 原号 |
 |---|---|---|---|---|---|---|---|
@@ -286,6 +334,19 @@
 | T-153 | WorkerCtx 是手写的全局面（tsconfig lib 缺 WebWorker） | 缺陷 | viewer | 待裁决 | apps/viewer/src/worker/main.ts:33 | documents/viewer/implementation/worker.md | — |
 | T-154 | clipToPayload 没有显式返回类型，字段写错的报错落在调用点 | 缺陷 | viewer | 待修 | apps/viewer/src/worker/main.ts:113 | documents/viewer/implementation/worker.md | — |
 | T-155 | req.rule 缺少防御，缺字段时抛 TypeError 并被 catch 成 error | 缺陷 | viewer | 待修 | apps/viewer/src/worker/main.ts:82 | documents/viewer/implementation/worker.md | — |
+| T-156 | `wasm.d.ts` 是零导入点的类型面 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/wasm.d.ts:13 | documents/viewer/implementation/app.md | — |
+| T-157 | `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/app.ts:726 | documents/viewer/implementation/app.md | — |
+| T-158 | `core/pose.ts` 的两个函数零调用点 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/core/pose.ts:36 | documents/viewer/implementation/core.md | — |
+| T-159 | `RAD2DEG` 在 `apps/viewer/src` 内零调用点 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/core/constants.ts:25 | documents/viewer/implementation/core.md | — |
+| T-160 | `ViewerScene.model` getter 零调用点 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/core/scene.ts:92 | documents/viewer/implementation/core.md | — |
+| T-161 | 六个导出在本工程内零调用点 | 未接线·死代码 | viewer | 待裁决 | src/renderer-shared/shader/lightmap-shader.ts:313 | documents/viewer/implementation/renderer.md | — |
+| T-162 | `setLightFloor` 在本工程内零调用点 | 未接线·死代码 | viewer | 待裁决 | src/renderer-shared/shader/lightmap-shader.ts:1752 | documents/viewer/implementation/renderer.md | — |
+| T-163 | `ReplayPlayer` 两个成员零调用点 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/replay/player.ts:295 | documents/viewer/implementation/replay.md | — |
+| T-164 | `ReplayImporter.dispose()` 零调用点 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/replay/importer.ts:175 | documents/viewer/implementation/replay.md | — |
+| T-165 | `ReplayVisuals.hasTracks()` 零调用点 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/replay/visuals.ts:162 | documents/viewer/implementation/replay.md | — |
+| T-166 | `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/replay/shavit-replay.ts:507 | documents/viewer/implementation/replay.md | — |
+| T-167 | 进度回调里的 `'map'` 分支不可达 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/replay/panel.ts:329 | documents/viewer/implementation/replay.md | — |
+| T-168 | `MapPanel.spawnPoints` getter 零调用点 | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/ui/mapinfo.ts:114 | documents/viewer/implementation/ui.md | — |
 | T-201 | 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:507 | documents/game/implementation/app-entry.md | — |
 | T-202 | 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示 | 缺陷 | game | 待修 | apps/game/src/app.ts:317 | documents/game/implementation/app-entry.md | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | — |
@@ -310,6 +371,21 @@
 | T-222 | 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出 | 配置·门禁 | game | 待裁决 | — | documents/game/implementation/scripts.md | — |
 | T-223 | single 产物引用了不在保留名单里的 `coi-serviceworker.js`、dist 同目录无该文件 | 配置·门禁 | game | 待裁决 | apps/game/scripts/build-dist.mjs:60 | documents/game/implementation/scripts.md | — |
 | T-224 | `build-dist.mjs` 两条路径都打印同一组 `[5/5]` 前缀、与步骤序号无关 | 工具·流程 | game | 待修 | apps/game/scripts/build-dist.mjs:90 | documents/game/implementation/scripts.md | — |
+| T-225 | `physics.mode` 零读取点 | 未接线·死代码 | game | 待裁决 | apps/game/src/config.ts:27 | documents/game/implementation/config.md | — |
+| T-226 | `sendSetDeathThreshold` 零调用点 | 未接线·死代码 | game | 待裁决 | apps/game/src/input/input-bridge.ts:83 | documents/game/implementation/input.md | — |
+| T-227 | 共享层的累积路径无消费方 | 未接线·死代码 | game | 待裁决 | src/ts-shared/input/mouse-buffer.ts:81 | documents/game/implementation/input.md | — |
+| T-228 | `sampleEpoch` 字段只写不读 | 未接线·死代码 | game | 待裁决 | apps/game/src/renderer/renderer-main.ts:130 | documents/game/implementation/renderer.md | — |
+| T-229 | `applyCollisionCorrection` 的入参有三个不被读取 | 未接线·死代码 | game | 待裁决 | src/ts-shared/phys/authority-calibrator.ts:735 | documents/game/implementation/renderer.md | — |
+| T-230 | 光照模块内多个导出在本工程零导入点 | 未接线·死代码 | game | 待裁决 | src/renderer-shared/shader/lightmap-shader.ts:1752 | documents/game/implementation/renderer.md | — |
+| T-231 | `SavePoint.t` 只写不读 | 未接线·死代码 | game | 待裁决 | apps/game/src/app.ts:610 | documents/game/implementation/savepoint.md | — |
+| T-232 | `getMap()` 零调用点 | 未接线·死代码 | game | 待裁决 | apps/game/src/savepoint.ts:69 | documents/game/implementation/savepoint.md | — |
+| T-233 | `clear()` 零调用点 | 未接线·死代码 | game | 待裁决 | apps/game/src/savepoint.ts:98 | documents/game/implementation/savepoint.md | — |
+| T-234 | `mtzB64` 与契约清单都指向了没有直接调用点的字段 | 未接线·死代码 | game | 待裁决 | src/ts-shared/auth/worker-dispatch.ts:297 | documents/game/implementation/scripts.md | — |
+| T-235 | `apps/game/src/world/types.ts` 在本工程零导入点 | 未接线·死代码 | game | 待裁决 | apps/game/src/renderer/renderer-main.ts:42 | documents/game/implementation/types.md | — |
+| T-236 | `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：… | 未接线·死代码 | game | 待裁决 | apps/game/crates/wasm/src/lib.rs:579 | documents/game/implementation/wasm-crate.md | — |
+| T-237 | `map_name` 恒为空串 | 未接线·死代码 | game | 待裁决 | apps/game/crates/wasm/src/lib.rs:457 | documents/game/implementation/wasm-crate.md | — |
+| T-238 | `InitMessage` 有三个字段既无发送方也无读取点 | 未接线·死代码 | game | 待裁决 | apps/game/src/worker/worker-types.ts:36 | documents/game/implementation/worker.md | — |
+| T-239 | `worker-types.ts` 里多条声明在本工程无发送方且无接收点 | 未接线·死代码 | game | 待裁决 | src/ts-shared/auth/worker-dispatch.ts:265 | documents/game/implementation/worker.md | — |
 | T-301 | 回放捕获 `replayCapture.record` 未传 `dtS`，样本 `dt` 恒 0；`InputFrame` 亦无 `dt` 字段 | 缺陷 | debug | 待修 | apps/debug/src/app.ts:2241 | documents/debug/implementation/input.md | — |
 | T-302 | 面板 `PARAM_DEFS` 与 `config.ts` 两套默认值来源、无交叉校验（`jumpHeight` 57 与 `jumpSpeed` 302 同写 `jump_height`） | 缺陷 | debug | 待裁决 | apps/debug/src/physics/param-defs.ts:47 | documents/debug/implementation/physics.md | — |
 | T-303 | 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1 | 缺陷 | debug | 待裁决 | apps/debug/src/renderer/lod-manager.ts:262 | documents/debug/implementation/renderer.md | — |
@@ -321,7 +397,27 @@
 | T-309 | 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24） | 缺陷 | debug | 待裁决 | apps/debug/src/wasm.d.ts:34 | documents/debug/implementation/wasm-bindings.md | — |
 | T-310 | `set-auto-restore-hull` 只改面板侧标记，`src/phys/**` 无对应参数与读取点，开关不写物理实例 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/worker/worker-types.ts:146 | documents/debug/implementation/worker.md | — |
 | T-311 | `custom-teleports` 的 localStorage 写入失败被静默忽略，调用方拿不到失败信号 | 缺陷 | debug | 待修 | apps/debug/src/world/custom-teleports.ts:66 | documents/debug/implementation/world.md | — |
+| T-312 | `tsconfig.json` 的五个路径别名零导入点 | 未接线·死代码 | debug | 待裁决 | apps/debug/tsconfig.json:19 | documents/debug/implementation/app.md | — |
+| T-313 | `keysFromMask` 无调用点 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/input/input-recorder.ts:772 | documents/debug/implementation/input.md | — |
+| T-314 | `InputPlayer.adopt` / `seekTo` / `setRealtime` 的调用面窄 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/input/input-recorder.ts:541 | documents/debug/implementation/input.md | — |
+| T-315 | `vec3.ts` 的 13 个函数零调用点 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/physics/math/vec3.ts:11 | documents/debug/implementation/physics.md | — |
+| T-316 | `setParamFromMap` 零调用点 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/physics/physics-params.ts:110 | documents/debug/implementation/physics.md | — |
+| T-317 | `TraceResult` 与 `V3Tuple` 的消费面不在本目录 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/physics/physics/Collision/Collision.types.ts:49 | documents/debug/implementation/physics.md | — |
+| T-318 | `LOD_LEVEL.PVS_HIDDEN` 是预留档位 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/renderer/lod-manager.ts:26 | documents/debug/implementation/renderer.md | — |
+| T-319 | `assignClusterIds` 的结果无消费方 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/renderer/lod-manager.ts:181 | documents/debug/implementation/renderer.md | — |
+| T-320 | 默认导出与 `parse_bsp` 在本工程零调用点 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/wasm.d.ts:20 | documents/debug/implementation/wasm-bindings.md | — |
+| T-321 | `apps/debug/web/styles.css` 在全工程零引用 | 未接线·死代码 | debug | 待裁决 | apps/debug/scripts/build-dist.mjs:63 | documents/debug/implementation/web.md | — |
+| T-322 | `TeleportManager` 的六项成员零调用点 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/world/teleport-manager.ts:18 | documents/debug/implementation/world.md | — |
+| T-323 | `spawn-loader.ts` 整模块零调用点 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/world/spawn-loader.ts:11 | documents/debug/implementation/world.md | — |
+| T-324 | `types.ts` 里有一批零引用类型 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/world/types.ts:18 | documents/debug/implementation/world.md | — |
 | T-401 | mosaic/decode.rs 的 code_to_img 不校验宽高下界、也不校验解码索引落在调色板色数内 | 缺陷 | shared | 待修 | src/wasm-core/mosaic/decode.rs:146 | documents/materials/overview.md；documents/wasm-core/overview.md | — |
+| T-402 | `compute-mode` 的三模式接线 | 未接线·死代码 | shared | 待裁决 | — | documents/ts-shared/overview.md | — |
+| T-403 | `MouseBuffer.push` / `drain` | 未接线·死代码 | shared | 待裁决 | — | documents/ts-shared/overview.md | — |
+| T-404 | `ShmState.wake` | 未接线·死代码 | shared | 待裁决 | — | documents/ts-shared/overview.md | — |
+| T-405 | `maskToKeys` | 未接线·死代码 | shared | 待裁决 | — | documents/ts-shared/overview.md | — |
+| T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | 未接线·死代码 | shared | 待裁决 | — | documents/ts-shared/overview.md | — |
+| T-407 | `world/types.ts` 的 `rootNode` 字段 | 未接线·死代码 | shared | 待裁决 | — | documents/ts-shared/overview.md | — |
+| T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | 未接线·死代码 | shared | 待裁决 | — | documents/wasm-core/overview.md | — |
 | T-501 | debug 的 chamfer 平面削减体积为零却决定地面法线 ⇒ 坡顶站不住 / 被弹飞 | 缺陷 | debug | 已结案 | — | progress/open-issues/01-chamfer-is-not-a-bevel.md | 原 01 |
 | T-502 | chamfer 黄线框靠重新猜平面得到，与物理侧平面表不是同一套判据 | 缺陷 | debug | 已结案 | — | progress/open-issues/02-chamfer-visualization-guesswork.md | 原 02 |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | — | progress/open-issues/03-renderer-merge-normal-attribute.md | 原 03 |

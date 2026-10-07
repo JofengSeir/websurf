@@ -32,8 +32,8 @@ Cargo 侧的三条关键声明：共享物理层 path 依赖（`apps/game/crates
 
 - **`start_disabled` 恒为 false**：触发器的该字段按**大写**键取值（`apps/game/crates/wasm/src/lib.rs:1545`），而实体文本在读入时已整体转小写（`src/wasm-core/vbsp/reader.rs` 的 `read_entities`），且属性查询是逐字节比较，取值必然失败、被 `.unwrap_or(false)` 吞掉（`apps/game/crates/wasm/src/lib.rs:1547`）。 （见 TODO.md T-015）
 - **`BspProcessor` 上叠了两个 `#[wasm_bindgen]` 属性**：一处悬空在结构体之前的注释块上方（`apps/game/crates/wasm/src/lib.rs:480`），一处紧随结构体（`:492`）。本次实测 `cargo check --manifest-path apps/game/crates/wasm/Cargo.toml` 以退出码 0 结束、未报重复属性，故该形态不影响当前构建。 （见 TODO.md T-217）
-- **`export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点**：方法有完整实现（`apps/game/crates/wasm/src/lib.rs:579`），而 `apps/game` 的 `.ts` 与 `.mjs` 内零匹配（本次实测；`apps/debug` 侧有引用，见 `apps/debug/crates/wasm/src/lib.rs:741`）。
-- **`map_name` 恒为空串**：元数据里的该字段在 Rust 侧写死 `String::new()`（`apps/game/crates/wasm/src/lib.rs:457`），消费端拿到的值恒为空；工程内展示地图名走的是文件名字符串（`apps/game/src/app.ts:501`）。
+- **`export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点**：方法有完整实现（`apps/game/crates/wasm/src/lib.rs:579`），而 `apps/game` 的 `.ts` 与 `.mjs` 内零匹配（本次实测；`apps/debug` 侧有引用，见 `apps/debug/crates/wasm/src/lib.rs:741`）。 （见 TODO.md T-236）
+- **`map_name` 恒为空串**：元数据里的该字段在 Rust 侧写死 `String::new()`（`apps/game/crates/wasm/src/lib.rs:457`），消费端拿到的值恒为空；工程内展示地图名走的是文件名字符串（`apps/game/src/app.ts:501`）。 （见 TODO.md T-237）
 - **`packed_files` 与其它计数来源不同**：该字段在构造时算一次并缓存（`apps/game/crates/wasm/src/lib.rs:506`、`:496`），其余计数在每次 `metadata()` 时重新统计（`:448`、`:449`）。
 - **`.mdl` 配对名用大小写敏感的 `replace`**：判据本身大小写不敏感（`apps/game/crates/wasm/src/lib.rs:114`），而配对名由 `replace(".mdl", …)` 生成（`:117`、`:118`）；zip 条目名不是全小写时两次 `pack.get` 会取回同一份 `.mdl` 字节填进 `.vvd` / `.dx90.vtx` 槽位，「三件齐」的判据在该情形下不再区分三件。 （见 TODO.md T-218）
 - **顶点法向翻转回退只覆盖 `verts_bsp < 4` 的情形**：导出 brush 时先按原平面算顶点，不足 4 个才把全部平面法线与 `dist` 取负重算一次（`apps/game/crates/wasm/src/lib.rs:2149`、`:2165`）；仍不足 4 个才落到 `skipped_verts_lt4` 分支（`:2169`）。

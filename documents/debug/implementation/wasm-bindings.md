@@ -47,4 +47,4 @@
 3. **两个自由导出未进 `.d.ts`**：`export_visleaf_pvs`（`apps/debug/crates/wasm/src/lib.rs:3261`）与 `start`（`:3494`）都没有对应的类型声明；`start` 由 wasm-bindgen 在装载时自动调用，不需要 TS 侧声明，`export_visleaf_pvs` 则既无声明也无任何 TS 消费点。
 4. **`export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 无 TS 调用点**：该变体只出现在 Rust 导出面与本文件的类型面之外（`apps/debug/crates/wasm/src/lib.rs:739`）。
 5. **本工程实际消费的 GLB 入口只有两个**：`export_glb_with_pakfile_models` 与 `export_glb_with_pakfile_models_with_defaults_and_lights`（由共享层 `BspProcessorLike` 要求，`apps/debug/crates/wasm/src/lib.rs:17`）；`.d.ts` 里声明的 `export_glb` 与 `export_glb_with_pakfile_models_with_defaults` 在本工程无调用点（`apps/debug/src/wasm.d.ts:38`、`:42`）。
-6. **默认导出与 `parse_bsp` 在本工程零调用点**：`apps/debug/src/wasm.d.ts:20` 的默认导出与 `apps/debug/src/wasm.d.ts:30` 的 `parse_bsp` 都注明本工程调用点为零；主线程走 `BspProcessor` + `metadata()`。
+6. **默认导出与 `parse_bsp` 在本工程零调用点**：`apps/debug/src/wasm.d.ts:20` 的默认导出与 `apps/debug/src/wasm.d.ts:30` 的 `parse_bsp` 都注明本工程调用点为零；主线程走 `BspProcessor` + `metadata()`。 （见 TODO.md T-320）

@@ -97,12 +97,12 @@
 | `tick-authority` 的 F4 乐观门 | `createTickAuthority` 全仓只有其自身测试调用；三个工程均无装配点（见 TODO.md T-006） |
 | `decoupled-loop` | `createDecoupledLoop` 全仓无装配点；其依赖的环境槽 `decoupledLoop` 无人填充（见 TODO.md T-006） |
 | 物理零分配支路 | `tick_into` / `state_out_ptr` / `seed_from` 的调用方只有上述两个未接线的控制器；线上路径走 `tick()` 返回对象（见 TODO.md T-006） |
-| `compute-mode` 的三模式接线 | `apps/**` 内无该模块的 import、无 `set-mode` 发送方、未注入 `getComputeMode` / `onSetMode` ⇒ 共享层缺省恒落 `'coupled'`；`resolveAuthTickRate` 零调用点 |
-| `MouseBuffer.push` / `drain` | 零调用点（线上路径是 `process()`） |
-| `ShmState.wake` | 零调用点（其唯一调用方 `waitWakeup` 只被未接线的解耦环使用） |
-| `maskToKeys` | 零调用点 |
-| `PvsManager.getFaceCluster` / `visibleClusterCount` | 零调用点 |
-| `world/types.ts` 的 `rootNode` 字段 | TS 侧无消费点 |
+| `compute-mode` 的三模式接线 | `apps/**` 内无该模块的 import、无 `set-mode` 发送方、未注入 `getComputeMode` / `onSetMode` ⇒ 共享层缺省恒落 `'coupled'`；`resolveAuthTickRate` 零调用点 （见 TODO.md T-402） |
+| `MouseBuffer.push` / `drain` | 零调用点（线上路径是 `process()`） （见 TODO.md T-403） |
+| `ShmState.wake` | 零调用点（其唯一调用方 `waitWakeup` 只被未接线的解耦环使用） （见 TODO.md T-404） |
+| `maskToKeys` | 零调用点 （见 TODO.md T-405） |
+| `PvsManager.getFaceCluster` / `visibleClusterCount` | 零调用点 （见 TODO.md T-406） |
+| `world/types.ts` 的 `rootNode` 字段 | TS 侧无消费点 （见 TODO.md T-407） |
 
 ## 7. 测试与门禁
 

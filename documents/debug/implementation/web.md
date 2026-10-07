@@ -59,7 +59,7 @@
 
 ## 已知缺口（状态见 TODO.md）
 
-1. **`apps/debug/web/styles.css` 在全工程零引用**：`apps/debug/web/index.html` 既不 `<link>` 该文件，`apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE` 与 `:64` 的 `KEEP_MULTI` 也都不含 `styles.css` ⇒ 该文件仍是死资产。`.health-log` 的实际样式自 2026-09-28 起由页面内联 `<style>` 块承担：`#health-log` 元素（`apps/debug/web/index.html:854`）的等宽、换行、限高与滚动外观都来自同文件样式块里的 `.health-log` 规则；外置文件里的同名规则依旧不生效。
+1. **`apps/debug/web/styles.css` 在全工程零引用**：`apps/debug/web/index.html` 既不 `<link>` 该文件，`apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE` 与 `:64` 的 `KEEP_MULTI` 也都不含 `styles.css` ⇒ 该文件仍是死资产。`.health-log` 的实际样式自 2026-09-28 起由页面内联 `<style>` 块承担：`#health-log` 元素（`apps/debug/web/index.html:854`）的等宽、换行、限高与滚动外观都来自同文件样式块里的 `.health-log` 规则；外置文件里的同名规则依旧不生效。 （见 TODO.md T-321）
 2. ~~**页面缺少被查询的九个 id**~~ **已全部处置（2026-09-26）**：九个查询（`pathVisibleChk`、`pvsEnabled` 与录制面板七个）已随各自死链删除，脚本不再查询任何页面不存在的 id（见 `documents/debug/implementation/app.md` 已知缺口第 10–12 项）。页面侧结论不变：`web/index.html` 从未提供「输入录制」区与 PVS 开关。
 3. **两个 id 无任何代码读写**：`lightingModeHint`（说明段，`apps/debug/web/index.html:551`）与 `pathBuildTag`（构建标签，`apps/debug/web/index.html:590`）在 `apps/debug/src` 与 `apps/debug/scripts` 内零命中。其中构建标签不做构建版本校验，与产物不符时页面不会提示。
 4. ~~**`#health-log` 的实际外观依赖内联样式之外的东西**~~ **已消除（2026-09-28）**：`.health-log` 的规则已写进页面内联 `<style>` 块（见第 1 项），该元素不再是浏览器默认的 `<pre>` 外观。

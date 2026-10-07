@@ -30,7 +30,7 @@
 
 ## 已知缺口（状态见 TODO.md）
 
-- **`physics.mode` 零读取点**：字段只有声明与默认值（`apps/game/src/config.ts:27`），本工程内没有读取者。权威侧的模式判定读的是消息里的 `patch.mode`（`src/ts-shared/auth/worker-dispatch.ts:385`），不是这份 config 的字段。
+- **`physics.mode` 零读取点**：字段只有声明与默认值（`apps/game/src/config.ts:27`），本工程内没有读取者。权威侧的模式判定读的是消息里的 `patch.mode`（`src/ts-shared/auth/worker-dispatch.ts:385`），不是这份 config 的字段。 （见 TODO.md T-225）
 - **`input.pitchLimit` 字段已删除**（2026-09-26 owner 裁决删字段；台账号追溯见 TODO.md T-045）：该字段已从 `InputConfig` 与 `DEFAULT_CONFIG` 移除（原声明 `apps/game/src/config.ts:70`、默认值 `:197`）。pitch 限幅实际由 Rust 侧承担；对比 debug 的同名键有 UI 且被读（`apps/debug/src/app.ts:1358`），两端本就不同。 （见 TODO.md T-045）
 - **`lighting.lightGamma` 的默认值落在着色器接受窗口之外**：默认 2.2（`apps/game/src/config.ts:228`），而 `setLightGamma` 只接受 `(0, 1]`，窗口外的值直接返回、不写共享 uniform（`src/renderer-shared/shader/lightmap-shader.ts:1789`）。因此 `init` 阶段那次初始化写入被忽略（`apps/game/src/renderer/renderer-main.ts:217`），共享 uniform 保持其自身初值（`src/renderer-shared/shader/lightmap-shader.ts:1556`）。 （见 TODO.md T-021）
 - **面板滑块量程与该接受窗口不一致**：滑块量程 0.5..6（`apps/game/src/panel/panel-controller.ts:471`、`apps/game/web/index.html:231`），拖到大于 1 时 `config.lighting.lightGamma` 变了、画面不变。 （见 TODO.md T-021）
