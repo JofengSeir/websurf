@@ -63,7 +63,7 @@ Semantic::TexCoords(1) → accessor_start + 2
 
 ### 2.4 debug 的归一钩子不覆盖这一项
 
-`apps/debug` 传了 `normalizeGroup` 钩子（`scene-optimizer.ts:183`, `:210`；类型见 `:53`-`:555`），
+`apps/debug` 传了 `normalizeGroup` 钩子（`scene-optimizer.ts:334`, `:369`；类型见 `:64`），
 它归一的是**混合 indexed / 非 indexed** 与**混合 `gpuType`**，不处理 `normal` 的有无。
 
 ## 3. 根因

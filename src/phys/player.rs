@@ -1310,9 +1310,9 @@ fn categorize_position(world: &mut World, p: &mut Player) {
         p.origin = tr.end_pos;
         // **起源的 `CategorizePosition` 不剪地面速度**：落到地面时只把**向下**的竖直分量清零
         // （`if (mv->m_vecVelocity[2] < 0) mv->m_vecVelocity[2] = 0;`），水平分量一个数都不动。
-        // 这正是"斜坡上任何方向的水平速度都保持 `maxspeed`"的来源：参考实现实测 40.5° 上坡的
-        // 水平位移与平地**逐位相同**（`test/surf-phys-reference/reference.mjs`，对照脚本
-        // `.tmp/slope-ref.mjs`），爬升量 `tanθ × 水平位移` 是白送的。
+        // 这正是"斜坡上任何方向的水平速度都保持 `maxspeed`"的来源：`slope_speed_tests` 的 40.5°
+        // 上坡夹具实测水平速度顶到 `RUN_SPEED`、每 tick 水平位移与平地相同，爬升量
+        // `tanθ × 水平位移` 是白送的。
         //
         // 旧实现把速度整体投影到地面平面（`dot < 0` 就投影整向量）：上坡时地面法线的水平分量
         // 指向**身后** ⇒ 每 tick 把水平速度乘一次 `cos²θ`，而 `accelerate` 每 tick 最多只补
@@ -1544,8 +1544,7 @@ fn walk_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64) {
     let wishspeed = compute_wish(p, params, &mut wish_dir);
     // **地面上的速度是纯水平的**：起源 `CGameMovement::WalkMove` 在 `Accelerate` 前后各写一次
     // `mv->m_vecVelocity[2] = 0`（`gamemovement.cpp:1958`、`:1960`），落地后再写一次
-    // "If we are on ground, no downward velocity"（`:2073`~`:2076`）；surfd 参考实现在落地
-    // 分支末尾同样 `if (e.grounded) e.velocity.z = 0`（`test/surf-phys-reference/physics.mjs:642`）。
+    // "If we are on ground, no downward velocity"（`:2073`~`:2076`）。
     //
     // 竖直分量若留在地面速度里，下一 tick 的 `accelerate` 只能按**水平投影**算 addspeed
     // （`currentspeed = dot(velocity, wishdir)`，wishdir 恒为水平）⇒ 斜坡上的水平速度停在
@@ -1704,7 +1703,7 @@ pub fn player_tick(world: &mut World, p: &mut Player, params: &PhysParams, dt: f
             }
             categorize_position(world, p);
             // "If we are on ground, no downward velocity"（起源 `CGameMovement::FullWalkMove`，
-            // `gamemovement.cpp:2073`~`:2076`；surfd 参考实现同位置 `physics.mjs:642`）。
+            // `gamemovement.cpp:2073`~`:2076`）。
             // **必须在这里清**：`categorize_position` 会按地面法线重写竖直分量，在 `walk_move`
             // 里清会被它覆盖。跳起当帧 `categorize_position` 会因 `velocity[1] > NON_JUMP_VELOCITY`
             // 判为离地（`on_ground = false`），故这条不会吃掉起跳速度。

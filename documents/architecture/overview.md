@@ -60,11 +60,11 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 
 | 接口 | 锚点 |
 |---|---|
-| 物理世界导出类型 `PhysWorld` | `src/phys/mod.rs:104` |
-| 单步（返回状态对象）`tick` | `src/phys/mod.rs:242` |
-| 单步（零分配，写共享缓冲）`tick_into` | `src/phys/mod.rs:265` |
-| 参数写入 `set_params`（JSON 键通道） | `src/phys/mod.rs:542` |
-| 世界数据 `World` | `src/phys/world.rs:955` |
+| 物理世界导出类型 `PhysWorld` | `src/phys/mod.rs:144` |
+| 单步（返回状态对象）`tick` | `src/phys/mod.rs:338` |
+| 单步（零分配，写共享缓冲）`tick_into` | `src/phys/mod.rs:361` |
+| 参数写入 `set_params`（JSON 键通道） | `src/phys/mod.rs:878` |
+| 世界数据 `World` | `src/phys/world.rs:1038` |
 | 传送门检测 `check` | `src/phys/teleport.rs:266` |
 
 ### 4.2 解析层（Rust）
@@ -84,7 +84,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 | 接口 | 锚点 | 用途 |
 |---|---|---|
 | `base64ToBytes` | `src/ts-shared/wasm/loader.ts:44` | 内嵌 wasm 载荷解码 |
-| `buildWorldBundle` | `src/ts-shared/phys/world-builder.ts:143` | 世界构建（BSP → wasm → 场景数据） |
+| `buildWorldBundle` | `src/ts-shared/phys/world-builder.ts:150` | 世界构建（BSP → wasm → 场景数据） |
 | `PvsManager` | `src/ts-shared/world/pvs-manager.ts:68` | cluster 查询与可见集 |
 | `layerMouseDelta` / `M_YAW` / `INPUT_CLAMP` | `src/ts-shared/input/input-layer.ts:25`、`:22`、`:19` | 输入归一 |
 | `MouseBuffer` | `src/ts-shared/input/mouse-buffer.ts:37` | 主线程鼠标增量缓冲 |
@@ -107,7 +107,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 1. `apps/<app>/web/index.html` 加载打包后的 `web/app.js`（构建产物，非本仓源码）。
 2. `apps/<app>/src/app.ts` 是主线程装配入口：它取 DOM、建渲染器、建 Worker、绑定面板。
 3. Worker 侧入口是 `apps/<app>/src/worker/main.ts`：装配 `self.onmessage` 与各控制器。
-4. 世界构建走共享层的 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:143`），其内部经 `src/ts-shared/wasm/loader.ts` 加载 wasm 产物；出生点坐标/yaw 换算由 `src/ts-shared/phys/angles.ts` 的 `bspYawToCsYaw` 提供（`apps/debug/src/world/spawn-loader.ts` 是同一换算的参考实现，全仓无 import）。
+4. 世界构建走共享层的 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:150`），其内部经 `src/ts-shared/wasm/loader.ts` 加载 wasm 产物；出生点坐标/yaw 换算由 `src/ts-shared/phys/angles.ts` 的 `bspYawToCsYaw` 提供（`apps/debug/src/world/spawn-loader.ts` 是同一换算的参考实现，全仓无 import）。
 5. Rust 侧由 `apps/<app>/crates/wasm/src/lib.rs` 暴露 `#[wasm_bindgen]` 函数，转发到 `src/wasm-core`（解析）与 `src/phys`（物理）。
 
 ### 5.2 帧链（`apps/debug` 与 `apps/game` 共形）
@@ -128,7 +128,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 ## 6. 关键不变量与遗留事实
 
 1. **权威时钟只有一个来源**：`src/ts-shared/auth/auth-loop.ts:250` 的 `createAuthLoop`；其步长由 `setFixedDt` 改写，`reset()` 会把累积器、唤醒基准与仿真时钟一并清零。调用方只在步长**真变化**时 `reset`（`src/ts-shared/auth/worker-dispatch.ts:207` 的分支）。
-2. **零分配物理支路已实现、未接线**：`tick_into`（`src/phys/mod.rs:265`）、`state_out_ptr`、`seed_from` 的调用方只有 `src/ts-shared/auth/tick-authority.ts` 与 `src/ts-shared/decoupled/decoupled-loop.ts`，而这两个控制器在三个工程内**都没有装配点**。线上路径走的是 `tick`（返回状态对象）。
+2. **零分配物理支路已实现、未接线**：`tick_into`（`src/phys/mod.rs:361`）、`state_out_ptr`、`seed_from` 的调用方只有 `src/ts-shared/auth/tick-authority.ts` 与 `src/ts-shared/decoupled/decoupled-loop.ts`，而这两个控制器在三个工程内**都没有装配点**。线上路径走的是 `tick`（返回状态对象）。
 3. **三份 `crates/wasm/src/lib.rs` 各自维护**：导出面不同，不构成同构副本。
 4. **剔除只有一条判据**：debug 的 `LodManager.update` 只做「块中心到相机距离 > `cullDistance`」（不查 cluster、无迟滞带）。原 `lod.pvsEnabled`（PVS 开关）于 2026-09-26 随死链删除——它既不参与判定、页面也无控件；`LodConfig` 现只含 `updateInterval` 与 `cullDistance`。
 5. **可执行门禁**：`cargo test -p websurf-phys`（物理门禁测试）、各工程 `npm run typecheck`、`node src/scripts/check-doc-drift.mjs`（文档锚点与路径）、`node src/scripts/check-shared-sync.mjs`（Rust 与 TS 两侧常量逐位比对）、`node src/scripts/wasm-stale-check.mjs`（wasm 产物新鲜度）。

@@ -43,7 +43,7 @@
 | 接口 | 锚点 |
 |---|---|
 | `base64ToBytes` | `src/ts-shared/wasm/loader.ts:44` |
-| `buildWorldBundle` | `src/ts-shared/phys/world-builder.ts:143` |
+| `buildWorldBundle` | `src/ts-shared/phys/world-builder.ts:150` |
 | `bspYawToCsYaw` | `src/ts-shared/phys/angles.ts` 的导出函数（同文件另有 `wrapDeg`） |
 | `layerMouseDelta` | `src/ts-shared/input/input-layer.ts:25` |
 | 常量 `M_YAW` / `INPUT_CLAMP` | `src/ts-shared/input/input-layer.ts:22`、`src/ts-shared/input/input-layer.ts:19` |

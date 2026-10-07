@@ -8,9 +8,6 @@
 //! - 爬坡靠 `CGameMovement::StepMove`（`:1515`）的"地面滑 / 抬 18-滑-落 18 择优" ⇒
 //!   **上坡的水平位移与平地一样**，爬升量 `tanθ × 水平位移` 是白送的。
 //!
-//! 参考实现读数（`test/surf-phys-reference/physics.mjs`，脚本 `.tmp/slope-ref.mjs`）：
-//! 40.5° 上坡的水平速度 = 260.00（= `maxSpeed`）、120 tick 水平位移 **430.73 HU**，与平地逐位相同。
-//!
 //! 修前（`categorize_position` 把地面速度投影到坡面）实测：40.5° 上坡水平速度 220.28，
 //! 再叠加"地面上清竖直分量"后 140.24 —— owner 2026-10-06 在真图更陡处读到 190。
 
@@ -93,8 +90,8 @@ fn walk_forward(mut w: World, start: [f64; 3]) -> (f64, f64, usize) {
 /// 可站坡度（≤ `acos(STANDABLE_NORMAL)` = 45.573°）上往上走：水平速度顶到 `RUN_SPEED`、每 tick
 /// 位移与平地相同；更陡的坡判滑（着地 0，不是"走得慢"）。
 ///
-/// 与参考实现逐档对照（`.tmp/slope-ref.mjs`）：45.0° / 45.4° ⇒ 水平 260.00 满速；46°（ny 0.6947
-/// < 0.7）⇒ 17.57 且着地 0/40。
+/// 逐档取值 30° / 35° / 40.5° / 43° / 45°（全部可站）与 46°（`ny = 0.6947 < 0.7`，不可站 ⇒
+/// 水平速度掉到 `0.5·RUN_SPEED` 以下且着地 0/40）。
 #[test]
 fn walkable_slopes_keep_maxspeed_and_steeper_ones_slide() {
     for ang in [30.0f64, 35.0, 40.5, 43.0, 45.0] {

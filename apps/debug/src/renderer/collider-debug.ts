@@ -10,12 +10,16 @@
  *   本模块按 `TriMesh.surfaceprop`（`apps/debug/src/physics/physics/Collision/Collision.types.ts`）
  *   是否存在拆成 .phy 与可视网格两条路径。
  *
- * 五个 Group 与五个开关彼此独立，各有自己的可视距离：
+ * 六个 Group 与六个开关彼此独立，各有自己的可视距离：
  * - `showSolids`  实体碰撞体凸包线框，逐面按法线着色（地面绿 / 斜坡黄 / 墙红）；
  * - `showTriggers` 触发器凸包或 AABB 线框（青=已链接 / 紫=孤儿 / 灰=初始禁用 / 橙=非玩家）；
  * - `showPhy` / `showVis` 模型三角形线框（橙 / 紫）；
  * - `showBevel` BSP 原生 bevel 辅助碰撞面（白：bevel 平面被 brush AABB 截出的截面，
  *   半透明填充 + 描边；与既有真实面共面的重复 bevel 不画——那只是把实体面又贴一遍）。
+ * - `showPhyBevel` `.phy` 凸体的**生成补面**（品红，同一套 AABB 截面画法，数据来自
+ *   `export_model_phy_bevels` = `phys::hull_bevels` 的输出）：与 `showBevel` 分开两路是因为
+ *   来源不同——白的是 BSP 编译器写进文件的 bevel side，品红的是物理侧按同一套 VBSP 判据在
+ *   解析期给`.phy` 凸体补出来的面（模型尖脊能不能站取决于它）。
  *
  * **面高亮纪律（本模块最高优先级）**：debug 画的必须是物理系统**实际影响运动**的面，
  * 画不出来就不画。判据唯一来源是上游 `export_brushes_planes` 逐平面给出的 `is_real_face`
@@ -70,6 +74,11 @@ const COLOR_TRIGGER_ORPHAN: RgbColor = { r: 0.6, g: 0.2, b: 0.9 };
 const COLOR_TRIGGER_DISABLED: RgbColor = { r: 0.5, g: 0.5, b: 0.5 };
 /** 触发碰撞箱：未禁用但 spawnflags 既无 Clients 也无 Everything（橙）。 */
 const COLOR_TRIGGER_NON_PLAYER: RgbColor = { r: 1.0, g: 0.6, b: 0.2 };
+
+/** `.phy` 生成补面的颜色（品红）：与 BSP 原生 bevel 的白分开两路。 */
+const PHY_BEVEL_COLOR = 0xff33ff;
+/** `.phy` 生成补面的填充不透明度（0-1）。 */
+const PHY_BEVEL_FILL_OPACITY = 0.16;
 
 /** spawnflags 位：1 = Clients、64 = Everything（与 TeleportManager 的两条判据同值）。 */
 const SPAWNFLAG_CLIENTS = 0x01;
@@ -427,11 +436,123 @@ function pushAabbEdges(
 }
 
 // ---------------------------------------------------------------------------
+// `.phy` 生成补面：数据形状 + AABB 截面画法
+// ---------------------------------------------------------------------------
+
+/**
+ * 一条生成补面（`export_model_phy_bevels` 的 `planes` 元素，11 个数）：
+ * `[nx, ny, nz, d, kind, ax, ay, az, bx, by, bz]` —— 平面（法线朝外、HU、世界空间）+ 类别
+ * （`0` = box bevel / `1` = edge bevel）+ **来源边**两端点（box bevel 写 0）。
+ */
+export type PhyBevelPlane = [
+	number, number, number, number, number, number, number, number, number, number, number,
+];
+
+/**
+ * `.phy` 凸体的生成补面条目（`export_model_phy_bevels` 的 JSON 形状）：**一块凸体一条**。
+ *
+ * `planes` 含两类：box bevel（该块 AABB 的轴向面）与 edge bevel（过棱斜切轴面）。显示**只画
+ * edge bevel**，画法是「沿来源边的 ±16 HU 窄条」——盒的足迹落在棱两侧各 16 HU 之内，那正是它
+ * 在碰撞里接住盒的那条带；若按整块 AABB 截面画，十几块叠起来就是铺满坡的一团，还会被误读成
+ * "模型外面套了个碰撞盒"。`min` / `max` 只用于视距粗筛。
+ */
+export interface PhyBevelPiece {
+	name: string;
+	min: [number, number, number];
+	max: [number, number, number];
+	box: number;
+	edge: number;
+	rejected: number;
+	planes: PhyBevelPlane[];
+}
+
+/**
+ * 平面被 AABB 截出的截面多边形（世界坐标，沿法线外移 `offset` HU）；与 AABB 不相交返回 null。
+ *
+ * 两条 bevel 路线（BSP 原生 / `.phy` 生成）共用这一套画法：斜面 brush 的 AABB 截面天然
+ * **溢出实体材质之外**，正是「辅助面 = 盒体扩张后的支撑面」的正确观感；若改画平面与凸包的
+ * 相交轮廓，通常只剩棱上一条线段，与实体线框分不开。
+ */
+function planeAabbSection(
+	normal: { x: number; y: number; z: number },
+	dist: number,
+	min: { x: number; y: number; z: number },
+	max: { x: number; y: number; z: number },
+	offset: number,
+): [number, number, number][] | null {
+	const radius = Math.hypot(max.x - min.x, max.y - min.y, max.z - min.z) / 2;
+	const cx = (min.x + max.x) / 2;
+	const cy = (min.y + max.y) / 2;
+	const cz = (min.z + max.z) / 2;
+	// 截面中心 = AABB 中心在该平面上的投影
+	const dn = normal.x * cx + normal.y * cy + normal.z * cz - dist;
+	const px = cx - normal.x * dn;
+	const py = cy - normal.y * dn;
+	const pz = cz - normal.z * dn;
+	// 平面内正交基：参考轴取**与法线分量最小**的坐标轴 —— 单位法线的最小分量必然 < 1，
+	// 参考轴才保证与法线不平行、叉积非零。box bevel 全是轴向法线（如 (0,1,0)），若按
+	// 「最同向」选轴，叉积恒为零、截面退化成一个点，所有 box bevel 都画不出来。
+	const absX = Math.abs(normal.x);
+	const absY = Math.abs(normal.y);
+	const absZ = Math.abs(normal.z);
+	const ref: [number, number, number] =
+		absX <= absY && absX <= absZ ? [1, 0, 0] : absY <= absZ ? [0, 1, 0] : [0, 0, 1];
+	let ux = normal.y * ref[2] - normal.z * ref[1];
+	let uy = normal.z * ref[0] - normal.x * ref[2];
+	let uz = normal.x * ref[1] - normal.y * ref[0];
+	const ul = Math.hypot(ux, uy, uz) || 1;
+	ux /= ul;
+	uy /= ul;
+	uz /= ul;
+	const vx = normal.y * uz - normal.z * uy;
+	const vy = normal.z * ux - normal.x * uz;
+	const vz = normal.x * uy - normal.y * ux;
+	// 初始四边形（覆盖半径 radius），逐条 AABB 半空间裁剪（Sutherland–Hodgman）
+	let poly: [number, number][] = [
+		[-radius, -radius],
+		[radius, -radius],
+		[radius, radius],
+		[-radius, radius],
+	];
+	const axes: ['x' | 'y' | 'z', 1 | -1][] = [
+		['x', 1], ['x', -1], ['y', 1], ['y', -1], ['z', 1], ['z', -1],
+	];
+	for (const [axis, sign] of axes) {
+		const bound = sign === 1 ? max[axis] : min[axis];
+		poly = clipPolyAxis(poly, ux, uy, uz, vx, vy, vz, px, py, pz, axis, sign, bound);
+		if (poly.length < 3) return null; // 平面与 AABB 不相交
+	}
+	return poly.map(([a, b]) => [
+		px + ux * a + vx * b + normal.x * offset,
+		py + uy * a + vy * b + normal.y * offset,
+		pz + uz * a + vz * b + normal.z * offset,
+	]);
+}
+
+/** 把截面多边形写进描边（逐边两个端点）与填充（扇形三角化）缓冲；截面是凸多边形。 */
+function pushSection(
+	world: [number, number, number][],
+	outline: number[],
+	fill: number[],
+): void {
+	for (let i = 0; i < world.length; i++) {
+		const a = world[i];
+		const b = world[(i + 1) % world.length];
+		outline.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+	}
+	for (let i = 1; i < world.length - 1; i++) {
+		fill.push(world[0][0], world[0][1], world[0][2]);
+		fill.push(world[i][0], world[i][1], world[i][2]);
+		fill.push(world[i + 1][0], world[i + 1][1], world[i + 1][2]);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // 碰撞体可视化管理器
 // ---------------------------------------------------------------------------
 
 /**
- * 碰撞体可视化：五个 Group 与五个开关，由 `renderer-main` 的每帧循环驱动。
+ * 碰撞体可视化：六个 Group 与六个开关，由 `renderer-main` 的每帧循环驱动。
  * `update` 内部按各自的限流计数重建：实体碰撞箱每 `REBUILD_INTERVAL` 帧、模型三角形
  * 每 `TRI_REBUILD_INTERVAL` 帧（开关或距离变更时 `phyDirty` 立即触发）、触发器每帧重建。
  * `update` 的返回值表示本帧是否装配过对象，调用方据此置 `needsRender`。
@@ -450,6 +571,8 @@ export class ColliderDebug {
 	/** bevel 辅助碰撞面（白）：画的是 bevel 平面被 brush AABB 截出的截面（半透明填充 +
 	 * 描边），与实体面线框（solidGroup，按法线分类取色）区分开。 */
 	private bevelGroup: THREE.Group | null = null;
+	/** `.phy` 生成补面（品红）：画法与 `bevelGroup` 同一套（平面被该块自身 AABB 截出的截面）。 */
+	private phyBevelGroup: THREE.Group | null = null;
 	/** 实体碰撞箱开关。 */
 	private showSolids = false;
 	/** 实体碰撞箱可视距离（HU，XZ 平面内点到 brush AABB 的距离；<= 0 = 全量）。 */
@@ -458,6 +581,8 @@ export class ColliderDebug {
 	private showTriggers = false;
 	/** bevel 辅助碰撞面开关（默认关）：独立于 showSolids，可视距离复用 brushViewDistance。 */
 	private showBevel = false;
+	/** `.phy` 生成补面开关（默认关）：独立于 showBevel，可视距离复用 phyViewDistance。 */
+	private showPhyBevel = false;
 	/** 触发器可视距离（HU；<= 0 = 全量）。 */
 	private triggerViewDistance = 0;
 	/** .phy 三角形开关（橙色线框）。 */
@@ -478,6 +603,8 @@ export class ColliderDebug {
 	private triggers: readonly TeleportTrigger[] = [];
 	/** 模型三角形网格（`renderer-main` 用 `buildWorldBundle` 的 triJson 注入）。 */
 	private triMeshes: TriMesh[] = [];
+	/** `.phy` 生成补面（`renderer-main` 用 `buildWorldBundle` 的 phyBevelsJson 注入）。 */
+	private phyBevels: PhyBevelPiece[] = [];
 
 	/** 建 5 个 Group（visible 全为 false）并挂到 scene；不清旧 Group，重复调用会再挂一组。 */
 	init(scene: THREE.Scene): void {
@@ -506,6 +633,11 @@ export class ColliderDebug {
 		this.bevelGroup.name = '__vbsp_bevel_debug__';
 		this.bevelGroup.visible = false;
 		scene.add(this.bevelGroup);
+
+		this.phyBevelGroup = new THREE.Group();
+		this.phyBevelGroup.name = '__model_phy_bevel_debug__';
+		this.phyBevelGroup.visible = false;
+		scene.add(this.phyBevelGroup);
 	}
 
 	/** 注入模型三角形网格，并置 `phyDirty`、把限流计数推到上限，使下次 `update` 立即重建。 */
@@ -559,6 +691,26 @@ export class ColliderDebug {
 			if (!showBevel) this.clearGroup(this.bevelGroup);
 		}
 		this.frameCounter = REBUILD_INTERVAL;
+	}
+
+	/**
+	 * 设置 `.phy` 生成补面（品红）开关。限流计数同样推到上限，故本次调用后下一次 `update`
+	 * 必定重建/清空一次；可视距离复用 `phyViewDistance`（与 `.phy` 三角形线框同一条）。
+	 */
+	setPhyBevelVisible(showPhyBevel: boolean): void {
+		this.showPhyBevel = showPhyBevel;
+		if (this.phyBevelGroup) {
+			this.phyBevelGroup.visible = showPhyBevel;
+			if (!showPhyBevel) this.clearGroup(this.phyBevelGroup);
+		}
+		this.triFrameCounter = TRI_REBUILD_INTERVAL;
+	}
+
+	/** 注入 `.phy` 生成补面数据，并置 `phyDirty`、把限流计数推到上限，使下次 `update` 立即重建。 */
+	setPhyBevels(pieces: PhyBevelPiece[]): void {
+		this.phyBevels = pieces;
+		this.phyDirty = true;
+		this.triFrameCounter = TRI_REBUILD_INTERVAL;
 	}
 
 	/**
@@ -628,14 +780,18 @@ export class ColliderDebug {
 		}
 
 		// 1.5 模型三角形线框：.phy 与可视网格共用限流计数与 phyDirty，
-		//     两条路径各自再检查自己的开关与 Group
-		if ((this.showPhy || this.showVis) && (this.phyGroup || this.visGroup)) {
+		//     两条路径各自再检查自己的开关与 Group（.phy 生成补面同属这一节拍）
+		if (
+			(this.showPhy || this.showVis || this.showPhyBevel) &&
+			(this.phyGroup || this.visGroup || this.phyBevelGroup)
+		) {
 			this.triFrameCounter++;
 			if (this.phyDirty || this.triFrameCounter >= TRI_REBUILD_INTERVAL) {
 				this.triFrameCounter = 0;
 				this.phyDirty = false;
 				if (this.showPhy && this.phyGroup) this.rebuildPhyTriangles(cameraPos);
 				if (this.showVis && this.visGroup) this.rebuildVisTriangles(cameraPos);
+				if (this.showPhyBevel && this.phyBevelGroup) this.rebuildPhyBevels(cameraPos);
 				rebuilt = true;
 			}
 		}
@@ -649,9 +805,16 @@ export class ColliderDebug {
 		return rebuilt;
 	}
 
-	/** 四个开关中任一为真即返回 true；`renderer-main` 据此决定本帧是否调用 `update`。 */
+	/** 六个开关中任一为真即返回 true；`renderer-main` 据此决定本帧是否调用 `update`。 */
 	get hasDebugWork(): boolean {
-		return this.showSolids || this.showBevel || this.showTriggers || this.showPhy || this.showVis;
+		return (
+			this.showSolids ||
+			this.showBevel ||
+			this.showPhyBevel ||
+			this.showTriggers ||
+			this.showPhy ||
+			this.showVis
+		);
 	}
 
 	/**
@@ -809,12 +972,6 @@ export class ColliderDebug {
 		let drawn = 0;
 		const OFFSET = 0.5; // 沿法线外移量（HU）：让截面与实体表面脱开、可见
 		for (const { brush } of nearby) {
-			// AABB 对角线的一半：截面四边形的基础半径（保证覆盖平面与 AABB 的整个截面）
-			const radius =
-				Math.hypot(brush.max.x - brush.min.x, brush.max.y - brush.min.y, brush.max.z - brush.min.z) / 2;
-			const cx = (brush.min.x + brush.max.x) / 2;
-			const cy = (brush.min.y + brush.max.y) / 2;
-			const cz = (brush.min.z + brush.max.z) / 2;
 			for (const plane of brush.planes) {
 				if (plane.isBevel !== true) continue;
 				// 与同 brush 某条非 bevel 平面共面的 bevel 不画（VBSP 的 edge bevel 偶尔与
@@ -834,67 +991,10 @@ export class ColliderDebug {
 				);
 				if (dupOfReal) continue;
 				bevelPlanes++;
-				// 截面中心 = AABB 中心在该平面上的投影
-				const dn = n.x * cx + n.y * cy + n.z * cz - plane.dist;
-				const px = cx - n.x * dn;
-				const py = cy - n.y * dn;
-				const pz = cz - n.z * dn;
-				// 平面内正交基：参考轴取**与法线分量最小**的坐标轴——单位法线的最小分量必然
-				// < 1，参考轴才保证不与法线平行、叉积非零。box bevel 全是轴向法线（如 (0,1,0)），
-				// 若按"最同向"选轴，叉积恒为零、截面退化成一个点，所有 box bevel 都画不出来
-				//（实测踩过：顶部 bevel 一张都看不到，只有斜向 edge bevel 出得来）
-				const absX = Math.abs(n.x);
-				const absY = Math.abs(n.y);
-				const absZ = Math.abs(n.z);
-				const ref = absX <= absY && absX <= absZ
-					? [1, 0, 0]
-					: absY <= absZ
-						? [0, 1, 0]
-						: [0, 0, 1];
-				let ux = n.y * ref[2] - n.z * ref[1];
-				let uy = n.z * ref[0] - n.x * ref[2];
-				let uz = n.x * ref[1] - n.y * ref[0];
-				const ul = Math.hypot(ux, uy, uz) || 1;
-				ux /= ul;
-				uy /= ul;
-				uz /= ul;
-				const vx = n.y * uz - n.z * uy;
-				const vy = n.z * ux - n.x * uz;
-				const vz = n.x * uy - n.y * ux;
-				// 初始四边形（覆盖半径 radius），逐条 AABB 半空间裁剪（Sutherland–Hodgman）
-				let poly: [number, number][] = [
-					[-radius, -radius],
-					[radius, -radius],
-					[radius, radius],
-					[-radius, radius],
-				];
-				const axes: ['x' | 'y' | 'z', 1 | -1][] = [
-					['x', 1], ['x', -1], ['y', 1], ['y', -1], ['z', 1], ['z', -1],
-				];
-				for (const [axis, sign] of axes) {
-					const bound = sign === 1 ? brush.max[axis] : brush.min[axis];
-					poly = clipPolyAxis(poly, ux, uy, uz, vx, vy, vz, px, py, pz, axis, sign, bound);
-					if (poly.length < 3) break;
-				}
-				if (poly.length < 3) continue; // 平面与 AABB 不相交
+				const section = planeAabbSection(n, plane.dist, brush.min, brush.max, OFFSET);
+				if (!section) continue; // 平面与 AABB 不相交（凸半空间交截为空）
 				drawn++;
-				// 外移 + 展开成世界坐标
-				const world = poly.map(([a, b]) => [
-					px + ux * a + vx * b + n.x * OFFSET,
-					py + uy * a + vy * b + n.y * OFFSET,
-					pz + uz * a + vz * b + n.z * OFFSET,
-				]);
-				for (let i = 0; i < world.length; i++) {
-					const a = world[i];
-					const b = world[(i + 1) % world.length];
-					outline.push(a[0], a[1], a[2], b[0], b[1], b[2]);
-				}
-				// 扇形三角化填充（顶点数 ≥ 3；poly 是凸多边形——凸半空间交截的结果）
-				for (let i = 1; i < world.length - 1; i++) {
-					fill.push(world[0][0], world[0][1], world[0][2]);
-					fill.push(world[i][0], world[i][1], world[i][2]);
-					fill.push(world[i + 1][0], world[i + 1][1], world[i + 1][2]);
-				}
+				pushSection(section, outline, fill);
 			}
 		}
 
@@ -924,6 +1024,112 @@ export class ColliderDebug {
 				`[collider-debug] bevel 重建: 距离=${this.brushViewDistance} brush=${nearby.length} bevel平面=${bevelPlanes} 截面=${drawn} 三角形=${fill.length / 9}`,
 			);
 		}
+	}
+
+	/**
+	 * 重建 `.phy` 生成补面（品红）：数据是 `export_model_phy_bevels` 的逐块条目
+	 * （`phys::hull_bevels` = VBSP `AddBrushBevels` 的移植产物）。
+	 *
+	 * **只画 edge bevel，且画成「沿来源边的 ±16 HU 窄条」**：那才是这张面在碰撞里接住盒的作用域。
+	 * box bevel（该块 AABB 的轴向面）不画 —— 它们是碰撞平面表的一部分（水平刀刃脊正是靠它站住），
+	 * 但按 AABB 画出来就是"包裹框"，会让人误读成模型外面套了个碰撞盒。
+	 *
+	 * 筛选口径与 `rebuildPhyTriangles` 相同（`phyViewDistance` 的 XZ 粗筛 + 上限截断前按真实
+	 * 距离排序取最近），因为两者的可视距离是同一个滑杆。
+	 */
+	private rebuildPhyBevels(cameraPos: THREE.Vector3): void {
+		this.clearGroup(this.phyBevelGroup!);
+		if (this.phyBevels.length === 0) return;
+
+		const pos = cameraPos;
+		const full = this.phyViewDistance <= 0;
+		const radiusSq = this.phyViewDistance * this.phyViewDistance;
+		const nearby: { piece: PhyBevelPiece; distSq: number }[] = [];
+		for (const piece of this.phyBevels) {
+			const nx = Math.max(piece.min[0], Math.min(pos.x, piece.max[0]));
+			const nz = Math.max(piece.min[2], Math.min(pos.z, piece.max[2]));
+			const dx = pos.x - nx;
+			const dz = pos.z - nz;
+			const distSq = dx * dx + dz * dz;
+			if (!full && distSq > radiusSq) continue;
+			nearby.push({ piece, distSq });
+		}
+		if (nearby.length > MAX_DEBUG_COLLIDERS) {
+			nearby.sort((a, b) => a.distSq - b.distSq);
+			nearby.length = MAX_DEBUG_COLLIDERS;
+		}
+
+		const outline: number[] = [];
+		const fill: number[] = [];
+		let edgePlanes = 0;
+		let drawn = 0;
+		// 窄条半宽（HU）= 站立盒半宽：盒的足迹落在棱两侧各 16 HU 之内，这条带就是该面在碰撞里
+		// 真正接住盒的作用域；沿法线再外移 0.5 HU 避免与实体面 z-fight。
+		const HALF = 16;
+		const OFFSET = 0.5;
+		for (const { piece } of nearby) {
+			for (const p of piece.planes) {
+				const [nx, ny, nz, _d, kind, ax, ay, az, bx, by, bz] = p;
+				if (kind !== 1) continue; // box bevel（= 该块 AABB 的轴向面）不画：那是"包裹框"观感的来源
+				edgePlanes++;
+				// 来源边方向
+				const dx = bx - ax;
+				const dy = by - ay;
+				const dz = bz - az;
+				const dl = Math.hypot(dx, dy, dz);
+				if (dl < 1e-6) continue;
+				const ux = dx / dl;
+				const uy = dy / dl;
+				const uz = dz / dl;
+				// 面内、垂直于棱的方向（窄条的宽度方向）
+				let wx = ny * uz - nz * uy;
+				let wy = nz * ux - nx * uz;
+				let wz = nx * uy - ny * ux;
+				const wl = Math.hypot(wx, wy, wz);
+				if (wl < 1e-6) continue;
+				wx /= wl;
+				wy /= wl;
+				wz /= wl;
+				const ox = nx * OFFSET;
+				const oy = ny * OFFSET;
+				const oz = nz * OFFSET;
+				const corners: [number, number, number][] = [
+					[ax + wx * HALF + ox, ay + wy * HALF + oy, az + wz * HALF + oz],
+					[bx + wx * HALF + ox, by + wy * HALF + oy, bz + wz * HALF + oz],
+					[bx - wx * HALF + ox, by - wy * HALF + oy, bz - wz * HALF + oz],
+					[ax - wx * HALF + ox, ay - wy * HALF + oy, az - wz * HALF + oz],
+				];
+				drawn++;
+				pushSection(corners, outline, fill);
+			}
+		}
+
+		if (fill.length > 0) {
+			const fgeom = new THREE.BufferGeometry();
+			fgeom.setAttribute('position', new THREE.Float32BufferAttribute(fill, 3));
+			const fmat = new THREE.MeshBasicMaterial({
+				color: PHY_BEVEL_COLOR,
+				transparent: true,
+				opacity: PHY_BEVEL_FILL_OPACITY,
+				side: THREE.DoubleSide,
+				depthWrite: false,
+			});
+			this.phyBevelGroup!.add(new THREE.Mesh(fgeom, fmat));
+		}
+		if (outline.length > 0) {
+			const geom = new THREE.BufferGeometry();
+			geom.setAttribute('position', new THREE.Float32BufferAttribute(outline, 3));
+			const mat = new THREE.LineBasicMaterial({
+				color: PHY_BEVEL_COLOR,
+				transparent: true,
+				opacity: 0.9,
+				depthTest: false, // 始终可见：辅助面语义上是覆盖层
+			});
+			this.phyBevelGroup!.add(new THREE.LineSegments(geom, mat));
+		}
+		console.log(
+			`[collider-debug] .phy 生成补面重建: 距离=${this.phyViewDistance} 块=${nearby.length} edge面=${edgePlanes} 窄条=${drawn} 三角形=${fill.length / 9}`,
+		);
 	}
 
 	/**
@@ -1135,22 +1341,24 @@ export class ColliderDebug {
 	}
 
 	/**
-	 * 清空全部 4 个 Group 的内容。保留 Group 本身与 scene 引用，也不改四个开关字段。
+	 * 清空全部 6 个 Group 的内容。保留 Group 本身与 scene 引用，也不改六个开关字段。
 	 */
 	clearAll(): void {
 		if (this.solidGroup) this.clearGroup(this.solidGroup);
 		if (this.bevelGroup) this.clearGroup(this.bevelGroup);
+		if (this.phyBevelGroup) this.clearGroup(this.phyBevelGroup);
 		if (this.phyGroup) this.clearGroup(this.phyGroup);
 		if (this.visGroup) this.clearGroup(this.visGroup);
 		if (this.triggerGroup) this.clearGroup(this.triggerGroup);
 	}
 
-	/** 清空 4 个 Group、从 scene 摘除并置空全部引用（含 scene）。之后 `update` 因 scene 为 null 恒返回 false；四个开关字段保持不变，`hasDebugWork` 仍可为 true。 */
+	/** 清空 6 个 Group、从 scene 摘除并置空全部引用（含 scene）。之后 `update` 因 scene 为 null 恒返回 false；六个开关字段保持不变，`hasDebugWork` 仍可为 true。 */
 	dispose(): void {
 		this.clearAll();
 		if (this.scene) {
 			if (this.solidGroup) this.scene.remove(this.solidGroup);
 			if (this.bevelGroup) this.scene.remove(this.bevelGroup);
+			if (this.phyBevelGroup) this.scene.remove(this.phyBevelGroup);
 			if (this.phyGroup) this.scene.remove(this.phyGroup);
 			if (this.visGroup) this.scene.remove(this.visGroup);
 			if (this.triggerGroup) this.scene.remove(this.triggerGroup);
@@ -1158,6 +1366,7 @@ export class ColliderDebug {
 		this.scene = null;
 		this.solidGroup = null;
 		this.bevelGroup = null;
+		this.phyBevelGroup = null;
 		this.phyGroup = null;
 		this.visGroup = null;
 		this.triggerGroup = null;

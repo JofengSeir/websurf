@@ -71,11 +71,11 @@
 
 ## 已知缺口
 
-1. **jump-apex 采样链的就绪判据与读数口径不符**（本地脚本 `jump-apex-measure.mjs`，未入库，行号从略）：其就绪判据取 `diag.posY`，而探针 `state()` 的来源是 `RendererMain.getCurrentState`，其返回结构是嵌套的 `pos` / `yaw` / `pitch` / `vel` / `onGround`（`apps/debug/src/renderer/renderer-main.ts:1263`）⇒ 扁平字段恒为 `undefined`，轮询必然走到 `LOAD_TIMEOUT_MS` 上限后 `finish(1)`。
+1. **jump-apex 采样链的就绪判据与读数口径不符**（本地脚本 `jump-apex-measure.mjs`，未入库，行号从略）：其就绪判据取 `diag.posY`，而探针 `state()` 的来源是 `RendererMain.getCurrentState`，其返回结构是嵌套的 `pos` / `yaw` / `pitch` / `vel` / `onGround`（`apps/debug/src/renderer/renderer-main.ts:1269`）⇒ 扁平字段恒为 `undefined`，轮询必然走到 `LOAD_TIMEOUT_MS` 上限后 `finish(1)`。
 2. **同一链路的采样表达式读的字段同样不存在**：静置判据读 `s.posY` / `s.velY`，落盘样本读 `s.posX/posY/posZ/velX/velY/velZ` 与 `au.frame.posY/velY/velX/velZ`——两处前缀在嵌套结构下都不存在（同一本地脚本，行号从略）。
 3. **`jump-apex-verify.mjs` 的内嵌复刻依赖已不在源码中的行为**：脚本自带一份「修复前行为」的 land 处理复刻作为对照面（`apps/debug/scripts/jump-apex-verify.mjs:27`）；`jump-apex-serve.mjs` 另用源码文本切片生成回退版，因此两处源码文本形态被脚本依赖。
 4. **`frame-bench.mjs` 的缺省地图路径不在工作区**：第 4 个参数缺省时取 `<仓库根>/maps/surf_666.bsp`（`apps/debug/scripts/frame-bench.mjs:37`），而该路径下没有文件，脚本随即打印「地图不存在」并以 2 退出（`apps/debug/scripts/frame-bench.mjs:54`）。地图实际位于 `test/maps/` 下，须显式传第 4 个参数。
-5. **`optimize-scene-verify.mjs` 用合成场景、不对当前 GLB 规模**：场景按固定常量合成（`MESH_COUNT` 个 primitive 装进若干容器，坐标由确定性随机数在 `WORLD` 尺度内生成），断言锚定脚本自身的可复现性；要复核当前 `apps/debug/pkg` 产物的真实规模须改用 `apps/debug/scripts/glb-mesh-count.mjs`（`apps/debug/scripts/optimize-scene-verify.mjs:15`、`:19`）。
+5. **`optimize-scene-verify.mjs` 用合成场景、不对当前 GLB 规模**：场景按固定常量合成（`MESH_COUNT` 个 primitive 装进若干容器，坐标由确定性随机数在 `WORLD` 尺度内生成），断言锚定脚本自身的可复现性；要复核当前 `apps/debug/pkg` 产物的真实规模须改用 `apps/debug/scripts/glb-mesh-count.mjs`（`apps/debug/scripts/optimize-scene-verify.mjs:18`、`:22`）。
 7. **`input-replay-verify.mjs` 依赖的录制 API 已被删除（2026-09-26）**：脚本从 `__wsInput.exportJson()` 取录制载荷（`apps/debug/scripts/input-replay-verify.mjs:297`），而该 API 随用户录制器链路一并删除；它还查询页面上不存在的 `#inputRecStatus`（`:461`）。**该脚本现已不可用**（此前也因载荷恒空必然失败）；若要保留无头回放验收，应改为外部录制 JSON → `__wsInput.load` → `play` → 用 `__wsInput.captureText()` / `progress()` 比对。
 8. ~~`start-dev.cmd` 的 wasm 过期门与被服务的 wasm 不是同一路径~~ **已消除（2026-09-24）**：`dev.cmd` 不再用过期门判断，而是**无条件**跑 `npm run build:wasm`（`apps/debug/dev.cmd:48`），而 `build:wasm` 在构建后会把 `pkg/` 的 wasm 复制到 `web/`（`apps/debug/package.json:8`）⇒ `web/` 与 `pkg/` 同步刷新。**保留为不变量**：`web/websurf_wasm_bg.wasm` 仍只由 `build:wasm` 更新（页面加载的是 `web/` 那份，见 `apps/debug/src/main-wasm.ts:23`），任何跳过 `build:wasm` 的路径都会让 dev 页面用到旧产物。
 9. ~~`play.cmd` 的 wasm 存在性门只看 `pkg/`~~ **已消除（2026-09-24）**：`build.cmd` 同样无条件 `build:wasm`（`apps/debug/build.cmd:52`），不存在"产物存在就跳过重建"的分支 ⇒ 打包用的 `pkg/`（读取处 `apps/debug/scripts/build-dist.mjs:78`）与 dev 页面用的 `web/` 都由这一次重编译刷新。

@@ -26,11 +26,11 @@
 本次重编以代码为唯一来源。本子树的主要入口文件：
 
 - `apps/debug/package.json:7` 的 `scripts`：dev 端口、构建链与全部门禁脚本的调用名。
-- `apps/debug/src/app.ts:278` 的 `main`：主线程装配入口（DOM 句柄 → 共享缓冲 → Worker → 渲染器 → 面板）。
-- `apps/debug/src/renderer/renderer-main.ts:610` 的 `tick`：一帧内的物理 / 剔除 / 可视化 / 渲染顺序。
+- `apps/debug/src/app.ts:266` 的 `main`：主线程装配入口（DOM 句柄 → 共享缓冲 → Worker → 渲染器 → 面板）。
+- `apps/debug/src/renderer/renderer-main.ts:615` 的 `tick`：一帧内的物理 / 剔除 / 可视化 / 渲染顺序。
 - `apps/debug/src/worker/main.ts:455` 的 `createAuthLoop` 装配：Worker 侧权威物理的唯一推进者。
 - `apps/debug/src/input/input-recorder.ts:166` 的 `InputRecorder`：录制 / 回放的数据模型与失败语义。
-- `apps/debug/crates/wasm/src/lib.rs:487` 的 `impl BspProcessor`：本工程 WASM 绑定层的导出面。
+- `apps/debug/crates/wasm/src/lib.rs:534` 的 `impl BspProcessor`：本工程 WASM 绑定层的导出面。
 - `apps/debug/web/index.html:481` 起的页面骨架：全部 DOM 句柄的来源。
 - `apps/debug/scripts/build-dist.mjs:75` 的 `multi` 开关：`single 产物` / `multi 产物` 两种形态的分岔点。
 

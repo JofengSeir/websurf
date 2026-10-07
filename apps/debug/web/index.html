@@ -799,6 +799,10 @@
                 <input type="checkbox" id="showBevel" />
                 <label for="showBevel" title="BSP 原生 bevel 辅助碰撞面线框（白）：编译器为「盒子别卡在棱上」生成的过棱平面，不构成实体表面、只在盒体扩张后的碰撞凸包里补支撑角；可视距离跟随 brush 可视距离">显示bevel辅助面</label>
               </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPhyBevel" />
+                <label for="showPhyBevel" title=".phy 凸体的生成补面线框（品红）：物理侧按 VBSP AddBrushBevels 的判据在解析期补齐的 edge bevel（过棱斜切轴面），也就是让模型尖脊能站的那张面。box bevel（该块的 AABB 面）不画，否则十几块叠起来会糊成一片；可视距离跟随 .phy 可视距离">显示.phy生成补面</label>
+              </div>
               <label title="brush 碰撞线框显示可视距离（HU）：0 = 全量显示">brush 可视距离</label>
               <input type="range" id="brushViewDistance" min="0" max="16384" step="64" value="512" />
               <div class="val"><input type="number" id="brushViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="512" /></div>

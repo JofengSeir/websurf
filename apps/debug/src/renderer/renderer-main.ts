@@ -38,6 +38,7 @@ import { TeleportManager } from '../world/teleport-manager.js';
 import { adaptBrushes } from '../world/collider-adapter.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
+import type { PhyBevelPiece } from './collider-debug.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
@@ -402,6 +403,7 @@ export class RendererMain {
       config.debug.visViewDistance,
     );
     this.colliderDebug.setBevelVisible(config.debug.showBevel);
+    this.colliderDebug.setPhyBevelVisible(config.debug.showPhyBevel);
     this.planeInfoEnabled = config.debug.showPlaneInfo;
 
     this.needsRender = true;
@@ -550,6 +552,9 @@ export class RendererMain {
     this.colliderDebug.setTriggers(this.triggers);
     if (data.triJson) {
       this.colliderDebug.setTriMeshes(JSON.parse(data.triJson));
+    }
+    if (data.phyBevelsJson) {
+      this.colliderDebug.setPhyBevels(JSON.parse(data.phyBevelsJson) as PhyBevelPiece[]);
     }
 
     // 纹理画质 manifest 就位后，按配置里的当前画质立即应用一次
@@ -904,6 +909,7 @@ export class RendererMain {
         this.config.debug.visViewDistance,
       );
       this.colliderDebug.setBevelVisible(this.config.debug.showBevel);
+      this.colliderDebug.setPhyBevelVisible(this.config.debug.showPhyBevel);
       this.planeInfoEnabled = this.config.debug.showPlaneInfo;
       this.needsRender = true;
     } else if (section === 'input' && this.cameraController) {

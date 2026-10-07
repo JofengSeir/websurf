@@ -1088,29 +1088,52 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
     const real = r.chat.map((m) => m.text);
     const counts = countByKind(r.chat);
     console.log('  ' + JSON.stringify(counts));
-    check(
-      '真实语料四类齐全且总数对得上（1 对话 / 5 进服 / 30 公告 / 4 过关）',
-      counts.chat === 1 && counts.join === 5 && counts.announce === 30 && counts.record === 4 && real.length === 40,
-      JSON.stringify(counts) + ' total=' + real.length,
-    );
-    const lineJoin = real.find((t) => t.startsWith('▲')) ?? '';
-    const lineChat = real.find((t) => /LuoXuan: /.test(t)) ?? '';
-    const lineAnnounce = real.find((t) => t.includes('地图剩余时间')) ?? '';
-    const lineRecord = real.find((t) => t.includes('完成了')) ?? '';
-    check('进服公告：▲ 起头那条被认成 join', classifyChat(lineJoin) === 'join', lineJoin);
-    check('玩家对话：带前缀标签的「说话人: 正文」被认成 chat', classifyChat(lineChat) === 'chat', lineChat);
-    check(
-      '服务器公告：有冒号的那条（地图剩余时间: …）仍认成 announce，不会被误判成聊天',
-      classifyChat(lineAnnounce) === 'announce',
-      lineAnnounce,
-    );
-    check('过关记录：认成 record（而不是 announce）', classifyChat(lineRecord) === 'record', lineRecord);
-    const rec = parseChatRecord(lineRecord);
-    check(
-      '过关记录解析出 玩家 + 关卡 + 用时',
-      rec !== null && rec.player === 'LuoXuan' && rec.level === '奖励关4' && Math.abs(rec.durationSec - 18.714) < 1e-6,
-      JSON.stringify(rec),
-    );
+    // **真实语料的「精确期望」只对登记语料成立**，与本段前面对 `.dem` 头/类别数的口径一致
+    // （`DEM_EXPECT`：已知夹具走精确断言，其余只验通用不变量并打印实测值）。
+    // 语料是 gitignore 夹具（`test/replay/**`，随工作区快照重建可能缺某一份），发现式选夹具会落到
+    // 另一份 `.dem`；此处若仍无条件断言，`npm run test:replay` 会在**环境缺口**上 FAIL，而
+    // `dev.cmd` 的 [5/5] 门禁据此中断、dev 服务起不来。
+    // 指纹取「登记语料里那条说话人行」——它是夹具内容，与分类规则无关，不会自己证明自己；
+    // 换语料时走 loud skip 并把实测值打印出来（机制级断言不受影响，见下方合成用例与通用不变量）。
+    const pinnedCorpus = real.some((t) => t.includes('LuoXuan: '));
+    if (pinnedCorpus) {
+      check(
+        '真实语料四类齐全且总数对得上（1 对话 / 5 进服 / 30 公告 / 4 过关）',
+        counts.chat === 1 && counts.join === 5 && counts.announce === 30 && counts.record === 4 && real.length === 40,
+        JSON.stringify(counts) + ' total=' + real.length,
+      );
+      const lineJoin = real.find((t) => t.startsWith('▲')) ?? '';
+      const lineChat = real.find((t) => /LuoXuan: /.test(t)) ?? '';
+      const lineAnnounce = real.find((t) => t.includes('地图剩余时间')) ?? '';
+      const lineRecord = real.find((t) => t.includes('完成了')) ?? '';
+      check('进服公告：▲ 起头那条被认成 join', classifyChat(lineJoin) === 'join', lineJoin);
+      check('玩家对话：带前缀标签的「说话人: 正文」被认成 chat', classifyChat(lineChat) === 'chat', lineChat);
+      check(
+        '服务器公告：有冒号的那条（地图剩余时间: …）仍认成 announce，不会被误判成聊天',
+        classifyChat(lineAnnounce) === 'announce',
+        lineAnnounce,
+      );
+      check('过关记录：认成 record（而不是 announce）', classifyChat(lineRecord) === 'record', lineRecord);
+      const rec = parseChatRecord(lineRecord);
+      check(
+        '过关记录解析出 玩家 + 关卡 + 用时',
+        rec !== null && rec.player === 'LuoXuan' && rec.level === '奖励关4' && Math.abs(rec.durationSec - 18.714) < 1e-6,
+        JSON.stringify(rec),
+      );
+      // **判据归属**（哪条规则命中的）：看板把每条消息的判据写进 data-rule 与悬停提示，
+      // 所以纯函数这一层也要能被断言 —— 只断「类别」的话，判据被改坏成兜底也发现不了。
+      // 这几条依赖登记语料里那四行原文，故与上面的精确期望同档。
+      check('判据归属：▲ 起头那条算 join-arrow', classifyChatDetailed(lineJoin).rule === 'join-arrow', JSON.stringify(classifyChatDetailed(lineJoin)));
+      check('判据归属：带标签的玩家对话算 chat-speaker', classifyChatDetailed(lineChat).rule === 'chat-speaker', JSON.stringify(classifyChatDetailed(lineChat)));
+      check('判据归属：带标签的服务器播报算 announce-shape', classifyChatDetailed(lineAnnounce).rule === 'announce-shape', JSON.stringify(classifyChatDetailed(lineAnnounce)));
+      check('判据归属：过关记录算 record-cn', classifyChatDetailed(lineRecord).rule === 'record-cn', JSON.stringify(classifyChatDetailed(lineRecord)));
+    } else {
+      console.log(
+        '  SKIP 真实语料的精确期望与判据归属（当前 .dem 夹具不是登记语料：不含「LuoXuan: 」那条说话人行）' +
+          ' —— 实测 ' + JSON.stringify(counts) + ' total=' + real.length +
+          '（恢复登记语料后自动生效；机制级断言照常跑）',
+      );
+    }
     check('用时支持 m:ss.mmm 写法', parseDuration('1:23.456') === 83.456, String(parseDuration('1:23.456')));
     // **跳转口径**（owner 定稿）：播报时刻 − 用时 − 5 秒缓冲，夹在 [0, 播报时刻]
     check(
@@ -1122,20 +1145,15 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
     check('缓冲可调（0 缓冲 = 正好播报 − 用时）', Math.abs(recordJumpSeconds(100, 20, 0) - 80) < 1e-9, String(recordJumpSeconds(100, 20, 0)));
     const hideAnn = filterChat(r.chat, { announce: true });
     const hideAll = filterChat(r.chat, { chat: true, join: true, announce: true, record: true });
+    // 机制级不变量：用**实测条数**断言（不写死 40 —— 语料换一份就失效的数字只属于登记语料那一段）
     check(
-      '过滤「服务器公告」⇒ 40 条剩 10 条，且一条 announce 都不剩',
-      hideAnn.length === 40 - counts.announce && hideAnn.every((m) => classifyChat(m.text) !== 'announce'),
-      String(hideAnn.length),
+      '过滤「服务器公告」⇒ 剩「总条数 − announce 条数」，且一条 announce 都不剩',
+      hideAnn.length === r.chat.length - counts.announce && hideAnn.every((m) => classifyChat(m.text) !== 'announce'),
+      `${hideAnn.length} vs ${r.chat.length - counts.announce}`,
     );
     check('四类全勾 ⇒ 一条不剩', hideAll.length === 0, String(hideAll.length));
-    check('一条都不勾 ⇒ 原样 40 条', filterChat(r.chat, {}).length === 40, String(filterChat(r.chat, {}).length));
+    check('一条都不勾 ⇒ 原样返回', filterChat(r.chat, {}).length === r.chat.length, String(filterChat(r.chat, {}).length));
 
-    // **判据归属**（哪条规则命中的）：看板把每条消息的判据写进 data-rule 与悬停提示，
-    // 所以纯函数这一层也要能被断言 —— 只断「类别」的话，判据被改坏成兜底也发现不了。
-    check('判据归属：▲ 起头那条算 join-arrow', classifyChatDetailed(lineJoin).rule === 'join-arrow', JSON.stringify(classifyChatDetailed(lineJoin)));
-    check('判据归属：带标签的玩家对话算 chat-speaker', classifyChatDetailed(lineChat).rule === 'chat-speaker', JSON.stringify(classifyChatDetailed(lineChat)));
-    check('判据归属：带标签的服务器播报算 announce-shape', classifyChatDetailed(lineAnnounce).rule === 'announce-shape', JSON.stringify(classifyChatDetailed(lineAnnounce)));
-    check('判据归属：过关记录算 record-cn', classifyChatDetailed(lineRecord).rule === 'record-cn', JSON.stringify(classifyChatDetailed(lineRecord)));
     // 兜底：既不是进服/过关、也不是「[ 标签 ] - 正文」形状，又看不出说话人 ⇒ 归公告并**被计数**
     const stranger = 'Some server print without any known shape 12345';
     check('判据归属：不认识的写法落到 fallback（仍归服务器公告）', classifyChatDetailed(stranger).kind === 'announce' && classifyChatDetailed(stranger).rule === 'fallback', JSON.stringify(classifyChatDetailed(stranger)));

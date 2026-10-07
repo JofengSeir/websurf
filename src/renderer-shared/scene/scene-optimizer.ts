@@ -6,6 +6,10 @@
  * 2026-10-03 Phase 3c 拆成「共享核 + 调用方包装」：mergeIntoChunks 是不改根、不挂载、不打日志的
  * 纯收集合并核（game 与 viewer 共用同一份算法）；root 挂载方式与诊断日志留在各调用方——game 的
  * optimizeScene 包装与拆分前逐行等价（先收集合并，再挂回 bspRoot、移除 GLB 子树、垫包围球、打统计）。
+ *
+ * 合并期另按输入顺序记一张**来源区间表**（原 mesh 名 + 其 `userData.vbsp` 元数据，见 MergeSourceTable）
+ * 挂到合并结果几何的 `userData` 上：块 mesh 是新建的、不带 name/userData，射线命中它之后要靠这张表
+ * 才能反查"真正被指到的是哪份几何"。新增的只有 userData——顶点/索引/材质/分组布局与合并前完全相同。
  */
 
 import * as THREE from 'three';
@@ -50,7 +54,13 @@ function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
   return keys.size;
 }
 
-/** 合并可选钩子：`normalizeGroup` 在两处合并入参前调用（debug 传其 `normalizeMergeGroup`——混合 indexed/非 indexed 与混合 gpuType 的归一；game/viewer 不传 ⇒ 行为与无钩子完全一致）。 */
+/**
+ * 合并可选钩子：`normalizeGroup` 在两处合并入参前调用（debug 传其 `normalizeMergeGroup`——混合
+ * indexed/非 indexed 与混合 gpuType 的归一；game/viewer 不传 ⇒ 行为与无钩子完全一致）。
+ *
+ * 契约：输出与输入**逐项对应**（长度与顺序不变）。来源区间表按输入顺序与钩子输出配对，长度不等时
+ * 该组不带表（`lookupMergeSource` 返回 null，退回按 mesh 自身的 name/userData 取名）。
+ */
 export interface MergeOptions {
   normalizeGroup?: (geoms: THREE.BufferGeometry[]) => THREE.BufferGeometry[];
 }
@@ -65,6 +75,139 @@ export interface MergeResult {
   chunkCount: number;
   vertsTotal: number;
   drawCallEst: number;
+}
+
+// ── 来源区间表（块 mesh 无名，靠它反查"命中的是哪份原几何"）──────────────────
+// 表按合并输入顺序首尾相接：第 i 条覆盖合并后缓冲的 [start, start + count)。
+// 索引几何以索引缓冲计（count = 该份几何的 index.count），非索引几何以顶点计
+// （count = 该份几何的 position.count）——两种口径下"三角形序号 × 3"都落在区间内。
+
+/** 来源区间表在 `geometry.userData` 上的键。 */
+export const MERGE_SOURCE_TABLE_KEY = 'websurfMergeSourceTable';
+
+/** 来源 mesh 的 `userData.vbsp` 分类元数据（装载期由各应用写入；共享层只读不改、按引用带过）。 */
+export interface MergeSourceMeta {
+  isTools?: boolean;
+  isNodraw?: boolean;
+  hasTexture?: boolean;
+  isWater?: boolean;
+  isTrans?: boolean;
+  isLightEmissive?: boolean;
+  textureName?: string;
+  materialName?: string;
+}
+
+/** 一条来源区间：合并后缓冲里的 `[start, start + count)` 来自哪只原 mesh。 */
+export interface MergeSourceRange {
+  /** 起点：索引几何为**索引缓冲下标**，非索引几何为**顶点下标**（由表的 `indexed` 区分）。 */
+  start: number;
+  /** 长度：索引几何为索引数，非索引几何为顶点数。 */
+  count: number;
+  /** 原 mesh 的节点名（GLTFLoader 写入；未命名时为空串）。 */
+  meshName: string;
+  /** 原 mesh 的 `userData.vbsp`（同一对象按引用带过，不复制）。 */
+  vbsp?: MergeSourceMeta;
+}
+
+/** 合并后几何的来源区间表（挂在 `geometry.userData[MERGE_SOURCE_TABLE_KEY]` 上）。 */
+export interface MergeSourceTable {
+  /** true = `start`/`count` 以索引缓冲计；false = 以顶点计。 */
+  indexed: boolean;
+  ranges: MergeSourceRange[];
+}
+
+/** 一份来源几何的元数据 = 区间表条目去掉 `[start, count)`。 */
+type MergeSourceSeed = Omit<MergeSourceRange, 'start' | 'count'>;
+
+/** 读一只 mesh 的来源元数据（节点名 + `userData.vbsp` 引用）。 */
+function meshSourceSeed(mesh: THREE.Mesh): MergeSourceSeed {
+  return {
+    meshName: mesh.name ?? '',
+    vbsp: mesh.userData?.vbsp as MergeSourceMeta | undefined,
+  };
+}
+
+/** 几何在合并缓冲里的长度：带 index 取索引数，否则取 POSITION 顶点数（无 POSITION 记 0）。 */
+function mergeBufferLength(geometry: THREE.BufferGeometry): number {
+  if (geometry.index) return geometry.index.count;
+  const pos = geometry.attributes.position as THREE.BufferAttribute | undefined;
+  return pos ? pos.count : 0;
+}
+
+/** 按合并输入顺序把「每份几何一条来源」摊成区间表。 */
+function buildSourceTable(geometries: THREE.BufferGeometry[], seeds: MergeSourceSeed[]): MergeSourceTable {
+  const ranges: MergeSourceRange[] = [];
+  let cursor = 0;
+  for (let i = 0; i < geometries.length; i++) {
+    const count = mergeBufferLength(geometries[i]);
+    ranges.push({ start: cursor, count, meshName: seeds[i].meshName, vbsp: seeds[i].vbsp });
+    cursor += count;
+  }
+  return { indexed: geometries.length > 0 && geometries[0].index !== null, ranges };
+}
+
+/**
+ * 把子几何各自的表按同一顺序拼成一张总表：子区间整体平移到总缓冲的坐标。
+ * `geometries` 传**实际参与最终合并的那一组**（可为钩子归一后的产物，长度口径与它一致）。
+ * 长度不等（钩子未逐项对应）或任一子表缺失时返回 null ⇒ 该块不带表。
+ */
+function concatSourceTables(
+  geometries: THREE.BufferGeometry[],
+  tables: (MergeSourceTable | null)[],
+): MergeSourceTable | null {
+  if (geometries.length === 0 || geometries.length !== tables.length) return null;
+  const ranges: MergeSourceRange[] = [];
+  let cursor = 0;
+  for (let i = 0; i < geometries.length; i++) {
+    const table = tables[i];
+    if (!table) return null;
+    for (const r of table.ranges) {
+      ranges.push({ start: r.start + cursor, count: r.count, meshName: r.meshName, vbsp: r.vbsp });
+    }
+    cursor += mergeBufferLength(geometries[i]);
+  }
+  return { indexed: geometries[0].index !== null, ranges };
+}
+
+/** 把表挂到几何的 userData 上（空表不挂，保持未合并几何的 userData 原样）。 */
+function attachSourceTable(geometry: THREE.BufferGeometry, table: MergeSourceTable | null): void {
+  if (!table || table.ranges.length === 0) return;
+  geometry.userData[MERGE_SOURCE_TABLE_KEY] = table;
+}
+
+/**
+ * 按射线命中的面序号反查来源区间。
+ *
+ * `faceIndex` 是**三角形序号**：three 的 `Mesh.raycast` 对索引几何写索引缓冲下标 /3、对非索引几何
+ * 写顶点下标 /3 ⇒ 两种口径都折算成缓冲下标 `faceIndex * 3` 再落区间（区间各按自己的缓冲计数）。
+ *
+ * @returns 命中的区间；几何没有来源表、`faceIndex` 非法或落在全部区间之外时返回 null。
+ */
+export function lookupMergeSource(
+  geometry: THREE.BufferGeometry | null | undefined,
+  faceIndex: number | null | undefined,
+): MergeSourceRange | null {
+  if (!geometry || faceIndex === null || faceIndex === undefined || !(faceIndex >= 0)) return null;
+  const table = geometry.userData?.[MERGE_SOURCE_TABLE_KEY] as MergeSourceTable | undefined;
+  const ranges = table?.ranges;
+  if (!ranges || ranges.length === 0) return null;
+  const probe = faceIndex * 3;
+  // 区间按 start 升序且首尾相接 ⇒ 二分出最后一个 start <= probe 的区间，再判它是否覆盖 probe
+  let lo = 0;
+  let hi = ranges.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (ranges[mid].start <= probe) {
+      found = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (found < 0) return null;
+  const range = ranges[found];
+  return probe < range.start + range.count ? range : null;
 }
 
 /**
@@ -156,6 +299,9 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       m.rotation.set(0, 0, 0);
       m.scale.set(1, 1, 1);
       m.updateMatrix();
+      // 单 mesh 的 cell 保留了原 mesh 的 name/userData，仍写一张单区间表：
+      // 让消费方只有一条查表路径（不必区分"这只 mesh 是不是合并产物"）
+      attachSourceTable(baked, buildSourceTable([baked], [meshSourceSeed(m)]));
       chunks.push(m);
       chunkCount++;
       drawCallEst++;
@@ -163,38 +309,50 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       continue;
     }
 
-    // 多 mesh cell：按材质实例分组，组内合并成一个几何（每组对应一个材质槽）
-    const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+    // 多 mesh cell：按材质实例分组，组内合并成一个几何（每组对应一个材质槽）。
+    // 来源元数据与几何并行收集（同一下标），供合并后拼区间表用。
+    const byMat = new Map<THREE.Material, { geoms: THREE.BufferGeometry[]; seeds: MergeSourceSeed[] }>();
     for (const it of arr) {
       const m = it.mesh;
       const mat = m.material as THREE.Material;
       const baked = m.geometry.clone();
       baked.applyMatrix4(m.matrixWorld);
-      let list = byMat.get(mat);
-      if (!list) {
-        list = [];
-        byMat.set(mat, list);
+      let group = byMat.get(mat);
+      if (!group) {
+        group = { geoms: [], seeds: [] };
+        byMat.set(mat, group);
       }
-      list.push(baked);
+      group.geoms.push(baked);
+      group.seeds.push(meshSourceSeed(m));
     }
     const mergedGeoms: THREE.BufferGeometry[] = [];
+    // 与 mergedGeoms 同下标的来源表（null = 这一份没有表，最终合并出的块也不带表）
+    const mergedTables: (MergeSourceTable | null)[] = [];
     const mats: THREE.Material[] = [];
-    for (const [mat, geomsRaw] of byMat) {
+    for (const [mat, group] of byMat) {
+      const geomsRaw = group.geoms;
       const geoms = opts?.normalizeGroup ? opts.normalizeGroup(geomsRaw) : geomsRaw;
+      // 钩子须逐项对应（长度不变）才谈得上"哪份几何进了哪段缓冲"
+      const seeds = geoms.length === group.seeds.length ? group.seeds : null;
       let merged: THREE.BufferGeometry[];
+      let tables: (MergeSourceTable | null)[];
       if (geoms.length === 1) {
         merged = geoms;
+        tables = [seeds ? buildSourceTable(geoms, seeds) : null];
       } else {
         const mg = mergeGeometries(geoms, false);
         if (mg) {
           for (const g of geoms) g.dispose();
           merged = [mg];
+          tables = [seeds ? buildSourceTable(geoms, seeds) : null];
         } else {
           merged = geoms; // 属性不一致（防御分支）：保留各自独立几何
+          tables = geoms.map((_, i) => (seeds ? buildSourceTable([geoms[i]], [seeds[i]]) : null));
         }
       }
-      for (const g of merged) {
-        mergedGeoms.push(g);
+      for (let i = 0; i < merged.length; i++) {
+        mergedGeoms.push(merged[i]);
+        mergedTables.push(tables[i]);
         mats.push(mat);
       }
     }
@@ -205,18 +363,25 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     let chunk: THREE.Mesh;
     if (mergedGeoms.length === 1) {
       chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
+      attachSourceTable(mergedGeoms[0], mergedTables[0]);
       drawCallEst++;
     } else {
-      const final = mergeGeometries(opts?.normalizeGroup ? opts.normalizeGroup(mergedGeoms) : mergedGeoms, true);
+      // 归一后的数组既做最终合并的入参，也定区间表的长度口径（逐项对应）
+      const normalized = opts?.normalizeGroup ? opts.normalizeGroup(mergedGeoms) : mergedGeoms;
+      const final = mergeGeometries(normalized, true);
       if (final) {
         for (const g of mergedGeoms) if (g !== final) g.dispose();
         chunk = new THREE.Mesh(final, mats);
         drawCallEst += final.groups.length;
+        attachSourceTable(final, concatSourceTables(normalized, mergedTables));
       } else {
         // 最终合并失败（极端防御）：每个材质单独一块
         chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
+        attachSourceTable(mergedGeoms[0], mergedTables[0]);
         for (let i = 1; i < mergedGeoms.length; i++) {
-          chunks.push(new THREE.Mesh(mergedGeoms[i], mats[i]));
+          const extra = new THREE.Mesh(mergedGeoms[i], mats[i]);
+          attachSourceTable(mergedGeoms[i], mergedTables[i]);
+          chunks.push(extra);
           chunkCount++;
           drawCallEst++;
         }

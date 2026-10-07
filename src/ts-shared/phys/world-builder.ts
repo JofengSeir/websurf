@@ -52,6 +52,8 @@ export interface BspProcessorLike {
   export_brushes_planes(filterJson: string): string;
   export_model_tri_colliders(): string;
   export_model_phy_colliders(): string;
+  /** `.phy` 凸体的生成补面（VBSP `AddBrushBevels` 移植）；**只有 debug 的 pkg 导出**。 */
+  export_model_phy_bevels?(): string;
   export_mosaic_manifest(): string;
   export_missing_textures(): string;
   export_glb_with_pakfile_models_with_defaults(defaultsJson: string): Uint8Array;
@@ -92,6 +94,11 @@ export interface WorldBundle {
   metadata: WorldMetadata;
   brushJson: string;
   triJson: string;
+  /**
+   * `.phy` 凸体块的**生成补面** JSON（`export_model_phy_bevels` 的输出；只服务 debug 的
+   * 第六路线框显示）。该导出只有 debug 的 `pkg` 提供，其余工程为 `'[]'`。
+   */
+  phyBevelsJson: string;
   teleportJson: string;
   spawnJson: string;
   pvsJson: string;
@@ -204,8 +211,20 @@ export async function buildWorldBundle(
       triJson = '[]';
     }
   }
-  await stage('导出 GLB（含 PAKFILE 模型）');
 
+  // `.phy` 凸体的**生成补面**（VBSP `AddBrushBevels` 的移植，只服务 debug 的第六路线框）。
+  // 该导出只有 debug 的 `pkg` 提供，其余工程 `typeof` 判定为 undefined ⇒ 保持 '[]'。
+  // 必须在 `export_glb*` **之前**取：那些导出会消费 BSP 数据（与上面两组同一条理由）。
+  let phyBevelsJson = '[]';
+  if (typeof proc.export_model_phy_bevels === 'function') {
+    try {
+      phyBevelsJson = proc.export_model_phy_bevels();
+    } catch (e) {
+      console.warn('[load-bsp] .phy 补面导出失败（第六路线框不可用）:', e);
+    }
+  }
+
+  await stage('导出 GLB（含 PAKFILE 模型）');
   // manifest 与缺失纹理都必须在 export_glb* 之前取：那些导出会消费 BSP 数据。
   let mosaicManifest: string | undefined;
   try {
@@ -270,6 +289,7 @@ export async function buildWorldBundle(
     metadata,
     brushJson,
     triJson: triJson ?? '[]',
+    phyBevelsJson,
     teleportJson,
     spawnJson,
     pvsJson,

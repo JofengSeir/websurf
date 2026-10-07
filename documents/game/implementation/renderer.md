@@ -8,7 +8,7 @@
 |---|---|---|
 | `renderer-main.ts` | 编排：Renderer/Scene/Camera 装配、loadScene 编排、rAF 帧循环（tick）、主线程预测物理、LOD/PVS 剔除、纹理画质（mosaic）、画面旋钮转发、出帧探针 | `RendererMain`（`apps/game/src/renderer/renderer-main.ts:80`） |
 | 共享层 `scene/scene-builder.ts` | GLB 字节 → 地图子场景：loadGlb、清根 rotation、摘 punctual 灯、施加 lightmap atlas | `buildMapScene`（`src/renderer-shared/scene/scene-builder.ts:61`）、`applyLightmap`（`:108`） |
-| 共享层 `scene/scene-optimizer.ts` | 空间分块合并：数万 mesh → 数百空间块（cell 自适应、按材质实例分组、失败逐块回退） | `optimizeScene(bspRoot, gltfScene, camera, fovDeg)`（`src/renderer-shared/scene/scene-optimizer.ts:256`；2026-10-03 内部拆为共享核 `mergeIntoChunks`（`:70`，不改根不挂载不打日志）+ 本包装，行为与拆分前逐行等价） |
+| 共享层 `scene/scene-optimizer.ts` | 空间分块合并：数万 mesh → 数百空间块（cell 自适应、按材质实例分组、失败逐块回退） | `optimizeScene(bspRoot, gltfScene, camera, fovDeg)`（`src/renderer-shared/scene/scene-optimizer.ts:421`；2026-10-03 内部拆为共享核 `mergeIntoChunks`（`:218`，不改根不挂载不打日志）+ 本包装，行为与拆分前逐行等价） |
 | 共享层 `scene/inject-stats.ts` | lightmap 注入生效性统计（首帧后一次性诊断，只读场景与 globalThis） | `reportInjectStatsOnce(scene)`（`src/renderer-shared/scene/inject-stats.ts:20`） |
 | 共享层 `camera/near-plane.ts` | 近平面贴墙自适应：4 水平方向射线探测，贴墙收缩 near | `NearPlaneController`（`src/renderer-shared/camera/near-plane.ts:24`；`update` 的 `opts` 支持 roots 直通与 `vertical` 六向——viewer 用，game 默认四向不变） |
 | 共享层 `scene/dispose.ts` | 场景子树显存释放（2026-10-04 Phase 4 自三份同源分叉合并，取 debug 的 11 贴图槽位版为基准；game 换图时由此补上 lightMap 等槽位的释放） | `disposeObject`（`src/renderer-shared/scene/dispose.ts:16`） |
@@ -41,8 +41,8 @@
 - **光照三路径与 fullbright 收敛**：world 面走 atlas、prop 第 1 级走几何属性 `_VBSP_VLIGHT`、第 2 级走 leaf ambient cube；无 lightmap 的图元统一收敛到 fullbright（`src/renderer-shared/shader/lightmap-shader.ts:543`）；`extras.unlit === true` 的图元跳过光照（`src/renderer-shared/shader/lightmap-shader.ts:830`）。
 - **`hasLightmap` 的读取源**：判据优先读 `geometry.userData`、回落 `mesh.userData`（`src/renderer-shared/shader/lightmap-shader.ts:882`、`:883`）；`== false` 的图元必须在「检测 uv1/uv2」之前拦下（`src/renderer-shared/shader/lightmap-shader.ts:885`）。
 - **材质去重**：按 map / color / transparent / opacity / alphaTest / side / depthWrite / alphaMap / 线框标记组成键复用材质实例，使分块合并的按材质分组仍然成立（`src/renderer-shared/shader/lightmap-shader.ts:516`、`src/renderer-shared/shader/lightmap-shader.ts:794`）。
-- **分块合并的失败语义**：任一步合并失败都回退为「保留各自独立几何」，不存在「合并失败即丢弃」的路径（`src/renderer-shared/scene/scene-optimizer.ts:193`、`:210`、`:219`）。
-- **视锥外保留圈**：块几何的包围球半径统一乘 `FRUSTUM_PAD`，且必须无条件重算（克隆几何会带上局部空间的旧球）（`src/renderer-shared/scene/scene-optimizer.ts:31`、`padBoundingSpheres :240`、`:245`）。
+- **分块合并的失败语义**：任一步合并失败都回退为「保留各自独立几何」，不存在「合并失败即丢弃」的路径（`src/renderer-shared/scene/scene-optimizer.ts:349`、`:369`、`:382`）。
+- **视锥外保留圈**：块几何的包围球半径统一乘 `FRUSTUM_PAD`，且必须无条件重算（克隆几何会带上局部空间的旧球）（`src/renderer-shared/scene/scene-optimizer.ts:35`、`padBoundingSpheres :405`、`:410`）。
 - **出帧探针只读不写**：`installFrameProbe` 往 `globalThis.__vbspFrameProbe` 挂一个对象（`apps/game/src/renderer/renderer-main.ts:859`），其 `applyPose` 复用生产路径的冻结机制（`setHoldPoint`）而新增任何渲染分支（`apps/game/src/renderer/renderer-main.ts:1020`、`:1051`）。
 - **注入生效性统计延后到首帧之后**：`applyLightmap` 返回「是否施加到 mesh」，`loadScene` 用它落账 `pendingInjectReport`；统计由 `tick` 在首帧 `render()` 之后跑一次（`apps/game/src/renderer/renderer-main.ts:279`、`:803`；实现在 `src/renderer-shared/scene/inject-stats.ts:20`）。
 
@@ -54,6 +54,6 @@
 - **`applyCollisionCorrection` 的入参有三个不被读取**：`_pos` / `_yawDeg` / `_pitchDeg` 在共享层实现里带 `_` 前缀（`src/ts-shared/phys/authority-calibrator.ts:735`），实际写入的位置与角度取自渲染自身当前状态（`src/ts-shared/phys/authority-calibrator.ts:776`）；`blocked` 事件与「渲染自己未着地」两种情形都是零写入（`src/ts-shared/phys/authority-calibrator.ts:743`、`:768`）。
 - **`setLightGamma` 的接受窗口窄于所有调用方**：窗口是 `(0, 1]`（`src/renderer-shared/shader/lightmap-shader.ts:1789`），而 `init` 传入的 `config.lighting.lightGamma` 默认 2.2（`apps/game/src/renderer/renderer-main.ts:217`）、面板滑块量程 0.5..6（`apps/game/src/panel/panel-controller.ts:471`）；窗口外的写入既不报错也不生效，共享 uniform 停在自身初值（`src/renderer-shared/shader/lightmap-shader.ts:1556`）。
 - **光照模块内多个导出在本工程零导入点**：`setLightFloor` / `getLightFloor`（`src/renderer-shared/shader/lightmap-shader.ts:1752`、`:1757`）、`isTextureOnlyMode`（`:447`）、`isLightmapSkipStage`（`:313`）、`getExposure`（`:1817`）、`getLightGamma`（`:1795`）、`getAmbientScale`（`:1836`），以及四个 GLSL 片段与 uniform 声明常量（`:87`、`:112`、`:165`、`:181`）——`renderer-main.ts` 的 import 面（`apps/game/src/renderer/renderer-main.ts:48`）不含它们。
-- **分块尺寸自适应忽略多材质网格**：`worldBox` 只在单材质分支里累计（`src/renderer-shared/scene/scene-optimizer.ts:102`），数组材质与无材质网格走 `keptMeshes` 的早退分支（`src/renderer-shared/scene/scene-optimizer.ts:78`、`:94`）；因此 cell 边长按「单材质网格的包围盒并集」估，场景里只有多材质网格时该并集为空（此时 `infos.length === 0`，整个分块直接返回，`src/renderer-shared/scene/scene-optimizer.ts:106`）。
+- **分块尺寸自适应忽略多材质网格**：`worldBox` 只在单材质分支里累计（`src/renderer-shared/scene/scene-optimizer.ts:250`），数组材质与无材质网格走 `keptMeshes` 的早退分支（`src/renderer-shared/scene/scene-optimizer.ts:221`、`:237`）；因此 cell 边长按「单材质网格的包围盒并集」估，场景里只有多材质网格时该并集为空（此时 `infos.length === 0`，整个分块直接返回，`src/renderer-shared/scene/scene-optimizer.ts:254`）。
 - **`applyLightmapToMeshes` 自身不判空图集**：`atlasTexture` 为 `null` 时的行为由调用方保证（`src/renderer-shared/shader/lightmap-shader.ts:474` 的口径），`applyLightmap` 在 `!atlas` 时提前返回（`src/renderer-shared/scene/scene-builder.ts:121`）。
 - **`loadScene` 的入口先释放上一张图**：`disposeScene` 在方法开头调用（`apps/game/src/renderer/renderer-main.ts:264`），因此换图失败时场景处于已释放状态，只能重新选图恢复（失败路径见 `apps/game/src/app.ts:601`）。

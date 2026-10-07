@@ -6,24 +6,24 @@
 
 依据：
 
-- 入口是主线程装配函数 `apps/debug/src/app.ts:278` 的 `main`：它按固定顺序建共享缓冲、起 Worker、装渲染器、绑面板与输入循环。
+- 入口是主线程装配函数 `apps/debug/src/app.ts:266` 的 `main`：它按固定顺序建共享缓冲、起 Worker、装渲染器、绑面板与输入循环。
 - `apps/debug/package.json:15` 的 `dev` 脚本把工程根目录交给共享静态服务器（端口 8080），页面入口是 `apps/debug/web/index.html`。
-- 调试 API 注册在 `apps/debug/src/app.ts:912` 的 `globalThis.__wsInput`，注释面写明的契约与「已删除成员」见 `apps/debug/src/app.ts:909` 起的清单；同一份 API 在 `apps/game` 内不注册。2026-09-26：随用户录制器删除的成员有 `start` / `stop` / `clear` / `isRecording` / `exportJson` / `status`（`status` 由新的 `progress` 取代）。
+- 调试 API 注册在 `apps/debug/src/app.ts:910` 的 `globalThis.__wsInput`，注释面写明的契约与「已删除成员」见 `apps/debug/src/app.ts:912` 起的清单；同一份 API 在 `apps/game` 内不注册。2026-09-26：随用户录制器删除的成员有 `start` / `stop` / `clear` / `isRecording` / `exportJson` / `status`（`status` 由新的 `progress` 取代）。
 - 工程自带一份 WASM 绑定层 `apps/debug/crates/wasm/src/lib.rs`（crate `websurf-wasm`），与 `apps/game`、`apps/viewer` 各自独立。
 
 ## 目录职责
 
 | 路径 | 职责 | 关键锚点 |
 |---|---|---|
-| `apps/debug/src/`（根级模块） | 主线程装配（`app.ts`）、运行时配置树（`config.ts`）、计时挑战状态机（`game-state.ts`）、默认纹理包（`default-pack.ts`）、主线程 wasm 懒初始化（`main-wasm.ts`）、手写 wasm 类型声明（`wasm.d.ts`） | `apps/debug/src/app.ts:278`、`apps/debug/src/config.ts:205`、`apps/debug/src/main-wasm.ts:28` |
-| `apps/debug/src/renderer/` | 主线程渲染器 `RendererMain` 与五个子管理器：相机、LOD 剔除、碰撞可视化、路径记录、准星射线（lightmap 着色器与雾/光照管理器已于 2026-10-02 下沉到渲染共享层，本目录不再持有） | `apps/debug/src/renderer/renderer-main.ts:183`、`apps/debug/src/renderer/lod-manager.ts:87`、`src/renderer-shared/shader/lightmap-shader.ts:482`、`src/renderer-shared/environment/light-manager.ts:87` |
+| `apps/debug/src/`（根级模块） | 主线程装配（`app.ts`）、运行时配置树（`config.ts`）、计时挑战状态机（`game-state.ts`）、默认纹理包（`default-pack.ts`）、主线程 wasm 懒初始化（`main-wasm.ts`）、手写 wasm 类型声明（`wasm.d.ts`） | `apps/debug/src/app.ts:266`、`apps/debug/src/config.ts:209`、`apps/debug/src/main-wasm.ts:28` |
+| `apps/debug/src/renderer/` | 主线程渲染器 `RendererMain` 与五个子管理器：相机、LOD 剔除、碰撞可视化、路径记录、准星射线（lightmap 着色器与雾/光照管理器已于 2026-10-02 下沉到渲染共享层，本目录不再持有） | `apps/debug/src/renderer/renderer-main.ts:184`、`apps/debug/src/renderer/lod-manager.ts:87`、`src/renderer-shared/shader/lightmap-shader.ts:482`、`src/renderer-shared/environment/light-manager.ts:87` |
 | `apps/debug/src/worker/` | Worker 入口装配（权威物理循环、消息分发、渲染轨迹采样、健康守护）、线程间消息类型面、物理面板协调器、内嵌纹理包暂存 | `apps/debug/src/worker/main.ts:455`、`apps/debug/src/worker/worker-types.ts:342`、`apps/debug/src/worker/physics-worker.ts:28` |
 | `apps/debug/src/input/` | 键盘采集、主线程→Worker 消息桥、输入录制/回放器（含回放捕获与丢帧语义） | `apps/debug/src/input/keyboard.ts:56`、`apps/debug/src/input/input-bridge.ts:16`、`apps/debug/src/input/input-recorder.ts:166` |
 | `apps/debug/src/world/` | WASM 导出 JSON 的类型面、brush 映射层、传送点数据层、自定义传送点 localStorage 层、出生点加载器（零调用点参考实现） | `apps/debug/src/world/types.ts:34`、`apps/debug/src/world/collider-adapter.ts:182`、`apps/debug/src/world/teleport-manager.ts:135` |
 | `apps/debug/src/physics/` | 面板参数定义表、参数管理器（写 `set_params` / `set_hull`）、config → Rust 参数映射、向量工具与 cs-movement 碰撞类型 | `apps/debug/src/physics/param-defs.ts:47`、`apps/debug/src/physics/physics-params.ts:54`、`apps/debug/src/physics/prediction-params.ts:23` |
 | `apps/debug/web/` | 页面骨架与全部 DOM id、样式、COOP/COEP 补丁脚本，以及构建产物落点（`app.js` / `worker.js` / `websurf_wasm_bg.wasm` / `textures.mtz`） | `apps/debug/web/index.html:481`、`apps/debug/web/styles.css:2`、`apps/debug/package.json:10` |
 | `apps/debug/scripts/` | 构建 dist、WASM API 契约门、无头验收与度量脚本、部署站入口页模板、路径基线资产 | `apps/debug/scripts/build-dist.mjs:63`、`apps/debug/scripts/check-wasm-api.mjs:1`、`apps/debug/scripts/input-replay-verify.mjs:1` |
-| `apps/debug/crates/wasm/` | 本工程的 WASM 绑定层：`BspProcessor` 全导出面 + 原样再导出共享层 `PhysWorld` | `apps/debug/crates/wasm/src/lib.rs:487`、`apps/debug/crates/wasm/src/lib.rs:55` |
+| `apps/debug/crates/wasm/` | 本工程的 WASM 绑定层：`BspProcessor` 全导出面 + 原样再导出共享层 `PhysWorld` | `apps/debug/crates/wasm/src/lib.rs:534`、`apps/debug/crates/wasm/src/lib.rs:55` |
 | `apps/debug/fixtures/` | 门禁脚本的输入夹具（不参与运行时） | `apps/debug/package.json:22` |
 
 ## 依赖方向
@@ -78,30 +78,30 @@
 从 `npm run dev` 到页面可交互的链路（参与者 → 动作）：
 
 1. `npm run dev`（`apps/debug/package.json:15`）→ `src/serve.py` 以 8080 为端口、以工程根为服务根启动；浏览器打开 `/web/index.html`。
-2. 页面加载 COOP/COEP 补丁脚本（`apps/debug/web/index.html:885`）与打包后的 `app.js`（`apps/debug/web/index.html:886`）。
-3. `app.js` 执行到 `apps/debug/src/app.ts:278` 的 `main`：先取画布句柄，取不到直接返回（`apps/debug/src/app.ts:279`）。
-4. 通道选择：`crossOriginIsolated === true` 且存在 `SharedArrayBuffer` 时建 `SHARED_BUFFER_SIZE` 的共享缓冲，否则置 `null`（`apps/debug/src/app.ts:286`）。
-5. 建 Worker：有内嵌 Worker 源码（构建注入的 `__VBSP_WORKER_JS__`）则走 Blob URL，否则 `new Worker('./worker.js', { type: 'module' })`（`apps/debug/src/app.ts:292`）。
-6. 下发 wasm：内嵌时把 `wasmB64` 放进 `wasm-init`，否则改用 `wasmUrl`；两条分支都带 `mtzB64`（构建未注入该全局键时其值为 `undefined`）（`apps/debug/src/app.ts:315`）。
-7. 建共享状态与消息桥：`createMainSharedState(sharedBuffer, worker)`（`apps/debug/src/app.ts:325`）、`new InputBridge(worker)`（`apps/debug/src/app.ts:327`）并 `sendInit`（`apps/debug/src/app.ts:328`）。
-8. 建渲染器并注册四个回调：`onCullStats` / `onSceneLoaded` / `onSyncRenderState` / `onPhysEvent`，随后 `init` 与 `start`（`apps/debug/src/app.ts:336` 起）。
-9. 主线程 wasm 懒初始化 `ensureMainWasm()` 的结果存进 `mainWasmReady`（`apps/debug/src/app.ts:362`）。
-10. 绑输入与面板：`bindInput`（`apps/debug/src/app.ts:367`）、`loadUiPrefs` → `syncPrefsControls` → `applyCrosshairStyle` → `sendPrefsToWorker` → `bindUI`（`apps/debug/src/app.ts:369` 起）。
-11. 起输入循环 `startInputLoop`（`apps/debug/src/app.ts:380`），并刷新录制面板状态（`apps/debug/src/app.ts:382`）。
-12. Worker 侧 `init` 处理完后回 `ready`（`apps/debug/src/worker/main.ts:483`），主线程在 `apps/debug/src/app.ts:393` 的 `ready` 分支把状态栏改成「Worker 已就绪。请加载 .bsp 文件。」。
-13. 用户通过 `#bspFile` 选图 → `apps/debug/src/app.ts:1881` 的 `handleBspFile` → 主线程解析并装载世界。
+2. 页面加载 COOP/COEP 补丁脚本（`apps/debug/web/index.html:889`）与打包后的 `app.js`（`apps/debug/web/index.html:890`）。
+3. `app.js` 执行到 `apps/debug/src/app.ts:266` 的 `main`：先取画布句柄，取不到直接返回（`apps/debug/src/app.ts:267`）。
+4. 通道选择：`crossOriginIsolated === true` 且存在 `SharedArrayBuffer` 时建 `SHARED_BUFFER_SIZE` 的共享缓冲，否则置 `null`（`apps/debug/src/app.ts:276`）。
+5. 建 Worker：有内嵌 Worker 源码（构建注入的 `__VBSP_WORKER_JS__`）则走 Blob URL，否则 `new Worker('./worker.js', { type: 'module' })`（`apps/debug/src/app.ts:291`）。
+6. 下发 wasm：内嵌时把 `wasmB64` 放进 `wasm-init`，否则改用 `wasmUrl`；两条分支都带 `mtzB64`（构建未注入该全局键时其值为 `undefined`）（`apps/debug/src/app.ts:306`）。
+7. 建共享状态与消息桥：`createMainSharedState(sharedBuffer, worker)`（`apps/debug/src/app.ts:313`）、`new InputBridge(worker)`（`apps/debug/src/app.ts:315`）并 `sendInit`（`apps/debug/src/app.ts:316`）。
+8. 建渲染器并注册四个回调：`onCullStats` / `onSceneLoaded` / `onSyncRenderState` / `onPhysEvent`，随后 `init` 与 `start`（`apps/debug/src/app.ts:324` 起）。
+9. 主线程 wasm 懒初始化 `ensureMainWasm()` 的结果存进 `mainWasmReady`（`apps/debug/src/app.ts:350`）。
+10. 绑输入与面板：`bindInput`（`apps/debug/src/app.ts:355`）、`loadUiPrefs` → `syncPrefsControls` → `applyCrosshairStyle` → `sendPrefsToWorker` → `bindUI`（`apps/debug/src/app.ts:357` 起）。
+11. 起输入循环 `startInputLoop`（`apps/debug/src/app.ts:367`），并刷新录制面板状态（`apps/debug/src/app.ts:383`）。
+12. Worker 侧 `init` 处理完后回 `ready`（`apps/debug/src/worker/main.ts:483`），主线程在 `apps/debug/src/app.ts:378` 的 `ready` 分支把状态栏改成「Worker 已就绪。请加载 .bsp 文件。」。
+13. 用户通过 `#bspFile` 选图 → `apps/debug/src/app.ts:1728` 的 `handleBspFile` → 主线程解析并装载世界。
 
 ## 不变量
 
 以下不变量由本工程代码保证，改动前需连带检查：
 
-1. **权威物理只有 Worker 一个推进者**：Worker 侧权威实例由 `apps/debug/src/worker/main.ts:455` 装配的 `createAuthLoop` 独占推进；主线程收到 `phys-frame` 只做缓存（`apps/debug/src/app.ts:397`），不 tick 权威实例。
+1. **权威物理只有 Worker 一个推进者**：Worker 侧权威实例由 `apps/debug/src/worker/main.ts:455` 装配的 `createAuthLoop` 独占推进；主线程收到 `phys-frame` 只做缓存（`apps/debug/src/app.ts:398`），不 tick 权威实例。
 2. **固定步长来自面板 tickRate，且不进 Rust**：`tickRate` 变更经 `apps/debug/src/worker/main.ts:466` 的 `onTickRateChange` 调 `authLoop.setFixedDt`，仅在步长真的变化时才 `reset()`。
-3. **主线程每个渲染帧最多推进 1 个物理步**：`apps/debug/src/renderer/renderer-main.ts:657` 是 `tick` 内唯一的 `predPhys.tick` 调用点；单步闸门打开时每帧配额再减一（`apps/debug/src/renderer/renderer-main.ts:622`）。
-4. **回放步长是一次性载荷**：`apps/debug/src/renderer/renderer-main.ts:628` 在读走 `replayDtS` 后立即置 `null`，输入循环用 `replayDtS === null` 作为「上一帧已被消费」的握手信号（`apps/debug/src/app.ts:2224`）。
-5. **输入增量是累加语义、按键掩码是覆盖语义**：`apps/debug/src/renderer/renderer-main.ts:1009` 的 `feedInput` 对 `dx`/`dy` 累加、对 `keys` 直接赋值，消费后清零增量（`apps/debug/src/renderer/renderer-main.ts:658`）。
+3. **主线程每个渲染帧最多推进 1 个物理步**：`apps/debug/src/renderer/renderer-main.ts:662` 是 `tick` 内唯一的 `predPhys.tick` 调用点；单步闸门打开时每帧配额再减一（`apps/debug/src/renderer/renderer-main.ts:627`）。
+4. **回放步长是一次性载荷**：`apps/debug/src/renderer/renderer-main.ts:633` 在读走 `replayDtS` 后立即置 `null`，输入循环用 `replayDtS === null` 作为「上一帧已被消费」的握手信号（`apps/debug/src/app.ts:2232`）。
+5. **输入增量是累加语义、按键掩码是覆盖语义**：`apps/debug/src/renderer/renderer-main.ts:1015` 的 `feedInput` 对 `dx`/`dy` 累加、对 `keys` 直接赋值，消费后清零增量（`apps/debug/src/renderer/renderer-main.ts:663`）。
 6. **双端物理参数同源**：主线程与 Worker 都从同一份 config 出发，映射实现收敛在 `src/ts-shared/phys/params.ts`（`apps/debug/src/physics/prediction-params.ts:23`、`apps/debug/src/worker/main.ts:62`）。
 7. **主线程与 Worker 各持独立 wasm 实例**：主线程由 `apps/debug/src/main-wasm.ts:28` 的 `ensureMainWasm` 初始化，Worker 在自己的作用域内独立 `initSync`（`apps/debug/src/worker/main.ts:479`）。
 8. **剔除距离由场景对角线唯一确定**：`apps/debug/src/renderer/lod-manager.ts:155` 起三行给出上限、下限与默认值的算式，面板滑块只能在该上限内改写（`apps/debug/src/renderer/lod-manager.ts:276`）。
-9. **渲染轨迹采样与渲染节点一一对应**：同一帧同一三元组先落 `PathRecorder` 渲染节点、再写共享内存采样槽，`i0` 取同一次自增（`apps/debug/src/renderer/renderer-main.ts:669` 与 `apps/debug/src/renderer/renderer-main.ts:673`）。
-10. **权威帧版本号单调**：`va` 由发布方单调递增（`apps/debug/src/worker/worker-types.ts:248`），主线程按它去重（`apps/debug/src/renderer/renderer-main.ts:646`）。
+9. **渲染轨迹采样与渲染节点一一对应**：同一帧同一三元组先落 `PathRecorder` 渲染节点、再写共享内存采样槽，`i0` 取同一次自增（`apps/debug/src/renderer/renderer-main.ts:674` 与 `apps/debug/src/renderer/renderer-main.ts:678`）。
+10. **权威帧版本号单调**：`va` 由发布方单调递增（`apps/debug/src/worker/worker-types.ts:248`），主线程按它去重（`apps/debug/src/renderer/renderer-main.ts:651`）。

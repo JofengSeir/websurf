@@ -265,6 +265,34 @@ fn load_vmdl(m: &InMemoryModel) -> Option<vmdl::Model> {
     Some(vmdl::Model::from_parts(mdl, vtx, vvd))
 }
 
+/// 从 PAKFILE 条目名构建 VMT **基名索引**：`基名小写 → 去掉 materials/ 前缀与 .vmt 后缀的路径`。
+///
+/// 只收 `materials/` 下、以 `.vmt` 结尾的条目；值保留条目原始大小写（`Packfile::get` 按名精确
+/// 匹配）。产物填进 `bsp_to_gltf_core::ConvertOptions` 的 `vmt_stem_index`，供世界面的贴图名在
+/// 精确候选全部落空时按基名回退取 `$basetexture` 等标注（texinfo 名形如
+/// `METAL/METALGRATE013A2`，包内同名 VMT 却在别的子目录下）。
+///
+/// 同名多条时取**路径最短**者；与当前值等长时保留先到的一条。
+fn build_vmt_stem_index(entry_names: &[String]) -> std::collections::HashMap<String, String> {
+    let mut out: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for name in entry_names {
+        let norm = name.replace('\\', "/");
+        let lower = norm.to_ascii_lowercase();
+        if !lower.starts_with("materials/") || !lower.ends_with(".vmt") {
+            continue;
+        }
+        let path = &norm["materials/".len()..norm.len() - ".vmt".len()];
+        let stem = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+        match out.get(&stem) {
+            Some(prev) if prev.len() <= path.len() => {}
+            _ => {
+                out.insert(stem, path.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// 解析所有被引用模型的材质：从 PAKFILE 取 `.vmt` 得透明度标注，再按 `$basetexture` 取 `.vtf` 解码为 PNG。
 ///
 /// `decode_textures = false` 时只填 `alpha_modes` / `unlit`、跳过图像解码（碰撞体路径用此模式）。
@@ -275,6 +303,11 @@ fn load_vmdl(m: &InMemoryModel) -> Option<vmdl::Model> {
 /// `find` 本身大小写不敏感，并按「原样 / `materials/` / `models/` / `materials/models/` 补后缀」
 /// 四个候选加一条「只按基名」回退依次试。
 ///
+/// `fallback` = 默认纹理包（textures.mtz 解压产物，键形如 `materials/<小写路径>`）：pakfile 内
+/// 没有该 VTF（stock 贴图未打包）时，按 `$basetexture` 路径与材质名依次查包取低清纹理补位。
+/// 传 `None` 即不回落，此时没有 pakfile VTF 的材质没有贴图 —— 模型会以基色因子着色（
+/// `alphaMode` 为 `MASK` 的格栅/铁丝网会因基色 alpha 恒为 1 而整块变实心）。
+///
 /// 容错：候选全不中时按 alpha_mode 0（不透明）记账并继续；`$basetexture` 缺失时只跟一层
 /// `include` 指向的母材质（母材质半透明而 `patch` 自身为 0 时继承母材质的 alpha_mode）；
 /// VTF 条目找不到或解码失败都只跳过图像，不产生错误返回。
@@ -283,6 +316,7 @@ fn resolve_pakfile_materials(
     models: &[InMemoryModel],
     index: &pakfile_models::PakIndex,
     decode_textures: bool,
+    fallback: Option<&std::collections::HashMap<String, String>>,
 ) -> PakMaterials {
     let mut out = PakMaterials::default();
 
@@ -348,14 +382,27 @@ fn resolve_pakfile_materials(
             let Some(base) = info.basetexture else {
                 continue;
             };
-            let Some(vtf_entry) = index.find(&base, "vtf") else {
-                continue;
-            };
-            let Ok(Some(vtf_bytes)) = bsp.pack.get(vtf_entry) else {
-                continue;
-            };
-            if let Ok(png) = decode_vtf_to_png(&vtf_bytes) {
-                out.textures.insert(tex.name.clone(), png);
+            // 先在 pakfile 内按 `$basetexture` 找同路径 VTF（原始分辨率），解出 PNG 即用
+            if let Some(vtf_entry) = index.find(&base, "vtf") {
+                if let Ok(Some(vtf_bytes)) = bsp.pack.get(vtf_entry) {
+                    if let Ok(png) = decode_vtf_to_png(&vtf_bytes) {
+                        out.textures.insert(tex.name.clone(), png);
+                        continue;
+                    }
+                }
+            }
+            // pakfile 内没有这张 VTF（stock 贴图未打包）时退到默认纹理包。
+            // 查表键经 `bsp_to_gltf_core::fallback_key` 归一成 `materials/<小写路径>`，故这里按
+            // `$basetexture` 路径与材质名依次试：模型材质名常是裸基名（`metalfence007a`），
+            // 包里的键却是源资源路径（`materials/metal/metalfence007a`）。
+            if let Some(fallback) = fallback {
+                if let Some(png) = websurf_wasm_core::bsp_to_gltf_core::fallback_texture_png(
+                    fallback,
+                    &[base.as_str(), tex.name.as_str()],
+                    8,
+                ) {
+                    out.textures.insert(tex.name.clone(), png);
+                }
             }
         }
     }
@@ -641,8 +688,10 @@ impl BspProcessor {
         }
 
         // 5. 解 PAKFILE 内的 VMT/VTF：贴图 PNG 字节 + 材质透明度 / 无光照标注（`decode_textures = true`）
+        // 本入口（`export_glb_with_pakfile_models`）不带默认纹理包回退表 ⇒ `fallback` 传 `None`
+        // （与 game 同名入口一致；带回退的那条是 `export_glb_with_defaults_opts`）。
         let index = pakfile_models::PakIndex::build(&entry_names);
-        let materials = resolve_pakfile_materials(&bsp, &models, &index, true);
+        let materials = resolve_pakfile_materials(&bsp, &models, &index, true, None);
 
         let resources = InMemoryResources {
             models,
@@ -750,8 +799,15 @@ impl BspProcessor {
 
         let (models, static_props, entry_names) = collect_pakfile_models(&bsp)?;
 
+        // 世界面材质的**基名 VMT 回退**索引（填进 `ConvertOptions::vmt_stem_index`）：
+        // texinfo 给的名字（如 `METAL/METALGRATE013A2`）在包内没有精确路径时，改按基名
+        // `metalgrate013a2.vmt` 命中作者写的 VMT，取其中的 `$basetexture` / `$translucent`
+        // 等标注 —— 缺这一条时该类世界面会退化成不透明且无贴图（格栅/铁丝网整块变实心）。
+        let stem_index = build_vmt_stem_index(&entry_names);
+
         let options = |generate_missing_list: bool| bsp_to_gltf_core::ConvertOptions {
             missing_fallback: fallback.clone(),
+            vmt_stem_index: stem_index.clone(),
             generate_missing_list,
             lightmap_max_atlas_area,
             ..bsp_to_gltf_core::ConvertOptions::default()
@@ -771,7 +827,7 @@ impl BspProcessor {
         }
 
         let index = pakfile_models::PakIndex::build(&entry_names);
-        let materials = resolve_pakfile_materials(&bsp, &models, &index, true);
+        let materials = resolve_pakfile_materials(&bsp, &models, &index, true, Some(&fallback));
         let resources = InMemoryResources {
             models,
             entities: Vec::new(),
@@ -831,7 +887,7 @@ impl BspProcessor {
         }
 
         let index = pakfile_models::PakIndex::build(&entry_names);
-        let materials = resolve_pakfile_materials(bsp, &models, &index, false);
+        let materials = resolve_pakfile_materials(bsp, &models, &index, false, None);
 
         let no_entities: Vec<model_integrator::Entity> = Vec::new();
 
@@ -1119,7 +1175,7 @@ impl BspProcessor {
         // 模型贴图（材质名 → PNG → mosaic）；失败静默跳过（不影响地图纹理覆盖）
         if let Ok((models, _props, entry_names)) = collect_pakfile_models(bsp) {
             let index = pakfile_models::PakIndex::build(&entry_names);
-            let materials = resolve_pakfile_materials(bsp, &models, &index, true);
+            let materials = resolve_pakfile_materials(bsp, &models, &index, true, None);
             for (name, png) in materials.textures {
                 if let Ok(code) = websurf_wasm_core::mosaic::encode::img_to_code(&png, &name) {
                     pairs.push((name.to_ascii_lowercase(), code));
@@ -3438,4 +3494,158 @@ pub fn decompress_mtz(bytes: &[u8]) -> Result<String, JsValue> {
 pub fn start() {
     #[cfg(target_arch = "wasm32")]
     init_panic_hook();
+}
+
+// ---------------------------------------------------------------------------
+// `.phy` 凸体补面导出（debug 第六路线框的数据源）
+// ---------------------------------------------------------------------------
+
+/// `export_model_phy_colliders` 输出的一项；本模块只读这三个字段。
+#[derive(serde::Deserialize)]
+struct PhyColliderMesh {
+    name: String,
+    vertices: Vec<[f32; 3]>,
+    indices: Vec<[u32; 3]>,
+}
+
+/// 顶点连通分量（并查集）：把「一只模型的全部凸体块拼成一个 mesh」按三角形连接性拆回块。
+///
+/// 导出时每块凸体占一段**连续**顶点区间（`base = local.len()` 之后整段拷入），三角形不跨块，
+/// 故连通分量与解析期的凸体块一一对应。
+fn vertex_components(vertex_count: usize, tris: &[[u32; 3]]) -> Vec<Vec<u32>> {
+    let mut parent: Vec<u32> = (0..vertex_count as u32).collect();
+    fn find(parent: &mut [u32], mut x: u32) -> u32 {
+        while parent[x as usize] != x {
+            let gp = parent[parent[x as usize] as usize];
+            parent[x as usize] = gp;
+            x = gp;
+        }
+        x
+    }
+    for t in tris {
+        let a = find(&mut parent, t[0]);
+        for o in [t[1], t[2]] {
+            let r = find(&mut parent, o);
+            if r != a {
+                parent[r as usize] = a;
+            }
+        }
+    }
+    let mut groups: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for i in 0..vertex_count as u32 {
+        let r = find(&mut parent, i);
+        groups.entry(r).or_default().push(i);
+    }
+    groups.into_values().collect()
+}
+
+/// `.phy` 凸体块的**生成补面**（`websurf_phys::phys::hull_bevels` = VBSP `AddBrushBevels` 的移植），
+/// 供 debug 第六路线框显示。
+///
+/// 为什么在这里拆块：`export_model_phy_colliders` 把一只模型的**全部凸体块拼进一个 mesh**
+/// （`base = local.len()` 累加），而补面判据「凸体全部顶点在面内侧」只在**单块凸体**上成立 ——
+/// 多块并集不是凸集，判据必然失败（`surf_666` 实测：459 个导出网格里 329 个的并集非凸，
+/// `s1_ramp1b` 11 块、并集越界 781.7 HU）。本导出复用那份 JSON、按连通分量拆回块，再逐块生成。
+///
+/// 输出 JSON：每个放置实例的**每一块**一个条目
+/// `{ "name", "min", "max", "box", "edge", "rejected", "planes": [[nx, ny, nz, d], ...] }`。
+/// `planes` **只含生成的 bevel**（`box` / `edge` 两类），面平面由 `.phy` 三角形线框那条路显示，
+/// 不在这里重复；生成数为 0 的块不入结果。两个上限只是防爆量，正常地图远达不到。
+#[wasm_bindgen]
+impl BspProcessor {
+    pub fn export_model_phy_bevels(&self) -> Result<String, JsValue> {
+            const MAX_PIECES: usize = 40_000;
+            const MAX_PLANES: usize = 80_000;
+            let json = self.export_model_phy_colliders()?;
+        let meshes: Vec<PhyColliderMesh> =
+            serde_json::from_str(&json).map_err(|e| to_js_err(e, "解析 .phy 碰撞 JSON"))?;
+        let mut out: Vec<serde_json::Value> = Vec::new();
+        let mut planes_total = 0usize;
+        for mesh in &meshes {
+            if out.len() >= MAX_PIECES || planes_total >= MAX_PLANES {
+                break;
+            }
+            for ids in vertex_components(mesh.vertices.len(), &mesh.indices) {
+                if ids.len() < 4 {
+                    continue;
+                }
+                let mut remap: Vec<u32> = vec![u32::MAX; mesh.vertices.len()];
+                let mut verts: Vec<[f64; 3]> = Vec::with_capacity(ids.len());
+                for &i in &ids {
+                    remap[i as usize] = verts.len() as u32;
+                    let v = mesh.vertices[i as usize];
+                    verts.push([v[0] as f64, v[1] as f64, v[2] as f64]);
+                }
+                let tris: Vec<[u32; 3]> = mesh
+                    .indices
+                    .iter()
+                    .filter(|t| remap[t[0] as usize] != u32::MAX)
+                    .map(|t| {
+                        [
+                            remap[t[0] as usize],
+                            remap[t[1] as usize],
+                            remap[t[2] as usize],
+                        ]
+                    })
+                    .collect();
+                if tris.is_empty() {
+                    continue;
+                }
+                let bevels = websurf_phys::phys::hull_bevels::hull_bevels(&verts, &tris);
+                if bevels.box_added + bevels.edge_added == 0 {
+                    continue;
+                }
+                let mut min = [f64::INFINITY; 3];
+                let mut max = [f64::NEG_INFINITY; 3];
+                for v in &verts {
+                    for i in 0..3 {
+                        if v[i] < min[i] {
+                            min[i] = v[i];
+                        }
+                        if v[i] > max[i] {
+                            max[i] = v[i];
+                        }
+                    }
+                }
+                let generated: Vec<[f64; 11]> = bevels
+                    .added
+                    .iter()
+                    .map(|b| {
+                        // 11 个数：平面 [nx,ny,nz,d] + 类别（0=box / 1=edge）+ 来源边两端点
+                        // [ax,ay,az,bx,by,bz]（box bevel 没有来源边，写 0）。
+                        let (kind, a, b2) = match (b.kind, b.edge) {
+                            (websurf_phys::phys::hull_bevels::BevelKind::Edge, Some([a, b2])) => {
+                                (1.0, a, b2)
+                            }
+                            _ => (0.0, [0.0; 3], [0.0; 3]),
+                        };
+                        [
+                            b.plane.normal[0],
+                            b.plane.normal[1],
+                            b.plane.normal[2],
+                            b.plane.dist,
+                            kind,
+                            a[0],
+                            a[1],
+                            a[2],
+                            b2[0],
+                            b2[1],
+                            b2[2],
+                        ]
+                    })
+                    .collect();
+                planes_total += generated.len();
+                out.push(serde_json::json!({
+                    "name": mesh.name,
+                    "min": min,
+                    "max": max,
+                    "box": bevels.box_added,
+                    "edge": bevels.edge_added,
+                    "rejected": bevels.rejected_edge_candidates,
+                    "planes": generated,
+                }));
+            }
+        }
+        serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化 .phy 补面失败"))
+    }
 }

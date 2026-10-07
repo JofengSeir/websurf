@@ -22,14 +22,18 @@
  *
  * 不变量与边界：
  * - `dir` 必须是单位向量：四段都把射线参数 `t` 当距离用（HU）；本文件既不校验也不归一。
- * - mesh 段元数据取自 `mesh.userData.vbsp`（由 `apps/debug/src/renderer/renderer-main.ts`
- *   的 `collectMetadata` 写入）；该字段缺失时 `materialName`/`textureName` 退化为 `''`，
- *   `meshMeta` 退化为 `undefined`。
+ * - mesh 段元数据优先取**合并来源区间表**（`src/renderer-shared/scene/scene-optimizer.ts` 的
+ *   `lookupMergeSource`：合并期按输入顺序记在合并结果几何的 `userData` 上，块 mesh 本身既无
+ *   name 也无 userData，命中它只能靠这张表反查来源）；几何没有表（未被合并的原 mesh）时退回
+ *   `mesh.userData.vbsp`（由 `apps/debug/src/renderer/renderer-main.ts` 的 `collectMetadata`
+ *   写入）。两者都缺时 `materialName`/`textureName` 退化为 `''`、`meshMeta` 退化为 `undefined`；
+ *   名字也取不到时 `meshName` 退化为 `'(unnamed mesh)'`。
  * - 四段全部落空返回 `null`；`scene` 为 `null` 时跳过 mesh 段；`mins` 或 `maxs` 为 `null`
  *   的触发器跳过（`castTriggerAABB` 内以非空断言读这两个字段）。
  */
 
 import * as THREE from 'three';
+import { lookupMergeSource } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import type { Brush } from '../physics/physics/Collision/Collision.types.js';
 import type { PlaneInfo } from '../worker/worker-types.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
@@ -128,6 +132,8 @@ export class PlaneInspector {
 	 *
 	 * 命中集按距离升序，故 `hits[0]` 即本段最近命中；`hit.object` 按 `THREE.Mesh` 断言后
 	 * 直接用（场景里的非 Mesh 对象也参与求交，落在同一断言下）。
+	 * 名字与元数据按 `hit.faceIndex` 从几何的合并来源区间表反查（见 `lookupMergeSource`），
+	 * 查不到才退回 mesh 自身的 `name` / `userData.vbsp`。
 	 * 返回值中 `normal` 取面法线（`hit.face` 为 `null` 时写 `null`），
 	 * `planeDist` 恒为 `null`、`brushIndex` 恒为 `-1`——这两个字段只由碰撞体/触发器分支填。
 	 */
@@ -143,9 +149,12 @@ export class PlaneInspector {
 		if (hits.length === 0) return null;
 
 		const hit = hits[0];
-		// 元数据在装载期由 renderer-main 的 collectMetadata 写到 userData.vbsp 上
 		const mesh = hit.object as THREE.Mesh;
-		const meta = mesh.userData?.vbsp as
+		// 元数据写在合并期：块 mesh 由 renderer-main 的 optimizeScene 新建、不带 name/userData，
+		// 真正被指到的来源几何（名 + collectMetadata 的分类元数据）按 `faceIndex` 存在几何上。
+		// 未被合并的 mesh（多材质烘焙保留、或分块开关关闭）没有这张表，退回读 mesh 自身。
+		const source = lookupMergeSource(mesh.geometry, hit.faceIndex);
+		const meta = (source?.vbsp ?? mesh.userData?.vbsp) as
 			| {
 					isTools?: boolean;
 					isNodraw?: boolean;
@@ -167,9 +176,8 @@ export class PlaneInspector {
 				: null,
 			planeDist: null,
 			brushIndex: -1,
-			// 块 mesh 由 renderer-main 的 optimizeScene 新建且不带 name/userData，
-			// 故两个兜底分支在线上可达
-			meshName: mesh.name || '(unnamed mesh)',
+			// 名字优先级：命中的来源几何名 → mesh 自身名 → 兜底串
+			meshName: source?.meshName || mesh.name || '(unnamed mesh)',
 			materialName: meta?.materialName ?? '',
 			textureName: meta?.textureName ?? '',
 			// 六项分类标记缺一即按 false 填；meta 整体缺失时 meshMeta 写 undefined

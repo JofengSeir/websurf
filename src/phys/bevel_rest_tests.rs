@@ -73,8 +73,8 @@ fn tent(with_bevel: bool) -> Brush {
 
 /// 盒底从脊上方 100 HU 垂直下探到脊下方 100 HU，返回追踪结果。
 fn drop_on_tent(with_bevel: bool) -> crate::phys::world::TraceResult {
-    let mins = [-16.0, 0.0, -16.0];
-    let maxs = [16.0, 72.0, 16.0];
+    let mins = [-X_HALF, 0.0, -X_HALF];
+    let maxs = [X_HALF, 72.0, X_HALF];
     let start = [0.0, H + 100.0, 0.0];
     let end = [0.0, H - 100.0, 0.0];
     let brushes = [tent(with_bevel)];

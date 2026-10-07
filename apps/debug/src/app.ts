@@ -116,6 +116,7 @@ const dom = {
 	// 显示设置（显示设置面板）
 	showSolidsChk: document.getElementById('showSolids') as HTMLInputElement | null,
 	showBevelChk: document.getElementById('showBevel') as HTMLInputElement | null,
+	showPhyBevelChk: document.getElementById('showPhyBevel') as HTMLInputElement | null,
 	brushViewDistanceRange: document.getElementById('brushViewDistance') as HTMLInputElement | null,
 	brushViewDistanceNum: document.getElementById('brushViewDistanceNum') as HTMLInputElement | null,
 	showTriggersChk: document.getElementById('showTriggers') as HTMLInputElement | null,
@@ -445,6 +446,8 @@ async function onSceneReadyUi(
 	if (dom.showSolidsChk) dom.showSolidsChk.checked = config.debug.showSolids;
 	if (dom.brushViewDistanceRange) dom.brushViewDistanceRange.value = String(config.debug.brushViewDistance);
 	if (dom.brushViewDistanceNum) dom.brushViewDistanceNum.value = String(config.debug.brushViewDistance);
+	if (dom.showBevelChk) dom.showBevelChk.checked = config.debug.showBevel;
+	if (dom.showPhyBevelChk) dom.showPhyBevelChk.checked = config.debug.showPhyBevel;
 	if (dom.showTriggersChk) dom.showTriggersChk.checked = config.debug.showTriggers;
 	if (dom.triggerViewDistanceRange) dom.triggerViewDistanceRange.value = String(config.debug.triggerViewDistance);
 	if (dom.triggerViewDistanceNum) dom.triggerViewDistanceNum.value = String(config.debug.triggerViewDistance);
@@ -1644,6 +1647,10 @@ function bindUI(): void {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyTriDebug({ showBevel: enabled });
 	});
+	dom.showPhyBevelChk?.addEventListener('change', (e) => {
+		const enabled = (e.target as HTMLInputElement).checked;
+		applyTriDebug({ showPhyBevel: enabled });
+	});
 	dom.showPhyChk?.addEventListener('change', (e) => {
 		const enabled = (e.target as HTMLInputElement).checked;
 		applyTriDebug({ showPhy: enabled });
@@ -1768,6 +1775,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 		glb: bundle.glbBytes,
 		brushJson: bundle.brushJson,
 		triJson: bundle.triJson,
+		phyBevelsJson: bundle.phyBevelsJson,
 		mosaicManifest: bundle.mosaicManifest,
 		missingTextures: bundle.missingTextures,
 		spawnJson: bundle.spawnJson,

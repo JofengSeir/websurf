@@ -132,6 +132,10 @@ export interface DebugConfig {
   /** 显示 BSP 原生 bevel 辅助碰撞面线框（白，`colliderDebug.setBevelVisible`；可视距离复用 brushViewDistance）。
    * bevel 平面由编译器为"盒子别卡在棱上"生成、不构成实体表面，单独一路以区别于实体面线框。 */
   showBevel: boolean;
+  /** 显示 `.phy` 凸体的**生成补面**线框（品红，`colliderDebug.setPhyBevelVisible`；可视距离复用 `phyViewDistance`）。
+   * 这些面由物理侧按 VBSP `AddBrushBevels` 的判据在解析期生成（`phys::hull_bevels`），补的是
+   * 「盒体扩张」缺掉的 Minkowski 面；与 BSP 原生 bevel（白）分开两路，来源不同。 */
+  showPhyBevel: boolean;
   /** brush 线框可视距离（HU，0 = 全量）：`setDebugFlags` 的第四个实参。 */
   brushViewDistance: number;
   /** 显示传送触发区线框（`setDebugFlags` 的第二个实参）。 */
@@ -245,6 +249,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   debug: {
     showSolids: false,
     showBevel: false,
+    showPhyBevel: false,
     brushViewDistance: 512,
     showTriggers: false,
     triggerViewDistance: 0,

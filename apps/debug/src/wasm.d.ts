@@ -47,6 +47,12 @@ declare module '*/pkg/websurf_wasm.js' {
     export_model_tri_colliders(): string;
     /** 内嵌模型的「自带物理碰撞体」(.phy) 凸包三角形 JSON；须在导出 GLB 之前调用。 */
     export_model_phy_colliders(): string;
+    /**
+     * `.phy` 凸体块的**生成补面** JSON（VBSP `AddBrushBevels` 的移植，只服务第六路线框显示）：
+     * 每块一条 `{ name, min, max, box, edge, rejected, planes: [[nx,ny,nz,d], ...] }`。
+     * 内部复用 `export_model_phy_colliders` 的输出，故同样须在导出 GLB 之前调用。
+     */
+    export_model_phy_bevels(): string;
     /** 出生点 JSON（消费点：`spawn-loader` 与 `buildWorldBundle`）。 */
     parse_spawn_points(): string;
     /** 传送点 JSON（消费点：`apps/debug/src/world/teleport-manager.ts` 建目的地表与触发器表）。 */

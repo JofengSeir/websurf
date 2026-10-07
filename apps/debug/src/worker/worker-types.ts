@@ -358,8 +358,9 @@ export type MainMessage =
 export interface PlaneInfo {
   /**
    * 命中类型：
-   * - 'mesh'：GLB 场景射线命中（取最近交点；`meshName` 取自节点名，命中不到名字时为
-   *   `(unnamed mesh)`），`planeDist` 为 null、`brushIndex` 为 -1；
+   * - 'mesh'：GLB 场景射线命中（取最近交点；`meshName` 取自命中的**来源几何**节点名——块 mesh
+   *   由分块合并新建、本身无名，名字按 `faceIndex` 从合并来源区间表反查；该表也查不到时读
+   *   mesh 自己的 `name`，仍为空则写 `(unnamed mesh)`），`planeDist` 为 null、`brushIndex` 为 -1；
    * - 'solid'：世界实体碰撞 brush 的射线-凸体求交；
    * - 'ladder'：梯子碰撞 brush 的同一套求交；
    * - 'trigger'：传送触发器 AABB。
@@ -377,13 +378,15 @@ export interface PlaneInfo {
    *  下标；'mesh'：恒为 -1。 */
   brushIndex: number;
   // ── mesh 信息（type='mesh'）──
-  /** GLB 节点名（同名节点由加载器追加序号，如 `crate`、`crate#1`）。 */
+  /** 命中的来源几何名（装载期由 GLTFLoader 按 GLB 网格名赋值：BSP 世界面的 glTF 网格无名，
+   *  故名为 `mesh_<网格下标>`，重名再加 `_序号`，如 `mesh_12`、`mesh_12_33321`；模型网格有名字，
+   *  如 `666_clip`）。块 mesh 是合并新建的、本身无名，该值由合并来源区间表按 `faceIndex` 给出。 */
   meshName?: string;
-  /** 材质名（取不到时为空串）。 */
+  /** 材质名（取不到的来源几何/未合并 mesh 上为空串）。 */
   materialName?: string;
-  /** 纹理名（取不到时为空串）。 */
+  /** 纹理名（同上）。 */
   textureName?: string;
-  /** 材质属性标记（网格 userData 缺失时整体为 undefined）。 */
+  /** 材质属性标记（来源几何没有合并元数据时整体为 undefined）。 */
   meshMeta?: {
     isTools: boolean;
     isNodraw: boolean;
@@ -422,6 +425,8 @@ export interface SceneDataMessage {
   brushJson: string;
   /** 模型可视网格的三角形碰撞 JSON（缺省即不带该部分）。 */
   triJson?: string;
+  /** `.phy` 凸体的生成补面 JSON（`export_model_phy_bevels`；只服务第六路线框显示，缺省即不带）。 */
+  phyBevelsJson?: string;
   /** 纹理画质 manifest：`{ 纹理名(小写 basetexture): mosaic 字节码 }` JSON。 */
   mosaicManifest?: string;
   /** 缺失材质纹理列表（VMT/VTF 缺失 → 走占位色）。 */

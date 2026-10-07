@@ -22,10 +22,10 @@
 
 | 用途 | 常量 | 值 | 位置 |
 |---|---|---|---|
-| 生成侧：顶点是否落在某平面上 | `eps_plane` | **0.1** | `apps/debug/crates/wasm/src/lib.rs:2834` |
-| 显示侧：顶点是否落在某平面上 | `FACE_EPS` | **0.5** | `apps/debug/src/renderer/collider-debug.ts:76` |
+| 生成侧：顶点是否落在某平面上 | `eps_plane` | **0.1** | `apps/debug/crates/wasm/src/lib.rs:2890` |
+| 显示侧：顶点是否落在某平面上 | `FACE_EPS` | **0.5** | `apps/debug/src/renderer/collider-debug.ts:95` |
 
-显示侧的 `computeChamferStrips`（`collider-debug.ts:298`-`:346`）用 `FACE_EPS` 收集面上顶点
+显示侧的 `computeChamferStrips`（`collider-debug.ts:307`-`:355`）用 `FACE_EPS` 收集面上顶点
 （`:308`），而物理侧用 `eps_plane` 收集同一批顶点。两者对「哪些顶点算在平面上」的判断不一致。
 
 ### 2.2 显示侧重新判定 chamfer，而不是接收 chamfer 列表
@@ -43,7 +43,7 @@
 - 物理侧有、显示侧判不出 → 该棱的黄框缺失（局部缺边）；
 - 显示侧判成、物理侧没有 → 凭空多出黄框（例如极薄 sliver 面上，其余顶点恰好落在对角线 0.5 HU 内）。
 
-代码自己承认了这两套判据不重合（`collider-debug.ts:262`-`:264`）：
+代码自己承认了这两套判据不重合（`collider-debug.ts:271`-`:273`）：
 
 > 注意判据不完全重合：`computeChamferStrips` 允许 ≥ 2 个顶点加共线校验，而 `orderedFaces` 只按
 > 「顶点数 ≥ 3」筛选，故共线三点以上的 chamfer 平面也会进入线框
@@ -65,12 +65,12 @@ const mdx = (s.a[0] + s.b[0]) / 2 - (brush.min.x + brush.max.x) / 2;
 **brush AABB 中心**（`collider-adapter.ts` 给出的 `min`/`max`）。对 L 形、楔形、长条斜坡这类
 brush，AABB 中心不落在凸包的核心区，于是在不同棱上判反，把 16 HU 的四边形推到凸包**内侧**。
 
-因为线框用 `depthTest: false` 画（`collider-debug.ts:267` 头注），推错的黄框照样可见，
+因为线框用 `depthTest: false` 画（`collider-debug.ts:276` 头注），推错的黄框照样可见，
 表现为「有一段框飘在不该在的位置」。
 
 ### 2.4 四边形尺寸是显示常量，与物理无关
 
-`CHAMFER_QUAD_LEN = 16`（`collider-debug.ts:277`），头注明确「只影响可视化尺寸，不参与任何判定」。
+`CHAMFER_QUAD_LEN = 16`（`collider-debug.ts:286`），头注明确「只影响可视化尺寸，不参与任何判定」。
 在 01 已确认 chamfer 削减体积为零的前提下，这 16 HU 的框**不代表任何碰撞面**，
 只是「这条棱在这里」的一个箭头式标记。
 
@@ -93,7 +93,7 @@ brush，AABB 中心不落在凸包的核心区，于是在不同棱上判反，�
    （或单独一个 chamfer 平面数组），可视化直接读，不再反推。这样 2.1 / 2.2 同时消解。
 2. **朝向改用凸包 centroid**：`computeBrushHull(brush)` 的顶点均值替代 AABB 中心，消解 2.3。
 3. 选 01 的方案 A 时，四边形长度应按真实倒角宽度画，而不是固定 16 HU。
-4. 若短期不动物理，至少把 `collider-debug.ts:258`-`:267` 的头注按实测改写——
+4. 若短期不动物理，至少把 `collider-debug.ts:267`-`:276` 的头注按实测改写——
    当前「既进物理碰撞」「角平分线 chamfer 呈现为贴坡倒角」两句都会让人以为存在真实倒角。
 ## 6. 处置结果（2026-10-05，已完成）
 
@@ -109,5 +109,5 @@ is_real_face（见 [01](01-chamfer-is-not-a-bevel.md) §6 与 plane_is_real_face
 orderedFaces 现在的第一道判据就是 p.isRealFace !== true → continue，
 即「不是物理真实面就不画」成为渲染侧的默认行为，而不是某个开关下的特例。
 
-FACE_EPS（collider-debug.ts:82）保留，但语义已收窄为「把凸包顶点归到已放行的面上」，
+FACE_EPS（collider-debug.ts:95）保留，但语义已收窄为「把凸包顶点归到已放行的面上」，
 不再参与「是不是面」的判断。

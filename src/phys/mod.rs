@@ -23,10 +23,11 @@
 //!   都以 `path = "../../../../src"` 指到本目录。`apps/viewer` 是纯查看器，
 //!   其 `crates/wasm` 只依赖 `websurf-wasm-core`，不含 `websurf-phys`。
 //!
-//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **24 个 `pub fn`**（含 `new`）。
+//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **25 个 `pub fn`**（含 `new`）。
 //! 其中 `set_yaw_pitch`在 `apps/**` 与 `src/**` 内无任何调用点；
 //! `predict`只被 `apps/game/scripts` 的两个验证脚本调用；
-//! `gate_veto_count`与 `debug_trace`同样只服务脚本。
+//! `gate_veto_count`与 `debug_trace`同样只服务脚本；
+//! `debug_hull_stats`是 `.phy` 凸体转 brush 的统计出口（核对接线量级，只读）。
 //!
 //! 零分配支路（**当前未装配**）：`tick_into` 把状态写进本实例固定缓冲 `state_out`，
 //! JS 侧经 `state_out_ptr`在 wasm 线性内存上建 `Float64Array` 视图直读，不构造
@@ -51,6 +52,13 @@
 pub mod player;
 pub mod teleport;
 pub mod world;
+
+/// VBSP `AddBrushBevels` 的移植：给单块凸体补齐「盒体扩张」所需的 box / edge bevel 平面
+/// （`.phy` 凸体要走 brush 平面表追踪器时的平面表来源）。
+pub mod hull_bevels;
+
+/// `.phy` 网格 → 凸体 brush：按连通分量拆块、逐块生成补面、转成 `Brush`（走 brush 追踪器）。
+pub mod phy_hulls;
 
 /// 种子面 v2：实例状态的可序列化投影（`src/phys/seed.rs` 的 `SEED_SCHEMA_VERSION = 2`），
 /// 供 scratch 实例从权威实例单向播种，不做任何反向写入。
@@ -77,6 +85,13 @@ mod contact_push_tests;
 /// BSP 原生 bevel 承担「刀刃脊可站」的回归（2 项）：停靠面由 bevel 决定，撤掉即楔进斜面。
 #[cfg(test)]
 mod bevel_rest_tests;
+/// `.phy` 凸体补面（`hull_bevels`）回归（3 项）：VBSP 两代 bevel 生成后盒停在脊线上，
+/// 撤掉生成即回到「按斜面扩张提前触停」的虚浮停位。
+#[cfg(test)]
+mod hull_bevel_tests;
+/// `.phy` 网格拆块 + 转凸体 brush 的门回归（3 项）：多块并集拆开后脊可站、非凸块退回三角形路径。
+#[cfg(test)]
+mod phy_hull_gate_tests;
 
 #[cfg(test)]
 mod slope_speed_tests;
@@ -142,6 +157,9 @@ pub struct PhysWorld {
     noclip: bool,
     /// 是否已成功执行过 `build_world`。为 false 时 `tick` / `tick_into` / `predict` 直接返回现状。
     ready: bool,
+    /// `build_world` 里 `.phy` 凸体转 brush 的统计（只读诊断，`debug_hull_stats` 出口）：
+    /// `[转成 brush 的块数, 生成的 box bevel 张数, 生成的 edge bevel 张数, 退回三角形路径的块数]`。
+    hull_stats: [usize; 4],
     /// 最近一次物理事件（传送/死亡）。一次 `step_core` 至多产生一个，
     /// 由 `take_event` 取走后置空；不取则被下一次事件覆盖。
     event: Option<PhysEvent>,
@@ -183,6 +201,7 @@ impl PhysWorld {
             death_y: -100_000.0,
             noclip: false,
             ready: false,
+            hull_stats: [0; 4],
             event: None,
             state_out: [0.0; 22],
         }
@@ -241,7 +260,57 @@ impl PhysWorld {
 
         // 2. tri → World.tri_meshes（紧凑数组 [x,y,z]）
         let tri_meshes = parse_tri_meshes(tri_json)?;
-        self.world.tri_meshes = tri_meshes;
+
+        // 2.5 `.phy` 凸体块 → brush：按连通分量把「一只模型的全部凸体块拼成一个 mesh」拆回块，
+        //     逐块生成 VBSP 补面（box / edge bevel）后走既有 brush 平面表追踪器 —— 这样模型尖脊
+        //     与 brush 刀脊同构：盒被过脊的补面接住，而不是被两侧斜面的外推面架在空中。
+        //     凸性不达标 / 面数 < 4 的块保持走三角形路径（把它的三角形原样留下）。
+        let mut leftover_meshes: Vec<TriMesh> = Vec::new();
+        let mut hull_brushes = 0usize;
+        let mut hull_box_bevels = 0usize;
+        let mut hull_edge_bevels = 0usize;
+        let mut hull_non_convex = 0usize;
+        for mesh in tri_meshes {
+            let mut brushes: Vec<Brush> = Vec::new();
+            let mut leftover_tris: Vec<[u32; 3]> = Vec::new();
+            for piece in phy_hulls::pieces_of_mesh(&mesh) {
+                if piece.convex {
+                    hull_brushes += 1;
+                    hull_box_bevels += piece.box_added;
+                    hull_edge_bevels += piece.edge_added;
+                    brushes.push(Brush {
+                        planes: piece.planes,
+                        min: piece.min,
+                        max: piece.max,
+                    });
+                } else {
+                    hull_non_convex += 1;
+                    leftover_tris.extend_from_slice(&piece.tris);
+                }
+            }
+            self.world.solids.extend(brushes);
+            if !leftover_tris.is_empty() {
+                leftover_meshes.push(TriMesh {
+                    name: mesh.name.clone(),
+                    vertices: mesh.vertices.clone(),
+                    indices: leftover_tris,
+                    min: mesh.min,
+                    max: mesh.max,
+                });
+            }
+        }
+        if hull_brushes > 0 || hull_non_convex > 0 {
+            eprintln!(
+                "[phys] .phy 凸体 → brush: 块={hull_brushes}（box bevel={hull_box_bevels} edge bevel={hull_edge_bevels}）；非凸/开集/退化退回三角形={hull_non_convex}",
+            );
+        }
+        self.hull_stats = [
+            hull_brushes,
+            hull_box_bevels,
+            hull_edge_bevels,
+            hull_non_convex,
+        ];
+        self.world.tri_meshes = leftover_meshes;
 
         // 3. 空间索引
         self.world.build_index();
@@ -510,6 +579,18 @@ impl PhysWorld {
             _ => None,
         };
         player::stuck_probe(&mut self.world, &self.player, at).to_vec()
+    }
+
+    /// `.phy` 凸体转 brush 的只读诊断：JSON 数组 `[块数, box bevel, edge bevel, 退回三角形路径的块数]`。
+    ///
+    /// 数据源是 `build_world` 第 2.5 步的统计（每次 `build_world` 覆盖）。存在的理由：`eprintln!`
+    /// 在 wasm 侧不落到 JS 控制台，而"接线后到底有多少块走了 brush 平面表、补面量级多大"需要可查。
+    #[wasm_bindgen]
+    pub fn debug_hull_stats(&self) -> String {
+        format!(
+            "[{},{},{},{}]",
+            self.hull_stats[0], self.hull_stats[1], self.hull_stats[2], self.hull_stats[3]
+        )
     }
 
     /// 取玩家**当前**碰撞箱的六个分量：`[min_x, min_y, min_z, max_x, max_y, max_z]`。
