@@ -80,7 +80,7 @@ pub struct MaterialData {
     /// 的材质枚举，需要按原始文本的着色器名区分处理，否则会被当成普通不透明材质。
     /// 渲染端据 `extras.vbsp_wireframe` 置 `material.wireframe`
     /// （`apps/game/src/renderer/lightmap-shader.ts` 的 `copyMaterialRenderState`）。
-    pub wireframe: bool,
+    pub wireframe: bool, pub texture_absent: bool, // 声明了 $basetexture 但 VTF 取不到 ⇒ 缺失观测计入（「本无 basetexture」不计）
 }
 
 impl Default for MaterialData {
@@ -95,7 +95,7 @@ impl Default for MaterialData {
             translucent: false,
             no_cull: false,
             transform: None,
-            wireframe: false,
+            wireframe: false, texture_absent: false,
         }
     }
 }
@@ -529,7 +529,7 @@ pub(crate) fn load_material_bsp(
         color: [255; 4],
         name: name.to_string(),
         path: vmt_path,
-        texture: texture_data,
+        texture_absent: material.base_texture().is_some() && texture_data.is_none(), texture: texture_data,
         alpha_test,
         translucent: translucent | glass,
         no_cull: material.no_cull(),

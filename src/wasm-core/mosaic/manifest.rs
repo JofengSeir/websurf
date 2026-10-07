@@ -44,15 +44,17 @@ pub fn collect_face_texture_names(bsp: &Bsp) -> Vec<String> {
 
 /// 逐个试探纹理能否加载，返回**加载失败**的材质名列表，顺序同 `collect_face_texture_names`。
 ///
-/// 判据是 `load_material_bsp` 返回 `Err`，涵盖缺 VMT、缺 VTF、解码失败等全部失败形态
-/// （本函数不区分具体原因）。与 `build_mosaic_manifest` 互补——后者只收成功的。
+/// 判据有两条：`load_material_bsp` 返回 `Err`（缺 VMT、解码失败等），或返回 `Ok` 但
+/// `MaterialData.texture_absent` 为真（`$basetexture` 指向的 `.vtf` 取不到）。
+/// 「本就没有 `$basetexture`」（Water）不算缺失。与 `build_mosaic_manifest` 互补。
 pub fn collect_missing_textures(bsp: &Bsp) -> Vec<String> {
     let names = collect_face_texture_names(bsp);
     let options = ConvertOptions::default();
     let mut missing = Vec::new();
     for name in &names {
-        if load_material_bsp(name, &[String::new()], bsp, &options).is_err() {
-            missing.push(name.clone());
+        match load_material_bsp(name, &[String::new()], bsp, &options) {
+            Ok(m) if !m.texture_absent => {}
+            _ => missing.push(name.clone()),
         }
     }
     missing

@@ -39,6 +39,8 @@
 
 **viewer 天空盒**：`apps/viewer` 原先 `scene.background` 恒为纯色，现已复用同一套 `src/renderer-shared/environment/skybox.ts` 逻辑显示地图 2D 天空盒；viewer 的 wasm 同样补上 `parse_entities` / `read_pakfile_file` / `decode_vtf_to_png` 三个导出。至此**三工程**（debug / game / viewer）天空盒口径一致。
 
+**缺失纹理观测**：`collect_missing_textures` 原先只统计 VMT 解析失败的材质 ——「VMT 解析成功但贴图取不到」被静默回退、不计缺失；现按 `MaterialData.texture_absent` 一并计入（`$basetexture` 声明的 VTF 缺文件或解不出；「本就没有 `$basetexture`」如 Water 仍不算缺失）。`surf_boreas` 缺失数 0 → 5，`surf_666` 46 → 47。
+
 **文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范），篇目见 `README.md`「文档地图」与 `documents/index.md`。
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。

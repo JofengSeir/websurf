@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07 已触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **419**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **420**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -203,7 +203,7 @@
 - **T-407** `world/types.ts` 的 `rootNode` 字段　`shared`
 - **T-408** `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de…　`shared`
 - **T-503** mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效　`shared`
-- **T-418** 【W9·补强】`collect_missing_textures` 只报 VMT 解析 `Err`（VTF 缺失被静默回退、不计缺失）　`shared`
+- **T-419** 贴图取不到：VTF 格式（Bgra4444 / Ia88）不受支持 + 两条 VTF 解码路径判定不一致（boreas 4+1 / 666 +1）　`shared`
 
 ### 已取证待立项（2）
 
@@ -396,7 +396,8 @@
 | T-415 | 【W7 核查】3D 天空盒（sky_camera 缩放区）在 surf_boreas 无几何可渲染：sky_camera three=(1840,-16064,-6208) 在世界包围盒 y≥-14783 之外 1281 HU，且 3000 HU 内 0 个网格中心 ⇒ 无需行动（2D 天空盒已由 T-412 覆盖） | 缺陷 | shared | 已结案 | progress/monthly/2026-10-5.md:17 | 本行即全部 | 判据：@BT@sky_camera@BT@ 存在且实测「3000 HU 内 0 网格中心 + 包围盒外 1281 HU」；对照 surf_null / surf_666 无 sky_camera、surf_concretejungle_fix 的相机在包围盒内（几何与地图原点混同 ⇒ 无法区分）。其它图若要 3D 天空盒需另立启发式切分任务 | — |
 | T-416 | 【W2b/game】game 工程无天空盒（`scene.background` 恒为纯色 0x222222）：game wasm 未导出 parse_entities / read_pakfile_file / decode_vtf_to_png ⇒ 无法复用 renderer-shared 的 skybox 逻辑 | 缺陷 | shared | 已结案 | apps/game/src/app.ts:514 | 本行即全部 | 判据：@BT@node .tmp/mapsurvey/verify-game-skybox.mjs test/maps/surf_boreas.bsp@BT@ ⇒ faces=6 且 slots=px,nx,py,ny,pz,nz；@BT@cd apps/game && npm run typecheck@BT@ exit 0；@BT@cd apps/game && npm run build:wasm@BT@ exit 0（新导出已现于 pkg d.ts）。viewer 侧（W2c）待做 | — |
 | T-417 | 【W2c】viewer 工程无天空盒：背景恒为纯色，且 viewer 的 wasm 未导出 parse_entities / read_pakfile_file / decode_vtf_to_png | 缺陷 | viewer | 已结案 | apps/viewer/src/core/bsp.ts:131 | 本行即全部 | 判据：① viewer pkg 的 d.ts 出现三导出；② @BT@node .tmp/mapsurvey/verify-viewer-skybox.mjs test/maps/surf_boreas.bsp@BT@ ⇒ faces=6 且槽序 px,nx,py,ny,pz,nz；③ @BT@cd apps/viewer && npm run typecheck@BT@ exit 0。做法可直接照 T-416（EOF 独立 impl 块保锚点） | — |
-| T-418 | 【W9·补强】`collect_missing_textures` 只报 VMT 解析 `Err`：「VMT 解析成功但 .vtf 不在包内」在 materials.rs 静默回退、不计缺失 ⇒ 缺失观测有盲区（详见任务书 W9） | 缺陷 | shared | 待修 | src/wasm-core/mosaic/manifest.rs:49 | progress/monthly/2026-10-5.md | 判据：修后 @BT@collect_missing_textures@BT@ 把「basetexture 指向的 .vtf 不在 pakfile」也计入缺失；@BT@node .tmp/mapsurvey/probe2.mjs test/maps/surf_boreas.bsp@BT@ 缺失数 ≥ 修前且新增项可逐条回溯到具体材质；surf_666 不回归 | — |
+| T-418 | 【W9·补强】`collect_missing_textures` 只报 VMT 解析 `Err`：「VMT 解析成功但 .vtf 不在包内」在 materials.rs 静默回退、不计缺失 ⇒ 缺失观测有盲区（详见任务书 W9） | 缺陷 | shared | 已结案 | src/wasm-core/mosaic/manifest.rs:49 | 本行即全部 | 判据：修后 @BT@collect_missing_textures@BT@ 把「basetexture 指向的 .vtf 不在 pakfile」也计入缺失；@BT@node .tmp/mapsurvey/probe2.mjs test/maps/surf_boreas.bsp@BT@ 缺失数 ≥ 修前且新增项可逐条回溯到具体材质；surf_666 不回归 | — |
+| T-419 | 贴图仍取不到的 5 个材质（surf_boreas）：4 个 VTF 格式不受支持（Bgra4444 / Ia88）、1 个 VTF 未打包；另有 surf_666 的 pk02_floor10_a 被 texture_utils 解出而 GLB 路径（load_texture_bsp 走 vtf crate）取不到 ⇒ 两条 VTF 解码路径判定不一致 | 缺陷 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/materials.rs:583 | progress/monthly/2026-10-5.md | 判据：@BT@node .tmp/mapsurvey/verify-w9.mjs test/maps/surf_boreas.bsp@BT@ 的 vtfDecodeFail 由 4 降为 0，或明确列为不支持并文档化；两条解码路径对同一 VTF 判定一致 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-2 |
