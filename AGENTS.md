@@ -25,7 +25,7 @@
 4. **裁决记录**：owner 的结论写进那一行（或它的详情页），不要只留在对话里——看板是唯一可回查处。
 5. **不必动看板的情况**：纯格式/拼写、依赖升级、注释措辞，以及其他**不改变既有结论、也不新增结论**的改动——但提交信息要写明「无待办影响」。
 6. **过程产物**：计划与任务书进 `.tmp/`；进展与历史进 `progress/`（**按月分文件**：`progress/monthly/YYYY-MM.md`；**卷必须登记在 `progress/index.md`**，并在 §7.1 索引补一行）；不回写正文。
-7. **体量**：看板超过头注阈值（80 KB 或 300 条）时，按头注的分卷规则处理「已记录 + 已结案」。
+7. **体量**：看板超过头注阈值（**96 KB 或 300 条**）时按头注的两级处理（先分卷「已记录 + 已结案」，仍超则逐行精简）——细则见 §0.4。
 
 > 第 3、5 条由 CI 的**软提示**（`node src/scripts/check-board-touch.mjs`）提醒：改了 `src/` / `apps/` / `documents/` 却没动 `TODO.md`、提交信息也没有 `T-###` 或「无待办影响」时打印警告。**owner 2026-10-07 裁决：只提示、不拦提交**（不上硬门）。
 
@@ -54,7 +54,7 @@
 | 类别 | 文件 | 上限 | 超限怎么办 |
 |---|---|---|---|
 | **入口** | `AGENTS.md` | **32 KB** | 只留规则与指针，明细移 `progress/` |
-| **控制层** | `TODO.md` | **96 KB 或 300 条** | 「已记录 + 已结案」分卷到 `progress/board/`（**未结项永不分卷**） |
+| **控制层** | `TODO.md` | **96 KB 或 300 条** | ①「已记录 + 已结案」分卷到 `progress/board/`（**未结项永不分卷**）；②仍超则逐行精简（长证据/判据转「见详情」，事项 ≤ 120 字符） |
 | | `OWNER.md` | **16 KB** | 已决行按季度分卷到 `progress/owner/` |
 | **规范层** | `documents/norms/**`、根 `README`/`CHANGELOG`/`CONTRIBUTING`/`SECURITY` | **48 KB** | 按主题拆篇，登记进 `documents/index.md` |
 | **过程记录** | `progress/**` 其余 | **48 KB** | 按时间/主题切卷，登记进 `progress/index.md` |
@@ -89,7 +89,7 @@
 | 仓库根 `*.md` | 本文件（§0 工作流核心，唯一入口）+ `README.md` + `TODO.md`（待办看板）+ `OWNER.md`（owner 决策队列）+ `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`；后四篇于 2026-09-22 由旧文档**合并重建**，细节源头为 git 历史 |
 | `documents/` | **45 篇**（2026-10-07 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
-| `progress/` | **过程记录**（不作事实来源），**导航见 `progress/index.md`**：`monthly/`（月度进展逐条原文，2026-10 已按 48 KB 上限切 4 卷）、`board/`（看板分卷：已记录 + 已结案）、`open-issues/01..07`（取证原文）、`pending-detail.md`（原 §7.3 台账原文）、`wg-status.md`（工作组状态）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由） |
+| `progress/` | **过程记录**（不作事实来源），**导航见 `progress/index.md`**：`monthly/`（月度进展逐条原文；2026-09 切 2 卷、2026-10 切 4 卷）、`board/`（看板分卷：已记录 + 已结案）、`open-issues/01..07`（取证原文）、`pending-detail.md`（原 §7.3 台账原文）、`wg-status.md`（工作组状态）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由） |
 | `.archive/` | **已删除（2026-10-07 owner 裁决）**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇）已从工作区移除，原文仅存 git 历史；`.gitignore` 保留 `**/.archive/` 规则作归档位 |
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
