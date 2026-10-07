@@ -105,3 +105,29 @@
 8. **剔除距离由场景对角线唯一确定**：`apps/debug/src/renderer/lod-manager.ts:155` 起三行给出上限、下限与默认值的算式，面板滑块只能在该上限内改写（`apps/debug/src/renderer/lod-manager.ts:276`）。
 9. **渲染轨迹采样与渲染节点一一对应**：同一帧同一三元组先落 `PathRecorder` 渲染节点、再写共享内存采样槽，`i0` 取同一次自增（`apps/debug/src/renderer/renderer-main.ts:674` 与 `apps/debug/src/renderer/renderer-main.ts:678`）。
 10. **权威帧版本号单调**：`va` 由发布方单调递增（`apps/debug/src/worker/worker-types.ts:248`），主线程按它去重（`apps/debug/src/renderer/renderer-main.ts:651`）。
+
+---
+
+## 阅读顺序与事实来源（并入原 README.md）
+
+> 本子树只描述 `apps/debug` 这一受控工程。全部结论来自当前工作区的源码、脚本与配置，逐条带 `文件:行号` 锚点。
+`documents/debug/differences.md` 之外的各篇都含一节 `## 已知缺口`（`README.md` 与 `overview.md` 除外：前者是导航，后者的不变量与缺口在对应 implementation 篇里逐条展开）。
+## 事实来源
+
+本次重编以代码为唯一来源。本子树的主要入口文件：
+
+- `apps/debug/package.json:7` 的 `scripts`：dev 端口、构建链与全部门禁脚本的调用名。
+- `apps/debug/src/app.ts:266` 的 `main`：主线程装配入口（DOM 句柄 → 共享缓冲 → Worker → 渲染器 → 面板）。
+- `apps/debug/src/renderer/renderer-main.ts:615` 的 `tick`：一帧内的物理 / 剔除 / 可视化 / 渲染顺序。
+- `apps/debug/src/worker/main.ts:455` 的 `createAuthLoop` 装配：Worker 侧权威物理的唯一推进者。
+- `apps/debug/src/input/input-recorder.ts:166` 的 `InputRecorder`：录制 / 回放的数据模型与失败语义。
+- `apps/debug/crates/wasm/src/lib.rs:534` 的 `impl BspProcessor`：本工程 WASM 绑定层的导出面。
+- `apps/debug/web/index.html:481` 起的页面骨架：全部 DOM 句柄的来源。
+- `apps/debug/scripts/build-dist.mjs:75` 的 `multi` 开关：`single 产物` / `multi 产物` 两种形态的分岔点。
+
+## 阅读顺序
+
+1. `documents/debug/overview.md` —— 先建立「这个工程由哪些目录承担什么」的地图。
+2. `documents/debug/sequences.md` —— 再看这些模块在时间轴上怎么串起来（启动、帧链、消息、回退）。
+3. `documents/debug/implementation/*.md` —— 按目录逐篇深入，每篇末尾的「已知缺口」列出当前不可用的路径。
+4. `documents/debug/differences.md` —— 最后对照 `apps/game` 与 `apps/viewer`，确认三工程的口径分界。

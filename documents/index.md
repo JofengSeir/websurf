@@ -6,7 +6,7 @@
 
 | 文档 | 回答什么 |
 |---|---|
-| [`../README.md`](../README.md) | 仓库总览：受控范围、目录结构、快速开始、构建链、验证与门禁、已知缺口摘要（状态见 TODO.md） |
+| [`../README.md`](../README.md) | 仓库总览：受控范围、目录结构、快速开始、构建链、验证与门禁、已知缺口摘要 |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | 当前工作区状态与各工程的版本声明 |
 | [../TODO.md](../TODO.md) | **待办看板**：唯一待办与状态来源（T-###、六值状态、证据锚点） |
 | [`index.md`](index.md) | 本页：全部文档的导航 |
@@ -23,13 +23,12 @@
 
 ## 应用工程
 
-三棵子树的四篇顶层文档同名同义：`README.md`（本子树范围与阅读顺序）、`overview.md`（工程定位 / 目录职责 / 依赖方向 / 构建产物与脚本 / 启动链 / 不变量）、`sequences.md`（启动时序、帧链、消息与通道、异常与回退）、`differences.md`（与另外两个工程的**实测**差异）。
+三棵子树的**三篇**顶层文档同名同义：overview.md（工程定位 / 目录职责 / 依赖方向 / 构建产物与脚本 / 启动链 / 不变量）、sequences.md（启动时序、帧链、消息与通道、异常与回退）、differences.md（与另外两个工程的**实测**差异）；apps/viewer 另有第四篇 replay-vs-dem.md（两条导入链路的产物与消费面差异）。原各子树 README.md 的范围与阅读顺序已并入对应 overview.md。
 
 ### `apps/debug`
 
 | 文档 | 回答什么 |
 |---|---|
-| [`debug/README.md`](debug/README.md) | 本子树范围、事实来源、阅读顺序 |
 | [`debug/overview.md`](debug/overview.md) | 工程定位、目录职责、依赖方向、构建产物与脚本、启动链、不变量 |
 | [`debug/sequences.md`](debug/sequences.md) | 启动时序与一帧内的链路、线程间消息、异常与回退路径 |
 | [`debug/differences.md`](debug/differences.md) | 与 `apps/game`、`apps/viewer` 的实测差异（两侧锚点） |
@@ -47,7 +46,6 @@
 
 | 文档 | 回答什么 |
 |---|---|
-| [`game/README.md`](game/README.md) | 本子树范围、事实来源、阅读顺序 |
 | [`game/overview.md`](game/overview.md) | 工程定位、目录职责、依赖方向、构建产物与脚本、启动链、不变量 |
 | [`game/sequences.md`](game/sequences.md) | 启动时序与一帧内的链路、线程间消息、异常与回退路径 |
 | [`game/differences.md`](game/differences.md) | 与 `apps/debug`、`apps/viewer` 的实测差异（两侧锚点） |
@@ -66,7 +64,6 @@
 
 | 文档 | 回答什么 |
 |---|---|
-| [`viewer/README.md`](viewer/README.md) | 本子树范围、事实来源、阅读顺序 |
 | [`viewer/overview.md`](viewer/overview.md) | 工程定位、目录职责、依赖方向、构建产物与脚本、启动链、不变量 |
 | [`viewer/sequences.md`](viewer/sequences.md) | 启动时序与一帧内的链路、线程间消息、异常与回退路径 |
 | [`viewer/differences.md`](viewer/differences.md) | 与 `apps/debug`、`apps/game` 的实测差异（两侧锚点） |

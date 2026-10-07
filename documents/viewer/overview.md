@@ -101,3 +101,35 @@
 | Worker 回传后本地 buffer 失效 | `t` / `pos` / `ang` 的 buffer 必进 transfer 列表，`vel` / `buttons` 存在才加 | `apps/viewer/src/worker/main.ts:88` 到 `apps/viewer/src/worker/main.ts:90` |
 | 记录播放基准 = 帧自身坐标 | 解码只做轴序/朝向映射，平移与旋转只在 `RuleConfig.transform` 存在且非恒等时叠加 | `apps/viewer/src/replay/build.ts:29`、`apps/viewer/src/replay/types.ts:55` |
 | 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:180` |
+
+---
+
+## 阅读顺序与事实来源（并入原 README.md）
+
+> 本子树只覆盖 `apps/viewer`（BSP 地图预览 + Shavit `.replay` 记录 / Source `.dem` 录像两条链路的回放查看器）。全部结论以当前源码、构建脚本与配置为唯一来源；引用代码一律写成「相对仓库根路径:行号」并同时给出符号名。
+> 术语：本工程**无权威物理**，只有「离线解析（`websurf-wasm-core`）」；不含「Worker 权威物理」与「主线程渲染物理（`predPhys`）」。
+主题划分取自代码目录本身：`apps/viewer/src` 下实际存在 `core/`、`replay/`、`ui/`、`renderer/`、`worker/` 五个子目录，另有入口文件 `app.ts` 与类型入口 `wasm.d.ts`（合为一篇 `app.md`），工程级资产 `crates/wasm/`、`scripts/`、`test/`、`web/`、`*.cmd` 各成一节或独立成篇。
+## 事实来源
+
+本子树用到的入口文件（读码起点，全部实测读过）：
+
+| 入口 | 锚点 | 提供了什么 |
+|---|---|---|
+| 工程清单 | `apps/viewer/package.json:7` | 12 个 script（含 `test:sessions` → `npm run test:sessions`：`apps/viewer/test/session-sep.mjs` 驱动的记录 / 录像两条链路**分离**端到端 CDP 回归，缺夹具 / 浏览器时 loud skip）、依赖面、引擎要求、dev 端口 8100 |
+| 主线程入口 | `apps/viewer/src/app.ts:48` | 画布获取、装配顺序、帧循环、对外 `globalThis.viewer` 接口 |
+| 地图加载 | `apps/viewer/src/core/bsp.ts:81` | `ensureWasm` 三条取值路径、`loadBspFile` 三步顺序 |
+| 记录面板 | `apps/viewer/src/replay/panel.ts:311` | 导入入口 `runImport`、规则持久化、映射切换与变换微调 |
+| 解析 Worker | `apps/viewer/src/worker/main.ts:46` | `ctx.onmessage` → `handle` → 带 transfer 列表回包 |
+| WASM 导出层 | `apps/viewer/crates/wasm/src/lib.rs:426` | `BspProcessor::new` 与三个方法 |
+| 打包脚本 | `apps/viewer/scripts/build-dist.mjs:223` | single / multi 两种产物形态与保留清单 |
+| 页面骨架 | `apps/viewer/web/index.html:12` | 全部 DOM id 与脚本标签形态 |
+
+共享层只被本工程**消费**（不修改）：`src/ts-shared/wasm/loader.ts`、`src/ts-shared/phys/angles.ts`、`src/ts-shared/phys/constants.ts`、`src/wasm-core/**`——消费点见 `documents/viewer/overview.md` 的「依赖方向」。
+
+## 阅读顺序
+
+1. `documents/viewer/overview.md` —— 先建立工程边界与构建面的整体认识。
+2. `documents/viewer/sequences.md` —— 再看「谁在什么时候调用谁、数据落在哪个结构上」。
+3. `documents/viewer/implementation/*.md` —— 逐主题看模块职责、导出清单与已知缺口；`replay.md` 是本工程体量最大的一条链路，建议在 `core.md` 之后读。
+4. `documents/viewer/replay-vs-dem.md` —— 若要改「导入产物 → 展示」这一段（新增展示项、拆链路、动 `Clip` 契约），先读它：它把两条链路各自的产物与消费面、以及当前缝合点逐条钉死。
+5. `documents/viewer/differences.md` —— 最后读，用于把本工程与另两个工程区分开（每条差异都带两侧锚点，不做跨工程类推）。

@@ -91,3 +91,31 @@
 - **装配顺序**：GLB 挂载 → 摘除 punctual 光源 → 施加 lightmap → 分块合并 → 受光材质终扫 → 预编译（`apps/game/src/renderer/renderer-main.ts:279`、`:287`、`:293`、`:308`，摘灯与清根 rotation 在 scene-builder.ts`）；顺序被注释与实现共同固定，例如光源必须在 `scene.add` 之前摘除（`src/renderer-shared/scene/scene-builder.ts:85`）。
 - **加载进度单调**：阶段名到百分比的映射是常量表（`apps/game/src/app.ts:679`），覆盖层用补间朝目标逼近（`apps/game/src/app.ts:727`）；失败时覆盖层转错误态而非直接消失（`apps/game/src/app.ts:803`）。
 - **键位单一来源**：HUD 标签与面板读同一份 `loadKeymap()`（`apps/game/src/app.ts:70` 注册刷新、`apps/game/src/app.ts:462` 写标签），改键后两边同步变化。
+
+---
+
+## 阅读顺序与事实来源（并入原 README.md）
+
+## 事实来源
+
+本子树全部结论取自当前源码，入口清单如下（行号随文件变动会漂，读时以符号名为准）：
+
+- `apps/game/package.json` 的 `scripts`（`apps/game/package.json:7`）：dev 端口、构建链与三个 node 冒烟脚本。
+- `apps/game/src/app.ts` 的 `main`（`apps/game/src/app.ts:94`）：主线程装配全流程，文件末 `void main()` 触发。
+- `apps/game/src/config.ts` 的 `DEFAULT_CONFIG`（`apps/game/src/config.ts:176`）：七段配置的唯一默认值来源。
+- `apps/game/src/worker/main.ts` 的 `createAuthLoop`（`apps/game/src/worker/main.ts:451`）：Worker 权威物理的装配点。
+- `apps/game/src/renderer/renderer-main.ts` 的 `tick`（`apps/game/src/renderer/renderer-main.ts:721`）：一帧内的物理、相机、剔除与绘制。
+- `apps/game/src/panel/panel-controller.ts` 的 `PanelController`（`apps/game/src/panel/panel-controller.ts:45`）：面板控件接线与偏好持久化。
+- `apps/game/src/input/input-bridge.ts` 的 `sendConfig`（`apps/game/src/input/input-bridge.ts:41`）：面板参数的双端下发口。
+- `apps/game/web/index.html` 的 `canvas#preview`（`apps/game/web/index.html:27`）：页面外壳与全部挂载点。
+
+共享层侧只写「game 如何消费」三个入口：`src/ts-shared/auth/worker-dispatch.ts` 的 `createWorkerDispatch`（`src/ts-shared/auth/worker-dispatch.ts:207`）、`src/ts-shared/auth/shared-state.ts` 的 `createMainSharedState`（`src/ts-shared/auth/shared-state.ts:1022`）、`src/ts-shared/phys/world-builder.ts` 的 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:150`）。
+
+## 阅读顺序
+
+1. `documents/game/overview.md`：先建立「这个工程由哪些目录构成、产物是什么、谁依赖谁」的骨架。
+2. `documents/game/sequences.md`：再看启动时序与一帧内的数据流，含 main↔Worker 的消息与载荷字段。
+3. `documents/game/implementation/*.md`：按模块读细节；每篇末节「已知缺口」逐条给锚点。
+4. `documents/game/differences.md`：最后看与另两个工程的实测差异，避免把某个工程的实现当成三工程通例。
+
+术语口径与另两棵子树对齐：共享物理 crate 写 `websurf-phys`（`src/phys/**`）；本工程的权威物理写「Worker 权威物理」；主线程物理写「主线程渲染物理（`predPhys`）」；通道写「SAB 通道」与「postMessage 回退」；产物形态写「single 产物」与「multi 产物」。

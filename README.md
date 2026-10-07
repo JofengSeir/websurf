@@ -57,7 +57,6 @@ npm run dev            # python ../../src/serve.py 8080 .
 | `apps/<app>/scripts/**` | 各工程构建与验收脚本（含 `build-dist.mjs`） |
 | `test/maps/**`、`test/replay/**`、`test/project/**` | 本地数据：地图夹具、记录 / 录像夹具、DEM 调研资料（**均 gitignore，不入库**） |
 | `documents/**` | 文档（见 §7） |
-| `.archive/**` | 旧文档归档区，**不作事实来源** |
 
 ## 4. 构建链
 
@@ -97,20 +96,15 @@ CI 三个 workflow（`.github/workflows/`）：
 
 ## 7. 文档地图
 
-| 文档 | 回答什么 |
-|---|---|
-| [TODO.md](TODO.md) | **待办看板**：唯一待办与状态来源（T-###） |
-| [documents/norms/agent-workflow.md](documents/norms/agent-workflow.md) | **跨工具 agent 工作流**：入口矩阵、开工流程、禁令与自检门禁 |
-| [documents/index.md](documents/index.md) | **文档总导航**（按实际文件树） |
-| [architecture/overview.md](documents/architecture/overview.md) | 受控范围、共享层构成、依赖方向、入口锚点、启动链与帧链、不变量 |
-| [phys/overview.md](documents/phys/overview.md) | 共享物理：世界容器、步进、玩家语义、传送、种子面 |
-| [wasm-core/overview.md](documents/wasm-core/overview.md) | 解析层：BSP/GLB/材质/mosaic 的模块职责与主流程 |
-| [ts-shared/overview.md](documents/ts-shared/overview.md) | TS 共享层：接口锚点、主流程、不变量、未接线清单 |
-| [materials/overview.md](documents/materials/overview.md) | 材质与纹理链路 |
-| [debug/README.md](documents/debug/README.md) · [game/README.md](documents/game/README.md) · [viewer/README.md](documents/viewer/README.md) | 三个工程的文档子树入口 |
-| [norms/annotation-and-verification.md](documents/norms/annotation-and-verification.md) | 注释书写规范与验收判据 |
-| [AGENTS.md](AGENTS.md) | 当前任务的 Agent 行为规范与进度纪要 |
+完整导航见 [documents/index.md](documents/index.md)（按实际文件树维护）；**待办与状态只在一处**：根 [TODO.md](TODO.md)。
 
+| 入口 | 回答什么 |
+|---|---|
+| [TODO.md](TODO.md) | **唯一待办看板**：状态、类型、归属、证据锚点、详情 |
+| [documents/index.md](documents/index.md) | 全部文档的总导航（共享层 / 三工程子树 / 规范 / 过程记录） |
+| [documents/norms/agent-workflow.md](documents/norms/agent-workflow.md) | **跨工具 agent 工作流**：入口矩阵、开工流程、禁令与自检门禁 |
+| [documents/norms/annotation-and-verification.md](documents/norms/annotation-and-verification.md) | 注释书写规范与验收判据、已验证的陷阱清单 |
+| [AGENTS.md](AGENTS.md) | 仓库级规范（三条禁令 / 六步法 / 自检 / 上报）与进度纪要 |
 ## 8. 已知缺口（摘要）（状态见 TODO.md）
 
 以下均为**读码所得、未修改代码**的登记项，逐条明细与证据见 `TODO.md`（零分配支路与 `set_yaw_pitch` 见 T-006、T-009；用户录制缺口见 T-041）：

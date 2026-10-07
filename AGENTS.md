@@ -36,10 +36,10 @@
 
 | 位置 | 状态 |
 |---|---|
-| 仓库根 `*.md` | 本文件 + `README.md` + `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`。后四篇于 2026-09-22 由 `.archive/` 归档原文**合并重建**（可读性改写：README 为总入口，CHANGELOG 分「当前状态 / 归档历史」两段，贡献与安全各一篇），细节源头仍是 `.archive/` |
+| 仓库根 `*.md` | 本文件（含跨工具工作流核心块）+ `README.md` + `TODO.md` + `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`。后四篇于 2026-09-22 由旧文档归档**合并重建**（可读性改写），细节源头为 git 历史 |
 | `documents/` | **46 篇**（2026-09-23 删 plan 后实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms 九棵子树；原 plan/ 三篇控制文件已随任务完结删除（owner 裁决）。**实测删除面**：`documents/` 下原 **47 篇** `.md`、根级 **4 篇** `.md`、退役 harness **39** 个路径（含 5 篇 `.md`）、apps/game 的 favicon.ico 1 个，合计 **91** 个路径（`git status` 实测） |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
-| `.archive/` | **存在**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇，保留相对路径）。**不作事实来源**，只用于历史追溯与本次根文档合并的素材；owner 定名 `.archive`（本文件早期写的 `.ak/` 为误记，以实际目录为准） |
+| `.archive/` | **已删除（2026-10-07 owner 裁决）**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇）已从工作区移除，原文仅存 git 历史；`.gitignore` 保留 `**/.archive/` 规则作归档位 |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
