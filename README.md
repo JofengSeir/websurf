@@ -99,6 +99,8 @@ CI 三个 workflow（`.github/workflows/`）：
 
 | 文档 | 回答什么 |
 |---|---|
+| [TODO.md](TODO.md) | **待办看板**：唯一待办与状态来源（T-###） |
+| [documents/norms/agent-workflow.md](documents/norms/agent-workflow.md) | **跨工具 agent 工作流**：入口矩阵、开工流程、禁令与自检门禁 |
 | [documents/index.md](documents/index.md) | **文档总导航**（按实际文件树） |
 | [architecture/overview.md](documents/architecture/overview.md) | 受控范围、共享层构成、依赖方向、入口锚点、启动链与帧链、不变量 |
 | [phys/overview.md](documents/phys/overview.md) | 共享物理：世界容器、步进、玩家语义、传送、种子面 |

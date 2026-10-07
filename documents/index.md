@@ -8,6 +8,7 @@
 |---|---|
 | [`../README.md`](../README.md) | 仓库总览：受控范围、目录结构、快速开始、构建链、验证与门禁、已知缺口摘要（状态见 TODO.md） |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | 当前工作区状态与各工程的版本声明 |
+| [../TODO.md](../TODO.md) | **待办看板**：唯一待办与状态来源（T-###、六值状态、证据锚点） |
 | [`index.md`](index.md) | 本页：全部文档的导航 |
 
 ## 共享层与架构
@@ -84,6 +85,7 @@
 | 文档 | 回答什么 |
 |---|---|
 | [`norms/annotation-and-verification.md`](norms/annotation-and-verification.md) | 事实来源与三条禁令、注释书写规范、验收判据、**已验证的陷阱清单**、记录约定 |
+| [norms/agent-workflow.md](norms/agent-workflow.md) | **跨工具 agent 工作流**：工具入口矩阵、唯一事实来源、开工流程、禁令与停线、自检门禁、维护方式 |
 
 ## 待解决问题（状态见 TODO.md）
 
