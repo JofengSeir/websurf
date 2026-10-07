@@ -63,13 +63,14 @@
 | **规范层** | `documents/norms/**`、根 `README`/`CHANGELOG`/`CONTRIBUTING`/`SECURITY` | **48 KB** | 按主题拆篇，登记进 `documents/index.md` |
 | **过程记录** | `progress/**` 其余 | **48 KB** | 按时间/主题切卷，登记进 `progress/index.md` |
 
-**分卷五条硬要求**
+**分卷六条硬要求**
 
 1. **可达**：任何分卷文件都必须登记在**该主题的导航文件**里——`documents/index.md`（文档树）、`progress/index.md`（过程记录）、`TODO.md` 头注（看板分卷）。体检硬查（`[G]⑧` / `[I]`）。
 2. **有序**：按时间或主题顺序切；卷名带序号（`2026-10-1.md`…）或日期区间；每卷头部写「第 N/M 卷 / 上一卷 / 下一卷 / 回到导航」。
 3. **进目录**：分卷进**主题子目录**（`progress/monthly/`、`progress/board/`、`progress/open-issues/`），不散在 `progress/` 根。
 4. **导航要小**：导航文件（`index.md`）只写「文件 / 一句话 / 什么时候看它」，不复述内容。
 5. **不可分卷的例外**：`TODO.md` 的未结项、`OWNER.md` 的待决行——它们是唯一状态源，拆开就失去「一处」的意义。
+6. **分卷/归档前先取许可**：把 `T-###` / `D-###` 行移出等于**删行**，而控制层不许 agent 删行 ⇒ 先 `node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完 `sync`（`OWNER.md` 同理）；无许可时 `sync` 会保留旧钉，体检 `[O]` 逐条报「单元被删除」。
 
 ---
 
@@ -93,7 +94,7 @@
 | 仓库根 `*.md` | 本文件（§0 工作流核心，唯一入口）+ `README.md` + `TODO.md`（待办看板）+ `OWNER.md`（owner 决策队列）+ `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`；后四篇于 2026-09-22 由旧文档**合并重建**，细节源头为 git 历史 |
 | `documents/` | **45 篇**（2026-10-07 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
-| `progress/` | **过程记录**（不作事实来源），**导航见 `progress/index.md`**：`monthly/`（月度进展逐条原文；2026-09 切 2 卷、2026-10 切 4 卷）、`board/`（看板分卷：已记录 + 已结案）、`open-issues/01..07`（取证原文）、`pending-detail.md`（原 §7.3 台账原文）、`wg-status.md`（工作组状态）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由） |
+| `progress/` | **过程记录**（不作事实来源），**导航见 `progress/index.md`**：`monthly/`（月度进展逐条原文；2026-09 切 2 卷、2026-10 切 5 卷）、`board/`（看板分卷：已记录 + 已结案）、`open-issues/01..07`（取证原文）、`pending-detail.md`（原 §7.3 台账原文）、`wg-status.md`（工作组状态）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由） |
 | `.archive/` | **已删除（2026-10-07 owner 裁决）**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇）已从工作区移除，原文仅存 git 历史；`.gitignore` 保留 `**/.archive/` 规则作归档位 |
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |

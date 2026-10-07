@@ -7,7 +7,7 @@
 # 校验项（src/scripts/check-doc-drift.mjs）：
 #   A 行数声明 —— `path`(NNN) / `| path | NNN |` 是否等于实测 wc -l
 #   B 文件:行号 锚点 —— 锚点是否超出文件总行数
-#   C 路径失效 —— 仅告警（历史叙述里常有「原 xxx 已移出」这类刻意保留的旧路径）
+#   C 路径失效 —— 锚点/声明指向的文件必须真实存在（失败；历史叙述请写成纯文本，别写成 `path:line`）
 #   D 裸文件名歧义 —— 仅计数（跨工程文档用 `app.ts` 之类简写，无法自动消歧，非错误）
 #   E 坏链 —— md 里的相对链接在磁盘上必须可解析（围栏代码块内跳过）
 #   F 行尾与 BOM —— 以**索引 blob**（提交形态）为准：不得含 CR、不得含 UTF-8 BOM
@@ -26,7 +26,7 @@
 #     deploy-pages.yml 的 matrix.app 与装配循环必须与 apps/ 目录三者一致；.cmd 须 @echo off + exit /b 且不写死用户目录
 #   O 文档契约（docflow）—— 调 node src/scripts/docflow.mjs check：只读 md 漂移 / 未落实审批 / 联动 /
 #     只读类新建与删除（划分与 approve·sync·claim·verify 见该脚本头注与 docflow.json）
-# A / B / E / F / G / L / M / N / O 任一非空即脚本 exit 1 → 本 workflow 失败（C 与 D 仅告警）。
+# A / B / C / E / F / G / L / M / N / O 任一非空即脚本 exit 1 → 本 workflow 失败（D 仅计数）。
 #
 # 同批还跑 src/scripts/check-board-touch.mjs（看板使用规程的**软提示**，AGENTS.md §0.1）：
 #   改了 src/ apps/ documents/ 却没动 TODO.md、提交信息也没有 T-### 或「无待办影响」时打印警告；

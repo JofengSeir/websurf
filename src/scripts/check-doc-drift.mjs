@@ -180,8 +180,9 @@ for (const f of indexCR) eolBad.push(`  ${f}  索引中仍含 CR（规范形式�
 const todoPath = 'TODO.md';
 const todoRaw = fs.existsSync(path.join(ROOT, todoPath)) ? fs.readFileSync(path.join(ROOT, todoPath), 'utf8') : '';
 // 分卷页（已记录 + 已结案）里的 ID 也算已存在：悬空检查与重复检查都要认它
-const archPath = 'progress/board/archive-2026-10.md';
-const archRaw = fs.existsSync(path.join(ROOT, archPath)) ? fs.readFileSync(path.join(ROOT, archPath), 'utf8') : '';
+const archDir = path.join(ROOT, 'progress/board');
+const archFiles = fs.existsSync(archDir) ? fs.readdirSync(archDir).filter((x) => /^archive-.*\.md$/.test(x)) : [];
+const archRaw = archFiles.map((x) => fs.readFileSync(path.join(archDir, x), 'utf8')).join('\n');
 const archIds = [...archRaw.matchAll(/\|\s*(T-\d{3})\s*\|/g)].map((m) => m[1]);
 const todoIds = [...todoRaw.matchAll(/\|\s*(T-\d{3})\s*\|/g)].map((m) => m[1]).concat(archIds);
 const todoSet = new Set(todoIds);
@@ -445,14 +446,14 @@ try {
   else docflow.push('  docflow check 非 0 退出（排查：node src/scripts/docflow.mjs check）');
 }
 
-const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length || docGap.length || falseClose.length || contract.length || docflow.length;
+const fail = drift.length || badAnchor.length || missing.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length || docGap.length || falseClose.length || contract.length || docflow.length;
 console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong + parentMiss.length} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending} ｜ 缺口未标注 ${docGap.length} ｜ 假结案 ${falseClose.length} ｜ 脚本/入口契约 ${contract.length} ｜ 文档契约 ${docflow.length}`);
 const todoKB = Buffer.byteLength(todoRaw, 'utf8') / 1024;
 const todoRowCount = (todoRaw.match(/^\|\s*T-\d{3}\s*\|/gm) || []).length;
-if (todoRaw && (todoKB > 80 || todoRowCount > 300)) console.log(`\n[提示] ${todoPath} 已 ${todoKB.toFixed(1)} KB / ${todoRowCount} 条，超过体量阈值（80 KB 或 300 条）——按头注的分卷规则处理「已记录 + 已结案」`);
+if (todoRaw && (todoKB > 80 || todoRowCount > 300)) console.log(`\n[提示] ${todoPath} 已 ${todoKB.toFixed(1)} KB / ${todoRowCount} 条，已达**提前分卷线 80 KB**（硬上限 96 KB / 300 条，见 AGENTS §0.4）——按头注的分卷规则处理「已记录 + 已结案」`);
 if (drift.length) console.log('\n[A] 行数声明漂移（失败）：\n' + drift.join('\n'));
 if (badAnchor.length) console.log('\n[B] 锚点越界（失败）：\n' + badAnchor.join('\n'));
-if (missing.length) console.log('\n[C] 路径失效（告警，可能是刻意保留的历史路径）：\n' + [...new Set(missing)].map((s) => '  ' + s).join('\n'));
+if (missing.length) console.log('\n[C] 路径失效（失败）：\n' + [...new Set(missing)].map((s) => '  ' + s).join('\n') + '\n  —— 指向的文件必须真实存在；历史叙述请改写为纯文本（不要写成 `path:line` 或 `path(N)`）');
 if (ambiguous) { const inProg = Object.entries(ambByDoc).filter(([k]) => k.startsWith(`progress/`)).reduce((s, [, v]) => s + v, 0); console.log(`\n[D] 歧义 ${ambiguous} 处（跨工程文档的裸文件名，需人工判读；非错误）｜规范面 ${ambiguous - inProg} 处、progress/ 过程记录 ${inProg} 处`); }
 if (broken.length) console.log('\n[E] 坏链（失败）：\n' + broken.join('\n'));
 if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set(eolBad)].join('\n'));

@@ -46,5 +46,5 @@
 |---|---|---|
 | `check-doc-drift.mjs` | 文档漂移体检 A–O（含体积/分卷/注释纪律/上级覆盖/缺口↔看板/假结案/脚本契约/文档契约） | `.github/workflows/doc-drift.yml`；`AGENTS §5` |
 | `check-board-touch.mjs` | 看板触碰**软提示**（改了 src/apps/documents 却没动 TODO.md） | CI（`continue-on-error`） |
-| `docflow.mjs` | 文档契约：只读钉 / 单元级字段权限 / 锚点内容指纹 / 强绑定 | 体检 `[O]` 直接调用 |
+| `docflow.mjs` | 文档契约：只读钉 / 单元级字段权限 / 锚点内容指纹（按 `目标:行号` 对位，含 TODO·OWNER 证据列的裸锚点）/ 强绑定 | 体检 `[O]` 直接调用（变更基线：CI 下 `HEAD^`，可 `--base` 指定） |
 | `check-glb-parity.mjs` | debug 与 game 的**材质口径一致性**（同一张图必须产出同一套材质） | **未接线** ⇒ 见 `TODO.md` T-409 |
