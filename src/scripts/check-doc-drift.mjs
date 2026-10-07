@@ -20,7 +20,8 @@
  *   G 待办同源：① 全仓 `T-###` 引用必须能在根 TODO.md 里找到（悬空即失败）；
  *     ② TODO.md 里的 ID 不得重复；③ 未结项的证据列不得为空（须写 `文件:行号` 或 `见详情`）；
  *     ④ 「未结项」列表与总表的 ID 集合必须一致（两份表示同源）；
- *     ⑤ 规范面文档不得自行声明待办状态
+ *     ⑤ 未结项的「详情」列必须非空且路径可解析；
+ *     ⑥ 规范面文档不得自行声明待办状态
  *     （`状态：待裁决` 一类），状态只写在 TODO.md——过程记录 `progress/**` 与
  *     `TODO.md` / `AGENTS.md` / `documents/norms/**` 豁免。
  *
@@ -189,6 +190,22 @@ for (const f of live) {
   });
 }
 
+// [G] ⑤ 未结项的「详情」列必须非空且每个路径都能解析（支持 ；;、 分隔的多路径）
+const badDetail = [];
+todoRaw.split(/\r?\n/).forEach((line) => {
+  const s = line.trim();
+  if (!s.startsWith('|') || /^\|[\s\-:|]+\|$/.test(s)) return;
+  const c = s.split('|').slice(1, -1).map((x) => x.trim());
+  if (c.length < 8 || !/^T-\d{3}$/.test(c[0])) return;
+  if (['已记录', '已结案'].includes(c[4])) return;
+  const parts = (c[6] || '').split(/[；;、]/).map((x) => x.trim()).filter(Boolean);
+  if (!parts.length) { badDetail.push(`  ${c[0]} 未结项但详情列为空`); return; }
+  parts.forEach((d) => {
+    if (fs.existsSync(d) || fs.existsSync(d + '.md')) return;
+    badDetail.push(`  ${c[0]} 详情无法解析：${d}`);
+  });
+})
+
 // [G] ④ 两份表示同源：「未结项」列表的 ID 集合必须等于总表里未结的 ID 集合
 const tableOpen = new Set();
 todoRaw.split(/\r?\n/).forEach((line) => {
@@ -204,8 +221,8 @@ const outOfSync = [
   ...[...tableOpen].filter((id) => !bulletSet.has(id)).map((id) => `  ${todoPath} 总表未结有 ${id}，列表里没有`),
 ];
 
-const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length;
-console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length}`);
+const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length;
+console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length}`);
 const todoKB = Buffer.byteLength(todoRaw, 'utf8') / 1024;
 const todoRowCount = (todoRaw.match(/^\|\s*T-\d{3}\s*\|/gm) || []).length;
 if (todoRaw && (todoKB > 80 || todoRowCount > 300)) console.log(`\n[提示] ${todoPath} 已 ${todoKB.toFixed(1)} KB / ${todoRowCount} 条，超过体量阈值（80 KB 或 300 条）——按头注的分卷规则处理「已记录 + 已结案」`);
@@ -215,6 +232,6 @@ if (missing.length) console.log('\n[C] 路径失效（告警，可能是刻意�
 if (ambiguous) { const inProg = Object.entries(ambByDoc).filter(([k]) => k.startsWith(`progress/`)).reduce((s, [, v]) => s + v, 0); console.log(`\n[D] 歧义 ${ambiguous} 处（跨工程文档的裸文件名，需人工判读；非错误）｜规范面 ${ambiguous - inProg} 处、progress/ 过程记录 ${inProg} 处`); }
 if (broken.length) console.log('\n[E] 坏链（失败）：\n' + broken.join('\n'));
 if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set(eolBad)].join('\n'));
-if (dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim, ...noEvidence, ...outOfSync].join('\n'));
+if (dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim, ...noEvidence, ...outOfSync, ...badDetail].join('\n'));
 
 process.exit(fail ? 1 : 0);
