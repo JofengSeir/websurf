@@ -117,6 +117,8 @@ cargo check -p websurf-phys                       # 或工程内 cargo check
 cd apps/<app> && npm run typecheck                # TS 侧
 ```
 
+> **提交与体检必须串成一步、红灯即终止**：先跑体检，非 0 就停（不要用「无论成败都继续」的链式命令把体检和 `git commit` 连在一起）。2026-10-07 两次红灯入库都出在这个写法上。
+
 **全量闸门**：全仓漂移体检（A–G）全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；README ↔ `documents/index.md` 口径一致。
 
 ---
