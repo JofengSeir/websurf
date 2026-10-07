@@ -77,11 +77,11 @@
 
 `cargo test -p websurf-phys` 实测 **10 passed / 0 failed**，全部由两个 `#[cfg(test)]` 模块提供：P2 幽灵面一类的门禁回归（4 项），以及蹲姿与 surf 语义（6 项，对齐 Source 的 `CanUnduck`）。两个模块的声明分别是 `src/phys/mod.rs:69` 与 `src/phys/mod.rs:72`。
 
-## 7. 已知遗留（如实登记，未改代码）
+## 7. 已知遗留（如实登记，未改代码）（状态见 TODO.md）
 
 | 项 | 事实 |
 |---|---|
-| `set_yaw_pitch` | 在 `apps/**` 与 `src/**` 内**零调用点** |
-| `predict` | 仅被 `apps/game/scripts` 下的两个脚本调用 |
-| 零分配支路 | `tick_into` / `state_out_ptr` / `seed_from` 的调用方只有 `src/ts-shared/auth/tick-authority.ts` 与 `src/ts-shared/decoupled/decoupled-loop.ts`，而这两个控制器在三个工程内**都没有装配点**——线上路径走 `tick()` 返回对象 |
+| `set_yaw_pitch` | 在 `apps/**` 与 `src/**` 内**零调用点**（见 TODO.md T-009） |
+| `predict` | 仅被 `apps/game/scripts` 下的两个脚本调用（见 TODO.md T-009） |
+| 零分配支路 | `tick_into` / `state_out_ptr` / `seed_from` 的调用方只有 `src/ts-shared/auth/tick-authority.ts` 与 `src/ts-shared/decoupled/decoupled-loop.ts`，而这两个控制器在三个工程内**都没有装配点**——线上路径走 `tick()` 返回对象（见 TODO.md T-006） |
 | `contactTicks` | 属调试/回归用计数，随 `state()` 一并导出 |

@@ -6,7 +6,7 @@
 
 | 文档 | 回答什么 |
 |---|---|
-| [`../README.md`](../README.md) | 仓库总览：受控范围、目录结构、快速开始、构建链、验证与门禁、已知缺口摘要 |
+| [`../README.md`](../README.md) | 仓库总览：受控范围、目录结构、快速开始、构建链、验证与门禁、已知缺口摘要（状态见 TODO.md） |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | 当前工作区状态与各工程的版本声明 |
 | [`index.md`](index.md) | 本页：全部文档的导航 |
 
@@ -17,7 +17,7 @@
 | [`architecture/overview.md`](architecture/overview.md) | 受控范围总架构：共享层构成、依赖方向、入口锚点、启动链与帧链、不变量、构建产物 |
 | [`phys/overview.md`](phys/overview.md) | 共享物理 `websurf-phys`：世界容器、步进、玩家移动语义、传送触发、种子面 |
 | [`wasm-core/overview.md`](wasm-core/overview.md) | 共享解析层 `websurf-wasm-core`：BSP、GLB、pakfile、材质与 mosaic |
-| [`ts-shared/overview.md`](ts-shared/overview.md) | TS 共享层：接口锚点、主流程、不变量、**未接线与零调用点清单**、测试与门禁 |
+| [`ts-shared/overview.md`](ts-shared/overview.md) | TS 共享层：接口锚点、主流程、不变量、**未接线与零调用点清单**（状态见 TODO.md）、测试与门禁 |
 | [`materials/overview.md`](materials/overview.md) | 材质与纹理链路：VMT/VTF、缺失纹理、默认纹理包 |
 
 ## 应用工程
@@ -85,7 +85,7 @@
 |---|---|
 | [`norms/annotation-and-verification.md`](norms/annotation-and-verification.md) | 事实来源与三条禁令、注释书写规范、验收判据、**已验证的陷阱清单**、记录约定 |
 
-## 待解决问题
+## 待解决问题（状态见 TODO.md）
 
 | 文档 | 回答什么 |
 |---|---|
@@ -95,8 +95,8 @@
 | [`open-issues/03-renderer-merge-normal-attribute.md`](open-issues/03-renderer-merge-normal-attribute.md) | `mergeGeometries` 因 `normal` 属性不一致失败，三应用合批静默失效 |
 | [`open-issues/04-wasm-untextured-surface-color.md`](open-issues/04-wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白 |
 | [`open-issues/05-wasmcore-bevel-doc-vs-code.md`](open-issues/05-wasmcore-bevel-doc-vs-code.md) | `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用 |
-| [`open-issues/06-phy-hull-facet-jump.md`](open-issues/06-phy-hull-facet-jump.md) | `.phy` 凸包表达不了曲面坡，玩家在 facet 交界处被一帧抬升十几 HU（待修） |
-| [open-issues/07-is-position-free-vs-trace.md](open-issues/07-is-position-free-vs-trace.md) | check_stuck 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死；已用修法 A 修复，遗留 3 条 |
+| [`open-issues/06-phy-hull-facet-jump.md`](open-issues/06-phy-hull-facet-jump.md) | `.phy` 凸包表达不了曲面坡，玩家在 facet 交界处被一帧抬升十几 HU（见 TODO.md T-066） |
+| [open-issues/07-is-position-free-vs-trace.md](open-issues/07-is-position-free-vs-trace.md) | check_stuck 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死；已用修法 A 修复，遗留 3 条（见 TODO.md T-065） |
 
 ## 维护约定
 

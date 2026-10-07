@@ -52,16 +52,16 @@
 - `PhysicsParams.attach` 在 `phys` 为 `null` 时直接返回，不产生副作用（`apps/debug/src/physics/physics-params.ts:76`）。
 - `emitPhysicsSnapshot` 只回传 `name` / `value` / `source` 三项，标签与取值范围留在主线程（`apps/debug/src/worker/physics-worker.ts:114`）。
 
-## 已知缺口
+## 已知缺口（状态见 TODO.md）
 
-1. **`physics-event` 消息无生产者**：`PhysicsEventMessage`（`apps/debug/src/worker/worker-types.ts:319`）在全仓只有类型声明与 `apps/debug/src/app.ts:413` 的消费分支，没有任何 `postMessage` 发送点。
-2. **`resize` 消息无收发链路**：主线程窗口 `resize` 直接调 `RendererMain.resize`（`apps/debug/src/app.ts:1247`），Worker 侧也没有 `resize` 分支（`apps/debug/src/worker/worker-types.ts:105`）。
-3. **`set-cull-distance` 消息被丢弃**：`InputBridge.sendSetCullDistance` 会发出该消息（`apps/debug/src/input/input-bridge.ts:91`），但分发层没有对应分支，落到 `onExtraMessage` 后 `PhysicsWorker.handleMessage` 也不认，返回 `false` 后被丢弃（`apps/debug/src/worker/worker-types.ts:155`、`apps/debug/src/worker/physics-worker.ts:95`）。剔除实际由主线程执行。
+1. **`physics-event` 消息无生产者**：`PhysicsEventMessage`（`apps/debug/src/worker/worker-types.ts:319`）在全仓只有类型声明与 `apps/debug/src/app.ts:413` 的消费分支，没有任何 `postMessage` 发送点。（见 TODO.md T-048）
+2. **`resize` 消息无收发链路**：主线程窗口 `resize` 直接调 `RendererMain.resize`（`apps/debug/src/app.ts:1247`），Worker 侧也没有 `resize` 分支（`apps/debug/src/worker/worker-types.ts:105`）。（见 TODO.md T-048）
+3. **`set-cull-distance` 消息被丢弃**：`InputBridge.sendSetCullDistance` 会发出该消息（`apps/debug/src/input/input-bridge.ts:91`），但分发层没有对应分支，落到 `onExtraMessage` 后 `PhysicsWorker.handleMessage` 也不认，返回 `false` 后被丢弃（`apps/debug/src/worker/worker-types.ts:155`、`apps/debug/src/worker/physics-worker.ts:95`）。剔除实际由主线程执行。（见 TODO.md T-048）
 4. **`init` 的画布三项无读取点**：`width` / `height` / `dpr` 在 Worker 侧没有读取点（`apps/debug/src/worker/worker-types.ts:50`）。
-5. **`InputMessage` 的六个运行期字段未声明**：`MsgState.addInput` 在运行时附带 `rt` / `rx` / `ry` / `rz` / `ri0` / `repoch`，接口只声明 `dx` / `dy` / `keys`（`apps/debug/src/worker/worker-types.ts:61`）。
-6. **`sync-render-state` 的 `teleport` 字段未声明**：主线程实际发送时带上该布尔（`apps/debug/src/app.ts:349`），接口只声明 `state`（`apps/debug/src/worker/worker-types.ts:188`）。
-7. **`mode-ack` 未声明且无消费分支**：分发层在 `set-mode` 分支会发出 `mode-ack`，`MainMessage` 未声明它，主线程分派也没有对应分支（`apps/debug/src/worker/worker-types.ts:340`）。
-8. **`set-mode` / `set-hold` 不在联合类型内**：两条消息由共享层分发层处理（`apps/debug/src/worker/worker-types.ts:214`），本工程的类型面不覆盖它们。
+5. **`InputMessage` 的六个运行期字段未声明**：`MsgState.addInput` 在运行时附带 `rt` / `rx` / `ry` / `rz` / `ri0` / `repoch`，接口只声明 `dx` / `dy` / `keys`（`apps/debug/src/worker/worker-types.ts:61`）。（见 TODO.md T-048）
+6. **`sync-render-state` 的 `teleport` 字段未声明**：主线程实际发送时带上该布尔（`apps/debug/src/app.ts:349`），接口只声明 `state`（`apps/debug/src/worker/worker-types.ts:188`）。（见 TODO.md T-048）
+7. **`mode-ack` 未声明且无消费分支**：分发层在 `set-mode` 分支会发出 `mode-ack`，`MainMessage` 未声明它，主线程分派也没有对应分支（`apps/debug/src/worker/worker-types.ts:340`）。（见 TODO.md T-048）
+8. **`set-mode` / `set-hold` 不在联合类型内**：两条消息由共享层分发层处理（`apps/debug/src/worker/worker-types.ts:214`），本工程的类型面不覆盖它们。（见 TODO.md T-048）
 9. **`mtzB64` 只存不用**：`getMtzB64`（`apps/debug/src/worker/mtz-data.ts:22`）在本仓内没有调用点，Worker 侧不消费纹理包（`apps/debug/src/worker/mtz-data.ts:10`）。
 10. **`PhysicsWorker.handleMessage` 的返回值无人使用**：唯一调用点是分发层的 `onExtraMessage` 钩子（`apps/debug/src/worker/main.ts:507`），返回值被忽略（`apps/debug/src/worker/physics-worker.ts:60`）。
-11. **`set-auto-restore-hull` 不写物理实例**：该开关只改面板侧标记并随 `physics-snapshot` 回传，`src/phys/**` 内没有对应参数与读取点（`apps/debug/src/worker/worker-types.ts:146`、`apps/debug/src/physics/physics-params.ts:61`）。
+11. **`set-auto-restore-hull` 不写物理实例**：该开关只改面板侧标记并随 `physics-snapshot` 回传，`src/phys/**` 内没有对应参数与读取点（`apps/debug/src/worker/worker-types.ts:146`、`apps/debug/src/physics/physics-params.ts:61`）。（见 TODO.md T-310）

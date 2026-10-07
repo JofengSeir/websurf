@@ -49,10 +49,10 @@
 - `CustomTeleport.yaw` 为 `null` 表示传送时保持当前朝向（`apps/debug/src/world/custom-teleports.ts:20`）。
 - 出生点向量的 Y-up 置换由上游完成，TS 端不二次映射（`apps/debug/src/world/spawn-loader.ts:5`）。
 
-## 已知缺口
+## 已知缺口（状态见 TODO.md）
 
 1. **`TeleportManager` 的六项成员零调用点**：`checkTeleport`、`setTriggerMode`、`setGroundedFramesRequired`、`onTeleported`、`resetCooldown`、`triggerCount`、`destCount` 在 `apps/debug/src` 与 `src` 内只出现在本文件的定义与注释里，没有外部调用点（`apps/debug/src/world/teleport-manager.ts:18` 起）。三种触发模式的判定与冷却状态机在本工作区内不参与运行。
 2. **`spawn-loader.ts` 整模块零调用点**：全仓无模块 import 它（`apps/debug/src/world/spawn-loader.ts:11`、`:64`、`:105`）；出生点加载的实际链路是共享层 `src/ts-shared/phys/world-builder.ts` 直接消费 `parse_spawn_points` 的 JSON。
 3. **`types.ts` 里有一批零引用类型**：`WasmTriMesh`、`WasmTeleportLink`、`WasmBspMetadata`、`ColliderFilter`、`DEFAULT_COLLIDER_FILTER` 在 `apps/debug/src` 与 `src` 内零引用（`apps/debug/src/world/types.ts:18`）。`triJson` 的实际消费方用的是 `apps/debug/src/physics/physics/Collision/Collision.types.ts` 的 `TriMesh`（比 `WasmTriMesh` 多一个可选 `surfaceprop`）。
 4. **`formatAdaptStats` 与 `verifyOutwardNormals` 的消费面窄**：两者都只在诊断调用点使用（`apps/debug/src/world/collider-adapter.ts:269`、`:330`），运行期映射只走 `adaptBrushes`。
-5. **`MAX_PER_MAP` 与 `STORAGE_PREFIX` 的可用性受浏览器存储限制**：写入失败时被静默忽略，调用方拿不到失败信号（`apps/debug/src/world/custom-teleports.ts:5`、`:63`）。
+5. **`MAX_PER_MAP` 与 `STORAGE_PREFIX` 的可用性受浏览器存储限制**：写入失败时被静默忽略，调用方拿不到失败信号（`apps/debug/src/world/custom-teleports.ts:5`、`:63`）。（见 TODO.md T-311）

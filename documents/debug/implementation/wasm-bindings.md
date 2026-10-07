@@ -40,10 +40,10 @@
 - 参数键名与 TS 侧的契约由 `apps/debug/scripts/check-wasm-api.mjs` 在构建期校验（`apps/debug/package.json:16`）。
 - `PhysWorld` 的 TS 类型声明由 `apps/debug/src/wasm.d.ts` 手写维护，不是 wasm-bindgen 产物（`apps/debug/crates/wasm/src/lib.rs:20`）。
 
-## 已知缺口
+## 已知缺口（状态见 TODO.md）
 
-1. **手写 `.d.ts` 落后于本文件的导出面（`PhysWorld` 侧）**：`apps/debug/src/wasm.d.ts` 的 `PhysWorld` 只有 17 个成员（`apps/debug/src/wasm.d.ts:86`），而 `src/phys/mod.rs` 的 `impl` 有 24 个 `pub fn`；缺 `tick_into`、`state_out_ptr`、`set_state_ex`、`state_full_json`、`seed_from`、`gate_veto_count`、`debug_trace`。调用后两者时只能用运行时收窄（`apps/debug/src/renderer/renderer-main.ts:1115`、`apps/debug/src/renderer/renderer-main.ts:1132`）。
-2. **手写 `.d.ts` 落后于本文件的导出面（`BspProcessor` 侧）**：`.d.ts` 声明 13 个成员（`apps/debug/src/wasm.d.ts:34` 起），Rust 侧有 24 个，缺 `export_glb_with_models`、`export_glb_with_pakfile_models_with_defaults_and_atlas_limit`、`export_glb_with_pakfile_models_with_defaults_and_lights`、`export_glb_with_pakfile_models_with_lights`、`is_alive`、`parse_entities`、`list_pakfile`、`read_pakfile_file`、`read_pakfile_scripts`、`export_colliders`、`export_colliders_with_filter`（`apps/debug/crates/wasm/src/lib.rs:21` 起）。
+1. **手写 `.d.ts` 落后于本文件的导出面（`PhysWorld` 侧）**：`apps/debug/src/wasm.d.ts` 的 `PhysWorld` 只有 17 个成员（`apps/debug/src/wasm.d.ts:86`），而 `src/phys/mod.rs` 的 `impl` 有 24 个 `pub fn`；缺 `tick_into`、`state_out_ptr`、`set_state_ex`、`state_full_json`、`seed_from`、`gate_veto_count`、`debug_trace`。调用后两者时只能用运行时收窄（`apps/debug/src/renderer/renderer-main.ts:1115`、`apps/debug/src/renderer/renderer-main.ts:1132`）。（见 TODO.md T-007）
+2. **手写 `.d.ts` 落后于本文件的导出面（`BspProcessor` 侧）**：`.d.ts` 声明 13 个成员（`apps/debug/src/wasm.d.ts:34` 起），Rust 侧有 24 个，缺 `export_glb_with_models`、`export_glb_with_pakfile_models_with_defaults_and_atlas_limit`、`export_glb_with_pakfile_models_with_defaults_and_lights`、`export_glb_with_pakfile_models_with_lights`、`is_alive`、`parse_entities`、`list_pakfile`、`read_pakfile_file`、`read_pakfile_scripts`、`export_colliders`、`export_colliders_with_filter`（`apps/debug/crates/wasm/src/lib.rs:21` 起）。（见 TODO.md T-309）
 3. **两个自由导出未进 `.d.ts`**：`export_visleaf_pvs`（`apps/debug/crates/wasm/src/lib.rs:3261`）与 `start`（`:3494`）都没有对应的类型声明；`start` 由 wasm-bindgen 在装载时自动调用，不需要 TS 侧声明，`export_visleaf_pvs` 则既无声明也无任何 TS 消费点。
 4. **`export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 无 TS 调用点**：该变体只出现在 Rust 导出面与本文件的类型面之外（`apps/debug/crates/wasm/src/lib.rs:739`）。
 5. **本工程实际消费的 GLB 入口只有两个**：`export_glb_with_pakfile_models` 与 `export_glb_with_pakfile_models_with_defaults_and_lights`（由共享层 `BspProcessorLike` 要求，`apps/debug/crates/wasm/src/lib.rs:17`）；`.d.ts` 里声明的 `export_glb` 与 `export_glb_with_pakfile_models_with_defaults` 在本工程无调用点（`apps/debug/src/wasm.d.ts:38`、`:42`）。

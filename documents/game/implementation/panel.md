@@ -28,13 +28,13 @@
 - **控件 id 与页面一一对应**：本次实测 `apps/game/src` 内 45 个 `getElementById` 字面量 id 在 `apps/game/web/index.html` 中全部存在（含 `${id}Num` 之外的滑块、复选框、select 与列表容器）。
 - **导航分栏是静态声明**：八个 `data-mod` 与八个 `data-pane` 全在页面里（`apps/game/web/index.html:84` 起、`apps/game/web/index.html:97` 起），控制器只切 `active` 类。
 
-## 已知缺口
+## 已知缺口（状态见 TODO.md）
 
-- **γ 滑块量程大于着色器接受窗口**：滑块量程 0.5..6（`apps/game/src/panel/panel-controller.ts:471`、`apps/game/web/index.html:231`），而渲染端 `setLightGamma` 只接受 `(0, 1]`（`src/renderer-shared/shader/lightmap-shader.ts:1789`）；拖到大于 1 时 config 已被写（`apps/game/src/panel/panel-controller.ts:472`）、画面不变。
-- **数值框路径不回写自身文本**：滑块输入会把值同步到数值框（`apps/game/src/panel/panel-controller.ts:568`），但数值框输入只把**钳制结果写回滑块**（`:577`），数值框自身文本保持用户输入的越界值；被写入 config 的是钳制后的值（`:578`）。
-- **`applyCrosshair` 有一个死变量**：`const dot = el.querySelector('.ch-dot')` 声明后未被使用（`apps/game/src/panel/panel-controller.ts:773`），中心点显隐实际由 `no-dot` 类承担（`:774`）。
+- **γ 滑块量程大于着色器接受窗口**：滑块量程 0.5..6（`apps/game/src/panel/panel-controller.ts:471`、`apps/game/web/index.html:231`），而渲染端 `setLightGamma` 只接受 `(0, 1]`（`src/renderer-shared/shader/lightmap-shader.ts:1789`）；拖到大于 1 时 config 已被写（`apps/game/src/panel/panel-controller.ts:472`）、画面不变。 （见 TODO.md T-021）
+- **数值框路径不回写自身文本**：滑块输入会把值同步到数值框（`apps/game/src/panel/panel-controller.ts:568`），但数值框输入只把**钳制结果写回滑块**（`:577`），数值框自身文本保持用户输入的越界值；被写入 config 的是钳制后的值（`:578`）。 （见 TODO.md T-021）
+- **`applyCrosshair` 有一个死变量**：`const dot = el.querySelector('.ch-dot')` 声明后未被使用（`apps/game/src/panel/panel-controller.ts:773`），中心点显隐实际由 `no-dot` 类承担（`:774`）。 （见 TODO.md T-021）
 - **渲染侧初值写两次**：`RendererMain.init` 先按 config 当时的值写一遍光照与 FOV（`apps/game/src/renderer/renderer-main.ts:213`、`:215`、`:217`、`:219`、`:221`、`:222`），`sendAllPrefs` 再用加载偏好后的 config 覆盖一次（`apps/game/src/panel/panel-controller.ts:750`、`:752`、`:753`、`:754`、`:755`）；两次都走共享 uniform，第二次对 γ 同样受接受窗口限制。
 - **只持久化部分输入段字段**：`collectPrefs` 的 `input` 段只写 `sensitivity` / `yawBindSpeed` / `noclipSpeed`（`apps/game/src/panel/panel-controller.ts:612`）。原 `pitchLimit` 从不进存档且全仓无读取点，已于 2026-09-26 从配置删除（见 `documents/game/implementation/config.md`）。
-- **面板不校验 DOM 是否存在**：`bindSlider` / `bindCheckbox` 在取不到元素时静默返回（`apps/game/src/panel/panel-controller.ts:561`、`:587`），控件缺失不会报错；`#panel` 缺失时构造期即抛出（`apps/game/src/panel/panel-controller.ts:78` 的断言）。
+- **面板不校验 DOM 是否存在**：`bindSlider` / `bindCheckbox` 在取不到元素时静默返回（`apps/game/src/panel/panel-controller.ts:561`、`:587`），控件缺失不会报错；`#panel` 缺失时构造期即抛出（`apps/game/src/panel/panel-controller.ts:78` 的断言）。 （见 TODO.md T-208）
 - **存点列表形参含不参与渲染的字段**：`renderSavePoints` 的形参类型带 `yaw`（`apps/game/src/panel/panel-controller.ts:780`），方法体只渲染序号、坐标与速率（`:796`），`yaw` 未被使用。
-- **M 键与 ESC 两条全局监听不校验场景状态**：M 键的判据只有 `e.code === 'KeyM'`（`apps/game/src/panel/panel-controller.ts:265`），ESC 分支只判 `!getLocked()`（`:273`）；两者都不读 `sceneReady`，因此加载进度覆盖层显示期间这两条分支同样会被触发。
+- **M 键与 ESC 两条全局监听不校验场景状态**：M 键的判据只有 `e.code === 'KeyM'`（`apps/game/src/panel/panel-controller.ts:265`），ESC 分支只判 `!getLocked()`（`:273`）；两者都不读 `sceneReady`，因此加载进度覆盖层显示期间这两条分支同样会被触发。 （见 TODO.md T-209）

@@ -95,13 +95,13 @@
 
 **lightmap 着色器**：光照模式切换不重建场景、不重编译材质，只改一个全场景共享 uniform（`apps/debug/src/config.ts:101`）；图集加载在两种模式下完全一致（`apps/debug/src/config.ts:101`）。着色器本体是渲染共享层单实例 `src/renderer-shared/shader/lightmap-shader.ts`（2026-10-02 由三工程各自一份的同构副本合并而来，旧副本已删除，三工程消费同一文件）。
 
-## 已知缺口
+## 已知缺口（状态见 TODO.md）
 
-1. **PVS 列不反映隐藏数**：`LodStats.pvsHidden` 在 `update` 的统计刷新里每轮恒写 0（`apps/debug/src/renderer/lod-manager.ts:262`），而面板剔除统计行把它作为「隐藏 N」打印（`apps/debug/src/app.ts:627`），页面 `#cullStats` 也带「PVS」列（`apps/debug/web/index.html:871`）。真正被隐藏的块数是 `far`（`apps/debug/src/renderer/lod-manager.ts:261`）。
-2. **PVS 相关统计在本工程恒为缺省值**：`RendererMain` 只构造 `PvsManager`、把 `getClusterAt` 交给 `assignClusterIds` 用、并读 `getStats` / `currentClusterId`，**从不调 `update`**，因此剔除统计里的 `cluster` 恒 -1、`visibleClusters` 恒 0（`apps/debug/src/renderer/renderer-main.ts:192` 起、`apps/debug/src/renderer/renderer-main.ts:549`）。
+1. **PVS 列不反映隐藏数**：`LodStats.pvsHidden` 在 `update` 的统计刷新里每轮恒写 0（`apps/debug/src/renderer/lod-manager.ts:262`），而面板剔除统计行把它作为「隐藏 N」打印（`apps/debug/src/app.ts:627`），页面 `#cullStats` 也带「PVS」列（`apps/debug/web/index.html:871`）。真正被隐藏的块数是 `far`（`apps/debug/src/renderer/lod-manager.ts:261`）。（见 TODO.md T-303）
+2. **PVS 相关统计在本工程恒为缺省值**：`RendererMain` 只构造 `PvsManager`、把 `getClusterAt` 交给 `assignClusterIds` 用、并读 `getStats` / `currentClusterId`，**从不调 `update`**，因此剔除统计里的 `cluster` 恒 -1、`visibleClusters` 恒 0（`apps/debug/src/renderer/renderer-main.ts:192` 起、`apps/debug/src/renderer/renderer-main.ts:549`）。（见 TODO.md T-303）
 3. **`LOD_LEVEL.PVS_HIDDEN` 是预留档位**：该常量在本文件内零引用，`update` 从不写入（`apps/debug/src/renderer/lod-manager.ts:26`）；`LodItem.clusterIds` 同样在本文件内无消费方（`apps/debug/src/renderer/lod-manager.ts:40`）。
 4. **`assignClusterIds` 的结果无消费方**：返回的「采到至少一个 cluster 的 mesh 数量」在 `loadScene` 里没有被使用（`apps/debug/src/renderer/lod-manager.ts:181`）。
-5. **tick 线的时间戳在无发布时钟时回落墙钟**：`readPublishedTau()` 返回 0 时用 rAF 时间戳 `now`（`apps/debug/src/renderer/renderer-main.ts:653`），两条线的时间基准在此时不同源。
-6. **权威 post-tick 位置差（residual）恒不记录**：`addTick` 的第六个实参固定传 `undefined`（`apps/debug/src/renderer/renderer-main.ts:657`），该组统计的样本数保持 0（`apps/debug/src/renderer/path-recorder.ts:648`）。
-7. **`lightmap-shader.ts` 的诊断覆盖只从全局键读**：`window.__vbsp*` 系列覆盖（如 `src/renderer-shared/shader/lightmap-shader.ts:1745` 的 `readLightFloorOverride`）在模块初始化时就固化成 uniform 初值（`src/renderer-shared/shader/lightmap-shader.ts:1549`、`:1556`、`:1563`、`:1580`），运行期注入不改变已创建的 uniform。
+5. **tick 线的时间戳在无发布时钟时回落墙钟**：`readPublishedTau()` 返回 0 时用 rAF 时间戳 `now`（`apps/debug/src/renderer/renderer-main.ts:653`），两条线的时间基准在此时不同源。（见 TODO.md T-304）
+6. **权威 post-tick 位置差（residual）恒不记录**：`addTick` 的第六个实参固定传 `undefined`（`apps/debug/src/renderer/renderer-main.ts:657`），该组统计的样本数保持 0（`apps/debug/src/renderer/path-recorder.ts:648`）。（见 TODO.md T-305）
+7. **`lightmap-shader.ts` 的诊断覆盖只从全局键读**：`window.__vbsp*` 系列覆盖（如 `src/renderer-shared/shader/lightmap-shader.ts:1745` 的 `readLightFloorOverride`）在模块初始化时就固化成 uniform 初值（`src/renderer-shared/shader/lightmap-shader.ts:1549`、`:1556`、`:1563`、`:1580`），运行期注入不改变已创建的 uniform。（见 TODO.md T-306）
 8. **准星射线是限流采样**：每 `PLANE_INSPECT_INTERVAL` 帧才检测一次，关闭开关时只清空上次结果，不做新检测（`apps/debug/src/renderer/renderer-main.ts:717`）。

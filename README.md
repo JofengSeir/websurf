@@ -109,9 +109,9 @@ CI 三个 workflow（`.github/workflows/`）：
 | [norms/annotation-and-verification.md](documents/norms/annotation-and-verification.md) | 注释书写规范与验收判据 |
 | [AGENTS.md](AGENTS.md) | 当前任务的 Agent 行为规范与进度纪要 |
 
-## 8. 已知缺口（摘要）
+## 8. 已知缺口（摘要）（状态见 TODO.md）
 
-以下均为**读码所得、未修改代码**的登记项，逐条明细与证据见 `AGENTS.md` §7.3 待决索引：
+以下均为**读码所得、未修改代码**的登记项，逐条明细与证据见 `TODO.md`（零分配支路与 `set_yaw_pitch` 见 T-006、T-009；用户录制缺口见 T-041）：
 
 - **输入侧只有回放、没有用户录制**：落样本的只有回放分支 `replayCapture`（`apps/debug/src/app.ts:2255`），页面没有用户录制入口（录制器已随死链删除）——录制产物只能由外部工具生成，经 `__wsInput.load` / `play` / `stopPlay` 回放。
 - **零分配支路已实现但未装配**：`tick_into` / `state_out_ptr` / `seed_from` 仅被 `src/ts-shared/` 的控制器调用，而这些控制器在三个工程内都没有装配点；`set_yaw_pitch` 在 `apps/**` 与 `src/**` 内零调用点。

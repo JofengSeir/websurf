@@ -54,13 +54,13 @@
 | `PakIndex` | `src/wasm-core/pakfile_models.rs:219` | PAK 内部文件索引：按「去前缀 + 去扩展名」的键查候选路径列表（候选顺序见该文件实现） |
 | `GameLumpHeader` | `src/wasm-core/vbsp/data/game.rs:42` | game lump 目录项；光照/HDR 相关数据的字段与版本差异由该模块承载 |
 
-## 6. 已知遗留与疑似缺陷（只记录，未改代码）
+## 6. 已知遗留与疑似缺陷（只记录，未改代码）（状态见 TODO.md）
 
-以下均已在根 `AGENTS.md` 的待决表中登记，此处只做索引，避免文档与台账出现两套口径：
+以下均已在 `TODO.md` 登记，此处只做索引，避免文档与看板出现两套口径：
 
-1. **`texture_utils/vtf.rs`**：`VTFHeader::write` 在 `version[0] < 7` 分支声明头长与实写长度不一致；`ResourceList::read` 吞占位而 `write` 不写；`get_offset` 把 `frame` 与 `face` 加成同一线性项；`get_mip_size` 与 `VTFImage::get_frame` 的图幅口径不一致。另记零调用点：`ResourceType::has_resource_type`、`HAS_NO_DATA_CHUNK`、`VTF::save_as_png`、`texture_utils::create`、`VTF::lowres_image`。
-2. **`mosaic/mtz.rs`**：`pack_regions` 用 `as u8` 写 meta 导致 `w`/`h` 超 255 时尺寸变值；`opacity` 仅在 `< 250` 时写出；`pack_regions` 与 `unpack_regions` 的签名长度接受集不一致；`w * h` 在 `u32` 上相乘无上界；容器文本再入解析的边界不一致；五个 `FLAG_*_LZ` 常量零引用；`emit_match` 的扩展长度字节在极长匹配时截断（当前唯一调用点已兜住）。
-3. **`mosaic/decode.rs`**：`code_to_img` 不校验宽高下界，也不校验解码出的索引是否落在调色板色数内。
-4. **通路 A 的材质扩展**：`extensions.KHR_texture_transform` 在 `material.transform` 存在时会被写入 material，但 BSP 导出路径不把它加入 `extensions_used`（消费端按 `extensionsUsed` 判断时会不生效）。
+1. **`texture_utils/vtf.rs`**：`VTFHeader::write` 在 `version[0] < 7` 分支声明头长与实写长度不一致；`ResourceList::read` 吞占位而 `write` 不写；`get_offset` 把 `frame` 与 `face` 加成同一线性项；`get_mip_size` 与 `VTFImage::get_frame` 的图幅口径不一致。另记零调用点：`ResourceType::has_resource_type`、`HAS_NO_DATA_CHUNK`、`VTF::save_as_png`、`texture_utils::create`、`VTF::lowres_image`（见 TODO.md T-012）。
+2. **`mosaic/mtz.rs`**：`pack_regions` 用 `as u8` 写 meta 导致 `w`/`h` 超 255 时尺寸变值；`opacity` 仅在 `< 250` 时写出；`pack_regions` 与 `unpack_regions` 的签名长度接受集不一致；`w * h` 在 `u32` 上相乘无上界；容器文本再入解析的边界不一致；五个 `FLAG_*_LZ` 常量零引用；`emit_match` 的扩展长度字节在极长匹配时截断（当前唯一调用点已兜住）（见 TODO.md T-014）。
+3. **`mosaic/decode.rs`**：`code_to_img` 不校验宽高下界，也不校验解码出的索引是否落在调色板色数内（见 TODO.md T-401）。
+4. **通路 A 的材质扩展**：`extensions.KHR_texture_transform` 在 `material.transform` 存在时会被写入 material，但 BSP 导出路径不把它加入 `extensions_used`（消费端按 `extensionsUsed` 判断时会不生效）（见 TODO.md T-011）。
 
-> 这些条目的处置（改代码 / 改文案 / 保持现状）由仓库 owner 裁决；注释中已按当前代码如实写明行为与口径。
+> 这些条目的处置（改代码 / 改文案 / 保持现状）见 `TODO.md`；注释中已按当前代码如实写明行为与口径。

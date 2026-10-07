@@ -90,13 +90,13 @@
 3. **输入钳制分两段**：单帧位移先在 `mouse-buffer` 内按 `MAX_DELTA` 钳制，再在 `input-layer` 受 `INPUT_CLAMP` 限制。
 4. **PVS 的可见性判据由调用方选择**：`PvsManager.update` / `isVisible` 只有 `apps/game` 调用；`apps/debug` 只用 `getClusterAt` 与统计读取，其 `currentClusterId` 保持 `-1`、`visibleCount` 保持 `0`。
 
-## 6. 未接线与零调用点（如实登记）
+## 6. 未接线与零调用点（如实登记）（状态见 TODO.md）
 
 | 项 | 事实 |
 |---|---|
-| `tick-authority` 的 F4 乐观门 | `createTickAuthority` 全仓只有其自身测试调用；三个工程均无装配点 |
-| `decoupled-loop` | `createDecoupledLoop` 全仓无装配点；其依赖的环境槽 `decoupledLoop` 无人填充 |
-| 物理零分配支路 | `tick_into` / `state_out_ptr` / `seed_from` 的调用方只有上述两个未接线的控制器；线上路径走 `tick()` 返回对象 |
+| `tick-authority` 的 F4 乐观门 | `createTickAuthority` 全仓只有其自身测试调用；三个工程均无装配点（见 TODO.md T-006） |
+| `decoupled-loop` | `createDecoupledLoop` 全仓无装配点；其依赖的环境槽 `decoupledLoop` 无人填充（见 TODO.md T-006） |
+| 物理零分配支路 | `tick_into` / `state_out_ptr` / `seed_from` 的调用方只有上述两个未接线的控制器；线上路径走 `tick()` 返回对象（见 TODO.md T-006） |
 | `compute-mode` 的三模式接线 | `apps/**` 内无该模块的 import、无 `set-mode` 发送方、未注入 `getComputeMode` / `onSetMode` ⇒ 共享层缺省恒落 `'coupled'`；`resolveAuthTickRate` 零调用点 |
 | `MouseBuffer.push` / `drain` | 零调用点（线上路径是 `process()`） |
 | `ShmState.wake` | 零调用点（其唯一调用方 `waitWakeup` 只被未接线的解耦环使用） |

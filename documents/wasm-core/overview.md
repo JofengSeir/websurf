@@ -64,10 +64,10 @@
 4. **导出产物以 GLTF 为准**：导出把光照图、材质扩展、模型合并都落到同一份 GLTF/GLB 里；扩展名是否登记进 `extensions_used` 由导出路径决定（本仓已登记一处不一致，见 §6）。
 5. **纹理容器有两个出入口**：文本形态（`mosaic` 的 encode/decode）与二进制形态（`mtz` 的 MTZ6 容器 + `texture_utils` 的 VTF 容器）各管一段，不要互相代用。
 
-## 6. 已知遗留（索引，详见根 `AGENTS.md` 的待决表）
+## 6. 已知遗留（索引，详见 `TODO.md`）（状态见 TODO.md）
 
 1. `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现**零调用点**（合计约 500 行，各带 `#[allow(dead_code)]`）；线上合并路径是 `model_integrator` 的合并入口。
-2. `bsp_to_gltf_core/lightmap.rs` 的一条错误文本里含对外部参考实现的 `文件:行号` 引用（属**代码字面量**，未改）。
-3. `texture_utils/vtf.rs` 的四处读写口径不一致与五项零调用点；`mosaic/mtz.rs` 的八处边界/一致性问题；`mosaic/decode.rs` 的宽高与调色板索引校验缺失。
-4. `extensions.KHR_texture_transform` 在 `material.transform` 存在时会被写入 material，但导出路径未把它登记进 `extensions_used`。
-5. 实体键名大小写：`apps/debug` 与 `apps/game` 的 wasm 绑定层各有一处 `.prop("StartDisabled")`（大写），而实体文本已整体小写 ⇒ 该次取值必然失败并被 `unwrap_or(false)` 吞掉。
+2. `bsp_to_gltf_core/lightmap.rs` 的一条错误文本里含对外部参考实现的 `文件:行号` 引用（属**代码字面量**，未改）（见 TODO.md T-013）。
+3. `texture_utils/vtf.rs` 的四处读写口径不一致与五项零调用点；`mosaic/mtz.rs` 的八处边界/一致性问题；`mosaic/decode.rs` 的宽高与调色板索引校验缺失（见 TODO.md T-012、T-014、T-401）。
+4. `extensions.KHR_texture_transform` 在 `material.transform` 存在时会被写入 material，但导出路径未把它登记进 `extensions_used`（见 TODO.md T-011）。
+5. 实体键名大小写：`apps/debug` 与 `apps/game` 的 wasm 绑定层各有一处 `.prop("StartDisabled")`（大写），而实体文本已整体小写 ⇒ 该次取值必然失败并被 `unwrap_or(false)` 吞掉（见 TODO.md T-015）。
