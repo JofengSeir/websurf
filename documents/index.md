@@ -83,6 +83,7 @@
 | 文档 | 回答什么 |
 |---|---|
 | [`norms/annotation-and-verification.md`](norms/annotation-and-verification.md) | 事实来源与三条禁令、注释书写规范、验收判据、**已验证的陷阱清单**、记录约定 |
+| [`norms/scripts-and-ci.md`](norms/scripts-and-ci.md) | 三工程脚本准入、Windows 入口 `.cmd` 契约、`.github` 部署链约束（体检 `[N]` 硬查） |
 
 ## 待解决问题（状态见 TODO.md）
 

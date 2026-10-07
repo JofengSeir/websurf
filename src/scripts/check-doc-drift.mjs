@@ -32,6 +32,10 @@
  *   M 假结案：终态行的判据若形如「git grep "<模式>" … ⇒ 0 命中」，则①该模式在判据自己声明的
  *     路径里必须真的 0 命中，②该模式在其「证据」文件里也必须 0 命中——`-- <路径>` 指错目录时
  *     判据会永远满足，条目就被永久假结案（实例：T-129 / T-132）。
+ *   N 脚本与部署链契约（见 documents/norms/scripts-and-ci.md）：① 三工程 `scripts/**` 的已跟踪脚本
+ *     引用面必须非零（本工程 package.json / CI / 同族脚本），否则须登记进该篇 §1.1 豁免表；
+ *     ② deploy-pages.yml 的 matrix.app 与装配段 for 循环必须与 `apps/` 目录三者一致；
+ *     ③ 三工程 `.cmd` 必须 @echo off + exit /b，且不得写死 `C:\Users\` 路径。
  *
  * `resolve` 的候选来自 scopeRoots(doc) × APP_EXTRA / SHARED_EXTRA 的拼接，外加 live 里
  * 的后缀命中与裸文件名命中；评分 = 行数够 (4) + 在文档作用域内 (2) + 非裸名且后缀命中 (1)，
@@ -385,8 +389,52 @@ boardRows.forEach((c) => {
   }
 });
 
-const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length || docGap.length || falseClose.length;
-console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong + parentMiss.length} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending} ｜ 缺口未标注 ${docGap.length} ｜ 假结案 ${falseClose.length}`);
+// [N] 脚本与部署链契约（口径见 documents/norms/scripts-and-ci.md）
+const normRel = 'documents/norms/scripts-and-ci.md';
+const normRaw = fs.existsSync(path.join(ROOT, normRel)) ? fs.readFileSync(path.join(ROOT, normRel), 'utf8') : '';
+const contract = [];
+const appsDir = path.join(ROOT, 'apps');
+const appNames = fs.existsSync(appsDir) ? fs.readdirSync(appsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : [];
+const ciRaw = live.filter((f) => f.startsWith('.github/workflows/')).map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+for (const a of appNames) {
+  const sd = path.join(appsDir, a, 'scripts');
+  const pkg = fs.existsSync(path.join(appsDir, a, 'package.json')) ? fs.readFileSync(path.join(appsDir, a, 'package.json'), 'utf8') : '';
+  if (fs.existsSync(sd)) {
+    for (const f of fs.readdirSync(sd).filter((x) => !x.startsWith('_') && /\.(mjs|js)$/.test(x))) {
+      const rel = 'apps/' + a + '/scripts/' + f;
+      if (!live.includes(rel)) continue;
+      if (pkg.includes(f) || ciRaw.includes(f)) continue;
+      if (fs.readdirSync(sd).some((o) => o !== f && fs.readFileSync(path.join(sd, o), 'utf8').includes(f))) continue;
+      const exempted = normRaw.split(/\r?\n/).some((l) => /^\|/.test(l.trim()) && l.includes('`' + rel + '`'));
+      if (exempted) continue;
+      contract.push('  ' + rel + ' 引用面为 0（本工程 package.json / CI / 同族脚本都没提它）⇒ 接线或登记进 ' + normRel + ' §1.1');
+    }
+  }
+  for (const f of fs.readdirSync(path.join(appsDir, a)).filter((x) => x.endsWith('.cmd'))) {
+    const rel = 'apps/' + a + '/' + f;
+    const t = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    if (!/@echo off/i.test(t)) contract.push('  ' + rel + ' 缺 @echo off');
+    if (!/exit\s*\/b/i.test(t)) contract.push('  ' + rel + ' 缺 exit /b（退出码口径）');
+    if (/C:\\Users\\/i.test(t)) contract.push('  ' + rel + ' 写死了用户目录（换机器即失效）');
+  }
+}
+const depRel = '.github/workflows/deploy-pages.yml';
+if (fs.existsSync(path.join(ROOT, depRel))) {
+  const dep = fs.readFileSync(path.join(ROOT, depRel), 'utf8');
+  const mm = dep.match(/matrix:\s*\n\s*app:\s*\[([^\]]*)\]/);
+  if (mm) {
+    const listed = mm[1].split(',').map((x) => x.trim()).filter(Boolean);
+    if (listed.slice().sort().join(',') !== appNames.slice().sort().join(',')) contract.push('  ' + depRel + ' matrix.app=[' + listed.join(',') + '] 与 apps/ 目录 [' + appNames.join(',') + '] 不一致');
+  } else contract.push('  ' + depRel + ' 未找到 matrix.app 清单');
+  const loop = dep.match(/for app in ([^\n;]+)/);
+  if (loop) {
+    const inLoop = loop[1].trim().split(/\s+/).filter(Boolean);
+    if (inLoop.slice().sort().join(',') !== appNames.slice().sort().join(',')) contract.push('  ' + depRel + ' 装配段 for app in [' + inLoop.join(',') + '] 与 apps/ 目录 [' + appNames.join(',') + '] 不一致');
+  }
+}
+
+const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length || docGap.length || falseClose.length || contract.length;
+console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong + parentMiss.length} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending} ｜ 缺口未标注 ${docGap.length} ｜ 假结案 ${falseClose.length} ｜ 脚本/入口契约 ${contract.length}`);
 const todoKB = Buffer.byteLength(todoRaw, 'utf8') / 1024;
 const todoRowCount = (todoRaw.match(/^\|\s*T-\d{3}\s*\|/gm) || []).length;
 if (todoRaw && (todoKB > 80 || todoRowCount > 300)) console.log(`\n[提示] ${todoPath} 已 ${todoKB.toFixed(1)} KB / ${todoRowCount} 条，超过体量阈值（80 KB 或 300 条）——按头注的分卷规则处理「已记录 + 已结案」`);
@@ -396,6 +444,7 @@ if (missing.length) console.log('\n[C] 路径失效（告警，可能是刻意�
 if (ambiguous) { const inProg = Object.entries(ambByDoc).filter(([k]) => k.startsWith(`progress/`)).reduce((s, [, v]) => s + v, 0); console.log(`\n[D] 歧义 ${ambiguous} 处（跨工程文档的裸文件名，需人工判读；非错误）｜规范面 ${ambiguous - inProg} 处、progress/ 过程记录 ${inProg} 处`); }
 if (broken.length) console.log('\n[E] 坏链（失败）：\n' + broken.join('\n'));
 if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set(eolBad)].join('\n'));
+if (contract.length) console.log('\n[N] 脚本与部署链契约（失败）：\n' + contract.join('\n'));
 if (docGap.length) console.log('\n[L] 文档缺口未标注（失败）：\n' + docGap.join('\n'));
 if (falseClose.length) console.log('\n[M] 假结案（失败）：\n' + falseClose.join('\n'));
 if (dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim, ...noEvidence, ...outOfSync, ...badDetail, ...badClaim, ...badCrit, ...sizeBad, ...piMissing, ...idxMissing, ...parentMiss].join('\n'));
