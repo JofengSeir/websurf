@@ -123,7 +123,7 @@ owner 裁定：**所有 debug 显示端的面高亮必须真实反映物理系�
 | WasmBrushPlane 增加 is_real_face 字段并随 planes_yup 输出 | 同上 |
 | Plane 增加 isRealFace?: boolean，adaptBrushes 直传不重算 | apps/debug/src/world/collider-adapter.ts、apps/debug/src/physics/physics/Collision/Collision.types.ts |
 | orderedFaces 只放行 isRealFace === true（缺字段按「未知即不画」） | apps/debug/src/renderer/collider-debug.ts |
-| 删除 computeChamferStrips / ebuildChamfers / 黄色线框 Group / setChamferDebugFlags | 同上 |
+| 删除 computeChamferStrips / rebuildChamfers / 黄色线框 Group / setChamferDebugFlags | 同上 |
 | 删除 showChamfers / chamferViewDistance 两个配置字段与页面上的复选框 + 滑块 | apps/debug/src/config.ts、apps/debug/web/index.html |
 
 **未做**：§5 的方案 A（真实倒角宽度）。它是物理行为变更，需要独立回归，不在本次规则范围内。
