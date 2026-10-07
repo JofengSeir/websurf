@@ -95,7 +95,7 @@
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
 | `.workbuddy/memory/**` | Agent 工作记忆（非文档树、不重编；仅作过程线索，不作事实来源） |
-| `skills/**` | **agent 环境陷阱 skill**（`skills/websurf-env-traps/SKILL.md`，开工前先读）。本机 DSH **不自动发现**项目级 skill（实测 `skill` 工具报 unknown），故由本文件 §0 第 7 条强制指向；若要让 `skill` 工具直接解析，需把该目录链接/复制进 `~/.agents/skills` |
+| `skills/**` | **agent 环境陷阱 skill**（`skills/websurf-env-traps/SKILL.md`，开工前先读）。仓库是**唯一源头**；本机已用 junction（零复制）链进 `~/.agents/skills/websurf-env-traps`，故 `skill` 工具可直接解析（2026-10-07 实测）；`AGENTS §0` 第 7 条同时保证不支持 skill 的工具也读得到 |
 
 ---
 

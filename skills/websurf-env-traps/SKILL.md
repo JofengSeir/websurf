@@ -60,8 +60,8 @@ description: "本仓（WebSurf，Windows + PowerShell 工作区）的环境与�
 ## 5. 本机工具/资源边界
 
 - **没有 Chrome**：`archify` 的 browser-check 会 skipped。先 `$env:ARCHIFY_CHROME="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"`（Edge 是 Chromium）。
-- **DSH 不自动发现项目级 skill**：本机 skill 来源是 home 级约定（`~/.dsh/skills`、`~/.agents/skills`、`~/.<工具>/skills`）；仓库内 `skills/**` 需链接/复制进共享池后 `skill` 工具才解析得到。⇒ 本仓规矩：**任何 agent 都必须读的东西，写进 `AGENTS.md` 指向的仓库文件**。
-- 过程产物进 `.tmp/`（已 gitignore）；`progress/` 是可见的过程记录（不作事实来源）；图表产物本仓放 `.archify/`（**未** 加进 gitignore ⇒ 会出现在 `git status`）。
+- **DSH 不自动发现项目级 skill**：本机 skill 来源是 home 级约定（`~/.dsh/skills`、`~/.agents/skills`、`~/.<工具>/skills`）；仓库内 `skills/**` 需链接/复制进共享池后 `skill` 工具才解析得到——**本机已用 junction 链好**（`~/.agents/skills/websurf-env-traps` → 仓库，零复制），`skill` 可直接解析。⇒ 本仓规矩：**任何 agent 都必须读的东西，写进 `AGENTS.md` 指向的仓库文件**（不依赖某个工具的 skill 发现）。
+- 过程产物进 `.tmp/`（已 gitignore）；`progress/` 是可见的过程记录（不作事实来源）；图表产物本仓放 `.archify/`（**已** 进 `.gitignore`，不再出现在 `git status`）。
 
 ## 6. 省 token 的作业方式（这条最省）
 
