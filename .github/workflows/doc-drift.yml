@@ -9,7 +9,16 @@
 #   B 文件:行号 锚点 —— 锚点是否超出文件总行数
 #   C 路径失效 —— 仅告警（历史叙述里常有「原 xxx 已移出」这类刻意保留的旧路径）
 #   D 裸文件名歧义 —— 仅计数（跨工程文档用 `app.ts` 之类简写，无法自动消歧，非错误）
-# A 或 B 非空即脚本 exit 1 → 本 workflow 失败。
+#   E 坏链 —— md 里的相对链接在磁盘上必须可解析（围栏代码块内跳过）
+#   F 行尾与 BOM —— 以**索引 blob**（提交形态）为准：不得含 CR、不得含 UTF-8 BOM
+#     （仓库 core.autocrlf=true ⇒ 规范形式是 LF，工作树的 CRLF 只是检出产物）
+#   G 待办同源 —— 全仓 T-### 必须存在于 TODO.md；ID 不重复；未结项证据列不得为空；
+#     规范面文档不得自行声明待办状态（progress/** 等豁免）
+# A / B / E / F / G 任一非空即脚本 exit 1 → 本 workflow 失败（C 与 D 仅告警）。
+#
+# 同批还跑 src/scripts/check-board-touch.mjs（看板使用规程的**软提示**，AGENTS.md §0.1）：
+#   改了 src/ apps/ documents/ 却没动 TODO.md、提交信息也没有 T-### 或「无待办影响」时打印警告；
+#   owner 2026-10-07 裁决只提示不拦提交，故以 continue-on-error 运行。
 #
 
 name: Doc Drift Check
@@ -30,6 +39,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # 软提示要比对提交区间，需要历史
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -38,4 +49,14 @@ jobs:
 
       - name: Run doc drift check
         run: node src/scripts/check-doc-drift.mjs
+      # 看板使用规程（AGENTS.md §0.1 第 3/5 条）的软提示：只警告、不拦提交。
+      - name: Board touch advisory (soft, push)
+        if: github.event_name == 'push'
+        continue-on-error: true
+        run: node src/scripts/check-board-touch.mjs --base "${{ github.event.before }}" --head "${{ github.sha }}"
+
+      - name: Board touch advisory (soft, PR)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: node src/scripts/check-board-touch.mjs --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.sha }}"
 

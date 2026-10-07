@@ -16,7 +16,21 @@
 5. **过程产物进 `.tmp/`**（不入库）；进展与历史记 `progress/`，不回写正文。
 6. **卡住就停**：六类情况必须停下上报，文件保持未提交（§6）。
 
+
+### 0.1 看板使用规程（取活 / 状态 / 收尾）
+
+1. **取活**：开工前先看 `TODO.md` 的「未结项」，一次只取一条（或一条的一个子项）；开工时把该行状态改为 `进行中`（同一提交）。
+2. **状态流转**：`待裁决` ——owner 定→ `待修` 或 `已结案`；`待修` ——开工→ `进行中` ——收尾→ `已结案`；`已取证待立项` 要先拆出任务书再动。
+3. **收尾必须在同一提交**：改代码或作出裁决的提交，要同时更新对应行的 `状态` 与 `证据`（`文件:行号` 或 `见详情`），提交信息里写明 `T-###`。
+4. **裁决记录**：owner 的结论写进那一行（或它的详情页），不要只留在对话里——看板是唯一可回查处。
+5. **不必动看板的情况**：纯格式/拼写、依赖升级、注释措辞，以及其他**不改变既有结论、也不新增结论**的改动——但提交信息要写明「无待办影响」。
+6. **过程产物**：计划与任务书进 `.tmp/`；进展与历史进 `progress/`（并在 §7.1 索引补一行）；不回写正文。
+7. **体量**：看板超过头注阈值（80 KB 或 300 条）时，按头注的分卷规则处理「已记录 + 已结案」。
+
+> 第 3、5 条由 CI 的**软提示**（`node src/scripts/check-board-touch.mjs`）提醒：改了 `src/` / `apps/` / `documents/` 却没动 `TODO.md`、提交信息也没有 `T-###` 或「无待办影响」时打印警告。**owner 2026-10-07 裁决：只提示、不拦提交**（不上硬门）。
+
 ---
+
 
 ## 1. 三条硬禁令（违反即返工）
 
@@ -35,9 +49,9 @@
 | 位置 | 状态 |
 |---|---|
 | 仓库根 `*.md` | 本文件（§0 工作流核心，唯一入口）+ `README.md` + `TODO.md`（待办看板）+ `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`；后四篇于 2026-09-22 由旧文档**合并重建**，细节源头为 git 历史 |
-| `documents/` | **46 篇**（2026-10-07 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
+| `documents/` | **45 篇**（2026-10-07 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
-| `progress/` | **过程记录**（不作事实来源）：`2026-09.md` / `2026-10.md`（原 §7.1 逐条原文）、`wg-status.md`（工作组状态与历史计划）、`pending-detail.md`（原 §7.3 待决原文）、`open-issues/01..07`（取证原文） |
+| `progress/` | **过程记录**（不作事实来源）：`2026-09.md` / `2026-10.md`（原 §7.1 逐条原文）、`wg-status.md`（工作组状态与历史计划）、`pending-detail.md`（原 §7.3 待决原文）、`open-issues/01..07`（取证原文）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由） |
 | `.archive/` | **已删除（2026-10-07 owner 裁决）**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇）已从工作区移除，原文仅存 git 历史；`.gitignore` 保留 `**/.archive/` 规则作归档位 |
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
@@ -78,6 +92,7 @@
 
 ```bash
 node src/scripts/check-doc-drift.mjs [文件]       # A–G 全 0（行数声明 / 锚点 / 路径 / 坏链 / 行尾与 BOM / 待办同源）
+node src/scripts/check-board-touch.mjs --staged   # 改了 src/ / apps/ / documents/ 却没动 TODO.md 时提示（软提示，不拦提交）
 grep -n -E "据文档|据注释|原设计|历史上|应该|可能|大概|似乎|推测" <新稿>   # 0 命中
 grep -n -E "test/game-core|dual-mode-harness" <新稿>   # 0 命中（两者均已不在工作区）
 cargo check -p websurf-phys                       # 或工程内 cargo check
@@ -191,6 +206,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 | 2026-09-30 | viewer 录像 tab 四件（owner：对话加进录像 tab 且要合主题合逻辑 /… | progress/2026-09.md:43 |
 | 2026-09-30 | 按键反推的根因链（留档：这一轮排掉了五个错误假设，最后落在采样口径上）：`keygues… | progress/2026-09.md:44 |
 | 2026-10-06 | P0 完成（owner："按实际起源的来，必要时破坏性修正"）：地面移动按起源原文修正三… | progress/2026-10.md:52 |
+| 2026-10-07 | 文档治理 v3（W1–W6）＋ 看板使用规程（a）＋ 软提示（b）… | progress/2026-10.md:53 |
 
 ### 7.2 工作组状态
 
