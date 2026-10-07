@@ -36,6 +36,8 @@ done.push(w('CLAUDE.md', ['# Claude Code 入口','',NOTE,'',CORE,''].join('\n'))
 done.push(w('GEMINI.md', ['# Gemini CLI 入口','',NOTE,'',CORE,''].join('\n')));
 done.push(w('.github/copilot-instructions.md', ['# GitHub Copilot 入口','',NOTE,'',CORE,''].join('\n')));
 done.push(w('.windsurfrules', ['# Windsurf 入口','',NOTE,'',CORE,''].join('\n')));
+done.push(w('.cline/rules/00-agent-workflow.md', ['# Cline / Roo Code 入口（.cline/rules 目录形态）','',NOTE,'',CORE,''].join('\n')));
+done.push(w('.cursorrules', ['# Cursor 入口（旧式 .cursorrules，Cline 亦自动探测）','',NOTE,'',CORE,''].join('\n')));
 done.push(w('.clinerules/00-agent-workflow.md', ['# Cline / Roo Code 入口','',NOTE,'',CORE,''].join('\n')));
 done.push(w('.cursor/rules/project.mdc', [
   '---',

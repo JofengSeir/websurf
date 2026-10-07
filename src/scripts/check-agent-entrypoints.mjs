@@ -9,7 +9,7 @@ const spec=fs.readFileSync(SPEC,'utf8').replace(/\r\n/g,'\n');
 const i=spec.indexOf(B), j=spec.indexOf(E);
 if(i<0||j<0) { console.log('[H] 规范文件缺少核心块标记'); process.exit(1); }
 const CORE=spec.slice(i,j+E.length).replace(/\n+$/,'');
-const TARGETS=['AGENTS.md','CLAUDE.md','GEMINI.md','.github/copilot-instructions.md','.windsurfrules','.clinerules/00-agent-workflow.md','.cursor/rules/project.mdc'];
+const TARGETS=['AGENTS.md','CLAUDE.md','GEMINI.md','.github/copilot-instructions.md','.windsurfrules','.clinerules/00-agent-workflow.md','.cline/rules/00-agent-workflow.md','.cursorrules','.cursor/rules/project.mdc'];
 const bad=[];
 for(const rel of TARGETS){
   const p=path.join(ROOT,rel);

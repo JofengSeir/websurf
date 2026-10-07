@@ -11,13 +11,13 @@
 | DSH | `AGENTS.md` | 原生 |
 | opencode | `AGENTS.md`（无该文件时回退 `CLAUDE.md`） | 原生 |
 | Claude Code | `CLAUDE.md` 或 `AGENTS.md` | 原生 + 薄适配 |
-| Cursor | `AGENTS.md` 或 `.cursor/rules/*.mdc` | 原生 + 薄适配 |
+| Cursor | `AGENTS.md`、`.cursor/rules/*.mdc`、`.cursorrules`（旧式） | 原生 + 薄适配 |
 | Cline / Roo Code | `.clinerules/`、`.cline/rules/`、`.cursorrules`、`.windsurfrules`、`AGENTS.md` | 原生 + 薄适配 |
 | Windsurf | `AGENTS.md`、`.windsurfrules`、`.windsurf/rules/` | 原生 + 薄适配 |
 | GitHub Copilot（VS Code） | `.github/copilot-instructions.md` | 薄适配 |
 | Gemini CLI | `GEMINI.md` | 薄适配 |
-| zcode | [待确认] | 待 owner 提供规则入口路径 |
-| workbuddy | [待确认]（`.workbuddy/memory/**` 是记忆区，非规则入口） | 待 owner 提供规则入口路径 |
+| zcode | 未纳入（owner 2026-10-07 确认不追） | 该工具只能读到 `AGENTS.md` 等通用入口 |
+| workbuddy | 未纳入（owner 2026-10-07 确认不追） | 记忆区 `.workbuddy/memory/**` 不是规则入口；只能读到通用入口 |
 
 「薄适配」= 文件内**不含规则正文**，只内嵌与其它入口逐字节相同的「工作流核心」块，并指向本文件。
 
