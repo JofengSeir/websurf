@@ -17,14 +17,15 @@
     "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
     "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
     "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
-    "skills/websurf-env-traps/SKILL.md": "1747974ec945dc2adde48019f03338774286779bf2125d0529e2e89f40bf3e8e",
-    "documents/norms/annotation-and-verification.md": "1138aaf2a11b86b54bd579f9ed6e81b6fff904015ef6dc4e9abb939c3d205a02",
+    "skills/websurf-env-traps/SKILL.md": "63bf5052ece6d2a256b9487af8a5fa262e5ccdc92478822f7be169492c9b0b3c",
+    "documents/norms/annotation-and-verification.md": "40f271606aad9363b61cfb24d756bbce306cf354b9e483283fab8c66f71a46b6",
     "documents/norms/scripts-and-ci.md": "9d3cd3b74c3667e418373b9e006c993b59cf1c191134877a3464646f6d0993ad",
     ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
     ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
     ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
     ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
-    "AGENTS.md": "40c979cdc2226c4816fc433cfe7d6c3e8b205c2c2f69af2403762027a1d20b8d"
+    "AGENTS.md": "53a2d312eade0322eeae2603c7e83cef4eb4ac7439bf8b7dbbdc7a44f020e270",
+    "documents/norms/local-path-hygiene.md": "fa7589d6fef4800bbf0920da32d2fe031877fc736111a8b8d1259d009d81f4a1"
   },
   "approvals": [
     {
@@ -100,14 +101,6 @@
       "consumed": true
     },
     {
-      "path": "documents/norms/annotation-and-verification.md",
-      "by": "owner(本轮指示：按优先级修审查项)",
-      "reason": "审查 P2-2：门禁已扩到 A–O，原文仍写「A–G 七项」——假陈述，改正",
-      "at": "2026-10-07",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "documents/norms/scripts-and-ci.md",
       "by": "owner(本轮指示：按优先级修审查项)",
       "reason": "审查：§4 里 docflow 的能力描述已过时（锚点按 目标:行号；CI 基线 HEAD^）",
@@ -116,17 +109,33 @@
       "consumed": true
     },
     {
-      "path": "skills/websurf-env-traps/SKILL.md",
-      "by": "owner(本轮指示：按优先级修审查项)",
-      "reason": "审查 P1-2：把本轮三条实测坑（CI 工作树==HEAD / 按位置存锚点假红 / 全量 sync 白洗）+ 只读闭环记进 §7",
+      "path": "AGENTS.md",
+      "by": "owner(本轮指示：强推脱敏处理)",
+      "reason": "历史脱敏重写后：文档里引用的短 SHA 按 旧→新 映射改写（9dbdc58 → 新 SHA）",
       "at": "2026-10-07",
       "task": "",
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
-      "by": "owner(本轮指示：按优先级修审查项)",
-      "reason": "审查 P1-7/P2-9：§0.4 补「分卷前取许可」步骤；§2 卷数 4→5（上一次 edit 因未先 read 被拒，许可未被使用）",
+      "path": "documents/norms/annotation-and-verification.md",
+      "by": "owner(本轮指示：强推脱敏处理)",
+      "reason": "历史脱敏重写后：文档里引用的短 SHA（9dbdc58）按映射改写",
+      "at": "2026-10-07",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "documents/norms/local-path-hygiene.md",
+      "by": "owner(本轮指示：强推脱敏处理 + 沉淀经验教训)",
+      "reason": "新建规范篇：公开仓库不留本机路径（owner：脱敏这件事要沉淀成规则）",
+      "at": "2026-10-07",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/websurf-env-traps/SKILL.md",
+      "by": "owner(本轮指示：强推脱敏处理 + 沉淀经验教训)",
+      "reason": "增两条实测坑：本机路径/用户名不得入库（体检 [P]）、amend 会让文档里的 SHA 失效",
       "at": "2026-10-07",
       "task": "",
       "consumed": true
@@ -1243,6 +1252,12 @@
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
         "line": 398
+      },
+      "T-606": {
+        "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-07",
+        "line": 399
       }
     },
     "OWNER.md": {
@@ -1300,77 +1315,83 @@
         "at": "2026-10-07",
         "line": 29
       },
-      "D-100": {
+      "D-014": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 35
       },
-      "D-101": {
+      "D-100": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 36
       },
-      "D-102": {
+      "D-101": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 37
       },
-      "D-103": {
+      "D-102": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 38
       },
-      "D-104": {
+      "D-103": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 39
       },
-      "D-105": {
+      "D-104": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 40
       },
-      "D-106": {
+      "D-105": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 41
       },
-      "D-001": {
+      "D-106": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 42
       },
-      "D-002": {
+      "D-001": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 43
       },
-      "D-003": {
+      "D-002": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 44
       },
-      "D-004": {
+      "D-003": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 45
       },
-      "**D-107**": {
+      "D-004": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 46
+      },
+      "**D-107**": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 47
       }
     }
   },
@@ -1579,7 +1600,9 @@
       "apps/game/src/worker/main.ts:1:1": "8d64a30d",
       "apps/viewer/src/replay/demopanel.ts:1238:1238": "8d64a30d",
       "src/scripts/docflow.mjs:201:201": "30f3eaae",
-      "progress/monthly/2026-10-5.md:9:9": "774eff54"
+      "progress/monthly/2026-10-5.md:9:9": "774eff54",
+      "src/scripts/check-doc-drift.mjs:442:442": "c5e51f97",
+      "progress/monthly/2026-10-5.md:11:11": "9b0c0354"
     },
     "apps/debug/scripts/path-baseline.md": {},
     "apps/viewer/scripts/dist-README.md": {},
@@ -4887,6 +4910,14 @@
   },
   "rebaselines": [
     {
+      "path": "TODO.md",
+      "at": "2026-10-07T17:21:51.156Z",
+      "by": "owner(强推脱敏处理)",
+      "reason": "脱敏重写后的连带同步：新增规范篇与 [P] 门禁、文档 SHA 重映射、T-606/D-014 登记",
+      "changed": 2,
+      "total": 166
+    },
+    {
       "path": "documents/viewer/implementation/scripts-and-test.md",
       "at": "2026-10-07T17:05:08.739Z",
       "by": "agent",
@@ -5197,14 +5228,6 @@
       "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
       "changed": 46,
       "total": 46
-    },
-    {
-      "path": "documents/debug/implementation/wasm-bindings.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 28,
-      "total": 28
     }
   ]
 }

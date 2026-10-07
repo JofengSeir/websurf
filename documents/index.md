@@ -84,6 +84,7 @@
 |---|---|
 | [`norms/annotation-and-verification.md`](norms/annotation-and-verification.md) | 事实来源与三条禁令、注释书写规范、验收判据、**已验证的陷阱清单**、记录约定 |
 | [`norms/scripts-and-ci.md`](norms/scripts-and-ci.md) | 三工程脚本准入、Windows 入口 `.cmd` 契约、`.github` 部署链约束（体检 `[N]` 硬查） |
+| [`norms/local-path-hygiene.md`](norms/local-path-hygiene.md) | 本机路径与隐私卫生：不许写什么、`[P]` 体检、泄漏后「改当前树 + 重写历史 + SHA 重映射」三步（体检 `[P]` 硬查） |
 
 ## 待解决问题（状态见 TODO.md）
 
@@ -99,4 +100,4 @@
 - **索引只列实际存在的文件**；新增或删除文档时同步更新本页，相对链接的坏链由 `node src/scripts/check-doc-drift.mjs` 的 `[E]` 项把关。
 - 三棵应用子树的节标题由统一模板固定（模板已在重编期定稿并验收，三棵子树现有顶层文档即定稿形态），不得自创分节；三篇 `implementation/` 的主题按各工程**实际目录**划分，因此篇名与篇数天然不同（debug 9 / game 10 / viewer 8）。
 - 文档里的代码锚点写成 `` `文件路径:行号` ``；行号随代码变动，改代码后跑 `node src/scripts/check-doc-drift.mjs` 复核越界（`[A]` 行数声明 / `[B]` 锚点越界）；「锚点处内容是否与正文一致」仍需人工开箱，体检不覆盖。
-- 应用子树的四篇顶层文档位于**旧文档的同名路径**上（旧文档树已从工作区删除、且按 B2 不重建）；正文全部按当前代码重写，与旧文档的逐字复用率为 0（重编期实测；历史台账已退役删除，git 历史 commit `9dbdc58` 可查）。
+- 应用子树的四篇顶层文档位于**旧文档的同名路径**上（旧文档树已从工作区删除、且按 B2 不重建）；正文全部按当前代码重写，与旧文档的逐字复用率为 0（重编期实测；历史台账已退役删除，git 历史 commit `6e0ecf6` 可查）。

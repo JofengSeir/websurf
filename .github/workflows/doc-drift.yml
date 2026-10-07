@@ -26,7 +26,9 @@
 #     deploy-pages.yml 的 matrix.app 与装配循环必须与 apps/ 目录三者一致；.cmd 须 @echo off + exit /b 且不写死用户目录
 #   O 文档契约（docflow）—— 调 node src/scripts/docflow.mjs check：只读 md 漂移 / 未落实审批 / 联动 /
 #     只读类新建与删除（划分与 approve·sync·claim·verify 见该脚本头注与 docflow.json）
-# A / B / C / E / F / G / L / M / N / O 任一非空即脚本 exit 1 → 本 workflow 失败（D 仅计数）。
+#   P 本机路径 —— 全仓文本不得出现私人目录名 / 本机绝对路径（占位符 <用户> / <本地工作区> / <盘符> 豁免）；
+#     规则与 2026-10-07 事故记录见 documents/norms/local-path-hygiene.md
+# A / B / C / E / F / G / L / M / N / O / P 任一非空即脚本 exit 1 → 本 workflow 失败（D 仅计数）。
 #
 # 同批还跑 src/scripts/check-board-touch.mjs（看板使用规程的**软提示**，AGENTS.md §0.1）：
 #   改了 src/ apps/ documents/ 却没动 TODO.md、提交信息也没有 T-### 或「无待办影响」时打印警告；

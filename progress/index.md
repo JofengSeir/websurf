@@ -32,7 +32,7 @@
 
 `2026-10` 按月切了 5 卷（每卷 ≤ 48 KB，按时间顺序）：`2026-10-1` → `2026-10-2` → `2026-10-3` → `2026-10-4` → `2026-10-5`。每卷头部有「上一卷 / 下一卷」链接；右列「什么时候看」写着用途。新进展追加到**当月最后一卷**（本页右列会随之更新）。
 
-## 进展索引（全量，105 条）
+## 进展索引（全量，106 条）
 
 > 由 `AGENTS.md §7.1` 分卷而来（入口文件 ≤ 32 KB）。**新增进展**追加到 `progress/monthly/` 的「当前写入目标」那一卷，然后在**本节**补一行（`AGENTS §7.1` 已于 2026-10-07 冻结，不再追加）。
 
@@ -40,18 +40,18 @@
 |---|---|---|
 | 2026-10-07 | owner 三问处置：物理通用性（答复）＋ debug 出生点「铁丝网」材质缺失修复 ＋… | progress/monthly/2026-10-1.md:10 |
 | 2026-10-07 | `.phy` 凸体补面接通物理（E′：VBSP `AddBrushBevels` 复刻 … | progress/monthly/2026-10-1.md:11 |
-| 2026-10-07 | bevel 第五路三缺陷修复（owner 复核 a8b9628 后报三问题，全部实测定位… | progress/monthly/2026-10-1.md:12 |
-| 2026-10-07 | owner 复核第五路线框报两问题，均已修（`16d9eba` 之后追加提交）。① 触发… | progress/monthly/2026-10-1.md:13 |
+| 2026-10-07 | bevel 第五路三缺陷修复（owner 复核 6dc3bb9 后报三问题，全部实测定位… | progress/monthly/2026-10-1.md:12 |
+| 2026-10-07 | owner 复核第五路线框报两问题，均已修（`24549e2` 之后追加提交）。① 触发… | progress/monthly/2026-10-1.md:13 |
 | 2026-10-07 | debug 新增第五路线框：BSP 原生 bevel 辅助碰撞面（白，独立开关）。原理考… | progress/monthly/2026-10-1.md:14 |
 | 2026-10-07 | P1 落地：运行时 chamfer 整段撤除，碰撞平面表回到「真实面 + BSP 原生 … | progress/monthly/2026-10-1.md:15 |
 | 2026-10-07 | 路线 A 落地：撞面推开改为「只在起点已嵌入时执行」—— 高刷屏下贴墙不再被推着走（ow… | progress/monthly/2026-10-1.md:16 |
-| 2026-10-07 | 「debug 预测定步 + 渲染插值」整条线（`4726c05` + `402da6d`… | progress/monthly/2026-10-1.md:17 |
+| 2026-10-07 | 「debug 预测定步 + 渲染插值」整条线（`68431a4` + `c32d03f`… | progress/monthly/2026-10-1.md:17 |
 | 2026-10-05 | surf_666 尖脊坡全链路：弹飞已修、卡死已修（B/E 实测否掉、走修法 A）、`s… | progress/monthly/2026-10-1.md:18 |
 | 2026-10-05 | surf_666 尖脊「弹飞」与「卡死」两条缺陷：定位、修复弹飞、卡死登记待裁决（own… | progress/monthly/2026-10-1.md:19 |
 | 2026-10-04 | 渲染收敛第二轮（owner 指令「合并过于保守」）：viewer 缺材质根因修复 + d… | progress/monthly/2026-10-1.md:20 |
-| 2026-10-04 | 渲染层下沉 Phase 5：终验与部署。fc8800e 推送后三道 CI 门全绿（Doc… | progress/monthly/2026-10-1.md:21 |
+| 2026-10-04 | 渲染层下沉 Phase 5：终验与部署。f3b9da3 推送后三道 CI 门全绿（Doc… | progress/monthly/2026-10-1.md:21 |
 | 2026-10-04 | 渲染层下沉 Phase 4：推广与收尾（game↔debug/viewer 渲染逻辑逐项… | progress/monthly/2026-10-1.md:22 |
-| 2026-10-03 | 3d 文档同步补完（`Doc Drift Check` 门修复）。触发：`e87b693… | progress/monthly/2026-10-2.md:11 |
+| 2026-10-03 | 3d 文档同步补完（`Doc Drift Check` 门修复）。触发：`e992f04… | progress/monthly/2026-10-2.md:11 |
 | 2026-10-03 | 渲染层下沉 Phase 3d：debug 对齐共享层（任务书 3d，debug 行为零变… | progress/monthly/2026-10-2.md:12 |
 | 2026-10-03 | 渲染层下沉 Phase 3c：viewer 对齐共享层 + 光照纪律统一（owner 裁… | progress/monthly/2026-10-2.md:13 |
 | 2026-10-03 | 渲染层下沉 Phase 3b：四模块落进 `src/renderer-shared/{s… | progress/monthly/2026-10-2.md:14 |
@@ -106,7 +106,7 @@
 | 2026-09-28 | game / viewer 页面观感重做（owner 要求：朴素、无花哨效果、不得参考现… | progress/monthly/2026-09-2.md:12 |
 | 2026-09-23 | plan 目录退役（owner 裁决）：原 `documents/plan/` 三篇控制… | progress/monthly/2026-09-2.md:13 |
 | 2026-09-29 | ui-style-plan 退役（owner 裁决）：风格计划系一次性工作件（P1–P4… | progress/monthly/2026-09-2.md:14 |
-| 2026-09-30 | 事故与补救：bd46461 误提交夹带另一 agent 的未提交工作（DEM 回放 20… | progress/monthly/2026-09-2.md:15 |
+| 2026-09-30 | 事故与补救：ffaf715 误提交夹带另一 agent 的未提交工作（DEM 回放 20… | progress/monthly/2026-09-2.md:15 |
 | 2026-09-30 | 远端入库面清理审查（owner：审查新推送、不该传的不传、`.gitignore` 收紧… | progress/monthly/2026-09-2.md:16 |
 | 2026-09-30 | 部署站入口页重做（owner 三点：三行入口文字对齐 / ctrl+W 卡片碍事改固定弹… | progress/monthly/2026-09-2.md:17 |
 | 2026-09-30 | README 时效性修订（owner：核对最新状况、注意可读性）：18 个 `文件:行号… | progress/monthly/2026-09-2.md:18 |
@@ -137,6 +137,7 @@
 | 2026-10-07 | 三工程脚本 / `.cmd` / 部署链约束层：21 件脚本逐件判接线（唯一孤儿 input-replay-verify.mjs，T-035 待裁决）＋ 新规范篇 `scripts-and-ci.md` ＋ 体检 `[N]`（豁免须明面登记；部署链 app 列表同源）… | progress/monthly/2026-10-4.md:31 |
 | 2026-10-07 | 文档契约 docflow（第一步）：md 分只读 10 / 可编辑 69，只读改·新建·删除需 owner 许可（approve→sync 重钉）；`claim`/`verify` 锁任务结束条件；体检 `[O]`；AGENTS.md 作为候选提升待定（§7.1 滚动索引冲突）… | progress/monthly/2026-10-4.md:32 |
 | 2026-10-07 | T-035 结案：退役零接线的 59 KB 孤儿脚本（改名 `_` 前缀、撤出索引、本地保留）；三处源码注释去引用并**保持行数**（指向 app.ts 的锚点近 400 处）；规范篇走 docflow 只读许可闭环… | progress/monthly/2026-10-4.md:33 |
+| 2026-10-07 | 全历史脱敏重写：`filter-branch` 索引过滤 417 提交（90 个泄漏 blob）、文档 73 处短 SHA 重映射、强推 main+tag；新增规范篇 `norms/local-path-hygiene.md` 与体检 `[P]`… | progress/monthly/2026-10-5.md:11 |
 | 2026-10-07 | T-132 结案（推送前顺带修）：smoke-cdp 的 `WS_PATH` 兜底去本机化（改为本工程 `node_modules/ws` + 明确报错，行数不变以保住下游锚点）；判据 `git grep "C:/Users/"` ⇒ 0 命中；记录里的本机路径一并脱敏… | progress/monthly/2026-10-5.md:10 |
 | 2026-10-07 | 独立审查子代理回报 ⇒ 门禁自审 P1 全修：锚点指纹改按「目标:行号」存比（插入不再假红）＋ `sync` 点名重钉且留痕 ＋ 控制层裸锚点纳入（162 处）＋ CI 变更基线（`HEAD^`）＋ `[C]` 转硬门 ＋ 覆盖率按相对路径 ＋ 分卷前取许可；顺带改正三处假陈述… | progress/monthly/2026-10-5.md:9 |
 | 2026-10-07 | T-134 / T-135 / T-038 结案：三工程 `.cmd` 入口对齐（multi 透传 / play.cmd 委派前置 / 端口占用只告警）＋ `.cmd` 行尾必须 CRLF（实测 LF 会让 cmd 切错命令行）＋ `.gitattributes` 钉死… | progress/monthly/2026-10-5.md:5 |

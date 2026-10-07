@@ -38,6 +38,9 @@
  *     ③ 三工程 `.cmd` 必须 @echo off + exit /b，且不得写死 `C:\Users\` 路径。
  *   O 文档契约（docflow）——直接调用 `node src/scripts/docflow.mjs check`（口径单源）：只读 md
  *     漂移 / 未落实审批 / 联动缺失 / 只读类新建与删除。划分与子命令见该脚本头注与 `docflow.json`。
+ *   P 本机路径：全仓文本不得出现**私人目录名 / 本机绝对路径**（Windows 用户目录、`/Users/<真名>`、
+ *     `/home/<真名>`、`<盘符>:\code\...` 一类）。占位符（`<用户>` / `<本地工作区>` / `<盘符>` …）豁免。
+ *     规则与 2026-10-07 事故记录见 `documents/norms/local-path-hygiene.md`。
  *
  * `resolve` 的候选来自 scopeRoots(doc) × APP_EXTRA / SHARED_EXTRA 的拼接，外加 live 里
  * 的后缀命中与裸文件名命中；评分 = 行数够 (4) + 在文档作用域内 (2) + 非裸名且后缀命中 (1)，
@@ -436,6 +439,24 @@ if (fs.existsSync(path.join(ROOT, depRel))) {
   }
 }
 
+// ===== [P] 本机路径：公开仓库不得出现私人目录 / 本机绝对路径（规则见 documents/norms/local-path-hygiene.md） =====
+const localPat = [
+  [/[A-Za-z]:[\\/][Uu]sers[\\/][A-Za-z0-9]/, 'Windows 用户目录'],
+  [/[A-Za-z]:[\\/]Documents and Settings[\\/][A-Za-z0-9]/, 'Windows 旧式用户目录'],
+  [/[\\/][Uu]sers[\\/][A-Za-z0-9][A-Za-z0-9._-]*/, 'Unix 家目录'],
+  [/[\\/]home[\\/][A-Za-z0-9][A-Za-z0-9._-]*/, 'Linux 家目录'],
+  [/[A-Za-z]:[\\/](?:code|projects|dev|work)[\\/][A-Za-z0-9]/, '本机工作区绝对路径'],
+];
+/** 占位符豁免：规则篇与文档举例要能写出「形状」而不算泄漏。 */
+const LOCAL_PLACEHOLDER = /<用户>|<本机用户>|<本地工作区>|<仓库根>|<盘符>|<真名>/g;
+const localPath = [];
+for (const f of live) {
+  if (!TEXT_EXT.test(f)) continue;
+  fs.readFileSync(path.join(ROOT, f), 'utf8').split(/\r?\n/).forEach((line, i) => {
+    const s = line.replace(LOCAL_PLACEHOLDER, '');
+    for (const [re, why] of localPat) if (re.test(s)) { localPath.push('  ' + f + ':' + (i + 1) + '  ' + why + '：' + line.trim().slice(0, 100)); break; }
+  });
+}
 // [O] 文档契约（docflow）：口径与实现在 src/scripts/docflow.mjs，这里只取它的退出码与逐条明细
 const docflow = [];
 try {
@@ -446,8 +467,8 @@ try {
   else docflow.push('  docflow check 非 0 退出（排查：node src/scripts/docflow.mjs check）');
 }
 
-const fail = drift.length || badAnchor.length || missing.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length || docGap.length || falseClose.length || contract.length || docflow.length;
-console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong + parentMiss.length} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending} ｜ 缺口未标注 ${docGap.length} ｜ 假结案 ${falseClose.length} ｜ 脚本/入口契约 ${contract.length} ｜ 文档契约 ${docflow.length}`);
+const fail = drift.length || badAnchor.length || missing.length || localPath.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length || docGap.length || falseClose.length || contract.length || docflow.length;
+console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜本机路径 ${localPath.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong + parentMiss.length} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending} ｜ 缺口未标注 ${docGap.length} ｜ 假结案 ${falseClose.length} ｜ 脚本/入口契约 ${contract.length} ｜ 文档契约 ${docflow.length}`);
 const todoKB = Buffer.byteLength(todoRaw, 'utf8') / 1024;
 const todoRowCount = (todoRaw.match(/^\|\s*T-\d{3}\s*\|/gm) || []).length;
 if (todoRaw && (todoKB > 80 || todoRowCount > 300)) console.log(`\n[提示] ${todoPath} 已 ${todoKB.toFixed(1)} KB / ${todoRowCount} 条，已达**提前分卷线 80 KB**（硬上限 96 KB / 300 条，见 AGENTS §0.4）——按头注的分卷规则处理「已记录 + 已结案」`);
@@ -459,6 +480,7 @@ if (broken.length) console.log('\n[E] 坏链（失败）：\n' + broken.join('\n
 if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set(eolBad)].join('\n'));
 const pendCount = boardRows.filter((c) => c[4] === '待裁决').length;
 if (pendCount > 50) console.log('\n[提示·待裁决压力] 待裁决 ' + pendCount + ' 条（阈值 50）——按 `AGENTS §0.1` 第 8 条：每轮先清一批再取新活。');
+if (localPath.length) console.log('\n[P] 本机路径（失败）：\n' + [...new Set(localPath)].join('\n') + '\n  —— 规则与处置见 documents/norms/local-path-hygiene.md');
 if (docflow.length) console.log('\n[O] 文档契约 docflow（失败）：\n' + docflow.join('\n'));
 if (contract.length) console.log('\n[N] 脚本与部署链契约（失败）：\n' + contract.join('\n'));
 if (docGap.length) console.log('\n[L] 文档缺口未标注（失败）：\n' + docGap.join('\n'));

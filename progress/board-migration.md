@@ -27,16 +27,16 @@
 
 | # | 内容 | 提交 |
 |---|---|---|
-| C1 | 建 `TODO.md`；`AGENTS.md` §7.3 的 68 条 + open-issues 7 项转 `T-###` | `0f67152` |
-| C2 | 34 个待办小节分诊：需决定的进看板，纯技术事实留文档并挂 `T-###` | `b700301` |
-| C3 | open-issues 整树迁 `progress/open-issues/`；引用面与源码注释收口 | `90c7384` |
-| C4 | 舍离：三篇 app `README.md`、`.archive/`、README §7 双导航、根 `sourceutils.js` | `dff15ee` |
-| C5 | `AGENTS.md` 收束：§7.1 84 条 → `progress/monthly/2026-09-*.md` / `2026-10.md`，§7.2 → `progress/wg-status.md` | `5bbac6b` |
-| C6 | 禁用词 2 处 + 锚点歧义（规范面归 0） | `1931d0c` |
-| C7 | 行尾：**前提被实测推翻**（见 §5） | `84e40cc` |
-| C8 | 门禁 `[E]` 坏链 / `[F]` 行尾 / `[G]` 待办同源，三条全上、失败即 exit 1 | `84e40cc` |
+| C1 | 建 `TODO.md`；`AGENTS.md` §7.3 的 68 条 + open-issues 7 项转 `T-###` | `dbabc0e` |
+| C2 | 34 个待办小节分诊：需决定的进看板，纯技术事实留文档并挂 `T-###` | `4bec3b4` |
+| C3 | open-issues 整树迁 `progress/open-issues/`；引用面与源码注释收口 | `caba350` |
+| C4 | 舍离：三篇 app `README.md`、`.archive/`、README §7 双导航、根 `sourceutils.js` | `7071593` |
+| C5 | `AGENTS.md` 收束：§7.1 84 条 → `progress/monthly/2026-09-*.md` / `2026-10.md`，§7.2 → `progress/wg-status.md` | `8b87218` |
+| C6 | 禁用词 2 处 + 锚点歧义（规范面归 0） | `f357eab` |
+| C7 | 行尾：**前提被实测推翻**（见 §5） | `81fdf28` |
+| C8 | 门禁 `[E]` 坏链 / `[F]` 行尾 / `[G]` 待办同源，三条全上、失败即 exit 1 | `81fdf28` |
 
-另有 owner 追加项：死代码/零调用点 48 条一律入看板（`e646a42`）、单入口化（`5bbac6b`）、注释收尾（`a978b8b`）。
+另有 owner 追加项：死代码/零调用点 48 条一律入看板（`100d2b8`）、单入口化（`8b87218`）、注释收尾（`9566089`）。
 
 **舍离清单 S1–S7**：S1 open-issues 迁出；S2 三篇 app README 并入各 overview 后删除；S3 34 个待办小节改名重生；
 S4 `.archive/`（57 文件 1.35 MB，先打包 `.tmp/backup-archive-*.zip`）删除；S5 README §7 压成指针；S6 根杂物删除；S7 三篇 `differences.md` 保留（唯一归处）。
@@ -59,7 +59,7 @@ S4 `.archive/`（57 文件 1.35 MB，先打包 `.tmp/backup-archive-*.zip`）删
 
 ## 6. 后续（任务书 v3）
 
-- W1 看板可核验（41 条补证据 + `[G]` 证据门）——已完成 `2cd2dfb`。
-- W2 看板↔文档双向（21 条孤儿项挂回模块文档）——已完成 `592b17f`。
+- W1 看板可核验（41 条补证据 + `[G]` 证据门）——已完成 `8b25ae0`。
+- W2 看板↔文档双向（21 条孤儿项挂回模块文档）——已完成 `c914a97`。
 - W3 待裁决分批清单 / W5 体量策略 / W6 本页；W4「看板使用规程 + CI 钩子」按 owner 指示**停下待议**。
 

@@ -3,7 +3,7 @@
 > 本文件是仓库**唯一生效的 Agent 规范与工作流入口**（§0 工作流核心）。所有 agent 工具都读根 `AGENTS.md`；**不再维护任何按工具分发的适配文件**。
 > **待办与状态只在根 `TODO.md`**（`T-###`）；**需要你拍板的决定只在根 `OWNER.md`**；历史进展与过程记录在 `progress/`；文档树导航见 `documents/index.md`。
 > **工况基线（owner 定调）**：受控工程 = `apps/debug` + `apps/game` + `apps/viewer` + 共享层 `src/`；`test/dual-mode-harness/` 已退役，**不恢复、不重编、不作事实来源**。
-> 历史控制文件（原 plan 目录三篇）已于 2026-09-23 退役删除，仅存 git 历史（commit `9dbdc58`）。
+> 历史控制文件（原 plan 目录三篇）已于 2026-09-23 退役删除，仅存 git 历史（commit `6e0ecf6`）。
 
 ## 0. 工作流核心（唯一入口，必读）
 
@@ -92,7 +92,7 @@
 | 位置 | 状态 |
 |---|---|
 | 仓库根 `*.md` | 本文件（§0 工作流核心，唯一入口）+ `README.md` + `TODO.md`（待办看板）+ `OWNER.md`（owner 决策队列）+ `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`；后四篇于 2026-09-22 由旧文档**合并重建**，细节源头为 git 历史 |
-| `documents/` | **45 篇**（2026-10-07 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
+| `documents/` | **46 篇**（2026-10-07 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
 | `progress/` | **过程记录**（不作事实来源），**导航见 `progress/index.md`**：`monthly/`（月度进展逐条原文；2026-09 切 2 卷、2026-10 切 5 卷）、`board/`（看板分卷：已记录 + 已结案）、`open-issues/01..07`（取证原文）、`pending-detail.md`（原 §7.3 台账原文）、`wg-status.md`（工作组状态）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由） |
 | `.archive/` | **已删除（2026-10-07 owner 裁决）**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇）已从工作区移除，原文仅存 git 历史；`.gitignore` 保留 `**/.archive/` 规则作归档位 |
@@ -149,7 +149,7 @@
 ## 5. 自检命令（每个文件提交前必跑）
 
 ```bash
-node src/scripts/check-doc-drift.mjs [文件]       # A–O 全 0（行数声明 / 锚点 / 路径 / 坏链 / 行尾与 BOM / 待办同源 / 体积 / 分卷可达 / 注释纪律 / 上级覆盖 / 缺口↔看板 / 假结案 / 脚本契约 / 文档契约）
+node src/scripts/check-doc-drift.mjs [文件]       # A–P 全 0（行数声明 / 锚点 / 路径 / 坏链 / 行尾与 BOM / 待办同源 / 体积 / 分卷可达 / 注释纪律 / 上级覆盖 / 缺口↔看板 / 假结案 / 脚本契约 / 文档契约 / 本机路径）
 node src/scripts/check-board-touch.mjs --staged   # 改了 src/ / apps/ / documents/ 却没动 TODO.md 时提示（软提示，不拦提交）
 node src/scripts/docflow.mjs check                     # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
 grep -n -E "据文档|据注释|原设计|历史上|应该|可能|大概|似乎|推测" <新稿>   # 0 命中
@@ -160,7 +160,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 
 > **提交与体检必须串成一步、红灯即终止**：先跑体检，非 0 就停（不要用「无论成败都继续」的链式命令把体检和 `git commit` 连在一起）。2026-10-07 两次红灯入库都出在这个写法上。
 
-**全量闸门**：全仓漂移体检（A–O）全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；README ↔ `documents/index.md` 口径一致。
+**全量闸门**：全仓漂移体检（A–P）全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；README ↔ `documents/index.md` 口径一致。
 
 ---
 
@@ -200,7 +200,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 
 **历史沿革**
 
-- 已结案项、规则与工具说明原存放于历史台账（原 plan 目录进度台账；2026-09-23 退役删除，仅存 git 历史 commit `9dbdc58`）：已结案 **19** 条、逐行原样移出的规则/工具说明 **11** 条。
+- 已结案项、规则与工具说明原存放于历史台账（原 plan 目录进度台账；2026-09-23 退役删除，仅存 git 历史 commit `6e0ecf6`）：已结案 **19** 条、逐行原样移出的规则/工具说明 **11** 条。
 - 本小节原有 **68** 条编号项（原 #1–#99，编号有跳号）于 2026-10-07 整体迁入 `TODO.md`，分配 **T-001…T-068**，总表保留「原号」列以便追溯；原文逐字保存在 `progress/pending-detail.md`。
 - 迁移边界情况：#94 原表行缺尾竖线、#88/#90 无状态列、#92 原状态列被正文里的裸竖线污染——三处均按正文判定状态，已在明细页注明。
 
