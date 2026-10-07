@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（173 条）
+## 未结项（172 条）
 
 ### 待裁决（63）
 
@@ -64,7 +64,6 @@
 - **T-125** 零帧轨道的口径不一致（列表面板有卡片、3D 无对象）　`viewer`
 - **T-128** dist 里的示例记录无法由当前源码路径重新产出　`viewer`
 - **T-129** 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080　`viewer`
-- **T-132** WS_PATH 兜底是本机绝对路径，换机器不可用　`viewer`
 - **T-137** 端口占用分支假定占用者服务的是 dist　`viewer`
 - **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
 - **T-142** 信息条重找跟随轨道，与 TrackSet.follow 策略重复　`viewer`
@@ -279,7 +278,7 @@
 | T-129 | 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:32 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "8080" -- apps/viewer/test/smoke-cdp.mjs@BT@ ⇒ 0 命中（缺省 SMOKE_URL 指向本工程端口 8100） | — |
 | T-130 | 冒烟按键断言（6 键）与当前 UI 八键不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:415 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 viewer 冒烟脚本 ⇒ 按键断言条数与当前 UI 八键一致 | — |
 | T-131 | 冒烟三条静态断言只对 single 产物成立 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:138 | documents/viewer/implementation/scripts-and-test.md | 判据：冒烟三条静态断言在 single 与多产物两种形态下都成立 ⇒ 各跑一次 exit 0 | — |
-| T-132 | WS_PATH 兜底是本机绝对路径，换机器不可用 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:45 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "WS_PATH" -- apps/viewer/test/smoke-cdp.mjs@BT@ ⇒ 兜底不含本机绝对路径（换机器可用） | — |
+| T-132 | WS_PATH 兜底是本机绝对路径，换机器不可用 | 配置·门禁 | viewer | 已结案 | apps/viewer/test/smoke-cdp.mjs:43 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "C:/Users/" -- apps/viewer/test/smoke-cdp.mjs@BT@ ⇒ 0 命中（兜底只认 WS_PATH 或本工程 node_modules/ws） | — |
 | T-133 | .gitignore 中间产物目录与 test:replay 实际输出不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/package.json:10 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 @BT@npm run test:replay@BT@ 后 @BT@git status --short@BT@ 无未忽略产物 ⇒ .gitignore 与实际输出目录一致 | — |
 | T-134 | build.cmd 无法产出 multi 产物 | 工具·流程 | viewer | 已结案 | apps/viewer/build.cmd:81 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "single-only" -- apps/viewer/build.cmd@BT@ ⇒ 0 命中；@BT@git grep -n "DIST_ARG" -- apps/viewer/build.cmd@BT@ ⇒ 命中（模式透传到 build-dist） | — |
 | T-135 | start.cmd 的 python 守卫让 dist/play.cmd 的 Node 兜底不可达 | 缺陷 | viewer | 已结案 | apps/viewer/start.cmd:35 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "play.cmd" -- apps/viewer/start.cmd@BT@ 的行号 < @BT@git grep -n "where python" -- apps/viewer/start.cmd@BT@ 的行号；桩测试（PATH 无 python + 桩 dist\play.cmd）⇒ 输出 [STUB] 且无解析错误 | — |

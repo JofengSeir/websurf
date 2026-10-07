@@ -40,9 +40,9 @@ async function loadWs() {
   } catch {
     /* 裸 ws 不可用：改用 WS_PATH 指向的副本 */
   }
-  const p =
-    process.env.WS_PATH ??
-    'C:/Users/<用户>/.workbuddy/binaries/node/workspace/node_modules/ws/index.js';
+  const p = (process.env.WS_PATH ?? join(VIEWER_ROOT, 'node_modules', 'ws', 'index.js')).replace(/\\/g, '/');
+  if (!existsSync(p)) throw new Error('CDP 冒烟需要 ws 包：在本工程 `npm i ws`，或用 WS_PATH 指向已有的安装');
+  /* 兜底只认本工程 node_modules 的相对位置，不写死任何用户目录（见 TODO.md T-132） */
   return (await import(`file:///${p}`)).default;
 }
 
