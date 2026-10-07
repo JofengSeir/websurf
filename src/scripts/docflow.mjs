@@ -123,7 +123,11 @@ function checkUnits(d) {
     for (const [id, want] of Object.entries(pins)) {
       const u = cur.get(id);
       if (!u) { if (!spec.allowDelete && !permit) bad.push('  ' + f + ' 单元 ' + id + ' 被删除（本文件不许删行；须先 approve）'); continue; }
-      if (protFp(u, spec) !== want.p && !permit) bad.push('  ' + f + ' 单元 ' + id + ' 的受保护列被改（列 ' + (spec.pinned || []).join(',') + '；须先 approve）');
+      const specH = sha(JSON.stringify({ p: spec.pinned || [], n: !!spec.allowNew, d: !!spec.allowDelete }));
+      if (protFp(u, spec) !== want.p && !permit) {
+        if (want.s && want.s !== specH) bad.push('  ' + f + ' 单元 ' + id + ' 的权限规格已变（现受保护列 [' + (spec.pinned || []).join(',') + ']）⇒ 复核后 approve 并 sync');
+        else bad.push('  ' + f + ' 单元 ' + id + ' 的受保护列 [' + ((spec.pinned || []).join(',') || '无') + '] 内容被改 ⇒ 须先 approve 并 sync');
+      }
     }
     for (const id of cur.keys()) if (!(id in pins) && !spec.allowNew && !permit) bad.push('  ' + f + ' 新增单元 ' + id + '（本文件不许 agent 新增行；须先 approve）');
   }
@@ -159,11 +163,65 @@ function refreshUnits(d) {
     for (const [id, u] of cur) {
       const p = protFp(u, spec);
       if (prev[id] && prev[id].p !== p && !permitFor(d, f)) { keep[id] = prev[id]; continue; }
-      keep[id] = { p, at: new Date().toISOString().slice(0, 10), line: u.line };
+      keep[id] = { p, s: sha(JSON.stringify({ p: spec.pinned || [], n: !!spec.allowNew, d: !!spec.allowDelete })), at: new Date().toISOString().slice(0, 10), line: u.line };
     }
     for (const [id, v] of Object.entries(prev)) if (!cur.has(id) && !spec.allowDelete && !permitFor(d, f)) keep[id] = v;
     d.unitPins[f] = keep;
   }
+}
+
+/** 锚点：文档里 `路径:行号` 指向的目标行内容指纹（按扫描序位置对齐存，8 位十六进制）。 */
+const ANCHOR_RE = /`([A-Za-z0-9_./\\-]+\.(?:ts|mts|mjs|cjs|js|rs|json|cmd|ps1|sh|yml|yaml|html|css|toml|py|md)):(\d+)(?:-(\d+))?`/g;
+/** 归一化一行（压空白）——纯格式化不算改动。 */
+const normLine = (s) => String(s).trim().replace(/\s+/g, ' ');
+function scanAnchors(text) {
+  const out = [];
+  for (const m of text.matchAll(ANCHOR_RE)) {
+    const target = m[1].split('\\').join('/');
+    const a = Number(m[2]); const b = m[3] ? Number(m[3]) : a;
+    const p = path.join(ROOT, target);
+    let fp = '-';
+    if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+      const L = fs.readFileSync(p, 'utf8').split(/\r?\n/);
+      const lines = [];
+      for (let i = a; i <= b; i++) lines.push(normLine(L[i - 1] ?? ''));
+      fp = sha(lines.join('\n')).slice(0, 8);
+    }
+    out.push({ target, line: a, end: b, fp });
+  }
+  return out;
+}
+/** 纳入锚点检查的 md：全仓已跟踪 md，排除过程记录 progress/ 与 skills/（历史与技能允许陈旧锚点）。 */
+function anchorDocs() {
+  return execFileSync('git', ['ls-files', '-z', '--', '*.md'], { cwd: ROOT, maxBuffer: 64e6 }).toString('utf8').split('\u0000').filter(Boolean)
+    .filter((f) => !f.startsWith('progress/') && !f.startsWith('skills/') && fs.existsSync(path.join(ROOT, f)));
+}
+/** 锚点内容指纹校验：哪一处指向的行内容变了，就点名哪一处。 */
+function checkAnchors(d) {
+  const bad = [];
+  const pins = d.anchorPins || {};
+  for (const f of anchorDocs()) {
+    const cur = scanAnchors(fs.readFileSync(path.join(ROOT, f), 'utf8'));
+    const want = pins[f];
+    if (!want) continue;
+    let shown = 0;
+    for (let i = 0; i < Math.min(cur.length, want.length); i++) {
+      if (cur[i].fp !== '-' && want[i] !== cur[i].fp) {
+        if (shown < 6) bad.push('  ' + f + ' 第 ' + (i + 1) + ' 个锚点（`' + cur[i].target + ':' + cur[i].line + '`）指向的行内容已变 ⇒ 复核文档后 sync');
+        shown++;
+      }
+    }
+    if (shown > 6) bad.push('  … ' + f + ' 同篇共 ' + shown + ' 处锚点内容已变');
+    if (cur.length !== want.length) bad.push('  ' + f + ' 锚点数变化（' + want.length + ' → ' + cur.length + '）⇒ 复核后 sync');
+  }
+  return bad;
+}
+/** 重钉锚点基线（sync 调用；重钉＝声明「我已复核」）。 */
+function refreshAnchors(d) {
+  d.anchorPins = d.anchorPins || {};
+  let n = 0;
+  for (const f of anchorDocs()) { const a = scanAnchors(fs.readFileSync(path.join(ROOT, f), 'utf8')); d.anchorPins[f] = a.map((x) => x.fp); n += a.length; }
+  return n;
 }
 
 /** 只读漂移：钉住的对不上、有钉的文件消失、只读类新文件未登记。 */
@@ -189,7 +247,7 @@ function checkCochange(d) {
 }
 function runCheck(quiet) {
   const d = load();
-  const bad = [...checkReadonly(d), ...checkCochange(d), ...checkUnits(d), ...checkBinds(d)];
+  const bad = [...checkReadonly(d), ...checkCochange(d), ...checkUnits(d), ...checkBinds(d), ...checkAnchors(d)];
   const pend = d.approvals.filter((a) => !a.consumed);
   if (pend.length) bad.push('  ' + pend.length + ' 条审批尚未落实（编辑完成后运行 sync 重钉）');
   if (!quiet) console.log('docflow check：只读规则 ' + readonlyGlobs(d).length + ' 条 / 钉 ' + Object.keys(d.pins).length + ' 个 / 审批 ' + d.approvals.length + ' 条 / 联动 ' + (d.cochange || []).length + ' 对');
@@ -209,6 +267,7 @@ function runReport() {
   if (us.length) {
     console.log('\n单元级功能权限（哈希只覆盖受保护列）：');
     for (const [f, s] of us) console.log('  ' + f + '  行匹配 ' + s.match + '  受保护列 [' + (s.pinned || []).join(',') + ']｜新增 ' + (s.allowNew ? '允许' : '需许可') + '｜删除 ' + (s.allowDelete ? '允许' : '需许可') + '｜已钉单元 ' + Object.keys(d.unitPins[f] || {}).length);
+    console.log('  锚点指纹：' + Object.keys(d.anchorPins || {}).length + ' 篇 / ' + Object.values(d.anchorPins || {}).reduce((a, v) => a + v.length, 0) + ' 处（只查 documents 与根文档，不含 progress 与 skills）');
     console.log((d.binds || []).length ? '\n强绑定：' + d.binds.map((b) => b.if + ' ⇒ ' + b.then.join(' , ')).join('；') : '\n强绑定：未配置（内核已就绪，配对策略待定）');
   }
   const cand = (d.policy && d.policy.candidates) || CANDIDATES;
@@ -228,8 +287,9 @@ function runApprove() {
 function runSync() {
   const d = load();
   const pend = d.approvals.filter((a) => !a.consumed);
-  if (!pend.length) { console.log('无待落实的审批'); return; }
   refreshUnits(d);
+  const anchors = refreshAnchors(d);
+  if (!pend.length) console.log('无待落实的审批；已重钉单元与 ' + anchors + ' 处锚点基线');
   for (const a of pend) {
     // 有单元规格的文件走 refreshUnits（字段级权限）；这里**只**给只读类文件建整篇钉，
     // 否则一个 approve 会把控制层文件整篇变只读，字段级权限就被盖住。
@@ -239,7 +299,7 @@ function runSync() {
     else { delete d.pins[a.path]; console.log('  移除钉（文件已删）：' + a.path); }
     a.consumed = true;
   }
-  save(d);
+  if (pend.length) save(d); else save(d);
 }
 function runClaim() {
   const d = load();
