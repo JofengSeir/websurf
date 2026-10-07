@@ -38,3 +38,13 @@
 4. **宁可硬失败**：产物缺 `index.html`、占位符 `__DEPLOY_*__` 未替换干净时必须 `exit 1`，不许静默发布残缺站点（现有实现已如此，见 `.github/workflows/deploy-pages.yml:164` 起）。
 5. **权限与并发**：`permissions` 最小化（`pages: write` / `id-token: write`）；`concurrency` 必须限制到同一 environment，避免并发发布互相覆盖。
 6. **不引入新 secret**：静态产物不得依赖仓库 secret；确需时先登记 `OWNER.md`。
+## 4. 共享门禁清单（`src/scripts/**`）
+
+> 本节同时满足「公开面必须有文档登记」：`src/scripts/**` 的每个工具都要在这里有一行，否则体检的覆盖率项会点名它。
+
+| 工具 | 作用 | 接线 |
+|---|---|---|
+| `check-doc-drift.mjs` | 文档漂移体检 A–O（含体积/分卷/注释纪律/上级覆盖/缺口↔看板/假结案/脚本契约/文档契约） | `.github/workflows/doc-drift.yml`；`AGENTS §5` |
+| `check-board-touch.mjs` | 看板触碰**软提示**（改了 src/apps/documents 却没动 TODO.md） | CI（`continue-on-error`） |
+| `docflow.mjs` | 文档契约：只读钉 / 单元级字段权限 / 锚点内容指纹 / 强绑定 | 体检 `[O]` 直接调用 |
+| `check-glb-parity.mjs` | debug 与 game 的**材质口径一致性**（同一张图必须产出同一套材质） | **未接线** ⇒ 见 `TODO.md` T-409 |

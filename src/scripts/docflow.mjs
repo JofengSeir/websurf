@@ -53,6 +53,8 @@ const cmd = argv[0] ?? 'report';
 const optAll = (name) => argv.flatMap((a, i) => (a === '--' + name && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
 const opt = (name, dflt) => (optAll(name).length ? optAll(name)[optAll(name).length - 1] : dflt);
 const flag = (name) => argv.includes('--' + name);
+/** 全量模式：CI 或显式 --all。本地默认「改动面模式」，只查受影响的目标，控住单次体检成本。 */
+const ALL_MODE = flag('all') || !!process.env.CI;
 /** `**` 跨目录、`*` 不跨目录的极简 glob。 */
 function globToRe(g) {
   let out = '';
@@ -117,6 +119,7 @@ const unitsOfFile = (d, f) => unitsOfText(d, f, fs.existsSync(path.join(ROOT, f)
 function checkUnits(d) {
   const bad = [];
   for (const [f, spec] of Object.entries(d.units || {})) {
+    if (!ALL_MODE && !changed().has(f)) continue;
     const cur = unitsOfFile(d, f);
     const pins = d.unitPins[f] || {};
     const permit = permitFor(d, f);
@@ -201,11 +204,13 @@ function checkAnchors(d) {
   const bad = [];
   const pins = d.anchorPins || {};
   for (const f of anchorDocs()) {
+    const docChanged = !ALL_MODE && changed().has(f);
     const cur = scanAnchors(fs.readFileSync(path.join(ROOT, f), 'utf8'));
     const want = pins[f];
     if (!want) continue;
     let shown = 0;
     for (let i = 0; i < Math.min(cur.length, want.length); i++) {
+      if (!ALL_MODE && !docChanged && !changed().has(cur[i].target)) continue;
       if (cur[i].fp !== '-' && want[i] !== cur[i].fp) {
         if (shown < 6) bad.push('  ' + f + ' 第 ' + (i + 1) + ' 个锚点（`' + cur[i].target + ':' + cur[i].line + '`）指向的行内容已变 ⇒ 复核文档后 sync');
         shown++;
@@ -224,11 +229,29 @@ function refreshAnchors(d) {
   return n;
 }
 
+/** 覆盖率：这些「公开面」必须被至少一篇文档（documents/** 或 AGENTS.md）提到——补 (a) 的盲区。 */
+const COVER_GLOBS = ['apps/*/scripts/*.mjs', 'apps/*/scripts/*.js', 'src/scripts/*.mjs'];
+function coverageFiles() {
+  const list = execFileSync('git', ['ls-files', '-z', '--', 'apps', 'src'], { cwd: ROOT, maxBuffer: 64e6 }).toString('utf8').split('\u0000').filter(Boolean);
+  const res = COVER_GLOBS.map(globToRe);
+  return list.filter((f) => res.some((r) => r.test(f))).sort();
+}
+/** 未被任何文档提到的公开面（阈值内只计数，见 policy.coverageMode）。 */
+function checkCoverage(d) {
+  const docs = ['AGENTS.md'].concat(execFileSync('git', ['ls-files', '-z', '--', 'documents/*.md'], { cwd: ROOT, maxBuffer: 64e6 }).toString('utf8').split('\u0000').filter(Boolean));
+  const text = docs.map((f) => (fs.existsSync(path.join(ROOT, f)) ? fs.readFileSync(path.join(ROOT, f), 'utf8') : '')).join('\n');
+  const bad = [];
+  for (const f of coverageFiles()) { const base = path.basename(f); if (!text.includes(base)) bad.push('  ' + f + ' 未被任何文档提到（公开面无人登记）⇒ 在 documents/** 补一行登记'); }
+  return bad;
+}
+
 /** 只读漂移：钉住的对不上、有钉的文件消失、只读类新文件未登记。 */
 function checkReadonly(d) {
   const bad = [];
   const md = new Set(listMd());
+  const chg = ALL_MODE ? null : changed();
   for (const [f, h] of Object.entries(d.pins)) {
+    if (chg && !chg.has(f)) continue;
     if (!md.has(f)) { bad.push('  ' + f + ' 已不存在（只读文件的删除须先 approve）'); continue; }
     if (hash(f) !== h && !permitFor(d, f)) bad.push('  ' + f + ' 内容已变且无审批 ⇒ owner 需 approve 后 sync');
   }
@@ -248,6 +271,9 @@ function checkCochange(d) {
 function runCheck(quiet) {
   const d = load();
   const bad = [...checkReadonly(d), ...checkCochange(d), ...checkUnits(d), ...checkBinds(d), ...checkAnchors(d)];
+  const cover = checkCoverage(d);
+  if (cover.length && (d.policy.coverageMode === 'hard')) bad.push(...cover);
+  if (cover.length && d.policy.coverageMode !== 'hard') console.log('  [覆盖率·计数] ' + cover.length + ' 个公开面未被文档提到（首批：' + cover.slice(0, 3).map((s) => s.trim().split(' ')[0]).join(', ') + '）');
   const pend = d.approvals.filter((a) => !a.consumed);
   if (pend.length) bad.push('  ' + pend.length + ' 条审批尚未落实（编辑完成后运行 sync 重钉）');
   if (!quiet) console.log('docflow check：只读规则 ' + readonlyGlobs(d).length + ' 条 / 钉 ' + Object.keys(d.pins).length + ' 个 / 审批 ' + d.approvals.length + ' 条 / 联动 ' + (d.cochange || []).length + ' 对');

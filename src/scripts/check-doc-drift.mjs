@@ -456,6 +456,8 @@ if (missing.length) console.log('\n[C] 路径失效（告警，可能是刻意�
 if (ambiguous) { const inProg = Object.entries(ambByDoc).filter(([k]) => k.startsWith(`progress/`)).reduce((s, [, v]) => s + v, 0); console.log(`\n[D] 歧义 ${ambiguous} 处（跨工程文档的裸文件名，需人工判读；非错误）｜规范面 ${ambiguous - inProg} 处、progress/ 过程记录 ${inProg} 处`); }
 if (broken.length) console.log('\n[E] 坏链（失败）：\n' + broken.join('\n'));
 if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set(eolBad)].join('\n'));
+const pendCount = boardRows.filter((c) => c[4] === '待裁决').length;
+if (pendCount > 50) console.log('\n[提示·待裁决压力] 待裁决 ' + pendCount + ' 条（阈值 50）——按 `AGENTS §0.1` 第 8 条：每轮先清一批再取新活。');
 if (docflow.length) console.log('\n[O] 文档契约 docflow（失败）：\n' + docflow.join('\n'));
 if (contract.length) console.log('\n[N] 脚本与部署链契约（失败）：\n' + contract.join('\n'));
 if (docGap.length) console.log('\n[L] 文档缺口未标注（失败）：\n' + docGap.join('\n'));
