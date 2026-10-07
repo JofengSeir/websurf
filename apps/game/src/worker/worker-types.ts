@@ -129,7 +129,7 @@ export interface SceneDataMessage {
   hasPvs: boolean;
   /** 纹理画质 manifest：`{ 纹理名(小写 basetexture): mosaic v4 字节码 }` JSON。
    * 画质切换（原始/压缩低清）时按贴图名查表，`mosaic_decode` 还原低清 PNG 替换。 */
-  mosaicManifest?: string;
+  mosaicManifest?: string; skyboxTexture?: import('three').CubeTexture | null;
 }
 
 /** `stats`：**本工程内无发送方、无接收点**（HUD 速度值由主线程

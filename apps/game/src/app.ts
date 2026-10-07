@@ -24,7 +24,7 @@
 
 import { createConfig } from './config.js';
 import type { RuntimeConfig } from './config.js';
-import { BspProcessor, decompress_mtz } from '../pkg/websurf_wasm.js';
+import { BspProcessor, decode_vtf_to_png, decompress_mtz } from '../pkg/websurf_wasm.js';
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { ACTION_LABELS, codeLabel, loadKeymap, type BindableAction } from './input/keymap.js';
@@ -33,7 +33,7 @@ import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
-import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js';
+import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js';
 import { RendererMain } from './renderer/renderer-main.js';
 import { PanelController } from './panel/panel-controller.js';
 import { SavePointStore, SAVEPOINT_MAX, type SavePoint } from './savepoint.js';
@@ -511,13 +511,13 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   showLoading(fileName);
   await new Promise((r) => setTimeout(r, 0)); // 让 UI 先更新（解析耗时较长）
   try {
-    const bundle = await buildWorldBundle(new BspProcessor(new Uint8Array(bytes)), {
+    const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const bundle = await buildWorldBundle(proc, {
       decompressMtz: decompress_mtz,
       onProgress: (stage) => advanceLoading(stage),
     });
 
     // 渲染场景（GLB + PVS + spawn）
-    advanceLoading('构建渲染场景 (GLB)');
+    advanceLoading('构建渲染场景 (GLB)'); const skyboxTexture = await buildSkyboxCubeTexture(skyboxFaces);
     await renderer.loadScene({
       type: 'scene-data',
       glb: bundle.glbBytes,
@@ -528,7 +528,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       spawn: bundle.spawn,
       glbSizeKb: Math.round(bundle.glbBytes.byteLength / 1024),
       numSpawnPoints: bundle.spawnList.length,
-      hasPvs: bundle.pvsJson.length > 2,
+      hasPvs: bundle.pvsJson.length > 2, skyboxTexture,
     });
 
     // 主线程物理世界（渲染线）

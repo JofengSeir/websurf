@@ -364,7 +364,7 @@ export class RendererMain {
 
 
     // 5. 回传场景包围盒最小 Y（`onSceneLoaded` 的调用方把它当死亡阈值转给 setDeathY）
-    this.onSceneLoaded?.(bbox.min.y);
+    if (data.skyboxTexture) this.scene.background = data.skyboxTexture; this.onSceneLoaded?.(bbox.min.y);
 
     // 6. 纹理画质 manifest + 按当前画质应用（mosaic 切换数据源）
     this.mosaicManifest = data.mosaicManifest
@@ -420,7 +420,7 @@ export class RendererMain {
       }
     }
     // three.js 渲染列表缓存按旧场景几何缓存条目，换图后清掉（2026-10-04 自 debug 对齐）
-    this.renderer?.renderLists?.dispose();
+    if (this.scene?.background instanceof THREE.Texture) { this.scene.background.dispose(); this.scene.background = new THREE.Color(0x222222); } this.renderer?.renderLists?.dispose();
     this.pvsManager = null;
     this.lodItems.length = 0;
     this.predPhys = null;

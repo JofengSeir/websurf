@@ -1235,65 +1235,71 @@
         "at": "2026-10-07",
         "line": 395
       },
+      "T-416": {
+        "p": "22ef4b14420cbea2d9ca2b6604995c0c8bd3129de01c1615bcda0148f39dd4ec",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-07",
+        "line": 396
+      },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 396
+        "line": 397
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 397
+        "line": 398
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 398
+        "line": 399
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 399
+        "line": 400
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 400
+        "line": 401
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 401
+        "line": 402
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 402
+        "line": 403
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 403
+        "line": 404
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 404
+        "line": 405
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 405
+        "line": 406
       }
     },
     "OWNER.md": {
@@ -1638,6 +1644,7 @@
       "src/renderer-shared/environment/fog-controller.ts:1:1": "8d64a30d",
       "src/wasm-core/model_integrator/mod.rs:1352:1352": "c21e5aa4",
       "progress/monthly/2026-10-5.md:17:17": "28dd72c2",
+      "apps/game/src/app.ts:514:514": "cd2e6c06",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -2534,7 +2541,7 @@
       "apps/viewer/package.json:11:11": "e4b7d3a2",
       "apps/viewer/package.json:12:12": "3e48d479",
       "apps/viewer/package.json:18:18~2": "15c96ebb",
-      "apps/game/src/app.ts:514:514": "78b4224e",
+      "apps/game/src/app.ts:514:514": "cd2e6c06",
       "apps/game/src/app.ts:558:558": "c51b06cf",
       "apps/game/src/worker/main.ts:508:508": "3d660efc",
       "apps/debug/src/app.ts:1796:1796": "d6173455",
@@ -2594,7 +2601,7 @@
       "apps/game/src/app.ts:799:799": "c6a519f2",
       "apps/game/src/app.ts:680:680": "64b9440a",
       "src/ts-shared/phys/world-builder.ts:162:162": "28f6634a",
-      "apps/game/src/app.ts:520:520": "bd243a71",
+      "apps/game/src/app.ts:520:520": "f7d28e32",
       "apps/game/src/app.ts:535:535": "e20bfcf4",
       "apps/game/src/app.ts:764:764": "8f45c670",
       "apps/game/src/app.ts:787:787": "57ba49c9",
@@ -2870,12 +2877,12 @@
       "apps/game/src/world/types.ts:12:12~2": "f39a4577",
       "apps/game/tsconfig.json:15:15": "b75c9199",
       "apps/game/package.json:8:8": "95a4d078",
-      "apps/game/src/app.ts:27:27": "2d95c82c",
+      "apps/game/src/app.ts:27:27": "62351ae1",
       "apps/game/src/worker/main.ts:65:65": "c08fab34",
       "apps/game/src/renderer/renderer-main.ts:34:34": "2aeaa87c",
       "apps/game/src/renderer/renderer-main.ts:42:42": "5161e24c",
       "apps/game/src/renderer/renderer-main.ts:785:785": "77e698ef",
-      "apps/game/src/app.ts:27:27~2": "2d95c82c",
+      "apps/game/src/app.ts:27:27~2": "62351ae1",
       "apps/game/src/wasm.d.ts:16:16~2": "e5eceedb",
       "apps/game/src/wasm.d.ts:16:16~3": "e5eceedb"
     },
@@ -2988,12 +2995,12 @@
       "apps/game/crates/wasm/src/lib.rs:35:35": "33da81ad",
       "apps/game/crates/wasm/Cargo.toml:24:24": "4e626621",
       "apps/game/tsconfig.json:15:15": "b75c9199",
-      "apps/game/src/app.ts:32:36": "f0d36136",
+      "apps/game/src/app.ts:32:36": "6a845665",
       "apps/game/src/renderer/renderer-main.ts:37:41": "ac78885f",
       "apps/game/src/worker/main.ts:66:73": "77dccf00",
       "apps/game/src/input/keyboard.ts:17:17": "4454fb37",
       "apps/game/src/input/keymap.ts:17:17": "a127184c",
-      "apps/game/src/app.ts:27:27": "2d95c82c",
+      "apps/game/src/app.ts:27:27": "62351ae1",
       "apps/game/src/worker/main.ts:65:65": "c08fab34",
       "apps/game/src/renderer/renderer-main.ts:34:34": "2aeaa87c",
       "apps/game/src/wasm.d.ts:16:16": "e5eceedb",
@@ -3113,7 +3120,7 @@
       "apps/game/src/app.ts:502:502": "dcc847e8",
       "apps/game/src/app.ts:507:507": "1b88bde1",
       "apps/game/src/app.ts:508:508": "4a207189",
-      "apps/game/src/app.ts:514:514": "78b4224e",
+      "apps/game/src/app.ts:514:514": "cd2e6c06",
       "apps/game/src/app.ts:521:521": "8c03750c",
       "apps/game/src/app.ts:536:536": "9016175f",
       "apps/game/src/renderer/renderer-main.ts:498:498": "10f13de5",
@@ -4955,6 +4962,54 @@
   },
   "rebaselines": [
     {
+      "path": "documents/game/sequences.md",
+      "at": "2026-10-07T20:35:42.644Z",
+      "by": "agent",
+      "reason": "T-416: game 天空盒接线（app.ts 27/36/514/520/531 行内容变更）",
+      "changed": 1,
+      "total": 184
+    },
+    {
+      "path": "documents/game/overview.md",
+      "at": "2026-10-07T20:35:42.295Z",
+      "by": "agent",
+      "reason": "T-416: game 天空盒接线（app.ts 27/36/514/520/531 行内容变更）",
+      "changed": 2,
+      "total": 114
+    },
+    {
+      "path": "documents/game/implementation/types.md",
+      "at": "2026-10-07T20:35:41.921Z",
+      "by": "agent",
+      "reason": "T-416: game 天空盒接线（app.ts 27/36/514/520/531 行内容变更）",
+      "changed": 2,
+      "total": 14
+    },
+    {
+      "path": "documents/game/implementation/app-entry.md",
+      "at": "2026-10-07T20:35:41.591Z",
+      "by": "agent",
+      "reason": "T-416: game 天空盒接线（app.ts 27/36/514/520/531 行内容变更）",
+      "changed": 1,
+      "total": 69
+    },
+    {
+      "path": "documents/game/differences.md",
+      "at": "2026-10-07T20:35:41.247Z",
+      "by": "agent",
+      "reason": "T-416: game 天空盒接线（app.ts 27/36/514/520/531 行内容变更）",
+      "changed": 1,
+      "total": 73
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-07T20:35:40.902Z",
+      "by": "agent",
+      "reason": "T-416: game 天空盒接线（app.ts 27/36/514/520/531 行内容变更）",
+      "changed": 1,
+      "total": 173
+    },
+    {
       "path": "TODO.md",
       "at": "2026-10-07T20:31:10.962Z",
       "by": "agent",
@@ -5225,54 +5280,6 @@
       "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
       "changed": 14,
       "total": 14
-    },
-    {
-      "path": "documents/game/sequences.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 184,
-      "total": 184
-    },
-    {
-      "path": "documents/game/overview.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 114,
-      "total": 114
-    },
-    {
-      "path": "documents/game/implementation/worker.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 50,
-      "total": 50
-    },
-    {
-      "path": "documents/game/implementation/wasm-crate.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 28,
-      "total": 28
-    },
-    {
-      "path": "documents/game/implementation/types.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 14,
-      "total": 14
-    },
-    {
-      "path": "documents/game/implementation/scripts.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 28,
-      "total": 28
     }
   ]
 }
