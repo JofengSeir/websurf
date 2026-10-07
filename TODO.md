@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07 已触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **427**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **428**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（177 条）
+## 未结项（178 条）
 
 ### 待裁决（63）
 
@@ -100,7 +100,7 @@
 - **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
 - **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 
-### 待修（113）
+### 待修（114）
 
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -208,6 +208,7 @@
 - **T-423** 【S4】surf_boreas 渲染偏暗：131 个 mesh 无贴图（含 water01/water_pure_beneath）、1976 个无 lightmap 走 fullbright、960 个落漏网兜底　`shared`
 - **T-425** 【S5】道具/树木光照偏暗：树贴图本身暗 + 仅 356/1562 mesh 带 `_vbsp_vlight`（值 0.05~0.33）+ 部分树两者皆无 ⇒ 黑剪影　`shared`
 - **T-426** 【S6】prop 光照：982/1562 mesh 无 vhv 也探不到 cube；探到的 cube ~0.08、vhv 0.05~0.33；`StaticPropLump` 未读 `m_AmbientCube[6]`（作者烘光）　`shared`
+- **T-427** 【S7·雪盖】雪在 `WorldVertexTransition` 的第二贴图（`alpine_snow01`）里，本仓全链路未处理 `$basetexture2`；混合 alpha 在 `lightmap_alpha_start` 指向的 lump（未读）　`shared`
 
 ### 已取证待立项（2）
 
@@ -409,6 +410,7 @@
 | T-424 | 【S2】3D 天空盒（Source 微缩景观）按正统做法接入：取 `sky_camera` 半径 `maxDim/scale` 内的微缩 mesh，复制后放大 `scale` 倍、把 `sky_camera` 点搬到世界原点；副本关深度读写 + `renderOrder=-1` 当天空层 ⇒ 玩家视点处能看到地图自带的微缩外景 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:1 | 本行即全部 | 判据：① owner 指认微缩区 (-3475,-11710,-3158)（实测该点 4000 HU 内有 101 个图元、距 `sky_camera` 7517）；② 站位 (-12048,14779.9,12768) 截图 ⇒ 背景出现灰色岩脊 + 雪斑 + 松树；③ A/B（`node .tmp/mapsurvey/mini-ab.mjs` 隐藏同名组）⇒ 隐藏后背景只剩纯色天空（`.tmp/mapsurvey/real-ab.png` vs `-nomini.png`）；④ debug `npm run typecheck`/`build:app` 通过。无 `sky_camera` 的图仍回退合成山脊（T-421） | — |
 | T-425 | 【S5】道具/树木光照偏暗：树贴图 `Arbre01` 本身暗（2048²，均值 RGB≈[72,70,56]）；场景 1562 mesh 中仅 356 带 `_vbsp_vlight`（采样值 0.05~0.33 偏暗），747 个 `Arbre01` 树 mesh 抽样数个既无 `_vbsp_vlight` 也无 node extras 立方体 ⇒ 只能按贴图原色渲染成黑剪影 | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1408 | progress/monthly/2026-10-5.md | 判据：先分类统计 props 三类（有 vhv / 只有 cube / 两者都无）各多少，并让「两者都无」的那类有可见兜底；再在同视点与 owner 参考图对比，树/岩石不再是纯黑 | — |
 | T-426 | 【S6】prop 光照数据：场景 1562 mesh 中 982 个既无 vhv 也探不到 cube ⇒ 走 fullbright；能探到的 cube 仅 ~0.08、vhv 0.05~0.33 ⇒ 整体偏暗。我们的 `StaticPropLump`（V6/V10/V11）**未读 `m_AmbientCube[6]`** —— 那是 Source 给静态道具的作者烘光 | 缺陷 | shared | 待修 | src/wasm-core/vbsp/data/game.rs:327 | progress/monthly/2026-10-5.md | 判据：先加临时导出验证 sprp 记录布局（boreas 的 sprp 在压缩 lump 内、raw 读取无效）确认记录里是否含 6×RGBExp32；据此让 prop 用作者烘光，再在同视点与 owner 参考图对比树/岩石不再是黑剪影 | — |
+| T-427 | 【S7·雪盖】地图的雪在 `WorldVertexTransition` 的**第二贴图**里：`materials/surf_lt_alpine/alpine_blendrocksnow.vmt` 的 `$basetexture2 = surf_lt_alpine/alpine_snow01`；而本仓**全链路都没有 `$basetexture2` / `WorldVertexTransition`**（Rust + TS 搜不到）⇒ 混合地形只画岩石那一半，雪永远不出现。混合系数在 `dface.lightmap_alpha_start` 指向的 **lightmap-alpha 数据**里：该字段我们解析进 `Face` 却**从未读取对应 lump** | 缺陷 | shared | 待修 | src/wasm-core/vbsp/data/mod.rs:1175 | progress/monthly/2026-10-5.md | 判据：① 读 lightmap-alpha lump 并逐 face 取到混合 alpha（探针能打印非零占比）；② 材质带第二贴图并在渲染端按该 alpha 混合（自定义 shader，glTF 核心表达不了）；③ 同视点截图地面出现雪色，与 owner 参考图的雪线一致 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-2 |
