@@ -82,7 +82,6 @@
 | 文档 | 回答什么 |
 |---|---|
 | [`norms/annotation-and-verification.md`](norms/annotation-and-verification.md) | 事实来源与三条禁令、注释书写规范、验收判据、**已验证的陷阱清单**、记录约定 |
-| [norms/agent-workflow.md](norms/agent-workflow.md) | **跨工具 agent 工作流**：工具入口矩阵、唯一事实来源、开工流程、禁令与停线、自检门禁、维护方式 |
 
 ## 待解决问题（状态见 TODO.md）
 

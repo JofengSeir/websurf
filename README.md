@@ -102,7 +102,6 @@ CI 三个 workflow（`.github/workflows/`）：
 |---|---|
 | [TODO.md](TODO.md) | **唯一待办看板**：状态、类型、归属、证据锚点、详情 |
 | [documents/index.md](documents/index.md) | 全部文档的总导航（共享层 / 三工程子树 / 规范 / 过程记录） |
-| [documents/norms/agent-workflow.md](documents/norms/agent-workflow.md) | **跨工具 agent 工作流**：入口矩阵、开工流程、禁令与自检门禁 |
 | [documents/norms/annotation-and-verification.md](documents/norms/annotation-and-verification.md) | 注释书写规范与验收判据、已验证的陷阱清单 |
 | [AGENTS.md](AGENTS.md) | 仓库级规范（三条禁令 / 六步法 / 自检 / 上报）与进度纪要 |
 ## 8. 已知缺口（摘要）（状态见 TODO.md）
