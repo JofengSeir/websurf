@@ -11,6 +11,11 @@
 #   D 裸文件名歧义 —— 仅计数（跨工程文档用 `app.ts` 之类简写，无法自动消歧，非错误）
 # A 或 B 非空即脚本 exit 1 → 本 workflow 失败。
 #
+# 同批还跑 src/scripts/check-agent-entrypoints.mjs（“agent 入口同源”门）：
+#   各 agent 工具入口（AGENTS.md / CLAUDE.md / GEMINI.md / .cursor / .clinerules /
+#   .windsurfrules / .github/copilot-instructions.md）内嵌的「工作流核心」块必须与
+#   documents/norms/agent-workflow.md 里的规范块逐字节一致；任何一处漂移即 exit 1。
+#
 # 为什么独立成一个 workflow：
 #   1. 脚本只用 node 内置模块，无需 npm ci，跑一次 < 1 分钟，不必挂进 45 分钟的 Pages 构建；
 #   2. Pages 工作流只在 push main 时触发，而文档漂移需要在 **PR** 阶段就拦住。
@@ -45,3 +50,6 @@ jobs:
 
       - name: Run doc drift check
         run: node src/scripts/check-doc-drift.mjs
+
+      - name: Check agent entrypoints
+        run: node src/scripts/check-agent-entrypoints.mjs

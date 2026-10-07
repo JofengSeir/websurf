@@ -1,5 +1,16 @@
 # AGENTS.md — 当前任务行为规范与进度纪要（文档/注释重编）
 
+<!-- AGENT-WORKFLOW-CORE:BEGIN -->
+## 工作流核心（跨工具统一，必读）
+
+1. **待办只在一处**：根 `TODO.md` 的 `T-###` 是唯一待办与状态来源；开工先看它的「未结项」，收尾在同一提交更新对应行。文档与注释只写技术事实，或写「见 TODO.md T-###」。
+2. **三条硬禁令**：禁以旧注释为依据；禁以旧文档为依据；禁推测——无法在代码中定位的结论标 `[待确认]` 并停下上报。
+3. **事实来源**：当前源码、构建脚本、配置，以及 `cargo check` / `npm run typecheck` / 漂移体检的实际输出；代码历史只作线索。
+4. **自检不绿不提交**：`node src/scripts/check-doc-drift.mjs` 与 `node src/scripts/check-agent-entrypoints.mjs` 全部为 0，改动涉及的工程 `npm run typecheck` 通过。
+5. **过程产物进 `.tmp/`**（不入库）；进展记 `progress/`，不回写正文。
+> 完整流程见 `documents/norms/agent-workflow.md`。
+<!-- AGENT-WORKFLOW-CORE:END -->
+
 > **本文件是当前唯一生效的 Agent 工作规范**，取代 2026-09-22 之前的旧 `AGENTS.md`。
 > **当前任务**：以**源码为唯一事实来源**，重写本仓库当前工况的全部文档与代码注释。
 > **控制文件已退役（2026-09-23 owner 裁决）**：原 plan 目录下三篇控制文件（project-survey 事实基线 / doc-rewrite-taskbook 任务书 / progress-log 进度台账）随重编任务完结删除，仅存 git 历史（最后一次完整版本为 commit `9dbdc58`）。**此后任务待办只记录于本文件**；注释书写规范与陷阱沉淀见 `documents/norms/annotation-and-verification.md`。
