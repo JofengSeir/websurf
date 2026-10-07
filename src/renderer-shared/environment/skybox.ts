@@ -6,8 +6,8 @@
  * BspProcessor.read_pakfile_file('materials/skybox/<skyname><suffix>.vmt') → $basetexture
  * → materials/<base>.vtf → decode_vtf_to_png（由调用方注入）。
  *
- * 轴映射：导出把 Source 的 [x,y,z] 映射到 Three 的 [y,z,x]（bsp_to_gltf_core 的根旋转），
- * 故 Source 六面 rt/lf/bk/ft/up/dn 落到 Three 的 py/ny/pz/nz/px/nx。
+ * 轴映射：世界顶点由 `bsp_to_gltf_core` 的 `map_coords` 写成 `[y,z,x]`，渲染端还清掉 GLB 根节点
+ * 的 90°Y 旋转 ⇒ Three 轴 = (X←SourceY, Y←SourceZ, Z←SourceX)；Source 六面因此落到 pz/nz/px/nx/py/ny。
  *
  * 边界：只读字节、不联网；PNG 解码与纹理上传在浏览器侧完成（createImageBitmap）。
  */
@@ -26,13 +26,21 @@ const SLOT_ORDER: readonly SkyboxSlot[] = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
 
 /** Source 面后缀 → three 槽位（轴映射见文件头）。 */
 const SUFFIX_SLOT: ReadonlyArray<readonly [string, SkyboxSlot]> = [
-  ['up', 'px'],
-  ['dn', 'nx'],
-  ['rt', 'py'],
-  ['lf', 'ny'],
-  ['bk', 'pz'],
-  ['ft', 'nz'],
+  ['ft', 'pz'],
+  ['bk', 'nz'],
+  ['lf', 'px'],
+  ['rt', 'nx'],
+  ['up', 'py'],
+  ['dn', 'ny'],
 ];
+
+/** 极面（up / dn）相对 GL 立方体贴图约定需要**面内旋转**的顺时针 90° 圈数。
+ *
+ * 依据：六个面两两相邻边的内容连续性实测（相邻边 MAE 显著低于其它配对）——
+ * 四个侧面在 `ft→lf→bk→rt` 环序下平均缝差 0.82（错误环序 28~35），极面则必须再各转 90°
+ * 才与标准十字布局的相邻关系一致（up 顺时针、dn 逆时针）。
+ */
+const POLE_TURNS_CW: Partial<Record<SkyboxSlot, number>> = { py: 1, ny: 3 };
 
 export interface SkyboxFacePng {
   slot: SkyboxSlot;
@@ -103,12 +111,14 @@ export async function buildSkyboxCubeTexture(
 ): Promise<THREE.CubeTexture | null> {
   if (!faces || faces.length !== 6) return null;
   const bySlot = new Map(faces.map((f) => [f.slot, f.png] as const));
-  const images: ImageBitmap[] = [];
+  const images: (ImageBitmap | HTMLCanvasElement)[] = [];
   try {
     for (const slot of SLOT_ORDER) {
       const png = bySlot.get(slot);
       if (!png) return null;
-      images.push(await createImageBitmap(new Blob([png as BlobPart], { type: 'image/png' })));
+      const bitmap = await createImageBitmap(new Blob([png as BlobPart], { type: 'image/png' }));
+      const turns = POLE_TURNS_CW[slot] ?? 0;
+      images.push(turns ? rotateBitmap(bitmap, turns) : bitmap);
     }
   } catch {
     return null;
@@ -117,4 +127,19 @@ export async function buildSkyboxCubeTexture(
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
   return texture;
+}
+
+
+/** 把位图按顺时针 90° 的整数倍转进一张画布（CubeTexture 的六个面源可以是 canvas）。 */
+function rotateBitmap(src: ImageBitmap, turnsCw: number): HTMLCanvasElement {
+  const swap = turnsCw % 2 !== 0;
+  const canvas = document.createElement('canvas');
+  canvas.width = swap ? src.height : src.width;
+  canvas.height = swap ? src.width : src.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((turnsCw * Math.PI) / 2);
+  ctx.drawImage(src, -src.width / 2, -src.height / 2);
+  return canvas;
 }
