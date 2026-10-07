@@ -176,7 +176,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 > **历史进度已移出本文件**：逐条原文见 `progress/monthly/2026-09-*.md`、`progress/monthly/2026-10-*.md`（过程记录，不作事实来源）。
 > 下表只作**索引**（日期 + 一句话 + 明细行号）；新增进展追加到对应月度文件，本表同步加一行。
 
-> **全量索引（94 条）见 `progress/index.md` 的「进展索引」**；为控制入口体积（§0.4：`AGENTS.md` ≤ 32 KB），本节只留最近 10 条。
+> **全量索引（95 条）见 `progress/index.md` 的「进展索引」**；为控制入口体积（§0.4：`AGENTS.md` ≤ 32 KB），本节只留最近 10 条。
 
 | 日期 | 摘要 | 明细 |
 |---|---|---|
@@ -190,6 +190,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 | 2026-10-07 | 项目级 agent 环境陷阱 skill（`skills/websurf-env-traps/SKILL.md`）＋ 实测本机 DSH 不自动发现项目级 skill（改由 §0 第 7 条强制指向）＋ 6 节 7.2 KB 陷阱清单… | progress/monthly/2026-10-4.md:26 |
 | 2026-10-07 | 文档已知缺口封堵机制（体检 [L]+[M]）＋ 自我纠错：T-129/T-132 假结案回滚（判据目录指错）＋ T-150 缺口打「已消除」… | progress/monthly/2026-10-4.md:29 |
 | 2026-10-07 | T-169 viewer 接入 KSF/gokz `.rec`（gokz-rec.ts 解析器 + 四类魔数分派 + 184 项自检全绿 + 体检等价实现全 0）… | progress/monthly/2026-10-4.md:28 |
+| 2026-10-07 | skill 链进 `~/.agents/skills`（junction 指向仓库，skill 工具可解析）＋ `.archify/` 进 `.gitignore`… | progress/monthly/2026-10-4.md:30 |
 
 ### 7.2 工作组状态
 

@@ -25,6 +25,9 @@
 # 生成者：apps/debug/scripts/plot-path.mjs（输出目录为 <输入 json 目录>/plot-<输入基名>/）
 **/plot-*/
 
+# ── 图表产物（生成者：archify 技能；每次执行生成一份带时间戳的目录，过程产物，不作事实来源）──
+.archify/
+
 # ── Python 运行期（生成者：python src/serve.py，见各工程 start-dev.cmd 与 play.cmd）──
 __pycache__/
 *.pyc
