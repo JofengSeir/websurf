@@ -4,11 +4,13 @@ setlocal EnableExtensions
 title WebSurf-viewer - Build
 cd /d "%~dp0"
 
-REM ---- viewer 是 single-only：底层 build-dist.mjs 支持 --multi，但本入口只接受 single ----
+set "DIST_MODE=single"
+if /i "%~1"=="multi" set "DIST_MODE=multi"
 if /i "%~1"=="" goto :mode_ok
 if /i "%~1"=="single" goto :mode_ok
+if /i "%~1"=="multi" goto :mode_ok
 echo [ERROR] Unsupported argument: %~1
-echo [HINT] viewer is single-only: usage: build.cmd [single]
+echo [HINT] Usage: build.cmd [single^|multi]
 pause
 exit /b 1
 :mode_ok
@@ -75,8 +77,10 @@ if errorlevel 1 (
 )
 echo [5/6] TypeScript ready.
 
-echo [6/6] Building dist package (single)...
-call node "%~dp0scripts\build-dist.mjs"
+echo [6/6] Building dist package (mode: %DIST_MODE%)...
+set "DIST_ARG="
+if /i "%DIST_MODE%"=="multi" set "DIST_ARG=--multi"
+call node "%~dp0scripts\build-dist.mjs" %DIST_ARG%
 if errorlevel 1 (
   echo [ERROR] dist build failed.
   echo [HINT] See the build-dist.mjs errors printed above, then retry.
@@ -86,7 +90,7 @@ if errorlevel 1 (
 
 echo ============================================================
 echo   WebSurf-viewer - build: complete
-echo   Output:  dist/ (single, WASM embedded)
+echo   Output:  dist/ (mode: %DIST_MODE%)
 echo   Run:     start.cmd
 echo ============================================================
 exit /b 0

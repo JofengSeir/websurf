@@ -26,9 +26,9 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（175 条）
+## 未结项（172 条）
 
-### 待裁决（64）
+### 待裁决（63）
 
 - **T-005** apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html…　`game`
 - **T-007** apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into…　`debug`
@@ -65,7 +65,6 @@
 - **T-128** dist 里的示例记录无法由当前源码路径重新产出　`viewer`
 - **T-129** 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080　`viewer`
 - **T-132** WS_PATH 兜底是本机绝对路径，换机器不可用　`viewer`
-- **T-134** build.cmd 无法产出 multi 产物　`viewer`
 - **T-137** 端口占用分支假定占用者服务的是 dist　`viewer`
 - **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
 - **T-142** 信息条重找跟随轨道，与 TrackSet.follow 策略重复　`viewer`
@@ -101,13 +100,12 @@
 - **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
 - **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 
-### 待修（109）
+### 待修（107）
 
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
 - **T-032** game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等）　`game`
 - **T-036** WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 coi-serviceworker.js 等）　`repo`
-- **T-038** 三工程入口 .cmd 的 2 条遗留（viewer build.cmd single-only 与底层 --multi 不一致、端口占用分支假定占用者服务 dist/）　`repo`
 - **T-039** 依赖表「本 crate 无引用点」清单（两法一致：源码引用面扫描 + cargo check 的 -W unused-crate-dep…　`repo`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
@@ -129,7 +127,6 @@
 - **T-130** 冒烟按键断言（6 键）与当前 UI 八键不一致　`viewer`
 - **T-131** 冒烟三条静态断言只对 single 产物成立　`viewer`
 - **T-133** .gitignore 中间产物目录与 test:replay 实际输出不一致　`viewer`
-- **T-135** start.cmd 的 python 守卫让 dist/play.cmd 的 Node 兜底不可达　`viewer`
 - **T-136** single 分支四段日志都写 [5/5] 步骤编号　`viewer`
 - **T-138** 光照模式下拉只写不回填，与运行期真实模式脱节　`viewer`
 - **T-140** 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复　`viewer`
@@ -234,7 +231,7 @@
 | T-033 | 【台账号·部分细化】夹具路径失效 → T-127；其余仍待裁 WG6b 6 条（test/maps/surf_null_4.replay 跨 3 文件失效等） | 缺陷 | repo | 待裁决 | 见详情 | progress/pending-detail.md | — | #64 |
 | T-035 | input-replay-verify.mjs 5 条（inputRecorder 永不落样本、f.dt 字段不存在、页面缺 7 个 i… | 缺陷 | debug | 已结案 | documents/debug/implementation/scripts.md | progress/pending-detail.md | 判据：@BT@git ls-files -- apps/debug/scripts/input-replay-verify.mjs@BT@ ⇒ 0 命中（已退役、不进版本库）；@BT@git grep -n "input-replay-verify" -- apps/debug/src@BT@ ⇒ 0 命中（源码注释不再引用） | #66 |
 | T-036 | WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 coi-serviceworker.js 等） | 未接线·死代码 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：剩余 15 条逐条 @BT@git grep -n "<符号>" -- src apps@BT@ ⇒ 只剩定义处 ⇒ 删除；删后体检 exit 0 且构建通过 | #67 |
-| T-038 | 三工程入口 .cmd 的 2 条遗留（viewer build.cmd single-only 与底层 --multi 不一致、端口占用分支假定占用者服务 dist/） | 配置·门禁 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：viewer @BT@build.cmd@BT@ 的 single-only 与底层 @BT@--multi@BT@ 一致；@BT@start.cmd@BT@ 端口占用分支不再假定占用者服务 @BT@dist/@BT@ | #69 |
+| T-038 | 三工程入口 .cmd 的 2 条遗留（viewer build.cmd single-only 与底层 --multi 不一致、端口占用分支假定占用者服务 dist/） | 配置·门禁 | repo | 已结案 | apps/viewer/build.cmd:81 / 三工程 start.cmd | progress/pending-detail.md | 判据：@BT@git grep -n "opening the browser to the running server" -- apps/debug/start.cmd apps/game/start.cmd apps/viewer/start.cmd@BT@ ⇒ 0 命中；@BT@git grep -n "single-only" -- apps/viewer/build.cmd@BT@ ⇒ 0 命中 | #69 |
 | T-039 | 依赖表「本 crate 无引用点」清单（两法一致：源码引用面扫描 + cargo check 的 -W unused-crate-dep… | 配置·门禁 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：@BT@cargo check -p websurf-phys@BT@ 等各 crate 无 @BT@unused_crate_dependencies@BT@ 警告 ⇒ 依赖表与源码引用面一致 | #70 |
 | T-040 | debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g… | 缺陷 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:1389 | progress/pending-detail.md | 判据：@BT@git grep -n "worker-b" apps/debug/src apps/game/src@BT@ ⇒ 两处措辞一致，或都改为不带外部实现引用的写法 | #71 |
 | T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:469 | progress/pending-detail.md | 判据：@BT@getLightingMode@BT@ 清点调用点（@BT@apps/debug/src/renderer/renderer-main.ts:469@BT@ 疑有一处）⇒ 真零调用则删，否则结案并改状态 | #78 |
@@ -283,8 +280,8 @@
 | T-131 | 冒烟三条静态断言只对 single 产物成立 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:138 | documents/viewer/implementation/scripts-and-test.md | 判据：冒烟三条静态断言在 single 与多产物两种形态下都成立 ⇒ 各跑一次 exit 0 | — |
 | T-132 | WS_PATH 兜底是本机绝对路径，换机器不可用 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:45 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "WS_PATH" -- apps/viewer/test/smoke-cdp.mjs@BT@ ⇒ 兜底不含本机绝对路径（换机器可用） | — |
 | T-133 | .gitignore 中间产物目录与 test:replay 实际输出不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/package.json:10 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 @BT@npm run test:replay@BT@ 后 @BT@git status --short@BT@ 无未忽略产物 ⇒ .gitignore 与实际输出目录一致 | — |
-| T-134 | build.cmd 无法产出 multi 产物 | 工具·流程 | viewer | 待裁决 | apps/viewer/build.cmd:8 | documents/viewer/implementation/scripts-and-test.md | — | — |
-| T-135 | start.cmd 的 python 守卫让 dist/play.cmd 的 Node 兜底不可达 | 缺陷 | viewer | 待修 | apps/viewer/start.cmd:11 | documents/viewer/implementation/scripts-and-test.md | 判据：无 python 环境下跑 @BT@apps/viewer/start.cmd@BT@ ⇒ 走 Node 兜底并成功启动（守卫不再遮蔽） | — |
+| T-134 | build.cmd 无法产出 multi 产物 | 工具·流程 | viewer | 已结案 | apps/viewer/build.cmd:81 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "single-only" -- apps/viewer/build.cmd@BT@ ⇒ 0 命中；@BT@git grep -n "DIST_ARG" -- apps/viewer/build.cmd@BT@ ⇒ 命中（模式透传到 build-dist） | — |
+| T-135 | start.cmd 的 python 守卫让 dist/play.cmd 的 Node 兜底不可达 | 缺陷 | viewer | 已结案 | apps/viewer/start.cmd:35 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "play.cmd" -- apps/viewer/start.cmd@BT@ 的行号 < @BT@git grep -n "where python" -- apps/viewer/start.cmd@BT@ 的行号；桩测试（PATH 无 python + 桩 dist\play.cmd）⇒ 输出 [STUB] 且无解析错误 | — |
 | T-136 | single 分支四段日志都写 [5/5] 步骤编号 | 工具·流程 | viewer | 待修 | apps/viewer/scripts/build-dist.mjs:315 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "\[5/5\]" -- apps/viewer/scripts@BT@ ⇒ single 分支四段日志编号与步骤序号一致 | — |
 | T-137 | 端口占用分支假定占用者服务的是 dist | 缺陷 | viewer | 待裁决 | apps/viewer/start.cmd:26 | documents/viewer/implementation/scripts-and-test.md | — | — |
 | T-138 | 光照模式下拉只写不回填，与运行期真实模式脱节 | 缺陷 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:98 | documents/viewer/implementation/ui.md | 判据：切换光照模式后下拉框回填值与 @BT@getLightingMode()@BT@ 一致（不再只写不回填） | — |

@@ -24,9 +24,9 @@
 三工程各 4 个：`build.cmd` / `dev.cmd` / `start.cmd` / `stop.cmd`。
 
 1. **形状**：`@echo off` + `chcp 65001`；每个失败分支 `exit /b <非 0>`，成功 `exit /b 0`。**不得用裸 `exit`**（会连调用方一起结束，日志汇总行可能丢失）。
-2. **参数透传**：`build.cmd` 必须把 `%*` 透传给 `npm run build:dist`，使 `build.cmd --multi` 等价于 `npm run build:dist -- --multi`；不得只接受 `single` 而拒绝其它参数（反例：`apps/viewer/build.cmd:8`，见 `T-134`）。
-3. **无硬依赖**：`dev.cmd` 可用 `python ../../src/serve.py <port>` 作 dev server，但缺 python 必须给出**可操作提示并回退**，不得静默失败；`start.cmd`（跑 dist 产物）**不得**要求 python（反例：`apps/viewer/start.cmd:11`，见 `T-135`）。
-4. **端口分两档，不得混用**：`dev.cmd` 跑 dev server 用 **8080 / 8090 / 8100**（与各工程 `package.json` 的 `dev` 一致，实测）；`start.cmd` 服务已打包的 `dist/` 用**相邻端口**（`apps/viewer/start.cmd:7` 实测缺省 `8101`），避免 dev 与 dist 互相抢占。占用探测只许提示或换端口，不许静默继续。
+2. **参数透传**：`build.cmd` 必须把 `%*` 透传给 `npm run build:dist`，使 `build.cmd --multi` 等价于 `npm run build:dist -- --multi`；不得只接受 `single` 而拒绝其它参数（`apps/viewer/build.cmd` 曾只接受 `single`，2026-10-07 依 `T-134` 对齐为与底层一致）。
+3. **启动链三级优先**：`start.cmd`（跑 dist 产物）必须**先用产物自带的启动器**（各工程 `dist/play.cmd`，由 `build-dist.mjs` 内联生成，自带 python → `npx serve` 回退），它不存在才回落到 `python src/serve.py`，再落到 `npx serve`；三级都不可用才报错退出。**守卫不得遮蔽更优路径**（反例：`apps/viewer/start.cmd` 顶部的 python 守卫曾使 `dist/play.cmd` 委派不可达，2026-10-07 依 `T-135` 下移）。`dev.cmd` 可用 `python ../../src/serve.py <port>`，缺 python 必须给出**可操作提示并回退**。
+4. **端口分两档，不得混用**：`dev.cmd` 跑 dev server 用 **8080 / 8090 / 8100**（与各工程 `package.json` 的 `dev` 一致，实测）；`start.cmd` 服务已打包的 `dist/` 用**相邻端口**（`apps/viewer/start.cmd:7` 实测缺省 `8101`），避免 dev 与 dist 互相抢占。占用时只许 `[WARN]` + 提示换端口，**不得假定占用者在服务本工程 `dist/`、不得自动开浏览器**（反例：三工程 `start.cmd` 原「[SKIP] … opening the browser」分支，2026-10-07 依 `T-038` 修）。
 5. **不写死用户路径**：不得出现 `C:\Users\<名>\…`（换机器即失效）。外部工具（浏览器等）走环境变量 + 常见安装路径探测。
 6. **不改全局状态**：不改系统 PATH / 注册表，不装依赖（依赖由 `npm ci` 负责）。
 

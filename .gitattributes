@@ -1,0 +1,6 @@
+# 检出形态（与 core.autocrlf 无关）：Windows 批处理必须 CRLF —— cmd.exe 按行解析，
+# LF 会把一行切错（实测：用 Node 写 LF 后 start.cmd 报 "'RT' is not recognized"）。
+# 索引形态仍是 LF（text 归一），与本仓「提交形态 = LF」的口径一致。
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

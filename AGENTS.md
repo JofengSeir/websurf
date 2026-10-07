@@ -179,7 +179,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 > **历史进度已移出本文件**：逐条原文见 `progress/monthly/2026-09-*.md`、`progress/monthly/2026-10-*.md`（过程记录，不作事实来源）。
 > 下表只作**索引**（日期 + 一句话 + 明细行号）；新增进展追加到对应月度文件，本表同步加一行。
 
-> **全量索引（97 条）见 `progress/index.md` 的「进展索引」**；为控制入口体积（§0.4：`AGENTS.md` ≤ 32 KB），本节只留最近 10 条。
+> **全量索引（98 条）见 `progress/index.md` 的「进展索引」**；为控制入口体积（§0.4：`AGENTS.md` ≤ 32 KB），本节只留最近 10 条。
 
 | 日期 | 摘要 | 明细 |
 |---|---|---|
@@ -197,6 +197,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 | 2026-10-07 | 三工程脚本 / `.cmd` / 部署链约束层：引用面实测出唯一孤儿 input-replay-verify.mjs（59 KB，T-035 待裁决）＋ 新规范篇 ＋ 体检 `[N]`（两次故障注入验证）… | progress/monthly/2026-10-4.md:31 |
 | 2026-10-07 | 文档契约 docflow：只读 10 / 可编辑 69 ＋ 哈希钉住 ＋ 审批（approve→sync）＋ 认领锁结束条件（claim→verify）＋ 体检 `[O]`；AGENTS.md 因 §7.1 滚动索引列为候选提升… | progress/monthly/2026-10-4.md:32 |
 | 2026-10-07 | T-035 结案：退役孤儿脚本 input-replay-verify.mjs（改名本地保留 + 三处注释去引用且**不动行数**以保 400 处锚点）+ 脚本/规范篇同步 + 判据实跑 0 命中… | progress/monthly/2026-10-4.md:33 |
+| 2026-10-07 | T-134 / T-135 / T-038 结案：三工程 `.cmd` 对齐（viewer 支持 multi、python 守卫下移让 dist\play.cmd 委派可达、端口占用不再假定）＋ 揪出 `.cmd` 工作树 LF 坑并加 `.gitattributes`… | progress/monthly/2026-10-5.md:5 |
 
 ### 7.2 工作组状态
 
