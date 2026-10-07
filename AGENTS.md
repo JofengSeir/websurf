@@ -1,7 +1,7 @@
 # AGENTS.md — 仓库 Agent 规范与工作流入口（唯一入口）
 
 > 本文件是仓库**唯一生效的 Agent 规范与工作流入口**（§0 工作流核心）。所有 agent 工具都读根 `AGENTS.md`；**不再维护任何按工具分发的适配文件**。
-> **待办与状态只在根 `TODO.md`**（`T-###`）；历史进展与过程记录在 `progress/`；文档树导航见 `documents/index.md`。
+> **待办与状态只在根 `TODO.md`**（`T-###`）；**需要你拍板的决定只在根 `OWNER.md`**；历史进展与过程记录在 `progress/`；文档树导航见 `documents/index.md`。
 > **工况基线（owner 定调）**：受控工程 = `apps/debug` + `apps/game` + `apps/viewer` + 共享层 `src/`；`test/dual-mode-harness/` 已退役，**不恢复、不重编、不作事实来源**。
 > 历史控制文件（原 plan 目录三篇）已于 2026-09-23 退役删除，仅存 git 历史（commit `9dbdc58`）。
 
@@ -37,6 +37,16 @@
 4. **验收判据**：详情页有判据就照它；没有**先在那一行补一句「怎么算做完」再动手**——没有判据的活不开工。
 5. **收尾（同一提交）**：更新该行 `状态`（→ `已结案`）与 `证据`（`文件:行号`），提交信息写 `T-###`；跑 §5 自检；进展补 `progress/<年-月>.md` 并在 §7.1 索引补一行。
 
+### 0.3 需要真人拍板的事 → 根 `OWNER.md`
+
+遇到任何**需要 owner 决定**的事（改契约、改状态口径、取舍范围、授权破坏性操作，以及 §6 的六类上报）：
+**先登记到根 `OWNER.md`**，写清 优先级 / 选项 / 我的建议 / **不决定的后果**；**不要在对话里临时追问**。
+答完把该行移入「已决」，附日期与结论，同时更新受影响的看板行。
+
+- 优先级：`P0` 不定就停摆（下游已有一批工作准备好）→ `P1` 改契约 / 状态语义 → `P2` 卫生与取舍。
+- 与看板的分工：看板 `待裁决` 是**工作等结论**；`OWNER.md` 是**人要做决定**。一条工作等裁决时两边都出现——
+  看板记那一行的状态，`OWNER.md` 记一条 `D-###`（可指向 `progress/decisions.md` 的批量明细）。
+
 ---
 
 
@@ -56,7 +66,7 @@
 
 | 位置 | 状态 |
 |---|---|
-| 仓库根 `*.md` | 本文件（§0 工作流核心，唯一入口）+ `README.md` + `TODO.md`（待办看板）+ `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`；后四篇于 2026-09-22 由旧文档**合并重建**，细节源头为 git 历史 |
+| 仓库根 `*.md` | 本文件（§0 工作流核心，唯一入口）+ `README.md` + `TODO.md`（待办看板）+ `OWNER.md`（owner 决策队列）+ `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`；后四篇于 2026-09-22 由旧文档**合并重建**，细节源头为 git 历史 |
 | `documents/` | **45 篇**（2026-10-07 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
 | `progress/` | **过程记录**（不作事实来源）：`2026-09.md` / `2026-10.md`（原 §7.1 逐条原文）、`wg-status.md`（工作组状态与历史计划）、`pending-detail.md`（原 §7.3 待决原文）、`open-issues/01..07`（取证原文）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由） |
@@ -216,6 +226,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 | 2026-10-06 | P0 完成（owner："按实际起源的来，必要时破坏性修正"）：地面移动按起源原文修正三… | progress/2026-10.md:52 |
 | 2026-10-07 | 文档治理 v3（W1–W6）＋ 看板使用规程（a）＋ 软提示（b）… | progress/2026-10.md:53 |
 | 2026-10-07 | 首次读者模拟 ＋ 循环硬伤修复（§0.2 日常流程 / [G] 同源门 / ID 分配规则）… | progress/2026-10.md:54 |
+| 2026-10-07 | 新增 owner 决策队列 `OWNER.md`（8 待决 / 7 已决，按 P0–P2 排序）＋ `AGENTS §0.3` 登记规则 ＋ `[G]⑥` 悬空 D-### 门… | progress/2026-10.md:55 |
 
 ### 7.2 工作组状态
 

@@ -169,6 +169,10 @@ const todoIds = [...todoRaw.matchAll(/\|\s*(T-\d{3})\s*\|/g)].map((m) => m[1]);
 const todoSet = new Set(todoIds);
 const dupRows = [...new Set(todoIds.filter((id, i) => todoIds.indexOf(id) !== i))].map((id) => `  ${todoPath}  ${id} 重复`);
 const dangling = [];
+const ownerPath = 'OWNER.md';                                   // owner 决策队列（控制层）
+const ownerRaw = fs.existsSync(path.join(ROOT, ownerPath)) ? fs.readFileSync(path.join(ROOT, ownerPath), 'utf8') : '';
+const ownerSet = new Set([...ownerRaw.matchAll(/D-\d{3}/g)].map((m) => m[0]));
+if (!ownerRaw) dangling.push('  缺少根 ' + ownerPath);
 const noEvidence = [];                       // [G] 未结项的证据列不得为空（可为 `文件:行号` 或 `见详情`）
 todoRaw.split(/\r?\n/).forEach((line) => {
   const s = line.trim();
@@ -187,6 +191,15 @@ for (const f of live) {
   lines.forEach((line, i) => {
     for (const m of line.matchAll(/T-\d{3}/g)) if (!todoSet.has(m[0])) dangling.push(`  ${f}:${i + 1}  ${m[0]} 不在 ${todoPath}`);
     if (!isExempt(f) && STATUS_RE.test(line)) statusClaim.push(`  ${f}:${i + 1}  ${line.trim().slice(0, 90)}`);
+  });
+}
+
+// [G] ⑥ 全仓任何 D-###（owner 决策编号）都必须在 OWNER.md 里真实存在
+for (const f of live) {
+  if (!/\.(md|ts|rs|mjs|js|json|html|css|yml|toml)$/.test(f)) continue;
+  const dlines = fs.readFileSync(path.join(ROOT, f), 'utf8').split(/\r?\n/);
+  dlines.forEach((line, i) => {
+    for (const m of line.matchAll(/D-\d{3}/g)) if (!ownerSet.has(m[0])) dangling.push('  ' + f + ':' + (i + 1) + '  ' + m[0] + ' 不在 ' + ownerPath);
   });
 }
 
