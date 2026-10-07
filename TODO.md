@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07 已触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **410**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **411**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -387,6 +387,7 @@
 | T-407 | `world/types.ts` 的 `rootNode` 字段 | 未接线·死代码 | shared | 待修 | apps/game/crates/wasm/src/lib.rs:1706 | documents/ts-shared/overview.md | 判据：`git grep -n "world/types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | 未接线·死代码 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/convert.rs:367 | documents/wasm-core/overview.md | 判据：`git grep -n "bsp_to_gltf_core/convert.rs" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-409 | `check-glb-parity.mjs` 门禁零接线（未进 package.json / CI，谁都不跑它） | 配置·门禁 | 共享 | 待修 | src/scripts/check-glb-parity.mjs:2 | documents/norms/scripts-and-ci.md | 判据：@BT@git grep -l "check-glb-parity" -- **/package.json .github@BT@ ⇒ 至少 1 个文件命中（已接线） | #409 |
+| T-410 | surf_boreas 的 patch 材质 include 前缀被叠加两次（本地又补 materials/ 而未剥 include 自带前缀）⇒ 21 个材质解析失败、539/1716 世界图元无贴图 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/materials.rs:448 | 本行即全部 | 判据：修前/修后同测 @BT@node .tmp/mapsurvey/probe2.mjs test/maps/surf_boreas.bsp@BT@ ⇒ missing 21 → 0；@BT@node .tmp/mapsurvey/probe2.mjs test/maps/surf_666.bsp@BT@ ⇒ 46 不变（证明只减不增）；@BT@git grep -n "trim_start_matches(\"materials/\")" -- src/wasm-core/bsp_to_gltf_core/materials.rs@BT@ ⇒ 1 命中。探针与原始输出在 .tmp/mapsurvey/（gitignored） | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-2 |

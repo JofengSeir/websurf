@@ -16,8 +16,8 @@
 //!
 //! 关键不变量：
 //! - VMT 与 VTF 各按 **4** 条候选路径依次查 pakfile：原名、全小写、全大写、`/` 换成 `_`
-//!   （前缀 `materials/`，后缀 `.vmt` / `.vtf`）。`resolve` 跟 include 时只用 **2** 条：
-//!   原文与全小写。
+//!   （前缀 `materials/`，后缀 `.vmt` / `.vtf`）。`resolve` 跟 include 时**先剥掉 include 自带的
+//!   `materials/` 前缀**（VBSP 生成的 patch 就这么写），再按原文与全小写两条候选查 pakfile。
 //! - pakfile 查找大小写敏感（`bsp.pack.get` 走 `zip.by_name`，按名精确匹配），
 //!   这正是候选里带全大写变体的原因。
 //! - 基名回退（`options.vmt_stem_index`）只在 4 条精确候选全部落空后启用；
@@ -445,7 +445,7 @@ pub(crate) fn load_material_bsp(
 
     let material = material.resolve(|path| {
         // 生成若干候选的路径格式
-        let path = path.trim_start_matches('/');
+        let path = path.trim_start_matches('/').trim_start_matches("materials/"); // 剥掉 VBSP patch include 自带的 materials/ 前缀
         let possible_paths = vec![
             format!("materials/{}", path),
             format!("materials/{}", path.to_lowercase())

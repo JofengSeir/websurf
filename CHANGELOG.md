@@ -25,6 +25,8 @@
 
 **记录导入**：viewer 记录页按文件头魔数分派两种记录格式——Shavit `.replay`（文本头 + 定长帧）与 KSF/gokz `.rec`（ksf.surf 回放文件；头部不含 tickrate，按 66.67 估算并在导入警告注明，策略见 `OWNER.md` D-010）。解析器见 `apps/viewer/src/replay/shavit-replay.ts` 与 `apps/viewer/src/replay/gokz-rec.ts`。
 
+**地图材质 patch**：修正 BSP 世界材质的 `patch` include 解析——VBSP 生成的 patch VMT 把 include 写成 `materials/xxx.vmt`，此前解析器又补一次 `materials/` 得到 `materials/materials/…` 而查不到，含 patch 的地图（如 `surf_boreas`）大片地形（21 个材质 / 539 世界图元）无贴图；现先剥 include 自带前缀再补回（`src/wasm-core/bsp_to_gltf_core/materials.rs:448`）。
+
 **文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范），篇目见 `README.md`「文档地图」与 `documents/index.md`。
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。

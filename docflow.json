@@ -1199,65 +1199,71 @@
         "at": "2026-10-07",
         "line": 389
       },
+      "T-410": {
+        "p": "caba40b1415c576a9be9731f16dc8767bd1bb52a65e8190fcbbf7fa20b0f55a5",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-07",
+        "line": 390
+      },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 390
+        "line": 391
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 391
+        "line": 392
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 392
+        "line": 393
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 393
+        "line": 394
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 394
+        "line": 395
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 395
+        "line": 396
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 396
+        "line": 397
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 397
+        "line": 398
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 398
+        "line": 399
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 399
+        "line": 400
       }
     },
     "OWNER.md": {
@@ -1409,7 +1415,8 @@
       "src/wasm-core/Cargo.toml:11:11": "39334f7a",
       "apps/debug/crates/wasm/Cargo.toml:12:12": "e3b0c442",
       "apps/game/crates/wasm/Cargo.toml:12:12": "e3b0c442",
-      "apps/viewer/crates/wasm/Cargo.toml:9:9": "f5efcadb"
+      "apps/viewer/crates/wasm/Cargo.toml:9:9": "f5efcadb",
+      "src/wasm-core/bsp_to_gltf_core/materials.rs:448:448": "c1f53f67"
     },
     "CONTRIBUTING.md": {},
     "OWNER.md": {},
@@ -1594,6 +1601,7 @@
       "apps/game/crates/wasm/src/lib.rs:1706:1706": "bb93b782",
       "src/wasm-core/bsp_to_gltf_core/convert.rs:367:367": "a803e10b",
       "src/scripts/check-glb-parity.mjs:2:2": "3f48e740",
+      "src/wasm-core/bsp_to_gltf_core/materials.rs:448:448": "c1f53f67",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -4906,9 +4914,26 @@
       "src/wasm-core/mosaic/decode.rs:64:64": "b62fa89a",
       "src/wasm-core/mosaic/mtz.rs:45:45": "eaae092a",
       "src/wasm-core/bsp_to_gltf_core/lightmap.rs:54:54": "558b50ef"
-    }
+    },
+    "documents/norms/local-path-hygiene.md": {}
   },
   "rebaselines": [
+    {
+      "path": "TODO.md",
+      "at": "2026-10-07T19:54:20.742Z",
+      "by": "agent",
+      "reason": "T-410: 新增 materials.rs:448 锚点",
+      "changed": 1,
+      "total": 167
+    },
+    {
+      "path": "CHANGELOG.md",
+      "at": "2026-10-07T19:54:20.383Z",
+      "by": "agent",
+      "reason": "T-410: 新增 materials.rs:448 锚点",
+      "changed": 1,
+      "total": 9
+    },
     {
       "path": "TODO.md",
       "at": "2026-10-07T17:21:51.156Z",
@@ -5212,22 +5237,6 @@
       "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
       "changed": 24,
       "total": 24
-    },
-    {
-      "path": "documents/debug/implementation/worker.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 41,
-      "total": 41
-    },
-    {
-      "path": "documents/debug/implementation/web.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 46,
-      "total": 46
     }
   ]
 }
