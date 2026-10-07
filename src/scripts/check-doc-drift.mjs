@@ -253,9 +253,14 @@ const piPath = path.join(ROOT, 'progress/index.md');
 const piRaw = fs.existsSync(piPath) ? fs.readFileSync(piPath, 'utf8') : '';
 const piMissing = [];
 if (!piRaw) piMissing.push('  缺少 progress/index.md（过程记录导航）');
-else live.filter((f) => f.startsWith('progress/') && f.endsWith('.md') && f !== 'progress/index.md').forEach((f) => {
-  if (!piRaw.includes(f.replace('progress/', ''))) piMissing.push('  ' + f + ' 未出现在 progress/index.md');
-});
+else {
+  const wt = piRaw.match(/当前写入目标\*\*[：:]\s*\x60?([^\x60\s|]+)\x60?/);
+  if (!wt) piMissing.push('  progress/index.md 缺「当前写入目标」行（写进展时无法确定目标卷，见 AGENTS §0.1 第 6 条）');
+  else if (!fs.existsSync(path.join(ROOT, wt[1]))) piMissing.push('  progress/index.md 的「当前写入目标」指向不存在的文件：' + wt[1]);
+  live.filter((f) => f.startsWith('progress/') && f.endsWith('.md') && f !== 'progress/index.md').forEach((f) => {
+    if (!piRaw.includes(f.replace('progress/', ''))) piMissing.push('  ' + f + ' 未出现在 progress/index.md');
+  });
+}
 
 // ===== [J] 代码注释纪律（in-file 块 >20 行 / 文件头 >60 行只计数；单行 >160 字符硬门） =====
 const cmtInFile = [];
@@ -314,8 +319,26 @@ const outOfSync = [
   ...[...tableOpen].filter((id) => !bulletSet.has(id)).map((id) => `  ${todoPath} 总表未结有 ${id}，列表里没有`),
 ];
 
-const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong;
-console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending}`);
+// [K] 每个 md 都必须有可识别的上级：AGENTS §2、documents/index.md 或 progress/index.md 必须点到它
+const agentsRaw = fs.existsSync(path.join(ROOT, 'AGENTS.md')) ? fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8') : '';
+const parentMiss = [];
+for (const f of live) {
+  if (!f.endsWith('.md')) continue;
+  let ok = false;
+  if (f === 'AGENTS.md') ok = true;
+  else if (f === 'documents/index.md' || f === 'progress/index.md') ok = agentsRaw.includes(f);
+  else if (f.startsWith('documents/')) ok = idxRaw.includes(f.replace('documents/', ''));
+  else if (f.startsWith('progress/')) ok = piRaw.includes(f.replace('progress/', ''));
+  else if (f.indexOf('/') < 0) ok = agentsRaw.includes(f);
+  else {
+    const parts = f.split('/');
+    ok = agentsRaw.includes(parts[parts.length - 1]) || agentsRaw.includes(parts.slice(0, -1).join('/') + '/') || agentsRaw.includes(parts[0] + '/**');
+  }
+  if (!ok) parentMiss.push('  ' + f + ' 没有任何上级导航点到它（AGENTS §2 / documents/index.md / progress/index.md）');
+}
+
+const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length;
+console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong + parentMiss.length} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending}`);
 const todoKB = Buffer.byteLength(todoRaw, 'utf8') / 1024;
 const todoRowCount = (todoRaw.match(/^\|\s*T-\d{3}\s*\|/gm) || []).length;
 if (todoRaw && (todoKB > 80 || todoRowCount > 300)) console.log(`\n[提示] ${todoPath} 已 ${todoKB.toFixed(1)} KB / ${todoRowCount} 条，超过体量阈值（80 KB 或 300 条）——按头注的分卷规则处理「已记录 + 已结案」`);
@@ -325,6 +348,6 @@ if (missing.length) console.log('\n[C] 路径失效（告警，可能是刻意�
 if (ambiguous) { const inProg = Object.entries(ambByDoc).filter(([k]) => k.startsWith(`progress/`)).reduce((s, [, v]) => s + v, 0); console.log(`\n[D] 歧义 ${ambiguous} 处（跨工程文档的裸文件名，需人工判读；非错误）｜规范面 ${ambiguous - inProg} 处、progress/ 过程记录 ${inProg} 处`); }
 if (broken.length) console.log('\n[E] 坏链（失败）：\n' + broken.join('\n'));
 if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set(eolBad)].join('\n'));
-if (dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim, ...noEvidence, ...outOfSync, ...badDetail, ...badClaim, ...badCrit, ...sizeBad, ...piMissing, ...idxMissing].join('\n'));
+if (dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim, ...noEvidence, ...outOfSync, ...badDetail, ...badClaim, ...badCrit, ...sizeBad, ...piMissing, ...idxMissing, ...parentMiss].join('\n'));
 
 process.exit(fail ? 1 : 0);
