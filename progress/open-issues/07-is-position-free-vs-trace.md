@@ -1,6 +1,6 @@
 # 07 · `is_position_free` 与 `trace` 在 .phy 三角网格上不一致 ⇒ 玩家被冻结
 
-**状态**：**主体已修**（修法 A 已实施，见 §8。真凶 = `models/props/666/s1_ramp1b.mdl` 的 .phy 凸包；
+**状态**：见 TODO.md T-065（迁移前自述「**主体已修**（修法 A 已实施，见 §8。真凶 = `models/props/666/s1_ramp1b.mdl` 的 .phy 凸包；」）
 病灶 = 判据的探测盒前探 16 HU 戳进前方上翘的坡，与盒高无关；修法 B / E 已实测否掉。
 **遗留**：§8.4 三条，其中 t≈115 的两 tick 跳变成因未定位）
 **回归**：`src/phys/stuck_gate_tests.rs`（2 项，含撤掉修复的对照实验）

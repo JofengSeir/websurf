@@ -1,6 +1,6 @@
 # 05 · `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用
 
-**状态**：已结项（2026-10-07）
+**状态**：见 TODO.md T-505（迁移前自述「已结项（2026-10-07）」）
 **取证日期**：2026-10-04
 **地图**：`test/maps/surf_666.bsp`
 
@@ -97,7 +97,7 @@ bevel sides: texture_info>=0 => 18157, <0 => 0
   `bevel` 非 0 表示倒角面，共享导出层自身不读它；各 app 的碰撞体导出把 bevel side **保留**进
   碰撞平面表（刀刃脊可站由它承担，owner 裁决）。
 - **bevel 的启用语义已定**（§5 当年悬置的问题）：不是"剔除"，而是**全量保留进碰撞平面表**；
-  实测与机器证据见 `documents/open-issues/01` §9（撤除运行时合成、bevel 接管，`bench:frames`
+  实测与机器证据见 `progress/open-issues/01` §9（撤除运行时合成、bevel 接管，`bench:frames`
   无劣化，`src/phys/bevel_rest_tests.rs` 钉住"停靠面由 bevel 决定"）。
 - `brush_sides` 表在共享层仍无读取点（读入内存的是各 app 的 wasm crate，经 `vbsp::Bsp` 使用）；
   `data/mod.rs` 注释已按此口径改写，本条不再挂账。

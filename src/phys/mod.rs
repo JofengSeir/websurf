@@ -516,7 +516,7 @@ impl PhysWorld {
     /// 碰撞箱取玩家**当前**箱，与 [`PhysWorld::debug_trace`] 同口径；不推进物理、不改状态。
     /// 名字经 [`PhysWorld::debug_tri_mesh_name`] 按下标 10 取。
     ///
-    /// 用途：`documents/open-issues/07` 的待裁决第 ① 条 —— 查明把玩家判成实心的到底是
+    /// 用途：`TODO.md T-065` 的待裁决第 ① 条 —— 查明把玩家判成实心的到底是
     /// 世界 brush 还是某个模型的 .phy 三角网格，以及是哪一个模型。
     #[wasm_bindgen]
     pub fn debug_collide_attrib(&mut self, x: f64, y: f64, z: f64) -> Vec<f64> {
@@ -622,7 +622,7 @@ impl PhysWorld {
     /// （`set_hull(16, 72, 54)` ⇒ 高 72、z 半伸 54）。而玩家盒 z 半伸 54 意味着身体向前
     /// 探出 54 HU —— 在任何一个"前方地面比脚下高"的坡上，那 54 HU 内的坡面都会落进身体盒，
     /// 于是判据必然报"卡在实体里"。本表把"多小的盒才不误报"直接量出来，
-    /// 使 `documents/open-issues/07` §7 第 ④ 条（判据是否选错盒）可裁决。
+    /// 使 `TODO.md T-065` §7 第 ④ 条（判据是否选错盒）可裁决。
     #[wasm_bindgen]
     pub fn debug_free_table(
         &mut self,
@@ -654,7 +654,7 @@ impl PhysWorld {
         out
     }
 
-    /// 「沿指定方向能否脱身」的扫描：`documents/open-issues/07` §8 修法 **E** 的实测入口。
+    /// 「沿指定方向能否脱身」的扫描：`TODO.md T-065` §8 修法 **E** 的实测入口。
     ///
     /// 对 `d = 1 ..= max_d` 每个整数距离，逐步做两件事并各记一个数：
     /// ① 用 `World::trace` 把当前盒体沿 `(nx,ny,nz)` 扫 `d` HU，取 `fraction`；
@@ -666,7 +666,7 @@ impl PhysWorld {
     /// 盒取玩家**当前**箱；不推进物理、不改任何状态。
     ///
     /// **为什么两个数都要**：只有 fraction = 1 不够 —— 沿法线抬起来可能仍落在实体里
-    /// （`documents/open-issues/07` §7 实测：卡死点沿 +y 抬 1~8 HU 全部仍不空闲）。
+    /// （`TODO.md T-065` §7 实测：卡死点沿 +y 抬 1~8 HU 全部仍不空闲）。
     /// 只有终点空闲也不够 —— 终点可能恰好在实体的另一侧，中间隔着材料。
     /// **两个同时成立**才等于「这一步真的能脱身」。
     #[wasm_bindgen]

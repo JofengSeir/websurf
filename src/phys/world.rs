@@ -99,7 +99,7 @@ pub struct TriMesh {
     ///
     /// 此前该字段在 `parse_tri_meshes` 的 `WasmTriMesh` 上**没有声明**，serde 按默认行为
     /// 忽略未知字段，于是 `export_model_phy_colliders` 明明吐了 `name`、落地后却查不到
-    /// 「这条三角形属于哪个模型」——`documents/open-issues/07` 的待裁决第 ① 条就是它。
+    /// 「这条三角形属于哪个模型」——`TODO.md T-065` 的待裁决第 ① 条就是它。
     pub name: String,
     /// 顶点表（Y-up、HU）。
     pub vertices: Vec<V3>,

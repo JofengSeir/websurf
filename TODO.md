@@ -16,9 +16,9 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（126 条）
+## 未结项（130 条）
 
-### 待裁决（85）
+### 待裁决（88）
 
 - **T-003** 旧 AGENTS.md 的通用工程规范（文件归属 / 临时区 / 产物 / 文档格式）未在本文件复述 —— 重编期间以任务书为准　`docs`
 - **T-005** apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html…　`game`
@@ -51,7 +51,7 @@
 - **T-060** .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01　`viewer`
 - **T-062** 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径…　`viewer`
 - **T-064** 8 篇 debug 文档存在「在界内但内容偏旧」的锚点簇（2026-10-03 本轮量化，未改）：src/scripts/check-d…　`docs`
-- **T-066** .phy 凸包表达不了曲面坡（documents/open-issues/06 §3.3 / §7.4 的遗留）：s1_ramp1b 实…　`shared`
+- **T-066** .phy 凸包表达不了曲面坡（progress/open-issues/06 §3.3 / §7.4 的遗留）：s1_ramp1b 实…　`shared`
 - **T-067** 修好卡死后暴露的两 tick 跳变（成因未定位）：修法 A 生效后，玩家在 surf_666 的 s1_ramp1b 上从 owner …　`shared`
 - **T-068** AGENTS.md 是全仓最大的文本文件，本轮起已超过 234 KB（301 行、最长单行 4031 字符 —— §7.1 的进度行本身…　`docs`
 - **T-101** 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错）　`viewer`
@@ -105,8 +105,11 @@
 - **T-308** 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套　`debug`
 - **T-309** 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24）　`debug`
 - **T-310** `set-auto-restore-hull` 只改面板侧标记，`src/phys/**` 无对应参数与读取点，开关不写物理实例　`debug`
+- **T-504** 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉　`shared`
+- **T-506** 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果）　`shared`
+- **T-507** check_stuck 的修法 D / C 未实施　`shared`
 
-### 待修（39）
+### 待修（40）
 
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
 - **T-065** check_stuck 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死　`shared`
@@ -147,15 +150,16 @@
 - **T-307** `frame-bench.mjs` 缺省地图路径 `<仓库根>/maps/surf_666.bsp` 不在工作区，不传第 4 参即打印「地图不存在」并 exit 2　`debug`
 - **T-311** `custom-teleports` 的 localStorage 写入失败被静默忽略，调用方拿不到失败信号　`debug`
 - **T-401** mosaic/decode.rs 的 code_to_img 不校验宽高下界、也不校验解码索引落在调色板色数内　`shared`
+- **T-503** mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效　`shared`
 
 ### 已取证待立项（2）
 
 - **T-109** 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正　`viewer`
 - **T-115** untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查　`viewer`
 
-> 另有 已记录 21 条、已结案 12 条见下表（保留 ID 供追溯，编号不复用）。
+> 另有 已记录 21 条、已结案 15 条见下表（保留 ID 供追溯，编号不复用）。
 
-## 总表（159 条）
+## 总表（166 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 原号 |
 |---|---|---|---|---|---|---|---|
@@ -223,8 +227,8 @@
 | T-062 | 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径… | 未接线·死代码 | viewer | 待裁决 | apps/viewer/src/replay/panel.ts:283 | progress/pending-detail.md | #93 |
 | T-063 | .dem 实体流：只有 1 个玩家实体采到位姿 | 缺陷 | viewer | 已结案 | — | progress/pending-detail.md | #94 |
 | T-064 | 8 篇 debug 文档存在「在界内但内容偏旧」的锚点簇（2026-10-03 本轮量化，未改）：src/scripts/check-d… | 文档口径 | docs | 待裁决 | apps/debug/src/worker/main.ts:483 | progress/pending-detail.md | #95 |
-| T-065 | check_stuck 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死 | 缺陷 | shared | 待修 | — | progress/pending-detail.md | #96 |
-| T-066 | .phy 凸包表达不了曲面坡（documents/open-issues/06 §3.3 / §7.4 的遗留）：s1_ramp1b 实… | 缺陷 | shared | 待裁决 | — | progress/pending-detail.md | #97 |
+| T-065 | check_stuck 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死 | 缺陷 | shared | 待修 | — | progress/open-issues/07-is-position-free-vs-trace.md | #96 |
+| T-066 | .phy 凸包表达不了曲面坡（progress/open-issues/06 §3.3 / §7.4 的遗留）：s1_ramp1b 实… | 缺陷 | shared | 待裁决 | — | progress/open-issues/06-phy-hull-facet-jump.md | #97 |
 | T-067 | 修好卡死后暴露的两 tick 跳变（成因未定位）：修法 A 生效后，玩家在 surf_666 的 s1_ramp1b 上从 owner … | 缺陷 | shared | 待裁决 | — | progress/pending-detail.md | #98 |
 | T-068 | AGENTS.md 是全仓最大的文本文件，本轮起已超过 234 KB（301 行、最长单行 4031 字符 —— §7.1 的进度行本身… | 文档口径 | docs | 待裁决 | — | progress/pending-detail.md | #99 |
 | T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错） | 缺陷 | viewer | 待裁决 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | — |
@@ -318,3 +322,10 @@
 | T-310 | `set-auto-restore-hull` 只改面板侧标记，`src/phys/**` 无对应参数与读取点，开关不写物理实例 | 未接线·死代码 | debug | 待裁决 | apps/debug/src/worker/worker-types.ts:146 | documents/debug/implementation/worker.md | — |
 | T-311 | `custom-teleports` 的 localStorage 写入失败被静默忽略，调用方拿不到失败信号 | 缺陷 | debug | 待修 | apps/debug/src/world/custom-teleports.ts:66 | documents/debug/implementation/world.md | — |
 | T-401 | mosaic/decode.rs 的 code_to_img 不校验宽高下界、也不校验解码索引落在调色板色数内 | 缺陷 | shared | 待修 | src/wasm-core/mosaic/decode.rs:146 | documents/materials/overview.md；documents/wasm-core/overview.md | — |
+| T-501 | debug 的 chamfer 平面削减体积为零却决定地面法线 ⇒ 坡顶站不住 / 被弹飞 | 缺陷 | debug | 已结案 | — | progress/open-issues/01-chamfer-is-not-a-bevel.md | 原 01 |
+| T-502 | chamfer 黄线框靠重新猜平面得到，与物理侧平面表不是同一套判据 | 缺陷 | debug | 已结案 | — | progress/open-issues/02-chamfer-visualization-guesswork.md | 原 02 |
+| T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | — | progress/open-issues/03-renderer-merge-normal-attribute.md | 原 03 |
+| T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | — | progress/open-issues/04-wasm-untextured-surface-color.md | 原 04 |
+| T-505 | src/wasm-core 侧 bevel / brushes 无消费者，注释却称导出层会用 | 文档口径 | shared | 已结案 | — | progress/open-issues/05-wasmcore-bevel-doc-vs-code.md | 原 05 |
+| T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | — | progress/open-issues/07-is-position-free-vs-trace.md | 原 07 §8.4-2 |
+| T-507 | check_stuck 的修法 D / C 未实施 | 缺陷 | shared | 待裁决 | — | progress/open-issues/07-is-position-free-vs-trace.md | 原 07 §8.4-3 |

@@ -1,6 +1,6 @@
 //! BSP 原生 bevel 承担「刀刃脊可站」的回归（2 项）：停靠面由 bevel 决定。
 //!
-//! 背景（owner 裁决，见 `documents/open-issues/01` §9）：wasm 导出层曾剔除
+//! 背景（owner 裁决，见 `TODO.md T-501` §9）：wasm 导出层曾剔除
 //! `side.bevel != 0` 的 BSP 原生 bevel side、改由运行时合成过棱切角平面承担
 //! 「盒停在刀刃脊顶」；该合成机制已整段撤除，平面表回到「真实面 + 原生 bevel」。
 //! 本文件用**手搓 brush**钉住机器可验证的证据：

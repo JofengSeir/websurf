@@ -1,4 +1,4 @@
-//! 卡死判据的着地门回归（`check_stuck` 修法 A，`documents/open-issues/07` §8 第 1 条）。
+//! 卡死判据的着地门回归（`check_stuck` 修法 A，`TODO.md T-065` §8 第 1 条）。
 //!
 //! 本文件钉住 `player.rs::check_stuck` 开头那道 `if p.on_ground { return false }`。
 //!
@@ -148,7 +148,7 @@ fn walking_into_a_higher_ledge_must_not_wiggle_in_place() {
     assert!(
         back_steps == 0,
         "朝 -z 顶住平台时不得出现朝 +z 的位移 tick（那是 check_stuck 每 tick 往回挤的表现，\
-         正是 documents/open-issues/07 描述的原地抖动）：实际 {} / 400 tick 出现后退，\
+         正是 TODO.md T-065 描述的原地抖动）：实际 {} / 400 tick 出现后退，\
          最大单 tick +{:.2} HU（起点 z={:.2}，终 z={:.2}）",
         back_steps,
         worst_back,

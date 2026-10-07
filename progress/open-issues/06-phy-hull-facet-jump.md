@@ -1,6 +1,6 @@
 # 06 · `.phy` 凸包表达不了曲面坡 ⇒ 玩家在 facet 交界处被一帧抬升十几 HU
 
-**状态**：**已处置**（根因是 `step_move` 的抬升闸门判据，已修，见 §7）
+**状态**：见 TODO.md T-066（迁移前自述「**已处置**（根因是 `step_move` 的抬升闸门判据，已修，见 §7）」）
 **发现日期**：2026-10-05
 **复现地图**：`test/maps/surf_666.bsp`
 **涉及对象**：`models/props/666/s1_ramp1b.mdl`（.phy 凸包，走 `triJson` / `trace_box_tri_entries`）

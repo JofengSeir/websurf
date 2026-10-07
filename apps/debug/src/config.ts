@@ -152,7 +152,7 @@ export interface DebugConfig {
   visViewDistance: number;
   // 原先此处有两个「显示过棱切平面线框 + 可视距离」字段，与页面上对应控件一并删除
   // （2026-10-04）：那路黄线框画的是过棱的切平面，零面积、不构成任何影响运动的表面，
-  // 属于「debug 画出不存在的物理面」。判定与理由见 `documents/open-issues/` 的 01 号篇。
+  // 属于「debug 画出不存在的物理面」。判定与理由见 `TODO.md T-501` 的 01 号篇。
   /** 准星射线检测开关（写进 `RendererMain.planeInfoEnabled`）。 */
   showPlaneInfo: boolean;
 }

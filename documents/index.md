@@ -87,16 +87,12 @@
 
 ## 待解决问题（状态见 TODO.md）
 
-| 文档 | 回答什么 |
+已取证缺陷与待决项的**状态只登记在根 `TODO.md`**（`T-###`）；逐篇取证原文（原 `documents/open-issues/`）已迁至 `progress/open-issues/`，属过程记录、不作事实来源。
+
+| 去处 | 回答什么 |
 |---|---|
-| [`open-issues/README.md`](open-issues/README.md) | 已取证未修复问题的索引、状态口径与关闭约定 |
-| [`open-issues/01-chamfer-is-not-a-bevel.md`](open-issues/01-chamfer-is-not-a-bevel.md) | debug 的 chamfer 平面削减体积为零，却决定了地面法线 → 坡顶站不住 / 被弹飞（已处置；2026-10-07 运行时合成整段撤除、原生 bevel 接管，见 §9） |
-| [`open-issues/02-chamfer-visualization-guesswork.md`](open-issues/02-chamfer-visualization-guesswork.md) | 黄线框靠重新猜平面得到，朝向用 AABB 中心而非凸包（已处置） |
-| [`open-issues/03-renderer-merge-normal-attribute.md`](open-issues/03-renderer-merge-normal-attribute.md) | `mergeGeometries` 因 `normal` 属性不一致失败，三应用合批静默失效 |
-| [`open-issues/04-wasm-untextured-surface-color.md`](open-issues/04-wasm-untextured-surface-color.md) | 无 `$basetexture` 的面按 `$color` 上色，大片无纹理面呈平白 |
-| [`open-issues/05-wasmcore-bevel-doc-vs-code.md`](open-issues/05-wasmcore-bevel-doc-vs-code.md) | `src/wasm-core` 侧 `bevel` / `brushes` 无消费者，注释却称导出层会用 |
-| [`open-issues/06-phy-hull-facet-jump.md`](open-issues/06-phy-hull-facet-jump.md) | `.phy` 凸包表达不了曲面坡，玩家在 facet 交界处被一帧抬升十几 HU（见 TODO.md T-066） |
-| [open-issues/07-is-position-free-vs-trace.md](open-issues/07-is-position-free-vs-trace.md) | check_stuck 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死；已用修法 A 修复，遗留 3 条（见 TODO.md T-065） |
+| [`../TODO.md`](../TODO.md) | 唯一待办看板：状态、类型、归属、证据锚点、详情 |
+| [`../progress/open-issues/`](../progress/open-issues/) | 7 篇取证原文（01–07），状态以 TODO.md 为准 |
 
 ## 维护约定
 
