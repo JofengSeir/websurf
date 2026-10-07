@@ -1217,65 +1217,71 @@
         "at": "2026-10-07",
         "line": 392
       },
+      "T-413": {
+        "p": "74539f8dca95afebcbbcb452c3bd8704fbf6a6ba21597434b97d150e1ed800af",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-07",
+        "line": 393
+      },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 393
+        "line": 394
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 394
+        "line": 395
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 395
+        "line": 396
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 396
+        "line": 397
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 397
+        "line": 398
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 398
+        "line": 399
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 399
+        "line": 400
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 400
+        "line": 401
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 401
+        "line": 402
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 402
+        "line": 403
       }
     },
     "OWNER.md": {
@@ -1617,6 +1623,7 @@
       "src/wasm-core/bsp_to_gltf_core/materials.rs:448:448": "c1f53f67",
       "src/wasm-core/bsp_to_gltf_core/materials.rs:475:475": "efb6962d",
       "src/renderer-shared/environment/skybox.ts:1:1": "8d64a30d",
+      "src/renderer-shared/environment/fog-controller.ts:1:1": "8d64a30d",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -2216,7 +2223,7 @@
       "apps/debug/tsconfig.json:26:26": "42653115",
       "apps/debug/src/app.ts:33:33": "76752942",
       "apps/debug/src/app.ts:35:35": "6c2e3dbe",
-      "apps/debug/src/app.ts:36:36": "cf2e89d5",
+      "apps/debug/src/app.ts:36:36": "474c1085",
       "apps/debug/src/worker/main.ts:27:27": "e0cbdab3",
       "apps/debug/src/worker/main.ts:32:32": "0a2d4e9c",
       "apps/debug/src/worker/main.ts:33:33": "e1ddfbf4",
@@ -2326,7 +2333,7 @@
       "apps/debug/src/worker/main.ts:483:483": "fe122e2c",
       "apps/debug/src/app.ts:380:380": "ec95cb1d",
       "apps/debug/src/app.ts:1728:1728": "1e0e8b4d",
-      "apps/debug/src/app.ts:1780:1780": "1780021f",
+      "apps/debug/src/app.ts:1780:1780": "5fda667e",
       "apps/debug/src/app.ts:1817:1817": "c19bb7c2",
       "apps/debug/src/app.ts:1819:1819": "f2845356",
       "apps/debug/src/app.ts:1829:1829": "22bf4012",
@@ -2432,7 +2439,7 @@
       "apps/debug/src/app.ts:352:352~2": "29576b54",
       "apps/debug/src/main-wasm.ts:38:38": "e66893d6",
       "apps/debug/src/app.ts:1745:1745": "92130cc9",
-      "apps/debug/src/app.ts:1765:1765": "cd2e6c06",
+      "apps/debug/src/app.ts:1765:1765": "825c0dba",
       "apps/debug/src/app.ts:1752:1752": "d10b36aa",
       "apps/debug/src/app.ts:405:405~2": "42af036c",
       "apps/debug/src/worker/main.ts:383:383~2": "0c490e15",
@@ -4935,6 +4942,30 @@
   "rebaselines": [
     {
       "path": "documents/debug/sequences.md",
+      "at": "2026-10-07T20:18:19.422Z",
+      "by": "agent",
+      "reason": "T-413: app.ts:1765/1780 解析行内容变更（雾接线）",
+      "changed": 2,
+      "total": 148
+    },
+    {
+      "path": "documents/debug/overview.md",
+      "at": "2026-10-07T20:18:19.098Z",
+      "by": "agent",
+      "reason": "T-413: app.ts:36 import 行内容变更（雾接线）",
+      "changed": 1,
+      "total": 120
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-07T20:18:18.762Z",
+      "by": "agent",
+      "reason": "T-413: 新增 fog-controller.ts:1 锚点",
+      "changed": 1,
+      "total": 170
+    },
+    {
+      "path": "documents/debug/sequences.md",
       "at": "2026-10-07T20:13:01.373Z",
       "by": "agent",
       "reason": "T-412: app.ts:1765/1780 解析行内容变更（天空盒接线）",
@@ -5228,30 +5259,6 @@
       "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
       "changed": 51,
       "total": 51
-    },
-    {
-      "path": "documents/game/implementation/panel.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 26,
-      "total": 26
-    },
-    {
-      "path": "documents/game/implementation/input.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 49,
-      "total": 49
-    },
-    {
-      "path": "documents/game/implementation/config.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 50,
-      "total": 50
     }
   ]
 }

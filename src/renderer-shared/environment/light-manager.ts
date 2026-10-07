@@ -107,6 +107,10 @@ export class LightManager {
 	private skybox: THREE.Texture | null = null;
 	/** 最近一次登记的背景色：`setSkybox(null)` 用它恢复纯色背景。 */
 	private readonly bgFallback = new THREE.Color(0x000000);
+	/** 地图线性雾（`setFog` 设置）；非空时挂到 `scene.fog`，`setFogEnabled(false)` 只摘引用不销毁实例。 */
+	private fog: THREE.Fog | null = null;
+	/** 最近一次 `setFog` 的参数；`setFogEnabled` 重新挂回时复用。 */
+	private fogParams: { color: number; start: number; end: number } | null = null;
 
 	constructor() {
 		// 预分配整池：初始 intensity 0、distance 0、decay 2、visible false
@@ -167,6 +171,24 @@ export class LightManager {
 	setSkybox(texture: THREE.Texture | null): void {
 		this.skybox = texture;
 		if (this.scene) this.scene.background = texture ?? this.bgFallback;
+	}
+
+	/**
+	 * 设置地图线性雾；传 null 摘掉 `scene.fog`（实例与参数一并清空）。
+	 *
+	 * 与 `setSkybox` 同层：环境背景与雾都由 light-manager 统一管，渲染端不再直接写 `scene.fog`。
+	 */
+	setFog(params: { color: number; start: number; end: number } | null): void {
+		this.fogParams = params;
+		this.fog = params ? new THREE.Fog(params.color, params.start, params.end) : null;
+		if (this.scene) this.scene.fog = this.fog;
+	}
+
+	/** 开关雾：关 = 摘掉 `scene.fog`；开 = 用最近一次 `setFog` 的参数（或已有实例）重新挂上。 */
+	setFogEnabled(enabled: boolean): void {
+		if (!this.scene) return;
+		if (enabled && !this.fog && this.fogParams) this.fog = new THREE.Fog(this.fogParams.color, this.fogParams.start, this.fogParams.end);
+		this.scene.fog = enabled ? this.fog : null;
 	}
 
 	/**

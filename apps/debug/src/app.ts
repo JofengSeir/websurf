@@ -33,7 +33,7 @@ import type {
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
-import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js';
+import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js';
 import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
 import { formatTime, GameState } from './game-state.js';
@@ -1762,7 +1762,7 @@ async function handleBspFile(file: File): Promise<void> {
  */
 async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void> {
 	if (!rendererMain || !inputBridge) return;
-	const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const bundle = await buildWorldBundle(proc, {
+	const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const fogParams = fogParamsFromEntities(proc.parse_entities()); const bundle = await buildWorldBundle(proc, {
 		colliderSource: config.physics.colliderSource ?? 'auto',
 		collectMissingTextures: true,
 		decompressMtz: decompress_mtz,
@@ -1777,7 +1777,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 		triJson: bundle.triJson,
 		phyBevelsJson: bundle.phyBevelsJson,
 		mosaicManifest: bundle.mosaicManifest,
-		missingTextures: bundle.missingTextures, skyboxTexture,
+		missingTextures: bundle.missingTextures, skyboxTexture, fogParams,
 		spawnJson: bundle.spawnJson,
 		pvsJson: bundle.pvsJson,
 		teleportJson: bundle.teleportJson,

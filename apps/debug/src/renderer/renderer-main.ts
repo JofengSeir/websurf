@@ -428,7 +428,7 @@ export class RendererMain {
         }
       }
     }
-    if (this.scene?.background instanceof THREE.Texture) { this.scene.background.dispose(); this.scene.background = null; } this.lightManager?.setSkybox(null); this.bspModelScene = null;
+    if (this.scene?.background instanceof THREE.Texture) { this.scene.background.dispose(); this.scene.background = null; } this.lightManager?.setSkybox(null); this.lightManager?.setFog(null); this.bspModelScene = null;
 
     // 2. three.js 渲染列表缓存
     this.renderer?.renderLists?.dispose();
@@ -575,7 +575,7 @@ export class RendererMain {
     this.config.lod.cullDistance = this.lodManager.cullDistance;
 
     this.needsRender = true;
-    if (data.skyboxTexture) this.lightManager.setSkybox(data.skyboxTexture ?? null); this.onSceneLoaded?.(boundingBox.min.y);
+    if (data.skyboxTexture) this.lightManager.setSkybox(data.skyboxTexture ?? null); this.lightManager.setFog(data.fogParams ?? null); this.onSceneLoaded?.(boundingBox.min.y);
     this.emitCullStats();
     return {
       diagonal: diagInfo.diagonal,
