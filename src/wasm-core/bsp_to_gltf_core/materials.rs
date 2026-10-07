@@ -28,7 +28,7 @@
 //! - `translucent` 与 `surfprop` 为 `glass` 二者按位或合并；`transform` 等于
 //!   `TextureTransform::default()` 时归 `None`。
 //! - 成功路径把 `color` 固定为纯白 `[255; 4]`；只有「着色器不被识别」与「没有 `$basetexture`」
-//!   两条早退路径才用 `parse_dollar_color` 取作者声明的基色。
+//!   两条早退路径才用 `parse_dollar_color` 取基色（`Water` 例外：走上游口径的半透明水色）。
 //!
 //! 边界：只读 pakfile 内字节，不写盘、不联网、不接触 DOM。
 //! `load_material`（非 BSP 通路）是占位实现，恒返回 `Err(Error::Other(..))`。
@@ -472,11 +472,11 @@ pub(crate) fn load_material_bsp(
     let base_texture = match material.base_texture() {
         Some(texture) => texture,
         None => {
-            // 没有基础纹理时也保留作者声明的 `$color`，不丢成纯白
+            let water = matches!(material, vmt_parser::material::Material::Water(_)); // Water 无 $basetexture ⇒ 上游口径的半透明水色
             return Ok(MaterialData {
-                name: name.to_string(),
-                path: vmt_path,
-                color: parse_dollar_color(&vdf).unwrap_or([255, 255, 255, 255]),
+                name: name.to_string(), path: vmt_path,
+                color: if water { [82, 180, 217, 128] } else { parse_dollar_color(&vdf).unwrap_or([255, 255, 255, 255]) },
+                translucent: water,
                 ..MaterialData::default()
             });
         }
