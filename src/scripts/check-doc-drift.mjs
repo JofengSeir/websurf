@@ -26,6 +26,12 @@
  *        [H] 流程性 md 体积（AGENTS 32 / TODO 96 / OWNER 16 / 其余 48 KB）、[J] 注释纪律（单行 ≤160 硬门，块长只计数）；⑨ 规范面文档不得自行声明待办状态
  *     （`状态：待裁决` 一类），状态只写在 TODO.md——过程记录 `progress/**` 与
  *     `TODO.md` / `AGENTS.md` / `documents/norms/**` 豁免。
+ *   L 文档缺口 ↔ 看板：终态行（已记录/已结案）的「详情」doc 里若仍引用该号，且该行没有
+ *     「已消除 / 已修 / 已处置 / 已结案 / 已判定无需行动 / 已撤销 / ~~」标记 ⇒ 失败
+ *     （文档不得留下假缺口）；详情不在 `documents/**`（如 `progress/`）的行不适用。
+ *   M 假结案：终态行的判据若形如「git grep "<模式>" … ⇒ 0 命中」，则①该模式在判据自己声明的
+ *     路径里必须真的 0 命中，②该模式在其「证据」文件里也必须 0 命中——`-- <路径>` 指错目录时
+ *     判据会永远满足，条目就被永久假结案（实例：T-129 / T-132）。
  *
  * `resolve` 的候选来自 scopeRoots(doc) × APP_EXTRA / SHARED_EXTRA 的拼接，外加 live 里
  * 的后缀命中与裸文件名命中；评分 = 行数够 (4) + 在文档作用域内 (2) + 非裸名且后缀命中 (1)，
@@ -35,7 +41,7 @@
  *   node src/scripts/check-doc-drift.mjs                 # 全仓 md
  *   node src/scripts/check-doc-drift.mjs documents/architecture/overview.md ...
  *
- * 退出码：A / B / E / F / G 非空 → 1；C 与 D 只打印、不影响退出码。
+ * 退出码：A / B / E / F / G / L / M 非空 → 1；C 与 D 只打印、不影响退出码。
  * 调用方：`.github/workflows/doc-drift.yml` 的 `Run doc drift check` 步骤直接跑本脚本。
  *
  * 能力边界（重要）：
@@ -337,8 +343,50 @@ for (const f of live) {
   if (!ok) parentMiss.push('  ' + f + ' 没有任何上级导航点到它（AGENTS §2 / documents/index.md / progress/index.md）');
 }
 
-const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length;
-console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong + parentMiss.length} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending}`);
+// [L] 文档缺口 ↔ 看板状态：终态行（已记录/已结案）的「详情」doc 里若仍引用该号，必须已标注解除
+const RESOLVED_RE = /已消除|已修|已处置|已结案|已判定无需行动|已撤销|~~/;
+const TERMINAL = ['已记录', '已结案'];
+const boardRows = [];
+todoRaw.split(/\r?\n/).forEach((line) => {
+  const s = line.trim();
+  if (!s.startsWith('|') || /^\|[\s\-:|]+\|$/.test(s)) return;
+  const c = s.split('|').slice(1, -1).map((x) => x.trim());
+  if (c.length < 9 || !/^T-\d{3}$/.test(c[0])) return;
+  boardRows.push(c);
+});
+const docGap = [];
+const falseClose = [];
+boardRows.forEach((c) => {
+  if (!TERMINAL.includes(c[4])) return;
+  // [L]
+  (c[6] || '').split(/[；;、]/).map((x) => x.trim()).filter((d) => d.startsWith('documents/') && d.endsWith('.md')).forEach((d) => {
+    const fp = path.join(ROOT, d);
+    if (!fs.existsSync(fp)) return;
+    fs.readFileSync(fp, 'utf8').split(/\r?\n/).forEach((dl, i) => {
+      if (!dl.includes(c[0]) || RESOLVED_RE.test(dl)) return;
+      docGap.push('  ' + c[0] + '（' + c[4] + '）的详情 ' + d + ':' + (i + 1) + ' 仍把它写成活缺口 ⇒ 标「已消除（YYYY-MM-DD）+ 原因」或删该段');
+    });
+  });
+  // [M]
+  const crit = (c[7] || '').replace(/@BT@/g, '`');
+  const gm = crit.match(/git grep[^`]*?"([^"]+)"(?:[^`]*?--\s*([^`]+))?/);
+  if (!gm || !/0 命中/.test(crit)) return;
+  const pat = gm[1];
+  const critPaths = (gm[2] || '').trim().split(/\s+/).filter((x) => /^[A-Za-z0-9_./-]+$/.test(x));
+  const run = (args) => { try { return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return ''; } };
+  if (critPaths.length) {
+    const own = run(['grep', '-n', '-e', pat, '--'].concat(critPaths));
+    if (own) falseClose.push('  ' + c[0] + '（' + c[4] + '）判据声明 0 命中，实测其自身路径仍有命中 ⇒ 结案依据不成立');
+  }
+  const evm = (c[5] || '').replace(/`/g, '').match(/([A-Za-z0-9_./-]+\.(?:d\.ts|json|mts|mjs|cjs|ts|js|rs|md|cmd|ps1|sh|yml|yaml|html|css|toml))(?::\d+)?/);
+  if (evm && fs.existsSync(path.join(ROOT, evm[1]))) {
+    const evHit = run(['grep', '-n', '-e', pat, '--', evm[1]]);
+    if (evHit) falseClose.push('  ' + c[0] + '（' + c[4] + '）判据在 ' + critPaths.join(' ') + ' 判 0 命中，但证据文件 ' + evm[1] + ' 仍命中「' + pat + '」 ⇒ 判据范围可疑（假结案）');
+  }
+});
+
+const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length || docGap.length || falseClose.length;
+console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong + parentMiss.length} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending} ｜ 缺口未标注 ${docGap.length} ｜ 假结案 ${falseClose.length}`);
 const todoKB = Buffer.byteLength(todoRaw, 'utf8') / 1024;
 const todoRowCount = (todoRaw.match(/^\|\s*T-\d{3}\s*\|/gm) || []).length;
 if (todoRaw && (todoKB > 80 || todoRowCount > 300)) console.log(`\n[提示] ${todoPath} 已 ${todoKB.toFixed(1)} KB / ${todoRowCount} 条，超过体量阈值（80 KB 或 300 条）——按头注的分卷规则处理「已记录 + 已结案」`);
@@ -348,6 +396,8 @@ if (missing.length) console.log('\n[C] 路径失效（告警，可能是刻意�
 if (ambiguous) { const inProg = Object.entries(ambByDoc).filter(([k]) => k.startsWith(`progress/`)).reduce((s, [, v]) => s + v, 0); console.log(`\n[D] 歧义 ${ambiguous} 处（跨工程文档的裸文件名，需人工判读；非错误）｜规范面 ${ambiguous - inProg} 处、progress/ 过程记录 ${inProg} 处`); }
 if (broken.length) console.log('\n[E] 坏链（失败）：\n' + broken.join('\n'));
 if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set(eolBad)].join('\n'));
+if (docGap.length) console.log('\n[L] 文档缺口未标注（失败）：\n' + docGap.join('\n'));
+if (falseClose.length) console.log('\n[M] 假结案（失败）：\n' + falseClose.join('\n'));
 if (dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim, ...noEvidence, ...outOfSync, ...badDetail, ...badClaim, ...badCrit, ...sizeBad, ...piMissing, ...idxMissing, ...parentMiss].join('\n'));
 
 process.exit(fail ? 1 : 0);

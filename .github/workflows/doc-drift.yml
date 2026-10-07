@@ -14,7 +14,15 @@
 #     （仓库 core.autocrlf=true ⇒ 规范形式是 LF，工作树的 CRLF 只是检出产物）
 #   G 待办同源 —— 全仓 T-### 必须存在于 TODO.md；ID 不重复；未结项证据列不得为空；
 #     规范面文档不得自行声明待办状态（progress/** 等豁免）
-# A / B / E / F / G 任一非空即脚本 exit 1 → 本 workflow 失败（C 与 D 仅告警）。
+#   H 流程性 md 体积（AGENTS 32 / TODO 96 / OWNER 16 / 其余 48 KB）
+#   I 分卷可达 —— progress/** 每篇必须登记在 progress/index.md，且「当前写入目标」行必须指向真实文件
+#   J 代码注释纪律 —— 单行 ≤160 字符为硬门，块长只计数
+#   K 上级覆盖 —— 每个 md 都必须被 AGENTS §2 / documents/index.md / progress/index.md 点到
+#   L 文档缺口 ↔ 看板 —— 终态行（已记录/已结案）的详情 doc 里若仍把该号写成活缺口且无
+#     「已消除/已修/已处置/已结案/已撤销/~~」标记 ⇒ 失败（文档不得留假缺口）
+#   M 假结案 —— 终态行的判据形如「git grep "<模式>" … ⇒ 0 命中」时，该模式在判据声明的路径与
+#     「证据」文件里都必须真的 0 命中；`-- <路径>` 指错目录会让判据永远满足（实例 T-129 / T-132）
+# A / B / E / F / G / L / M 任一非空即脚本 exit 1 → 本 workflow 失败（C 与 D 仅告警）。
 #
 # 同批还跑 src/scripts/check-board-touch.mjs（看板使用规程的**软提示**，AGENTS.md §0.1）：
 #   改了 src/ apps/ documents/ 却没动 TODO.md、提交信息也没有 T-### 或「无待办影响」时打印警告；

@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（174 条）
+## 未结项（176 条）
 
 ### 待裁决（65）
 
@@ -64,6 +64,8 @@
 - **T-124** Track.offset 只有下界没有上界，可拉长主时钟总长　`viewer`
 - **T-125** 零帧轨道的口径不一致（列表面板有卡片、3D 无对象）　`viewer`
 - **T-128** dist 里的示例记录无法由当前源码路径重新产出　`viewer`
+- **T-129** 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080　`viewer`
+- **T-132** WS_PATH 兜底是本机绝对路径，换机器不可用　`viewer`
 - **T-134** build.cmd 无法产出 multi 产物　`viewer`
 - **T-137** 端口占用分支假定占用者服务的是 dist　`viewer`
 - **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
@@ -100,7 +102,7 @@
 - **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
 - **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 
-### 待修（107）
+### 待修（109）
 
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -213,7 +215,7 @@
 
 > 已记录 / 已结案 **40 条已分卷**到 `progress/board/archive-2026-10.md`（ID 与状态保留；编号不复用，取新号时连同该页一起数）。
 
-## 总表（179 条）
+## 总表（180 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
@@ -277,10 +279,10 @@
 | T-126 | panel.ts 平移输入框 hint 写「默认 0」而 step 为 10 HU | 文档口径 | viewer | 待修 | apps/viewer/src/replay/panel.ts:154 | documents/viewer/implementation/replay.md | 判据：@BT@git grep -n "默认 0" -- apps/viewer/src/replay/panel.ts@BT@ ⇒ hint 与 @BT@step=10 HU@BT@ 一致 | — |
 | T-127 | 真实夹具路径跨三处失效（指向 test/maps 而非 test/replay） | 缺陷 | viewer | 待修 | apps/viewer/test/replay-selftest.ts:75 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "test/maps" -- apps/viewer@BT@ ⇒ 0 命中（夹具路径指向 test/replay） | — |
 | T-128 | dist 里的示例记录无法由当前源码路径重新产出 | 缺陷 | viewer | 待裁决 | apps/viewer/scripts/build-dist.mjs:238 | documents/viewer/implementation/scripts-and-test.md | — | — |
-| T-129 | 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080 | 配置·门禁 | viewer | 已结案 | git grep -n "8080" -- apps/viewer/scripts ⇒ 0 命中（2026-10-07 复核；缺省 SMOKE_URL 不再指向 8080） | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "8080" -- apps/viewer/scripts@BT@ ⇒ 0 命中（缺省 SMOKE_URL 指向本工程端口） | — |
+| T-129 | 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:32 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "8080" -- apps/viewer/test/smoke-cdp.mjs@BT@ ⇒ 0 命中（缺省 SMOKE_URL 指向本工程端口 8100） | — |
 | T-130 | 冒烟按键断言（6 键）与当前 UI 八键不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:415 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 viewer 冒烟脚本 ⇒ 按键断言条数与当前 UI 八键一致 | — |
 | T-131 | 冒烟三条静态断言只对 single 产物成立 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:138 | documents/viewer/implementation/scripts-and-test.md | 判据：冒烟三条静态断言在 single 与多产物两种形态下都成立 ⇒ 各跑一次 exit 0 | — |
-| T-132 | WS_PATH 兜底是本机绝对路径，换机器不可用 | 配置·门禁 | viewer | 已结案 | git grep -n "WS_PATH" -- apps/viewer/scripts ⇒ 0 命中（2026-10-07 复核；兜底不再含本机绝对路径） | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "WS_PATH" -- apps/viewer/scripts@BT@ ⇒ 兜底不含本机绝对路径（换机器可用） | — |
+| T-132 | WS_PATH 兜底是本机绝对路径，换机器不可用 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:45 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "WS_PATH" -- apps/viewer/test/smoke-cdp.mjs@BT@ ⇒ 兜底不含本机绝对路径（换机器可用） | — |
 | T-133 | .gitignore 中间产物目录与 test:replay 实际输出不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/package.json:10 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 @BT@npm run test:replay@BT@ 后 @BT@git status --short@BT@ 无未忽略产物 ⇒ .gitignore 与实际输出目录一致 | — |
 | T-134 | build.cmd 无法产出 multi 产物 | 工具·流程 | viewer | 待裁决 | apps/viewer/build.cmd:8 | documents/viewer/implementation/scripts-and-test.md | — | — |
 | T-135 | start.cmd 的 python 守卫让 dist/play.cmd 的 Node 兜底不可达 | 缺陷 | viewer | 待修 | apps/viewer/start.cmd:11 | documents/viewer/implementation/scripts-and-test.md | 判据：无 python 环境下跑 @BT@apps/viewer/start.cmd@BT@ ⇒ 走 Node 兜底并成功启动（守卫不再遮蔽） | — |
@@ -317,7 +319,7 @@
 | T-166 | `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/shavit-replay.ts:507 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ShavitParseResult.flags" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-167 | 进度回调里的 `'map'` 分支不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:329 | documents/viewer/implementation/replay.md | 判据：`git grep -n "'map'" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-168 | `MapPanel.spawnPoints` getter 零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:114 | documents/viewer/implementation/ui.md | 判据：`git grep -n "MapPanel.spawnPoints" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-169 | viewer 记录链路不认 KSF/gokz `.rec`（ksf.surf 回放文件：i32 魔数 2/3 纯二进制头，非 shavit 文本头格式）⇒ 嗅探落 unknown 被拒 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/gokz-rec.ts | documents/viewer/implementation/replay.md | 判据：`cd apps/viewer && npm run test:replay` ⇒ 新增 gokz .rec 合成夹具组（嗅探 / 头解析与闭合 / 坐标映射 / Clip 装配 / v2 分支）全 ok 且 exit 0；`cd apps/viewer && npm run typecheck` ⇒ 0 错；`node src/scripts/check-doc-drift.mjs` ⇒ A–G 全 0（agent 沙箱 git EBUSY 跑不了时由 CI/owner 复跑） | — |
+| T-169 | viewer 记录链路不认 KSF/gokz `.rec`（ksf.surf 回放文件：i32 魔数 2/3 纯二进制头，非 shavit 文本头格式）⇒ 嗅探落 unknown 被拒 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/gokz-rec.ts:130 | documents/viewer/implementation/replay.md | 判据：`cd apps/viewer && npm run test:replay` ⇒ 新增 gokz .rec 合成夹具组（嗅探 / 头解析与闭合 / 坐标映射 / Clip 装配 / v2 分支）全 ok 且 exit 0；`cd apps/viewer && npm run typecheck` ⇒ 0 错；`node src/scripts/check-doc-drift.mjs` ⇒ A–G 全 0（agent 沙箱 git EBUSY 跑不了时由 CI/owner 复跑） | — |
 | T-201 | 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:507 | documents/game/implementation/app-entry.md | — | — |
 | T-202 | 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示 | 缺陷 | game | 待修 | apps/game/src/app.ts:317 | documents/game/implementation/app-entry.md | 判据：移除任一可选 DOM（如 @BT@#loadMapBtn@BT@）⇒ 页面/控制台出现可读提示，不静默降级 | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | — | — |
