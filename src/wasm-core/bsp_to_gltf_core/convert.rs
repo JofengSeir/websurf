@@ -1055,6 +1055,10 @@ fn push_bsp_face_bsp(
     };
     let has_lightmap = lightmap_region.is_some();
 
+    // `WorldVertexTransition` 的 `$basetexture2` 混合权重：与 `vertex_positions()` 逐项对齐。
+    // 非位移面恒 0；**所有面都写**（哪怕恒 0）——同一 mesh 里属性集必须一致，否则下游合并失败。
+    let blend_alphas: Vec<f32> = face.vertex_blend_alphas().collect();
+
     let vertices = face.vertex_positions().map(move |pos| BspVertexData {
         position: map_coords(pos),
         uv: texture.uv(pos),
@@ -1144,6 +1148,41 @@ fn push_bsp_face_bsp(
         sparse: None,
     });
 
+    // 混合权重走独立 buffer view + accessor（SCALAR f32），与 TEXCOORD_1 同策：不改变
+    // `BspVertexData` 的 stride。
+    let blend_buffer_start = buffer.len() as u64;
+    buffer.extend_from_slice(bytemuck::cast_slice::<f32, u8>(&blend_alphas));
+    let blend_view = Index::new(gltf.buffer_views.len() as u32);
+    gltf.buffer_views.push(gltf_json::buffer::View {
+        buffer: Index::new(0),
+        byte_length: USize64(buffer.len() as u64 - blend_buffer_start),
+        byte_offset: Some(USize64(blend_buffer_start)),
+        byte_stride: None,
+        extensions: Default::default(),
+        extras: Default::default(),
+        name: None,
+        target: Some(gltf_json::validation::Checked::Valid(
+            gltf_json::buffer::Target::ArrayBuffer,
+        )),
+    });
+    let blend_accessor = Index::new(gltf.accessors.len() as u32);
+    gltf.accessors.push(gltf_json::Accessor {
+        buffer_view: Some(blend_view),
+        byte_offset: Some(USize64(0)),
+        count: USize64(vertex_count),
+        component_type: gltf_json::validation::Checked::Valid(
+            gltf_json::accessor::GenericComponentType(gltf_json::accessor::ComponentType::F32),
+        ),
+        extensions: Default::default(),
+        extras: Default::default(),
+        type_: gltf_json::validation::Checked::Valid(gltf_json::accessor::Type::Scalar),
+        min: None,
+        max: None,
+        name: None,
+        normalized: false,
+        sparse: None,
+    });
+
     let material_index = if options.textures {
         Some(push_or_get_material_bsp(
             buffer,
@@ -1172,6 +1211,13 @@ fn push_bsp_face_bsp(
             map.insert(
                 gltf_json::validation::Checked::Valid(gltf_json::mesh::Semantic::TexCoords(1)),
                 Index::new(accessor_start + 2),
+            );
+            // 自定义语义：`Semantic::Extras` 自动补前导 `_` ⇒ 上线名 `_VBSP_BLEND`。
+            map.insert(
+                gltf_json::validation::Checked::Valid(gltf_json::mesh::Semantic::Extras(
+                    "VBSP_BLEND".into(),
+                )),
+                blend_accessor,
             );
             map
         },

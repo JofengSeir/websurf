@@ -1727,7 +1727,7 @@
       "src/renderer-shared/environment/miniature-sky.ts:1:1~2": "8d64a30d",
       "src/renderer-shared/shader/lightmap-shader.ts:1408:1408": "809c03b3",
       "src/wasm-core/vbsp/data/game.rs:327:327": "42967d45",
-      "apps/debug/crates/wasm/src/lib.rs:3657:3657": "c6219fff",
+      "src/wasm-core/bsp_to_gltf_core/convert.rs:1060:1060": "c06979e1",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -5046,6 +5046,14 @@
   "rebaselines": [
     {
       "path": "TODO.md",
+      "at": "2026-10-07T23:52:58.788Z",
+      "by": "agent",
+      "reason": "T-427 证据列改为实现锚点",
+      "changed": 2,
+      "total": 184
+    },
+    {
+      "path": "TODO.md",
       "at": "2026-10-07T23:19:17.307Z",
       "by": "agent",
       "reason": "T-427 证据列改为新探针导出",
@@ -5355,14 +5363,6 @@
       "reason": "T-410: 新增 materials.rs:448 锚点",
       "changed": 1,
       "total": 167
-    },
-    {
-      "path": "CHANGELOG.md",
-      "at": "2026-10-07T19:54:20.383Z",
-      "by": "agent",
-      "reason": "T-410: 新增 materials.rs:448 锚点",
-      "changed": 1,
-      "total": 9
     }
   ]
 }

@@ -32,7 +32,7 @@
 
 `2026-10` 按月切了 5 卷（每卷 ≤ 48 KB，按时间顺序）：`2026-10-1` → `2026-10-2` → `2026-10-3` → `2026-10-4` → `2026-10-5`。每卷头部有「上一卷 / 下一卷」链接；右列「什么时候看」写着用途。新进展追加到**当月最后一卷**（本页右列会随之更新）。
 
-## 进展索引（全量，122 条）
+## 进展索引（全量，123 条）
 
 > 由 `AGENTS.md §7.1` 分卷而来（入口文件 ≤ 32 KB）。**新增进展**追加到 `progress/monthly/` 的「当前写入目标」那一卷，然后在**本节**补一行（`AGENTS §7.1` 已于 2026-10-07 冻结，不再追加）。
 
@@ -160,3 +160,4 @@
 | 2026-10-08 | T-426 登记 + D-015：prop 光照分类实测（982/1562 两者皆无、能探到的值 0.05~0.33 偏暗）；读码发现 StaticPropLump 未读 m_AmbientCube，但 sprp 在压缩 lump 内无法 raw 验证 | progress/monthly/2026-10-5.md:26 |
 | 2026-10-08 | T-427 登记：雪盖缺失的机制 —— 雪在 WorldVertexTransition 的 $basetexture2（alpine_snow01），本仓全链路未处理；混合 alpha 在未读的 lightmap-alpha lump | progress/monthly/2026-10-5.md:27 |
 | 2026-10-08 | T-427 续：雪/岩混合系数查实 = 位移顶点 alpha（84405 个、0~255 双峰，我们早已解析未用）；DISP lightmap alpha lump 是空的（已排除） | progress/monthly/2026-10-5.md:28 |
+| 2026-10-08 | T-427 ①②：混合权重导出为 _VBSP_BLEND（1716 图元 / 401427 顶点）+ 第二贴图 $basetexture2 入 GLB（alpine_blendrocksnow → alpine_snow01） | progress/monthly/2026-10-5.md:29 |

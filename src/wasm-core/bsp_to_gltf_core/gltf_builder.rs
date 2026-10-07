@@ -215,6 +215,12 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
         .texture
         .map(|tex| push_or_get_texture(buffer, gltf, tex));
 
+    // `WorldVertexTransition` 的第二贴图（`$basetexture2`）：与第一张贴图共用同一套去重与编码，
+    // 下标写进材质 extras 的 `vbsp_basetexture2`，渲染端据此按顶点属性 `_VBSP_BLEND` 混合两图。
+    let second_index = material
+        .basetexture2
+        .map(|tex| push_or_get_texture(buffer, gltf, tex));
+
     let alpha_mode = match (material.translucent, material.alpha_test.is_some()) {
         (true, _) => AlphaMode::Blend,
         (false, true) => AlphaMode::Mask,
@@ -273,10 +279,13 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
         // 判定）为真才写这一项；键名 `vbsp_wireframe` 与渲染端读的 `material.userData` 键
         // 一致（`apps/game/src/renderer/lightmap-shader.ts` 的 `copyMaterialRenderState`
         // 据此置 `wireframe = true`）；`RawValue` 构造失败则 `extras` 退回默认，不写这一项。
-        extras: if material.wireframe {
-            serde_json::value::to_raw_value(&serde_json::json!({ "vbsp_wireframe": true }))
-                .map(Some)
-                .unwrap_or_default()
+        extras: if material.wireframe || second_index.is_some() {
+            serde_json::value::to_raw_value(&serde_json::json!({
+                "vbsp_wireframe": material.wireframe,
+                "vbsp_basetexture2": second_index.map(|index| index.value()),
+            }))
+            .map(Some)
+            .unwrap_or_default()
         } else {
             Extras::default()
         },

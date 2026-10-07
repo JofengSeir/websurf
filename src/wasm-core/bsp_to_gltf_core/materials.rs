@@ -80,7 +80,7 @@ pub struct MaterialData {
     /// 的材质枚举，需要按原始文本的着色器名区分处理，否则会被当成普通不透明材质。
     /// 渲染端据 `extras.vbsp_wireframe` 置 `material.wireframe`
     /// （`apps/game/src/renderer/lightmap-shader.ts` 的 `copyMaterialRenderState`）。
-    pub wireframe: bool, pub texture_absent: bool, // 声明了 $basetexture 但 VTF 取不到 ⇒ 缺失观测计入（「本无 basetexture」不计）
+    pub wireframe: bool, pub texture_absent: bool, pub basetexture2: Option<TextureData>, // texture_absent：声明了 $basetexture 但 VTF 取不到 ⇒ 缺失观测计入（「本无 basetexture」不计）；basetexture2：WorldVertexTransition 的第二贴图（无则 None）
 }
 
 impl Default for MaterialData {
@@ -95,7 +95,7 @@ impl Default for MaterialData {
             translucent: false,
             no_cull: false,
             transform: None,
-            wireframe: false, texture_absent: false,
+            wireframe: false, texture_absent: false, basetexture2: None,
         }
     }
 }
@@ -523,13 +523,13 @@ pub(crate) fn load_material_bsp(
     let transform = material
         .base_texture_transform()
         .filter(|transform| **transform != vmt_parser::TextureTransform::default())
-        .cloned();
+        .cloned(); let second_texture = load_second_texture(bsp, options, &vdf);
 
     Ok(MaterialData {
         color: [255; 4],
         name: name.to_string(),
         path: vmt_path,
-        texture_absent: material.base_texture().is_some() && texture_data.is_none(), texture: texture_data,
+        texture_absent: material.base_texture().is_some() && texture_data.is_none(), texture: texture_data, basetexture2: second_texture,
         alpha_test,
         translucent: translucent | glass,
         no_cull: material.no_cull(),
@@ -595,5 +595,37 @@ fn load_texture_bsp(
         ))
     } else {
         Ok(image)
+    }
+}
+
+/// 从未被 `vmt_parser` 建模的 VMT 文本里取 `$basetexture2`（`WorldVertexTransition` 的第二贴图名）。
+///
+/// 扫描方式与 [`parse_dollar_color`] 同一套：在**小写副本**里定位 `"$basetexture2"`，再按同一
+/// 字节偏移切原文，取紧随其后的第一对引号内的值。只做扁平扫描，不处理注释与嵌套块。
+fn parse_dollar_basetexture2(vdf: &str) -> Option<String> {
+    let lower = vdf.to_ascii_lowercase();
+    let key = "\"$basetexture2\"";
+    let at = lower.find(key)?;
+    let rest = &vdf[at + key.len()..];
+    let open = rest.find('"')?;
+    let close = rest[open + 1..].find('"')? + open + 1;
+    let value = rest[open + 1..close].trim();
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+/// 加载 `$basetexture2` 指向的 VTF，供 `MaterialData::basetexture2` 使用。
+///
+/// 失败路径与第一贴图同策：pakfile 内没有该 VTF 时查 `options.missing_fallback` 回退表，仍无则
+/// 返回 `None`（只用第一贴图）——与「不处理第二贴图」的历史行为一致，不会更差。
+fn load_second_texture(bsp: &Bsp, options: &ConvertOptions, vdf: &str) -> Option<TextureData> {
+    let name = parse_dollar_basetexture2(vdf)?;
+    match load_texture_bsp(&name, bsp, options) {
+        Ok(image) => Some(TextureData { name, image }),
+        Err(_) => fallback_texture_png(&options.missing_fallback, &[name.as_str()], 8)
+            .and_then(|png| image::load_from_memory(&png).ok())
+            .map(|image| TextureData { name, image }),
     }
 }

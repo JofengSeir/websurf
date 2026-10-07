@@ -362,6 +362,18 @@ impl<'a> Handle<'a, Face> {
             .unwrap_or_else(|| Either::Right(self.triangulate().flatten()))
     }
 
+    /// 与 `vertex_positions()` **逐项对齐**的 `WorldVertexTransition` 混合权重（0..1，越大越
+    /// 偏向 `$basetexture2`）：位移面按细分网格取 `DisplacementVertex.alpha / 255`；其余面恒 0
+    /// （brush 面的混合权重本仓无数据来源 ⇒ 只用第一贴图，与现状一致）。
+    ///
+    /// 与 `vertex_positions()` 同一套三角化顺序，故两者可安全逐项配对。
+    pub fn vertex_blend_alphas(&self) -> impl Iterator<Item = f32> + 'a {
+        match self.displacement() {
+            Some(displacement) => Either::Left(displacement.triangulated_blend_alphas()),
+            None => Either::Right(std::iter::repeat(0.0f32).take(self.vertex_positions().count())),
+        }
+    }
+
     /// 面的平面法线（`plane_num` → `Bsp::planes`）。
     ///
     /// `unwrap()`：`plane_num` 越界 panic，而 `Bsp::validate` **不检查** `face.plane_num`。
@@ -496,7 +508,28 @@ impl<'a> Handle<'a, DisplacementInfo> {
                 ]
             })
     }
+
+    /// 与 `triangulated_displaced_vertices()` **同序**的混合权重：网格顶点的
+    /// `DisplacementVertex.alpha` 归一化（源数据是 0..255 的字节量级），按同一 index 表展平。
+    pub fn triangulated_blend_alphas(&self) -> impl Iterator<Item = f32> + 'a {
+        let alphas: Vec<f32> = self.displacement_vertices().map(|d| d.alpha / 255.0).collect();
+        let steps = 2usize.pow(self.power as u32);
+        let index = move |x: usize, y: usize| y * (steps + 1) + x;
+        (0..steps)
+            .flat_map(move |x| (0..steps).map(move |y| (x, y)))
+            .flat_map(move |(x, y)| {
+                [
+                    alphas[index(x, y)],
+                    alphas[index(x + 1, y)],
+                    alphas[index(x, y + 1)],
+                    alphas[index(x + 1, y)],
+                    alphas[index(x + 1, y + 1)],
+                    alphas[index(x, y + 1)],
+                ]
+            })
+    }
 }
+
 
 impl<'a> Handle<'a, DisplacementSubNeighbour> {
     /// 该子邻居指向的 displacement（`neighbour_index`）；越界返回 `None`。
