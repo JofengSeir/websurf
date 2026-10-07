@@ -18,7 +18,7 @@
  *     注意：仓库 `core.autocrlf=true` 且无 `.gitattributes` ⇒ 规范形式是 **LF**，
  *     工作树里的 CRLF 只是检出产物（Linux CI 上会是 LF），故不能拿工作树行尾当判据。
  *   G 待办同源：① 全仓 `T-###` 引用必须能在根 TODO.md 里找到（悬空即失败）；
- *     ② TODO.md 里的 ID 不得重复；③ 未结项的证据列不得为空（须写 `文件:行号` 或 `见详情`）；
+ *     ② TODO.md 与 progress/board-archive.md 合计 ID 不得重复；③ 未结项的证据列不得为空（须写 `文件:行号` 或 `见详情`）；
  *     ④ 「未结项」列表与总表的 ID 集合必须一致（两份表示同源）；
  *     ⑤ 未结项的「详情」列必须非空且路径可解析；
  *     ⑥ 进行中的行必须带认领后缀；⑦ 待修/进行中/阻塞 行的判据不得为 [待补]（硬门）；
@@ -166,7 +166,11 @@ for (const f of indexCR) eolBad.push(`  ${f}  索引中仍含 CR（规范形式�
 // ===== [G] 待办同源 =====
 const todoPath = 'TODO.md';
 const todoRaw = fs.existsSync(path.join(ROOT, todoPath)) ? fs.readFileSync(path.join(ROOT, todoPath), 'utf8') : '';
-const todoIds = [...todoRaw.matchAll(/\|\s*(T-\d{3})\s*\|/g)].map((m) => m[1]);
+// 分卷页（已记录 + 已结案）里的 ID 也算已存在：悬空检查与重复检查都要认它
+const archPath = 'progress/board-archive.md';
+const archRaw = fs.existsSync(path.join(ROOT, archPath)) ? fs.readFileSync(path.join(ROOT, archPath), 'utf8') : '';
+const archIds = [...archRaw.matchAll(/\|\s*(T-\d{3})\s*\|/g)].map((m) => m[1]);
+const todoIds = [...todoRaw.matchAll(/\|\s*(T-\d{3})\s*\|/g)].map((m) => m[1]).concat(archIds);
 const todoSet = new Set(todoIds);
 const dupRows = [...new Set(todoIds.filter((id, i) => todoIds.indexOf(id) !== i))].map((id) => `  ${todoPath}  ${id} 重复`);
 const dangling = [];

@@ -69,7 +69,7 @@
 | 仓库根 `*.md` | 本文件（§0 工作流核心，唯一入口）+ `README.md` + `TODO.md`（待办看板）+ `OWNER.md`（owner 决策队列）+ `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`；后四篇于 2026-09-22 由旧文档**合并重建**，细节源头为 git 历史 |
 | `documents/` | **45 篇**（2026-10-07 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
-| `progress/` | **过程记录**（不作事实来源）：`2026-09.md` / `2026-10.md`（原 §7.1 逐条原文）、`wg-status.md`（工作组状态与历史计划）、`pending-detail.md`（原 §7.3 待决原文）、`open-issues/01..07`（取证原文）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由） |
+| `progress/` | **过程记录**（不作事实来源）：`2026-09.md` / `2026-10.md`（原 §7.1 逐条原文）、`wg-status.md`（工作组状态与历史计划）、`pending-detail.md`（原 §7.3 待决原文）、`open-issues/01..07`（取证原文）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由）、`board-archive.md`（看板分卷：已记录 + 已结案） |
 | `.archive/` | **已删除（2026-10-07 owner 裁决）**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇）已从工作区移除，原文仅存 git 历史；`.gitignore` 保留 `**/.archive/` 规则作归档位 |
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
@@ -232,6 +232,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 | 2026-10-07 | 首次读者模拟 ＋ 循环硬伤修复（§0.2 日常流程 / [G] 同源门 / ID 分配规则）… | progress/2026-10.md:54 |
 | 2026-10-07 | 新增 owner 决策队列 `OWNER.md`（8 待决 / 7 已决，按 P0–P2 排序）＋ `AGENTS §0.3` 登记规则 ＋ `[G]⑥` 悬空 D-### 门… | progress/2026-10.md:55 |
 | 2026-10-07 | 契约改造 D-001~D-004（判据列 / 阻塞态 / 认领 / 68 条改判）＋ 文档归位（README·arch·norms 加 OWNER 指针）… | progress/2026-10.md:56 |
+| 2026-10-07 | 看板首次分卷（40 条已记录/已结案 → `progress/board-archive.md`，76.9→69.8 KB）＋ `[G]` ID 全集跨页… | progress/2026-10.md:57 |
 
 ### 7.2 工作组状态
 

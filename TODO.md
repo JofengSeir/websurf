@@ -4,9 +4,9 @@
 > 其余文档只写技术事实，不复述状态；代码注释只允许写「见 TODO.md T-###」。
 > 规则：一行一条；ID 永不复用；结案保留 ID；**改代码或裁决的同一提交必须更新对应行**。
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
-> **体量策略**：本表超过 **80 KB 或 300 条**时，把「已记录 + 已结案」整段移入 `progress/board-archive.md`（保留 ID 与状态供追溯），**未结项永不分卷**；体检的 `[G]` 会打印当前体积与余量。
+> **体量策略**：本表超过 **80 KB 或 300 条**时，把「已记录 + 已结案」整段移入 `progress/board-archive.md`（保留 ID 与状态供追溯），**未结项永不分卷**；体检 `[G]` 会打印体积与余量。**已于 2026-10-07 触发一次**（40 条已分卷）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，只写数字部分；区段前缀见上一行）**：viewer **169**；game **240**；debug **325**；shared **409**；取证项 **508**；跨区/文档治理 **601**（该段尚未使用）。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board-archive.md` 的历史行；只写数字部分）**：viewer **169**；game **240**；debug **325**；shared **409**；取证项 **508**；跨区/文档治理 **601**（该段尚未使用）。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -211,80 +211,44 @@
 - **T-109** 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正　`viewer`
 - **T-115** untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查　`viewer`
 
-> 另有 已记录 21 条、已结案 19 条见下表（保留 ID 供追溯，编号不复用）。
+> 已记录 / 已结案 **40 条已分卷**到 `progress/board-archive.md`（ID 与状态保留；编号不复用，取新号时连同该页一起数）。
 
-## 总表（214 条）
+## 总表（174 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
-| T-001 | 根 README 已删除，仓库暂无 README | 文档口径 | docs | 已结案 | — | progress/pending-detail.md | — | #1 |
-| T-002 | 导航 index 已删除 | 文档口径 | docs | 已结案 | — | progress/pending-detail.md | — | #2 |
-| T-003 | 旧 AGENTS.md 的通用工程规范（文件归属 / 临时区 / 产物 / 文档格式）未在本文件复述 —— 重编期间以任务书为准 | 文档口径 | docs | 已结案 | AGENTS.md:21 | progress/pending-detail.md | — | #3 |
-| T-004 | CI 与共享脚本仍引用已退役的 harness | 配置·门禁 | repo | 已结案 | — | progress/pending-detail.md | — | #4 |
 | T-005 | apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html… | 缺陷 | game | 待裁决 | apps/game/web/index.html:19 | progress/pending-detail.md | — | #5 |
-| T-006 | 零分配支路已实现但未接线：tick_into / state_out_ptr / seed_from 只被 src/ts-shared/… | 未接线·死代码 | shared | 已记录 | — | progress/pending-detail.md | — | #7 |
 | T-007 | apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into… | 缺陷 | debug | 待裁决 | apps/debug/src/wasm.d.ts:67-119 | progress/pending-detail.md | — | #8 |
 | T-008 | apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new … | 配置·门禁 | game | 待修 | apps/game/scripts/check-wasm-api.mjs:52-70 | progress/pending-detail.md | 判据：跑 @BT@node apps/game/scripts/check-wasm-api.mjs@BT@ ⇒ exit 0，且 PHYS_API 列出的项 ≥ crates/wasm 实际导出数（不再缺 @BT@new@BT@ 等） | #9 |
-| T-009 | set_yaw_pitch 在 apps/ 与 src/ 内零调用点 | 未接线·死代码 | shared | 已记录 | — | progress/pending-detail.md | — | #10 |
-| T-010 | teleport_gate_ticks 参数链已死：set_params 的 JSON 键可写、player.rs 有该字段（默认 3）… | 未接线·死代码 | shared | 已记录 | — | progress/pending-detail.md | — | #11 |
-| T-011 | BSP 导出未把 KHR_texture_transform 登记进 extensionsUsed | 缺陷 | shared | 已记录 | — | progress/pending-detail.md | — | #26 |
-| T-012 | vtf.rs 4 条读写不一致 + 5 处死代码 | 未接线·死代码 | shared | 已记录 | — | progress/pending-detail.md | — | #27 |
 | T-013 | lightmap.rs 错误串含外部实现引用 Lightmap.cs:64 | 缺陷 | shared | 待裁决 | src/wasm-core/bsp_to_gltf_core/lightmap.rs:207 | progress/pending-detail.md | — | #28 |
-| T-014 | mosaic/mtz.rs 8 条编解码不一致 | 缺陷 | shared | 已记录 | — | progress/pending-detail.md | — | #30 |
 | T-015 | vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤） | 缺陷 | shared | 待裁决 | 见详情 | progress/pending-detail.md | — | #31 |
 | T-016 | compute-mode.ts 的 summary 字面量含已删文档编号 | 文档口径 | shared | 待裁决 | src/ts-shared/auth/compute-mode.ts:89 | progress/pending-detail.md | — | #36 |
-| T-017 | jump-apex-verify.mjs 内嵌「修复前行为」复刻 | 配置·门禁 | debug | 已记录 | — | progress/pending-detail.md | — | #38 |
 | T-018 | tick-authority.test.ts 断言标签含 Q1 / §8.5 | 缺陷 | shared | 待裁决 | src/ts-shared/auth/tick-authority.test.ts:625 | progress/pending-detail.md | — | #40 |
-| T-019 | owner 指令：子代理并发 ≤3（含 19 并发被掐断的复盘） | 工具·流程 | repo | 已记录 | — | progress/pending-detail.md | — | #41 |
-| T-020 | 旧文档篇数口径对撞（68 篇 vs 实测 56 篇） | 文档口径 | docs | 已结案 | documents/index.md:3 | progress/pending-detail.md | — | #43 |
 | T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #50 |
-| T-022 | 规范篇里的禁用词是「引用对象」（全仓唯一允许出现处） | 文档口径 | docs | 已记录 | — | progress/pending-detail.md | — | #51 |
 | T-023 | check-wasm-api.mjs 输出标签 F4 无出处 | 配置·门禁 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：@BT@git grep -n "F4" -- apps/game/scripts@BT@ ⇒ 标签有出处（指向规范/文档的编号体系）或已改为无编号输出 | #52 |
 | T-024 | game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等） | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #53 |
-| T-025 | 【台账号·已细化】→ T-119 viewer timeline.ts 的 title 文案与 prerun 负段口径矛盾 | 文档口径 | viewer | 已记录 | — | progress/pending-detail.md | — | #54 |
-| T-026 | 【台账号·已细化】→ T-118、T-120 viewer 死支路 4 条（A-B 区间带恒不显示 / 零调用点 / 混基宽度） | 未接线·死代码 | viewer | 已记录 | — | progress/pending-detail.md | — | #55 |
-| T-027 | 【台账号·已细化】→ T-104..T-108、T-138..T-143 viewer core + ui 9 条（含 ensureWasm 永久缓存失败） | 缺陷 | viewer | 已记录 | — | progress/pending-detail.md | — | #58 |
-| T-028 | 【台账号·已细化】→ T-121..T-123 viewer replay/ 10 条（含 GPU 资源不释放、blob URL 泄漏） | 缺陷 | viewer | 已记录 | — | progress/pending-detail.md | — | #59 |
 | T-029 | debug 脚本 10 条（jump-apex 采样链链路级仍待裁决 | 配置·门禁 | debug | 待修 | 见详情 | progress/pending-detail.md | 判据：10 条子项逐条处置完毕；每条子项脚本跑通 exit 0，并在 @BT@progress/pending-detail.md@BT@ 对应条目标注处置结果 | #60 |
-| T-030 | 【台账号·已细化】→ T-144..T-151 viewer crates/wasm 6 条（.MDL 三件套替换隐患等） | 缺陷 | viewer | 已记录 | — | progress/pending-detail.md | — | #61 |
 | T-031 | game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB） | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #62 |
 | T-032 | game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等） | 配置·门禁 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：7 条子项逐条处置；@BT@_dbg_floor@BT@ 的 onGround 不再恒 undefined（脚本输出该字段有真值） | #63 |
 | T-033 | 【台账号·部分细化】夹具路径失效 → T-127；其余仍待裁 WG6b 6 条（test/maps/surf_null_4.replay 跨 3 文件失效等） | 缺陷 | repo | 待裁决 | 见详情 | progress/pending-detail.md | — | #64 |
-| T-034 | 范围盘点（coverage-scan）+ 配置面口径冲突（已结案）：件数实测更正为 9 Cargo.toml / 5 .gitignor… | 配置·门禁 | repo | 已结案 | — | progress/pending-detail.md | — | #65 |
 | T-035 | input-replay-verify.mjs 5 条（inputRecorder 永不落样本、f.dt 字段不存在、页面缺 7 个 i… | 缺陷 | debug | 待裁决 | 见详情 | progress/pending-detail.md | — | #66 |
 | T-036 | WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 coi-serviceworker.js 等） | 未接线·死代码 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：剩余 15 条逐条 @BT@git grep -n "<符号>" -- src apps@BT@ ⇒ 只剩定义处 ⇒ 删除；删后体检 exit 0 且构建通过 | #67 |
-| T-037 | WG12 src/ 侧 10 条（check-shared-sync 门禁恒失败已于本轮处置：退役路径出清单后四项子检查全过 | 配置·门禁 | shared | 已结案 | — | progress/pending-detail.md | — | #68 |
 | T-038 | 9 个 .cmd 的 5 条遗留（viewer start.cmd 守卫与 dist/play.cmd 等） | 配置·门禁 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：9 个 .cmd 逐个跑通；viewer @BT@start.cmd@BT@ 的 python 守卫不再遮蔽 Node 兜底（无 python 环境也能起） | #69 |
 | T-039 | 依赖表「本 crate 无引用点」清单（两法一致：源码引用面扫描 + cargo check 的 -W unused-crate-dep… | 配置·门禁 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：@BT@cargo check -p websurf-phys@BT@ 等各 crate 无 @BT@unused_crate_dependencies@BT@ 警告 ⇒ 依赖表与源码引用面一致 | #70 |
 | T-040 | debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g… | 缺陷 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:1389 | progress/pending-detail.md | 判据：@BT@git grep -n "worker-b" apps/debug/src apps/game/src@BT@ ⇒ 两处措辞一致，或都改为不带外部实现引用的写法 | #71 |
-| T-041 | debug 输入录制/回放面板整组控件不存在 | 配置·门禁 | debug | 已结案 | — | progress/pending-detail.md | — | #72 |
-| T-042 | debug 路径可见开关不存在 | 缺陷 | debug | 已结案 | — | progress/pending-detail.md | — | #73 |
-| T-043 | debug PVS 开关双断 | 缺陷 | debug | 已结案 | — | progress/pending-detail.md | — | #74 |
-| T-044 | debug 四个配置字段纯死 | 未接线·死代码 | debug | 已结案 | — | progress/pending-detail.md | — | #75 |
-| T-045 | game pitchLimit 死字段 | 未接线·死代码 | game | 已结案 | — | progress/pending-detail.md | — | #76 |
 | T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:469 | progress/pending-detail.md | 判据：@BT@getLightingMode@BT@ 清点调用点（@BT@apps/debug/src/renderer/renderer-main.ts:469@BT@ 疑有一处）⇒ 真零调用则删，否则结案并改状态 | #78 |
-| T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | 未接线·死代码 | debug | 待修 | apps/game/src/app.ts:170 | progress/pending-detail.md | 判据：@BT@git grep -n "resetTo\|\.stop(" -- src apps@BT@ ⇒ 无外部调用点则删；有则接线并补调用 | #79 |
+| T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | 未接线·死代码 | debug | 待修 | apps/game/src/app.ts:170 | progress/pending-detail.md | 判据：@BT@git grep -n "resetTo\ | \.stop(" -- src apps@BT@ ⇒ 无外部调用点则删；有则接线并补调用 | #79 |
 | T-048 | worker 消息联合类型与实际收发不符（历史遗留，已由文档记录）：debug/game 的 worker-types.ts 里 rea… | 文档口径 | debug | 待裁决 | 见详情 | progress/pending-detail.md | — | #80 |
-| T-049 | v5 面板绑定审计：命中全为间接下发（非缺陷）：apps/game/src/panel/panel-controller.ts 有 11… | 工具·流程 | game | 已记录 | apps/game/src/app.ts:193-197 | progress/pending-detail.md | — | #82 |
-| T-050 | v4 审计工具边界（留档）：.tmp/audit/page-chain-audit4.mjs 会误报两类 —— ① 动态生成的 clas… | 工具·流程 | game | 已记录 | — | progress/pending-detail.md | — | #81 |
-| T-051 | 审计脚本的口径边界（留档）：.tmp/audit/page-chain-audit3.mjs 的 id 提取不覆盖 qs<T>('x')… | 工具·流程 | repo | 已记录 | apps/viewer/src/app.ts:71 | progress/pending-detail.md | — | #77 |
-| T-052 | viewer 三条 P0 接线缺陷（① 拖拽 .dem ② 遥测 HUD 常隐 ③ 记录 tab 回位）—— ①②③ 均已在后续轮处置 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/telemetry.ts:102 | progress/pending-detail.md | — | #83 |
 | T-053 | viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/… | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/timeline.ts:110 | progress/pending-detail.md | — | #84 |
 | T-054 | debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g… | 缺陷 | debug | 待裁决 | apps/debug/src/app.ts:1992 | progress/pending-detail.md | — | #85 |
 | T-055 | game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（… | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #86 |
 | T-056 | 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局… | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #87 |
-| T-057 | viewer 录像（.dem）按键可视化（Key Overlay）—— 拟以「反推」实现，本轮只登记不动手（owner 提出，2026-… | 未接线·死代码 | viewer | 已记录 | — | progress/pending-detail.md | — | #88 |
 | T-058 | DemoParseResult 里「已解码但应用面为零」的字段清单（owner 要求记录，2026-09-30 | 未接线·死代码 | viewer | 待修 | 见详情 | progress/pending-detail.md | 判据：零应用字段逐条 @BT@git grep -n "<字段>" -- src apps@BT@ ⇒ 只剩定义处则删字段，否则接线 | #89 |
-| T-059 | 录像「对话」只能显示服务端文本，玩家聊天看不到（本轮新增分节的边界，2026-09-30）：已在录像 tab 加第三节「对话」并接上 c… | 缺陷 | viewer | 已记录 | — | progress/pending-detail.md | — | #90 |
 | T-060 | .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01 | 缺陷 | viewer | 待裁决 | 见详情 | progress/pending-detail.md | — | #91 |
-| T-061 | 真实 .dem 夹具首扫（test/replay/auto-20261001-050330-surf_gigapede.dem，11.8… | 工具·流程 | viewer | 已记录 | — | progress/pending-detail.md | — | #92 |
 | T-062 | 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径… | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:283 | progress/pending-detail.md | 判据：@BT@git grep -n "importer" -- apps/viewer/src@BT@ ⇒ Source .dem 分支无 UI 调用路径 ⇒ 删或接线 | #93 |
-| T-063 | .dem 实体流：只有 1 个玩家实体采到位姿 | 缺陷 | viewer | 已结案 | — | progress/pending-detail.md | — | #94 |
 | T-064 | 8 篇 debug 文档存在「在界内但内容偏旧」的锚点簇（2026-10-03 本轮量化，未改）：src/scripts/check-d… | 文档口径 | docs | 待裁决 | apps/debug/src/worker/main.ts:483 | progress/pending-detail.md | — | #95 |
-| T-065 | check_stuck 探测盒前探 16 HU 戳进前方上翘的坡 ⇒ 误报卡死 | 缺陷 | shared | 已结案 | src/phys/player.rs:1400 | progress/open-issues/07-is-position-free-vs-trace.md | — | #96 |
 | T-066 | .phy 凸包表达不了曲面坡（progress/open-issues/06 §3.3 / §7.4 的遗留）：s1_ramp1b 实… | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/06-phy-hull-facet-jump.md | — | #97 |
 | T-067 | 修好卡死后暴露的两 tick 跳变（成因未定位）：修法 A 生效后，玩家在 surf_666 的 s1_ramp1b 上从 owner … | 缺陷 | shared | 待裁决 | 见详情 | progress/pending-detail.md | — | #98 |
-| T-068 | AGENTS.md 是全仓最大的文本文件，本轮起已超过 234 KB（301 行、最长单行 4031 字符 —— §7.1 的进度行本身… | 文档口径 | docs | 已结案 | AGENTS.md:1 | progress/pending-detail.md | — | #99 |
 | T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错） | 缺陷 | viewer | 待裁决 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | — | — |
 | T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道 | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:267 | documents/viewer/implementation/app.md | 判据：构造 2 条以上越界轨道 ⇒ 提示串 bbox 覆盖全部（不再只取第一条） | — |
 | T-103 | ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动） | 缺陷 | viewer | 待裁决 | apps/viewer/src/app.ts:807 | documents/viewer/implementation/app.md | — | — |
@@ -324,7 +288,7 @@
 | T-137 | 端口占用分支假定占用者服务的是 dist | 缺陷 | viewer | 待裁决 | apps/viewer/start.cmd:26 | documents/viewer/implementation/scripts-and-test.md | — | — |
 | T-138 | 光照模式下拉只写不回填，与运行期真实模式脱节 | 缺陷 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:98 | documents/viewer/implementation/ui.md | 判据：切换光照模式后下拉框回填值与 @BT@getLightingMode()@BT@ 一致（不再只写不回填） | — |
 | T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待裁决 | apps/viewer/src/ui/mapinfo.ts:130 | documents/viewer/implementation/ui.md | — | — |
-| T-140 | 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/telemetry.ts:122 | documents/viewer/implementation/ui.md | 判据：@BT@git grep -rn "水平速度\|horizontalSpeed" -- apps/viewer/src@BT@ ⇒ 只剩 sampling/player 一处实现 | — |
+| T-140 | 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/telemetry.ts:122 | documents/viewer/implementation/ui.md | 判据：@BT@git grep -rn "水平速度\ | horizontalSpeed" -- apps/viewer/src@BT@ ⇒ 只剩 sampling/player 一处实现 | — |
 | T-141 | setTracks 把父元素强转为 HTMLElement，null 时抛 TypeError | 缺陷 | viewer | 待修 | apps/viewer/src/ui/telemetry.ts:110 | documents/viewer/implementation/ui.md | 判据：@BT@setTracks(null)@BT@ ⇒ 不抛 TypeError（有明确容错） | — |
 | T-142 | 信息条重找跟随轨道，与 TrackSet.follow 策略重复 | 缺陷 | viewer | 待裁决 | apps/viewer/src/ui/replaymeta.ts:25 | documents/viewer/implementation/ui.md | — | — |
 | T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | 缺陷 | viewer | 待裁决 | apps/viewer/src/core/dom.ts:39 | documents/viewer/implementation/ui.md | — | — |
@@ -373,7 +337,6 @@
 | T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | 缺陷 | game | 待裁决 | apps/game/crates/wasm/src/lib.rs:117 | documents/game/implementation/wasm-crate.md | — | — |
 | T-219 | `SceneDataMessage` 是主线程 `loadScene` 形参、不是跨线程消息，却声明在「Worker → 主线程」分组 | 文档口径 | game | 待修 | apps/game/src/worker/worker-types.ts:110 | documents/game/implementation/worker.md | 判据：文档中 @BT@SceneDataMessage@BT@ 归到「主线程 loadScene 形参」处，不再列在「Worker → 主线程」分组 | — |
 | T-220 | `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加 | 缺陷 | game | 待裁决 | apps/game/src/worker/main.ts:513 | documents/game/implementation/worker.md | — | — |
-| T-221 | `phys-p2-regression.mjs` 的 `ALL PASS` 分支在当前产物下不可达（本地脚本未入库） | 工具·流程 | game | 已记录 | — | documents/game/implementation/scripts.md | — | — |
 | T-222 | 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出 | 配置·门禁 | game | 待修 | 见详情 | documents/game/implementation/scripts.md | 判据：13 个脚本补 @BT@process.exitCode@BT@ 后逐个跑失败路径 ⇒ exit ≠ 0（结论能被 CI 带出） | — |
 | T-223 | single 产物引用了不在保留名单里的 `coi-serviceworker.js`、dist 同目录无该文件 | 配置·门禁 | game | 待修 | apps/game/scripts/build-dist.mjs:60 | documents/game/implementation/scripts.md | 判据：构建 single 产物后 @BT@ls apps/game/dist/coi-serviceworker.js@BT@ 存在，或产物中不再引用它 | — |
 | T-224 | `build-dist.mjs` 两条路径都打印同一组 `[5/5]` 前缀、与步骤序号无关 | 工具·流程 | game | 待修 | apps/game/scripts/build-dist.mjs:90 | documents/game/implementation/scripts.md | 判据：@BT@git grep -n "\[5/5\]" -- apps/game/scripts/build-dist.mjs@BT@ ⇒ 两条路径的前缀与步骤序号对应 | — |
@@ -424,10 +387,7 @@
 | T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | 未接线·死代码 | shared | 待修 | apps/game/src/renderer/renderer-main.ts:333 | documents/ts-shared/overview.md | 判据：`git grep -n "PvsManager.getFaceCluster" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-407 | `world/types.ts` 的 `rootNode` 字段 | 未接线·死代码 | shared | 待修 | apps/game/crates/wasm/src/lib.rs:1706 | documents/ts-shared/overview.md | 判据：`git grep -n "world/types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | 未接线·死代码 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/convert.rs:367 | documents/wasm-core/overview.md | 判据：`git grep -n "bsp_to_gltf_core/convert.rs" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-501 | debug 的 chamfer 平面削减体积为零却决定地面法线 ⇒ 坡顶站不住 / 被弹飞 | 缺陷 | debug | 已结案 | — | progress/open-issues/01-chamfer-is-not-a-bevel.md | — | 原 01 |
-| T-502 | chamfer 黄线框靠重新猜平面得到，与物理侧平面表不是同一套判据 | 缺陷 | debug | 已结案 | — | progress/open-issues/02-chamfer-visualization-guesswork.md | — | 原 02 |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
-| T-505 | src/wasm-core 侧 bevel / brushes 无消费者，注释却称导出层会用 | 文档口径 | shared | 已结案 | — | progress/open-issues/05-wasmcore-bevel-doc-vs-code.md | — | 原 05 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-2 |
 | T-507 | check_stuck 的修法 D / C 未实施 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-3 |
