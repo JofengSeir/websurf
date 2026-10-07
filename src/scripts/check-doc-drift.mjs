@@ -241,7 +241,7 @@ for (const pair of caps) {
   if (kb > pair[1]) sizeBad.push('  ' + f + ' 已 ' + kb.toFixed(1) + ' KB（上限 ' + pair[1] + ' KB；见 AGENTS §0.4）');
 }
 for (const f of live) {
-  const isProc = f.startsWith('progress/') || f.startsWith('documents/norms/');
+  const isProc = f.startsWith('progress/') || f.startsWith('documents/norms/') || f.startsWith('documents/');
   const isRoot = ['README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md'].indexOf(f) >= 0;
   if (!isProc && !isRoot) continue;
   const kb = fs.statSync(path.join(ROOT, f)).size / 1024;
