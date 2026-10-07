@@ -190,6 +190,9 @@ for (const f of live) {
 
 const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length;
 console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length}`);
+const todoKB = Buffer.byteLength(todoRaw, 'utf8') / 1024;
+const todoRowCount = (todoRaw.match(/^\|\s*T-\d{3}\s*\|/gm) || []).length;
+if (todoRaw && (todoKB > 80 || todoRowCount > 300)) console.log(`\n[提示] ${todoPath} 已 ${todoKB.toFixed(1)} KB / ${todoRowCount} 条，超过体量阈值（80 KB 或 300 条）——按头注的分卷规则处理「已记录 + 已结案」`);
 if (drift.length) console.log('\n[A] 行数声明漂移（失败）：\n' + drift.join('\n'));
 if (badAnchor.length) console.log('\n[B] 锚点越界（失败）：\n' + badAnchor.join('\n'));
 if (missing.length) console.log('\n[C] 路径失效（告警，可能是刻意保留的历史路径）：\n' + [...new Set(missing)].map((s) => '  ' + s).join('\n'));
