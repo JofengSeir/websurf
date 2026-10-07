@@ -77,14 +77,18 @@ export class ReplayMetaPanel {
           : '头部地图名（基础名，不含 _N 后缀）',
       );
     }
-    add('风格', String(meta.style), 'Shavit style id（0 = 默认风格）');
+    // gokz `.rec`（KSF）头部只有帧数与估算 tickrate：风格 / 玩家 / 成绩 / 地图都不适用
+    const gokz = meta.format === 'gokz2' || meta.format === 'gokz3';
+    if (!gokz) add('风格', String(meta.style), 'Shavit style id（0 = 默认风格）');
     add('tick', meta.tickrate.toFixed(2), 'tick/s——帧率基准，帧间隔 = 1/tick');
     add(
       '帧',
-      `${meta.preFrames}+${meta.frameCount}+${meta.postFrames}`,
+      gokz ? `${meta.frameCount}` : `${meta.preFrames}+${meta.frameCount}+${meta.postFrames}`,
       // stage>0 属跑段细节：只进悬停 title，不占条面
-      `起跑前 + 正式跑 + 结束后（帧数，合计 ${meta.totalFrames}）；主时钟 0 = 起跑帧，prerun 不在播放区间` +
-        (meta.stage > 0 ? `；stage 跑段 ${meta.stage}` : ''),
+      gokz
+        ? `tick 数（主时钟 0 = 首帧，即起点区触碰）；文件不含 tickrate，按 ${meta.tickrate.toFixed(2)} 估算（见导入警告）`
+        : `起跑前 + 正式跑 + 结束后（帧数，合计 ${meta.totalFrames}）；主时钟 0 = 起跑帧，prerun 不在播放区间` +
+          (meta.stage > 0 ? `；stage 跑段 ${meta.stage}` : ''),
     );
     if (meta.timestamp !== null) {
       add('日期', fmtDate(meta.timestamp), '创纪录时间（头部 Unix 时间戳；旧版本用文件时间兜底）');
@@ -93,10 +97,12 @@ export class ReplayMetaPanel {
       '格式',
       `v${meta.version}`,
       // offsetsLength>0 属格式内部细节：只进悬停 title，不占条面
-      (meta.format === 'v2'
-        ? 'V2 旧格式（带 tickrate 估算，见导入警告）'
-        : `Shavit FINAL 格式版本 0x${meta.version.toString(16).toUpperCase().padStart(2, '0')}`) +
-        (meta.offsetsLength > 0
+      (gokz
+        ? `KSF/gokz .rec 格式（帧含按钮 / 位置 / 朝向 / 原生速度）`
+        : meta.format === 'v2'
+          ? 'V2 旧格式（带 tickrate 估算，见导入警告）'
+          : `Shavit FINAL 格式版本 0x${meta.version.toString(16).toUpperCase().padStart(2, '0')}`) +
+        (!gokz && meta.offsetsLength > 0
           ? `；fail-replay offsets 记录 ${meta.offsetsLength - 1} 条（解析时已跳过该区）`
           : ''),
     );

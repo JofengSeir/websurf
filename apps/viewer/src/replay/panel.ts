@@ -4,7 +4,7 @@
  * 职责边界：本文件负责人机交互与规则持久化，不做解析（交给
  * `apps/viewer/src/replay/importer.ts` 的 `ReplayImporter`）、不改轨道结构
  * （进出的 clip 交给 `onClip`，由 `apps/viewer/src/app.ts` 决定追加还是替换轨道）。
- * 本页**只收 `.replay`**：入口按内容复核（`apps/viewer/src/core/filekind.ts`），
+ * 本页**只收 `.replay` 与 `.rec`**（KSF/gokz 记录）：入口按内容复核（`apps/viewer/src/core/filekind.ts`），
  * 选到别的类型一律经 `onForeignFile` 交回 `apps/viewer/src/app.ts` 的 `routeFile` 改送。
  *
  * 关键不变量：
@@ -93,7 +93,7 @@ export class ReplayPanel {
     const fileInput = el('input');
     fileInput.type = 'file';
     // 本页只收记录：`.dem` 归「录像」页。误选不会在本页被解析 —— `loadFile` 按内容复核后转发
-    fileInput.accept = '.replay';
+    fileInput.accept = '.replay,.rec';
     fileInput.style.display = 'none';
     // 引导层的「导入记录」按钮以 `for="replayFile"` 触发本输入（首访用户在引导层即可导入）
     fileInput.id = 'replayFile';
@@ -281,14 +281,14 @@ export class ReplayPanel {
       return;
     }
     const kind = await sniffFileKind(file);
-    if (kind !== 'replay') {
+    if (kind !== 'replay' && kind !== 'rec') {
       if (this.opts.onForeignFile) {
         // 去向与文案都归 `routeFile`（本页不替它决定是录像页还是地图）
         this.opts.onForeignFile(file);
         return;
       }
       this.fileNote(
-        `${file.name} 不是 ${FILE_KIND_LABEL.replay}文件（识别为 ${FILE_KIND_LABEL[kind]}）——本页只收 .replay`,
+        `${file.name} 不是记录文件（识别为 ${FILE_KIND_LABEL[kind]}）——本页只收 .replay / .rec`,
         'error',
       );
       return;
@@ -326,7 +326,7 @@ export class ReplayPanel {
         this.file.name,
         (phase, done, total) => {
           const pct = total > 1 ? ` ${Math.round((done / total) * 100)}%` : '';
-          if (phase === 'parse') this.opts.onStatus(`解析 .replay…${pct}`);
+          if (phase === 'parse') this.opts.onStatus(`解析记录…${pct}`);
         },
       );
       // 一份 `.replay` = 一条轨道。重新导入（改映射 / 改变换）时把上次那条轨道 id 当作替换目标，

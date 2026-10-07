@@ -44,7 +44,7 @@
 | 相机单一写者 | 回放第一人称段把 `drivesCamera` / `allowMove` 置假并用 `applyToWithRoll` 写相机，其余帧由 `FlyCam` 写 | `apps/viewer/src/app.ts:974` 到 `apps/viewer/src/app.ts:993` |
 | 帧间隔上限 | dt 取 `min(now - lastNow, 0.05)`，避免切标签页回来时时间跳变 | `apps/viewer/src/app.ts:968` |
 | HUD 节流 | 位姿行、活动会话时间轴、遥测按 ≥ 80 ms 的间隔刷新，不每帧重排 DOM | `apps/viewer/src/app.ts:997` 到 `apps/viewer/src/app.ts:1012` |
-| 导入分派单点 | 拖拽、引导层输入、两个面板的文件框都汇进 `routeFile`：按**文件头魔数**判类型（`sniffFileKind`），`.bsp` → 地图（不切 tab）、`.replay` → 切记录页交给面板、`.dem` → 切录像页交给 `DemoPanel.load`；三种都不命中才提示，文案列出三条魔数 | `apps/viewer/src/app.ts:639` 到 `apps/viewer/src/app.ts:644` |
+| 导入分派单点 | 拖拽、引导层输入、两个面板的文件框都汇进 `routeFile`：按**文件头魔数**判类型（`sniffFileKind`），`.bsp` → 地图（不切 tab）、`.replay` / `.rec` → 切记录页交给面板、`.dem` → 切录像页交给 `DemoPanel.load`；四种都不命中才提示，文案列出四条魔数 | `apps/viewer/src/app.ts:639` 到 `apps/viewer/src/app.ts:659` |
 | 拖拽与引导层入口 | 拖拽按内容分派（不再看扩展名）；引导层「导入记录 / 录像」用**独立隐藏输入** `#importFile`（不指向记录页的 `#replayFile`），去向同样由内容决定 | `apps/viewer/src/app.ts:521`、`apps/viewer/src/app.ts:618` 到 `apps/viewer/src/app.ts:622`、`apps/viewer/src/app.ts:663` 到 `apps/viewer/src/app.ts:666` |
 | 面板误选改送 | 两个面板的载入入口都按内容复核：非本页类型经 `onForeignFile` 交回 `routeFile` 改送，不在本页解析 | `apps/viewer/src/app.ts:287`、`apps/viewer/src/app.ts:366` |
 | URL 深链 | `?bsp=` 与 `?replay=` 可任意组合；记录先按魔数嗅探再交给面板，非 Shavit 直接报错（深链是唯一仍按参数名定类型的入口，见已知缺口 6） | `apps/viewer/src/app.ts:788` 到 `apps/viewer/src/app.ts:825` |

@@ -1,9 +1,11 @@
 /**
- * 记录（`.replay`）导入入口：优先把解析交给 Worker（避免长时间占用主线程），Worker 不可用或
- * 启动失败时自动回退到主线程做同一套解析；两条路径都只接受 Shavit 原生 `.replay`。
+ * 记录导入入口：优先把解析交给 Worker（避免长时间占用主线程），Worker 不可用或
+ * 启动失败时自动回退到主线程做同一套解析；两条路径都按**魔数分派**两种格式——
+ * Shavit 原生 `.replay`（`apps/viewer/src/replay/shavit-replay.ts`）与 KSF/gokz `.rec`
+ * （`apps/viewer/src/replay/gokz-rec.ts`）。
  *
- * 数据流：`File` + `RuleConfig` → （Worker 或主线程）`parseShavitReplay` →
- * `clipFromShavitReplay` → `Clip`。Worker 消息与载荷类型见
+ * 数据流：`File` + `RuleConfig` → （Worker 或主线程）`parseShavitReplay` / `parseGokzRec` →
+ * `clipFromShavitReplay` / `clipFromGokzRec` → `Clip`。Worker 消息与载荷类型见
  * `apps/viewer/src/replay/protocol.ts`，Worker 侧实现见 `apps/viewer/src/worker/main.ts`。
  *
  * **本文件不碰 Source `.dem`**：录像链路有自己的解析器与自己的会话（`parseSourceDemo` →
@@ -30,6 +32,7 @@ import {
   fileLooksLikeShavitReplay,
   parseShavitReplay,
 } from './shavit-replay.js';
+import { clipFromGokzRec, fileLooksLikeGokzRec, parseGokzRec } from './gokz-rec.js';
 import type {
   ClipPayload,
   ParseRequest,
@@ -53,7 +56,7 @@ export interface ImportResult {
    */
   clip: Clip;
   warnings: string[];
-  /** 导入来源标识：`.replay` 的路径（取自 `Clip.resolvedPath`）。 */
+  /** 导入来源标识：`Clip.resolvedPath`（'.replay' = Shavit，'.rec' = KSF/gokz）。 */
   resolvedPath: string;
 }
 
@@ -141,8 +144,8 @@ export class ReplayImporter {
   }
 
   /**
-   * 导入一份 Shavit `.replay` 并生成 `Clip`：先试 Worker，`send` 抛哨兵错误或 `workerBroken`
-   * 已置位时改走 `importOnMain`（同源解析）；其余异常原样上抛。
+   * 导入一份记录文件并生成 `Clip`：先试 Worker，`send` 抛哨兵错误或 `workerBroken`
+   * 已置位时改走 `importOnMain`（同源解析）；其余异常原样上抛。格式由 Worker 按魔数分派。
    *
    * `file` 为 null 时交由解析侧复用自己缓存的上一份文件——本仓唯一调用点
    * （`apps/viewer/src/replay/panel.ts` 的 `ReplayPanel.runImport`）保证非空。
@@ -182,7 +185,7 @@ export class ReplayImporter {
 
   /**
    * 主线程回退路径：目标文件取 `file ?? mainNativeFile`，两者都为空则抛错。
-   * 先按魔数嗅探（是二进制判定，不做文本解码），非 `.replay` 直接抛错；
+   * 先按魔数嗅探并分派格式（二进制判定，不做文本解码），两种记录魔数都不命中直接抛错；
    * 字节只在「命中同一文件句柄」时复用缓存，否则重新 `arrayBuffer()` 并覆盖缓存。
    *
    * `ProgressFn` 的数值口径与 Worker 侧一致（`'parse'` 的 0/1 与 1/1），
@@ -197,10 +200,12 @@ export class ReplayImporter {
     const target = file ?? this.mainNativeFile;
     if (!target) throw new Error('没有可解析的文件');
 
-    // 魔数嗅探必须在 text() 之前——Shavit .replay 是二进制，文本解码会破坏它
-    if (!(await fileLooksLikeShavitReplay(target))) {
+    // 魔数嗅探与分派必须在 text() 之前——记录文件是二进制，文本解码会破坏它
+    const isShavit = await fileLooksLikeShavitReplay(target);
+    const isGokz = !isShavit && (await fileLooksLikeGokzRec(target));
+    if (!isShavit && !isGokz) {
       throw new Error(
-        `${name} 不是 Shavit .replay 录像文件——viewer 只支持 Shavit 原生 .replay（JSON/规则脚本通道已移除）`,
+        `${name} 不是受支持的记录文件——viewer 只收 Shavit .replay 与 KSF .rec（JSON/规则脚本通道已移除）`,
       );
     }
 
@@ -210,6 +215,17 @@ export class ReplayImporter {
       bytes = await target.arrayBuffer();
       this.mainNativeFile = target;
       this.mainNativeBytes = bytes;
+    }
+    if (isGokz) {
+      const parsed = parseGokzRec(bytes, {
+        // File.lastModified 是 ms；时间戳兜底取 Unix 秒（与 Shavit 路径同口径）
+        timestampFallback: Math.floor(target.lastModified / 1000),
+        // 坐标映射切换（默认 shavit 定标映射；仅用户显式切换时非默认）
+        mapping: { axesMode: rule.axesMode, yawMode: rule.yawMode },
+      });
+      onProgress?.('parse', 1, 1);
+      const { clip, warnings } = clipFromGokzRec(name, parsed, rule);
+      return { clip, warnings, resolvedPath: clip.resolvedPath };
     }
     const parsed = parseShavitReplay(bytes, {
       // File.lastModified 是 ms；.replay 头部 iTimestamp 是 Unix 秒（mtime 兜底同单位）

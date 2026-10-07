@@ -20,6 +20,7 @@ import {
   parseShavitReplay,
   SHAVIT_MAX_VERSION,
 } from '../src/replay/shavit-replay.js';
+import { clipFromGokzRec, parseGokzRec } from '../src/replay/gokz-rec.js';
 import { defaultRule } from '../src/replay/types.js';
 import type { Clip, RuleConfig } from '../src/replay/types.js';
 import { parseSourceDemo } from '../src/replay/demo/demo.js';
@@ -878,8 +879,8 @@ console.log('\n[9] 文件类型识别（按魔数分派，不看扩展名）');
   check('Shavit 头不会被判成 demo', kindOfHead(shavitHead) !== 'demo');
   check('HL2DEMO 头不会被判成 replay', kindOfHead(demHead) !== 'replay');
   check(
-    '展示名齐全（四种取值都有文案）',
-    (['bsp', 'replay', 'demo', 'unknown'] as const).every(
+    '展示名齐全（五种取值都有文案）',
+    (['bsp', 'replay', 'demo', 'rec', 'unknown'] as const).every(
       (k) => typeof FILE_KIND_LABEL[k] === 'string' && FILE_KIND_LABEL[k].length > 0,
     ),
   );
@@ -1311,6 +1312,169 @@ console.log(`\n${failures === 0 ? '全部通过' : failures + ' 项失败'}\n`);
       check('DEM Clip 元信息为 null（`.dem` 没有 Shavit 文件头）', c.meta === null, String(c.meta));
       check('DEM Clip 计数与各定长数组等长', c.count === c.pos.length / 3 && c.count === c.ang.length / 3, `${c.count}`);
     }
+  }
+}
+
+// ── [9b] KSF/gokz .rec 原生解析（合成 fixture）────────────────────────
+// 格式出处：ksf.surf 前端 replayviewer.js 的 ReplayFile（头 6 i32 + bookmark 区 + 定长帧区）。
+// 合成夹具把 bookmark 区与扩展块填成可识别的填充值，从而钉死「跳过量」；帧值按
+// 「Source 坐标 → viewer 映射」的期望值断言。
+console.log('\n[9b] KSF/gokz .rec 原生解析（合成 fixture）');
+{
+  interface RecTick {
+    buttons: number;
+    pos: [number, number, number];
+    pitch: number;
+    yaw: number;
+    vel: [number, number, number];
+  }
+  /** 构造 v2/v3 .rec 字节：头（v3 含 extCells 跳过段）→ bookmark 区（填 0xAB）→ 帧区。 */
+  const buildRec = (opts: {
+    version: 2 | 3;
+    ticks: RecTick[];
+    headTickCount?: number;
+    bookMarks?: number;
+    extCells?: number;
+  }): ArrayBuffer => {
+    const tickCells = opts.version === 3 ? 18 : 10;
+    const extCells = opts.version === 3 ? (opts.extCells ?? 0) : 0;
+    const bookMarks = opts.bookMarks ?? 0;
+    const headBytes = 24 + extCells * 4;
+    const total = headBytes + bookMarks * 524 + opts.ticks.length * tickCells * 4;
+    const buf = new ArrayBuffer(total);
+    const dv = new DataView(buf);
+    dv.setInt32(0, opts.version, true);
+    dv.setInt32(4, opts.version, true);
+    dv.setInt32(8, opts.headTickCount ?? opts.ticks.length, true);
+    dv.setInt32(12, bookMarks, true);
+    if (opts.version === 3) {
+      dv.setInt32(16, tickCells, true);
+      dv.setInt32(20, extCells, true);
+      for (let c = 0; c < extCells; c++) dv.setUint32(24 + c * 4, 0xcdcdcdcd, true);
+    }
+    const bmBase = headBytes;
+    for (let b = 0; b < bookMarks * 524; b++) new Uint8Array(buf)[bmBase + b] = 0xab;
+    const frameBase = bmBase + bookMarks * 524;
+    opts.ticks.forEach((t, i) => {
+      const base = frameBase + i * tickCells * 4;
+      dv.setInt32(base, t.buttons, true);
+      dv.setFloat32(base + 4, t.pos[0], true);
+      dv.setFloat32(base + 8, t.pos[1], true);
+      dv.setFloat32(base + 12, t.pos[2], true);
+      dv.setFloat32(base + 16, t.pitch, true);
+      dv.setFloat32(base + 20, t.yaw, true);
+      dv.setFloat32(base + 28, t.vel[0], true);
+      dv.setFloat32(base + 32, t.vel[1], true);
+      dv.setFloat32(base + 36, t.vel[2], true);
+    });
+    return buf;
+  };
+  const tick = (n: number, seed = 0): RecTick[] =>
+    Array.from({ length: n }, (_, i) => ({
+      buttons: 8 + i,
+      pos: [10 + i, 20 + i, 30 + i] as [number, number, number],
+      pitch: 5 + i,
+      yaw: 10 + i,
+      vel: [1 + i, 2 + i, 3 + i] as [number, number, number],
+    })).slice(0, Math.max(n, 0));
+
+  // 嗅探：v2/v3 头都判 rec，且与其它三类魔数互不误判
+  check('.rec v3 头 → rec', kindOfHead(new Uint8Array(buildRec({ version: 3, ticks: tick(1) }))) === 'rec');
+  check('.rec v2 头 → rec', kindOfHead(new Uint8Array(buildRec({ version: 2, ticks: tick(1) }))) === 'rec');
+  check('魔数 4 → 非 rec', kindOfHead(head(0)) !== 'rec');
+  function head(magic: number): Uint8Array {
+    const out = new Uint8Array(80);
+    new DataView(out.buffer).setInt32(0, magic, true);
+    return out;
+  }
+
+  // v3 全量：头字段、bookmark/扩展块跳过量（夹具填充 0xAB/0xCD，错位必脏）、默认映射、时间轴
+  const r3 = parseGokzRec(buildRec({ version: 3, ticks: tick(3), bookMarks: 2, extCells: 2 }), {
+    timestampFallback: 1700000000,
+  });
+  check('v3 头字段', r3.meta.version === 3 && r3.meta.format === 'gokz3' && r3.meta.frameCount === 3);
+  check('v3 count/timestamp', r3.count === 3 && r3.meta.timestamp === 1700000000);
+  check('v3 tickrate 兜底并写警告', near(r3.meta.tickrate, 200 / 3, 1e-9) && r3.warnings.some((w) => w.includes('tickrate')));
+  check('v3 buttons 逐帧', r3.buttons[0] === 8 && r3.buttons[1] === 9 && r3.buttons[2] === 10);
+  check('v3 pos 映射 [y,z,x]', r3.pos[0] === 20 && r3.pos[1] === 30 && r3.pos[2] === 10, `${r3.pos[0]},${r3.pos[1]},${r3.pos[2]}`);
+  check('v3 yaw +180 / pitch 取反', near(r3.ang[0], 190) && near(r3.ang[1], -5), `${r3.ang[0]},${r3.ang[1]}`);
+  check('v3 原生 vel 同轴序映射', r3.vel[0] === 2 && r3.vel[1] === 3 && r3.vel[2] === 1);
+  check('v3 t = i/tickrate', near(r3.t[1], 1 / (200 / 3), 1e-9), `${r3.t[1]}`);
+  check('v3 无 NaN 污染（bookmark 跳对位）', Number.isFinite(r3.pos[8]) && Number.isFinite(r3.ang[8]));
+
+  // 显式 tickrate：不写估算警告
+  const r3r = parseGokzRec(buildRec({ version: 3, ticks: tick(2) }), { tickrate: 128 });
+  check('显式 tickrate 生效且无警告', r3r.meta.tickrate === 128 && r3r.warnings.length === 0);
+
+  // raw 直读：pos/vel 轴序原样、ang [yaw, pitch, 0]
+  const r3raw = parseGokzRec(buildRec({ version: 3, ticks: tick(1) }), {
+    mapping: { axesMode: 'raw', yawMode: 'raw' },
+  });
+  check('raw 模式 pos/vel 直读', r3raw.pos[0] === 10 && r3raw.pos[2] === 30 && r3raw.vel[2] === 3);
+  check('raw 模式 ang 直读', near(r3raw.ang[0], 10) && near(r3raw.ang[1], 5));
+
+  // v2：10 cell 帧（无 flags cell 与扩展块），解析同通路
+  const r2 = parseGokzRec(buildRec({ version: 2, ticks: tick(2) }), {});
+  check('v2 头字段与 count', r2.meta.version === 2 && r2.meta.format === 'gokz2' && r2.count === 2);
+  check('v2 buttons/pos 映射', r2.buttons[1] === 9 && r2.pos[1 * 3] === 21 && r2.pos[1 * 3 + 2] === 11);
+
+  // Clip 装配：来源标识、时长、bbox、maxSpeed、buttons 透传、transform 生效
+  const rule = defaultRule();
+  const { clip: c3 } = clipFromGokzRec('boreas.rec', r3, rule);
+  check('Clip resolvedPath/meta', c3.resolvedPath === '.rec' && c3.meta?.format === 'gokz3');
+  check('Clip 时长 = 末帧 t', near(c3.duration, c3.t[c3.count - 1], 1e-9));
+  check('Clip bbox 来自映射后 pos', near(c3.bbox.min[0], 20, 1e-4) && near(c3.bbox.max[0], 22, 1e-4));
+  check('Clip maxSpeed 来自原生 vel', c3.maxSpeed > 0);
+  check('Clip buttons 透传', c3.buttons !== null && c3.buttons[2] === 10);
+  const { clip: cT } = clipFromGokzRec('t.rec', r3, {
+    ...rule,
+    transform: { offset: [100, 200, 300], yawDeg: 0 },
+  });
+  check('Clip transform 平移生效', near(cT.pos[0], 120, 1e-3) && near(cT.pos[1], 230, 1e-3));
+
+  // 官方 reader 口径：帧区实有 tick 数与头部声明不一致时按实有解析并警告
+  const rLead = parseGokzRec(buildRec({ version: 3, ticks: tick(4), headTickCount: 2 }), {});
+  check('lead-in：按帧区实有 tick 解析', rLead.count === 4 && rLead.warnings.some((w) => w.includes('实有')));
+
+  // 截断：头部声明多于帧区实有 → 报错
+  let threw = false;
+  try {
+    parseGokzRec(buildRec({ version: 3, ticks: tick(2), headTickCount: 5 }), {});
+  } catch (e) {
+    threw = e instanceof Error && e.message.includes('截断');
+  }
+  check('截断文件报错', threw);
+
+  // 真实夹具（发现式，与 [9] 的 .dem 同口径）：test/replay 下第一份 .rec；缺失 loud skip。
+  let realRec: Uint8Array | null = null;
+  for (const d of [
+    new URL('../../../test/replay/', import.meta.url),
+    new URL('../../../../test/replay/', import.meta.url),
+  ]) {
+    try {
+      const names = readdirSync(d).filter((f) => f.endsWith('.rec')).sort();
+      if (names.length === 0) continue;
+      realRec = new Uint8Array(readFileSync(new URL(names[0], d)));
+      console.log(`     （真实 .rec 夹具 ${names[0]}）`);
+      break;
+    } catch {
+      /* 换下一个候选路径 */
+    }
+  }
+  if (realRec) {
+    check('真实 .rec 夹具 → rec', kindOfHead(realRec) === 'rec');
+    const rr = parseGokzRec(realRec.buffer.slice(realRec.byteOffset, realRec.byteOffset + realRec.byteLength), {});
+    check(
+      '真实 .rec 解析闭合',
+      rr.count > 0 && rr.pos.length === rr.count * 3 && rr.ang.length === rr.count * 3 && rr.vel.length === rr.count * 3,
+      `${rr.count}`,
+    );
+    check(
+      '真实 .rec 坐标全部有限',
+      rr.pos.every((v) => Number.isFinite(v)) && rr.vel.every((v) => Number.isFinite(v)),
+    );
+  } else {
+    console.log('  SKIP 真实 .rec 夹具缺失（test/replay 下没有 .rec）');
   }
 }
 

@@ -59,15 +59,17 @@ export function defaultRule(): RuleConfig {
 // ── Shavit .replay 头部元信息（原生解析路径的元数据契约）──────────────
 
 /**
- * Shavit `.replay` 头部元信息。字段的读取顺序与逐字段版本门槛见
+ * 记录头部元信息。Shavit 路径的字段读取顺序与逐字段版本门槛见
  * `apps/viewer/src/replay/shavit-replay.ts` 的 `parseShavitReplay`（门槛由各 `has(n)` 分支与
  * `cellsForVersion` 给出）；FINAL 有这些字段，V2 无对应字段 → 0 / null。
+ * KSF `.rec` 路径（`apps/viewer/src/replay/gokz-rec.ts`）只填 version / format / frameCount /
+ * totalFrames / tickrate / timestamp，其余取零值。
  */
 export interface ReplayHeaderMeta {
-  /** FINAL 格式版本（1..0x0C）；V2 无版本概念 → 0。 */
+  /** FINAL 格式版本（1..0x0C）；V2 无版本概念 → 0；gokz = 魔数（2 或 3）。 */
   version: number;
-  /** 格式变体。 */
-  format: 'final' | 'v2';
+  /** 格式变体（`gokz*` = KSF `.rec`，见 `apps/viewer/src/replay/gokz-rec.ts`）。 */
+  format: 'final' | 'v2' | 'gokz2' | 'gokz3';
   /** 地图基础名（头部 sMap，不带 `_N`/`_sN` 后缀；V2 无 → ''）。 */
   map: string;
   /** 样式（V2 / <v3 无 → 0）。 */
@@ -123,16 +125,16 @@ export interface Clip {
   duration: number;
   bbox: { min: [number, number, number]; max: [number, number, number] };
   maxSpeed: number;
-  /** 导入来源标识：'.replay'（原生 Shavit）。 */
+  /** 导入来源标识：'.replay'（原生 Shavit）或 '.rec'（KSF/gokz）。 */
   resolvedPath: string;
   /** 生成这份 clip 的规则快照（重放时可读）。 */
   rule: RuleConfig;
   /**
    * 逐帧按键位掩码（IN_*：IN_JUMP=2、IN_DUCK=4、IN_FORWARD=8…）。
-   * 仅 Shavit .replay 原生路径填充。
+   * Shavit .replay 与 KSF .rec 原生路径都填充。
    */
   buttons: Int32Array | null;
-  /** Shavit .replay 头部元信息（地图/track/成绩/玩家/tick…）。 */
+  /** 记录头部元信息（Shavit .replay 或 KSF .rec，按 `format` 区分）。 */
   meta: ReplayHeaderMeta | null;
 }
 

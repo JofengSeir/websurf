@@ -5,8 +5,9 @@
  * `apps/viewer/src/replay/importer.ts` 的 `ReplayImporter`。
  *
  * 关键不变量：
- * - **魔数嗅探先于任何文本解码**：`.replay` 是二进制，先按 `fileLooksLikeShavitReplay` 判定，
- *   非 `.replay` 直接回 `type: 'error'`（文本解码会破坏字节）；
+ * - **魔数嗅探先于任何文本解码**：记录文件是二进制，先按 `fileLooksLikeShavitReplay` /
+ *   `fileLooksLikeGokzRec` 判定并分派格式（Shavit `.replay` 或 KSF `.rec`），都不命中直接回
+ *   `type: 'error'`（文本解码会破坏字节）；
  * - 缓存的是**原始字节**（`cachedNativeBytes`）而不是解析结果：改映射/变换重导时重新解码，
  *   同时避免 buffer 被 transfer 出去后本地失效；
  * - 回传的定型数组 buffer 全部进 transfer 列表（`t`/`pos`/`ang` 必有，`vel`/`buttons` 存在
@@ -22,6 +23,7 @@ import {
   fileLooksLikeShavitReplay,
   parseShavitReplay,
 } from '../replay/shavit-replay.js';
+import { clipFromGokzRec, fileLooksLikeGokzRec, parseGokzRec } from '../replay/gokz-rec.js';
 import type { ParseRequest, ParseResponse } from '../replay/protocol.js';
 import type { Clip } from '../replay/types.js';
 
@@ -56,10 +58,12 @@ async function handle(req: ParseRequest): Promise<void> {
     const file = req.file ?? cachedNativeFile;
     if (!file) throw new Error('没有可解析的文件');
 
-    // 魔数嗅探必须在文本解码之前——Shavit .replay 是二进制，file.text() 会破坏它
-    if (!(await fileLooksLikeShavitReplay(file))) {
+    // 魔数嗅探与格式分派必须在文本解码之前——记录文件是二进制，file.text() 会破坏它
+    const isShavit = await fileLooksLikeShavitReplay(file);
+    const isGokz = !isShavit && (await fileLooksLikeGokzRec(file));
+    if (!isShavit && !isGokz) {
       throw new Error(
-        `${req.name} 不是 Shavit .replay 记录文件——viewer 只支持 Shavit 原生 .replay（JSON/规则脚本通道已移除）`,
+        `${req.name} 不是受支持的记录文件——viewer 只收 Shavit .replay 与 KSF .rec（JSON/规则脚本通道已移除）`,
       );
     }
 
@@ -75,15 +79,20 @@ async function handle(req: ParseRequest): Promise<void> {
       cachedNativeBytes = bytes;
     }
 
-    const parsed = parseShavitReplay(bytes, {
-      // File.lastModified 是 ms；.replay 头部 iTimestamp 是 Unix 秒（mtime 兜底同单位）
-      timestampFallback: Math.floor(file.lastModified / 1000),
-      // 坐标映射切换（默认 shavit 定标映射；仅用户显式切换时非默认）
-      mapping: { axesMode: req.rule.axesMode, yawMode: req.rule.yawMode },
-    });
+    const { clip, warnings } = isGokz
+      ? clipFromGokzRec(req.name, parseGokzRec(bytes, {
+          // File.lastModified 是 ms；时间戳兜底取 Unix 秒（与 Shavit 路径同口径）
+          timestampFallback: Math.floor(file.lastModified / 1000),
+          // 坐标映射切换（默认 shavit 定标映射；仅用户显式切换时非默认）
+          mapping: { axesMode: req.rule.axesMode, yawMode: req.rule.yawMode },
+        }), req.rule)
+      : clipFromShavitReplay(req.name, parseShavitReplay(bytes, {
+          // File.lastModified 是 ms；.replay 头部 iTimestamp 是 Unix 秒（mtime 兜底同单位）
+          timestampFallback: Math.floor(file.lastModified / 1000),
+          // 坐标映射切换（默认 shavit 定标映射；仅用户显式切换时非默认）
+          mapping: { axesMode: req.rule.axesMode, yawMode: req.rule.yawMode },
+        }), req.rule);
     post({ id, type: 'progress', phase: 'parse', done: 1, total: 1 });
-
-    const { clip, warnings } = clipFromShavitReplay(req.name, parsed, req.rule);
 
     const transfer: Transferable[] = [clip.t.buffer, clip.pos.buffer, clip.ang.buffer];
     if (clip.vel) transfer.push(clip.vel.buffer);

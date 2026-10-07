@@ -642,7 +642,7 @@ async function routeFile(file: File): Promise<void> {
     await loadBsp(file);
     return;
   }
-  if (kind === 'replay') {
+  if (kind === 'replay' || kind === 'rec') {
     activateTab('replay');
     await replayPanel?.loadFile(file);
     return;
@@ -653,8 +653,8 @@ async function routeFile(file: File): Promise<void> {
     return;
   }
   const msg =
-    `未加载：${file.name} 不是 .bsp / .replay / .dem` +
-    `（按文件头魔数识别：VBSP / {SHAVITREPLAYFORMAT} / HL2DEMO）`;
+    `未加载：${file.name} 不是 .bsp / .replay / .rec / .dem` +
+    `（按文件头魔数识别：VBSP / {SHAVITREPLAYFORMAT} / KSF .rec / HL2DEMO）`;
   if (!scene.hasModel()) hud.showGuideError(msg);
   else hud.flashStatus(msg, 5000);
 }

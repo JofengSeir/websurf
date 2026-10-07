@@ -94,7 +94,7 @@
 | Worker 构造抛错或 `onerror` | `workerBroken` 置位、终止并丢弃 Worker、用同一个错误拒绝全部未结算请求；此后每次导入直接走主线程 | `apps/viewer/src/replay/importer.ts:116` 到 `apps/viewer/src/replay/importer.ts:130` |
 | 主线程回退的魔数嗅探失败 | 抛「不是 Shavit .replay 记录文件」错误，经面板 note 显示 | `apps/viewer/src/replay/importer.ts:201` 到 `apps/viewer/src/replay/importer.ts:205` |
 | Worker 收到消息但永不回包 | `import` 不设超时：promise 永不结算，面板 `busy` 保持为真，后续导入被丢弃 | `apps/viewer/src/replay/importer.ts:149`、`apps/viewer/src/replay/panel.ts:316` 到 `apps/viewer/src/replay/panel.ts:320` |
-| 拖入三条魔数都不认的文件 | 已加载地图时 HUD 临时提示 5 s，未加载地图时写引导层错误；文案列出三条魔数（VBSP / `{SHAVITREPLAYFORMAT}` / HL2DEMO） | `apps/viewer/src/app.ts:655` 到 `apps/viewer/src/app.ts:659` |
+| 拖入四条魔数都不认的文件 | 已加载地图时 HUD 临时提示 5 s，未加载地图时写引导层错误；文案列出四条魔数（VBSP / `{SHAVITREPLAYFORMAT}` / KSF .rec / HL2DEMO） | `apps/viewer/src/app.ts:655` 到 `apps/viewer/src/app.ts:659` |
 | URL 深链 fetch 失败或不是 Shavit 记录 | 无地图时打开引导层并显示错误；已有地图时 HUD 临时提示 6 s | `apps/viewer/src/app.ts:814` 到 `apps/viewer/src/app.ts:822` |
 | 规则存档缺失 / 版本不符 / 解析抛错 | 保留内置默认规则 `defaultRule()`；读不到时顺手清掉旧版键 | `apps/viewer/src/replay/panel.ts:198`、`apps/viewer/src/replay/types.ts:55` |
 | `localStorage` 写入失败 | `saveRule` 静默忽略（隐私模式等） | `apps/viewer/src/replay/panel.ts:226` |
