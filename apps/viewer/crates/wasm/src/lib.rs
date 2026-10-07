@@ -161,9 +161,9 @@ fn collect_pakfile_models(
     Ok((models, static_props, entry_names))
 }
 
-/// 单个 VTF 字节 → PNG 字节（内部工具，不作为 wasm API 暴露）。
+/// 单个 VTF 字节 → PNG 字节（导出给 TS 侧天空盒解码；内部材质解析同样调用它）。
 /// 只解最高分辨率图的第 0 帧；三条失败链各自带上下文：VTF 解析 / 图像解码 / PNG 编码。
-fn decode_vtf_to_png(data: &[u8]) -> Result<Vec<u8>, JsValue> {
+#[wasm_bindgen] pub fn decode_vtf_to_png(data: &[u8]) -> Result<Vec<u8>, JsValue> {
     let vtf = texture_utils::from_bytes(data).map_err(|e| to_js_err(e, "VTF 解析失败"))?;
     let image = vtf
         .highres_image
@@ -717,4 +717,65 @@ impl BspProcessor {
 pub fn decompress_mtz(bytes: &[u8]) -> Result<String, JsValue> {
     websurf_wasm_core::mosaic::mtz::decompress_mtz(bytes)
         .map_err(|e| JsValue::from_str(&format!("decompress_mtz: {e}")))
+}
+
+
+// ---------------------------------------------------------------------------
+// T-417：2D 天空盒复用 `src/renderer-shared/environment/skybox.ts` 的同一套 TS 逻辑，
+// 需要与 debug / game 同形的两个导出。追加为**独立 `impl` 块**，既有行号一格不移（保住文档锚点）。
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen]
+impl BspProcessor {
+    /// 实体集合 JSON：字段与 debug / game 的同名导出一致（天空盒取 `worldspawn.skyname`）。
+    pub fn parse_entities(&self) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?;
+
+        #[derive(serde::Serialize)]
+        struct EntityOut {
+            index: usize,
+            classname: String,
+            targetname: String,
+            props: std::collections::BTreeMap<String, String>,
+            outputs: Vec<String>,
+            origin_raw: String,
+            model_raw: Option<String>,
+        }
+
+        let mut result: Vec<EntityOut> = Vec::new();
+        for (i, ent) in bsp.entities.iter().enumerate() {
+            let classname = ent.prop("classname").map(|s| s.to_string()).unwrap_or_default();
+            let targetname = ent.prop("targetname").map(|s| s.to_string()).unwrap_or_default();
+            let origin_raw = ent.prop("origin").map(|s| s.to_string()).unwrap_or_default();
+            let model_raw = ent.prop("model").ok().map(|s| s.to_string());
+            let mut props = std::collections::BTreeMap::new();
+            let mut outputs = Vec::new();
+            for (key, val) in ent.properties() {
+                if key.starts_with("On") || key.starts_with("on") {
+                    outputs.push(format!("{} {}", key, val));
+                } else {
+                    props.insert(key.to_string(), val.to_string());
+                }
+            }
+            result.push(EntityOut { index: i, classname, targetname, props, outputs, origin_raw, model_raw });
+        }
+
+        serde_json::to_string(&result).map_err(|e| JsValue::from_str(&format!("序列化失败: {e}")))
+    }
+
+    /// 读取 pakfile 内文件字节（找不到返回空数组）；供天空盒取 6 面 VTF。
+    pub fn read_pakfile_file(&self, name: &str) -> Result<Vec<u8>, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?;
+        match bsp.pack.get(name) {
+            Ok(Some(data)) => Ok(data),
+            Ok(None) => Ok(Vec::new()),
+            Err(e) => Err(to_js_err(e, "读取 pakfile 文件失败")),
+        }
+    }
 }

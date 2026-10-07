@@ -20,9 +20,9 @@
  * 只做「字节 → 结构化结果」。
  */
 
-import { BspProcessor, decompress_mtz, initSync } from '../../pkg/websurf_viewer_wasm.js';
+import { BspProcessor, decode_vtf_to_png, decompress_mtz, initSync } from '../../pkg/websurf_viewer_wasm.js';
 import { base64ToBytes, readEmbeddedWasmB64 } from '../../../../src/ts-shared/wasm/loader.js';
-import { loadDefaultsJson } from '../../../../src/ts-shared/materials/defaults.js';
+import { loadDefaultsJson } from '../../../../src/ts-shared/materials/defaults.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../../src/renderer-shared/environment/skybox.js';
 
 export interface BspMeta {
   schema_version?: number;
@@ -48,7 +48,7 @@ export interface BspLoadResult {
   spawnPoints: SpawnPoint[];
   /** 推荐出生点下标（wasm 规则：有 info_player_start 时取它的下标，否则 0）。 */
   primary: number;
-  glbBytes: ArrayBuffer;
+  glbBytes: ArrayBuffer; skyboxTexture: import('three').CubeTexture | null;
   /** 解析 + GLB 导出的耗时（ms），`performance.now()` 前后差值。 */
   elapsedMs: number;
 }
@@ -128,7 +128,7 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const proc = new BspProcessor(new Uint8Array(await file.arrayBuffer()));
   const meta = JSON.parse(proc.metadata()) as BspMeta;
   // parse_spawn_points 是借用方法，必须在取走 Bsp 实例的 GLB 导出之前调用
-  const spawnJson = proc.parse_spawn_points();
+  const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v));
   // 缺失纹理回退（与 game 同款）：装载失败回落 '{}'（无回退表），导出失败回落裸导出
   const defaultsJson = await loadDefaultsJson(decompress_mtz);
   let glb: Uint8Array;
@@ -142,7 +142,7 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
     glb.byteOffset,
     glb.byteOffset + glb.byteLength,
   ) as ArrayBuffer;
-  const elapsedMs = performance.now() - t0;
+  const elapsedMs = performance.now() - t0; const skyboxTexture = await buildSkyboxCubeTexture(skyboxFaces);
 
   const spawnData = JSON.parse(spawnJson) as {
     spawn_points?: SpawnPoint[];
@@ -152,7 +152,7 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const spawnPoints = spawnData.spawn_points ?? [];
   const primary = spawnData.primary ?? 0;
 
-  return { fileName: file.name, meta, spawnPoints, primary, glbBytes, elapsedMs };
+  return { fileName: file.name, meta, spawnPoints, primary, glbBytes, skyboxTexture, elapsedMs };
 }
 
 /**

@@ -37,6 +37,8 @@
 
 **game 天空盒**：`apps/game` 原先 `scene.background` 恒为纯色（0x222222），现已复用 `src/renderer-shared/environment/skybox.ts` 的同一套逻辑显示地图 2D 天空盒；game 的 wasm 增 `parse_entities` / `read_pakfile_file` / `decode_vtf_to_png` 三个导出（追加为独立 `impl` 块，既有行号不动）。viewer 侧待做。
 
+**viewer 天空盒**：`apps/viewer` 原先 `scene.background` 恒为纯色，现已复用同一套 `src/renderer-shared/environment/skybox.ts` 逻辑显示地图 2D 天空盒；viewer 的 wasm 同样补上 `parse_entities` / `read_pakfile_file` / `decode_vtf_to_png` 三个导出。至此**三工程**（debug / game / viewer）天空盒口径一致。
+
 **文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范），篇目见 `README.md`「文档地图」与 `documents/index.md`。
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。

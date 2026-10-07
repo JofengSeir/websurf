@@ -131,7 +131,7 @@ export class ViewerScene {
   }
 
   /** 挂载 GLB（替换旧地图）：解析 → 施加静态光照 → 分块合并 → 合并后终扫 → `fitCamera`。 */
-  async mountGlb(glbBytes: ArrayBuffer): Promise<void> {
+  async mountGlb(glbBytes: ArrayBuffer, skyboxTexture?: import('three').CubeTexture | null): Promise<void> {
     // 共享装配核（2026-10-03 起与 game 同一条链路）：GLB 字节 → 子场景（isBspModel 标记 +
     // 清根 rotation + 世界包围盒 + 摘 punctual 灯，顺序约束见 buildMapScene 文档）
     const { gltf, scene: mapRoot, maxDim } = await buildMapScene(glbBytes);
@@ -141,9 +141,9 @@ export class ViewerScene {
       this.scene.remove(this.modelRoot);
       this.modelRoot = null;
       // three.js 渲染列表缓存按旧地图几何缓存条目，换图后清掉（2026-10-04 自 debug 对齐）
-      this.renderer.renderLists.dispose();
+      if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose(); this.renderer.renderLists.dispose();
     }
-    this.scene.add(mapRoot);
+    this.scene.background = skyboxTexture ?? new THREE.Color(BG_COLOR); this.scene.add(mapRoot);
     this.modelRoot = mapRoot;
 
     // 静态光照（预烘焙，默认）必须赶在 optimizeScene 之前：分块合并按材质实例分组，
