@@ -1229,65 +1229,71 @@
         "at": "2026-10-07",
         "line": 394
       },
+      "T-415": {
+        "p": "b8cae7f3e2790d3efc5aae1d08a763c113e7d7d8cdd038d0018b3ef12041ff1b",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-07",
+        "line": 395
+      },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 395
+        "line": 396
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 396
+        "line": 397
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 397
+        "line": 398
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 398
+        "line": 399
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 399
+        "line": 400
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 400
+        "line": 401
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 401
+        "line": 402
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 402
+        "line": 403
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 403
+        "line": 404
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 404
+        "line": 405
       }
     },
     "OWNER.md": {
@@ -1631,6 +1637,7 @@
       "src/renderer-shared/environment/skybox.ts:1:1": "8d64a30d",
       "src/renderer-shared/environment/fog-controller.ts:1:1": "8d64a30d",
       "src/wasm-core/model_integrator/mod.rs:1352:1352": "c21e5aa4",
+      "progress/monthly/2026-10-5.md:17:17": "28dd72c2",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -4949,6 +4956,14 @@
   "rebaselines": [
     {
       "path": "TODO.md",
+      "at": "2026-10-07T20:31:10.962Z",
+      "by": "agent",
+      "reason": "T-415: 新增 progress:17 锚点",
+      "changed": 1,
+      "total": 172
+    },
+    {
+      "path": "TODO.md",
       "at": "2026-10-07T20:25:20.374Z",
       "by": "agent",
       "reason": "T-414: 新增 model_integrator/mod.rs:1352 锚点",
@@ -5258,14 +5273,6 @@
       "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
       "changed": 28,
       "total": 28
-    },
-    {
-      "path": "documents/game/implementation/savepoint.md",
-      "at": "2026-10-07T16:40:06.521Z",
-      "by": "agent",
-      "reason": "锚点钉格式升级（按位置数组 → 按 目标:行号）+ 首次纳入 TODO 证据列 162 处裸锚点",
-      "changed": 31,
-      "total": 31
     }
   ]
 }
