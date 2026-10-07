@@ -67,6 +67,7 @@
 | [`viewer/overview.md`](viewer/overview.md) | 工程定位、目录职责、依赖方向、构建产物与脚本、启动链、不变量 |
 | [`viewer/sequences.md`](viewer/sequences.md) | 启动时序与一帧内的链路、线程间消息、异常与回退路径 |
 | [`viewer/differences.md`](viewer/differences.md) | 与 `apps/debug`、`apps/game` 的实测差异（两侧锚点） |
+| [`viewer/replay-vs-dem.md`](viewer/replay-vs-dem.md) | 记录与录像两条链路的分工与选型依据（`.replay` vs `.dem`） |
 | [`viewer/implementation/app.md`](viewer/implementation/app.md) | 根级入口与页面装配 |
 | [`viewer/implementation/core.md`](viewer/implementation/core.md) | `core/**`：BSP 装载、场景、相机、DOM 工具 |
 | [`viewer/implementation/replay.md`](viewer/implementation/replay.md) | `replay/**`：录像解析、播放器、时间轴、轨道面板与可视化 |
