@@ -15,6 +15,7 @@
 4. **自检不绿不提交**：`node src/scripts/check-doc-drift.mjs` 全为 0；改动涉及的工程 `npm run typecheck` 通过（§5）。
 5. **过程产物进 `.tmp/`**（不入库）；进展与历史记 `progress/`，不回写正文。
 6. **卡住就停**：六类情况必须停下上报，文件保持未提交（§6）。
+7. **先读环境陷阱**：开工前读 `skills/websurf-env-traps/SKILL.md`——Windows/PowerShell、沙箱边界、git 并发提交、以及「判据指错路径 ⇒ 永久假结案」这类坑，每条都是本仓实测撞过的。
 
 
 ### 0.1 看板使用规程（取活 / 状态 / 收尾）
@@ -94,6 +95,7 @@
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
 | `.workbuddy/memory/**` | Agent 工作记忆（非文档树、不重编；仅作过程线索，不作事实来源） |
+| `skills/**` | **agent 环境陷阱 skill**（`skills/websurf-env-traps/SKILL.md`，开工前先读）。本机 DSH **不自动发现**项目级 skill（实测 `skill` 工具报 unknown），故由本文件 §0 第 7 条强制指向；若要让 `skill` 工具直接解析，需把该目录链接/复制进 `~/.agents/skills` |
 
 ---
 
@@ -174,7 +176,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 > **历史进度已移出本文件**：逐条原文见 `progress/monthly/2026-09-*.md`、`progress/monthly/2026-10-*.md`（过程记录，不作事实来源）。
 > 下表只作**索引**（日期 + 一句话 + 明细行号）；新增进展追加到对应月度文件，本表同步加一行。
 
-> **全量索引（92 条）见 `progress/index.md` 的「进展索引」**；为控制入口体积（§0.4：`AGENTS.md` ≤ 32 KB），本节只留最近 10 条。
+> **全量索引（93 条）见 `progress/index.md` 的「进展索引」**；为控制入口体积（§0.4：`AGENTS.md` ≤ 32 KB），本节只留最近 10 条。
 
 | 日期 | 摘要 | 明细 |
 |---|---|---|
@@ -189,6 +191,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 | 2026-10-07 | 流程文档体积政策 `§0.4` ＋ 注释纪律 `§3.1` ＋ progress 目录化（monthly 4 卷 / board）＋ `[H][I][J]` 三门前 ④⑤⑥… | progress/monthly/2026-10-4.md:23 |
 | 2026-10-07 | 推送前检查：上级覆盖 0 缺口 ＋ 写路径改为「当前写入目标」＋ `[I][K]` 两门… | progress/monthly/2026-10-4.md:24 |
 | 2026-10-07 | 待办清账（批量核对）：178 条未结 + OWNER 6 条待决逐类复核——证据锚点 0 失效 / 主题符号全在 / 判据实跑结案 4 条（T-023·T-129·T-132·T-150）＋ 修 1 条错判据（T-126）＋ 消 1 条重复（T-038↔T-135）… | progress/monthly/2026-10-4.md:25 |
+| 2026-10-07 | 项目级 agent 环境陷阱 skill（`skills/websurf-env-traps/SKILL.md`）＋ 实测本机 DSH 不自动发现项目级 skill（改由 §0 第 7 条强制指向）＋ 6 节 7.2 KB 陷阱清单… | progress/monthly/2026-10-4.md:26 |
 
 ### 7.2 工作组状态
 
