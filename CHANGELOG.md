@@ -45,6 +45,8 @@
 
 **微缩外景（Source 3D 天空盒的替代实现）**：夹具里没有可分离的地图自带微缩区，故在可达范围之外合成三层低多边形山脊作「到不了的外景」（`src/renderer-shared/environment/miniature-sky.ts`，逐层向雾色混合出大气透视，材质不吃地图雾以免被整片吃掉）；debug 已接线并随换图释放。
 
+**3D 天空盒（地图自带微缩景观）**：按起源引擎的正统做法接入 —— 取 `sky_camera` 半径（`场景半径 / scale`）内的微缩 mesh，复制后放大 `scale` 倍并把 `sky_camera` 点搬到世界原点，副本关深度读写并以 `renderOrder = -1` 当天空层；于是玩家在自己的出生点就能看到地图自带的那片远山/雪脊（`surf_boreas` 的微缩区在 `(-3475,-11710,-3158)`）。没有 `sky_camera` 的图仍回退到合成的山脊。
+
 **文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范），篇目见 `README.md`「文档地图」与 `documents/index.md`。
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。

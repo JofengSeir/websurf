@@ -41,7 +41,7 @@ import { ColliderDebug } from './collider-debug.js';
 import type { PhyBevelPiece } from './collider-debug.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
-import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js'; import { buildMiniatureSky } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js'; import { buildMiniatureOutside, buildMiniatureSky } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { LodManager } from './lod-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
@@ -533,7 +533,7 @@ export class RendererMain {
       }
     }
     this.bspModelScene = mapRoot;
-    this.scene.add(mapRoot); const miniature = buildMiniatureSky({ center: boundingBox.getCenter(new THREE.Vector3()), radius: maxDim * 0.5, color: 0x46566a, haze: data.fogParams?.color ?? 0xc8d8e4, seed: data.metadata?.numFaces ?? 1 }); miniature.userData.isMiniatureSky = true; this.scene.add(miniature);
+    this.scene.add(mapRoot); const miniature = (data.skyCamera ? buildMiniatureOutside(mapRoot, data.skyCamera, maxDim / data.skyCamera.scale) : null) ?? buildMiniatureSky({ center: boundingBox.getCenter(new THREE.Vector3()), radius: maxDim * 0.5, color: 0x46566a, haze: data.fogParams?.color ?? 0xc8d8e4, seed: data.metadata?.numFaces ?? 1 }); miniature.userData.isMiniatureSky = true; this.scene.add(miniature);
 
     const defaultNear = NearPlaneController.defaultNearForScene(maxDim);
     this.nearPlane.setDefaultNear(defaultNear);

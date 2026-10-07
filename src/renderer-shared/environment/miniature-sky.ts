@@ -90,3 +90,74 @@ export function buildMiniatureSky(opts: MiniatureSkyOptions): THREE.Group {
 	for (const layer of LAYERS) group.add(buildRidge(opts, layer));
 	return group;
 }
+
+
+/** `sky_camera` 换算出的参数（origin 已按导出轴约定转成 Three 坐标）。 */
+export interface SkyCameraParams {
+	origin: [number, number, number];
+	scale: number;
+}
+
+/** 从 `parse_entities()` 的 JSON 取 `sky_camera`；无该实体或 origin/scale 非法返回 null。 */
+export function skyCameraFromEntities(entitiesJson: string): SkyCameraParams | null {
+	try {
+		const parsed: unknown = JSON.parse(entitiesJson);
+		const list = (Array.isArray(parsed) ? parsed : ((parsed as { entities?: unknown[] }).entities ?? [])) as Array<{
+			classname?: string;
+			props?: Record<string, string>;
+		}>;
+		for (const e of list) {
+			if (e?.classname !== 'sky_camera') continue;
+			const o = (e.props?.origin ?? '').trim().split(/\s+/).map(Number);
+			if (o.length < 3 || o.some((v) => !Number.isFinite(v))) continue;
+			const s = Number.parseFloat(e.props?.scale ?? '16');
+			return { origin: [o[1], o[2], o[0]], scale: Number.isFinite(s) && s > 0 ? s : 16 };
+		}
+	} catch {
+		// 非法 JSON 只说明没有天空盒，不影响地图渲染
+	}
+	return null;
+}
+
+/** 副本材质：关掉深度读写（当天空层用），保留雾参与大气衰减。 */
+function cloneAsOutside(m: THREE.Material): THREE.Material {
+	const c = m.clone();
+	c.depthTest = false;
+	c.depthWrite = false;
+	return c;
+}
+
+/**
+ * 用地图自带的微缩区构建外景（Source 3D 天空盒的正统做法）：
+ * 取距 `sky_camera` 半径内的 mesh，复制一份放大 `scale` 倍、并把 `sky_camera` 点搬到世界原点
+ * ⇒ 微缩区成为真实地图周围的外景。副本材质关深度读写 + `renderOrder = -1`，总在最底层被主图覆盖。
+ * 未选中任何 mesh 时返回 null（调用方回退 `buildMiniatureSky`）。
+ */
+export function buildMiniatureOutside(mapRoot: THREE.Object3D, cam: SkyCameraParams, radius: number): THREE.Group | null {
+	const origin = new THREE.Vector3(cam.origin[0], cam.origin[1], cam.origin[2]);
+	const picked: THREE.Mesh[] = [];
+	mapRoot.updateMatrixWorld(true);
+	mapRoot.traverse((o) => {
+		const m = o as THREE.Mesh;
+		if (!m.isMesh || !m.geometry) return;
+		if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+		const bs = m.geometry.boundingSphere;
+		if (!bs) return;
+		if (bs.center.clone().applyMatrix4(m.matrixWorld).distanceTo(origin) <= radius) picked.push(m);
+	});
+	if (picked.length === 0) return null;
+	const group = new THREE.Group();
+	group.name = 'MiniatureSky';
+	group.userData.isMiniatureSky = true;
+	for (const src of picked) {
+		const material = Array.isArray(src.material) ? src.material.map(cloneAsOutside) : cloneAsOutside(src.material);
+		const mesh = new THREE.Mesh(src.geometry, material);
+		mesh.renderOrder = -1;
+		mesh.frustumCulled = false;
+		group.add(mesh);
+	}
+	const s = cam.scale;
+	group.scale.setScalar(s);
+	group.position.set(-origin.x * s, -origin.y * s, -origin.z * s);
+	return group;
+}
