@@ -14,7 +14,8 @@
  * - `showSolids`  实体碰撞体凸包线框，逐面按法线着色（地面绿 / 斜坡黄 / 墙红）；
  * - `showTriggers` 触发器凸包或 AABB 线框（青=已链接 / 紫=孤儿 / 灰=初始禁用 / 橙=非玩家）；
  * - `showPhy` / `showVis` 模型三角形线框（橙 / 紫）；
- * - `showBevel` BSP 原生 bevel 辅助碰撞面线框（白，画 bevel 平面与凸包的相交轮廓）。
+ * - `showBevel` BSP 原生 bevel 辅助碰撞面（白：bevel 平面被 brush AABB 截出的截面，
+ *   半透明填充 + 描边；与既有真实面共面的重复 bevel 不画——那只是把实体面又贴一遍）。
  *
  * **面高亮纪律（本模块最高优先级）**：debug 画的必须是物理系统**实际影响运动**的面，
  * 画不出来就不画。判据唯一来源是上游 `export_brushes_planes` 逐平面给出的 `is_real_face`
@@ -446,8 +447,8 @@ export class ColliderDebug {
 	private visGroup: THREE.Group | null = null;
 	/** 触发器线框（按触发类型着色，受 showTriggers 控制）。 */
 	private triggerGroup: THREE.Group | null = null;
-	/** bevel 辅助碰撞面线框（白）：画的是 BSP 原生 bevel 平面与凸包的相交轮廓，
-	 * 与实体面线框（solidGroup，按法线分类取色）区分开。 */
+	/** bevel 辅助碰撞面（白）：画的是 bevel 平面被 brush AABB 截出的截面（半透明填充 +
+	 * 描边），与实体面线框（solidGroup，按法线分类取色）区分开。 */
 	private bevelGroup: THREE.Group | null = null;
 	/** 实体碰撞箱开关。 */
 	private showSolids = false;
@@ -675,25 +676,27 @@ export class ColliderDebug {
 		const full = this.brushViewDistance <= 0;
 		const radiusSq = this.brushViewDistance * this.brushViewDistance;
 
-		// 距离筛选：XZ 取点到 brush AABB 的最近点算距离，Y 取 [minY, maxY] 窗口；全量模式跳过 XZ 判据
+		// 距离筛选：XZ 取点到 brush AABB 的最近点算距离，Y 取 [minY, maxY] 窗口；全量模式跳过 XZ 判据。
+		// distSq 必须真算：上限截断前按它排序取最近的——colliders 是地图序不是距离序，
+		// 排序键若恒 0，截断保留的就是数组靠前的，视距拉远后相机附近的 brush 反而被截掉
 		const nearby: { brush: Brush; distSq: number }[] = [];
 		for (const brush of colliders) {
+			let distSq = 0;
 			if (!full) {
 				const nx = Math.max(brush.min.x, Math.min(pos.x, brush.max.x));
 				const nz = Math.max(brush.min.z, Math.min(pos.z, brush.max.z));
 				const dx = pos.x - nx;
 				const dz = pos.z - nz;
-				const distSq = dx * dx + dz * dz;
+				distSq = dx * dx + dz * dz;
 				if (distSq > radiusSq) continue;
 			}
 			if (brush.max.y < minY || brush.min.y > maxY) continue;
-			nearby.push({ brush, distSq: 0 });
+			nearby.push({ brush, distSq });
 		}
 
 		if (nearby.length === 0) return;
 
-		// 超出上限时按 distSq 排序再截断；但收集时 distSq 一律写入 0、比较键恒等，
-		// 故排序不产生距离序，截断保留的是 colliders 中靠前的 MAX_DEBUG_COLLIDERS 个
+		// 超出上限时按 distSq 升序取最近的 MAX_DEBUG_COLLIDERS 个
 		if (nearby.length > MAX_DEBUG_COLLIDERS) {
 			nearby.sort((a, b) => a.distSq - b.distSq);
 			nearby.length = MAX_DEBUG_COLLIDERS;
@@ -782,17 +785,22 @@ export class ColliderDebug {
 		const pos = cameraPos;
 		const full = this.brushViewDistance <= 0;
 		const radiusSq = this.brushViewDistance * this.brushViewDistance;
-		const nearby: Brush[] = [];
+		// 距离必须真算进 distSq：上限截断前要按它排序——colliders 是地图序不是距离序，
+		// 视距拉远后若按数组序截断，名额会被远处的 brush 占满、相机附近的反而被截掉
+		//（实测踩过：bevel 视距开大，近处的 bevel 集体消失）
+		const nearby: { brush: Brush; distSq: number }[] = [];
 		for (const brush of colliders) {
-			if (!full) {
-				const nx = Math.max(brush.min.x, Math.min(pos.x, brush.max.x));
-				const nz = Math.max(brush.min.z, Math.min(pos.z, brush.max.z));
-				const dx = pos.x - nx;
-				const dz = pos.z - nz;
-				if (dx * dx + dz * dz > radiusSq) continue;
-			}
-			nearby.push(brush);
-			if (nearby.length >= MAX_DEBUG_COLLIDERS) break;
+			const nx = Math.max(brush.min.x, Math.min(pos.x, brush.max.x));
+			const nz = Math.max(brush.min.z, Math.min(pos.z, brush.max.z));
+			const dx = pos.x - nx;
+			const dz = pos.z - nz;
+			const distSq = dx * dx + dz * dz;
+			if (!full && distSq > radiusSq) continue;
+			nearby.push({ brush, distSq });
+		}
+		if (nearby.length > MAX_DEBUG_COLLIDERS) {
+			nearby.sort((a, b) => a.distSq - b.distSq);
+			nearby.length = MAX_DEBUG_COLLIDERS;
 		}
 
 		const outline: number[] = [];
@@ -800,7 +808,7 @@ export class ColliderDebug {
 		let bevelPlanes = 0;
 		let drawn = 0;
 		const OFFSET = 0.5; // 沿法线外移量（HU）：让截面与实体表面脱开、可见
-		for (const brush of nearby) {
+		for (const { brush } of nearby) {
 			// AABB 对角线的一半：截面四边形的基础半径（保证覆盖平面与 AABB 的整个截面）
 			const radius =
 				Math.hypot(brush.max.x - brush.min.x, brush.max.y - brush.min.y, brush.max.z - brush.min.z) / 2;
@@ -809,17 +817,38 @@ export class ColliderDebug {
 			const cz = (brush.min.z + brush.max.z) / 2;
 			for (const plane of brush.planes) {
 				if (plane.isBevel !== true) continue;
-				bevelPlanes++;
+				// 与同 brush 某条非 bevel 平面共面的 bevel 不画（VBSP 的 edge bevel 偶尔与
+				// 既有真实面同面——surf_666 刀脊 brush 只有东坡有这条共面 bevel，画出来就是
+				// "实体面上贴了张白纸"，且西坡没有对应物、看起来不对称）。共面判据：
+				// 法线逐分量 < 1e-4 且 dist 差 < 0.1 HU（实测这对平面 dist 差 0.0107 HU，
+				// 属 VBSP 生成 edge bevel 的浮点漂移；0.1 与上游顶点共面容差同量级，
+				// 两个平面在碰撞里等效）。不画不丢信息：那条真实面已经画了同一张面
 				const n = plane.normal;
+				const dupOfReal = brush.planes.some(
+					(q) =>
+						q.isBevel !== true &&
+						Math.abs(q.normal.x - n.x) < 1e-4 &&
+						Math.abs(q.normal.y - n.y) < 1e-4 &&
+						Math.abs(q.normal.z - n.z) < 1e-4 &&
+						Math.abs(q.dist - plane.dist) < 0.1,
+				);
+				if (dupOfReal) continue;
+				bevelPlanes++;
 				// 截面中心 = AABB 中心在该平面上的投影
 				const dn = n.x * cx + n.y * cy + n.z * cz - plane.dist;
 				const px = cx - n.x * dn;
 				const py = cy - n.y * dn;
 				const pz = cz - n.z * dn;
-				// 平面内正交基：取与法线最不正交的坐标轴参与叉乘，避免退化
-				const ref = Math.abs(n.x) > Math.abs(n.y) && Math.abs(n.x) > Math.abs(n.z)
+				// 平面内正交基：参考轴取**与法线分量最小**的坐标轴——单位法线的最小分量必然
+				// < 1，参考轴才保证不与法线平行、叉积非零。box bevel 全是轴向法线（如 (0,1,0)），
+				// 若按"最同向"选轴，叉积恒为零、截面退化成一个点，所有 box bevel 都画不出来
+				//（实测踩过：顶部 bevel 一张都看不到，只有斜向 edge bevel 出得来）
+				const absX = Math.abs(n.x);
+				const absY = Math.abs(n.y);
+				const absZ = Math.abs(n.z);
+				const ref = absX <= absY && absX <= absZ
 					? [1, 0, 0]
-					: Math.abs(n.y) >= Math.abs(n.z)
+					: absY <= absZ
 						? [0, 1, 0]
 						: [0, 0, 1];
 				let ux = n.y * ref[2] - n.z * ref[1];
