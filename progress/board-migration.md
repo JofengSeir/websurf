@@ -31,7 +31,7 @@
 | C2 | 34 个待办小节分诊：需决定的进看板，纯技术事实留文档并挂 `T-###` | `b700301` |
 | C3 | open-issues 整树迁 `progress/open-issues/`；引用面与源码注释收口 | `90c7384` |
 | C4 | 舍离：三篇 app `README.md`、`.archive/`、README §7 双导航、根 `sourceutils.js` | `dff15ee` |
-| C5 | `AGENTS.md` 收束：§7.1 84 条 → `progress/2026-09.md` / `2026-10.md`，§7.2 → `progress/wg-status.md` | `5bbac6b` |
+| C5 | `AGENTS.md` 收束：§7.1 84 条 → `progress/monthly/2026-09.md` / `2026-10.md`，§7.2 → `progress/wg-status.md` | `5bbac6b` |
 | C6 | 禁用词 2 处 + 锚点歧义（规范面归 0） | `1931d0c` |
 | C7 | 行尾：**前提被实测推翻**（见 §5） | `84e40cc` |
 | C8 | 门禁 `[E]` 坏链 / `[F]` 行尾 / `[G]` 待办同源，三条全上、失败即 exit 1 | `84e40cc` |
