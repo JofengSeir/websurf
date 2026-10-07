@@ -41,10 +41,9 @@ const LOCK = path.join(ROOT, 'docflow.json');
 /** 收尾必动、不参与「越界改动」判定的文件（§0.2 强制同提交更新它们）。 */
 const STD = ['TODO.md', 'OWNER.md', 'CHANGELOG.md', 'docflow.json'];
 /** 默认只读集：宪法层里**不随提交滚动**的那些。 */
-const DEFAULT_READONLY = ['README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'documents/norms/**', '.github/**/*.md', 'skills/**/SKILL.md'];
+const DEFAULT_READONLY = ['AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'documents/norms/**', '.github/**/*.md', 'skills/**/SKILL.md'];
 /** 候选提升为只读、但需先解决「每提交都要改它」的文件（report 会提示）。 */
 const CANDIDATES = [
-  ['AGENTS.md', '§7.1 每次收尾要追加滚动索引行 ⇒ 提升前须先把该索引移出本文件'],
   ['TODO.md', '唯一状态源，agent 每次认领/结案都要改 ⇒ 只锁「新建/删除」而非「改行」才有意义'],
   ['OWNER.md', '§0.3 规定 agent 要写 D-### 决策行 ⇒ 同上'],
 ];
@@ -68,7 +67,7 @@ function globToRe(g) {
   }
   return new RegExp('^' + out + '$');
 }
-const load = () => (fs.existsSync(LOCK) ? JSON.parse(fs.readFileSync(LOCK, 'utf8')) : { version: 1, policy: { readonly: DEFAULT_READONLY, candidates: CANDIDATES }, pins: {}, approvals: [], cochange: [], claim: null });
+const load = () => (fs.existsSync(LOCK) ? JSON.parse(fs.readFileSync(LOCK, 'utf8')) : { version: 1, policy: { readonly: DEFAULT_READONLY, candidates: CANDIDATES }, pins: {}, unitPins: {}, units: {}, binds: [], approvals: [], cochange: [], claim: null });
 const save = (d) => fs.writeFileSync(LOCK, JSON.stringify(d, null, 2) + '\n');
 const readonlyGlobs = (d) => (d.policy && d.policy.readonly ? d.policy.readonly : DEFAULT_READONLY);
 const isReadonly = (d, f) => readonlyGlobs(d).some((g) => globToRe(g).test(f));
@@ -89,6 +88,83 @@ function changed() {
 }
 const permitFor = (d, f) => d.approvals.find((a) => a.path === f && !a.consumed);
 const autoOk = (f) => STD.includes(f) || f.startsWith('progress/');
+
+/** sha256（UTF-8）。 */
+const sha = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
+/** 从文本抽出「单元」（表格行）：id -> { cells, line }；unit.idCell 指定哪列当 id。 */
+function extractUnits(text, spec) {
+  const re = new RegExp(spec.match);
+  const out = new Map();
+  text.split(/\r?\n/).forEach((l, i) => {
+    if (!re.test(l)) return;
+    const cells = l.split('|').slice(1, -1).map((x) => x.trim());
+    if (cells.length < 2) return;
+    out.set(cells[spec.idCell ?? 0], { cells, line: i + 1 });
+  });
+  return out;
+}
+/** 受保护列指纹（权限判定用）。 */
+const protFp = (u, spec) => sha((spec.pinned || []).map((i) => u.cells[i] ?? '').join('|'));
+/** 单元全指纹（强绑定判定用）。 */
+const fullFp = (u) => sha(u.cells.join('|'));
+/** HEAD 版本的同一文件（强绑定基线）。 */
+function headText(f) {
+  try { return execFileSync('git', ['show', 'HEAD:' + f.split(path.sep).join('/')], { cwd: ROOT, encoding: 'utf8', maxBuffer: 32e6 }); } catch { return ''; }
+}
+const unitsOfText = (d, f, text) => extractUnits(text, d.units[f]);
+const unitsOfFile = (d, f) => unitsOfText(d, f, fs.existsSync(path.join(ROOT, f)) ? fs.readFileSync(path.join(ROOT, f), 'utf8') : '');
+/** 权限：受保护列不得改、行集合不得增删（除非该文件拿到许可）。 */
+function checkUnits(d) {
+  const bad = [];
+  for (const [f, spec] of Object.entries(d.units || {})) {
+    const cur = unitsOfFile(d, f);
+    const pins = d.unitPins[f] || {};
+    const permit = permitFor(d, f);
+    for (const [id, want] of Object.entries(pins)) {
+      const u = cur.get(id);
+      if (!u) { if (!spec.allowDelete && !permit) bad.push('  ' + f + ' 单元 ' + id + ' 被删除（本文件不许删行；须先 approve）'); continue; }
+      if (protFp(u, spec) !== want.p && !permit) bad.push('  ' + f + ' 单元 ' + id + ' 的受保护列被改（列 ' + (spec.pinned || []).join(',') + '；须先 approve）');
+    }
+    for (const id of cur.keys()) if (!(id in pins) && !spec.allowNew && !permit) bad.push('  ' + f + ' 新增单元 ' + id + '（本文件不许 agent 新增行；须先 approve）');
+  }
+  return bad;
+}
+/** 强绑定：单元变了 ⇒ 配对单元必须也变（比工作树与 HEAD）。`#*` = 整篇任一单元。 */
+function checkBinds(d) {
+  const bad = [];
+  const changedIn = (f, id) => {
+    const cur = unitsOfFile(d, f), head = unitsOfText(d, f, headText(f));
+    if (id === '*') return [...cur.keys()].some((k) => !head.has(k) || fullFp(cur.get(k)) !== fullFp(head.get(k)));
+    if (cur.has(id) !== head.has(id)) return true;
+    return cur.has(id) && fullFp(cur.get(id)) !== fullFp(head.get(id));
+  };
+  for (const b of d.binds || []) {
+    const [fa, ia] = String(b.if).split('#');
+    if (!(d.units || {})[fa]) continue;
+    if (!changedIn(fa, ia)) continue;
+    for (const t of b.then) {
+      const [fb, ib] = String(t).split('#');
+      if (!(d.units || {})[fb]) continue;
+      if (!changedIn(fb, ib)) bad.push('  强绑定：' + b.if + ' 变了，但配对的 ' + t + ' 没动');
+    }
+  }
+  return bad;
+}
+/** 重钉单元（sync 调用；受保护列变了要求有许可）。 */
+function refreshUnits(d) {
+  for (const [f, spec] of Object.entries(d.units || {})) {
+    const cur = unitsOfFile(d, f);
+    const prev = d.unitPins[f] || {};
+    const keep = {};
+    for (const [id, u] of cur) {
+      const p = protFp(u, spec);
+      if (prev[id] && prev[id].p !== p && !permitFor(d, f)) { keep[id] = prev[id]; continue; }
+      keep[id] = { p, at: new Date().toISOString().slice(0, 10), line: u.line };
+    }
+    for (const [id, v] of Object.entries(prev)) if (!cur.has(id) && !spec.allowDelete && !permitFor(d, f)) keep[id] = v;
+    d.unitPins[f] = keep;
+  }
+}
 
 /** 只读漂移：钉住的对不上、有钉的文件消失、只读类新文件未登记。 */
 function checkReadonly(d) {
@@ -113,7 +189,7 @@ function checkCochange(d) {
 }
 function runCheck(quiet) {
   const d = load();
-  const bad = [...checkReadonly(d), ...checkCochange(d)];
+  const bad = [...checkReadonly(d), ...checkCochange(d), ...checkUnits(d), ...checkBinds(d)];
   const pend = d.approvals.filter((a) => !a.consumed);
   if (pend.length) bad.push('  ' + pend.length + ' 条审批尚未落实（编辑完成后运行 sync 重钉）');
   if (!quiet) console.log('docflow check：只读规则 ' + readonlyGlobs(d).length + ' 条 / 钉 ' + Object.keys(d.pins).length + ' 个 / 审批 ' + d.approvals.length + ' 条 / 联动 ' + (d.cochange || []).length + ' 对');
@@ -129,6 +205,12 @@ function runReport() {
   console.log('\n只读（改 / 新建 / 删除都需 owner 许可）：');
   for (const f of ro) console.log('  ' + (f in d.pins ? (hash(f) === d.pins[f] ? '✓ 已钉' : '✗ 漂移') : '· 未登记') + '  ' + f);
   console.log('\n可编辑 ' + ed.length + ' 篇（控制层与过程记录必须可写）：' + ed.slice(0, 24).join(', ') + (ed.length > 24 ? ' …' : ''));
+  const us = Object.entries(d.units || {});
+  if (us.length) {
+    console.log('\n单元级功能权限（哈希只覆盖受保护列）：');
+    for (const [f, s] of us) console.log('  ' + f + '  行匹配 ' + s.match + '  受保护列 [' + (s.pinned || []).join(',') + ']｜新增 ' + (s.allowNew ? '允许' : '需许可') + '｜删除 ' + (s.allowDelete ? '允许' : '需许可') + '｜已钉单元 ' + Object.keys(d.unitPins[f] || {}).length);
+    console.log((d.binds || []).length ? '\n强绑定：' + d.binds.map((b) => b.if + ' ⇒ ' + b.then.join(' , ')).join('；') : '\n强绑定：未配置（内核已就绪，配对策略待定）');
+  }
   const cand = (d.policy && d.policy.candidates) || CANDIDATES;
   if (cand.length) { console.log('\n候选提升为只读（需先解决「每次提交都要改它」）：'); for (const [p, why] of cand) console.log('  ' + p + ' —— ' + why); }
   if (d.claim) console.log('\n当前认领：' + d.claim.task + '（may ' + d.claim.may.length + ' / must ' + d.claim.must.length + '，' + d.claim.at + '）');
@@ -137,7 +219,7 @@ function runApprove() {
   const d = load();
   const f = opt('path');
   if (!f) throw new Error('用法：approve --path <文件> --by <谁> --reason <为什么> [--task T-###]');
-  if (!isReadonly(d, f) && !(f in d.pins)) throw new Error(f + ' 不是只读类文件；可编辑文件无需审批');
+  if (!isReadonly(d, f) && !(f in d.pins) && !((d.units || {})[f])) throw new Error(f + ' 既不是只读类文件，也没有单元规格；无需审批');
   const a = { path: f, by: opt('by', 'unknown'), reason: opt('reason', ''), at: new Date().toISOString().slice(0, 10), task: opt('task', ''), consumed: false };
   d.approvals = d.approvals.filter((x) => x.path !== f).concat([a]);
   save(d);
@@ -147,7 +229,11 @@ function runSync() {
   const d = load();
   const pend = d.approvals.filter((a) => !a.consumed);
   if (!pend.length) { console.log('无待落实的审批'); return; }
+  refreshUnits(d);
   for (const a of pend) {
+    // 有单元规格的文件走 refreshUnits（字段级权限）；这里**只**给只读类文件建整篇钉，
+    // 否则一个 approve 会把控制层文件整篇变只读，字段级权限就被盖住。
+    if (!isReadonly(d, a.path) && !(a.path in d.pins)) { a.consumed = true; continue; }
     const h = hash(a.path);
     if (h) { d.pins[a.path] = h; console.log('  重钉 ' + a.path + ' → ' + h.slice(0, 12) + '…'); }
     else { delete d.pins[a.path]; console.log('  移除钉（文件已删）：' + a.path); }
