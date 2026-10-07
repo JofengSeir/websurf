@@ -1003,7 +1003,7 @@ function frame(now: number): void {
     // 录像（`.dem`）在 `democlip.ts` 里置 `buttons: null` 且**不做任何反推**——Source 引擎
     // 只把录制者本人的输入写进 `dem_usercmd`（观察者/SourceTV 录像实测 0 条），其他玩家的
     // 原始按键不在文件里，由运动学「猜」出来的按键与真实输入存在系统性偏差（owner 裁定
-    // 撤除：宁可不显示，也不显示猜的，见 AGENTS.md §7.3 #88/#92）。
+    // 撤除：宁可不显示，也不显示猜的，见 `TODO.md` T-057 / T-060）。
     // 无真值时按键簇整组熄灭；录像会话的时间轴上根本没有按键簇（见 telemetry 构造处）。
     const follow = s.player.tracks.follow;
     const frameButtons = follow?.clip.buttons ?? null;

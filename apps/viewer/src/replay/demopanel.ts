@@ -705,7 +705,7 @@ export class DemoPanel {
       const slot = t.entityIndex - 1;
       // **不再要求该槽在 `userinfo` 里有名字**：原先这里有一条 `nameAtSlot(...) === '' ⇒ continue`，
       // 而实测这些录像的 `userinfo` **只有槽 0（录制机器人）**（见 `documents/viewer/implementation/dem.md`
-      // §已知缺口 4）⇒ 真人全被滤掉、槽 0 那位又常无位姿轨迹 ⇒ **花名册整个为空** ⇒ 自动跟随选不出人
+      // 「已知缺口（状态见 TODO.md）」第 4 条）⇒ 真人全被滤掉、槽 0 那位又常无位姿轨迹 ⇒ **花名册整个为空** ⇒ 自动跟随选不出人
       // ⇒ 信息条与详情名牌永远停在第一个人身上（owner 报的「滚动名称被锁死」）。
       // 名字本来就不必是判据：下面一行就有兜底（`|| className #实体号`）。
       const from = t.samples[0].tick;
