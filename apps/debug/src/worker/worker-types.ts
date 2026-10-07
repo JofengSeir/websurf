@@ -430,7 +430,7 @@ export interface SceneDataMessage {
   /** 纹理画质 manifest：`{ 纹理名(小写 basetexture): mosaic 字节码 }` JSON。 */
   mosaicManifest?: string;
   /** 缺失材质纹理列表（VMT/VTF 缺失 → 走占位色）。 */
-  missingTextures?: string[];
+  missingTextures?: string[]; skyboxTexture?: import('three').CubeTexture | null;
   spawnJson: string;
   pvsJson: string;
   teleportJson: string;

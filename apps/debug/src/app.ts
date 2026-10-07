@@ -19,7 +19,7 @@ import { createConfig, applyConfigPatch } from './config.js';
 import { loadDefaultTexturePack } from './default-pack.js';
 import { ensureMainWasm, mainWasmUrl } from './main-wasm.js';
 // 主线程侧的 WASM 入口：BSP 解析与 MTZ 解压（与 Worker 各自的 wasm 模块实例）
-import { BspProcessor, decompress_mtz } from '../pkg/websurf_wasm.js';
+import { BspProcessor, decode_vtf_to_png, decompress_mtz } from '../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from './config.js';
 import type {
 	MainMessage,
@@ -33,7 +33,7 @@ import type {
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
-import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js';
+import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js';
 import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
 import { formatTime, GameState } from './game-state.js';
@@ -1762,13 +1762,13 @@ async function handleBspFile(file: File): Promise<void> {
  */
 async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void> {
 	if (!rendererMain || !inputBridge) return;
-	const bundle = await buildWorldBundle(new BspProcessor(new Uint8Array(bytes)), {
+	const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const bundle = await buildWorldBundle(proc, {
 		colliderSource: config.physics.colliderSource ?? 'auto',
 		collectMissingTextures: true,
 		decompressMtz: decompress_mtz,
 		onProgress: (s) => setStatus(s, ''),
 	});
-	renderMetadata(bundle.metadata, fileName);
+	renderMetadata(bundle.metadata, fileName); const skyboxTexture = await buildSkyboxCubeTexture(skyboxFaces); console.info('[skybox] faces=' + (skyboxFaces ? skyboxFaces.length : 0) + ' tex=' + !!skyboxTexture);
 
 	const sceneData: SceneDataMessage = {
 		type: 'scene-data',
@@ -1777,7 +1777,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 		triJson: bundle.triJson,
 		phyBevelsJson: bundle.phyBevelsJson,
 		mosaicManifest: bundle.mosaicManifest,
-		missingTextures: bundle.missingTextures,
+		missingTextures: bundle.missingTextures, skyboxTexture,
 		spawnJson: bundle.spawnJson,
 		pvsJson: bundle.pvsJson,
 		teleportJson: bundle.teleportJson,

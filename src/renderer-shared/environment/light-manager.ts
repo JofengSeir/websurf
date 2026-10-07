@@ -103,6 +103,11 @@ export class LightManager {
 	/** 已提取的点光源候选（世界坐标 + 颜色/强度/半径），每次 `extractPointLights` 整体替换。 */
 	private pointCandidates: PointLightCandidate[] = [];
 
+	/** 天空盒背景（`setSkybox` 设置）；非空时压过 `bgColor` 的纯色，light-manager 不再改写背景。 */
+	private skybox: THREE.Texture | null = null;
+	/** 最近一次登记的背景色：`setSkybox(null)` 用它恢复纯色背景。 */
+	private readonly bgFallback = new THREE.Color(0x000000);
+
 	constructor() {
 		// 预分配整池：初始 intensity 0、distance 0、decay 2、visible false
 		for (let i = 0; i < MAX_POINT_LIGHTS; i++) {
@@ -151,7 +156,17 @@ export class LightManager {
 		}
 
 		// 背景色不走 toColor：config 的该字段类型为 number
-		scene.background = new THREE.Color(lc.bgColor);
+		this.bgFallback.set(lc.bgColor); if (!this.skybox) scene.background = new THREE.Color(lc.bgColor);
+	}
+
+	/**
+	 * 装配天空盒背景；传 null 恢复最近一次登记的纯色（`bgFallback`）。
+	 *
+	 * 天空盒优先于 `bgColor`：非空期间 `applyLights` 与 `updateLighting` 都不再改写背景。
+	 */
+	setSkybox(texture: THREE.Texture | null): void {
+		this.skybox = texture;
+		if (this.scene) this.scene.background = texture ?? this.bgFallback;
 	}
 
 	/**
@@ -307,7 +322,7 @@ export class LightManager {
 			this.updateDirPosition();
 		}
 		if (params.bgColor !== undefined) {
-			this.scene.background = toColor(params.bgColor, null);
+			this.bgFallback.set(params.bgColor); if (!this.skybox) this.scene.background = toColor(params.bgColor, null);
 		}
 	}
 
