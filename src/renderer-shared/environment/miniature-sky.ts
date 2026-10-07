@@ -119,14 +119,6 @@ export function skyCameraFromEntities(entitiesJson: string): SkyCameraParams | n
 	return null;
 }
 
-/** 副本材质：关掉深度读写（当天空层用），保留雾参与大气衰减。 */
-function cloneAsOutside(m: THREE.Material): THREE.Material {
-	const c = m.clone();
-	c.depthTest = false;
-	c.depthWrite = false;
-	return c;
-}
-
 /**
  * 用地图自带的微缩区构建外景（Source 3D 天空盒的正统做法）：
  * 取距 `sky_camera` 半径内的 mesh，复制一份放大 `scale` 倍、并把 `sky_camera` 点搬到世界原点
@@ -150,8 +142,10 @@ export function buildMiniatureOutside(mapRoot: THREE.Object3D, cam: SkyCameraPar
 	group.name = 'MiniatureSky';
 	group.userData.isMiniatureSky = true;
 	for (const src of picked) {
-		const material = Array.isArray(src.material) ? src.material.map(cloneAsOutside) : cloneAsOutside(src.material);
-		const mesh = new THREE.Mesh(src.geometry, material);
+		// 复用源材质：材质上已挂着 lightmap / ambient cube 的 `onBeforeCompile` 注入，
+		// 克隆会丢掉注入（克隆体不复制 onBeforeCompile）⇒ 副本会变成不受光的死黑。
+		const mesh = new THREE.Mesh(src.geometry, src.material);
+		mesh.userData = src.userData;
 		mesh.renderOrder = -1;
 		mesh.frustumCulled = false;
 		group.add(mesh);
