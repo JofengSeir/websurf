@@ -18,7 +18,8 @@
  *     注意：仓库 `core.autocrlf=true` 且无 `.gitattributes` ⇒ 规范形式是 **LF**，
  *     工作树里的 CRLF 只是检出产物（Linux CI 上会是 LF），故不能拿工作树行尾当判据。
  *   G 待办同源：① 全仓 `T-###` 引用必须能在根 TODO.md 里找到（悬空即失败）；
- *     ② TODO.md 里的 ID 不得重复；③ 规范面文档不得自行声明待办状态
+ *     ② TODO.md 里的 ID 不得重复；③ 未结项的证据列不得为空（须写 `文件:行号` 或 `见详情`）；
+ *     ④ 规范面文档不得自行声明待办状态
  *     （`状态：待裁决` 一类），状态只写在 TODO.md——过程记录 `progress/**` 与
  *     `TODO.md` / `AGENTS.md` / `documents/norms/**` 豁免。
  *
@@ -166,6 +167,14 @@ const todoIds = [...todoRaw.matchAll(/\|\s*(T-\d{3})\s*\|/g)].map((m) => m[1]);
 const todoSet = new Set(todoIds);
 const dupRows = [...new Set(todoIds.filter((id, i) => todoIds.indexOf(id) !== i))].map((id) => `  ${todoPath}  ${id} 重复`);
 const dangling = [];
+const noEvidence = [];                       // [G] 未结项的证据列不得为空（可为 `文件:行号` 或 `见详情`）
+todoRaw.split(/\r?\n/).forEach((line) => {
+  const s = line.trim();
+  if (!s.startsWith('|') || /^\|[\s\-:|]+\|$/.test(s)) return;
+  const c = s.split('|').slice(1, -1).map((x) => x.trim());
+  if (c.length < 8 || !/^T-\d{3}$/.test(c[0])) return;
+  if (!['已记录', '已结案'].includes(c[4]) && (!c[5] || c[5] === '—')) noEvidence.push(`  ${c[0]} 未结项但证据列为空`);
+})
 const statusClaim = [];
 const STATUS_RE = /状态\s*[：:]\s*(待裁决|待修|已取证待立项|进行中|已记录|已结案)/;
 const isExempt = (f) => f.startsWith('progress/') || f === todoPath || f === 'AGENTS.md' || f.startsWith('documents/norms/') || f.startsWith('src/scripts/');
@@ -179,14 +188,14 @@ for (const f of live) {
   });
 }
 
-const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length;
-console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length}`);
+const fail = drift.length || badAnchor.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length;
+console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length}`);
 if (drift.length) console.log('\n[A] 行数声明漂移（失败）：\n' + drift.join('\n'));
 if (badAnchor.length) console.log('\n[B] 锚点越界（失败）：\n' + badAnchor.join('\n'));
 if (missing.length) console.log('\n[C] 路径失效（告警，可能是刻意保留的历史路径）：\n' + [...new Set(missing)].map((s) => '  ' + s).join('\n'));
 if (ambiguous) { const inProg = Object.entries(ambByDoc).filter(([k]) => k.startsWith(`progress/`)).reduce((s, [, v]) => s + v, 0); console.log(`\n[D] 歧义 ${ambiguous} 处（跨工程文档的裸文件名，需人工判读；非错误）｜规范面 ${ambiguous - inProg} 处、progress/ 过程记录 ${inProg} 处`); }
 if (broken.length) console.log('\n[E] 坏链（失败）：\n' + broken.join('\n'));
 if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set(eolBad)].join('\n'));
-if (dangling.length || statusClaim.length || dupRows.length) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim].join('\n'));
+if (dangling.length || statusClaim.length || dupRows.length || noEvidence.length) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim, ...noEvidence].join('\n'));
 
 process.exit(fail ? 1 : 0);
