@@ -33,6 +33,8 @@
 
 **地图雾**：`env_fog_controller`（`fogenable` / `fogcolor` / `fogstart` / `fogend`）此前未被施加（`renderer-main` 不设 `scene.fog`）；现解析为线性 `THREE.Fog` 并由 `LightManager.setFog` 统一挂载（`src/renderer-shared/environment/fog-controller.ts`），可经 `setFogEnabled` 开关；`apps/debug` 已接线。
 
+**动态道具**：模型枚举原先只收 `static_props` 引用的模型、且 `ModelIntegrator` 的 `entities` 恒空，导致 `prop_dynamic` / `prop_dynamic_override` 的道具不进 GLB；现把「带 `model` 的实体」并入引用集合，并由 `model_integrator::collect_model_entities` 喂给放置解析（`surf_boreas` 的 `buk01`、`surf_666` 的 `cow` 已出现）。
+
 **文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范），篇目见 `README.md`「文档地图」与 `documents/index.md`。
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。

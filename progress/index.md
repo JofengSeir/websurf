@@ -32,7 +32,7 @@
 
 `2026-10` 按月切了 5 卷（每卷 ≤ 48 KB，按时间顺序）：`2026-10-1` → `2026-10-2` → `2026-10-3` → `2026-10-4` → `2026-10-5`。每卷头部有「上一卷 / 下一卷」链接；右列「什么时候看」写着用途。新进展追加到**当月最后一卷**（本页右列会随之更新）。
 
-## 进展索引（全量，110 条）
+## 进展索引（全量，111 条）
 
 > 由 `AGENTS.md §7.1` 分卷而来（入口文件 ≤ 32 KB）。**新增进展**追加到 `progress/monthly/` 的「当前写入目标」那一卷，然后在**本节**补一行（`AGENTS §7.1` 已于 2026-10-07 冻结，不再追加）。
 
@@ -148,3 +148,4 @@
 | 2026-10-08 | T-411 结案：Water 无 $basetexture 由不透明纯白改为半透明水色（surf_boreas 320 图元；probe10 实测 OPAQUE→BLEND） | progress/monthly/2026-10-5.md:13 |
 | 2026-10-08 | T-412 结案：2D cubemap 天空盒（debug 接线；LightManager 背景优先天空盒）；验收=6 面 PNG + background=CubeTexture + 抬头截图由暗变亮 | progress/monthly/2026-10-5.md:14 |
 | 2026-10-08 | T-413 结案：地图雾 env_fog_controller → THREE.Fog（LightManager.setFog + 可开关）；验收=Fog(500,43420,e8fffe) + 合成用例 + 雾化截图 | progress/monthly/2026-10-5.md:15 |
+| 2026-10-08 | T-414 结案：动态道具进 GLB（引用集合并入实体 model + collect_model_entities）；验收=boreas nodes 1513→1514 命中 buk01.mdl、666 +1=cow.mdl | progress/monthly/2026-10-5.md:16 |

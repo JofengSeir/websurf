@@ -66,11 +66,11 @@ struct PakMaterials {
 fn collect_pakfile_models(
     bsp: &vbsp::Bsp,
 ) -> Result<(Vec<InMemoryModel>, Vec<StaticProp>, Vec<String>), JsValue> {
-    // 1. 收集被静态道具引用的模型路径
+    // 1. 被静态道具**或带模型实体**（`prop_dynamic` 等）引用的模型路径集合；
     let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for prop in bsp.static_props() {
-        referenced.insert(prop.model().to_string());
-    }
+    let prop_models = bsp.static_props().map(|p| p.model().to_string());
+    let ent_models = bsp.entities.iter().filter_map(|e| e.prop("model").ok().map(|s| s.to_string()));
+    for m in prop_models.chain(ent_models) { referenced.insert(m); }
 
     // 2. 枚举 PAKFILE 全部条目（整遍扫描共持有一把 zip 锁）
     //    同一遍里顺带取出 `sp_<idx>.vhv` / `sp_hdr_<idx>.vhv` 两个 blob：它们是 prop 的逐顶点
@@ -649,7 +649,7 @@ impl BspProcessor {
         let materials = resolve_pakfile_materials(&bsp, &models, &index, true, Some(&fallback));
         let resources = InMemoryResources {
             models,
-            entities: Vec::new(),
+            entities: model_integrator::collect_model_entities(&bsp),
             static_props,
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
@@ -705,7 +705,7 @@ impl BspProcessor {
 
         let resources = InMemoryResources {
             models,
-            entities: Vec::new(),
+            entities: model_integrator::collect_model_entities(&bsp),
             static_props,
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
@@ -748,7 +748,7 @@ impl BspProcessor {
 
         let resources = InMemoryResources {
             models,
-            entities: Vec::new(),
+            entities: model_integrator::collect_model_entities(&bsp),
             static_props,
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,

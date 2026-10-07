@@ -1340,3 +1340,45 @@ pub fn map_coords<C: Into<[f32; 3]>>(vec: C) -> [f32; 3] {
     let vec = vec.into();
     [vec[1], vec[2], vec[0]]
 }
+
+/// BSP 内**带模型**的实体（`prop_dynamic` 等）→ [`Entity`]，供 `resolve_placements` 的实体支路。
+///
+/// 收集条件：有非空 `model` 键。`classname` 取不到则跳过；`origin` / `angles` 原样搬运，
+/// `scale` 优先取 `scale`、回退 `modelscale`（`prop_dynamic` 用后者）。灯光相关键一律 `None`
+/// —— 灯走 `light_entities`，与本表无关。
+///
+/// 与 `static_props` 的关系：`resolve_placements` 前两级（完整路径 / 文件名包含）命中静态道具时
+/// 提前返回，故本表只补「没有 static prop 条目」的实例（动态道具即此类）。
+pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<Entity> {
+    let mut out = Vec::new();
+    for ent in bsp.entities.iter() {
+        let Ok(model) = ent.prop("model") else {
+            continue;
+        };
+        if model.is_empty() {
+            continue;
+        }
+        let Ok(classname) = ent.prop("classname") else {
+            continue;
+        };
+        let prop = |key: &'static str| ent.prop(key).ok().map(|s| s.to_string());
+        out.push(Entity {
+            properties: EntityProperties {
+                classname: classname.to_string(),
+                model: Some(model.to_string()),
+                origin: prop("origin"),
+                angles: prop("angles"),
+                scale: prop("scale").or_else(|| prop("modelscale")),
+                light: None,
+                cone: None,
+                inner_cone: None,
+                constant_attn: None,
+                linear_attn: None,
+                quadratic_attn: None,
+                pitch: None,
+            },
+        });
+    }
+    out
+}
+
