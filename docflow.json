@@ -30,7 +30,7 @@
     "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
     "skills/websurf-env-traps/SKILL.md": "bbb5cbb6b5afaf1e1a93bb10108720525f9b9bd91e4fc181fd8255e63d45cbac",
     "documents/norms/annotation-and-verification.md": "0ce02e206be9cbb643b143f8f3ccde20d85a32604d4abb3a057cecc920b2d6d5",
-    "documents/norms/scripts-and-ci.md": "acdd75599cfb483285c9d62d69c6a9240598bbc5416d3e28cdc4582869c275c2",
+    "documents/norms/scripts-and-ci.md": "2b6f7fa6458f7339451b117a1b462bebe94db8841d244ba7cba516aea304b914",
     ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
     ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
     ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
@@ -63,14 +63,6 @@
     },
     {
       "path": "documents/norms/annotation-and-verification.md",
-      "by": "owner(本轮指示)",
-      "reason": "建立 docflow 基线",
-      "at": "2026-10-07",
-      "task": "D-docflow",
-      "consumed": true
-    },
-    {
-      "path": "documents/norms/scripts-and-ci.md",
       "by": "owner(本轮指示)",
       "reason": "建立 docflow 基线",
       "at": "2026-10-07",
@@ -115,6 +107,14 @@
       "reason": "探针",
       "at": "2026-10-07",
       "task": "",
+      "consumed": true
+    },
+    {
+      "path": "documents/norms/scripts-and-ci.md",
+      "by": "owner(本轮指示：三条按建议执行)",
+      "reason": "T-035 退役孤儿脚本，豁免表与反例句随之更新",
+      "at": "2026-10-07",
+      "task": "T-035",
       "consumed": true
     }
   ],

@@ -22,7 +22,7 @@
 | `apps/debug/scripts/auth-clock-verify.mjs` | `npm run test:auth-clock`（`apps/debug/package.json:23`） | 权威时钟验证（确定性 Node 测试）：`auth-loop` 的 `reset()` 语义与 `worker-dispatch` 只在步长真变化时 `reset()` |
 | `apps/debug/scripts/path-acceptance.mjs` | `npm run test:path-acceptance`（`apps/debug/package.json:22`） | tick 点到渲染折线的垂距验收门：逐 tick 点取到所有合格线段的最短距离，按 `--jump-hu` 过滤跳变段 |
 | `apps/debug/scripts/phys-surf-crouch-smoke.mjs` | `npm run test:surf-crouch`（`apps/debug/package.json:20`） | 直接对 `apps/debug/pkg` 的 wasm 产物跑三条贴坡/蹲姿用例，任一失败即 `FAIL` 并以 1 退出 |
-| `apps/debug/scripts/input-replay-verify.mjs` | 无 npm script（手工 / 无头驱动） | 输入录制与确定性回放的无头验收：逐帧输入一致、逐帧位置差、帧数一致三组判据，经 `globalThis.__wsInput` 驱动真实页面 |
+| `apps/debug/scripts/_input-replay-verify.mjs`（**本地实验件，不入库**） | 无 | 已退役（2026-10-07，见 `TODO.md` T-035）：它依赖的 `__wsInput.exportJson` 随录制器链路删除后不可用，且其 `dt` 自检与实现注释「唯一 `record` 调用点不传 `dtS`」矛盾 ⇒ 必然失败。文件保留在本地供复现，不进版本库 |
 | `apps/debug/scripts/frame-bench.mjs` | `npm run bench:frames`（`apps/debug/package.json:18`） | headless 逐帧耗时实测：取 400 个帧间隔样本并打印分位数，另给一行 `RESULT_JSON` |
 | `apps/debug/scripts/glb-mesh-count.mjs` | `npm run count:glb-meshes`（`apps/debug/package.json:17`） | 用 `apps/debug/pkg` 的 wasm 产物解析 BSP、导出 GLB、就地解析 GLB 的 JSON chunk 统计规模 |
 | `apps/debug/scripts/plot-path.mjs` | `npm run plot:path`（`apps/debug/package.json:21`） | 把面板导出的物理路径 JSON 画成 2D 正交投影 PNG 并做折角分析 |
@@ -76,7 +76,7 @@
 3. **`jump-apex-verify.mjs` 的内嵌复刻依赖已不在源码中的行为**：脚本自带一份「修复前行为」的 land 处理复刻作为对照面（`apps/debug/scripts/jump-apex-verify.mjs:27`）；`jump-apex-serve.mjs` 另用源码文本切片生成回退版，因此两处源码文本形态被脚本依赖。（见 TODO.md T-017）
 4. **`frame-bench.mjs` 的缺省地图路径不在工作区**：第 4 个参数缺省时取 `<仓库根>/maps/surf_666.bsp`（`apps/debug/scripts/frame-bench.mjs:37`），而该路径下没有文件，脚本随即打印「地图不存在」并以 2 退出（`apps/debug/scripts/frame-bench.mjs:54`）。地图实际位于 `test/maps/` 下，须显式传第 4 个参数。（见 TODO.md T-307）
 5. **`optimize-scene-verify.mjs` 用合成场景、不对当前 GLB 规模**：场景按固定常量合成（`MESH_COUNT` 个 primitive 装进若干容器，坐标由确定性随机数在 `WORLD` 尺度内生成），断言锚定脚本自身的可复现性；要复核当前 `apps/debug/pkg` 产物的真实规模须改用 `apps/debug/scripts/glb-mesh-count.mjs`（`apps/debug/scripts/optimize-scene-verify.mjs:18`、`:22`）。
-7. **`input-replay-verify.mjs` 依赖的录制 API 已被删除（2026-09-26）**：脚本从 `__wsInput.exportJson()` 取录制载荷（`apps/debug/scripts/input-replay-verify.mjs:297`），而该 API 随用户录制器链路一并删除；它还查询页面上不存在的 `#inputRecStatus`（`:461`）。**该脚本现已不可用**（此前也因载荷恒空必然失败）；若要保留无头回放验收，应改为外部录制 JSON → `__wsInput.load` → `play` → 用 `__wsInput.captureText()` / `progress()` 比对。（见 TODO.md T-035）
+7. ~~**`input-replay-verify.mjs` 依赖的录制 API 已被删除（2026-09-26）**~~ **已消除（2026-10-07）**：该脚本已退役为本地实验件（`apps/debug/scripts/_input-replay-verify.mjs`，不入库），本文件 §「脚本登记」行同步改为退役态；对齐 §1 B3 的处置顺序是「先修实现或退役工具，不许留恒红的门」。（见 `TODO.md` T-035）
 8. ~~`start-dev.cmd` 的 wasm 过期门与被服务的 wasm 不是同一路径~~ **已消除（2026-09-24）**：`dev.cmd` 不再用过期门判断，而是**无条件**跑 `npm run build:wasm`（`apps/debug/dev.cmd:48`），而 `build:wasm` 在构建后会把 `pkg/` 的 wasm 复制到 `web/`（`apps/debug/package.json:8`）⇒ `web/` 与 `pkg/` 同步刷新。**保留为不变量**：`web/websurf_wasm_bg.wasm` 仍只由 `build:wasm` 更新（页面加载的是 `web/` 那份，见 `apps/debug/src/main-wasm.ts:23`），任何跳过 `build:wasm` 的路径都会让 dev 页面用到旧产物。
 9. ~~`play.cmd` 的 wasm 存在性门只看 `pkg/`~~ **已消除（2026-09-24）**：`build.cmd` 同样无条件 `build:wasm`（`apps/debug/build.cmd:52`），不存在"产物存在就跳过重建"的分支 ⇒ 打包用的 `pkg/`（读取处 `apps/debug/scripts/build-dist.mjs:78`）与 dev 页面用的 `web/` 都由这一次重编译刷新。
 10. ~~`start-dev.cmd` 只守 `python`~~ **已消除（2026-09-24）**：`dev.cmd` 的工具链自检覆盖 **npm / node / python / wasm-pack** 四项（`apps/debug/dev.cmd:17` 起），`build.cmd` 覆盖 npm / wasm-pack / node 三项（`apps/debug/build.cmd:24` 起）。

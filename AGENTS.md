@@ -196,6 +196,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 | 2026-10-07 | skill 链进 `~/.agents/skills`（junction 指向仓库，skill 工具可解析）＋ `.archify/` 进 `.gitignore`… | progress/monthly/2026-10-4.md:30 |
 | 2026-10-07 | 三工程脚本 / `.cmd` / 部署链约束层：引用面实测出唯一孤儿 input-replay-verify.mjs（59 KB，T-035 待裁决）＋ 新规范篇 ＋ 体检 `[N]`（两次故障注入验证）… | progress/monthly/2026-10-4.md:31 |
 | 2026-10-07 | 文档契约 docflow：只读 10 / 可编辑 69 ＋ 哈希钉住 ＋ 审批（approve→sync）＋ 认领锁结束条件（claim→verify）＋ 体检 `[O]`；AGENTS.md 因 §7.1 滚动索引列为候选提升… | progress/monthly/2026-10-4.md:32 |
+| 2026-10-07 | T-035 结案：退役孤儿脚本 input-replay-verify.mjs（改名本地保留 + 三处注释去引用且**不动行数**以保 400 处锚点）+ 脚本/规范篇同步 + 判据实跑 0 命中… | progress/monthly/2026-10-4.md:33 |
 
 ### 7.2 工作组状态
 

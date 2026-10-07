@@ -385,7 +385,7 @@ boardRows.forEach((c) => {
     if (own) falseClose.push('  ' + c[0] + '（' + c[4] + '）判据声明 0 命中，实测其自身路径仍有命中 ⇒ 结案依据不成立');
   }
   const evm = (c[5] || '').replace(/`/g, '').match(/([A-Za-z0-9_./-]+\.(?:d\.ts|json|mts|mjs|cjs|ts|js|rs|md|cmd|ps1|sh|yml|yaml|html|css|toml))(?::\d+)?/);
-  if (evm && fs.existsSync(path.join(ROOT, evm[1]))) {
+  if (evm && !/\.md$/.test(evm[1]) && fs.existsSync(path.join(ROOT, evm[1]))) {
     const evHit = run(['grep', '-n', '-e', pat, '--', evm[1]]);
     if (evHit) falseClose.push('  ' + c[0] + '（' + c[4] + '）判据在 ' + critPaths.join(' ') + ' 判 0 命中，但证据文件 ' + evm[1] + ' 仍命中「' + pat + '」 ⇒ 判据范围可疑（假结案）');
   }

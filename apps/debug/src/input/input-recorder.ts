@@ -11,8 +11,8 @@
  * - 读取侧：`apps/debug/src/app.ts` 的 `armReplay` 用 meta 对齐起点，输入循环把样本交回
  *   `feedInput`，并把 `frameDt` 的结果写进 `apps/debug/src/renderer/renderer-main.ts` 的
  *   `replayDtS`（渲染主循环消费一次后置 null）。
- * - 无头验收：`apps/debug/scripts/input-replay-verify.mjs` 经 `globalThis.__wsInput`
- *   （注册在 `apps/debug/src/app.ts`）驱动录制 / 导出 / 载入 / 逐帧回放 / 捕获。
+ * - 无头验收：由 CDP 脚本经 `globalThis.__wsInput`（注册在 `apps/debug/src/app.ts`）
+ *   驱动载入 / 逐帧回放 / 捕获三组能力。
  * - 载入侧只认本模块自己的 schema 字符串，不做版本迁移。
  *
  * ── 录的是什么：调用方给的值 ──────────────────────────────────
@@ -791,8 +791,8 @@ export function keysFromMask(mask: number): KeyState {
  * `compared` 取两组长度的较小值；`firstMismatch` 是首个不等帧的下标（无则 -1）；
  * `diffs` 最多收 8 条逐帧描述（此后不再追加），两组长度不等时额外追加一条帧数说明。
  * `identical` 要求无任何不等帧**且**两组长度相等。
- * 本函数在本仓无调用点：`apps/debug/scripts/input-replay-verify.mjs` 的 `compareInputs`
- * 另有一份同口径实现。
+ * 本函数在本仓无调用点：导出给外部调用方（CDP 脚本或独立比对工具）使用——录制侧与回放侧
+ * 各自产出的样本可交给它做同口径逐帧比对。
  */
 export function compareFrames(
   recorded: readonly InputFrame[],

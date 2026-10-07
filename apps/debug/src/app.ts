@@ -844,7 +844,7 @@ function loadPlaybackFromJson(text: string, override?: Partial<InputReplayMeta>)
 // 都必须能被 CDP 脚本无点击驱动，故该 API 永久保留在本应用（仅 debug 应用注册；
 // game 应用不注册）。
 //
-// 契约（签名固定，改动须同步 debug/scripts/input-replay-verify.mjs 与面板 title）：
+// 契约（签名固定，改动须同步面板 title）：
 //   start(): void                       开始录制（锚定当前状态为回放起点）
 //   stop(): void                        停止录制
 //   clear(): void                       清空已录帧

@@ -57,6 +57,8 @@ test/project/*
 # 它们的引用面只有同族脚本之间的互提及与文档描述（2026-09-27 全仓引用面实测）。
 # 保留在本地是为了复现当时的实验；入库会把一次性探针变成"看起来要维护"的资产。
 # 同族约定：新建的临时调试脚本请以 `_` 前缀命名（`apps/game/.gitignore` 已有 `scripts/_*.mjs`）。
+# 2026-10-07 依 T-035 退回本地实验件：apps/debug/scripts/input-replay-verify.mjs → `_input-replay-verify.mjs`
+apps/*/scripts/_*.mjs
 apps/debug/scripts/jump-apex-auth-diag.mjs
 apps/debug/scripts/jump-apex-measure.mjs
 apps/debug/scripts/jump-apex-report.mjs
