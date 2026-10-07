@@ -57,3 +57,4 @@
 - **分块尺寸自适应忽略多材质网格**：`worldBox` 只在单材质分支里累计（`src/renderer-shared/scene/scene-optimizer.ts:250`），数组材质与无材质网格走 `keptMeshes` 的早退分支（`src/renderer-shared/scene/scene-optimizer.ts:221`、`:237`）；因此 cell 边长按「单材质网格的包围盒并集」估，场景里只有多材质网格时该并集为空（此时 `infos.length === 0`，整个分块直接返回，`src/renderer-shared/scene/scene-optimizer.ts:254`）。 （见 TODO.md T-210）
 - **`applyLightmapToMeshes` 自身不判空图集**：`atlasTexture` 为 `null` 时的行为由调用方保证（`src/renderer-shared/shader/lightmap-shader.ts:474` 的口径），`applyLightmap` 在 `!atlas` 时提前返回（`src/renderer-shared/scene/scene-builder.ts:121`）。
 - **`loadScene` 的入口先释放上一张图**：`disposeScene` 在方法开头调用（`apps/game/src/renderer/renderer-main.ts:264`），因此换图失败时场景处于已释放状态，只能重新选图恢复（失败路径见 `apps/game/src/app.ts:601`）。 （见 TODO.md T-212）
+- 看板另有登记项：`TODO.md` 的 T-046 —— **状态与结论只在那登记**，本文件不复述。

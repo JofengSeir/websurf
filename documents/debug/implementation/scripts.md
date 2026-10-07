@@ -81,3 +81,4 @@
 9. ~~`play.cmd` 的 wasm 存在性门只看 `pkg/`~~ **已消除（2026-09-24）**：`build.cmd` 同样无条件 `build:wasm`（`apps/debug/build.cmd:52`），不存在"产物存在就跳过重建"的分支 ⇒ 打包用的 `pkg/`（读取处 `apps/debug/scripts/build-dist.mjs:78`）与 dev 页面用的 `web/` 都由这一次重编译刷新。
 10. ~~`start-dev.cmd` 只守 `python`~~ **已消除（2026-09-24）**：`dev.cmd` 的工具链自检覆盖 **npm / node / python / wasm-pack** 四项（`apps/debug/dev.cmd:17` 起），`build.cmd` 覆盖 npm / wasm-pack / node 三项（`apps/debug/build.cmd:24` 起）。
 11. **四个 `.cmd` 没有任何 npm script 或相互转发**（`dev.cmd` / `build.cmd` / `start.cmd` / `stop.cmd` 各自独立）：`npm run dev`、`npm run build:dist`、`npm run check:api` 是与它们并行的独立入口，因此双击入口与命令行入口的环境准备步骤各写一套；`start.cmd` 只服务 `dist/`，不会替你补构建。（见 TODO.md T-308）
+- 看板另有登记项：`TODO.md` 的 T-038 —— **状态与结论只在那登记**，本文件不复述。

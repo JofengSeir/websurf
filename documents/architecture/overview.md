@@ -134,6 +134,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 5. **可执行门禁**：`cargo test -p websurf-phys`（物理门禁测试）、各工程 `npm run typecheck`、`node src/scripts/check-doc-drift.mjs`（文档锚点与路径）、`node src/scripts/check-shared-sync.mjs`（Rust 与 TS 两侧常量逐位比对）、`node src/scripts/wasm-stale-check.mjs`（wasm 产物新鲜度）。
 
 ---
+- 看板另有登记项：`TODO.md` 的 T-036、T-039 —— **状态与结论只在那登记**，本文件不复述。
 
 ## 7. 构建与产物
 

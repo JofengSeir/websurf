@@ -38,3 +38,4 @@
 - **`mtzB64` 与契约清单都指向了没有直接调用点的字段**：`wasm-init` 的 `mtzB64`（`src/ts-shared/auth/worker-dispatch.ts:297`）在本工程无发送方；默认纹理包实际在主线程经 `buildWorldBundle` 的 `decompressMtz` 注入读取（`src/ts-shared/materials/defaults.ts:22`、`apps/game/src/app.ts:516`），因此 `mtzB64` 这条 Worker 通道在本工程内是闲置的。 （见 TODO.md T-234）
 - **`PHYS_API` 里的零调用点条目**：`set_yaw_pitch` 只出现在清单里（`apps/game/scripts/check-wasm-api.mjs:72`），`apps/**` 与 `src/**` 内零调用点（本次实测）；契约检查只验声明存在，不验是否有消费者。 （见 TODO.md T-009）
 - **`build-dist.mjs` 的输出标签是固定文本**：single 与 multi 两条路径都打印同一组 `[5/5]` 前缀（`apps/game/scripts/build-dist.mjs:90`、`:130`），该前缀与步骤序号无关，读日志时不能按它判断当前处于第几步。 （见 TODO.md T-224）
+- 看板另有登记项：`TODO.md` 的 T-023、T-031、T-032、T-038 —— **状态与结论只在那登记**，本文件不复述。

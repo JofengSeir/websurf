@@ -103,6 +103,7 @@
 | `maskToKeys` | 零调用点 （见 TODO.md T-405） |
 | `PvsManager.getFaceCluster` / `visibleClusterCount` | 零调用点 （见 TODO.md T-406） |
 | `world/types.ts` 的 `rootNode` 字段 | TS 侧无消费点 （见 TODO.md T-407） |
+- 看板另有登记项：`TODO.md` 的 T-016、T-018 —— **状态与结论只在那登记**，本文件不复述。
 
 ## 7. 测试与门禁
 

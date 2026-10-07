@@ -39,3 +39,4 @@
 - **速度读数用 `innerHTML` 写入**：`updateSpeedHud` 通过 `dom.statsEl.innerHTML` 写值（`apps/game/src/app.ts:437`），其中竖线分隔符是写死的 `<span class="vsep">` 片段（`apps/game/src/app.ts:435`）；数值本身来自本端物理速度与 `config.hud.speedMode` 分支。
 - **`syncFullConfig` 对 `hud` 段下发的载荷不是 hud 段**：段表列出四段（`apps/game/src/app.ts:642`），而 `InputBridge.sendConfig` 对非 `player` 段一律下发全量物理参数、`section` 名原样保留（`apps/game/src/input/input-bridge.ts:57`、`apps/game/src/input/input-bridge.ts:65`）；Worker 侧不读 `hud` 段，故静态看无行为影响，但 Worker 的 `config.hud` 会被并入物理参数键（`src/ts-shared/auth/worker-dispatch.ts:351`）。 （见 TODO.md T-204）
 - **`lockTickRate` 的强制值依赖调用时机**：`syncFullConfig` 每次调用都会把 `config.physics.tickRate` 覆写为 64（`apps/game/src/app.ts:639`），面板在锁定模式下也写死 64 并禁用控件（`apps/game/src/panel/panel-controller.ts:284`）；两处必须同时生效，否则面板显示值与下发值会分叉。 （见 TODO.md T-205）
+- 看板另有登记项：`TODO.md` 的 T-005、T-056 —— **状态与结论只在那登记**，本文件不复述。

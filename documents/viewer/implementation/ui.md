@@ -77,3 +77,4 @@
 6. **按键簇渲染八键，标签集含 Q / E**：`KEYS` 实测八项（`apps/viewer/src/ui/telemetry.ts:53` 到 `apps/viewer/src/ui/telemetry.ts:62`），与 CDP 冒烟脚本里「按键数 = 6、标签集为 {W,A,S,D,跳,蹲}」的断言不一致（测试侧见 `documents/viewer/implementation/scripts-and-test.md`），当前 UI 下该断言不成立。（见 TODO.md T-130）
 7. **信息条自己重找跟随轨道**：`ReplayMetaPanel.setTracks` 在收到的轨道数组里按 `followId` 再查一次并回退第一条（`apps/viewer/src/ui/replaymeta.ts:25`），与 `TrackSet.follow` 的同一策略（`apps/viewer/src/replay/tracks.ts:92`）重复；两处若口径分叉，信息条会与第一人称相机跟随不同的轨道。（见 TODO.md T-142）
 8. **`el()` 的属性写入限制了 id 型契约**：面板里需要被外部查询的控件靠 `attrs.id` 落地（例：`apps/viewer/src/ui/mapinfo.ts:89` 的 `id: 'lightingMode'`、`apps/viewer/src/replay/panel.ts:158` 的三个平移输入），而 `el()` 对 `undefined` / `false` 值跳过、对 `true` 写空串（`apps/viewer/src/core/dom.ts:39` 到 `apps/viewer/src/core/dom.ts:42`）⇒ 传 `id: undefined` 时控件静默无 id，外部按 id 取值的路径（深链、冒烟脚本、外部脚本）会取到 null。（见 TODO.md T-143）
+- 看板另有登记项：`TODO.md` 的 T-053 —— **状态与结论只在那登记**，本文件不复述。

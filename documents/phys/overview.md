@@ -85,3 +85,4 @@
 | `predict` | 仅被 `apps/game/scripts` 下的两个脚本调用（见 TODO.md T-009） |
 | 零分配支路 | `tick_into` / `state_out_ptr` / `seed_from` 的调用方只有 `src/ts-shared/auth/tick-authority.ts` 与 `src/ts-shared/decoupled/decoupled-loop.ts`，而这两个控制器在三个工程内**都没有装配点**——线上路径走 `tick()` 返回对象（见 TODO.md T-006） |
 | `contactTicks` | 属调试/回归用计数，随 `state()` 一并导出 |
+- 看板另有登记项：`TODO.md` 的 T-067、T-506、T-507 —— **状态与结论只在那登记**，本文件不复述。

@@ -58,3 +58,4 @@
 4. **`viewer.replay.setSpeed` 的钳制下限在正常入参下不可达**：表达式 `Math.max(0.1, Math.min(16, Number(x) || 1))`（`apps/viewer/src/app.ts:726`）先用 `|| 1` 把 0 / NaN 归成 1，只有传负数才会落到 0.1 下限；时间轴下拉的档位下限是 0.1（`apps/viewer/src/replay/timeline.ts:28`），两者不冲突，但接口文档化的下半区实际只有负数能触发。 （见 TODO.md T-157）
 5. **`updateReplayMapStatus` 只在 `currentBox` 非空时做检查**：`?replay=` 深链先导入记录而地图尚未加载时该函数直接跳过检查（`apps/viewer/src/app.ts:253`），贴合问题要等地图加载后由 `loadBsp` 末尾再次调用才会被报出（`apps/viewer/src/app.ts:559`）。
 6. **深链是唯一仍按"参数名"定类型的入口**：四个交互入口（拖拽 / 引导层 / 记录页文件框 / 录像页文件框）都走内容分派，而 `?replay=` 仍在取到字节后**先嗅探 Shavit 魔数**，不命中即报错（`apps/viewer/src/app.ts:807` 到 `apps/viewer/src/app.ts:811`）——即 `?replay=<一份 .dem>` 会被拒。参数名本身就是类型声明，故本轮未改；若要统一成内容分派，属独立改动。（见 TODO.md T-103）
+- 看板另有登记项：`TODO.md` 的 T-056 —— **状态与结论只在那登记**，本文件不复述。

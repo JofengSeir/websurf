@@ -64,3 +64,4 @@
 11. ~~`start-dev.cmd` 的 wasm 新鲜度门看的是另一份产物~~ **已消除（2026-09-24）**：`dev.cmd` 改为无条件重编译（不再比对时间戳，见 `apps/viewer/dev.cmd:48`）；工具链自检也从"只守 python"扩到 **npm / node / python / wasm-pack** 四项（`apps/viewer/dev.cmd:17` 起），`build.cmd` 另覆盖 npm / wasm-pack / node 三项（`apps/viewer/build.cmd:22` 起）。
 12. **single 分支的步骤编号是四段都写 `[5/5]`**（代码字符串）：`apps/viewer/scripts/build-dist.mjs:315`、`apps/viewer/scripts/build-dist.mjs:319`、`apps/viewer/scripts/build-dist.mjs:326`、`apps/viewer/scripts/build-dist.mjs:333` 四行日志用了同一个编号，而 multi 分支的日志用 `[multi]` 前缀（`apps/viewer/scripts/build-dist.mjs:249`）⇒ 输出里的进度编号不表达实际步序。（见 TODO.md T-136）
 13. **端口占用分支假定占用者服务的就是 dist**：`start.cmd` 在 8101 已被监听时直接打开 `http://localhost:%PORT%/index.html` 并退出（`apps/viewer/start.cmd:26` 到 `apps/viewer/start.cmd:30`），而端口上的服务由谁提供、根目录指向哪里都不由本脚本决定（对比 `apps/viewer/dev.cmd:80` 同样只拼 URL）；占用者若服务的是工程根而非 `dist/`，打开的是 dev 页面而不是打包产物页面。（见 TODO.md T-137）
+- 看板另有登记项：`TODO.md` 的 T-033、T-038 —— **状态与结论只在那登记**，本文件不复述。
