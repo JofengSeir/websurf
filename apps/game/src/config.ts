@@ -133,7 +133,7 @@ export interface LightingConfig {
   exposure: number;
   /** 光照项 gamma（shadow-lift）：对解码后的线性辐射度做 `pow(d, γ)`，只抬暗部。
    *  读点同 `exposure`（`setLightGamma` 的共享 uniform、面板控件量程 0.5..6）。
-   *  **接受窗口是 `(0, 1]`**：`lightmap-shader.ts` 的 `setLightGamma` 对
+ *  **接受窗口是 `(0, 8]`**（2026-10-08 起）：`lightmap-shader.ts` 的 `setLightGamma` 对
    *  `value <= 0 || value > 1` 直接返回，故本字段取大于 1 的值时该次写入被忽略。 */
   lightGamma: number;
   /** 模型（prop）烘焙光照亮度倍率：只作用于 ambient cube 路径（static prop 的静态照明），
@@ -218,7 +218,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   },
   lighting: {
     // 默认取「被照亮的面 ≈ 贴图原色」的显示档：曝光 × pow(luxel, 1/γ) ≈ 1。
-    // lightGamma 的接受窗口是 (0, 1]（见字段注释），本默认值大于 1
+ // lightGamma 的接受窗口是 (0, 8]（见字段注释），2.2 生效
     // ⇒ `setLightGamma` 忽略本次写入、共享 uniform 保持其自身初值。
     exposure: 2.3,
     lightGamma: 2.2,

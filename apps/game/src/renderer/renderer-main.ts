@@ -213,7 +213,7 @@ export class RendererMain {
     setLightingModeInShader(config.lighting?.mode ?? 'baked');
     // 显示侧亮度倍率（接受窗口见本文的 setExposure 包装器）
     setExposure(config.lighting?.exposure ?? 1);
-    // 光照项 gamma（shadow-lift）：缺省 0.5；接受窗口是 (0, 1]
+ // 光照项 gamma（shadow-lift）：缺省 0.5；接受窗口是 (0, 8]
     setLightGamma(config.lighting?.lightGamma ?? 0.5);
     // prop（模型）烘焙光照亮度：ambient cube 路径的独立档位，不动 world lightmap
     setAmbientScale(config.lighting?.ambientScale ?? 1.5);
@@ -461,7 +461,7 @@ export class RendererMain {
 
   /**
    * 光照项 gamma（shadow-lift）：转发给 `src/renderer-shared/shader/lightmap-shader.ts` 的
-   * `setLightGamma`。接受窗口是 (0, 1]，窗口外的值被忽略（`apps/game/src/config.ts` 的
+ * `setLightGamma`。接受窗口是 (0, 8]（2026-10-08 起），窗口外的值被忽略（`apps/game/src/config.ts` 的
    * `lighting.lightGamma` 默认 2.2 即落在窗口外，`init` 的那次写入不改变共享 uniform）。
    */
   setLightGamma(value: number): void {

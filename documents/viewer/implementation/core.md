@@ -43,7 +43,7 @@
 
 ## 已知缺口（状态见 TODO.md）
 
-1. **构造期 γ 写入落在着色器接受窗口之外**：`ViewerScene` 构造时调用 `setLightGamma(2.2)`（`apps/viewer/src/core/scene.ts:65`），而 `setLightGamma` 在 `value <= 0 || value > 1` 时直接返回（`src/renderer-shared/shader/lightmap-shader.ts:1789`）⇒ 这次写入被忽略，γ 共享 uniform 保持自身初值 1；同一组五参数里其余四项都落在各自窗口内（`apps/viewer/src/core/scene.ts:64` 到 `apps/viewer/src/core/scene.ts:69`）。`apps/game/src/config.ts:228` 的默认 `lightGamma` 同为 2.2，是同一码值来源。（见 TODO.md T-104）
+1. **构造期 γ 写入落在着色器接受窗口之外**：`ViewerScene` 构造时调用 `setLightGamma(2.2)`（`apps/viewer/src/core/scene.ts:65`），而 `setLightGamma` 在 `value <= 0 || value > 1` 时直接返回（`src/renderer-shared/shader/lightmap-shader.ts:1789`）⇒ 这次写入被忽略，γ 共享 uniform 保持自身初值 1；同一组五参数里其余四项都落在各自窗口内（`apps/viewer/src/core/scene.ts:64` 到 `apps/viewer/src/core/scene.ts:69`）。`apps/game/src/config.ts:228` 的默认 `lightGamma` 同为 2.2，是同一码值来源。（见 TODO.md T-104）（已消除 2026-10-08：接受窗口已改为 (0,8] 并与面板量程对齐，2.2 生效）
 2. **`ensureWasm` 把首次失败永久缓存**：模块级 `wasmReady` 只在为 null 时创建（`apps/viewer/src/core/bsp.ts:82`），被 reject 后没有任何重置点，之后每次调用都返回同一个 rejected Promise（`apps/viewer/src/core/bsp.ts:119`）⇒ 一次瞬时 fetch 失败后本次页面会话无法自愈，只能刷新。（见 TODO.md T-105）
 3. **`allowPointerLock` 是无写无读的字段**：声明在 `apps/viewer/src/core/fly.ts:68`，`attach` 的 click 处理只判 `locked`（`apps/viewer/src/core/fly.ts:88`），`apps/viewer/src` 内既无写入点也无读取点。
 4. **`onLockChange` 无赋值点**：字段声明与调用都在 `apps/viewer/src/core/fly.ts:80` 与 `apps/viewer/src/core/fly.ts:104`，本工程只给 `FlyCam` 赋过 `onLockError`（`apps/viewer/src/app.ts:74`）⇒ 锁定状态变化回调永不触发。

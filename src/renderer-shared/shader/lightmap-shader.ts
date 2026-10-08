@@ -1492,12 +1492,12 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 }
 
 /**
- * 从 Mesh 自身向上找 ambientCube（最多回溯 2 层：Mesh → prop node(Group)）。
- * multi-primitive 的 prop 被 GLTFLoader 包成 Group，node extras 落在 Group 上。
+ * 从 Mesh 自身向上找 ambientCube（一路回溯到根；多层 Group 的 extras 在最外层节点上）。
+ * 固定只回溯 2 层会漏掉层级更深的 prop。
  */
 function resolveAmbientCube(mesh: THREE.Mesh): unknown {
 	let obj: THREE.Object3D | null = mesh;
-	for (let depth = 0; depth < 2 && obj; depth++) {
+	for (let depth = 0; depth < 16 && obj; depth++) {
 		const c = (obj.userData as { ambientCube?: unknown }).ambientCube;
 		if (c !== undefined) return c;
 		obj = obj.parent;
@@ -1781,12 +1781,12 @@ function readDebugLightmapOnly(): boolean {
 function readGammaOverride(): number | null {
 	const g = globalThis as { __vbspLightGamma?: unknown };
 	const v = g.__vbspLightGamma;
-	return typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 1 ? v : null;
+	return typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 8 ? v : null;
 }
 
 /** 设置光照项 gamma（面板 / config 调用；非法值忽略；A/B 覆盖优先）。 */
 export function setLightGamma(value: number): void {
-	if (!Number.isFinite(value) || value <= 0 || value > 1) return;
+	if (!Number.isFinite(value) || value <= 0 || value > 8) return; // 窗口 (0,8]：γ>1 才是抬高暗部（旧 (0,1] 与语义相反，2.2 一直被忽略）
 	if (readGammaOverride() !== null) return;
 	lightGammaUniform.value = value;
 }

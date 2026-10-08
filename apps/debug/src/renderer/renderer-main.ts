@@ -356,7 +356,7 @@ export class RendererMain {
     setLightingModeInShader(config.lighting?.mode ?? 'baked');
     // 静态光照（预烘焙）显示参数：与 game 的 init 装配同值（2026-10-04 起三应用同一基线；
     // 数值出处是 `apps/game/src/config.ts` 的 `DEFAULT_CONFIG.lighting`）。
-    // 注意 `setLightGamma` 只接受 (0, 1] 的入参 ⇒ 2.2 会被它忽略、共享 uniform 保持初值 1
+ // `setLightGamma` 接受 (0, 8]（2026-10-08 起）⇒ 2.2 生效（抬高暗部）
     // （与 game/viewer 同一码值行为，非本文件特有）。
     setExposure(2.3);
     setLightGamma(2.2);

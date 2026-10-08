@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（176 条）
+## 未结项（173 条）
 
 ### 待裁决（63）
 
@@ -100,7 +100,7 @@
 - **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
 - **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 
-### 待修（112）
+### 待修（109）
 
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -113,7 +113,6 @@
 - **T-058** DemoParseResult 里「已解码但应用面为零」的字段清单（owner 要求记录，2026-09-30　`viewer`
 - **T-062** 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径…　`viewer`
 - **T-102** 贴合检查提示串的 bbox 只取第一条越界轨道　`viewer`
-- **T-104** 构造期 setLightGamma(2.2) 落在着色器接受窗口外被忽略　`viewer`
 - **T-105** ensureWasm 把首次失败永久缓存，一次瞬时失败后本会话不自愈　`viewer`
 - **T-108** 回退脚本加载无超时且成功路径不移除 script 标签　`viewer`
 - **T-114** 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems）　`viewer`
@@ -204,8 +203,6 @@
 - **T-408** `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de…　`shared`
 - **T-503** mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效　`shared`
 - **T-419** 贴图取不到：VTF 格式（Bgra4444 / Ia88）不受支持 + 两条 VTF 解码路径判定不一致（boreas 4+1 / 666 +1）　`shared`
-- **T-423** 【S4】surf_boreas 渲染偏暗：131 个 mesh 无贴图（含 water01/water_pure_beneath）、1976 个无 lightmap 走 fullbright、960 个落漏网兜底　`shared`
-- **T-425** 【S5】道具/树木光照偏暗：树贴图本身暗 + 仅 356/1562 mesh 带 `_vbsp_vlight`（值 0.05~0.33）+ 部分树两者皆无 ⇒ 黑剪影　`shared`
 - **T-426** 【S6】prop 光照：982/1562 mesh 无 vhv 也探不到 cube；探到的 cube ~0.08、vhv 0.05~0.33；`StaticPropLump` 未读 `m_AmbientCube[6]`（作者烘光）　`shared`
 
 ### 已取证待立项（2）
@@ -226,7 +223,7 @@
 | T-015 | vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤） | 缺陷 | shared | 待裁决 | 见详情 | progress/pending-detail.md | — | #31 |
 | T-016 | compute-mode.ts 的 summary 字面量含已删文档编号 | 文档口径 | shared | 待裁决 | src/ts-shared/auth/compute-mode.ts:89 | progress/pending-detail.md | — | #36 |
 | T-018 | tick-authority.test.ts 断言标签含 Q1 / §8.5 | 缺陷 | shared | 待裁决 | src/ts-shared/auth/tick-authority.test.ts:625 | progress/pending-detail.md | — | #40 |
-| T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #50 |
+| T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 待裁决 | src/renderer-shared/shader/lightmap-shader.ts:1789 | progress/pending-detail.md | — | #50 |
 | T-023 | check-wasm-api.mjs 输出标签 F4 无出处 | 配置·门禁 | game | 已结案 | git grep -n "F4" -- apps/game/scripts ⇒ 0 命中（2026-10-07 复核；标签已改为无编号输出） | progress/pending-detail.md | 判据：@BT@git grep -n "F4" -- apps/game/scripts@BT@ ⇒ 标签有出处（指向规范/文档的编号体系）或已改为无编号输出 | #52 |
 | T-024 | game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等） | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #53 |
 | T-029 | debug 脚本 10 条（jump-apex 采样链链路级仍待裁决 | 配置·门禁 | debug | 待修 | 见详情 | progress/pending-detail.md | 判据：10 条子项逐条处置完毕；每条子项脚本跑通 exit 0，并在 @BT@progress/pending-detail.md@BT@ 对应条目标注处置结果 | #60 |
@@ -254,7 +251,7 @@
 | T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错） | 缺陷 | viewer | 待裁决 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | — | — |
 | T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道 | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:267 | documents/viewer/implementation/app.md | 判据：构造 2 条以上越界轨道 ⇒ 提示串 bbox 覆盖全部（不再只取第一条） | — |
 | T-103 | ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动） | 缺陷 | viewer | 待裁决 | apps/viewer/src/app.ts:807 | documents/viewer/implementation/app.md | — | — |
-| T-104 | 构造期 setLightGamma(2.2) 落在着色器接受窗口外被忽略 | 缺陷 | viewer | 待修 | apps/viewer/src/core/scene.ts:65 | documents/viewer/implementation/core.md | 判据：页面加载后控制台无「γ 落在接受窗口外被忽略」告警，且模式切换后 γ 生效 | — |
+| T-104 | 构造期 setLightGamma(2.2) 落在着色器接受窗口外被忽略 | 缺陷 | viewer | 已结案 | src/renderer-shared/shader/lightmap-shader.ts:1789 | 本行即全部 | 判据：页面加载后控制台无「γ 落在接受窗口外被忽略」告警，且模式切换后 γ 生效 | — |
 | T-105 | ensureWasm 把首次失败永久缓存，一次瞬时失败后本会话不自愈 | 缺陷 | viewer | 待修 | apps/viewer/src/core/bsp.ts:82 | documents/viewer/implementation/core.md | 判据：首次 @BT@ensureWasm@BT@ 失败后再次调用会重试（断网→联网后可自愈） | — |
 | T-106 | numField 把空串当合法 0 写入变换 | 缺陷 | viewer | 待裁决 | apps/viewer/src/core/dom.ts:107 | documents/viewer/implementation/core.md | — | — |
 | T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | 缺陷 | shared | 待裁决 | src/renderer-shared/scene/scene-optimizer.ts:250 | documents/viewer/implementation/core.md | — | — |
@@ -404,10 +401,10 @@
 | T-420 | 【S1】天空盒六面槽位映射错误：up/dn 落在 ±X、四个侧面互串（`SUFFIX_SLOT` 写成 up→px…），且极面未按 GL 约定做面内旋转 ⇒ 天空被错误拼接 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/skybox.ts:29 | 本行即全部 | 判据：① 轴约定读码确认（世界顶点 `map_coords`=[y,z,x]，渲染端清根旋转）⇒ 应为 ft→pz/bk→nz/lf→px/rt→nx/up→py/dn→ny；② `node .tmp/mapsurvey/seamtest.mjs` ⇒ 四侧面在 ft→lf→bk→rt 环序下平均缝差 0.82（错误环序 28~35）；③ `node .tmp/mapsurvey/polerot-verify.mjs` ⇒ up 转 90°CW、dn 转 90°CCW 后 0° 为最低分；④ debug `npm run typecheck`/`build:app` 通过，截图 .tmp/mapsurvey/cj-horizon.png、cj-up.png | — |
 | T-421 | 【S2】Source 3D 天空盒（微缩景观）未实现：`sky_camera` 只被读作雾参数，微缩几何未按 scale 分离渲染 ⇒ 地图外景缺失 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:1 | 判据：① `node .tmp/mapsurvey/mini-recon.mjs <map>` 证明夹具无可分离微缩区（boreas：相机在包围盒外 1281 HU、3000 HU 内 0 网格；concretejungle：2000 HU 内 26%、分布平滑）；② 隐藏地图后 A/B（`mini-ab.mjs ... 0 hidemap` + `mini-diff.mjs`）⇒ 差异 9.26%（分带 6~9 = 山脊）；③ 带地图、在 owner 指定视点（-12048,14736,12768）⇒ 0.17%（山脊从地形上方露一条带）。**实现**：`src/renderer-shared/environment/miniature-sky.ts` 合成三层山脊，挂场景根（`userData.isMiniatureSky`），随图释放；**限制**：该视点显著性不足，要更明显需调高度/距离或做第二相机视差 | 判据：① `node .tmp/mapsurvey/mini-recon.mjs <map>` 证明夹具无可分离微缩区（boreas：相机在包围盒外 1281 HU、3000 HU 内 0 网格；concretejungle：2000 HU 内 26%、分布平滑）；② 隐藏地图后的 A/B ⇒ `node .tmp/mapsurvey/mini-ab.mjs <bsp> <out.png> <url> 0 hidemap` + `node .tmp/mapsurvey/mini-diff.mjs` ⇒ 差异 9.26%（分带 6~9 = 山脊）；③ 带地图、在 owner 指定视点 ⇒ 0.17%（山脊从地形上方露一条带） | — |
 | T-422 | 【S3】surf_boreas 无雪盖：`worldspawn.skyname=tendies_sky`、雾色偏冬，但世界几何未体现雪覆盖 | 缺陷 | shared | 已结案 | src/renderer-shared/shader/world-transition.ts:1 | 本行即全部 | 判据：先取证——surf_boreas 世界材质里是否存在雪贴图/雪材质（雪盖在贴图还是几何层面）；再给出可见方案，且不影响非雪图 | — |
-| T-423 | 【S4】surf_boreas 渲染整体偏暗：实测场景 1492 个 mesh 全为 MeshBasicMaterial，其中 **131 个无贴图**（water_pure_beneath 36 / water01 36 / alch_symbols 7 / tendies_endsmoke 6 / 无名 38）；日志 `[lightmap]` 显示 1976 个 mesh 无 lightmap 走 fullbright、960 个落「漏网兜底」 | 缺陷 | shared | 待修 | apps/debug/src/renderer/renderer-main.ts:505 | progress/monthly/2026-10-5.md | 判据：对照 owner 给的参考外观 —— ① 树/岩石不再纯黑（至少显示贴图原色或受光）；② 131 个无贴图 mesh 归零，或明确列入缺失观测（含 **prop 贴图**缺失，当前 `collect_missing_textures` 只覆盖世界面材质）；③ 同视点截图与参考图逐区对比 | — |
+| T-423 | 【S4】surf_boreas 渲染整体偏暗：实测场景 1492 个 mesh 全为 MeshBasicMaterial，其中 **131 个无贴图**（water_pure_beneath 36 / water01 36 / alch_symbols 7 / tendies_endsmoke 6 / 无名 38）；日志 `[lightmap]` 显示 1976 个 mesh 无 lightmap 走 fullbright、960 个落「漏网兜底」 | 缺陷 | shared | 已结案 | src/renderer-shared/shader/lightmap-shader.ts:1789 | 本行即全部 | 判据：对照 owner 给的参考外观 —— ① 树/岩石不再纯黑（至少显示贴图原色或受光）；② 131 个无贴图 mesh 归零，或明确列入缺失观测（含 **prop 贴图**缺失，当前 `collect_missing_textures` 只覆盖世界面材质）；③ 同视点截图与参考图逐区对比 | — |
 | T-424 | 【S2】3D 天空盒（Source 微缩景观）按正统做法接入：取 `sky_camera` 半径 `maxDim/scale` 内的微缩 mesh，复制后**绕 `sky_camera` 缩放** `scale` 倍（平移量 `CAM*(1-scale)`，锚点=相机本身；T-428 修正，锚点取世界原点会偏 21.6°~77.1°）；副本以 `renderOrder=-1` 当天空层 ⇒ 玩家视点处能看到地图自带的微缩外景 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:1 | 本行即全部 | 判据：① owner 指认微缩区 (-3475,-11710,-3158)（实测该点 4000 HU 内有 101 个图元、距 `sky_camera` 7517）；② 站位 (-12048,14779.9,12768) 截图 ⇒ 背景出现灰色岩脊 + 雪斑 + 松树；③ A/B（`node .tmp/mapsurvey/mini-ab.mjs` 隐藏同名组）⇒ 隐藏后背景只剩纯色天空（`.tmp/mapsurvey/real-ab.png` vs `-nomini.png`）；④ debug `npm run typecheck`/`build:app` 通过。无 `sky_camera` 的图仍回退合成山脊（T-421） | — |
-| T-425 | 【S5】道具/树木光照偏暗：树贴图 `Arbre01` 本身暗（2048²，均值 RGB≈[72,70,56]）；场景 1562 mesh 中仅 356 带 `_vbsp_vlight`（采样值 0.05~0.33 偏暗），747 个 `Arbre01` 树 mesh 抽样数个既无 `_vbsp_vlight` 也无 node extras 立方体 ⇒ 只能按贴图原色渲染成黑剪影 | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1408 | progress/monthly/2026-10-5.md | 判据：先分类统计 props 三类（有 vhv / 只有 cube / 两者都无）各多少，并让「两者都无」的那类有可见兜底；再在同视点与 owner 参考图对比，树/岩石不再是纯黑 | — |
-| T-426 | 【S6】prop 光照数据：场景 1562 mesh 中 982 个既无 vhv 也探不到 cube ⇒ 走 fullbright；能探到的 cube 仅 ~0.08、vhv 0.05~0.33 ⇒ 整体偏暗。我们的 `StaticPropLump`（V6/V10/V11）**未读 `m_AmbientCube[6]`** —— 那是 Source 给静态道具的作者烘光 | 缺陷 | shared | 待修 | src/wasm-core/vbsp/data/game.rs:327 | progress/monthly/2026-10-5.md | 判据：先加临时导出验证 sprp 记录布局（boreas 的 sprp 在压缩 lump 内、raw 读取无效）确认记录里是否含 6×RGBExp32；据此让 prop 用作者烘光，再在同视点与 owner 参考图对比树/岩石不再是黑剪影 | — |
+| T-425 | 【S5】道具/树木光照偏暗：树贴图 `Arbre01` 本身暗（2048²，均值 RGB≈[72,70,56]）；场景 1562 mesh 中仅 356 带 `_vbsp_vlight`（采样值 0.05~0.33 偏暗），747 个 `Arbre01` 树 mesh 抽样数个既无 `_vbsp_vlight` 也无 node extras 立方体 ⇒ 只能按贴图原色渲染成黑剪影 | 缺陷 | shared | 已结案 | src/renderer-shared/shader/lightmap-shader.ts:1500 | 本行即全部 | 判据：先分类统计 props 三类（有 vhv / 只有 cube / 两者都无）各多少，并让「两者都无」的那类有可见兜底；再在同视点与 owner 参考图对比，树/岩石不再是纯黑 | — |
+| T-426 | 【S6】prop 光照数据：场景 1562 mesh 中 982 个既无 vhv 也探不到 cube ⇒ 走 fullbright；能探到的 cube 仅 ~0.08、vhv 0.05~0.33 ⇒ 整体偏暗。我们的 `StaticPropLump`（V6/V10/V11）**未读 `m_AmbientCube[6]`** —— 那是 Source 给静态道具的作者烘光 | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1500 | progress/monthly/2026-10-5.md | 判据：先加临时导出验证 sprp 记录布局（boreas 的 sprp 在压缩 lump 内、raw 读取无效）确认记录里是否含 6×RGBExp32；据此让 prop 用作者烘光，再在同视点与 owner 参考图对比树/岩石不再是黑剪影 | — |
 | T-427 | 【S7·雪盖】地图的雪在 `WorldVertexTransition` 的**第二贴图**里：`materials/surf_lt_alpine/alpine_blendrocksnow.vmt` 的 `$basetexture2 = surf_lt_alpine/alpine_snow01`；而本仓**全链路都没有 `$basetexture2` / `WorldVertexTransition`**（Rust + TS 搜不到）⇒ 混合地形只画岩石那一半，雪永远不出现。混合系数在 `dface.lightmap_alpha_start` 指向的 **lightmap-alpha 数据**里：该字段我们解析进 `Face` 却**从未读取对应 lump** | 缺陷 | shared | 已结案 | src/renderer-shared/shader/world-transition.ts:1 | 本行即全部 | 判据：① 读 lightmap-alpha lump 并逐 face 取到混合 alpha（探针能打印非零占比）；② 材质带第二贴图并在渲染端按该 alpha 混合（自定义 shader，glTF 核心表达不了）；③ 同视点截图地面出现雪色，与 owner 参考图的雪线一致 | — |
 | T-428 | 【S8】3D 天空盒外景**锚点错**：T-424 按「把 `sky_camera` 点搬到世界原点」放置（锚点=原点），而起源引擎是把天空相机放到 `CAM + (player-CAM)/scale` 再渲染微缩几何 —— 两者对同一微缩点的**方向**实测差 **21.6°~77.1°**，外景整体错位（owner 目视发现「偏了」）。已改为**绕 `sky_camera` 缩放**（平移量 `CAM*(1-scale)`），与引擎方向夹角 **0.00°** | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:143 | 本行即全部 | 判据：① 数值——引擎相机公式 vs 本实现，对 3 个采样微缩点的方向夹角 = 0.00°（锚点取原点时 21.6°~77.1°）；② 目视——同视点 yaw240 远处山脊落在与主图一致的地平高度（`.tmp/mapsurvey/anchor-yaw240.png`）；③ debug `npm run typecheck` + `build:app` 通过 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |

@@ -59,7 +59,7 @@ export class ViewerScene {
     // —— exposure 2.3 / lightGamma 2.2 / ambientScale 1 / propVertexRelax 1 / propVertexFlatten 0.85。
     // 数值出处是 `apps/game/src/config.ts` 的 `DEFAULT_CONFIG.lighting`：本工程没有面板持久化，
     // 直接取同一组默认值，使同一张地图在两端观感一致。
-    // 注意 `setLightGamma` 只接受 (0, 1] 的入参 ⇒ 这里的 2.2 会被它忽略、共享 uniform 保持初值 1；
+ // `setLightGamma` 接受 (0, 8]（2026-10-08 起）⇒ 这里的 2.2 生效（抬高暗部）；
     // 其余四项都落在各自接受窗口内（`setPropVertexFlatten` 另会把值钳到上限 1）。
     setExposure(2.3);
     setLightGamma(2.2);

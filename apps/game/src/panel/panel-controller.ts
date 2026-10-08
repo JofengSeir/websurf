@@ -60,7 +60,7 @@ export class PanelController {
     private readonly onSyncRenderDistance?: (dist: number) => void,
     /** 曝光（显示侧亮度倍率）→ 渲染器 `setExposure`：全场景共享 uniform，改值后下一次绘制生效。 */
     private readonly onSyncExposure?: (exposure: number) => void,
-    /** 暗部提升 γ → 渲染器 `setLightGamma`（共享 uniform）；着色器侧只接受 `(0, 1]`，更大取值被忽略。 */
+ * 暗部提升 γ → 渲染器 `setLightGamma`（共享 uniform）；接受窗口 `(0, 8]`（2026-10-08 起），与滑块量程 0.5..6 一致。
     private readonly onSyncLightGamma?: (gamma: number) => void,
     /** 模型（prop）烘焙光照亮度 → 渲染器 `setAmbientScale`（共享 uniform，只作用于 ambient cube 路径）。 */
     private readonly onSyncAmbientScale?: (scale: number) => void,
@@ -467,7 +467,7 @@ export class PanelController {
 
     // 暗部提升 γ（0.5..6，步进 0.01）→ config.lighting.lightGamma + 渲染器 setLightGamma：
     // 着色器对光照项做 pow(L, 1/γ)（γ>1 抬暗部、γ<1 压暗部）；
-    // 渲染端的 setLightGamma 只接受 (0, 1]，滑块大于 1 的取值不会写进共享 uniform。
+ // 渲染端的 setLightGamma 接受 (0, 8]（2026-10-08 起），滑块取值会写进共享 uniform。
     this.bindSlider('lightGamma', 0.5, 6, 0.01, (v) => {
       this.config.lighting.lightGamma = v;
       this.onSyncLightGamma?.(v);

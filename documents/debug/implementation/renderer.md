@@ -73,7 +73,7 @@
 **地图装配（2026-10-04 起与 game/viewer 同一条共享链路）**：`loadScene` 走共享 `buildMapScene`
 （GLB → 子场景 + 清根 rotation + 世界包围盒 + **摘 punctual 灯**，此前本工程自持 loadGlb 且保留 GLB 内嵌灯——surf_666 上 2118 盏灯重复计光且推高 uniform，是三应用观感分歧来源之一）
 → 共享 `applyLightmap` → 分块合并 → **合并后 fullbright 终扫**（与 game 同序）→ `renderer.compile` 预编译；
-`init` 按 game 同值落五个光照旋钮（exposure 2.3 / lightGamma 2.2——落在接受窗口外被忽略 / ambientScale 1 / propVertexRelax 1 / propVertexFlatten 0.85），
+`init` 按 game 同值落五个光照旋钮（exposure 2.3 / lightGamma 2.2——落在接受窗口外被忽略 / ambientScale 1 / propVertexRelax 1 / propVertexFlatten 0.85），（已消除 2026-10-08：接受窗口已改为 (0,8] 并与面板量程对齐，2.2 生效）
 `LightManager` 三盏基础灯默认强度归零（`apps/debug/src/config.ts:213` 起的默认值改动；面板仍可拉高做光照对照，但终扫收敛为 fullbright 的 mesh 不再响应这些灯）。
 锚点：`apps/debug/src/renderer/renderer-main.ts:484` 到 `apps/debug/src/renderer/renderer-main.ts:524`。
 
