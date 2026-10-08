@@ -85,8 +85,13 @@ export function applyWorldTransitionToMaterial(material: THREE.Material, second:
 		shader.vertexShader = shader.vertexShader
 			.replace('#include <common>', blendDecl + '\n#include <common>')
 			.replace('#include <begin_vertex>', blendCopy);
-		// three 0.165 的 map chunk 用 `vMapUv`；更早版本是 `vUv`，按实际 shader 文本选。
-		const uv = shader.fragmentShader.includes('vMapUv') ? 'vMapUv' : 'vUv';
+		// ⚠️ 不能从 `shader.fragmentShader` 里找 varying 名：`onBeforeCompile` 拿到的还是**未展开的**
+		// `#include <…>` 模板，`vMapUv` 只出现在 chunk 源码里 ⇒ 那样的判断永远命中不到、会退成 `vUv`，
+		// 而 three 0.165 的 fragment 里只有 `vMapUv` ⇒ program 编译失败 ⇒ 该批 mesh 一个像素都不画。
+		// 正解：从 three 自己的 `map_fragment` chunk 里读它实际用的 UV 变量名。
+		const mapChunk = (THREE.ShaderChunk as unknown as Record<string, string>).map_fragment ?? '';
+		const uv = /texture2D\(\s*map\s*,\s*([A-Za-z_]\w*)\s*\)/.exec(mapChunk)?.[1] ?? 'vMapUv';
+		console.info('[world-transition] 注入双贴图混合：UV varying = ' + uv + '（取自 three 的 map_fragment chunk）');
 		const mix = [
 			'#include <map_fragment>',
 			'\tdiffuseColor.rgb = mix(diffuseColor.rgb, texture2D(vbspSecondTex, ' + uv + ').rgb, clamp(vbspBlend, 0.0, 1.0));',
@@ -120,5 +125,6 @@ export function applyWorldTransitionShaders(root: THREE.Object3D): number {
 		applyWorldTransitionToMaterial(material, second);
 		applied++;
 	}
+	console.info('[world-transition] 双贴图地形混合：登记贴图 ' + secondByFirstTexture.size + ' 张，注入材质 ' + applied + ' 个');
 	return applied;
 }
