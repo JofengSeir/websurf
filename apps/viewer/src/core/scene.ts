@@ -18,7 +18,7 @@ import {
   setPropVertexRelax,
   getLightingMode,
   type LightingMode,
-} from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+} from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
 import { applyLightmap, buildMapScene } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
@@ -134,7 +134,7 @@ export class ViewerScene {
   async mountGlb(glbBytes: ArrayBuffer, skyboxTexture?: import('three').CubeTexture | null): Promise<void> {
     // 共享装配核（2026-10-03 起与 game 同一条链路）：GLB 字节 → 子场景（isBspModel 标记 +
     // 清根 rotation + 世界包围盒 + 摘 punctual 灯，顺序约束见 buildMapScene 文档）
-    const { gltf, scene: mapRoot, maxDim } = await buildMapScene(glbBytes);
+    const { gltf, scene: mapRoot, maxDim } = await buildMapScene(glbBytes); await collectWorldTransitionTextures(gltf, mapRoot);
 
     if (this.modelRoot) {
       disposeObject(this.modelRoot);
@@ -158,7 +158,7 @@ export class ViewerScene {
 
     // 合并后终扫（2026-10-03 起与 game 同序：终扫必须晚于合并——合并会重建 mesh/材质数组）：
     // 把仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程不加灯，受光材质恒黑）
-    const swept = fullbrightUnlitLitMaterials(this.modelRoot);
+    const swept = fullbrightUnlitLitMaterials(this.modelRoot); applyWorldTransitionShaders(this.modelRoot);
     if (swept > 0) {
       console.info(`[viewer][lightmap] 装配后终扫：${swept} 个 mesh 收敛为 fullbright 贴图原色`);
     }

@@ -45,7 +45,7 @@ import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/sc
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
-import { fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -268,7 +268,7 @@ export class RendererMain {
     //    (1) 摘灯必须在挂进主场景之前（rAF 已在跑，先挂再摘会让中间帧带灯编译材质，uniform 超限
     //        ⇒ 该批 mesh 一个像素都不画）；(2) 必须 removeFromParent 真摘，visible=false 仍会被
     //        traverse 且程序失效。
-    const { gltf, scene, bbox, maxDim } = await buildMapScene(data.glb);
+    const { gltf, scene, bbox, maxDim } = await buildMapScene(data.glb); await collectWorldTransitionTextures(gltf, scene);
 
     this.scene.add(scene); // 挂进主场景：此时 punctual 光源已摘除
 
@@ -290,7 +290,7 @@ export class RendererMain {
     //      `MeshStandardMaterial`）收敛到 fullbright。本工程不加任何灯 ⇒ 受光材质只剩
     //      emissive=[0,0,0]，恒渲染纯黑。必须在 optimizeScene 之后（合并会重建 mesh/材质数组）、
     //      首次编译之前。
-    const converged = fullbrightUnlitLitMaterials(this.scene);
+    const converged = fullbrightUnlitLitMaterials(this.scene); applyWorldTransitionShaders(this.scene);
     if (converged > 0) {
       console.info(
         `[lightmap] 装配后终扫：${converged} 个 mesh 仍为受光材质 ⇒ 收敛为 fullbright 贴图原色` +

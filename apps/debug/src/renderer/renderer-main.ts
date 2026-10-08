@@ -53,7 +53,7 @@ import {
   applyLightmap,
   buildMapScene,
 } from '../../../../src/renderer-shared/scene/scene-builder.js';
-import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
 
 /**
@@ -485,7 +485,7 @@ export class RendererMain {
     // 共享装配核（2026-10-04 起与 game/viewer 同一条链路）：GLB 字节 → 子场景（isBspModel 标记 +
     // 清根 rotation + 世界包围盒 + **摘 punctual 灯**）。此前本工程自持 loadGlb + 手工装配、
     // GLB 内嵌的灯全部保留进场景——重复计光且推高 uniform，是三应用观感分歧的来源之一。
-    const { gltf, scene: mapRoot, bbox: boundingBox, maxDim } = await buildMapScene(data.glb);
+    const { gltf, scene: mapRoot, bbox: boundingBox, maxDim } = await buildMapScene(data.glb); await collectWorldTransitionTextures(gltf, mapRoot);
     this.collectMetadata(mapRoot);
 
     // lightmap（共享链路，与 game 同一份）：atlas 由 GLB extras 的 textureIndex 解出，
@@ -502,7 +502,7 @@ export class RendererMain {
 
     // 合并后终扫（2026-10-04 起与 game 同序：终扫必须晚于合并——合并会重建 mesh/材质数组）：
     // 把仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程默认不加灯，受光材质恒黑）
-    const converged = fullbrightUnlitLitMaterials(mapRoot);
+    const converged = fullbrightUnlitLitMaterials(mapRoot); applyWorldTransitionShaders(mapRoot);
     if (converged > 0) {
       console.info(
         `[lightmap] 装配后终扫：${converged} 个 mesh 仍为受光材质 ⇒ 收敛为 fullbright 贴图原色` +
