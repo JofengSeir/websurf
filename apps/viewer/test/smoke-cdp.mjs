@@ -29,7 +29,7 @@ const EDGE =
   process.env.EDGE_PATH ??
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = Number(process.env.SMOKE_PORT ?? 9333);
-const URL_ = process.env.SMOKE_URL ?? 'http://127.0.0.1:8080/web/index.html';
+const URL_ = process.env.SMOKE_URL ?? 'http://127.0.0.1:8100/web/index.html';
 // 缺省夹具：<仓库根>/test/replay/surf_null_4.replay（SMOKE_FILE_REPLAY 可覆盖）；深链跑不需要文件选择
 const LOCAL_REPLAY =
   process.env.SMOKE_FILE_REPLAY ?? join(VIEWER_ROOT, '..', '..', 'test', 'replay', 'surf_null_4.replay');

@@ -152,7 +152,7 @@ export class ReplayPanel {
         label,
         value: tf.offset[i] ?? 0,
         step: 10,
-        hint: 'HU；显式叠加在帧坐标上（默认 0 = 播放帧自身坐标）',
+        hint: 'HU；步长 10 HU；显式叠加在帧坐标上（默认 0 = 播放帧自身坐标）',
         onInput: () => this.applyTransformFromInputs(),
       });
       input.id = ['tf-offX', 'tf-offY', 'tf-offZ'][i];

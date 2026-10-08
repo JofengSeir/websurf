@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（153 条）
+## 未结项（149 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（121）
+### 待修（117）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -79,15 +79,11 @@
 - **T-108** 回退脚本加载无超时且成功路径不移除 script 标签　`viewer`
 - **T-114** 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems）　`viewer`
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
-- **T-120** 正式跑段高亮宽度混基，Track.offset 非 0 时位置与宽度偏　`viewer`
 - **T-121** disposeTree 不释放轨迹线（Line）与 tick 点（Points）　`viewer`
 - **T-122** createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL　`viewer`
 - **T-123** 导入无超时与取消，Worker 不回消息时 Promise 永不结算　`viewer`
-- **T-126** panel.ts 平移输入框 hint 写「默认 0」而 step 为 10 HU　`viewer`
-- **T-129** 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080　`viewer`
 - **T-130** 冒烟按键断言（6 键）与当前 UI 八键不一致　`viewer`
 - **T-131** 冒烟三条静态断言只对 single 产物成立　`viewer`
-- **T-133** .gitignore 中间产物目录与 test:replay 实际输出不一致　`viewer`
 - **T-136** single 分支四段日志都写 [5/5] 步骤编号　`viewer`
 - **T-140** 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复　`viewer`
 - **T-144** .MDL 大小写让「三件齐」检查失效，vvd/vtx 槽位填进 .mdl 字节　`viewer`
@@ -239,19 +235,19 @@
 | T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | 工具·流程 | shared | 待裁决 | src/renderer-shared/shader/lightmap-shader.ts:351 | documents/viewer/implementation/renderer.md | — | — |
 | T-118 | A-B 区间带恒不显示（宽度算式分子恒等于分母） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:525 | documents/viewer/implementation/replay.md | 判据：A-B 区间带可见（宽度算式分子≠分母）：构造 A≠B ⇒ 带出现且宽度随区间变化 | — |
 | T-119 | 时间轴两条 title 文案与默认播放窗口矛盾 | 文档口径 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:185 ⇒ 文案改为「prerun 帧计入区间（读数可为负）」，与 apps/viewer/src/replay/player.ts:180 的 Math.min(0,t0) 窗口一致 | documents/viewer/implementation/replay.md | 见详情 | — |
-| T-120 | 正式跑段高亮宽度混基，Track.offset 非 0 时位置与宽度偏 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:551 | documents/viewer/implementation/replay.md | 判据：构造 @BT@Track.offset ≠ 0@BT@ 的轨道 ⇒ 正式跑段高亮的位置与宽度同基对齐 | — |
+| T-120 | 正式跑段高亮宽度混基，Track.offset 非 0 时位置与宽度偏 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:552 ⇒ 宽度算式先加 `track.offset` 换成主时钟（与左端同基）；DOM 桩探针 ⇒ left=10%、width=60%（旧算式 50%，偏 10 个百分点）；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-121 | disposeTree 不释放轨迹线（Line）与 tick 点（Points） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/visuals.ts:168 | documents/viewer/implementation/replay.md | 判据：反复载入/卸载场景 ⇒ 轨迹线（Line）与 tick 点（Points）被释放（@BT@renderer.info.memory@BT@ 回落） | — |
 | T-122 | createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL | 缺陷 | viewer | 待修 | apps/viewer/src/replay/importer.ts:101 | documents/viewer/implementation/replay.md | 判据：重起 Worker 后 blob URL 不累积（@BT@createObjectURL@BT@ 与 @BT@revokeObjectURL@BT@ 配对） | — |
 | T-123 | 导入无超时与取消，Worker 不回消息时 Promise 永不结算 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/importer.ts:137 | documents/viewer/implementation/replay.md | 判据：Worker 不回消息时导入 Promise 以超时结算（不再永不 settle），并可取消 | — |
 | T-124 | Track.offset 只有下界没有上界，可拉长主时钟总长 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/trackpanel.ts:209 ⇒ `Math.min(3600, Math.max(0, n))`（上限 1 h），提示语写明 0~3600；`npm run typecheck` 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-125 | 零帧轨道的口径不一致（列表面板有卡片、3D 无对象） | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/visuals.ts:96 | documents/viewer/implementation/replay.md | — | — |
-| T-126 | panel.ts 平移输入框 hint 写「默认 0」而 step 为 10 HU | 文档口径 | viewer | 待修 | apps/viewer/src/replay/panel.ts:154 | documents/viewer/implementation/replay.md | 判据：@BT@git grep -n "默认 0" -- apps/viewer/src/replay/panel.ts@BT@ ⇒ hint 与 @BT@step=10 HU@BT@ 一致 | — |
+| T-126 | panel.ts 平移输入框 hint 写「默认 0」而 step 为 10 HU | 文档口径 | viewer | 已结案 | apps/viewer/src/replay/panel.ts:155 ⇒ hint 补「步长 10 HU」，与 `step: 10` 一致；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-127 | 真实夹具路径跨三处失效（指向 test/maps 而非 test/replay） | 缺陷 | viewer | 已结案 | apps/viewer/test/replay-selftest.ts:77 ⇒ 夹具路径改指 test/replay（4 层，与 :912 同口径）；`npm run test:replay` ⇒ fixture 可读 / 53365 B / 字节闭合 全 ok | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-128 | dist 里的示例记录无法由当前源码路径重新产出 | 缺陷 | viewer | 已结案 | apps/viewer/scripts/build-dist.mjs:239 ⇒ 示例记录源改指 test/replay；`npm run build:dist -- --multi` ⇒ dist/assets/maps/surf_null_4.replay 53365 B 已打包 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
-| T-129 | 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:32 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "8080" -- apps/viewer/test/smoke-cdp.mjs@BT@ ⇒ 0 命中（缺省 SMOKE_URL 指向本工程端口 8100） | — |
+| T-129 | 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080 | 配置·门禁 | viewer | 已结案 | apps/viewer/test/smoke-cdp.mjs:32 ⇒ 缺省 `SMOKE_URL` 改 8100；`git grep -n "8080" -- apps/viewer/test/smoke-cdp.mjs` ⇒ 0 命中 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-130 | 冒烟按键断言（6 键）与当前 UI 八键不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:415 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 viewer 冒烟脚本 ⇒ 按键断言条数与当前 UI 八键一致 | — |
 | T-131 | 冒烟三条静态断言只对 single 产物成立 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:138 | documents/viewer/implementation/scripts-and-test.md | 判据：冒烟三条静态断言在 single 与多产物两种形态下都成立 ⇒ 各跑一次 exit 0 | — |
-| T-133 | .gitignore 中间产物目录与 test:replay 实际输出不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/package.json:10 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 @BT@npm run test:replay@BT@ 后 @BT@git status --short@BT@ 无未忽略产物 ⇒ .gitignore 与实际输出目录一致 | — |
+| T-133 | .gitignore 中间产物目录与 test:replay 实际输出不一致 | 配置·门禁 | viewer | 已结案 | **遗弃**：`apps/viewer/.gitignore` 全文 4 行、无 `/temp/` 规则（仅注释说明由根覆盖）；根 `.gitignore:23`/`:24` 的 `**/.tmp/`、`**/temp/` 已覆盖输出目录；实测 `npm run test:replay` ⇒ exit 0 且 `git status --short` 干净 ⇒ 判据本就满足 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-136 | single 分支四段日志都写 [5/5] 步骤编号 | 工具·流程 | viewer | 待修 | apps/viewer/scripts/build-dist.mjs:315 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "\[5/5\]" -- apps/viewer/scripts@BT@ ⇒ single 分支四段日志编号与步骤序号一致 | — |
 | T-138 | 光照模式下拉只写不回填，与运行期真实模式脱节 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/mapinfo.ts:98 ⇒ 初值取 `getLightingMode()`、change 后回填实况（1:1 三处）；DOM 桩探针：提交 texture 而实况 baked ⇒ 下拉回填 baked；`npm run typecheck` 通过 | documents/viewer/implementation/ui.md | 见详情 | — |
 | T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待裁决 | apps/viewer/src/ui/mapinfo.ts:130 | documents/viewer/implementation/ui.md | — | — |

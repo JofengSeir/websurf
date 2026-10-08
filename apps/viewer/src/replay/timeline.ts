@@ -502,9 +502,9 @@ export class Timeline {
    * (min(rangeStop, duration) − rangeStart) / winLen，而窗口端点就是区间端点，故该值恒为 100，
    * 落不进「width > 0.05 且 width < 99.95」这一绘制条件，该带实际不会被显示。
    *
-   * 跑段高亮：左端 rel(track.offset)，宽度 (min(runEndLocal, clip.duration) − max(track.offset, winStart)) / winLen
-   * （被减数取的是轨道内部时间 `track.clip.t` 上的帧时间，减数里含全局 `track.offset` 且只出现一次；
-   * `offset` 非 0 时两项因此不同基准）；
+   * 跑段高亮：左端 rel(track.offset)，宽度 (track.offset + min(runEndLocal, clip.duration) − max(track.offset, winStart)) / winLen
+   * （被减数是轨道内部时间 `track.clip.t` 上的帧时间，**先加 track.offset 换成主时钟**再与减数相减——
+   * 否则 `offset` 非 0 时两项不同基准，位置与宽度会偏）；
    * runEndLocal 取 meta.preFrames + meta.frameCount 处的帧时间，该下标越界时取 clip.duration。
    */
   private refreshZones(): void {
@@ -537,8 +537,8 @@ export class Timeline {
       }
     }
 
-    // 正式跑段高亮：左端 = rel(track.offset)；宽度 = (min(runEndLocal, clip.duration) − max(track.offset, winStart)) / winLen，
-    // runEndLocal = idxEnd（= preFrames + frameCount）处的帧时间，idxEnd 越界时取 clip.duration。
+    // 正式跑段高亮：左端 = rel(track.offset)；宽度 = (track.offset + min(runEndLocal, clip.duration) − max(track.offset, winStart)) / winLen，
+    // runEndLocal = idxEnd（= preFrames + frameCount）处的帧时间（轨道内部基准），加 track.offset 后才与主时钟同基。
     if (this.runZone) {
       const track = p.tracks.follow;
       const meta = track?.clip.meta ?? null;
@@ -549,7 +549,7 @@ export class Timeline {
         // 左端钳 0：offset 在 prerun 段为负，rel 会给出负百分比把带子推出滑杆左缘；
         // 宽度公式的右端已用 max(offset, winStart) 钳过，两端口径在此对齐
         const left = Math.max(0, rel(track.offset));
-        const width = ((Math.min(runEndLocal, track.clip.duration) - Math.max(track.offset, winStart)) / winLen) * 100;
+        const width = ((track.offset + Math.min(runEndLocal, track.clip.duration) - Math.max(track.offset, winStart)) / winLen) * 100;
         // 跑段占满或缺失窗口时高亮无信息量，不画
         if (width > 0.05 && width < 99.95) {
           this.runZone.style.display = '';
