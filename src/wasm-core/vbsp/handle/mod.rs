@@ -24,8 +24,8 @@
 //!   face→texture_info、texture_info→texture_data、node→plane、node→leaf、edge→vertex、
 //!   static prop→模型名，但**不覆盖** model→faces、leaf→leaf_faces、face→plane。
 //! - `DisplacementInfo::corner_positions` 要求对应面恰好 4 个顶点（`ArrayVec<_, 4>` + `try_into`）；
-//!   细分顶点数是 `(2^power + 1)^2`，`triangulated_displaced_vertices` 按这个尺寸直接下标取点，
-//!   顶点缺失即 panic 而不是少出三角形。
+//!   细分顶点数是 `(2^power + 1)^2`，`triangulated_displaced_vertices` 按引擎扇形细分
+//!   （`TesselateDisplacement`）直接下标取点，顶点缺失即 panic 而不是少出三角形。
 //! - `Leaf::visible_set` 走 `VisData::visible_clusters`，那里对 `pvs_offsets`、`data` 与结果位图
 //!   都是直接下标：调用方须保证 `cluster < pvs_offsets.len()`，且所有 leaf 的
 //!   `cluster < VisData::cluster_count`。
@@ -392,34 +392,13 @@ impl<'a> Handle<'a, Face> {
         match self.displacement() {
             None => Either::Right(std::iter::repeat(None).take(self.vertex_positions().count())),
             Some(displacement) => {
-                let steps = 2usize.pow(displacement.power as u32);
-                let side = steps + 1;
-                let index = |x: usize, y: usize| y * side + x;
-                // `subdivided_face` 按 x 外层展平 ⇒ flat = x*side + y；本表把 flat 映回 (x, y)
-                let mut grid_of_flat = vec![(0usize, 0usize); side * side];
-                for x in 0..side {
-                    for y in 0..side {
-                        grid_of_flat[x * side + y] = (x, y);
-                    }
-                }
-                // 与 `triangulated_displaced_vertices()` 同一 index 表、同一三角形顺序
-                let mut out: Vec<Option<(f32, f32)>> = Vec::with_capacity(steps * steps * 6);
-                for x in 0..steps {
-                    for y in 0..steps {
-                        for flat in [
-                            index(x, y),
-                            index(x + 1, y),
-                            index(x, y + 1),
-                            index(x + 1, y),
-                            index(x + 1, y + 1),
-                            index(x, y + 1),
-                        ] {
-                            let (gx, gy) = grid_of_flat[flat];
-                            // gx 沿角 0→1 ⇒ 图集 V；gy 沿角 0→3 ⇒ 图集 U
-                            out.push(Some(disp_grid_uv(gx, gy, steps)));
-                        }
-                    }
-                }
+                let steps = 2usize.pow(displacement.power.max(0) as u32);
+                // 与 `triangulated_displaced_vertices()` 同一条细分序列（引擎扇形细分）
+                let out: Vec<Option<(f32, f32)>> = displacement
+                    .tessellated_grid()
+                    .into_iter()
+                    .map(|(gx, gy)| Some(disp_grid_uv(gx, gy, steps)))
+                    .collect();
                 Either::Left(out.into_iter())
             }
         }
@@ -535,49 +514,106 @@ impl<'a> Handle<'a, DisplacementInfo> {
             .map(move |(displacement, base_pos)| base_pos + displacement.displacement())
     }
 
-    /// 把细分网格三角化：先把全部细分顶点收进 `Vec`，再按 `index(x, y) = y * (steps + 1) + x` 取值，
-    /// 每个格子出 2 个三角形（共 6 个顶点）。
+    /// 引擎的细分三角形序列：每项是网格坐标 `(gx, gy)`，每个三角形 3 个、共用顶点重复出现。
     ///
-    /// `steps = 2^power`，所以需要恰好 `(steps + 1)^2` 个顶点；少一个就 panic
-    /// （`displaced_vertices` 的 `zip` 截断会让这种缺失真的发生），不是少出几个三角形。
+    /// 按起源 `TesselateDisplacement`（`public/disp_tesselate.h`）复现：四叉树自根向下，每个节点用
+    /// `g_TesselateWinding` 的 8 个环绕点绕节点中心成扇（8 个三角形/扇）；环绕点里 4 个对角点是
+    /// 子节点中心，按 `allowed_vertices` 判活——活的才递归，死的当普通点、扇在此断开。
+    /// 所有环绕点同样受掩码约束（相邻位移 power 不同时，引擎据此粗化细边）。
+    ///
+    /// 网格下标口径：`flat = gx * side + gy`（与 `subdivided_face` 的展平顺序一致）。
+    fn tessellated_grid(&self) -> Vec<(usize, usize)> {
+        let power = self.power.max(0) as usize;
+        if power == 0 {
+            // 2×2 网格（1 格）：无子节点，直接给该格的两个三角形
+            return vec![(0, 0), (1, 0), (0, 1), (1, 0), (1, 1), (0, 1)];
+        }
+        let side = 2usize.pow(power as u32) + 1;
+        let mut out = Vec::with_capacity((side - 1) * (side - 1) * 6);
+        let mid = (side - 1) / 2;
+        self.tessellate_node(mid, mid, 0, power, side, &mut out);
+        out
+    }
+
+    /// 一个节点（中心 `(cx, cy)`、层级 `level`）的扇形细分：先递归活着的子节点，再给本节点成扇。
+    fn tessellate_node(
+        &self,
+        cx: usize,
+        cy: usize,
+        level: usize,
+        power: usize,
+        side: usize,
+        out: &mut Vec<(usize, usize)>,
+    ) {
+        let vert_inc = 1usize << (power - level - 1);
+        let leaf = level + 1 >= power;
+        let mut child_active = [false; 4];
+        if !leaf {
+            let half = vert_inc / 2;
+            for (i, (sx, sy)) in [(-1isize, -1isize), (1, -1), (-1, 1), (1, 1)].iter().enumerate() {
+                let nx = (cx as isize + sx * half as isize) as usize;
+                let ny = (cy as isize + sy * half as isize) as usize;
+                child_active[i] = self.vertex_allowed(nx * side + ny);
+                if child_active[i] {
+                    self.tessellate_node(nx, ny, level + 1, power, side, out);
+                }
+            }
+        }
+        // `g_TesselateWinding` 的 8 个环绕点（末项是首项重复，用来收口）
+        const RING: [(isize, isize); 9] = [
+            (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1),
+        ];
+        let mut prev: Option<(usize, usize)> = None;
+        for (dx, dy) in RING {
+            let gx = (cx as isize + dx * vert_inc as isize) as usize;
+            let gy = (cy as isize + dy * vert_inc as isize) as usize;
+            if dx != 0 && dy != 0 && !leaf {
+                let idx = match (dx > 0, dy > 0) {
+                    (false, false) => 0,
+                    (true, false) => 1,
+                    (false, true) => 2,
+                    (true, true) => 3,
+                };
+                if child_active[idx] {
+                    prev = None;
+                    continue;
+                }
+            }
+            if !self.vertex_allowed(gx * side + gy) {
+                continue;
+            }
+            if let Some(p) = prev {
+                out.push(p);
+                out.push((gx, gy));
+                out.push((cx, cy));
+            }
+            prev = Some((gx, gy));
+        }
+    }
+
+    /// `allowed_vertices`（10 个 u32 = 320 位）第 `flat` 位是否为 1；越界按不允许处理。
+    fn vertex_allowed(&self, flat: usize) -> bool {
+        let word = flat >> 5;
+        word < self.allowed_vertices.len() && (self.allowed_vertices[word] >> (flat & 31)) & 1 == 1
+    }
+
+    /// 与 `vertex_positions()` 逐项对齐的细分三角形顶点位置序列。
     pub fn triangulated_displaced_vertices(&self) -> impl Iterator<Item = Vector> + 'a {
         let vertices: Vec<_> = self.displaced_vertices().collect();
-        let steps = 2usize.pow(self.power as u32);
-
-        let index = move |x: usize, y: usize| y * (steps + 1) + x;
-
-        (0..steps)
-            .flat_map(move |x| (0..steps).map(move |y| (x, y)))
-            .flat_map(move |(x, y)| {
-                [
-                    vertices[index(x, y)],
-                    vertices[index(x + 1, y)],
-                    vertices[index(x, y + 1)],
-                    vertices[index(x + 1, y)],
-                    vertices[index(x + 1, y + 1)],
-                    vertices[index(x, y + 1)],
-                ]
-            })
+        let side = 2usize.pow(self.power.max(0) as u32) + 1;
+        self.tessellated_grid()
+            .into_iter()
+            .map(move |(gx, gy)| vertices[gx * side + gy])
     }
 
     /// 与 `triangulated_displaced_vertices()` **同序**的混合权重：网格顶点的
-    /// `DisplacementVertex.alpha` 归一化（源数据是 0..255 的字节量级），按同一 index 表展平。
+    /// `DisplacementVertex.alpha` 归一化（源数据是 0..255 的字节量级），按同一序列展平。
     pub fn triangulated_blend_alphas(&self) -> impl Iterator<Item = f32> + 'a {
         let alphas: Vec<f32> = self.displacement_vertices().map(|d| d.alpha / 255.0).collect();
-        let steps = 2usize.pow(self.power as u32);
-        let index = move |x: usize, y: usize| y * (steps + 1) + x;
-        (0..steps)
-            .flat_map(move |x| (0..steps).map(move |y| (x, y)))
-            .flat_map(move |(x, y)| {
-                [
-                    alphas[index(x, y)],
-                    alphas[index(x + 1, y)],
-                    alphas[index(x, y + 1)],
-                    alphas[index(x + 1, y)],
-                    alphas[index(x + 1, y + 1)],
-                    alphas[index(x, y + 1)],
-                ]
-            })
+        let side = 2usize.pow(self.power.max(0) as u32) + 1;
+        self.tessellated_grid()
+            .into_iter()
+            .map(move |(gx, gy)| alphas[gx * side + gy])
     }
 }
 

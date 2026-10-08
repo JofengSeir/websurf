@@ -143,47 +143,28 @@
   ],
   "cochange": [],
   "claim": {
-    "task": "T-448",
+    "task": "T-449",
     "may": [
-      "apps/game/src/app.ts",
-      "apps/game/src/renderer/renderer-main.ts",
-      "apps/game/src/worker/worker-types.ts",
-      "apps/viewer/Cargo.lock",
-      "apps/viewer/crates/wasm/Cargo.toml",
-      "apps/viewer/crates/wasm/src/lib.rs",
-      "apps/viewer/src/app.ts",
-      "apps/viewer/src/core/bsp.ts",
-      "apps/viewer/src/core/scene.ts",
+      "src/wasm-core/vbsp/handle/mod.rs",
       "TODO.md",
       "CHANGELOG.md",
       "progress/index.md",
       "progress/monthly/2026-10-7.md",
-      "documents/**",
       "docflow.json"
     ],
     "must": [
-      "apps/game/src/renderer/renderer-main.ts",
-      "apps/viewer/src/core/scene.ts",
-      "apps/viewer/crates/wasm/src/lib.rs",
+      "src/wasm-core/vbsp/handle/mod.rs",
       "TODO.md"
     ],
     "base": {
-      "apps/game/src/app.ts": "002e7e76db09d5b2a303fe6d72aaa2a70d48937a7742a33a57af6b471ec7beb1",
-      "apps/game/src/renderer/renderer-main.ts": "1e33b7f060d0acb475502f46c3a4d592d20b78688fd9efe5208b9abe938fc359",
-      "apps/game/src/worker/worker-types.ts": "25ced5099b0aaa82fb7de8532eb678ad6b1a191194f2626c8dc979d55effa58c",
-      "apps/viewer/Cargo.lock": "31f83c6dbea7a0de7cb79185b656ee9381d58d8d42d1908cc1d49a2da441fcde",
-      "apps/viewer/crates/wasm/Cargo.toml": "20d267890160a5610d36137f0ca8e10bc2a50f27ff02d4774905efe8510a60b4",
-      "apps/viewer/crates/wasm/src/lib.rs": "8be6a0120e6039ff3382c01a5d0192c942353491c12855d28f714a38509e98dc",
-      "apps/viewer/src/app.ts": "0e93854b23e0eb386b29127c5f4c207718a7be54718591b1030efab657b48c8a",
-      "apps/viewer/src/core/bsp.ts": "ad04e0d27cc64a4407853bbd990688792e0685635ee63e10d62e0a23ea39d688",
-      "apps/viewer/src/core/scene.ts": "095f5faf7516d0e7df751135fdabaa20293a1335de1a91db0c20ecd9723fd4e6",
-      "TODO.md": "2c5770cadd506bc893dbc91aadcf18fe4a92533d41498cfd56c0cc7ebabbfd0b",
-      "CHANGELOG.md": "d769950d40c6a28d3a3cb8b2e73e7fbe3e32c43ee643f5370e687d1fc8a128b6",
-      "progress/index.md": "56f6b2323c7e86e842f3ff38b85dcdb0de020940bc7b81fc1b6f77e441656227",
-      "progress/monthly/2026-10-7.md": "8b9368be555a068cbd421b872012ae31f1292a2af93b41e4525136390e13ed16",
-      "docflow.json": "233486c1043c77517cb6fe980309a5c2d7114534acec52044c000e3905cfe2a6"
+      "src/wasm-core/vbsp/handle/mod.rs": "f4a376308bdd3189992514374c3cfbd3cdc7572f96153615840dd5edd7d140fd",
+      "TODO.md": "69d125a62edd3538981f46728d9f977f58ee611dd403fb3022d7f23a7517fa1f",
+      "CHANGELOG.md": "26d8d8efd97691cbbeee19c8595e6c7be230301201f077d061381a937fdaa6d0",
+      "progress/index.md": "68973ed4984320ac309d5f2c1680f6173e12c71ff863a024bb7bcee17ec39b6a",
+      "progress/monthly/2026-10-7.md": "889f12176700f5f23f7b0382b8492fc1aad146daed624d13dfe78fc101818613",
+      "docflow.json": "18e9db1aa0ac745601f94c0ce87fa19dcd5a4fc6d0341ba91d03a4b540fe34c5"
     },
-    "at": "2026-10-08T16:18:17.453Z",
+    "at": "2026-10-08T18:28:51.915Z",
     "pins": {
       "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -1477,77 +1458,83 @@
         "at": "2026-10-08",
         "line": 429
       },
+      "T-449": {
+        "p": "89ab58774b304ce4fab35b05527b16e7794d821db9411dbc51b73534db7c8bd0",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-08",
+        "line": 430
+      },
       "T-446": {
         "p": "923a45565e4aae3e8a7d1ebf4596e3ed1d154119df17a25a17f162b6a429a727",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 430
+        "line": 431
       },
       "T-441": {
         "p": "bbe56cd331b48595acc3d960d91ef2287c8b8f6291a78eef3491852bd7a3950c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 431
+        "line": 432
       },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 432
+        "line": 433
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 433
+        "line": 434
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 434
+        "line": 435
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 435
+        "line": 436
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 436
+        "line": 437
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 437
+        "line": 438
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 438
+        "line": 439
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 439
+        "line": 440
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 440
+        "line": 441
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 441
+        "line": 442
       }
     },
     "OWNER.md": {
@@ -1617,89 +1604,95 @@
         "at": "2026-10-08",
         "line": 34
       },
+      "**D-019**": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-08",
+        "line": 36
+      },
       "D-014": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
-        "line": 42
-      },
-      "D-100": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
-        "line": 43
-      },
-      "D-101": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 44
       },
-      "D-102": {
+      "D-100": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 45
       },
-      "D-103": {
+      "D-101": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 46
       },
-      "D-104": {
+      "D-102": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 47
       },
-      "D-105": {
+      "D-103": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 48
       },
-      "D-106": {
+      "D-104": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 49
       },
-      "D-001": {
+      "D-105": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 50
       },
-      "D-002": {
+      "D-106": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 51
       },
-      "D-003": {
+      "D-001": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 52
       },
-      "D-004": {
+      "D-002": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 53
       },
+      "D-003": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 54
+      },
+      "D-004": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 55
+      },
       "D-015": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 54
+        "line": 56
       },
       "**D-107**": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 55
+        "line": 57
       }
     }
   },
@@ -1943,6 +1936,7 @@
       "src/phys/world.rs:449:449~2": "0ee8ea43",
       "src/ts-shared/phys/world-builder.ts:136:136": "7c44241d",
       "apps/game/src/renderer/renderer-main.ts:280:280": "19d086c0",
+      "src/wasm-core/vbsp/handle/mod.rs:601:601": "be9a451b",
       "src/ts-shared/phys/world-builder.ts:203:203": "ea663714",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
@@ -5264,6 +5258,14 @@
   },
   "rebaselines": [
     {
+      "path": "TODO.md",
+      "at": "2026-10-08T18:28:51.708Z",
+      "by": "agent",
+      "reason": "T-449 行新增：证据列指向 handle/mod.rs:601（triangulated_displaced_vertices）",
+      "changed": 1,
+      "total": 207
+    },
+    {
       "path": "documents/viewer/overview.md",
       "at": "2026-10-08T16:20:19.514Z",
       "by": "agent",
@@ -5574,14 +5576,6 @@
       "reason": "T-445：src/phys/world.rs 的 clip_box_to_triangle 从「±n 面 + 边墙当门」改为 Minkowski 精确面集（17 张面，净 +8 行）⇒ 文档里指向该文件的行号整体平移；已逐条复核新行号仍指向同一符号后重钉",
       "changed": 2,
       "total": 33
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-08T15:28:00.823Z",
-      "by": "agent",
-      "reason": "T-445：src/phys/world.rs 的 clip_box_to_triangle 从「±n 面 + 边墙当门」改为 Minkowski 精确面集（17 张面，净 +8 行）⇒ 文档里指向该文件的行号整体平移；已逐条复核新行号仍指向同一符号后重钉",
-      "changed": 3,
-      "total": 204
     }
   ]
 }

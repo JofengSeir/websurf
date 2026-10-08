@@ -191,3 +191,4 @@
 | 2026-10-08 | T-447 结案：ramp 坡没实体是导出**按纹理**丢了 playerclip brush（`skip_sky`）；引擎只按 contents 判碰撞，默认改 false | progress/monthly/2026-10-7.md:4 |
 | 2026-10-08 | T-448 结案：三工程同步——game 补 3D 天空盒/地图雾，viewer 补 wasm 构建 + `parse_pvs_data` + 天空区/雾（不引物理） | progress/monthly/2026-10-7.md:5 |
 | 2026-10-08 | 碰撞生成逻辑解读：brush 只看 contents、置换面按 MASK_SOLID、prop 按 solid；owner 点处「隐形坡」= ramp_s1 的 PLAYERCLIP 楔形（引擎同样碰撞）⇒ 登记 D-019 | progress/monthly/2026-10-7.md:6 |
+| 2026-10-08 | T-449 结案：置换面三角化改引擎扇形细分（四叉树 + `g_TesselateWinding` 8 点扇 + `allowed_vertices`），修地表与模型坡错误相交 | progress/monthly/2026-10-7.md:7 |
