@@ -16,11 +16,11 @@
     进度覆盖层 · #panel>.win ESC 控制面板（左导航 + 右设置体）。
   -->
   <link rel="stylesheet" href="./styles.css" />
-    <!-- favicon：两条声明分别指向 ./favicon.ico（页面同目录）与 /favicon.ico（dev 服务器根，
-       见 apps/game/package.json 的 dev 脚本：python ../../src/serve.py 8090 .）。注意本工程当前
-       没有 favicon.ico 文件，故这两条路径都会 404。 -->
+    <!-- favicon：`web/favicon.ico` 是唯一源（dev 下页面在 /web/index.html，相对路径 ./favicon.ico 命中；
+       打包时 build-dist 把它拷到 dist 根，dist 页面同样命中。不写 /favicon.ico——dev 下它指仓库根、
+       部署到子路径时指域名根，两处都不对）。 -->
   <link rel="icon" href="./favicon.ico" type="image/x-icon" />
-  <link rel="alternate icon" href="/favicon.ico" type="image/x-icon" />
+  <!-- 不再声明 /favicon.ico：它只在「dev 服务器根」这一种情形下命中，且与本页相对路径重复。 -->
 </head>
 <body>
 <div id="app">

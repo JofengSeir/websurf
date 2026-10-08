@@ -22,7 +22,7 @@
 ## 关键流程与不变量
 
 - **物理脚本的装载方式一致**：直接 `import { initSync, PhysWorld } from '../pkg/websurf_wasm.js'` 并 `initSync({ module: readFileSync(...) })`（`apps/game/scripts/phys-seed-smoke.mjs:30`、`:37`；本地未入库的 `phys-p2-regression.mjs` 同法）；断言在 node 侧做，不经浏览器。
-- **发行打包的两形态由一份保留名单固定**：single 5 项（`apps/game/scripts/build-dist.mjs:60`）、multi 9 项（`apps/game/scripts/build-dist.mjs:62`）；形态开关是命令行 `--multi`（`apps/game/scripts/build-dist.mjs:74`）。
+- **发行打包的两形态由一份保留名单固定**：single 6 项（`apps/game/scripts/build-dist.mjs:60`）、multi 10 项（`apps/game/scripts/build-dist.mjs:62`）；形态开关是命令行 `--multi`（`apps/game/scripts/build-dist.mjs:74`）。
 - **打包内核收敛在共享层**：`cleanDist` / `bundleIife` / `bundleEsm` / `writeEmbeddedPreamble` / `rewriteIndexToClassicScript` / `cleanStale` / `copyLicensePair` / `printTree` 全部来自 `src/scripts/lib/dist-pack.mjs`（`apps/game/scripts/build-dist.mjs:37`）；本脚本只负责输入校验与形态编排。
 - **输入缺失即抛错**：`requireInputs` 校验 pkg 的 wasm 与仓库根的默认纹理包（`apps/game/scripts/build-dist.mjs:78`、`:80`、`:83`），顶层 `main().catch` 打印错误后以退出码 1 结束（`apps/game/scripts/build-dist.mjs:236`）。
 - **multi 形态的 SW 占位符必须被替换**：构建后若仍含占位符特征串即抛错（`apps/game/scripts/build-dist.mjs:199`、`:203`），避免发出未注入清单的 Service Worker。

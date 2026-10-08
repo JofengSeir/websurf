@@ -26,9 +26,8 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（163 条）
-### 待裁决（31）
-- **T-005** apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html…　`game`
+## 未结项（162 条）
+### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
 - **T-031** game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB）　`game`
@@ -204,7 +203,7 @@
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
-| T-005 | apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html… | 缺陷 | game | 待裁决 | apps/game/web/index.html:19 | progress/pending-detail.md | — | #5 |
+| T-005 | apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html… | 缺陷 | game | 已结案 | apps/game/web/index.html:22 ⇒ 只留相对路径；`apps/game/web/favicon.ico`（168 B，blob fccb749）已恢复并加进 KEEP_SINGLE/KEEP_MULTI + 两形态拷贝；`npm run build:dist` 与 `-- --multi` ⇒ dist/favicon.ico 168 B 且 dist/index.html 引用它 | documents/game/implementation/app-entry.md | 见详情 | #5 |
 | T-007 | apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into… | 缺陷 | debug | 待修 | apps/debug/src/wasm.d.ts:86 | documents/debug/implementation/wasm-bindings.md | 判据：手写 PhysWorld 声明与 `apps/debug/pkg/websurf_wasm.d.ts` 方法集一致（缺项 0）⇒ `npm run typecheck` 通过 | #8 |
 | T-008 | apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new … | 配置·门禁 | game | 待修 | apps/game/scripts/check-wasm-api.mjs:52-70 | progress/pending-detail.md | 判据：跑 @BT@node apps/game/scripts/check-wasm-api.mjs@BT@ ⇒ exit 0，且 PHYS_API 列出的项 ≥ crates/wasm 实际导出数（不再缺 @BT@new@BT@ 等） | #9 |
 | T-013 | lightmap.rs 错误串含外部实现引用 Lightmap.cs:64 | 缺陷 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/lightmap.rs:219 | documents/wasm-core/overview.md | 判据：`git grep -n "Lightmap.cs" -- src` ⇒ 0 命中（错误串不再引用外部实现） | #28 |
