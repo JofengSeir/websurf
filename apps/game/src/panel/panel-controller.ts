@@ -21,7 +21,7 @@
  */
 
 import type { RuntimeConfig } from '../config.js';
-import { buildPhysicsParams } from '../config.js';
+import { buildPhysicsParams, LOCKED_TICK_RATE } from '../config.js';
 import type { InputBridge } from '../input/input-bridge.js';
 import type { KeyboardInput } from '../input/keyboard.js';
 import {
@@ -278,21 +278,21 @@ export class PanelController {
     // 物理滑块/复选框 → config.physics 就地写回 → InputBridge.sendConfig('physics', …)：
     // 该桥把 buildPhysicsParams 的全量 snake_case 参数同时交给主线程预测实例与权威 Worker
     // （消息 type = 'config'，section = 'physics'），并额外带上 JS 驱动层的 tickRate。
-    // lockTickRate 为 true 时 tickRate 不走滑块：写死 64、滑块与数值框都禁用，只下发一次 config。
+    // lockTickRate 为 true 时 tickRate 不走滑块：写 LOCKED_TICK_RATE、滑块与数值框都禁用，只下发一次 config。
     const tickRateEl = document.getElementById('tickRate') as HTMLInputElement | null;
     const tickRateNum = document.getElementById('tickRateNum') as HTMLInputElement | null;
     if (this.config.lockTickRate) {
       // 锁定：config 与两个控件都写 64 并禁用
-      this.config.physics.tickRate = 64;
+      this.config.physics.tickRate = LOCKED_TICK_RATE;
       if (tickRateEl) {
-        tickRateEl.value = '64';
+        tickRateEl.value = String(LOCKED_TICK_RATE);
         tickRateEl.disabled = true;
       }
       if (tickRateNum) {
-        tickRateNum.value = '64';
+        tickRateNum.value = String(LOCKED_TICK_RATE);
         tickRateNum.disabled = true;
       }
-      this.bridge.sendConfig('physics', { tickRate: 64 });
+      this.bridge.sendConfig('physics', { tickRate: LOCKED_TICK_RATE });
     } else {
       this.bindSlider('tickRate', 48, 128, 1, (v) => {
         this.config.physics.tickRate = v;
@@ -569,7 +569,7 @@ export class PanelController {
 
   private bindSlider(id: string, min: number, max: number, step: number, onInput: (v: number) => void): void {
     const el = document.getElementById(id) as HTMLInputElement | null;
-    if (!el) return;
+    if (!el) { console.warn(`[panel] 找不到滑块控件 #${id}（页面结构与面板绑定不一致）`); return; }
     const num = document.getElementById(`${id}Num`) as HTMLInputElement | null;
     // 步进以实参写回两个控件（滑块与数值框共用同一个 step）
     el.step = String(step);
@@ -594,8 +594,8 @@ export class PanelController {
 
   /** 复选框绑定：`change` 时把 `checked` 交给回调，并落盘偏好。 */
   private bindCheckbox(id: string, onChange: (v: boolean) => void): void {
-    const el = document.getElementById(id) as HTMLInputElement | null;
-    el?.addEventListener('change', () => {
+    const el = document.getElementById(id) as HTMLInputElement | null; if (!el) { console.warn(`[panel] 找不到复选框控件 #${id}（页面结构与面板绑定不一致）`); return; }
+    el.addEventListener('change', () => {
       onChange(el.checked);
       this.savePanelPrefs();
     });

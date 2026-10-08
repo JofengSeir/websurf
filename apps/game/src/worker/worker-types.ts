@@ -224,12 +224,12 @@ export interface PhysEventMessage {
   timeMs: number;
 }
 
-/** Worker → 主线程的联合类型（T-048 补齐）：12 条——`ready` / `bsp-metadata` / `scene-data` /
- *  `stats` / `error` / `player-respawn` / `phys-event` / `health-log` / `phys-frame` / `mode-ack` /
- *  `world-build-ms` / `world-parse-ms`；`WorldJsonMessage` / `InputMessage` 方向相反，已移到上一组。 */
+/** Worker → 主线程的联合类型（T-048 补齐）：11 条——`ready` / `bsp-metadata` / `stats` / `error` /
+ *  `player-respawn` / `phys-event` / `health-log` / `phys-frame` / `mode-ack` / `world-build-ms` /
+ *  `world-parse-ms`；`WorldJsonMessage` / `InputMessage` 方向相反已移上一组；`scene-data` 是主线程 `loadScene` 形参、不属本组。 */
 export type MainMessage =
   | ReadyMessage | BspMetadataMessage
-  | SceneDataMessage | StatsMessage
+  | StatsMessage
   | ErrorMessage | PlayerRespawnMessage
   | PhysEventMessage | HealthLogMessage
   | PhysFrameMessage

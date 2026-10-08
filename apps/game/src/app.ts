@@ -22,7 +22,7 @@
  * `error`、`world-build-ms`、`world-parse-ms`。
  */
 
-import { createConfig } from './config.js';
+import { createConfig, LOCKED_TICK_RATE } from './config.js';
 import type { RuntimeConfig } from './config.js';
 import { BspProcessor, decode_vtf_to_png, decompress_mtz } from '../pkg/websurf_wasm.js';
 import { InputBridge } from './input/input-bridge.js';
@@ -249,12 +249,12 @@ function bindInput(): void {
     if (!sceneReady || pointerLock.isLocked()) return;
     const target = e.target as Element | null;
     if (target && typeof target.closest === 'function' && target.closest(UI_HIT_SELECTOR)) return;
+    // `requestLock` 恒返回 `Promise<boolean>`（`src/ts-shared/input/pointer-lock.ts:63`）：
+    // 原先的 `instanceof Promise` 判门在当前签名下恒真、只是死分支，故直接走 promise（T-207）。
     const p = pointerLock.requestLock(dom.canvas!);
-    if (p instanceof Promise) {
-      p.then((ok) => {
-        if (!ok) setStatus('锁定失败，请再次点击画布（确保焦点在页面内）', 'error');
-      });
-    }
+    p.then((ok) => {
+      if (!ok) setStatus('锁定失败，请再次点击画布（确保焦点在页面内）', 'error');
+    });
   });
 
   // 存点 / 读点快捷键（用户定调 2026-08-18）：X 存点；C 按住 = 定在存点（速度 0），
@@ -637,7 +637,7 @@ function endHoldPoint(): void {
 function syncFullConfig(): void {  if (!bridge) return;
   // V8/P2：锁定模式下强制 tickRate=64（防面板/外部消息绕过）
   if (config.lockTickRate) {
-    config.physics.tickRate = 64;
+    config.physics.tickRate = LOCKED_TICK_RATE;
   }
   const sections: Array<keyof RuntimeConfig> = ['physics', 'input', 'player', 'hud'];
   for (const section of sections) {

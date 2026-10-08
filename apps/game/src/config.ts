@@ -29,7 +29,7 @@ export interface PhysicsConfig {
    *  （→ `src/ts-shared/auth/auth-loop.ts` 的 `setFixedDt`，固定步长 = 1 / max(tickRate, 1) 秒）、
    *  `apps/game/src/input/input-bridge.ts` 的 `sendConfig`（显式附加进 physics 下发参数）、
    *  面板 tickRate 控件（量程 48..128）、`apps/game/src/app.ts` 的 `syncFullConfig`
-   *  （`lockTickRate` 为真时强制写 64）。 */
+   *  （`lockTickRate` 为真时强制写 `LOCKED_TICK_RATE`）。 */
   tickRate: number;
   /** 重力加速度（HU/s²）→ Rust `gravity`。读点：`worker/main.ts` 的 `syncParamsToWasm`
    *  与 `buildPhysicsParams`；面板重力控件（量程 200..2000）。 */
@@ -158,7 +158,7 @@ export interface LightingConfig {
 }
 
 export interface RuntimeConfig {
-  /** 锁定 tick 频率：true = `physics.tickRate` 固定 64 且面板控件禁用；
+  /** 锁定 tick 频率：true = `physics.tickRate` 固定为 `LOCKED_TICK_RATE` 且面板控件禁用；
    *  false = 面板 48..128 可调。读点：`apps/game/src/panel/panel-controller.ts`
    *  （控件禁用与固定下发）、`apps/game/src/app.ts` 的 `syncFullConfig`（下发前强制写 64）。 */
   lockTickRate: boolean;
@@ -169,13 +169,13 @@ export interface RuntimeConfig {
   texture: TextureConfig;
   lighting: LightingConfig;
 }
-
+export const LOCKED_TICK_RATE = 64; // 锁定 tick 频率时的固定值（默认值 / 下发 / 面板控件三处共用；改这里即全生效，T-205）
 export const DEFAULT_CONFIG: RuntimeConfig = {
   // 默认不锁频（面板可调）；改为 true 后需 reload 生效
   lockTickRate: false,
   physics: {
     mode: 'physics',
-    tickRate: 64,
+    tickRate: LOCKED_TICK_RATE,
     gravity: 800,
     jumpSpeed: 302,
     maxSpeed: 250,

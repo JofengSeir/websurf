@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（140 条）
+## 未结项（136 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（108）
+### 待修（104）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -98,16 +98,12 @@
 - **T-167** 进度回调里的 `'map'` 分支不可达　`viewer`
 - **T-168** `MapPanel.spawnPoints` getter 零调用点　`viewer`
 - **T-202** 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示　`game`
-- **T-205** `lockTickRate` 的 64 在 `syncFullConfig`、面板构造与 `DEFAULT_CONFIG` 三处硬编码、需同步修改　`game`
 - **T-206** `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃　`game`
-- **T-207** `requestLock` 的 `p instanceof Promise` 判门在当前签名下恒真、失败提示恒挂 promise 回调　`game`
-- **T-208** `bindSlider`／`bindCheckbox` 取不到元素时静默返回，控件缺失不报错　`game`
 - **T-211** `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造　`game`
 - **T-215** 存档解析结果不是数组时静默保持空列表、不报错，表现为该地图没有存点　`game`
 - **T-216** `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长　`game`
 - **T-217** `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方）　`game`
 - **T-218** `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl`　`game`
-- **T-219** `SceneDataMessage` 是主线程 `loadScene` 形参、不是跨线程消息，却声明在「Worker → 主线程」分组　`game`
 - **T-220** `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加　`game`
 - **T-222** 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出　`game`
 - **T-223** single 产物引用了不在保留名单里的 `coi-serviceworker.js`、dist 同目录无该文件　`game`
@@ -274,10 +270,10 @@
 | T-202 | 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示 | 缺陷 | game | 待修 | apps/game/src/app.ts:317 | documents/game/implementation/app-entry.md | 判据：移除任一可选 DOM（如 @BT@#loadMapBtn@BT@）⇒ 页面/控制台出现可读提示，不静默降级 | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | — | — |
 | T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | 缺陷 | game | 待裁决 | apps/game/src/input/input-bridge.ts:65 | documents/game/implementation/input.md | — | — |
-| T-205 | `lockTickRate` 的 64 在 `syncFullConfig`、面板构造与 `DEFAULT_CONFIG` 三处硬编码、需同步修改 | 配置·门禁 | game | 待修 | apps/game/src/app.ts:640 | documents/game/implementation/config.md | 判据：@BT@git grep -n "lockTickRate" -- apps/game/src@BT@ ⇒ 64 只在一处定义、他处引用（改一处即生效） | — |
+| T-205 | `lockTickRate` 的 64 在 `syncFullConfig`、面板构造与 `DEFAULT_CONFIG` 三处硬编码、需同步修改 | 配置·门禁 | game | 已结案 | apps/game/src/config.ts:172 ⇒ `export const LOCKED_TICK_RATE = 64`（1:1 落原空行，零漂移）；`DEFAULT_CONFIG` + `apps/game/src/app.ts:640` + 面板 4 处全改引用；`git grep "= 64|tickRate: 64" -- apps/game/src` ⇒ 只剩定义处；typecheck 通过 | documents/game/implementation/config.md | 见详情 | — |
 | T-206 | `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃 | 未接线·死代码 | game | 待修 | apps/game/src/input/input-bridge.ts:30 | documents/game/implementation/input.md | 判据：`git grep -n "InputBridge.addInput" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-207 | `requestLock` 的 `p instanceof Promise` 判门在当前签名下恒真、失败提示恒挂 promise 回调 | 缺陷 | game | 待修 | apps/game/src/app.ts:253 | documents/game/implementation/input.md | 判据：@BT@requestLock@BT@ 判门与当前签名一致（不再恒真）；失败提示走正确的回调分支 | — |
-| T-208 | `bindSlider`／`bindCheckbox` 取不到元素时静默返回，控件缺失不报错 | 缺陷 | game | 待修 | apps/game/src/panel/panel-controller.ts:572 | documents/game/implementation/panel.md | 判据：@BT@bindSlider@BT@/@BT@bindCheckbox@BT@ 取不到元素时报错或告警（不静默 return） | — |
+| T-207 | `requestLock` 的 `p instanceof Promise` 判门在当前签名下恒真、失败提示恒挂 promise 回调 | 缺陷 | game | 已结案 | apps/game/src/app.ts:252 ⇒ 删掉恒真的 `instanceof Promise` 判门（`requestLock` 签名恒 `Promise<boolean>`），直接 `p.then(ok => …)`（1:1）；`git grep "instanceof Promise" -- apps/game/src` ⇒ 仅注释；typecheck 通过 | documents/game/implementation/input.md | 见详情 | — |
+| T-208 | `bindSlider`／`bindCheckbox` 取不到元素时静默返回，控件缺失不报错 | 缺陷 | game | 已结案 | apps/game/src/panel/panel-controller.ts:572/597 ⇒ 取不到控件时 `console.warn` 点名 id；DOM 桩探针（getElementById 恒 null）⇒ 告警 2 条；typecheck 通过 | documents/game/implementation/panel.md | 见详情 | — |
 | T-209 | M 键与 ESC 两条全局监听不校验 `sceneReady`，加载覆盖层显示期间同样触发 | 缺陷 | game | 已结案 | apps/game/src/panel/panel-controller.ts:265 ⇒ 两处监听均带 `this.sceneReady` 守卫（`updateVisibility` 写入、`hide()` 加载期复位）；`apps/game` typecheck 通过 | documents/game/implementation/panel.md | 见详情 | — |
 | T-211 | `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造 | 未接线·死代码 | game | 待修 | apps/game/src/renderer/renderer-main.ts:77 | documents/game/implementation/renderer.md | 判据：`git grep -n "ENABLE_PVS" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | 缺陷 | game | 待裁决 | apps/game/src/renderer/renderer-main.ts:264 | documents/game/implementation/renderer.md | — | — |
@@ -287,7 +283,7 @@
 | T-216 | `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长 | 缺陷 | game | 待修 | apps/game/src/savepoint.ts:112 | documents/game/implementation/savepoint.md | 判据：连续 `add`/`delete` ⇒ 序列化次数不随条数线性增长（合并写入或防抖） | — |
 | T-217 | `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方） | 缺陷 | game | 待修 | apps/game/crates/wasm/src/lib.rs:480 | documents/game/implementation/wasm-crate.md | 判据：@BT@BspProcessor@BT@ 上 @BT@#[wasm_bindgen]@BT@ 只出现一次且归属正确（不再悬空在注释块上方） | — |
 | T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | 缺陷 | game | 待修 | apps/game/crates/wasm/src/lib.rs:117 | documents/game/implementation/wasm-crate.md | 判据：zip 条目名非全小写时 `.vvd`/`.dx90.vtx` 仍取回正确文件（配对名按同一小写基准生成） | — |
-| T-219 | `SceneDataMessage` 是主线程 `loadScene` 形参、不是跨线程消息，却声明在「Worker → 主线程」分组 | 文档口径 | game | 待修 | apps/game/src/worker/worker-types.ts:110 | documents/game/implementation/worker.md | 判据：文档中 @BT@SceneDataMessage@BT@ 归到「主线程 loadScene 形参」处，不再列在「Worker → 主线程」分组 | — |
+| T-219 | `SceneDataMessage` 是主线程 `loadScene` 形参、不是跨线程消息，却声明在「Worker → 主线程」分组 | 文档口径 | game | 已结案 | apps/game/src/worker/worker-types.ts:233 ⇒ `SceneDataMessage` 移出 `MainMessage`（联合注释改「11 条」并说明它是主线程 `loadScene` 形参）；typecheck 通过 | documents/game/implementation/worker.md | 见详情 | — |
 | T-220 | `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加 | 缺陷 | game | 待修 | apps/game/src/worker/main.ts:513 | documents/game/implementation/worker.md | 判据：`world-parse-ms` 诊断不再重复解析（复用 `build_world` 的解析结果或降级移除该诊断） | — |
 | T-222 | 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出 | 配置·门禁 | game | 待修 | 见详情 | documents/game/implementation/scripts.md | 判据：13 个脚本补 @BT@process.exitCode@BT@ 后逐个跑失败路径 ⇒ exit ≠ 0（结论能被 CI 带出） | — |
 | T-223 | single 产物引用了不在保留名单里的 `coi-serviceworker.js`、dist 同目录无该文件 | 配置·门禁 | game | 待修 | apps/game/scripts/build-dist.mjs:60 | documents/game/implementation/scripts.md | 判据：构建 single 产物后 @BT@ls apps/game/dist/coi-serviceworker.js@BT@ 存在，或产物中不再引用它 | — |
