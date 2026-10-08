@@ -206,3 +206,4 @@
 | 2026-10-09 | T-048 结案：game Worker 消息联合按实际收发面补齐（13+12 条 + 8 个新接口，EOF 追加保锚点）；覆盖探针未覆盖 0 | progress/monthly/2026-10-7.md:18 |
 | 2026-10-09 | T-007/T-309 结案：debug 手写 .d.ts 文末声明合并补齐（33/26 逐名一致，缺 0）+ 删掉两处运行时收窄 | progress/monthly/2026-10-7.md:19 |
 | 2026-10-09 | T-153 结案：viewer lib 加 WebWorker、删手写 WorkerCtx（ctx = self）；typecheck + build:worker 通过 | progress/monthly/2026-10-7.md:20 |
+| 2026-10-09 | T-142 结案：viewer 信息条改收已解析的 Track\|null（跟随轨道只在 TrackSet.follow 一处解析）+ 同族 prerun 文案 | progress/monthly/2026-10-7.md:21 |

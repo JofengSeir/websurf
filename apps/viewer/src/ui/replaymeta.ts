@@ -18,11 +18,11 @@ export class ReplayMetaPanel {
 
   /**
    * 轨道增删 / 跟随切换后调用（`apps/viewer/src/app.ts` 的 `syncTracks`）。
-   * 展示跟随轨道（`followId` 未命中时回退第一条）的头部元信息；无轨道或无 `meta` 时
-   * 清空内容并加 `hidden` 类。
+   * 入参是**已解析好的**跟随轨道（`TrackSet.follow` 单点解析：`followId` 命中即它、否则第一条、
+   * 无轨道为 null）；本面板不再自己重查一遍。无轨道或无 `meta` 时清空内容并加 `hidden` 类。
    */
-  setTracks(tracks: readonly Track[], followId: string | null): void {
-    const follow = tracks.find((t) => t.id === followId) ?? tracks[0] ?? null;
+  setTracks(follow: Track | null): void {
+    // 跟随轨道的解析只在 `TrackSet.follow` 一处（避免两处口径漂移）。
     const meta = follow?.clip.meta ?? null;
     if (!follow || !meta) {
       this.root.classList.add('hidden');
@@ -87,7 +87,7 @@ export class ReplayMetaPanel {
       // stage>0 属跑段细节：只进悬停 title，不占条面
       gokz
         ? `tick 数（主时钟 0 = 首帧，即起点区触碰）；文件不含 tickrate，按 ${meta.tickrate.toFixed(2)} 估算（见导入警告）`
-        : `起跑前 + 正式跑 + 结束后（帧数，合计 ${meta.totalFrames}）；主时钟 0 = 起跑帧，prerun 不在播放区间` +
+        : `起跑前 + 正式跑 + 结束后（帧数，合计 ${meta.totalFrames}）；主时钟 0 = 起跑帧，prerun 帧计入区间（读数可为负）` +
           (meta.stage > 0 ? `；stage 跑段 ${meta.stage}` : ''),
     );
     if (meta.timestamp !== null) {

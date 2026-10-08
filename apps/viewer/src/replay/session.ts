@@ -136,7 +136,7 @@ export class ReplaySession {
       this.visuals.setActive(true, this.player.sampleAll(), this.player.mode, this.player.tracks.followId);
     }
     this.timeline.setReady(this.ready);
-    this.meta?.setTracks(tracks, this.player.tracks.followId);
+    this.meta?.setTracks(this.player.tracks.follow);
   }
 
   /** 本会话的全部轨道（只读视图，供外部内省）。 */
