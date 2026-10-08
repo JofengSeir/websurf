@@ -1339,7 +1339,7 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.vbspExposure = exposureUniform;
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
-		shader.uniforms.vbspBakedMix = bakedMixUniform;
+		shader.uniforms.vbspBakedMix = bakedMixUniform; shader.uniforms.vbspLightFloor = lightFloorUniform;
 		// 声明必须来自共享常量（守卫断言"注入单元自洽"）
 		const decls = VBSP_LIGHTMAP_UNIFORM_DECLS.join('\n');
 		// ⚠️ 这个数组进的是 **fragment** shader ⇒ **不能出现 `attribute`**
@@ -1352,7 +1352,7 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 			// 纯纹理模式：逐顶点烘焙项恒 1.0（= 贴图原色），与 world 路径同一开关语义
 			'	if (vbspBakedMix < 0.5) { return vec3(1.0); }',
 			'	float g = max(vbspLightGamma, 0.001);',
-			'	return pow(max(vbspVLight, vec3(0.0)), vec3(2.2 / g)) * vbspExposure;',
+			'	return pow(max(vbspVLight, vec3(vbspLightFloor)), vec3(2.2 / g)) * vbspExposure;',
 			'}',
 		].join('\n');
 		const vs = shader.vertexShader;

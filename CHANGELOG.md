@@ -29,6 +29,8 @@
 
 **水体材质**：`Water` 着色器可以没有 `$basetexture`（只用 `$refracttexture`），此前该分支按「无基色」早退成**不透明纯白**；现按上游口径给半透明水色 `[82,180,217,128]`（`src/wasm-core/bsp_to_gltf_core/materials.rs:475`），含水面地图（如 `surf_boreas` 的 320 世界图元）不再画成白块。
 
+**逐顶点道具的光照下限接上**：`vbspLightFloor` 此前只接进 world 路径与 level 2（ambient cube）路径，level 1（`applyVertexLightingShader`）从未设置该 uniform ⇒ 「光照下限」旋钮对**逐顶点着色的道具静默无效**。现补上并用于 `max(vlight, floor)`；`floor` 默认 0 时与改前等价（`max(v,0)`），调大后逐顶点道具不再纯黑——与 T-438 未覆盖的 28.5% 暗顶点互补。
+
 **退化 `.vhv` 的兜底（道具逐顶点光照）**：`.vhv` 只烘 direct+bounce，背光顶点精确为 0；实测 `surf_boreas` 全部道具顶点里 **43.7%** 三通道全 0，而 level 1 是纯乘法（`vbspVertexLightTerm`）且**不叠** leaf ambient cube ⇒ 这些顶点必然是纯黑。现按"暗顶点占比 ≥ `VLIGHT_DARK_FRACTION_MAX`（0.5）"判定该份烘焙无法表达表面，退回 leaf ambient cube（平坦但不再是纯黑）。效果：带 `_VBSP_VLIGHT` 的图元 397→220，全黑顶点 43.7%→28.5%。
 
 **道具逐顶点光照的顶点错位**：`.vhv` 是**一个 strip group 一块**、块内按该 strip group 的顶点数组局部序（SDK `utils/vrad/vradstaticprops.cpp` 取 `mesh->vertexoffset + pVertex(nVertex)->origMeshVertID`），而 GLB 顶点数组按 `origMeshVertID` 排。我们此前按"拼接序 = 模型顶点序"使用，逐顶点光照落到错误顶点上（表现为石头一块亮一块黑、像拼接）。现新增 `vmdl::Model::remap_strip_group_colors` 按 SDK 口径重排后再挂 `_VBSP_VLIGHT`，长度/几何对不上则退回 leaf ambient cube。

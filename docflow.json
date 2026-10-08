@@ -143,25 +143,23 @@
   ],
   "cochange": [],
   "claim": {
-    "task": "T-438",
+    "task": "T-439",
     "may": [
-      "src/wasm-core/model_integrator/mod.rs",
-      "TODO.md",
+      "src/renderer-shared/shader/lightmap-shader.ts",
       "CHANGELOG.md",
       "progress/monthly/2026-10-6.md",
       "progress/index.md"
     ],
     "must": [
-      "src/wasm-core/model_integrator/mod.rs"
+      "src/renderer-shared/shader/lightmap-shader.ts"
     ],
     "base": {
-      "src/wasm-core/model_integrator/mod.rs": "b42634b08b592160fe5d7586d4c0e9bf4ac6af7f96b1586a18e1ebcd609e96e4",
-      "TODO.md": "6018b52c648286b47ca0d5e70aff357e740e74eb9480c71f6aede07db40d25a7",
-      "CHANGELOG.md": "2e05c6b355ee50cf2eb8501e9dd6c250affb2ca4988c8f83041eb458231d1a00",
-      "progress/monthly/2026-10-6.md": "81f732d152c80d448570d2d2b61b04092ece6dd98e7eb6cc4a609de79628c430",
-      "progress/index.md": "e5135444f80fe1fc38d95fc4bc40ce435324cfe08762592f86ef475a3490c4b3"
+      "src/renderer-shared/shader/lightmap-shader.ts": "a22eee567213ff6046bf4049e4134f0c78991c75a269c1759e76a923199d21e8",
+      "CHANGELOG.md": "c894022779c8754cd93c72dab4169600a723567a0136e491329bccb5c0bfef5a",
+      "progress/monthly/2026-10-6.md": "f602d03ab508be572bc6496f05624d2aea3b69e6d7a9874ea8eeba59c75ef549",
+      "progress/index.md": "90b05b104b7e634ca5888d783d3015fa8709a11d4f05e1936a955d358f44dc40"
     },
-    "at": "2026-10-08T12:42:48.788Z",
+    "at": "2026-10-08T12:46:34.939Z",
     "pins": {
       "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -1407,65 +1405,71 @@
         "at": "2026-10-08",
         "line": 418
       },
+      "T-439": {
+        "p": "5f1eddd3e8dd0d82f923057d86322d6165e2e2bbeeae06c1048488162c16e214",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-08",
+        "line": 419
+      },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 419
+        "line": 420
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 420
+        "line": 421
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 421
+        "line": 422
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 422
+        "line": 423
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 423
+        "line": 424
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 424
+        "line": 425
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 425
+        "line": 426
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 426
+        "line": 427
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 427
+        "line": 428
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 428
+        "line": 429
       }
     },
     "OWNER.md": {
@@ -1848,6 +1852,7 @@
       "src/wasm-core/bsp_to_gltf_core/materials.rs:529:529": "3eb4aa8f",
       "src/wasm-core/vhv.rs:44:44": "df6a211a",
       "src/wasm-core/model_integrator/mod.rs:225:225": "e12a76c7",
+      "src/renderer-shared/shader/lightmap-shader.ts:1342:1342": "b1e930ca",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -5169,6 +5174,14 @@
   "rebaselines": [
     {
       "path": "TODO.md",
+      "at": "2026-10-08T12:47:25.845Z",
+      "by": "agent",
+      "reason": "T-439 登记并精简超长判据",
+      "changed": 1,
+      "total": 199
+    },
+    {
+      "path": "TODO.md",
       "at": "2026-10-08T12:42:49.337Z",
       "by": "agent",
       "reason": "T-438 登记：证据锚点 model_integrator/mod.rs:225（暗占比阈值过滤）",
@@ -5476,14 +5489,6 @@
       "at": "2026-10-08T02:02:10.689Z",
       "by": "agent",
       "reason": "T-426 结案",
-      "changed": 2,
-      "total": 187
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-08T01:38:24.956Z",
-      "by": "agent",
-      "reason": "T-429 登记",
       "changed": 2,
       "total": 187
     }
