@@ -1,15 +1,14 @@
 /**
- * 微缩外景（Source「3D 天空盒 / 微缩景观」在本仓的替代实现）。
+ * 3D 天空盒（起源「微缩景观」）：地图自带的天空区图元 + 一台随玩家 1/scale 移动的**第二相机**。
  *
- * 起源引擎的 3D 天空盒是**地图作者**在 `sky_camera` 附近按 `scale` 缩放的密封区域，
- * 引擎用一台「随玩家 1/scale 移动」的相机把它画在主视图之前，于是成为玩家到不了的外景。
- * 本仓实测（`.tmp/mapsurvey/mini-recon.mjs`）表明手上的夹具**没有**可分离的该区域：
- * `surf_boreas` 的 `sky_camera` 在世界包围盒外 1281 HU、3000 HU 内 0 网格；
- * `surf_concretejungle_fix` 的相机落在play区域里（2000 HU 内占 26%，分布平滑）。
- * 因此这里改为**合成**一圈低多边形山脊，放在可达范围之外，充当「地图到达不了的地方的外景」。
+ * 起源的做法（`viewrender.cpp` 的 `CSkyboxView::DrawInternal`）：把天空相机放到
+ * `sky_camera 原点 + 主相机位置 / scale`，用**未缩放**的地图几何画一遍天空区，之后清深度、
+ * 主相机再画主世界。本模块给出这条链路的三个部件：
+ * - `skyCameraFromEntities`：从实体 JSON 取 `sky_camera` 的 origin/scale；
+ * - `extractSkyArea`：把天空区图元摘进「天空层」（主相机看不到，判据由调用方给）；
+ * - `createSkyCamera` / `syncSkyCamera`：第二相机及其每帧位姿。
  *
- * 画法：每层是一条锯齿「幕帘」（顶部随机起伏、底部低于地平），三层由近及远、颜色逐层
- * 向雾色靠拢（大气透视），材质 `fog: false` 以免远处被地图雾整片吃掉——透视已烘进颜色。
+ * 没有 `sky_camera`、或天空区不可分离时，调用方回退 `buildMiniatureSky` 的合成山脊。
  */
 import * as THREE from 'three';
 
@@ -118,76 +117,72 @@ export function skyCameraFromEntities(entitiesJson: string): SkyCameraParams | n
 	}
 	return null;
 }
+/** 天空层：3D 天空盒图元只挂这一层——主相机看不到它，天空相机只看它。 */
+export const SKY_LAYER = 1;
+
+/** 建天空相机：投影每帧由 `syncSkyCamera` 从主相机抄，这里只定层与名字。 */
+export function createSkyCamera(): THREE.PerspectiveCamera {
+	const cam = new THREE.PerspectiveCamera();
+	cam.name = 'SkyCamera';
+	cam.layers.set(SKY_LAYER);
+	return cam;
+}
+
 /**
- * 用地图自带的微缩区构建外景（起源 3D 天空盒的静态等价实现）。
+ * 每帧同步天空相机（起源 `CSkyboxView::DrawInternal` 的位姿算法）。
  *
- * 选取：以 `sky_camera` 为中心半径 `seedRadius`（= 场景半径 / scale）内的 mesh 为**种子**，再按
- * 包围盒间距 `<= gap` 向相邻 mesh 扩张 —— 微缩区是一整块自相连的几何，而它与地图本体之间隔着
- * 空腔。**不能只用半径**：`surf_boreas` 实测按半径只取到 102/361 个图元，前面/左边的山整块丢失。
+ * 位置 = `sky_camera 原点 + 主相机位置 / scale`：对应 `viewrender.cpp` 里
+ * `VectorScale(origin, 1/scale)` 后 `VectorAdd(origin, sky3dparams.origin)`，与
+ * `env_headcrabcanister_shared.cpp` 的 `vecSkyboxOrigin + pos/scale` 同式；朝向与投影抄主相机。
  *
- * 变换：绕 `sky_camera` 缩放 `scale` 倍（锚点 = 相机本身，`position = CAM*(1-scale)`）——与起源把
- * 天空相机放到 `CAM + (player-CAM)/scale` 再渲染微缩几何等价（方向夹角实测 0.00°）。
+ * 实测（`.tmp/mapsurvey/skyfrontface.mjs`，surf_boreas 的 163 个出生点）：本式让
+ * **359.8/361** 个天空图元的正面朝向相机；换成绕相机缩放的相对式 `CAM + (P-CAM)/scale`
+ * 只剩 235.6/361，且 163/163 个出生点都是本式更优。
  */
-export function buildMiniatureOutside(
-	mapRoot: THREE.Object3D,
-	cam: SkyCameraParams,
-	seedRadius: number,
-	gap = 256,
-): THREE.Group | null {
-	const origin = new THREE.Vector3(cam.origin[0], cam.origin[1], cam.origin[2]);
+export function syncSkyCamera(sky: THREE.PerspectiveCamera, main: THREE.PerspectiveCamera, params: SkyCameraParams): void {
+	sky.fov = main.fov;
+	sky.aspect = main.aspect;
+	sky.near = main.near;
+	sky.far = main.far;
+	sky.zoom = main.zoom;
+	sky.updateProjectionMatrix();
+	const s = params.scale;
+	sky.position.set(
+		params.origin[0] + main.position.x / s,
+		params.origin[1] + main.position.y / s,
+		params.origin[2] + main.position.z / s,
+	);
+	sky.quaternion.copy(main.quaternion);
+	sky.updateMatrixWorld(true);
+}
+
+/**
+ * 把天空区图元摘进天空层（起源 3D 天空盒的几何侧）：起源的天空区图元**不参与主视图**，
+ * 由天空相机单独渲染。
+ *
+ * 判据 `isSkyMesh` 由调用方给出（本模块不认识 BSP/PVS）；摘出的 mesh 用 `attach` 保持世界
+ * 变换，只改 `layers`：主相机看不到（`main.layers.disable(SKY_LAYER)`）、天空相机只看它。
+ * 一个都没命中时返回 null（调用方回退 `buildMiniatureSky`）。
+ *
+ * 调用方（`apps/debug` 的 `RendererMain.loadScene`）用的判据是「图元采样点落在 `sky_camera`
+ * 所在 BSP cluster」——实测它与本模块上一版的「种子 + 包围盒簇扩张」选出**同一批** 361 个图元
+ * （`.tmp/mapsurvey/skysel.mjs`：两条独立判据互证）。
+ */
+export function extractSkyArea(mapRoot: THREE.Object3D, isSkyMesh: (mesh: THREE.Mesh) => boolean): THREE.Group | null {
 	mapRoot.updateMatrixWorld(true);
-	const meshes: THREE.Mesh[] = [];
+	const picked: THREE.Mesh[] = [];
 	mapRoot.traverse((o) => {
 		const m = o as THREE.Mesh;
-		if (m.isMesh && m.geometry) meshes.push(m);
+		if (m.isMesh && m.geometry && isSkyMesh(m)) picked.push(m);
 	});
-	const boxes = meshes.map((m) => {
-		if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
-		const bb = (m.geometry.boundingBox as THREE.Box3).clone().applyMatrix4(m.matrixWorld);
-		return bb;
-	});
-	const picked = new Set<number>();
-	for (let i = 0; i < meshes.length; i++) {
-		if (boxes[i].getCenter(new THREE.Vector3()).distanceTo(origin) <= seedRadius) picked.add(i);
-	}
-	if (picked.size === 0) return null;
-	// 扩张：包围盒间距 <= gap 视为同一块（种子已保证落在微缩区内）
-	// 两个包围盒之间的最短距离（逐轴取正向间隔，再取欧氏范数）
-	const boxGap = (a: THREE.Box3, b: THREE.Box3): number => {
-		let sum = 0;
-		for (const axis of ['x', 'y', 'z'] as const) {
-			const d = Math.max(0, a.min[axis] - b.max[axis], b.min[axis] - a.max[axis]);
-			sum += d * d;
-		}
-		return Math.sqrt(sum);
-	};
-	for (let changed = true; changed; ) {
-		changed = false;
-		for (let i = 0; i < meshes.length; i++) {
-			if (picked.has(i)) continue;
-			for (const j of picked) {
-				if (boxGap(boxes[i], boxes[j]) <= gap) {
-					picked.add(i);
-					changed = true;
-					break;
-				}
-			}
-		}
-	}
+	if (picked.length === 0) return null;
 	const group = new THREE.Group();
 	group.name = 'MiniatureSky';
 	group.userData.isMiniatureSky = true;
-	for (const i of picked) {
-		const src = meshes[i];
-		// 复用源材质：材质上已挂着 lightmap / ambient cube 注入，克隆会丢注入。
-		const mesh = new THREE.Mesh(src.geometry, src.material);
-		mesh.userData = src.userData;
-		mesh.renderOrder = -1;
-		mesh.frustumCulled = false;
-		group.add(mesh);
+	group.updateMatrixWorld(true);
+	for (const mesh of picked) {
+		group.attach(mesh);
+		mesh.layers.set(SKY_LAYER);
 	}
-	const s = cam.scale;
-	group.scale.setScalar(s);
-	group.position.set(origin.x * (1 - s), origin.y * (1 - s), origin.z * (1 - s));
 	return group;
 }

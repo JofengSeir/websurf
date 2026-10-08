@@ -37,13 +37,13 @@
 
 一个渲染帧由两条 rAF 循环加一条 Worker 定时循环组成，三者的注册顺序在主线程是**渲染先、输入后**（`RendererMain.start` 在 `startInputLoop` 之前调用：`apps/debug/src/app.ts:347` 早于 `apps/debug/src/app.ts:367`）。
 
-**A. 渲染主循环**（`apps/debug/src/renderer/renderer-main.ts:615` 的 `tick`，内部顺序固定）：
+**A. 渲染主循环**（`apps/debug/src/renderer/renderer-main.ts:671` 的 `tick`，内部顺序固定）：
 
-1. 登记下一帧（`apps/debug/src/renderer/renderer-main.ts:617`）。
-2. ① 物理段，仅当 `predReady` 且单步闸门有余量时执行（`apps/debug/src/renderer/renderer-main.ts:625`）：
-   - 取本帧步长：回放模式取一次性 `replayDtS`，否则取墙钟间隔（首帧取 1/64，上限 0.1 秒），取走即置空（`apps/debug/src/renderer/renderer-main.ts:629`、`apps/debug/src/renderer/renderer-main.ts:633`）；
-   - 本帧输入写共享内存输入槽（`apps/debug/src/renderer/renderer-main.ts:636`）；
-   - 非回放模式下做权威帧校准与权威速度外推（`apps/debug/src/renderer/renderer-main.ts:638`、`apps/debug/src/renderer/renderer-main.ts:640`）；
+1. 登记下一帧（`apps/debug/src/renderer/renderer-main.ts:673`）。
+2. ① 物理段，仅当 `predReady` 且单步闸门有余量时执行（`apps/debug/src/renderer/renderer-main.ts:681`）：
+   - 取本帧步长：回放模式取一次性 `replayDtS`，否则取墙钟间隔（首帧取 1/64，上限 0.1 秒），取走即置空（`apps/debug/src/renderer/renderer-main.ts:685`、`apps/debug/src/renderer/renderer-main.ts:689`）；
+   - 本帧输入写共享内存输入槽（`apps/debug/src/renderer/renderer-main.ts:692`）；
+   - 非回放模式下做权威帧校准与权威速度外推（`apps/debug/src/renderer/renderer-main.ts:694`、`apps/debug/src/renderer/renderer-main.ts:696`）；
    - 路径记录 tick 线：只在权威版本号 `va` 变化时落点，时间戳取发布时钟 τ（`apps/debug/src/renderer/renderer-main.ts:651` 起）；
    - 推进渲染物理 `predPhys.tick(dt, keys, dx, dy)`，随后清零鼠标增量（`apps/debug/src/renderer/renderer-main.ts:662`、`apps/debug/src/renderer/renderer-main.ts:663`）；
    - 消费 Rust 侧 `take_event`（`apps/debug/src/renderer/renderer-main.ts:666` → `apps/debug/src/renderer/renderer-main.ts:1262`）；

@@ -43,9 +43,9 @@
 
 **天空盒拼接**：六面槽位映射此前按错误的轴约定书写（`up` 落在 +X、四个侧面互串），且极面未按 GL 立方体贴图约定做面内旋转；现按 `map_coords` 的真实轴约定改为 `ft→pz / bk→nz / lf→px / rt→nx / up→py / dn→ny`，并把 `up`/`dn` 各转 90°（相邻边连续性实测确认）。
 
-**微缩外景（Source 3D 天空盒的替代实现）**：夹具里没有可分离的地图自带微缩区，故在可达范围之外合成三层低多边形山脊作「到不了的外景」（`src/renderer-shared/environment/miniature-sky.ts`，逐层向雾色混合出大气透视，材质不吃地图雾以免被整片吃掉）；debug 已接线并随换图释放。
+**微缩外景（无 `sky_camera` 时的兜底）**：地图没有 `sky_camera`、或天空区与可玩区不可分离时，回退到合成三层低多边形山脊作「到不了的外景」（`src/renderer-shared/environment/miniature-sky.ts`，逐层向雾色混合出大气透视，材质不吃地图雾以免被整片吃掉）；debug 已接线并随换图释放。
 
-**3D 天空盒（地图自带微缩景观）**：按起源引擎的正统做法接入 —— 取 `sky_camera` 半径（`场景半径 / scale`）内的微缩 mesh，复制后**绕 `sky_camera` 缩放 `scale` 倍**（平移量 `CAM*(1-scale)`，等价于引擎把天空相机放到 `CAM + (player-CAM)/scale` 再渲染微缩几何；两者方向夹角实测 0.00°），副本以 `renderOrder = -1` 当天空层；于是玩家在自己的出生点就能看到地图自带的那片远山/雪脊（`surf_boreas` 的微缩区在 `(-3475,-11710,-3158)`，锚点=相机而不是世界原点，后者会偏 21.6°~77.1°）。没有 `sky_camera` 的图仍回退到合成的山脊。
+**3D 天空盒（第二相机两遍法，起源正统做法）**：`sky_camera` 驱动的**第二台相机**位姿 = `sky_camera 原点 + 主相机位置 / scale`（`viewrender.cpp` 的 `CSkyboxView::DrawInternal`），地图自带的天空区图元摘进独立层、由它单独渲染；顺序是「2D 天空盒背景 + 天空区 → 清深度 → 主世界」，主世界那一遍不再画背景（否则 three 的背景 pass 会盖掉天空遍）。天空区的判据是「图元采样点落在 `sky_camera` 所在 BSP cluster」，实测与旧的「种子 + 包围盒簇扩张」是同一批 361 个图元（`surf_boreas` 的天空区 = 1103 leaf / 1231 面）；相机公式由正面朝向实测钉住：引擎式 **359.8/361** 对相对式 235.6/361、**163/163** 个出生点都是引擎式更优。此前「绕 `sky_camera` 缩放」的静态近似**已删除**——它的引擎相机公式写错了（`CAM+(P-CAM)/scale`），且必须靠 `renderOrder`/关深度来伪装层序。没有 `sky_camera` 的图仍回退到合成的山脊。
 
 **双贴图地形混合（`WorldVertexTransition` 岩雪混合）**：起源引擎把「岩石 / 雪」这类地形混合写成 VMT 的 `$basetexture2`，并按逐顶点 alpha 混合；此前本仓**全链路都没有处理第二贴图**，故 `surf_boreas` 的雪永远不出现（混合地形只画岩石那一半）。现按通用做法接通三步 —— ① 导出侧把位移顶点的 `alpha/255` 写成几何属性 `_VBSP_BLEND`（非位移面恒 0，所有面都写以保证属性集一致）；② 按 VMT 文本取 `$basetexture2`（不依赖 `vmt_parser` 的着色器枚举，任何 VMT 都能取到）并作为 glTF 第二贴图，下标写进材质 extras `vbsp_basetexture2`；③ 渲染端 `src/renderer-shared/shader/world-transition.ts` 在装配收尾后链式注入 `mix(第一贴图, 第二贴图, 权重)`（不覆盖 lightmap 注入），三个工程共用同一套。开关 `window.__vbspWorldTransitionOff = true` 可做 A/B 对照。
 
