@@ -12,7 +12,9 @@
  * 第三层（2026-10-09 起）：`BspMetadata`（Rust serde 键名）↔ `BspMeta`（TS 接口键名）逐键对齐
  * （`assertStructFieldsMatchInterface`）——两侧都不把对方纳入编译期校验，字段改名即失败。
  *
- * 用法：node scripts/check-wasm-api.mjs
+ * 用法：node scripts/check-wasm-api.mjs [--source-only]
+ *   `--source-only` 只跑第三层（Rust serde 键名 ↔ TS 接口键名）：该层只读源码、不碰 `pkg/`，
+ *   故可进 CI 的轻量 job（`OWNER.md` D-022 选项 (a)）；不带参数时三层全跑，需先 `build:wasm`。
  * 退出码：0 = 通过，1 = 不匹配
  */
 import { dirname, join } from 'node:path';
@@ -33,6 +35,24 @@ const DTS = join(ROOT, 'pkg', `${PKG_BASE}.d.ts`);
 // viewer 消费面：BSP 解析类 + wasm 同步初始化 + MTZ 解压（2026-10-04 起缺失纹理回退链路）
 const VIEWER_API = ['initSync', 'decompress_mtz'];
 
+// 第三层先算（只读源码）：`--source-only` 在读 `pkg/` 之前就返回，故该模式不要求 build:wasm
+const metaFields = assertStructFieldsMatchInterface({
+  rustPath: join(ROOT, 'crates', 'wasm', 'src', 'lib.rs'),
+  structName: 'BspMetadata',
+  tsPath: join(ROOT, 'src', 'core', 'bsp.ts'),
+  interfaceName: 'BspMeta',
+});
+if (process.argv.includes('--source-only')) {
+  if (metaFields.ok) {
+    console.log('✓ 源码级契约通过：BspMetadata ↔ BspMeta 键名逐一对齐（--source-only，未读 pkg/）。');
+    process.exit(0);
+  }
+  if (metaFields.message) console.error(`✗ ${metaFields.message}`);
+  for (const m of metaFields.missingInTs) console.error(`✗ Rust 有而 TS 缺的键：${m}`);
+  for (const m of metaFields.missingInRust) console.error(`✗ TS 有而 Rust 缺的键：${m}`);
+  process.exit(1);
+}
+
 const read = readDtsApiNames({ dtsPath: DTS });
 if (!read.ok) {
   console.error(read.message);
@@ -45,15 +65,6 @@ const coverage = assertTsImportsCoveredByExports({
   pkgBasename: PKG_BASE,
   exports: extractExportsFromDts(DTS),
 });
-// 第三层：BspMetadata（Rust serde 键名）↔ BspMeta（TS 接口键名）——两侧都不把对方纳入编译期
-// 校验，字段改名时 TS 只会静默拿到 undefined，故这条断言是唯一的对齐门。
-const metaFields = assertStructFieldsMatchInterface({
-  rustPath: join(ROOT, 'crates', 'wasm', 'src', 'lib.rs'),
-  structName: 'BspMetadata',
-  tsPath: join(ROOT, 'src', 'core', 'bsp.ts'),
-  interfaceName: 'BspMeta',
-});
-
 if (assertion.ok && coverage.ok && metaFields.ok) {
   console.log(`✓ WASM 契约通过：BspProcessor 类 + ${VIEWER_API.length} 个 API 全部导出。`);
   console.log(`  TS 导入符号 (${coverage.imports.length}): ${coverage.imports.join(', ')}`);

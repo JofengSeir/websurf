@@ -5,6 +5,8 @@
 #
 # 门禁清单（与各工程 package.json 的 test:* 对齐）：
 #   rust-unit-tests — `cargo test -p websurf-phys`（共享层物理单测；含蹲姿/surf 回归、P2 幻影门）
+#   source-contract — `apps/viewer` 的 `check-wasm-api.mjs --source-only`（Rust serde 键名 ↔ TS 接口键名；
+#                     只读源码、不装 wasm 工具链、不建 pkg ⇒ 最便宜的一道，D-022 选项 (a)）
 #   debug           — test:optimize-scene / test:auth-clock / test:path-acceptance / test:jump-apex /
 #                     test:surf-crouch（五道都在 apps/debug 内跑：optimize-scene 会把
 #                     `src/renderer/renderer-main.ts` 及其 `../pkg/websurf_wasm.js` 打成 Node bundle，
@@ -48,6 +50,24 @@ jobs:
 
       - name: cargo test -p websurf-phys
         run: cargo test -p websurf-phys
+
+  # ── 源码级契约（不装 wasm 工具链、不建 pkg；D-022 选项 (a)）────────────────
+  source-contract:
+    name: source-level wasm contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: viewer Rust serde ↔ TS interface keys
+        working-directory: apps/viewer
+        run: node scripts/check-wasm-api.mjs --source-only
 
   # ── debug 门禁（五道都在 apps/debug 内跑，先建本工程 pkg）─────────────────
   debug-gates:

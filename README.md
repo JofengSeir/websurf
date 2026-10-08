@@ -84,7 +84,7 @@ node src/scripts/check-doc-drift.mjs             # 文档漂移体检
 CI 三个 workflow（`.github/workflows/`）：
 
 - **`doc-drift.yml`**：跑 `check-doc-drift.mjs`，查行数声明、`文件:行号` 锚点越界、路径失效、裸文件名歧义。能力边界：**只查越界，不查该行内容与描述是否相符**。
-- **`ci-gates.yml`**（`.github/workflows/ci-gates.yml:36`）：四个 job —— `rust-unit-tests`（`cargo test -p websurf-phys`）、`debug-gates`（五道）、`game-gates`（三道）、`viewer-gates`（`test:replay`）。纯文档改动（`**.md`、`documents/**`）不触发门禁。
+- **`ci-gates.yml`**（`.github/workflows/ci-gates.yml:38`）：五个 job —— `rust-unit-tests`（`cargo test -p websurf-phys`）、`source-contract`（`apps/viewer/scripts/check-wasm-api.mjs --source-only`：Rust serde 键名 ↔ TS 接口键名，只读源码、不装 wasm 工具链；`OWNER.md` D-022 选项 (a)）、`debug-gates`（五道）、`game-gates`（三道）、`viewer-gates`（`test:replay`）。纯文档改动（`**.md`、`documents/**`）不触发门禁。
 - **`deploy-pages.yml`**：matrix 并行构建三工程的 `build:dist -- --multi`，装到 `deploy/<app>/`，用入口页模板生成站点首页。组装时给入口页烙印部署 id 并生成 `version.json`——入口页每次部署对每个浏览器弹一次部署提示，旧缓存页据此自检过期并自动刷新。**与门禁互不阻塞**。
 
 ## 6. 依赖方向与共享层

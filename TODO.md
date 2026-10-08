@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（113 条）
+## 未结项（112 条）
 ### 待裁决（0）
 
 
-### 待修（111）
+### 待修（110）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -141,7 +141,6 @@
 - **T-203** 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈　`game`
 - **T-204** `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指）　`game`
 - **T-212** `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图　`game`
-- **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
 ### 已取证待立项（2）
@@ -225,7 +224,7 @@
 | T-147 | 材质去重键是材质名，同名材质被后续模型复用 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:216 | documents/viewer/implementation/wasm.md | 判据：同名材质来自不同模型 ⇒ 各自独立实例（去重键含 search_path/模型作用域） | — |
 | T-148 | packed_files 构造期缓存而 num_static_props 每次现算 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:429 | documents/viewer/implementation/wasm.md | 判据：`git grep -n "num_static_props" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 只在构造期算一次，`metadata()` 复用缓存 | — |
 | T-149 | map_name 两端都拿不到值，字段保留但无内容 | 缺陷 | viewer | 已结案 | apps/viewer/crates/wasm/src/lib.rs:389 | documents/viewer/implementation/wasm.md | 判据：`git grep -n "map_name" -- apps/viewer` ⇒ 仅占位字段、无解析来源（不做：两端都无来源，删除属 D-103 禁区） | — |
-| T-151 | BspMetadata 与 TS 契约靠约定对齐，无编译期校验 | 缺陷 | viewer | 已结案 | apps/viewer/scripts/check-wasm-api.mjs:50 ⇒ 新增第三层键名断言（引擎 `src/scripts/lib/wasm-api-contract.mjs`）；`npm run check:api` ⇒ 9↔9 通过、exit 0；把 TS 键改名后 ⇒ exit 1 并点名缺键 | documents/viewer/implementation/wasm.md | 见详情 | — |
+| T-151 | BspMetadata 与 TS 契约靠约定对齐，无编译期校验 | 缺陷 | viewer | 已结案 | apps/viewer/scripts/check-wasm-api.mjs:39 ⇒ 新增第三层键名断言（引擎 `src/scripts/lib/wasm-api-contract.mjs`）；`npm run check:api` ⇒ 9↔9 通过、exit 0；把 TS 键改名后 ⇒ exit 1 并点名缺键 | documents/viewer/implementation/wasm.md | 见详情 | — |
 | T-152 | Worker 没有心跳，请求侧无法区分「在解析」与「已失联」 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/importer.ts:141 ⇒ `send` 建 30 s 看门狗、新增 `onWorkerTimeout`；假 Worker 永不回包的探针实测 30.0 s 后拒绝（`workerBroken=true`、`pending=0`）；`npm run typecheck` 通过 | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-153 | WorkerCtx 是手写的全局面（tsconfig lib 缺 WebWorker） | 缺陷 | viewer | 已结案 | apps/viewer/tsconfig.json:6 ⇒ `lib` 加 `WebWorker`；手写 `WorkerCtx` 删除、`ctx = self`（无断言）；`npm run typecheck` 与 `build:worker` 均通过 | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-154 | clipToPayload 没有显式返回类型，字段写错的报错落在调用点 | 缺陷 | viewer | 已结案 | apps/viewer/src/worker/main.ts:122 ⇒ `clipToPayload(clip: Clip): ClipPayload`；把定义里 `vel` 写成 `vel2` 的对照 ⇒ 报错落点由调用点 `main.ts(104,20)` 移到定义处 `main.ts(129,5)`；typecheck 通过 | documents/viewer/implementation/worker.md | 见详情 | — |
@@ -326,4 +325,4 @@
 | T-607 | 【S19·Pages 站点守卫】站点源被切成「从分支构建」后，GitHub 内部 `pages-build-deployment` 会在**每次推送**（含纯文档推送）把仓库根按 Jekyll 发布、顶掉 Actions 产物，而部署链无任何断言/告警（2026-10-08 设置被切走；2026-10-09 02:40 的纯文档推送把站点顶掉，35 分钟后才发现） | 配置·门禁 | repo | 待修 | .github/workflows/deploy-pages.yml:200 | progress/monthly/2026-10-7.md | 判据：站点源被改成「从分支构建」时自检报错（定时 workflow 红或部署后断言失败）；正常时 `curl -s https://jofengseir.github.io/websurf/version.json` 的 id 与本次部署一致 | — |
 | T-608 | 核实「单入口」假设：Copilot / Gemini CLI 是否真的读根 `AGENTS.md`（目前只是通行约定），结论与出处写进规范篇 | 文档口径 | docs | 待修 | AGENTS.md:5 | documents/norms/annotation-and-verification.md | 判据：逐字核实两个工具是否读根 `AGENTS.md`（官方文档或实测）⇒ 结论与出处落进 `documents/norms/**`（只读，须 owner 许可 + sync） | — |
 | T-609 | 体检 `[O]` 对**终态行**（已记录 / 已结案）的「判据」列按行态保护：改终态行判据须先 approve，未结行改判据不拦 | 工具·流程 | repo | 待修 | src/scripts/docflow.mjs:201 | documents/norms/annotation-and-verification.md | 判据：改一条终态行的判据 ⇒ `node src/scripts/docflow.mjs check` 报「受保护列」；改未结行的判据不报 | — |
-| T-610 | 三工程的 `check:api` 都不在 CI 里跑，只有 PR 模板手写勾选 | 缺陷 | 跨区 | 待修 | `.github/workflows/**` 零命中 `check:api`（`apps/viewer/package.json:18`、`apps/debug/package.json:16`、`apps/game/package.json:16`） | documents/norms/scripts-and-ci.md | 判据：`.github/workflows/ci-gates.yml` 出现**不装 wasm 工具链**的源码级契约 job（跑 `src/scripts/lib/wasm-api-contract.mjs`）⇒ 改 Rust 字段名时 CI 变红；若裁决不接则改判「已结案（不做）」并注明理由 | — |
+| T-610 | 三工程的 `check:api` 都不在 CI 里跑，只有 PR 模板手写勾选 | 缺陷 | 跨区 | 已结案 | 按 OWNER.md D-022 选项 (a) 实施：`apps/viewer/scripts/check-wasm-api.mjs` 新增 `--source-only`（只跑第三层 Rust serde 键名 ↔ TS 接口键名，只读源码、不碰 pkg/），`.github/workflows/ci-gates.yml` 新增 `source-contract` job（不装 wasm 工具链、5 分钟上限）⇒ `.github/workflows/**` 内 `check-wasm-api.mjs` 有命中；判据实测：`--source-only` ⇒ exit 0；扰动 TS 字段（schema_version→zzPerturbed）⇒ exit 1 并点名缺键；默认三层全跑仍 exit 0（无回归） | documents/norms/scripts-and-ci.md | 见详情 | — |

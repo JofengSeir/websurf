@@ -21,7 +21,7 @@
 | `decompress_mtz(bytes)` | 模块级函数 | MTZ 容器（`MTZ6`/`MTZ5`）→ JSON 文本；TS 侧构建 defaults_json 用 | `apps/viewer/crates/wasm/src/lib.rs:717` |
 | `BspMetadata` | 仅 `serde::Serialize`（**不**跨 wasm 边界） | 元数据的序列化载体 | `apps/viewer/crates/wasm/src/lib.rs:361`、`apps/viewer/crates/wasm/src/lib.rs:362` |
 
-TS 侧的消费面有三个名字（`BspProcessor` / `decompress_mtz` / `initSync`；2026-10-04 起缺失纹理回退链路加入 `decompress_mtz`），契约清单由 `apps/viewer/scripts/check-wasm-api.mjs:34` 与 `apps/viewer/scripts/check-wasm-api.mjs:42` 守着（`VIEWER_API` 两项 + `BspProcessor` 类反向覆盖）；另有第三层 `BspMetadata` ↔ `BspMeta` 键名对齐（`apps/viewer/scripts/check-wasm-api.mjs:50`）。
+TS 侧的消费面有三个名字（`BspProcessor` / `decompress_mtz` / `initSync`；2026-10-04 起缺失纹理回退链路加入 `decompress_mtz`），契约清单由 `apps/viewer/scripts/check-wasm-api.mjs:36` 与 `apps/viewer/scripts/check-wasm-api.mjs:62` 守着（`VIEWER_API` 两项 + `BspProcessor` 类反向覆盖）；另有第三层 `BspMetadata` ↔ `BspMeta` 键名对齐（`apps/viewer/scripts/check-wasm-api.mjs:39`）。
 
 ## 关键流程与不变量
 
