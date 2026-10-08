@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（173 条）
+## 未结项（172 条）
 
 ### 待裁决（63）
 
@@ -100,7 +100,7 @@
 - **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
 - **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 
-### 待修（109）
+### 待修（108）
 
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -203,7 +203,6 @@
 - **T-408** `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de…　`shared`
 - **T-503** mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效　`shared`
 - **T-419** 贴图取不到：VTF 格式（Bgra4444 / Ia88）不受支持 + 两条 VTF 解码路径判定不一致（boreas 4+1 / 666 +1）　`shared`
-- **T-426** 【S6】prop 光照：982/1562 mesh 无 vhv 也探不到 cube；探到的 cube ~0.08、vhv 0.05~0.33；`StaticPropLump` 未读 `m_AmbientCube[6]`（作者烘光）　`shared`
 
 ### 已取证待立项（2）
 
@@ -404,7 +403,7 @@
 | T-423 | 【S4】surf_boreas 渲染整体偏暗：实测场景 1492 个 mesh 全为 MeshBasicMaterial，其中 **131 个无贴图**（water_pure_beneath 36 / water01 36 / alch_symbols 7 / tendies_endsmoke 6 / 无名 38）；日志 `[lightmap]` 显示 1976 个 mesh 无 lightmap 走 fullbright、960 个落「漏网兜底」 | 缺陷 | shared | 已结案 | src/renderer-shared/shader/lightmap-shader.ts:1789 | 本行即全部 | 判据：对照 owner 给的参考外观 —— ① 树/岩石不再纯黑（至少显示贴图原色或受光）；② 131 个无贴图 mesh 归零，或明确列入缺失观测（含 **prop 贴图**缺失，当前 `collect_missing_textures` 只覆盖世界面材质）；③ 同视点截图与参考图逐区对比 | — |
 | T-424 | 【S2】3D 天空盒（Source 微缩景观）按正统做法接入：取 `sky_camera` 半径 `maxDim/scale` 内的微缩 mesh，复制后**绕 `sky_camera` 缩放** `scale` 倍（平移量 `CAM*(1-scale)`，锚点=相机本身；T-428 修正，锚点取世界原点会偏 21.6°~77.1°）；副本以 `renderOrder=-1` 当天空层 ⇒ 玩家视点处能看到地图自带的微缩外景 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:1 | 本行即全部 | 判据：① owner 指认微缩区 (-3475,-11710,-3158)（实测该点 4000 HU 内有 101 个图元、距 `sky_camera` 7517）；② 站位 (-12048,14779.9,12768) 截图 ⇒ 背景出现灰色岩脊 + 雪斑 + 松树；③ A/B（`node .tmp/mapsurvey/mini-ab.mjs` 隐藏同名组）⇒ 隐藏后背景只剩纯色天空（`.tmp/mapsurvey/real-ab.png` vs `-nomini.png`）；④ debug `npm run typecheck`/`build:app` 通过。无 `sky_camera` 的图仍回退合成山脊（T-421） | — |
 | T-425 | 【S5】道具/树木光照偏暗：树贴图 `Arbre01` 本身暗（2048²，均值 RGB≈[72,70,56]）；场景 1562 mesh 中仅 356 带 `_vbsp_vlight`（采样值 0.05~0.33 偏暗），747 个 `Arbre01` 树 mesh 抽样数个既无 `_vbsp_vlight` 也无 node extras 立方体 ⇒ 只能按贴图原色渲染成黑剪影 | 缺陷 | shared | 已结案 | src/renderer-shared/shader/lightmap-shader.ts:1500 | 本行即全部 | 判据：先分类统计 props 三类（有 vhv / 只有 cube / 两者都无）各多少，并让「两者都无」的那类有可见兜底；再在同视点与 owner 参考图对比，树/岩石不再是纯黑 | — |
-| T-426 | 【S6】prop 光照数据：场景 1562 mesh 中 982 个既无 vhv 也探不到 cube ⇒ 走 fullbright；能探到的 cube 仅 ~0.08、vhv 0.05~0.33 ⇒ 整体偏暗。我们的 `StaticPropLump`（V6/V10/V11）**未读 `m_AmbientCube[6]`** —— 那是 Source 给静态道具的作者烘光 | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1500 | progress/monthly/2026-10-5.md | 判据：先加临时导出验证 sprp 记录布局（boreas 的 sprp 在压缩 lump 内、raw 读取无效）确认记录里是否含 6×RGBExp32；据此让 prop 用作者烘光，再在同视点与 owner 参考图对比树/岩石不再是黑剪影 | — |
+| T-426 | 【S6】prop 光照数据：场景 1562 mesh 中 982 个既无 vhv 也探不到 cube ⇒ 走 fullbright；能探到的 cube 仅 ~0.08、vhv 0.05~0.33 ⇒ 整体偏暗。我们的 `StaticPropLump`（V6/V10/V11）**未读 `m_AmbientCube[6]`** —— 那是 Source 给静态道具的作者烘光 | 缺陷 | shared | 已结案 | src/renderer-shared/shader/lightmap-shader.ts:1516 | 本行即全部 | 判据：先加临时导出验证 sprp 记录布局（boreas 的 sprp 在压缩 lump 内、raw 读取无效）确认记录里是否含 6×RGBExp32；据此让 prop 用作者烘光，再在同视点与 owner 参考图对比树/岩石不再是黑剪影 | — |
 | T-427 | 【S7·雪盖】地图的雪在 `WorldVertexTransition` 的**第二贴图**里：`materials/surf_lt_alpine/alpine_blendrocksnow.vmt` 的 `$basetexture2 = surf_lt_alpine/alpine_snow01`；而本仓**全链路都没有 `$basetexture2` / `WorldVertexTransition`**（Rust + TS 搜不到）⇒ 混合地形只画岩石那一半，雪永远不出现。混合系数在 `dface.lightmap_alpha_start` 指向的 **lightmap-alpha 数据**里：该字段我们解析进 `Face` 却**从未读取对应 lump** | 缺陷 | shared | 已结案 | src/renderer-shared/shader/world-transition.ts:1 | 本行即全部 | 判据：① 读 lightmap-alpha lump 并逐 face 取到混合 alpha（探针能打印非零占比）；② 材质带第二贴图并在渲染端按该 alpha 混合（自定义 shader，glTF 核心表达不了）；③ 同视点截图地面出现雪色，与 owner 参考图的雪线一致 | — |
 | T-428 | 【S8】3D 天空盒外景**锚点错**：T-424 按「把 `sky_camera` 点搬到世界原点」放置（锚点=原点），而起源引擎是把天空相机放到 `CAM + (player-CAM)/scale` 再渲染微缩几何 —— 两者对同一微缩点的**方向**实测差 **21.6°~77.1°**，外景整体错位（owner 目视发现「偏了」）。已改为**绕 `sky_camera` 缩放**（平移量 `CAM*(1-scale)`），与引擎方向夹角 **0.00°** | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:143 | 本行即全部 | 判据：① 数值——引擎相机公式 vs 本实现，对 3 个采样微缩点的方向夹角 = 0.00°（锚点取原点时 21.6°~77.1°）；② 目视——同视点 yaw240 远处山脊落在与主图一致的地平高度（`.tmp/mapsurvey/anchor-yaw240.png`）；③ debug `npm run typecheck` + `build:app` 通过 | — |
 | T-429 | 【S9】3D 天空盒外景**被切掉大半**：`buildMiniatureOutside` 原先只取「距 `sky_camera` 半径 `maxDim/scale` 内」的 mesh，实测只拿到 **102/361** 个图元（微缩区与地图本体之间的空腔之外还有一整圈）⇒ 前面/左边的山整块丢失（owner 目视发现「少了一块」）。改为**种子 + 包围盒间距扩张**（gap=256）取完整簇 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:123 | 本行即全部 | 判据：① 数值——簇扩张取到 361 个图元（原半径法 102），包围盒 32512×8106×31592；② 目视——同视点三个朝向外景齐全（`.tmp/mapsurvey/full-yaw0/120/240.png`）；③ `npm run typecheck`/`build:app` 通过 | — |
