@@ -580,12 +580,12 @@ fn load_texture_bsp(
             Error::Other(format!("Can't find VTF file in BSP. Tried: {}", paths_str))
         })?;
 
-    let vtf = vtf::vtf::VTF::read(&vtf_data)?;
-    // `vtf` crate 的 decode 对 4 通道未压缩格式（Bgra8888）返回「Rgb8 变体 + 多 25% 容量」的
-    // DynamicImage：`ImageBuffer::from_raw` 只查缓冲下界不查恰好，多余容量滞留容器，PNG 编码按
-    // `color()` 算期望长度即触发 image 0.25 的 Invalid-buffer-length 断言 panic。`into_rgba8()`
-    // 跨变体重建精确容器（Rgb8→逐像素复制、Rgba8→原样返回），对任何格式免疫；alpha 一并保留。
-    let image = DynamicImage::ImageRgba8(vtf.highres_image.decode(0)?.into_rgba8());
+    // 两条 VTF 解码路径一致性（T-419）：外部 `vtf` crate 与 `texture_utils` 是两套独立实现，对
+    // `Ia88` / `Bgra4444` 判定不一致（**crate 能读表头、decode 才报错**）。`and_then` 覆盖到解码，
+    // 故 **crate 优先、失败退本仓**；`into_rgba8()` 重建精确容器（crate 的 Rgb8 变体多 25% 容量会 panic）。
+    let crate_try = vtf::vtf::VTF::read(&vtf_data)
+        .and_then(|vtf| Ok(DynamicImage::ImageRgba8(vtf.highres_image.decode(0)?.into_rgba8())));
+    let image = crate_try.or_else(|e| decode_vtf_by_texture_utils(&vtf_data, e))?;
 
     if options.texture_scale != 1.0 {
         Ok(image.resize(
@@ -628,4 +628,22 @@ fn load_second_texture(bsp: &Bsp, options: &ConvertOptions, vdf: &str) -> Option
             .and_then(|png| image::load_from_memory(&png).ok())
             .map(|image| TextureData { name, image }),
     }
+}
+
+
+/// `vtf` crate 解不开时的兜底：改用本仓 `texture_utils` 解码（认 `Ia88` / `Bgra4444` 等 crate 不认的格式）。
+///
+/// 两条 VTF 解码路径是两套独立实现、判定不一致（T-419），这里只兜 crate 的失败分支。
+/// `texture_utils::Error` 没实现到本模块 `Error` 的 `From`，故两处都显式转 `Error::Other`。
+/// crate 的 `Ok` 分支仍走 `into_rgba8()`：它对该类未压缩格式会返回「Rgb8 变体 + 多 25% 容量」的
+/// 容器，PNG 编码按 `color()` 算期望长度会触发断言 panic。
+fn decode_vtf_by_texture_utils<E: std::fmt::Debug>(
+    vtf_data: &[u8],
+    crate_err: E,
+) -> Result<DynamicImage, Error> {
+    let vtf = crate::texture_utils::from_bytes(vtf_data)
+        .map_err(|e| Error::Other(format!("两条 VTF 解码路径均失败（crate: {:?}；本仓: {:?}）", crate_err, e)))?;
+    vtf.highres_image
+        .decode(0)
+        .map_err(|e| Error::Other(format!("两条 VTF 解码路径均失败（本仓解码: {:?}）", e)))
 }

@@ -176,3 +176,4 @@
 | 2026-10-08 | T-434 结案：碰撞与材质透明度解耦（去掉 `alpha_mode==1` 门控）+ `auto` 逐模型回退可视网格；surf_666 `phyOnlyModel` 2→0（窗可撞）；boreas prop 碰撞本就 11/11（1576 个 `solid=0` 是地图自己的声明） | progress/monthly/2026-10-6.md:15 |
 | 2026-10-08 | T-435 结案：prop 光照方向 — 洋红=魔法点光 #352（Source [13332,628,12251]，G≈0）；GLB 位置走 map_coords 而**法线**没走 ⇒ ambient cube 轴序只在纯 yaw 下偶然对；两侧同改后竖直法线取竖直 cube 面（up 0.12904 / down 0.03378） | progress/monthly/2026-10-6.md:16 |
 | 2026-10-08 | T-436 结案：缺材质的半透明占位 `[255;4]`（BLEND+alpha=1 ⇒ 白墙）改为 alpha 0.2 淡雾；实测 tendies_endsmoke 的 VMT 在包内但 $basetexture 的 VTF 不在 | progress/monthly/2026-10-6.md:17 |
+| 2026-10-08 | T-419 结案：VTF `Ia88`/`Bgra4444` 解码补上 + `load_texture_bsp` 改「crate 优先、失败退本仓」；vtfDecodeFail 4→0，三条模型材质出真贴图 | progress/monthly/2026-10-6.md:18 |

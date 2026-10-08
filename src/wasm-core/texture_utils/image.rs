@@ -108,6 +108,8 @@ impl<'a> VTFImage<'a> {
     /// - `Bgra8888` 按 4 字节块交换 B/R（`convert_bgra`，得到 RGBA 布局）后按 **`ImageRgba8`**
     ///   解释——4 通道缓冲不能配 `ImageRgb8`：`ImageBuffer::from_raw` 只查「够用」不查「恰好」，
     ///   多出的 25% 容量会滞留容器，PNG 编码按 `color()` 算期望长度即 panic；
+    /// - `Ia88`（2 B/像素、`[I][A]`）与 `Bgra4444`（小端 u16、位序 `A4R4G4B4`、4 位按 `v*17` 展宽）
+    ///   各有一臂，输出同为 RGBA8；
     /// - 其余格式（含 `Dxt1Onebitalpha` 之外的全部未列表格式）→ `UnsupportedImageFormat`。
     ///
     /// 不做：不选 mip 层（固定 0）、不做色彩空间转换、不处理 Bluescreen 变体。
@@ -143,6 +145,30 @@ impl<'a> VTFImage<'a> {
                 let mut bgra = bytes.to_vec();
                 convert_bgra(&mut bgra);
                 self.image_from_buffer(bgra, DynamicImage::ImageRgba8)
+            }
+            // `Ia88`：2 字节/像素（8 位强度 + 8 位 alpha），字节序 `[I][A]`（同 D3D `A8L8`）。
+            // 输出统一成 RGBA8（r=g=b=I），与其余分支同一容器口径。
+            ImageFormat::Ia88 => {
+                let n = self.width as usize * self.height as usize;
+                let mut rgba = Vec::with_capacity(n * 4);
+                for px in bytes.chunks_exact(2).take(n) {
+                    rgba.extend_from_slice(&[px[0], px[0], px[0], px[1]]);
+                }
+                self.image_from_buffer(rgba, DynamicImage::ImageRgba8)
+            }
+            // `Bgra4444`：2 字节/像素的小端 u16、4 位/通道，位序同 D3D `A4R4G4B4`
+            // （bit0-3=B、4-7=G、8-11=R、12-15=A）。4 位按 `v * 17` 展成 8 位（= v/15*255 四舍五入）。
+            ImageFormat::Bgra4444 => {
+                let n = self.width as usize * self.height as usize;
+                let mut rgba = Vec::with_capacity(n * 4);
+                for px in bytes.chunks_exact(2).take(n) {
+                    let v = u16::from_le_bytes([px[0], px[1]]);
+                    rgba.push((((v >> 8) & 0xF) as u8) * 17);
+                    rgba.push((((v >> 4) & 0xF) as u8) * 17);
+                    rgba.push(((v & 0xF) as u8) * 17);
+                    rgba.push((((v >> 12) & 0xF) as u8) * 17);
+                }
+                self.image_from_buffer(rgba, DynamicImage::ImageRgba8)
             }
             _ => Err(Error::UnsupportedImageFormat(self.format)),
         }
@@ -224,6 +250,7 @@ impl ImageFormat {
             ImageFormat::Rgb888 => Ok(width * height * 3),
             ImageFormat::Bgr888 => Ok(width * height * 3),
             ImageFormat::Rgb565 => Ok(width * height * 2),
+            ImageFormat::Bgra4444 => Ok(width * height * 2),
             ImageFormat::I8 => Ok(width * height),
             ImageFormat::Ia88 => Ok(width * height * 2),
             ImageFormat::A8 => Ok(width * height),
