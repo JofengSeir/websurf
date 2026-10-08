@@ -20,6 +20,7 @@
 | 编号 | 决定 | 优先级 | 我的建议 | 不决定的后果 |
 |---|---|---|---|---|
 | D-022 | **三工程的 `check:api` 是否接进 CI**（对应 `TODO.md` T-610）：现状三条契约门（`apps/{debug,game,viewer}/scripts/check-wasm-api.mjs`）只靠 `.github/PULL_REQUEST_TEMPLATE.md` 的手写勾选项，`.github/workflows/**` 里**零命中** ⇒ 契约破了不拦合并。三个选项：(a) 只把**不需要构建**的源码级断言（如 T-151 新加的 Rust↔TS 键名对齐）单独接一个轻量 job；(b) 加完整 job 跑三条 `check:api`（需在 CI 里装 wasm-pack + Rust 工具链并构建 `pkg`，分钟级）；(c) 保持现状 | P2 | **(a)**：键名对齐只读源码（Rust 结构体 + TS 接口），不依赖 `pkg`，接进 CI 成本近零；完整 `check:api` 继续走 PR 勾选 | 契约门实际只在人手跑时才生效；改 Rust 字段名或删导出，CI 仍全绿 |
+| D-023 | **T-433 的目视验收**：prop 光照已按 D-016 改成「vhv 逐顶点烘焙 + leaf ambient cube **相加**」（`src/renderer-shared/shader/lightmap-shader.ts`，cube 项按顶点烘成 `_VBSP_VCUBE` 属性以保住第 1 级共享材质）。代码侧已验证：注入后片元是 `(direct + indirect) * vbspExposure`、顶点属性逐面与片元同式（探针见 `progress/monthly/2026-10-7.md`）。**判据的「黑像素占比 4.94% → 0.00%」需要浏览器渲染，本机没有** ⇒ 请你在 debug / game 里加载 `surf_666` 看一眼：黑块 / 紫斑是否消失、props 是否过亮。 | P2 | 若过亮：我调 `PROP_CUBE_GAIN`（`window.__vbspPropCubeGain` 可免重建 A/B），或改成「仅当 vhv 近零时才用 cube 兜底」。 | T-433 停在「阻塞」等这一眼 |
 
 ## 已决（留痕，不占注意力）
 

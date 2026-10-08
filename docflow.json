@@ -117,14 +117,6 @@
       "consumed": true
     },
     {
-      "path": "OWNER.md",
-      "by": "owner",
-      "reason": "新增 D-022",
-      "at": "2026-10-08",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "README.md",
       "by": "owner",
       "reason": "T-223：game KEEP_SINGLE 加 coi-serviceworker.js，README 该锚点需重钉（正文不改）",
@@ -133,16 +125,60 @@
       "consumed": true
     },
     {
+      "path": "OWNER.md",
+      "by": "owner",
+      "reason": "新增 D-023",
+      "at": "2026-10-08",
+      "task": "",
+      "consumed": true
+    },
+    {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "补回 T-433 bullet",
+      "reason": "T-433 阻塞行：详情列改裸路径 + 重算段落计数",
       "at": "2026-10-08",
       "task": "",
       "consumed": true
     }
   ],
   "cochange": [],
-  "claim": null,
+  "claim": {
+    "task": "T-433",
+    "may": [
+      "src/renderer-shared/shader/lightmap-shader.ts",
+      "documents/debug/implementation/renderer.md",
+      "TODO.md",
+      "OWNER.md",
+      "progress/index.md",
+      "progress/monthly/2026-10-7.md"
+    ],
+    "must": [
+      "src/renderer-shared/shader/lightmap-shader.ts"
+    ],
+    "base": {
+      "src/renderer-shared/shader/lightmap-shader.ts": "4eb23cf9dd07848553e8d996b3778286417d15756ff74684fff04f377449dbd3",
+      "documents/debug/implementation/renderer.md": "ada558cc4f3e6c4748be1900bdda1ee87cf862bee7bbcf8158df1fd91d251d68",
+      "TODO.md": "f5fed12338a5cc0ec98341128c9b42f287b4128a39ef8535fdff0337ef1e93bf",
+      "OWNER.md": "931a21cd411962fb12287cc924edd50cef4fd0991a7372d2388b48ac7f23cce1",
+      "progress/index.md": "b31ac30cbaa982d53d5ea73aeaf32d07cf24d09e48bd7ddb876794ae9f935ca4",
+      "progress/monthly/2026-10-7.md": "703343b127c6eab9ebefe9104465ded20d84f4355229d584ea6cc1db3624cef9"
+    },
+    "at": "2026-10-08T22:16:46.569Z",
+    "pins": {
+      "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
+      "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
+      "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
+      "skills/websurf-env-traps/SKILL.md": "4bae9ea251bca4824c169cf27e4a93277d472eef8b7843feabd61a529471d157",
+      "documents/norms/annotation-and-verification.md": "40f271606aad9363b61cfb24d756bbce306cf354b9e483283fab8c66f71a46b6",
+      "documents/norms/scripts-and-ci.md": "9d3cd3b74c3667e418373b9e006c993b59cf1c191134877a3464646f6d0993ad",
+      ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
+      ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
+      ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
+      ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
+      "AGENTS.md": "53a2d312eade0322eeae2603c7e83cef4eb4ac7439bf8b7dbbdc7a44f020e270",
+      "documents/norms/local-path-hygiene.md": "fa7589d6fef4800bbf0920da32d2fe031877fc736111a8b8d1259d009d81f4a1"
+    }
+  },
   "units": {
     "TODO.md": {
       "match": "^\\|\\s*T-\\d{3}\\s*\\|",
@@ -1213,173 +1249,179 @@
         "at": "2026-10-08",
         "line": 22
       },
-      "D-014": {
+      "D-023": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
-        "line": 32
+        "at": "2026-10-08",
+        "line": 23
       },
-      "D-100": {
+      "D-014": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 33
       },
-      "D-101": {
+      "D-100": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 34
       },
-      "D-102": {
+      "D-101": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 35
       },
-      "D-103": {
+      "D-102": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 36
       },
-      "D-104": {
+      "D-103": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 37
       },
-      "D-105": {
+      "D-104": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 38
       },
-      "D-106": {
+      "D-105": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 39
       },
-      "D-001": {
+      "D-106": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 40
       },
-      "D-002": {
+      "D-001": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 41
       },
-      "D-003": {
+      "D-002": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 42
       },
-      "D-004": {
+      "D-003": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 43
       },
+      "D-004": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 44
+      },
       "D-015": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 44
+        "line": 45
       },
       "**D-107**": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 45
+        "line": 46
       },
       "D-005": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 46
+        "line": 47
       },
       "D-006": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 47
+        "line": 48
       },
       "D-007": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 48
+        "line": 49
       },
       "D-008": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 49
+        "line": 50
       },
       "D-009": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 50
+        "line": 51
       },
       "D-010": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 51
+        "line": 52
       },
       "D-011": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 52
+        "line": 53
       },
       "D-012": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 53
+        "line": 54
       },
       "D-013": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 54
+        "line": 55
       },
       "D-016": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 55
+        "line": 56
       },
       "D-018": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 56
+        "line": 57
       },
       "D-019": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 57
+        "line": 58
       },
       "D-020": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 58
+        "line": 59
       },
       "D-021": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 59
+        "line": 60
       }
     }
   },
@@ -1429,8 +1471,6 @@
     "TODO.md": {
       "documents/game/implementation/scripts.md:40:40": "9d1cc2a1",
       "apps/game/src/app.ts:640:640": "06b0b66c",
-      "src/wasm-core/vhv.rs:41:41": "8f99698a",
-      "src/renderer-shared/shader/lightmap-shader.ts:545:545": "8298ad2c",
       "apps/viewer/package.json:18:18": "15c96ebb",
       "apps/debug/package.json:16:16": "15c96ebb",
       "apps/game/package.json:16:16": "15c96ebb",
@@ -1584,7 +1624,6 @@
       "apps/game/crates/wasm/src/lib.rs:1734:1734": "4a2cba58",
       "src/wasm-core/bsp_to_gltf_core/convert.rs:367:367": "a803e10b",
       "src/scripts/check-glb-parity.mjs:2:2": "3f48e740",
-      "progress/monthly/2026-10-7.md:42:42": "586d6e54",
       "apps/game/src/renderer/renderer-main.ts:1020:1020": "52edeba1",
       "src/ts-shared/phys/world-builder.ts:203:203": "ea663714",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
@@ -3869,7 +3908,7 @@
       "src/renderer-shared/shader/lightmap-shader.ts:129:129": "c4bea582",
       "src/renderer-shared/shader/lightmap-shader.ts:135:135": "b392b2af",
       "src/renderer-shared/shader/lightmap-shader.ts:1230:1230": "0c467743",
-      "src/renderer-shared/shader/lightmap-shader.ts:1344:1344": "be35df49",
+      "src/renderer-shared/shader/lightmap-shader.ts:1344:1344": "244edc3b",
       "src/renderer-shared/shader/lightmap-shader.ts:1451:1451": "bcd1c8cb",
       "src/renderer-shared/shader/lightmap-shader.ts:433:433": "539890dc",
       "src/renderer-shared/shader/lightmap-shader.ts:438:438": "ae4622f0",
@@ -4954,6 +4993,30 @@
   },
   "rebaselines": [
     {
+      "path": "documents/viewer/implementation/renderer.md",
+      "at": "2026-10-08T22:22:05.648Z",
+      "by": "agent",
+      "reason": "T-433：lightmap-shader.ts 改回 1:1 后重钉（此前 sync 钉到错位内容）",
+      "changed": 1,
+      "total": 100
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-08T22:22:05.366Z",
+      "by": "agent",
+      "reason": "T-433：lightmap-shader.ts 改回 1:1 后重钉（此前 sync 钉到错位内容）",
+      "changed": 7,
+      "total": 165
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-08T22:20:52.347Z",
+      "by": "agent",
+      "reason": "T-433 转阻塞（待目视）",
+      "changed": 10,
+      "total": 165
+    },
+    {
       "path": "TODO.md",
       "at": "2026-10-08T22:13:22.495Z",
       "by": "agent",
@@ -5248,30 +5311,6 @@
       "reason": "T-215/T-216：savepoint.ts 改动，锚点复核后重钉",
       "changed": 2,
       "total": 32
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-08T21:17:18.569Z",
-      "by": "agent",
-      "reason": "T-215/T-216 结案",
-      "changed": 5,
-      "total": 166
-    },
-    {
-      "path": "documents/game/sequences.md",
-      "at": "2026-10-08T21:14:10.411Z",
-      "by": "agent",
-      "reason": "T-207：app.ts requestLock 段改动，锚点复核后重钉",
-      "changed": 2,
-      "total": 184
-    },
-    {
-      "path": "documents/game/implementation/app-entry.md",
-      "at": "2026-10-08T21:14:10.086Z",
-      "by": "agent",
-      "reason": "T-207：app.ts requestLock 段改动，锚点复核后重钉",
-      "changed": 1,
-      "total": 69
     }
   ]
 }

@@ -29,8 +29,8 @@
  * ## 三条光照路径（都在片元里替换 three 的 lightmap 采样项）
  *
  * 1. **world 面**：图集 + 手写双线性 + RGBExp32 解码，函数体在 `VBSP_APPLY_LIGHTMAP`；
- * 2. **prop 第 1 级**：几何属性 `_VBSP_VLIGHT` 的逐顶点烘焙值（`applyVertexLightingShader`）；
- * 3. **prop 第 2 级**：node extras 的 leaf ambient cube，按法线平方加权（`applyAmbientCubeIfAny`）。
+ * 2. **prop 第 1 级**：几何属性 `_VBSP_VLIGHT` 的逐顶点烘焙值 **加上**同顶点的 leaf ambient cube 项（`_VBSP_VCUBE`；`direct + indirect`，D-016 口径）；
+ * 3. **prop 第 2 级**：几何**没有** `_VBSP_VLIGHT` 时的回退——node extras 的 leaf ambient cube，按法线平方加权（`applyAmbientCubeIfAny`）。
  *
  * `extras.unlit === true` 的图元不吃任何光照，直接贴图原色（`routeFullbright` 的首个分支）。
  *
@@ -546,7 +546,7 @@ export function applyLightmapToMeshes(
 			// 第 1 级：逐顶点预烘焙（数据在几何上 ⇒ 材质全场景共享）。
 			// 必须**显式赋值**给 mesh：`acquire*` 只建/取缓存实例，不做赋值
 			// （只有 `applyFullbrightBasic` 内部赋值）。漏赋值 ⇒ 该 mesh 仍持旧材质。
-			reconstructVertexLighting(mesh);
+			reconstructVertexLighting(mesh); bakeVertexCubeAttribute(mesh, resolveAmbientCube(mesh));
 			mesh.material = acquireVertexLightingMaterial(mesh);
 			vertexLightingRouted++;
 			fullbright++;
@@ -1339,32 +1339,32 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.vbspExposure = exposureUniform;
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
-		shader.uniforms.vbspBakedMix = bakedMixUniform; shader.uniforms.vbspLightFloor = lightFloorUniform;
+		shader.uniforms.vbspBakedMix = bakedMixUniform; shader.uniforms.vbspLightFloor = lightFloorUniform; shader.uniforms.vbspAmbientScale = ambientScaleUniform;
 		// 声明必须来自共享常量（守卫断言"注入单元自洽"）
-		const decls = VBSP_LIGHTMAP_UNIFORM_DECLS.join('\n');
+		const decls = [...VBSP_LIGHTMAP_UNIFORM_DECLS, 'uniform float vbspAmbientScale;'].join('\n');
 		// ⚠️ 这个数组进的是 **fragment** shader ⇒ **不能出现 `attribute`**
 		// （GLSL 里 `attribute` 仅限 vertex 阶段，出现在 fragment 里时编译报
 		//  `'attribute' : Illegal use of reserved word` ⇒ program 无效 ⇒ 模型不渲染）。
 		// 属性声明只在下面的 vertex 侧 `vsA` 里出现。
 		const fn = [
-			'varying vec3 vbspVLight;',
+			'varying vec3 vbspVLight;\nvarying vec3 vbspVCube;',
 			'vec3 vbspVertexLightTerm() {',
 			// 纯纹理模式：逐顶点烘焙项恒 1.0（= 贴图原色），与 world 路径同一开关语义
 			'	if (vbspBakedMix < 0.5) { return vec3(1.0); }',
 			'	float g = max(vbspLightGamma, 0.001);',
-			'	return pow(max(vbspVLight, vec3(vbspLightFloor)), vec3(2.2 / g)) * vbspExposure;',
+			'	return (pow(max(vbspVLight, vec3(vbspLightFloor)), vec3(2.2 / g)) + pow(max(vbspVCube, vec3(vbspLightFloor)), vec3(1.0 / g)) * vbspAmbientScale) * vbspExposure;',
 			'}',
 		].join('\n');
 		const vs = shader.vertexShader;
 		const vsA = vs.replace(
 			'#include <common>',
-			'attribute vec3 ' + VERTEX_LIGHTING_ATTR + ';\nvarying vec3 vbspVLight;\n#include <common>',
+			'attribute vec3 ' + VERTEX_LIGHTING_ATTR + ';\nattribute vec3 ' + VERTEX_CUBE_ATTR + ';\nvarying vec3 vbspVLight;\nvarying vec3 vbspVCube;\n#include <common>',
 		);
 		const vsB =
 			vsA !== vs
 				? vsA.replace(
 						'#include <begin_vertex>',
-						'#include <begin_vertex>\n\tvbspVLight = ' + VERTEX_LIGHTING_ATTR + ';',
+						'#include <begin_vertex>\n\tvbspVLight = ' + VERTEX_LIGHTING_ATTR + ';\n\tvbspVCube = ' + VERTEX_CUBE_ATTR + ';',
 					)
 				: vsA;
 		const vsChanged = vsB !== vs;
@@ -1835,4 +1835,46 @@ export function setAmbientScale(value: number): void {
 /** 读取当前模型光照亮度倍率（诊断用）。 */
 export function getAmbientScale(): number {
 	return ambientScaleUniform.value;
+}
+
+
+/**
+ * 与 `_VBSP_VLIGHT` **相加**的 leaf ambient cube 顶点项（D-016 的引擎 2013 口径
+ * `m_Color = direct + indirect`）。
+ *
+ * 为什么烘成几何属性而不是逐 prop uniform：第 1 级的前提是「数据在几何上 ⇒ 材质全场景共享」，
+ * 逐 prop uniform 会让每个 prop 各占一个材质实例，丢掉 `optimizeScene` 的按材质合并。
+ *
+ * 值 = `Σ_i c_i · n_i²`（与片元侧 `vbspAmbientRaw()` 同式、同下标约定），`c_i` 已乘
+ * `effectivePropCubeGain()`（与第 2 级同口径）⇒ 片元侧仍按 `pow(v, 1/γ) × 曝光 × ambientScale` 解码。
+ * 几何缺该属性时 GLSL 的 attribute 读 (0,0,0) ⇒ 相加项为 0，行为与改动前一致。
+ */
+const VERTEX_CUBE_ATTR = '_vbsp_vcube';
+
+/** 见 `VERTEX_CUBE_ATTR` 的文档。cube 不可用（缺 18 分量 / 无几何 / 无 normal）时不写属性。
+ *  **两套轴**：cube 下标是 Source 轴序（`[+X,-X,+Y,-Y,+Z,-Z]`，见 `LeafAmbientSample::cube`），
+ *  而几何法线是渲染轴（渲染 z ← Source X）⇒ 下面对 `n.z` 用 `0/1` 不是笔误；
+ *  与片元 `vbspAmbientRaw()` 同式，改一处必须改另一处。
+ *
+ * 片元里的光照项是 `(direct + indirect) × vbspExposure`——`exposure` 只套在**求和之后**
+ * （两条路径各自乘一次会重复曝光，D-016 之前的两条乘法路径正是各自乘的）。 */
+function bakeVertexCubeAttribute(mesh: THREE.Mesh, rawCube: unknown): void {
+	const g = mesh.geometry as THREE.BufferGeometry | undefined;
+	if (!g || !Array.isArray(rawCube) || rawCube.length !== 18) return;
+	const nrm = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
+	if (!nrm) return;
+	const gain = effectivePropCubeGain();
+	const c = rawCube.map((v) => (typeof v === 'number' ? v * gain : 0));
+	const out = new Float32Array(nrm.count * 3);
+	for (let i = 0; i < nrm.count; i++) {
+		const nx = nrm.getX(i), ny = nrm.getY(i), nz = nrm.getZ(i);
+		const sx = nx * nx, sy = ny * ny, sz = nz * nz;
+		for (let k = 0; k < 3; k++) {
+			out[i * 3 + k] =
+				c[(nz < 0 ? 1 : 0) * 3 + k] * sz +
+				c[(nx < 0 ? 3 : 2) * 3 + k] * sx +
+				c[(ny < 0 ? 5 : 4) * 3 + k] * sy;
+		}
+	}
+	g.setAttribute(VERTEX_CUBE_ATTR, new THREE.BufferAttribute(out, 3));
 }

@@ -228,3 +228,4 @@
 | 2026-10-09 | T-304/T-305 结案（均判遗弃不修）：τ 与 now 同源、residual 主线程原理上拿不到；顺带修正 2 处指错行的锚点 | progress/monthly/2026-10-7.md:40 |
 | 2026-10-09 | T-013 结案（错误串去外部实现引用）；另完成 T-433 诊断：prop 两条光照路径 either/or + 乘法 ⇒ cube 从未生效 | progress/monthly/2026-10-7.md:41 |
 | 2026-10-09 | T-433 实测诊断：VHV 数据中位 40~60 / max 239（非「max 95」）、alpha=255；两条 prop 光照是 either/or + 乘法 ⇒ 按 D-016 改相加（下轮实施） | progress/monthly/2026-10-7.md:42 |
+| 2026-10-09 | T-433 实施完成（cube 按顶点烘成属性 + 真相加；探针逐面核对），转阻塞等 owner 目视（OWNER.md D-023） | progress/monthly/2026-10-7.md:43 |
