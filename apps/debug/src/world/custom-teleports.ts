@@ -2,8 +2,8 @@
  * 自定义传送点的数据层（侧边栏面板用）：按地图名分组保存玩家当前位置或手输坐标，
  * 之后一键传送回去。
  *
- * 持久化：localStorage，键为 `STORAGE_PREFIX + 地图名`；每个函数各自 try/catch，
- * 存储不可用时降级为空列表或忽略写入，不抛异常。
+ * 持久化：localStorage，键为 `STORAGE_PREFIX + 地图名`；每个函数各自 try/catch，**不抛异常**：
+ * 读失败降级为空列表，写失败打 `console.error` 并返回 `false`（调用方据此提示，不再静默）。
  *
  * 消费点：`apps/debug/src/app.ts`（列表渲染、新增、删除、清空与「传送到该点」按钮）。
  * 其中 `saveCustomTeleports` 只被本文件的 `addCustomTeleport` 与 `removeCustomTeleport` 调用。
@@ -59,12 +59,12 @@ export function loadCustomTeleports(mapName: string): CustomTeleport[] {
 	}
 }
 
-/** 覆盖写入某地图的传送点列表；写入抛错（配额用尽等）时静默放弃。 */
-export function saveCustomTeleports(mapName: string, list: CustomTeleport[]): void {
+/** 覆盖写入某地图的传送点列表；返回是否真的落盘（写失败打 `console.error` 并返回 `false`，不再静默）。 */
+export function saveCustomTeleports(mapName: string, list: CustomTeleport[]): boolean {
 	try {
-		localStorage.setItem(STORAGE_PREFIX + mapName, JSON.stringify(list));
-	} catch {
-		// 写入失败（如配额用尽）时静默放弃，由调用方的 UI 提示
+		localStorage.setItem(STORAGE_PREFIX + mapName, JSON.stringify(list)); return true;
+	} catch (err) {
+		console.error('[custom-teleports] 写入失败（如配额用尽）:', err); return false;
 	}
 }
 
