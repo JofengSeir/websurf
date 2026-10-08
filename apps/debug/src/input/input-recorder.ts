@@ -5,9 +5,9 @@
  * 本模块只有数据结构与取值逻辑：不挂事件监听、不读任何全局对象，全部接线在
  * `apps/debug/src/app.ts`。
  * - 写入侧（唯一）：`apps/debug/src/app.ts` 的输入循环在回放分支里调
- *   `replayCapture.record(now, finalDx, finalDy, finalKeys)`，记的是该帧实际要喂出去的值；
+ *   `replayCapture.record(now, finalDx, finalDy, finalKeys, dtS)`，记的是该帧实际要喂出去的值；
  *   同一分支随后把这三个量交给 `apps/debug/src/renderer/renderer-main.ts` 的 `feedInput`。
- *   该调用点省略 `dtS`，故写进样本的步长恒为 0。
+ *   `dtS` 取该回放帧的步长（`stepped.dtS`，未取到时退 `InputPlayer.frameDt(1/64)`）。
  * - 读取侧：`apps/debug/src/app.ts` 的 `armReplay` 用 meta 对齐起点，输入循环把样本交回
  *   `feedInput`，并把 `frameDt` 的结果写进 `apps/debug/src/renderer/renderer-main.ts` 的
  *   `replayDtS`（渲染主循环消费一次后置 null）。
@@ -58,7 +58,7 @@ export interface InputFrame {
   /** 本帧鼠标 Y 像素增量；来源同 `dx`。 */
   dy: number;
   /** 本帧按键位掩码（位定义见 `src/ts-shared/auth/shared-state.ts` 的 `KEY_MASK`）。 */
-  keys: number;
+  keys: number; /** 本帧物理步长（秒）；0 = 未记录（对象数组形式里可选，`load` 缺省按 0）。 */ dt?: number;
 }
 
 /** 录制起点的玩家状态；`apps/debug/src/app.ts` 的 `armReplay` 在缺全量种子时用它做部分对齐。 */
@@ -286,7 +286,7 @@ export class InputRecorder {
    *
    * 本类不采样，五个入参全由调用方给；样本按调用顺序追加，不去重、不合并，容量不足时先
    * `grow`。本仓唯一调用点是 `apps/debug/src/app.ts` 回放分支的
-   * `replayCapture.record(now, finalDx, finalDy, finalKeys)`——它省略 `dtS`，故 `dts` 写入 0。
+   * `replayCapture.record(now, finalDx, finalDy, finalKeys, dtS)`——`dtS` 取该回放帧的步长。
    *
    * @param nowMs 样本时间戳（ms，原样保存）
    * @param dx 本帧鼠标 X 像素增量
@@ -321,14 +321,14 @@ export class InputRecorder {
   frames(): InputFrame[] {
     const out: InputFrame[] = new Array(this.n);
     for (let i = 0; i < this.n; i++) {
-      out[i] = { t: this.times[i], dx: this.dxs[i], dy: this.dys[i], keys: this.keysArr[i] };
+      out[i] = { t: this.times[i], dx: this.dxs[i], dy: this.dys[i], keys: this.keysArr[i], dt: this.dts[i] };
     }
     return out;
   }
 
   /**
-   * 对象数组形式的载荷（**未**序列化）。数值已规整：`t` 保留 3 位小数（ms）、`dx` / `dy`
-   * 保留 6 位小数、`keys` 取 int32，`meta` 走 `mergedMeta`。规整后的十进制文本经
+   * 对象数组形式的载荷（**未**序列化）。数值已规整：`t` 保留 3 位小数（ms）、`dx` / `dy` /
+   * `dt` 保留 6 位小数、`keys` 取 int32，`meta` 走 `mergedMeta`。规整后的十进制文本经
    * `toJson` / `fromJson` 往返后仍是同一个双精度值，逐帧比较据此成立。
    */
   toPayload(meta?: Partial<InputReplayMeta>): InputReplayPayload {
@@ -338,7 +338,7 @@ export class InputRecorder {
         t: round(this.times[i], 3),
         dx: round(this.dxs[i], 6),
         dy: round(this.dys[i], 6),
-        keys: this.keysArr[i] | 0,
+        keys: this.keysArr[i] | 0, dt: round(this.dts[i], 6),
       };
     }
     return { schema: INPUT_REPLAY_SCHEMA, meta: this.mergedMeta(meta), frames };
@@ -358,7 +358,7 @@ export class InputRecorder {
    *
    * 元素是十进制 JSON 数字，源数据分别是 `Float64Array`（8 字节浮点）与 `Int32Array`
    * （4 字节整数）：`t` 3 位小数、`dx` / `dy` / `dt` 6 位小数、`keys` 为整数。
-   * `dt` 是每样本的物理步长（秒），对象数组形式里没有对应字段——`load` 读对象数组时
+   * `dt` 是每样本的物理步长（秒），对象数组形式里是可选的同名字段——`load` 读对象数组时
    * 会去看每个元素的可选 `dt`。
    * 本方法内部仍调一次 `toPayload`，只取它的 `schema` 与 `meta`，对象数组被丢弃。
    */
@@ -757,9 +757,9 @@ export class InputPlayer {
     return this.i + 1 >= this.n;
   }
 
-  /** 物化第 i 个样本（不含 `dt`；`dts` 只经 `frameDt` 暴露）。 */
+  /** 物化第 i 个样本（含 `dt`；`dts[i]` 为 0 时表示该帧未记录步长）。 */
   private sample(i: number): InputFrame {
-    return { t: this.times[i], dx: this.dxs[i], dy: this.dys[i], keys: this.keysArr[i] };
+    return { t: this.times[i], dx: this.dxs[i], dy: this.dys[i], keys: this.keysArr[i], dt: this.dts[i] };
   }
 }
 

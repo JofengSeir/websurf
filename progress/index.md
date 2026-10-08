@@ -235,3 +235,4 @@
 | 2026-10-09 | T-202 结案：可选 DOM 缺失改走 `optDom()` 打点名告警（app.ts 五处 1:1、246 锚点零漂移） | progress/monthly/2026-10-8.md:7 |
 | 2026-10-09 | T-446 实测（未结案）：移动侧也穿坡（-66）、trace 能命中 367.4；已加 start_solid 1:1 守卫但非成因；phys 回归 36/36 | progress/monthly/2026-10-8.md:8 |
 | 2026-10-09 | T-446 结案（遗弃）：ramp 穿坡已由 T-447（skip_sky 按纹理丢 brush）解决；实测碰撞命中 367.4；保留 start_solid 1:1 加固（phys 36/36） | progress/monthly/2026-10-8.md:9 |
+| 2026-10-09 | T-301 结案：回放样本带 `dt`（调用点补第 5 参 + 三处物化 + InputFrame.dt），全 1:1 零漂移 | progress/monthly/2026-10-8.md:10 |

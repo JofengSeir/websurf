@@ -2238,7 +2238,7 @@ function startInputLoop(): void {
 				feed = false;
 			} else if (replayCaptureArmed) {
 				// 回放捕获：每个样本**只记一条**（与录制逐帧一一对应，才能逐帧比对）
-				replayCapture.record(now, finalDx, finalDy, finalKeys);
+				replayCapture.record(now, finalDx, finalDy, finalKeys, stepped ? stepped.dtS : inputPlayer.frameDt(1 / 64));
 				replayLoopFrames++;
 			}
 			if (idx !== lastFedReplayIndex) lastFedReplayIndex = idx;

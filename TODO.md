@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（119 条）
+## 未结项（118 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（87）
+### 待修（86）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -114,7 +114,6 @@
 - **T-237** `map_name` 恒为空串　`game`
 - **T-238** `InitMessage` 有三个字段既无发送方也无读取点　`game`
 - **T-239** `worker-types.ts` 里多条声明在本工程无发送方且无接收点　`game`
-- **T-301** 回放捕获 `replayCapture.record` 未传 `dtS`，样本 `dt` 恒 0；`InputFrame` 亦无 `dt` 字段　`debug`
 - **T-307** `frame-bench.mjs` 缺省地图路径 `<仓库根>/maps/surf_666.bsp` 不在工作区，不传第 4 参即打印「地图不存在」并 exit 2　`debug`
 - **T-308** 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套　`debug`
 - **T-312** `tsconfig.json` 的五个路径别名零导入点　`debug`
@@ -286,7 +285,7 @@
 | T-237 | `map_name` 恒为空串 | 未接线·死代码 | game | 待修 | apps/game/crates/wasm/src/lib.rs:457 | documents/game/implementation/wasm-crate.md | 判据：`git grep -n "map_name" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-238 | `InitMessage` 有三个字段既无发送方也无读取点 | 未接线·死代码 | game | 待修 | apps/game/src/worker/worker-types.ts:36 | documents/game/implementation/worker.md | 判据：`git grep -n "InitMessage" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-239 | `worker-types.ts` 里多条声明在本工程无发送方且无接收点 | 未接线·死代码 | game | 待修 | src/ts-shared/auth/worker-dispatch.ts:265 | documents/game/implementation/worker.md | 判据：`git grep -n "worker-types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-301 | 回放捕获 `replayCapture.record` 未传 `dtS`，样本 `dt` 恒 0；`InputFrame` 亦无 `dt` 字段 | 缺陷 | debug | 待修 | apps/debug/src/app.ts:2241 | documents/debug/implementation/input.md | 判据：@BT@replayCapture.record@BT@ 传 @BT@dtS@BT@ ⇒ 样本 @BT@dt@BT@ 非 0（@BT@InputFrame@BT@ 增 @BT@dt@BT@ 字段） | — |
+| T-301 | 回放捕获 `replayCapture.record` 未传 `dtS`，样本 `dt` 恒 0；`InputFrame` 亦无 `dt` 字段 | 缺陷 | debug | 已结案 | apps/debug/src/app.ts:2241 传第五参 dtS；input-recorder.ts 的 InputFrame 增可选 dt、frames()/toPayload()/sample() 三处物化带上它（全部 1:1 ⇒ 该文件 18 个锚点零漂移）；探针：record(…,0.015625) ⇒ frames()/toPayload()/toCompactPayload() 的 dt = 0.015625, 0.03125, 0；对象数组 load 带 dt ⇒ 0.02 保留、缺 dt ⇒ 0；InputPlayer 回放帧带 dt；debug typecheck 通过 | documents/debug/implementation/input.md | 见详情 | — |
 | T-302 | 面板 `PARAM_DEFS` 与 `config.ts` 两套默认值来源、无交叉校验（`jumpHeight` 57 与 `jumpSpeed` 302 同写 `jump_height`） | 缺陷 | debug | 已结案 | apps/debug/scripts/check-param-defaults.mjs（`npm run check:param-defaults`）⇒ 面板默认值经 PARAM_TO_RUST 与 config 换算值比对；正例 7 项全 OK 退出 0，反例（gravity 800→900）⇒ jumpHeight 报差并 exit 1 | documents/debug/implementation/physics.md | 见详情 | — |
 | T-303 | 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1 | 缺陷 | debug | 待裁决 | apps/debug/src/renderer/lod-manager.ts:262 | documents/debug/implementation/renderer.md | — | — |
 | T-304 | tick 线时间戳在 `readPublishedTau()` 返回 0 时回落墙钟 `now`，两条线时间基准不同源 | 缺陷 | debug | 已结案 | 遗弃（不修）：断言不成立——`readPublishedTau()` 是 `tickInstantToTau = workerInstMs + rtOffset`（apps/debug/src/worker/main.ts:262）的**渲染时钟域**值，与回落用的 `now` 同源；且 τ=0 是「未投影」契约语义（src/ts-shared/auth/auth-loop.ts:428），此时发布位置就是权威自身 state、对应当前时刻。另修正了文档里指错行的锚点 | documents/debug/implementation/renderer.md | 见详情 | — |
