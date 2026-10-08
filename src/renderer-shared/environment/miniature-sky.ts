@@ -91,10 +91,41 @@ export function buildMiniatureSky(opts: MiniatureSkyOptions): THREE.Group {
 }
 
 
+/**
+ * `sky_camera` 自己的天空盒雾（引擎 `CSkyboxView::Enable3dSkyboxFog` 的取值来源）。
+ * `enable` 为假时引擎在天空遍直接 `FogMode(NONE)` —— 天空区**一点雾都不吃**。
+ */
+export interface SkyFogParams {
+	enable: boolean;
+	color: number;
+	start: number;
+	end: number;
+}
+
 /** `sky_camera` 换算出的参数（origin 已按导出轴约定转成 Three 坐标）。 */
 export interface SkyCameraParams {
 	origin: [number, number, number];
 	scale: number;
+	/** 天空盒雾；缺键或 `fogenable` 为假时天空遍不吃雾。 */
+	fog?: SkyFogParams | null;
+}
+
+/** 从 `sky_camera` 键值取天空盒雾；`fogenable` 缺省即未启用（与引擎的 bool 键值缺省一致）。 */
+function skyFogFromProps(props: Record<string, string> | undefined): SkyFogParams | null {
+	if (!props) return null;
+	const rgb = (props.fogcolor ?? '').trim().split(/\s+/).map(Number);
+	const color =
+		rgb.length >= 3 && rgb.every((v) => Number.isFinite(v))
+			? ((rgb[0] & 0xff) << 16) | ((rgb[1] & 0xff) << 8) | (rgb[2] & 0xff)
+			: 0xffffff;
+	const start = Number.parseFloat(props.fogstart ?? '0');
+	const end = Number.parseFloat(props.fogend ?? '0');
+	return {
+		enable: /^1$/.test((props.fogenable ?? '').trim()),
+		color,
+		start: Number.isFinite(start) ? start : 0,
+		end: Number.isFinite(end) ? end : 0,
+	};
 }
 
 /** 从 `parse_entities()` 的 JSON 取 `sky_camera`；无该实体或 origin/scale 非法返回 null。 */
@@ -110,7 +141,11 @@ export function skyCameraFromEntities(entitiesJson: string): SkyCameraParams | n
 			const o = (e.props?.origin ?? '').trim().split(/\s+/).map(Number);
 			if (o.length < 3 || o.some((v) => !Number.isFinite(v))) continue;
 			const s = Number.parseFloat(e.props?.scale ?? '16');
-			return { origin: [o[1], o[2], o[0]], scale: Number.isFinite(s) && s > 0 ? s : 16 };
+			return {
+				origin: [o[1], o[2], o[0]],
+				scale: Number.isFinite(s) && s > 0 ? s : 16,
+				fog: skyFogFromProps(e.props),
+			};
 		}
 	} catch {
 		// 非法 JSON 只说明没有天空盒，不影响地图渲染

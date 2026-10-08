@@ -204,8 +204,10 @@ export class RendererMain {
   /** 3D 天空盒：天空相机（由 `sky_camera` 驱动）与它单独渲染的天空区组（见 `miniature-sky.ts`）。 */
   private skyCamera: THREE.PerspectiveCamera | null = null;
   private skyGroup: THREE.Group | null = null;
-  /** 天空相机参数（`sky_camera` 的 origin/scale）；为 null 表示本图没有 3D 天空盒。 */
+  /** 天空相机参数（`sky_camera` 的 origin/scale/雾）；为 null 表示本图没有 3D 天空盒。 */
   private skyParams: SkyCameraParams | null = null;
+  /** 天空遍专用的雾实例（`sky_camera` 自己的雾参数 + start/end 乘 1/scale，见 `renderFrame`）。 */
+  private skyFog: THREE.Fog | null = null;
 
   /** 灯光与光照参数（`init` 里 `applyLights`；lighting 段 patch 时 `syncFromConfig`）。 */
   private readonly lightManager = new LightManager();
@@ -807,9 +809,24 @@ export class RendererMain {
     }
     syncSkyCamera(skyCamera, camera, this.skyParams);
     const background = scene.background;
+    const mapFog = scene.fog;
+    // 天空遍的雾走 sky_camera 自己的参数，且 start/end 乘 1/scale（引擎 Enable3dSkyboxFog：
+    // FogStart/FogEnd * (1/skyboxScale)）——天空区几何是按 1/scale 烘的，用主图的雾会把
+    // 「远处的山」按近处衰减；fogenable 为假时引擎直接 FogMode(NONE)，天空区一点雾都不吃。
+    const skyFogParams = this.skyParams.fog;
+    if (skyFogParams?.enable) {
+      if (!this.skyFog) this.skyFog = new THREE.Fog(0xffffff, 0, 1);
+      this.skyFog.color.setHex(skyFogParams.color);
+      this.skyFog.near = skyFogParams.start / this.skyParams.scale;
+      this.skyFog.far = skyFogParams.end / this.skyParams.scale;
+      scene.fog = this.skyFog;
+    } else {
+      scene.fog = null;
+    }
     renderer.autoClear = false;
     renderer.clear();
     renderer.render(scene, skyCamera);
+    scene.fog = mapFog;
     renderer.clearDepth();
     scene.background = null;
     renderer.render(scene, camera);

@@ -39,7 +39,7 @@
 
 **映射的分支与不变量**：顺序固定——既非 solid 又非 ladder 的 brush 直接跳过；平面数组为空或平面数低于 `MIN_PLANES_PER_BRUSH` 时跳过；AABB 任一边小于 `MIN_AABB_SIZE` 时跳过（`apps/debug/src/world/collider-adapter.ts:167` 起）。`verifyOutwardNormals` 提供独立的正反校验并输出 `NormalCheckReport`（`apps/debug/src/world/collider-adapter.ts:269`）。
 
-**传送点的实际运行路径不在本模块**：运行期传送由 `src/phys/teleport.rs` 的判定在权威物理内完成，主线程收事件的唯一入口是共享层 `src/phys/mod.rs` 的 `take_event`（`apps/debug/src/world/teleport-manager.ts:13` 起）。本模块当前只承担「解析 JSON + 暴露触发器列表」：`getTriggers()` 是唯一被外部调用的成员，消费点是 `RendererMain.loadScene`（`apps/debug/src/renderer/renderer-main.ts:496` 起），产出交给 `ColliderDebug.setTriggers`（触发区线框）与 `PlaneInspector`（准星拾取触发器 AABB）。
+**传送点的实际运行路径不在本模块**：运行期传送由 `src/phys/teleport.rs` 的判定在权威物理内完成，主线程收事件的唯一入口是共享层 `src/phys/mod.rs` 的 `take_event`（`apps/debug/src/world/teleport-manager.ts:13` 起）。本模块当前只承担「解析 JSON + 暴露触发器列表」：`getTriggers()` 是唯一被外部调用的成员，消费点是 `RendererMain.loadScene`（`apps/debug/src/renderer/renderer-main.ts:498` 起），产出交给 `ColliderDebug.setTriggers`（触发区线框）与 `PlaneInspector`（准星拾取触发器 AABB）。
 
 **自定义传送点的数据流**：列表按地图名分组存在 `localStorage`，主线程的列表渲染、新增、删除、清空与「传送到该点」按钮由 `apps/debug/src/app.ts` 承担（`apps/debug/src/world/custom-teleports.ts:8`）；其中 `saveCustomTeleports` 只被本文件的 `addCustomTeleport` 与 `removeCustomTeleport` 调用（`apps/debug/src/world/custom-teleports.ts:9`）。
 
