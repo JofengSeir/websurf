@@ -70,11 +70,11 @@ check('clampPitch(30)=30', near(clampPitch(30), 30));
 check('clampPitch(NaN)=0', near(clampPitch(Number.NaN), 0));
 
 // ── 真实文件段：Shavit .replay 原生解析 ─────────────────────────────
-// 本段期望值对应 `test/maps/surf_null_4.replay` 这一份 v12 文件（逐字段写成常量）。
+// 本段期望值对应 `test/replay/surf_null_4.replay` 这一份 v12 文件（逐字段写成常量）。
 // 该路径由本地放置、不入库；缺失时整段跳过（见下方 SKIP 分支）。
 
-/** 真实夹具路径（本地放置、不入库）：test/maps/surf_null_4.replay；下面按 v12 完整文件断言。 */
-const FIXTURE_URL = new URL('../../../test/maps/surf_null_4.replay', import.meta.url);
+/** 真实夹具路径（本地放置、不入库）：test/replay/surf_null_4.replay；下面按 v12 完整文件断言。 */
+const FIXTURE_URL = new URL('../../../../test/replay/surf_null_4.replay', import.meta.url);
 
 const asciiBytes = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 
@@ -186,7 +186,7 @@ function buildV2Fixture(n: number): Uint8Array {
 /** 非录像文本（JSON）：嗅探必须判负，直接解析必须报错。 */
 const JSON_TEXT = JSON.stringify({ map: 'testmap', frames: [{ pos: [1, 2, 3], ang: [0, 0] }] });
 
-console.log('\n[2] Shavit .replay 原生解析（真实文件 test/maps/surf_null_4.replay）');
+console.log('\n[2] Shavit .replay 原生解析（真实文件 test/replay/surf_null_4.replay）');
 let fixture: Uint8Array | null = null;
 try {
   fixture = readFileSync(FIXTURE_URL);
@@ -197,10 +197,10 @@ if (!fixture) {
   // 真实夹具缺失：loud skip——本段断言不计入 failures，也不因此 exit 1；
   // 合成 fixture 相关断言（[3] 起）照常跑。
   console.log(
-    '\n[SKIP] 真实 fixture 缺失（test/maps/surf_null_4.replay）——跳过「真实文件逐字节」段（[2][8] 节），其余断言照常',
+    '\n[SKIP] 真实 fixture 缺失（test/replay/surf_null_4.replay）——跳过「真实文件逐字节」段（[2][8] 节），其余断言照常',
   );
 } else {
-  check('fixture 可读（test/maps/surf_null_4.replay）', fixture.length > 0);
+  check('fixture 可读（test/replay/surf_null_4.replay）', fixture.length > 0);
   check('文件大小 53365 B', fixture.length === 53365, String(fixture.length));
   check('嗅探命中魔数', looksLikeShavitReplay(fixture));
   check('嗅探排除 JSON 文本', !looksLikeShavitReplay(new TextEncoder().encode(JSON_TEXT)));
@@ -886,7 +886,7 @@ console.log('\n[9] 文件类型识别（按魔数分派，不看扩展名）');
   );
 
   // 真实夹具：`.dem` 取 test/replay 下第一份（发现式，与末尾「Source .dem」段同口径）；
-  // `.replay` 取 test/maps/surf_null_4.replay。两者缺失都 loud skip，不计入 failures。
+  // `.replay` 取 test/replay/surf_null_4.replay。两者缺失都 loud skip，不计入 failures。
   const demDirs = [
     new URL('../../../test/replay/', import.meta.url),
     new URL('../../../../test/replay/', import.meta.url),
@@ -909,8 +909,8 @@ console.log('\n[9] 文件类型识别（按魔数分派，不看扩展名）');
   let realReplay: Uint8Array | null = null;
   for (const cand of [
     FIXTURE_URL,
-    new URL('../../../../test/maps/surf_null_4.replay', import.meta.url),
-    '../../test/maps/surf_null_4.replay',
+    new URL('../../../../test/replay/surf_null_4.replay', import.meta.url),
+    '../../test/replay/surf_null_4.replay',
   ]) {
     try {
       realReplay = new Uint8Array(readFileSync(cand));
@@ -922,7 +922,7 @@ console.log('\n[9] 文件类型识别（按魔数分派，不看扩展名）');
   if (realReplay) {
     check('真实 .replay 夹具 → replay', kindOfHead(realReplay) === 'replay', kindOfHead(realReplay));
   } else {
-    console.log('  SKIP 真实 .replay 夹具缺失（test/maps/surf_null_4.replay）');
+    console.log('  SKIP 真实 .replay 夹具缺失（test/replay/surf_null_4.replay）');
   }
 
   // 面板与拖拽实际调用的是 `sniffFileKind(File)`（按需切片，不整份读入）。

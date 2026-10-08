@@ -236,11 +236,11 @@ async function rebuildDist() {
   // ── 示例录像（深链演示用；本地夹具缺失时告警并跳过）──────────────
   await mkdir(join(dist, 'assets', 'maps'), { recursive: true });
   for (const name of ['surf_null_4.replay']) {
-    const srcReplay = join(repoRoot, 'test', 'maps', name);
+    const srcReplay = join(repoRoot, 'test', 'replay', name);
     if (existsSync(srcReplay)) {
       await copyFile(srcReplay, join(dist, 'assets/maps', name));
     } else {
-      console.warn(`[WARN] 示例资产缺失，跳过: test/maps/${name}（dist 示例深链将不可用）`);
+      console.warn(`[WARN] 示例资产缺失，跳过: test/replay/${name}（dist 示例深链将不可用）`);
     }
   }
 

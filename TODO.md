@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（171 条）
+## 未结项（169 条）
 ### 待裁决（33）
 - **T-005** apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html…　`game`
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
@@ -63,7 +63,7 @@
 - **T-504** 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉　`shared`
 
 
-### 待修（136）
+### 待修（134）
 - **T-007** apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into…　`debug`
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
@@ -92,8 +92,6 @@
 - **T-122** createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL　`viewer`
 - **T-123** 导入无超时与取消，Worker 不回消息时 Promise 永不结算　`viewer`
 - **T-126** panel.ts 平移输入框 hint 写「默认 0」而 step 为 10 HU　`viewer`
-- **T-127** 真实夹具路径跨三处失效（指向 test/maps 而非 test/replay）　`viewer`
-- **T-128** dist 里的示例记录无法由当前源码路径重新产出　`viewer`
 - **T-129** 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080　`viewer`
 - **T-130** 冒烟按键断言（6 键）与当前 UI 八键不一致　`viewer`
 - **T-131** 冒烟三条静态断言只对 single 产物成立　`viewer`
@@ -264,8 +262,8 @@
 | T-124 | Track.offset 只有下界没有上界，可拉长主时钟总长 | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/trackpanel.ts:204 | documents/viewer/implementation/replay.md | — | — |
 | T-125 | 零帧轨道的口径不一致（列表面板有卡片、3D 无对象） | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/visuals.ts:96 | documents/viewer/implementation/replay.md | — | — |
 | T-126 | panel.ts 平移输入框 hint 写「默认 0」而 step 为 10 HU | 文档口径 | viewer | 待修 | apps/viewer/src/replay/panel.ts:154 | documents/viewer/implementation/replay.md | 判据：@BT@git grep -n "默认 0" -- apps/viewer/src/replay/panel.ts@BT@ ⇒ hint 与 @BT@step=10 HU@BT@ 一致 | — |
-| T-127 | 真实夹具路径跨三处失效（指向 test/maps 而非 test/replay） | 缺陷 | viewer | 待修 | apps/viewer/test/replay-selftest.ts:75 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "test/maps" -- apps/viewer@BT@ ⇒ 0 命中（夹具路径指向 test/replay） | — |
-| T-128 | dist 里的示例记录无法由当前源码路径重新产出 | 缺陷 | viewer | 待修 | apps/viewer/scripts/build-dist.mjs:238 | documents/viewer/implementation/scripts-and-test.md | 判据：`git grep -n "test/maps" -- apps/viewer/scripts` ⇒ 0 命中（示例记录源改指 test/replay） | — |
+| T-127 | 真实夹具路径跨三处失效（指向 test/maps 而非 test/replay） | 缺陷 | viewer | 已结案 | apps/viewer/test/replay-selftest.ts:77 ⇒ 夹具路径改指 test/replay（4 层，与 :912 同口径）；`npm run test:replay` ⇒ fixture 可读 / 53365 B / 字节闭合 全 ok | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
+| T-128 | dist 里的示例记录无法由当前源码路径重新产出 | 缺陷 | viewer | 已结案 | apps/viewer/scripts/build-dist.mjs:239 ⇒ 示例记录源改指 test/replay；`npm run build:dist -- --multi` ⇒ dist/assets/maps/surf_null_4.replay 53365 B 已打包 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-129 | 冒烟缺省 SMOKE_URL 指向另一工程的 dev 端口 8080 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:32 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "8080" -- apps/viewer/test/smoke-cdp.mjs@BT@ ⇒ 0 命中（缺省 SMOKE_URL 指向本工程端口 8100） | — |
 | T-130 | 冒烟按键断言（6 键）与当前 UI 八键不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:415 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 viewer 冒烟脚本 ⇒ 按键断言条数与当前 UI 八键一致 | — |
 | T-131 | 冒烟三条静态断言只对 single 产物成立 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:138 | documents/viewer/implementation/scripts-and-test.md | 判据：冒烟三条静态断言在 single 与多产物两种形态下都成立 ⇒ 各跑一次 exit 0 | — |

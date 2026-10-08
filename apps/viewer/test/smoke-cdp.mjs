@@ -11,7 +11,7 @@
  *
  * 用法：npm run local:smoke
  *   环境变量：EDGE_PATH / WS_PATH / SMOKE_URL / SMOKE_PORT / SMOKE_FILE_REPLAY
- *   缺省用 CDP 把本地 test/maps/surf_null_4.replay 塞进「选择录像文件」input（与用户点选同链路）；
+ *   缺省用 CDP 把本地 test/replay/surf_null_4.replay 塞进「选择录像文件」input（与用户点选同链路）；
  *   SMOKE_URL 带 ?replay= / ?bsp= 时改走深链自动导入。
  *   夹具或地图缺失时 loud skip：打印 SKIP、不计入 failures。
  */
@@ -30,9 +30,9 @@ const EDGE =
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = Number(process.env.SMOKE_PORT ?? 9333);
 const URL_ = process.env.SMOKE_URL ?? 'http://127.0.0.1:8080/web/index.html';
-// 缺省夹具：<仓库根>/test/maps/surf_null_4.replay（SMOKE_FILE_REPLAY 可覆盖）；深链跑不需要文件选择
+// 缺省夹具：<仓库根>/test/replay/surf_null_4.replay（SMOKE_FILE_REPLAY 可覆盖）；深链跑不需要文件选择
 const LOCAL_REPLAY =
-  process.env.SMOKE_FILE_REPLAY ?? join(VIEWER_ROOT, '..', '..', 'test', 'maps', 'surf_null_4.replay');
+  process.env.SMOKE_FILE_REPLAY ?? join(VIEWER_ROOT, '..', '..', 'test', 'replay', 'surf_null_4.replay');
 
 async function loadWs() {
   try {
@@ -143,7 +143,7 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   check('dist 根无 worker.js / *.wasm', !existsSync(join(distRoot, 'worker.js')) && !existsSync(join(distRoot, 'websurf_viewer_wasm_bg.wasm')));
   check('dist/play.cmd 存在', existsSync(join(distRoot, 'play.cmd')));
   check('dist-multi/ 不存在（单一 dist）', !existsSync(join(VIEWER_ROOT, 'dist-multi')));
-  // 示例录像 dist/assets/maps/surf_null_4.replay 由 build 从本地源 test/maps/surf_null_4.replay 复制；
+  // 示例录像 dist/assets/maps/surf_null_4.replay 由 build 从本地源 test/replay/surf_null_4.replay 复制；
   // 源不存在时 build 只告警并跳过，本断言随之跳过（不误判为失败）。
   if (existsSync(LOCAL_REPLAY)) {
     check(
@@ -151,7 +151,7 @@ if (!existsSync(join(distRoot, 'index.html'))) {
       existsSync(join(distRoot, 'assets', 'maps', 'surf_null_4.replay')),
     );
   } else {
-    console.log('  skip  dist/assets/maps/surf_null_4.replay（本地源 test/maps/surf_null_4.replay 不存在，build 未打包该示例）');
+    console.log('  skip  dist/assets/maps/surf_null_4.replay（本地源 test/replay/surf_null_4.replay 不存在，build 未打包该示例）');
   }
 
   const playCmd = readFileSync(join(distRoot, 'play.cmd'), 'utf8');
@@ -363,7 +363,7 @@ try {
     sessionId,
   );
   console.log('  信息条：' + metaText);
-  // 以下数值取自 test/maps/surf_null_4.replay 头部，与 apps/viewer/test/replay-selftest.ts 的真实文件段同源
+  // 以下数值取自 test/replay/surf_null_4.replay 头部，与 apps/viewer/test/replay-selftest.ts 的真实文件段同源
   check('信息条含成绩 16.21 s', metaText.includes('成绩') && metaText.includes('16.21 s'), metaText);
   check('信息条含玩家 [U:1:196340649]', metaText.includes('[U:1:196340649]'), metaText);
   check('信息条含地图 surf_null · Bonus 4', metaText.includes('surf_null') && metaText.includes('Bonus 4'), metaText);

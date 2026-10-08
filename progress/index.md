@@ -197,3 +197,4 @@
 | 2026-10-08 | 经验教训写进 skill：`skills/websurf-env-traps/SKILL.md` 新增 §8（文档/看板/锚点 8 条）+ §1 两行；只读 md 走 owner 许可 + sync | progress/monthly/2026-10-7.md:9 |
 | 2026-10-09 | Pages 站点被「从分支构建」顶掉（站点根变 README 渲染页）——`build_type` 改回 `workflow` + 重跑部署已恢复；取证：188 份 DSH 会话日志 0 命中，改动来自浏览器会话；登记 D-021 / T-607 | progress/monthly/2026-10-7.md:10 |
 | 2026-10-09 | 看板清理：65 条待裁决逐条核验（遗弃 7 / 转待修 25 / 保留 33）＋ OWNER 14 条决定按推荐值落实（D-020 分卷已执行）＋ 53 条分卷（TODO 97.3→77.9 KB） | progress/monthly/2026-10-7.md:11 |
+| 2026-10-09 | T-127/T-128 结案：viewer 夹具与 dist 示例源改指 `test/replay`（+ bundle 层数修正）⇒ 自检真实文件段不再 SKIP、dist 已打包示例 | progress/monthly/2026-10-7.md:12 |
