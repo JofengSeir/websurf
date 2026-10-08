@@ -66,7 +66,7 @@
 | `build:ts` | `apps/viewer/package.json:15` | 依次跑 `typecheck` → `build:worker` → `build:app` | 同上两个 `.js` |
 | `build` | `apps/viewer/package.json:16` | `build:wasm` + `build:ts` | 全量 dev 产物 |
 | `build:dist` | `apps/viewer/package.json:17` | `node scripts/build-dist.mjs`（默认 single 产物） | `apps/viewer/dist/**` |
-| `check:api` | `apps/viewer/package.json:18` | `node scripts/check-wasm-api.mjs`（`pkg/*.d.ts` 契约 + TS 导入反向覆盖） | 无 |
+| `check:api` | `apps/viewer/package.json:18` | `node scripts/check-wasm-api.mjs`（`pkg/*.d.ts` 契约 + TS 导入反向覆盖 + `BspMetadata`↔`BspMeta` 键名对齐） | 无 |
 | `dev` | `apps/viewer/package.json:19` | `python ../../src/serve.py 8100 .`（**端口 8100**，服务根 = 工程根） | 无 |
 
 产物落点与形态：

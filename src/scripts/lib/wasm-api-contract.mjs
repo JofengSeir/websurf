@@ -18,6 +18,10 @@
  *   extractExportsFromDts            ← 仅 `apps/game/scripts/check-wasm-api.mjs` 与
  *                                      `apps/viewer/scripts/check-wasm-api.mjs`
  *   findPkgEntryJs                   ← 当前无调用方
+ *   assertStructFieldsMatchInterface ← 仅 `apps/viewer/scripts/check-wasm-api.mjs`
+ *                                      （Rust serde 键名 ↔ TS 接口键名；内部用下面两个提取函数）
+ *   extractRustSerdeKeys             ← 仅 `apps/viewer/scripts/check-wasm-api.mjs` 与上面的断言
+ *   extractTsInterfaceKeys           ← 同上
  *   DEFAULT_MISSING_PKG_HINT         ← 三份薄配置都不传 missingHint，故默认值生效
  */
 
@@ -210,4 +214,125 @@ export function findPkgEntryJs(pkgDir) {
   if (!existsSync(pkgDir)) return null;
   const hit = readdirSync(pkgDir).filter(isPkgEntryJs);
   return hit.length ? join(pkgDir, hit[0]) : null;
+}
+
+/** 找配对右花括号的下标（从 open 处的 '{' 起按深度配对）；找不到返回文本长度。 */
+function matchBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return text.length;
+}
+
+/** 按 serde 的 `rename_all` 命名法改写字段名；未列出的命名法原样返回（保守：多报而非漏报）。 */
+function applyRenameAll(field, style) {
+  if (!style) return field;
+  const parts = field.split('_');
+  switch (style) {
+    case 'camelCase':
+      return parts.map((p, i) => (i === 0 ? p : p[0].toUpperCase() + p.slice(1))).join('');
+    case 'PascalCase':
+      return parts.map((p) => p[0].toUpperCase() + p.slice(1)).join('');
+    case 'kebab-case':
+      return parts.join('-');
+    case 'SCREAMING_SNAKE_CASE':
+      return field.toUpperCase();
+    default:
+      return field;
+  }
+}
+
+/**
+ * 从 Rust 结构体源码里提取**序列化后的键名**。
+ *
+ * 定位第一个 `pub struct <structName>`，按花括号配对取结构体体；逐字段取 `pub <field>: <type>,`，
+ * 字段前紧邻 `#[serde(rename = "x")]` 时取 `x`，结构体标 `#[serde(rename_all = "…")]` 时按该
+ * 命名法改写。不覆盖 `#[serde(skip)]` / `flatten`（本仓未使用；真用到时本函数会多报键名，
+ * 属保守失败——宁可报错也不静默放过）。
+ *
+ * @param {{ rustText: string, structName: string }} args
+ * @returns {Set<string>}
+ */
+export function extractRustSerdeKeys({ rustText, structName } = {}) {
+  if (!rustText || !structName) {
+    throw new Error('wasm-api-contract: extractRustSerdeKeys 缺少 rustText / structName');
+  }
+  const at = rustText.search(new RegExp('\\bpub\\s+struct\\s+' + structName + '\\b'));
+  if (at < 0) throw new Error('wasm-api-contract: 未找到 pub struct ' + structName);
+  const open = rustText.indexOf('{', at);
+  if (open < 0) throw new Error('wasm-api-contract: pub struct ' + structName + ' 缺花括号');
+  const body = rustText.slice(open + 1, matchBrace(rustText, open));
+  const head = rustText.slice(Math.max(0, at - 400), at);
+  const renameAll = /rename_all\s*=\s*"([^"]+)"/.exec(head);
+  const keys = new Set();
+  let pending = null;
+  for (const rawLine of body.split('\n')) {
+    const line = rawLine.trim();
+    const renamed = /^#\[serde\([^)]*rename\s*=\s*"([^"]+)"/.exec(line);
+    if (renamed) {
+      pending = renamed[1];
+      continue;
+    }
+    const field = /^pub\s+(\w+)\s*:/.exec(line);
+    if (!field) continue;
+    keys.add(pending === null ? applyRenameAll(field[1], renameAll && renameAll[1]) : pending);
+    pending = null;
+  }
+  return keys;
+}
+
+/**
+ * 从 TS 接口源码里提取键名（可选标记 `?` 不算键名的一部分）。
+ *
+ * 定位 `interface <interfaceName>`（可带 `export`），按花括号配对取体，逐行取
+ * `<key>?: <type>;`。注释行与嵌套对象字面量里的键（形如 `a: { b: … }`）不参与判定。
+ *
+ * @param {{ tsText: string, interfaceName: string }} args
+ * @returns {Set<string>}
+ */
+export function extractTsInterfaceKeys({ tsText, interfaceName } = {}) {
+  if (!tsText || !interfaceName) {
+    throw new Error('wasm-api-contract: extractTsInterfaceKeys 缺少 tsText / interfaceName');
+  }
+  const at = tsText.search(new RegExp('interface\\s+' + interfaceName + '\\b'));
+  if (at < 0) throw new Error('wasm-api-contract: 未找到 interface ' + interfaceName);
+  const open = tsText.indexOf('{', at);
+  if (open < 0) throw new Error('wasm-api-contract: interface ' + interfaceName + ' 缺花括号');
+  const body = tsText.slice(open + 1, matchBrace(tsText, open));
+  const keys = new Set();
+  for (const rawLine of body.split('\n')) {
+    const key = /^\s*(\w+)\s*\??\s*:/.exec(rawLine);
+    if (key) keys.add(key[1]);
+  }
+  return keys;
+}
+
+/**
+ * 断言「Rust 结构体的序列化键名集合 == TS 接口的键名集合」——两侧都不把对方纳入编译期校验时，
+ * 这条断言就是唯一的对齐门（字段改名即失败）。
+ *
+ * 返回 { ok, missingInTs, missingInRust, message }：missingInTs = Rust 有而 TS 缺（TS 会静默
+ * 拿到 undefined），missingInRust = TS 有而 Rust 缺（TS 侧多写了不存在的字段）。解析失败
+ * （文件不可读 / 结构体或接口找不到）转成 ok=false + message，不抛异常。
+ *
+ * @param {{ rustPath: string, structName: string, tsPath: string, interfaceName: string }} args
+ * @returns {{ ok: boolean, missingInTs: string[], missingInRust: string[], message?: string }}
+ */
+export function assertStructFieldsMatchInterface({ rustPath, structName, tsPath, interfaceName } = {}) {
+  let rustKeys;
+  let tsKeys;
+  try {
+    rustKeys = extractRustSerdeKeys({ rustText: readTextFile(rustPath), structName });
+    tsKeys = extractTsInterfaceKeys({ tsText: readTextFile(tsPath), interfaceName });
+  } catch (error) {
+    return { ok: false, missingInTs: [], missingInRust: [], message: error.message };
+  }
+  const missingInTs = [...rustKeys].filter((k) => !tsKeys.has(k));
+  const missingInRust = [...tsKeys].filter((k) => !rustKeys.has(k));
+  return { ok: missingInTs.length === 0 && missingInRust.length === 0, missingInTs, missingInRust };
 }

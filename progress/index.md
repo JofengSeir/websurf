@@ -209,3 +209,4 @@
 | 2026-10-09 | T-142 结案：viewer 信息条改收已解析的 Track\|null（跟随轨道只在 TrackSet.follow 一处解析）+ 同族 prerun 文案 | progress/monthly/2026-10-7.md:21 |
 | 2026-10-09 | T-152 结案：viewer 解析 Worker 加 30 s 看门狗（到期判失联 ⇒ 主线程回退）；假 Worker 探针实测 30.0 s | progress/monthly/2026-10-7.md:22 |
 | 2026-10-09 | T-124 结案：viewer 轨道偏移输入加 1 h 上限（模型侧不设限，只挡用户输入面） | progress/monthly/2026-10-7.md:23 |
+| 2026-10-09 | T-151 结案：viewer 加第三层契约门（Rust `BspMetadata` serde 键名 ↔ TS `BspMeta` 接口键名，双向缺键即 exit 1） | progress/monthly/2026-10-7.md:24 |

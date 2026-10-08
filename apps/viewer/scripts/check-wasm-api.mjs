@@ -9,6 +9,9 @@
  * 清单取自**实际消费面**，而非与其他工程对齐——多列未使用的 API 会让契约失去含义。
  * 反向断言由 `assertTsImportsCoveredByExports` 完成：源码新增导入而清单未跟上时本检查失败。
  *
+ * 第三层（2026-10-09 起）：`BspMetadata`（Rust serde 键名）↔ `BspMeta`（TS 接口键名）逐键对齐
+ * （`assertStructFieldsMatchInterface`）——两侧都不把对方纳入编译期校验，字段改名即失败。
+ *
  * 用法：node scripts/check-wasm-api.mjs
  * 退出码：0 = 通过，1 = 不匹配
  */
@@ -16,6 +19,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertDtsExports,
+  assertStructFieldsMatchInterface,
   assertTsImportsCoveredByExports,
   extractExportsFromDts,
   readDtsApiNames,
@@ -41,10 +45,19 @@ const coverage = assertTsImportsCoveredByExports({
   pkgBasename: PKG_BASE,
   exports: extractExportsFromDts(DTS),
 });
+// 第三层：BspMetadata（Rust serde 键名）↔ BspMeta（TS 接口键名）——两侧都不把对方纳入编译期
+// 校验，字段改名时 TS 只会静默拿到 undefined，故这条断言是唯一的对齐门。
+const metaFields = assertStructFieldsMatchInterface({
+  rustPath: join(ROOT, 'crates', 'wasm', 'src', 'lib.rs'),
+  structName: 'BspMetadata',
+  tsPath: join(ROOT, 'src', 'core', 'bsp.ts'),
+  interfaceName: 'BspMeta',
+});
 
-if (assertion.ok && coverage.ok) {
+if (assertion.ok && coverage.ok && metaFields.ok) {
   console.log(`✓ WASM 契约通过：BspProcessor 类 + ${VIEWER_API.length} 个 API 全部导出。`);
   console.log(`  TS 导入符号 (${coverage.imports.length}): ${coverage.imports.join(', ')}`);
+  console.log('  BspMetadata ↔ BspMeta 键名逐一对齐。');
   process.exit(0);
 }
 
@@ -56,5 +69,16 @@ if (!assertion.ok) {
 if (!coverage.ok) {
   console.error(`✗ TS 导入了声明面之外的符号 ${coverage.missing.length} 个:`);
   for (const m of coverage.missing) console.error(`    - ${m}`);
+}
+if (!metaFields.ok) {
+  if (metaFields.message) console.error(`✗ ${metaFields.message}`);
+  if (metaFields.missingInTs.length) {
+    console.error(`✗ Rust 有而 TS 缺的键 ${metaFields.missingInTs.length} 个（TS 侧会静默拿到 undefined）:`);
+    for (const m of metaFields.missingInTs) console.error(`    - ${m}`);
+  }
+  if (metaFields.missingInRust.length) {
+    console.error(`✗ TS 有而 Rust 缺的键 ${metaFields.missingInRust.length} 个:`);
+    for (const m of metaFields.missingInRust) console.error(`    - ${m}`);
+  }
 }
 process.exit(1);
