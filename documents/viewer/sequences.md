@@ -90,7 +90,7 @@
 | BSP 解析 / 导出抛错 | `humanizeBspError` 按 message 归成四类文案；无地图时显示引导层错误详情，已有地图时临时提示 5 s 并还原旧摘要 | `apps/viewer/src/core/bsp.ts:169`、`apps/viewer/src/app.ts:568` 到 `apps/viewer/src/app.ts:579` |
 | GLB 未携带光照图集 | 共享 applyLightmap 返回 false，viewer 打一条「未施加」说明；地图仍可看（贴图原色） | `apps/viewer/src/core/scene.ts:209` 到 `apps/viewer/src/core/scene.ts:211` |
 | 施加静态光照中途抛错 | 共享 applyLightmap 的 catch 只 `console.error` 并返回 false，不阻断挂载 | `src/renderer-shared/scene/scene-builder.ts:131` 到 `src/renderer-shared/scene/scene-builder.ts:133` |
-| 块内几何合并失败 | 保留全部子块（不丢几何）；最终合并失败时逐块建 Mesh（共享核，game/viewer 同一份） | `src/renderer-shared/scene/scene-optimizer.ts:342`、`:362`、`:374` |
+| 块内几何合并失败 | 保留全部子块（不丢几何）；最终合并失败时逐块建 Mesh（共享核，game/viewer 同一份） | `src/renderer-shared/scene/scene-optimizer.ts:343`、`:356`、`:374`、`:395` |
 | Worker 构造抛错或 `onerror` | `workerBroken` 置位、终止并丢弃 Worker、用同一个错误拒绝全部未结算请求；此后每次导入直接走主线程 | `apps/viewer/src/replay/importer.ts:116` 到 `apps/viewer/src/replay/importer.ts:130` |
 | 主线程回退的魔数嗅探失败 | 抛「不是 Shavit .replay 记录文件」错误，经面板 note 显示 | `apps/viewer/src/replay/importer.ts:201` 到 `apps/viewer/src/replay/importer.ts:205` |
 | Worker 收到消息但永不回包 | `import` 不设超时：promise 永不结算，面板 `busy` 保持为真，后续导入被丢弃 | `apps/viewer/src/replay/importer.ts:149`、`apps/viewer/src/replay/panel.ts:316` 到 `apps/viewer/src/replay/panel.ts:320` |

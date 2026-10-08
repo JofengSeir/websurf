@@ -340,14 +340,25 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
         merged = geoms;
         tables = [seeds ? buildSourceTable(geoms, seeds) : null];
       } else {
-        const mg = mergeGeometries(geoms, false);
-        if (mg) {
-          for (const g of geoms) g.dispose();
-          merged = [mg];
-          tables = [seeds ? buildSourceTable(geoms, seeds) : null];
-        } else {
-          merged = geoms; // 属性不一致（防御分支）：保留各自独立几何
-          tables = geoms.map((_, i) => (seeds ? buildSourceTable([geoms[i]], [seeds[i]]) : null));
+        // 属性集不一致时 mergeGeometries 整批返回 null（典型：世界面没有 `normal`、prop 有）⇒
+        // 先按合并签名切子组、逐组合并（T-503）：签名不同的子组各自成块，不再整组退化成「不合并」。
+        merged = [];
+        tables = [];
+        for (const idxs of splitMergeIndices(geoms)) {
+          const sub = idxs.map((i) => geoms[i]);
+          const subSeeds = seeds ? idxs.map((i) => seeds[i]) : null;
+          const mg = sub.length > 1 ? mergeGeometries(sub, false) : null;
+          if (mg) {
+            for (const g of sub) g.dispose();
+            merged.push(mg);
+            tables.push(subSeeds ? buildSourceTable(sub, subSeeds) : null);
+          } else {
+            // 单元素子组、或同签名仍失败（极端防御）：各自独立几何
+            for (let k = 0; k < sub.length; k++) {
+              merged.push(sub[k]);
+              tables.push(subSeeds ? buildSourceTable([sub[k]], [subSeeds[k]]) : null);
+            }
+          }
         }
       }
       for (let i = 0; i < merged.length; i++) {
@@ -360,37 +371,39 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       for (const it of arr) it.mesh.geometry.dispose();
       continue;
     }
-    let chunk: THREE.Mesh;
+    // 最终合并也按合并签名分组：签名不同的几何不能被 mergeGeometries 合到一起（T-503），
+    // 故一个 cell 可能产出多块；每块内的 groups 仍与材质数组一一对应。
+    const cellChunks: THREE.Mesh[] = [];
     if (mergedGeoms.length === 1) {
-      chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
       attachSourceTable(mergedGeoms[0], mergedTables[0]);
+      cellChunks.push(new THREE.Mesh(mergedGeoms[0], mats[0]));
       drawCallEst++;
     } else {
       // 归一后的数组既做最终合并的入参，也定区间表的长度口径（逐项对应）
       const normalized = opts?.normalizeGroup ? opts.normalizeGroup(mergedGeoms) : mergedGeoms;
-      const final = mergeGeometries(normalized, true);
-      if (final) {
-        for (const g of mergedGeoms) if (g !== final) g.dispose();
-        chunk = new THREE.Mesh(final, mats);
-        drawCallEst += final.groups.length;
-        attachSourceTable(final, concatSourceTables(normalized, mergedTables));
-      } else {
-        // 最终合并失败（极端防御）：每个材质单独一块
-        chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
-        attachSourceTable(mergedGeoms[0], mergedTables[0]);
-        for (let i = 1; i < mergedGeoms.length; i++) {
-          const extra = new THREE.Mesh(mergedGeoms[i], mats[i]);
-          attachSourceTable(mergedGeoms[i], mergedTables[i]);
-          chunks.push(extra);
-          chunkCount++;
-          drawCallEst++;
+      for (const idxs of splitMergeIndices(normalized)) {
+        const sub = idxs.map((i) => normalized[i]);
+        const subMats = idxs.map((i) => mats[i]);
+        const subTables = idxs.map((i) => mergedTables[i]);
+        const final = sub.length > 1 ? mergeGeometries(sub, true) : null;
+        if (final) {
+          for (const g of sub) if (g !== final) g.dispose();
+          attachSourceTable(final, concatSourceTables(sub, subTables));
+          cellChunks.push(new THREE.Mesh(final, subMats));
+          drawCallEst += final.groups.length;
+        } else {
+          // 单元素子组、或同签名仍失败（极端防御）：每个材质单独一块
+          for (let k = 0; k < sub.length; k++) {
+            attachSourceTable(sub[k], subTables[k]);
+            cellChunks.push(new THREE.Mesh(sub[k], [subMats[k]]));
+            drawCallEst++;
+          }
         }
       }
     }
     for (const it of arr) it.mesh.geometry.dispose();
-    chunkCount++;
     for (const g of mergedGeoms) vertsTotal += g.attributes.position.count;
-    chunks.push(chunk);
+    for (const c of cellChunks) { chunks.push(c); chunkCount++; }
   }
 
   return { infos, keptMeshes, chunks, cellSize, cellsCount: cells.size, chunkCount, vertsTotal, drawCallEst };
@@ -465,4 +478,33 @@ export function optimizeScene(
       `draw call 估算 ${r.drawCallEst} | ` +
       `前向视锥可见块估算 ${visibleEst >= 0 ? `${visibleEst}/${r.chunkCount}` : 'N/A（camera 未就绪）'}`,
   );
+}
+
+
+/**
+ * 几何的「合并签名」：`mergeGeometries` 要求同一批几何的**属性名集合、itemSize、类型、
+ * normalized** 与**是否 indexed** 全一致，否则整批返回 null。本仓的实际触发面是「世界面没有
+ * `normal`（材质是 MeshBasic、导出侧不写）而 prop 有」⇒ 同一 cell / 同一材质里混着两类几何时
+ * 合批静默失效（T-503）。
+ */
+function mergeSignature(g: THREE.BufferGeometry): string {
+	const parts: string[] = [];
+	for (const name of Object.keys(g.attributes).sort()) {
+		const a = g.attributes[name] as THREE.BufferAttribute;
+		const ctor = (a.array as unknown as { constructor?: { name?: string } }).constructor;
+		parts.push(`${name}:${a.itemSize}:${ctor?.name ?? '?'}:${a.normalized ? 1 : 0}`);
+	}
+	return (g.index ? 'idx|' : 'raw|') + parts.join(',');
+}
+
+/** 按合并签名把几何**下标**切成可合并的子组（保序：先出现的签名先成组）。 */
+function splitMergeIndices(geoms: THREE.BufferGeometry[]): number[][] {
+	const bySig = new Map<string, number[]>();
+	for (let i = 0; i < geoms.length; i++) {
+		const s = mergeSignature(geoms[i]);
+		const arr = bySig.get(s);
+		if (arr) arr.push(i);
+		else bySig.set(s, [i]);
+	}
+	return [...bySig.values()];
 }
