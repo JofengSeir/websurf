@@ -4,7 +4,7 @@
  * 构造函数按序建出四块：
  * 1. 「更换地图」文件行（`filebtn map-reload`，`for="bspFile"`，点击转发 `#bspFile.click()`；
  *    未加载地图时不显示）；
- * 2. 光照模式分区（`select#lightingMode`，两档 baked / texture，初值 baked）；
+ * 2. 光照模式分区（`select#lightingMode`，两档 baked / texture，初值取运行期 `getLightingMode()`，切换后回填实况）；
  * 3. 「地图信息」分区：默认只列文件 / 出生点数 / 世界尺寸三行，统计明细收进折叠容器；
  * 4. 「出生点导航」分区：每个出生点一行（`spawn-item`，推荐项加 `primary` 类与 ★ 前缀），
  *    行内「跳转」按钮把该点的位置与角度交给构造时传入的 `onJump`。
@@ -20,7 +20,7 @@ import { el, foldBox, section } from '../core/dom.js';
 import { spawnPointAng } from '../core/spawn.js';
 import type { Pose } from '../core/pose.js';
 import type { BspLoadResult } from '../core/bsp.js';
-import type { LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 export interface WorldBox {
   min: [number, number, number];
@@ -95,8 +95,8 @@ export class MapPanel {
     ] as const) {
       select.appendChild(el('option', undefined, label, { value }));
     }
-    select.value = 'baked';
-    select.addEventListener('change', () => this.onLightingMode(select.value as LightingMode));
+    select.value = getLightingMode(); // 初值取运行期实况（不再写死 'baked'：默认值只在 scene.ts 一处）
+    select.addEventListener('change', () => { this.onLightingMode(select.value as LightingMode); select.value = getLightingMode(); });
     row.appendChild(select);
     body.appendChild(row);
     body.appendChild(
