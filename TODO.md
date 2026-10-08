@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07 已触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **433**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **434**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -26,9 +26,9 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（172 条）
+## 未结项（173 条）
 
-### 待裁决（63）
+### 待裁决（64）
 
 - **T-005** apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html…　`game`
 - **T-007** apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into…　`debug`
@@ -92,6 +92,7 @@
 - **T-308** 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套　`debug`
 - **T-309** 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24）　`debug`
 - **T-409** `check-glb-parity.mjs` 门禁零接线（未进 package.json / CI）　`共享`
+- **T-433** prop 逐顶点光照（`sp_<i>.vhv`）数据极暗：黑块 / 紫斑的**唯一**来源（关掉该路径黑像素 4.94%→0.00%），解析已对齐 SDK（checksum 1503/1503），收口口径待定　`shared`
 - **T-504** 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉　`shared`
 - **T-506** 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果）　`shared`
 - **T-507** check_stuck 的修法 D / C 未实施　`shared`
@@ -211,7 +212,7 @@
 
 > 已记录 / 已结案 **40 条已分卷**到 `progress/board/archive-2026-10.md`（ID 与状态保留；编号不复用，取新号时连同该页一起数）。
 
-## 总表（182 条）
+## 总表（183 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
@@ -410,6 +411,7 @@
 | T-430 | 【S10】3D 天空盒改用起源正统的**第二相机**两遍法：天空相机 = `sky_camera` 原点 + 主相机位置 / scale，天空区图元摘到独立层，清深度后主相机再画主世界；并纠正 T-415「无几何可渲染」与 T-428「锚点=相机」两条已结案结论 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:177 | 见 progress/monthly/2026-10-6.md:9、:10 | 判据：@BT@node .tmp/mapsurvey/skyfrontface.mjs test/maps/surf_boreas.bsp@BT@ ⇒ 引擎式正面朝向 359.8/361、相对式 235.6/361，163/163 出生点引擎式更优；@BT@node .tmp/mapsurvey/skyver.mjs test/maps/surf_boreas.bsp .tmp/mapsurvey/skyver.png@BT@ ⇒ 天空组包围盒 min=[-16192,-14862,-15784] max=[16320,-6676,15808]、层分离 760+881 无交集；三工程 @BT@npm run typecheck@BT@ exit 0 | — |
 | T-431 | 【S11】地图上的「黑带」：lightmap 图集的**空纹素**（每面 1 px 边距 + 打包未用空间）是 `(0,0,0,0)`，解码成纯黑，而面边缘的取样会踩进去 ⇒ 每个面的边界上画出一条黑带（owner 目视报「这些地图纹理有问题 有莫名其妙的黑带」）。改为落位填像素后做**膨胀**填满空纹素 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/lightmap.rs:545 | 见 progress/monthly/2026-10-6.md:11、:12；根因由 T-432 定位（位移面 UV 必须是细分网格，不是投影） | 判据：@BT@cargo test -p websurf-wasm-core --lib dilate_fills_every_empty_texel@BT@ ⇒ 1 passed（本机宿主链接缺 mingw @BT@dlltool@BT@ 时改用 @BT@node .tmp/mapsurvey/rustunit.mjs@BT@ 抽出同一份源码 + @BT@rustc@BT@ 编译执行，输出 @BT@DILATE-TEST-OK@BT@）；@BT@node .tmp/mapsurvey/atlassurvey.mjs test/maps/surf_boreas.bsp@BT@ ⇒ 8 张图均 @BT@空=0.0%@BT@；@BT@node .tmp/mapsurvey/uvcheck.mjs test/maps/surf_boreas.bsp@BT@ ⇒ @BT@badSamplingVerts=0@BT@（改前 26,810 / 7.27%） | — |
 | T-432 | 【S11·根因】位移面的 lightmap UV **不能用投影**：起源 SDK 要求位移面按**细分网格**插值——四角 luxel 坐标恒为 `(0.5,0.5)…(U+0.5,V+0.5)`（`builddisp.cpp` 的 `CalcLuxelCoords` / `CalcDispSurfCoords`），归一化后就是**单位方格** `u=j/2^power`、`v=i/2^power`。我们此前把（已被位移推走的）顶点投影到 lightmap 轴 ⇒ 漂出本面矩形，采到相邻面的光照贴图（owner 说的「混进其他光照贴图」）或图集空白（黑带） | 缺陷 | shared | 已结案 | src/wasm-core/vbsp/handle/mod.rs:391 | 见 progress/monthly/2026-10-6.md:13、:14 | 判据：@BT@node .tmp/mapsurvey/uvrect.mjs test/maps/surf_boreas.bsp .tmp/mapsurvey/pre-surf_boreas-atlas.png@BT@ ⇒ 逐面 uv 盒落在自己矩形内 **1351/1351、越界 0**（改前 **931/1351 = 68.9%**，最大越界 49 纹素、39 个整块落到图集外）；8 张图同法全部 0 越界 | — |
+| T-433 | 【S12·残留黑块的真实层级】owner 参考截图里的黑块 / 紫斑**全部**来自 prop 的逐顶点预烘焙光照路径（几何属性 `_VBSP_VLIGHT`，源文件是 pakfile 的 `sp_<i>.vhv`）：关闭该路径后同一视点纯黑像素 **4.94% → 0.00%**、均值 63.9 → 70.6。解析侧已逐字段对齐 SDK——`vradstaticprops.cpp:1563-1593` 写 `flags=4` / `vertexSize=4` 且顶点为 **B,G,R,A** 顺序，`gamebspfile.h:206-225` 的 `StaticPropLump_t` **没有** ambient cube 字段，与本仓 72 B 记录逐字段吻合；prop→文件的 checksum 校验 **1503 匹配 / 0 不符**。但**数据本身极暗**：1587 个 prop 全图最大字节仅 ~95/255、prop 均值亮度中位数 6.8/255、298 个 prop 全 0。VRAD 侧 `m_Color = direct + indirect`（`vradstaticprops.cpp:1427`）与世界面同一物理量 ⇒「world 亮、prop 近黑」是数据 + 兜底口径问题，**不是**解析错 | 缺陷 | shared | 待裁决 | src/wasm-core/vhv.rs:90 | progress/pending-detail.md | 口径见 OWNER.md **D-016** | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-2 |
