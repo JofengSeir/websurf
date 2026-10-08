@@ -61,13 +61,13 @@ export interface BspLoadResult {
 
 let wasmReady: Promise<void> | null = null;
 
-/** 动态插入 classic `<script>` 并等它加载完（回退分支加载 wasm-embedded.js 用）。 */
+/** 动态插入 classic `<script>` 并等它加载完（回退分支加载 wasm-embedded.js 用）；三条路径都移除标签，超时 10 s（T-108）。 */
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`script 加载失败: ${src}`));
+    const s = document.createElement('script'); const fail = (m: string): void => { s.remove(); reject(new Error(m)); };
+    s.src = src; s.onload = () => { clearTimeout(timer); s.remove(); resolve(); };
+    s.onerror = () => { clearTimeout(timer); fail(`script 加载失败: ${src}`); };
+    const timer = setTimeout(() => fail(`script 加载超时（10s）: ${src}`), 10_000);
     document.head.appendChild(s);
   });
 }

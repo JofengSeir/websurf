@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（143 条）
+## 未结项（142 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（111）
+### 待修（110）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -75,7 +75,6 @@
 - **T-062** 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径…　`viewer`
 - **T-102** 贴合检查提示串的 bbox 只取第一条越界轨道　`viewer`
 - **T-107** 分块选块包围盒只统计部分 Mesh，块边长由子集推出　`shared`
-- **T-108** 回退脚本加载无超时且成功路径不移除 script 标签　`viewer`
 - **T-114** 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems）　`viewer`
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
 - **T-130** 冒烟按键断言（6 键）与当前 UI 八键不一致　`viewer`
@@ -217,7 +216,7 @@
 | T-105 | ensureWasm 把首次失败永久缓存，一次瞬时失败后本会话不自愈 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/bsp.ts:123 ⇒ `wasmReady` 的 IIFE 接 `.catch` 清缓存；前后对照探针（fetch 每次必失败、连续两次调用）⇒ 修复前 fetch 1 次（不重试）/ 修复后 2 次（会重试）；typecheck 通过 | documents/viewer/implementation/core.md | 见详情 | — |
 | T-106 | numField 把空串当合法 0 写入变换 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/dom.ts:106 ⇒ 空串 / 纯空白 trim 后判 invalid、不写变换（DOM 桩探针：`""` ⇒ onInput(NaN,false) + invalid 类） | documents/viewer/implementation/core.md | 见详情 | — |
 | T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:250 | documents/viewer/implementation/core.md | 判据：构造仅含多材质网格的分块 ⇒ 分块边长含全部 Mesh 的并集（`worldBox` 不再只在单材质分支累计） | — |
-| T-108 | 回退脚本加载无超时且成功路径不移除 script 标签 | 缺陷 | viewer | 待修 | apps/viewer/src/core/bsp.ts:59 | documents/viewer/implementation/core.md | 判据：回退脚本加载有超时；成功路径移除 @BT@script@BT@ 标签（@BT@document.querySelectorAll("script")@BT@ 不残留） | — |
+| T-108 | 回退脚本加载无超时且成功路径不移除 script 标签 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/bsp.ts:64 ⇒ `loadScript` 加 10 s 超时 + 三条路径都移除标签（1:1，10 行不变）；DOM 桩探针 ⇒ 成功路径标签数 0、超时路径 10.0 s 拒绝且标签数 0；typecheck 通过 | documents/viewer/implementation/core.md | 见详情 | — |
 | T-109 | 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正 | 缺陷 | viewer | 已取证待立项 | apps/viewer/src/replay/demo/net.ts:325 | documents/viewer/implementation/dem.md | — | — |
 | T-110 | 包内 svc_CreateStringTable 只稳定解出第一张表 | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/demo/net.ts:693 | documents/viewer/implementation/dem.md | — | — |
 | T-111 | svc_CreateStringTable 的压缩标志未实现 | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/demo/net.ts:709 | documents/viewer/implementation/dem.md | — | — |

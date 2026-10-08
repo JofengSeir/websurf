@@ -214,3 +214,4 @@
 | 2026-10-09 | T-120 结案（跑段高亮同基，探针 60% vs 旧 50%）/ T-126 / T-129 结案；T-133 遗弃（.gitignore 无该规则、判据本就满足） | progress/monthly/2026-10-7.md:26 |
 | 2026-10-09 | T-105 结案（WASM 失败不再永久缓存，探针 1→2 次重试）/ T-122 结案（Blob URL 3 建 3 revoke）；T-123 遗弃（T-152 已覆盖）/ T-136 遗弃（与 T-224 同源，合并） | progress/monthly/2026-10-7.md:27 |
 | 2026-10-09 | T-140 结案（遥测改用 sampling.horizontalSpeed，探针 500/0/250）/ T-121 结案（disposeTree 释放 Line+Points，探针 0→2） | progress/monthly/2026-10-7.md:28 |
+| 2026-10-09 | T-108 结案：viewer 回退脚本加载加 10 s 超时 + 三条路径移除 script 标签（探针：标签数 0 / 超时 10.0 s） | progress/monthly/2026-10-7.md:29 |
