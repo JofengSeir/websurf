@@ -503,8 +503,8 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   panel?.renderSavePoints(savePointStore.all());
   // 读取地图后退出面板，改用加载进度覆盖层
   panel?.hide();
-  // 主线程 wasm 就绪（decompress_mtz 依赖；失败则继续，回退降级为占位色）
-  await mainWasmReady.catch(() => undefined);
+  // 主线程 wasm 就绪（BspProcessor / decompress_mtz 都来自该模块；失败即无法解析，报错并中止）
+  await mainWasmReady.catch((e) => { console.error('[app] 主线程 wasm 初始化失败，无法解析地图：', e); setStatus('主线程 wasm 初始化失败，无法加载地图（详见控制台）', 'error'); throw e; });
   renderer.disposeScene();
   sceneReady = false;
   setStatus(`正在加载 ${fileName}（主线程解析 BSP）...`, '');

@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（115 条）
+## 未结项（113 条）
 ### 待裁决（0）
 
 
-### 待修（113）
+### 待修（111）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -121,10 +121,8 @@
 - **T-103** ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动）　`viewer`
 - **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
 - **T-143** el() 属性写入限制了 id 型契约（undefined 静默无 id）　`viewer`
-- **T-201** 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色　`game`
 - **T-213** 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错　`game`
 - **T-214** 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态　`game`
-- **T-303** 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1　`debug`
 - **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
 - **T-031** game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB）　`game`
@@ -245,7 +243,7 @@
 | T-166 | `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/shavit-replay.ts:507 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ShavitParseResult.flags" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-167 | 进度回调里的 `'map'` 分支不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:329 | documents/viewer/implementation/replay.md | 判据：`git grep -n "'map'" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-168 | `MapPanel.spawnPoints` getter 零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:114 | documents/viewer/implementation/ui.md | 判据：`git grep -n "MapPanel.spawnPoints" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-201 | 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色 | 缺陷 | game | 待修 | apps/game/src/app.ts:507 | documents/game/implementation/app-entry.md | 判据：注入 wasm 初始化失败 ⇒ 控制台可见错误且加载被阻断（不再被 `.catch` 吞掉） | — |
+| T-201 | 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色 | 缺陷 | game | 已结案 | apps/game/src/app.ts:506-507（1:1）：`mainWasmReady` 失败改为 console.error 打根因 + setStatus(...,'error') + 重新抛出 ⇒ 加载被阻断、控制台可见错误（原为 `.catch(() => undefined)` 静默继续）；game typecheck 通过；debug 侧同名写法（apps/debug/src/app.ts:1731）故意保留（其注释写明由下方 try 报错） | documents/game/implementation/app-entry.md | 见详情 | — |
 | T-202 | 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示 | 缺陷 | game | 已结案 | apps/game/src/dom-optional.ts 新增 `optDom()`（缺失打 `console.warn` 点名 id）；app.ts 四处可选控件改走它（五处 1:1，246 个锚点零漂移）；探针 ⇒ 缺失返回 null + 点名告警、存在 0 告警；game typecheck 通过 | documents/game/implementation/app-entry.md | 见详情 | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待修 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | 判据：未选图 / 未锁定前点击画布 ⇒ 有可见反馈（不再静默返回） | — |
 | T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | 缺陷 | game | 待修 | apps/game/src/input/input-bridge.ts:65 | documents/game/implementation/input.md | 判据：`hud` 段只含 hud 字段（探针比对 `input-bridge.ts` 下发与 `config.hud`） | — |
@@ -284,7 +282,7 @@
 | T-239 | `worker-types.ts` 里多条声明在本工程无发送方且无接收点 | 未接线·死代码 | game | 待修 | src/ts-shared/auth/worker-dispatch.ts:265 | documents/game/implementation/worker.md | 判据：`git grep -n "worker-types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-301 | 回放捕获 `replayCapture.record` 未传 `dtS`，样本 `dt` 恒 0；`InputFrame` 亦无 `dt` 字段 | 缺陷 | debug | 已结案 | apps/debug/src/app.ts:2241 传第五参 dtS；input-recorder.ts 的 InputFrame 增可选 dt、frames()/toPayload()/sample() 三处物化带上它（全部 1:1 ⇒ 该文件 18 个锚点零漂移）；探针：record(…,0.015625) ⇒ frames()/toPayload()/toCompactPayload() 的 dt = 0.015625, 0.03125, 0；对象数组 load 带 dt ⇒ 0.02 保留、缺 dt ⇒ 0；InputPlayer 回放帧带 dt；debug typecheck 通过 | documents/debug/implementation/input.md | 见详情 | — |
 | T-302 | 面板 `PARAM_DEFS` 与 `config.ts` 两套默认值来源、无交叉校验（`jumpHeight` 57 与 `jumpSpeed` 302 同写 `jump_height`） | 缺陷 | debug | 已结案 | apps/debug/scripts/check-param-defaults.mjs（`npm run check:param-defaults`）⇒ 面板默认值经 PARAM_TO_RUST 与 config 换算值比对；正例 7 项全 OK 退出 0，反例（gravity 800→900）⇒ jumpHeight 报差并 exit 1 | documents/debug/implementation/physics.md | 见详情 | — |
-| T-303 | 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1 | 缺陷 | debug | 待修 | apps/debug/src/renderer/lod-manager.ts:262 | documents/debug/implementation/renderer.md | 判据：未接线 PVS ⇒ 不再打印「隐藏 N」；接线后统计与实际隐藏数一致 | — |
+| T-303 | 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1 | 缺陷 | debug | 已结案 | apps/debug/src/app.ts:603（1:1）：PVS 段改为 `totalClusters > 0 ? '可见/总 隐藏n' : '未接线'` ⇒ 未接线时不再打印假「隐藏 0」；apps/debug/src/renderer/lod-manager.ts:262 的 pvsHidden=0 口径与既有注释不变；debug typecheck 通过；文档两条缺口按 [L] 标「已消除（2026-10-09）」 | documents/debug/implementation/renderer.md | 见详情 | — |
 | T-304 | tick 线时间戳在 `readPublishedTau()` 返回 0 时回落墙钟 `now`，两条线时间基准不同源 | 缺陷 | debug | 已结案 | 遗弃（不修）：断言不成立——`readPublishedTau()` 是 `tickInstantToTau = workerInstMs + rtOffset`（apps/debug/src/worker/main.ts:262）的**渲染时钟域**值，与回落用的 `now` 同源；且 τ=0 是「未投影」契约语义（src/ts-shared/auth/auth-loop.ts:428），此时发布位置就是权威自身 state、对应当前时刻。另修正了文档里指错行的锚点 | documents/debug/implementation/renderer.md | 见详情 | — |
 | T-305 | 权威 post-tick 位置差（residual）固定传 `undefined`，该组统计样本数恒 0 | 缺陷 | debug | 已结案 | 遗弃（不修）：residual 需「权威自身 post-tick 位置」，而发布只写投影位置（src/ts-shared/auth/auth-loop.ts:431）⇒ 主线程原理上拿不到；要填需给共享内存加槽位（SAB 布局跨端契约改动），该统计当前无读取方。限制已写进 residualStats 文档，字段留作扩展点 | documents/debug/implementation/renderer.md | 见详情 | — |
 | T-306 | lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform | 缺陷 | debug | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1549 | documents/debug/implementation/renderer.md | 判据：运行期改诊断开关 ⇒ 覆盖生效（不再固化于模块初始化时的 uniform 初值） | — |

@@ -240,3 +240,4 @@
 | 2026-10-09 | 待裁决清零（30→0）：第二批 18 条全部转待修并补可执行判据（判据挂真实 .dem 夹具与 ci-gates.yml） | progress/monthly/2026-10-8.md:12 |
 | 2026-10-09 | T-504 结案：无纹理面兜底色白→深灰；定位纠错（真正生效的是 fallback_bsp:328 而非 issue 指的 437/478）；探针 46→0 白 | progress/monthly/2026-10-8.md:13 |
 | 2026-10-09 | T-015 结案：start_disabled 恒 false 修掉（大写键→小写键，两处 1:1）；surf_fornax 唯一一条 StartDisabled 1 实测生效 | progress/monthly/2026-10-8.md:14 |
+| 2026-10-09 | T-303（PVS 未接线就不打印假「隐藏 N」）+ T-201（wasm 初始化失败不再被吞、阻断加载）结案；两处 1:1 | progress/monthly/2026-10-8.md:15 |

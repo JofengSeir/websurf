@@ -600,7 +600,7 @@ function updateCullStatsUI(msg: CullStatsLike): void {
 		const p = msg.pvs;
 		dom.cullStatsEl.innerHTML =
 			`<span class="label">可见</span> <span class="v">${msg.visible}/${msg.total}</span>  <span class="label">视距</span> <span class="v">${msg.cullDist.toFixed(0)}</span>  ` +
-			`<span class="label">cluster</span> <span class="v">${p.cluster >= 0 ? p.cluster : '—'}</span>  <span class="label">PVS</span> <span class="v">${p.visibleClusters}/${p.totalClusters} 隐藏${p.pvsHidden}</span>  ` +
+			`<span class="label">cluster</span> <span class="v">${p.cluster >= 0 ? p.cluster : '—'}</span>  <span class="label">PVS</span> <span class="v">${p.totalClusters > 0 ? `${p.visibleClusters}/${p.totalClusters} 隐藏${p.pvsHidden}` : '未接线'}</span>  ` +
 			`<span class="label">LOD</span> <span class="v">近${p.near}/远${p.far}</span>`;
 	}
 	updatePathCountsUI(); // 顺带刷新路径记录点数（~10Hz，够用）
