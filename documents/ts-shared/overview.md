@@ -103,7 +103,7 @@
 | `maskToKeys` | 零调用点 （见 TODO.md T-405） |
 | `PvsManager.getFaceCluster` / `visibleClusterCount` | 零调用点 （见 TODO.md T-406） |
 | `world/types.ts` 的 `rootNode` 字段 | TS 侧无消费点 （见 TODO.md T-407） |
-- 看板另有登记项：`TODO.md` 的 T-016、T-018 —— **状态与结论只在那登记**，本文件不复述。
+- 看板另有登记项：`TODO.md` 的 T-402…T-407 等 —— **状态与结论只在那登记**，本文件不复述。**已消除（2026-10-09）**：T-016（`compute-mode` 的 summary 不再含已废的 `§3.4.C` 编号）、T-018（`tick-authority.test.ts` 的断言标签不再含 `Q1` / `§8.5`）。
 
 ## 7. 测试与门禁
 

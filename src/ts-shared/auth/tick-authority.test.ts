@@ -443,7 +443,7 @@ test('§9 窗外（remaining > T−δ）/ 地板（remaining ≤ 1）/ 追爆（
   assert.equal(ctx.c.stats.floorSkips, 0, '窗外早醒不记账（每 tick 多次的正常唤醒）');
   ctx.c.onWake(1000, 1000.5); // remaining=0.5 ≤ 地板 1 → 放弃
   assert.equal(ctx.c.gate.stats.optimisticPublished, 0);
-  assert.equal(ctx.c.stats.floorSkips, 1, '迟到地板计入 floorSkips（门上游，Q1 口径）');
+  assert.equal(ctx.c.stats.floorSkips, 1, '迟到地板计入 floorSkips（门上游）');
   ctx.c.onWake(1000, 999); // 追爆 remaining<0（acc≥fixedDt 真步本唤醒触发）→ 回落纯历史
   assert.equal(ctx.c.gate.stats.optimisticPublished, 0);
   assert.equal(ctx.c.stats.floorSkips, 2, '追爆同属地板分支');
@@ -622,7 +622,7 @@ test('§18 动态 tick 周期：T=10 → 门重建 δ cap=2', () => {
   assert.equal(ctx.c.gate.leadDeltaMs, 2, 'δ cap = T − ε_max = 2');
   // 门重建后锚为 null（回到引导期语义）→ 本窗尝试落 leadMiss（纯历史一拍）
   assert.equal(ctx.c.gate.stats.optimisticPublished, 0, '重建后无锚 → 不发');
-  assert.equal(ctx.c.gate.stats.leadMiss, 1, 'leadMiss 计入（§8.5 停顿语义）');
+  assert.equal(ctx.c.gate.stats.leadMiss, 1, 'leadMiss 计入（停顿语义）');
   assertClosureIdentity(ctx, 1, '重建后闭账恒等');
 });
 

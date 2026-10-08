@@ -103,7 +103,7 @@ export const MODE_HANDOVER_MATRIX: readonly ModeHandoverRow[] = [
     authLineAfter: false,
     decoupledLineAfter: true,
     stateInject: true,
-    summary: '既有行（存档）：gate 翻转 + state 注入 + tickPhys 对齐 + 采样器清零 + resetInput（§3.4.C 步骤 a-f）',
+    summary: '既有行（存档）：gate 翻转 + state 注入 + tickPhys 对齐 + 采样器清零 + resetInput',
   },
   {
     from: 'decoupled',
