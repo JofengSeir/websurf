@@ -57,7 +57,7 @@ const MTZ = join(REPO, 'src', 'materials', 'textures.mtz'); // 默认纹理包�
 const HEADER = '/* WebSurf-game embedded build — auto-generated, do not edit */\n'; // 内嵌形态 app.js 的 banner
 
 // single 形态保留的 dist/ 顶层文件（cleanStale 按它删掉多余文件）
-const KEEP_SINGLE = ['index.html', 'app.js', 'styles.css', 'favicon.ico', 'LICENSE.cs-movement', 'NOTICE.cs-movement'];
+const KEEP_SINGLE = ['index.html', 'app.js', 'styles.css', 'favicon.ico', 'coi-serviceworker.js', 'LICENSE.cs-movement', 'NOTICE.cs-movement'];
 // multi 形态保留的 dist/ 顶层文件（多出 worker.js、外置 wasm / 纹理包与 coi-serviceworker.js）
 const KEEP_MULTI = [
   'index.html',
@@ -126,7 +126,7 @@ async function buildSingle(wasmPath) {
   if (!rewritten) {
     console.warn('[WARN] web/index.html 未命中 module script 特征串，dist/index.html 可能仍是 module script。');
   }
-  copyFileSync(STYLES, join(DIST, 'styles.css')); copyFileSync(FAVICON, join(DIST, 'favicon.ico')); // 样式表与图标外置（两种形态都拷贝）
+  copyFileSync(STYLES, join(DIST, 'styles.css')); copyFileSync(FAVICON, join(DIST, 'favicon.ico')); copyFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js')); // 样式表 / 图标 / SW 模板外置（SW 未注入清单时走 typeof 回退，见 web/coi-serviceworker.js 头注）
   console.log(`[5/5] dist/app.js: ${(bytes / 1024 / 1024).toFixed(2)} MB（single 全内嵌）`);
 }
 
