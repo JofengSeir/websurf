@@ -26,6 +26,7 @@
 | `open-issues/05-wasmcore-bevel-doc-vs-code.md` | 取证：wasm-core bevel 文档 vs 代码 | 同上 |
 | `open-issues/06-phy-hull-facet-jump.md` | 取证：.phy 凸包表达不了曲面坡 | 同上 |
 | `open-issues/07-is-position-free-vs-trace.md` | 取证：is_position_free vs trace（卡死修法） | 同上 |
+| `lessons-2026-10-08.md` | **本会话（约 66 轮）的经验教训整理**：方法论 / 查实的技术事实 / 仓库流程纪律 / 环境陷阱 / 事故 | 开工前或交接时先读 |
 
 ## 卷序（月度进展）
 
@@ -192,3 +193,4 @@
 | 2026-10-08 | T-448 结案：三工程同步——game 补 3D 天空盒/地图雾，viewer 补 wasm 构建 + `parse_pvs_data` + 天空区/雾（不引物理） | progress/monthly/2026-10-7.md:5 |
 | 2026-10-08 | 碰撞生成逻辑解读：brush 只看 contents、置换面按 MASK_SOLID、prop 按 solid；owner 点处「隐形坡」= ramp_s1 的 PLAYERCLIP 楔形（引擎同样碰撞）⇒ 登记 D-019 | progress/monthly/2026-10-7.md:6 |
 | 2026-10-08 | T-449 结案：置换面三角化改引擎扇形细分（四叉树 + `g_TesselateWinding` 8 点扇 + `allowed_vertices`），修地表与模型坡错误相交 | progress/monthly/2026-10-7.md:7 |
+| 2026-10-08 | 文档整理 + 经验教训总结：推送 52 个提交（远端 = `1d18548`）；体检 A–P 全 0、`documents/index.md` 与文件树逐项对齐；新增模块不变量（位移面细分）与 `progress/lessons-2026-10-08.md`；登记 D-020（看板分卷） | progress/monthly/2026-10-7.md:8 |

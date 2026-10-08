@@ -146,25 +146,28 @@
     "task": "T-449",
     "may": [
       "src/wasm-core/vbsp/handle/mod.rs",
-      "TODO.md",
-      "CHANGELOG.md",
+      "documents/wasm-core/overview.md",
+      "OWNER.md",
+      "progress/lessons-2026-10-08.md",
       "progress/index.md",
       "progress/monthly/2026-10-7.md",
+      "TODO.md",
       "docflow.json"
     ],
     "must": [
-      "src/wasm-core/vbsp/handle/mod.rs",
-      "TODO.md"
+      "src/wasm-core/vbsp/handle/mod.rs"
     ],
     "base": {
-      "src/wasm-core/vbsp/handle/mod.rs": "f4a376308bdd3189992514374c3cfbd3cdc7572f96153615840dd5edd7d140fd",
-      "TODO.md": "69d125a62edd3538981f46728d9f977f58ee611dd403fb3022d7f23a7517fa1f",
-      "CHANGELOG.md": "26d8d8efd97691cbbeee19c8595e6c7be230301201f077d061381a937fdaa6d0",
-      "progress/index.md": "68973ed4984320ac309d5f2c1680f6173e12c71ff863a024bb7bcee17ec39b6a",
-      "progress/monthly/2026-10-7.md": "889f12176700f5f23f7b0382b8492fc1aad146daed624d13dfe78fc101818613",
+      "src/wasm-core/vbsp/handle/mod.rs": "6dc1145477df3db10016f019f5a3adc0ca35c4536bf93c59f676b266d1e0d215",
+      "documents/wasm-core/overview.md": "595d3319b6658a7422ca80213a663908ab46370d335ac7a4967fbb60fc0930b3",
+      "OWNER.md": "5f6f7487567138e6b9ee5dd193ed228a3562a9b40af5439122128ab18bffb3d9",
+      "progress/lessons-2026-10-08.md": "2da1779c2ce12a61413d71c579e6506aea143eda451d708cb8c64c73b61f3577",
+      "progress/index.md": "6e20188db9a30033046639db59f9fbe9dd56bb8b2bfc15519aea3bfa4f5f0c36",
+      "progress/monthly/2026-10-7.md": "46b7ed144f7c0249e44f50f8db675436eed6bc82ef3c31fa345bbee57bda1f3e",
+      "TODO.md": "6051d592069eddb6bf0f53ad69d5ff90a9b15001b545b6973be8339741a34aac",
       "docflow.json": "18e9db1aa0ac745601f94c0ce87fa19dcd5a4fc6d0341ba91d03a4b540fe34c5"
     },
-    "at": "2026-10-08T18:28:51.915Z",
+    "at": "2026-10-08T18:44:08.147Z",
     "pins": {
       "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -1610,89 +1613,95 @@
         "at": "2026-10-08",
         "line": 36
       },
+      "**D-020**": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-08",
+        "line": 38
+      },
       "D-014": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
-        "line": 44
-      },
-      "D-100": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
-        "line": 45
-      },
-      "D-101": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 46
       },
-      "D-102": {
+      "D-100": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 47
       },
-      "D-103": {
+      "D-101": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 48
       },
-      "D-104": {
+      "D-102": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 49
       },
-      "D-105": {
+      "D-103": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 50
       },
-      "D-106": {
+      "D-104": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 51
       },
-      "D-001": {
+      "D-105": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 52
       },
-      "D-002": {
+      "D-106": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 53
       },
-      "D-003": {
+      "D-001": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 54
       },
-      "D-004": {
+      "D-002": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 55
       },
+      "D-003": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 56
+      },
+      "D-004": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 57
+      },
       "D-015": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 56
+        "line": 58
       },
       "**D-107**": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 57
+        "line": 59
       }
     }
   },
@@ -5252,11 +5261,21 @@
       "src/wasm-core/bsp_to_gltf_core/lightmap.rs:66:66": "558b50ef",
       "src/wasm-core/bsp_to_gltf_core/lightmap.rs:545:545": "318d5099",
       "src/wasm-core/vbsp/handle/mod.rs:391:391": "62c695da",
-      "src/wasm-core/bsp_to_gltf_core/lightmap.rs:630:630": "f62a320b"
+      "src/wasm-core/bsp_to_gltf_core/lightmap.rs:630:630": "f62a320b",
+      "src/wasm-core/vbsp/handle/mod.rs:525:525": "589e679d",
+      "src/wasm-core/vbsp/handle/mod.rs:601:601": "be9a451b"
     },
     "documents/norms/local-path-hygiene.md": {}
   },
   "rebaselines": [
+    {
+      "path": "documents/wasm-core/overview.md",
+      "at": "2026-10-08T18:44:08.245Z",
+      "by": "agent",
+      "reason": "T-449：§5 新增「位移面细分照引擎口径」不变量（4 个代码锚点）",
+      "changed": 2,
+      "total": 24
+    },
     {
       "path": "TODO.md",
       "at": "2026-10-08T18:28:51.708Z",
@@ -5568,14 +5587,6 @@
       "reason": "T-445：src/phys/world.rs 的 clip_box_to_triangle 从「±n 面 + 边墙当门」改为 Minkowski 精确面集（17 张面，净 +8 行）⇒ 文档里指向该文件的行号整体平移；已逐条复核新行号仍指向同一符号后重钉",
       "changed": 2,
       "total": 29
-    },
-    {
-      "path": "documents/architecture/overview.md",
-      "at": "2026-10-08T15:28:00.989Z",
-      "by": "agent",
-      "reason": "T-445：src/phys/world.rs 的 clip_box_to_triangle 从「±n 面 + 边墙当门」改为 Minkowski 精确面集（17 张面，净 +8 行）⇒ 文档里指向该文件的行号整体平移；已逐条复核新行号仍指向同一符号后重钉",
-      "changed": 2,
-      "total": 33
     }
   ]
 }

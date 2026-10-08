@@ -63,6 +63,7 @@
 3. **实体键名大小写**：实体文本在读取阶段已统一为小写，`RawEntity` 的取值是逐字节比较——因此取值键必须写小写（本仓已登记一处反例，见 §6）。
 4. **导出产物以 GLTF 为准**：导出把光照图、材质扩展、模型合并都落到同一份 GLTF/GLB 里；扩展名是否登记进 `extensions_used` 由导出路径决定（本仓已登记一处不一致，见 §6）。
 5. **纹理容器有两个出入口**：文本形态（`mosaic` 的 encode/decode）与二进制形态（`mtz` 的 MTZ6 容器 + `texture_utils` 的 VTF 容器）各管一段，不要互相代用。
+6. **位移面细分照引擎口径**：位移面的三角形不是「每格 2 个」，而是起源 `TesselateDisplacement`（`public/disp_tesselate.h`）的**四叉树 + 每节点 8 点扇**——环绕点表 `g_TesselateWinding` 共 9 项（末项重复首项收口），叶层每扇 8 个三角形，非叶节点在 4 个子节点全活时不出三角形；环绕点与子节点是否参与由 `ddispinfo_t.m_AllowedVerts`（10 个 u32）决定（邻居 power 不匹配时引擎据此粗化细边）。顶点数组的展平顺序是 `flat = x * side + y`（判据：相邻 patch 的共享边顶点必须重合）。实现见 `src/wasm-core/vbsp/handle/mod.rs:525`（`tessellated_grid`）、`:539`（`tessellate_node`）、`:595`（`vertex_allowed`）；渲染（GLB）与置换面碰撞（`export_displacement_colliders`）共用同一条序列（`src/wasm-core/vbsp/handle/mod.rs:601`）。
 
 ## 6. 已知遗留（索引，详见 `TODO.md`）（状态见 TODO.md）
 
