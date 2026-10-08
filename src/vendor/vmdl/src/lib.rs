@@ -327,3 +327,32 @@ impl ReadRelative for String {
         String::from_utf8(bytes).map_err(ModelError::from)
     }
 }
+
+
+impl Model {
+    /// 把 `.vhv` 的逐顶点光照从 **strip group 顶点序** 重排到 **模型顶点序**。
+    ///
+    /// Source 写 `.vhv` 是"一个 strip group 一个块"，块内是 `pVertex(nVertex)` 的局部下标序
+    /// （`utils/vrad/vradstaticprops.cpp`：`m_VertexColors[nVertex] = colorVerts[mesh->vertexoffset + pVertex(nVertex)->origMeshVertID]`），
+    /// 而模型顶点数组是按 `origMeshVertID` 排的——两者不同序，照数组下标硬对应会把光照贴到别的
+    /// 顶点上（`rock04_epic` 的 strip group 前几个 `origMeshVertID` 是 `389,392,391,1080,…`）。
+    ///
+    /// `colors` 必须正好覆盖全部 strip group 的顶点（按 mesh → strip group 顺序拼接）；任何一处
+    /// 对不上就返回 `None`，由调用方退回 leaf ambient cube（不产出错位数据）。
+    pub fn remap_strip_group_colors(&self, colors: &[[f32; 3]]) -> Option<Vec<[f32; 3]>> {
+        let mut out = vec![[0.0f32; 3]; self.vertices().len()];
+        let mut src = 0usize;
+        for mesh in self.meshes() {
+            let base = mesh.mdl.vertex_offset as usize + mesh.model_vertex_offset;
+            for strip_group in mesh.vtx.strip_groups.iter() {
+                let n = strip_group.vertices.len();
+                let chunk = colors.get(src..src + n)?;
+                for (i, v) in strip_group.vertices.iter().enumerate() {
+                    *out.get_mut(base + v.original_mesh_vertex_id as usize)? = chunk[i];
+                }
+                src += n;
+            }
+        }
+        (src == colors.len()).then_some(out)
+    }
+}

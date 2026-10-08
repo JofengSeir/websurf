@@ -222,11 +222,11 @@ impl ModelIntegrator {
             let groups = group_placements_by_vertex_lighting(&placements, model.vertices().len());
 
             for (vlight, idxs) in &groups {
+                // `.vhv` 块是 strip group 顶点序，须按 `origMeshVertID` 重排到模型顶点序。
+                // 重排不成立（长度/几何不符）时退 cube，不静默错位。
+                let vlight = vlight.as_ref().and_then(|c| model.remap_strip_group_colors(c));
                 let mesh = self.push_model(
-                    buffer,
-                    gltf,
-                    &model,
-                    Path::new(&in_mem.name),
+                    buffer, gltf, &model, Path::new(&in_mem.name),
                     vlight.as_deref(),
                 )?;
                 let mesh_index = gltf.meshes.len() as u32;
