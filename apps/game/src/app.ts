@@ -22,7 +22,7 @@
  * `error`、`world-build-ms`、`world-parse-ms`。
  */
 
-import { createConfig, LOCKED_TICK_RATE } from './config.js';
+import { createConfig, LOCKED_TICK_RATE } from './config.js'; import { optDom } from './dom-optional.js';
 import type { RuntimeConfig } from './config.js';
 import { BspProcessor, decode_vtf_to_png, decompress_mtz } from '../pkg/websurf_wasm.js';
 import { InputBridge } from './input/input-bridge.js';
@@ -42,12 +42,12 @@ const config: RuntimeConfig = createConfig();
 
 const dom = {
   canvas: document.getElementById('preview') as HTMLCanvasElement | null,
-  fileInput: document.getElementById('bspFile') as HTMLInputElement | null,
+  fileInput: optDom<HTMLInputElement>('bspFile'),
   statusEl: document.getElementById('status') as HTMLElement | null,
   statsEl: document.getElementById('stats') as HTMLElement | null,
   keys: document.getElementById('keys') as HTMLElement | null,
-  spawnSelect: document.getElementById('spawnSelect') as HTMLSelectElement | null,
-  respawnBtn: document.getElementById('respawnBtn') as HTMLButtonElement | null,
+  spawnSelect: optDom<HTMLSelectElement>('spawnSelect'),
+  respawnBtn: optDom<HTMLButtonElement>('respawnBtn'),
   fpsEl: document.getElementById('fps') as HTMLElement | null,
   // 近平面自适应控件：range 与 number 成对，bindNearParam 双向同步后交给渲染器
   nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
@@ -314,7 +314,7 @@ function bindInput(): void {
   });
 
   // 加载地图按钮 → 触发隐藏 file input
-  document.getElementById('loadMapBtn')?.addEventListener('click', () => {
+  optDom<HTMLButtonElement>('loadMapBtn')?.addEventListener('click', () => {
     dom.fileInput?.click();
   });
 
