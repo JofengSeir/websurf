@@ -60,7 +60,7 @@
 
 1. **`texture_utils/vtf.rs`**：`VTFHeader::write` 在 `version[0] < 7` 分支声明头长与实写长度不一致；`ResourceList::read` 吞占位而 `write` 不写；`get_offset` 把 `frame` 与 `face` 加成同一线性项；`get_mip_size` 与 `VTFImage::get_frame` 的图幅口径不一致。另记零调用点：`ResourceType::has_resource_type`、`HAS_NO_DATA_CHUNK`、`VTF::save_as_png`、`texture_utils::create`、`VTF::lowres_image`（见 TODO.md T-012）。
 2. **`mosaic/mtz.rs`**：`pack_regions` 用 `as u8` 写 meta 导致 `w`/`h` 超 255 时尺寸变值；`opacity` 仅在 `< 250` 时写出；`pack_regions` 与 `unpack_regions` 的签名长度接受集不一致；`w * h` 在 `u32` 上相乘无上界；容器文本再入解析的边界不一致；五个 `FLAG_*_LZ` 常量零引用；`emit_match` 的扩展长度字节在极长匹配时截断（当前唯一调用点已兜住）（见 TODO.md T-014）。
-3. **`mosaic/decode.rs`**：`code_to_img` 不校验宽高下界，也不校验解码出的索引是否落在调色板色数内（见 TODO.md T-401）。
+3. **`mosaic/decode.rs`**：`code_to_img` 不校验宽高下界，也不校验解码出的索引是否落在调色板色数内。**已消除（2026-10-09）**：T-401 —— 两道校验都补上（`src/wasm-core/mosaic/decode.rs:145`、`:150`），wasm 不再 panic。重建 debug wasm 后的探针：`B[x:0x1]…` ⇒ 修复前 `panic: Image index (0, 0) out of bounds (0, 1)`（`src/wasm-core/mosaic/decode.rs:167`），修复后「图像尺寸为 0: 0x1」；`…R[wA]`（索引 3 ≥ 2 色）⇒「调色板索引越界: 3 >= 2」；正常 1x1 / 2x2 仍返回 PNG（头 `89504e47`）。
 4. **通路 A 的材质扩展**：`extensions.KHR_texture_transform` 在 `material.transform` 存在时会被写入 material，但 BSP 导出路径不把它加入 `extensions_used`（消费端按 `extensionsUsed` 判断时会不生效）（见 TODO.md T-011）。
 
 > 这些条目的处置（改代码 / 改文案 / 保持现状）见 `TODO.md`；注释中已按当前代码如实写明行为与口径。

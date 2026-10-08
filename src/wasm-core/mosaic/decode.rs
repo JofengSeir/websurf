@@ -11,9 +11,10 @@
 //! - `apps/debug` 与 `apps/game` 的 wasm 层导出 `mosaic_decode`；
 //! - 两工程渲染端的 `replaceMapWithMosaic`，固定传 `scale = 8`。
 //!
-//! 校验范围：调色板色数（1..=8）、格数上限 100000、`R[` 与 `A[` 的字节长度。
-//! 与 `mosaic::mtz` 的 `parse_bytecode` 不同，本函数不校验 `宽 ≥ 1` / `高 ≥ 1`，
-//! 也不校验解出的索引是否落在调色板区间内——这两条由编码侧的不变量保证。
+//! 校验范围：调色板色数（1..=8）、格数上限 100000、`R[` 与 `A[` 的字节长度，以及
+//! `宽 ≥ 1` / `高 ≥ 1` 与「解出的索引落在调色板区间内」——后两条原先只由编码侧的不变量
+//! 保证，但 MTZ 纹理包是外部文件、字节码可能损坏，越界会让 wasm 直接 panic（整个页面挂掉），
+//! 故解码侧也各补一道（T-401）。
 
 /// base64url 解码（不要求 `=` 填充）。逐 6 bit 累积、满 8 bit 出一字节，
 /// 末尾不足 8 bit 的残余位直接丢弃。遇字母表外字符返回 `None`。
@@ -138,12 +139,19 @@ pub fn code_to_img(code: &str, scale: u32) -> Result<Vec<u8>, String> {
     }
 
     // 拼装 宽×高 网格：色取 C[索引]，alpha 由 A[ 掩码决定——命中（bit=1）为 0，
-    // 否则取全局不透明度；缺 A[ 时全格都用全局不透明度
+    // 否则取全局不透明度；缺 A[ 时全格都用全局不透明度。
+    // 尺寸下界：0 宽/0 高会让后面的缩放与采样越界（`w - 1` 下溢、`get_pixel` 越界）
+    if w == 0 || h == 0 {
+        return Err(format!("图像尺寸为 0: {w}x{h}"));
+    }
     let mut grid = image::RgbaImage::new(w, h);
     for y in 0..h {
         for x in 0..w {
             let i = (y * w + x) as usize;
-            let c = colors[idx[i] as usize];
+            let ci = idx[i] as usize;
+            let Some(c) = colors.get(ci) else {
+                return Err(format!("调色板索引越界: {ci} >= {}", colors.len()));
+            };
             let a = match &alpha {
                 Some(m) if (m[i / 8] >> (7 - i % 8)) & 1 == 1 => 0u8,
                 _ => opacity,

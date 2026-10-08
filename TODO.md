@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（131 条）
+## 未结项（130 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（99）
+### 待修（98）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -139,7 +139,6 @@
 - **T-322** `TeleportManager` 的六项成员零调用点　`debug`
 - **T-323** `spawn-loader.ts` 整模块零调用点　`debug`
 - **T-324** `types.ts` 里有一批零引用类型　`debug`
-- **T-401** mosaic/decode.rs 的 code_to_img 不校验宽高下界、也不校验解码索引落在调色板色数内　`shared`
 - **T-402** `compute-mode` 的三模式接线　`shared`
 - **T-403** `MouseBuffer.push` / `drain`　`shared`
 - **T-404** `ShmState.wake`　`shared`
@@ -322,7 +321,7 @@
 | T-322 | `TeleportManager` 的六项成员零调用点 | 未接线·死代码 | debug | 待修 | apps/debug/src/world/teleport-manager.ts:18 | documents/debug/implementation/world.md | 判据：`git grep -n "TeleportManager" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-323 | `spawn-loader.ts` 整模块零调用点 | 未接线·死代码 | debug | 待修 | apps/debug/src/world/spawn-loader.ts:11 | documents/debug/implementation/world.md | 判据：`git grep -n "spawn-loader.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-324 | `types.ts` 里有一批零引用类型 | 未接线·死代码 | debug | 待修 | apps/debug/src/world/types.ts:18 | documents/debug/implementation/world.md | 判据：`git grep -n "types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-401 | mosaic/decode.rs 的 code_to_img 不校验宽高下界、也不校验解码索引落在调色板色数内 | 缺陷 | shared | 待修 | src/wasm-core/mosaic/decode.rs:146 | documents/materials/overview.md；documents/wasm-core/overview.md | 判据：@BT@cargo test -p websurf-phys@BT@ 覆盖越界输入 ⇒ @BT@code_to_img@BT@ 返回错误，不越界读取调色板 | — |
+| T-401 | mosaic/decode.rs 的 code_to_img 不校验宽高下界、也不校验解码索引落在调色板色数内 | 缺陷 | shared | 已结案 | src/wasm-core/mosaic/decode.rs:145/150 ⇒ 补尺寸下界与调色板索引校验；重建 debug wasm 探针 ⇒ 零尺寸由 panic 改「图像尺寸为 0」、索引 3≥2 色 ⇒「调色板索引越界」、正常路径仍出 PNG | documents/materials/overview.md；documents/wasm-core/overview.md | 见详情 | — |
 | T-402 | `compute-mode` 的三模式接线 | 未接线·死代码 | shared | 待修 | src/ts-shared/auth/auth-loop.ts:160 | documents/ts-shared/overview.md | 判据：`git grep -n "compute-mode" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-403 | `MouseBuffer.push` / `drain` | 未接线·死代码 | shared | 待修 | src/ts-shared/input/mouse-buffer.ts:81 | documents/ts-shared/overview.md | 判据：`git grep -n "MouseBuffer.push" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-404 | `ShmState.wake` | 未接线·死代码 | shared | 待修 | src/ts-shared/auth/shared-state.ts:447 | documents/ts-shared/overview.md | 判据：`git grep -n "ShmState.wake" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |

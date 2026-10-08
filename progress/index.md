@@ -221,3 +221,4 @@
 | 2026-10-09 | T-223 结案：game single 产物补 `coi-serviceworker.js`（KEEP_SINGLE 6→7 + 拷贝；实测 dist 7 条目） | progress/monthly/2026-10-7.md:33 |
 | 2026-10-09 | T-220 结案：game worker 的 `world-parse-ms` 代理测量默认关闭（探针：默认 0 次解析 / 开关打开 2 次） | progress/monthly/2026-10-7.md:34 |
 | 2026-10-09 | T-224 结案：三工程 build-dist 日志前缀 `[5/5]` → `[single]`/`[multi]`（24 行 1:1；真实构建输出验证） | progress/monthly/2026-10-7.md:35 |
+| 2026-10-09 | T-401 结案：`mosaic` 解码器补尺寸/调色板越界校验（修复前 wasm panic 已实测复现；重建 wasm 后改为返回错误） | progress/monthly/2026-10-7.md:36 |
