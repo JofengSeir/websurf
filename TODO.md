@@ -26,9 +26,8 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（118 条）
-### 待裁决（30）
-- **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
+## 未结项（117 条）
+### 待裁决（18）
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
 - **T-031** game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB）　`game`
 - **T-053** viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/…　`viewer`
@@ -36,8 +35,6 @@
 - **T-055** game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（…　`game`
 - **T-056** 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局…　`game`
 - **T-060** .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01　`viewer`
-- **T-101** 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错）　`viewer`
-- **T-103** ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动）　`viewer`
 - **T-110** 包内 svc_CreateStringTable 只稳定解出第一张表　`viewer`
 - **T-111** svc_CreateStringTable 的压缩标志未实现　`viewer`
 - **T-112** svc_UpdateStringTable 只对 userinfo 解条目，其它表只按长度跳过　`viewer`
@@ -45,22 +42,13 @@
 - **T-116** 注入期 throw 不在本工程调用方 catch 覆盖范围内　`shared`
 - **T-117** broken 阶段对照靠失配字面量维持，three 升级需同步　`shared`
 - **T-125** 零帧轨道的口径不一致（列表面板有卡片、3D 无对象）　`viewer`
-- **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
-- **T-143** el() 属性写入限制了 id 型契约（undefined 静默无 id）　`viewer`
-- **T-149** map_name 两端都拿不到值，字段保留但无内容　`viewer`
-- **T-201** 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色　`game`
 - **T-203** 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈　`game`
 - **T-204** `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指）　`game`
 - **T-212** `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图　`game`
-- **T-213** 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错　`game`
-- **T-214** 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态　`game`
-- **T-303** 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1　`debug`
-- **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
-- **T-504** 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉　`shared`
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（86）
+### 待修（97）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -147,6 +135,17 @@
 - **T-608** 核实「单入口」假设（Copilot / Gemini CLI 是否读根 `AGENTS.md`）并写进规范篇　`docs`
 - **T-609** 终态行的「判据」列按行态保护（改终态判据须先 approve）　`repo`
 - **T-433** prop 逐顶点光照（`sp_<i>.vhv`）与 leaf ambient cube 的组合口径：D-016 已决「相加」，而现实现是 either/or + 乘法　`shared`
+- **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
+- **T-101** 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错）　`viewer`
+- **T-103** ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动）　`viewer`
+- **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
+- **T-143** el() 属性写入限制了 id 型契约（undefined 静默无 id）　`viewer`
+- **T-201** 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色　`game`
+- **T-213** 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错　`game`
+- **T-214** 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态　`game`
+- **T-303** 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1　`debug`
+- **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
+- **T-504** 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉　`shared`
 
 
 ### 已取证待立项（2）
@@ -163,7 +162,7 @@
 | T-007 | apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into… | 缺陷 | debug | 已结案 | apps/debug/src/wasm.d.ts:145 起 ⇒ 文末同名 interface 声明合并补 16 个成员；`node .tmp/t007/probe.mjs` ⇒ PhysWorld 33/33 缺 0；收窄已删、`apps/debug` typecheck 通过 | documents/debug/implementation/wasm-bindings.md | 见详情 | #8 |
 | T-008 | apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new … | 配置·门禁 | game | 待修 | apps/game/scripts/check-wasm-api.mjs:52-70 | progress/pending-detail.md | 判据：跑 @BT@node apps/game/scripts/check-wasm-api.mjs@BT@ ⇒ exit 0，且 PHYS_API 列出的项 ≥ crates/wasm 实际导出数（不再缺 @BT@new@BT@ 等） | #9 |
 | T-013 | lightmap.rs 错误串含外部实现引用 Lightmap.cs:64 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/lightmap.rs:219 ⇒ 错误串删掉外部实现引用（1:1），改为陈述本仓常量 256×256=65536；判据 `git grep "Lightmap.cs" -- src` ⇒ 0 命中 | documents/wasm-core/overview.md | 见详情 | #28 |
-| T-015 | vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤） | 缺陷 | shared | 待裁决 | 见详情 | progress/pending-detail.md | — | #31 |
+| T-015 | vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤） | 缺陷 | shared | 待修 | 见详情 | progress/pending-detail.md | 判据：`node .tmp/mapsurvey/entitystart.mjs` ⇒ 键含 `start_disabled` 的实体解析后 `start_disabled == true`（现恒 false） | #31 |
 | T-016 | compute-mode.ts 的 summary 字面量含已删文档编号 | 文档口径 | shared | 已结案 | src/ts-shared/auth/compute-mode.ts:106 ⇒ summary 不再含 §3.4.C；`git grep -n "§3.4" -- src` ⇒ 0 命中 | documents/ts-shared/overview.md | 见详情 | #36 |
 | T-018 | tick-authority.test.ts 断言标签含 Q1 / §8.5 | 缺陷 | shared | 已结案 | src/ts-shared/auth/tick-authority.test.ts:446 ⇒ 断言标签已去掉 Q1 / §8.5；`npx esbuild … && node .tmp/t018/tick-authority.test.mjs` ⇒ 全例通过（exit 0） | documents/ts-shared/overview.md | 见详情 | §8.5" -- src/ts-shared/auth/tick-authority.test.ts` ⇒ 0 命中（断言标签不再含旧编号） | #40 |
 | T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 待修 | apps/game/src/panel/panel-controller.ts:583 | documents/game/implementation/panel.md | 判据：数值框回写自身文本；`dot` 死变量清掉（`git grep -n "dot" -- apps/game/src/panel/panel-controller.ts` 无声明未用） | #50 |
@@ -186,9 +185,9 @@
 | T-060 | .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01 | 缺陷 | viewer | 待裁决 | 见详情 | progress/pending-detail.md | — | #91 |
 | T-062 | 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径… | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:283 | progress/pending-detail.md | 判据：@BT@git grep -n "importer" -- apps/viewer/src@BT@ ⇒ Source .dem 分支无 UI 调用路径 ⇒ 删或接线 | #93 |
 | T-064 | 8 篇 debug 文档存在「在界内但内容偏旧」的锚点簇（2026-10-03 本轮量化，未改）：src/scripts/check-d… | 文档口径 | docs | 已结案 | documents/debug/sequences.md:24 与 documents/debug/overview.md:91 ⇒ `ready` 发送点锚点按符号重定位为 apps/debug/src/worker/main.ts:484（原 483 是 `onInit` 行） | documents/debug/sequences.md | 见详情 | #95 |
-| T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错） | 缺陷 | viewer | 待裁决 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | — | — |
+| T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | 判据：移除面板容器 ⇒ 控制台出现可读错误（不再静默生成脱离文档的元素） | — |
 | T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道 | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:267 | documents/viewer/implementation/app.md | 判据：构造 2 条以上越界轨道 ⇒ 提示串 bbox 覆盖全部（不再只取第一条） | — |
-| T-103 | ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动） | 缺陷 | viewer | 待裁决 | apps/viewer/src/app.ts:807 | documents/viewer/implementation/app.md | — | — |
+| T-103 | ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:807 | documents/viewer/implementation/app.md | 判据：`?replay=x.dem` ⇒ 按内容（魔数）分派并载入成功（不再按参数名拒收） | — |
 | T-105 | ensureWasm 把首次失败永久缓存，一次瞬时失败后本会话不自愈 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/bsp.ts:123 ⇒ `wasmReady` 的 IIFE 接 `.catch` 清缓存；前后对照探针（fetch 每次必失败、连续两次调用）⇒ 修复前 fetch 1 次（不重试）/ 修复后 2 次（会重试）；typecheck 通过 | documents/viewer/implementation/core.md | 见详情 | — |
 | T-106 | numField 把空串当合法 0 写入变换 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/dom.ts:106 ⇒ 空串 / 纯空白 trim 后判 invalid、不写变换（DOM 桩探针：`""` ⇒ onInput(NaN,false) + invalid 类） | documents/viewer/implementation/core.md | 见详情 | — |
 | T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:250 | documents/viewer/implementation/core.md | 判据：构造仅含多材质网格的分块 ⇒ 分块边长含全部 Mesh 的并集（`worldBox` 不再只在单材质分支累计） | — |
@@ -219,17 +218,17 @@
 | T-133 | .gitignore 中间产物目录与 test:replay 实际输出不一致 | 配置·门禁 | viewer | 已结案 | **遗弃**：`apps/viewer/.gitignore` 全文 4 行、无 `/temp/` 规则（仅注释说明由根覆盖）；根 `.gitignore:23`/`:24` 的 `**/.tmp/`、`**/temp/` 已覆盖输出目录；实测 `npm run test:replay` ⇒ exit 0 且 `git status --short` 干净 ⇒ 判据本就满足 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-136 | single 分支四段日志都写 [5/5] 步骤编号 | 工具·流程 | viewer | 已结案 | **遗弃（与 T-224 同源）**：`[5/5]` 是三工程打包阶段的固定文本前缀（multi 分支另有 `[multi]`），已由 T-224 登记（`documents/game/implementation/scripts.md:40`）；本条为重复登记，合并到 T-224 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-138 | 光照模式下拉只写不回填，与运行期真实模式脱节 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/mapinfo.ts:98 ⇒ 初值取 `getLightingMode()`、change 后回填实况（1:1 三处）；DOM 桩探针：提交 texture 而实况 baked ⇒ 下拉回填 baked；`npm run typecheck` 通过 | documents/viewer/implementation/ui.md | 见详情 | — |
-| T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待裁决 | apps/viewer/src/ui/mapinfo.ts:130 | documents/viewer/implementation/ui.md | — | — |
+| T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:130 | documents/viewer/implementation/ui.md | 判据：点导航「卸载地图」⇒ 回到空态且可再次载入 | — |
 | T-140 | 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复 | 未接线·死代码 | viewer | 已结案 | apps/viewer/src/ui/telemetry.ts:122 ⇒ 改用 `sampling.ts` 的 `horizontalSpeed`（该文件内 `Math.hypot(s.vel[0], s.vel[2])` 0 命中）；DOM 桩探针 ⇒ 500 / 0 / 250 正确；typecheck 通过 | documents/viewer/implementation/ui.md | 见详情 | horizontalSpeed" -- apps/viewer/src@BT@ ⇒ 只剩 sampling/player 一处实现 | — |
 | T-141 | setTracks 把父元素强转为 HTMLElement，null 时抛 TypeError | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/telemetry.ts:110 ⇒ 现场已无 `parentElement` 强转（`git grep -n parentElement -- apps/viewer/src/ui/telemetry.ts` ⇒ 0 命中）；DOM 桩探针 `setTracks(null)` ⇒ 未抛异常、hidden=true ⇒ **遗弃**（缺陷不再复现，判据本就满足） | documents/viewer/implementation/ui.md | 见详情 | — |
 | T-142 | 信息条重找跟随轨道，与 TrackSet.follow 策略重复 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/replaymeta.ts:24 ⇒ `setTracks(follow: Track | null)`，面板内不再重查；调用点改传 `TrackSet.follow`；`npm run typecheck` 通过，`tracks.find((t) => t.id === followId)` 在 apps/viewer/src 内 0 命中 | documents/viewer/implementation/ui.md | 见详情 | null` 决定，面板内不再重查 | — |
-| T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | 缺陷 | viewer | 待裁决 | apps/viewer/src/core/dom.ts:39 | documents/viewer/implementation/ui.md | — | — |
+| T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | 缺陷 | viewer | 待修 | apps/viewer/src/core/dom.ts:39 | documents/viewer/implementation/ui.md | 判据：`el('div', { id: undefined })` ⇒ 告警或报错（不再静默无 id） | — |
 | T-144 | .MDL 大小写让「三件齐」检查失效，vvd/vtx 槽位填进 .mdl 字节 | 缺陷 | viewer | 已结案 | apps/viewer/crates/wasm/src/lib.rs:122/123 ⇒ 配对名改「去尾部 4 字节再拼后缀」（大小写无关）；同源代码 game:117、debug:151 一并修（三文件 1:1）；重建 debug wasm 回归 ⇒ 三张地图 GLB 与修复前逐字节一致；本地 8 图 550 个模型条目全小写（潜在缺陷） | documents/viewer/implementation/wasm.md | 见详情 | — |
 | T-145 | 模型名匹配与材质查找的大小写口径不一致 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:119 | documents/viewer/implementation/wasm.md | 判据：模型名与材质查找同走小写基准 ⇒ 大小写不一致的模型名仍能配对（`cargo test` 覆盖） | — |
 | T-146 | 锁中毒会 panic，与本文件其它失败形态不一致 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:429 | documents/viewer/implementation/wasm.md | 判据：构造锁中毒场景 ⇒ 返回错误而非 panic（@BT@cargo test@BT@ 覆盖该路径） | — |
 | T-147 | 材质去重键是材质名，同名材质被后续模型复用 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:216 | documents/viewer/implementation/wasm.md | 判据：同名材质来自不同模型 ⇒ 各自独立实例（去重键含 search_path/模型作用域） | — |
 | T-148 | packed_files 构造期缓存而 num_static_props 每次现算 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:429 | documents/viewer/implementation/wasm.md | 判据：`git grep -n "num_static_props" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 只在构造期算一次，`metadata()` 复用缓存 | — |
-| T-149 | map_name 两端都拿不到值，字段保留但无内容 | 缺陷 | viewer | 待裁决 | apps/viewer/crates/wasm/src/lib.rs:389 | documents/viewer/implementation/wasm.md | — | — |
+| T-149 | map_name 两端都拿不到值，字段保留但无内容 | 缺陷 | viewer | 已结案 | apps/viewer/crates/wasm/src/lib.rs:389 | documents/viewer/implementation/wasm.md | 判据：`git grep -n "map_name" -- apps/viewer` ⇒ 仅占位字段、无解析来源（不做：两端都无来源，删除属 D-103 禁区） | — |
 | T-151 | BspMetadata 与 TS 契约靠约定对齐，无编译期校验 | 缺陷 | viewer | 已结案 | apps/viewer/scripts/check-wasm-api.mjs:50 ⇒ 新增第三层键名断言（引擎 `src/scripts/lib/wasm-api-contract.mjs`）；`npm run check:api` ⇒ 9↔9 通过、exit 0；把 TS 键改名后 ⇒ exit 1 并点名缺键 | documents/viewer/implementation/wasm.md | 见详情 | — |
 | T-152 | Worker 没有心跳，请求侧无法区分「在解析」与「已失联」 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/importer.ts:141 ⇒ `send` 建 30 s 看门狗、新增 `onWorkerTimeout`；假 Worker 永不回包的探针实测 30.0 s 后拒绝（`workerBroken=true`、`pending=0`）；`npm run typecheck` 通过 | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-153 | WorkerCtx 是手写的全局面（tsconfig lib 缺 WebWorker） | 缺陷 | viewer | 已结案 | apps/viewer/tsconfig.json:6 ⇒ `lib` 加 `WebWorker`；手写 `WorkerCtx` 删除、`ctx = self`（无断言）；`npm run typecheck` 与 `build:worker` 均通过 | documents/viewer/implementation/worker.md | 见详情 | — |
@@ -248,7 +247,7 @@
 | T-166 | `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/shavit-replay.ts:507 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ShavitParseResult.flags" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-167 | 进度回调里的 `'map'` 分支不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:329 | documents/viewer/implementation/replay.md | 判据：`git grep -n "'map'" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-168 | `MapPanel.spawnPoints` getter 零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:114 | documents/viewer/implementation/ui.md | 判据：`git grep -n "MapPanel.spawnPoints" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-201 | 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:507 | documents/game/implementation/app-entry.md | — | — |
+| T-201 | 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色 | 缺陷 | game | 待修 | apps/game/src/app.ts:507 | documents/game/implementation/app-entry.md | 判据：注入 wasm 初始化失败 ⇒ 控制台可见错误且加载被阻断（不再被 `.catch` 吞掉） | — |
 | T-202 | 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示 | 缺陷 | game | 已结案 | apps/game/src/dom-optional.ts 新增 `optDom()`（缺失打 `console.warn` 点名 id）；app.ts 四处可选控件改走它（五处 1:1，246 个锚点零漂移）；探针 ⇒ 缺失返回 null + 点名告警、存在 0 告警；game typecheck 通过 | documents/game/implementation/app-entry.md | 见详情 | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | — | — |
 | T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | 缺陷 | game | 待裁决 | apps/game/src/input/input-bridge.ts:65 | documents/game/implementation/input.md | — | — |
@@ -259,8 +258,8 @@
 | T-209 | M 键与 ESC 两条全局监听不校验 `sceneReady`，加载覆盖层显示期间同样触发 | 缺陷 | game | 已结案 | apps/game/src/panel/panel-controller.ts:265 ⇒ 两处监听均带 `this.sceneReady` 守卫（`updateVisibility` 写入、`hide()` 加载期复位）；`apps/game` typecheck 通过 | documents/game/implementation/panel.md | 见详情 | — |
 | T-211 | `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造 | 未接线·死代码 | game | 待修 | apps/game/src/renderer/renderer-main.ts:77 | documents/game/implementation/renderer.md | 判据：`git grep -n "ENABLE_PVS" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | 缺陷 | game | 待裁决 | apps/game/src/renderer/renderer-main.ts:264 | documents/game/implementation/renderer.md | — | — |
-| T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | 缺陷 | game | 待裁决 | apps/game/src/savepoint.ts:92 | documents/game/implementation/savepoint.md | — | — |
-| T-214 | 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态 | 缺陷 | game | 待裁决 | apps/game/src/savepoint.ts:21 | documents/game/implementation/savepoint.md | — | — |
+| T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | 缺陷 | game | 待修 | apps/game/src/savepoint.ts:92 | documents/game/implementation/savepoint.md | 判据：删除存点 ⇒ 有二次确认；越界索引 ⇒ 报错（不再静默 persist） | — |
+| T-214 | 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态 | 缺陷 | game | 待修 | apps/game/src/savepoint.ts:21 | documents/game/implementation/savepoint.md | 判据：蹲伏中存点、站立后读点 ⇒ 读到站立眼高（存点含蹲伏态） | — |
 | T-215 | 存档解析结果不是数组时静默保持空列表、不报错，表现为该地图没有存点 | 缺陷 | game | 已结案 | apps/game/src/savepoint.ts:59 ⇒ 非数组存档打 `console.error` 点名（1:1）；对照探针 ⇒ 修复前错误 0 条、修复后 1 条；typecheck 通过 | documents/game/implementation/savepoint.md | 见详情 | — |
 | T-216 | `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长 | 缺陷 | game | 已结案 | apps/game/src/savepoint.ts:84/92/100 ⇒ 三处改走类末尾新增的 `persistSoon()`（同批次合并写，零锚点漂移）；对照探针 ⇒ 连续 50 次 add 的 setItem 由 50 次降为 1 次；typecheck 通过 | documents/game/implementation/savepoint.md | 见详情 | — |
 | T-217 | `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方） | 缺陷 | game | 待修 | apps/game/crates/wasm/src/lib.rs:480 | documents/game/implementation/wasm-crate.md | 判据：@BT@BspProcessor@BT@ 上 @BT@#[wasm_bindgen]@BT@ 只出现一次且归属正确（不再悬空在注释块上方） | — |
@@ -287,10 +286,10 @@
 | T-239 | `worker-types.ts` 里多条声明在本工程无发送方且无接收点 | 未接线·死代码 | game | 待修 | src/ts-shared/auth/worker-dispatch.ts:265 | documents/game/implementation/worker.md | 判据：`git grep -n "worker-types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-301 | 回放捕获 `replayCapture.record` 未传 `dtS`，样本 `dt` 恒 0；`InputFrame` 亦无 `dt` 字段 | 缺陷 | debug | 已结案 | apps/debug/src/app.ts:2241 传第五参 dtS；input-recorder.ts 的 InputFrame 增可选 dt、frames()/toPayload()/sample() 三处物化带上它（全部 1:1 ⇒ 该文件 18 个锚点零漂移）；探针：record(…,0.015625) ⇒ frames()/toPayload()/toCompactPayload() 的 dt = 0.015625, 0.03125, 0；对象数组 load 带 dt ⇒ 0.02 保留、缺 dt ⇒ 0；InputPlayer 回放帧带 dt；debug typecheck 通过 | documents/debug/implementation/input.md | 见详情 | — |
 | T-302 | 面板 `PARAM_DEFS` 与 `config.ts` 两套默认值来源、无交叉校验（`jumpHeight` 57 与 `jumpSpeed` 302 同写 `jump_height`） | 缺陷 | debug | 已结案 | apps/debug/scripts/check-param-defaults.mjs（`npm run check:param-defaults`）⇒ 面板默认值经 PARAM_TO_RUST 与 config 换算值比对；正例 7 项全 OK 退出 0，反例（gravity 800→900）⇒ jumpHeight 报差并 exit 1 | documents/debug/implementation/physics.md | 见详情 | — |
-| T-303 | 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1 | 缺陷 | debug | 待裁决 | apps/debug/src/renderer/lod-manager.ts:262 | documents/debug/implementation/renderer.md | — | — |
+| T-303 | 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1 | 缺陷 | debug | 待修 | apps/debug/src/renderer/lod-manager.ts:262 | documents/debug/implementation/renderer.md | 判据：未接线 PVS ⇒ 不再打印「隐藏 N」；接线后统计与实际隐藏数一致 | — |
 | T-304 | tick 线时间戳在 `readPublishedTau()` 返回 0 时回落墙钟 `now`，两条线时间基准不同源 | 缺陷 | debug | 已结案 | 遗弃（不修）：断言不成立——`readPublishedTau()` 是 `tickInstantToTau = workerInstMs + rtOffset`（apps/debug/src/worker/main.ts:262）的**渲染时钟域**值，与回落用的 `now` 同源；且 τ=0 是「未投影」契约语义（src/ts-shared/auth/auth-loop.ts:428），此时发布位置就是权威自身 state、对应当前时刻。另修正了文档里指错行的锚点 | documents/debug/implementation/renderer.md | 见详情 | — |
 | T-305 | 权威 post-tick 位置差（residual）固定传 `undefined`，该组统计样本数恒 0 | 缺陷 | debug | 已结案 | 遗弃（不修）：residual 需「权威自身 post-tick 位置」，而发布只写投影位置（src/ts-shared/auth/auth-loop.ts:431）⇒ 主线程原理上拿不到；要填需给共享内存加槽位（SAB 布局跨端契约改动），该统计当前无读取方。限制已写进 residualStats 文档，字段留作扩展点 | documents/debug/implementation/renderer.md | 见详情 | — |
-| T-306 | lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform | 缺陷 | debug | 待裁决 | src/renderer-shared/shader/lightmap-shader.ts:1549 | documents/debug/implementation/renderer.md | — | — |
+| T-306 | lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform | 缺陷 | debug | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1549 | documents/debug/implementation/renderer.md | 判据：运行期改诊断开关 ⇒ 覆盖生效（不再固化于模块初始化时的 uniform 初值） | — |
 | T-307 | `frame-bench.mjs` 缺省地图路径 `<仓库根>/maps/surf_666.bsp` 不在工作区，不传第 4 参即打印「地图不存在」并 exit 2 | 缺陷 | debug | 待修 | apps/debug/scripts/frame-bench.mjs:37 | documents/debug/implementation/scripts.md | 判据：不传第 4 参跑 @BT@frame-bench.mjs@BT@ ⇒ 不再打印「地图不存在」并 exit 2（缺省路径可用或改为必填报错） | — |
 | T-308 | 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套 | 工具·流程 | debug | 待修 | apps/debug/package.json:7 | documents/debug/implementation/scripts.md | 判据：`apps/debug/package.json` 有指向 dev/build/start/stop 的 script，`.cmd` 只做薄包装（环境准备只留一处） | — |
 | T-309 | 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24） | 缺陷 | debug | 已结案 | apps/debug/src/wasm.d.ts:145 起 ⇒ 同块补 BspProcessor 12 个成员；`node .tmp/t007/probe.mjs` ⇒ BspProcessor 26/26 缺 0 | documents/debug/implementation/wasm-bindings.md | 见详情 | — |
@@ -323,7 +322,7 @@
 | T-446 | 盒**起点落在道具 `.phy` 凸壳内部**时该道具整块被跳过（`start_solid` 分支既不出接触、也不做退嵌）⇒ boreas `1600,7600` 的 `ramp_c1m`（678 三角、y≈339 有朝上面）自上而下 500 HU 扫掠一次都不命中、玩家穿坡落到 -38；同点位换 `dx/dz ±48` 复现一致 | 缺陷 | shared | 已结案 | 遗弃（已被 T-447 解决）：T-447（2026-10-08 结案，progress/board/archive-2026-10.md:95）修的是「brush 导出按面纹理跳过 TOOLS/TOOLSSKYBOX ⇒ 丢掉 ramp 坡面碰撞」，判据为「18 采样点里 16 个碰撞面抬升 43~401 HU」。本轮实测印证碰撞已在：debug_trace 从 y=400 向下命中 y=367.4（n=(-0.55,0.62,-0.55)），1 HU 短扫掠在 368→367、367.5→366.5 都命中；从 y≤367 起扫为 start_solid 既定语义（frac=1、无法线）。移动侧落到 y≈-66 是陡坡滑行（与 slope_speed_tests 及 36 项 phys 测试一致），非穿坡。另修一处独立隐患：try_player_move 的 start_solid 守卫（src/phys/player.rs:729，1:1，36/36 无回归） | progress/monthly/2026-10-6.md | 见详情 | — |
 | T-441 | 【S16】置换面碰撞**分块懒加载**（落实 D-017：owner 2026-10-08 裁决，避免一次性 ~13MB JSON / 13 万三角形入物理） | 缺陷 | shared | 待修 | src/ts-shared/phys/world-builder.ts:203 | progress/monthly/2026-10-6.md | 判据：置换面按块分批构建；`triJson` 单次体积显著下降且洞穴壁仍全有碰撞 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 已结案 | src/renderer-shared/scene/scene-optimizer.ts:343/356/374/384/395 ⇒ 两级合并都先按「属性签名」切子组再逐组合并（新 helper 追加在 EOF，正文 +13 行）；探针：3 个 mesh（1 个缺 normal）⇒ 修复前 3 块 + 1 条 three 报错、修复后 2 块 + 0 报错；现有回归 `npm run test:optimize-scene` ⇒ 21 passed / 0 failed（来源表与 faceIndex 反查完好） | progress/open-issues/03-renderer-merge-normal-attribute.md | 见详情 | 原 03 |
-| T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
+| T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待修 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | 判据：无 `$basetexture` 的面不再呈平白/粉（按 `$color` 口径修正或改兜底贴图） | 原 04 |
 | T-601 | 注释瘦身 · 共享层：20 处超长注释 + 3 个超长文件头（含 lightmap-shader.ts / player.rs / vbsp / gltf_builder.rs / authority-calibrator.ts 等） | 文档口径 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1582 | documents/architecture/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
 | T-602 | 注释瘦身 · debug：4 处超长注释 + 0 个超长文件头（debug 脚本与 app.ts / teleport-manager.ts / path-recorder.ts / crates/wasm 等） | 文档口径 | debug | 待修 | apps/debug/scripts/jump-apex-verify.mjs:1 | documents/debug/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
 | T-603 | 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等） | 文档口径 | game | 待修 | apps/game/src/worker/main.ts:1 | documents/game/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
