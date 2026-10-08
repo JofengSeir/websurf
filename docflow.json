@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-013 结案",
+      "reason": "补回 T-433 bullet",
       "at": "2026-10-08",
       "task": "",
       "consumed": true
@@ -1429,6 +1429,8 @@
     "TODO.md": {
       "documents/game/implementation/scripts.md:40:40": "9d1cc2a1",
       "apps/game/src/app.ts:640:640": "06b0b66c",
+      "src/wasm-core/vhv.rs:41:41": "8f99698a",
+      "src/renderer-shared/shader/lightmap-shader.ts:545:545": "8298ad2c",
       "apps/viewer/package.json:18:18": "15c96ebb",
       "apps/debug/package.json:16:16": "15c96ebb",
       "apps/game/package.json:16:16": "15c96ebb",
@@ -1582,7 +1584,7 @@
       "apps/game/crates/wasm/src/lib.rs:1734:1734": "4a2cba58",
       "src/wasm-core/bsp_to_gltf_core/convert.rs:367:367": "a803e10b",
       "src/scripts/check-glb-parity.mjs:2:2": "3f48e740",
-      "src/wasm-core/vhv.rs:90:90": "e1a17f57",
+      "progress/monthly/2026-10-7.md:42:42": "586d6e54",
       "apps/game/src/renderer/renderer-main.ts:1020:1020": "52edeba1",
       "src/ts-shared/phys/world-builder.ts:203:203": "ea663714",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
@@ -4952,6 +4954,14 @@
   },
   "rebaselines": [
     {
+      "path": "TODO.md",
+      "at": "2026-10-08T22:13:22.495Z",
+      "by": "agent",
+      "reason": "T-433 转进行中并更新实测证据",
+      "changed": 4,
+      "total": 168
+    },
+    {
       "path": "documents/wasm-core/overview.md",
       "at": "2026-10-08T22:04:07.911Z",
       "by": "agent",
@@ -5262,14 +5272,6 @@
       "reason": "T-207：app.ts requestLock 段改动，锚点复核后重钉",
       "changed": 1,
       "total": 69
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-08T21:14:10.085Z",
-      "by": "agent",
-      "reason": "T-205 证据列裸路径锚点改全路径",
-      "changed": 2,
-      "total": 166
     }
   ]
 }

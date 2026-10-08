@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（123 条）
+## 未结项（122 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（91）
+### 待修（90）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -140,7 +140,6 @@
 - **T-407** `world/types.ts` 的 `rootNode` 字段　`shared`
 - **T-408** `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de…　`shared`
 - **T-409** `check-glb-parity.mjs` 门禁零接线（未进 package.json / CI）　`共享`
-- **T-433** prop 逐顶点光照（`sp_<i>.vhv`）数据极暗：黑块 / 紫斑的**唯一**来源（关掉该路径黑像素 4.94%→0.00%），解析已对齐 SDK（checksum 1503/1503），收口口径待定　`shared`
 - **T-443** 帧探针补 `applyPoseAt(pos, yaw, pitch)`（现只有 spawn/surface 预设），脚本才能钉任意位姿出图　`debug`
 - **T-446** 盒**起点落在道具 `.phy` 凸壳内部**时该道具整块被跳过（`start_solid` 分支不出接触、又不做退嵌）⇒ 如图 `1600,7600` 处的 `ramp_c1m`（AABB x[-1475,2534] y[99,1536] z[6666,10508]，678 三角、y≈339 有朝上面）下达 500 HU 扫掠一次都不命中、人穿坡落到 -38；真图复核脚本 `.tmp/mapsurvey/spot1600b.mjs`　`shared`
 - **T-441** 置换面碰撞**分块懒加载**（D-017 裁决）：避免一次性 ~13MB JSON / 13 万三角形入物理　`shared`
@@ -152,6 +151,7 @@
 - **T-607** GitHub Pages 站点会被「从分支构建」的内部 Jekyll 构建静默顶掉（站点根变 README 渲染页），部署链无断言/告警　`repo`
 - **T-608** 核实「单入口」假设（Copilot / Gemini CLI 是否读根 `AGENTS.md`）并写进规范篇　`docs`
 - **T-609** 终态行的「判据」列按行态保护（改终态判据须先 approve）　`repo`
+- **T-433** prop 逐顶点光照（`sp_<i>.vhv`）与 leaf ambient cube 的组合口径：D-016 已决「相加」，而现实现是 either/or + 乘法　`shared`
 
 
 ### 已取证待立项（2）
@@ -323,7 +323,7 @@
 | T-407 | `world/types.ts` 的 `rootNode` 字段 | 未接线·死代码 | shared | 待修 | apps/game/crates/wasm/src/lib.rs:1734 | documents/ts-shared/overview.md | 判据：`git grep -n "world/types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | 未接线·死代码 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/convert.rs:367 | documents/wasm-core/overview.md | 判据：`git grep -n "bsp_to_gltf_core/convert.rs" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-409 | `check-glb-parity.mjs` 门禁零接线（未进 package.json / CI，谁都不跑它） | 配置·门禁 | 共享 | 待修 | src/scripts/check-glb-parity.mjs:2 | documents/norms/scripts-and-ci.md | 判据：@BT@git grep -l "check-glb-parity" -- **/package.json .github@BT@ ⇒ 至少 1 个文件命中（已接线） | #409 |
-| T-433 | 【S12·残留黑块的真实层级】owner 参考截图里的黑块 / 紫斑**全部**来自 prop 的逐顶点预烘焙光照路径（几何属性 `_VBSP_VLIGHT`，源文件是 pakfile 的 `sp_<i>.vhv`）：关闭该路径后同一视点纯黑像素 **4.94% → 0.00%**、均值 63.9 → 70.6。解析侧已逐字段对齐 SDK——`vradstaticprops.cpp:1563-1593` 写 `flags=4` / `vertexSize=4` 且顶点为 **B,G,R,A** 顺序，`gamebspfile.h:206-225` 的 `StaticPropLump_t` **没有** ambient cube 字段，与本仓 72 B 记录逐字段吻合；prop→文件的 checksum 校验 **1503 匹配 / 0 不符**。但**数据本身极暗**：1587 个 prop 全图最大字节仅 ~95/255、prop 均值亮度中位数 6.8/255、298 个 prop 全 0。VRAD 侧 `m_Color = direct + indirect`（`vradstaticprops.cpp:1427`）与世界面同一物理量 ⇒「world 亮、prop 近黑」是数据 + 兜底口径问题，**不是**解析错 | 缺陷 | shared | 待修 | src/wasm-core/vhv.rs:90 | progress/pending-detail.md | 判据：prop 逐顶点光照与 leaf ambient cube **相加**（引擎 2013 口径）⇒ owner 截图里的黑块 / 紫斑消除（黑像素占比 4.94% → 0.00%） | — |
+| T-433 | 【S12·残留黑块的真实层级】owner 参考截图里的黑块 / 紫斑**全部**来自 prop 的逐顶点预烘焙光照路径（几何属性 `_VBSP_VLIGHT`，源文件是 pakfile 的 `sp_<i>.vhv`）：关闭该路径后同一视点纯黑像素 **4.94% → 0.00%**、均值 63.9 → 70.6。解析侧已逐字段对齐 SDK——`vradstaticprops.cpp:1563-1593` 写 `flags=4` / `vertexSize=4` 且顶点为 **B,G,R,A** 顺序，`gamebspfile.h:206-225` 的 `StaticPropLump_t` **没有** ambient cube 字段，与本仓 72 B 记录逐字段吻合；prop→文件的 checksum 校验 **1503 匹配 / 0 不符**。但**数据本身极暗**：1587 个 prop 全图最大字节仅 ~95/255、prop 均值亮度中位数 6.8/255、298 个 prop 全 0。VRAD 侧 `m_Color = direct + indirect`（`vradstaticprops.cpp:1427`）与世界面同一物理量 ⇒「world 亮、prop 近黑」是数据 + 兜底口径问题，**不是**解析错 | 缺陷 | shared | 进行中 · dsh · 2026-10-09 | 实测（surf_666 的 629 个 .vhv / 50.4 万顶点）：RGB 中位 40~60、p95 98~127、**max 239**（条目原写「max ~95」不确）；第 4 字节恒 **255**（确是 alpha，忽略正确）；解析 `v*2/255` + shader `^2.2` 与引擎口径一致（`src/wasm-core/vhv.rs:41`）。两条路径是 either/or（`src/renderer-shared/shader/lightmap-shader.ts:545` 命中即 return），且都是**乘法**（`:1375`、`:1477`）⇒ 需按 D-016 改成相加，做法见 progress/monthly/2026-10-7.md:42 | progress/pending-detail.md | 见详情 | — |
 | T-443 | 【S17·debug】帧探针 `applyPose` 只有 `spawn`/`surface` 两个预设 ⇒ 脚本无法钉任意位姿出图；补 `applyPoseAt(pos, yawDeg, pitchDeg)`（走现成 `setHoldPoint`） | 缺失 | debug | 待修 | apps/game/src/renderer/renderer-main.ts:1020 | progress/monthly/2026-10-6.md | 判据：脚本调用后 `cameraPose()` 返回同一 pos/yaw/pitch，两次运行像素 diff≈0 | — |
 | T-446 | 盒**起点落在道具 `.phy` 凸壳内部**时该道具整块被跳过（`start_solid` 分支既不出接触、也不做退嵌）⇒ boreas `1600,7600` 的 `ramp_c1m`（678 三角、y≈339 有朝上面）自上而下 500 HU 扫掠一次都不命中、玩家穿坡落到 -38；同点位换 `dx/dz ±48` 复现一致 | 缺陷 | shared | 待修 | 见详情 | progress/monthly/2026-10-6.md | 判据：@BT@node .tmp/mapsurvey/spot1600b.mjs@BT@ ⇒ `从 y=340 向下 frac=0.688 命中y=-4.0`（未命中 y≈339 的坡面） | — |
 | T-441 | 【S16】置换面碰撞**分块懒加载**（落实 D-017：owner 2026-10-08 裁决，避免一次性 ~13MB JSON / 13 万三角形入物理） | 缺陷 | shared | 待修 | src/ts-shared/phys/world-builder.ts:203 | progress/monthly/2026-10-6.md | 判据：置换面按块分批构建；`triJson` 单次体积显著下降且洞穴壁仍全有碰撞 | — |
