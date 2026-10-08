@@ -128,12 +128,14 @@ export interface WorldBuilderOptions {
   onProgress?: (stage: string) => void;
 }
 
-/** 缺省 brush 过滤条件；五个键与 Rust 侧 `ColliderFilter::default()` 逐字段同值。 */
+/** 缺省 brush 过滤条件；五个键与 Rust 侧 `ColliderFilter::default()` 逐字段同值。
+ *  `skip_sky: false`：碰撞只看 brush 的 contents，纹理不参与；本图的 ramp 坡面碰撞
+ *  就是 `CONTENTS_PLAYERCLIP` + `TOOLS/TOOLSSKYBOX` 纹理，按纹理跳过会让玩家穿坡。 */
 const DEFAULT_BRUSH_FILTER = {
   include_ladder: true,
   include_solid: true,
   min_brush_volume: 0,
-  skip_sky: true,
+  skip_sky: false,
   skip_nodraw: false,
 };
 

@@ -2297,7 +2297,7 @@ impl BspProcessor {
 /// 因此「不传」与「传 `{}`」得到同一套取值：
 /// - `include_ladder` / `include_solid`（默认 `true`）：是否导出 LADDER / SOLID brush；
 /// - `min_brush_volume`（`f32`，默认 `0.0`）：跳过 AABB 体积小于此值的 brush；
-/// - `skip_sky`（默认 `true`）：跳过含 SKY / SKY2D 纹理的 brush；
+/// - `skip_sky`（默认 `false`）：跳过含 SKY / SKY2D 纹理的 brush（碰撞只看 contents，纹理不参与）；
 /// - `skip_nodraw`（默认 `false`）：跳过含 NODRAW 纹理的 brush（NODRAW 只影响渲染，不影响碰撞）。
 ///
 /// 示例：`{"skip_sky": false, "min_brush_volume": 100.0}`
@@ -2309,13 +2309,13 @@ struct ColliderFilter {
     include_solid: bool,
     #[serde(default)]
     min_brush_volume: f32,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     skip_sky: bool,
     #[serde(default)]
     skip_nodraw: bool,
 }
 
-// 自定义 Default：与 serde 默认一致（include_*=true, skip_sky=true, skip_nodraw=false）；
+// 自定义 Default：与 serde 默认一致（include_*=true, skip_sky=false, skip_nodraw=false）；
 // #[derive(Default)] 会为 bool 生成 false，与 #[serde(default = "default_true")] 不一致
 impl Default for ColliderFilter {
     fn default() -> Self {
@@ -2323,7 +2323,7 @@ impl Default for ColliderFilter {
             include_ladder: true,
             include_solid: true,
             min_brush_volume: 0.0,
-            skip_sky: true,
+            skip_sky: false,
             skip_nodraw: false,
         }
     }

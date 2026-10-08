@@ -84,7 +84,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 | 接口 | 锚点 | 用途 |
 |---|---|---|
 | `base64ToBytes` | `src/ts-shared/wasm/loader.ts:44` | 内嵌 wasm 载荷解码 |
-| `buildWorldBundle` | `src/ts-shared/phys/world-builder.ts:150` | 世界构建（BSP → wasm → 场景数据） |
+| `buildWorldBundle` | `src/ts-shared/phys/world-builder.ts:152` | 世界构建（BSP → wasm → 场景数据） |
 | `PvsManager` | `src/ts-shared/world/pvs-manager.ts:68` | cluster 查询与可见集 |
 | `layerMouseDelta` / `M_YAW` / `INPUT_CLAMP` | `src/ts-shared/input/input-layer.ts:25`、`:22`、`:19` | 输入归一 |
 | `MouseBuffer` | `src/ts-shared/input/mouse-buffer.ts:37` | 主线程鼠标增量缓冲 |
@@ -107,7 +107,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 1. `apps/<app>/web/index.html` 加载打包后的 `web/app.js`（构建产物，非本仓源码）。
 2. `apps/<app>/src/app.ts` 是主线程装配入口：它取 DOM、建渲染器、建 Worker、绑定面板。
 3. Worker 侧入口是 `apps/<app>/src/worker/main.ts`：装配 `self.onmessage` 与各控制器。
-4. 世界构建走共享层的 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:150`），其内部经 `src/ts-shared/wasm/loader.ts` 加载 wasm 产物；出生点坐标/yaw 换算由 `src/ts-shared/phys/angles.ts` 的 `bspYawToCsYaw` 提供（`apps/debug/src/world/spawn-loader.ts` 是同一换算的参考实现，全仓无 import）。
+4. 世界构建走共享层的 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:152`），其内部经 `src/ts-shared/wasm/loader.ts` 加载 wasm 产物；出生点坐标/yaw 换算由 `src/ts-shared/phys/angles.ts` 的 `bspYawToCsYaw` 提供（`apps/debug/src/world/spawn-loader.ts` 是同一换算的参考实现，全仓无 import）。
 5. Rust 侧由 `apps/<app>/crates/wasm/src/lib.rs` 暴露 `#[wasm_bindgen]` 函数，转发到 `src/wasm-core`（解析）与 `src/phys`（物理）。
 
 ### 5.2 帧链（`apps/debug` 与 `apps/game` 共形）

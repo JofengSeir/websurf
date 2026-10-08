@@ -267,7 +267,7 @@ export interface ColliderFilter {
   include_solid?: boolean;
   /** 跳过 AABB 体积小于此值的 brush（默认 0 = 不过滤）。 */
   min_brush_volume?: number;
-  /** 跳过含 SKY / SKY2D 纹理的 brush（默认 true）。 */
+  /** 跳过含 SKY / SKY2D 纹理的 brush（默认 false；碰撞只看 contents）。 */
   skip_sky?: boolean;
   /** 跳过含 NODRAW 纹理的 brush（默认 false）。 */
   skip_nodraw?: boolean;
@@ -281,6 +281,6 @@ export const DEFAULT_COLLIDER_FILTER: Required<ColliderFilter> = {
   include_ladder: true,
   include_solid: true,
   min_brush_volume: 0,
-  skip_sky: true,
+  skip_sky: false,
   skip_nodraw: false,
 };

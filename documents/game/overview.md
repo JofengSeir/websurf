@@ -109,7 +109,7 @@
 - `apps/game/src/input/input-bridge.ts` 的 `sendConfig`（`apps/game/src/input/input-bridge.ts:41`）：面板参数的双端下发口。
 - `apps/game/web/index.html` 的 `canvas#preview`（`apps/game/web/index.html:27`）：页面外壳与全部挂载点。
 
-共享层侧只写「game 如何消费」三个入口：`src/ts-shared/auth/worker-dispatch.ts` 的 `createWorkerDispatch`（`src/ts-shared/auth/worker-dispatch.ts:207`）、`src/ts-shared/auth/shared-state.ts` 的 `createMainSharedState`（`src/ts-shared/auth/shared-state.ts:1022`）、`src/ts-shared/phys/world-builder.ts` 的 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:150`）。
+共享层侧只写「game 如何消费」三个入口：`src/ts-shared/auth/worker-dispatch.ts` 的 `createWorkerDispatch`（`src/ts-shared/auth/worker-dispatch.ts:207`）、`src/ts-shared/auth/shared-state.ts` 的 `createMainSharedState`（`src/ts-shared/auth/shared-state.ts:1022`）、`src/ts-shared/phys/world-builder.ts` 的 `buildWorldBundle`（`src/ts-shared/phys/world-builder.ts:152`）。
 
 ## 阅读顺序
 

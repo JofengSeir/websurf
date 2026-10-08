@@ -2138,7 +2138,7 @@ impl BspProcessor {
     ///
     /// `filter_json` 是 [`ColliderFilter`] 的 JSON，控制导出哪些 brush：
     /// - `include_ladder` / `include_solid`: 是否导出 LADDER / SOLID brush（默认 true）
-    /// - `skip_sky`: 是否跳过含 SKY 纹理的 brush（默认 true）；`skip_nodraw`: 是否跳过含 NODRAW 纹理的 brush（默认 false）
+    /// - `skip_sky`: 是否跳过含 SKY 纹理的 brush（默认 false，见下）；`skip_nodraw`: 是否跳过含 NODRAW 纹理的 brush（默认 false）
     /// - `min_brush_volume`: 跳过 AABB 体积小于此值的 brush（默认 0，不跳过）
     ///
     /// 算法：收集 brush 平面 → 三平面求交得凸包顶点（过滤正侧）→ 按面 fan 三角化 →
@@ -3061,7 +3061,7 @@ impl BspProcessor {
 /// 导出哪些 brush。所有字段可选，缺失时用默认值。字段名为 snake_case：
 /// - `include_ladder` / `include_solid` (默认 true): 是否导出 LADDER / SOLID brush
 /// - `min_brush_volume` (f32, 默认 0): 跳过 AABB 体积小于此值的 brush
-/// - `skip_sky` (默认 true): 跳过含 SKY 纹理的 brush（天空无碰撞）
+/// - `skip_sky` (默认 false): 跳过含 SKY 纹理的 brush。**碰撞只看 contents**，纹理不参与
 /// - `skip_nodraw` (默认 false): 跳过含 NODRAW 纹理的 brush。
 ///   注意：NODRAW 只影响渲染不影响碰撞，故默认不跳过。
 ///
@@ -3074,13 +3074,13 @@ struct ColliderFilter {
     include_solid: bool,
     #[serde(default)]
     min_brush_volume: f32,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     skip_sky: bool,
     #[serde(default)]
     skip_nodraw: bool,
 }
 
-// 自定义 Default：与 serde 默认一致（include_*=true, skip_sky=true, skip_nodraw=false）；
+// 自定义 Default：与 serde 默认一致（include_*=true, skip_sky=false, skip_nodraw=false）；
 // #[derive(Default)] 会为 bool 生成 false，与 #[serde(default = "default_true")] 不一致
 impl Default for ColliderFilter {
     fn default() -> Self {
@@ -3088,7 +3088,7 @@ impl Default for ColliderFilter {
             include_ladder: true,
             include_solid: true,
             min_brush_volume: 0.0,
-            skip_sky: true,
+            skip_sky: false,
             skip_nodraw: false,
         }
     }

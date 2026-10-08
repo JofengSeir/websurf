@@ -26,7 +26,7 @@ Cargo 侧的三条关键声明：共享物理层 path 依赖（`apps/game/crates
 - **导出选项由 `ConvertOptions` 承载**：缺失纹理回退表、基名 VMT 索引、缺失清单开关与图集面积上界四项（`apps/game/crates/wasm/src/lib.rs:627`）；`generate_missing_list` 为真时导出期同时收集缺失清单（`:630`）。
 - **PHY 顶点要过两级变换**：先做 IVP → Source 坐标换算（`(x, z, -y)`，纯旋转、det 为 +1），再施加与显示端相同的根骨骼变换，最后按放置表搬进世界空间（`apps/game/crates/wasm/src/lib.rs:1041`、`:1025`、`:1047`）。
 - **brush 导出的自证计数**：九个具名跳过分支之和等于 `skipped`，且 `exported + skipped == total` 时统计行末尾为 `ok`，否则为 `MISMATCH`（`apps/game/crates/wasm/src/lib.rs:2026`、`:2026`、`:2043`）。
-- **默认纹理包的解压口在本工程由主线程使用**：`decompress_mtz` 经 `buildWorldBundle` 的 `decompressMtz` 注入（`apps/game/src/app.ts:516`、`src/ts-shared/phys/world-builder.ts:258`）。
+- **默认纹理包的解压口在本工程由主线程使用**：`decompress_mtz` 经 `buildWorldBundle` 的 `decompressMtz` 注入（`apps/game/src/app.ts:516`、`src/ts-shared/phys/world-builder.ts:260`）。
 
 ## 已知缺口（状态见 TODO.md）
 
