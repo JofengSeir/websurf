@@ -1006,9 +1006,10 @@ fn push_bsp_model_bsp(
 ///
 /// 顶点属性按 `BspVertexData` 写（`position` 经 [`map_coords`]），语义表里
 /// `TEXCOORD_0` 与 `TEXCOORD_1` 分别绑到 `accessor_start + 1` 与 `accessor_start + 2`。
-/// TEXCOORD_1 是 lightmap UV：命中图集区域时用 `lightmap::lightmap_uv` 逐顶点算，
-/// 否则写中性常量 `[0, 0]`——**没有 lightmap 也要写**，否则同一块几何里的属性集不一致，
-/// 下游合并会失败。
+/// TEXCOORD_1 是 lightmap UV，命中图集区域的图元按面类型二选一（都不命中时写中性常量
+/// `[0, 0]`——**没有 lightmap 也要写**，否则同一块几何里的属性集不一致，下游合并会失败）：
+/// **brush 面**用 `lightmap::lightmap_uv` 投影，**位移面**用 `Handle::<Face>::vertex_grid_uv`
+/// 给出的细分网格单位方格坐标（口径与理由见该方法的 doc）。
 ///
 /// `extras` 固定写 `{"faceIndex": <面序号>, "hasLightmap": <是否命中图集区域>}`。
 fn push_bsp_face_bsp(
@@ -1047,8 +1048,14 @@ fn push_bsp_face_bsp(
         (Some(export), Some(region)) => {
             let texinfo: &crate::vbsp::TextureInfo = &texture;
             let vbsp_face: &crate::vbsp::Face = &face;
+            // 位移面走**细分网格** UV（`vertex_grid_uv`），brush 面走投影（`lightmap_uv`）。
+            // 两个迭代器与 `vertex_positions()` 逐项对齐，故必须同时推进。
+            let mut grid = face.vertex_grid_uv();
             face.vertex_positions()
-                .map(|pos| lightmap::lightmap_uv(&export.atlas, region, vbsp_face, texinfo, pos))
+                .map(|pos| match grid.next().flatten() {
+                    Some((gu, gv)) => lightmap::lightmap_region_uv(&export.atlas, region, gu, gv),
+                    None => lightmap::lightmap_uv(&export.atlas, region, vbsp_face, texinfo, pos),
+                })
                 .collect()
         }
         _ => vec![[0.0f32, 0.0f32]; vertex_count as usize],

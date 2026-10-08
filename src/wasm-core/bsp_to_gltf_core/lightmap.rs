@@ -20,8 +20,14 @@
 //!   所需页数下界；不静默截断、不降采样、不部分写入。
 //! - 像素编码 `R=mantissa_r, G=mantissa_g, B=mantissa_b, A=exp+128`（`exp` 是 `i8`，按 `u8`
 //!   回绕即 +128；见 `build_atlas` 写像素处）。
-//! - UV：`uv = axis·pos + axis.w - LightMapOffset`，除以 `LightMapSize`（**不是** luxel 数那一级），
-//!   再映射进内缩矩形并加半像素（见 `lightmap_uv`）。
+//! - UV 有**两条来源**，都汇到 `lightmap_region_uv`（内缩矩形 + 半像素）：
+//!   ① **brush 面**：`uv = axis·pos + axis.w - LightMapOffset`，除以 `LightMapSize`（**不是** luxel
+//!      数那一级）——见 `lightmap_uv`；
+//!   ② **位移面**：`uv` 是细分网格上的**单位方格**（`Handle::<Face>::vertex_grid_uv` 的产出）。
+//!      起源 SDK 把位移面的 luxel 坐标定义为四角 `(0.5,0.5)…(U+0.5,V+0.5)` 之间的双线性插值
+//!      （`builddisp.cpp` 的 `CCoreDispSurface::CalcLuxelCoords` / `CCoreDispInfo::CalcDispSurfCoords`），
+//!      归一化后与三维位置无关。**不能**对位移顶点用 ①：位移把顶点推离原平面后，投影会漂出本面
+//!      的矩形（实测 `surf_boreas` 68.9% 的图元越界、最远 49 纹素），采到相邻面的贴图或图集空白。
 //! - 单面 luxel 边长上界 256：超限**报错**而非越界（见 [`MAX_LUXEL_SIDE`] 与
 //!   `check_face_luxel_size`——它被抽成纯函数，好让 257 这条分支有单测覆盖）。
 //!
@@ -611,14 +617,23 @@ pub fn lightmap_uv(
     let u = u / face.light_map_texture_size[0].max(1) as f32;
     let v = v / face.light_map_texture_size[1].max(1) as f32;
 
+    lightmap_region_uv(atlas, region, u, v)
+}
+
+/// 把面内归一化坐标 `(u, v) ∈ [0,1]²` 映射进该面在图集里的矩形。
+///
+/// 口径：矩形 min 加**半像素**、尺寸取**边长减一**（见 `lightmap_uv` 的 doc）——于是 `u=0` 落在
+/// 第一个 luxel 中心、`u=1` 落在最后一个 luxel 中心，与该面在图集里的 `size+1` 个 luxel 对齐。
+///
+/// 两条 UV 来源都汇到这里：brush 面经 `lightmap_uv` 的投影得到 `(u, v)`；位移面直接用
+/// `Handle::<Face>::vertex_grid_uv` 给出的单位方格坐标（口径见那里的 doc）。
+pub fn lightmap_region_uv(atlas: &LightmapAtlas, region: LightmapRect, u: f32, v: f32) -> [f32; 2] {
     let atlas_w = atlas.width as f32;
     let atlas_h = atlas.height as f32;
-    // 图集内映射：min 加半像素、size 用（矩形边长 - 1），见本函数 doc
     let min_x = (region.x as f32 + 0.5) / atlas_w;
     let min_y = (region.y as f32 + 0.5) / atlas_h;
     let size_x = (region.width as f32 - 1.0) / atlas_w;
     let size_y = (region.height as f32 - 1.0) / atlas_h;
-
     [min_x + u * size_x, min_y + v * size_y]
 }
 

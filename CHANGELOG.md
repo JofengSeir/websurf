@@ -53,6 +53,8 @@
 
 **lightmap 图集空纹素膨胀（消除地图上的「黑带」）**：图集给每个面留了一圈 1 px 边距（打包矩形 = luxel + 2、落位内缩 1 px），打包还会留下未用残块与页尾；这些空纹素是 `(0,0,0,0)`，而渲染端的解码式是 `rgb * 2^(a*255-128)` ⇒ 解码成**纯黑**。面边缘的 lightmap 取样会取到矩形外的纹素（顶点 UV 落在 luxel 中心，再往外半纹素就出界），踩到边距就在每个面的边界上画出一条黑带——实测 `surf_boreas` 有 **26,810/368,634（7.27%）** 个 lightmap 顶点取样落在空纹素上、其中 **86% 恰好差 1 纹素**，8 张地图的图集空纹素占比 **32.7%~67.2%**。现落位填像素后做**多源 BFS 膨胀**，把每个空纹素填成最近有效纹素的值（`dilate_empty_texels`，`src/wasm-core/bsp_to_gltf_core/lightmap.rs`）⇒ 越界取样取到的是该面自己的边缘 luxel；8 张图图集 `空=0.0%`、`surf_boreas` 的取样落空顶点数归零，图集 PNG 体积基本不变。
 
+**位移面的 lightmap UV 改按细分网格（黑带 / 「串台光照」的根因）**：起源 SDK 里位移面的 lightmap 采样块是 `(sizeU+1)×(sizeV+1)` 的**规则网格**，四角 luxel 坐标恒为 `(0.5,0.5)`、`(0.5,V+0.5)`、`(U+0.5,V+0.5)`、`(U+0.5,0.5)`（`builddisp.cpp` 的 `CCoreDispSurface::CalcLuxelCoords`），网格点由 `CCoreDispInfo::CalcDispSurfCoords` 在四角之间双线性插值——归一化后就是**单位方格** `u=j/2^power`、`v=i/2^power`，与顶点三维位置无关。本仓此前把**已被位移推走的顶点**投影到 lightmap 轴上，于是地形（位移面）的 UV 漂出本面的图集矩形：实测 `surf_boreas` **931/1351（68.9%）** 个图元的 uv 盒越界，最大越界 **49 个纹素**、39 个整块落到图集外 ⇒ 采到**相邻面的光照贴图**（观感是「混进其他光照贴图」）或图集空白（纯黑块/黑边）。现按 SDK 口径改为 `src/wasm-core/vbsp/handle/mod.rs` 的 `vertex_grid_uv`（`Handle::<Face>` 逐顶点给出单位方格坐标）→ `src/wasm-core/bsp_to_gltf_core/lightmap.rs` 的 `lightmap_region_uv` 映射进矩形；**8 张地图逐面 uv 盒全部落回自己的矩形（越界 0）**。
+
 **文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范），篇目见 `README.md`「文档地图」与 `documents/index.md`。
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。

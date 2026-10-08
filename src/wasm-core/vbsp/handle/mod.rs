@@ -374,6 +374,57 @@ impl<'a> Handle<'a, Face> {
         }
     }
 
+    /// 与 `vertex_positions()` **逐项对齐**的位移面细分网格 UV（`[0,1]`；非位移面恒 `None`）。
+    ///
+    /// 口径照起源 SDK 的 `builddisp.cpp`：位移面的 lightmap 采样块是 `(sizeU+1)×(sizeV+1)` 的
+    /// **规则网格**，四个角的 luxel 坐标恒为 `(0.5,0.5)`、`(0.5,V+0.5)`、`(U+0.5,V+0.5)`、
+    /// `(U+0.5,0.5)`（`CCoreDispSurface::CalcLuxelCoords`），网格点由
+    /// `CCoreDispInfo::CalcDispSurfCoords` 在四角之间**双线性插值**得到。把该坐标按「面矩形内缩
+    /// 半像素」归一化后，这串坐标正好退化成**单位方格**：`u = j/steps`（`j` 沿角 0→3 的边）、
+    /// `v = i/steps`（`i` 沿角 0→1 的边），其中 `steps = 2^power`、`i`/`j` 即 `subdivided_face`
+    /// 的 x/y。
+    ///
+    /// 为什么不能用投影：位移顶点的世界位置已被法线方向推走，投到 lightmap 轴上会漂出本面的
+    /// 矩形（实测 `surf_boreas` 68.9% 的 lightmapped 图元越界、最远 49 个纹素）⇒ 采到相邻面的
+    /// 光照贴图，或（落在图集空白处时）采到纯黑。消费点是
+    /// `bsp_to_gltf_core/convert.rs` 的 `push_bsp_face_bsp`。
+    pub fn vertex_grid_uv(&self) -> impl Iterator<Item = Option<(f32, f32)>> + 'a {
+        match self.displacement() {
+            None => Either::Right(std::iter::repeat(None).take(self.vertex_positions().count())),
+            Some(displacement) => {
+                let steps = 2usize.pow(displacement.power as u32);
+                let side = steps + 1;
+                let index = |x: usize, y: usize| y * side + x;
+                // `subdivided_face` 按 x 外层展平 ⇒ flat = x*side + y；本表把 flat 映回 (x, y)
+                let mut grid_of_flat = vec![(0usize, 0usize); side * side];
+                for x in 0..side {
+                    for y in 0..side {
+                        grid_of_flat[x * side + y] = (x, y);
+                    }
+                }
+                // 与 `triangulated_displaced_vertices()` 同一 index 表、同一三角形顺序
+                let mut out: Vec<Option<(f32, f32)>> = Vec::with_capacity(steps * steps * 6);
+                for x in 0..steps {
+                    for y in 0..steps {
+                        for flat in [
+                            index(x, y),
+                            index(x + 1, y),
+                            index(x, y + 1),
+                            index(x + 1, y),
+                            index(x + 1, y + 1),
+                            index(x, y + 1),
+                        ] {
+                            let (gx, gy) = grid_of_flat[flat];
+                            // gx 沿角 0→1 ⇒ 图集 V；gy 沿角 0→3 ⇒ 图集 U
+                            out.push(Some(disp_grid_uv(gx, gy, steps)));
+                        }
+                    }
+                }
+                Either::Left(out.into_iter())
+            }
+        }
+    }
+
     /// 面的平面法线（`plane_num` → `Bsp::planes`）。
     ///
     /// `unwrap()`：`plane_num` 越界 panic，而 `Bsp::validate` **不检查** `face.plane_num`。
@@ -539,6 +590,17 @@ impl<'a> Handle<'a, DisplacementSubNeighbour> {
 }
 
 
+/// 位移面细分网格坐标 `(i, j)` → 该面的**单位方格** lightmap UV `(u, v)`（见
+/// `Handle::<Face>::vertex_grid_uv` 的口径）。
+///
+/// `i` 沿角 0→1 的边、对应图集 **V**；`j` 沿角 0→3 的边、对应图集 **U**；`steps = 2^power`
+/// 是网格的格数（`steps + 1` 个点）。抽成纯函数只为让「角点落到 0/1」这条约定可被单测钉住。
+fn disp_grid_uv(i: usize, j: usize, steps: usize) -> (f32, f32) {
+    let oo = 1.0f32 / steps.max(1) as f32;
+    (j as f32 * oo, i as f32 * oo)
+}
+
+
 impl<'a> Handle<'a, StaticPropLump> {
     /// 该道具的模型路径：`prop_type` 是 `static_props.dict.name` 的下标（直接下标，越界 panic）。
     ///
@@ -546,5 +608,25 @@ impl<'a> Handle<'a, StaticPropLump> {
     /// （`data/mod.rs` 的 `as_prop_placement`），不在本文件里。
     pub fn model(&self) -> &'a str {
         self.bsp.static_props.dict.name[self.prop_type as usize].as_str()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::disp_grid_uv;
+
+    /// 位移网格的四个角必须落到单位方格的四个角：`i=0/j=0 → (0,0)`（`u=j/2^power`、`v=i/2^power`）。
+    /// `i` 与 `j` 不可互换——`i` 走角 0→1（图集 V）、`j` 走角 0→3（图集 U）。
+    #[test]
+    fn disp_grid_uv_maps_corners_to_unit_square() {
+        assert_eq!(disp_grid_uv(0, 0, 8), (0.0, 0.0));
+        assert_eq!(disp_grid_uv(8, 0, 8), (0.0, 1.0));
+        assert_eq!(disp_grid_uv(0, 8, 8), (1.0, 0.0));
+        assert_eq!(disp_grid_uv(8, 8, 8), (1.0, 1.0));
+        assert_eq!(disp_grid_uv(4, 4, 8), (0.5, 0.5));
+        assert_eq!(disp_grid_uv(2, 6, 8), (0.75, 0.25));
+        // 与 power 无关地铺满单位方格
+        assert_eq!(disp_grid_uv(1, 1, 1), (1.0, 1.0));
+        assert_eq!(disp_grid_uv(0, 0, 1), (0.0, 0.0));
     }
 }
