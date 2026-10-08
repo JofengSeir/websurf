@@ -865,9 +865,10 @@ impl BspProcessor {
     /// 输出 JSON：`[{ "name", "vertices": [[x,y,z]...], "indices": [[a,b,c]...],
     /// "min": [...], "max": [...] }]`，每个放置实例一个条目，世界坐标 Y-up。
     ///
-    /// 门控：先在放置表上丢掉 `solid == Some(0)`（`vbsp` 的 `SolidType::None`）的实例；
-    /// 再逐 mesh 用 skin table 的 `texture_info.name` 查 `alpha_modes`，取不到按 0 算，
-    /// 只有 `alpha == 1`（Blend，真半透明）的 mesh 被跳过，`2`（Mask）保留。
+    /// 门控：唯一门控是放置表上的 `solid == Some(0)`（`vbsp` 的 `SolidType::None`）。
+    /// **不按材质透明度剔除**：起源引擎的碰撞来自模型的 `.phy`（vphysics）与 BSP 的 `contents` 位，
+    /// `$translucent` / `$alphatest` 这类材质键只进渲染，从不参与碰撞定义
+    /// （玻璃 / 水面道具本该可站可撞；探针在 `surf_666` 的窗与 `surf_sedona` 的坡上实测到被误剔）。
     ///
     /// 规模护栏：累计三角形数达 `MAX_TRI_TOTAL`（200_000）后停止取新模型、并中止当前实例循环，
     /// 已产出的条目照常返回；放置表为空或三件套不全的模型直接跳过。
@@ -881,13 +882,11 @@ impl BspProcessor {
             .as_ref()
             .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
 
-        let (models, static_props, entry_names) = collect_pakfile_models(bsp)?;
+        // 三件套收集顺带回的条目名表只服务材质查询；本函数已不看材质，故丢弃。
+        let (models, static_props, _entry_names) = collect_pakfile_models(bsp)?;
         if models.is_empty() {
             return Ok("[]".to_string());
         }
-
-        let index = pakfile_models::PakIndex::build(&entry_names);
-        let materials = resolve_pakfile_materials(bsp, &models, &index, false, None);
 
         let no_entities: Vec<model_integrator::Entity> = Vec::new();
 
@@ -937,18 +936,9 @@ impl BspProcessor {
                 continue;
             }
 
-            // ---- 展开三角（vendored vmdl 已修复条带展开），逐 mesh 做透明度门控 ----
-            let skin = model.skin_tables().next();
+            // ---- 展开三角（vendored vmdl 已修复条带展开）；逐 mesh 全收，不看材质透明度 ----
             let mut tris: Vec<[u32; 3]> = Vec::new();
             for mesh in model.meshes() {
-                let alpha = skin
-                    .as_ref()
-                    .and_then(|s| s.texture_info(mesh.material_index()))
-                    .and_then(|t| materials.alpha_modes.get(&t.name).copied())
-                    .unwrap_or(0);
-                if alpha == 1 {
-                    continue; // 真半透明：可穿过
-                }
                 let idx: Vec<usize> = mesh.vertex_strip_indices().flatten().collect();
                 for c in idx.chunks_exact(3) {
                     let (a, b, d) = (c[0], c[1], c[2]);

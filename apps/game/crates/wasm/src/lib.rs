@@ -789,9 +789,10 @@ impl BspProcessor {
     ///
     /// # 碰撞门控
     ///
-    /// - `Placement::solid == Some(0)`（`SOLID_NONE`）的实例先被 `filter` 掉；
-    /// - 逐 mesh 查 PAKFILE 标注：`alpha_mode == 1`（`$translucent` 置位，或 `$alpha < 1`）跳过该 mesh，
-    ///   其余情形（`$alphatest` 的 2 与无标注的 0）保留。
+    /// 唯一门控是 `Placement::solid == Some(0)`（`SolidType::None` / `SOLID_NONE`，由 BSP 的静态道具
+    /// 记录给出）。**不按材质透明度剔除**：起源引擎的碰撞来自模型的 `.phy`（vphysics）与 BSP 的
+    /// `contents` 位，`$translucent` / `$alphatest` 这类材质键只进渲染，从不参与碰撞定义
+    /// （玻璃 / 水面道具本该可站可撞，探针在 `surf_666` 的窗与 `surf_sedona` 的坡上实测到过被误剔）。
     ///
     /// # 调用时机
     ///
@@ -804,13 +805,11 @@ impl BspProcessor {
             .as_ref()
             .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
 
-        let (models, static_props, entry_names) = collect_pakfile_models(bsp)?;
+        // 三件套收集顺带回的条目名表只服务材质查询；本函数已不看材质，故丢弃。
+        let (models, static_props, _entry_names) = collect_pakfile_models(bsp)?;
         if models.is_empty() {
             return Ok("[]".to_string());
         }
-
-        let index = pakfile_models::PakIndex::build(&entry_names);
-        let materials = resolve_pakfile_materials(bsp, &models, &index, false, None);
 
         let no_entities: Vec<model_integrator::Entity> = Vec::new();
 
@@ -859,18 +858,9 @@ impl BspProcessor {
                 continue;
             }
 
-            // ---- 展开三角：条带索引展平成三元组，逐 mesh 做透明度门控 ----
-            let skin = model.skin_tables().next();
+            // ---- 展开三角：条带索引展平成三元组（逐 mesh 全收，不看材质透明度）----
             let mut tris: Vec<[u32; 3]> = Vec::new();
             for mesh in model.meshes() {
-                let alpha = skin
-                    .as_ref()
-                    .and_then(|s| s.texture_info(mesh.material_index()))
-                    .and_then(|t| materials.alpha_modes.get(&t.name).copied())
-                    .unwrap_or(0);
-                if alpha == 1 {
-                    continue; // alpha_mode == 1（Blend）：该 mesh 不参与碰撞
-                }
                 let idx: Vec<usize> = mesh.vertex_strip_indices().flatten().collect();
                 for c in idx.chunks_exact(3) {
                     let (a, b, d) = (c[0], c[1], c[2]);

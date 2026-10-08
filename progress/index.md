@@ -173,3 +173,4 @@
 | 2026-10-08 | T-431 结案：图集落位后多源 BFS 膨胀填满空纹素（越界取样改取该面自己的边缘 luxel）；8 张图 `空=0.0%`、badSamplingVerts 26,810→0；单测用抽源码 + 独立 rustc 跑通（宿主 cargo 链接不可用） | progress/monthly/2026-10-6.md:12 |
 | 2026-10-08 | T-431 复盘：按 SDK 复查 lightmap「解析」口径（CalcFaceExtents / 采样块跨距 `lumpBytes≈16×luxelCount` / used==luxelCount）全部自洽 ⇒ 问题在 UV 算法；SDK 指明位移面四角 luxel 恒为 (0.5,0.5)…(U+0.5,V+0.5) 并在细分网格上双线性插值 | progress/monthly/2026-10-6.md:13 |
 | 2026-10-08 | T-432 结案：位移面 lightmap UV 改按 SDK 的**单位方格**（`vertex_grid_uv` + `lightmap_region_uv`）；**8 张地图逐面 uv 盒越界 0**（boreas 改前 931/1351=68.9%、最大越界 49 纹素）；截图 A/B 洋红带 4.03%→0.00%、黑块消失 | progress/monthly/2026-10-6.md:14 |
+| 2026-10-08 | T-434 结案：碰撞与材质透明度解耦（去掉 `alpha_mode==1` 门控）+ `auto` 逐模型回退可视网格；surf_666 `phyOnlyModel` 2→0（窗可撞）；boreas prop 碰撞本就 11/11（1576 个 `solid=0` 是地图自己的声明） | progress/monthly/2026-10-6.md:15 |

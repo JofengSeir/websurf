@@ -194,11 +194,20 @@ export async function buildWorldBundle(
   try {
     if (colliderSource === 'visual') {
       triJson = proc.export_model_tri_colliders();
+    } else if (colliderSource === 'auto') {
+      // **逐模型**回退：`.phy` 优先，缺失/解析失败的模型改用可视网格三角形。
+      // 整表为空才回退不够用——`.phy` 缺失只影响个别模型，而其余模型已产出条目 ⇒ 那些模型
+      // 静默无碰撞（实测 surf_666 5 个、ze_cursed_bear 3 个模型命中这条）。
+      const phyArr = JSON.parse(proc.export_model_phy_colliders()) as Array<{ name: string }>;
+      const have = new Set(phyArr.map((e) => e.name));
+      const visArr = JSON.parse(proc.export_model_tri_colliders()) as Array<{ name: string }>;
+      const fallback = visArr.filter((e) => !have.has(e.name));
+      triJson = JSON.stringify(phyArr.concat(fallback));
+      console.log(
+        `[load-bsp] 模型碰撞(auto)：.phy ${phyArr.length} 实例 + 可视回退 ${fallback.length} 实例（${new Set(fallback.map((e) => e.name)).size} 模型）`,
+      );
     } else {
       triJson = proc.export_model_phy_colliders();
-      if (colliderSource === 'auto' && (JSON.parse(triJson) as unknown[]).length === 0) {
-        triJson = proc.export_model_tri_colliders();
-      }
     }
     console.log(
       `[load-bsp] 模型三角形碰撞网格(${colliderSource}): ${JSON.parse(triJson).length} 个实例`,

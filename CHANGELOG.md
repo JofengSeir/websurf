@@ -29,6 +29,8 @@
 
 **水体材质**：`Water` 着色器可以没有 `$basetexture`（只用 `$refracttexture`），此前该分支按「无基色」早退成**不透明纯白**；现按上游口径给半透明水色 `[82,180,217,128]`（`src/wasm-core/bsp_to_gltf_core/materials.rs:475`），含水面地图（如 `surf_boreas` 的 320 世界图元）不再画成白块。
 
+**道具与玻璃的碰撞**：可视碰撞导出此前**按材质透明度剔除网格**——`alpha_mode == 1`（`$translucent` / `$alpha`）的 mesh 整件不进碰撞三角形，于是半透明/透明道具（`surf_666` 的 `kr_windows` / `details69_window01m`、`surf_sedona` 的 16 个模型含 `surf_sedona_ramp03` 与 `naz_curve1..5`）在 `.phy` 输出里存在、在可视输出里被整件剔掉，玩家会穿过本该可站可撞的坡与窗。起源引擎的碰撞来自模型的 `.phy`（vphysics）与 BSP 的 `contents` 位，`$translucent` / `$alphatest` 只进渲染 ⇒ 现改为**不按透明度剔除**（`apps/*/crates/wasm/src/lib.rs` 的 `export_model_tri_colliders`）；同时 `src/ts-shared/phys/world-builder.ts` 的 `auto` 改为**逐模型**回退可视网格（原先只在整表为空时回退 ⇒ `.phy` 缺失的个别模型静默无碰撞，实测 `surf_666` 5 个、`ze_cursed_bear` 3 个）。
+
 **天空盒**：渲染端此前没有天空背景（SKY 面被 `is_visible` 过滤，`LightManager` 只设纯色），抬头只见深色；现按 `worldspawn.skyname` 解析 pakfile 内 6 面 skybox 材质（VMT → VTF → PNG）装配为 `scene.background` 的 cubemap（`src/renderer-shared/environment/skybox.ts`；背景优先级归 `LightManager.setSkybox`），已在 `apps/debug` 接线。
 
 **地图雾**：`env_fog_controller`（`fogenable` / `fogcolor` / `fogstart` / `fogend`）此前未被施加（`renderer-main` 不设 `scene.fog`）；现解析为线性 `THREE.Fog` 并由 `LightManager.setFog` 统一挂载（`src/renderer-shared/environment/fog-controller.ts`），可经 `setFogEnabled` 开关；`apps/debug` 已接线。

@@ -142,7 +142,41 @@
     }
   ],
   "cochange": [],
-  "claim": null,
+  "claim": {
+    "task": "T-434",
+    "may": [
+      "apps/debug/crates/wasm/src/lib.rs",
+      "apps/game/crates/wasm/src/lib.rs",
+      "src/ts-shared/phys/world-builder.ts",
+      "TODO.md",
+      "CHANGELOG.md"
+    ],
+    "must": [
+      "src/ts-shared/phys/world-builder.ts"
+    ],
+    "base": {
+      "apps/debug/crates/wasm/src/lib.rs": "fea9a6fdf4ace0ed7f67831d9476bab8486d6c7e6a0ef43ee104be233968fd44",
+      "apps/game/crates/wasm/src/lib.rs": "8d036a94f0b8641bde78ca5fa85e1a289134c92c1febd6aca47dcaf8e3f79b2f",
+      "src/ts-shared/phys/world-builder.ts": "47807ca898f802a6c02aa7b5738c5c3f373034d04ed8c7154a280b1d020cbef6",
+      "TODO.md": "2126963e041529804ea3e5b20a6689f4284c0a6f84104bf97e027fddda109624",
+      "CHANGELOG.md": "0d1e042d181c15b7763667fca9594640f571379a2c7142b190c1089c34dfbac5"
+    },
+    "at": "2026-10-08T10:46:47.319Z",
+    "pins": {
+      "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
+      "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
+      "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
+      "skills/websurf-env-traps/SKILL.md": "63bf5052ece6d2a256b9487af8a5fa262e5ccdc92478822f7be169492c9b0b3c",
+      "documents/norms/annotation-and-verification.md": "40f271606aad9363b61cfb24d756bbce306cf354b9e483283fab8c66f71a46b6",
+      "documents/norms/scripts-and-ci.md": "9d3cd3b74c3667e418373b9e006c993b59cf1c191134877a3464646f6d0993ad",
+      ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
+      ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
+      ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
+      ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
+      "AGENTS.md": "53a2d312eade0322eeae2603c7e83cef4eb4ac7439bf8b7dbbdc7a44f020e270",
+      "documents/norms/local-path-hygiene.md": "fa7589d6fef4800bbf0920da32d2fe031877fc736111a8b8d1259d009d81f4a1"
+    }
+  },
   "units": {
     "TODO.md": {
       "match": "^\\|\\s*T-\\d{3}\\s*\\|",
@@ -1343,65 +1377,71 @@
         "at": "2026-10-08",
         "line": 414
       },
+      "T-434": {
+        "p": "8954d7302b0c9b332ef2fdb5adb3e6df402e9bcb1b570d90e37b626df1723304",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-08",
+        "line": 415
+      },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 415
+        "line": 416
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 416
+        "line": 417
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 417
+        "line": 418
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 418
+        "line": 419
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 419
+        "line": 420
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 420
+        "line": 421
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 421
+        "line": 422
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 422
+        "line": 423
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 423
+        "line": 424
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 424
+        "line": 425
       }
     },
     "OWNER.md": {
@@ -1750,7 +1790,7 @@
       "src/ts-shared/auth/shared-state.ts:447:447": "39a36df5",
       "src/ts-shared/auth/shared-state.ts:98:98": "a23d99ac",
       "apps/game/src/renderer/renderer-main.ts:333:333": "97292e2a",
-      "apps/game/crates/wasm/src/lib.rs:1706:1706": "bb93b782",
+      "apps/game/crates/wasm/src/lib.rs:1706:1706": "4a2cba58",
       "src/wasm-core/bsp_to_gltf_core/convert.rs:367:367": "a803e10b",
       "src/scripts/check-glb-parity.mjs:2:2": "3f48e740",
       "src/wasm-core/bsp_to_gltf_core/materials.rs:448:448": "c1f53f67",
@@ -1778,6 +1818,7 @@
       "src/wasm-core/vbsp/handle/mod.rs:391:391": "62c695da",
       "progress/monthly/2026-10-6.md:13:13": "79e216cd",
       "src/wasm-core/vhv.rs:90:90": "e1a17f57",
+      "src/ts-shared/phys/world-builder.ts:196:196": "e6c46546",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -2214,7 +2255,7 @@
       "apps/debug/src/renderer/renderer-main.ts:1251:1251": "f2b340c4",
       "apps/debug/src/wasm.d.ts:34:34": "dcb832ca",
       "apps/debug/crates/wasm/src/lib.rs:21:21": "bcb4915f",
-      "apps/debug/crates/wasm/src/lib.rs:3261:3261": "8f2dbfb6",
+      "apps/debug/crates/wasm/src/lib.rs:3251:3251": "8f2dbfb6",
       "apps/debug/crates/wasm/src/lib.rs:739:739": "5fb9a0b8",
       "apps/debug/crates/wasm/src/lib.rs:17:17": "859b97e8",
       "apps/debug/src/wasm.d.ts:38:38": "3e126fa1",
@@ -3033,12 +3074,12 @@
       "apps/game/crates/wasm/src/lib.rs:99:99": "799d6427",
       "apps/game/crates/wasm/src/lib.rs:418:418": "3c15ab59",
       "apps/game/crates/wasm/src/lib.rs:627:627": "9993fabc",
-      "apps/game/crates/wasm/src/lib.rs:1023:1023": "17338002",
-      "apps/game/crates/wasm/src/lib.rs:2008:2008": "e27eb7c2",
+      "apps/game/crates/wasm/src/lib.rs:1013:1013": "17338002",
+      "apps/game/crates/wasm/src/lib.rs:1998:1998": "e27eb7c2",
       "apps/game/src/app.ts:516:516": "4532a2c6",
-      "src/ts-shared/phys/world-builder.ts:249:249": "f89cdbdf",
-      "apps/game/crates/wasm/src/lib.rs:1545:1545": "9ccc6541",
-      "apps/game/crates/wasm/src/lib.rs:1547:1547": "855e3910",
+      "src/ts-shared/phys/world-builder.ts:258:258": "f89cdbdf",
+      "apps/game/crates/wasm/src/lib.rs:1535:1535": "9ccc6541",
+      "apps/game/crates/wasm/src/lib.rs:1537:1537": "855e3910",
       "apps/game/crates/wasm/src/lib.rs:480:480": "beff473b",
       "apps/game/crates/wasm/src/lib.rs:579:579": "ad08d75a",
       "apps/debug/crates/wasm/src/lib.rs:741:741": "ad08d75a",
@@ -3046,7 +3087,7 @@
       "apps/game/src/app.ts:501:501": "17312cc9",
       "apps/game/crates/wasm/src/lib.rs:506:506": "61f75a07",
       "apps/game/crates/wasm/src/lib.rs:114:114~2": "d040825c",
-      "apps/game/crates/wasm/src/lib.rs:2149:2149": "d25d535f",
+      "apps/game/crates/wasm/src/lib.rs:2139:2139": "d25d535f",
       "apps/game/crates/wasm/src/lib.rs:575:575": "1d93376d"
     },
     "documents/game/implementation/worker.md": {
@@ -5099,6 +5140,30 @@
   "rebaselines": [
     {
       "path": "TODO.md",
+      "at": "2026-10-08T10:57:34.411Z",
+      "by": "agent",
+      "reason": "T-434 结案：证据行号 + 新增锚点 world-builder.ts:196",
+      "changed": 2,
+      "total": 193
+    },
+    {
+      "path": "documents/debug/implementation/wasm-bindings.md",
+      "at": "2026-10-08T10:57:34.289Z",
+      "by": "agent",
+      "reason": "debug lib.rs 删 10 行（去材质透明度门控）⇒ 锚点整体 -10",
+      "changed": 2,
+      "total": 28
+    },
+    {
+      "path": "documents/game/implementation/wasm-crate.md",
+      "at": "2026-10-08T10:57:34.181Z",
+      "by": "agent",
+      "reason": "game lib.rs 删 10 行（去材质透明度门控）⇒ 锚点整体 -10",
+      "changed": 12,
+      "total": 28
+    },
+    {
+      "path": "TODO.md",
       "at": "2026-10-08T10:34:57.092Z",
       "by": "agent",
       "reason": "T-433 登记：新增证据锚点 src/wasm-core/vhv.rs:90（parse_vhv 入口）",
@@ -5392,30 +5457,6 @@
       "reason": "T-427 ③ 接线：导入行/建场景行/终扫行同行追加了 world-transition 调用（断言不变）",
       "changed": 1,
       "total": 170
-    },
-    {
-      "path": "documents/viewer/implementation/core.md",
-      "at": "2026-10-08T00:06:31.372Z",
-      "by": "agent",
-      "reason": "T-427 ③ 接线：导入行/建场景行/终扫行同行追加了 world-transition 调用（断言不变）",
-      "changed": 2,
-      "total": 121
-    },
-    {
-      "path": "documents/viewer/differences.md",
-      "at": "2026-10-08T00:06:31.038Z",
-      "by": "agent",
-      "reason": "T-427 ③ 接线：导入行/建场景行/终扫行同行追加了 world-transition 调用（断言不变）",
-      "changed": 3,
-      "total": 94
-    },
-    {
-      "path": "documents/game/implementation/renderer.md",
-      "at": "2026-10-08T00:06:30.655Z",
-      "by": "agent",
-      "reason": "T-427 ③ 接线：导入行/建场景行/终扫行同行追加了 world-transition 调用（断言不变）",
-      "changed": 1,
-      "total": 51
     }
   ]
 }
