@@ -182,7 +182,7 @@ export class Timeline {
     this.timeEl = el('span', 'tl-time', '0.00 / 0.00 s');
     this.timeEl.title =
       profile.clock === 'run'
-        ? '当前 / 总时长（秒，主时钟）；0 = 起跑帧，prerun 帧不在播放区间'
+        ? '当前 / 总时长（秒，主时钟）；0 = 起跑帧，prerun 帧计入区间（读数可为负）'
         : '当前 / 总时长（m:ss，主时钟 0 = 录像开头）';
     controls.appendChild(this.timeEl);
 

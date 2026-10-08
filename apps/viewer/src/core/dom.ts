@@ -103,7 +103,7 @@ export function numField(parent: HTMLElement, opts: NumOpts): HTMLInputElement {
   input.value = String(opts.value);
   if (opts.hint) input.title = opts.hint;
   input.addEventListener('input', () => {
-    const n = Number(input.value);
+    const raw = input.value.trim(); const n = raw === '' ? Number.NaN : Number(raw);
     const valid = Number.isFinite(n);
     input.classList.toggle('invalid', !valid);
     if (valid) opts.onInput?.(n, true);
