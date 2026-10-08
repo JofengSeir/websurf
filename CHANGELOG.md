@@ -29,6 +29,8 @@
 
 **水体材质**：`Water` 着色器可以没有 `$basetexture`（只用 `$refracttexture`），此前该分支按「无基色」早退成**不透明纯白**；现按上游口径给半透明水色 `[82,180,217,128]`（`src/wasm-core/bsp_to_gltf_core/materials.rs:475`），含水面地图（如 `surf_boreas` 的 320 世界图元）不再画成白块。
 
+**退化 `.vhv` 的兜底（道具逐顶点光照）**：`.vhv` 只烘 direct+bounce，背光顶点精确为 0；实测 `surf_boreas` 全部道具顶点里 **43.7%** 三通道全 0，而 level 1 是纯乘法（`vbspVertexLightTerm`）且**不叠** leaf ambient cube ⇒ 这些顶点必然是纯黑。现按"暗顶点占比 ≥ `VLIGHT_DARK_FRACTION_MAX`（0.5）"判定该份烘焙无法表达表面，退回 leaf ambient cube（平坦但不再是纯黑）。效果：带 `_VBSP_VLIGHT` 的图元 397→220，全黑顶点 43.7%→28.5%。
+
 **道具逐顶点光照的顶点错位**：`.vhv` 是**一个 strip group 一块**、块内按该 strip group 的顶点数组局部序（SDK `utils/vrad/vradstaticprops.cpp` 取 `mesh->vertexoffset + pVertex(nVertex)->origMeshVertID`），而 GLB 顶点数组按 `origMeshVertID` 排。我们此前按"拼接序 = 模型顶点序"使用，逐顶点光照落到错误顶点上（表现为石头一块亮一块黑、像拼接）。现新增 `vmdl::Model::remap_strip_group_colors` 按 SDK 口径重排后再挂 `_VBSP_VLIGHT`，长度/几何对不上则退回 leaf ambient cube。
 
 **VTF 贴图格式（模型那几条白块的根因）**：`Ia88` / `Bgra4444` 两类格式此前解不出（外部 `vtf` crate 能读表头、`decode` 报 `UnsupportedImageFormat`），于是 `tendies_endsmoke` / `alch_symbols` / `end_wiccan` 等按"缺贴图"走占位。现 `src/wasm-core/texture_utils/image.rs` 补上这两类解码，`load_texture_bsp` 改为 **crate 优先、失败退本仓**，两条解码路径判定一致；`surf_boreas` 的 `vtfDecodeFail` 由 4 降为 0，上述材质取到真贴图。

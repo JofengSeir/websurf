@@ -222,9 +222,9 @@ impl ModelIntegrator {
             let groups = group_placements_by_vertex_lighting(&placements, model.vertices().len());
 
             for (vlight, idxs) in &groups {
-                // `.vhv` 块是 strip group 顶点序，须按 `origMeshVertID` 重排到模型顶点序。
-                // 重排不成立（长度/几何不符）时退 cube，不静默错位。
-                let vlight = vlight.as_ref().and_then(|c| model.remap_strip_group_colors(c));
+                // `.vhv` 块是 strip group 顶点序，须按 `origMeshVertID` 重排到模型顶点序；重排不成立、
+                // 或烘焙梯度不可用（暗顶点占比超阈，见 `VLIGHT_DARK_FRACTION_MAX`）时退 leaf ambient cube。
+                let vlight = vlight.as_ref().and_then(|c| model.remap_strip_group_colors(c)).filter(|c| (c.iter().filter(|v| v[0] + v[1] + v[2] <= 0.0).count() as f32) < VLIGHT_DARK_FRACTION_MAX * c.len() as f32);
                 let mesh = self.push_model(
                     buffer, gltf, &model, Path::new(&in_mem.name),
                     vlight.as_deref(),
@@ -1382,3 +1382,14 @@ pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<Entity> {
     out
 }
 
+
+/// 逐顶点烘焙（`.vhv`）**判为不可用**的暗顶点占比阈值。
+///
+/// VRAD 的 `.vhv` 只写 direct + bounce（`utils/vrad/vradstaticprops.cpp`：`VectorAdd(directColor,
+/// indirectColor, ...)`），因此背光/被遮蔽顶点精确为 0；实测 surf_boreas 的全部道具顶点里
+/// **43.7%** 三通道全 0。逐顶点项是纯乘法（`renderer-shared/shader/lightmap-shader.ts` 的
+/// `vbspVertexLightTerm`），全 0 顶点必然画成纯黑，且没有 leaf ambient cube 兜底。
+///
+/// 超过本阈值 ⇒ 认为这份烘焙无法表达该表面，返回 false 让该实例退回 leaf ambient cube
+/// （平坦但不再是纯黑）。取 0.5 是"过半顶点无光"这一可解释的界；调整它只影响这类退化道具。
+pub const VLIGHT_DARK_FRACTION_MAX: f32 = 0.5;

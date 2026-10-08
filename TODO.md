@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07 已触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **438**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **439**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -211,7 +211,7 @@
 
 > 已记录 / 已结案 **40 条已分卷**到 `progress/board/archive-2026-10.md`（ID 与状态保留；编号不复用，取新号时连同该页一起数）。
 
-## 总表（187 条）
+## 总表（188 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
@@ -415,6 +415,7 @@
 | T-435 | 【S14·洋红/方向】owner 指出「洋红是**魔法元素自带光源**，要考虑它的方向，例如 13539,1284,9884 中央大坑四周的石头模型」。**已定位光源**：`LUMP_WORLDLIGHTS` 第 #352 条 = Source `[13332,628,12251]`、强度 `[690.1, 0.5, 1896.6]`（G≈0，纯洋红），距该视点 2465 HU；近处的 leaf ambient 实测**最亮面是 +Z（上）**（0.123 vs +Y 0.065）⇒ 方向光来自**正上方**。**已定位实现缺陷**：`src/wasm-core/model_integrator/mod.rs:1331` 的**位置**经 `map_coords` 转成 Y-up，而 `:1333` 的**法线**是 `vertex.normal.into()` **原样（Source Z-up）**；引擎口径见 `common_vertexlitgeneric_dx9.h` 的 `VertexShaderAmbientLight`（cube 槽 0/1=±X、2/3=±Y、4/5=±Z，按世界法线加权）。⇒ 渲染端 `vbspAmbCube` 的加权式虽与引擎同形，却因「法线未转、cube 亦未转」而**只对纯 yaw 旋转的道具偶然成立**；带 pitch/roll 的 prop（冲浪坡正是）方向会错 | 缺陷 | shared | 已结案 | src/wasm-core/model_integrator/mod.rs:1333 | progress/pending-detail.md | 见详情 | — |
 | T-436 | 【S15·缺材质占位】声明**半透明**的材质在贴图整条拿不到时，此前占位色是 `[255,255,255,255]` ⇒ glTF 是 `alphaMode=BLEND` **且 alpha=1**，等于把 `$additive` 的烟/雾画成**不透明白幕**（owner 截图中央那块白墙：HUD 写 `project_tendies/tendies_endsmoke（半透明）`）。**实证**：pakfile 里有该 VMT（`$basetexture project_tendies/tendies_smoke` + `$translucent 1` + `$additive 1`），但那张 VTF **不在包内** ⇒ 走占位分支 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/materials.rs:529 | progress/monthly/2026-10-6.md | 见详情 | — |
 | T-437 | 【S14·光照乱序】`.vhv` 一个 strip group 一块、块内按该 strip group 的局部顶点序，我们当成模型顶点序用 ⇒ 逐顶点光照整体错位（`rock04_epic` 等实测） | 缺陷 | shared | 已结案 | src/wasm-core/vhv.rs:44 | progress/monthly/2026-10-6.md | 见详情 | — |
+| T-438 | 【S14】`.vhv` 只含 direct+bounce、43.7% 顶点全 0；level 1 纯乘法无 cube ⇒ 纯黑；按暗占比退 cube | 缺陷 | shared | 已结案 | src/wasm-core/model_integrator/mod.rs:225 | progress/monthly/2026-10-6.md | 见详情 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-2 |

@@ -177,4 +177,5 @@
 | 2026-10-08 | T-435 结案：prop 光照方向 — 洋红=魔法点光 #352（Source [13332,628,12251]，G≈0）；GLB 位置走 map_coords 而**法线**没走 ⇒ ambient cube 轴序只在纯 yaw 下偶然对；两侧同改后竖直法线取竖直 cube 面（up 0.12904 / down 0.03378） | progress/monthly/2026-10-6.md:16 |
 | 2026-10-08 | T-436 结案：缺材质的半透明占位 `[255;4]`（BLEND+alpha=1 ⇒ 白墙）改为 alpha 0.2 淡雾；实测 tendies_endsmoke 的 VMT 在包内但 $basetexture 的 VTF 不在 | progress/monthly/2026-10-6.md:17 |
 | 2026-10-08 | T-437 结案：`.vhv` 是"一个 strip group 一块、按局部序"而我们当成模型顶点序 ⇒ 逐顶点光照错位；新增 `remap_strip_group_colors`，精确比对 0 处不符（旧序 3277/4082） | progress/monthly/2026-10-6.md:19 |
+| 2026-10-08 | T-438 结案：`.vhv` 只含 direct+bounce、43.7% 顶点全 0 ⇒ 纯黑；按暗占比 ≥0.5 判为不可用退回 cube，黑顶点 43.7%→28.5% | progress/monthly/2026-10-6.md:20 |
 | 2026-10-08 | T-419 结案：VTF `Ia88`/`Bgra4444` 解码补上 + `load_texture_bsp` 改「crate 优先、失败退本仓」；vtfDecodeFail 4→0，三条模型材质出真贴图 | progress/monthly/2026-10-6.md:18 |

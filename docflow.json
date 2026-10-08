@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "dsh",
-      "reason": "T-437 事项精简到 <=120 字符以过 96 KB 硬上限（AGENTS 0.4 第二级）",
+      "reason": "T-438 事项精简至过 96 KB 上限",
       "at": "2026-10-08",
       "task": "",
       "consumed": true
@@ -143,9 +143,8 @@
   ],
   "cochange": [],
   "claim": {
-    "task": "T-437",
+    "task": "T-438",
     "may": [
-      "src/vendor/vmdl/src/lib.rs",
       "src/wasm-core/model_integrator/mod.rs",
       "TODO.md",
       "CHANGELOG.md",
@@ -153,17 +152,16 @@
       "progress/index.md"
     ],
     "must": [
-      "src/vendor/vmdl/src/lib.rs"
+      "src/wasm-core/model_integrator/mod.rs"
     ],
     "base": {
-      "src/vendor/vmdl/src/lib.rs": "be31f3fe8febf172bf274964e4e0fd5a96cdbe835e0aaa8ae5c2d39520489bfe",
-      "src/wasm-core/model_integrator/mod.rs": "ede9f72fe5159055c7a897459d0f613e404d24aeb7bd57cf058f92c9367e6ee3",
-      "TODO.md": "57b0128effad63967d615d1c3c3d72ea8a984ec5bbc35cd2a043c5b5fddb0098",
-      "CHANGELOG.md": "8b7c02f1b43cc78b556262be1cdf76a561d299b3352f114e7bf5783eb1d50862",
-      "progress/monthly/2026-10-6.md": "3a057feca77b75c8ad001dd3f6bf92aecb934205844c7fd38eb238196bc23f2b",
-      "progress/index.md": "387c4c8ed7a17ac13d91bc89b1c66f42d9ef478ed1701c47ea1a043ca565a168"
+      "src/wasm-core/model_integrator/mod.rs": "b42634b08b592160fe5d7586d4c0e9bf4ac6af7f96b1586a18e1ebcd609e96e4",
+      "TODO.md": "6018b52c648286b47ca0d5e70aff357e740e74eb9480c71f6aede07db40d25a7",
+      "CHANGELOG.md": "2e05c6b355ee50cf2eb8501e9dd6c250affb2ca4988c8f83041eb458231d1a00",
+      "progress/monthly/2026-10-6.md": "81f732d152c80d448570d2d2b61b04092ece6dd98e7eb6cc4a609de79628c430",
+      "progress/index.md": "e5135444f80fe1fc38d95fc4bc40ce435324cfe08762592f86ef475a3490c4b3"
     },
-    "at": "2026-10-08T12:29:44.688Z",
+    "at": "2026-10-08T12:42:48.788Z",
     "pins": {
       "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -1403,65 +1401,71 @@
         "at": "2026-10-08",
         "line": 417
       },
+      "T-438": {
+        "p": "a26af7d3f4f24325db7ace5a4f347661b4b5cf6f4d8f362d3e5b77542f90fab5",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-08",
+        "line": 418
+      },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 418
+        "line": 419
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 419
+        "line": 420
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 420
+        "line": 421
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 421
+        "line": 422
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 422
+        "line": 423
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 423
+        "line": 424
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 424
+        "line": 425
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 425
+        "line": 426
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 426
+        "line": 427
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 427
+        "line": 428
       }
     },
     "OWNER.md": {
@@ -1843,6 +1847,7 @@
       "src/wasm-core/model_integrator/mod.rs:1333:1333": "e3b55805",
       "src/wasm-core/bsp_to_gltf_core/materials.rs:529:529": "3eb4aa8f",
       "src/wasm-core/vhv.rs:44:44": "df6a211a",
+      "src/wasm-core/model_integrator/mod.rs:225:225": "e12a76c7",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -5164,6 +5169,14 @@
   "rebaselines": [
     {
       "path": "TODO.md",
+      "at": "2026-10-08T12:42:49.337Z",
+      "by": "agent",
+      "reason": "T-438 登记：证据锚点 model_integrator/mod.rs:225（暗占比阈值过滤）",
+      "changed": 1,
+      "total": 198
+    },
+    {
+      "path": "TODO.md",
       "at": "2026-10-08T12:30:02.700Z",
       "by": "agent",
       "reason": "T-437 登记：证据锚点 vhv.rs:44",
@@ -5473,14 +5486,6 @@
       "reason": "T-429 登记",
       "changed": 2,
       "total": 187
-    },
-    {
-      "path": "documents/viewer/implementation/renderer.md",
-      "at": "2026-10-08T01:12:18.549Z",
-      "by": "agent",
-      "reason": "T-423/T-425：setLightGamma 窗口 (0,1]→(0,8]，复核并更新受影响的断言",
-      "changed": 1,
-      "total": 100
     }
   ]
 }
