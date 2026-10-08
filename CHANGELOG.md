@@ -31,6 +31,8 @@
 
 **置换面（displacement）碰撞导出**：洞穴壁/地形是置换面（本图 **1351 张面 / 84,405 顶点**），而笔刷碰撞只有 **159 个凸包** ⇒ 置换面此前**完全没有碰撞**（`world-builder.ts` 里 `disp` 命中 0）。置换面把可见表面从基础笔刷平面推了出去，只拿基础平面做碰撞，玩家撞到的是看不见的旧平面。Source 对置换面的做法就是按**置换面自身的三角形**烘碰撞，故新增 `export_displacement_colliders`（debug + game 两个工程），复用渲染端 `Handle::triangulated_displaced_vertices`（细分网格 + 位移量）输出三角形汤，过 `map_coords` 转 Y-up：**132,480 个三角形**，AABB 覆盖全图。
 
+**置换面碰撞接入物理世界**：`export_model_tri_colliders` 的出口前追加置换面（displacement）条目（本图 1125 条 / 132,480 三角形，与渲染共用同一条细分+位移路径）。洞穴壁/地形此前只被笔刷凸包覆盖（159 个），置换面把可见表面从基础平面推出去 ⇒ 玩家撞到看不见的旧平面。现在 `auto` 分支会带上它们（名字 `__disp_<i>` 与 `.phy` 永不重名）。代价：`triJson` 增大约 13MB。
+
 **逐顶点道具的光照下限接上**：`vbspLightFloor` 此前只接进 world 路径与 level 2（ambient cube）路径，level 1（`applyVertexLightingShader`）从未设置该 uniform ⇒ 「光照下限」旋钮对**逐顶点着色的道具静默无效**。现补上并用于 `max(vlight, floor)`；`floor` 默认 0 时与改前等价（`max(v,0)`），调大后逐顶点道具不再纯黑——与 T-438 未覆盖的 28.5% 暗顶点互补。
 
 **退化 `.vhv` 的兜底（道具逐顶点光照）**：`.vhv` 只烘 direct+bounce，背光顶点精确为 0；实测 `surf_boreas` 全部道具顶点里 **43.7%** 三通道全 0，而 level 1 是纯乘法（`vbspVertexLightTerm`）且**不叠** leaf ambient cube ⇒ 这些顶点必然是纯黑。现按"暗顶点占比 ≥ `VLIGHT_DARK_FRACTION_MAX`（0.5）"判定该份烘焙无法表达表面，退回 leaf ambient cube（平坦但不再是纯黑）。效果：带 `_VBSP_VLIGHT` 的图元 397→220，全黑顶点 43.7%→28.5%。

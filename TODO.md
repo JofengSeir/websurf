@@ -103,7 +103,6 @@
 
 ### 待修（108）
 
-- **T-440** 置换面碰撞：1351 张 disp 面此前零碰撞；`export_displacement_colliders` ⇒ 132,480 三角形，待 TS 接入　`shared`
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
 - **T-032** game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等）　`game`
@@ -385,7 +384,7 @@
 | T-404 | `ShmState.wake` | 未接线·死代码 | shared | 待修 | src/ts-shared/auth/shared-state.ts:447 | documents/ts-shared/overview.md | 判据：`git grep -n "ShmState.wake" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-405 | `maskToKeys` | 未接线·死代码 | shared | 待修 | src/ts-shared/auth/shared-state.ts:98 | documents/ts-shared/overview.md | 判据：`git grep -n "maskToKeys" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | 未接线·死代码 | shared | 待修 | apps/game/src/renderer/renderer-main.ts:333 | documents/ts-shared/overview.md | 判据：`git grep -n "PvsManager.getFaceCluster" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-407 | `world/types.ts` 的 `rootNode` 字段 | 未接线·死代码 | shared | 待修 | apps/game/crates/wasm/src/lib.rs:1706 | documents/ts-shared/overview.md | 判据：`git grep -n "world/types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-407 | `world/types.ts` 的 `rootNode` 字段 | 未接线·死代码 | shared | 待修 | apps/game/crates/wasm/src/lib.rs:1734 | documents/ts-shared/overview.md | 判据：`git grep -n "world/types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | 未接线·死代码 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/convert.rs:367 | documents/wasm-core/overview.md | 判据：`git grep -n "bsp_to_gltf_core/convert.rs" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-409 | `check-glb-parity.mjs` 门禁零接线（未进 package.json / CI，谁都不跑它） | 配置·门禁 | 共享 | 待修 | src/scripts/check-glb-parity.mjs:2 | documents/norms/scripts-and-ci.md | 判据：@BT@git grep -l "check-glb-parity" -- **/package.json .github@BT@ ⇒ 至少 1 个文件命中（已接线） | #409 |
 | T-410 | surf_boreas 的 patch 材质 include 前缀被叠加两次（本地又补 materials/ 而未剥 include 自带前缀）⇒ 21 个材质解析失败、539/1716 世界图元无贴图 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/materials.rs:448 | 本行即全部 | 判据：修前/修后同测 @BT@node .tmp/mapsurvey/probe2.mjs test/maps/surf_boreas.bsp@BT@ ⇒ missing 21 → 0；@BT@node .tmp/mapsurvey/probe2.mjs test/maps/surf_666.bsp@BT@ ⇒ 46 不变（证明只减不增）；@BT@git grep -n "trim_start_matches(\"materials/\")" -- src/wasm-core/bsp_to_gltf_core/materials.rs@BT@ ⇒ 1 命中。探针与原始输出在 .tmp/mapsurvey/（gitignored） | — |
@@ -418,7 +417,7 @@
 | T-437 | 【S14·光照乱序】`.vhv` 一个 strip group 一块、块内按该 strip group 的局部顶点序，我们当成模型顶点序用 ⇒ 逐顶点光照整体错位（`rock04_epic` 等实测） | 缺陷 | shared | 已结案 | src/wasm-core/vhv.rs:44 | progress/monthly/2026-10-6.md | 见详情 | — |
 | T-438 | 【S14】`.vhv` 只含 direct+bounce、43.7% 顶点全 0；level 1 纯乘法无 cube ⇒ 纯黑；按暗占比退 cube | 缺陷 | shared | 已结案 | src/wasm-core/model_integrator/mod.rs:225 | progress/monthly/2026-10-6.md | 见详情 | — |
 | T-439 | 【S14】`vbspLightFloor` 未接进 level 1（逐顶点道具）⇒ 光照下限旋钮对其静默无效；现补上并用于 `max(vlight, floor)`，floor=0 时行为不变 | 缺陷 | shared | 已结案 | src/renderer-shared/shader/lightmap-shader.ts:1342 | progress/monthly/2026-10-6.md | 见详情 | — |
-| T-440 | 【S16·置换面碰撞】洞穴壁/地形是**置换面**（1351 张面 / 84,405 顶点），而笔刷碰撞只有 159 个凸包 ⇒ 置换面此前**完全没有碰撞**。新增 `export_displacement_colliders`（debug+game），复用渲染端 `triangulated_displaced_vertices` 输出三角形汤（132,480 三角形，Y-up 世界坐标） | 缺陷 | shared | 进行中 · dsh · 2026-10-08 | apps/debug/crates/wasm/src/lib.rs | progress/monthly/2026-10-6.md | 判据：@BT@node .tmp/mapsurvey/dispcoll.mjs@BT@ ⇒ 三角形数 = 132480、AABB 覆盖全图；接入 TS 后世界里三角形碰撞面数应 +132480 | — |
+| T-440 | 【S16·置换面碰撞】洞穴壁/地形是**置换面**（1351 张面 / 84,405 顶点），而笔刷碰撞只有 159 个凸包 ⇒ 置换面此前**完全没有碰撞**。新增 `export_displacement_colliders`（debug+game），复用渲染端 `triangulated_displaced_vertices` 输出三角形汤（132,480 三角形，Y-up 世界坐标） | 缺陷 | shared | 已结案 | apps/debug/crates/wasm/src/lib.rs | progress/monthly/2026-10-6.md | 判据：@BT@node .tmp/mapsurvey/dispwired.mjs@BT@ ⇒ tri 条目 1136（模型 11 + 置换面 1125）、三角形 141,286（disp 132,480）、与 .phy 重名 0 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-2 |

@@ -989,6 +989,34 @@ impl BspProcessor {
             }
         }
 
+        
+        // 置换面（displacement）：笔刷碰撞只覆盖平面凸包，而置换面把可见表面从基础笔刷平面推了
+        // 出去 —— 只拿基础平面做碰撞，玩家撞到的是看不见的旧平面。Source 对置换面的做法就是按
+        // 置换面自身的三角形烘碰撞；这里与渲染共用同一条细分+位移路径，并走本函数同一个出口
+        // （`TriMesh[]`）⇒ 物理侧无需新增通道（auto 分支按「.phy 里没有的名字」回退，必被带上）。
+        for i in 0..bsp.displacements.len() {
+            let Some(disp) = bsp.displacement(i) else { continue };
+            let mut verts: Vec<[f32; 3]> = Vec::new();
+            let mut min = [f32::INFINITY; 3];
+            let mut max = [f32::NEG_INFINITY; 3];
+            for v in disp.triangulated_displaced_vertices() {
+                let p = model_integrator::map_coords([v.x, v.y, v.z]);
+                for k in 0..3 {
+                    if p[k] < min[k] { min[k] = p[k]; }
+                    if p[k] > max[k] { max[k] = p[k]; }
+                }
+                verts.push(p);
+            }
+            if verts.len() < 3 { continue; }
+            let tri_count = (verts.len() / 3) as u32;
+            out.push(TriMeshOut {
+                name: format!("__disp_{i}"),
+                vertices: verts,
+                indices: (0..tri_count).map(|t| [t * 3, t * 3 + 1, t * 3 + 2]).collect(),
+                min,
+                max,
+            });
+        }
         serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化模型三角形碰撞失败"))
     }
 
