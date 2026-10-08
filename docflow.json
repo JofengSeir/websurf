@@ -125,17 +125,17 @@
       "consumed": true
     },
     {
-      "path": "TODO.md",
-      "by": "dsh-agent",
-      "reason": "T-447 事项列去掉表格竖线（解析器不认 \\\\| 转义），语义未变",
+      "path": "skills/websurf-env-traps/SKILL.md",
+      "by": "owner",
+      "reason": "把 Pages 站点被分支构建顶掉的陷阱写进 skill（owner 要求教训进 skill）",
       "at": "2026-10-08",
       "task": "",
       "consumed": true
     },
     {
-      "path": "skills/websurf-env-traps/SKILL.md",
+      "path": "TODO.md",
       "by": "owner",
-      "reason": "把 Pages 站点被分支构建顶掉的陷阱写进 skill（owner 要求教训进 skill）",
+      "reason": "T-607 新行事项措辞更正：时间描述写错（设置切走 25h 后下一次推送才顶掉站点，35 分钟后被发现）",
       "at": "2026-10-08",
       "task": "",
       "consumed": true
@@ -1500,7 +1500,7 @@
         "line": 443
       },
       "T-607": {
-        "p": "76465d2f5e90c213127f6a07ebe25482dde89989af39242a6e841359ec429dbc",
+        "p": "91b52e65e575502bd70609dfd4c8584471d20a3438c97344ecfa3170a096190f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
         "line": 444
