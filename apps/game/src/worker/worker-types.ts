@@ -4,15 +4,15 @@
  * 本文件只有类型、没有实现：分支实现在 `src/ts-shared/auth/worker-dispatch.ts` 的
  * `createWorkerDispatch`，装配点是 `apps/game/src/worker/main.ts` 的 `self.onmessage`。
  *
- * 本文件共 21 个导出（19 个接口 + 2 个联合类型），在本工程内只有两个有导入点：
+ * 本文件共 29 个导出（27 个接口 + 2 个联合类型），在本工程内只有两个有导入点：
  * - `KeyState`：`apps/game/src/app.ts`、`apps/game/src/input/keyboard.ts`、
  *   `apps/game/src/input/keymap.ts`（后者用它派生 `BindableAction`）；
  * - `SceneDataMessage`：`apps/game/src/renderer/renderer-main.ts` 的 `loadScene` 形参，调用方是
  *   `apps/game/src/app.ts` 的 BSP 装载段——是主线程内的调用载荷，不是跨线程消息。
- * 其余声明无导入点，只作协议形状的记录；其中数条与当前收发双方不一致，逐条在下方注明。
+ * 其余声明无导入点，只作协议形状的记录；方向与当前收发双方不一致的逐条在下方注明。
  *
  * 两个联合类型按方向划分：`WorkerMessage`（主线程 → Worker）与 `MainMessage`（Worker → 主线程）。
- * 两者的成员集都不完整，也都只作类型用途——分发器按 `type` 字符串分派，不做运行时校验。
+ * 两者按方向列全了实际收发面（T-048 补齐），但只作类型用途——分发器按 `type` 字符串分派，不做运行时校验。
  */
 
 import type { RuntimeConfig } from '../config.js';
@@ -38,7 +38,7 @@ export interface InitMessage {
   dpr: number;
 }
 
-/** `load-bsp`：**本工程内无发送方、也无对应分发分支**（地图装载在主线程完成，
+/** `load-bsp`：**本工程内无发送方、也无对应分发分支**，已从联合里移除（地图装载在主线程完成，
  *  经 `apps/game/src/app.ts` 的 `buildWorldBundle` 后以 `world-json` 消息交给 Worker）。 */
 export interface LoadBspMessage {
   type: 'load-bsp';
@@ -72,17 +72,17 @@ export interface SetDeathThresholdMessage {
   value: number;
 }
 
-/** 主线程 → Worker 的联合类型。**成员集不完整**：`input`、`world-json`、
- *  `sync-render-state`、`set-spawn-points`、`teleport-to-pos`、`set-mode`、`set-hold`
- *  七条在用的消息未列入；已列入的 `LoadBspMessage` 反而没有发送方。 */
+/** 主线程 → Worker 的联合类型（T-048 补齐）：按实际收发面列全 13 条——`wasm-init` / `init` /
+ *  `config` / `respawn` / `teleport` / `set-death-threshold` / `world-json` / `input` /
+ *  `sync-render-state` / `set-spawn-points` / `teleport-to-pos` / `set-mode` / `set-hold`。 */
 export type WorkerMessage =
-  | WasmInitMessage
-  | InitMessage
-  | LoadBspMessage
-  | ConfigMessage
-  | RespawnMessage
-  | TeleportMessage
-  | SetDeathThresholdMessage;
+  | WasmInitMessage | InitMessage
+  | ConfigMessage | RespawnMessage
+  | TeleportMessage | SetDeathThresholdMessage
+  | WorldJsonMessage | InputMessage
+  | SyncRenderStateMessage | SetSpawnPointsMessage
+  | TeleportToPosMessage | SetModeMessage
+  | SetHoldMessage;
 
 // ── Worker-A → 主线程（本组末尾两条 `WorldJsonMessage` / `InputMessage`
 //    实际方向相反，仍声明在原位）──────────────────────────────
@@ -224,19 +224,19 @@ export interface PhysEventMessage {
   timeMs: number;
 }
 
-/** Worker → 主线程的联合类型。**成员集不完整**：`phys-frame`（本文件的 `PhysFrameMessage`）、
- *  `mode-ack`、`world-build-ms`、`world-parse-ms` 未列入；已列入的 `WorldJsonMessage` 方向相反，
- *  `ReadyMessage` / `BspMetadataMessage` / `StatsMessage` / `PlayerRespawnMessage` 无发送方。 */
+/** Worker → 主线程的联合类型（T-048 补齐）：12 条——`ready` / `bsp-metadata` / `scene-data` /
+ *  `stats` / `error` / `player-respawn` / `phys-event` / `health-log` / `phys-frame` / `mode-ack` /
+ *  `world-build-ms` / `world-parse-ms`；`WorldJsonMessage` / `InputMessage` 方向相反，已移到上一组。 */
 export type MainMessage =
-  | ReadyMessage
-  | BspMetadataMessage
-  | SceneDataMessage
-  | StatsMessage
-  | ErrorMessage
-  | PlayerRespawnMessage
-  | WorldJsonMessage
-  | PhysEventMessage
-  | HealthLogMessage;
+  | ReadyMessage | BspMetadataMessage
+  | SceneDataMessage | StatsMessage
+  | ErrorMessage | PlayerRespawnMessage
+  | PhysEventMessage | HealthLogMessage
+  | PhysFrameMessage
+  | ModeAckMessage
+  | WorldBuildMsMessage
+  | WorldParseMsMessage;
+// ↑ 方向说明见两组标题注释；`WorldJsonMessage` / `InputMessage` 已归「主线程 → Worker」组。
 
 // ── 输入状态（共享内存 keys 位掩码，与 Rust KEY_MASK 一致；掩码常量/转换
 //    收敛到 ts-shared auth/shared-state.ts，此处仅保留类型）─────
@@ -256,4 +256,63 @@ export interface KeyState {
   wheelJump: boolean;
   yawLeft: boolean;
   yawRight: boolean;
+}
+
+// ── 补录：实际收发面里此前未声明的 8 条消息（T-048）─────────────────────
+// 放在文件末尾是为了不改动上方任何一行 ⇒ 文档锚点行号零漂移。载荷形状的权威来源是
+// 分发器 src/ts-shared/auth/worker-dispatch.ts 的对应分支与 apps/game/src/worker/main.ts 的发送点。
+
+/** `sync-render-state`（主线程 → Worker）：渲染帧状态重锚 / 全态注入。
+ *  发送方 `apps/game/src/app.ts` 的 `renderer.onSyncRenderState`。 */
+export interface SyncRenderStateMessage {
+  type: 'sync-render-state';
+  state: import('../../../../src/ts-shared/decoupled/decoupled-loop.js').SyncRenderStateLike;
+  teleport?: boolean;
+}
+
+/** `set-spawn-points`（主线程 → Worker）：出生点列表 JSON，只影响 `teleport_to_spawn` 的目标集。 */
+export interface SetSpawnPointsMessage {
+  type: 'set-spawn-points';
+  json: string;
+}
+
+/** `teleport-to-pos`（主线程 → Worker）：传送到任意坐标；**本工程内无发送方**，分发器仍有分支。 */
+export interface TeleportToPosMessage {
+  type: 'teleport-to-pos';
+  pos: [number, number, number];
+  yaw?: number;
+}
+
+/** `set-mode`（主线程 → Worker）：计算模式握手；**本工程内无发送方**，分发器仍有分支。 */
+export interface SetModeMessage {
+  type: 'set-mode';
+  mode: 'coupled' | 'decoupled' | 'tick';
+  state?: import('../../../../src/ts-shared/decoupled/decoupled-loop.js').SyncRenderStateLike;
+}
+
+/** `set-hold`（主线程 → Worker）：解耦 hold 冻结 / 存点恢复；**本工程内无发送方**，分发器仍有分支。 */
+export interface SetHoldMessage {
+  type: 'set-hold';
+  hold?: import('../../../../src/ts-shared/decoupled/decoupled-loop.js').HoldState | null;
+  release?: import('../../../../src/ts-shared/decoupled/decoupled-loop.js').SavePointLike;
+}
+
+/** `mode-ack`（Worker → 主线程）：模式握手回执，由分发器无条件发出。 */
+export interface ModeAckMessage {
+  type: 'mode-ack';
+  mode: string;
+  appliedAtMs: number;
+}
+
+/** `world-build-ms`（Worker → 主线程）：`build_world` 段耗时诊断（主线程只打 console）。 */
+export interface WorldBuildMsMessage {
+  type: 'world-build-ms';
+  ms: number;
+}
+
+/** `world-parse-ms`（Worker → 主线程）：两个大 JSON 的解析耗时诊断（主线程只打 console）。 */
+export interface WorldParseMsMessage {
+  type: 'world-parse-ms';
+  brush: number;
+  tri: number;
 }

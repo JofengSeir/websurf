@@ -98,7 +98,7 @@ Worker → 主线程：
 | `world-parse-ms` | 未声明 | 无 | `apps/game/src/app.ts:128` | **缺声明**：发送方 `apps/game/src/worker/main.ts:518` |
 | `mode-ack` | 未声明 | 无 | 本工程无接收点 | 分发器在 `src/ts-shared/auth/worker-dispatch.ts:534` 发出；本工程不发 `set-mode`，故不会收到 |
 
-两个联合类型的成员集都与实际收发不符：`WorkerMessage`（`apps/game/src/worker/worker-types.ts:78`）未列入 `input`、`world-json`、`sync-render-state`、`set-spawn-points`、`teleport-to-pos`、`set-mode`、`set-hold` 七条在用的消息，却列入了没有发送方的 `LoadBspMessage`；`MainMessage`（`apps/game/src/worker/worker-types.ts:230`）未列入 `phys-frame`、`mode-ack`、`world-build-ms`、`world-parse-ms`，且把方向相反的 `WorldJsonMessage` 列入其中。类型面只作形状记录：分发器按 `type` 字符串分派，不做运行时校验（`src/ts-shared/auth/worker-dispatch.ts:265`）。
+两个联合类型的成员集都与实际收发不符：`WorkerMessage`（`apps/game/src/worker/worker-types.ts:78`）未列入 `input`、`world-json`、`sync-render-state`、`set-spawn-points`、`teleport-to-pos`、`set-mode`、`set-hold` 七条在用的消息，却列入了没有发送方的 `LoadBspMessage`；`MainMessage`（`apps/game/src/worker/worker-types.ts:230`）未列入 `phys-frame`、`mode-ack`、`world-build-ms`、`world-parse-ms`，且把方向相反的 `WorldJsonMessage` 列入其中。类型面只作形状记录：分发器按 `type` 字符串分派，不做运行时校验（`src/ts-shared/auth/worker-dispatch.ts:265`）。**已消除（2026-10-09）**：T-048 —— 两个联合已按实际收发面补齐（`WorkerMessage` 13 条 / `MainMessage` 12 条，新增 8 个接口声明），覆盖探针实测未覆盖 0。
 
 `KeyState` 的字段集在两侧同名同型：本工程声明在 `apps/game/src/worker/worker-types.ts:247`，共享层的位掩码与转换在 `src/ts-shared/auth/shared-state.ts:67` 的 `KEY_MASK` 与 `src/ts-shared/auth/shared-state.ts:81` 的 `keysToMask`；本工程不另设位常量。
 
