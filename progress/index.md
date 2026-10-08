@@ -202,3 +202,4 @@
 | 2026-10-09 | T-209 结案：game 面板 M/ESC 加 `sceneReady` 守卫（+ 加载失败路径复位）；改动全为 1:1 行替换、锚点零漂移 | progress/monthly/2026-10-7.md:14 |
 | 2026-10-09 | T-064 结案：debug 文档 `ready` 锚点按符号重定位（483 → 484）；证据列裸文件名会触发 `[D]` 歧义 + 死锚点 | progress/monthly/2026-10-7.md:15 |
 | 2026-10-09 | T-106/T-119 结案（待裁决清账）：numField 空串不再当 0（DOM 桩探针行为验证）、时间轴 prerun 文案改正 | progress/monthly/2026-10-7.md:16 |
+| 2026-10-09 | T-005 结案：game favicon 从历史恢复（168 B）并接进两形态 dist（KEEP 名单 + 拷贝）；HTML 只留相对路径 | progress/monthly/2026-10-7.md:17 |
