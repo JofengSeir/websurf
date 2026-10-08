@@ -21,6 +21,8 @@ import {
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
 import { applyLightmap, buildMapScene } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { buildMiniatureSky, createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
 import {
@@ -40,6 +42,15 @@ export class ViewerScene {
 
   /** 已挂载的 BSP 模型根（换图时先 `disposeObject` 再挂新的）。 */
   private modelRoot: THREE.Object3D | null = null;
+
+  /** 3D 天空盒（`miniature-sky.ts`，与 debug/game 同款）：第二相机 + 只挂 `SKY_LAYER` 层的天空区组。 */
+  private skyCamera: THREE.PerspectiveCamera | null = null;
+  private skyGroup: THREE.Group | null = null;
+  private skyParams: SkyCameraParams | null = null;
+  /** 天空遍专用雾（`sky_camera` 自己的参数，start/end 乘 1/scale）。 */
+  private skyFog: THREE.Fog | null = null;
+  /** PVS（`parse_pvs_data` 载荷）：天空区判据按「图元采样点所在 cluster」取。 */
+  private pvs: PvsManager | null = null;
 
   /** 近平面贴墙自适应：实现在渲染共享层 `src/renderer-shared/camera/near-plane.ts`。 */
   private readonly nearPlane = new NearPlaneController();
@@ -119,7 +130,36 @@ export class ViewerScene {
         { roots: [this.modelRoot], vertical: true },
       );
     }
+    // 有 3D 天空盒时按起源的两遍法（与 debug/game 同款）：① 天空相机画 2D 天空盒背景 + 天空层；
+    // ② 清深度、摘掉背景后主相机画主世界（不摘背景的话 three 的背景 pass 会盖掉第 ① 遍）。
+    const skyCamera = this.skyCamera;
+    if (!skyCamera || !this.skyGroup || !this.skyParams) {
+      this.renderer.autoClear = true;
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    syncSkyCamera(skyCamera, this.camera, this.skyParams);
+    const background = this.scene.background;
+    const mapFog = this.scene.fog;
+    // 天空遍的雾走 sky_camera 自己的参数，start/end 乘 1/scale（引擎 Enable3dSkyboxFog）
+    const skyFogParams = this.skyParams.fog;
+    if (skyFogParams?.enable) {
+      if (!this.skyFog) this.skyFog = new THREE.Fog(0xffffff, 0, 1);
+      this.skyFog.color.setHex(skyFogParams.color);
+      this.skyFog.near = skyFogParams.start / this.skyParams.scale;
+      this.skyFog.far = skyFogParams.end / this.skyParams.scale;
+      this.scene.fog = this.skyFog;
+    } else {
+      this.scene.fog = null;
+    }
+    this.renderer.autoClear = false;
+    this.renderer.clear();
+    this.renderer.render(this.scene, skyCamera);
+    this.scene.fog = mapFog;
+    this.renderer.clearDepth();
+    this.scene.background = null;
     this.renderer.render(this.scene, this.camera);
+    this.scene.background = background;
   }
 
   add(obj: THREE.Object3D): void {
@@ -131,10 +171,27 @@ export class ViewerScene {
   }
 
   /** 挂载 GLB（替换旧地图）：解析 → 施加静态光照 → 分块合并 → 合并后终扫 → `fitCamera`。 */
-  async mountGlb(glbBytes: ArrayBuffer, skyboxTexture?: import('three').CubeTexture | null): Promise<void> {
+  async mountGlb(
+    glbBytes: ArrayBuffer,
+    skyboxTexture?: import('three').CubeTexture | null,
+    sky?: { fogParams?: { color: number; start: number; end: number } | null; skyCamera?: SkyCameraParams | null; pvsJson?: string },
+  ): Promise<void> {
+    // 换图：上一张图的天空层与雾先释放（下面的摘取会覆盖 this.skyGroup 引用）
+    if (this.skyGroup) { disposeObject(this.skyGroup); this.scene.remove(this.skyGroup); this.skyGroup = null; }
+    this.skyParams = null; this.skyFog = null; this.pvs = null;
     // 共享装配核（2026-10-03 起与 game 同一条链路）：GLB 字节 → 子场景（isBspModel 标记 +
     // 清根 rotation + 世界包围盒 + 摘 punctual 灯，顺序约束见 buildMapScene 文档）
     const { gltf, scene: mapRoot, maxDim } = await buildMapScene(glbBytes); await collectWorldTransitionTextures(gltf, mapRoot);
+
+    // 3D 天空盒（起源做法，与 debug/game 同款）：把天空区图元摘出主世界、交第二相机单独渲染。
+    // 判据 =「图元采样点落在 `sky_camera` 所在 cluster」；必须早于分块合并——合并后跨区的大块
+    // 无法再拆。无 `sky_camera` / 无 PVS / 摘不到图元时不建，末尾用合成山脊兜底。
+    this.pvs = sky?.pvsJson ? new PvsManager(sky.pvsJson) : null;
+    const skyCluster = sky?.skyCamera && this.pvs
+      ? this.pvs.getClusterAt({ x: sky.skyCamera.origin[0], y: sky.skyCamera.origin[1], z: sky.skyCamera.origin[2] })
+      : -1;
+    this.skyGroup = sky?.skyCamera && skyCluster >= 0 ? extractSkyArea(mapRoot, (m) => this.meshInCluster(m, skyCluster)) : null;
+    this.skyParams = this.skyGroup && sky?.skyCamera ? sky.skyCamera : null;
 
     if (this.modelRoot) {
       disposeObject(this.modelRoot);
@@ -159,6 +216,8 @@ export class ViewerScene {
     // 合并后终扫（2026-10-03 起与 game 同序：终扫必须晚于合并——合并会重建 mesh/材质数组）：
     // 把仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程不加灯，受光材质恒黑）
     const swept = fullbrightUnlitLitMaterials(this.modelRoot); applyWorldTransitionShaders(this.modelRoot);
+    // 天空区图元已摘出主根，同两道装配要在天空组上再跑一次（全亮收敛 + WorldTransition 雪盖）
+    if (this.skyGroup) { fullbrightUnlitLitMaterials(this.skyGroup); applyWorldTransitionShaders(this.skyGroup); }
     if (swept > 0) {
       console.info(`[viewer][lightmap] 装配后终扫：${swept} 个 mesh 收敛为 fullbright 贴图原色`);
     }
@@ -173,6 +232,21 @@ export class ViewerScene {
       console.warn('[viewer][render] 预编译着色器失败（不影响按需编译）:', err);
     }
 
+    // 挂天空层 + 地图雾（与 debug/game 同款：天空图元只在第 1 层、由第二相机渲染）
+    this.skyCamera = createSkyCamera();
+    if (this.skyGroup) {
+      this.scene.add(this.skyGroup);
+      console.info(`[viewer][skybox] 3D 天空盒：天空区 ${this.skyGroup.children.length} 个图元挂第 ${SKY_LAYER} 层，由第二相机渲染`);
+    } else {
+      const box = new THREE.Box3().setFromObject(mapRoot);
+      const radius = Math.max(box.getSize(new THREE.Vector3()).length() * 0.5, 1);
+      const miniature = buildMiniatureSky({ center: box.getCenter(new THREE.Vector3()), radius, color: 0x46566a, haze: sky?.fogParams?.color });
+      miniature.userData.isMiniatureSky = true;
+      this.scene.add(miniature);
+      console.info('[viewer][skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 合成山脊兜底');
+    }
+    // 地图线性雾（`env_fog_controller`）：与 debug/game 同值
+    this.scene.fog = sky?.fogParams ? new THREE.Fog(sky.fogParams.color, sky.fogParams.start, sky.fogParams.end) : null;
     this.fitCamera(maxDim);
   }
 
@@ -221,6 +295,26 @@ export class ViewerScene {
    * 收集与合并算法、失败回退、包围球垫圈（`padBoundingSpheres`）全部与 game 同一份代码。
    * 副作用：旧 `modelRoot` 从场景移除、由新根节点接管；被合并掉的原始几何会 dispose。
    */
+  /** 判某个 mesh 是否落在指定 BSP cluster（与 debug/game 同一采样口径：包围盒中心 + 6 个 ±r 轴点）。 */
+  private meshInCluster(mesh: THREE.Mesh, cluster: number): boolean {
+    if (!this.pvs) return false;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const box = mesh.geometry.boundingBox;
+    if (!box) return false;
+    const center = box.getCenter(new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
+    if (this.pvs.getClusterAt(center) === cluster) return true;
+    const size = box.getSize(new THREE.Vector3());
+    const r = Math.max(1, Math.max(size.x, size.y, size.z) * 0.25);
+    for (const axis of ['x', 'y', 'z'] as const) {
+      for (const sign of [1, -1]) {
+        const probe = center.clone();
+        probe[axis] += sign * r;
+        if (this.pvs.getClusterAt(probe) === cluster) return true;
+      }
+    }
+    return false;
+  }
+
   private optimizeScene(): void {
     if (!this.modelRoot) return;
     const r = mergeIntoChunks(this.modelRoot);

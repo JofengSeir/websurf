@@ -27,7 +27,7 @@ TS 侧的消费面有三个名字（`BspProcessor` / `decompress_mtz` / `initSyn
 
 | 流程 / 不变量 | 说明 | 锚点 |
 |---|---|---|
-| 顺序契约 | 两个 `export_glb_*` 都把内部 `Bsp` `take()` 走，必须排在 `metadata` / `parse_spawn_points` 之后；取走后再调它们返回「BSP 未解析或已导出」错误。TS 主链路：先试主导出，失败回退裸导出（`apps/viewer/src/core/bsp.ts:131` 到 `apps/viewer/src/core/bsp.ts:141`） | `apps/viewer/crates/wasm/src/lib.rs:584`、`apps/viewer/crates/wasm/src/lib.rs:642` |
+| 顺序契约 | 两个 `export_glb_*` 都把内部 `Bsp` `take()` 走，必须排在 `metadata` / `parse_spawn_points` 之后；取走后再调它们返回「BSP 未解析或已导出」错误。TS 主链路：先试主导出，失败回退裸导出（`apps/viewer/src/core/bsp.ts:137` 到 `apps/viewer/src/core/bsp.ts:147`） | `apps/viewer/crates/wasm/src/lib.rs:584`、`apps/viewer/crates/wasm/src/lib.rs:642` |
 | 元数据来源 | `schema_version` 固定 1；`magic` 由 header 的 v/b/s/p 四字节拼成；四个 lump 计数直接取长度；`num_static_props` 现数一遍；`packed_files` 用构造期缓存 | `apps/viewer/crates/wasm/src/lib.rs:387` 到 `apps/viewer/crates/wasm/src/lib.rs:395` |
 | 出生点收录判据 | `classname` 命中 `SPAWN_CLASSNAMES` 之一，或以 `info_player_` 开头；`origin` 解析不出三个分量则整条跳过 | `apps/viewer/crates/wasm/src/lib.rs:504` 到 `apps/viewer/crates/wasm/src/lib.rs:514`、`apps/viewer/crates/wasm/src/lib.rs:524`、`apps/viewer/crates/wasm/src/lib.rs:533` |
 | 出生点坐标变换 | `origin` 走 `rotate_yup`（`[x,y,z] → [y,z,x]`，正交且 det = +1），与地图 GLB 同一变换 | `apps/viewer/crates/wasm/src/lib.rs:499`、`apps/viewer/crates/wasm/src/lib.rs:549` |
@@ -41,9 +41,9 @@ TS 侧的消费面有三个名字（`BspProcessor` / `decompress_mtz` / `initSyn
 | 失败只跳过不报错 | `.mdl` 读不出、VMT 找不到、`$basetexture` 缺失、VTF 取不到或解码失败都只跳过对应项；VMT 缺失时该材质按 Opaque 记一笔 | `apps/viewer/crates/wasm/src/lib.rs:211`、`apps/viewer/crates/wasm/src/lib.rs:234`、`apps/viewer/crates/wasm/src/lib.rs:255` 到 `apps/viewer/crates/wasm/src/lib.rs:266` |
 | 无模型时回退纯地图导出 | 一个被引用模型都没收集到时改用 `bsp_to_gltf_core::export_bsp`，不报错 | `apps/viewer/crates/wasm/src/lib.rs:593` 到 `apps/viewer/crates/wasm/src/lib.rs:603` |
 | 错误翻译格式 | `to_js_err` 把任意 Debug 错误压成 `"{上下文}: {Debug}"` 字符串 | `apps/viewer/crates/wasm/src/lib.rs:42` 到 `apps/viewer/crates/wasm/src/lib.rs:44` |
-| 依赖面最小 | crate 只依赖共享解析层与绑定/序列化/图像四类；不依赖 `websurf-phys`，不含 mosaic / 默认纹理包 | `apps/viewer/crates/wasm/Cargo.toml:18` 到 `apps/viewer/crates/wasm/Cargo.toml:33` |
+| 依赖面最小 | crate 只依赖共享解析层与绑定/序列化/图像四类；不依赖 `websurf-phys`，不含 mosaic / 默认纹理包 | `apps/viewer/crates/wasm/Cargo.toml:18` 到 `apps/viewer/crates/wasm/Cargo.toml:36` |
 | patch 指向 vendored vmdl | workspace 级 `[patch.crates-io]` 把 `vmdl` 指到 `src/vendor/vmdl` | `apps/viewer/Cargo.toml:12` 到 `apps/viewer/Cargo.toml:13` |
-| release 配置 | `opt-level = 3` + `lto = true` + `codegen-units = 1`；wasm-pack 侧跳过二次 `wasm-opt` | `apps/viewer/Cargo.toml:18` 到 `apps/viewer/Cargo.toml:21`、`apps/viewer/crates/wasm/Cargo.toml:36` 到 `apps/viewer/crates/wasm/Cargo.toml:37` |
+| release 配置 | `opt-level = 3` + `lto = true` + `codegen-units = 1`；wasm-pack 侧跳过二次 `wasm-opt` | `apps/viewer/Cargo.toml:18` 到 `apps/viewer/Cargo.toml:21`、`apps/viewer/crates/wasm/Cargo.toml:39` 到 `apps/viewer/crates/wasm/Cargo.toml:40` |
 
 ## 已知缺口（状态见 TODO.md）
 

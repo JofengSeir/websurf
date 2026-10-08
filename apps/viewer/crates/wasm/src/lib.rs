@@ -778,4 +778,148 @@ impl BspProcessor {
             Err(e) => Err(to_js_err(e, "读取 pakfile 文件失败")),
         }
     }
+
+    /// 解析 PVS（可见性）数据：节点 / 叶簇 AABB / 每簇可见位串 —— 供渲染端 PVS 剔除与 3D 天空盒
+    /// 的天空区判据（「图元采样点所在的 BSP cluster」）使用。
+    ///
+    /// 与 debug/game 同一导出同签名同载荷（本工程薄导出层的副本）：节点 plane normal 与叶簇
+    /// mins/maxs 按 [x,y,z]→[y,z,x] 转到 Three.js Y-up，plane dist 不变。这是**解析层**接口
+    /// （websurf-wasm-core），不含物理与碰撞——本工程仍不引入 websurf-phys。
+    pub fn parse_pvs_data(&self) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
+
+        use vbsp::{Leaf, Node, Plane};
+
+        // ---- 可序列化结构 ----
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PvsNode {
+            normal: [f32; 3],
+            dist: f32,
+            children: [i32; 2],
+        }
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PvsLeaf {
+            cluster: i16,
+            mins: [i16; 3],
+            maxs: [i16; 3],
+            is_solid: bool,
+        }
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PvsData {
+            root_node: u32,
+            nodes: Vec<PvsNode>,
+            leaves: Vec<PvsLeaf>,
+            face_clusters: Vec<i32>,
+            pvs_bits_base64: String,
+            cluster_count: u32,
+            bytes_per_row: usize,
+        }
+
+        // 坐标旋转 [x,y,z]→[y,z,x]（BSP Z-up → Three.js Y-up），与其他导出函数保持一致
+        fn rotate_yup_f32(v: &vbsp::Vector) -> [f32; 3] {
+            [v.y, v.z, v.x]
+        }
+        fn rotate_yup_i16(v: [i16; 3]) -> [i16; 3] {
+            [v[1], v[2], v[0]]
+        }
+
+        // ---- 1. 导出 nodes（BSP 树节点）----
+        let nodes: Vec<PvsNode> = bsp
+            .nodes
+            .iter()
+            .map(|node: &Node| {
+                // plane_index 越界（损坏的 BSP）时退回默认平面，不中断本次导出
+                let plane_idx = node.plane_index as usize;
+                let default_plane = Plane { normal: vbsp::Vector { x: 0.0, y: 0.0, z: 1.0 }, dist: 0.0, ty: 0 };
+                let plane = bsp.planes.get(plane_idx).unwrap_or(&default_plane);
+                PvsNode {
+                    normal: rotate_yup_f32(&plane.normal),
+                    dist: plane.dist,
+                    children: node.children,
+                }
+            })
+            .collect();
+
+        // ---- 2. 导出 leaves（cluster + 包围盒 + is_solid）----
+        // leaves 按 BSP 原始顺序输出；`nodes[].children` 的负值取反即 leaf 下标。
+        let leaves: Vec<PvsLeaf> = bsp
+            .leaves
+            .iter()
+            .map(|leaf: &Leaf| PvsLeaf {
+                cluster: leaf.cluster,
+                mins: rotate_yup_i16(leaf.mins),
+                maxs: rotate_yup_i16(leaf.maxs),
+                is_solid: leaf.cluster < 0,
+            })
+            .collect();
+
+        // ---- 3. 建立 face → cluster 映射（取第一个非固体 cluster）----
+        let mut face_clusters = vec![-1i32; bsp.faces.len()];
+        for leaf in bsp.leaves.iter() {
+            if leaf.cluster < 0 {
+                continue; // 固体 leaf（cluster < 0）不参与 face → cluster 映射
+            }
+            let start = leaf.first_leaf_face as usize;
+            let count = leaf.leaf_face_count as usize;
+            if start + count > bsp.leaf_faces.len() {
+                continue; // leaf_faces 区间越出表尾：跳过该 leaf
+            }
+            for fi in start..(start + count) {
+                let face_idx = bsp.leaf_faces[fi].face as usize;
+                if face_idx < face_clusters.len() && face_clusters[face_idx] < 0 {
+                    face_clusters[face_idx] = leaf.cluster as i32;
+                }
+            }
+        }
+
+        // ---- 4. 预解码 PVS 位图 ----
+        // 逐簇调 `vbsp::decode_pvs_row`，不走 `VisData::visible_clusters`——后者是另一份独立
+        // RLE 循环，offset 越界时 panic，而 wasm 导出的 panic 会破坏 wasm-bindgen 状态。
+        let cluster_count = bsp.vis_data.cluster_count;
+        let bytes_per_row = ((cluster_count as usize) + 7) / 8;
+        let mut pvs_bits = vec![0u8; (cluster_count as usize) * bytes_per_row];
+
+        // 仅在有 PVS 数据时解码
+        if cluster_count > 0 && !bsp.vis_data.pvs_offsets.is_empty() {
+            let vis_data = &bsp.vis_data.data;
+            let pvs_offsets = &bsp.vis_data.pvs_offsets;
+            for c in 0..cluster_count {
+                let c_usize = c as usize;
+                if c_usize >= pvs_offsets.len() {
+                    break;
+                }
+                let offset = pvs_offsets[c_usize] as usize;
+                // offset 超出 vis_data：跳过该簇
+                if offset >= vis_data.len() {
+                    continue;
+                }
+                let row_offset = c_usize * bytes_per_row;
+                // RLE 解码：一次跳过覆盖 8 个簇，规则集中在 `vbsp::decode_pvs_row`
+                vbsp::decode_pvs_row(vis_data, offset, cluster_count, bytes_per_row, row_offset, &mut pvs_bits);
+            }
+        }
+
+        let pvs_bits_base64 = {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode(&pvs_bits)
+        };
+
+        let pvs_data = PvsData {
+            root_node: 0,
+            nodes,
+            leaves,
+            face_clusters,
+            pvs_bits_base64,
+            cluster_count,
+            bytes_per_row,
+        };
+
+        serde_json::to_string(&pvs_data).map_err(|e| to_js_err(e, "序列化 PVS 数据失败"))
+    }
 }

@@ -42,6 +42,7 @@ import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
 import { optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inject-stats.js';
 import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
+import { buildMiniatureSky, createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
@@ -86,6 +87,12 @@ export class RendererMain {
   private camera: THREE.PerspectiveCamera | null = null;
   /** PVS 查询器（`loadScene` 用 `data.pvsJson` 建；`ENABLE_PVS` 为真时 `tick` 用它剔除）。 */
   private pvsManager: PvsManager | null = null;
+  /** 3D 天空盒（`miniature-sky.ts`，与 debug 同款）：第二相机 + 只挂第 `SKY_LAYER` 层的天空区组。 */
+  private skyCamera: THREE.PerspectiveCamera | null = null;
+  private skyGroup: THREE.Group | null = null;
+  private skyParams: SkyCameraParams | null = null;
+  /** 天空遍专用雾（`sky_camera` 自己的雾参数，start/end 乘 1/scale）。 */
+  private skyFog: THREE.Fog | null = null;
   /** 运行时配置（`init` 注入）：光照初值、纹理画质、FOV、剔除距离都从它取。 */
   private config!: RuntimeConfig;
 
@@ -270,6 +277,16 @@ export class RendererMain {
     //        traverse 且程序失效。
     const { gltf, scene, bbox, maxDim } = await buildMapScene(data.glb); await collectWorldTransitionTextures(gltf, scene);
 
+    // 1.1 3D 天空盒（起源做法，与 debug 同款）：把天空区图元摘出主世界，交第二相机单独渲染。
+    //     判据 =「图元采样点落在 `sky_camera` 所在 cluster」；必须早于分块合并——合并成空间块后
+    //     跨区的大块无法再拆。无 `sky_camera`/无 PVS/摘不到图元时不建，末尾用合成山脊兜底。
+    this.pvsManager = new PvsManager(data.pvsJson);
+    const skyCluster = data.skyCamera
+      ? this.pvsManager.getClusterAt({ x: data.skyCamera.origin[0], y: data.skyCamera.origin[1], z: data.skyCamera.origin[2] })
+      : -1;
+    this.skyGroup = data.skyCamera && skyCluster >= 0 ? extractSkyArea(scene, (m) => this.meshInCluster(m, skyCluster)) : null;
+    this.skyParams = this.skyGroup && data.skyCamera ? data.skyCamera : null;
+
     this.scene.add(scene); // 挂进主场景：此时 punctual 光源已摘除
 
     // 1.2 离线烘焙静态光照（lightmap atlas）：**必须**在 optimizeScene 之前施加。
@@ -291,6 +308,8 @@ export class RendererMain {
     //      emissive=[0,0,0]，恒渲染纯黑。必须在 optimizeScene 之后（合并会重建 mesh/材质数组）、
     //      首次编译之前。
     const converged = fullbrightUnlitLitMaterials(this.scene); applyWorldTransitionShaders(this.scene);
+    // 天空区图元已摘出主场景，同两道装配要在天空组上再跑一次（全亮收敛 + WorldTransition 雪盖）
+    if (this.skyGroup) { fullbrightUnlitLitMaterials(this.skyGroup); applyWorldTransitionShaders(this.skyGroup); }
     if (converged > 0) {
       console.info(
         `[lightmap] 装配后终扫：${converged} 个 mesh 仍为受光材质 ⇒ 收敛为 fullbright 贴图原色` +
@@ -366,6 +385,21 @@ export class RendererMain {
     // 5. 回传场景包围盒最小 Y（`onSceneLoaded` 的调用方把它当死亡阈值转给 setDeathY）
     if (data.skyboxTexture) this.scene.background = data.skyboxTexture; this.onSceneLoaded?.(bbox.min.y);
 
+    // 5b. 挂天空层 + 地图雾。天空层必须在 LOD/PVS 注册**之后**：天空图元只在第 1 层、由第二相机
+    //     渲染，不能被主相机的 LOD/PVS 剔除（注册时它们还没进场景，故不会被收进 lodItems）。
+    this.skyCamera = createSkyCamera();
+    if (this.skyGroup) {
+      this.scene.add(this.skyGroup);
+      console.info(`[skybox] 3D 天空盒：天空区 ${this.skyGroup.children.length} 个图元挂第 ${SKY_LAYER} 层，由第二相机渲染`);
+    } else {
+      const miniature = buildMiniatureSky({ center: bbox.getCenter(new THREE.Vector3()), radius: maxDim * 0.5, color: 0x46566a, haze: data.fogParams?.color });
+      miniature.userData.isMiniatureSky = true;
+      this.scene.add(miniature);
+      console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 合成山脊兜底');
+    }
+    // 地图线性雾（`env_fog_controller`）：与 debug 的 `lightManager.setFog` 同值
+    this.scene.fog = data.fogParams ? new THREE.Fog(data.fogParams.color, data.fogParams.start, data.fogParams.end) : null;
+
     // 6. 纹理画质 manifest + 按当前画质应用（mosaic 切换数据源）
     this.mosaicManifest = data.mosaicManifest
       ? (JSON.parse(data.mosaicManifest) as Record<string, string>)
@@ -422,6 +456,15 @@ export class RendererMain {
     // three.js 渲染列表缓存按旧场景几何缓存条目，换图后清掉（2026-10-04 自 debug 对齐）
     if (this.scene?.background instanceof THREE.Texture) { this.scene.background.dispose(); this.scene.background = new THREE.Color(0x222222); } this.renderer?.renderLists?.dispose();
     this.pvsManager = null;
+    // 天空层与天空相机随地图一起释放；雾也摘掉（换图不继承上一张图的雾）
+    if (this.scene) {
+      for (let i = this.scene.children.length - 1; i >= 0; i--) {
+        const child = this.scene.children[i];
+        if (child.userData?.isMiniatureSky) { disposeObject(child); this.scene.remove(child); }
+      }
+      this.scene.fog = null;
+    }
+    this.skyGroup = null; this.skyParams = null; this.skyCamera = null; this.skyFog = null;
     this.lodItems.length = 0;
     this.predPhys = null;
     this.predReady = false;
@@ -435,6 +478,69 @@ export class RendererMain {
     this.calibrator.clear();
     // 换图后渲染采样流不连续 → 索引空间重启（世代 +1，Worker 丢弃旧图缓存）
     this.resetSampleStream();
+  }
+
+  /**
+   * 一帧的 draw call。有 3D 天空盒时按起源的两遍法（`CSkyboxView::DrawInternal`，与 debug 同款）：
+   * ① 天空相机（位姿见 `syncSkyCamera`）把 2D 天空盒背景 + 天空层图元画进后台缓冲；
+   * ② 清深度后主相机画主世界——这一遍**必须摘掉背景**，否则 three 的背景 pass 会把第 ① 遍盖掉。
+   * 无 3D 天空盒时退回单遍。
+   */
+  private renderFrame(): void {
+    const renderer = this.renderer;
+    const camera = this.camera;
+    const scene = this.scene;
+    if (!renderer || !camera || !scene) return;
+    const skyCamera = this.skyCamera;
+    if (!skyCamera || !this.skyGroup || !this.skyParams) {
+      renderer.autoClear = true;
+      renderer.render(scene, camera);
+      return;
+    }
+    syncSkyCamera(skyCamera, camera, this.skyParams);
+    const background = scene.background;
+    const mapFog = scene.fog;
+    // 天空遍的雾走 `sky_camera` 自己的参数，start/end 乘 1/scale（引擎 `Enable3dSkyboxFog`）；
+    // `fogenable` 为假时引擎直接 `FogMode(NONE)`，天空区一点雾都不吃。
+    const skyFogParams = this.skyParams.fog;
+    if (skyFogParams?.enable) {
+      if (!this.skyFog) this.skyFog = new THREE.Fog(0xffffff, 0, 1);
+      this.skyFog.color.setHex(skyFogParams.color);
+      this.skyFog.near = skyFogParams.start / this.skyParams.scale;
+      this.skyFog.far = skyFogParams.end / this.skyParams.scale;
+      scene.fog = this.skyFog;
+    } else {
+      scene.fog = null;
+    }
+    renderer.autoClear = false;
+    renderer.clear();
+    renderer.render(scene, skyCamera);
+    scene.fog = mapFog;
+    renderer.clearDepth();
+    scene.background = null;
+    renderer.render(scene, camera);
+    scene.background = background;
+  }
+
+  /** 判某个 mesh 是否落在指定 BSP cluster（与 debug 同一采样口径：包围盒中心 + 6 个 ±r 轴点）。 */
+  private meshInCluster(mesh: THREE.Mesh, cluster: number): boolean {
+    const pvs = this.pvsManager;
+    if (!pvs) return false;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const box = mesh.geometry.boundingBox;
+    if (!box) return false;
+    const center = box.getCenter(new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
+    if (pvs.getClusterAt(center) === cluster) return true;
+    const size = box.getSize(new THREE.Vector3());
+    const r = Math.max(1, Math.max(size.x, size.y, size.z) * 0.25);
+    for (const axis of ['x', 'y', 'z'] as const) {
+      for (const sign of [1, -1]) {
+        const probe = center.clone();
+        probe[axis] += sign * r;
+        if (pvs.getClusterAt(probe) === cluster) return true;
+      }
+    }
+    return false;
   }
 
   /** 面板实时调整探测距离与收缩系数：转发 NearPlaneController.setParams（判据见该文件）。 */
@@ -794,7 +900,7 @@ export class RendererMain {
     }
 
     // 3. 绘制（帧率跟随 rAF，不做节流）
-    this.renderer.render(this.scene, this.camera);
+    this.renderFrame();
 
     // 3b. 首帧之后跑一次注入生效性统计（此刻材质已编译、onBeforeCompile 的回填已到位）
     if (this.pendingInjectReport && !this.injectReported) {

@@ -6,7 +6,7 @@
 
 - 工程自述与入口脚本：`apps/game/package.json:4` 的 `description`、`apps/game/package.json:7` 的 `scripts`。
 - 唯一入口模块：`apps/game/src/app.ts` 的 `main`（`apps/game/src/app.ts:94`），文件末 `void main()`（`apps/game/src/app.ts:832`）触发；画布缺失时直接返回（`apps/game/src/app.ts:95`）。
-- 两条物理线同时存在：Worker 侧由 `createAuthLoop` 驱动（`apps/game/src/worker/main.ts:451`），主线程侧由 `RendererMain.buildPredictionWorld` 建实例（`apps/game/src/renderer/renderer-main.ts:498`）并在每帧 `tick` 推进（`apps/game/src/renderer/renderer-main.ts:737`）。
+- 两条物理线同时存在：Worker 侧由 `createAuthLoop` 驱动（`apps/game/src/worker/main.ts:451`），主线程侧由 `RendererMain.buildPredictionWorld` 建实例（`apps/game/src/renderer/renderer-main.ts:604`）并在每帧 `tick` 推进（`apps/game/src/renderer/renderer-main.ts:843`）。
 - 交互面：页面 `apps/game/web/index.html` 声明的挂载点由 `apps/game/src/app.ts` 的 `dom` 表（`apps/game/src/app.ts:43`）与 `PanelController`（`apps/game/src/panel/panel-controller.ts:37`）绑定；本次实测 `apps/game/src` 下 45 个 `getElementById` 字面量 id 在 `apps/game/web/index.html` 中全部存在，8 个选择器查询也各自有对应结构。
 - dev 端口 8090：`apps/game/package.json:15`。
 
@@ -17,7 +17,7 @@
 | `apps/game/src/` | 主线程与 Worker 的 TypeScript 源码（`apps/game/src/app.ts`、`apps/game/src/config.ts`、`apps/game/src/savepoint.ts`、`apps/game/src/wasm.d.ts` 四个根文件） | `apps/game/src/app.ts:94` 的 `main` |
 | `apps/game/src/input/` | 键位表与持久化、键盘状态、面板参数下发桥 | `apps/game/src/input/input-bridge.ts:41` 的 `sendConfig` |
 | `apps/game/src/panel/` | ESC 面板控制器：导航切换、控件接线、偏好持久化、存点列表 | `apps/game/src/panel/panel-controller.ts:37` 的 `PanelController` |
-| `apps/game/src/renderer/` | 主线程渲染物理与场景编排：loadScene 调度、帧循环、剔除、出帧探针（GLB 装载/光照注入/分块合并/近平面在渲染共享层） | `apps/game/src/renderer/renderer-main.ts:80` 的 `RendererMain`（装配/相机细节另见渲染共享层 `src/renderer-shared/{scene,camera}/` 四模块，2026-10-02 拆分并下沉） |
+| `apps/game/src/renderer/` | 主线程渲染物理与场景编排：loadScene 调度、帧循环、剔除、出帧探针（GLB 装载/光照注入/分块合并/近平面在渲染共享层） | `apps/game/src/renderer/renderer-main.ts:81` 的 `RendererMain`（装配/相机细节另见渲染共享层 `src/renderer-shared/{scene,camera}/` 四模块，2026-10-02 拆分并下沉） |
 | `apps/game/src/worker/` | Worker 权威物理入口与消息协议类型声明 | `apps/game/src/worker/main.ts:451` 的 `createAuthLoop` |
 | `apps/game/src/world/` | 向量与 PVS 类型出口（转出共享层类型） | `apps/game/src/world/types.ts:12` 的类型转出 |
 | `apps/game/web/` | 手写页面资产（`index.html`、`styles.css`、`coi-serviceworker.js`）与 esbuild 产物落点 | `apps/game/web/index.html:27` 的 `canvas#preview` |
@@ -83,12 +83,12 @@
 
 ## 不变量
 
-- **单写者（输入）**：每帧只有 `RendererMain.tick` 一处写共享输入槽（`apps/game/src/renderer/renderer-main.ts:731`）；`InputBridge.addInput` 是显式空实现（`apps/game/src/input/input-bridge.ts:30`），不退化成第二条写入路径。
+- **单写者（输入）**：每帧只有 `RendererMain.tick` 一处写共享输入槽（`apps/game/src/renderer/renderer-main.ts:837`）；`InputBridge.addInput` 是显式空实现（`apps/game/src/input/input-bridge.ts:30`），不退化成第二条写入路径。
 - **同源输入**：真实鼠标增量先经 `layerMouseDelta` 乘灵敏度（`apps/game/src/app.ts:235`，实现在 `src/ts-shared/input/input-layer.ts:25`），Q/E 转向经 `qeEquivalentDx`（`apps/game/src/app.ts:411`）；物理参数里的 `sensitivity` 恒为 1（`src/ts-shared/phys/params.ts:67`），因此改灵敏度不会让两条物理线拿到不同参数。
 - **固定步长**：Worker 权威物理的步长由 `setFixedDt` 按 tickRate 折算，初值 1/64 秒（`src/ts-shared/auth/auth-loop.ts:252`），步长未变时 `setFixedDt` 返回 false、调用方据此跳过累积器清零（`src/ts-shared/auth/worker-dispatch.ts:359`）。
-- **权威是速度之主**：主线程每帧依次调 `correctFromAuthority` 与 `calibrateVelocity`（`apps/game/src/renderer/renderer-main.ts:733`、`apps/game/src/renderer/renderer-main.ts:735`），稳态下权威只改渲染速度、不改渲染位置（`src/ts-shared/phys/authority-calibrator.ts:33` 的口径说明）。
-- **世代单调（渲染采样）**：位置突变时失效世代 +1（`apps/game/src/renderer/renderer-main.ts:182` 的 `bumpSampleEpoch`），换图与重建物理世界时索引空间重启（`apps/game/src/renderer/renderer-main.ts:188`），世代槽由共享层独占维护、调用方不传值（`apps/game/src/renderer/renderer-main.ts:754`）。
-- **装配顺序**：GLB 挂载 → 摘除 punctual 光源 → 施加 lightmap → 分块合并 → 受光材质终扫 → 预编译（`apps/game/src/renderer/renderer-main.ts:279`、`:287`、`:293`、`:308`，摘灯与清根 rotation 在 scene-builder.ts`）；顺序被注释与实现共同固定，例如光源必须在 `scene.add` 之前摘除（`src/renderer-shared/scene/scene-builder.ts:85`）。
+- **权威是速度之主**：主线程每帧依次调 `correctFromAuthority` 与 `calibrateVelocity`（`apps/game/src/renderer/renderer-main.ts:839`、`apps/game/src/renderer/renderer-main.ts:841`），稳态下权威只改渲染速度、不改渲染位置（`src/ts-shared/phys/authority-calibrator.ts:33` 的口径说明）。
+- **世代单调（渲染采样）**：位置突变时失效世代 +1（`apps/game/src/renderer/renderer-main.ts:189` 的 `bumpSampleEpoch`），换图与重建物理世界时索引空间重启（`apps/game/src/renderer/renderer-main.ts:195`），世代槽由共享层独占维护、调用方不传值（`apps/game/src/renderer/renderer-main.ts:860`）。
+- **装配顺序**：GLB 挂载 → 摘除 punctual 光源 → 施加 lightmap → 分块合并 → 受光材质终扫 → 预编译（`apps/game/src/renderer/renderer-main.ts:296`、`:287`、`:293`、`:308`，摘灯与清根 rotation 在 scene-builder.ts`）；顺序被注释与实现共同固定，例如光源必须在 `scene.add` 之前摘除（`src/renderer-shared/scene/scene-builder.ts:85`）。
 - **加载进度单调**：阶段名到百分比的映射是常量表（`apps/game/src/app.ts:679`），覆盖层用补间朝目标逼近（`apps/game/src/app.ts:727`）；失败时覆盖层转错误态而非直接消失（`apps/game/src/app.ts:803`）。
 - **键位单一来源**：HUD 标签与面板读同一份 `loadKeymap()`（`apps/game/src/app.ts:70` 注册刷新、`apps/game/src/app.ts:462` 写标签），改键后两边同步变化。
 
@@ -104,7 +104,7 @@
 - `apps/game/src/app.ts` 的 `main`（`apps/game/src/app.ts:94`）：主线程装配全流程，文件末 `void main()` 触发。
 - `apps/game/src/config.ts` 的 `DEFAULT_CONFIG`（`apps/game/src/config.ts:176`）：七段配置的唯一默认值来源。
 - `apps/game/src/worker/main.ts` 的 `createAuthLoop`（`apps/game/src/worker/main.ts:451`）：Worker 权威物理的装配点。
-- `apps/game/src/renderer/renderer-main.ts` 的 `tick`（`apps/game/src/renderer/renderer-main.ts:721`）：一帧内的物理、相机、剔除与绘制。
+- `apps/game/src/renderer/renderer-main.ts` 的 `tick`（`apps/game/src/renderer/renderer-main.ts:827`）：一帧内的物理、相机、剔除与绘制。
 - `apps/game/src/panel/panel-controller.ts` 的 `PanelController`（`apps/game/src/panel/panel-controller.ts:45`）：面板控件接线与偏好持久化。
 - `apps/game/src/input/input-bridge.ts` 的 `sendConfig`（`apps/game/src/input/input-bridge.ts:41`）：面板参数的双端下发口。
 - `apps/game/web/index.html` 的 `canvas#preview`（`apps/game/web/index.html:27`）：页面外壳与全部挂载点。

@@ -10,7 +10,7 @@
 
 它与其他两个工程的定位差别由三处实测界定：
 
-- **没有物理**：WASM 侧只暴露 BSP 解析与 GLB 导出（`apps/viewer/crates/wasm/src/lib.rs:426` 的 `BspProcessor::new` 之后只有 `metadata` / `parse_spawn_points` / `export_glb_with_pakfile_models` 三个方法），crate 依赖里没有 `websurf-phys`（`apps/viewer/crates/wasm/Cargo.toml:18`）。
+- **没有物理**：WASM 侧只暴露 BSP 解析与 GLB 导出（`apps/viewer/crates/wasm/src/lib.rs:426` 的 `BspProcessor::new` 之后是 `metadata` / `parse_spawn_points` / `parse_entities` / `parse_pvs_data` / `read_pakfile_file` / `decompress_mtz` / `decode_vtf_to_png` 与两个 `export_glb_*`），crate 依赖里没有 `websurf-phys`（`apps/viewer/crates/wasm/Cargo.toml:18`）。
 - **不参与共享状态通道**：入口只打印 `crossOriginIsolated` 供核对，不建 `SharedArrayBuffer`、不选通道（`apps/viewer/src/app.ts:54`）。
 - **有独立的解析 Worker**：Worker 只做 `.replay` 字节 → 结构化帧的解码（`apps/viewer/src/worker/main.ts:53` 的 `handle`），不做物理、不常驻状态机。
 
@@ -21,7 +21,7 @@
 | 路径 | 职责 | 关键锚点 |
 |---|---|---|
 | `apps/viewer/src/app.ts` | 主线程装配入口：画布、场景、飞行相机、面板、按内容的导入分派 `routeFile`、URL 深链、帧循环、`globalThis.viewer` 接口 | `apps/viewer/src/app.ts:48`、`apps/viewer/src/app.ts:612`、`apps/viewer/src/app.ts:750` |
-| `apps/viewer/src/core/` | BSP 加载与 WASM 懒初始化、three 场景与光照模式、自由飞行相机、位姿、常量、DOM 构件、出生点解析、导入文件的类型识别 | `apps/viewer/src/core/bsp.ts:81`、`apps/viewer/src/core/scene.ts:36`（ViewerScene，装配/光照/合并/近平面 2026-10-03 起走渲染共享层）、`apps/viewer/src/core/fly.ts:84`、`apps/viewer/src/core/spawn.ts:96`、`apps/viewer/src/core/filekind.ts:62` |
+| `apps/viewer/src/core/` | BSP 加载与 WASM 懒初始化、three 场景与光照模式、自由飞行相机、位姿、常量、DOM 构件、出生点解析、导入文件的类型识别 | `apps/viewer/src/core/bsp.ts:87`、`apps/viewer/src/core/scene.ts:38`（ViewerScene，装配/光照/合并/近平面 2026-10-03 起走渲染共享层）、`apps/viewer/src/core/fly.ts:84`、`apps/viewer/src/core/spawn.ts:96`、`apps/viewer/src/core/filekind.ts:62` |
 | `apps/viewer/src/replay/` | 记录（`.replay`）/ 录像（`.dem`）两条链路各持一份**独立回放会话**（`session.ts` 的 `ReplaySession`）、`.replay` 原生解析、导入与 Worker 协议、播放器与采样、多轨道容器、3D 呈现、记录 / 录像面板、轨迹列表、时间轴、人工变换 | `apps/viewer/src/replay/shavit-replay.ts:284`、`apps/viewer/src/replay/session.ts:62`、`apps/viewer/src/replay/player.ts:17`、`apps/viewer/src/replay/timeline.ts:52` |
 | `apps/viewer/src/ui/` | HUD 与引导层、地图信息与出生点导航、记录信息条、**录像信息条**、遥测 HUD | `apps/viewer/src/ui/hud.ts:21`、`apps/viewer/src/ui/mapinfo.ts:129`、`apps/viewer/src/ui/demometa.ts:33`、`apps/viewer/src/ui/telemetry.ts:64` |
 | `src/renderer-shared/`（仓库根，跨工程共享层） | 静态光照着色器单实例：RGBExp32 图集解码注入 + prop 三级光照路由（2026-10-02 由三工程各自的 `apps/<app>/src/renderer/lightmap-shader.ts` 合并而来，viewer 的 `src/renderer/` 目录因此清空） | `src/renderer-shared/shader/lightmap-shader.ts:482`、`src/renderer-shared/shader/lightmap-shader.ts:374` |
@@ -43,10 +43,10 @@
 | 共享 TS 运行时 `src/ts-shared/wasm/loader.ts` | 相对路径 import | `apps/viewer/src/core/bsp.ts:24` 取 `base64ToBytes` 与 `readEmbeddedWasmB64` |
 | 共享 TS 角度实现 `src/ts-shared/phys/angles.ts` | 相对路径再导出 | `apps/viewer/src/core/pose.ts:22` 再导出 `wrapDeg` / `bspYawToCsYaw`，再由 `apps/viewer/src/replay/helpers.ts:10` 与 `apps/viewer/src/core/spawn.ts:27` 消费 |
 | 共享眼高常量 `src/ts-shared/phys/constants.ts` | 相对路径再导出 | `apps/viewer/src/core/constants.ts:35` 再导出 `EYE_STAND` |
-| 共享渲染层 `src/renderer-shared/{shader,scene,camera}/` | tsconfig include 跨目录收编 + 深层相对路径 import（2026-10-03 起 viewer 消费 shader + scene-builder/scene-optimizer + near-plane） | `apps/viewer/src/core/scene.ts:14` 到 `apps/viewer/src/core/scene.ts:27`（导入面）与 `apps/viewer/src/ui/mapinfo.ts:23`（仅 `LightingMode` 类型）；three 依赖由根级 `package.json:6` 声明 |
+| 共享渲染层 `src/renderer-shared/{shader,scene,camera}/` | tsconfig include 跨目录收编 + 深层相对路径 import（2026-10-03 起 viewer 消费 shader + scene-builder/scene-optimizer + near-plane） | `apps/viewer/src/core/scene.ts:14` 到 `apps/viewer/src/core/scene.ts:29`（导入面）与 `apps/viewer/src/ui/mapinfo.ts:23`（仅 `LightingMode` 类型）；three 依赖由根级 `package.json:6` 声明 |
 | `three` 运行时 | 仓库根 `package.json:6`（单实例，2026-10-02 上收） | 场景、相机、材质、`GLTFLoader`（viewer 场景面：`apps/viewer/src/core/scene.ts:13`；`mergeGeometries` 已随合并下沉共享 scene-optimizer） |
 | TypeScript 程序面 | `apps/viewer/tsconfig.json:15` 的 `include` 含 `../../src/ts-shared/**/*.ts` 与 `../../src/renderer-shared/**/*.ts` | 共享层 TS 文件参与本工程 `tsc --noEmit` |
-| vendored `vmdl` | `apps/viewer/Cargo.toml:12` 的 `[patch.crates-io]` | `apps/viewer/crates/wasm/Cargo.toml:30` 的 `vmdl = "0.2"`（PAKFILE 内嵌模型解析） |
+| vendored `vmdl` | `apps/viewer/Cargo.toml:12` 的 `[patch.crates-io]` | `apps/viewer/crates/wasm/Cargo.toml:33` 的 `vmdl = "0.2"`（PAKFILE 内嵌模型解析） |
 
 依赖方向单向：`apps/viewer → src/**`（含共享渲染层 `src/renderer-shared/**`）与 `apps/viewer → three`（依赖声明在仓库根 `package.json`）；本工程不引另外两个工程的任何文件（静态光照着色器是共享单实例，三工程经 tsconfig include 收编同一文件，见 `src/renderer-shared/shader/lightmap-shader.ts:6`）。
 
@@ -84,23 +84,23 @@
 5. `apps/viewer/src/app.ts:74` 建 `FlyCam` 并 `attach` 到画布（注册 pointer lock、mousemove、keydown/keyup、blur）。
 6. 侧栏 / dock / 标签页取句柄并绑事件（`apps/viewer/src/app.ts:79` 到 `apps/viewer/src/app.ts:90`），tab 点击统一进唯一的切换点 `switchTab`（`apps/viewer/src/app.ts:175`）；随后两个回放会话各自构造（`apps/viewer/src/app.ts:100`），各自建自己的时间轴与信息条 —— 记录条在会话内建（`apps/viewer/src/replay/session.ts:86`），录像条由 `apps/viewer/src/app.ts:135` 单独建；两条各占 dock 的一层（记录层 = `#replayMeta` + `#timeline`，录像层 = `#demoInfo` + `#timelineDemo`，DOM 见 `apps/viewer/web/index.html:132`、`apps/viewer/web/index.html:136`），再按遥测 `TelemetryHud`（`apps/viewer/src/app.ts:127`）、`MapPanel`（`apps/viewer/src/app.ts:212`）、`ReplayPanel`（`apps/viewer/src/app.ts:283` 到 `apps/viewer/src/app.ts:314`）依次装配。
 7. 对外接口挂到 `globalThis.viewer`（`apps/viewer/src/app.ts:750`）；URL 深链 `?bsp=` / `?replay=` 在启动末尾异步加载（`apps/viewer/src/app.ts:788` 到 `apps/viewer/src/app.ts:825`）。
-8. `requestAnimationFrame(frame)` 起主循环（`apps/viewer/src/app.ts:1020`）；WASM 直到用户真的选地图时才初始化（`apps/viewer/src/core/bsp.ts:123` 的 `await ensureWasm()`）。
+8. `requestAnimationFrame(frame)` 起主循环（`apps/viewer/src/app.ts:1020`）；WASM 直到用户真的选地图时才初始化（`apps/viewer/src/core/bsp.ts:129` 的 `await ensureWasm()`）。
 
 ## 不变量
 
 | 不变量 | 由什么保证 | 锚点 |
 |---|---|---|
 | GLB 导出必须是 `BspProcessor` 的最后一次调用 | `export_glb_with_pakfile_models` 取走内部 `Bsp`，之后再调另两个方法返回错误 | `apps/viewer/crates/wasm/src/lib.rs:583`、`apps/viewer/crates/wasm/src/lib.rs:438` |
-| `loadBspFile` 的顺序固定为 metadata → spawn → 默认纹理包 → GLB（主导出，失败回退裸导出） | 前两步是借用方法、导出会取走实例 | `apps/viewer/src/core/bsp.ts:129` 到 `apps/viewer/src/core/bsp.ts:125` |
-| 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序由共享 buildMapScene/applyLightmap 与 mountGlb 的编排共同固定 | `apps/viewer/src/core/scene.ts:151`、`apps/viewer/src/core/scene.ts:157` |
-| | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / 近平面候选 / 分块合并 / 换图释放的唯一范围（2026-10-03 起根仍是 Scene（共享 buildMapScene 产物），替换走 `mountGlb`） | `apps/viewer/src/core/scene.ts:42`、`apps/viewer/src/core/scene.ts:146` 到 `apps/viewer/src/core/scene.ts:147` |
+| `loadBspFile` 的顺序固定为 metadata → spawn → 默认纹理包 → GLB（主导出，失败回退裸导出） | 前两步是借用方法、导出会取走实例 | `apps/viewer/src/core/bsp.ts:135` 到 `apps/viewer/src/core/bsp.ts:131` |
+| 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序由共享 buildMapScene/applyLightmap 与 mountGlb 的编排共同固定 | `apps/viewer/src/core/scene.ts:208`、`apps/viewer/src/core/scene.ts:214` |
+| | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / 近平面候选 / 分块合并 / 换图释放的唯一范围（2026-10-03 起根仍是 Scene（共享 buildMapScene 产物），替换走 `mountGlb`） | `apps/viewer/src/core/scene.ts:44`、`apps/viewer/src/core/scene.ts:203` 到 `apps/viewer/src/core/scene.ts:204` |
 | 相机每帧只被一个写者写 | 只有**上场会话**给得出第一人称采样（`ReplaySession.cameraSample()` 对下场的会话恒返回 `null`，`apps/viewer/src/replay/session.ts:161`）：有采样时把 `fly.drivesCamera` 与 `fly.allowMove` 置假并用 `applyToWithRoll` 写相机；否则由 `FlyCam.update` + `applyTo` 写 | `apps/viewer/src/app.ts:974` 到 `apps/viewer/src/app.ts:993`、`apps/viewer/src/core/fly.ts:196` |
 | 位姿角一律用度、弧度只在 `FlyCam` 内部 | `Pose.ang` 是度；`setPose` / `setWorld` 在边界处换算 | `apps/viewer/src/core/pose.ts:27`、`apps/viewer/src/core/fly.ts:207` |
 | 采样二分要求时间轴单调不减 | `.replay` 路径由 `t(i) = (i − preFrames) / tickrate` 与 `tickrate > 0` 保证（解析期校验） | `apps/viewer/src/replay/sampling.ts:26`、`apps/viewer/src/replay/shavit-replay.ts:350` |
 | 「Worker 坏掉」是单向的 | `ensureWorker` 一旦置 `workerBroken` 就不再重试，后续全部走主线程 | `apps/viewer/src/replay/importer.ts:71`、`apps/viewer/src/replay/importer.ts:91` |
 | Worker 回传后本地 buffer 失效 | `t` / `pos` / `ang` 的 buffer 必进 transfer 列表，`vel` / `buttons` 存在才加 | `apps/viewer/src/worker/main.ts:88` 到 `apps/viewer/src/worker/main.ts:90` |
 | 记录播放基准 = 帧自身坐标 | 解码只做轴序/朝向映射，平移与旋转只在 `RuleConfig.transform` 存在且非恒等时叠加 | `apps/viewer/src/replay/build.ts:29`、`apps/viewer/src/replay/types.ts:55` |
-| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:180` |
+| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:254` |
 
 ---
 
@@ -117,7 +117,7 @@
 |---|---|---|
 | 工程清单 | `apps/viewer/package.json:7` | 12 个 script（含 `test:sessions` → `npm run test:sessions`：`apps/viewer/test/session-sep.mjs` 驱动的记录 / 录像两条链路**分离**端到端 CDP 回归，缺夹具 / 浏览器时 loud skip）、依赖面、引擎要求、dev 端口 8100 |
 | 主线程入口 | `apps/viewer/src/app.ts:48` | 画布获取、装配顺序、帧循环、对外 `globalThis.viewer` 接口 |
-| 地图加载 | `apps/viewer/src/core/bsp.ts:81` | `ensureWasm` 三条取值路径、`loadBspFile` 三步顺序 |
+| 地图加载 | `apps/viewer/src/core/bsp.ts:87` | `ensureWasm` 三条取值路径、`loadBspFile` 三步顺序 |
 | 记录面板 | `apps/viewer/src/replay/panel.ts:311` | 导入入口 `runImport`、规则持久化、映射切换与变换微调 |
 | 解析 Worker | `apps/viewer/src/worker/main.ts:46` | `ctx.onmessage` → `handle` → 带 transfer 列表回包 |
 | WASM 导出层 | `apps/viewer/crates/wasm/src/lib.rs:426` | `BspProcessor::new` 与三个方法 |

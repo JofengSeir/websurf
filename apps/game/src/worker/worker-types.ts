@@ -130,6 +130,10 @@ export interface SceneDataMessage {
   /** 纹理画质 manifest：`{ 纹理名(小写 basetexture): mosaic v4 字节码 }` JSON。
    * 画质切换（原始/压缩低清）时按贴图名查表，`mosaic_decode` 还原低清 PNG 替换。 */
   mosaicManifest?: string; skyboxTexture?: import('three').CubeTexture | null;
+  /** 地图线性雾（`env_fog_controller`，见 renderer-shared/environment/fog-controller.js）；无控制器为 null。 */
+  fogParams?: { color: number; start: number; end: number } | null;
+  /** 3D 天空盒的 `sky_camera` 参数（见 renderer-shared/environment/miniature-sky.js）；无则退回合成山脊。 */
+  skyCamera?: { origin: [number, number, number]; scale: number; fog?: { enable: boolean; color: number; start: number; end: number } | null } | null;
 }
 
 /** `stats`：**本工程内无发送方、无接收点**（HUD 速度值由主线程

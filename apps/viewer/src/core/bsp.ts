@@ -22,7 +22,7 @@
 
 import { BspProcessor, decode_vtf_to_png, decompress_mtz, initSync } from '../../pkg/websurf_viewer_wasm.js';
 import { base64ToBytes, readEmbeddedWasmB64 } from '../../../../src/ts-shared/wasm/loader.js';
-import { loadDefaultsJson } from '../../../../src/ts-shared/materials/defaults.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../../src/renderer-shared/environment/skybox.js';
+import { loadDefaultsJson } from '../../../../src/ts-shared/materials/defaults.js'; import { fogParamsFromEntities } from '../../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../../src/renderer-shared/environment/skybox.js';
 
 export interface BspMeta {
   schema_version?: number;
@@ -49,6 +49,12 @@ export interface BspLoadResult {
   /** 推荐出生点下标（wasm 规则：有 info_player_start 时取它的下标，否则 0）。 */
   primary: number;
   glbBytes: ArrayBuffer; skyboxTexture: import('three').CubeTexture | null;
+  /** 地图雾（`env_fog_controller`）；无控制器为 null。 */
+  fogParams: { color: number; start: number; end: number } | null;
+  /** 3D 天空盒的 `sky_camera` 参数；无则 null（渲染端退回合成山脊）。 */
+  skyCamera: SkyCameraParams | null;
+  /** `parse_pvs_data()` 的载荷（天空区判据按 cluster 采样用）。 */
+  pvsJson: string;
   /** 解析 + GLB 导出的耗时（ms），`performance.now()` 前后差值。 */
   elapsedMs: number;
 }
@@ -128,7 +134,7 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const proc = new BspProcessor(new Uint8Array(await file.arrayBuffer()));
   const meta = JSON.parse(proc.metadata()) as BspMeta;
   // parse_spawn_points 是借用方法，必须在取走 Bsp 实例的 GLB 导出之前调用
-  const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v));
+  const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const pvsJson = proc.parse_pvs_data(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera = skyCameraFromEntities(entitiesJson);
   // 缺失纹理回退（与 game 同款）：装载失败回落 '{}'（无回退表），导出失败回落裸导出
   const defaultsJson = await loadDefaultsJson(decompress_mtz);
   let glb: Uint8Array;
@@ -152,7 +158,7 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const spawnPoints = spawnData.spawn_points ?? [];
   const primary = spawnData.primary ?? 0;
 
-  return { fileName: file.name, meta, spawnPoints, primary, glbBytes, skyboxTexture, elapsedMs };
+  return { fileName: file.name, meta, spawnPoints, primary, glbBytes, skyboxTexture, fogParams, skyCamera, pvsJson, elapsedMs };
 }
 
 /**

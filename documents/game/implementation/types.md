@@ -19,6 +19,6 @@
 
 ## 已知缺口（状态见 TODO.md）
 
-- **`apps/game/src/world/types.ts` 在本工程零导入点**：`apps/game/src` 内没有对 `./types.js` 或其相对路径的 import（本次实测零匹配）；PVS 类型经 `PvsManager` 内部消费（`apps/game/src/renderer/renderer-main.ts:42`、`apps/game/src/renderer/renderer-main.ts:785`），不经过本文件。 （见 TODO.md T-235）
+- **`apps/game/src/world/types.ts` 在本工程零导入点**：`apps/game/src` 内没有对 `./types.js` 或其相对路径的 import（本次实测零匹配）；PVS 类型经 `PvsManager` 内部消费（`apps/game/src/renderer/renderer-main.ts:42`、`apps/game/src/renderer/renderer-main.ts:891`），不经过本文件。 （见 TODO.md T-235）
 - **`wasm.d.ts` 的转出与三个导入方之间没有强制关系**：三个导入方直接写 pkg 路径（`apps/game/src/app.ts:27`），`apps/game/src/wasm.d.ts:16` 的 `export *` 只保证这些路径可解析；删掉本文件后类型检查仍能从 `pkg` 目录取到声明，本文件的独立作用仅限「pkg 产物缺失时的兜底形态」。
 - **与另两个工程的类型入口形态不同**：本工程的入口是一条 `export *`（`apps/game/src/wasm.d.ts:16`），`apps/debug` 侧则是逐成员手写的 `declare module` 形态（`apps/debug/src/wasm.d.ts`，其头部注释与成员表见该文件）；两者不是同一套写法，改 Rust 导出面时只有本工程侧会自动跟进。 （见 TODO.md T-007）

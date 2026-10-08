@@ -541,7 +541,7 @@ async function loadBsp(file: File): Promise<void> {
   try {
     hud.setStatus(`正在解析 ${file.name}（主线程 BSP 解析）…`);
     const result: BspLoadResult = await loadBspFile(file);
-    await scene.mountGlb(result.glbBytes, result.skyboxTexture);
+    await scene.mountGlb(result.glbBytes, result.skyboxTexture, { fogParams: result.fogParams, skyCamera: result.skyCamera, pvsJson: result.pvsJson });
 
     const box = scene.worldBox();
     if (box && Number.isFinite(box.min.x)) {

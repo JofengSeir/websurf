@@ -33,7 +33,7 @@ import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
-import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js';
+import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities, type SkyCameraParams } from '../../../src/renderer-shared/environment/miniature-sky.js';
 import { RendererMain } from './renderer/renderer-main.js';
 import { PanelController } from './panel/panel-controller.js';
 import { SavePointStore, SAVEPOINT_MAX, type SavePoint } from './savepoint.js';
@@ -511,7 +511,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   showLoading(fileName);
   await new Promise((r) => setTimeout(r, 0)); // 让 UI 先更新（解析耗时较长）
   try {
-    const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const bundle = await buildWorldBundle(proc, {
+    const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera: SkyCameraParams | null = skyCameraFromEntities(entitiesJson); const bundle = await buildWorldBundle(proc, {
       decompressMtz: decompress_mtz,
       onProgress: (stage) => advanceLoading(stage),
     });
@@ -528,7 +528,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       spawn: bundle.spawn,
       glbSizeKb: Math.round(bundle.glbBytes.byteLength / 1024),
       numSpawnPoints: bundle.spawnList.length,
-      hasPvs: bundle.pvsJson.length > 2, skyboxTexture,
+      hasPvs: bundle.pvsJson.length > 2, skyboxTexture, fogParams, skyCamera,
     });
 
     // 主线程物理世界（渲染线）
