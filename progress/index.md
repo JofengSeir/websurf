@@ -222,3 +222,4 @@
 | 2026-10-09 | T-220 结案：game worker 的 `world-parse-ms` 代理测量默认关闭（探针：默认 0 次解析 / 开关打开 2 次） | progress/monthly/2026-10-7.md:34 |
 | 2026-10-09 | T-224 结案：三工程 build-dist 日志前缀 `[5/5]` → `[single]`/`[multi]`（24 行 1:1；真实构建输出验证） | progress/monthly/2026-10-7.md:35 |
 | 2026-10-09 | T-401 结案：`mosaic` 解码器补尺寸/调色板越界校验（修复前 wasm panic 已实测复现；重建 wasm 后改为返回错误） | progress/monthly/2026-10-7.md:36 |
+| 2026-10-09 | T-144/T-218 结案：`.mdl` 配对大小写缺陷（三工程同源代码一并修，1:1）；回归实测三张地图 GLB 逐字节一致 | progress/monthly/2026-10-7.md:37 |

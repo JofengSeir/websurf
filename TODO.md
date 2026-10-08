@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（130 条）
+## 未结项（128 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（98）
+### 待修（96）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -79,7 +79,6 @@
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
 - **T-130** 冒烟按键断言（6 键）与当前 UI 八键不一致　`viewer`
 - **T-131** 冒烟三条静态断言只对 single 产物成立　`viewer`
-- **T-144** .MDL 大小写让「三件齐」检查失效，vvd/vtx 槽位填进 .mdl 字节　`viewer`
 - **T-145** 模型名匹配与材质查找的大小写口径不一致　`viewer`
 - **T-146** 锁中毒会 panic，与本文件其它失败形态不一致　`viewer`
 - **T-147** 材质去重键是材质名，同名材质被后续模型复用　`viewer`
@@ -101,7 +100,6 @@
 - **T-206** `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃　`game`
 - **T-211** `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造　`game`
 - **T-217** `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方）　`game`
-- **T-218** `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl`　`game`
 - **T-222** 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出　`game`
 - **T-225** `physics.mode` 零读取点　`game`
 - **T-226** `sendSetDeathThreshold` 零调用点　`game`
@@ -236,7 +234,7 @@
 | T-141 | setTracks 把父元素强转为 HTMLElement，null 时抛 TypeError | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/telemetry.ts:110 ⇒ 现场已无 `parentElement` 强转（`git grep -n parentElement -- apps/viewer/src/ui/telemetry.ts` ⇒ 0 命中）；DOM 桩探针 `setTracks(null)` ⇒ 未抛异常、hidden=true ⇒ **遗弃**（缺陷不再复现，判据本就满足） | documents/viewer/implementation/ui.md | 见详情 | — |
 | T-142 | 信息条重找跟随轨道，与 TrackSet.follow 策略重复 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/replaymeta.ts:24 ⇒ `setTracks(follow: Track | null)`，面板内不再重查；调用点改传 `TrackSet.follow`；`npm run typecheck` 通过，`tracks.find((t) => t.id === followId)` 在 apps/viewer/src 内 0 命中 | documents/viewer/implementation/ui.md | 见详情 | null` 决定，面板内不再重查 | — |
 | T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | 缺陷 | viewer | 待裁决 | apps/viewer/src/core/dom.ts:39 | documents/viewer/implementation/ui.md | — | — |
-| T-144 | .MDL 大小写让「三件齐」检查失效，vvd/vtx 槽位填进 .mdl 字节 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:119 | documents/viewer/implementation/wasm.md | 判据：@BT@.MDL@BT@ 大小写不敏感匹配 ⇒ vvd/vtx 槽位不再填入 .mdl 字节，三件齐检查有效 | — |
+| T-144 | .MDL 大小写让「三件齐」检查失效，vvd/vtx 槽位填进 .mdl 字节 | 缺陷 | viewer | 已结案 | apps/viewer/crates/wasm/src/lib.rs:122/123 ⇒ 配对名改「去尾部 4 字节再拼后缀」（大小写无关）；同源代码 game:117、debug:151 一并修（三文件 1:1）；重建 debug wasm 回归 ⇒ 三张地图 GLB 与修复前逐字节一致；本地 8 图 550 个模型条目全小写（潜在缺陷） | documents/viewer/implementation/wasm.md | 见详情 | — |
 | T-145 | 模型名匹配与材质查找的大小写口径不一致 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:119 | documents/viewer/implementation/wasm.md | 判据：模型名与材质查找同走小写基准 ⇒ 大小写不一致的模型名仍能配对（`cargo test` 覆盖） | — |
 | T-146 | 锁中毒会 panic，与本文件其它失败形态不一致 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:429 | documents/viewer/implementation/wasm.md | 判据：构造锁中毒场景 ⇒ 返回错误而非 panic（@BT@cargo test@BT@ 覆盖该路径） | — |
 | T-147 | 材质去重键是材质名，同名材质被后续模型复用 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:216 | documents/viewer/implementation/wasm.md | 判据：同名材质来自不同模型 ⇒ 各自独立实例（去重键含 search_path/模型作用域） | — |
@@ -276,7 +274,7 @@
 | T-215 | 存档解析结果不是数组时静默保持空列表、不报错，表现为该地图没有存点 | 缺陷 | game | 已结案 | apps/game/src/savepoint.ts:59 ⇒ 非数组存档打 `console.error` 点名（1:1）；对照探针 ⇒ 修复前错误 0 条、修复后 1 条；typecheck 通过 | documents/game/implementation/savepoint.md | 见详情 | — |
 | T-216 | `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长 | 缺陷 | game | 已结案 | apps/game/src/savepoint.ts:84/92/100 ⇒ 三处改走类末尾新增的 `persistSoon()`（同批次合并写，零锚点漂移）；对照探针 ⇒ 连续 50 次 add 的 setItem 由 50 次降为 1 次；typecheck 通过 | documents/game/implementation/savepoint.md | 见详情 | — |
 | T-217 | `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方） | 缺陷 | game | 待修 | apps/game/crates/wasm/src/lib.rs:480 | documents/game/implementation/wasm-crate.md | 判据：@BT@BspProcessor@BT@ 上 @BT@#[wasm_bindgen]@BT@ 只出现一次且归属正确（不再悬空在注释块上方） | — |
-| T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | 缺陷 | game | 待修 | apps/game/crates/wasm/src/lib.rs:117 | documents/game/implementation/wasm-crate.md | 判据：zip 条目名非全小写时 `.vvd`/`.dx90.vtx` 仍取回正确文件（配对名按同一小写基准生成） | — |
+| T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | 缺陷 | game | 已结案 | apps/game/crates/wasm/src/lib.rs:117/118 ⇒ 同 T-144 的配对修正（三处同源代码同提交修掉，均 1:1）；重建 debug wasm 回归 ⇒ surf_fornax/surf_null/surf_666 的 GLB 逐字节一致 | documents/game/implementation/wasm-crate.md | 见详情 | — |
 | T-219 | `SceneDataMessage` 是主线程 `loadScene` 形参、不是跨线程消息，却声明在「Worker → 主线程」分组 | 文档口径 | game | 已结案 | apps/game/src/worker/worker-types.ts:233 ⇒ `SceneDataMessage` 移出 `MainMessage`（联合注释改「11 条」并说明它是主线程 `loadScene` 形参）；typecheck 通过 | documents/game/implementation/worker.md | 见详情 | — |
 | T-220 | `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加 | 缺陷 | game | 已结案 | apps/game/src/worker/main.ts:512 ⇒ 代理测量挂 `globalThis.__vbspWorldParseTiming` 开关（4 处 1:1，行数不变）；探针 ⇒ 默认 JSON.parse 0 次 / 无消息，开关打开 2 次 / 1 条（修复前默认 2 次 / 1 条）；typecheck 通过 | documents/game/implementation/worker.md | 见详情 | — |
 | T-222 | 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出 | 配置·门禁 | game | 待修 | 见详情 | documents/game/implementation/scripts.md | 判据：13 个脚本补 @BT@process.exitCode@BT@ 后逐个跑失败路径 ⇒ exit ≠ 0（结论能被 CI 带出） | — |

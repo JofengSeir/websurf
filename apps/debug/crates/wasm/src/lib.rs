@@ -148,8 +148,8 @@ fn collect_pakfile_models(
         if !name.to_ascii_lowercase().ends_with(".mdl") || !referenced.contains(name) {
             continue;
         }
-        let vvd_name = name.replace(".mdl", ".vvd");
-        let vtx_name = name.replace(".mdl", ".dx90.vtx");
+        let vvd_name = format!("{}.vvd", &name[..name.len() - 4]); // 去尾部 4 字节（`.mdl`，任意大小写）再拼后缀
+        let vtx_name = format!("{}.dx90.vtx", &name[..name.len() - 4]); // `replace` 区分大小写会让大写条目填进 `.mdl` 字节（T-144 / T-218）
         let mdl = match bsp.pack.get(name) {
             Ok(Some(d)) => d,
             _ => continue,
