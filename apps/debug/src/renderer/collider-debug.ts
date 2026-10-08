@@ -1193,15 +1193,23 @@ export class ColliderDebug {
 		const visPos: number[] = []; // 可视网格顶点流（紫色）
 		let triCount = 0;
 
-		for (const mesh of this.triMeshes) {
-			if (mesh.surfaceprop !== undefined) continue; // 跳过 .phy 网格（已由 rebuildPhyTriangles 画过）
+		// ⚠️ `MAX_TRI_LINES` 是"先到先得"的截断：按 `triMeshes` 的**遍历顺序**收集、到顶就 break，
+		// 于是先被遍历到的（常常是远处的）占满配额、近处的反被丢掉 —— 实测症状：模型多时近处线框
+		// 消失、只剩远处。故先按相机 XZ 距离升序排候选再收集：保近弃远，与 `MAX_DEBUG_COLLIDERS`
+		// （按 distSq 取最近）同一策略。
+		const candidates = this.triMeshes
+			.filter((m) => m.surfaceprop === undefined)
+			.map((m) => {
+				const nx = Math.max(m.min[0], Math.min(pos.x, m.max[0]));
+				const nz = Math.max(m.min[2], Math.min(pos.z, m.max[2]));
+				const dx = pos.x - nx;
+				const dz = pos.z - nz;
+				return { mesh: m, d2: dx * dx + dz * dz };
+			})
+			.sort((a, b) => a.d2 - b.d2);
+		for (const { mesh, d2 } of candidates) {
 			if (triCount * 3 >= MAX_TRI_LINES) break;
-			// mesh AABB 的 XZ 粗筛（vertices/min/max 均为紧凑数组 [x,y,z]）
-			const nx = Math.max(mesh.min[0], Math.min(pos.x, mesh.max[0]));
-			const nz = Math.max(mesh.min[2], Math.min(pos.z, mesh.max[2]));
-			const dx = pos.x - nx;
-			const dz = pos.z - nz;
-			if (dx * dx + dz * dz > radiusSq) continue;
+			if (d2 > radiusSq) continue;
 
 			for (const [a, b, c] of mesh.indices) {
 				if (triCount * 3 >= MAX_TRI_LINES) break;

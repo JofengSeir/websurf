@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07 已触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **441**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **444**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -101,8 +101,10 @@
 - **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
 - **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 
-### 待修（108）
+### 待修（110）
 
+- **T-441** 置换面碰撞**分块懒加载**（D-017 裁决）：避免一次性 ~13MB JSON / 13 万三角形入物理　`shared`
+- **T-443** 帧探针补 `applyPoseAt(pos, yaw, pitch)`（现只有 spawn/surface 预设），脚本才能钉任意位姿出图　`debug`
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
 - **T-032** game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等）　`game`
@@ -211,7 +213,7 @@
 
 > 已记录 / 已结案 **40 条已分卷**到 `progress/board/archive-2026-10.md`（ID 与状态保留；编号不复用，取新号时连同该页一起数）。
 
-## 总表（190 条）
+## 总表（193 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
@@ -231,7 +233,7 @@
 | T-033 | 【台账号·部分细化】夹具路径失效 → T-127；其余仍待裁 WG6b 6 条（test/maps/surf_null_4.replay 跨 3 文件失效等） | 缺陷 | repo | 待裁决 | 见详情 | progress/pending-detail.md | — | #64 |
 | T-035 | input-replay-verify.mjs 5 条（inputRecorder 永不落样本、f.dt 字段不存在、页面缺 7 个 i… | 缺陷 | debug | 已结案 | documents/debug/implementation/scripts.md | progress/pending-detail.md | 判据：@BT@git ls-files -- apps/debug/scripts/input-replay-verify.mjs@BT@ ⇒ 0 命中（已退役、不进版本库）；@BT@git grep -n "input-replay-verify" -- apps/debug/src@BT@ ⇒ 0 命中（源码注释不再引用） | #66 |
 | T-036 | WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 coi-serviceworker.js 等） | 未接线·死代码 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：剩余 15 条逐条 @BT@git grep -n "<符号>" -- src apps@BT@ ⇒ 只剩定义处 ⇒ 删除；删后体检 exit 0 且构建通过 | #67 |
-| T-038 | 三工程入口 .cmd 的 2 条遗留（viewer build.cmd single-only 与底层 --multi 不一致、端口占用分支假定占用者服务 dist/） | 配置·门禁 | repo | 已结案 | apps/viewer/build.cmd:81 / 三工程 start.cmd | progress/pending-detail.md | 判据：@BT@git grep -n "opening the browser to the running server" -- apps/debug/start.cmd apps/game/start.cmd apps/viewer/start.cmd@BT@ ⇒ 0 命中；@BT@git grep -n "single-only" -- apps/viewer/build.cmd@BT@ ⇒ 0 命中 | #69 |
+| T-038 | 三工程入口 .cmd 的 2 条遗留（viewer build.cmd single-only 与底层 --multi 不一致、端口占用分支假定占用者服务 dist/） | 配置·门禁 | repo | 已结案 | apps/viewer/build.cmd:81 / 三工程 start.cmd | progress/pending-detail.md | 见详情 | #69 |
 | T-039 | 依赖表「本 crate 无引用点」清单（两法一致：源码引用面扫描 + cargo check 的 -W unused-crate-dep… | 配置·门禁 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：@BT@cargo check -p websurf-phys@BT@ 等各 crate 无 @BT@unused_crate_dependencies@BT@ 警告 ⇒ 依赖表与源码引用面一致 | #70 |
 | T-040 | debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g… | 缺陷 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:1517 | progress/pending-detail.md | 判据：@BT@git grep -n "worker-b" apps/debug/src apps/game/src@BT@ ⇒ 两处措辞一致，或都改为不带外部实现引用的写法 | #71 |
 | T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:486 | progress/pending-detail.md | 判据：@BT@getLightingMode@BT@ 清点调用点（@BT@apps/debug/src/renderer/renderer-main.ts:486@BT@ 疑有一处）⇒ 真零调用则删，否则结案并改状态 | #78 |
@@ -281,7 +283,7 @@
 | T-132 | WS_PATH 兜底是本机绝对路径，换机器不可用 | 配置·门禁 | viewer | 已结案 | apps/viewer/test/smoke-cdp.mjs:43 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "C:/Users/" -- apps/viewer/test/smoke-cdp.mjs@BT@ ⇒ 0 命中（兜底只认 WS_PATH 或本工程 node_modules/ws） | — |
 | T-133 | .gitignore 中间产物目录与 test:replay 实际输出不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/package.json:10 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 @BT@npm run test:replay@BT@ 后 @BT@git status --short@BT@ 无未忽略产物 ⇒ .gitignore 与实际输出目录一致 | — |
 | T-134 | build.cmd 无法产出 multi 产物 | 工具·流程 | viewer | 已结案 | apps/viewer/build.cmd:81 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "single-only" -- apps/viewer/build.cmd@BT@ ⇒ 0 命中；@BT@git grep -n "DIST_ARG" -- apps/viewer/build.cmd@BT@ ⇒ 命中（模式透传到 build-dist） | — |
-| T-135 | start.cmd 的 python 守卫让 dist/play.cmd 的 Node 兜底不可达 | 缺陷 | viewer | 已结案 | apps/viewer/start.cmd:35 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "play.cmd" -- apps/viewer/start.cmd@BT@ 的行号 < @BT@git grep -n "where python" -- apps/viewer/start.cmd@BT@ 的行号；桩测试（PATH 无 python + 桩 dist\play.cmd）⇒ 输出 [STUB] 且无解析错误 | — |
+| T-135 | start.cmd 的 python 守卫让 dist/play.cmd 的 Node 兜底不可达 | 缺陷 | viewer | 已结案 | apps/viewer/start.cmd:35 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-136 | single 分支四段日志都写 [5/5] 步骤编号 | 工具·流程 | viewer | 待修 | apps/viewer/scripts/build-dist.mjs:315 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "\[5/5\]" -- apps/viewer/scripts@BT@ ⇒ single 分支四段日志编号与步骤序号一致 | — |
 | T-137 | 端口占用分支假定占用者服务的是 dist | 缺陷 | viewer | 待裁决 | apps/viewer/start.cmd:26 | documents/viewer/implementation/scripts-and-test.md | — | — |
 | T-138 | 光照模式下拉只写不回填，与运行期真实模式脱节 | 缺陷 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:98 | documents/viewer/implementation/ui.md | 判据：切换光照模式后下拉框回填值与 @BT@getLightingMode()@BT@ 一致（不再只写不回填） | — |
@@ -315,7 +317,7 @@
 | T-166 | `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/shavit-replay.ts:507 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ShavitParseResult.flags" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-167 | 进度回调里的 `'map'` 分支不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:329 | documents/viewer/implementation/replay.md | 判据：`git grep -n "'map'" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-168 | `MapPanel.spawnPoints` getter 零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:114 | documents/viewer/implementation/ui.md | 判据：`git grep -n "MapPanel.spawnPoints" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-169 | viewer 记录链路不认 KSF/gokz `.rec`（ksf.surf 回放文件：i32 魔数 2/3 纯二进制头，非 shavit 文本头格式）⇒ 嗅探落 unknown 被拒 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/gokz-rec.ts:130 | documents/viewer/implementation/replay.md | 判据：`cd apps/viewer && npm run test:replay` ⇒ 新增 gokz .rec 合成夹具组（嗅探 / 头解析与闭合 / 坐标映射 / Clip 装配 / v2 分支）全 ok 且 exit 0；`cd apps/viewer && npm run typecheck` ⇒ 0 错；`node src/scripts/check-doc-drift.mjs` ⇒ A–G 全 0（agent 沙箱 git EBUSY 跑不了时由 CI/owner 复跑） | — |
+| T-169 | viewer 记录链路不认 KSF/gokz `.rec`（ksf.surf 回放文件：i32 魔数 2/3 纯二进制头，非 shavit 文本头格式）⇒ 嗅探落 unknown 被拒 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/gokz-rec.ts:130 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-201 | 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:507 | documents/game/implementation/app-entry.md | — | — |
 | T-202 | 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示 | 缺陷 | game | 待修 | apps/game/src/app.ts:317 | documents/game/implementation/app-entry.md | 判据：移除任一可选 DOM（如 @BT@#loadMapBtn@BT@）⇒ 页面/控制台出现可读提示，不静默降级 | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | — | — |
@@ -409,7 +411,7 @@
 | T-429 | 【S9】3D 天空盒外景**被切掉大半**：`buildMiniatureOutside` 原先只取「距 `sky_camera` 半径 `maxDim/scale` 内」的 mesh，实测只拿到 **102/361** 个图元（微缩区与地图本体之间的空腔之外还有一整圈）⇒ 前面/左边的山整块丢失（owner 目视发现「少了一块」）。改为**种子 + 包围盒间距扩张**（gap=256）取完整簇 | 缺陷 | shared | 已结案 | 见 T-430 | 本行即全部；取全簇结论仍成立（与 cluster 判据同批 361 个图元），实现已并入 T-430 的 meshInCluster | 判据：① 数值——簇扩张取到 361 个图元（原半径法 102），包围盒 32512×8106×31592；② 目视——同视点三个朝向外景齐全（`.tmp/mapsurvey/full-yaw0/120/240.png`）；③ `npm run typecheck`/`build:app` 通过 | — |
 | T-430 | 【S10】3D 天空盒改用起源正统的**第二相机**两遍法：天空相机 = `sky_camera` 原点 + 主相机位置 / scale，天空区图元摘到独立层，清深度后主相机再画主世界；并纠正 T-415「无几何可渲染」与 T-428「锚点=相机」两条已结案结论 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/miniature-sky.ts:177 | 见 progress/monthly/2026-10-6.md:9、:10 | 见详情 | — |
 | T-431 | 【S11】地图上的「黑带」：lightmap 图集的**空纹素**（每面 1 px 边距 + 打包未用空间）是 `(0,0,0,0)`，解码成纯黑，而面边缘的取样会踩进去 ⇒ 每个面的边界上画出一条黑带（owner 目视报「这些地图纹理有问题 有莫名其妙的黑带」）。改为落位填像素后做**膨胀**填满空纹素 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/lightmap.rs:545 | 见 progress/monthly/2026-10-6.md:11、:12；根因由 T-432 定位（位移面 UV 必须是细分网格，不是投影） | 见详情 | — |
-| T-432 | 【S11·根因】位移面的 lightmap UV **不能用投影**：起源 SDK 要求位移面按**细分网格**插值——四角 luxel 坐标恒为 `(0.5,0.5)…(U+0.5,V+0.5)`（`builddisp.cpp` 的 `CalcLuxelCoords` / `CalcDispSurfCoords`），归一化后就是**单位方格** `u=j/2^power`、`v=i/2^power`。我们此前把（已被位移推走的）顶点投影到 lightmap 轴 ⇒ 漂出本面矩形，采到相邻面的光照贴图（owner 说的「混进其他光照贴图」）或图集空白（黑带） | 缺陷 | shared | 已结案 | src/wasm-core/vbsp/handle/mod.rs:391 | 见 progress/monthly/2026-10-6.md:13、:14 | 判据：@BT@node .tmp/mapsurvey/uvrect.mjs test/maps/surf_boreas.bsp .tmp/mapsurvey/pre-surf_boreas-atlas.png@BT@ ⇒ 逐面 uv 盒落在自己矩形内 **1351/1351、越界 0**（改前 **931/1351 = 68.9%**，最大越界 49 纹素、39 个整块落到图集外）；8 张图同法全部 0 越界 | — |
+| T-432 | 【S11·根因】位移面的 lightmap UV **不能用投影**：起源 SDK 要求位移面按**细分网格**插值——四角 luxel 坐标恒为 `(0.5,0.5)…(U+0.5,V+0.5)`（`builddisp.cpp` 的 `CalcLuxelCoords` / `CalcDispSurfCoords`），归一化后就是**单位方格** `u=j/2^power`、`v=i/2^power`。我们此前把（已被位移推走的）顶点投影到 lightmap 轴 ⇒ 漂出本面矩形，采到相邻面的光照贴图（owner 说的「混进其他光照贴图」）或图集空白（黑带） | 缺陷 | shared | 已结案 | src/wasm-core/vbsp/handle/mod.rs:391 | 见 progress/monthly/2026-10-6.md:13、:14 | 见详情 | — |
 | T-433 | 【S12·残留黑块的真实层级】owner 参考截图里的黑块 / 紫斑**全部**来自 prop 的逐顶点预烘焙光照路径（几何属性 `_VBSP_VLIGHT`，源文件是 pakfile 的 `sp_<i>.vhv`）：关闭该路径后同一视点纯黑像素 **4.94% → 0.00%**、均值 63.9 → 70.6。解析侧已逐字段对齐 SDK——`vradstaticprops.cpp:1563-1593` 写 `flags=4` / `vertexSize=4` 且顶点为 **B,G,R,A** 顺序，`gamebspfile.h:206-225` 的 `StaticPropLump_t` **没有** ambient cube 字段，与本仓 72 B 记录逐字段吻合；prop→文件的 checksum 校验 **1503 匹配 / 0 不符**。但**数据本身极暗**：1587 个 prop 全图最大字节仅 ~95/255、prop 均值亮度中位数 6.8/255、298 个 prop 全 0。VRAD 侧 `m_Color = direct + indirect`（`vradstaticprops.cpp:1427`）与世界面同一物理量 ⇒「world 亮、prop 近黑」是数据 + 兜底口径问题，**不是**解析错 | 缺陷 | shared | 待裁决 | src/wasm-core/vhv.rs:90 | progress/pending-detail.md | 口径见 OWNER.md **D-016** | — |
 | T-434 | 【S13】碰撞与材质透明度**无关**：`export_model_tri_colliders` 逐 mesh 用 `alpha_mode == 1`（`$translucent`）**剔除**该 mesh 的碰撞三角形 ⇒ 半透明/透明道具整件没有碰撞（实测 `surf_666` 的 `kr_windows` / `details69_window01m`、`surf_sedona` 的 16 个含 `surf_sedona_ramp03` 与 `naz_curve*`：在 `.phy` 输出里存在、在可视输出里被整件剔掉）。另 `world-builder` 的 `auto` 只在**整表为空**时回退可视网格 ⇒ `.phy` 缺失的个别模型静默无碰撞（`surf_666` 5 个、`ze_cursed_bear` 3 个 TRI-ONLY 模型） | 缺陷 | shared | 已结案 | src/ts-shared/phys/world-builder.ts:196 | 本行即全部 | 见详情 | — |
 | T-435 | 【S14·洋红/方向】owner 指出「洋红是**魔法元素自带光源**，要考虑它的方向，例如 13539,1284,9884 中央大坑四周的石头模型」。**已定位光源**：`LUMP_WORLDLIGHTS` 第 #352 条 = Source `[13332,628,12251]`、强度 `[690.1, 0.5, 1896.6]`（G≈0，纯洋红），距该视点 2465 HU；近处的 leaf ambient 实测**最亮面是 +Z（上）**（0.123 vs +Y 0.065）⇒ 方向光来自**正上方**。**已定位实现缺陷**：`src/wasm-core/model_integrator/mod.rs:1331` 的**位置**经 `map_coords` 转成 Y-up，而 `:1333` 的**法线**是 `vertex.normal.into()` **原样（Source Z-up）**；引擎口径见 `common_vertexlitgeneric_dx9.h` 的 `VertexShaderAmbientLight`（cube 槽 0/1=±X、2/3=±Y、4/5=±Z，按世界法线加权）。⇒ 渲染端 `vbspAmbCube` 的加权式虽与引擎同形，却因「法线未转、cube 亦未转」而**只对纯 yaw 旋转的道具偶然成立**；带 pitch/roll 的 prop（冲浪坡正是）方向会错 | 缺陷 | shared | 已结案 | src/wasm-core/model_integrator/mod.rs:1333 | progress/pending-detail.md | 见详情 | — |
@@ -418,6 +420,9 @@
 | T-438 | 【S14】`.vhv` 只含 direct+bounce、43.7% 顶点全 0；level 1 纯乘法无 cube ⇒ 纯黑；按暗占比退 cube | 缺陷 | shared | 已结案 | src/wasm-core/model_integrator/mod.rs:225 | progress/monthly/2026-10-6.md | 见详情 | — |
 | T-439 | 【S14】`vbspLightFloor` 未接进 level 1（逐顶点道具）⇒ 光照下限旋钮对其静默无效；现补上并用于 `max(vlight, floor)`，floor=0 时行为不变 | 缺陷 | shared | 已结案 | src/renderer-shared/shader/lightmap-shader.ts:1342 | progress/monthly/2026-10-6.md | 见详情 | — |
 | T-440 | 【S16·置换面碰撞】洞穴壁/地形是**置换面**（1351 张面 / 84,405 顶点），而笔刷碰撞只有 159 个凸包 ⇒ 置换面此前**完全没有碰撞**。新增 `export_displacement_colliders`（debug+game），复用渲染端 `triangulated_displaced_vertices` 输出三角形汤（132,480 三角形，Y-up 世界坐标） | 缺陷 | shared | 已结案 | apps/debug/crates/wasm/src/lib.rs | progress/monthly/2026-10-6.md | 判据：@BT@node .tmp/mapsurvey/dispwired.mjs@BT@ ⇒ tri 条目 1136（模型 11 + 置换面 1125）、三角形 141,286（disp 132,480）、与 .phy 重名 0 | — |
+| T-442 | 【S17·debug】碰撞线框 `MAX_TRI_LINES` 按 `triMeshes` 遍历顺序截断 ⇒ 模型多时**近处线框消失、只剩远处**；改为按相机 XZ 距离升序收集（保近弃远） | 缺陷 | debug | 已结案 | apps/debug/src/renderer/collider-debug.ts:1196 | progress/monthly/2026-10-6.md | 判据：@BT@cd apps/debug && npm run typecheck@BT@ 通过（TYPECHECK=0） | — |
+| T-443 | 【S17·debug】帧探针 `applyPose` 只有 `spawn`/`surface` 两个预设 ⇒ 脚本无法钉任意位姿出图；补 `applyPoseAt(pos, yawDeg, pitchDeg)`（走现成 `setHoldPoint`） | 缺失 | debug | 待修 | apps/game/src/renderer/renderer-main.ts:1020 | progress/monthly/2026-10-6.md | 判据：脚本调用后 `cameraPose()` 返回同一 pos/yaw/pitch，两次运行像素 diff≈0 | — |
+| T-441 | 【S16】置换面碰撞**分块懒加载**（落实 D-017：owner 2026-10-08 裁决，避免一次性 ~13MB JSON / 13 万三角形入物理） | 缺陷 | shared | 待修 | src/ts-shared/phys/world-builder.ts:203 | progress/monthly/2026-10-6.md | 判据：置换面按块分批构建；`triJson` 单次体积显著下降且洞穴壁仍全有碰撞 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-2 |
