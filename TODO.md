@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（161 条）
+## 未结项（159 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,8 +60,7 @@
 - **T-504** 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉　`shared`
 
 
-### 待修（129）
-- **T-007** apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into…　`debug`
+### 待修（127）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -153,7 +152,6 @@
 - **T-305** 权威 post-tick 位置差（residual）固定传 `undefined`，该组统计样本数恒 0　`debug`
 - **T-307** `frame-bench.mjs` 缺省地图路径 `<仓库根>/maps/surf_666.bsp` 不在工作区，不传第 4 参即打印「地图不存在」并 exit 2　`debug`
 - **T-308** 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套　`debug`
-- **T-309** 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24）　`debug`
 - **T-310** `set-auto-restore-hull` 只改面板侧标记，`src/phys/**` 无对应参数与读取点，开关不写物理实例　`debug`
 - **T-311** `custom-teleports` 的 localStorage 写入失败被静默忽略，调用方拿不到失败信号　`debug`
 - **T-312** `tsconfig.json` 的五个路径别名零导入点　`debug`
@@ -203,7 +201,7 @@
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
 | T-005 | apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html… | 缺陷 | game | 已结案 | apps/game/web/index.html:22 ⇒ 只留相对路径；`apps/game/web/favicon.ico`（168 B，blob fccb749）已恢复并加进 KEEP_SINGLE/KEEP_MULTI + 两形态拷贝；`npm run build:dist` 与 `-- --multi` ⇒ dist/favicon.ico 168 B 且 dist/index.html 引用它 | documents/game/implementation/app-entry.md | 见详情 | #5 |
-| T-007 | apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into… | 缺陷 | debug | 待修 | apps/debug/src/wasm.d.ts:86 | documents/debug/implementation/wasm-bindings.md | 判据：手写 PhysWorld 声明与 `apps/debug/pkg/websurf_wasm.d.ts` 方法集一致（缺项 0）⇒ `npm run typecheck` 通过 | #8 |
+| T-007 | apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into… | 缺陷 | debug | 已结案 | apps/debug/src/wasm.d.ts:145 起 ⇒ 文末同名 interface 声明合并补 16 个成员；`node .tmp/t007/probe.mjs` ⇒ PhysWorld 33/33 缺 0；收窄已删、`apps/debug` typecheck 通过 | documents/debug/implementation/wasm-bindings.md | 见详情 | #8 |
 | T-008 | apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new … | 配置·门禁 | game | 待修 | apps/game/scripts/check-wasm-api.mjs:52-70 | progress/pending-detail.md | 判据：跑 @BT@node apps/game/scripts/check-wasm-api.mjs@BT@ ⇒ exit 0，且 PHYS_API 列出的项 ≥ crates/wasm 实际导出数（不再缺 @BT@new@BT@ 等） | #9 |
 | T-013 | lightmap.rs 错误串含外部实现引用 Lightmap.cs:64 | 缺陷 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/lightmap.rs:219 | documents/wasm-core/overview.md | 判据：`git grep -n "Lightmap.cs" -- src` ⇒ 0 命中（错误串不再引用外部实现） | #28 |
 | T-015 | vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤） | 缺陷 | shared | 待裁决 | 见详情 | progress/pending-detail.md | — | #31 |
@@ -336,7 +334,7 @@
 | T-306 | lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform | 缺陷 | debug | 待裁决 | src/renderer-shared/shader/lightmap-shader.ts:1549 | documents/debug/implementation/renderer.md | — | — |
 | T-307 | `frame-bench.mjs` 缺省地图路径 `<仓库根>/maps/surf_666.bsp` 不在工作区，不传第 4 参即打印「地图不存在」并 exit 2 | 缺陷 | debug | 待修 | apps/debug/scripts/frame-bench.mjs:37 | documents/debug/implementation/scripts.md | 判据：不传第 4 参跑 @BT@frame-bench.mjs@BT@ ⇒ 不再打印「地图不存在」并 exit 2（缺省路径可用或改为必填报错） | — |
 | T-308 | 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套 | 工具·流程 | debug | 待修 | apps/debug/package.json:7 | documents/debug/implementation/scripts.md | 判据：`apps/debug/package.json` 有指向 dev/build/start/stop 的 script，`.cmd` 只做薄包装（环境准备只留一处） | — |
-| T-309 | 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24） | 缺陷 | debug | 待修 | apps/debug/src/wasm.d.ts:34 | documents/debug/implementation/wasm-bindings.md | 判据：手写 `BspProcessor` 声明与生成产物一致（缺项 0，当前缺 11）⇒ `npm run typecheck` 通过 | — |
+| T-309 | 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24） | 缺陷 | debug | 已结案 | apps/debug/src/wasm.d.ts:145 起 ⇒ 同块补 BspProcessor 12 个成员；`node .tmp/t007/probe.mjs` ⇒ BspProcessor 26/26 缺 0 | documents/debug/implementation/wasm-bindings.md | 见详情 | — |
 | T-310 | `set-auto-restore-hull` 只改面板侧标记，`src/phys/**` 无对应参数与读取点，开关不写物理实例 | 未接线·死代码 | debug | 待修 | apps/debug/src/worker/worker-types.ts:146 | documents/debug/implementation/worker.md | 判据：`git grep -n "set-auto-restore-hull" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-311 | `custom-teleports` 的 localStorage 写入失败被静默忽略，调用方拿不到失败信号 | 缺陷 | debug | 待修 | apps/debug/src/world/custom-teleports.ts:66 | documents/debug/implementation/world.md | 判据：模拟 localStorage 写失败 ⇒ 调用方拿到失败信号（不再静默忽略） | — |
 | T-312 | `tsconfig.json` 的五个路径别名零导入点 | 未接线·死代码 | debug | 待修 | apps/debug/tsconfig.json:19 | documents/debug/implementation/app.md | 判据：`git grep -n "tsconfig.json" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |

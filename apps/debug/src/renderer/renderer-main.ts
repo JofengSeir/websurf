@@ -1228,11 +1228,11 @@ export class RendererMain {
    * 轨迹却不可复现"。用种子面写回后该差值按定义恒为 0（f64 位级往返）。
    *
    * 事件槽**不导出**（`false`）：事件不可播种（不可跨边界消费）。
-   * @returns 种子 JSON；物理未就绪或 wasm 未导出该方法时返回 null（回放退化为部分对齐）
+   * @returns 种子 JSON；物理未就绪时返回 null（回放退化为部分对齐）
    */
   captureFullPhysState(): string | null {
-    const phys = this.predPhys as unknown as { state_full_json?: (includeEvent: boolean) => string } | null;
-    if (!phys?.state_full_json) return null;
+    const phys = this.predPhys;
+    if (!phys) return null;
     try {
       return phys.state_full_json(false);
     } catch (err) {
@@ -1248,8 +1248,8 @@ export class RendererMain {
    * @returns 是否写入成功
    */
   restoreFullPhysState(json: string): boolean {
-    const phys = this.predPhys as unknown as { set_state_ex?: (json: string) => void } | null;
-    if (!phys?.set_state_ex) return false;
+    const phys = this.predPhys;
+    if (!phys) return false;
     try {
       phys.set_state_ex(json);
       return true;
