@@ -17,7 +17,7 @@
     "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
     "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
     "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
-    "skills/websurf-env-traps/SKILL.md": "63bf5052ece6d2a256b9487af8a5fa262e5ccdc92478822f7be169492c9b0b3c",
+    "skills/websurf-env-traps/SKILL.md": "dd3b2fb3c0a54b3356fdc87ca3de4372f8ffbe61a3aebf554688d41b15c35518",
     "documents/norms/annotation-and-verification.md": "40f271606aad9363b61cfb24d756bbce306cf354b9e483283fab8c66f71a46b6",
     "documents/norms/scripts-and-ci.md": "9d3cd3b74c3667e418373b9e006c993b59cf1c191134877a3464646f6d0993ad",
     ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
@@ -117,14 +117,6 @@
       "consumed": true
     },
     {
-      "path": "skills/websurf-env-traps/SKILL.md",
-      "by": "owner(本轮指示：强推脱敏处理 + 沉淀经验教训)",
-      "reason": "增两条实测坑：本机路径/用户名不得入库（体检 [P]）、amend 会让文档里的 SHA 失效",
-      "at": "2026-10-07",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "OWNER.md",
       "by": "owner",
       "reason": "D-015 由 agent 自决并移入已决（owner 在对话中已授权渲染层面自行处理、不留待裁决）",
@@ -139,50 +131,18 @@
       "at": "2026-10-08",
       "task": "",
       "consumed": true
+    },
+    {
+      "path": "skills/websurf-env-traps/SKILL.md",
+      "by": "owner",
+      "reason": "同一授权的收尾：把举例里的具体待办号改成文字描述（避免悬空引用）",
+      "at": "2026-10-08",
+      "task": "",
+      "consumed": true
     }
   ],
   "cochange": [],
-  "claim": {
-    "task": "T-449",
-    "may": [
-      "src/wasm-core/vbsp/handle/mod.rs",
-      "documents/wasm-core/overview.md",
-      "OWNER.md",
-      "progress/lessons-2026-10-08.md",
-      "progress/index.md",
-      "progress/monthly/2026-10-7.md",
-      "TODO.md",
-      "docflow.json"
-    ],
-    "must": [
-      "src/wasm-core/vbsp/handle/mod.rs"
-    ],
-    "base": {
-      "src/wasm-core/vbsp/handle/mod.rs": "6dc1145477df3db10016f019f5a3adc0ca35c4536bf93c59f676b266d1e0d215",
-      "documents/wasm-core/overview.md": "595d3319b6658a7422ca80213a663908ab46370d335ac7a4967fbb60fc0930b3",
-      "OWNER.md": "5f6f7487567138e6b9ee5dd193ed228a3562a9b40af5439122128ab18bffb3d9",
-      "progress/lessons-2026-10-08.md": "2da1779c2ce12a61413d71c579e6506aea143eda451d708cb8c64c73b61f3577",
-      "progress/index.md": "6e20188db9a30033046639db59f9fbe9dd56bb8b2bfc15519aea3bfa4f5f0c36",
-      "progress/monthly/2026-10-7.md": "46b7ed144f7c0249e44f50f8db675436eed6bc82ef3c31fa345bbee57bda1f3e",
-      "TODO.md": "6051d592069eddb6bf0f53ad69d5ff90a9b15001b545b6973be8339741a34aac",
-      "docflow.json": "18e9db1aa0ac745601f94c0ce87fa19dcd5a4fc6d0341ba91d03a4b540fe34c5"
-    },
-    "at": "2026-10-08T18:44:08.147Z",
-    "pins": {
-      "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
-      "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
-      "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
-      "skills/websurf-env-traps/SKILL.md": "63bf5052ece6d2a256b9487af8a5fa262e5ccdc92478822f7be169492c9b0b3c",
-      "documents/norms/annotation-and-verification.md": "40f271606aad9363b61cfb24d756bbce306cf354b9e483283fab8c66f71a46b6",
-      "documents/norms/scripts-and-ci.md": "9d3cd3b74c3667e418373b9e006c993b59cf1c191134877a3464646f6d0993ad",
-      ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
-      ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
-      ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
-      ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
-      "AGENTS.md": "53a2d312eade0322eeae2603c7e83cef4eb4ac7439bf8b7dbbdc7a44f020e270",
-      "documents/norms/local-path-hygiene.md": "fa7589d6fef4800bbf0920da32d2fe031877fc736111a8b8d1259d009d81f4a1"
-    }
-  },
+  "claim": null,
   "units": {
     "TODO.md": {
       "match": "^\\|\\s*T-\\d{3}\\s*\\|",

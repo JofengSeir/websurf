@@ -194,3 +194,4 @@
 | 2026-10-08 | 碰撞生成逻辑解读：brush 只看 contents、置换面按 MASK_SOLID、prop 按 solid；owner 点处「隐形坡」= ramp_s1 的 PLAYERCLIP 楔形（引擎同样碰撞）⇒ 登记 D-019 | progress/monthly/2026-10-7.md:6 |
 | 2026-10-08 | T-449 结案：置换面三角化改引擎扇形细分（四叉树 + `g_TesselateWinding` 8 点扇 + `allowed_vertices`），修地表与模型坡错误相交 | progress/monthly/2026-10-7.md:7 |
 | 2026-10-08 | 文档整理 + 经验教训总结：推送 52 个提交（远端 = `1d18548`）；体检 A–P 全 0、`documents/index.md` 与文件树逐项对齐；新增模块不变量（位移面细分）与 `progress/lessons-2026-10-08.md`；登记 D-020（看板分卷） | progress/monthly/2026-10-7.md:8 |
+| 2026-10-08 | 经验教训写进 skill：`skills/websurf-env-traps/SKILL.md` 新增 §8（文档/看板/锚点 8 条）+ §1 两行；只读 md 走 owner 许可 + sync | progress/monthly/2026-10-7.md:9 |

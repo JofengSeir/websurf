@@ -33,6 +33,8 @@ description: "本仓（WebSurf，Windows + PowerShell 工作区）的环境与�
 | PowerShell 正则里的 `\s` | 吃掉行尾 `\r` → 变 bare LF | 行尾用 `[ \t]*`（同 §5 第 4 条） |
 | `git status --porcelain` 不加 `-uall` | 未跟踪**目录**塌缩成一行 | 当文件清单用会读目录（`EISDIR`）⇒ 加 `-uall`（同 §5 第 16 条） |
 | `git show "HEAD:<路径>"` 用反斜杠 | 参照集为空 → **假通过** | 必须正斜杠（同 §5 第 1 条） |
+| PowerShell 里 `try{…}catch{}` 挤成一行 | 解析报 `The Try statement is missing its Catch or Finally block` | 必须多行（或保证 `try{}` 与 `catch{}` 各自成块）——一行式写法在 PS 5.1 直接语法错 |
+| `web_fetch` 直连 `raw.githubusercontent.com` | 30 s 超时 | 走代理：`pwsh` + `Invoke-WebRequest -UseBasicParsing -Proxy http://127.0.0.1:7897 -OutFile …`（7890/7891 未开） |
 
 ## 2. 沙箱边界
 
@@ -82,3 +84,14 @@ description: "本仓（WebSurf，Windows + PowerShell 工作区）的环境与�
 - **本机路径与用户名不许进仓库**：公开仓库里出现 Windows 用户目录、`/Users/<真名>`、`<盘符>:\code\...` 一律是缺陷（体检 `[P]` 硬查）；兜底路径用环境变量或相对仓库根，找不到就明确报错。已经进过历史的，只有「镜像备份 → `filter-branch` 索引过滤 → 校验 → 强推」能清掉，且**所有 SHA 都会变**（文档里的短 SHA 必须按位置映射重写）。规则与事故记录见 `documents/norms/local-path-hygiene.md`。
 - **`git commit --amend` 会让已写进文档的 SHA 失效**：实测 5 处文档引用了被 amend 淘汰、不在任何 ref 上的提交。写 SHA 前先确认它在 ref 上（`git merge-base --is-ancestor <sha> main`）。
 - **`.cmd` / `.bat` / `.ps1` 的每一行都要 CRLF**：用 Node 写文件会落 LF，`cmd.exe` 当场把命令行切错（报 `'RT' is not recognized`、中文标签被当命令跑）。仓库已加 `.gitattributes`（`text eol=crlf`）钉死检出形态；改完必须确认行尾，再用桩件实跑一次。
+
+## 8. 文档 / 看板 / 锚点（2026-10 这几轮新增）
+
+- **悬空待办号是硬门**：任何**制品**里出现的具体待办号（progress 条目、文档正文、`docflow sync --reason` 的说明）都必须能在 `TODO.md` 找到，否则体检 `[G]` 待办同源失败——**包括用来举例的号**。实测两次：在 progress 里引用了一个已被分卷移走的旧批次号、以及在 `sync --reason` 里先写新号后建行，都被拦。要引用历史批次就写文字描述，别写号。
+- **加行 = 锚点行号变旧**：`docflow sync` 只按给定行号**重钉内容**，不会告诉你行号错了（体检只说「行内容已变」）⇒ 优先把改动压成 **1:1 行替换**（新增字段与相邻字段同行、加 `#[wasm_bindgen]` 导出用文件末尾独立 impl 块）；确实必须加行时，先按 `git diff -U0` 的 hunk 表把文档里的行号整体平移，再 `sync`。
+- **只读 md 会被「锚点平移」顺带改到**：一次批量平移把根 `README.md`（只读）改进了「需审批」状态 ⇒ 平移脚本要**跳过只读集**；非改不可时改成「不改行数」的写法（只读三步闭环见 §7）。
+- **认领的时序**：`claim` 之后必须真的改过 `must` 文件，`verify` 才通过；「先改后认领」同样过不了。做法：备份 `must` 文件 → 还原成 `HEAD` 版 → `release` + `claim` → 还原备份 → `verify`。
+- **看板体量**：硬上限 96 KB（提前分卷线 80 KB）。超线时**逐行精简**（长判据/长证据转 `见详情`）可以自决；把「已记录 + 已结案」**分卷**到 `progress/board/` 等于删行，**必须先取 owner 许可**（`approve` → 移 → `sync`）。
+- **`documents/index.md` 没有「列全了没有」的门禁**：整理文档时自己跑一遍「实际 `.md` 文件树 ↔ 索引里出现的路径」对照（实测 46 ↔ 46 才算齐），并顺手核对 `progress/index.md` 的「当前写入目标」是否仍指向当月最后一卷。
+- **验 wasm-core 只能靠「重建 wasm + 探针」**：宿主 `cargo test/check -p websurf-wasm-core` 会因缺 `dlltool.exe` 失败；TS 探针用 `npx esbuild x.ts --bundle --format=esm --platform=node --outfile=x.mjs` 打包后再 `node` 跑（探针放 `.tmp/`，只打印不落盘也行）。
+- **判据要落到「拓扑 / 语义」，不要只看位置**：实测一个网格的顶点位置全对、三角形却连错顶点（顶点数组展平顺序被转置）——用**浮点四舍五入的位置键**比对会产生大量假差异（f32 vs f64），要用**整数拓扑键**（如网格三元组）或与 SDK 规则逐项对齐。这类错肉眼只表现为「位置不对」，极易误判成别的问题。
