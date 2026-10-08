@@ -190,3 +190,4 @@
 | 2026-10-08 | T-446 立项（待修）：盒起点落在道具 `.phy` 凸壳内部时整块道具被跳过、玩家穿坡（boreas `1600,7600` 的 `ramp_c1m` 实证） | progress/monthly/2026-10-6.md:27 |
 | 2026-10-08 | T-447 结案：ramp 坡没实体是导出**按纹理**丢了 playerclip brush（`skip_sky`）；引擎只按 contents 判碰撞，默认改 false | progress/monthly/2026-10-7.md:4 |
 | 2026-10-08 | T-448 结案：三工程同步——game 补 3D 天空盒/地图雾，viewer 补 wasm 构建 + `parse_pvs_data` + 天空区/雾（不引物理） | progress/monthly/2026-10-7.md:5 |
+| 2026-10-08 | 碰撞生成逻辑解读：brush 只看 contents、置换面按 MASK_SOLID、prop 按 solid；owner 点处「隐形坡」= ramp_s1 的 PLAYERCLIP 楔形（引擎同样碰撞）⇒ 登记 D-019 | progress/monthly/2026-10-7.md:6 |
