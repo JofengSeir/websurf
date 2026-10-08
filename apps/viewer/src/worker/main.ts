@@ -27,21 +27,21 @@ import { clipFromGokzRec, fileLooksLikeGokzRec, parseGokzRec } from '../replay/g
 import type { ParseRequest, ParseResponse } from '../replay/protocol.js';
 import type { Clip } from '../replay/types.js';
 
-interface WorkerCtx {
-  onmessage: ((e: MessageEvent) => void) | null;
-  postMessage: (msg: ParseResponse, transfer?: Transferable[]) => void;
-}
+// Worker 全局面不再手写类型：直接用 `lib` 里的 `WebWorker`（`apps/viewer/tsconfig.json` 的
+// `lib` 已含它）——`self` 本身就是 `WorkerGlobalScope & typeof globalThis`，其 `onmessage` /
+// `postMessage`（含 transfer 形参）都由 lib 提供，故此处不再需要 `interface WorkerCtx`。
+// 保留下面这个 `ctx` 别名只为少改调用点：类型与 `self` 完全一致，无断言、无收窄。
 
-const ctx = self as unknown as WorkerCtx;
+const ctx = self;
 
 /** Shavit .replay 缓存：`cachedNativeFile` 是上次取字节的文件句柄，`cachedNativeBytes` 是其原始
  *  字节；仅当本次请求的 `file` 与缓存句柄同一个对象时才复用字节，否则重新 `arrayBuffer()`。 */
 let cachedNativeFile: File | null = null;
 let cachedNativeBytes: ArrayBuffer | null = null;
 
-/** 薄封装：给 `ctx.postMessage` 一个确定签名（Worker 全局的 `postMessage` 无返回值的类型缺口）。 */
+/** 薄封装：给 `ctx.postMessage` 一个确定签名（`WebWorker` lib 的 transfer 形参不接受 `undefined`）。 */
 function post(msg: ParseResponse, transfer?: Transferable[]): void {
-  ctx.postMessage(msg, transfer);
+  if (transfer) ctx.postMessage(msg, transfer); else ctx.postMessage(msg);
 }
 
 /** Worker 入口：只挂 `onmessage`，不 await `handle`——异常已在 `handle` 内转成 `'error'` 响应。 */

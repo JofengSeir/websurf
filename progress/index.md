@@ -205,3 +205,4 @@
 | 2026-10-09 | T-005 结案：game favicon 从历史恢复（168 B）并接进两形态 dist（KEEP 名单 + 拷贝）；HTML 只留相对路径 | progress/monthly/2026-10-7.md:17 |
 | 2026-10-09 | T-048 结案：game Worker 消息联合按实际收发面补齐（13+12 条 + 8 个新接口，EOF 追加保锚点）；覆盖探针未覆盖 0 | progress/monthly/2026-10-7.md:18 |
 | 2026-10-09 | T-007/T-309 结案：debug 手写 .d.ts 文末声明合并补齐（33/26 逐名一致，缺 0）+ 删掉两处运行时收窄 | progress/monthly/2026-10-7.md:19 |
+| 2026-10-09 | T-153 结案：viewer lib 加 WebWorker、删手写 WorkerCtx（ctx = self）；typecheck + build:worker 通过 | progress/monthly/2026-10-7.md:20 |
