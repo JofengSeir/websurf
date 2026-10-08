@@ -12,7 +12,7 @@
 | 事实 | 依据 |
 |---|---|
 | 只有 `apps/debug` 与 `apps/game` 的 wasm crate 依赖它；**`apps/viewer` 不依赖**（viewer 无物理） | 三份 `apps/*/crates/wasm/Cargo.toml`；viewer 那份只声明 `websurf-wasm-core` |
-| 对外边界是 `#[wasm_bindgen] impl PhysWorld`（`src/phys/mod.rs:186`），导出 **24 个 `pub fn`** | `src/phys/mod.rs` 的导出面 |
+| 对外边界是 `#[wasm_bindgen] impl PhysWorld`（`src/phys/mod.rs:189`），导出 **24 个 `pub fn`** | `src/phys/mod.rs` 的导出面 |
 | 世界几何与碰撞、玩家运动、传送触发都在本层内实现，**不含** BSP 解析与渲染 | `src/phys/mod.rs:52` 起的 `pub mod player` / `pub mod teleport` / `pub mod world` |
 
 ## 2. 文件与职责
@@ -20,7 +20,7 @@
 | 文件 | 职责 |
 |---|---|
 | `src/phys/mod.rs` | wasm-bindgen 绑定层：`PhysWorld` 实例、参数写入、状态导出、零分配支路、事件槽 |
-| `src/phys/world.rs` | 世界几何与碰撞：brush / 三角网格双空间索引、射线与包围盒查询（`pub struct World`，`src/phys/world.rs:1038`） |
+| `src/phys/world.rs` | 世界几何与碰撞：brush / 三角网格双空间索引、射线与包围盒查询（`pub struct World`，`src/phys/world.rs:1076`） |
 | `src/phys/player.rs` | 玩家运动语义与参数结构（`pub struct PhysParams`，`src/phys/player.rs:175`；步进入口 `player_tick`，`src/phys/player.rs:1676`） |
 | `src/phys/teleport.rs` | 传送触发与冷却（入口 `pub fn check`，`src/phys/teleport.rs:267`） |
 | `src/phys/seed.rs` | 种子/确定性支持（私有模块，不对外导出） |
@@ -31,19 +31,19 @@
 
 | 分组 | 导出 | 锚点 |
 |---|---|---|
-| 构造与世界装配 | `new`、`build_world` | `src/phys/mod.rs:193`、`src/phys/mod.rs:225` |
-| 步进 | `tick`（返回状态对象）、`tick_into`（写固定缓冲，零分配） | `src/phys/mod.rs:338`、`src/phys/mod.rs:361` |
-| 状态导出 | `state`、`state_full_json`、`state_out_ptr`、`set_state_ex`、`seed_from` | `src/phys/mod.rs:977`、`src/phys/mod.rs:414`、`src/phys/mod.rs:382`、`src/phys/mod.rs:401`、`src/phys/mod.rs:429` |
-| 调试与门禁 | `gate_veto_count`、`debug_trace`、`predict` | `src/phys/mod.rs:438`、`src/phys/mod.rs:447`、`src/phys/mod.rs:761` |
+| 构造与世界装配 | `new`、`build_world` | `src/phys/mod.rs:196`、`src/phys/mod.rs:228` |
+| 步进 | `tick`（返回状态对象）、`tick_into`（写固定缓冲，零分配） | `src/phys/mod.rs:341`、`src/phys/mod.rs:364` |
+| 状态导出 | `state`、`state_full_json`、`state_out_ptr`、`set_state_ex`、`seed_from` | `src/phys/mod.rs:980`、`src/phys/mod.rs:417`、`src/phys/mod.rs:385`、`src/phys/mod.rs:404`、`src/phys/mod.rs:432` |
+| 调试与门禁 | `gate_veto_count`、`debug_trace`、`predict` | `src/phys/mod.rs:441`、`src/phys/mod.rs:450`、`src/phys/mod.rs:764` |
 | 玩家动作 | `respawn`、`teleport_to`、`teleport_to_spawn`、`set_spawn_points`、`set_state`、`set_velocity`、`set_yaw_pitch`、`set_death_y` | 同名导出（见 `src/phys/mod.rs` 的 `#[wasm_bindgen] impl` 段） |
-| 参数与形态 | `set_params`、`set_hull`、`set_noclip` | `src/phys/mod.rs:878` 等 |
-| 事件 | `take_event`（一次性取走最近事件） | `src/phys/mod.rs:991` |
+| 参数与形态 | `set_params`、`set_hull`、`set_noclip` | `src/phys/mod.rs:881` 等 |
+| 事件 | `take_event`（一次性取走最近事件） | `src/phys/mod.rs:994` |
 
 ## 4. 契约
 
 ### 4.1 参数（`set_params`）
 
-`set_params` 接一个 JSON 补丁，反序列化到函数内的 `Patch` 结构体，**共 15 个可选字段**（`src/phys/mod.rs:878` 起的函数体）：
+`set_params` 接一个 JSON 补丁，反序列化到函数内的 `Patch` 结构体，**共 15 个可选字段**（`src/phys/mod.rs:881` 起的函数体）：
 
 `gravity`、`accelerate`、`friction`、`stop_speed`、`jump_height`、`air_accelerate`、`run_speed`、`walk_speed`、`crouch_speed`、`autobhop`、`bhop_speed_clamp`、`sensitivity`、`yaw_bind_speed`、`noclip_speed`、`teleport_gate_ticks`。
 
@@ -54,8 +54,8 @@
 | 出口 | 语义 |
 |---|---|
 | `state()` | 返回**新建** JS 对象，**固定 11 个键**：`posX/posY/posZ`（HU）、`yaw`/`pitch`（度）、`velX/velY/velZ`（HU/s）、`onGround`、`contactTicks`、`eyeHeight`（HU）；不含时间戳 |
-| `state_js()` | 上面那个对象的唯一构造点（`src/phys/mod.rs:1035`），同时供 `tick` / `predict` 复用 |
-| `state_out_ptr()` | 返回固定缓冲 `state_out: [f64; 22]` 的 wasm 线性内存指针（字段声明 `src/phys/mod.rs:182`）；JS 侧以 `Float64Array` 视图直读，**不构造对象** |
+| `state_js()` | 上面那个对象的唯一构造点（`src/phys/mod.rs:1038`），同时供 `tick` / `predict` 复用 |
+| `state_out_ptr()` | 返回固定缓冲 `state_out: [f64; 22]` 的 wasm 线性内存指针（字段声明 `src/phys/mod.rs:185`）；JS 侧以 `Float64Array` 视图直读，**不构造对象** |
 | `state_full_json()` | 完整状态 JSON 出口（可含事件），供回放/诊断 |
 | `set_state_ex()` / `seed_from()` | 由 JSON / 由另一个实例播种状态 |
 

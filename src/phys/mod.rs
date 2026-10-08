@@ -96,6 +96,9 @@ mod phy_hull_gate_tests;
 #[cfg(test)]
 mod slope_speed_tests;
 
+#[cfg(test)]
+mod tri_surface_tests;
+
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
 use world::{Brush, LadderVolume, TriMesh, World};

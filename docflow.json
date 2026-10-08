@@ -143,21 +143,41 @@
   ],
   "cochange": [],
   "claim": {
-    "task": "T-442",
+    "task": "T-444",
     "may": [
-      "apps/debug/src/renderer/collider-debug.ts",
+      "src/phys/world.rs",
+      "src/phys/mod.rs",
+      "src/phys/tri_surface_tests.rs",
       "TODO.md",
-      "CHANGELOG.md"
+      "OWNER.md",
+      "CHANGELOG.md",
+      "progress/monthly/2026-10-6.md",
+      "progress/index.md",
+      "documents/architecture/overview.md",
+      "documents/game/implementation/input.md",
+      "documents/game/implementation/scripts.md",
+      "documents/phys/overview.md",
+      "src/scripts/docflow.json"
     ],
     "must": [
-      "apps/debug/src/renderer/collider-debug.ts"
+      "src/phys/world.rs",
+      "src/phys/tri_surface_tests.rs",
+      "TODO.md"
     ],
     "base": {
-      "apps/debug/src/renderer/collider-debug.ts": "cbda79f46864383c730dd1a4df6ba7497b7d9e5ac255077e0d543d4814f40549",
-      "TODO.md": "9093c39fd16d8558bab1656a719fb2e87e7c0be4a3616388d25bfec0557c45fc",
-      "CHANGELOG.md": "c56fb8426fe5417be18639c87c68c2e530eb028d86a551f88405a31841ecb0f8"
+      "src/phys/world.rs": "34ea50ed8a7f7410dbb1dfc2ebd04e53e82bb280a42afc9fea6bf2d0458b4c7e",
+      "src/phys/mod.rs": "600ddc71355124f716e8ff26aaf7e56e9a59aca9487aa7ce7553fd2c35a80e34",
+      "TODO.md": "b089e87ea7c0e2451517a1a94cdf77e847ec1aa0a0d598d64e834bbd40fcfb38",
+      "OWNER.md": "21cd233e894fe42133bf10e8cb9d196ab9da2547bcce5feb7ecd9bb745c9b278",
+      "CHANGELOG.md": "da1baac562f5014a44980fcae3025b9eb8343b2093c801fc872f84f23becf75a",
+      "progress/monthly/2026-10-6.md": "ac7d5b4bfbc3d5ed37675e0f53cfaedf08d3267560641ab3c54fcf2a3169f17a",
+      "progress/index.md": "28aed9799134e7d3a0f43f4fb84900ba1856c66aa11e050ffd36c2b6d7b481ec",
+      "documents/architecture/overview.md": "f6cce8dabe551b337bc3fe0dfa1ec5f96e64ee6731e73779d67f690bdaa17f87",
+      "documents/game/implementation/input.md": "d8e1c1fa710bb7ad3c5938bc36115d24d2143916a1d2de81767a8967e1048173",
+      "documents/game/implementation/scripts.md": "ff6bb2a618fdb9e3a255ee89efc4065deaaaf2608d23b140463a9b13725f15eb",
+      "documents/phys/overview.md": "2efe43f35173080cec05b7171c8d89eb78c83655323bd8076f4c81a4361fa5f7"
     },
-    "at": "2026-10-08T13:47:38.764Z",
+    "at": "2026-10-08T14:42:32.190Z",
     "pins": {
       "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -1427,71 +1447,77 @@
         "at": "2026-10-08",
         "line": 424
       },
+      "T-444": {
+        "p": "fa629c3e2412529189b760b45d0efb1ae488f307050c8afdd1e4c199e777d588",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-08",
+        "line": 425
+      },
       "T-441": {
         "p": "bbe56cd331b48595acc3d960d91ef2287c8b8f6291a78eef3491852bd7a3950c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 425
+        "line": 426
       },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 426
+        "line": 427
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 427
+        "line": 428
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 428
+        "line": 429
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 429
+        "line": 430
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 430
+        "line": 431
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 431
+        "line": 432
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 432
+        "line": 433
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 433
+        "line": 434
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 434
+        "line": 435
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 435
+        "line": 436
       }
     },
     "OWNER.md": {
@@ -1555,89 +1581,95 @@
         "at": "2026-10-08",
         "line": 33
       },
+      "**D-018**": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-08",
+        "line": 34
+      },
       "D-014": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
-        "line": 39
-      },
-      "D-100": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
-        "line": 40
-      },
-      "D-101": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
-        "line": 41
-      },
-      "D-102": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 42
       },
-      "D-103": {
+      "D-100": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 43
       },
-      "D-104": {
+      "D-101": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 44
       },
-      "D-105": {
+      "D-102": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 45
       },
-      "D-106": {
+      "D-103": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 46
       },
-      "D-001": {
+      "D-104": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 47
       },
-      "D-002": {
+      "D-105": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 48
       },
-      "D-003": {
+      "D-106": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 49
       },
-      "D-004": {
+      "D-001": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 50
       },
+      "D-002": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 51
+      },
+      "D-003": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 52
+      },
+      "D-004": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 53
+      },
       "D-015": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 51
+        "line": 54
       },
       "**D-107**": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 52
+        "line": 55
       }
     }
   },
@@ -1877,6 +1909,7 @@
       "src/renderer-shared/shader/lightmap-shader.ts:1342:1342": "b1e930ca",
       "apps/debug/src/renderer/collider-debug.ts:1196:1196": "18c88ad6",
       "apps/game/src/renderer/renderer-main.ts:1020:1020": "1e2f455c",
+      "src/phys/world.rs:441:441": "cad0a285",
       "src/ts-shared/phys/world-builder.ts:203:203": "b0c68575",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
@@ -1891,11 +1924,11 @@
     "apps/debug/scripts/path-baseline.md": {},
     "apps/viewer/scripts/dist-README.md": {},
     "documents/architecture/overview.md": {
-      "src/phys/mod.rs:144:144": "98da3994",
-      "src/phys/mod.rs:338:338": "46ed07c0",
-      "src/phys/mod.rs:361:361": "300a4c5d",
-      "src/phys/mod.rs:878:878": "13eb2237",
-      "src/phys/world.rs:1038:1038": "b22efcc4",
+      "src/phys/mod.rs:147:147": "98da3994",
+      "src/phys/mod.rs:341:341": "46ed07c0",
+      "src/phys/mod.rs:364:364": "300a4c5d",
+      "src/phys/mod.rs:881:881": "13eb2237",
+      "src/phys/world.rs:1076:1076": "b22efcc4",
       "src/phys/teleport.rs:266:266": "c4bb8939",
       "src/wasm-core/vbsp/bspfile.rs:28:28": "42d62ccb",
       "src/wasm-core/vbsp/reader.rs:71:71": "69af7903",
@@ -1923,7 +1956,7 @@
       "src/ts-shared/phys/world-builder.ts:150:150~2": "8bf6b3db",
       "src/ts-shared/auth/auth-loop.ts:250:250~2": "a7130838",
       "src/ts-shared/auth/worker-dispatch.ts:207:207~2": "42fa68bc",
-      "src/phys/mod.rs:361:361~2": "300a4c5d"
+      "src/phys/mod.rs:364:364~2": "300a4c5d"
     },
     "documents/debug/differences.md": {
       "apps/debug/src/renderer/renderer-main.ts:24:24": "2606bf04",
@@ -2944,7 +2977,7 @@
       "apps/game/src/app.ts:306:306": "0fad8620",
       "apps/game/src/app.ts:400:400": "83a61762",
       "apps/game/src/input/input-bridge.ts:83:83~2": "5b0c7f70",
-      "src/phys/mod.rs:201:201": "ced63fb6",
+      "src/phys/mod.rs:204:204": "ced63fb6",
       "src/ts-shared/input/pointer-lock.ts:63:63": "eb87b33e",
       "src/ts-shared/input/pointer-lock.ts:65:65": "289a831e",
       "apps/game/src/app.ts:253:253": "1a685d92",
@@ -3091,8 +3124,8 @@
       "apps/game/scripts/check-wasm-api.mjs:83:83": "2ed3f8a7",
       "apps/game/scripts/check-wasm-api.mjs:90:90": "67af272f",
       "apps/game/scripts/check-wasm-api.mjs:55:55": "48173bef",
-      "src/phys/mod.rs:193:193": "e180c1d0",
-      "src/phys/mod.rs:401:401": "706728c3",
+      "src/phys/mod.rs:196:196": "e180c1d0",
+      "src/phys/mod.rs:404:404": "706728c3",
       "apps/game/scripts/check-wasm-api.mjs:47:47": "9d485a7f",
       "apps/game/web/index.html:294:294": "4ab5fbc6",
       "apps/game/scripts/build-dist.mjs:60:60~2": "9264f142",
@@ -3527,32 +3560,32 @@
       ".github/workflows/deploy-pages.yml:164:164": "20d40009"
     },
     "documents/phys/overview.md": {
-      "src/phys/mod.rs:186:186": "58d7cfb9",
+      "src/phys/mod.rs:189:189": "58d7cfb9",
       "src/phys/mod.rs:52:52": "28a5b6d3",
-      "src/phys/world.rs:1038:1038": "b22efcc4",
+      "src/phys/world.rs:1076:1076": "b22efcc4",
       "src/phys/player.rs:175:175": "798c330f",
       "src/phys/player.rs:1676:1676": "eb2137b2",
       "src/phys/teleport.rs:267:267": "e01a64d4",
       "src/phys/mod.rs:69:69": "fefb5b38",
       "src/phys/mod.rs:72:72": "36390206",
-      "src/phys/mod.rs:193:193": "e180c1d0",
-      "src/phys/mod.rs:225:225": "3042572a",
-      "src/phys/mod.rs:338:338": "46ed07c0",
-      "src/phys/mod.rs:361:361": "300a4c5d",
-      "src/phys/mod.rs:977:977": "29c62b60",
-      "src/phys/mod.rs:414:414": "4bbb0c0c",
-      "src/phys/mod.rs:382:382": "16626b6a",
-      "src/phys/mod.rs:401:401": "706728c3",
-      "src/phys/mod.rs:429:429": "09b1a27d",
-      "src/phys/mod.rs:438:438": "a12f5e80",
-      "src/phys/mod.rs:447:447": "9b253515",
-      "src/phys/mod.rs:761:761": "10caacd1",
-      "src/phys/mod.rs:878:878": "13eb2237",
-      "src/phys/mod.rs:991:991": "caaf1261",
-      "src/phys/mod.rs:878:878~2": "13eb2237",
+      "src/phys/mod.rs:196:196": "e180c1d0",
+      "src/phys/mod.rs:228:228": "3042572a",
+      "src/phys/mod.rs:341:341": "46ed07c0",
+      "src/phys/mod.rs:364:364": "300a4c5d",
+      "src/phys/mod.rs:980:980": "29c62b60",
+      "src/phys/mod.rs:417:417": "4bbb0c0c",
+      "src/phys/mod.rs:385:385": "16626b6a",
+      "src/phys/mod.rs:404:404": "706728c3",
+      "src/phys/mod.rs:432:432": "09b1a27d",
+      "src/phys/mod.rs:441:441": "a12f5e80",
+      "src/phys/mod.rs:450:450": "9b253515",
+      "src/phys/mod.rs:764:764": "10caacd1",
+      "src/phys/mod.rs:881:881": "13eb2237",
+      "src/phys/mod.rs:994:994": "caaf1261",
+      "src/phys/mod.rs:881:881~2": "13eb2237",
       "src/phys/player.rs:175:175~2": "798c330f",
-      "src/phys/mod.rs:1035:1035": "375ed9d3",
-      "src/phys/mod.rs:182:182": "0862f81e",
+      "src/phys/mod.rs:1038:1038": "375ed9d3",
+      "src/phys/mod.rs:185:185": "0862f81e",
       "src/phys/teleport.rs:267:267~2": "e01a64d4",
       "src/phys/mod.rs:69:69~2": "fefb5b38",
       "src/phys/mod.rs:72:72~2": "36390206"
@@ -5198,6 +5231,46 @@
   },
   "rebaselines": [
     {
+      "path": "documents/phys/overview.md",
+      "at": "2026-10-08T14:41:50.971Z",
+      "by": "agent",
+      "reason": "T-444：src/phys/world.rs 的 clip_box_to_triangle 改为「三角形是面」语义（净 +38 行）、src/phys/mod.rs 新增 tri_surface_tests 模块（+3 行）⇒ 文档里指向这两个文件的行号整体平移；已逐条复核新行号仍指向同一符号（PhysWorld / World / impl PhysWorld / build_world / tick / new / death_y 等）后重钉",
+      "changed": 38,
+      "total": 29
+    },
+    {
+      "path": "documents/game/implementation/scripts.md",
+      "at": "2026-10-08T14:41:50.869Z",
+      "by": "agent",
+      "reason": "T-444：src/phys/world.rs 的 clip_box_to_triangle 改为「三角形是面」语义（净 +38 行）、src/phys/mod.rs 新增 tri_surface_tests 模块（+3 行）⇒ 文档里指向这两个文件的行号整体平移；已逐条复核新行号仍指向同一符号（PhysWorld / World / impl PhysWorld / build_world / tick / new / death_y 等）后重钉",
+      "changed": 4,
+      "total": 28
+    },
+    {
+      "path": "documents/game/implementation/input.md",
+      "at": "2026-10-08T14:41:50.761Z",
+      "by": "agent",
+      "reason": "T-444：src/phys/world.rs 的 clip_box_to_triangle 改为「三角形是面」语义（净 +38 行）、src/phys/mod.rs 新增 tri_surface_tests 模块（+3 行）⇒ 文档里指向这两个文件的行号整体平移；已逐条复核新行号仍指向同一符号（PhysWorld / World / impl PhysWorld / build_world / tick / new / death_y 等）后重钉",
+      "changed": 2,
+      "total": 49
+    },
+    {
+      "path": "documents/architecture/overview.md",
+      "at": "2026-10-08T14:41:50.652Z",
+      "by": "agent",
+      "reason": "T-444：src/phys/world.rs 的 clip_box_to_triangle 改为「三角形是面」语义（净 +38 行）、src/phys/mod.rs 新增 tri_surface_tests 模块（+3 行）⇒ 文档里指向这两个文件的行号整体平移；已逐条复核新行号仍指向同一符号（PhysWorld / World / impl PhysWorld / build_world / tick / new / death_y 等）后重钉",
+      "changed": 12,
+      "total": 33
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-08T14:41:50.542Z",
+      "by": "agent",
+      "reason": "T-444：src/phys/world.rs 的 clip_box_to_triangle 改为「三角形是面」语义（净 +38 行）、src/phys/mod.rs 新增 tri_surface_tests 模块（+3 行）⇒ 文档里指向这两个文件的行号整体平移；已逐条复核新行号仍指向同一符号（PhysWorld / World / impl PhysWorld / build_world / tick / new / death_y 等）后重钉",
+      "changed": 1,
+      "total": 203
+    },
+    {
       "path": "TODO.md",
       "at": "2026-10-08T13:47:53.151Z",
       "by": "agent",
@@ -5476,46 +5549,6 @@
       "reason": "T-430：renderer-main.ts 新增第二相机两遍法（+82 行）⇒ 行号平移，锚点按内容对位重钉",
       "changed": 37,
       "total": 148
-    },
-    {
-      "path": "documents/debug/overview.md",
-      "at": "2026-10-08T03:09:25.468Z",
-      "by": "agent",
-      "reason": "T-430：renderer-main.ts 新增第二相机两遍法（+82 行）⇒ 行号平移，锚点按内容对位重钉",
-      "changed": 18,
-      "total": 120
-    },
-    {
-      "path": "documents/debug/implementation/world.md",
-      "at": "2026-10-08T03:09:25.377Z",
-      "by": "agent",
-      "reason": "T-430：renderer-main.ts 新增第二相机两遍法（+82 行）⇒ 行号平移，锚点按内容对位重钉",
-      "changed": 2,
-      "total": 24
-    },
-    {
-      "path": "documents/debug/implementation/wasm-bindings.md",
-      "at": "2026-10-08T03:09:25.292Z",
-      "by": "agent",
-      "reason": "T-430：renderer-main.ts 新增第二相机两遍法（+82 行）⇒ 行号平移，锚点按内容对位重钉",
-      "changed": 4,
-      "total": 28
-    },
-    {
-      "path": "documents/debug/implementation/scripts.md",
-      "at": "2026-10-08T03:09:25.205Z",
-      "by": "agent",
-      "reason": "T-430：renderer-main.ts 新增第二相机两遍法（+82 行）⇒ 行号平移，锚点按内容对位重钉",
-      "changed": 2,
-      "total": 30
-    },
-    {
-      "path": "documents/debug/implementation/renderer.md",
-      "at": "2026-10-08T03:09:25.116Z",
-      "by": "agent",
-      "reason": "T-430：renderer-main.ts 新增第二相机两遍法（+82 行）⇒ 行号平移，锚点按内容对位重钉",
-      "changed": 66,
-      "total": 103
     }
   ]
 }

@@ -182,3 +182,5 @@
 | 2026-10-08 | T-440：置换面碰撞导出（1351 张面此前零碰撞）；`export_displacement_colliders` ⇒ 132,480 三角形，待 TS 接入 | progress/monthly/2026-10-6.md:22 |
 | 2026-10-08 | T-440 收口：置换面碰撞接进物理（走 `export_model_tri_colliders` 出口，零 TS 改动）；条目 1136 / 三角形 141,286（disp 132,480） | progress/monthly/2026-10-6.md:23 |
 | 2026-10-08 | T-419 结案：VTF `Ia88`/`Bgra4444` 解码补上 + `load_texture_bsp` 改「crate 优先、失败退本仓」；vtfDecodeFail 4→0，三条模型材质出真贴图 | progress/monthly/2026-10-6.md:18 |
+
+| 2026-10-08 | T-444 结案：三角形是「面」不是实心体（贴坡「脚底黏住」的根因）——边墙不再出接触/法线、三角形不报 `start_solid`；真图 8 向行走 7 向 0 个「贴地却几乎不动」tick | progress/monthly/2026-10-6.md:25 |

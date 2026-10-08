@@ -33,6 +33,8 @@
 
 **置换面碰撞接入物理世界**：`export_model_tri_colliders` 的出口前追加置换面（displacement）条目（本图 1125 条 / 132,480 三角形，与渲染共用同一条细分+位移路径）。洞穴壁/地形此前只被笔刷凸包覆盖（159 个），置换面把可见表面从基础平面推出去 ⇒ 玩家撞到看不见的旧平面。现在 `auto` 分支会带上它们（名字 `__disp_<i>` 与 `.phy` 永不重名）。代价：`triJson` 增大约 13MB。
 
+**贴坡行走的「脚底黏住」（三角形碰撞体把面当成实心）**：碰撞侧的三角形此前按 **5 面实心凸体**裁剪（面法线 ±n + 三条边墙），边墙**也产生接触并出法线**；贴坡行走时盒的前缘会在相邻三角形的**棱线**处被这张横向墙挡住，法线又几乎与移动方向相反 ⇒ 速度被整段剪掉、每 tick 只挪零点几 HU（`surf_boreas` 的 `11309,809,10456` 处 yaw90 走 250 tick 只前进 109 HU、其中 56 个 tick 近乎静止）；同时 ±n 这对零厚度面让「盒跨在面两侧」（贴地/贴坡的常态）**必然**被判成 `start_solid`，贴地时 `check_stuck` 会每 tick 误报「卡死」。**修法**：三角形按**面**处理（起源里置换面是 polysoup，没有内部）——三条边墙只作「接触处盒仍搭在该三角形面域上」的门、不出接触与法线，接触只由 ±n 产生，三角形不写 `start_solid` / `all_solid`。修复后同一路径 8 个方向里 7 个方向净位移 **956~972 HU**、**0 个「贴地却几乎不动」的 tick**（唯一残留是真竖直墙）。回归：`src/phys/tri_surface_tests.rs`（4 项），`cargo test -p websurf-phys` **35 项全过**。
+
 **逐顶点道具的光照下限接上**：`vbspLightFloor` 此前只接进 world 路径与 level 2（ambient cube）路径，level 1（`applyVertexLightingShader`）从未设置该 uniform ⇒ 「光照下限」旋钮对**逐顶点着色的道具静默无效**。现补上并用于 `max(vlight, floor)`；`floor` 默认 0 时与改前等价（`max(v,0)`），调大后逐顶点道具不再纯黑——与 T-438 未覆盖的 28.5% 暗顶点互补。
 
 **退化 `.vhv` 的兜底（道具逐顶点光照）**：`.vhv` 只烘 direct+bounce，背光顶点精确为 0；实测 `surf_boreas` 全部道具顶点里 **43.7%** 三通道全 0，而 level 1 是纯乘法（`vbspVertexLightTerm`）且**不叠** leaf ambient cube ⇒ 这些顶点必然是纯黑。现按"暗顶点占比 ≥ `VLIGHT_DARK_FRACTION_MAX`（0.5）"判定该份烘焙无法表达表面，退回 leaf ambient cube（平坦但不再是纯黑）。效果：带 `_VBSP_VLIGHT` 的图元 397→220，全黑顶点 43.7%→28.5%。
