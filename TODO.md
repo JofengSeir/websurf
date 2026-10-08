@@ -27,28 +27,10 @@
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
 ## 未结项（117 条）
-### 待裁决（18）
-- **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
-- **T-031** game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB）　`game`
-- **T-053** viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/…　`viewer`
-- **T-054** debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g…　`debug`
-- **T-055** game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（…　`game`
-- **T-056** 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局…　`game`
-- **T-060** .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01　`viewer`
-- **T-110** 包内 svc_CreateStringTable 只稳定解出第一张表　`viewer`
-- **T-111** svc_CreateStringTable 的压缩标志未实现　`viewer`
-- **T-112** svc_UpdateStringTable 只对 userinfo 解条目，其它表只按长度跳过　`viewer`
-- **T-113** svc_GameEvent 只按长度跳过，事件描述符表未保存　`viewer`
-- **T-116** 注入期 throw 不在本工程调用方 catch 覆盖范围内　`shared`
-- **T-117** broken 阶段对照靠失配字面量维持，three 升级需同步　`shared`
-- **T-125** 零帧轨道的口径不一致（列表面板有卡片、3D 无对象）　`viewer`
-- **T-203** 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈　`game`
-- **T-204** `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指）　`game`
-- **T-212** `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图　`game`
-- **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
+### 待裁决（0）
 
 
-### 待修（97）
+### 待修（115）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -146,6 +128,24 @@
 - **T-303** 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1　`debug`
 - **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
 - **T-504** 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉　`shared`
+- **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
+- **T-031** game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB）　`game`
+- **T-053** viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/…　`viewer`
+- **T-054** debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g…　`debug`
+- **T-055** game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（…　`game`
+- **T-056** 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局…　`game`
+- **T-060** .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01　`viewer`
+- **T-110** 包内 svc_CreateStringTable 只稳定解出第一张表　`viewer`
+- **T-111** svc_CreateStringTable 的压缩标志未实现　`viewer`
+- **T-112** svc_UpdateStringTable 只对 userinfo 解条目，其它表只按长度跳过　`viewer`
+- **T-113** svc_GameEvent 只按长度跳过，事件描述符表未保存　`viewer`
+- **T-116** 注入期 throw 不在本工程调用方 catch 覆盖范围内　`shared`
+- **T-117** broken 阶段对照靠失配字面量维持，three 升级需同步　`shared`
+- **T-125** 零帧轨道的口径不一致（列表面板有卡片、3D 无对象）　`viewer`
+- **T-203** 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈　`game`
+- **T-204** `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指）　`game`
+- **T-212** `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图　`game`
+- **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
 ### 已取证待立项（2）
@@ -166,9 +166,9 @@
 | T-016 | compute-mode.ts 的 summary 字面量含已删文档编号 | 文档口径 | shared | 已结案 | src/ts-shared/auth/compute-mode.ts:106 ⇒ summary 不再含 §3.4.C；`git grep -n "§3.4" -- src` ⇒ 0 命中 | documents/ts-shared/overview.md | 见详情 | #36 |
 | T-018 | tick-authority.test.ts 断言标签含 Q1 / §8.5 | 缺陷 | shared | 已结案 | src/ts-shared/auth/tick-authority.test.ts:446 ⇒ 断言标签已去掉 Q1 / §8.5；`npx esbuild … && node .tmp/t018/tick-authority.test.mjs` ⇒ 全例通过（exit 0） | documents/ts-shared/overview.md | 见详情 | §8.5" -- src/ts-shared/auth/tick-authority.test.ts` ⇒ 0 命中（断言标签不再含旧编号） | #40 |
 | T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 待修 | apps/game/src/panel/panel-controller.ts:583 | documents/game/implementation/panel.md | 判据：数值框回写自身文本；`dot` 死变量清掉（`git grep -n "dot" -- apps/game/src/panel/panel-controller.ts` 无声明未用） | #50 |
-| T-024 | game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等） | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #53 |
+| T-024 | game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等） | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：`apps/game/src/worker/worker-types.ts` 的字段与实际载荷一致（`npm run typecheck` + 字段清单探针，无缺项） | #53 |
 | T-029 | debug 脚本 10 条（jump-apex 采样链链路级仍待裁决 | 配置·门禁 | debug | 待修 | 见详情 | progress/pending-detail.md | 判据：10 条子项逐条处置完毕；每条子项脚本跑通 exit 0，并在 @BT@progress/pending-detail.md@BT@ 对应条目标注处置结果 | #60 |
-| T-031 | game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB） | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #62 |
+| T-031 | game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB） | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：`node apps/game/scripts/phys-rate-parity.mjs` ⇒ 混合分区的时长与结果一致、flatTop 的 AABB 正确 | #62 |
 | T-032 | game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等） | 配置·门禁 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：7 条子项逐条处置；@BT@_dbg_floor@BT@ 的 onGround 不再恒 undefined（脚本输出该字段有真值） | #63 |
 | T-033 | 【台账号·部分细化】夹具路径失效 → T-127；其余仍待裁 WG6b 6 条（test/maps/surf_null_4.replay 跨 3 文件失效等） | 缺陷 | repo | 已结案 | 台账号 6 条已全部细化到独立 T-12x 行（T-127 夹具路径 + T-128..T-132） | progress/pending-detail.md | 见详情 | #64 |
 | T-036 | WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 coi-serviceworker.js 等） | 未接线·死代码 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：剩余 15 条逐条 @BT@git grep -n "<符号>" -- src apps@BT@ ⇒ 只剩定义处 ⇒ 删除；删后体检 exit 0 且构建通过 | #67 |
@@ -177,12 +177,12 @@
 | T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:486 | progress/pending-detail.md | 判据：@BT@getLightingMode@BT@ 清点调用点（@BT@apps/debug/src/renderer/renderer-main.ts:486@BT@ 疑有一处）⇒ 真零调用则删，否则结案并改状态 | #78 |
 | T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | 未接线·死代码 | debug | 待修 | apps/game/src/app.ts:170 | progress/pending-detail.md | 判据：@BT@git grep -n "resetTo\ | \.stop(" -- src apps@BT@ ⇒ 无外部调用点则删；有则接线并补调用 | #79 |
 | T-048 | worker 消息联合类型与实际收发不符（历史遗留，已由文档记录）：debug/game 的 worker-types.ts 里 rea… | 文档口径 | debug | 已结案 | apps/game/src/worker/worker-types.ts:78 ⇒ 联合补齐（WorkerMessage 13 条 / MainMessage 12 条 + 8 个新接口）；`node .tmp/t048/probe.mjs` ⇒ 运行时 15 条字面量未覆盖 0；`apps/game` typecheck 通过 | documents/game/implementation/worker.md | 见详情 | #80 |
-| T-053 | viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/… | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/timeline.ts:110 | progress/pending-detail.md | — | #84 |
-| T-054 | debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g… | 缺陷 | debug | 待裁决 | apps/debug/src/app.ts:1992 | progress/pending-detail.md | — | #85 |
-| T-055 | game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（… | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #86 |
-| T-056 | 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局… | 缺陷 | game | 待裁决 | 见详情 | progress/pending-detail.md | — | #87 |
+| T-053 | viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/… | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:110 | progress/pending-detail.md | 判据：帮助文案与 `apps/viewer/src/replay/timeline.ts` 现行类名/样式一致（无「淡金带 / 金框」残留） | #84 |
+| T-054 | debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g… | 缺陷 | debug | 待修 | apps/debug/src/app.ts:1992 | progress/pending-detail.md | 判据：全局 `:focus-visible` 与 `::selection` 规则存在且可见（键盘 Tab 可达、选中态非默认） | #85 |
+| T-055 | game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（… | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：导航 `.mod` 与 `.key-chip`/`.x` 可 Tab 聚焦（不再是裸 div） | #86 |
+| T-056 | 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局… | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：F5 / 刷新不弹关闭确认，仅在有地图 / 对局中弹（条件化） | #87 |
 | T-058 | DemoParseResult 里「已解码但应用面为零」的字段清单（owner 要求记录，2026-09-30 | 未接线·死代码 | viewer | 待修 | 见详情 | progress/pending-detail.md | 判据：零应用字段逐条 @BT@git grep -n "<字段>" -- src apps@BT@ ⇒ 只剩定义处则删字段，否则接线 | #89 |
-| T-060 | .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01 | 缺陷 | viewer | 待裁决 | 见详情 | progress/pending-detail.md | — | #91 |
+| T-060 | .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01 | 缺陷 | viewer | 待修 | 见详情 | progress/pending-detail.md | 判据：从 `test/replay/auto-20260929-192716-surf_sedona.dem` 解出玩家输入，或给出「引擎侧确不可得」的可执行实证 | #91 |
 | T-062 | 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径… | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:283 | progress/pending-detail.md | 判据：@BT@git grep -n "importer" -- apps/viewer/src@BT@ ⇒ Source .dem 分支无 UI 调用路径 ⇒ 删或接线 | #93 |
 | T-064 | 8 篇 debug 文档存在「在界内但内容偏旧」的锚点簇（2026-10-03 本轮量化，未改）：src/scripts/check-d… | 文档口径 | docs | 已结案 | documents/debug/sequences.md:24 与 documents/debug/overview.md:91 ⇒ `ready` 发送点锚点按符号重定位为 apps/debug/src/worker/main.ts:484（原 483 是 `onInit` 行） | documents/debug/sequences.md | 见详情 | #95 |
 | T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | 判据：移除面板容器 ⇒ 控制台出现可读错误（不再静默生成脱离文档的元素） | — |
@@ -193,14 +193,14 @@
 | T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:250 | documents/viewer/implementation/core.md | 判据：构造仅含多材质网格的分块 ⇒ 分块边长含全部 Mesh 的并集（`worldBox` 不再只在单材质分支累计） | — |
 | T-108 | 回退脚本加载无超时且成功路径不移除 script 标签 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/bsp.ts:64 ⇒ `loadScript` 加 10 s 超时 + 三条路径都移除标签（1:1，10 行不变）；DOM 桩探针 ⇒ 成功路径标签数 0、超时路径 10.0 s 拒绝且标签数 0；typecheck 通过 | documents/viewer/implementation/core.md | 见详情 | — |
 | T-109 | 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正 | 缺陷 | viewer | 已取证待立项 | apps/viewer/src/replay/demo/net.ts:325 | documents/viewer/implementation/dem.md | — | — |
-| T-110 | 包内 svc_CreateStringTable 只稳定解出第一张表 | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/demo/net.ts:693 | documents/viewer/implementation/dem.md | — | — |
-| T-111 | svc_CreateStringTable 的压缩标志未实现 | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/demo/net.ts:709 | documents/viewer/implementation/dem.md | — | — |
-| T-112 | svc_UpdateStringTable 只对 userinfo 解条目，其它表只按长度跳过 | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/demo/net.ts:730 | documents/viewer/implementation/dem.md | — | — |
-| T-113 | svc_GameEvent 只按长度跳过，事件描述符表未保存 | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/demo/net.ts:563 | documents/viewer/implementation/dem.md | — | — |
+| T-110 | 包内 svc_CreateStringTable 只稳定解出第一张表 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:693 | documents/viewer/implementation/dem.md | 判据：`test/replay/auto-20260929-192716-surf_sedona.dem` ⇒ `svc_CreateStringTable` 解出**全部**表（现只稳定解出第一张） | — |
+| T-111 | svc_CreateStringTable 的压缩标志未实现 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:709 | documents/viewer/implementation/dem.md | 判据：`test/replay/auto-20260929-192716-surf_sedona.dem` ⇒ `svc_CreateStringTable` 的压缩标志分支解出（不再跳过） | — |
+| T-112 | svc_UpdateStringTable 只对 userinfo 解条目，其它表只按长度跳过 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:730 | documents/viewer/implementation/dem.md | 判据：`test/replay/auto-20260929-192716-surf_sedona.dem` ⇒ `svc_UpdateStringTable` 对非 userinfo 表也解出条目（不再只按长度跳过） | — |
+| T-113 | svc_GameEvent 只按长度跳过，事件描述符表未保存 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:563 | documents/viewer/implementation/dem.md | 判据：`test/replay/auto-20260929-192716-surf_sedona.dem` ⇒ `svc_GameEvent` 保存事件描述符表（不再只按长度跳过） | — |
 | T-114 | 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems） | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:269 | documents/viewer/implementation/dem.md | 判据：@BT@git grep -n "mergeVectorElems" -- apps src@BT@ ⇒ 0 命中（诊断开关已从生产代码移除） | — |
 | T-115 | untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查 | 缺陷 | viewer | 已取证待立项 | apps/viewer/src/replay/demo/demo.ts:866 | documents/viewer/implementation/dem.md | — | — |
-| T-116 | 注入期 throw 不在本工程调用方 catch 覆盖范围内 | 缺陷 | shared | 待裁决 | src/renderer-shared/shader/lightmap-shader.ts:1114 | documents/viewer/implementation/renderer.md | — | — |
-| T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | 工具·流程 | shared | 待裁决 | src/renderer-shared/shader/lightmap-shader.ts:351 | documents/viewer/implementation/renderer.md | — | — |
+| T-116 | 注入期 throw 不在本工程调用方 catch 覆盖范围内 | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1114 | documents/viewer/implementation/renderer.md | 判据：注入期抛错 ⇒ 调用方 catch 覆盖（探针构造 throw 路径） | — |
+| T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | 工具·流程 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:351 | documents/viewer/implementation/renderer.md | 判据：three 升级后 broken 阶段对照仍有效（对失配字面量加断言，缺失即失败） | — |
 | T-118 | A-B 区间带恒不显示（宽度算式分子恒等于分母） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:525 | documents/viewer/implementation/replay.md | 判据：A-B 区间带可见（宽度算式分子≠分母）：构造 A≠B ⇒ 带出现且宽度随区间变化 | — |
 | T-119 | 时间轴两条 title 文案与默认播放窗口矛盾 | 文档口径 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:185 ⇒ 文案改为「prerun 帧计入区间（读数可为负）」，与 apps/viewer/src/replay/player.ts:180 的 Math.min(0,t0) 窗口一致 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-120 | 正式跑段高亮宽度混基，Track.offset 非 0 时位置与宽度偏 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:552 ⇒ 宽度算式先加 `track.offset` 换成主时钟（与左端同基）；DOM 桩探针 ⇒ left=10%、width=60%（旧算式 50%，偏 10 个百分点）；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
@@ -208,7 +208,7 @@
 | T-122 | createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/importer.ts:104 ⇒ Blob URL 记进 `WeakMap<Worker,string>`，`onerror`/`dispose`/`onWorkerTimeout` 三条丢弃路径先 `releaseWorkerUrl`；探针 ⇒ createObjectURL=3 / revokeObjectURL=3 配对；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-123 | 导入无超时与取消，Worker 不回消息时 Promise 永不结算 | 缺陷 | viewer | 已结案 | **遗弃（由 T-152 覆盖）**：T-152 的 30 s 看门狗（探针实测 30.0 s 后拒绝、workerBroken=true、pending=0）已消除「Promise 永不结算」；「可取消」判为功能新增而非本缺陷 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-124 | Track.offset 只有下界没有上界，可拉长主时钟总长 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/trackpanel.ts:209 ⇒ `Math.min(3600, Math.max(0, n))`（上限 1 h），提示语写明 0~3600；`npm run typecheck` 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
-| T-125 | 零帧轨道的口径不一致（列表面板有卡片、3D 无对象） | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/visuals.ts:96 | documents/viewer/implementation/replay.md | — | — |
+| T-125 | 零帧轨道的口径不一致（列表面板有卡片、3D 无对象） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/visuals.ts:96 | documents/viewer/implementation/replay.md | 判据：零帧轨道 ⇒ 列表与 3D 口径一致（要么都无卡片、要么都有对象） | — |
 | T-126 | panel.ts 平移输入框 hint 写「默认 0」而 step 为 10 HU | 文档口径 | viewer | 已结案 | apps/viewer/src/replay/panel.ts:155 ⇒ hint 补「步长 10 HU」，与 `step: 10` 一致；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-127 | 真实夹具路径跨三处失效（指向 test/maps 而非 test/replay） | 缺陷 | viewer | 已结案 | apps/viewer/test/replay-selftest.ts:77 ⇒ 夹具路径改指 test/replay（4 层，与 :912 同口径）；`npm run test:replay` ⇒ fixture 可读 / 53365 B / 字节闭合 全 ok | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-128 | dist 里的示例记录无法由当前源码路径重新产出 | 缺陷 | viewer | 已结案 | apps/viewer/scripts/build-dist.mjs:239 ⇒ 示例记录源改指 test/replay；`npm run build:dist -- --multi` ⇒ dist/assets/maps/surf_null_4.replay 53365 B 已打包 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
@@ -249,15 +249,15 @@
 | T-168 | `MapPanel.spawnPoints` getter 零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:114 | documents/viewer/implementation/ui.md | 判据：`git grep -n "MapPanel.spawnPoints" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-201 | 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色 | 缺陷 | game | 待修 | apps/game/src/app.ts:507 | documents/game/implementation/app-entry.md | 判据：注入 wasm 初始化失败 ⇒ 控制台可见错误且加载被阻断（不再被 `.catch` 吞掉） | — |
 | T-202 | 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示 | 缺陷 | game | 已结案 | apps/game/src/dom-optional.ts 新增 `optDom()`（缺失打 `console.warn` 点名 id）；app.ts 四处可选控件改走它（五处 1:1，246 个锚点零漂移）；探针 ⇒ 缺失返回 null + 点名告警、存在 0 告警；game typecheck 通过 | documents/game/implementation/app-entry.md | 见详情 | — |
-| T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待裁决 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | — | — |
-| T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | 缺陷 | game | 待裁决 | apps/game/src/input/input-bridge.ts:65 | documents/game/implementation/input.md | — | — |
+| T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待修 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | 判据：未选图 / 未锁定前点击画布 ⇒ 有可见反馈（不再静默返回） | — |
+| T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | 缺陷 | game | 待修 | apps/game/src/input/input-bridge.ts:65 | documents/game/implementation/input.md | 判据：`hud` 段只含 hud 字段（探针比对 `input-bridge.ts` 下发与 `config.hud`） | — |
 | T-205 | `lockTickRate` 的 64 在 `syncFullConfig`、面板构造与 `DEFAULT_CONFIG` 三处硬编码、需同步修改 | 配置·门禁 | game | 已结案 | apps/game/src/config.ts:172 ⇒ `export const LOCKED_TICK_RATE = 64`（1:1 落原空行，零漂移）；`DEFAULT_CONFIG` + `apps/game/src/app.ts:640` + 面板 4 处全改引用；`git grep "= 64|tickRate: 64" -- apps/game/src` ⇒ 只剩定义处；typecheck 通过 | documents/game/implementation/config.md | 见详情 | — |
 | T-206 | `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃 | 未接线·死代码 | game | 待修 | apps/game/src/input/input-bridge.ts:30 | documents/game/implementation/input.md | 判据：`git grep -n "InputBridge.addInput" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-207 | `requestLock` 的 `p instanceof Promise` 判门在当前签名下恒真、失败提示恒挂 promise 回调 | 缺陷 | game | 已结案 | apps/game/src/app.ts:252 ⇒ 删掉恒真的 `instanceof Promise` 判门（`requestLock` 签名恒 `Promise<boolean>`），直接 `p.then(ok => …)`（1:1）；`git grep "instanceof Promise" -- apps/game/src` ⇒ 仅注释；typecheck 通过 | documents/game/implementation/input.md | 见详情 | — |
 | T-208 | `bindSlider`／`bindCheckbox` 取不到元素时静默返回，控件缺失不报错 | 缺陷 | game | 已结案 | apps/game/src/panel/panel-controller.ts:572/597 ⇒ 取不到控件时 `console.warn` 点名 id；DOM 桩探针（getElementById 恒 null）⇒ 告警 2 条；typecheck 通过 | documents/game/implementation/panel.md | 见详情 | — |
 | T-209 | M 键与 ESC 两条全局监听不校验 `sceneReady`，加载覆盖层显示期间同样触发 | 缺陷 | game | 已结案 | apps/game/src/panel/panel-controller.ts:265 ⇒ 两处监听均带 `this.sceneReady` 守卫（`updateVisibility` 写入、`hide()` 加载期复位）；`apps/game` typecheck 通过 | documents/game/implementation/panel.md | 见详情 | — |
 | T-211 | `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造 | 未接线·死代码 | game | 待修 | apps/game/src/renderer/renderer-main.ts:77 | documents/game/implementation/renderer.md | 判据：`git grep -n "ENABLE_PVS" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | 缺陷 | game | 待裁决 | apps/game/src/renderer/renderer-main.ts:264 | documents/game/implementation/renderer.md | — | — |
+| T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | 缺陷 | game | 待修 | apps/game/src/renderer/renderer-main.ts:264 | documents/game/implementation/renderer.md | 判据：换图失败 ⇒ 场景仍可用（不再入口先 `disposeScene`） | — |
 | T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | 缺陷 | game | 待修 | apps/game/src/savepoint.ts:92 | documents/game/implementation/savepoint.md | 判据：删除存点 ⇒ 有二次确认；越界索引 ⇒ 报错（不再静默 persist） | — |
 | T-214 | 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态 | 缺陷 | game | 待修 | apps/game/src/savepoint.ts:21 | documents/game/implementation/savepoint.md | 判据：蹲伏中存点、站立后读点 ⇒ 读到站立眼高（存点含蹲伏态） | — |
 | T-215 | 存档解析结果不是数组时静默保持空列表、不报错，表现为该地图没有存点 | 缺陷 | game | 已结案 | apps/game/src/savepoint.ts:59 ⇒ 非数组存档打 `console.error` 点名（1:1）；对照探针 ⇒ 修复前错误 0 条、修复后 1 条；typecheck 通过 | documents/game/implementation/savepoint.md | 见详情 | — |
@@ -330,4 +330,4 @@
 | T-607 | 【S19·Pages 站点守卫】站点源被切成「从分支构建」后，GitHub 内部 `pages-build-deployment` 会在**每次推送**（含纯文档推送）把仓库根按 Jekyll 发布、顶掉 Actions 产物，而部署链无任何断言/告警（2026-10-08 设置被切走；2026-10-09 02:40 的纯文档推送把站点顶掉，35 分钟后才发现） | 配置·门禁 | repo | 待修 | .github/workflows/deploy-pages.yml:200 | progress/monthly/2026-10-7.md | 判据：站点源被改成「从分支构建」时自检报错（定时 workflow 红或部署后断言失败）；正常时 `curl -s https://jofengseir.github.io/websurf/version.json` 的 id 与本次部署一致 | — |
 | T-608 | 核实「单入口」假设：Copilot / Gemini CLI 是否真的读根 `AGENTS.md`（目前只是通行约定），结论与出处写进规范篇 | 文档口径 | docs | 待修 | AGENTS.md:5 | documents/norms/annotation-and-verification.md | 判据：逐字核实两个工具是否读根 `AGENTS.md`（官方文档或实测）⇒ 结论与出处落进 `documents/norms/**`（只读，须 owner 许可 + sync） | — |
 | T-609 | 体检 `[O]` 对**终态行**（已记录 / 已结案）的「判据」列按行态保护：改终态行判据须先 approve，未结行改判据不拦 | 工具·流程 | repo | 待修 | src/scripts/docflow.mjs:201 | documents/norms/annotation-and-verification.md | 判据：改一条终态行的判据 ⇒ `node src/scripts/docflow.mjs check` 报「受保护列」；改未结行的判据不报 | — |
-| T-610 | 三工程的 `check:api` 都不在 CI 里跑，只有 PR 模板手写勾选 | 缺陷 | 跨区 | 待裁决 | `.github/workflows/**` 零命中 `check:api`（`apps/viewer/package.json:18`、`apps/debug/package.json:16`、`apps/game/package.json:16`） | documents/norms/scripts-and-ci.md | 判据：`.github/workflows/**` 内 `check:api` 至少 1 命中（接线后契约破损即拦合并）；若 owner 裁决不接，本条改判「已结案（不做）」并注明理由 | — |
+| T-610 | 三工程的 `check:api` 都不在 CI 里跑，只有 PR 模板手写勾选 | 缺陷 | 跨区 | 待修 | `.github/workflows/**` 零命中 `check:api`（`apps/viewer/package.json:18`、`apps/debug/package.json:16`、`apps/game/package.json:16`） | documents/norms/scripts-and-ci.md | 判据：`.github/workflows/ci-gates.yml` 出现**不装 wasm 工具链**的源码级契约 job（跑 `src/scripts/lib/wasm-api-contract.mjs`）⇒ 改 Rust 字段名时 CI 变红；若裁决不接则改判「已结案（不做）」并注明理由 | — |

@@ -127,7 +127,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "待裁决首批 12 条处置（owner 已授权按推荐做）",
+      "reason": "待裁决第二批 18 条处置（owner 已授权按推荐做）",
       "at": "2026-10-08",
       "task": "",
       "consumed": true
@@ -135,7 +135,7 @@
     {
       "path": "OWNER.md",
       "by": "owner",
-      "reason": "记录 D-025 批量授权",
+      "reason": "D-025 落实列追加第二批",
       "at": "2026-10-08",
       "task": "",
       "consumed": true
