@@ -179,4 +179,5 @@
 | 2026-10-08 | T-437 结案：`.vhv` 是"一个 strip group 一块、按局部序"而我们当成模型顶点序 ⇒ 逐顶点光照错位；新增 `remap_strip_group_colors`，精确比对 0 处不符（旧序 3277/4082） | progress/monthly/2026-10-6.md:19 |
 | 2026-10-08 | T-438 结案：`.vhv` 只含 direct+bounce、43.7% 顶点全 0 ⇒ 纯黑；按暗占比 ≥0.5 判为不可用退回 cube，黑顶点 43.7%→28.5% | progress/monthly/2026-10-6.md:20 |
 | 2026-10-08 | T-439：`vbspLightFloor` 没接进 level 1（逐顶点道具），补上并用于 `max(vlight, floor)`；floor=0 时零行为变化 | progress/monthly/2026-10-6.md:21 |
+| 2026-10-08 | T-440：置换面碰撞导出（1351 张面此前零碰撞）；`export_displacement_colliders` ⇒ 132,480 三角形，待 TS 接入 | progress/monthly/2026-10-6.md:22 |
 | 2026-10-08 | T-419 结案：VTF `Ia88`/`Bgra4444` 解码补上 + `load_texture_bsp` 改「crate 优先、失败退本仓」；vtfDecodeFail 4→0，三条模型材质出真贴图 | progress/monthly/2026-10-6.md:18 |

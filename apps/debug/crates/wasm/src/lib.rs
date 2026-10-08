@@ -3671,3 +3671,31 @@ pub fn disp_vertex_alpha_stats(data: &[u8]) -> Result<String, JsValue> {
     Ok(format!("{{\"count\":{},\"zeros\":{},\"ones\":{},\"min\":{:.3},\"max\":{:.3},\"mean\":{:.3},\"buckets\":{:?}}}",
         verts.len(), zeros, ones, if verts.is_empty() { 0.0 } else { min }, if verts.is_empty() { 0.0 } else { max }, sum / n, buckets))
 }
+
+
+/// 置换面（displacement）的**碰撞三角形汤**（世界坐标，Y-up），供物理侧建洞穴壁/地形碰撞。
+///
+/// 为什么需要单独一条：笔刷碰撞走平面凸包（`export_brushes_planes`），而置换面把可见表面从基础
+/// 笔刷平面**推出去**了——只拿基础平面做碰撞，玩家撞到的是藏在可见面后面那层旧平面，看得见的
+/// 洞穴壁反而没有碰撞。Source 对置换面的做法就是**按置换面自身的三角形**烘碰撞（VBSP 的 disp
+/// coll），这里与渲染端共用同一条细分+位移路径（`Handle::triangulated_displaced_vertices`），
+/// 保证"看到的"与"撞到的"是同一张面。
+///
+/// 返回 JSON：`[[x,y,z], ...]`，每 3 个顶点一个三角形（与 `triangulated_displaced_vertices`
+/// 同序）；坐标已按 `map_coords` 转成与其它碰撞体一致的 Y-up 世界坐标。
+#[wasm_bindgen]
+pub fn export_displacement_colliders(data: &[u8]) -> Result<String, JsValue> {
+    let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
+    let mut out: Vec<[f32; 3]> = Vec::new();
+    for i in 0..bsp.displacements.len() {
+        let Some(disp) = bsp.displacement(i) else {
+            continue;
+        };
+        for v in disp.triangulated_displaced_vertices() {
+            out.push(websurf_wasm_core::model_integrator::map_coords([
+                v.x, v.y, v.z,
+            ]));
+        }
+    }
+    serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化置换面碰撞失败"))
+}

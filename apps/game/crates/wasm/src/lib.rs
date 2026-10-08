@@ -2532,3 +2532,22 @@ impl BspProcessor {
         }
     }
 }
+
+/// 置换面（displacement）的**碰撞三角形汤**（世界坐标，Y-up）—— 与 debug 工程同名同签名，
+/// 详见该工程里同名函数的说明：笔刷碰撞只覆盖平面凸包，而置换面把可见表面从基础笔刷平面推了
+/// 出去；Source 对置换面的做法就是按置换面自身的三角形烘碰撞。这里与渲染端共用
+/// `Handle::triangulated_displaced_vertices`，保证"看到的"与"撞到的"是同一张面。
+#[wasm_bindgen]
+pub fn export_displacement_colliders(data: &[u8]) -> Result<String, JsValue> {
+    let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
+    let mut out: Vec<[f32; 3]> = Vec::new();
+    for i in 0..bsp.displacements.len() {
+        let Some(disp) = bsp.displacement(i) else {
+            continue;
+        };
+        for v in disp.triangulated_displaced_vertices() {
+            out.push(websurf_wasm_core::model_integrator::map_coords([v.x, v.y, v.z]));
+        }
+    }
+    serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化置换面碰撞失败"))
+}
