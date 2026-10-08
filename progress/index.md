@@ -217,3 +217,4 @@
 | 2026-10-09 | T-108 结案：viewer 回退脚本加载加 10 s 超时 + 三条路径移除 script 标签（探针：标签数 0 / 超时 10.0 s） | progress/monthly/2026-10-7.md:29 |
 | 2026-10-09 | T-154 结案（clipToPayload 显式返回类型，报错落点移到定义处）/ T-155 结案（req.rule 防御，TypeError → 明确错误） | progress/monthly/2026-10-7.md:30 |
 | 2026-10-09 | T-205/T-207/T-208/T-219 结案（game）：固定 tick 值单点化、删恒真判门、控件缺失告警、SceneDataMessage 归位 | progress/monthly/2026-10-7.md:31 |
+| 2026-10-09 | T-215/T-216 结案（game）：非数组存档报错；存点写入合并（50 次 add ⇒ 1 次 setItem） | progress/monthly/2026-10-7.md:32 |

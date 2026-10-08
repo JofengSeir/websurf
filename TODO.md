@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（136 条）
+## 未结项（134 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（104）
+### 待修（102）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -100,8 +100,6 @@
 - **T-202** 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示　`game`
 - **T-206** `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃　`game`
 - **T-211** `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造　`game`
-- **T-215** 存档解析结果不是数组时静默保持空列表、不报错，表现为该地图没有存点　`game`
-- **T-216** `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长　`game`
 - **T-217** `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方）　`game`
 - **T-218** `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl`　`game`
 - **T-220** `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加　`game`
@@ -279,8 +277,8 @@
 | T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | 缺陷 | game | 待裁决 | apps/game/src/renderer/renderer-main.ts:264 | documents/game/implementation/renderer.md | — | — |
 | T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | 缺陷 | game | 待裁决 | apps/game/src/savepoint.ts:92 | documents/game/implementation/savepoint.md | — | — |
 | T-214 | 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态 | 缺陷 | game | 待裁决 | apps/game/src/savepoint.ts:21 | documents/game/implementation/savepoint.md | — | — |
-| T-215 | 存档解析结果不是数组时静默保持空列表、不报错，表现为该地图没有存点 | 缺陷 | game | 待修 | apps/game/src/savepoint.ts:57 | documents/game/implementation/savepoint.md | 判据：喂入非数组存档 ⇒ 有错误信号，而非静默保持空列表（表现为「该地图没有存点」） | — |
-| T-216 | `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长 | 缺陷 | game | 待修 | apps/game/src/savepoint.ts:112 | documents/game/implementation/savepoint.md | 判据：连续 `add`/`delete` ⇒ 序列化次数不随条数线性增长（合并写入或防抖） | — |
+| T-215 | 存档解析结果不是数组时静默保持空列表、不报错，表现为该地图没有存点 | 缺陷 | game | 已结案 | apps/game/src/savepoint.ts:59 ⇒ 非数组存档打 `console.error` 点名（1:1）；对照探针 ⇒ 修复前错误 0 条、修复后 1 条；typecheck 通过 | documents/game/implementation/savepoint.md | 见详情 | — |
+| T-216 | `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长 | 缺陷 | game | 已结案 | apps/game/src/savepoint.ts:84/92/100 ⇒ 三处改走类末尾新增的 `persistSoon()`（同批次合并写，零锚点漂移）；对照探针 ⇒ 连续 50 次 add 的 setItem 由 50 次降为 1 次；typecheck 通过 | documents/game/implementation/savepoint.md | 见详情 | — |
 | T-217 | `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方） | 缺陷 | game | 待修 | apps/game/crates/wasm/src/lib.rs:480 | documents/game/implementation/wasm-crate.md | 判据：@BT@BspProcessor@BT@ 上 @BT@#[wasm_bindgen]@BT@ 只出现一次且归属正确（不再悬空在注释块上方） | — |
 | T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | 缺陷 | game | 待修 | apps/game/crates/wasm/src/lib.rs:117 | documents/game/implementation/wasm-crate.md | 判据：zip 条目名非全小写时 `.vvd`/`.dx90.vtx` 仍取回正确文件（配对名按同一小写基准生成） | — |
 | T-219 | `SceneDataMessage` 是主线程 `loadScene` 形参、不是跨线程消息，却声明在「Worker → 主线程」分组 | 文档口径 | game | 已结案 | apps/game/src/worker/worker-types.ts:233 ⇒ `SceneDataMessage` 移出 `MainMessage`（联合注释改「11 条」并说明它是主线程 `loadScene` 形参）；typecheck 通过 | documents/game/implementation/worker.md | 见详情 | — |

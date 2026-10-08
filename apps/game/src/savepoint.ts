@@ -41,11 +41,11 @@ const STORAGE_PREFIX = 'websurf-game.savepoints.';
 /** 存点存储：按地图读写列表，容量上限见 `SAVEPOINT_MAX`。 */
 export class SavePointStore {
   private list: SavePoint[] = [];
-  private map = '';
+  private map = ''; private writeQueued = false;
 
   /** 切换地图：清空内存列表并从 localStorage 载入该地图存点，返回列表的浅拷贝。
    *  `mapName` 为空串时直接返回空列表（不读存储）；JSON 解析抛异常时打 `console.error`
-   *  并清空列表；解析结果不是数组时静默保持空列表。 */
+   *  并清空列表；解析结果不是数组时同样打 `console.error` 并保持空列表（T-215）。 */
   load(mapName: string): SavePoint[] {
     this.map = mapName || '';
     this.list = [];
@@ -56,7 +56,7 @@ export class SavePointStore {
         const parsed = JSON.parse(raw) as SavePoint[];
         if (Array.isArray(parsed)) {
           this.list = parsed.slice(-SAVEPOINT_MAX);
-        }
+        } else { console.error('[savepoint] 存档不是数组（已忽略，表现为该地图没有存点）:', typeof parsed); }
       }
     } catch (err) {
       console.error('[savepoint] 读取失败:', err);
@@ -81,7 +81,7 @@ export class SavePointStore {
     if (this.list.length > SAVEPOINT_MAX) {
       this.list.shift(); // 遗弃最早
     }
-    this.persist();
+    this.persistSoon(); // 合并写（T-216）
     return [...this.list];
   }
 
@@ -89,7 +89,7 @@ export class SavePointStore {
   delete(index: number): SavePoint[] {
     if (index >= 0 && index < this.list.length) {
       this.list.splice(index, 1);
-      this.persist();
+      this.persistSoon(); // 合并写（T-216）
     }
     return [...this.list];
   }
@@ -97,7 +97,7 @@ export class SavePointStore {
   /** 清空当前地图的存点并写存储（空列表同样落盘）。 */
   clear(): void {
     this.list = [];
-    this.persist();
+    this.persistSoon(); // 合并写（T-216）
   }
 
   /** 最近一个存点（C 键读点的目标）；列表为空时返回 null。 */
@@ -105,7 +105,7 @@ export class SavePointStore {
     return this.list.length > 0 ? this.list[this.list.length - 1] : null;
   }
 
-  /** 整表序列化写回 localStorage（键由当前地图名决定）；地图名为空时不写。 */
+  /** 整表序列化写回 localStorage（键由当前地图名决定）；地图名为空时不写。**只由 `persistSoon` 的合并写路径调用**（T-216）。 */
   private persist(): void {
     try {
       if (!this.map) return;
@@ -113,5 +113,13 @@ export class SavePointStore {
     } catch (err) {
       console.error('[savepoint] 写入失败:', err);
     }
+  }
+
+  /** 合并写：同一同步批次内的多次改动只落盘一次（`add` / `delete` / `clear` 都走它，T-216）。 */
+  private persistSoon(): void {
+    if (!this.map) return;
+    if (this.writeQueued) return;
+    this.writeQueued = true;
+    queueMicrotask(() => { this.writeQueued = false; this.persist(); });
   }
 }
