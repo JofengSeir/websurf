@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（124 条）
+## 未结项（123 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,9 +60,8 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（92）
+### 待修（91）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
-- **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
 - **T-032** game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等）　`game`
@@ -168,7 +167,7 @@
 | T-005 | apps/game 的 favicon.ico 被同一批删除波及：该文件在库中唯一，而 apps/game/web/index.html… | 缺陷 | game | 已结案 | apps/game/web/index.html:22 ⇒ 只留相对路径；`apps/game/web/favicon.ico`（168 B，blob fccb749）已恢复并加进 KEEP_SINGLE/KEEP_MULTI + 两形态拷贝；`npm run build:dist` 与 `-- --multi` ⇒ dist/favicon.ico 168 B 且 dist/index.html 引用它 | documents/game/implementation/app-entry.md | 见详情 | #5 |
 | T-007 | apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into… | 缺陷 | debug | 已结案 | apps/debug/src/wasm.d.ts:145 起 ⇒ 文末同名 interface 声明合并补 16 个成员；`node .tmp/t007/probe.mjs` ⇒ PhysWorld 33/33 缺 0；收窄已删、`apps/debug` typecheck 通过 | documents/debug/implementation/wasm-bindings.md | 见详情 | #8 |
 | T-008 | apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new … | 配置·门禁 | game | 待修 | apps/game/scripts/check-wasm-api.mjs:52-70 | progress/pending-detail.md | 判据：跑 @BT@node apps/game/scripts/check-wasm-api.mjs@BT@ ⇒ exit 0，且 PHYS_API 列出的项 ≥ crates/wasm 实际导出数（不再缺 @BT@new@BT@ 等） | #9 |
-| T-013 | lightmap.rs 错误串含外部实现引用 Lightmap.cs:64 | 缺陷 | shared | 待修 | src/wasm-core/bsp_to_gltf_core/lightmap.rs:219 | documents/wasm-core/overview.md | 判据：`git grep -n "Lightmap.cs" -- src` ⇒ 0 命中（错误串不再引用外部实现） | #28 |
+| T-013 | lightmap.rs 错误串含外部实现引用 Lightmap.cs:64 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/lightmap.rs:219 ⇒ 错误串删掉外部实现引用（1:1），改为陈述本仓常量 256×256=65536；判据 `git grep "Lightmap.cs" -- src` ⇒ 0 命中 | documents/wasm-core/overview.md | 见详情 | #28 |
 | T-015 | vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤） | 缺陷 | shared | 待裁决 | 见详情 | progress/pending-detail.md | — | #31 |
 | T-016 | compute-mode.ts 的 summary 字面量含已删文档编号 | 文档口径 | shared | 已结案 | src/ts-shared/auth/compute-mode.ts:106 ⇒ summary 不再含 §3.4.C；`git grep -n "§3.4" -- src` ⇒ 0 命中 | documents/ts-shared/overview.md | 见详情 | #36 |
 | T-018 | tick-authority.test.ts 断言标签含 Q1 / §8.5 | 缺陷 | shared | 已结案 | src/ts-shared/auth/tick-authority.test.ts:446 ⇒ 断言标签已去掉 Q1 / §8.5；`npx esbuild … && node .tmp/t018/tick-authority.test.mjs` ⇒ 全例通过（exit 0） | documents/ts-shared/overview.md | 见详情 | §8.5" -- src/ts-shared/auth/tick-authority.test.ts` ⇒ 0 命中（断言标签不再含旧编号） | #40 |

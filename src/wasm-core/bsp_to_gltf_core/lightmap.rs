@@ -216,7 +216,7 @@ pub fn check_face_luxel_size(luxel_x: i32, luxel_y: i32, face_index: usize) -> R
     if luxel_x > MAX_LUXEL_SIDE || luxel_y > MAX_LUXEL_SIDE {
         return Err(Error::Other(format!(
             "面 {face_index} 的 lightmap 区域 {luxel_x}×{luxel_y} 超过单面读缓冲上界 \
-             {MAX_LUXEL_SIDE}×{MAX_LUXEL_SIDE}（外部参照实现的 Lightmap.cs:64 仅 65536 项），拒绝越界读取"
+             {MAX_LUXEL_SIDE}×{MAX_LUXEL_SIDE}（256×256 = 65536 项），拒绝越界读取"
         )));
     }
     Ok(())

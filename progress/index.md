@@ -226,3 +226,4 @@
 | 2026-10-09 | T-310 结案：debug 的「自动恢复默认体积」开关真正接上物理（探针：开关关 10000×5000 / 开关开卡死后 32×72） | progress/monthly/2026-10-7.md:38 |
 | 2026-10-09 | T-302 结案：新增 `check:param-defaults` 交叉校验（正例 7 项 OK；反例 gravity 800→900 ⇒ exit 1） | progress/monthly/2026-10-7.md:39 |
 | 2026-10-09 | T-304/T-305 结案（均判遗弃不修）：τ 与 now 同源、residual 主线程原理上拿不到；顺带修正 2 处指错行的锚点 | progress/monthly/2026-10-7.md:40 |
+| 2026-10-09 | T-013 结案（错误串去外部实现引用）；另完成 T-433 诊断：prop 两条光照路径 either/or + 乘法 ⇒ cube 从未生效 | progress/monthly/2026-10-7.md:41 |
