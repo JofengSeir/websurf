@@ -195,3 +195,4 @@
 | 2026-10-08 | T-449 结案：置换面三角化改引擎扇形细分（四叉树 + `g_TesselateWinding` 8 点扇 + `allowed_vertices`），修地表与模型坡错误相交 | progress/monthly/2026-10-7.md:7 |
 | 2026-10-08 | 文档整理 + 经验教训总结：推送 52 个提交（远端 = `1d18548`）；体检 A–P 全 0、`documents/index.md` 与文件树逐项对齐；新增模块不变量（位移面细分）与 `progress/lessons-2026-10-08.md`；登记 D-020（看板分卷） | progress/monthly/2026-10-7.md:8 |
 | 2026-10-08 | 经验教训写进 skill：`skills/websurf-env-traps/SKILL.md` 新增 §8（文档/看板/锚点 8 条）+ §1 两行；只读 md 走 owner 许可 + sync | progress/monthly/2026-10-7.md:9 |
+| 2026-10-09 | Pages 站点被「从分支构建」顶掉（站点根变 README 渲染页）——`build_type` 改回 `workflow` + 重跑部署已恢复；取证：188 份 DSH 会话日志 0 命中，改动来自浏览器会话；登记 D-021 / T-607 | progress/monthly/2026-10-7.md:10 |
