@@ -21,7 +21,8 @@
     "plot:path": "node scripts/plot-path.mjs",
     "test:path-acceptance": "node scripts/path-acceptance.mjs fixtures/path/tick-on-render-prefix.json --assert --expect fail",
     "test:auth-clock": "esbuild ../../src/ts-shared/auth/auth-loop.ts --bundle --format=esm --platform=node --outfile=.tmp/auth-clock/auth-loop.bundle.mjs && node scripts/auth-clock-verify.mjs",
-    "test:jump-apex": "esbuild ../../src/ts-shared/phys/authority-calibrator.ts --bundle --format=esm --platform=node --outfile=.tmp/jump-apex/authority-calibrator.bundle.mjs && node scripts/jump-apex-verify.mjs"
+    "test:jump-apex": "esbuild ../../src/ts-shared/phys/authority-calibrator.ts --bundle --format=esm --platform=node --outfile=.tmp/jump-apex/authority-calibrator.bundle.mjs && node scripts/jump-apex-verify.mjs",
+    "check:param-defaults": "node scripts/check-param-defaults.mjs"
   },
   "dependencies": {},
   "devDependencies": {

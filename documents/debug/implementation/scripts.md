@@ -12,6 +12,7 @@
 |---|---|---|
 | `apps/debug/scripts/build-dist.mjs` | `npm run build:dist`（`apps/debug/package.json:13`） | 出 `single 产物`（默认，`apps/debug/scripts/build-dist.mjs:88` 起）或 `multi 产物`（`--multi`，`apps/debug/scripts/build-dist.mjs:75`）；`KEEP_SINGLE` 见 `apps/debug/scripts/build-dist.mjs:63`，`KEEP_MULTI` 见 `:64`；输入前置检查要求 `apps/debug/pkg/websurf_wasm_bg.wasm` 与仓库纹理包都存在（`apps/debug/scripts/build-dist.mjs:77`） |
 | `apps/debug/scripts/check-wasm-api.mjs` | `npm run check:api`（`apps/debug/package.json:16`） | 三层校验：声明面（`pkg` 的 `.d.ts` 必须有 `BspProcessor` 与 `PhysWorld`）、导入面（`src` 下全部 `.ts` 对 pkg 的导入符号必须是 pkg 导出面的子集）、不变量（导入面不得为空）。薄配置：检查引擎在共享层 `src/scripts/lib/wasm-api-contract.mjs` |
+| `apps/debug/scripts/check-param-defaults.mjs` | `npm run check:param-defaults`（`apps/debug/package.json:25`） | 面板默认值 ↔ config 默认值交叉校验（`TODO.md` T-302）：把 `PARAM_DEFS` 的 number 项经 `PARAM_TO_RUST` 映射后，与 `buildPhysicsParams(DEFAULT_CONFIG.physics, DEFAULT_CONFIG.input)` 的同键值比对（容差 1e-2，覆盖 `jumpHeight` 的 57 ↔ 302²/1600 取整差）；无 config 对应项只列出。不一致打印明细并以 1 退出。 |
 | `apps/debug/scripts/pages-index.html` | 无（资产） | 部署站入口页模板，被 `.github/workflows/deploy-pages.yml:177` 复制并烙印部署 id（`__DEPLOY_ID__` / `__DEPLOY_TIME__` 占位符 sed 替换，同段断言无残留）为 `deploy/index.html`，同段生成 `deploy/version.json`；入口页内联脚本按部署 id 做「每次部署弹一次提示」（localStorage 记已读）与过期自检（fetch version.json 不一致 ⇒ 强制弹提示并在关闭后自动刷新一次） |
 
 **无头验收与度量**
