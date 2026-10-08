@@ -219,3 +219,4 @@
 | 2026-10-09 | T-205/T-207/T-208/T-219 结案（game）：固定 tick 值单点化、删恒真判门、控件缺失告警、SceneDataMessage 归位 | progress/monthly/2026-10-7.md:31 |
 | 2026-10-09 | T-215/T-216 结案（game）：非数组存档报错；存点写入合并（50 次 add ⇒ 1 次 setItem） | progress/monthly/2026-10-7.md:32 |
 | 2026-10-09 | T-223 结案：game single 产物补 `coi-serviceworker.js`（KEEP_SINGLE 6→7 + 拷贝；实测 dist 7 条目） | progress/monthly/2026-10-7.md:33 |
+| 2026-10-09 | T-220 结案：game worker 的 `world-parse-ms` 代理测量默认关闭（探针：默认 0 次解析 / 开关打开 2 次） | progress/monthly/2026-10-7.md:34 |

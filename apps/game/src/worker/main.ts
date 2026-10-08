@@ -507,15 +507,15 @@ self.onmessage = (e: MessageEvent<unknown>): void => {
   const d = e.data as { type?: string; brushJson?: string; triJson?: string } | null;
   if (d?.type === 'world-json') {
     worldJsonRecvAt = performance.now();
-    // 诊断：两个大 JSON 的**解析**耗时（JS 侧 `JSON.parse` 作代理测量）。与 `world-build-ms`
-    // （解析 + build_world）相减即得 build_world（含建索引）的净耗时。
-    const t0 = performance.now();
-    try { if (d.brushJson) JSON.parse(d.brushJson); } catch { /* 诊断用，忽略 */ }
+    // 诊断（默认关闭，T-220）：大 JSON 的解析耗时（`JSON.parse` 代理测量）与 `world-build-ms` 相减即得
+    // build_world 的净耗时；`build_world` 内部会再解析一遍，故只有置 `globalThis.__vbspWorldParseTiming` 为 true 时才测。
+    const measureParse = (globalThis as { __vbspWorldParseTiming?: boolean }).__vbspWorldParseTiming === true; const t0 = performance.now();
+    try { if (d.brushJson && measureParse) JSON.parse(d.brushJson); } catch { /* 诊断用，忽略 */ }
     const brushMs = performance.now() - t0;
     const t1 = performance.now();
-    try { if (d.triJson) JSON.parse(d.triJson); } catch { /* 诊断用，忽略 */ }
+    try { if (d.triJson && measureParse) JSON.parse(d.triJson); } catch { /* 诊断用，忽略 */ }
     const triMs = performance.now() - t1;
-    postMessage({ type: 'world-parse-ms', brush: +brushMs.toFixed(1), tri: +triMs.toFixed(1) });
+    if (measureParse) postMessage({ type: 'world-parse-ms', brush: +brushMs.toFixed(1), tri: +triMs.toFixed(1) });
   }
   dispatch(e);
 };
