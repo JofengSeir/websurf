@@ -9,6 +9,10 @@
 //!   `0` 是**合法**偏移，不是哨兵。
 //! - 打包矩形落位后**内缩 2 像素**，使有效矩形恰好等于该面 luxel 数（见 `build_atlas` 的落位
 //!   与 `LightmapRect`）。
+//! - 落位并填像素后，把**空纹素**（1 px 边距与打包留下的未用空间）逐个膨胀成最近的
+//!   有效纹素值（`dilate_empty_texels`，多源 BFS，O(像素数)）。不做这一步时，面边缘的
+//!   lightmap 取样会踩进边距里的 `(0,0,0,0)`、解码成纯黑 ⇒ **每个面的边界上出现黑带**
+//!   （实测 `surf_boreas` 7.3% 的顶点取样落在空纹素上，其中 86% 恰好差 1 纹素）。
 //! - 页形状取 `size_width` / `size_height` 给出的尺寸序列（`1 << ((i + 1) >> 1)` 与
 //!   `1 << (i >> 1)`），按**面积升序**选第一个能装下全部矩形的**允许**形状。允许 = 单边 ≤
 //!   [`MAX_ATLAS_SIDE`] **且** 面积 ≤ [`MAX_ATLAS_PAGE_AREA`] ⇒ **4096×4096 不在允许集内**。
@@ -29,10 +33,12 @@
 //!
 //! 边界：只做打包、落位、像素编码与导出契约注入。不解析 BSP、不选 HDR/LDR（由调用方决定并传入）。
 //!
-//! 测试归属：本文件 6 个 `#[test]`——`single_face_luxel_limit_is_enforced`、
+//! 测试归属：本文件 7 个 `#[test]`——`single_face_luxel_limit_is_enforced`、
 //! `pack_size_sequence_matches_upstream`、`page_shape_policy_is_bounded_both_sides`、
 //! `small_map_keeps_square_page`、`packer_is_deterministic_and_in_bounds`、
-//! `luxel_count_and_encoding_match_formula`。
+//! `luxel_count_and_encoding_match_formula`、`dilate_fills_every_empty_texel`。
+
+use std::collections::VecDeque;
 
 use crate::bsp_to_gltf_core::Error;
 use crate::vbsp::{Bsp, Face, LightingLump, TextureInfo, Vector};
@@ -459,7 +465,11 @@ pub fn build_atlas(
         });
     }
 
-    let mut pixels = vec![0u8; (atlas_width as usize) * (atlas_height as usize) * 4];
+    let atlas_px = atlas_width as usize * atlas_height as usize;
+    let mut pixels = vec![0u8; atlas_px * 4];
+    // 哪些纹素被面覆盖（膨胀的种子）。按**区域**记而不是按「alpha != 0」记：
+    // 合法 luxel 的 exp 可以是 -128（A 回绕成 0），用 alpha 当判据会把它误当空纹素。
+    let mut filled = vec![false; atlas_px];
     for (index, region) in regions.iter().enumerate() {
         let Some(region) = region else { continue };
         let face = &faces[index];
@@ -477,9 +487,13 @@ pub fn build_atlas(
                 pixels[px + 2] = b;
                 // A = exp + 128（exp 是 i8，按 u8 回绕即 +128）
                 pixels[px + 3] = e.wrapping_add(128);
+                filled[(region.y + t) as usize * atlas_width as usize + (region.x + s) as usize] = true;
             }
         }
     }
+
+    // 膨胀：把空纹素填成最近的有效纹素值。见函数 doc 与模块头的黑带说明。
+    dilate_empty_texels(&mut pixels, atlas_width as usize, atlas_height as usize, &mut filled);
 
     Ok(LightmapAtlas {
         width: atlas_width,
@@ -505,6 +519,73 @@ pub fn build_atlas(
         bytes_referenced_end,
         lightofs_max,
     })
+}
+
+/// 把**空纹素**逐个填成最近的有效纹素值（多源 BFS，四邻域，O(像素数)）。
+///
+/// 为什么必须做：打包矩形是 `luxel + 2`、落位时内缩 1 px，于是每个面的有效矩形周围留了一圈
+/// 1 px 边距；打包装不满的页尾与分割残块也留在图集里。这些空纹素是 `(0,0,0,0)`，而渲染端的
+/// 解码式是 `rgb * 2^(a*255-128)` ⇒ 解码出**纯黑**。lightmap 取样在面边缘会取到矩形外的纹素
+/// （顶点 UV 落在 luxel 中心，边缘再往外半纹素就出界），踩到边距就画出一条黑带；实测
+/// `surf_boreas` 有 7.3% 的顶点取样落在空纹素上，其中 86% 恰好差 1 纹素，其余最多差 10。
+///
+/// 填成邻接纹素后，越界取样取到的是**该面自己的边缘 luxel**。外部参照实现不画边距、让越界
+/// 取样直接落到相邻面的 luxel 上，所以它没有这条黑带；本实现在保留边距的同时把边距填满。
+///
+/// 代价与确定性：填满后图集 PNG **更小**（空块从「零散黑」变成「平滑延展」，熵更低）；BFS 的
+/// 推进顺序只由种子顺序与四邻域次序决定 ⇒ 同一输入必得同一份像素。
+///
+/// `filled` 与 `pixels` 同长（每纹素一项）；返回填掉的纹素数。
+fn dilate_empty_texels(pixels: &mut [u8], width: usize, height: usize, filled: &mut [bool]) -> usize {
+    debug_assert_eq!(filled.len() * 4, pixels.len(), "filled 必须与 pixels 等长（按纹素）");
+    let mut queue: VecDeque<usize> = filled
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| if *f { Some(i) } else { None })
+        .collect();
+    let mut added = 0usize;
+    while let Some(p) = queue.pop_front() {
+        let x = p % width;
+        let y = p / width;
+        let src = [
+            pixels[p * 4],
+            pixels[p * 4 + 1],
+            pixels[p * 4 + 2],
+            pixels[p * 4 + 3],
+        ];
+        // 四邻域：左、右、上、下（次序固定 ⇒ 平局时结果确定）
+        let mut neighbors = [0usize; 4];
+        let mut n = 0usize;
+        if x > 0 {
+            neighbors[n] = p - 1;
+            n += 1;
+        }
+        if x + 1 < width {
+            neighbors[n] = p + 1;
+            n += 1;
+        }
+        if y > 0 {
+            neighbors[n] = p - width;
+            n += 1;
+        }
+        if y + 1 < height {
+            neighbors[n] = p + width;
+            n += 1;
+        }
+        for &q in &neighbors[..n] {
+            if filled[q] {
+                continue;
+            }
+            filled[q] = true;
+            queue.push_back(q);
+            pixels[q * 4] = src[0];
+            pixels[q * 4 + 1] = src[1];
+            pixels[q * 4 + 2] = src[2];
+            pixels[q * 4 + 3] = src[3];
+            added += 1;
+        }
+    }
+    added
 }
 
 /// 计算某面某顶点在**图集**里的 lightmap UV（`[0, 1]` 归一化，可直接用于该图集纹理）。
@@ -860,5 +941,52 @@ mod tests {
         assert_eq!(data.len() as u64 / 4, total, "字节数与 luxel 数必须自洽");
         // A = exp + 128（exp 为 i8，按 u8 回绕）
         assert_eq!(data[3].wrapping_add(128), 0, "exp 字节 128 ⇒ +128 回绕为 0");
+    }
+
+    /// 膨胀必须把**每一个**空纹素填掉，且取最近种子值（多源 BFS）。
+    #[test]
+    fn dilate_fills_every_empty_texel() {
+        // 单个种子：全图应变成该种子的值
+        let (w, h) = (7usize, 5usize);
+        let mut pixels = vec![0u8; w * h * 4];
+        let mut filled = vec![false; w * h];
+        let seed = 1 * w + 1;
+        pixels[seed * 4..seed * 4 + 4].copy_from_slice(&[10, 20, 30, 40]);
+        filled[seed] = true;
+        let added = dilate_empty_texels(&mut pixels, w, h, &mut filled);
+        assert_eq!(added, w * h - 1, "空纹素数必须恰好填掉");
+        assert!(filled.iter().all(|f| *f), "不得留下空纹素");
+        for i in 0..w * h {
+            assert_eq!(
+                &pixels[i * 4..i * 4 + 4],
+                &[10, 20, 30, 40],
+                "纹素 {i} 未取到唯一种子的值"
+            );
+        }
+
+        // 两个种子：各自吸引离自己更近的一侧
+        let mut pixels = vec![0u8; w * h * 4];
+        let mut filled = vec![false; w * h];
+        let a = 0usize; // (0,0)
+        let b = (h - 1) * w + (w - 1); // (6,4)
+        pixels[a * 4..a * 4 + 4].copy_from_slice(&[1, 1, 1, 1]);
+        pixels[b * 4..b * 4 + 4].copy_from_slice(&[2, 2, 2, 2]);
+        filled[a] = true;
+        filled[b] = true;
+        dilate_empty_texels(&mut pixels, w, h, &mut filled);
+        let at = |x: usize, y: usize| pixels[(y * w + x) * 4];
+        assert_eq!(at(0, h - 1), 1, "(0,4) 距 A 更近");
+        assert_eq!(at(w - 1, 0), 2, "(6,0) 距 B 更近");
+        assert_eq!(at(0, 0), 1);
+        assert_eq!(at(w - 1, h - 1), 2);
+        // 确定性：同输入同结果
+        let mut p2 = vec![0u8; w * h * 4];
+        let mut f2 = vec![false; w * h];
+        p2[a * 4..a * 4 + 4].copy_from_slice(&[1, 1, 1, 1]);
+        p2[b * 4..b * 4 + 4].copy_from_slice(&[2, 2, 2, 2]);
+        f2[a] = true;
+        f2[b] = true;
+        dilate_empty_texels(&mut p2, w, h, &mut f2);
+        assert_eq!(pixels, p2, "膨胀必须确定性");
     }
 }

@@ -53,7 +53,7 @@
 1. **读**：`BspFile` 定位 lump → `vbsp/reader.rs` 逐 lump 解析成 `vbsp/mod.rs` 与 `vbsp/data/` 里的结构（实体、叶子、面、纹理、game lump）。
 2. **装配**：`convert.rs` 的 `export_bsp_with_models` 是唯一导出入口，内部按序装配模型网格、材质、光照图，并在需要时调用 `model_integrator` 把 BSP 内模型合并进同一份 GLTF。
 3. **缺失资源**：导出期不静默丢弃——用 `ResourceType`/`ResourceSource`/`MissingResource` 描述「缺什么、来自哪里」；材质侧的回退链路见 `documents/materials/overview.md` §4。
-4. **光照图**：`bsp_to_gltf_core/lightmap.rs` 负责按面装配 atlas；页面积上限为常量 `MAX_ATLAS_PAGE_AREA`（`src/wasm-core/bsp_to_gltf_core/lightmap.rs:54`，即最大边长平方的一半）。
+4. **光照图**：`bsp_to_gltf_core/lightmap.rs` 负责按面装配 atlas；页面积上限为常量 `MAX_ATLAS_PAGE_AREA`（`src/wasm-core/bsp_to_gltf_core/lightmap.rs:60`，即最大边长平方的一半）。落位并填像素后，边距与未用空间这些**空纹素**会被膨胀填成最近的有效纹素值（`dilate_empty_texels`，`src/wasm-core/bsp_to_gltf_core/lightmap.rs:539`）——不填时面边缘的取样会踩到 `(0,0,0,0)`、解码成纯黑，在每个面的边界上画出黑带。
 5. **贴图**：三条互不相同的通路（外部 `vtf` crate / 本仓 `texture_utils` / mosaic 字节码）——分工与调用点见 `documents/materials/overview.md` §2。
 
 ## 5. 关键不变量与边界
