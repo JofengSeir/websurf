@@ -60,7 +60,7 @@ export class PanelController {
     private readonly onSyncRenderDistance?: (dist: number) => void,
     /** 曝光（显示侧亮度倍率）→ 渲染器 `setExposure`：全场景共享 uniform，改值后下一次绘制生效。 */
     private readonly onSyncExposure?: (exposure: number) => void,
- * 暗部提升 γ → 渲染器 `setLightGamma`（共享 uniform）；接受窗口 `(0, 8]`（2026-10-08 起），与滑块量程 0.5..6 一致。
+    /** 暗部提升 γ → 渲染器 `setLightGamma`（共享 uniform）；接受窗口 `(0, 8]`（2026-10-08 起），与滑块量程 0.5..6 一致。 */
     private readonly onSyncLightGamma?: (gamma: number) => void,
     /** 模型（prop）烘焙光照亮度 → 渲染器 `setAmbientScale`（共享 uniform，只作用于 ambient cube 路径）。 */
     private readonly onSyncAmbientScale?: (scale: number) => void,
