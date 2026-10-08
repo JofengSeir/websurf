@@ -1325,12 +1325,12 @@ pub struct ModelVertex {
 }
 
 impl ModelVertex {
-    /// 从 vmdl 顶点创建模型顶点
+    /// 从 vmdl 顶点创建模型顶点（**位置与法线都走 `map_coords`**：两者必须同轴序，否则按法线的光照会把方向贴错）
     fn from(vertex: &vmdl::vvd::Vertex, model: &VmdlModel) -> Self {
         ModelVertex {
             position: map_coords(model.apply_root_transform(vertex.position)),
             uv: vertex.texture_coordinates,
-            normal: vertex.normal.into(),
+            normal: map_coords(model.apply_root_transform(vertex.normal)),
         }
     }
 }

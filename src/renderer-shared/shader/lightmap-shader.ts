@@ -1397,7 +1397,7 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
  * 对齐外部参照实现 `StudioModel.sampleAmbientCube`（顶点色通道）——本工程 prop 顶点
  * 多实例共享 mesh（不逐实例上传顶点色），故 cube 走 node extras + uniform + shader 加权：
  * - cube 数据：`vbsp::Bsp::prop_ambient_cube`（leaf 定位 + 最近采样点 + RGBExp32 线性解码）
- * - 权重：`n.x²·cube[±X] + n.y²·cube[±Y] + n.z²·cube[±Z]`（与外部参照实现同式）
+ * - 权重：按 **Source 分量**取槽（cube 槽是 Source 世界轴；由 Three 世界法线换回 Sx=n.z、Sy=n.x、Sz=n.y）——引擎同式见 `common_vertexlitgeneric_dx9.h` 的 `VertexShaderAmbientLight`
  * - 域：cube 已是线性值，直接乘进 linear 域 diffuseColor（不套外部参照实现的
  *   linearToScreenGamma——那是其 sRGB 直出管线的显示变换，同 gamma-parity 的矫正原则）
  * - 无均匀缩放假设：prop scale=1；mat3(modelMatrix) 变换世界法线
@@ -1454,9 +1454,9 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 			"vec3 vbspAmbientRaw() {",
 			"	vec3 n = normalize( vbspWNormal );",
 			"	vec3 c = vec3( 0.0 );",
-			"	c += vbspAmbCube[ n.x < 0.0 ? 1 : 0 ] * ( n.x * n.x );",
-			"	c += vbspAmbCube[ n.y < 0.0 ? 3 : 2 ] * ( n.y * n.y );",
-			"	c += vbspAmbCube[ n.z < 0.0 ? 5 : 4 ] * ( n.z * n.z );",
+			"	c += vbspAmbCube[ n.z < 0.0 ? 1 : 0 ] * ( n.z * n.z );",
+			"	c += vbspAmbCube[ n.x < 0.0 ? 3 : 2 ] * ( n.x * n.x );",
+			"	c += vbspAmbCube[ n.y < 0.0 ? 5 : 4 ] * ( n.y * n.y );",
 			"	return max(c, vec3(0.0));",
 			"}",
 			// ⚠️ 显示 gamma 只能套在**光照项**上（与 `vbsp_ApplyLightmap` 同因）：

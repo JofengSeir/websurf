@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（174 条）
+## 未结项（173 条）
 
 ### 待裁决（64）
 
@@ -101,7 +101,7 @@
 - **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
 - **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 
-### 待修（109）
+### 待修（108）
 
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -204,7 +204,6 @@
 - **T-408** `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de…　`shared`
 - **T-503** mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效　`shared`
 - **T-419** 贴图取不到：VTF 格式（Bgra4444 / Ia88）不受支持 + 两条 VTF 解码路径判定不一致（boreas 4+1 / 666 +1）　`shared`
-- **T-435** 预烘焙光照**方向**：洋红 = 魔法点光 #352（Source [13332,628,12251]，纯洋红），但 GLB 的 `NORMAL` 未随位置做 `map_coords` ⇒ ambient cube 的朝向只对纯 yaw 道具偶然成立，带 pitch 的坡方向会错　`shared`
 
 ### 已取证待立项（2）
 
@@ -414,7 +413,7 @@
 | T-432 | 【S11·根因】位移面的 lightmap UV **不能用投影**：起源 SDK 要求位移面按**细分网格**插值——四角 luxel 坐标恒为 `(0.5,0.5)…(U+0.5,V+0.5)`（`builddisp.cpp` 的 `CalcLuxelCoords` / `CalcDispSurfCoords`），归一化后就是**单位方格** `u=j/2^power`、`v=i/2^power`。我们此前把（已被位移推走的）顶点投影到 lightmap 轴 ⇒ 漂出本面矩形，采到相邻面的光照贴图（owner 说的「混进其他光照贴图」）或图集空白（黑带） | 缺陷 | shared | 已结案 | src/wasm-core/vbsp/handle/mod.rs:391 | 见 progress/monthly/2026-10-6.md:13、:14 | 判据：@BT@node .tmp/mapsurvey/uvrect.mjs test/maps/surf_boreas.bsp .tmp/mapsurvey/pre-surf_boreas-atlas.png@BT@ ⇒ 逐面 uv 盒落在自己矩形内 **1351/1351、越界 0**（改前 **931/1351 = 68.9%**，最大越界 49 纹素、39 个整块落到图集外）；8 张图同法全部 0 越界 | — |
 | T-433 | 【S12·残留黑块的真实层级】owner 参考截图里的黑块 / 紫斑**全部**来自 prop 的逐顶点预烘焙光照路径（几何属性 `_VBSP_VLIGHT`，源文件是 pakfile 的 `sp_<i>.vhv`）：关闭该路径后同一视点纯黑像素 **4.94% → 0.00%**、均值 63.9 → 70.6。解析侧已逐字段对齐 SDK——`vradstaticprops.cpp:1563-1593` 写 `flags=4` / `vertexSize=4` 且顶点为 **B,G,R,A** 顺序，`gamebspfile.h:206-225` 的 `StaticPropLump_t` **没有** ambient cube 字段，与本仓 72 B 记录逐字段吻合；prop→文件的 checksum 校验 **1503 匹配 / 0 不符**。但**数据本身极暗**：1587 个 prop 全图最大字节仅 ~95/255、prop 均值亮度中位数 6.8/255、298 个 prop 全 0。VRAD 侧 `m_Color = direct + indirect`（`vradstaticprops.cpp:1427`）与世界面同一物理量 ⇒「world 亮、prop 近黑」是数据 + 兜底口径问题，**不是**解析错 | 缺陷 | shared | 待裁决 | src/wasm-core/vhv.rs:90 | progress/pending-detail.md | 口径见 OWNER.md **D-016** | — |
 | T-434 | 【S13】碰撞与材质透明度**无关**：`export_model_tri_colliders` 逐 mesh 用 `alpha_mode == 1`（`$translucent`）**剔除**该 mesh 的碰撞三角形 ⇒ 半透明/透明道具整件没有碰撞（实测 `surf_666` 的 `kr_windows` / `details69_window01m`、`surf_sedona` 的 16 个含 `surf_sedona_ramp03` 与 `naz_curve*`：在 `.phy` 输出里存在、在可视输出里被整件剔掉）。另 `world-builder` 的 `auto` 只在**整表为空**时回退可视网格 ⇒ `.phy` 缺失的个别模型静默无碰撞（`surf_666` 5 个、`ze_cursed_bear` 3 个 TRI-ONLY 模型） | 缺陷 | shared | 已结案 | src/ts-shared/phys/world-builder.ts:196 | 本行即全部 | 判据：@BT@node .tmp/mapsurvey/collcmp.mjs@BT@ ⇒ 每张图 @BT@phyOnlyModel=0@BT@，且 @BT@auto@BT@ 的并集覆盖 TRI-ONLY 模型（改前 surf_666 2 个窗、surf_sedona 16 个模型被剔） | — |
-| T-435 | 【S14·洋红/方向】owner 指出「洋红是**魔法元素自带光源**，要考虑它的方向，例如 13539,1284,9884 中央大坑四周的石头模型」。**已定位光源**：`LUMP_WORLDLIGHTS` 第 #352 条 = Source `[13332,628,12251]`、强度 `[690.1, 0.5, 1896.6]`（G≈0，纯洋红），距该视点 2465 HU；近处的 leaf ambient 实测**最亮面是 +Z（上）**（0.123 vs +Y 0.065）⇒ 方向光来自**正上方**。**已定位实现缺陷**：`src/wasm-core/model_integrator/mod.rs:1331` 的**位置**经 `map_coords` 转成 Y-up，而 `:1333` 的**法线**是 `vertex.normal.into()` **原样（Source Z-up）**；引擎口径见 `common_vertexlitgeneric_dx9.h` 的 `VertexShaderAmbientLight`（cube 槽 0/1=±X、2/3=±Y、4/5=±Z，按世界法线加权）。⇒ 渲染端 `vbspAmbCube` 的加权式虽与引擎同形，却因「法线未转、cube 亦未转」而**只对纯 yaw 旋转的道具偶然成立**；带 pitch/roll 的 prop（冲浪坡正是）方向会错 | 缺陷 | shared | 待修 | src/wasm-core/model_integrator/mod.rs:1333 | progress/pending-detail.md | 判据：修后按 **GLB 里的 `NORMAL` 属性**（不是从位置反算）对同一视点做 corr(法线·指向光源, ambient 亮度) ⇒ 明显高于改前；并 13539,1284,9884 同点截帧对照洋红落在**朝上**面 | — |
+| T-435 | 【S14·洋红/方向】owner 指出「洋红是**魔法元素自带光源**，要考虑它的方向，例如 13539,1284,9884 中央大坑四周的石头模型」。**已定位光源**：`LUMP_WORLDLIGHTS` 第 #352 条 = Source `[13332,628,12251]`、强度 `[690.1, 0.5, 1896.6]`（G≈0，纯洋红），距该视点 2465 HU；近处的 leaf ambient 实测**最亮面是 +Z（上）**（0.123 vs +Y 0.065）⇒ 方向光来自**正上方**。**已定位实现缺陷**：`src/wasm-core/model_integrator/mod.rs:1331` 的**位置**经 `map_coords` 转成 Y-up，而 `:1333` 的**法线**是 `vertex.normal.into()` **原样（Source Z-up）**；引擎口径见 `common_vertexlitgeneric_dx9.h` 的 `VertexShaderAmbientLight`（cube 槽 0/1=±X、2/3=±Y、4/5=±Z，按世界法线加权）。⇒ 渲染端 `vbspAmbCube` 的加权式虽与引擎同形，却因「法线未转、cube 亦未转」而**只对纯 yaw 旋转的道具偶然成立**；带 pitch/roll 的 prop（冲浪坡正是）方向会错 | 缺陷 | shared | 已结案 | src/wasm-core/model_integrator/mod.rs:1333 | progress/pending-detail.md | 判据：@BT@node .tmp/mapsurvey/normalfix.mjs@BT@（用 GLB 的 @BT@NORMAL@BT@ 属性，不从位置反算）⇒ 近魔法点光 prop 的**竖直**法线取 cube 的**竖直**面：up=**0.12904**（= 最亮 +Z 面 0.123~0.131）、down=0.03378（≈ 最暗 −Z 面）；改前同一组落在**水平**面（+Y 0.065 / −Y 0.0625）⇒「上方的光」原先被旋了 90°。另 8 向截帧对照 meanAbsDiff 5.3~124，但夹具相机**在空中下落**（帧不齐）⇒ 不作判据，留待 noclip A/B | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/07-is-position-free-vs-trace.md | — | 原 07 §8.4-2 |
