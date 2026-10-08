@@ -200,13 +200,13 @@ export class TrackPanel {
     offInput.type = 'number';
     offInput.step = '0.1';
     offInput.value = String(track.offset);
-    offInput.title = '时间偏移（秒）：本条的第 0 帧对应主时钟的这一刻，用来对齐起跑时刻不同的跑法';
+    offInput.title = '时间偏移（秒，0 ~ 3600）：本条的第 0 帧对应主时钟的这一刻，用来对齐起跑时刻不同的跑法';
     offInput.addEventListener('input', () => {
       const n = Number(offInput.value);
       const valid = Number.isFinite(n);
       offInput.classList.toggle('invalid', !valid);
       if (!valid) return;
-      track.offset = Math.max(0, n);
+      track.offset = Math.min(3600, Math.max(0, n)); // 上限 1 h：防止误输入把主时钟总长拉到荒谬长度（T-124）
       this.opts.onChange();
     });
     line2.appendChild(offInput);

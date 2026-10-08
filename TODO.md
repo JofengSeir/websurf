@@ -26,8 +26,8 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（156 条）
-### 待裁决（30）
+## 未结项（155 条）
+### 待裁决（29）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
 - **T-031** game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB）　`game`
@@ -44,7 +44,6 @@
 - **T-113** svc_GameEvent 只按长度跳过，事件描述符表未保存　`viewer`
 - **T-116** 注入期 throw 不在本工程调用方 catch 覆盖范围内　`shared`
 - **T-117** broken 阶段对照靠失配字面量维持，three 升级需同步　`shared`
-- **T-124** Track.offset 只有下界没有上界，可拉长主时钟总长　`viewer`
 - **T-125** 零帧轨道的口径不一致（列表面板有卡片、3D 无对象）　`viewer`
 - **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
 - **T-143** el() 属性写入限制了 id 型契约（undefined 静默无 id）　`viewer`
@@ -246,7 +245,7 @@
 | T-121 | disposeTree 不释放轨迹线（Line）与 tick 点（Points） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/visuals.ts:168 | documents/viewer/implementation/replay.md | 判据：反复载入/卸载场景 ⇒ 轨迹线（Line）与 tick 点（Points）被释放（@BT@renderer.info.memory@BT@ 回落） | — |
 | T-122 | createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL | 缺陷 | viewer | 待修 | apps/viewer/src/replay/importer.ts:101 | documents/viewer/implementation/replay.md | 判据：重起 Worker 后 blob URL 不累积（@BT@createObjectURL@BT@ 与 @BT@revokeObjectURL@BT@ 配对） | — |
 | T-123 | 导入无超时与取消，Worker 不回消息时 Promise 永不结算 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/importer.ts:137 | documents/viewer/implementation/replay.md | 判据：Worker 不回消息时导入 Promise 以超时结算（不再永不 settle），并可取消 | — |
-| T-124 | Track.offset 只有下界没有上界，可拉长主时钟总长 | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/trackpanel.ts:204 | documents/viewer/implementation/replay.md | — | — |
+| T-124 | Track.offset 只有下界没有上界，可拉长主时钟总长 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/trackpanel.ts:209 ⇒ `Math.min(3600, Math.max(0, n))`（上限 1 h），提示语写明 0~3600；`npm run typecheck` 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-125 | 零帧轨道的口径不一致（列表面板有卡片、3D 无对象） | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/visuals.ts:96 | documents/viewer/implementation/replay.md | — | — |
 | T-126 | panel.ts 平移输入框 hint 写「默认 0」而 step 为 10 HU | 文档口径 | viewer | 待修 | apps/viewer/src/replay/panel.ts:154 | documents/viewer/implementation/replay.md | 判据：@BT@git grep -n "默认 0" -- apps/viewer/src/replay/panel.ts@BT@ ⇒ hint 与 @BT@step=10 HU@BT@ 一致 | — |
 | T-127 | 真实夹具路径跨三处失效（指向 test/maps 而非 test/replay） | 缺陷 | viewer | 已结案 | apps/viewer/test/replay-selftest.ts:77 ⇒ 夹具路径改指 test/replay（4 层，与 :912 同口径）；`npm run test:replay` ⇒ fixture 可读 / 53365 B / 字节闭合 全 ok | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
