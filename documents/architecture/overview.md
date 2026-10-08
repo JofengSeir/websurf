@@ -64,7 +64,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 | 单步（返回状态对象）`tick` | `src/phys/mod.rs:341` |
 | 单步（零分配，写共享缓冲）`tick_into` | `src/phys/mod.rs:364` |
 | 参数写入 `set_params`（JSON 键通道） | `src/phys/mod.rs:881` |
-| 世界数据 `World` | `src/phys/world.rs:1076` |
+| 世界数据 `World` | `src/phys/world.rs:1084` |
 | 传送门检测 `check` | `src/phys/teleport.rs:266` |
 
 ### 4.2 解析层（Rust）

@@ -20,7 +20,7 @@
 | 文件 | 职责 |
 |---|---|
 | `src/phys/mod.rs` | wasm-bindgen 绑定层：`PhysWorld` 实例、参数写入、状态导出、零分配支路、事件槽 |
-| `src/phys/world.rs` | 世界几何与碰撞：brush / 三角网格双空间索引、射线与包围盒查询（`pub struct World`，`src/phys/world.rs:1076`） |
+| `src/phys/world.rs` | 世界几何与碰撞：brush / 三角网格双空间索引、射线与包围盒查询（`pub struct World`，`src/phys/world.rs:1084`） |
 | `src/phys/player.rs` | 玩家运动语义与参数结构（`pub struct PhysParams`，`src/phys/player.rs:175`；步进入口 `player_tick`，`src/phys/player.rs:1676`） |
 | `src/phys/teleport.rs` | 传送触发与冷却（入口 `pub fn check`，`src/phys/teleport.rs:267`） |
 | `src/phys/seed.rs` | 种子/确定性支持（私有模块，不对外导出） |

@@ -30,10 +30,13 @@
 //!   `DIST_EPSILON / 8.0`（0.00390625，**不在模块作用域**）：无限平面造成的假进入
 //!   只跳过该条平面，保留同一实体更晚的真实接触，不做整实体否决；
 //! - 网格查询给出的是**超集**（AABB 相交即候选），是否真的命中由 `clip_planes` 决定；
-//! - **三角形是「面」不是实心体**（`clip_box_to_triangle`）：接触只由面法线 ±n 产生，三条
-//!   边墙只作「接触处盒仍搭在该三角形面域上」的门，**不产生接触也不出法线**；因此三角形
-//!   **不参与 `start_solid` / `all_solid`** —— 盒跨在面两侧是贴地/贴坡的常态，不是嵌入实体，
-//!   把它当实心会让贴面行走每 tick 误报一次「起点在实体内」。
+//! - **三角形走 Minkowski 和的精确面集**（`clip_box_to_triangle`）：三角面 ⊕ 盒顶点（±n）、
+//!   三角边 ⊕ 盒棱（每条边 ×3 盒轴，法线 `cross(edge, axis)`）、三角顶点 ⊕ 盒面（±三轴）。
+//!   等价于 SDK `CDispCollTree::SweepAABBTriIntersect` 的 `AxisPlanesXYZ` + `EdgeCrossAxis*`。
+//!   少掉边/轴两类 ⇒ 盒脚印跨棱线时一次接触都不产生（会穿过去）；只用「边墙」
+//!   `cross(edge, n)` 代替 ⇒ 障碍集被放大（那条法线的支撑集只有 1 维），贴坡时会被横法线
+//!   挡死（「脚底黏住」）。三角形**不参与 `start_solid` / `all_solid`**：盒跨在面两侧是
+//!   贴地/贴坡的常态，不是嵌入实体，当实心会让贴面行走每 tick 误报一次「起点在实体内」。
 //! - 大对象兜底：跨度超 `BIG_CELL_LIMIT`（512 个 cell）的对象进 `big` 列表，
 //!   每次查询无条件参与。
 //!
@@ -443,19 +446,35 @@ fn clip_box_to_brush(
     );
 }
 
-/// 扫掠盒 vs 单个三角形：模型可视网格原样参与碰撞，不做 brush 近似。
+/// 扫掠盒 vs 单个三角形：取 **Minkowski 和 `三角形 ⊕ 盒` 的精确面集**（SDK 口径）。
 ///
-/// **三角形是「面」，不是实体**：置换面恒走这条路，`.phy` 里凸性不达标的块也走它。
-/// 它没有内部，所以这里只回答两件事：① 盒有没有**穿过这张面**（面用 ±法线两条零厚度
-/// 平面表达，Minkowski 扩张后自然有厚度，故双面都可碰）；② 接触处盒是否仍搭在三角形
-/// **面域**上（三条边各一条侧平面，法线 `normalize(cross(edge, n))` 再按质心翻正，
-/// 顶点绕序不影响结果）——② 只当门，不产生接触、不出法线。
+/// 三角形是「面」不是实体（置换面恒走这条路，`.phy` 里凸性不达标的块也走它），
+/// 故障碍集是 `Tri ⊕ (-Box)`，它的面（facet）只有三类，**缺一类就漏接触**：
 ///
-/// 边墙若也参与接触（把它当实心棱），贴坡行走时盒的前缘会在相邻三角的**棱线**上被
-/// 一张横法线挡住，法线又几乎与移动方向相反 ⇒ 速度被整段剪掉、每 tick 只挪零点几 HU，
-/// 表现为「脚底黏住」。面只沿自己的法线推人，故本函数的法线恒取自 ±n。
+/// 1. **三角面 ⊕ 盒顶点** ⇒ ±n 两张零厚度平面（Minkowski 扩张后自然带盒的厚度）；
+/// 2. **三角边 ⊕ 盒棱（沿盒轴）** ⇒ 每条边 ×3 条盒轴，法线 `normalize(cross(edge, axis))`；
+/// 3. **三角顶点 ⊕ 盒面** ⇒ ±x/±y/±z 六张，`dist` 取三角形在该轴向上的支撑值。
 ///
-/// 退化情形直接返回：三角形面积近似 0（`|cross| < 1e-8`）。
+/// 三类合起来等价于 SDK `CDispCollTree::SweepAABBTriIntersect`（`public/dispcoll_common.h`）：
+/// 它以 `AxisPlanesXYZ`（第 3 类）+ `Cache_EdgeCrossAxisX/Y/Z`（第 2 类）+ 三角面逐面求交，
+/// 再用 `ResolveRayPlaneIntersect` 定进入/离开分数 —— 即引擎对置换面那套「盒 vs 三角」扫掠。
+///
+/// **为什么不能只留第 1 类**（2026-10-08 实测）：盒的脚印**跨过三角形棱线**时，面平面的进入
+/// 分数是用「盒沿 n 的支撑角」算的，而那个角可能落在三角形面域**之外** ⇒ 命中处盒 AABB 与
+/// 该三角形 AABB 分离 ⇒ `aabb_overlaps_at` 正当否决 ⇒ 该三角形一次接触都不产生 ⇒ 盒**从棱线
+/// 处穿过去**（`surf_boreas` 13183,10060 附近 `__disp_176` 的棱上，连跳几下就掉到 -256）。
+/// 补上第 2/3 类后棱线自会被 `cross(edge, axis)` 面接住。
+///
+/// **为什么不能用「边墙」`cross(edge, n)` 代替第 2 类**（2026-10-07/08 两轮实测）：那条法线
+/// **不是** `Tri ⊕ (-Box)` 的面（其支撑集是 1 维的），它属于 `Tri ⊕ 线段(n)` ⇒ 障碍集被放大，
+/// 贴坡行走时盒的前缘会在相邻三角的棱线上被一张横法线挡住、法线又几乎与移动方向相反 ⇒
+/// 速度被整段剪掉、每 tick 只挪零点几 HU（表现为「脚底黏住」）。第 2 类的法线是斜的，
+/// 接触后盒沿坡面滑走。
+///
+/// 三角形不写 `start_solid` / `all_solid`：盒跨在面两侧是站/贴面的常态，不是嵌入实体；
+/// 写成实心会让贴面行走每 tick 命中一次「起点实心」把速度清零。
+///
+/// 退化情形直接返回：三角形面积近似 0（`|cross| < 1e-8`）；法线平行的边不产面（`continue`）。
 ///
 /// 喂给 `aabb_overlaps_at` 的实体 AABB 是三个顶点现算的三角形包围盒，
 /// **不是** `TriMesh` 的 `min` / `max` 字段。
@@ -485,40 +504,48 @@ fn clip_box_to_triangle(
     let n = [raw_n[0] / n_len, raw_n[1] / n_len, raw_n[2] / n_len];
     let d = dot(&n, &va);
 
-    // 质心：只用于给边平面的法线定向（不是几何中心之外的任何量）
-    let centroid = [
-        (va[0] + vb[0] + vc[0]) / 3.0,
-        (va[1] + vb[1] + vc[1]) / 3.0,
-        (va[2] + vb[2] + vc[2]) / 3.0,
-    ];
+    // 三角形在方向 u 上的支撑值（面集里每张面的 `dist` 都取它，故面都恰是支撑面）
+    let support = |u: &V3| dot(u, &va).max(dot(u, &vb)).max(dot(u, &vc));
 
-    // 面平面：±n 两条、厚度 0。**接触只由它们产生** —— 三角形是「面」不是实体
-    // （置换面恒走这条路；`.phy` 里凸性不达标的块也走它），它没有内部，故本函数
-    // **不写 `start_solid` / `all_solid`**：盒跨在面两侧是站/贴面的常态，不是嵌入实体。
-    // 写成实心会让贴面行走每 tick 命中一次「起点实心」，把速度清零（表现为脚底黏住）。
-    let face_planes = [
-        Plane { normal: n, dist: d },
-        Plane { normal: [-n[0], -n[1], -n[2]], dist: -d },
-    ];
+    // 第 1 类：三角面 ⊕ 盒顶点（±n）
+    let mut planes: Vec<Plane> = Vec::with_capacity(17);
+    planes.push(Plane { normal: n, dist: d });
+    planes.push(Plane {
+        normal: [-n[0], -n[1], -n[2]],
+        dist: -d,
+    });
 
-    // 三条边墙：只作「接触处盒仍与三角形面域相交」的门，**不产生接触、不算法线**。
-    // 它们必须留在判据里，否则面平面退化成无限平面：盆沿/崖边外侧的盒会被假接触挡住。
-    let mut walls: Vec<Plane> = Vec::new();
+    // 第 2 类：三角边 ⊕ 盒棱（三条盒轴）
+    let axes: [V3; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     for (pa, pb) in [(&va, &vb), (&vb, &vc), (&vc, &va)] {
         let e = sub(pb, pa);
-        let raw = cross(&e, &n);
-        let len = (dot(&raw, &raw)).sqrt();
-        if len < 1e-8 {
-            continue; // 与面法线平行的退化边
+        for ax in &axes {
+            let raw = cross(&e, ax);
+            let len = (dot(&raw, &raw)).sqrt();
+            if len < 1e-8 {
+                continue; // 边与盒轴平行 ⇒ 该面退化成零面积，跳过
+            }
+            let u = [raw[0] / len, raw[1] / len, raw[2] / len];
+            planes.push(Plane {
+                normal: u,
+                dist: support(&u),
+            });
         }
-        let mut en = [raw[0] / len, raw[1] / len, raw[2] / len];
-        let mut ed = dot(&en, pa);
-        // 质心必须在「内侧」（负侧）；否则翻转该边平面（顶点顺序无关）
-        if dot(&en, &centroid) - ed > 0.0 {
-            en = [-en[0], -en[1], -en[2]];
-            ed = -ed;
+    }
+
+    // 第 3 类：三角顶点 ⊕ 盒面（±三轴）
+    for i in 0..3 {
+        for s in [1.0, -1.0] {
+            let mut u: V3 = [0.0, 0.0, 0.0];
+            u[i] = s;
+            planes.push(Plane {
+                normal: u,
+                dist: support(&u),
+            });
         }
-        walls.push(Plane { normal: en, dist: ed });
+    }
+    if planes.len() < 4 {
+        return; // 退化保护（正常路径恒 17 张）
     }
 
     // 三角形自己的包围盒：与 brush 同一条必要校验路径（命中处盒 AABB 必须与它重叠）
@@ -533,34 +560,15 @@ fn clip_box_to_triangle(
         va[2].max(vb[2]).max(vc[2]),
     ];
 
+    // 走 `cand` 再挑字段：三角形**不传播** `start_solid` / `all_solid`（见上）
     let mut cand = TraceResult::new(*end);
-    clip_planes(&face_planes, start, end, mins, maxs, &tmin, &tmax, &mut cand);
+    clip_planes(&planes, start, end, mins, maxs, &tmin, &tmax, &mut cand);
     if cand.fraction >= 1.0 || cand.fraction >= result.fraction {
-        return;
-    }
-    let at = [
-        start[0] + (end[0] - start[0]) * cand.fraction,
-        start[1] + (end[1] - start[1]) * cand.fraction,
-        start[2] + (end[2] - start[2]) * cand.fraction,
-    ];
-    if !walls_touched_at(&walls, &at, mins, maxs) {
         return;
     }
     result.fraction = cand.fraction;
     result.normal = cand.normal;
     result.steepest_normal = cand.steepest_normal;
-}
-
-/// 盒（盒心 `at` + `mins` / `maxs`）在接触分数处是否仍与三角形**面域**相交。
-///
-/// 逐条边墙取盒的「最内侧角」（`plane_offset` 的 min 角约定）与墙比较：任一墙整盒落在
-/// 外侧即判不相交。min 角约定天然含盒的横向尺寸，故盒压在三角形**棱线**上（盒心已越界、
-/// 盒体仍搭在面域上）同样算相交。
-fn walls_touched_at(walls: &[Plane], at: &V3, mins: &V3, maxs: &V3) -> bool {
-    walls.iter().all(|p| {
-        let dist = p.dist - plane_offset(&p.normal, mins, maxs);
-        dot(&p.normal, at) - dist <= 0.0
-    })
 }
 
 // ---------------------------------------------------------------------------

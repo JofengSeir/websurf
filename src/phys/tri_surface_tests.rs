@@ -5,6 +5,10 @@
 //!   `is_position_free` 为真、追踪不写 `start_solid` / `all_solid`。修前把三角形当
 //!   实心凸体（±法线 + 三条边墙的 5 面闭集），贴面行走每 tick 被判「起点实心」，
 //!   `check_stuck` 冻结、或移动被剪成每 tick 零点几 HU —— owner 报的「脚底黏住」。
+//! - **面集是 Minkowski 和 `三角形 ⊕ 盒` 的精确面集**（SDK `CDispCollTree::SweepAABBTriIntersect`）：
+//!   面（±n）+ 边×盒轴（`cross(edge, axis)`）+ 盒轴（±x/±y/±z）。少掉后两类时，盒的脚印
+//!   跨过三角形棱线会**一次接触都不产生**（面平面的支撑角落在三角面域之外 ⇒
+//!   `aabb_overlaps_at` 否决 ⇒ 盒从棱线处穿过去）。第 5 项钉住这一条。
 //! - **边墙不出法线**：接触法线恒取面法线 ±n。边墙若也参与接触，盒的前缘会在相邻三角
 //!   的**棱线**上被一张横法线挡住，法线又几乎与移动方向相反 ⇒ 速度被整段剪掉。
 //!   第 2 项（沿锯齿坡滑行不被边墙挡）与第 3 项（陡面仍按面法线挡）钉住这条的两侧；
@@ -185,5 +189,40 @@ fn walking_up_a_faceted_triangle_slope_keeps_horizontal_speed() {
     assert!(
         advanced > 200.0,
         "沿坡应正常前进：净 −z 位移 {advanced:.1} HU（起点 z={z0}）"
+    );
+}
+
+/// 5. 盒的脚印跨过三角形棱线时**必须被接住**（不能穿过去）。
+///
+/// 夹具是 `surf_boreas` 里真实出问题的那张置换三角（`__disp_176` 的 tri#124，
+/// 位于 13183,10060 附近）：脚印跨在它的 A–C 棱上。修前（只留面平面）实测同一扫掠
+/// `fraction = 1.0000`（一次接触都不产生）⇒ 玩家从棱线处掉进地图底。
+#[test]
+fn a_box_descending_across_a_triangle_edge_is_caught() {
+    let m = mesh(
+        "disp176",
+        vec![
+            [13344.2, 719.0, 10048.0],
+            [13234.3, 705.8, 10048.0],
+            [13337.6, 694.7, 10176.0],
+        ],
+        vec![[0, 1, 2]],
+    );
+    let mut w = world(m);
+    let tr = w.trace(&[13340.0, 900.0, 10050.0], &[13340.0, -300.0, 10050.0], &MINS, &MAXS);
+    assert!(
+        tr.fraction < 1.0,
+        "脚印跨棱线的盒必须被三角形接住：frac={}（修前为 1.0，即穿过去）",
+        tr.fraction
+    );
+    let n = tr.normal.expect("命中必须给法线");
+    assert!(
+        n[1] > 0.3,
+        "接住它的应是三角面或过棱的斜补面（法线朝上），实际 {n:?}"
+    );
+    let hit_y = 900.0 - 1200.0 * tr.fraction;
+    assert!(
+        hit_y > 690.0 && hit_y < 760.0,
+        "落点应在该三角附近（±40 HU），实际 y={hit_y:.1}"
     );
 }

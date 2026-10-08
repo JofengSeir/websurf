@@ -143,21 +143,17 @@
   ],
   "cochange": [],
   "claim": {
-    "task": "T-444",
+    "task": "T-445",
     "may": [
       "src/phys/world.rs",
-      "src/phys/mod.rs",
       "src/phys/tri_surface_tests.rs",
       "TODO.md",
-      "OWNER.md",
       "CHANGELOG.md",
       "progress/monthly/2026-10-6.md",
       "progress/index.md",
       "documents/architecture/overview.md",
-      "documents/game/implementation/input.md",
-      "documents/game/implementation/scripts.md",
       "documents/phys/overview.md",
-      "src/scripts/docflow.json"
+      "docflow.json"
     ],
     "must": [
       "src/phys/world.rs",
@@ -165,19 +161,17 @@
       "TODO.md"
     ],
     "base": {
-      "src/phys/world.rs": "34ea50ed8a7f7410dbb1dfc2ebd04e53e82bb280a42afc9fea6bf2d0458b4c7e",
-      "src/phys/mod.rs": "600ddc71355124f716e8ff26aaf7e56e9a59aca9487aa7ce7553fd2c35a80e34",
-      "TODO.md": "b089e87ea7c0e2451517a1a94cdf77e847ec1aa0a0d598d64e834bbd40fcfb38",
-      "OWNER.md": "21cd233e894fe42133bf10e8cb9d196ab9da2547bcce5feb7ecd9bb745c9b278",
-      "CHANGELOG.md": "da1baac562f5014a44980fcae3025b9eb8343b2093c801fc872f84f23becf75a",
-      "progress/monthly/2026-10-6.md": "ac7d5b4bfbc3d5ed37675e0f53cfaedf08d3267560641ab3c54fcf2a3169f17a",
-      "progress/index.md": "28aed9799134e7d3a0f43f4fb84900ba1856c66aa11e050ffd36c2b6d7b481ec",
-      "documents/architecture/overview.md": "f6cce8dabe551b337bc3fe0dfa1ec5f96e64ee6731e73779d67f690bdaa17f87",
-      "documents/game/implementation/input.md": "d8e1c1fa710bb7ad3c5938bc36115d24d2143916a1d2de81767a8967e1048173",
-      "documents/game/implementation/scripts.md": "ff6bb2a618fdb9e3a255ee89efc4065deaaaf2608d23b140463a9b13725f15eb",
-      "documents/phys/overview.md": "2efe43f35173080cec05b7171c8d89eb78c83655323bd8076f4c81a4361fa5f7"
+      "src/phys/world.rs": "adeb5beb1d34dc88adf2bb90fd334201076a6c6e5aee6375a615229070502784",
+      "src/phys/tri_surface_tests.rs": "61c78a888f91549f1f707a026461bc956b7fdd733a85661ab15e3f79289f8b0e",
+      "TODO.md": "8ca9474b5d73f6321b4267be23497d2ce1115227c788150bb17c3ef7a4321b64",
+      "CHANGELOG.md": "386febf9ef48e28c5b637f0a84e0845d65b101e83b75c0d595f6a6efe98c96c8",
+      "progress/monthly/2026-10-6.md": "5acfa5cd5ae2f58f2d51b35b4f7a1f0a29b9147fd69e8a8e38c5025cd86d9cf5",
+      "progress/index.md": "38e7e6dfcb54f4025b7e794bacc1250fb3de4471ad3a22ea9d7d97292ef66a67",
+      "documents/architecture/overview.md": "40b69adb8c4d4fa3cc34265cd74e1361faa51f0bf4e1d3272ec7691d3fb157fc",
+      "documents/phys/overview.md": "13470f6bf05068bef8ce90ba489054faff2dc6c5e7c94945eec44cb507a55ac4",
+      "docflow.json": "c94c429171f64aa53696c12fcf21bb5cc9cbd830234b3b7a74af8f430bb0cdd6"
     },
-    "at": "2026-10-08T14:42:32.190Z",
+    "at": "2026-10-08T15:28:13.601Z",
     "pins": {
       "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -1453,71 +1447,77 @@
         "at": "2026-10-08",
         "line": 425
       },
+      "T-445": {
+        "p": "0704d7e26480db58bf95fd80f17d16995ff8c010e96b0804b4463f72310cf804",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-08",
+        "line": 426
+      },
       "T-441": {
         "p": "bbe56cd331b48595acc3d960d91ef2287c8b8f6291a78eef3491852bd7a3950c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 426
+        "line": 427
       },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 427
+        "line": 428
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 428
+        "line": 429
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 429
+        "line": 430
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 430
+        "line": 431
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 431
+        "line": 432
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 432
+        "line": 433
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 433
+        "line": 434
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 434
+        "line": 435
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 435
+        "line": 436
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 436
+        "line": 437
       }
     },
     "OWNER.md": {
@@ -1909,7 +1909,8 @@
       "src/renderer-shared/shader/lightmap-shader.ts:1342:1342": "b1e930ca",
       "apps/debug/src/renderer/collider-debug.ts:1196:1196": "18c88ad6",
       "apps/game/src/renderer/renderer-main.ts:1020:1020": "1e2f455c",
-      "src/phys/world.rs:441:441": "cad0a285",
+      "src/phys/world.rs:449:449": "0ee8ea43",
+      "src/phys/world.rs:449:449~2": "0ee8ea43",
       "src/ts-shared/phys/world-builder.ts:203:203": "b0c68575",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
@@ -1928,7 +1929,7 @@
       "src/phys/mod.rs:341:341": "46ed07c0",
       "src/phys/mod.rs:364:364": "300a4c5d",
       "src/phys/mod.rs:881:881": "13eb2237",
-      "src/phys/world.rs:1076:1076": "b22efcc4",
+      "src/phys/world.rs:1084:1084": "b22efcc4",
       "src/phys/teleport.rs:266:266": "c4bb8939",
       "src/wasm-core/vbsp/bspfile.rs:28:28": "42d62ccb",
       "src/wasm-core/vbsp/reader.rs:71:71": "69af7903",
@@ -3562,7 +3563,7 @@
     "documents/phys/overview.md": {
       "src/phys/mod.rs:189:189": "58d7cfb9",
       "src/phys/mod.rs:52:52": "28a5b6d3",
-      "src/phys/world.rs:1076:1076": "b22efcc4",
+      "src/phys/world.rs:1084:1084": "b22efcc4",
       "src/phys/player.rs:175:175": "798c330f",
       "src/phys/player.rs:1676:1676": "eb2137b2",
       "src/phys/teleport.rs:267:267": "e01a64d4",
@@ -5232,6 +5233,30 @@
   "rebaselines": [
     {
       "path": "documents/phys/overview.md",
+      "at": "2026-10-08T15:28:01.126Z",
+      "by": "agent",
+      "reason": "T-445：src/phys/world.rs 的 clip_box_to_triangle 从「±n 面 + 边墙当门」改为 Minkowski 精确面集（17 张面，净 +8 行）⇒ 文档里指向该文件的行号整体平移；已逐条复核新行号仍指向同一符号后重钉",
+      "changed": 2,
+      "total": 29
+    },
+    {
+      "path": "documents/architecture/overview.md",
+      "at": "2026-10-08T15:28:00.989Z",
+      "by": "agent",
+      "reason": "T-445：src/phys/world.rs 的 clip_box_to_triangle 从「±n 面 + 边墙当门」改为 Minkowski 精确面集（17 张面，净 +8 行）⇒ 文档里指向该文件的行号整体平移；已逐条复核新行号仍指向同一符号后重钉",
+      "changed": 2,
+      "total": 33
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-08T15:28:00.823Z",
+      "by": "agent",
+      "reason": "T-445：src/phys/world.rs 的 clip_box_to_triangle 从「±n 面 + 边墙当门」改为 Minkowski 精确面集（17 张面，净 +8 行）⇒ 文档里指向该文件的行号整体平移；已逐条复核新行号仍指向同一符号后重钉",
+      "changed": 3,
+      "total": 204
+    },
+    {
+      "path": "documents/phys/overview.md",
       "at": "2026-10-08T14:41:50.971Z",
       "by": "agent",
       "reason": "T-444：src/phys/world.rs 的 clip_box_to_triangle 改为「三角形是面」语义（净 +38 行）、src/phys/mod.rs 新增 tri_surface_tests 模块（+3 行）⇒ 文档里指向这两个文件的行号整体平移；已逐条复核新行号仍指向同一符号（PhysWorld / World / impl PhysWorld / build_world / tick / new / death_y 等）后重钉",
@@ -5525,30 +5550,6 @@
       "reason": "T-430 续：天空遍按引擎 Enable3dSkyboxFog 用 sky_camera 自己的雾（+14 行）⇒ 行号平移，锚点按内容对位重钉",
       "changed": 12,
       "total": 187
-    },
-    {
-      "path": "documents/viewer/differences.md",
-      "at": "2026-10-08T03:09:25.748Z",
-      "by": "agent",
-      "reason": "T-430：renderer-main.ts 新增第二相机两遍法（+82 行）⇒ 行号平移，锚点按内容对位重钉",
-      "changed": 8,
-      "total": 94
-    },
-    {
-      "path": "documents/game/differences.md",
-      "at": "2026-10-08T03:09:25.653Z",
-      "by": "agent",
-      "reason": "T-430：renderer-main.ts 新增第二相机两遍法（+82 行）⇒ 行号平移，锚点按内容对位重钉",
-      "changed": 6,
-      "total": 73
-    },
-    {
-      "path": "documents/debug/sequences.md",
-      "at": "2026-10-08T03:09:25.561Z",
-      "by": "agent",
-      "reason": "T-430：renderer-main.ts 新增第二相机两遍法（+82 行）⇒ 行号平移，锚点按内容对位重钉",
-      "changed": 37,
-      "total": 148
     }
   ]
 }
