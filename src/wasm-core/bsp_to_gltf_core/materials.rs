@@ -264,7 +264,7 @@ pub fn load_material_fallback(
             MaterialData {
                 name: name.to_string(),
                 path: String::new(),
-                color: [255, 255, 255, 255],
+                color: FALLBACK_BASE_COLOR, // 与本文件 BSP 通路同口径：真正无纹理面用缺省深灰
                 ..MaterialData::default()
             }
         }
@@ -276,7 +276,7 @@ pub fn load_material_fallback(
 /// 返回：成功返回解析结果；失败返回 `MaterialData`，先按**材质名**查
 /// `options.missing_fallback`（`scale = 8`，解码成图像后作为该材质的贴图，
 /// 颜色仍是纯白，透明度由 `push_material` 按贴图自身的 alpha 镂空补判）；
-/// 回退表也没命中时返回纯白默认材质（`path` 为空串）。
+/// 回退表也没命中时返回缺省深灰兜底材质（`FALLBACK_BASE_COLOR`，`path` 为空串）。
 /// 失败时同样在 `options.generate_missing_list` 为真时追加一条
 /// `ResourceType::Material` + `ResourceSource::BspFile` 记录。
 ///
@@ -325,7 +325,7 @@ pub fn load_material_fallback_bsp(
             MaterialData {
                 name: name.to_string(),
                 path: String::new(),
-                color: [255, 255, 255, 255],
+                color: FALLBACK_BASE_COLOR, // 兜底贴图也没命中 ⇒ 真正无纹理面：缺省深灰（不是纯白），可辨识且不与纹理面硬接
                 ..MaterialData::default()
             }
         }
@@ -434,7 +434,7 @@ pub(crate) fn load_material_bsp(
             return Ok(MaterialData {
                 name: name.to_string(),
                 path: vmt_path,
-                color: parse_dollar_color(&vdf).unwrap_or([255, 255, 255, 255]),
+                color: parse_dollar_color(&vdf).unwrap_or(FALLBACK_BASE_COLOR),
                 wireframe: parse_shader_name(&vdf)
                     .map(|s| s.eq_ignore_ascii_case("wireframe"))
                     .unwrap_or(false),
@@ -475,7 +475,7 @@ pub(crate) fn load_material_bsp(
             let water = matches!(material, vmt_parser::material::Material::Water(_)); // Water 无 $basetexture ⇒ 上游口径的半透明水色
             return Ok(MaterialData {
                 name: name.to_string(), path: vmt_path,
-                color: if water { [82, 180, 217, 128] } else { parse_dollar_color(&vdf).unwrap_or([255, 255, 255, 255]) },
+                color: if water { [82, 180, 217, 128] } else { parse_dollar_color(&vdf).unwrap_or(FALLBACK_BASE_COLOR) },
                 translucent: water,
                 ..MaterialData::default()
             });
@@ -647,3 +647,11 @@ fn decode_vtf_by_texture_utils<E: std::fmt::Debug>(
         .decode(0)
         .map_err(|e| Error::Other(format!("两条 VTF 解码路径均失败（本仓解码: {:?}）", e)))
 }
+
+/// 「无 `$basetexture`」与「着色器不被识别」两条兜底路径的**缺省基色**（低饱和深灰）。
+///
+/// 为什么不是纯白：地图作者常用「无 `$basetexture` 的 VMT」表达无纹理面，缺省白会让成片面与相邻
+/// 纹理面硬接、看着像绘制失败（`progress/open-issues/04-wasm-untextured-surface-color.md`）。深灰让
+/// 「缺资源」在画面上可辨识又不抢眼；作者显式写了 `$color` 时仍以作者值为准。成功路径（有贴图）
+/// 仍固定纯白，不受本常量影响。
+const FALLBACK_BASE_COLOR: [u8; 4] = [64, 64, 72, 255];
