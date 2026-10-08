@@ -24,7 +24,7 @@ import {
   parseShavitReplay,
 } from '../replay/shavit-replay.js';
 import { clipFromGokzRec, fileLooksLikeGokzRec, parseGokzRec } from '../replay/gokz-rec.js';
-import type { ParseRequest, ParseResponse } from '../replay/protocol.js';
+import type { ClipPayload, ParseRequest, ParseResponse } from '../replay/protocol.js';
 import type { Clip } from '../replay/types.js';
 
 // Worker 全局面不再手写类型：直接用 `lib` 里的 `WebWorker`（`apps/viewer/tsconfig.json` 的
@@ -84,14 +84,14 @@ async function handle(req: ParseRequest): Promise<void> {
           // File.lastModified 是 ms；时间戳兜底取 Unix 秒（与 Shavit 路径同口径）
           timestampFallback: Math.floor(file.lastModified / 1000),
           // 坐标映射切换（默认 shavit 定标映射；仅用户显式切换时非默认）
-          mapping: { axesMode: req.rule.axesMode, yawMode: req.rule.yawMode },
-        }), req.rule)
+          mapping: { axesMode: ruleOf(req).axesMode, yawMode: ruleOf(req).yawMode },
+        }), ruleOf(req))
       : clipFromShavitReplay(req.name, parseShavitReplay(bytes, {
           // File.lastModified 是 ms；.replay 头部 iTimestamp 是 Unix 秒（mtime 兜底同单位）
           timestampFallback: Math.floor(file.lastModified / 1000),
           // 坐标映射切换（默认 shavit 定标映射；仅用户显式切换时非默认）
-          mapping: { axesMode: req.rule.axesMode, yawMode: req.rule.yawMode },
-        }), req.rule);
+          mapping: { axesMode: ruleOf(req).axesMode, yawMode: ruleOf(req).yawMode },
+        }), ruleOf(req));
     post({ id, type: 'progress', phase: 'parse', done: 1, total: 1 });
 
     const transfer: Transferable[] = [clip.t.buffer, clip.pos.buffer, clip.ang.buffer];
@@ -117,9 +117,9 @@ async function handle(req: ParseRequest): Promise<void> {
 }
 
 /** 逐字段构造 `ClipPayload`（见 `apps/viewer/src/replay/protocol.ts`）：显式列字段而不用展开，
- *  返回对象与 `transfer` 里那些 buffer 同源；本函数无显式返回类型，形状由 `post` 处的
- *  `ParseResponse` 逐字段校验。 */
-function clipToPayload(clip: Clip) {
+ *  返回对象与 `transfer` 里那些 buffer 同源；**返回类型显式写在签名上**，故字段写错时
+ *  `npm run typecheck` 在**定义处**报错（而不是落到 `post` 的调用点）。 */
+function clipToPayload(clip: Clip): ClipPayload {
   return {
     name: clip.name,
     count: clip.count,
@@ -134,4 +134,10 @@ function clipToPayload(clip: Clip) {
     buttons: clip.buttons,
     meta: clip.meta,
   };
+}
+
+/** 取请求里的规则配置；缺字段时给出**明确错误**，而不是让 `req.rule.x` 抛 TypeError 被 catch 成笼统 error（T-155）。 */
+function ruleOf(req: ParseRequest): ParseRequest['rule'] {
+  if (!req.rule) throw new Error('导入请求缺少 rule 配置——面板应总是带上它，请刷新页面后重试');
+  return req.rule;
 }
