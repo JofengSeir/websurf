@@ -118,32 +118,68 @@ export function skyCameraFromEntities(entitiesJson: string): SkyCameraParams | n
 	}
 	return null;
 }
-
 /**
- * 用地图自带的微缩区构建外景（Source 3D 天空盒的正统做法）：
- * 取距 `sky_camera` 半径内的 mesh，复制一份放大 `scale` 倍、并把 `sky_camera` 点搬到世界原点
- * ⇒ 微缩区成为真实地图周围的外景。副本材质关深度读写 + `renderOrder = -1`，总在最底层被主图覆盖。
- * 未选中任何 mesh 时返回 null（调用方回退 `buildMiniatureSky`）。
+ * 用地图自带的微缩区构建外景（起源 3D 天空盒的静态等价实现）。
+ *
+ * 选取：以 `sky_camera` 为中心半径 `seedRadius`（= 场景半径 / scale）内的 mesh 为**种子**，再按
+ * 包围盒间距 `<= gap` 向相邻 mesh 扩张 —— 微缩区是一整块自相连的几何，而它与地图本体之间隔着
+ * 空腔。**不能只用半径**：`surf_boreas` 实测按半径只取到 102/361 个图元，前面/左边的山整块丢失。
+ *
+ * 变换：绕 `sky_camera` 缩放 `scale` 倍（锚点 = 相机本身，`position = CAM*(1-scale)`）——与起源把
+ * 天空相机放到 `CAM + (player-CAM)/scale` 再渲染微缩几何等价（方向夹角实测 0.00°）。
  */
-export function buildMiniatureOutside(mapRoot: THREE.Object3D, cam: SkyCameraParams, radius: number): THREE.Group | null {
+export function buildMiniatureOutside(
+	mapRoot: THREE.Object3D,
+	cam: SkyCameraParams,
+	seedRadius: number,
+	gap = 256,
+): THREE.Group | null {
 	const origin = new THREE.Vector3(cam.origin[0], cam.origin[1], cam.origin[2]);
-	const picked: THREE.Mesh[] = [];
 	mapRoot.updateMatrixWorld(true);
+	const meshes: THREE.Mesh[] = [];
 	mapRoot.traverse((o) => {
 		const m = o as THREE.Mesh;
-		if (!m.isMesh || !m.geometry) return;
-		if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
-		const bs = m.geometry.boundingSphere;
-		if (!bs) return;
-		if (bs.center.clone().applyMatrix4(m.matrixWorld).distanceTo(origin) <= radius) picked.push(m);
+		if (m.isMesh && m.geometry) meshes.push(m);
 	});
-	if (picked.length === 0) return null;
+	const boxes = meshes.map((m) => {
+		if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+		const bb = (m.geometry.boundingBox as THREE.Box3).clone().applyMatrix4(m.matrixWorld);
+		return bb;
+	});
+	const picked = new Set<number>();
+	for (let i = 0; i < meshes.length; i++) {
+		if (boxes[i].getCenter(new THREE.Vector3()).distanceTo(origin) <= seedRadius) picked.add(i);
+	}
+	if (picked.size === 0) return null;
+	// 扩张：包围盒间距 <= gap 视为同一块（种子已保证落在微缩区内）
+	// 两个包围盒之间的最短距离（逐轴取正向间隔，再取欧氏范数）
+	const boxGap = (a: THREE.Box3, b: THREE.Box3): number => {
+		let sum = 0;
+		for (const axis of ['x', 'y', 'z'] as const) {
+			const d = Math.max(0, a.min[axis] - b.max[axis], b.min[axis] - a.max[axis]);
+			sum += d * d;
+		}
+		return Math.sqrt(sum);
+	};
+	for (let changed = true; changed; ) {
+		changed = false;
+		for (let i = 0; i < meshes.length; i++) {
+			if (picked.has(i)) continue;
+			for (const j of picked) {
+				if (boxGap(boxes[i], boxes[j]) <= gap) {
+					picked.add(i);
+					changed = true;
+					break;
+				}
+			}
+		}
+	}
 	const group = new THREE.Group();
 	group.name = 'MiniatureSky';
 	group.userData.isMiniatureSky = true;
-	for (const src of picked) {
-		// 复用源材质：材质上已挂着 lightmap / ambient cube 的 `onBeforeCompile` 注入，
-		// 克隆会丢掉注入（克隆体不复制 onBeforeCompile）⇒ 副本会变成不受光的死黑。
+	for (const i of picked) {
+		const src = meshes[i];
+		// 复用源材质：材质上已挂着 lightmap / ambient cube 注入，克隆会丢注入。
 		const mesh = new THREE.Mesh(src.geometry, src.material);
 		mesh.userData = src.userData;
 		mesh.renderOrder = -1;
@@ -151,10 +187,6 @@ export function buildMiniatureOutside(mapRoot: THREE.Object3D, cam: SkyCameraPar
 		group.add(mesh);
 	}
 	const s = cam.scale;
-	// 锚点必须是 `sky_camera` **本身**：起源引擎把天空相机放到 `CAM + (player-CAM)/scale` 再渲染
-	// 微缩几何，本实现把它烘成静态坐标 ⇒ 与引擎对任一微缩点的**方向**完全一致（实测夹角
-	// 0.00°；若把相机点搬到世界原点（锚点=原点）会差 21.6°~77.1°，外景整体错位）。
-	// 故平移量 = CAM*(1-scale)。
 	group.scale.setScalar(s);
 	group.position.set(origin.x * (1 - s), origin.y * (1 - s), origin.z * (1 - s));
 	return group;
