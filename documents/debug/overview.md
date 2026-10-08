@@ -88,7 +88,7 @@
 9. 主线程 wasm 懒初始化 `ensureMainWasm()` 的结果存进 `mainWasmReady`（`apps/debug/src/app.ts:350`）。
 10. 绑输入与面板：`bindInput`（`apps/debug/src/app.ts:355`）、`loadUiPrefs` → `syncPrefsControls` → `applyCrosshairStyle` → `sendPrefsToWorker` → `bindUI`（`apps/debug/src/app.ts:357` 起）。
 11. 起输入循环 `startInputLoop`（`apps/debug/src/app.ts:367`），并刷新录制面板状态（`apps/debug/src/app.ts:383`）。
-12. Worker 侧 `init` 处理完后回 `ready`（`apps/debug/src/worker/main.ts:483`），主线程在 `apps/debug/src/app.ts:378` 的 `ready` 分支把状态栏改成「Worker 已就绪。请加载 .bsp 文件。」。
+12. Worker 侧 `init` 处理完后回 `ready`（`apps/debug/src/worker/main.ts:484`），主线程在 `apps/debug/src/app.ts:378` 的 `ready` 分支把状态栏改成「Worker 已就绪。请加载 .bsp 文件。」。
 13. 用户通过 `#bspFile` 选图 → `apps/debug/src/app.ts:1728` 的 `handleBspFile` → 主线程解析并装载世界。
 
 ## 不变量

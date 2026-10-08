@@ -21,7 +21,7 @@
 | 主线程 | 面板偏好：`loadUiPrefs` → `syncPrefsControls` → `applyCrosshairStyle` → `sendPrefsToWorker` → `bindUI` | `localStorage` 的 `vbsp:uiPrefs` → config → 控件与 Worker | `apps/debug/src/app.ts:359` |
 | 主线程 | 初始控件状态（碰撞来源 / 物理模式两个 `<select>`；PVS 复选框链已于 2026-09-26 删除） | 两个 `<select>` | `apps/debug/src/app.ts:363` |
 | 主线程 | `startInputLoop()` 登记输入循环 | rAF 输入循环 | `apps/debug/src/app.ts:367` |
-| Worker | 处理 `init` → 建 `ShmState`/`MsgState` → `onInit` 钩子回 `ready` | `MainMessage` 的 `ready` | `apps/debug/src/worker/main.ts:483` |
+| Worker | 处理 `init` → 建 `ShmState`/`MsgState` → `onInit` 钩子回 `ready` | `MainMessage` 的 `ready` | `apps/debug/src/worker/main.ts:484` |
 | 主线程 | `ready` 分支把状态栏改为「请加载 .bsp 文件」 | `#status` 文本 | `apps/debug/src/app.ts:380` |
 | 用户 | 通过 `#bspFile` 选图（或拖拽 / 深链） | `File` → `ArrayBuffer` | `apps/debug/src/app.ts:1728` |
 | 主线程 | `handleLoadBsp` → `buildWorldBundle(new BspProcessor(bytes), {...})` | 世界包：GLB 字节、brush/tri/spawn/teleport/pvs JSON、mosaic manifest、缺失纹理表 | `apps/debug/src/app.ts:1780` |

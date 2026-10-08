@@ -200,3 +200,4 @@
 | 2026-10-09 | T-127/T-128 结案：viewer 夹具与 dist 示例源改指 `test/replay`（+ bundle 层数修正）⇒ 自检真实文件段不再 SKIP、dist 已打包示例 | progress/monthly/2026-10-7.md:12 |
 | 2026-10-09 | T-016/T-018 结案：删掉共享层代码里的陈旧文档编号（`§3.4.C` / `Q1` / `§8.5`）；tick-authority 测试直跑全例通过 | progress/monthly/2026-10-7.md:13 |
 | 2026-10-09 | T-209 结案：game 面板 M/ESC 加 `sceneReady` 守卫（+ 加载失败路径复位）；改动全为 1:1 行替换、锚点零漂移 | progress/monthly/2026-10-7.md:14 |
+| 2026-10-09 | T-064 结案：debug 文档 `ready` 锚点按符号重定位（483 → 484）；证据列裸文件名会触发 `[D]` 歧义 + 死锚点 | progress/monthly/2026-10-7.md:15 |
