@@ -284,15 +284,15 @@ function buildMark(color: number, radius: number, opacity: number): THREE.Mesh {
 }
 
 /**
- * 释放子树的几何体与材质：遍历时只处理 `isMesh` 的节点，故 `THREE.Line` 与 `THREE.Points`
- * （轨迹线、tick 数据点）的几何体与材质不在释放范围内。
+ * 释放子树的几何体与材质：**不按类型判**——`Mesh` / `Line` / `Points` 都带 `geometry` + `material`，
+ * 按「有没有」释放即可，故轨迹线（`THREE.Line`）与 tick 数据点（`THREE.Points`）同样被释放。
  */
 function disposeTree(obj: THREE.Object3D): void {
   obj.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    mesh.geometry?.dispose();
-    const mat = mesh.material;
+    // 不按类型判：Mesh / Line / Points 都带 geometry + material，按「有没有」释放（T-121）
+    const node = child as THREE.Object3D & { geometry?: THREE.BufferGeometry; material?: THREE.Material | THREE.Material[] };
+    node.geometry?.dispose();
+    const mat = node.material;
     if (Array.isArray(mat)) for (const m of mat) m.dispose();
     else mat?.dispose();
   });

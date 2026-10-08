@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（145 条）
+## 未结项（143 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（113）
+### 待修（111）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -78,10 +78,8 @@
 - **T-108** 回退脚本加载无超时且成功路径不移除 script 标签　`viewer`
 - **T-114** 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems）　`viewer`
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
-- **T-121** disposeTree 不释放轨迹线（Line）与 tick 点（Points）　`viewer`
 - **T-130** 冒烟按键断言（6 键）与当前 UI 八键不一致　`viewer`
 - **T-131** 冒烟三条静态断言只对 single 产物成立　`viewer`
-- **T-140** 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复　`viewer`
 - **T-144** .MDL 大小写让「三件齐」检查失效，vvd/vtx 槽位填进 .mdl 字节　`viewer`
 - **T-145** 模型名匹配与材质查找的大小写口径不一致　`viewer`
 - **T-146** 锁中毒会 panic，与本文件其它失败形态不一致　`viewer`
@@ -232,7 +230,7 @@
 | T-118 | A-B 区间带恒不显示（宽度算式分子恒等于分母） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:525 | documents/viewer/implementation/replay.md | 判据：A-B 区间带可见（宽度算式分子≠分母）：构造 A≠B ⇒ 带出现且宽度随区间变化 | — |
 | T-119 | 时间轴两条 title 文案与默认播放窗口矛盾 | 文档口径 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:185 ⇒ 文案改为「prerun 帧计入区间（读数可为负）」，与 apps/viewer/src/replay/player.ts:180 的 Math.min(0,t0) 窗口一致 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-120 | 正式跑段高亮宽度混基，Track.offset 非 0 时位置与宽度偏 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:552 ⇒ 宽度算式先加 `track.offset` 换成主时钟（与左端同基）；DOM 桩探针 ⇒ left=10%、width=60%（旧算式 50%，偏 10 个百分点）；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
-| T-121 | disposeTree 不释放轨迹线（Line）与 tick 点（Points） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/visuals.ts:168 | documents/viewer/implementation/replay.md | 判据：反复载入/卸载场景 ⇒ 轨迹线（Line）与 tick 点（Points）被释放（@BT@renderer.info.memory@BT@ 回落） | — |
+| T-121 | disposeTree 不释放轨迹线（Line）与 tick 点（Points） | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/visuals.ts:291 ⇒ `disposeTree` 按「有无 geometry/material」释放（不再只 `isMesh`）；three 真对象探针 ⇒ 修复前已释放 0、修复后 2（Line + Points）；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-122 | createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/importer.ts:104 ⇒ Blob URL 记进 `WeakMap<Worker,string>`，`onerror`/`dispose`/`onWorkerTimeout` 三条丢弃路径先 `releaseWorkerUrl`；探针 ⇒ createObjectURL=3 / revokeObjectURL=3 配对；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-123 | 导入无超时与取消，Worker 不回消息时 Promise 永不结算 | 缺陷 | viewer | 已结案 | **遗弃（由 T-152 覆盖）**：T-152 的 30 s 看门狗（探针实测 30.0 s 后拒绝、workerBroken=true、pending=0）已消除「Promise 永不结算」；「可取消」判为功能新增而非本缺陷 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-124 | Track.offset 只有下界没有上界，可拉长主时钟总长 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/trackpanel.ts:209 ⇒ `Math.min(3600, Math.max(0, n))`（上限 1 h），提示语写明 0~3600；`npm run typecheck` 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
@@ -247,7 +245,7 @@
 | T-136 | single 分支四段日志都写 [5/5] 步骤编号 | 工具·流程 | viewer | 已结案 | **遗弃（与 T-224 同源）**：`[5/5]` 是三工程打包阶段的固定文本前缀（multi 分支另有 `[multi]`），已由 T-224 登记（`documents/game/implementation/scripts.md:40`）；本条为重复登记，合并到 T-224 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-138 | 光照模式下拉只写不回填，与运行期真实模式脱节 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/mapinfo.ts:98 ⇒ 初值取 `getLightingMode()`、change 后回填实况（1:1 三处）；DOM 桩探针：提交 texture 而实况 baked ⇒ 下拉回填 baked；`npm run typecheck` 通过 | documents/viewer/implementation/ui.md | 见详情 | — |
 | T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待裁决 | apps/viewer/src/ui/mapinfo.ts:130 | documents/viewer/implementation/ui.md | — | — |
-| T-140 | 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/telemetry.ts:122 | documents/viewer/implementation/ui.md | 判据：@BT@git grep -rn "水平速度\ | horizontalSpeed" -- apps/viewer/src@BT@ ⇒ 只剩 sampling/player 一处实现 | — |
+| T-140 | 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复 | 未接线·死代码 | viewer | 已结案 | apps/viewer/src/ui/telemetry.ts:122 ⇒ 改用 `sampling.ts` 的 `horizontalSpeed`（该文件内 `Math.hypot(s.vel[0], s.vel[2])` 0 命中）；DOM 桩探针 ⇒ 500 / 0 / 250 正确；typecheck 通过 | documents/viewer/implementation/ui.md | 见详情 | horizontalSpeed" -- apps/viewer/src@BT@ ⇒ 只剩 sampling/player 一处实现 | — |
 | T-141 | setTracks 把父元素强转为 HTMLElement，null 时抛 TypeError | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/telemetry.ts:110 ⇒ 现场已无 `parentElement` 强转（`git grep -n parentElement -- apps/viewer/src/ui/telemetry.ts` ⇒ 0 命中）；DOM 桩探针 `setTracks(null)` ⇒ 未抛异常、hidden=true ⇒ **遗弃**（缺陷不再复现，判据本就满足） | documents/viewer/implementation/ui.md | 见详情 | — |
 | T-142 | 信息条重找跟随轨道，与 TrackSet.follow 策略重复 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/replaymeta.ts:24 ⇒ `setTracks(follow: Track | null)`，面板内不再重查；调用点改传 `TrackSet.follow`；`npm run typecheck` 通过，`tracks.find((t) => t.id === followId)` 在 apps/viewer/src 内 0 命中 | documents/viewer/implementation/ui.md | 见详情 | null` 决定，面板内不再重查 | — |
 | T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | 缺陷 | viewer | 待裁决 | apps/viewer/src/core/dom.ts:39 | documents/viewer/implementation/ui.md | — | — |

@@ -26,7 +26,7 @@
  */
 
 import { el } from '../core/dom.js';
-import type { Sample } from '../replay/types.js';
+import type { Sample } from '../replay/types.js'; import { horizontalSpeed } from '../replay/sampling.js';
 
 /** Source IN_* 按键位（`KEYS` 逐项消费；按位口径与 `Clip.buttons` 一致，值写在行尾）。 */
 const IN_JUMP = 1 << 1; // 2
@@ -119,7 +119,7 @@ export class TelemetryHud {
    */
   update(s: Sample | null, buttons: number | null): void {
     if (s?.vel) {
-      const h = Math.hypot(s.vel[0], s.vel[2]);
+      const h = horizontalSpeed(s) ?? 0; // 与 sampling / player 同源，本处不再自算（T-140）
       this.horizEl.textContent = h.toFixed(0);
       this.vertEl.textContent = Math.abs(s.vel[1]).toFixed(0);
       // 电平表：400u/s 满格钳制，末 2 段（11/12）点亮时加 hot 转 REC 红
