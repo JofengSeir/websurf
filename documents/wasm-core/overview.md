@@ -71,4 +71,4 @@
 2. `bsp_to_gltf_core/lightmap.rs` 的一条错误文本里含对外部参考实现的 `文件:行号` 引用（属**代码字面量**，未改）。**已消除（2026-10-09）**：T-013 —— 错误串里的外部实现引用已删（`src/wasm-core/bsp_to_gltf_core/lightmap.rs:219`，1:1 行替换），保留原意但只陈述本仓常量：`{MAX_LUXEL_SIDE}×{MAX_LUXEL_SIDE}（256×256 = 65536 项）`。判据：`git grep -n "Lightmap.cs" -- src` ⇒ **0 命中**。
 3. `texture_utils/vtf.rs` 的四处读写口径不一致与五项零调用点；`mosaic/mtz.rs` 的八处边界/一致性问题；`mosaic/decode.rs` 的宽高与调色板索引校验缺失（**该条已消除 2026-10-09**：T-401 —— 两道校验已补，越界输入改为返回错误而非 panic）（见 TODO.md T-012、T-014）。
 4. `extensions.KHR_texture_transform` 在 `material.transform` 存在时会被写入 material，但导出路径未把它登记进 `extensions_used`（见 TODO.md T-011）。
-5. 实体键名大小写：`apps/debug` 与 `apps/game` 的 wasm 绑定层各有一处 `.prop("StartDisabled")`（大写），而实体文本已整体小写 ⇒ 该次取值必然失败并被 `unwrap_or(false)` 吞掉（见 TODO.md T-015）。
+5. ~~实体键名大小写~~ **已消除（2026-10-09）**：T-015 —— `apps/debug` 与 `apps/game` 的 wasm 绑定层原各有一处 `.prop("StartDisabled")`（大写），而实体文本已整体小写 ⇒ 取值必然失败并被 `unwrap_or(false)` 吞掉；现两处均改为小写键 `.prop("startdisabled")`，并以 `surf_fornax` 那唯一一条 `StartDisabled 1` 实测（`triggers` 里 1 条 `start_disabled=true`）。

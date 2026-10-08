@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（116 条）
+## 未结项（115 条）
 ### 待裁决（0）
 
 
-### 待修（114）
+### 待修（113）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -117,7 +117,6 @@
 - **T-608** 核实「单入口」假设（Copilot / Gemini CLI 是否读根 `AGENTS.md`）并写进规范篇　`docs`
 - **T-609** 终态行的「判据」列按行态保护（改终态判据须先 approve）　`repo`
 - **T-433** prop 逐顶点光照（`sp_<i>.vhv`）与 leaf ambient cube 的组合口径：D-016 已决「相加」，而现实现是 either/or + 乘法　`shared`
-- **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-101** 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错）　`viewer`
 - **T-103** ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动）　`viewer`
 - **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
@@ -161,7 +160,7 @@
 | T-007 | apps/debug/src/wasm.d.ts:67-119 的 PhysWorld 类型落后源码 7 个方法（缺 tick_into… | 缺陷 | debug | 已结案 | apps/debug/src/wasm.d.ts:145 起 ⇒ 文末同名 interface 声明合并补 16 个成员；`node .tmp/t007/probe.mjs` ⇒ PhysWorld 33/33 缺 0；收窄已删、`apps/debug` typecheck 通过 | documents/debug/implementation/wasm-bindings.md | 见详情 | #8 |
 | T-008 | apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new … | 配置·门禁 | game | 待修 | apps/game/scripts/check-wasm-api.mjs:52-70 | progress/pending-detail.md | 判据：跑 @BT@node apps/game/scripts/check-wasm-api.mjs@BT@ ⇒ exit 0，且 PHYS_API 列出的项 ≥ crates/wasm 实际导出数（不再缺 @BT@new@BT@ 等） | #9 |
 | T-013 | lightmap.rs 错误串含外部实现引用 Lightmap.cs:64 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/lightmap.rs:219 ⇒ 错误串删掉外部实现引用（1:1），改为陈述本仓常量 256×256=65536；判据 `git grep "Lightmap.cs" -- src` ⇒ 0 命中 | documents/wasm-core/overview.md | 见详情 | #28 |
-| T-015 | vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤） | 缺陷 | shared | 待修 | 见详情 | progress/pending-detail.md | 判据：`node .tmp/mapsurvey/entitystart.mjs` ⇒ 键含 `start_disabled` 的实体解析后 `start_disabled == true`（现恒 false） | #31 |
+| T-015 | vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤） | 缺陷 | shared | 已结案 | 两绑定层大写键 `.prop("StartDisabled")` → 小写 `.prop("startdisabled")`（apps/game/crates/wasm/src/lib.rs:1563、apps/debug/crates/wasm/src/lib.rs:1809，均 1:1）；探针 `.tmp/t015/probe.mjs` ⇒ surf_fornax 的 `triggers` 恰 1 条 start_disabled=true（nebula2_startroom_dest，与文本里唯一一处 `StartDisabled 1` 对应）、surf_666 的 420 处全 0 ⇒ 0 条禁用。原述「entity.rs 6 条」中仅此条可在工作区定位（pending-detail 只存摘要），其余 5 条无锚点、无法开工 | progress/pending-detail.md | 见详情 | #31 |
 | T-016 | compute-mode.ts 的 summary 字面量含已删文档编号 | 文档口径 | shared | 已结案 | src/ts-shared/auth/compute-mode.ts:106 ⇒ summary 不再含 §3.4.C；`git grep -n "§3.4" -- src` ⇒ 0 命中 | documents/ts-shared/overview.md | 见详情 | #36 |
 | T-018 | tick-authority.test.ts 断言标签含 Q1 / §8.5 | 缺陷 | shared | 已结案 | src/ts-shared/auth/tick-authority.test.ts:446 ⇒ 断言标签已去掉 Q1 / §8.5；`npx esbuild … && node .tmp/t018/tick-authority.test.mjs` ⇒ 全例通过（exit 0） | documents/ts-shared/overview.md | 见详情 | §8.5" -- src/ts-shared/auth/tick-authority.test.ts` ⇒ 0 命中（断言标签不再含旧编号） | #40 |
 | T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 待修 | apps/game/src/panel/panel-controller.ts:583 | documents/game/implementation/panel.md | 判据：数值框回写自身文本；`dot` 死变量清掉（`git grep -n "dot" -- apps/game/src/panel/panel-controller.ts` 无声明未用） | #50 |

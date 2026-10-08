@@ -30,7 +30,7 @@ Cargo 侧的三条关键声明：共享物理层 path 依赖（`apps/game/crates
 
 ## 已知缺口（状态见 TODO.md）
 
-- **`start_disabled` 恒为 false**：触发器的该字段按**大写**键取值（`apps/game/crates/wasm/src/lib.rs:1563`），而实体文本在读入时已整体转小写（`src/wasm-core/vbsp/reader.rs` 的 `read_entities`），且属性查询是逐字节比较，取值必然失败、被 `.unwrap_or(false)` 吞掉（`apps/game/crates/wasm/src/lib.rs:1565`）。 （见 TODO.md T-015）
+- ~~**`start_disabled` 恒为 false**~~ **已消除（2026-10-09）**：T-015 —— 绑定层原来按**大写**键 `.prop("StartDisabled")` 取值，而实体文本读入时已整体小写、`RawEntity::prop` 又是逐字节比较 ⇒ 必然取不到并被 `.unwrap_or(false)` 吞掉。现改为小写键 `.prop("startdisabled")`（`apps/game/crates/wasm/src/lib.rs:1563`、`apps/debug/crates/wasm/src/lib.rs:1809`，两处均 1:1）。**取证**：`test/maps/surf_fornax.bsp` 的实体文本里有且只有 1 处 `StartDisabled 1`，修复后 `parse_teleports()` 的 `triggers` 里恰有 **1** 条 `start_disabled=true`（`nebula2_startroom_dest`）；`surf_666` 的 420 处 `StartDisabled` 全为 `0` ⇒ 0 条禁用（与文本一致）。
 - **`BspProcessor` 上叠了两个 `#[wasm_bindgen]` 属性**：一处悬空在结构体之前的注释块上方（`apps/game/crates/wasm/src/lib.rs:480`），一处紧随结构体（`:492`）。本次实测 `cargo check --manifest-path apps/game/crates/wasm/Cargo.toml` 以退出码 0 结束、未报重复属性，故该形态不影响当前构建。 （见 TODO.md T-217）
 - **`export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点**：方法有完整实现（`apps/game/crates/wasm/src/lib.rs:579`），而 `apps/game` 的 `.ts` 与 `.mjs` 内零匹配（本次实测；`apps/debug` 侧有引用，见 `apps/debug/crates/wasm/src/lib.rs:741`）。 （见 TODO.md T-236）
 - **`map_name` 恒为空串**：元数据里的该字段在 Rust 侧写死 `String::new()`（`apps/game/crates/wasm/src/lib.rs:457`），消费端拿到的值恒为空；工程内展示地图名走的是文件名字符串（`apps/game/src/app.ts:501`）。 （见 TODO.md T-237）

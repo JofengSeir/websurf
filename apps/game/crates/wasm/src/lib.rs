@@ -1555,12 +1555,12 @@ impl BspProcessor {
                     .and_then(|s| s.parse::<u32>().ok())
                     .unwrap_or(1);
 
-                // StartDisabled：键按**大写**传入，而实体文本在读入时已整体转小写
-                // （`src/wasm-core/vbsp/reader.rs` 的 `read_entities` 调 `to_ascii_lowercase`），
-                // `RawEntity::prop` 又是 `key == prop_key` 的逐字节比较 ⇒ 这里取不到该键，
-                // `.unwrap_or(false)` 把错误吞掉，`start_disabled` 恒为 false。
+                // StartDisabled：实体文本在读入时已整体转小写（`src/wasm-core/vbsp/reader.rs` 的
+                // `read_entities` 调 `to_ascii_lowercase`），而 `RawEntity::prop` 是 `key == prop_key`
+                // 的逐字节比较 ⇒ 这里必须传**小写**键，否则取不到、被 `.unwrap_or(false)` 吞掉
+                // （2026-10-09 T-015 修；此前恒 false）。
                 let start_disabled = ent
-                    .prop("StartDisabled")
+                    .prop("startdisabled")
                     .map(|s| s == "1")
                     .unwrap_or(false);
 

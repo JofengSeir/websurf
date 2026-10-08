@@ -1804,9 +1804,9 @@ impl BspProcessor {
                     .and_then(|s| s.parse::<u32>().ok())
                     .unwrap_or(1);
 
-                // StartDisabled 默认 false=启用；disabled 不应触发传送，TS 端会跳过
+                // StartDisabled 默认 false=启用；disabled 不应触发传送，TS 端会跳过。键传小写（实体文本已小写化）
                 let start_disabled = ent
-                    .prop("StartDisabled")
+                    .prop("startdisabled")
                     .map(|s| s == "1")
                     .unwrap_or(false);
 
