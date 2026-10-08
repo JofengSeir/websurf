@@ -101,7 +101,7 @@ export class ReplayImporter {
       let w: Worker;
       if (typeof g.__VBSP_WORKER_JS__ === 'string' && g.__VBSP_WORKER_JS__.length > 0) {
         const blob = new Blob([g.__VBSP_WORKER_JS__], { type: 'text/javascript' });
-        w = new Worker(URL.createObjectURL(blob));
+        const blobUrl = URL.createObjectURL(blob); w = new Worker(blobUrl); workerBlobUrls.set(w, blobUrl);
       } else {
         w = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
       }
@@ -119,7 +119,7 @@ export class ReplayImporter {
       w.onerror = (e) => {
         // Worker 起不来（缺少 worker.js 等）：后续全部走主线程
         this.workerBroken = true;
-        this.worker?.terminate();
+        releaseWorkerUrl(this.worker); this.worker?.terminate();
         this.worker = null;
         const err = new Error(`解析 Worker 启动失败（${e.message || '未知原因'}），已改用主线程解析`);
         for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(err); }
@@ -176,7 +176,7 @@ export class ReplayImporter {
 
   /** 终止 Worker 并清空未结算请求表（不置 `workerBroken`，下次 `import` 会重新起 Worker）；本仓无调用点。 */
   dispose(): void {
-    this.worker?.terminate();
+    releaseWorkerUrl(this.worker); this.worker?.terminate();
     this.worker = null;
     this.pending.clear();
   }
@@ -246,7 +246,7 @@ export class ReplayImporter {
    */
   private onWorkerTimeout(): void {
     this.workerBroken = true;
-    this.worker?.terminate();
+    releaseWorkerUrl(this.worker); this.worker?.terminate();
     this.worker = null;
     const err = new Error('解析 Worker 超时（30s 无响应），已改用主线程解析');
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(err); }
@@ -281,4 +281,16 @@ function payloadToClip(p: ClipPayload, rule: RuleConfig): Clip {
     buttons: p.buttons,
     meta: p.meta,
   };
+}
+
+/** Blob Worker 的 URL 表（单文件构建用）：`URL.createObjectURL` 必须在 Worker 被丢弃时 revoke，
+ *  否则每次重起 Worker 都会留一条不回收的 blob URL（T-122）。用 WeakMap 而不是字段：不动
+ *  类体行号（文档锚点不漂移），且天然按实例隔离。 */
+const workerBlobUrls = new WeakMap<Worker, string>();
+
+/** 丢弃 Worker 前先 revoke 它的 Blob URL（模块构建的 Worker 不在表里，是无操作）。 */
+function releaseWorkerUrl(w: Worker | null): void {
+  if (!w) return;
+  const u = workerBlobUrls.get(w);
+  if (u) URL.revokeObjectURL(u);
 }

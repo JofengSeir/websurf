@@ -212,3 +212,4 @@
 | 2026-10-09 | T-151 结案：viewer 加第三层契约门（Rust `BspMetadata` serde 键名 ↔ TS `BspMeta` 接口键名，双向缺键即 exit 1） | progress/monthly/2026-10-7.md:24 |
 | 2026-10-09 | T-138 结案（viewer 光照下拉初值取实况 + 切换后回填）/ T-141 遗弃（parentElement 强转已不存在，探针证明 setTracks(null) 不抛） | progress/monthly/2026-10-7.md:25 |
 | 2026-10-09 | T-120 结案（跑段高亮同基，探针 60% vs 旧 50%）/ T-126 / T-129 结案；T-133 遗弃（.gitignore 无该规则、判据本就满足） | progress/monthly/2026-10-7.md:26 |
+| 2026-10-09 | T-105 结案（WASM 失败不再永久缓存，探针 1→2 次重试）/ T-122 结案（Blob URL 3 建 3 revoke）；T-123 遗弃（T-152 已覆盖）/ T-136 遗弃（与 T-224 同源，合并） | progress/monthly/2026-10-7.md:27 |

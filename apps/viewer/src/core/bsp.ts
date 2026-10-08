@@ -120,7 +120,7 @@ export function ensureWasm(): Promise<void> {
       throw new Error(
         'WASM 加载失败：外置请求与内嵌回退均不可用——请运行 npm run build:wasm 后重试',
       );
-    })();
+    })().catch((e) => { wasmReady = null; throw e; }); // 失败不缓存：断网→联网后再调一次会重试（T-105）
   }
   return wasmReady;
 }

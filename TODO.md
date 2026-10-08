@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（149 条）
+## 未结项（145 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（117）
+### 待修（113）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -74,17 +74,13 @@
 - **T-058** DemoParseResult 里「已解码但应用面为零」的字段清单（owner 要求记录，2026-09-30　`viewer`
 - **T-062** 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径…　`viewer`
 - **T-102** 贴合检查提示串的 bbox 只取第一条越界轨道　`viewer`
-- **T-105** ensureWasm 把首次失败永久缓存，一次瞬时失败后本会话不自愈　`viewer`
 - **T-107** 分块选块包围盒只统计部分 Mesh，块边长由子集推出　`shared`
 - **T-108** 回退脚本加载无超时且成功路径不移除 script 标签　`viewer`
 - **T-114** 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems）　`viewer`
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
 - **T-121** disposeTree 不释放轨迹线（Line）与 tick 点（Points）　`viewer`
-- **T-122** createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL　`viewer`
-- **T-123** 导入无超时与取消，Worker 不回消息时 Promise 永不结算　`viewer`
 - **T-130** 冒烟按键断言（6 键）与当前 UI 八键不一致　`viewer`
 - **T-131** 冒烟三条静态断言只对 single 产物成立　`viewer`
-- **T-136** single 分支四段日志都写 [5/5] 步骤编号　`viewer`
 - **T-140** 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复　`viewer`
 - **T-144** .MDL 大小写让「三件齐」检查失效，vvd/vtx 槽位填进 .mdl 字节　`viewer`
 - **T-145** 模型名匹配与材质查找的大小写口径不一致　`viewer`
@@ -220,7 +216,7 @@
 | T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错） | 缺陷 | viewer | 待裁决 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | — | — |
 | T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道 | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:267 | documents/viewer/implementation/app.md | 判据：构造 2 条以上越界轨道 ⇒ 提示串 bbox 覆盖全部（不再只取第一条） | — |
 | T-103 | ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动） | 缺陷 | viewer | 待裁决 | apps/viewer/src/app.ts:807 | documents/viewer/implementation/app.md | — | — |
-| T-105 | ensureWasm 把首次失败永久缓存，一次瞬时失败后本会话不自愈 | 缺陷 | viewer | 待修 | apps/viewer/src/core/bsp.ts:82 | documents/viewer/implementation/core.md | 判据：首次 @BT@ensureWasm@BT@ 失败后再次调用会重试（断网→联网后可自愈） | — |
+| T-105 | ensureWasm 把首次失败永久缓存，一次瞬时失败后本会话不自愈 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/bsp.ts:123 ⇒ `wasmReady` 的 IIFE 接 `.catch` 清缓存；前后对照探针（fetch 每次必失败、连续两次调用）⇒ 修复前 fetch 1 次（不重试）/ 修复后 2 次（会重试）；typecheck 通过 | documents/viewer/implementation/core.md | 见详情 | — |
 | T-106 | numField 把空串当合法 0 写入变换 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/dom.ts:106 ⇒ 空串 / 纯空白 trim 后判 invalid、不写变换（DOM 桩探针：`""` ⇒ onInput(NaN,false) + invalid 类） | documents/viewer/implementation/core.md | 见详情 | — |
 | T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:250 | documents/viewer/implementation/core.md | 判据：构造仅含多材质网格的分块 ⇒ 分块边长含全部 Mesh 的并集（`worldBox` 不再只在单材质分支累计） | — |
 | T-108 | 回退脚本加载无超时且成功路径不移除 script 标签 | 缺陷 | viewer | 待修 | apps/viewer/src/core/bsp.ts:59 | documents/viewer/implementation/core.md | 判据：回退脚本加载有超时；成功路径移除 @BT@script@BT@ 标签（@BT@document.querySelectorAll("script")@BT@ 不残留） | — |
@@ -237,8 +233,8 @@
 | T-119 | 时间轴两条 title 文案与默认播放窗口矛盾 | 文档口径 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:185 ⇒ 文案改为「prerun 帧计入区间（读数可为负）」，与 apps/viewer/src/replay/player.ts:180 的 Math.min(0,t0) 窗口一致 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-120 | 正式跑段高亮宽度混基，Track.offset 非 0 时位置与宽度偏 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:552 ⇒ 宽度算式先加 `track.offset` 换成主时钟（与左端同基）；DOM 桩探针 ⇒ left=10%、width=60%（旧算式 50%，偏 10 个百分点）；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-121 | disposeTree 不释放轨迹线（Line）与 tick 点（Points） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/visuals.ts:168 | documents/viewer/implementation/replay.md | 判据：反复载入/卸载场景 ⇒ 轨迹线（Line）与 tick 点（Points）被释放（@BT@renderer.info.memory@BT@ 回落） | — |
-| T-122 | createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL | 缺陷 | viewer | 待修 | apps/viewer/src/replay/importer.ts:101 | documents/viewer/implementation/replay.md | 判据：重起 Worker 后 blob URL 不累积（@BT@createObjectURL@BT@ 与 @BT@revokeObjectURL@BT@ 配对） | — |
-| T-123 | 导入无超时与取消，Worker 不回消息时 Promise 永不结算 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/importer.ts:137 | documents/viewer/implementation/replay.md | 判据：Worker 不回消息时导入 Promise 以超时结算（不再永不 settle），并可取消 | — |
+| T-122 | createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/importer.ts:104 ⇒ Blob URL 记进 `WeakMap<Worker,string>`，`onerror`/`dispose`/`onWorkerTimeout` 三条丢弃路径先 `releaseWorkerUrl`；探针 ⇒ createObjectURL=3 / revokeObjectURL=3 配对；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
+| T-123 | 导入无超时与取消，Worker 不回消息时 Promise 永不结算 | 缺陷 | viewer | 已结案 | **遗弃（由 T-152 覆盖）**：T-152 的 30 s 看门狗（探针实测 30.0 s 后拒绝、workerBroken=true、pending=0）已消除「Promise 永不结算」；「可取消」判为功能新增而非本缺陷 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-124 | Track.offset 只有下界没有上界，可拉长主时钟总长 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/trackpanel.ts:209 ⇒ `Math.min(3600, Math.max(0, n))`（上限 1 h），提示语写明 0~3600；`npm run typecheck` 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-125 | 零帧轨道的口径不一致（列表面板有卡片、3D 无对象） | 缺陷 | viewer | 待裁决 | apps/viewer/src/replay/visuals.ts:96 | documents/viewer/implementation/replay.md | — | — |
 | T-126 | panel.ts 平移输入框 hint 写「默认 0」而 step 为 10 HU | 文档口径 | viewer | 已结案 | apps/viewer/src/replay/panel.ts:155 ⇒ hint 补「步长 10 HU」，与 `step: 10` 一致；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
@@ -248,7 +244,7 @@
 | T-130 | 冒烟按键断言（6 键）与当前 UI 八键不一致 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:415 | documents/viewer/implementation/scripts-and-test.md | 判据：跑 viewer 冒烟脚本 ⇒ 按键断言条数与当前 UI 八键一致 | — |
 | T-131 | 冒烟三条静态断言只对 single 产物成立 | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:138 | documents/viewer/implementation/scripts-and-test.md | 判据：冒烟三条静态断言在 single 与多产物两种形态下都成立 ⇒ 各跑一次 exit 0 | — |
 | T-133 | .gitignore 中间产物目录与 test:replay 实际输出不一致 | 配置·门禁 | viewer | 已结案 | **遗弃**：`apps/viewer/.gitignore` 全文 4 行、无 `/temp/` 规则（仅注释说明由根覆盖）；根 `.gitignore:23`/`:24` 的 `**/.tmp/`、`**/temp/` 已覆盖输出目录；实测 `npm run test:replay` ⇒ exit 0 且 `git status --short` 干净 ⇒ 判据本就满足 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
-| T-136 | single 分支四段日志都写 [5/5] 步骤编号 | 工具·流程 | viewer | 待修 | apps/viewer/scripts/build-dist.mjs:315 | documents/viewer/implementation/scripts-and-test.md | 判据：@BT@git grep -n "\[5/5\]" -- apps/viewer/scripts@BT@ ⇒ single 分支四段日志编号与步骤序号一致 | — |
+| T-136 | single 分支四段日志都写 [5/5] 步骤编号 | 工具·流程 | viewer | 已结案 | **遗弃（与 T-224 同源）**：`[5/5]` 是三工程打包阶段的固定文本前缀（multi 分支另有 `[multi]`），已由 T-224 登记（`documents/game/implementation/scripts.md:40`）；本条为重复登记，合并到 T-224 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-138 | 光照模式下拉只写不回填，与运行期真实模式脱节 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/mapinfo.ts:98 ⇒ 初值取 `getLightingMode()`、change 后回填实况（1:1 三处）；DOM 桩探针：提交 texture 而实况 baked ⇒ 下拉回填 baked；`npm run typecheck` 通过 | documents/viewer/implementation/ui.md | 见详情 | — |
 | T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待裁决 | apps/viewer/src/ui/mapinfo.ts:130 | documents/viewer/implementation/ui.md | — | — |
 | T-140 | 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/telemetry.ts:122 | documents/viewer/implementation/ui.md | 判据：@BT@git grep -rn "水平速度\ | horizontalSpeed" -- apps/viewer/src@BT@ ⇒ 只剩 sampling/player 一处实现 | — |
@@ -300,7 +296,7 @@
 | T-220 | `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加 | 缺陷 | game | 待修 | apps/game/src/worker/main.ts:513 | documents/game/implementation/worker.md | 判据：`world-parse-ms` 诊断不再重复解析（复用 `build_world` 的解析结果或降级移除该诊断） | — |
 | T-222 | 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出 | 配置·门禁 | game | 待修 | 见详情 | documents/game/implementation/scripts.md | 判据：13 个脚本补 @BT@process.exitCode@BT@ 后逐个跑失败路径 ⇒ exit ≠ 0（结论能被 CI 带出） | — |
 | T-223 | single 产物引用了不在保留名单里的 `coi-serviceworker.js`、dist 同目录无该文件 | 配置·门禁 | game | 待修 | apps/game/scripts/build-dist.mjs:60 | documents/game/implementation/scripts.md | 判据：构建 single 产物后 @BT@ls apps/game/dist/coi-serviceworker.js@BT@ 存在，或产物中不再引用它 | — |
-| T-224 | `build-dist.mjs` 两条路径都打印同一组 `[5/5]` 前缀、与步骤序号无关 | 工具·流程 | game | 待修 | apps/game/scripts/build-dist.mjs:90 | documents/game/implementation/scripts.md | 判据：@BT@git grep -n "\[5/5\]" -- apps/game/scripts/build-dist.mjs@BT@ ⇒ 两条路径的前缀与步骤序号对应 | — |
+| T-224 | `build-dist.mjs` 两条路径都打印同一组 `[5/5]` 前缀、与步骤序号无关 | 工具·流程 | game | 待修 | apps/game/scripts/build-dist.mjs:90（含 viewer 侧同源登记 T-136，2026-10-09 合并到本条） | documents/game/implementation/scripts.md | 判据：@BT@git grep -n "\[5/5\]" -- apps/game/scripts/build-dist.mjs@BT@ ⇒ 两条路径的前缀与步骤序号对应 | — |
 | T-225 | `physics.mode` 零读取点 | 未接线·死代码 | game | 待修 | apps/game/src/config.ts:27 | documents/game/implementation/config.md | 判据：`git grep -n "physics.mode" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-226 | `sendSetDeathThreshold` 零调用点 | 未接线·死代码 | game | 待修 | apps/game/src/input/input-bridge.ts:83 | documents/game/implementation/input.md | 判据：`git grep -n "sendSetDeathThreshold" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-227 | 共享层的累积路径无消费方 | 未接线·死代码 | game | 待修 | src/ts-shared/input/mouse-buffer.ts:81 | documents/game/implementation/input.md | 判据：@BT@git grep -n "<累积路径符号>" -- apps src@BT@ ⇒ 无消费方 ⇒ 删除 | — |
