@@ -199,3 +199,4 @@
 | 2026-10-09 | 看板清理：65 条待裁决逐条核验（遗弃 7 / 转待修 25 / 保留 33）＋ OWNER 14 条决定按推荐值落实（D-020 分卷已执行）＋ 53 条分卷（TODO 97.3→77.9 KB） | progress/monthly/2026-10-7.md:11 |
 | 2026-10-09 | T-127/T-128 结案：viewer 夹具与 dist 示例源改指 `test/replay`（+ bundle 层数修正）⇒ 自检真实文件段不再 SKIP、dist 已打包示例 | progress/monthly/2026-10-7.md:12 |
 | 2026-10-09 | T-016/T-018 结案：删掉共享层代码里的陈旧文档编号（`§3.4.C` / `Q1` / `§8.5`）；tick-authority 测试直跑全例通过 | progress/monthly/2026-10-7.md:13 |
+| 2026-10-09 | T-209 结案：game 面板 M/ESC 加 `sceneReady` 守卫（+ 加载失败路径复位）；改动全为 1:1 行替换、锚点零漂移 | progress/monthly/2026-10-7.md:14 |

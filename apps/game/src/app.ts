@@ -598,7 +598,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   } catch (err) {
     const msg = `BSP 解析失败: ${err instanceof Error ? err.message : String(err)}`;
     setError(msg);
-    renderer.disposeScene();
+    renderer.disposeScene(); panel?.updateVisibility(sceneReady); // 加载失败：面板状态机复位（否则 M/ESC 一直被屏蔽）
     failLoading(msg);
   }
 }

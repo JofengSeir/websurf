@@ -38,7 +38,7 @@ export class PanelController {
   private readonly root: HTMLElement;
   private keymap: Record<BindableAction, string[]>;
   /** 正在录制的动作；`null` = 当前无录制（此时 `finishRecording` 直接返回，键位不变）。 */
-  private recordingAction: BindableAction | null = null;
+  private recordingAction: BindableAction | null = null; private sceneReady = false; // 场景就绪（updateVisibility 写入）
   /** 录制期间挂在 window 上的 keydown 监听器引用；`stopRecording` 用它配合 `{ capture: true }` 解绑。 */
   private recordingHandler: ((e: KeyboardEvent) => void) | null = null;
 
@@ -92,13 +92,13 @@ export class PanelController {
 
   /** 按指针锁定与场景就绪刷新可见性：`!getLocked() || !sceneReady` 时移除 `hidden` 类。 */
   updateVisibility(sceneReady: boolean): void {
-    const visible = !this.getLocked() || !sceneReady;
+    const visible = !this.getLocked() || !sceneReady; this.sceneReady = sceneReady;
     this.root.classList.toggle('hidden', !visible);
   }
 
   /** 加 `hidden` 类强制隐藏；`app.ts` 在开始加载地图时调用（界面交给加载进度覆盖层）。 */
   hide(): void {
-    this.root.classList.add('hidden');
+    this.root.classList.add('hidden'); this.sceneReady = false; // 加载期：屏蔽 M/ESC
   }
 
   // ── 模块导航：在 `.nav` 上事件委托，按 `data-mod` 切 `.mod` 与 `.mod-pane` 的 active ──
@@ -260,17 +260,17 @@ export class PanelController {
   // ── 通用控件绑定：滑块 + 数值框、复选框、select、按钮 ────────────
 
   private bindEvents(): void {
-    // M 键：切换面板 `hidden` 类（不校验锁定状态）
+    // M 键：切换面板 `hidden` 类（不校验锁定状态；加载期由 sceneReady 屏蔽）
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'KeyM') {
+      if (e.code === 'KeyM' && this.sceneReady) {
         e.preventDefault();
         this.root.classList.toggle('hidden');
       }
     });
 
-    // ESC：未锁定时移除 `hidden` 类；锁定态的退锁由浏览器 pointerlockchange 触发（见 app.ts）
+    // ESC：未锁定时移除 `hidden` 类；锁定态的退锁由浏览器 pointerlockchange 触发（见 app.ts）；加载期由 sceneReady 屏蔽
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Escape' && !this.getLocked()) {
+      if (e.code === 'Escape' && !this.getLocked() && this.sceneReady) {
         this.root.classList.remove('hidden');
       }
     });

@@ -37,5 +37,5 @@
 - **只持久化部分输入段字段**：`collectPrefs` 的 `input` 段只写 `sensitivity` / `yawBindSpeed` / `noclipSpeed`（`apps/game/src/panel/panel-controller.ts:612`）。原 `pitchLimit` 从不进存档且全仓无读取点，已于 2026-09-26 从配置删除（见 `documents/game/implementation/config.md`）。
 - **面板不校验 DOM 是否存在**：`bindSlider` / `bindCheckbox` 在取不到元素时静默返回（`apps/game/src/panel/panel-controller.ts:561`、`:587`），控件缺失不会报错；`#panel` 缺失时构造期即抛出（`apps/game/src/panel/panel-controller.ts:78` 的断言）。 （见 TODO.md T-208）
 - **存点列表形参含不参与渲染的字段**：`renderSavePoints` 的形参类型带 `yaw`（`apps/game/src/panel/panel-controller.ts:780`），方法体只渲染序号、坐标与速率（`:796`），`yaw` 未被使用。
-- **M 键与 ESC 两条全局监听不校验场景状态**：M 键的判据只有 `e.code === 'KeyM'`（`apps/game/src/panel/panel-controller.ts:265`），ESC 分支只判 `!getLocked()`（`:273`）；两者都不读 `sceneReady`，因此加载进度覆盖层显示期间这两条分支同样会被触发。 （见 TODO.md T-209）
+- **M 键与 ESC 两条全局监听不校验场景状态**：M 键的判据只有 `e.code === 'KeyM'`（`apps/game/src/panel/panel-controller.ts:265`），ESC 分支只判 `!getLocked()`（`:273`）；两者都不读 `sceneReady`，因此加载进度覆盖层显示期间这两条分支同样会被触发。 **已消除（2026-10-09）**：T-209 —— 两条监听都加了 `this.sceneReady` 守卫（`apps/game/src/panel/panel-controller.ts:265`、`:273`），`updateVisibility` 写入该字段、`hide()` 在加载期复位它；`app.ts` 的加载失败路径补 `panel?.updateVisibility(sceneReady)` 复位面板状态机，避免失败后 M/ESC 一直被屏蔽。
 - 看板另有登记项：`TODO.md` 的 T-055 —— **状态与结论只在那登记**，本文件不复述。
