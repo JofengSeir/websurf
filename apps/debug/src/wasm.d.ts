@@ -135,6 +135,8 @@ declare module '*/pkg/websurf_wasm.js' {
     state(): any;
     /** 取最近一次物理事件（`{ kind: 'teleport', … }` 或 `{ kind: 'death' }`），无事件返回 null；一次性消费。 */
     take_event(): any;
+    /** 卡死（离地判定）时自动恢复默认碰撞箱三围的开关（见 src/phys/mod.rs 的 set_auto_restore_hull）。 */
+    set_auto_restore_hull(enabled: boolean): void;
   }
 }
   /** 同上的 bg 侧入口（只有默认导出 init）。本仓无引用点。 */

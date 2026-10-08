@@ -157,7 +157,7 @@ pub struct PhysWorld {
     death_y: f64,
     /// noclip 自由视角开关。置位后 `step_core`改走 `noclip_step`：
     /// **位置由本实例自行推进**，不走碰撞、不触发传送与死亡。
-    noclip: bool,
+    noclip: bool, auto_restore_hull: bool, // 后者：卡死（离地判定）时自动恢复默认碰撞箱，debug 面板开关（T-310）
     /// 是否已成功执行过 `build_world`。为 false 时 `tick` / `tick_into` / `predict` 直接返回现状。
     ready: bool,
     /// `build_world` 里 `.phy` 凸体转 brush 的统计（只读诊断，`debug_hull_stats` 出口）：
@@ -202,7 +202,7 @@ impl PhysWorld {
             spawn: [0.0, 100.0, 0.0],
             spawn_points: Vec::new(),
             death_y: -100_000.0,
-            noclip: false,
+            noclip: false, auto_restore_hull: false,
             ready: false,
             hull_stats: [0; 4],
             event: None,
@@ -750,7 +750,7 @@ impl PhysWorld {
                 self.player.input.reset = false;
                 self.player.respawn(&self.spawn);
             }
-            player_tick(&mut self.world, &mut self.player, &self.params, dt);
+            player_tick(&mut self.world, &mut self.player, &self.params, dt); self.maybe_restore_hull();
         }
     }
 
@@ -1255,4 +1255,28 @@ fn fill_state_out(p: &Player, o: &mut [f64; 22]) {
     o[19] = if p.has_jumped_before { 1.0 } else { 0.0 };
     o[20] = p.eye_height();
     o[21] = if p.on_ground { 1.0 } else { 0.0 };
+}
+
+/// 卡死时自动恢复默认碰撞箱：`set_auto_restore_hull` 置位后，`step_core` 每步末尾检查
+/// `player::stuck_ticks`（>0 即本步判为卡死），命中就把三围写回 `DEFAULT_HULL_*`。
+/// 判据本身的着地门（`on_ground` 为真不判卡死）保持不变，故只有**离地**卡死会触发。
+#[wasm_bindgen]
+impl PhysWorld {
+    /// 开关：卡死（离地判定）时自动把碰撞箱恢复成默认三围。
+    pub fn set_auto_restore_hull(&mut self, enabled: bool) {
+        self.auto_restore_hull = enabled;
+    }
+}
+
+impl PhysWorld {
+    /// `step_core` 末尾的钩子；开关关闭或本步未判卡死时什么都不做。
+    fn maybe_restore_hull(&mut self) {
+        if self.auto_restore_hull && self.player.stuck_ticks > 0 {
+            self.set_hull(
+                player::DEFAULT_HULL_HALF_WIDTH,
+                player::DEFAULT_HULL_STAND_HEIGHT,
+                player::DEFAULT_HULL_DUCK_HEIGHT,
+            );
+        }
+    }
 }

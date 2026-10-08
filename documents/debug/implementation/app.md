@@ -35,7 +35,7 @@
 
 **`apps/debug/src/wasm.d.ts`（手写环境声明）**
 
-两条 `declare module` 通配声明：`*/pkg/websurf_wasm.js`（`apps/debug/src/wasm.d.ts:19`，含 `initSync`、`BspProcessor`、`PhysWorld` 与四个自由函数）与 `*/pkg/websurf_wasm_bg.js`（`apps/debug/src/wasm.d.ts:143`，只有默认导出）。
+两条 `declare module` 通配声明：`*/pkg/websurf_wasm.js`（`apps/debug/src/wasm.d.ts:19`，含 `initSync`、`BspProcessor`、`PhysWorld` 与四个自由函数）与 `*/pkg/websurf_wasm_bg.js`（`apps/debug/src/wasm.d.ts:144`，只有默认导出）。
 
 ## 关键流程与不变量
 

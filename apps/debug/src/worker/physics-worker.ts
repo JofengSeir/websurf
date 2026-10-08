@@ -88,7 +88,7 @@ export class PhysicsWorker {
       }
       case 'set-auto-restore-hull': {
         const m = msg as { enabled: boolean };
-        this.physicsParams.autoRestoreHull = m.enabled;
+        this.physicsParams.autoRestoreHull = m.enabled; this.phys?.set_auto_restore_hull(m.enabled);
         this.emitPhysicsSnapshot();
         return true;
       }
