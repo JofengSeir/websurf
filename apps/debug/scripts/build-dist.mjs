@@ -87,27 +87,27 @@ function requireInputs() {
 
 /** single 形态：单文件 IIFE，WASM / Worker 源码 / 默认纹理包全部内嵌。 */
 async function buildSingle(wasmPath) {
-  console.log('[5/5] 编码 WASM (base64)...');
+  console.log('[single] 编码 WASM (base64)...');
   const wasmB64 = readFileSync(wasmPath).toString('base64');
 
-  console.log('[5/5] 编码默认纹理包 (base64)...');
+  console.log('[single] 编码默认纹理包 (base64)...');
   const mtzB64 = readFileSync(MTZ).toString('base64');
 
-  console.log('[5/5] 打包 worker (IIFE，Blob URL 用)...');
+  console.log('[single] 打包 worker (IIFE，Blob URL 用)...');
   const workerJs = await bundleIife({
     build,
     entry: join(ROOT, 'src', 'worker', 'main.ts'),
     options: { logLevel: 'info' },
   });
 
-  console.log('[5/5] 打包 app (IIFE)...');
+  console.log('[single] 打包 app (IIFE)...');
   const appCode = await bundleIife({
     build,
     entry: join(ROOT, 'src', 'app.ts'),
     options: { logLevel: 'info' },
   });
 
-  console.log('[5/5] 写入 dist/（classic index.html + 内嵌 app.js）...');
+  console.log('[single] 写入 dist/（classic index.html + 内嵌 app.js）...');
   const { bytes } = await writeEmbeddedPreamble({
     distDir: DIST,
     appCode,
@@ -124,12 +124,12 @@ async function buildSingle(wasmPath) {
   if (!rewritten) {
     console.warn('[WARN] web/index.html 未命中 module script 特征串，dist/index.html 可能仍是 module script。');
   }
-  console.log(`[5/5] dist/app.js: ${(bytes / 1024 / 1024).toFixed(2)} MB（single 全内嵌）`);
+  console.log(`[single] dist/app.js: ${(bytes / 1024 / 1024).toFixed(2)} MB（single 全内嵌）`);
 }
 
 /** multi 形态：多文件 ESM，WASM 与纹理包外置，页面侧 fetch。 */
 async function buildMulti(wasmPath) {
-  console.log('[5/5] 打包 app / worker (ESM)...');
+  console.log('[multi] 打包 app / worker (ESM)...');
   await bundleEsm({
     build,
     entry: join(ROOT, 'src', 'app.ts'),
@@ -152,11 +152,11 @@ async function buildMulti(wasmPath) {
       readFileSync(appPath, 'utf8'),
   );
 
-  console.log('[5/5] 复制 WASM / 默认纹理包...');
+  console.log('[multi] 复制 WASM / 默认纹理包...');
   copyFileSync(wasmPath, join(DIST, WASM_FILE));
   copyFileSync(MTZ, join(DIST, 'textures.mtz'));  // COI serviceworker：静态托管上补发 COOP/COEP 响应头，使页面处于 crossOriginIsolated
 
-  console.log('[5/5] 复制 index.html（module script 原样，与 web/ 同构）...');
+  console.log('[multi] 复制 index.html（module script 原样，与 web/ 同构）...');
   copyFileSync(INDEX_HTML, join(DIST, 'index.html'));
 
   // multi 专用：按 dist/ 里实际存在的文件生成预缓存清单，连同缓存名一起注入 SW
@@ -197,7 +197,7 @@ async function buildMulti(wasmPath) {
     );
   }
   writeFileSync(join(DIST, 'coi-serviceworker.js'), swWithManifest);
-  console.log(`[5/5] 注入 SW 预缓存清单: ${precacheManifest.length} 个资源`);
+  console.log(`[multi] 注入 SW 预缓存清单: ${precacheManifest.length} 个资源`);
 }
 
 async function main() {

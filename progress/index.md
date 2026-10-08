@@ -220,3 +220,4 @@
 | 2026-10-09 | T-215/T-216 结案（game）：非数组存档报错；存点写入合并（50 次 add ⇒ 1 次 setItem） | progress/monthly/2026-10-7.md:32 |
 | 2026-10-09 | T-223 结案：game single 产物补 `coi-serviceworker.js`（KEEP_SINGLE 6→7 + 拷贝；实测 dist 7 条目） | progress/monthly/2026-10-7.md:33 |
 | 2026-10-09 | T-220 结案：game worker 的 `world-parse-ms` 代理测量默认关闭（探针：默认 0 次解析 / 开关打开 2 次） | progress/monthly/2026-10-7.md:34 |
+| 2026-10-09 | T-224 结案：三工程 build-dist 日志前缀 `[5/5]` → `[single]`/`[multi]`（24 行 1:1；真实构建输出验证） | progress/monthly/2026-10-7.md:35 |

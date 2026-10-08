@@ -312,25 +312,25 @@ async function rebuildDist() {
   }
 
   // ── single：app 打成 IIFE（WASM 与 Worker 内嵌），index.html 改写成 classic script ──
-  console.log('[5/5] 编码 WASM → base64 …');
+  console.log('[single] 编码 WASM → base64 …');
   const wasmBytes = await readFile(join(viewerRoot, 'web/websurf_viewer_wasm_bg.wasm'));
   const wasmB64 = wasmBytes.toString('base64');
 
-  console.log('[5/5] 打包录像解析 Worker（IIFE，Blob URL 用）…');
+  console.log('[single] 打包录像解析 Worker（IIFE，Blob URL 用）…');
   const workerCode = await bundleIife({
     build,
     entry: WORKER_SRC,
     options: { logLevel: 'warning' },
   });
 
-  console.log('[5/5] 打包 app（IIFE + 内嵌）…');
+  console.log('[single] 打包 app（IIFE + 内嵌）…');
   const appCode = await bundleIife({
     build,
     entry: APP_SRC,
     options: { logLevel: 'warning' },
   });
 
-  console.log('[5/5] 写入 dist/（classic index.html + 内嵌 app.js + styles.css）…');
+  console.log('[single] 写入 dist/（classic index.html + 内嵌 app.js + styles.css）…');
   await writeEmbeddedPreamble({
     distDir: dist,
     appCode,

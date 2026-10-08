@@ -87,13 +87,13 @@ function requireInputs() {
 
 /** single：IIFE 加三个内嵌全局键，并把 index.html 改写成 classic script（file:// 双击可用）。 */
 async function buildSingle(wasmPath) {
-  console.log('[5/5] 编码 WASM (base64)...');
+  console.log('[single] 编码 WASM (base64)...');
   const wasmB64 = readFileSync(wasmPath).toString('base64');
 
-  console.log('[5/5] 编码默认纹理包 (base64)...');
+  console.log('[single] 编码默认纹理包 (base64)...');
   const mtzB64 = readFileSync(MTZ).toString('base64');
 
-  console.log('[5/5] 打包 worker (IIFE，Blob URL 用)...');
+  console.log('[single] 打包 worker (IIFE，Blob URL 用)...');
   // worker 打成 IIFE：文本经 __VBSP_WORKER_JS__ 内嵌，运行时由 apps/game/src/app.ts 做 Blob URL
   const workerJs = await bundleIife({
     build,
@@ -101,7 +101,7 @@ async function buildSingle(wasmPath) {
     options: { logLevel: 'info' },
   });
 
-  console.log('[5/5] 打包 app (IIFE)...');
+  console.log('[single] 打包 app (IIFE)...');
   // app 打成 IIFE：与内嵌前缀一起写成 dist/app.js
   const appCode = await bundleIife({
     build,
@@ -109,7 +109,7 @@ async function buildSingle(wasmPath) {
     options: { logLevel: 'info' },
   });
 
-  console.log('[5/5] 写入 dist/（classic index.html + 内嵌 app.js + styles.css）...');
+  console.log('[single] 写入 dist/（classic index.html + 内嵌 app.js + styles.css）...');
   const { bytes } = await writeEmbeddedPreamble({
     distDir: DIST,
     appCode,
@@ -127,12 +127,12 @@ async function buildSingle(wasmPath) {
     console.warn('[WARN] web/index.html 未命中 module script 特征串，dist/index.html 可能仍是 module script。');
   }
   copyFileSync(STYLES, join(DIST, 'styles.css')); copyFileSync(FAVICON, join(DIST, 'favicon.ico')); copyFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js')); // 样式表 / 图标 / SW 模板外置（SW 未注入清单时走 typeof 回退，见 web/coi-serviceworker.js 头注）
-  console.log(`[5/5] dist/app.js: ${(bytes / 1024 / 1024).toFixed(2)} MB（single 全内嵌）`);
+  console.log(`[single] dist/app.js: ${(bytes / 1024 / 1024).toFixed(2)} MB（single 全内嵌）`);
 }
 
 /** multi：分文件 ESM 加外置 wasm / 纹理包（HTTP 托管下 fetch 可用，产物比 single 小）。 */
 async function buildMulti(wasmPath) {
-  console.log('[5/5] 打包 app / worker (ESM)...');
+  console.log('[multi] 打包 app / worker (ESM)...');
   await bundleEsm({
     build,
     entry: join(ROOT, 'src', 'app.ts'),
@@ -155,11 +155,11 @@ async function buildMulti(wasmPath) {
       readFileSync(appPath, 'utf8'),
   );
 
-  console.log('[5/5] 复制 WASM / 默认纹理包...');
+  console.log('[multi] 复制 WASM / 默认纹理包...');
   copyFileSync(wasmPath, join(DIST, WASM_FILE));
   copyFileSync(MTZ, join(DIST, 'textures.mtz'));  // 默认纹理包外置
 
-  console.log('[5/5] 复制 index.html / styles.css（module script 原样）...');
+  console.log('[multi] 复制 index.html / styles.css（module script 原样）...');
   copyFileSync(INDEX_HTML, join(DIST, 'index.html'));
   copyFileSync(STYLES, join(DIST, 'styles.css')); copyFileSync(FAVICON, join(DIST, 'favicon.ico'));
 
@@ -205,7 +205,7 @@ async function buildMulti(wasmPath) {
     );
   }
   writeFileSync(join(DIST, 'coi-serviceworker.js'), swWithManifest);
-  console.log(`[5/5] 注入 SW 预缓存清单: ${precacheManifest.length} 个资源`);
+  console.log(`[multi] 注入 SW 预缓存清单: ${precacheManifest.length} 个资源`);
 }
 
 async function main() {
