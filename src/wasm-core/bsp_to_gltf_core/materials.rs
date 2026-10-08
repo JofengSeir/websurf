@@ -504,7 +504,7 @@ pub(crate) fn load_material_bsp(
             //    `$basetexture` 路径、材质名——铁丝网/格栅的镂空信息就在包里那张低清图上。
             // ② 必须在**这里**回退，而不是在外层 `Err` 分支：外层按材质名查表并返回
             //    `MaterialData::default()`，会把本 VMT 已解析到的
-            //    `translucent` / `alpha_test` 一并丢掉（实机表现：镂空画成近黑实心块）。
+            //    `translucent` / `alpha_test` 一并丢掉（实机表现：镂空画成近黑实心块）；③ 半透明材质贴图拿不到时占位 alpha=51（BLEND+alpha=1 会把烟/雾画成白墙）。
             match fallback_texture_png(&options.missing_fallback, &[base_texture, name], 8)
                 .and_then(|png| image::load_from_memory(&png).ok())
             {
@@ -526,7 +526,7 @@ pub(crate) fn load_material_bsp(
         .cloned(); let second_texture = load_second_texture(bsp, options, &vdf);
 
     Ok(MaterialData {
-        color: [255; 4],
+        color: [255, 255, 255, if (translucent | glass) && texture_data.is_none() { 51 } else { 255 }],
         name: name.to_string(),
         path: vmt_path,
         texture_absent: material.base_texture().is_some() && texture_data.is_none(), texture: texture_data, basetexture2: second_texture,

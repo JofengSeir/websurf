@@ -29,6 +29,8 @@
 
 **水体材质**：`Water` 着色器可以没有 `$basetexture`（只用 `$refracttexture`），此前该分支按「无基色」早退成**不透明纯白**；现按上游口径给半透明水色 `[82,180,217,128]`（`src/wasm-core/bsp_to_gltf_core/materials.rs:475`），含水面地图（如 `surf_boreas` 的 320 世界图元）不再画成白块。
 
+**缺材质占位（半透明）**：声明一半透明的材质若**贴图整条拿不到**，此前占位色是 `[255,255,255,255]` ⇒ glTF 为 `alphaMode=BLEND` **且 alpha=1**，等于把 `$additive` 的烟/雾画成**不透明白幕**（`surf_boreas` 中央那面白墙即 `project_tendies/tendies_endsmoke`：VMT 在包里、`$translucent 1` + `$additive 1`，但 `$basetexture` 的 VTF 不在包内）。现按 `translucent | glass` 且 `texture_data.is_none()` 时占位 alpha 取 **51（0.2）**，呈现为淡雾而不是白墙；不透明材质照旧 255。
+
 **道具光照方向（leaf ambient cube 的轴序）**：GLB 的**位置**经 `map_coords` 转成 Y-up，而**法线**此前是 `vertex.normal.into()` 原样（Source Z-up），两条属性不在同一基；渲染端 `vbspAmbRaw` 又按引擎口径 `common_vertexlitgeneric_dx9.h` 的 `VertexShaderAmbientLight` 用 **Source 分量**取 cube 槽（cube 本身也是 Source 序 `[+X,−X,+Y,−Y,+Z,−Z]`）⇒ 两侧"错得一致"，只对**纯 yaw** 旋转的道具偶然成立，带 pitch/roll 的道具（冲浪坡）会把"上方的光"贴到别的朝向。现改为：法线同样走 `map_coords(apply_root_transform(..))`，并把 shader 的取槽索引按 Three 序重排（`nz²·cube[0/1] + nx²·cube[2/3] + ny²·cube[4/5]`）。实测近洋红魔法点光（worldlight #352，Source `[13332,628,12251]`、强度 `[690,0.5,1897]`）处的 prop：竖直法线取 cube 的竖直面 **up=0.12904 / down=0.03378**（改前为水平面 0.065/0.0625）。
 
 **道具与玻璃的碰撞**：可视碰撞导出此前**按材质透明度剔除网格**——`alpha_mode == 1`（`$translucent` / `$alpha`）的 mesh 整件不进碰撞三角形，于是半透明/透明道具（`surf_666` 的 `kr_windows` / `details69_window01m`、`surf_sedona` 的 16 个模型含 `surf_sedona_ramp03` 与 `naz_curve1..5`）在 `.phy` 输出里存在、在可视输出里被整件剔掉，玩家会穿过本该可站可撞的坡与窗。起源引擎的碰撞来自模型的 `.phy`（vphysics）与 BSP 的 `contents` 位，`$translucent` / `$alphatest` 只进渲染 ⇒ 现改为**不按透明度剔除**（`apps/*/crates/wasm/src/lib.rs` 的 `export_model_tri_colliders`）；同时 `src/ts-shared/phys/world-builder.ts` 的 `auto` 改为**逐模型**回退可视网格（原先只在整表为空时回退 ⇒ `.phy` 缺失的个别模型静默无碰撞，实测 `surf_666` 5 个、`ze_cursed_bear` 3 个）。
