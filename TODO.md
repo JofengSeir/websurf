@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（157 条）
+## 未结项（156 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-504** 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉　`shared`
 
 
-### 待修（125）
+### 待修（124）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-013** lightmap.rs 错误串含外部实现引用 Lightmap.cs:64　`shared`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
@@ -98,7 +98,6 @@
 - **T-147** 材质去重键是材质名，同名材质被后续模型复用　`viewer`
 - **T-148** packed_files 构造期缓存而 num_static_props 每次现算　`viewer`
 - **T-151** BspMetadata 与 TS 契约靠约定对齐，无编译期校验　`viewer`
-- **T-152** Worker 没有心跳，请求侧无法区分「在解析」与「已失联」　`viewer`
 - **T-154** clipToPayload 没有显式返回类型，字段写错的报错落在调用点　`viewer`
 - **T-155** req.rule 缺少防御，缺字段时抛 TypeError 并被 catch 成 error　`viewer`
 - **T-156** `wasm.d.ts` 是零导入点的类型面　`viewer`
@@ -270,7 +269,7 @@
 | T-148 | packed_files 构造期缓存而 num_static_props 每次现算 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:429 | documents/viewer/implementation/wasm.md | 判据：`git grep -n "num_static_props" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 只在构造期算一次，`metadata()` 复用缓存 | — |
 | T-149 | map_name 两端都拿不到值，字段保留但无内容 | 缺陷 | viewer | 待裁决 | apps/viewer/crates/wasm/src/lib.rs:389 | documents/viewer/implementation/wasm.md | — | — |
 | T-151 | BspMetadata 与 TS 契约靠约定对齐，无编译期校验 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:362 | documents/viewer/implementation/wasm.md | 判据：`BspMetadata` 字段名与 TS 契约有编译期或测试期校验（字段名不一致时 `npm run typecheck`/测试失败） | — |
-| T-152 | Worker 没有心跳，请求侧无法区分「在解析」与「已失联」 | 缺陷 | viewer | 待修 | apps/viewer/src/worker/main.ts:70 | documents/viewer/implementation/worker.md | 判据：Worker 不回消息时请求侧在超时后判「已失联」（不再与「在解析」不可区分） | — |
+| T-152 | Worker 没有心跳，请求侧无法区分「在解析」与「已失联」 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/importer.ts:141 ⇒ `send` 建 30 s 看门狗、新增 `onWorkerTimeout`；假 Worker 永不回包的探针实测 30.0 s 后拒绝（`workerBroken=true`、`pending=0`）；`npm run typecheck` 通过 | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-153 | WorkerCtx 是手写的全局面（tsconfig lib 缺 WebWorker） | 缺陷 | viewer | 已结案 | apps/viewer/tsconfig.json:6 ⇒ `lib` 加 `WebWorker`；手写 `WorkerCtx` 删除、`ctx = self`（无断言）；`npm run typecheck` 与 `build:worker` 均通过 | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-154 | clipToPayload 没有显式返回类型，字段写错的报错落在调用点 | 缺陷 | viewer | 待修 | apps/viewer/src/worker/main.ts:113 | documents/viewer/implementation/worker.md | 判据：@BT@clipToPayload@BT@ 有显式返回类型 ⇒ 字段写错时 @BT@npm run typecheck@BT@ 在定义处报错（不在调用点） | — |
 | T-155 | req.rule 缺少防御，缺字段时抛 TypeError 并被 catch 成 error | 缺陷 | viewer | 待修 | apps/viewer/src/worker/main.ts:82 | documents/viewer/implementation/worker.md | 判据：@BT@req.rule@BT@ 缺字段时给出明确错误（不再抛 TypeError 且被 catch 成笼统 error） | — |

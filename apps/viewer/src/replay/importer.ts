@@ -64,7 +64,7 @@ export interface ImportResult {
 interface Pending {
   resolve: (v: ParseResponse) => void;
   reject: (e: Error) => void;
-  onProgress?: ProgressFn;
+  onProgress?: ProgressFn; timer?: ReturnType<typeof setTimeout>;
 }
 
 export class ReplayImporter {
@@ -113,7 +113,7 @@ export class ReplayImporter {
           p.onProgress?.(msg.phase, msg.done, msg.total);
           return;
         }
-        this.pending.delete(msg.id);
+        this.pending.delete(msg.id); clearTimeout(p.timer);
         p.resolve(msg);
       };
       w.onerror = (e) => {
@@ -122,7 +122,7 @@ export class ReplayImporter {
         this.worker?.terminate();
         this.worker = null;
         const err = new Error(`解析 Worker 启动失败（${e.message || '未知原因'}），已改用主线程解析`);
-        for (const p of this.pending.values()) p.reject(err);
+        for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(err); }
         this.pending.clear();
       };
       this.worker = w;
@@ -138,7 +138,7 @@ export class ReplayImporter {
     const w = this.ensureWorker();
     if (!w) return Promise.reject(new Error('__NO_WORKER__'));
     return new Promise<ParseResponse>((resolve, reject) => {
-      this.pending.set(req.id, { resolve, reject, onProgress });
+      this.pending.set(req.id, { resolve, reject, onProgress, timer: setTimeout(() => this.onWorkerTimeout(), 30_000) });
       w.postMessage(req);
     });
   }
@@ -149,7 +149,7 @@ export class ReplayImporter {
    *
    * `file` 为 null 时交由解析侧复用自己缓存的上一份文件——本仓唯一调用点
    * （`apps/viewer/src/replay/panel.ts` 的 `ReplayPanel.runImport`）保证非空。
-   * 边界：`postMessage` 成功但 Worker 始终不回消息时，本 Promise 不设超时、不会被结算。
+   * 边界：`postMessage` 成功后 Worker **30 s 内无任何回包**（含进度）即判「失联」⇒ 置 `workerBroken`、终止并丢弃 Worker、拒绝全部未结算请求，`catch` 走主线程回退。
    */
   async import(
     file: File | null,
@@ -236,6 +236,21 @@ export class ReplayImporter {
     onProgress?.('parse', 1, 1);
     const { clip, warnings } = clipFromShavitReplay(name, parsed, rule);
     return { clip, warnings, resolvedPath: clip.resolvedPath };
+  }
+
+  /**
+   * Worker 超时（`send` 的 30 s 计时器到期、期间连进度都没回过）：按「失联」处理——置
+   * `workerBroken`、终止并丢弃 Worker、用同一个错误拒绝全部未结算请求，使 `import` 的
+   * `catch` 走 `importOnMain` 主线程回退（与 `onerror` 同路）。计时器在正常回包
+   * （`onmessage`）与 `onerror` / `dispose` 三条路径上都会被清掉。
+   */
+  private onWorkerTimeout(): void {
+    this.workerBroken = true;
+    this.worker?.terminate();
+    this.worker = null;
+    const err = new Error('解析 Worker 超时（30s 无响应），已改用主线程解析');
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(err); }
+    this.pending.clear();
   }
 }
 
