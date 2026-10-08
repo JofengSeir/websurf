@@ -85,14 +85,6 @@
       "consumed": true
     },
     {
-      "path": "TODO.md",
-      "by": "owner(放开新增行)",
-      "reason": "权限规格变更：allowNew true",
-      "at": "2026-10-07",
-      "task": "D-107",
-      "consumed": true
-    },
-    {
       "path": "documents/norms/scripts-and-ci.md",
       "by": "owner(本轮指示：按优先级修审查项)",
       "reason": "审查：§4 里 docflow 的能力描述已过时（锚点按 目标:行号；CI 基线 HEAD^）",
@@ -136,6 +128,14 @@
       "path": "OWNER.md",
       "by": "owner",
       "reason": "D-015 由 agent 自决并移入已决（owner 在对话中已授权渲染层面自行处理、不留待裁决）",
+      "at": "2026-10-08",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "TODO.md",
+      "by": "owner",
+      "reason": "T-424 事项列里的「把 sky_camera 点搬到世界原点」已被 T-428 证伪并修正，需同步措辞",
       "at": "2026-10-08",
       "task": "",
       "consumed": true
@@ -1284,9 +1284,9 @@
         "line": 407
       },
       "T-424": {
-        "p": "78b57e2bbb43cd199031e5fc8e0465641412856629630c7ce6bae48c27f7db4d",
+        "p": "a4de1208991fea55f9d5e0babd2f670011b43812a548b4508e9186d294ab0824",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
-        "at": "2026-10-07",
+        "at": "2026-10-08",
         "line": 408
       },
       "T-425": {
@@ -1307,65 +1307,71 @@
         "at": "2026-10-07",
         "line": 411
       },
+      "T-428": {
+        "p": "01ee622eecf6e3a7392a0a24dd0f573976493a265e23b91d27cf37f83bebf15d",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-08",
+        "line": 412
+      },
       "T-503": {
         "p": "64c19c9939752c45a6ab55ec78faa8edcef1e9b41e2180490e3e0c0227ee8aa8",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 412
+        "line": 413
       },
       "T-504": {
         "p": "5d7f7e8991b01a7f5633fc6f7331731fa0a1df18cdef77f4de5a0b8f3064f7fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 413
+        "line": 414
       },
       "T-506": {
         "p": "f0ba7bd325f7b1dbdce5e6851c4d71e898a2282f6986c743acd732df95e42ca0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 414
+        "line": 415
       },
       "T-507": {
         "p": "28732aed355542c581838be55b305de2278ac6b034590e015720b625181a97de",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 415
+        "line": 416
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 416
+        "line": 417
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 417
+        "line": 418
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 418
+        "line": 419
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 419
+        "line": 420
       },
       "T-605": {
         "p": "232d9bb6e214c51056198e1d9d9cba7d37dcf6f186c866724e95e05963c9ac51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 420
+        "line": 421
       },
       "T-606": {
         "p": "dc729d30140d250f962dece0261615dbc5e8b6c7384433de3c65ea257dfe72ef",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 421
+        "line": 422
       }
     },
     "OWNER.md": {
@@ -1728,6 +1734,7 @@
       "src/renderer-shared/shader/lightmap-shader.ts:1408:1408": "809c03b3",
       "src/wasm-core/vbsp/data/game.rs:327:327": "42967d45",
       "src/renderer-shared/shader/world-transition.ts:1:1~2": "8d64a30d",
+      "src/renderer-shared/environment/miniature-sky.ts:143:143": "26ecc2ce",
       "src/renderer-shared/scene/scene-optimizer.ts:258:258": "d9a61b1f",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
       "apps/debug/scripts/jump-apex-verify.mjs:1:1": "4949218d",
@@ -5045,6 +5052,14 @@
   },
   "rebaselines": [
     {
+      "path": "TODO.md",
+      "at": "2026-10-08T00:28:15.718Z",
+      "by": "agent",
+      "reason": "T-424 事项列里的「把 sky_camera 点搬到世界原点」已被 T-428 证伪并修正，需同步措辞",
+      "changed": 1,
+      "total": 185
+    },
+    {
       "path": "documents/viewer/sequences.md",
       "at": "2026-10-08T00:06:31.746Z",
       "by": "agent",
@@ -5355,14 +5370,6 @@
       "reason": "T-413: app.ts:36 import 行内容变更（雾接线）",
       "changed": 1,
       "total": 120
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-07T20:18:18.762Z",
-      "by": "agent",
-      "reason": "T-413: 新增 fog-controller.ts:1 锚点",
-      "changed": 1,
-      "total": 170
     }
   ]
 }

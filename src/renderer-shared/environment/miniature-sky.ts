@@ -151,7 +151,11 @@ export function buildMiniatureOutside(mapRoot: THREE.Object3D, cam: SkyCameraPar
 		group.add(mesh);
 	}
 	const s = cam.scale;
+	// 锚点必须是 `sky_camera` **本身**：起源引擎把天空相机放到 `CAM + (player-CAM)/scale` 再渲染
+	// 微缩几何，本实现把它烘成静态坐标 ⇒ 与引擎对任一微缩点的**方向**完全一致（实测夹角
+	// 0.00°；若把相机点搬到世界原点（锚点=原点）会差 21.6°~77.1°，外景整体错位）。
+	// 故平移量 = CAM*(1-scale)。
 	group.scale.setScalar(s);
-	group.position.set(-origin.x * s, -origin.y * s, -origin.z * s);
+	group.position.set(origin.x * (1 - s), origin.y * (1 - s), origin.z * (1 - s));
 	return group;
 }

@@ -45,7 +45,7 @@
 
 **微缩外景（Source 3D 天空盒的替代实现）**：夹具里没有可分离的地图自带微缩区，故在可达范围之外合成三层低多边形山脊作「到不了的外景」（`src/renderer-shared/environment/miniature-sky.ts`，逐层向雾色混合出大气透视，材质不吃地图雾以免被整片吃掉）；debug 已接线并随换图释放。
 
-**3D 天空盒（地图自带微缩景观）**：按起源引擎的正统做法接入 —— 取 `sky_camera` 半径（`场景半径 / scale`）内的微缩 mesh，复制后放大 `scale` 倍并把 `sky_camera` 点搬到世界原点，副本关深度读写并以 `renderOrder = -1` 当天空层；于是玩家在自己的出生点就能看到地图自带的那片远山/雪脊（`surf_boreas` 的微缩区在 `(-3475,-11710,-3158)`）。没有 `sky_camera` 的图仍回退到合成的山脊。
+**3D 天空盒（地图自带微缩景观）**：按起源引擎的正统做法接入 —— 取 `sky_camera` 半径（`场景半径 / scale`）内的微缩 mesh，复制后**绕 `sky_camera` 缩放 `scale` 倍**（平移量 `CAM*(1-scale)`，等价于引擎把天空相机放到 `CAM + (player-CAM)/scale` 再渲染微缩几何；两者方向夹角实测 0.00°），副本以 `renderOrder = -1` 当天空层；于是玩家在自己的出生点就能看到地图自带的那片远山/雪脊（`surf_boreas` 的微缩区在 `(-3475,-11710,-3158)`，锚点=相机而不是世界原点，后者会偏 21.6°~77.1°）。没有 `sky_camera` 的图仍回退到合成的山脊。
 
 **双贴图地形混合（`WorldVertexTransition` 岩雪混合）**：起源引擎把「岩石 / 雪」这类地形混合写成 VMT 的 `$basetexture2`，并按逐顶点 alpha 混合；此前本仓**全链路都没有处理第二贴图**，故 `surf_boreas` 的雪永远不出现（混合地形只画岩石那一半）。现按通用做法接通三步 —— ① 导出侧把位移顶点的 `alpha/255` 写成几何属性 `_VBSP_BLEND`（非位移面恒 0，所有面都写以保证属性集一致）；② 按 VMT 文本取 `$basetexture2`（不依赖 `vmt_parser` 的着色器枚举，任何 VMT 都能取到）并作为 glTF 第二贴图，下标写进材质 extras `vbsp_basetexture2`；③ 渲染端 `src/renderer-shared/shader/world-transition.ts` 在装配收尾后链式注入 `mix(第一贴图, 第二贴图, 权重)`（不覆盖 lightmap 注入），三个工程共用同一套。开关 `window.__vbspWorldTransitionOff = true` 可做 A/B 对照。
 
