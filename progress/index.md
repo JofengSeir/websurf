@@ -185,3 +185,4 @@
 
 | 2026-10-08 | T-444 结案：三角形是「面」不是实心体（贴坡「脚底黏住」的根因）——边墙不再出接触/法线、三角形不报 `start_solid`；真图 8 向行走 7 向 0 个「贴地却几乎不动」tick | progress/monthly/2026-10-6.md:25 |
 | 2026-10-08 | T-445 结案：盒从置换面棱线上穿过去（owner 报「连跳穿透地板」）——三角形障碍集补成 Minkowski 精确面集（SDK `CDispCollTree::SweepAABBTriIntersect` 口径） | progress/monthly/2026-10-6.md:26 |
+| 2026-10-08 | T-446 立项（待修）：盒起点落在道具 `.phy` 凸壳内部时整块道具被跳过、玩家穿坡（boreas `1600,7600` 的 `ramp_c1m` 实证） | progress/monthly/2026-10-6.md:27 |

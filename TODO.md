@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07 已触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **446**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **447**；取证项 **508**；跨区/文档治理 **606**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（173 条）
+## 未结项（174 条）
 
 ### 待裁决（64）
 
@@ -101,8 +101,9 @@
 - **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
 - **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 
-### 待修（110）
+### 待修（111）
 
+- **T-446** 盒**起点落在道具 `.phy` 凸壳内部**时该道具整块被跳过（`start_solid` 分支不出接触、又不做退嵌）⇒ 如图 `1600,7600` 处的 `ramp_c1m`（AABB x[-1475,2534] y[99,1536] z[6666,10508]，678 三角、y≈339 有朝上面）下达 500 HU 扫掠一次都不命中、人穿坡落到 -38；真图复核脚本 `.tmp/mapsurvey/spot1600b.mjs`　`shared`
 - **T-441** 置换面碰撞**分块懒加载**（D-017 裁决）：避免一次性 ~13MB JSON / 13 万三角形入物理　`shared`
 - **T-443** 帧探针补 `applyPoseAt(pos, yaw, pitch)`（现只有 spawn/surface 预设），脚本才能钉任意位姿出图　`debug`
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
@@ -392,7 +393,7 @@
 | T-410 | surf_boreas 的 patch 材质 include 前缀被叠加两次（本地又补 materials/ 而未剥 include 自带前缀）⇒ 21 个材质解析失败、539/1716 世界图元无贴图 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/materials.rs:448 | 本行即全部 | 见详情 | — |
 | T-411 | Water 材质无 $basetexture 时被画成不透明纯白（缺上游的 Water 特判）⇒ surf_boreas 320/1716 世界图元（18.6%）水面观感错误 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/materials.rs:475 | 本行即全部 | 见详情 | — |
 | T-412 | 地图渲染端没有天空盒背景（SKY 面被 is_visible 过滤、LightManager 只设纯色）⇒ 抬头只见纯深色；新增 2D cubemap 天空盒（skyname → 6 面 VTF → CubeTexture） | 缺陷 | shared | 已结案 | src/renderer-shared/environment/skybox.ts:1 | 本行即全部 | 判据：@BT@node .tmp/mapsurvey/verify-skybox.mjs test/maps/surf_boreas.bsp@BT@ ⇒ faces=6 且全为合法 PNG；运行时 CDP 取 background 为 @BT@CubeTexture imgs=6@BT@（修前为 Color）；@BT@npm run typecheck@BT@（apps/debug）exit 0。探针与截图见 .tmp/mapsurvey/（gitignored） | — |
-| T-413 | 地图雾（env_fog_controller）未施加（renderer-main 明说不设 scene.fog）⇒ 远景无空气衰减 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/fog-controller.ts:1 | 本行即全部 | 判据：@BT@node .tmp/mapsurvey/verify-fog.mjs test/maps/surf_boreas.bsp@BT@ ⇒ color=0xe8fffe / start=500 / end=43420，且合成用例 on / off / end<start 正确；运行时 CDP ⇒ scene.fog = Fog(500,43420,0xe8fffe)，@BT@setFogEnabled(false)@BT@ ⇒ null、再开 ⇒ 恢复；@BT@npm run typecheck@BT@ exit 0。探针与截图见 .tmp/mapsurvey/ | — |
+| T-413 | 地图雾（env_fog_controller）未施加（renderer-main 明说不设 scene.fog）⇒ 远景无空气衰减 | 缺陷 | shared | 已结案 | src/renderer-shared/environment/fog-controller.ts:1 | 本行即全部 | 见详情 | — |
 | T-414 | 动态道具（prop_dynamic / prop_dynamic_override）不进 GLB：模型枚举只收 static_props 引用、且装配点 entities 恒空 | 缺陷 | shared | 已结案 | src/wasm-core/model_integrator/mod.rs:1352 | 本行即全部 | 见详情 | — |
 | T-415 | 【W7 核查】3D 天空盒（sky_camera 缩放区）在 surf_boreas 无几何可渲染：sky_camera three=(1840,-16064,-6208) 在世界包围盒 y≥-14783 之外 1281 HU，且 3000 HU 内 0 个网格中心 ⇒ 无需行动（2D 天空盒已由 T-412 覆盖） | 缺陷 | shared | 已结案 | progress/monthly/2026-10-5.md:17 | 本行即全部 | 判据：@BT@sky_camera@BT@ 存在且实测「3000 HU 内 0 网格中心 + 包围盒外 1281 HU」；对照 surf_null / surf_666 无 sky_camera、surf_concretejungle_fix 的相机在包围盒内（几何与地图原点混同 ⇒ 无法区分）。其它图若要 3D 天空盒需另立启发式切分任务 | — |
 | T-416 | 【W2b/game】game 工程无天空盒（`scene.background` 恒为纯色 0x222222）：game wasm 未导出 parse_entities / read_pakfile_file / decode_vtf_to_png ⇒ 无法复用 renderer-shared 的 skybox 逻辑 | 缺陷 | shared | 已结案 | apps/game/src/app.ts:514 | 本行即全部 | 判据：@BT@node .tmp/mapsurvey/verify-game-skybox.mjs test/maps/surf_boreas.bsp@BT@ ⇒ faces=6 且 slots=px,nx,py,ny,pz,nz；@BT@cd apps/game && npm run typecheck@BT@ exit 0；@BT@cd apps/game && npm run build:wasm@BT@ exit 0（新导出已现于 pkg d.ts）。viewer 侧（W2c）待做 | — |
@@ -424,6 +425,7 @@
 | T-443 | 【S17·debug】帧探针 `applyPose` 只有 `spawn`/`surface` 两个预设 ⇒ 脚本无法钉任意位姿出图；补 `applyPoseAt(pos, yawDeg, pitchDeg)`（走现成 `setHoldPoint`） | 缺失 | debug | 待修 | apps/game/src/renderer/renderer-main.ts:1020 | progress/monthly/2026-10-6.md | 判据：脚本调用后 `cameraPose()` 返回同一 pos/yaw/pitch，两次运行像素 diff≈0 | — |
 | T-444 | 【S18·三角形「面」语义】三角形被当成 5 面**实心凸体**（±n + 三边墙）：边墙也产生接触 ⇒ 贴坡时盒前缘被相邻三角的横向墙挡住、法线几乎与移动反向、速度被整段剪掉（owner 报「脚底黏住」；boreas `11309,809,10456` yaw90 250 tick 只走 109 HU、56 个 tick 近乎静止）；±n 零厚度对又让「盒跨在面两侧」必然判 `start_solid`。修法：边墙只作「接触处盒仍搭在三角形面域上」的门、不出接触与法线；接触只由 ±n 产生；三角形不写 `start_solid` / `all_solid` | 缺陷 | shared | 已结案 | src/phys/world.rs:449 | progress/monthly/2026-10-6.md | 判据：@BT@cargo test -p websurf-phys@BT@ 全过（新增 4 项 @BT@tri_surface_tests@BT@）；@BT@node .tmp/mapsurvey/stickab.mjs@BT@ ⇒ 该点 8 向中 7 向净位移 ≥919 HU、0 个「贴地却几乎不动」tick（修前 yaw90=109/56）。面集已在 T-445 补全为精确面集 | — |
 | T-445 | 【S18·三角形面集补全】三角形障碍集只有 ±n 两条面（T-444 把边墙降级为门）⇒ 盒**脚印跨过三角形棱线**时，面平面的进入分数按「盒沿 n 的支撑角」算、该角可能落在三角面域之外 ⇒ 命中处盒 AABB 与该三角 AABB 分离、`aabb_overlaps_at` 正当否决 ⇒ **一次接触都不产生**，盒从棱线穿过去（owner 报 boreas `12799,809,10444` 附近连跳穿地板；实测 `13183,10060` yaw270 起跳 111 tick 后自由落体到 -256）。修法按 SDK 补全 Minkowski 和 `三角形 ⊕ 盒` 的精确面集：三角面⊕盒顶点（±n）+ 三角边⊕盒棱（`cross(edge,axis)`）+ 三角顶点⊕盒面（±三轴） | 缺陷 | shared | 已结案 | src/phys/world.rs:449 | progress/monthly/2026-10-6.md | 判据：@BT@cargo test -p websurf-phys@BT@ 36 项全过（新增 @BT@a_box_descending_across_a_triangle_edge_is_caught@BT@，夹具取自 boreas `__disp_176` tri#124）；@BT@node .tmp/mapsurvey/tunneldetail.mjs@BT@ ⇒ 原 111 tick 起自由落体的路径改由 656~659 的置换面接住、末位置 y=685（修前 -256）；@BT@node .tmp/mapsurvey/stickab.mjs@BT@ ⇒ 8 向中 7 向 0 个「贴地却几乎不动」tick | — |
+| T-446 | 盒**起点落在道具 `.phy` 凸壳内部**时该道具整块被跳过（`start_solid` 分支既不出接触、也不做退嵌）⇒ boreas `1600,7600` 的 `ramp_c1m`（678 三角、y≈339 有朝上面）自上而下 500 HU 扫掠一次都不命中、玩家穿坡落到 -38；同点位换 `dx/dz ±48` 复现一致 | 缺陷 | shared | 待修 | 见详情 | progress/monthly/2026-10-6.md | 判据：@BT@node .tmp/mapsurvey/spot1600b.mjs@BT@ ⇒ `从 y=340 向下 frac=0.688 命中y=-4.0`（未命中 y≈339 的坡面） | — |
 | T-441 | 【S16】置换面碰撞**分块懒加载**（落实 D-017：owner 2026-10-08 裁决，避免一次性 ~13MB JSON / 13 万三角形入物理） | 缺陷 | shared | 待修 | src/ts-shared/phys/world-builder.ts:203 | progress/monthly/2026-10-6.md | 判据：置换面按块分批构建；`triJson` 单次体积显著下降且洞穴壁仍全有碰撞 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:258 | progress/open-issues/03-renderer-merge-normal-attribute.md | 判据：三应用合批生效（合批 Mesh 数 > 0，日志无「normal 属性不一致」失败） | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
