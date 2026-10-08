@@ -135,14 +135,46 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-202 结案",
+      "reason": "T-446 转进行中并更新实测证据",
       "at": "2026-10-08",
       "task": "",
       "consumed": true
     }
   ],
   "cochange": [],
-  "claim": null,
+  "claim": {
+    "task": "T-446",
+    "may": [
+      "src/phys/player.rs",
+      "TODO.md",
+      "progress/index.md",
+      "progress/monthly/2026-10-8.md"
+    ],
+    "must": [
+      "src/phys/player.rs"
+    ],
+    "base": {
+      "src/phys/player.rs": "a981286da44e51c51a4bd1e2409b0576e589c94af6a4c4044e0e2316b267415a",
+      "TODO.md": "5f220ac26724c83b6acbfdc502528e917adadc240348311c56a0c9ebe54844f4",
+      "progress/index.md": "c1c80652f8b7da9a699c307343582dafd8c9771492bac76588df590b6153dcdc",
+      "progress/monthly/2026-10-8.md": "590467fc5fc5f2d8b39fce7ed612e0e633639ba6e95ecd56caed5a62edfcb6c9"
+    },
+    "at": "2026-10-08T22:44:23.254Z",
+    "pins": {
+      "README.md": "3b20d022d2afc6c5d5a8f3b394157016a1c03648f02b09cc7a25374cbce7978c",
+      "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
+      "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
+      "skills/websurf-env-traps/SKILL.md": "4bae9ea251bca4824c169cf27e4a93277d472eef8b7843feabd61a529471d157",
+      "documents/norms/annotation-and-verification.md": "40f271606aad9363b61cfb24d756bbce306cf354b9e483283fab8c66f71a46b6",
+      "documents/norms/scripts-and-ci.md": "9d3cd3b74c3667e418373b9e006c993b59cf1c191134877a3464646f6d0993ad",
+      ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
+      ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
+      ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
+      ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
+      "AGENTS.md": "53a2d312eade0322eeae2603c7e83cef4eb4ac7439bf8b7dbbdc7a44f020e270",
+      "documents/norms/local-path-hygiene.md": "fa7589d6fef4800bbf0920da32d2fe031877fc736111a8b8d1259d009d81f4a1"
+    }
+  },
   "units": {
     "TODO.md": {
       "match": "^\\|\\s*T-\\d{3}\\s*\\|",
@@ -1594,6 +1626,7 @@
       "src/wasm-core/bsp_to_gltf_core/convert.rs:367:367": "a803e10b",
       "src/scripts/check-glb-parity.mjs:2:2": "3f48e740",
       "apps/game/src/renderer/renderer-main.ts:1020:1020": "52edeba1",
+      "src/phys/player.rs:729:729": "e449928a",
       "src/ts-shared/phys/world-builder.ts:203:203": "ea663714",
       "src/renderer-shared/scene/scene-optimizer.ts:343:343": "5c8331d1",
       "src/renderer-shared/shader/lightmap-shader.ts:1582:1582": "8d64a30d",
@@ -4963,6 +4996,14 @@
   },
   "rebaselines": [
     {
+      "path": "TODO.md",
+      "at": "2026-10-08T22:46:24.708Z",
+      "by": "agent",
+      "reason": "T-446 转进行中并更新实测证据",
+      "changed": 1,
+      "total": 165
+    },
+    {
       "path": "documents/game/sequences.md",
       "at": "2026-10-08T22:39:23.613Z",
       "by": "agent",
@@ -5273,14 +5314,6 @@
       "reason": "T-220：worker/main.ts:518 的 postMessage 挂开关，锚点复核后重钉",
       "changed": 1,
       "total": 184
-    },
-    {
-      "path": "documents/game/implementation/worker.md",
-      "at": "2026-10-08T21:22:53.017Z",
-      "by": "agent",
-      "reason": "T-220：worker/main.ts:512 附近内容变更，锚点复核后重钉",
-      "changed": 3,
-      "total": 52
     }
   ]
 }

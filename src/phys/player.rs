@@ -726,7 +726,7 @@ fn try_player_move(world: &mut World, p: &mut Player, _params: &PhysParams, dt: 
             p.velocity = [0.0, 0.0, 0.0];
             return;
         }
-        if tr.fraction > 0.0 {
+        if tr.fraction > 0.0 && !tr.start_solid { // 起点实心时 fraction 仍为 1、end_pos == end：采用它等于「照原速穿过去」，故不采用（与 step_move 的抬升分支同口径）
             p.origin = tr.end_pos;
             let _ = original_vel; // 语义保留：original_vel 为碰撞前速度，剪裁用
             planes.clear();
