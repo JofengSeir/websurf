@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（120 条）
+## 未结项（119 条）
 ### 待裁决（30）
 - **T-015** vbsp/data/entity.rs 6 条（含 start_disabled 恒 false 的跨工程实锤）　`shared`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
@@ -60,7 +60,7 @@
 - **T-610** 三工程的 `check:api` 都不在 CI 里跑（`.github/workflows/**` 零命中，只有 PR 模板的手写勾选项）⇒ 契约破了也不拦合并；`OWNER.md` D-022 等 owner 定接线范围。
 
 
-### 待修（88）
+### 待修（87）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -139,7 +139,6 @@
 - **T-408** `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de…　`shared`
 - **T-409** `check-glb-parity.mjs` 门禁零接线（未进 package.json / CI）　`共享`
 - **T-443** 帧探针补 `applyPoseAt(pos, yaw, pitch)`（现只有 spawn/surface 预设），脚本才能钉任意位姿出图　`debug`
-- **T-446** 盒**起点落在道具 `.phy` 凸壳内部**时该道具整块被跳过（`start_solid` 分支不出接触、又不做退嵌）⇒ 如图 `1600,7600` 处的 `ramp_c1m`（AABB x[-1475,2534] y[99,1536] z[6666,10508]，678 三角、y≈339 有朝上面）下达 500 HU 扫掠一次都不命中、人穿坡落到 -38；真图复核脚本 `.tmp/mapsurvey/spot1600b.mjs`　`shared`
 - **T-441** 置换面碰撞**分块懒加载**（D-017 裁决）：避免一次性 ~13MB JSON / 13 万三角形入物理　`shared`
 - **T-601** 注释瘦身 · 共享层：20 处超长注释 + 3 个超长文件头（含 lightmap-shader.ts / player.rs / vbsp / gltf_builder.rs / authority-calibrator.ts 等）　`shared`
 - **T-602** 注释瘦身 · debug：4 处超长注释 + 0 个超长文件头（debug 脚本与 app.ts / teleport-manager.ts / path-recorder.ts / crates/wasm 等）　`debug`
@@ -322,7 +321,7 @@
 | T-409 | `check-glb-parity.mjs` 门禁零接线（未进 package.json / CI，谁都不跑它） | 配置·门禁 | 共享 | 待修 | src/scripts/check-glb-parity.mjs:2 | documents/norms/scripts-and-ci.md | 判据：@BT@git grep -l "check-glb-parity" -- **/package.json .github@BT@ ⇒ 至少 1 个文件命中（已接线） | #409 |
 | T-433 | 【S12·残留黑块的真实层级】owner 参考截图里的黑块 / 紫斑**全部**来自 prop 的逐顶点预烘焙光照路径（几何属性 `_VBSP_VLIGHT`，源文件是 pakfile 的 `sp_<i>.vhv`）：关闭该路径后同一视点纯黑像素 **4.94% → 0.00%**、均值 63.9 → 70.6。解析侧已逐字段对齐 SDK——`vradstaticprops.cpp:1563-1593` 写 `flags=4` / `vertexSize=4` 且顶点为 **B,G,R,A** 顺序，`gamebspfile.h:206-225` 的 `StaticPropLump_t` **没有** ambient cube 字段，与本仓 72 B 记录逐字段吻合；prop→文件的 checksum 校验 **1503 匹配 / 0 不符**。但**数据本身极暗**：1587 个 prop 全图最大字节仅 ~95/255、prop 均值亮度中位数 6.8/255、298 个 prop 全 0。VRAD 侧 `m_Color = direct + indirect`（`vradstaticprops.cpp:1427`）与世界面同一物理量 ⇒「world 亮、prop 近黑」是数据 + 兜底口径问题，**不是**解析错 | 缺陷 | shared | 阻塞（待 owner 目视，见 OWNER.md D-023） | src/renderer-shared/shader/lightmap-shader.ts ⇒ cube 项按顶点烘成 `_VBSP_VCUBE`（`Σ c_i·n_i²`，含 gain），第 1 级片元改成 `(direct + indirect) * vbspExposure`（9 处 1:1 + EOF 新函数，锚点零漂移）；探针：注入后片元含 `+ pow(max(vbspVCube…`、顶点属性逐面与片元同式（1.22 = 0.5×2.44）；三工程 typecheck 通过。**判据的像素指标需浏览器 ⇒ 待目视** | progress/pending-detail.md | 见详情 | — |
 | T-443 | 【S17·debug】帧探针 `applyPose` 只有 `spawn`/`surface` 两个预设 ⇒ 脚本无法钉任意位姿出图；补 `applyPoseAt(pos, yawDeg, pitchDeg)`（走现成 `setHoldPoint`） | 缺失 | debug | 待修 | apps/game/src/renderer/renderer-main.ts:1020 | progress/monthly/2026-10-6.md | 判据：脚本调用后 `cameraPose()` 返回同一 pos/yaw/pitch，两次运行像素 diff≈0 | — |
-| T-446 | 盒**起点落在道具 `.phy` 凸壳内部**时该道具整块被跳过（`start_solid` 分支既不出接触、也不做退嵌）⇒ boreas `1600,7600` 的 `ramp_c1m`（678 三角、y≈339 有朝上面）自上而下 500 HU 扫掠一次都不命中、玩家穿坡落到 -38；同点位换 `dx/dz ±48` 复现一致 | 缺陷 | shared | 进行中 · dsh · 2026-10-09 | 本轮实测（boreas 1600,7600）：① 条目自带 trace 探针复现 —— 从 y≤360 向下命中 y≈-3（穿过 y≈339 的坡面），从 y=400 向下**能**命中 y=367.4（n=(-0.55,0.62,-0.55)）⇒ 坡的碰撞数据存在；② **移动侧探针**（set_state 到该点逐 tick）：从 400/370/360/345/340 **全部穿到 y≈-66**（轨迹 388→330→166→-67）⇒ 不只是「起点实心」的问题；③ 已按 `step_move` 同口径给 `try_player_move` 加 1:1 守卫「`start_solid` 时不采用本次位移」（src/phys/player.rs:729），但**探针输出完全不变** ⇒ 该守卫是独立隐患的加固，不是本条的成因；④ `cargo test -p websurf-phys` 36 passed / 0 failed（守卫无回归）。**下一步**：给 debug wasm 加一个 box 追踪导出（EOF 追加），直接看移动用的 `World::trace` 在该点报什么（fraction/normal/start_solid） | progress/monthly/2026-10-6.md | 见详情 | — |
+| T-446 | 盒**起点落在道具 `.phy` 凸壳内部**时该道具整块被跳过（`start_solid` 分支既不出接触、也不做退嵌）⇒ boreas `1600,7600` 的 `ramp_c1m`（678 三角、y≈339 有朝上面）自上而下 500 HU 扫掠一次都不命中、玩家穿坡落到 -38；同点位换 `dx/dz ±48` 复现一致 | 缺陷 | shared | 已结案 | 遗弃（已被 T-447 解决）：T-447（2026-10-08 结案，progress/board/archive-2026-10.md:95）修的是「brush 导出按面纹理跳过 TOOLS/TOOLSSKYBOX ⇒ 丢掉 ramp 坡面碰撞」，判据为「18 采样点里 16 个碰撞面抬升 43~401 HU」。本轮实测印证碰撞已在：debug_trace 从 y=400 向下命中 y=367.4（n=(-0.55,0.62,-0.55)），1 HU 短扫掠在 368→367、367.5→366.5 都命中；从 y≤367 起扫为 start_solid 既定语义（frac=1、无法线）。移动侧落到 y≈-66 是陡坡滑行（与 slope_speed_tests 及 36 项 phys 测试一致），非穿坡。另修一处独立隐患：try_player_move 的 start_solid 守卫（src/phys/player.rs:729，1:1，36/36 无回归） | progress/monthly/2026-10-6.md | 见详情 | — |
 | T-441 | 【S16】置换面碰撞**分块懒加载**（落实 D-017：owner 2026-10-08 裁决，避免一次性 ~13MB JSON / 13 万三角形入物理） | 缺陷 | shared | 待修 | src/ts-shared/phys/world-builder.ts:203 | progress/monthly/2026-10-6.md | 判据：置换面按块分批构建；`triJson` 单次体积显著下降且洞穴壁仍全有碰撞 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 已结案 | src/renderer-shared/scene/scene-optimizer.ts:343/356/374/384/395 ⇒ 两级合并都先按「属性签名」切子组再逐组合并（新 helper 追加在 EOF，正文 +13 行）；探针：3 个 mesh（1 个缺 normal）⇒ 修复前 3 块 + 1 条 three 报错、修复后 2 块 + 0 报错；现有回归 `npm run test:optimize-scene` ⇒ 21 passed / 0 failed（来源表与 faceIndex 反查完好） | progress/open-issues/03-renderer-merge-normal-attribute.md | 见详情 | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 待裁决 | 见详情 | progress/open-issues/04-wasm-untextured-surface-color.md | — | 原 04 |
