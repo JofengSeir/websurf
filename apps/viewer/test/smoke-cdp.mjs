@@ -413,9 +413,9 @@ try {
   );
   check('速度为单行「横向｜竖向」结构（vsep 分隔）', tmState && tmState.sep === true, String(tmState?.sep));
   check(
-    '按键簇六键齐备且位于 #timeline（W/A/S/D/跳/蹲）',
-    tmState && tmState.keys.length === 6 &&
-      ['W', 'A', 'S', 'D', '跳', '蹲'].every((l) => tmState.keys.some((k) => k.label === l)),
+    '按键簇八键齐备且位于 #timeline（Q/W/E/A/S/D/蹲/跳）',
+    tmState && tmState.keys.length === 8 &&
+      ['Q', 'W', 'E', 'A', 'S', 'D', '蹲', '跳'].every((l) => tmState.keys.some((k) => k.label === l)),
     JSON.stringify(tmState?.keys),
   );
 
