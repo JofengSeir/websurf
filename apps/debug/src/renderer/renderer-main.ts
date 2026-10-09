@@ -21,7 +21,7 @@
  * 渲染采样写入共享内存的口径见本文件内紧随共享内存导入的那段说明。
  */
 
-import { applyLightingPresentationDefaults } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
 import * as THREE from 'three';
 import { deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
@@ -368,8 +368,8 @@ export class RendererMain {
 
 
 
-	// 静态光照呈现参数：取自共享层唯一默认档（不要在这里逐项写死）
-	applyLightingPresentationDefaults();
+	// 静态光照呈现参数：取自共享层唯一呈现档（`vbsp:renderPrefs`，不要在这里逐项写死）
+	applyRenderPrefs(readRenderPrefs());
     // 跨线程通道形态与本地采样世代计数（诊断用；世代不参与协议，见 sampleEpoch）
     console.log(`[renderer] 跨线程通道: ${this.shared.isShared ? 'SAB' : 'MsgState'}（阶段 1 渲染直读本地物理）`);
     console.log(`[renderer] 渲染采样失效世代计数（本地诊断，非协议值）: ${this.sampleEpoch}`);

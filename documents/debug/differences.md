@@ -7,7 +7,7 @@
 | 维度 | 本工程 | 对比工程 | 证据（两侧锚点） |
 |---|---|---|---|
 | 渲染库 | three.js + `GLTFLoader` + `BufferGeometryUtils` 的 `mergeGeometries` | `apps/game`：同一套引入 | 本工程 `apps/debug/src/renderer/renderer-main.ts:24`；game `apps/game/src/renderer/renderer-main.ts:33` |
-| 渲染库 | 同上 | `apps/viewer`：同一套引入 | 本工程 `apps/debug/src/renderer/renderer-main.ts:24`；viewer `apps/viewer/src/core/scene.ts:10` |
+| 渲染库 | 同上 | `apps/viewer`：同一套引入 | 本工程 `apps/debug/src/renderer/renderer-main.ts:58`（共享渲染层 shader 引入）、`apps/debug/src/renderer/renderer-main.ts:24`（呈现档引入）；viewer `apps/viewer/src/core/scene.ts:10` |
 | 页面布局 | 左侧边栏（多个 `<details>` 分区）＋ 右侧预览区 | `apps/game`：全屏画布 + 单块 `#panel` 覆盖层 | 本工程 `apps/debug/web/index.html:489`（侧边栏）、`apps/debug/web/index.html:860`（预览区）；game `apps/game/web/index.html:75`（`#panel`）、`apps/game/web/index.html:27`（画布） |
 | 页面布局 | 同上 | `apps/viewer`：顶栏 + 侧栏标签页（`#tabs` / `#pane-map` / `#pane-replay` / `#pane-demo`）+ 底部 `#dock`（两个回放会话各占一层） | 本工程 `apps/debug/web/index.html:489`；viewer `apps/viewer/web/index.html:74`（顶栏）、`apps/viewer/web/index.html:101`（侧栏）、`apps/viewer/web/index.html:130`（dock） |
 | 物理运行位置 | **Worker 权威物理** + **主线程渲染物理（`predPhys`）** 双线 | `apps/game`：同构双线（Worker 权威 + 主线程渲染物理） | 本工程 `apps/debug/src/worker/main.ts:455`、`apps/debug/src/renderer/renderer-main.ts:769`；game `apps/game/src/worker/main.ts:451`、`apps/game/src/renderer/renderer-main.ts:990` |

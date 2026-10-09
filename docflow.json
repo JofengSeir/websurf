@@ -145,23 +145,28 @@
   "claim": {
     "task": "T-454",
     "may": [
-      ".tmp/unify/**",
+      "src/renderer-shared/config/**",
+      "apps/game/src/panel/**",
+      "apps/game/src/config.ts",
+      "apps/game/src/renderer/renderer-main.ts",
+      "apps/debug/src/**",
+      "apps/viewer/src/**",
+      "documents/**",
       "TODO.md",
-      "progress/monthly/2026-10-10.md",
-      "progress/index.md",
-      "CHANGELOG.md"
+      "progress/**",
+      "CHANGELOG.md",
+      ".tmp/unify/**"
     ],
     "must": [
-      ".tmp/unify/shot.mjs",
-      ".tmp/unify/diff.mjs"
+      "src/renderer-shared/config/render-prefs.ts"
     ],
     "base": {
-      "TODO.md": "974614dc5b72177e10652210cd80be91dd46174a85126f06c40f89b90f9ed454",
-      "progress/monthly/2026-10-10.md": "cd5d805970391e56e3faeb25e67090f1b7539175a6f89f65743944c201e9028d",
-      "progress/index.md": "5f80934b8c845208f50ff115409f2dd6a173a0abb20ad2150df13b2e4302c404",
-      "CHANGELOG.md": "26d8d8efd97691cbbeee19c8595e6c7be230301201f077d061381a937fdaa6d0"
+      "apps/game/src/config.ts": "23ec2105621a95a83307736ed8acea45e69c608756827c809ce4dfd2dc68d435",
+      "apps/game/src/renderer/renderer-main.ts": "765c8371543c4b693a2dfdf0fb818a4b0e1e63bdd7f9bab05ba08fe386aaf43c",
+      "TODO.md": "cc7084e8bed3be42d7c1a4d24363d9de62429ead1263dc1455f4fb1575d20da4",
+      "CHANGELOG.md": "2cae36009e6d293c7a1692ebbebd65e82b2848bd17fc8366054339096c4eac6d"
     },
-    "at": "2026-10-09T12:58:21.558Z",
+    "at": "2026-10-09T15:24:08.040Z",
     "pins": {
       "README.md": "966ec495a5063cb2f69ae90c1dd639a0f8e6a456341e1f79dba1e577e6b0fecc",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -1020,15 +1025,17 @@
       "src/ts-shared/auth/shared-state.ts:146:146": "e2e6f567",
       "src/ts-shared/auth/tick-authority.ts:274:274": "80a58e90",
       "src/ts-shared/decoupled/decoupled-loop.ts:211:211": "f69d544a",
+      "src/renderer-shared/config/render-prefs.ts:187:187": "44209132",
       "src/ts-shared/phys/world-builder.ts:152:152~2": "8bf6b3db",
       "src/ts-shared/auth/auth-loop.ts:250:250~2": "a7130838",
       "src/ts-shared/auth/worker-dispatch.ts:207:207~2": "42fa68bc",
       "src/phys/mod.rs:364:364~2": "300a4c5d"
     },
     "documents/debug/differences.md": {
-      "apps/debug/src/renderer/renderer-main.ts:24:24": "c9e145b2",
+      "apps/debug/src/renderer/renderer-main.ts:24:24": "e89b0290",
       "apps/game/src/renderer/renderer-main.ts:33:33": "2606bf04",
-      "apps/debug/src/renderer/renderer-main.ts:24:24~2": "c9e145b2",
+      "apps/debug/src/renderer/renderer-main.ts:58:58": "3acd0125",
+      "apps/debug/src/renderer/renderer-main.ts:24:24~2": "e89b0290",
       "apps/viewer/src/core/scene.ts:10:10": "2606bf04",
       "apps/debug/web/index.html:489:489": "9a8ba3d8",
       "apps/debug/web/index.html:860:860": "fce52225",
@@ -1582,13 +1589,14 @@
       "apps/debug/tsconfig.json:26:26": "42653115",
       "apps/debug/src/app.ts:33:33": "76752942",
       "apps/debug/src/app.ts:35:35": "6c2e3dbe",
-      "apps/debug/src/app.ts:36:36": "2dc98a63",
+      "apps/debug/src/app.ts:36:36": "9dd199d4",
       "apps/debug/src/worker/main.ts:27:27": "e0cbdab3",
       "apps/debug/src/worker/main.ts:32:32": "0a2d4e9c",
       "apps/debug/src/worker/main.ts:33:33": "e1ddfbf4",
       "package.json:6:6": "6dbf3070",
       "apps/debug/package.json:27:27": "3a95ab90",
-      "apps/debug/src/renderer/renderer-main.ts:24:24": "c9e145b2",
+      "apps/debug/src/renderer/renderer-main.ts:25:25": "2606bf04",
+      "apps/debug/src/renderer/renderer-main.ts:26:26": "cb8202d3",
       "apps/debug/tsconfig.json:19:19": "dc6bb3d4",
       "apps/debug/src/app.ts:38:38": "47b7de8d",
       "apps/debug/package.json:7:7": "3dcf7fcb",
@@ -3961,7 +3969,7 @@
       "apps/viewer/src/replay/helpers.ts:10:10": "111be9f5",
       "apps/viewer/src/core/spawn.ts:27:27": "0e14d029",
       "apps/viewer/src/core/constants.ts:34:34": "d05f5b71",
-      "apps/viewer/src/core/scene.ts:14:14": "683f2f5b",
+      "apps/viewer/src/core/scene.ts:12:12": "e0cbdab3",
       "apps/viewer/src/core/scene.ts:29:29": "b2a8167d",
       "apps/viewer/src/ui/mapinfo.ts:23:23": "058f0826",
       "package.json:6:6~2": "6dbf3070",
@@ -4292,6 +4300,38 @@
   },
   "rebaselines": [
     {
+      "path": "documents/viewer/overview.md",
+      "at": "2026-10-09T15:12:05.577Z",
+      "by": "DSH",
+      "reason": "P1 把渲染呈现档来源上收到 src/renderer-shared/config/render-prefs.ts（import 行内容变、行号未移；已逐条复核断言）",
+      "changed": 2,
+      "total": 132
+    },
+    {
+      "path": "documents/debug/overview.md",
+      "at": "2026-10-09T15:12:05.577Z",
+      "by": "DSH",
+      "reason": "P1 把渲染呈现档来源上收到 src/renderer-shared/config/render-prefs.ts（import 行内容变、行号未移；已逐条复核断言）",
+      "changed": 4,
+      "total": 120
+    },
+    {
+      "path": "documents/debug/differences.md",
+      "at": "2026-10-09T15:12:05.577Z",
+      "by": "DSH",
+      "reason": "P1 把渲染呈现档来源上收到 src/renderer-shared/config/render-prefs.ts（import 行内容变、行号未移；已逐条复核断言）",
+      "changed": 3,
+      "total": 79
+    },
+    {
+      "path": "documents/architecture/overview.md",
+      "at": "2026-10-09T15:12:05.576Z",
+      "by": "DSH",
+      "reason": "P1 把渲染呈现档来源上收到 src/renderer-shared/config/render-prefs.ts（import 行内容变、行号未移；已逐条复核断言）",
+      "changed": 1,
+      "total": 34
+    },
+    {
       "path": "OWNER.md",
       "at": "2026-10-09T14:55:11.655Z",
       "by": "DSH",
@@ -4578,38 +4618,6 @@
       "reason": "T-625 锚点复核",
       "changed": 1,
       "total": 1
-    },
-    {
-      "path": "documents/viewer/implementation/renderer.md",
-      "at": "2026-10-09T09:18:21.548Z",
-      "by": "agent",
-      "reason": "T-625 锚点复核",
-      "changed": 1,
-      "total": 87
-    },
-    {
-      "path": "documents/game/sequences.md",
-      "at": "2026-10-09T09:18:19.462Z",
-      "by": "agent",
-      "reason": "T-625 锚点复核",
-      "changed": 2,
-      "total": 187
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T09:18:15.996Z",
-      "by": "agent",
-      "reason": "T-625 登记",
-      "changed": 1,
-      "total": 115
-    },
-    {
-      "path": "documents/viewer/implementation/renderer.md",
-      "at": "2026-10-09T08:31:35.160Z",
-      "by": "agent",
-      "reason": "T-623：终扫根节点口径登记后锚点复核",
-      "changed": 30,
-      "total": 87
     }
   ]
 }

@@ -97,6 +97,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 | 事件位 `AUTH_EVT` | `src/ts-shared/auth/shared-state.ts:146` | 权威事件编码 |
 | `createTickAuthority` | `src/ts-shared/auth/tick-authority.ts:274` | F4 乐观门（**已实现、未接线**，见 §6） |
 | `createDecoupledLoop` | `src/ts-shared/decoupled/decoupled-loop.ts:211` | 解耦环（**已实现、未接线**，见 §6） |
+| `readRenderPrefs` / `writeRenderPrefs` / `applyRenderPrefs` | `src/renderer-shared/config/render-prefs.ts:187`、`:197`、`:211` | 三端渲染呈现档的唯一来源（键 `vbsp:renderPrefs`；T-454 P1） |
 
 ---
 

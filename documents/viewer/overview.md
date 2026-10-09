@@ -43,7 +43,7 @@
 | 共享 TS 运行时 `src/ts-shared/wasm/loader.ts` | 相对路径 import | `apps/viewer/src/core/bsp.ts:24` 取 `base64ToBytes` 与 `readEmbeddedWasmB64` |
 | 共享 TS 角度实现 `src/ts-shared/phys/angles.ts` | 相对路径再导出 | `apps/viewer/src/core/pose.ts:21` 再导出 `wrapDeg` / `bspYawToCsYaw`，再由 `apps/viewer/src/replay/helpers.ts:10` 与 `apps/viewer/src/core/spawn.ts:27` 消费 |
 | 共享眼高常量 `src/ts-shared/phys/constants.ts` | 相对路径再导出 | `apps/viewer/src/core/constants.ts:34` 再导出 `EYE_STAND` |
-| 共享渲染层 `src/renderer-shared/{shader,scene,camera}/` | tsconfig include 跨目录收编 + 深层相对路径 import（2026-10-03 起 viewer 消费 shader + scene-builder/scene-optimizer + near-plane） | `apps/viewer/src/core/scene.ts:14` 到 `apps/viewer/src/core/scene.ts:29`（导入面）与 `apps/viewer/src/ui/mapinfo.ts:23`（仅 `LightingMode` 类型）；three 依赖由根级 `package.json:6` 声明 |
+| 共享渲染层 `src/renderer-shared/{shader,scene,camera,config}/` | tsconfig include 跨目录收编 + 深层相对路径 import（2026-10-03 起 viewer 消费 shader + scene-builder/scene-optimizer + near-plane；2026-10-09 增 `config/render-prefs`，呈现档改由共享层唯一来源提供） | `apps/viewer/src/core/scene.ts:12` 到 `apps/viewer/src/core/scene.ts:29`（导入面）与 `apps/viewer/src/ui/mapinfo.ts:23`（仅 `LightingMode` 类型）；three 依赖由根级 `package.json:6` 声明 |
 | `three` 运行时 | 仓库根 `package.json:6`（单实例，2026-10-02 上收） | 场景、相机、材质、`GLTFLoader`（viewer 场景面：`apps/viewer/src/core/scene.ts:13`；`mergeGeometries` 已随合并下沉共享 scene-optimizer） |
 | TypeScript 程序面 | `apps/viewer/tsconfig.json:15` 的 `include` 含 `../../src/ts-shared/**/*.ts` 与 `../../src/renderer-shared/**/*.ts` | 共享层 TS 文件参与本工程 `tsc --noEmit` |
 | vendored `vmdl` | `apps/viewer/Cargo.toml:12` 的 `[patch.crates-io]` | `apps/viewer/crates/wasm/Cargo.toml:33` 的 `vmdl = "0.2"`（PAKFILE 内嵌模型解析） |

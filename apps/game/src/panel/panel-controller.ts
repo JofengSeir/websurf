@@ -21,7 +21,7 @@
  */
 
 import type { RuntimeConfig } from '../config.js';
-import { buildPhysicsParams, DEFAULT_CONFIG, LOCKED_TICK_RATE } from '../config.js';
+import { buildPhysicsParams, DEFAULT_CONFIG, LOCKED_TICK_RATE } from '../config.js'; import { readRenderPrefs, writeRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
 import type { InputBridge } from '../input/input-bridge.js';
 import type { KeyboardInput } from '../input/keyboard.js';
 import {
@@ -627,7 +627,7 @@ export class PanelController {
   /** 落盘偏好（构造期与每次控件变更后调用）；localStorage 抛错时只告警。 */
   private savePanelPrefs(): void {
     try {
-      localStorage.setItem(PanelController.PREFS_KEY, JSON.stringify(this.collectPrefs()));
+      localStorage.setItem(PanelController.PREFS_KEY, JSON.stringify(this.collectPrefs())); writeRenderPrefs({ lighting: { ...this.config.lighting }, textureQuality: this.config.texture.quality, culling: { distance: this.config.hud.renderDistance }, camera: { fov: this.config.hud.fov } });
     } catch (err) {
       console.warn('[panel] 面板偏好保存失败:', err);
     }
@@ -638,7 +638,7 @@ export class PanelController {
   private loadPanelPrefs(): void {
     try {
       const raw = localStorage.getItem(PanelController.PREFS_KEY);
-      if (!raw) return;
+      if (!raw) { consumeRenderPrefs(this.config); return; }
       const prefs = JSON.parse(raw) as Record<string, unknown>;
       if (prefs.__version !== PanelController.PREFS_VERSION) {
         console.warn(
@@ -658,7 +658,7 @@ export class PanelController {
       merge(this.config.input, prefs.input);
       merge(this.config.hud, prefs.hud);
       merge(this.config.texture, prefs.texture);
-      merge(this.config.lighting, prefs.lighting);
+      merge(this.config.lighting, prefs.lighting); consumeRenderPrefs(this.config);
     } catch (err) {
       console.warn('[panel] 面板偏好加载失败:', err);
     }
@@ -868,4 +868,14 @@ function onActivate(el: Element | null, fn: (e: Event) => void): void {
     const k = (e as KeyboardEvent).key;
     if (k === 'Enter' || k === ' ') { e.preventDefault(); fn(e); }
   });
+}
+
+/** 把共享呈现档（`vbsp:renderPrefs` 是渲染档的唯一来源）写进 config 的渲染档字段。
+ *  面板自己的 localStorage 存档只保留非渲染段（物理/输入/准星等）；旧档里的渲染字段只在迁移时被读一次。 */
+function consumeRenderPrefs(config: RuntimeConfig): void {
+  const rp = readRenderPrefs();
+  config.lighting = { ...config.lighting, ...rp.lighting };
+  config.texture.quality = rp.textureQuality;
+  config.hud.fov = rp.camera.fov;
+  config.hud.renderDistance = rp.culling.distance;
 }

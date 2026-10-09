@@ -35,7 +35,7 @@
 | `websurf-phys`（`src/phys/**`） | `apps/debug/crates/wasm/Cargo.toml:25` 的 path 依赖 | 由 `apps/debug/crates/wasm/src/lib.rs:55` 的 `pub use websurf_phys::phys::PhysWorld` 原样再导出，JS 侧从 `apps/debug/pkg/websurf_wasm.js` 取 |
 | `websurf-wasm-core`（`src/wasm-core/**`） | `apps/debug/crates/wasm/Cargo.toml:27` 的 path 依赖 | `apps/debug/crates/wasm/src/lib.rs:49` 引入 `vbsp` / `bsp_to_gltf_core` / `model_integrator` / `pakfile_models` / `texture_utils` |
 | `src/ts-shared/**`（TypeScript 共享层） | `apps/debug/tsconfig.json:26` 的 `include` 把共享层的 `.ts` 纳入同一程序 | 主线程：`apps/debug/src/app.ts:33`（`shared-state`）、`apps/debug/src/app.ts:35`（`input-layer`）、`apps/debug/src/app.ts:36`（`world-builder`）；Worker：`apps/debug/src/worker/main.ts:27`（`auth-loop`）、`apps/debug/src/worker/main.ts:32`（`worker-dispatch`）、`apps/debug/src/worker/main.ts:33`（`phys/params`） |
-| 渲染侧三方库 `three` | 仓库根 `package.json:6` 的 dependencies（2026-10-02 上收为单实例；`apps/debug/package.json:27` 的 dependencies 已清空） | `apps/debug/src/renderer/renderer-main.ts:24` 起的 `THREE` 与 `examples/jsm` 引入 |
+| 渲染侧三方库 `three` | 仓库根 `package.json:6` 的 dependencies（2026-10-02 上收为单实例；`apps/debug/package.json:27` 的 dependencies 已清空） | `apps/debug/src/renderer/renderer-main.ts:25` 的 `THREE` 与 `apps/debug/src/renderer/renderer-main.ts:26` 的 `examples/jsm` 引入 |
 
 两点与依赖面有关的事实：
 

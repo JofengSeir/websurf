@@ -141,3 +141,4 @@
 | 2026-10-09 | T-454 任务书独立审查（有条件可行）+ v2 修订：10 条 Must-fix 落地、纠正 1 条审查事实错误 | progress/monthly/2026-10-10.md:17 |
 | 2026-10-09 | T-454 P0：三端出图比对仪器（`shot.mjs`/`diff.mjs`）+ 基线（`surf_boreas`，debug↔game ≤2 占比 99.980%、均值差 0.0029） | progress/monthly/2026-10-10.md:19 |
 | 2026-10-09 | 超限分卷落地（TODO 95.9→44.3 KB、index 48.2→22.3 KB，新增 4 个分卷）+ 任务书 v3（P1–P8 逐阶段可执行清单 + 默认取值表 + D-108/D-109 决策清零） | progress/monthly/2026-10-10.md:21 |
+| 2026-10-09 | T-454 P1：渲染呈现档收到唯一来源 `vbsp:renderPrefs`（`src/renderer-shared/config/render-prefs.ts`，三端同源；三端出图与 P0 基线逐像素相同） | progress/monthly/2026-10-10.md:23 |

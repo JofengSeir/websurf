@@ -33,7 +33,7 @@ import type {
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
-import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js';
+import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs } from '../../../src/renderer-shared/config/render-prefs.js';
 import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
 import { formatTime, GameState } from './game-state.js';
@@ -1150,7 +1150,7 @@ function collectUiPrefs(): Record<string, unknown> {
 /** 保存面板偏好到 localStorage。 */
 function saveUiPrefs(): void {
 	try {
-		localStorage.setItem(UI_PREFS_KEY, JSON.stringify(collectUiPrefs()));
+		localStorage.setItem(UI_PREFS_KEY, JSON.stringify(collectUiPrefs())); writeRenderPrefs({ textureQuality: config.texture.quality });
 	} catch (err) {
 		console.warn('[app] UI 偏好保存失败:', err);
 	}
@@ -1161,7 +1161,7 @@ function saveUiPrefs(): void {
 function loadUiPrefs(): void {
 	try {
 		const raw = localStorage.getItem(UI_PREFS_KEY);
-		if (!raw) return;
+		if (!raw) { config.texture.quality = readRenderPrefs().textureQuality; return; }
 		const prefs = JSON.parse(raw) as Record<string, unknown>;
 		if (prefs.__version !== UI_PREFS_VERSION) {
 			console.warn(
@@ -1180,7 +1180,7 @@ function loadUiPrefs(): void {
 		merge('debug', prefs.debug);
 		merge('lod', prefs.lod);
 		merge('player', prefs.player);
-		merge('texture', prefs.texture);
+		merge('texture', prefs.texture); config.texture.quality = readRenderPrefs().textureQuality;
 	} catch (err) {
 		console.warn('[app] UI 偏好加载失败:', err);
 	}

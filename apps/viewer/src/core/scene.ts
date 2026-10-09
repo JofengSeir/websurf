@@ -11,11 +11,11 @@ import * as THREE from 'three';
 import { setFogMaxDensity } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import {
   fullbrightUnlitLitMaterials,
-  applyLightingPresentationDefaults,
   setLightingMode as setLightingModeInShader,
   getLightingMode,
   type LightingMode,
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
 import { applyLightmap, buildMapScene } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
@@ -30,7 +30,7 @@ import {
   FOV,
 } from './constants.js';
 
-const DEFAULT_LIGHTING_MODE: LightingMode = 'baked';
+const DEFAULT_LIGHTING_MODE: LightingMode = readRenderPrefs().lighting.mode;
 
 export class ViewerScene {
   readonly renderer: THREE.WebGLRenderer;
@@ -69,8 +69,8 @@ export class ViewerScene {
 
 
 
-	// 静态光照呈现参数：取自共享层唯一默认档；本工程无面板持久化，直接用同一组值
-	applyLightingPresentationDefaults();
+	// 静态光照呈现参数：取自共享层唯一呈现档（`vbsp:renderPrefs`）
+	applyRenderPrefs(readRenderPrefs());
     setLightingModeInShader(DEFAULT_LIGHTING_MODE);
 
     this.scene = new THREE.Scene();
