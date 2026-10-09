@@ -253,3 +253,4 @@
 | 2026-10-09 | T-024 结案：worker-types 的 wasm-init / input 字段按分发器与发送面补齐（1:1 零漂移） | progress/monthly/2026-10-8.md:26 |
 | 2026-10-09 | T-238 判为遗留误报结案：debug 侧 sendInit 就发那三个字段（拦下一次 19 处锚点平移） | progress/monthly/2026-10-8.md:27 |
 | 2026-10-09 | T-029 结案：2 条子项的对象（本地探针 jump-apex-measure.mjs）全工作区扫描不存在；在库件 test:jump-apex exit 0 | progress/monthly/2026-10-8.md:28 |
+| 2026-10-09 | dem 簇：T-110/112/113 结案（探针实测 4 份 .dem）、T-111/114 收窄；test:replay exit 0 | progress/monthly/2026-10-8.md:29 |

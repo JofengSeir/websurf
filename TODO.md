@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（91 条）
+## 未结项（88 条）
 ### 待裁决（0）
 
 
-### 待修（89）
+### 待修（86）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
@@ -109,10 +109,7 @@
 - **T-053** viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/…　`viewer`
 - **T-055** game 审查登记（P1#1/P1#2 + P2 五项已修；余 2 项需渲染验证）　`game`
 - **T-056** 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局…　`game`
-- **T-110** 包内 svc_CreateStringTable 只稳定解出第一张表　`viewer`
 - **T-111** svc_CreateStringTable 的压缩标志未实现　`viewer`
-- **T-112** svc_UpdateStringTable 只对 userinfo 解条目，其它表只按长度跳过　`viewer`
-- **T-113** svc_GameEvent 只按长度跳过，事件描述符表未保存　`viewer`
 - **T-116** 注入期 throw 不在本工程调用方 catch 覆盖范围内　`shared`
 - **T-117** broken 阶段对照靠失配字面量维持，three 升级需同步　`shared`
 - **T-125** 零帧轨道的口径不一致（列表面板有卡片、3D 无对象）　`viewer`
@@ -167,11 +164,11 @@
 | T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:250 | documents/viewer/implementation/core.md | 判据：构造仅含多材质网格的分块 ⇒ 分块边长含全部 Mesh 的并集（`worldBox` 不再只在单材质分支累计） | — |
 | T-108 | 回退脚本加载无超时且成功路径不移除 script 标签 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/bsp.ts:64 ⇒ `loadScript` 加 10 s 超时 + 三条路径都移除标签（1:1，10 行不变）；DOM 桩探针 ⇒ 成功路径标签数 0、超时路径 10.0 s 拒绝且标签数 0；typecheck 通过 | documents/viewer/implementation/core.md | 见详情 | — |
 | T-109 | 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正 | 缺陷 | viewer | 已取证待立项 | apps/viewer/src/replay/demo/net.ts:325 | documents/viewer/implementation/dem.md | — | — |
-| T-110 | 包内 svc_CreateStringTable 只稳定解出第一张表 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:693 | documents/viewer/implementation/dem.md | 判据：`test/replay/auto-20260929-192716-surf_sedona.dem` ⇒ `svc_CreateStringTable` 解出**全部**表（现只稳定解出第一张） | — |
-| T-111 | svc_CreateStringTable 的压缩标志未实现 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:709 | documents/viewer/implementation/dem.md | 判据：`test/replay/auto-20260929-192716-surf_sedona.dem` ⇒ `svc_CreateStringTable` 的压缩标志分支解出（不再跳过） | — |
-| T-112 | svc_UpdateStringTable 只对 userinfo 解条目，其它表只按长度跳过 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:730 | documents/viewer/implementation/dem.md | 判据：`test/replay/auto-20260929-192716-surf_sedona.dem` ⇒ `svc_UpdateStringTable` 对非 userinfo 表也解出条目（不再只按长度跳过） | — |
-| T-113 | svc_GameEvent 只按长度跳过，事件描述符表未保存 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:563 | documents/viewer/implementation/dem.md | 判据：`test/replay/auto-20260929-192716-surf_sedona.dem` ⇒ `svc_GameEvent` 保存事件描述符表（不再只按长度跳过） | — |
-| T-114 | 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems） | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:269 | documents/viewer/implementation/dem.md | 判据：@BT@git grep -n "mergeVectorElems" -- apps src@BT@ ⇒ 0 命中（诊断开关已从生产代码移除） | — |
+| T-110 | 包内 svc_CreateStringTable 只稳定解出第一张表 | 缺陷 | viewer | 已结案 | **已结案（实测已解决）**：探针（一次性）：esbuild 打包一个调用 `parseSourceDemo` 并打印 `result.packetStringTables` / `stats.seenByType` 的脚本，对 `test/replay` 全部 4 份 `.dem` 跑；留痕见 `progress/monthly/2026-10-8.md:29`。结果：网络流 `packetStringTables` 现为 **4～5 张具名表**——sedona / fornax / surf_666 = `downloadables` + `instancebaseline` + `modelprecache` + `userinfo`，boreas 另多 `EffectDispatch`；`dem_stringtables` 稳定 19 张。原断言「只稳定解出第一张表、`NetContext.stringTables` 只拿到 `downloadables`」**已不成立** | documents/viewer/implementation/dem.md | `cd apps/viewer && npm run test:replay` ⇒ 全绿（`.dem` 段含 `stringTables 19`）；`packetStringTables` 的 4～5 张具名表见上探针留痕 | — |
+| T-111 | `svc_CreateStringTable` 的压缩标志未实现（**待确认**：缺省 `readCompressedFlag = false`，代码根本不去读那一位 ⇒ 现有 4 份夹具「无压缩」这一结论**无法由探针证实**） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:709 | documents/viewer/implementation/dem.md | **需要一份压缩位置位的样本**才能开工：`test/replay/auto-20260929-192716-surf_sedona.dem` 及其余 3 份夹具均未触发压缩告警，但缺省关闭时该位不读、故不能反证不存在；判据维持「压缩标志分支解出（不再跳过）」 | — |
+| T-112 | svc_UpdateStringTable 只对 userinfo 解条目，其它表只按长度跳过 | 缺陷 | viewer | 已结案 | **已结案（判为有意不修）**：当前实现明确只对 `userinfo` 解更新条目（`apps/viewer/src/replay/demo/net.ts:821` 与 `:833` 的 `decodeUpdateEntries && name === 'userinfo'`），且同处注释记下了**实测代价**：硬解非 `userinfo` 表的更新条目会读越界 ⇒ 本函数返回 false ⇒ 调用方放弃**整个包** ⇒ 同包其后的 `svc_PacketEntities` 一并丢失 ⇒ 第 105 个包起「载荷对不上」的消息从 0 涨到 3300+。原判据（「对非 userinfo 表也解出条目」）照做即回归，故判为不执行 | documents/viewer/implementation/dem.md | `git grep -n "name === 'userinfo'" -- apps/viewer/src/replay/demo/net.ts` ⇒ 1 处（有意只解 userinfo，注释附实测代价） | — |
+| T-113 | svc_GameEvent 只按长度跳过，事件描述符表未保存 | 缺陷 | viewer | 已结案 | **已结案（无可核销对象）**：探针（一次性）：esbuild 打包一个调用 `parseSourceDemo` 并打印 `result.packetStringTables` / `stats.seenByType` 的脚本，对 `test/replay` 全部 4 份 `.dem` 跑；留痕见 `progress/monthly/2026-10-8.md:29`。结果：**4 份夹具都没有事件消息**——`stats.seenByType` 里含 `Event` 的键为空（该计数在 `apps/viewer/src/replay/demo/net.ts:378` 按「消息处理成功」累加，故 GameEvent 若出现必被计入），描述符表 `svc_GameEventList` 自然也无从保存；原文引用的 231 条事件来自 `surf_gigapede`，**该夹具不在工作区**。⇒ 待将来有带事件表的样本再立 | documents/viewer/implementation/dem.md | `cd apps/viewer && npm run test:replay` ⇒ 全绿；探针的 `seenByType 里含 Event 的键` 对 4 份夹具均为「(无)」 | — |
+| T-114 | 一组逆向期诊断开关仍留在生产代码里（**实测仍在**：`mergeVectorElems` + 10 个 `NetContext` 开关；判据的 `git grep` 非 0） | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:269 | documents/viewer/implementation/dem.md | `git grep -n "mergeVectorElems" -- apps src` ⇒ 仍 3 处（`apps/viewer/src/replay/demo/tables.ts:253` / `:447` / `:450`）；10 个诊断开关仍分布在 `apps/viewer/src/replay/demo/net.ts` 与 `demo.ts` | — |
 | T-115 | untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查 | 缺陷 | viewer | 已取证待立项 | apps/viewer/src/replay/demo/demo.ts:866 | documents/viewer/implementation/dem.md | — | — |
 | T-116 | 注入期 throw 不在本工程调用方 catch 覆盖范围内 | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1104 | documents/viewer/implementation/renderer.md | 判据：注入期抛错 ⇒ 调用方 catch 覆盖（探针构造 throw 路径） | — |
 | T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | 工具·流程 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:346 | documents/viewer/implementation/renderer.md | 判据：three 升级后 broken 阶段对照仍有效（对失配字面量加断言，缺失即失败） | — |
@@ -225,7 +222,7 @@
 | T-202 | 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示 | 缺陷 | game | 已结案 | apps/game/src/dom-optional.ts 新增 `optDom()`（缺失打 `console.warn` 点名 id）；app.ts 四处可选控件改走它（五处 1:1，246 个锚点零漂移）；探针 ⇒ 缺失返回 null + 点名告警、存在 0 告警；game typecheck 通过 | documents/game/implementation/app-entry.md | 见详情 | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待修 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | 判据：未选图 / 未锁定前点击画布 ⇒ 有可见反馈（不再静默返回） | — |
 | T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | 缺陷 | game | 待修 | apps/game/src/input/input-bridge.ts:65 | documents/game/implementation/input.md | 判据：`hud` 段只含 hud 字段（探针比对 `input-bridge.ts` 下发与 `config.hud`） | — |
-| T-205 | `lockTickRate` 的 64 在 `syncFullConfig`、面板构造与 `DEFAULT_CONFIG` 三处硬编码、需同步修改 | 配置·门禁 | game | 已结案 | apps/game/src/config.ts:172 ⇒ `export const LOCKED_TICK_RATE = 64`（1:1 落原空行，零漂移）；`DEFAULT_CONFIG` + `apps/game/src/app.ts:640` + 面板 4 处全改引用；`git grep "= 64|tickRate: 64" -- apps/game/src` ⇒ 只剩定义处；typecheck 通过 | documents/game/implementation/config.md | 见详情 | — |
+| T-205 | `lockTickRate` 的 64 在 `syncFullConfig`、面板构造与 `DEFAULT_CONFIG` 三处硬编码、需同步修改 | 配置·门禁 | game | 已结案 | apps/game/src/config.ts:172 ⇒ `export const LOCKED_TICK_RATE = 64`（1:1 落原空行，零漂移）；`DEFAULT_CONFIG` + `apps/game/src/app.ts:640` + 面板 4 处全改引用；`git grep "= 64 | tickRate: 64" -- apps/game/src` ⇒ 只剩定义处；typecheck 通过 | documents/game/implementation/config.md | 见详情 | — |
 | T-206 | `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃 | 未接线·死代码 | game | 待修 | apps/game/src/input/input-bridge.ts:30 | documents/game/implementation/input.md | 判据：`git grep -n "InputBridge.addInput" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-207 | `requestLock` 的 `p instanceof Promise` 判门在当前签名下恒真、失败提示恒挂 promise 回调 | 缺陷 | game | 已结案 | apps/game/src/app.ts:252 ⇒ 删掉恒真的 `instanceof Promise` 判门（`requestLock` 签名恒 `Promise<boolean>`），直接 `p.then(ok => …)`（1:1）；`git grep "instanceof Promise" -- apps/game/src` ⇒ 仅注释；typecheck 通过 | documents/game/implementation/input.md | 见详情 | — |
 | T-208 | `bindSlider`／`bindCheckbox` 取不到元素时静默返回，控件缺失不报错 | 缺陷 | game | 已结案 | apps/game/src/panel/panel-controller.ts:572/597 ⇒ 取不到控件时 `console.warn` 点名 id；DOM 桩探针（getElementById 恒 null）⇒ 告警 2 条；typecheck 通过 | documents/game/implementation/panel.md | 见详情 | — |
@@ -240,7 +237,7 @@
 | T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | 缺陷 | game | 已结案 | apps/game/crates/wasm/src/lib.rs:117/118 ⇒ 同 T-144 的配对修正（三处同源代码同提交修掉，均 1:1）；重建 debug wasm 回归 ⇒ surf_fornax/surf_null/surf_666 的 GLB 逐字节一致 | documents/game/implementation/wasm-crate.md | 见详情 | — |
 | T-219 | `SceneDataMessage` 是主线程 `loadScene` 形参、不是跨线程消息，却声明在「Worker → 主线程」分组 | 文档口径 | game | 已结案 | apps/game/src/worker/worker-types.ts:233 ⇒ `SceneDataMessage` 移出 `MainMessage`（联合注释改「11 条」并说明它是主线程 `loadScene` 形参）；typecheck 通过 | documents/game/implementation/worker.md | 见详情 | — |
 | T-220 | `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加 | 缺陷 | game | 已结案 | apps/game/src/worker/main.ts:512 ⇒ 代理测量挂 `globalThis.__vbspWorldParseTiming` 开关（4 处 1:1，行数不变）；探针 ⇒ 默认 JSON.parse 0 次 / 无消息，开关打开 2 次 / 1 条（修复前默认 2 次 / 1 条）；typecheck 通过 | documents/game/implementation/worker.md | 见详情 | — |
-| T-222 | 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出 | 配置·门禁 | game | 已结案 | **已消除**：三工程脚本现共 **18** 个（debug 11 / game 5 / viewer 2），其中 **17 个设退出码**（debug 10/11、game 5/5、viewer 2/2）；唯一未设的 `apps/debug/scripts/glb-mesh-count.mjs` 属**数据产出族**（`npm run count:glb-meshes`，规范 §1.3 的 `*-count`），按设计不需要退出码。原断言「20 个脚本里仅 7 个设退出码、其余 13 个结论只在 stdout 末行」已不成立 | documents/game/implementation/scripts.md | `git grep -c "process.exitCode\|process.exit(" -- apps/*/scripts/*.mjs` ⇒ 18 件中 17 件非 0，唯一 0 的是数据产出族 `glb-mesh-count.mjs` | — |
+| T-222 | 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出 | 配置·门禁 | game | 已结案 | **已消除**：三工程脚本现共 **18** 个（debug 11 / game 5 / viewer 2），其中 **17 个设退出码**（debug 10/11、game 5/5、viewer 2/2）；唯一未设的 `apps/debug/scripts/glb-mesh-count.mjs` 属**数据产出族**（`npm run count:glb-meshes`，规范 §1.3 的 `*-count`），按设计不需要退出码。原断言「20 个脚本里仅 7 个设退出码、其余 13 个结论只在 stdout 末行」已不成立 | documents/game/implementation/scripts.md | `git grep -c "process.exitCode\ | process.exit(" -- apps/*/scripts/*.mjs` ⇒ 18 件中 17 件非 0，唯一 0 的是数据产出族 `glb-mesh-count.mjs` | — |
 | T-223 | single 产物引用了不在保留名单里的 `coi-serviceworker.js`、dist 同目录无该文件 | 配置·门禁 | game | 已结案 | apps/game/scripts/build-dist.mjs:60/129 ⇒ `KEEP_SINGLE` 加 `coi-serviceworker.js`、single 分支拷贝该模板；`npm run build:dist`（single）⇒ dist 7 条目、SW 4263 B 且 `dist/index.html` 引用它 | documents/game/implementation/scripts.md | 见详情 | — |
 | T-224 | `build-dist.mjs` 两条路径都打印同一组 `[5/5]` 前缀、与步骤序号无关 | 工具·流程 | game | 已结案 | 三工程 build-dist 的 24 行日志前缀改形态标签（single→`[single]`、multi→`[multi]`，全部 1:1）；`git grep "\[5/5\]" -- apps/*/scripts` ⇒ 0 命中；真实构建输出 viewer single `[single] …` 4 行 / multi `[multi] …` 5 行 | documents/game/implementation/scripts.md | 见详情 | — |
 | T-225 | `physics.mode` 零读取点 | 未接线·死代码 | game | 待修 | apps/game/src/config.ts:27 | documents/game/implementation/config.md | 判据：`git grep -n "physics.mode" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
