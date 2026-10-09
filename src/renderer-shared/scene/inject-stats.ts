@@ -92,6 +92,7 @@ import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, 
       let vlBad = 0;
       let vlUnlit = 0;
       let vlMissed = 0;
+		const vlMissedNames: string[] = [];
       scene.traverse((obj) => {
         const m = obj as THREE.Mesh;
         if (!m.isMesh) return;
@@ -105,7 +106,7 @@ import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, 
             if (!hasAttr) continue;
             const unlit = (mat?.userData as { unlit?: unknown } | undefined)?.unlit === true;
             if (unlit) vlUnlit++;
-            else vlMissed++;
+				else { vlMissed++; if (vlMissedNames.length < 12) { const hlG = (g?.userData as { hasLightmap?: unknown } | undefined)?.hasLightmap; const hlM = (m.userData as { hasLightmap?: unknown }).hasLightmap; const hasCube = !!(mat as unknown as { __vbspAmbientInject?: unknown }).__vbspAmbientInject; vlMissedNames.push((m.name || '(anon)') + '@' + (mat?.name || '(noname)') + '[' + (mat?.type || '?') + '|hl=' + String(hlG ?? hlM) + '|cb=' + (hasCube ? 1 : 0) + '|uv1=' + (g?.getAttribute?.('uv1') ? 1 : 0) + ']'); } }
             continue;
           }
           if (rec.applied) vlOk++;
@@ -127,8 +128,10 @@ import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, 
         );
       }
       if (vlMissed > 0) {
+		const fb = (globalThis as { __vbspFbRoute?: { withVl: number; noVl: number; unlit: number; off: number; names: string[] } }).__vbspFbRoute;
+		if (fb) console.info(`[vertex-lighting] fullbright 路由分诊：带 vlight 且已注入=${fb.withVl}，带 vlight 但被 off 关=${fb.off}，无 vlight=${fb.noVl}，unlit=${fb.unlit}（样例 ${fb.names.join(', ')}）`);
         console.error(
-          `[vertex-lighting] 有 ${vlMissed} 个带 _VBSP_VLIGHT 的非 unlit mesh 没走到第 1 级材质 ⇒ 缺陷`,
+			`[vertex-lighting] 有 ${vlMissed} 个带 _VBSP_VLIGHT 的非 unlit mesh 没走到第 1 级材质 ⇒ 缺陷` + (vlMissedNames.length ? '：' + vlMissedNames.join(' ｜ ') : ''),
         );
       }
       // alpha 状态审计（铁丝网/格栅/玻璃这类材质的关键状态：替换材质若丢掉 alphaTest/side，

@@ -531,6 +531,13 @@ export function applyLightmapToMeshes(
 	 * `reconstructVertexLighting` / `acquireVertexLightingMaterial` 的初始化。
 	 */
 	const routeFullbright = (mesh: THREE.Mesh): void => {
+		type FbRoute = { withVl: number; noVl: number; unlit: number; off: number; names: string[] };
+		const gFB = globalThis as unknown as { __vbspFbRoute?: FbRoute };
+		if (!gFB.__vbspFbRoute) gFB.__vbspFbRoute = { withVl: 0, noVl: 0, unlit: 0, off: 0, names: [] };
+		const _diag = gFB.__vbspFbRoute;
+		if (isUnlit(mesh)) _diag.unlit++;
+		else if (hasVertexLightingAttr(mesh)) { if (readVertexLightingOff()) _diag.off++; else { _diag.withVl++; if (_diag.names.length < 5) _diag.names.push(mesh.name || '(anon)'); } }
+		else _diag.noVl++;
 		const unlit = isUnlit(mesh);
 		if (!unlit && hasVertexLightingAttr(mesh) && !readVertexLightingOff()) {
 			// 第 1 级：逐顶点预烘焙（数据在几何上 ⇒ 材质全场景共享）。
@@ -1909,3 +1916,7 @@ export function setFogMaxDensity(v: number): void {
 	for (const m of injectedMaterials) m.needsUpdate = true;
 }
 
+		type FbRoute = { withVl: number; noVl: number; unlit: number; off: number; names: string[] };
+		const gFB = globalThis as unknown as { __vbspFbRoute?: FbRoute };
+		if (!gFB.__vbspFbRoute) gFB.__vbspFbRoute = { withVl: 0, noVl: 0, unlit: 0, off: 0, names: [] };
+		const _diag = gFB.__vbspFbRoute;
