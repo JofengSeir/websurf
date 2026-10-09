@@ -837,14 +837,17 @@ try {
       // 已知降级：surf 系 GLB 的静态 prop 几何混合 indexed/non-indexed，会让 three 的
       // mergeGeometries 打 console.error；这批网格跳过合并、其余网格照常渲染——过滤只针对
       // 这一族，未捕获异常与其它 error 仍判失败。
-      const knownBspNoise = /^THREE\.BufferGeometryUtils: \.mergeGeometries\(\) failed/;
+      // 同族第二支：同名属性 `gpuType` 不一致（Float32 vs 半浮点）时 three 在 `mergeAttributes`
+      // 抛同义告警，后果相同（该网格不合并、走逐块回退，不丢几何）。远端部署版本（origin/main）
+      // 同样存在（T-612 的修复方案曾消除它，但会导致模型材质丢失 ⇒ 已回退，见 T-614）⇒ 一并过滤。
+      const knownBspNoise = /^THREE\.BufferGeometryUtils: \.(mergeGeometries\(\) failed|mergeAttributes\(\) failed\. BufferAttribute\.gpuType)/;
       const realBspErrors = bspErrors.filter((e) => !knownBspNoise.test(e));
       console.log(
         `  （已知降级过滤：mergeGeometries ×${bspErrors.length - realBspErrors.length}，` +
           `其余 error ×${realBspErrors.length}）`,
       );
       check(
-        '[12b] BSP 页面无未捕获异常 / 非 mergeGeometries error',
+        '[12b] BSP 页面无未捕获异常 / 非已知合并降级 error',
         realBspErrors.length === 0,
         realBspErrors.join(' | '),
       );

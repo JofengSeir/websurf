@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-614 收尾复核",
+      "reason": "T-612 现状口径",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -168,7 +168,7 @@
   "unitPins": {
     "TODO.md": {
       "T-612": {
-        "p": "8ff4305d739b8bdfd2412a4da5eeee52ab40ca8519886974e08b626146a34893",
+        "p": "40b4379c34fe193be13b8870bdffb3e8384bbabe17376146998666b12936ce57",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
         "line": 104
