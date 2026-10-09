@@ -26,16 +26,14 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（103 条）
+## 未结项（99 条）
 ### 待裁决（0）
 
 
-### 待修（101）
+### 待修（97）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
-- **T-032** game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等）　`game`
-- **T-036** WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 coi-serviceworker.js 等）　`repo`
 - **T-039** 依赖表「本 crate 无引用点」清单（两法一致：源码引用面扫描 + cargo check 的 -W unused-crate-dep…　`repo`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
@@ -58,7 +56,6 @@
 - **T-206** `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃　`game`
 - **T-211** `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造　`game`
 - **T-217** `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方）　`game`
-- **T-222** 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出　`game`
 - **T-225** `physics.mode` 零读取点　`game`
 - **T-226** `sendSetDeathThreshold` 零调用点　`game`
 - **T-227** 共享层的累积路径无消费方　`game`
@@ -115,7 +112,6 @@
 - **T-214** 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态　`game`
 - **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
-- **T-031** game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB）　`game`
 - **T-053** viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/…　`viewer`
 - **T-054** debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g…　`debug`
 - **T-055** game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（…　`game`
@@ -154,10 +150,10 @@
 | T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 待修 | apps/game/src/panel/panel-controller.ts:583 | documents/game/implementation/panel.md | 判据：数值框回写自身文本；`dot` 死变量清掉（`git grep -n "dot" -- apps/game/src/panel/panel-controller.ts` 无声明未用） | #50 |
 | T-024 | game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等） | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：`apps/game/src/worker/worker-types.ts` 的字段与实际载荷一致（`npm run typecheck` + 字段清单探针，无缺项） | #53 |
 | T-029 | debug 脚本 10 条（jump-apex 采样链链路级仍待裁决 | 配置·门禁 | debug | 待修 | 见详情 | progress/pending-detail.md | 判据：10 条子项逐条处置完毕；每条子项脚本跑通 exit 0，并在 @BT@progress/pending-detail.md@BT@ 对应条目标注处置结果 | #60 |
-| T-031 | game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB） | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：`node apps/game/scripts/phys-rate-parity.mjs` ⇒ 混合分区的时长与结果一致、flatTop 的 AABB 正确 | #62 |
-| T-032 | game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等） | 配置·门禁 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：7 条子项逐条处置；@BT@_dbg_floor@BT@ 的 onGround 不再恒 undefined（脚本输出该字段有真值） | #63 |
+| T-031 | game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB） | 缺陷 | game | 已结案 | **遗弃（无可执行残留）**：对象 `apps/game/scripts/phys-rate-parity.mjs`（及其 v2）**已不在工作区**（game 现存 5 个脚本、无 parity 件），其断言级缺陷所指的 `flatTop` 也**全仓 0 命中** ⇒ 缺陷随脚本消失 | progress/pending-detail.md | `git ls-files "apps/game/scripts/*"` ⇒ 5 件、无 parity；`git grep -n flatTop -- apps src` ⇒ 0 命中（遗弃） | #62 |
+| T-032 | game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等） | 配置·门禁 | game | 已结案 | **遗弃（无可执行残留）**：具名项 `_dbg_floor` **全仓 0 命中**；`progress/wg-status.md:17` 载明这批对象是 WG5b 的本地探针脚本（`_dbg_*` 为 gitignored、不在工作区）。game 脚本总数已由 11 件降到 5 件（`build-dist` / `check-wasm-api` / `phys-seed-smoke` / `phys-smoke` / `phys-surf-crouch-smoke`） | progress/pending-detail.md | `git grep -n "_dbg_floor" -- apps/game` ⇒ 0 命中（遗弃） | #63 |
 | T-033 | 【台账号·部分细化】夹具路径失效 → T-127；其余仍待裁 WG6b 6 条（test/maps/surf_null_4.replay 跨 3 文件失效等） | 缺陷 | repo | 已结案 | 台账号 6 条已全部细化到独立 T-12x 行（T-127 夹具路径 + T-128..T-132） | progress/pending-detail.md | 见详情 | #64 |
-| T-036 | WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 coi-serviceworker.js 等） | 未接线·死代码 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：剩余 15 条逐条 @BT@git grep -n "<符号>" -- src apps@BT@ ⇒ 只剩定义处 ⇒ 删除；删后体检 exit 0 且构建通过 | #67 |
+| T-036 | WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 coi-serviceworker.js 等） | 未接线·死代码 | repo | 已结案 | **遗弃（无可执行残留）**：15 条明细只存于已退役的历史台账（`progress/pending-detail.md` 仅存标题行，工作区无枚举）；`progress/wg-status.md:17` 载明这批对象是 WG5b 的**本地探针脚本**（`_dbg_keys` / `_dbg_floor` / `phys-p2-trace` / `phys-diag-flat` / `phys-gate-probe2` / `phys-p2-ground` / `phys-p2-regression` / `phys-teleport-gate` 等，其中 `_dbg_*` 明确为 gitignored、不在工作区）。唯一落在工作区内的具名项「`KEEP_SINGLE` 缺 `coi-serviceworker.js`」**已由 T-223 修复**（提交 `d9e3db8`） | progress/pending-detail.md | `git grep -n "coi-serviceworker" -- apps/game/scripts/build-dist.mjs` ⇒ 已在 `KEEP_SINGLE`（`apps/game/scripts/build-dist.mjs:60`）与拷贝段（`:129`）；其余 14 条无工作区锚点（遗弃） | #67 |
 | T-039 | 依赖表「本 crate 无引用点」清单（两法一致：源码引用面扫描 + cargo check 的 -W unused-crate-dep… | 配置·门禁 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：@BT@cargo check -p websurf-phys@BT@ 等各 crate 无 @BT@unused_crate_dependencies@BT@ 警告 ⇒ 依赖表与源码引用面一致 | #70 |
 | T-040 | debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g… | 缺陷 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:1517 | progress/pending-detail.md | 判据：@BT@git grep -n "worker-b" apps/debug/src apps/game/src@BT@ ⇒ 两处措辞一致，或都改为不带外部实现引用的写法 | #71 |
 | T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:486 | progress/pending-detail.md | 判据：@BT@getLightingMode@BT@ 清点调用点（@BT@apps/debug/src/renderer/renderer-main.ts:486@BT@ 疑有一处）⇒ 真零调用则删，否则结案并改状态 | #78 |
@@ -252,7 +248,7 @@
 | T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | 缺陷 | game | 已结案 | apps/game/crates/wasm/src/lib.rs:117/118 ⇒ 同 T-144 的配对修正（三处同源代码同提交修掉，均 1:1）；重建 debug wasm 回归 ⇒ surf_fornax/surf_null/surf_666 的 GLB 逐字节一致 | documents/game/implementation/wasm-crate.md | 见详情 | — |
 | T-219 | `SceneDataMessage` 是主线程 `loadScene` 形参、不是跨线程消息，却声明在「Worker → 主线程」分组 | 文档口径 | game | 已结案 | apps/game/src/worker/worker-types.ts:233 ⇒ `SceneDataMessage` 移出 `MainMessage`（联合注释改「11 条」并说明它是主线程 `loadScene` 形参）；typecheck 通过 | documents/game/implementation/worker.md | 见详情 | — |
 | T-220 | `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加 | 缺陷 | game | 已结案 | apps/game/src/worker/main.ts:512 ⇒ 代理测量挂 `globalThis.__vbspWorldParseTiming` 开关（4 处 1:1，行数不变）；探针 ⇒ 默认 JSON.parse 0 次 / 无消息，开关打开 2 次 / 1 条（修复前默认 2 次 / 1 条）；typecheck 通过 | documents/game/implementation/worker.md | 见详情 | — |
-| T-222 | 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出 | 配置·门禁 | game | 待修 | 见详情 | documents/game/implementation/scripts.md | 判据：13 个脚本补 @BT@process.exitCode@BT@ 后逐个跑失败路径 ⇒ exit ≠ 0（结论能被 CI 带出） | — |
+| T-222 | 20 个脚本里仅 7 个设退出码，其余 13 个结论只在 stdout 末行、接入 CI 时判定不带出 | 配置·门禁 | game | 已结案 | **已消除**：三工程脚本现共 **18** 个（debug 11 / game 5 / viewer 2），其中 **17 个设退出码**（debug 10/11、game 5/5、viewer 2/2）；唯一未设的 `apps/debug/scripts/glb-mesh-count.mjs` 属**数据产出族**（`npm run count:glb-meshes`，规范 §1.3 的 `*-count`），按设计不需要退出码。原断言「20 个脚本里仅 7 个设退出码、其余 13 个结论只在 stdout 末行」已不成立 | documents/game/implementation/scripts.md | `git grep -c "process.exitCode\|process.exit(" -- apps/*/scripts/*.mjs` ⇒ 18 件中 17 件非 0，唯一 0 的是数据产出族 `glb-mesh-count.mjs` | — |
 | T-223 | single 产物引用了不在保留名单里的 `coi-serviceworker.js`、dist 同目录无该文件 | 配置·门禁 | game | 已结案 | apps/game/scripts/build-dist.mjs:60/129 ⇒ `KEEP_SINGLE` 加 `coi-serviceworker.js`、single 分支拷贝该模板；`npm run build:dist`（single）⇒ dist 7 条目、SW 4263 B 且 `dist/index.html` 引用它 | documents/game/implementation/scripts.md | 见详情 | — |
 | T-224 | `build-dist.mjs` 两条路径都打印同一组 `[5/5]` 前缀、与步骤序号无关 | 工具·流程 | game | 已结案 | 三工程 build-dist 的 24 行日志前缀改形态标签（single→`[single]`、multi→`[multi]`，全部 1:1）；`git grep "\[5/5\]" -- apps/*/scripts` ⇒ 0 命中；真实构建输出 viewer single `[single] …` 4 行 / multi `[multi] …` 5 行 | documents/game/implementation/scripts.md | 见详情 | — |
 | T-225 | `physics.mode` 零读取点 | 未接线·死代码 | game | 待修 | apps/game/src/config.ts:27 | documents/game/implementation/config.md | 判据：`git grep -n "physics.mode" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
