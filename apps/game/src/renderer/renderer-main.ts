@@ -47,7 +47,7 @@ import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCame
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
-import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -400,7 +400,7 @@ export class RendererMain {
 
 
     // 5. 回传场景包围盒最小 Y（`onSceneLoaded` 的调用方把它当死亡阈值转给 setDeathY）
-    if (data.skyboxTexture) this.scene.background = data.skyboxTexture; this.onSceneLoaded?.(bbox.min.y);
+    if (data.skyboxTexture) { this.scene.background = data.skyboxTexture; setReflectionEnvMap(data.skyboxTexture); } this.onSceneLoaded?.(bbox.min.y);
 
     // 5b. 挂天空层 + 地图雾。天空层必须在 LOD/PVS 注册**之后**：天空图元只在第 1 层、由第二相机
     //     渲染，不能被主相机的 LOD/PVS 剔除（注册时它们还没进场景，故不会被收进 lodItems）。

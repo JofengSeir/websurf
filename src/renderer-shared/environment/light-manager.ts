@@ -31,7 +31,7 @@
  */
 
 import * as THREE from 'three';
-import { setFogMaxDensity } from '../shader/lightmap-shader.js';
+import { setFogMaxDensity, setReflectionEnvMap } from '../shader/lightmap-shader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 /** 颜色入参的两种形态：`number` 直接当十六进制色值，字符串按 `#rrggbb` 解析。 */
@@ -172,6 +172,8 @@ export class LightManager {
 	setSkybox(texture: THREE.Texture | null): void {
 		this.skybox = texture;
 		if (this.scene) this.scene.background = texture ?? this.bgFallback;
+		// 同一张贴图也作为 `$envmap` 材质的近似反射源（冰/玻璃/水的亮部）
+		setReflectionEnvMap(texture);
 	}
 
 	/**

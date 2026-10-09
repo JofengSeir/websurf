@@ -1305,6 +1305,7 @@ function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.Mes
 	// `alphaTest > 0` 时 three 需要 `transparent` 与材质的 alphaTest 语义配合：
 	// glTF 的 MASK 材质是 `transparent=false` + `alphaTest=cutoff`（GLTFLoader 的赋值形态），
 	// 这里保持原样即可（three 对 alphaTest 的处理与 transparent 独立）。
+	applyReflectionEnvMap(dst, src);
 }
 
 /**
@@ -1934,3 +1935,36 @@ export function setFogMaxDensity(v: number): void {
 	for (const m of injectedMaterials) m.needsUpdate = true;
 }
 
+
+
+// ── env_cubemap 近似反射（VMT `$envmap`）────────────────────────────────────
+// 引擎里 `$envmap env_cubemap` 的材质（冰、玻璃、水）亮部主要来自环境反射；本工程用
+// 2D 天空盒的立方体贴图作为近似源，tint 取自 VMT 的 `$envmaptint`（经材质 extras 落到
+// userData.vbsp_envmap）。诊断覆盖：globalThis.__vbspEnvMapAll（数字）对所有替换材质生效。
+let reflectionEnvMap: THREE.Texture | null = null;
+
+/** 设置反射源（由 LightManager.setSkybox 调用；null 清除）。 */
+export function setReflectionEnvMap(tex: THREE.Texture | null): void {
+	reflectionEnvMap = tex;
+	(globalThis as { __vbspEnvMapReady?: boolean }).__vbspEnvMapReady = tex !== null;
+	// 材质通常在天空盒之前建好 ⇒ 这里对已登记的注入材质补挂一次（含 userData.vbsp_envmap 与全局覆盖）
+	for (const m of injectedMaterials) {
+		applyReflectionEnvMap(m, m);
+		m.needsUpdate = true;
+	}
+}
+
+/** 把 VMT 的 `$envmap` 意图落到 three 的 envMap（Basic 材质支持 envMap/reflectivity/combine）。 */
+function applyReflectionEnvMap(dst: THREE.Material, src: THREE.Material): void {
+	const ov = (globalThis as { __vbspEnvMapAll?: unknown }).__vbspEnvMapAll;
+	const raw = (src.userData as { vbsp_envmap?: unknown }).vbsp_envmap;
+	const tint = typeof ov === 'number' ? ov : Array.isArray(raw) && raw.length >= 3 ? Number(raw[0]) : null;
+	if (tint === null || !Number.isFinite(tint)) return;
+	const m = dst as THREE.MeshBasicMaterial;
+	if (!reflectionEnvMap) return;
+	m.envMap = reflectionEnvMap as THREE.CubeTexture;
+	m.combine = THREE.MixOperation;
+	m.reflectivity = Math.max(0, Math.min(1, tint));
+	(globalThis as { __vbspEnvMapApplied?: number }).__vbspEnvMapApplied =
+		((globalThis as { __vbspEnvMapApplied?: number }).__vbspEnvMapApplied ?? 0) + 1;
+}
