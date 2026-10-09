@@ -107,6 +107,31 @@
 8. **准星射线是限流采样**：每 `PLANE_INSPECT_INTERVAL` 帧才检测一次，关闭开关时只清空上次结果，不做新检测（`apps/debug/src/renderer/renderer-main.ts:719`）。
 - 看板另有登记项：`TODO.md` 的 T-046 —— **状态与结论只在那登记**，本文件不复述。
 
+## 渲染装配全链条（三端同构，2026-10-09 梳理）
+
+一张地图从 GLB 字节到出画，**三端必须逐步同序**；下表既是顺序，也是每一步的约束与理由（括号内为 debug 的调用锚点，game/viewer 为同一份共享实现）。
+任何一步错位都会表现为「某一类图元没有光照 / 没有混合 / 观感不一致」，而不是报错。
+
+| # | 步骤 | 约束（为什么必须在这里） |
+|---|---|---|
+| 1 | `buildMapScene(glb)`（`apps/debug/src/renderer/renderer-main.ts:503`） | 清根 rotation + 世界包围盒 + **摘除 punctual 灯**；必须在挂进主场景之前（VRAD 烘焙已含其贡献，运行时再打会重复计光且 uniform 超限） |
+| 2 | `collectWorldTransitionTextures(gltf, root)`（`:503`） | 登记 VMT `$basetexture2`（雪盖等第二贴图）与材质 extras；必须在注入（第 7 步）之前 |
+| 3 | `applyLightmap(root, gltf)`（`:508`） | 世界面 lightmap atlas（`uv1` 通道）+ prop 逐顶点烘焙（`sp_<i>.vhv`）+ leaf ambient cube；**必须早于分块合并**（合并会重建几何与材质数组，之后按原 mesh 的材质/UV 施加就找不到映射） |
+| 4 | `extractSkyArea(root, 判定)`（`:524`） | 3D 天空盒天空区摘出主世界。判据 =「图元采样点落在 `sky_camera` 所在 BSP cluster」。**必须晚于第 3 步**（T-621：早摘则天空区不在光照遍历范围内 ⇒ 只剩贴图原色），**必须早于第 5 步**（合并成空间块后跨区大块无法再拆） |
+| 5 | `optimizeScene(root)`（`:530`）/ `mergeIntoChunks(root)` | 空间分块合并（按材质实例分组）。天空组**不在**主世界子树里，必须**单独合并**并重贴天空层（T-622） |
+| 6 | `fullbrightUnlitLitMaterials(root)`（`:550`） | 仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程不加灯 ⇒ 受光材质恒黑）。必须**晚于第 5 步**（合并会重建 mesh/材质数组）。天空组要再跑一遍 |
+| 7 | `applyWorldTransitionShaders(root)`（`:550`） | 双贴图混合注入（雪盖）：按顶点属性 `_vbsp_blend` 与 `vbsp_basetexture2` 改写材质。天空组要再跑一遍 |
+| 8 | 挂载：`scene.add(root)` + `scene.add(skyGroup)`（`:585`） | 天空组逐 mesh `layers.set(SKY_LAYER)`；主相机 `layers.disable(SKY_LAYER)`；天空相机 `createSkyCamera` + 每帧 `syncSkyCamera`（位姿 = 主相机 ÷ scale + `sky_camera` 原点）；天空遍雾 `start/end ÷ scale` |
+| 9 | 天空遍（第二相机） | 画 2D 天空盒六面 + 第 1 层图元（微缩景观）；主相机不画第 1 层 |
+
+**三端分歧史：三起同类错误，全部是「顺序/来源不一致」，且都不报错。**
+
+| 分歧 | 表现 | 处置 |
+|---|---|---|
+| 摘天空区的时机（T-621） | game/viewer 的微缩景观只有贴图原色、没有最基本的光照 | 摘取移到第 3 步之后（与 debug 同序） |
+| 天空组不做合并（T-622） | 1010 个逐面小块 = 1010 次天空遍 draw call | 补 `mergeIntoChunks` + `padBoundingSpheres` + 重贴 `SKY_LAYER` |
+| 呈现默认档三份各写（T-620） | 同一张图三端观感不同；debug 读到的坐标与 game 画面不同源 | 收进共享层 `LIGHTING_PRESENTATION_DEFAULTS`，三端只读它 |
+
 ## 环境氛围机制完整性矩阵（T-617，2026-10-09）
 
 目标地图 `test/maps/surf_boreas.bsp` 逐机制的复现状态与证据（SDK 参照物：`test/project/source-sdk-2013-master/`）。

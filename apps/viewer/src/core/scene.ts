@@ -202,6 +202,21 @@ export class ViewerScene {
     }
 
     // 渲染减负：空间分块合并（GLTFLoader 逐 primitive 建 Mesh，这里按空间块归并）
+    // 天空区也要合并：天空组没有主世界那棵原 GLB 子树，合并后必须自己 clear 并重贴天空层。
+    // 不合并时 1000+ 个逐面小块就是 1000+ 次天空遍 draw call。与 debug 同构。
+    if (this.skyGroup) {
+      const skyMerged = mergeIntoChunks(this.skyGroup);
+      this.skyGroup.clear();
+      for (const m of skyMerged.chunks) this.skyGroup.add(m);
+      for (const m of skyMerged.keptMeshes) this.skyGroup.add(m);
+      padBoundingSpheres(this.skyGroup);
+      this.skyGroup.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.layers.set(SKY_LAYER);
+      });
+      console.info(`[skybox] 天空区合并：${skyMerged.infos.length + skyMerged.keptMeshes.length} mesh → ${skyMerged.chunkCount} 块`);
+    }
+
     this.optimizeScene();
 
     // 合并后终扫（2026-10-03 起与 game 同序：终扫必须晚于合并——合并会重建 mesh/材质数组）：

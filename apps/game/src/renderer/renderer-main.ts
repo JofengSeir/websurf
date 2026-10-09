@@ -40,7 +40,7 @@ import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-ca
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
-import { optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { mergeIntoChunks, padBoundingSpheres, optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inject-stats.js';
 import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
@@ -303,6 +303,21 @@ export class RendererMain {
     // 1.5 空间分块合并（GLB 挂载后、PVS/LOD 注册前）：数万 mesh → 数百空间块。
     //     必须在下方 traverse（lodItems 收集 + clusterIds 分配）之前执行——那次 traverse 收集的是
     //     合并之后的块 mesh。
+    // 天空区也要合并：天空组没有主世界那棵原 GLB 子树，合并后必须自己 clear 并重贴天空层。
+    // 不合并时 1000+ 个逐面小块就是 1000+ 次天空遍 draw call。与 debug 同构。
+    if (this.skyGroup) {
+      const skyMerged = mergeIntoChunks(this.skyGroup);
+      this.skyGroup.clear();
+      for (const m of skyMerged.chunks) this.skyGroup.add(m);
+      for (const m of skyMerged.keptMeshes) this.skyGroup.add(m);
+      padBoundingSpheres(this.skyGroup);
+      this.skyGroup.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.layers.set(SKY_LAYER);
+      });
+      console.info(`[skybox] 天空区合并：${skyMerged.infos.length + skyMerged.keptMeshes.length} mesh → ${skyMerged.chunkCount} 块`);
+    }
+
     optimizeScene(scene, gltf.scene, this.camera, this.config?.hud?.fov ?? FOV_DEFAULT);
 
     // 1.55 装配后终扫：把仍带受光材质的 mesh（GLTFLoader 给 prop/派生网格的
