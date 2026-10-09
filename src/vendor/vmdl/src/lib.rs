@@ -339,6 +339,15 @@ impl Model {
     ///
     /// `colors` 必须正好覆盖全部 strip group 的顶点（按 mesh → strip group 顺序拼接）；任何一处
     /// 对不上就返回 `None`，由调用方退回 leaf ambient cube（不产出错位数据）。
+    /// strip group 顶点总数：即 `remap_strip_group_colors` 期望的 `colors` 长度
+    /// （`.vhv` 按「mesh → strip group」顺序拼接块，与该总数一一对应）。
+    pub fn strip_vertex_total(&self) -> usize {
+        self.meshes()
+            .flat_map(|mesh| mesh.vtx.strip_groups.iter())
+            .map(|sg| sg.vertices.len())
+            .sum()
+    }
+
     pub fn remap_strip_group_colors(&self, colors: &[[f32; 3]]) -> Option<Vec<[f32; 3]>> {
         let mut out = vec![[0.0f32; 3]; self.vertices().len()];
         let mut src = 0usize;
