@@ -26,18 +26,17 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（78 条）
+## 未结项（77 条）
 ### 待裁决（0）
 
 
-### 待修（76）
+### 待修（75）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
 - **T-062** 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径…　`viewer`
-- **T-107** 分块选块包围盒只统计部分 Mesh，块边长由子集推出　`shared`
 - **T-114** 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems）　`viewer`
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
 - **T-147** 材质去重键是材质名，同名材质被后续模型复用　`viewer`
@@ -130,7 +129,7 @@
 | T-062 | 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径… | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:283 | progress/pending-detail.md | 判据：@BT@git grep -n "importer" -- apps/viewer/src@BT@ ⇒ Source .dem 分支无 UI 调用路径 ⇒ 删或接线 | #93 |
 | T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道（修复已落地 2026-10-09，判据待浏览器实测） | 缺陷 | viewer | 已结案 | **已结案（2026-10-09，selftest 实测）**：提示串 bbox 不再只取第一条——`unionBbox` 从 `app.ts` 末尾**上收到 `apps/viewer/src/replay/types.ts:173`**（跨文件公用，`app.ts` 与 `test/replay-selftest.ts` 各以**同行 1:1** 折进已有 import 行，零锚点漂移），调用点 `apps/viewer/src/app.ts:265` 到 `apps/viewer/src/app.ts:267`。**验证（可跑判据已补）**：`cd apps/viewer && npm run test:replay` ⇒ **exit 0**，输出含 `ok   unionBbox 并集覆盖两条轨道`（两条轨道的并集 `[-3,0,-1]`~`[2,5,4]` 逐分量核对）；`npm run typecheck` ⇒ exit 0 | documents/viewer/implementation/app.md | `cd apps/viewer && npm run test:replay` ⇒ 断言「unionBbox 并集覆盖两条轨道」为 **ok**、exit 0；`git grep -n "unionBbox" -- apps/viewer/src` ⇒ 定义在 `replay/types.ts`，`app.ts` 仅 1 处调用点 | — |
 | T-103 | ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:807 | documents/viewer/implementation/app.md | 判据：`?replay=x.dem` ⇒ 按内容（魔数）分派并载入成功（不再按参数名拒收） | — |
-| T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:250 | documents/viewer/implementation/core.md | 判据：构造仅含多材质网格的分块 ⇒ 分块边长含全部 Mesh 的并集（`worldBox` 不再只在单材质分支累计） | — |
+| T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | 缺陷 | shared | 已结案 | **已结案（2026-10-09，差分量测 + 回归）**：多材质 Mesh 保留分支在烘焙后把包围盒并入 `worldBox`（`src/renderer-shared/scene/scene-optimizer.ts:242`，**同行 1:1**，零锚点漂移）。**量测更正原断言的后果**：`worldBox` 全函数只有一处消费——`:263` 的 `diag` 作 cellSize **初值**，随后 6 轮按实际非空 cell 数收敛到 300–800；差值量测（`.tmp/t107/probe.mjs`，场景 spread=4000/20000 × 有/无修复）两项 cellSize 全为 128、cellsCount 全为 10 ⇒ **无可观测差异**，原断言「块边长由子集推出」应降级为「初值由子集推出、迭代自我纠正」。回归 `cd apps/debug && npm run test:optimize-scene` ⇒ 21 passed / 0 failed（exit 0） | documents/viewer/implementation/core.md | `git grep -n "worldBox.union" -- src/renderer-shared/scene/scene-optimizer.ts` ⇒ 2 处（单材质分支 + 多材质保留分支）；`cd apps/debug && npm run test:optimize-scene` ⇒ 21 passed / 0 failed、exit 0；差分量测脚本 `.tmp/t107/probe.mjs`（不入库）显示有/无修复无差异 | — |
 | T-109 | 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正 | 缺陷 | viewer | 已取证待立项 | apps/viewer/src/replay/demo/net.ts:325 | documents/viewer/implementation/dem.md | — | — |
 | T-111 | `svc_CreateStringTable` 的压缩标志未实现（**待确认**：缺省 `readCompressedFlag = false`，代码根本不去读那一位 ⇒ 现有 4 份夹具「无压缩」这一结论**无法由探针证实**） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:709 | documents/viewer/implementation/dem.md | **需要一份压缩位置位的样本**才能开工：`test/replay/auto-20260929-192716-surf_sedona.dem` 及其余 3 份夹具均未触发压缩告警，但缺省关闭时该位不读、故不能反证不存在；判据维持「压缩标志分支解出（不再跳过）」 | — |
 | T-114 | 一组逆向期诊断开关仍留在生产代码里（**实测仍在**：`mergeVectorElems` + 10 个 `NetContext` 开关；判据的 `git grep` 非 0） | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:269 | documents/viewer/implementation/dem.md | `git grep -n "mergeVectorElems" -- apps src` ⇒ 仍 3 处（`apps/viewer/src/replay/demo/tables.ts:253` / `:447` / `:450`）；10 个诊断开关仍分布在 `apps/viewer/src/replay/demo/net.ts` 与 `demo.ts` | — |

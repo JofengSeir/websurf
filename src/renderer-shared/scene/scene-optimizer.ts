@@ -239,7 +239,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
         m.rotation.set(0, 0, 0);
         m.scale.set(1, 1, 1);
         m.updateMatrix();
-        keptMeshes.push(m);
+        if (!baked.boundingBox) baked.computeBoundingBox(); if (baked.boundingBox) worldBox.union(baked.boundingBox); keptMeshes.push(m);
       }
       return;
     }
