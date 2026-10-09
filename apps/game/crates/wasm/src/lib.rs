@@ -477,8 +477,6 @@ impl BspMetadata {
     }
 }
 
-#[wasm_bindgen]
-
 // ---------------------------------------------------------------------------
 // 处理器：持有 BSP 解析结果，借用式重复导出 / 提取
 // ---------------------------------------------------------------------------
@@ -503,7 +501,7 @@ impl BspProcessor {
     pub fn new(data: &[u8]) -> Result<BspProcessor, JsValue> {
         let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
         // 一次性计算并缓存 packed_files，避免 metadata() 重复克隆 Packfile
-        let packed_files = bsp.pack.clone().into_zip().lock().unwrap().len();
+        let packed_files = bsp.pack.clone().into_zip().lock().map_err(|e| JsValue::from_str(&format!("pakfile 锁定失败: {e}")))?.len();
         Ok(BspProcessor {
             bsp: Some(std::sync::Arc::new(bsp)),
             packed_files,

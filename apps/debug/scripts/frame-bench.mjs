@@ -13,8 +13,8 @@
  * 的文本 → 采样 → 统计。控制台里含 `optimizeScene` 的首行也会被回显。
  *
  * 前置：debug 的静态服务已在跑（默认页面 http://localhost:8080/web/index.html，对应
- * `apps/debug/package.json` 的 `dev`），且地图文件存在 —— 地图缺省取 <仓库根>/maps/surf_666.bsp，
- * 而该路径当前不在工作区（地图实际放在 <仓库根>/test/maps/ 下），故不给第 4 个参数时会在
+ * `apps/debug/package.json` 的 `dev`），且地图文件存在 —— 地图缺省取 <仓库根>/test/maps/surf_666.bsp
+ * （*.bsp 不入库，需自备同名文件），故不给第 4 个参数时会在
  * 地图检查处打印「地图不存在」并以 2 退出。
  *
  * 退出码：未找到 Chrome/Edge，或地图不存在 → 2；页面里没有 `#bspFile` → 1；
@@ -34,7 +34,7 @@ const repoRoot = join(debugDir, '..', '..');
 
 const LABEL = process.argv[2] ?? 'run';
 const URL = process.argv[3] ?? 'http://localhost:8080/web/index.html';
-const MAP = process.argv[4] ?? join(repoRoot, 'maps', 'surf_666.bsp');
+const MAP = process.argv[4] ?? join(repoRoot, 'test', 'maps', 'surf_666.bsp');
 const SAMPLES = 400;
 const LOAD_TIMEOUT_MS = 90000;
 

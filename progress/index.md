@@ -271,3 +271,4 @@
 | 2026-10-09 | T-102 结案：unionBbox 上收 types.ts + selftest 常驻断言（test:replay exit 0，判据可跑化） | progress/monthly/2026-10-9.md:11 |
 | 2026-10-09 | T-107 结案：worldBox 并入多材质包围盒；差分量测把「块边长」降级为「初值」；另筛查 154 条缺口找出 36 孤儿 | progress/monthly/2026-10-9.md:12 |
 | 2026-10-09 | T-167 结案（两处死阶段声明都删，16 锚点重编号）；T-118 重定性为冗余死 UI；普查出 27 条纯文字判据 | progress/monthly/2026-10-9.md:13 |
+| 2026-10-09 | T-217（悬空 wasm_bindgen 删掉，29 锚点重编号）+ T-307（缺省地图路径修好，实跑 400 帧 204 FPS）；自纠三次门禁红灯 | progress/monthly/2026-10-9.md:14 |

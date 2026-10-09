@@ -165,7 +165,7 @@
 | T-233 | `clear()` 零调用点 | apps/game/src/savepoint.ts:98 |
 | T-234 | `mtzB64` 与契约清单都指向了没有直接调用点的字段 | src/ts-shared/auth/worker-dispatch.ts:297 |
 | T-235 | `apps/game/src/world/types.ts` 在本工程零导入点 | apps/game/src/renderer/renderer-main.ts:42 |
-| T-236 | `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：… | apps/game/crates/wasm/src/lib.rs:579 |
+| T-236 | `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：… | apps/game/crates/wasm/src/lib.rs:577 |
 | T-237 | `map_name` 恒为空串 | apps/game/crates/wasm/src/lib.rs:457 |
 | T-238 | `InitMessage` 有三个字段既无发送方也无读取点 | apps/game/src/worker/worker-types.ts:36 |
 | T-239 | `worker-types.ts` 里多条声明在本工程无发送方且无接收点 | src/ts-shared/auth/worker-dispatch.ts:265 |
@@ -179,7 +179,7 @@
 | T-404 | `ShmState.wake` | src/ts-shared/auth/shared-state.ts:447 |
 | T-405 | `maskToKeys` | src/ts-shared/auth/shared-state.ts:98 |
 | T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | apps/game/src/renderer/renderer-main.ts:333 |
-| T-407 | `world/types.ts` 的 `rootNode` 字段 | apps/game/crates/wasm/src/lib.rs:1706 |
+| T-407 | `world/types.ts` 的 `rootNode` 字段 | apps/game/crates/wasm/src/lib.rs:1704 |
 | T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | src/wasm-core/bsp_to_gltf_core/convert.rs:367 |
 
 ## 第 3 组 · 文档口径（4 条）
