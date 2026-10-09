@@ -47,4 +47,5 @@
 | `check-doc-drift.mjs` | 文档漂移体检 A–O（含体积/分卷/注释纪律/上级覆盖/缺口↔看板/假结案/脚本契约/文档契约） | `.github/workflows/doc-drift.yml`；`AGENTS §5` |
 | `check-board-touch.mjs` | 看板触碰**软提示**（改了 src/apps/documents 却没动 TODO.md） | CI（`continue-on-error`） |
 | `docflow.mjs` | 文档契约：只读钉 / 单元级字段权限 / 锚点内容指纹（按 `目标:行号` 对位，含 TODO·OWNER 证据列的裸锚点）/ 强绑定 | 体检 `[O]` 直接调用（变更基线：CI 下 `HEAD^`，可 `--base` 指定） |
-| `check-glb-parity.mjs` | debug 与 game 的**材质口径一致性**（同一张图必须产出同一套材质） | **未接线** ⇒ 见 `TODO.md` T-409 |
+| `check-glb-parity.mjs` | 三端（debug / game / viewer）GLB **语义一致性**：节点名集合、每图元属性键集合、带 `extras.ambientCube` 的节点集合、材质逐字段、贴图逐字节 | `.github/workflows/ci-gates.yml` 的 `glb-parity` job（三端 wasm + `textures.mtz` 组合）；缺地图夹具时自报 SKIP 并 `exit 0` ⇒ **已消除（2026-10-10）：已接线**（`TODO.md` T-409 已结案）** |
+| `check-render-parity.mjs` | 渲染同源门禁：`apps/**` 不得再出现 19 条渲染实现符号（`new THREE.WebGLRenderer` / `outputColorSpace =` / `applyLightmap(` / `mergeIntoChunks(` / `setFogMaxDensity(` / `padBoundingSpheres(` / `camera.far =` 等），三端 import 面必须覆盖 7 个共享入口，旧偏好键字面量只许出现在白名单文件 | 手工跑 + CI（`glb-parity` job 的末步）；**已接线（2026-10-10，T-454 P7）** |

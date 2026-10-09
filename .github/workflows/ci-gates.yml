@@ -275,3 +275,87 @@ jobs:
         working-directory: apps/viewer
         # 只 esbuild 自检入口（src/replay/*），不依赖 pkg/ 与 wasm
         run: npm run test:replay
+
+  # ── 三端 wasm + textures.mtz 组合门禁（T-454 P5 固定交付项；原 T-409 未接线）─────
+  # 三份 wasm 在同一台 runner 上各自构建，然后跑**字段级** GLB 一致性门禁：节点名集合、
+  # 图元属性键集合、`extras.ambientCube` 节点集合、材质逐字段、贴图逐字节。
+  # 地图夹具 `test/maps/**` 在 `.gitignore` 内、CI 上不存在 ⇒ 门禁自报 SKIP 并 exit 0
+  # （口径见 `src/scripts/check-glb-parity.mjs` 头注）；本 job 的真正价值是**证明三份 crate
+  # 都能用同一套共享编排编译出来**，并在有夹具的本地/自建 runner 上立刻升级为逐字段断言。
+  glb-parity:
+    name: three-end GLB parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Cache wasm-bindgen-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-0.2.128-x86_64-linux
+
+      - name: Install wasm-bindgen-cli 0.2.128 (cache → prebuilt → cargo install)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -x "$HOME/.cargo/bin/wasm-bindgen" ] &&
+             "$HOME/.cargo/bin/wasm-bindgen" --version 2>/dev/null | grep -q '0.2.128'; then
+            echo "[cache hit] wasm-bindgen-cli 0.2.128 已就绪"
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            exit 0
+          fi
+          VERSION=0.2.128
+          if curl -fSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 \
+               -o /tmp/wbg.tar.gz \
+               "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz"; then
+            tar -xzf /tmp/wbg.tar.gz -C /tmp
+            mkdir -p "$HOME/.cargo/bin"
+            cp "/tmp/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl/wasm-bindgen" "$HOME/.cargo/bin/"
+            echo "[prebuilt] wasm-bindgen-cli ${VERSION} 已就位"
+          else
+            echo "[warn] 预编译包下载失败，退回 cargo install（首次编译数分钟，之后走 cache）"
+            cargo install wasm-bindgen-cli --version "${VERSION}" --locked
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      # 根级 three（renderer-shared 依赖）：与 debug-gates 同理，先根后工程。
+      - name: Install root shared dependencies
+        run: npm ci
+
+      - name: Build the three WASM packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in debug game viewer; do
+            echo "== apps/$app =="
+            (cd "apps/$app" && npm ci && npm run build:wasm)
+          done
+
+      - name: WASM API contract (three ends)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in debug game viewer; do
+            echo "== apps/$app check:api =="
+            (cd "apps/$app" && node scripts/check-wasm-api.mjs)
+          done
+
+      - name: GLB parity (three ends; SKIP when map fixtures are absent)
+        run: node src/scripts/check-glb-parity.mjs

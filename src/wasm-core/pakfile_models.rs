@@ -10,7 +10,7 @@
 //!    `translation + q ⊗ (scale ⊙ v)` 搬到世界空间。
 //!
 //! 本模块**不做碰撞判定、不读 `.phy`、不展开网格、不碰 GLB**。下游：
-//! - 三工程 `crates/wasm/src/lib.rs` 的 `resolve_pakfile_materials`：调 `PakIndex` +
+//! - `src/wasm-core/render_bundle.rs` 的 `resolve_pakfile_materials`（三端共用）：调 `PakIndex` +
 //!   `parse_vmt`，产出 `材质名 → alpha_mode` 与 `纹理名 → PNG 字节`；
 //! - `apps/debug` 与 `apps/game` 的 `export_model_tri_colliders` /
 //!   `export_model_phy_colliders`（`apps/viewer` 无碰撞导出，不调这两个）：

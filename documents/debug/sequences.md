@@ -46,7 +46,7 @@
    - 非回放模式下做权威帧校准与权威速度外推（`apps/debug/src/renderer/renderer-main.ts:629`、`apps/debug/src/renderer/renderer-main.ts:631`）；
    - 路径记录 tick 线：只在权威版本号 `va` 变化时落点，时间戳取发布时钟 τ（`apps/debug/src/renderer/renderer-main.ts:589` 起）；
    - 推进渲染物理 `predPhys.tick(dt, keys, dx, dy)`，随后清零鼠标增量（`apps/debug/src/renderer/renderer-main.ts:600`、`apps/debug/src/renderer/renderer-main.ts:599`）；
-   - 消费 Rust 侧 `take_event`（`apps/debug/src/renderer/renderer-main.ts:604` → `apps/debug/src/renderer/renderer-main.ts:1198`）；
+   - 消费 Rust 侧 `take_event`（`apps/debug/src/renderer/renderer-main.ts:604` → `apps/debug/src/renderer/renderer-main.ts:1166`）；
    - 取状态摆相机：渲染节点落 `PathRecorder`、写共享内存渲染采样、相机 yaw/pitch 与眼睛高度（`apps/debug/src/renderer/renderer-main.ts:612`、`apps/debug/src/renderer/renderer-main.ts:616`、`apps/debug/src/renderer/renderer-main.ts:618`、`apps/debug/src/renderer/renderer-main.ts:622`）；
    - 隔帧近平面探测（`apps/debug/src/renderer/renderer-main.ts:624`）。
 3. ② 视距剔除：`LodManager.update` 返回真表示有块可见性翻转（`apps/debug/src/renderer/renderer-main.ts:638`）。
@@ -74,7 +74,7 @@
 
 **三者的时间耦合**：
 
-- 主线程渲染物理每帧推进一次，权威物理按固定步长推进；两者的对齐由 `correctFromAuthority` 与 `calibrateVelocity` 完成（`apps/debug/src/renderer/renderer-main.ts:1183`、`apps/debug/src/renderer/renderer-main.ts:1188`）。
+- 主线程渲染物理每帧推进一次，权威物理按固定步长推进；两者的对齐由 `correctFromAuthority` 与 `calibrateVelocity` 完成（`apps/debug/src/renderer/renderer-main.ts:1151`、`apps/debug/src/renderer/renderer-main.ts:1156`）。
 - 权威帧的位置不是权威自身的 post-tick 位置，而是渲染折线上的采样点；主线程每帧写一条渲染采样，Worker 读它并取点（`apps/debug/src/renderer/renderer-main.ts:58` 起、`apps/debug/src/worker/main.ts:12`）。
 - 路径记录的两条线因此可以按同一时间基准比较：tick 线用发布时钟 τ，渲染线用 rAF 时间戳（`apps/debug/src/renderer/renderer-main.ts:589` 起）。
 
@@ -142,7 +142,7 @@
 | 碰撞体导出失败 | `buildWorldBundle` 按 `colliderSource` 三档逐级回退：模型自带 `.phy` → 可视网格 → 空数组 | `apps/debug/src/config.ts:14` |
 | 录制载荷缺 `meta.initialState` | 拒绝回放并告警，不进入回放态 | `apps/debug/src/app.ts:794` |
 | 录制地图名与当前地图不符 | 只告警不阻断，结果由调用方判断 | `apps/debug/src/app.ts:798` |
-| 全量种子写回失败 | 退化为九参部分对齐（`setPredictionState`） | `apps/debug/src/app.ts:750`、`apps/debug/src/renderer/renderer-main.ts:1033` |
+| 全量种子写回失败 | 退化为九参部分对齐（`setPredictionState`） | `apps/debug/src/app.ts:750`、`apps/debug/src/renderer/renderer-main.ts:1001` |
 | Pointer Lock 未锁定 | 键位掩码强制 0，防止 ESC 前后按键残留 | `apps/debug/src/app.ts:2275` |
 | 窗口失焦导致 rAF 停摆 | 显式写一次 `addInput(0, 0, 0)` 清权威键位，并清渲染物理残留输入 | `apps/debug/src/app.ts:1121` |
 | 窗口尺寸变化 | 直接调 `rendererMain.resize`（不经 `resize` 消息——该消息无收发链路） | `apps/debug/src/app.ts:1110` |

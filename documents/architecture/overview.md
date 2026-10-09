@@ -77,7 +77,7 @@ apps/*/src/**（TypeScript）            ──►  src/ts-shared/**
 | MTZ 容器魔数 `MAGIC`（`MTZ6`）与旧版 `MAGIC_V5` | `src/wasm-core/mosaic/mtz.rs:45`、`src/wasm-core/mosaic/mtz.rs:47` |
 | 单图编码 `img_to_code` | `src/wasm-core/mosaic/encode.rs:68` |
 | VTF 容器 `VTF` 与其读取 `read` | `src/wasm-core/texture_utils/vtf.rs:71`、`src/wasm-core/texture_utils/vtf.rs:93` |
-| 模块清单（`pub mod`） | `src/wasm-core/lib.rs:36` 起 |
+| 模块清单（`pub mod`） | `src/wasm-core/lib.rs:37` 起 |
 
 ### 4.3 TS 运行时
 

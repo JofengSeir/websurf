@@ -22,15 +22,18 @@
 //! 顺序契约：两个 `export_glb_*` 都会取走内部 `Bsp` 实例，必须排在另外两个方法之后；
 //! 取走之后再调那两个方法一律得到错误，而不是旧值。
 
-use std::collections::HashMap;
 use std::io::Cursor;
 
 use wasm_bindgen::prelude::*;
 
 // 解析层来自仓库根的共享 crate websurf-wasm-core（路径依赖 ../../../../src/wasm-core）
 use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, texture_utils, vbsp};
-use model_integrator::{
-    ExportOptions, InMemoryModel, InMemoryResources, ModelIntegrator, StaticProp,
+use model_integrator::{ExportOptions, InMemoryResources, ModelIntegrator};
+
+// 导出编排（PAKFILE 模型 / 材质 / 光源）：仓库根 `src/wasm-core/render_bundle.rs`
+use websurf_wasm_core::render_bundle::{
+    build_vmt_stem_index, collect_light_entities, collect_pakfile_models,
+    resolve_pakfile_materials, VhvLog,
 };
 
 // ---------------------------------------------------------------------------
@@ -44,124 +47,8 @@ fn to_js_err<E: std::fmt::Debug>(e: E, ctx: &str) -> JsValue {
 }
 
 // ---------------------------------------------------------------------------
-// PAKFILE 内嵌模型：模型三件套提取与材质解析
+// 纹理解码导出：VTF 字节 → PNG 字节
 // ---------------------------------------------------------------------------
-
-/// 一次材质解析的产物：喂给 `InMemoryResources` 的三张表。
-#[derive(Default)]
-struct PakMaterials {
-    /// `材质名 → PNG 字节`（对应 `InMemoryResources` 的 `textures`）。
-    /// 键取自 `vmdl` 的纹理名，须与下面这个查表键逐字符一致，否则该贴图进不了 GLB：
-    /// `src/wasm-core/model_integrator/mod.rs` 的 `push_texture`。
-    textures: HashMap<String, Vec<u8>>,
-    /// `材质名 → alpha_mode`（对应 `InMemoryResources` 的 `material_alpha_mode`）：
-    /// 1 = Blend（双面）、2 = Mask（`alphaCutoff = 0.5`）、0 = Opaque。
-    alpha_modes: HashMap<String, u8>,
-    /// 自发光 / 无光照材质名集合（对应 `InMemoryResources` 的 `material_unlit`）；
-    /// 渲染侧据此走全亮，不吃 lightmap 与 ambient cube。
-    unlit: std::collections::HashSet<String>,
-    /// `材质名 → $envmaptint`（仅声明了 `$envmap` 的材质入表）：渲染端据此挂 env_cubemap 近似反射。
-    envmap_tints: HashMap<String, [f32; 3]>,
-}
-
-/// 收集 PAKFILE 里的内嵌模型：被 `static_props` 引用、且 `.mdl` / `.vvd` / `.dx90.vtx` 三件齐全的那些。
-///
-/// 返回 `(三件套字节, 静态道具放置表, PAKFILE 全部条目名)`：
-/// - 三件套只收 `static_props` 的模型名在 zip 里精确命中的条目，缺任一件即跳过该模型；
-/// - 放置表逐项来自 `Bsp::static_props()`，同时补齐 `ambient_cube`（`Bsp::prop_ambient_cube` 给的
-///   leaf 环境盒）与 `vertex_lighting`（同一轮扫描顺手取出的 `sp_<idx>.vhv` 顶点光照，HDR 优先）；
-/// - 第三项是留给 [`pakfile_models::PakIndex`] 复用的条目名清单，免得为了找材质再遍历一次 zip。
-///
-/// zip 索引只锁一次：锁在本轮条目扫描期间一直持有，扫描结束立刻释放。
-fn collect_pakfile_models(
-    bsp: &vbsp::Bsp,
-) -> Result<(Vec<InMemoryModel>, Vec<StaticProp>, Vec<String>), JsValue> {
-    // 1. 静态道具引用到的模型名（字典里的名字，与 zip 条目名按原样比较）
-    let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new(); // 键一律小写（T-145）
-    for prop in bsp.static_props() {
-        referenced.insert(prop.model().to_ascii_lowercase());
-    } for ent in bsp.entities.iter() { if let Ok(m) = ent.prop("model") { referenced.insert(m.to_ascii_lowercase()); } } // T-454 P5-2：实体放置模型（prop_dynamic 等）并入被引用集合，与 game/debug 同语义
-
-    // 2. 一次遍历枚举全部条目：收集条目名，并顺手挑出 sp_<idx>.vhv 顶点光照
-    let zip = bsp.pack.clone().into_zip();
-    let mut zip_guard = zip
-        .lock()
-        .map_err(|e| JsValue::from_str(&format!("pakfile 锁定失败: {e}")))?;
-    let mut entry_names: Vec<String> = Vec::with_capacity(zip_guard.len());
-    // vhv 命名是 `sp_<idx>.vhv` 与 `sp_hdr_<idx>.vhv`（idx 对应 static_props 的序号）：
-    // 同一个 idx 上 HDR 版本覆盖非 HDR 版本；解析不出下标、读失败或读出空字节的条目直接丢弃。
-    let mut vhv_blobs: std::collections::HashMap<usize, Vec<u8>> = std::collections::HashMap::new();
-    for i in 0..zip_guard.len() {
-        if let Ok(mut entry) = zip_guard.by_index(i) {
-            let name = entry.name().to_string();
-            let lower = name.to_ascii_lowercase();
-            if lower.starts_with("sp_") && lower.ends_with(".vhv") {
-                let mid = &lower[3..lower.len() - 4];
-                let (idx_part, is_hdr) = match mid.strip_prefix("hdr_") {
-                    Some(rest) => (rest, true),
-                    None => (mid, false),
-                };
-                if let Ok(idx) = idx_part.parse::<usize>() {
-                    let mut buf = Vec::with_capacity(entry.size() as usize);
-                    if std::io::Read::read_to_end(&mut entry, &mut buf).is_ok() && !buf.is_empty() {
-                        if is_hdr || !vhv_blobs.contains_key(&idx) {
-                            vhv_blobs.insert(idx, buf);
-                        }
-                    }
-                }
-            }
-            entry_names.push(name);
-        }
-    }
-    drop(zip_guard);
-
-    // 3. 逐个被引用模型取三件套：`.mdl` 命中后按尾部去掉后缀再拼出 `.vvd` / `.dx90.vtx`，缺一即跳过
-    let mut models: Vec<InMemoryModel> = Vec::new();
-    for name in &entry_names {
-        if !name.to_ascii_lowercase().ends_with(".mdl") || !referenced.contains(&name.to_ascii_lowercase()) {
-            continue;
-        }
-        let vvd_name = format!("{}.vvd", &name[..name.len() - 4]); // 去尾部 4 字节（`.mdl`，任意大小写）再拼后缀
-        let vtx_name = format!("{}.dx90.vtx", &name[..name.len() - 4]); // `replace` 区分大小写会让大写条目填进 `.mdl` 字节（T-144 / T-218）
-        let mdl = match bsp.pack.get(name) {
-            Ok(Some(d)) => d,
-            _ => continue,
-        };
-        let vvd = match bsp.pack.get(&vvd_name) {
-            Ok(Some(d)) => d,
-            _ => continue,
-        };
-        let vtx = match bsp.pack.get(&vtx_name) {
-            Ok(Some(d)) => d,
-            _ => continue,
-        };
-        models.push(InMemoryModel {
-            name: name.clone(),
-            mdl,
-            vvd,
-            vtx,
-        });
-    }
-
-    // 4. 放置表：本工程只喂 GLB 节点；带碰撞导出的工程另用同一个字段
-    let static_props: Vec<StaticProp> = bsp
-        .static_props()
-        .enumerate()
-        .map(|(i, prop)| StaticProp {
-            model: prop.model().to_string(),
-            origin: [prop.origin.x, prop.origin.y, prop.origin.z],
-            angles: prop.angles(),
-            solid: prop.solid as u8,
-            ambient_cube: bsp.prop_ambient_cube(i),
-            vertex_lighting: vhv_blobs
-                .get(&i)
-                .and_then(|b| websurf_wasm_core::vhv::parse_vhv(b))
-                .map(|v| v.colors),
-        })
-        .collect();
-
-    Ok((models, static_props, entry_names))
-}
 
 /// 单个 VTF 字节 → PNG 字节（导出给 TS 侧天空盒解码；内部材质解析同样调用它）。
 /// 只解最高分辨率图的第 0 帧；三条失败链各自带上下文：VTF 解析 / 图像解码 / PNG 编码。
@@ -178,177 +65,6 @@ fn collect_pakfile_models(
         .map_err(|e| to_js_err(e, "PNG 编码失败"))?;
 
     Ok(output)
-}
-
-/// 解析被引用模型的材质标注与贴图：取 `.vmt` 得 `alpha_mode` / `unlit` / `$basetexture`，
-/// 再按 `$basetexture` 取 `.vtf` 解码为 PNG；`patch` 材质多跟一层 `include` 母材质。
-///
-/// VMT 候选路径按 `mdl.textures[].search_paths` 与 `mdl.texture_paths` 逐条拼上材质名，末尾补一条
-/// 裸材质名；查询一律走 [`pakfile_models::PakIndex::find`]。已解析过的材质名不再重复解析。
-///
-/// `fallback` = 默认纹理包（`textures.mtz` 解压产物，键形如 `materials/<小写路径>`）：pakfile 内
-/// 没有该 VTF 时，按 `$basetexture` 路径与材质名依次查包取低清纹理补位；传 `None` 即不回落，
-/// 此时没有 pakfile VTF 的材质没有贴图。（与 game crate 同签名同语义；2026-10-04 起 viewer 的
-/// 主导出路径传入回退表。）
-fn resolve_pakfile_materials(
-    bsp: &vbsp::Bsp,
-    models: &[InMemoryModel],
-    index: &pakfile_models::PakIndex,
-    fallback: Option<&std::collections::HashMap<String, String>>,
-) -> PakMaterials {
-    let mut out = PakMaterials::default();
-
-    // 闭包：按候选路径取 VMT 文本并解析（取不到返回 None）
-    let fetch_vmt = |path: &str| -> Option<pakfile_models::VmtInfo> {
-        let entry = index.find(path, "vmt")?;
-        let bytes = match bsp.pack.get(entry) {
-            Ok(Some(b)) => b,
-            _ => return None,
-        };
-        Some(pakfile_models::parse_vmt(&String::from_utf8_lossy(&bytes)))
-    };
-
-    for m in models {
-        // 纹理名表只在 .mdl 里，故不碰 .vvd / .dx90.vtx
-        let Ok(mdl) = vmdl::Mdl::read(&m.mdl) else {
-            continue;
-        };
-
-        for tex in &mdl.textures {
-            if out.alpha_modes.contains_key(&tex.name) {
-                continue; // 共享材质只解析一次
-            }
-
-            // 候选路径：每个搜索目录拼一个，最后再补一个裸材质名
-            let mut candidates: Vec<String> = Vec::new();
-            for sp in tex.search_paths.iter().chain(mdl.texture_paths.iter()) {
-                let sp = sp.replace('\\', "/");
-                let sp = sp.trim_matches('/');
-                if sp.is_empty() {
-                    continue;
-                }
-                candidates.push(format!("{sp}/{}", tex.name));
-            }
-            candidates.push(tex.name.clone());
-
-            let Some(mut info) = candidates.iter().find_map(|c| fetch_vmt(c)) else {
-                // VMT 没打包进来 → 该材质按 Opaque 记一笔
-                out.alpha_modes.insert(tex.name.clone(), 0);
-                continue;
-            };
-
-            // patch 材质：跟一层 include 取母材质的 $basetexture；本材质未标透明度时继承母材质
-            if info.basetexture.is_none() {
-                if let Some(inc) = info.include.clone() {
-                    if let Some(base_info) = fetch_vmt(&inc) {
-                        info.basetexture = base_info.basetexture;
-                        if info.alpha_mode == 0 {
-                            info.alpha_mode = base_info.alpha_mode;
-                        }
-                    }
-                }
-            }
-
-            out.alpha_modes.insert(tex.name.clone(), info.alpha_mode);
-            if info.unlit {
-                out.unlit.insert(tex.name.clone());
-            }
-            if let Some(t) = info.envmap_tint {
-                out.envmap_tints.insert(tex.name.clone(), t);
-            }
-
-            let Some(base) = info.basetexture else {
-                continue;
-            };
-            // 先在 pakfile 内按 `$basetexture` 找同路径 VTF（原始分辨率），解出 PNG 即用
-            if let Some(vtf_entry) = index.find(&base, "vtf") {
-                if let Ok(Some(vtf_bytes)) = bsp.pack.get(vtf_entry) {
-                    if let Ok(png) = decode_vtf_to_png(&vtf_bytes) {
-                        out.textures.insert(tex.name.clone(), png);
-                        continue;
-                    }
-                }
-            }
-            // pakfile 内没有这张 VTF（stock 贴图未打包）时退到默认纹理包。
-            // 查表键经 `bsp_to_gltf_core::fallback_key` 归一成 `materials/<小写路径>`，故这里按
-            // `$basetexture` 路径与材质名依次试：模型材质名常是裸基名（`metalfence007a`），
-            // 包里的键却是源资源路径（`materials/metal/metalfence007a`）。
-            if let Some(fallback) = fallback {
-                if let Some(png) = websurf_wasm_core::bsp_to_gltf_core::fallback_texture_png(
-                    fallback,
-                    &[base.as_str(), tex.name.as_str()],
-                    8,
-                ) {
-                    out.textures.insert(tex.name.clone(), png);
-                }
-            }
-        }
-    }
-
-    out
-}
-
-/// BSP 光照实体（classname ∈ `LIGHT_CLASSNAMES`）→ [`model_integrator::Entity`]。
-///
-/// 只搬运光照解析要用的属性子集：`model`/`origin`/`angles`/`scale` 与 `_light`/`_cone`/
-/// `_inner_cone`/三个衰减系数/`pitch`；取不到的属性一律留成 `None`，`classname` 取不到则跳过该实体。
-/// 消费端 [`ModelIntegrator`] 把这些实体写成 `KHR_lights_punctual` 扩展（渲染端 buildMapScene 摘除）。
-fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> {
-    const LIGHT_CLASSNAMES: &[&str] = &["light", "light_spot", "light_environment"];
-    let mut out = Vec::new();
-    for ent in bsp.entities.iter() {
-        let Ok(classname) = ent.prop("classname") else {
-            continue;
-        };
-        if !LIGHT_CLASSNAMES.contains(&classname) {
-            continue;
-        }
-        let prop = |key: &'static str| ent.prop(key).ok().map(|s| s.to_string());
-        out.push(model_integrator::Entity {
-            properties: model_integrator::EntityProperties {
-                classname: classname.to_string(),
-                model: prop("model"),
-                origin: prop("origin"),
-                angles: prop("angles"),
-                scale: prop("scale"),
-                light: prop("_light"),
-                cone: prop("_cone"),
-                inner_cone: prop("_inner_cone"),
-                constant_attn: prop("_constant_attn"),
-                linear_attn: prop("_linear_attn"),
-                quadratic_attn: prop("_quadratic_attn"),
-                pitch: prop("pitch"),
-            },
-        });
-    }
-    out
-}
-
-/// 从 PAKFILE 条目名构建 VMT **基名索引**：`基名小写 → 去掉 materials/ 前缀与 .vmt 后缀的路径`。
-///
-/// 只收 `materials/` 下、以 `.vmt` 结尾的条目；值保留条目原始大小写（`Packfile::get` 按名精确
-/// 匹配）。产物填进 `bsp_to_gltf_core::ConvertOptions::vmt_stem_index`，供世界面的贴图名在精确
-/// 候选全部落空时按基名回退取 `$basetexture` 等标注。
-///
-/// 同名多条时取**路径最短**者；与当前值等长时保留先到的一条。
-fn build_vmt_stem_index(entry_names: &[String]) -> std::collections::HashMap<String, String> {
-    let mut out: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for name in entry_names {
-        let norm = name.replace('\\', "/");
-        let lower = norm.to_ascii_lowercase();
-        if !lower.starts_with("materials/") || !lower.ends_with(".vmt") {
-            continue;
-        }
-        let path = &norm["materials/".len()..norm.len() - ".vmt".len()];
-        let stem = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
-        match out.get(&stem) {
-            Some(prev) if prev.len() <= path.len() => {}
-            _ => {
-                out.insert(stem, path.to_string());
-            }
-        }
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -595,7 +311,7 @@ impl BspProcessor {
             .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
 
         // 1~3. 三件套 + 放置表 + PAKFILE 条目名
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp)?;
+        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, true, VhvLog::Never).map_err(|e| JsValue::from_str(&e))?;
 
         // 4. 没有任何被引用模型：纯地图导出（Bsp 同样已被取走）
         if models.is_empty() {
@@ -612,7 +328,7 @@ impl BspProcessor {
 
         // 5. VMT/VTF → 贴图字节 + 透明度档位 + 无光照名集合（裸导出无回退表）
         let index = pakfile_models::PakIndex::build(&entry_names);
-        let materials = resolve_pakfile_materials(&bsp, &models, &index, None);
+        let materials = resolve_pakfile_materials(&bsp, &models, &index, true, None);
 
         let resources = InMemoryResources {
             models,
@@ -684,7 +400,7 @@ impl BspProcessor {
             serde_json::from_str(defaults_json)
                 .map_err(|e| to_js_err(e, "默认纹理包 JSON 解析失败"))?;
 
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp)?;
+        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, true, VhvLog::Never).map_err(|e| JsValue::from_str(&e))?;
 
         // 世界面材质的基名 VMT 回退索引（texinfo 给的贴图名在包内无精确路径时按基名命中）
         let stem_index = build_vmt_stem_index(&entry_names);
@@ -697,7 +413,7 @@ impl BspProcessor {
 
         // 无模型时仍走整合器路径（空模型不产出节点，光照注入照常发生）——与 game 同语义
         let index = pakfile_models::PakIndex::build(&entry_names);
-        let materials = resolve_pakfile_materials(&bsp, &models, &index, Some(&fallback));
+        let materials = resolve_pakfile_materials(&bsp, &models, &index, true, Some(&fallback));
         let resources = InMemoryResources {
             models,
             entities: model_integrator::collect_model_entities(&bsp),
@@ -950,4 +666,37 @@ pub fn mosaic_decode(code: &str, scale: u32) -> Result<Vec<u8>, JsValue> {
 pub fn mosaic_encode(png: &[u8], name: &str) -> Result<String, JsValue> {
     websurf_wasm_core::mosaic::encode::img_to_code(png, name)
         .map_err(|e| JsValue::from_str(&format!("mosaic_encode: {e}")))
+}
+
+/// 生成纹理画质 manifest：`{ 纹理名(小写 VMT 路径): mosaic v4 字节码 }` JSON。
+///
+/// T-454 P6：本工程此前没有这个导出（debug / game 都有）⇒ 画质档「低清」在 viewer 上**没有数据源**，
+/// 三端画质档因此不同源。语义与 debug / game 一致（两类键：地图 face 纹理 + PAKFILE 模型贴图），
+/// 端间差异只有 viewer 自己的历史口径——模型名按**小写**比较（`case_insensitive_model_names = true`）、
+/// 不打印 vhv 统计日志（`VhvLog::Never`）——与 `render_bundle` 里那两个形参一一对应。
+///
+/// 顺序契约：与两个 `export_glb_*` 一样读内部 `Bsp`，必须在它们**之前**调用（否则报「已被消费或未加载」）。
+#[wasm_bindgen]
+impl BspProcessor {
+    pub fn export_mosaic_manifest(&self) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
+        let mut pairs = websurf_wasm_core::mosaic::manifest::build_mosaic_manifest(bsp);
+        // 模型贴图（材质名 → PNG → mosaic）；失败静默跳过（不影响地图纹理覆盖）
+        if let Ok((models, _props, entry_names)) =
+            collect_pakfile_models(bsp, true, VhvLog::Never).map_err(|e| JsValue::from_str(&e))
+        {
+            let index = pakfile_models::PakIndex::build(&entry_names);
+            let materials = resolve_pakfile_materials(bsp, &models, &index, true, None);
+            for (name, png) in materials.textures {
+                if let Ok(code) = websurf_wasm_core::mosaic::encode::img_to_code(&png, &name) {
+                    pairs.push((name.to_ascii_lowercase(), code));
+                }
+            }
+        }
+        let map: std::collections::HashMap<String, String> = pairs.into_iter().collect();
+        serde_json::to_string(&map).map_err(|e| to_js_err(e, "序列化 mosaic manifest 失败"))
+    }
 }

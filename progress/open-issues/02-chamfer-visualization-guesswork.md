@@ -22,7 +22,7 @@
 
 | 用途 | 常量 | 值 | 位置 |
 |---|---|---|---|
-| 生成侧：顶点是否落在某平面上 | `eps_plane` | **0.1** | `apps/debug/crates/wasm/src/lib.rs:2890` |
+| 生成侧：顶点是否落在某平面上 | `eps_plane` | **0.1** | `apps/debug/crates/wasm/src/lib.rs:2548` |
 | 显示侧：顶点是否落在某平面上 | `FACE_EPS` | **0.5** | `apps/debug/src/renderer/collider-debug.ts:95` |
 
 显示侧的 `computeChamferStrips`（`collider-debug.ts:307`-`:355`）用 `FACE_EPS` 收集面上顶点

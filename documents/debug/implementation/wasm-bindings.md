@@ -10,10 +10,10 @@
 
 **导出面（`apps/debug/crates/wasm/src/lib.rs`）**
 
-- 自由函数：`parse_bsp`（`apps/debug/crates/wasm/src/lib.rs:510`）、`export_visleaf_pvs`（`:3261`）、`decode_vtf_to_png`（`:3447`）、`mosaic_encode`（`:3468`）、`mosaic_decode`（`:3475`）、`decompress_mtz`（`:3483`），另有模块装载时自动调用的 `start`（`:3494`）。
-- `BspProcessor` 类（`apps/debug/crates/wasm/src/lib.rs:525`，`impl` 从 `:534` 起），24 个 `#[wasm_bindgen]` 成员：构造（`:537`）、`metadata`（`:552`）、`export_glb`（`:569`）、`export_glb_with_models`（`:608`）、`export_glb_with_pakfile_models`（`:668`）、`export_glb_with_pakfile_models_with_defaults`（`:726`）、`export_glb_with_pakfile_models_with_defaults_and_atlas_limit`（`:741`）、`export_glb_with_pakfile_models_with_defaults_and_lights`（`:760`）、`export_glb_with_pakfile_models_with_lights`（`:771`）、`export_model_tri_colliders`（`:878`）、`export_model_phy_colliders`（`:1020`）、`is_alive`（`:1157`）、`export_mosaic_manifest`（`:1169`）、`export_missing_textures`（`:1193`）、`parse_spawn_points`（`:1210`）、`parse_entities`（`:1326`）、`list_pakfile`（`:1389`）、`read_pakfile_file`（`:1424`）、`read_pakfile_scripts`（`:1442`）、`parse_teleports`（`:1516`）、`parse_pvs_data`（`:1969`）、`export_colliders`（`:2112`）、`export_colliders_with_filter`（`:2134`）、`export_brushes_planes`（`:2593`）。
-- 共享物理原样再导出：`pub use websurf_phys::phys::PhysWorld`（`apps/debug/crates/wasm/src/lib.rs:55`）——JS 侧从 `apps/debug/pkg/websurf_wasm.js` 拿到的 `PhysWorld` 就是共享层那一个类型，本文件不加包装。
-- 非导出辅助：`to_js_err`（`:65`，错误 → `JsValue` 的统一转换）、`init_panic_hook`（`:375`，无 `#[wasm_bindgen]`，只被 `start` 调用且仅 `wasm32` 编译），以及 `BspMetadata`（`:391`，`metadata()` 的序列化载体）。
+- 自由函数：`parse_bsp`（`apps/debug/crates/wasm/src/lib.rs:171`）、`export_visleaf_pvs`（`:2735`）、`decode_vtf_to_png`（`:2921`）、`mosaic_encode`（`:2942`）、`mosaic_decode`（`:2949`）、`decompress_mtz`（`:2957`），另有模块装载时自动调用的 `start`（`:2968`）。
+- `BspProcessor` 类（`apps/debug/crates/wasm/src/lib.rs:186`，`impl` 从 `:195` 起），24 个 `#[wasm_bindgen]` 成员：构造（`:198`）、`metadata`（`:213`）、`export_glb`（`:230`）、`export_glb_with_models`（`:269`）、`export_glb_with_pakfile_models`（`:330`）、`export_glb_with_pakfile_models_with_defaults`（`:389`）、`export_glb_with_pakfile_models_with_defaults_and_atlas_limit`（`:404`）、`export_glb_with_pakfile_models_with_defaults_and_lights`（`:423`）、`export_glb_with_pakfile_models_with_lights`（`:434`）、`export_model_tri_colliders`（`:543`）、`export_model_phy_colliders`（`:702`）、`is_alive`（`:839`）、`export_mosaic_manifest`（`:851`）、`export_missing_textures`（`:877`）、`parse_spawn_points`（`:894`）、`parse_entities`（`:1010`）、`list_pakfile`（`:1073`）、`read_pakfile_file`（`:1108`）、`read_pakfile_scripts`（`:1126`）、`parse_teleports`（`:1200`）、`parse_pvs_data`（`:1653`）、`export_colliders`（`:1796`）、`export_colliders_with_filter`（`:1818`）、`export_brushes_planes`（`:2272`）。
+- 共享物理原样再导出：`pub use websurf_phys::phys::PhysWorld`（`apps/debug/crates/wasm/src/lib.rs:60`）——JS 侧从 `apps/debug/pkg/websurf_wasm.js` 拿到的 `PhysWorld` 就是共享层那一个类型，本文件不加包装。
+- 非导出辅助：`to_js_err`（`:70`，错误 → `JsValue` 的统一转换）、`init_panic_hook`（`:83`，无 `#[wasm_bindgen]`，只被 `start` 调用且仅 `wasm32` 编译），以及 `BspMetadata`（`:99`，`metadata()` 的序列化载体）。
 
 **上下游**
 
@@ -32,7 +32,7 @@
 
 **本层不做格式解析**：本文件不做字节级格式解析、不做 GLB 装配、不做 VTF 解码，全部转交上游 crate（`apps/debug/crates/wasm/src/lib.rs:40`）。
 
-**图集面积上界的唯一覆盖入口**：`export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 是公开导出里唯一能改写 `ConvertOptions.lightmap_max_atlas_area` 的入口；非有限值、0 或负数都归一成 0（即用共享层政策上界），其余行为与 `_with_defaults` 相同（`apps/debug/crates/wasm/src/lib.rs:733` 起）。
+**图集面积上界的唯一覆盖入口**：`export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 是公开导出里唯一能改写 `ConvertOptions.lightmap_max_atlas_area` 的入口；非有限值、0 或负数都归一成 0（即用共享层政策上界），其余行为与 `_with_defaults` 相同（`apps/debug/crates/wasm/src/lib.rs:404` 起）。
 
 **不变量**：
 
@@ -42,9 +42,9 @@
 
 ## 已知缺口（状态见 TODO.md）
 
-1. **手写 `.d.ts` 落后于本文件的导出面（`PhysWorld` 侧）**：`apps/debug/src/wasm.d.ts` 的 `PhysWorld` 只有 17 个成员（`apps/debug/src/wasm.d.ts:86`），而 `src/phys/mod.rs` 的 `impl` 有 24 个 `pub fn`；缺 `tick_into`、`state_out_ptr`、`set_state_ex`、`state_full_json`、`seed_from`、`gate_veto_count`、`debug_trace`。调用后两者时只能用运行时收窄（`apps/debug/src/renderer/renderer-main.ts:1167`、`apps/debug/src/renderer/renderer-main.ts:1184`）。**已消除（2026-10-09）**：T-007 —— 缺的 16 个成员已在 `apps/debug/src/wasm.d.ts` 文末以「同名 interface 声明合并」补齐（`PhysWorld` 33 个成员与 `apps/debug/pkg/websurf_wasm.d.ts` 逐名一致）；`renderer-main.ts` 的两处运行时收窄已删。
+1. **手写 `.d.ts` 落后于本文件的导出面（`PhysWorld` 侧）**：`apps/debug/src/wasm.d.ts` 的 `PhysWorld` 只有 17 个成员（`apps/debug/src/wasm.d.ts:86`），而 `src/phys/mod.rs` 的 `impl` 有 24 个 `pub fn`；缺 `tick_into`、`state_out_ptr`、`set_state_ex`、`state_full_json`、`seed_from`、`gate_veto_count`、`debug_trace`。调用后两者时只能用运行时收窄（`apps/debug/src/renderer/renderer-main.ts:1135`、`apps/debug/src/renderer/renderer-main.ts:1152`）。**已消除（2026-10-09）**：T-007 —— 缺的 16 个成员已在 `apps/debug/src/wasm.d.ts` 文末以「同名 interface 声明合并」补齐（`PhysWorld` 33 个成员与 `apps/debug/pkg/websurf_wasm.d.ts` 逐名一致）；`renderer-main.ts` 的两处运行时收窄已删。
 2. **手写 `.d.ts` 落后于本文件的导出面（`BspProcessor` 侧）**：`.d.ts` 声明 13 个成员（`apps/debug/src/wasm.d.ts:34` 起），Rust 侧有 24 个，缺 `export_glb_with_models`、`export_glb_with_pakfile_models_with_defaults_and_atlas_limit`、`export_glb_with_pakfile_models_with_defaults_and_lights`、`export_glb_with_pakfile_models_with_lights`、`is_alive`、`parse_entities`、`list_pakfile`、`read_pakfile_file`、`read_pakfile_scripts`、`export_colliders`、`export_colliders_with_filter`（`apps/debug/crates/wasm/src/lib.rs:21` 起）。**已消除（2026-10-09）**：T-309 —— 缺的 12 个成员同样在文末补齐（`BspProcessor` 26 个成员逐名一致）。
-3. **两个自由导出未进 `.d.ts`**：`export_visleaf_pvs`（`apps/debug/crates/wasm/src/lib.rs:3279`）与 `start`（`:3494`）都没有对应的类型声明；`start` 由 wasm-bindgen 在装载时自动调用，不需要 TS 侧声明，`export_visleaf_pvs` 则既无声明也无任何 TS 消费点。
-4. **`export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 无 TS 调用点**：该变体只出现在 Rust 导出面与本文件的类型面之外（`apps/debug/crates/wasm/src/lib.rs:739`）。
+3. **两个自由导出未进 `.d.ts`**：`export_visleaf_pvs`（`apps/debug/crates/wasm/src/lib.rs:2735`）与 `start`（`:2968`）都没有对应的类型声明；`start` 由 wasm-bindgen 在装载时自动调用，不需要 TS 侧声明，`export_visleaf_pvs` 则既无声明也无任何 TS 消费点。
+4. **`export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 无 TS 调用点**：该变体只出现在 Rust 导出面与本文件的类型面之外（`apps/debug/crates/wasm/src/lib.rs:404`）。
 5. **本工程实际消费的 GLB 入口只有两个**：`export_glb_with_pakfile_models` 与 `export_glb_with_pakfile_models_with_defaults_and_lights`（由共享层 `BspProcessorLike` 要求，`apps/debug/crates/wasm/src/lib.rs:17`）；`.d.ts` 里声明的 `export_glb` 与 `export_glb_with_pakfile_models_with_defaults` 在本工程无调用点（`apps/debug/src/wasm.d.ts:38`、`:42`）。
 6. **默认导出与 `parse_bsp` 在本工程零调用点**：`apps/debug/src/wasm.d.ts:20` 的默认导出与 `apps/debug/src/wasm.d.ts:30` 的 `parse_bsp` 都注明本工程调用点为零；主线程走 `BspProcessor` + `metadata()`。 （见 TODO.md T-320）

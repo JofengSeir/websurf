@@ -20,8 +20,8 @@
 //!
 //! 关键不变量：
 //! - 门面只再导出 [`fallback_key`] 与 [`fallback_texture_png`]；`materials` 其余部分保持
-//!   crate 私有。两项里只有 `fallback_texture_png` 有 crate 外调用点
-//!   （`apps/game/crates/wasm/src/lib.rs` 的 `resolve_pakfile_materials`）；`fallback_key` 由它内部调用。
+//!   crate 私有。两项都只在 crate 内被调用（`render_bundle` 与 `materials` 自身），
+//!   无 crate 外调用点；`fallback_key` 只由 `fallback_texture_png` 内部调用。
 //! - lightmap 单页上界由 `lightmap` 的常量与 [`ConvertOptions::lightmap_max_atlas_area`]
 //!   共同决定：单边上界 `MAX_ATLAS_SIDE = 4096` px、面积上界
 //!   `MAX_ATLAS_PAGE_AREA = 4096 × 4096 / 2 = 8,388,608` px²（即 4096×2048）；
@@ -43,9 +43,9 @@ pub mod lightmap;
 pub(crate) mod materials;
 
 // 缺失纹理回退表的键口径与查表解码入口的门面再导出（`materials` 模块保持 crate 私有）。
-// 导出层实际用到的是 `fallback_texture_png`：`apps/game/crates/wasm/src/lib.rs` 的
-// `resolve_pakfile_materials` 用它
-// 给 PAKFILE 模型材质补 pakfile 内没有的贴图；`fallback_key` 在 crate 外无调用点，
+// 唯一 crate 内调用点是共享导出编排 `src/wasm-core/render_bundle.rs` 的
+// `resolve_pakfile_materials`：它用 `fallback_texture_png` 给 PAKFILE 模型材质
+// 补 pakfile 内没有的贴图；`fallback_key` 在 crate 外无调用点，
 // 只由 `fallback_texture_png` 在 `materials.rs` 内部调用。
 pub use materials::{fallback_key, fallback_texture_png};
 

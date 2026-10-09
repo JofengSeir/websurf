@@ -10,7 +10,7 @@
 | `apps/game/src/input/keyboard.ts` | `KeyboardInput` 类（`bind` / `unbind` / `getState` / `getMask` / `reset` / `setEnabled` / `setKeymap` / `onKeymapChange`） | `apps/game/src/input/keyboard.ts:48`、`:100`、`:108`、`:117`、`:122`、`:127`、`:75`、`:69`、`:64` |
 | `apps/game/src/input/input-bridge.ts` | `InputBridge` 类（`addInput` / `sendConfig` / `sendRespawn` / `sendTeleport` / `sendSetDeathThreshold`） | `apps/game/src/input/input-bridge.ts:19`、`:30`、`:41`、`:69`、`:75`、`:83` |
 
-`InputBridge.sendSetDeathThreshold`（`apps/game/src/input/input-bridge.ts:83`）在本工程内**零调用点**：死亡阈值实际由渲染器回调链设定（`apps/game/src/app.ts:163` 注册 `onSceneLoaded` → `apps/game/src/renderer/renderer-main.ts:568` 的 `setDeathY` 只写主线程物理）。
+`InputBridge.sendSetDeathThreshold`（`apps/game/src/input/input-bridge.ts:83`）在本工程内**零调用点**：死亡阈值实际由渲染器回调链设定（`apps/game/src/app.ts:163` 注册 `onSceneLoaded` → `apps/game/src/renderer/renderer-main.ts:512` 的 `setDeathY` 只写主线程物理）。
 
 ## 关键流程与不变量
 

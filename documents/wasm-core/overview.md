@@ -13,7 +13,7 @@
 
 ## 2. 模块清单
 
-`src/wasm-core/lib.rs` 对外声明 **8 个 `pub mod`**（`src/wasm-core/lib.rs:36`–`src/wasm-core/lib.rs:43`）：`bsp_to_gltf_core`、`model_integrator`、`mosaic`、`pakfile_models`、`phyfile`、`texture_utils`、`vbsp`、`vhv`。
+`src/wasm-core/lib.rs` 对外声明 **9 个 `pub mod`**（`src/wasm-core/lib.rs:37`–`src/wasm-core/lib.rs:45`）：`bsp_to_gltf_core`、`model_integrator`、`mosaic`、`pakfile_models`、`phyfile`、`render_bundle`、`texture_utils`、`vbsp`、`vhv`。
 
 | 分组 | 文件数 | 内容 |
 |---|---|---|

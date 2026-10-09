@@ -8,13 +8,13 @@
 
 导出 `CullStatsLike`（`apps/debug/src/renderer/renderer-main.ts:89`）、`RenderPhysEvent`（`apps/debug/src/renderer/renderer-main.ts:106`）、`RendererMain`（`apps/debug/src/renderer/renderer-main.ts:184`）。类内公开面按用途分五组：
 
-- 生命周期：`init`（`apps/debug/src/renderer/renderer-main.ts:360`）、`disposeScene`（`apps/debug/src/renderer/renderer-main.ts:428`）、`loadScene`（`apps/debug/src/renderer/renderer-main.ts:489`）、`start` / `stop`（`apps/debug/src/renderer/renderer-main.ts:580` / `:625`）、`resize`（`apps/debug/src/renderer/renderer-main.ts:831`）。
-- 物理线：`buildPredictionWorld`（`apps/debug/src/renderer/renderer-main.ts:917`）、`feedInput`（`apps/debug/src/renderer/renderer-main.ts:948`）、`setPredictionState`（`apps/debug/src/renderer/renderer-main.ts:1030`）、`setPredictionParams` / `setPredictionHull` / `setPredictionNoclip`（`apps/debug/src/renderer/renderer-main.ts:1091` 起）、`respawn` / `teleportToSpawn` / `teleportToPos`（`apps/debug/src/renderer/renderer-main.ts:1101` 起）、`setSpawnPoints` / `setDeathY`（`apps/debug/src/renderer/renderer-main.ts:1140` / `:1296`）、`getCurrentVel` / `getCurrentState`（`apps/debug/src/renderer/renderer-main.ts:1158` / `:1366`）、`resetTo`（`apps/debug/src/renderer/renderer-main.ts:1179`）、`applyCollisionCorrection`（`apps/debug/src/renderer/renderer-main.ts:1189`）、`syncCameraToCurrentState`（`apps/debug/src/renderer/renderer-main.ts:956`）、`clearPendingInput`（`apps/debug/src/renderer/renderer-main.ts:1019`）。
-- 回放相关（debug 专属）：`setReplayMode` / `isReplayMode`（`apps/debug/src/renderer/renderer-main.ts:988` / `:1139`）、`setManualSteps`（`apps/debug/src/renderer/renderer-main.ts:1008`）、`captureReplayState`（`apps/debug/src/renderer/renderer-main.ts:1244`）、`captureFullPhysState` / `restoreFullPhysState`（`apps/debug/src/renderer/renderer-main.ts:1047` / `:1225`）。
-- 路径记录：`startPathRecording` / `stopPathRecording` / `isPathRecording` / `clearPath`（`apps/debug/src/renderer/renderer-main.ts:726` 起）、四个分量显隐开关 `setPathRenderVisible` / `setPathTickVisible` / `setPathDeviVisible` / `setPathDotsVisible`（`apps/debug/src/renderer/renderer-main.ts:773` 起）、`getPathShapeStats` / `getPathDeviStats` / `getPathCounts`（`apps/debug/src/renderer/renderer-main.ts:780` 起）、`exportPathJson` / `exportPathCsv`（`apps/debug/src/renderer/renderer-main.ts:818` / `:984`）。**2026-09-26**：原 `setPathVisible` / `isPathVisible`（整组显隐与其查询）与唯一入口 `#pathVisibleChk` 一并删除——入口 id 在页面不存在，四个分量开关已覆盖其语义；`PathRecorder` 的 `setVisible` 与 `visible` getter 同步删除。
-- 渲染侧配置：`applyConfigPatch`（`apps/debug/src/renderer/renderer-main.ts:847`）、`applyTextureQuality`（`apps/debug/src/renderer/renderer-main.ts:892`——2026-10-04 起算法本体在共享核 `src/renderer-shared/scene/texture-quality.ts:48`，本方法只保留诊断日志、`ensureMainWasm` 钩子与 `needsRender` 置位）、`setLightingMode` / `getLightingMode`（`apps/debug/src/renderer/renderer-main.ts:464` / `:483`）、`setCullDistance`（`apps/debug/src/renderer/renderer-main.ts:717`）、`setNearParams`（`apps/debug/src/renderer/renderer-main.ts:693`，转发共享控制器）、`getPlaneInfo`（`apps/debug/src/renderer/renderer-main.ts:703`）、`getPvsCluster`（`apps/debug/src/renderer/renderer-main.ts:1229`）。
+- 生命周期：`init`（`apps/debug/src/renderer/renderer-main.ts:360`）、`disposeScene`（`apps/debug/src/renderer/renderer-main.ts:428`）、`loadScene`（`apps/debug/src/renderer/renderer-main.ts:489`）、`start` / `stop`（`apps/debug/src/renderer/renderer-main.ts:580` / `:625`）、`resize`（`apps/debug/src/renderer/renderer-main.ts:799`）。
+- 物理线：`buildPredictionWorld`（`apps/debug/src/renderer/renderer-main.ts:885`）、`feedInput`（`apps/debug/src/renderer/renderer-main.ts:916`）、`setPredictionState`（`apps/debug/src/renderer/renderer-main.ts:998`）、`setPredictionParams` / `setPredictionHull` / `setPredictionNoclip`（`apps/debug/src/renderer/renderer-main.ts:1059` 起）、`respawn` / `teleportToSpawn` / `teleportToPos`（`apps/debug/src/renderer/renderer-main.ts:1069` 起）、`setSpawnPoints` / `setDeathY`（`apps/debug/src/renderer/renderer-main.ts:1108` / `:1296`）、`getCurrentVel` / `getCurrentState`（`apps/debug/src/renderer/renderer-main.ts:1126` / `:1366`）、`resetTo`（`apps/debug/src/renderer/renderer-main.ts:1147`）、`applyCollisionCorrection`（`apps/debug/src/renderer/renderer-main.ts:1157`）、`syncCameraToCurrentState`（`apps/debug/src/renderer/renderer-main.ts:924`）、`clearPendingInput`（`apps/debug/src/renderer/renderer-main.ts:987`）。
+- 回放相关（debug 专属）：`setReplayMode` / `isReplayMode`（`apps/debug/src/renderer/renderer-main.ts:956` / `:1139`）、`setManualSteps`（`apps/debug/src/renderer/renderer-main.ts:976`）、`captureReplayState`（`apps/debug/src/renderer/renderer-main.ts:1212`）、`captureFullPhysState` / `restoreFullPhysState`（`apps/debug/src/renderer/renderer-main.ts:1015` / `:1225`）。
+- 路径记录：`startPathRecording` / `stopPathRecording` / `isPathRecording` / `clearPath`（`apps/debug/src/renderer/renderer-main.ts:726` 起）、四个分量显隐开关 `setPathRenderVisible` / `setPathTickVisible` / `setPathDeviVisible` / `setPathDotsVisible`（`apps/debug/src/renderer/renderer-main.ts:741` 起）、`getPathShapeStats` / `getPathDeviStats` / `getPathCounts`（`apps/debug/src/renderer/renderer-main.ts:748` 起）、`exportPathJson` / `exportPathCsv`（`apps/debug/src/renderer/renderer-main.ts:786` / `:984`）。**2026-09-26**：原 `setPathVisible` / `isPathVisible`（整组显隐与其查询）与唯一入口 `#pathVisibleChk` 一并删除——入口 id 在页面不存在，四个分量开关已覆盖其语义；`PathRecorder` 的 `setVisible` 与 `visible` getter 同步删除。
+- 渲染侧配置：`applyConfigPatch`（`apps/debug/src/renderer/renderer-main.ts:815`）、`applyTextureQuality`（`apps/debug/src/renderer/renderer-main.ts:860`——2026-10-04 起算法本体在共享核 `src/renderer-shared/scene/texture-quality.ts:48`，本方法只保留诊断日志、`ensureMainWasm` 钩子与 `needsRender` 置位）、`setLightingMode` / `getLightingMode`（`apps/debug/src/renderer/renderer-main.ts:464` / `:483`）、`setCullDistance`（`apps/debug/src/renderer/renderer-main.ts:717`）、`setNearParams`（`apps/debug/src/renderer/renderer-main.ts:693`，转发共享控制器）、`getPlaneInfo`（`apps/debug/src/renderer/renderer-main.ts:703`）、`getPvsCluster`（`apps/debug/src/renderer/renderer-main.ts:1197`）。
 
-本文件还持有三个模块级常量：`FOV`（`apps/debug/src/renderer/renderer-main.ts:76`）、`PLANE_INSPECT_INTERVAL`（`apps/debug/src/renderer/renderer-main.ts:78`）、`DEG2RAD`（`apps/debug/src/renderer/renderer-main.ts:1338`）。近平面三参数（near 下限 0.05 / 探测距离 100 / 收缩系数 0.3）与分块合并参数（cell 目标/区间/钳制、FRUSTUM_PAD）2026-10-03 起由渲染共享层承载（`src/renderer-shared/camera/near-plane.ts` 与 `src/renderer-shared/scene/scene-optimizer.ts`，数值与原 debug 常量一致）。
+本文件还持有三个模块级常量：`FOV`（`apps/debug/src/renderer/renderer-main.ts:76`）、`PLANE_INSPECT_INTERVAL`（`apps/debug/src/renderer/renderer-main.ts:78`）、`DEG2RAD`（`apps/debug/src/renderer/renderer-main.ts:1306`）。近平面三参数（near 下限 0.05 / 探测距离 100 / 收缩系数 0.3）与分块合并参数（cell 目标/区间/钳制、FRUSTUM_PAD）2026-10-03 起由渲染共享层承载（`src/renderer-shared/camera/near-plane.ts` 与 `src/renderer-shared/scene/scene-optimizer.ts`，数值与原 debug 常量一致）。
 
 **`apps/debug/src/renderer/lod-manager.ts`**
 
@@ -91,7 +91,7 @@
 
 **渲染采样传输**：同一帧先落 `PathRecorder` 渲染节点、再写共享内存渲染采样槽，`i0` 用同一次自增，保证「渲染节点下标 = 采样下标」（`apps/debug/src/renderer/renderer-main.ts:612`、`apps/debug/src/renderer/renderer-main.ts:616`）。
 
-**回放模式的边界**：`setReplayMode(true)` 只关掉权威→渲染方向的两项实时耦合（`correctFromAuthority` 与 `calibrateVelocity`），共享内存输入槽照写、渲染与路径记录逻辑不动（`apps/debug/src/renderer/renderer-main.ts:988` 起）。
+**回放模式的边界**：`setReplayMode(true)` 只关掉权威→渲染方向的两项实时耦合（`correctFromAuthority` 与 `calibrateVelocity`），共享内存输入槽照写、渲染与路径记录逻辑不动（`apps/debug/src/renderer/renderer-main.ts:956` 起）。
 
 **lightmap 着色器**：光照模式切换不重建场景、不重编译材质，只改一个全场景共享 uniform（`apps/debug/src/config.ts:101`）；图集加载在两种模式下完全一致（`apps/debug/src/config.ts:101`）。着色器本体是渲染共享层单实例 `src/renderer-shared/shader/lightmap-shader.ts`（2026-10-02 由三工程各自一份的同构副本合并而来，旧副本已删除，三工程消费同一文件）。
 
@@ -114,16 +114,16 @@
 
 | # | 步骤 | 约束（为什么必须在这里） |
 |---|---|---|
-| 1 | `buildMapScene(glb)`（`apps/debug/src/renderer/renderer-main.ts:491`） | 清根 rotation + 世界包围盒 + **摘除 punctual 灯**；必须在挂进主场景之前（VRAD 烘焙已含其贡献，运行时再打会重复计光且 uniform 超限） |
-| 2 | `collectWorldTransitionTextures(gltf, root)`（`:503`） | 登记 VMT `$basetexture2`（雪盖等第二贴图）与材质 extras；必须在注入（第 7 步）之前 |
-| 3 | `applyLightmap(root, gltf)`（`:508`） | 世界面 lightmap atlas（`uv1` 通道）+ prop 逐顶点烘焙（`sp_<i>.vhv`）+ leaf ambient cube；**必须早于分块合并**（合并会重建几何与材质数组，之后按原 mesh 的材质/UV 施加就找不到映射） |
-| 4 | `extractSkyArea(root, 判定)`（`:524`） | 3D 天空盒天空区摘出主世界。判据 =「图元采样点落在 `sky_camera` 所在 BSP cluster」。**必须晚于第 3 步**（T-621：早摘则天空区不在光照遍历范围内 ⇒ 只剩贴图原色），**必须早于第 5 步**（合并成空间块后跨区大块无法再拆） |
-| 5 | `optimizeScene(root)`（`:530`）/ `mergeIntoChunks(root)` | 空间分块合并（按材质实例分组）。天空组**不在**主世界子树里，必须**单独合并**并重贴天空层（T-622） |
-| 6 | `fullbrightUnlitLitMaterials(root)`（`:550`） | 仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程不加灯 ⇒ 受光材质恒黑）。必须**晚于第 5 步**（合并会重建 mesh/材质数组）。天空组要再跑一遍 |
-| 6b | 剔除注册：`lodManager.setup`+`assignClusterIds`（debug）/ 内联 `lodItems`+`clusterIds`（game） | 逐块记录「世界中心 + 半径 + cluster 集合」，供每帧 `tick` 按 `cullDistance`（game 另叠 PVS）把更远的块 `visible = false`。**必须在合并之后**（收集的是合并后的块 mesh） |
-| 7 | `applyWorldTransitionShaders(root)`（`:550`） | 双贴图混合注入（雪盖）：按顶点属性 `_vbsp_blend` 与 `vbsp_basetexture2` 改写材质。天空组要再跑一遍 |
-| 8 | 挂载：`scene.add(root)` + `scene.add(skyGroup)`（`:585`） | 天空组逐 mesh `layers.set(SKY_LAYER)`；主相机 `layers.disable(SKY_LAYER)`；天空相机 `createSkyCamera` + 每帧 `syncSkyCamera`（位姿 = 主相机 ÷ scale + `sky_camera` 原点）；天空遍雾 `start/end ÷ scale` |
-| 9 | 天空遍（第二相机） | 画 2D 天空盒六面 + 第 1 层图元（微缩景观）；主相机不画第 1 层 |
+| 1 | `buildMapScene(glb)`（`src/renderer-shared/scene/assemble-scene.ts:70`） | 清根 rotation + 世界包围盒 + **摘除 punctual 灯**；必须在挂进主场景之前（VRAD 烘焙已含其贡献，运行时再打会重复计光且 uniform 超限） |
+| 2 | `collectWorldTransitionTextures(gltf, root)`（`:71`） | 登记 VMT `$basetexture2`（雪盖等第二贴图）与材质 extras；必须在注入（第 7 步）之前 |
+| 3 | `applyLightmap(root, gltf)`（`:74`） | 世界面 lightmap atlas（`uv1` 通道）+ prop 逐顶点烘焙（`sp_<i>.vhv`）+ leaf ambient cube；**必须早于分块合并**（合并会重建几何与材质数组，之后按原 mesh 的材质/UV 施加就找不到映射） |
+| 4 | `extractSkyArea(root, 判定)`（`:82` 到 `:84`） | 3D 天空盒天空区摘出主世界。判据 =「图元采样点落在 `sky_camera` 所在 BSP cluster」。**必须晚于第 3 步**（T-621：早摘则天空区不在光照遍历范围内 ⇒ 只剩贴图原色），**必须早于第 5 步**（合并成空间块后跨区大块无法再拆） |
+| 5 | 主根 `optimizeScene`（`:86`，由各端 `mergeMain` 提供）/ 天空组 `mergeIntoChunks`（`:90`） | 空间分块合并（按材质实例分组）。天空组**不在**主世界子树里，必须**单独合并**并重贴天空层（T-622） |
+| 6 | `fullbrightUnlitLitMaterials(root)`（`:102`，天空组 `:106`） | 仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程不加灯 ⇒ 受光材质恒黑）。必须**晚于第 5 步**（合并会重建 mesh/材质数组）。天空组要再跑一遍 |
+| 6b | 剔除注册：`lodManager.setup`+`assignClusterIds`（debug，`apps/debug/src/renderer/renderer-main.ts:535` 到 `:536`）/ 内联 `lodItems`+`clusterIds`（game） | 逐块记录「世界中心 + 半径 + cluster 集合」，供每帧 `tick` 按 `cullDistance`（game 另叠 PVS）把更远的块 `visible = false`。**必须在合并之后**（收集的是合并后的块 mesh） |
+| 7 | `applyWorldTransitionShaders(root)`（`:103`，天空组 `:107`） | 双贴图混合注入（雪盖）：按顶点属性 `_vbsp_blend` 与 `vbsp_basetexture2` 改写材质。天空组要再跑一遍 |
+| 8 | 挂载：`scene.add(root)` + `scene.add(skyGroup)`（`apps/debug/src/renderer/renderer-main.ts:523` 到 `:525`） | 天空组逐 mesh `layers.set(SKY_LAYER)`（装配核 `src/renderer-shared/scene/assemble-scene.ts:95` 到 `:98`）；主相机 `layers.disable(SKY_LAYER)`；天空相机 `createSkyCamera`（`apps/debug/src/renderer/renderer-main.ts:390`）+ 每帧 `syncSkyCamera`（T-454 P7 起只在 `src/renderer-shared/environment/render-sky-pass.ts:79`）；天空遍雾 `start/end ÷ scale`（同模块） |
+| 9 | 天空遍（第二相机）（T-454 P7 起唯一实现 `src/renderer-shared/environment/render-sky-pass.ts:70`） | 画 2D 天空盒六面 + 第 1 层图元（微缩景观）；主相机不画第 1 层 |
 
 **三端分歧史：三起同类错误，全部是「顺序/来源不一致」，且都不报错。**
 

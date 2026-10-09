@@ -23,7 +23,7 @@
 | `apps/debug/src/physics/` | 面板参数定义表、参数管理器（写 `set_params` / `set_hull`）、config → Rust 参数映射、向量工具与 cs-movement 碰撞类型 | `apps/debug/src/physics/param-defs.ts:47`、`apps/debug/src/physics/physics-params.ts:54`、`apps/debug/src/physics/prediction-params.ts:23` |
 | `apps/debug/web/` | 页面骨架与全部 DOM id、样式、COOP/COEP 补丁脚本，以及构建产物落点（`app.js` / `worker.js` / `websurf_wasm_bg.wasm` / `textures.mtz`） | `apps/debug/web/index.html:481`、`apps/debug/package.json:10` |
 | `apps/debug/scripts/` | 构建 dist、WASM API 契约门、无头验收与度量脚本、部署站入口页模板、路径基线资产 | `apps/debug/scripts/build-dist.mjs:63`、`apps/debug/scripts/check-wasm-api.mjs:1`、`apps/debug/scripts/_input-replay-verify.mjs（已退役，本地保留）:1` |
-| `apps/debug/crates/wasm/` | 本工程的 WASM 绑定层：`BspProcessor` 全导出面 + 原样再导出共享层 `PhysWorld` | `apps/debug/crates/wasm/src/lib.rs:534`、`apps/debug/crates/wasm/src/lib.rs:55` |
+| `apps/debug/crates/wasm/` | 本工程的 WASM 绑定层：`BspProcessor` 全导出面 + 原样再导出共享层 `PhysWorld` | `apps/debug/crates/wasm/src/lib.rs:190`、`apps/debug/crates/wasm/src/lib.rs:60` |
 | `apps/debug/fixtures/` | 门禁脚本的输入夹具（不参与运行时） | `apps/debug/package.json:22` |
 
 ## 依赖方向
@@ -32,7 +32,7 @@
 
 | 依赖对象 | 声明处 | 消费点 |
 |---|---|---|
-| `websurf-phys`（`src/phys/**`） | `apps/debug/crates/wasm/Cargo.toml:25` 的 path 依赖 | 由 `apps/debug/crates/wasm/src/lib.rs:55` 的 `pub use websurf_phys::phys::PhysWorld` 原样再导出，JS 侧从 `apps/debug/pkg/websurf_wasm.js` 取 |
+| `websurf-phys`（`src/phys/**`） | `apps/debug/crates/wasm/Cargo.toml:25` 的 path 依赖 | 由 `apps/debug/crates/wasm/src/lib.rs:60` 的 `pub use websurf_phys::phys::PhysWorld` 原样再导出，JS 侧从 `apps/debug/pkg/websurf_wasm.js` 取 |
 | `websurf-wasm-core`（`src/wasm-core/**`） | `apps/debug/crates/wasm/Cargo.toml:27` 的 path 依赖 | `apps/debug/crates/wasm/src/lib.rs:49` 引入 `vbsp` / `bsp_to_gltf_core` / `model_integrator` / `pakfile_models` / `texture_utils` |
 | `src/ts-shared/**`（TypeScript 共享层） | `apps/debug/tsconfig.json:26` 的 `include` 把共享层的 `.ts` 纳入同一程序 | 主线程：`apps/debug/src/app.ts:33`（`shared-state`）、`apps/debug/src/app.ts:35`（`input-layer`）、`apps/debug/src/app.ts:36`（`world-builder`）；Worker：`apps/debug/src/worker/main.ts:27`（`auth-loop`）、`apps/debug/src/worker/main.ts:32`（`worker-dispatch`）、`apps/debug/src/worker/main.ts:33`（`phys/params`） |
 | 渲染侧三方库 `three` | 仓库根 `package.json:6` 的 dependencies（2026-10-02 上收为单实例；`apps/debug/package.json:27` 的 dependencies 已清空） | `apps/debug/src/renderer/renderer-main.ts:25` 的 `THREE` 与 `apps/debug/src/renderer/renderer-main.ts:26` 的 `examples/jsm` 引入 |
@@ -99,7 +99,7 @@
 2. **固定步长来自面板 tickRate，且不进 Rust**：`tickRate` 变更经 `apps/debug/src/worker/main.ts:466` 的 `onTickRateChange` 调 `authLoop.setFixedDt`，仅在步长真的变化时才 `reset()`。
 3. **主线程每个渲染帧最多推进 1 个物理步**：`apps/debug/src/renderer/renderer-main.ts:653` 是 `tick` 内唯一的 `predPhys.tick` 调用点；单步闸门打开时每帧配额再减一（`apps/debug/src/renderer/renderer-main.ts:618`）。
 4. **回放步长是一次性载荷**：`apps/debug/src/renderer/renderer-main.ts:624` 在读走 `replayDtS` 后立即置 `null`，输入循环用 `replayDtS === null` 作为「上一帧已被消费」的握手信号（`apps/debug/src/app.ts:2232`）。
-5. **输入增量是累加语义、按键掩码是覆盖语义**：`apps/debug/src/renderer/renderer-main.ts:1076` 的 `feedInput` 对 `dx`/`dy` 累加、对 `keys` 直接赋值，消费后清零增量（`apps/debug/src/renderer/renderer-main.ts:654`）。
+5. **输入增量是累加语义、按键掩码是覆盖语义**：`apps/debug/src/renderer/renderer-main.ts:1044` 的 `feedInput` 对 `dx`/`dy` 累加、对 `keys` 直接赋值，消费后清零增量（`apps/debug/src/renderer/renderer-main.ts:654`）。
 6. **双端物理参数同源**：主线程与 Worker 都从同一份 config 出发，映射实现收敛在 `src/ts-shared/phys/params.ts`（`apps/debug/src/physics/prediction-params.ts:23`、`apps/debug/src/worker/main.ts:62`）。
 7. **主线程与 Worker 各持独立 wasm 实例**：主线程由 `apps/debug/src/main-wasm.ts:28` 的 `ensureMainWasm` 初始化，Worker 在自己的作用域内独立 `initSync`（`apps/debug/src/worker/main.ts:479`）。
 8. **剔除距离由场景对角线唯一确定**：`apps/debug/src/renderer/lod-manager.ts:155` 起三行给出上限、下限与默认值的算式，面板滑块只能在该上限内改写（`apps/debug/src/renderer/lod-manager.ts:271`）。
@@ -121,7 +121,7 @@
 - `apps/debug/src/renderer/renderer-main.ts:551` 的 `tick`：一帧内的物理 / 剔除 / 可视化 / 渲染顺序。
 - `apps/debug/src/worker/main.ts:455` 的 `createAuthLoop` 装配：Worker 侧权威物理的唯一推进者。
 - `apps/debug/src/input/input-recorder.ts:166` 的 `InputRecorder`：录制 / 回放的数据模型与失败语义。
-- `apps/debug/crates/wasm/src/lib.rs:534` 的 `impl BspProcessor`：本工程 WASM 绑定层的导出面。
+- `apps/debug/crates/wasm/src/lib.rs:190` 的 `impl BspProcessor`：本工程 WASM 绑定层的导出面。
 - `apps/debug/web/index.html:481` 起的页面骨架：全部 DOM 句柄的来源。
 - `apps/debug/scripts/build-dist.mjs:75` 的 `multi` 开关：`single 产物` / `multi 产物` 两种形态的分岔点。
 

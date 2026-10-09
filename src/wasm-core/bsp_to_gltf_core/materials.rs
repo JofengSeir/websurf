@@ -146,7 +146,7 @@ impl TextureCollector {
 /// 而 `MATERIALS/foo` 会得到 `materials/materials/foo`。
 ///
 /// 调用点一律把**贴图路径**（`$basetexture`）排在候选列表前面、材质名排在后面
-/// （见 `load_material_bsp` 与 `apps/game/crates/wasm/src/lib.rs` 的 `resolve_pakfile_materials`），
+/// （见 `load_material_bsp` 与 `src/wasm-core/render_bundle.rs` 的 `resolve_pakfile_materials`），
 /// 因为回退表按源资源路径索引，而材质名与 `$basetexture` 可以不同名。
 /// 本函数不校验路径是否存在，也不读盘。
 pub fn fallback_key(path: &str) -> String {

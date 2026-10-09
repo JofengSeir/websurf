@@ -10,7 +10,7 @@
 //! 其中"字节 → 结构化数据 / GLB"的全部工作在本 crate 内完成，产出的 GLB 与
 //! brush / tri / teleport JSON 再分别交给渲染线与物理线。
 //!
-//! 职责清单（与本文件 `pub mod` 声明一一对应，共 **8** 个模块）：
+//! 职责清单（与本文件 `pub mod` 声明一一对应，共 **9** 个模块）：
 //! - `vbsp`：BSP 文件解析（64 个 lump 目录项、LZMA 封装、实体与 game lump）
 //! - `bsp_to_gltf_core`：BSP → GLB 导出（几何、材质、lightmap atlas）
 //! - `model_integrator`：MDL 模型整合（放置、网格、材质）
@@ -19,6 +19,7 @@
 //! - `texture_utils`：VTF 解码
 //! - `mosaic`：mosaic v4 纹理字节码与 MTZ 容器
 //! - `vhv`：prop 顶点光照（`parse_vhv` → `PropVertexLighting`）
+//! - `render_bundle`：三端薄壳共用的导出编排（PAKFILE 模型/材质提取、光源实体、碰撞体派生）
 //!
 //! 关键不变量：BSP 头是 **64** 个 lump 目录项（`vbsp/data/mod.rs` 的
 //! `entries: [LumpEntry; 64]`），逐模块的其余不变量见各模块文档。
@@ -38,6 +39,7 @@ pub mod model_integrator;
 pub mod mosaic;
 pub mod pakfile_models;
 pub mod phyfile;
+pub mod render_bundle;
 pub mod texture_utils;
 pub mod vbsp;
 pub mod vhv;

@@ -10,7 +10,7 @@
 | 渲染库 | 同上 | `apps/viewer`：同一套引入 | 本工程 `apps/debug/src/renderer/renderer-main.ts:55`（共享渲染层 shader 引入）、`apps/debug/src/renderer/renderer-main.ts:24`（呈现档 + 渲染器工厂 + 位姿入口引入）；viewer `apps/viewer/src/core/scene.ts:10` |
 | 页面布局 | 左侧边栏（多个 `<details>` 分区）＋ 右侧预览区 | `apps/game`：全屏画布 + 单块 `#panel` 覆盖层 | 本工程 `apps/debug/web/index.html:489`（侧边栏）、`apps/debug/web/index.html:860`（预览区）；game `apps/game/web/index.html:75`（`#panel`）、`apps/game/web/index.html:27`（画布） |
 | 页面布局 | 同上 | `apps/viewer`：顶栏 + 侧栏标签页（`#tabs` / `#pane-map` / `#pane-replay` / `#pane-demo`）+ 底部 `#dock`（两个回放会话各占一层） | 本工程 `apps/debug/web/index.html:489`；viewer `apps/viewer/web/index.html:74`（顶栏）、`apps/viewer/web/index.html:101`（侧栏）、`apps/viewer/web/index.html:130`（dock） |
-| 物理运行位置 | **Worker 权威物理** + **主线程渲染物理（`predPhys`）** 双线 | `apps/game`：同构双线（Worker 权威 + 主线程渲染物理） | 本工程 `apps/debug/src/worker/main.ts:455`、`apps/debug/src/renderer/renderer-main.ts:705`；game `apps/game/src/worker/main.ts:451`、`apps/game/src/renderer/renderer-main.ts:871` |
+| 物理运行位置 | **Worker 权威物理** + **主线程渲染物理（`predPhys`）** 双线 | `apps/game`：同构双线（Worker 权威 + 主线程渲染物理） | 本工程 `apps/debug/src/worker/main.ts:455`、`apps/debug/src/renderer/renderer-main.ts:705`；game `apps/game/src/worker/main.ts:451`、`apps/game/src/renderer/renderer-main.ts:815` |
 | 物理运行位置 | 同上 | `apps/viewer`：**无物理**（离线解析 + 纯视觉），Worker 只做回放解析 | 本工程 `apps/debug/src/renderer/renderer-main.ts:29`（引入 `PhysWorld`）；viewer `apps/viewer/src/app.ts:6`（定位为纯视觉、不引入物理与碰撞） |
 | 共享状态通道 | `createMainSharedState`：SAB 通道优先，缺 `SharedArrayBuffer` 时落 postMessage 回退 | `apps/game`：同一函数、同一分支条件 | 本工程 `apps/debug/src/app.ts:315`、`apps/debug/src/app.ts:278`；game `apps/game/src/app.ts:158`、`apps/game/src/app.ts:102` |
 | 共享状态通道 | 同上 | `apps/viewer`：不做通道选择（无物理，不需要共享内存） | 本工程 `apps/debug/src/app.ts:326`；viewer `apps/viewer/src/app.ts:50` |
@@ -42,7 +42,7 @@
 
 ## 与 game 的实现一致项（显式声明）
 
-- 渲染库与加载器一致：两侧都从 `three` 取 `THREE`、从 `three/examples/jsm/loaders/GLTFLoader.js` 取 `GLTFLoader`，并从 `BufferGeometryUtils` 取 `mergeGeometries`（本工程 `apps/debug/src/renderer/renderer-main.ts:25`、`apps/debug/src/renderer/renderer-main.ts:25`；game `apps/game/src/renderer/renderer-main.ts:34`、`apps/game/src/renderer/renderer-main.ts:36`）。
+- 渲染库与加载器一致：两侧都从 `three` 取 `THREE`（本工程 `apps/debug/src/renderer/renderer-main.ts:25`；game `apps/game/src/renderer/renderer-main.ts:33`）；`GLTFLoader` 与 `mergeGeometries` 已收口到共享层（`src/renderer-shared/scene/scene-builder.ts:13`、`src/renderer-shared/scene/scene-optimizer.ts:16`），本工程 renderer 侧只剩 `BufferGeometryUtils` 的 `deinterleaveGeometry`（`apps/debug/src/renderer/renderer-main.ts:26`）。
 - 通道选择条件一致：都以 `crossOriginIsolated === true` 且存在 `SharedArrayBuffer` 为建 SAB 的前提，否则落消息回退（本工程 `apps/debug/src/app.ts:278`；game `apps/game/src/app.ts:102`）。
 - 权威物理的装配方式一致：两侧 Worker 都用共享层 `createAuthLoop` 推进权威实例、都用 `createWorkerDispatch` 处理消息（本工程 `apps/debug/src/worker/main.ts:455`、`apps/debug/src/worker/main.ts:470`；game `apps/game/src/worker/main.ts:451`、`apps/game/src/worker/main.ts:462`）。
 

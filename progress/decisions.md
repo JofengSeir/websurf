@@ -26,11 +26,11 @@
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | apps/game/src/app.ts:249 |
 | T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | apps/game/src/input/input-bridge.ts:65 |
 | T-209 | M 键与 ESC 两条全局监听不校验 `sceneReady`，加载覆盖层显示期间同样触发 | apps/game/src/panel/panel-controller.ts:265 |
-| T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | apps/game/src/renderer/renderer-main.ts:254 |
+| T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | apps/game/src/renderer/renderer-main.ts:246 |
 | T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | apps/game/src/savepoint.ts:92 |
 | T-214 | 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态 | apps/game/src/savepoint.ts:21 |
 | T-216 | `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长 | apps/game/src/savepoint.ts:112 |
-| T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | apps/game/crates/wasm/src/lib.rs:117 |
+| T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | src/wasm-core/render_bundle.rs:141 |
 | T-220 | `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加 | apps/game/src/worker/main.ts:513 |
 
 ### debug（7）
@@ -87,11 +87,11 @@
 | T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | apps/viewer/src/ui/mapinfo.ts:125 |
 | T-142 | 信息条重找跟随轨道，与 TrackSet.follow 策略重复 | apps/viewer/src/ui/replaymeta.ts:25 |
 | T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | apps/viewer/src/core/dom.ts:39 |
-| T-145 | 模型名匹配与材质查找的大小写口径不一致 | apps/viewer/crates/wasm/src/lib.rs:606 |
-| T-147 | 材质去重键是材质名，同名材质被后续模型复用 | apps/viewer/crates/wasm/src/lib.rs:216 |
-| T-148 | packed_files 构造期缓存而 num_static_props 每次现算 | apps/viewer/crates/wasm/src/lib.rs:381 |
-| T-149 | map_name 两端都拿不到值，字段保留但无内容 | apps/viewer/crates/wasm/src/lib.rs:389 |
-| T-151 | BspMetadata 与 TS 契约靠约定对齐，无编译期校验 | apps/viewer/crates/wasm/src/lib.rs:362 |
+| T-145 | 模型名匹配与材质查找的大小写口径不一致 | apps/viewer/crates/wasm/src/lib.rs:322 |
+| T-147 | 材质去重键是材质名，同名材质被后续模型复用 | src/wasm-core/render_bundle.rs:339 |
+| T-148 | packed_files 构造期缓存而 num_static_props 每次现算 | apps/viewer/crates/wasm/src/lib.rs:97 |
+| T-149 | map_name 两端都拿不到值，字段保留但无内容 | apps/viewer/crates/wasm/src/lib.rs:102 |
+| T-151 | BspMetadata 与 TS 契约靠约定对齐，无编译期校验 | apps/viewer/crates/wasm/src/lib.rs:78 |
 | T-152 | Worker 没有心跳，请求侧无法区分「在解析」与「已失联」 | apps/viewer/src/worker/main.ts:91 |
 | T-153 | WorkerCtx 是手写的全局面（tsconfig lib 缺 WebWorker） | apps/viewer/src/worker/main.ts:33 |
 
@@ -165,8 +165,8 @@
 | T-233 | `clear()` 零调用点 | apps/game/src/savepoint.ts:98 |
 | T-234 | `mtzB64` 与契约清单都指向了没有直接调用点的字段 | src/ts-shared/auth/worker-dispatch.ts:297 |
 | T-235 | `apps/game/src/world/types.ts` 在本工程零导入点 | apps/game/src/renderer/renderer-main.ts:42 |
-| T-236 | `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：… | apps/game/crates/wasm/src/lib.rs:577 |
-| T-237 | `map_name` 恒为空串 | apps/game/crates/wasm/src/lib.rs:457 |
+| T-236 | `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：… | apps/game/crates/wasm/src/lib.rs:261 |
+| T-237 | `map_name` 恒为空串 | apps/game/crates/wasm/src/lib.rs:141 |
 | T-238 | `InitMessage` 有三个字段既无发送方也无读取点 | apps/game/src/worker/worker-types.ts:36 |
 | T-239 | `worker-types.ts` 里多条声明在本工程无发送方且无接收点 | src/ts-shared/auth/worker-dispatch.ts:265 |
 
@@ -178,8 +178,8 @@
 | T-403 | `MouseBuffer.push` / `drain` | src/ts-shared/input/mouse-buffer.ts:81 |
 | T-404 | `ShmState.wake` | src/ts-shared/auth/shared-state.ts:447 |
 | T-405 | `maskToKeys` | src/ts-shared/auth/shared-state.ts:98 |
-| T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | apps/game/src/renderer/renderer-main.ts:274 |
-| T-407 | `world/types.ts` 的 `rootNode` 字段 | apps/game/crates/wasm/src/lib.rs:1704 |
+| T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | apps/game/src/renderer/renderer-main.ts:266 |
+| T-407 | `world/types.ts` 的 `rootNode` 字段 | apps/game/crates/wasm/src/lib.rs:1390 |
 | T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | src/wasm-core/bsp_to_gltf_core/convert.rs:367 |
 
 ## 第 3 组 · 文档口径（4 条）
