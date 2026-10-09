@@ -59,9 +59,9 @@
 | 方向 | 消息（以类型声明为准） | 载荷字段 | 锚点 |
 |---|---|---|---|
 | 主线程 → Worker | `ParseRequest` | `id:number`、`type:'import'`、`file:File \| null`、`rule:RuleConfig`、`name:string` | `apps/viewer/src/replay/protocol.ts:29` 到 `apps/viewer/src/replay/protocol.ts:40` |
-| Worker → 主线程 | `ParseResponse` 的 `progress` 分支 | `phase:'parse' \| 'map'`、`done`、`total` | `apps/viewer/src/replay/protocol.ts:47` |
-| Worker → 主线程 | `ParseResponse` 的 `done` 分支 | `payloads:ClipPayload[]`、`warnings:string[]`、`resolvedPath:string` | `apps/viewer/src/replay/protocol.ts:48` |
-| Worker → 主线程 | `ParseResponse` 的 `error` 分支 | `message:string` | `apps/viewer/src/replay/protocol.ts:49` |
+| Worker → 主线程 | `ParseResponse` 的 `progress` 分支 | `phase:'parse' \| 'map'`、`done`、`total` | `apps/viewer/src/replay/protocol.ts:48` |
+| Worker → 主线程 | `ParseResponse` 的 `done` 分支 | `payloads:ClipPayload[]`、`warnings:string[]`、`resolvedPath:string` | `apps/viewer/src/replay/protocol.ts:49` |
+| Worker → 主线程 | `ParseResponse` 的 `error` 分支 | `message:string` | `apps/viewer/src/replay/protocol.ts:50` |
 | （载荷定义） | `ClipPayload` | `name` / `count` / `t` / `pos` / `ang` / `vel` / `duration` / `bbox` / `maxSpeed` / `resolvedPath` / `buttons` / `meta` 共 12 项 | `apps/viewer/src/replay/protocol.ts:12` 到 `apps/viewer/src/replay/protocol.ts:27` |
 
 字段级的实测情况：

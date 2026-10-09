@@ -270,3 +270,4 @@
 | 2026-10-09 | T-143（el() 的 id 告警，Node 探针实测）+ T-145（模型名大小写同口径）结案；两次自纠「净增行」 | progress/monthly/2026-10-9.md:10 |
 | 2026-10-09 | T-102 结案：unionBbox 上收 types.ts + selftest 常驻断言（test:replay exit 0，判据可跑化） | progress/monthly/2026-10-9.md:11 |
 | 2026-10-09 | T-107 结案：worldBox 并入多材质包围盒；差分量测把「块边长」降级为「初值」；另筛查 154 条缺口找出 36 孤儿 | progress/monthly/2026-10-9.md:12 |
+| 2026-10-09 | T-167 结案（两处死阶段声明都删，16 锚点重编号）；T-118 重定性为冗余死 UI；普查出 27 条纯文字判据 | progress/monthly/2026-10-9.md:13 |

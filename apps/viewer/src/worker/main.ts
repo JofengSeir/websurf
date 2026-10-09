@@ -12,7 +12,7 @@
  *   同时避免 buffer 被 transfer 出去后本地失效；
  * - 回传的定型数组 buffer 全部进 transfer 列表（`t`/`pos`/`ang` 必有，`vel`/`buttons` 存在
  *   才加）⇒ 零拷贝，但发送后这些 buffer 在 Worker 侧已不可再用；
- * - 进度只发 `'parse'` 阶段两条（0/1、1/1）；`ParseResponse` 声明的 `'map'` 阶段本文件不发；
+ * - 进度只发 `'parse'` 阶段两条（0/1、1/1）；协议里不再声明第二个阶段（原 `'map'` 已按 T-167 删除）；
  * - 单条请求的异常在 `handle` 内收敛成 `type: 'error'` 响应，不会漏到 `onmessage`；
  * - 本文件不做 Worker 能力检测：环境里起不了 Worker 时，由主线程侧
  *   `apps/viewer/src/replay/importer.ts` 退回 `importOnMain` 做同源解析。

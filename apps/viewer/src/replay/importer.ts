@@ -40,8 +40,8 @@ import type {
 } from './protocol.js';
 import type { Clip, RuleConfig } from './types.js';
 
-/** 进度阶段取值：`'parse'` = 解析 `.replay`，`'map'` = 规则映射；当前只有 `'parse'` 会被发出。 */
-export type ImportPhase = 'parse' | 'map';
+/** 进度阶段取值：当前**只有** `'parse'`（解析 `.replay`）；原联合类型里的规则映射阶段无发送方，2026-10-09 按 T-167 删除。 */
+export type ImportPhase = 'parse';
 /** 进度回调签名（阶段 + 已完成 + 总数）。 */
 export type ProgressFn = (phase: ImportPhase, done: number, total: number) => void;
 

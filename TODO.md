@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（77 条）
+## 未结项（76 条）
 ### 待裁决（0）
 
 
-### 待修（75）
+### 待修（74）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
@@ -41,7 +41,6 @@
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
 - **T-147** 材质去重键是材质名，同名材质被后续模型复用　`viewer`
 - **T-166** `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点　`viewer`
-- **T-167** 进度回调里的 `'map'` 分支不可达　`viewer`
 - **T-206** `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃　`game`
 - **T-211** `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造　`game`
 - **T-217** `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方）　`game`
@@ -136,7 +135,7 @@
 | T-115 | untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查 | 缺陷 | viewer | 已取证待立项 | apps/viewer/src/replay/demo/demo.ts:866 | documents/viewer/implementation/dem.md | — | — |
 | T-116 | 注入期 throw 不在本工程调用方 catch 覆盖范围内 | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1104 | documents/viewer/implementation/renderer.md | 判据：注入期抛错 ⇒ 调用方 catch 覆盖（探针构造 throw 路径） | — |
 | T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | 工具·流程 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:346 | documents/viewer/implementation/renderer.md | 判据：three 升级后 broken 阶段对照仍有效（对失配字面量加断言，缺失即失败） | — |
-| T-118 | A-B 区间带恒不显示（宽度算式分子恒等于分母） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:525 | documents/viewer/implementation/replay.md | 判据：A-B 区间带可见（宽度算式分子≠分母）：构造 A≠B ⇒ 带出现且宽度随区间变化 | — |
+| T-118 | A-B 区间带是冗余死 UI（窗口恒等于区间 ⇒ 永不显示）⇒ 删除 band + `.tl-zone-ab` + `profile.abRange` | 缺陷 | viewer | 待修 | **2026-10-09 重新取证：原断言（「宽度算式分子恒等于分母」是缺陷）被推翻**。`rangeStart`/`rangeEnd` **就是** A-B 区间（`apps/viewer/src/replay/player.ts:32` 到 `apps/viewer/src/replay/player.ts:34`，由「A 起点 / B 终点」按钮按当前时间写入，`apps/viewer/src/replay/timeline.ts:317` 到 `apps/viewer/src/replay/timeline.ts:329`），`rangeStop` 由 `min(rangeEnd, duration)` 推出（`apps/viewer/src/replay/player.ts:83` 到 `apps/viewer/src/replay/player.ts:85`），且**播放窗口就是该区间**（没有第二个窗口旋钮）⇒ 区间带分支里 `winStart = rangeStart`、`winLen = rangeStop − rangeStart`，宽度恒等于 100，落不进 `width < 99.95` ⇒ **按设计**被抑制。区间本身可见（滑杆跨度 + `t0 → t1` 读数，`apps/viewer/src/replay/timeline.ts:448` 到 `apps/viewer/src/replay/timeline.ts:450`）。⇒ 该行重定性为「**区间带是冗余死 UI**」（D-103：死代码不就地删、先登记），修法 = 删除 band 元素 + `.tl-zone-ab` 样式 + `profile.abRange` 开关 | documents/viewer/implementation/replay.md | `git grep -n "abBand\|tl-zone-ab\|abRange" -- apps/viewer/src apps/viewer/web` ⇒ 0 命中（band 已删）；`cd apps/viewer && npm run typecheck` ⇒ exit 0；冒烟段 `[5] A-B 区间` 仍通过（区间读数与滑杆跨度照常，`cd apps/viewer && npm run local:smoke`） | — |
 | T-125 | 零帧轨道的口径不一致（列表面板有卡片、3D 无对象） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/visuals.ts:96 | documents/viewer/implementation/replay.md | 判据：零帧轨道 ⇒ 列表与 3D 口径一致（要么都无卡片、要么都有对象） | — |
 | T-131 | 冒烟三条静态断言只对 single 产物成立（**已实测成立**：dev/multi 形态下这三条 FAIL，见 `apps/viewer/test/smoke-cdp.mjs:138`/`:139`/`:143`） | 配置·门禁 | viewer | 已结案 | **已结案（2026-10-09，两种形态各实测一次 exit 0）**：三条静态断言原本只认 **single** 产物的形状（classic `./app.js`、无 `type="module"`、根目录无 `worker.js` / `*.wasm`），而 `--multi` 产物天然不满足（module script + 外置 wasm + 根目录 worker.js）⇒ 断言改为**按实际形态分支**：①「`index.html` 入口与形态一致」（single ⇒ classic `./app.js`；multi ⇒ `type="module"` + `./app.js`）；②「dist 根内容与形态自洽」（single ⇒ 无 `worker.js`/`*.wasm`；multi ⇒ 两者都有）。两处都是**同行 1:1 替换**（smoke-cdp.mjs 有 9+1+2+1+1+1+1+1 处文档锚点，行数零变化）。**验证**：`node scripts/build-dist.mjs --multi` 形态下 `npm run local:smoke` ⇒ **exit 0 / 0 项失败**；`node scripts/build-dist.mjs`（single）形态下再跑 ⇒ **exit 0 / 0 项失败**。**至此 viewer 冒烟由本轮的 6 项失败清到 0**（T-130 断言八键、T-612 合并签名、配色断言改 `.track-color`、本条形态分支） | documents/viewer/implementation/scripts-and-test.md | `cd apps/viewer && npm run local:smoke` 在 **multi** 与 **single** 两种 dist 形态下都 **exit 0**（2026-10-09 各实测一次；两种形态的入口/根内容断言各自动分支）；`git grep -c "isSingle" -- apps/viewer/test/smoke-cdp.mjs` ⇒ 2 处（形态分支） | — |
 | T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:125 | documents/viewer/implementation/ui.md | 判据：点导航「卸载地图」⇒ 回到空态且可再次载入 | — |
@@ -146,7 +145,7 @@
 | T-147 | 材质去重键是材质名，同名材质被后续模型复用 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:216 | documents/viewer/implementation/wasm.md | 判据：同名材质来自不同模型 ⇒ 各自独立实例（去重键含 search_path/模型作用域） | — |
 | T-148 | packed_files 构造期缓存而 num_static_props 每次现算 | 缺陷 | viewer | 已结案 | **已结案（2026-10-09）**：`num_static_props` 不再每次 `metadata()` 现算——与 `packed_files` 同待遇：构造期算一次存进新字段 `BspProcessor::cached_static_props`（`apps/viewer/crates/wasm/src/lib.rs:431`），`BspMetadata::from_bsp` 改为**接收缓存值**（签名加第 3 个参数，`apps/viewer/crates/wasm/src/lib.rs:380`），调用点 `metadata()` 传 `self.cached_static_props`（`:443`）。四处编辑全部**同行 1:1**（该文件有 30+ 处文档锚点），并同步改掉两处已陈旧的文档注释（`:358` 的「现数一遍」、`:377` 到 `:379` 的口径）。**验证**：`git grep -n "static_props()" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 唯一与元数据相关的计数在构造期（`:431`）；`npm run build:wasm` ⇒ exit 0 | documents/viewer/implementation/wasm.md | `git grep -n "num_static_props" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 只作字段/参数/结构体字面量出现，**不再有现算**；`git grep -n "cached_static_props" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 4 处（字段/构造/调用/参数）；`cd apps/viewer && npm run build:wasm` ⇒ exit 0 | — |
 | T-166 | `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/shavit-replay.ts:507 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ShavitParseResult.flags" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-167 | 进度回调里的 `'map'` 分支不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:329 | documents/viewer/implementation/replay.md | 判据：`git grep -n "'map'" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-167 | 进度回调里的 `'map'` 分支不可达 | 未接线·死代码 | viewer | 已结案 | **已结案（2026-10-09）**：**两处**声明同一个死阶段，都要删——`ParseResponse` 的联合类型收窄为 `phase: 'parse'`（`apps/viewer/src/replay/protocol.ts:48`，1:1）与 `ImportPhase` 收窄为 `'parse'`（`apps/viewer/src/replay/importer.ts:44`，1:1）；三处注释口径同步（`apps/viewer/src/replay/protocol.ts:43` 到 `:45`、`apps/viewer/src/replay/importer.ts:43`、`apps/viewer/src/worker/main.ts:15`）。protocol.ts 因此净增 1 行（注释改写）⇒ 先按 `git diff -U0` 建映射把该文件的 **16 处文档锚点重编号**再 `sync`。**验证**：`git grep -n "| 'map'" -- apps/viewer/src` ⇒ 0 命中；`cd apps/viewer && npm run typecheck` ⇒ **exit 0** | documents/viewer/implementation/replay.md | `cd apps/viewer && npm run typecheck` ⇒ exit 0；`git grep -n "| 'map'" -- apps/viewer/src` ⇒ 0 命中（BRE 下 `|` 为字面量；注意 `apps/viewer/src/app.ts:181` 的 `'map'` 是标签页名、与阶段无关） | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待修 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | 判据：未选图 / 未锁定前点击画布 ⇒ 有可见反馈（不再静默返回） | — |
 | T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | 缺陷 | game | 待修 | apps/game/src/input/input-bridge.ts:65 | documents/game/implementation/input.md | 判据：`hud` 段只含 hud 字段（探针比对 `input-bridge.ts` 下发与 `config.hud`） | — |
 | T-206 | `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃 | 未接线·死代码 | game | 待修 | apps/game/src/input/input-bridge.ts:30 | documents/game/implementation/input.md | 判据：`git grep -n "InputBridge.addInput" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |

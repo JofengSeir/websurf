@@ -40,10 +40,11 @@ export type ParseRequest = {
 };
 
 /**
- * Worker → 主线程的三种响应：progress（阶段进度，phase 取值域 'parse' | 'map'，Worker 当前只发
- * 'parse'）、done（payload + warnings + resolvedPath）、error（message 为错误文本）。
+ * Worker → 主线程的三种响应：progress（阶段进度；`phase` 目前**只有** `'parse'` 一个取值——原联合
+ * 类型里的第二个阶段无发送方，2026-10-09 按 T-167 删除）、done（payload + warnings +
+ * resolvedPath）、error（message 为错误文本）。
  */
 export type ParseResponse =
-  | { id: number; type: 'progress'; phase: 'parse' | 'map'; done: number; total: number }
+  | { id: number; type: 'progress'; phase: 'parse'; done: number; total: number }
   | { id: number; type: 'done'; payloads: ClipPayload[]; warnings: string[]; resolvedPath: string }
   | { id: number; type: 'error'; message: string };
