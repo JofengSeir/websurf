@@ -106,3 +106,27 @@
 7. **`lightmap-shader.ts` 的诊断覆盖只从全局键读**：`window.__vbsp*` 系列覆盖（如 `src/renderer-shared/shader/lightmap-shader.ts:1735` 的 `readLightFloorOverride`）在模块初始化时就固化成 uniform 初值（`src/renderer-shared/shader/lightmap-shader.ts:1539`、`:1556`、`:1563`、`:1580`），运行期注入不改变已创建的 uniform。（见 TODO.md T-306）
 8. **准星射线是限流采样**：每 `PLANE_INSPECT_INTERVAL` 帧才检测一次，关闭开关时只清空上次结果，不做新检测（`apps/debug/src/renderer/renderer-main.ts:719`）。
 - 看板另有登记项：`TODO.md` 的 T-046 —— **状态与结论只在那登记**，本文件不复述。
+
+## 环境氛围机制完整性矩阵（T-617，2026-10-09）
+
+目标地图 `test/maps/surf_boreas.bsp` 逐机制的复现状态与证据（SDK 参照物：`test/project/source-sdk-2013-master/`）。
+「审计面」= 本仓读取该机制的代码入口；状态含义：**已复现**（有实测证据）/ **未实现** / **不适用**。
+
+| 机制（SDK 出处） | 状态 | 审计面与证据 |
+|---|---|---|
+| `env_fog_controller` 主色与端点（`fogcontroller.cpp:59-60`） | 已复现 | `src/renderer-shared/environment/fog-controller.ts`；T-413 实测 `Fog(500,43420,0xe8fffe)` |
+| `fogmaxdensity` 雾因子上限（`fogcontroller.cpp:61/103`） | 已复现（T-617 第 4 轮） | `src/renderer-shared/shader/lightmap-shader.ts` 的 `FOG_MAX_DENSITY` 夹取补丁 + `setFogMaxDensity()`；实测 `chunkPatched=true`、强制 0.2 时 `define=DEFINED:0.2`、同视点 4.5% 像素变化，cap=1 时 0.0% |
+| `fogcolor2` + `fogblend` 朝日雾色渐变 | 未实现 | 8 张夹具图 `fogblend = 0` ⇒ 当前无差异；实现需视方向 varying |
+| `sky_camera`：2D 六面天空盒 + 3D 微缩区 + 天空遍自带雾（`SkyCamera.cpp:57`） | 已复现 | T-412 / T-416 / T-417 / T-424 / T-430；调试端 `skyFog` 用 `sky_camera` 自己的雾键值、`start/end ÷ scale` |
+| `light_environment`（`_light` / `_ambient`） | 已复现（烘焙路径） | 由 VRAD 烘进世界 lightmap 与 prop 顶点光；运行期把 GLB 的 punctual 灯摘除（`renderer-main.ts` 的摘灯日志）与 SDK 同口径 |
+| 世界面 lightmap（RGBExp32 图集 + 双线性） | 已复现 | 与 SDK `common_lightmappedgeneric_fxc.h:195` 的 `LightMapSample` 对拍；本仓图集把有符号 i8 指数重编码为 `A = exp + 128`（`src/wasm-core/bsp_to_gltf_core/lightmap.rs:21/494/957`） |
+| prop 逐顶点烘焙（`.vhv`） | 已复现 | SDK `hardwareverts.h`（`#pragma pack(1)`：`pMesh` 在 +40、28 B 步长）+ `vradstaticprops.cpp:1579-1594`（BGRA）与本仓 `src/wasm-core/vhv.rs` 逐字一致；1587 份实测第 4 字节恒 255 |
+| leaf ambient cube | 已复现 | `src/wasm-core/vbsp/data/game.rs:21-23`：指数按 `as i8`、与 lightmap 解码只差 `/255`；实测线性中位 0.0475 |
+| 呈现管线（`OverBright2` + 一次屏幕 gamma） | 已复现（T-617 第 2 轮） | `imaterialsystem.h:16` `OVERBRIGHT 2.0f` + `mathlib.h:1753` `MathLib_Init(gamma 2.2, overbright 2.0)`；本仓 three 输出端已做那一次编码 ⇒ `lightGamma 1.0` + `exposure 2.0`；实测 σ 54.2（参照图 59.2） |
+| 洞穴内光照 | 已实测（无需修） | 洞内（岩石隧道）均值 31.1 / σ 19.0 / 纯黑 **0.00%**；world lightmap 与 leaf ambient 两条路径在洞内均工作 |
+| `env_sun` 光晕 sprite | 未实现 | 该图参照画面天光均匀发白、无可见太阳；`sprites/light_glow02_add_noz` 也不在 pakfile 内 |
+| `func_dustmotes` / `info_particle_system` 粒子 | 未实现 | 本图用自定义粒子 `tendies_alch01` / `tendies_alch01_large`，复现需 CS:GO `.pcf` 粒子格式 ⇒ 独立特性，不属光照管线 |
+| `env_fade` 过场淡出 | 未实现 | 地图脚本触发的白场淡出，与静态光照无关 |
+| `env_tonemap_controller` / `color_correction` | 未实现 | 本图没有这两个实体（不是缺口）；`surf_null` / `surf_sedona` / `tsurf_concretejungle_b16` 有 ⇒ 那些图的氛围未覆盖 |
+
+仍未实现项的登记见 TODO.md T-618。
