@@ -7,7 +7,7 @@
  * 支持倍速、A-B 区间、循环、逐帧。
  */
 
-import { indexInClip, sampleClip, horizontalSpeed as horizSpeed } from './sampling.js';
+import { indexInClip } from './sampling.js';
 import { TrackSet } from './tracks.js';
 import type { Clip, Sample, Track, TrackSample } from './types.js';
 
@@ -287,18 +287,6 @@ export class ReplayPlayer {
   /** 所有轨道在当前主时钟的采样（含不可见轨道，渲染层按 Track.visible 过滤）。 */
   sampleAll(): TrackSample[] {
     return this.tracks.sampleAll(this.time);
-  }
-
-  /** 水平速度（HU/s）：转发 `apps/viewer/src/replay/sampling.ts` 的 `horizontalSpeed`；无速度数据返回 null。
-   *  本方法在本仓无调用点——遥测 HUD 自己算（`apps/viewer/src/ui/telemetry.ts` 的
-   *  `Math.hypot(s.vel[0], s.vel[2])`）。 */
-  horizontalSpeed(s: Sample | null): number | null {
-    return horizSpeed(s);
-  }
-
-  /** 按 clip 内部时间采样（不经 `Track.offset`）；本仓无调用点——全仓仅此处定义，未接任何 UI 或测试。 */
-  static sampleClipAt(clip: Clip, t: number): Sample | null {
-    return sampleClip(clip, t);
   }
 
   /** 把主时钟夹回当前区间。 */

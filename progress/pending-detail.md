@@ -367,7 +367,7 @@ debug `renderer-main.ts` optimizeScene 调用链注释「其又源自 harness wo
 
 ## T-062（原 #93） — 待裁决
 
-**本轮入口收敛的两条留档待裁（2026-10-01）**：① **`importer.ts` 的 Source `.dem` 分支在 UI 层已无调用路径**——四个交互入口都按内容分派，`.dem` 一律进录像页，而 `ReplayPanel.loadFile` 嗅探后只放行 `.replay`（`apps/viewer/src/replay/panel.ts:283` 到 `apps/viewer/src/replay/panel.ts:293`）⇒ `ReplayImporter.import` 的 `.dem` 分流（`apps/viewer/src/replay/importer.ts:189`）连同 `importDemoOnMain`、`ImportResult.demo` 与面板里的「Source 录像」摘要分支（`apps/viewer/src/replay/panel.ts:346` 到 `apps/viewer/src/replay/panel.ts:358`）当前不可达；本轮**保留为解析层防御**（`ReplayImporter.import` 的对外契约仍是「传什么都能正确解析」），是否清账待裁；② **URL 深链 `?replay=` 仍按参数名只收 Shavit**——取到字节后先嗅探 `{SHAVITREPLAYFORMAT}`，不命中即报错（`apps/viewer/src/app.ts:685` 到 `apps/viewer/src/app.ts:689`），即 `?replay=<一份 .dem>` 会被拒；参数名本身即类型声明，故本轮未把它并进内容分派。两处的完整记述见 `documents/viewer/implementation/app.md` 已知缺口 6 与 `documents/viewer/implementation/replay.md` 第 20 条
+**本轮入口收敛的两条留档待裁（2026-10-01）**：① **`importer.ts` 的 Source `.dem` 分支在 UI 层已无调用路径**——四个交互入口都按内容分派，`.dem` 一律进录像页，而 `ReplayPanel.loadFile` 嗅探后只放行 `.replay`（`apps/viewer/src/replay/panel.ts:283` 到 `apps/viewer/src/replay/panel.ts:293`）⇒ `ReplayImporter.import` 的 `.dem` 分流（`apps/viewer/src/replay/importer.ts:182`）连同 `importDemoOnMain`、`ImportResult.demo` 与面板里的「Source 录像」摘要分支（`apps/viewer/src/replay/panel.ts:346` 到 `apps/viewer/src/replay/panel.ts:358`）当前不可达；本轮**保留为解析层防御**（`ReplayImporter.import` 的对外契约仍是「传什么都能正确解析」），是否清账待裁；② **URL 深链 `?replay=` 仍按参数名只收 Shavit**——取到字节后先嗅探 `{SHAVITREPLAYFORMAT}`，不命中即报错（`apps/viewer/src/app.ts:685` 到 `apps/viewer/src/app.ts:689`），即 `?replay=<一份 .dem>` 会被拒；参数名本身即类型声明，故本轮未把它并进内容分派。两处的完整记述见 `documents/viewer/implementation/app.md` 已知缺口 6 与 `documents/viewer/implementation/replay.md` 第 20 条
 
 原状态列：待 owner 裁决
 

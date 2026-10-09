@@ -110,11 +110,6 @@ export class MapPanel {
     );
   }
 
-  /** 出生点快照的只读视图（本仓当前零外部调用点：跳转列表由 `renderSpawns` 直接建 DOM）。 */
-  get spawnPoints(): ReadonlyArray<{ name: string; pos: [number, number, number] }> {
-    return this.spawns;
-  }
-
   /** 换图载入中：给「更换地图」入口加 `busy` 类（引导按钮的 busy 态由 app 管）。 */
   setLoadBusy(busy: boolean): void {
     this.reloadWrap.classList.toggle('busy', busy);

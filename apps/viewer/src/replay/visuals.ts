@@ -158,11 +158,6 @@ export class ReplayVisuals {
     this.showTickNodes = v;
   }
 
-  /** 是否已建过对象（等价于「有没有含帧的轨道」）。 */
-  hasTracks(): boolean {
-    return this.objects.length > 0;
-  }
-
   /** 移除并释放全部已建对象，随后清空对象表。 */
   clear(): void {
     for (const o of this.objects) {

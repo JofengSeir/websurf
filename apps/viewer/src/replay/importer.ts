@@ -174,13 +174,6 @@ export class ReplayImporter {
     }
   }
 
-  /** 终止 Worker 并清空未结算请求表（不置 `workerBroken`，下次 `import` 会重新起 Worker）；本仓无调用点。 */
-  dispose(): void {
-    releaseWorkerUrl(this.worker); this.worker?.terminate();
-    this.worker = null;
-    this.pending.clear();
-  }
-
   // ── 主线程回退（与 Worker 同源：嗅探 → 字节缓存 → 原生解析 → Clip）──
 
   /**

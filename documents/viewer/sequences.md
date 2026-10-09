@@ -32,7 +32,7 @@
 | 用户 | 录像页文件框 → `DemoPanel.load(file)`：同样先复核，非 `.dem` 经 `onForeignFile` 改送 | `lastFile` 字段、看板各容器 | `apps/viewer/src/replay/demopanel.ts:464` 到 `apps/viewer/src/replay/demopanel.ts:470` |
 | 主线程 | **解析完成**（`parseSourceDemo`）→ 录像看板一次推两件事：`onParsed(result, file, rosterCount)` 把 `DemoParseResult` 交给**录像信息条** `DemoMetaStrip.set`（`#demoInfo`：12 项条面 + 悬停诊断面），`onLoaded()` 把整场时长写进本会话播放器（`sessionLength`）并放出时间轴，随后从 0 s 自动跟随播放；解析失败时推 `onParsed(null, …)` **清空**信息条 | `DemoParseResult` 进 `#demoInfo`；`sessionLength` 撑起 `#timelineDemo` | `apps/viewer/src/replay/demopanel.ts:500`、`apps/viewer/src/replay/demopanel.ts:517` 到 `apps/viewer/src/replay/demopanel.ts:518`、`apps/viewer/src/app.ts:390` 到 `apps/viewer/src/app.ts:401`、`apps/viewer/src/app.ts:440` 到 `apps/viewer/src/app.ts:452` |
 | 主线程 | `runImport(true)` → `importer.import(file, rule, name, onProgress)` | `busy` 置真 | `apps/viewer/src/replay/panel.ts:321` |
-| Worker 或主线程 | 嗅探魔数 → 取字节（命中同一文件句柄则复用缓存）→ `parseShavitReplay` → `clipFromShavitReplay` | `ShavitParseResult` → `Clip`（定型数组 + meta + buttons） | `apps/viewer/src/replay/importer.ts:201` 到 `apps/viewer/src/replay/importer.ts:221`、`apps/viewer/src/replay/shavit-replay.ts:569` |
+| Worker 或主线程 | 嗅探魔数 → 取字节（命中同一文件句柄则复用缓存）→ `parseShavitReplay` → `clipFromShavitReplay` | `ShavitParseResult` → `Clip`（定型数组 + meta + buttons） | `apps/viewer/src/replay/importer.ts:194` 到 `apps/viewer/src/replay/importer.ts:214`、`apps/viewer/src/replay/shavit-replay.ts:569` |
 | 主线程 | `onClip` → `replaceClip` 或 `addTrack` → `player.mode = 'first'` → `syncSession('replay')` → `updateReplayMapStatus()` | 本会话的 `TrackSet`、3D 对象、时间轴、信息条、遥测 HUD | `apps/viewer/src/app.ts:288` 到 `apps/viewer/src/app.ts:300`、`apps/viewer/src/app.ts:245` |
 
 ## 帧链/主循环
@@ -68,9 +68,9 @@
 
 - **`id` 是配回 pending 表的唯一键**：请求侧自增（`apps/viewer/src/replay/importer.ts:158`），响应侧按 `msg.id` 找到 resolver，`progress` 不结算、其余分支删表并结算（`apps/viewer/src/replay/importer.ts:107` 到 `apps/viewer/src/replay/importer.ts:114`）。
 - **`file` 声明允许 null**（`apps/viewer/src/replay/protocol.ts:35`）：null 的语义是「复用上一份文件的字节缓存」。本仓唯一调用点传的是非空字段（`apps/viewer/src/replay/panel.ts:324` 传 `this.file`，而 `runImport` 在 `apps/viewer/src/replay/panel.ts:312` 已挡掉 null），Worker 侧写的是 `req.file ?? cachedNativeFile`（`apps/viewer/src/worker/main.ts:56`）。
-- **进度阶段只有 `'parse'`**：Worker 发 0/1 与 1/1 两条（`apps/viewer/src/worker/main.ts:66`、`apps/viewer/src/worker/main.ts:84`），主线程回退路径在同一位置发同样的两条（`apps/viewer/src/replay/importer.ts:207`、`apps/viewer/src/replay/importer.ts:220`）；`'map'` 阶段没有任何发送方。
+- **进度阶段只有 `'parse'`**：Worker 发 0/1 与 1/1 两条（`apps/viewer/src/worker/main.ts:66`、`apps/viewer/src/worker/main.ts:84`），主线程回退路径在同一位置发同样的两条（`apps/viewer/src/replay/importer.ts:200`、`apps/viewer/src/replay/importer.ts:213`）；`'map'` 阶段没有任何发送方。
 - **回包走 transfer 列表**：`t` / `pos` / `ang` 的 buffer 必进，`vel` / `buttons` 存在才进（`apps/viewer/src/worker/main.ts:88` 到 `apps/viewer/src/worker/main.ts:90`），发送后这些 buffer 在 Worker 侧不可再用。
-- **`Clip.id` 与 `Clip.rule` 不在载荷里**：由主线程 `payloadToClip` 本地补（`apps/viewer/src/replay/importer.ts:236`）。
+- **`Clip.id` 与 `Clip.rule` 不在载荷里**：由主线程 `payloadToClip` 本地补（`apps/viewer/src/replay/importer.ts:229`）。
 - **`ImportResult.resolvedPath` 无读取点**：Worker 回包的 `resolvedPath` 被透传进结果对象（`apps/viewer/src/replay/importer.ts:166`），而 `apps/viewer/src` 内没有消费该字段的地方。
 - **`TrackPanelOptions.onPresence` 无发送方**：该可选回调每次 `refresh` 都会被 `?.` 调用（`apps/viewer/src/replay/trackpanel.ts:119`），但 `ReplayPanel` 构造 `TrackPanel` 时只传了 `onChange` 与 `onCleared`（`apps/viewer/src/replay/panel.ts:116` 到 `apps/viewer/src/replay/panel.ts:117`），故它永不触发。
 
@@ -92,7 +92,7 @@
 | 施加静态光照中途抛错 | 共享 applyLightmap 的 catch 只 `console.error` 并返回 false，不阻断挂载 | `src/renderer-shared/scene/scene-builder.ts:131` 到 `src/renderer-shared/scene/scene-builder.ts:133` |
 | 块内几何合并失败 | 保留全部子块（不丢几何）；最终合并失败时逐块建 Mesh（共享核，game/viewer 同一份） | `src/renderer-shared/scene/scene-optimizer.ts:343`、`:356`、`:374`、`:395` |
 | Worker 构造抛错或 `onerror` | `workerBroken` 置位、终止并丢弃 Worker、用同一个错误拒绝全部未结算请求；此后每次导入直接走主线程 | `apps/viewer/src/replay/importer.ts:116` 到 `apps/viewer/src/replay/importer.ts:130` |
-| 主线程回退的魔数嗅探失败 | 抛「不是 Shavit .replay 记录文件」错误，经面板 note 显示 | `apps/viewer/src/replay/importer.ts:201` 到 `apps/viewer/src/replay/importer.ts:205` |
+| 主线程回退的魔数嗅探失败 | 抛「不是 Shavit .replay 记录文件」错误，经面板 note 显示 | `apps/viewer/src/replay/importer.ts:194` 到 `apps/viewer/src/replay/importer.ts:198` |
 | Worker 收到消息但永不回包 | `import` 不设超时：promise 永不结算，面板 `busy` 保持为真，后续导入被丢弃 | `apps/viewer/src/replay/importer.ts:149`、`apps/viewer/src/replay/panel.ts:316` 到 `apps/viewer/src/replay/panel.ts:320` |
 | 拖入四条魔数都不认的文件 | 已加载地图时 HUD 临时提示 5 s，未加载地图时写引导层错误；文案列出四条魔数（VBSP / `{SHAVITREPLAYFORMAT}` / KSF .rec / HL2DEMO） | `apps/viewer/src/app.ts:655` 到 `apps/viewer/src/app.ts:659` |
 | URL 深链 fetch 失败或不是 Shavit 记录 | 无地图时打开引导层并显示错误；已有地图时 HUD 临时提示 6 s | `apps/viewer/src/app.ts:814` 到 `apps/viewer/src/app.ts:822` |

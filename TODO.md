@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（110 条）
+## 未结项（106 条）
 ### 待裁决（0）
 
 
-### 待修（108）
+### 待修（104）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -56,12 +56,8 @@
 - **T-157** `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达　`viewer`
 - **T-161** 六个导出在本工程内零调用点　`viewer`
 - **T-162** `setLightFloor` 在本工程内零调用点　`viewer`
-- **T-163** `ReplayPlayer` 两个成员零调用点　`viewer`
-- **T-164** `ReplayImporter.dispose()` 零调用点　`viewer`
-- **T-165** `ReplayVisuals.hasTracks()` 零调用点　`viewer`
 - **T-166** `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点　`viewer`
 - **T-167** 进度回调里的 `'map'` 分支不可达　`viewer`
-- **T-168** `MapPanel.spawnPoints` getter 零调用点　`viewer`
 - **T-206** `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃　`game`
 - **T-211** `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造　`game`
 - **T-217** `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方）　`game`
@@ -197,7 +193,7 @@
 | T-118 | A-B 区间带恒不显示（宽度算式分子恒等于分母） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:525 | documents/viewer/implementation/replay.md | 判据：A-B 区间带可见（宽度算式分子≠分母）：构造 A≠B ⇒ 带出现且宽度随区间变化 | — |
 | T-119 | 时间轴两条 title 文案与默认播放窗口矛盾 | 文档口径 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:185 ⇒ 文案改为「prerun 帧计入区间（读数可为负）」，与 apps/viewer/src/replay/player.ts:180 的 Math.min(0,t0) 窗口一致 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-120 | 正式跑段高亮宽度混基，Track.offset 非 0 时位置与宽度偏 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:552 ⇒ 宽度算式先加 `track.offset` 换成主时钟（与左端同基）；DOM 桩探针 ⇒ left=10%、width=60%（旧算式 50%，偏 10 个百分点）；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
-| T-121 | disposeTree 不释放轨迹线（Line）与 tick 点（Points） | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/visuals.ts:291 ⇒ `disposeTree` 按「有无 geometry/material」释放（不再只 `isMesh`）；three 真对象探针 ⇒ 修复前已释放 0、修复后 2（Line + Points）；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
+| T-121 | disposeTree 不释放轨迹线（Line）与 tick 点（Points） | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/visuals.ts:286 ⇒ `disposeTree` 按「有无 geometry/material」释放（不再只 `isMesh`）；three 真对象探针 ⇒ 修复前已释放 0、修复后 2（Line + Points）；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-122 | createObjectURL 未配对 revokeObjectURL，重起 Worker 泄漏 blob URL | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/importer.ts:104 ⇒ Blob URL 记进 `WeakMap<Worker,string>`，`onerror`/`dispose`/`onWorkerTimeout` 三条丢弃路径先 `releaseWorkerUrl`；探针 ⇒ createObjectURL=3 / revokeObjectURL=3 配对；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-123 | 导入无超时与取消，Worker 不回消息时 Promise 永不结算 | 缺陷 | viewer | 已结案 | **遗弃（由 T-152 覆盖）**：T-152 的 30 s 看门狗（探针实测 30.0 s 后拒绝、workerBroken=true、pending=0）已消除「Promise 永不结算」；「可取消」判为功能新增而非本缺陷 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-124 | Track.offset 只有下界没有上界，可拉长主时钟总长 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/trackpanel.ts:209 ⇒ `Math.min(3600, Math.max(0, n))`（上限 1 h），提示语写明 0~3600；`npm run typecheck` 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
@@ -211,7 +207,7 @@
 | T-133 | .gitignore 中间产物目录与 test:replay 实际输出不一致 | 配置·门禁 | viewer | 已结案 | **遗弃**：`apps/viewer/.gitignore` 全文 4 行、无 `/temp/` 规则（仅注释说明由根覆盖）；根 `.gitignore:23`/`:24` 的 `**/.tmp/`、`**/temp/` 已覆盖输出目录；实测 `npm run test:replay` ⇒ exit 0 且 `git status --short` 干净 ⇒ 判据本就满足 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-136 | single 分支四段日志都写 [5/5] 步骤编号 | 工具·流程 | viewer | 已结案 | **遗弃（与 T-224 同源）**：`[5/5]` 是三工程打包阶段的固定文本前缀（multi 分支另有 `[multi]`），已由 T-224 登记（`documents/game/implementation/scripts.md:40`）；本条为重复登记，合并到 T-224 | documents/viewer/implementation/scripts-and-test.md | 见详情 | — |
 | T-138 | 光照模式下拉只写不回填，与运行期真实模式脱节 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/mapinfo.ts:98 ⇒ 初值取 `getLightingMode()`、change 后回填实况（1:1 三处）；DOM 桩探针：提交 texture 而实况 baked ⇒ 下拉回填 baked；`npm run typecheck` 通过 | documents/viewer/implementation/ui.md | 见详情 | — |
-| T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:130 | documents/viewer/implementation/ui.md | 判据：点导航「卸载地图」⇒ 回到空态且可再次载入 | — |
+| T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:125 | documents/viewer/implementation/ui.md | 判据：点导航「卸载地图」⇒ 回到空态且可再次载入 | — |
 | T-140 | 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复 | 未接线·死代码 | viewer | 已结案 | apps/viewer/src/ui/telemetry.ts:122 ⇒ 改用 `sampling.ts` 的 `horizontalSpeed`（该文件内 `Math.hypot(s.vel[0], s.vel[2])` 0 命中）；DOM 桩探针 ⇒ 500 / 0 / 250 正确；typecheck 通过 | documents/viewer/implementation/ui.md | 见详情 | horizontalSpeed" -- apps/viewer/src@BT@ ⇒ 只剩 sampling/player 一处实现 | — |
 | T-141 | setTracks 把父元素强转为 HTMLElement，null 时抛 TypeError | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/telemetry.ts:110 ⇒ 现场已无 `parentElement` 强转（`git grep -n parentElement -- apps/viewer/src/ui/telemetry.ts` ⇒ 0 命中）；DOM 桩探针 `setTracks(null)` ⇒ 未抛异常、hidden=true ⇒ **遗弃**（缺陷不再复现，判据本就满足） | documents/viewer/implementation/ui.md | 见详情 | — |
 | T-142 | 信息条重找跟随轨道，与 TrackSet.follow 策略重复 | 缺陷 | viewer | 已结案 | apps/viewer/src/ui/replaymeta.ts:24 ⇒ `setTracks(follow: Track | null)`，面板内不再重查；调用点改传 `TrackSet.follow`；`npm run typecheck` 通过，`tracks.find((t) => t.id === followId)` 在 apps/viewer/src 内 0 命中 | documents/viewer/implementation/ui.md | 见详情 | null` 决定，面板内不再重查 | — |
@@ -234,12 +230,12 @@
 | T-160 | `ViewerScene.model` getter 零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/scene.ts` 删除 `get model()`（0/5 行）；**判据**：全工作区扫描 `.model` ⇒ 只有类内部 `modelRoot`，无外部读取者；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-161 | 六个导出在本工程内零调用点 | 未接线·死代码 | viewer | 待修 | src/renderer-shared/shader/lightmap-shader.ts:313 | documents/viewer/implementation/renderer.md | 判据：六个导出逐个 @BT@git grep -n "<符号>" -- apps/viewer src@BT@ ⇒ 只剩定义处 ⇒ 删除 | — |
 | T-162 | `setLightFloor` 在本工程内零调用点 | 未接线·死代码 | viewer | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1752 | documents/viewer/implementation/renderer.md | 判据：`git grep -n "setLightFloor" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-163 | `ReplayPlayer` 两个成员零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/player.ts:295 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ReplayPlayer" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-164 | `ReplayImporter.dispose()` 零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/importer.ts:175 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ReplayImporter.dispose()" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-165 | `ReplayVisuals.hasTracks()` 零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/visuals.ts:162 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ReplayVisuals.hasTracks()" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-163 | `ReplayPlayer` 两个成员零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/replay/player.ts` 删除 `horizontalSpeed` 与静态 `sampleClipAt`（1/13 行，导入收窄为 `indexInClip`）；**判据**：全工作区扫描（540 个文件、含未跟踪）`.horizontalSpeed(` / `.sampleClipAt(` ⇒ 各 **0** 处；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/replay.md | 全工作区扫描（含未跟踪）该成员无调用点 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
+| T-164 | `ReplayImporter.dispose()` 零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/replay/importer.ts` 删除 `dispose()`（0/7 行）；**判据**：全工作区扫描 ⇒ `importer` 实例无 `.dispose(` 调用（viewer 内 `.dispose(` 只剩 three 几何/材质/贴图）；删除后 viewer typecheck exit 0。**取舍**：另一路是接到页面卸载以消 Worker 泄漏，属新增接线、超出本行判据 | documents/viewer/implementation/replay.md | 全工作区扫描（含未跟踪）该成员无调用点 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
+| T-165 | `ReplayVisuals.hasTracks()` 零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/replay/visuals.ts` 删除 `hasTracks()`（0/5 行）；**判据**：全工作区扫描 `.hasTracks(` ⇒ **0** 处（`apps/viewer/src/ui/telemetry.ts:109` 的 `hasTracks` 是形参名）；删除后 viewer typecheck exit 0 | documents/viewer/implementation/replay.md | 全工作区扫描（含未跟踪）该成员无调用点 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-166 | `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/shavit-replay.ts:507 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ShavitParseResult.flags" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-167 | 进度回调里的 `'map'` 分支不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:329 | documents/viewer/implementation/replay.md | 判据：`git grep -n "'map'" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-168 | `MapPanel.spawnPoints` getter 零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:114 | documents/viewer/implementation/ui.md | 判据：`git grep -n "MapPanel.spawnPoints" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-168 | `MapPanel.spawnPoints` getter 零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/ui/mapinfo.ts` 删除 `get spawnPoints()`（0/5 行）；**判据**：全工作区扫描 `.spawnPoints` ⇒ 全部是 BSP 结果的 `result.spawnPoints`，无 `MapPanel` 读取者；删除后 viewer typecheck exit 0 | documents/viewer/implementation/ui.md | 全工作区扫描（含未跟踪）该成员无调用点 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-201 | 主线程 wasm 初始化失败被 `.catch` 吞掉、不阻断加载，缺失纹理降级为占位色 | 缺陷 | game | 已结案 | apps/game/src/app.ts:506-507（1:1）：`mainWasmReady` 失败改为 console.error 打根因 + setStatus(...,'error') + 重新抛出 ⇒ 加载被阻断、控制台可见错误（原为 `.catch(() => undefined)` 静默继续）；game typecheck 通过；debug 侧同名写法（apps/debug/src/app.ts:1731）故意保留（其注释写明由下方 try 报错） | documents/game/implementation/app-entry.md | 见详情 | — |
 | T-202 | 可选 DOM 依赖（`#loadMapBtn`/`#bspFile`/`#respawnBtn`/`#spawnSelect`）缺失时静默降级、无报错无提示 | 缺陷 | game | 已结案 | apps/game/src/dom-optional.ts 新增 `optDom()`（缺失打 `console.warn` 点名 id）；app.ts 四处可选控件改走它（五处 1:1，246 个锚点零漂移）；探针 ⇒ 缺失返回 null + 点名告警、存在 0 告警；game typecheck 通过 | documents/game/implementation/app-entry.md | 见详情 | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待修 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | 判据：未选图 / 未锁定前点击画布 ⇒ 有可见反馈（不再静默返回） | — |

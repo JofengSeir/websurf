@@ -84,7 +84,7 @@
 | T-125 | 零帧轨道的口径不一致（列表面板有卡片、3D 无对象） | apps/viewer/src/replay/visuals.ts:96 |
 | T-128 | dist 里的示例记录无法由当前源码路径重新产出 | apps/viewer/scripts/build-dist.mjs:238 |
 | T-137 | 端口占用分支假定占用者服务的是 dist | apps/viewer/start.cmd:26 |
-| T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | apps/viewer/src/ui/mapinfo.ts:130 |
+| T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | apps/viewer/src/ui/mapinfo.ts:125 |
 | T-142 | 信息条重找跟随轨道，与 TrackSet.follow 策略重复 | apps/viewer/src/ui/replaymeta.ts:25 |
 | T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | apps/viewer/src/core/dom.ts:39 |
 | T-145 | 模型名匹配与材质查找的大小写口径不一致 | apps/viewer/crates/wasm/src/lib.rs:606 |
@@ -141,12 +141,12 @@
 | T-160 | `ViewerScene.model` getter 零调用点 | apps/viewer/src/core/scene.ts:92 |
 | T-161 | 六个导出在本工程内零调用点 | src/renderer-shared/shader/lightmap-shader.ts:313 |
 | T-162 | `setLightFloor` 在本工程内零调用点 | src/renderer-shared/shader/lightmap-shader.ts:1752 |
-| T-163 | `ReplayPlayer` 两个成员零调用点 | apps/viewer/src/replay/player.ts:295 |
-| T-164 | `ReplayImporter.dispose()` 零调用点 | apps/viewer/src/replay/importer.ts:175 |
-| T-165 | `ReplayVisuals.hasTracks()` 零调用点 | apps/viewer/src/replay/visuals.ts:162 |
+| T-163 | `ReplayPlayer` 两个成员零调用点 | apps/viewer/src/replay/player.ts（2026-10-09 已删） |
+| T-164 | `ReplayImporter.dispose()` 零调用点 | apps/viewer/src/replay/importer.ts（2026-10-09 已删） |
+| T-165 | `ReplayVisuals.hasTracks()` 零调用点 | apps/viewer/src/replay/visuals.ts（2026-10-09 已删） |
 | T-166 | `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点 | apps/viewer/src/replay/shavit-replay.ts:507 |
 | T-167 | 进度回调里的 `'map'` 分支不可达 | apps/viewer/src/replay/panel.ts:329 |
-| T-168 | `MapPanel.spawnPoints` getter 零调用点 | apps/viewer/src/ui/mapinfo.ts:114 |
+| T-168 | `MapPanel.spawnPoints` getter 零调用点 | apps/viewer/src/ui/mapinfo.ts（2026-10-09 已删） |
 
 ### game（17）
 
