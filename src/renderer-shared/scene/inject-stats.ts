@@ -84,7 +84,36 @@ import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, 
       console.info(`[ambient-cube] applied=${ambOk} 失败=${ambBad}`);
     }
 
-    // 第 1 级 prop 光照（逐顶点预烘焙 → `_VBSP_VLIGHT` 几何属性）的接线校验：走这一级的材质数、
+    	// 定向转储（诊断）：全局设 `__vbspDumpMesh='<regex>'` 时，把匹配 mesh 的几何属性、
+	// `_VBSP_VLIGHT` 统计与三条注入路径的落账状态逐条打出来，用于定位「某个 prop 为什么是黑的」。
+	{
+		const pat = (globalThis as { __vbspDumpMesh?: string }).__vbspDumpMesh;
+		if (pat) {
+			const re = new RegExp(pat);
+			scene.traverse((obj) => {
+				const m = obj as THREE.Mesh;
+				if (!m.isMesh || !re.test(m.name || '')) return;
+				const g = m.geometry as THREE.BufferGeometry;
+				const at = g?.getAttribute?.('_vbsp_vlight') as THREE.BufferAttribute | undefined;
+				let stats = 'no-attr';
+				if (at) {
+					const a = at.array as ArrayLike<number>;
+					let mn = Infinity, mx = -Infinity, sum = 0, zero = 0;
+					for (let i = 0; i < a.length; i++) { const v = a[i]; if (!Number.isFinite(v)) continue; if (v < mn) mn = v; if (v > mx) mx = v; sum += v; if (v === 0) zero++; }
+					stats = 'min=' + mn.toFixed(4) + ' max=' + mx.toFixed(4) + ' mean=' + (sum / a.length).toFixed(4) + ' zero=' + (100 * zero / a.length).toFixed(1) + '%';
+				}
+				const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material;
+				const rec = mat as unknown as { __vbspLightmapInject?: { applied?: boolean }; __vbspVertexLightingInject?: { applied?: boolean }; __vbspAmbientInject?: { applied?: boolean } };
+				console.info('[dump] ' + JSON.stringify({
+					name: m.name, mat: mat?.name, matType: mat?.type, attrs: Object.keys(g?.attributes ?? {}),
+					vlight: stats,
+					inject: { lightmap: rec.__vbspLightmapInject?.applied === true, vlight1: rec.__vbspVertexLightingInject?.applied === true, ambCube: rec.__vbspAmbientInject?.applied === true },
+					userData: JSON.stringify((m.userData as { vbsp?: unknown }).vbsp ?? {}).slice(0, 160),
+				}));
+			});
+		}
+	}
+// 第 1 级 prop 光照（逐顶点预烘焙 → `_VBSP_VLIGHT` 几何属性）的接线校验：走这一级的材质数、
     // 注入是否生效、有没有失败。带属性却没注入记录的分两类：材质标了 `userData.unlit === true`
     // 的自发光 VMT 本就不吃光照（正确），其余算真漏网并打 error。
     {

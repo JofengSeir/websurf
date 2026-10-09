@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（69 条）
+## 未结项（70 条）
 ### 待裁决（0）
 
 
@@ -98,6 +98,7 @@
 - **T-618** 氛围机制剩余缺口（tonemap/color_correction、env_sun、粒子 .pcf、env_fade、fogcolor2/fogblend）　`shared`
 - **T-619** owner 反馈：雪盖疑似消失（未复现，待视点）+ 石头模型偏黑（30 个 rock03 报警疑假阳性）　`shared`
 - **T-624** viewer 无 LOD/PVS 剔除（全量绘制）　`viewer`
+- **T-625** 洞内 prop 异常黑：部分 mesh 无 `_VBSP_VLIGHT` ⇒ 只剩近零环境光立方体兜底　`shared`
 ### 已取证待立项（2）
 - **T-109** 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正　`viewer`
 - **T-115** untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查　`viewer`
@@ -117,6 +118,7 @@
 | T-622 | 3D 天空盒天空区未做分块合并（game/viewer：1010 个小块 = 1010 次 draw call，debug 已合并为 882） | 缺失 | shared | 已结案 | **待修（2026-10-09 登记，T-621 同轮发现）**。`[skybox] 3D 天空盒：天空区 N 个图元` 实测 **debug 882 块**（`apps/debug/src/renderer/renderer-main.ts:535` 对 `skyGroup` 跑了一遍 `mergeIntoChunks` + `padBoundingSpheres` + 重贴 `SKY_LAYER`）而 **game/viewer 未合并 ⇒ 1010 个逐面小块 = 1010 次天空遍 draw call**。 | progress/pending-detail.md | game/viewer 载入 `surf_boreas` ⇒ 控制台天空区图元数从 1010 降到与 debug 同量级（~882）；三端 typecheck/build exit 0；截图与合并前逐像素一致（±2%） | 新  **已结案（2026-10-09，第 1 轮）**：game/viewer 补 `mergeIntoChunks(this.skyGroup)` + `padBoundingSpheres` + 逐 mesh 重贴 `SKY_LAYER`（与 debug `apps/debug/src/renderer/renderer-main.ts:535` 同构）。**验证**：game 日志 `[skybox] 天空区合并：1010 mesh → 882 块`、`天空区 882 个图元挂第 1 层`，与 debug **逐字相同**；合并前后同视点截图逐像素差异 **0.00%**（最大通道和 51，仅块边界像素）⇒ 画面不变、天空遍 draw call 1010 → 882。 |
 | T-623 | 终扫根节点三端不同（mapRoot / this.scene / modelRoot）⇒ 计数差 169/183/179 已核实为无害 | 缺陷 | shared | 已结案 | **已结案（2026-10-09，第 2 轮）**。目标轮次 2/256：把全链条上最后一处未解释的计数差钉死。三端终扫 `fullbrightUnlitLitMaterials` 的**根节点不同**：debug 扫 `mapRoot`（`apps/debug/src/renderer/renderer-main.ts:550`）、game 扫 `this.scene`（`apps/game/src/renderer/renderer-main.ts:311`）、viewer 扫 `this.modelRoot`（`apps/viewer/src/core/scene.ts:207`）⇒ 收敛计数 169 / 183 / 179、fullbright 总数 2936 / 2936 / 2928。新增常驻诊断「终扫点名」（`src/renderer-shared/shader/lightmap-shader.ts` 的 `fullbrightUnlitLitMaterials` 记录被收敛 mesh 与其材质名，前 12 个）后核实：被收敛的是**水/粒子/冰面的受光材质**（`johnshandy/world/water_pure_beneath`、`maps/surf_boreas/project_tendies/water01_…`、`project_tendies/alch_symbols`、`tendies_endsmoke`、`ice03`、`ice02_…`）—— 本工程运行期不加灯，受光材质恒黑 ⇒ 三端都统一走「全亮贴图原色」兜底。**结论：根节点差异只改变由谁完成这次收敛，不改变最终材质形态，三端光照链等价。** | progress/pending-detail.md | 三端载入 `test/maps/surf_boreas.bsp` ⇒ 控制台均出现 `[lightmap] 终扫点名：…` 且被点名材质属水/粒子/冰面类；`施加 lightmap mesh=` 三端均为 1351；`[skybox]` 天空区 882 块；三端 `npm run typecheck` + `build:app` exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 | 新 |
 | T-624 | viewer 无 LOD/PVS 剔除（全量绘制；debug 距离剔除、game 距离+PVS） | 缺失 | viewer | 待修 | **待修（2026-10-09，第 3 轮全链条分析发现）**。三端剔除链不一致：debug 用 `apps/debug/src/renderer/lod-manager.ts`（只按距离 `cullDistance`，默认 12800）；game 在 `apps/game/src/renderer/renderer-main.ts` 内联「距离 + 可选 PVS」；**viewer 在 `apps/viewer/src` 里没有任何剔除逻辑**（grep `lod`/`cullDistance` 只命中 replay 面板的 `visible` 开关）⇒ viewer 全量绘制所有块。属可见性/性能差异，**不是光照链分歧**（debug HUD 在同视点显示 `隐藏 0`，即未剔任何块）。 | progress/pending-detail.md | viewer 载入 `test/maps/surf_boreas.bsp` ⇒ 控制台出现与另两端同口径的剔除统计（可见/剔除块数）；三端 `npm run typecheck` + `build:app` exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 | 新 |
+| T-625 | 洞内 prop 异常黑：部分 mesh 无 _VBSP_VLIGHT ⇒ 只剩近零环境光立方体兜底 | 缺陷 | shared | 待修 | **待修（2026-10-09，owner 报「洞内部分模型异常黑」）**。**已复现**：用 debug 端准星检查器定位到 owner 报的物体 —— `准星 模型「rock03_epicmdl#3」22HU[8632,6980,-4111] 材质:rock03 纹理:rock03`（材质纹理都在 ✓），22HU 近距整帧全黑、61HU 时是**几乎纯黑的一大块岩石**（只有顶部边缘有灰）。**机制（有硬数据）**：新增按名字触发的定向转储后实测同一模型内部两类 mesh —— `rock01_epicmdl#16`/`rock05_epicmdl#28`/`rock08_epicmdl` 的 attrs 含 `_vbsp_vlight`+`_vbsp_vcube`、`注入{vlight1:true}`；而 **`rock03_epicmdl#12` 的 attrs 只有 `normal/position/uv`（无 `_vbsp_vlight`）**、`注入{ambCube:true}` ⇒ 这些 mesh 走**只有叶子环境光立方体**的兜底。洞穴内该 cube 接近 0（T-617 实测线性中位 0.004）＋共享默认 `lightFloor = 0` ⇒ 光照项恒 0 ⇒ **纯黑**。旁证：game 端 `[ambient-cube] 命中=1376 未命中=734`、T-619 的 `rock03_giantmdl` 30 个「真漏网」、以及 `src/wasm-core/vbsp/data/game.rs:249/318` 的 `NO_PER_VERTEX_LIGHTING = 0x40` **定义了但全仓无消费方**。附着点：`src/wasm-core/model_integrator/mod.rs:435` 的 `vlight.filter(｜v｜ v.len() == vertex_count)?` —— 长度不等即整 mesh 回退 cube（注释注明为刻意设计）。**第二个报点** `ramp_c1m_8`/`ice_transparent` 本轮未命中（射线打在 `实体面#15` 或空），留待识别。 ｜ | progress/pending-detail.md | ① 导出任一含 `_vbsp_vlight` 缺失 mesh 的 prop（如 `rock03_epicmdl`）⇒ 对比 `.vhv` 的 `mesh_vert_counts` 与该 mesh 的 GLB 顶点数，找出长度不等的具体 mesh 与原因（strip 重排/顶点复制）；② 修复后 game 载入 `test/maps/surf_boreas.bsp` ⇒ 定向转储 `__vbspDumpMesh='rock0[0-9]_epicmdl'` 中不再出现 `attrs` 缺 `_vbsp_vlight` 的 mesh，且 T-619 的「真漏网」计数归零；③ 该处岩石近距截图不再整块纯黑（与相邻 mesh 亮度同量级）；④ 三端 typecheck + build:app exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 ｜ 新  | 新 |
 ## 总表（84 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
