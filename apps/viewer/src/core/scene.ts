@@ -21,7 +21,7 @@ import {
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
 import { applyLightmap, buildMapScene } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
-import { buildMiniatureSky, createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
@@ -180,7 +180,7 @@ export class ViewerScene {
 
     // 3D 天空盒（起源做法，与 debug/game 同款）：把天空区图元摘出主世界、交第二相机单独渲染。
     // 判据 =「图元采样点落在 `sky_camera` 所在 cluster」；必须早于分块合并——合并后跨区的大块
-    // 无法再拆。无 `sky_camera` / 无 PVS / 摘不到图元时不建，末尾用合成山脊兜底。
+    // 无法再拆。无 `sky_camera` / 无 PVS / 摘不到图元时不建，末尾不挂天空层。
     this.pvs = sky?.pvsJson ? new PvsManager(sky.pvsJson) : null;
     const skyCluster = sky?.skyCamera && this.pvs
       ? this.pvs.getClusterAt({ x: sky.skyCamera.origin[0], y: sky.skyCamera.origin[1], z: sky.skyCamera.origin[2] })
@@ -233,12 +233,7 @@ export class ViewerScene {
       this.scene.add(this.skyGroup);
       console.info(`[viewer][skybox] 3D 天空盒：天空区 ${this.skyGroup.children.length} 个图元挂第 ${SKY_LAYER} 层，由第二相机渲染`);
     } else {
-      const box = new THREE.Box3().setFromObject(mapRoot);
-      const radius = Math.max(box.getSize(new THREE.Vector3()).length() * 0.5, 1);
-      const miniature = buildMiniatureSky({ center: box.getCenter(new THREE.Vector3()), radius, color: 0x46566a, haze: sky?.fogParams?.color });
-      miniature.userData.isMiniatureSky = true;
-      this.scene.add(miniature);
-      console.info('[viewer][skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 合成山脊兜底');
+      console.info('[viewer][skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
     // 地图线性雾（`env_fog_controller`）：与 debug/game 同值
     this.scene.fog = sky?.fogParams ? new THREE.Fog(sky.fogParams.color, sky.fogParams.start, sky.fogParams.end) : null;

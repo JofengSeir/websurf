@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-615 锚点复核",
+      "reason": "T-616 收尾",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -191,509 +191,515 @@
         "at": "2026-10-09",
         "line": 107
       },
+      "T-616": {
+        "p": "d8b0a50e2a558893c91545f54ccf1529832f61c60462629f65f0be589013d591",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-09",
+        "line": 108
+      },
       "T-008": {
         "p": "26d198afdec3e0ca421268fdc46eb041e24861d21f46e238fa8947c0ba3cc890",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 112
+        "line": 113
       },
       "T-021": {
         "p": "b7be36a43e7766455e8d096d8fa79e26d01a4eca92c896ffc1209c67627a468d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 113
+        "line": 114
       },
       "T-040": {
         "p": "fc87cd40a60245133b941c8d713f6346c519908467b32d84ee8e1888eb40ea2b",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 114
+        "line": 115
       },
       "T-046": {
         "p": "f30c660edb1fe23a7794308940cfa7314ebea6c0e64decab8358b47a31edee75",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 115
+        "line": 116
       },
       "T-047": {
         "p": "a0292ebae89c613f9312b550672e5137157158022dca220171d8ba8beec2e69b",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 116
+        "line": 117
       },
       "T-053": {
         "p": "ea504b4cd2ec008cd96ca66292a7d84acfe59132a9d33cd91071388705275769",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 117
+        "line": 118
       },
       "T-056": {
         "p": "7cf3d9090ef438b4ad04ee2811b13d841998040d8f43a4e50c57fa4122a48278",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 118
+        "line": 119
       },
       "T-062": {
         "p": "b3b0e33d581b1771b5cc4fa7784b181c9d03d99329cb794f2c2788927109661a",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 119
+        "line": 120
       },
       "T-102": {
         "p": "d399d8223d6417c5c429cbc50104c17718d777937f580a342fc9dc56df72811e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 120
+        "line": 121
       },
       "T-103": {
         "p": "874411149b8cd03744671355a36da9b2074825a262ee5e780226cc59c16fc220",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 121
+        "line": 122
       },
       "T-107": {
         "p": "4afc51445f2b491628691bf1d68ff9811bcb4dad9d01e90e6deab1c447e25748",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 122
+        "line": 123
       },
       "T-109": {
         "p": "7f13360d08124d81d8b9688c1b81e1e19e26e571d556782149ae7f92fc7255bf",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 123
+        "line": 124
       },
       "T-111": {
         "p": "8d82593cf697c69347a96534b3b76b7f41be8ebf0033cb6ff7e87b8a686b8d13",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 124
+        "line": 125
       },
       "T-114": {
         "p": "76fd25b6ae1a6acb2f42ba8272ac71ace736b53bf2baf8c5e1f9aa4605c1fa8e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 125
+        "line": 126
       },
       "T-115": {
         "p": "241d7747e0e0487428389f114653ec1aa2862bea23fb114163d1bef6ee4e312d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 126
+        "line": 127
       },
       "T-116": {
         "p": "779338f99ffb03eda65577c1c231aec92bbc9162460030fccb1fc8d01bf78ef0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 127
+        "line": 128
       },
       "T-117": {
         "p": "237f51378546f2fc79e1db6f3f53adc0343f9580a6ade27b6e84bb8ad89d373f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 128
+        "line": 129
       },
       "T-118": {
         "p": "b2ebcd913924a36156e39f4303992355b9dd331630d28d918c83de33ffe984e6",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 129
+        "line": 130
       },
       "T-125": {
         "p": "b3c3b2ac928a18f5b20fcac5e6475a9a9836acb548d869d08caf5a63b4694da2",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 130
+        "line": 131
       },
       "T-131": {
         "p": "97cca75f88889198095bf46ff3a93c06c017bc66e7f6dc78750ae4657cac22cb",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 131
+        "line": 132
       },
       "T-139": {
         "p": "fa111678811945786dd6f8ba9b1d563099337cb1be9356bcd41443f81c891c5a",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 132
+        "line": 133
       },
       "T-143": {
         "p": "4aafa45c4cf20878f2f7c24c287814c5a0f42bd5fd681ecd78d0023799128200",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 133
+        "line": 134
       },
       "T-145": {
         "p": "68171ae46c978b2071395bc2974499d249c38ae8db7563b4494ae6312b3dcab9",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 134
+        "line": 135
       },
       "T-146": {
         "p": "1e279a7a7057e234abd45e1080674871db69f0d6e05b80468769c678104dcacd",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 135
+        "line": 136
       },
       "T-147": {
         "p": "898a43e69a121c59ac1a9de2599f38b1e342705eab92a8b6d0958c215d7ea429",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 136
+        "line": 137
       },
       "T-148": {
         "p": "e32d48371c3d3b7a42bdc9650c56fe4ce2f1c74c059f995402087702554b13eb",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 137
+        "line": 138
       },
       "T-166": {
         "p": "43a406185993f1c1ec666ea3067cf23680b672e3280d39f3151487fa45dd8a51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 138
+        "line": 139
       },
       "T-167": {
         "p": "46274c9d63b8d47df99a89fe7a608c0e2d373013c89106fa1313770dc5a33446",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 139
+        "line": 140
       },
       "T-203": {
         "p": "d38f41d52c6cdf250fa4b1711e54f3bfae0239aaa1e916b269f6309455a41664",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 140
+        "line": 141
       },
       "T-204": {
         "p": "8ed352a049c8409f94b5c8eb0d7dcf8aa2107a391494bee10f222b0b4cb721d3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 141
+        "line": 142
       },
       "T-206": {
         "p": "4793ba67a47377c028615a3824bad92e70a64e4411bc5ff57d22ab0bbfa4d175",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 142
+        "line": 143
       },
       "T-211": {
         "p": "d35663f956334d9700ff4c98e23a82740abbf6f3302db70eee09d4f757f107b1",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 143
+        "line": 144
       },
       "T-212": {
         "p": "b211fe1b6def7c5b9d3420006c2afe1873a5e1a73d7e4b96f01b78bbb1545029",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 144
+        "line": 145
       },
       "T-213": {
         "p": "f14835f5e67c05785ea1ffad3f77b8b559fcef5631e21a2febd77e74fff41b7e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 145
+        "line": 146
       },
       "T-214": {
         "p": "36e4387b30a359be69ff5a6b7813527116e31caeaf03054cef683eb07f0a3995",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 146
+        "line": 147
       },
       "T-217": {
         "p": "1f1337b18137011c7047f829bc788bebd5559a3a5fc6716aa9281a4aa2319e03",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 147
+        "line": 148
       },
       "T-225": {
         "p": "0f155848ac6c248e6e5a0793505c4291831267d0df894505d04d69db9a73d68e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 148
+        "line": 149
       },
       "T-226": {
         "p": "5a3210904a724721a9a6295cf79181917c307efa4c9d10b32bf6397e5ccf5d4c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 149
+        "line": 150
       },
       "T-227": {
         "p": "7f00464543e63fe62188e1bc8407b6cfa992369d10d4f5810351a430a07b9dcd",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 150
+        "line": 151
       },
       "T-228": {
         "p": "3996ae75af584e7102d051235cf946f684943d5c02160cfc114bc63adce5e7b0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 151
+        "line": 152
       },
       "T-229": {
         "p": "a0db6abbe5db0c2af9196b2b74cece41db34b63da9cfdd72e3b7069e926a1fb4",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 152
+        "line": 153
       },
       "T-230": {
         "p": "bf3a388c0719ee37cfde2b112c5259c0574d36e196ba417b7bb5da5b409e7333",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 153
+        "line": 154
       },
       "T-231": {
         "p": "ea6ec112e4b72fc2bde2115f90d8ae65b54c50e2a749331ba9721f09b6209e07",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 154
+        "line": 155
       },
       "T-232": {
         "p": "efaf29863eb6af112232e00fbe24a97ad4f90e5c4b413f824a0fb5d67259d6aa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 155
+        "line": 156
       },
       "T-233": {
         "p": "d3b893e04f2642b1a005ddc5675342fa3f6fdbb5398e544805a301d18690afbc",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 156
+        "line": 157
       },
       "T-234": {
         "p": "199a67db97df4222d332691b12a2e51253b3a26ded1b9cfd8be109f5d9e4cf54",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 157
+        "line": 158
       },
       "T-235": {
         "p": "5910dae0249314634885c8ef5f6cd2042b00dfb610ce6e4fb30fae93a8212b0c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 158
+        "line": 159
       },
       "T-236": {
         "p": "c314ee955eb46b3e8af6b164ec61bf0dae250a114a3d5e6fed15c2cdfa276b46",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 159
+        "line": 160
       },
       "T-237": {
         "p": "252c164aa17f55f946004937f55a9eeddbf050ded789a3d4cc48b271fa4023d5",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 160
+        "line": 161
       },
       "T-239": {
         "p": "c02f1a4abf45d5e375e7a001d664fbb74ed64aacfbd3c2246d0ef20d11de47da",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 161
+        "line": 162
       },
       "T-306": {
         "p": "6e70aa29280171cfc8cefecd3c625c3d6fbaf1efd9ddb7c263da724c590012ac",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 162
+        "line": 163
       },
       "T-307": {
         "p": "c09929e1f2b79dded79313d42c87f76f9779966c2b3edda7ffdbd2f831bc6751",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 163
+        "line": 164
       },
       "T-308": {
         "p": "30907f1a79153d298eaf5e6a44236bc0c72503c106b354ef7413e9601545017d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 164
+        "line": 165
       },
       "T-312": {
         "p": "aba079a77d850991bf33f93eafe27e51e3b360ff443affee20e1512979e40a35",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 165
+        "line": 166
       },
       "T-313": {
         "p": "0e15baa84fb07cd54573e8583f5d83297947d2b04c454c4ac5e60645a2304cae",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 166
+        "line": 167
       },
       "T-314": {
         "p": "e27449d56336582826058aafbcd04d7b1ab2870d36c48aacb80dcfb467f588b3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 167
+        "line": 168
       },
       "T-315": {
         "p": "ed435381060aa96252c9648dfbedef29a695a1a144fc4bc3bab33c765847f3b3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 168
+        "line": 169
       },
       "T-316": {
         "p": "f9cd2f65fb0ea0439d189ae7b6398770e819e1efecaf4dff80eeb3f9b26207a4",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 169
+        "line": 170
       },
       "T-317": {
         "p": "707502c04076006e6ecad99fd9b465d283bf2d3d82b7b7e5a8032f8326a5797b",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 170
+        "line": 171
       },
       "T-318": {
         "p": "3b573ac174e2c9c9335c55edfac56f02a97bec7e640f5c6e245ebee5c46e2397",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 171
+        "line": 172
       },
       "T-319": {
         "p": "d8308d8982ed1309503c5d1f653fc3393fa350393f8df794412fe275a6b6bb47",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 172
+        "line": 173
       },
       "T-320": {
         "p": "5c0a2668bacc94de7b074a206b508b4e434d332a784ddd59f6fabfe10ce17b96",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 173
+        "line": 174
       },
       "T-322": {
         "p": "40f53562aa59a7430907f5258093a960f6350a1a0a7cd379b12ba8f1f4642302",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 174
+        "line": 175
       },
       "T-323": {
         "p": "020dff84912950875415d3620e08b32103193f85c823caa74cbad7f56df7ebe2",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 175
+        "line": 176
       },
       "T-324": {
         "p": "b91d1ef7bb45bbddd3e133772dcacd9aea00c81876ba756b7f1ac72fe17e1eeb",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 176
+        "line": 177
       },
       "T-402": {
         "p": "d3938652187653fc4243b2276d7a186d75be0d634a7d0895aedc9eb9a6e2202d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 177
+        "line": 178
       },
       "T-403": {
         "p": "6ce6510d53a21df1dd5ed88d215bac59b3b63bd7ae236792d745cfffa8cfb463",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 178
+        "line": 179
       },
       "T-404": {
         "p": "1764015e7886b5cfb00fb02ed37b6731437807af3d00ec81c1d56ca0663621df",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 179
+        "line": 180
       },
       "T-405": {
         "p": "ebcd5df6285b97634f24a82cab9f4c2e9e620de3503f2ab232f296e030d75c0d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 180
+        "line": 181
       },
       "T-406": {
         "p": "0d72de1d6ee165d507cb1b374fb826428c5f744c9c7153ba14f5c38a9d0b198d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 181
+        "line": 182
       },
       "T-407": {
         "p": "d478fc262e0308b84be33bb2bb8c3047c3de8f031ce42bb22594ddc524a5ae91",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 182
+        "line": 183
       },
       "T-408": {
         "p": "d35aee95142ed577f89633eeee4e3bc0f79dd19f985850185b033a1140ba2e45",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 183
+        "line": 184
       },
       "T-409": {
         "p": "dad86a1339e9bbc7983127f4c4328fc362747789649e172cb8aa8181171458d3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 184
+        "line": 185
       },
       "T-433": {
         "p": "f18abddf7520f90195be24c395a837aa42999e55a475552d5916342f393c5dde",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 185
+        "line": 186
       },
       "T-443": {
         "p": "a0373137cc3622c6f89c298a524a4a58b713090b3f203daf05624d6e2bea6693",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 186
+        "line": 187
       },
       "T-441": {
         "p": "bbe56cd331b48595acc3d960d91ef2287c8b8f6291a78eef3491852bd7a3950c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 187
+        "line": 188
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 188
+        "line": 189
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 189
+        "line": 190
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 190
+        "line": 191
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 191
+        "line": 192
       },
       "T-607": {
         "p": "91b52e65e575502bd70609dfd4c8584471d20a3438c97344ecfa3170a096190f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 192
+        "line": 193
       },
       "T-608": {
         "p": "436c6121534947512ecb201f088483251162c1d75c3f42ff188b21d246531af9",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 193
+        "line": 194
       },
       "T-609": {
         "p": "d375b8f8f8e1c2dea3e1bedf5d74b05f8bbe98ef632664d53a3b67e7c0a7d47f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 194
+        "line": 195
       },
       "T-611": {
         "p": "ed0faef7255ef07bb97afb6801ea626fc5984ab4d79f531944ec74d6c19c8005",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 195
+        "line": 196
       }
     },
     "OWNER.md": {
@@ -949,7 +955,7 @@
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
       "apps/game/src/config.ts:221:221": "35609e9c",
       "apps/game/src/panel/panel-controller.ts:569:569": "e8adcbbe",
-      "apps/debug/src/renderer/renderer-main.ts:1517:1517": "d72aa0a5",
+      "apps/debug/src/renderer/renderer-main.ts:1514:1514": "d72aa0a5",
       "apps/viewer/src/replay/types.ts:173:173": "a54e2f27",
       "apps/viewer/src/app.ts:265:265": "29576b54",
       "apps/viewer/src/app.ts:267:267": "27634b9a",
@@ -983,7 +989,7 @@
       "apps/game/crates/wasm/src/lib.rs:490:490": "beff473b",
       "apps/game/crates/wasm/src/lib.rs:457:457": "7160b9a6",
       "apps/debug/scripts/frame-bench.mjs:37:37": "25c591da",
-      "documents/viewer/implementation/core.md:29:29": "2dd9b28f",
+      "documents/viewer/implementation/core.md:29:29": "0832a0bc",
       "documents/viewer/implementation/core.md:31:31": "a79362a9",
       "apps/viewer/src/core/scene.ts:184:184~2": "55fe664e",
       "apps/game/scripts/check-wasm-api.mjs:52:70": "e05aa5d3",
@@ -1045,7 +1051,7 @@
       "apps/game/crates/wasm/src/lib.rs:1732:1732": "4a2cba58",
       "src/wasm-core/bsp_to_gltf_core/convert.rs:367:367": "a803e10b",
       "src/scripts/check-glb-parity.mjs:2:2": "3f48e740",
-      "apps/game/src/renderer/renderer-main.ts:1020:1020": "52edeba1",
+      "apps/game/src/renderer/renderer-main.ts:1017:1017": "52edeba1",
       "src/ts-shared/phys/world-builder.ts:203:203": "ea663714",
       ".github/workflows/deploy-pages.yml:200:200": "6dd5eaf1",
       "src/scripts/docflow.mjs:201:201": "30f3eaae"
@@ -1101,9 +1107,9 @@
       "apps/viewer/web/index.html:101:101": "aac32651",
       "apps/viewer/web/index.html:130:130": "951fa0a1",
       "apps/debug/src/worker/main.ts:455:455": "2ffefb43",
-      "apps/debug/src/renderer/renderer-main.ts:772:772": "d1d0ca7c",
+      "apps/debug/src/renderer/renderer-main.ts:769:769": "d1d0ca7c",
       "apps/game/src/worker/main.ts:451:451": "2ffefb43",
-      "apps/game/src/renderer/renderer-main.ts:993:993": "762a5048",
+      "apps/game/src/renderer/renderer-main.ts:990:990": "762a5048",
       "apps/debug/src/renderer/renderer-main.ts:29:29": "a962b5d6",
       "apps/viewer/src/app.ts:6:6": "8c993215",
       "apps/debug/src/app.ts:315:315": "9c650160",
@@ -1247,8 +1253,8 @@
       "apps/debug/src/app.ts:1915:1915": "694ec8fd",
       "apps/debug/src/app.ts:2255:2255": "85fc021f",
       "apps/debug/src/wasm.d.ts:86:86": "e4914832",
-      "apps/debug/src/renderer/renderer-main.ts:1234:1234": "04df5959",
-      "apps/debug/src/renderer/renderer-main.ts:1251:1251": "04df5959",
+      "apps/debug/src/renderer/renderer-main.ts:1231:1231": "04df5959",
+      "apps/debug/src/renderer/renderer-main.ts:1248:1248": "04df5959",
       "apps/debug/src/wasm.d.ts:126:126": "4587cf44",
       "apps/debug/src/config.ts:51:51~2": "c4c24786",
       "apps/debug/tsconfig.json:19:19": "dc6bb3d4",
@@ -1325,38 +1331,38 @@
       "apps/debug/src/renderer/renderer-main.ts:361:361": "a604c873",
       "apps/debug/src/renderer/renderer-main.ts:437:437": "66c9bdd6",
       "apps/debug/src/renderer/renderer-main.ts:498:498": "fa3bf374",
-      "apps/debug/src/renderer/renderer-main.ts:647:647": "1f48e7b8",
-      "apps/debug/src/renderer/renderer-main.ts:898:898": "7566ba80",
-      "apps/debug/src/renderer/renderer-main.ts:984:984": "23b030da",
-      "apps/debug/src/renderer/renderer-main.ts:1015:1015": "e3b0c442",
-      "apps/debug/src/renderer/renderer-main.ts:1097:1097": "66342f82",
-      "apps/debug/src/renderer/renderer-main.ts:1158:1158": "73dd47a9",
-      "apps/debug/src/renderer/renderer-main.ts:1168:1168": "8d64a30d",
-      "apps/debug/src/renderer/renderer-main.ts:1207:1207": "39997bb5",
-      "apps/debug/src/renderer/renderer-main.ts:1222:1222": "0fdb2b3c",
-      "apps/debug/src/renderer/renderer-main.ts:1243:1243": "e3b0c442",
-      "apps/debug/src/renderer/renderer-main.ts:1253:1253": "03d9aba6",
-      "apps/debug/src/renderer/renderer-main.ts:1020:1020": "d6ce3f4e",
-      "apps/debug/src/renderer/renderer-main.ts:1083:1083": "e592a543",
-      "apps/debug/src/renderer/renderer-main.ts:1052:1052": "b5323310",
-      "apps/debug/src/renderer/renderer-main.ts:1072:1072": "12c4cd56",
-      "apps/debug/src/renderer/renderer-main.ts:1308:1308": "8942ee8d",
-      "apps/debug/src/renderer/renderer-main.ts:1111:1111": "675a79a6",
-      "apps/debug/src/renderer/renderer-main.ts:790:790": "d10b36aa",
-      "apps/debug/src/renderer/renderer-main.ts:837:837": "11a47837",
-      "apps/debug/src/renderer/renderer-main.ts:844:844": "e4363d9d",
-      "apps/debug/src/renderer/renderer-main.ts:882:882": "8d46a8af",
-      "apps/debug/src/renderer/renderer-main.ts:911:911": "3c6cb7ad",
-      "apps/debug/src/renderer/renderer-main.ts:956:956": "9c8bd370",
+      "apps/debug/src/renderer/renderer-main.ts:644:644": "1f48e7b8",
+      "apps/debug/src/renderer/renderer-main.ts:895:895": "7566ba80",
+      "apps/debug/src/renderer/renderer-main.ts:981:981": "23b030da",
+      "apps/debug/src/renderer/renderer-main.ts:1012:1012": "e3b0c442",
+      "apps/debug/src/renderer/renderer-main.ts:1094:1094": "66342f82",
+      "apps/debug/src/renderer/renderer-main.ts:1155:1155": "73dd47a9",
+      "apps/debug/src/renderer/renderer-main.ts:1165:1165": "8d64a30d",
+      "apps/debug/src/renderer/renderer-main.ts:1204:1204": "39997bb5",
+      "apps/debug/src/renderer/renderer-main.ts:1222:1222": "63793258",
+      "apps/debug/src/renderer/renderer-main.ts:1243:1243": "358f0ff3",
+      "apps/debug/src/renderer/renderer-main.ts:1253:1253": "e1be4fde",
+      "apps/debug/src/renderer/renderer-main.ts:1020:1020": "91a5d579",
+      "apps/debug/src/renderer/renderer-main.ts:1083:1083": "7db8861d",
+      "apps/debug/src/renderer/renderer-main.ts:1052:1052": "c1b9c519",
+      "apps/debug/src/renderer/renderer-main.ts:1072:1072": "699fb2ae",
+      "apps/debug/src/renderer/renderer-main.ts:1308:1308": "4402e23b",
+      "apps/debug/src/renderer/renderer-main.ts:1111:1111": "ff965d7a",
+      "apps/debug/src/renderer/renderer-main.ts:790:790": "30a4407e",
+      "apps/debug/src/renderer/renderer-main.ts:837:837": "548c2bd7",
+      "apps/debug/src/renderer/renderer-main.ts:844:844": "f0af064c",
+      "apps/debug/src/renderer/renderer-main.ts:882:882": "d10b36aa",
+      "apps/debug/src/renderer/renderer-main.ts:911:911": "de64b719",
+      "apps/debug/src/renderer/renderer-main.ts:956:956": "eacff9c7",
       "src/renderer-shared/scene/texture-quality.ts:48:48": "3645c081",
       "apps/debug/src/renderer/renderer-main.ts:473:473": "6d065a13",
-      "apps/debug/src/renderer/renderer-main.ts:781:781": "b121a967",
-      "apps/debug/src/renderer/renderer-main.ts:757:757": "d10b36aa",
-      "apps/debug/src/renderer/renderer-main.ts:767:767": "41186e41",
-      "apps/debug/src/renderer/renderer-main.ts:1293:1293": "8942ee8d",
+      "apps/debug/src/renderer/renderer-main.ts:781:781": "e3b0c442",
+      "apps/debug/src/renderer/renderer-main.ts:757:757": "80bd92e6",
+      "apps/debug/src/renderer/renderer-main.ts:767:767": "c7ee094d",
+      "apps/debug/src/renderer/renderer-main.ts:1293:1293": "7932eb87",
       "apps/debug/src/renderer/renderer-main.ts:77:77": "c357faa5",
       "apps/debug/src/renderer/renderer-main.ts:79:79": "a7f16be0",
-      "apps/debug/src/renderer/renderer-main.ts:1402:1402": "cd385476",
+      "apps/debug/src/renderer/renderer-main.ts:1402:1402": "dde44124",
       "apps/debug/src/renderer/lod-manager.ts:23:23": "3e0a4bef",
       "apps/debug/src/renderer/lod-manager.ts:48:48": "11db8634",
       "apps/debug/src/renderer/lod-manager.ts:68:68": "d11a4ef7",
@@ -1382,29 +1388,29 @@
       "src/renderer-shared/scene/dispose.ts:16:16": "95b1f086",
       "apps/debug/src/renderer/renderer-main.ts:431:431": "207f2b7a",
       "src/renderer-shared/scene/texture-quality.ts:48:48~2": "3645c081",
-      "apps/debug/src/renderer/renderer-main.ts:615:615": "3f076a1d",
-      "apps/debug/src/renderer/renderer-main.ts:682:682": "a700986f",
-      "apps/debug/src/renderer/renderer-main.ts:683:683": "f8ab69c8",
-      "apps/debug/src/renderer/renderer-main.ts:686:686": "b1ec9b3b",
+      "apps/debug/src/renderer/renderer-main.ts:615:615": "e6e579ce",
+      "apps/debug/src/renderer/renderer-main.ts:682:682": "f332cf2f",
+      "apps/debug/src/renderer/renderer-main.ts:683:683": "b1ec9b3b",
+      "apps/debug/src/renderer/renderer-main.ts:686:686": "18622cf5",
       "apps/debug/src/config.ts:213:213": "647c12a5",
       "apps/debug/src/renderer/renderer-main.ts:498:498~2": "fa3bf374",
-      "apps/debug/src/renderer/renderer-main.ts:641:641": "5d35a453",
+      "apps/debug/src/renderer/renderer-main.ts:641:641": "e3b0c442",
       "src/renderer-shared/camera/near-plane.ts:65:65": "8e8af9bc",
-      "apps/debug/src/renderer/renderer-main.ts:691:691": "aeef02dd",
-      "apps/debug/src/renderer/renderer-main.ts:757:757~2": "d10b36aa",
+      "apps/debug/src/renderer/renderer-main.ts:691:691": "3ba11269",
+      "apps/debug/src/renderer/renderer-main.ts:757:757~2": "80bd92e6",
       "apps/debug/src/renderer/lod-manager.ts:231:231": "90b014e9",
       "apps/debug/src/renderer/lod-manager.ts:226:226": "3de64144",
       "apps/debug/src/renderer/lod-manager.ts:246:246": "82430b3d",
       "apps/debug/src/renderer/lod-manager.ts:155:155": "4d5e4d38",
-      "apps/debug/src/renderer/renderer-main.ts:676:676": "bd437e36",
-      "apps/debug/src/renderer/renderer-main.ts:653:653": "ee040fac",
+      "apps/debug/src/renderer/renderer-main.ts:676:676": "7af04a41",
+      "apps/debug/src/renderer/renderer-main.ts:653:653": "469fdefa",
       "apps/debug/src/app.ts:644:644": "3abd4e42",
       "apps/debug/src/app.ts:656:656": "3756ddf0",
       "apps/debug/src/renderer/renderer-main.ts:124:124": "83ddc56c",
       "src/renderer-shared/scene/scene-optimizer.ts:218:218": "27f16c60",
-      "apps/debug/src/renderer/renderer-main.ts:676:676~2": "bd437e36",
-      "apps/debug/src/renderer/renderer-main.ts:680:680": "153193bb",
-      "apps/debug/src/renderer/renderer-main.ts:1052:1052~2": "b5323310",
+      "apps/debug/src/renderer/renderer-main.ts:676:676~2": "7af04a41",
+      "apps/debug/src/renderer/renderer-main.ts:680:680": "f8ab69c8",
+      "apps/debug/src/renderer/renderer-main.ts:1052:1052~2": "c1b9c519",
       "apps/debug/src/config.ts:101:101": "a11a721f",
       "apps/debug/src/config.ts:101:101~2": "a11a721f",
       "apps/debug/src/app.ts:603:603": "7e067924",
@@ -1413,18 +1419,18 @@
       "apps/debug/src/renderer/renderer-main.ts:192:192": "35ac5938",
       "apps/debug/src/renderer/renderer-main.ts:551:551": "ef9aa64f",
       "apps/debug/src/renderer/lod-manager.ts:181:181~2": "6063e1bb",
-      "apps/debug/src/renderer/renderer-main.ts:708:708": "d4675535",
+      "apps/debug/src/renderer/renderer-main.ts:708:708": "523e1e87",
       "apps/debug/src/worker/main.ts:262:262": "1888de3f",
       "src/ts-shared/auth/auth-loop.ts:428:428": "36c67aa1",
-      "apps/debug/src/renderer/renderer-main.ts:655:655": "55fe7a66",
-      "apps/debug/src/renderer/renderer-main.ts:712:712": "1e88d097",
+      "apps/debug/src/renderer/renderer-main.ts:655:655": "d10b36aa",
+      "apps/debug/src/renderer/renderer-main.ts:712:712": "d10b36aa",
       "apps/debug/src/renderer/path-recorder.ts:648:648": "5c25c5a4",
       "src/ts-shared/auth/auth-loop.ts:431:431": "dccb28f7",
       "apps/debug/src/renderer/path-recorder.ts:647:647": "47beec80",
-      "apps/debug/src/renderer/renderer-main.ts:657:657": "8c7c79a8",
+      "apps/debug/src/renderer/renderer-main.ts:657:657": "e3b0c442",
       "src/renderer-shared/shader/lightmap-shader.ts:1735:1735": "e0fa2ec1",
       "src/renderer-shared/shader/lightmap-shader.ts:1539:1539": "48afb530",
-      "apps/debug/src/renderer/renderer-main.ts:719:719": "a3bdd646"
+      "apps/debug/src/renderer/renderer-main.ts:719:719": "8f4d305e"
     },
     "documents/debug/implementation/scripts.md": {
       "apps/debug/package.json:13:13": "8642e88d",
@@ -1447,7 +1453,7 @@
       "apps/debug/scripts/build-dist.mjs:220:220~2": "30eb094a",
       "apps/debug/scripts/jump-apex-verify.mjs:80:80": "0de5c01d",
       "apps/debug/scripts/jump-apex-verify.mjs:89:89": "08c26599",
-      "apps/debug/src/renderer/renderer-main.ts:1391:1391": "994e4c2e",
+      "apps/debug/src/renderer/renderer-main.ts:1388:1388": "994e4c2e",
       "apps/debug/scripts/jump-apex-verify.mjs:27:27": "fbc57a27",
       "apps/debug/scripts/frame-bench.mjs:37:37": "25c591da",
       "apps/debug/scripts/optimize-scene-verify.mjs:18:18": "6f3fabc8",
@@ -1478,8 +1484,8 @@
       "apps/debug/package.json:16:16": "15c96ebb",
       "apps/debug/crates/wasm/src/lib.rs:20:20": "cdfd62c6",
       "apps/debug/src/wasm.d.ts:86:86": "e4914832",
-      "apps/debug/src/renderer/renderer-main.ts:1234:1234": "04df5959",
-      "apps/debug/src/renderer/renderer-main.ts:1251:1251": "04df5959",
+      "apps/debug/src/renderer/renderer-main.ts:1231:1231": "04df5959",
+      "apps/debug/src/renderer/renderer-main.ts:1248:1248": "04df5959",
       "apps/debug/src/wasm.d.ts:34:34": "22ead2f8",
       "apps/debug/crates/wasm/src/lib.rs:21:21": "bcb4915f",
       "apps/debug/crates/wasm/src/lib.rs:3279:3279": "8f2dbfb6",
@@ -1700,25 +1706,25 @@
       "apps/debug/src/worker/main.ts:455:455~2": "2ffefb43",
       "apps/debug/src/app.ts:398:398": "cac67225",
       "apps/debug/src/worker/main.ts:466:466": "2b8381ae",
-      "apps/debug/src/renderer/renderer-main.ts:720:720": "574ccabb",
-      "apps/debug/src/renderer/renderer-main.ts:685:685": "f332cf2f",
-      "apps/debug/src/renderer/renderer-main.ts:691:691": "aeef02dd",
+      "apps/debug/src/renderer/renderer-main.ts:717:717": "574ccabb",
+      "apps/debug/src/renderer/renderer-main.ts:682:682": "f332cf2f",
+      "apps/debug/src/renderer/renderer-main.ts:688:688": "aeef02dd",
       "apps/debug/src/app.ts:2232:2232": "43675625",
-      "apps/debug/src/renderer/renderer-main.ts:1143:1143": "bf3ac468",
-      "apps/debug/src/renderer/renderer-main.ts:721:721": "001f55ec",
+      "apps/debug/src/renderer/renderer-main.ts:1140:1140": "bf3ac468",
+      "apps/debug/src/renderer/renderer-main.ts:718:718": "001f55ec",
       "apps/debug/src/physics/prediction-params.ts:23:23~2": "34e8f2a2",
       "apps/debug/src/worker/main.ts:62:62": "fe92a314",
       "apps/debug/src/main-wasm.ts:28:28~2": "3cd52cbd",
       "apps/debug/src/worker/main.ts:479:479": "8157d406",
       "apps/debug/src/renderer/lod-manager.ts:155:155": "4d5e4d38",
       "apps/debug/src/renderer/lod-manager.ts:276:276": "5b7a4ab1",
-      "apps/debug/src/renderer/renderer-main.ts:732:732": "f504df9d",
-      "apps/debug/src/renderer/renderer-main.ts:736:736": "b96a7b35",
+      "apps/debug/src/renderer/renderer-main.ts:729:729": "f504df9d",
+      "apps/debug/src/renderer/renderer-main.ts:733:733": "b96a7b35",
       "apps/debug/src/worker/worker-types.ts:248:248": "96af6911",
-      "apps/debug/src/renderer/renderer-main.ts:653:653": "ee040fac",
+      "apps/debug/src/renderer/renderer-main.ts:650:650": "ee040fac",
       "apps/debug/package.json:7:7~2": "3dcf7fcb",
       "apps/debug/src/app.ts:266:266~4": "5a1db74d",
-      "apps/debug/src/renderer/renderer-main.ts:615:615": "3f076a1d",
+      "apps/debug/src/renderer/renderer-main.ts:615:615": "e6e579ce",
       "apps/debug/src/worker/main.ts:455:455~3": "2ffefb43",
       "apps/debug/src/input/input-recorder.ts:166:166~2": "d31f84eb",
       "apps/debug/crates/wasm/src/lib.rs:534:534~2": "f8f5c7a0",
@@ -1764,29 +1770,29 @@
       "apps/debug/src/worker/main.ts:455:455": "2ffefb43",
       "apps/debug/src/app.ts:347:347": "683be277",
       "apps/debug/src/app.ts:367:367~2": "b3d091d0",
-      "apps/debug/src/renderer/renderer-main.ts:673:673": "06ad747a",
-      "apps/debug/src/renderer/renderer-main.ts:675:675": "c135199e",
-      "apps/debug/src/renderer/renderer-main.ts:683:683": "f8ab69c8",
-      "apps/debug/src/renderer/renderer-main.ts:687:687": "f97eef30",
-      "apps/debug/src/renderer/renderer-main.ts:691:691": "aeef02dd",
-      "apps/debug/src/renderer/renderer-main.ts:694:694": "3ba11269",
-      "apps/debug/src/renderer/renderer-main.ts:696:696": "58d35e62",
-      "apps/debug/src/renderer/renderer-main.ts:698:698": "b2bf324d",
-      "apps/debug/src/renderer/renderer-main.ts:653:653": "ee040fac",
-      "apps/debug/src/renderer/renderer-main.ts:664:664": "fc9645cc",
-      "apps/debug/src/renderer/renderer-main.ts:663:663": "f49c79f8",
-      "apps/debug/src/renderer/renderer-main.ts:668:668": "bfc780e6",
-      "apps/debug/src/renderer/renderer-main.ts:1262:1262": "739ddafb",
-      "apps/debug/src/renderer/renderer-main.ts:676:676": "bd437e36",
-      "apps/debug/src/renderer/renderer-main.ts:680:680": "153193bb",
-      "apps/debug/src/renderer/renderer-main.ts:682:682": "a700986f",
-      "apps/debug/src/renderer/renderer-main.ts:686:686": "b1ec9b3b",
-      "apps/debug/src/renderer/renderer-main.ts:691:691~2": "aeef02dd",
-      "apps/debug/src/renderer/renderer-main.ts:702:702": "3473559b",
-      "apps/debug/src/renderer/renderer-main.ts:703:703": "9eb6f009",
-      "apps/debug/src/renderer/renderer-main.ts:719:719": "a3bdd646",
-      "apps/debug/src/renderer/renderer-main.ts:728:728": "9cfe5d79",
-      "apps/debug/src/renderer/renderer-main.ts:735:735": "00756d0b",
+      "apps/debug/src/renderer/renderer-main.ts:670:670": "06ad747a",
+      "apps/debug/src/renderer/renderer-main.ts:672:672": "c135199e",
+      "apps/debug/src/renderer/renderer-main.ts:680:680": "f8ab69c8",
+      "apps/debug/src/renderer/renderer-main.ts:684:684": "f97eef30",
+      "apps/debug/src/renderer/renderer-main.ts:688:688": "aeef02dd",
+      "apps/debug/src/renderer/renderer-main.ts:691:691": "3ba11269",
+      "apps/debug/src/renderer/renderer-main.ts:693:693": "58d35e62",
+      "apps/debug/src/renderer/renderer-main.ts:695:695": "b2bf324d",
+      "apps/debug/src/renderer/renderer-main.ts:653:653": "469fdefa",
+      "apps/debug/src/renderer/renderer-main.ts:664:664": "834d5e94",
+      "apps/debug/src/renderer/renderer-main.ts:663:663": "f5bd8ef8",
+      "apps/debug/src/renderer/renderer-main.ts:668:668": "7edbadf4",
+      "apps/debug/src/renderer/renderer-main.ts:1262:1262": "49858fbe",
+      "apps/debug/src/renderer/renderer-main.ts:676:676": "7af04a41",
+      "apps/debug/src/renderer/renderer-main.ts:680:680~2": "f8ab69c8",
+      "apps/debug/src/renderer/renderer-main.ts:682:682": "f332cf2f",
+      "apps/debug/src/renderer/renderer-main.ts:686:686": "18622cf5",
+      "apps/debug/src/renderer/renderer-main.ts:688:688~2": "aeef02dd",
+      "apps/debug/src/renderer/renderer-main.ts:702:702": "1cd85e20",
+      "apps/debug/src/renderer/renderer-main.ts:703:703": "b62857ed",
+      "apps/debug/src/renderer/renderer-main.ts:719:719": "8f4d305e",
+      "apps/debug/src/renderer/renderer-main.ts:728:728": "22c9b362",
+      "apps/debug/src/renderer/renderer-main.ts:735:735": "6f56cf5e",
       "apps/debug/src/app.ts:603:603": "7e067924",
       "apps/debug/src/app.ts:2183:2183": "69cb189b",
       "apps/debug/src/app.ts:2203:2203": "f509460e",
@@ -1806,11 +1812,11 @@
       "apps/debug/src/worker/main.ts:308:308": "cda399d0",
       "apps/debug/src/worker/main.ts:383:383": "0c490e15",
       "apps/debug/src/worker/main.ts:460:460": "14e966a0",
-      "apps/debug/src/renderer/renderer-main.ts:1247:1247": "be7f7aae",
-      "apps/debug/src/renderer/renderer-main.ts:1252:1252": "de6aab45",
+      "apps/debug/src/renderer/renderer-main.ts:1247:1247": "b47943a1",
+      "apps/debug/src/renderer/renderer-main.ts:1252:1252": "10e0fa08",
       "apps/debug/src/renderer/renderer-main.ts:59:59": "e3b0c442",
       "apps/debug/src/worker/main.ts:12:12": "507ab3df",
-      "apps/debug/src/renderer/renderer-main.ts:653:653~2": "ee040fac",
+      "apps/debug/src/renderer/renderer-main.ts:653:653~2": "469fdefa",
       "apps/debug/src/app.ts:315:315": "9c650160",
       "apps/debug/src/worker/worker-types.ts:46:46": "7184fe4c",
       "apps/debug/src/renderer/renderer-main.ts:63:63": "684888c0",
@@ -1869,7 +1875,7 @@
       "apps/debug/src/app.ts:794:794": "9b1b5cca",
       "apps/debug/src/app.ts:798:798": "d1cddcd1",
       "apps/debug/src/app.ts:750:750": "9d8b2b56",
-      "apps/debug/src/renderer/renderer-main.ts:1097:1097": "66342f82",
+      "apps/debug/src/renderer/renderer-main.ts:1097:1097": "1f23547a",
       "apps/debug/src/app.ts:2275:2275": "d10b36aa",
       "apps/debug/src/app.ts:1121:1121": "29576b54",
       "apps/debug/src/app.ts:1110:1110~3": "29576b54",
@@ -1890,9 +1896,9 @@
       "apps/viewer/web/index.html:8:8": "b33b82b4",
       "apps/game/src/worker/main.ts:451:451": "2ffefb43",
       "apps/debug/src/worker/main.ts:455:455": "2ffefb43",
-      "apps/game/src/renderer/renderer-main.ts:604:604": "10f13de5",
-      "apps/debug/src/renderer/renderer-main.ts:1220:1220": "0cff3eac",
-      "apps/game/src/renderer/renderer-main.ts:604:604~2": "10f13de5",
+      "apps/game/src/renderer/renderer-main.ts:601:601": "10f13de5",
+      "apps/debug/src/renderer/renderer-main.ts:1217:1217": "0cff3eac",
+      "apps/game/src/renderer/renderer-main.ts:601:601~2": "10f13de5",
       "apps/viewer/src/core/bsp.ts:134:134": "418fbe28",
       "apps/viewer/crates/wasm/Cargo.toml:5:5": "0014339b",
       "apps/game/crates/wasm/Cargo.toml:22:22": "e3b0c442",
@@ -2046,7 +2052,7 @@
       "apps/game/src/config.ts:250:250": "e3b0c442",
       "apps/game/src/config.ts:252:252": "b5a81fad",
       "apps/game/src/app.ts:642:642": "cf011a06",
-      "apps/game/src/renderer/renderer-main.ts:448:448": "66c9bdd6",
+      "apps/game/src/renderer/renderer-main.ts:445:445": "66c9bdd6",
       "apps/game/src/renderer/renderer-main.ts:275:275": "26f9232d",
       "apps/game/src/config.ts:224:224": "7ad127b6",
       "apps/game/web/index.html:232:232": "ad5999b0",
@@ -2079,7 +2085,7 @@
       "apps/game/src/input/input-bridge.ts:19:19": "956a8c2a",
       "apps/game/src/input/input-bridge.ts:83:83": "5b0c7f70",
       "apps/game/src/app.ts:163:163": "4aa4a8bd",
-      "apps/game/src/renderer/renderer-main.ts:666:666": "a4b540d2",
+      "apps/game/src/renderer/renderer-main.ts:663:663": "a4b540d2",
       "apps/game/src/input/keymap.ts:20:20~2": "74bbd478",
       "apps/game/src/input/keymap.ts:37:37": "e302b049",
       "apps/game/src/app.ts:65:65": "99196384",
@@ -2166,8 +2172,8 @@
       "apps/game/src/renderer/renderer-main.ts:216:216": "a604c873",
       "src/renderer-shared/scene/scene-builder.ts:70:70": "56084808",
       "apps/game/src/renderer/renderer-main.ts:296:296": "f7f99052",
-      "apps/game/src/renderer/renderer-main.ts:837:837": "aeef02dd",
-      "apps/game/src/renderer/renderer-main.ts:834:834": "d826747d",
+      "apps/game/src/renderer/renderer-main.ts:831:831": "d826747d",
+      "apps/game/src/renderer/renderer-main.ts:831:831~2": "d826747d",
       "apps/game/src/renderer/renderer-main.ts:189:189": "410ffd48",
       "src/ts-shared/auth/shared-state.ts:399:399": "be6e6b78",
       "apps/game/src/renderer/renderer-main.ts:195:195": "e5b5589d",
@@ -2179,17 +2185,17 @@
       "src/renderer-shared/shader/lightmap-shader.ts:784:784": "b6f0e2b5",
       "src/renderer-shared/scene/scene-optimizer.ts:343:343": "e2fd2acc",
       "src/renderer-shared/scene/scene-optimizer.ts:35:35": "01f4b3a1",
-      "apps/game/src/renderer/renderer-main.ts:965:965": "c26e7741",
-      "apps/game/src/renderer/renderer-main.ts:1126:1126": "1e2f455c",
+      "apps/game/src/renderer/renderer-main.ts:962:962": "c26e7741",
+      "apps/game/src/renderer/renderer-main.ts:1123:1123": "1e2f455c",
       "apps/game/src/renderer/renderer-main.ts:296:296~2": "f7f99052",
       "src/renderer-shared/scene/inject-stats.ts:20:20~2": "675c3043",
       "apps/game/src/renderer/renderer-main.ts:78:78": "ee716eea",
-      "apps/game/src/renderer/renderer-main.ts:877:877": "22df4b25",
+      "apps/game/src/renderer/renderer-main.ts:874:874": "22df4b25",
       "apps/game/src/renderer/renderer-main.ts:342:342": "d01f3eb1",
       "apps/game/src/renderer/renderer-main.ts:137:137": "797f9a95",
       "apps/game/src/worker/main.ts:276:276": "f2e2d5e9",
-      "apps/game/src/renderer/renderer-main.ts:768:768": "28bbd6d0",
-      "apps/game/src/renderer/renderer-main.ts:644:644": "0a4329b7",
+      "apps/game/src/renderer/renderer-main.ts:765:765": "28bbd6d0",
+      "apps/game/src/renderer/renderer-main.ts:641:641": "0a4329b7",
       "src/ts-shared/phys/authority-calibrator.ts:735:735": "763038fe",
       "src/ts-shared/phys/authority-calibrator.ts:776:776": "9ac948b6",
       "src/ts-shared/phys/authority-calibrator.ts:743:743": "60ea817a",
@@ -2219,8 +2225,8 @@
       "apps/game/src/app.ts:625:625": "87fa9c19",
       "apps/game/src/app.ts:632:632": "be8af1ab",
       "apps/game/src/app.ts:209:209": "e1257147",
-      "apps/game/src/renderer/renderer-main.ts:678:678": "ff9db35a",
-      "apps/game/src/renderer/renderer-main.ts:710:710": "eee30dba",
+      "apps/game/src/renderer/renderer-main.ts:675:675": "ff9db35a",
+      "apps/game/src/renderer/renderer-main.ts:707:707": "eee30dba",
       "apps/game/src/app.ts:610:610~2": "5c033129",
       "apps/game/src/panel/panel-controller.ts:771:771": "ec0c170b",
       "apps/game/src/savepoint.ts:69:69": "8330a6e1",
@@ -2230,7 +2236,7 @@
       "apps/game/src/panel/panel-controller.ts:803:803": "46778c7d",
       "apps/game/src/savepoint.ts:93:93": "4ec7b66c",
       "apps/game/src/savepoint.ts:21:21~2": "1503c278",
-      "apps/game/src/renderer/renderer-main.ts:703:703": "cf5ab4d6",
+      "apps/game/src/renderer/renderer-main.ts:700:700": "cf5ab4d6",
       "apps/game/src/savepoint.ts:57:57": "274c54cd",
       "apps/game/src/savepoint.ts:59:59": "a0852628",
       "apps/game/src/savepoint.ts:112:112": "2bf72308"
@@ -2277,7 +2283,7 @@
       "apps/game/src/worker/main.ts:65:65": "c08fab34",
       "apps/game/src/renderer/renderer-main.ts:34:34": "2aeaa87c",
       "apps/game/src/renderer/renderer-main.ts:42:42": "5161e24c",
-      "apps/game/src/renderer/renderer-main.ts:891:891": "77e698ef",
+      "apps/game/src/renderer/renderer-main.ts:888:888": "77e698ef",
       "apps/game/src/app.ts:27:27~2": "62351ae1",
       "apps/game/src/wasm.d.ts:16:16~2": "e5eceedb",
       "apps/game/src/wasm.d.ts:16:16~3": "e5eceedb"
@@ -2377,8 +2383,8 @@
       "apps/game/src/app.ts:832:832": "11edd48d",
       "apps/game/src/app.ts:95:95": "d3e6b864",
       "apps/game/src/worker/main.ts:451:451": "2ffefb43",
-      "apps/game/src/renderer/renderer-main.ts:604:604": "10f13de5",
-      "apps/game/src/renderer/renderer-main.ts:843:843": "1bbe9d52",
+      "apps/game/src/renderer/renderer-main.ts:601:601": "10f13de5",
+      "apps/game/src/renderer/renderer-main.ts:840:840": "1bbe9d52",
       "apps/game/src/app.ts:43:43": "8802505c",
       "apps/game/src/panel/panel-controller.ts:37:37": "8ff828a4",
       "apps/game/package.json:15:15": "08daaa13",
@@ -2453,7 +2459,7 @@
       "apps/game/src/app.ts:317:317": "ddbea1c7",
       "apps/game/src/app.ts:321:321": "e3f04dee",
       "apps/game/src/app.ts:326:326": "6debd0c8",
-      "apps/game/src/renderer/renderer-main.ts:837:837": "aeef02dd",
+      "apps/game/src/renderer/renderer-main.ts:834:834": "aeef02dd",
       "apps/game/src/input/input-bridge.ts:30:30": "3940053d",
       "apps/game/src/app.ts:235:235": "2855c433",
       "src/ts-shared/input/input-layer.ts:25:25": "70a53365",
@@ -2461,12 +2467,12 @@
       "src/ts-shared/phys/params.ts:67:67": "f1c775e9",
       "src/ts-shared/auth/auth-loop.ts:252:252": "644607a7",
       "src/ts-shared/auth/worker-dispatch.ts:359:359": "fd061764",
-      "apps/game/src/renderer/renderer-main.ts:839:839": "5295fcb4",
-      "apps/game/src/renderer/renderer-main.ts:841:841": "f13eedce",
+      "apps/game/src/renderer/renderer-main.ts:836:836": "5295fcb4",
+      "apps/game/src/renderer/renderer-main.ts:838:838": "f13eedce",
       "src/ts-shared/phys/authority-calibrator.ts:33:33": "0be3495a",
       "apps/game/src/renderer/renderer-main.ts:189:189": "410ffd48",
       "apps/game/src/renderer/renderer-main.ts:195:195": "e5b5589d",
-      "apps/game/src/renderer/renderer-main.ts:860:860": "f7c8db2a",
+      "apps/game/src/renderer/renderer-main.ts:857:857": "f7c8db2a",
       "apps/game/src/renderer/renderer-main.ts:296:296": "f7f99052",
       "src/renderer-shared/scene/scene-builder.ts:85:85": "abadd150",
       "apps/game/src/app.ts:679:679": "0e1a4858",
@@ -2478,7 +2484,7 @@
       "apps/game/src/app.ts:94:94~3": "5a1db74d",
       "apps/game/src/config.ts:176:176": "f4644f65",
       "apps/game/src/worker/main.ts:451:451~3": "2ffefb43",
-      "apps/game/src/renderer/renderer-main.ts:827:827": "da7226c5",
+      "apps/game/src/renderer/renderer-main.ts:824:824": "da7226c5",
       "apps/game/src/panel/panel-controller.ts:45:45": "f91c1a1d",
       "apps/game/src/input/input-bridge.ts:41:41~2": "e2259974",
       "apps/game/web/index.html:27:27~2": "7dde4006",
@@ -2508,7 +2514,7 @@
       "apps/game/src/app.ts:170:170": "82bc334d",
       "apps/game/src/app.ts:173:173": "3783d667",
       "apps/game/src/app.ts:176:176": "26a379a7",
-      "apps/game/src/renderer/renderer-main.ts:592:592": "b45bb7d7",
+      "apps/game/src/renderer/renderer-main.ts:589:589": "b45bb7d7",
       "apps/game/src/app.ts:181:181": "2f3d8c78",
       "apps/game/src/app.ts:182:182": "d2cfb6df",
       "apps/game/src/app.ts:185:185": "a524df56",
@@ -2525,7 +2531,7 @@
       "apps/game/src/app.ts:514:514": "31ce3741",
       "apps/game/src/app.ts:521:521": "8c03750c",
       "apps/game/src/app.ts:536:536": "9016175f",
-      "apps/game/src/renderer/renderer-main.ts:604:604": "10f13de5",
+      "apps/game/src/renderer/renderer-main.ts:601:601": "10f13de5",
       "apps/game/src/app.ts:558:558": "c51b06cf",
       "apps/game/src/app.ts:570:570": "cb872c3c",
       "apps/game/src/app.ts:571:571": "4db1729d",
@@ -2535,25 +2541,25 @@
       "apps/game/src/app.ts:582:582": "5990917f",
       "apps/game/src/app.ts:594:594": "0018bdde",
       "apps/game/src/app.ts:596:596": "8b0ca448",
-      "apps/game/src/renderer/renderer-main.ts:829:829": "8d847504",
-      "apps/game/src/renderer/renderer-main.ts:830:830": "fa35c468",
-      "apps/game/src/renderer/renderer-main.ts:833:833": "3d891d97",
-      "apps/game/src/renderer/renderer-main.ts:834:834": "d826747d",
-      "apps/game/src/renderer/renderer-main.ts:837:837": "aeef02dd",
-      "apps/game/src/renderer/renderer-main.ts:839:839": "5295fcb4",
-      "apps/game/src/renderer/renderer-main.ts:841:841": "f13eedce",
-      "apps/game/src/renderer/renderer-main.ts:843:843": "1bbe9d52",
-      "apps/game/src/renderer/renderer-main.ts:844:844": "7303054f",
-      "apps/game/src/renderer/renderer-main.ts:847:847": "0ccc3199",
-      "apps/game/src/renderer/renderer-main.ts:860:860": "f7c8db2a",
-      "apps/game/src/renderer/renderer-main.ts:862:862": "e0197462",
-      "apps/game/src/renderer/renderer-main.ts:863:863": "4d588a53",
-      "apps/game/src/renderer/renderer-main.ts:866:866": "d043592a",
+      "apps/game/src/renderer/renderer-main.ts:826:826": "8d847504",
+      "apps/game/src/renderer/renderer-main.ts:827:827": "fa35c468",
+      "apps/game/src/renderer/renderer-main.ts:830:830": "3d891d97",
+      "apps/game/src/renderer/renderer-main.ts:831:831": "d826747d",
+      "apps/game/src/renderer/renderer-main.ts:834:834": "aeef02dd",
+      "apps/game/src/renderer/renderer-main.ts:836:836": "5295fcb4",
+      "apps/game/src/renderer/renderer-main.ts:841:841": "7303054f",
+      "apps/game/src/renderer/renderer-main.ts:843:843": "69112201",
+      "apps/game/src/renderer/renderer-main.ts:844:844": "0ccc3199",
+      "apps/game/src/renderer/renderer-main.ts:847:847": "d10b36aa",
+      "apps/game/src/renderer/renderer-main.ts:860:860": "4d588a53",
+      "apps/game/src/renderer/renderer-main.ts:862:862": "2241a07d",
+      "apps/game/src/renderer/renderer-main.ts:863:863": "d043592a",
+      "apps/game/src/renderer/renderer-main.ts:866:866": "d10b36aa",
       "src/renderer-shared/camera/near-plane.ts:65:65": "8e8af9bc",
-      "apps/game/src/renderer/renderer-main.ts:885:885": "6aa00c45",
+      "apps/game/src/renderer/renderer-main.ts:885:885": "a51ce8a7",
       "apps/game/src/renderer/renderer-main.ts:78:78": "ee716eea",
-      "apps/game/src/renderer/renderer-main.ts:903:903": "b121a967",
-      "apps/game/src/renderer/renderer-main.ts:909:909": "5181e971",
+      "apps/game/src/renderer/renderer-main.ts:903:903": "3e51cde6",
+      "apps/game/src/renderer/renderer-main.ts:909:909": "e3b0c442",
       "apps/game/src/app.ts:391:391": "10ed9ead",
       "apps/game/src/app.ts:396:396": "0dedb9ab",
       "apps/game/src/app.ts:400:400": "83a61762",
@@ -2577,7 +2583,7 @@
       "apps/game/src/worker/main.ts:291:291": "de08663b",
       "apps/game/src/worker/main.ts:458:458": "5eb47813",
       "apps/game/src/app.ts:141:141": "316986fa",
-      "apps/game/src/renderer/renderer-main.ts:780:780": "9ca85125",
+      "apps/game/src/renderer/renderer-main.ts:780:780": "e3b0c442",
       "src/ts-shared/auth/shared-state.ts:1022:1022": "54543cfc",
       "src/ts-shared/auth/shared-state.ts:568:568": "8fe5f0ab",
       "src/ts-shared/auth/shared-state.ts:259:259": "fc4d3766",
@@ -2637,7 +2643,7 @@
       "apps/game/src/app.ts:117:117~2": "243264a5",
       "apps/game/src/app.ts:119:119": "70d91d5d",
       "apps/game/src/app.ts:150:150": "fd50999d",
-      "apps/game/src/renderer/renderer-main.ts:742:742": "9c98eacb",
+      "apps/game/src/renderer/renderer-main.ts:742:742": "46eaeb52",
       "src/ts-shared/auth/worker-dispatch.ts:299:299~2": "051a1e2a",
       "apps/game/src/app.ts:136:136~2": "b0acc6be",
       "apps/game/src/app.ts:823:823": "6c5c1407",
@@ -2997,7 +3003,7 @@
       "apps/viewer/src/core/scene.ts:203:203": "595bd0e6",
       "apps/viewer/src/core/scene.ts:209:209": "55dca7a1",
       "apps/viewer/src/core/scene.ts:213:213": "70036a9b",
-      "apps/viewer/src/core/scene.ts:245:245": "3d770b2b",
+      "apps/viewer/src/core/scene.ts:240:240": "3d770b2b",
       "src/renderer-shared/scene/scene-builder.ts:108:108": "793a4234",
       "apps/viewer/src/core/scene.ts:204:204": "0a344c61",
       "apps/viewer/src/core/scene.ts:206:206": "d10b36aa",
@@ -3005,12 +3011,12 @@
       "apps/viewer/src/core/scene.ts:119:119": "d26daaaf",
       "apps/viewer/src/core/scene.ts:125:125": "0336a826",
       "src/renderer-shared/camera/near-plane.ts:65:65": "8e8af9bc",
-      "apps/viewer/src/core/scene.ts:270:270": "f54564f0",
-      "apps/viewer/src/core/scene.ts:275:275": "fea50734",
+      "apps/viewer/src/core/scene.ts:265:265": "f54564f0",
+      "apps/viewer/src/core/scene.ts:270:270": "fea50734",
       "src/renderer-shared/scene/scene-optimizer.ts:218:218": "27f16c60",
-      "apps/viewer/src/core/scene.ts:315:315": "d0e8b6bd",
-      "apps/viewer/src/core/scene.ts:318:318": "01242fa6",
-      "apps/viewer/src/core/scene.ts:257:257": "588a52a9",
+      "apps/viewer/src/core/scene.ts:310:310": "d0e8b6bd",
+      "apps/viewer/src/core/scene.ts:313:313": "01242fa6",
+      "apps/viewer/src/core/scene.ts:252:252": "588a52a9",
       "src/renderer-shared/shader/lightmap-shader.ts:431:431": "a7793959",
       "src/renderer-shared/scene/dispose.ts:16:16~2": "95b1f086",
       "src/renderer-shared/scene/dispose.ts:16:16~3": "95b1f086",
@@ -3821,7 +3827,7 @@
       "apps/viewer/src/replay/demopanel.ts:1148:1148": "997f2d6d",
       "apps/viewer/src/ui/mapinfo.ts:98:98": "f9d5b26a",
       "src/renderer-shared/shader/lightmap-shader.ts:437:437": "295354fc",
-      "apps/viewer/src/core/scene.ts:249:249": "251ebc26",
+      "apps/viewer/src/core/scene.ts:244:244": "251ebc26",
       "apps/viewer/src/core/scene.ts:77:77": "fb565cb6",
       "apps/viewer/src/ui/mapinfo.ts:98:98~2": "f9d5b26a",
       "apps/viewer/src/core/scene.ts:36:36": "6bd09791",
@@ -4100,7 +4106,7 @@
       "apps/viewer/src/replay/build.ts:29:29": "74e721d2",
       "apps/viewer/src/replay/types.ts:55:55": "40809910",
       "src/renderer-shared/shader/lightmap-shader.ts:431:431": "a7793959",
-      "apps/viewer/src/core/scene.ts:249:249": "251ebc26",
+      "apps/viewer/src/core/scene.ts:244:244": "251ebc26",
       "apps/viewer/package.json:7:7~3": "3dcf7fcb",
       "apps/viewer/src/app.ts:48:48~4": "e8b4ca19",
       "apps/viewer/src/core/bsp.ts:87:87~2": "04f2fb15",
@@ -4352,6 +4358,158 @@
   },
   "rebaselines": [
     {
+      "path": "documents/viewer/overview.md",
+      "at": "2026-10-09T04:56:46.003Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 2,
+      "total": 132
+    },
+    {
+      "path": "documents/viewer/implementation/ui.md",
+      "at": "2026-10-09T04:56:45.286Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 2,
+      "total": 149
+    },
+    {
+      "path": "documents/viewer/implementation/core.md",
+      "at": "2026-10-09T04:56:44.584Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 11,
+      "total": 116
+    },
+    {
+      "path": "documents/game/sequences.md",
+      "at": "2026-10-09T04:56:43.905Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 27,
+      "total": 187
+    },
+    {
+      "path": "documents/game/overview.md",
+      "at": "2026-10-09T04:56:43.232Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 14,
+      "total": 114
+    },
+    {
+      "path": "documents/game/implementation/types.md",
+      "at": "2026-10-09T04:56:42.550Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 2,
+      "total": 14
+    },
+    {
+      "path": "documents/game/implementation/savepoint.md",
+      "at": "2026-10-09T04:56:41.903Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 6,
+      "total": 31
+    },
+    {
+      "path": "documents/game/implementation/renderer.md",
+      "at": "2026-10-09T04:56:41.204Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 14,
+      "total": 46
+    },
+    {
+      "path": "documents/game/implementation/input.md",
+      "at": "2026-10-09T04:56:40.539Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 2,
+      "total": 50
+    },
+    {
+      "path": "documents/game/implementation/config.md",
+      "at": "2026-10-09T04:56:39.872Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 2,
+      "total": 50
+    },
+    {
+      "path": "documents/game/differences.md",
+      "at": "2026-10-09T04:56:39.185Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 6,
+      "total": 73
+    },
+    {
+      "path": "documents/debug/sequences.md",
+      "at": "2026-10-09T04:56:38.503Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 35,
+      "total": 148
+    },
+    {
+      "path": "documents/debug/overview.md",
+      "at": "2026-10-09T04:56:37.801Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 17,
+      "total": 119
+    },
+    {
+      "path": "documents/debug/implementation/wasm-bindings.md",
+      "at": "2026-10-09T04:56:37.097Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 4,
+      "total": 28
+    },
+    {
+      "path": "documents/debug/implementation/scripts.md",
+      "at": "2026-10-09T04:56:36.391Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 2,
+      "total": 31
+    },
+    {
+      "path": "documents/debug/implementation/renderer.md",
+      "at": "2026-10-09T04:56:35.724Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 53,
+      "total": 106
+    },
+    {
+      "path": "documents/debug/implementation/app.md",
+      "at": "2026-10-09T04:56:35.035Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 4,
+      "total": 86
+    },
+    {
+      "path": "documents/debug/differences.md",
+      "at": "2026-10-09T04:56:34.375Z",
+      "by": "agent",
+      "reason": "T-616 锚点复核",
+      "changed": 4,
+      "total": 78
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-09T04:56:33.690Z",
+      "by": "agent",
+      "reason": "T-616 山脊删除后锚点复核",
+      "changed": 5,
+      "total": 106
+    },
+    {
       "path": "documents/game/overview.md",
       "at": "2026-10-09T04:50:16.393Z",
       "by": "agent",
@@ -4518,158 +4676,6 @@
       "reason": "D-026 批量处置",
       "changed": 2,
       "total": 29
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T02:31:03.257Z",
-      "by": "agent",
-      "reason": "D-026：批量遗弃 7 条不重要行 + T-040 修复",
-      "changed": 7,
-      "total": 106
-    },
-    {
-      "path": "documents/game/implementation/savepoint.md",
-      "at": "2026-10-09T02:27:43.794Z",
-      "by": "agent",
-      "reason": "T-213 结案",
-      "changed": 5,
-      "total": 31
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T02:27:43.482Z",
-      "by": "agent",
-      "reason": "T-213 结案",
-      "changed": 3,
-      "total": 112
-    },
-    {
-      "path": "documents/game/implementation/savepoint.md",
-      "at": "2026-10-09T02:18:12.824Z",
-      "by": "agent",
-      "reason": "panel-controller.ts 删死变量（净 -1 行）后锚点重编号",
-      "changed": 4,
-      "total": 32
-    },
-    {
-      "path": "documents/game/implementation/renderer.md",
-      "at": "2026-10-09T02:18:04.877Z",
-      "by": "agent",
-      "reason": "T-021 结案 + 缺口标已消除",
-      "changed": 3,
-      "total": 46
-    },
-    {
-      "path": "documents/game/implementation/config.md",
-      "at": "2026-10-09T02:18:04.595Z",
-      "by": "agent",
-      "reason": "T-021 结案 + 缺口标已消除",
-      "changed": 6,
-      "total": 50
-    },
-    {
-      "path": "documents/game/implementation/panel.md",
-      "at": "2026-10-09T02:18:04.311Z",
-      "by": "agent",
-      "reason": "T-021 结案 + 缺口标已消除",
-      "changed": 7,
-      "total": 27
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T02:18:04.029Z",
-      "by": "agent",
-      "reason": "T-021 结案",
-      "changed": 4,
-      "total": 111
-    },
-    {
-      "path": "documents/debug/implementation/scripts.md",
-      "at": "2026-10-09T02:09:10.074Z",
-      "by": "agent",
-      "reason": "T-217/T-307 结案 + 锚点重编号",
-      "changed": 2,
-      "total": 31
-    },
-    {
-      "path": "documents/game/implementation/wasm-crate.md",
-      "at": "2026-10-09T02:09:09.800Z",
-      "by": "agent",
-      "reason": "T-217/T-307 结案 + 锚点重编号",
-      "changed": 22,
-      "total": 31
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T02:09:09.523Z",
-      "by": "agent",
-      "reason": "T-217 + T-307 结案",
-      "changed": 7,
-      "total": 109
-    },
-    {
-      "path": "documents/viewer/implementation/replay.md",
-      "at": "2026-10-09T02:02:17.728Z",
-      "by": "agent",
-      "reason": "T-118 重定性",
-      "changed": 14,
-      "total": 229
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T02:02:17.438Z",
-      "by": "agent",
-      "reason": "T-118 重定性（死 UI）",
-      "changed": 9,
-      "total": 108
-    },
-    {
-      "path": "documents/viewer/sequences.md",
-      "at": "2026-10-09T02:00:55.252Z",
-      "by": "agent",
-      "reason": "T-167 结案 + 锚点重编号",
-      "changed": 4,
-      "total": 170
-    },
-    {
-      "path": "documents/viewer/implementation/worker.md",
-      "at": "2026-10-09T02:00:54.973Z",
-      "by": "agent",
-      "reason": "T-167 结案 + 锚点重编号",
-      "changed": 4,
-      "total": 47
-    },
-    {
-      "path": "documents/viewer/implementation/replay.md",
-      "at": "2026-10-09T02:00:54.686Z",
-      "by": "agent",
-      "reason": "T-167 结案 + 锚点重编号",
-      "changed": 10,
-      "total": 229
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T02:00:54.411Z",
-      "by": "agent",
-      "reason": "T-167 结案",
-      "changed": 7,
-      "total": 101
-    },
-    {
-      "path": "documents/game/implementation/renderer.md",
-      "at": "2026-10-09T01:51:01.025Z",
-      "by": "agent",
-      "reason": "T-107 结案",
-      "changed": 4,
-      "total": 49
-    },
-    {
-      "path": "documents/viewer/implementation/core.md",
-      "at": "2026-10-09T01:51:00.744Z",
-      "by": "agent",
-      "reason": "T-107 结案",
-      "changed": 4,
-      "total": 117
     }
   ]
 }

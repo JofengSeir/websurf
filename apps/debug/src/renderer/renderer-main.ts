@@ -42,7 +42,7 @@ import type { PhyBevelPiece } from './collider-debug.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
-import { buildMiniatureSky, createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { LodManager } from './lod-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
@@ -514,7 +514,7 @@ export class RendererMain {
 
     // 3D 天空盒（起源做法）：把天空区图元**摘出主世界**，交给第二台相机单独渲染。
     // 判据 =「图元采样点落在 sky_camera 所在 BSP cluster」；无 PVS 或无 sky_camera 时不建
-    // 天空区，由下面的合成山脊兜底。摘取放在合并**之前**：GLB 图元还是逐面的小块，cluster
+    // 天空区；摘不到时不挂天空层。摘取放在合并**之前**：GLB 图元还是逐面的小块，cluster
     // 采样才准；合并成空间块后跨区的大块无法再拆。
     // 两条独立判据互证（`.tmp/mapsurvey/skysel.mjs`）：本判据与上一版「种子 + 包围盒簇扩张」
     // 在 GLB 图元口径下都是 361 个；浏览器侧 GLTFLoader 逐 primitive 建 mesh，同一片区域上是
@@ -587,10 +587,7 @@ export class RendererMain {
       this.scene.add(this.skyGroup);
       console.info(`[skybox] 3D 天空盒：天空区 ${this.skyGroup.children.length} 个图元挂第 ${SKY_LAYER} 层，由第二相机渲染`);
     } else {
-      const miniature = buildMiniatureSky({ center: boundingBox.getCenter(new THREE.Vector3()), radius: maxDim * 0.5, color: 0x46566a, haze: data.fogParams?.color ?? 0xc8d8e4, seed: data.metadata?.numFaces ?? 1 });
-      miniature.userData.isMiniatureSky = true;
-      this.scene.add(miniature);
-      console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 合成山脊兜底');
+      console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
 
     const defaultNear = NearPlaneController.defaultNearForScene(maxDim);

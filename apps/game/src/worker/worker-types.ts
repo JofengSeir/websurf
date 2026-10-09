@@ -132,7 +132,7 @@ export interface SceneDataMessage {
   mosaicManifest?: string; skyboxTexture?: import('three').CubeTexture | null;
   /** 地图线性雾（`env_fog_controller`，见 renderer-shared/environment/fog-controller.js）；无控制器为 null。 */
   fogParams?: { color: number; start: number; end: number } | null;
-  /** 3D 天空盒的 `sky_camera` 参数（见 renderer-shared/environment/miniature-sky.js）；无则退回合成山脊。 */
+  /** 3D 天空盒的 `sky_camera` 参数（见 renderer-shared/environment/miniature-sky.js）；无则不加天空层。 */
   skyCamera?: { origin: [number, number, number]; scale: number; fog?: { enable: boolean; color: number; start: number; end: number } | null } | null;
 }
 

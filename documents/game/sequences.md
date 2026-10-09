@@ -17,7 +17,7 @@
 | `main` | 建 `RendererMain` 并注册两个回调（`onSceneLoaded`、`onSyncRenderState`） | `renderer`；死亡阈值回调 | `apps/game/src/app.ts:162`、`apps/game/src/app.ts:163`、`apps/game/src/app.ts:166` |
 | `main` | `renderer.init(...)` 后 `start()`：写光照 uniform 初值、建 renderer/scene/camera、起 rAF | three 的 renderer / scene / camera；光照共享 uniform | `apps/game/src/app.ts:169`、`apps/game/src/app.ts:170` |
 | `main` | `installFrameProbe()`：挂 `globalThis.__vbspFrameProbe` | `globalThis` 一个对象 | `apps/game/src/app.ts:173` |
-| `main` | `initPrediction('./websurf_wasm_bg.wasm', embeddedWasm)`：内嵌走 `initSync`，否则 `fetch` | 主线程 wasm 实例；`mainWasmReady` promise | `apps/game/src/app.ts:176`、`apps/game/src/renderer/renderer-main.ts:592` |
+| `main` | `initPrediction('./websurf_wasm_bg.wasm', embeddedWasm)`：内嵌走 `initSync`，否则 `fetch` | 主线程 wasm 实例；`mainWasmReady` promise | `apps/game/src/app.ts:176`、`apps/game/src/renderer/renderer-main.ts:589` |
 | `main` | 建 `InputBridge`，随后 `syncFullConfig()` 按四段各发一条 `config` | `bridge`；Worker 与本端 config 副本 | `apps/game/src/app.ts:181`、`apps/game/src/app.ts:182` |
 | `main` | 建 `PanelController`：加载偏好 → 回写控件 → 全量下发 → 应用准星 | 面板 DOM；`config`；localStorage | `apps/game/src/app.ts:185`、`apps/game/src/panel/panel-controller.ts:82` |
 | `main` | `initKeyHud()` → `bindInput()` → `startInputLoop()` | 键簇标签；DOM 事件；rAF 输入循环 | `apps/game/src/app.ts:219`、`apps/game/src/app.ts:220`、`apps/game/src/app.ts:221` |
@@ -25,7 +25,7 @@
 | `handleLoadBsp` | 记录地图名、载入该地图存点、收起面板、等主线程 wasm 就绪 | `currentMapName`；`savePointStore`；面板可见性 | `apps/game/src/app.ts:501`、`apps/game/src/app.ts:502`、`apps/game/src/app.ts:507` |
 | `handleLoadBsp` | 释放上一张图 → `buildWorldBundle(...)` 解析并导出 | 场景释放；`WorldBundle` | `apps/game/src/app.ts:508`、`apps/game/src/app.ts:514` |
 | `handleLoadBsp` | `renderer.loadScene({...})`：GLB + spawn + PVS + mosaic manifest | three 场景；死亡阈值回调 | `apps/game/src/app.ts:521` |
-| `handleLoadBsp` | `renderer.buildPredictionWorld({...})`：主线程渲染物理世界 | `predPhys` | `apps/game/src/app.ts:536`、`apps/game/src/renderer/renderer-main.ts:604` |
+| `handleLoadBsp` | `renderer.buildPredictionWorld({...})`：主线程渲染物理世界 | `predPhys` | `apps/game/src/app.ts:536`、`apps/game/src/renderer/renderer-main.ts:601` |
 | `handleLoadBsp` → Worker | 发 `world-json`（三段 JSON + spawn） | Worker 侧权威实例 | `apps/game/src/app.ts:558` |
 | `handleLoadBsp` | 双端出生点列表：渲染端 `setSpawnPoints` + Worker `set-spawn-points` | 两端出生点列表 | `apps/game/src/app.ts:570`、`apps/game/src/app.ts:571` |
 | `handleLoadBsp` | 再 `syncFullConfig()`（世界重建后参数重放） | Worker 侧 `set_params` / `set_hull` | `apps/game/src/app.ts:573`、`apps/game/src/worker/main.ts:88` |
@@ -37,10 +37,10 @@
 
 主线程侧（`RendererMain.tick`，rAF 驱动）：
 
-1. 续帧并取景：`requestAnimationFrame(this.boundTick)`，renderer/scene/camera 任一缺失即返回（`apps/game/src/renderer/renderer-main.ts:829`、`apps/game/src/renderer/renderer-main.ts:830`）。
-2. 物理分支开门条件 `predReady && predPhys`（`apps/game/src/renderer/renderer-main.ts:833`）；`dt` 取与上一物理帧的间隔，首个物理帧取 1/64 秒、上限 0.1 秒（`apps/game/src/renderer/renderer-main.ts:834`）。
-3. 写共享输入槽：`shared.addInput(pendingDx, pendingDy, pendingKeys)`（`apps/game/src/renderer/renderer-main.ts:837`）——本工程唯一的输入写入点。
-4. 消费权威帧与校准速度：`correctFromAuthority()` 后 `calibrateVelocity(now)`（`apps/game/src/renderer/renderer-main.ts:839`、`apps/game/src/renderer/renderer-main.ts:841`）。
+1. 续帧并取景：`requestAnimationFrame(this.boundTick)`，renderer/scene/camera 任一缺失即返回（`apps/game/src/renderer/renderer-main.ts:826`、`apps/game/src/renderer/renderer-main.ts:827`）。
+2. 物理分支开门条件 `predReady && predPhys`（`apps/game/src/renderer/renderer-main.ts:830`）；`dt` 取与上一物理帧的间隔，首个物理帧取 1/64 秒、上限 0.1 秒（`apps/game/src/renderer/renderer-main.ts:831`）。
+3. 写共享输入槽：`shared.addInput(pendingDx, pendingDy, pendingKeys)`（`apps/game/src/renderer/renderer-main.ts:834`）——本工程唯一的输入写入点。
+4. 消费权威帧与校准速度：`correctFromAuthority()` 后 `calibrateVelocity(now)`（`apps/game/src/renderer/renderer-main.ts:836`、`apps/game/src/renderer/renderer-main.ts:841`）。
 5. 推进主线程渲染物理：`predPhys.tick(dt, keys, dx, dy)`，随后把 dx/dy 清零（键位保留为按住状态）（`apps/game/src/renderer/renderer-main.ts:843`、`apps/game/src/renderer/renderer-main.ts:844`）。
 6. 冻结分支：按住 C 期间每帧把物理写回存点位姿并把速度清零（`apps/game/src/renderer/renderer-main.ts:847`）。
 7. 取物理状态写渲染采样：`writeRenderSample(now, posX, posY, posZ, renderSampleIndex++)`，不传世代（`apps/game/src/renderer/renderer-main.ts:860`）。

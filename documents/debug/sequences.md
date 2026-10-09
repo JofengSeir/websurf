@@ -37,18 +37,18 @@
 
 一个渲染帧由两条 rAF 循环加一条 Worker 定时循环组成，三者的注册顺序在主线程是**渲染先、输入后**（`RendererMain.start` 在 `startInputLoop` 之前调用：`apps/debug/src/app.ts:347` 早于 `apps/debug/src/app.ts:367`）。
 
-**A. 渲染主循环**（`apps/debug/src/renderer/renderer-main.ts:673` 的 `tick`，内部顺序固定）：
+**A. 渲染主循环**（`apps/debug/src/renderer/renderer-main.ts:670` 的 `tick`，内部顺序固定）：
 
-1. 登记下一帧（`apps/debug/src/renderer/renderer-main.ts:675`）。
-2. ① 物理段，仅当 `predReady` 且单步闸门有余量时执行（`apps/debug/src/renderer/renderer-main.ts:683`）：
-   - 取本帧步长：回放模式取一次性 `replayDtS`，否则取墙钟间隔（首帧取 1/64，上限 0.1 秒），取走即置空（`apps/debug/src/renderer/renderer-main.ts:687`、`apps/debug/src/renderer/renderer-main.ts:691`）；
-   - 本帧输入写共享内存输入槽（`apps/debug/src/renderer/renderer-main.ts:694`）；
-   - 非回放模式下做权威帧校准与权威速度外推（`apps/debug/src/renderer/renderer-main.ts:696`、`apps/debug/src/renderer/renderer-main.ts:698`）；
+1. 登记下一帧（`apps/debug/src/renderer/renderer-main.ts:672`）。
+2. ① 物理段，仅当 `predReady` 且单步闸门有余量时执行（`apps/debug/src/renderer/renderer-main.ts:680`）：
+   - 取本帧步长：回放模式取一次性 `replayDtS`，否则取墙钟间隔（首帧取 1/64，上限 0.1 秒），取走即置空（`apps/debug/src/renderer/renderer-main.ts:684`、`apps/debug/src/renderer/renderer-main.ts:688`）；
+   - 本帧输入写共享内存输入槽（`apps/debug/src/renderer/renderer-main.ts:691`）；
+   - 非回放模式下做权威帧校准与权威速度外推（`apps/debug/src/renderer/renderer-main.ts:693`、`apps/debug/src/renderer/renderer-main.ts:695`）；
    - 路径记录 tick 线：只在权威版本号 `va` 变化时落点，时间戳取发布时钟 τ（`apps/debug/src/renderer/renderer-main.ts:653` 起）；
    - 推进渲染物理 `predPhys.tick(dt, keys, dx, dy)`，随后清零鼠标增量（`apps/debug/src/renderer/renderer-main.ts:664`、`apps/debug/src/renderer/renderer-main.ts:663`）；
    - 消费 Rust 侧 `take_event`（`apps/debug/src/renderer/renderer-main.ts:668` → `apps/debug/src/renderer/renderer-main.ts:1262`）；
    - 取状态摆相机：渲染节点落 `PathRecorder`、写共享内存渲染采样、相机 yaw/pitch 与眼睛高度（`apps/debug/src/renderer/renderer-main.ts:676`、`apps/debug/src/renderer/renderer-main.ts:680`、`apps/debug/src/renderer/renderer-main.ts:682`、`apps/debug/src/renderer/renderer-main.ts:686`）；
-   - 隔帧近平面探测（`apps/debug/src/renderer/renderer-main.ts:691`）。
+   - 隔帧近平面探测（`apps/debug/src/renderer/renderer-main.ts:688`）。
 3. ② 视距剔除：`LodManager.update` 返回真表示有块可见性翻转（`apps/debug/src/renderer/renderer-main.ts:702`）。
 4. ③ 碰撞体 / 触发器 / 三角面 可视化（`apps/debug/src/renderer/renderer-main.ts:703`）。
 5. ④ 准星射线：计数器满 `PLANE_INSPECT_INTERVAL` 才检测一次；关闭时清掉上次结果（`apps/debug/src/renderer/renderer-main.ts:719`）。

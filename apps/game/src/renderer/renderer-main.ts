@@ -42,7 +42,7 @@ import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
 import { optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inject-stats.js';
 import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
-import { buildMiniatureSky, createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
@@ -279,7 +279,7 @@ export class RendererMain {
 
     // 1.1 3D 天空盒（起源做法，与 debug 同款）：把天空区图元摘出主世界，交第二相机单独渲染。
     //     判据 =「图元采样点落在 `sky_camera` 所在 cluster」；必须早于分块合并——合并成空间块后
-    //     跨区的大块无法再拆。无 `sky_camera`/无 PVS/摘不到图元时不建，末尾用合成山脊兜底。
+    //     跨区的大块无法再拆。无 `sky_camera`/无 PVS/摘不到图元时不建，末尾不挂天空层。
     this.pvsManager = new PvsManager(data.pvsJson);
     const skyCluster = data.skyCamera
       ? this.pvsManager.getClusterAt({ x: data.skyCamera.origin[0], y: data.skyCamera.origin[1], z: data.skyCamera.origin[2] })
@@ -392,10 +392,7 @@ export class RendererMain {
       this.scene.add(this.skyGroup);
       console.info(`[skybox] 3D 天空盒：天空区 ${this.skyGroup.children.length} 个图元挂第 ${SKY_LAYER} 层，由第二相机渲染`);
     } else {
-      const miniature = buildMiniatureSky({ center: bbox.getCenter(new THREE.Vector3()), radius: maxDim * 0.5, color: 0x46566a, haze: data.fogParams?.color });
-      miniature.userData.isMiniatureSky = true;
-      this.scene.add(miniature);
-      console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 合成山脊兜底');
+      console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
     // 地图线性雾（`env_fog_controller`）：与 debug 的 `lightManager.setFog` 同值
     this.scene.fog = data.fogParams ? new THREE.Fog(data.fogParams.color, data.fogParams.start, data.fogParams.end) : null;

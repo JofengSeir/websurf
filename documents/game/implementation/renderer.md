@@ -35,22 +35,22 @@
 ## 关键流程与不变量
 
 - **装配顺序**：GLB 解析 → 清根 rotation → 摘除 punctual 光源（必须先于挂进主场景，两判据见 `buildMapScene` 文档）→ `applyLightmap`（必须先于分块合并）→ `optimizeScene` → 受光材质终扫 → 预编译（`src/renderer-shared/scene/scene-builder.ts:70`、`:85`、`apps/game/src/renderer/renderer-main.ts:296`、`:287`、`:293`、`:308`）。
-- **一帧的固定顺序**：写输入槽 → 消费权威帧 → 校准速度 → 推进物理 → 写渲染采样 → 相机位姿 → 剔除 → 绘制（`apps/game/src/renderer/renderer-main.ts:837`、`:733`、`:735`、`:737`、`:754`、`:756`、`:779`、`:797`）。
-- **dt 上限**：每帧 `dt` 被夹在 0.1 秒内，首个物理帧取 1/64 秒（`apps/game/src/renderer/renderer-main.ts:834`）；这是「主线程卡顿不产生物理慢动作」的判据来源。
+- **一帧的固定顺序**：写输入槽 → 消费权威帧 → 校准速度 → 推进物理 → 写渲染采样 → 相机位姿 → 剔除 → 绘制（`apps/game/src/renderer/renderer-main.ts:831`、`:733`、`:735`、`:737`、`:754`、`:756`、`:779`、`:797`）。
+- **dt 上限**：每帧 `dt` 被夹在 0.1 秒内，首个物理帧取 1/64 秒（`apps/game/src/renderer/renderer-main.ts:831`）；这是「主线程卡顿不产生物理慢动作」的判据来源。
 - **世代单调**：`bumpSampleEpoch` 只做「本地计数 +1 + 通知共享层」（`apps/game/src/renderer/renderer-main.ts:189`），真正生效的世代在共享槽里（`src/ts-shared/auth/shared-state.ts:399`）；`resetSampleStream` 同时把序号归零与世代 +1（`apps/game/src/renderer/renderer-main.ts:195`）。
 - **光照三路径与 fullbright 收敛**：world 面走 atlas、prop 第 1 级走几何属性 `_VBSP_VLIGHT`、第 2 级走 leaf ambient cube；无 lightmap 的图元统一收敛到 fullbright（`src/renderer-shared/shader/lightmap-shader.ts:533`）；`extras.unlit === true` 的图元跳过光照（`src/renderer-shared/shader/lightmap-shader.ts:820`）。
 - **`hasLightmap` 的读取源**：判据优先读 `geometry.userData`、回落 `mesh.userData`（`src/renderer-shared/shader/lightmap-shader.ts:872`、`:883`）；`== false` 的图元必须在「检测 uv1/uv2」之前拦下（`src/renderer-shared/shader/lightmap-shader.ts:875`）。
 - **材质去重**：按 map / color / transparent / opacity / alphaTest / side / depthWrite / alphaMap / 线框标记组成键复用材质实例，使分块合并的按材质分组仍然成立（`src/renderer-shared/shader/lightmap-shader.ts:506`、`src/renderer-shared/shader/lightmap-shader.ts:784`）。
 - **分块合并的失败语义**：**不按属性签名切分**（T-503 / T-612 的切分方案 2026-10-09 已整体回退，原因见 T-614：会让模型并成「材质数组 + 几何无分组」的块 ⇒ three 只用 `material[0]` 渲染 ⇒ 模型材质丢失）。原semantics：两级合并都**先按「属性签名」切子组再逐组合并**（签名 = 属性名集合 + itemSize + 类型 + normalized + 是否 indexed；世界面没有 `normal`、prop 有，混在同一材质组里时整批合并会返回 null ⇒ 这正是 T-503 的成因），同签名仍失败才回退为「保留各自独立几何」，不存在「合并失败即丢弃」的路径（`src/renderer-shared/scene/scene-optimizer.ts:343`、`:349`、`:371`、`:379`、`:384`）。
 - **视锥外保留圈**：块几何的包围球半径统一乘 `FRUSTUM_PAD`，且必须无条件重算（克隆几何会带上局部空间的旧球）（`src/renderer-shared/scene/scene-optimizer.ts:35`、`padBoundingSpheres :405`、`:410`）。
-- **出帧探针只读不写**：`installFrameProbe` 往 `globalThis.__vbspFrameProbe` 挂一个对象（`apps/game/src/renderer/renderer-main.ts:965`），其 `applyPose` 复用生产路径的冻结机制（`setHoldPoint`）而新增任何渲染分支（`apps/game/src/renderer/renderer-main.ts:1126`、`:1051`）。
+- **出帧探针只读不写**：`installFrameProbe` 往 `globalThis.__vbspFrameProbe` 挂一个对象（`apps/game/src/renderer/renderer-main.ts:962`），其 `applyPose` 复用生产路径的冻结机制（`setHoldPoint`）而新增任何渲染分支（`apps/game/src/renderer/renderer-main.ts:1123`、`:1051`）。
 - **注入生效性统计延后到首帧之后**：`applyLightmap` 返回「是否施加到 mesh」，`loadScene` 用它落账 `pendingInjectReport`；统计由 `tick` 在首帧 `render()` 之后跑一次（`apps/game/src/renderer/renderer-main.ts:296`、`:803`；实现在 `src/renderer-shared/scene/inject-stats.ts:20`）。
 
 ## 已知缺口（状态见 TODO.md）
 
-- **PVS 剔除在本工程被常量关死**：`ENABLE_PVS` 为 `false`（`apps/game/src/renderer/renderer-main.ts:78`），因此 `tick` 既不调 `pvs.update`，也不按 cluster 隐藏块（`apps/game/src/renderer/renderer-main.ts:877`、`:774`）；`pvsManager` 仍被构造、每块仍被分配 `clusterIds`（`apps/game/src/renderer/renderer-main.ts:342`、`:351`）——这部分计算在当前配置下不产生剔除效果。 （见 TODO.md T-211）
+- **PVS 剔除在本工程被常量关死**：`ENABLE_PVS` 为 `false`（`apps/game/src/renderer/renderer-main.ts:78`），因此 `tick` 既不调 `pvs.update`，也不按 cluster 隐藏块（`apps/game/src/renderer/renderer-main.ts:874`、`:774`）；`pvsManager` 仍被构造、每块仍被分配 `clusterIds`（`apps/game/src/renderer/renderer-main.ts:342`、`:351`）——这部分计算在当前配置下不产生剔除效果。 （见 TODO.md T-211）
 - **`sampleEpoch` 字段只写不读**：本类的该字段只在 `bumpSampleEpoch` 里自增（`apps/game/src/renderer/renderer-main.ts:137`、`:182`），本文件没有第二个读取点；共享槽里的世代才被 Worker 复检（`apps/game/src/worker/main.ts:276`）。 （见 TODO.md T-228）
-- **`resetTo` 在本工程内没有调用点**：方法体只转发给校准器（`apps/game/src/renderer/renderer-main.ts:768`、`:663`）；`apps/game/src` 内没有外部调用者（本次实测零匹配），主线程的位置突变各走 `respawn` / `teleportToSpawn` / `loadSavepoint` 三条路径（`apps/game/src/renderer/renderer-main.ts:644`、`:545`、`:598`）。 （见 TODO.md T-047）
+- **`resetTo` 在本工程内没有调用点**：方法体只转发给校准器（`apps/game/src/renderer/renderer-main.ts:765`、`:663`）；`apps/game/src` 内没有外部调用者（本次实测零匹配），主线程的位置突变各走 `respawn` / `teleportToSpawn` / `loadSavepoint` 三条路径（`apps/game/src/renderer/renderer-main.ts:641`、`:545`、`:598`）。 （见 TODO.md T-047）
 - **`applyCollisionCorrection` 的入参有三个不被读取**：`_pos` / `_yawDeg` / `_pitchDeg` 在共享层实现里带 `_` 前缀（`src/ts-shared/phys/authority-calibrator.ts:735`），实际写入的位置与角度取自渲染自身当前状态（`src/ts-shared/phys/authority-calibrator.ts:776`）；`blocked` 事件与「渲染自己未着地」两种情形都是零写入（`src/ts-shared/phys/authority-calibrator.ts:743`、`:768`）。 （见 TODO.md T-229）
 - ~~**`setLightGamma` 的接受窗口窄于所有调用方**~~ **已消除（2026-10-09）**：T-021 —— 窗口改为 `(0, 8]`（`src/renderer-shared/shader/lightmap-shader.ts:1774`），涵盖 `init` 传入的默认 2.2 与面板量程 0.5..6。原断言：窗口 `(0, 1]` 窄于所有调用方，窗口外的写入不生效。
 - **光照模块内多个导出在本工程零导入点**：`setLightFloor` / `getLightFloor`（`src/renderer-shared/shader/lightmap-shader.ts:1742`、`:1757`）、`isTextureOnlyMode`（`:447`）、`isLightmapSkipStage`（`:313`）、`getExposure`（`:1817`）、`getLightGamma`（`:1795`）、`getAmbientScale`（`:1836`），以及四个 GLSL 片段与 uniform 声明常量（`:87`、`:112`、`:165`、`:181`）——`renderer-main.ts` 的 import 面（`apps/game/src/renderer/renderer-main.ts:49`）不含它们。 （见 TODO.md T-230）

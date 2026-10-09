@@ -51,7 +51,7 @@ export interface BspLoadResult {
   glbBytes: ArrayBuffer; skyboxTexture: import('three').CubeTexture | null;
   /** 地图雾（`env_fog_controller`）；无控制器为 null。 */
   fogParams: { color: number; start: number; end: number } | null;
-  /** 3D 天空盒的 `sky_camera` 参数；无则 null（渲染端退回合成山脊）。 */
+  /** 3D 天空盒的 `sky_camera` 参数；无则 null（渲染端不加天空层）。 */
   skyCamera: SkyCameraParams | null;
   /** `parse_pvs_data()` 的载荷（天空区判据按 cluster 采样用）。 */
   pvsJson: string;
