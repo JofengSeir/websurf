@@ -155,3 +155,4 @@
 | 2026-10-09 | T-454 P5-3：viewer 补齐 `mosaic_encode`（mosaic 导出对完备，运行时双验证）；P5-2 调查收敛为「viewer 导出链确实收 static_props ⇒ 原 props 缺失结论需按当前代码重新取证」 | progress/monthly/2026-10-10.md:43 |
 | 2026-10-09 | T-454 P5-2：viewer 实体放置模型接通（**两处**根因：`entities: Vec::new()` + 被引用模型集合未并入实体 `model`）；GLB 数据级对齐 debug/game（boreas +3.7MB/`buk01.mdl` 0→1、surf_666 `cow.mdl` 0→1），测试视点出图逐像素不变 | progress/monthly/2026-10-10.md:45 |
 | 2026-10-09 | 滚动分卷：新开 progress/monthly/2026-10-11.md（第 11/11 卷，承接 T-454 续写；上一卷 40.77 KB 封卷）并改指「当前写入目标」 | progress/monthly/2026-10-11.md:1 |
+| 2026-10-09 | T-454 会话交接：P0–P5-2 已落地（12 个提交未 push），交接清单入 .tmp/task-unify-render/TASK-handoff.md（剩余 P5-2 尾/P6/P7/P8 + 纪律与坑） | progress/monthly/2026-10-11.md:11 |
