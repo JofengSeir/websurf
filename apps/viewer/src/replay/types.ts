@@ -169,3 +169,15 @@ export interface TrackSample {
   track: Track;
   sample: Sample | null;
 }
+
+/** 多条越界轨道的包围盒取并集：提示串的 bbox 必须覆盖**全部**越界轨道（只取第一条会误导读数）。 */
+export function unionBbox(
+  boxes: { min: [number, number, number]; max: [number, number, number] }[],
+): { min: [number, number, number]; max: [number, number, number] } {
+  const min: [number, number, number] = [boxes[0].min[0], boxes[0].min[1], boxes[0].min[2]];
+  const max: [number, number, number] = [boxes[0].max[0], boxes[0].max[1], boxes[0].max[2]];
+  for (const q of boxes.slice(1)) {
+    for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], q.min[i]); max[i] = Math.max(max[i], q.max[i]); }
+  }
+  return { min, max };
+}

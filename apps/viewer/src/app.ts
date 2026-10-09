@@ -42,7 +42,7 @@ import { DemoPanel } from './replay/demopanel.js';
 import { ReplaySession } from './replay/session.js';
 import type { SessionKind } from './replay/session.js';
 import { looksLikeShavitReplay, SHAVIT_SNIFF_BYTES } from './replay/shavit-replay.js';
-import { defaultRule } from './replay/types.js';
+import { defaultRule, unionBbox } from './replay/types.js';
 import type { Track } from './replay/types.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement | null;
@@ -1058,12 +1058,3 @@ window.addEventListener('beforeunload', (e) => {
   e.returnValue = ''; // 触发确认框所必需（Chrome/Edge 约定）
 });
 
-/** 多条越界轨道取并集：提示串的 bbox 必须覆盖全部越界轨道（只取第一条会误导读数）。 */
-function unionBbox(boxes: { min: [number, number, number]; max: [number, number, number] }[]): { min: [number, number, number]; max: [number, number, number] } {
-  const min: [number, number, number] = [boxes[0].min[0], boxes[0].min[1], boxes[0].min[2]];
-  const max: [number, number, number] = [boxes[0].max[0], boxes[0].max[1], boxes[0].max[2]];
-  for (const q of boxes.slice(1)) {
-    for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], q.min[i]); max[i] = Math.max(max[i], q.max[i]); }
-  }
-  return { min, max };
-}

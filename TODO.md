@@ -26,18 +26,17 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（79 条）
+## 未结项（78 条）
 ### 待裁决（0）
 
 
-### 待修（77）
+### 待修（76）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
 - **T-062** 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径…　`viewer`
-- **T-102** 贴合检查提示串的 bbox 只取第一条越界轨道　`viewer`
 - **T-107** 分块选块包围盒只统计部分 Mesh，块边长由子集推出　`shared`
 - **T-114** 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems）　`viewer`
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
@@ -129,7 +128,7 @@
 | T-053 | viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/… | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:110 | progress/pending-detail.md | 判据：帮助文案与 `apps/viewer/src/replay/timeline.ts` 现行类名/样式一致（无「淡金带 / 金框」残留） | #84 |
 | T-056 | 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局… | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：F5 / 刷新不弹关闭确认，仅在有地图 / 对局中弹（条件化） | #87 |
 | T-062 | 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径… | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:283 | progress/pending-detail.md | 判据：@BT@git grep -n "importer" -- apps/viewer/src@BT@ ⇒ Source .dem 分支无 UI 调用路径 ⇒ 删或接线 | #93 |
-| T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道（修复已落地 2026-10-09，判据待浏览器实测） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:267 | documents/viewer/implementation/app.md | 判据：构造 2 条以上越界轨道 ⇒ 提示串 bbox 覆盖全部（不再只取第一条） | — |
+| T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道（修复已落地 2026-10-09，判据待浏览器实测） | 缺陷 | viewer | 已结案 | **已结案（2026-10-09，selftest 实测）**：提示串 bbox 不再只取第一条——`unionBbox` 从 `app.ts` 末尾**上收到 `apps/viewer/src/replay/types.ts:173`**（跨文件公用，`app.ts` 与 `test/replay-selftest.ts` 各以**同行 1:1** 折进已有 import 行，零锚点漂移），调用点 `apps/viewer/src/app.ts:265` 到 `apps/viewer/src/app.ts:267`。**验证（可跑判据已补）**：`cd apps/viewer && npm run test:replay` ⇒ **exit 0**，输出含 `ok   unionBbox 并集覆盖两条轨道`（两条轨道的并集 `[-3,0,-1]`~`[2,5,4]` 逐分量核对）；`npm run typecheck` ⇒ exit 0 | documents/viewer/implementation/app.md | `cd apps/viewer && npm run test:replay` ⇒ 断言「unionBbox 并集覆盖两条轨道」为 **ok**、exit 0；`git grep -n "unionBbox" -- apps/viewer/src` ⇒ 定义在 `replay/types.ts`，`app.ts` 仅 1 处调用点 | — |
 | T-103 | ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:807 | documents/viewer/implementation/app.md | 判据：`?replay=x.dem` ⇒ 按内容（魔数）分派并载入成功（不再按参数名拒收） | — |
 | T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | 缺陷 | shared | 待修 | src/renderer-shared/scene/scene-optimizer.ts:250 | documents/viewer/implementation/core.md | 判据：构造仅含多材质网格的分块 ⇒ 分块边长含全部 Mesh 的并集（`worldBox` 不再只在单材质分支累计） | — |
 | T-109 | 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正 | 缺陷 | viewer | 已取证待立项 | apps/viewer/src/replay/demo/net.ts:325 | documents/viewer/implementation/dem.md | — | — |

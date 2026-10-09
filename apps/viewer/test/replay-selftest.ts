@@ -21,7 +21,7 @@ import {
   SHAVIT_MAX_VERSION,
 } from '../src/replay/shavit-replay.js';
 import { clipFromGokzRec, parseGokzRec } from '../src/replay/gokz-rec.js';
-import { defaultRule } from '../src/replay/types.js';
+import { defaultRule, unionBbox } from '../src/replay/types.js';
 import type { Clip, RuleConfig } from '../src/replay/types.js';
 import { parseSourceDemo } from '../src/replay/demo/demo.js';
 import { flattenSendTable } from '../src/replay/demo/tables.js';
@@ -1477,5 +1477,17 @@ console.log('\n[9b] KSF/gokz .rec 原生解析（合成 fixture）');
     console.log('  SKIP 真实 .rec 夹具缺失（test/replay 下没有 .rec）');
   }
 }
+
+// unionBbox：多条越界轨道的 bbox 必须取并集（只取第一条会误导读数；T-102）
+check(
+  'unionBbox 并集覆盖两条轨道',
+  (() => {
+    const u = unionBbox([
+      { min: [0, 0, 0], max: [1, 1, 1] },
+      { min: [-3, 2, -1], max: [2, 5, 4] },
+    ]);
+    return u.min[0] === -3 && u.min[1] === 0 && u.min[2] === -1 && u.max[0] === 2 && u.max[1] === 5 && u.max[2] === 4;
+  })(),
+);
 
 process.exit(failures === 0 ? 0 : 1);
