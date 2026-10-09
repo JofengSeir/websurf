@@ -219,9 +219,9 @@ export class RendererMain {
     // 材质与同一张 atlas，这里写初值只是让首帧就是所选模式（运行期切换见 setLightingMode）。
     setLightingModeInShader(config.lighting?.mode ?? 'baked');
     // 显示侧亮度倍率（接受窗口见本文的 setExposure 包装器）
-    setExposure(config.lighting?.exposure ?? 1);
+    setExposure(config.lighting?.exposure ?? 2.3);
  // 光照项 gamma（shadow-lift）：缺省 0.5；接受窗口是 (0, 8]
-    setLightGamma(config.lighting?.lightGamma ?? 1);
+    setLightGamma(config.lighting?.lightGamma ?? 2.2);
     // prop（模型）烘焙光照亮度：ambient cube 路径的独立档位，不动 world lightmap
     setAmbientScale(config.lighting?.ambientScale ?? 1);
     // 第 1 级逐顶点光照的几何重建档位：平滑遍数（0 = 原样使用烘焙值）与方差压缩上限

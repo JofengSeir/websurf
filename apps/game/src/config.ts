@@ -217,11 +217,12 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     quality: 'original',
   },
   lighting: {
-    // 默认取**共享层（`src/renderer-shared/shader/lightmap-shader.ts`）自己的初值**，不叠加项目自调档：
+    // 默认取 **SDK 呈现口径**：引擎出帧是 `OverBright2` + 屏幕 gamma（`LinearToScreenGamma`，1/2.2）
+    // 作用在 lightmap 空间的烘焙值上 ⇒ 换算到本仓旋钮 = exposure ≈ 2.3 / lightGamma 2.2。
     // `LIGHTMAP_EXPOSURE_DEFAULT` 1、gamma 1、`ambientScaleUniform` 1、`propVertexRelaxPasses` 1、
     // `propVertexFlattenAmount` 0、`lightingMode` 'baked'。地图自带的整体亮度即烘焙结果（world lightmap
-    exposure: 1,
-    lightGamma: 1,
+    exposure: 2.3,
+    lightGamma: 2.2,
     ambientScale: 1,
     // 1 = 接缝焊接 + 1 次 Laplacian 松弛；0 = 原样使用烘焙值
     propVertexRelax: 1,

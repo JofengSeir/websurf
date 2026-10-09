@@ -26,13 +26,13 @@
 - **映射是薄层**：`buildPhysicsParams` 只做字段名搬运，键名归一与 `jump_height = jumpSpeed² / (2 × gravity)` 的换算都在共享层（`src/ts-shared/phys/params.ts:49`、`src/ts-shared/phys/params.ts:58`）；`sensitivity` 在共享层被写死为 1（`src/ts-shared/phys/params.ts:67`），真实灵敏度由输入层乘入（`src/ts-shared/input/input-layer.ts:25`）。
 - **段级更新不做校验**：`applyConfigPatch` 在段不存在或不是对象时静默返回，patch 里出现段中不存在的键时照写（`apps/game/src/config.ts:250`、`apps/game/src/config.ts:252`）。
 - **只发四段**：`syncFullConfig` 的段表是 `physics` / `input` / `player` / `hud`（`apps/game/src/app.ts:642`）；`texture` 与 `lighting` 段不下发 Worker——本工程内这两段的读取点全部在主线程（`apps/game/src/renderer/renderer-main.ts:445`、`apps/game/src/renderer/renderer-main.ts:275`）。
-- **面板量程与默认值一致的两处**：`lightGamma` 默认 1 与页面滑块初值 1 同值（`apps/game/src/config.ts:224`、`apps/game/web/index.html:232`），`fov` 默认 73.6 与滑块初值 73.6 同值（`apps/game/src/config.ts:209`、`apps/game/web/index.html:225`）。
+- **面板量程与默认值一致的两处**：`exposure` / `lightGamma` 默认 2.3 / 2.2 与页面滑块初值同值（SDK 呈现口径：`OVERBRIGHT 2.0f`（`test/project/source-sdk-2013-master/src/public/materialsystem/imaterialsystem.h:16`）+ `MathLib_Init( gamma 2.2, overbright 2.0 )`（`…/src/public/mathlib/mathlib.h:1753`），见 TODO.md T-617）（`apps/game/src/config.ts:224`、`apps/game/web/index.html:232`），`fov` 默认 73.6 与滑块初值 73.6 同值（`apps/game/src/config.ts:209`、`apps/game/web/index.html:225`）。
 
 ## 已知缺口（状态见 TODO.md）
 
 - **`physics.mode` 零读取点**：字段只有声明与默认值（`apps/game/src/config.ts:27`），本工程内没有读取者。权威侧的模式判定读的是消息里的 `patch.mode`（`src/ts-shared/auth/worker-dispatch.ts:385`），不是这份 config 的字段。 （见 TODO.md T-225）
 - **`input.pitchLimit` 字段已删除**（2026-09-26 owner 裁决删字段；台账号追溯见 TODO.md T-045）：该字段已从 `InputConfig` 与 `DEFAULT_CONFIG` 移除（原声明 `apps/game/src/config.ts:70`、默认值 `:197`）。pitch 限幅实际由 Rust 侧承担；对比 debug 的同名键有 UI 且被读（`apps/debug/src/app.ts:1358`），两端本就不同。 （见 TODO.md T-045）
-- ~~**`lighting.lightGamma` 的默认值落在着色器接受窗口之外**~~ **已消除（2026-10-09）**：T-021 —— 窗口改为 `(0, 8]`（`src/renderer-shared/shader/lightmap-shader.ts:1774`），默认值已于 2026-10-09 改为共享层默认 1（`apps/game/src/config.ts:224`，见 TODO.md T-615）⇒ 落在窗口内、`init` 那次写入生效。原断言：默认 2.2 而窗口是 `(0, 1]`，初始化写入被忽略。
+- ~~**`lighting.lightGamma` 的默认值落在着色器接受窗口之外**~~ **已消除（2026-10-09）**：T-021 —— 窗口改为 `(0, 8]`（`src/renderer-shared/shader/lightmap-shader.ts:1774`），默认值已于 2026-10-09 定为 SDK 呈现口径 2.2（`apps/game/src/config.ts:222`），页面滑块同值⇒ 落在窗口内、`init` 那次写入生效。原断言：默认 2.2 而窗口是 `(0, 1]`，初始化写入被忽略。
 - ~~**面板滑块量程与该接受窗口不一致**~~ **已消除（2026-10-09）**：T-021 —— 接受窗口 `(0, 8]` 已涵盖面板量程 0.5..6（`apps/game/src/panel/panel-controller.ts:452`、`apps/game/web/index.html:232`）。原断言：量程 0.5..6 而窗口 `(0, 1]`，拖到大于 1 时 config 变了、画面不变。
 - **`applyConfigPatch` 照写未知键的副作用**：把非 `physics` / `input` 段的消息载荷原样写入对应段（`apps/game/src/config.ts:252`、`src/ts-shared/auth/worker-dispatch.ts:351`）；本工程对 `hud` 段下发的其实是全量物理参数（`apps/game/src/input/input-bridge.ts:65`），于是 Worker 的 `config.hud` 会被并入 `gravity` / `run_speed` 等键（`src/ts-shared/phys/params.ts:49`）。Worker 不读 `hud` 段，静态看无行为影响。 （见 TODO.md T-204）
 - **段表与 `RuntimeConfig` 的段数不等**：顶层有七段（`apps/game/src/config.ts:163`），下发表只有四段（`apps/game/src/app.ts:642`）；`texture` / `lighting` / `lockTickRate` 不进 `config` 消息，改这三处的效果只在本端可见。

@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-617 认领",
+      "reason": "T-617 第 1 轮结论",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -198,7 +198,7 @@
         "line": 109
       },
       "T-617": {
-        "p": "071af590058773b233da53cc80f05712aed35f30e5b88c05e36e2009ba9e0756",
+        "p": "3f5953f67d748bfd81905285362441b53e54fb99a54df7de686923f47e54b1fa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
         "line": 110
@@ -958,8 +958,9 @@
       "apps/viewer/src/core/scene.ts:184:184": "55fe664e",
       "src/renderer-shared/scene/scene-optimizer.ts:421:421": "39934fd2",
       "src/renderer-shared/scene/scene-optimizer.ts:421:421~2": "39934fd2",
+      "src/wasm-core/vbsp/data/game.rs:21:23": "a122f1c8",
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
-      "apps/game/src/config.ts:221:221": "35609e9c",
+      "apps/game/src/config.ts:221:221": "c40c2a35",
       "apps/game/src/panel/panel-controller.ts:569:569": "e8adcbbe",
       "apps/debug/src/renderer/renderer-main.ts:1514:1514": "d72aa0a5",
       "apps/viewer/src/replay/types.ts:173:173": "a54e2f27",
@@ -1127,7 +1128,7 @@
       "apps/debug/src/config.ts:187:187": "d39ae4d9",
       "apps/debug/src/config.ts:268:268": "0363cb1c",
       "apps/game/src/config.ts:173:173": "d39ae4d9",
-      "apps/game/src/config.ts:235:235": "0363cb1c",
+      "apps/game/src/config.ts:235:235": "e3b0c442",
       "apps/debug/src/config.ts:209:209": "0d4a9ce8",
       "apps/viewer/src/core/constants.ts:24:24": "909c45da",
       "apps/viewer/src/core/constants.ts:11:11": "3e2c2d9a",
@@ -1916,7 +1917,7 @@
       "apps/game/src/app.ts:158:158~2": "5a4559a0",
       "apps/viewer/src/app.ts:50:50": "643ed2ac",
       "apps/game/src/config.ts:173:173": "d39ae4d9",
-      "apps/game/src/config.ts:235:235": "0363cb1c",
+      "apps/game/src/config.ts:235:235": "e3b0c442",
       "apps/debug/src/config.ts:187:187": "d39ae4d9",
       "apps/debug/src/config.ts:268:268": "0363cb1c",
       "apps/game/src/config.ts:205:205": "5dab35ce",
@@ -2043,25 +2044,25 @@
       "apps/game/src/config.ts:131:131": "ba4d661f",
       "apps/game/src/config.ts:163:163": "bf22435c",
       "apps/game/src/config.ts:176:176": "f4644f65",
-      "apps/game/src/config.ts:239:239": "85b5c6f3",
-      "apps/game/src/config.ts:245:245": "39997bb5",
-      "apps/game/src/config.ts:259:259": "5e0133ce",
+      "apps/game/src/config.ts:239:239": "e3b0c442",
+      "apps/game/src/config.ts:245:245": "bcf2441a",
+      "apps/game/src/config.ts:259:259": "021fb596",
       "apps/game/src/app.ts:41:41": "432332c3",
       "apps/game/src/worker/main.ts:77:77": "432332c3",
       "apps/game/src/input/input-bridge.ts:58:58": "4da3f1b5",
       "apps/game/src/worker/main.ts:88:88": "fe92a314",
-      "apps/game/src/config.ts:240:240": "568ad536",
+      "apps/game/src/config.ts:240:240": "85b5c6f3",
       "src/ts-shared/phys/params.ts:49:49": "9f4e2080",
       "src/ts-shared/phys/params.ts:58:58": "a487976d",
       "src/ts-shared/phys/params.ts:67:67": "f1c775e9",
       "src/ts-shared/input/input-layer.ts:25:25": "70a53365",
-      "apps/game/src/config.ts:250:250": "e3b0c442",
-      "apps/game/src/config.ts:252:252": "b5a81fad",
+      "apps/game/src/config.ts:250:250": "d10b36aa",
+      "apps/game/src/config.ts:252:252": "bb3b0d38",
       "apps/game/src/app.ts:642:642": "cf011a06",
       "apps/game/src/renderer/renderer-main.ts:445:445": "66c9bdd6",
       "apps/game/src/renderer/renderer-main.ts:275:275": "26f9232d",
-      "apps/game/src/config.ts:224:224": "7ad127b6",
-      "apps/game/web/index.html:232:232": "ad5999b0",
+      "apps/game/src/config.ts:224:224": "9cec8117",
+      "apps/game/web/index.html:232:232": "5bc15c19",
       "apps/game/src/config.ts:209:209": "46390aa4",
       "apps/game/web/index.html:225:225": "033381fe",
       "apps/game/src/config.ts:27:27": "aecbd6de",
@@ -2069,10 +2070,10 @@
       "apps/game/src/config.ts:70:70": "8d65c0ef",
       "apps/debug/src/app.ts:1358:1358": "ad4e670d",
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
-      "apps/game/src/config.ts:224:224~2": "7ad127b6",
+      "apps/game/src/config.ts:222:222": "35609e9c",
       "apps/game/src/panel/panel-controller.ts:452:452": "49ad0a42",
-      "apps/game/web/index.html:232:232~2": "ad5999b0",
-      "apps/game/src/config.ts:252:252~2": "b5a81fad",
+      "apps/game/web/index.html:232:232~2": "5bc15c19",
+      "apps/game/src/config.ts:252:252~2": "bb3b0d38",
       "src/ts-shared/auth/worker-dispatch.ts:351:351": "8cdf5c08",
       "apps/game/src/input/input-bridge.ts:65:65": "77b425c5",
       "src/ts-shared/phys/params.ts:49:49~2": "9f4e2080",
@@ -2153,8 +2154,8 @@
       "apps/game/web/index.html:97:97": "0c55f439",
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
       "apps/game/src/panel/panel-controller.ts:471:471": "e3b0c442",
-      "apps/game/web/index.html:232:232": "ad5999b0",
-      "apps/game/src/config.ts:221:221": "35609e9c",
+      "apps/game/web/index.html:232:232": "5bc15c19",
+      "apps/game/src/config.ts:221:221": "c40c2a35",
       "apps/game/src/panel/panel-controller.ts:588:588": "28cb6cf2",
       "apps/game/src/renderer/renderer-main.ts:220:220": "cec26723",
       "apps/game/src/panel/panel-controller.ts:750:750": "01e7caf2",
@@ -2807,7 +2808,7 @@
       "apps/viewer/src/core/constants.ts:37:37": "db6d5e4a",
       "apps/viewer/src/replay/panel.ts:29:29": "5bb5113c",
       "apps/game/src/config.ts:176:176": "f4644f65",
-      "apps/game/src/config.ts:223:223": "8713964a",
+      "apps/game/src/config.ts:223:223": "9cbd3427",
       "apps/debug/src/config.ts:187:187": "d39ae4d9",
       "apps/viewer/scripts/build-dist.mjs:47:47": "9231f5b8",
       "apps/viewer/scripts/build-dist.mjs:52:52": "6e4ab169",
@@ -4364,6 +4365,54 @@
   },
   "rebaselines": [
     {
+      "path": "documents/viewer/differences.md",
+      "at": "2026-10-09T05:33:39.022Z",
+      "by": "agent",
+      "reason": "T-617 第 1 轮：SDK 呈现口径默认值",
+      "changed": 1,
+      "total": 94
+    },
+    {
+      "path": "documents/game/implementation/panel.md",
+      "at": "2026-10-09T05:33:38.430Z",
+      "by": "agent",
+      "reason": "T-617 第 1 轮：SDK 呈现口径默认值",
+      "changed": 2,
+      "total": 27
+    },
+    {
+      "path": "documents/game/implementation/config.md",
+      "at": "2026-10-09T05:33:37.820Z",
+      "by": "agent",
+      "reason": "T-617 第 1 轮：SDK 呈现口径默认值",
+      "changed": 12,
+      "total": 50
+    },
+    {
+      "path": "documents/game/differences.md",
+      "at": "2026-10-09T05:33:37.220Z",
+      "by": "agent",
+      "reason": "T-617 第 1 轮：SDK 呈现口径默认值",
+      "changed": 1,
+      "total": 73
+    },
+    {
+      "path": "documents/debug/differences.md",
+      "at": "2026-10-09T05:33:36.618Z",
+      "by": "agent",
+      "reason": "T-617 第 1 轮：SDK 呈现口径默认值",
+      "changed": 1,
+      "total": 78
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-09T05:31:50.488Z",
+      "by": "agent",
+      "reason": "T-617 第 1 轮结论",
+      "changed": 2,
+      "total": 107
+    },
+    {
       "path": "documents/viewer/overview.md",
       "at": "2026-10-09T04:56:46.003Z",
       "by": "agent",
@@ -4634,54 +4683,6 @@
       "reason": "T-614 收尾复核",
       "changed": 2,
       "total": 106
-    },
-    {
-      "path": "documents/viewer/sequences.md",
-      "at": "2026-10-09T04:19:58.562Z",
-      "by": "agent",
-      "reason": "T-614 回退复核",
-      "changed": 1,
-      "total": 170
-    },
-    {
-      "path": "documents/viewer/implementation/core.md",
-      "at": "2026-10-09T04:19:57.898Z",
-      "by": "agent",
-      "reason": "T-614 回退复核",
-      "changed": 1,
-      "total": 117
-    },
-    {
-      "path": "documents/game/implementation/renderer.md",
-      "at": "2026-10-09T04:19:57.230Z",
-      "by": "agent",
-      "reason": "T-614 回退复核",
-      "changed": 4,
-      "total": 46
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T04:19:55.903Z",
-      "by": "agent",
-      "reason": "回退合并改造后的文档/锚点复核（T-614）",
-      "changed": 4,
-      "total": 106
-    },
-    {
-      "path": "documents/debug/implementation/renderer.md",
-      "at": "2026-10-09T02:31:04.149Z",
-      "by": "agent",
-      "reason": "D-026 批量处置",
-      "changed": 2,
-      "total": 106
-    },
-    {
-      "path": "documents/game/implementation/wasm-crate.md",
-      "at": "2026-10-09T02:31:03.852Z",
-      "by": "agent",
-      "reason": "D-026 批量处置",
-      "changed": 2,
-      "total": 29
     }
   ]
 }
