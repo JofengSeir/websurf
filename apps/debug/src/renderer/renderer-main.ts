@@ -43,19 +43,18 @@ import type { PhyBevelPiece } from './collider-debug.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
-import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { createSkyCamera, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { LodManager } from './lod-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
 import type { InputReplayInitialState, InputReplayHull } from '../input/input-recorder.js';
 import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
-import { mergeIntoChunks, optimizeScene as optimizeSceneShared, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { optimizeScene as optimizeSceneShared } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import {
-  applyLightmap,
-  buildMapScene,
-} from '../../../../src/renderer-shared/scene/scene-builder.js';
-import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+  assembleScene,
+} from '../../../../src/renderer-shared/scene/assemble-scene.js';
+import { setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
 
 /**
@@ -489,65 +488,23 @@ export class RendererMain {
     if (!this.scene || !this.camera) return null;
     this.disposeScene();
 
-    // 共享装配核（2026-10-04 起与 game/viewer 同一条链路）：GLB 字节 → 子场景（isBspModel 标记 +
-    // 清根 rotation + 世界包围盒 + **摘 punctual 灯**）。此前本工程自持 loadGlb + 手工装配、
-    // GLB 内嵌的灯全部保留进场景——重复计光且推高 uniform，是三应用观感分歧的来源之一。
-    const { gltf, scene: mapRoot, bbox: boundingBox, maxDim } = await buildMapScene(data.glb); await collectWorldTransitionTextures(gltf, mapRoot);
-    this.collectMetadata(mapRoot);
-
-    // lightmap（共享链路，与 game 同一份）：atlas 由 GLB extras 的 textureIndex 解出，
-    // **与光照模式无关地一律加载并应用**；必须先于分块合并（合并按材质实例分组）。
-    const applied = await applyLightmap(mapRoot, gltf);
-    if (!applied) {
-      console.info('[debug][lightmap] 未施加静态光照（无 atlas 或施加失败），地图为贴图原色');
-    }
-
-    // 3D 天空盒（起源做法）：把天空区图元**摘出主世界**，交给第二台相机单独渲染。
-    // 判据 =「图元采样点落在 sky_camera 所在 BSP cluster」；无 PVS 或无 sky_camera 时不建
-    // 天空区；摘不到时不挂天空层。摘取放在合并**之前**：GLB 图元还是逐面的小块，cluster
-    // 采样才准；合并成空间块后跨区的大块无法再拆。
-    // 两条独立判据互证（`.tmp/mapsurvey/skysel.mjs`）：本判据与上一版「种子 + 包围盒簇扩张」
-    // 在 GLB 图元口径下都是 361 个；浏览器侧 GLTFLoader 逐 primitive 建 mesh，同一片区域上是
-    // 1010 个小块，实测包围盒 min=[-16192,-14862,-15784] max=[16320,-6676,15808] 完全一致。
+    // 共享装配核（T-454 P3b-2 起三端同一条链路）：GLB → 摘 punctual 灯 → 双贴图登记 → lightmap
+    // → 摘天空区 → 主模型合并 → 天空区合并 → 终扫，顺序即契约（见 `scene/assemble-scene.ts` 文件头）。
+    // 此前本工程自持 loadGlb + 手工装配，GLB 内嵌的灯会全部保留进场景（重复计光且推高 uniform）。
     this.pvsManager = new PvsManager(data.pvsJson);
-    const skyCluster = data.skyCamera
-      ? this.pvsManager.getClusterAt({ x: data.skyCamera.origin[0], y: data.skyCamera.origin[1], z: data.skyCamera.origin[2] })
-      : -1;
-    this.skyGroup = data.skyCamera && skyCluster >= 0 ? extractSkyArea(mapRoot, (m) => this.meshInCluster(m, skyCluster)) : null;
-    this.skyParams = this.skyGroup && data.skyCamera ? data.skyCamera : null;
-    // 空间分块合并：必须在下面的 updateMatrixWorld / boundingBox 以及 LOD·PVS 注册
-    //（lodManager.setup 与 assignClusterIds）之前执行——块几何已烘焙到世界空间，包围盒与
-    // 相机 near/far 要按块重算，LOD 项与 clusterId 也要注册到分块后的 mesh。
-    // 放在 lightmap 之后：lightmap 按原 mesh 的材质/UV 施加，材质实例在合并中按实例去重保留。
-    if (OPTIMIZE_SCENE_ENABLED) this.optimizeScene(mapRoot, gltf.scene);
-    // 天空区也要合并：不合并时 1000+ 个逐面小块就是 1000+ 次 draw call。
-    // 不能直接调 optimizeScene——那条路径靠 `bspRoot.remove(gltfScene)` 摘掉整棵原 GLB 子树，
-    // 而天空组没有这棵子树；原图元的几何已在 mergeIntoChunks 里 dispose，必须自己 clear。
-    // 合并会新建块 mesh（默认第 0 层），合并后要把天空层重新贴回天空组里每个 mesh。
-    if (OPTIMIZE_SCENE_ENABLED && this.skyGroup) {
-      const merged = mergeIntoChunks(this.skyGroup, { normalizeGroup: normalizeMergeGroup });
-      this.skyGroup.clear();
-      for (const m of merged.chunks) this.skyGroup.add(m);
-      for (const m of merged.keptMeshes) this.skyGroup.add(m);
-      padBoundingSpheres(this.skyGroup);
-      this.skyGroup.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.isMesh) m.layers.set(SKY_LAYER);
-      });
-      console.info(`[skybox] 天空区合并：${merged.infos.length + merged.keptMeshes.length} mesh → ${merged.chunkCount} 块`);
-    }
-
-    // 合并后终扫（2026-10-04 起与 game 同序：终扫必须晚于合并——合并会重建 mesh/材质数组）：
-    // 把仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程默认不加灯，受光材质恒黑）
-    const converged = fullbrightUnlitLitMaterials(mapRoot); applyWorldTransitionShaders(mapRoot);
-    // 天空区图元已摘出 mapRoot，同两道装配（全亮收敛 + WorldVertexTransition 雪盖）要在天空组上再跑一次
-    if (this.skyGroup) { fullbrightUnlitLitMaterials(this.skyGroup); applyWorldTransitionShaders(this.skyGroup); }
-    if (converged > 0) {
-      console.info(
-        `[lightmap] 装配后终扫：${converged} 个 mesh 仍为受光材质 ⇒ 收敛为 fullbright 贴图原色` +
-          '（默认不加灯，受光材质恒黑；unlit 图元不吃 ambient cube）',
-      );
-    }
+    const asm = await assembleScene({
+      glb: data.glb,
+      logPrefix: 'debug',
+      pvs: this.pvsManager,
+      skyCamera: data.skyCamera ?? null,
+      meshInCluster: (m, c) => this.meshInCluster(m, c),
+      onRootReady: (root) => this.collectMetadata(root),
+      mergeMain: OPTIMIZE_SCENE_ENABLED ? (root, gltf) => { this.optimizeScene(root, gltf.scene); } : undefined,
+      normalizeGroup: normalizeMergeGroup,
+    });
+    const mapRoot = asm.root, boundingBox = asm.bbox, maxDim = asm.maxDim;
+    this.skyGroup = asm.skyGroup;
+    this.skyParams = asm.skyGroup && data.skyCamera ? data.skyCamera : null;
 
     // 预编译着色器程序（2026-10-04 起与 game 同款）：把「首次可见才编译」的卡顿挪到加载期。
     // 失败不致命（three 仍按需编译），故只告警。

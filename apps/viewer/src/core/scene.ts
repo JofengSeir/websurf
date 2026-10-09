@@ -16,9 +16,9 @@ import {
   type LightingMode,
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
 import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
-import { applyLightmap, buildMapScene } from '../../../../src/renderer-shared/scene/scene-builder.js';
+import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js';
 import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
-import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { createSkyCamera, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
@@ -152,15 +152,8 @@ export class ViewerScene {
     // 换图：上一张图的天空层与雾先释放（下面的摘取会覆盖 this.skyGroup 引用）
     if (this.skyGroup) { disposeObject(this.skyGroup); this.scene.remove(this.skyGroup); this.skyGroup = null; }
     this.skyParams = null; this.skyFog = null; this.pvs = null;
-    // 共享装配核（2026-10-03 起与 game 同一条链路）：GLB 字节 → 子场景（isBspModel 标记 +
-    // 清根 rotation + 世界包围盒 + 摘 punctual 灯，顺序约束见 buildMapScene 文档）
-    const { gltf, scene: mapRoot, maxDim } = await buildMapScene(glbBytes); await collectWorldTransitionTextures(gltf, mapRoot);
-
-    // 3D 天空盒（起源做法，与 debug/game 同款）：把天空区图元摘出主世界、交第二相机单独渲染。
-    // 判据 =「图元采样点落在 `sky_camera` 所在 cluster」；必须早于分块合并——合并后跨区的大块
-    // 无法再拆。无 `sky_camera` / 无 PVS / 摘不到图元时不建，末尾不挂天空层。
-    this.pvs = sky?.pvsJson ? new PvsManager(sky.pvsJson) : null;
-
+    // 换图：先释放上一张图（必须在装配核之前——装配核里的 `optimizeScene` 会改写 `this.modelRoot`，
+    // 放到后面就会把**新**图当成旧图释放）
     if (this.modelRoot) {
       disposeObject(this.modelRoot);
       this.scene.remove(this.modelRoot);
@@ -168,49 +161,23 @@ export class ViewerScene {
       // three.js 渲染列表缓存按旧地图几何缓存条目，换图后清掉（2026-10-04 自 debug 对齐）
       if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose(); this.renderer.renderLists.dispose();
     }
-    this.scene.background = skyboxTexture ?? new THREE.Color(BG_COLOR); this.scene.add(mapRoot);
-    this.modelRoot = mapRoot;
+    // 共享装配核（T-454 P3b-2 起三端同一条链路）：GLB → 摘 punctual 灯 → 双贴图登记 → lightmap
+    // → 摘天空区 → 主模型合并 → 天空区合并 → 终扫，顺序即契约（见 `scene/assemble-scene.ts` 文件头）。
+    this.pvs = sky?.pvsJson ? new PvsManager(sky.pvsJson) : null;
+    const asm = await assembleScene({
+      glb: glbBytes,
+      logPrefix: 'viewer',
+      pvs: this.pvs,
+      skyCamera: sky?.skyCamera ?? null,
+      meshInCluster: (m, c) => this.meshInCluster(m, c),
+      mergeMain: () => this.optimizeScene(),
+    });
 
-    // 静态光照（预烘焙，默认）必须赶在 optimizeScene 之前：分块合并按材质实例分组，
-    // 换过材质的图元一旦留到合并之后才处理，分组与逐 primitive 的 UV1 映射都会失配。
-    const applied = await applyLightmap(mapRoot, gltf);
-    // 3D 天空盒摘取：必须在 applyLightmap 之后（否则微缩区拿不到 lightmap 与逐顶点烘焙），
-    // 且在 optimizeScene 之前（合并成空间块后跨区大块无法再拆）。
-    const skyCluster = sky?.skyCamera && this.pvs
-      ? this.pvs.getClusterAt({ x: sky.skyCamera.origin[0], y: sky.skyCamera.origin[1], z: sky.skyCamera.origin[2] })
-      : -1;
-    this.skyGroup = sky?.skyCamera && skyCluster >= 0 ? extractSkyArea(mapRoot, (m) => this.meshInCluster(m, skyCluster)) : null;
-    this.skyParams = this.skyGroup && sky?.skyCamera ? sky.skyCamera : null;
-    if (!applied) {
-      console.info('[viewer][lightmap] 未施加静态光照（无 atlas 或施加失败），地图为贴图原色');
-    }
-
-    // 渲染减负：空间分块合并（GLTFLoader 逐 primitive 建 Mesh，这里按空间块归并）
-    // 天空区也要合并：天空组没有主世界那棵原 GLB 子树，合并后必须自己 clear 并重贴天空层。
-    // 不合并时 1000+ 个逐面小块就是 1000+ 次天空遍 draw call。与 debug 同构。
-    if (this.skyGroup) {
-      const skyMerged = mergeIntoChunks(this.skyGroup);
-      this.skyGroup.clear();
-      for (const m of skyMerged.chunks) this.skyGroup.add(m);
-      for (const m of skyMerged.keptMeshes) this.skyGroup.add(m);
-      padBoundingSpheres(this.skyGroup);
-      this.skyGroup.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.isMesh) m.layers.set(SKY_LAYER);
-      });
-      console.info(`[skybox] 天空区合并：${skyMerged.infos.length + skyMerged.keptMeshes.length} mesh → ${skyMerged.chunkCount} 块`);
-    }
-
-    this.optimizeScene();
-
-    // 合并后终扫（2026-10-03 起与 game 同序：终扫必须晚于合并——合并会重建 mesh/材质数组）：
-    // 把仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程不加灯，受光材质恒黑）
-    const swept = fullbrightUnlitLitMaterials(this.modelRoot); applyWorldTransitionShaders(this.modelRoot);
-    // 天空区图元已摘出主根，同两道装配要在天空组上再跑一次（全亮收敛 + WorldTransition 雪盖）
-    if (this.skyGroup) { fullbrightUnlitLitMaterials(this.skyGroup); applyWorldTransitionShaders(this.skyGroup); }
-    if (swept > 0) {
-      console.info(`[viewer][lightmap] 装配后终扫：${swept} 个 mesh 收敛为 fullbright 贴图原色`);
-    }
+    this.scene.background = skyboxTexture ?? new THREE.Color(BG_COLOR); this.scene.add(asm.root);
+    this.modelRoot = asm.root;
+    this.skyGroup = asm.skyGroup;
+    this.skyParams = asm.skyGroup && sky?.skyCamera ? sky.skyCamera : null;
+    const maxDim = asm.maxDim;
 
     // 预编译着色器程序（2026-10-04 起与 game/debug 同款）：把「首次可见才编译」的卡顿挪到加载期。
     // 失败不致命（three 仍按需编译），故只告警。
@@ -290,15 +257,17 @@ export class ViewerScene {
     return false;
   }
 
-  private optimizeScene(): void {
-    if (!this.modelRoot) return;
-    const r = mergeIntoChunks(this.modelRoot);
+  private optimizeScene(modelRoot?: THREE.Object3D): THREE.Object3D | void {
+    const src = modelRoot ?? this.modelRoot;
+    if (!src) return;
+    const r = mergeIntoChunks(src);
     const optRoot = new THREE.Group();
     for (const m of r.chunks) optRoot.add(m);
     for (const m of r.keptMeshes) optRoot.add(m);
     padBoundingSpheres(optRoot);
-    this.scene.remove(this.modelRoot);
+    this.scene.remove(src);
     this.scene.add(optRoot);
     this.modelRoot = optRoot;
+    return optRoot;
   }
 }

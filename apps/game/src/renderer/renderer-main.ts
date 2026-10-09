@@ -40,7 +40,7 @@ import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-ca
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
-import { mergeIntoChunks, padBoundingSpheres, optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { mergeIntoChunks, padBoundingSpheres, optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js'; import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js';
 import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inject-stats.js';
 import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
@@ -269,63 +269,24 @@ export class RendererMain {
     //    (1) 摘灯必须在挂进主场景之前（rAF 已在跑，先挂再摘会让中间帧带灯编译材质，uniform 超限
     //        ⇒ 该批 mesh 一个像素都不画）；(2) 必须 removeFromParent 真摘，visible=false 仍会被
     //        traverse 且程序失效。
-    const { gltf, scene, bbox, maxDim } = await buildMapScene(data.glb); await collectWorldTransitionTextures(gltf, scene);
-
-
-    this.scene.add(scene); // 挂进主场景：此时 punctual 光源已摘除
-
-    // 1.2 离线烘焙静态光照（lightmap atlas）：**必须**在 optimizeScene 之前施加。
-    //     理由：lightmap 按原 mesh 的材质与 UV 通道施加并改写材质，而分块合并会重建几何与材质
-    //     数组；放到合并之后施加就找不到原来的材质映射。返回值落账 pendingInjectReport
-    //     （首帧后由 tick 统一统计注入生效性）。
-    this.pendingInjectReport = await applyLightmap(scene, gltf);
-    // 1.1 3D 天空盒（起源做法，与 debug 同款）：把天空区图元摘出主世界，交第二相机单独渲染。
-    //     判据 =「图元采样点落在 `sky_camera` 所在 cluster」。
-    //     位置与 debug 同序：**必须晚于 applyLightmap**（否则微缩区图元已不在遍历范围内 ⇒ 拿不到
-    //     lightmap 与逐顶点烘焙，只剩贴图原色），且必须早于分块合并（合并成空间块后跨区大块无法再拆）。
+    // 共享装配核（T-454 P3b-2 起三端同一条链路）：GLB → 摘 punctual 灯 → 双贴图登记 → lightmap
+    // → 摘天空区 → 主模型合并 → 天空区合并 → 终扫，顺序即契约（见 `scene/assemble-scene.ts` 文件头）。
+    // 摘灯发生在 buildMapScene 内部（挂进主场景之前），故这里挂载点放在装配之后是安全的：
+    // rAF 已在跑，先挂再摘会让中间帧带灯编译材质、uniform 超限 ⇒ 该批 mesh 一个像素都不画。
     this.pvsManager = new PvsManager(data.pvsJson);
-    const skyCluster = data.skyCamera
-      ? this.pvsManager.getClusterAt({ x: data.skyCamera.origin[0], y: data.skyCamera.origin[1], z: data.skyCamera.origin[2] })
-      : -1;
-    this.skyGroup = data.skyCamera && skyCluster >= 0 ? extractSkyArea(scene, (m) => this.meshInCluster(m, skyCluster)) : null;
-    this.skyParams = this.skyGroup && data.skyCamera ? data.skyCamera : null;
-
-    // 1.3 装配顺序的其余约束：摘灯 → 施加 lightmap → 分块合并 → 受光材质终扫（合并会重建材质
-    //     数组，所以终扫必须晚于合并、早于首次编译）。
-
-    // 1.5 空间分块合并（GLB 挂载后、PVS/LOD 注册前）：数万 mesh → 数百空间块。
-    //     必须在下方 traverse（lodItems 收集 + clusterIds 分配）之前执行——那次 traverse 收集的是
-    //     合并之后的块 mesh。
-    // 天空区也要合并：天空组没有主世界那棵原 GLB 子树，合并后必须自己 clear 并重贴天空层。
-    // 不合并时 1000+ 个逐面小块就是 1000+ 次天空遍 draw call。与 debug 同构。
-    if (this.skyGroup) {
-      const skyMerged = mergeIntoChunks(this.skyGroup);
-      this.skyGroup.clear();
-      for (const m of skyMerged.chunks) this.skyGroup.add(m);
-      for (const m of skyMerged.keptMeshes) this.skyGroup.add(m);
-      padBoundingSpheres(this.skyGroup);
-      this.skyGroup.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.isMesh) m.layers.set(SKY_LAYER);
-      });
-      console.info(`[skybox] 天空区合并：${skyMerged.infos.length + skyMerged.keptMeshes.length} mesh → ${skyMerged.chunkCount} 块`);
-    }
-
-    optimizeScene(scene, gltf.scene, this.camera, this.config?.hud?.fov ?? FOV_DEFAULT);
-
-    // 1.55 装配后终扫：把仍带受光材质的 mesh（GLTFLoader 给 prop/派生网格的
-    //      `MeshStandardMaterial`）收敛到 fullbright。本工程不加任何灯 ⇒ 受光材质只剩
-    //      emissive=[0,0,0]，恒渲染纯黑。必须在 optimizeScene 之后（合并会重建 mesh/材质数组）、
-    //      首次编译之前。
-    const converged = fullbrightUnlitLitMaterials(this.scene); applyWorldTransitionShaders(this.scene);
-    // 天空区图元已摘出主场景，同两道装配要在天空组上再跑一次（全亮收敛 + WorldTransition 雪盖）
-    if (this.skyGroup) { fullbrightUnlitLitMaterials(this.skyGroup); applyWorldTransitionShaders(this.skyGroup); }
-    if (converged > 0) {
-      console.info(
-        `[lightmap] 装配后终扫：${converged} 个 mesh 仍为受光材质 ⇒ 收敛为 fullbright 贴图原色` +
-          '（本工程不加灯，受光材质恒黑；unlit 图元不吃 ambient cube）',
-      );
-    }
+    const asm = await assembleScene({
+      glb: data.glb,
+      logPrefix: 'game',
+      pvs: this.pvsManager,
+      skyCamera: data.skyCamera ?? null,
+      meshInCluster: (m, c) => this.meshInCluster(m, c),
+      mergeMain: (root, gltf) => { optimizeScene(root, gltf.scene, this.camera, this.config?.hud?.fov ?? FOV_DEFAULT); },
+    });
+    const scene = asm.root, maxDim = asm.maxDim, bbox = asm.bbox;
+    this.pendingInjectReport = asm.applied;
+    this.scene.add(scene); // 挂进主场景：此时 punctual 光源已在装配核内摘除
+    this.skyGroup = asm.skyGroup;
+    this.skyParams = asm.skyGroup && data.skyCamera ? data.skyCamera : null;
 
     // 1.6 预编译着色器程序：把「首次可见才编译」的卡顿挪到加载期。
     //     背景：`tick` 把主线程物理的 dt 夹在 0.1s 以内（上限见该方法的 dt 计算）⇒ 超过 100ms 的

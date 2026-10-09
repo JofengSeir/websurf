@@ -109,7 +109,7 @@
 
 | ID | 事项 | 证据 |
 |---|---|---|
-| T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | apps/debug/src/renderer/renderer-main.ts:461 |
+| T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | apps/debug/src/renderer/renderer-main.ts:460 |
 | T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | apps/game/src/app.ts:170 |
 | T-310 | `set-auto-restore-hull` 只改面板侧标记，`src/phys/**` 无对应参数与读取点，开关不写物理实例 | apps/debug/src/worker/worker-types.ts:146 |
 | T-312 | `tsconfig.json` 的五个路径别名零导入点 | apps/debug/tsconfig.json:19 |
@@ -178,7 +178,7 @@
 | T-403 | `MouseBuffer.push` / `drain` | src/ts-shared/input/mouse-buffer.ts:81 |
 | T-404 | `ShmState.wake` | src/ts-shared/auth/shared-state.ts:447 |
 | T-405 | `maskToKeys` | src/ts-shared/auth/shared-state.ts:98 |
-| T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | apps/game/src/renderer/renderer-main.ts:326 |
+| T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | apps/game/src/renderer/renderer-main.ts:277 |
 | T-407 | `world/types.ts` 的 `rootNode` 字段 | apps/game/crates/wasm/src/lib.rs:1704 |
 | T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | src/wasm-core/bsp_to_gltf_core/convert.rs:367 |
 
