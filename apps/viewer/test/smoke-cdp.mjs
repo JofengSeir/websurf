@@ -135,12 +135,12 @@ if (!existsSync(join(distRoot, 'index.html'))) {
   console.log('  skip  dist/ 未构建（先 npm run build:dist）；跳过静态断言');
 } else {
   const distHtml = readFileSync(join(distRoot, 'index.html'), 'utf8');
-  check('index.html 用 classic script ./app.js', distHtml.includes('<script src="./app.js">'), 'module 残留?');
-  check('index.html 无 <script type="module"', !distHtml.includes('<script type="module"'));
+  const isSingle = distHtml.includes('<script src="./app.js">');
+  check(`index.html 入口与形态一致（${isSingle ? 'single：classic ./app.js' : 'multi：module ./app.js'}）`, isSingle || distHtml.includes('<script type="module" src="./app.js">'), '入口脚本形态?');
   const appJs = readFileSync(join(distRoot, 'app.js'), 'utf8');
   check('app.js 内嵌 __VBSP_WASM_B64__', appJs.includes('__VBSP_WASM_B64__'));
   check('app.js 内嵌 __VBSP_WORKER_JS__', appJs.includes('__VBSP_WORKER_JS__'));
-  check('dist 根无 worker.js / *.wasm', !existsSync(join(distRoot, 'worker.js')) && !existsSync(join(distRoot, 'websurf_viewer_wasm_bg.wasm')));
+  check(`dist 根内容与形态自洽（${isSingle ? 'single ⇒ 无 worker.js / *.wasm' : 'multi ⇒ 有 worker.js 与 *.wasm'}）`, isSingle ? (!existsSync(join(distRoot, 'worker.js')) && !existsSync(join(distRoot, 'websurf_viewer_wasm_bg.wasm'))) : (existsSync(join(distRoot, 'worker.js')) && existsSync(join(distRoot, 'websurf_viewer_wasm_bg.wasm'))));
   check('dist/play.cmd 存在', existsSync(join(distRoot, 'play.cmd')));
   check('dist-multi/ 不存在（单一 dist）', !existsSync(join(VIEWER_ROOT, 'dist-multi')));
   // 示例录像 dist/assets/maps/surf_null_4.replay 由 build 从本地源 test/replay/surf_null_4.replay 复制；

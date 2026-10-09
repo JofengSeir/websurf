@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（84 条）
+## 未结项（83 条）
 ### 待裁决（0）
 
 
-### 待修（82）
+### 待修（81）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
@@ -41,7 +41,6 @@
 - **T-107** 分块选块包围盒只统计部分 Mesh，块边长由子集推出　`shared`
 - **T-114** 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems）　`viewer`
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
-- **T-131** 冒烟三条静态断言只对 single 产物成立　`viewer`
 - **T-145** 模型名匹配与材质查找的大小写口径不一致　`viewer`
 - **T-146** 锁中毒会 panic，与本文件其它失败形态不一致　`viewer`
 - **T-147** 材质去重键是材质名，同名材质被后续模型复用　`viewer`
@@ -145,7 +144,7 @@
 | T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | 工具·流程 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:346 | documents/viewer/implementation/renderer.md | 判据：three 升级后 broken 阶段对照仍有效（对失配字面量加断言，缺失即失败） | — |
 | T-118 | A-B 区间带恒不显示（宽度算式分子恒等于分母） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:525 | documents/viewer/implementation/replay.md | 判据：A-B 区间带可见（宽度算式分子≠分母）：构造 A≠B ⇒ 带出现且宽度随区间变化 | — |
 | T-125 | 零帧轨道的口径不一致（列表面板有卡片、3D 无对象） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/visuals.ts:96 | documents/viewer/implementation/replay.md | 判据：零帧轨道 ⇒ 列表与 3D 口径一致（要么都无卡片、要么都有对象） | — |
-| T-131 | 冒烟三条静态断言只对 single 产物成立（**已实测成立**：dev/multi 形态下这三条 FAIL，见 `apps/viewer/test/smoke-cdp.mjs:138`/`:139`/`:143`） | 配置·门禁 | viewer | 待修 | apps/viewer/test/smoke-cdp.mjs:138 | documents/viewer/implementation/scripts-and-test.md | `cd apps/viewer && npm run local:smoke` 在 **dev/multi** 与 **single(dist)** 两种形态下都 exit 0（现状：dev 形态下这三条各报 FAIL）⇒ 需把断言改成按形态分支（或只在 single 形态下断言） | — |
+| T-131 | 冒烟三条静态断言只对 single 产物成立（**已实测成立**：dev/multi 形态下这三条 FAIL，见 `apps/viewer/test/smoke-cdp.mjs:138`/`:139`/`:143`） | 配置·门禁 | viewer | 已结案 | **已结案（2026-10-09，两种形态各实测一次 exit 0）**：三条静态断言原本只认 **single** 产物的形状（classic `./app.js`、无 `type="module"`、根目录无 `worker.js` / `*.wasm`），而 `--multi` 产物天然不满足（module script + 外置 wasm + 根目录 worker.js）⇒ 断言改为**按实际形态分支**：①「`index.html` 入口与形态一致」（single ⇒ classic `./app.js`；multi ⇒ `type="module"` + `./app.js`）；②「dist 根内容与形态自洽」（single ⇒ 无 `worker.js`/`*.wasm`；multi ⇒ 两者都有）。两处都是**同行 1:1 替换**（smoke-cdp.mjs 有 9+1+2+1+1+1+1+1 处文档锚点，行数零变化）。**验证**：`node scripts/build-dist.mjs --multi` 形态下 `npm run local:smoke` ⇒ **exit 0 / 0 项失败**；`node scripts/build-dist.mjs`（single）形态下再跑 ⇒ **exit 0 / 0 项失败**。**至此 viewer 冒烟由本轮的 6 项失败清到 0**（T-130 断言八键、T-612 合并签名、配色断言改 `.track-color`、本条形态分支） | documents/viewer/implementation/scripts-and-test.md | `cd apps/viewer && npm run local:smoke` 在 **multi** 与 **single** 两种 dist 形态下都 **exit 0**（2026-10-09 各实测一次；两种形态的入口/根内容断言各自动分支）；`git grep -c "isSingle" -- apps/viewer/test/smoke-cdp.mjs` ⇒ 2 处（形态分支） | — |
 | T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:125 | documents/viewer/implementation/ui.md | 判据：点导航「卸载地图」⇒ 回到空态且可再次载入 | — |
 | T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | 缺陷 | viewer | 待修 | apps/viewer/src/core/dom.ts:39 | documents/viewer/implementation/ui.md | 判据：`el('div', { id: undefined })` ⇒ 告警或报错（不再静默无 id） | — |
 | T-145 | 模型名匹配与材质查找的大小写口径不一致 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:119 | documents/viewer/implementation/wasm.md | 判据：模型名与材质查找同走小写基准 ⇒ 大小写不一致的模型名仍能配对（`cargo test` 覆盖） | — |
