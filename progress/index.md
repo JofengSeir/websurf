@@ -150,3 +150,4 @@
 | 2026-10-09 | T-454 P4b：viewer 接入共享可见性控制器（`scene/visibility-controller.ts`；declared delta `≤2 0.9685`/均值差 1.18）；规范会话下 debug↔game 100.000% 通道差 ≤2；新发现 debug 会话形态相关「偏亮模式」 | progress/monthly/2026-10-10.md:35 |
 | 2026-10-09 | T-454 P4c：debug 距离判定接入共享 `isBeyondCullDistance`（同模式对比逐像素相同）；更正 debug 双模式刻画为「**每次会话随机落进两个确定性模式之一**」（规范 173.67 / 偏亮 176.75） | progress/monthly/2026-10-10.md:37 |
 | 2026-10-09 | T-454 诊断：debug 双模式差异**只在天区**（差异像素 11.85%，包围盒 x∈[211,1279] y∈[0,215]，比值 p95 1.129；世界几何/光照逐像素相同）⇒ 天区装配的加载期竞态 | progress/monthly/2026-10-10.md:39 |
+| 2026-10-09 | T-454 P5-1：viewer 导出面补齐 `mosaic_decode`（EOF 追加纯 Rust 转发，锚点零漂移；d.ts 三端齐备 + `initSync` 运行时验证转发生效；`src/wasm-core` 仍 0 处 wasm_bindgen） | progress/monthly/2026-10-10.md:41 |

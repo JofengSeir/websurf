@@ -933,3 +933,12 @@ impl BspProcessor {
         serde_json::to_string(&pvs_data).map_err(|e| to_js_err(e, "序列化 PVS 数据失败"))
     }
 }
+
+/// mosaic v4 字节码 → PNG 字节（低清还原，最近邻放大 ×scale，默认 ×8）。
+/// T-454 P5：本工程导出面此前缺 `mosaic_decode`（debug / game 都有），补齐后三端共用同一条解码路径
+/// （画质档「低清」在图集缺失时的兜底解码；纯 Rust 转发，wasm-bindgen 只出现在本文件的导出层）。
+#[wasm_bindgen]
+pub fn mosaic_decode(code: &str, scale: u32) -> Result<Vec<u8>, JsValue> {
+    websurf_wasm_core::mosaic::decode::code_to_img(code, scale)
+        .map_err(|e| JsValue::from_str(&format!("mosaic_decode: {e}")))
+}
