@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（106 条）
+## 未结项（103 条）
 ### 待裁决（0）
 
 
-### 待修（104）
+### 待修（101）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -52,10 +52,7 @@
 - **T-146** 锁中毒会 panic，与本文件其它失败形态不一致　`viewer`
 - **T-147** 材质去重键是材质名，同名材质被后续模型复用　`viewer`
 - **T-148** packed_files 构造期缓存而 num_static_props 每次现算　`viewer`
-- **T-156** `wasm.d.ts` 是零导入点的类型面　`viewer`
 - **T-157** `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达　`viewer`
-- **T-161** 六个导出在本工程内零调用点　`viewer`
-- **T-162** `setLightFloor` 在本工程内零调用点　`viewer`
 - **T-166** `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点　`viewer`
 - **T-167** 进度回调里的 `'map'` 分支不可达　`viewer`
 - **T-206** `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃　`game`
@@ -188,8 +185,8 @@
 | T-113 | svc_GameEvent 只按长度跳过，事件描述符表未保存 | 缺陷 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:563 | documents/viewer/implementation/dem.md | 判据：`test/replay/auto-20260929-192716-surf_sedona.dem` ⇒ `svc_GameEvent` 保存事件描述符表（不再只按长度跳过） | — |
 | T-114 | 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems） | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/demo/net.ts:269 | documents/viewer/implementation/dem.md | 判据：@BT@git grep -n "mergeVectorElems" -- apps src@BT@ ⇒ 0 命中（诊断开关已从生产代码移除） | — |
 | T-115 | untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查 | 缺陷 | viewer | 已取证待立项 | apps/viewer/src/replay/demo/demo.ts:866 | documents/viewer/implementation/dem.md | — | — |
-| T-116 | 注入期 throw 不在本工程调用方 catch 覆盖范围内 | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1114 | documents/viewer/implementation/renderer.md | 判据：注入期抛错 ⇒ 调用方 catch 覆盖（探针构造 throw 路径） | — |
-| T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | 工具·流程 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:351 | documents/viewer/implementation/renderer.md | 判据：three 升级后 broken 阶段对照仍有效（对失配字面量加断言，缺失即失败） | — |
+| T-116 | 注入期 throw 不在本工程调用方 catch 覆盖范围内 | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1104 | documents/viewer/implementation/renderer.md | 判据：注入期抛错 ⇒ 调用方 catch 覆盖（探针构造 throw 路径） | — |
+| T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | 工具·流程 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:346 | documents/viewer/implementation/renderer.md | 判据：three 升级后 broken 阶段对照仍有效（对失配字面量加断言，缺失即失败） | — |
 | T-118 | A-B 区间带恒不显示（宽度算式分子恒等于分母） | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:525 | documents/viewer/implementation/replay.md | 判据：A-B 区间带可见（宽度算式分子≠分母）：构造 A≠B ⇒ 带出现且宽度随区间变化 | — |
 | T-119 | 时间轴两条 title 文案与默认播放窗口矛盾 | 文档口径 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:185 ⇒ 文案改为「prerun 帧计入区间（读数可为负）」，与 apps/viewer/src/replay/player.ts:180 的 Math.min(0,t0) 窗口一致 | documents/viewer/implementation/replay.md | 见详情 | — |
 | T-120 | 正式跑段高亮宽度混基，Track.offset 非 0 时位置与宽度偏 | 缺陷 | viewer | 已结案 | apps/viewer/src/replay/timeline.ts:552 ⇒ 宽度算式先加 `track.offset` 换成主时钟（与左端同基）；DOM 桩探针 ⇒ left=10%、width=60%（旧算式 50%，偏 10 个百分点）；typecheck 通过 | documents/viewer/implementation/replay.md | 见详情 | — |
@@ -223,13 +220,13 @@
 | T-153 | WorkerCtx 是手写的全局面（tsconfig lib 缺 WebWorker） | 缺陷 | viewer | 已结案 | apps/viewer/tsconfig.json:6 ⇒ `lib` 加 `WebWorker`；手写 `WorkerCtx` 删除、`ctx = self`（无断言）；`npm run typecheck` 与 `build:worker` 均通过 | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-154 | clipToPayload 没有显式返回类型，字段写错的报错落在调用点 | 缺陷 | viewer | 已结案 | apps/viewer/src/worker/main.ts:122 ⇒ `clipToPayload(clip: Clip): ClipPayload`；把定义里 `vel` 写成 `vel2` 的对照 ⇒ 报错落点由调用点 `main.ts(104,20)` 移到定义处 `main.ts(129,5)`；typecheck 通过 | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-155 | req.rule 缺少防御，缺字段时抛 TypeError 并被 catch 成 error | 缺陷 | viewer | 已结案 | apps/viewer/src/worker/main.ts:87/88/93/94 ⇒ 改走文末 `ruleOf(req)`；探针 ⇒ `rule: undefined` 修复前 TypeError、修复后明确错误「导入请求缺少 rule 配置」；`rule: {}` 仍 done（1211 帧） | documents/viewer/implementation/worker.md | 见详情 | — |
-| T-156 | `wasm.d.ts` 是零导入点的类型面 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/wasm.d.ts:13 | documents/viewer/implementation/app.md | 判据：`git grep -n "wasm.d.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-156 | `wasm.d.ts` 是零导入点的类型面 | 未接线·死代码 | viewer | 已结案 | **遗弃（不删）**：`apps/viewer/src/wasm.d.ts` 确为零导入点（真正导入 wasm 的是 `apps/viewer/src/core/bsp.ts:23` 的 `../../pkg/websurf_viewer_wasm.js`，全仓无 `./wasm.js` 引用），但它被 `apps/viewer/tsconfig.json:15` 的 `include` 点名收进编译程序，且只读规范 `CONTRIBUTING.md:26` 以「各工程 `src/wasm.d.ts`」为约定 ⇒ 删除需同时改构建配置与规范篇、收益为零 | documents/viewer/implementation/app.md | `git grep -n "wasm.d.ts" -- apps/viewer/tsconfig.json` ⇒ 仍在 include（遗弃、不删） | — |
 | T-157 | `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/app.ts:726 | documents/viewer/implementation/app.md | 判据：`git grep -n "viewer.replay.setSpeed" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-158 | `core/pose.ts` 的两个函数零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/pose.ts` 删除 `pitchClampedRad` 与 `eyeHeight`（1/22 行，同时移除随之失效的 `./constants.js` 导入）；**判据**：全工作区扫描（527 个文件、含未跟踪，非 `git grep`）⇒ 两者只剩定义处与文档/TODO 提及，`pose.js` 的导入点只有 `type Pose` / `bspYawToCsYaw` / `wrapDeg` 再导出 ⇒ 零调用点；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-159 | `RAD2DEG` 在 `apps/viewer/src` 内零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/constants.ts` 删除 `RAD2DEG`（2/4 行）；**判据**：全工作区扫描 ⇒ 只剩定义处与文档/TODO 提及 ⇒ 零调用点；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-160 | `ViewerScene.model` getter 零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/scene.ts` 删除 `get model()`（0/5 行）；**判据**：全工作区扫描 `.model` ⇒ 只有类内部 `modelRoot`，无外部读取者；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
-| T-161 | 六个导出在本工程内零调用点 | 未接线·死代码 | viewer | 待修 | src/renderer-shared/shader/lightmap-shader.ts:313 | documents/viewer/implementation/renderer.md | 判据：六个导出逐个 @BT@git grep -n "<符号>" -- apps/viewer src@BT@ ⇒ 只剩定义处 ⇒ 删除 | — |
-| T-162 | `setLightFloor` 在本工程内零调用点 | 未接线·死代码 | viewer | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1752 | documents/viewer/implementation/renderer.md | 判据：`git grep -n "setLightFloor" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-161 | 六个导出在本工程内零调用点 | 未接线·死代码 | viewer | 已结案 | 按 D-024 窄口径处置：**5 个真死导出已删除**（`isLightmapSkipStage`、`isTextureOnlyMode`、`getLightFloor`、`getExposure`、`getAmbientScale`；`src/renderer-shared/shader/lightmap-shader.ts` 1/26 行，同时改掉 `:423` 那句提到 `isTextureOnlyMode` 的注释）；**其余 3 个不是死代码**——`getVertexLightingRelaxStats` / `getPropVertexRelax` / `getPropVertexFlatten` 被 `src/renderer-shared/scene/inject-stats.ts:116`、`:122`、`:124` 调用，而 `reportInjectStatsOnce` 由 `apps/game/src/renderer/renderer-main.ts:43` 使用 ⇒ 原断言「六个都零调用点」对其中 3 个不成立，已更正并保留 | documents/viewer/implementation/renderer.md | 全工作区扫描（含未跟踪）这 5 个符号仅剩定义处 ⇒ 删除；删除后 debug / game / viewer 三工程 `npm run typecheck` 全部 exit 0 且体检 A–P 全 0 | — |
+| T-162 | `setLightFloor` 在本工程内零调用点 | 未接线·死代码 | viewer | 已结案 | **遗弃（不删）**：`setLightFloor` 是**文档化的控制台 A/B 钩子**（`src/renderer-shared/shader/lightmap-shader.ts` 注释明写 `window.__vbspLightFloor = 0.004` 与调 `setLightFloor()` 两种用法），且 debug / game / viewer 三篇 `renderer.md` 都把它列为模块导出面 | documents/viewer/implementation/renderer.md | `git grep -n "setLightFloor" -- src` ⇒ 仍在（遗弃、不删）；文档已按 [L] 标「已消除 + 遗弃」 | — |
 | T-163 | `ReplayPlayer` 两个成员零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/replay/player.ts` 删除 `horizontalSpeed` 与静态 `sampleClipAt`（1/13 行，导入收窄为 `indexInClip`）；**判据**：全工作区扫描（540 个文件、含未跟踪）`.horizontalSpeed(` / `.sampleClipAt(` ⇒ 各 **0** 处；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/replay.md | 全工作区扫描（含未跟踪）该成员无调用点 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-164 | `ReplayImporter.dispose()` 零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/replay/importer.ts` 删除 `dispose()`（0/7 行）；**判据**：全工作区扫描 ⇒ `importer` 实例无 `.dispose(` 调用（viewer 内 `.dispose(` 只剩 three 几何/材质/贴图）；删除后 viewer typecheck exit 0。**取舍**：另一路是接到页面卸载以消 Worker 泄漏，属新增接线、超出本行判据 | documents/viewer/implementation/replay.md | 全工作区扫描（含未跟踪）该成员无调用点 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-165 | `ReplayVisuals.hasTracks()` 零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/replay/visuals.ts` 删除 `hasTracks()`（0/5 行）；**判据**：全工作区扫描 `.hasTracks(` ⇒ **0** 处（`apps/viewer/src/ui/telemetry.ts:109` 的 `hasTracks` 是形参名）；删除后 viewer typecheck exit 0 | documents/viewer/implementation/replay.md | 全工作区扫描（含未跟踪）该成员无调用点 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
@@ -263,7 +260,7 @@
 | T-227 | 共享层的累积路径无消费方 | 未接线·死代码 | game | 待修 | src/ts-shared/input/mouse-buffer.ts:81 | documents/game/implementation/input.md | 判据：@BT@git grep -n "<累积路径符号>" -- apps src@BT@ ⇒ 无消费方 ⇒ 删除 | — |
 | T-228 | `sampleEpoch` 字段只写不读 | 未接线·死代码 | game | 待修 | apps/game/src/renderer/renderer-main.ts:130 | documents/game/implementation/renderer.md | 判据：`git grep -n "sampleEpoch" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-229 | `applyCollisionCorrection` 的入参有三个不被读取 | 未接线·死代码 | game | 待修 | src/ts-shared/phys/authority-calibrator.ts:735 | documents/game/implementation/renderer.md | 判据：`git grep -n "applyCollisionCorrection" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-230 | 光照模块内多个导出在本工程零导入点 | 未接线·死代码 | game | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1752 | documents/game/implementation/renderer.md | 判据：光照模块导出逐个 @BT@git grep -n "import" -- apps/game/src@BT@ ⇒ 零导入者 ⇒ 删除 | — |
+| T-230 | 光照模块内多个导出在本工程零导入点 | 未接线·死代码 | game | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1742 | documents/game/implementation/renderer.md | 判据：光照模块导出逐个 @BT@git grep -n "import" -- apps/game/src@BT@ ⇒ 零导入者 ⇒ 删除 | — |
 | T-231 | `SavePoint.t` 只写不读 | 未接线·死代码 | game | 待修 | apps/game/src/app.ts:610 | documents/game/implementation/savepoint.md | 判据：`git grep -n "SavePoint.t" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-232 | `getMap()` 零调用点 | 未接线·死代码 | game | 待修 | apps/game/src/savepoint.ts:69 | documents/game/implementation/savepoint.md | 判据：`git grep -n "getMap()" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-233 | `clear()` 零调用点 | 未接线·死代码 | game | 待修 | apps/game/src/savepoint.ts:98 | documents/game/implementation/savepoint.md | 判据：`git grep -n "clear()" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
@@ -278,7 +275,7 @@
 | T-303 | 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1 | 缺陷 | debug | 已结案 | apps/debug/src/app.ts:603（1:1）：PVS 段改为 `totalClusters > 0 ? '可见/总 隐藏n' : '未接线'` ⇒ 未接线时不再打印假「隐藏 0」；apps/debug/src/renderer/lod-manager.ts:262 的 pvsHidden=0 口径与既有注释不变；debug typecheck 通过；文档两条缺口按 [L] 标「已消除（2026-10-09）」 | documents/debug/implementation/renderer.md | 见详情 | — |
 | T-304 | tick 线时间戳在 `readPublishedTau()` 返回 0 时回落墙钟 `now`，两条线时间基准不同源 | 缺陷 | debug | 已结案 | 遗弃（不修）：断言不成立——`readPublishedTau()` 是 `tickInstantToTau = workerInstMs + rtOffset`（apps/debug/src/worker/main.ts:262）的**渲染时钟域**值，与回落用的 `now` 同源；且 τ=0 是「未投影」契约语义（src/ts-shared/auth/auth-loop.ts:428），此时发布位置就是权威自身 state、对应当前时刻。另修正了文档里指错行的锚点 | documents/debug/implementation/renderer.md | 见详情 | — |
 | T-305 | 权威 post-tick 位置差（residual）固定传 `undefined`，该组统计样本数恒 0 | 缺陷 | debug | 已结案 | 遗弃（不修）：residual 需「权威自身 post-tick 位置」，而发布只写投影位置（src/ts-shared/auth/auth-loop.ts:431）⇒ 主线程原理上拿不到；要填需给共享内存加槽位（SAB 布局跨端契约改动），该统计当前无读取方。限制已写进 residualStats 文档，字段留作扩展点 | documents/debug/implementation/renderer.md | 见详情 | — |
-| T-306 | lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform | 缺陷 | debug | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1549 | documents/debug/implementation/renderer.md | 判据：运行期改诊断开关 ⇒ 覆盖生效（不再固化于模块初始化时的 uniform 初值） | — |
+| T-306 | lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform | 缺陷 | debug | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1539 | documents/debug/implementation/renderer.md | 判据：运行期改诊断开关 ⇒ 覆盖生效（不再固化于模块初始化时的 uniform 初值） | — |
 | T-307 | `frame-bench.mjs` 缺省地图路径 `<仓库根>/maps/surf_666.bsp` 不在工作区，不传第 4 参即打印「地图不存在」并 exit 2 | 缺陷 | debug | 待修 | apps/debug/scripts/frame-bench.mjs:37 | documents/debug/implementation/scripts.md | 判据：不传第 4 参跑 @BT@frame-bench.mjs@BT@ ⇒ 不再打印「地图不存在」并 exit 2（缺省路径可用或改为必填报错） | — |
 | T-308 | 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套 | 工具·流程 | debug | 待修 | apps/debug/package.json:7 | documents/debug/implementation/scripts.md | 判据：`apps/debug/package.json` 有指向 dev/build/start/stop 的 script，`.cmd` 只做薄包装（环境准备只留一处） | — |
 | T-309 | 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24） | 缺陷 | debug | 已结案 | apps/debug/src/wasm.d.ts:145 起 ⇒ 同块补 BspProcessor 12 个成员；`node .tmp/t007/probe.mjs` ⇒ BspProcessor 26/26 缺 0 | documents/debug/implementation/wasm-bindings.md | 见详情 | — |
@@ -312,7 +309,7 @@
 | T-441 | 【S16】置换面碰撞**分块懒加载**（落实 D-017：owner 2026-10-08 裁决，避免一次性 ~13MB JSON / 13 万三角形入物理） | 缺陷 | shared | 待修 | src/ts-shared/phys/world-builder.ts:203 | progress/monthly/2026-10-6.md | 判据：置换面按块分批构建；`triJson` 单次体积显著下降且洞穴壁仍全有碰撞 | — |
 | T-503 | mergeGeometries 因 normal 属性不一致失败，三应用合批静默失效 | 缺陷 | shared | 已结案 | src/renderer-shared/scene/scene-optimizer.ts:343/356/374/384/395 ⇒ 两级合并都先按「属性签名」切子组再逐组合并（新 helper 追加在 EOF，正文 +13 行）；探针：3 个 mesh（1 个缺 normal）⇒ 修复前 3 块 + 1 条 three 报错、修复后 2 块 + 0 报错；现有回归 `npm run test:optimize-scene` ⇒ 21 passed / 0 failed（来源表与 faceIndex 反查完好） | progress/open-issues/03-renderer-merge-normal-attribute.md | 见详情 | 原 03 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 缺陷 | shared | 已结案 | src/wasm-core/bsp_to_gltf_core/materials.rs:437/478/267/328 + EOF `FALLBACK_BASE_COLOR`（缺省基色白 → 低饱和深灰 [64,64,72]；作者显式 `$color` 与有贴图的成功路径不变）；探针（`export_glb` 的 JSON chunk 扫 `baseColorFactor`）：surf_666 无贴图且纯白 **46 → 0**、深灰 **0 → 46**（有贴图 18 未动）；surf_boreas 0 → 1 深灰 | progress/open-issues/04-wasm-untextured-surface-color.md | 见详情 | 原 04 |
-| T-601 | 注释瘦身 · 共享层：20 处超长注释 + 3 个超长文件头（含 lightmap-shader.ts / player.rs / vbsp / gltf_builder.rs / authority-calibrator.ts 等） | 文档口径 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1582 | documents/architecture/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
+| T-601 | 注释瘦身 · 共享层：20 处超长注释 + 3 个超长文件头（含 lightmap-shader.ts / player.rs / vbsp / gltf_builder.rs / authority-calibrator.ts 等） | 文档口径 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1572 | documents/architecture/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
 | T-602 | 注释瘦身 · debug：4 处超长注释 + 0 个超长文件头（debug 脚本与 app.ts / teleport-manager.ts / path-recorder.ts / crates/wasm 等） | 文档口径 | debug | 待修 | apps/debug/scripts/jump-apex-verify.mjs:1 | documents/debug/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
 | T-603 | 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等） | 文档口径 | game | 待修 | apps/game/src/worker/main.ts:1 | documents/game/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
 | T-604 | 注释瘦身 · viewer：1 处超长注释 | 文档口径 | viewer | 待修 | apps/viewer/src/replay/demopanel.ts:1238 | documents/viewer/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |

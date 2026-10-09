@@ -309,11 +309,6 @@ export function readLightmapStage(): LightmapStage {
 		: 'auto';
 }
 
-/** 该 stage 是否属于「跳过自定义光照」类（`native` 与 `noinject`）。 */
-export function isLightmapSkipStage(stage: string): boolean {
-	return stage === 'native' || stage === 'noinject';
-}
-
 /**
  * lightmap 采样应使用的 UV 通道号（正确值 = 1）。
  *
@@ -420,7 +415,7 @@ export async function loadLightmapAtlas(
  */
 export type LightingMode = 'baked' | 'texture';
 
-/** 当前光照模式（模块级；`applyLightmapToMeshes` 与 `isTextureOnlyMode` 读它）。 */
+/** 当前光照模式（模块级；`applyLightmapToMeshes` 读它）。 */
 let lightingMode: LightingMode = 'baked';
 
 /**
@@ -441,11 +436,6 @@ export function setLightingMode(mode: LightingMode): void {
 /** 当前光照模式。 */
 export function getLightingMode(): LightingMode {
 	return lightingMode;
-}
-
-/** 是否纯纹理模式（只有 `'texture'` 为真）。 */
-export function isTextureOnlyMode(): boolean {
-	return lightingMode === 'texture';
 }
 
 // ---------------------------------------------------------------------------
@@ -1753,11 +1743,6 @@ export function setLightFloor(v: number): void {
 	if (Number.isFinite(v) && v >= 0) lightFloorUniform.value = v;
 }
 
-/** 读取当前暗部抬升下限。 */
-export function getLightFloor(): number {
-	return lightFloorUniform.value as number;
-}
-
 /** 诊断：只输出 albedo（贴图原色，不施加 lightmap）——`window.__vbspDebugAlbedoOnly`。 */
 function readDebugAlbedoOnly(): boolean {
 	return (globalThis as { __vbspDebugAlbedoOnly?: unknown }).__vbspDebugAlbedoOnly === true;
@@ -1813,11 +1798,6 @@ export function setExposure(value: number): void {
 	exposureUniform.value = value;
 }
 
-/** 读取当前全局曝光（诊断用）。 */
-export function getExposure(): number {
-	return exposureUniform.value;
-}
-
 /** 出帧 A/B 覆盖值（`window.__vbspAmbientScale`）。 */
 function readAmbientScaleOverride(): number | null {
 	const g = globalThis as { __vbspAmbientScale?: unknown };
@@ -1830,11 +1810,6 @@ export function setAmbientScale(value: number): void {
 	if (!Number.isFinite(value) || value < 0) return;
 	if (readAmbientScaleOverride() !== null) return;
 	ambientScaleUniform.value = value;
-}
-
-/** 读取当前模型光照亮度倍率（诊断用）。 */
-export function getAmbientScale(): number {
-	return ambientScaleUniform.value;
 }
 
 

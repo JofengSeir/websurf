@@ -42,7 +42,7 @@
 | T-054 | debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g… | apps/debug/src/app.ts:1992 |
 | T-302 | 面板 `PARAM_DEFS` 与 `config.ts` 两套默认值来源、无交叉校验（`jumpHeight` 57 与 `jumpSpeed` 302 同写 `jump_height`） | apps/debug/src/physics/param-defs.ts:47 |
 | T-303 | 剔除/PVS 统计口径失真：`pvsHidden` 恒写 0 却按「隐藏 N」打印，`PvsManager.update` 从不调用 ⇒ `cluster` 恒 -1 | apps/debug/src/renderer/lod-manager.ts:262 |
-| T-306 | lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform | src/renderer-shared/shader/lightmap-shader.ts:1549 |
+| T-306 | lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform | src/renderer-shared/shader/lightmap-shader.ts:1539 |
 | T-309 | 手写 `.d.ts` 的 `BspProcessor` 侧落后 Rust 导出面 11 项（13 vs 24） | apps/debug/src/wasm.d.ts:34 |
 
 ### shared（11）
@@ -55,7 +55,7 @@
 | T-066 | .phy 凸包表达不了曲面坡（progress/open-issues/06 §3.3 / §7.4 的遗留）：s1_ramp1b 实… | 见详情 |
 | T-067 | 修好卡死后暴露的两 tick 跳变（成因未定位）：修法 A 生效后，玩家在 surf_666 的 s1_ramp1b 上从 owner … | 见详情 |
 | T-107 | 分块选块包围盒只统计部分 Mesh，块边长由子集推出 | src/renderer-shared/scene/scene-optimizer.ts:250 |
-| T-116 | 注入期 throw 不在本工程调用方 catch 覆盖范围内 | src/renderer-shared/shader/lightmap-shader.ts:1114 |
+| T-116 | 注入期 throw 不在本工程调用方 catch 覆盖范围内 | src/renderer-shared/shader/lightmap-shader.ts:1104 |
 | T-210 | 分块 cell 尺寸只在单材质分支累计包围盒，仅有多材质网格时并集为空、整个分块直接返回 | src/renderer-shared/scene/scene-optimizer.ts:250 |
 | T-504 | 无 $basetexture 的面按 $color 上色，大片无纹理面呈平白 / 粉 | 见详情 |
 | T-506 | 站立时的真卡死不再被处理（修法 A 的既定代价，未构造场景验证后果） | 见详情 |
@@ -139,8 +139,8 @@
 | T-158 | `core/pose.ts` 的两个函数零调用点 | apps/viewer/src/core/pose.ts（2026-10-09 T-158 已删除该函数） |
 | T-159 | `RAD2DEG` 在 `apps/viewer/src` 内零调用点 | apps/viewer/src/core/constants.ts:25 |
 | T-160 | `ViewerScene.model` getter 零调用点 | apps/viewer/src/core/scene.ts:92 |
-| T-161 | 六个导出在本工程内零调用点 | src/renderer-shared/shader/lightmap-shader.ts:313 |
-| T-162 | `setLightFloor` 在本工程内零调用点 | src/renderer-shared/shader/lightmap-shader.ts:1752 |
+| T-161 | 六个导出在本工程内零调用点 | src/renderer-shared/shader/lightmap-shader.ts（2026-10-09 已删 5 个，留 3 个） |
+| T-162 | `setLightFloor` 在本工程内零调用点 | src/renderer-shared/shader/lightmap-shader.ts:1742 |
 | T-163 | `ReplayPlayer` 两个成员零调用点 | apps/viewer/src/replay/player.ts（2026-10-09 已删） |
 | T-164 | `ReplayImporter.dispose()` 零调用点 | apps/viewer/src/replay/importer.ts（2026-10-09 已删） |
 | T-165 | `ReplayVisuals.hasTracks()` 零调用点 | apps/viewer/src/replay/visuals.ts（2026-10-09 已删） |
@@ -159,7 +159,7 @@
 | T-227 | 共享层的累积路径无消费方 | src/ts-shared/input/mouse-buffer.ts:81 |
 | T-228 | `sampleEpoch` 字段只写不读 | apps/game/src/renderer/renderer-main.ts:130 |
 | T-229 | `applyCollisionCorrection` 的入参有三个不被读取 | src/ts-shared/phys/authority-calibrator.ts:735 |
-| T-230 | 光照模块内多个导出在本工程零导入点 | src/renderer-shared/shader/lightmap-shader.ts:1752 |
+| T-230 | 光照模块内多个导出在本工程零导入点 | src/renderer-shared/shader/lightmap-shader.ts:1742 |
 | T-231 | `SavePoint.t` 只写不读 | apps/game/src/app.ts:610 |
 | T-232 | `getMap()` 零调用点 | apps/game/src/savepoint.ts:69 |
 | T-233 | `clear()` 零调用点 | apps/game/src/savepoint.ts:98 |
@@ -252,7 +252,7 @@
 
 | ID | 事项 | 证据 |
 |---|---|---|
-| T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | src/renderer-shared/shader/lightmap-shader.ts:351 |
+| T-117 | broken 阶段对照靠失配字面量维持，three 升级需同步 | src/renderer-shared/shader/lightmap-shader.ts:346 |
 
 ### viewer（1）
 
