@@ -156,3 +156,4 @@
 | 2026-10-09 | T-454 P5-2：viewer 实体放置模型接通（**两处**根因：`entities: Vec::new()` + 被引用模型集合未并入实体 `model`）；GLB 数据级对齐 debug/game（boreas +3.7MB/`buk01.mdl` 0→1、surf_666 `cow.mdl` 0→1），测试视点出图逐像素不变 | progress/monthly/2026-10-10.md:45 |
 | 2026-10-09 | 滚动分卷：新开 progress/monthly/2026-10-11.md（第 11/11 卷，承接 T-454 续写；上一卷 40.77 KB 封卷）并改指「当前写入目标」 | progress/monthly/2026-10-11.md:1 |
 | 2026-10-09 | T-454 会话交接：P0–P5-2 已落地（12 个提交未 push），交接清单入 .tmp/task-unify-render/TASK-handoff.md（剩余 P5-2 尾/P6/P7/P8 + 纪律与坑） | progress/monthly/2026-10-11.md:11 |
+| 2026-10-09 | T-454 收尾验收通过：三端 12 个 `.cmd` 静态契约 12/12 + `build.cmd` 实跑 exit 0 + 9 个测试门 exit 0 + 自选端口验 web/dist 均 HTTP 200；页面内载入 `surf_boreas`/`surf_666` 三端 6/6 就绪（附：曾误在主机跑 dev.cmd 拉窗口/浏览器，已清理并改沙箱内验证） | progress/monthly/2026-10-11.md:13 |
