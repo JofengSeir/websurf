@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-617 第 2 轮",
+      "reason": "T-617 第 3 轮",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -198,7 +198,7 @@
         "line": 109
       },
       "T-617": {
-        "p": "ab300ee488b96c4b051292ff847c7f15f94a57bd228dd65f1b087351134f4ff1",
+        "p": "444c8a531bee2729fd3c400207196a1d227146f6e712212908fb8b419d047553",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
         "line": 110
