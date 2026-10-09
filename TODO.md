@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（87 条）
+## 未结项（86 条）
 ### 待裁决（0）
 
 
-### 待修（85）
+### 待修（84）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
@@ -98,7 +98,6 @@
 - **T-608** 核实「单入口」假设（Copilot / Gemini CLI 是否读根 `AGENTS.md`）并写进规范篇　`docs`
 - **T-609** 终态行的「判据」列按行态保护（改终态判据须先 approve）　`repo`
 - **T-433** prop 逐顶点光照（`sp_<i>.vhv`）与 leaf ambient cube 的组合口径：D-016 已决「相加」，而现实现是 either/or + 乘法　`shared`
-- **T-101** 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错）　`viewer`
 - **T-103** ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动）　`viewer`
 - **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
 - **T-143** el() 属性写入限制了 id 型契约（undefined 静默无 id）　`viewer`
@@ -155,7 +154,7 @@
 | T-060 | .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01 | 缺陷 | viewer | 已结案 | **已消除**：owner 已终裁「宁缺勿猜」——提交 `9046975`（fix(viewer): .dem 缺陷清账）明确「按键显示撤除：删 `keyguess.ts`，帧循环只认 `clip.buttons` 真值（`.replay` 路径），`.dem` 按键簇整组熄灭」。工作区留有**可执行实证**：`apps/viewer/src/replay/demo/demo.ts` 的 `usercmdDiag` 统计 `dem_usercmd` 载荷长度（注释写明「用来判断按键信息是否存在」），`apps/viewer/src/replay/democlip.ts:120` 记录该裁定 ⇒「输入是否可得」已查实（载荷存在）、「是否使用」已由 owner 决定 | progress/pending-detail.md | `git log -1 --format=%s 9046975` ⇒ 含「按键反推显示撤除」；`git grep -n usercmdDiag -- apps/viewer/src` ⇒ 诊断仍在（裁定留档） | #91 |
 | T-062 | 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径… | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:283 | progress/pending-detail.md | 判据：@BT@git grep -n "importer" -- apps/viewer/src@BT@ ⇒ Source .dem 分支无 UI 调用路径 ⇒ 删或接线 | #93 |
 | T-064 | 8 篇 debug 文档存在「在界内但内容偏旧」的锚点簇（2026-10-03 本轮量化，未改）：src/scripts/check-d… | 文档口径 | docs | 已结案 | documents/debug/sequences.md:24 与 documents/debug/overview.md:91 ⇒ `ready` 发送点锚点按符号重定位为 apps/debug/src/worker/main.ts:484（原 483 是 `onInit` 行） | documents/debug/sequences.md | 见详情 | #95 |
-| T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错）（修复已落地 2026-10-09，判据待浏览器实测） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | 判据：移除面板容器 ⇒ 控制台出现可读错误（不再静默生成脱离文档的元素） | — |
+| T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错）（修复已落地 2026-10-09，判据待浏览器实测） | 缺陷 | viewer | 已结案 | **已结案（CDP 实测，2026-10-09）**：修复 = `dockFallback` 带容器名打 `console.error`（`apps/viewer/src/app.ts`，7 个调用点各补名）。**实测**：探针（`.tmp/t101/probe.mjs`）以 CDP 驱动本机 Edge headless（`--headless=new --use-angle=swiftshader`），用 `Page.addScriptToEvaluateOnNewDocument` 把 `Document.prototype.getElementById` 对 `session-replay` 覆写为返回 null（模拟容器缺失），加载 `http://127.0.0.1:8100/web/index.html` 后从 `Runtime.consoleAPICalled` 捕获到 `[console.error] [viewer] 面板容器缺失：session-replay 降级为脱离文档的元素（检查 web/index.html 的对应 id）` ⇒ 判据「移除面板容器 ⇒ 控制台出现可读错误（不再静默生成脱离文档的元素）」**满足** | documents/viewer/implementation/app.md | 探针复现：`node .tmp/t101/serve.mjs apps/viewer 8100`（静态服务）+ `cd apps/viewer && npm run build:app`（bundle 必须先重建，`web/app.js` 是 gitignored 的构建产物）+ `node .tmp/t101/probe.mjs` ⇒ 输出含 `面板容器缺失：session-replay`；`git grep -n "面板容器缺失" -- apps/viewer/src/app.ts` ⇒ 1 处（`dockFallback`） | — |
 | T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道（修复已落地 2026-10-09，判据待浏览器实测） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:267 | documents/viewer/implementation/app.md | 判据：构造 2 条以上越界轨道 ⇒ 提示串 bbox 覆盖全部（不再只取第一条） | — |
 | T-103 | ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:807 | documents/viewer/implementation/app.md | 判据：`?replay=x.dem` ⇒ 按内容（魔数）分派并载入成功（不再按参数名拒收） | — |
 | T-105 | ensureWasm 把首次失败永久缓存，一次瞬时失败后本会话不自愈 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/bsp.ts:123 ⇒ `wasmReady` 的 IIFE 接 `.catch` 清缓存；前后对照探针（fetch 每次必失败、连续两次调用）⇒ 修复前 fetch 1 次（不重试）/ 修复后 2 次（会重试）；typecheck 通过 | documents/viewer/implementation/core.md | 见详情 | — |
