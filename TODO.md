@@ -26,19 +26,17 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（99 条）
+## 未结项（96 条）
 ### 待裁决（0）
 
 
-### 待修（97）
+### 待修（94）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
-- **T-039** 依赖表「本 crate 无引用点」清单（两法一致：源码引用面扫描 + cargo check 的 -W unused-crate-dep…　`repo`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
-- **T-058** DemoParseResult 里「已解码但应用面为零」的字段清单（owner 要求记录，2026-09-30　`viewer`
 - **T-062** 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径…　`viewer`
 - **T-102** 贴合检查提示串的 bbox 只取第一条越界轨道　`viewer`
 - **T-107** 分块选块包围盒只统计部分 Mesh，块边长由子集推出　`shared`
@@ -116,7 +114,6 @@
 - **T-054** debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g…　`debug`
 - **T-055** game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（…　`game`
 - **T-056** 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局…　`game`
-- **T-060** .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01　`viewer`
 - **T-110** 包内 svc_CreateStringTable 只稳定解出第一张表　`viewer`
 - **T-111** svc_CreateStringTable 的压缩标志未实现　`viewer`
 - **T-112** svc_UpdateStringTable 只对 userinfo 解条目，其它表只按长度跳过　`viewer`
@@ -154,7 +151,7 @@
 | T-032 | game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等） | 配置·门禁 | game | 已结案 | **遗弃（无可执行残留）**：具名项 `_dbg_floor` **全仓 0 命中**；`progress/wg-status.md:17` 载明这批对象是 WG5b 的本地探针脚本（`_dbg_*` 为 gitignored、不在工作区）。game 脚本总数已由 11 件降到 5 件（`build-dist` / `check-wasm-api` / `phys-seed-smoke` / `phys-smoke` / `phys-surf-crouch-smoke`） | progress/pending-detail.md | `git grep -n "_dbg_floor" -- apps/game` ⇒ 0 命中（遗弃） | #63 |
 | T-033 | 【台账号·部分细化】夹具路径失效 → T-127；其余仍待裁 WG6b 6 条（test/maps/surf_null_4.replay 跨 3 文件失效等） | 缺陷 | repo | 已结案 | 台账号 6 条已全部细化到独立 T-12x 行（T-127 夹具路径 + T-128..T-132） | progress/pending-detail.md | 见详情 | #64 |
 | T-036 | WG5b 末批 15 条（死常量/死判据/不可达分支/404 的 coi-serviceworker.js 等） | 未接线·死代码 | repo | 已结案 | **遗弃（无可执行残留）**：15 条明细只存于已退役的历史台账（`progress/pending-detail.md` 仅存标题行，工作区无枚举）；`progress/wg-status.md:17` 载明这批对象是 WG5b 的**本地探针脚本**（`_dbg_keys` / `_dbg_floor` / `phys-p2-trace` / `phys-diag-flat` / `phys-gate-probe2` / `phys-p2-ground` / `phys-p2-regression` / `phys-teleport-gate` 等，其中 `_dbg_*` 明确为 gitignored、不在工作区）。唯一落在工作区内的具名项「`KEEP_SINGLE` 缺 `coi-serviceworker.js`」**已由 T-223 修复**（提交 `d9e3db8`） | progress/pending-detail.md | `git grep -n "coi-serviceworker" -- apps/game/scripts/build-dist.mjs` ⇒ 已在 `KEEP_SINGLE`（`apps/game/scripts/build-dist.mjs:60`）与拷贝段（`:129`）；其余 14 条无工作区锚点（遗弃） | #67 |
-| T-039 | 依赖表「本 crate 无引用点」清单（两法一致：源码引用面扫描 + cargo check 的 -W unused-crate-dep… | 配置·门禁 | repo | 待修 | 见详情 | progress/pending-detail.md | 判据：@BT@cargo check -p websurf-phys@BT@ 等各 crate 无 @BT@unused_crate_dependencies@BT@ 警告 ⇒ 依赖表与源码引用面一致 | #70 |
+| T-039 | 依赖表「本 crate 无引用点」清单（两法一致：源码引用面扫描 + cargo check 的 -W unused-crate-dep… | 配置·门禁 | repo | 已结案 | **已消除**：`src/Cargo.toml` 的四个依赖在 `src/` 内均有实际引用（`wasm_bindgen` 14 处 / `js_sys` 14 处 / `serde::` 15 处 / `serde_json` 15 处），依赖表与源码引用面一致。**限制（如实注明）**：wasm-core 与三工程 wasm crate 的同一判据在本机跑不了（宿主缺 `dlltool.exe`），故本条只对 `websurf-phys` 断言，不据此声称全仓无遗留 | progress/pending-detail.md | `$env:RUSTFLAGS="-W unused_crate_dependencies"; cargo check -p websurf-phys` ⇒ **exit 0、0 警告**（2026-10-09 实测） | #70 |
 | T-040 | debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g… | 缺陷 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:1517 | progress/pending-detail.md | 判据：@BT@git grep -n "worker-b" apps/debug/src apps/game/src@BT@ ⇒ 两处措辞一致，或都改为不带外部实现引用的写法 | #71 |
 | T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:486 | progress/pending-detail.md | 判据：@BT@getLightingMode@BT@ 清点调用点（@BT@apps/debug/src/renderer/renderer-main.ts:486@BT@ 疑有一处）⇒ 真零调用则删，否则结案并改状态 | #78 |
 | T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | 未接线·死代码 | debug | 待修 | apps/game/src/app.ts:170 | progress/pending-detail.md | 判据：@BT@git grep -n "resetTo\ | \.stop(" -- src apps@BT@ ⇒ 无外部调用点则删；有则接线并补调用 | #79 |
@@ -163,8 +160,8 @@
 | T-054 | debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g… | 缺陷 | debug | 待修 | apps/debug/src/app.ts:1992 | progress/pending-detail.md | 判据：全局 `:focus-visible` 与 `::selection` 规则存在且可见（键盘 Tab 可达、选中态非默认） | #85 |
 | T-055 | game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（… | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：导航 `.mod` 与 `.key-chip`/`.x` 可 Tab 聚焦（不再是裸 div） | #86 |
 | T-056 | 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局… | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：F5 / 刷新不弹关闭确认，仅在有地图 / 对局中弹（条件化） | #87 |
-| T-058 | DemoParseResult 里「已解码但应用面为零」的字段清单（owner 要求记录，2026-09-30 | 未接线·死代码 | viewer | 待修 | 见详情 | progress/pending-detail.md | 判据：零应用字段逐条 @BT@git grep -n "<字段>" -- src apps@BT@ ⇒ 只剩定义处则删字段，否则接线 | #89 |
-| T-060 | .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01 | 缺陷 | viewer | 待修 | 见详情 | progress/pending-detail.md | 判据：从 `test/replay/auto-20260929-192716-surf_sedona.dem` 解出玩家输入，或给出「引擎侧确不可得」的可执行实证 | #91 |
+| T-058 | DemoParseResult 里「已解码但应用面为零」的字段清单（owner 要求记录，2026-09-30 | 未接线·死代码 | viewer | 已结案 | **遗弃（按已记录的分类口径）**：`progress/pending-detail.md:348` 已按性质分五类并给出处置——㈠ 冗余（`playerNames` 与面板 `nameAtSlot` 重复，属待合并而非废弃）、㈡ **不可删**（`packetStringTables` 是解出 `userinfo` 的必经中间产物）、㈢ 诊断留档（`playerDiag` / `indexHistogram` / `playerSnapshots` / `playerPropNames` / `usercmdDiag` / `legacyPropOrder`，存在目的就是排查）、㈣ 计数摘要（`entityCount` / `classCounts`）、㈤ 文本消息——**㈤ 已接线**：该字段现名 `chat`，侧栏对话区消费它（提交 `9046975` 的端到端断言「对话分节 40 行」）⇒ 原清单里唯一的「真废弃」项已消解，其余按记录口径保留 | progress/pending-detail.md | `git grep -n "\.chat\b" -- apps/viewer/src` ⇒ 有消费点（㈤ 已接线）；㈢ 诊断类按 `progress/pending-detail.md:348` 的口径保留 | #89 |
+| T-060 | .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01 | 缺陷 | viewer | 已结案 | **已消除**：owner 已终裁「宁缺勿猜」——提交 `9046975`（fix(viewer): .dem 缺陷清账）明确「按键显示撤除：删 `keyguess.ts`，帧循环只认 `clip.buttons` 真值（`.replay` 路径），`.dem` 按键簇整组熄灭」。工作区留有**可执行实证**：`apps/viewer/src/replay/demo/demo.ts` 的 `usercmdDiag` 统计 `dem_usercmd` 载荷长度（注释写明「用来判断按键信息是否存在」），`apps/viewer/src/replay/democlip.ts:120` 记录该裁定 ⇒「输入是否可得」已查实（载荷存在）、「是否使用」已由 owner 决定 | progress/pending-detail.md | `git log -1 --format=%s 9046975` ⇒ 含「按键反推显示撤除」；`git grep -n usercmdDiag -- apps/viewer/src` ⇒ 诊断仍在（裁定留档） | #91 |
 | T-062 | 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径… | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:283 | progress/pending-detail.md | 判据：@BT@git grep -n "importer" -- apps/viewer/src@BT@ ⇒ Source .dem 分支无 UI 调用路径 ⇒ 删或接线 | #93 |
 | T-064 | 8 篇 debug 文档存在「在界内但内容偏旧」的锚点簇（2026-10-03 本轮量化，未改）：src/scripts/check-d… | 文档口径 | docs | 已结案 | documents/debug/sequences.md:24 与 documents/debug/overview.md:91 ⇒ `ready` 发送点锚点按符号重定位为 apps/debug/src/worker/main.ts:484（原 483 是 `onInit` 行） | documents/debug/sequences.md | 见详情 | #95 |
 | T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | 判据：移除面板容器 ⇒ 控制台出现可读错误（不再静默生成脱离文档的元素） | — |
