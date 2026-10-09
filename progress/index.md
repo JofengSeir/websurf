@@ -267,3 +267,4 @@
 | 2026-10-09 | T-612 结案：合并签名补 gpuType（viewer 262 次报错归零）；冒烟 6→3 项失败 | progress/monthly/2026-10-9.md:7 |
 | 2026-10-09 | T-131 结案：静态断言按形态分支，multi/single 两形态各 exit 0 ⇒ viewer 冒烟 0 项失败 | progress/monthly/2026-10-9.md:8 |
 | 2026-10-09 | viewer wasm 簇：T-146（锁中毒→JsError）+ T-148（num_static_props 缓存）结案；65 处 lib.rs 锚点重编号 | progress/monthly/2026-10-9.md:9 |
+| 2026-10-09 | T-143（el() 的 id 告警，Node 探针实测）+ T-145（模型名大小写同口径）结案；两次自纠「净增行」 | progress/monthly/2026-10-9.md:10 |

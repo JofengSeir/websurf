@@ -75,9 +75,9 @@ fn collect_pakfile_models(
     bsp: &vbsp::Bsp,
 ) -> Result<(Vec<InMemoryModel>, Vec<StaticProp>, Vec<String>), JsValue> {
     // 1. 静态道具引用到的模型名（字典里的名字，与 zip 条目名按原样比较）
-    let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new(); // 键一律小写（T-145）
     for prop in bsp.static_props() {
-        referenced.insert(prop.model().to_string());
+        referenced.insert(prop.model().to_ascii_lowercase());
     }
 
     // 2. 一次遍历枚举全部条目：收集条目名，并顺手挑出 sp_<idx>.vhv 顶点光照
@@ -116,7 +116,7 @@ fn collect_pakfile_models(
     // 3. 逐个被引用模型取三件套：`.mdl` 命中后按尾部去掉后缀再拼出 `.vvd` / `.dx90.vtx`，缺一即跳过
     let mut models: Vec<InMemoryModel> = Vec::new();
     for name in &entry_names {
-        if !name.to_ascii_lowercase().ends_with(".mdl") || !referenced.contains(name) {
+        if !name.to_ascii_lowercase().ends_with(".mdl") || !referenced.contains(&name.to_ascii_lowercase()) {
             continue;
         }
         let vvd_name = format!("{}.vvd", &name[..name.len() - 4]); // 去尾部 4 字节（`.mdl`，任意大小写）再拼后缀

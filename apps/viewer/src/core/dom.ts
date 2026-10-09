@@ -37,7 +37,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   if (text !== undefined) node.textContent = text;
   if (attrs) {
     for (const [k, v] of Object.entries(attrs)) {
-      if (v === undefined || v === false) continue;
+      if (v === undefined || v === false) { if (k === 'id') console.warn(`[viewer] el(): id 为 ${String(v)} —— 该控件不会被外部查询到（T-143）`); continue; }
       node.setAttribute(k, v === true ? '' : String(v));
     }
   }
