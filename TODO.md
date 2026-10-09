@@ -26,7 +26,7 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（68 条）
+## 未结项（69 条）
 ### 待裁决（0）
 
 
@@ -97,6 +97,7 @@
 - **T-611** 文档锚点「行号陈旧」体检抓不到：docflow 钉的是「该行当前内容」而非「文档所称符号所在行」，故行号已指错、只要内容稳定就永远绿灯（2026-10-09 实测：`documents/viewer/implementation/core.md` 的 `apps/viewer/src/core/scene.ts:184` 实际指向 `this.pvs = …` 而非 `mountGlb`，体检仍全绿；同篇另有 8 处行号整体偏离 5–15 行）　`owner`
 - **T-618** 氛围机制剩余缺口（tonemap/color_correction、env_sun、粒子 .pcf、env_fade、fogcolor2/fogblend）　`shared`
 - **T-619** owner 反馈：雪盖疑似消失（未复现，待视点）+ 石头模型偏黑（30 个 rock03 报警疑假阳性）　`shared`
+- **T-624** viewer 无 LOD/PVS 剔除（全量绘制）　`viewer`
 ### 已取证待立项（2）
 - **T-109** 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正　`viewer`
 - **T-115** untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查　`viewer`
@@ -115,6 +116,7 @@
 | T-621 | 3D 天空盒（微缩景观）天空区未受烘焙光照：摘出顺序早于 applyLightmap（game/viewer） | 缺陷 | shared | 已结案 | **已结案（2026-10-09，第 1 轮）**。owner 指出「game/viewer 的**微缩景观背景**（3D 天空盒天空区）连最基本的光照都没做好，debug 有」。**根因（三端逐行对照）**：`extractSkyArea`（把天空区图元摘出主世界）与 `applyLightmap`（施加烘焙光照）的先后顺序不一致 —— debug 是 `applyLightmap(mapRoot)`(508) → `extractSkyArea`(524)，天空区**先受光**再被摘出；game 原为 `extractSkyArea(scene)`(288) → `applyLightmap`(297)、viewer 原为 `extractSkyArea`(182) → `applyLightmap`(197)，**摘出后光照再也遍历不到它们** ⇒ 天空区只剩 `fullbrightUnlitLitMaterials` 收敛出的贴图原色（无 lightmap、无逐顶点烘焙）。**修复**：game/viewer 的摘取挪到 `applyLightmap` 之后、`optimizeScene` 之前（与 debug 完全同序；仍是合并前摘取，理由见原注释：合并成空间块后跨区大块无法再拆）。**验证**：game 的诊断计数由 `fullbright mesh=2283 / hasLightmap=false=1325 / 第 1 级=173 / 施加 mesh=992 / 双贴图注入=359` 变为 `2936 / 1976 / 203 / 1351 / 1`，与 debug **逐项相等**；同视点截图远景带均值 203.9 → 188.2、近景带 150.1 → 150.5（只有微缩区改变）。 | progress/pending-detail.md | game 载入 `test/maps/surf_boreas.bsp` ⇒ 控制台 `[lightmap] 光照模式=baked… 施加 mesh=` 与 debug 的同一行**逐项相等**（当前 1351）；`[skybox] 3D 天空盒：天空区 N 个图元` 存在；三端 `npm run typecheck` + `build:app` exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 | 新 |
 | T-622 | 3D 天空盒天空区未做分块合并（game/viewer：1010 个小块 = 1010 次 draw call，debug 已合并为 882） | 缺失 | shared | 已结案 | **待修（2026-10-09 登记，T-621 同轮发现）**。`[skybox] 3D 天空盒：天空区 N 个图元` 实测 **debug 882 块**（`apps/debug/src/renderer/renderer-main.ts:535` 对 `skyGroup` 跑了一遍 `mergeIntoChunks` + `padBoundingSpheres` + 重贴 `SKY_LAYER`）而 **game/viewer 未合并 ⇒ 1010 个逐面小块 = 1010 次天空遍 draw call**。 | progress/pending-detail.md | game/viewer 载入 `surf_boreas` ⇒ 控制台天空区图元数从 1010 降到与 debug 同量级（~882）；三端 typecheck/build exit 0；截图与合并前逐像素一致（±2%） | 新  **已结案（2026-10-09，第 1 轮）**：game/viewer 补 `mergeIntoChunks(this.skyGroup)` + `padBoundingSpheres` + 逐 mesh 重贴 `SKY_LAYER`（与 debug `apps/debug/src/renderer/renderer-main.ts:535` 同构）。**验证**：game 日志 `[skybox] 天空区合并：1010 mesh → 882 块`、`天空区 882 个图元挂第 1 层`，与 debug **逐字相同**；合并前后同视点截图逐像素差异 **0.00%**（最大通道和 51，仅块边界像素）⇒ 画面不变、天空遍 draw call 1010 → 882。 |
 | T-623 | 终扫根节点三端不同（mapRoot / this.scene / modelRoot）⇒ 计数差 169/183/179 已核实为无害 | 缺陷 | shared | 已结案 | **已结案（2026-10-09，第 2 轮）**。目标轮次 2/256：把全链条上最后一处未解释的计数差钉死。三端终扫 `fullbrightUnlitLitMaterials` 的**根节点不同**：debug 扫 `mapRoot`（`apps/debug/src/renderer/renderer-main.ts:550`）、game 扫 `this.scene`（`apps/game/src/renderer/renderer-main.ts:311`）、viewer 扫 `this.modelRoot`（`apps/viewer/src/core/scene.ts:207`）⇒ 收敛计数 169 / 183 / 179、fullbright 总数 2936 / 2936 / 2928。新增常驻诊断「终扫点名」（`src/renderer-shared/shader/lightmap-shader.ts` 的 `fullbrightUnlitLitMaterials` 记录被收敛 mesh 与其材质名，前 12 个）后核实：被收敛的是**水/粒子/冰面的受光材质**（`johnshandy/world/water_pure_beneath`、`maps/surf_boreas/project_tendies/water01_…`、`project_tendies/alch_symbols`、`tendies_endsmoke`、`ice03`、`ice02_…`）—— 本工程运行期不加灯，受光材质恒黑 ⇒ 三端都统一走「全亮贴图原色」兜底。**结论：根节点差异只改变由谁完成这次收敛，不改变最终材质形态，三端光照链等价。** | progress/pending-detail.md | 三端载入 `test/maps/surf_boreas.bsp` ⇒ 控制台均出现 `[lightmap] 终扫点名：…` 且被点名材质属水/粒子/冰面类；`施加 lightmap mesh=` 三端均为 1351；`[skybox]` 天空区 882 块；三端 `npm run typecheck` + `build:app` exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 | 新 |
+| T-624 | viewer 无 LOD/PVS 剔除（全量绘制；debug 距离剔除、game 距离+PVS） | 缺失 | viewer | 待修 | **待修（2026-10-09，第 3 轮全链条分析发现）**。三端剔除链不一致：debug 用 `apps/debug/src/renderer/lod-manager.ts`（只按距离 `cullDistance`，默认 12800）；game 在 `apps/game/src/renderer/renderer-main.ts` 内联「距离 + 可选 PVS」；**viewer 在 `apps/viewer/src` 里没有任何剔除逻辑**（grep `lod`/`cullDistance` 只命中 replay 面板的 `visible` 开关）⇒ viewer 全量绘制所有块。属可见性/性能差异，**不是光照链分歧**（debug HUD 在同视点显示 `隐藏 0`，即未剔任何块）。 | progress/pending-detail.md | viewer 载入 `test/maps/surf_boreas.bsp` ⇒ 控制台出现与另两端同口径的剔除统计（可见/剔除块数）；三端 `npm run typecheck` + `build:app` exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 | 新 |
 ## 总表（84 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |

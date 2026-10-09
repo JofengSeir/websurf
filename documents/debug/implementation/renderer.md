@@ -120,6 +120,7 @@
 | 4 | `extractSkyArea(root, 判定)`（`:524`） | 3D 天空盒天空区摘出主世界。判据 =「图元采样点落在 `sky_camera` 所在 BSP cluster」。**必须晚于第 3 步**（T-621：早摘则天空区不在光照遍历范围内 ⇒ 只剩贴图原色），**必须早于第 5 步**（合并成空间块后跨区大块无法再拆） |
 | 5 | `optimizeScene(root)`（`:530`）/ `mergeIntoChunks(root)` | 空间分块合并（按材质实例分组）。天空组**不在**主世界子树里，必须**单独合并**并重贴天空层（T-622） |
 | 6 | `fullbrightUnlitLitMaterials(root)`（`:550`） | 仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程不加灯 ⇒ 受光材质恒黑）。必须**晚于第 5 步**（合并会重建 mesh/材质数组）。天空组要再跑一遍 |
+| 6b | 剔除注册：`lodManager.setup`+`assignClusterIds`（debug）/ 内联 `lodItems`+`clusterIds`（game） | 逐块记录「世界中心 + 半径 + cluster 集合」，供每帧 `tick` 按 `cullDistance`（game 另叠 PVS）把更远的块 `visible = false`。**必须在合并之后**（收集的是合并后的块 mesh） |
 | 7 | `applyWorldTransitionShaders(root)`（`:550`） | 双贴图混合注入（雪盖）：按顶点属性 `_vbsp_blend` 与 `vbsp_basetexture2` 改写材质。天空组要再跑一遍 |
 | 8 | 挂载：`scene.add(root)` + `scene.add(skyGroup)`（`:585`） | 天空组逐 mesh `layers.set(SKY_LAYER)`；主相机 `layers.disable(SKY_LAYER)`；天空相机 `createSkyCamera` + 每帧 `syncSkyCamera`（位姿 = 主相机 ÷ scale + `sky_camera` 原点）；天空遍雾 `start/end ÷ scale` |
 | 9 | 天空遍（第二相机） | 画 2D 天空盒六面 + 第 1 层图元（微缩景观）；主相机不画第 1 层 |
@@ -132,6 +133,7 @@
 | 天空组不做合并（T-622） | 1010 个逐面小块 = 1010 次天空遍 draw call | 补 `mergeIntoChunks` + `padBoundingSpheres` + 重贴 `SKY_LAYER` |
 | 呈现默认档三份各写（T-620） | 同一张图三端观感不同；debug 读到的坐标与 game 画面不同源 | 收进共享层 `LIGHTING_PRESENTATION_DEFAULTS`，三端只读它 |
 | 终扫的根节点不同（2026-10-09 核对） | debug 扫 `mapRoot`、game 扫 `this.scene`、viewer 扫 `this.modelRoot` ⇒ 收敛计数 169 / 183 / 179、fullbright 总数 2936 / 2936 / 2928 | **核对为无害**：点名显示被收敛的是水/粒子/冰面的受光材质（`water_pure_beneath`、`water01_…`、`alch_symbols`、`endsmoke`、`ice03/ice02`），三端都统一走「全亮贴图原色」兜底；根节点差异只改变「谁来做这次收敛」，不改变最终材质形态 |
+| 剔除链三端不同（2026-10-09 核对） | debug：`apps/debug/src/renderer/lod-manager.ts` 只按距离（`cullDistance`，默认 12800；`assignClusterIds` 的结果自述「当前无消费方」）；game：`apps/game/src/renderer/renderer-main.ts` 内联距离剔除 + 可选 PVS；viewer：`apps/viewer/src` 无任何剔除 ⇒ 全量绘制 | **核对为可见性/性能差异，非光照**：实测 debug HUD 在该视点 `隐藏 0`（未剔任何块）⇒ 不是两端观感差的来源。viewer 的全量绘制已登记 T-624 |
 
 ## 环境氛围机制完整性矩阵（T-617，2026-10-09）
 
