@@ -1,8 +1,0 @@
-
-.health-log { font: 11px/1.5 Consolas, 'Courier New', monospace;
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: #9ca3af;
-  max-height: 200px;
-  overflow-y: auto;
-  margin: 0; padding: 8px 10px; }

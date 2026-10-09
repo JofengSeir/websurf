@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（96 条）
+## 未结项（94 条）
 ### 待裁决（0）
 
 
-### 待修（94）
+### 待修（92）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -80,7 +80,6 @@
 - **T-318** `LOD_LEVEL.PVS_HIDDEN` 是预留档位　`debug`
 - **T-319** `assignClusterIds` 的结果无消费方　`debug`
 - **T-320** 默认导出与 `parse_bsp` 在本工程零调用点　`debug`
-- **T-321** `apps/debug/web/styles.css` 在全工程零引用　`debug`
 - **T-322** `TeleportManager` 的六项成员零调用点　`debug`
 - **T-323** `spawn-loader.ts` 整模块零调用点　`debug`
 - **T-324** `types.ts` 里有一批零引用类型　`debug`
@@ -111,7 +110,6 @@
 - **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
 - **T-053** viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/…　`viewer`
-- **T-054** debug 审查登记（P1 三条 + P2 四条已修；余 P2×5 + 1 条未具名 P1）　`debug`
 - **T-055** game 审查登记（P1#1/P1#2 + P2 五项已修；余 2 项需渲染验证）　`game`
 - **T-056** 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局…　`game`
 - **T-110** 包内 svc_CreateStringTable 只稳定解出第一张表　`viewer`
@@ -157,7 +155,7 @@
 | T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | 未接线·死代码 | debug | 待修 | apps/game/src/app.ts:170 | progress/pending-detail.md | 判据：@BT@git grep -n "resetTo\ | \.stop(" -- src apps@BT@ ⇒ 无外部调用点则删；有则接线并补调用 | #79 |
 | T-048 | worker 消息联合类型与实际收发不符（历史遗留，已由文档记录）：debug/game 的 worker-types.ts 里 rea… | 文档口径 | debug | 已结案 | apps/game/src/worker/worker-types.ts:78 ⇒ 联合补齐（WorkerMessage 13 条 / MainMessage 12 条 + 8 个新接口）；`node .tmp/t048/probe.mjs` ⇒ 运行时 15 条字面量未覆盖 0；`apps/game` typecheck 通过 | documents/game/implementation/worker.md | 见详情 | #80 |
 | T-053 | viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/… | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:110 | progress/pending-detail.md | 判据：帮助文案与 `apps/viewer/src/replay/timeline.ts` 现行类名/样式一致（无「淡金带 / 金框」残留） | #84 |
-| T-054 | debug 审查登记（**P1 三条 + P2 四条已修 2026-10-09**；余 P2×5 + 1 条未具名 P1）：P2——`web/styles.css` 死文件、路径图例 tooltip 写三档实为两档、`#missingTexturesOk` 死钩子、`#error` 背景硬编码、窄窗侧栏挤压（可接受） | 缺陷 | debug | 待修 | apps/debug/src/app.ts:1992 | progress/pending-detail.md | 剩余项逐条核销：`git ls-files apps/debug/web/styles.css` ⇒ 已删或已接线；`git grep -n missingTexturesOk -- apps/debug` ⇒ 已删；路径图例 tooltip 文案与两档着色一致；`git grep -nE "#[0-9a-fA-F]{6}" -- apps/debug/web/index.html` ⇒ 只剩令牌定义处 | #85 |
+| T-054 | debug 审查登记（**P1 三条 + P2 四条已修 2026-10-09**；余 P2×5 + 1 条未具名 P1）：P2——`web/styles.css` 死文件、路径图例 tooltip 写三档实为两档、`#missingTexturesOk` 死钩子、`#error` 背景硬编码、窄窗侧栏挤压（可接受） | 缺陷 | debug | 已结案 | **已结案（P1 三条 + P2 八条均已处置）**：本轮再处置四条——① 路径图例 tooltip「绿 ≤5° / 黄 ≤20° / 红 >20°」**与实现不符**（`apps/debug/src/renderer/path-recorder.ts:135` 的 `turnColor` 只有两档：≤20° 琥珀 / >20° 红），已改齐，并同步把导出 JSON 的 `drawing` 字面量与注释一并对齐；② `#error` 背景硬编码 `rgba(224,133,123,0.1)` 提成 `--err-weak` 令牌（`apps/debug/web/index.html:35` / `:99`）；③ 「`web/styles.css` 死文件」经查属实 ⇒ 删除（另见 T-321 结案）；④ 「`#missingTexturesOk` 死钩子」**不成立**——该按钮在 `apps/debug/src/app.ts:501`/`:502`（移除旧监听再挂新）与 `:1597`（点「知道了，继续」关闭弹窗）都有接线，`apps/debug/web/index.html:886` 是活元素；⑤「窄窗侧栏挤压」登记时即注明「可接受」⇒ 无需动作。**限制**：原题称 P1×4，但登记正文只逐条写了 3 条 P1（均已修），第 4 条无工作区锚点、无法核销 | progress/pending-detail.md | `git grep -n "绿 ≤5°" -- apps/debug/src` ⇒ 0 命中；`git grep -n "绿 ≤5°" -- apps/debug/web` ⇒ 0 命中（**夹具** `apps/debug/fixtures/path/tick-on-render-prefix.json` 是 2026-09-10 的历史录制、内嵌描述保持当时原样，刻意不改）；`git ls-files apps/debug/web/styles.css` ⇒ 无输出（已删）；其余以锚点陈述：`#error` 背景改 `var(--err-weak)`（令牌定义 `apps/debug/web/index.html:35`、消费 `:99`）；`#missingTexturesOk` 在 `apps/debug/src/app.ts:501` / `:1597` 仍有接线 ⇒ 该项判为不成立 | #85 |
 | T-055 | game 审查登记（**P1#1 / P1#2 + P2 五项已修 2026-10-09**；余 2 项**需渲染验证**）：P1#3——「权威健康」行三元素被 grid 挤成两行（静态读码看不到成因：`.row` 是 `168px 1fr 88px` 三列，三个子元素正好一列一个）；`#panel::before` 切角边线窄窗脱离（注释自认「按固定 760×580 定位」）。**两项本机无浏览器 ⇒ [待确认]**，不得凭静态读码改布局 | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 两项均需浏览器实测：≤640px 下「权威健康」行是否仍两行；窄窗下切角边线是否仍贴合切角（本机无浏览器 ⇒ [待确认]，不得凭静态读码改布局） | #86 |
 | T-056 | 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局… | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：F5 / 刷新不弹关闭确认，仅在有地图 / 对局中弹（条件化） | #87 |
 | T-058 | DemoParseResult 里「已解码但应用面为零」的字段清单（owner 要求记录，2026-09-30 | 未接线·死代码 | viewer | 已结案 | **遗弃（按已记录的分类口径）**：`progress/pending-detail.md:348` 已按性质分五类并给出处置——㈠ 冗余（`playerNames` 与面板 `nameAtSlot` 重复，属待合并而非废弃）、㈡ **不可删**（`packetStringTables` 是解出 `userinfo` 的必经中间产物）、㈢ 诊断留档（`playerDiag` / `indexHistogram` / `playerSnapshots` / `playerPropNames` / `usercmdDiag` / `legacyPropOrder`，存在目的就是排查）、㈣ 计数摘要（`entityCount` / `classCounts`）、㈤ 文本消息——**㈤ 已接线**：该字段现名 `chat`，侧栏对话区消费它（提交 `9046975` 的端到端断言「对话分节 40 行」）⇒ 原清单里唯一的「真废弃」项已消解，其余按记录口径保留 | progress/pending-detail.md | `git grep -n "\.chat\b" -- apps/viewer/src` ⇒ 有消费点（㈤ 已接线）；㈢ 诊断类按 `progress/pending-detail.md:348` 的口径保留 | #89 |
@@ -283,7 +281,7 @@
 | T-318 | `LOD_LEVEL.PVS_HIDDEN` 是预留档位 | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/lod-manager.ts:26 | documents/debug/implementation/renderer.md | 判据：`git grep -n "LOD_LEVEL.PVS_HIDDEN" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-319 | `assignClusterIds` 的结果无消费方 | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/lod-manager.ts:181 | documents/debug/implementation/renderer.md | 判据：`git grep -n "assignClusterIds" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-320 | 默认导出与 `parse_bsp` 在本工程零调用点 | 未接线·死代码 | debug | 待修 | apps/debug/src/wasm.d.ts:20 | documents/debug/implementation/wasm-bindings.md | 判据：`git grep -n "parse_bsp" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-321 | `apps/debug/web/styles.css` 在全工程零引用 | 未接线·死代码 | debug | 待修 | apps/debug/scripts/build-dist.mjs:63 | documents/debug/implementation/web.md | 判据：`git grep -n "apps/debug/web/styles.css" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-321 | `apps/debug/web/styles.css` 在全工程零引用 | 未接线·死代码 | debug | 已结案 | **已结案**：删除 `apps/debug/web/styles.css`（8 行，全文只有一条 `.health-log` 规则；页面自 2026-09-28 起用内联 `<style>` 块承担同一外观，`apps/debug/scripts/build-dist.mjs` 的 `KEEP_SINGLE` / `KEEP_MULTI` 均不含它）；`documents/debug/implementation/web.md` 的缺口已按 [L] 标「已消除」 | documents/debug/implementation/web.md | `git ls-files apps/debug/web/styles.css` ⇒ 无输出（已删）；`git grep -n "apps/debug/web/styles.css" -- src apps` ⇒ 0 命中；debug `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-322 | `TeleportManager` 的六项成员零调用点 | 未接线·死代码 | debug | 待修 | apps/debug/src/world/teleport-manager.ts:18 | documents/debug/implementation/world.md | 判据：`git grep -n "TeleportManager" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-323 | `spawn-loader.ts` 整模块零调用点 | 未接线·死代码 | debug | 待修 | apps/debug/src/world/spawn-loader.ts:11 | documents/debug/implementation/world.md | 判据：`git grep -n "spawn-loader.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-324 | `types.ts` 里有一批零引用类型 | 未接线·死代码 | debug | 待修 | apps/debug/src/world/types.ts:18 | documents/debug/implementation/world.md | 判据：`git grep -n "types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |

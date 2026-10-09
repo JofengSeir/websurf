@@ -30,10 +30,6 @@
 
 页面自身带一段内联 `<style>`（`apps/debug/web/index.html:7` 起），大部分外观写在其中；页面的全部 id 共 106 个。
 
-**`apps/debug/web/styles.css`**
-
-全文只有一条规则：`apps/debug/web/styles.css:2` 的 `.health-log`（等宽字体、`pre-wrap`、`break-all`、灰色、限高 200px、纵向滚动）。
-
 **`apps/debug/web/coi-serviceworker.js`（classic script，兼容静态托管）**
 
 同一文件承担双重身份（`apps/debug/web/coi-serviceworker.js:1`）：页面上下文负责注册并在激活后 reload；Service Worker 上下文给响应补 `Cross-Origin-Embedder-Policy: require-corp` 与 `Cross-Origin-Opener-Policy: same-origin`（`apps/debug/web/coi-serviceworker.js:10`、`:11`）。预缓存清单与缓存名由构建注入（`__PRECACHE_MANIFEST__` / `__CACHE_NAME__`），未注入时两者都走 `typeof` 安全回退（`apps/debug/web/coi-serviceworker.js:2`、`:4`）。
@@ -59,7 +55,7 @@
 
 ## 已知缺口（状态见 TODO.md）
 
-1. **`apps/debug/web/styles.css` 在全工程零引用**：`apps/debug/web/index.html` 既不 `<link>` 该文件，`apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE` 与 `:64` 的 `KEEP_MULTI` 也都不含 `styles.css` ⇒ 该文件仍是死资产。`.health-log` 的实际样式自 2026-09-28 起由页面内联 `<style>` 块承担：`#health-log` 元素（`apps/debug/web/index.html:854`）的等宽、换行、限高与滚动外观都来自同文件样式块里的 `.health-log` 规则；外置文件里的同名规则依旧不生效。 （见 TODO.md T-321）
+1. ~~**`apps/debug/web/styles.css` 在全工程零引用**~~ **已消除（2026-10-09）**：T-321 —— 该文件已删除（全文只有一条 `.health-log` 规则，而页面自 2026-09-28 起用内联 `<style>` 块承担同一外观；`KEEP_SINGLE` / `KEEP_MULTI` 都不含它）。
 2. ~~**页面缺少被查询的九个 id**~~ **已全部处置（2026-09-26）**：九个查询（`pathVisibleChk`、`pvsEnabled` 与录制面板七个）已随各自死链删除，脚本不再查询任何页面不存在的 id（见 `documents/debug/implementation/app.md` 已知缺口第 10–12 项）。页面侧结论不变：`web/index.html` 从未提供「输入录制」区与 PVS 开关。
 3. **两个 id 无任何代码读写**：`lightingModeHint`（说明段，`apps/debug/web/index.html:551`）与 `pathBuildTag`（构建标签，`apps/debug/web/index.html:590`）在 `apps/debug/src` 与 `apps/debug/scripts` 内零命中。其中构建标签不做构建版本校验，与产物不符时页面不会提示。
 4. ~~**`#health-log` 的实际外观依赖内联样式之外的东西**~~ **已消除（2026-09-28）**：`.health-log` 的规则已写进页面内联 `<style>` 块（见第 1 项），该元素不再是浏览器默认的 `<pre>` 外观。

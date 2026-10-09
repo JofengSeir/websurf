@@ -713,8 +713,8 @@ export class PathRecorder {
    * - `render`：只含 `rec` 为真的记录期节点，每项 `{t,x,y,z}`——是 `renderNodes` 的子集，
    *   故其下标不等于渲染采样传输的 `i0`（见文件头），外部按 `t` 对齐
    * - `tick`：每项 `{t,x,y,z}`，仅当该节点有 `residual` 时多一个 `residual` 字段
-   * 注意 `sampling`/`timebase`/`drawing` 是**代码里的字符串字面量**：`drawing` 对折角着色的描述
-   * 是三档，而 `turnColor` 实际只有两档（≤20° 琥珀 / >20° 红），本注释不改变该字面量。
+   * 注意 `sampling`/`timebase`/`drawing` 是**代码里的字符串字面量**：`drawing` 原先写成三档，
+   * 而 `turnColor` 实际只有两档（≤20° 琥珀 / >20° 红）——2026-10-09 已把该字面量改齐两档。
    * 读法：`apps/debug/scripts/path-acceptance.mjs` 与 `apps/debug/scripts/plot-path.mjs`
    * 都只读 `render`/`tick` 两个数组（后者还要求两者都非空）。
    */
@@ -733,7 +733,7 @@ export class PathRecorder {
           'tick.t = 该帧发布所依据的渲染时钟采样时刻 τ（readPublishedTau；0=未投影 → 轮询时刻）',
         drawing:
           `3D 绘制为分段直线（跳变 >${JUMP_BREAK} HU 处断开），` +
-          'tick 段按折角着色：绿 ≤5° / 黄 ≤20° / 红 >20°。本导出为未做任何展开的原始节点',
+          'tick 段按折角着色，只有两档：≤20° 保持 tick 线本色（琥珀）、>20° 染红标出硬折角。本导出为未做任何展开的原始节点',
         meta: meta ?? {},
         summary: this.deviStats(),
         render: this.renderNodes

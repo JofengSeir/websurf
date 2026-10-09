@@ -32,7 +32,7 @@
       --accent: #d9973f;
       --accent-weak: rgba(217, 151, 63, 0.13);
       --ok: #7fc98f;
-      --err: #e0857b;
+      --err: #e0857b; --err-weak: rgba(224, 133, 123, 0.1);
       --warn: #d4b26a;
       --r: 2px;
       --mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
@@ -96,7 +96,7 @@
     #error {
       color: var(--err);
       padding: 6px 8px; font-size: 11px;
-      background: rgba(224, 133, 123, 0.1); border-bottom: 1px solid var(--border);
+      background: var(--err-weak); border-bottom: 1px solid var(--border);
     }
 
     /* 手风琴（details/summary） */
@@ -580,7 +580,7 @@
           <div class="acc-body">
             <div class="ctrl-grid">
               <div class="ctrl-full path-legend"
-                   title="两条线都记录 PhysWorld 脚底中心点（origin 的 x/y/z），节点之间直连直线段（真实轨迹），跳变 >100 HU（respawn/传送）处自动断开不连线。采样严格按各自的计算节点：渲染物理 = 主线程 predPhys 每个 rAF 物理步一个节点（更新率 = 显示器刷新率）；tick 物理 = Worker 权威帧每来一帧新的（V_A 变化）一个节点（64 档 ≈ 67 节点/秒）。tick 段按折角着色：绿 ≤5° / 黄 ≤20° / 红 >20°。导出均为原始节点，带 t 供外部按时间对齐。">
+                   title="两条线都记录 PhysWorld 脚底中心点（origin 的 x/y/z），节点之间直连直线段（真实轨迹），跳变 >100 HU（respawn/传送）处自动断开不连线。采样严格按各自的计算节点：渲染物理 = 主线程 predPhys 每个 rAF 物理步一个节点（更新率 = 显示器刷新率）；tick 物理 = Worker 权威帧每来一帧新的（V_A 变化）一个节点（64 档 ≈ 67 节点/秒）。tick 段按折角着色，只有两档：≤20° 保持 tick 线本色（琥珀）、>20° 染红标出硬折角。导出均为原始节点，带 t 供外部按时间对齐。">
                 <span class="lg-render">■</span> 渲染物理（主线程 predPhys，每 rAF）<br />
                 <span class="lg-tick">■</span> tick 物理（Worker 权威帧，每新帧）
                 <span class="lg-break">■</span> 硬折角(&gt;20°)<br />
