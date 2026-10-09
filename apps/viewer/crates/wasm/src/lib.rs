@@ -355,7 +355,7 @@ fn build_vmt_stem_index(entry_names: &[String]) -> std::collections::HashMap<Str
 /// 不标 `#[wasm_bindgen]`：本结构体只用于序列化，不跨边界暴露字段或方法。字段与来源：
 /// `schema_version` 固定为 1；`magic` 由 `header` 的 v/b/s/p 四个字节拼成；`map_name` 当前恒为空串
 /// （`from_bsp` 不填该字段）；`num_models` / `num_faces` / `num_vertices` / `num_brushes` 直接取
-/// `Bsp` 对应 lump 的长度；`num_static_props` 现数一遍 `Bsp::static_props()`；`packed_files` 由
+/// `Bsp` 对应 lump 的长度；`num_static_props` 与 `packed_files` 都由构造期缓存传入；
 /// `BspProcessor::new` 缓存后传入。键名与 `apps/viewer/src/core/bsp.ts` 的 `BspMeta` 一一对应，
 /// TS 侧字段全部可选，缺键不报错。
 #[derive(serde::Serialize)]
@@ -374,11 +374,10 @@ pub struct BspMetadata {
 }
 
 impl BspMetadata {
-    /// 由 `Bsp` 现算元数据；`packed_files` 由 `BspProcessor` 缓存的字段传入——
-    /// `Packfile` 的 zip 字段私有（`src/wasm-core/vbsp/data/mod.rs`），取条目数只能先 `clone()`
-    /// 再 `into_zip()`（消费 self），故在构造期算一次、此后复用，免得每次 `metadata()` 都克隆。
-    fn from_bsp(bsp: &vbsp::Bsp, packed_files: usize) -> Self {
-        let num_static_props = bsp.static_props().count();
+    /// 由 `Bsp` 组元数据；`packed_files` 与 `num_static_props` 都由 `BspProcessor` 的构造期
+    /// 缓存传入——`Packfile` 的 zip 字段私有（`src/wasm-core/vbsp/data/mod.rs`），取条目数只能先
+    /// `clone()` 再 `into_zip()`（消费 self）；`static_props()` 是线性扫描。两者都只在构造期算一次。
+    fn from_bsp(bsp: &vbsp::Bsp, packed_files: usize, num_static_props: usize) -> Self {
 
         let h = &bsp.header;
         let magic = format!("{}{}{}{}", h.v as char, h.b as char, h.s as char, h.p as char);
@@ -415,21 +414,25 @@ pub struct BspProcessor {
     bsp: Option<std::sync::Arc<vbsp::Bsp>>,
     /// 构造期缓存下来的 pakfile 条目数（zip 字段私有，取 len 得先 clone + into_zip）
     packed_files: usize,
+    /// 构造期缓存下来的 static_props 计数（T-148：此前每次 `metadata()` 都线性扫一遍）。
+    cached_static_props: usize,
 }
 
 #[wasm_bindgen]
 impl BspProcessor {
     /// 解析 BSP 字节并建处理器；解析失败时转成上下文为 "BSP 解析失败" 的 JS 错误。
-    /// 同时把 pakfile 条目数一次算好存进 `packed_files`（共享层 `Packfile` 的锁中毒会 panic，
-    /// 这里同样直接 `unwrap`）。
+    /// 同时把 pakfile 条目数与 static_props 计数一次算好存进字段（`Packfile` 的锁中毒在此
+    /// 转成 JS 错误，不再 `unwrap` panic——T-146）。
     #[wasm_bindgen(constructor)]
     pub fn new(data: &[u8]) -> Result<BspProcessor, JsValue> {
         let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
         // zip 只在这里 clone 一次：Packfile 没有「只读条目数」的接口
-        let packed_files = bsp.pack.clone().into_zip().lock().unwrap().len();
+        let packed_files = bsp.pack.clone().into_zip().lock().map_err(|e| JsValue::from_str(&format!("pakfile 锁定失败: {e}")))?.len();
+        let cached_static_props = bsp.static_props().count();
         Ok(BspProcessor {
             bsp: Some(std::sync::Arc::new(bsp)),
             packed_files,
+            cached_static_props,
         })
     }
 
@@ -440,7 +443,7 @@ impl BspProcessor {
             .bsp
             .as_ref()
             .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?;
-        let metadata = BspMetadata::from_bsp(bsp, self.packed_files);
+        let metadata = BspMetadata::from_bsp(bsp, self.packed_files, self.cached_static_props);
         metadata.to_json()
     }
 

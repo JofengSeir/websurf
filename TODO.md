@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（83 条）
+## 未结项（81 条）
 ### 待裁决（0）
 
 
-### 待修（81）
+### 待修（79）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
@@ -42,9 +42,7 @@
 - **T-114** 一组逆向期诊断开关仍留在生产代码里（含已被驳回的 mergeVectorElems）　`viewer`
 - **T-118** A-B 区间带恒不显示（宽度算式分子恒等于分母）　`viewer`
 - **T-145** 模型名匹配与材质查找的大小写口径不一致　`viewer`
-- **T-146** 锁中毒会 panic，与本文件其它失败形态不一致　`viewer`
 - **T-147** 材质去重键是材质名，同名材质被后续模型复用　`viewer`
-- **T-148** packed_files 构造期缓存而 num_static_props 每次现算　`viewer`
 - **T-166** `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点　`viewer`
 - **T-167** 进度回调里的 `'map'` 分支不可达　`viewer`
 - **T-206** `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃　`game`
@@ -148,9 +146,9 @@
 | T-139 | 导航缺「卸载地图」入口，载入过地图后回不到空态 | 缺陷 | viewer | 待修 | apps/viewer/src/ui/mapinfo.ts:125 | documents/viewer/implementation/ui.md | 判据：点导航「卸载地图」⇒ 回到空态且可再次载入 | — |
 | T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | 缺陷 | viewer | 待修 | apps/viewer/src/core/dom.ts:39 | documents/viewer/implementation/ui.md | 判据：`el('div', { id: undefined })` ⇒ 告警或报错（不再静默无 id） | — |
 | T-145 | 模型名匹配与材质查找的大小写口径不一致 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:119 | documents/viewer/implementation/wasm.md | 判据：模型名与材质查找同走小写基准 ⇒ 大小写不一致的模型名仍能配对（`cargo test` 覆盖） | — |
-| T-146 | 锁中毒会 panic，与本文件其它失败形态不一致 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:429 | documents/viewer/implementation/wasm.md | 判据：构造锁中毒场景 ⇒ 返回错误而非 panic（@BT@cargo test@BT@ 覆盖该路径） | — |
+| T-146 | 锁中毒会 panic，与本文件其它失败形态不一致 | 缺陷 | viewer | 已结案 | **已结案（2026-10-09）**：`BspProcessor::new` 里 `bsp.pack.clone().into_zip().lock()` 的 `PoisonError` 不再 `unwrap()`，改经 `map_err` 转成 `JsValue`（`"pakfile 锁定失败: {e}"`）再由 `?` 返回（`apps/viewer/crates/wasm/src/lib.rs:429`，**同一行内改写**，1:1 零锚点漂移；构造函数本就在 `:423` 到 `:424` 的注释里承认过这个 unwrap），与同文件其它失败点形态一致（`apps/viewer/crates/wasm/src/lib.rs:85` 到 `apps/viewer/crates/wasm/src/lib.rs:87`）。**验证**：`cd apps/viewer && npm run build:wasm` ⇒ **exit 0**（wasm-pack 编译通过）。**限制如实记**：宿主缺 `dlltool.exe`，`cargo test` 在宿主目标跑不了，锁中毒的行为判据只能由构造保证（`PoisonError` → `JsValue` → `?`，类型上不可能 panic） | documents/viewer/implementation/wasm.md | `git grep -n "lock().unwrap()" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 0 命中（该处改走 `map_err` + `?`）；`cd apps/viewer && npm run build:wasm` ⇒ exit 0 | — |
 | T-147 | 材质去重键是材质名，同名材质被后续模型复用 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:216 | documents/viewer/implementation/wasm.md | 判据：同名材质来自不同模型 ⇒ 各自独立实例（去重键含 search_path/模型作用域） | — |
-| T-148 | packed_files 构造期缓存而 num_static_props 每次现算 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:429 | documents/viewer/implementation/wasm.md | 判据：`git grep -n "num_static_props" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 只在构造期算一次，`metadata()` 复用缓存 | — |
+| T-148 | packed_files 构造期缓存而 num_static_props 每次现算 | 缺陷 | viewer | 已结案 | **已结案（2026-10-09）**：`num_static_props` 不再每次 `metadata()` 现算——与 `packed_files` 同待遇：构造期算一次存进新字段 `BspProcessor::cached_static_props`（`apps/viewer/crates/wasm/src/lib.rs:431`），`BspMetadata::from_bsp` 改为**接收缓存值**（签名加第 3 个参数，`apps/viewer/crates/wasm/src/lib.rs:380`），调用点 `metadata()` 传 `self.cached_static_props`（`:443`）。四处编辑全部**同行 1:1**（该文件有 30+ 处文档锚点），并同步改掉两处已陈旧的文档注释（`:358` 的「现数一遍」、`:377` 到 `:379` 的口径）。**验证**：`git grep -n "static_props()" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 唯一与元数据相关的计数在构造期（`:431`）；`npm run build:wasm` ⇒ exit 0 | documents/viewer/implementation/wasm.md | `git grep -n "num_static_props" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 只作字段/参数/结构体字面量出现，**不再有现算**；`git grep -n "cached_static_props" -- apps/viewer/crates/wasm/src/lib.rs` ⇒ 4 处（字段/构造/调用/参数）；`cd apps/viewer && npm run build:wasm` ⇒ exit 0 | — |
 | T-166 | `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/shavit-replay.ts:507 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ShavitParseResult.flags" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-167 | 进度回调里的 `'map'` 分支不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:329 | documents/viewer/implementation/replay.md | 判据：`git grep -n "'map'" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | 缺陷 | game | 待修 | apps/game/src/app.ts:249 | documents/game/implementation/app-entry.md | 判据：未选图 / 未锁定前点击画布 ⇒ 有可见反馈（不再静默返回） | — |

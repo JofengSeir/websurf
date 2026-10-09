@@ -38,7 +38,7 @@
 | pointer lock 失败降级 | 先试 `requestPointerLock({unadjustedMovement:true})`；返回 Promise 被拒或同步抛出时回退无参调用；`pointerlockerror` 触发 `onLockError` | `apps/viewer/src/core/fly.ts:144`、`apps/viewer/src/core/fly.ts:146`、`apps/viewer/src/core/fly.ts:91` |
 | 位姿单位约定 | `Pose.ang` 是度；弧度只在 `FlyCam` 内部；`setPose` 用 `DEG2RAD` 换算并把 pitch 夹到 `PITCH_LIMIT` | `apps/viewer/src/core/pose.ts:26`、`apps/viewer/src/core/fly.ts:209` |
 | 出生点四级优先级 | ① primary 下标指向的 `info_player_start`；② 实体序第一个 `info_player_start`；③ 实体序第一个 `info_player_*`；④ bbox 内的第一个 `info_teleport_destination`；都不可用时回落 bbox 中心高位俯瞰（`index = −1`）；`box` 为 null 时第 ④⑤ 步不执行并返回 null | `apps/viewer/src/core/spawn.ts:102` 到 `apps/viewer/src/core/spawn.ts:117` |
-| 出生点角度换算 | `yaw = bspYawToCsYaw(angles[1])`、`pitch = −angles[0]`（wasm 的 `angles` 保持 BSP 原始 `[pitch, yaw, roll]` 次序） | `apps/viewer/src/core/spawn.ts:58`、`apps/viewer/crates/wasm/src/lib.rs:456` |
+| 出生点角度换算 | `yaw = bspYawToCsYaw(angles[1])`、`pitch = −angles[0]`（wasm 的 `angles` 保持 BSP 原始 `[pitch, yaw, roll]` 次序） | `apps/viewer/src/core/spawn.ts:58`、`apps/viewer/crates/wasm/src/lib.rs:459` |
 | `EYE_STAND` 单点 | 本工程不持有该字面量，从共享层再导出；相机 y = `pos.y + EYE_STAND` | `apps/viewer/src/core/constants.ts:34`、`apps/viewer/src/core/fly.ts:203` |
 
 ## 已知缺口（状态见 TODO.md）

@@ -10,7 +10,7 @@
 
 它与其他两个工程的定位差别由三处实测界定：
 
-- **没有物理**：WASM 侧只暴露 BSP 解析与 GLB 导出（`apps/viewer/crates/wasm/src/lib.rs:426` 的 `BspProcessor::new` 之后是 `metadata` / `parse_spawn_points` / `parse_entities` / `parse_pvs_data` / `read_pakfile_file` / `decompress_mtz` / `decode_vtf_to_png` 与两个 `export_glb_*`），crate 依赖里没有 `websurf-phys`（`apps/viewer/crates/wasm/Cargo.toml:18`）。
+- **没有物理**：WASM 侧只暴露 BSP 解析与 GLB 导出（`apps/viewer/crates/wasm/src/lib.rs:427` 的 `BspProcessor::new` 之后是 `metadata` / `parse_spawn_points` / `parse_entities` / `parse_pvs_data` / `read_pakfile_file` / `decompress_mtz` / `decode_vtf_to_png` 与两个 `export_glb_*`），crate 依赖里没有 `websurf-phys`（`apps/viewer/crates/wasm/Cargo.toml:18`）。
 - **不参与共享状态通道**：入口只打印 `crossOriginIsolated` 供核对，不建 `SharedArrayBuffer`、不选通道（`apps/viewer/src/app.ts:54`）。
 - **有独立的解析 Worker**：Worker 只做 `.replay` 字节 → 结构化帧的解码（`apps/viewer/src/worker/main.ts:53` 的 `handle`），不做物理、不常驻状态机。
 
@@ -27,7 +27,7 @@
 | `src/renderer-shared/`（仓库根，跨工程共享层） | 静态光照着色器单实例：RGBExp32 图集解码注入 + prop 三级光照路由（2026-10-02 由三工程各自的 `apps/<app>/src/renderer/lightmap-shader.ts` 合并而来，viewer 的 `src/renderer/` 目录因此清空） | `src/renderer-shared/shader/lightmap-shader.ts:472`、`src/renderer-shared/shader/lightmap-shader.ts:369` |
 | `apps/viewer/src/worker/` | 记录解析 Worker 源码（esbuild 打成 `web/worker.js`） | `apps/viewer/src/worker/main.ts:46` |
 | `apps/viewer/src/wasm.d.ts` | 把 `pkg/websurf_viewer_wasm.js` 的导出整体转出，供 `./wasm.js` 引用类型；本工程内零导入点 | `apps/viewer/src/wasm.d.ts:13` |
-| `apps/viewer/crates/wasm/` | WASM 薄导出层（Rust）：`BspProcessor` 类 | `apps/viewer/crates/wasm/src/lib.rs:414` |
+| `apps/viewer/crates/wasm/` | WASM 薄导出层（Rust）：`BspProcessor` 类 | `apps/viewer/crates/wasm/src/lib.rs:413` |
 | `apps/viewer/scripts/` | 打包（single / multi）与 WASM 契约检查 | `apps/viewer/scripts/build-dist.mjs:223`、`apps/viewer/scripts/check-wasm-api.mjs:62` |
 | `apps/viewer/test/` | Node 侧记录管线自检、CDP 冒烟、最小 Node 类型面 | `apps/viewer/test/replay-selftest.ts:45`、`apps/viewer/test/smoke-cdp.mjs:122` |
 | `apps/viewer/web/` | 页面骨架、样式、dev 运行产物（`app.js` / `worker.js` / `websurf_viewer_wasm_bg.wasm`）、`coi-serviceworker.js` | `apps/viewer/web/index.html:12`、`apps/viewer/web/styles.css:24` |
@@ -90,7 +90,7 @@
 
 | 不变量 | 由什么保证 | 锚点 |
 |---|---|---|
-| GLB 导出必须是 `BspProcessor` 的最后一次调用 | `export_glb_with_pakfile_models` 取走内部 `Bsp`，之后再调另两个方法返回错误 | `apps/viewer/crates/wasm/src/lib.rs:583`、`apps/viewer/crates/wasm/src/lib.rs:438` |
+| GLB 导出必须是 `BspProcessor` 的最后一次调用 | `export_glb_with_pakfile_models` 取走内部 `Bsp`，之后再调另两个方法返回错误 | `apps/viewer/crates/wasm/src/lib.rs:586`、`apps/viewer/crates/wasm/src/lib.rs:441` |
 | `loadBspFile` 的顺序固定为 metadata → spawn → 默认纹理包 → GLB（主导出，失败回退裸导出） | 前两步是借用方法、导出会取走实例 | `apps/viewer/src/core/bsp.ts:135` 到 `apps/viewer/src/core/bsp.ts:131` |
 | 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序由共享 buildMapScene/applyLightmap 与 mountGlb 的编排共同固定 | `apps/viewer/src/core/scene.ts:203`、`apps/viewer/src/core/scene.ts:209` |
 | | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / 近平面候选 / 分块合并 / 换图释放的唯一范围（2026-10-03 起根仍是 Scene（共享 buildMapScene 产物），替换走 `mountGlb`） | `apps/viewer/src/core/scene.ts:44`、`apps/viewer/src/core/scene.ts:198` 到 `apps/viewer/src/core/scene.ts:199` |
@@ -120,7 +120,7 @@
 | 地图加载 | `apps/viewer/src/core/bsp.ts:87` | `ensureWasm` 三条取值路径、`loadBspFile` 三步顺序 |
 | 记录面板 | `apps/viewer/src/replay/panel.ts:311` | 导入入口 `runImport`、规则持久化、映射切换与变换微调 |
 | 解析 Worker | `apps/viewer/src/worker/main.ts:46` | `ctx.onmessage` → `handle` → 带 transfer 列表回包 |
-| WASM 导出层 | `apps/viewer/crates/wasm/src/lib.rs:426` | `BspProcessor::new` 与三个方法 |
+| WASM 导出层 | `apps/viewer/crates/wasm/src/lib.rs:427` | `BspProcessor::new` 与三个方法 |
 | 打包脚本 | `apps/viewer/scripts/build-dist.mjs:223` | single / multi 两种产物形态与保留清单 |
 | 页面骨架 | `apps/viewer/web/index.html:12` | 全部 DOM id 与脚本标签形态 |
 

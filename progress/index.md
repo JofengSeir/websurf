@@ -266,3 +266,4 @@
 | 2026-10-09 | T-130 结案 + T-612 登记；TODO 分卷 90 行 → 归档第 2/3 卷，TODO 97.5→44.7 KB；新开第 9 卷 | progress/monthly/2026-10-9.md:7 |
 | 2026-10-09 | T-612 结案：合并签名补 gpuType（viewer 262 次报错归零）；冒烟 6→3 项失败 | progress/monthly/2026-10-9.md:7 |
 | 2026-10-09 | T-131 结案：静态断言按形态分支，multi/single 两形态各 exit 0 ⇒ viewer 冒烟 0 项失败 | progress/monthly/2026-10-9.md:8 |
+| 2026-10-09 | viewer wasm 簇：T-146（锁中毒→JsError）+ T-148（num_static_props 缓存）结案；65 处 lib.rs 锚点重编号 | progress/monthly/2026-10-9.md:9 |
