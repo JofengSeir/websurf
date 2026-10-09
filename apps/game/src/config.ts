@@ -17,6 +17,7 @@
  * 输入与 HUD 在 `apps/game/src/app.ts`。
  */
 
+import { LIGHTING_PRESENTATION_DEFAULTS } from '../../../src/renderer-shared/shader/lightmap-shader.js';
 import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../../src/ts-shared/phys/params.js';
 
 export interface PhysicsConfig {
@@ -221,8 +222,8 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     // （`MathLib_Init(gamma 2.2, overbright 2.0)`）；three 输出端已做那次 sRGB 编码 ⇒ 光照项保持线性（lightGamma 1）。
     // `LIGHTMAP_EXPOSURE_DEFAULT` 1、gamma 1、`ambientScaleUniform` 1、`propVertexRelaxPasses` 1、
     // `propVertexFlattenAmount` 0、`lightingMode` 'baked'。地图自带的整体亮度即烘焙结果（world lightmap
-    exposure: 2.0,
-    lightGamma: 1.0,
+    exposure: LIGHTING_PRESENTATION_DEFAULTS.exposure,
+    lightGamma: LIGHTING_PRESENTATION_DEFAULTS.lightGamma,
     ambientScale: 1,
     // 1 = 接缝焊接 + 1 次 Laplacian 松弛；0 = 原样使用烘焙值
     propVertexRelax: 1,

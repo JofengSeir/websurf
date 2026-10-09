@@ -531,13 +531,6 @@ export function applyLightmapToMeshes(
 	 * `reconstructVertexLighting` / `acquireVertexLightingMaterial` 的初始化。
 	 */
 	const routeFullbright = (mesh: THREE.Mesh): void => {
-		type FbRoute = { withVl: number; noVl: number; unlit: number; off: number; names: string[] };
-		const gFB = globalThis as unknown as { __vbspFbRoute?: FbRoute };
-		if (!gFB.__vbspFbRoute) gFB.__vbspFbRoute = { withVl: 0, noVl: 0, unlit: 0, off: 0, names: [] };
-		const _diag = gFB.__vbspFbRoute;
-		if (isUnlit(mesh)) _diag.unlit++;
-		else if (hasVertexLightingAttr(mesh)) { if (readVertexLightingOff()) _diag.off++; else { _diag.withVl++; if (_diag.names.length < 5) _diag.names.push(mesh.name || '(anon)'); } }
-		else _diag.noVl++;
 		const unlit = isUnlit(mesh);
 		if (!unlit && hasVertexLightingAttr(mesh) && !readVertexLightingOff()) {
 			// 第 1 级：逐顶点预烘焙（数据在几何上 ⇒ 材质全场景共享）。
@@ -1541,7 +1534,16 @@ function resolveAmbientCube(mesh: THREE.Mesh): unknown {
  * 平价默认下**被照亮的面**本就只有贴图原色的三成左右 —— 这是参照实现的语义，
  * 不是缺陷；嫌暗请用面板「亮度（曝光）」「暗部提升（γ）」两个旋钮，不要改这里的默认值。
  */
-const LIGHTMAP_EXPOSURE_DEFAULT = 1;
+/** 三端**唯一**的静态光照呈现默认档（SDK 口径：`OVERBRIGHT 2.0f` + 一次屏幕 gamma）。
+ *  各应用与面板初值都必须取自本对象，不得在 apps/ 里再写一份 —— 发现分叉请改这里。 */
+export const LIGHTING_PRESENTATION_DEFAULTS = {
+	exposure: 2.0,
+	lightGamma: 1.0,
+	ambientScale: 1,
+	propVertexRelax: 1,
+	propVertexFlatten: 0,
+} as const;
+const LIGHTMAP_EXPOSURE_DEFAULT = LIGHTING_PRESENTATION_DEFAULTS.exposure;
 
 const exposureUniform = { value: readExposureOverride() ?? LIGHTMAP_EXPOSURE_DEFAULT };
 
@@ -1550,14 +1552,14 @@ const exposureUniform = { value: readExposureOverride() ?? LIGHTMAP_EXPOSURE_DEF
  * <1 抬高暗部、亮部基本不动；用来对齐外部参照实现的 γ2.2 域乘算。
  * 与曝光一样是**所有材质共享**的 uniform ⇒ 面板/出帧改一次全场景生效。
  */
-const lightGammaUniform = { value: readGammaOverride() ?? 1 };
+const lightGammaUniform = { value: readGammaOverride() ?? LIGHTING_PRESENTATION_DEFAULTS.lightGamma };
 
 /**
  * 模型（prop）烘焙光照亮度倍率：**只作用于 ambient cube 路径**（static prop 的静态照明），
  * 与 world lightmap 的曝光/γ 相互独立。1.0 = 忠于数据；0 = 模型全黑（A/B 用）。
  * 与其余旋钮一样是**全材质共享**的 uniform ⇒ 拖动即时生效、不触发材质重编译。
  */
-const ambientScaleUniform = { value: readAmbientScaleOverride() ?? 1 };
+const ambientScaleUniform = { value: readAmbientScaleOverride() ?? LIGHTING_PRESENTATION_DEFAULTS.ambientScale };
 
 /**
  * **暗部抬升下限**（默认 **0 = 关闭**，外部参照实现平价）。
@@ -1677,7 +1679,7 @@ export function getVertexLightingRelaxStats(): Readonly<typeof vertexLightingRel
  * 由 `renderer-main` 从 `config.lighting.propVertexRelax` 注入；也可免重建 A/B：
  * 加载前设 `window.__vbspPropVertexRelax = 0|1|2`。
  */
-let propVertexRelaxPasses = 1;
+let propVertexRelaxPasses: number = LIGHTING_PRESENTATION_DEFAULTS.propVertexRelax;
 
 /** 设置重建平滑次数（≥0；0 = 关闭，最忠于烘焙数据）。 */
 export function setPropVertexRelax(passes: number): void {
@@ -1696,9 +1698,18 @@ export function getPropVertexRelax(): number {
  * 由 `renderer-main` 从 `config.lighting.propVertexFlatten` 注入；
  * 免重建 A/B：加载前设 `window.__vbspPropVertexFlatten = 0|0.85|1`。
  */
-let propVertexFlattenAmount = 0;
+let propVertexFlattenAmount: number = LIGHTING_PRESENTATION_DEFAULTS.propVertexFlatten;
 
 /** 设置方差压缩量（0 = 不压；1 = 完全压平到 prop 均值）。 */
+/** 应用共享层默认档（三端 init 的唯一调用点；不要在 apps/ 里逐项写死）。 */
+export function applyLightingPresentationDefaults(): void {
+	const d = LIGHTING_PRESENTATION_DEFAULTS;
+	setExposure(d.exposure);
+	setLightGamma(d.lightGamma);
+	setAmbientScale(d.ambientScale);
+	setPropVertexRelax(d.propVertexRelax);
+	setPropVertexFlatten(d.propVertexFlatten);
+}
 export function setPropVertexFlatten(v: number): void {
 	if (Number.isFinite(v) && v >= 0) propVertexFlattenAmount = Math.min(1, v);
 }
@@ -1916,7 +1927,3 @@ export function setFogMaxDensity(v: number): void {
 	for (const m of injectedMaterials) m.needsUpdate = true;
 }
 
-		type FbRoute = { withVl: number; noVl: number; unlit: number; off: number; names: string[] };
-		const gFB = globalThis as unknown as { __vbspFbRoute?: FbRoute };
-		if (!gFB.__vbspFbRoute) gFB.__vbspFbRoute = { withVl: 0, noVl: 0, unlit: 0, off: 0, names: [] };
-		const _diag = gFB.__vbspFbRoute;

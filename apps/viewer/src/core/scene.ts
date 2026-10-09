@@ -11,12 +11,8 @@ import * as THREE from 'three';
 import { setFogMaxDensity } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import {
   fullbrightUnlitLitMaterials,
-  setAmbientScale,
-  setExposure,
-  setLightGamma,
+  applyLightingPresentationDefaults,
   setLightingMode as setLightingModeInShader,
-  setPropVertexFlatten,
-  setPropVertexRelax,
   getLightingMode,
   type LightingMode,
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
@@ -67,17 +63,14 @@ export class ViewerScene {
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    // 静态光照（预烘焙）参数：与 `apps/game/src/renderer/renderer-main.ts` 初始化装配同值
-    // —— exposure 2.3 / lightGamma 2.2 / ambientScale 1 / propVertexRelax 1 / propVertexFlatten 0.85。
-    // 数值出处是 `apps/game/src/config.ts` 的 `DEFAULT_CONFIG.lighting`：本工程没有面板持久化，
-    // 直接取同一组默认值，使同一张地图在两端观感一致。
- // `setLightGamma` 接受 (0, 8]（2026-10-08 起）⇒ 这里的 2.2 生效（抬高暗部）；
-    // 其余四项都落在各自接受窗口内（`setPropVertexFlatten` 另会把值钳到上限 1）。
-    setExposure(2.3);
-    setLightGamma(2.2);
-    setAmbientScale(1);
-    setPropVertexRelax(1);
-    setPropVertexFlatten(0.85);
+
+
+
+
+
+
+	// 静态光照呈现参数：取自共享层唯一默认档；本工程无面板持久化，直接用同一组值
+	applyLightingPresentationDefaults();
     setLightingModeInShader(DEFAULT_LIGHTING_MODE);
 
     this.scene = new THREE.Scene();

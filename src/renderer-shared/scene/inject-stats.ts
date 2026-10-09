@@ -128,8 +128,6 @@ import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, 
         );
       }
       if (vlMissed > 0) {
-		const fb = (globalThis as { __vbspFbRoute?: { withVl: number; noVl: number; unlit: number; off: number; names: string[] } }).__vbspFbRoute;
-		if (fb) console.info(`[vertex-lighting] fullbright 路由分诊：带 vlight 且已注入=${fb.withVl}，带 vlight 但被 off 关=${fb.off}，无 vlight=${fb.noVl}，unlit=${fb.unlit}（样例 ${fb.names.join(', ')}）`);
         console.error(
 			`[vertex-lighting] 有 ${vlMissed} 个带 _VBSP_VLIGHT 的非 unlit mesh 没走到第 1 级材质 ⇒ 缺陷` + (vlMissedNames.length ? '：' + vlMissedNames.join(' ｜ ') : ''),
         );

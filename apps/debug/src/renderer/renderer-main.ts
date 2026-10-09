@@ -21,6 +21,7 @@
  * 渲染采样写入共享内存的口径见本文件内紧随共享内存导入的那段说明。
  */
 
+import { applyLightingPresentationDefaults } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import * as THREE from 'three';
 import { deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
@@ -54,7 +55,7 @@ import {
   applyLightmap,
   buildMapScene,
 } from '../../../../src/renderer-shared/scene/scene-builder.js';
-import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
 
 /**
@@ -363,15 +364,12 @@ export class RendererMain {
     // 光照模式（面板「预烘焙 / 纯纹理」）：模块级开关，交由 lightmap-shader 的
     // applyLightmapToMeshes 分流；在加载地图前设定，使该图的所有材质从一开始就按同一模式注入。
     setLightingModeInShader(config.lighting?.mode ?? 'baked');
-    // 静态光照（预烘焙）显示参数：与 game 的 init 装配同值（2026-10-04 起三应用同一基线；
-    // 数值出处是 `apps/game/src/config.ts` 的 `DEFAULT_CONFIG.lighting`）。
- // `setLightGamma` 接受 (0, 8]（2026-10-08 起）⇒ 2.2 生效（抬高暗部）
-    // （与 game/viewer 同一码值行为，非本文件特有）。
-    setExposure(2.3);
-    setLightGamma(2.2);
-    setAmbientScale(1);
-    setPropVertexRelax(1);
-    setPropVertexFlatten(0.85);
+
+
+
+
+	// 静态光照呈现参数：取自共享层唯一默认档（不要在这里逐项写死）
+	applyLightingPresentationDefaults();
     // 跨线程通道形态与本地采样世代计数（诊断用；世代不参与协议，见 sampleEpoch）
     console.log(`[renderer] 跨线程通道: ${this.shared.isShared ? 'SAB' : 'MsgState'}（阶段 1 渲染直读本地物理）`);
     console.log(`[renderer] 渲染采样失效世代计数（本地诊断，非协议值）: ${this.sampleEpoch}`);
