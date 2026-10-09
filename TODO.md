@@ -26,13 +26,12 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（72 条）
+## 未结项（64 条）
 ### 待裁决（0）
 
 
-### 待修（70）
+### 待修（62）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
-- **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
 - **T-062** 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径…　`viewer`
@@ -54,7 +53,6 @@
 - **T-234** `mtzB64` 与契约清单都指向了没有直接调用点的字段　`game`
 - **T-235** `apps/game/src/world/types.ts` 在本工程零导入点　`game`
 - **T-236** `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：…　`game`
-- **T-237** `map_name` 恒为空串　`game`
 - **T-239** `worker-types.ts` 里多条声明在本工程无发送方且无接收点　`game`
 - **T-308** 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套　`debug`
 - **T-312** `tsconfig.json` 的五个路径别名零导入点　`debug`
@@ -63,7 +61,6 @@
 - **T-315** `vec3.ts` 的 13 个函数零调用点　`debug`
 - **T-316** `setParamFromMap` 零调用点　`debug`
 - **T-317** `TraceResult` 与 `V3Tuple` 的消费面不在本目录　`debug`
-- **T-318** `LOD_LEVEL.PVS_HIDDEN` 是预留档位　`debug`
 - **T-319** `assignClusterIds` 的结果无消费方　`debug`
 - **T-320** 默认导出与 `parse_bsp` 在本工程零调用点　`debug`
 - **T-322** `TeleportManager` 的六项成员零调用点　`debug`
@@ -79,12 +76,7 @@
 - **T-409** `check-glb-parity.mjs` 门禁零接线（未进 package.json / CI）　`共享`
 - **T-443** 帧探针补 `applyPoseAt(pos, yaw, pitch)`（现只有 spawn/surface 预设），脚本才能钉任意位姿出图　`debug`
 - **T-441** 置换面碰撞**分块懒加载**（D-017 裁决）：避免一次性 ~13MB JSON / 13 万三角形入物理　`shared`
-- **T-601** 注释瘦身 · 共享层：20 处超长注释 + 3 个超长文件头（含 lightmap-shader.ts / player.rs / vbsp / gltf_builder.rs / authority-calibrator.ts 等）　`shared`
-- **T-602** 注释瘦身 · debug：4 处超长注释 + 0 个超长文件头（debug 脚本与 app.ts / teleport-manager.ts / path-recorder.ts / crates/wasm 等）　`debug`
-- **T-603** 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等）　`game`
-- **T-604** 注释瘦身 · viewer：1 处超长注释　`viewer`
 - **T-607** GitHub Pages 站点会被「从分支构建」的内部 Jekyll 构建静默顶掉（站点根变 README 渲染页），部署链无断言/告警　`repo`
-- **T-608** 核实「单入口」假设（Copilot / Gemini CLI 是否读根 `AGENTS.md`）并写进规范篇　`docs`
 - **T-609** 终态行的「判据」列按行态保护（改终态判据须先 approve）　`repo`
 - **T-433** prop 逐顶点光照（`sp_<i>.vhv`）与 leaf ambient cube 的组合口径：D-016 已决「相加」，而现实现是 either/or + 乘法　`shared`
 - **T-103** ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动）　`viewer`
@@ -116,7 +108,7 @@
 |---|---|---|---|---|---|---|---|---|
 | T-008 | apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new … | 配置·门禁 | game | 待修 | apps/game/scripts/check-wasm-api.mjs:52-70 | progress/pending-detail.md | 判据：跑 @BT@node apps/game/scripts/check-wasm-api.mjs@BT@ ⇒ exit 0，且 PHYS_API 列出的项 ≥ crates/wasm 实际导出数（不再缺 @BT@new@BT@ 等） | #9 |
 | T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 已结案 | **已结案（2026-10-09）——四条子项逐条落地/核销**：① **γ 量程 vs 接受窗口**与② **默认 2.2 被忽略**：早已由 2026-10-08 的改动解决（接受窗口改为 `(0, 8]`，`src/renderer-shared/shader/lightmap-shader.ts:1774`；面板量程 0.5..6 落在窗口内；`apps/game/src/config.ts:221` 注明「2.2 生效」）——这正是**文档里已标「已消除 2026-10-08」而看板行没关**的那类遗留。③ **数值框不回写自身文本**：本轮修掉（`apps/game/src/panel/panel-controller.ts:588` 在钳制后同时回写滑块与数值框，**同行 1:1**；`:583` 的注释同步）。④ **`applyCrosshair` 死变量**：本轮删除那个「查询 `.ch-dot` 却不使用」的局部声明（净 −1 行；该文件的 40 处文档锚点全部指向 :784 之前 ⇒ **零重编号**）。**验证**：`cd apps/game && npm run typecheck` ⇒ **exit 0**；**行为复核（CDP 探针，真浏览器）**：往 `#lightGammaNum` 输入越界值 99 ⇒ 该框与滑块**同时**显示 **6**（修复前该框停在 99）。**踩坑记录**：第一次探针读数仍是 99——因为 8090 服务的是 `web/app.js` **旧 bundle**，`npm run build:app` 之后才 PASS（与 `[P]/[S]` 里记过的是同一个坑） | documents/game/implementation/panel.md | `cd apps/game && npm run typecheck` ⇒ exit 0；CDP 探针（`.tmp/t021/probe.mjs`，不入库：headless Edge + `Runtime.evaluate` 往 `#lightGammaNum` 派发 input）⇒ 输入越界值 99 后该框与 `#lightGamma` **同时**显示钳制值 6（修复前该框停在 99）；`git grep -n "num.value = el.value" -- apps/game/src/panel/panel-controller.ts` ⇒ 1 处（回写点） | #50 |
-| T-040 | debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g… | 缺陷 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:1517 | progress/pending-detail.md | 判据：@BT@git grep -n "worker-b" apps/debug/src apps/game/src@BT@ ⇒ 两处措辞一致，或都改为不带外部实现引用的写法 | #71 |
+| T-040 | debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g… | 缺陷 | debug | 已结案 | **已结案（2026-10-09）**：注释不再引用已退役的 harness——`apps/debug/src/renderer/renderer-main.ts:1517` 的「（其又源自 harness worker-b）」改为「（算法与 game 同一份）」（同行 1:1）。`test/dual-mode-harness/` 已于 2026-09-23 退役且按 `AGENTS §0` 不作事实来源，注释里留它的名字只会误导后来人。**验证**：`git grep -n "harness" -- apps/debug/src` ⇒ 0 命中 | progress/pending-detail.md | `git grep -n "harness" -- apps/debug/src` ⇒ 0 命中（注释不再引用已退役 harness） | #71 |
 | T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:486 | progress/pending-detail.md | 判据：@BT@getLightingMode@BT@ 清点调用点（@BT@apps/debug/src/renderer/renderer-main.ts:486@BT@ 疑有一处）⇒ 真零调用则删，否则结案并改状态 | #78 |
 | T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | 未接线·死代码 | debug | 待修 | apps/game/src/app.ts:170 | progress/pending-detail.md | 判据：@BT@git grep -n "resetTo\ | \.stop(" -- src apps@BT@ ⇒ 无外部调用点则删；有则接线并补调用 | #79 |
 | T-053 | viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/… | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:110 | progress/pending-detail.md | 判据：帮助文案与 `apps/viewer/src/replay/timeline.ts` 现行类名/样式一致（无「淡金带 / 金框」残留） | #84 |
@@ -162,7 +154,7 @@
 | T-234 | `mtzB64` 与契约清单都指向了没有直接调用点的字段 | 未接线·死代码 | game | 待修 | src/ts-shared/auth/worker-dispatch.ts:297 | documents/game/implementation/scripts.md | 判据：`git grep -n "mtzB64" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-235 | `apps/game/src/world/types.ts` 在本工程零导入点 | 未接线·死代码 | game | 待修 | apps/game/src/renderer/renderer-main.ts:42 | documents/game/implementation/types.md | 判据：`git grep -n "apps/game/src/world/types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-236 | `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：… | 未接线·死代码 | game | 待修 | apps/game/crates/wasm/src/lib.rs:577 | documents/game/implementation/wasm-crate.md | 判据：`git grep -n "export_glb_with_pakfile_models_with_defaults_and_atlas_limit" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-237 | `map_name` 恒为空串 | 未接线·死代码 | game | 待修 | apps/game/crates/wasm/src/lib.rs:457 | documents/game/implementation/wasm-crate.md | 判据：`git grep -n "map_name" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-237 | `map_name` 恒为空串 | 未接线·死代码 | game | 已结案 | **已结案（2026-10-09，遗弃）**：与**已结案的 T-149 同一条**——`map_name` 是两端都无来源的占位字段（Rust 恒写空串 `apps/game/crates/wasm/src/lib.rs:457`、TS 侧可选 `apps/game/src/…`），删除属 `OWNER.md` D-103 禁区 ⇒ 保留占位，本行按重复登记遗弃 | documents/game/implementation/wasm-crate.md | **遗弃（不做）**：判据不再适用；依据见证据（与 T-149 重复，且删除属 D-103 禁区） | — |
 | T-239 | `worker-types.ts` 里多条声明在本工程无发送方且无接收点 | 未接线·死代码 | game | 待修 | src/ts-shared/auth/worker-dispatch.ts:265 | documents/game/implementation/worker.md | 判据：`git grep -n "worker-types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-306 | lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform | 缺陷 | debug | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1539 | documents/debug/implementation/renderer.md | 判据：运行期改诊断开关 ⇒ 覆盖生效（不再固化于模块初始化时的 uniform 初值） | — |
 | T-307 | `frame-bench.mjs` 缺省地图路径 `<仓库根>/maps/surf_666.bsp` 不在工作区，不传第 4 参即打印「地图不存在」并 exit 2 | 缺陷 | debug | 已结案 | **已结案（2026-10-09，实跑）**：缺省地图路径改为 `<仓库根>/test/maps/surf_666.bsp`（`apps/debug/scripts/frame-bench.mjs:37`，**同行 1:1**），头注两行同步（`:16` 到 `:17`）。**验证（真跑了一次）**：不传第 4 参 `node scripts/frame-bench.mjs` ⇒ 打印 `地图 <仓库根>/test/maps/surf_666.bsp`、10.7 s 出现就绪标记、optimizeScene 合并 35255 mesh → 1701 块、400 帧平均 **4.902 ms（204 FPS）**、p95 6.715 ms、>33 ms **0 帧** ⇒ exit 0，不再「地图不存在」exit 2 | documents/debug/implementation/scripts.md | `cd apps/debug && node scripts/frame-bench.mjs`（不传第 4 参）⇒ 打印地图路径 `<仓库根>/test/maps/surf_666.bsp` 并跑完 400 帧、exit 0（实测 4.902 ms / 204 FPS）；`git grep -n "repoRoot, 'maps'" -- apps/debug/scripts/frame-bench.mjs` ⇒ 0 命中（缺省已改指 test/maps） | — |
@@ -173,7 +165,7 @@
 | T-315 | `vec3.ts` 的 13 个函数零调用点 | 未接线·死代码 | debug | 待修 | apps/debug/src/physics/math/vec3.ts:11 | documents/debug/implementation/physics.md | 判据：`git grep -n "vec3.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-316 | `setParamFromMap` 零调用点 | 未接线·死代码 | debug | 待修 | apps/debug/src/physics/physics-params.ts:110 | documents/debug/implementation/physics.md | 判据：`git grep -n "setParamFromMap" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-317 | `TraceResult` 与 `V3Tuple` 的消费面不在本目录 | 未接线·死代码 | debug | 待修 | apps/debug/src/physics/physics/Collision/Collision.types.ts:49 | documents/debug/implementation/physics.md | 判据：`git grep -n "TraceResult" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-318 | `LOD_LEVEL.PVS_HIDDEN` 是预留档位 | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/lod-manager.ts:26 | documents/debug/implementation/renderer.md | 判据：`git grep -n "LOD_LEVEL.PVS_HIDDEN" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-318 | `LOD_LEVEL.PVS_HIDDEN` 是预留档位 | 未接线·死代码 | debug | 已结案 | **已结案（2026-10-09，遗弃）**：`LOD_LEVEL.PVS_HIDDEN` 是**按设计预留**的档位（三应用共享同一套 LOD 档位序），「本文件内零引用」正是预留的意义；删掉会让档位编号与 debug/game 错位 ⇒ 不删 | documents/debug/implementation/renderer.md | **遗弃（不做）**：判据不再适用；依据见证据（预留档位，删除会破坏三应用档位序） | — |
 | T-319 | `assignClusterIds` 的结果无消费方 | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/lod-manager.ts:181 | documents/debug/implementation/renderer.md | 判据：`git grep -n "assignClusterIds" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-320 | 默认导出与 `parse_bsp` 在本工程零调用点 | 未接线·死代码 | debug | 待修 | apps/debug/src/wasm.d.ts:20 | documents/debug/implementation/wasm-bindings.md | 判据：`git grep -n "parse_bsp" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-322 | `TeleportManager` 的六项成员零调用点 | 未接线·死代码 | debug | 待修 | apps/debug/src/world/teleport-manager.ts:18 | documents/debug/implementation/world.md | 判据：`git grep -n "TeleportManager" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
@@ -190,11 +182,11 @@
 | T-433 | 【S12·残留黑块的真实层级】owner 参考截图里的黑块 / 紫斑**全部**来自 prop 的逐顶点预烘焙光照路径（几何属性 `_VBSP_VLIGHT`，源文件是 pakfile 的 `sp_<i>.vhv`）：关闭该路径后同一视点纯黑像素 **4.94% → 0.00%**、均值 63.9 → 70.6。解析侧已逐字段对齐 SDK——`vradstaticprops.cpp:1563-1593` 写 `flags=4` / `vertexSize=4` 且顶点为 **B,G,R,A** 顺序，`gamebspfile.h:206-225` 的 `StaticPropLump_t` **没有** ambient cube 字段，与本仓 72 B 记录逐字段吻合；prop→文件的 checksum 校验 **1503 匹配 / 0 不符**。但**数据本身极暗**：1587 个 prop 全图最大字节仅 ~95/255、prop 均值亮度中位数 6.8/255、298 个 prop 全 0。VRAD 侧 `m_Color = direct + indirect`（`vradstaticprops.cpp:1427`）与世界面同一物理量 ⇒「world 亮、prop 近黑」是数据 + 兜底口径问题，**不是**解析错 | 缺陷 | shared | 阻塞（待 owner 目视，见 OWNER.md D-023） | src/renderer-shared/shader/lightmap-shader.ts ⇒ cube 项按顶点烘成 `_VBSP_VCUBE`（`Σ c_i·n_i²`，含 gain），第 1 级片元改成 `(direct + indirect) * vbspExposure`（9 处 1:1 + EOF 新函数，锚点零漂移）；探针：注入后片元含 `+ pow(max(vbspVCube…`、顶点属性逐面与片元同式（1.22 = 0.5×2.44）；三工程 typecheck 通过。**判据的像素指标需浏览器 ⇒ 待目视** **2026-10-09 补（本机浏览器可用，已实跑）**：Edge headless + CDP（探针走 `change` 事件投喂 `#bspFile`）实测 `surf_666` 约 10 秒加载完成；关掉缺失纹理弹窗后**默认视点纯黑像素 0.00%**（截图无黑块/紫斑，亮度 18~214）；**玩家出生点 20~100 仍 21~29% 纯黑**（虚空还是未受光几何未判定）⇒ 详见 `OWNER.md` D-023，截图在 `.tmp/t433/` | progress/pending-detail.md | 见详情 | — |
 | T-443 | 【S17·debug】帧探针 `applyPose` 只有 `spawn`/`surface` 两个预设 ⇒ 脚本无法钉任意位姿出图；补 `applyPoseAt(pos, yawDeg, pitchDeg)`（走现成 `setHoldPoint`） | 缺失 | debug | 待修 | apps/game/src/renderer/renderer-main.ts:1020 | progress/monthly/2026-10-6.md | 判据：脚本调用后 `cameraPose()` 返回同一 pos/yaw/pitch，两次运行像素 diff≈0 | — |
 | T-441 | 【S16】置换面碰撞**分块懒加载**（落实 D-017：owner 2026-10-08 裁决，避免一次性 ~13MB JSON / 13 万三角形入物理） | 缺陷 | shared | 待修 | src/ts-shared/phys/world-builder.ts:203 | progress/monthly/2026-10-6.md | 判据：置换面按块分批构建；`triJson` 单次体积显著下降且洞穴壁仍全有碰撞 | — |
-| T-601 | 注释瘦身 · 共享层：20 处超长注释 + 3 个超长文件头（含 lightmap-shader.ts / player.rs / vbsp / gltf_builder.rs / authority-calibrator.ts 等） | 文档口径 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1572 | documents/architecture/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
-| T-602 | 注释瘦身 · debug：4 处超长注释 + 0 个超长文件头（debug 脚本与 app.ts / teleport-manager.ts / path-recorder.ts / crates/wasm 等） | 文档口径 | debug | 待修 | apps/debug/scripts/jump-apex-verify.mjs:1 | documents/debug/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
-| T-603 | 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等） | 文档口径 | game | 待修 | apps/game/src/worker/main.ts:1 | documents/game/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
-| T-604 | 注释瘦身 · viewer：1 处超长注释 | 文档口径 | viewer | 待修 | apps/viewer/src/replay/demopanel.ts:1238 | documents/viewer/overview.md | 判据：`node src/scripts/check-doc-drift.mjs` 的 `[J]` 输出里不再有该区域的条目（in-file 注释块 ≤ 20 行、文件头 ≤ 60 行）；超长机理按 `AGENTS §3.1` 第 4 条移入 `documents/` 并留一句指针 | — |
+| T-601 | 注释瘦身 · 共享层：20 处超长注释 + 3 个超长文件头（含 lightmap-shader.ts / player.rs / vbsp / gltf_builder.rs / authority-calibrator.ts 等） | 文档口径 | shared | 已结案 | **已结案（2026-10-09，遗弃）**：同一事实已由体检 `[J]` 直接计数（当前 28 块 / 4 头），这四行只是把同一份超长注释清单**按工程拆开重记**、不提供额外信息；注释瘦身是纯风格项、不影响任何行为 ⇒ 按 owner 2026-10-09「去掉一些看起来就不太重要的」批量遗弃（要清理时按 `[J]` 输出逐条做） | documents/architecture/overview.md | **遗弃（不做）**：依据见证据（与体检 `[J]` 计数重复，纯风格项） | — |
+| T-602 | 注释瘦身 · debug：4 处超长注释 + 0 个超长文件头（debug 脚本与 app.ts / teleport-manager.ts / path-recorder.ts / crates/wasm 等） | 文档口径 | debug | 已结案 | **已结案（2026-10-09，遗弃）**：同 T-601 —— 与体检 `[J]` 计数重复的纯风格项，按 owner 2026-10-09 指示批量遗弃 | documents/debug/overview.md | **遗弃（不做）**：依据见证据（与体检 `[J]` 计数重复，纯风格项） | — |
+| T-603 | 注释瘦身 · game：2 处超长注释 + 1 个超长文件头（worker/main.ts 与 crates/wasm/src/lib.rs 等） | 文档口径 | game | 已结案 | **已结案（2026-10-09，遗弃）**：同 T-601 —— 与体检 `[J]` 计数重复的纯风格项，按 owner 2026-10-09 指示批量遗弃 | documents/game/overview.md | **遗弃（不做）**：依据见证据（与体检 `[J]` 计数重复，纯风格项） | — |
+| T-604 | 注释瘦身 · viewer：1 处超长注释 | 文档口径 | viewer | 已结案 | **已结案（2026-10-09，遗弃）**：同 T-601 —— 与体检 `[J]` 计数重复的纯风格项（本工程只余 1 处超长注释），按 owner 2026-10-09 指示批量遗弃 | documents/viewer/overview.md | **遗弃（不做）**：依据见证据（与体检 `[J]` 计数重复，纯风格项） | — |
 | T-607 | 【S19·Pages 站点守卫】站点源被切成「从分支构建」后，GitHub 内部 `pages-build-deployment` 会在**每次推送**（含纯文档推送）把仓库根按 Jekyll 发布、顶掉 Actions 产物，而部署链无任何断言/告警（2026-10-08 设置被切走；2026-10-09 02:40 的纯文档推送把站点顶掉，35 分钟后才发现） | 配置·门禁 | repo | 待修 | .github/workflows/deploy-pages.yml:200 | progress/monthly/2026-10-7.md | 判据：站点源被改成「从分支构建」时自检报错（定时 workflow 红或部署后断言失败）；正常时 `curl -s https://jofengseir.github.io/websurf/version.json` 的 id 与本次部署一致 | — |
-| T-608 | 核实「单入口」假设：Copilot / Gemini CLI 是否真的读根 `AGENTS.md`（目前只是通行约定），结论与出处写进规范篇 | 文档口径 | docs | 待修 | AGENTS.md:5 | documents/norms/annotation-and-verification.md | 判据：逐字核实两个工具是否读根 `AGENTS.md`（官方文档或实测）⇒ 结论与出处落进 `documents/norms/**`（只读，须 owner 许可 + sync） | — |
+| T-608 | 核实「单入口」假设：Copilot / Gemini CLI 是否真的读根 `AGENTS.md`（目前只是通行约定），结论与出处写进规范篇 | 文档口径 | docs | 已结案 | **已结案（2026-10-09，遗弃）**：核实「Copilot / Gemini CLI 是否真读根 `AGENTS.md`」属**通行约定**的考证——结论无论正负都不改变本仓任何配置或行为（`AGENTS §0` 已把根 `AGENTS.md` 定为唯一入口）⇒ 不值得占一行 | documents/norms/annotation-and-verification.md | **遗弃（不做）**：依据见证据（结论不改变本仓行为） | — |
 | T-609 | 体检 `[O]` 对**终态行**（已记录 / 已结案）的「判据」列按行态保护：改终态行判据须先 approve，未结行改判据不拦 | 工具·流程 | repo | 待修 | src/scripts/docflow.mjs:201 | documents/norms/annotation-and-verification.md | 判据：改一条终态行的判据 ⇒ `node src/scripts/docflow.mjs check` 报「受保护列」；改未结行的判据不报 | — |
 | T-611 | 文档锚点「行号陈旧」体检抓不到 | 缺陷 | 工具 | 待修 | `documents/viewer/implementation/core.md:29`、`documents/viewer/implementation/core.md:31` | documents/norms/annotation-and-verification.md | 判据：先建 `src/scripts/check-doc-anchor-target.mjs`（逐锚点断言「文档所称符号名出现在该行」，不符 exit 1）；负向用例 = 上述 `apps/viewer/src/core/scene.ts:184` ⇒ exit 1，修好后的 `core.md` 全篇 ⇒ exit 0 | — |

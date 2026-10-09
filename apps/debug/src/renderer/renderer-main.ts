@@ -1514,7 +1514,7 @@ export class RendererMain {
 
   // ── 空间分块合并（optimizeScene：GLB 挂载后执行一次）─────────────
   // 渲染减负核心：3.4 万 Mesh（每帧遍历/剔除/draw call 开销）→ 数百~数千空间块。
-  // 移植自 game/src/renderer/renderer-main.ts::optimizeScene（其又源自 harness worker-b）。
+  // 移植自 game/src/renderer/renderer-main.ts::optimizeScene（算法与 game 同一份）。
   // 载体与 game 一致：直接在 BSP 根（bspRoot，userData.isBspModel 保留不变）内替换内容——
   // 移除 gltf.scene、块 mesh 直接挂 BSP 根。
   // 时序：loadScene 中 scene.add(gltf.scene) + lightmap 之后、updateMatrixWorld / boundingBox /
