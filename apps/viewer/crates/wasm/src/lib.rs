@@ -942,3 +942,12 @@ pub fn mosaic_decode(code: &str, scale: u32) -> Result<Vec<u8>, JsValue> {
     websurf_wasm_core::mosaic::decode::code_to_img(code, scale)
         .map_err(|e| JsValue::from_str(&format!("mosaic_decode: {e}")))
 }
+
+/// PNG 字节 → `#mosaic v4` 字节码文本；错误文本前缀 `mosaic_encode`。
+/// T-454 P5-3：与 `mosaic_decode` 成对补齐（debug / game 都有这一对），viewer 侧供画质档产出/回归比对用；
+/// 纯 Rust 转发，wasm-bindgen 只出现在本导出层。
+#[wasm_bindgen]
+pub fn mosaic_encode(png: &[u8], name: &str) -> Result<String, JsValue> {
+    websurf_wasm_core::mosaic::encode::img_to_code(png, name)
+        .map_err(|e| JsValue::from_str(&format!("mosaic_encode: {e}")))
+}

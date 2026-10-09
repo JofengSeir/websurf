@@ -148,7 +148,6 @@
       "apps/viewer/crates/wasm/**",
       "apps/viewer/src/**",
       "src/wasm-core/**",
-      "src/renderer-shared/**",
       "documents/**",
       "TODO.md",
       "progress/**",
@@ -159,9 +158,9 @@
     ],
     "base": {
       "TODO.md": "055bdb7dfb9783f3ea17606d6216d4991fcf84160b5b71de333bd74358ad31de",
-      "apps/viewer/crates/wasm/src/lib.rs": "adce773f792c7799cc3391cb42b4386ae7746b6049068587e93be1524b576a92"
+      "apps/viewer/crates/wasm/src/lib.rs": "03fc3659b3af9deaaf9a1bf3f6890fdf95ba73b8ad7ca00f6069d5f1a4cd72e3"
     },
-    "at": "2026-10-09T17:00:19.414Z",
+    "at": "2026-10-09T17:02:00.829Z",
     "pins": {
       "README.md": "966ec495a5063cb2f69ae90c1dd639a0f8e6a456341e1f79dba1e577e6b0fecc",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
