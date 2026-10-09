@@ -49,6 +49,14 @@ export interface VisibilityUpdateResult {
   pvsActive: boolean;
 }
 
+/** 距离判定（共享唯一口径）：块中心到相机是否超过剔除距离。本控制器与 debug 的 `LodManager` 都调它。 */
+export function isBeyondCullDistance(center: THREE.Vector3, cameraPos: THREE.Vector3, cullDistance: number): boolean {
+  const dx = cameraPos.x - center.x;
+  const dy = cameraPos.y - center.y;
+  const dz = cameraPos.z - center.z;
+  return dx * dx + dy * dy + dz * dz > cullDistance * cullDistance;
+}
+
 /** 收集/剔除的唯一实现。一个端持一个实例即可（换图时 `clear()` 再 `collect()`）。 */
 export class VisibilityController {
   items: VisibilityItem[] = [];
@@ -118,9 +126,9 @@ export class VisibilityController {
     const pvsClusterValid = pvs !== null && pvs.currentClusterId >= 0;
     if (this.enablePvs && pvs) pvs.update(camPos);
     for (const item of this.items) {
-      const dist = item.center.distanceTo(camPos);
+      const beyond = isBeyondCullDistance(item.center, camPos, this.cullDistance);
       let level = LOD_NEAR;
-      if (dist > this.cullDistance) {
+      if (beyond) {
         level = LOD_FAR;
         culledByDistance++;
       } else if (

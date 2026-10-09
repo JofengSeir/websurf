@@ -17,7 +17,7 @@
 
 import * as THREE from 'three';
 import type { RuntimeConfig } from '../config.js';
-import type { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
+import type { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js'; import { isBeyondCullDistance } from '../../../../src/renderer-shared/scene/visibility-controller.js';
 
 /** LOD 级别。 */
 export const LOD_LEVEL = {
@@ -229,7 +229,7 @@ export class LodManager {
 		let lodChanged = false;
 
 		// 可见性判据只有「块中心距离 > cullDistance」这一条：不查 cluster、不带迟滞带。
-		const cullDistSq = this.cullDistance * this.cullDistance;
+		// 距离口径（含平方比较）由共享 `isBeyondCullDistance` 承载，三端同一份（T-454 P4c）。
 
 		let nearCount = 0;
 		let farCount = 0;
@@ -237,12 +237,7 @@ export class LodManager {
 		for (let i = 0, n = this.items.length; i < n; i++) {
 			const item = this.items[i];
 
-			const dx = cameraPos.x - item.center.x;
-			const dy = cameraPos.y - item.center.y;
-			const dz = cameraPos.z - item.center.z;
-			const distSq = dx * dx + dy * dy + dz * dz;
-
-			const visible = distSq <= cullDistSq;
+			const visible = !isBeyondCullDistance(item.center, cameraPos, this.cullDistance);
 			if (item.isVisible !== visible) {
 				item.mesh.visible = visible;
 				item.isVisible = visible;

@@ -18,7 +18,7 @@
 
 **`apps/debug/src/renderer/lod-manager.ts`**
 
-导出 `LOD_LEVEL`（`apps/debug/src/renderer/lod-manager.ts:23`）、`LodStats`（`apps/debug/src/renderer/lod-manager.ts:48`）、`SceneDiagonalInfo`（`apps/debug/src/renderer/lod-manager.ts:68`）、`LodManager`（`apps/debug/src/renderer/lod-manager.ts:87`）。类内公开面：`setup`（`apps/debug/src/renderer/lod-manager.ts:121`）、`assignClusterIds`（`apps/debug/src/renderer/lod-manager.ts:181`）、`update`（`apps/debug/src/renderer/lod-manager.ts:222`）、`setCullDistance`（`apps/debug/src/renderer/lod-manager.ts:275`）、`getStats`（`apps/debug/src/renderer/lod-manager.ts:283`）、三个 getter（`apps/debug/src/renderer/lod-manager.ts:288` 起）、`dispose`（`apps/debug/src/renderer/lod-manager.ts:303`）。
+导出 `LOD_LEVEL`（`apps/debug/src/renderer/lod-manager.ts:23`）、`LodStats`（`apps/debug/src/renderer/lod-manager.ts:48`）、`SceneDiagonalInfo`（`apps/debug/src/renderer/lod-manager.ts:68`）、`LodManager`（`apps/debug/src/renderer/lod-manager.ts:87`）。类内公开面：`setup`（`apps/debug/src/renderer/lod-manager.ts:121`）、`assignClusterIds`（`apps/debug/src/renderer/lod-manager.ts:181`）、`update`（`apps/debug/src/renderer/lod-manager.ts:222`）、`setCullDistance`（`apps/debug/src/renderer/lod-manager.ts:270`）、`getStats`（`apps/debug/src/renderer/lod-manager.ts:278`）、三个 getter（`apps/debug/src/renderer/lod-manager.ts:283` 起）、`dispose`（`apps/debug/src/renderer/lod-manager.ts:298`）。
 
 **`apps/debug/src/renderer/collider-debug.ts`**
 
@@ -79,7 +79,7 @@
 
 **近平面自适应只改投影矩阵**：实现在共享 `NearPlaneController.update`（`src/renderer-shared/camera/near-plane.ts:65`，2026-10-03 起本工程不再持有副本）：候选 `roots` 直通 `bspModelScene` 子树（等价于旧的 scene.traverse），沿 4 个水平正交方向各投一条长度为 probe 的射线取最近命中，命中则 `near = max(minD × ratio, CAMERA_NEAR_MIN)`，无命中回到 `defaultNear`；与当前值相差超过 0.001 才写入。调用点（`apps/debug/src/renderer/renderer-main.ts:627`）保留了 noclip 跳过与隔帧节拍；`setNearParams`（`apps/debug/src/renderer/renderer-main.ts:693`）转发共享控制器并照旧置 `needsRender`。
 
-**LOD 剔除的判据与取值**：判据只有「块中心到相机距离平方 > `cullDistance` 的平方」一条，不带迟滞、不查 PVS（`apps/debug/src/renderer/lod-manager.ts:231`）；每 `lod.updateInterval` 帧才判一轮（`apps/debug/src/renderer/lod-manager.ts:226`），只有可见性翻转时才写 `mesh.visible` 并把返回值置真（`apps/debug/src/renderer/lod-manager.ts:246`）。距离取值：上限 = 对角线 ×4 上取整到 100 HU，默认 = min(对角线 ×2, max(12800, 最大边 ×0.5))（`apps/debug/src/renderer/lod-manager.ts:155` 起）。
+**LOD 剔除的判据与取值**：判据只有「块中心到相机距离平方 > `cullDistance` 的平方」一条，不带迟滞、不查 PVS（`apps/debug/src/renderer/lod-manager.ts:231`）；每 `lod.updateInterval` 帧才判一轮（`apps/debug/src/renderer/lod-manager.ts:226`），只有可见性翻转时才写 `mesh.visible` 并把返回值置真（`apps/debug/src/renderer/lod-manager.ts:241`）。距离取值：上限 = 对角线 ×4 上取整到 100 HU，默认 = min(对角线 ×2, max(12800, 最大边 ×0.5))（`apps/debug/src/renderer/lod-manager.ts:155` 起）。
 
 **路径记录两条线与两种度量**：
 
@@ -97,7 +97,7 @@
 
 ## 已知缺口（状态见 TODO.md）
 
-1. ~~**PVS 列不反映隐藏数**~~ **已消除（2026-10-09）**：T-303 —— 面板剔除统计行的 PVS 段改为**未接线就不打印数字**（`apps/debug/src/app.ts:603`：`totalClusters > 0 ? '可见/总 隐藏n' : '未接线'`，1:1）。底层口径不变：`LodStats.pvsHidden` 每轮仍恒写 0（`apps/debug/src/renderer/lod-manager.ts:262`），真正被隐藏的块数是 `far`（`:261`）；「接线后统计与实际隐藏数一致」属**可选后续**（判据后半句）。
+1. ~~**PVS 列不反映隐藏数**~~ **已消除（2026-10-09）**：T-303 —— 面板剔除统计行的 PVS 段改为**未接线就不打印数字**（`apps/debug/src/app.ts:603`：`totalClusters > 0 ? '可见/总 隐藏n' : '未接线'`，1:1）。底层口径不变：`LodStats.pvsHidden` 每轮仍恒写 0（`apps/debug/src/renderer/lod-manager.ts:257`），真正被隐藏的块数是 `far`（`:261`）；「接线后统计与实际隐藏数一致」属**可选后续**（判据后半句）。
 2. ~~**PVS 相关统计在本工程恒为缺省值**~~ **已消除（2026-10-09）**：T-303 —— 面板现按「未接线」如实显示、不再假装有数（同下条所述 `apps/debug/src/app.ts:603`）；底层仍未接线：`RendererMain` 只构造 `PvsManager`、把 `getClusterAt` 交给 `assignClusterIds` 用、并读 `getStats` / `currentClusterId`，**从不调 `update`**，因此剔除统计里的 `cluster` 恒 -1、`visibleClusters` 恒 0（`apps/debug/src/renderer/renderer-main.ts:191` 起、`apps/debug/src/renderer/renderer-main.ts:495`）。面板现按「未接线」显示而不是假装有数（见上一条）；要真接线需调 `PvsManager.update`（未做）。
 3. ~~**`LOD_LEVEL.PVS_HIDDEN` 是预留档位**~~ **已消除（2026-10-09）**：T-318 —— **遗弃，不删**：它是枚举里**按设计预留**的档位（三应用同一套 LOD 档位序），删掉会让档位编号与另两个工程错位；「本文件内零引用」正是预留的意义。
 4. **`assignClusterIds` 的结果无消费方**：返回的「采到至少一个 cluster 的 mesh 数量」在 `loadScene` 里没有被使用（`apps/debug/src/renderer/lod-manager.ts:181`）。 （见 TODO.md T-319）

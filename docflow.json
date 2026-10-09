@@ -146,9 +146,9 @@
     "task": "T-454",
     "may": [
       "src/renderer-shared/**",
-      "apps/viewer/src/**",
-      "apps/game/src/**",
       "apps/debug/src/**",
+      "apps/game/src/**",
+      "apps/viewer/src/**",
       "documents/**",
       "TODO.md",
       "progress/**",
@@ -156,14 +156,14 @@
       ".tmp/unify/**"
     ],
     "must": [
-      "apps/viewer/src/core/scene.ts"
+      "apps/debug/src/renderer/lod-manager.ts"
     ],
     "base": {
-      "TODO.md": "54d11eb722b02bf92b83cbee4c7c8af431bd3f48554a744463a90753518659f0",
+      "TODO.md": "38fb83c2aa58db7ef3cf1bced247712f43c054e994ae91954ec15dd7b185396f",
       "CHANGELOG.md": "2cae36009e6d293c7a1692ebbebd65e82b2848bd17fc8366054339096c4eac6d",
-      "apps/viewer/src/core/scene.ts": "cf942a28b6eb1a90f107ae230f7a601bd66cd6d1d155626c9bf5464e0dba8324"
+      "apps/debug/src/renderer/lod-manager.ts": "1767235c76a6dbde61361a7440a69fc9e4deaa954d4041491be6fadac2d1964c"
     },
-    "at": "2026-10-09T16:47:51.855Z",
+    "at": "2026-10-09T16:54:00.223Z",
     "pins": {
       "README.md": "966ec495a5063cb2f69ae90c1dd639a0f8e6a456341e1f79dba1e577e6b0fecc",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -1306,10 +1306,10 @@
       "apps/debug/src/renderer/lod-manager.ts:121:121": "74037615",
       "apps/debug/src/renderer/lod-manager.ts:181:181": "6063e1bb",
       "apps/debug/src/renderer/lod-manager.ts:222:222": "a60f7ea5",
-      "apps/debug/src/renderer/lod-manager.ts:275:275": "d47780aa",
-      "apps/debug/src/renderer/lod-manager.ts:283:283": "18be9986",
-      "apps/debug/src/renderer/lod-manager.ts:288:288": "f7d3d359",
-      "apps/debug/src/renderer/lod-manager.ts:303:303": "2d3a8a57",
+      "apps/debug/src/renderer/lod-manager.ts:270:270": "d47780aa",
+      "apps/debug/src/renderer/lod-manager.ts:278:278": "18be9986",
+      "apps/debug/src/renderer/lod-manager.ts:283:283": "f7d3d359",
+      "apps/debug/src/renderer/lod-manager.ts:298:298": "2d3a8a57",
       "apps/debug/src/renderer/collider-debug.ts:560:560": "923c989f",
       "apps/debug/src/renderer/path-recorder.ts:46:46": "8a39435b",
       "apps/debug/src/renderer/path-recorder.ts:115:115": "9a773549",
@@ -1336,7 +1336,7 @@
       "apps/debug/src/renderer/renderer-main.ts:693:693~2": "e91528f3",
       "apps/debug/src/renderer/lod-manager.ts:231:231": "90b014e9",
       "apps/debug/src/renderer/lod-manager.ts:226:226": "3de64144",
-      "apps/debug/src/renderer/lod-manager.ts:246:246": "82430b3d",
+      "apps/debug/src/renderer/lod-manager.ts:241:241": "82430b3d",
       "apps/debug/src/renderer/lod-manager.ts:155:155": "4d5e4d38",
       "apps/debug/src/renderer/renderer-main.ts:612:612": "df923d21",
       "apps/debug/src/renderer/renderer-main.ts:589:589": "d10b36aa",
@@ -1350,7 +1350,7 @@
       "apps/debug/src/config.ts:101:101": "a11a721f",
       "apps/debug/src/config.ts:101:101~2": "a11a721f",
       "apps/debug/src/app.ts:603:603": "7e067924",
-      "apps/debug/src/renderer/lod-manager.ts:262:262": "36c9032c",
+      "apps/debug/src/renderer/lod-manager.ts:257:257": "36c9032c",
       "apps/debug/src/app.ts:603:603~2": "7e067924",
       "apps/debug/src/renderer/renderer-main.ts:191:191": "66a7fd95",
       "apps/debug/src/renderer/renderer-main.ts:495:495": "a3b09e82",
@@ -1656,7 +1656,7 @@
       "apps/debug/src/main-wasm.ts:28:28~2": "3cd52cbd",
       "apps/debug/src/worker/main.ts:479:479": "8157d406",
       "apps/debug/src/renderer/lod-manager.ts:155:155": "4d5e4d38",
-      "apps/debug/src/renderer/lod-manager.ts:276:276": "5b7a4ab1",
+      "apps/debug/src/renderer/lod-manager.ts:271:271": "5b7a4ab1",
       "apps/debug/src/renderer/renderer-main.ts:660:660": "9590f7ad",
       "apps/debug/src/renderer/renderer-main.ts:664:664": "f7c8db2a",
       "apps/debug/src/worker/worker-types.ts:248:248": "96af6911",
@@ -4295,6 +4295,22 @@
   },
   "rebaselines": [
     {
+      "path": "documents/debug/overview.md",
+      "at": "2026-10-09T16:50:40.759Z",
+      "by": "DSH",
+      "reason": "T-454 P4c：debug LodManager 的距离判定改用共享 isBeyondCullDistance（lod-manager.ts -5 行），锚点按内容对位重钉",
+      "changed": 2,
+      "total": 120
+    },
+    {
+      "path": "documents/debug/implementation/renderer.md",
+      "at": "2026-10-09T16:50:40.758Z",
+      "by": "DSH",
+      "reason": "T-454 P4c：debug LodManager 的距离判定改用共享 isBeyondCullDistance（lod-manager.ts -5 行），锚点按内容对位重钉",
+      "changed": 11,
+      "total": 108
+    },
+    {
       "path": "documents/viewer/sequences.md",
       "at": "2026-10-09T16:48:21.893Z",
       "by": "DSH",
@@ -4597,22 +4613,6 @@
       "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
       "changed": 57,
       "total": 148
-    },
-    {
-      "path": "documents/debug/overview.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 20,
-      "total": 120
-    },
-    {
-      "path": "documents/debug/implementation/world.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 2,
-      "total": 24
     }
   ]
 }
