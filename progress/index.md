@@ -256,3 +256,4 @@
 | 2026-10-09 | dem 簇：T-110/112/113 结案（探针实测 4 份 .dem）、T-111/114 收窄；test:replay exit 0 | progress/monthly/2026-10-8.md:29 |
 | 2026-10-09 | T-157 遗弃结案 + T-101/T-102 修复落地；确认本机 Edge 存在（CDP 路径可用） | progress/monthly/2026-10-8.md:30 |
 | 2026-10-09 | CDP 路径打通（静态服务 + Edge headless 探针）；T-101 实测结案 | progress/monthly/2026-10-8.md:31 |
+| 2026-10-09 | T-055 结案：两项由 CDP 几何实测确认并修复（行高 53→35；切角偏差 56/89→0.3/0） | progress/monthly/2026-10-8.md:32 |

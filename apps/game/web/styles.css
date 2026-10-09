@@ -213,14 +213,18 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   padding: 20px;
   background: var(--overlay);
 }
-/* 切角斜边 1px 边线：沿窗口右上切角内侧布置（几何 = 50%±380/290 居中
-   加切角中点偏移，rotate 45° 顺时针沿斜边） */
+/* 切角斜边 1px 边线：几何随**窗口实际尺寸**走，而不是写死 760×580。
+   `.win` 是 `width: 760px; max-width: 100%` + `height: 580px; max-height: 92vh`，居中于 #panel，
+   故半宽 = `min(380px, 50% - 20px)`（20px = #panel 的 padding）、半高 = `min(290px, 46vh)`；
+   切角斜边的中点在窗口右上角内缩 5px 处（斜边从 (右-10, 顶) 到 (右, 顶+10)）。
+   2026-10-09 实测：写死值时 800×600 偏差 56px、600×800 偏差 89px。 */
 #panel::before {
   content: ""; position: absolute;
-  top: calc(50% - 284.8px); left: calc(50% + 367.3px);
+  top: calc(50% - min(290px, 46vh) + 5px);
+  left: calc(50% + min(380px, 50% - 20px) - 5px);
   width: 14px; height: 1px;
   background: var(--border-strong);
-  transform: rotate(45deg);
+  transform: translate(-50%, -50%) rotate(45deg);
   z-index: 1; /* 压槽嵌片与螺丝都在 .win 层——边线必须抬到其上才可见 */
 }
 #panel .win {
@@ -440,6 +444,9 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
     var(--border-strong) 0 1px, transparent 1px 4px);
   opacity: 0.5; pointer-events: none;
 }
+/* 健康行：值 span 占中列、按钮独占读数列 ⇒ 三元素同行（通用规则 `#panel .row > button.small`
+   的 `grid-column: 2 / -1` 跨列会把按钮挤到第二行，实测 label/值 y=126 而按钮 y=144） */
+#panel .mod-pane[data-pane="health"] .row > button.small { grid-column: 3; }
 /* 空 label 的行（恢复默认等）：label 隐藏，按钮归位到读数列右对齐（8.4-4） */
 #panel .row > label:empty { display: none; }
 #panel .row > button.small { grid-column: 2 / -1; justify-self: end; }
@@ -720,6 +727,8 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   /* 引导线端点跟随 120/72 栅格（= 列宽 + gap 12 再各收 4px，与定宽口径一致） */
   #panel .row:has(> input[type="checkbox"])::before,
   #panel .row:has(> input[type="color"])::before { left: 128px; right: 80px; }
+  /* #panel 的 padding 在本档降到 10px ⇒ 切角边线的半宽公式同步换底（实测不换会差 10px） */
+  #panel::before { left: calc(50% + min(380px, 50% - 10px) - 5px); }
   #panel .row label, #panel .key-row .kname { font-size: 13px; }
   #stats { font-size: 17px; }
 }
