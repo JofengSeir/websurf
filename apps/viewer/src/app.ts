@@ -20,7 +20,7 @@
  * 与播放控制）与 `session`（当前上场的会话）。
  */
 
-import { DEG2RAD } from './core/constants.js';
+import { DEG2RAD } from './core/constants.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../src/renderer-shared/camera/pose-entry.js';
 import { ViewerScene } from './core/scene.js';
 import { FlyCam } from './core/fly.js';
 import { resolveInitialSpawn } from './core/spawn.js';
@@ -71,7 +71,7 @@ try {
   throw e;
 }
 
-const fly = new FlyCam();
+const fly = new FlyCam(); installPoseEntry({ applyPose: (p) => { fly.setPose({ pos: [p.pos[0], feetFromCameraPose(p)[1], p.pos[2]], ang: [p.yawDeg, p.pitchDeg] }); }, readPose: () => cameraPoseOf(scene.camera), releasePose: () => {} }, 'viewer');
 fly.attach(gameCanvas);
 fly.onLockError = () => hud.flashStatus('鼠标锁定失败，请再点击一次画布重试');
 

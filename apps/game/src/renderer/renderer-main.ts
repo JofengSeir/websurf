@@ -47,7 +47,7 @@ import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCame
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
-import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -1208,6 +1208,6 @@ export class RendererMain {
         return { replaced };
       },
     };
-    (globalThis as unknown as { __vbspFrameProbe?: unknown }).__vbspFrameProbe = probe;
+    (globalThis as unknown as { __vbspFrameProbe?: unknown }).__vbspFrameProbe = probe; installPoseEntry({ applyPose: (p) => { self.setHoldPoint({ x: p.pos[0], y: feetFromCameraPose(p)[1], z: p.pos[2], yaw: p.yawDeg, pitch: p.pitchDeg, onGround: true }); }, readPose: () => cameraPoseOf(self.camera), releasePose: () => { self.holdPoint = null; } }, 'game');
   }
 }

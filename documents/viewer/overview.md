@@ -81,7 +81,7 @@
 2. `apps/viewer/web/index.html:153` 以 `<script type="module" src="./app.js">` 加载 esbuild 产物；`apps/viewer/web/index.html:136` 起的捕获阶段 `error` 监听在资源 404 时显示 `#fatal` 卡片。
 3. `apps/viewer/src/app.ts:48` 取 `canvas#game`，取不到即抛错（`apps/viewer/src/app.ts:48`）。
 4. `apps/viewer/src/app.ts:64` 建 `ViewerScene`（WebGL 渲染器 + 相机 + 三点光），失败时经 `Hud.showFatal` 提示后重抛（`apps/viewer/src/app.ts:65` 到 `apps/viewer/src/app.ts:70`）。
-5. `apps/viewer/src/app.ts:74` 建 `FlyCam` 并 `attach` 到画布（注册 pointer lock、mousemove、keydown/keyup、blur）。
+5. `apps/viewer/src/app.ts:74` 建 `FlyCam` 并挂共享位姿入口（T-454 P3a 起同一行的 `installPoseEntry(...)`，宿主用 `FlyCam.setPose`），`:75` `attach` 到画布（注册 pointer lock、mousemove、keydown/keyup、blur）。
 6. 侧栏 / dock / 标签页取句柄并绑事件（`apps/viewer/src/app.ts:79` 到 `apps/viewer/src/app.ts:90`），tab 点击统一进唯一的切换点 `switchTab`（`apps/viewer/src/app.ts:175`）；随后两个回放会话各自构造（`apps/viewer/src/app.ts:100`），各自建自己的时间轴与信息条 —— 记录条在会话内建（`apps/viewer/src/replay/session.ts:86`），录像条由 `apps/viewer/src/app.ts:135` 单独建；两条各占 dock 的一层（记录层 = `#replayMeta` + `#timeline`，录像层 = `#demoInfo` + `#timelineDemo`，DOM 见 `apps/viewer/web/index.html:132`、`apps/viewer/web/index.html:136`），再按遥测 `TelemetryHud`（`apps/viewer/src/app.ts:127`）、`MapPanel`（`apps/viewer/src/app.ts:212`）、`ReplayPanel`（`apps/viewer/src/app.ts:283` 到 `apps/viewer/src/app.ts:314`）依次装配。
 7. 对外接口挂到 `globalThis.viewer`（`apps/viewer/src/app.ts:750`）；URL 深链 `?bsp=` / `?replay=` 在启动末尾异步加载（`apps/viewer/src/app.ts:788` 到 `apps/viewer/src/app.ts:825`）。
 8. `requestAnimationFrame(frame)` 起主循环（`apps/viewer/src/app.ts:1020`）；WASM 直到用户真的选地图时才初始化（`apps/viewer/src/core/bsp.ts:129` 的 `await ensureWasm()`）。

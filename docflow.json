@@ -145,6 +145,7 @@
   "claim": {
     "task": "T-454",
     "may": [
+      "src/renderer-shared/camera/**",
       "src/renderer-shared/render/**",
       "src/renderer-shared/config/**",
       "apps/debug/src/**",
@@ -157,13 +158,13 @@
       ".tmp/unify/**"
     ],
     "must": [
-      "src/renderer-shared/render/create-renderer.ts"
+      "src/renderer-shared/camera/pose-entry.ts"
     ],
     "base": {
-      "TODO.md": "cc958dd4dd13be10d565ec0884a2b56856c55ce37344b8fafb215ab4667c32a5",
+      "TODO.md": "d1bee189349c5a99d704b0fadef14847899dce622e5ac779d2054adbbfe1ef53",
       "CHANGELOG.md": "2cae36009e6d293c7a1692ebbebd65e82b2848bd17fc8366054339096c4eac6d"
     },
-    "at": "2026-10-09T15:43:10.103Z",
+    "at": "2026-10-09T15:56:02.992Z",
     "pins": {
       "README.md": "966ec495a5063cb2f69ae90c1dd639a0f8e6a456341e1f79dba1e577e6b0fecc",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -1029,10 +1030,10 @@
       "src/phys/mod.rs:364:364~2": "300a4c5d"
     },
     "documents/debug/differences.md": {
-      "apps/debug/src/renderer/renderer-main.ts:24:24": "600c3e64",
+      "apps/debug/src/renderer/renderer-main.ts:24:24": "1de7cb07",
       "apps/game/src/renderer/renderer-main.ts:33:33": "2606bf04",
       "apps/debug/src/renderer/renderer-main.ts:58:58": "3acd0125",
-      "apps/debug/src/renderer/renderer-main.ts:24:24~2": "600c3e64",
+      "apps/debug/src/renderer/renderer-main.ts:24:24~2": "1de7cb07",
       "apps/viewer/src/core/scene.ts:10:10": "2606bf04",
       "apps/debug/web/index.html:489:489": "9a8ba3d8",
       "apps/debug/web/index.html:860:860": "fce52225",
@@ -1657,8 +1658,8 @@
       "apps/debug/src/worker/main.ts:479:479": "8157d406",
       "apps/debug/src/renderer/lod-manager.ts:155:155": "4d5e4d38",
       "apps/debug/src/renderer/lod-manager.ts:276:276": "5b7a4ab1",
-      "apps/debug/src/renderer/renderer-main.ts:712:712": "f9127986",
-      "apps/debug/src/renderer/renderer-main.ts:716:716": "6f56cf5e",
+      "apps/debug/src/renderer/renderer-main.ts:707:707": "9590f7ad",
+      "apps/debug/src/renderer/renderer-main.ts:711:711": "f7c8db2a",
       "apps/debug/src/worker/worker-types.ts:248:248": "96af6911",
       "apps/debug/src/renderer/renderer-main.ts:633:633": "55fe7a66",
       "apps/debug/package.json:7:7~2": "3dcf7fcb",
@@ -2987,7 +2988,7 @@
       "apps/viewer/src/core/fly.ts:88:88": "4bd7ed41",
       "apps/viewer/src/core/fly.ts:80:80": "9dc089aa",
       "apps/viewer/src/core/fly.ts:104:104": "6779dd7e",
-      "apps/viewer/src/app.ts:74:74": "1ce1237c",
+      "apps/viewer/src/app.ts:76:76": "4d9aca7a",
       "apps/viewer/src/core/fly.ts:172:172": "8b6526c3",
       "apps/viewer/src/core/fly.ts:203:203~2": "14a73000",
       "apps/viewer/src/core/dom.ts:107:107": "564392c4",
@@ -4001,7 +4002,7 @@
       "apps/viewer/src/app.ts:64:64": "03d9aba6",
       "apps/viewer/src/app.ts:65:65": "4b0a5bfb",
       "apps/viewer/src/app.ts:70:70": "9d8b2b56",
-      "apps/viewer/src/app.ts:74:74": "1ce1237c",
+      "apps/viewer/src/app.ts:74:74": "f2c7153a",
       "apps/viewer/src/app.ts:79:79": "693d7a1b",
       "apps/viewer/src/app.ts:90:90": "29576b54",
       "apps/viewer/src/app.ts:175:175": "a709eb8a",
@@ -4295,6 +4296,38 @@
   },
   "rebaselines": [
     {
+      "path": "documents/viewer/overview.md",
+      "at": "2026-10-09T15:55:07.713Z",
+      "by": "DSH",
+      "reason": "T-454 P3a：三端挂共享位姿入口（apps/debug renderer-main / game renderer-main / viewer app.ts），4 行同号内容变更；顺手修正 2 处陈旧锚点（debug overview 的 PathRecorder/采样槽行、viewer core 的 onLockError 行）",
+      "changed": 1,
+      "total": 132
+    },
+    {
+      "path": "documents/viewer/implementation/core.md",
+      "at": "2026-10-09T15:55:07.713Z",
+      "by": "DSH",
+      "reason": "T-454 P3a：三端挂共享位姿入口（apps/debug renderer-main / game renderer-main / viewer app.ts），4 行同号内容变更；顺手修正 2 处陈旧锚点（debug overview 的 PathRecorder/采样槽行、viewer core 的 onLockError 行）",
+      "changed": 2,
+      "total": 116
+    },
+    {
+      "path": "documents/debug/overview.md",
+      "at": "2026-10-09T15:55:07.713Z",
+      "by": "DSH",
+      "reason": "T-454 P3a：三端挂共享位姿入口（apps/debug renderer-main / game renderer-main / viewer app.ts），4 行同号内容变更；顺手修正 2 处陈旧锚点（debug overview 的 PathRecorder/采样槽行、viewer core 的 onLockError 行）",
+      "changed": 4,
+      "total": 120
+    },
+    {
+      "path": "documents/debug/differences.md",
+      "at": "2026-10-09T15:55:07.713Z",
+      "by": "DSH",
+      "reason": "T-454 P3a：三端挂共享位姿入口（apps/debug renderer-main / game renderer-main / viewer app.ts），4 行同号内容变更；顺手修正 2 处陈旧锚点（debug overview 的 PathRecorder/采样槽行、viewer core 的 onLockError 行）",
+      "changed": 2,
+      "total": 79
+    },
+    {
       "path": "documents/viewer/sequences.md",
       "at": "2026-10-09T15:37:06.972Z",
       "by": "DSH",
@@ -4581,38 +4614,6 @@
       "reason": "T-626 结案",
       "changed": 1,
       "total": 94
-    },
-    {
-      "path": "documents/materials/overview.md",
-      "at": "2026-10-09T10:17:21.597Z",
-      "by": "agent",
-      "reason": "T-626 结案",
-      "changed": 1,
-      "total": 16
-    },
-    {
-      "path": "documents/game/implementation/wasm-crate.md",
-      "at": "2026-10-09T10:17:20.983Z",
-      "by": "agent",
-      "reason": "T-626 结案",
-      "changed": 23,
-      "total": 29
-    },
-    {
-      "path": "documents/debug/overview.md",
-      "at": "2026-10-09T10:17:19.690Z",
-      "by": "agent",
-      "reason": "T-626 结案",
-      "changed": 2,
-      "total": 119
-    },
-    {
-      "path": "documents/debug/implementation/wasm-bindings.md",
-      "at": "2026-10-09T10:17:19.229Z",
-      "by": "agent",
-      "reason": "T-626 结案",
-      "changed": 5,
-      "total": 28
     }
   ]
 }

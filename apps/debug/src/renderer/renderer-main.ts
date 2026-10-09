@@ -21,7 +21,7 @@
  * 渲染采样写入共享内存的口径见本文件内紧随共享内存导入的那段说明。
  */
 
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, yawPitchRadOf } from '../../../../src/renderer-shared/camera/pose-entry.js';
 import * as THREE from 'three';
 import { deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
@@ -187,7 +187,7 @@ export class RendererMain {
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
-  private cameraController: CameraController | null = null;
+  private cameraController: CameraController | null = null; /** 位姿冻结（共享位姿入口写入；每帧相机同步消费，见 `tick`）。 */ poseHold: { x: number; y: number; z: number; yawRad: number; pitchRad: number } | null = null;
   private pvsManager: PvsManager | null = null;
   private teleportManager: { getTriggers(): readonly TeleportTrigger[] } | null = null;
   /** 实体碰撞体列表 = `solids` + `ladders`（`ColliderDebug` 的碰撞箱可视化数据源）。 */
@@ -390,7 +390,7 @@ export class RendererMain {
     this.camera.layers.disable(SKY_LAYER);
     this.skyCamera = createSkyCamera();
 
-    this.cameraController = new CameraController(this.camera, config.input);
+    this.cameraController = new CameraController(this.camera, config.input); installPoseEntry({ applyPose: (p) => { const [yawRad, pitchRad] = yawPitchRadOf(p); this.poseHold = { x: p.pos[0], y: p.pos[1], z: p.pos[2], yawRad, pitchRad }; }, readPose: () => cameraPoseOf(this.camera), releasePose: () => { this.poseHold = null; } }, 'debug');
 
     this.lightManager.applyLights(this.scene, config);
     this.colliderDebug.init(this.scene);
@@ -710,11 +710,11 @@ export class RendererMain {
       // 不传世代：世代槽由 shared-state 在写入时就地读取。
       this.shared.writeRenderSample(now, st.posX, st.posY, st.posZ, this.renderSampleIndex++);
       const cc = this.cameraController;
-      cc.setYawPitch(st.yaw * DEG2RAD, st.pitch * DEG2RAD, false);
+      const hold = this.poseHold; cc.setYawPitch(hold ? hold.yawRad : st.yaw * DEG2RAD, hold ? hold.pitchRad : st.pitch * DEG2RAD, false);
       cc.update();
       // 相机放在眼睛高度（脚底 + eyeHeight），不做任何位置修正
-      const camY = st.posY + st.eyeHeight;
-      cc.setPosition(st.posX, camY, st.posZ);
+      const camY = hold ? hold.y : st.posY + st.eyeHeight;
+      cc.setPosition(hold ? hold.x : st.posX, camY, hold ? hold.z : st.posZ);
 
       // 近平面自适应：隔帧执行一次；noclip 下位置不受碰撞约束，跳过探测
       this.nearCheckToggle = !this.nearCheckToggle;
