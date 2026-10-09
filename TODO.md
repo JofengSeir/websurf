@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（75 条）
+## 未结项（74 条）
 ### 待裁决（1）
 - **T-628** 规范 §2.3 的 `dist/play.cmd` 断言与实现不符（仅 viewer 产出，debug/game 不产出）　`repo`
 
-### 待修（72）
+### 待修（71）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
@@ -98,7 +98,6 @@
 - **T-619** owner 反馈：雪盖疑似消失（未复现，待视点）+ 石头模型偏黑（30 个 rock03 报警疑假阳性）　`shared`
 - **T-624** viewer 无 LOD/PVS 剔除（全量绘制）　`viewer`
 - **T-627** `$bumpmap` 法线贴图未接线（冰面缺凹凸高光细节）　`shared`
-- **T-450** 实体放置模型无烘焙光照（无 `_VBSP_VLIGHT`/`extras.ambientCube`）⇒ 恒 fullbright　`shared`
 - **T-452** `s1_ramp1b` 逐顶点光照条纹（三端数据相同；疑在合并期 + 反条纹档默认关）　`shared`
 - **T-453** 三端呈现/画质档不同源（game 面板档 + 画质；debug 只默认档；viewer 皆无）⇒ 见 T-454 P1（D-108 已决 2026-10-09）　`shared`
 - **T-455** 天空区渲染两模式不确定：同构建、同视点、两次加载会落在两种模式之一（差异全部在天空区）　`shared`
@@ -184,7 +183,7 @@
 | T-609 | 体检 `[O]` 对**终态行**（已记录 / 已结案）的「判据」列按行态保护：改终态行判据须先 approve，未结行改判据不拦 | 工具·流程 | repo | 待修 | src/scripts/docflow.mjs:201 | documents/norms/annotation-and-verification.md | 判据：改一条终态行的判据 ⇒ `node src/scripts/docflow.mjs check` 报「受保护列」；改未结行的判据不报 | — |
 | T-611 | 文档锚点「行号陈旧」体检抓不到 | 缺陷 | 工具 | 待修 | `documents/viewer/implementation/core.md:29`、`documents/viewer/implementation/core.md:31` | documents/norms/annotation-and-verification.md | 判据：先建 `src/scripts/check-doc-anchor-target.mjs`（逐锚点断言「文档所称符号名出现在该行」，不符 exit 1）；负向用例 = **测试时构造**一个陈旧锚点（2026-10-09 的实例 `apps/viewer/src/core/scene.ts:165` 已于 2026-10-10 由 T-454 锚点重钉修好，不能再用）⇒ exit 1，修好后的 `core.md` 全篇 ⇒ exit 0 | — |
 | T-170 | viewer 不导出实体放置模型（`entities` 恒空）⇒ `prop_dynamic` 等实体模型完全不渲染 | 缺陷 | viewer | 已结案 | `apps/viewer/crates/wasm/src/lib.rs:419`；**已结案（2026-10-10）**：T-454 P5-2（`c52eea7`）已接 `entities: model_integrator::collect_model_entities(&bsp)`（`:335`、`:419`），实测 GLB 出现 `buk01.mdl`（boreas）/`cow.mdl`（surf_666），三端一致 | progress/monthly/2026-10-10.md | 判据：GLB 门禁扩到三端后跑 `surf_boreas` ⇒ exit 0 且 viewer 段出现 `buk01.mdl` | 新 |
-| T-450 | 实体放置模型无任何烘焙光照（无 `_VBSP_VLIGHT`、无 `extras.ambientCube`）⇒ 恒 fullbright 贴图原色 | 缺陷 | shared | 待修 | src/wasm-core/model_integrator/mod.rs:1368 | progress/monthly/2026-10-10.md | 判据：探针列「有 mesh 无 `extras.ambientCube`」节点 ⇒ 只剩世界面 `bsp` | 新 |
+| T-450 | 实体放置模型无任何烘焙光照（无 `_VBSP_VLIGHT`、无 `extras.ambientCube`）⇒ 恒 fullbright 贴图原色 | 缺陷 | shared | 已结案 | `src/wasm-core/vbsp/mod.rs:704`（`ambient_cube_at_point`）、`src/wasm-core/model_integrator/mod.rs:1412`（`collect_model_entities` 按实体 origin 查 leaf cube）、`:1245`（实体支路取用）；**已结案（2026-10-10）**：新增 `Bsp::ambient_cube_at_point`（Source 点 → leaf 最近采样，与 `prop_ambient_cube` 共用同一份实现）+ `Entity.ambient_cube` + `parse_origin_source`（不 `map_coords`，否则查错 leaf）；实测探针「无 cube 且含 `.mdl`」**1 → 0**（`buk01.mdl` 进入有 cube 桶），无 cube 的 9 个节点全是世界面 `bsp`；三端 GLB 门禁 exit 0（ambientCube 节点 501 → 502） | 新 |
 | T-451 | 三端 GLB 一致性门禁只覆盖 debug↔game 且只比材质/图片（viewer、图元属性、节点 extras 全盲） | 配置·门禁 | shared | 已结案 | `src/scripts/check-glb-parity.mjs:233-235`；**已结案（2026-10-10）**：门禁已扩到三端（节点名/图元属性键/`extras.ambientCube`/材质逐字段/贴图逐字节），本机实跑 exit 0——120 材质、101 贴图、2634 节点名、6 属性键、501 ambientCube 节点三端全同 | progress/monthly/2026-10-10.md | 判据：`APPS` 含 viewer + 断言节点名/属性键/ambientCube 三项；门禁 exit 0 | 新 |
 | T-452 | `s1_ramp1b` 逐顶点光照条纹（三端导出数据相同；疑点在合并期差异 + 反条纹档 `propVertexFlatten` 默认 0） | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:728（对照 apps/debug/src/renderer/renderer-main.ts:143） | progress/monthly/2026-10-10.md | 判据：同视点三端 × `__vbspPropVertexRelax=0/1` × `__vbspPropVertexFlatten=1` + 转储 ⇒ 条纹消失 | 新 |
 | T-453 | 三端呈现/画质档不同源（game 持久化面板五档 + mosaic 画质；debug 只默认档但有画质档；viewer 两者皆无） | 缺陷 | shared | 待修 | apps/game/src/renderer/renderer-main.ts:218 | progress/monthly/2026-10-10.md | 见 T-454 P1 | 新 |

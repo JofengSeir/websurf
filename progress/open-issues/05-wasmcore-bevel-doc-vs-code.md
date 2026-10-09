@@ -35,7 +35,7 @@
 
 > `brush_side` / `num_brush_sides`：`Bsp.brush_sides` 的区间；**导出层按它取每个 brush 的面与凸包平面**
 
-实测：两张表在 `src/wasm-core/vbsp/mod.rs:492` 解析进内存后，全仓没有任何读取点。
+实测：两张表在 `src/wasm-core/vbsp/mod.rs:496` 解析进内存后，全仓没有任何读取点。
 `Handle` 侧也没有 `Handle<Brush>` 的访问器（`src/wasm-core/vbsp/handle/mod.rs` 只有
 `Model` / `Leaf` / `Face` / `Displacement` 几个 impl）。
 

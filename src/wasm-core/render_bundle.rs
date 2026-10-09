@@ -246,7 +246,7 @@ pub fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> 
                 linear_attn: prop("_linear_attn"),
                 quadratic_attn: prop("_quadratic_attn"),
                 pitch: prop("pitch"),
-            },
+            }, ambient_cube: None, // 灯实体没有模型，不查 leaf ambient cube
         });
     }
     out

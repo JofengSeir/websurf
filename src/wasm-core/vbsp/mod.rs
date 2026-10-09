@@ -47,8 +47,12 @@ pub use crate::vbsp::data::*;
 /// prop ambient cube 的**唯一量级旋钮**：对 `decode_linear_ambient` 的结果统一乘它。
 ///
 /// 当前值 `1.0`，即按 `data/game.rs` 的 `decode_linear_ambient` 原值输出（mantissa × 2^exp，不除 255）。
-/// 读取点只有两处，都在 `prop_ambient_cube` 内：中性灰兜底 `NEUTRAL` 与六个面的写出。
+/// 读取点只有两处，都在 `ambient_cube_at_point` 内：中性灰兜底 `NEUTRAL_AMBIENT` 与六个面的写出。
 pub(crate) const AMBIENT_SCALE: f32 = 1.0;
+
+/// 无 ambient 数据时的中性灰兜底（18 个分量同值）：解码域是 mantissa × 2^exp（不除 255），固定常数
+/// 0.0109 再乘 `AMBIENT_SCALE`，使没有数据的 prop / 实体与有数据的落在同一量级。
+const NEUTRAL_AMBIENT: [f32; 18] = [AMBIENT_SCALE * 0.0109; 18];
 use crate::vbsp::error::ValidationError;
 pub use crate::vbsp::handle::Handle;
 use binrw::io::Cursor;
@@ -656,8 +660,8 @@ impl Bsp {
     /// prop 静态环境光：查该 prop 采样点的 6 面 ambient cube，返回线性 RGB 的 18 个 float
     /// （face 序 `[+X, -X, +Y, -Y, +Z, -Z]`，每面 3 个分量，见 `data/game.rs` 的 `LeafAmbientSample::cube`）。
     ///
-    /// 取值链，任何一步不成立都退回中性灰 `NEUTRAL`：
-    /// - `prop_index` 越界 / 该图没有静态道具 → `NEUTRAL`；
+    /// 取值链，任何一步不成立都退回中性灰 `NEUTRAL_AMBIENT`：
+    /// - `prop_index` 越界 / 该图没有静态道具 → `NEUTRAL_AMBIENT`；
     /// - 查询点：`StaticPropLump::flags` 的 `0x2` 位置位时取 `lighting_origin`，否则取 `origin`；
     ///   直接拿这三个 Source 坐标分量，不做坐标旋转；
     /// - LDR / HDR 组选择按**长度比较**：只有 `leaf_ambient_lighting_hdr.len()` **严格大于**
@@ -671,17 +675,15 @@ impl Bsp {
     /// - 每面 `decode_linear_ambient()`（mantissa × 2^exp，不除 255）后统一乘 `AMBIENT_SCALE`。
     ///
     /// 返回类型是 `Option<[f32; 18]>`，但当前实现**每条路径都返回 `Some`**：
-    /// 全 `NEUTRAL` 的 18 个分量就是"没有 ambient 数据"的表示，`None` 从未被构造。
+    /// 全 `NEUTRAL_AMBIENT` 的 18 个分量就是"没有 ambient 数据"的表示，`None` 从未被构造。
+    /// 查询点定好后委托 [`Self::ambient_cube_at_point`]（实体放置模型也走同一个函数）。
     ///
     /// 索引前提：叶环境光的采样表与区间表都走 `get`，越界只跳过；但树遍历里的
     /// `self.nodes[node_idx]` 与 `self.planes[node.plane_index]` 是**直接下标**，
     /// 依赖 `validate` 已确认节点表非空、且节点引用的平面与子节点都在表内。
     pub fn prop_ambient_cube(&self, prop_index: usize) -> Option<[f32; 18]> {
-        // 中性灰兜底：解码域是 mantissa × 2^exp（不除 255），固定常数 0.0109 再乘 AMBIENT_SCALE，
-        // 使没有 ambient 数据的 prop 与有数据的 prop 落在同一量级；18 个分量取同一个值。
-        const NEUTRAL: [f32; 18] = [AMBIENT_SCALE * 0.0109; 18];
         let Some(prop) = self.static_props.props.props.get(prop_index) else {
-            return Some(NEUTRAL);
+            return Some(NEUTRAL_AMBIENT);
         };
         let use_lighting_origin = (prop.flags.bits() & 0x2) != 0;
         let lo = prop.lighting_origin;
@@ -691,6 +693,15 @@ impl Bsp {
         } else {
             [origin.x, origin.y, origin.z]
         };
+        self.ambient_cube_at_point(p)
+    }
+
+    /// Source 坐标（**不旋转、不做 `map_coords`**）→ 该点所在 leaf 的最近采样 6 面 ambient cube。
+    ///
+    /// 实体放置模型（`prop_dynamic` 等）没有 `sp_<i>.vhv` 烘焙产物，只能按「实体 origin 所在 leaf」取
+    /// 第 2 级光照；与 `prop_ambient_cube` 共用同一段树遍历 / 最近采样 / 解码——HDR-LDR 选取规则、
+    /// `NEUTRAL_AMBIENT` 兜底与 `AMBIENT_SCALE` 口径都只有这一份实现。
+    pub fn ambient_cube_at_point(&self, p: [f32; 3]) -> Option<[f32; 18]> {
         // 组选择：严格更长才用 HDR（长度相等时归 LDR 组）；两组都空由下面的 is_empty 守卫拦下
         let use_hdr = self.leaf_ambient_lighting_hdr.len() > self.leaf_ambient_lighting.len();
         let (indices, samples) = if use_hdr {
@@ -699,7 +710,7 @@ impl Bsp {
             (&self.leaf_ambient_indices, &self.leaf_ambient_lighting)
         };
         if indices.is_empty() || samples.is_empty() {
-            return Some(NEUTRAL);
+            return Some(NEUTRAL_AMBIENT);
         }
         // leaf 定位：与 leaf_at 同一套判定（侧面 >= 0 走 children[0]），差别是这里有 256 次上限
         let mut node_idx: i32 = 0;
@@ -719,16 +730,16 @@ impl Bsp {
         }
         let li = match leaf_idx {
             Some(li) => li,
-            None => return Some(NEUTRAL),
+            None => return Some(NEUTRAL_AMBIENT),
         };
         let Some(index) = indices.get(li) else {
-            return Some(NEUTRAL);
+            return Some(NEUTRAL_AMBIENT);
         };
         if index.ambient_sample_count == 0 {
-            return Some(NEUTRAL);
+            return Some(NEUTRAL_AMBIENT);
         }
         let Some(leaf) = self.leaves.get(li) else {
-            return Some(NEUTRAL);
+            return Some(NEUTRAL_AMBIENT);
         };
         // 最近采样点：样本的 0..255 相对坐标按 leaf bounds 展开成世界位置，比距离平方
         let mut best: Option<(f32, usize)> = None;
@@ -748,10 +759,10 @@ impl Bsp {
             }
         }
         let Some((_, si)) = best else {
-            return Some(NEUTRAL);
+            return Some(NEUTRAL_AMBIENT);
         };
         let Some(s) = samples.get(si) else {
-            return Some(NEUTRAL);
+            return Some(NEUTRAL_AMBIENT);
         };
         let mut out = [0f32; 18];
         for (j, face) in s.cube.iter().enumerate() {

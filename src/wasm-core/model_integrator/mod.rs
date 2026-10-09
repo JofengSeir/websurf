@@ -1111,7 +1111,7 @@ pub struct EntityProperties {
 /// 实体
 #[derive(Debug, Clone, Deserialize)]
 pub struct Entity {
-    pub properties: EntityProperties,
+    pub properties: EntityProperties, #[serde(default)] pub ambient_cube: Option<[f32; 18]>, // 实体 origin 所在 leaf 的 6 面 ambient cube（线性 RGB，face 序 [+X,-X,+Y,-Y,+Z,-Z]）；None = 无数据（渲染端中性灰兜底），见 vbsp::Bsp::ambient_cube_at_point
 }
 
 /// 静态模型
@@ -1242,8 +1242,9 @@ pub fn resolve_placements(
                 .as_ref()
                 .and_then(|s| parse_scale_str(s)),
             solid: None,
-            ambient_cube: None,
-            // 实体来源（prop_dynamic 等）没有 sp_*.vhv（那是 prop_static 的烘焙产物）
+            ambient_cube: entity.ambient_cube,
+            // 实体来源（prop_dynamic 等）没有 sp_*.vhv（那是 prop_static 的烘焙产物）⇒ 只有第 2 级
+            // leaf ambient cube（由 `collect_model_entities` 按实体 origin 查得）
             vertex_lighting: None,
         });
     }
@@ -1299,6 +1300,22 @@ pub fn parse_origin_str(origin: &str) -> Option<[f32; 3]> {
         parts[1].parse::<f32>().ok()?,
         parts[2].parse::<f32>().ok()?,
     ]))
+}
+
+/// 解析 `"x y z"` 形式的 origin 字符串，**保持 Source 坐标**（不 `map_coords`、不旋转）。
+///
+/// 只用于按点查 BSP 的 leaf 数据（如 `vbsp::Bsp::ambient_cube_at_point`）：树遍历与采样点都在 Source
+/// 空间，先 `map_coords` 会查错 leaf。渲染用的坐标一律走 `parse_origin_str`。
+pub fn parse_origin_source(origin: &str) -> Option<[f32; 3]> {
+    let parts: Vec<&str> = origin.split_whitespace().collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some([
+        parts[0].parse::<f32>().ok()?,
+        parts[1].parse::<f32>().ok()?,
+        parts[2].parse::<f32>().ok()?,
+    ])
 }
 
 /// 解析 `"pitch yaw roll"` 字符串为四元数。
@@ -1392,7 +1409,7 @@ pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<Entity> {
                 linear_attn: None,
                 quadratic_attn: None,
                 pitch: None,
-            },
+            }, ambient_cube: prop("origin").and_then(|o| parse_origin_source(&o)).and_then(|p| bsp.ambient_cube_at_point(p)),
         });
     }
     out
