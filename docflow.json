@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-617 第 1 轮结论",
+      "reason": "T-617 第 2 轮",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -198,7 +198,7 @@
         "line": 109
       },
       "T-617": {
-        "p": "3f5953f67d748bfd81905285362441b53e54fb99a54df7de686923f47e54b1fa",
+        "p": "ab300ee488b96c4b051292ff847c7f15f94a57bd228dd65f1b087351134f4ff1",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
         "line": 110
@@ -960,7 +960,7 @@
       "src/renderer-shared/scene/scene-optimizer.ts:421:421~2": "39934fd2",
       "src/wasm-core/vbsp/data/game.rs:21:23": "a122f1c8",
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
-      "apps/game/src/config.ts:221:221": "c40c2a35",
+      "apps/game/src/config.ts:221:221": "c433fb27",
       "apps/game/src/panel/panel-controller.ts:569:569": "e8adcbbe",
       "apps/debug/src/renderer/renderer-main.ts:1514:1514": "d72aa0a5",
       "apps/viewer/src/replay/types.ts:173:173": "a54e2f27",
@@ -2061,8 +2061,8 @@
       "apps/game/src/app.ts:642:642": "cf011a06",
       "apps/game/src/renderer/renderer-main.ts:445:445": "66c9bdd6",
       "apps/game/src/renderer/renderer-main.ts:275:275": "26f9232d",
-      "apps/game/src/config.ts:224:224": "9cec8117",
-      "apps/game/web/index.html:232:232": "5bc15c19",
+      "apps/game/src/config.ts:224:224": "3e9caff3",
+      "apps/game/web/index.html:232:232": "ad5999b0",
       "apps/game/src/config.ts:209:209": "46390aa4",
       "apps/game/web/index.html:225:225": "033381fe",
       "apps/game/src/config.ts:27:27": "aecbd6de",
@@ -2072,7 +2072,7 @@
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
       "apps/game/src/config.ts:222:222": "35609e9c",
       "apps/game/src/panel/panel-controller.ts:452:452": "49ad0a42",
-      "apps/game/web/index.html:232:232~2": "5bc15c19",
+      "apps/game/web/index.html:232:232~2": "ad5999b0",
       "apps/game/src/config.ts:252:252~2": "bb3b0d38",
       "src/ts-shared/auth/worker-dispatch.ts:351:351": "8cdf5c08",
       "apps/game/src/input/input-bridge.ts:65:65": "77b425c5",
@@ -2154,8 +2154,8 @@
       "apps/game/web/index.html:97:97": "0c55f439",
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
       "apps/game/src/panel/panel-controller.ts:471:471": "e3b0c442",
-      "apps/game/web/index.html:232:232": "5bc15c19",
-      "apps/game/src/config.ts:221:221": "c40c2a35",
+      "apps/game/web/index.html:232:232": "ad5999b0",
+      "apps/game/src/config.ts:221:221": "c433fb27",
       "apps/game/src/panel/panel-controller.ts:588:588": "28cb6cf2",
       "apps/game/src/renderer/renderer-main.ts:220:220": "cec26723",
       "apps/game/src/panel/panel-controller.ts:750:750": "01e7caf2",
@@ -4365,6 +4365,30 @@
   },
   "rebaselines": [
     {
+      "path": "documents/game/implementation/panel.md",
+      "at": "2026-10-09T05:40:41.594Z",
+      "by": "agent",
+      "reason": "T-617 第 2 轮",
+      "changed": 2,
+      "total": 27
+    },
+    {
+      "path": "documents/game/implementation/config.md",
+      "at": "2026-10-09T05:40:40.976Z",
+      "by": "agent",
+      "reason": "T-617 第 2 轮",
+      "changed": 3,
+      "total": 50
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-09T05:40:40.570Z",
+      "by": "agent",
+      "reason": "T-617 第 2 轮",
+      "changed": 1,
+      "total": 107
+    },
+    {
       "path": "documents/viewer/differences.md",
       "at": "2026-10-09T05:33:39.022Z",
       "by": "agent",
@@ -4658,30 +4682,6 @@
       "by": "agent",
       "reason": "T-615 收尾复核",
       "changed": 3,
-      "total": 106
-    },
-    {
-      "path": "documents/viewer/implementation/core.md",
-      "at": "2026-10-09T04:21:04.518Z",
-      "by": "agent",
-      "reason": "T-614 复核",
-      "changed": 2,
-      "total": 117
-    },
-    {
-      "path": "documents/game/implementation/renderer.md",
-      "at": "2026-10-09T04:21:03.873Z",
-      "by": "agent",
-      "reason": "T-614 复核",
-      "changed": 2,
-      "total": 46
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T04:21:03.247Z",
-      "by": "agent",
-      "reason": "T-614 收尾复核",
-      "changed": 2,
       "total": 106
     }
   ]

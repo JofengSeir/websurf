@@ -217,12 +217,12 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     quality: 'original',
   },
   lighting: {
-    // 默认取 **SDK 呈现口径**：引擎出帧是 `OverBright2` + 屏幕 gamma（`LinearToScreenGamma`，1/2.2）
-    // 作用在 lightmap 空间的烘焙值上 ⇒ 换算到本仓旋钮 = exposure ≈ 2.3 / lightGamma 2.2。
+    // 默认取 **SDK 呈现口径**：引擎 `(albedo_lin × light_lin) × OverBright2` 之后只做一次屏幕 gamma
+    // （`MathLib_Init(gamma 2.2, overbright 2.0)`）；three 输出端已做那次 sRGB 编码 ⇒ 光照项保持线性（lightGamma 1）。
     // `LIGHTMAP_EXPOSURE_DEFAULT` 1、gamma 1、`ambientScaleUniform` 1、`propVertexRelaxPasses` 1、
     // `propVertexFlattenAmount` 0、`lightingMode` 'baked'。地图自带的整体亮度即烘焙结果（world lightmap
-    exposure: 2.3,
-    lightGamma: 2.2,
+    exposure: 2.0,
+    lightGamma: 1.0,
     ambientScale: 1,
     // 1 = 接缝焊接 + 1 次 Laplacian 松弛；0 = 原样使用烘焙值
     propVertexRelax: 1,
