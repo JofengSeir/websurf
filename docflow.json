@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-612 现状口径",
+      "reason": "T-615 锚点复核",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -185,509 +185,515 @@
         "at": "2026-10-09",
         "line": 106
       },
+      "T-615": {
+        "p": "d4d37e2f90b19581befb08b61085058dea3e6443dd2654fc3d93aa244d46274a",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-09",
+        "line": 107
+      },
       "T-008": {
         "p": "26d198afdec3e0ca421268fdc46eb041e24861d21f46e238fa8947c0ba3cc890",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 111
+        "line": 112
       },
       "T-021": {
         "p": "b7be36a43e7766455e8d096d8fa79e26d01a4eca92c896ffc1209c67627a468d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 112
+        "line": 113
       },
       "T-040": {
         "p": "fc87cd40a60245133b941c8d713f6346c519908467b32d84ee8e1888eb40ea2b",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 113
+        "line": 114
       },
       "T-046": {
         "p": "f30c660edb1fe23a7794308940cfa7314ebea6c0e64decab8358b47a31edee75",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 114
+        "line": 115
       },
       "T-047": {
         "p": "a0292ebae89c613f9312b550672e5137157158022dca220171d8ba8beec2e69b",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 115
+        "line": 116
       },
       "T-053": {
         "p": "ea504b4cd2ec008cd96ca66292a7d84acfe59132a9d33cd91071388705275769",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 116
+        "line": 117
       },
       "T-056": {
         "p": "7cf3d9090ef438b4ad04ee2811b13d841998040d8f43a4e50c57fa4122a48278",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 117
+        "line": 118
       },
       "T-062": {
         "p": "b3b0e33d581b1771b5cc4fa7784b181c9d03d99329cb794f2c2788927109661a",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 118
+        "line": 119
       },
       "T-102": {
         "p": "d399d8223d6417c5c429cbc50104c17718d777937f580a342fc9dc56df72811e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 119
+        "line": 120
       },
       "T-103": {
         "p": "874411149b8cd03744671355a36da9b2074825a262ee5e780226cc59c16fc220",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 120
+        "line": 121
       },
       "T-107": {
         "p": "4afc51445f2b491628691bf1d68ff9811bcb4dad9d01e90e6deab1c447e25748",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 121
+        "line": 122
       },
       "T-109": {
         "p": "7f13360d08124d81d8b9688c1b81e1e19e26e571d556782149ae7f92fc7255bf",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 122
+        "line": 123
       },
       "T-111": {
         "p": "8d82593cf697c69347a96534b3b76b7f41be8ebf0033cb6ff7e87b8a686b8d13",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 123
+        "line": 124
       },
       "T-114": {
         "p": "76fd25b6ae1a6acb2f42ba8272ac71ace736b53bf2baf8c5e1f9aa4605c1fa8e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 124
+        "line": 125
       },
       "T-115": {
         "p": "241d7747e0e0487428389f114653ec1aa2862bea23fb114163d1bef6ee4e312d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 125
+        "line": 126
       },
       "T-116": {
         "p": "779338f99ffb03eda65577c1c231aec92bbc9162460030fccb1fc8d01bf78ef0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 126
+        "line": 127
       },
       "T-117": {
         "p": "237f51378546f2fc79e1db6f3f53adc0343f9580a6ade27b6e84bb8ad89d373f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 127
+        "line": 128
       },
       "T-118": {
         "p": "b2ebcd913924a36156e39f4303992355b9dd331630d28d918c83de33ffe984e6",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 128
+        "line": 129
       },
       "T-125": {
         "p": "b3c3b2ac928a18f5b20fcac5e6475a9a9836acb548d869d08caf5a63b4694da2",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 129
+        "line": 130
       },
       "T-131": {
         "p": "97cca75f88889198095bf46ff3a93c06c017bc66e7f6dc78750ae4657cac22cb",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 130
+        "line": 131
       },
       "T-139": {
         "p": "fa111678811945786dd6f8ba9b1d563099337cb1be9356bcd41443f81c891c5a",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 131
+        "line": 132
       },
       "T-143": {
         "p": "4aafa45c4cf20878f2f7c24c287814c5a0f42bd5fd681ecd78d0023799128200",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 132
+        "line": 133
       },
       "T-145": {
         "p": "68171ae46c978b2071395bc2974499d249c38ae8db7563b4494ae6312b3dcab9",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 133
+        "line": 134
       },
       "T-146": {
         "p": "1e279a7a7057e234abd45e1080674871db69f0d6e05b80468769c678104dcacd",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 134
+        "line": 135
       },
       "T-147": {
         "p": "898a43e69a121c59ac1a9de2599f38b1e342705eab92a8b6d0958c215d7ea429",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 135
+        "line": 136
       },
       "T-148": {
         "p": "e32d48371c3d3b7a42bdc9650c56fe4ce2f1c74c059f995402087702554b13eb",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 136
+        "line": 137
       },
       "T-166": {
         "p": "43a406185993f1c1ec666ea3067cf23680b672e3280d39f3151487fa45dd8a51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 137
+        "line": 138
       },
       "T-167": {
         "p": "46274c9d63b8d47df99a89fe7a608c0e2d373013c89106fa1313770dc5a33446",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 138
+        "line": 139
       },
       "T-203": {
         "p": "d38f41d52c6cdf250fa4b1711e54f3bfae0239aaa1e916b269f6309455a41664",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 139
+        "line": 140
       },
       "T-204": {
         "p": "8ed352a049c8409f94b5c8eb0d7dcf8aa2107a391494bee10f222b0b4cb721d3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 140
+        "line": 141
       },
       "T-206": {
         "p": "4793ba67a47377c028615a3824bad92e70a64e4411bc5ff57d22ab0bbfa4d175",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 141
+        "line": 142
       },
       "T-211": {
         "p": "d35663f956334d9700ff4c98e23a82740abbf6f3302db70eee09d4f757f107b1",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 142
+        "line": 143
       },
       "T-212": {
         "p": "b211fe1b6def7c5b9d3420006c2afe1873a5e1a73d7e4b96f01b78bbb1545029",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 143
+        "line": 144
       },
       "T-213": {
         "p": "f14835f5e67c05785ea1ffad3f77b8b559fcef5631e21a2febd77e74fff41b7e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 144
+        "line": 145
       },
       "T-214": {
         "p": "36e4387b30a359be69ff5a6b7813527116e31caeaf03054cef683eb07f0a3995",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 145
+        "line": 146
       },
       "T-217": {
         "p": "1f1337b18137011c7047f829bc788bebd5559a3a5fc6716aa9281a4aa2319e03",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 146
+        "line": 147
       },
       "T-225": {
         "p": "0f155848ac6c248e6e5a0793505c4291831267d0df894505d04d69db9a73d68e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 147
+        "line": 148
       },
       "T-226": {
         "p": "5a3210904a724721a9a6295cf79181917c307efa4c9d10b32bf6397e5ccf5d4c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 148
+        "line": 149
       },
       "T-227": {
         "p": "7f00464543e63fe62188e1bc8407b6cfa992369d10d4f5810351a430a07b9dcd",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 149
+        "line": 150
       },
       "T-228": {
         "p": "3996ae75af584e7102d051235cf946f684943d5c02160cfc114bc63adce5e7b0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 150
+        "line": 151
       },
       "T-229": {
         "p": "a0db6abbe5db0c2af9196b2b74cece41db34b63da9cfdd72e3b7069e926a1fb4",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 151
+        "line": 152
       },
       "T-230": {
         "p": "bf3a388c0719ee37cfde2b112c5259c0574d36e196ba417b7bb5da5b409e7333",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 152
+        "line": 153
       },
       "T-231": {
         "p": "ea6ec112e4b72fc2bde2115f90d8ae65b54c50e2a749331ba9721f09b6209e07",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 153
+        "line": 154
       },
       "T-232": {
         "p": "efaf29863eb6af112232e00fbe24a97ad4f90e5c4b413f824a0fb5d67259d6aa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 154
+        "line": 155
       },
       "T-233": {
         "p": "d3b893e04f2642b1a005ddc5675342fa3f6fdbb5398e544805a301d18690afbc",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 155
+        "line": 156
       },
       "T-234": {
         "p": "199a67db97df4222d332691b12a2e51253b3a26ded1b9cfd8be109f5d9e4cf54",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 156
+        "line": 157
       },
       "T-235": {
         "p": "5910dae0249314634885c8ef5f6cd2042b00dfb610ce6e4fb30fae93a8212b0c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 157
+        "line": 158
       },
       "T-236": {
         "p": "c314ee955eb46b3e8af6b164ec61bf0dae250a114a3d5e6fed15c2cdfa276b46",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 158
+        "line": 159
       },
       "T-237": {
         "p": "252c164aa17f55f946004937f55a9eeddbf050ded789a3d4cc48b271fa4023d5",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 159
+        "line": 160
       },
       "T-239": {
         "p": "c02f1a4abf45d5e375e7a001d664fbb74ed64aacfbd3c2246d0ef20d11de47da",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 160
+        "line": 161
       },
       "T-306": {
         "p": "6e70aa29280171cfc8cefecd3c625c3d6fbaf1efd9ddb7c263da724c590012ac",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 161
+        "line": 162
       },
       "T-307": {
         "p": "c09929e1f2b79dded79313d42c87f76f9779966c2b3edda7ffdbd2f831bc6751",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 162
+        "line": 163
       },
       "T-308": {
         "p": "30907f1a79153d298eaf5e6a44236bc0c72503c106b354ef7413e9601545017d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 163
+        "line": 164
       },
       "T-312": {
         "p": "aba079a77d850991bf33f93eafe27e51e3b360ff443affee20e1512979e40a35",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 164
+        "line": 165
       },
       "T-313": {
         "p": "0e15baa84fb07cd54573e8583f5d83297947d2b04c454c4ac5e60645a2304cae",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 165
+        "line": 166
       },
       "T-314": {
         "p": "e27449d56336582826058aafbcd04d7b1ab2870d36c48aacb80dcfb467f588b3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 166
+        "line": 167
       },
       "T-315": {
         "p": "ed435381060aa96252c9648dfbedef29a695a1a144fc4bc3bab33c765847f3b3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 167
+        "line": 168
       },
       "T-316": {
         "p": "f9cd2f65fb0ea0439d189ae7b6398770e819e1efecaf4dff80eeb3f9b26207a4",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 168
+        "line": 169
       },
       "T-317": {
         "p": "707502c04076006e6ecad99fd9b465d283bf2d3d82b7b7e5a8032f8326a5797b",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 169
+        "line": 170
       },
       "T-318": {
         "p": "3b573ac174e2c9c9335c55edfac56f02a97bec7e640f5c6e245ebee5c46e2397",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 170
+        "line": 171
       },
       "T-319": {
         "p": "d8308d8982ed1309503c5d1f653fc3393fa350393f8df794412fe275a6b6bb47",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 171
+        "line": 172
       },
       "T-320": {
         "p": "5c0a2668bacc94de7b074a206b508b4e434d332a784ddd59f6fabfe10ce17b96",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 172
+        "line": 173
       },
       "T-322": {
         "p": "40f53562aa59a7430907f5258093a960f6350a1a0a7cd379b12ba8f1f4642302",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 173
+        "line": 174
       },
       "T-323": {
         "p": "020dff84912950875415d3620e08b32103193f85c823caa74cbad7f56df7ebe2",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 174
+        "line": 175
       },
       "T-324": {
         "p": "b91d1ef7bb45bbddd3e133772dcacd9aea00c81876ba756b7f1ac72fe17e1eeb",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 175
+        "line": 176
       },
       "T-402": {
         "p": "d3938652187653fc4243b2276d7a186d75be0d634a7d0895aedc9eb9a6e2202d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 176
+        "line": 177
       },
       "T-403": {
         "p": "6ce6510d53a21df1dd5ed88d215bac59b3b63bd7ae236792d745cfffa8cfb463",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 177
+        "line": 178
       },
       "T-404": {
         "p": "1764015e7886b5cfb00fb02ed37b6731437807af3d00ec81c1d56ca0663621df",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 178
+        "line": 179
       },
       "T-405": {
         "p": "ebcd5df6285b97634f24a82cab9f4c2e9e620de3503f2ab232f296e030d75c0d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 179
+        "line": 180
       },
       "T-406": {
         "p": "0d72de1d6ee165d507cb1b374fb826428c5f744c9c7153ba14f5c38a9d0b198d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 180
+        "line": 181
       },
       "T-407": {
         "p": "d478fc262e0308b84be33bb2bb8c3047c3de8f031ce42bb22594ddc524a5ae91",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 181
+        "line": 182
       },
       "T-408": {
         "p": "d35aee95142ed577f89633eeee4e3bc0f79dd19f985850185b033a1140ba2e45",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 182
+        "line": 183
       },
       "T-409": {
         "p": "dad86a1339e9bbc7983127f4c4328fc362747789649e172cb8aa8181171458d3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 183
+        "line": 184
       },
       "T-433": {
         "p": "f18abddf7520f90195be24c395a837aa42999e55a475552d5916342f393c5dde",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 184
+        "line": 185
       },
       "T-443": {
         "p": "a0373137cc3622c6f89c298a524a4a58b713090b3f203daf05624d6e2bea6693",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 185
+        "line": 186
       },
       "T-441": {
         "p": "bbe56cd331b48595acc3d960d91ef2287c8b8f6291a78eef3491852bd7a3950c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 186
+        "line": 187
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 187
+        "line": 188
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 188
+        "line": 189
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 189
+        "line": 190
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 190
+        "line": 191
       },
       "T-607": {
         "p": "91b52e65e575502bd70609dfd4c8584471d20a3438c97344ecfa3170a096190f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 191
+        "line": 192
       },
       "T-608": {
         "p": "436c6121534947512ecb201f088483251162c1d75c3f42ff188b21d246531af9",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 192
+        "line": 193
       },
       "T-609": {
         "p": "d375b8f8f8e1c2dea3e1bedf5d74b05f8bbe98ef632664d53a3b67e7c0a7d47f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 193
+        "line": 194
       },
       "T-611": {
         "p": "ed0faef7255ef07bb97afb6801ea626fc5984ab4d79f531944ec74d6c19c8005",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 194
+        "line": 195
       }
     },
     "OWNER.md": {
@@ -941,8 +947,8 @@
       "src/renderer-shared/scene/scene-optimizer.ts:421:421": "39934fd2",
       "src/renderer-shared/scene/scene-optimizer.ts:421:421~2": "39934fd2",
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
-      "apps/game/src/config.ts:221:221": "ab1d5de4",
-      "apps/game/src/panel/panel-controller.ts:588:588": "e8adcbbe",
+      "apps/game/src/config.ts:221:221": "35609e9c",
+      "apps/game/src/panel/panel-controller.ts:569:569": "e8adcbbe",
       "apps/debug/src/renderer/renderer-main.ts:1517:1517": "d72aa0a5",
       "apps/viewer/src/replay/types.ts:173:173": "a54e2f27",
       "apps/viewer/src/app.ts:265:265": "29576b54",
@@ -971,7 +977,7 @@
       "apps/viewer/src/replay/importer.ts:43:43": "ce070069",
       "apps/viewer/src/worker/main.ts:15:15": "bf370ba8",
       "apps/viewer/src/app.ts:181:181": "deb1aa65",
-      "apps/game/src/panel/panel-controller.ts:822:822": "46778c7d",
+      "apps/game/src/panel/panel-controller.ts:803:803": "46778c7d",
       "apps/game/src/savepoint.ts:93:93": "4ec7b66c",
       "apps/game/crates/wasm/src/lib.rs:480:480": "2ecce8dc",
       "apps/game/crates/wasm/src/lib.rs:490:490": "beff473b",
@@ -2042,8 +2048,8 @@
       "apps/game/src/app.ts:642:642": "cf011a06",
       "apps/game/src/renderer/renderer-main.ts:448:448": "66c9bdd6",
       "apps/game/src/renderer/renderer-main.ts:275:275": "26f9232d",
-      "apps/game/src/config.ts:228:228": "68bd9d79",
-      "apps/game/web/index.html:231:231": "a9d5a79b",
+      "apps/game/src/config.ts:224:224": "7ad127b6",
+      "apps/game/web/index.html:232:232": "ad5999b0",
       "apps/game/src/config.ts:209:209": "46390aa4",
       "apps/game/web/index.html:225:225": "033381fe",
       "apps/game/src/config.ts:27:27": "aecbd6de",
@@ -2051,9 +2057,9 @@
       "apps/game/src/config.ts:70:70": "8d65c0ef",
       "apps/debug/src/app.ts:1358:1358": "ad4e670d",
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
-      "apps/game/src/config.ts:221:221": "ab1d5de4",
-      "apps/game/src/panel/panel-controller.ts:471:471": "49ad0a42",
-      "apps/game/web/index.html:232:232": "5bc15c19",
+      "apps/game/src/config.ts:224:224~2": "7ad127b6",
+      "apps/game/src/panel/panel-controller.ts:452:452": "49ad0a42",
+      "apps/game/web/index.html:232:232~2": "ad5999b0",
       "apps/game/src/config.ts:252:252~2": "b5a81fad",
       "src/ts-shared/auth/worker-dispatch.ts:351:351": "8cdf5c08",
       "apps/game/src/input/input-bridge.ts:65:65": "77b425c5",
@@ -2126,25 +2132,25 @@
       "apps/game/src/panel/panel-controller.ts:106:106": "dd9bdb63",
       "apps/game/src/panel/panel-controller.ts:262:262": "ca8a3daa",
       "apps/game/src/panel/panel-controller.ts:82:82": "3fdbd5d2",
-      "apps/game/src/panel/panel-controller.ts:651:651": "69a57114",
-      "apps/game/src/panel/panel-controller.ts:606:606": "d2a27498",
+      "apps/game/src/panel/panel-controller.ts:632:632": "69a57114",
+      "apps/game/src/panel/panel-controller.ts:587:587": "d2a27498",
       "apps/game/src/panel/panel-controller.ts:213:213": "ce6c855a",
       "apps/game/src/panel/panel-controller.ts:253:253": "ad3be439",
-      "apps/game/src/panel/panel-controller.ts:451:451": "6e2dbf77",
+      "apps/game/src/panel/panel-controller.ts:451:451": "39cc929a",
       "apps/game/web/index.html:84:84": "20e33867",
       "apps/game/web/index.html:97:97": "0c55f439",
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
-      "apps/game/src/panel/panel-controller.ts:471:471": "49ad0a42",
-      "apps/game/web/index.html:232:232": "5bc15c19",
-      "apps/game/src/config.ts:221:221": "ab1d5de4",
-      "apps/game/src/panel/panel-controller.ts:588:588": "e8adcbbe",
+      "apps/game/src/panel/panel-controller.ts:471:471": "e3b0c442",
+      "apps/game/web/index.html:232:232": "ad5999b0",
+      "apps/game/src/config.ts:221:221": "35609e9c",
+      "apps/game/src/panel/panel-controller.ts:588:588": "28cb6cf2",
       "apps/game/src/renderer/renderer-main.ts:220:220": "cec26723",
-      "apps/game/src/panel/panel-controller.ts:750:750": "5f1d06bb",
-      "apps/game/src/panel/panel-controller.ts:612:612": "fbf92a33",
-      "apps/game/src/panel/panel-controller.ts:561:561": "ae0172b9",
+      "apps/game/src/panel/panel-controller.ts:750:750": "01e7caf2",
+      "apps/game/src/panel/panel-controller.ts:612:612": "24e1e21b",
+      "apps/game/src/panel/panel-controller.ts:561:561": "7748f0fe",
       "apps/game/src/panel/panel-controller.ts:78:78": "30c8d793",
-      "apps/game/src/panel/panel-controller.ts:572:572": "31870b68",
-      "apps/game/src/panel/panel-controller.ts:780:780": "5ede765e",
+      "apps/game/src/panel/panel-controller.ts:572:572": "29576b54",
+      "apps/game/src/panel/panel-controller.ts:780:780": "8beaabe2",
       "apps/game/src/panel/panel-controller.ts:265:265": "c7177b5c",
       "apps/game/src/panel/panel-controller.ts:265:265~2": "c7177b5c"
     },
@@ -2216,12 +2222,12 @@
       "apps/game/src/renderer/renderer-main.ts:678:678": "ff9db35a",
       "apps/game/src/renderer/renderer-main.ts:710:710": "eee30dba",
       "apps/game/src/app.ts:610:610~2": "5c033129",
-      "apps/game/src/panel/panel-controller.ts:790:790": "ec0c170b",
+      "apps/game/src/panel/panel-controller.ts:771:771": "ec0c170b",
       "apps/game/src/savepoint.ts:69:69": "8330a6e1",
       "apps/game/src/savepoint.ts:98:98": "059637b5",
       "apps/game/src/app.ts:502:502": "dcc847e8",
       "apps/game/src/savepoint.ts:51:51": "fbca6ee2",
-      "apps/game/src/panel/panel-controller.ts:822:822": "46778c7d",
+      "apps/game/src/panel/panel-controller.ts:803:803": "46778c7d",
       "apps/game/src/savepoint.ts:93:93": "4ec7b66c",
       "apps/game/src/savepoint.ts:21:21~2": "1503c278",
       "apps/game/src/renderer/renderer-main.ts:703:703": "cf5ab4d6",
@@ -2440,7 +2446,7 @@
       "apps/game/src/app.ts:182:182": "d2cfb6df",
       "apps/game/src/app.ts:642:642": "cf011a06",
       "apps/game/src/app.ts:185:185": "a524df56",
-      "apps/game/src/panel/panel-controller.ts:82:90": "6ad299a7",
+      "apps/game/src/panel/panel-controller.ts:82:90": "f05e2f9e",
       "apps/game/src/app.ts:219:221": "b8e4e89b",
       "apps/game/src/app.ts:80:80": "386a45f8",
       "apps/game/src/app.ts:575:575": "0500ee3b",
@@ -2664,8 +2670,8 @@
       "apps/game/src/worker/main.ts:291:291~2": "de08663b",
       "apps/game/src/savepoint.ts:62:62": "9711ab01",
       "apps/game/src/savepoint.ts:114:114": "cdec8f5a",
-      "apps/game/src/panel/panel-controller.ts:651:651": "69a57114",
-      "apps/game/src/panel/panel-controller.ts:657:657": "d5475744",
+      "apps/game/src/panel/panel-controller.ts:632:632": "69a57114",
+      "apps/game/src/panel/panel-controller.ts:638:638": "d5475744",
       "apps/game/src/input/keymap.ts:56:56": "60f778af",
       "apps/game/src/input/keymap.ts:64:64": "193da8f5"
     },
@@ -2789,7 +2795,7 @@
       "apps/viewer/src/core/constants.ts:37:37": "db6d5e4a",
       "apps/viewer/src/replay/panel.ts:29:29": "5bb5113c",
       "apps/game/src/config.ts:176:176": "f4644f65",
-      "apps/game/src/config.ts:223:223": "9cec8117",
+      "apps/game/src/config.ts:223:223": "8713964a",
       "apps/debug/src/config.ts:187:187": "d39ae4d9",
       "apps/viewer/scripts/build-dist.mjs:47:47": "9231f5b8",
       "apps/viewer/scripts/build-dist.mjs:52:52": "6e4ab169",
@@ -3031,7 +3037,6 @@
       "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "4306aff6",
       "apps/viewer/src/core/scene.ts:75:75": "baa62f39",
       "apps/viewer/src/core/scene.ts:80:80": "0adce390",
-      "apps/game/src/config.ts:228:228": "68bd9d79",
       "apps/viewer/src/core/bsp.ts:88:88": "36716ebe",
       "apps/viewer/src/core/bsp.ts:125:125": "5cbe546e",
       "apps/viewer/src/core/bsp.ts:123:123": "389ff41b",
@@ -4347,6 +4352,102 @@
   },
   "rebaselines": [
     {
+      "path": "documents/game/overview.md",
+      "at": "2026-10-09T04:50:16.393Z",
+      "by": "agent",
+      "reason": "T-615 复核",
+      "changed": 1,
+      "total": 114
+    },
+    {
+      "path": "documents/game/implementation/config.md",
+      "at": "2026-10-09T04:49:48.602Z",
+      "by": "agent",
+      "reason": "T-615 正文复核",
+      "changed": 6,
+      "total": 50
+    },
+    {
+      "path": "documents/viewer/implementation/core.md",
+      "at": "2026-10-09T04:48:10.131Z",
+      "by": "agent",
+      "reason": "T-615 正文复核",
+      "changed": 1,
+      "total": 116
+    },
+    {
+      "path": "documents/viewer/implementation/core.md",
+      "at": "2026-10-09T04:47:30.649Z",
+      "by": "agent",
+      "reason": "T-615 锚点复核",
+      "changed": 1,
+      "total": 117
+    },
+    {
+      "path": "documents/viewer/differences.md",
+      "at": "2026-10-09T04:47:29.967Z",
+      "by": "agent",
+      "reason": "T-615 锚点复核",
+      "changed": 1,
+      "total": 94
+    },
+    {
+      "path": "documents/game/sequences.md",
+      "at": "2026-10-09T04:47:29.314Z",
+      "by": "agent",
+      "reason": "T-615 锚点复核",
+      "changed": 4,
+      "total": 187
+    },
+    {
+      "path": "documents/game/implementation/savepoint.md",
+      "at": "2026-10-09T04:47:28.691Z",
+      "by": "agent",
+      "reason": "T-615 锚点复核",
+      "changed": 4,
+      "total": 31
+    },
+    {
+      "path": "documents/game/implementation/panel.md",
+      "at": "2026-10-09T04:47:28.076Z",
+      "by": "agent",
+      "reason": "T-615 锚点复核",
+      "changed": 24,
+      "total": 27
+    },
+    {
+      "path": "documents/game/implementation/config.md",
+      "at": "2026-10-09T04:47:27.460Z",
+      "by": "agent",
+      "reason": "T-615 锚点复核",
+      "changed": 5,
+      "total": 50
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-09T04:47:26.841Z",
+      "by": "agent",
+      "reason": "T-615 锚点复核",
+      "changed": 5,
+      "total": 106
+    },
+    {
+      "path": "documents/game/implementation/panel.md",
+      "at": "2026-10-09T04:44:45.547Z",
+      "by": "agent",
+      "reason": "T-615 收尾复核",
+      "changed": 23,
+      "total": 27
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-09T04:44:44.856Z",
+      "by": "agent",
+      "reason": "T-615 收尾复核",
+      "changed": 3,
+      "total": 106
+    },
+    {
       "path": "documents/viewer/implementation/core.md",
       "at": "2026-10-09T04:21:04.518Z",
       "by": "agent",
@@ -4569,102 +4670,6 @@
       "reason": "T-107 结案",
       "changed": 4,
       "total": 117
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T01:51:00.470Z",
-      "by": "agent",
-      "reason": "T-107 结案 + 两处缺口标已消除",
-      "changed": 2,
-      "total": 96
-    },
-    {
-      "path": "documents/viewer/implementation/app.md",
-      "at": "2026-10-09T01:44:36.596Z",
-      "by": "agent",
-      "reason": "T-102 结案 + 缺口标已消除",
-      "changed": 3,
-      "total": 90
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T01:44:36.320Z",
-      "by": "agent",
-      "reason": "T-102 结案",
-      "changed": 2,
-      "total": 96
-    },
-    {
-      "path": "documents/viewer/implementation/ui.md",
-      "at": "2026-10-09T01:41:57.754Z",
-      "by": "agent",
-      "reason": "T-143/T-145 结案",
-      "changed": 5,
-      "total": 149
-    },
-    {
-      "path": "documents/viewer/implementation/wasm.md",
-      "at": "2026-10-09T01:41:57.463Z",
-      "by": "agent",
-      "reason": "T-143/T-145 结案",
-      "changed": 2,
-      "total": 79
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T01:41:57.165Z",
-      "by": "agent",
-      "reason": "T-143 + T-145 结案",
-      "changed": 4,
-      "total": 94
-    },
-    {
-      "path": "documents/viewer/implementation/wasm.md",
-      "at": "2026-10-09T01:41:45.878Z",
-      "by": "agent",
-      "reason": "T-145 比对行内容变更",
-      "changed": 2,
-      "total": 79
-    },
-    {
-      "path": "TODO.md",
-      "at": "2026-10-09T01:41:45.599Z",
-      "by": "agent",
-      "reason": "T-145 比对行内容变更",
-      "changed": 1,
-      "total": 94
-    },
-    {
-      "path": "documents/viewer/implementation/wasm.md",
-      "at": "2026-10-09T01:39:37.542Z",
-      "by": "agent",
-      "reason": "lib.rs 三处补行（T-146/T-148）后锚点重编号 + 重钉",
-      "changed": 50,
-      "total": 79
-    },
-    {
-      "path": "documents/viewer/overview.md",
-      "at": "2026-10-09T01:39:37.261Z",
-      "by": "agent",
-      "reason": "lib.rs 三处补行（T-146/T-148）后锚点重编号 + 重钉",
-      "changed": 10,
-      "total": 132
-    },
-    {
-      "path": "documents/viewer/implementation/core.md",
-      "at": "2026-10-09T01:39:36.975Z",
-      "by": "agent",
-      "reason": "lib.rs 三处补行（T-146/T-148）后锚点重编号 + 重钉",
-      "changed": 2,
-      "total": 117
-    },
-    {
-      "path": "documents/viewer/differences.md",
-      "at": "2026-10-09T01:39:36.694Z",
-      "by": "agent",
-      "reason": "lib.rs 三处补行（T-146/T-148）后锚点重编号 + 重钉",
-      "changed": 2,
-      "total": 94
     }
   ]
 }

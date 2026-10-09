@@ -221,12 +221,12 @@ export class RendererMain {
     // 显示侧亮度倍率（接受窗口见本文的 setExposure 包装器）
     setExposure(config.lighting?.exposure ?? 1);
  // 光照项 gamma（shadow-lift）：缺省 0.5；接受窗口是 (0, 8]
-    setLightGamma(config.lighting?.lightGamma ?? 0.5);
+    setLightGamma(config.lighting?.lightGamma ?? 1);
     // prop（模型）烘焙光照亮度：ambient cube 路径的独立档位，不动 world lightmap
-    setAmbientScale(config.lighting?.ambientScale ?? 1.5);
+    setAmbientScale(config.lighting?.ambientScale ?? 1);
     // 第 1 级逐顶点光照的几何重建档位：平滑遍数（0 = 原样使用烘焙值）与方差压缩上限
     setPropVertexRelax(config.lighting?.propVertexRelax ?? 1);
-    setPropVertexFlatten(config.lighting?.propVertexFlatten ?? 0.85);
+    setPropVertexFlatten(config.lighting?.propVertexFlatten ?? 0);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,

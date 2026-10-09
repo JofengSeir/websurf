@@ -21,7 +21,7 @@
  */
 
 import type { RuntimeConfig } from '../config.js';
-import { buildPhysicsParams, LOCKED_TICK_RATE } from '../config.js';
+import { buildPhysicsParams, DEFAULT_CONFIG, LOCKED_TICK_RATE } from '../config.js';
 import type { InputBridge } from '../input/input-bridge.js';
 import type { KeyboardInput } from '../input/keyboard.js';
 import {
@@ -82,7 +82,7 @@ export class PanelController {
     this.loadPanelPrefs();
     this.bindEvents();
     this.bindModuleNav();
-    this.renderKeyList();
+    this.renderKeyList(); this.bindPaneResets();
     // 顺序：loadPanelPrefs 改 config → syncControlsFromConfig 回写控件 → sendAllPrefs 下发两端
     // → applyCrosshair。回写放在 bindEvents 之后，控件显示的是加载后的 config 值。
     this.syncControlsFromConfig();
@@ -375,25 +375,6 @@ export class PanelController {
       this.config.player.duckHeight = v;
       this.sendHull();
     });
-    document.getElementById('hullReset')?.addEventListener('click', () => {
-      this.config.player.halfWidth = 16;
-      this.config.player.standHeight = 72;
-      this.config.player.duckHeight = 54;
-      // 滑块与右侧数值框一起写默认值（#hullReset 不走 bindSlider，两个控件都要手工同步）
-      for (const [id, val] of [
-        ['hullHalfWidth', 16],
-        ['hullStandHeight', 72],
-        ['hullDuckHeight', 54],
-      ] as const) {
-        const range = document.getElementById(id) as HTMLInputElement | null;
-        if (range) range.value = String(val);
-        const num = document.getElementById(`${id}Num`) as HTMLInputElement | null;
-        if (num) num.value = String(val);
-      }
-      this.sendHull();
-      this.savePanelPrefs();
-    });
-
     // 操作：灵敏度（写 config.input.sensitivity；物理参数里的 sensitivity 恒为 1，
     // 真实灵敏度由输入层乘入角度增量）与 Q/E 旋转速度（映射为 yaw_bind_speed）
     this.bindSlider('sensitivity', 0.1, 5.0, 0.01, (v) => {
@@ -825,6 +806,57 @@ export class PanelController {
       row.appendChild(delBtn);
       box.appendChild(row);
     });
+  }
+  /**
+   * 各面板「恢复默认」的目标：段 → 键，值一律取 `DEFAULT_CONFIG`（= 共享层 `lightmap-shader` 的默认值）。
+   * 只列该面板真正可调的键：`view` 面板改的是 `physics.mode`，故 `physics` 段在这里只列 `mode`，
+   * 不会连带重置 `physics` 面板的滑块。没有可调项的面板不注入按钮：按键有自己的「恢复默认键位」
+   * （`resetKeymap`），通用是地图/出生点操作，健康是运行计数。
+   */
+  private static readonly PANE_RESET: Record<string, ReadonlyArray<{ section: 'physics' | 'input' | 'player' | 'hud' | 'texture' | 'lighting'; keys: readonly string[] }>> = {
+    physics: [{ section: 'physics', keys: ['tickRate', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp', 'teleportGateTicks'] }],
+    hull: [{ section: 'player', keys: ['halfWidth', 'standHeight', 'duckHeight'] }],
+    look: [{ section: 'input', keys: ['sensitivity', 'yawBindSpeed'] }],
+    display: [
+      { section: 'hud', keys: ['showCrosshair', 'speedMode', 'fov', 'renderDistance', 'crosshair'] },
+      { section: 'texture', keys: ['quality'] },
+      { section: 'lighting', keys: ['exposure', 'lightGamma', 'ambientScale', 'propVertexRelax', 'propVertexFlatten', 'mode'] },
+    ],
+    view: [{ section: 'physics', keys: ['mode'] }, { section: 'input', keys: ['noclipSpeed'] }],
+  };
+
+  /** 给每个有可调项的面板注入一个「恢复默认」按钮（已有 `[data-reset-pane]` 的不重复注入）。 */
+  private bindPaneResets(): void {
+    this.root.querySelectorAll('.mod-pane').forEach((paneEl) => {
+      const pane = paneEl.getAttribute('data-pane') ?? '';
+      if (!PanelController.PANE_RESET[pane]) return;
+      let btn = paneEl.querySelector<HTMLButtonElement>('[data-reset-pane]');
+      if (!btn) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = '<label></label><button class="small" data-reset-pane type="button">恢复默认</button>';
+        paneEl.appendChild(row);
+        btn = row.querySelector('button');
+      }
+      btn?.addEventListener('click', () => this.resetPane(pane));
+    });
+  }
+
+  /** 把一个面板的可调项写回 `DEFAULT_CONFIG`，然后回写控件、下发两端并持久化。 */
+  private resetPane(pane: string): void {
+    const groups = PanelController.PANE_RESET[pane];
+    if (!groups) return;
+    for (const { section, keys } of groups) {
+      const target = this.config[section] as unknown as Record<string, unknown>;
+      const defaults = DEFAULT_CONFIG[section] as unknown as Record<string, unknown>;
+      for (const key of keys) target[key] = structuredClone(defaults[key]);
+    }
+    // 与构造函数同序：回写控件 → 侧效应（准星 CSS / 纹理画质）→ 下发两端 → 持久化
+    this.syncControlsFromConfig();
+    this.applyCrosshair();
+    this.onTextureQualityChange?.(this.config.texture.quality);
+    this.sendAllPrefs();
+    this.savePanelPrefs();
   }
 }
 

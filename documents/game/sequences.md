@@ -124,5 +124,5 @@ Worker → 主线程：
 | 权威发布停滞或渲染采样停滞 | 各只告警一次，直到版本号 / 序号重新前进才复位 | `apps/game/src/worker/main.ts:432`、`apps/game/src/worker/main.ts:445` |
 | 渲染采样配对跨世代或陈旧 | `rtServeEpochOk` 复检失败即丢弃配对、本 tick 不投影，回退权威自身位置 | `apps/game/src/worker/main.ts:273`、`apps/game/src/worker/main.ts:291` |
 | 存点读写 localStorage 失败 | 读失败打 `console.error` 并清空内存列表；写失败打 `console.error` 且不影响内存列表 | `apps/game/src/savepoint.ts:62`、`apps/game/src/savepoint.ts:114` |
-| 面板偏好版本不匹配 | 不合并存档内容，以当前 config（默认值）写回新版本档 | `apps/game/src/panel/panel-controller.ts:651`、`apps/game/src/panel/panel-controller.ts:657` |
+| 面板偏好版本不匹配 | 不合并存档内容，以当前 config（默认值）写回新版本档 | `apps/game/src/panel/panel-controller.ts:632`、`apps/game/src/panel/panel-controller.ts:638` |
 | 键位持久化读失败 | 回落到默认表的深拷贝（逐动作合并，允许空数组即禁用该动作） | `apps/game/src/input/keymap.ts:56`、`apps/game/src/input/keymap.ts:64` |

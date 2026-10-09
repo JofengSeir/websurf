@@ -217,16 +217,16 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     quality: 'original',
   },
   lighting: {
-    // 默认取「被照亮的面 ≈ 贴图原色」的显示档：曝光 × pow(luxel, 1/γ) ≈ 1。
- // lightGamma 的接受窗口是 (0, 8]（见字段注释），2.2 生效
-    // ⇒ `setLightGamma` 忽略本次写入、共享 uniform 保持其自身初值。
-    exposure: 2.3,
-    lightGamma: 2.2,
+    // 默认取**共享层（`src/renderer-shared/shader/lightmap-shader.ts`）自己的初值**，不叠加项目自调档：
+    // `LIGHTMAP_EXPOSURE_DEFAULT` 1、gamma 1、`ambientScaleUniform` 1、`propVertexRelaxPasses` 1、
+    // `propVertexFlattenAmount` 0、`lightingMode` 'baked'。地图自带的整体亮度即烘焙结果（world lightmap
+    exposure: 1,
+    lightGamma: 1,
     ambientScale: 1,
     // 1 = 接缝焊接 + 1 次 Laplacian 松弛；0 = 原样使用烘焙值
     propVertexRelax: 1,
-    // 0.85 = 压掉大部分方差、保留少量结构；1 = 完全压平到 prop 均值
-    propVertexFlatten: 0.85,
+    // 0 = 原样使用烘焙值；0.85 = 压掉大部分方差（项目自调档，需要时再开）
+    propVertexFlatten: 0,
     // 预烘焙；纯纹理由面板切换
     mode: 'baked',
   },
