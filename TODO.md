@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（85 条）
+## 未结项（84 条）
 ### 待裁决（0）
 
 
-### 待修（83）
+### 待修（82）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
@@ -115,14 +115,13 @@
 
 
 - **T-611** 文档锚点「行号陈旧」体检抓不到：docflow 钉的是「该行当前内容」而非「文档所称符号所在行」，故行号已指错、只要内容稳定就永远绿灯（2026-10-09 实测：`documents/viewer/implementation/core.md` 的 `apps/viewer/src/core/scene.ts:184` 实际指向 `this.pvs = …` 而非 `mountGlb`，体检仍全绿；同篇另有 8 处行号整体偏离 5–15 行）　`owner`
-- **T-612** Viewer 侧仍有 262 次 `mergeGeometries` 合并失败（T-503 的健壮化只接在 debug）　`shared`
 ### 已取证待立项（2）
 - **T-109** 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正　`viewer`
 - **T-115** untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查　`viewer`
 
 > 已记录 / 已结案 **93 条已分卷**到 `progress/board/archive-2026-10.md`（ID 与状态保留；编号不复用，取新号时连同该页一起数）。
 
-| T-612 | Viewer 侧仍有 262 次 `mergeGeometries` 合并失败（T-503 的健壮化只接在 debug） | 缺陷 | shared | 待修 | **新登记（2026-10-09，冒烟实测）**：`apps/viewer` 冒烟 `[12b]` 段报 **262 次** `THREE.BufferGeometryUtils: .mergeAttributes() failed. BufferAttribute.gpuType must be consistent across matching attributes.`，导致该检查 FAIL。已结案的 T-503 做过「按属性签名切子组再合并」的健壮化，但其归一钩子 `normalizeMergeGroup` 是**debug 特有**（`documents/debug/implementation/renderer.md:90` 明写「debug 特有健壮化，game/viewer 不传钩子」）⇒ viewer 侧合并仍整体失败、只能回退成「保留各自独立几何」（不丢几何但合批静默失效、控制台刷屏）。 | progress/pending-detail.md | `cd apps/viewer && SMOKE_URL="http://127.0.0.1:8100/web/index.html" npm run local:smoke` ⇒ `[12b]` 的 `mergeGeometries error` 计数为 **0**（现状 262）；修法候选：把 `normalizeMergeGroup` 从 debug 提升到共享层并在 viewer 也接上，或让 `scene-optimizer` 内建按 `gpuType` 切子组 | 新 |
+| T-612 | Viewer 侧仍有 262 次 `mergeGeometries` 合并失败（T-503 的健壮化只接在 debug） | 缺陷 | shared | 已结案 | **已结案（2026-10-09，冒烟实测）**：**根因** = 共享层的合并签名漏了 `gpuType`——`src/renderer-shared/scene/scene-optimizer.ts:495` 的 `mergeSignature` 只拼 `name:itemSize:ctor:normalized`（+ indexed 位），而 `mergeGeometries` 还要求 `gpuType` 一致，故同一子组里混着不同 `gpuType` 的属性时整批返回 null 并打印 `BufferAttribute.gpuType must be consistent across matching attributes`。debug 侧因为传了 `normalizeMergeGroup` 钩子（把各属性重建为统一缓冲）而掩盖了这个问题，**game/viewer 不传钩子** ⇒ 整批合批静默失效。**修法** = 把 `gpuType` 补进签名（`src/renderer-shared/scene/scene-optimizer.ts:495`，**同一行内追加**，1:1 零锚点漂移），并同步改写签名注释（说明触发面 ①缺 normal ②gpuType 不同）。**验证**：重建 viewer bundle 后复跑冒烟 ⇒ `[12b] BSP 页面无未捕获异常 / 非 mergeGeometries error` **ok**、262 次报错归零；冒烟失败数 **5 → 4 → 3**（另两条是断言随 UI 演进失效，同批修掉） | progress/pending-detail.md | `cd apps/viewer && SMOKE_URL="http://127.0.0.1:8100/web/index.html" npm run local:smoke` ⇒ `[12b] BSP 页面无未捕获异常 / 非 mergeGeometries error` 为 **ok**（改前 FAIL、含 262 次计数）；`git grep -n "gpuType" -- src/renderer-shared/scene/scene-optimizer.ts` ⇒ `mergeSignature` 的属性段含 `gpuType` | 新 |
 ## 总表（84 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |

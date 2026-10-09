@@ -483,16 +483,18 @@ export function optimizeScene(
 
 /**
  * 几何的「合并签名」：`mergeGeometries` 要求同一批几何的**属性名集合、itemSize、类型、
- * normalized** 与**是否 indexed** 全一致，否则整批返回 null。本仓的实际触发面是「世界面没有
- * `normal`（材质是 MeshBasic、导出侧不写）而 prop 有」⇒ 同一 cell / 同一材质里混着两类几何时
- * 合批静默失效（T-503）。
+ * normalized、`gpuType`** 与**是否 indexed** 全一致，否则整批返回 null（`gpuType` 那一路的
+ * 报错文本是 `BufferAttribute.gpuType must be consistent across matching attributes`）。
+ * 本仓的实际触发面有两类：①「世界面没有 `normal`（材质是 MeshBasic、导出侧不写）而 prop 有」
+ * （T-503）；② 同名属性但 `gpuType` 不同（如 Float32 与半浮点）——签名漏了 `gpuType`，导致
+ * **未接 `normalizeGroup` 钩子的 game/viewer 侧**整批合批静默失效（T-612，viewer 冒烟实测 262 次）。
  */
 function mergeSignature(g: THREE.BufferGeometry): string {
 	const parts: string[] = [];
 	for (const name of Object.keys(g.attributes).sort()) {
 		const a = g.attributes[name] as THREE.BufferAttribute;
 		const ctor = (a.array as unknown as { constructor?: { name?: string } }).constructor;
-		parts.push(`${name}:${a.itemSize}:${ctor?.name ?? '?'}:${a.normalized ? 1 : 0}`);
+		parts.push(`${name}:${a.itemSize}:${ctor?.name ?? '?'}:${a.normalized ? 1 : 0}:${(a as unknown as { gpuType?: number }).gpuType ?? 0}`);
 	}
 	return (g.index ? 'idx|' : 'raw|') + parts.join(',');
 }

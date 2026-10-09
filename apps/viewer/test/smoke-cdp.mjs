@@ -528,7 +528,7 @@ try {
   const rows2 = await waitRows(sessionId, 2);
   check('轨迹列表变成 2 行', rows2 === 2, `rows=${rows2}`);
   const colors = await evaluate(
-    "Array.from(document.querySelectorAll('#pane-replay .track-dot')).map(e => e.style.background)",
+    "Array.from(document.querySelectorAll('#pane-replay .track-color')).map(e => e.value)",
     sessionId,
   );
   check('两条轨迹配色不同', colors.length === 2 && colors[0] !== colors[1], JSON.stringify(colors));

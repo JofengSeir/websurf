@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "分卷：已结案行移入 progress/board/archive-2026-10.md",
+      "reason": "T-612 证据里的裸锚点补全路径",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -171,511 +171,511 @@
         "p": "9db67f7ef8a41db3fcedbd65ad8a8cef2fb0ae23942e8c00a104cba01eb0528c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 125
+        "line": 124
       },
       "T-008": {
         "p": "26d198afdec3e0ca421268fdc46eb041e24861d21f46e238fa8947c0ba3cc890",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 130
+        "line": 129
       },
       "T-021": {
         "p": "b7be36a43e7766455e8d096d8fa79e26d01a4eca92c896ffc1209c67627a468d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 131
+        "line": 130
       },
       "T-040": {
         "p": "fc87cd40a60245133b941c8d713f6346c519908467b32d84ee8e1888eb40ea2b",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 132
+        "line": 131
       },
       "T-046": {
         "p": "f30c660edb1fe23a7794308940cfa7314ebea6c0e64decab8358b47a31edee75",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 133
+        "line": 132
       },
       "T-047": {
         "p": "a0292ebae89c613f9312b550672e5137157158022dca220171d8ba8beec2e69b",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 134
+        "line": 133
       },
       "T-053": {
         "p": "ea504b4cd2ec008cd96ca66292a7d84acfe59132a9d33cd91071388705275769",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 135
+        "line": 134
       },
       "T-056": {
         "p": "7cf3d9090ef438b4ad04ee2811b13d841998040d8f43a4e50c57fa4122a48278",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 136
+        "line": 135
       },
       "T-062": {
         "p": "b3b0e33d581b1771b5cc4fa7784b181c9d03d99329cb794f2c2788927109661a",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 137
+        "line": 136
       },
       "T-102": {
         "p": "d399d8223d6417c5c429cbc50104c17718d777937f580a342fc9dc56df72811e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 138
+        "line": 137
       },
       "T-103": {
         "p": "874411149b8cd03744671355a36da9b2074825a262ee5e780226cc59c16fc220",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 139
+        "line": 138
       },
       "T-107": {
         "p": "4afc51445f2b491628691bf1d68ff9811bcb4dad9d01e90e6deab1c447e25748",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 140
+        "line": 139
       },
       "T-109": {
         "p": "7f13360d08124d81d8b9688c1b81e1e19e26e571d556782149ae7f92fc7255bf",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 141
+        "line": 140
       },
       "T-111": {
         "p": "8d82593cf697c69347a96534b3b76b7f41be8ebf0033cb6ff7e87b8a686b8d13",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 142
+        "line": 141
       },
       "T-114": {
         "p": "76fd25b6ae1a6acb2f42ba8272ac71ace736b53bf2baf8c5e1f9aa4605c1fa8e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 143
+        "line": 142
       },
       "T-115": {
         "p": "241d7747e0e0487428389f114653ec1aa2862bea23fb114163d1bef6ee4e312d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 144
+        "line": 143
       },
       "T-116": {
         "p": "779338f99ffb03eda65577c1c231aec92bbc9162460030fccb1fc8d01bf78ef0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 145
+        "line": 144
       },
       "T-117": {
         "p": "237f51378546f2fc79e1db6f3f53adc0343f9580a6ade27b6e84bb8ad89d373f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 146
+        "line": 145
       },
       "T-118": {
         "p": "f53a54a4124277ec48747a11bd6f6c4bbbae961636a46855b5ae55572a31ef2f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 147
+        "line": 146
       },
       "T-125": {
         "p": "b3c3b2ac928a18f5b20fcac5e6475a9a9836acb548d869d08caf5a63b4694da2",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 148
+        "line": 147
       },
       "T-131": {
         "p": "97cca75f88889198095bf46ff3a93c06c017bc66e7f6dc78750ae4657cac22cb",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 149
+        "line": 148
       },
       "T-139": {
         "p": "fa111678811945786dd6f8ba9b1d563099337cb1be9356bcd41443f81c891c5a",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 150
+        "line": 149
       },
       "T-143": {
         "p": "4aafa45c4cf20878f2f7c24c287814c5a0f42bd5fd681ecd78d0023799128200",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 151
+        "line": 150
       },
       "T-145": {
         "p": "68171ae46c978b2071395bc2974499d249c38ae8db7563b4494ae6312b3dcab9",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 152
+        "line": 151
       },
       "T-146": {
         "p": "1e279a7a7057e234abd45e1080674871db69f0d6e05b80468769c678104dcacd",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 153
+        "line": 152
       },
       "T-147": {
         "p": "898a43e69a121c59ac1a9de2599f38b1e342705eab92a8b6d0958c215d7ea429",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 154
+        "line": 153
       },
       "T-148": {
         "p": "e32d48371c3d3b7a42bdc9650c56fe4ce2f1c74c059f995402087702554b13eb",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 155
+        "line": 154
       },
       "T-166": {
         "p": "43a406185993f1c1ec666ea3067cf23680b672e3280d39f3151487fa45dd8a51",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 156
+        "line": 155
       },
       "T-167": {
         "p": "a33bb5ffa6e068e29f0d8272e348fb611d43891965bda1280a04beb65c7e7b5a",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 157
+        "line": 156
       },
       "T-203": {
         "p": "d38f41d52c6cdf250fa4b1711e54f3bfae0239aaa1e916b269f6309455a41664",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 158
+        "line": 157
       },
       "T-204": {
         "p": "8ed352a049c8409f94b5c8eb0d7dcf8aa2107a391494bee10f222b0b4cb721d3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 159
+        "line": 158
       },
       "T-206": {
         "p": "4793ba67a47377c028615a3824bad92e70a64e4411bc5ff57d22ab0bbfa4d175",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 160
+        "line": 159
       },
       "T-211": {
         "p": "d35663f956334d9700ff4c98e23a82740abbf6f3302db70eee09d4f757f107b1",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 161
+        "line": 160
       },
       "T-212": {
         "p": "b211fe1b6def7c5b9d3420006c2afe1873a5e1a73d7e4b96f01b78bbb1545029",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 162
+        "line": 161
       },
       "T-213": {
         "p": "f14835f5e67c05785ea1ffad3f77b8b559fcef5631e21a2febd77e74fff41b7e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 163
+        "line": 162
       },
       "T-214": {
         "p": "36e4387b30a359be69ff5a6b7813527116e31caeaf03054cef683eb07f0a3995",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 164
+        "line": 163
       },
       "T-217": {
         "p": "1f1337b18137011c7047f829bc788bebd5559a3a5fc6716aa9281a4aa2319e03",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 165
+        "line": 164
       },
       "T-225": {
         "p": "0f155848ac6c248e6e5a0793505c4291831267d0df894505d04d69db9a73d68e",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 166
+        "line": 165
       },
       "T-226": {
         "p": "5a3210904a724721a9a6295cf79181917c307efa4c9d10b32bf6397e5ccf5d4c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 167
+        "line": 166
       },
       "T-227": {
         "p": "7f00464543e63fe62188e1bc8407b6cfa992369d10d4f5810351a430a07b9dcd",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 168
+        "line": 167
       },
       "T-228": {
         "p": "3996ae75af584e7102d051235cf946f684943d5c02160cfc114bc63adce5e7b0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 169
+        "line": 168
       },
       "T-229": {
         "p": "a0db6abbe5db0c2af9196b2b74cece41db34b63da9cfdd72e3b7069e926a1fb4",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 170
+        "line": 169
       },
       "T-230": {
         "p": "bf3a388c0719ee37cfde2b112c5259c0574d36e196ba417b7bb5da5b409e7333",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 171
+        "line": 170
       },
       "T-231": {
         "p": "ea6ec112e4b72fc2bde2115f90d8ae65b54c50e2a749331ba9721f09b6209e07",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 172
+        "line": 171
       },
       "T-232": {
         "p": "efaf29863eb6af112232e00fbe24a97ad4f90e5c4b413f824a0fb5d67259d6aa",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 173
+        "line": 172
       },
       "T-233": {
         "p": "d3b893e04f2642b1a005ddc5675342fa3f6fdbb5398e544805a301d18690afbc",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 174
+        "line": 173
       },
       "T-234": {
         "p": "199a67db97df4222d332691b12a2e51253b3a26ded1b9cfd8be109f5d9e4cf54",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 175
+        "line": 174
       },
       "T-235": {
         "p": "5910dae0249314634885c8ef5f6cd2042b00dfb610ce6e4fb30fae93a8212b0c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 176
+        "line": 175
       },
       "T-236": {
         "p": "c314ee955eb46b3e8af6b164ec61bf0dae250a114a3d5e6fed15c2cdfa276b46",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 177
+        "line": 176
       },
       "T-237": {
         "p": "252c164aa17f55f946004937f55a9eeddbf050ded789a3d4cc48b271fa4023d5",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 178
+        "line": 177
       },
       "T-239": {
         "p": "c02f1a4abf45d5e375e7a001d664fbb74ed64aacfbd3c2246d0ef20d11de47da",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 179
+        "line": 178
       },
       "T-306": {
         "p": "6e70aa29280171cfc8cefecd3c625c3d6fbaf1efd9ddb7c263da724c590012ac",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 180
+        "line": 179
       },
       "T-307": {
         "p": "c09929e1f2b79dded79313d42c87f76f9779966c2b3edda7ffdbd2f831bc6751",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 181
+        "line": 180
       },
       "T-308": {
         "p": "30907f1a79153d298eaf5e6a44236bc0c72503c106b354ef7413e9601545017d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 182
+        "line": 181
       },
       "T-312": {
         "p": "aba079a77d850991bf33f93eafe27e51e3b360ff443affee20e1512979e40a35",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 183
+        "line": 182
       },
       "T-313": {
         "p": "0e15baa84fb07cd54573e8583f5d83297947d2b04c454c4ac5e60645a2304cae",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 184
+        "line": 183
       },
       "T-314": {
         "p": "e27449d56336582826058aafbcd04d7b1ab2870d36c48aacb80dcfb467f588b3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 185
+        "line": 184
       },
       "T-315": {
         "p": "ed435381060aa96252c9648dfbedef29a695a1a144fc4bc3bab33c765847f3b3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 186
+        "line": 185
       },
       "T-316": {
         "p": "f9cd2f65fb0ea0439d189ae7b6398770e819e1efecaf4dff80eeb3f9b26207a4",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 187
+        "line": 186
       },
       "T-317": {
         "p": "707502c04076006e6ecad99fd9b465d283bf2d3d82b7b7e5a8032f8326a5797b",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 188
+        "line": 187
       },
       "T-318": {
         "p": "3b573ac174e2c9c9335c55edfac56f02a97bec7e640f5c6e245ebee5c46e2397",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 189
+        "line": 188
       },
       "T-319": {
         "p": "d8308d8982ed1309503c5d1f653fc3393fa350393f8df794412fe275a6b6bb47",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 190
+        "line": 189
       },
       "T-320": {
         "p": "5c0a2668bacc94de7b074a206b508b4e434d332a784ddd59f6fabfe10ce17b96",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 191
+        "line": 190
       },
       "T-322": {
         "p": "40f53562aa59a7430907f5258093a960f6350a1a0a7cd379b12ba8f1f4642302",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 192
+        "line": 191
       },
       "T-323": {
         "p": "020dff84912950875415d3620e08b32103193f85c823caa74cbad7f56df7ebe2",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 193
+        "line": 192
       },
       "T-324": {
         "p": "b91d1ef7bb45bbddd3e133772dcacd9aea00c81876ba756b7f1ac72fe17e1eeb",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 194
+        "line": 193
       },
       "T-402": {
         "p": "d3938652187653fc4243b2276d7a186d75be0d634a7d0895aedc9eb9a6e2202d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 195
+        "line": 194
       },
       "T-403": {
         "p": "6ce6510d53a21df1dd5ed88d215bac59b3b63bd7ae236792d745cfffa8cfb463",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 196
+        "line": 195
       },
       "T-404": {
         "p": "1764015e7886b5cfb00fb02ed37b6731437807af3d00ec81c1d56ca0663621df",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 197
+        "line": 196
       },
       "T-405": {
         "p": "ebcd5df6285b97634f24a82cab9f4c2e9e620de3503f2ab232f296e030d75c0d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 198
+        "line": 197
       },
       "T-406": {
         "p": "0d72de1d6ee165d507cb1b374fb826428c5f744c9c7153ba14f5c38a9d0b198d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 199
+        "line": 198
       },
       "T-407": {
         "p": "d478fc262e0308b84be33bb2bb8c3047c3de8f031ce42bb22594ddc524a5ae91",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 200
+        "line": 199
       },
       "T-408": {
         "p": "d35aee95142ed577f89633eeee4e3bc0f79dd19f985850185b033a1140ba2e45",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 201
+        "line": 200
       },
       "T-409": {
         "p": "dad86a1339e9bbc7983127f4c4328fc362747789649e172cb8aa8181171458d3",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 202
+        "line": 201
       },
       "T-433": {
         "p": "f18abddf7520f90195be24c395a837aa42999e55a475552d5916342f393c5dde",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 203
+        "line": 202
       },
       "T-443": {
         "p": "a0373137cc3622c6f89c298a524a4a58b713090b3f203daf05624d6e2bea6693",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 204
+        "line": 203
       },
       "T-441": {
         "p": "bbe56cd331b48595acc3d960d91ef2287c8b8f6291a78eef3491852bd7a3950c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 205
+        "line": 204
       },
       "T-601": {
         "p": "2d9113d675d9920ee815754eeea2abae110db4be0599705a5a99fa04e3f338f7",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 206
+        "line": 205
       },
       "T-602": {
         "p": "6fcf33fca2c686961745fe7bcd18f3d40b78ba29f9bbb0141271959a291eb053",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 207
+        "line": 206
       },
       "T-603": {
         "p": "659f7ea3cd4bb55f428dd9ede66b45b940f82d4fbd324af9c94f625948b6f2d0",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 208
+        "line": 207
       },
       "T-604": {
         "p": "1bf31806af260c4e18969af448828883c4b3c4b1c471b62af92fd883afa9893d",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-07",
-        "line": 209
+        "line": 208
       },
       "T-607": {
         "p": "91b52e65e575502bd70609dfd4c8584471d20a3438c97344ecfa3170a096190f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 210
+        "line": 209
       },
       "T-608": {
         "p": "436c6121534947512ecb201f088483251162c1d75c3f42ff188b21d246531af9",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 211
+        "line": 210
       },
       "T-609": {
         "p": "d375b8f8f8e1c2dea3e1bedf5d74b05f8bbe98ef632664d53a3b67e7c0a7d47f",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-08",
-        "line": 212
+        "line": 211
       },
       "T-611": {
         "p": "ed0faef7255ef07bb97afb6801ea626fc5984ab4d79f531944ec74d6c19c8005",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
-        "line": 213
+        "line": 212
       }
     },
     "OWNER.md": {
@@ -920,7 +920,8 @@
     },
     "TODO.md": {
       "apps/viewer/src/core/scene.ts:184:184": "55fe664e",
-      "documents/debug/implementation/renderer.md:90:90": "3810bda3",
+      "src/renderer-shared/scene/scene-optimizer.ts:495:495": "94dd25f0",
+      "src/renderer-shared/scene/scene-optimizer.ts:495:495~2": "94dd25f0",
       "apps/viewer/src/replay/demo/tables.ts:253:253": "3e02442e",
       "apps/viewer/test/smoke-cdp.mjs:138:138": "2820f71e",
       "documents/viewer/implementation/core.md:29:29": "2dd9b28f",
@@ -4335,6 +4336,22 @@
   },
   "rebaselines": [
     {
+      "path": "TODO.md",
+      "at": "2026-10-09T01:33:15.495Z",
+      "by": "agent",
+      "reason": "T-612 证据里的裸锚点补全路径",
+      "changed": 2,
+      "total": 92
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-09T01:33:02.683Z",
+      "by": "agent",
+      "reason": "T-612 结案",
+      "changed": 3,
+      "total": 92
+    },
+    {
       "path": "documents/viewer/implementation/scripts-and-test.md",
       "at": "2026-10-09T01:29:02.960Z",
       "by": "agent",
@@ -4637,22 +4654,6 @@
       "reason": "T-156/161/162 结案 + lightmap-shader 删 5 导出后锚点平移",
       "changed": 2,
       "total": 120
-    },
-    {
-      "path": "documents/viewer/implementation/app.md",
-      "at": "2026-10-09T00:15:25.408Z",
-      "by": "agent",
-      "reason": "T-156/161/162 结案 + lightmap-shader 删 5 导出后锚点平移",
-      "changed": 3,
-      "total": 97
-    },
-    {
-      "path": "documents/game/implementation/renderer.md",
-      "at": "2026-10-09T00:15:25.130Z",
-      "by": "agent",
-      "reason": "T-156/161/162 结案 + lightmap-shader 删 5 导出后锚点平移",
-      "changed": 20,
-      "total": 51
     }
   ]
 }
