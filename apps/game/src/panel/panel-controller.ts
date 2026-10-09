@@ -580,12 +580,12 @@ export class PanelController {
       onInput(v);
       this.savePanelPrefs(); // 落盘偏好
     });
-    // 数值框输入：解析 → 钳到 [min, max] → 回写滑块与 config（数值框自身文本不改写）
+    // 数值框输入：解析 → 钳到 [min, max] → 回写滑块、数值框自身文本与 config（T-021）
     if (num) {
       num.addEventListener('input', () => {
         const v = parseFloat(num.value);
         if (!Number.isFinite(v)) return;
-        el.value = String(Math.min(max, Math.max(min, v)));
+        el.value = String(Math.min(max, Math.max(min, v))); num.value = el.value;
         onInput(Math.min(max, Math.max(min, v)));
         this.savePanelPrefs();
       });
@@ -781,7 +781,6 @@ export class PanelController {
     el.querySelectorAll('.ch-line').forEach((line) => {
       line.classList.toggle('outline', c.outline);
     });
-    const dot = el.querySelector('.ch-dot') as HTMLElement | null;
     el.classList.toggle('no-dot', !c.dot);
   }
 

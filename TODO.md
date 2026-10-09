@@ -26,13 +26,12 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（74 条）
+## 未结项（73 条）
 ### 待裁决（0）
 
 
-### 待修（72）
+### 待修（71）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
-- **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
@@ -117,7 +116,7 @@
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
 | T-008 | apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new … | 配置·门禁 | game | 待修 | apps/game/scripts/check-wasm-api.mjs:52-70 | progress/pending-detail.md | 判据：跑 @BT@node apps/game/scripts/check-wasm-api.mjs@BT@ ⇒ exit 0，且 PHYS_API 列出的项 ≥ crates/wasm 实际导出数（不再缺 @BT@new@BT@ 等） | #9 |
-| T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 待修 | apps/game/src/panel/panel-controller.ts:583 | documents/game/implementation/panel.md | 判据：数值框回写自身文本；`dot` 死变量清掉（`git grep -n "dot" -- apps/game/src/panel/panel-controller.ts` 无声明未用） | #50 |
+| T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 已结案 | **已结案（2026-10-09）——四条子项逐条落地/核销**：① **γ 量程 vs 接受窗口**与② **默认 2.2 被忽略**：早已由 2026-10-08 的改动解决（接受窗口改为 `(0, 8]`，`src/renderer-shared/shader/lightmap-shader.ts:1774`；面板量程 0.5..6 落在窗口内；`apps/game/src/config.ts:221` 注明「2.2 生效」）——这正是**文档里已标「已消除 2026-10-08」而看板行没关**的那类遗留。③ **数值框不回写自身文本**：本轮修掉（`apps/game/src/panel/panel-controller.ts:588` 在钳制后同时回写滑块与数值框，**同行 1:1**；`:583` 的注释同步）。④ **`applyCrosshair` 死变量**：本轮删除那个「查询 `.ch-dot` 却不使用」的局部声明（净 −1 行；该文件的 40 处文档锚点全部指向 :784 之前 ⇒ **零重编号**）。**验证**：`cd apps/game && npm run typecheck` ⇒ **exit 0**；**行为复核（CDP 探针，真浏览器）**：往 `#lightGammaNum` 输入越界值 99 ⇒ 该框与滑块**同时**显示 **6**（修复前该框停在 99）。**踩坑记录**：第一次探针读数仍是 99——因为 8090 服务的是 `web/app.js` **旧 bundle**，`npm run build:app` 之后才 PASS（与 `[P]/[S]` 里记过的是同一个坑） | documents/game/implementation/panel.md | `cd apps/game && npm run typecheck` ⇒ exit 0；CDP 探针（`.tmp/t021/probe.mjs`，不入库：headless Edge + `Runtime.evaluate` 往 `#lightGammaNum` 派发 input）⇒ 输入越界值 99 后该框与 `#lightGamma` **同时**显示钳制值 6（修复前该框停在 99）；`git grep -n "num.value = el.value" -- apps/game/src/panel/panel-controller.ts` ⇒ 1 处（回写点） | #50 |
 | T-040 | debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g… | 缺陷 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:1517 | progress/pending-detail.md | 判据：@BT@git grep -n "worker-b" apps/debug/src apps/game/src@BT@ ⇒ 两处措辞一致，或都改为不带外部实现引用的写法 | #71 |
 | T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | 未接线·死代码 | debug | 待修 | apps/debug/src/renderer/renderer-main.ts:486 | progress/pending-detail.md | 判据：@BT@getLightingMode@BT@ 清点调用点（@BT@apps/debug/src/renderer/renderer-main.ts:486@BT@ 疑有一处）⇒ 真零调用则删，否则结案并改状态 | #78 |
 | T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | 未接线·死代码 | debug | 待修 | apps/game/src/app.ts:170 | progress/pending-detail.md | 判据：@BT@git grep -n "resetTo\ | \.stop(" -- src apps@BT@ ⇒ 无外部调用点则删；有则接线并补调用 | #79 |
