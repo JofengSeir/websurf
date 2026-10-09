@@ -1305,6 +1305,7 @@ function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.Mes
 	// `alphaTest > 0` 时 three 需要 `transparent` 与材质的 alphaTest 语义配合：
 	// glTF 的 MASK 材质是 `transparent=false` + `alphaTest=cutoff`（GLTFLoader 的赋值形态），
 	// 这里保持原样即可（three 对 alphaTest 的处理与 transparent 独立）。
+	registerInjectedMaterial(dst);
 	applyReflectionEnvMap(dst, src);
 }
 
@@ -1963,8 +1964,10 @@ function applyReflectionEnvMap(dst: THREE.Material, src: THREE.Material): void {
 	const m = dst as THREE.MeshBasicMaterial;
 	if (!reflectionEnvMap) return;
 	m.envMap = reflectionEnvMap as THREE.CubeTexture;
-	m.combine = THREE.MixOperation;
-	m.reflectivity = Math.max(0, Math.min(1, tint));
+	// Source 的 $envmap 是**叠加**在漫反射之上的反射高光（非混入），强度按 tint 缩放后仍须保守：
+	// MixOperation + 0.66 会把整个材质混成天空色（实测 879 个材质一起变惨白）。
+	m.combine = THREE.AddOperation;
+	m.reflectivity = Math.max(0, Math.min(0.5, tint * 0.35));
 	(globalThis as { __vbspEnvMapApplied?: number }).__vbspEnvMapApplied =
 		((globalThis as { __vbspEnvMapApplied?: number }).__vbspEnvMapApplied ?? 0) + 1;
 }

@@ -103,7 +103,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-626 进度",
+      "reason": "T-626 第7轮",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -111,7 +111,7 @@
     {
       "path": "documents/norms/annotation-and-verification.md",
       "by": "owner",
-      "reason": "T-626 进度",
+      "reason": "T-626 第7轮",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -119,7 +119,7 @@
     {
       "path": "documents/norms/local-path-hygiene.md",
       "by": "owner",
-      "reason": "T-626 进度",
+      "reason": "T-626 第7轮",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -127,7 +127,7 @@
     {
       "path": "documents/norms/scripts-and-ci.md",
       "by": "owner",
-      "reason": "T-626 进度",
+      "reason": "T-626 第7轮",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -135,7 +135,7 @@
     {
       "path": "README.md",
       "by": "owner",
-      "reason": "T-626 进度",
+      "reason": "T-626 第7轮",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -1021,7 +1021,7 @@
       "apps/game/src/renderer/renderer-main.ts:311:311": "b0cd2fe6",
       "apps/viewer/src/core/scene.ts:207:207": "9858df21",
       "src/wasm-core/model_integrator/mod.rs:435:435": "6f9a9aa5",
-      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "b1e6be42",
+      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "a0fc1387",
       "apps/game/src/config.ts:221:221": "504410cd",
       "apps/game/src/panel/panel-controller.ts:569:569": "e8adcbbe",
       "apps/debug/src/renderer/renderer-main.ts:1514:1514": "bfc6ad1f",
@@ -1091,7 +1091,7 @@
       "src/ts-shared/input/mouse-buffer.ts:81:81": "4201b8dd",
       "apps/game/src/renderer/renderer-main.ts:130:130": "f7df527e",
       "src/ts-shared/phys/authority-calibrator.ts:735:735": "763038fe",
-      "src/renderer-shared/shader/lightmap-shader.ts:1742:1742": "d10b36aa",
+      "src/renderer-shared/shader/lightmap-shader.ts:1742:1742": "1ab0dc40",
       "apps/game/src/app.ts:610:610": "5c033129",
       "apps/game/src/savepoint.ts:69:69": "8330a6e1",
       "apps/game/src/savepoint.ts:98:98": "059637b5",
@@ -1099,7 +1099,7 @@
       "apps/game/src/renderer/renderer-main.ts:42:42": "1b1bf99d",
       "apps/game/crates/wasm/src/lib.rs:577:577": "ad08d75a",
       "src/ts-shared/auth/worker-dispatch.ts:265:265": "452333e2",
-      "src/renderer-shared/shader/lightmap-shader.ts:1539:1539": "493236ab",
+      "src/renderer-shared/shader/lightmap-shader.ts:1539:1539": "684888c0",
       "apps/debug/package.json:7:7": "3dcf7fcb",
       "apps/debug/tsconfig.json:19:19": "dc6bb3d4",
       "apps/debug/src/input/input-recorder.ts:772:772": "9f94ca1e",
@@ -1497,8 +1497,8 @@
       "src/ts-shared/auth/auth-loop.ts:431:431": "dccb28f7",
       "apps/debug/src/renderer/path-recorder.ts:647:647": "47beec80",
       "apps/debug/src/renderer/renderer-main.ts:657:657": "e3b0c442",
-      "src/renderer-shared/shader/lightmap-shader.ts:1735:1735": "d10b36aa",
-      "src/renderer-shared/shader/lightmap-shader.ts:1539:1539": "493236ab",
+      "src/renderer-shared/shader/lightmap-shader.ts:1735:1735": "abb07067",
+      "src/renderer-shared/shader/lightmap-shader.ts:1539:1539": "684888c0",
       "apps/debug/src/renderer/renderer-main.ts:719:719": "f0f36f53",
       "apps/debug/src/renderer/renderer-main.ts:503:503": "00ce5f1e",
       "src/wasm-core/vbsp/data/game.rs:21:23": "a122f1c8"
@@ -2133,7 +2133,7 @@
       "src/ts-shared/auth/worker-dispatch.ts:385:385": "e3e3f859",
       "apps/game/src/config.ts:70:70": "339438a8",
       "apps/debug/src/app.ts:1358:1358": "ad4e670d",
-      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "b1e6be42",
+      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "a0fc1387",
       "apps/game/src/config.ts:222:222": "c433fb27",
       "apps/game/src/panel/panel-controller.ts:452:452": "49ad0a42",
       "apps/game/web/index.html:232:232~2": "ad5999b0",
@@ -2216,7 +2216,7 @@
       "apps/game/src/panel/panel-controller.ts:451:451": "39cc929a",
       "apps/game/web/index.html:84:84": "20e33867",
       "apps/game/web/index.html:97:97": "0c55f439",
-      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "b1e6be42",
+      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "a0fc1387",
       "apps/game/src/panel/panel-controller.ts:471:471": "e3b0c442",
       "apps/game/web/index.html:232:232": "ad5999b0",
       "apps/game/src/config.ts:221:221": "504410cd",
@@ -2270,8 +2270,8 @@
       "src/ts-shared/phys/authority-calibrator.ts:735:735": "763038fe",
       "src/ts-shared/phys/authority-calibrator.ts:776:776": "9ac948b6",
       "src/ts-shared/phys/authority-calibrator.ts:743:743": "60ea817a",
-      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "b1e6be42",
-      "src/renderer-shared/shader/lightmap-shader.ts:1742:1742": "d10b36aa",
+      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "a0fc1387",
+      "src/renderer-shared/shader/lightmap-shader.ts:1742:1742": "1ab0dc40",
       "apps/game/src/renderer/renderer-main.ts:49:49": "70698999",
       "src/renderer-shared/scene/scene-optimizer.ts:263:263": "c22e7871",
       "src/renderer-shared/shader/lightmap-shader.ts:464:464": "ad50e74a",
@@ -3111,7 +3111,7 @@
       "apps/viewer/src/core/constants.ts:34:34~2": "d05f5b71",
       "apps/viewer/src/core/fly.ts:203:203": "14a73000",
       "apps/viewer/src/core/scene.ts:76:76": "2777e0fd",
-      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "b1e6be42",
+      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "a0fc1387",
       "apps/viewer/src/core/scene.ts:75:75": "e3b0c442",
       "apps/viewer/src/core/scene.ts:80:80": "9c12f25c",
       "apps/viewer/src/core/bsp.ts:88:88": "36716ebe",
@@ -3353,16 +3353,16 @@
       "src/renderer-shared/shader/lightmap-shader.ts:437:437": "295354fc",
       "src/renderer-shared/shader/lightmap-shader.ts:472:472": "407f5b81",
       "src/renderer-shared/shader/lightmap-shader.ts:1057:1057": "08214d34",
-      "src/renderer-shared/shader/lightmap-shader.ts:1664:1664": "c2f9b8c4",
-      "src/renderer-shared/shader/lightmap-shader.ts:1676:1676": "e3b0c442",
-      "src/renderer-shared/shader/lightmap-shader.ts:1681:1681": "73ae255c",
-      "src/renderer-shared/shader/lightmap-shader.ts:1695:1695": "d10b36aa",
-      "src/renderer-shared/shader/lightmap-shader.ts:1700:1700": "d10b36aa",
-      "src/renderer-shared/shader/lightmap-shader.ts:1742:1742": "d10b36aa",
-      "src/renderer-shared/shader/lightmap-shader.ts:1773:1773": "a0fc1387",
-      "src/renderer-shared/shader/lightmap-shader.ts:1780:1780": "c7ba590d",
-      "src/renderer-shared/shader/lightmap-shader.ts:1792:1792": "7dfe95fd",
-      "src/renderer-shared/shader/lightmap-shader.ts:1809:1809": "e3b0c442",
+      "src/renderer-shared/shader/lightmap-shader.ts:1664:1664": "07d1717a",
+      "src/renderer-shared/shader/lightmap-shader.ts:1676:1676": "df3982fd",
+      "src/renderer-shared/shader/lightmap-shader.ts:1681:1681": "ed962336",
+      "src/renderer-shared/shader/lightmap-shader.ts:1695:1695": "78d0da96",
+      "src/renderer-shared/shader/lightmap-shader.ts:1700:1700": "d186cbb5",
+      "src/renderer-shared/shader/lightmap-shader.ts:1742:1742": "1ab0dc40",
+      "src/renderer-shared/shader/lightmap-shader.ts:1773:1773": "9fa68ae6",
+      "src/renderer-shared/shader/lightmap-shader.ts:1780:1780": "94633bb0",
+      "src/renderer-shared/shader/lightmap-shader.ts:1792:1792": "e14d0e86",
+      "src/renderer-shared/shader/lightmap-shader.ts:1809:1809": "d10b36aa",
       "src/renderer-shared/shader/lightmap-shader.ts:264:264": "9ca5c7bd",
       "src/renderer-shared/shader/lightmap-shader.ts:255:255~2": "c8002f1d",
       "src/renderer-shared/shader/lightmap-shader.ts:261:261": "d10b36aa",
@@ -3373,8 +3373,8 @@
       "src/renderer-shared/shader/lightmap-shader.ts:129:129": "c4bea582",
       "src/renderer-shared/shader/lightmap-shader.ts:135:135": "b392b2af",
       "src/renderer-shared/shader/lightmap-shader.ts:1220:1220": "9b1b5cca",
-      "src/renderer-shared/shader/lightmap-shader.ts:1334:1334": "79463edb",
-      "src/renderer-shared/shader/lightmap-shader.ts:1441:1441": "be281046",
+      "src/renderer-shared/shader/lightmap-shader.ts:1334:1334": "e801dc24",
+      "src/renderer-shared/shader/lightmap-shader.ts:1441:1441": "d7762171",
       "src/renderer-shared/shader/lightmap-shader.ts:428:428": "539890dc",
       "src/renderer-shared/shader/lightmap-shader.ts:433:433": "ae4622f0",
       "src/renderer-shared/shader/lightmap-shader.ts:121:121": "cdc8a8a1",
@@ -3398,15 +3398,15 @@
       "src/renderer-shared/shader/lightmap-shader.ts:685:685": "2e9f0b05",
       "src/renderer-shared/shader/lightmap-shader.ts:568:568": "48766b0c",
       "src/renderer-shared/shader/lightmap-shader.ts:570:570": "07c32b67",
-      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "b1e6be42",
-      "src/renderer-shared/shader/lightmap-shader.ts:1793:1793": "e826f767",
-      "src/renderer-shared/shader/lightmap-shader.ts:1810:1810": "474b1b0d",
-      "src/renderer-shared/shader/lightmap-shader.ts:1677:1677": "8d64a30d",
-      "src/renderer-shared/shader/lightmap-shader.ts:1696:1696": "e3b0c442",
-      "src/renderer-shared/shader/lightmap-shader.ts:1775:1775": "d10b36aa",
-      "src/renderer-shared/shader/lightmap-shader.ts:1797:1797": "e3b0c442",
-      "src/renderer-shared/shader/lightmap-shader.ts:1811:1811": "c2f8d7e7",
-      "src/renderer-shared/shader/lightmap-shader.ts:1715:1715": "735e227b",
+      "src/renderer-shared/shader/lightmap-shader.ts:1774:1774": "a0fc1387",
+      "src/renderer-shared/shader/lightmap-shader.ts:1793:1793": "7dfe95fd",
+      "src/renderer-shared/shader/lightmap-shader.ts:1810:1810": "e3b0c442",
+      "src/renderer-shared/shader/lightmap-shader.ts:1677:1677": "e3b0c442",
+      "src/renderer-shared/shader/lightmap-shader.ts:1696:1696": "d10b36aa",
+      "src/renderer-shared/shader/lightmap-shader.ts:1775:1775": "b1e6be42",
+      "src/renderer-shared/shader/lightmap-shader.ts:1797:1797": "d10b36aa",
+      "src/renderer-shared/shader/lightmap-shader.ts:1811:1811": "474b1b0d",
+      "src/renderer-shared/shader/lightmap-shader.ts:1715:1715": "cfbe52c5",
       "src/renderer-shared/shader/lightmap-shader.ts:1166:1166": "e3b0c442",
       "src/renderer-shared/shader/lightmap-shader.ts:1193:1193": "a4bb2550",
       "src/renderer-shared/shader/lightmap-shader.ts:1205:1205": "5ebe46e6",
@@ -4430,6 +4430,62 @@
   "rebaselines": [
     {
       "path": "documents/viewer/implementation/renderer.md",
+      "at": "2026-10-09T10:08:06.326Z",
+      "by": "agent",
+      "reason": "T-626 第7轮",
+      "changed": 21,
+      "total": 87
+    },
+    {
+      "path": "documents/viewer/implementation/core.md",
+      "at": "2026-10-09T10:08:06.077Z",
+      "by": "agent",
+      "reason": "T-626 第7轮",
+      "changed": 1,
+      "total": 116
+    },
+    {
+      "path": "documents/game/implementation/renderer.md",
+      "at": "2026-10-09T10:08:03.413Z",
+      "by": "agent",
+      "reason": "T-626 第7轮",
+      "changed": 2,
+      "total": 46
+    },
+    {
+      "path": "documents/game/implementation/panel.md",
+      "at": "2026-10-09T10:08:03.265Z",
+      "by": "agent",
+      "reason": "T-626 第7轮",
+      "changed": 1,
+      "total": 27
+    },
+    {
+      "path": "documents/game/implementation/config.md",
+      "at": "2026-10-09T10:08:03.007Z",
+      "by": "agent",
+      "reason": "T-626 第7轮",
+      "changed": 1,
+      "total": 50
+    },
+    {
+      "path": "documents/debug/implementation/renderer.md",
+      "at": "2026-10-09T10:08:01.786Z",
+      "by": "agent",
+      "reason": "T-626 第7轮",
+      "changed": 2,
+      "total": 108
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-09T10:08:00.833Z",
+      "by": "agent",
+      "reason": "T-626 第7轮",
+      "changed": 3,
+      "total": 115
+    },
+    {
+      "path": "documents/viewer/implementation/renderer.md",
       "at": "2026-10-09T10:02:15.211Z",
       "by": "agent",
       "reason": "T-626 进度",
@@ -4691,62 +4747,6 @@
       "reason": "T-622 锚点复核",
       "changed": 7,
       "total": 114
-    },
-    {
-      "path": "documents/game/implementation/types.md",
-      "at": "2026-10-09T08:02:42.061Z",
-      "by": "agent",
-      "reason": "T-622 锚点复核",
-      "changed": 1,
-      "total": 14
-    },
-    {
-      "path": "documents/game/implementation/savepoint.md",
-      "at": "2026-10-09T08:02:41.827Z",
-      "by": "agent",
-      "reason": "T-622 锚点复核",
-      "changed": 3,
-      "total": 31
-    },
-    {
-      "path": "documents/game/implementation/renderer.md",
-      "at": "2026-10-09T08:02:41.713Z",
-      "by": "agent",
-      "reason": "T-622 锚点复核",
-      "changed": 7,
-      "total": 46
-    },
-    {
-      "path": "documents/game/implementation/config.md",
-      "at": "2026-10-09T08:02:41.349Z",
-      "by": "agent",
-      "reason": "T-622 锚点复核",
-      "changed": 1,
-      "total": 50
-    },
-    {
-      "path": "documents/game/differences.md",
-      "at": "2026-10-09T08:02:41.124Z",
-      "by": "agent",
-      "reason": "T-622 锚点复核",
-      "changed": 2,
-      "total": 73
-    },
-    {
-      "path": "documents/debug/differences.md",
-      "at": "2026-10-09T08:02:39.768Z",
-      "by": "agent",
-      "reason": "T-622 锚点复核",
-      "changed": 1,
-      "total": 78
-    },
-    {
-      "path": "documents/debug/implementation/renderer.md",
-      "at": "2026-10-09T08:02:39.356Z",
-      "by": "agent",
-      "reason": "T-622 结案",
-      "changed": 1,
-      "total": 108
     }
   ]
 }
