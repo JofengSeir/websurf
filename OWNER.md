@@ -19,7 +19,7 @@
 
 | 编号 | 决定 | 优先级 | 我的建议 | 不决定的后果 |
 |---|---|---|---|---|
-| D-023 | **T-433 的目视验收**：prop 光照已按 D-016 改成「vhv 逐顶点烘焙 + leaf ambient cube **相加**」（`src/renderer-shared/shader/lightmap-shader.ts`，cube 项按顶点烘成 `_VBSP_VCUBE` 属性以保住第 1 级共享材质）。代码侧已验证：注入后片元是 `(direct + indirect) * vbspExposure`、顶点属性逐面与片元同式（探针见 `progress/monthly/2026-10-7.md`）。**判据的「黑像素占比 4.94% → 0.00%」需要浏览器渲染，本机没有** ⇒ 请你在 debug / game 里加载 `surf_666` 看一眼：黑块 / 紫斑是否消失、props 是否过亮。 | P2 | 若过亮：我调 `PROP_CUBE_GAIN`（`window.__vbspPropCubeGain` 可免重建 A/B），或改成「仅当 vhv 近零时才用 cube 兜底」。 | T-433 停在「阻塞」等这一眼 |
+| D-023 | **T-433 的目视验收**：prop 光照已按 D-016 改成「vhv 逐顶点烘焙 + leaf ambient cube **相加**」（`src/renderer-shared/shader/lightmap-shader.ts`，cube 项按顶点烘成 `_VBSP_VCUBE` 属性以保住第 1 级共享材质）。代码侧已验证：注入后片元是 `(direct + indirect) * vbspExposure`、顶点属性逐面与片元同式（探针见 `progress/monthly/2026-10-7.md`）。**判据的「黑像素占比 4.94% → 0.00%」需要浏览器渲染，本机没有** ⇒ 请你在 debug / game 里加载 `surf_666` 看一眼：黑块 / 紫斑是否消失、props 是否过亮。 | P2 | 本机**其实有浏览器**（`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe` + CDP + SwiftShader WebGL）⇒ 我用探针实跑了你自己不用跑：`surf_666`（79 MB）在 headless Edge 里 **约 10 秒**加载完成；关掉「缺失纹理」弹窗后，**默认视点（spawn 0）纯黑像素 0.00%**（原判据写 4.94%）、截图里**无黑块 / 无紫斑**、亮度区间 18~214。**但玩家出生点 20 / 40 / 60 / 80 / 100 的画面仍有 21~29% 纯黑**（截图下半部整片黑 + 白色碰撞线框）——**我无法判定那是「无几何的虚空背景」还是「未受光的几何」**。截图在 `.tmp/t433/`（`shot.png`、`spawn-20.png`、`spawn-60.png` …）。⇒ 请你只需看这些图回答两件事：① 那 21~29% 的黑是虚空还是黑块（若是虚空 ⇒ T-433 可结；若是黑块 ⇒ 是新的真缺陷）；② props 是否过亮。 **若确认过亮**：我调 `PROP_CUBE_GAIN`（`window.__vbspPropCubeGain` 可免重建 A/B），或改成「仅当 vhv 近零时才用 cube 兜底」——这条原建议保留。 | T-433 停在「阻塞」等这一眼 |  |
 
 ## 已决（留痕，不占注意力）
 

@@ -125,17 +125,17 @@
       "consumed": true
     },
     {
-      "path": "OWNER.md",
+      "path": "TODO.md",
       "by": "owner",
-      "reason": "D-024 已按推荐执行",
+      "reason": "T-055 两项 CDP 实测修复后结案",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
     },
     {
-      "path": "TODO.md",
+      "path": "OWNER.md",
       "by": "owner",
-      "reason": "T-055 两项 CDP 实测修复后结案",
+      "reason": "D-023 格式修正 + 补回原建议",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
