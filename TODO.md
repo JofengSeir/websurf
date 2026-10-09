@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07、2026-10-09 各触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **172**；game **240**；debug **325**；shared **455**；取证项 **508**；跨区/文档治理 **629**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **172**；game **240**；debug **325**；shared **456**；取证项 **508**；跨区/文档治理 **629**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（74 条）
+## 未结项（75 条）
 ### 待裁决（1）
 - **T-628** 规范 §2.3 的 `dist/play.cmd` 断言与实现不符（仅 viewer 产出，debug/game 不产出）　`repo`
 
-### 待修（71）
+### 待修（72）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
@@ -101,6 +101,7 @@
 - **T-450** 实体放置模型无烘焙光照（无 `_VBSP_VLIGHT`/`extras.ambientCube`）⇒ 恒 fullbright　`shared`
 - **T-452** `s1_ramp1b` 逐顶点光照条纹（三端数据相同；疑在合并期 + 反条纹档默认关）　`shared`
 - **T-453** 三端呈现/画质档不同源（game 面板档 + 画质；debug 只默认档；viewer 皆无）⇒ 见 T-454 P1（D-108 已决 2026-10-09）　`shared`
+- **T-455** 天空区渲染两模式不确定：同构建、同视点、两次加载会落在两种模式之一（差异全部在天空区）　`shared`
 - **T-454** 渲染链三端统一（任务书见详情；除 debug 调试绘制外全部收敛到共享层）　`shared`
 - **T-171** viewer multi 产物随包 `coi-serviceworker.js` 但页面从不加载（SW 永不注册、静态托管拿不到 crossOriginIsolated）　`viewer`
 - **T-629** 三端 `dev.cmd` 的端口检查是死分支：`if errorlevel 1 goto :start_server` 紧接 `:start_server`　`repo`
@@ -114,7 +115,7 @@
 | T-619 | owner 反馈两项：雪盖疑似消失（未复现，待视点）+ 石头模型偏黑（30 个 rock03 报警疑假阳性） | 缺陷 | shared | 待修 | **待修（2026-10-09 登记，owner 反馈「雪盖消失 / 石头模型有点黑」）**。**① 雪盖**：在 game 同一次加载内做双档 A/B（默认 `exposure 2.0 / lightGamma 1.0` vs 旧档 `2.3 / 2.2`，同视点、隐藏面板）：全帧均值 178.6 → 199.5、**上 40%（天空+雪）两档逐像素相同（均值 204.3 / 近白 49.9%）**、差异只在下 60% 的暗部（161.6 → 196.3）⇒ 雪**在位且亮部无变化**，当前视点复现不出「消失」；控制台 `[world-transition] 双贴图地形混合：登记贴图 1 张，注入材质 359 个` 证明雪混合链路在工作。**待 owner 给视点/出生点**才能定位是哪个区域。**② 石头偏黑**：控制台 `[vertex-lighting] 真漏网=30`，逐名打印后全部是 **`rock03_giantmdl#4/#5/#6/#15/#18…@rock03`**（`MeshBasicMaterial｜hl=undefined｜cb=0｜uv1=0`）；新增的 `fullbright 路由分诊` 显示 `带 vlight 且已注入=173 / 无 vlight=928 / unlit=1182`（合计 2283 = 全部 fullbright 图元）⇒ **这 30 个不在任何一桶**，是在装配/几何合并后从兄弟图元**继承**了 `_VBSP_VLIGHT` 属性而材质仍是 fullbright ⇒ 该报警**疑为统计假阳性**（口径需收窄到「无注入记录 且 该 mesh 自己的材质不是 fullbright 材质」）。巨石变黑的**真因尚未钉死**：候选是 `.vhv` 的 per-mesh 附着/strip 重排在该模型上部分失败，或 fullbright+cube 兜底本身偏暗。**③** 另需注意：`lightGamma 1.0` 使 prop 项的指数由 `^1` 变 `^(2.2/g)=^2.2`（把 lightmap 空间的 `.vhv` 还原成线性，SDK 口径正确），这本身会让岩石比旧档更暗。 | progress/pending-detail.md | ① 雪：owner 给出视点（出生点名或坐标）后，同视点与旧档 A/B ⇒ 该区域雪面亮度两档差 ≤ 5% 即判「雪未丢」，否则定位该区域的混合权重/材质；② 石头：`rock03_giantmdl` 在 `.vhv` 侧的依附检查 —— 导出该 prop 的 `sp_<i>.vhv` 的 mesh 数与模型 mesh 数对比，找出缺失的那个 mesh（缺则补，不成立则改兜底口径）；③ game 载入 `test/maps/surf_boreas.bsp` ⇒ 控制台「真漏网」计数在口径收窄后由 30 变为 0 或列出真阳性；`apps/{debug,game,viewer} npm run typecheck` exit 0 | 新 |
 | T-624 | viewer 无 LOD/PVS 剔除（全量绘制；debug 距离剔除、game 距离+PVS） | 缺失 | viewer | 待修 | **待修（2026-10-09，第 3 轮全链条分析发现）**。三端剔除链不一致：debug 用 `apps/debug/src/renderer/lod-manager.ts`（只按距离 `cullDistance`，默认 12800）；game 在 `apps/game/src/renderer/renderer-main.ts` 内联「距离 + 可选 PVS」；**viewer 在 `apps/viewer/src` 里没有任何剔除逻辑**（grep `lod`/`cullDistance` 只命中 replay 面板的 `visible` 开关）⇒ viewer 全量绘制所有块。属可见性/性能差异，**不是光照链分歧**（debug HUD 在同视点显示 `隐藏 0`，即未剔任何块）。 | progress/pending-detail.md | viewer 载入 `test/maps/surf_boreas.bsp` ⇒ 控制台出现与另两端同口径的剔除统计（可见/剔除块数）；三端 `npm run typecheck` + `build:app` exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 | 新 |
 | T-627 | `$bumpmap` 法线贴图未接线（冰面缺凹凸高光细节） | 缺失 | shared | 待修 | **待修（2026-10-09，第 8 轮从 VMT 对照发现）**。`materials/project_tendies/models/ice_transparent.vmt` 声明 `$bumpmap surf_lt_alpine/alpine_snow01_normal`，但我们的材质管线既不解析也不渲染法线贴图（`parse_vmt` 无 `$bumpmap`、`MeshBasicMaterial` 无 tangent/normal 通路）⇒ 冰面只有平面反射、没有凹凸细节。T-626 修复的是「异常黑」（`$envmap`），本条是配套的细节保真缺口。 | progress/pending-detail.md | 导出侧保留 `$bumpmap` 并接线（three 侧 Basic 材质不支持法线 ⇒ 需换受光材质或自定义注入）；修复后同机位冰坡出现凹凸高光细节；三端 typecheck + build:app exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 | 新 |
-## 总表（77 条）
+## 总表（78 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
@@ -190,4 +191,5 @@
 | T-454 | 渲染链三端统一（任务书 `.tmp/task-unify-render/TASK.md`）：除 debug 调试绘制外全部收敛共享层 | 缺陷 | shared | 进行中 · DSH · 2026-10-09 | 见详情（P0 仪器/基线在 `.tmp/unify/`；P1 呈现档 `config/render-prefs.ts`、P2 渲染器工厂 `render/create-renderer.ts`、P3a 位姿入口 `camera/pose-entry.ts`、P3b-1 相机口径 `camera/scene-camera.ts`、P3b-2 装配核 `scene/assemble-scene.ts`、P4 可见性 `scene/visibility-controller.ts`（三端已接）已收口；P5 导出面 + viewer 实体放置模型已接；**收尾验收（三端 .cmd 可用 + 页面内载图）2026-10-09 通过**（第二轮补证：start.cmd 服务段三端实跑 200、stop.cmd 两分支实跑、dist 页面三端载图 6/6、dev 路径重载 6/6、修 debug single 形态 dist 悬空 `./coi-serviceworker.js`；第三轮补证：`build.cmd multi` 端到端 exit 0 + 三端 multi dist 载图 6/6、game/viewer `stop.cmd` 实跑、`start.cmd` 守卫分支三条）；**P5-2 尾（2026-10-10）**：三端导出编排收进 `src/wasm-core/render_bundle.rs`（纯 Rust 547 行；三端 `lib.rs` 净删 1306 行重复），`check-glb-parity` 扩到三端并接 CI（`glb-parity` job），**六组 GLB 哈希与搬动前逐一相同**；**P7（2026-10-10）**：`environment/render-sky-pass.ts` 收编两遍法与雾单入口 + `src/scripts/check-render-parity.mjs`（19 条实现符号 0 命中、三端 typecheck exit 0），实测 game 侧仅 0.02% 像素变化（雾上限施加顺序对齐 debug）⇒ **debug↔game 由 ≤2 99.980%/均值差 0.0029 变为逐像素 100.0000%/均值差 0/最差 0**；余 P6/P8 见 `.tmp/task-unify-render/TASK-handoff.md`） | progress/monthly/2026-10-11.md | 判据：三端 GLB 门禁 exit 0 + 新 `check-render-parity` exit 0（apps/ 无渲染实现符号；跨端比对须同模式配对——debug 双模式差异已定位在**天区**，见 progress/monthly/2026-10-10.md）+ P0 基线不劣化 | 新 |
 | T-628 | 规范 §2.3 断言「各工程 `dist/play.cmd`，由 `build-dist.mjs` 内联生成」与实际不符：只有 `apps/viewer` 产出 `dist/play.cmd`/`play.sh`（`apps/viewer/scripts/build-dist.mjs:233`）；debug/game 不产出、其 `start.cmd` 直接走 `python src/serve.py` 回落（`documents/debug/differences.md:20`、`documents/game/differences.md:20` 已记录该差异）⇒ 取舍：(a) 只改规范措辞，或 (b) 给两工程补产物自带启动器并让 `start.cmd` 优先委派 | 文档·规范 | repo | 待裁决 | `documents/norms/scripts-and-ci.md:28`、`apps/viewer/scripts/build-dist.mjs:233` | progress/monthly/2026-10-11.md | 判据：`grep -c play.cmd apps/debug/scripts/build-dist.mjs apps/game/scripts/build-dist.mjs` 均为 0、`apps/viewer/scripts/build-dist.mjs` 大于 0；规范与实现两侧结论一致后结案 | 新 |
 | T-171 | viewer 的 multi（Pages 部署）产物随包并预缓存 `coi-serviceworker.js`，但页面从不加载它（`apps/viewer/web/index.html` 只有内联脚本与 `<script type="module" src="./app.js">`，multi 分支直接复制该文件）⇒ 该 SW 永不注册、静态托管上拿不到 `crossOriginIsolated`（4 KB 死重量 + 预缓存清单里一条永不生效的项） | 未接线·死代码 | viewer | 待修 | apps/viewer/web/index.html:160、apps/viewer/scripts/build-dist.mjs:250 | progress/monthly/2026-10-11.md | 判据：二选一——(a) 在 viewer 页面加 `<script src="./coi-serviceworker.js"></script>` ⇒ 浏览器里 `navigator.serviceWorker.controller` 非空；(b) 把该文件从 viewer 的 `KEEP_MULTI` 与预缓存清单里去掉 ⇒ 产物不再含它。改后 `npm run build:dist -- --multi` exit 0 且三端 typecheck exit 0 | 新 |
+| T-455 | 天空区渲染两模式不确定：同构建、同视点、两次加载落在两种模式之一，差异全部在天空区 | 缺陷 | shared | 待修 | src/renderer-shared/environment/render-sky-pass.ts:70 | progress/monthly/2026-10-11.md | 判据：同构建同视点连跑两次出图 ⇒ 逐像素 100%（现状 `≤2 0.8252` / 均值差 3.19 / 最差 79，差异 bbox x∈[212,1279] y∈[0,215] 全在天空区；同端重复与跨端对照都出现同一组数） | 新 |
 | T-629 | 三端 `dev.cmd` 的端口检查是**死分支**：`if errorlevel 1 goto :start_server` 的下一行就是 `:start_server` ⇒ 端口被占与空闲两条路径落到同一处，检查本身不改变任何行为。后果：dev 端口被占（上一轮残留服务、或外来进程）时既不提示也不改行为，仍会 `start "" http://localhost:%PORT%/web/index.html` 开浏览器——指向占用者（可能是旧服务或别人的服务），而新起的 `serve.py` 只在自己的最小化窗口里打印 `[ERROR] 端口 N 无法监听` 后退出 | 未接线·死代码 | repo | 待修 | apps/debug/dev.cmd:80-82、apps/game/dev.cmd:80-82、apps/viewer/dev.cmd:80-82 | progress/monthly/2026-10-11.md | 判据：三端同改，按 `documents/norms/scripts-and-ci.md` §2.4 对 `start.cmd` 的口径给 `dev.cmd` 补同一守卫（占用时 `[WARN]` + 提示换端口 + **不开浏览器** + `exit /b 0`），或删掉这段死代码并说明交由 `serve.py` 报错；验证：静态断言三端不再出现「条件跳转目标标签紧邻其下」的形态 + `node .tmp/unify/cmd-contract-check.mjs` 12/12 通过（行尾保持 CRLF） | 新 |

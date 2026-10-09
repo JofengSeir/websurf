@@ -20,7 +20,7 @@
  * 只做「字节 → 结构化结果」。
  */
 
-import { BspProcessor, decode_vtf_to_png, decompress_mtz, initSync } from '../../pkg/websurf_viewer_wasm.js';
+import { BspProcessor, decode_vtf_to_png, decompress_mtz, initSync, mosaic_decode } from '../../pkg/websurf_viewer_wasm.js';
 import { base64ToBytes, readEmbeddedWasmB64 } from '../../../../src/ts-shared/wasm/loader.js';
 import { loadDefaultsJson } from '../../../../src/ts-shared/materials/defaults.js'; import { fogParamsFromEntities } from '../../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../../src/renderer-shared/environment/skybox.js';
 
@@ -48,7 +48,7 @@ export interface BspLoadResult {
   spawnPoints: SpawnPoint[];
   /** 推荐出生点下标（wasm 规则：有 info_player_start 时取它的下标，否则 0）。 */
   primary: number;
-  glbBytes: ArrayBuffer; skyboxTexture: import('three').CubeTexture | null;
+  glbBytes: ArrayBuffer; skyboxTexture: import('three').CubeTexture | null; /** 纹理画质 manifest（`{ 纹理名小写: mosaic v4 字节码 }`，T-454 P6 新增导出）；无 mosaic 数据时为空对象。 */ mosaicManifest: Record<string, string>;
   /** 地图雾（`env_fog_controller`）；无控制器为 null。 */
   fogParams: { color: number; start: number; end: number; maxDensity: number } | null;
   /** 3D 天空盒的 `sky_camera` 参数；无则 null（渲染端不加天空层）。 */
@@ -134,7 +134,7 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const proc = new BspProcessor(new Uint8Array(await file.arrayBuffer()));
   const meta = JSON.parse(proc.metadata()) as BspMeta;
   // parse_spawn_points 是借用方法，必须在取走 Bsp 实例的 GLB 导出之前调用
-  const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const pvsJson = proc.parse_pvs_data(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera = skyCameraFromEntities(entitiesJson);
+  const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const pvsJson = proc.parse_pvs_data(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera = skyCameraFromEntities(entitiesJson); const mosaicManifestJson = proc.export_mosaic_manifest();
   // 缺失纹理回退（与 game 同款）：装载失败回落 '{}'（无回退表），导出失败回落裸导出
   const defaultsJson = await loadDefaultsJson(decompress_mtz);
   let glb: Uint8Array;
@@ -158,7 +158,7 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const spawnPoints = spawnData.spawn_points ?? [];
   const primary = spawnData.primary ?? 0;
 
-  return { fileName: file.name, meta, spawnPoints, primary, glbBytes, skyboxTexture, fogParams, skyCamera, pvsJson, elapsedMs };
+  return { fileName: file.name, meta, spawnPoints, primary, glbBytes, skyboxTexture, fogParams, skyCamera, pvsJson, elapsedMs, mosaicManifest: JSON.parse(mosaicManifestJson) as Record<string, string> };
 }
 
 /**
@@ -179,3 +179,7 @@ export function humanizeBspError(e: unknown): [string, string] {
   }
   return ['地图加载失败', raw];
 }
+
+// T-454 P6：本文件是 viewer 侧**唯一**导入 `pkg/` 的地方（见文件头），画质切换需要 mosaic 解码，
+// 故在这里转出，`core/scene.ts` 从本模块取（不新开第二个 pkg 导入点）。
+export { mosaic_decode };
