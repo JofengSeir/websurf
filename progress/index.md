@@ -278,3 +278,4 @@
 | 2026-10-09 | 收束：D-026 批量遗弃 8 行（70→62）+ 推送前检查全绿（3 typecheck/3 wasm/2 dist/cargo 36/全部 app 检查/冒烟 0 FAIL） | progress/monthly/2026-10-9.md:17 |
 | 2026-10-09 | 三端模型/光照分叉第 1 轮分析：viewer 缺实体放置模型（`entities` 恒空 ⇒ `buk01.mdl`/`cow.mdl` 缺失）+ 实体模型无烘焙光照 ⇒ 恒 fullbright + `s1_ramp1b` 条纹排除导出侧 + GLB 门禁盲区；登记 T-170/T-450/T-451/T-452/T-453 与 D-108 | progress/monthly/2026-10-10.md:6 |
 | 2026-10-09 | owner 指令：渲染链三端彻底统一（T-454 任务书 + 8 阶段 + 唯一实现落点 + debug 白名单）；D-108 落定；看板逐行精简 95.5→83.2 KB | progress/monthly/2026-10-10.md:14 |
+| 2026-10-09 | T-454 任务书独立审查（有条件可行）+ v2 修订：10 条 Must-fix 落地、纠正 1 条审查事实错误 | progress/monthly/2026-10-10.md:17 |
