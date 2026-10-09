@@ -31,6 +31,7 @@
  */
 
 import * as THREE from 'three';
+import { setFogMaxDensity } from '../shader/lightmap-shader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 /** 颜色入参的两种形态：`number` 直接当十六进制色值，字符串按 `#rrggbb` 解析。 */
@@ -110,7 +111,7 @@ export class LightManager {
 	/** 地图线性雾（`setFog` 设置）；非空时挂到 `scene.fog`，`setFogEnabled(false)` 只摘引用不销毁实例。 */
 	private fog: THREE.Fog | null = null;
 	/** 最近一次 `setFog` 的参数；`setFogEnabled` 重新挂回时复用。 */
-	private fogParams: { color: number; start: number; end: number } | null = null;
+	private fogParams: { color: number; start: number; end: number; maxDensity: number } | null = null;
 
 	constructor() {
 		// 预分配整池：初始 intensity 0、distance 0、decay 2、visible false
@@ -178,7 +179,8 @@ export class LightManager {
 	 *
 	 * 与 `setSkybox` 同层：环境背景与雾都由 light-manager 统一管，渲染端不再直接写 `scene.fog`。
 	 */
-	setFog(params: { color: number; start: number; end: number } | null): void {
+	setFog(params: { color: number; start: number; end: number; maxDensity: number } | null): void {
+		setFogMaxDensity(params?.maxDensity ?? 1);
 		this.fogParams = params;
 		this.fog = params ? new THREE.Fog(params.color, params.start, params.end) : null;
 		if (this.scene) this.scene.fog = this.fog;

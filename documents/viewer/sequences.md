@@ -46,11 +46,11 @@
 | 相机（回放第一人称） | `fly.drivesCamera = false`、`fly.allowMove = false`；`fly.setWorld(pos, yaw, pitch, roll)` 后 `fly.applyToWithRoll(camera)` | `apps/viewer/src/app.ts:975` 到 `apps/viewer/src/app.ts:986` |
 | 相机（自由飞行） | `fly.roll = 0`；`drivesCamera` / `allowMove` 置真；`fly.update(dt)` 消化鼠标增量与按键位移后 `fly.applyTo(camera)` | `apps/viewer/src/app.ts:940` 到 `apps/viewer/src/app.ts:956` |
 | 可视化 | `ReplaySession.tick()` 内 `visuals.update(player.sampleAll(), mode, followId)`：本会话未上场则先熄灭全部对象；上场时按 `Track.visible` 与三个显示开关定各对象显隐，再给幽灵写位置与 `'YXZ'` 序旋转 | `apps/viewer/src/replay/session.ts:155`、`apps/viewer/src/replay/visuals.ts:108` |
-| 场景 | `scene.render()`：每 2 帧做一次近平面自适应（共享 NearPlaneController，roots+vertical 六向），再交 three 绘制 | `apps/viewer/src/core/scene.ts:114` 到 `apps/viewer/src/core/scene.ts:157` |
+| 场景 | `scene.render()`：每 2 帧做一次近平面自适应（共享 NearPlaneController，roots+vertical 六向），再交 three 绘制 | `apps/viewer/src/core/scene.ts:114` 到 `apps/viewer/src/core/scene.ts:159` |
 | HUD 节流刷新 | 距上次刷新 ≥ 80 ms 时刷新位姿读数行、**活动会话**的 `timeline.refresh()`、`telemetry.update(sample, buttons)` | `apps/viewer/src/app.ts:997` 到 `apps/viewer/src/app.ts:1012` |
 | 输入（键盘） | `Timeline` 的全局 `keydown`：K 播放/暂停、`,` / `.` 逐帧、I / O 设区间；输入控件持焦点时全部不响应，且**只有上场的那条时间轴响应**（`setOnStage` 置位）—— 否则看录像时按 K 会把记录会话的播放态、帧号与 A-B 区间一起改掉 | `apps/viewer/src/replay/timeline.ts:293` 到 `apps/viewer/src/replay/timeline.ts:313`、`apps/viewer/src/replay/timeline.ts:352` |
 | 输入（鼠标/键盘，飞行） | `FlyCam` 只在 `locked` 为真时消化 mousemove 与位移键；`blur` 与解锁清空增量与按键集合 | `apps/viewer/src/core/fly.ts:107`、`apps/viewer/src/core/fly.ts:127` |
-| resize 事件 | `scene.resize(gameCanvas)` 重设渲染尺寸与相机 aspect | `apps/viewer/src/app.ts:828`、`apps/viewer/src/core/scene.ts:108` |
+| resize 事件 | `scene.resize(gameCanvas)` 重设渲染尺寸与相机 aspect | `apps/viewer/src/app.ts:828`、`apps/viewer/src/core/scene.ts:110` |
 
 ## 消息与通道
 

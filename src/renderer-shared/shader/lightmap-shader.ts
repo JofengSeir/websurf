@@ -1103,7 +1103,7 @@ function injectLightmapShader(
 	const uniformValue = { value: atlasSize.clone() };
 	material.onBeforeCompile = (shader) => {
 		shader.uniforms.vbsp_AtlasSize = uniformValue;
-		shader.uniforms.vbspExposure = exposureUniform;
+		shader.uniforms.vbspExposure = exposureUniform; registerInjectedMaterial(material); material.customProgramCacheKey = () => 'vbsp-fog' + fogMaxDensity;
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
 		shader.uniforms.vbspLightFloor = lightFloorUniform;
 		// 模式开关的运行期载体（全场景共享同一对象，见 `bakedMixUniform`）
@@ -1219,7 +1219,7 @@ function injectLightmapShader(
 		// 插入函数定义 + uniform 声明（vbspExposure 与 atlasSize 并列，S1 曝光旋钮）
 		updated = VBSP_LIGHTMAP_UNIFORM_DECLS.join('\n') + '\n' + injected + updated;
 
-		shader.fragmentShader = updated;
+		shader.fragmentShader = fogMaxDensityDefine() + updated;
 	};
 	material.needsUpdate = true;
 }
@@ -1328,7 +1328,7 @@ function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.Mes
 function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.vbspExposure = exposureUniform;
-		shader.uniforms.vbspLightGamma = lightGammaUniform;
+		shader.uniforms.vbspLightGamma = lightGammaUniform; registerInjectedMaterial(mat); mat.customProgramCacheKey = () => 'vbsp-fog' + fogMaxDensity;
 		shader.uniforms.vbspBakedMix = bakedMixUniform; shader.uniforms.vbspLightFloor = lightFloorUniform; shader.uniforms.vbspAmbientScale = ambientScaleUniform;
 		// 声明必须来自共享常量（守卫断言"注入单元自洽"）
 		const decls = [...VBSP_LIGHTMAP_UNIFORM_DECLS, 'uniform float vbspAmbientScale;'].join('\n');
@@ -1377,7 +1377,7 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 			return;
 		}
 		shader.vertexShader = vsB;
-		shader.fragmentShader = fsA;
+		shader.fragmentShader = fogMaxDensityDefine() + fsA;
 	};
 	mat.needsUpdate = true;
 }
@@ -1418,7 +1418,7 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 	};
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.vbspAmbCube = uniformValue;
-		shader.uniforms.vbspExposure = exposureUniform;
+		shader.uniforms.vbspExposure = exposureUniform; registerInjectedMaterial(mat); mat.customProgramCacheKey = () => 'vbsp-fog' + fogMaxDensity;
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
 		shader.uniforms.vbspLightFloor = lightFloorUniform;
 		shader.uniforms.vbspAmbientScale = ambientScaleUniform;
@@ -1476,7 +1476,7 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 			return;
 		}
 		shader.vertexShader = vsB;
-		shader.fragmentShader = fsA;
+		shader.fragmentShader = fogMaxDensityDefine() + fsA;
 	};
 	mat.needsUpdate = true;
 }
@@ -1853,3 +1853,59 @@ function bakeVertexCubeAttribute(mesh: THREE.Mesh, rawCube: unknown): void {
 	}
 	g.setAttribute(VERTEX_CUBE_ATTR, new THREE.BufferAttribute(out, 3));
 }
+
+// ---------------------------------------------------------------------------
+// 雾密度上限（`env_fog_controller` 的 `fogmaxdensity`）
+// ---------------------------------------------------------------------------
+
+/** three 线性雾分支里那句的唯一可定位片段（短串，不依赖缩进形式）。 */
+const FOG_SMOOTHSTEP = 'float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );';
+
+/** 夹取版：只在编译期定义了 `FOG_MAX_DENSITY` 的程序里生效，其余走 `#else` 原式。 */
+const FOG_SMOOTHSTEP_CAPPED =
+	'#ifdef FOG_MAX_DENSITY\n\t\tfloat fogFactor = min( smoothstep( fogNear, fogFar, vFogDepth ), FOG_MAX_DENSITY );\n#else\n\t\tfloat fogFactor = smoothstep( fogNear, fogFar, vFogDepth );\n#endif';
+
+/** 当前地图的雾密度上限（1 = 不加限）。 */
+let fogMaxDensity = 1;
+
+/** 经过本文件注入的材质（值变化时标记重编）。 */
+const injectedMaterials = new Set<THREE.Material>();
+
+/** 登记一个注入材质（三处 `onBeforeCompile` 首行调用）。 */
+function registerInjectedMaterial(m: THREE.Material): void {
+	injectedMaterials.add(m);
+}
+
+/** 注入材质编译期预置的 `#define`；上限为 1 时返回空串（不改既有程序）。 */
+function fogMaxDensityDefine(): string {
+	(globalThis as { __vbspFogDefine?: string }).__vbspFogDefine = fogMaxDensity < 1 ? 'DEFINED:' + fogMaxDensity : 'NONE';
+	return fogMaxDensity < 1 ? `#define FOG_MAX_DENSITY ${fogMaxDensity.toFixed(4)}\n` : '';
+}
+
+/** 全局安装夹取式 `fog_fragment`（幂等；未定义该宏的程序不受影响）。 */
+function installFogMaxDensity(): void {
+	const chunks = THREE.ShaderChunk as unknown as Record<string, string>;
+	const cur = chunks.fog_fragment;
+	if (cur && !cur.includes('FOG_MAX_DENSITY')) {
+		chunks.fog_fragment = cur.replace(FOG_SMOOTHSTEP, FOG_SMOOTHSTEP_CAPPED);
+	(globalThis as { __vbspFogChunkPatched?: boolean }).__vbspFogChunkPatched = Boolean(chunks.fog_fragment && chunks.fog_fragment.includes('FOG_MAX_DENSITY'));
+	}
+}
+installFogMaxDensity();
+
+/**
+ * 设置雾密度上限（0..1）：值变化时标记已缓存的注入材质重编，
+ * 兼容「先建材质、后拿到地图雾」的加载顺序。
+ */
+export function setFogMaxDensity(v: number): void {
+	if (!Number.isFinite(v) || v <= 0) return;
+	// 诊断/出帧 A/B 覆盖：`globalThis.__vbspFogMaxDensity`（数字）优先于地图值。
+	const ov = (globalThis as { __vbspFogMaxDensity?: unknown }).__vbspFogMaxDensity;
+	if (typeof ov === 'number' && Number.isFinite(ov) && ov > 0) v = ov;
+	const clamped = Math.min(1, v);
+	if (clamped === fogMaxDensity) return;
+	fogMaxDensity = clamped;
+	(globalThis as { __vbspFogCap?: number }).__vbspFogCap = clamped;
+	for (const m of injectedMaterials) m.needsUpdate = true;
+}
+

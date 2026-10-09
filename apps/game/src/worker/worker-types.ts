@@ -131,7 +131,7 @@ export interface SceneDataMessage {
    * 画质切换（原始/压缩低清）时按贴图名查表，`mosaic_decode` 还原低清 PNG 替换。 */
   mosaicManifest?: string; skyboxTexture?: import('three').CubeTexture | null;
   /** 地图线性雾（`env_fog_controller`，见 renderer-shared/environment/fog-controller.js）；无控制器为 null。 */
-  fogParams?: { color: number; start: number; end: number } | null;
+  fogParams?: { color: number; start: number; end: number; maxDensity: number } | null;
   /** 3D 天空盒的 `sky_camera` 参数（见 renderer-shared/environment/miniature-sky.js）；无则不加天空层。 */
   skyCamera?: { origin: [number, number, number]; scale: number; fog?: { enable: boolean; color: number; start: number; end: number } | null } | null;
 }

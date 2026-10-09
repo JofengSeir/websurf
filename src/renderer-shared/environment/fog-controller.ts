@@ -5,8 +5,9 @@
  * （`color` 为 0xRRGGBB，`start`/`end` 为 HU 距离）；没有控制器、`fogenable` 为 0、
  * 或 `end <= start` 时返回 null（表示不用地图雾）。
  *
- * `fogcolor` 写作 "R G B"（0–255）。`fogmaxdensity` / `fogblend` / `fogcolor2` 不建模：
- * `THREE.Fog` 是线性雾，首版只取主色与两个端点。
+ * `fogcolor` 写作 "R G B"（0–255）。`maxDensity` 取 `fogmaxdensity`（SDK `CFogController` 的同名键，
+ * 默认 1.0，见 `test/project/source-sdk-2013-master/src/game/server/fogcontroller.cpp:61/103`）：它是雾因子的**上限**，
+ * `<1` 时远处不再饱和成纯雾色。`fogblend`/`fogcolor2` 仍未建模（夹具图均 `fogblend = 0`）。
  */
 
 /** 线性雾参数（`color` 为 0xRRGGBB，端点单位 HU）。 */
@@ -14,6 +15,8 @@ export interface FogParams {
 	color: number;
 	start: number;
 	end: number;
+	/** 雾因子上限（`fogmaxdensity`，0..1；1 = 不加限）。 */
+	maxDensity: number;
 }
 
 /** 实体列表项（`parse_entities()` 的最小结构面）。 */
@@ -39,7 +42,9 @@ export function fogParamsFromEntities(entitiesJson: string): FogParams | null {
 		const start = Number.parseFloat(p.fogstart ?? '');
 		const end = Number.parseFloat(p.fogend ?? '');
 		if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) return null;
-		return { color, start, end };
+		const md = Number.parseFloat(p.fogmaxdensity ?? '1');
+		const maxDensity = Number.isFinite(md) ? Math.min(1, Math.max(0, md)) : 1;
+		return { color, start, end, maxDensity };
 	}
 	return null;
 }

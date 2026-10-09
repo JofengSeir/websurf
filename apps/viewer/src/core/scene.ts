@@ -8,6 +8,7 @@
  * modelRoot 的换图生命周期与拾取/量测接口。
  */
 import * as THREE from 'three';
+import { setFogMaxDensity } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import {
   fullbrightUnlitLitMaterials,
   setAmbientScale,
@@ -169,7 +170,7 @@ export class ViewerScene {
   async mountGlb(
     glbBytes: ArrayBuffer,
     skyboxTexture?: import('three').CubeTexture | null,
-    sky?: { fogParams?: { color: number; start: number; end: number } | null; skyCamera?: SkyCameraParams | null; pvsJson?: string },
+    sky?: { fogParams?: { color: number; start: number; end: number; maxDensity: number } | null; skyCamera?: SkyCameraParams | null; pvsJson?: string },
   ): Promise<void> {
     // 换图：上一张图的天空层与雾先释放（下面的摘取会覆盖 this.skyGroup 引用）
     if (this.skyGroup) { disposeObject(this.skyGroup); this.scene.remove(this.skyGroup); this.skyGroup = null; }
@@ -237,6 +238,7 @@ export class ViewerScene {
     }
     // 地图线性雾（`env_fog_controller`）：与 debug/game 同值
     this.scene.fog = sky?.fogParams ? new THREE.Fog(sky.fogParams.color, sky.fogParams.start, sky.fogParams.end) : null;
+    setFogMaxDensity(sky?.fogParams?.maxDensity ?? 1);
     this.fitCamera(maxDim);
   }
 

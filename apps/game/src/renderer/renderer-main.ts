@@ -31,6 +31,7 @@
  */
 
 import * as THREE from 'three';
+import { setFogMaxDensity } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
@@ -396,6 +397,7 @@ export class RendererMain {
     }
     // 地图线性雾（`env_fog_controller`）：与 debug 的 `lightManager.setFog` 同值
     this.scene.fog = data.fogParams ? new THREE.Fog(data.fogParams.color, data.fogParams.start, data.fogParams.end) : null;
+    setFogMaxDensity(data.fogParams?.maxDensity ?? 1);
 
     // 6. 纹理画质 manifest + 按当前画质应用（mosaic 切换数据源）
     this.mosaicManifest = data.mosaicManifest
