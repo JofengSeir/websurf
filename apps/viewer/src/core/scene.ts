@@ -15,7 +15,7 @@ import {
   getLightingMode,
   type LightingMode,
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js'; import { VisibilityController } from '../../../../src/renderer-shared/scene/visibility-controller.js';
 import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js';
 import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { createSkyCamera, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
@@ -50,7 +50,7 @@ export class ViewerScene {
   private pvs: PvsManager | null = null;
 
   /** 近平面贴墙自适应：实现在渲染共享层 `src/renderer-shared/camera/near-plane.ts`。 */
-  private readonly nearPlane = new NearPlaneController();
+  private readonly nearPlane = new NearPlaneController(); /** 可见性控制器（T-454 P4b：收集/判定在共享层；天空层不参与剔除）。 */ private readonly visibility = new VisibilityController();
   private nearCheckToggle = false;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -99,6 +99,8 @@ export class ViewerScene {
   }
 
   render(): void {
+    // 可见性（T-454 P4b）：距离优先 + 可选 PVS，判定与写回在共享控制器里；天空层不参与
+    this.visibility.update(this.camera, this.pvs);
     // 近平面贴墙自适应：每 2 帧做一次（`nearCheckToggle` 交替），贴墙 / 贴地 / 贴顶时收缩 near；
     // 候选收集只取 modelRoot 子树，且开 vertical（自由飞行要贴地/贴顶——game 只探水平四向）
     this.nearCheckToggle = !this.nearCheckToggle;
@@ -178,6 +180,12 @@ export class ViewerScene {
     this.skyGroup = asm.skyGroup;
     this.skyParams = asm.skyGroup && sky?.skyCamera ? sky.skyCamera : null;
     const maxDim = asm.maxDim;
+    // 可见性（T-454 P4b：本工程此前全量绘制，见 TODO.md T-624）：收集可剔除块 + 按呈现档设剔除距离。
+    // 天空层（SKY_LAYER）由共享控制器在收集阶段跳过 ⇒ 第二相机那一遍不受影响。
+    const rpCull = readRenderPrefs();
+    this.visibility.enablePvs = rpCull.culling.pvs;
+    this.visibility.collect(asm.root, this.pvs);
+    this.visibility.setCullDistance(maxDim * 0.5, rpCull.culling.distance);
 
     // 预编译着色器程序（2026-10-04 起与 game/debug 同款）：把「首次可见才编译」的卡顿挪到加载期。
     // 失败不致命（three 仍按需编译），故只告警。

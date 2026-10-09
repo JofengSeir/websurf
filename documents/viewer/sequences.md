@@ -26,7 +26,7 @@
 | 用户 | 点引导按钮「选择地图」/ 地图页换图入口 → `#bspFile` 的 change → `loadBsp(file)` | `bspLoading` 与 busy 类 | `apps/viewer/src/app.ts:612` 到 `apps/viewer/src/app.ts:616`、`apps/viewer/src/app.ts:535` |
 | 用户 | 拖拽 / 引导层「导入记录 / 录像」/ 两个面板的文件框 → `routeFile(file)`：按文件头魔数判类型，命中即切到对应 tab | 无（纯分派，不落状态） | `apps/viewer/src/app.ts:626` 到 `apps/viewer/src/app.ts:644`、`apps/viewer/src/app.ts:618` 到 `apps/viewer/src/app.ts:622`、`apps/viewer/src/app.ts:663` 到 `apps/viewer/src/app.ts:666` |
 | 主线程 + WASM | `ensureWasm()` → `new BspProcessor(bytes)` → `metadata()` → `parse_spawn_points()` → `loadDefaultsJson` → `export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson)`（顺序被借用语义固死；导出失败回退裸导出。2026-10-04 起与 game 同款） | `BspLoadResult`：meta / spawnPoints / primary / glbBytes / elapsedMs | `apps/viewer/src/core/bsp.ts:129`、`apps/viewer/src/core/bsp.ts:134` 到 `apps/viewer/src/core/bsp.ts:131` |
-| 主线程 | `scene.mountGlb(glbBytes, skyboxTexture, { fogParams, skyCamera, pvsJson })`：调**共享装配核** `assembleScene`（序列 = 摘 punctual 灯 → 双贴图登记 → applyLightmap → **摘 3D 天空区**（判据 = 图元采样点落在 `sky_camera` 所在 cluster）→ 主模型分块合并 → 天空区合并 → 合并后终扫，天空组同样跑）→ 挂天空层 + 地图雾 → `fitCamera(maxDim)` | `modelRoot`（共享装配产出的子场景根）、相机 near/far | `apps/viewer/src/core/scene.ts:153`、`apps/viewer/src/core/scene.ts:158` 到 `apps/viewer/src/core/scene.ts:166`、`src/renderer-shared/scene/assemble-scene.ts:98` |
+| 主线程 | `scene.mountGlb(glbBytes, skyboxTexture, { fogParams, skyCamera, pvsJson })`：调**共享装配核** `assembleScene`（序列 = 摘 punctual 灯 → 双贴图登记 → applyLightmap → **摘 3D 天空区**（判据 = 图元采样点落在 `sky_camera` 所在 cluster）→ 主模型分块合并 → 天空区合并 → 合并后终扫，天空组同样跑）→ 挂天空层 + 地图雾 → `fitCamera(maxDim)` | `modelRoot`（共享装配产出的子场景根）、相机 near/far | `apps/viewer/src/core/scene.ts:155`、`apps/viewer/src/core/scene.ts:160` 到 `apps/viewer/src/core/scene.ts:168`、`src/renderer-shared/scene/assemble-scene.ts:98` |
 | 主线程 | `resolveInitialSpawn(spawnPoints, primary, box)` 定初始视角；`mapPanel.setMap(...)` 填面板；`updateReplayMapStatus()` 做贴合检查 | `currentBox`、`lastSpawnSource`、面板 DOM | `apps/viewer/src/app.ts:557` 到 `apps/viewer/src/app.ts:559`、`apps/viewer/src/core/spawn.ts:96` |
 | 用户 | 记录页文件框 / 深链 → `ReplayPanel.loadFile(file)`：先按内容复核，非 `.replay` 经 `onForeignFile` 交回 `routeFile` 改送 | `file` 字段、`lastTrackId` 清空为 null | `apps/viewer/src/replay/panel.ts:278`、`apps/viewer/src/replay/panel.ts:283` |
 | 用户 | 录像页文件框 → `DemoPanel.load(file)`：同样先复核，非 `.dem` 经 `onForeignFile` 改送 | `lastFile` 字段、看板各容器 | `apps/viewer/src/replay/demopanel.ts:464` 到 `apps/viewer/src/replay/demopanel.ts:470` |
@@ -46,11 +46,11 @@
 | 相机（回放第一人称） | `fly.drivesCamera = false`、`fly.allowMove = false`；`fly.setWorld(pos, yaw, pitch, roll)` 后 `fly.applyToWithRoll(camera)` | `apps/viewer/src/app.ts:975` 到 `apps/viewer/src/app.ts:986` |
 | 相机（自由飞行） | `fly.roll = 0`；`drivesCamera` / `allowMove` 置真；`fly.update(dt)` 消化鼠标增量与按键位移后 `fly.applyTo(camera)` | `apps/viewer/src/app.ts:940` 到 `apps/viewer/src/app.ts:956` |
 | 可视化 | `ReplaySession.tick()` 内 `visuals.update(player.sampleAll(), mode, followId)`：本会话未上场则先熄灭全部对象；上场时按 `Track.visible` 与三个显示开关定各对象显隐，再给幽灵写位置与 `'YXZ'` 序旋转 | `apps/viewer/src/replay/session.ts:155`、`apps/viewer/src/replay/visuals.ts:108` |
-| 场景 | `scene.render()`：每 2 帧做一次近平面自适应（共享 NearPlaneController，roots+vertical 六向），再交 three 绘制 | `apps/viewer/src/core/scene.ts:105` 到 `apps/viewer/src/core/scene.ts:143` |
+| 场景 | `scene.render()`：每 2 帧做一次近平面自适应（共享 NearPlaneController，roots+vertical 六向），再交 three 绘制 | `apps/viewer/src/core/scene.ts:107` 到 `apps/viewer/src/core/scene.ts:145` |
 | HUD 节流刷新 | 距上次刷新 ≥ 80 ms 时刷新位姿读数行、**活动会话**的 `timeline.refresh()`、`telemetry.update(sample, buttons)` | `apps/viewer/src/app.ts:997` 到 `apps/viewer/src/app.ts:1012` |
 | 输入（键盘） | `Timeline` 的全局 `keydown`：K 播放/暂停、`,` / `.` 逐帧、I / O 设区间；输入控件持焦点时全部不响应，且**只有上场的那条时间轴响应**（`setOnStage` 置位）—— 否则看录像时按 K 会把记录会话的播放态、帧号与 A-B 区间一起改掉 | `apps/viewer/src/replay/timeline.ts:293` 到 `apps/viewer/src/replay/timeline.ts:313`、`apps/viewer/src/replay/timeline.ts:352` |
 | 输入（鼠标/键盘，飞行） | `FlyCam` 只在 `locked` 为真时消化 mousemove 与位移键；`blur` 与解锁清空增量与按键集合 | `apps/viewer/src/core/fly.ts:107`、`apps/viewer/src/core/fly.ts:127` |
-| resize 事件 | `scene.resize(gameCanvas)` 重设渲染尺寸与相机 aspect | `apps/viewer/src/app.ts:828`、`apps/viewer/src/core/scene.ts:103` |
+| resize 事件 | `scene.resize(gameCanvas)` 重设渲染尺寸与相机 aspect | `apps/viewer/src/app.ts:828`、`apps/viewer/src/core/scene.ts:105` |
 
 ## 消息与通道
 
@@ -88,7 +88,7 @@
 | WASM 外置请求非 2xx | 打一条 `warn` 后回退到内嵌副本路径 | `apps/viewer/src/core/bsp.ts:107` |
 | WASM 首次失败后再试 | 模块级 Promise 已被 rejected 且不重置 ⇒ 同一次页面会话内不会重新尝试（见 `documents/viewer/implementation/core.md` 的「已知缺口」） | `apps/viewer/src/core/bsp.ts:88` |
 | BSP 解析 / 导出抛错 | `humanizeBspError` 按 message 归成四类文案；无地图时显示引导层错误详情，已有地图时临时提示 5 s 并还原旧摘要 | `apps/viewer/src/core/bsp.ts:169`、`apps/viewer/src/app.ts:568` 到 `apps/viewer/src/app.ts:579` |
-| GLB 未携带光照图集 | 共享 applyLightmap 返回 false，viewer 打一条「未施加」说明；地图仍可看（贴图原色） | `apps/viewer/src/core/scene.ts:166` 到 `apps/viewer/src/core/scene.ts:166` |
+| GLB 未携带光照图集 | 共享 applyLightmap 返回 false，viewer 打一条「未施加」说明；地图仍可看（贴图原色） | `apps/viewer/src/core/scene.ts:168` 到 `apps/viewer/src/core/scene.ts:168` |
 | 施加静态光照中途抛错 | 共享 applyLightmap 的 catch 只 `console.error` 并返回 false，不阻断挂载 | `src/renderer-shared/scene/scene-builder.ts:131` 到 `src/renderer-shared/scene/scene-builder.ts:133` |
 | 块内几何合并失败 | 保留全部子块（不丢几何）；最终合并失败时逐块建 Mesh（共享核，game/viewer 同一份） | `src/renderer-shared/scene/scene-optimizer.ts:343`、`:349`、`:371`、`:384` |
 | Worker 构造抛错或 `onerror` | `workerBroken` 置位、终止并丢弃 Worker、用同一个错误拒绝全部未结算请求；此后每次导入直接走主线程 | `apps/viewer/src/replay/importer.ts:116` 到 `apps/viewer/src/replay/importer.ts:130` |

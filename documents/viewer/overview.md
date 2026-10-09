@@ -92,15 +92,15 @@
 |---|---|---|
 | GLB 导出必须是 `BspProcessor` 的最后一次调用 | `export_glb_with_pakfile_models` 取走内部 `Bsp`，之后再调另两个方法返回错误 | `apps/viewer/crates/wasm/src/lib.rs:586`、`apps/viewer/crates/wasm/src/lib.rs:441` |
 | `loadBspFile` 的顺序固定为 metadata → spawn → 默认纹理包 → GLB（主导出，失败回退裸导出） | 前两步是借用方法、导出会取走实例 | `apps/viewer/src/core/bsp.ts:135` 到 `apps/viewer/src/core/bsp.ts:131` |
-| 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序由**共享装配核** `src/renderer-shared/scene/assemble-scene.ts` 固定（T-454 P3b-2 起三端同一份），`mountGlb` 只调它并接自己的合并实现 | `apps/viewer/src/core/scene.ts:166`、`src/renderer-shared/scene/assemble-scene.ts:98` |
-| | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / 近平面候选 / 分块合并 / 换图释放的唯一范围（2026-10-03 起根仍是 Scene（共享 buildMapScene 产物），替换走 `mountGlb`） | `apps/viewer/src/core/scene.ts:44`、`apps/viewer/src/core/scene.ts:166` 到 `apps/viewer/src/core/scene.ts:166` |
+| 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序由**共享装配核** `src/renderer-shared/scene/assemble-scene.ts` 固定（T-454 P3b-2 起三端同一份），`mountGlb` 只调它并接自己的合并实现 | `apps/viewer/src/core/scene.ts:168`、`src/renderer-shared/scene/assemble-scene.ts:98` |
+| | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / 近平面候选 / 分块合并 / 换图释放的唯一范围（2026-10-03 起根仍是 Scene（共享 buildMapScene 产物），替换走 `mountGlb`） | `apps/viewer/src/core/scene.ts:44`、`apps/viewer/src/core/scene.ts:168` 到 `apps/viewer/src/core/scene.ts:168` |
 | 相机每帧只被一个写者写 | 只有**上场会话**给得出第一人称采样（`ReplaySession.cameraSample()` 对下场的会话恒返回 `null`，`apps/viewer/src/replay/session.ts:161`）：有采样时把 `fly.drivesCamera` 与 `fly.allowMove` 置假并用 `applyToWithRoll` 写相机；否则由 `FlyCam.update` + `applyTo` 写 | `apps/viewer/src/app.ts:974` 到 `apps/viewer/src/app.ts:993`、`apps/viewer/src/core/fly.ts:196` |
 | 位姿角一律用度、弧度只在 `FlyCam` 内部 | `Pose.ang` 是度；`setPose` / `setWorld` 在边界处换算 | `apps/viewer/src/core/pose.ts:26`、`apps/viewer/src/core/fly.ts:207` |
 | 采样二分要求时间轴单调不减 | `.replay` 路径由 `t(i) = (i − preFrames) / tickrate` 与 `tickrate > 0` 保证（解析期校验） | `apps/viewer/src/replay/sampling.ts:26`、`apps/viewer/src/replay/shavit-replay.ts:350` |
 | 「Worker 坏掉」是单向的 | `ensureWorker` 一旦置 `workerBroken` 就不再重试，后续全部走主线程 | `apps/viewer/src/replay/importer.ts:71`、`apps/viewer/src/replay/importer.ts:91` |
 | Worker 回传后本地 buffer 失效 | `t` / `pos` / `ang` 的 buffer 必进 transfer 列表，`vel` / `buttons` 存在才加 | `apps/viewer/src/worker/main.ts:88` 到 `apps/viewer/src/worker/main.ts:90` |
 | 记录播放基准 = 帧自身坐标 | 解码只做轴序/朝向映射，平移与旋转只在 `RuleConfig.transform` 存在且非恒等时叠加 | `apps/viewer/src/replay/build.ts:29`、`apps/viewer/src/replay/types.ts:55` |
-| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:431`、`apps/viewer/src/core/scene.ts:179` |
+| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:431`、`apps/viewer/src/core/scene.ts:181` |
 
 ---
 
