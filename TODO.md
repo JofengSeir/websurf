@@ -111,7 +111,7 @@
 - **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
 - **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
 - **T-053** viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/…　`viewer`
-- **T-054** debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g…　`debug`
+- **T-054** debug 审查登记（P1 三条已修；余 P2×9 + 1 条未具名 P1）　`debug`
 - **T-055** game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（…　`game`
 - **T-056** 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局…　`game`
 - **T-110** 包内 svc_CreateStringTable 只稳定解出第一张表　`viewer`
@@ -157,7 +157,7 @@
 | T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | 未接线·死代码 | debug | 待修 | apps/game/src/app.ts:170 | progress/pending-detail.md | 判据：@BT@git grep -n "resetTo\ | \.stop(" -- src apps@BT@ ⇒ 无外部调用点则删；有则接线并补调用 | #79 |
 | T-048 | worker 消息联合类型与实际收发不符（历史遗留，已由文档记录）：debug/game 的 worker-types.ts 里 rea… | 文档口径 | debug | 已结案 | apps/game/src/worker/worker-types.ts:78 ⇒ 联合补齐（WorkerMessage 13 条 / MainMessage 12 条 + 8 个新接口）；`node .tmp/t048/probe.mjs` ⇒ 运行时 15 条字面量未覆盖 0；`apps/game` typecheck 通过 | documents/game/implementation/worker.md | 见详情 | #80 |
 | T-053 | viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/… | 缺陷 | viewer | 待修 | apps/viewer/src/replay/timeline.ts:110 | progress/pending-detail.md | 判据：帮助文案与 `apps/viewer/src/replay/timeline.ts` 现行类名/样式一致（无「淡金带 / 金框」残留） | #84 |
-| T-054 | debug 审查登记（P1×4 + P2×9）：P1——全局 :focus-visible 与 ::selection 规则整体缺失（g… | 缺陷 | debug | 待修 | apps/debug/src/app.ts:1992 | progress/pending-detail.md | 判据：全局 `:focus-visible` 与 `::selection` 规则存在且可见（键盘 Tab 可达、选中态非默认） | #85 |
+| T-054 | debug 审查登记（**P1 三条已修 2026-10-09**；余 P2×9 + 1 条未具名 P1）：P2——select 箭头 data-URI 旧天青调色板、单位 span 硬编码 #6a6f8a、SOURCE_LABEL 三色复制令牌、#error 背景硬编码、`web/styles.css` 死文件、滚动条注释不符、路径图例 tooltip 三档实为两档、`#missingTexturesOk` 死钩子、窄窗侧栏挤压（可接受） | 缺陷 | debug | 待修 | apps/debug/src/app.ts:1992 | progress/pending-detail.md | 剩余项逐条核销：`git ls-files apps/debug/web/styles.css` ⇒ 已删或已接线；`git grep -n missingTexturesOk -- apps/debug` ⇒ 已删；路径图例 tooltip 文案与两档着色一致；`git grep -nE "#[0-9a-fA-F]{6}" -- apps/debug/web/index.html` ⇒ 只剩令牌定义处 | #85 |
 | T-055 | game 审查登记（P1×3 + P2×9）：P1——导航 .mod 与 .key-chip/.x 是无 tabindex 的 div（… | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：导航 `.mod` 与 `.key-chip`/`.x` 可 Tab 聚焦（不再是裸 div） | #86 |
 | T-056 | 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局… | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：F5 / 刷新不弹关闭确认，仅在有地图 / 对局中弹（条件化） | #87 |
 | T-058 | DemoParseResult 里「已解码但应用面为零」的字段清单（owner 要求记录，2026-09-30 | 未接线·死代码 | viewer | 已结案 | **遗弃（按已记录的分类口径）**：`progress/pending-detail.md:348` 已按性质分五类并给出处置——㈠ 冗余（`playerNames` 与面板 `nameAtSlot` 重复，属待合并而非废弃）、㈡ **不可删**（`packetStringTables` 是解出 `userinfo` 的必经中间产物）、㈢ 诊断留档（`playerDiag` / `indexHistogram` / `playerSnapshots` / `playerPropNames` / `usercmdDiag` / `legacyPropOrder`，存在目的就是排查）、㈣ 计数摘要（`entityCount` / `classCounts`）、㈤ 文本消息——**㈤ 已接线**：该字段现名 `chat`，侧栏对话区消费它（提交 `9046975` 的端到端断言「对话分节 40 行」）⇒ 原清单里唯一的「真废弃」项已消解，其余按记录口径保留 | progress/pending-detail.md | `git grep -n "\.chat\b" -- apps/viewer/src` ⇒ 有消费点（㈤ 已接线）；㈢ 诊断类按 `progress/pending-detail.md:348` 的口径保留 | #89 |

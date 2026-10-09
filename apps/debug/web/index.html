@@ -55,13 +55,13 @@
       cursor: pointer;
     }
     button:hover:not(:disabled) { background: transparent; border-color: var(--accent); color: var(--accent); }
-    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button:disabled, select:disabled, input:disabled, textarea:disabled { opacity: 0.45; cursor: not-allowed; }
     input[type="file"] { font-size: 11px; color: var(--text); }
     input[type="file"]::-webkit-file-upload-button {
       background: transparent; color: var(--text); border: 1px solid var(--border-strong);
       padding: 2px 8px; border-radius: var(--r); cursor: pointer;
     }
-
+    :focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; } ::selection { background: var(--accent-weak); color: var(--text); }
     /* 整体布局 */
     #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
     #topbar {

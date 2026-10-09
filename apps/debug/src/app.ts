@@ -1741,7 +1741,7 @@ async function handleBspFile(file: File): Promise<void> {
 	// 换地图重置出生点传送去重（新地图选相同索引也应生效）
 	lastTeleportIdx = -1;
 	if (dom.spawnSelect) dom.spawnSelect.innerHTML = '';
-	setStatus(`正在加载 ${file.name}（主线程解析 BSP）...`, '');
+	setError(''); setStatus(`正在加载 ${file.name}（主线程解析 BSP）...`, '');
 	// 让 UI 先更新（解析耗时较长）
 	await new Promise((r) => setTimeout(r, 0));
 	try {

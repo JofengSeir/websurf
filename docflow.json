@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-039/058/060 结案",
+      "reason": "T-054 P1 三条已修，行收窄到剩余项",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -288,9 +288,9 @@
         "line": 159
       },
       "T-054": {
-        "p": "596ab5568204856befae7537ddc57bb77bf0aaa64954eb2cf529cb7fb204327f",
+        "p": "56fa1c92f892556e411b96853dd6d76f326e1b954679fd8e16e34a1d8bf1485c",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
-        "at": "2026-10-07",
+        "at": "2026-10-09",
         "line": 160
       },
       "T-055": {
