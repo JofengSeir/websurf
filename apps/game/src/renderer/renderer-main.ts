@@ -47,7 +47,7 @@ import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCame
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
-import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -228,14 +228,7 @@ export class RendererMain {
     // 第 1 级逐顶点光照的几何重建档位：平滑遍数（0 = 原样使用烘焙值）与方差压缩上限
     setPropVertexRelax(config.lighting?.propVertexRelax ?? 1);
     setPropVertexFlatten(config.lighting?.propVertexFlatten ?? 0);
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    this.renderer.setPixelRatio(Math.min(dpr, 2)); // dpr 上限 2：高 DPI 下不再翻倍像素量
-    this.renderer.setSize(width, height, false);
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer = createRenderer({ canvas, width, height, dpr });
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
@@ -337,16 +330,7 @@ export class RendererMain {
     // 1.6 预编译着色器程序：把「首次可见才编译」的卡顿挪到加载期。
     //     背景：`tick` 把主线程物理的 dt 夹在 0.1s 以内（上限见该方法的 dt 计算）⇒ 超过 100ms 的
     //     主线程卡顿会让物理表现为慢动作。失败不致命（three 仍按需编译），故只告警。
-    try {
-      const renderer = this.renderer;
-      if (renderer) {
-        const compileT0 = performance.now();
-        renderer.compile(this.scene, this.camera);
-        console.info(`[render] 着色器程序预编译耗时 ${(performance.now() - compileT0).toFixed(0)}ms`);
-      }
-    } catch (err) {
-      console.warn('[render] 预编译着色器失败（不影响按需编译）:', err);
-    }
+    if (this.renderer && this.scene && this.camera) precompileScene(this.renderer, this.scene, this.camera);
 
     // 2. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 NearPlaneController.update 收缩）
     const defaultNear = NearPlaneController.defaultNearForScene(maxDim);

@@ -97,14 +97,14 @@
 
 1. **权威物理只有 Worker 一个推进者**：Worker 侧权威实例由 `apps/debug/src/worker/main.ts:455` 装配的 `createAuthLoop` 独占推进；主线程收到 `phys-frame` 只做缓存（`apps/debug/src/app.ts:398`），不 tick 权威实例。
 2. **固定步长来自面板 tickRate，且不进 Rust**：`tickRate` 变更经 `apps/debug/src/worker/main.ts:466` 的 `onTickRateChange` 调 `authLoop.setFixedDt`，仅在步长真的变化时才 `reset()`。
-3. **主线程每个渲染帧最多推进 1 个物理步**：`apps/debug/src/renderer/renderer-main.ts:717` 是 `tick` 内唯一的 `predPhys.tick` 调用点；单步闸门打开时每帧配额再减一（`apps/debug/src/renderer/renderer-main.ts:682`）。
-4. **回放步长是一次性载荷**：`apps/debug/src/renderer/renderer-main.ts:688` 在读走 `replayDtS` 后立即置 `null`，输入循环用 `replayDtS === null` 作为「上一帧已被消费」的握手信号（`apps/debug/src/app.ts:2232`）。
-5. **输入增量是累加语义、按键掩码是覆盖语义**：`apps/debug/src/renderer/renderer-main.ts:1140` 的 `feedInput` 对 `dx`/`dy` 累加、对 `keys` 直接赋值，消费后清零增量（`apps/debug/src/renderer/renderer-main.ts:718`）。
+3. **主线程每个渲染帧最多推进 1 个物理步**：`apps/debug/src/renderer/renderer-main.ts:700` 是 `tick` 内唯一的 `predPhys.tick` 调用点；单步闸门打开时每帧配额再减一（`apps/debug/src/renderer/renderer-main.ts:665`）。
+4. **回放步长是一次性载荷**：`apps/debug/src/renderer/renderer-main.ts:671` 在读走 `replayDtS` 后立即置 `null`，输入循环用 `replayDtS === null` 作为「上一帧已被消费」的握手信号（`apps/debug/src/app.ts:2232`）。
+5. **输入增量是累加语义、按键掩码是覆盖语义**：`apps/debug/src/renderer/renderer-main.ts:1123` 的 `feedInput` 对 `dx`/`dy` 累加、对 `keys` 直接赋值，消费后清零增量（`apps/debug/src/renderer/renderer-main.ts:701`）。
 6. **双端物理参数同源**：主线程与 Worker 都从同一份 config 出发，映射实现收敛在 `src/ts-shared/phys/params.ts`（`apps/debug/src/physics/prediction-params.ts:23`、`apps/debug/src/worker/main.ts:62`）。
 7. **主线程与 Worker 各持独立 wasm 实例**：主线程由 `apps/debug/src/main-wasm.ts:28` 的 `ensureMainWasm` 初始化，Worker 在自己的作用域内独立 `initSync`（`apps/debug/src/worker/main.ts:479`）。
 8. **剔除距离由场景对角线唯一确定**：`apps/debug/src/renderer/lod-manager.ts:155` 起三行给出上限、下限与默认值的算式，面板滑块只能在该上限内改写（`apps/debug/src/renderer/lod-manager.ts:276`）。
-9. **渲染轨迹采样与渲染节点一一对应**：同一帧同一三元组先落 `PathRecorder` 渲染节点、再写共享内存采样槽，`i0` 取同一次自增（`apps/debug/src/renderer/renderer-main.ts:729` 与 `apps/debug/src/renderer/renderer-main.ts:733`）。
-10. **权威帧版本号单调**：`va` 由发布方单调递增（`apps/debug/src/worker/worker-types.ts:248`），主线程按它去重（`apps/debug/src/renderer/renderer-main.ts:650`）。
+9. **渲染轨迹采样与渲染节点一一对应**：同一帧同一三元组先落 `PathRecorder` 渲染节点、再写共享内存采样槽，`i0` 取同一次自增（`apps/debug/src/renderer/renderer-main.ts:712` 与 `apps/debug/src/renderer/renderer-main.ts:716`）。
+10. **权威帧版本号单调**：`va` 由发布方单调递增（`apps/debug/src/worker/worker-types.ts:248`），主线程按它去重（`apps/debug/src/renderer/renderer-main.ts:633`）。
 
 ---
 
@@ -118,7 +118,7 @@
 
 - `apps/debug/package.json:7` 的 `scripts`：dev 端口、构建链与全部门禁脚本的调用名。
 - `apps/debug/src/app.ts:266` 的 `main`：主线程装配入口（DOM 句柄 → 共享缓冲 → Worker → 渲染器 → 面板）。
-- `apps/debug/src/renderer/renderer-main.ts:615` 的 `tick`：一帧内的物理 / 剔除 / 可视化 / 渲染顺序。
+- `apps/debug/src/renderer/renderer-main.ts:598` 的 `tick`：一帧内的物理 / 剔除 / 可视化 / 渲染顺序。
 - `apps/debug/src/worker/main.ts:455` 的 `createAuthLoop` 装配：Worker 侧权威物理的唯一推进者。
 - `apps/debug/src/input/input-recorder.ts:166` 的 `InputRecorder`：录制 / 回放的数据模型与失败语义。
 - `apps/debug/crates/wasm/src/lib.rs:534` 的 `impl BspProcessor`：本工程 WASM 绑定层的导出面。

@@ -15,7 +15,7 @@ import {
   getLightingMode,
   type LightingMode,
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js';
 import { applyLightmap, buildMapScene } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
@@ -54,14 +54,7 @@ export class ViewerScene {
   private nearCheckToggle = false;
 
   constructor(canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer = createRenderer({ canvas, width: canvas.clientWidth, height: canvas.clientHeight });
 
 
 
@@ -230,13 +223,7 @@ export class ViewerScene {
 
     // 预编译着色器程序（2026-10-04 起与 game/debug 同款）：把「首次可见才编译」的卡顿挪到加载期。
     // 失败不致命（three 仍按需编译），故只告警。
-    try {
-      const compileT0 = performance.now();
-      this.renderer.compile(this.scene, this.camera);
-      console.info(`[viewer][render] 着色器程序预编译耗时 ${(performance.now() - compileT0).toFixed(0)}ms`);
-    } catch (err) {
-      console.warn('[viewer][render] 预编译着色器失败（不影响按需编译）:', err);
-    }
+    precompileScene(this.renderer, this.scene, this.camera);
 
     // 挂天空层 + 地图雾（与 debug/game 同款：天空图元只在第 1 层、由第二相机渲染）
     this.skyCamera = createSkyCamera();

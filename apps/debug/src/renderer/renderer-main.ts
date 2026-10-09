@@ -21,7 +21,7 @@
  * 渲染采样写入共享内存的口径见本文件内紧随共享内存导入的那段说明。
  */
 
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js';
 import * as THREE from 'three';
 import { deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
@@ -374,15 +374,7 @@ export class RendererMain {
     console.log(`[renderer] 跨线程通道: ${this.shared.isShared ? 'SAB' : 'MsgState'}（阶段 1 渲染直读本地物理）`);
     console.log(`[renderer] 渲染采样失效世代计数（本地诊断，非协议值）: ${this.sampleEpoch}`);
 
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    this.renderer.setPixelRatio(Math.min(dpr, 2));
-    this.renderer.setSize(width, height, false);
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.NoToneMapping;
+    this.renderer = createRenderer({ canvas, width, height, dpr });
 
     this.scene = new THREE.Scene();
     // 物理路径可视化挂在根场景而不是 bspModelScene 下：后者每次换图重建，而路径要跨图保留；
@@ -559,16 +551,7 @@ export class RendererMain {
 
     // 预编译着色器程序（2026-10-04 起与 game 同款）：把「首次可见才编译」的卡顿挪到加载期。
     // 失败不致命（three 仍按需编译），故只告警。
-    try {
-      const renderer = this.renderer;
-      if (renderer) {
-        const compileT0 = performance.now();
-        renderer.compile(this.scene, this.camera);
-        console.info(`[render] 着色器程序预编译耗时 ${(performance.now() - compileT0).toFixed(0)}ms`);
-      }
-    } catch (err) {
-      console.warn('[render] 预编译着色器失败（不影响按需编译）:', err);
-    }
+    if (this.renderer && this.scene && this.camera) precompileScene(this.renderer, this.scene, this.camera);
 
     mapRoot.updateMatrixWorld(true);
 

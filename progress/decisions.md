@@ -26,7 +26,7 @@
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | apps/game/src/app.ts:249 |
 | T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | apps/game/src/input/input-bridge.ts:65 |
 | T-209 | M 键与 ESC 两条全局监听不校验 `sceneReady`，加载覆盖层显示期间同样触发 | apps/game/src/panel/panel-controller.ts:265 |
-| T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | apps/game/src/renderer/renderer-main.ts:264 |
+| T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | apps/game/src/renderer/renderer-main.ts:257 |
 | T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | apps/game/src/savepoint.ts:92 |
 | T-214 | 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态 | apps/game/src/savepoint.ts:21 |
 | T-216 | `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长 | apps/game/src/savepoint.ts:112 |
@@ -109,7 +109,7 @@
 
 | ID | 事项 | 证据 |
 |---|---|---|
-| T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | apps/debug/src/renderer/renderer-main.ts:469 |
+| T-046 | debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份… | apps/debug/src/renderer/renderer-main.ts:461 |
 | T-047 | game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap… | apps/game/src/app.ts:170 |
 | T-310 | `set-auto-restore-hull` 只改面板侧标记，`src/phys/**` 无对应参数与读取点，开关不写物理实例 | apps/debug/src/worker/worker-types.ts:146 |
 | T-312 | `tsconfig.json` 的五个路径别名零导入点 | apps/debug/tsconfig.json:19 |
@@ -138,7 +138,7 @@
 | T-157 | `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达 | apps/viewer/src/app.ts:726 |
 | T-158 | `core/pose.ts` 的两个函数零调用点 | apps/viewer/src/core/pose.ts（2026-10-09 T-158 已删除该函数） |
 | T-159 | `RAD2DEG` 在 `apps/viewer/src` 内零调用点 | apps/viewer/src/core/constants.ts:25 |
-| T-160 | `ViewerScene.model` getter 零调用点 | apps/viewer/src/core/scene.ts:92 |
+| T-160 | `ViewerScene.model` getter 零调用点 | apps/viewer/src/core/scene.ts:85 |
 | T-161 | 六个导出在本工程内零调用点 | src/renderer-shared/shader/lightmap-shader.ts（2026-10-09 已删 5 个，留 3 个） |
 | T-162 | `setLightFloor` 在本工程内零调用点 | src/renderer-shared/shader/lightmap-shader.ts:1742 |
 | T-163 | `ReplayPlayer` 两个成员零调用点 | apps/viewer/src/replay/player.ts（2026-10-09 已删） |
@@ -178,7 +178,7 @@
 | T-403 | `MouseBuffer.push` / `drain` | src/ts-shared/input/mouse-buffer.ts:81 |
 | T-404 | `ShmState.wake` | src/ts-shared/auth/shared-state.ts:447 |
 | T-405 | `maskToKeys` | src/ts-shared/auth/shared-state.ts:98 |
-| T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | apps/game/src/renderer/renderer-main.ts:333 |
+| T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | apps/game/src/renderer/renderer-main.ts:326 |
 | T-407 | `world/types.ts` 的 `rootNode` 字段 | apps/game/crates/wasm/src/lib.rs:1704 |
 | T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | src/wasm-core/bsp_to_gltf_core/convert.rs:367 |
 
