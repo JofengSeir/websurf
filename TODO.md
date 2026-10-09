@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（93 条）
+## 未结项（92 条）
 ### 待裁决（0）
 
 
-### 待修（91）
+### 待修（90）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -67,7 +67,6 @@
 - **T-235** `apps/game/src/world/types.ts` 在本工程零导入点　`game`
 - **T-236** `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：…　`game`
 - **T-237** `map_name` 恒为空串　`game`
-- **T-238** `InitMessage` 有三个字段既无发送方也无读取点　`game`
 - **T-239** `worker-types.ts` 里多条声明在本工程无发送方且无接收点　`game`
 - **T-307** `frame-bench.mjs` 缺省地图路径 `<仓库根>/maps/surf_666.bsp` 不在工作区，不传第 4 参即打印「地图不存在」并 exit 2　`debug`
 - **T-308** 四个 `.cmd`（dev/build/start/stop）无 npm script、互不转发，双击入口与命令行入口的环境准备各写一套　`debug`
@@ -258,7 +257,7 @@
 | T-235 | `apps/game/src/world/types.ts` 在本工程零导入点 | 未接线·死代码 | game | 待修 | apps/game/src/renderer/renderer-main.ts:42 | documents/game/implementation/types.md | 判据：`git grep -n "apps/game/src/world/types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-236 | `export_glb_with_pakfile_models_with_defaults_and_atlas_limit` 在本工程无调用点：… | 未接线·死代码 | game | 待修 | apps/game/crates/wasm/src/lib.rs:579 | documents/game/implementation/wasm-crate.md | 判据：`git grep -n "export_glb_with_pakfile_models_with_defaults_and_atlas_limit" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-237 | `map_name` 恒为空串 | 未接线·死代码 | game | 待修 | apps/game/crates/wasm/src/lib.rs:457 | documents/game/implementation/wasm-crate.md | 判据：`git grep -n "map_name" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-238 | `InitMessage` 有三个字段既无发送方也无读取点 | 未接线·死代码 | game | 待修 | apps/game/src/worker/worker-types.ts:36 | documents/game/implementation/worker.md | 判据：`git grep -n "InitMessage" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-238 | `InitMessage` 有三个字段既无发送方也无读取点 | 未接线·死代码 | game | 已结案 | **已结案（判为遗留误报，不成立）**：断言「`InitMessage` 的三个字段**既无发送方**也无读取点」经跨工程核查**只有后半成立**——① **发送方存在**：`apps/debug/src/input/input-bridge.ts:21` 的 `sendInit` 发 `{ type: 'init', shared, width, height, dpr }`，调用点 `apps/debug/src/app.ts:316`（`git grep -n "sendInit" -- apps/debug/src` ⇒ 3 处：定义 + 调用 + 注释）；② 「无读取点」成立：分发器只读 `shared`（`src/ts-shared/auth/worker-dispatch.ts:270`），且 debug 侧注释已写明这三者是**只写字段**（`apps/debug/src/worker/worker-types.ts:50`）。原断言只在 **game 本工程内**成立（game 侧 `apps/game/src/app.ts:148` 只发 `type` 与 `shared`），而 game 侧声明注释本就带「在本工程内」限定。字段属跨工程协议形状，**不删**；`documents/game/implementation/worker.md:37` 的缺口按 [L] 标已消除，`documents/game/sequences.md:80` 的「不一致」判定改为按工程分别陈述 | documents/game/implementation/worker.md | `git grep -n "sendInit" -- apps/debug/src` ⇒ 3 处（含 `apps/debug/src/input/input-bridge.ts:21` 的发送点与 `apps/debug/src/app.ts:316` 的调用点）；`git grep -n "init.shared" -- src/ts-shared/auth/worker-dispatch.ts` ⇒ 1 处（分发器只读 shared）；game/debug 两工程 `npm run typecheck` exit 0；体检 A–P 全 0 | — |
 | T-239 | `worker-types.ts` 里多条声明在本工程无发送方且无接收点 | 未接线·死代码 | game | 待修 | src/ts-shared/auth/worker-dispatch.ts:265 | documents/game/implementation/worker.md | 判据：`git grep -n "worker-types.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-301 | 回放捕获 `replayCapture.record` 未传 `dtS`，样本 `dt` 恒 0；`InputFrame` 亦无 `dt` 字段 | 缺陷 | debug | 已结案 | apps/debug/src/app.ts:2241 传第五参 dtS；input-recorder.ts 的 InputFrame 增可选 dt、frames()/toPayload()/sample() 三处物化带上它（全部 1:1 ⇒ 该文件 18 个锚点零漂移）；探针：record(…,0.015625) ⇒ frames()/toPayload()/toCompactPayload() 的 dt = 0.015625, 0.03125, 0；对象数组 load 带 dt ⇒ 0.02 保留、缺 dt ⇒ 0；InputPlayer 回放帧带 dt；debug typecheck 通过 | documents/debug/implementation/input.md | 见详情 | — |
 | T-302 | 面板 `PARAM_DEFS` 与 `config.ts` 两套默认值来源、无交叉校验（`jumpHeight` 57 与 `jumpSpeed` 302 同写 `jump_height`） | 缺陷 | debug | 已结案 | apps/debug/scripts/check-param-defaults.mjs（`npm run check:param-defaults`）⇒ 面板默认值经 PARAM_TO_RUST 与 config 换算值比对；正例 7 项全 OK 退出 0，反例（gravity 800→900）⇒ jumpHeight 报差并 exit 1 | documents/debug/implementation/physics.md | 见详情 | — |

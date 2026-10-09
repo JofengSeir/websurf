@@ -77,7 +77,7 @@ Worker 侧（`createAuthLoop`，定时器唤醒 + 固定步长累积器）：
 | type | 类型声明的载荷 | 声明锚点 | 实际发送点 | 声明与实际是否一致 |
 |---|---|---|---|---|
 | `wasm-init` | `{ type, wasmUrl?, wasmB64?, mtzB64? }` | `apps/game/src/worker/worker-types.ts:25` | `apps/game/src/app.ts:152`（`wasmB64`）、`apps/game/src/app.ts:154`（`wasmUrl`） | 一致：分发器接受 `wasmB64` / `wasmUrl` / `mtzB64` 三者（`src/ts-shared/auth/worker-dispatch.ts:297`），声明已补齐；`mtzB64` 本工程无发送方 |
-| `init` | `{ type, shared, width, height, dpr }` | `apps/game/src/worker/worker-types.ts:33` | `apps/game/src/app.ts:148`（只发 `type` 与 `shared`） | **不一致**：`width` / `height` / `dpr` 既无发送方也无读取点，分发器只读 `shared`（`src/ts-shared/auth/worker-dispatch.ts:270`） |
+| `init` | `{ type, shared, width, height, dpr }` | `apps/game/src/worker/worker-types.ts:33` | `apps/game/src/app.ts:148`（只发 `type` 与 `shared`）；debug 侧 `apps/debug/src/input/input-bridge.ts:21` 发全部五字段（调用点 `apps/debug/src/app.ts:316`） | game 侧三字段无发送方、两侧均无读取点（分发器只读 `shared`，`src/ts-shared/auth/worker-dispatch.ts:270`）；debug 侧注释写明是只写字段（`apps/debug/src/worker/worker-types.ts:50`） |
 | `config` | `{ type, section, patch }` | `apps/game/src/worker/worker-types.ts:51` | `apps/game/src/input/input-bridge.ts:46`、`:53`、`:65` | 一致（段名与实际下发载荷的口径差异见下条） |
 | `respawn` | `{ type }` | `apps/game/src/worker/worker-types.ts:58` | `apps/game/src/input/input-bridge.ts:71` | 一致 |
 | `teleport` | `{ type, target }` | `apps/game/src/worker/worker-types.ts:63` | `apps/game/src/input/input-bridge.ts:77` | 一致 |
