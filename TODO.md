@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07、2026-10-09 各触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **170**；game **240**；debug **325**；shared **450**；取证项 **508**；跨区/文档治理 **611**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **171**；game **240**；debug **325**；shared **454**；取证项 **508**；跨区/文档治理 **611**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -26,11 +26,12 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（68 条）
-### 待裁决（0）
+## 未结项（73 条）
+### 待裁决（1）
+- **T-453** 三端呈现/画质档不同源（game 面板档 + 画质；debug 只默认档；viewer 皆无）⇒ 等 owner（D-108）　`shared`
 
 
-### 待修（65）
+### 待修（69）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
@@ -99,6 +100,10 @@
 - **T-619** owner 反馈：雪盖疑似消失（未复现，待视点）+ 石头模型偏黑（30 个 rock03 报警疑假阳性）　`shared`
 - **T-624** viewer 无 LOD/PVS 剔除（全量绘制）　`viewer`
 - **T-627** `$bumpmap` 法线贴图未接线（冰面缺凹凸高光细节）　`shared`
+- **T-170** viewer 不导出实体放置模型（`entities` 恒空）⇒ 实体模型完全不渲染　`viewer`
+- **T-450** 实体放置模型无烘焙光照（无 `_VBSP_VLIGHT`/`extras.ambientCube`）⇒ 恒 fullbright　`shared`
+- **T-451** 三端 GLB 门禁只覆盖 debug↔game 且只比材质/图片（viewer、属性、extras 全盲）　`shared`
+- **T-452** `s1_ramp1b` 逐顶点光照条纹（三端数据相同；疑在合并期 + 反条纹档默认关）　`shared`
 ### 已取证待立项（2）
 - **T-109** 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正　`viewer`
 - **T-115** untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查　`viewer`
@@ -121,7 +126,7 @@
 | T-625 | 洞内 prop 异常黑：部分 mesh 无 _VBSP_VLIGHT ⇒ 只剩近零环境光立方体兜底 | 缺陷 | shared | 已结案 | **待修（2026-10-09，owner 报「洞内部分模型异常黑」）**。**已复现**：用 debug 端准星检查器定位到 owner 报的物体 —— `准星 模型「rock03_epicmdl#3」22HU[8632,6980,-4111] 材质:rock03 纹理:rock03`（材质纹理都在 ✓），22HU 近距整帧全黑、61HU 时是**几乎纯黑的一大块岩石**（只有顶部边缘有灰）。**机制（有硬数据）**：新增按名字触发的定向转储后实测同一模型内部两类 mesh —— `rock01_epicmdl#16`/`rock05_epicmdl#28`/`rock08_epicmdl` 的 attrs 含 `_vbsp_vlight`+`_vbsp_vcube`、`注入{vlight1:true}`；而 **`rock03_epicmdl#12` 的 attrs 只有 `normal/position/uv`（无 `_vbsp_vlight`）**、`注入{ambCube:true}` ⇒ 这些 mesh 走**只有叶子环境光立方体**的兜底。洞穴内该 cube 接近 0（T-617 实测线性中位 0.004）＋共享默认 `lightFloor = 0` ⇒ 光照项恒 0 ⇒ **纯黑**。旁证：game 端 `[ambient-cube] 命中=1376 未命中=734`、T-619 的 `rock03_giantmdl` 30 个「真漏网」、以及 `src/wasm-core/vbsp/data/game.rs:249/318` 的 `NO_PER_VERTEX_LIGHTING = 0x40` **定义了但全仓无消费方**。附着点：`src/wasm-core/model_integrator/mod.rs:435` 的 `vlight.filter(｜v｜ v.len() == vertex_count)?` —— 长度不等即整 mesh 回退 cube（注释注明为刻意设计）。**第二个报点** `ramp_c1m_8`/`ice_transparent` 本轮未命中（射线打在 `实体面#15` 或空），留待识别。 ｜ **已结案（2026-10-09，第 3 轮）**：根因 = `src/wasm-core/model_integrator/mod.rs` 的两道过滤（① `:222` 用**模型顶点数**去比 `.vhv` 的 **strip group 顶点序长度**，不符即整实例丢弃；② 旧 `VLIGHT_DARK_FRACTION_MAX = 0.5`：重排后**纯黑顶点占比 ≥50% 就整块丢弃**逐顶点烘焙）。洞穴内直接光本就大面积为零 ⇒ 触发丢弃 ⇒ 只剩近零 leaf ambient cube ⇒ 纯黑。**修复**：① 新增 `vmdl::strip_vertex_total()`（= strip group 顶点总数，即 `remap_strip_group_colors` 期望的长度）并改用它比对；② **删除暗占比丢弃**（着色器本就按 `pow(vlight)+cube` 组合：黑顶点贡献 0、由 cube 兜底 ⇒ 丢弃多余且有害），连同其常量与文档块一并移除。**验证**：game 转储 `rock03_epicmdl#12` 由 `attrs=[normal,position,uv]`（无 vlight）变为 `[…,_vbsp_vlight,_vbsp_vcube]`、`vlight1:true`，其真实数据 `min0/max0.384/mean0.016/**zero=88.3%**`（正是被旧阈值 0.5 丢弃的那类）；debug 同机位复拍：22HU 由整帧全黑变为暗而有结构、95HU 由近乎纯黑变为受光结构清晰（洞内整体仍暗，符合预期）。 | progress/pending-detail.md | 新 | 新 |
 | T-626 | 冰坡 `ice_transparent` 半透明面渲染异常（暗蓝黑＋硬边尖刺） | 缺陷 | shared | 已结案 | **待修（2026-10-09，owner 报第二个物体）**。owner 报 `ramp_c1m_8`（材质/纹理 `ice_transparent`，半透明）。**已定位**：用「材质名/纹理名也纳入匹配的定向转储」列出 39 个 `ice_transparent`/`ramp_wood01` 网格并取世界坐标，再在 debug 端准星检查器命中同族实例 —— `准星 模型「ramp_c1_8」 76HU[5192,5660,-3979] 材质:ice_transparent 纹理:ice_transparent (半透明)`（z≈-3979，正是洞穴一带 ✓）。**已复现**：近距离截图（`.tmp/goal-dark/shots-r2/chunk4846_0_0.png`）是一片**暗蓝黑平面 + 一排硬边尖刺**，形态不是单纯的「光不足」，更像**半透明 alpha/裁切处理异常**（该 chunk 的 `_vbsp_vlight` 实测 `mean 0.1351 / zero 25.2%`，线性化后即为暗蓝灰底色 ⇒ 底色暗属预期，尖刺形态属异常）。**未定因**：需读该材质的 `transparent/alphaTest/opacity/side` 与纹理 alpha 通道。注：owner 写的名字是 `ramp_c1m_8`，实测同族实例名为 `ramp_c1_8`（材质相同）。 **定因（2026-10-09，第 5 轮，两条硬证据）**：① **pakfile 原始 VMT**（`materials/project_tendies/models/ice_transparent.vmt`，`vertexlitgeneric`）写着 `$translucent 1`、**`$envmap env_cubemap` + `$envmaptint [0.66 0.66 0.66]`**、`$bumpmap surf_lt_alpine/alpine_snow01_normal`；② **运行期材质实测**（新增 matState 转储）`{transparent:true, alphaTest:0, blending:Normal, depthWrite:false, format:RGBA, size:512×512}` ⇒ **半透明/alpha 管线完全正确**，不是 alpha 或裁切缺陷。真正原因：该冰面在引擎里主要靠 **`$envmap` 反射**（加 bump 法线）显亮，而我们**既不导出也不渲染 envmap/bumpmap**（材质 userData 为空、类型为 `MeshBasicMaterial`）⇒ 洞穴里只剩「暗烘焙光 × 自身贴图」⇒ 视觉上「异常的黑」。**结论：不是洞穴光照计算错误，而是缺 `$envmap`/`$bumpmap` 特性。** **进度（第 6 轮）**：渲染端基础设施已就位 —— `setReflectionEnvMap()`（反射源持有者，由 `LightManager.setSkybox` 注入）与 `copyMaterialRenderState` 末尾的 `applyReflectionEnvMap`（读 `userData.vbsp_envmap`，诊断覆盖 `globalThis.__vbspEnvMapAll`）；实测三态灯 `{ready:true, all:0.66, applied:0}` ⇒ **反射源已就绪、全局覆盖生效，但对已建材质补挂 0 个** ⇒ 这些 prop 材质不在 `injectedMaterials` 登记表里（不经三个注入点创建）⇒ **渲染端接线未打通**；导出侧 `$envmap`/`$envmaptint` 尚未写入材质 extras。当前基础设施对用户**不可见**（无 `vbsp_envmap` 时行为不变）。旁证：本轮发现目标机位附近有地图 `trigger_teleport`（会把玩家弹回 tele_start）⇒ 截图须在 1.4s 内完成或选触发器外机位。 **第 7 轮**：修正为**加法混合**（`AddOperation`，`reflectivity = min(0.5, tint×0.35)`）—— 首版用 `MixOperation` + 0.66，实测把 879 个材质一起混成天空色、整屏惨白 ✗；并在 `copyMaterialRenderState` 里补 `registerInjectedMaterial(dst)`（材质登记原只覆盖三个雾补丁点，prop 材质经 `acquireVertexLightingMaterial → applyVertexLightingShader` 创建时未登记 ⇒ `applied` 由 0 变 **879**）。**A/B 实测（debug，全局覆盖 0.66）**：`chunk4846_1_90` 均值 49.3 → **98.3**、`chunk4846_2_180` 37.4 → **98.3**，差异 71%；截图里冰坡尖刺出现淡蓝白**反射高光**、画面未被冲淡 ⇒ **渲染端方案验证通过**。**仍待做**：把反射限定到 VMT 真的声明 `$envmap` 的材质（当前全局开关会连岩石一起提亮，属过度施加）⇒ 需在模型材质路径导出 `$envmap`/`$envmaptint` extras。 **已结案（2026-10-09，第 8 轮，端到端验证）**：导出侧在 `src/wasm-core/pakfile_models.rs` 的 `parse_vmt`/`VmtInfo` 新增 `$envmap`/`$envmaptint` 解析（`envmap_tint`，缺省 `[1,1,1]`），经三端收集器 `PakMaterials.envmap_tints` → `InMemoryResources.material_envmap` → `model_integrator::push_material` 写进材质 extras `vbsp_envmap`；渲染端按之前的 `applyReflectionEnvMap`（加法 + `reflectivity=min(0.5,tint×0.35)`）自动接线。**验证（debug，不带任何全局开关）**：`__vbspEnvMapApplied = **10**`（仅声明 `$envmap` 的材质，此前全局测试为 879 全量）✅；同机位截图冰坡呈**淡蓝白反射高光**、**周围岩石保持洞内暗度** ✅。结论：**该物体的「异常黑」已修复**（根因是缺 `$envmap` 特性，非光照计算错误）。配套的 `$bumpmap` 法线细节另立 T-627。 | progress/pending-detail.md | ① 在导出侧保留 VMT 的 `$envmap`/`$envmaptint` 与 `$bumpmap` 标记（extras/userData）并在渲染端接线（可用 2D 天空盒立方体作为 `env_cubemap` 的近似源）；② 修复后同机位（`[5166,6191,-3850]` 朝向该坡）截图中冰面出现反射亮度、不再呈死黑平面；③ 三端 typecheck + build:app exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 | 新 |
 | T-627 | `$bumpmap` 法线贴图未接线（冰面缺凹凸高光细节） | 缺失 | shared | 待修 | **待修（2026-10-09，第 8 轮从 VMT 对照发现）**。`materials/project_tendies/models/ice_transparent.vmt` 声明 `$bumpmap surf_lt_alpine/alpine_snow01_normal`，但我们的材质管线既不解析也不渲染法线贴图（`parse_vmt` 无 `$bumpmap`、`MeshBasicMaterial` 无 tangent/normal 通路）⇒ 冰面只有平面反射、没有凹凸细节。T-626 修复的是「异常黑」（`$envmap`），本条是配套的细节保真缺口。 | progress/pending-detail.md | 导出侧保留 `$bumpmap` 并接线（three 侧 Basic 材质不支持法线 ⇒ 需换受光材质或自定义注入）；修复后同机位冰坡出现凹凸高光细节；三端 typecheck + build:app exit 0；`node src/scripts/check-doc-drift.mjs` A–P 全 0 | 新 |
-## 总表（84 条）
+## 总表（89 条）
 
 | ID | 事项 | 类型 | 归属 | 状态 | 证据 | 详情 | 判据 | 原号 |
 |---|---|---|---|---|---|---|---|---|
@@ -209,3 +214,8 @@
 | T-608 | 核实「单入口」假设：Copilot / Gemini CLI 是否真的读根 `AGENTS.md`（目前只是通行约定），结论与出处写进规范篇 | 文档口径 | docs | 已结案 | **已结案（2026-10-09，遗弃）**：核实「Copilot / Gemini CLI 是否真读根 `AGENTS.md`」属**通行约定**的考证——结论无论正负都不改变本仓任何配置或行为（`AGENTS §0` 已把根 `AGENTS.md` 定为唯一入口）⇒ 不值得占一行 | documents/norms/annotation-and-verification.md | **遗弃（不做）**：依据见证据（结论不改变本仓行为） | — |
 | T-609 | 体检 `[O]` 对**终态行**（已记录 / 已结案）的「判据」列按行态保护：改终态行判据须先 approve，未结行改判据不拦 | 工具·流程 | repo | 待修 | src/scripts/docflow.mjs:201 | documents/norms/annotation-and-verification.md | 判据：改一条终态行的判据 ⇒ `node src/scripts/docflow.mjs check` 报「受保护列」；改未结行的判据不报 | — |
 | T-611 | 文档锚点「行号陈旧」体检抓不到 | 缺陷 | 工具 | 待修 | `documents/viewer/implementation/core.md:29`、`documents/viewer/implementation/core.md:31` | documents/norms/annotation-and-verification.md | 判据：先建 `src/scripts/check-doc-anchor-target.mjs`（逐锚点断言「文档所称符号名出现在该行」，不符 exit 1）；负向用例 = 上述 `apps/viewer/src/core/scene.ts:184` ⇒ exit 1，修好后的 `core.md` 全篇 ⇒ exit 0 | — |
+| T-170 | viewer 不导出实体放置模型（`entities` 恒空）⇒ `prop_dynamic` 等实体模型完全不渲染 | 缺陷 | viewer | 待修 | apps/viewer/crates/wasm/src/lib.rs:703 | progress/monthly/2026-10-10.md | 判据：`src/scripts/check-glb-parity.mjs` 扩到三端后跑 `node src/scripts/check-glb-parity.mjs test/maps/surf_boreas.bsp` ⇒ exit 0 且 viewer 段出现 `buk01.mdl` | 新 |
+| T-450 | 实体放置模型无任何烘焙光照（无 `_VBSP_VLIGHT`、无 `extras.ambientCube`）⇒ 恒 fullbright 贴图原色 | 缺陷 | shared | 待修 | src/wasm-core/model_integrator/mod.rs:1368 | progress/monthly/2026-10-10.md | 判据：探针列「有 mesh 但无 `extras.ambientCube`」节点 ⇒ 只剩世界面 `bsp`；实体模型节点拿到 cube 或逐顶点光照 | 新 |
+| T-451 | 三端 GLB 一致性门禁只覆盖 debug↔game 且只比材质/图片（viewer、图元属性、节点 extras 全盲） | 配置·门禁 | shared | 待修 | src/scripts/check-glb-parity.mjs:41 | progress/monthly/2026-10-10.md | 判据：`APPS` 含 viewer 且断言加「节点名集合 / 图元属性键集合 / `extras.ambientCube` 有无」三项；`node src/scripts/check-glb-parity.mjs test/maps/surf_boreas.bsp` ⇒ 三端全绿 exit 0 | 新 |
+| T-452 | `s1_ramp1b` 逐顶点光照条纹（三端导出数据相同；疑点在合并期差异 + 反条纹档 `propVertexFlatten` 默认 0） | 缺陷 | shared | 待修 | src/renderer-shared/shader/lightmap-shader.ts:728（对照 apps/debug/src/renderer/renderer-main.ts:144） | progress/monthly/2026-10-10.md | 判据：同视点三端 × `__vbspPropVertexRelax=0/1` × `__vbspPropVertexFlatten=1` + `__vbspDumpMesh=s1_ramp1b` 转储 ⇒ 条纹在某档消失（沿条纹方向相邻列差 ≥ 50% 下降） | 新 |
+| T-453 | 三端呈现/画质档不同源（game 持久化面板五档 + mosaic 画质；debug 只默认档但有画质档；viewer 两者皆无） | 缺陷 | shared | 待裁决 | apps/game/src/renderer/renderer-main.ts:221 | progress/monthly/2026-10-10.md | [待补] 等 owner 对 D-108 的结论 | 新 |
