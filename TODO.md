@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（88 条）
+## 未结项（87 条）
 ### 待裁决（0）
 
 
-### 待修（86）
+### 待修（85）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
@@ -47,7 +47,6 @@
 - **T-146** 锁中毒会 panic，与本文件其它失败形态不一致　`viewer`
 - **T-147** 材质去重键是材质名，同名材质被后续模型复用　`viewer`
 - **T-148** packed_files 构造期缓存而 num_static_props 每次现算　`viewer`
-- **T-157** `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达　`viewer`
 - **T-166** `ShavitParseResult.flags` 与 `frameStart` 在运行期无消费点　`viewer`
 - **T-167** 进度回调里的 `'map'` 分支不可达　`viewer`
 - **T-206** `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃　`game`
@@ -156,8 +155,8 @@
 | T-060 | .dem 玩家输入可得性重审（owner 质疑「表示无法获取玩家的输入，但实际上应该可以」，2026-10-01 | 缺陷 | viewer | 已结案 | **已消除**：owner 已终裁「宁缺勿猜」——提交 `9046975`（fix(viewer): .dem 缺陷清账）明确「按键显示撤除：删 `keyguess.ts`，帧循环只认 `clip.buttons` 真值（`.replay` 路径），`.dem` 按键簇整组熄灭」。工作区留有**可执行实证**：`apps/viewer/src/replay/demo/demo.ts` 的 `usercmdDiag` 统计 `dem_usercmd` 载荷长度（注释写明「用来判断按键信息是否存在」），`apps/viewer/src/replay/democlip.ts:120` 记录该裁定 ⇒「输入是否可得」已查实（载荷存在）、「是否使用」已由 owner 决定 | progress/pending-detail.md | `git log -1 --format=%s 9046975` ⇒ 含「按键反推显示撤除」；`git grep -n usercmdDiag -- apps/viewer/src` ⇒ 诊断仍在（裁定留档） | #91 |
 | T-062 | 本轮入口收敛的两条留档待裁（2026-10-01）：① importer.ts 的 Source .dem 分支在 UI 层已无调用路径… | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/panel.ts:283 | progress/pending-detail.md | 判据：@BT@git grep -n "importer" -- apps/viewer/src@BT@ ⇒ Source .dem 分支无 UI 调用路径 ⇒ 删或接线 | #93 |
 | T-064 | 8 篇 debug 文档存在「在界内但内容偏旧」的锚点簇（2026-10-03 本轮量化，未改）：src/scripts/check-d… | 文档口径 | docs | 已结案 | documents/debug/sequences.md:24 与 documents/debug/overview.md:91 ⇒ `ready` 发送点锚点按符号重定位为 apps/debug/src/worker/main.ts:484（原 483 是 `onInit` 行） | documents/debug/sequences.md | 见详情 | #95 |
-| T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | 判据：移除面板容器 ⇒ 控制台出现可读错误（不再静默生成脱离文档的元素） | — |
-| T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道 | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:267 | documents/viewer/implementation/app.md | 判据：构造 2 条以上越界轨道 ⇒ 提示串 bbox 覆盖全部（不再只取第一条） | — |
+| T-101 | 面板容器缺失时静默降级为脱离文档的元素（需决定是否显式报错）（修复已落地 2026-10-09，判据待浏览器实测） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:210 | documents/viewer/implementation/app.md | 判据：移除面板容器 ⇒ 控制台出现可读错误（不再静默生成脱离文档的元素） | — |
+| T-102 | 贴合检查提示串的 bbox 只取第一条越界轨道（修复已落地 2026-10-09，判据待浏览器实测） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:267 | documents/viewer/implementation/app.md | 判据：构造 2 条以上越界轨道 ⇒ 提示串 bbox 覆盖全部（不再只取第一条） | — |
 | T-103 | ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动） | 缺陷 | viewer | 待修 | apps/viewer/src/app.ts:807 | documents/viewer/implementation/app.md | 判据：`?replay=x.dem` ⇒ 按内容（魔数）分派并载入成功（不再按参数名拒收） | — |
 | T-105 | ensureWasm 把首次失败永久缓存，一次瞬时失败后本会话不自愈 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/bsp.ts:123 ⇒ `wasmReady` 的 IIFE 接 `.catch` 清缓存；前后对照探针（fetch 每次必失败、连续两次调用）⇒ 修复前 fetch 1 次（不重试）/ 修复后 2 次（会重试）；typecheck 通过 | documents/viewer/implementation/core.md | 见详情 | — |
 | T-106 | numField 把空串当合法 0 写入变换 | 缺陷 | viewer | 已结案 | apps/viewer/src/core/dom.ts:106 ⇒ 空串 / 纯空白 trim 后判 invalid、不写变换（DOM 桩探针：`""` ⇒ onInput(NaN,false) + invalid 类） | documents/viewer/implementation/core.md | 见详情 | — |
@@ -206,7 +205,7 @@
 | T-154 | clipToPayload 没有显式返回类型，字段写错的报错落在调用点 | 缺陷 | viewer | 已结案 | apps/viewer/src/worker/main.ts:122 ⇒ `clipToPayload(clip: Clip): ClipPayload`；把定义里 `vel` 写成 `vel2` 的对照 ⇒ 报错落点由调用点 `main.ts(104,20)` 移到定义处 `main.ts(129,5)`；typecheck 通过 | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-155 | req.rule 缺少防御，缺字段时抛 TypeError 并被 catch 成 error | 缺陷 | viewer | 已结案 | apps/viewer/src/worker/main.ts:87/88/93/94 ⇒ 改走文末 `ruleOf(req)`；探针 ⇒ `rule: undefined` 修复前 TypeError、修复后明确错误「导入请求缺少 rule 配置」；`rule: {}` 仍 done（1211 帧） | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-156 | `wasm.d.ts` 是零导入点的类型面 | 未接线·死代码 | viewer | 已结案 | **遗弃（不删）**：`apps/viewer/src/wasm.d.ts` 确为零导入点（真正导入 wasm 的是 `apps/viewer/src/core/bsp.ts:23` 的 `../../pkg/websurf_viewer_wasm.js`，全仓无 `./wasm.js` 引用），但它被 `apps/viewer/tsconfig.json:15` 的 `include` 点名收进编译程序，且只读规范 `CONTRIBUTING.md:26` 以「各工程 `src/wasm.d.ts`」为约定 ⇒ 删除需同时改构建配置与规范篇、收益为零 | documents/viewer/implementation/app.md | `git grep -n "wasm.d.ts" -- apps/viewer/tsconfig.json` ⇒ 仍在 include（遗弃、不删） | — |
-| T-157 | `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/app.ts:726 | documents/viewer/implementation/app.md | 判据：`git grep -n "viewer.replay.setSpeed" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-157 | `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达 | 未接线·死代码 | viewer | 已结案 | **已结案（判为遗弃，不删）**：`window.viewer.replay.setSpeed` 是**文档化的对外控制 API**——`apps/viewer/web/index.html:104` 明写「外部脚本可经 `window.viewer.replay` 控制播放：play / pause / seek(秒) / setSpeed / setMode / follow / tracks() / meta()」，`apps/viewer/src/replay/timeline.ts:27` 又以它的钳制范围作为倍速档位的权威口径。原断言（`Math.max(0.1, Math.min(16, Number(x) || 1))` 的下限只有负数能触发）成立但**无功能影响**：文档自己写明「两者不冲突」，钳制是防御性的。按 D-024 窄口径（零调用点但**有文档/接口依赖**）⇒ 遗弃、不删 | documents/viewer/implementation/app.md | `git grep -n "window.viewer.replay" -- apps/viewer/web/index.html` ⇒ 1 处（对外 API 文档）；`git grep -n "viewer.replay.setSpeed" -- apps/viewer/src` ⇒ 1 处（`apps/viewer/src/replay/timeline.ts:27` 引用其钳制范围）；`cd apps/viewer && npm run typecheck` ⇒ exit 0 | — |
 | T-158 | `core/pose.ts` 的两个函数零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/pose.ts` 删除 `pitchClampedRad` 与 `eyeHeight`（1/22 行，同时移除随之失效的 `./constants.js` 导入）；**判据**：全工作区扫描（527 个文件、含未跟踪，非 `git grep`）⇒ 两者只剩定义处与文档/TODO 提及，`pose.js` 的导入点只有 `type Pose` / `bspYawToCsYaw` / `wrapDeg` 再导出 ⇒ 零调用点；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-159 | `RAD2DEG` 在 `apps/viewer/src` 内零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/constants.ts` 删除 `RAD2DEG`（2/4 行）；**判据**：全工作区扫描 ⇒ 只剩定义处与文档/TODO 提及 ⇒ 零调用点；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-160 | `ViewerScene.model` getter 零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/scene.ts` 删除 `get model()`（0/5 行）；**判据**：全工作区扫描 `.model` ⇒ 只有类内部 `modelRoot`，无外部读取者；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |

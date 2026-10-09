@@ -96,20 +96,20 @@ sidebarToggle?.addEventListener('click', () => {
  * 那样的文件头，故这一层没有信息条，元信息由录像页看板自己展示）。
  * 容器元素缺失时兜底成游离 div：会话仍可构造，只是不上屏（与既有的 `qs(...) ?? createElement` 口径一致）。
  */
-const dockFallback = (): HTMLElement => document.createElement('div');
+const dockFallback = (what: string): HTMLElement => { console.error(`[viewer] 面板容器缺失：${what} 降级为脱离文档的元素（检查 web/index.html 的对应 id）`); return document.createElement('div'); };
 const sessions: Record<SessionKind, ReplaySession> = {
   replay: new ReplaySession(
     'replay',
     scene,
-    qs('session-replay') ?? dockFallback(),
-    qs('timeline') ?? dockFallback(),
+    qs('session-replay') ?? dockFallback('session-replay'),
+    qs('timeline') ?? dockFallback('timeline'),
     qs('replayMeta'),
   ),
   demo: new ReplaySession(
     'demo',
     scene,
-    qs('session-demo') ?? dockFallback(),
-    qs('timelineDemo') ?? dockFallback(),
+    qs('session-demo') ?? dockFallback('session-demo'),
+    qs('timelineDemo') ?? dockFallback('timelineDemo'),
     null,
   ),
 };
@@ -125,19 +125,19 @@ function activeSession(): ReplaySession {
 // `.dem` 的 `Clip.buttons` 恒 `null`（Source 只把录制者本人的输入写进 usercmd），
 // 没有真值就不该建一排永远不亮的灯，故录像会话的时间轴上根本没有按键簇。
 const telemetry = new TelemetryHud(
-  telemetryEl ?? dockFallback(),
+  telemetryEl ?? dockFallback('telemetry'),
   sessions.replay.timelineRoot,
 );
 
 // **录像信息条**（`#demoInfo`，录像会话 dock 上层）：录像侧独有的展示位，内容来自 `.dem` 解析产物
 // （由 `demoPanel` 的 `onParsed` 推入）。与记录会话的 `#replayMeta` 是**两个元素、两个写者** ——
 // 记录条归 `ReplaySession` 的 `ReplayMetaPanel`，两者互不触碰对方的容器。
-const demoInfo = new DemoMetaStrip(qs('demoInfo') ?? dockFallback());
+const demoInfo = new DemoMetaStrip(qs('demoInfo') ?? dockFallback('demoInfo'));
 
 // **画面左下角的对话浮层**（`#chatOverlay`）：只显示录像「当前这一刻」附近的几条聊天
 // （15 秒淡出 / 同屏最多 5 条 / 超出丢最早那条 / 最底下是最晚的）。数据由 `onParsed` 一次性推入，
 // 时间由帧循环推进（见 `frame()`）；`bottom` 由它按 `#dock` 高度动态让位。
-const chatOverlay = new ChatOverlay(qs('chatOverlay') ?? dockFallback(), qs('dock'));
+const chatOverlay = new ChatOverlay(qs('chatOverlay') ?? dockFallback('chatOverlay'), qs('dock'));
 
 /** 速度读数的显隐跟随**当前上场会话**有没有内容（录像载入完但还没点人时也该显示）。 */
 function syncTelemetry(): void {
@@ -264,7 +264,7 @@ function updateReplayMapStatus(): void {
       );
     });
     if (outside.length > 0) {
-      const b = outside[0].clip.bbox;
+      const b = unionBbox(outside.map((t) => t.clip.bbox));
       msgs.push(
         `${outside.map((t) => `「${t.name}」`).join('、')}完全落在地图包围盒外` +
           `（bbox min ${tip(b.min)} / max ${tip(b.max)}）`,
@@ -1057,3 +1057,13 @@ window.addEventListener('beforeunload', (e) => {
   e.preventDefault();
   e.returnValue = ''; // 触发确认框所必需（Chrome/Edge 约定）
 });
+
+/** 多条越界轨道取并集：提示串的 bbox 必须覆盖全部越界轨道（只取第一条会误导读数）。 */
+function unionBbox(boxes: { min: [number, number, number]; max: [number, number, number] }[]): { min: [number, number, number]; max: [number, number, number] } {
+  const min: [number, number, number] = [boxes[0].min[0], boxes[0].min[1], boxes[0].min[2]];
+  const max: [number, number, number] = [boxes[0].max[0], boxes[0].max[1], boxes[0].max[2]];
+  for (const q of boxes.slice(1)) {
+    for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], q.min[i]); max[i] = Math.max(max[i], q.max[i]); }
+  }
+  return { min, max };
+}
