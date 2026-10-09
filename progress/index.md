@@ -152,3 +152,4 @@
 | 2026-10-09 | T-454 诊断：debug 双模式差异**只在天区**（差异像素 11.85%，包围盒 x∈[211,1279] y∈[0,215]，比值 p95 1.129；世界几何/光照逐像素相同）⇒ 天区装配的加载期竞态 | progress/monthly/2026-10-10.md:39 |
 | 2026-10-09 | T-454 P5-1：viewer 导出面补齐 `mosaic_decode`（EOF 追加纯 Rust 转发，锚点零漂移；d.ts 三端齐备 + `initSync` 运行时验证转发生效；`src/wasm-core` 仍 0 处 wasm_bindgen） | progress/monthly/2026-10-10.md:41 |
 | 2026-10-09 | T-454 P5-3：viewer 补齐 `mosaic_encode`（mosaic 导出对完备，运行时双验证）；P5-2 调查收敛为「viewer 导出链确实收 static_props ⇒ 原 props 缺失结论需按当前代码重新取证」 | progress/monthly/2026-10-10.md:43 |
+| 2026-10-09 | T-454 P5-2：viewer 实体放置模型接通（**两处**根因：`entities: Vec::new()` + 被引用模型集合未并入实体 `model`）；GLB 数据级对齐 debug/game（boreas +3.7MB/`buk01.mdl` 0→1、surf_666 `cow.mdl` 0→1），测试视点出图逐像素不变 | progress/monthly/2026-10-10.md:45 |

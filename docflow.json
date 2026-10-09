@@ -158,9 +158,9 @@
     ],
     "base": {
       "TODO.md": "055bdb7dfb9783f3ea17606d6216d4991fcf84160b5b71de333bd74358ad31de",
-      "apps/viewer/crates/wasm/src/lib.rs": "03fc3659b3af9deaaf9a1bf3f6890fdf95ba73b8ad7ca00f6069d5f1a4cd72e3"
+      "apps/viewer/crates/wasm/src/lib.rs": "6f11c18a0f2d1a2caada8d8e55ff1ba67c7b3ac30f3fae80ab5c444ac78dffae"
     },
-    "at": "2026-10-09T17:02:00.829Z",
+    "at": "2026-10-09T17:08:14.055Z",
     "pins": {
       "README.md": "966ec495a5063cb2f69ae90c1dd639a0f8e6a456341e1f79dba1e577e6b0fecc",
       "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
@@ -980,7 +980,7 @@
       "src/ts-shared/phys/world-builder.ts:203:203": "ea663714",
       ".github/workflows/deploy-pages.yml:200:200": "6dd5eaf1",
       "src/scripts/docflow.mjs:201:201": "30f3eaae",
-      "apps/viewer/crates/wasm/src/lib.rs:703:703": "c96d6a69",
+      "apps/viewer/crates/wasm/src/lib.rs:703:703": "4dcdecf1",
       "src/wasm-core/model_integrator/mod.rs:1368:1368": "c21e5aa4",
       "src/scripts/check-glb-parity.mjs:41:41": "871d91c4",
       "src/renderer-shared/shader/lightmap-shader.ts:728:728": "83f90fb7",
@@ -4292,6 +4292,14 @@
   },
   "rebaselines": [
     {
+      "path": "TODO.md",
+      "at": "2026-10-09T17:08:13.902Z",
+      "by": "DSH",
+      "reason": "T-454 P5-2：看板证据列补 viewer 实体放置模型接通",
+      "changed": 1,
+      "total": 82
+    },
+    {
       "path": "documents/debug/overview.md",
       "at": "2026-10-09T16:50:40.759Z",
       "by": "DSH",
@@ -4602,14 +4610,6 @@
       "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
       "changed": 11,
       "total": 75
-    },
-    {
-      "path": "documents/debug/sequences.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 57,
-      "total": 148
     }
   ]
 }

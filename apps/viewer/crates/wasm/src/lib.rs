@@ -80,7 +80,7 @@ fn collect_pakfile_models(
     let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new(); // 键一律小写（T-145）
     for prop in bsp.static_props() {
         referenced.insert(prop.model().to_ascii_lowercase());
-    }
+    } for ent in bsp.entities.iter() { if let Ok(m) = ent.prop("model") { referenced.insert(m.to_ascii_lowercase()); } } // T-454 P5-2：实体放置模型（prop_dynamic 等）并入被引用集合，与 game/debug 同语义
 
     // 2. 一次遍历枚举全部条目：收集条目名，并顺手挑出 sp_<idx>.vhv 顶点光照
     let zip = bsp.pack.clone().into_zip();
@@ -616,7 +616,7 @@ impl BspProcessor {
 
         let resources = InMemoryResources {
             models,
-            entities: Vec::new(),
+            entities: model_integrator::collect_model_entities(&bsp),
             static_props,
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
@@ -700,7 +700,7 @@ impl BspProcessor {
         let materials = resolve_pakfile_materials(&bsp, &models, &index, Some(&fallback));
         let resources = InMemoryResources {
             models,
-            entities: Vec::new(),
+            entities: model_integrator::collect_model_entities(&bsp),
             static_props,
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
