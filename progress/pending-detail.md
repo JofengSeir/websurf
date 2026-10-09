@@ -410,7 +410,7 @@ debug `renderer-main.ts` optimizeScene 调用链注释「其又源自 harness wo
 
 - **光源定位**：`LUMP_WORLDLIGHTS`（lump 15，记录 88 B）共 384 条；第 **#352** 条 = `origin [13332, 628, 12251]`、`intensity [690.1, 0.5, 1896.6]`（G≈0 ⇒ 纯洋红）、type=`emit_point`、style=0，距 owner 视点 `13539,1284,9884` **2465 HU**。全图洋红点光 20 条，其余最近的在 10056 HU 外。
 - **方向基准**：该处近处 prop 的 leaf ambient cube 六面实测（`extras.ambientCube`）——槽 4（Source **+Z = 上**）最亮 `0.123~0.131`，槽 2（+Y）`0.065~0.078`，槽 5（-Z）最暗 `0.019~0.031` ⇒ 方向光**来自正上方**，洋红/亮度应落在**朝上**的面。
-- **实现缺陷**：`src/wasm-core/model_integrator/mod.rs:1326` 位置走 `map_coords(model.apply_root_transform(...))`（Source Z-up → glTF Y-up），而 `:1333` 法线是 `vertex.normal.into()`，**既不做 `map_coords` 也不做根变换**。
+- **实现缺陷**：`src/wasm-core/model_integrator/mod.rs:1328` 位置走 `map_coords(model.apply_root_transform(...))`（Source Z-up → glTF Y-up），而 `:1333` 法线是 `vertex.normal.into()`，**既不做 `map_coords` 也不做根变换**。
 - **引擎口径**：`common_vertexlitgeneric_dx9.h` 的 `VertexShaderAmbientLight`：`linearColor = n².x·cube[neg.x] + n².y·cube[neg.y+2] + n².z·cube[neg.z+4]`，`worldNormal` 是 **Source 世界轴**。本仓 `lightmap-shader.ts:1457-1459` 与它同形，且 cube 槽序也是 `[+X,-X,+Y,-Y,+Z,-Z]`（Source）⇒ 因为**法线也没转**，两侧"错得一致"，对**纯 yaw** 旋转的道具偶然成立；带 pitch/roll 的 prop（冲浪坡）会把"上方的光"贴到别的朝向。
 - **一次被否定的改动（留痕避免重犯）**：曾直接把 shader 加权式改成 Three 序（`nz²·cube[0/1] + nx²·cube[2/3] + ny²·cube[4/5]`），用「按位置反算的 Y-up 法线」测 corr(朝向光源, ambient 亮度) 得 **-0.0541**，而原式得 **0.5297** ⇒ 单独改一侧会打坏。这也**反证**了未转的是法线一侧。
 - **下一步（修法 + 判据）**：① `ModelVertex::from` 的法线改为 `map_coords(model.apply_root_transform(vertex.normal))`；② 同步把 shader 加权式改成 Three 序；③ 判据用 **GLB 的 `NORMAL` 属性**（不是从位置反算）重测相关系数应显著高于改前，并在 `13539,1284,9884` 同点截帧看洋红是否落在朝上的面。

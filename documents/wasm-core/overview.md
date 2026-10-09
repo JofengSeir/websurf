@@ -36,7 +36,7 @@
 | `GameLumpHeader` | `src/wasm-core/vbsp/data/game.rs:42` | game lump 目录项（版本差异按字段宽度累加读取） |
 | `Leaves` / `LightingLump` | `src/wasm-core/vbsp/mod.rs:77` / `src/wasm-core/vbsp/mod.rs:247` | 叶子集合视图与光照 lump |
 | `parse_vhv` | `src/wasm-core/vhv.rs:90` | 读 pakfile 内的 `sp_<i>.vhv` → prop 顶点色 |
-| `PakIndex` | `src/wasm-core/pakfile_models.rs:219` | PAK 内文件索引（去前缀/去扩展名后按候选列表查找） |
+| `PakIndex` | `src/wasm-core/pakfile_models.rs:211` | PAK 内文件索引（去前缀/去扩展名后按候选列表查找） |
 | `export_bsp_with_models` | `src/wasm-core/bsp_to_gltf_core/convert.rs:179` | **导出主入口**：BSP（+可选模型集成）→ GLTF |
 | `ConvertOptions` / `ExportResult` | `src/wasm-core/bsp_to_gltf_core/mod.rs:134` / `:115` | 导出选项与结果 |
 | `ResourceType` / `ResourceSource` / `MissingResource` | `src/wasm-core/bsp_to_gltf_core/mod.rs:75` / `:90` / `:101` | 资源缺失的类型化表示（导出期不静默丢弃） |

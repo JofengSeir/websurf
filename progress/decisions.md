@@ -30,7 +30,7 @@
 | T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | apps/game/src/savepoint.ts:92 |
 | T-214 | 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态 | apps/game/src/savepoint.ts:21 |
 | T-216 | `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长 | apps/game/src/savepoint.ts:112 |
-| T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | src/wasm-core/render_bundle.rs:141 |
+| T-218 | `.mdl` 配对名用大小写敏感的 `replace`，zip 条目名非全小写时 `.vvd`／`.dx90.vtx` 取回同一份 `.mdl` | src/wasm-core/render_bundle.rs:142 |
 | T-220 | `world-parse-ms` 的两段 `JSON.parse` 与 `build_world` 内部解析重复、开销叠加 | apps/game/src/worker/main.ts:513 |
 
 ### debug（7）
@@ -88,7 +88,7 @@
 | T-142 | 信息条重找跟随轨道，与 TrackSet.follow 策略重复 | apps/viewer/src/ui/replaymeta.ts:25 |
 | T-143 | el() 属性写入限制了 id 型契约（undefined 静默无 id） | apps/viewer/src/core/dom.ts:39 |
 | T-145 | 模型名匹配与材质查找的大小写口径不一致 | apps/viewer/crates/wasm/src/lib.rs:322 |
-| T-147 | 材质去重键是材质名，同名材质被后续模型复用 | src/wasm-core/render_bundle.rs:339 |
+| T-147 | 材质去重键是材质名，同名材质被后续模型复用 | src/wasm-core/render_bundle.rs:340 |
 | T-148 | packed_files 构造期缓存而 num_static_props 每次现算 | apps/viewer/crates/wasm/src/lib.rs:97 |
 | T-149 | map_name 两端都拿不到值，字段保留但无内容 | apps/viewer/crates/wasm/src/lib.rs:102 |
 | T-151 | BspMetadata 与 TS 契约靠约定对齐，无编译期校验 | apps/viewer/crates/wasm/src/lib.rs:78 |

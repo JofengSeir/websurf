@@ -22,6 +22,7 @@ import { applyLightmap, buildMapScene } from './scene-builder.js';
 import { mergeIntoChunks, padBoundingSpheres } from './scene-optimizer.js';
 import { extractSkyArea, SKY_LAYER, type SkyCameraParams } from '../environment/miniature-sky.js';
 import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../shader/world-transition.js';
+import { applyBumpShaders, collectBumpTextures } from '../shader/bumpmap.js';
 import { fullbrightUnlitLitMaterials } from '../shader/lightmap-shader.js';
 
 /** PVS 查询面（只用到 cluster 查询；各端的 PvsManager 结构兼容）。 */
@@ -69,6 +70,9 @@ export interface AssembleSceneResult {
 export async function assembleScene(opts: AssembleSceneOptions): Promise<AssembleSceneResult> {
   const { gltf, scene: mapRoot, bbox, maxDim } = await buildMapScene(opts.glb);
   await collectWorldTransitionTextures(gltf, mapRoot);
+  // `$bumpmap`（T-627/P8）登记必须同样早于 lightmap：lightmap 会另建材质、不搬 userData，
+  // 但第一贴图实例被沿用（注册表以它为键），所以要在建材质之前把贴图实例取到手。
+  await collectBumpTextures(gltf, mapRoot);
   opts.onRootReady?.(mapRoot, gltf);
 
   const applied = await applyLightmap(mapRoot, gltf);
@@ -101,10 +105,13 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
 
   const converged = fullbrightUnlitLitMaterials(root);
   applyWorldTransitionShaders(root);
+  // 反射扰动注入必须在**合并之后**：合并按材质实例分组，早注入会漏掉合并新建的实例。
+  applyBumpShaders(root);
   let skyConverged = 0;
   if (skyGroup) {
     skyConverged = fullbrightUnlitLitMaterials(skyGroup);
     applyWorldTransitionShaders(skyGroup);
+    applyBumpShaders(skyGroup);
   }
   if (converged > 0) {
     console.info(

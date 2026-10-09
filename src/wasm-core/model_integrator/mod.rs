@@ -143,6 +143,7 @@ pub struct InMemoryResources {
     pub material_unlit: std::collections::HashSet<String>,
     /// `材质名 → $envmaptint`（仅 `$envmap` 材质）：写进材质 extras 的 `vbsp_envmap`，
     /// 渲染端据此挂 env_cubemap 近似反射。
+    pub material_bumpmap: std::collections::HashMap<String, String>, // `材质名 → 法线贴图表键`（T-627/P8）：键指向 `textures` 里的 `$bumpmap` PNG；`push_material` 据此推贴图并把纹理下标写进 extras `vbsp_bumpmap`
     pub material_envmap: std::collections::HashMap<String, [f32; 3]>,
 }
 
@@ -596,6 +597,16 @@ impl ModelIntegrator {
             // 尝试加载纹理文件
             let texture_index = self.push_texture(buffer, gltf, &material_name);
 
+            // `$bumpmap`（T-627/P8）：法线贴图按 `<材质名>#bump` 从内存贴图表取（由
+            // `render_bundle::resolve_pakfile_materials` 解出），推成 GLB 贴图后把**纹理下标**写进
+            // 材质 extras。刻意**不**设 `normal_texture`：MeshBasicMaterial 的 fragment 没有 `normal`
+            // 符号，设了会让整批材质编译失败（见 `renderer-shared/shader/bumpmap.ts`）。
+            let bump_texture_index = self
+                .in_memory
+                .material_bumpmap
+                .get(&material_name)
+                .and_then(|k| self.push_texture(buffer, gltf, k));
+
             // 有真实贴图时基色必须为白（否则给贴图叠加染色）；
             // 无贴图时才回退到「按材质名生成的可区分颜色」。
             let color = if texture_index.is_some() {
@@ -638,6 +649,10 @@ impl ModelIntegrator {
             // `$envmap` 材质：把 `$envmaptint` 交给渲染端（`material.userData.vbsp_envmap`）。
             if let Some(t) = self.in_memory.material_envmap.get(&material_name) {
                 ex.insert("vbsp_envmap".into(), serde_json::json!(t));
+            }
+            // `$bumpmap` 材质：把**纹理下标**交给渲染端（`material.userData.vbsp_bumpmap`）。
+            if let Some(idx) = bump_texture_index {
+                ex.insert("vbsp_bumpmap".into(), serde_json::json!(idx));
             }
             let extras: json::Extras = if ex.is_empty() {
                 Default::default()

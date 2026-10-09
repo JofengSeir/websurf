@@ -114,7 +114,7 @@
 
 | # | 步骤 | 约束（为什么必须在这里） |
 |---|---|---|
-| 1 | `buildMapScene(glb)`（`src/renderer-shared/scene/assemble-scene.ts:70`） | 清根 rotation + 世界包围盒 + **摘除 punctual 灯**；必须在挂进主场景之前（VRAD 烘焙已含其贡献，运行时再打会重复计光且 uniform 超限） |
+| 1 | `buildMapScene(glb)`（`src/renderer-shared/scene/assemble-scene.ts:71`） | 清根 rotation + 世界包围盒 + **摘除 punctual 灯**；必须在挂进主场景之前（VRAD 烘焙已含其贡献，运行时再打会重复计光且 uniform 超限） |
 | 2 | `collectWorldTransitionTextures(gltf, root)`（`:71`） | 登记 VMT `$basetexture2`（雪盖等第二贴图）与材质 extras；必须在注入（第 7 步）之前 |
 | 3 | `applyLightmap(root, gltf)`（`:74`） | 世界面 lightmap atlas（`uv1` 通道）+ prop 逐顶点烘焙（`sp_<i>.vhv`）+ leaf ambient cube；**必须早于分块合并**（合并会重建几何与材质数组，之后按原 mesh 的材质/UV 施加就找不到映射） |
 | 4 | `extractSkyArea(root, 判定)`（`:82` 到 `:84`） | 3D 天空盒天空区摘出主世界。判据 =「图元采样点落在 `sky_camera` 所在 BSP cluster」。**必须晚于第 3 步**（T-621：早摘则天空区不在光照遍历范围内 ⇒ 只剩贴图原色），**必须早于第 5 步**（合并成空间块后跨区大块无法再拆） |
@@ -122,7 +122,7 @@
 | 6 | `fullbrightUnlitLitMaterials(root)`（`:102`，天空组 `:106`） | 仍是 GLTF 原 Standard 材质的图元收敛为贴图原色（本工程不加灯 ⇒ 受光材质恒黑）。必须**晚于第 5 步**（合并会重建 mesh/材质数组）。天空组要再跑一遍 |
 | 6b | 剔除注册：`lodManager.setup`+`assignClusterIds`（debug，`apps/debug/src/renderer/renderer-main.ts:535` 到 `:536`）/ 内联 `lodItems`+`clusterIds`（game） | 逐块记录「世界中心 + 半径 + cluster 集合」，供每帧 `tick` 按 `cullDistance`（game 另叠 PVS）把更远的块 `visible = false`。**必须在合并之后**（收集的是合并后的块 mesh） |
 | 7 | `applyWorldTransitionShaders(root)`（`:103`，天空组 `:107`） | 双贴图混合注入（雪盖）：按顶点属性 `_vbsp_blend` 与 `vbsp_basetexture2` 改写材质。天空组要再跑一遍 |
-| 8 | 挂载：`scene.add(root)` + `scene.add(skyGroup)`（`apps/debug/src/renderer/renderer-main.ts:523` 到 `:525`） | 天空组逐 mesh `layers.set(SKY_LAYER)`（装配核 `src/renderer-shared/scene/assemble-scene.ts:95` 到 `:98`）；主相机 `layers.disable(SKY_LAYER)`；天空相机 `createSkyCamera`（`apps/debug/src/renderer/renderer-main.ts:390`）+ 每帧 `syncSkyCamera`（T-454 P7 起只在 `src/renderer-shared/environment/render-sky-pass.ts:79`）；天空遍雾 `start/end ÷ scale`（同模块） |
+| 8 | 挂载：`scene.add(root)` + `scene.add(skyGroup)`（`apps/debug/src/renderer/renderer-main.ts:523` 到 `:525`） | 天空组逐 mesh `layers.set(SKY_LAYER)`（装配核 `src/renderer-shared/scene/assemble-scene.ts:99` 到 `:98`）；主相机 `layers.disable(SKY_LAYER)`；天空相机 `createSkyCamera`（`apps/debug/src/renderer/renderer-main.ts:390`）+ 每帧 `syncSkyCamera`（T-454 P7 起只在 `src/renderer-shared/environment/render-sky-pass.ts:79`）；天空遍雾 `start/end ÷ scale`（同模块） |
 | 9 | 天空遍（第二相机）（T-454 P7 起唯一实现 `src/renderer-shared/environment/render-sky-pass.ts:70`） | 画 2D 天空盒六面 + 第 1 层图元（微缩景观）；主相机不画第 1 层 |
 
 **三端分歧史：三起同类错误，全部是「顺序/来源不一致」，且都不报错。**

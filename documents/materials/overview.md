@@ -51,7 +51,7 @@
 
 | 项 | 锚点 | 语义 |
 |---|---|---|
-| `PakIndex` | `src/wasm-core/pakfile_models.rs:219` | PAK 内部文件索引：按「去前缀 + 去扩展名」的键查候选路径列表（候选顺序见该文件实现） |
+| `PakIndex` | `src/wasm-core/pakfile_models.rs:211` | PAK 内部文件索引：按「去前缀 + 去扩展名」的键查候选路径列表（候选顺序见该文件实现） |
 | `GameLumpHeader` | `src/wasm-core/vbsp/data/game.rs:42` | game lump 目录项；光照/HDR 相关数据的字段与版本差异由该模块承载 |
 
 ## 6. 已知遗留与疑似缺陷（只记录，未改代码）（状态见 TODO.md）

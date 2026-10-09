@@ -51,6 +51,7 @@ pub struct PakMaterials {
     /// 的输入（共享层用 `extras.unlit` 标记这类图元；缺失会让自发光 prop 被当受光材质处理）。
     pub unlit: HashSet<String>,
     /// `材质名 → $envmaptint`（仅 `$envmap` 材质）：渲染端据此挂 env_cubemap 近似反射。
+    pub bumpmaps: HashMap<String, String>, // `材质名 → 法线贴图表键`（T-627/P8）：值形如 `<材质名>#bump`，指向 `textures` 里解出的 `$bumpmap` PNG；材质 extras 只记这个键
     pub envmap_tints: HashMap<String, [f32; 3]>,
 }
 
@@ -380,6 +381,20 @@ pub fn resolve_pakfile_materials(
 
             if !decode_textures {
                 continue;
+            }
+            // `$bumpmap`（T-627/P8）：法线贴图也解成 PNG 进同一张贴图表，键用 `<材质名>#bump`
+            // （与基色键同源且不会与基色/其它材质重名）；`bumpmaps` 记下这层映射，`push_material`
+            // 据此把**纹理下标**写进材质 extras。与基色贴图无关：基色缺失也照样收法线图。
+            if let Some(bump) = info.bumpmap.clone() {
+                if let Some(vtf_entry) = index.find(&bump, "vtf") {
+                    if let Ok(Some(vtf_bytes)) = bsp.pack.get(vtf_entry) {
+                        if let Some(png) = decode_vtf_png(&vtf_bytes) {
+                            let key = format!("{}#bump", tex.name);
+                            out.textures.insert(key.clone(), png);
+                            out.bumpmaps.insert(tex.name.clone(), key);
+                        }
+                    }
+                }
             }
             let Some(base) = info.basetexture else {
                 continue;

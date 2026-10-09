@@ -55,6 +55,7 @@ pub struct VmtInfo {
     pub unlit: bool,
     /// `$envmap` 存在时的反射强度：取自 `$envmaptint`（缺省 `[1,1,1]`）。
     /// 消费方据此给材质挂环境反射（`env_cubemap` 的近似）；`None` = 该材质未声明 `$envmap`。
+    pub bumpmap: Option<String>, // `$bumpmap` 的值（同上归一化：`\`→`/`、去首尾 `/` 与 `.vtf` 后缀）；None = 该材质未声明 `$bumpmap`（T-627/P8 用它取法线贴图）
     pub envmap_tint: Option<[f32; 3]>,
     /// `Patch` 着色器的 `include` 目标（另一个 `.vmt` 的路径）：`\` 已归一为 `/`，
     /// 首尾 `/` 已去掉，`.vmt` 后缀已剥。首次命中即锁定。
@@ -196,6 +197,20 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
             "$envmaptint" => {
                 if let Some(t) = parse_tint3(val) {
                     envmap_tint = Some(t);
+                }
+            }
+            "$bumpmap" => {
+                if info.bumpmap.is_none() {
+                    let v = val.replace('\\', "/");
+                    let v = v.trim_matches('/');
+                    let v = if v.to_ascii_lowercase().ends_with(".vtf") {
+                        v[..v.len() - 4].to_string()
+                    } else {
+                        v.to_string()
+                    };
+                    if !v.is_empty() {
+                        info.bumpmap = Some(v);
+                    }
                 }
             }
             "$alpha" => {
