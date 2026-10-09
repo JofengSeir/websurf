@@ -176,11 +176,6 @@ export class ViewerScene {
     // 判据 =「图元采样点落在 `sky_camera` 所在 cluster」；必须早于分块合并——合并后跨区的大块
     // 无法再拆。无 `sky_camera` / 无 PVS / 摘不到图元时不建，末尾不挂天空层。
     this.pvs = sky?.pvsJson ? new PvsManager(sky.pvsJson) : null;
-    const skyCluster = sky?.skyCamera && this.pvs
-      ? this.pvs.getClusterAt({ x: sky.skyCamera.origin[0], y: sky.skyCamera.origin[1], z: sky.skyCamera.origin[2] })
-      : -1;
-    this.skyGroup = sky?.skyCamera && skyCluster >= 0 ? extractSkyArea(mapRoot, (m) => this.meshInCluster(m, skyCluster)) : null;
-    this.skyParams = this.skyGroup && sky?.skyCamera ? sky.skyCamera : null;
 
     if (this.modelRoot) {
       disposeObject(this.modelRoot);
@@ -195,6 +190,13 @@ export class ViewerScene {
     // 静态光照（预烘焙，默认）必须赶在 optimizeScene 之前：分块合并按材质实例分组，
     // 换过材质的图元一旦留到合并之后才处理，分组与逐 primitive 的 UV1 映射都会失配。
     const applied = await applyLightmap(mapRoot, gltf);
+    // 3D 天空盒摘取：必须在 applyLightmap 之后（否则微缩区拿不到 lightmap 与逐顶点烘焙），
+    // 且在 optimizeScene 之前（合并成空间块后跨区大块无法再拆）。
+    const skyCluster = sky?.skyCamera && this.pvs
+      ? this.pvs.getClusterAt({ x: sky.skyCamera.origin[0], y: sky.skyCamera.origin[1], z: sky.skyCamera.origin[2] })
+      : -1;
+    this.skyGroup = sky?.skyCamera && skyCluster >= 0 ? extractSkyArea(mapRoot, (m) => this.meshInCluster(m, skyCluster)) : null;
+    this.skyParams = this.skyGroup && sky?.skyCamera ? sky.skyCamera : null;
     if (!applied) {
       console.info('[viewer][lightmap] 未施加静态光照（无 atlas 或施加失败），地图为贴图原色');
     }

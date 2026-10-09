@@ -278,15 +278,6 @@ export class RendererMain {
     //        traverse 且程序失效。
     const { gltf, scene, bbox, maxDim } = await buildMapScene(data.glb); await collectWorldTransitionTextures(gltf, scene);
 
-    // 1.1 3D 天空盒（起源做法，与 debug 同款）：把天空区图元摘出主世界，交第二相机单独渲染。
-    //     判据 =「图元采样点落在 `sky_camera` 所在 cluster」；必须早于分块合并——合并成空间块后
-    //     跨区的大块无法再拆。无 `sky_camera`/无 PVS/摘不到图元时不建，末尾不挂天空层。
-    this.pvsManager = new PvsManager(data.pvsJson);
-    const skyCluster = data.skyCamera
-      ? this.pvsManager.getClusterAt({ x: data.skyCamera.origin[0], y: data.skyCamera.origin[1], z: data.skyCamera.origin[2] })
-      : -1;
-    this.skyGroup = data.skyCamera && skyCluster >= 0 ? extractSkyArea(scene, (m) => this.meshInCluster(m, skyCluster)) : null;
-    this.skyParams = this.skyGroup && data.skyCamera ? data.skyCamera : null;
 
     this.scene.add(scene); // 挂进主场景：此时 punctual 光源已摘除
 
@@ -295,6 +286,16 @@ export class RendererMain {
     //     数组；放到合并之后施加就找不到原来的材质映射。返回值落账 pendingInjectReport
     //     （首帧后由 tick 统一统计注入生效性）。
     this.pendingInjectReport = await applyLightmap(scene, gltf);
+    // 1.1 3D 天空盒（起源做法，与 debug 同款）：把天空区图元摘出主世界，交第二相机单独渲染。
+    //     判据 =「图元采样点落在 `sky_camera` 所在 cluster」。
+    //     位置与 debug 同序：**必须晚于 applyLightmap**（否则微缩区图元已不在遍历范围内 ⇒ 拿不到
+    //     lightmap 与逐顶点烘焙，只剩贴图原色），且必须早于分块合并（合并成空间块后跨区大块无法再拆）。
+    this.pvsManager = new PvsManager(data.pvsJson);
+    const skyCluster = data.skyCamera
+      ? this.pvsManager.getClusterAt({ x: data.skyCamera.origin[0], y: data.skyCamera.origin[1], z: data.skyCamera.origin[2] })
+      : -1;
+    this.skyGroup = data.skyCamera && skyCluster >= 0 ? extractSkyArea(scene, (m) => this.meshInCluster(m, skyCluster)) : null;
+    this.skyParams = this.skyGroup && data.skyCamera ? data.skyCamera : null;
 
     // 1.3 装配顺序的其余约束：摘灯 → 施加 lightmap → 分块合并 → 受光材质终扫（合并会重建材质
     //     数组，所以终扫必须晚于合并、早于首次编译）。

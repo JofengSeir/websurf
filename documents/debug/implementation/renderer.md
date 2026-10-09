@@ -118,6 +118,7 @@
 | `fogmaxdensity` 雾因子上限（`fogcontroller.cpp:61/103`） | 已复现（T-617 第 4 轮） | `src/renderer-shared/shader/lightmap-shader.ts` 的 `FOG_MAX_DENSITY` 夹取补丁 + `setFogMaxDensity()`；实测 `chunkPatched=true`、强制 0.2 时 `define=DEFINED:0.2`、同视点 4.5% 像素变化，cap=1 时 0.0% |
 | `fogcolor2` + `fogblend` 朝日雾色渐变 | 未实现 | 8 张夹具图 `fogblend = 0` ⇒ 当前无差异；实现需视方向 varying |
 | `sky_camera`：2D 六面天空盒 + 3D 微缩区 + 天空遍自带雾（`SkyCamera.cpp:57`） | 已复现 | T-412 / T-416 / T-417 / T-424 / T-430；调试端 `skyFog` 用 `sky_camera` 自己的雾键值、`start/end ÷ scale` |
+| 3D 天空盒**天空区的烘焙光照**（微缩景观） | 已复现（T-621 修复顺序） | `extractSkyArea` 必须晚于 `applyLightmap`：debug `apps/debug/src/renderer/renderer-main.ts` 先施加后摘出；game/viewer 原先相反 ⇒ 天空区拿不到 lightmap 与逐顶点烘焙、只剩贴图原色。修复后三端 `施加 mesh=` 逐项相等（1351） |
 | `light_environment`（`_light` / `_ambient`） | 已复现（烘焙路径） | 由 VRAD 烘进世界 lightmap 与 prop 顶点光；运行期把 GLB 的 punctual 灯摘除（`renderer-main.ts` 的摘灯日志）与 SDK 同口径 |
 | 世界面 lightmap（RGBExp32 图集 + 双线性） | 已复现 | 与 SDK `common_lightmappedgeneric_fxc.h:195` 的 `LightMapSample` 对拍；本仓图集把有符号 i8 指数重编码为 `A = exp + 128`（`src/wasm-core/bsp_to_gltf_core/lightmap.rs:21/494/957`） |
 | prop 逐顶点烘焙（`.vhv`） | 已复现 | SDK `hardwareverts.h`（`#pragma pack(1)`：`pMesh` 在 +40、28 B 步长）+ `vradstaticprops.cpp:1579-1594`（BGRA）与本仓 `src/wasm-core/vhv.rs` 逐字一致；1587 份实测第 4 字节恒 255 |
