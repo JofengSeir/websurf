@@ -60,6 +60,8 @@ struct PakMaterials {
     /// 自发光 / 无光照材质名集合（对应 `InMemoryResources` 的 `material_unlit`）；
     /// 渲染侧据此走全亮，不吃 lightmap 与 ambient cube。
     unlit: std::collections::HashSet<String>,
+    /// `材质名 → $envmaptint`（仅声明了 `$envmap` 的材质入表）：渲染端据此挂 env_cubemap 近似反射。
+    envmap_tints: HashMap<String, [f32; 3]>,
 }
 
 /// 收集 PAKFILE 里的内嵌模型：被 `static_props` 引用、且 `.mdl` / `.vvd` / `.dx90.vtx` 三件齐全的那些。
@@ -250,6 +252,9 @@ fn resolve_pakfile_materials(
             out.alpha_modes.insert(tex.name.clone(), info.alpha_mode);
             if info.unlit {
                 out.unlit.insert(tex.name.clone());
+            }
+            if let Some(t) = info.envmap_tint {
+                out.envmap_tints.insert(tex.name.clone(), t);
             }
 
             let Some(base) = info.basetexture else {
@@ -616,6 +621,7 @@ impl BspProcessor {
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
             material_unlit: materials.unlit,
+            material_envmap: materials.envmap_tints,
             light_entities: Vec::new(),
         };
 
@@ -699,6 +705,7 @@ impl BspProcessor {
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
             material_unlit: materials.unlit,
+            material_envmap: materials.envmap_tints,
             light_entities: if include_lights {
                 collect_light_entities(&bsp)
             } else {

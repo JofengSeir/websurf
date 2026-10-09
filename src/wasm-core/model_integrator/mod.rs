@@ -141,6 +141,9 @@ pub struct InMemoryResources {
     /// （`apps/game/src/renderer/lightmap-shader.ts` 的 `routeFullbright`）。
     /// 来源是 `pakfile_models::parse_vmt`：着色器名以 `unlit` 开头，或 `$selfillum` 取非 `0` 的非空值。
     pub material_unlit: std::collections::HashSet<String>,
+    /// `材质名 → $envmaptint`（仅 `$envmap` 材质）：写进材质 extras 的 `vbsp_envmap`，
+    /// 渲染端据此挂 env_cubemap 近似反射。
+    pub material_envmap: std::collections::HashMap<String, [f32; 3]>,
 }
 
 /// 模型整合器：一次导出期间持有内存资源与两张去重缓存。
@@ -628,12 +631,21 @@ impl ModelIntegrator {
 
             // 自发光 / 无光照标注：写进 extras（GLTFLoader → material.userData.unlit）
             // `json::Extras` = `Option<Box<RawValue>>` ⇒ 直接给原始 JSON 文本
-            let mut extras = json::Extras::default();
+            let mut ex = serde_json::Map::new();
             if self.in_memory.material_unlit.contains(&material_name) {
-                if let Ok(raw) = serde_json::value::RawValue::from_string("{\"unlit\":true}".to_string()) {
-                    extras = Some(raw);
-                }
+                ex.insert("unlit".into(), serde_json::json!(true));
             }
+            // `$envmap` 材质：把 `$envmaptint` 交给渲染端（`material.userData.vbsp_envmap`）。
+            if let Some(t) = self.in_memory.material_envmap.get(&material_name) {
+                ex.insert("vbsp_envmap".into(), serde_json::json!(t));
+            }
+            let extras: json::Extras = if ex.is_empty() {
+                Default::default()
+            } else {
+                serde_json::value::RawValue::from_string(serde_json::Value::Object(ex).to_string())
+                    .ok()
+                    .map(Box::from)
+            };
             // 创建材质
             let material = gltf::json::Material {
                 extensions: Default::default(),

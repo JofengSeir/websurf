@@ -53,6 +53,9 @@ pub struct VmtInfo {
     /// 自发光 / 无光照：着色器名以 `unlit` 开头（不区分大小写），或 `$selfillum` 取到
     /// 非 `"0"` 的非空值。消费方据此让材质走全亮（不吃 lightmap / ambient cube）。
     pub unlit: bool,
+    /// `$envmap` 存在时的反射强度：取自 `$envmaptint`（缺省 `[1,1,1]`）。
+    /// 消费方据此给材质挂环境反射（`env_cubemap` 的近似）；`None` = 该材质未声明 `$envmap`。
+    pub envmap_tint: Option<[f32; 3]>,
     /// `Patch` 着色器的 `include` 目标（另一个 `.vmt` 的路径）：`\` 已归一为 `/`，
     /// 首尾 `/` 已去掉，`.vmt` 后缀已剥。首次命中即锁定。
     ///
@@ -108,11 +111,27 @@ fn tokenize_kv(line: &str) -> Vec<String> {
 ///
 /// 行切分同时按 `\n` 与 `\r`（`split(['\n', '\r'])`）——只按 `\n` 切会把孤立 CR
 /// 两侧的内容并成一行，见单元测试 `parses_basetexture_across_lone_cr`。
+/// `$envmaptint "[r g b]"`：去掉方括号后取前三个浮点；不足三个或解析失败返回 `None`。
+fn parse_tint3(v: &str) -> Option<[f32; 3]> {
+    let t = v.trim().trim_start_matches('[').trim_end_matches(']');
+    let n: Vec<f32> = t
+        .split_whitespace()
+        .filter_map(|s| s.parse::<f32>().ok())
+        .collect();
+    if n.len() >= 3 {
+        Some([n[0], n[1], n[2]])
+    } else {
+        None
+    }
+}
+
 pub fn parse_vmt(text: &str) -> VmtInfo {
     let mut info = VmtInfo::default();
     let mut translucent = false;
     let mut alphatest = false;
     let mut unlit = false;
+    let mut envmap = false;
+    let mut envmap_tint: Option<[f32; 3]> = None;
 
     // 行尾必须按 `\r` / `\n` **都切**：`str::lines()` 只认 `\n`，孤立 CR 会把相邻两行
     // 并成一行，于是 `toks[0]` 变成前一行的键 ⇒ 取不到 `$basetexture`。本文件用
@@ -169,6 +188,16 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
                     unlit = true;
                 }
             }
+            "$envmap" => {
+                if val != "0" && !val.is_empty() {
+                    envmap = true;
+                }
+            }
+            "$envmaptint" => {
+                if let Some(t) = parse_tint3(val) {
+                    envmap_tint = Some(t);
+                }
+            }
             "$alpha" => {
                 if let Ok(a) = val.parse::<f32>() {
                     if a < 0.999 {
@@ -197,6 +226,11 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
     }
 
     info.unlit = unlit;
+    info.envmap_tint = if envmap {
+        Some(envmap_tint.unwrap_or([1.0, 1.0, 1.0]))
+    } else {
+        None
+    };
     // 优先级：Blend 压过 Mask；两者都无才是 Opaque
     info.alpha_mode = if translucent {
         1

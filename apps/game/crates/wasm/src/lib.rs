@@ -57,6 +57,8 @@ struct PakMaterials {
     alpha_modes: HashMap<String, u8>,
     /// 自发光 / 无光照材质名集合（着色器名以 `unlit` 开头，或 `$selfillum` 取到非 `0` 的非空值）。
     unlit: std::collections::HashSet<String>,
+    /// `材质名 → $envmaptint`（仅 `$envmap` 材质）：渲染端据此挂 env_cubemap 近似反射。
+    envmap_tints: HashMap<String, [f32; 3]>,
 }
 
 /// 提取被 `static_props` 引用且 `.mdl/.vvd/.dx90.vtx` 三件齐全的模型，并装配静态道具放置表。
@@ -373,6 +375,9 @@ fn resolve_pakfile_materials(
             if info.unlit {
                 out.unlit.insert(tex.name.clone());
             }
+                if let Some(t) = info.envmap_tint {
+                    out.envmap_tints.insert(tex.name.clone(), t);
+                }
 
             if !decode_textures {
                 continue;
@@ -652,6 +657,7 @@ impl BspProcessor {
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
             material_unlit: materials.unlit,
+            material_envmap: materials.envmap_tints,
             light_entities: if include_lights {
                 collect_light_entities(&bsp)
             } else {
@@ -708,6 +714,7 @@ impl BspProcessor {
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
             material_unlit: materials.unlit,
+            material_envmap: materials.envmap_tints,
             light_entities: Vec::new(),
         };
 
@@ -751,6 +758,7 @@ impl BspProcessor {
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
             material_unlit: materials.unlit,
+            material_envmap: materials.envmap_tints,
             light_entities: collect_light_entities(&bsp),
         };
 
