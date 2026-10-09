@@ -142,40 +142,7 @@
     }
   ],
   "cochange": [],
-  "claim": {
-    "task": "T-454",
-    "may": [
-      "TODO.md",
-      "OWNER.md",
-      "progress/monthly/2026-10-11.md",
-      "progress/index.md",
-      "documents/debug/**",
-      "documents/game/**",
-      "documents/viewer/**"
-    ],
-    "must": [],
-    "base": {
-      "TODO.md": "758fbe3b95dbe6a015d6c2a86dffac5702dd68dd82181e4cf84ea4f998e3c75d",
-      "OWNER.md": "b4ff08ee82393dac0581335159cc3636a5662525af1e23a2a96f11e26d89a279",
-      "progress/monthly/2026-10-11.md": "1e177d5a36f7e4421ad0dc4ef0b1363296a55cb1af194e21667a47376b3498cb",
-      "progress/index.md": "5f97d89d53e0aacefe9d797769b21ae21c57549a303299e1ed53eb5b43727b08"
-    },
-    "at": "2026-10-09T18:16:29.208Z",
-    "pins": {
-      "README.md": "966ec495a5063cb2f69ae90c1dd639a0f8e6a456341e1f79dba1e577e6b0fecc",
-      "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
-      "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
-      "skills/websurf-env-traps/SKILL.md": "4bae9ea251bca4824c169cf27e4a93277d472eef8b7843feabd61a529471d157",
-      "documents/norms/annotation-and-verification.md": "40f271606aad9363b61cfb24d756bbce306cf354b9e483283fab8c66f71a46b6",
-      "documents/norms/scripts-and-ci.md": "496a8f87a69c003945133d7727711a2f0e9cd68bb9080f72d8e4483b9d5434f7",
-      ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
-      ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
-      ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
-      ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
-      "AGENTS.md": "53a2d312eade0322eeae2603c7e83cef4eb4ac7439bf8b7dbbdc7a44f020e270",
-      "documents/norms/local-path-hygiene.md": "fa7589d6fef4800bbf0920da32d2fe031877fc736111a8b8d1259d009d81f4a1"
-    }
-  },
+  "claim": null,
   "units": {
     "TODO.md": {
       "match": "^\\|\\s*T-\\d{3}\\s*\\|",
