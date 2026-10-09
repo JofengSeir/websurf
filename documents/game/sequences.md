@@ -76,7 +76,7 @@ Worker 侧（`createAuthLoop`，定时器唤醒 + 固定步长累积器）：
 
 | type | 类型声明的载荷 | 声明锚点 | 实际发送点 | 声明与实际是否一致 |
 |---|---|---|---|---|
-| `wasm-init` | `{ type, wasmUrl? }` | `apps/game/src/worker/worker-types.ts:25` | `apps/game/src/app.ts:152`（`wasmB64`）、`apps/game/src/app.ts:154`（`wasmUrl`） | **不一致**：分发器接受 `wasmB64` / `wasmUrl` / `mtzB64` 三者（`src/ts-shared/auth/worker-dispatch.ts:297`），声明只列了 `wasmUrl` |
+| `wasm-init` | `{ type, wasmUrl?, wasmB64?, mtzB64? }` | `apps/game/src/worker/worker-types.ts:25` | `apps/game/src/app.ts:152`（`wasmB64`）、`apps/game/src/app.ts:154`（`wasmUrl`） | 一致：分发器接受 `wasmB64` / `wasmUrl` / `mtzB64` 三者（`src/ts-shared/auth/worker-dispatch.ts:297`），声明已补齐；`mtzB64` 本工程无发送方 |
 | `init` | `{ type, shared, width, height, dpr }` | `apps/game/src/worker/worker-types.ts:33` | `apps/game/src/app.ts:148`（只发 `type` 与 `shared`） | **不一致**：`width` / `height` / `dpr` 既无发送方也无读取点，分发器只读 `shared`（`src/ts-shared/auth/worker-dispatch.ts:270`） |
 | `config` | `{ type, section, patch }` | `apps/game/src/worker/worker-types.ts:51` | `apps/game/src/input/input-bridge.ts:46`、`:53`、`:65` | 一致（段名与实际下发载荷的口径差异见下条） |
 | `respawn` | `{ type }` | `apps/game/src/worker/worker-types.ts:58` | `apps/game/src/input/input-bridge.ts:71` | 一致 |
@@ -84,7 +84,7 @@ Worker 侧（`createAuthLoop`，定时器唤醒 + 固定步长累积器）：
 | `set-death-threshold` | `{ type, value }` | `apps/game/src/worker/worker-types.ts:70` | `apps/game/src/input/input-bridge.ts:86` | 一致 |
 | `load-bsp` | `{ type, name, data }` | `apps/game/src/worker/worker-types.ts:43` | 无发送方 | **无发送方也无分发分支**：地图装载在主线程完成 |
 | `world-json` | `{ type, brushJson, triJson, teleportJson, spawn }` | `apps/game/src/worker/worker-types.ts:175` | `apps/game/src/app.ts:558` | 类型声明位置在「Worker → 主线程」分组里，实际方向相反（分发器在 `src/ts-shared/auth/worker-dispatch.ts:304` 接收） |
-| `input` | `{ type, dx, dy, keys }` | `apps/game/src/worker/worker-types.ts:186` | 无直接发送点（由 `MsgState.addInput` 发出） | 声明只列三个必填字段；回退通道实现还会附带渲染采样六字段（`src/ts-shared/auth/worker-dispatch.ts:280`） |
+| `input` | `{ type, dx, dy, keys, rt?, rx?, ry?, rz?, ri0?, repoch? }` | `apps/game/src/worker/worker-types.ts:186` | 无直接发送点（由 `MsgState.addInput` 发出） | 一致：三个必填字段 + 渲染采样六字段（可选）已全部声明（`src/ts-shared/auth/shared-state.ts:330`） |
 
 Worker → 主线程：
 

@@ -250,3 +250,4 @@
 | 2026-10-09 | T-054 P1 三条修掉（全局 focus/selection、禁用态、#error 不清），全部 1:1 零锚点漂移 | progress/monthly/2026-10-8.md:22 |
 | 2026-10-09 | T-055 P1#1 键盘可达（8 .mod + key-chip/x + onActivate@EOF）；T-054 P2 再修四条 | progress/monthly/2026-10-8.md:23 |
 | 2026-10-09 | T-055 再修五项（P1#2 引导线联动、#status 省略、--hud-text 令牌、头注两处、删不可达规则）；余 2 项标 [待确认] | progress/monthly/2026-10-8.md:24 |
+| 2026-10-09 | T-024 结案：worker-types 的 wasm-init / input 字段按分发器与发送面补齐（1:1 零漂移） | progress/monthly/2026-10-8.md:26 |

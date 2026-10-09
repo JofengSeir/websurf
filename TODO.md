@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（94 条）
+## 未结项（93 条）
 ### 待裁决（0）
 
 
-### 待修（92）
+### 待修（91）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -108,7 +108,6 @@
 - **T-213** 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错　`game`
 - **T-214** 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态　`game`
 - **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
-- **T-024** game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等）　`game`
 - **T-053** viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/…　`viewer`
 - **T-055** game 审查登记（P1#1/P1#2 + P2 五项已修；余 2 项需渲染验证）　`game`
 - **T-056** 多轮对话遗留待办合并（owner 逐轮提出、未裁决）：① 关闭确认已上线但 F5 / 刷新同样弹框，若嫌烦改条件化（仅在有地图 / 对局…　`game`
@@ -143,7 +142,7 @@
 | T-016 | compute-mode.ts 的 summary 字面量含已删文档编号 | 文档口径 | shared | 已结案 | src/ts-shared/auth/compute-mode.ts:106 ⇒ summary 不再含 §3.4.C；`git grep -n "§3.4" -- src` ⇒ 0 命中 | documents/ts-shared/overview.md | 见详情 | #36 |
 | T-018 | tick-authority.test.ts 断言标签含 Q1 / §8.5 | 缺陷 | shared | 已结案 | src/ts-shared/auth/tick-authority.test.ts:446 ⇒ 断言标签已去掉 Q1 / §8.5；`npx esbuild … && node .tmp/t018/tick-authority.test.mjs` ⇒ 全例通过（exit 0） | documents/ts-shared/overview.md | 见详情 | §8.5" -- src/ts-shared/auth/tick-authority.test.ts` ⇒ 0 命中（断言标签不再含旧编号） | #40 |
 | T-021 | game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略） | 缺陷 | game | 待修 | apps/game/src/panel/panel-controller.ts:583 | documents/game/implementation/panel.md | 判据：数值框回写自身文本；`dot` 死变量清掉（`git grep -n "dot" -- apps/game/src/panel/panel-controller.ts` 无声明未用） | #50 |
-| T-024 | game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等） | 缺陷 | game | 待修 | 见详情 | progress/pending-detail.md | 判据：`apps/game/src/worker/worker-types.ts` 的字段与实际载荷一致（`npm run typecheck` + 字段清单探针，无缺项） | #53 |
+| T-024 | game 类型面/配置面 3 条（worker-types.ts 落后实际载荷等） | 缺陷 | game | 已结案 | **已结案**：具名项「`worker-types.ts` 落后实际载荷」已修——`WasmInitMessage` 补齐 `wasmB64?` / `mtzB64?`（与分发器 `src/ts-shared/auth/worker-dispatch.ts:297` 的读取面一致，发送方 `apps/game/src/app.ts:152` / `:154`），`InputMessage` 补齐渲染采样六字段 `rt?` / `rx?` / `ry?` / `rz?` / `ri0?` / `repoch?`（与 `src/ts-shared/auth/shared-state.ts:330` 的实际载荷一致）；两处都是**同行 1:1 替换**（该文件有 4+15+3 处文档锚点，行数零变化）。`documents/game/implementation/worker.md:36` 的缺口按 [L] 标已消除，`documents/game/sequences.md:79` / `:87` 两行表格断言同步改齐。**限制**：原题称「类型面/配置面 3 条」，但登记正文只写明了这一条具名项（`progress/pending-detail.md:146` 只有标题行），另 2 条无工作区锚点、无法核销 | progress/pending-detail.md | `git grep -c "wasmB64" -- apps/game/src/worker/worker-types.ts` ⇒ 1；`git grep -c "repoch" -- apps/game/src/worker/worker-types.ts` ⇒ 1；`npm run typecheck`（apps/game）exit 0；体检 A–P 全 0 | #53 |
 | T-029 | debug 脚本 10 条（jump-apex 采样链链路级仍待裁决 | 配置·门禁 | debug | 待修 | 见详情 | progress/pending-detail.md | 判据：10 条子项逐条处置完毕；每条子项脚本跑通 exit 0，并在 @BT@progress/pending-detail.md@BT@ 对应条目标注处置结果 | #60 |
 | T-031 | game phys-rate-parity 4 条（混合分区时长/结果、flatTop AABB） | 缺陷 | game | 已结案 | **遗弃（无可执行残留）**：对象 `apps/game/scripts/phys-rate-parity.mjs`（及其 v2）**已不在工作区**（game 现存 5 个脚本、无 parity 件），其断言级缺陷所指的 `flatTop` 也**全仓 0 命中** ⇒ 缺陷随脚本消失 | progress/pending-detail.md | `git ls-files "apps/game/scripts/*"` ⇒ 5 件、无 parity；`git grep -n flatTop -- apps src` ⇒ 0 命中（遗弃） | #62 |
 | T-032 | game 脚本 11 件 7 条（_dbg_floor 的 onGround 恒 undefined 等） | 配置·门禁 | game | 已结案 | **遗弃（无可执行残留）**：具名项 `_dbg_floor` **全仓 0 命中**；`progress/wg-status.md:17` 载明这批对象是 WG5b 的本地探针脚本（`_dbg_*` 为 gitignored、不在工作区）。game 脚本总数已由 11 件降到 5 件（`build-dist` / `check-wasm-api` / `phys-seed-smoke` / `phys-smoke` / `phys-surf-crouch-smoke`） | progress/pending-detail.md | `git grep -n "_dbg_floor" -- apps/game` ⇒ 0 命中（遗弃） | #63 |

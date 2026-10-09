@@ -19,12 +19,12 @@ import type { RuntimeConfig } from '../config.js';
 
 // ── 主线程 → Worker-A ────────────────────────────────────────
 
-/** `wasm-init`：实例化 wasm。实际载荷比本声明宽——分发器读
+/** `wasm-init`：实例化 wasm。声明与分发器读取面一致——
  *  `{ wasmB64?: string; wasmUrl?: string; mtzB64?: string }`（内嵌 base64 优先，其次按 URL 取），
  *  发送方 `apps/game/src/app.ts` 只发 `wasmB64` 或 `wasmUrl` 两者之一。 */
 export interface WasmInitMessage {
   type: 'wasm-init';
-  wasmUrl?: string;
+  wasmUrl?: string; wasmB64?: string; mtzB64?: string;
 }
 
 /** `init`：建跨线程状态通道。分发器只读 `shared`（`null` = 落到 `MsgState` 消息回退通道）；
@@ -182,12 +182,12 @@ export interface WorldJsonMessage {
 
 /** `input`：方向是**主线程 → Worker**，仅 `MsgState` 消息回退
  *  通道使用（SAB 模式走共享槽）；发送方是 `src/ts-shared/auth/shared-state.ts` 的
- *  `MsgState.addInput`，它还会额外附带渲染采样六字段，本声明只列三个必填字段。 */
+ *  `MsgState.addInput`，载荷 = 三个必填字段 + 渲染采样六字段（后者全部可选）。 */
 export interface InputMessage {
   type: 'input';
   dx: number;
   dy: number;
-  keys: number;
+  keys: number; rt?: number; rx?: number; ry?: number; rz?: number; ri0?: number; repoch?: number;
 }
 
 /** `phys-frame`：权威帧，仅 `MsgState` 消息回退通道使用；发送方是
