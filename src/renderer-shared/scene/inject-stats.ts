@@ -108,7 +108,8 @@ import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, 
 				const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material;
 				const rec = mat as unknown as { __vbspLightmapInject?: { applied?: boolean }; __vbspVertexLightingInject?: { applied?: boolean }; __vbspAmbientInject?: { applied?: boolean } };
 				console.info('[dump] ' + JSON.stringify({
-					name: m.name, mat: mat?.name, tex: (mat as unknown as { map?: { name?: string } | null })?.map?.name ?? null, matType: mat?.type, attrs: Object.keys(g?.attributes ?? {}),
+					name: m.name, mat: mat?.name, tex: (mat as unknown as { map?: { name?: string } | null })?.map?.name ?? null,
+					matState: (() => { const b = mat as unknown as { transparent?: boolean; alphaTest?: number; opacity?: number; blending?: number; side?: number; depthWrite?: boolean; premultipliedAlpha?: boolean; map?: { format?: number; image?: { width?: number; height?: number; data?: { length?: number } } | null } | null }; const im = b.map?.image; return { tr: b.transparent === true, at: b.alphaTest ?? 0, op: b.opacity ?? 1, bl: b.blending ?? 1, side: b.side ?? 0, dw: b.depthWrite !== false, fmt: b.map?.format ?? -1, size: im ? [im.width, im.height] : null, dataLen: im?.data?.length ?? (im ? 'bitmap' : 0) }; })(), matType: mat?.type, attrs: Object.keys(g?.attributes ?? {}),
 					vlight: stats,
 					inject: { lightmap: rec.__vbspLightmapInject?.applied === true, vlight1: rec.__vbspVertexLightingInject?.applied === true, ambCube: rec.__vbspAmbientInject?.applied === true },
 					world: (() => { const bs = (m.geometry as THREE.BufferGeometry & { boundingSphere?: THREE.Sphere | null }).boundingSphere; const v = bs ? bs.center.clone() : m.position.clone(); v.applyMatrix4(m.matrixWorld); return [Math.round(v.x), Math.round(v.y), Math.round(v.z)]; })(),

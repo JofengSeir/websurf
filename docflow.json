@@ -103,7 +103,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-626 登记",
+      "reason": "T-626 定因",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -111,7 +111,7 @@
     {
       "path": "documents/norms/annotation-and-verification.md",
       "by": "owner",
-      "reason": "T-626 锚点复核",
+      "reason": "T-626 定因",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -119,7 +119,7 @@
     {
       "path": "documents/norms/local-path-hygiene.md",
       "by": "owner",
-      "reason": "T-626 锚点复核",
+      "reason": "T-626 定因",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -127,7 +127,7 @@
     {
       "path": "documents/norms/scripts-and-ci.md",
       "by": "owner",
-      "reason": "T-626 锚点复核",
+      "reason": "T-626 定因",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -135,7 +135,7 @@
     {
       "path": "README.md",
       "by": "owner",
-      "reason": "T-626 锚点复核",
+      "reason": "T-626 定因",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -983,7 +983,7 @@
     },
     "CONTRIBUTING.md": {},
     "OWNER.md": {
-      "src/renderer-shared/scene/inject-stats.ts:116:116": "e4199e1f"
+      "src/renderer-shared/scene/inject-stats.ts:116:116": "775cd8e1"
     },
     "README.md": {
       "apps/debug/package.json:15:15": "97c68581",
@@ -2726,8 +2726,8 @@
       "apps/game/src/app.ts:602:602": "00df6ad2",
       "src/renderer-shared/scene/scene-builder.ts:120:120": "2510bd23",
       "src/renderer-shared/scene/scene-builder.ts:121:121": "1e6c4879",
-      "src/renderer-shared/scene/inject-stats.ts:177:177": "5c61f52b",
-      "src/renderer-shared/scene/inject-stats.ts:182:182": "e593f736",
+      "src/renderer-shared/scene/inject-stats.ts:177:177": "5ecc0a5a",
+      "src/renderer-shared/scene/inject-stats.ts:182:182": "9170eb45",
       "src/renderer-shared/scene/texture-quality.ts:94:94": "ac16cf57",
       "apps/game/src/renderer/renderer-main.ts:331:331": "f575d9d3",
       "apps/game/src/app.ts:300:300": "f98051eb",
@@ -3416,7 +3416,7 @@
       "src/renderer-shared/scene/scene-builder.ts:131:131": "4b34adb5",
       "src/renderer-shared/scene/scene-builder.ts:133:133": "d10b36aa",
       "apps/viewer/src/app.ts:773:773": "23444d50",
-      "src/renderer-shared/scene/inject-stats.ts:116:116": "e4199e1f",
+      "src/renderer-shared/scene/inject-stats.ts:116:116": "775cd8e1",
       "apps/game/src/renderer/renderer-main.ts:43:43": "2eeeb82c",
       "src/renderer-shared/shader/lightmap-shader.ts:324:324~2": "886f4535",
       "src/renderer-shared/shader/lightmap-shader.ts:1001:1001": "fdc0c11a",
@@ -4430,6 +4430,30 @@
   "rebaselines": [
     {
       "path": "OWNER.md",
+      "at": "2026-10-09T09:53:19.226Z",
+      "by": "agent",
+      "reason": "T-626 定因",
+      "changed": 1,
+      "total": 1
+    },
+    {
+      "path": "documents/viewer/implementation/renderer.md",
+      "at": "2026-10-09T09:53:14.675Z",
+      "by": "agent",
+      "reason": "T-626 定因",
+      "changed": 1,
+      "total": 87
+    },
+    {
+      "path": "documents/game/sequences.md",
+      "at": "2026-10-09T09:53:12.684Z",
+      "by": "agent",
+      "reason": "T-626 定因",
+      "changed": 2,
+      "total": 187
+    },
+    {
+      "path": "OWNER.md",
       "at": "2026-10-09T09:48:42.442Z",
       "by": "agent",
       "reason": "T-626 锚点复核",
@@ -4723,30 +4747,6 @@
       "reason": "T-621：天空区光照顺序修复后锚点复核",
       "changed": 22,
       "total": 187
-    },
-    {
-      "path": "documents/game/overview.md",
-      "at": "2026-10-09T07:55:19.403Z",
-      "by": "agent",
-      "reason": "T-621：天空区光照顺序修复后锚点复核",
-      "changed": 8,
-      "total": 114
-    },
-    {
-      "path": "documents/game/implementation/types.md",
-      "at": "2026-10-09T07:55:19.018Z",
-      "by": "agent",
-      "reason": "T-621：天空区光照顺序修复后锚点复核",
-      "changed": 1,
-      "total": 14
-    },
-    {
-      "path": "documents/game/implementation/savepoint.md",
-      "at": "2026-10-09T07:55:18.772Z",
-      "by": "agent",
-      "reason": "T-621：天空区光照顺序修复后锚点复核",
-      "changed": 3,
-      "total": 31
     }
   ]
 }
