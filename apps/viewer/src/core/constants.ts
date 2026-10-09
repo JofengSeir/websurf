@@ -38,8 +38,8 @@ export const FOV = 73.6;
 /** 相机初始 near / far（HU）：构造时传入，地图挂载后由 `ViewerScene.fitCamera` 重设。 */
 export const CAMERA_INIT_NEAR = 0.1;
 export const CAMERA_INIT_FAR = 100000;
-/** 地图加载后 far = maxDim × 此值，再与 `CAMERA_INIT_FAR` 取大（`ViewerScene.fitCamera`）。 */
-export const CAMERA_FAR_SCALE = 100;
+/** 地图加载后 far = maxDim × 此值（T-454 P3b 起唯一来源是共享 `camera/scene-camera.ts`，此处只再导出）。 */
+export { CAMERA_FAR_SCALE } from '../../../../src/renderer-shared/camera/scene-camera.js';
 export const BG_COLOR = 0x0d1b2a;
 
 /** 自由飞行速度（HU/s）：`FlyCam.update` 每帧位移 = 归一化方向 × 速度 × dt；`FLY_SPEED_FAST` 为 ×4（按住左右 Shift）。 */

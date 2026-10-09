@@ -15,7 +15,7 @@ import {
   getLightingMode,
   type LightingMode,
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
 import { applyLightmap, buildMapScene } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
@@ -102,16 +102,7 @@ export class ViewerScene {
     // 近平面贴墙自适应：每 2 帧做一次（`nearCheckToggle` 交替），贴墙 / 贴地 / 贴顶时收缩 near；
     // 候选收集只取 modelRoot 子树，且开 vertical（自由飞行要贴地/贴顶——game 只探水平四向）
     this.nearCheckToggle = !this.nearCheckToggle;
-    if (this.nearCheckToggle && this.modelRoot) {
-      this.nearPlane.update(
-        this.camera,
-        this.scene,
-        this.camera.position.x,
-        this.camera.position.y,
-        this.camera.position.z,
-        { roots: [this.modelRoot], vertical: true },
-      );
-    }
+    if (this.nearCheckToggle && this.modelRoot) { shrinkNearPlane(this.nearPlane, this.camera, this.scene, this.camera.position.x, this.camera.position.y, this.camera.position.z, [this.modelRoot]); }
     // 有 3D 天空盒时按起源的两遍法（与 debug/game 同款）：① 天空相机画 2D 天空盒背景 + 天空层；
     // ② 清深度、摘掉背景后主相机画主世界（不摘背景的话 three 的背景 pass 会盖掉第 ① 遍）。
     const skyCamera = this.skyCamera;
@@ -260,18 +251,13 @@ export class ViewerScene {
   }
 
   /**
-   * 相机 near / far 按地图尺寸自适应；无地图时直接返回（保持构造值）。
-   * - near = `NearPlaneController.defaultNearForScene(maxDim)`（= max(maxDim / 1000, CAMERA_NEAR_MIN)，
-   *   同时经 `setDefaultNear` 落账供贴墙收缩后复位
-   * - far = max(maxDim × CAMERA_FAR_SCALE, CAMERA_INIT_FAR)（viewer 比 game 多一档 INIT_FAR 下限）
-   * 两个尺寸都取自地图装配返回的 maxDim，改完调用 `updateProjectionMatrix`。
+   * 相机 near / far / fov 按地图尺寸自适应：T-454 P3b 起**委托共享** `camera/scene-camera.ts` 的
+   * `applySceneCamera()`（near = `NearPlaneController.defaultNearForScene(maxDim)`、far = maxDim × 100、
+   * fov 取呈现档；无地图时不调用，保持构造值）。
+   * `maxDim` 取自地图装配返回的尺寸；改完由共享入口调用 `updateProjectionMatrix`。
    */
   fitCamera(maxDim: number): void {
-    const defaultNear = NearPlaneController.defaultNearForScene(maxDim);
-    this.nearPlane.setDefaultNear(defaultNear);
-    this.camera.near = defaultNear;
-    this.camera.far = Math.max(maxDim * CAMERA_FAR_SCALE, CAMERA_INIT_FAR);
-    this.camera.updateProjectionMatrix();
+    applySceneCamera(this.camera, this.nearPlane, maxDim, readRenderPrefs().camera.fov);
   }
 
   /**

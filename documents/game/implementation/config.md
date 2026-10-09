@@ -25,7 +25,7 @@
 - **默认值只写一处**：`createConfig` 用 `structuredClone` 复制 `DEFAULT_CONFIG`（`apps/game/src/config.ts:240`），避免面板改动污染默认值。
 - **映射是薄层**：`buildPhysicsParams` 只做字段名搬运，键名归一与 `jump_height = jumpSpeed² / (2 × gravity)` 的换算都在共享层（`src/ts-shared/phys/params.ts:49`、`src/ts-shared/phys/params.ts:58`）；`sensitivity` 在共享层被写死为 1（`src/ts-shared/phys/params.ts:67`），真实灵敏度由输入层乘入（`src/ts-shared/input/input-layer.ts:25`）。
 - **段级更新不做校验**：`applyConfigPatch` 在段不存在或不是对象时静默返回，patch 里出现段中不存在的键时照写（`apps/game/src/config.ts:250`、`apps/game/src/config.ts:252`）。
-- **只发四段**：`syncFullConfig` 的段表是 `physics` / `input` / `player` / `hud`（`apps/game/src/app.ts:642`）；`texture` 与 `lighting` 段不下发 Worker——本工程内这两段的读取点全部在主线程（`apps/game/src/renderer/renderer-main.ts:429`、`apps/game/src/renderer/renderer-main.ts:268`）。
+- **只发四段**：`syncFullConfig` 的段表是 `physics` / `input` / `player` / `hud`（`apps/game/src/app.ts:642`）；`texture` 与 `lighting` 段不下发 Worker——本工程内这两段的读取点全部在主线程（`apps/game/src/renderer/renderer-main.ts:425`、`apps/game/src/renderer/renderer-main.ts:268`）。
 - **面板量程与默认值一致的两处**：`exposure` / `lightGamma` 默认 2.0 / 1.0 与页面滑块初值同值（SDK 呈现口径：`OVERBRIGHT 2.0f`（`test/project/source-sdk-2013-master/src/public/materialsystem/imaterialsystem.h:16`）+ `MathLib_Init( gamma 2.2, overbright 2.0 )`（`…/src/public/mathlib/mathlib.h:1753`），见 TODO.md T-617）（`apps/game/src/config.ts:224`、`apps/game/web/index.html:232`），`fov` 默认 73.6 与滑块初值 73.6 同值（`apps/game/src/config.ts:209`、`apps/game/web/index.html:225`）。
 
 ## 已知缺口（状态见 TODO.md）

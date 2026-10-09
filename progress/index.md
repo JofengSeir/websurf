@@ -144,3 +144,4 @@
 | 2026-10-09 | T-454 P1：渲染呈现档收到唯一来源 `vbsp:renderPrefs`（`src/renderer-shared/config/render-prefs.ts`，三端同源；三端出图与 P0 基线逐像素相同） | progress/monthly/2026-10-10.md:23 |
 | 2026-10-09 | T-454 P2：渲染器构造 + 预编译收口到 `src/renderer-shared/render/create-renderer.ts`（apps 内 `new THREE.WebGLRenderer`/输出链赋值/`renderer.compile` 全为 0；222 处锚点按内容校验后整体上移） | progress/monthly/2026-10-10.md:25 |
 | 2026-10-09 | T-454 P3a：三端共享位姿入口 `camera/pose-entry.ts`（`globalThis.__vbspPose`，收编 T-443）；钉同一位姿后三端读数逐项相同（仅 `near` 分叉待 P3b），debug↔game 像素 100.000% 通道差 ≤2 | progress/monthly/2026-10-10.md:27 |
+| 2026-10-09 | T-454 P3b-1：near/far/fov 与近平面收缩收口到 `src/renderer-shared/camera/scene-camera.ts`（viewer 取消 `CAMERA_INIT_FAR` 下限、取消 `vertical` 独有；三端 near 读数差从 13.5 HU 收到 ≤4e-4 HU） | progress/monthly/2026-10-10.md:29 |

@@ -21,7 +21,7 @@
  * 渲染采样写入共享内存的口径见本文件内紧随共享内存导入的那段说明。
  */
 
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, yawPitchRadOf } from '../../../../src/renderer-shared/camera/pose-entry.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, yawPitchRadOf } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
 import * as THREE from 'three';
 import { deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
@@ -571,11 +571,7 @@ export class RendererMain {
       console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
 
-    const defaultNear = NearPlaneController.defaultNearForScene(maxDim);
-    this.nearPlane.setDefaultNear(defaultNear);
-    this.camera.near = defaultNear;
-    this.camera.far = maxDim * 100;
-    this.camera.updateProjectionMatrix();
+    applySceneCamera(this.camera, this.nearPlane, maxDim, readRenderPrefs().camera.fov);
 
     // LOD 与 PVS：setup 收集块并按对角线定剔除距离，随后用 PVS 给每个块分配 clusterId
     // （pvsManager 已在天空区摘取前建好）
@@ -719,7 +715,7 @@ export class RendererMain {
       // 近平面自适应：隔帧执行一次；noclip 下位置不受碰撞约束，跳过探测
       this.nearCheckToggle = !this.nearCheckToggle;
       if (this.nearCheckToggle && !this.noclipActive && this.bspModelScene) {
-        this.nearPlane.update(this.camera, this.bspModelScene, st.posX, camY, st.posZ, { roots: [this.bspModelScene] });
+        shrinkNearPlane(this.nearPlane, this.camera, this.bspModelScene, st.posX, camY, st.posZ, [this.bspModelScene]);
       }
     } else if (this.stepGated) {
       // 闸门跳过物理的帧也要推进墙钟基准，否则闸门恢复时会拿到一个异常大的 dt

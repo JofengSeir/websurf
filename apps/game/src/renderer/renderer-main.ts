@@ -47,7 +47,7 @@ import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCame
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
-import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -333,11 +333,7 @@ export class RendererMain {
     if (this.renderer && this.scene && this.camera) precompileScene(this.renderer, this.scene, this.camera);
 
     // 2. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 NearPlaneController.update 收缩）
-    const defaultNear = NearPlaneController.defaultNearForScene(maxDim);
-    this.nearPlane.setDefaultNear(defaultNear);
-    this.camera.near = defaultNear;
-    this.camera.far = maxDim * 100;
-    this.camera.updateProjectionMatrix();
+    applySceneCamera(this.camera, this.nearPlane, maxDim, this.config.hud.fov);
 
     // 3. PVS + LOD 注册
     this.pvsManager = new PvsManager(data.pvsJson);
@@ -864,7 +860,7 @@ export class RendererMain {
       // 近平面贴墙自适应（每 2 帧一次）：贴墙收缩 near，防近平面把墙面裁掉
       this.nearCheckToggle = !this.nearCheckToggle;
       if (this.nearCheckToggle) {
-        this.nearPlane.update(this.camera, this.scene, st.posX, st.posY + st.eyeHeight, st.posZ);
+        shrinkNearPlane(this.nearPlane, this.camera, this.scene, st.posX, st.posY + st.eyeHeight, st.posZ);
       }
     }
 
