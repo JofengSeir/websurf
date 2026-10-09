@@ -26,7 +26,7 @@
 | T-203 | 未选图／未锁定前点击画布直接返回，不请求指针锁定也无任何反馈 | apps/game/src/app.ts:249 |
 | T-204 | `hud` 段下发的是全量物理参数、被 Worker 并入 `config.hud`（app-entry／config／input／worker 四篇同指） | apps/game/src/input/input-bridge.ts:65 |
 | T-209 | M 键与 ESC 两条全局监听不校验 `sceneReady`，加载覆盖层显示期间同样触发 | apps/game/src/panel/panel-controller.ts:265 |
-| T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | apps/game/src/renderer/renderer-main.ts:257 |
+| T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | apps/game/src/renderer/renderer-main.ts:254 |
 | T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | apps/game/src/savepoint.ts:92 |
 | T-214 | 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态 | apps/game/src/savepoint.ts:21 |
 | T-216 | `persist` 每次整表序列化，`add`／`delete`／`clear` 各触发一次、写入量随条数线性增长 | apps/game/src/savepoint.ts:112 |
@@ -153,11 +153,11 @@
 | ID | 事项 | 证据 |
 |---|---|---|
 | T-206 | `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃 | apps/game/src/input/input-bridge.ts:30 |
-| T-211 | `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造 | apps/game/src/renderer/renderer-main.ts:77 |
+| T-211 | `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造 | apps/game/src/renderer/renderer-main.ts:74 |
 | T-225 | `physics.mode` 零读取点 | apps/game/src/config.ts:27 |
 | T-226 | `sendSetDeathThreshold` 零调用点 | apps/game/src/input/input-bridge.ts:83 |
 | T-227 | 共享层的累积路径无消费方 | src/ts-shared/input/mouse-buffer.ts:81 |
-| T-228 | `sampleEpoch` 字段只写不读 | apps/game/src/renderer/renderer-main.ts:130 |
+| T-228 | `sampleEpoch` 字段只写不读 | apps/game/src/renderer/renderer-main.ts:127 |
 | T-229 | `applyCollisionCorrection` 的入参有三个不被读取 | src/ts-shared/phys/authority-calibrator.ts:735 |
 | T-230 | 光照模块内多个导出在本工程零导入点 | src/renderer-shared/shader/lightmap-shader.ts:1742 |
 | T-231 | `SavePoint.t` 只写不读 | apps/game/src/app.ts:610 |
@@ -178,7 +178,7 @@
 | T-403 | `MouseBuffer.push` / `drain` | src/ts-shared/input/mouse-buffer.ts:81 |
 | T-404 | `ShmState.wake` | src/ts-shared/auth/shared-state.ts:447 |
 | T-405 | `maskToKeys` | src/ts-shared/auth/shared-state.ts:98 |
-| T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | apps/game/src/renderer/renderer-main.ts:277 |
+| T-406 | `PvsManager.getFaceCluster` / `visibleClusterCount` | apps/game/src/renderer/renderer-main.ts:274 |
 | T-407 | `world/types.ts` 的 `rootNode` 字段 | apps/game/crates/wasm/src/lib.rs:1704 |
 | T-408 | `bsp_to_gltf_core/convert.rs` 内三份 GLTF 合并实现零调用点（合计约 500 行，各带 `#[allow(de… | src/wasm-core/bsp_to_gltf_core/convert.rs:367 |
 

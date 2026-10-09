@@ -17,7 +17,7 @@
 - **读写失败都不抛出**：读失败打 `console.error` 并清空内存列表（`apps/game/src/savepoint.ts:61`）；写失败打 `console.error`、内存列表不受影响（`apps/game/src/savepoint.ts:113`）。
 - **`load('')` 与空地图名不落盘**：地图名为空时 `load` 只清内存不读存储（`apps/game/src/savepoint.ts:52`），`persist` 直接返回（`apps/game/src/savepoint.ts:111`）。
 - **读取路径**：X 键存点写完整状态加时间戳（`apps/game/src/app.ts:610`）；按住 C 取 `latest()` 并冻结（`apps/game/src/app.ts:619`、`apps/game/src/app.ts:625`），松开 C 恢复速度并向权威同步（`apps/game/src/app.ts:632`）；面板列表的「读」按索引取 `all()` 的第 i 项（`apps/game/src/app.ts:209`）。
-- **状态来源单一**：存点字段直接来自渲染物理的 `state()`（`apps/game/src/renderer/renderer-main.ts:616`），读点时经 `set_state` 全量写回（`apps/game/src/renderer/renderer-main.ts:648`）。
+- **状态来源单一**：存点字段直接来自渲染物理的 `state()`（`apps/game/src/renderer/renderer-main.ts:580`），读点时经 `set_state` 全量写回（`apps/game/src/renderer/renderer-main.ts:612`）。
 
 ## 已知缺口（状态见 TODO.md）
 
@@ -25,6 +25,6 @@
 - **`getMap()` 零调用点**：方法有完整实现（`apps/game/src/savepoint.ts:69`），`apps/game/src` 内无调用者（面板与加载流程都不需要回读地图名）。 （见 TODO.md T-232）
 - **`clear()` 零调用点**：方法会清空列表并落盘（`apps/game/src/savepoint.ts:98`），`apps/game/src` 内无调用者；换图走的是 `load`（`apps/game/src/app.ts:502`），它同样会清空内存列表但**不写存储**（`apps/game/src/savepoint.ts:51`），因此被换掉的地图存档保留在 localStorage 里。 （见 TODO.md T-233）
 - ~~**删除无二次确认**~~ **已消除（2026-10-09）**：T-213 —— 面板删除按钮的点击回调先 `window.confirm`（`apps/game/src/panel/panel-controller.ts:803`，同行 1:1；按钮 `title` 同步改为「会先确认」）；越界索引改为**打告警**（`apps/game/src/savepoint.ts:93` 的同行 `else`，「不再静默不写存储」）。**验证（DOM 桩探针，浏览器无关）**：`confirm=false` 时点 × ⇒ 删除回调 **0** 次、`confirm=true` ⇒ **1** 次（index 0）；`SavePointStore.delete(5)`（列表 0 条）⇒ **1** 条「删除越界索引」告警。原断言：删除按钮直接调 `onSavePointDelete`、`delete` 立即 persist；越界索引既不报错也不写存储。
-- **存点不含蹲伏态**：字段集没有蹲下高度或姿态标记（`apps/game/src/savepoint.ts:21`），读点时的 `eyeHeight` 取渲染物理的**当前**值（`apps/game/src/renderer/renderer-main.ts:641`、`:618`），在蹲伏中读点会把当前眼高带进新状态。 （见 TODO.md T-214）
+- **存点不含蹲伏态**：字段集没有蹲下高度或姿态标记（`apps/game/src/savepoint.ts:21`），读点时的 `eyeHeight` 取渲染物理的**当前**值（`apps/game/src/renderer/renderer-main.ts:605`、`:618`），在蹲伏中读点会把当前眼高带进新状态。 （见 TODO.md T-214）
 - **解析结果不是数组时静默保持空列表**：`load` 只在 `Array.isArray` 为真时赋值（`apps/game/src/savepoint.ts:57`），存档被写成对象或字符串时不会报错，表现为该地图没有存点。 **已消除（2026-10-09）**：T-215 —— 非数组存档改为打 `console.error`（`apps/game/src/savepoint.ts:59`）。对照探针：喂 `{"not":"an array"}` ⇒ 修复前 `console.error` **0** 条（静默）、修复后 **1** 条并点名「存档不是数组（已忽略，表现为该地图没有存点）: object」。
 - **写入量随存点条数线性增长**：`persist` 每次整表序列化（`apps/game/src/savepoint.ts:112`），`add` / `delete` / `clear` 都各自触发一次整表写入。 **已消除（2026-10-09）**：T-216 —— `add` / `delete` / `clear` 改走新增的 `persistSoon()`（`apps/game/src/savepoint.ts` 类末尾，同一同步批次内多次改动合并为一次写；`persist()` 只由它调用）。对照探针：连续 50 次 `add` ⇒ 修复前 `setItem` **50** 次，修复后同步阶段 0 次、微任务冲刷后 **1** 次。

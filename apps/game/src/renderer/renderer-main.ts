@@ -40,7 +40,7 @@ import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-ca
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
-import { mergeIntoChunks, padBoundingSpheres, optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js'; import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js';
+import { mergeIntoChunks, padBoundingSpheres, optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js'; import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js'; import { VisibilityController } from '../../../../src/renderer-shared/scene/visibility-controller.js';
 import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inject-stats.js';
 import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
@@ -67,9 +67,6 @@ const DEG2RAD = Math.PI / 180;
 
 
 /** LOD 档位（写进 mesh.userData.lodLevel）：近距可见 / 超出剔除距离 / PVS 判定不可见。 */
-const LOD_NEAR = 0;
-const LOD_FAR = 2;
-const LOD_PVS_HIDDEN = -1;
 /**
  * PVS 剔除总开关：false 时 `tick` 既不调 `PvsManager.update`，也不按 cluster 隐藏块，块可见性
  * 只由距离档（`cullDistance`）决定；`loadScene` 仍会建 `pvsManager` 并给每块分配 `clusterIds`。
@@ -137,7 +134,7 @@ export class RendererMain {
    */
   private sampleEpoch = 0;
   /** mesh → { 世界包围盒中心, 半径, clusterIds }（距离剔除与 PVS 判定用）。 */
-  private lodItems: Array<{ mesh: THREE.Mesh; center: THREE.Vector3; radius: number; clusterIds: number[] }> = [];
+  private lodItems: Array<{ mesh: THREE.Mesh; center: THREE.Vector3; radius: number; clusterIds: number[] }> = []; /** 可见性控制器（T-454 P4：收集/判定在共享层）。 */ private visibility = new VisibilityController();
   /** 当前剔除距离（世界单位）：`loadScene` 按 `config.hud.renderDistance` 或自动值设定，
    *  `setRenderDistance` 可实时改；`tick` 用它把更远的块置 `visible = false`。 */
   private cullDistance = 12800;
@@ -296,48 +293,15 @@ export class RendererMain {
     // 2. 相机 near/far（near 自适应：默认 maxDim/1000，贴墙由 NearPlaneController.update 收缩）
     applySceneCamera(this.camera, this.nearPlane, maxDim, this.config.hud.fov);
 
-    // 3. PVS + LOD 注册
+    // 3. PVS + LOD 注册（T-454 P4：收集与判定都走共享 `VisibilityController`，三端同一份）
     this.pvsManager = new PvsManager(data.pvsJson);
+    this.visibility.enablePvs = ENABLE_PVS;
+    this.visibility.collect(scene, this.pvsManager);
     this.lodItems.length = 0;
-    scene.traverse((obj) => {
-      if (!(obj as THREE.Mesh).isMesh) return;
-      const mesh = obj as THREE.Mesh;
-      const geom = mesh.geometry as THREE.BufferGeometry;
-      if (!geom.boundingSphere) geom.computeBoundingSphere();
-      const bs = geom.boundingSphere!;
-      mesh.userData.lodLevel = LOD_NEAR;
-      // clusterIds：空间采样分配——包围球中心与 6 个 ±r 轴上点各查一次 PvsManager.getClusterAt；
-      // 不走逐 face 映射（`src/ts-shared/world/pvs-manager.ts` 的 `getFaceCluster` 在本仓零调用点，
-      // 见该文件的成员说明）。
-      const center = bs.center.clone().applyMatrix4(mesh.matrixWorld);
-      const set = new Set<number>();
-      const r = Math.max(bs.radius, 1);
-      const samples: Array<[number, number, number]> = [
-        [center.x, center.y, center.z],
-        [center.x + r, center.y, center.z],
-        [center.x - r, center.y, center.z],
-        [center.x, center.y + r, center.z],
-        [center.x, center.y - r, center.z],
-        [center.x, center.y, center.z + r],
-        [center.x, center.y, center.z - r],
-      ];
-      for (const [x, y, z] of samples) {
-        const cl = this.pvsManager!.getClusterAt({ x, y, z });
-        if (cl >= 0) set.add(cl);
-      }
-      this.lodItems.push({
-        mesh,
-        center,
-        radius: bs.radius,
-        clusterIds: [...set],
-      });
-    });
 
     // 4. 视距剔除距离：自动值 = 场景包围盒对角线 × 0.5（下限 1000）；config.hud.renderDistance > 0
-    //    时覆盖它（面板「渲染距离」滑块；0 = 自动）
-    this.autoCullDistance = Math.max(maxDim * 0.5, 1000);
-    const cfgRenderDistance = this.config?.hud?.renderDistance ?? 0;
-    this.cullDistance = cfgRenderDistance > 0 ? cfgRenderDistance : this.autoCullDistance;
+    //    时覆盖它（面板「渲染距离」滑块；0 = 自动）。档位与自动值口径由共享控制器承载。
+    this.cullDistance = this.visibility.setCullDistance(maxDim * 0.5, this.config?.hud?.renderDistance ?? 0);
 
 
     // 5. 回传场景包围盒最小 Y（`onSceneLoaded` 的调用方把它当死亡阈值转给 setDeathY）
@@ -421,7 +385,7 @@ export class RendererMain {
       this.scene.fog = null;
     }
     this.skyGroup = null; this.skyParams = null; this.skyCamera = null; this.skyFog = null;
-    this.lodItems.length = 0;
+    this.lodItems.length = 0; this.visibility.clear();
     this.predPhys = null;
     this.predReady = false;
     this.pendingDx = 0;
@@ -827,33 +791,9 @@ export class RendererMain {
 
     const camPos = this.camera.position;
 
-    // 2. LOD/PVS 剔除：超距与（PVS 启用且相机 cluster 有效时）不可见的块置 visible = false
-    if (this.lodItems.length > 0) {
-      const pvs = this.pvsManager;
-      if (ENABLE_PVS && pvs) pvs.update(camPos);
-      // 相机不在任何 cluster（出生在固体里/地图外）时可见集为空，会把有 cluster 的块错误全剔
-      // → 这种情况跳过 PVS，只按距离判定
-      const pvsActive = ENABLE_PVS && pvs !== null && pvs.enabled;
-      const pvsClusterValid = pvs !== null && pvs.currentClusterId >= 0;
-      for (const item of this.lodItems) {
-        const dist = item.center.distanceTo(camPos);
-        let level = LOD_NEAR;
-        if (dist > this.cullDistance) {
-          level = LOD_FAR;
-        } else if (
-          pvsActive &&
-          pvsClusterValid &&
-          item.clusterIds.length > 0 &&
-          !item.clusterIds.some((c) => pvs!.isVisible(c))
-        ) {
-          level = LOD_PVS_HIDDEN;
-        }
-        if (item.mesh.userData.lodLevel !== level) {
-          item.mesh.userData.lodLevel = level;
-          item.mesh.visible = level === LOD_NEAR;
-        }
-      }
-    }
+    // 2. LOD/PVS 剔除（T-454 P4：判定与写回都在共享 `VisibilityController`：距离优先、距离内再看 PVS，
+    //    天空层不参与剔除）
+    this.visibility.update(this.camera, this.pvsManager);
 
     // 3. 绘制（帧率跟随 rAF，不做节流）
     this.renderFrame();
@@ -881,7 +821,7 @@ export class RendererMain {
    * 生效点：`tick` 的剔除遍历——距离超过它的块置 `visible = false`，不产生 draw call。
    */
   setRenderDistance(dist: number): void {
-    this.cullDistance = dist > 0 ? dist : this.autoCullDistance;
+    this.cullDistance = this.visibility.setCullDistance(this.visibility.autoCullDistance, dist);
   }
 
 

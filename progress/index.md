@@ -146,3 +146,4 @@
 | 2026-10-09 | T-454 P3a：三端共享位姿入口 `camera/pose-entry.ts`（`globalThis.__vbspPose`，收编 T-443）；钉同一位姿后三端读数逐项相同（仅 `near` 分叉待 P3b），debug↔game 像素 100.000% 通道差 ≤2 | progress/monthly/2026-10-10.md:27 |
 | 2026-10-09 | T-454 P3b-1：near/far/fov 与近平面收缩收口到 `src/renderer-shared/camera/scene-camera.ts`（viewer 取消 `CAMERA_INIT_FAR` 下限、取消 `vertical` 独有；三端 near 读数差从 13.5 HU 收到 ≤4e-4 HU） | progress/monthly/2026-10-10.md:29 |
 | 2026-10-09 | T-454 P3b-2：装配核 `src/renderer-shared/scene/assemble-scene.ts` 收口三端装配序列（apps 内 `applyLightmap`/`extractSkyArea`/`padBoundingSpheres` 等 0 命中；统一「先主后天空」合并次序；顺手修掉本轮引入的 viewer 换图解构缺陷） | progress/monthly/2026-10-10.md:31 |
+| 2026-10-09 | T-454 P4：可见性控制器 src/renderer-shared/scene/visibility-controller.ts（game 先接、行为中性：出图与 P3b-2 逐像素相同；天空层永不剔除） | progress/monthly/2026-10-10.md:33 |
