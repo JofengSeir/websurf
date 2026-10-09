@@ -28,3 +28,11 @@
 
 - 上表中「本维度各工程实现一致」的判定只用于**逐参数比对过**的项（three 渲染器构造、`--multi` 开关语义、`types: []`）；其余维度一律按实测差异写。
 - 本工程与另两个工程共享同一套 `src/` 共享层，但**共享面不同**：本工程只消费 `src/ts-shared/wasm/loader.ts`、`src/ts-shared/phys/angles.ts`、`src/ts-shared/phys/constants.ts` 与 `src/wasm-core/**`；不消费 `websurf-phys`、输入层、tick/授权与解耦环（消费点见 `documents/viewer/overview.md` 的「依赖方向」）。
+
+## 渲染链三端同源（T-454 P5-2/P7 收口，2026-10-10）
+
+- 渲染实现已全部收在共享层：装配核 `src/renderer-shared/scene/assemble-scene.ts`、天空两遍法与地图雾 `src/renderer-shared/environment/render-sky-pass.ts`、渲染器工厂 `src/renderer-shared/render/create-renderer.ts`，lightmap / 双贴图 / 画质档在 `src/renderer-shared/**`；wasm 导出编排（PAKFILE 模型与材质、光源实体、碰撞体派生）在 `src/wasm-core/render_bundle.rs`。
+- 判据（可执行）：`node src/scripts/check-render-parity.mjs` ⇒ exit 0——`apps/**` 下 19 条渲染实现符号 **0 命中**，三端 import 面各覆盖 7 个共享入口（本工程 7/7）。
+- 画质档（T-454 P6）已三端同源：本工程此前**没有**画质切换，现已接 `export_mosaic_manifest()`（本次补齐的导出）+ 共享核 `src/renderer-shared/scene/texture-quality.ts`，档位读共享呈现档 `textureQuality`，并挂 `globalThis.__vbspTextureQuality` 供无头 A/B。
+- 本工程与另两端的**固有差异与渲染链无关**：无物理、无调试层、相机与控制在 `apps/viewer/src/**` 自成一档（见上表）；渲染侧只剩本工程自己的默认视角与面板。
+- 实测：`test/maps/surf_boreas.bsp` 上 manifest 25 条、材质贴图 24 个，`mini` 档命中 24/24；钉位姿（`-12048,14800.1213,12768,-90,0`）两档对照 = `≤2 60.62%` / 均值差 3.1377 / 最差 187 ⇒ 切档真实生效。

@@ -31,7 +31,7 @@
  */
 
 import * as THREE from 'three';
-import { setFogMaxDensity, setReflectionEnvMap } from '../shader/lightmap-shader.js';
+import { setReflectionEnvMap } from '../shader/lightmap-shader.js'; import { createMapFog } from './render-sky-pass.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 /** 颜色入参的两种形态：`number` 直接当十六进制色值，字符串按 `#rrggbb` 解析。 */
@@ -182,9 +182,9 @@ export class LightManager {
 	 * 与 `setSkybox` 同层：环境背景与雾都由 light-manager 统一管，渲染端不再直接写 `scene.fog`。
 	 */
 	setFog(params: { color: number; start: number; end: number; maxDensity: number } | null): void {
-		setFogMaxDensity(params?.maxDensity ?? 1);
 		this.fogParams = params;
-		this.fog = params ? new THREE.Fog(params.color, params.start, params.end) : null;
+		// 建雾与雾上限都走共享环境模块的唯一入口（`environment/render-sky-pass.ts` 的 `createMapFog`）
+		this.fog = createMapFog(params);
 		if (this.scene) this.scene.fog = this.fog;
 	}
 

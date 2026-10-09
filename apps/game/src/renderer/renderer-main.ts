@@ -31,7 +31,7 @@
  */
 
 import * as THREE from 'three';
-import { setFogMaxDensity } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { applyMapFog, renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js';
 import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
@@ -43,11 +43,11 @@ import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
 import { mergeIntoChunks, padBoundingSpheres, optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js'; import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js'; import { VisibilityController } from '../../../../src/renderer-shared/scene/visibility-controller.js';
 import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inject-stats.js';
 import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
-import { createSkyCamera, extractSkyArea, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { createSkyCamera, extractSkyArea, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
-import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setExposure, setLightGamma, setAmbientScale, setPropVertexRelax, setPropVertexFlatten, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyLightingPresentation, type RenderLightingPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -213,18 +213,10 @@ export class RendererMain {
   /** 建 renderer/scene/camera 并把光照参数初值写进共享 uniform；必须在 `loadScene` 之前调用。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
-    // 光照模式（面板「预烘焙 / 纯纹理」）：只是共享 uniform 的初值——两种模式都加载同一批注入
-    // 材质与同一张 atlas，这里写初值只是让首帧就是所选模式（运行期切换见 setLightingMode）。
+    // 静态光照项初值：唯一入口是共享呈现档模块的字段级施加器 `applyLightingPresentation`
+    // （值来源仍是本工程的 `config.lighting`；字段级调用不读档、不落盘）
     setLightingModeInShader(config.lighting?.mode ?? 'baked');
-    // 显示侧亮度倍率（接受窗口见本文的 setExposure 包装器）
-    setExposure(config.lighting?.exposure ?? 2.0);
- // 光照项 gamma（shadow-lift）：缺省 0.5；接受窗口是 (0, 8]
-    setLightGamma(config.lighting?.lightGamma ?? 1.0);
-    // prop（模型）烘焙光照亮度：ambient cube 路径的独立档位，不动 world lightmap
-    setAmbientScale(config.lighting?.ambientScale ?? 1);
-    // 第 1 级逐顶点光照的几何重建档位：平滑遍数（0 = 原样使用烘焙值）与方差压缩上限
-    setPropVertexRelax(config.lighting?.propVertexRelax ?? 1);
-    setPropVertexFlatten(config.lighting?.propVertexFlatten ?? 0);
+    applyLightingPresentation(config.lighting);
     this.renderer = createRenderer({ canvas, width, height, dpr });
 
     this.scene = new THREE.Scene();
@@ -316,9 +308,8 @@ export class RendererMain {
     } else {
       console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
-    // 地图线性雾（`env_fog_controller`）：与 debug 的 `lightManager.setFog` 同值
-    this.scene.fog = data.fogParams ? new THREE.Fog(data.fogParams.color, data.fogParams.start, data.fogParams.end) : null;
-    setFogMaxDensity(data.fogParams?.maxDensity ?? 1);
+    // 地图线性雾（`env_fog_controller`）：建雾 + 雾上限的唯一入口（共享环境模块；debug 由 lightManager.setFog 走同一函数）
+    applyMapFog(this.scene, data.fogParams);
 
     // 6. 纹理画质 manifest + 按当前画质应用（mosaic 切换数据源）
     this.mosaicManifest = data.mosaicManifest
@@ -407,39 +398,8 @@ export class RendererMain {
    * 无 3D 天空盒时退回单遍。
    */
   private renderFrame(): void {
-    const renderer = this.renderer;
-    const camera = this.camera;
-    const scene = this.scene;
-    if (!renderer || !camera || !scene) return;
-    const skyCamera = this.skyCamera;
-    if (!skyCamera || !this.skyGroup || !this.skyParams) {
-      renderer.autoClear = true;
-      renderer.render(scene, camera);
-      return;
-    }
-    syncSkyCamera(skyCamera, camera, this.skyParams);
-    const background = scene.background;
-    const mapFog = scene.fog;
-    // 天空遍的雾走 `sky_camera` 自己的参数，start/end 乘 1/scale（引擎 `Enable3dSkyboxFog`）；
-    // `fogenable` 为假时引擎直接 `FogMode(NONE)`，天空区一点雾都不吃。
-    const skyFogParams = this.skyParams.fog;
-    if (skyFogParams?.enable) {
-      if (!this.skyFog) this.skyFog = new THREE.Fog(0xffffff, 0, 1);
-      this.skyFog.color.setHex(skyFogParams.color);
-      this.skyFog.near = skyFogParams.start / this.skyParams.scale;
-      this.skyFog.far = skyFogParams.end / this.skyParams.scale;
-      scene.fog = this.skyFog;
-    } else {
-      scene.fog = null;
-    }
-    renderer.autoClear = false;
-    renderer.clear();
-    renderer.render(scene, skyCamera);
-    scene.fog = mapFog;
-    renderer.clearDepth();
-    scene.background = null;
-    renderer.render(scene, camera);
-    scene.background = background;
+    // 两遍法唯一实现：共享环境模块 `environment/render-sky-pass.ts`（主世界 + 天空层，含天空遍雾）
+    this.skyFog = renderSkyPass({ renderer: this.renderer, scene: this.scene, camera: this.camera, skyCamera: this.skyCamera, skyGroup: this.skyGroup, skyParams: this.skyParams, skyFog: this.skyFog });
   }
 
   /** 判某个 mesh 是否落在指定 BSP cluster（与 debug 同一采样口径：包围盒中心 + 6 个 ±r 轴点）。 */
@@ -477,29 +437,13 @@ export class RendererMain {
   }
 
   /**
-   * 全局曝光（显示侧亮度倍率）：转发给 `src/renderer-shared/shader/lightmap-shader.ts` 的
-   * `setExposure` —— 改的是共享 uniform，立即生效、不重编译材质。该函数只接受有限正数，
-   * 其余值（含 0 与负数）被忽略。
+   * 面板单点改写静态光照项（曝光 / 光照项 gamma / prop ambient cube 亮度）：经共享呈现档
+   * `src/renderer-shared/config/render-prefs.ts` 的唯一字段级入口 `applyLightingPresentation`
+   * 施加——改的是共享 uniform，立即生效、不重编译材质。各字段的接受窗口由
+   * `src/renderer-shared/shader/lightmap-shader.ts` 的对应 setter 把关（窗口外的值被忽略）。
    */
-  setExposure(value: number): void {
-    setExposure(value);
-  }
-
-  /**
-   * 光照项 gamma（shadow-lift）：转发给 `src/renderer-shared/shader/lightmap-shader.ts` 的
- * `setLightGamma`。接受窗口是 (0, 8]（2026-10-08 起），窗口外的值被忽略（`apps/game/src/config.ts` 的
-   * `lighting.lightGamma` 默认 2.2 即落在窗口外，`init` 的那次写入不改变共享 uniform）。
-   */
-  setLightGamma(value: number): void {
-    setLightGamma(value);
-  }
-
-  /**
-   * prop（模型）烘焙光照亮度倍率（ambient cube 路径专用）：转发给
-   * `src/renderer-shared/shader/lightmap-shader.ts` 的 `setAmbientScale`；接受有限非负数。
-   */
-  setAmbientScale(value: number): void {
-    setAmbientScale(value);
+  applyLighting(patch: Partial<RenderLightingPrefs>): void {
+    applyLightingPresentation(patch);
   }
 
   // ── 主线程唯一物理线 ───────────────────────────────────────
@@ -1105,6 +1049,6 @@ export class RendererMain {
         return { replaced };
       },
     };
-    (globalThis as unknown as { __vbspFrameProbe?: unknown }).__vbspFrameProbe = probe; installPoseEntry({ applyPose: (p) => { self.setHoldPoint({ x: p.pos[0], y: feetFromCameraPose(p)[1], z: p.pos[2], yaw: p.yawDeg, pitch: p.pitchDeg, onGround: true }); }, readPose: () => cameraPoseOf(self.camera), releasePose: () => { self.holdPoint = null; } }, 'game');
+    (globalThis as unknown as { __vbspFrameProbe?: unknown }).__vbspFrameProbe = probe; installPoseEntry({ applyPose: (p) => { self.setHoldPoint({ x: p.pos[0], y: feetFromCameraPose(p)[1], z: p.pos[2], yaw: p.yawDeg, pitch: p.pitchDeg, onGround: true }); }, readPose: () => cameraPoseOf(self.camera), releasePose: () => { self.holdPoint = null; } }, 'game'); (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality = (q) => self.applyTextureQuality(q);
   }
 }

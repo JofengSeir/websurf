@@ -209,11 +209,7 @@ export function writeRenderPrefs(patch: RenderPrefsPatch): RenderPrefs {
 
 /** 把档里的静态光照项施加到共享着色器（三端 init 的唯一调用点）。 */
 export function applyRenderPrefs(p: RenderPrefs): void {
-  setExposure(p.lighting.exposure);
-  setLightGamma(p.lighting.lightGamma);
-  setAmbientScale(p.lighting.ambientScale);
-  setPropVertexRelax(p.lighting.propVertexRelax);
-  setPropVertexFlatten(p.lighting.propVertexFlatten);
+  applyLightingPresentation(p.lighting);
   setLightingMode(p.lighting.mode);
 }
 
@@ -242,4 +238,19 @@ export function describeRenderPrefs(p: RenderPrefs): string {
     '（0=自动） pvs=' +
     (p.culling.pvs ? 'on' : 'off')
   );
+}
+
+/**
+ * 字段级施加静态光照项（缺省字段不动）：**不读档、不落盘**，值来源由调用方决定。
+ *
+ * 与 `applyRenderPrefs` 的分工：整档（含光照模式）由它施加；本函数是两个字段级调用方的共享入口——
+ * ① 各端初始化把配置对象里的现值写进共享 uniform（值仍是各自的 `config.lighting`）；
+ * ② 面板滑块单点改写（每次只动一个字段），不因拖动而反复解析 localStorage 存档。
+ */
+export function applyLightingPresentation(patch: Partial<RenderLightingPrefs>): void {
+  if (patch.exposure !== undefined) setExposure(patch.exposure);
+  if (patch.lightGamma !== undefined) setLightGamma(patch.lightGamma);
+  if (patch.ambientScale !== undefined) setAmbientScale(patch.ambientScale);
+  if (patch.propVertexRelax !== undefined) setPropVertexRelax(patch.propVertexRelax);
+  if (patch.propVertexFlatten !== undefined) setPropVertexFlatten(patch.propVertexFlatten);
 }

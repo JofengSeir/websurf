@@ -192,9 +192,9 @@ if (isolated) {
     (quality) => void renderer?.applyTextureQuality(quality),
     (fov) => renderer?.setFov(fov),
     (dist) => renderer?.setRenderDistance(dist),
-    (exposure) => renderer?.setExposure(exposure),
-    (gamma) => renderer?.setLightGamma(gamma),
-    (scale) => renderer?.setAmbientScale(scale),
+    (exposure) => renderer?.applyLighting({ exposure }),
+    (gamma) => renderer?.applyLighting({ lightGamma: gamma }),
+    (scale) => renderer?.applyLighting({ ambientScale: scale }),
     // 光照模式（预烘焙 / 纯纹理）：**运行期 uniform 切换**，只改共享 uniform ⇒ 立即生效、
     // 不重建场景、不重编译材质、不打断视角与移动（详见 lightmap-shader.setLightingMode）。
     // 面板偏好加载阶段也会回调一次 ⇒ 只是把模式初值定下来（两种模式加载路径一致）。

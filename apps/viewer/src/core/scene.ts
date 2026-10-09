@@ -8,17 +8,17 @@
  * modelRoot 的换图生命周期与拾取/量测接口。
  */
 import * as THREE from 'three';
-import { setFogMaxDensity } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { applyMapFog, renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js';
 import {
   fullbrightUnlitLitMaterials,
   setLightingMode as setLightingModeInShader,
   getLightingMode,
   type LightingMode,
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js'; import { VisibilityController } from '../../../../src/renderer-shared/scene/visibility-controller.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js'; import { VisibilityController } from '../../../../src/renderer-shared/scene/visibility-controller.js'; import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js'; import { mosaic_decode } from './bsp.js';
 import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js';
-import { mergeIntoChunks, padBoundingSpheres } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
-import { createSkyCamera, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { mergeIntoNewRoot } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
@@ -105,36 +105,8 @@ export class ViewerScene {
     // 候选收集只取 modelRoot 子树，且开 vertical（自由飞行要贴地/贴顶——game 只探水平四向）
     this.nearCheckToggle = !this.nearCheckToggle;
     if (this.nearCheckToggle && this.modelRoot) { shrinkNearPlane(this.nearPlane, this.camera, this.scene, this.camera.position.x, this.camera.position.y, this.camera.position.z, [this.modelRoot]); }
-    // 有 3D 天空盒时按起源的两遍法（与 debug/game 同款）：① 天空相机画 2D 天空盒背景 + 天空层；
-    // ② 清深度、摘掉背景后主相机画主世界（不摘背景的话 three 的背景 pass 会盖掉第 ① 遍）。
-    const skyCamera = this.skyCamera;
-    if (!skyCamera || !this.skyGroup || !this.skyParams) {
-      this.renderer.autoClear = true;
-      this.renderer.render(this.scene, this.camera);
-      return;
-    }
-    syncSkyCamera(skyCamera, this.camera, this.skyParams);
-    const background = this.scene.background;
-    const mapFog = this.scene.fog;
-    // 天空遍的雾走 sky_camera 自己的参数，start/end 乘 1/scale（引擎 Enable3dSkyboxFog）
-    const skyFogParams = this.skyParams.fog;
-    if (skyFogParams?.enable) {
-      if (!this.skyFog) this.skyFog = new THREE.Fog(0xffffff, 0, 1);
-      this.skyFog.color.setHex(skyFogParams.color);
-      this.skyFog.near = skyFogParams.start / this.skyParams.scale;
-      this.skyFog.far = skyFogParams.end / this.skyParams.scale;
-      this.scene.fog = this.skyFog;
-    } else {
-      this.scene.fog = null;
-    }
-    this.renderer.autoClear = false;
-    this.renderer.clear();
-    this.renderer.render(this.scene, skyCamera);
-    this.scene.fog = mapFog;
-    this.renderer.clearDepth();
-    this.scene.background = null;
-    this.renderer.render(this.scene, this.camera);
-    this.scene.background = background;
+    // 两遍法唯一实现：共享环境模块 `environment/render-sky-pass.ts`（主世界 + 天空层，含天空遍雾）
+    this.skyFog = renderSkyPass({ renderer: this.renderer, scene: this.scene, camera: this.camera, skyCamera: this.skyCamera, skyGroup: this.skyGroup, skyParams: this.skyParams, skyFog: this.skyFog });
   }
 
   add(obj: THREE.Object3D): void {
@@ -149,7 +121,7 @@ export class ViewerScene {
   async mountGlb(
     glbBytes: ArrayBuffer,
     skyboxTexture?: import('three').CubeTexture | null,
-    sky?: { fogParams?: { color: number; start: number; end: number; maxDensity: number } | null; skyCamera?: SkyCameraParams | null; pvsJson?: string },
+    sky?: { fogParams?: { color: number; start: number; end: number; maxDensity: number } | null; skyCamera?: SkyCameraParams | null; pvsJson?: string; mosaicManifest?: Record<string, string> | null },
   ): Promise<void> {
     // 换图：上一张图的天空层与雾先释放（下面的摘取会覆盖 this.skyGroup 引用）
     if (this.skyGroup) { disposeObject(this.skyGroup); this.scene.remove(this.skyGroup); this.skyGroup = null; }
@@ -199,9 +171,8 @@ export class ViewerScene {
     } else {
       console.info('[viewer][skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
-    // 地图线性雾（`env_fog_controller`）：与 debug/game 同值
-    this.scene.fog = sky?.fogParams ? new THREE.Fog(sky.fogParams.color, sky.fogParams.start, sky.fogParams.end) : null;
-    setFogMaxDensity(sky?.fogParams?.maxDensity ?? 1);
+    // 地图线性雾（`env_fog_controller`）：建雾 + 雾上限的唯一入口（共享环境模块，三端同值）
+    applyMapFog(this.scene, sky?.fogParams); await applyViewerTextureQuality(this.scene, this.modelRoot, sky?.mosaicManifest ?? null, readRenderPrefs().textureQuality);
     this.fitCamera(maxDim);
   }
 
@@ -268,14 +239,39 @@ export class ViewerScene {
   private optimizeScene(modelRoot?: THREE.Object3D): THREE.Object3D | void {
     const src = modelRoot ?? this.modelRoot;
     if (!src) return;
-    const r = mergeIntoChunks(src);
-    const optRoot = new THREE.Group();
-    for (const m of r.chunks) optRoot.add(m);
-    for (const m of r.keptMeshes) optRoot.add(m);
-    padBoundingSpheres(optRoot);
+    // 合并算法与垫球口径在共享核（`mergeIntoNewRoot` = mergeIntoChunks + 新 Group 挂块 + padBoundingSpheres）
+    const optRoot = mergeIntoNewRoot(src);
     this.scene.remove(src);
     this.scene.add(optRoot);
     this.modelRoot = optRoot;
     return optRoot;
   }
+}
+
+/**
+ * 纹理画质档（T-454 P6）：viewer 此前**没有**画质切换（debug / game 都有）⇒ 三端画质档不同源。
+ *
+ * 数据源是 `BspProcessor::export_mosaic_manifest()`（本阶段补齐的导出）；切换算法在共享核
+ * `renderer-shared/scene/texture-quality.ts`，本函数只负责「读档 → 调共享核 → 打印与另两端同形的
+ * 诊断行 → 挂 A/B 钩子」。`globalThis.__vbspTextureQuality(q)` 供脚本与无头仪器在同一会话内
+ * A/B（与 `globalThis.__vbspPose` 同风格）；`original` 用缓存的原图还原，`mini` 用 mosaic 字节码。
+ */
+const origTextureImages = new Map<THREE.Texture, unknown>();
+
+async function applyViewerTextureQuality(
+  scene: THREE.Scene,
+  root: THREE.Object3D | null,
+  manifest: Record<string, string> | null,
+  quality: 'original' | 'mini',
+): Promise<void> {
+  const count = manifest ? Object.keys(manifest).length : 0;
+  console.log(`[renderer] 画质切换 → ${quality}，manifest ${count} 条，modelRoot=${!!root}`);
+  (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality =
+    (q) => applyViewerTextureQuality(scene, root, manifest, q);
+  if (!manifest || !root || count === 0) return;
+  const stats = await applyTextureQuality(root, manifest, quality, origTextureImages, {
+    decode: mosaic_decode,
+  });
+  console.log(`[renderer] 场景贴图 ${stats.mapCount} 个`);
+  console.log(`[renderer] mini 匹配 ${stats.matched}/${stats.mapCount}；未匹配:`, stats.noMatch.slice(0, 12));
 }

@@ -43,7 +43,7 @@ import type { PhyBevelPiece } from './collider-debug.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
-import { createSkyCamera, SKY_LAYER, syncSkyCamera, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
+import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js'; import { renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js';
 import { LodManager } from './lod-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
@@ -389,7 +389,7 @@ export class RendererMain {
     this.camera.layers.disable(SKY_LAYER);
     this.skyCamera = createSkyCamera();
 
-    this.cameraController = new CameraController(this.camera, config.input); installPoseEntry({ applyPose: (p) => { const [yawRad, pitchRad] = yawPitchRadOf(p); this.poseHold = { x: p.pos[0], y: p.pos[1], z: p.pos[2], yawRad, pitchRad }; }, readPose: () => cameraPoseOf(this.camera), releasePose: () => { this.poseHold = null; } }, 'debug');
+    this.cameraController = new CameraController(this.camera, config.input); installPoseEntry({ applyPose: (p) => { const [yawRad, pitchRad] = yawPitchRadOf(p); this.poseHold = { x: p.pos[0], y: p.pos[1], z: p.pos[2], yawRad, pitchRad }; }, readPose: () => cameraPoseOf(this.camera), releasePose: () => { this.poseHold = null; } }, 'debug'); (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality = (q) => this.applyTextureQuality(q);
 
     this.lightManager.applyLights(this.scene, config);
     this.colliderDebug.init(this.scene);
@@ -728,40 +728,8 @@ export class RendererMain {
    * 无 3D 天空盒时退回单遍。
    */
   private renderFrame(): void {
-    const renderer = this.renderer;
-    const camera = this.camera;
-    const scene = this.scene;
-    if (!renderer || !camera || !scene) return;
-    const skyCamera = this.skyCamera;
-    if (!skyCamera || !this.skyGroup || !this.skyParams) {
-      renderer.autoClear = true;
-      renderer.render(scene, camera);
-      return;
-    }
-    syncSkyCamera(skyCamera, camera, this.skyParams);
-    const background = scene.background;
-    const mapFog = scene.fog;
-    // 天空遍的雾走 sky_camera 自己的参数，且 start/end 乘 1/scale（引擎 Enable3dSkyboxFog：
-    // FogStart/FogEnd * (1/skyboxScale)）——天空区几何是按 1/scale 烘的，用主图的雾会把
-    // 「远处的山」按近处衰减；fogenable 为假时引擎直接 FogMode(NONE)，天空区一点雾都不吃。
-    const skyFogParams = this.skyParams.fog;
-    if (skyFogParams?.enable) {
-      if (!this.skyFog) this.skyFog = new THREE.Fog(0xffffff, 0, 1);
-      this.skyFog.color.setHex(skyFogParams.color);
-      this.skyFog.near = skyFogParams.start / this.skyParams.scale;
-      this.skyFog.far = skyFogParams.end / this.skyParams.scale;
-      scene.fog = this.skyFog;
-    } else {
-      scene.fog = null;
-    }
-    renderer.autoClear = false;
-    renderer.clear();
-    renderer.render(scene, skyCamera);
-    scene.fog = mapFog;
-    renderer.clearDepth();
-    scene.background = null;
-    renderer.render(scene, camera);
-    scene.background = background;
+    // 两遍法唯一实现：共享环境模块 `environment/render-sky-pass.ts`（主世界 + 天空层，含天空遍雾）
+    this.skyFog = renderSkyPass({ renderer: this.renderer, scene: this.scene, camera: this.camera, skyCamera: this.skyCamera, skyGroup: this.skyGroup, skyParams: this.skyParams, skyFog: this.skyFog });
   }
 
   /**

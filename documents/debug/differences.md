@@ -50,3 +50,10 @@
 
 - 三工程的 `web/index.html` 都由构建脚本改写成 `single 产物` 的 classic script 形态，`multi 产物` 保留 module script；改写实现收敛在共享层 `src/scripts/lib/dist-pack.mjs`（本工程 `apps/debug/scripts/build-dist.mjs:43` 与 viewer `apps/viewer/scripts/build-dist.mjs:39` 都从该模块引入同一组打包辅助函数）。
 - 三工程的 dev 服务器都是共享的 `src/serve.py`，只是端口与服务根不同（本工程 `apps/debug/package.json:15`；viewer `apps/viewer/package.json:18`）。
+
+## 渲染链三端同源（T-454 P5-2/P7 收口，2026-10-10）
+
+- 渲染实现已全部收在共享层：装配核 `src/renderer-shared/scene/assemble-scene.ts`、天空两遍法与地图雾 `src/renderer-shared/environment/render-sky-pass.ts`、渲染器工厂 `src/renderer-shared/render/create-renderer.ts`，lightmap / 双贴图 / 画质档在 `src/renderer-shared/**`；wasm 导出编排（PAKFILE 模型与材质、光源实体、碰撞体派生）在 `src/wasm-core/render_bundle.rs`。
+- 判据（可执行）：`node src/scripts/check-render-parity.mjs` ⇒ exit 0——`apps/**` 下 19 条渲染实现符号 **0 命中**，三端 import 面各覆盖 7 个共享入口（本工程 7/7）。
+- **本端唯一保留的渲染差异 = 调试绘制层**（线框 / 包围盒 / 面板可视化等 debug overlay），它不参与跨端像素比对。
+- 实测：同图同视点（`test/maps/surf_boreas.bsp`、位姿 `-12048,14800.1213,12768,-90,0`、`web/index.html`）本端与 `apps/game` **逐像素相同**（`100.0000%` / 均值差 0 / 最差 0；T-454 P7 前为 `99.980%` / 0.0029 / 43）；与 `apps/viewer` 的差异见 `documents/viewer/differences.md`。

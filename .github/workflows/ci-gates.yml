@@ -359,3 +359,6 @@ jobs:
 
       - name: GLB parity (three ends; SKIP when map fixtures are absent)
         run: node src/scripts/check-glb-parity.mjs
+
+      - name: Render parity (apps/** must go through shared entries)
+        run: node src/scripts/check-render-parity.mjs

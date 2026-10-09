@@ -466,3 +466,20 @@ export function optimizeScene(
       `前向视锥可见块估算 ${visibleEst >= 0 ? `${visibleEst}/${r.chunkCount}` : 'N/A（camera 未就绪）'}`,
   );
 }
+
+/**
+ * 「新根」口径的合并包装：合并 `src` 的图元到一个**新建的 Group** 并垫包围球，返回新根。
+ *
+ * 与 `optimizeScene` 的唯一差别是载体的归属——后者原地挂回传入的 BSP 根；本函数把根交给调用方，
+ * 由调用方决定挂到哪个场景、是否替换自己的根引用（`apps/viewer` 的 model getter / 拾取 /
+ * `worldBox` 都按根切换）。收集与合并算法、失败回退、垫球口径与 `optimizeScene` 同一份。
+ * 副作用：`src` 下被合并掉的原始几何会 dispose；`src` 本身**不**从任何父节点摘除。
+ */
+export function mergeIntoNewRoot(src: THREE.Object3D): THREE.Group {
+  const r = mergeIntoChunks(src);
+  const root = new THREE.Group();
+  for (const m of r.chunks) root.add(m);
+  for (const m of r.keptMeshes) root.add(m);
+  padBoundingSpheres(root);
+  return root;
+}

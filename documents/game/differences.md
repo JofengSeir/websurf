@@ -26,3 +26,10 @@
 | 测试与门禁脚本 | 契约检查脚本的清单是**本工程自己**的 `EXPORT_API` / `PHYS_API` 两张表 | `apps/viewer` 只跑 `check:api` 与回放自测 / 冒烟（`test:replay`、`test:sessions`、`local:smoke`），无物理冒烟脚本 | `apps/game/scripts/check-wasm-api.mjs:55`；`apps/viewer/package.json:10`、`apps/viewer/package.json:11`、`apps/viewer/package.json:12`、`apps/viewer/package.json:18` |
 | 地图装载位置 | BSP 解析、GLB 导出、物理世界构建**全在主线程**；Worker 只收 `world-json` 建权威世界，不参与解析 | `apps/debug` 同样主线程解析；解析管线共用同一函数 | 本维度两工程实现一致：`apps/game/src/app.ts:514`、`apps/game/src/app.ts:558`、`apps/game/src/worker/main.ts:508`；`apps/debug/src/app.ts:1796` 亦取 `bundle.pvsJson`，`src/ts-shared/phys/world-builder.ts:6` 写明两工程的 `handleLoadBsp` 都只调 `buildWorldBundle` |
 | 光照三路径实现 | 着色器本体是渲染共享层单实例 `src/renderer-shared/shader/lightmap-shader.ts`（2026-10-02 起；合并前本工程自有副本，该副本只 import `three` 与 `GLTFLoader` 的类型） | `apps/debug` 与 `apps/viewer` 消费**同一份**共享文件；合并前「同一相对路径下各有一份独立文件」的旧差异不再成立 | `src/renderer-shared/shader/lightmap-shader.ts:70`、`src/renderer-shared/shader/lightmap-shader.ts:71`（import 面与合并前一致）；三工程导入点：`apps/game/src/renderer/renderer-main.ts:33`、`apps/debug/src/renderer/renderer-main.ts:57`、`apps/viewer/src/core/scene.ts:17` |
+
+## 渲染链三端同源（T-454 P5-2/P7 收口，2026-10-10）
+
+- 渲染实现已全部收在共享层：装配核 `src/renderer-shared/scene/assemble-scene.ts`、天空两遍法与地图雾 `src/renderer-shared/environment/render-sky-pass.ts`、渲染器工厂 `src/renderer-shared/render/create-renderer.ts`，lightmap / 双贴图 / 画质档在 `src/renderer-shared/**`；wasm 导出编排（PAKFILE 模型与材质、光源实体、碰撞体派生）在 `src/wasm-core/render_bundle.rs`。
+- 判据（可执行）：`node src/scripts/check-render-parity.mjs` ⇒ exit 0——`apps/**` 下 19 条渲染实现符号 **0 命中**，三端 import 面各覆盖 7 个共享入口（本工程 7/7）。
+- **本端不再有独立渲染差异**：唯一跨端渲染差异是 `apps/debug` 的调试绘制层（本工程无调试层）。
+- 实测：同图同视点（`test/maps/surf_boreas.bsp`、位姿 `-12048,14800.1213,12768,-90,0`、`web/index.html`）本端与 `apps/debug` **逐像素相同**（`100.0000%` / 均值差 0 / 最差 0）。P7 把本端雾上限的施加顺序对齐 debug 口径（先设上限再建雾），本端画面因此变化 **0.02%** 像素（均值差 0.0029，170 px、底部 y∈[471,524] 带）——这是 P7 声明的全部 expected-delta；同构建重复运行逐像素为 0（不是随机噪声）。

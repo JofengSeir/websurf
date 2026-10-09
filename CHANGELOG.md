@@ -89,6 +89,8 @@
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。
 
+**渲染三端同源收口（T-454 P5/P7，2026-10-10）**：`apps/**` 不再持有渲染实现——三端 wasm 导出编排（PAKFILE 模型/材质提取、光源实体、碰撞体派生）收进 `src/wasm-core/render_bundle.rs`（纯 Rust、零 `wasm_bindgen`；三端 `crates/wasm/src/lib.rs` 净删 **1306** 行重复，GLB 导出**逐字节不变**：同端重复导出确定性，搬动前后六组 sha256 相同），渲染侧的天空两遍法与地图雾收进 `src/renderer-shared/environment/render-sky-pass.ts`（`setFogMaxDensity` 在 `apps/**` **0 命中**）。**可见变化**：game 的雾上限施加顺序对齐 debug（同一视点 **0.02%** 像素、均值差 0.0029）⇒ 此后同图同视点 **debug↔game 逐像素完全相同**（`100.0000%` / 均值差 0 / 最差 0，原为 `99.980%` / 0.0029 / 43）。新增两道门禁并接入 CI `glb-parity` job：`src/scripts/check-glb-parity.mjs`（三端 GLB 节点名/属性键/`extras.ambientCube`/材质逐字段/贴图逐字节一致性）与 `src/scripts/check-render-parity.mjs`（`apps/**` 19 条渲染实现符号 0 命中 + 三端共享入口覆盖）。
+
 **当前已知缺口**（逐条证据与处置状态见根 `AGENTS.md` §7.3 待决索引；原进度台账已随 plan 目录退役删除）：输入录制链路未接线、零分配支路（`tick_into` / `state_out_ptr` / `seed_from`）与 `set_yaw_pitch` 无装配点、`.cmd` 的 wasm 新鲜度门与页面消费的产物不是同一份等。
 
 > 注：更早的条目（含已退役工程 `test/dual-mode-harness`、`test/game-core` 的时期）见 §2 归档历史；当前受控工程只有 `apps/{debug,game,viewer}` 与 `src/`。
