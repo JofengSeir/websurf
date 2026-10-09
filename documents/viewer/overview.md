@@ -41,8 +41,8 @@
 | 共享解析层 `websurf-wasm-core`（`src/wasm-core/**`） | `apps/viewer/crates/wasm/Cargo.toml:19` 的路径依赖 | `apps/viewer/crates/wasm/src/lib.rs:31` 一次 `use` 覆盖 `bsp_to_gltf_core` / `model_integrator` / `pakfile_models` / `texture_utils` / `vbsp` |
 | 共享物理层 `websurf-phys`（`src/phys/**`） | **无声明**：本工程两份 `Cargo.toml` 都不引用它 | 无消费点（无物理、无碰撞） |
 | 共享 TS 运行时 `src/ts-shared/wasm/loader.ts` | 相对路径 import | `apps/viewer/src/core/bsp.ts:24` 取 `base64ToBytes` 与 `readEmbeddedWasmB64` |
-| 共享 TS 角度实现 `src/ts-shared/phys/angles.ts` | 相对路径再导出 | `apps/viewer/src/core/pose.ts:22` 再导出 `wrapDeg` / `bspYawToCsYaw`，再由 `apps/viewer/src/replay/helpers.ts:10` 与 `apps/viewer/src/core/spawn.ts:27` 消费 |
-| 共享眼高常量 `src/ts-shared/phys/constants.ts` | 相对路径再导出 | `apps/viewer/src/core/constants.ts:35` 再导出 `EYE_STAND` |
+| 共享 TS 角度实现 `src/ts-shared/phys/angles.ts` | 相对路径再导出 | `apps/viewer/src/core/pose.ts:21` 再导出 `wrapDeg` / `bspYawToCsYaw`，再由 `apps/viewer/src/replay/helpers.ts:10` 与 `apps/viewer/src/core/spawn.ts:27` 消费 |
+| 共享眼高常量 `src/ts-shared/phys/constants.ts` | 相对路径再导出 | `apps/viewer/src/core/constants.ts:34` 再导出 `EYE_STAND` |
 | 共享渲染层 `src/renderer-shared/{shader,scene,camera}/` | tsconfig include 跨目录收编 + 深层相对路径 import（2026-10-03 起 viewer 消费 shader + scene-builder/scene-optimizer + near-plane） | `apps/viewer/src/core/scene.ts:14` 到 `apps/viewer/src/core/scene.ts:29`（导入面）与 `apps/viewer/src/ui/mapinfo.ts:23`（仅 `LightingMode` 类型）；three 依赖由根级 `package.json:6` 声明 |
 | `three` 运行时 | 仓库根 `package.json:6`（单实例，2026-10-02 上收） | 场景、相机、材质、`GLTFLoader`（viewer 场景面：`apps/viewer/src/core/scene.ts:13`；`mergeGeometries` 已随合并下沉共享 scene-optimizer） |
 | TypeScript 程序面 | `apps/viewer/tsconfig.json:15` 的 `include` 含 `../../src/ts-shared/**/*.ts` 与 `../../src/renderer-shared/**/*.ts` | 共享层 TS 文件参与本工程 `tsc --noEmit` |
@@ -92,15 +92,15 @@
 |---|---|---|
 | GLB 导出必须是 `BspProcessor` 的最后一次调用 | `export_glb_with_pakfile_models` 取走内部 `Bsp`，之后再调另两个方法返回错误 | `apps/viewer/crates/wasm/src/lib.rs:583`、`apps/viewer/crates/wasm/src/lib.rs:438` |
 | `loadBspFile` 的顺序固定为 metadata → spawn → 默认纹理包 → GLB（主导出，失败回退裸导出） | 前两步是借用方法、导出会取走实例 | `apps/viewer/src/core/bsp.ts:135` 到 `apps/viewer/src/core/bsp.ts:131` |
-| 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序由共享 buildMapScene/applyLightmap 与 mountGlb 的编排共同固定 | `apps/viewer/src/core/scene.ts:208`、`apps/viewer/src/core/scene.ts:214` |
-| | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / 近平面候选 / 分块合并 / 换图释放的唯一范围（2026-10-03 起根仍是 Scene（共享 buildMapScene 产物），替换走 `mountGlb`） | `apps/viewer/src/core/scene.ts:44`、`apps/viewer/src/core/scene.ts:203` 到 `apps/viewer/src/core/scene.ts:204` |
+| 静态光照必须早于空间分块合并 | 合并按材质实例分组，换过材质后再合并会失配；顺序由共享 buildMapScene/applyLightmap 与 mountGlb 的编排共同固定 | `apps/viewer/src/core/scene.ts:203`、`apps/viewer/src/core/scene.ts:209` |
+| | 地图只有一个根句柄 | `modelRoot` 是 `worldBox` / 近平面候选 / 分块合并 / 换图释放的唯一范围（2026-10-03 起根仍是 Scene（共享 buildMapScene 产物），替换走 `mountGlb`） | `apps/viewer/src/core/scene.ts:44`、`apps/viewer/src/core/scene.ts:198` 到 `apps/viewer/src/core/scene.ts:199` |
 | 相机每帧只被一个写者写 | 只有**上场会话**给得出第一人称采样（`ReplaySession.cameraSample()` 对下场的会话恒返回 `null`，`apps/viewer/src/replay/session.ts:161`）：有采样时把 `fly.drivesCamera` 与 `fly.allowMove` 置假并用 `applyToWithRoll` 写相机；否则由 `FlyCam.update` + `applyTo` 写 | `apps/viewer/src/app.ts:974` 到 `apps/viewer/src/app.ts:993`、`apps/viewer/src/core/fly.ts:196` |
-| 位姿角一律用度、弧度只在 `FlyCam` 内部 | `Pose.ang` 是度；`setPose` / `setWorld` 在边界处换算 | `apps/viewer/src/core/pose.ts:27`、`apps/viewer/src/core/fly.ts:207` |
+| 位姿角一律用度、弧度只在 `FlyCam` 内部 | `Pose.ang` 是度；`setPose` / `setWorld` 在边界处换算 | `apps/viewer/src/core/pose.ts:26`、`apps/viewer/src/core/fly.ts:207` |
 | 采样二分要求时间轴单调不减 | `.replay` 路径由 `t(i) = (i − preFrames) / tickrate` 与 `tickrate > 0` 保证（解析期校验） | `apps/viewer/src/replay/sampling.ts:26`、`apps/viewer/src/replay/shavit-replay.ts:350` |
 | 「Worker 坏掉」是单向的 | `ensureWorker` 一旦置 `workerBroken` 就不再重试，后续全部走主线程 | `apps/viewer/src/replay/importer.ts:71`、`apps/viewer/src/replay/importer.ts:91` |
 | Worker 回传后本地 buffer 失效 | `t` / `pos` / `ang` 的 buffer 必进 transfer 列表，`vel` / `buttons` 存在才加 | `apps/viewer/src/worker/main.ts:88` 到 `apps/viewer/src/worker/main.ts:90` |
 | 记录播放基准 = 帧自身坐标 | 解码只做轴序/朝向映射，平移与旋转只在 `RuleConfig.transform` 存在且非恒等时叠加 | `apps/viewer/src/replay/build.ts:29`、`apps/viewer/src/replay/types.ts:55` |
-| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:254` |
+| 光照模式切换不重建场景 | 两种模式共用同一批注入材质，只改共享 uniform | `src/renderer-shared/shader/lightmap-shader.ts:436`、`apps/viewer/src/core/scene.ts:249` |
 
 ---
 

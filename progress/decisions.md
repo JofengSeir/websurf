@@ -136,7 +136,7 @@
 | T-140 | 遥测 HUD 自算水平速度，与 sampling/player 的现成实现重复 | apps/viewer/src/ui/telemetry.ts:122 |
 | T-156 | `wasm.d.ts` 是零导入点的类型面 | apps/viewer/src/wasm.d.ts:13 |
 | T-157 | `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达 | apps/viewer/src/app.ts:726 |
-| T-158 | `core/pose.ts` 的两个函数零调用点 | apps/viewer/src/core/pose.ts:36 |
+| T-158 | `core/pose.ts` 的两个函数零调用点 | apps/viewer/src/core/pose.ts（2026-10-09 T-158 已删除该函数） |
 | T-159 | `RAD2DEG` 在 `apps/viewer/src` 内零调用点 | apps/viewer/src/core/constants.ts:25 |
 | T-160 | `ViewerScene.model` getter 零调用点 | apps/viewer/src/core/scene.ts:92 |
 | T-161 | 六个导出在本工程内零调用点 | src/renderer-shared/shader/lightmap-shader.ts:313 |

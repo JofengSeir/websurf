@@ -242,3 +242,4 @@
 | 2026-10-09 | T-015 结案：start_disabled 恒 false 修掉（大写键→小写键，两处 1:1）；surf_fornax 唯一一条 StartDisabled 1 实测生效 | progress/monthly/2026-10-8.md:14 |
 | 2026-10-09 | T-303（PVS 未接线就不打印假「隐藏 N」）+ T-201（wasm 初始化失败不再被吞、阻断加载）结案；两处 1:1 | progress/monthly/2026-10-8.md:15 |
 | 2026-10-09 | T-610 结案 + D-022 落地：源码级契约接进 CI（--source-only + source-contract job）；负向测试 exit 1 | progress/monthly/2026-10-8.md:16 |
+| 2026-10-09 | D-024 落地：死代码窄口径首批删 3 条（T-158/159/160）；发现锚点行号陈旧体检抓不到 ⇒ 立项 T-611 | progress/monthly/2026-10-8.md:17 |

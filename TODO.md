@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（112 条）
+## 未结项（110 条）
 ### 待裁决（0）
 
 
-### 待修（110）
+### 待修（108）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-021** game 面板 4 条（γ 量程 vs 接受窗口 / 数值框不回写 / 死变量 / 默认 γ=2.2 被忽略）　`game`
 - **T-029** debug 脚本 10 条（jump-apex 采样链链路级仍待裁决　`debug`
@@ -54,9 +54,6 @@
 - **T-148** packed_files 构造期缓存而 num_static_props 每次现算　`viewer`
 - **T-156** `wasm.d.ts` 是零导入点的类型面　`viewer`
 - **T-157** `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达　`viewer`
-- **T-158** `core/pose.ts` 的两个函数零调用点　`viewer`
-- **T-159** `RAD2DEG` 在 `apps/viewer/src` 内零调用点　`viewer`
-- **T-160** `ViewerScene.model` getter 零调用点　`viewer`
 - **T-161** 六个导出在本工程内零调用点　`viewer`
 - **T-162** `setLightFloor` 在本工程内零调用点　`viewer`
 - **T-163** `ReplayPlayer` 两个成员零调用点　`viewer`
@@ -143,6 +140,7 @@
 - **T-212** `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图　`game`
 
 
+- **T-611** 文档锚点「行号陈旧」体检抓不到：docflow 钉的是「该行当前内容」而非「文档所称符号所在行」，故行号已指错、只要内容稳定就永远绿灯（2026-10-09 实测：`documents/viewer/implementation/core.md` 的 `apps/viewer/src/core/scene.ts:184` 实际指向 `this.pvs = …` 而非 `mountGlb`，体检仍全绿；同篇另有 8 处行号整体偏离 5–15 行）　`owner`
 ### 已取证待立项（2）
 - **T-109** 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正　`viewer`
 - **T-115** untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查　`viewer`
@@ -231,9 +229,9 @@
 | T-155 | req.rule 缺少防御，缺字段时抛 TypeError 并被 catch 成 error | 缺陷 | viewer | 已结案 | apps/viewer/src/worker/main.ts:87/88/93/94 ⇒ 改走文末 `ruleOf(req)`；探针 ⇒ `rule: undefined` 修复前 TypeError、修复后明确错误「导入请求缺少 rule 配置」；`rule: {}` 仍 done（1211 帧） | documents/viewer/implementation/worker.md | 见详情 | — |
 | T-156 | `wasm.d.ts` 是零导入点的类型面 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/wasm.d.ts:13 | documents/viewer/implementation/app.md | 判据：`git grep -n "wasm.d.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-157 | `viewer.replay.setSpeed` 的钳制下限在正常入参下不可达 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/app.ts:726 | documents/viewer/implementation/app.md | 判据：`git grep -n "viewer.replay.setSpeed" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-158 | `core/pose.ts` 的两个函数零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/core/pose.ts:36 | documents/viewer/implementation/core.md | 判据：`git grep -n "core/pose.ts" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-159 | `RAD2DEG` 在 `apps/viewer/src` 内零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/core/constants.ts:25 | documents/viewer/implementation/core.md | 判据：`git grep -n "RAD2DEG" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
-| T-160 | `ViewerScene.model` getter 零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/core/scene.ts:92 | documents/viewer/implementation/core.md | 判据：`git grep -n "ViewerScene.model" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
+| T-158 | `core/pose.ts` 的两个函数零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/pose.ts` 删除 `pitchClampedRad` 与 `eyeHeight`（1/22 行，同时移除随之失效的 `./constants.js` 导入）；**判据**：全工作区扫描（527 个文件、含未跟踪，非 `git grep`）⇒ 两者只剩定义处与文档/TODO 提及，`pose.js` 的导入点只有 `type Pose` / `bspYawToCsYaw` / `wrapDeg` 再导出 ⇒ 零调用点；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
+| T-159 | `RAD2DEG` 在 `apps/viewer/src` 内零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/constants.ts` 删除 `RAD2DEG`（2/4 行）；**判据**：全工作区扫描 ⇒ 只剩定义处与文档/TODO 提及 ⇒ 零调用点；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
+| T-160 | `ViewerScene.model` getter 零调用点 | 未接线·死代码 | viewer | 已结案 | `apps/viewer/src/core/scene.ts` 删除 `get model()`（0/5 行）；**判据**：全工作区扫描 `.model` ⇒ 只有类内部 `modelRoot`，无外部读取者；删除后 viewer `npm run typecheck` exit 0 | documents/viewer/implementation/core.md | 全工作区扫描该符号（含未跟踪）⇒ 仅定义处 ⇒ 删除；删除后 viewer `npm run typecheck` exit 0 且体检 A–P 全 0 | — |
 | T-161 | 六个导出在本工程内零调用点 | 未接线·死代码 | viewer | 待修 | src/renderer-shared/shader/lightmap-shader.ts:313 | documents/viewer/implementation/renderer.md | 判据：六个导出逐个 @BT@git grep -n "<符号>" -- apps/viewer src@BT@ ⇒ 只剩定义处 ⇒ 删除 | — |
 | T-162 | `setLightFloor` 在本工程内零调用点 | 未接线·死代码 | viewer | 待修 | src/renderer-shared/shader/lightmap-shader.ts:1752 | documents/viewer/implementation/renderer.md | 判据：`git grep -n "setLightFloor" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-163 | `ReplayPlayer` 两个成员零调用点 | 未接线·死代码 | viewer | 待修 | apps/viewer/src/replay/player.ts:295 | documents/viewer/implementation/replay.md | 判据：`git grep -n "ReplayPlayer" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
@@ -326,3 +324,5 @@
 | T-608 | 核实「单入口」假设：Copilot / Gemini CLI 是否真的读根 `AGENTS.md`（目前只是通行约定），结论与出处写进规范篇 | 文档口径 | docs | 待修 | AGENTS.md:5 | documents/norms/annotation-and-verification.md | 判据：逐字核实两个工具是否读根 `AGENTS.md`（官方文档或实测）⇒ 结论与出处落进 `documents/norms/**`（只读，须 owner 许可 + sync） | — |
 | T-609 | 体检 `[O]` 对**终态行**（已记录 / 已结案）的「判据」列按行态保护：改终态行判据须先 approve，未结行改判据不拦 | 工具·流程 | repo | 待修 | src/scripts/docflow.mjs:201 | documents/norms/annotation-and-verification.md | 判据：改一条终态行的判据 ⇒ `node src/scripts/docflow.mjs check` 报「受保护列」；改未结行的判据不报 | — |
 | T-610 | 三工程的 `check:api` 都不在 CI 里跑，只有 PR 模板手写勾选 | 缺陷 | 跨区 | 已结案 | 按 OWNER.md D-022 选项 (a) 实施：`apps/viewer/scripts/check-wasm-api.mjs` 新增 `--source-only`（只跑第三层 Rust serde 键名 ↔ TS 接口键名，只读源码、不碰 pkg/），`.github/workflows/ci-gates.yml` 新增 `source-contract` job（不装 wasm 工具链、5 分钟上限）⇒ `.github/workflows/**` 内 `check-wasm-api.mjs` 有命中；判据实测：`--source-only` ⇒ exit 0；扰动 TS 字段（schema_version→zzPerturbed）⇒ exit 1 并点名缺键；默认三层全跑仍 exit 0（无回归） | documents/norms/scripts-and-ci.md | 见详情 | — |
+
+| T-611 | 文档锚点「行号陈旧」体检抓不到 | 缺陷 | 工具 | 待修 | `documents/viewer/implementation/core.md:29`、`documents/viewer/implementation/core.md:31` | documents/norms/annotation-and-verification.md | 判据：先建 `src/scripts/check-doc-anchor-target.mjs`（逐锚点断言「文档所称符号名出现在该行」，不符 exit 1）；负向用例 = 上述 `apps/viewer/src/core/scene.ts:184` ⇒ exit 1，修好后的 `core.md` 全篇 ⇒ exit 0 | — |

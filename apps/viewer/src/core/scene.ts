@@ -99,11 +99,6 @@ export class ViewerScene {
     return this.modelRoot !== null;
   }
 
-  /** 已挂载的地图根节点（拾取 / 量测用；无地图时为 null）。 */
-  get model(): THREE.Object3D | null {
-    return this.modelRoot;
-  }
-
   /** 当前地图的世界包围盒（由 `modelRoot` 现算；无地图时为 null）。 */
   worldBox(): THREE.Box3 | null {
     if (!this.modelRoot) return null;

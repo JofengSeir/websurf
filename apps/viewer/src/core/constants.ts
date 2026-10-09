@@ -2,8 +2,8 @@
  * viewer 全局常量单点（`EYE_STAND` 除外——那一条从共享层再导出）。
  *
  * 单位口径：
- * - 角度：`DEG2RAD` / `RAD2DEG` 是换算因子；`FOV` 与 `PITCH_LIMIT_DEG` 用度；
- *   `PITCH_LIMIT` 用弧度（`FlyCam` 与 `pitchClampedRad` 消费）。
+ * - 角度：`DEG2RAD` 是换算因子；`FOV` 与 `PITCH_LIMIT_DEG` 用度；
+ *   `PITCH_LIMIT` 用弧度（`FlyCam` 消费）。
  * - 长度：一律 HU。`EYE_STAND` 站立眼高、`CAMERA_*` 相机裁剪面、`FLY_SPEED*` 每秒位移。
  * - 鼠标：`MOUSE_SENS` 单位 rad/px（`FlyCam.update` 把像素增量换成弧度）；
  *   `MOUSE_MAX_DELTA` 单位 px，是**单次事件**的绝对值上限（`FlyCam.delta`）。
@@ -19,11 +19,9 @@
  * 消费点：`apps/viewer/src/core/scene.ts`（相机、背景、near/far）、
  * `apps/viewer/src/core/fly.ts`（速度、灵敏度、pitch 限幅）、
  * `apps/viewer/src/replay/helpers.ts`（`PITCH_LIMIT_DEG`）。
- * `RAD2DEG` 在本仓 `apps/viewer/src` 内零调用点。
  */
 
 export const DEG2RAD = Math.PI / 180;
-export const RAD2DEG = 180 / Math.PI;
 
 /**
  * 站立眼高（HU）。`pos` 为脚底，相机 y = `pos.y + EYE_STAND`。
