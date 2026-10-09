@@ -7,7 +7,7 @@
  *                     上游许可证 + 构建头注释 + `__VBSP_WASM_B64__` / `__VBSP_WORKER_JS__` /
  *                     `__VBSP_TEXTURES_MTZ_B64__` 三个全局键（WASM、Worker 源码、默认纹理包全内嵌）；
  *                     页面侧据此建 Blob URL 起 worker，并把 WASM 与纹理包交给 worker
- *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证的产物级副本
+ *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证的产物级副本；dist/coi-serviceworker.js — 原样复制（未注入清单时走 typeof 回退，与 multi 同源）
  *
  * ── multi（--multi，HTTP 部署）───────────────────────────────────
  *   dist/index.html — 原样复制 web/index.html
@@ -60,7 +60,7 @@ const UPSTREAM_LICENSE =
   ' * (modified by WebSurf — see NOTICE.cs-movement)\n' +
   ' */\n';
 
-const KEEP_SINGLE = ['index.html', 'app.js', 'LICENSE.cs-movement', 'NOTICE.cs-movement'];
+const KEEP_SINGLE = ['index.html', 'app.js', 'coi-serviceworker.js', 'LICENSE.cs-movement', 'NOTICE.cs-movement'];
 const KEEP_MULTI = [
   'index.html',
   'app.js',
@@ -107,7 +107,7 @@ async function buildSingle(wasmPath) {
     options: { logLevel: 'info' },
   });
 
-  console.log('[single] 写入 dist/（classic index.html + 内嵌 app.js）...');
+  console.log('[single] 写入 dist/（classic index.html + 内嵌 app.js）...'); copyFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js'));
   const { bytes } = await writeEmbeddedPreamble({
     distDir: DIST,
     appCode,

@@ -70,7 +70,7 @@
 
 - `apps/debug/web/`：`app.js` 与 `worker.js` 是 esbuild 产物，`websurf_wasm_bg.wasm` 是 `build:wasm` 的副本（`apps/debug/package.json:8`），`textures.mtz` 是默认纹理包（离线资产）。
 - `apps/debug/pkg/`：wasm-pack 的输出目录，`apps/debug/scripts/build-dist.mjs:50` 从该目录取 wasm 文件名常量。
-- `apps/debug/dist/`：`apps/debug/scripts/build-dist.mjs:48` 定义的目标目录。`single 产物` 保留的清单是 `apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE`；`multi 产物` 的清单是 `apps/debug/scripts/build-dist.mjs:64` 的 `KEEP_MULTI`（多出 `worker.js` / wasm / `textures.mtz` / `coi-serviceworker.js`）。
+- `apps/debug/dist/`：`apps/debug/scripts/build-dist.mjs:48` 定义的目标目录。`single 产物` 保留的清单是 `apps/debug/scripts/build-dist.mjs:63` 的 `KEEP_SINGLE`；`multi 产物` 的清单是 `apps/debug/scripts/build-dist.mjs:64` 的 `KEEP_MULTI`（多出 `worker.js` / wasm / `textures.mtz`；`coi-serviceworker.js` 两形态都随产物发出）。
 - 三个 `.cmd` 是并行的手工入口（2026-09-24 起的 `dev` / `build` / `start` 三件，取代旧的 `start-dev` / `play` / `build-dist`）：`apps/debug/dev.cmd:7` 默认端口 8080，跑完整链条（工具链自检 → 依赖 → 强制重编译 wasm 与 TS → 五道测试门）后起服务并开浏览器；`apps/debug/build.cmd:7` 默认 `single`、接受 `multi` 参数，重编译后打包进 `dist/`；`apps/debug/start.cmd:7` 默认端口 8081，只服务已打包的 `dist/`（不做构建）。
 
 ## 启动链

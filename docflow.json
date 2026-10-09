@@ -142,7 +142,51 @@
     }
   ],
   "cochange": [],
-  "claim": null,
+  "claim": {
+    "task": "T-454",
+    "may": [
+      "apps/debug/scripts/build-dist.mjs",
+      "TODO.md",
+      "OWNER.md",
+      "progress/monthly/2026-10-11.md",
+      "progress/index.md",
+      "documents/debug/differences.md",
+      "documents/debug/implementation/scripts.md",
+      "documents/debug/overview.md",
+      "documents/game/differences.md",
+      "documents/viewer/differences.md"
+    ],
+    "must": [
+      "apps/debug/scripts/build-dist.mjs"
+    ],
+    "base": {
+      "apps/debug/scripts/build-dist.mjs": "5d80f2346eb05818e188bbcc3b53b70574e9c2c2af372fd096d98c0e20cd2d96",
+      "TODO.md": "758fbe3b95dbe6a015d6c2a86dffac5702dd68dd82181e4cf84ea4f998e3c75d",
+      "OWNER.md": "b4ff08ee82393dac0581335159cc3636a5662525af1e23a2a96f11e26d89a279",
+      "progress/monthly/2026-10-11.md": "1e177d5a36f7e4421ad0dc4ef0b1363296a55cb1af194e21667a47376b3498cb",
+      "progress/index.md": "5f97d89d53e0aacefe9d797769b21ae21c57549a303299e1ed53eb5b43727b08",
+      "documents/debug/differences.md": "877cf3a3b3326f8e71e3c137c4f579f5b696d3b5eabc21e9daeac71931aef1f7",
+      "documents/debug/implementation/scripts.md": "7dd090de4b04918378b92e5675de4b017e1bdde750b0b31abf2b40f94ec7eb51",
+      "documents/debug/overview.md": "c6b351f0a0de7ea135f945d389df1ca7d674e4e0192ed428ead447a7cb1a9ac4",
+      "documents/game/differences.md": "791aab5699caad4902308113065f7ea8dd09cbf5f5753bac19240771d6910560",
+      "documents/viewer/differences.md": "9dc02982ac323b554d1804d84b8febbdd03a1438bcffbda64747f5774533a90f"
+    },
+    "at": "2026-10-09T18:06:29.365Z",
+    "pins": {
+      "README.md": "966ec495a5063cb2f69ae90c1dd639a0f8e6a456341e1f79dba1e577e6b0fecc",
+      "CONTRIBUTING.md": "5f66aadaefd01cf1169f3863083277031db94ef3fe72a5b237936c0c4fc100b7",
+      "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
+      "skills/websurf-env-traps/SKILL.md": "4bae9ea251bca4824c169cf27e4a93277d472eef8b7843feabd61a529471d157",
+      "documents/norms/annotation-and-verification.md": "40f271606aad9363b61cfb24d756bbce306cf354b9e483283fab8c66f71a46b6",
+      "documents/norms/scripts-and-ci.md": "496a8f87a69c003945133d7727711a2f0e9cd68bb9080f72d8e4483b9d5434f7",
+      ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
+      ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
+      ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
+      ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
+      "AGENTS.md": "53a2d312eade0322eeae2603c7e83cef4eb4ac7439bf8b7dbbdc7a44f020e270",
+      "documents/norms/local-path-hygiene.md": "fa7589d6fef4800bbf0920da32d2fe031877fc736111a8b8d1259d009d81f4a1"
+    }
+  },
   "units": {
     "TODO.md": {
       "match": "^\\|\\s*T-\\d{3}\\s*\\|",
@@ -610,6 +654,12 @@
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
         "line": 191
+      },
+      "T-628": {
+        "p": "dd8afc46a936ad708d4e30397f41410877f4709348960034c2eb801845800976",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-09",
+        "line": 192
       }
     },
     "OWNER.md": {
@@ -619,209 +669,215 @@
         "at": "2026-10-08",
         "line": 22
       },
-      "D-108": {
+      "D-110": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-09",
-        "line": 32
+        "line": 23
       },
-      "D-109": {
+      "D-108": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-09",
         "line": 33
       },
-      "D-014": {
+      "D-109": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
+        "at": "2026-10-09",
         "line": 34
       },
-      "D-100": {
+      "D-014": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 35
       },
-      "D-101": {
+      "D-100": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 36
       },
-      "D-102": {
+      "D-101": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 37
       },
-      "D-103": {
+      "D-102": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 38
       },
-      "D-104": {
+      "D-103": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 39
       },
-      "D-105": {
+      "D-104": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 40
       },
-      "D-106": {
+      "D-105": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 41
       },
-      "D-001": {
+      "D-106": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 42
       },
-      "D-025": {
+      "D-001": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-08",
+        "at": "2026-10-07",
         "line": 43
       },
-      "D-024": {
+      "D-025": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
         "line": 44
       },
-      "D-022": {
+      "D-024": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
         "line": 45
       },
-      "D-002": {
+      "D-022": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-07",
+        "at": "2026-10-08",
         "line": 46
       },
-      "D-003": {
+      "D-002": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 47
       },
-      "D-004": {
+      "D-003": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
         "line": 48
       },
+      "D-004": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-07",
+        "line": 49
+      },
       "D-015": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 49
+        "line": 50
       },
       "**D-107**": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 50
+        "line": 51
       },
       "D-005": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 51
+        "line": 52
       },
       "D-006": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 52
+        "line": 53
       },
       "D-007": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 53
+        "line": 54
       },
       "D-008": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 54
+        "line": 55
       },
       "D-009": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 55
+        "line": 56
       },
       "D-010": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 56
+        "line": 57
       },
       "D-011": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 57
+        "line": 58
       },
       "D-012": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 58
+        "line": 59
       },
       "D-013": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 59
+        "line": 60
       },
       "D-016": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 60
+        "line": 61
       },
       "D-018": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 61
+        "line": 62
       },
       "D-019": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 62
+        "line": 63
       },
       "D-020": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 63
+        "line": 64
       },
       "D-021": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 64
+        "line": 65
       },
       "D-026": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-09",
-        "line": 65
+        "line": 66
       }
     }
   },
@@ -845,6 +901,7 @@
     },
     "CONTRIBUTING.md": {},
     "OWNER.md": {
+      "documents/norms/scripts-and-ci.md:28:28": "da0f1ce4",
       "src/renderer-shared/scene/inject-stats.ts:116:116": "775cd8e1"
     },
     "README.md": {
@@ -884,6 +941,11 @@
       "documents/viewer/implementation/core.md:29:29": "104c16e2",
       "documents/viewer/implementation/core.md:31:31": "e01ef09f",
       "apps/viewer/src/core/scene.ts:165:165~2": "d10b36aa",
+      "apps/viewer/scripts/build-dist.mjs:233:233": "a9812f45",
+      "documents/debug/differences.md:20:20": "59f32e91",
+      "documents/game/differences.md:20:20": "a50cfefd",
+      "documents/norms/scripts-and-ci.md:28:28": "da0f1ce4",
+      "apps/viewer/scripts/build-dist.mjs:233:233~2": "a9812f45",
       "apps/game/scripts/check-wasm-api.mjs:52:70": "e05aa5d3",
       "apps/game/scripts/check-wasm-api.mjs:52:70~2": "e05aa5d3",
       "apps/game/scripts/check-wasm-api.mjs:52:70~3": "e05aa5d3",
@@ -1025,10 +1087,10 @@
       "apps/debug/src/config.ts:209:209": "0d4a9ce8",
       "apps/viewer/src/core/constants.ts:24:24": "909c45da",
       "apps/viewer/src/core/constants.ts:11:11": "3e2c2d9a",
-      "apps/debug/scripts/build-dist.mjs:63:63": "e5b96663",
+      "apps/debug/scripts/build-dist.mjs:63:63": "2d352dc6",
       "apps/debug/scripts/build-dist.mjs:75:75": "9231f5b8",
       "apps/game/scripts/build-dist.mjs:60:60": "e2f766d4",
-      "apps/debug/scripts/build-dist.mjs:63:63~2": "e5b96663",
+      "apps/debug/scripts/build-dist.mjs:63:63~2": "2d352dc6",
       "apps/viewer/scripts/build-dist.mjs:52:52": "6e4ab169",
       "apps/viewer/scripts/build-dist.mjs:62:62": "0e9769ad",
       "apps/debug/web/index.html:692:692": "c147beaa",
@@ -1338,7 +1400,7 @@
       "apps/debug/package.json:13:13": "8642e88d",
       "apps/debug/scripts/build-dist.mjs:88:88": "5f910a82",
       "apps/debug/scripts/build-dist.mjs:75:75": "9231f5b8",
-      "apps/debug/scripts/build-dist.mjs:63:63": "e5b96663",
+      "apps/debug/scripts/build-dist.mjs:63:63": "2d352dc6",
       "apps/debug/scripts/build-dist.mjs:77:77": "7597b470",
       "apps/debug/package.json:16:16": "15c96ebb",
       "apps/debug/package.json:25:25": "ec21464f",
@@ -1538,7 +1600,7 @@
       "apps/debug/src/physics/prediction-params.ts:23:23": "34e8f2a2",
       "apps/debug/web/index.html:481:481": "dc40aef0",
       "apps/debug/package.json:10:10": "8922e9a4",
-      "apps/debug/scripts/build-dist.mjs:63:63": "e5b96663",
+      "apps/debug/scripts/build-dist.mjs:63:63": "2d352dc6",
       "apps/debug/scripts/check-wasm-api.mjs:1:1": "8d64a30d",
       "apps/debug/crates/wasm/src/lib.rs:534:534": "92c832d3",
       "apps/debug/crates/wasm/src/lib.rs:55:55": "33da81ad",
@@ -1581,7 +1643,7 @@
       "apps/debug/package.json:8:8~2": "95a4d078",
       "apps/debug/scripts/build-dist.mjs:50:50": "7fd783dc",
       "apps/debug/scripts/build-dist.mjs:48:48": "8ae8a5b1",
-      "apps/debug/scripts/build-dist.mjs:63:63~2": "e5b96663",
+      "apps/debug/scripts/build-dist.mjs:63:63~2": "2d352dc6",
       "apps/debug/scripts/build-dist.mjs:64:64": "0e9769ad",
       "apps/debug/dev.cmd:7:7": "9d558705",
       "apps/debug/build.cmd:7:7": "91e8538d",
@@ -1821,7 +1883,7 @@
       "apps/game/src/config.ts:205:205": "0c3e3886",
       "apps/viewer/src/core/constants.ts:37:37": "db6d5e4a",
       "apps/game/scripts/build-dist.mjs:60:60": "e2f766d4",
-      "apps/debug/scripts/build-dist.mjs:63:63": "e5b96663",
+      "apps/debug/scripts/build-dist.mjs:63:63": "2d352dc6",
       "apps/game/scripts/build-dist.mjs:60:60~2": "e2f766d4",
       "apps/viewer/scripts/build-dist.mjs:52:52": "6e4ab169",
       "apps/game/scripts/build-dist.mjs:62:62": "0e9769ad",
@@ -2708,7 +2770,7 @@
       "apps/viewer/scripts/build-dist.mjs:52:52": "6e4ab169",
       "apps/viewer/scripts/build-dist.mjs:62:62": "0e9769ad",
       "apps/viewer/scripts/build-dist.mjs:342:342": "b593516b",
-      "apps/debug/scripts/build-dist.mjs:63:63": "e5b96663",
+      "apps/debug/scripts/build-dist.mjs:63:63": "2d352dc6",
       "apps/debug/scripts/build-dist.mjs:64:64": "0e9769ad",
       "apps/debug/scripts/build-dist.mjs:75:75": "9231f5b8",
       "apps/game/scripts/build-dist.mjs:60:60": "e2f766d4",
@@ -4259,6 +4321,62 @@
   },
   "rebaselines": [
     {
+      "path": "documents/viewer/differences.md",
+      "at": "2026-10-09T18:06:05.462Z",
+      "by": "agent",
+      "reason": "build-dist.mjs:63 内容变更，复核保留清单对照",
+      "changed": 1,
+      "total": 90
+    },
+    {
+      "path": "documents/game/differences.md",
+      "at": "2026-10-09T18:06:05.383Z",
+      "by": "agent",
+      "reason": "debug KEEP_SINGLE 项数 4→5，复核对照表",
+      "changed": 1,
+      "total": 75
+    },
+    {
+      "path": "documents/debug/overview.md",
+      "at": "2026-10-09T18:06:05.304Z",
+      "by": "agent",
+      "reason": "single 形态清单变更，复核 dist 说明行",
+      "changed": 2,
+      "total": 120
+    },
+    {
+      "path": "documents/debug/implementation/scripts.md",
+      "at": "2026-10-09T18:06:05.229Z",
+      "by": "agent",
+      "reason": "build-dist.mjs:63 内容变更（KEEP_SINGLE 增列），锚点复核",
+      "changed": 1,
+      "total": 31
+    },
+    {
+      "path": "documents/debug/differences.md",
+      "at": "2026-10-09T18:06:05.149Z",
+      "by": "agent",
+      "reason": "debug KEEP_SINGLE 增列 coi-serviceworker.js，复核差异表两行断言",
+      "changed": 2,
+      "total": 79
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-09T18:06:05.064Z",
+      "by": "agent",
+      "reason": "T-454 验收二轮：新增 T-628 行 + T-454 证据补记",
+      "changed": 5,
+      "total": 87
+    },
+    {
+      "path": "OWNER.md",
+      "at": "2026-10-09T18:06:04.980Z",
+      "by": "agent",
+      "reason": "T-454 验收二轮：新增 D-110 行（规范 §2.3 vs debug/game 实现）",
+      "changed": 1,
+      "total": 2
+    },
+    {
       "path": "TODO.md",
       "at": "2026-10-09T17:08:13.902Z",
       "by": "DSH",
@@ -4521,62 +4639,6 @@
       "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
       "changed": 43,
       "total": 187
-    },
-    {
-      "path": "documents/game/overview.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 16,
-      "total": 114
-    },
-    {
-      "path": "documents/game/implementation/types.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 2,
-      "total": 14
-    },
-    {
-      "path": "documents/game/implementation/savepoint.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 6,
-      "total": 31
-    },
-    {
-      "path": "documents/game/implementation/renderer.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 20,
-      "total": 46
-    },
-    {
-      "path": "documents/game/implementation/input.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 2,
-      "total": 50
-    },
-    {
-      "path": "documents/game/implementation/config.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 2,
-      "total": 50
-    },
-    {
-      "path": "documents/game/differences.md",
-      "at": "2026-10-09T16:27:21.298Z",
-      "by": "DSH",
-      "reason": "T-454 P3b-2：三端装配序列收口到 src/renderer-shared/scene/assemble-scene.ts（debug -23、game -21、viewer -17 行），锚点整体上移，已用 shift-anchors --from-diff 按内容校验",
-      "changed": 11,
-      "total": 75
     }
   ]
 }
