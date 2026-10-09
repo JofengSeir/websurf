@@ -249,3 +249,4 @@
 | 2026-10-09 | 遗留路线清查二批：T-060（owner 终裁）/ T-039（cargo 判据 exit 0）/ T-058（五类口径，㈤ 已接线）结案 | progress/monthly/2026-10-8.md:21 |
 | 2026-10-09 | T-054 P1 三条修掉（全局 focus/selection、禁用态、#error 不清），全部 1:1 零锚点漂移 | progress/monthly/2026-10-8.md:22 |
 | 2026-10-09 | T-055 P1#1 键盘可达（8 .mod + key-chip/x + onActivate@EOF）；T-054 P2 再修四条 | progress/monthly/2026-10-8.md:23 |
+| 2026-10-09 | T-055 再修五项（P1#2 引导线联动、#status 省略、--hud-text 令牌、头注两处、删不可达规则）；余 2 项标 [待确认] | progress/monthly/2026-10-8.md:24 |

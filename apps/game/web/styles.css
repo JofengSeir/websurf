@@ -3,7 +3,7 @@
  *
  * 主题「莱茵精工」R1：暗色档案面板（参考 LBEILC/RhineLabUI 的语彙，
  * 不照搬、无动画）。R1 返工口径（§八）：
- *   · 菱角分明：全文件 border-radius 一律 0，仅螺丝（2 处）与服务孔
+ *   · 菱角分明：全文件 border-radius 一律 0，仅螺丝（1 处）与服务孔
  *     （1 处）保留 50% 圆；准星圆点与状态 LED 改方形（菱角语彙延伸到
  *     HUD，游戏语义不变）；
  *   · 切角系统：右上切角（clip-path polygon），**按尺度两级**——结构级
@@ -22,12 +22,13 @@
  *     加载卡装饰螺丝已按 owner 2026-09-30 裁决撤下（点缀收敛）；导航不再有
  *     页脚（关闭上移到螺丝钮，兜底 = 点击 #panel 遮罩空白处，见
  *     panel-controller 的 closePanel）；
- *   · 布局：窗口高度**固定 580px**（R1.1 从内容驱动回退——七 pane 之间
+ *   · 布局：窗口高度**固定 580px**（R1.1 从内容驱动回退——八 pane 之间
  *     高度差会让窗口在切换时跳动；稀疏 pane 的留白改由页脚署名收尾），
  *     行网格 168/1fr/88，滑块行读作「刻度 + 读数」（.val 去边框为读数区）；
  *   · 收敛：装饰分结构/嵌件/硬件三层，同屏每类 ≥2 次且位置可预期，
  *     琥珀全屏 5 类（主按钮底、激活导航左条、滑块游标、页头编号、
- *     顶缘嵌片；同类多实例计 1 处）。
+ *     顶缘嵌片；同类多实例计 1 处）。另有 hover / focus / 激活等交互态同用琥珀
+ *     （`.win-close:hover`、滑块游标 hover、输入框 focus、checkbox hover 等），不另计入静态 5 类。
  * 准星圆点（#crosshair 的方点）保留方形——菱角语彙延伸到 HUD。
  *
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名或行内变量驱动）：
@@ -53,6 +54,7 @@
   --border: #2f3a3c;                      /* 1px 发丝线 */
   --border-strong: #536166;               /* RhineLabUI 分隔线色 */
   --text: #e0e3dc;                        /* RhineLabUI 正文 */
+  --hud-text: #eceee6;                    /* HUD 读数：比正文更亮，亮色天空下仍可读 */
   --muted: #a6b0b1;                       /* RhineLabUI 辅助 */
   --accent: #c5a16b;                      /* RhineLabUI 琥珀强调 */
   --accent-hover: #d4b27e;
@@ -104,6 +106,8 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   width: 6px; height: 6px; margin-top: -3px;
   background: var(--muted);
 }
+/* 长文案单行截断：避免换行后压住下方 #error（top:46px） */
+#status { max-width: 46ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #status.success { color: var(--ok); }
 #status.success::before { background: var(--ok); }
 #status.error { color: var(--err); }
@@ -119,7 +123,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   font-variant-numeric: tabular-nums;
 }
 #stats {
-  font-size: 20px; font-weight: 600; letter-spacing: 0.04em; color: #eceee6;
+  font-size: 20px; font-weight: 600; letter-spacing: 0.04em; color: var(--hud-text);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 #stats .vsep { color: var(--muted); margin: 0 7px; font-weight: 400; }
@@ -165,11 +169,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   z-index: 4;
 }
 #crosshair.hidden { display: none; }
-/* :empty 退化形态：容器无子元素时画单个方点 */
-#crosshair:empty {
-  width: 3px; height: 3px;
-  background: #4ade80;
-}
 #crosshair .ch-line {
   position: absolute;
   left: 50%; top: 50%;
@@ -718,6 +717,9 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   #panel .body { padding: 16px 14px; }
   #panel .pane-title { font-size: 15px; }
   #panel .row { grid-template-columns: 120px 1fr 72px; }
+  /* 引导线端点跟随 120/72 栅格（= 列宽 + gap 12 再各收 4px，与定宽口径一致） */
+  #panel .row:has(> input[type="checkbox"])::before,
+  #panel .row:has(> input[type="color"])::before { left: 128px; right: 80px; }
   #panel .row label, #panel .key-row .kname { font-size: 13px; }
   #stats { font-size: 17px; }
 }

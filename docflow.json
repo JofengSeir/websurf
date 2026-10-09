@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-055 P1#1 修后收窄；T-054 P2 四条修后收窄",
+      "reason": "T-055 五项修后收窄到需渲染验证的两项",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -294,7 +294,7 @@
         "line": 160
       },
       "T-055": {
-        "p": "b16924229dbdc8b514716ebda0e7577ebc2dc420575a312b8ee831dd86a45184",
+        "p": "cf46fed9d5d0aefafe47ad52ef062031757171e676f296c4ad1df29df7c13b56",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
         "line": 161
