@@ -131,6 +131,7 @@
 | 摘天空区的时机（T-621） | game/viewer 的微缩景观只有贴图原色、没有最基本的光照 | 摘取移到第 3 步之后（与 debug 同序） |
 | 天空组不做合并（T-622） | 1010 个逐面小块 = 1010 次天空遍 draw call | 补 `mergeIntoChunks` + `padBoundingSpheres` + 重贴 `SKY_LAYER` |
 | 呈现默认档三份各写（T-620） | 同一张图三端观感不同；debug 读到的坐标与 game 画面不同源 | 收进共享层 `LIGHTING_PRESENTATION_DEFAULTS`，三端只读它 |
+| 终扫的根节点不同（2026-10-09 核对） | debug 扫 `mapRoot`、game 扫 `this.scene`、viewer 扫 `this.modelRoot` ⇒ 收敛计数 169 / 183 / 179、fullbright 总数 2936 / 2936 / 2928 | **核对为无害**：点名显示被收敛的是水/粒子/冰面的受光材质（`water_pure_beneath`、`water01_…`、`alch_symbols`、`endsmoke`、`ice03/ice02`），三端都统一走「全亮贴图原色」兜底；根节点差异只改变「谁来做这次收敛」，不改变最终材质形态 |
 
 ## 环境氛围机制完整性矩阵（T-617，2026-10-09）
 

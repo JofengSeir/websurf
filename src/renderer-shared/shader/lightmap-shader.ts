@@ -1081,7 +1081,14 @@ export function fullbrightUnlitLitMaterials(scene: THREE.Object3D): number {
 		if (!touched) return;
 		mesh.material = Array.isArray(cur) ? next : next[0];
 		converted++;
+		{
+			const g = (globalThis as { __vbspFullbrightNames?: string[] }).__vbspFullbrightNames
+				?? ((globalThis as unknown as { __vbspFullbrightNames: string[] }).__vbspFullbrightNames = []);
+			if (g.length < 12) g.push((mesh.name || '(anon)') + '@' + (list[0]?.name || '?'));
+		}
 	});
+	const fbn = (globalThis as { __vbspFullbrightNames?: string[] }).__vbspFullbrightNames;
+	if (converted > 0 && fbn?.length) console.info('[lightmap] 终扫点名：' + fbn.join(' ｜ '));
 	return converted;
 }
 
