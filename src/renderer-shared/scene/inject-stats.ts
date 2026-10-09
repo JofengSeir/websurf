@@ -92,7 +92,10 @@ import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, 
 			const re = new RegExp(pat);
 			scene.traverse((obj) => {
 				const m = obj as THREE.Mesh;
-				if (!m.isMesh || !re.test(m.name || '')) return;
+				if (!m.isMesh) return;
+				const _mm = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material | undefined;
+				const _map = (_mm as unknown as { map?: { name?: string } | null } | undefined)?.map;
+				if (!re.test(m.name || '') && !re.test(_mm?.name || '') && !re.test(_map?.name || '')) return;
 				const g = m.geometry as THREE.BufferGeometry;
 				const at = g?.getAttribute?.('_vbsp_vlight') as THREE.BufferAttribute | undefined;
 				let stats = 'no-attr';
@@ -105,10 +108,12 @@ import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, 
 				const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material;
 				const rec = mat as unknown as { __vbspLightmapInject?: { applied?: boolean }; __vbspVertexLightingInject?: { applied?: boolean }; __vbspAmbientInject?: { applied?: boolean } };
 				console.info('[dump] ' + JSON.stringify({
-					name: m.name, mat: mat?.name, matType: mat?.type, attrs: Object.keys(g?.attributes ?? {}),
+					name: m.name, mat: mat?.name, tex: (mat as unknown as { map?: { name?: string } | null })?.map?.name ?? null, matType: mat?.type, attrs: Object.keys(g?.attributes ?? {}),
 					vlight: stats,
 					inject: { lightmap: rec.__vbspLightmapInject?.applied === true, vlight1: rec.__vbspVertexLightingInject?.applied === true, ambCube: rec.__vbspAmbientInject?.applied === true },
-					userData: JSON.stringify((m.userData as { vbsp?: unknown }).vbsp ?? {}).slice(0, 160),
+					world: (() => { const bs = (m.geometry as THREE.BufferGeometry & { boundingSphere?: THREE.Sphere | null }).boundingSphere; const v = bs ? bs.center.clone() : m.position.clone(); v.applyMatrix4(m.matrixWorld); return [Math.round(v.x), Math.round(v.y), Math.round(v.z)]; })(),
+					radius: Math.round((m.geometry as THREE.BufferGeometry & { boundingSphere?: THREE.Sphere | null }).boundingSphere?.radius ?? 0),
+					userData: JSON.stringify((m.userData as { vbsp?: unknown }).vbsp ?? {}).slice(0, 120),
 				}));
 			});
 		}
