@@ -85,12 +85,12 @@ export class SavePointStore {
     return [...this.list];
   }
 
-  /** 删除指定索引的存点（无二次确认）；索引越界时不改列表、也不写存储。 */
+  /** 删除指定索引的存点（二次确认在面板侧）；索引越界时不改列表、不写存储，并打告警（T-213）。 */
   delete(index: number): SavePoint[] {
     if (index >= 0 && index < this.list.length) {
       this.list.splice(index, 1);
       this.persistSoon(); // 合并写（T-216）
-    }
+    } else { console.warn(`[savepoint] 删除越界索引 ${index}（当前 ${this.list.length} 条）：已忽略`); }
     return [...this.list];
   }
 

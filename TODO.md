@@ -26,11 +26,11 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（73 条）
+## 未结项（72 条）
 ### 待裁决（0）
 
 
-### 待修（71）
+### 待修（70）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-040** debug renderer-main.ts optimizeScene 调用链注释「其又源自 harness worker-b」与 g…　`debug`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
@@ -89,7 +89,6 @@
 - **T-433** prop 逐顶点光照（`sp_<i>.vhv`）与 leaf ambient cube 的组合口径：D-016 已决「相加」，而现实现是 either/or + 乘法　`shared`
 - **T-103** ?replay= 深链仍按参数名定类型，.dem 会被拒（统一为内容分派属独立改动）　`viewer`
 - **T-139** 导航缺「卸载地图」入口，载入过地图后回不到空态　`viewer`
-- **T-213** 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错　`game`
 - **T-214** 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态　`game`
 - **T-306** lightmap 诊断覆盖只在模块初始化时固化为 uniform 初值，运行期注入不改变已创建 uniform　`debug`
 - **T-053** viewer P1×3 + P2 批（同轮审查登记）：P1——帮助文案「淡金带 / 金框」与区间带现行灰白斜纹 / 白框不符（apps/…　`viewer`
@@ -148,7 +147,7 @@
 | T-206 | `InputBridge.addInput` 是显式空实现，三个实参全部被丢弃 | 未接线·死代码 | game | 待修 | apps/game/src/input/input-bridge.ts:30 | documents/game/implementation/input.md | 判据：`git grep -n "InputBridge.addInput" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-211 | `ENABLE_PVS` 常量关死：`pvs.update` 与按 cluster 隐藏均不执行，`pvsManager`／`clusterIds` 仍构造 | 未接线·死代码 | game | 待修 | apps/game/src/renderer/renderer-main.ts:77 | documents/game/implementation/renderer.md | 判据：`git grep -n "ENABLE_PVS" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |
 | T-212 | `loadScene` 入口先调 `disposeScene`，换图失败时场景已释放、只能重新选图 | 缺陷 | game | 待修 | apps/game/src/renderer/renderer-main.ts:264 | documents/game/implementation/renderer.md | 判据：换图失败 ⇒ 场景仍可用（不再入口先 `disposeScene`） | — |
-| T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | 缺陷 | game | 待修 | apps/game/src/savepoint.ts:92 | documents/game/implementation/savepoint.md | 判据：删除存点 ⇒ 有二次确认；越界索引 ⇒ 报错（不再静默 persist） | — |
+| T-213 | 删除存点无二次确认：按钮回调直接调 `onSavePointDelete`，`delete` 立即 `persist`；越界索引不报错 | 缺陷 | game | 已结案 | **已结案（2026-10-09）——两个子项都落地**：① **二次确认**：面板删除按钮的点击回调改为 `if (window.confirm(...)) this.onSavePointDelete?.(i)`（`apps/game/src/panel/panel-controller.ts:822`，**同行 1:1**；按钮 `title` 从「（无确认）」改为「（会先确认）」）。② **越界索引报错**：`SavePointStore.delete` 的越界分支由「静默忽略」改为**打告警并说明当前条数**（`apps/game/src/savepoint.ts:93` 同行 `else`，1:1）。两个文件净增 **0 行** ⇒ 零锚点重编号。**验证（DOM 桩探针，`PanelController` 的 15 个构造参数按位传参——第一次我把回调塞到第 13 位、落在 `onSyncLightingMode` 上，探针读数里冒出 `"baked"` 才暴露）**：`confirm=false` 时点 × ⇒ 删除回调 **0** 次、`confirm=true` ⇒ **1** 次（index 0）；`SavePointStore.delete(5)`（当前 0 条）⇒ **1** 条 `[savepoint] 删除越界索引 5（当前 0 条）：已忽略` 告警。`cd apps/game && npm run typecheck` ⇒ exit 0 | documents/game/implementation/savepoint.md | `cd apps/game && npm run typecheck` ⇒ exit 0；探针（`.tmp/t213/probe.mjs`，esbuild 打包 `panel-controller` + 最小 DOM/window/localStorage 桩）⇒ `confirm=false` 时点 × 删除回调 0 次、`confirm=true` 时 1 次（index 0）；`SavePointStore.delete(5)` ⇒ 1 条「删除越界索引…已忽略」告警 | — |
 | T-214 | 存点不含蹲伏态：读点的 `eyeHeight` 取渲染物理当前值，蹲伏中读点会把当前眼高带入新状态 | 缺陷 | game | 待修 | apps/game/src/savepoint.ts:21 | documents/game/implementation/savepoint.md | 判据：蹲伏中存点、站立后读点 ⇒ 读到站立眼高（存点含蹲伏态） | — |
 | T-217 | `BspProcessor` 上叠两个 `#[wasm_bindgen]` 属性（一处悬空在注释块上方） | 缺陷 | game | 已结案 | **已结案（2026-10-09）**：悬空的那个 `#[wasm_bindgen]`（原 `apps/game/crates/wasm/src/lib.rs:480`）连同其后空行删除，净 −2 行；现在与 viewer 同形（属性各归其项：结构体 `apps/game/crates/wasm/src/lib.rs:490`、`impl` `:497`）。该文件 32 处锚点 ⇒ 按 `git diff -U0` 映射把 `:480` 之后的 **29 处重编号**再 `sync`。**验证**：`cd apps/game && npm run build:wasm` ⇒ **exit 0**。**同族附带修复**：同文件 `new` 的 `lock().unwrap()` 也改 `map_err(...)?`（与 viewer 的 T-146 同缺陷） | documents/game/implementation/wasm-crate.md | `cd apps/game && npm run build:wasm` ⇒ exit 0；`git grep -n "#\[wasm_bindgen\]" -- apps/game/crates/wasm/src/lib.rs` ⇒ 属性各归其项（`pub struct BspProcessor` 一处、`impl BspProcessor` 一处），无悬空重复 | — |
 | T-225 | `physics.mode` 零读取点 | 未接线·死代码 | game | 待修 | apps/game/src/config.ts:27 | documents/game/implementation/config.md | 判据：`git grep -n "physics.mode" -- src apps` 只剩定义处（无调用点）⇒ 删除；删后体检 exit 0 且涉及工程 `npm run typecheck` 通过 | — |

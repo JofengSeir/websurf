@@ -816,10 +816,10 @@ export class PanelController {
       const delBtn = document.createElement('button');
       delBtn.className = 'small danger';
       delBtn.textContent = '×';
-      delBtn.title = '删除该存点（无确认）';
+      delBtn.title = '删除该存点（会先确认）';
       delBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.onSavePointDelete?.(i);
+        if (window.confirm(`删除第 ${i + 1} 个存点？`)) this.onSavePointDelete?.(i);
       });
       row.appendChild(loadBtn);
       row.appendChild(delBtn);
