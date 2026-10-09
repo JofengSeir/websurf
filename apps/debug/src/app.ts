@@ -1971,9 +1971,9 @@ function onRenderPhysEvent(ev: RenderPhysEvent): void {
 /** 参数来源标签（默认/手动/地图设置）。色值与页面内联样式的
  * .src-default / .src-manual 及 --warn 同源（index.html 的 <style> 块）。 */
 const SOURCE_LABEL: Record<ParamSource, { text: string; color: string }> = {
-	'mode-default': { text: '默认', color: '#7fc98f' },
-	manual: { text: '手动', color: '#d9973f' },
-	map: { text: '地图设置', color: '#d4b26a' },
+	'mode-default': { text: '默认', color: 'var(--ok)' },
+	manual: { text: '手动', color: 'var(--accent)' },
+	map: { text: '地图设置', color: 'var(--warn)' },
 };
 
 /** 面板渲染抑制（snapshot 回填时防触发 input 事件回发 Worker，防循环）。 */
@@ -1983,7 +1983,7 @@ let panelSuppress = false;
 function initPhysicsPanel(): void {
 	if (!dom.physicsParamList) return;
 	dom.physicsParamList.innerHTML = PARAM_DEFS.map((def) => {
-		const unit = def.unit ? ` <span style="color:#6a6f8a; font-size:10px;">${def.unit}</span>` : '';
+		const unit = def.unit ? ` <span style="color:var(--muted); font-size:10px;">${def.unit}</span>` : '';
 		if (def.kind === 'boolean') {
 			return (
 				`<div class="ctrl-checkbox-row ctrl-full" data-param-row="${def.name}">` +

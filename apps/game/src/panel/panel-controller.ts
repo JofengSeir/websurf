@@ -104,7 +104,7 @@ export class PanelController {
   // ── 模块导航：在 `.nav` 上事件委托，按 `data-mod` 切 `.mod` 与 `.mod-pane` 的 active ──
 
   private bindModuleNav(): void {
-    this.root.querySelector('.nav')?.addEventListener('click', (e) => {
+    onActivate(this.root.querySelector('.nav'), (e) => {
       const mod = (e.target as HTMLElement).closest('.mod');
       if (!mod) return;
       const name = (mod as HTMLElement).dataset.mod;
@@ -134,8 +134,8 @@ export class PanelController {
                 : this.keymap[action]
                     .map(
                       (code) =>
-                        `<span class="key-chip" data-action="${action}" data-code="${code}">
-                           ${codeLabel(code)}<span class="x" data-del="${code}">✕</span>
+                        `<span class="key-chip" tabindex="0" role="button" data-action="${action}" data-code="${code}">
+                           ${codeLabel(code)}<span class="x" tabindex="0" role="button" data-del="${code}">✕</span>
                          </span>`,
                     )
                     .join('')}
@@ -152,7 +152,7 @@ export class PanelController {
     if (!list) return;
     // 点键位 chip：进入录制；录制结果替换该动作的键位（append = false）
     list.querySelectorAll('.key-chip').forEach((chip) => {
-      chip.addEventListener('click', (e) => {
+      onActivate(chip, (e) => {
         e.stopPropagation();
         const action = (chip as HTMLElement).dataset.action as BindableAction;
         this.startRecording(action);
@@ -160,7 +160,7 @@ export class PanelController {
     });
     // 点 ✕：从该动作的键位数组里剔除该 code（允许删空——空数组即该动作无按键）
     list.querySelectorAll('.key-chip .x').forEach((x) => {
-      x.addEventListener('click', (e) => {
+      onActivate(x, (e) => {
         e.stopPropagation();
         const chip = (x as HTMLElement).closest('.key-chip') as HTMLElement;
         const action = chip.dataset.action as BindableAction;
@@ -827,4 +827,14 @@ export class PanelController {
       box.appendChild(row);
     });
   }
+}
+
+/** 绑定「点击 + 键盘激活（Enter / 空格）」：让 `tabindex="0"` 的 div 型控件键盘可达。 */
+function onActivate(el: Element | null, fn: (e: Event) => void): void {
+  if (!el) return;
+  el.addEventListener('click', fn);
+  el.addEventListener('keydown', (e) => {
+    const k = (e as KeyboardEvent).key;
+    if (k === 'Enter' || k === ' ') { e.preventDefault(); fn(e); }
+  });
 }

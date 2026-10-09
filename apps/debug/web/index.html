@@ -376,7 +376,7 @@
     .mt-actions { margin-top: 10px; text-align: right; }
     /* ── 控件细节统一（对齐 game / viewer 的自绘语彙）──────────────────────
        滚动条：方角、thumb=分隔色、1px 轨道沿、hover 仪表橙为瞬时态（健康日志 /
-       帧时间列表；侧栏 #sidebar 刻意隐藏滚动条，不动）。勿与标准 scrollbar-width
+       缺失纹理列表；侧栏 #sidebar 刻意隐藏滚动条，不动）。勿与标准 scrollbar-width
        并设——Chromium 121+ 会因标准属性存在而忽略 webkit 伪元素。── */
     .health-log::-webkit-scrollbar, .mt-list::-webkit-scrollbar { width: 10px; height: 10px; }
     .health-log::-webkit-scrollbar-track, .mt-list::-webkit-scrollbar-track {
@@ -388,7 +388,7 @@
     /* 下拉：去原生箭头，改 muted 色 data-URI 刻度箭头（形态对齐 viewer 的 field-select） */
     .ctrl-grid select, .spawn-select {
       appearance: none; -webkit-appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%238593a6'/%3E%3C/svg%3E");
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23a39c91'/%3E%3C/svg%3E");
       background-repeat: no-repeat; background-position: right 6px center;
       padding-right: 20px;
     }

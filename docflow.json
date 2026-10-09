@@ -135,7 +135,7 @@
     {
       "path": "TODO.md",
       "by": "owner",
-      "reason": "T-054 P1 三条已修，行收窄到剩余项",
+      "reason": "T-055 P1#1 修后收窄；T-054 P2 四条修后收窄",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
@@ -288,15 +288,15 @@
         "line": 159
       },
       "T-054": {
-        "p": "56fa1c92f892556e411b96853dd6d76f326e1b954679fd8e16e34a1d8bf1485c",
+        "p": "e08e8987a994db03356ae689530e060b36eb3407f2b1fbd27a605f4319b29844",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
         "line": 160
       },
       "T-055": {
-        "p": "e707e295035e3021a33c934b7bda7d72bf0a326520e689e8b519d28f41f57ec1",
+        "p": "b16924229dbdc8b514716ebda0e7577ebc2dc420575a312b8ee831dd86a45184",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
-        "at": "2026-10-07",
+        "at": "2026-10-09",
         "line": 161
       },
       "T-056": {
@@ -2723,7 +2723,7 @@
       "apps/game/src/panel/panel-controller.ts:213:213": "ce6c855a",
       "apps/game/src/panel/panel-controller.ts:253:253": "ad3be439",
       "apps/game/src/panel/panel-controller.ts:451:451": "6e2dbf77",
-      "apps/game/web/index.html:84:84": "10e2535c",
+      "apps/game/web/index.html:84:84": "20e33867",
       "apps/game/web/index.html:97:97": "0c55f439",
       "apps/game/src/panel/panel-controller.ts:471:471": "49ad0a42",
       "apps/game/web/index.html:231:231": "a9d5a79b",
@@ -4957,6 +4957,14 @@
   },
   "rebaselines": [
     {
+      "path": "documents/game/implementation/panel.md",
+      "at": "2026-10-09T00:32:22.078Z",
+      "by": "agent",
+      "reason": "T-055 P1#1：.mod 加 tabindex/role 后同行内容变更，断言（导航标记）仍成立",
+      "changed": 1,
+      "total": 28
+    },
+    {
       "path": "TODO.md",
       "at": "2026-10-09T00:26:21.498Z",
       "by": "agent",
@@ -5267,14 +5275,6 @@
       "reason": "T-610：脚本加 --source-only 后锚点复核重钉",
       "changed": 12,
       "total": 115
-    },
-    {
-      "path": "documents/viewer/overview.md",
-      "at": "2026-10-08T23:38:50.885Z",
-      "by": "agent",
-      "reason": "T-610：脚本加 --source-only 后锚点复核重钉",
-      "changed": 3,
-      "total": 132
     }
   ]
 }
