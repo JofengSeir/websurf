@@ -54,6 +54,8 @@ test/project/*
 
 # ── 归档文件──
 **/.archive/
+# 迁移派生归档（原文副本 + .meta.json；可从 agentmemory 与 git 重建，见 T-637）
+archive/
 
 # ── 一次性实验 / 诊断脚本（本地保留、不入库）──
 # 判据：`package.json` 的 script、CI workflow、工程 `.cmd`、构建与门禁链**都不引用**它们；
