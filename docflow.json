@@ -22,8 +22,8 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "d03524f66cdaae0abd96744d204ea954155e325413a23356708299207fa457a2",
-    "AGENTS.md": "538372accb6d5e2cde84636dbe2b152ac7ed7ca49019d0bba1b42dfd60ce9747",
-    "skills/websurf-workflow/SKILL.md": "65fef405f64068d0c0e58ea183d803efe9ad52911647de99ae9f10167ec7b98a"
+    "AGENTS.md": "4bcece9d9c11dde1eb3d6850406a2bcb69419fcab0abf9913fe9c7c0dc3315d2",
+    "skills/websurf-workflow/SKILL.md": "fbeb4717ece4d2b27501ff117d32dd3342e4c1752729aaa7198c31b81ec048d2"
   },
   "approvals": [
     {
@@ -107,14 +107,6 @@
       "consumed": true
     },
     {
-      "path": "skills/websurf-workflow/SKILL.md",
-      "by": "owner(2026-10-11",
-      "reason": "看板重迁改用",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "README.md",
       "by": "owner(2026-10-11",
       "reason": "取消",
@@ -133,7 +125,15 @@
     {
       "path": "AGENTS.md",
       "by": "owner(2026-10-11",
-      "reason": "取消",
+      "reason": "技能布局调整为",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/websurf-workflow/SKILL.md",
+      "by": "owner(2026-10-11",
+      "reason": "技能布局调整为",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
