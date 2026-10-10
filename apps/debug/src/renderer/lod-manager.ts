@@ -1,99 +1,87 @@
 /**
- * WebSurf — 视距剔除（debug 侧实现）。
+ * WebSurf — 视距剔除（debug 侧**统计与 UI 形状**；判定本体在共享层）。
  *
- * 判据（`update`）：块中心到相机的距离平方 > `cullDistance` 的平方 ⇒ 隐藏，否则可见。
- * 只有这一条判据：`update` 不读 `clusterIds`、不读 `PvsManager`、无迟滞带。
+ * 2026-10-11（T-460 WP3）：判定与 PVS 口径全部移交 `src/renderer-shared/scene/visibility-controller.ts`
+ * ——本文件不再持有自己的距离公式，也不再自己写 `mesh.visible`，只做三件事：
+ *   ① `setup`：把块交给共享控制器收集（`collect`），并算场景对角线与滑块量程（UI 用）；
+ *   ② `assignClusterIds`：把 PVS 载荷交给共享控制器补 cluster 集合（`assignClusters`，采样口径同一份）
+ *      ——该方法的返回值（采到 cluster 的块数）由此成为**真消费方**：`update` 用它做 PVS 判定（T-319）；
+ *   ③ `update`：按 `lod.updateInterval` 节流调共享控制器的 `update`，把返回值翻成 `LodStats`，
+ *      并把 `changed` 回给调用方（debug 是按需渲染）。
  *
- * 帧节流：`update` 每次调用都 `updateCounter++`，但只有计数达到 `config.lod.updateInterval`
- * 时才做判定并刷新 `stats`（`apps/debug/src/config.ts` 的 `lod.updateInterval` 默认 1）。
- *
- * 剔除距离取值（`setup`）：上限 `maxCull` = 场景对角线 ×4 上取整到 100 HU；默认
- * `cullDistance` = min(对角线 ×2, max(12800, 最大边 ×0.5))，各项先上取整到 100 HU ⇒
- * 小地图取对角线两倍全覆盖，大地图取最大边一半且不低于 12800。
- *
- * `PvsManager` 只被 `assignClusterIds` 用来把采样点映射成 cluster 集合，该结果当前无消费方；
- * `LOD_LEVEL.PVS_HIDDEN` 与 `LodStats.pvsHidden` 不参与判定（`pvsHidden` 每次刷新写 0）。
+ * 取值口径统一到共享呈现档 `vbsp:renderPrefs`（三端同档）：
+ *   - `culling.distance`（0 = 自动 `max(maxDim × 0.5, 1000)`）——面板滑块写档，不再走本文件私有公式；
+ *   - `culling.pvs`——每轮判定前重新读档，档即开关（T-633）。
  */
-
 import * as THREE from 'three';
 import type { RuntimeConfig } from '../config.js';
-import type { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js'; import { isBeyondCullDistance } from '../../../../src/renderer-shared/scene/visibility-controller.js';
+import type { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
+import { readRenderPrefs, writeRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
+import {
+	LOD_FAR,
+	LOD_NEAR,
+	LOD_PVS_HIDDEN,
+	VisibilityController,
+} from '../../../../src/renderer-shared/scene/visibility-controller.js';
 
-/** LOD 级别。 */
+/** LOD 级别：取值与共享控制器写进 `mesh.userData.lodLevel` 的三个常量同源。 */
 export const LOD_LEVEL = {
-	NEAR: 0, // 可见（距离判据通过）
-	FAR: 2, // 隐藏（距离超出 cullDistance）
-	PVS_HIDDEN: -1, // 预留档位：本文件零引用，update 从不写入
+	NEAR: LOD_NEAR, // 可见（距离判据通过，且未被 PVS 剔除）
+	FAR: LOD_FAR, // 隐藏（距离超出 cullDistance）
+	PVS_HIDDEN: LOD_PVS_HIDDEN, // 隐藏（PVS 判定当前 cluster 不可见）
 } as const;
 
-/** 单个 mesh 的 LOD 注册项。 */
-interface LodItem {
-	mesh: THREE.Mesh;
-	/** 世界坐标中心。 */
-	center: THREE.Vector3;
-	/** 包围球半径。 */
-	radius: number;
-	/**
-	 * mesh 覆盖的 cluster 集合（由 assignClusterIds 采样定位并去重）。
-	 * 空数组 = 7 个采样点全部落在 solid/地图外（getClusterAt 返回负值）；本文件内无消费方。
-	 */
-	clusterIds: number[];
-	/** 当前是否可见。 */
-	isVisible: boolean;
-	/** 当前 LOD 级别。 */
-	lodLevel: number;
-}
-
-/** LOD 统计信息。 */
+/** LOD 统计信息（形状不变：debug 的 UI 与 worker 消息按字段名取用）。 */
 export interface LodStats {
-	/** 可见 mesh 数。 */
+	/** 可见块数。 */
 	visible: number;
-	/** 总 mesh 数。 */
+	/** 总块数。 */
 	total: number;
-	/** 近级数量。 */
+	/** 近级数量（= 可见块数）。 */
 	near: number;
 	/** 远级（距离超出，已隐藏）数量。 */
 	far: number;
-	/** PVS 剔除数量：update 每次刷新恒写 0。 */
+	/** PVS 剔除数量（`culling.pvs` 为真时由共享控制器写回）。 */
 	pvsHidden: number;
-	/** 当前视距剔除距离。 */
+	/** 当前生效的视距剔除距离。 */
 	cullDistance: number;
 	/** 场景对角线。 */
 	diagonal: number;
-	/** 视距剔除上限。 */
+	/** 视距剔除上限（滑块量程，纯 UI 量）。 */
 	maxCull: number;
 }
 
-/** 场景对角线信息（setupLod 输出，用于 UI 滑块设置）。 */
+/** 场景对角线信息（setup 输出，用于 UI 滑块设置）。 */
 export interface SceneDiagonalInfo {
 	/** mesh 数量。 */
 	count: number;
 	/** 场景对角线。 */
 	diagonal: number;
-	/** 默认视距剔除距离：min(对角线×2, max(12800, 最大边×0.5))，先上取整到 100 HU。 */
+	/** 生效剔除距离（档值 0 时 = 自动值）。 */
 	defaultCull: number;
 	/** 视距剔除上限：场景对角线 ×4，上取整到 100 HU。 */
 	maxCull: number;
 }
 
 /**
- * LOD 管理器。
- *
- * `setup` 收集全部有效 mesh（世界中心 + 包围球半径 + 场景对角线），`assignClusterIds`
- * 为其采样 cluster，`update` 按相机距离逐块写 `mesh.visible` 并刷新 `stats`。
+ * LOD 管理器（debug 侧）：收集 → 补 cluster → 每 `updateInterval` 帧口径统一地判一次。
  *
  * `update` 的返回值为「本轮是否有块的可见性发生变化」，调用方据此决定是否重绘。
  */
 export class LodManager {
-	/** LOD 注册项。 */
-	private items: LodItem[] = [];
+	/** 判定本体（共享层唯一实现）：收集、cluster 采样、距离 + PVS 判定都在它里面。 */
+	private readonly visibility = new VisibilityController();
+	/** PVS 查询器：`assignClusterIds` 存入，`update` 交给共享控制器。 */
+	private pvs: PvsManager | null = null;
 	/** 每帧计数器（无条件 ++）。 */
 	private updateCounter = 0;
-	/** 视距剔除距离（HU）。 */
-	cullDistance = 12800;
+	/** 生效视距剔除距离（HU）；与共享控制器同值。 */
+	cullDistance = 0;
+	/** 自动剔除距离（`最大边 × 0.5`；下限由共享控制器的 `CULL_DISTANCE_MIN` 兜）。 */
+	private autoCull = 0;
 	/** 场景对角线。 */
 	private diagonal = 0;
-	/** 视距剔除上限。 */
+	/** 视距剔除上限（滑块量程）。 */
 	private maxCull = 0;
 
 	/** 当前统计快照（供 getStats 读取，每 updateInterval 帧刷新）。 */
@@ -109,9 +97,8 @@ export class LodManager {
 	};
 
 	/**
-	 * 遍历模型注册 LOD 项。
+	 * 注册视距剔除：块收集交给共享控制器（天空层在收集阶段被跳过），剔除距离按**共享档**取值。
 	 *
-	 * 只收 `boundingSphere` 存在、半径有限且 > 0 的 mesh；中心由包围球中心乘 `matrixWorld` 得到。
 	 * 注册后把 `updateCounter` 置为 `lod.updateInterval`，使下一次 `update` 立即做首帧判定。
 	 *
 	 * @param model 加载的 glTF 场景根节点。
@@ -119,157 +106,90 @@ export class LodManager {
 	 * @returns 场景对角线信息（`count` / `diagonal` / `defaultCull` / `maxCull`，供 UI 滑块使用）。
 	 */
 	setup(model: THREE.Object3D, config: RuntimeConfig): SceneDiagonalInfo {
-		this.items.length = 0;
-		model.updateMatrixWorld(true);
+		const count = this.visibility.collect(model, null);
 
-		const _center = new THREE.Vector3();
-		let count = 0;
-
-		model.traverse((obj) => {
-			if (!(obj as THREE.Mesh).isMesh) return;
-			const mesh = obj as THREE.Mesh;
-			const geom = mesh.geometry as THREE.BufferGeometry;
-			if (!geom) return;
-			if (!geom.boundingSphere) geom.computeBoundingSphere();
-			const bs = geom.boundingSphere;
-			if (!bs || !isFinite(bs.radius) || bs.radius <= 0) return;
-
-			_center.copy(bs.center).applyMatrix4(mesh.matrixWorld);
-			this.items.push({
-				mesh,
-				center: _center.clone(),
-				radius: bs.radius,
-				clusterIds: [],
-				isVisible: true,
-				lodLevel: LOD_LEVEL.NEAR,
-			});
-			count++;
-		});
-
-		// 场景对角线 → 剔除上限与默认值（均向上取整到 100 HU）
-		// 默认值 = min(diag*2, max(12800, maxDim*0.5))：小地图取对角线两倍全覆盖，
-		// 大地图取最大边一半，且不低于 12800。
 		const box = new THREE.Box3().setFromObject(model);
 		const size = box.getSize(new THREE.Vector3());
+		const maxDim = Math.max(size.x, size.y, size.z);
 		const diag = size.length();
-		const maxCull = Math.ceil((diag * 4) / 100) * 100;
-		const gameAlignedCull = Math.max(12800, Math.ceil((Math.max(size.x, size.y, size.z) * 0.5) / 100) * 100);
-		const defaultCull = Math.min(Math.ceil((diag * 2) / 100) * 100, gameAlignedCull);
 		this.diagonal = diag;
-		this.maxCull = maxCull;
-		this.cullDistance = defaultCull;
+		this.maxCull = Math.ceil((diag * 4) / 100) * 100;
+		this.autoCull = Number.isFinite(maxDim) ? Math.max(maxDim * 0.5, 0) : 0;
+		this.cullDistance = this.visibility.setCullDistance(this.autoCull, readRenderPrefs().culling.distance);
 
-		// 触发首帧立即执行 LOD 判定
 		this.updateCounter = config.lod.updateInterval;
-		this.stats.total = count;
-		this.stats.diagonal = diag;
-		this.stats.maxCull = maxCull;
-		this.stats.cullDistance = defaultCull;
+		this.stats = {
+			visible: count,
+			total: count,
+			near: count,
+			far: 0,
+			pvsHidden: 0,
+			cullDistance: this.cullDistance,
+			diagonal: diag,
+			maxCull: this.maxCull,
+		};
 
-		return { count, diagonal: diag, defaultCull, maxCull };
+		return { count, diagonal: diag, defaultCull: this.cullDistance, maxCull: this.maxCull };
 	}
 
 	/**
-	 * 为已注册的 mesh 建立 cluster 集合。
-	 *
-	 * 按 mesh 包围盒采样 7 个点（中心 + 6 个面中点，半径取 `max(radius, 1)`），逐点调
-	 * `PvsManager.getClusterAt`，把非负结果去重收进 `clusterIds`；已有非空 `clusterIds` 的项跳过。
+	 * 为已注册的块建立 cluster 集合：转交共享控制器的 `assignClusters`（7 点采样口径全仓一份）。
 	 *
 	 * @param pvsManager PVS 管理器。
-	 * @returns 采到至少一个 cluster 的 mesh 数量。
+	 * @returns 采到至少一个 cluster 的 mesh 数量（`update` 的 PVS 阶段消费它）。
 	 */
 	assignClusterIds(pvsManager: PvsManager): number {
-		let mapped = 0;
-		const p = { x: 0, y: 0, z: 0 };
-		for (const item of this.items) {
-			if (item.clusterIds.length > 0) continue;
-			const set = new Set<number>();
-			const c = item.center;
-			const r = Math.max(item.radius, 1);
-			const samples: [number, number, number][] = [
-				[c.x, c.y, c.z],
-				[c.x + r, c.y, c.z],
-				[c.x - r, c.y, c.z],
-				[c.x, c.y + r, c.z],
-				[c.x, c.y - r, c.z],
-				[c.x, c.y, c.z + r],
-				[c.x, c.y, c.z - r],
-			];
-			for (const [x, y, z] of samples) {
-				p.x = x;
-				p.y = y;
-				p.z = z;
-				const cl = pvsManager.getClusterAt(p);
-				if (cl >= 0) set.add(cl);
-			}
-			item.clusterIds = [...set];
-			if (item.clusterIds.length > 0) mapped++;
-		}
-		return mapped;
+		this.pvs = pvsManager;
+		return this.visibility.assignClusters(pvsManager);
 	}
 
 	/**
-	 * 每帧调用；每 `config.lod.updateInterval` 次做一轮判定。
+	 * 每帧调用；每 `config.lod.updateInterval` 次做一轮判定（判定本体在共享控制器）。
 	 *
-	 * 判定：块中心到 `cameraPos` 的距离平方 <= `cullDistance` 的平方 ⇒ 可见（`NEAR`），
-	 * 否则隐藏（`FAR`）；仅当可见性翻转时写 `mesh.visible` / `lodLevel` 并把返回值置为 true。
-	 * 每轮判定后用当前结果重写 `stats`（`pvsHidden` 恒为 0）。
+	 * 判定顺序（共享口径）：距离优先 → 距离内再看 PVS（档 `culling.pvs` 为真、相机 cluster 有效、
+	 * 该块 cluster 全部不可见 ⇒ 隐藏）。天空层不参与。
 	 *
 	 * @param cameraPos 相机世界坐标。
 	 * @param config 运行时配置（读 `lod.updateInterval`）。
 	 * @returns 本次是否有块的可见性发生变化。
 	 */
 	update(cameraPos: THREE.Vector3, config: RuntimeConfig): boolean {
-		if (this.items.length === 0) return false;
+		if (this.visibility.items.length === 0) return false;
 
 		this.updateCounter++;
 		if (this.updateCounter < config.lod.updateInterval) return false;
 		this.updateCounter = 0;
 
-		let lodChanged = false;
-
-		// 可见性判据只有「块中心距离 > cullDistance」这一条：不查 cluster、不带迟滞带。
-		// 距离口径（含平方比较）由共享 `isBeyondCullDistance` 承载，三端同一份（T-454 P4c）。
-
-		let nearCount = 0;
-		let farCount = 0;
-
-		for (let i = 0, n = this.items.length; i < n; i++) {
-			const item = this.items[i];
-
-			const visible = !isBeyondCullDistance(item.center, cameraPos, this.cullDistance);
-			if (item.isVisible !== visible) {
-				item.mesh.visible = visible;
-				item.isVisible = visible;
-				item.lodLevel = visible ? LOD_LEVEL.NEAR : LOD_LEVEL.FAR;
-				lodChanged = true;
-			}
-
-			if (visible) nearCount++;
-			else farCount++;
-		}
-
-		// 刷新统计快照
-		this.stats.visible = nearCount;
-		this.stats.total = this.items.length;
-		this.stats.near = nearCount;
-		this.stats.far = farCount;
-		this.stats.pvsHidden = 0;
-		this.stats.cullDistance = this.cullDistance;
-		this.stats.diagonal = this.diagonal;
-		this.stats.maxCull = this.maxCull;
-
-		return lodChanged;
+		// 档即开关（T-633）：每轮判定前重读，面板/深链改档后下一轮生效
+		this.visibility.enablePvs = readRenderPrefs().culling.pvs;
+		const r = this.visibility.update({ position: cameraPos }, this.pvs);
+		this.cullDistance = r.cullDistance;
+		this.stats = {
+			visible: r.visible,
+			total: this.visibility.items.length,
+			near: r.visible,
+			far: r.culledByDistance,
+			pvsHidden: r.culledByPvs,
+			cullDistance: r.cullDistance,
+			diagonal: this.diagonal,
+			maxCull: this.maxCull,
+		};
+		return r.changed;
 	}
 
 	/**
 	 * 设置视距剔除距离（UI 滑块调用）。
 	 *
+	 * 夹到 `[0, maxCull]` 后**写共享呈现档**（`culling.distance`，0 = 自动）——三端由同一档生效，
+	 * 面板不再持有私有距离。
+	 *
 	 * @param dist 剔除距离（HU），会被 clamp 到 [0, maxCull]。
 	 */
 	setCullDistance(dist: number): void {
-		this.cullDistance = Math.max(0, Math.min(dist, this.maxCull));
+		const clamped = Math.max(0, Math.min(dist, this.maxCull));
+		this.cullDistance = this.visibility.setCullDistance(this.autoCull, clamped);
 		this.stats.cullDistance = this.cullDistance;
+		writeRenderPrefs({ culling: { distance: clamped } });
 		// 触发下一帧立即判定（置 999 ≥ updateInterval）
 		this.updateCounter = 999;
 	}
@@ -281,7 +201,7 @@ export class LodManager {
 
 	/** 已注册 mesh 数量。 */
 	get itemCount(): number {
-		return this.items.length;
+		return this.visibility.items.length;
 	}
 
 	/** 场景对角线。 */
@@ -294,8 +214,9 @@ export class LodManager {
 		return this.maxCull;
 	}
 
-	/** 释放资源。 */
+	/** 释放资源（只清块表，不碰场景对象）。 */
 	dispose(): void {
-		this.items.length = 0;
+		this.visibility.clear();
+		this.pvs = null;
 	}
 }

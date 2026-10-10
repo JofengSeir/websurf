@@ -32,6 +32,11 @@ export interface PvsQuery {
   isVisible(clusterId: number): boolean;
 }
 
+/** 只要「点 → cluster」这一件事的采样面（`PvsManager` 与它的结构等价替身都满足）。 */
+export interface PvsSampler {
+  getClusterAt(p: { x: number; y: number; z: number }): number;
+}
+
 export interface VisibilityItem {
   mesh: THREE.Mesh;
   /** 世界空间包围球心（收集时按 `matrixWorld` 烘焙）。 */
@@ -47,6 +52,8 @@ export interface VisibilityUpdateResult {
   culledByPvs: number;
   cullDistance: number;
   pvsActive: boolean;
+  /** 本帧是否有块的 `lodLevel` 发生变化（debug 的按需渲染据此决定是否重画）。 */
+  changed: boolean;
 }
 
 /** 距离判定（共享唯一口径）：块中心到相机是否超过剔除距离。本控制器与 debug 的 `LodManager` 都调它。 */
@@ -82,7 +89,7 @@ export class VisibilityController {
    * 收集可剔除块：遍历 `root` 下所有 mesh，按世界包围球中心与 6 个 ±r 轴上点查 cluster，
    * 写入 `userData.lodLevel = LOD_NEAR` 并返回块数。天空层（`SKY_LAYER`）跳过。
    */
-  collect(root: THREE.Object3D, pvs: { getClusterAt(p: { x: number; y: number; z: number }): number } | null): number {
+  collect(root: THREE.Object3D, pvs: PvsSampler | null): number {
     this.items.length = 0;
     root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
@@ -94,34 +101,52 @@ export class VisibilityController {
       if (!bs) return;
       mesh.userData.lodLevel = LOD_NEAR;
       const center = bs.center.clone().applyMatrix4(mesh.matrixWorld);
-      const set = new Set<number>();
-      const r = Math.max(bs.radius, 1);
-      const samples: Array<[number, number, number]> = [
-        [center.x, center.y, center.z],
-        [center.x + r, center.y, center.z],
-        [center.x - r, center.y, center.z],
-        [center.x, center.y + r, center.z],
-        [center.x, center.y - r, center.z],
-        [center.x, center.y, center.z + r],
-        [center.x, center.y, center.z - r],
-      ];
-      if (pvs) {
-        for (const [x, y, z] of samples) {
-          const cl = pvs.getClusterAt({ x, y, z });
-          if (cl >= 0) set.add(cl);
-        }
-      }
-      this.items.push({ mesh, center, radius: bs.radius, clusterIds: [...set] });
+      this.items.push({ mesh, center, radius: bs.radius, clusterIds: [] });
     });
+    if (pvs) this.assignClusters(pvs);
     return this.items.length;
   }
 
-  /** 每帧剔除：距离优先、距离内再看 PVS；返回本帧统计。 */
-  update(camera: THREE.Camera, pvs: PvsQuery | null): VisibilityUpdateResult {
+  /**
+   * 为已收集的块补 cluster 集合：包围球中心 + 6 个 ±r 轴上点共 7 点采样，非负结果去重。
+   *
+   * 与 `collect(root, pvs)` 分开是因为 PVS 载荷可能晚于块收集就绪（debug 侧是 `setup` 之后才
+   * `assignClusterIds`）；两处共用本方法 ⇒ 采样口径全仓只有一份。
+   *
+   * @returns 采到至少一个 cluster 的块数。
+   */
+  assignClusters(pvs: PvsSampler): number {
+    let mapped = 0;
+    for (const item of this.items) {
+      const set = new Set<number>();
+      const c = item.center;
+      const r = Math.max(item.radius, 1);
+      const samples: Array<[number, number, number]> = [
+        [c.x, c.y, c.z],
+        [c.x + r, c.y, c.z],
+        [c.x - r, c.y, c.z],
+        [c.x, c.y + r, c.z],
+        [c.x, c.y - r, c.z],
+        [c.x, c.y, c.z + r],
+        [c.x, c.y, c.z - r],
+      ];
+      for (const [x, y, z] of samples) {
+        const cl = pvs.getClusterAt({ x, y, z });
+        if (cl >= 0) set.add(cl);
+      }
+      item.clusterIds = [...set];
+      if (item.clusterIds.length > 0) mapped++;
+    }
+    return mapped;
+  }
+
+  /** 每帧剔除：距离优先、距离内再看 PVS；返回本帧统计。`camera` 只用到 `position`（debug 侧只持有相机位置）。 */
+  update(camera: { position: THREE.Vector3 }, pvs: PvsQuery | null): VisibilityUpdateResult {
     const camPos = camera.position;
     let visible = 0;
     let culledByDistance = 0;
     let culledByPvs = 0;
+    let changed = false;
     const pvsActive = this.enablePvs && pvs !== null && pvs.enabled;
     const pvsClusterValid = pvs !== null && pvs.currentClusterId >= 0;
     if (this.enablePvs && pvs) pvs.update(camPos);
@@ -145,8 +170,9 @@ export class VisibilityController {
       if (item.mesh.userData.lodLevel !== level) {
         item.mesh.userData.lodLevel = level;
         item.mesh.visible = level === LOD_NEAR;
+        changed = true;
       }
     }
-    return { visible, culledByDistance, culledByPvs, cullDistance: this.cullDistance, pvsActive };
+    return { visible, culledByDistance, culledByPvs, cullDistance: this.cullDistance, pvsActive, changed };
   }
 }

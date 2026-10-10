@@ -47,7 +47,7 @@ import { createSkyCamera, extractSkyArea, SKY_LAYER, type SkyCameraParams } from
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
-import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyLightingPresentation, type RenderLightingPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyLightingPresentation, readRenderPrefs, type RenderLightingPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -68,12 +68,12 @@ const DEG2RAD = Math.PI / 180;
 
 /** LOD 档位（写进 mesh.userData.lodLevel）：近距可见 / 超出剔除距离 / PVS 判定不可见。 */
 /**
- * PVS 剔除总开关：false 时 `tick` 既不调 `PvsManager.update`，也不按 cluster 隐藏块，块可见性
- * 只由距离档（`cullDistance`）决定；`loadScene` 仍会建 `pvsManager` 并给每块分配 `clusterIds`。
- * 置 true 后启用：`update` 每帧刷新当前 cluster，`isVisible` 判定块的 cluster 是否可见；相机不在
- * 任何 cluster（`currentClusterId < 0`）时 `tick` 跳过 PVS 只按距离判定，防可见集为空导致误剔。
+ * PVS 剔除总开关（T-633）：三端统一取**共享呈现档** `culling.pvs`（`vbsp:renderPrefs`），
+ * 本端不再硬编码；缺档时用共享默认值 `RENDER_DEFAULT_PVS`（false）。
+ * 判定顺序（距离优先 → 距离内再看 PVS；相机不在任何 cluster 时跳过 PVS，防可见集为空）由共享
+ * `VisibilityController.update` 承担，本端只把档值交给它。
  */
-const ENABLE_PVS = false;
+const ENABLE_PVS = () => readRenderPrefs().culling.pvs;
 
 /** 主线程渲染器（职责与数据流见文件头）；实例由 `apps/game/src/app.ts` 创建并驱动。 */
 export class RendererMain {
@@ -287,7 +287,7 @@ export class RendererMain {
 
     // 3. PVS + LOD 注册（T-454 P4：收集与判定都走共享 `VisibilityController`，三端同一份）
     this.pvsManager = new PvsManager(data.pvsJson);
-    this.visibility.enablePvs = ENABLE_PVS;
+    this.visibility.enablePvs = ENABLE_PVS();
     this.visibility.collect(scene, this.pvsManager);
     this.lodItems.length = 0;
 

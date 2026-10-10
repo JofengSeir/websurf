@@ -80,13 +80,13 @@ const FOV = 73.6;
 const PLANE_INSPECT_INTERVAL = 6;
 
 /** HUD 剔除统计（`emitCullStats` 组装，交给 app.ts 注册的 `onCullStats`）。
- * `visible/total/cullDist` 与 `pvs.near/far/pvsHidden` 取自 `LodManager.getStats`——
- * 该管理器只按「块中心到相机距离 > cullDistance」判可见，`near` = 可见块数、
- * `far` = 隐藏块数、`pvsHidden` 恒 0。
+ * `visible/total/cullDist` 与 `pvs.near/far/pvsHidden` 取自 `LodManager.getStats`——判定本体在
+ * 共享 `VisibilityController`（距离优先、档 `culling.pvs` 为真时再看 PVS），`near` = 可见块数、
+ * `far` = 距离剔除块数、`pvsHidden` = PVS 剔除块数（T-633 之前恒 0）。
  * `pvs.cluster/visibleClusters/totalClusters` 取自 `PvsManager.getStats`：本文件只构造
  * `PvsManager`、把它的 `getClusterAt` 交给 `LodManager.assignClusterIds` 用、并读
- * `getStats`/`currentClusterId`，**从不调 `update`**，故 `cluster` 恒 -1、`visibleClusters`
- * 恒 0。`lodManager.itemCount <= 0` 时整个回调不下发。 */
+ * `getStats`/`currentClusterId`，**从不直接调 `update`**（PVS 刷新由共享控制器在档开启时调），
+ * 故未开档时 `cluster` 恒 -1、`visibleClusters` 恒 0。`lodManager.itemCount <= 0` 时整个回调不下发。 */
 export interface CullStatsLike {
   visible: number;
   total: number;
@@ -800,7 +800,7 @@ export class RendererMain {
     this.needsRender = true;
   }
 
-  /** 设置视距剔除距离：交给 `LodManager.setCullDistance` 夹到 [0, maxCull]，再把结果写回 config。 */
+  /** 设置视距剔除距离：交给 `LodManager.setCullDistance`（夹到 [0, maxCull]，并写共享档 `culling.distance`），再把结果写回 config。 */
   setCullDistance(dist: number): void {
     this.lodManager.setCullDistance(dist);
     this.config.lod.cullDistance = this.lodManager.cullDistance;
