@@ -16,7 +16,7 @@
     "README.md": "0b89f30e8d2d28921d4fd55f5f6f03f979b1fa995f4537efa5df8b49149a9e19",
     "CONTRIBUTING.md": "b11e2f55b65f41f46d928bca3f7a819d2b86c0f5af406c68884502cddfe4ede6",
     "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
-    "skills/websurf-env-traps/SKILL.md": "82c1775e2c7d83d586d372647d2311cef2421aab0ddb36a5bf13d73dbdf293c0",
+    "skills/websurf-env-traps/SKILL.md": "6dfa47ded54ea649ce3f1dd041bdc7a70ff31cedf191f14eec17bcaef9d622ec",
     ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
     ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
     ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
@@ -82,14 +82,6 @@
       "consumed": true
     },
     {
-      "path": "skills/websurf-env-traps/SKILL.md",
-      "by": "owner(2026-10-10)",
-      "reason": "记忆库引用改散文表述",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "OWNER.md",
       "by": "owner(2026-10-10",
       "reason": "5",
@@ -117,6 +109,14 @@
       "path": "skills/agentmemory-usage/SKILL.md",
       "by": "owner(2026-10-10",
       "reason": "加工具不可用时的兜底小节",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/websurf-env-traps/SKILL.md",
+      "by": "owner(2026-10-10",
+      "reason": "加代理事实",
       "at": "2026-10-10",
       "task": "",
       "consumed": true

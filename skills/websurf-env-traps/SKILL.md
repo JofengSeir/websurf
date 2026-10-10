@@ -96,3 +96,11 @@ description: "本仓（WebSurf，Windows + PowerShell 工作区）的环境与�
 - **验 wasm-core 只能靠「重建 wasm + 探针」**：宿主 `cargo test/check -p websurf-wasm-core` 会因缺 `dlltool.exe` 失败；TS 探针用 `npx esbuild x.ts --bundle --format=esm --platform=node --outfile=x.mjs` 打包后再 `node` 跑（探针放 `.tmp/`，只打印不落盘也行）。
 - **判据要落到「拓扑 / 语义」，不要只看位置**：实测一个网格的顶点位置全对、三角形却连错顶点（顶点数组展平顺序被转置）——用**浮点四舍五入的位置键**比对会产生大量假差异（f32 vs f64），要用**整数拓扑键**（如网格三元组）或与 SDK 规则逐项对齐。这类错肉眼只表现为「位置不对」，极易误判成别的问题。
 - **Pages 站点会被「从分支构建」静默顶掉**：站点源一旦是「Deploy from a branch」，GitHub 内部 `pages-build-deployment` 会在**每次推送**（含纯文档推送）把仓库根按 Jekyll 发布 ⇒ 站点根被 README 渲染页顶掉（出现 `Jekyll v3.10.0` + `style.css?v=<sha>` 即中招），Actions 产物的 `/debug/`、`/game/`、`/viewer/`、`/version.json` 全 404。查源：`GET /repos/{owner}/{repo}/pages` 的 `build_type`（须为 `workflow`）；修：`PUT` 同路径 `{"build_type":"workflow"}`，再 `POST .../actions/workflows/<id>/dispatches` 重跑部署。**取证别只看仓库**——设置改动不在 git 里，要查浏览器历史与各 agent 日志（`~/.dsh/sessions/**` 是 zstd 压缩，先解压再搜）；取 token 用 `git credential fill`（PowerShell 管道，bash 下会挂）。
+
+- **GitHub 直连不稳 → 先挂本机代理**：`git push/fetch/clone` 报 `Connection was reset` / `Failed to connect to github.com:443` 时，不要以为没网——本机走 Clash，加代理即通：
+
+  ```bash
+  git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin main
+  ```
+
+  也可先设 `HTTPS_PROXY` / `HTTP_PROXY=http://127.0.0.1:7897`。实测：直连连续失败 7 次，挂代理第 1 次成功。
