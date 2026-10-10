@@ -85,7 +85,7 @@
 
 **三端渲染呈现档收到唯一来源（`vbsp:renderPrefs`）**：三端此前各持一份呈现档——game 从面板偏好 `vbsp:panelPrefs` 读曝光 / γ / 模型光照 / 画质档 / FOV / 渲染距离，debug 从 `vbsp:uiPrefs` 读画质档，viewer 两者皆无（恒用默认档）⇒ 同一台机器三端可以呈现不同亮度与清晰度，「三端同画面」无法当基线。现新增共享层唯一来源 `src/renderer-shared/config/render-prefs.ts`（键 `vbsp:renderPrefs`，带版本号）：三端 init 都经 `readRenderPrefs()` + `applyRenderPrefs()` 取同一组值；写入只由能代表用户的端（game 面板、debug 的画质档控件）经 `writeRenderPrefs()` 落盘。旧键**只读迁移一次**并保留（`vbsp:panelPrefs` / `vbsp:uiPrefs` 不删，回退不丢设置）。**效果**：在一台改过 game 亮度/画质档的机器上，debug 与 viewer 此后跟随同一组值（这正是三端同源的目的）；未改过设置的机器画面逐像素不变（三端出图与 T-454 P0 基线比对：`≤2 占比 1.0000`、均值差 0）。启动时三端各打一行 `[render-prefs] 生效：…`，便于比对同一组生效值。判据与后续阶段（相机/雾/可见性/画质再接）见 `TODO.md` T-454。
 
-**文档体系**：根 `README.md` 为入口；`documents/**` 按主题分篇（架构、物理、解析层、TS 共享层、材质、规范），篇目见 `README.md`「文档地图」与 `documents/index.md`。
+**文档体系**：工作流与工程文档已全部压进 **agentmemory**（marker 前缀 `websurf/`）；仓库侧只留 `AGENTS.md`（入口）+ `TODO.md`（状态）+ `OWNER.md`（决定）+ `skills/**` + git 仓库项目文档。
 
 **验证**：共享层 `cargo test -p websurf-phys`；三工程 `npm run typecheck` 与各自 `test:*` 门禁；文档侧 `node src/scripts/check-doc-drift.mjs`。CI 三条 workflow 见 `README.md`「验证与 CI」。
 
