@@ -137,6 +137,7 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 - `src/scripts/check-doc-drift.mjs`
 - `src/scripts/check-glb-parity.mjs`
 - `src/scripts/check-memory-sync.mjs`
+- `src/scripts/check-prefs-parity.mjs`
 - `src/scripts/check-render-parity.mjs`
 - `src/scripts/check-shared-sync.mjs`
 - `src/scripts/docflow.mjs`

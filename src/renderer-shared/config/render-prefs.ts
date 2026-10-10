@@ -17,6 +17,10 @@
  * 旧键只读兼容：新键缺失时按 `vbsp:panelPrefs`（game）/ `vbsp:uiPrefs`（debug）的对应字段**迁移一次**并
  * 落回新键；旧键不删（回退不丢用户设置）。迁移只搬语义相同的字段——debug 的 `lod.cullDistance`
  * （默认 12800，与 game 的「0 = 自动」不同义）不搬，留给 P4 按统一口径处理。
+ *
+ * 跨 origin 可比性（T-460 WP2 / D1=A）：localStorage 按 origin 隔离 ⇒ 三端档无法共享，故补一条
+ * **深链覆盖** `?prefs=default|<base64(JSON)>`（优先级最高、不落盘）与**档指纹**（`fp=`），
+ * 由 `src/scripts/check-prefs-parity.mjs` 起三端逐字比对生效行。
  */
 import {
   LIGHTING_PRESENTATION_DEFAULTS,
@@ -171,11 +175,74 @@ function migrateLegacy(): RenderPrefs | null {
   return base;
 }
 
-function load(): RenderPrefs {
+function loadStored(): RenderPrefs {
   const raw = readRaw(RENDER_PREFS_KEY) as Record<string, unknown> | null;
   if (raw && raw.version === RENDER_PREFS_VERSION) return normalize(raw);
   if (raw) console.warn('[render-prefs] 存档版本 ' + String(raw.version) + ' ≠ ' + RENDER_PREFS_VERSION + '，改用默认档');
   return migrateLegacy() ?? defaultRenderPrefs();
+}
+
+/** 深链覆盖的查询参数名：`?prefs=default` 或 `?prefs=<base64(JSON)>`（D1=A）。 */
+export const RENDER_PREFS_QUERY = 'prefs';
+
+/** 取档来源（诊断行与三端一致性门禁据此判断覆盖是否真的生效）。 */
+let deepLinkActive = false;
+
+/** base64（标准与 URL 安全两种字符集都收）→ UTF-8 文本。 */
+function decodeBase64(b64: string): string {
+  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * 深链覆盖：`?prefs=default` 强制默认档；`?prefs=<base64(JSON)>` 强制指定档（经 `normalize` 归一）。
+ *
+ * 优先级**高于 localStorage，且不落盘**（只在取档时生效）；解析失败时告警并回落存档档。
+ * 用途：localStorage 按 origin 隔离 ⇒ 三端在同一台机器上无法共享档（T-459），深链是唯一能让
+ * 三端落到同一档的手段——门禁 `check-prefs-parity.mjs` 即按 `?prefs=default` 起三端比对生效行。
+ */
+function deepLinkPrefs(): RenderPrefs | null {
+  if (typeof location === 'undefined' || typeof atob !== 'function') return null;
+  let raw: string | null = null;
+  try { raw = new URLSearchParams(location.search).get(RENDER_PREFS_QUERY); } catch { return null; }
+  if (!raw) return null;
+  if (raw === 'default') { deepLinkActive = true; return defaultRenderPrefs(); }
+  try {
+    const p = normalize(JSON.parse(decodeBase64(raw)) as unknown);
+    deepLinkActive = true;
+    return p;
+  } catch (err) {
+    console.warn('[render-prefs] ?' + RENDER_PREFS_QUERY + '= 解析失败，忽略深链覆盖:', err);
+    return null;
+  }
+}
+
+/** 取生效档：深链覆盖优先，其次存档档。 */
+function load(): RenderPrefs {
+  return deepLinkPrefs() ?? loadStored();
+}
+
+/**
+ * 档指纹：四段生效值归一后的 FNV-1a 32 位短哈希（8 位十六进制，三端同格式）。
+ *
+ * 同档必同指纹、任一项不同必不同 ⇒ 判据可以「比指纹」而不必逐字段比（`describeRenderPrefs` 的
+ * `fp=` 与三端一致性探针都读它）。不进 localStorage、不参与 `version`。
+ */
+export function renderPrefsFingerprint(p: RenderPrefs): string {
+  const key = JSON.stringify([
+    p.lighting.exposure, p.lighting.lightGamma, p.lighting.ambientScale,
+    p.lighting.propVertexRelax, p.lighting.propVertexFlatten, p.lighting.mode,
+    p.textureQuality,
+    p.culling.distance, p.culling.pvs,
+    p.camera.fov,
+  ]);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
 }
 
 let logged = false;
@@ -190,12 +257,15 @@ export function readRenderPrefs(): RenderPrefs {
     logged = true;
     console.info(describeRenderPrefs(p));
   }
+  const g = globalThis as { __vbspRenderPrefsFp?: string; __vbspRenderPrefsSource?: string };
+  g.__vbspRenderPrefsFp = renderPrefsFingerprint(p);
+  g.__vbspRenderPrefsSource = deepLinkActive ? 'deep-link' : 'storage';
   return p;
 }
 
 /** 写入（逐段合并）并返回落盘后的完整档；调用方只有代表用户写入的那一端（game 面板 / debug 画质档）。 */
 export function writeRenderPrefs(patch: RenderPrefsPatch): RenderPrefs {
-  const cur = load();
+  const cur = loadStored(); // 深链覆盖不落盘：写入一律以存档档为基准
   const next = normalize({
     ...cur,
     ...patch,
@@ -236,7 +306,11 @@ export function describeRenderPrefs(p: RenderPrefs): string {
     ' cull=' +
     p.culling.distance +
     '（0=自动） pvs=' +
-    (p.culling.pvs ? 'on' : 'off')
+    (p.culling.pvs ? 'on' : 'off') +
+    ' fp=' +
+    renderPrefsFingerprint(p) +
+    ' source=' +
+    (deepLinkActive ? 'deep-link' : 'storage')
   );
 }
 
