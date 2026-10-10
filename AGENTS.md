@@ -71,7 +71,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | 根 `*.md` | `AGENTS.md`（本文件）｜ `TODO.md`（唯一待办与状态源）｜ `OWNER.md`（owner 决策队列）｜ `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`（git 仓库项目文档） |
 | `documents/` | **不存在**：原 47 篇工程/共享层/架构文档 + 3 篇规范已全部迁入 agentmemory，原文归档 `archive/memory/2026-10/` |
 | `progress/` | **3 个机器可读文件**：`memory-index.jsonl`（迁移台账 = manifest，`check-memory-sync.mjs` 的权威输入）、`control-ids.json`（控制层 ID 索引，门禁 `[G]` 判定「ID 已存在」的唯一来源）、`pending-kb.jsonl`（MCP 不可用时的待补写队列，见 §0 兜底）|
-| `skills/**` | **三篇** skill：`skills/websurf-workflow/SKILL.md`（**先读：工作流循环**）、`skills/websurf-env-traps/SKILL.md`（开工前先读）、`skills/agentmemory-usage/SKILL.md`（用记忆库前先读）。仓库是唯一源头；本机 junction 链进 `~/.agents/skills/`，故 `skill` 工具可直接解析；内容同时已入库 |
+| `skills/**` | **三篇** skill：`skills/websurf-workflow/SKILL.md`（**先读：工作流循环**）、`skills/websurf-env-traps/SKILL.md`（开工前先读）、`skills/agentmemory-usage/SKILL.md`（用记忆库前先读）。仓库是唯一源头；**harness 只扫 `<仓库>/.agents/skills`、`<仓库>/.dsh/skills`、`~/.agents/skills`、`<dshHome>/skills` 四个根，不扫 `<仓库>/skills/`** ⇒ 新机器要先把三个技能 junction 进任一根（见技能 `websurf-workflow` 的「技能注册」节）；内容同时已入库 |
 | `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/`；`apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` 是构建资产（后者被 `build-dist.mjs` 消费） |
 | `src/**` | 共享层（phys / wasm-core / ts-shared / materials / renderer-shared）+ `src/scripts/**`（本地门禁与工具） |
 | `test/` | `test/maps/`（BSP 夹具）、`test/replay/`（录像样例）——两者 gitignore；`test/project/**` 为第三方参考资料 |

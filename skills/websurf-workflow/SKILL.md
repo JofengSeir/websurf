@@ -64,3 +64,14 @@ git config core.hooksPath .githooks   # 每个克隆要启用一次（本地配�
 ```
 
 钩子挡两类：代码改动缺留痕、队列滞留未回放。跳过用 `git commit --no-verify` 或 `KB_HOOK=off git commit`。
+
+## 技能注册（每台机器一次）
+
+harness 的扫描根是这四个（源码 `dsh-skill-filesystem/lib/index.js`）：`<仓库>/.dsh/skills`、`<仓库>/.agents/skills`、`<dshHome>/skills`、`~/.agents/skills`。
+**`<仓库>/skills/` 不在扫描根里** —— 它是内容源头（唯一真相），必须被注册进上面任一根才能被 `skill()` 找到：
+
+```cmd
+mklink /J "%USERPROFILE%\.agents\skills\websurf-workflow" "D:\code\projects\websurf\skills\websurf-workflow"
+```
+
+三个技能各建一次（`agentmemory-usage` / `websurf-env-traps` / `websurf-workflow`）。注册是机器本地行为，不随仓库走；新机器上先注册再开工。

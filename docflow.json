@@ -21,9 +21,9 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
-    "AGENTS.md": "dbadd975ffccc1737374d6db3c00cc3908564e72119afe30911b304b4a45ba70",
+    "AGENTS.md": "564538e416caea609d266602e5b433403ee9bac6854e3563c2ee9d99dc7a8b91",
     "skills/agentmemory-usage/SKILL.md": "25d51096301e47ce4868bb35b76e30e9a6307feb73c4c577e7c2131a95a10d6c",
-    "skills/websurf-workflow/SKILL.md": "44e959be7bf95dc95e511de98b3104afcfd06dc4db3e16e799e50c5cf553b8d6"
+    "skills/websurf-workflow/SKILL.md": "edb5f9977b5ede5d6a3e27f0eedb279b52337d73223fda18d16094ad31634bc4"
   },
   "approvals": [
     {
@@ -116,8 +116,8 @@
     },
     {
       "path": "skills/websurf-workflow/SKILL.md",
-      "by": "owner(2026-10-10",
-      "reason": "新建技能：本仓",
+      "by": "owner(2026-10-10)",
+      "reason": "补技能注册说明",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -125,7 +125,7 @@
     {
       "path": "AGENTS.md",
       "by": "owner(2026-10-10)",
-      "reason": "修正",
+      "reason": "补技能注册说明",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
