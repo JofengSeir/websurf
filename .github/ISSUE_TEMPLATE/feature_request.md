@@ -12,7 +12,9 @@ assignees: ''
 
 **适用工程**
 
-- [ ] debug / [ ] game / [ ] test / [ ] 共享层（src/）
+- [ ] debug（`apps/debug`） / [ ] game（`apps/game`） / [ ] viewer（`apps/viewer`） / [ ] 共享层（`src/`）
+
+（注：`test` 验证工程已退役，不再作为选项；三端工程见 `README.md`。）
 
 **你希望实现的解决方案**
 

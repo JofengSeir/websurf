@@ -15,62 +15,22 @@
   "pins": {
     "README.md": "0b89f30e8d2d28921d4fd55f5f6f03f979b1fa995f4537efa5df8b49149a9e19",
     "CONTRIBUTING.md": "b11e2f55b65f41f46d928bca3f7a819d2b86c0f5af406c68884502cddfe4ede6",
-    "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
+    "SECURITY.md": "71952253779a089c79245c22207364fcd7c6f1796c7e1c922b9c2ce6a69d6931",
     "skills/websurf-env-traps/SKILL.md": "6dfa47ded54ea649ce3f1dd041bdc7a70ff31cedf191f14eec17bcaef9d622ec",
-    ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
-    ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
-    ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
+    ".github/ISSUE_TEMPLATE/bug_report.md": "1c04607a70bd18dd118b6771a9f0fe12ea5d777ade9bf18c1992c3a500075ed5",
+    ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
+    ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
     "AGENTS.md": "31d48ef411490208cbe3aaa23142e952b0c838a15d7bed0dc4310a60bddb9179",
-    "skills/agentmemory-usage/SKILL.md": "a77cb8a1806e48f645df35df43fe147f9a38db3d266f94d6a9bbc8da75d76e09"
+    "skills/agentmemory-usage/SKILL.md": "25d51096301e47ce4868bb35b76e30e9a6307feb73c4c577e7c2131a95a10d6c"
   },
   "approvals": [
-    {
-      "path": "SECURITY.md",
-      "by": "owner(本轮指示)",
-      "reason": "建立 docflow 基线",
-      "at": "2026-10-07",
-      "task": "D-docflow",
-      "consumed": true
-    },
-    {
-      "path": ".github/ISSUE_TEMPLATE/bug_report.md",
-      "by": "owner(本轮指示)",
-      "reason": "建立 docflow 基线",
-      "at": "2026-10-07",
-      "task": "D-docflow",
-      "consumed": true
-    },
-    {
-      "path": ".github/ISSUE_TEMPLATE/feature_request.md",
-      "by": "owner(本轮指示)",
-      "reason": "建立 docflow 基线",
-      "at": "2026-10-07",
-      "task": "D-docflow",
-      "consumed": true
-    },
-    {
-      "path": ".github/ISSUE_TEMPLATE/other.md",
-      "by": "owner(本轮指示)",
-      "reason": "建立 docflow 基线",
-      "at": "2026-10-07",
-      "task": "D-docflow",
-      "consumed": true
-    },
     {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
       "by": "owner(本轮指示)",
       "reason": "建立 docflow 基线",
       "at": "2026-10-07",
       "task": "D-docflow",
-      "consumed": true
-    },
-    {
-      "path": "README.md",
-      "by": "owner(2026-10-10",
-      "reason": "迁出小节后残留的交叉引用",
-      "at": "2026-10-10",
-      "task": "",
       "consumed": true
     },
     {
@@ -106,17 +66,57 @@
       "consumed": true
     },
     {
-      "path": "skills/agentmemory-usage/SKILL.md",
+      "path": "skills/websurf-env-traps/SKILL.md",
       "by": "owner(2026-10-10",
-      "reason": "加工具不可用时的兜底小节",
+      "reason": "加代理事实",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
     },
     {
-      "path": "skills/websurf-env-traps/SKILL.md",
-      "by": "owner(2026-10-10",
-      "reason": "加代理事实",
+      "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "by": "Jofen",
+      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "by": "Jofen",
+      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/other.md",
+      "by": "Jofen",
+      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "SECURITY.md",
+      "by": "Jofen",
+      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "README.md",
+      "by": "Jofen",
+      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/agentmemory-usage/SKILL.md",
+      "by": "Jofen",
+      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -745,7 +745,7 @@
       "src/serve.py:21:21": "f1a915eb"
     },
     "SECURITY.md": {
-      "src/serve.py:39:40": "4f1a7afb"
+      "src/serve.py:40:41": "a4a62ad0"
     },
     "TODO.md": {
       "apps/viewer/src/core/scene.ts:165:165": "5e51e649",
@@ -854,10 +854,28 @@
       "apps/game/dev.cmd:80:82": "30fe0256",
       "apps/viewer/dev.cmd:80:82": "30fe0256"
     },
-    "apps/debug/scripts/path-baseline.md": {},
+    "apps/debug/scripts/path-baseline.md": {
+      ".github/workflows/ci-gates.yml:159:159": "77c90367"
+    },
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "apps/debug/scripts/path-baseline.md",
+      "at": "2026-10-10T15:41:08.745Z",
+      "by": "codebuddy",
+      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：ISSUE 模板工程选项对齐三端（去已退役 test、补 viewer、两端改三端）；SECURITY 的 serve.py COOP/COEP 行号更正为 40-41；agentmemory R3 收窄为「控制层原件不迁」以消除与 AGENTS 冲突；path-baseline 的 CI job 名与 .gitignore 描述对齐实际；OWNER D-115/D-116 按实际更正",
+      "changed": 1,
+      "total": 1
+    },
+    {
+      "path": "SECURITY.md",
+      "at": "2026-10-10T15:41:08.744Z",
+      "by": "codebuddy",
+      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：ISSUE 模板工程选项对齐三端（去已退役 test、补 viewer、两端改三端）；SECURITY 的 serve.py COOP/COEP 行号更正为 40-41；agentmemory R3 收窄为「控制层原件不迁」以消除与 AGENTS 冲突；path-baseline 的 CI job 名与 .gitignore 描述对齐实际；OWNER D-115/D-116 按实际更正",
+      "changed": 2,
+      "total": 1
+    },
     {
       "path": "CHANGELOG.md",
       "at": "2026-10-10T15:18:45.746Z",

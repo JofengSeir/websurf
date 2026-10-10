@@ -2,8 +2,9 @@
 
 ## ⚠️ CI 夹具与两个夹具的语义（2026-09-11）
 
-CI 门 `npm run test:path-acceptance`（`.github/workflows/ci-gates.yml` 的 `harness-and-debug-gates` job、
-紧跟「权威时钟验证」之后；2026-09-21 前挂在 `deploy-pages.yml`）跑的是
+CI 门 `npm run test:path-acceptance`（`.github/workflows/ci-gates.yml` 的 **`debug-gates`** job、该步在
+`.github/workflows/ci-gates.yml:159`；2026-09-21 前挂在 `deploy-pages.yml`）跑的是
+（**job 名 2026-10-10 复核更正**：原文写的 `harness-and-debug-gates` 已不存在，实测 job 名为 `debug-gates`）
 `node scripts/path-acceptance.mjs fixtures/path/tick-on-render-prefix.json --assert --expect fail`。
 
 ### 夹具 1：`tick-on-render-prefix.json` —— **缺陷存在时**的录制（当前 CI 输入）
@@ -25,9 +26,10 @@ CI 门 `npm run test:path-acceptance`（`.github/workflows/ci-gates.yml` 的 `ha
 （或把本脚本的 `--expect` 切到 `pass`）——**在那之前不要**把它写进 CI：
 用 prefix 夹具配 `pass` 会真红，配 `fail` 才是当前语义。
 
-夹具入库靠根 `.gitignore` 地图区块后的两条例外（`!debug/fixtures/path/`、
-`!debug/fixtures/path/*.json`），`git check-ignore -v` 对夹具**不应报 ignored**
-（当前输出命中的是 `!` 取反规则 = 未忽略；`git add --dry-run` 可入库为准）。
+夹具入库：根 `.gitignore` **现已无任何 `fixtures` 相关规则**（2026-10-10 复核更正：原文所称
+`!debug/fixtures/path/` 与 `!debug/fixtures/path/*.json` 两条例外已不存在），夹具
+`apps/debug/fixtures/path/tick-on-render-prefix.json` 本身即**已被 git 跟踪**
+（`git ls-files --error-unmatch <夹具>` 命中）⇒ 不受 ignore 影响，可正常入库。
 
 生成时间: 2026-09-10T19:59:18.905Z
 

@@ -12,10 +12,10 @@ assignees: ''
 
 **所属工程**
 
-- [ ] debug（主工程 / Debug Build）
-- [ ] game（WebSurf-game）
-- [ ] test（WebSurf-test 验证工程）
-- [ ] 共享层（src/，两端均受影响）
+- [ ] debug（`apps/debug`，调试台：碰撞/路径/平面检视、录制）
+- [ ] game（`apps/game`，游玩：物理 + 面板）
+- [ ] viewer（`apps/viewer`，查看器 + 回放）
+- [ ] 共享层（`src/`，**三端**均受影响）
 
 **复现步骤**
 
