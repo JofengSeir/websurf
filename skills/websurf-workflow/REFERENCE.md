@@ -80,6 +80,7 @@ mklink /J "%USERPROFILE%\.agents\skills\websurf-env-traps" "%CD%\skills\websurf-
 | `src/scripts/close-round.mjs` | 收尾留痕与 `--check-round` |
 | `src/scripts/check-doc-drift.mjs` | 文档漂移体检（A–P） |
 | `src/scripts/check-memory-sync.mjs` | 记忆库台账体检 |
+| `src/scripts/sync-board.mjs` | 看板重迁：无参打印计划 / `--done --ids` 落台账 / `--status` 比 sha12 |
 | `src/scripts/check-board-touch.mjs` | 改动的看板触碰软提示 |
 
 ## 8. 记忆库写入约定（本仓特有）

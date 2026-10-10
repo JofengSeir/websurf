@@ -22,7 +22,7 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "d03524f66cdaae0abd96744d204ea954155e325413a23356708299207fa457a2",
-    "AGENTS.md": "6b27e7fca7da08cd6022ba271b0d369d8a65b77cf6c7efe05a01d318d414b063",
+    "AGENTS.md": "fc4e76f0d70b03e8545f8e8755a76750585cba13160d5eb02e71456c98db0f66",
     "skills/websurf-workflow/SKILL.md": "65fef405f64068d0c0e58ea183d803efe9ad52911647de99ae9f10167ec7b98a"
   },
   "approvals": [
@@ -123,17 +123,17 @@
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
+      "path": "skills/websurf-workflow/SKILL.md",
       "by": "owner(2026-10-11",
-      "reason": "看板迁库：AGENTS",
+      "reason": "看板重迁改用",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
     },
     {
-      "path": "skills/websurf-workflow/SKILL.md",
+      "path": "AGENTS.md",
       "by": "owner(2026-10-11",
-      "reason": "补「新条目先立行」与",
+      "reason": "登记",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
