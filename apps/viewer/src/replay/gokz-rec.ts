@@ -2,7 +2,7 @@
  * KSF/gokz `.rec` 二进制原生解析（ksf.surf 回放文件格式，与 Shavit `.replay` 完全不同）。
  *
  * 格式权威出处是 ksf.surf 前端 `/gokz/js/replayviewer.js` 的 `ReplayFile` 类；本模块按该定义
- * 读取，字节级布局与逐段说明见 `documents/viewer/implementation/replay.md` 的 gokz `.rec` 段。
+ * 读取，字节级布局与逐段说明见 agentmemory `websurf/documents/viewer/implementation/replay.md#chunk*` 的 gokz `.rec` 段。
  * 概要：i32 魔数（2 或 3）→ i32 保留 → i32 tick 数 → i32 bookmark 数 →（v3 独有：i32 帧宽
  * cell 数 + i32 扩展块 cell 数并跳过扩展块）→ bookmark 区（整段跳过，本模块不解码）→ 定长帧区。
  * 每帧前 10 个 cell 与 v2 相同：i32 buttons、f32 pos[3]、f32 angles(pitch,yaw)、i32 丢弃、

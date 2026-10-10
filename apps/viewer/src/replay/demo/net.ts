@@ -847,7 +847,7 @@ function readUpdateStringTable(r: BitReader, ctx: NetContext, stats: DemoParseSt
   // 之前只有 1 条这样的放弃，而它让其后 3300+ 条实体消息全部对不上（`entityPayloadExact` 停在 99）。
   //
   // 注意这里**不是**把错误藏起来：越界次数另计（`DemoParseStats.updateEntryOverflow`）并进警告，
-  // 条目布局本身的缺口仍按原样留档在 `documents/viewer/implementation/dem.md`。
+  // 条目布局本身的缺口仍按原样留档在 agentmemory `websurf/documents/viewer/implementation/dem.md#chunk*`。
   if (r.overflowed && !wasOvf) {
     stats.updateEntryOverflow++;
     if (stats.updateEntryOverflow <= 4) {

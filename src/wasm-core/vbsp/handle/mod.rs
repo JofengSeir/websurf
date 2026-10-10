@@ -521,7 +521,7 @@ impl<'a> Handle<'a, DisplacementInfo> {
     /// 子节点中心，按 `allowed_vertices` 判活——活的才递归，死的当普通点、扇在此断开。
     /// 所有环绕点同样受掩码约束（相邻位移 power 不同时，引擎据此粗化细边）。
     ///
-    /// 网格下标口径：`flat = gx * side + gy`（与 `subdivided_face` 的展平顺序一致）；机理与判据见 `documents/wasm-core/overview.md` §5。
+    /// 网格下标口径：`flat = gx * side + gy`（与 `subdivided_face` 的展平顺序一致）；机理与判据见 agentmemory `websurf/documents/wasm-core/overview.md#chunk*`（§5）。
     fn tessellated_grid(&self) -> Vec<(usize, usize)> {
         let power = self.power.max(0) as usize;
         if power == 0 {
