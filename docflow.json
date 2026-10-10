@@ -106,7 +106,7 @@
       "consumed": true
     },
     {
-      "path": "TODO.md",
+      "path": "OWNER.md",
       "by": "owner(2026-10-10",
       "reason": "5",
       "at": "2026-10-10",
@@ -114,9 +114,9 @@
       "consumed": true
     },
     {
-      "path": "OWNER.md",
+      "path": "TODO.md",
       "by": "owner(2026-10-10",
-      "reason": "5",
+      "reason": "裸文件名锚点按",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -790,7 +790,6 @@
       "apps/game/src/renderer/renderer-main.ts:76:76": "ee716eea",
       "apps/viewer/src/core/scene.ts:158:158": "87f9783a",
       "apps/viewer/src/core/constants.ts:43:43": "300d88bb",
-      "renderer-main.ts:243:243": "-",
       "apps/debug/src/renderer/renderer-main.ts:503:503": "30a4c6c2",
       "apps/game/scripts/check-wasm-api.mjs:52:70": "e05aa5d3",
       "src/renderer-shared/shader/bumpmap.ts:1:1": "8d64a30d",
@@ -870,6 +869,14 @@
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "TODO.md",
+      "at": "2026-10-10T14:47:43.205Z",
+      "by": "agent",
+      "reason": "裸文件名锚点按",
+      "changed": 1,
+      "total": 105
+    },
     {
       "path": "TODO.md",
       "at": "2026-10-10T14:47:15.767Z",
