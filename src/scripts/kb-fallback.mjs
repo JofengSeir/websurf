@@ -4,7 +4,8 @@
  *
  * 三层（probe 逐层探测并给出该走哪条）：
  *   L1 宿主 MCP 工具 memory_*：正常路径（脚本探测不到，agent 自己知道手里有没有）
- *   L2 agentmemory 服务 HTTP：读 GET http://127.0.0.1:3113/memories?limit=N，写走 REST http://127.0.0.1:3111
+ *   L2 agentmemory 服务 HTTP：读 GET http://127.0.0.1:3113/memories?limit=N（默认端口；本机另有 REST :3111）
+ *      起服务：AGENTMEMORY_DIR 环境变量或 ../agentmemory/start-agentmemory.cmd
  *   L3 仓库兜底：规则从 skills/** 与门禁脚本重建（脚本即规则的可执行定义）；
  *      写不进知识库的条目落 progress/pending-kb.jsonl，服务恢复后用 plan 回放，done 删除
  *
@@ -24,7 +25,7 @@ const QUEUE = path.join(ROOT, 'progress/pending-kb.jsonl');
 const LEDGER = path.join(ROOT, 'progress/memory-index.jsonl');
 const VIEWER = 'http://127.0.0.1:3113/memories?limit=1';
 const REST = 'http://127.0.0.1:3111/status';
-const STARTERS = ['../agentmemory/start-agentmemory.cmd', '../../agentmemory/start-agentmemory.cmd', 'D:/code/projects/agentmemory/start-agentmemory.cmd'];
+const START_DIRS = [process.env.AGENTMEMORY_DIR, '../agentmemory', '../../agentmemory'].filter(Boolean);
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : (d === undefined ? '' : d); };
 const rows = () => (fs.existsSync(QUEUE) ? fs.readFileSync(QUEUE, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
@@ -42,7 +43,7 @@ async function probe() {
   const q = rows();
   const viewer = await http(VIEWER);
   const rest = await http(REST);
-  const starter = STARTERS.map((s) => path.resolve(ROOT, s)).find((p) => fs.existsSync(p));
+  const starter = START_DIRS.map((d) => path.resolve(ROOT, d, 'start-agentmemory.cmd')).find((p) => fs.existsSync(p));
   const ledger = nLines(LEDGER);
   console.log('知识库兜底探测（L1 由宿主决定：你手里有没有 memory_* 工具）');
   console.log('  L2 读（viewer :3113）: ' + (viewer ? '可用 ｜ 库内 total=' + viewer.total : '不可用'));
