@@ -26,12 +26,12 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（76 条）
+## 未结项（75 条）
 ### 待裁决（2）
 - **T-628** 规范 §2.3 的 `dist/play.cmd` 断言与实现不符（仅 viewer 产出，debug/game 不产出）　`repo`
 - **T-638** 记忆库检索质量回归未达任务书 V3 的 20/20（实测 17/20 rank-1、19/20 top-3）　`repo`
 
-### 待修（69）
+### 待修（68）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
@@ -104,7 +104,6 @@
 
 
 - **T-508** 三端逐像素残余 71 px 差异未定位（x532..540 / y435..451）　`shared`
-- **T-641** 记忆库「现状文档」层（`documents/**` 129 条）是**迁移时点快照**：其 `path:line` 锚点不在任何门禁扫描面内（`check-doc-drift [B]` 只扫仓库内 16 篇 md）⇒ T-460 改过的实现面在那些文档里仍是旧写法，锚点可静默越界（实测库内文档引用的 lod-manager 第 257 行已越过该文件 235 行的文件尾）　`shared`
 ### 进行中（2）
 - **T-630** viewer 主模型**从未**被分块合并（`mergeIntoNewRoot` 是死代码）　`viewer`
 - **T-634** 两处「编译得过、跑起来静默退化」：debug 预编译早于挂载地图根 / 无 3D 天空盒时 viewer 清屏色不同　`shared`
@@ -219,4 +218,4 @@
 | T-460 | 三端渲染一致性修复（任务书：单一入口 + 口径统一 + 状态断言门禁；覆盖 T-457/T-631/T-632/T-633/T-636 与本批新增三项） | 缺陷 | shared | 已结案 | **已结案（2026-10-11）**：见详情| progress/memory-index.jsonl | 判据：每 WP 收口时三端 `npm run typecheck` + `build:ts` exit 0、`node src/scripts/check-render-parity.mjs` exit 0（A–J）、`node src/scripts/check-prefs-parity.mjs` exit 0、`node src/scripts/check-render-consistency.mjs` exit 0（三端探针快照 V1/V2/V4/V5 逐字段；缺依赖 SKIP）、`node src/scripts/check-doc-drift.mjs` A–P 全 0；三端 prefs/envmap/cull/pvs/merge/sky 状态逐字段相同；画面达标由 owner 目视确认（不以截图作判据） | 新 |
 | T-508 | 三端逐像素残余差异 71 px 未定位（反射强度归零 A/B 后 game 与 viewer 仍差，bbox x532..540 / y435..451，最差 157） | 缺陷 | shared | 待修 | 一次性 CDP 探针实测（三端同图同位姿、反射项归零后残余均值差 0.007/255）；与 T-455「天空区两模式不确定」是否同源未知 | progress/memory-index.jsonl | 判据：定位到具体材质/端并由三端状态断言解释；或判定与 T-455 同源后并入该条 | 新 |
 | T-640 | debug 画布尺寸与水平视野与其他两端不同源：debug canvas 在 `#previewArea` 内（实测 956×676），game/viewer 为整窗（1256×708） | 缺陷 | repo | 已结案 | **已结案（2026-10-11）**：`apps/debug/web/index.html`（`<canvas id="preview">` 在 `#previewArea` 内）、`apps/debug/src/app.ts:1108-1109` → `apps/debug/src/renderer/renderer-main.ts:753` 写 `camera.aspect`；game/viewer 为整窗画布 | progress/memory-index.jsonl | 判据：视口来源落入共享只读探针的 `viewport` 字段且与实际一致（D3：只声明不改布局）；跨端像素比对前统一画布尺寸 | 新 |
-| T-641 | 记忆库「现状文档」层（`documents/**` 129 条）是**迁移时点快照**：其 `path:line` 锚点不在任何门禁扫描面内（`check-doc-drift [B]` 只扫仓库内 16 篇 md）⇒ T-460 改过的实现面在文档里仍是旧写法，锚点可静默越界 | 工具·文档治理 | shared | 待修 | 见 progress/memory-index.jsonl（T-460 收尾审计）：`documents/debug/implementation/renderer.md` 称 `LodStats.pvsHidden` 恒写 0（引 lod-manager 第 257 行，而该文件现 235 行 ⇒ 越界）、称 debug 经 `normalizeGroup` 注入合并归一（`apps/**` 现 0 处）、称共享画质入口在 texture-quality 第 48 行（该行现为 `SceneTextureRoots`）；`documents/architecture/overview.md` 称 `LodManager.update` 只判距离且 `lod.pvsEnabled` 已随死链删除（现判定走共享控制器、`enablePvs` 每轮读共享档）、引 render-prefs 第 187/197/211 行（现值已错）；`documents/debug/overview.md` 称剔除距离「由场景对角线唯一确定」（现自动值输入为装配核 `maxDim`） | progress/memory-index.jsonl | 判据：`node src/scripts/check-memory-sync.mjs` 的 stale/orphan/missing/leak 全 0，且上述各段在库内已重迁（重迁后 `archive_mismatch=0` 仍成立）或被显式标注「迁移时点快照，以源码为准」；机制选择见 OWNER.md D-119 | 新 |
+| T-641 | 记忆库「现状文档」层（`documents/**` 129 条）是**迁移时点快照**：其 `path:line` 锚点不在任何门禁扫描面内（`check-doc-drift [B]` 只扫仓库内 16 篇 md）⇒ T-460 改过的实现面在文档里仍是旧写法，锚点可静默越界 | 工具·文档治理 | shared | 已结案 | **已结案（2026-10-11，按 D-119 的 (b)+(c) 落地）**：(b) 4 篇受影响文档各添一条库内勘误条目（marker `…/x.md#errata0@<源 sha12>`；id `mem_mv2scsrd_2c40f842be89`／`mem_mv2sd2g9_efecd17d3848`／`mem_mv2sd999_3a5e489b5505`／`mem_mv2sdg22_c813380bfff9`）——含「迁移时点快照，以当前源码 + `websurf/norms/render-parity-discipline.md` 为准」声明与逐条「原断言 → 现事实」对照（pvsHidden 恒 0 → 共享回值实测 90；`normalizeGroup` 注入 → 共享默认；画质入口 → `applySceneTextureQuality`；只判距离 → 共享控制器；对角线唯一确定 → 装配核 `maxDim`），台账同步补 4 行（与冻结归档原文同 sha12 ⇒ `archive_mismatch=0`）。(c) 新增门禁 `src/scripts/check-kb-doc-drift.mjs`（库内 `documents/**` 的 4926 处锚点对当前源码，报路径失效/越界；`--strict` 时失败，库不可达 SKIP），实测**路径失效 0 / 行号越界 11**（全在 `documents/debug/**`，引 lod-manager 第 241、257、270、271、278、283、298 行，而该文件现 235 行）；已登记 `AGENTS.md` §3 + §3.1。**archive 原文按你的指令未改**（只读扫描，未重写、未重钉） | progress/memory-index.jsonl | 判据：`node src/scripts/check-kb-doc-drift.mjs` exit 0 且打印正文条目的失效/越界计数（当前 **0 失效 / 11 越界**，均为已登记的「迁移时点快照」漂移）；`--strict` 是「承诺文档随代码同步」时的判红开关（当前 11 处越界即 exit 1，属 (b) 语义下已接受状态）；`node src/scripts/check-memory-sync.mjs` stale/orphan/missing/leak 全 0 | 新 |

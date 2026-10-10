@@ -94,6 +94,7 @@ node src/scripts/docflow.mjs check                 # 只读 md 漂移 / 未落�
 node src/scripts/check-render-parity.mjs           # 三端渲染同源（静态 A–J：实现符号 / 共享入口装配与调用面 / 视口声明；git 不可用时降级）
 node src/scripts/check-render-consistency.mjs      # 三端渲染一致（运行期：探针快照逐字段；缺三端 dev 服务或浏览器即 SKIP）
 node src/scripts/check-prefs-parity.mjs            # 三端呈现档可比（`?prefs=default` 生效行逐字相同 + `--selftest` 负向自测）
+node src/scripts/check-kb-doc-drift.mjs --strict    # 记忆库「现状文档」锚点体检（documents/** 的 路径:行号 对当前源码；失效/越界即失败；库不可达 SKIP）
 node src/scripts/kb-fallback.mjs probe           # 知识库可用性：L1 工具 / L2 HTTP / L3 仓库兜底，并列出待补写条目
 node src/scripts/close-round.mjs --check-round --staged  # 留痕检查（钩子同口径）；--note/--done 见脚本头注释
 git config core.hooksPath .githooks                  # 每个克隆启用一次提交门禁（本地配置，不随仓库走）
@@ -139,6 +140,7 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 - `src/scripts/check-board-touch.mjs`
 - `src/scripts/check-doc-drift.mjs`
 - `src/scripts/check-glb-parity.mjs`
+- `src/scripts/check-kb-doc-drift.mjs`
 - `src/scripts/check-memory-sync.mjs`
 - `src/scripts/check-prefs-parity.mjs`
 - `src/scripts/check-render-consistency.mjs`
