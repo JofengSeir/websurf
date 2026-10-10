@@ -1,0 +1,76 @@
+# WebSurf: 文档漂移体检（doc drift check）
+#
+# 背景：仓库铁律是「文档内容以实际代码为准，不一致时以代码为准并回改文档」。
+# 但 2026-09 的实践表明，文档「文件地图」会随代码演进而漂移（行数声明过期、
+# 锚点越界、迁移后遗留旧目录前缀），且人工不易发现。本 workflow 把校验自动化。
+#
+# 校验项（src/scripts/check-doc-drift.mjs）：
+#   A 行数声明 —— `path`(NNN) / `| path | NNN |` 是否等于实测 wc -l
+#   B 文件:行号 锚点 —— 锚点是否超出文件总行数
+#   C 路径失效 —— 锚点/声明指向的文件必须真实存在（失败；历史叙述请写成纯文本，别写成 `path:line`）
+#   D 裸文件名歧义 —— 仅计数（跨工程文档用 `app.ts` 之类简写，无法自动消歧，非错误）
+#   E 坏链 —— md 里的相对链接在磁盘上必须可解析（围栏代码块内跳过）
+#   F 行尾与 BOM —— 以**索引 blob**（提交形态）为准：不得含 CR、不得含 UTF-8 BOM
+#     （仓库 core.autocrlf=true ⇒ 规范形式是 LF，工作树的 CRLF 只是检出产物）
+#   G 待办同源 —— 全仓 T-### 必须存在于 TODO.md；ID 不重复；未结项证据列不得为空；
+#     规范面文档不得自行声明待办状态（progress/** 等豁免）
+#   H 流程性 md 体积（AGENTS 32 / TODO 96 / OWNER 16 / 其余 48 KB）
+#   I 过程记录分卷可达 —— 仓库已无 process md（进展直接写 agentmemory）⇒ 恒为空检查，保留段号以对齐 A–P
+#   J 代码注释纪律 —— 单行 ≤160 字符为硬门，块长只计数
+#   K 上级覆盖 —— 每个 md 都必须被 AGENTS §2 点到（`documents/` 与 `progress/` 已无文档树与导航）
+#   L 文档缺口 ↔ 看板 —— 终态行（已记录/已结案）的详情 doc 里若仍把该号写成活缺口且无
+#     「已消除/已修/已处置/已结案/已撤销/~~」标记 ⇒ 失败（文档不得留假缺口）
+#   M 假结案 —— 终态行的判据形如「git grep "<模式>" … ⇒ 0 命中」时，该模式在判据声明的路径与
+#     「证据」文件里都必须真的 0 命中；`-- <路径>` 指错目录会让判据永远满足（实例 T-129 / T-132）
+#   N 脚本与部署链契约 —— 三工程 scripts/** 的引用面须非零（登记见 AGENTS §3.1）
+#     deploy-pages.yml 的 matrix.app 与装配循环必须与 apps/ 目录三者一致；.cmd 须 @echo off + exit /b 且不写死用户目录
+#   O 文档契约（docflow）—— 调 node src/scripts/docflow.mjs check：只读 md 漂移 / 未落实审批 / 联动 /
+#     只读类新建与删除（划分与 approve·sync·claim·verify 见该脚本头注与 docflow.json）
+#   P 本机路径 —— 全仓文本不得出现私人目录名 / 本机绝对路径（占位符 <用户> / <本地工作区> / <盘符> 豁免）；
+#     规范与 2026-10-07 事故记录见 agentmemory `websurf/documents/norms/local-path-hygiene.md#…`
+# A / B / C / E / F / G / L / M / N / O / P 任一非空即脚本 exit 1 → 本 workflow 失败（D 仅计数）。
+#
+# 同批还跑 src/scripts/check-board-touch.mjs（看板使用规程的**软提示**，AGENTS.md §0.1）：
+#   改了 src/ apps/ documents/ 却没动 TODO.md、提交信息也没有 T-### 或「无待办影响」时打印警告；
+#   owner 2026-10-07 裁决只提示不拦提交，故以 continue-on-error 运行。
+#
+
+name: Doc Drift Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  doc-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # 软提示要比对提交区间，需要历史
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run doc drift check
+        run: node src/scripts/check-doc-drift.mjs
+      # 看板使用规程（AGENTS.md §0.1 第 3/5 条）的软提示：只警告、不拦提交。
+      - name: Board touch advisory (soft, push)
+        if: github.event_name == 'push'
+        continue-on-error: true
+        run: node src/scripts/check-board-touch.mjs --base "${{ github.event.before }}" --head "${{ github.sha }}"
+
+      - name: Board touch advisory (soft, PR)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: node src/scripts/check-board-touch.mjs --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.sha }}"
+
