@@ -77,11 +77,10 @@ apps/game/scripts/wasm-hash-pin.mjs
 #   + 机制 docflow.json / 6 个治理脚本 / doc-drift.yml —— 全部入库。
 # 仍不入库：archive/**（迁移原文；agent 可暴力解读项目重新总结）、.archify/、.workbuddy/。
 # 已放行：AGENTS.md TODO.md OWNER.md docflow.json progress/ skills/
+!progress/board.jsonl
 #   src/scripts/{docflow,check-doc-drift,check-board-touch,check-memory-sync,check-shared-sync,wasm-stale-check}.mjs
 #   .github/workflows/doc-drift.yml
 # ── 操作系统噪声（跨平台协作常带进来的文件）──
 .DS_Store
 Thumbs.db
 desktop.ini
-
-!progress/board.jsonl
