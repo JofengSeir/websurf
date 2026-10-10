@@ -8,7 +8,7 @@
  * modelRoot 的换图生命周期与拾取/量测接口。
  */
 import * as THREE from 'three';
-import { applyMapFog, renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js';
+import { renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js'; import { setSceneEnvironment, setSceneBackgroundColor, clearSceneEnvironment } from '../../../../src/renderer-shared/environment/scene-environment.js';
 import {
   fullbrightUnlitLitMaterials,
   setLightingMode as setLightingModeInShader,
@@ -67,7 +67,7 @@ export class ViewerScene {
     setLightingModeInShader(DEFAULT_LIGHTING_MODE);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(BG_COLOR);
+    setSceneBackgroundColor(this.scene, BG_COLOR);
 
     this.camera = new THREE.PerspectiveCamera(
       FOV,
@@ -133,7 +133,7 @@ export class ViewerScene {
       this.scene.remove(this.modelRoot);
       this.modelRoot = null;
       // three.js 渲染列表缓存按旧地图几何缓存条目，换图后清掉（2026-10-04 自 debug 对齐）
-      if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose(); this.renderer.renderLists.dispose();
+      clearSceneEnvironment(this.scene, { disposeBackground: true }); this.renderer.renderLists.dispose();
     }
     // 共享装配核（T-454 P3b-2 起三端同一条链路）：GLB → 摘 punctual 灯 → 双贴图登记 → lightmap
     // → 摘天空区 → 主模型合并 → 天空区合并 → 终扫，顺序即契约（见 `scene/assemble-scene.ts` 文件头）。
@@ -149,7 +149,7 @@ export class ViewerScene {
       mergeMain: (root) => this.optimizeScene(root),
     });
 
-    this.scene.background = skyboxTexture ?? new THREE.Color(BG_COLOR); this.scene.add(asm.root);
+    setSceneEnvironment(this.scene, { background: skyboxTexture ?? new THREE.Color(BG_COLOR), skyboxReflection: skyboxTexture ?? null }); this.scene.add(asm.root);
     this.modelRoot = asm.root;
     this.skyGroup = asm.skyGroup;
     this.skyParams = asm.skyGroup && sky?.skyCamera ? sky.skyCamera : null;
@@ -174,7 +174,7 @@ export class ViewerScene {
       console.info('[viewer][skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
     // 地图线性雾（`env_fog_controller`）：建雾 + 雾上限的唯一入口（共享环境模块，三端同值）
-    applyMapFog(this.scene, sky?.fogParams); await applyViewerTextureQuality(this.scene, this.modelRoot, sky?.mosaicManifest ?? null, readRenderPrefs().textureQuality);
+    setSceneEnvironment(this.scene, { fog: sky?.fogParams ?? null }); await applyViewerTextureQuality(this.scene, this.modelRoot, sky?.mosaicManifest ?? null, readRenderPrefs().textureQuality);
     this.fitCamera(maxDim);
   }
 

@@ -31,7 +31,7 @@
  */
 
 import * as THREE from 'three';
-import { applyMapFog, renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js';
+import { renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js'; import { setSceneEnvironment, setSceneBackgroundColor, clearSceneEnvironment } from '../../../../src/renderer-shared/environment/scene-environment.js';
 import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
@@ -47,7 +47,7 @@ import { createSkyCamera, extractSkyArea, SKY_LAYER, type SkyCameraParams } from
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
-import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setReflectionEnvMap, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyLightingPresentation, type RenderLightingPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
+import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyLightingPresentation, type RenderLightingPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
 
 /** 透视相机 FOV 初值（度）：`init` 优先取 `config.hud.fov`，缺省用它；面板滑块量程 60..110。 */
 const FOV_DEFAULT = 73.6;
@@ -240,7 +240,7 @@ export class RendererMain {
     }
 
     // 背景
-    this.scene.background = new THREE.Color(0x222222);
+    setSceneBackgroundColor(this.scene, 0x222222);
   }
 
   /**
@@ -297,7 +297,7 @@ export class RendererMain {
 
 
     // 5. 回传场景包围盒最小 Y（`onSceneLoaded` 的调用方把它当死亡阈值转给 setDeathY）
-    if (data.skyboxTexture) { this.scene.background = data.skyboxTexture; setReflectionEnvMap(data.skyboxTexture); } this.onSceneLoaded?.(bbox.min.y);
+    setSceneEnvironment(this.scene, data.skyboxTexture ? { background: data.skyboxTexture, skyboxReflection: data.skyboxTexture } : {}); this.onSceneLoaded?.(bbox.min.y);
 
     // 5b. 挂天空层 + 地图雾。天空层必须在 LOD/PVS 注册**之后**：天空图元只在第 1 层、由第二相机
     //     渲染，不能被主相机的 LOD/PVS 剔除（注册时它们还没进场景，故不会被收进 lodItems）。
@@ -308,8 +308,8 @@ export class RendererMain {
     } else {
       console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
-    // 地图线性雾（`env_fog_controller`）：建雾 + 雾上限的唯一入口（共享环境模块；debug 由 lightManager.setFog 走同一函数）
-    applyMapFog(this.scene, data.fogParams);
+    // 地图线性雾（`env_fog_controller`）：建雾 + 雾上限的唯一入口是共享环境模块，本行只做登记
+    setSceneEnvironment(this.scene, { fog: data.fogParams ?? null });
 
     // 6. 纹理画质 manifest + 按当前画质应用（mosaic 切换数据源）
     this.mosaicManifest = data.mosaicManifest
@@ -365,7 +365,7 @@ export class RendererMain {
       }
     }
     // three.js 渲染列表缓存按旧场景几何缓存条目，换图后清掉（2026-10-04 自 debug 对齐）
-    if (this.scene?.background instanceof THREE.Texture) { this.scene.background.dispose(); this.scene.background = new THREE.Color(0x222222); } this.renderer?.renderLists?.dispose();
+    if (this.scene) clearSceneEnvironment(this.scene, { disposeBackground: true }); this.renderer?.renderLists?.dispose();
     this.pvsManager = null;
     // 天空层与天空相机随地图一起释放；雾也摘掉（换图不继承上一张图的雾）
     if (this.scene) {
@@ -373,7 +373,7 @@ export class RendererMain {
         const child = this.scene.children[i];
         if (child.userData?.isMiniatureSky) { disposeObject(child); this.scene.remove(child); }
       }
-      this.scene.fog = null;
+      // 雾已由上面的 clearSceneEnvironment 摘掉（场景环境唯一入口）
     }
     this.skyGroup = null; this.skyParams = null; this.skyCamera = null; this.skyFog = null;
     this.lodItems.length = 0; this.visibility.clear();

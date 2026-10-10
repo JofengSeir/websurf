@@ -43,7 +43,7 @@ import type { PhyBevelPiece } from './collider-debug.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
 import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
-import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js'; import { renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js';
+import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js'; import { renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js'; import { setSceneEnvironment, clearSceneEnvironment } from '../../../../src/renderer-shared/environment/scene-environment.js';
 import { LodManager } from './lod-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
@@ -431,7 +431,7 @@ export class RendererMain {
         }
       }
     }
-    if (this.scene?.background instanceof THREE.Texture) { this.scene.background.dispose(); this.scene.background = null; } this.lightManager?.setSkybox(null); this.lightManager?.setFog(null); this.bspModelScene = null;
+    if (this.scene) clearSceneEnvironment(this.scene, { disposeBackground: true }); this.bspModelScene = null;
     // 天空区组已随上面的 isMiniatureSky 分支 dispose；这里只清引用
     this.skyGroup = null;
     this.skyParams = null;
@@ -565,7 +565,7 @@ export class RendererMain {
     this.config.lod.cullDistance = this.lodManager.cullDistance;
 
     this.needsRender = true;
-    if (data.skyboxTexture) this.lightManager.setSkybox(data.skyboxTexture ?? null); this.lightManager.setFog(data.fogParams ?? null); this.onSceneLoaded?.(boundingBox.min.y);
+    setSceneEnvironment(this.scene, data.skyboxTexture ? { background: data.skyboxTexture, skyboxReflection: data.skyboxTexture, fog: data.fogParams ?? null } : { fog: data.fogParams ?? null }); this.onSceneLoaded?.(boundingBox.min.y);
     this.emitCullStats();
     return {
       diagonal: diagInfo.diagonal,

@@ -6,6 +6,10 @@
  * 入参类型从应用侧 `RuntimeConfig` 换成本文件的结构等价接口 `ConfigWithLighting`，
  * 逻辑零改动）。当前唯一消费方仍是 `apps/debug/src/renderer/renderer-main.ts`。
  *
+ * 2026-10-11（T-460 WP1）：**环境职责已移交** `environment/scene-environment.ts`——本文件不再持有
+ * 天空盒背景、反射源与雾（`setSkybox`/`setFog`/`setFogEnabled` 已删除），只保留三盏基础灯与
+ * 8 槽点光源池；`lighting.bgColor` 仍由本文件消费，写背景的动作改走共享入口。
+ *
  * 持有一场景的全部灯光：
  * - 三盏基础灯 `THREE.AmbientLight` / `THREE.HemisphereLight` / `THREE.DirectionalLight`，
  *   方向灯按球坐标（方位角 + 仰角 + 固定距离）定位，`dir.target` 留在原点；
@@ -31,7 +35,7 @@
  */
 
 import * as THREE from 'three';
-import { setReflectionEnvMap } from '../shader/lightmap-shader.js'; import { createMapFog } from './render-sky-pass.js';
+import { setSceneBackgroundColor } from './scene-environment.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 /** 颜色入参的两种形态：`number` 直接当十六进制色值，字符串按 `#rrggbb` 解析。 */
@@ -104,15 +108,6 @@ export class LightManager {
 	/** 已提取的点光源候选（世界坐标 + 颜色/强度/半径），每次 `extractPointLights` 整体替换。 */
 	private pointCandidates: PointLightCandidate[] = [];
 
-	/** 天空盒背景（`setSkybox` 设置）；非空时压过 `bgColor` 的纯色，light-manager 不再改写背景。 */
-	private skybox: THREE.Texture | null = null;
-	/** 最近一次登记的背景色：`setSkybox(null)` 用它恢复纯色背景。 */
-	private readonly bgFallback = new THREE.Color(0x000000);
-	/** 地图线性雾（`setFog` 设置）；非空时挂到 `scene.fog`，`setFogEnabled(false)` 只摘引用不销毁实例。 */
-	private fog: THREE.Fog | null = null;
-	/** 最近一次 `setFog` 的参数；`setFogEnabled` 重新挂回时复用。 */
-	private fogParams: { color: number; start: number; end: number; maxDensity: number } | null = null;
-
 	constructor() {
 		// 预分配整池：初始 intensity 0、distance 0、decay 2、visible false
 		for (let i = 0; i < MAX_POINT_LIGHTS; i++) {
@@ -160,39 +155,8 @@ export class LightManager {
 			scene.add(pl);
 		}
 
-		// 背景色不走 toColor：config 的该字段类型为 number
-		this.bgFallback.set(lc.bgColor); if (!this.skybox) scene.background = new THREE.Color(lc.bgColor);
-	}
-
-	/**
-	 * 装配天空盒背景；传 null 恢复最近一次登记的纯色（`bgFallback`）。
-	 *
-	 * 天空盒优先于 `bgColor`：非空期间 `applyLights` 与 `updateLighting` 都不再改写背景。
-	 */
-	setSkybox(texture: THREE.Texture | null): void {
-		this.skybox = texture;
-		if (this.scene) this.scene.background = texture ?? this.bgFallback;
-		// 同一张贴图也作为 `$envmap` 材质的近似反射源（冰/玻璃/水的亮部）
-		setReflectionEnvMap(texture);
-	}
-
-	/**
-	 * 设置地图线性雾；传 null 摘掉 `scene.fog`（实例与参数一并清空）。
-	 *
-	 * 与 `setSkybox` 同层：环境背景与雾都由 light-manager 统一管，渲染端不再直接写 `scene.fog`。
-	 */
-	setFog(params: { color: number; start: number; end: number; maxDensity: number } | null): void {
-		this.fogParams = params;
-		// 建雾与雾上限都走共享环境模块的唯一入口（`environment/render-sky-pass.ts` 的 `createMapFog`）
-		this.fog = createMapFog(params);
-		if (this.scene) this.scene.fog = this.fog;
-	}
-
-	/** 开关雾：关 = 摘掉 `scene.fog`；开 = 用最近一次 `setFog` 的参数（或已有实例）重新挂上。 */
-	setFogEnabled(enabled: boolean): void {
-		if (!this.scene) return;
-		if (enabled && !this.fog && this.fogParams) this.fog = new THREE.Fog(this.fogParams.color, this.fogParams.start, this.fogParams.end);
-		this.scene.fog = enabled ? this.fog : null;
+		// 背景色不走 toColor：config 的该字段类型为 number；背景的唯一写入口在 scene-environment.ts
+		setSceneBackgroundColor(scene, lc.bgColor);
 	}
 
 	/**
@@ -348,7 +312,7 @@ export class LightManager {
 			this.updateDirPosition();
 		}
 		if (params.bgColor !== undefined) {
-			this.bgFallback.set(params.bgColor); if (!this.skybox) this.scene.background = toColor(params.bgColor, null);
+			setSceneBackgroundColor(this.scene, toColor(params.bgColor, null));
 		}
 	}
 

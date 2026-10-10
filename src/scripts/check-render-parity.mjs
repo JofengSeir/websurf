@@ -73,6 +73,13 @@ const IMPL_SYMBOLS = [
   ['camera.far =', /camera\.far\s*=/],
   ['renderer.compile(', /renderer\.compile\s*\(/],
   ['padBoundingSpheres(', /padBoundingSpheres\s*\(/],
+  // T-460 WP1：环境登记唯一入口（背景 / 反射源 / 雾）。命中即失败——三端只许调 scene-environment.ts。
+  ['setReflectionEnvMap(', /setReflectionEnvMap\s*\(/],
+  ['applyReflectionEnvMap(', /applyReflectionEnvMap\s*\(/],
+  ['scene.background =', /scene\.background\s*=/],
+  ['scene.fog =', /scene\.fog\s*=/],
+  ['applyMapFog(', /applyMapFog\s*\(/],
+  ['createMapFog(', /createMapFog\s*\(/],
 ];
 
 /** B 断言：只读兼容的旧偏好键字面量 + §5 白名单「各端面板/偏好 UI」的文件。 */
@@ -92,6 +99,8 @@ const SHARED_ENTRIES = [
   ['相机口径', 'renderer-shared/camera/scene-camera.js'],
   ['呈现档', 'renderer-shared/config/render-prefs.js'],
   ['位姿入口', 'renderer-shared/camera/pose-entry.js'],
+  // T-460 WP1：环境登记唯一入口——三端必须在同一次落地里 import（漏一端即静默降级，T-458）。
+  ['环境登记', 'renderer-shared/environment/scene-environment.js'],
 ];
 
 /** E 断言：装配核第 ⑤ 步的 `mergeMain` 写成零参 ⇒ 丢弃装配核传入的 `(root, gltf)`。 */

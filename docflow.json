@@ -132,7 +132,41 @@
     }
   ],
   "cochange": [],
-  "claim": null,
+  "claim": {
+    "task": "T-460",
+    "may": [
+      "src/renderer-shared/**",
+      "apps/**",
+      "src/scripts/**",
+      "src/wasm-core/**",
+      "TODO.md",
+      "OWNER.md",
+      "AGENTS.md",
+      "docflow.json",
+      "progress/**"
+    ],
+    "must": [],
+    "base": {
+      "TODO.md": "a7c039f7bbafcde15bd4a66706e5765bbc32cb3e2f9624fe2467a895d47c560d",
+      "OWNER.md": "337acd2cb405953707fc18758fe5aa6df0c4a1e0880aace2efea922a0e1a71e2",
+      "AGENTS.md": "54e612e47e32e22fbb4939170aba50c2673c9c21475a8b44f1b5029bd6c4b6eb",
+      "docflow.json": "c3d4459319c5677d2dbac46eaf5e2aabc22868a82f934d4c316c97c7a051fcef"
+    },
+    "at": "2026-10-10T16:53:46.295Z",
+    "pins": {
+      "README.md": "8cafb89c099598507609a323531a86b39ba1c03046fc9b97c109abb645fe8cfb",
+      "CONTRIBUTING.md": "b11e2f55b65f41f46d928bca3f7a819d2b86c0f5af406c68884502cddfe4ede6",
+      "SECURITY.md": "71952253779a089c79245c22207364fcd7c6f1796c7e1c922b9c2ce6a69d6931",
+      "skills/websurf-env-traps/SKILL.md": "947c9c16d89bda84fc1c1aeb886a903e25b4992c79d9a1b324bcbba6e5bbb951",
+      ".github/ISSUE_TEMPLATE/bug_report.md": "1c04607a70bd18dd118b6771a9f0fe12ea5d777ade9bf18c1992c3a500075ed5",
+      ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
+      ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
+      ".github/PULL_REQUEST_TEMPLATE.md": "226b5d53daa15017d2c5a014a9ad64bcc197e0f484f7ad723b6c6ebdf46ce484",
+      "AGENTS.md": "54e612e47e32e22fbb4939170aba50c2673c9c21475a8b44f1b5029bd6c4b6eb",
+      "skills/agentmemory-usage/SKILL.md": "08a0e816e072599809ad0abc1e59470b4775920111a944bf340ec42aee0b2645",
+      "skills/websurf-workflow/SKILL.md": "3a845d31401522d5aa0dabcd7318b17bdd5455dc46809383457873eee641e046"
+    }
+  },
   "units": {
     "TODO.md": {
       "match": "^\\|\\s*T-\\d{3}\\s*\\|",
@@ -842,10 +876,10 @@
       "apps/game/src/renderer/renderer-main.ts:333:333": "8837935e",
       "apps/debug/src/renderer/renderer-main.ts:967:968": "58f7b886",
       "apps/viewer/src/core/scene.ts:281:281": "3a74844a",
-      "src/renderer-shared/environment/light-manager.ts:172:177": "7382b6ae",
-      "apps/game/src/renderer/renderer-main.ts:300:300": "af427f98",
-      "apps/viewer/src/core/scene.ts:152:152": "bdf46acc",
-      "src/renderer-shared/shader/lightmap-shader.ts:1965:1965": "45056480",
+      "apps/viewer/src/core/scene.ts:152:152": "d4015c1c",
+      "apps/game/src/renderer/renderer-main.ts:300:300": "58ba9bf2",
+      "apps/debug/src/renderer/renderer-main.ts:568:568": "b412664e",
+      "src/renderer-shared/shader/lightmap-shader.ts:1965:1965": "918f8107",
       "apps/game/src/panel/panel-controller.ts:630:630": "1c3c349a",
       "apps/debug/src/app.ts:1153:1153": "d756cf27",
       "apps/debug/src/app.ts:1108:1109": "04d4a8a7",
@@ -930,6 +964,14 @@
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "TODO.md",
+      "at": "2026-10-10T16:58:13.045Z",
+      "by": "agent",
+      "reason": "T-460 WP1：环境登记唯一入口落地，T-458 行的挂载点锚点改为共享入口与三端调用点（light-manager 环境方法已删除）",
+      "changed": 5,
+      "total": 116
+    },
     {
       "path": "TODO.md",
       "at": "2026-10-10T16:43:17.322Z",

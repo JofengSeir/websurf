@@ -1944,7 +1944,7 @@ export function setFogMaxDensity(v: number): void {
 // userData.vbsp_envmap）。诊断覆盖：globalThis.__vbspEnvMapAll（数字）对所有替换材质生效。
 let reflectionEnvMap: THREE.Texture | null = null;
 
-/** 设置反射源（由 LightManager.setSkybox 调用；null 清除）。 */
+/** 设置反射源（唯一调用方是 `environment/scene-environment.ts`；null 清除）。 */
 export function setReflectionEnvMap(tex: THREE.Texture | null): void {
 	reflectionEnvMap = tex;
 	(globalThis as { __vbspEnvMapReady?: boolean }).__vbspEnvMapReady = tex !== null;
@@ -1962,7 +1962,7 @@ function applyReflectionEnvMap(dst: THREE.Material, src: THREE.Material): void {
 	const tint = typeof ov === 'number' ? ov : Array.isArray(raw) && raw.length >= 3 ? Number(raw[0]) : null;
 	if (tint === null || !Number.isFinite(tint)) return;
 	const m = dst as THREE.MeshBasicMaterial;
-	if (!reflectionEnvMap) return;
+	if (!reflectionEnvMap) { noteEnvMapMissing(); return; }
 	m.envMap = reflectionEnvMap as THREE.CubeTexture;
 	// Source 的 $envmap 是**叠加**在漫反射之上的反射高光（非混入），强度按 tint 缩放后仍须保守：
 	// MixOperation + 0.66 会把整个材质混成天空色（实测 879 个材质一起变惨白）。
@@ -1970,4 +1970,25 @@ function applyReflectionEnvMap(dst: THREE.Material, src: THREE.Material): void {
 	m.reflectivity = Math.max(0, Math.min(0.5, tint * 0.35));
 	(globalThis as { __vbspEnvMapApplied?: number }).__vbspEnvMapApplied =
 		((globalThis as { __vbspEnvMapApplied?: number }).__vbspEnvMapApplied ?? 0) + 1;
+}
+
+/**
+ * `$envmap` 材质已登记、但反射源为空时的缺源告警（首次一条 + 累计计数）。
+ *
+ * 定义在文件末尾：`setReflectionEnvMap` / `applyReflectionEnvMap` 的行号被文档锚点钉住
+ * （`TODO.md` 的 T-458 行），插在中间会让锚点整体平移。
+ */
+function noteEnvMapMissing(): void {
+	const g = globalThis as { __vbspEnvMapMissing?: number; __vbspEnvMapMissingWarned?: boolean };
+	g.__vbspEnvMapMissing = (g.__vbspEnvMapMissing ?? 0) + 1;
+	if (!g.__vbspEnvMapMissingWarned) {
+		g.__vbspEnvMapMissingWarned = true;
+		console.warn('[lightmap-shader] $envmap 材质已登记但反射源为空（场景未登记天空盒）⇒ 这批材质的反射高光整体缺失');
+	}
+}
+
+/** 反射源状态只读出口（三端一致性探针与门禁读它；`globalThis.__vbspEnvMap*` 保留兼容）。 */
+export function getReflectionEnvMapState(): { ready: boolean; applied: number; missing: number } {
+	const g = globalThis as { __vbspEnvMapReady?: boolean; __vbspEnvMapApplied?: number; __vbspEnvMapMissing?: number };
+	return { ready: g.__vbspEnvMapReady === true, applied: g.__vbspEnvMapApplied ?? 0, missing: g.__vbspEnvMapMissing ?? 0 };
 }
