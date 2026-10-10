@@ -25,7 +25,8 @@ node src/scripts/close-round.mjs --done --marker <marker> --id <memoryId>
 
 1. 入口：harness 每轮注入 `AGENTS.md`，它只说「去哪取」。
 2. `(读库)` 取工作流总纲：`memory_smart_search("websurf 工作流 取活 收尾 自检")`；返回的第 1 条是总纲，按它列的主题词逐条取细则。
-3. 取活：`progress/board.jsonl`「未结项」挑一条，该行状态改 `进行中 · <agent> · <YYYY-MM-DD>`。只写「进行中」会被 `[G]` 待办同源挡下。
+2.5. **看板没有对应条目**（owner 提的新功能 / 新发现的缺陷）⇒ **先立一行 `T-###`**（下一个空闲号：`T-` + 现有最大号 +1，`progress/control-ids.json` 可查占用），写全 `type/owner/status=进行中 · <agent> · <日期>/evidence/detail/criteria`，**再**走下一步。直接改代码不立行 = 无痕改动，钩子会挡提交。
+3. 取活：**读知识库看板** `memory_smart_search("websurf 待办看板 取活")`（条目标题「待办看板（活动板）」，列全部未结项）挑一条；库不可用时读 `progress/board.jsonl`，按 `status ∉ {已记录, 已结案}` 筛。挑定后把该行的 `status` 改成 `进行中 · <agent> · <YYYY-MM-DD>`（改的是 board.jsonl，改完**必须重迁入库**，否则 `check-memory-sync` 因 sha12 失配报红）。
 4. `(门禁)` 认领：`docflow.mjs claim --task T-### --may/--must`；`claim` 之后必须真的改过 `must` 文件，`verify` 才通过。
 5. `(读库)` 取上下文：按主题召回工程文档。**召回是线索不是事实**，结论必须回源码核到 `文件:行号`；核不到就标 `[待确认]` 停下上报。
 6. 改：源码 / 配置 / 文档。`skills/**/SKILL.md`、`AGENTS.md`、根 `README/CONTRIBUTING/SECURITY`、`.github/**/*.md` 属只读类，走 `approve → 改 → sync` 三步闭环。

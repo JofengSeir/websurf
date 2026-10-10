@@ -39,6 +39,8 @@ node src/scripts/close-round.mjs --done --marker <marker> --id <memoryId>
 ## 4. 并发（同一工作区可能有别的 agent）
 
 - 提交前必跑 `git status --short`，只 `git add` 自己改的文件。`progress/board.jsonl` / `OWNER.md` 常被双方同时改，**对方新增的行原样保留**。
+
+- ⚠ **`verify` 在并发工作区会误报**：它把工作区里**别人的在途改动**也算「越界改动」（实测：他人 34 个已 staged 文件 ⇒ `verify` exit 1）。并发时以「本轮 `claim` 的 `may/must` + 自己实际改的文件」自查为准，不要因 `verify` 非 0 就回退工作区。
 - 绝不 `git checkout -- <文件>` 去「清干净」——会抹掉未提交成果。
 - `progress/memory-index.jsonl` 与 `skills/**` 是**共享可变资源，没有锁**：改了技能内容，它的台账条目立刻 `stale`（体检会红）⇒ **改完技能务必重迁条目**。
 - `git` 与 `spawnSync` 在并发下会 `EBUSY`；`docflow sync` 失败时先把工作区收干净再重试。

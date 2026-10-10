@@ -9,7 +9,7 @@
  *   只读（默认，机器清单见代码里的 DEFAULT_READONLY）：AGENTS.md、README.md、
  *        CONTRIBUTING.md、SECURITY.md、documents/norms 全篇、.github 下的 .md 模板、
  *        skills 下的 SKILL.md
- *   可编辑：TODO.md、OWNER.md、CHANGELOG.md、documents 其余各篇、progress、skills 其余
+ *   可编辑：OWNER.md、CHANGELOG.md、documents 其余各篇、progress（含看板镜像 board.jsonl）、skills 其余
  *        —— 控制层与过程记录**必须**能被 agent 写（§0.1 状态流转、§0.3 决策登记、§0.2 收尾）。
  *
  * 哈希口径：文件内容按 LF 归一后取 sha256。与体检 [F] 的「提交形态」一致——仓库
@@ -45,12 +45,12 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const LOCK = path.join(ROOT, 'docflow.json');
 /** 收尾必动、不参与「越界改动」判定的文件（§0.2 强制同提交更新它们）。 */
-const STD = ['TODO.md', 'OWNER.md', 'CHANGELOG.md', 'docflow.json'];
+const STD = ['OWNER.md', 'CHANGELOG.md', 'docflow.json', 'progress/board.jsonl'];
 /** 默认只读集：宪法层里**不随提交滚动**的那些。 */
 const DEFAULT_READONLY = ['AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md', '.github/**/*.md', 'skills/**/SKILL.md'];
 /** 候选提升为只读、但需先解决「每提交都要改它」的文件（report 会提示）。 */
 const CANDIDATES = [
-  ['TODO.md', '唯一状态源，agent 每次认领/结案都要改 ⇒ 只锁「新建/删除」而非「改行」才有意义'],
+  ['progress/board.jsonl', '看板机器可读镜像（人类可读看板在 agentmemory）；agent 每次认领/结案都要改 ⇒ 只锁「新建/删除」而非「改行」才有意义'],
   ['OWNER.md', '§0.3 规定 agent 要写 D-### 决策行 ⇒ 同上'],
 ];
 const argv = process.argv.slice(2);
