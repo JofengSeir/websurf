@@ -13,27 +13,19 @@
     "coverageMode": "hard"
   },
   "pins": {
-    "README.md": "0b89f30e8d2d28921d4fd55f5f6f03f979b1fa995f4537efa5df8b49149a9e19",
+    "README.md": "8cafb89c099598507609a323531a86b39ba1c03046fc9b97c109abb645fe8cfb",
     "CONTRIBUTING.md": "b11e2f55b65f41f46d928bca3f7a819d2b86c0f5af406c68884502cddfe4ede6",
     "SECURITY.md": "71952253779a089c79245c22207364fcd7c6f1796c7e1c922b9c2ce6a69d6931",
-    "skills/websurf-env-traps/SKILL.md": "6dfa47ded54ea649ce3f1dd041bdc7a70ff31cedf191f14eec17bcaef9d622ec",
+    "skills/websurf-env-traps/SKILL.md": "947c9c16d89bda84fc1c1aeb886a903e25b4992c79d9a1b324bcbba6e5bbb951",
     ".github/ISSUE_TEMPLATE/bug_report.md": "1c04607a70bd18dd118b6771a9f0fe12ea5d777ade9bf18c1992c3a500075ed5",
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
-    ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
-    "AGENTS.md": "564538e416caea609d266602e5b433403ee9bac6854e3563c2ee9d99dc7a8b91",
-    "skills/agentmemory-usage/SKILL.md": "25d51096301e47ce4868bb35b76e30e9a6307feb73c4c577e7c2131a95a10d6c",
-    "skills/websurf-workflow/SKILL.md": "d179dd32ed653364f8aae5ec3ab6104b2ddd1a052482f0a8cf42bf6762095755"
+    ".github/PULL_REQUEST_TEMPLATE.md": "226b5d53daa15017d2c5a014a9ad64bcc197e0f484f7ad723b6c6ebdf46ce484",
+    "AGENTS.md": "54e612e47e32e22fbb4939170aba50c2673c9c21475a8b44f1b5029bd6c4b6eb",
+    "skills/agentmemory-usage/SKILL.md": "08a0e816e072599809ad0abc1e59470b4775920111a944bf340ec42aee0b2645",
+    "skills/websurf-workflow/SKILL.md": "3a845d31401522d5aa0dabcd7318b17bdd5455dc46809383457873eee641e046"
   },
   "approvals": [
-    {
-      "path": ".github/PULL_REQUEST_TEMPLATE.md",
-      "by": "owner(本轮指示)",
-      "reason": "建立 docflow 基线",
-      "at": "2026-10-07",
-      "task": "D-docflow",
-      "consumed": true
-    },
     {
       "path": "CONTRIBUTING.md",
       "by": "owner(2026-10-10",
@@ -54,14 +46,6 @@
       "path": "TODO.md",
       "by": "owner(2026-10-10",
       "reason": "裸文件名锚点按",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "skills/websurf-env-traps/SKILL.md",
-      "by": "owner(2026-10-10",
-      "reason": "加代理事实",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -99,9 +83,17 @@
       "consumed": true
     },
     {
+      "path": "AGENTS.md",
+      "by": "Jofen",
+      "reason": "子代理独立审查发现的口径错误：doc-drift.yml 入库状态、viewer 非 single-only、归档目录描述、PR 模板漏 viewer 契约门、agentmemory §8 与 §16 矛盾及台账名/行数/CLI 路径、workflow 注册相对路径与进行中格式",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
       "path": "README.md",
       "by": "Jofen",
-      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
+      "reason": "子代理独立审查发现的口径错误：doc-drift.yml 入库状态、viewer 非 single-only、归档目录描述、PR 模板漏 viewer 契约门、agentmemory §8 与 §16 矛盾及台账名/行数/CLI 路径、workflow 注册相对路径与进行中格式",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -109,23 +101,31 @@
     {
       "path": "skills/agentmemory-usage/SKILL.md",
       "by": "Jofen",
-      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "AGENTS.md",
-      "by": "owner(2026-10-10)",
-      "reason": "补技能注册说明",
+      "reason": "子代理独立审查发现的口径错误：doc-drift.yml 入库状态、viewer 非 single-only、归档目录描述、PR 模板漏 viewer 契约门、agentmemory §8 与 §16 矛盾及台账名/行数/CLI 路径、workflow 注册相对路径与进行中格式",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
     },
     {
       "path": "skills/websurf-workflow/SKILL.md",
-      "by": "owner(2026-10-10)",
-      "reason": "去掉字面本机路径",
+      "by": "Jofen",
+      "reason": "子代理独立审查发现的口径错误：doc-drift.yml 入库状态、viewer 非 single-only、归档目录描述、PR 模板漏 viewer 契约门、agentmemory §8 与 §16 矛盾及台账名/行数/CLI 路径、workflow 注册相对路径与进行中格式",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/websurf-env-traps/SKILL.md",
+      "by": "Jofen",
+      "reason": "子代理审查：本篇只提 1 个已注册的 junction，实际有 3 个（含 websurf-workflow、agentmemory-usage），与 AGENTS.md:74「三个技能」不一致",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "by": "Jofen",
+      "reason": "上一轮锚点写成相对路径 ci-gates.yml 导致指纹失效，改为全路径 .github/workflows/ci-gates.yml:355",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -789,7 +789,9 @@
     ".github/ISSUE_TEMPLATE/bug_report.md": {},
     ".github/ISSUE_TEMPLATE/feature_request.md": {},
     ".github/ISSUE_TEMPLATE/other.md": {},
-    ".github/PULL_REQUEST_TEMPLATE.md": {},
+    ".github/PULL_REQUEST_TEMPLATE.md": {
+      ".github/workflows/ci-gates.yml:355:355": "17f00cc3"
+    },
     "AGENTS.md": {},
     "CHANGELOG.md": {},
     "CONTRIBUTING.md": {},
@@ -928,6 +930,22 @@
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "at": "2026-10-10T16:35:08.856Z",
+      "by": "codebuddy",
+      "reason": "子代理独立审查发现并复核的口径错误：doc-drift.yml 实为已入库（非仅本地保留）；viewer 并非 single-only（支持 --multi）；归档原文仍在本地 archive/（gitignored 不入库），「已删除/仅存 git 历史」双向不成立；PR 模板补 viewer 契约门；agentmemory §8 与 §16 矛盾（:3113/memories 200）、台账名改 memory-index.jsonl、.env 行数与 CLI 路径按实测更正；workflow 注册命令改 %CD% 并写明须在仓库根执行、「进行中」须带认领格式；env-traps 的 junction 由 1 个更正为 3 个",
+      "changed": 2,
+      "total": 1
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "at": "2026-10-10T16:34:49.527Z",
+      "by": "codebuddy",
+      "reason": "子代理独立审查发现并复核的口径错误：doc-drift.yml 实为已入库（非仅本地保留）；viewer 并非 single-only（支持 --multi）；归档原文仍在本地 archive/（gitignored 不入库），「已删除/仅存 git 历史」双向不成立；PR 模板补 viewer 契约门；agentmemory §8 与 §16 矛盾（:3113/memories 200）、台账名改 memory-index.jsonl、.env 行数与 CLI 路径按实测更正；workflow 注册命令改 %CD% 并写明须在仓库根执行、「进行中」须带认领格式；env-traps 的 junction 由 1 个更正为 3 个",
+      "changed": 1,
+      "total": 1
+    },
     {
       "path": "TODO.md",
       "at": "2026-10-10T16:20:50.551Z",

@@ -75,7 +75,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/`；`apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` 是构建资产（后者被 `build-dist.mjs` 消费） |
 | `src/**` | 共享层（phys / wasm-core / ts-shared / materials / renderer-shared）+ `src/scripts/**`（本地门禁与工具） |
 | `test/` | `test/maps/`（BSP 夹具）、`test/replay/`（录像样例）——两者 gitignore；`test/project/**` 为第三方参考资料 |
-| `.github/**` | `workflows/ci-gates.yml`、`workflows/deploy-pages.yml`（`doc-drift.yml` 仅本地保留）+ `.github/**/*.md` 模板（功能性配置） |
+| `.github/**` | `workflows/ci-gates.yml`、`workflows/deploy-pages.yml`、`workflows/doc-drift.yml`（**三者均入库**；`.gitignore:81` 的「已放行」注释即为此）+ `.github/**/*.md` 模板（功能性配置） |
 | `.workbuddy/memory/**` | 其他 agent 的工作记忆；只作过程线索，不作依据 |
 | `archive/**` | 迁移原文与回滚存证（gitignore）；**不作依据** |
 

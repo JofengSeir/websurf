@@ -229,7 +229,7 @@ const exists = res.results[0]?.score > 0.9;
 const exists = res.results.length > 0;
 ```
 
-**唯一权威是 append-only 台账**（`progress.jsonl`），`smart_search` 只作交叉验证。
+**唯一权威是 append-only 台账**（`progress/memory-index.jsonl`；2026-10-10 复核更正：本篇曾写作 `progress.jsonl`，该文件在仓库中不存在），`smart_search` 只作交叉验证。
 
 ---
 
@@ -350,13 +350,18 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ---
 
-## 8. 🚨 没有 HTTP 入口，只能用 MCP 工具
+## 8. 🚨 入口分层：记忆路由只在 Viewer 端口，MCP 仍是主通道
 
-实测 25+ 路径全 404（`/mcp`、`/api/memory/*`、`/rest/*`、`/openapi.json`…），
-`config/iii-http.yaml` 只有 host/port/cors，**无路由表**。
+> **2026-10-10 复核更正**：本节原写「没有 HTTP 入口、不能写 curl」，与本篇 §16 及实测冲突。
+> 实测（curl 直连，均 200/404 可复现）：
+> - `http://127.0.0.1:3113/memories?limit=1000` → **200**，返回 §16 所述结构
+>   `{limit, memories:[{id,content,title,project,files,concepts,createdAt}], …}`；
+> - `http://127.0.0.1:3111/memories` → **404**（3111 只有 `config/flags` 与 `status`）；
+> - `/mcp`、`/api/memory/*`、`/rest/*`、`/openapi.json` 等 25+ 路径仍全 404 —— 即**没有 MCP-over-HTTP**，
+>   记忆工具本身没有 HTTP 入口。
 
-⇒ **所有验收判据必须写成 MCP `memory_*` 工具调用，不能写 curl**。
-（curl 仅用于读 `/agentmemory/config/flags` 和 `/agentmemory/status` 这两个裸 REST 端点）
+⇒ 判定口径：**存在性/列表类判据可用 curl 打 `:3113/memories`（见 §16，正是权威判存在性的做法）；
+写入与检索判据仍必须写成 MCP `memory_*` 工具调用**。别用「能不能 curl」一刀切。
 
 ---
 
@@ -412,7 +417,7 @@ const ok = res.results.filter(r => r.content.includes(`/${工程名}/`));
 - [ ] 已查台账确认不是重复（或确认是真 stale 需重迁）
 
 ### 写入后
-- [ ] `progress.jsonl` 已 append（append-only，不覆盖）
+- [ ] `progress/memory-index.jsonl` 已 append（append-only，不覆盖）
 - [ ] `vectorDocuments` 计数已增加
 - [ ] `pendingVectorBackfill == 0`
 
@@ -461,9 +466,11 @@ Desktop\dsh-memory.cmd        # Ollama + agentmemory，不起 dsh
 
 # 停止
 node node_modules/@agentmemory/agentmemory/dist/cli.mjs stop   # 在 agentmemory 目录
+# 2026-10-10 复核：该路径随安装方式变化（本机 ~/.agentmemory/ 下无 node_modules，只有 bin/iii.exe）
+# ⇒ 找不到时先跑 `node src/scripts/kb-fallback.mjs probe`，按它打印的实际 CLI 路径走
 ```
 
-- 配置在 `~/.agentmemory/.env`（245 行，改完**必须重启**才生效）
+- 配置在 `~/.agentmemory/.env`（2026-10-10 实测 **262 行**；行数会随版本漂移，勿写死，改完**必须重启**才生效）
 - 数据默认在 `~/.agentmemory/data`，可用 `--data-dir` 或 `AGENTMEMORY_DATA_DIR` 改
 - **归零** = 停服务 → 挪走 `data/` → 建空目录 → 重启（配置在 `.env` 里，不会丢）
 - 重启后 API 有**短暂未就绪期**（端口已监听但 `/agentmemory/config/flags` 仍 404），**轮询到 200 才算可用**

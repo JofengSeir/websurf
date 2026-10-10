@@ -1,8 +1,8 @@
 # WebSurf-viewer — 打包产物（`dist/`）
 
 `dist/` 是唯一的产物目录，两种模式都写进这里：`npm run build:dist`（在 `viewer/` 下）产出
-**single**，`node scripts/build-dist.mjs --multi` 产出 **multi**。**纯静态产物，部署侧
-不需要 Node / Rust / wasm-pack。** 同一份产物两种用法：
+**single**，`node scripts/build-dist.mjs --multi` 产出 **multi**。**纯静态产物**：构建与部署不需要 Node / Rust / wasm-pack（本地双击预览时，若 python 缺失，
+`play.cmd` / `play.sh` 会回落到 `npx --yes serve`，那时才需要 Node）。同一份产物两种用法：
 
 | 用法 | 说明 |
 |---|---|
@@ -17,7 +17,7 @@ dist/
 ├── app.js                     single 的单文件 IIFE：内嵌 WASM(base64) + 录像 Worker（Blob URL）
 ├── styles.css
 ├── assets/maps/               示例录像（HTTP 深链演示用；file:// 下走面板文件选择）
-│   └── surf_null_4.replay
+│   └── surf_null_4.replay       （仅当本地 `test/replay/surf_null_4.replay` 存在时随 build 打包；缺失则深链不可用，file:// 下仍可用面板选文件）
 ├── serve.py                   静态服务器（python serve.py [port]，默认 8101）
 ├── play.cmd                   双击 = 起服务器 + 自动打开浏览器（Windows）★
 ├── play.sh                    同左（macOS/Linux）★
@@ -27,8 +27,8 @@ dist/
 single 与 multi 写进同一个 `dist/`，差别在 app / worker / wasm 的形态（后跑的那次会覆盖前一次）：
 
 - **single**：`app.js` 里内嵌 WASM(base64) 与录像解析 Worker；目录里没有 `worker.js`、也没有 `.wasm` 文件。
-- **multi**：另含 `worker.js`、`websurf_viewer_wasm_bg.wasm`、`wasm-embedded.js`（fetch 失败时的内嵌回退副本）
-  与 `coi-serviceworker.js`（预缓存清单与缓存名由 `scripts/build-dist.mjs` 注入）。
+- **multi**：另含 `worker.js`、`websurf_viewer_wasm_bg.wasm`、`wasm-embedded.js`（fetch 失败时的内嵌回退副本）、
+  `textures.mtz`（默认纹理包）与 `coi-serviceworker.js`（预缓存清单与缓存名由 `scripts/build-dist.mjs` 注入）。
 
 ## 双击启动（play.cmd / play.sh）
 

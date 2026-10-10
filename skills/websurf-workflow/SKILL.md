@@ -11,7 +11,8 @@ description: 本仓（WebSurf）agent 工作流循环：一轮从取活到收尾
 开轮 ① 入口：harness 每轮注入 AGENTS.md（自动）
      ② 📖 取工作流：memory_smart_search("websurf 工作流 取活 收尾 自检") → 规则总纲
         工具不可用 → node src/scripts/kb-fallback.mjs probe → L2 HTTP 读 / L3 仓库兜底
-     ③ 取活：TODO.md「未结项」挑一条 → 该行状态改「进行中」（留痕）
+     ③ 取活：TODO.md「未结项」挑一条 → 该行状态改 `进行中 · <agent> · <YYYY-MM-DD>`（留痕）
+        （⚙️ 只写「进行中」会被 `check-doc-drift` 的 `[G]` 待办同源硬挡）
      ④ 认领：node src/scripts/docflow.mjs claim --task T-### --may/--must ⚙️
      ⑤ 📖 取上下文：按主题召回工程文档（线索；事实回源码核到 文件:行号）
      ⑥ 改：源码/配置/文档；只读 md 要先 approve ⚙️
@@ -71,7 +72,8 @@ harness 的扫描根是这四个（源码 `dsh-skill-filesystem/lib/index.js`）
 **`<仓库>/skills/` 不在扫描根里** —— 它是内容源头（唯一真相），必须被注册进上面任一根才能被 `skill()` 找到：
 
 ```cmd
-mklink /J "%USERPROFILE%\.agents\skills\websurf-workflow" "..\skills\websurf-workflow"
+mklink /J "%USERPROFILE%\.agents\skills\websurf-workflow" "%CD%\skills\websurf-workflow"
+rem   必须在**仓库根**执行：`..\skills\...` 会按当前目录解析，从别的目录跑会建出空壳 junction
 ```
 
 三个技能各建一次（`agentmemory-usage` / `websurf-env-traps` / `websurf-workflow`）。注册是机器本地行为，不随仓库走；新机器上先注册再开工。

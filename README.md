@@ -26,7 +26,7 @@ npm run dev            # python ../../src/serve.py 8080 .
 | 入口 | 做什么 | 端口 |
 |---|---|---|
 | `apps/<app>/dev.cmd` | **全链条**：工具链自检 → 依赖 → 强制重编译 WASM 与 TS → 跑本工程测试门 → 起 dev 服务并打开浏览器 | debug 8080 / game 8090 / viewer 8100 |
-| `apps/<app>/build.cmd` | **重编译并打包**：工具链自检 → 依赖 → WASM → 契约检查 → TS → `dist/`（`[single\|multi]`，viewer 为 single-only） | — |
+| `apps/<app>/build.cmd` | **重编译并打包**：工具链自检 → 依赖 → WASM → 契约检查 → TS → `dist/`（`[single\|multi]`，三端均支持；viewer 亦支持 `--multi`） | — |
 | `apps/<app>/start.cmd` | **只启动**，不做任何构建：服务已打包的 `dist/`（缺 `dist/` 会提示先跑 `build.cmd`）；viewer 存在 `dist\play.cmd` 时转给它 | debug 8081 / game 8091 / viewer 8101 |
 | `apps/<app>/stop.cmd` | **停止服务**：按端口（dev + start 两个）找 LISTENING 进程，只杀 python（不误伤同端口的外部程序）；可选参数指定单端口。dev 服务的独立最小化窗口（标题 `WebSurf-<app> dev server :<port>`）关窗或本脚本均可停止 | debug 8080+8081 / game 8090+8091 / viewer 8100+8101 |
 
