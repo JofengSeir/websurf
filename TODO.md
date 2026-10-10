@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段迁入 agentmemory，并把其 `T-###` 登记进 `progress/control-ids.json`（**未结项永不分卷**；2026-10-07、2026-10-09 各触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含已归档的历史行（`progress/control-ids.json` 的 `archived.t`）；只写数字部分）**：viewer **172**；game **240**；debug **325**；shared **458**；取证项 **508**；跨区/文档治理 **640**。分配新条目后同步更新本行。
+> **下一可用号（实测，含已归档的历史行（`progress/control-ids.json` 的 `archived.t`）；只写数字部分）**：viewer **173**；game **240**；debug **325**；shared **461**；取证项 **509**；跨区/文档治理 **641**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -26,13 +26,13 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（81 条）
+## 未结项（87 条）
 ### 待裁决（3）
 - **T-628** 规范 §2.3 的 `dist/play.cmd` 断言与实现不符（仅 viewer 产出，debug/game 不产出）　`repo`
 - **T-638** 记忆库检索质量回归未达任务书 V3 的 20/20（实测 17/20 rank-1、19/20 top-3）　`repo`
 
 - **T-631** 底层 GLB：三端 `collect_pakfile_models` 的 `case_insensitive_model_names` 跨端不同　`shared`
-### 待修（74）
+### 待修（79）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
@@ -111,9 +111,15 @@
 - **T-632** 剔除距离三套口径：debug 用私有公式、game/viewer 用共享 `VisibilityController`　`shared`
 - **T-633** PVS 开关三端不同源：debug 恒 0、game 硬编码 `false`、viewer 追随共享档　`shared`
 - **T-636** 合并归一钩子 `normalizeGroup` 只有 debug 注入　`shared`
-### 进行中（2）
+- **T-172** 画质切换遍历根三端不同：game 整场景、debug/viewer 不含天空组　`viewer`
+- **T-458** `$envmap` 反射源缺唯一挂载入口：三端各自接线，漏调即静默降级　`shared`
+- **T-459** 呈现档存 localStorage（按 origin 隔离）⇒ 三端生效档可静默分叉　`shared`
+- **T-508** 三端逐像素残余 71 px 差异未定位（x532..540 / y435..451）　`shared`
+- **T-640** debug 画布尺寸与水平视野与其他两端不同源　`repo`
+### 进行中（3）
 - **T-630** viewer 主模型**从未**被分块合并（`mergeIntoNewRoot` 是死代码）　`viewer`
 - **T-634** 两处「编译得过、跑起来静默退化」：debug 预编译早于挂载地图根 / 无 3D 天空盒时 viewer 清屏色不同　`shared`
+- **T-460** 三端渲染一致性修复（任务书：覆盖 T-457/T-631/T-632/T-633/T-636 与本批新增）　`shared`
 
 ### 已取证待立项（2）
 - **T-109** 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正　`viewer`
@@ -215,3 +221,9 @@
 | T-637 | websurf 过程记录（`progress/` 24 篇）迁入 agentmemory 并归档（迁移任务书 `.plan/websurf-migration-taskbook.md` §十一 阶段 0–3） | 工具·流程 | repo | 已结案 | progress/memory-index.jsonl（127 行台账 + 24 篇归档 sha256 全一致）；提交 e4080e1（阶段0–1/d395525（指针）/d79a749（迁移本体）；V3 检索回归未达 20/20 已转 T-638 | src/scripts/check-memory-sync.mjs | 判据：@BT@node src/scripts/check-memory-sync.mjs@BT@ ⇒ @BT@stale=0 orphan=0 missing=0 leak=0@BT@（V1）且 @BT@--keys@BT@ 的 @BT@markers==entries@BT@（V7）；@BT@--rerun@BT@ ⇒ @BT@new_writes=0@BT@（V2）；MCP @BT@memory_smart_search@BT@ 遍历命中内容断言 marker 精确出现（禁用分数与命中数）⇒ 跨工程同名族 20 条 rank-1 20/20（V3）；@BT@node src/scripts/check-doc-drift.mjs@BT@ 连跑 5 次不再抛 EBUSY 且 [G]/[O] 不劣于基线（V5）；@BT@archive/memory/**@BT@ 的 @BT@.meta.json@BT@ sha256 与源文件全一致（V6） | — |
 | T-638 | 记忆库检索质量：原 20 条探针未达 20/20（实测 rank-1 17/20）——经查 3 处未命中全是**无效探针**（查询词属别的文件），另证得**逐字片段取自 7 KB 大块时 rank-1 仅 4/6**（粗块稀释短查询） | 工具·流程 | repo | 待裁决 | 见详情 | progress/memory-index.jsonl | 判据：按 @BT@OWNER.md@BT@ D-114 选定方案后复跑同一探针集 ⇒ 语料内措辞 rank-1 **20/20** 且 @BT@check-memory-sync@BT@ 的 @BT@cross_project_leak=0@BT@；现状 17/20。**D-113 的 (b) 扩索引条目已实施并实测无效**（17/20 → 17/20，索引条目 539 KB） | — |
 | T-639 | `OWNER.md` 超 §0.4 的 16 KB 上限，已决行分卷被体检 [G]⑥ 阻塞（`D-###` 存在性只读 `OWNER.md`，分卷后全仓引用会变悬空） | 工具·流程 | repo | 已结案 | agentmemory（progress/owner/2026-Q4.md） | progress/memory-index.jsonl | 判据：① 体检把 @BT@progress/owner/**@BT@ 计入 `D-###` 存在性来源（对称于 `T-###` 读 @BT@progress/board/archive-*.md@BT@）② 已决行按季度分卷入 @BT@progress/owner/@BT@ 并登记 @BT@progress/index.md@BT@ ⇒ @BT@node src/scripts/check-doc-drift.mjs@BT@ 不再报「OWNER.md 已 X KB（上限 16 KB）」且 `D-###` 悬空为 0 | — |
+| T-172 | 画质切换遍历根三端不同：game 传整个 `scene`（含天空组）、debug 传 `bspModelScene`、viewer 传 `modelRoot` ⇒ `mini` 档下天空区只有 game 被降清 | 缺陷 | viewer | 待修 | `apps/game/src/renderer/renderer-main.ts:333`（`applyTextureQuality(this.scene, …)`）、`apps/debug/src/renderer/renderer-main.ts:967-968`（`bspModelScene`）、`apps/viewer/src/core/scene.ts:281`（`modelRoot`） | progress/memory-index.jsonl | 判据：同一 `mini` 档下三端画质切换的 `mapCount` / manifest 命中数相同（含天空组）；遍历根收进共享入口后三端不再各传根 | 新 |
+| T-458 | `$envmap` 反射源缺唯一挂载入口：debug 经 `LightManager.setSkybox`、game 直接调、viewer 零调用 ⇒ 漏调即静默降级（消费端守卫 `if (!reflectionEnvMap) return`） | 缺陷 | shared | 待修 | 三端挂载点：`src/renderer-shared/environment/light-manager.ts:172-177`（debug）、`apps/game/src/renderer/renderer-main.ts:300`、`apps/viewer/src/core/scene.ts:152`（只写 background，全文件零 `setReflectionEnvMap`）；静默守卫 `src/renderer-shared/shader/lightmap-shader.ts:1965` | progress/memory-index.jsonl | 判据：三端只经共享环境入口登记 ⇒ `node src/scripts/check-render-parity.mjs` 的 [A] 新增 `setReflectionEnvMap(` 且 `apps/**` 0 命中；三端 `__vbspEnvMapReady` 同值、`__vbspEnvMapApplied` 相同 | 新 |
+| T-459 | 呈现档 `vbsp:renderPrefs` 存 localStorage（按 origin 隔离），写入方仅 game 写 lighting 段 ⇒ 三端生效档可静默分叉（同机同图不同亮度/γ） | 缺陷 | shared | 待修 | `src/renderer-shared/config/render-prefs.ts:33,119-135`（键与读写）；写入方 `apps/game/src/panel/panel-controller.ts:630`（整个 `lighting`）、`apps/debug/src/app.ts:1153`（只 `textureQuality`）、viewer 零写入 | progress/memory-index.jsonl | 判据：深链 `?prefs=default` 下三端控制台 `[render-prefs] 生效：…` 行逐字相同；任一端档非默认时脚本报红并打印三行（D1=A：档指纹 + 深链覆盖） | 新 |
+| T-460 | 三端渲染一致性修复（任务书：单一入口 + 口径统一 + 状态断言门禁；覆盖 T-457/T-631/T-632/T-633/T-636 与本批新增三项） | 缺陷 | shared | 进行中 · dsh-agent · 2026-10-11 | 见详情 | progress/memory-index.jsonl | 判据：每 WP 收口时三端 `npm run typecheck` + `build:ts` exit 0、`node src/scripts/check-render-parity.mjs` exit 0、`node src/scripts/check-doc-drift.mjs` A–P 全 0；三端 prefs/envmap/cull/pvs/merge 五组状态逐字段相同；画面达标由 owner 目视确认（不以截图作判据） | 新 |
+| T-508 | 三端逐像素残余差异 71 px 未定位（反射强度归零 A/B 后 game 与 viewer 仍差，bbox x532..540 / y435..451，最差 157） | 缺陷 | shared | 待修 | 一次性 CDP 探针实测（三端同图同位姿、反射项归零后残余均值差 0.007/255）；与 T-455「天空区两模式不确定」是否同源未知 | progress/memory-index.jsonl | 判据：定位到具体材质/端并由三端状态断言解释；或判定与 T-455 同源后并入该条 | 新 |
+| T-640 | debug 画布尺寸与水平视野与其他两端不同源：debug canvas 在 `#previewArea` 内（实测 956×676），game/viewer 为整窗（1256×708） | 缺陷 | repo | 待修 | `apps/debug/web/index.html`（`<canvas id="preview">` 在 `#previewArea` 内）、`apps/debug/src/app.ts:1108-1109` → `apps/debug/src/renderer/renderer-main.ts:798` 写 `camera.aspect`；game/viewer 为整窗画布 | progress/memory-index.jsonl | 判据：视口来源落入共享只读探针的 `viewport` 字段且与实际一致（D3：只声明不改布局）；跨端像素比对前统一画布尺寸 | 新 |
