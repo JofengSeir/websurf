@@ -1,6 +1,6 @@
-# skills/third-party/ 下的第三方技能（vendored）
+# skills/agentmemory-usage/ 下的第三方技能（vendored）
 
-本目录（`skills/third-party/`）**只放上游技能**；本仓自建技能在上一层（`skills/websurf-workflow/`、`skills/websurf-env-traps/`、`skills/agentmemory-usage/`）。判据看是否在本文件的「官方技能清单」里：
+本目录（`skills/agentmemory-usage/`）**同时放着两类东西**：本仓自建的守则 `SKILL.md` / `REFERENCE.md`（顶层两个文件），以及上游 agentmemory 官方技能 17 篇（下面那些子目录）+ `_shared/`。判据看是否在本文件的「官方技能清单」里：
 
 | 类别 | 归属 | 可否改动 | 是否进记忆库 |
 |---|---|---|---|
@@ -13,7 +13,7 @@
 
 ```bash
 # 只换用户名段；模式刻意写成 Users/<…> 的字形，避免本文件自身触发 [P]
-git grep -l 'Users/' -- skills/third-party | xargs sed -i 's|Users/[A-Za-z0-9][A-Za-z0-9._-]*|Users/<user>|g'
+git grep -l 'Users/' -- skills/agentmemory-usage | xargs sed -i 's|Users/[A-Za-z0-9][A-Za-z0-9._-]*|Users/<user>|g'
 ```
 
 实测改写 8 行 / 2 个文件（`handoff/EXAMPLES.md`、`recap/EXAMPLES.md`），其余 29 个文件与上游逐字节一致。**升包后必须重跑这一条**，否则 `check-doc-drift` 的 `[P]` 会红。

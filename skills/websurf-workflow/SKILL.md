@@ -59,7 +59,7 @@ RIGHT：体检与提交串成一步（`&&`），红灯即终止；本仓出过�
 
 - `websurf-env-traps`：本仓环境与流程陷阱，开工前读。
 - `agentmemory-usage`：**本仓记忆库守则**（判定口径 / 红线 / 配置坑），用记忆库前先读。
-- `memory-discipline`、`agentmemory-mcp-tools`：上游官方技能（在 `skills/third-party/`）。
+- `memory-discipline`、`agentmemory-mcp-tools`：上游官方技能（在 `skills/agentmemory-usage/`）。
 
 ## Reference
 

@@ -4,7 +4,7 @@ description: 使用本地 agentmemory 记忆库（MCP）时必须遵守的规则
 user-invocable: false
 ---
 
-本技能是本仓**唯一**的 agentmemory 使用守则。`skills/third-party/` 下的是上游官方技能（原样复制、不得就地修改，见 `skills/third-party/THIRD-PARTY.md`）。
+本技能是本仓**唯一**的 agentmemory 使用守则。`skills/agentmemory-usage/` 下的是上游官方技能（原样复制、不得就地修改，见 `skills/agentmemory-usage/THIRD-PARTY.md`）。
 
 ## Quick start
 
@@ -60,7 +60,7 @@ RIGHT：先按权威接口确认，再决定写不写（重复条目会稀释召
 
 - `websurf-workflow`：一轮工作流的循环骨架（收尾三步走、四道门禁）。
 - `websurf-env-traps` §11：本机记忆栈的启动、端口与判定。
-- `skills/third-party/`：上游官方技能（`memory-discipline`、`remember` / `recall` / `forget`、`agentmemory-mcp-tools` / `-config` / `-rest-api` / `-architecture` / `-hooks` / `-agents` 等），原样复制、不改。
+- `skills/agentmemory-usage/`：上游官方技能（`memory-discipline`、`remember` / `recall` / `forget`、`agentmemory-mcp-tools` / `-config` / `-rest-api` / `-architecture` / `-hooks` / `-agents` 等），原样复制、不改。
 
 ## Reference
 

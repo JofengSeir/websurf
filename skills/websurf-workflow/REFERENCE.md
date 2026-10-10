@@ -69,7 +69,7 @@ mklink /J "%USERPROFILE%\.agents\skills\websurf-workflow" "%CD%\skills\websurf-w
 mklink /J "%USERPROFILE%\.agents\skills\websurf-env-traps" "%CD%\skills\websurf-env-traps"
 ```
 
-`skills/` 下的**每个**技能目录都要各建一次，含 `skills/third-party/` 下的全部官方技能 17 篇（路径是 `skills/third-party/<name>`；`_shared/` 不是技能，不建）；三篇项目技能（`websurf-workflow`、`websurf-env-traps`、`agentmemory-usage`）也各建一次。注册是机器本地行为，不随仓库走；新机器上先注册再开工。
+`skills/` 下的**每个**技能目录都要各建一次，含 `skills/agentmemory-usage/` 下的全部官方技能 17 篇（路径是 `skills/agentmemory-usage/<name>`；`_shared/` 不是技能，不建）；三篇项目技能（`websurf-workflow`、`websurf-env-traps`、`agentmemory-usage`）也各建一次。注册是机器本地行为，不随仓库走；新机器上先注册再开工。
 
 ## 7. 相关脚本
 
