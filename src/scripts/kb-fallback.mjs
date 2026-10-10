@@ -55,7 +55,7 @@ async function probe() {
   console.log('');
   console.log('该走哪条：');
   if (viewer || rest) {
-    console.log('  ① L1 可用 → 正常走 memory_* 工具（约定见 skills/agentmemory-usage/SKILL.md）。');
+    console.log('  ① L1 可用 → 正常走 memory_* 工具（通用用法见官方技能 memory-discipline / agentmemory-mcp-tools；本仓写入约定见 skills/websurf-workflow/REFERENCE.md）。');
     console.log('  ② L1 不可用但服务在 → 读用 GET ' + VIEWER + '；写按 plan 的 JSON 调 MCP，或等服务恢复回放。');
   } else {
     console.log('  ① 先起服务：' + (starter || '找到 start-agentmemory.cmd 后运行') + '，然后重跑 probe。');
