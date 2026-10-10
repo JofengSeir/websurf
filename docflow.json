@@ -21,8 +21,8 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
     ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
     ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
-    "AGENTS.md": "340752fcbdb843606e2fcaa263a27c370371cd1770470828db0a1c236c13c03c",
-    "skills/agentmemory-usage/SKILL.md": "7d41a28a8732e12aa02d5d03a2ac51cd35a917b1836d03b8fe79f7e158fabac8"
+    "AGENTS.md": "31d48ef411490208cbe3aaa23142e952b0c838a15d7bed0dc4310a60bddb9179",
+    "skills/agentmemory-usage/SKILL.md": "a77cb8a1806e48f645df35df43fe147f9a38db3d266f94d6a9bbc8da75d76e09"
   },
   "approvals": [
     {
@@ -82,23 +82,7 @@
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
-      "by": "owner(2026-10-10",
-      "reason": "补无库时的重建路径",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "skills/websurf-env-traps/SKILL.md",
-      "by": "owner(2026-10-10)",
-      "reason": "记忆库引用改散文表述",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "skills/agentmemory-usage/SKILL.md",
       "by": "owner(2026-10-10)",
       "reason": "记忆库引用改散文表述",
       "at": "2026-10-10",
@@ -117,6 +101,22 @@
       "path": "TODO.md",
       "by": "owner(2026-10-10",
       "reason": "裸文件名锚点按",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "AGENTS.md",
+      "by": "owner(2026-10-10",
+      "reason": "接入",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/agentmemory-usage/SKILL.md",
+      "by": "owner(2026-10-10",
+      "reason": "加工具不可用时的兜底小节",
       "at": "2026-10-10",
       "task": "",
       "consumed": true

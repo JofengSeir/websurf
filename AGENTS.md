@@ -30,12 +30,12 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 **取法**：marker 是**标识**不是查询串（同篇兄弟条目共享前缀 token，按 marker 搜会被稀释）——用上表的主题词搜。
 **取回内容只作线索**：落结论仍须回当前源码核到 `文件:行号`。
 
-**本机没有记忆库时（例如全新克隆）——不要停，按此重建工作流**：
-1. 读两篇技能：`skills/websurf-env-traps/SKILL.md`（环境与流程陷阱）、`skills/agentmemory-usage/SKILL.md`（用库规则）；
-2. **门禁脚本即规则的可执行定义**：`check-doc-drift.mjs` 的 A–P 段就是文档规则，`docflow.json` 就是只读/认领/审批规则，`check-memory-sync.mjs` 就是台账约定；
-3. 控制层照常：`TODO.md` 取活、`OWNER.md` 登记待决；
-4. 台账按 `progress/memory-index.jsonl` 现有行的格式继续追加；`progress/control-ids.json` 是体检 `[G]` 判定「ID 已存在」的来源；
-5. 需要完整规则文本时：按上面 2–3 重新总结项目，或从 git 历史取旧版 `AGENTS.md`（本仓历史里有）。
+**本机没有记忆库 / MCP 工具不可用时——不要停**：先跑 `node src/scripts/kb-fallback.mjs probe`，按它给出的那层走。三层兜底：
+1. **L1（正常）**：`memory_*` 工具可用 ⇒ 按上表召回、按 §5 写进展。
+2. **L2（服务在、工具不在）**：读用 `GET http://127.0.0.1:3113/memories?limit=1000`（判存在性比检索可靠）；写不了先落 L3 队列。服务没起就先跑 `start-agentmemory.cmd`（probe 会打印实际路径）。
+3. **L3（只有仓库）**：规则从本文件 + `skills/**` + **门禁脚本**重建——`check-doc-drift.mjs` 的 A–P 段就是文档规则、`docflow.json` 就是只读/认领/审批规则、`check-memory-sync.mjs` 就是台账约定；控制层照常（`TODO.md` 取活、`OWNER.md` 登记待决）。
+4. **当轮进展不许丢**：写不进知识库就用 `node src/scripts/kb-fallback.mjs queue --marker <marker> --note <文本>` 落 `progress/pending-kb.jsonl`；恢复后 `plan` 打印可直接调用的 `memory_save` 参数，逐条回放并补台账，再 `done --marker <marker>` 删除。
+5. 需要完整规则文本时：按 3 重新总结项目，或从 git 历史取旧版 `AGENTS.md`（本仓历史里有）。
 
 ---
 
@@ -57,7 +57,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 |---|---|
 | 根 `*.md` | `AGENTS.md`（本文件）｜ `TODO.md`（唯一待办与状态源）｜ `OWNER.md`（owner 决策队列）｜ `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`（git 仓库项目文档） |
 | `documents/` | **不存在**：原 47 篇工程/共享层/架构文档 + 3 篇规范已全部迁入 agentmemory，原文归档 `archive/memory/2026-10/` |
-| `progress/` | **2 个机器可读文件**：`memory-index.jsonl`（迁移台账 = manifest，`check-memory-sync.mjs` 的权威输入）、`control-ids.json`（控制层 ID 索引，门禁 `[G]` 判定「ID 已存在」的唯一来源） |
+| `progress/` | **3 个机器可读文件**：`memory-index.jsonl`（迁移台账 = manifest，`check-memory-sync.mjs` 的权威输入）、`control-ids.json`（控制层 ID 索引，门禁 `[G]` 判定「ID 已存在」的唯一来源）、`pending-kb.jsonl`（MCP 不可用时的待补写队列，见 §0 兜底）|
 | `skills/**` | 两篇 skill：`skills/websurf-env-traps/SKILL.md`（开工前先读）、`skills/agentmemory-usage/SKILL.md`（用记忆库前先读）。仓库是唯一源头；本机 junction 链进 `~/.agents/skills/`，故 `skill` 工具可直接解析；内容同时已入库 |
 | `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/`；`apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` 是构建资产（后者被 `build-dist.mjs` 消费） |
 | `src/**` | 共享层（phys / wasm-core / ts-shared / materials / renderer-shared）+ `src/scripts/**`（本地门禁与工具） |
@@ -78,6 +78,7 @@ node src/scripts/check-doc-drift.mjs [文件]        # A–P 全 0（行数声�
 node src/scripts/check-memory-sync.mjs             # 记忆库同步：stale / orphan / archive_mismatch / missing / leak 全 0（台账 progress/memory-index.jsonl）
 node src/scripts/check-memory-sync.mjs --keys      # markers == entries
 node src/scripts/docflow.mjs check                 # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
+node src/scripts/kb-fallback.mjs probe           # 知识库可用性：L1 工具 / L2 HTTP / L3 仓库兜底，并列出待补写条目
 node src/scripts/check-board-touch.mjs --staged    # 软提示：改了代码却没动 TODO.md
 grep -n -E "据文档|据注释|原设计|历史上|应该|可能|大概|似乎|推测" <新稿>   # 0 命中
 cargo check -p websurf-phys                        # 或工程内 cargo check
@@ -124,6 +125,7 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 - `src/scripts/check-render-parity.mjs`
 - `src/scripts/check-shared-sync.mjs`
 - `src/scripts/docflow.mjs`
+- `src/scripts/kb-fallback.mjs`
 - `src/scripts/lib/dist-pack.mjs`
 - `src/scripts/lib/wasm-api-contract.mjs`
 - `src/scripts/sync-default-textures.mjs`

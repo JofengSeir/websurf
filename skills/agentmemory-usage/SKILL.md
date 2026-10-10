@@ -495,3 +495,13 @@ curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:3113/memories?limit=
 
 > 推论：**「删除」也要用真 id**。台账里的 id 若来自 `memory_export`（审计重放），对它调
 > `memory_governance_delete` 可能无效，从而留下删不掉的孤儿并占住同一个首行——这正是本仓踩过的坑。
+
+## 工具不可用时（兜底）
+
+MCP `memory_*` 没注册时**不要停**，先跑 `node src/scripts/kb-fallback.mjs probe`（本仓自带）：
+
+- **读**：`GET http://127.0.0.1:3113/memories?limit=1000` —— 判存在性比检索可靠（检索只暴露 `title`）。
+- **写**：写不进就 `node src/scripts/kb-fallback.mjs queue --marker <marker> --note <文本>` 落 `progress/pending-kb.jsonl`；
+  恢复后 `plan` 打印可直接调用的 `memory_save` 参数 → 逐条写回 → 补 `progress/memory-index.jsonl` 台账 → `done --marker <marker>` 删除。
+- **纯仓库兜底**：规则从 `skills/**` + 门禁脚本重建（`check-doc-drift.mjs` 的 A–P 即文档规则、`docflow.json` 即只读/认领规则）；控制层照常。
+- **服务没起**：跑 `start-agentmemory.cmd`（probe 会打印实际路径）。
