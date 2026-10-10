@@ -39,7 +39,7 @@
 4. **认领即锁结束条件**：`node src/scripts/docflow.mjs claim --task T-### --may <本次会动的文件> [--must <必须动的文件>]`——把「这次允许改什么、必须改什么」写成契约；收尾跑 `node src/scripts/docflow.mjs verify`（`must` 未改、越界改动、只读漂移都会拦）。一次只允许一条认领，换任务先 `release`。
 5. **先读本模块文档，再读码定位**：先看本模块在 `documents/` 的文档（定位 / 边界 / 时序 / 已知缺口）拿上下文，再按导出项与调用点读码；**事实一律以代码为准**，结论必须落到 `文件:行号`，落不到就标 `[待确认]` 并停下上报（§1）。**记忆库里的是线索不是事实**：用 `memory_smart_search` 定位时**必须先声明工程作用域**（查询词带工程名），并校验命中结果的 `source` 前缀是否属本工程——不符即弃用、加工程名重查（agentmemory 是单实例共享库，跨工程同名文件会串台）；落结论仍须回原文核到 `文件:行号`。
 6. **验收判据（必填）**：判据写在 `TODO.md` 总表的「判据」列，内容 = **可执行命令 + 期望输出**；详情页有判据就照它，没有就**先补判据再动手**——没有判据的活不开工。
-7. **收尾（同一提交）**：更新该行 `状态`（→ `已结案`）与 `证据`（`文件:行号`），提交信息写 `T-###`；文档增删 ⇒ 同提交更新 `documents/index.md`（体检 `[G]⑧` 硬查覆盖）；用户可见变化 ⇒ 同提交更新 `CHANGELOG.md`；**该条在 `documents/**` 有「已知缺口」段落 ⇒ 同提交打上 ~~原断言~~ +「已消除（YYYY-MM-DD）：原因」（体检 `[L]` 硬查，删掉整段也算合格）；结案前先用「证据」文件本身复核断言是否真的不成立——判据的 `-- <路径>` 指错目录会导致假结案（体检 `[M]` 拦）**；跑 §5 自检；进展按 §0.1 第 6 条写进「当前写入目标」那一卷，并在 `progress/index.md` 的索引补一行（§7.1 已冻结）。 **只读 md 不得直接改**（清单见 `node src/scripts/docflow.mjs report`：`documents/norms/**`、`README`、`.github/**/*.md`、`skills/**/SKILL.md` 等）：须 owner 先 `approve --path … --by … --reason …`、改完 `sync` 重钉；新建/删除只读类文件同理。只读文件若在记忆库留有 slot 副本，那是**派生投影**，权威仍是仓库文件（slot 不得作唯一副本）；规则 / 宪法 / 待办类**本就不入库**（见 `skills/agentmemory-usage` 红线 R3）。
+7. **收尾（同一提交）**：更新该行 `状态`（→ `已结案`）与 `证据`（`文件:行号`），提交信息写 `T-###`；文档增删 ⇒ 同提交更新 `documents/index.md`（体检 `[G]⑧` 硬查覆盖）；用户可见变化 ⇒ 同提交更新 `CHANGELOG.md`；**该条在 `documents/**` 有「已知缺口」段落 ⇒ 同提交打上 ~~原断言~~ +「已消除（YYYY-MM-DD）：原因」（体检 `[L]` 硬查，删掉整段也算合格）；结案前先用「证据」文件本身复核断言是否真的不成立——判据的 `-- <路径>` 指错目录会导致假结案（体检 `[M]` 拦）**；跑 §5 自检；进展按 §0.1 第 6 条写进「当前写入目标」那一卷，并在 `progress/index.md` 的索引补一行（§7.1 已冻结）。 **只读 md 不得直接改**（清单见 `node src/scripts/docflow.mjs report`：`documents/norms/**`、`README`、`.github/**/*.md`、`skills/**/SKILL.md` 等）：须 owner 先 `approve --path … --by … --reason …`、改完 `sync` 重钉；新建/删除只读类文件同理。只读文件若在记忆库留有 slot 副本，那是**派生投影**，权威仍是仓库文件（slot 不得作唯一副本）；规则 / 宪法 / 待办类**本就不入库**（见 `skills/agentmemory-usage` 红线 R3），因此 **`docflow sync --to-slot` 不予实现**：R3 下这类文件本就不该有 slot 副本，权威与同步只走仓库侧（`docflow.json:pins` + `progress/memory-index.jsonl` 台账）。
 
 ### 0.3 需要真人拍板的事 → 根 `OWNER.md`
 
@@ -163,7 +163,7 @@ cd apps/<app> && npm run typecheck                # TS 侧
 > **提交与体检必须串成一步、红灯即终止**：先跑体检，非 0 就停（不要用「无论成败都继续」的链式命令把体检和 `git commit` 连在一起）。2026-10-07 两次红灯入库都出在这个写法上。
 
 **两条新增闸门（2026-10-10，迁移任务书 §十一 1.4）**：
-① **记忆库同步** —— `node src/scripts/check-memory-sync.mjs`：台账 `progress/memory-index.jsonl` 里每个 marker 的 sha12 必须与磁盘源文件一致（源变 ⇒ 记忆条目已陈旧），迁出的源须标 `retired`，迁出范围内不得漏迁（`missing`）；哈希两套并用（raw / LF 归一 + 去 BOM），与 `docflow.json:pins` 同口径、不另造第三套。
+① **记忆库同步** —— `node src/scripts/check-memory-sync.mjs`：台账 `progress/memory-index.jsonl` 里每个 marker 的 sha12 必须与磁盘源文件一致（源变 ⇒ 记忆条目已陈旧），迁出的源须标 `retired`，迁出范围内不得漏迁（`missing`），**`cross_project_leak` 必须为 0**（marker 项目前缀，§十二 项目隔离）；哈希两套并用（raw / LF 归一 + 去 BOM），与 `docflow.json:pins` 同口径、不另造第三套。**可判定口径（§5.3 第 8 条）**：一条内容可不可用，判据是**它的 sha 是否与仓库当前文件一致**，**不是**它「来自文档还是来自记忆库」——§1 B2 禁的是把 git 历史里的旧文档当依据，不是禁引用文档。
 ② **检索质量回归** —— 无脚本，用 MCP 工具跑：`memory_smart_search` 的命中结果**必须遍历内容断言 marker 精确出现**（§0.2 第 5 条口径：分数与命中数都不能判存在性），跨工程同名族 20 条 rank-1 需 **20/20**。
 
 **全量闸门**：全仓漂移体检（A–P）全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；README ↔ `documents/index.md` 口径一致；`check-memory-sync.mjs` 全 0（stale / orphan / missing / leak）。

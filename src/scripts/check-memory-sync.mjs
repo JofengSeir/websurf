@@ -11,7 +11,8 @@
  *   stale   台账 marker 里的 sha12 与磁盘源文件不符 ⇒ 源变了、条目陈旧
  *   orphan  台账有、磁盘无：未标 `retired` 计 orphan（真丢源），标了计 retired（有意迁出）
  *   missing 迁出范围内的 md 在台账里没有 source 记录 ⇒ 漏迁
- *   leak    台账里出现迁移范围外的 source（排除前缀 / 非本项目 marker）⇒ 越界入库
+ *   leak    台账里出现排除前缀的 source（`.cargo-home` / `node_modules` / `test/project`）⇒ 越界入库
+ *   xproj   marker 的项目前缀不是本项目 ⇒ **跨项目串台**（agentmemory 单实例共享库，无自动隔离）
  *
  * 口径：哈希两套并用以兼容检出形态——`sha256(raw)` 或 `sha256(LF 归一 + 去 BOM)`，
  * 与 `docflow.json:pins` 的 LF 归一口径同源（**不另造第三套**）。
@@ -72,7 +73,7 @@ for (const [i, l] of lines.entries()) {
 const MARKER_RE = new RegExp('^([a-z0-9_-]+)/([^#]+)#([a-z]+)(\\d+)@([0-9a-f]{12})$');
 
 // ===== 三段检查 =====
-const stale = [], orphan = [], leak = [], dup = [];
+const stale = [], orphan = [], leak = [], xproj = [], dup = [];
 const seen = new Set();
 const sources = new Set();
 let retired = 0;
@@ -82,7 +83,7 @@ for (const e of entries) {
   if (seen.has(e.marker)) dup.push('  marker 重复：' + e.marker);
   seen.add(e.marker);
   const [, proj, rel, , , mk12] = m;
-  if (proj !== PROJECT) { leak.push('  marker 项目前缀不是 ' + PROJECT + '：' + e.marker); continue; }
+  if (proj !== PROJECT) { xproj.push('  marker 项目前缀不是 ' + PROJECT + '：' + e.marker); continue; }
   if (e.source !== rel) leak.push('  marker 与 source 不一致：' + e.marker + ' vs ' + e.source);
   if (EX.some((x) => rel.startsWith(x))) leak.push('  排除前缀泄漏：' + rel);
   sources.add(rel);
@@ -104,14 +105,14 @@ const scope = tracked.filter(inScope).filter((f) => fs.existsSync(path.join(ROOT
 const missing = scope.filter((f) => !sources.has(f)).map((f) => '  ' + f).sort();
 
 /** 唯一违规判据：主检查与 --rerun 共用，避免两处口径分叉。 */
-const bad = (t) => Boolean(t.stale || t.orphan || t.missing || t.leak || t.dup || t.badJson);
+const bad = (t) => Boolean(t.stale || t.orphan || t.missing || t.leak || t.xproj || t.dup || t.badJson);
 const sum = {
   entries: entries.length, markers: seen.size, sources: sources.size, scope: scope.length,
   stale: stale.length, orphan: orphan.length, retired, missing: missing.length,
-  leak: leak.length, dup: dup.length, badJson: badJson.length,
+  leak: leak.length, xproj: xproj.length, dup: dup.length, badJson: badJson.length,
 };
 const line = `entries=${sum.entries} markers=${sum.markers} sources=${sum.sources} scope=${sum.scope} ` +
-  `stale=${sum.stale} orphan=${sum.orphan} retired=${sum.retired} missing=${sum.missing} leak=${sum.leak} dup=${sum.dup}`;
+  `stale=${sum.stale} orphan=${sum.orphan} retired=${sum.retired} missing=${sum.missing} leak=${sum.leak} cross_project_leak=${sum.xproj} dup=${sum.dup}`;
 
 if (flag('keys')) { console.log(`markers=${sum.markers} entries=${sum.entries}`); process.exit(sum.markers === sum.entries && !sum.badJson ? 0 : 1); }
 
@@ -129,7 +130,7 @@ if (flag('rerun')) {
 
 console.log('记忆库同步体检：' + line);
 const detail = (title, arr) => { if (arr.length) console.log('\n[' + title + ']（' + arr.length + '）：\n' + (flag('list') ? arr.join('\n') : arr.slice(0, 10).join('\n') + (arr.length > 10 ? `\n  … 另 ${arr.length - 10} 条（--list 看全）` : ''))); };
-detail('stale', stale); detail('orphan', orphan); detail('missing', missing); detail('leak', leak); detail('dup', dup); detail('badJson', badJson);
+detail('stale', stale); detail('orphan', orphan); detail('missing', missing); detail('leak', leak); detail('cross_project_leak', xproj); detail('dup', dup); detail('badJson', badJson);
 if (bad(sum)) {
   console.log('\n  —— stale：源变了 ⇒ 重迁该 marker；orphan：源没了 ⇒ 备份后标 retired；missing：范围内漏迁；leak：不该入库的进了台账');
 }
