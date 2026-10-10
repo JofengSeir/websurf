@@ -71,25 +71,14 @@ apps/game/scripts/t13-ulp-sensitivity-control.mjs
 apps/game/scripts/wasm-hash-pin.mjs
 # apps/viewer/test/shot.mjs：一次性 CDP 截图工具（观感验证用；引用面为零，判据同上）
 
-# ── 本地保留（不推送）：开发 / 治理层 ──
-# 判据：部署链（.github/workflows/deploy-pages.yml）与三端构建/运行**不需要**它们。
-# 远端仓库只应有：三端 apps/** + 共享层 src/** + README/LICENSE/CHANGELOG/CONTRIBUTING/SECURITY
-#   + .github 模板与两个 workflow（deploy-pages / ci-gates）。
-AGENTS.md
-TODO.md
-OWNER.md
-docflow.json
-# documents/ 已放行（2026-10-10 owner 指令）：迁出后仅剩 index.md + norms/** 3 篇规范，属仓库项目文档
-# 已删除：documents/
-progress/
-skills/
-src/scripts/docflow.mjs
-src/scripts/check-doc-drift.mjs
-src/scripts/check-board-touch.mjs
-src/scripts/check-memory-sync.mjs
-src/scripts/check-shared-sync.mjs
-src/scripts/wasm-stale-check.mjs
-.github/workflows/doc-drift.yml
+# ── agent 工作流层（2026-10-10 owner 指令：改为入库）──
+# 判据：远端必须在**没有本地知识库**的前提下也能重新解读项目并重建工作流 ⇒
+#   入口 AGENTS.md + 控制层 TODO.md/OWNER.md + 台账 progress/** + 引导 skills/**
+#   + 机制 docflow.json / 6 个治理脚本 / doc-drift.yml —— 全部入库。
+# 仍不入库：archive/**（迁移原文；agent 可暴力解读项目重新总结）、.archify/、.workbuddy/。
+# 已放行：AGENTS.md TODO.md OWNER.md docflow.json progress/ skills/
+#   src/scripts/{docflow,check-doc-drift,check-board-touch,check-memory-sync,check-shared-sync,wasm-stale-check}.mjs
+#   .github/workflows/doc-drift.yml
 # ── 操作系统噪声（跨平台协作常带进来的文件）──
 .DS_Store
 Thumbs.db
