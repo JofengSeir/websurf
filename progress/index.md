@@ -18,7 +18,8 @@
 | `monthly/2026-10-8.md` | 2026-10 第 8/9 卷：T-311 写入失败信号 / D-024 死代码口径（2026-10-09 起） | （2026-10-09 起由第 9 卷接续） 　**（已迁出 → agentmemory / `archive/memory/`）** |
 | `monthly/2026-10-9.md` | 2026-10 第 9/10 卷：CDP 视觉验证 / 遗留路线清查续（2026-10-09 起） | （2026-10-09 起由第 10 卷接续） 　**（已迁出 → agentmemory / `archive/memory/`）** |
 | `monthly/2026-10-10.md` | 2026-10 第 10/11 卷：三端模型/光照分叉分析 + T-454 P0–P5-2（2026-10-09，40.77 KB 后封卷） | 追该阶段的逐条过程 　**（已迁出 → agentmemory / `archive/memory/`）** |
-| `monthly/2026-10-11.md` | 2026-10 第 11/11 卷：T-454 续（自 2026-10-09 滚动分卷起） | **新一轮进展写在这里**（当月最后一卷） |
+| `monthly/2026-10-11.md` | 2026-10 第 11 卷：T-454 续 + T-637 迁移全程（达 43.3 KB 封卷） | **（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-12.md` | 2026-10 第 12/12 卷：续写 | **新一轮进展写在这里**（当月最后一卷 =「当前写入目标」） |
 | `board/archive-2026-10.md` | 看板分卷：已记录 + 已结案（93 条） | 查某条历史项的 ID / 状态 |
 | `board/archive-2026-10-2.md` | 第 2 卷：2026-10-09 分卷移出的 90 条已结案行 | 追溯用 |
 | `board/archive-2026-10-3.md` | 第 3 卷：同上（后半） | 追溯用 |
@@ -42,12 +43,12 @@
 
 ## 卷序（月度进展）
 
-> **当前写入目标**：`progress/monthly/2026-10-11.md`（当月最后一卷；超过 **40 KB** 就先开新卷、硬上限 **48 KB** 见 §0.4；新卷要补「上/下卷链接 + 登记本页 + 索引各一行」）。
+> **当前写入目标**：`progress/monthly/2026-10-12.md`（当月最后一卷；超过 **40 KB** 就先开新卷、硬上限 **48 KB** 见 §0.4；新卷要补「上/下卷链接 + 登记本页 + 索引各一行」）。
 > **按日期找哪一卷**：以各行右列的**覆盖范围**为准；注意**新条目一律追加在当月最后一卷**，所以相邻卷的范围可能重叠——精确查找直接用 `grep -n "2026-10-05" progress/monthly/*.md`。
 
-`2026-10` 原有 11 卷，其中 **10 卷已迁出**（→ agentmemory / `archive/memory/2026-10/`），仓库内只保留**当月最后一卷** `2026-10-11`（即「当前写入目标」）。旧卷头部有「上一卷 / 下一卷」链接，右列「什么时候看」写着用途与迁移状态。新进展一律追加到**当月最后一卷**（本页右列会随之更新）。
+`2026-10` 原有 12 卷，其中 **11 卷已迁出**（→ agentmemory / `archive/memory/2026-10/`），仓库内只保留**当月最后一卷** `2026-10-12`（即「当前写入目标」）。**滚动规则**：当前卷超过 **40 KB** 就开下一卷并把它改指新卷，**被封的卷随即迁入 agentmemory + `archive/memory/`**（`check-memory-sync` 会把它报成 `missing`，直到迁移完成）。旧卷头部有「上一卷 / 下一卷」链接，右列「什么时候看」写着用途与迁移状态。
 
-## 进展索引（本页保留最近 93 条：2026-10-08 起）
+## 进展索引（本页保留最近 94 条：2026-10-08 起）
 
 > **分卷（2026-10-09，owner 授权）**：2026-09 与 10 月上旬共 144 条已移入 [`index/2026-09.md`](index/2026-09.md)（38 条）与 [`index/2026-10-1.md`](index/2026-10-1.md)（106 条）；**新增进展仍追加在本页**，本页超过 40 KB 时把最老一段切进 `index/`（细则见 `AGENTS §0.4`）。
 
@@ -156,21 +157,23 @@
 | 2026-10-09 | T-454 P5-1：viewer 导出面补齐 `mosaic_decode`（EOF 追加纯 Rust 转发，锚点零漂移；d.ts 三端齐备 + `initSync` 运行时验证转发生效；`src/wasm-core` 仍 0 处 wasm_bindgen） | progress/monthly/2026-10-10.md 第 41 行 |
 | 2026-10-09 | T-454 P5-3：viewer 补齐 `mosaic_encode`（mosaic 导出对完备，运行时双验证）；P5-2 调查收敛为「viewer 导出链确实收 static_props ⇒ 原 props 缺失结论需按当前代码重新取证」 | progress/monthly/2026-10-10.md 第 43 行 |
 | 2026-10-09 | T-454 P5-2：viewer 实体放置模型接通（**两处**根因：`entities: Vec::new()` + 被引用模型集合未并入实体 `model`）；GLB 数据级对齐 debug/game（boreas +3.7MB/`buk01.mdl` 0→1、surf_666 `cow.mdl` 0→1），测试视点出图逐像素不变 | progress/monthly/2026-10-10.md 第 45 行 |
-| 2026-10-09 | 滚动分卷：新开 progress/monthly/2026-10-11.md（第 11/11 卷，承接 T-454 续写；上一卷 40.77 KB 封卷）并改指「当前写入目标」 | progress/monthly/2026-10-11.md:1 |
-| 2026-10-09 | T-454 会话交接：P0–P5-2 已落地（12 个提交未 push），交接清单入 .tmp/task-unify-render/TASK-handoff.md（剩余 P5-2 尾/P6/P7/P8 + 纪律与坑） | progress/monthly/2026-10-11.md:11 |
-| 2026-10-09 | T-454 收尾验收通过：三端 12 个 `.cmd` 静态契约 12/12 + `build.cmd` 实跑 exit 0 + 9 个测试门 exit 0 + 自选端口验 web/dist 均 HTTP 200；页面内载入 `surf_boreas`/`surf_666` 三端 6/6 就绪（附：曾误在主机跑 dev.cmd 拉窗口/浏览器，已清理并改沙箱内验证） | progress/monthly/2026-10-11.md:13 |
-| 2026-10-09 | T-454 验收第二轮：start.cmd 服务段三端实跑（debug/game 走 src/serve.py、viewer 走 dist/play.cmd 的 dist/serve.py）+ stop.cmd 两分支实跑（只杀本工程 python、外来 PID 跳过）+ dist 页面三端载图 6/6 + dev 路径重载 6/6；修 debug single 形态 dist 悬空 `./coi-serviceworker.js`（静态托管恢复 crossOriginIsolated）；登记 T-628 / D-110 | progress/monthly/2026-10-11.md:26 |
-| 2026-10-09 | T-454 验收三轮：`build.cmd multi` 端到端 exit 0（含 wasm-pack stderr 造成假 exit 1 的 pwsh 陷阱）+ 三端 multi dist（部署形态）载图 6/6 + game/viewer `stop.cmd` 实跑 + `start.cmd` 三条守卫（端口被占 / 自定义端口 / 缺 dist，均不开浏览器）；恢复三端 single dist；新登记 T-171（viewer multi 随包 SW 但页面从不加载）；另登记 T-629（三端 dev.cmd 的端口检查是死分支） | progress/monthly/2026-10-11.md:36 |
-| 2026-10-10 | T-454 P5-2 尾：三端导出编排收进 `src/wasm-core/render_bundle.rs`（纯 Rust 547 行；三端 lib.rs 净删 1306 行重复）+ `check-glb-parity` 扩到三端并接 CI（`glb-parity` job）；**六组 GLB sha256 与搬动前逐一相同**；关 T-409 / T-451 / T-170 | progress/monthly/2026-10-11.md:47 |
-| 2026-10-10 | T-454 P7：天空两遍法与地图雾收进 `src/renderer-shared/environment/render-sky-pass.ts`（`setFogMaxDensity` 在 `apps/**` 0 命中）+ 新增 `src/scripts/check-render-parity.mjs`（19 条实现符号 0 命中）并接 CI；实测 game 仅 0.02% 像素变化 ⇒ **debug↔game 由 99.980%/0.0029 变为逐像素 100.0000%/0/0** | progress/monthly/2026-10-11.md:54 |
-| 2026-10-10 | T-454 P6：viewer 补 `export_mosaic_manifest` 并接共享画质档（三端 manifest **逐字节相同**：25 条 / 30778 字符 / `a1fd4760f86f6244`，mini 命中 24/24）；三端挂同名 `__vbspTextureQuality` 供 A/B；顺带登记 **T-455**（天空区两模式不确定：game 两次加载 `0.8252/3.1876/79`，bbox 全在天空区） | progress/monthly/2026-10-11.md:60 |
-| 2026-10-10 | **T-450 结案**：实体放置模型接上第 2 级光照——新增 `Bsp::ambient_cube_at_point`（Source 点查 leaf）+ `Entity.ambient_cube` + `parse_origin_source`；探针「无 cube 且含 `.mdl`」**1 → 0**（`buk01.mdl` 入有 cube 桶），三端门禁 exit 0（ambientCube 节点 501 → 502）；`.vhv`（第 1 级）因无数据依据不做 | progress/monthly/2026-10-11.md:69 |
-| 2026-10-10 | **T-627 结案 / T-454 P8**：`$bumpmap` 全链路（VMT 解析 → PNG 入表 → 材质 extras `vbsp_bumpmap`，三端各 12 材质逐条相同）+ 共享 `shader/bumpmap.ts`（A 案反射扰动 / B 案细节通道）；实测 A 案在均匀白天空下逐像素 0 ⇒ 另立 **T-456**，可见通道 B 案 `均值差 2.18 / 最差 10`；P8 后 debug↔game 仍逐像素 100.0000% | progress/monthly/2026-10-11.md:77 |
-| 2026-10-10 | **T-454 全部阶段结案**（P0–P8 + T-450/T-627）：收尾判据全绿——三端 typecheck/build:wasm/build:ts exit 0、三端 GLB 门禁 exit 0（120 材质/105 贴图/2634 节点/6 属性键/502 ambientCube 全同）、`check-render-parity` exit 0（19 条实现符号 0 命中）、drift A–P 全 0、debug↔game 逐像素 **100.0000%**；余项 T-455/T-456 | progress/monthly/2026-10-11.md:84 |
-| 2026-10-10 | T-637 立项：websurf 过程记录迁入 agentmemory（迁移任务书 §十一 阶段 0–1）——任务书 §三「现状」已失效（库 0 条 / 台账不存在 / P1 两卷俱在 / P3 未复现）；阶段 1 工作流改造落地（retryGit + 降级 WARN、board-touch 扩面、新 check-memory-sync、AGENTS 五处条款、§4 登记）；[P] 20→0 / [G] 12→7 / [O] 59→57 | progress/monthly/2026-10-11.md:89 |
-| 2026-10-10 | T-637 阶段 2：`progress/` 24 篇迁入 agentmemory（127 条 = 103 段 + 24 索引，marker + facet project:websurf）+ 归档 `archive/memory/`（V6 24/24 sha256 一致）；源已从仓库移除；台账 `progress/memory-index.jsonl` 标 retired；260 处指针改写为「第 N 行」；`check-memory-sync` exit 0（stale/orphan/missing/leak=0） | progress/monthly/2026-10-11.md:98 |
-| 2026-10-10 | **T-637 阶段 3 结案**：AGENTS §2 载明「24 篇已迁 agentmemory + 台账/门禁指针」、§0.4 补机器可读台账口径、§7 五处已迁引用改历史表述；OWNER.md 新增 D-112（已决，留70/迁24）与 D-113（待决，检索质量 P2）；TODO 登记 T-638/T-639；体检 [C]/[E]/[N]/[P]=0、[G]=7（均非本轮）、[O]=57；check-memory-sync exit 0 | progress/monthly/2026-10-11.md:108 |
-| 2026-10-10 | **D-113 + T-639 落地，体检 [G] 首次归零（12→7→0）**：T-639 —— 体检 [G]⑥ 的 D-### 来源扩到 progress/owner/**（对称 T-### 认 board 分卷）、OWNER.md 已决 35 行移入 progress/owner/2026-Q4.md（19.2→9.3 KB）；D-113 (b) 扩索引条目**实测无效**（17/20→17/20）；原 3 处未命中**证伪为无效探针**（词属别的文件）；新证据「逐字片段在 7 KB 块上 rank-1 仅 4/6」⇒ 登记 D-114；补齐 T-630…636 列表项；[P] 因 skill 被外部替换而复发并修好 | progress/monthly/2026-10-11.md:115 |
+| 2026-10-09 | 滚动分卷：新开 progress/monthly/2026-10-11.md（第 11/11 卷，承接 T-454 续写；上一卷 40.77 KB 封卷）并改指「当前写入目标」 | progress/monthly/2026-10-11.md 第 1 行 |
+| 2026-10-09 | T-454 会话交接：P0–P5-2 已落地（12 个提交未 push），交接清单入 .tmp/task-unify-render/TASK-handoff.md（剩余 P5-2 尾/P6/P7/P8 + 纪律与坑） | progress/monthly/2026-10-11.md 第 11 行 |
+| 2026-10-09 | T-454 收尾验收通过：三端 12 个 `.cmd` 静态契约 12/12 + `build.cmd` 实跑 exit 0 + 9 个测试门 exit 0 + 自选端口验 web/dist 均 HTTP 200；页面内载入 `surf_boreas`/`surf_666` 三端 6/6 就绪（附：曾误在主机跑 dev.cmd 拉窗口/浏览器，已清理并改沙箱内验证） | progress/monthly/2026-10-11.md 第 13 行 |
+| 2026-10-09 | T-454 验收第二轮：start.cmd 服务段三端实跑（debug/game 走 src/serve.py、viewer 走 dist/play.cmd 的 dist/serve.py）+ stop.cmd 两分支实跑（只杀本工程 python、外来 PID 跳过）+ dist 页面三端载图 6/6 + dev 路径重载 6/6；修 debug single 形态 dist 悬空 `./coi-serviceworker.js`（静态托管恢复 crossOriginIsolated）；登记 T-628 / D-110 | progress/monthly/2026-10-11.md 第 26 行 |
+| 2026-10-09 | T-454 验收三轮：`build.cmd multi` 端到端 exit 0（含 wasm-pack stderr 造成假 exit 1 的 pwsh 陷阱）+ 三端 multi dist（部署形态）载图 6/6 + game/viewer `stop.cmd` 实跑 + `start.cmd` 三条守卫（端口被占 / 自定义端口 / 缺 dist，均不开浏览器）；恢复三端 single dist；新登记 T-171（viewer multi 随包 SW 但页面从不加载）；另登记 T-629（三端 dev.cmd 的端口检查是死分支） | progress/monthly/2026-10-11.md 第 36 行 |
+| 2026-10-10 | T-454 P5-2 尾：三端导出编排收进 `src/wasm-core/render_bundle.rs`（纯 Rust 547 行；三端 lib.rs 净删 1306 行重复）+ `check-glb-parity` 扩到三端并接 CI（`glb-parity` job）；**六组 GLB sha256 与搬动前逐一相同**；关 T-409 / T-451 / T-170 | progress/monthly/2026-10-11.md 第 47 行 |
+| 2026-10-10 | T-454 P7：天空两遍法与地图雾收进 `src/renderer-shared/environment/render-sky-pass.ts`（`setFogMaxDensity` 在 `apps/**` 0 命中）+ 新增 `src/scripts/check-render-parity.mjs`（19 条实现符号 0 命中）并接 CI；实测 game 仅 0.02% 像素变化 ⇒ **debug↔game 由 99.980%/0.0029 变为逐像素 100.0000%/0/0** | progress/monthly/2026-10-11.md 第 54 行 |
+| 2026-10-10 | T-454 P6：viewer 补 `export_mosaic_manifest` 并接共享画质档（三端 manifest **逐字节相同**：25 条 / 30778 字符 / `a1fd4760f86f6244`，mini 命中 24/24）；三端挂同名 `__vbspTextureQuality` 供 A/B；顺带登记 **T-455**（天空区两模式不确定：game 两次加载 `0.8252/3.1876/79`，bbox 全在天空区） | progress/monthly/2026-10-11.md 第 60 行 |
+| 2026-10-10 | **T-450 结案**：实体放置模型接上第 2 级光照——新增 `Bsp::ambient_cube_at_point`（Source 点查 leaf）+ `Entity.ambient_cube` + `parse_origin_source`；探针「无 cube 且含 `.mdl`」**1 → 0**（`buk01.mdl` 入有 cube 桶），三端门禁 exit 0（ambientCube 节点 501 → 502）；`.vhv`（第 1 级）因无数据依据不做 | progress/monthly/2026-10-11.md 第 69 行 |
+| 2026-10-10 | **T-627 结案 / T-454 P8**：`$bumpmap` 全链路（VMT 解析 → PNG 入表 → 材质 extras `vbsp_bumpmap`，三端各 12 材质逐条相同）+ 共享 `shader/bumpmap.ts`（A 案反射扰动 / B 案细节通道）；实测 A 案在均匀白天空下逐像素 0 ⇒ 另立 **T-456**，可见通道 B 案 `均值差 2.18 / 最差 10`；P8 后 debug↔game 仍逐像素 100.0000% | progress/monthly/2026-10-11.md 第 77 行 |
+| 2026-10-10 | **T-454 全部阶段结案**（P0–P8 + T-450/T-627）：收尾判据全绿——三端 typecheck/build:wasm/build:ts exit 0、三端 GLB 门禁 exit 0（120 材质/105 贴图/2634 节点/6 属性键/502 ambientCube 全同）、`check-render-parity` exit 0（19 条实现符号 0 命中）、drift A–P 全 0、debug↔game 逐像素 **100.0000%**；余项 T-455/T-456 | progress/monthly/2026-10-11.md 第 84 行 |
+| 2026-10-10 | T-637 立项：websurf 过程记录迁入 agentmemory（迁移任务书 §十一 阶段 0–1）——任务书 §三「现状」已失效（库 0 条 / 台账不存在 / P1 两卷俱在 / P3 未复现）；阶段 1 工作流改造落地（retryGit + 降级 WARN、board-touch 扩面、新 check-memory-sync、AGENTS 五处条款、§4 登记）；[P] 20→0 / [G] 12→7 / [O] 59→57 | progress/monthly/2026-10-11.md 第 89 行 |
+| 2026-10-10 | T-637 阶段 2：`progress/` 24 篇迁入 agentmemory（127 条 = 103 段 + 24 索引，marker + facet project:websurf）+ 归档 `archive/memory/`（V6 24/24 sha256 一致）；源已从仓库移除；台账 `progress/memory-index.jsonl` 标 retired；260 处指针改写为「第 N 行」；`check-memory-sync` exit 0（stale/orphan/missing/leak=0） | progress/monthly/2026-10-11.md 第 98 行 |
+| 2026-10-10 | **T-637 阶段 3 结案**：AGENTS §2 载明「24 篇已迁 agentmemory + 台账/门禁指针」、§0.4 补机器可读台账口径、§7 五处已迁引用改历史表述；OWNER.md 新增 D-112（已决，留70/迁24）与 D-113（待决，检索质量 P2）；TODO 登记 T-638/T-639；体检 [C]/[E]/[N]/[P]=0、[G]=7（均非本轮）、[O]=57；check-memory-sync exit 0 | progress/monthly/2026-10-11.md 第 108 行 |
+| 2026-10-10 | **D-113 + T-639 落地，体检 [G] 首次归零（12→7→0）**：T-639 —— 体检 [G]⑥ 的 D-### 来源扩到 progress/owner/**（对称 T-### 认 board 分卷）、OWNER.md 已决 35 行移入 progress/owner/2026-Q4.md（19.2→9.3 KB）；D-113 (b) 扩索引条目**实测无效**（17/20→17/20）；原 3 处未命中**证伪为无效探针**（词属别的文件）；新证据「逐字片段在 7 KB 块上 rank-1 仅 4/6」⇒ 登记 D-114；补齐 T-630…636 列表项；[P] 因 skill 被外部替换而复发并修好 | progress/monthly/2026-10-11.md 第 115 行 |
+| 2026-10-10 | **滚动分卷 + 第 11 卷迁出**：2026-10-11 达 43.3 KB 超 40 KB 线 ⇒ 开第 12 卷（改指「当前写入目标」）并把第 11 卷按 T-637 规程入库（5 段+1 索引，库内 127→133）+ 归档（sha256 三处一致后 git rm -f）+ 台账 retired；15 处指针改写为「第 N 行」；7 条 TODO 详情改指台账；progress/ 从此只留一卷在库 | progress/monthly/2026-10-12.md:8 |
+
 
 
 
