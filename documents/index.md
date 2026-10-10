@@ -93,7 +93,7 @@
 | 去处 | 回答什么 |
 |---|---|
 | [`../TODO.md`](../TODO.md) | 唯一待办看板：状态、类型、归属、证据锚点、详情 |
-| [`../progress/open-issues/`](../progress/open-issues/) | 7 篇取证原文（01–07），状态以 TODO.md 为准 |
+| `progress/open-issues/`（7 篇取证原文已于 2026-10-10 迁入 agentmemory + `archive/memory/2026-10/`，目录已从仓库移除） | 7 篇取证原文（01–07），状态以 TODO.md 为准 |
 
 ## 维护约定
 

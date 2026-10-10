@@ -6,36 +6,36 @@
 
 | 文件 | 一句话 | 什么时候看 |
 |---|---|---|
-| `monthly/2026-09-1.md` | 2026-09 第 1/2 卷：重编期 WG 收尾（2026-09-22 ~ 09-29，19 条） | 追某次改动当时怎么做的 |
-| `monthly/2026-09-2.md` | 2026-09 第 2/2 卷：UI 轮次 / 主题 / 事故补救（2026-09-23 ~ 09-30，19 条） | 追某次改动当时怎么做的 |
-| `monthly/2026-10-1.md` | 2026-10 第 1/5 卷：物理 bevel / chamfer 那批（2026-10-04 ~ 10-07，13 条） | 追某次改动当时怎么做的 |
-| `monthly/2026-10-2.md` | 2026-10 第 2/5 卷：渲染层下沉 Phase 1–3d（2026-10-02 ~ 10-03，13 条） | 追某次改动当时怎么做的 |
-| `monthly/2026-10-3.md` | 2026-10 第 3/5 卷：viewer 影带 / 时间轴 / 主题（2026-10-02，13 条） | 同上 |
-| `monthly/2026-10-4.md` | 2026-10 第 4/5 卷：10-01 收尾 ～ 本轮文档整理（2026-10-01 ~ 10-07，14 条） | （已封卷） |
-| `monthly/2026-10-5.md` | 2026-10 第 5/7 卷：10-07 `.cmd` 入口对齐轮（2026-10-07 起） | 追某次改动当时怎么做的 |
-| `monthly/2026-10-6.md` | 2026-10 第 6/7 卷：置换面碰撞 / 三角形面集 / 卡脚与穿透修复（2026-10-08） | 同上 |
-| `monthly/2026-10-7.md` | 2026-10 第 7/8 卷：ramp 坡碰撞（碰撞只看 contents） | 追某次改动当时怎么做的 |
-| `monthly/2026-10-8.md` | 2026-10 第 8/9 卷：T-311 写入失败信号 / D-024 死代码口径（2026-10-09 起） | （2026-10-09 起由第 9 卷接续） |
-| `monthly/2026-10-9.md` | 2026-10 第 9/10 卷：CDP 视觉验证 / 遗留路线清查续（2026-10-09 起） | （2026-10-09 起由第 10 卷接续） |
-| `monthly/2026-10-10.md` | 2026-10 第 10/11 卷：三端模型/光照分叉分析 + T-454 P0–P5-2（2026-10-09，40.77 KB 后封卷） | 追该阶段的逐条过程 |
+| `monthly/2026-09-1.md` | 2026-09 第 1/2 卷：重编期 WG 收尾（2026-09-22 ~ 09-29，19 条） | 追某次改动当时怎么做的 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-09-2.md` | 2026-09 第 2/2 卷：UI 轮次 / 主题 / 事故补救（2026-09-23 ~ 09-30，19 条） | 追某次改动当时怎么做的 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-1.md` | 2026-10 第 1/5 卷：物理 bevel / chamfer 那批（2026-10-04 ~ 10-07，13 条） | 追某次改动当时怎么做的 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-2.md` | 2026-10 第 2/5 卷：渲染层下沉 Phase 1–3d（2026-10-02 ~ 10-03，13 条） | 追某次改动当时怎么做的 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-3.md` | 2026-10 第 3/5 卷：viewer 影带 / 时间轴 / 主题（2026-10-02，13 条） | 同上 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-4.md` | 2026-10 第 4/5 卷：10-01 收尾 ～ 本轮文档整理（2026-10-01 ~ 10-07，14 条） | （已封卷） 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-5.md` | 2026-10 第 5/7 卷：10-07 `.cmd` 入口对齐轮（2026-10-07 起） | 追某次改动当时怎么做的 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-6.md` | 2026-10 第 6/7 卷：置换面碰撞 / 三角形面集 / 卡脚与穿透修复（2026-10-08） | 同上 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-7.md` | 2026-10 第 7/8 卷：ramp 坡碰撞（碰撞只看 contents） | 追某次改动当时怎么做的 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-8.md` | 2026-10 第 8/9 卷：T-311 写入失败信号 / D-024 死代码口径（2026-10-09 起） | （2026-10-09 起由第 9 卷接续） 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-9.md` | 2026-10 第 9/10 卷：CDP 视觉验证 / 遗留路线清查续（2026-10-09 起） | （2026-10-09 起由第 10 卷接续） 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `monthly/2026-10-10.md` | 2026-10 第 10/11 卷：三端模型/光照分叉分析 + T-454 P0–P5-2（2026-10-09，40.77 KB 后封卷） | 追该阶段的逐条过程 　**（已迁出 → agentmemory / `archive/memory/`）** |
 | `monthly/2026-10-11.md` | 2026-10 第 11/11 卷：T-454 续（自 2026-10-09 滚动分卷起） | **新一轮进展写在这里**（当月最后一卷） |
 | `board/archive-2026-10.md` | 看板分卷：已记录 + 已结案（93 条） | 查某条历史项的 ID / 状态 |
 | `board/archive-2026-10-2.md` | 第 2 卷：2026-10-09 分卷移出的 90 条已结案行 | 追溯用 |
 | `board/archive-2026-10-3.md` | 第 3 卷：同上（后半） | 追溯用 |
 | `board/archive-2026-10-4.md` | 看板分卷第 4 卷：2026-10-09 再分卷的已结案行（第 1/2 批） | 查某条历史项的 ID / 状态 |
 | `board/archive-2026-10-5.md` | 看板分卷第 5 卷：2026-10-09 再分卷的已结案行（第 2/2 批） | 查某条历史项的 ID / 状态 |
-| `decisions.md` | 待裁决分批清单（133 条按 5 组，带建议答法） | owner 要批量裁决时 |
-| `pending-detail.md` | 原 AGENTS §7.3 台账逐条原文 | 看板某行的「详情」列指过来时 |
-| `wg-status.md` | 工作组（WG1–WG12）状态与历史计划 | 追重编期分工 |
-| `board-migration.md` | 看板来由：为什么建、基线、C1–C8、S1–S7 | 质疑看板设计是否合原意时 |
-| `open-issues/01-chamfer-is-not-a-bevel.md` | 取证：chamfer 不是 bevel | 追该结论的依据 |
-| `open-issues/02-chamfer-visualization-guesswork.md` | 取证：chamfer 可视化曾靠猜 | 同上 |
-| `open-issues/03-renderer-merge-normal-attribute.md` | 取证：合批因 normal 不一致失败 | 同上 |
-| `open-issues/04-wasm-untextured-surface-color.md` | 取证：无纹理面上色 | 同上 |
-| `open-issues/05-wasmcore-bevel-doc-vs-code.md` | 取证：wasm-core bevel 文档 vs 代码 | 同上 |
-| `open-issues/06-phy-hull-facet-jump.md` | 取证：.phy 凸包表达不了曲面坡 | 同上 |
-| `open-issues/07-is-position-free-vs-trace.md` | 取证：is_position_free vs trace（卡死修法） | 同上 |
-| `lessons-2026-10-08.md` | **本会话（约 66 轮）的经验教训整理**：方法论 / 查实的技术事实 / 仓库流程纪律 / 环境陷阱 / 事故 | 开工前或交接时先读 |
+| `decisions.md` | 待裁决分批清单（133 条按 5 组，带建议答法） | owner 要批量裁决时 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `pending-detail.md` | 原 AGENTS §7.3 台账逐条原文 | 看板某行的「详情」列指过来时 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `wg-status.md` | 工作组（WG1–WG12）状态与历史计划 | 追重编期分工 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `board-migration.md` | 看板来由：为什么建、基线、C1–C8、S1–S7 | 质疑看板设计是否合原意时 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `open-issues/01-chamfer-is-not-a-bevel.md` | 取证：chamfer 不是 bevel | 追该结论的依据 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `open-issues/02-chamfer-visualization-guesswork.md` | 取证：chamfer 可视化曾靠猜 | 同上 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `open-issues/03-renderer-merge-normal-attribute.md` | 取证：合批因 normal 不一致失败 | 同上 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `open-issues/04-wasm-untextured-surface-color.md` | 取证：无纹理面上色 | 同上 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `open-issues/05-wasmcore-bevel-doc-vs-code.md` | 取证：wasm-core bevel 文档 vs 代码 | 同上 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `open-issues/06-phy-hull-facet-jump.md` | 取证：.phy 凸包表达不了曲面坡 | 同上 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `open-issues/07-is-position-free-vs-trace.md` | 取证：is_position_free vs trace（卡死修法） | 同上 　**（已迁出 → agentmemory / `archive/memory/`）** |
+| `lessons-2026-10-08.md` | **本会话（约 66 轮）的经验教训整理**：方法论 / 查实的技术事实 / 仓库流程纪律 / 环境陷阱 / 事故 | 开工前或交接时先读 　**（已迁出 → agentmemory / `archive/memory/`）** |
 | `index/2026-09.md` | 进展索引分卷 1/2：2026-09 的 38 条 | 查 9 月的逐条进展索引 |
 | `index/2026-10-1.md` | 进展索引分卷 2/2：2026-10 上旬的 106 条 | 查 10 月上旬的逐条进展索引 |
 
@@ -44,9 +44,9 @@
 > **当前写入目标**：`progress/monthly/2026-10-11.md`（当月最后一卷；超过 **40 KB** 就先开新卷、硬上限 **48 KB** 见 §0.4；新卷要补「上/下卷链接 + 登记本页 + 索引各一行」）。
 > **按日期找哪一卷**：以各行右列的**覆盖范围**为准；注意**新条目一律追加在当月最后一卷**，所以相邻卷的范围可能重叠——精确查找直接用 `grep -n "2026-10-05" progress/monthly/*.md`。
 
-`2026-10` 按月切了 6 卷（每卷 ≤ 48 KB，按时间顺序）：`2026-10-1` → `2026-10-2` → `2026-10-3` → `2026-10-4` → `2026-10-5` → `2026-10-6`。每卷头部有「上一卷 / 下一卷」链接；右列「什么时候看」写着用途。新进展追加到**当月最后一卷**（本页右列会随之更新）。
+`2026-10` 原有 11 卷，其中 **10 卷已迁出**（→ agentmemory / `archive/memory/2026-10/`），仓库内只保留**当月最后一卷** `2026-10-11`（即「当前写入目标」）。旧卷头部有「上一卷 / 下一卷」链接，右列「什么时候看」写着用途与迁移状态。新进展一律追加到**当月最后一卷**（本页右列会随之更新）。
 
-## 进展索引（本页保留最近 90 条：2026-10-08 起）
+## 进展索引（本页保留最近 91 条：2026-10-08 起）
 
 > **分卷（2026-10-09，owner 授权）**：2026-09 与 10 月上旬共 144 条已移入 [`index/2026-09.md`](index/2026-09.md)（38 条）与 [`index/2026-10-1.md`](index/2026-10-1.md)（106 条）；**新增进展仍追加在本页**，本页超过 40 KB 时把最老一段切进 `index/`（细则见 `AGENTS §0.4`）。
 
@@ -167,4 +167,6 @@
 | 2026-10-10 | **T-627 结案 / T-454 P8**：`$bumpmap` 全链路（VMT 解析 → PNG 入表 → 材质 extras `vbsp_bumpmap`，三端各 12 材质逐条相同）+ 共享 `shader/bumpmap.ts`（A 案反射扰动 / B 案细节通道）；实测 A 案在均匀白天空下逐像素 0 ⇒ 另立 **T-456**，可见通道 B 案 `均值差 2.18 / 最差 10`；P8 后 debug↔game 仍逐像素 100.0000% | progress/monthly/2026-10-11.md:77 |
 | 2026-10-10 | **T-454 全部阶段结案**（P0–P8 + T-450/T-627）：收尾判据全绿——三端 typecheck/build:wasm/build:ts exit 0、三端 GLB 门禁 exit 0（120 材质/105 贴图/2634 节点/6 属性键/502 ambientCube 全同）、`check-render-parity` exit 0（19 条实现符号 0 命中）、drift A–P 全 0、debug↔game 逐像素 **100.0000%**；余项 T-455/T-456 | progress/monthly/2026-10-11.md:84 |
 | 2026-10-10 | T-637 立项：websurf 过程记录迁入 agentmemory（迁移任务书 §十一 阶段 0–1）——任务书 §三「现状」已失效（库 0 条 / 台账不存在 / P1 两卷俱在 / P3 未复现）；阶段 1 工作流改造落地（retryGit + 降级 WARN、board-touch 扩面、新 check-memory-sync、AGENTS 五处条款、§4 登记）；[P] 20→0 / [G] 12→7 / [O] 59→57 | progress/monthly/2026-10-11.md:89 |
+| 2026-10-10 | T-637 阶段 2：`progress/` 24 篇迁入 agentmemory（127 条 = 103 段 + 24 索引，marker + facet project:websurf）+ 归档 `archive/memory/`（V6 24/24 sha256 一致）；源已从仓库移除；台账 `progress/memory-index.jsonl` 标 retired；260 处指针改写为「第 N 行」；`check-memory-sync` exit 0（stale/orphan/missing/leak=0） | progress/monthly/2026-10-11.md:98 |
+
 
