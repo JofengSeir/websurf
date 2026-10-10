@@ -41,7 +41,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 2. **② 代码改动缺留痕**：改了 `apps/**` 或 `src/**`（不含 `src/scripts/**`）却没动 `TODO.md` 或没新增台账行 ⇒ 钩子挡提交。
 3. **③ 已有条目失配**：`stale`/`orphan`/`archive_mismatch`/`missing`/`leak` 任一非 0 ⇒ `check-memory-sync` 红，必须重迁。
 
-开工前先加载技能：`skill("websurf-workflow")`（循环与强制力）、`skill("websurf-env-traps")`（环境陷阱）；用记忆库前 `skill("agentmemory-usage")`。
+开工前先加载技能：`skill("websurf-workflow")`（循环与强制力）、`skill("websurf-env-traps")`（环境陷阱）；用记忆库前 `skill("memory-discipline")`（读写时机）与 `skill("agentmemory-mcp-tools")`（工具索引）。后两篇是 **agentmemory 官方技能**，与本仓项目技能同置 `skills/`，来源与更新法见 `skills/THIRD-PARTY.md`。
 
 **本机没有记忆库 / MCP 工具不可用时——不要停**：先跑 `node src/scripts/kb-fallback.mjs probe`，按它给出的那层走。三层兜底：
 1. **L1（正常）**：`memory_*` 工具可用 ⇒ 按上表召回、按 §5 写进展。
@@ -71,8 +71,8 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | 根 `*.md` | `AGENTS.md`（本文件）｜ `TODO.md`（唯一待办与状态源）｜ `OWNER.md`（owner 决策队列）｜ `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`（git 仓库项目文档） |
 | `documents/` | **不存在**：原 47 篇工程/共享层/架构文档 + 3 篇规范已全部迁入 agentmemory，原文归档 `archive/memory/2026-10/` |
 | `progress/` | **3 个机器可读文件**：`memory-index.jsonl`（迁移台账 = manifest，`check-memory-sync.mjs` 的权威输入）、`control-ids.json`（控制层 ID 索引，门禁 `[G]` 判定「ID 已存在」的唯一来源）、`pending-kb.jsonl`（MCP 不可用时的待补写队列，见 §0 兜底）|
-| `skills/**` | **三篇** skill：`skills/websurf-workflow/SKILL.md`（**先读：工作流循环**）、`skills/websurf-env-traps/SKILL.md`（开工前先读）、`skills/agentmemory-usage/SKILL.md`（用记忆库前先读）。仓库是唯一源头；**harness 只扫 `<仓库>/.agents/skills`、`<仓库>/.dsh/skills`、`~/.agents/skills`、`<dshHome>/skills` 四个根，不扫 `<仓库>/skills/`** ⇒ 新机器要先把三个技能 junction 进任一根（见技能 `websurf-workflow` 的「技能注册」节）；内容同时已入库 |
-| `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/`；`apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` 是构建资产（后者被 `build-dist.mjs` 消费） |
+| `skills/**` | **两类**：① **本项目技能** `skills/websurf-workflow/`（**先读：工作流循环**）、`skills/websurf-env-traps/`（开工前先读）—— 各含 `SKILL.md`（骨架，属只读类）+ `REFERENCE.md`（细则）；② **agentmemory 官方技能** 17 篇（`memory-discipline`、`remember`/`recall`/`forget`、`lesson`、`agentmemory-mcp-tools`/`-config`/`-rest-api`/`-architecture`/`-hooks`/`-agents`、`recap`/`handoff`/`session-history`/`commit-context`/`commit-history`、`write-agentmemory-skill`）+ `_shared/TROUBLESHOOTING.md` —— 上游**原样复制、不得就地修改**，来源/版本/更新法见 `skills/THIRD-PARTY.md`。仓库是唯一源头；**harness 只扫 `<仓库>/.agents/skills`、`<仓库>/.dsh/skills`、`~/.agents/skills`、`<dshHome>/skills` 四个根，不扫 `<仓库>/skills/`** ⇒ 新机器要把 `skills/` 下每个技能目录 junction 进任一根（见 `websurf-workflow` 的 REFERENCE「技能注册」节）。项目技能的 `SKILL.md` 进台账；官方技能不进（工具自带文档，随包更新） |
+| `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/`；`apps/viewer/scripts/dist-README.md` 是构建资产（被 `build-dist.mjs` 消费） |
 | `src/**` | 共享层（phys / wasm-core / ts-shared / materials / renderer-shared）+ `src/scripts/**`（本地门禁与工具） |
 | `test/` | `test/maps/`（BSP 夹具）、`test/replay/`（录像样例）——两者 gitignore；`test/project/**` 为第三方参考资料 |
 | `.github/**` | `workflows/ci-gates.yml`、`workflows/deploy-pages.yml`、`workflows/doc-drift.yml`（**三者均入库**；`.gitignore:81` 的「已放行」注释即为此）+ `.github/**/*.md` 模板（功能性配置） |
@@ -80,7 +80,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | `archive/**` | 迁移原文与回滚存证（gitignore）；**不作依据** |
 
 **仓库内 md 清单**（体检 `[K]` 要求每篇都能被上级导航点到，故在此列全）：
-`.github/ISSUE_TEMPLATE/bug_report.md`、`.github/ISSUE_TEMPLATE/feature_request.md`、`.github/ISSUE_TEMPLATE/other.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`OWNER.md`、`README.md`、`SECURITY.md`、`TODO.md`、`apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md`、`skills/agentmemory-usage/SKILL.md`、`skills/websurf-env-traps/SKILL.md`、`skills/websurf-workflow/SKILL.md`。
+`.github/ISSUE_TEMPLATE/bug_report.md`、`.github/ISSUE_TEMPLATE/feature_request.md`、`.github/ISSUE_TEMPLATE/other.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`OWNER.md`、`README.md`、`SECURITY.md`、`TODO.md`、`apps/viewer/scripts/dist-README.md`、`skills/**`（本目录全部 md：两篇项目技能的 `SKILL.md` + `REFERENCE.md`、`THIRD-PARTY.md`、官方技能的 `SKILL.md`/`REFERENCE.md`/`EXAMPLES.md` 与 `_shared/TROUBLESHOOTING.md`）。
 
 ---
 
@@ -125,7 +125,6 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 - `apps/debug/scripts/glb-mesh-count.mjs`
 - `apps/debug/scripts/jump-apex-verify.mjs`
 - `apps/debug/scripts/optimize-scene-verify.mjs`
-- `apps/debug/scripts/path-acceptance.mjs`
 - `apps/debug/scripts/phys-surf-crouch-smoke.mjs`
 - `apps/debug/scripts/plot-path.mjs`
 - `apps/game/scripts/build-dist.mjs`

@@ -31,10 +31,8 @@
  * （见 `lastTickT`）。
  *
  * **三个距离量是三件不同的事，不可互相替代**：
- * - **垂距** `PathPoint.perp`：tick 点到渲染折线的最短距离（投影钳位到线段）。本文件只扫
- *   `±PERP_WINDOW_MS` 时间窗内的线段，属面板实时指示；验收度量在
- *   `apps/debug/scripts/path-acceptance.mjs`——它对全部合格线段建 AABB BVH 做全量最近搜索，
- *   并在统计前剔除跳变邻近窗，两者口径不同。
+ * - **垂距** `PathPoint.perp`：tick 点到渲染折线的最短距离（投影钳位到线段）。只扫
+ *   `±PERP_WINDOW_MS` 时间窗内的线段，属面板实时指示的**近似**口径。
  * - **偏差梳** `deviStats()` 的 `mean/max/green/yellow/red`：tick 点与**同一时刻**渲染位置的
  *   差（按 `t` 在渲染节点间线性插值），含切向滞后，会被传送放大。
  * - **残差** `PathPoint.residual`：权威自身 post-tick 位置与发布（投影）位置的距离，
@@ -80,7 +78,7 @@ export interface DistStats {
  *  这个模块级对象本身（同一引用，调用方只读）。 */
 const EMPTY_STATS: DistStats = { n: 0, mean: 0, p50: 0, p95: 0, max: 0 };
 
-/** 最近秩分位数 `sorted[min(n-1, floor(n*q))]`（与 `apps/debug/scripts/path-acceptance.mjs` 的 `pct` 同定义）。
+/** 最近秩分位数 `sorted[min(n-1, floor(n*q))]`。
  *  `sorted` 须已升序；空数组返回 0。 */
 function quantile(sorted: number[], q: number): number {
   if (!sorted.length) return 0;
@@ -123,10 +121,8 @@ const JUMP_BREAK = 100;
 /**
  * 面板垂距的**近似**时间窗（ms，单侧）。
  *
- * `perpDistAt` 只扫 `[t−此值, t+此值]` 内的渲染线段；`apps/debug/scripts/path-acceptance.mjs`
- * 对全部合格线段做全量最近搜索，并在统计前剔除跳变邻近窗。两者口径不同：本值只用于面板
- * 实时观察（是否接近 0 / 有无趋势），判定以脚本为准（`apps/debug/package.json` 的
- * `test:path-acceptance`，CI 的 debug job 调用）。
+ * `perpDistAt` 只扫 `[t−此值, t+此值]` 内的渲染线段。本值只用于面板
+ * 实时观察（是否接近 0 / 有无趋势），不是全量最近搜索口径。
  */
 const PERP_WINDOW_MS = 250;
 
@@ -359,8 +355,7 @@ export class PathRecorder {
    * `addTick` 不假设调用方给的 `t` 递增：同一对渲染样本会被相邻两帧复用，调用点也会
    * 回落到轮询时刻。本字段把 `t` 钳到 `max(t, lastTickT)`（允许相等）。
    *
-   * 下游依赖升序：本文件的 `sampleRenderAt` / `perpDistAt` 用二分查找；导出后
-   * `apps/debug/scripts/path-acceptance.mjs` 也逐点检查时间戳，非单调即判数据非法并拒绝整份文件。
+   * 下游依赖升序：本文件的 `sampleRenderAt` / `perpDistAt` 用二分查找。
    *
    * 不变量：一次录制内 tick 时间戳非递减。注意只有 `clear` 会复位本字段，`stop`/`start`
    * 不复位，故分段累加时守卫跨段延续。
@@ -465,7 +460,7 @@ export class PathRecorder {
     else this.lastTickT = t;
     const p: PathPoint = { t, x, y, z };
     if (residual !== undefined && Number.isFinite(residual)) p.residual = residual;
-    // 垂距（面板近似窗；全量口径见 apps/debug/scripts/path-acceptance.mjs）
+    // 垂距（面板近似窗）
     const perp = this.perpDistAt(t, x, y, z);
     if (Number.isFinite(perp)) p.perp = perp;
     const p1 = this.prevTick1;
@@ -528,14 +523,12 @@ export class PathRecorder {
   }
 
   /**
-   * 垂距（面板用，**近似**）：点 p 到渲染折线的**最短距离**，与
-   * `apps/debug/scripts/path-acceptance.mjs` 的度量同定义——
+   * 垂距（面板用，**近似**）：点 p 到渲染折线的**最短距离**，
    *   d = min over 合格线段 的 |p − proj_clamped(p, seg)|，
    *   合格线段 = 长度 ≤ `JUMP_BREAK`（更长的段被跳过，零长段也跳过）。
    *
-   * **与脚本的差异（刻意）**：本方法只扫 `[t−PERP_WINDOW_MS, t+PERP_WINDOW_MS]` 内的线段
-   * （此刻尚未 append 的节点天然不在窗内，故参照 `renderNodes` 的当前内容）；脚本对全部
-   * 合格线段做全量最近搜索，并在统计前剔除跳变邻近窗。判定以脚本为准，这里只作实时指示。
+   * **近似所在**：本方法只扫 `[t−PERP_WINDOW_MS, t+PERP_WINDOW_MS]` 内的线段
+   * （此刻尚未 append 的节点天然不在窗内，故参照 `renderNodes` 的当前内容）。这里只作实时指示。
    * @returns 最短距离（HU）；`renderNodes` 少于 2 个时 NaN；有节点但窗口内没有合格线段时为
    *          +Infinity（调用点据此不写入 `perp`）
    */
@@ -715,8 +708,8 @@ export class PathRecorder {
    * - `tick`：每项 `{t,x,y,z}`，仅当该节点有 `residual` 时多一个 `residual` 字段
    * 注意 `sampling`/`timebase`/`drawing` 是**代码里的字符串字面量**：`drawing` 原先写成三档，
    * 而 `turnColor` 实际只有两档（≤20° 琥珀 / >20° 红）——2026-10-09 已把该字面量改齐两档。
-   * 读法：`apps/debug/scripts/path-acceptance.mjs` 与 `apps/debug/scripts/plot-path.mjs`
-   * 都只读 `render`/`tick` 两个数组（后者还要求两者都非空）。
+   * 读法：消费方（如 `apps/debug/scripts/plot-path.mjs`）只读 `render`/`tick` 两个数组
+   * （后者要求两者都非空）。
    */
   toJson(meta?: Record<string, unknown>): string {
     return JSON.stringify(

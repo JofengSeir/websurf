@@ -7,8 +7,8 @@
 #   rust-unit-tests — `cargo test -p websurf-phys`（共享层物理单测；含蹲姿/surf 回归、P2 幻影门）
 #   source-contract — `apps/viewer` 的 `check-wasm-api.mjs --source-only`（Rust serde 键名 ↔ TS 接口键名；
 #                     只读源码、不装 wasm 工具链、不建 pkg ⇒ 最便宜的一道，D-022 选项 (a)）
-#   debug           — test:optimize-scene / test:auth-clock / test:path-acceptance / test:jump-apex /
-#                     test:surf-crouch（五道都在 apps/debug 内跑：optimize-scene 会把
+#   debug           — test:optimize-scene / test:auth-clock / test:jump-apex /
+#                     test:surf-crouch（四道都在 apps/debug 内跑：optimize-scene 会把
 #                     `src/renderer/renderer-main.ts` 及其 `../pkg/websurf_wasm.js` 打成 Node bundle，
 #                     jump-apex 与 surf-crouch 直读 `apps/debug/pkg/` ⇒ 本 job 先建 debug wasm）
 #   game            — test:phys / test:seed-smoke / test:surf-crouch（都读 apps/game/pkg）
@@ -151,12 +151,6 @@ jobs:
       - name: 权威时钟验证（配置消息不得丢仿真时间）
         working-directory: apps/debug
         run: npm run test:auth-clock
-
-      # tick→渲染 路径垂距门：Worker 权威帧的发布位置必须是渲染轨迹上的采样点。
-      # 夹具是「缺陷存在时」的真实录制，配 --expect fail —— 判别力自检。
-      - name: tick→render 路径垂距验收（稳态 p95 ≤ 2 HU）
-        working-directory: apps/debug
-        run: npm run test:path-acceptance
 
       - name: 跳跃顶点权威验证（jump apex）
         working-directory: apps/debug

@@ -835,7 +835,7 @@ export class RendererMain {
   /**
    * 路径距离统计（HU）：三组量口径不同，不可混用。
    * - `perp`：垂距——tick 点到渲染折线的最短距离，只扫 ±250ms 时间窗内的线段；面板 p95 读数
-   *   用它，离线验收口径在 `apps/debug/scripts/path-acceptance.mjs`。
+   *   用它（面板近似窗，非全量最近搜索口径）。
    * - `mean/max/green/yellow/red`：偏差梳——tick 点与其同时刻渲染位置的直线距离。
    * - `residual`：残差——权威 post-tick 位置与发布位置的距离；本类的调用点拿不到该读数，
    *   故这组统计的样本数恒为 0。

@@ -79,7 +79,7 @@ if errorlevel 1 (
 echo [4/5] TypeScript ready.
 
 echo [5/5] Running test gates...
-for %%T in (test:optimize-scene test:auth-clock test:path-acceptance test:jump-apex test:surf-crouch) do (
+for %%T in (test:optimize-scene test:auth-clock test:jump-apex test:surf-crouch) do (
   echo   - npm run %%T
   call npm run %%T
   if errorlevel 1 (

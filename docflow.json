@@ -7,7 +7,8 @@
       "CONTRIBUTING.md",
       "SECURITY.md",
       ".github/**/*.md",
-      "skills/**/SKILL.md"
+      "skills/websurf-workflow/SKILL.md",
+      "skills/websurf-env-traps/SKILL.md"
     ],
     "candidates": [],
     "coverageMode": "hard"
@@ -16,14 +17,13 @@
     "README.md": "8cafb89c099598507609a323531a86b39ba1c03046fc9b97c109abb645fe8cfb",
     "CONTRIBUTING.md": "b11e2f55b65f41f46d928bca3f7a819d2b86c0f5af406c68884502cddfe4ede6",
     "SECURITY.md": "71952253779a089c79245c22207364fcd7c6f1796c7e1c922b9c2ce6a69d6931",
-    "skills/websurf-env-traps/SKILL.md": "947c9c16d89bda84fc1c1aeb886a903e25b4992c79d9a1b324bcbba6e5bbb951",
+    "skills/websurf-env-traps/SKILL.md": "ee7267b8aae2b84d8c48d56f9cfbb2bf26c56a7c3cf28dc8c14dd06e88032da4",
     ".github/ISSUE_TEMPLATE/bug_report.md": "1c04607a70bd18dd118b6771a9f0fe12ea5d777ade9bf18c1992c3a500075ed5",
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
-    ".github/PULL_REQUEST_TEMPLATE.md": "226b5d53daa15017d2c5a014a9ad64bcc197e0f484f7ad723b6c6ebdf46ce484",
-    "AGENTS.md": "d2f1dafa4a365f9cbef85aada3728aa5e34cfbdbc79397e9f062b3bc5fb760b7",
-    "skills/agentmemory-usage/SKILL.md": "08a0e816e072599809ad0abc1e59470b4775920111a944bf340ec42aee0b2645",
-    "skills/websurf-workflow/SKILL.md": "3a845d31401522d5aa0dabcd7318b17bdd5455dc46809383457873eee641e046"
+    ".github/PULL_REQUEST_TEMPLATE.md": "d03524f66cdaae0abd96744d204ea954155e325413a23356708299207fa457a2",
+    "AGENTS.md": "d2e74939624f1969b8c1b9b420730878119a9905259f8f17578398c89432b6bf",
+    "skills/websurf-workflow/SKILL.md": "4e4a48d55a3ccb0fd78b05c84dcfd2227beefda141b19ec37d8bee210c57e16c"
   },
   "approvals": [
     {
@@ -83,22 +83,6 @@
       "consumed": true
     },
     {
-      "path": "skills/websurf-workflow/SKILL.md",
-      "by": "Jofen",
-      "reason": "子代理独立审查发现的口径错误：doc-drift.yml 入库状态、viewer 非 single-only、归档目录描述、PR 模板漏 viewer 契约门、agentmemory §8 与 §16 矛盾及台账名/行数/CLI 路径、workflow 注册相对路径与进行中格式",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "skills/websurf-env-traps/SKILL.md",
-      "by": "Jofen",
-      "reason": "子代理审查：本篇只提 1 个已注册的 junction，实际有 3 个（含 websurf-workflow、agentmemory-usage），与 AGENTS.md:74「三个技能」不一致",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
       "by": "Jofen",
       "reason": "上一轮锚点写成相对路径 ci-gates.yml 导致指纹失效，改为全路径 .github/workflows/ci-gates.yml:355",
@@ -124,10 +108,42 @@
     },
     {
       "path": "AGENTS.md",
-      "by": "owner(2026-10-11)",
-      "reason": "T-641/D-119 落地：登记新增的记忆库文档锚点体检脚本 check-kb-doc-drift.mjs（§3 门禁清单 + §3.1 脚本清单）",
+      "by": "owner(Jofen)",
+      "reason": "以官方 agentmemory skill 替换自维护的 agentmemory-usage；websurf-workflow / websurf-env-traps 按 house format 重编为 SKILL.md 骨架 + REFERENCE.md 细则，并承接 agentmemory-usage 里本仓特有的约定；AGENTS §2 同步。",
       "at": "2026-10-10",
-      "task": "T-641",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/websurf-workflow/SKILL.md",
+      "by": "owner(Jofen)",
+      "reason": "以官方 agentmemory skill 替换自维护的 agentmemory-usage；websurf-workflow / websurf-env-traps 按 house format 重编为 SKILL.md 骨架 + REFERENCE.md 细则，并承接 agentmemory-usage 里本仓特有的约定；AGENTS §2 同步。",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/websurf-env-traps/SKILL.md",
+      "by": "owner(Jofen)",
+      "reason": "以官方 agentmemory skill 替换自维护的 agentmemory-usage；websurf-workflow / websurf-env-traps 按 house format 重编为 SKILL.md 骨架 + REFERENCE.md 细则，并承接 agentmemory-usage 里本仓特有的约定；AGENTS §2 同步。",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "AGENTS.md",
+      "by": "owner(2026-10-11)",
+      "reason": "R11（owner 指示）：移除 favicon 与 test:path-acceptance 门禁后同步锚点——ci-gates.yml 删步使 glb-parity job 由 285 前移到 279（`TODO.md` T-409 证据列）、三端 check:api 循环由 355 前移到 349（PR 模板契约门）；TODO.md 新增 T-643；AGENTS.md 去掉 path-acceptance.mjs 与 path-baseline.md 两处登记",
+      "at": "2026-10-10",
+      "task": "T-643",
+      "consumed": true
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "by": "owner(2026-10-11)",
+      "reason": "R11（owner 指示）：移除 favicon 与 test:path-acceptance 门禁后同步锚点——ci-gates.yml 删步使 glb-parity job 由 285 前移到 279（`TODO.md` T-409 证据列）、三端 check:api 循环由 355 前移到 349（PR 模板契约门）；TODO.md 新增 T-643；AGENTS.md 去掉 path-acceptance.mjs 与 path-baseline.md 两处登记",
+      "at": "2026-10-10",
+      "task": "T-643",
       "consumed": true
     }
   ],
@@ -744,6 +760,12 @@
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-10",
         "line": 221
+      },
+      "T-643": {
+        "p": "a9780e776b67068a02969a0355a7496229d8e99d351a4aa3c08dae79805be45a",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-10",
+        "line": 222
       }
     },
     "OWNER.md": {
@@ -808,7 +830,7 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": {},
     ".github/ISSUE_TEMPLATE/other.md": {},
     ".github/PULL_REQUEST_TEMPLATE.md": {
-      ".github/workflows/ci-gates.yml:355:355": "17f00cc3"
+      ".github/workflows/ci-gates.yml:349:349": "17f00cc3"
     },
     "AGENTS.md": {},
     "CHANGELOG.md": {},
@@ -836,7 +858,7 @@
       "apps/viewer/src/replay/timeline.ts:448:448": "767c6872",
       "apps/viewer/src/replay/timeline.ts:450:450": "eb798bc1",
       "apps/game/src/renderer/renderer-main.ts:76:76": "ade8cf9d",
-      ".github/workflows/ci-gates.yml:285:285": "ab72d938",
+      ".github/workflows/ci-gates.yml:279:279": "ab72d938",
       "src/scripts/check-glb-parity.mjs:47:47": "8f41147a",
       "apps/viewer/src/core/scene.ts:176:176~2": "5e51e649",
       "apps/viewer/crates/wasm/src/lib.rs:419:419": "4dcdecf1",
@@ -878,6 +900,8 @@
       "apps/debug/dev.cmd:46:46": "b7676ce7",
       "apps/game/dev.cmd:46:46": "b7676ce7",
       "apps/viewer/dev.cmd:46:46": "b7676ce7",
+      ".github/workflows/ci-gates.yml:279:279~2": "ab72d938",
+      "apps/debug/dev.cmd:82:82": "40c90d67",
       "apps/game/scripts/check-wasm-api.mjs:52:70": "e05aa5d3",
       "apps/game/scripts/check-wasm-api.mjs:55:73": "d112cfe0",
       "apps/game/scripts/check-wasm-api.mjs:55:73~2": "d112cfe0",
@@ -953,12 +977,25 @@
       "apps/debug/dev.cmd:54:69": "5d25cbc3",
       "apps/debug/build.cmd:51:66": "5598c469"
     },
-    "apps/debug/scripts/path-baseline.md": {
-      ".github/workflows/ci-gates.yml:159:159": "77c90367"
-    },
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "TODO.md",
+      "at": "2026-10-10T20:31:45.974Z",
+      "by": "codebuddy",
+      "reason": "R11（owner 指示）：移除 favicon 与 test:path-acceptance 门禁后同步锚点——ci-gates.yml 删步使 glb-parity job 由 285 前移到 279（`TODO.md` T-409 证据列）、三端 check:api 循环由 355 前移到 349（PR 模板契约门）；TODO.md 新增 T-643；AGENTS.md 去掉 path-acceptance.mjs 与 path-baseline.md 两处登记",
+      "changed": 4,
+      "total": 129
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "at": "2026-10-10T20:31:45.973Z",
+      "by": "codebuddy",
+      "reason": "R11（owner 指示）：移除 favicon 与 test:path-acceptance 门禁后同步锚点——ci-gates.yml 删步使 glb-parity job 由 285 前移到 279（`TODO.md` T-409 证据列）、三端 check:api 循环由 355 前移到 349（PR 模板契约门）；TODO.md 新增 T-643；AGENTS.md 去掉 path-acceptance.mjs 与 path-baseline.md 两处登记",
+      "changed": 2,
+      "total": 1
+    },
     {
       "path": "TODO.md",
       "at": "2026-10-10T19:52:16.517Z",

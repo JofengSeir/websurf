@@ -50,20 +50,20 @@ const ROOT = join(HERE, '..'); // apps/game
 const REPO = join(ROOT, '..', '..'); // 仓库根
 const DIST = join(ROOT, 'dist'); // 产物目录：cleanDist 会整目录先删再建
 const INDEX_HTML = join(ROOT, 'web', 'index.html'); // single 改写它、multi 原样拷贝
-const STYLES = join(ROOT, 'web', 'styles.css'); const FAVICON = join(ROOT, 'web', 'favicon.ico'); // 两种形态都原样拷贝
+const STYLES = join(ROOT, 'web', 'styles.css'); // 两种形态都原样拷贝
 const WASM_FILE = 'websurf_wasm_bg.wasm'; // 外置 wasm 的文件名，multi 下同时用作 URL
 const MTZ = join(REPO, 'src', 'materials', 'textures.mtz'); // 默认纹理包（仓库根共享资产）
 
 const HEADER = '/* WebSurf-game embedded build — auto-generated, do not edit */\n'; // 内嵌形态 app.js 的 banner
 
 // single 形态保留的 dist/ 顶层文件（cleanStale 按它删掉多余文件）
-const KEEP_SINGLE = ['index.html', 'app.js', 'styles.css', 'favicon.ico', 'coi-serviceworker.js', 'LICENSE.cs-movement', 'NOTICE.cs-movement'];
+const KEEP_SINGLE = ['index.html', 'app.js', 'styles.css', 'coi-serviceworker.js', 'LICENSE.cs-movement', 'NOTICE.cs-movement'];
 // multi 形态保留的 dist/ 顶层文件（多出 worker.js、外置 wasm / 纹理包与 coi-serviceworker.js）
 const KEEP_MULTI = [
   'index.html',
   'app.js',
   'worker.js',
-  'styles.css', 'favicon.ico',
+  'styles.css',
   WASM_FILE,
   'textures.mtz',
   'coi-serviceworker.js',
@@ -126,7 +126,7 @@ async function buildSingle(wasmPath) {
   if (!rewritten) {
     console.warn('[WARN] web/index.html 未命中 module script 特征串，dist/index.html 可能仍是 module script。');
   }
-  copyFileSync(STYLES, join(DIST, 'styles.css')); copyFileSync(FAVICON, join(DIST, 'favicon.ico')); copyFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js')); // 样式表 / 图标 / SW 模板外置（SW 未注入清单时走 typeof 回退，见 web/coi-serviceworker.js 头注）
+  copyFileSync(STYLES, join(DIST, 'styles.css')); copyFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js')); // 样式表 / SW 模板外置（SW 未注入清单时走 typeof 回退，见 web/coi-serviceworker.js 头注）
   console.log(`[single] dist/app.js: ${(bytes / 1024 / 1024).toFixed(2)} MB（single 全内嵌）`);
 }
 
@@ -161,7 +161,7 @@ async function buildMulti(wasmPath) {
 
   console.log('[multi] 复制 index.html / styles.css（module script 原样）...');
   copyFileSync(INDEX_HTML, join(DIST, 'index.html'));
-  copyFileSync(STYLES, join(DIST, 'styles.css')); copyFileSync(FAVICON, join(DIST, 'favicon.ico'));
+  copyFileSync(STYLES, join(DIST, 'styles.css'));
 
   // coi-serviceworker.js：静态托管上用 SW 给响应补 COOP/COEP 头，使页面 crossOriginIsolated；
   // 这里生成预缓存清单，并把清单与缓存名注入 SW 模板（multi 形态专用）。
