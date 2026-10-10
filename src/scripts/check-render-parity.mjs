@@ -24,6 +24,12 @@
  *   G 预编译必须晚于挂载：地图根 `scene.add(...)` 的行号必须小于 `precompileScene(...)` 的行号
  *     （早于它则编译的是空场景，预编译形同未做）。
  *   H 无 3D 天空盒时的清屏色三端同值（基准 `0x222222`）。
+ *   I 共享入口**调用面**（T-460 WP1/WP6/WP7）：`setSceneEnvironment(`、`applySceneTextureQuality(`、
+ *     `installRenderProbe(` 必须在三端各自 `src/**` 里真的被**调用**（import 不算）——C 只看 import，
+ *     挡不住「import 了却没调」这类空档（正是 T-458 的成因）。
+ *   J 视口声明与实际一致（T-460 WP6，D3 只声明不改）：三端探针的 `viewportSource` 必须与静态事实
+ *     相符——debug 的画布在 `#previewArea` 内（`layout-canvas`），game/viewer 的画布是整窗
+ *     （`full-window`）。**只判声明对不对，不比尺寸**。
  *
  * 扫描面：`git ls-files --cached --others --exclude-standard` 下 `apps/**` 的 .ts/.mjs/.js，
  * 再排除 `pkg/`（wasm 胶水，生成物）、`dist/`、`node_modules/`。
@@ -32,10 +38,11 @@
  *   node src/scripts/check-render-parity.mjs            # 默认只打印结论
  *   node src/scripts/check-render-parity.mjs --verbose  # 逐条打印每个符号的命中数
  *
- * 退出码：任一硬断言（A/B/C/D/E/F/G/H）失败 → 1（逐条打印 `文件:行号` 与命中行）；全部通过 → 0。
+ * 退出码：任一硬断言（A/B/C/D/E/F/G/H/I/J）失败 → 1（逐条打印 `文件:行号` 与命中行）；全部通过 → 0。
  *
- * 能力边界：A/B/C 是静态文本判定——「符号没出现」不等于「行为已同源」；E/F/G/H 是**行为层**判定
- * （实参透传 / 调用顺序 / 取值同源），能守住 2026-10-10 全量排查里 R1 / R6 / R7 那类
+ * 能力边界：A/B/C 是静态文本判定——「符号没出现」不等于「行为已同源」；E/F/H/I/J 是**行为层**判定
+ * （实参透传 / 调用顺序 / 取值同源 / 调用面存在 / 视口声明对得上），能守住 2026-10-10 全量排查里
+ * R1 / R6 / R7 那类
  * 「编译得过、跑起来静默分叉」的缺陷。但以下仍需**像素基线 / 运行期探针**覆盖，本脚本管不到：
  *   - 合并后的实际块数与包围球垫圈是否生效（R1 的后果侧）；
  *   - 剔除距离与 PVS 开关的三端口径（R4 / R5，实现仍在各端私有路径上，见任务书）；
@@ -101,6 +108,8 @@ const SHARED_ENTRIES = [
   ['位姿入口', 'renderer-shared/camera/pose-entry.js'],
   // T-460 WP1：环境登记唯一入口——三端必须在同一次落地里 import（漏一端即静默降级，T-458）。
   ['环境登记', 'renderer-shared/environment/scene-environment.js'],
+  // T-460 WP7：只读渲染状态探针——三端都必须挂（否则一致性门禁读不到该端状态）。
+  ['只读探针', 'renderer-shared/render/render-probe.js'],
 ];
 
 /** E 断言：装配核第 ⑤ 步的 `mergeMain` 写成零参 ⇒ 丢弃装配核传入的 `(root, gltf)`。 */
@@ -289,6 +298,48 @@ for (const app of APPS) {
   }
 }
 
+// ── [I] 共享入口调用面（import 不算；防「import 了却没调」）──────────────────
+const callEntries = [
+  ['环境登记', 'setSceneEnvironment'],
+  ['画质入口', 'applySceneTextureQuality'],
+  ['只读探针', 'installRenderProbe'],
+];
+const callReport = [];
+for (const app of APPS) {
+  const srcFiles = files.filter((f) => f.startsWith(`apps/${app}/src/`));
+  const lines = [];
+  for (const f of srcFiles) lines.push(...fs.readFileSync(path.join(ROOT, f), 'utf8').split(/\r?\n/));
+  const missing = [];
+  for (const [label, sym] of callEntries) {
+    const re = new RegExp('(^|[^\\w.])' + sym + '\\s*\\(');
+    const hit = lines.some((l) => re.test(l) && !/^\s*import\b/.test(l));
+    if (!hit) missing.push(`${label}（未调用 ${sym}）`);
+  }
+  callReport.push(`${app}:${callEntries.length - missing.length}/${callEntries.length}`);
+  if (missing.length) failures.push(`  [I] apps/${app} 未调用关键共享入口：${missing.join('、')}`);
+}
+
+// ── [J] 视口声明与实际一致（D3：只声明不改；不比尺寸）──────────────────────
+const viewportReport = [];
+for (const app of APPS) {
+  const htmlPath = path.join(ROOT, 'apps', app, 'web', 'index.html');
+  const html = fs.existsSync(htmlPath) ? fs.readFileSync(htmlPath, 'utf8') : '';
+  const areaAt = html.indexOf('id="previewArea"');
+  const canvasAt = html.indexOf('<canvas');
+  const canvasInArea = areaAt >= 0 && canvasAt > areaAt;
+  const expect = canvasInArea ? 'layout-canvas' : 'full-window';
+  const srcFiles = files.filter((f) => f.startsWith(`apps/${app}/src/`));
+  const srcText = srcFiles.map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+  const declared = /viewportSource:\s*'([^']+)'/.exec(srcText)?.[1] ?? null;
+  viewportReport.push(`${app}:${declared ?? '未声明'}（静态事实 ${expect}）`);
+  if (declared === null) failures.push(`  [J] apps/${app} 未声明视口来源（探针的 viewportSource）`);
+  else if (declared !== expect) {
+    failures.push(
+      `  [J] apps/${app} 声明的视口来源 '${declared}' 与静态事实不符（画布在 #previewArea 内？${canvasInArea}）⇒ 应为 '${expect}'`,
+    );
+  }
+}
+
 // ── 结论 ───────────────────────────────────────────────────────────────────
 console.log('渲染同源门禁（apps/**）');
 console.log(`扫描面：${files.length} 个文件（git ls-files --cached --others --exclude-standard；排除 pkg/dist/node_modules）`);
@@ -301,6 +352,8 @@ console.log(`[E] 装配核实参透传：${mergeMainChecked} 处 mergeMain（零
 console.log(`[F] 底层提取口径：${extractReport.join('、')}（硬断言：无布尔实参 + 共享签名无形参）`);
 console.log(`[G] 预编译顺序（挂载→预编译）：${orderReport.join('、')}`);
 console.log(`[H] 清屏色基准 ${BG_COLOR_LITERAL} 命中文件数：${bgReport.join('、')}`);
+console.log(`[I] 共享入口调用面：${callReport.join('、')}（共 ${callEntries.length} 项，import 不算）`);
+console.log(`[J] 视口声明对静态事实：${viewportReport.join('、')}`);
 if (failures.length) {
   console.log(`\n渲染同源门禁：失败 ${failures.length} 条\n` + failures.join('\n'));
   process.exit(1);

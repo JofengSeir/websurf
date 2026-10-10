@@ -15,9 +15,9 @@ import {
   getLightingMode,
   type LightingMode,
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js'; import { VisibilityController } from '../../../../src/renderer-shared/scene/visibility-controller.js'; import { applySceneTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js'; import { mosaic_decode } from './bsp.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js'; import { VisibilityController, type VisibilityUpdateResult } from '../../../../src/renderer-shared/scene/visibility-controller.js'; import { installRenderProbe } from '../../../../src/renderer-shared/render/render-probe.js'; import { applySceneTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js'; import { mosaic_decode } from './bsp.js';
 import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js';
-import { mergeIntoNewRoot } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { mergeIntoNewRoot, mergeStatsOf } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
@@ -50,7 +50,7 @@ export class ViewerScene {
   private pvs: PvsManager | null = null;
 
   /** 近平面贴墙自适应：实现在渲染共享层 `src/renderer-shared/camera/near-plane.ts`。 */
-  private readonly nearPlane = new NearPlaneController(); /** 可见性控制器（T-454 P4b：收集/判定在共享层；天空层不参与剔除）。 */ private readonly visibility = new VisibilityController();
+  private readonly nearPlane = new NearPlaneController(); /** 可见性控制器（T-454 P4b：收集/判定在共享层；天空层不参与剔除）。 */ private readonly visibility = new VisibilityController(); /** 最近一次可见性判定结果（三端一致性探针读 `pvsHidden`）。 */ private lastVisibility: VisibilityUpdateResult | null = null;
   private nearCheckToggle = false;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -80,6 +80,17 @@ export class ViewerScene {
     // 运行时灯：不加（2026-10-03 起 viewer 与 game 同一光照纪律）。GLB 自带的 punctual 光源
     // 在共享 buildMapScene 里摘除（VRAD 烘焙已含其贡献，运行时再打会重复计光，且 2000+ 盏
     // 会把受光材质的 uniform 推到上限 ⇒ program 无效 ⇒ 整批 mesh 一个像素都不画）。
+
+    // 只读渲染状态探针（T-460 WP7）：三端一致性门禁的唯一读入口，只读状态、不改渲染行为
+    installRenderProbe({
+      scope: 'viewer',
+      viewportSource: 'full-window',
+      canvas: () => this.renderer.domElement,
+      cull: () => ({ distance: this.visibility.cullDistance, auto: this.visibility.autoCullDistance, configured: readRenderPrefs().culling.distance }),
+      pvs: () => ({ enabled: this.visibility.enablePvs, pvsHidden: this.lastVisibility?.culledByPvs ?? 0, clusters: this.pvs?.getStats().visibleCount ?? 0 }),
+      merge: () => mergeStatsOf(this.modelRoot),
+      sky: () => ({ hasGroup: !!this.skyGroup, children: this.skyGroup?.children.length ?? 0 }),
+    });
   }
 
   hasModel(): boolean {
@@ -100,7 +111,7 @@ export class ViewerScene {
 
   render(): void {
     // 可见性（T-454 P4b）：距离优先 + 可选 PVS，判定与写回在共享控制器里；天空层不参与
-    this.visibility.update(this.camera, this.pvs);
+    this.lastVisibility = this.visibility.update(this.camera, this.pvs);
     // 近平面贴墙自适应：每 2 帧做一次（`nearCheckToggle` 交替），贴墙 / 贴地 / 贴顶时收缩 near；
     // 候选收集只取 modelRoot 子树，且开 vertical（自由飞行要贴地/贴顶——game 只探水平四向）
     this.nearCheckToggle = !this.nearCheckToggle;

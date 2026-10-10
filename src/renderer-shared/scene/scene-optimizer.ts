@@ -451,6 +451,27 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
   return { infos, keptMeshes, chunks, cellSize, cellsCount: cells.size, chunkCount, vertsTotal, drawCallEst };
 }
 
+/** 合并统计（T-460 WP7）：写在产出根的 `userData.vbspMerge` 上，供三端一致性探针逐字段比对。 */
+export interface MergeStats {
+  /** 参与合并的输入 mesh 数。 */
+  meshes: number;
+  /** 合并后的块数。 */
+  chunks: number;
+  /** draw call 估算（块内材质槽数之和）。 */
+  drawCallEst: number;
+}
+
+/** 把合并统计挂到产出根（`optimizeScene` / `mergeIntoNewRoot` 各调一次）。 */
+function attachMergeStats(root: THREE.Object3D, stats: MergeStats): void {
+  (root.userData as { vbspMerge?: MergeStats }).vbspMerge = stats;
+}
+
+/** 读产出根上的合并统计（探针用；未合并过时为 null）。 */
+export function mergeStatsOf(root: THREE.Object3D | null | undefined): MergeStats | null {
+  if (!root) return null;
+  return (root.userData as { vbspMerge?: MergeStats }).vbspMerge ?? null;
+}
+
 /**
  * 视锥外保留一圈：给 root 下每个 mesh 的包围球半径乘 FRUSTUM_PAD。必须无条件重算包围球（不能只判
  * null）：烘焙路径是 geometry.clone() + applyMatrix4(matrixWorld)，克隆会带上 GLB 局部空间的旧球
@@ -491,6 +512,7 @@ export function optimizeScene(
   for (const m of r.keptMeshes) bspRoot.add(m);
   bspRoot.remove(gltfScene);
   padBoundingSpheres(bspRoot);
+  attachMergeStats(bspRoot, { meshes: totalMeshes, chunks: r.chunkCount, drawCallEst: r.drawCallEst });
 
   // 统计 + 前向视锥可见块估算（块中心与相机方向的点积粗估，FOV 取入参 fovDeg）
   const chunkBox = new THREE.Box3();
@@ -536,5 +558,6 @@ export function mergeIntoNewRoot(src: THREE.Object3D): THREE.Group {
   for (const m of r.chunks) root.add(m);
   for (const m of r.keptMeshes) root.add(m);
   padBoundingSpheres(root);
+  attachMergeStats(root, { meshes: r.infos.length, chunks: r.chunkCount, drawCallEst: r.drawCallEst });
   return root;
 }

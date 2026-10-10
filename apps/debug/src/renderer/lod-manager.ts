@@ -103,14 +103,16 @@ export class LodManager {
 	 *
 	 * @param model 加载的 glTF 场景根节点。
 	 * @param config 运行时配置（只读 `lod.updateInterval`）。
+	 * @param maxDim 整图最大边（`assembleScene` 的 `maxDim`）——自动剔除距离的**输入必须与另两端同源**：
+	 *   用本端模型根现算的 bbox 会偏小（天空区已被 `extractSkyArea` 摘走），三端 `cullDistance` 因此不等
+	 *   （T-460 WP7 运行期探针实测：debug 16146.83 vs game/viewer 16325.11）。
 	 * @returns 场景对角线信息（`count` / `diagonal` / `defaultCull` / `maxCull`，供 UI 滑块使用）。
 	 */
-	setup(model: THREE.Object3D, config: RuntimeConfig): SceneDiagonalInfo {
+	setup(model: THREE.Object3D, config: RuntimeConfig, maxDim: number): SceneDiagonalInfo {
 		const count = this.visibility.collect(model, null);
 
 		const box = new THREE.Box3().setFromObject(model);
 		const size = box.getSize(new THREE.Vector3());
-		const maxDim = Math.max(size.x, size.y, size.z);
 		const diag = size.length();
 		this.diagonal = diag;
 		this.maxCull = Math.ceil((diag * 4) / 100) * 100;
@@ -212,6 +214,16 @@ export class LodManager {
 	/** 视距剔除上限。 */
 	get maxCullDistance(): number {
 		return this.maxCull;
+	}
+
+	/** 生效的 PVS 开关（共享控制器里的值；三端一致性探针读它）。 */
+	get pvsEnabled(): boolean {
+		return this.visibility.enablePvs;
+	}
+
+	/** 自动剔除距离（`最大边 × 0.5`，下限由共享控制器兜；探针读它）。 */
+	get autoCullDistance(): number {
+		return this.autoCull;
 	}
 
 	/** 释放资源（只清块表，不碰场景对象）。 */

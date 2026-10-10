@@ -49,7 +49,7 @@ import type { DistStats } from './path-recorder.js';
 import type { InputReplayInitialState, InputReplayHull } from '../input/input-recorder.js';
 import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
-import { optimizeScene as optimizeSceneShared } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
+import { mergeStatsOf, optimizeScene as optimizeSceneShared } from '../../../../src/renderer-shared/scene/scene-optimizer.js'; import { installRenderProbe } from '../../../../src/renderer-shared/render/render-probe.js';
 import {
   assembleScene,
 } from '../../../../src/renderer-shared/scene/assemble-scene.js';
@@ -336,6 +336,17 @@ export class RendererMain {
 
     this.cameraController = new CameraController(this.camera, config.input); installPoseEntry({ applyPose: (p) => { const [yawRad, pitchRad] = yawPitchRadOf(p); this.poseHold = { x: p.pos[0], y: p.pos[1], z: p.pos[2], yawRad, pitchRad }; }, readPose: () => cameraPoseOf(this.camera), releasePose: () => { this.poseHold = null; } }, 'debug'); (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality = (q) => this.applyTextureQuality(q);
 
+    // 只读渲染状态探针（T-460 WP7）：三端一致性门禁的唯一读入口，只读状态、不改渲染行为
+    installRenderProbe({
+      scope: 'debug',
+      viewportSource: 'layout-canvas',
+      canvas: () => document.querySelector('canvas'),
+      cull: () => ({ distance: this.lodManager.cullDistance, auto: this.lodManager.autoCullDistance, configured: readRenderPrefs().culling.distance }),
+      pvs: () => ({ enabled: this.lodManager.pvsEnabled, pvsHidden: this.lodManager.getStats().pvsHidden, clusters: this.pvsManager?.getStats().visibleCount ?? 0 }),
+      merge: () => mergeStatsOf(this.bspModelScene),
+      sky: () => ({ hasGroup: !!this.skyGroup, children: this.skyGroup?.children.length ?? 0 }),
+    });
+
     this.lightManager.applyLights(this.scene, config);
     this.colliderDebug.init(this.scene);
     this.colliderDebug.setDebugFlags(
@@ -477,7 +488,7 @@ export class RendererMain {
 
     // LOD 与 PVS：setup 收集块并按对角线定剔除距离，随后用 PVS 给每个块分配 clusterId
     // （pvsManager 已在天空区摘取前建好）
-    const diagInfo = this.lodManager.setup(mapRoot, this.config);
+    const diagInfo = this.lodManager.setup(mapRoot, this.config, maxDim);
     this.lodManager.assignClusterIds(this.pvsManager);
 
     // 传送触发器：进碰撞可视化，同时作为准星射线的 trigger 命中面

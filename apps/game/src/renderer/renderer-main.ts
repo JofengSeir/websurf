@@ -40,7 +40,7 @@ import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-ca
 import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
-import { mergeIntoChunks, padBoundingSpheres, optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js'; import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js'; import { VisibilityController } from '../../../../src/renderer-shared/scene/visibility-controller.js';
+import { mergeIntoChunks, mergeStatsOf, padBoundingSpheres, optimizeScene } from '../../../../src/renderer-shared/scene/scene-optimizer.js'; import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js'; import { VisibilityController, type VisibilityUpdateResult } from '../../../../src/renderer-shared/scene/visibility-controller.js'; import { installRenderProbe } from '../../../../src/renderer-shared/render/render-probe.js';
 import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inject-stats.js';
 import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { createSkyCamera, extractSkyArea, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
@@ -156,6 +156,8 @@ export class RendererMain {
   // ── 纹理画质切换（mosaic）──────────────────────────────────
   /** 画质 manifest（纹理名小写 → mosaic 字节码）；为空时整条画质切换链路短路。 */
   private mosaicManifest: Record<string, string> | null = null;
+  /** 最近一次可见性判定的结果（探针读 `pvsHidden`；每帧在 `tick` 里刷新）。 */
+  private lastVisibility: VisibilityUpdateResult | null = null;
   /** 换成 mosaic 之前的原始贴图图像（键 = 纹理对象）；切回 `original` 时用它还原。 */
   private readonly origTextureImages = new Map<THREE.Texture, unknown>();
   // 近平面贴墙自适应：字段与逻辑在 ./near-plane.ts 的 NearPlaneController（tick 每 2 帧调 update）。
@@ -241,6 +243,17 @@ export class RendererMain {
 
     // 背景
     setSceneBackgroundColor(this.scene, 0x222222);
+
+    // 只读渲染状态探针（T-460 WP7）：三端一致性门禁的唯一读入口，只读状态、不改渲染行为
+    installRenderProbe({
+      scope: 'game',
+      viewportSource: 'full-window',
+      canvas: () => this.renderer?.domElement ?? null,
+      cull: () => ({ distance: this.visibility.cullDistance, auto: this.visibility.autoCullDistance, configured: readRenderPrefs().culling.distance }),
+      pvs: () => ({ enabled: this.visibility.enablePvs, pvsHidden: this.lastVisibility?.culledByPvs ?? 0, clusters: this.pvsManager?.getStats().visibleCount ?? 0 }),
+      merge: () => mergeStatsOf(this.scene?.children.find((c) => c.userData?.isBspModel) ?? null),
+      sky: () => ({ hasGroup: !!this.skyGroup, children: this.skyGroup?.children.length ?? 0 }),
+    });
   }
 
   /**
@@ -738,7 +751,7 @@ export class RendererMain {
 
     // 2. LOD/PVS 剔除（T-454 P4：判定与写回都在共享 `VisibilityController`：距离优先、距离内再看 PVS，
     //    天空层不参与剔除）
-    this.visibility.update(this.camera, this.pvsManager);
+    this.lastVisibility = this.visibility.update(this.camera, this.pvsManager);
 
     // 3. 绘制（帧率跟随 rAF，不做节流）
     this.renderFrame();
