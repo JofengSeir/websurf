@@ -57,7 +57,9 @@ const failures = [];
 async function exportApp({ app, pkg }, mapBytes) {
   const pkgJs = path.join(ROOT, 'apps', app, 'pkg', pkg);
   const pkgWasm = pkgJs.replace(/\.js$/, '_bg.wasm');
-  const mtzPath = path.join(ROOT, 'apps', app, 'web', 'textures.mtz');
+  // 纹理包只认仓库根的唯一源（apps/<app>/web/ 下的副本不入库，仅供本地 dev 静态服务）。
+  // 三端读同一份字节，等价关系比逐端副本更强。
+  const mtzPath = path.join(ROOT, 'src', 'materials', 'textures.mtz');
   const mod = await import(pathToFileURL(pkgJs).href);
   mod.initSync({ module: fs.readFileSync(pkgWasm) });
 
@@ -199,12 +201,14 @@ console.log(`地图: ${DEFAULT_MAP}`);
 
 const missing = [];
 for (const { app, pkg } of APPS) {
-  for (const rel of [['pkg', pkg], ['pkg', pkg.replace(/\.js$/, '_bg.wasm')], ['web', 'textures.mtz']]) {
+  for (const rel of [['pkg', pkg], ['pkg', pkg.replace(/\.js$/, '_bg.wasm')]]) {
     const abs = path.join(ROOT, 'apps', app, ...rel);
     if (!fs.existsSync(abs)) missing.push(path.relative(ROOT, abs).split(path.sep).join('/'));
   }
 }
 if (!fs.existsSync(DEFAULT_MAP)) missing.push(path.relative(ROOT, DEFAULT_MAP).split(path.sep).join('/'));
+const MTZ_SRC = path.join(ROOT, 'src', 'materials', 'textures.mtz');
+if (!fs.existsSync(MTZ_SRC)) missing.push('src/materials/textures.mtz');
 if (missing.length) {
   console.log(`SKIP 缺少输入（先各自 npm run build:wasm 并放入地图夹具）：${missing.join(', ')}`);
   process.exit(0);

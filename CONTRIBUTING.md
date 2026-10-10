@@ -36,12 +36,13 @@ npm run build          # build:wasm + typecheck + esbuild 打包
 | `apps/game` | `check:api`、`test:phys`、`test:seed-smoke`、`test:surf-crouch` |
 | `apps/viewer` | `check:api`、`test:replay`、`local:smoke`（需本地 dev 服务与 Edge/Chromium） |
 | 共享层 | `cargo test -p websurf-phys` |
-| 文档 | `node src/scripts/check-doc-drift.mjs` |
 
 其中 debug / game / viewer 的主要 `test:*` 同时是 CI 门禁（`.github/workflows/ci-gates.yml`）；部署另由 `deploy-pages.yml` 负责，两者互不阻塞。
 
-## 5. 文档
+## 5. 文档与治理（本地保留）
 
-文档已于 2026-09-22 完成**重编**（以源码为唯一事实来源重写全部文档与代码注释）；旧文档已移出工作区（不作事实来源，原文仅存 git 历史），重编控制文件已于 2026-09-23 随任务完结删除。
-
-改动文档或注释时，请遵循 `documents/norms/annotation-and-verification.md`（注释书写规范与验收判据）与根 `AGENTS.md`（当前规范、任务待办与待决索引），并在提交前跑 `node src/scripts/check-doc-drift.mjs`（锚点越界必须为 0）。
+本仓库是**公开的运行/构建仓库**：只收「三端 + 共享层 + 部署与 CI」。
+开发过程的治理层（`documents/**` 文档与注释规范、`TODO.md` 待办看板、`OWNER.md` 决策队列、`AGENTS.md` 仓库规范、
+`progress/**` 过程记录、`skills/**`，以及 `src/scripts/{docflow,check-doc-drift,check-board-touch,check-memory-sync}.mjs` 文档门禁）
+**只在本地保留、不推送**（判据见根 `.gitignore` 的「本地保留」段）。改动代码时请遵守本地那一层的规范；
+公开侧只需保证 `cargo test -p websurf-phys`、三端 `npm run typecheck` 与各自 `test:*` 门禁通过。

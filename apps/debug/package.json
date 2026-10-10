@@ -12,6 +12,7 @@
     "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
     "build:dist": "node scripts/build-dist.mjs",
     "build": "npm run build:wasm && npm run build:ts",
+    "predev": "node ../../src/scripts/sync-default-textures.mjs",
     "dev": "python ../../src/serve.py 8080 .",
     "check:api": "node scripts/check-wasm-api.mjs",
     "count:glb-meshes": "node scripts/glb-mesh-count.mjs",

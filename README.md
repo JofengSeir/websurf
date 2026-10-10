@@ -51,12 +51,11 @@ npm run dev            # python ../../src/serve.py 8080 .
 | `src/phys/**` | `websurf-phys`：世界容器、玩家移动语义、传送触发、种子面 |
 | `src/wasm-core/**` | `websurf-wasm-core`：BSP、GLB、pakfile、材质与 mosaic |
 | `src/ts-shared/**` | TS 共享：权威循环、tick 消费者、共享状态通道、物理参数与角度、世界类型 |
-| `src/scripts/**` | 共享脚本：wasm 过期检查、文档漂移体检、共享层同步体检、分发打包 |
+| `src/scripts/**` | 共享脚本：`lib/` 分发打包内核与 wasm API 契约、GLB / 渲染同源门禁、默认纹理同步 |
 | `apps/<app>/crates/wasm/**` | 各工程的 wasm-bindgen 导出层（debug/game 为 `websurf-wasm`，viewer 为 `websurf_viewer_wasm`） |
 | `apps/<app>/src/**`、`web/**` | 前端源码与静态页面（`web/app.js`、`web/worker.js` 是**构建产物**，不入库） |
 | `apps/<app>/scripts/**` | 各工程构建与验收脚本（含 `build-dist.mjs`） |
 | `test/maps/**`、`test/replay/**`、`test/project/**` | 本地数据：地图夹具、记录 / 录像夹具、DEM 调研资料（**均 gitignore，不入库**） |
-| `documents/**` | 文档（见 §7） |
 
 ## 4. 构建链
 
@@ -72,7 +71,6 @@ npm run dev            # python ../../src/serve.py 8080 .
 cargo test -p websurf-phys                       # 共享物理单测
 cd apps/<app> && npm run typecheck               # 类型检查
 cd apps/<app> && npm run test:<门>               # 见下表
-node src/scripts/check-doc-drift.mjs             # 文档漂移体检
 ```
 
 | 工程 | `test:*` 门禁（锚点：`.github/workflows/ci-gates.yml`） |
@@ -81,9 +79,8 @@ node src/scripts/check-doc-drift.mjs             # 文档漂移体检
 | `apps/game` | `test:phys`、`test:seed-smoke`、`test:surf-crouch` |
 | `apps/viewer` | `test:replay`（纯 TS 自检，不依赖 wasm 产物） |
 
-CI 三个 workflow（`.github/workflows/`）：
+CI 两个 workflow（`.github/workflows/`）：
 
-- **`doc-drift.yml`**：跑 `check-doc-drift.mjs`，查行数声明、`文件:行号` 锚点越界、路径失效、裸文件名歧义。能力边界：**只查越界，不查该行内容与描述是否相符**。
 - **`ci-gates.yml`**（`.github/workflows/ci-gates.yml:38`）：五个 job —— `rust-unit-tests`（`cargo test -p websurf-phys`）、`source-contract`（`apps/viewer/scripts/check-wasm-api.mjs --source-only`：Rust serde 键名 ↔ TS 接口键名，只读源码、不装 wasm 工具链；`OWNER.md` D-022 选项 (a)）、`debug-gates`（五道）、`game-gates`（三道）、`viewer-gates`（`test:replay`）。纯文档改动（`**.md`、`documents/**`）不触发门禁。
 - **`deploy-pages.yml`**：matrix 并行构建三工程的 `build:dist -- --multi`，装到 `deploy/<app>/`，用入口页模板生成站点首页。组装时给入口页烙印部署 id 并生成 `version.json`——入口页每次部署对每个浏览器弹一次部署提示，旧缓存页据此自检过期并自动刷新。**与门禁互不阻塞**。
 
@@ -94,20 +91,20 @@ CI 三个 workflow（`.github/workflows/`）：
 - TS 侧一律用相对路径 import 共享层（例：`apps/debug/src/input/input-recorder.ts:47`）；SAB 通道与 postMessage 回退的分派在 `src/ts-shared/auth/shared-state.ts:1022` 的 `createMainSharedState`。
 - 共享层一处改动多端生效：**不要在工程内复制共享实现**。
 
-## 7. 文档地图
+## 7. 文档与治理（本地保留，不在公开仓库）
 
-完整导航见 [documents/index.md](documents/index.md)（按实际文件树维护）；**待办与状态只在一处**：根 [TODO.md](TODO.md)；**需要 owner 拍板的决定只在一处**：根 [OWNER.md](OWNER.md)。
+本仓库是**公开的运行/构建仓库**：只收「三端 + 共享层 + 部署与 CI」。
+面向开发过程的那一层——代码注释规范、模块文档、待办看板、owner 决策队列、进度与过程记录、文档漂移门禁
+（`documents/**`、`TODO.md`、`OWNER.md`、`AGENTS.md`、`progress/**`、`skills/**`、`src/scripts/{docflow,check-doc-drift,check-board-touch,check-memory-sync}.mjs` 等）
+——**只在本地保留、不推送到远端**（判据见根 `.gitignore` 的「本地保留」段）。
 
-| 入口 | 回答什么 |
-|---|---|
-| [TODO.md](TODO.md) | **唯一待办看板**：状态、类型、归属、证据锚点、详情 |
-| [OWNER.md](OWNER.md) | **owner 决策队列**：待你拍板的决定（优先级 / 选项 / 我的建议 / 不定的后果）与已决留痕 |
-| [documents/index.md](documents/index.md) | 全部文档的总导航（共享层 / 三工程子树 / 规范 / 过程记录） |
-| [documents/norms/annotation-and-verification.md](documents/norms/annotation-and-verification.md) | 注释书写规范与验收判据、已验证的陷阱清单 |
-| [AGENTS.md](AGENTS.md) | 仓库级规范：三禁令 / §0.1 看板规程 / §0.2 日常流程 / §0.3 决策登记 / 自检 / 上报 |
-## 8. 已知缺口（摘要）（状态见 TODO.md）
+因此根 `README` / `CHANGELOG` / `CONTRIBUTING` / `SECURITY` 与 `.github/` 模板之外的文档引用可能指向本地文件，
+那是刻意为之：公开仓库只保证**能构建、能跑、能自动部署**。
 
-以下均为**读码所得、未修改代码**的登记项，逐条明细与证据见 `TODO.md`（零分配支路与 `set_yaw_pitch` 见 T-006、T-009；用户录制缺口见 T-041）：
+
+## 8. 已知缺口（摘要）（状态台账本地保留）
+
+以下均为**读码所得、未修改代码**的登记项（逐条明细与证据的台账随开发层本地保留）：
 
 - **输入侧只有回放、没有用户录制**：落样本的只有回放分支 `replayCapture`（`apps/debug/src/app.ts:2255`），页面没有用户录制入口（录制器已随死链删除）——录制产物只能由外部工具生成，经 `__wsInput.load` / `play` / `stopPlay` 回放。
 - **零分配支路已实现但未装配**：`tick_into` / `state_out_ptr` / `seed_from` 仅被 `src/ts-shared/` 的控制器调用，而这些控制器在三个工程内都没有装配点；`set_yaw_pitch` 在 `apps/**` 与 `src/**` 内零调用点。

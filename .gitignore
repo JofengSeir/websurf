@@ -12,8 +12,9 @@
 **/web/app.js
 **/web/worker.js
 **/web/websurf_wasm_bg.wasm
-# 注意：**/web/textures.mtz 不在此列——apps/debug/web/textures.mtz 与 apps/game/web/textures.mtz 是
-# 公共默认纹理包 src/materials/textures.mtz 的副本（跟踪，服务运行必需）；apps/viewer 无该副本。
+# 三端 web/ 下的默认纹理包是 src/materials/textures.mtz 的本地开发副本（唯一源在 src/materials；构建产物由
+# build-dist.mjs 直接读 src/materials ⇒ dist/ 自带）。dev 起服务前用 src/scripts/sync-default-textures.mjs 同步。
+apps/*/web/textures.mtz
 
 # ── Cargo / wasm-pack 缓存（生成者：src/scripts/cargo-env.cmd 的 CARGO_HOME / WASM_PACK_CACHE）──
 **/.cargo-home/
@@ -87,6 +88,24 @@ apps/game/scripts/wasm-hash-pin.mjs
 # apps/viewer/test/shot.mjs：一次性 CDP 截图工具（观感验证用；引用面为零，判据同上）
 apps/viewer/test/shot.mjs
 
+# ── 本地保留（不推送）：开发 / 治理层 ──
+# 判据：部署链（.github/workflows/deploy-pages.yml）与三端构建/运行**不需要**它们。
+# 远端仓库只应有：三端 apps/** + 共享层 src/** + README/LICENSE/CHANGELOG/CONTRIBUTING/SECURITY
+#   + .github 模板与两个 workflow（deploy-pages / ci-gates）。
+AGENTS.md
+TODO.md
+OWNER.md
+docflow.json
+documents/
+progress/
+skills/
+src/scripts/docflow.mjs
+src/scripts/check-doc-drift.mjs
+src/scripts/check-board-touch.mjs
+src/scripts/check-memory-sync.mjs
+src/scripts/check-shared-sync.mjs
+src/scripts/wasm-stale-check.mjs
+.github/workflows/doc-drift.yml
 # ── 操作系统噪声（跨平台协作常带进来的文件）──
 .DS_Store
 Thumbs.db

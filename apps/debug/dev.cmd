@@ -43,6 +43,13 @@ if errorlevel 1 (
   exit /b 1
 )
 echo [2/5] Node dependencies ready.
+echo [2/5] Syncing shared default textures (src/materials -> web/)...
+call node "%~dp0..\..\src\scripts\sync-default-textures.mjs"
+if errorlevel 1 (
+  echo [ERROR] Texture sync failed.
+  pause
+  exit /b 1
+)
 
 echo [3/5] Rebuilding WASM (release)...
 call npm run build:wasm
