@@ -48,6 +48,9 @@ test/project/*
 # ZCode 会话的工作区（计划文件 .zcode/plans/** 等，工具自动生成；漂移体检不应扫描它们）
 .zcode/
 .zcodeignore
+# agent 计划区（任务书 / 方案草稿，工具与 owner 生成；同 .zcode/ 与 AGENTS §0.1 第 6 条：过程产物不入库）
+# 不忽略会让漂移体检扫描它：本机绝对路径计入 [P]、举例待办号计入 [G]（2026-10-10 实测 19+5 处）
+.plan/
 
 # ── 归档文件──
 **/.archive/

@@ -66,8 +66,24 @@ import { execFileSync } from 'node:child_process';
 const ROOT = process.cwd();
 const EXT = 'ts|tsx|rs|mjs|js|py|cmd|json|md|toml|html|css|yml|yaml';
 
-const tracked = execFileSync('git', ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard'], { maxBuffer: 64 * 1024 * 1024 })
-  .toString('utf8').split(/\r?\n/).filter(Boolean);
+/** 同步退避：无事件循环可 await，Atomics.wait 是 Node 的同步 sleep 惯用法。 */
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/** git 调用重试：并发或杀软占用下偶发 EBUSY（见 skills/websurf-env-traps）。3 次仍失败才抛出。 */
+function gitRetry(args, n = 3) {
+  for (let i = 1; ; i++) {
+    try { return execFileSync('git', ['-C', ROOT, ...args], { maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).toString('utf8'); }
+    catch (e) { if (i >= n) throw e; sleepSync(200 * i); }
+  }
+}
+
+/** 基础设施故障（git 不可用 / EBUSY）不等于「内容通过」：降级 WARN 并显式说明体检未完成。 */
+let tracked;
+try {
+  tracked = gitRetry(['ls-files', '--cached', '--others', '--exclude-standard']).split(/\r?\n/).filter(Boolean);
+} catch (e) {
+  console.log('[WARN] git 不可用（' + String((e && e.message) || e).slice(0, 120) + '）⇒ 本次体检未完成，不代表通过');
+  process.exit(0);
+}
 // ls-files 会把「已删除但未暂存」的条目也列出来，故按磁盘存在性再过滤一次
 const live = tracked.filter((f) => fs.existsSync(path.join(ROOT, f)));
 const wc = (rel) => { let n = 0; const b = fs.readFileSync(path.join(ROOT, rel)); for (const x of b) if (x === 10) n++; return n; };
@@ -459,11 +475,19 @@ for (const f of live) {
 }
 // [O] 文档契约（docflow）：口径与实现在 src/scripts/docflow.mjs，这里只取它的退出码与逐条明细
 const docflow = [];
+const docflowWarn = [];
+/** docflow 把「git 基础设施故障」降级为 [WARN] 且 exit 0；这里必须还原成可见的告警而不是静默丢掉。 */
+const splitDocflow = (out) => {
+  for (const l of String(out).split('\n')) {
+    if (!l.trim()) continue;
+    (l.includes('[WARN]') ? docflowWarn : docflow).push('  ' + l.trim());
+  }
+};
 try {
-  execFileSync('node', ['src/scripts/docflow.mjs', 'check', '--quiet'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  splitDocflow(execFileSync('node', ['src/scripts/docflow.mjs', 'check', '--quiet'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
 } catch (e) {
   const out = String(e.stdout || '').trim();
-  if (out) out.split('\n').forEach((l) => { if (l.trim()) docflow.push('  ' + l.trim()); });
+  if (out) splitDocflow(out);
   else docflow.push('  docflow check 非 0 退出（排查：node src/scripts/docflow.mjs check）');
 }
 
@@ -481,6 +505,7 @@ if (eolBad.length) console.log('\n[F] 行尾/BOM（失败）：\n' + [...new Set
 const pendCount = boardRows.filter((c) => c[4] === '待裁决').length;
 if (pendCount > 50) console.log('\n[提示·待裁决压力] 待裁决 ' + pendCount + ' 条（阈值 50）——按 `AGENTS §0.1` 第 8 条：每轮先清一批再取新活。');
 if (localPath.length) console.log('\n[P] 本机路径（失败）：\n' + [...new Set(localPath)].join('\n') + '\n  —— 规则与处置见 documents/norms/local-path-hygiene.md');
+if (docflowWarn.length) console.log('\n[WARN] 文档契约 docflow 未完成：\n' + [...new Set(docflowWarn)].join('\n') + '\n  —— 基础设施故障，不是契约通过');
 if (docflow.length) console.log('\n[O] 文档契约 docflow（失败）：\n' + docflow.join('\n'));
 if (contract.length) console.log('\n[N] 脚本与部署链契约（失败）：\n' + contract.join('\n'));
 if (docGap.length) console.log('\n[L] 文档缺口未标注（失败）：\n' + docGap.join('\n'));

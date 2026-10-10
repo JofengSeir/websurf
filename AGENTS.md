@@ -37,9 +37,9 @@
 2. **挑活**：从 `TODO.md` 的「未结项」里挑**一条**。顺序：`待修` → `已取证待立项` 拆出的子项 → 其余；**`待裁决` 不要自取**（等 owner 结论）。同一时刻只做一条。
 3. **留痕**：开工先只改那一行（`状态` 写成 `进行中 · <agent> · <YYYY-MM-DD>`，即认领）——用本次改动的第一个提交带上，避免多个 agent 抢同一条。
 4. **认领即锁结束条件**：`node src/scripts/docflow.mjs claim --task T-### --may <本次会动的文件> [--must <必须动的文件>]`——把「这次允许改什么、必须改什么」写成契约；收尾跑 `node src/scripts/docflow.mjs verify`（`must` 未改、越界改动、只读漂移都会拦）。一次只允许一条认领，换任务先 `release`。
-5. **先读本模块文档，再读码定位**：先看本模块在 `documents/` 的文档（定位 / 边界 / 时序 / 已知缺口）拿上下文，再按导出项与调用点读码；**事实一律以代码为准**，结论必须落到 `文件:行号`，落不到就标 `[待确认]` 并停下上报（§1）。
+5. **先读本模块文档，再读码定位**：先看本模块在 `documents/` 的文档（定位 / 边界 / 时序 / 已知缺口）拿上下文，再按导出项与调用点读码；**事实一律以代码为准**，结论必须落到 `文件:行号`，落不到就标 `[待确认]` 并停下上报（§1）。**记忆库里的是线索不是事实**：用 `memory_smart_search` 定位时**必须先声明工程作用域**（查询词带工程名），并校验命中结果的 `source` 前缀是否属本工程——不符即弃用、加工程名重查（agentmemory 是单实例共享库，跨工程同名文件会串台）；落结论仍须回原文核到 `文件:行号`。
 6. **验收判据（必填）**：判据写在 `TODO.md` 总表的「判据」列，内容 = **可执行命令 + 期望输出**；详情页有判据就照它，没有就**先补判据再动手**——没有判据的活不开工。
-7. **收尾（同一提交）**：更新该行 `状态`（→ `已结案`）与 `证据`（`文件:行号`），提交信息写 `T-###`；文档增删 ⇒ 同提交更新 `documents/index.md`（体检 `[G]⑧` 硬查覆盖）；用户可见变化 ⇒ 同提交更新 `CHANGELOG.md`；**该条在 `documents/**` 有「已知缺口」段落 ⇒ 同提交打上 ~~原断言~~ +「已消除（YYYY-MM-DD）：原因」（体检 `[L]` 硬查，删掉整段也算合格）；结案前先用「证据」文件本身复核断言是否真的不成立——判据的 `-- <路径>` 指错目录会导致假结案（体检 `[M]` 拦）**；跑 §5 自检；进展按 §0.1 第 6 条写进「当前写入目标」那一卷，并在 `progress/index.md` 的索引补一行（§7.1 已冻结）。 **只读 md 不得直接改**（清单见 `node src/scripts/docflow.mjs report`：`documents/norms/**`、`README`、`.github/**/*.md`、`skills/**/SKILL.md` 等）：须 owner 先 `approve --path … --by … --reason …`、改完 `sync` 重钉；新建/删除只读类文件同理。
+7. **收尾（同一提交）**：更新该行 `状态`（→ `已结案`）与 `证据`（`文件:行号`），提交信息写 `T-###`；文档增删 ⇒ 同提交更新 `documents/index.md`（体检 `[G]⑧` 硬查覆盖）；用户可见变化 ⇒ 同提交更新 `CHANGELOG.md`；**该条在 `documents/**` 有「已知缺口」段落 ⇒ 同提交打上 ~~原断言~~ +「已消除（YYYY-MM-DD）：原因」（体检 `[L]` 硬查，删掉整段也算合格）；结案前先用「证据」文件本身复核断言是否真的不成立——判据的 `-- <路径>` 指错目录会导致假结案（体检 `[M]` 拦）**；跑 §5 自检；进展按 §0.1 第 6 条写进「当前写入目标」那一卷，并在 `progress/index.md` 的索引补一行（§7.1 已冻结）。 **只读 md 不得直接改**（清单见 `node src/scripts/docflow.mjs report`：`documents/norms/**`、`README`、`.github/**/*.md`、`skills/**/SKILL.md` 等）：须 owner 先 `approve --path … --by … --reason …`、改完 `sync` 重钉；新建/删除只读类文件同理。只读文件若在记忆库留有 slot 副本，那是**派生投影**，权威仍是仓库文件（slot 不得作唯一副本）；规则 / 宪法 / 待办类**本就不入库**（见 `skills/agentmemory-usage` 红线 R3）。
 
 ### 0.3 需要真人拍板的事 → 根 `OWNER.md`
 
@@ -81,7 +81,7 @@
 |---|---|---|
 | **B1** | 禁以旧注释为依据 | 不得摘抄、复述、沿用任何现有代码注释——它们正是重写对象。语义只能从实现、调用点、测试取得 |
 | **B2** | 禁以旧文档为依据 | 旧文档已从工作区删除（仅存于 git 历史，**不得读取、不得引用、不得当作回滚依据**）；任务必须能在文档树为空时从源码重建 |
-| **B3** | 禁推测 | 无法在代码中定位的结论标 `[待确认]` 并停下上报；禁止"应该/可能/大概是/历史上" |
+| **B3** | 禁推测 | 无法在代码中定位的结论标 `[待确认]` 并停下上报；禁止"应该/可能/大概是/历史上"。**例外**：日志类与逐字引用类内容不受本禁约束（它们记录"当时发生了什么"，本就不该能定位到当前代码），但必须带 `[source:路径#序号@sha12]`，sha12 = 该源文件 sha256 前 12 位 |
 
 **取证手段**：源码行、构建脚本、配置、以及 `cargo check` / `cargo test` / `npm run typecheck` / 漂移体检的**实际输出**。代码历史（`git log`/`blame`）可作线索，但最终以当前代码为准。
 
@@ -92,14 +92,14 @@
 | 位置 | 状态 |
 |---|---|
 | 仓库根 `*.md` | 本文件（§0 工作流核心，唯一入口）+ `README.md` + `TODO.md`（待办看板）+ `OWNER.md`（owner 决策队列）+ `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`；后四篇于 2026-09-22 由旧文档**合并重建**，细节源头为 git 历史 |
-| `documents/` | **46 篇**（2026-10-07 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
+| `documents/` | **47 篇**（2026-10-10 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
-| `progress/` | **过程记录**（不作事实来源），**导航见 `progress/index.md`**：`monthly/`（月度进展逐条原文；2026-09 切 2 卷、2026-10 切 5 卷）、`board/`（看板分卷：已记录 + 已结案）、`open-issues/01..07`（取证原文）、`pending-detail.md`（原 §7.3 台账原文）、`wg-status.md`（工作组状态）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由） |
+| `progress/` | **过程记录**（不作事实来源），**导航见 `progress/index.md`**：`monthly/`（月度进展逐条原文，**13 卷**：2026-09 ×2 + 2026-10 ×11；当月最后一卷即「当前写入目标」）、`board/`（看板分卷，**5 卷**：已记录 + 已结案）、`open-issues/01..07`（取证原文，**7 篇**）、`index.md` + `index/`（进展索引与分卷）、`pending-detail.md`（原 §7.3 台账原文）、`wg-status.md`（工作组状态）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由）、`lessons-2026-10-08.md`（经验教训） |
 | `.archive/` | **已删除（2026-10-07 owner 裁决）**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇）已从工作区移除，原文仅存 git 历史；`.gitignore` 保留 `**/.archive/` 规则作归档位 |
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
 | `.workbuddy/memory/**` | Agent 工作记忆（非文档树、不重编；仅作过程线索，不作事实来源） |
-| `skills/**` | **agent 环境陷阱 skill**（`skills/websurf-env-traps/SKILL.md`，开工前先读）。仓库是**唯一源头**；本机已用 junction（零复制）链进 `~/.agents/skills/websurf-env-traps`，故 `skill` 工具可直接解析（2026-10-07 实测）；`AGENTS §0` 第 7 条同时保证不支持 skill 的工具也读得到 |
+| `skills/**` | **两篇 skill**（`skills/websurf-env-traps/SKILL.md` 开工前先读；`skills/agentmemory-usage/SKILL.md` 用记忆库前先读）。仓库是**唯一源头**；本机已用 junction（零复制）链进 `~/.agents/skills/`，故 `skill` 工具可直接解析（2026-10-07 实测）；`AGENTS §0` 第 7 条同时保证不支持 skill 的工具也读得到 |
 
 ---
 
@@ -150,8 +150,10 @@
 
 ```bash
 node src/scripts/check-doc-drift.mjs [文件]       # A–P 全 0（行数声明 / 锚点 / 路径 / 坏链 / 行尾与 BOM / 待办同源 / 体积 / 分卷可达 / 注释纪律 / 上级覆盖 / 缺口↔看板 / 假结案 / 脚本契约 / 文档契约 / 本机路径）
-node src/scripts/check-board-touch.mjs --staged   # 改了 src/ / apps/ / documents/ 却没动 TODO.md 时提示（软提示，不拦提交）
+node src/scripts/check-board-touch.mjs --staged   # 改了 src/ / apps/ / documents/ / progress/ / skills/ / .github/ 却没动 TODO.md 时提示（软提示，不拦提交）
 node src/scripts/docflow.mjs check                     # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
+node src/scripts/check-memory-sync.mjs                 # 记忆库同步（stale / orphan / missing / leak 全 0；台账 progress/memory-index.jsonl）
+node src/scripts/check-memory-sync.mjs --keys          # markers == entries（同上）
 grep -n -E "据文档|据注释|原设计|历史上|应该|可能|大概|似乎|推测" <新稿>   # 0 命中
 grep -n -E "test/game-core|dual-mode-harness" <新稿>   # 0 命中（两者均已不在工作区）
 cargo check -p websurf-phys                       # 或工程内 cargo check
@@ -160,7 +162,11 @@ cd apps/<app> && npm run typecheck                # TS 侧
 
 > **提交与体检必须串成一步、红灯即终止**：先跑体检，非 0 就停（不要用「无论成败都继续」的链式命令把体检和 `git commit` 连在一起）。2026-10-07 两次红灯入库都出在这个写法上。
 
-**全量闸门**：全仓漂移体检（A–P）全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；README ↔ `documents/index.md` 口径一致。
+**两条新增闸门（2026-10-10，迁移任务书 §十一 1.4）**：
+① **记忆库同步** —— `node src/scripts/check-memory-sync.mjs`：台账 `progress/memory-index.jsonl` 里每个 marker 的 sha12 必须与磁盘源文件一致（源变 ⇒ 记忆条目已陈旧），迁出的源须标 `retired`，迁出范围内不得漏迁（`missing`）；哈希两套并用（raw / LF 归一 + 去 BOM），与 `docflow.json:pins` 同口径、不另造第三套。
+② **检索质量回归** —— 无脚本，用 MCP 工具跑：`memory_smart_search` 的命中结果**必须遍历内容断言 marker 精确出现**（§0.2 第 5 条口径：分数与命中数都不能判存在性），跨工程同名族 20 条 rank-1 需 **20/20**。
+
+**全量闸门**：全仓漂移体检（A–P）全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；README ↔ `documents/index.md` 口径一致；`check-memory-sync.mjs` 全 0（stale / orphan / missing / leak）。
 
 ---
 

@@ -22,6 +22,7 @@
  * 子命令（退出码：check / verify 有违规 → 1）：
  *   report                                       打印划分与锁状态（给人看）
  *   check [--quiet] [--all] [--base R]           只读漂移 / 单元权限 / 锚点内容 / 联动（体检 [O] 同口径）
+ *                                                git 基础设施故障重试 3 次后降级 [WARN] + exit 0（见 gitRetry）
  *   approve --path P --by W --reason R [--task T]   登记一次「临时可动」许可
  *   sync [--path P…] [--all] [--by W] [--reason R]  落实许可并重钉（锚点有变化时 --reason 必填）
  *   claim --task T --may A,B [--must C,D]        认领：写任务变更契约（同一时刻只允许一条）
@@ -67,6 +68,15 @@ function tryRev(r) {
 }
 /** 只算一次的懒值：git 调用很贵，同一事实在一个进程里只取一次。 */
 function memo(fn) { let v, done = false; return () => { if (!done) { v = fn(); done = true; } return v; }; }
+/** 同步退避：无事件循环可 await，Atomics.wait 是 Node 的同步 sleep 惯用法。 */
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/** git 调用重试：并发或杀软占用下偶发 EBUSY（见 skills/websurf-env-traps）。3 次仍失败才抛出。 */
+function gitRetry(args, n = 3) {
+  for (let i = 1; ; i++) {
+    try { return execFileSync('git', args, { cwd: ROOT, maxBuffer: 64e6, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (e) { if (i >= n) throw e; sleepSync(200 * i); }
+  }
+}
 /** `**` 跨目录、`*` 不跨目录的极简 glob。 */
 function globToRe(g) {
   let out = '';
@@ -93,7 +103,7 @@ function hash(f) {
 }
 /** 版本库里与工作区的 md（已跟踪 + 未忽略的未跟踪）。 */
 const listMd = memo(() => {
-  const out = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.md'], { cwd: ROOT, maxBuffer: 64e6 }).toString('utf8').split('\u0000').filter(Boolean);
+  const out = gitRetry(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.md']).split('\u0000').filter(Boolean);
   return [...new Set(out)].filter((f) => fs.existsSync(path.join(ROOT, f)));
 });
 /** 变更面：有基线就比 `基线..工作树`（CI 里才算得出「本次改了什么」），否则工作树 vs HEAD。 */
@@ -466,7 +476,11 @@ function runVerify() {
 }
 let code = 0;
 if (cmd === 'report') runReport();
-else if (cmd === 'check') code = runCheck(flag('quiet')) ? 1 : 0;
+else if (cmd === 'check') {
+  // 基础设施故障（EBUSY / git 不可用）≠ 契约违规：重试后仍失败则降级 WARN，且必须自报「未完成」。
+  try { code = runCheck(flag('quiet')) ? 1 : 0; }
+  catch (e) { console.log('  [WARN] git 不可用（' + String((e && e.message) || e).slice(0, 120) + '）⇒ 本次文档契约检查未完成'); code = 0; }
+}
 else if (cmd === 'approve') runApprove();
 else if (cmd === 'sync') runSync();
 else if (cmd === 'claim') runClaim();

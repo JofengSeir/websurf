@@ -19,13 +19,14 @@
     "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
     "skills/websurf-env-traps/SKILL.md": "4bae9ea251bca4824c169cf27e4a93277d472eef8b7843feabd61a529471d157",
     "documents/norms/annotation-and-verification.md": "40f271606aad9363b61cfb24d756bbce306cf354b9e483283fab8c66f71a46b6",
-    "documents/norms/scripts-and-ci.md": "75b98b2fe201e1281640c81d8e4f83b0b2e0511353eb35a90cebb9a0a15e3d90",
+    "documents/norms/scripts-and-ci.md": "8e978aa8c300371e10b241e1e17d3016bfb3b7b040c2a8d3c65241f2f8e9a24a",
     ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
     ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
     ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
     ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
-    "AGENTS.md": "53a2d312eade0322eeae2603c7e83cef4eb4ac7439bf8b7dbbdc7a44f020e270",
-    "documents/norms/local-path-hygiene.md": "fa7589d6fef4800bbf0920da32d2fe031877fc736111a8b8d1259d009d81f4a1"
+    "AGENTS.md": "fb7feaa0313ffb9ef1cc810df8d69a767b11ec80488861730dbb45d6f2c1280a",
+    "documents/norms/local-path-hygiene.md": "fa7589d6fef4800bbf0920da32d2fe031877fc736111a8b8d1259d009d81f4a1",
+    "skills/agentmemory-usage/SKILL.md": "d62db107cba5a8f4302c4bca7cdc8f260d873cc076e63212577a28388c8b733e"
   },
   "approvals": [
     {
@@ -77,14 +78,6 @@
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
-      "by": "owner(本轮指示：强推脱敏处理)",
-      "reason": "历史脱敏重写后：文档里引用的短 SHA 按 旧→新 映射改写（9dbdc58 → 新 SHA）",
-      "at": "2026-10-07",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "skills/websurf-env-traps/SKILL.md",
       "by": "owner",
       "reason": "把 Pages 站点被分支构建顶掉的陷阱写进 skill（owner 要求教训进 skill）",
@@ -125,18 +118,34 @@
       "consumed": true
     },
     {
-      "path": "documents/norms/scripts-and-ci.md",
+      "path": "TODO.md",
       "by": "owner",
-      "reason": "T-454 P5：按体检 [L] 口径把 T-409 的缺口标记写成「已结案」（owner 2026-10-09「直接做完」授权）",
+      "reason": "登记 T-457（viewer 未挂反射源，运行期实测）",
       "at": "2026-10-09",
       "task": "",
       "consumed": true
     },
     {
-      "path": "TODO.md",
-      "by": "owner",
-      "reason": "登记 T-457（viewer 未挂反射源，运行期实测）",
-      "at": "2026-10-09",
+      "path": "AGENTS.md",
+      "by": "owner(.plan 迁移任务书 §十一 1.4)",
+      "reason": "迁移任务书 §十一 1.4：补记忆库工作流条款（§2 计数纠正 / §0.2 第5条 作用域检索 / §1 B3 日志例外 / §0.2 第7条 slot 派生投影 / §5 两条新闸门）",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/agentmemory-usage/SKILL.md",
+      "by": "owner(本地 skill，仓库为唯一源头)",
+      "reason": "新增只读类文件登记 + 修掉 §13 里的本机绝对路径（体检 [P]）",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "documents/norms/scripts-and-ci.md",
+      "by": "owner(.plan 迁移任务书 §十一 1.5)",
+      "reason": "§4 共享门禁清单加 check-memory-sync.mjs 一行（公开面登记）；并订正 check-board-touch 的触碰面与 check-doc-drift 的 A–P 口径",
+      "at": "2026-10-10",
       "task": "",
       "consumed": true
     }
@@ -646,224 +655,272 @@
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-09",
         "line": 196
+      },
+      "T-630": {
+        "p": "5b3b8d6984582f86a11c4a1ce7d5389c5b2697afa962a6624cc01fbbb05763e4",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-10",
+        "line": 197
+      },
+      "T-631": {
+        "p": "4652a2833d001739414dddf45fe21ebe3bb9a103ae424ea4487f2e495b977a0a",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-10",
+        "line": 198
+      },
+      "T-632": {
+        "p": "7f4389420e0f7facaafb31ca4ed7445b63834813946ba105e57b878a87c59bdc",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-10",
+        "line": 199
+      },
+      "T-633": {
+        "p": "9d3f27516528bd34bcba7e32b244f51537b51b1f876e7857716051827f776da7",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-10",
+        "line": 200
+      },
+      "T-634": {
+        "p": "5705b425b7ee9ae9721a761ed9096e78df533dfcb34aa97ae8cbed0ce0955e17",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-10",
+        "line": 201
+      },
+      "T-635": {
+        "p": "2ffdfc377cb86bcb5520e7c3a130bc3c432811b6c6528a77f61e43727793d28c",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-10",
+        "line": 202
+      },
+      "T-636": {
+        "p": "bd26370d1d7b1289d17b12c4df7979e7bb06611d9b0d286af493598822b1b645",
+        "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
+        "at": "2026-10-10",
+        "line": 203
       }
     },
     "OWNER.md": {
+      "D-111": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-10",
+        "line": 22
+      },
       "D-023": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 22
+        "line": 23
       },
       "D-110": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-09",
-        "line": 23
+        "line": 24
       },
       "D-108": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-09",
-        "line": 33
+        "line": 34
       },
       "D-109": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-09",
-        "line": 34
+        "line": 35
       },
       "D-014": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 35
+        "line": 36
       },
       "D-100": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 36
+        "line": 37
       },
       "D-101": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 37
+        "line": 38
       },
       "D-102": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 38
+        "line": 39
       },
       "D-103": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 39
+        "line": 40
       },
       "D-104": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 40
+        "line": 41
       },
       "D-105": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 41
+        "line": 42
       },
       "D-106": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 42
+        "line": 43
       },
       "D-001": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 43
+        "line": 44
       },
       "D-025": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 44
+        "line": 45
       },
       "D-024": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 45
+        "line": 46
       },
       "D-022": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 46
+        "line": 47
       },
       "D-002": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 47
+        "line": 48
       },
       "D-003": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 48
+        "line": 49
       },
       "D-004": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 49
+        "line": 50
       },
       "D-015": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 50
+        "line": 51
       },
       "**D-107**": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-07",
-        "line": 51
+        "line": 52
       },
       "D-005": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 52
+        "line": 53
       },
       "D-006": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 53
+        "line": 54
       },
       "D-007": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 54
+        "line": 55
       },
       "D-008": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 55
+        "line": 56
       },
       "D-009": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 56
+        "line": 57
       },
       "D-010": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 57
+        "line": 58
       },
       "D-011": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 58
+        "line": 59
       },
       "D-012": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 59
+        "line": 60
       },
       "D-013": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 60
+        "line": 61
       },
       "D-016": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 61
+        "line": 62
       },
       "D-018": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 62
+        "line": 63
       },
       "D-019": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 63
+        "line": 64
       },
       "D-020": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 64
+        "line": 65
       },
       "D-021": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 65
+        "line": 66
       },
       "D-026": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-09",
-        "line": 66
+        "line": 67
       }
     }
   },

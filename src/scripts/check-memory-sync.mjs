@@ -1,0 +1,136 @@
+#!/usr/bin/env node
+/**
+ * 记忆库同步体检（memory-index 台账 ↔ 磁盘）——对应 AGENTS §5 的门禁之一。
+ *
+ * 解决的问题：agentmemory 里的条目是 md 的**派生线索**，源文件一旦改动，条目就陈旧，
+ * 但记忆库自身查不出来（§2：分数与命中数都不能判存在性，也没有 entry 级版本）。
+ * 所以把「哪条记忆对应哪个源的哪个哈希」留在**仓库侧台账** `progress/memory-index.jsonl`，
+ * 由本工具离线核对。台账是 append-only 的权威记录，记忆库只作检索面。
+ *
+ * 三段检查（只依赖 git + fs，不连记忆库）：
+ *   stale   台账 marker 里的 sha12 与磁盘源文件不符 ⇒ 源变了、条目陈旧
+ *   orphan  台账有、磁盘无：未标 `retired` 计 orphan（真丢源），标了计 retired（有意迁出）
+ *   missing 迁出范围内的 md 在台账里没有 source 记录 ⇒ 漏迁
+ *   leak    台账里出现迁移范围外的 source（排除前缀 / 非本项目 marker）⇒ 越界入库
+ *
+ * 口径：哈希两套并用以兼容检出形态——`sha256(raw)` 或 `sha256(LF 归一 + 去 BOM)`，
+ * 与 `docflow.json:pins` 的 LF 归一口径同源（**不另造第三套**）。
+ *
+ * 用法（退出码：有违规 → 1）：
+ *   node src/scripts/check-memory-sync.mjs            完整检查
+ *   node src/scripts/check-memory-sync.mjs --keys     只打印 marker/entry 计数（V7）
+ *   node src/scripts/check-memory-sync.mjs --rerun    与上次状态比对，报 new_writes（V2）
+ *   node src/scripts/check-memory-sync.mjs --list     逐条打印违规明细
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const LEDGER = path.join(ROOT, 'progress/memory-index.jsonl');
+const INDEX = path.join(ROOT, 'progress/index.md');
+const STATE = path.join(ROOT, '.tmp/md-migrate/memory-sync-state.json');
+const PROJECT = 'websurf';
+/** 迁移范围的保留项：不参与 missing 判定（见任务书 §四 与 AGENTS §0.1 第 6 条）。 */
+const KEEP = [
+  'progress/board/',   // 看板分卷：体检 [G] 直读这里的 T-### 作为「已存在」来源
+  'progress/index.md', // AGENTS §0.1 第 6 条「当前写入目标」的唯一权威（也在 progress/ 下）
+  'progress/index/',   // progress/index.md 的下卷链目标
+];
+/** 绝不允许进台账的路径前缀（任务书 §七 leak 段）。 */
+const EX = ['.cargo-home', 'node_modules', 'test/project'];
+
+const argv = process.argv.slice(2);
+const flag = (n) => argv.includes('--' + n);
+
+const sha12 = (b) => crypto.createHash('sha256').update(b).digest('hex').slice(0, 12);
+/** 两套并用的哈希前缀：raw 与 LF 归一 + 去 BOM。 */
+function hash12s(abs) {
+  const raw = fs.readFileSync(abs);
+  let txt = raw.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  return new Set([sha12(raw), sha12(Buffer.from(txt, 'utf8'))]);
+}
+/** 「当前写入目标」由 progress/index.md 自己声明，避免此处硬编码卷名（它会滚动）。 */
+function writeTarget() {
+  if (!fs.existsSync(INDEX)) return null;
+  const m = fs.readFileSync(INDEX, 'utf8').match(/\*\*当前写入目标\*\*：\s*`([^`]+)`/);
+  return m ? m[1] : null;
+}
+const inScope = (rel) => rel.endsWith('.md') && rel.startsWith('progress/')
+  && !KEEP.some((k) => rel.startsWith(k))
+  && rel !== writeTarget()
+  && !EX.some((e) => rel.startsWith(e));
+
+// ===== 读台账 =====
+const lines = fs.existsSync(LEDGER) ? fs.readFileSync(LEDGER, 'utf8').split(/\r?\n/).filter((l) => l.trim()) : [];
+const badJson = [];
+const entries = [];
+for (const [i, l] of lines.entries()) {
+  try { entries.push(JSON.parse(l)); } catch { badJson.push('  ' + (i + 1) + ' 行不是合法 JSON'); }
+}
+const MARKER_RE = new RegExp('^([a-z0-9_-]+)/([^#]+)#([a-z]+)(\\d+)@([0-9a-f]{12})$');
+
+// ===== 三段检查 =====
+const stale = [], orphan = [], leak = [], dup = [];
+const seen = new Set();
+const sources = new Set();
+let retired = 0;
+for (const e of entries) {
+  const m = MARKER_RE.exec(String(e.marker || ''));
+  if (!m) { leak.push('  marker 形状不合法：' + e.marker); continue; }
+  if (seen.has(e.marker)) dup.push('  marker 重复：' + e.marker);
+  seen.add(e.marker);
+  const [, proj, rel, , , mk12] = m;
+  if (proj !== PROJECT) { leak.push('  marker 项目前缀不是 ' + PROJECT + '：' + e.marker); continue; }
+  if (e.source !== rel) leak.push('  marker 与 source 不一致：' + e.marker + ' vs ' + e.source);
+  if (EX.some((x) => rel.startsWith(x))) leak.push('  排除前缀泄漏：' + rel);
+  sources.add(rel);
+  const abs = path.join(ROOT, rel);
+  if (!fs.existsSync(abs)) {
+    if (e.retired === true) retired++;
+    else orphan.push('  ' + rel + '（台账有、磁盘无，且未标 retired）');
+    continue;
+  }
+  const ok = hash12s(abs);
+  if (!ok.has(mk12)) stale.push('  ' + rel + ' 台账 ' + mk12 + ' / 磁盘 ' + [...ok][0]);
+}
+
+// missing：迁出范围内、磁盘上有、台账里没有 source 记录的 md（源自动跟踪面）
+const tracked = (await import('node:child_process')).execFileSync(
+  'git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: ROOT, maxBuffer: 64e6, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+).split(/\r?\n/).filter(Boolean);
+const scope = tracked.filter(inScope).filter((f) => fs.existsSync(path.join(ROOT, f)));
+const missing = scope.filter((f) => !sources.has(f)).map((f) => '  ' + f).sort();
+
+/** 唯一违规判据：主检查与 --rerun 共用，避免两处口径分叉。 */
+const bad = (t) => Boolean(t.stale || t.orphan || t.missing || t.leak || t.dup || t.badJson);
+const sum = {
+  entries: entries.length, markers: seen.size, sources: sources.size, scope: scope.length,
+  stale: stale.length, orphan: orphan.length, retired, missing: missing.length,
+  leak: leak.length, dup: dup.length, badJson: badJson.length,
+};
+const line = `entries=${sum.entries} markers=${sum.markers} sources=${sum.sources} scope=${sum.scope} ` +
+  `stale=${sum.stale} orphan=${sum.orphan} retired=${sum.retired} missing=${sum.missing} leak=${sum.leak} dup=${sum.dup}`;
+
+if (flag('keys')) { console.log(`markers=${sum.markers} entries=${sum.entries}`); process.exit(sum.markers === sum.entries && !sum.badJson ? 0 : 1); }
+
+if (flag('rerun')) {
+  const prev = fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, 'utf8')) : null;
+  const now = [...seen].sort();
+  const prevSet = new Set(prev ? prev.markers : []);
+  const newWrites = now.filter((x) => !prevSet.has(x)).length;
+  fs.mkdirSync(path.dirname(STATE), { recursive: true });
+  fs.writeFileSync(STATE, JSON.stringify({ at: new Date().toISOString(), markers: now }, null, 1));
+  const bytewiseSame = prev ? JSON.stringify(prev.markers) === JSON.stringify(now) : false;
+  console.log(`entries=${sum.entries} markers=${sum.markers} new_writes=${newWrites} entries_identical=${bytewiseSame}`);
+  process.exit(bad(sum) ? 1 : 0);
+}
+
+console.log('记忆库同步体检：' + line);
+const detail = (title, arr) => { if (arr.length) console.log('\n[' + title + ']（' + arr.length + '）：\n' + (flag('list') ? arr.join('\n') : arr.slice(0, 10).join('\n') + (arr.length > 10 ? `\n  … 另 ${arr.length - 10} 条（--list 看全）` : ''))); };
+detail('stale', stale); detail('orphan', orphan); detail('missing', missing); detail('leak', leak); detail('dup', dup); detail('badJson', badJson);
+if (bad(sum)) {
+  console.log('\n  —— stale：源变了 ⇒ 重迁该 marker；orphan：源没了 ⇒ 备份后标 retired；missing：范围内漏迁；leak：不该入库的进了台账');
+}
+process.exit(bad(sum) ? 1 : 0);

@@ -5,8 +5,9 @@
  * owner 2026-10-07 裁决：这一层**只提示、不拦提交**（不上硬门），因此 CI 以
  * continue-on-error 运行；本脚本自身默认 exit 0，只有显式 --strict 才 exit 1。
  *
- * 判据：本次改动触及 `src/` / `apps/` / `documents/`，但既没改 `TODO.md`，
- * 提交信息里也没有 `T-###` 或「无待办影响」字样 ⇒ 打一条提示。
+ * 判据：本次改动触及 `src/` / `apps/` / `documents/` / `progress/` / `skills/` / `.github/`，
+ * 但既没改 `TODO.md`，提交信息里也没有 `T-###` 或「无待办影响」字样 ⇒ 打一条提示。
+ * （`progress/` 等三支于 2026-10-10 补入：此前删 15 个 `progress/` 跟踪文件零提示。）
  *
  * 用法：
  *   node src/scripts/check-board-touch.mjs --staged                  # 提交前（看暂存区）
@@ -39,7 +40,7 @@ if (staged) {
   messages = git(['log', '--format=%B', range]) || '';
 }
 
-const touched = files.filter((f) => /^(src|apps|documents)\//.test(f));
+const touched = files.filter((f) => /^(src|apps|documents|progress|skills|\.github)\//.test(f));
 const boardTouched = files.includes('TODO.md');
 const noted = /T-\d{3}/.test(messages) || /无待办影响/.test(messages);
 
