@@ -36,7 +36,6 @@ npm run dev            # python ../../src/serve.py 8080 .
 
 - 改动流程与提交规范 → [CONTRIBUTING.md](CONTRIBUTING.md)
 - 漏洞报告与安全事实 → [SECURITY.md](SECURITY.md)
-- 版本历史 → [CHANGELOG.md](CHANGELOG.md)
 
 第三方组件：
 

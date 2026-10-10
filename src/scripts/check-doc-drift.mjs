@@ -277,19 +277,19 @@ for (const f of live) {
 
 // ===== [H] 流程文档体积 =====
 const sizeBad = [];
-const caps = [['AGENTS.md', 32], ['TODO.md', 96], ['OWNER.md', 16]];
+const caps = [['AGENTS.md', 32], ['OWNER.md', 32]];   // 流程文档体积上限（KB）；2026-10-11：TODO.md 退场、OWNER 由 16 提到 32（owner 指示）
 for (const pair of caps) {
   const f = pair[0];
   if (!fs.existsSync(path.join(ROOT, f))) continue;
   const kb = fs.statSync(path.join(ROOT, f)).size / 1024;
-  if (kb > pair[1]) sizeBad.push('  ' + f + ' 已 ' + kb.toFixed(1) + ' KB（上限 ' + pair[1] + ' KB；见 AGENTS §0.4）');
+  if (kb > pair[1]) sizeBad.push('  ' + f + ' 已 ' + kb.toFixed(1) + ' KB（上限 ' + pair[1] + ' KB；见记忆库召回 `websurf 文档体积 分卷 上限 导航`）');
 }
 for (const f of live) {
   const isProc = false; // 仓库已无过程记录与文档树（皆迁入 agentmemory）
-  const isRoot = ['README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md'].indexOf(f) >= 0;
+  const isRoot = ['README.md', 'CONTRIBUTING.md', 'SECURITY.md'].indexOf(f) >= 0;
   if (!isProc && !isRoot) continue;
   const kb = fs.statSync(path.join(ROOT, f)).size / 1024;
-  if (kb > 48) sizeBad.push('  ' + f + ' 已 ' + kb.toFixed(1) + ' KB（流程性 md 上限 48 KB；见 AGENTS §0.4）');
+  if (kb > 48) sizeBad.push('  ' + f + ' 已 ' + kb.toFixed(1) + ' KB（流程性 md 上限 48 KB；见记忆库召回 `websurf 文档体积 分卷 上限 导航`）');
 }
 
 // ===== [I] 过程记录分卷可达（仓库已无过程记录卷：进展直接写 agentmemory，无导航文件） =====

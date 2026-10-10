@@ -14,15 +14,15 @@
     "coverageMode": "hard"
   },
   "pins": {
-    "README.md": "8cafb89c099598507609a323531a86b39ba1c03046fc9b97c109abb645fe8cfb",
+    "README.md": "d32bb99c00258bc7a39290dfe7eba0ec96eea133aa269d0d350788d8947b7637",
     "CONTRIBUTING.md": "b11e2f55b65f41f46d928bca3f7a819d2b86c0f5af406c68884502cddfe4ede6",
-    "SECURITY.md": "71952253779a089c79245c22207364fcd7c6f1796c7e1c922b9c2ce6a69d6931",
+    "SECURITY.md": "64196372b3a4cc4b35bc1d78dd31bde0d80dd7099ef28236fcdef46dd481597e",
     "skills/websurf-env-traps/SKILL.md": "0b56637e989536fa35f5cffbc4286d6ed650ea2989707652a06a703f0b21d8f0",
     ".github/ISSUE_TEMPLATE/bug_report.md": "1c04607a70bd18dd118b6771a9f0fe12ea5d777ade9bf18c1992c3a500075ed5",
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "d03524f66cdaae0abd96744d204ea954155e325413a23356708299207fa457a2",
-    "AGENTS.md": "fc4e76f0d70b03e8545f8e8755a76750585cba13160d5eb02e71456c98db0f66",
+    "AGENTS.md": "538372accb6d5e2cde84636dbe2b152ac7ed7ca49019d0bba1b42dfd60ce9747",
     "skills/websurf-workflow/SKILL.md": "65fef405f64068d0c0e58ea183d803efe9ad52911647de99ae9f10167ec7b98a"
   },
   "approvals": [
@@ -54,22 +54,6 @@
       "path": ".github/ISSUE_TEMPLATE/other.md",
       "by": "Jofen",
       "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "SECURITY.md",
-      "by": "Jofen",
-      "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "README.md",
-      "by": "Jofen",
-      "reason": "子代理独立审查发现的口径错误：doc-drift.yml 入库状态、viewer 非 single-only、归档目录描述、PR 模板漏 viewer 契约门、agentmemory §8 与 §16 矛盾及台账名/行数/CLI 路径、workflow 注册相对路径与进行中格式",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -131,9 +115,25 @@
       "consumed": true
     },
     {
+      "path": "README.md",
+      "by": "owner(2026-10-11",
+      "reason": "取消",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "SECURITY.md",
+      "by": "owner(2026-10-11",
+      "reason": "取消",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
       "path": "AGENTS.md",
       "by": "owner(2026-10-11",
-      "reason": "登记",
+      "reason": "取消",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -217,7 +217,6 @@
       ".github/workflows/ci-gates.yml:349:349": "17f00cc3"
     },
     "AGENTS.md": {},
-    "CHANGELOG.md": {},
     "CONTRIBUTING.md": {},
     "OWNER.md": {
       "src/wasm-core/render_bundle.rs:74:76": "6faa50e8"
@@ -272,14 +271,6 @@
       "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：ISSUE 模板工程选项对齐三端（去已退役 test、补 viewer、两端改三端）；SECURITY 的 serve.py COOP/COEP 行号更正为 40-41；agentmemory R3 收窄为「控制层原件不迁」以消除与 AGENTS 冲突；path-baseline 的 CI job 名与 .gitignore 描述对齐实际；OWNER D-115/D-116 按实际更正",
       "changed": 2,
       "total": 1
-    },
-    {
-      "path": "CHANGELOG.md",
-      "at": "2026-10-10T15:18:45.746Z",
-      "by": "codebuddy",
-      "reason": "CHANGELOG.md 正文在 2026-10-10 裸文件名锚点去行号重构后已不含任何 `路径:行号` 锚点（grep 0 命中）；anchorPins 中 10 条（apps/*/package.json:3:3、src/Cargo.toml:3:3、src/wasm-core/Cargo.toml:11:11、apps/*/crates/wasm/Cargo.toml:12/12/9、materials.rs:448/475）均为陈旧钉 ⇒ 复核后按文档现状重钉为空集（本机 execFileSync git 恒 EBUSY，无法走 sync，按 sync 语义等价落盘）",
-      "changed": 10,
-      "total": 0
     },
     {
       "path": "OWNER.md",

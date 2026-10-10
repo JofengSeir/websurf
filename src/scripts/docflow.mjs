@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const LOCK = path.join(ROOT, 'docflow.json');
 /** 收尾必动、不参与「越界改动」判定的文件（§0.2 强制同提交更新它们）。 */
-const STD = ['OWNER.md', 'CHANGELOG.md', 'docflow.json', 'progress/board.jsonl'];
+const STD = ['OWNER.md', 'docflow.json', 'progress/board.jsonl'];
 /** 默认只读集：宪法层里**不随提交滚动**的那些。 */
 const DEFAULT_READONLY = ['AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md', '.github/**/*.md', 'skills/**/SKILL.md'];
 /** 候选提升为只读、但需先解决「每提交都要改它」的文件（report 会提示）。 */

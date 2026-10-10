@@ -68,7 +68,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 
 | 位置 | 状态 |
 |---|---|
-| 根 `*.md` | `AGENTS.md`（本文件）｜ `OWNER.md`（owner 决策队列）｜ `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`（git 仓库项目文档） |
+| 根 `*.md` | `AGENTS.md`（本文件）｜ `OWNER.md`（owner 决策队列）｜ `README.md`、`CONTRIBUTING.md`、`SECURITY.md`（git 仓库项目文档）。**无 `CHANGELOG.md`**：2026-10-11 owner 决定取消——改动记录已全部在 commit 历史里，agent 不再维护该文件 |
 | `documents/` | **不存在**：原 47 篇工程/共享层/架构文档 + 3 篇规范已全部迁入 agentmemory，原文归档 `archive/memory/2026-10/` |
 | `progress/` | **3 个机器可读文件**：`memory-index.jsonl`（迁移台账 = manifest，`check-memory-sync.mjs` 的权威输入）、`control-ids.json`（控制层 ID 索引，门禁 `[G]` 判定「ID 已存在」的唯一来源）、`pending-kb.jsonl`（MCP 不可用时的待补写队列，见 §0 兜底）、**`board.jsonl`（看板机器可读镜像 = 门禁 `[G]` 权威输入）** |
 | `skills/**` | **两类**：① **本项目技能** `skills/websurf-workflow/`（**先读：工作流循环**）、`skills/websurf-env-traps/`（开工前先读）—— 各含 `SKILL.md`（骨架，属只读类）+ `REFERENCE.md`（细则）；② **agentmemory 官方技能** 17 篇（`memory-discipline`、`remember`/`recall`/`forget`、`lesson`、`agentmemory-mcp-tools`/`-config`/`-rest-api`/`-architecture`/`-hooks`/`-agents`、`recap`/`handoff`/`session-history`/`commit-context`/`commit-history`、`write-agentmemory-skill`）+ `_shared/TROUBLESHOOTING.md` —— 上游**原样复制、不得就地修改**，来源/版本/更新法见 `skills/THIRD-PARTY.md`。仓库是唯一源头；**harness 只扫 `<仓库>/.agents/skills`、`<仓库>/.dsh/skills`、`~/.agents/skills`、`<dshHome>/skills` 四个根，不扫 `<仓库>/skills/`** ⇒ 新机器要把 `skills/` 下每个技能目录 junction 进任一根（见 `websurf-workflow` 的 REFERENCE「技能注册」节）。项目技能的 `SKILL.md` 进台账；官方技能不进（工具自带文档，随包更新） |
@@ -80,7 +80,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | `archive/**` | 迁移原文与回滚存证（gitignore）；**不作依据** |
 
 **仓库内 md 清单**（体检 `[K]` 要求每篇都能被上级导航点到，故在此列全）：
-`.github/ISSUE_TEMPLATE/bug_report.md`、`.github/ISSUE_TEMPLATE/feature_request.md`、`.github/ISSUE_TEMPLATE/other.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`OWNER.md`、`README.md`、`SECURITY.md`、`apps/viewer/scripts/dist-README.md`、`skills/**`（本目录全部 md：两篇项目技能的 `SKILL.md` + `REFERENCE.md`、`THIRD-PARTY.md`、官方技能的 `SKILL.md`/`REFERENCE.md`/`EXAMPLES.md` 与 `_shared/TROUBLESHOOTING.md`）。
+`.github/ISSUE_TEMPLATE/bug_report.md`、`.github/ISSUE_TEMPLATE/feature_request.md`、`.github/ISSUE_TEMPLATE/other.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`CONTRIBUTING.md`、`OWNER.md`、`README.md`、`SECURITY.md`、`apps/viewer/scripts/dist-README.md`、`skills/**`（本目录全部 md：两篇项目技能的 `SKILL.md` + `REFERENCE.md`、`THIRD-PARTY.md`、官方技能的 `SKILL.md`/`REFERENCE.md`/`EXAMPLES.md` 与 `_shared/TROUBLESHOOTING.md`）。
 
 ---
 
