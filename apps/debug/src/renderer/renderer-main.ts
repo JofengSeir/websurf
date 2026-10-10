@@ -40,7 +40,7 @@ import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
 import type { PhyBevelPiece } from './collider-debug.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
-import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
+import { applySceneTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
 import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js'; import { renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js'; import { setSceneEnvironment, clearSceneEnvironment } from '../../../../src/renderer-shared/environment/scene-environment.js';
 import { LodManager } from './lod-manager.js';
@@ -908,13 +908,10 @@ export class RendererMain {
       `[renderer] 画质切换 → ${quality}，manifest ${manifest ? Object.keys(manifest).length : 0} 条，bspModelScene=${!!this.bspModelScene}`,
     );
     if (!manifest || !this.bspModelScene) return;
-    const stats = await applyTextureQuality(
-      this.bspModelScene,
-      manifest,
-      quality,
-      this.origTextureImages,
-      { decode: mosaic_decode, ensureWasm: ensureMainWasm },
-    );
+    const stats = await applySceneTextureQuality({
+      mainRoot: this.bspModelScene, skyRoot: this.skyGroup, manifest, quality,
+      origImages: this.origTextureImages, deps: { decode: mosaic_decode, ensureWasm: ensureMainWasm },
+    });
     console.log(`[renderer] 场景贴图 ${stats.mapCount} 个`);
     console.log(
       `[renderer] mini 匹配 ${stats.matched}/${stats.mapCount}；未匹配:`,

@@ -45,7 +45,7 @@ import { reportInjectStatsOnce } from '../../../../src/renderer-shared/scene/inj
 import { buildMapScene, applyLightmap } from '../../../../src/renderer-shared/scene/scene-builder.js';
 import { createSkyCamera, extractSkyArea, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
 import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
-import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
+import { applySceneTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
 import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js'; import { fullbrightUnlitLitMaterials, setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyLightingPresentation, readRenderPrefs, type RenderLightingPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
 
@@ -330,8 +330,9 @@ export class RendererMain {
    */
   async applyTextureQuality(quality: 'original' | 'mini'): Promise<void> {
     if (!this.mosaicManifest || !this.scene) return;
-    await applyTextureQuality(this.scene, this.mosaicManifest, quality, this.origTextureImages, {
-      decode: mosaic_decode,
+    await applySceneTextureQuality({
+      mainRoot: this.scene, skyRoot: this.skyGroup, manifest: this.mosaicManifest,
+      quality, origImages: this.origTextureImages, deps: { decode: mosaic_decode },
     });
   }
 

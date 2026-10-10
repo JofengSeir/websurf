@@ -879,9 +879,9 @@
       "apps/viewer/src/core/constants.ts:43:43": "300d88bb",
       "src/renderer-shared/scene/scene-optimizer.ts:74:74": "f3fde19a",
       "apps/debug/src/renderer/renderer-main.ts:447:447": "8b43ed81",
-      "apps/game/src/renderer/renderer-main.ts:333:333": "8837935e",
-      "apps/debug/src/renderer/renderer-main.ts:911:912": "58f7b886",
-      "apps/viewer/src/core/scene.ts:281:281": "3a74844a",
+      "apps/game/src/renderer/renderer-main.ts:333:333": "ac9439a7",
+      "apps/debug/src/renderer/renderer-main.ts:911:911": "ebe1df22",
+      "apps/viewer/src/core/scene.ts:282:282": "ebe1df22",
       "apps/viewer/src/core/scene.ts:152:152": "d4015c1c",
       "apps/game/src/renderer/renderer-main.ts:300:300": "58ba9bf2",
       "apps/debug/src/renderer/renderer-main.ts:512:512": "b412664e",
@@ -948,7 +948,7 @@
       "apps/game/src/renderer/renderer-main.ts:274:274": "ea536eb7",
       "src/ts-shared/world/types.ts:43:43": "9a3cb36e",
       "src/wasm-core/bsp_to_gltf_core/convert.rs:367:367": "a803e10b",
-      "apps/game/src/renderer/renderer-main.ts:898:898": "0fbbe010",
+      "apps/game/src/renderer/renderer-main.ts:899:899": "0fbbe010",
       "src/ts-shared/phys/world-builder.ts:203:203": "ea663714",
       "src/renderer-shared/shader/bumpmap.ts:1:1": "8d64a30d",
       ".github/workflows/deploy-pages.yml:200:200": "6dd5eaf1",
@@ -970,6 +970,14 @@
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "TODO.md",
+      "at": "2026-10-10T17:32:07.132Z",
+      "by": "agent",
+      "reason": "T-460 WP6：T-172/T-443 行的锚点按遍历根统一后的实际位置更新（debug:911 / game:333,899 / viewer:282）",
+      "changed": 7,
+      "total": 122
+    },
     {
       "path": "OWNER.md",
       "at": "2026-10-10T17:27:51.121Z",

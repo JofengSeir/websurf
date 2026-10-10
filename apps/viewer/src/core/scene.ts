@@ -15,7 +15,7 @@ import {
   getLightingMode,
   type LightingMode,
 } from '../../../../src/renderer-shared/shader/lightmap-shader.js'; import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../../../../src/renderer-shared/shader/world-transition.js';
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js'; import { VisibilityController } from '../../../../src/renderer-shared/scene/visibility-controller.js'; import { applyTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js'; import { mosaic_decode } from './bsp.js';
+import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js'; import { VisibilityController } from '../../../../src/renderer-shared/scene/visibility-controller.js'; import { applySceneTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js'; import { mosaic_decode } from './bsp.js';
 import { assembleScene } from '../../../../src/renderer-shared/scene/assemble-scene.js';
 import { mergeIntoNewRoot } from '../../../../src/renderer-shared/scene/scene-optimizer.js';
 import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js';
@@ -174,7 +174,7 @@ export class ViewerScene {
       console.info('[viewer][skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
     // 地图线性雾（`env_fog_controller`）：建雾 + 雾上限的唯一入口（共享环境模块，三端同值）
-    setSceneEnvironment(this.scene, { fog: sky?.fogParams ?? null }); await applyViewerTextureQuality(this.scene, this.modelRoot, sky?.mosaicManifest ?? null, readRenderPrefs().textureQuality);
+    setSceneEnvironment(this.scene, { fog: sky?.fogParams ?? null }); await applyViewerTextureQuality(this.scene, this.modelRoot, this.skyGroup, sky?.mosaicManifest ?? null, readRenderPrefs().textureQuality);
     this.fitCamera(maxDim);
   }
 
@@ -270,16 +270,17 @@ const origTextureImages = new Map<THREE.Texture, unknown>();
 async function applyViewerTextureQuality(
   scene: THREE.Scene,
   root: THREE.Object3D | null,
+  skyRoot: THREE.Object3D | null,
   manifest: Record<string, string> | null,
   quality: 'original' | 'mini',
 ): Promise<void> {
   const count = manifest ? Object.keys(manifest).length : 0;
-  console.log(`[renderer] 画质切换 → ${quality}，manifest ${count} 条，modelRoot=${!!root}`);
+  console.log(`[renderer] 画质切换 → ${quality}，manifest ${count} 条，modelRoot=${!!root} sky=${!!skyRoot}`);
   (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality =
-    (q) => applyViewerTextureQuality(scene, root, manifest, q);
+    (q) => applyViewerTextureQuality(scene, root, skyRoot, manifest, q);
   if (!manifest || !root || count === 0) return;
-  const stats = await applyTextureQuality(root, manifest, quality, origTextureImages, {
-    decode: mosaic_decode,
+  const stats = await applySceneTextureQuality({
+    mainRoot: root, skyRoot, manifest, quality, origImages: origTextureImages, deps: { decode: mosaic_decode },
   });
   console.log(`[renderer] 场景贴图 ${stats.mapCount} 个`);
   console.log(`[renderer] mini 匹配 ${stats.matched}/${stats.mapCount}；未匹配:`, stats.noMatch.slice(0, 12));
