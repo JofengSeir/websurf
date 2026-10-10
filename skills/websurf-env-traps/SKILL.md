@@ -7,7 +7,7 @@ description: "本仓（WebSurf，Windows + PowerShell 工作区）的环境与�
 
 > **为什么有这篇**：本仓在 Windows + PowerShell 下作业，agent 反复撞同一批墙（假绿、假「功能已删」、编码/行尾、输出被截断、沙箱边界），每次都要花 token 重新发现一遍。
 > **边界**：本篇讲「怎么干活不撞墙」，**不是事实来源**；待办与状态只在根 `TODO.md`。
-> **历史工具链陷阱**（`verify.ps1` 时代共 16 条）已在 agentmemory 记忆库 websurf/documents/norms/annotation-and-verification.md:70 的 §5 逐条留档，本篇**不复述**，只写今天仍会撞、且开工就该知道的。
+> **历史工具链陷阱**（`verify.ps1` 时代共 16 条）已在 agentmemory 记忆库 记忆库 「注释与验证规范」 第 70 行 的 §5 逐条留档，本篇**不复述**，只写今天仍会撞、且开工就该知道的。
 
 ## 0. 三条最贵的坑（只看这三条也值）
 
@@ -81,7 +81,7 @@ description: "本仓（WebSurf，Windows + PowerShell 工作区）的环境与�
 - **`sync` 不许无条件全量重钉**：不点名的全量 `sync` 会把真漂移一起洗掉，门禁退化成「红了就 sync」。现在的口径：只钉点名的篇，锚点**真有变化**时 `--reason` 必填，并留痕在 `docflow.json` 的 `rebaselines`。
 - **「登记 / 覆盖率」类判据不能用 basename 匹配**：`build-dist.mjs` 这类同名脚本一天三份，裸文件名会被别处的同名文件顶包 ⇒ 必须按**仓库相对路径**匹配（同名时只凭裸名不算登记）。
 - **只读 md 的改动是三步闭环**：`approve` → 改 → `sync`。只做前两步时「有未落实的审批」本身就是红灯；反过来 `sync` 也不能替代许可——对只读文件 `sync --path` 没有许可会被拒。
-- **本机路径与用户名不许进仓库**：公开仓库里出现 Windows 用户目录、`/Users/<真名>`、`<盘符>:\code\...` 一律是缺陷（体检 `[P]` 硬查）；兜底路径用环境变量或相对仓库根，找不到就明确报错。已经进过历史的，只有「镜像备份 → `filter-branch` 索引过滤 → 校验 → 强推」能清掉，且**所有 SHA 都会变**（文档里的短 SHA 必须按位置映射重写）。规则与事故记录见 agentmemory 记忆库 websurf/documents/norms/local-path-hygiene.md。
+- **本机路径与用户名不许进仓库**：公开仓库里出现 Windows 用户目录、`/Users/<真名>`、`<盘符>:\code\...` 一律是缺陷（体检 `[P]` 硬查）；兜底路径用环境变量或相对仓库根，找不到就明确报错。已经进过历史的，只有「镜像备份 → `filter-branch` 索引过滤 → 校验 → 强推」能清掉，且**所有 SHA 都会变**（文档里的短 SHA 必须按位置映射重写）。规则与事故记录见 agentmemory 记忆库 记忆库 「本机路径卫生」规范。
 - **`git commit --amend` 会让已写进文档的 SHA 失效**：实测 5 处文档引用了被 amend 淘汰、不在任何 ref 上的提交。写 SHA 前先确认它在 ref 上（`git merge-base --is-ancestor <sha> main`）。
 - **`.cmd` / `.bat` / `.ps1` 的每一行都要 CRLF**：用 Node 写文件会落 LF，`cmd.exe` 当场把命令行切错（报 `'RT' is not recognized`、中文标签被当命令跑）。仓库已加 `.gitattributes`（`text eol=crlf`）钉死检出形态；改完必须确认行尾，再用桩件实跑一次。
 
