@@ -417,7 +417,33 @@ const ok = res.results.filter(r => r.content.includes(`/${工程名}/`));
 
 ---
 
-## 13. 启动与生命周期
+## 14. ⚠️ 项目隔离：**单实例共享库，没有自动隔离**
+
+多 agent / 多项目共用同一个 agentmemory 实例时，**实测隔离能力不足**：
+
+| 工具 | 有 `project` 参数？ |
+|---|---|
+| `memory_save` / `memory_lesson_save` / `memory_lesson_recall` / `memory_profile` / `memory_timeline` | ✅ 能打标 / 过滤 |
+| **`memory_smart_search`** | ❌ **没有** |
+| **`memory_recall`** | ❌ **没有** |
+| **`memory_slot_get`** | ❌ **只有 `label`，无 scope 过滤** |
+| **`memory_facet_query`** | ❌ **只有 dimension 匹配，无 project 维度** |
+
+⇒ **写入能打 project 标，但语义检索与 slot 读取都无法按项目过滤。**
+多项目共用时会**跨项目召回**。四道手动隔离闸（**第一个项目迁入时就要建**）：
+
+| # | 闸 | 做法 |
+|---|---|---|
+| **I1** | marker 带项目前缀 | `<project>/<相对路径>#<序号>@<sha12>` |
+| **I2** | 每条强制打 project 维度 | `memory_facet_tag(dimension="project", value="<slug>", targetId=<marker>, targetType="memory")` |
+| **I3** | slot label 带项目前缀 | ✅ 用 `websurf_norms` 而非 `norms`；**绝不用 `persona`/`guidance` 这类通用名做项目专属 slot** |
+| **I4** | 检索词强制带项目名 | 查 A 项目就用 `A <query>`，并**校验结果的 `source` 前缀** |
+
+**体检必须含**：`cross_project_leak = 0`（检索结果里 source 不属当前项目的条数）
+
+---
+
+## 15. 启动与生命周期
 
 ```bash
 # 完整启动（dsh + 记忆栈）

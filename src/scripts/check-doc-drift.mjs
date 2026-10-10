@@ -208,7 +208,12 @@ const todoSet = new Set(todoIds);
 const dupRows = [...new Set(todoIds.filter((id, i) => todoIds.indexOf(id) !== i))].map((id) => `  ${todoPath}  ${id} 重复`);
 const dangling = [];
 const ownerPath = 'OWNER.md';                                   // owner 决策队列（控制层）
-const ownerRaw = fs.existsSync(path.join(ROOT, ownerPath)) ? fs.readFileSync(path.join(ROOT, ownerPath), 'utf8') : '';
+// 已决行的季度分卷页也算「已存在」——对称于上面 T-### 认 progress/board/archive-*.md。
+// 若只认 OWNER.md，AGENTS §0.4 的「已决行分卷到 progress/owner/」会把全仓 D-### 引用判成悬空。
+const ownerDir = path.join(ROOT, 'progress/owner');
+const ownerVols = fs.existsSync(ownerDir) ? fs.readdirSync(ownerDir).filter((x) => x.endsWith('.md')) : [];
+const ownerRaw = (fs.existsSync(path.join(ROOT, ownerPath)) ? fs.readFileSync(path.join(ROOT, ownerPath), 'utf8') : '')
+  + ownerVols.map((x) => fs.readFileSync(path.join(ownerDir, x), 'utf8')).join('\n');
 const ownerSet = new Set([...ownerRaw.matchAll(/D-\d{3}/g)].map((m) => m[0]));
 if (!ownerRaw) dangling.push('  缺少根 ' + ownerPath);
 const noEvidence = [];                       // [G] 未结项的证据列不得为空（可为 `文件:行号` 或 `见详情`）
@@ -259,7 +264,7 @@ for (const f of live) {
   if (!/\.(md|ts|rs|mjs|js|json|html|css|yml|toml)$/.test(f)) continue;
   const dlines = fs.readFileSync(path.join(ROOT, f), 'utf8').split(/\r?\n/);
   dlines.forEach((line, i) => {
-    for (const m of line.matchAll(/D-\d{3}/g)) if (!ownerSet.has(m[0])) dangling.push('  ' + f + ':' + (i + 1) + '  ' + m[0] + ' 不在 ' + ownerPath);
+    for (const m of line.matchAll(/D-\d{3}/g)) if (!ownerSet.has(m[0])) dangling.push('  ' + f + ':' + (i + 1) + '  ' + m[0] + ' 不在 ' + ownerPath + '（或 progress/owner/ 分卷）');
   });
 }
 

@@ -36,6 +36,7 @@ const PROJECT = 'websurf';
 /** 迁移范围的保留项：不参与 missing 判定（见任务书 §四 与 AGENTS §0.1 第 6 条）。 */
 const KEEP = [
   'progress/board/',   // 看板分卷：体检 [G] 直读这里的 T-### 作为「已存在」来源
+  'progress/owner/',   // OWNER.md 已决分卷（AGENTS §0.4）：装 D-### 决定 ⇒ 属规则/控制层，R3 禁入记忆库
   'progress/index.md', // AGENTS §0.1 第 6 条「当前写入目标」的唯一权威（也在 progress/ 下）
   'progress/index/',   // progress/index.md 的下卷链目标
 ];
