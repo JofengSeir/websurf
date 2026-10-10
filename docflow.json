@@ -21,8 +21,9 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
-    "AGENTS.md": "31d48ef411490208cbe3aaa23142e952b0c838a15d7bed0dc4310a60bddb9179",
-    "skills/agentmemory-usage/SKILL.md": "25d51096301e47ce4868bb35b76e30e9a6307feb73c4c577e7c2131a95a10d6c"
+    "AGENTS.md": "0dfc7f474c171adbcaad839d2fcfa1fc7c30e400f71967ea8b5095aaeaf1d81e",
+    "skills/agentmemory-usage/SKILL.md": "25d51096301e47ce4868bb35b76e30e9a6307feb73c4c577e7c2131a95a10d6c",
+    "skills/websurf-workflow/SKILL.md": "44e959be7bf95dc95e511de98b3104afcfd06dc4db3e16e799e50c5cf553b8d6"
   },
   "approvals": [
     {
@@ -53,14 +54,6 @@
       "path": "TODO.md",
       "by": "owner(2026-10-10",
       "reason": "裸文件名锚点按",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "AGENTS.md",
-      "by": "owner(2026-10-10",
-      "reason": "接入",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -117,6 +110,22 @@
       "path": "skills/agentmemory-usage/SKILL.md",
       "by": "Jofen",
       "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/websurf-workflow/SKILL.md",
+      "by": "owner(2026-10-10",
+      "reason": "新建技能：本仓",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "AGENTS.md",
+      "by": "owner(2026-10-10",
+      "reason": "主动提及工作流循环",
       "at": "2026-10-10",
       "task": "",
       "consumed": true

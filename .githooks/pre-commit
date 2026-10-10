@@ -1,0 +1,18 @@
+#!/bin/sh
+# 收尾门禁：挡住两类「没走完循环」的可判定情形（其余只提示）。
+# 跳过：git commit --no-verify，或 KB_HOOK=off git commit ...
+if [ "$KB_HOOK" = "off" ]; then echo '[收尾门禁] KB_HOOK=off，跳过'; exit 0; fi
+node src/scripts/close-round.mjs --check-round --staged || {
+  echo ''
+  echo '[收尾门禁] 已挡下：本轮代码改动缺留痕。补法见 src/scripts/close-round.mjs 头注释。'
+  echo '            确有理由可跳过：git commit --no-verify'
+  exit 1
+}
+node src/scripts/check-memory-sync.mjs --queue-only >/dev/null 2>&1 || {
+  echo ''
+  echo '[收尾门禁] 已挡下：progress/pending-kb.jsonl 有未回放的条目，而知识库可达。'
+  echo '            回放：node src/scripts/kb-fallback.mjs plan → memory_save → done --marker <m>'
+  exit 1
+}
+echo '[收尾门禁] 留痕与队列检查通过。记得跑四道门禁（AGENTS §3）。'
+exit 0

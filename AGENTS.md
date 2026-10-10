@@ -30,6 +30,19 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 **取法**：marker 是**标识**不是查询串（同篇兄弟条目共享前缀 token，按 marker 搜会被稀释）——用上表的主题词搜。
 **取回内容只作线索**：落结论仍须回当前源码核到 `文件:行号`。
 
+**一轮的循环**（细节见技能 `websurf-workflow`；下面 ①②③ 会被门禁挡下）：
+
+```
+开轮 → 📖 取工作流(记忆库) → 取活(TODO 未结项 + 状态留痕) → docflow claim 认领 → 📖 取上下文
+     → 改 → 收尾(TODO 状态/证据 → ✍️ 写进展 → 四道门禁 → 提交推送) → 维护(stale 等归零)
+```
+
+1. **① 队列滞留**：`progress/pending-kb.jsonl` 非空而知识库可达 ⇒ 体检 `pending` 红 + 钩子挡提交（回放：`kb-fallback plan` → `memory_save` → `done`）。
+2. **② 代码改动缺留痕**：改了 `apps/**` 或 `src/**`（不含 `src/scripts/**`）却没动 `TODO.md` 或没新增台账行 ⇒ 钩子挡提交。
+3. **③ 已有条目失配**：`stale`/`orphan`/`archive_mismatch`/`missing`/`leak` 任一非 0 ⇒ `check-memory-sync` 红，必须重迁。
+
+开工前先加载技能：`skill("websurf-workflow")`（循环与强制力）、`skill("websurf-env-traps")`（环境陷阱）；用记忆库前 `skill("agentmemory-usage")`。
+
 **本机没有记忆库 / MCP 工具不可用时——不要停**：先跑 `node src/scripts/kb-fallback.mjs probe`，按它给出的那层走。三层兜底：
 1. **L1（正常）**：`memory_*` 工具可用 ⇒ 按上表召回、按 §5 写进展。
 2. **L2（服务在、工具不在）**：读用 `GET http://127.0.0.1:3113/memories?limit=1000`（判存在性比检索可靠）；写不了先落 L3 队列。服务没起就先跑 `start-agentmemory.cmd`（probe 会打印实际路径）。
@@ -58,7 +71,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | 根 `*.md` | `AGENTS.md`（本文件）｜ `TODO.md`（唯一待办与状态源）｜ `OWNER.md`（owner 决策队列）｜ `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`（git 仓库项目文档） |
 | `documents/` | **不存在**：原 47 篇工程/共享层/架构文档 + 3 篇规范已全部迁入 agentmemory，原文归档 `archive/memory/2026-10/` |
 | `progress/` | **3 个机器可读文件**：`memory-index.jsonl`（迁移台账 = manifest，`check-memory-sync.mjs` 的权威输入）、`control-ids.json`（控制层 ID 索引，门禁 `[G]` 判定「ID 已存在」的唯一来源）、`pending-kb.jsonl`（MCP 不可用时的待补写队列，见 §0 兜底）|
-| `skills/**` | 两篇 skill：`skills/websurf-env-traps/SKILL.md`（开工前先读）、`skills/agentmemory-usage/SKILL.md`（用记忆库前先读）。仓库是唯一源头；本机 junction 链进 `~/.agents/skills/`，故 `skill` 工具可直接解析；内容同时已入库 |
+| `skills/**` | **三篇** skill：`skills/websurf-workflow/SKILL.md`（**先读：工作流循环**）、`skills/websurf-env-traps/SKILL.md`（开工前先读）、`skills/agentmemory-usage/SKILL.md`（用记忆库前先读）。仓库是唯一源头；本机 junction 链进 `~/.agents/skills/`，故 `skill` 工具可直接解析；内容同时已入库 |
 | `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/`；`apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` 是构建资产（后者被 `build-dist.mjs` 消费） |
 | `src/**` | 共享层（phys / wasm-core / ts-shared / materials / renderer-shared）+ `src/scripts/**`（本地门禁与工具） |
 | `test/` | `test/maps/`（BSP 夹具）、`test/replay/`（录像样例）——两者 gitignore；`test/project/**` 为第三方参考资料 |
@@ -67,7 +80,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | `archive/**` | 迁移原文与回滚存证（gitignore）；**不作依据** |
 
 **仓库内 md 清单**（体检 `[K]` 要求每篇都能被上级导航点到，故在此列全）：
-`.github/ISSUE_TEMPLATE/bug_report.md`、`.github/ISSUE_TEMPLATE/feature_request.md`、`.github/ISSUE_TEMPLATE/other.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`OWNER.md`、`README.md`、`SECURITY.md`、`TODO.md`、`apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md`、`skills/agentmemory-usage/SKILL.md`、`skills/websurf-env-traps/SKILL.md`。
+`.github/ISSUE_TEMPLATE/bug_report.md`、`.github/ISSUE_TEMPLATE/feature_request.md`、`.github/ISSUE_TEMPLATE/other.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`OWNER.md`、`README.md`、`SECURITY.md`、`TODO.md`、`apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md`、`skills/agentmemory-usage/SKILL.md`、`skills/websurf-env-traps/SKILL.md`、`skills/websurf-workflow/SKILL.md`。
 
 ---
 
@@ -79,6 +92,8 @@ node src/scripts/check-memory-sync.mjs             # 记忆库同步：stale / o
 node src/scripts/check-memory-sync.mjs --keys      # markers == entries
 node src/scripts/docflow.mjs check                 # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
 node src/scripts/kb-fallback.mjs probe           # 知识库可用性：L1 工具 / L2 HTTP / L3 仓库兜底，并列出待补写条目
+node src/scripts/close-round.mjs --check-round --staged  # 留痕检查（钩子同口径）；--note/--done 见脚本头注释
+git config core.hooksPath .githooks                  # 每个克隆启用一次提交门禁（本地配置，不随仓库走）
 node src/scripts/check-board-touch.mjs --staged    # 软提示：改了代码却没动 TODO.md
 grep -n -E "据文档|据注释|原设计|历史上|应该|可能|大概|似乎|推测" <新稿>   # 0 命中
 cargo check -p websurf-phys                        # 或工程内 cargo check
@@ -125,6 +140,7 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 - `src/scripts/check-render-parity.mjs`
 - `src/scripts/check-shared-sync.mjs`
 - `src/scripts/docflow.mjs`
+- `src/scripts/close-round.mjs`
 - `src/scripts/kb-fallback.mjs`
 - `src/scripts/lib/dist-pack.mjs`
 - `src/scripts/lib/wasm-api-contract.mjs`
@@ -145,6 +161,7 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 
 > 逐条进展原文全部在 **agentmemory**（marker 前缀 `websurf/progress/`）。
 > 新进展用 MCP `memory_save` 写入，并在 `progress/memory-index.jsonl` 追加一行台账。
+> 三步走：`node src/scripts/close-round.mjs --note "…"` → `memory_save` → `--done --marker <m> --id <id>`（自动补台账 + 跑门禁 + 给提交模板）。
 > 权威存在性判据：`GET http://localhost:3113/memories?limit=1000`（**不要用检索命中判存在性**）。
 
 **仍生效的规则**

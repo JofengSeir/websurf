@@ -109,6 +109,8 @@ const archive = buildArchiveIndex();
 
 // ===== 检查 =====
 const stale = [], orphan = [], leak = [], xproj = [], dup = [], archMismatch = [];
+const pending = [];   // 待补写队列滞留（知识库可达时非空即失败）
+let pendingOffline = 0;
 const seen = new Set();
 const sources = new Set();
 let retired = 0;
@@ -143,17 +145,28 @@ for (const e of entries) {
 const scope = SCOPE_ROOTS.reduce((a, r) => a.concat(walkMd(path.join(ROOT, r))), []).filter(inScope);
 const missing = scope.filter((f) => !sources.has(f)).map((f) => '  ' + f).sort();
 
+// 队列滞留检查（A）：写不进知识库的条目不得长期滞留。
+const QFILE = path.join(ROOT, 'progress/pending-kb.jsonl');
+const qRows = fs.existsSync(QFILE) ? fs.readFileSync(QFILE, 'utf8').split('\n').filter(Boolean) : [];
+let kbUp = false;
+try { const rr = await fetch('http://127.0.0.1:3113/memories?limit=1', { signal: AbortSignal.timeout(1500) }); kbUp = rr.ok; } catch { }
+if (qRows.length && kbUp) pending.push('  progress/pending-kb.jsonl 有 ' + qRows.length + ' 条待补写，而知识库可达 ⇒ 先 plan 回放再 done');
+pendingOffline = qRows.length && !kbUp ? qRows.length : 0;
+
 /** 唯一违规判据：主检查与 --rerun 共用，避免两处口径分叉。 */
-const bad = (t) => Boolean(t.stale || t.orphan || t.missing || t.leak || t.xproj || t.dup || t.badJson || t.archMismatch);
+const sum0 = (a) => a.length > 0;
+const bad = (t) => Boolean(t.stale || t.orphan || t.missing || t.leak || t.xproj || t.dup || t.badJson || t.archMismatch || t.pending);
 const sum = {
   entries: entries.length, markers: seen.size, sources: sources.size, scope: scope.length,
-  stale: stale.length, orphan: orphan.length, archive_absent: archiveAbsent, retired, missing: missing.length,
+  stale: stale.length, orphan: orphan.length, archive_absent: archiveAbsent, pending: pending.length, pending_offline: pendingOffline, retired, missing: missing.length,
   leak: leak.length, xproj: xproj.length, dup: dup.length, badJson: badJson.length, archMismatch: archMismatch.length,
 };
 const line = `entries=${sum.entries} markers=${sum.markers} sources=${sum.sources} scope=${sum.scope} ` +
   `scope_roots=${SCOPE_ROOTS.map((r) => r.replace('/', '')).join('+')} ` +
-  `stale=${sum.stale} orphan=${sum.orphan} archive_absent=${sum.archive_absent} archived=${sum.retired} archive_mismatch=${sum.archMismatch} ` +
+  `stale=${sum.stale} orphan=${sum.orphan} archive_absent=${sum.archive_absent} pending=${sum.pending} pending_offline=${sum.pending_offline} archived=${sum.retired} archive_mismatch=${sum.archMismatch} ` +
   `missing=${sum.missing} leak=${sum.leak} cross_project_leak=${sum.xproj} dup=${sum.dup}`;
+
+if (flag('queue-only')) { console.log('队列滞留检查：pending=' + pending.length + ' pending_offline=' + pendingOffline); process.exit(sum0(pending) ? 1 : 0); }
 
 if (flag('keys')) { console.log(`markers=${sum.markers} entries=${sum.entries}`); process.exit(sum.markers === sum.entries && !sum.badJson ? 0 : 1); }
 
@@ -171,7 +184,7 @@ if (flag('rerun')) {
 
 console.log('记忆库同步体检：' + line);
 const detail = (title, arr) => { if (arr.length) console.log('\n[' + title + ']（' + arr.length + '）：\n' + (flag('list') ? arr.join('\n') : arr.slice(0, 10).join('\n') + (arr.length > 10 ? `\n  … 另 ${arr.length - 10} 条（--list 看全）` : ''))); };
-detail('stale', stale); detail('orphan', orphan); detail('archive_mismatch', archMismatch); detail('missing', missing); detail('leak', leak); detail('cross_project_leak', xproj); detail('dup', dup); detail('badJson', badJson);
+detail('stale', stale); detail('orphan', orphan); detail('pending', pending); detail('archive_mismatch', archMismatch); detail('missing', missing); detail('leak', leak); detail('cross_project_leak', xproj); detail('dup', dup); detail('badJson', badJson);
 if (bad(sum)) {
   console.log('\n  —— stale：源变了 ⇒ 重迁该 marker；orphan：源没归档好 ⇒ 先备份再标 retired；archive_mismatch：归档原文与 marker 不符 ⇒ 条目已陈旧；missing：范围内漏迁；leak：不该入库的进了台账');
 }
