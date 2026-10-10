@@ -91,6 +91,9 @@ node src/scripts/check-doc-drift.mjs [文件]        # A–P 全 0（行数声�
 node src/scripts/check-memory-sync.mjs             # 记忆库同步：stale / orphan / archive_mismatch / missing / leak 全 0（台账 progress/memory-index.jsonl）
 node src/scripts/check-memory-sync.mjs --keys      # markers == entries
 node src/scripts/docflow.mjs check                 # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
+node src/scripts/check-render-parity.mjs           # 三端渲染同源（静态 A–J：实现符号 / 共享入口装配与调用面 / 视口声明；git 不可用时降级）
+node src/scripts/check-render-consistency.mjs      # 三端渲染一致（运行期：探针快照逐字段；缺三端 dev 服务或浏览器即 SKIP）
+node src/scripts/check-prefs-parity.mjs            # 三端呈现档可比（`?prefs=default` 生效行逐字相同 + `--selftest` 负向自测）
 node src/scripts/kb-fallback.mjs probe           # 知识库可用性：L1 工具 / L2 HTTP / L3 仓库兜底，并列出待补写条目
 node src/scripts/close-round.mjs --check-round --staged  # 留痕检查（钩子同口径）；--note/--done 见脚本头注释
 git config core.hooksPath .githooks                  # 每个克隆启用一次提交门禁（本地配置，不随仓库走）
