@@ -734,18 +734,7 @@
     ".github/ISSUE_TEMPLATE/other.md": {},
     ".github/PULL_REQUEST_TEMPLATE.md": {},
     "AGENTS.md": {},
-    "CHANGELOG.md": {
-      "apps/debug/package.json:3:3": "02ac97ce",
-      "apps/game/package.json:3:3": "02ac97ce",
-      "apps/viewer/package.json:3:3": "02ac97ce",
-      "src/Cargo.toml:3:3": "f5efcadb",
-      "src/wasm-core/Cargo.toml:11:11": "39334f7a",
-      "apps/debug/crates/wasm/Cargo.toml:12:12": "e3b0c442",
-      "apps/game/crates/wasm/Cargo.toml:12:12": "e3b0c442",
-      "apps/viewer/crates/wasm/Cargo.toml:9:9": "f5efcadb",
-      "src/wasm-core/bsp_to_gltf_core/materials.rs:448:448": "c1f53f67",
-      "src/wasm-core/bsp_to_gltf_core/materials.rs:475:475": "efb6962d"
-    },
+    "CHANGELOG.md": {},
     "CONTRIBUTING.md": {},
     "OWNER.md": {
       "src/wasm-core/render_bundle.rs:74:76": "f1e3b8d5"
@@ -869,6 +858,14 @@
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "CHANGELOG.md",
+      "at": "2026-10-10T15:18:45.746Z",
+      "by": "codebuddy",
+      "reason": "CHANGELOG.md 正文在 2026-10-10 裸文件名锚点去行号重构后已不含任何 `路径:行号` 锚点（grep 0 命中）；anchorPins 中 10 条（apps/*/package.json:3:3、src/Cargo.toml:3:3、src/wasm-core/Cargo.toml:11:11、apps/*/crates/wasm/Cargo.toml:12/12/9、materials.rs:448/475）均为陈旧钉 ⇒ 复核后按文档现状重钉为空集（本机 execFileSync git 恒 EBUSY，无法走 sync，按 sync 语义等价落盘）",
+      "changed": 10,
+      "total": 0
+    },
     {
       "path": "TODO.md",
       "at": "2026-10-10T14:47:43.205Z",
