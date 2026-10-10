@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../pkg && node -e \"require('fs').copyFileSync('../../pkg/websurf_viewer_wasm_bg.wasm','../../web/websurf_viewer_wasm_bg.wasm')\"",
+    "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../../../.tmp/wasm-out/viewer && node ../../../../src/scripts/copy-wasm-pkg.mjs viewer",
     "typecheck": "tsc --noEmit",
     "test:replay": "esbuild test/replay-selftest.ts --bundle --outfile=.tmp/replay-selftest/replay-selftest.mjs --format=esm --platform=node --target=node18 && node .tmp/replay-selftest/replay-selftest.mjs",
     "test:sessions": "node test/session-sep.mjs",
