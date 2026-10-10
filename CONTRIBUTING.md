@@ -1,6 +1,6 @@
 # 贡献指南
 
-欢迎报告问题、改进文档、修复 bug、新增功能。仓库结构、构建链与文档地图见 [README.md](README.md)。
+欢迎报告问题、改进文档、修复 bug、新增功能。安装与运行见 [README.md](README.md)。
 
 ## 1. 报告问题
 
@@ -18,5 +18,5 @@ npm ci
 npm run build          # build:wasm + typecheck + esbuild 打包
 ```
 
-- 涉及物理、时序或渲染回归的改动，跑 §4 的验证脚本。
+- 涉及物理、时序或渲染回归的改动，须跑对应门禁（见 `.github/workflows/ci-gates.yml`）并附实测输出。
 - 提交 PR：说明改动与验证方式，并按 `.github/PULL_REQUEST_TEMPLATE.md` 勾选测试项。

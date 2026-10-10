@@ -6,7 +6,7 @@
 
 ---
 
-## 2. 快速开始
+## 1. 快速开始
 
 每个应用是**独立的 npm 工程**；仓库根另有一个 `package.json`（2026-10-02 起，只承载跨工程共享的 npm 依赖——渲染共享层的 `three` 单实例，不含脚本）。以 `apps/debug` 为例：
 
@@ -32,9 +32,9 @@ npm run dev            # python ../../src/serve.py 8080 .
 
 **静态服务**：`src/serve.py` 只做一件事——按正确 MIME 提供本地文件：端口取 `argv[1]`（默认 8080，`src/serve.py:19`），服务根取 `argv[2]`（`src/serve.py:20`），启动时 `os.chdir` 到该根（`src/serve.py:21`），并为所有响应加 COOP/COEP，页面才能拿到 `SharedArrayBuffer`。
 
-## 9. 参与与许可
+## 2. 参与与许可
 
-- 改动流程、验证脚本、提交规范 → [CONTRIBUTING.md](CONTRIBUTING.md)
+- 改动流程与提交规范 → [CONTRIBUTING.md](CONTRIBUTING.md)
 - 漏洞报告与安全事实 → [SECURITY.md](SECURITY.md)
 - 版本历史 → [CHANGELOG.md](CHANGELOG.md)
 
