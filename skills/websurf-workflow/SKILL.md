@@ -71,7 +71,7 @@ harness 的扫描根是这四个（源码 `dsh-skill-filesystem/lib/index.js`）
 **`<仓库>/skills/` 不在扫描根里** —— 它是内容源头（唯一真相），必须被注册进上面任一根才能被 `skill()` 找到：
 
 ```cmd
-mklink /J "%USERPROFILE%\.agents\skills\websurf-workflow" "D:\code\projects\websurf\skills\websurf-workflow"
+mklink /J "%USERPROFILE%\.agents\skills\websurf-workflow" "..\skills\websurf-workflow"
 ```
 
 三个技能各建一次（`agentmemory-usage` / `websurf-env-traps` / `websurf-workflow`）。注册是机器本地行为，不随仓库走；新机器上先注册再开工。

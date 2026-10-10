@@ -23,7 +23,7 @@
     ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
     "AGENTS.md": "564538e416caea609d266602e5b433403ee9bac6854e3563c2ee9d99dc7a8b91",
     "skills/agentmemory-usage/SKILL.md": "25d51096301e47ce4868bb35b76e30e9a6307feb73c4c577e7c2131a95a10d6c",
-    "skills/websurf-workflow/SKILL.md": "edb5f9977b5ede5d6a3e27f0eedb279b52337d73223fda18d16094ad31634bc4"
+    "skills/websurf-workflow/SKILL.md": "d179dd32ed653364f8aae5ec3ab6104b2ddd1a052482f0a8cf42bf6762095755"
   },
   "approvals": [
     {
@@ -115,7 +115,7 @@
       "consumed": true
     },
     {
-      "path": "skills/websurf-workflow/SKILL.md",
+      "path": "AGENTS.md",
       "by": "owner(2026-10-10)",
       "reason": "补技能注册说明",
       "at": "2026-10-10",
@@ -123,9 +123,9 @@
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
+      "path": "skills/websurf-workflow/SKILL.md",
       "by": "owner(2026-10-10)",
-      "reason": "补技能注册说明",
+      "reason": "去掉字面本机路径",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
