@@ -49,7 +49,7 @@
 
 - 优先级：`P0` 不定就停摆（下游已有一批工作准备好）→ `P1` 改契约 / 状态语义 → `P2` 卫生与取舍。
 - 与看板的分工：看板 `待裁决` 是**工作等结论**；`OWNER.md` 是**人要做决定**。一条工作等裁决时两边都出现——
-  看板记那一行的状态，`OWNER.md` 记一条 `D-###`（可指向 `progress/decisions.md` 的批量明细）。
+  看板记那一行的状态，`OWNER.md` 记一条 `D-###`（批量明细原在 `progress/decisions.md`，2026-10-10 已迁 agentmemory，见台账 `progress/memory-index.jsonl`）。
 
 ### 0.4 文档体积与分卷（适用所有流程性 md）
 
@@ -61,13 +61,13 @@
 | **控制层** | `TODO.md` | **96 KB 或 300 条** | ①「已记录 + 已结案」分卷到 `progress/board/`（**未结项永不分卷**）；②仍超则逐行精简（长证据/判据转「见详情」，事项 ≤ 120 字符） |
 | | `OWNER.md` | **16 KB** | 已决行按季度分卷到 `progress/owner/` |
 | **规范层** | `documents/norms/**`、根 `README`/`CHANGELOG`/`CONTRIBUTING`/`SECURITY` | **48 KB** | 按主题拆篇，登记进 `documents/index.md` |
-| **过程记录** | `progress/**` 其余 | **48 KB** | 按时间/主题切卷，登记进 `progress/index.md` |
+| **过程记录** | `progress/**` 其余 | **48 KB** | 按时间/主题切卷，登记进 `progress/index.md`。**机器可读台账**（如 `progress/memory-index.jsonl`）同受本上限约束（体检 `[H]` 只看路径前缀）；接近上限时先与 owner 议「分卷」还是「上限口径不含机器可读文件」，不得靠删字段规避 |
 
 **分卷六条硬要求**
 
 1. **可达**：任何分卷文件都必须登记在**该主题的导航文件**里——`documents/index.md`（文档树）、`progress/index.md`（过程记录）、`TODO.md` 头注（看板分卷）。体检硬查（`[G]⑧` / `[I]`）。
 2. **有序**：按时间或主题顺序切；卷名带序号（`2026-10-1.md`…）或日期区间；每卷头部写「第 N/M 卷 / 上一卷 / 下一卷 / 回到导航」。
-3. **进目录**：分卷进**主题子目录**（`progress/monthly/`、`progress/board/`、`progress/open-issues/`），不散在 `progress/` 根。
+3. **进目录**：分卷进**主题子目录**（`progress/monthly/`、`progress/board/`、`progress/index/`），不散在 `progress/` 根。
 4. **导航要小**：导航文件（`index.md`）只写「文件 / 一句话 / 什么时候看它」，不复述内容。
 5. **不可分卷的例外**：`TODO.md` 的未结项、`OWNER.md` 的待决行——它们是唯一状态源，拆开就失去「一处」的意义。
 6. **分卷/归档前先取许可**：把 `T-###` / `D-###` 行移出等于**删行**，而控制层不许 agent 删行 ⇒ 先 `node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完 `sync`（`OWNER.md` 同理）；无许可时 `sync` 会保留旧钉，体检 `[O]` 逐条报「单元被删除」。
@@ -92,9 +92,9 @@
 | 位置 | 状态 |
 |---|---|
 | 仓库根 `*.md` | 本文件（§0 工作流核心，唯一入口）+ `README.md` + `TODO.md`（待办看板）+ `OWNER.md`（owner 决策队列）+ `CHANGELOG.md` + `CONTRIBUTING.md` + `SECURITY.md`；后四篇于 2026-09-22 由旧文档**合并重建**，细节源头为 git 历史 |
-| `documents/` | **47 篇**（2026-10-10 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 已迁 `progress/open-issues/` |
+| `documents/` | **47 篇**（2026-10-10 实测）：architecture / phys / wasm-core / ts-shared / materials / debug / game / viewer / norms **九棵子树** + `index.md`。工程子树的顶层文档为 overview / sequences / differences（viewer 另有 replay-vs-dem）；原 `open-issues/` 7 篇曾迁 `progress/open-issues/`，2026-10-10 又随本次迁移入库 agentmemory 并从仓库移除（marker 前缀 `websurf/progress/open-issues/`） |
 | `test/` | 仅 `test/maps/`（BSP 夹具）与 `test/replay/`（录像样例），两者均 gitignore；`test/dual-mode-harness/` 已退役 |
-| `progress/` | **过程记录**（不作事实来源），**导航见 `progress/index.md`**：`monthly/`（月度进展逐条原文，**13 卷**：2026-09 ×2 + 2026-10 ×11；当月最后一卷即「当前写入目标」）、`board/`（看板分卷，**5 卷**：已记录 + 已结案）、`open-issues/01..07`（取证原文，**7 篇**）、`index.md` + `index/`（进展索引与分卷）、`pending-detail.md`（原 §7.3 台账原文）、`wg-status.md`（工作组状态）、`decisions.md`（待裁决分批清单）、`board-migration.md`（看板来由）、`lessons-2026-10-08.md`（经验教训） |
+| `progress/` | **过程记录**（不作事实来源），**导航见 `progress/index.md`**。**其中 24 篇已迁 agentmemory（副本，仓库为准）**：monthly 12 卷 + `open-issues/` 7 篇 + 根散篇 5（`pending-detail` `wg-status` `decisions` `board-migration` `lessons-2026-10-08`）已入库为**派生线索索引**，原文归档 `archive/memory/`，映射见台账 `progress/memory-index.jsonl`，同步体检 `src/scripts/check-memory-sync.mjs`。**仓库现存 9 篇**：`monthly/2026-10-11.md`（唯一在库月度卷 =「当前写入目标」）、`board/` 5 卷（看板分卷；体检 `[G]` 直读其 `T-###`）、`index.md` + `index/` 2 卷 |
 | `.archive/` | **已删除（2026-10-07 owner 裁决）**：旧文档归档区（根 5 篇 + `documents/**` 45 篇 + 退役 harness `docs/` 5 篇 ≈ 57 篇）已从工作区移除，原文仅存 git 历史；`.gitignore` 保留 `**/.archive/` 规则作归档位 |
 | `apps/debug/scripts/path-baseline.md`、`apps/viewer/scripts/dist-README.md` | **保留**（构建脚本资产，非文档树；其中 dist-README 被 `build-dist.mjs` 消费，不可删） |
 | `.github/**/*.md` | **保留**（PR / Issue 模板，功能性配置，不属本次重编范围） |
@@ -184,17 +184,17 @@ cd apps/<app> && npm run typecheck                # TS 侧
 
 ### 7.1 已完成 / 已发生
 
-> **本节滚动索引已冻结（2026-10-07）**：进展逐条原文在 `progress/monthly/`，全量索引（日期 / 摘要 / `卷:行号`）在 `progress/index.md` 的「进展索引」。
+> **本节滚动索引已冻结（2026-10-07）**：进展逐条原文在 `progress/monthly/`（2026-09 的 2 卷与 2026-10 的第 1–10 卷已于 2026-10-10 迁入 agentmemory + `archive/memory/`），全量索引（日期 / 摘要 / `卷:行号`）在 `progress/index.md` 的「进展索引」。
 > **冻结原因**：本节若每提交追加一行，本文件就永远处于「可编辑」，无法纳入只读宪法层；且索引职责与 `progress/index.md` 重复。
 > **此后写进展只做两件事**：追加到「当前写入目标」那一卷，并在 `progress/index.md` 的索引补一行。
 ### 7.2 工作组状态
 
-> 工作组（WG1–WG12）逐条状态与判定明细见 `progress/wg-status.md`（过程记录）。
+> 工作组（WG1–WG12）逐条状态与判定明细原在 `progress/wg-status.md`，已于 2026-10-10 迁入 agentmemory（marker 前缀 `websurf/progress/wg-status.md`，原文归档 `archive/memory/2026-10/`）。
 > 结论：全部工作组已完成并经主控复验；此后只剩 `TODO.md` 中登记的待决项。
 
 ### 7.3 当前阻塞与待决
 
-> **待决与已知项已全部迁出本文件**：唯一事实来源是根 `TODO.md`（状态只在那登记）；逐字原文明细见 `progress/pending-detail.md`。
+> **待决与已知项已全部迁出本文件**：唯一事实来源是根 `TODO.md`（状态只在那登记）；逐字原文明细原在 `progress/pending-detail.md`，已于 2026-10-10 迁入 agentmemory（marker 前缀 `websurf/progress/pending-detail.md`）。
 > 本小节此后只保留**仍生效的规则**与历史沿革，不再新增待决条目。
 
 **仍生效的规则**
@@ -207,12 +207,12 @@ cd apps/<app> && npm run typecheck                # TS 侧
 **历史沿革**
 
 - 已结案项、规则与工具说明原存放于历史台账（原 plan 目录进度台账；2026-09-23 退役删除，仅存 git 历史 commit `6e0ecf6`）：已结案 **19** 条、逐行原样移出的规则/工具说明 **11** 条。
-- 本小节原有 **68** 条编号项（原 #1–#99，编号有跳号）于 2026-10-07 整体迁入 `TODO.md`，分配 **T-001…T-068**，总表保留「原号」列以便追溯；原文逐字保存在 `progress/pending-detail.md`。
+- 本小节原有 **68** 条编号项（原 #1–#99，编号有跳号）于 2026-10-07 整体迁入 `TODO.md`，分配 **T-001…T-068**，总表保留「原号」列以便追溯；原文逐字原保存在 `progress/pending-detail.md`（2026-10-10 迁入 agentmemory）。
 - 迁移边界情况：#94 原表行缺尾竖线、#88/#90 无状态列、#92 原状态列被正文里的裸竖线污染——三处均按正文判定状态，已在明细页注明。
 
 ### 7.4 下一步
 
-> 历史「下一步建议顺序」已随工作完结作废，原文见 `progress/wg-status.md`。
+> 历史「下一步建议顺序」已随工作完结作废，原文原见 `progress/wg-status.md`（2026-10-10 迁入 agentmemory）。
 > 当前工作入口只有一个：根 `TODO.md` 的「未结项」。
 
 ## 附录 A：仓库构建与验证速查

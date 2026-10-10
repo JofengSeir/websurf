@@ -46,7 +46,7 @@
 
 `2026-10` 原有 11 卷，其中 **10 卷已迁出**（→ agentmemory / `archive/memory/2026-10/`），仓库内只保留**当月最后一卷** `2026-10-11`（即「当前写入目标」）。旧卷头部有「上一卷 / 下一卷」链接，右列「什么时候看」写着用途与迁移状态。新进展一律追加到**当月最后一卷**（本页右列会随之更新）。
 
-## 进展索引（本页保留最近 91 条：2026-10-08 起）
+## 进展索引（本页保留最近 92 条：2026-10-08 起）
 
 > **分卷（2026-10-09，owner 授权）**：2026-09 与 10 月上旬共 144 条已移入 [`index/2026-09.md`](index/2026-09.md)（38 条）与 [`index/2026-10-1.md`](index/2026-10-1.md)（106 条）；**新增进展仍追加在本页**，本页超过 40 KB 时把最老一段切进 `index/`（细则见 `AGENTS §0.4`）。
 
@@ -168,5 +168,7 @@
 | 2026-10-10 | **T-454 全部阶段结案**（P0–P8 + T-450/T-627）：收尾判据全绿——三端 typecheck/build:wasm/build:ts exit 0、三端 GLB 门禁 exit 0（120 材质/105 贴图/2634 节点/6 属性键/502 ambientCube 全同）、`check-render-parity` exit 0（19 条实现符号 0 命中）、drift A–P 全 0、debug↔game 逐像素 **100.0000%**；余项 T-455/T-456 | progress/monthly/2026-10-11.md:84 |
 | 2026-10-10 | T-637 立项：websurf 过程记录迁入 agentmemory（迁移任务书 §十一 阶段 0–1）——任务书 §三「现状」已失效（库 0 条 / 台账不存在 / P1 两卷俱在 / P3 未复现）；阶段 1 工作流改造落地（retryGit + 降级 WARN、board-touch 扩面、新 check-memory-sync、AGENTS 五处条款、§4 登记）；[P] 20→0 / [G] 12→7 / [O] 59→57 | progress/monthly/2026-10-11.md:89 |
 | 2026-10-10 | T-637 阶段 2：`progress/` 24 篇迁入 agentmemory（127 条 = 103 段 + 24 索引，marker + facet project:websurf）+ 归档 `archive/memory/`（V6 24/24 sha256 一致）；源已从仓库移除；台账 `progress/memory-index.jsonl` 标 retired；260 处指针改写为「第 N 行」；`check-memory-sync` exit 0（stale/orphan/missing/leak=0） | progress/monthly/2026-10-11.md:98 |
+| 2026-10-10 | **T-637 阶段 3 结案**：AGENTS §2 载明「24 篇已迁 agentmemory + 台账/门禁指针」、§0.4 补机器可读台账口径、§7 五处已迁引用改历史表述；OWNER.md 新增 D-112（已决，留70/迁24）与 D-113（待决，检索质量 P2）；TODO 登记 T-638/T-639；体检 [C]/[E]/[N]/[P]=0、[G]=7（均非本轮）、[O]=57；check-memory-sync exit 0 | progress/monthly/2026-10-11.md:108 |
+
 
 

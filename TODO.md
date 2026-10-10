@@ -6,7 +6,7 @@
 > 台账号（原 AGENTS §7.3 的「N 条」聚合行）在底层条目细化后**保留原行**、置 `已记录` 并在事项前标「【台账号·已细化】」，只作编号追溯，不再承载状态；未完全细化者保留原状态并标注已细化部分。
 > **体量策略**：本表超过 **96 KB 或 300 条**时，按两级处理——①把「已记录 + 已结案」整段移入 `progress/board/archive-<年-月>.md`（**未结项永不分卷**；2026-10-07、2026-10-09 各触发一次）；②若已分卷后仍超限，则**逐行精简**：`证据`/`判据` 超长的改写为「见详情」并把全文移入该行详情页，`事项` 一律 ≤ 120 字符。体检 `[H]` 硬查 96 KB。**分卷/归档前先取许可**：`node src/scripts/docflow.mjs approve --path TODO.md --by <谁> --reason 分卷`，移完再 `sync`（本表不许 agent 删行，无许可 `sync` 会保留旧钉、体检逐条报「单元被删除」）。
 > **ID 分配**：新条目取**所属区段的下一个未用号**——viewer `T-1xx`、game `T-2xx`、debug `T-3xx`、shared `T-4xx`、取证项 `T-5xx`、跨区/文档治理 `T-6xx`；**已出现过的号永不复用**。
-> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **172**；game **240**；debug **325**；shared **458**；取证项 **508**；跨区/文档治理 **638**。分配新条目后同步更新本行。
+> **下一可用号（实测，含 `progress/board/archive-2026-10.md` 的历史行；只写数字部分）**：viewer **172**；game **240**；debug **325**；shared **458**；取证项 **508**；跨区/文档治理 **640**。分配新条目后同步更新本行。
 > **ID 引用纪律**：全仓任何 `T-###` 写法都必须对应表里**真实存在**的行（体检 `[G]` 硬查）；**不要写「未来号 / 预留号」**——2026-10-07 实测：把头注里的「下一可用号」写成 `T-1xx` 的具体号后，门禁立即报 6 条悬空 ID。所以「下一可用号」只写数字部分，区段前缀由上两行给出。
 > **两份表示同源**：「未结项」列表由总表按状态生成；**改状态/证据只改总表**，两者必须一致（体检 `[G]` 把关）。
 > **验收判据（D-001 起必填）**：`待修` 行的「判据」列必须给出**可执行命令 + 期望输出**（**行为要求见 `AGENTS §0.1` 第 3 条**）；体检 `[G]` 现在只**计数**（`[待补]` 的条数），补齐后转硬门。
@@ -26,11 +26,12 @@
 | 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |
 | 已结案 | 已按结论改完，或已判定无需行动 |
 
-## 未结项（75 条）
-### 待裁决（1）
+## 未结项（76 条）
+### 待裁决（2）
 - **T-628** 规范 §2.3 的 `dist/play.cmd` 断言与实现不符（仅 viewer 产出，debug/game 不产出）　`repo`
+- **T-638** 记忆库检索质量回归未达任务书 V3 的 20/20（实测 17/20 rank-1、19/20 top-3）　`repo`
 
-### 待修（71）
+### 待修（72）
 - **T-008** apps/game/scripts/check-wasm-api.mjs:52-70 的 PHYS_API 只列 17 项，缺 new …　`game`
 - **T-046** debug / game 的 RendererMain.getLightingMode() 零调用点：debug 与 game 各有一份…　`debug`
 - **T-047** game RendererMain.resetTo() 与 stop() 零调用点：start() 由 apps/game/src/ap…　`debug`
@@ -104,12 +105,11 @@
 - **T-455** 天空区渲染两模式不确定：同构建、同视点、两次加载会落在两种模式之一（差异全部在天空区）　`shared`
 - **T-171** viewer multi 产物随包 `coi-serviceworker.js` 但页面从不加载（SW 永不注册、静态托管拿不到 crossOriginIsolated）　`viewer`
 - **T-629** 三端 `dev.cmd` 的端口检查是死分支：`if errorlevel 1 goto :start_server` 紧接 `:start_server`　`repo`
+- **T-639** `OWNER.md` 超 §0.4 的 16 KB 上限，分卷被体检 `[G]⑥` 阻塞（`D-###` 存在性只读 `OWNER.md`）　`repo`
+
 ### 已取证待立项（2）
 - **T-109** 实体流的「条数」与「记录边界」尚未定死，untilEnd 口径不能直接转正　`viewer`
 - **T-115** untilEnd 口径性能：真录像前 4 MB 约 75 秒，瓶颈待查　`viewer`
-
-### 进行中（1）
-- **T-637** websurf 过程记录（`progress/` 24 篇）迁入 agentmemory 并归档（迁移任务书 §十一 阶段 0–3）　`repo`
 
 > 已记录 / 已结案 **183 条已分卷**（`progress/board/archive-2026-10.md` 等 3 卷）；2026-10-09 再分卷 32 条 ⇒ [`archive-2026-10-4.md`](progress/board/archive-2026-10-4.md) / [`archive-2026-10-5.md`](progress/board/archive-2026-10-5.md)（ID 与状态保留；编号不复用，取新号时连同这些页一起数）。
 
@@ -204,4 +204,6 @@
 | T-634 | 两处「编译得过、跑起来静默退化」：① debug 预编译早于挂载地图根（编译空场景）② 无 3D 天空盒时 viewer 清屏色与另两端不同 | 缺陷 | shared | 进行中 · codebuddy · 2026-10-10 | ① `apps/debug/src/renderer/renderer-main.ts`（原 `precompileScene` 在 `:511`、地图根 `:523` 才 `scene.add`）⇒ **已修**：预编译移到 `scene.add(mapRoot)` 之后（现 `:519` add → `:530` precompile，与 game `:276`→`:283` 同序）。② viewer `apps/viewer/src/core/constants.ts:43` 原 `BG_COLOR = 0x0d1b2a` vs debug `config.ts:226` / game `renderer-main.ts:243` 的 `0x222222` ⇒ **已修**：对齐 `0x222222`（该常量只用于 `scene.background`，无 UI 消费方）。两处已被新的门禁断言 [G]/[H] 覆盖 | .tmp/audit/render-parity-2026-10-10.md | 判据：`node src/scripts/check-render-parity.mjs` exit 0 且 [G] 打印三端 `add@…→precompile@…`（挂载行号小于预编译行号）、[H] 三端各命中 `0x222222`；三端 `typecheck` + `build:app` exit 0 | 新 |
 | T-635 | 渲染同源门禁只做静态文本判定 ⇒ 抓不到「实参丢弃 / 调用顺序 / 取值不同源」这类行为层分叉（T-630、T-634 都属此列） | 工具·门禁 | shared | 已结案 | `src/scripts/check-render-parity.mjs` 原文件头自述「只做静态文本判定——符号没出现不等于行为已同源」。**已扩（2026-10-10）**：新增 E（装配核 `mergeMain` 实参透传：禁止零参写法）、F（底层 `collect_pakfile_models` 口径同源，**提示级**，待 T-631 裁决后转硬断言）、G（预编译必须晚于地图根挂载，按行号判定）、H（清屏色三端同值）。负向自测 10/10 通过（`.tmp/audit/selftest-parity-asserts.mjs`）；本机因 git EBUSY 无法直接跑 git 扫描面，用扫描面换成 fs 遍历的同源副本实跑 exit 0 | .tmp/audit/render-parity-2026-10-10.md | 判据：`node src/scripts/check-render-parity.mjs` exit 0（CI 上 git 可用）；`node .tmp/audit/selftest-parity-asserts.mjs` 全 PASS；**仍管不到**：合并后实际块数/垫球是否生效、剔除与 PVS 运行期口径、R8 钩子 —— 需像素基线与运行期探针（见任务书） | 新 |
 | T-636 | 合并归一钩子 `normalizeGroup` 只有 debug 注入 ⇒ 同材质组内 indexed/非 indexed 混合或 `gpuType` 混合时 game/viewer 走合批失败保留分支，draw call 高于 debug | 缺陷 | shared | 待修 | `apps/debug/src/renderer/renderer-main.ts:503` 传 `normalizeGroup: normalizeMergeGroup`（实现 `:143-180`），经 `src/renderer-shared/scene/assemble-scene.ts:47,94` 注入；game/viewer 不传。**是否在当前测试图上真发生 `[待确认]`**（该钩子按 `:64-67` 也不处理 `normal` 属性，而已知同族问题是 `normal` 有无导致合批失败，见 `progress/open-issues/03-renderer-merge-normal-attribute.md`） | .tmp/audit/render-parity-2026-10-10.md | 判据：三端同图（boreas / surf_666）控制台「分块合并」日志里的块数与 draw call 估算逐项相同；若不同，把钩子收进共享层（三端同传）后复测 | 新 |
-| T-637 | websurf 过程记录（`progress/` 24 篇）迁入 agentmemory 并归档（迁移任务书 `.plan/websurf-migration-taskbook.md` §十一 阶段 0–3） | 工具·流程 | repo | 进行中 · dsh-agent · 2026-10-10 | src/scripts/check-memory-sync.mjs:1 | src/scripts/check-memory-sync.mjs | 判据：@BT@node src/scripts/check-memory-sync.mjs@BT@ ⇒ @BT@stale=0 orphan=0 missing=0 leak=0@BT@（V1）且 @BT@--keys@BT@ 的 @BT@markers==entries@BT@（V7）；@BT@--rerun@BT@ ⇒ @BT@new_writes=0@BT@（V2）；MCP @BT@memory_smart_search@BT@ 遍历命中内容断言 marker 精确出现（禁用分数与命中数）⇒ 跨工程同名族 20 条 rank-1 20/20（V3）；@BT@node src/scripts/check-doc-drift.mjs@BT@ 连跑 5 次不再抛 EBUSY 且 [G]/[O] 不劣于基线（V5）；@BT@archive/memory/**@BT@ 的 @BT@.meta.json@BT@ sha256 与源文件全一致（V6） | — |
+| T-637 | websurf 过程记录（`progress/` 24 篇）迁入 agentmemory 并归档（迁移任务书 `.plan/websurf-migration-taskbook.md` §十一 阶段 0–3） | 工具·流程 | repo | 已结案 | progress/memory-index.jsonl（127 行台账 + 24 篇归档 sha256 全一致）；提交 e4080e1（阶段0–1/d395525（指针）/d79a749（迁移本体）；V3 检索回归未达 20/20 已转 T-638 | src/scripts/check-memory-sync.mjs | 判据：@BT@node src/scripts/check-memory-sync.mjs@BT@ ⇒ @BT@stale=0 orphan=0 missing=0 leak=0@BT@（V1）且 @BT@--keys@BT@ 的 @BT@markers==entries@BT@（V7）；@BT@--rerun@BT@ ⇒ @BT@new_writes=0@BT@（V2）；MCP @BT@memory_smart_search@BT@ 遍历命中内容断言 marker 精确出现（禁用分数与命中数）⇒ 跨工程同名族 20 条 rank-1 20/20（V3）；@BT@node src/scripts/check-doc-drift.mjs@BT@ 连跑 5 次不再抛 EBUSY 且 [G]/[O] 不劣于基线（V5）；@BT@archive/memory/**@BT@ 的 @BT@.meta.json@BT@ sha256 与源文件全一致（V6） | — |
+| T-638 | 记忆库检索质量回归未达任务书 V3 的 20/20（20 条概念探针实测 rank-1 17/20、top-3 19/20；3 处为并列抢位非内容缺失） | 工具·流程 | repo | 待裁决 | 见详情 | progress/monthly/2026-10-11.md | 判据：MCP @BT@memory_smart_search@BT@ 跑 20 条概念探针（探针集合与现状见进展卷）⇒ rank-1 **≥ 20/20**；现状 17/20；改善方案请裁 @BT@OWNER.md@BT@ D-113 | — |
+| T-639 | `OWNER.md` 超 §0.4 的 16 KB 上限，已决行分卷被体检 [G]⑥ 阻塞（`D-###` 存在性只读 `OWNER.md`，分卷后全仓引用会变悬空） | 工具·流程 | repo | 待修 | 见详情 | progress/monthly/2026-10-11.md | 判据：① 体检把 @BT@progress/owner/**@BT@ 计入 `D-###` 存在性来源（对称于 `T-###` 读 @BT@progress/board/archive-*.md@BT@）② 已决行按季度分卷入 @BT@progress/owner/@BT@ 并登记 @BT@progress/index.md@BT@ ⇒ @BT@node src/scripts/check-doc-drift.mjs@BT@ 不再报「OWNER.md 已 X KB（上限 16 KB）」且 `D-###` 悬空为 0 | — |
