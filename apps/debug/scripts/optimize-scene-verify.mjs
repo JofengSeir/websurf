@@ -38,7 +38,8 @@
  *      即表里的「名字」与缓冲里的「几何」真的对得上（只靠表自身推不出这一条）；
  *   ⑪ `lookupMergeSource` 的答案与测试脚本内独立二分的结果一致，越界 / 无表几何返回 null；
  *   ⑫ 第二个场景覆盖**索引 / 非索引 / 同一材质下混合**三种形态（走真实 `RendererMain.optimizeScene`
- *      注入的 `normalizeMergeGroup` 钩子），逐块核对表与两种口径下的 `faceIndex` 反查。
+ *      走真实 `RendererMain.optimizeScene`（合并前的归一由共享核默认钩子 `normalizeMergeGroup` 承担，
+ *      T-460 WP4 起三端同一份），逐块核对表与两种口径下的 `faceIndex` 反查。
  *
  * 用法：npm run test:optimize-scene   （先 esbuild 打包再运行本脚本）
  *      或手动：npx esbuild src/renderer/renderer-main.ts --bundle --format=esm \

@@ -43,8 +43,6 @@ export interface AssembleSceneOptions {
   skyCamera?: SkyCameraParams | null;
   /** 步骤 ⑤：本端的主模型分块合并；返回合并后的主根（不返回则沿用原根）。 */
   mergeMain?: (root: THREE.Scene, gltf: GLTF) => THREE.Object3D | void;
-  /** 合并前对待合并几何数组的归一钩子（debug 的 `normalizeMergeGroup`；其余端不传）。 */
-  normalizeGroup?: (geometries: THREE.BufferGeometry[]) => THREE.BufferGeometry[];
   /** 步骤 ② 之后、③ 之前的钩子（debug 用它收元数据——必须早于合并，合并会 dispose 原 mesh）。 */
   onRootReady?: (root: THREE.Scene, gltf: GLTF) => void;
 }
@@ -91,7 +89,7 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   const root = mergedRoot ?? mapRoot;
 
   if (skyGroup) {
-    const skyMerged = mergeIntoChunks(skyGroup, opts.normalizeGroup ? { normalizeGroup: opts.normalizeGroup } : undefined);
+    const skyMerged = mergeIntoChunks(skyGroup);
     skyGroup.clear();
     for (const m of skyMerged.chunks) skyGroup.add(m);
     for (const m of skyMerged.keptMeshes) skyGroup.add(m);

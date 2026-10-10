@@ -23,7 +23,6 @@
 
 import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, yawPitchRadOf } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
 import * as THREE from 'three';
-import { deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
 import { ensureMainWasm, mosaic_decode } from '../main-wasm.js';
 // 主线程唯一物理线：PhysWorld 与 BspProcessor 同模块（main-wasm 已 initSync）
@@ -118,66 +117,12 @@ export interface RenderPhysEvent {
 // 动机：GLTFLoader 对 GLB 的每个 primitive 建一个 THREE.Mesh，未合并时每帧三处开销都随
 // Mesh 数线性增长——renderer.render 的视锥剔除与逐 mesh draw call、LodManager.update 的
 // 逐项距离判定、近平面自适应的整树 traverse + 包围球测试。合并把对象压成「块」，一块的
-// draw call 数 = 该块的材质数。载体与归一钩子见 `optimizeScene` 薄委托与 `normalizeMergeGroup`。
+// draw call 数 = 该块的材质数。载体见 `optimizeScene` 薄委托；合并前的归一由共享核的默认钩子承担
+// （`scene-optimizer.ts` 的 `normalizeMergeGroup`，T-460 WP4 起三端同一份）。
 
 
 /** 分块合并总开关：false 时 `loadScene` 不调 `optimizeScene`，保留 GLTFLoader 原始场景图。 */
 const OPTIMIZE_SCENE_ENABLED = true;
-
-/**
- * 合并前归一：让同组 geometry 的属性布局一致，否则 `mergeGeometries` 直接失败返回 null。
- *
- * 两步：
- * 1. 索引不一致（组内既有带 index 又有不带）时，把带 index 的转成非索引几何；
- *    全带或全不带则原样保留。
- * 2. 若组内出现多于一种 `BufferAttribute.gpuType`（值为 undefined 时按 0 计），
- *    逐份 clone 后重建属性：先把交错属性解交错（`deinterleaveGeometry`），再按
- *    `count × itemSize` 显式拷成 `Float32Array`，保留 `normalized` 标志；拷贝长度与
- *    `count × itemSize` 不等时打印错误并继续。
- *
- * 交错属性必须解交错的原因：`InterleavedBufferAttribute.array` 是整段 stride 缓冲
- * （长度 = count × stride），而 `itemSize` 只是逻辑分量数，直接按 `itemSize` 重建会得到
- * 非整数顶点数——three.js 逐顶点读到 undefined，包围盒/包围球变 NaN，`LodManager` 的
- * cullDistance 随之为 NaN，最终一个块都不渲染。
- */
-function normalizeMergeGroup(geoms: THREE.BufferGeometry[]): THREE.BufferGeometry[] {
-  const hasIdx = geoms.some((g) => g.index !== null);
-  const allIdx = geoms.every((g) => g.index !== null);
-  let out = hasIdx && !allIdx ? geoms.map((g) => (g.index ? g.toNonIndexed() : g)) : geoms;
-  const gpuTypes = new Set<number>();
-  for (const g of out) {
-    for (const name of Object.keys(g.attributes)) {
-      const a = g.attributes[name] as THREE.BufferAttribute;
-      gpuTypes.add((a as unknown as { gpuType?: number }).gpuType ?? 0);
-    }
-  }
-  if (gpuTypes.size > 1) {
-    out = out.map((g) => {
-      const g2 = g.clone();
-      // 交错属性先摊平成普通属性：其 array 是整段 stride 缓冲，直接重建会切出非整数顶点数
-      if (Object.values(g2.attributes).some((a) => (a as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute)) {
-        deinterleaveGeometry(g2);
-      }
-      for (const name of Object.keys(g2.attributes)) {
-        const a = g2.attributes[name] as THREE.BufferAttribute;
-        // 长度固定为 count × itemSize 的新缓冲，逐元素拷贝原数据
-        const src = a.array as ArrayLike<number>;
-        const arr = new Float32Array(a.count * a.itemSize);
-        for (let i = 0; i < arr.length; i++) arr[i] = src[i] as number;
-        // 长度自洽检查：分配式与比较式同为 count × itemSize，不等时打印属性名与三个长度
-        if (arr.length !== a.count * a.itemSize) {
-          console.error(
-            `[optimizeScene] 属性 ${name} 长度不自洽：array=${arr.length} count=${a.count} itemSize=${a.itemSize}`,
-          );
-        }
-        g2.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize, a.normalized));
-      }
-      g2.dispose();
-      return g2;
-    });
-  }
-  return out;
-}
 
 
 /** 主线程渲染器：持有 WebGL 渲染器、场景、相机与全部子管理器。相机不再本地插值——
@@ -500,7 +445,6 @@ export class RendererMain {
       meshInCluster: (m, c) => this.meshInCluster(m, c),
       onRootReady: (root) => this.collectMetadata(root),
       mergeMain: OPTIMIZE_SCENE_ENABLED ? (root, gltf) => { this.optimizeScene(root, gltf.scene); } : undefined,
-      normalizeGroup: normalizeMergeGroup,
     });
     const mapRoot = asm.root, boundingBox = asm.bbox, maxDim = asm.maxDim;
     this.skyGroup = asm.skyGroup;
@@ -1419,10 +1363,9 @@ export class RendererMain {
   // 移除 gltf.scene、块 mesh 直接挂 BSP 根。
   // 时序：loadScene 中 scene.add(gltf.scene) + lightmap 之后、updateMatrixWorld / boundingBox /
   // LOD·PVS 注册之前的空间分块合并：算法已下沉渲染共享核（`src/renderer-shared/scene/scene-optimizer.ts`，
-  // 与 game 同一份），本方法只保留入口与 debug 特有的合并前归一（`normalizeMergeGroup`：混合
-    // indexed/非 indexed 与混合 gpuType 的归一，经 `normalizeGroup` 钩子注入共享核）。
+  // 与 game 同一份），本方法只保留入口——合并前的归一由共享核的默认钩子承担（T-460 WP4）。
   private optimizeScene(bspRoot: THREE.Scene, gltfScene: THREE.Object3D): void {
-    optimizeSceneShared(bspRoot, gltfScene, this.camera, FOV, { normalizeGroup: normalizeMergeGroup });
+    optimizeSceneShared(bspRoot, gltfScene, this.camera, FOV);
   }
 
   // 复用向量

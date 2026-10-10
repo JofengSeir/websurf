@@ -13,7 +13,7 @@
  */
 
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { deinterleaveGeometry, mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 // ── 空间分块合并参数（GLB 挂载后一次性执行；见 optimizeScene）──────────
 // GLTFLoader 按 GLB 的 primitive 逐个建 THREE.Mesh，图元多的地图因此会产生数万个 Mesh 对象：
 // 每帧都要遍历它们做剔除，可见的还要逐个 draw call。分块合并把这批 Mesh 收敛成数百个空间块
@@ -55,8 +55,63 @@ function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
 }
 
 /**
- * 合并可选钩子：`normalizeGroup` 在两处合并入参前调用（debug 传其 `normalizeMergeGroup`——混合
- * indexed/非 indexed 与混合 gpuType 的归一；game/viewer 不传 ⇒ 行为与无钩子完全一致）。
+ * 合并前归一（`mergeIntoChunks` 的**默认**钩子；T-460 WP4 从 debug 侧搬入，三端同一份）。
+ *
+ * 为什么需要：同组 geometry 的属性布局不一致时，three 的 `mergeGeometries` 直接返回 null，该组只能
+ * 回退成「各自保留独立几何」⇒ draw call 随组数线性增长（T-636：这正是 game/viewer 与 debug 分叉处）。
+ *
+ * 两步：
+ * ① 索引不一致（组内既有带 `index` 又有不带）时，把带 `index` 的转成非索引几何；全带或全不带原样保留。
+ * ② 组内出现多于一种 `BufferAttribute.gpuType`（`undefined` 按 0 计）时逐份 clone 后重建属性：
+ *    交错属性先解交错，再按 `count × itemSize` 显式拷成 `Float32Array`，保留 `normalized` 标志。
+ *
+ * 交错属性必须解交错：`InterleavedBufferAttribute.array` 是整段 stride 缓冲（长度 = count × stride），
+ * 而 `itemSize` 只是逻辑分量数，直接按 `itemSize` 重建会得到非整数顶点数 ⇒ 逐顶点读到 `undefined`、
+ * 包围球变 NaN ⇒ 剔除判定失效、整块不渲染。
+ *
+ * 契约：输出与输入**逐项对应**（长度与顺序不变）——来源区间表按输入顺序与钩子输出配对。
+ */
+export function normalizeMergeGroup(geoms: THREE.BufferGeometry[]): THREE.BufferGeometry[] {
+  const hasIdx = geoms.some((g) => g.index !== null);
+  const allIdx = geoms.every((g) => g.index !== null);
+  let out = hasIdx && !allIdx ? geoms.map((g) => (g.index ? g.toNonIndexed() : g)) : geoms;
+  const gpuTypes = new Set<number>();
+  for (const g of out) {
+    for (const name of Object.keys(g.attributes)) {
+      const a = g.attributes[name] as THREE.BufferAttribute;
+      gpuTypes.add((a as unknown as { gpuType?: number }).gpuType ?? 0);
+    }
+  }
+  if (gpuTypes.size > 1) {
+    out = out.map((g) => {
+      const g2 = g.clone();
+      // 交错属性先摊平成普通属性：其 array 是整段 stride 缓冲，直接重建会切出非整数顶点数
+      if (Object.values(g2.attributes).some((a) => (a as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute)) {
+        deinterleaveGeometry(g2);
+      }
+      for (const name of Object.keys(g2.attributes)) {
+        const a = g2.attributes[name] as THREE.BufferAttribute;
+        // 长度固定为 count × itemSize 的新缓冲，逐元素拷贝原数据
+        const src = a.array as ArrayLike<number>;
+        const arr = new Float32Array(a.count * a.itemSize);
+        for (let i = 0; i < arr.length; i++) arr[i] = src[i] as number;
+        // 长度自洽检查：分配式与比较式同为 count × itemSize，不等时打印属性名与三个长度
+        if (arr.length !== a.count * a.itemSize) {
+          console.error(`[optimizeScene] 属性 ${name} 长度不自洽：array=${arr.length} count=${a.count} itemSize=${a.itemSize}`);
+        }
+        g2.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize, a.normalized));
+      }
+      g2.dispose();
+      return g2;
+    });
+  }
+  return out;
+}
+
+/**
+ * 合并可选钩子：`normalizeGroup` 在两处合并入参前调用，**默认值**即上面的共享 `normalizeMergeGroup`
+ * ——T-460 WP4 起三端都走同一份归一（此前只有 debug 注入，game/viewer 走合批失败保留分支）。
+ * 传入自定义函数即整体替换（逃生口）；传 `(g) => g` 可显式关掉归一（调试/对照用）。
  *
  * 契约：输出与输入**逐项对应**（长度与顺序不变）。来源区间表按输入顺序与钩子输出配对，长度不等时
  * 该组不带表（`lookupMergeSource` 返回 null，退回按 mesh 自身的 name/userData 取名）。
@@ -331,7 +386,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     const mats: THREE.Material[] = [];
     for (const [mat, group] of byMat) {
       const geomsRaw = group.geoms;
-      const geoms = opts?.normalizeGroup ? opts.normalizeGroup(geomsRaw) : geomsRaw;
+      const geoms = (opts?.normalizeGroup ?? normalizeMergeGroup)(geomsRaw);
       // 钩子须逐项对应（长度不变）才谈得上"哪份几何进了哪段缓冲"
       const seeds = geoms.length === group.seeds.length ? group.seeds : null;
       let merged: THREE.BufferGeometry[];
@@ -367,7 +422,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       drawCallEst++;
     } else {
       // 归一后的数组既做最终合并的入参，也定区间表的长度口径（逐项对应）
-      const normalized = opts?.normalizeGroup ? opts.normalizeGroup(mergedGeoms) : mergedGeoms;
+      const normalized = (opts?.normalizeGroup ?? normalizeMergeGroup)(mergedGeoms);
       const final = mergeGeometries(normalized, true);
       if (final) {
         for (const g of mergedGeoms) if (g !== final) g.dispose();
