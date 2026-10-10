@@ -65,28 +65,11 @@ archive/
 # 同族约定：新建的临时调试脚本请以 `_` 前缀命名（`apps/game/.gitignore` 已有 `scripts/_*.mjs`）。
 # 2026-10-07 依 T-035 退回本地实验件：apps/debug/scripts/input-replay-verify.mjs → `_input-replay-verify.mjs`
 apps/*/scripts/_*.mjs
-apps/debug/scripts/jump-apex-auth-diag.mjs
-apps/debug/scripts/jump-apex-measure.mjs
-apps/debug/scripts/jump-apex-report.mjs
-apps/debug/scripts/jump-apex-serve.mjs
-apps/debug/scripts/jump-apex-smoke.mjs
-apps/debug/scripts/jump-apex-trace.mjs
-apps/debug/scripts/jump-apex-window.mjs
-apps/game/scripts/phys-diag-flat.mjs
-apps/game/scripts/phys-dual-pipe.mjs
-apps/game/scripts/phys-gate-probe2.mjs
-apps/game/scripts/phys-p2-ground.mjs
-apps/game/scripts/phys-p2-regression.mjs
-apps/game/scripts/phys-p2-trace.mjs
-apps/game/scripts/phys-rate-parity.mjs
-apps/game/scripts/phys-rate-parity-v2.mjs
-apps/game/scripts/phys-teleport-gate.mjs
 apps/game/scripts/t13-input-surface-probe.mjs
 apps/game/scripts/t13-literal-sweep.mjs
 apps/game/scripts/t13-ulp-sensitivity-control.mjs
 apps/game/scripts/wasm-hash-pin.mjs
 # apps/viewer/test/shot.mjs：一次性 CDP 截图工具（观感验证用；引用面为零，判据同上）
-apps/viewer/test/shot.mjs
 
 # ── 本地保留（不推送）：开发 / 治理层 ──
 # 判据：部署链（.github/workflows/deploy-pages.yml）与三端构建/运行**不需要**它们。
@@ -96,7 +79,8 @@ AGENTS.md
 TODO.md
 OWNER.md
 docflow.json
-documents/
+# documents/ 已放行（2026-10-10 owner 指令）：迁出后仅剩 index.md + norms/** 3 篇规范，属仓库项目文档
+# 已删除：documents/
 progress/
 skills/
 src/scripts/docflow.mjs
