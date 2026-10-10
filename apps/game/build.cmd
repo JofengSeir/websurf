@@ -51,8 +51,15 @@ echo [2/6] Node dependencies ready.
 echo [3/6] Rebuilding WASM (release)...
 call npm run build:wasm
 if errorlevel 1 (
-  echo [ERROR] WASM build failed.
-  echo [HINT] Delete crates\wasm\target\wasm32-unknown-unknown and retry ^(antivirus locks are the usual cause^).
+  echo [WARN] WASM build failed - retrying once ^(transient file locks are common^)...
+  timeout /t 2 /nobreak >nul 2>&1
+  call npm run build:wasm
+)
+if errorlevel 1 (
+  echo [ERROR] WASM build failed twice.
+  echo [HINT] If the log says "failed to write ... pkg\websurf_wasm_bg.wasm" ^(os error 5 / 拒绝访问^):
+  echo [HINT]   a file lock or a second build window holds it - close other dev/build windows, then retry.
+  echo [HINT] Otherwise install Rust + wasm-pack ^(rustup + cargo install wasm-pack^), then retry.
   pause
   exit /b 1
 )

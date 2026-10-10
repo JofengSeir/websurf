@@ -358,3 +358,4 @@
 {"marker":"websurf/documents/architecture/overview.md#errata0@ae7b77c93bca","source":"documents/architecture/overview.md","kind":"errata","seq":0,"memoryId":"mem_mv2sd2g9_efecd17d3848","at":"2026-10-11","retired":true,"shape":"snapshot"}
 {"marker":"websurf/documents/debug/overview.md#errata0@27e1893b8fd3","source":"documents/debug/overview.md","kind":"errata","seq":0,"memoryId":"mem_mv2sd999_3a5e489b5505","at":"2026-10-11","retired":true,"shape":"snapshot"}
 {"marker":"websurf/documents/viewer/differences.md#errata0@17ebf6aa3773","source":"documents/viewer/differences.md","kind":"errata","seq":0,"memoryId":"mem_mv2sdg22_c813380bfff9","at":"2026-10-11","retired":true,"shape":"snapshot"}
+{"marker":"websurf/progress/notes/2026-10-10-cmd-fixes.md#index0@f8163a1e34a5","source":"progress/notes/2026-10-10-cmd-fixes.md","kind":"index","seq":0,"memoryId":"mem_mv2td7md_c05ddf4e10f9","at":"2026-10-11","retired":true,"shape":"snapshot","workflow":true}

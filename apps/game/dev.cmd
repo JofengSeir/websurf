@@ -43,7 +43,7 @@ if errorlevel 1 (
   exit /b 1
 )
 echo [2/5] Node dependencies ready.
-echo [2/5] Syncing shared default textures (src/materials -> web/)...
+echo [2/5] Syncing shared default textures (src/materials -^> web/)...
 call node "%~dp0..\..\src\scripts\sync-default-textures.mjs"
 if errorlevel 1 (
   echo [ERROR] Texture sync failed.
@@ -54,8 +54,15 @@ if errorlevel 1 (
 echo [3/5] Rebuilding WASM (release)...
 call npm run build:wasm
 if errorlevel 1 (
-  echo [ERROR] WASM build failed.
-  echo [HINT] Install Rust and wasm-pack ^(rustup + cargo install wasm-pack^), then retry.
+  echo [WARN] WASM build failed - retrying once ^(transient file locks are common^)...
+  timeout /t 2 /nobreak >nul 2>&1
+  call npm run build:wasm
+)
+if errorlevel 1 (
+  echo [ERROR] WASM build failed twice.
+  echo [HINT] If the log says "failed to write ... pkg\websurf_wasm_bg.wasm" ^(os error 5 / 拒绝访问^):
+  echo [HINT]   a file lock or a second build window holds it - close other dev/build windows, then retry.
+  echo [HINT] Otherwise install Rust + wasm-pack ^(rustup + cargo install wasm-pack^), then retry.
   pause
   exit /b 1
 )
@@ -86,6 +93,11 @@ echo [5/5] All test gates passed.
 
 netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul 2>&1
 if errorlevel 1 goto :start_server
+echo [WARN] Port %PORT% is already in use.
+echo [WARN] Cannot verify the occupant serves this project's web\ - not opening the browser.
+echo [HINT] Use another port:  dev.cmd ^<port^>
+exit /b 0
+
 :start_server
 echo ============================================================
 echo   WebSurf-game - Dev Server (web/)

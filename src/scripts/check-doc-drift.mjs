@@ -419,6 +419,18 @@ for (const a of appNames) {
     if (!/@echo off/i.test(t)) contract.push('  ' + rel + ' 缺 @echo off');
     if (!/exit\s*\/b/i.test(t)) contract.push('  ' + rel + ' 缺 exit /b（退出码口径）');
     if (/C:\\Users\\/i.test(t)) contract.push('  ' + rel + ' 写死了用户目录（换机器即失效）');
+    const cmdLines = t.split(/\r?\n/);
+    cmdLines.forEach((l, i) => {
+      // 死分支：`goto :x` 的下一行就是 `:x` ⇒ 条件不改变任何行为（T-629 的 dev.cmd 端口守卫）
+      const m = /^\s*(?:if\s+.*?\s+)?goto\s+:?([A-Za-z0-9_]+)\s*$/i.exec(l);
+      if (m && (cmdLines[i + 1] ?? '').trim() === ':' + m[1]) {
+        contract.push('  ' + rel + ':' + (i + 1) + ' `goto :' + m[1] + '` 的下一行就是该标签 ⇒ 死分支（检查不改变行为）');
+      }
+      // echo 行里未转义的 `>`（如 `->`）会被 cmd 当重定向：该行不打印，还生成一个杂散文件（T-642 实测）
+      if (/^\s*@?echo\b/i.test(l) && /(?<!\^)>/.test(l)) {
+        contract.push('  ' + rel + ':' + (i + 1) + ' echo 行含未转义 `>` ⇒ 会被当成重定向（不打印 + 生成杂散文件），应写 `^>`');
+      }
+    });
   }
 }
 const depRel = '.github/workflows/deploy-pages.yml';
