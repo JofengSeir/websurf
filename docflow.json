@@ -16,13 +16,13 @@
     "README.md": "0b89f30e8d2d28921d4fd55f5f6f03f979b1fa995f4537efa5df8b49149a9e19",
     "CONTRIBUTING.md": "b11e2f55b65f41f46d928bca3f7a819d2b86c0f5af406c68884502cddfe4ede6",
     "SECURITY.md": "9880a4c2055b8b8546ddf0bed150f62e04ea448f98186d03a02a76e00706c374",
-    "skills/websurf-env-traps/SKILL.md": "7ce08fa5a4555f0fc04393bacbe19ecf4031af2607c4ce4e6111f73d20e6b835",
+    "skills/websurf-env-traps/SKILL.md": "82c1775e2c7d83d586d372647d2311cef2421aab0ddb36a5bf13d73dbdf293c0",
     ".github/ISSUE_TEMPLATE/bug_report.md": "8fb5ccb4398d7bd64cbdfae596aa1d54c8c1a9221fe84e7a901c3ad8f27a15ac",
     ".github/ISSUE_TEMPLATE/feature_request.md": "73a9ddf231a5b6a9b813fb762a1b614ff403bf0d33f460dd3dd695f876fb747a",
     ".github/ISSUE_TEMPLATE/other.md": "2712c67978ba0b6607f1715c4513d617de6b85f90b328678fcaa8f6c4dd79a85",
     ".github/PULL_REQUEST_TEMPLATE.md": "3e1a7680a27475ab05461ab460603f11411e4a6ed6fea8b3e99b057206a1a9cd",
     "AGENTS.md": "340752fcbdb843606e2fcaa263a27c370371cd1770470828db0a1c236c13c03c",
-    "skills/agentmemory-usage/SKILL.md": "fce6045d7efd6c692a7ff46b63221e0aba6fd63c2c15f40b98bc73e908b4387d"
+    "skills/agentmemory-usage/SKILL.md": "7d41a28a8732e12aa02d5d03a2ac51cd35a917b1836d03b8fe79f7e158fabac8"
   },
   "approvals": [
     {
@@ -66,14 +66,6 @@
       "consumed": true
     },
     {
-      "path": "OWNER.md",
-      "by": "owner(2026-10-10 指示「D113/T639 按建议改动」)",
-      "reason": "D-113 按 owner 指示取 (b) 并已落实 ⇒ 移入已决分卷；同时新增 D-114（检索质量下一个修法，承 D-113）",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "README.md",
       "by": "owner(2026-10-10",
       "reason": "迁出小节后残留的交叉引用",
@@ -99,24 +91,32 @@
     },
     {
       "path": "skills/websurf-env-traps/SKILL.md",
-      "by": "owner(2026-10-10",
-      "reason": "路径引用改纯文本、示例改占位符",
+      "by": "owner(2026-10-10)",
+      "reason": "记忆库引用改散文表述",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
     },
     {
       "path": "skills/agentmemory-usage/SKILL.md",
-      "by": "owner(2026-10-10",
-      "reason": "路径引用改纯文本、示例改占位符",
+      "by": "owner(2026-10-10)",
+      "reason": "记忆库引用改散文表述",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
     },
     {
       "path": "TODO.md",
-      "by": "owner(2026-10-10)",
-      "reason": "详情单元格改指台账",
+      "by": "owner(2026-10-10",
+      "reason": "5",
+      "at": "2026-10-10",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "OWNER.md",
+      "by": "owner(2026-10-10",
+      "reason": "5",
       "at": "2026-10-10",
       "task": "",
       "consumed": true
@@ -599,7 +599,7 @@
         "line": 202
       },
       "T-628": {
-        "p": "61104e83d4f49df18fd368aaaa6bcd68ae86aebb99d216df65e1d36298db610f",
+        "p": "372536510c71449fcdc580a79a1f3faaa8b76a910e68ed494b7905b29c8fc697",
         "s": "15c86d5a287d64a8efc93677462d7bcafe8fc46f65a1673ca56ab2739d5848cd",
         "at": "2026-10-10",
         "line": 203
@@ -748,7 +748,6 @@
     },
     "CONTRIBUTING.md": {},
     "OWNER.md": {
-      "lib.rs:314:314": "-",
       "src/wasm-core/render_bundle.rs:74:76": "f1e3b8d5"
     },
     "README.md": {
@@ -760,7 +759,8 @@
       "src/serve.py:39:40": "4f1a7afb"
     },
     "TODO.md": {
-      "apps/viewer/src/core/scene.ts:165:165": "e3b0c442",
+      "apps/viewer/src/core/scene.ts:165:165": "5e51e649",
+      "apps/viewer/src/core/scene.ts:53:53": "490ed190",
       "src/wasm-core/pakfile_models.rs:59:59": "4d861aea",
       "src/wasm-core/render_bundle.rs:388:388": "2ac013ec",
       "src/wasm-core/model_integrator/mod.rs:600:600": "89cf23f2",
@@ -775,13 +775,23 @@
       "apps/viewer/src/replay/timeline.ts:450:450": "eb798bc1",
       ".github/workflows/ci-gates.yml:285:285": "ab72d938",
       "src/scripts/check-glb-parity.mjs:47:47": "8f41147a",
-      "apps/viewer/src/core/scene.ts:165:165~2": "e3b0c442",
+      "apps/viewer/src/core/scene.ts:165:165~2": "5e51e649",
       "apps/viewer/crates/wasm/src/lib.rs:419:419": "4dcdecf1",
       "src/wasm-core/vbsp/mod.rs:704:704": "598fe0e3",
       "src/wasm-core/model_integrator/mod.rs:1412:1412": "9f52f0de",
-      "src/scripts/check-glb-parity.mjs:233:235": "31217dbe",
+      "src/scripts/check-glb-parity.mjs:233:235": "d42707b5",
       "apps/viewer/scripts/build-dist.mjs:233:233": "a9812f45",
       "apps/viewer/scripts/build-dist.mjs:233:233~2": "a9812f45",
+      "apps/viewer/src/core/scene.ts:147:147": "473f4c89",
+      "src/renderer-shared/scene/assemble-scene.ts:90:90": "33bc36d8",
+      "src/wasm-core/render_bundle.rs:74:76": "f1e3b8d5",
+      "apps/debug/src/renderer/lod-manager.ts:154:160": "507eff2a",
+      "src/renderer-shared/scene/visibility-controller.ts:75:79": "a09e35b7",
+      "apps/game/src/renderer/renderer-main.ts:76:76": "ee716eea",
+      "apps/viewer/src/core/scene.ts:158:158": "87f9783a",
+      "apps/viewer/src/core/constants.ts:43:43": "300d88bb",
+      "renderer-main.ts:243:243": "-",
+      "apps/debug/src/renderer/renderer-main.ts:503:503": "30a4c6c2",
       "apps/game/scripts/check-wasm-api.mjs:52:70": "e05aa5d3",
       "src/renderer-shared/shader/bumpmap.ts:1:1": "8d64a30d",
       "apps/game/scripts/check-wasm-api.mjs:52:70~2": "e05aa5d3",
@@ -844,7 +854,7 @@
       "apps/game/src/renderer/renderer-main.ts:898:898": "0fbbe010",
       "src/ts-shared/phys/world-builder.ts:203:203": "ea663714",
       ".github/workflows/deploy-pages.yml:200:200": "6dd5eaf1",
-      "src/scripts/docflow.mjs:201:201": "30f3eaae",
+      "src/scripts/docflow.mjs:201:201": "6f7f3fe1",
       "src/renderer-shared/shader/lightmap-shader.ts:728:728": "83f90fb7",
       "apps/debug/src/renderer/renderer-main.ts:143:143": "b63af70c",
       "apps/game/src/renderer/renderer-main.ts:218:218": "cec26723",
@@ -852,14 +862,38 @@
       "apps/viewer/scripts/build-dist.mjs:250:250": "9d4deaa0",
       "src/renderer-shared/environment/render-sky-pass.ts:70:70": "788c312b",
       "src/renderer-shared/shader/lightmap-shader.ts:1948:1948": "d376ec66",
-      "apps/debug/dev.cmd:80:82": "1bf4ca88",
-      "apps/game/dev.cmd:80:82": "1bf4ca88",
-      "apps/viewer/dev.cmd:80:82": "1bf4ca88"
+      "apps/debug/dev.cmd:80:82": "30fe0256",
+      "apps/game/dev.cmd:80:82": "30fe0256",
+      "apps/viewer/dev.cmd:80:82": "30fe0256"
     },
     "apps/debug/scripts/path-baseline.md": {},
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "TODO.md",
+      "at": "2026-10-10T14:47:15.767Z",
+      "by": "agent",
+      "reason": "5",
+      "changed": 4,
+      "total": 106
+    },
+    {
+      "path": "OWNER.md",
+      "at": "2026-10-10T14:47:15.767Z",
+      "by": "agent",
+      "reason": "5",
+      "changed": 1,
+      "total": 1
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-10T14:45:49.118Z",
+      "by": "agent",
+      "reason": "记忆库引用改散文表述",
+      "changed": 22,
+      "total": 110
+    },
     {
       "path": "README.md",
       "at": "2026-10-10T14:21:17.566Z",
