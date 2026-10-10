@@ -311,7 +311,7 @@ impl BspProcessor {
             .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
 
         // 1~3. 三件套 + 放置表 + PAKFILE 条目名
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, true, VhvLog::Never).map_err(|e| JsValue::from_str(&e))?;
+        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Never).map_err(|e| JsValue::from_str(&e))?;
 
         // 4. 没有任何被引用模型：纯地图导出（Bsp 同样已被取走）
         if models.is_empty() {
@@ -400,7 +400,7 @@ impl BspProcessor {
             serde_json::from_str(defaults_json)
                 .map_err(|e| to_js_err(e, "默认纹理包 JSON 解析失败"))?;
 
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, true, VhvLog::Never).map_err(|e| JsValue::from_str(&e))?;
+        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Never).map_err(|e| JsValue::from_str(&e))?;
 
         // 世界面材质的基名 VMT 回退索引（texinfo 给的贴图名在包内无精确路径时按基名命中）
         let stem_index = build_vmt_stem_index(&entry_names);
@@ -686,7 +686,7 @@ impl BspProcessor {
         let mut pairs = websurf_wasm_core::mosaic::manifest::build_mosaic_manifest(bsp);
         // 模型贴图（材质名 → PNG → mosaic）；失败静默跳过（不影响地图纹理覆盖）
         if let Ok((models, _props, entry_names)) =
-            collect_pakfile_models(bsp, true, VhvLog::Never).map_err(|e| JsValue::from_str(&e))
+            collect_pakfile_models(bsp, VhvLog::Never).map_err(|e| JsValue::from_str(&e))
         {
             let index = pakfile_models::PakIndex::build(&entry_names);
             let materials = resolve_pakfile_materials(bsp, &models, &index, true, None);

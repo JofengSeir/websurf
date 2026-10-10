@@ -304,7 +304,7 @@ impl BspProcessor {
         let fallback: std::collections::HashMap<String, String> =
             serde_json::from_str(defaults_json).map_err(|e| to_js_err(e, "默认纹理包 JSON 解析失败"))?;
 
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, false, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
 
         // 世界面材质的**基名 VMT 回退**索引（填进 `ConvertOptions::vmt_stem_index`）：
         // texinfo 给的名字（如 `METAL/METALGRATE013A2`）在包内没有精确路径时，改按基名
@@ -372,7 +372,7 @@ impl BspProcessor {
         let bsp = self.take_bsp()?;
 
         // 1~3 步（见 `collect_pakfile_models`）：模型三件套 + 静态道具放置表 + PAKFILE 条目清单
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, false, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
 
         // 4. 未打包任何模型 → 退回纯地图导出（不装配整合器）
         if models.is_empty() {
@@ -429,7 +429,7 @@ impl BspProcessor {
     pub fn export_glb_with_pakfile_models_with_lights(&mut self) -> Result<Vec<u8>, JsValue> {
         let bsp = self.take_bsp()?;
 
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, false, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
 
         // 解析 PAKFILE 内的 VMT/VTF：贴图字节 + 内置透明度标注
         let index = pakfile_models::PakIndex::build(&entry_names);
@@ -496,7 +496,7 @@ impl BspProcessor {
             .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
 
         // 三件套收集顺带回的条目名表只服务材质查询；本函数已不看材质，故丢弃。
-        let (models, static_props, _entry_names) = collect_pakfile_models(bsp, false, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let (models, static_props, _entry_names) = collect_pakfile_models(bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
         if models.is_empty() {
             return Ok("[]".to_string());
         }
@@ -657,7 +657,7 @@ impl BspProcessor {
             .as_ref()
             .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
 
-        let (models, static_props, _entry_names) = collect_pakfile_models(bsp, false, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let (models, static_props, _entry_names) = collect_pakfile_models(bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
         if models.is_empty() {
             return Ok("[]".to_string());
         }
@@ -809,7 +809,7 @@ impl BspProcessor {
         let mut pairs = websurf_wasm_core::mosaic::manifest::build_mosaic_manifest(bsp);
         // 模型贴图（材质名 → PNG → mosaic）；失败静默跳过（不影响地图纹理覆盖）
         if let Ok((models, _props, entry_names)) =
-            collect_pakfile_models(bsp, false, VhvLog::Always).map_err(|e| JsValue::from_str(&e))
+            collect_pakfile_models(bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))
         {
             let index = pakfile_models::PakIndex::build(&entry_names);
             let materials = resolve_pakfile_materials(bsp, &models, &index, true, None);

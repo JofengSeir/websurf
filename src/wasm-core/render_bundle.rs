@@ -19,9 +19,9 @@
 //!
 //! 不变量（搬动自各端时逐条保留，导出结果须与搬动前逐字节相同）：
 //! - 跨端差异一律用**形参**表达，不留分叉实现：`collect_pakfile_models` 的
-//!   `case_insensitive_model_names`（viewer 按小写比对被引用模型名，debug/game 精确比对）与
 //!   `vhv_log`（三端 stderr 口径不同）；`resolve_pakfile_materials` 的 `decode_textures`
-//!   （viewer 恒 `true`）。
+//!   （viewer 恒 `true`）。模型名比对口径自 T-460 WP5 起**不再是形参**：固定逐字符精确相等
+//!   （D-111 取 (a)+(c)，三端不再各传）。
 //! - 提取与解析**不产生失败返回**：单条目读取失败、`vhv` 解析失败、三件套缺件都只跳过并计数。
 //!   [`collect_pakfile_models`] 的唯一 `Err` 是 PAKFILE 互斥锁被毒化，文本为
 //!   `pakfile 锁定失败: <Debug>`；各端把该文本原样转成 JS 错误值，不经 `to_js_err`
@@ -71,32 +71,23 @@ pub enum VhvLog {
 /// 返回 `(模型三件套, 静态道具放置表, PAKFILE 全部条目名)`；第三项是**未过滤**的全部条目名，
 /// 供 [`pakfile_models::PakIndex`] 复用，避免为找材质再遍历 zip。
 ///
-/// `case_insensitive_model_names`：被引用模型名与 zip 条目名的比对口径——`true` 时两侧都按
-/// ASCII 小写比对（viewer 口径），`false` 时逐字符相等（debug/game 口径）。`vhv_log` 见
-/// [`VhvLog`]。
+/// 模型名比对口径**固定为逐字符精确相等**（T-460 WP5 / D-111 取 (a)+(c)）：被引用模型名与
+/// zip 条目名不做 ASCII 小写折叠——该口径此前由形参表达，viewer 传 `true` 会让同一张图在
+/// 三端导出不同的 prop 集合。`vhv_log` 见 [`VhvLog`]。
 ///
 /// 失败语义：zip 互斥锁被毒化时返回已成型的中文错误文本，其余情况一律不失败——单个条目读取出错、
 /// `sp_*.vhv` 解析失败、模型三件套缺件都只跳过该条目并计数。
 pub fn collect_pakfile_models(
     bsp: &vbsp::Bsp,
-    case_insensitive_model_names: bool,
     vhv_log: VhvLog,
 ) -> Result<(Vec<InMemoryModel>, Vec<StaticProp>, Vec<String>), String> {
-    let fold = |s: &str| -> String {
-        if case_insensitive_model_names {
-            s.to_ascii_lowercase()
-        } else {
-            s.to_string()
-        }
-    };
-
     // 1. 被静态道具**或带模型实体**（`prop_dynamic` 等）引用的模型路径集合
     let mut referenced: HashSet<String> = HashSet::new();
-    let prop_models = bsp.static_props().map(|p| fold(p.model()));
+    let prop_models = bsp.static_props().map(|p| p.model().to_string());
     let ent_models = bsp
         .entities
         .iter()
-        .filter_map(|e| e.prop("model").ok().map(&fold));
+        .filter_map(|e| e.prop("model").ok().map(|m| m.to_string()));
     for m in prop_models.chain(ent_models) {
         referenced.insert(m);
     }
@@ -139,7 +130,7 @@ pub fn collect_pakfile_models(
     //    后缀判断走 `to_ascii_lowercase()`，归属判断走上面的比对口径，两者可以不一致。
     let mut models: Vec<InMemoryModel> = Vec::new();
     for name in &entry_names {
-        if !name.to_ascii_lowercase().ends_with(".mdl") || !referenced.contains(&fold(name)) {
+        if !name.to_ascii_lowercase().ends_with(".mdl") || !referenced.contains(name) {
             continue;
         }
         let vvd_name = format!("{}.vvd", &name[..name.len() - 4]); // 去尾部 4 字节（`.mdl`，任意大小写）再拼后缀

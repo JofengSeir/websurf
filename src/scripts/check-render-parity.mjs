@@ -18,9 +18,9 @@
  *   D app 清单同源：本脚本的 `APPS` 必须与 `apps/` 下的工程目录一致（防漏扫一端）。
  *   E 装配核实参透传：`mergeMain` 必须接收装配核传进来的 `(root, gltf)`——写成零参箭头会把实参
  *     丢掉，主模型合并整体早退（回落未合并的 mapRoot），**不会编译失败、只会静默退化**。
- *   F 底层提取口径同源：三端 `crates/wasm/src/lib.rs` 里 `collect_pakfile_models` 的
- *     `case_insensitive_model_names` 必须同值（跨端不同 ⇒ 同一张图导出的 prop 集合可能不同）。
- *     **当前为提示级**（待 `OWNER.md` 裁决基准），裁决落地后转硬断言。
+ *   F 底层提取口径同源（T-460 WP5 / D-111 取 (a)+(c)）：模型名比对口径固定在共享层
+ *     `render_bundle.rs`（逐字符精确相等），三端 `crates/wasm/src/lib.rs` 的调用**不得再传布尔
+ *     实参**，共享签名也不得再有 `case_insensitive_model_names` 形参（同时断言「调用数 > 0」防空转）。
  *   G 预编译必须晚于挂载：地图根 `scene.add(...)` 的行号必须小于 `precompileScene(...)` 的行号
  *     （早于它则编译的是空场景，预编译形同未做）。
  *   H 无 3D 天空盒时的清屏色三端同值（基准 `0x222222`）。
@@ -32,9 +32,9 @@
  *   node src/scripts/check-render-parity.mjs            # 默认只打印结论
  *   node src/scripts/check-render-parity.mjs --verbose  # 逐条打印每个符号的命中数
  *
- * 退出码：任一硬断言（A/B/C/D/E/G/H）失败 → 1（逐条打印 `文件:行号` 与命中行）；全部通过 → 0。
+ * 退出码：任一硬断言（A/B/C/D/E/F/G/H）失败 → 1（逐条打印 `文件:行号` 与命中行）；全部通过 → 0。
  *
- * 能力边界：A/B/C 是静态文本判定——「符号没出现」不等于「行为已同源」；E/G/H 是**行为层**判定
+ * 能力边界：A/B/C 是静态文本判定——「符号没出现」不等于「行为已同源」；E/F/G/H 是**行为层**判定
  * （实参透传 / 调用顺序 / 取值同源），能守住 2026-10-10 全量排查里 R1 / R6 / R7 那类
  * 「编译得过、跑起来静默分叉」的缺陷。但以下仍需**像素基线 / 运行期探针**覆盖，本脚本管不到：
  *   - 合并后的实际块数与包围球垫圈是否生效（R1 的后果侧）；
@@ -113,8 +113,10 @@ const PRECOMPILE_CALL = /precompileScene\s*\(/;
 /** H 断言：无 3D 天空盒时的清屏色基准（三端必须都出现该字面量）。 */
 const BG_COLOR_LITERAL = '0x222222';
 
-/** F 提示：底层 PAKFILE 模型提取口径（第一个布尔实参 = `case_insensitive_model_names`）。 */
-const EXTRACT_CALL = /collect_pakfile_models\(\s*(?:&)?\w+\s*,\s*(true|false)\s*,/;
+/** F 断言：底层提取口径（T-460 WP5）——布尔实参必须 0 命中、调用形状必须带 `VhvLog`、共享签名无形参。 */
+const EXTRACT_BOOL_ARG = /collect_pakfile_models\(\s*(?:&)?\w+\s*,\s*(?:true|false)\s*,/;
+const EXTRACT_CALL_SHAPE = /collect_pakfile_models\(\s*(?:&)?\w+\s*,\s*VhvLog::/;
+const EXTRACT_SIGNATURE_PARAM = /pub\s+fn\s+collect_pakfile_models\s*\([^)]*case_insensitive_model_names/;
 
 const files = execFileSync('git', ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard'], {
   maxBuffer: 64 * 1024 * 1024,
@@ -206,8 +208,16 @@ for (const f of files) {
   });
 }
 
-// ── [F] 底层提取口径同源（提示级：待 OWNER.md 裁决后转硬断言）────────────────
-const extractModes = [];
+// ── [F] 底层提取口径同源（硬断言；T-460 WP5 起口径固定在共享层）────────────────
+const extractReport = [];
+const sharedRs = path.join(ROOT, 'src', 'wasm-core', 'render_bundle.rs');
+if (!fs.existsSync(sharedRs)) {
+  failures.push('  [F] src/wasm-core/render_bundle.rs 不存在（无法核对提取口径）');
+} else if (EXTRACT_SIGNATURE_PARAM.test(fs.readFileSync(sharedRs, 'utf8'))) {
+  failures.push(
+    '  [F] src/wasm-core/render_bundle.rs 的 collect_pakfile_models 仍带 case_insensitive_model_names 形参 ⇒ 口径没收回共享层',
+  );
+}
 for (const app of APPS) {
   const libRs = path.join(ROOT, 'apps', app, 'crates', 'wasm', 'src', 'lib.rs');
   if (!fs.existsSync(libRs)) {
@@ -215,16 +225,15 @@ for (const app of APPS) {
     continue;
   }
   const text = fs.readFileSync(libRs, 'utf8');
-  const modes = new Set();
-  for (const m of text.matchAll(new RegExp(EXTRACT_CALL.source, 'g'))) modes.add(m[1]);
-  extractModes.push(`${app}=${[...modes].sort().join('|') || '无调用'}(${[...text.matchAll(new RegExp(EXTRACT_CALL.source, 'g'))].length} 处)`);
-}
-const distinctModes = new Set(extractModes.map((s) => s.split('=')[1].replace(/\(\d+ 处\)/, '')));
-if (distinctModes.size > 1) {
-  notes.push(
-    `  [F] 提示（不拦）：底层 collect_pakfile_models 的 case_insensitive_model_names 三端不同 ⇒ ${extractModes.join('、')}；` +
-      `待 owner 裁决基准后本条转硬断言（差异后果：模型名大小写不一致时三端导出的 prop 集合不同）`,
-  );
+  const booleans = [...text.matchAll(new RegExp(EXTRACT_BOOL_ARG.source, 'g'))].length;
+  const calls = [...text.matchAll(new RegExp(EXTRACT_CALL_SHAPE.source, 'g'))].length;
+  extractReport.push(`${app}:${calls} 处调用`);
+  if (booleans > 0) {
+    failures.push(`  [F] apps/${app}/crates/wasm/src/lib.rs 有 ${booleans} 处调用仍传布尔实参（口径已固定在共享层，不得再传）`);
+  }
+  if (calls === 0) {
+    failures.push(`  [F] apps/${app}/crates/wasm/src/lib.rs 未见 collect_pakfile_models 调用（该断言会空转）`);
+  }
 }
 
 // ── [G] 预编译必须晚于挂载地图根 ───────────────────────────────────────────
@@ -289,7 +298,7 @@ if (VERBOSE) for (const n of notes) console.log(n);
 console.log(`[C] 三端共享入口装配：${entryReport.join('、')}（共 ${SHARED_ENTRIES.length} 项）`);
 console.log(`[D] app 清单同源：apps/ = ${onDisk.join(',')}`);
 console.log(`[E] 装配核实参透传：${mergeMainChecked} 处 mergeMain（零参即失败）`);
-console.log(`[F] 底层提取口径：${extractModes.join('、')}${distinctModes.size > 1 ? ' ⇒ 不一致（提示级，待裁决）' : '（同源）'}`);
+console.log(`[F] 底层提取口径：${extractReport.join('、')}（硬断言：无布尔实参 + 共享签名无形参）`);
 console.log(`[G] 预编译顺序（挂载→预编译）：${orderReport.join('、')}`);
 console.log(`[H] 清屏色基准 ${BG_COLOR_LITERAL} 命中文件数：${bgReport.join('、')}`);
 if (failures.length) {

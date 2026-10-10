@@ -830,7 +830,7 @@
     "CHANGELOG.md": {},
     "CONTRIBUTING.md": {},
     "OWNER.md": {
-      "src/wasm-core/render_bundle.rs:74:76": "f1e3b8d5"
+      "src/wasm-core/render_bundle.rs:74:76": "6faa50e8"
     },
     "README.md": {
       "src/serve.py:19:19": "5d85e228",
@@ -861,13 +861,13 @@
       "src/scripts/check-glb-parity.mjs:233:235": "d42707b5",
       "apps/viewer/src/core/scene.ts:53:53": "490ed190",
       "src/wasm-core/pakfile_models.rs:58:58": "cb495c54",
-      "src/wasm-core/render_bundle.rs:388:388": "2ac013ec",
+      "src/wasm-core/render_bundle.rs:379:379": "2ac013ec",
       "src/wasm-core/model_integrator/mod.rs:655:655": "e73a635f",
       "apps/viewer/scripts/build-dist.mjs:233:233": "a9812f45",
       "apps/viewer/scripts/build-dist.mjs:233:233~2": "a9812f45",
       "apps/viewer/src/core/scene.ts:147:147": "473f4c89",
       "src/renderer-shared/scene/assemble-scene.ts:90:90": "e3b0c442",
-      "src/wasm-core/render_bundle.rs:74:76": "f1e3b8d5",
+      "src/wasm-core/render_bundle.rs:74:76": "6faa50e8",
       "apps/debug/src/renderer/lod-manager.ts:118:118": "34357a8a",
       "src/renderer-shared/scene/visibility-controller.ts:82:82": "6ec1d6d7",
       "apps/viewer/src/core/scene.ts:162:162": "12a4e9f7",
@@ -907,7 +907,7 @@
       "src/renderer-shared/shader/lightmap-shader.ts:346:346": "178e154a",
       "apps/viewer/src/replay/visuals.ts:96:96": "b71597d8",
       "apps/viewer/src/ui/mapinfo.ts:125:125": "9ce8f8bd",
-      "src/wasm-core/render_bundle.rs:339:339": "78e00031",
+      "src/wasm-core/render_bundle.rs:330:330": "78e00031",
       "apps/viewer/src/replay/shavit-replay.ts:507:507": "43ed7725",
       "apps/game/src/app.ts:249:249": "021ef7f6",
       "apps/game/src/input/input-bridge.ts:65:65": "77b425c5",
@@ -970,6 +970,22 @@
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "OWNER.md",
+      "at": "2026-10-10T17:27:51.121Z",
+      "by": "agent",
+      "reason": "T-460 WP5：render_bundle.rs 的 collect_pakfile_models 文档注释口径更新（D-111 取 (a)+(c) 落地）",
+      "changed": 1,
+      "total": 1
+    },
+    {
+      "path": "TODO.md",
+      "at": "2026-10-10T17:27:51.046Z",
+      "by": "agent",
+      "reason": "T-460 WP5：T-631 证据与判据改为收口后口径；render_bundle 行号平移（339→330、388→379）",
+      "changed": 5,
+      "total": 122
+    },
     {
       "path": "TODO.md",
       "at": "2026-10-10T17:15:02.338Z",
