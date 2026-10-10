@@ -506,10 +506,6 @@ export class RendererMain {
     this.skyGroup = asm.skyGroup;
     this.skyParams = asm.skyGroup && data.skyCamera ? data.skyCamera : null;
 
-    // 预编译着色器程序（2026-10-04 起与 game 同款）：把「首次可见才编译」的卡顿挪到加载期。
-    // 失败不致命（three 仍按需编译），故只告警。
-    if (this.renderer && this.scene && this.camera) precompileScene(this.renderer, this.scene, this.camera);
-
     mapRoot.updateMatrixWorld(true);
 
     // 摘除旧的 BSP 模型子树引用（资源已由开头的 disposeScene 释放，这里只防场景里叠加两份）
@@ -527,6 +523,11 @@ export class RendererMain {
     } else {
       console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
     }
+
+    // 预编译着色器程序（2026-10-04 起与 game 同款）：把「首次可见才编译」的卡顿挪到加载期。
+    // 失败不致命（three 仍按需编译），故只告警。
+    // 顺序与 game 一致：**必须晚于** `scene.add(mapRoot)`——早于它则编译的是空场景，预编译形同未做。
+    if (this.renderer && this.scene && this.camera) precompileScene(this.renderer, this.scene, this.camera);
 
     applySceneCamera(this.camera, this.nearPlane, maxDim, readRenderPrefs().camera.fov);
 

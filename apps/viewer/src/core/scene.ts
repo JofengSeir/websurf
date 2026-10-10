@@ -144,7 +144,9 @@ export class ViewerScene {
       pvs: this.pvs,
       skyCamera: sky?.skyCamera ?? null,
       meshInCluster: (m, c) => this.meshInCluster(m, c),
-      mergeMain: () => this.optimizeScene(),
+      // 实参必须透传：装配核第 ⑤ 步把 `(root, gltf)` 传进来，丢弃就会让主模型合并整体早退
+      // （`this.modelRoot` 此刻为 null ⇒ `optimizeScene` 返回 undefined ⇒ 回落未合并的 mapRoot）。
+      mergeMain: (root) => this.optimizeScene(root),
     });
 
     this.scene.background = skyboxTexture ?? new THREE.Color(BG_COLOR); this.scene.add(asm.root);
@@ -240,7 +242,14 @@ export class ViewerScene {
     const src = modelRoot ?? this.modelRoot;
     if (!src) return;
     // 合并算法与垫球口径在共享核（`mergeIntoNewRoot` = mergeIntoChunks + 新 Group 挂块 + padBoundingSpheres）
+    // 日志与另两端同口径（`[optimizeScene] 分块合并:` 只由 `optimizeScene` 打印，本端走新根包装故自带一行）：
+    // 三端都要能答「多少 mesh → 多少块」，否则「主模型到底合没合并」无从对号。
+    let before = 0;
+    src.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) before++;
+    });
     const optRoot = mergeIntoNewRoot(src);
+    console.info(`[viewer][optimize] 主模型分块合并：${before} mesh → ${optRoot.children.length} 个合并块`);
     this.scene.remove(src);
     this.scene.add(optRoot);
     this.modelRoot = optRoot;

@@ -13,7 +13,7 @@
  * `apps/game/src/renderer/renderer-main.ts` 的 `far = maxDim * 100`；近平面三参数
  * （near 下限 0.05、探测距离 100、收缩系数 0.3）2026-10-03 起由渲染共享层
  * `src/renderer-shared/camera/near-plane.ts` 的默认值承载（数值与这里曾写的一致），本文件
- * 不再重复声明；`CAMERA_INIT_NEAR` 0.1、`CAMERA_INIT_FAR` 100000 与 `BG_COLOR` 0x0d1b2a
+ * 不再重复声明；`CAMERA_INIT_NEAR` 0.1、`CAMERA_INIT_FAR` 100000 与 `BG_COLOR` 0x222222
  * 只属本工程。
  *
  * 消费点：`apps/viewer/src/core/scene.ts`（相机、背景、near/far）、
@@ -40,7 +40,8 @@ export const CAMERA_INIT_NEAR = 0.1;
 export const CAMERA_INIT_FAR = 100000;
 /** 地图加载后 far = maxDim × 此值（T-454 P3b 起唯一来源是共享 `camera/scene-camera.ts`，此处只再导出）。 */
 export { CAMERA_FAR_SCALE } from '../../../../src/renderer-shared/camera/scene-camera.js';
-export const BG_COLOR = 0x0d1b2a;
+/** 无 3D 天空盒时的清屏色：与 debug / game 同值（`0x222222` 中性深灰），2026-10-10 对齐。 */
+export const BG_COLOR = 0x222222;
 
 /** 自由飞行速度（HU/s）：`FlyCam.update` 每帧位移 = 归一化方向 × 速度 × dt；`FLY_SPEED_FAST` 为 ×4（按住左右 Shift）。 */
 export const FLY_SPEED = 500;
