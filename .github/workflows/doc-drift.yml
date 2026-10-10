@@ -12,7 +12,7 @@
 #   E 坏链 —— md 里的相对链接在磁盘上必须可解析（围栏代码块内跳过）
 #   F 行尾与 BOM —— 以**索引 blob**（提交形态）为准：不得含 CR、不得含 UTF-8 BOM
 #     （仓库 core.autocrlf=true ⇒ 规范形式是 LF，工作树的 CRLF 只是检出产物）
-#   G 待办同源 —— 全仓 T-### 必须存在于 TODO.md；ID 不重复；未结项证据列不得为空；
+#   G 待办同源 —— 全仓 T-### 必须存在于 progress/board.jsonl；ID 不重复；未结项证据列不得为空；
 #     规范面文档不得自行声明待办状态（progress/** 等豁免）
 #   H 流程性 md 体积（AGENTS 32 / TODO 96 / OWNER 16 / 其余 48 KB）
 #   I 过程记录分卷可达 —— 仓库已无 process md（进展直接写 agentmemory）⇒ 恒为空检查，保留段号以对齐 A–P
@@ -31,7 +31,7 @@
 # A / B / C / E / F / G / L / M / N / O / P 任一非空即脚本 exit 1 → 本 workflow 失败（D 仅计数）。
 #
 # 同批还跑 src/scripts/check-board-touch.mjs（看板使用规程的**软提示**，AGENTS.md §0.1）：
-#   改了 src/ apps/ documents/ 却没动 TODO.md、提交信息也没有 T-### 或「无待办影响」时打印警告；
+#   改了 src/ apps/ documents/ 却没动 progress/board.jsonl、提交信息也没有 T-### 或「无待办影响」时打印警告；
 #   owner 2026-10-07 裁决只提示不拦提交，故以 continue-on-error 运行。
 #
 

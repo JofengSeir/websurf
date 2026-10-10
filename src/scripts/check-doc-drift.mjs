@@ -196,8 +196,21 @@ try {
 for (const f of indexCR) eolBad.push(`  ${f}  索引中仍含 CR（规范形式为 LF，core.autocrlf=true）`);
 
 // ===== [G] 待办同源 =====
-const todoPath = 'TODO.md';
-const todoRaw = fs.existsSync(path.join(ROOT, todoPath)) ? fs.readFileSync(path.join(ROOT, todoPath), 'utf8') : '';
+// 看板已迁入 agentmemory（2026-10-11）：权威输入 = progress/board.jsonl（机器可读镜像）。
+// 下面把 JSONL 合成为与旧 TODO.md 总表同形的 md 表的 md 表，后续 [G]/[L]/[M] 判定逻辑保持不变。
+const todoPath = 'progress/board.jsonl';
+const boardFile = path.join(ROOT, todoPath);
+let todoRaw = '';
+let boardRowsRaw = [];
+if (fs.existsSync(boardFile)) {
+  for (const ln of fs.readFileSync(boardFile, 'utf8').split(/\r?\n/)) {
+    if (!ln.trim()) continue;
+    let r; try { r = JSON.parse(ln); } catch { continue; }
+    boardRowsRaw.push(r);
+    todoRaw += '| ' + [r.id, r.title, r.type, r.owner, r.status, r.evidence, r.detail, r.criteria, r.origin].map((x) => String(x == null ? '' : x)).join(' | ') + ' |\n';
+  }
+  todoRaw += boardRowsRaw.filter((r) => !['已记录', '已结案'].includes(r.status)).map((r) => '- **' + r.id + '** ' + r.title).join('\n') + '\n';
+}
 // 已结案行（现为 agentmemory 条目）的 ID 也算已存在：悬空检查与重复检查都要认它。
 // 机器可读来源 = progress/control-ids.json（控制层 ID 索引）。
 let archIdsJson = [];

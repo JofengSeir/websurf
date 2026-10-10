@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 面板默认值 ↔ config 默认值的交叉校验（`TODO.md T-302`）。
+ * 面板默认值 ↔ config 默认值的交叉校验（`progress/board.jsonl T-302`）。
  *
  * **要防的回归**：面板侧默认值写在 `apps/debug/src/physics/param-defs.ts` 的 `PARAM_DEFS`，
  * 配置侧默认值写在 `apps/debug/src/config.ts` 的 `DEFAULT_CONFIG`，两者**各自手抄**同一组

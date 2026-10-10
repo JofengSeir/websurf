@@ -1,79 +1,65 @@
 ---
 name: websurf-workflow
-description: 本仓（WebSurf）agent 工作流循环：一轮从取活到收尾的完整步骤、每步的强制力、收尾命令与知识库兜底。开工前读它——不读会不知道循环怎么走、哪些步骤会被门禁挡下。
+description: WebSurf 仓库一轮 agent 工作流的循环骨架：取活、认领、改、收尾留痕，以及提交前必须全 0 的四道门禁。当在本仓开工、需要确认这轮工作怎么走、写本轮进展、或准备提交时使用。
+user-invocable: false
 ---
 
-# WebSurf agent 工作流循环
+本仓的工作流**本体**（规则细则）在 agentmemory，本技能只给循环骨架与入口。开工先读本技能，再按 `AGENTS.md` §0 的表逐条召回细则。
 
-## 一轮的循环（📖=读知识库 ✍️=写知识库 ⚙️=门禁强制）
-
-```
-开轮 ① 入口：harness 每轮注入 AGENTS.md（自动）
-     ② 📖 取工作流：memory_smart_search("websurf 工作流 取活 收尾 自检") → 规则总纲
-        工具不可用 → node src/scripts/kb-fallback.mjs probe → L2 HTTP 读 / L3 仓库兜底
-     ③ 取活：TODO.md「未结项」挑一条 → 该行状态改 `进行中 · <agent> · <YYYY-MM-DD>`（留痕）
-        （⚙️ 只写「进行中」会被 `check-doc-drift` 的 `[G]` 待办同源硬挡）
-     ④ 认领：node src/scripts/docflow.mjs claim --task T-### --may/--must ⚙️
-     ⑤ 📖 取上下文：按主题召回工程文档（线索；事实回源码核到 文件:行号）
-     ⑥ 改：源码/配置/文档；只读 md 要先 approve ⚙️
-     ⑦ 收尾：TODO 状态+证据+判据 ⚙️[G]
-             ✍️ 写进展：close-round ①生成 → memory_save → close-round ②登记
-             ⚙️ 四道门禁全 0（AGENTS §3）⇒ 提交（带 T-###）⇒ 推送
-     ⑧ 维护：stale/orphan/archive_mismatch/missing/leak 非 0 ⇒ 红，必须重迁 ⚙️
-```
-
-## 每步的强制力（哪些不做会被挡）
-
-| 步骤 | 强度 |
-|---|---|
-| 📖 读知识库 | **只有诱因，没有检查**：规则全文只在库里，不读就不知道细则；但不读不会失败（体检不检查「读过没」） |
-| ✍️ 写新进展条目 | 靠自觉：`close-round --check-round` 会在**改了 apps/src 代码却没留痕**时挡提交（pre-commit 钩子已启用） |
-| ✍️ 待补写队列 | **强制**：`progress/pending-kb.jsonl` 非空且知识库可达 ⇒ 体检 `pending` 失败 + 钩子挡提交 |
-| 🔧 维护已有条目 | **强制**：stale/orphan/archive_mismatch/missing/leak 任一非 0 ⇒ `check-memory-sync` 红 |
-| ⚙️ 控制层/受保护列 | **强制**：`[G]` 待办同源、docflow 受保护列、claim |
-| 📖 加载技能 | 要主动调 `skill(name)`；技能内容默认不进上下文 |
-
-## 收尾两条命令（把「写进展」压到最小）
+## Quick start
 
 ```bash
-# ① 生成条目：写归档原文 + 算 marker + 打印可直接调用的 memory_save
+node src/scripts/kb-fallback.mjs probe      # 先问清这轮走哪一层（L1 记忆库 / L2 只读 / L3 仓库）
+node src/scripts/docflow.mjs claim --task T-### --must <要改的文件>
 node src/scripts/close-round.mjs --note "<本轮正文>" --slug <名> --task T-###
-# ② 登记：补台账 + 跑四道门禁 + 打印提交模板
 node src/scripts/close-round.mjs --done --marker <marker> --id <memoryId>
 ```
 
-改了 `apps/**` 或 `src/**`（不含 `src/scripts/**`）却没动 `TODO.md` 或没新增台账行时，`--check-round` 会挡提交。
+## Why
 
-## 知识库不可用时（三层兜底）
+**状态永远在文件里，规则永远在记忆库。** 不读细则不会当场失败（没有门禁能检查「你读过没」），但收尾一定被挡下：门禁查的是「改了有没有留痕」，而留痕的格式定义在细则里。
 
-`node src/scripts/kb-fallback.mjs probe` 给出该走哪层：
+## Workflow
 
-- **L1**：`memory_*` 工具正常 → 正常走。
-- **L2**：服务在、工具不在 → 读 `GET http://127.0.0.1:3113/memories?limit=1000`；写不了先落队列。服务没起 → 跑 `start-agentmemory.cmd`（probe 打印实际路径）。
-- **L3**：只有仓库 → 规则从本技能 + `skills/websurf-env-traps` + **门禁脚本**重建；进展用 `kb-fallback queue` 落盘，恢复后 `plan` 回放 → `done`。
+一轮的循环。标 `(读库)` 的步走记忆库，标 `(写库)` 的要落台账，标 `(门禁)` 的不过就提交不了。
 
-## 并发（同一工作区可能有别的 agent）
+1. 入口：harness 每轮注入 `AGENTS.md`，它只说「去哪取」。
+2. `(读库)` 取工作流总纲：`memory_smart_search("websurf 工作流 取活 收尾 自检")`；返回的第 1 条是总纲，按它列的主题词逐条取细则。
+3. 取活：`progress/board.jsonl`「未结项」挑一条，该行状态改 `进行中 · <agent> · <YYYY-MM-DD>`。只写「进行中」会被 `[G]` 待办同源挡下。
+4. `(门禁)` 认领：`docflow.mjs claim --task T-### --may/--must`；`claim` 之后必须真的改过 `must` 文件，`verify` 才通过。
+5. `(读库)` 取上下文：按主题召回工程文档。**召回是线索不是事实**，结论必须回源码核到 `文件:行号`；核不到就标 `[待确认]` 停下上报。
+6. 改：源码 / 配置 / 文档。`skills/**/SKILL.md`、`AGENTS.md`、根 `README/CONTRIBUTING/SECURITY`、`.github/**/*.md` 属只读类，走 `approve → 改 → sync` 三步闭环。
+7. `(写库)` `(门禁)` 收尾：`progress/board.jsonl` 补状态 + 证据 + 判据 → `close-round` ①生成条目、②写库并登记台账 → 四道门禁全 0 → 提交（信息带 `T-###`）。
+8. `(写库)` 维护：`check-memory-sync` 的 `stale` / `orphan` / `archive_mismatch` / `missing` / `leak` 任一非 0 即为红，必须重迁，不许绕过。
 
-- 提交前先 `git status --short`，只 `git add` 自己改的文件；`TODO.md`/`OWNER.md` 常被双方同时改，并发方新增的行原样保留。
-- `progress/memory-index.jsonl`、`skills/**` 是**共享可变资源**，没有锁：你改了技能内容，它的条目立刻 stale（体检会红）⇒ 改完技能务必重迁条目。
-- `git`/`spawnSync` 在并发下会 EBUSY；`docflow sync` 失败时先把工作区收干净再重试。
+## Anti-patterns
 
-## 钩子（提交门禁）
+WRONG：先改代码，收尾时再补 `progress/board.jsonl` 与进展条目。
 
-```bash
-git config core.hooksPath .githooks   # 每个克隆要启用一次（本地配置，不随仓库走）
-```
+RIGHT：开轮先在 `progress/board.jsonl` 留状态、`claim` 拿许可；改动完成后立刻用 `close-round` 两条命令收尾。改了 `apps/**` 或 `src/**`（不含 `src/scripts/**`）却没有留痕时，`close-round --check-round` 会直接挡住提交（pre-commit 钩子已启用）。
 
-钩子挡两类：代码改动缺留痕、队列滞留未回放。跳过用 `git commit --no-verify` 或 `KB_HOOK=off git commit`。
+WRONG：把召回结果当结论写进代码或文档。
 
-## 技能注册（每台机器一次）
+RIGHT：召回只用来定位「读哪份文件」，事实一律回源码核到 `文件:行号`。
 
-harness 的扫描根是这四个（源码 `dsh-skill-filesystem/lib/index.js`）：`<仓库>/.dsh/skills`、`<仓库>/.agents/skills`、`<dshHome>/skills`、`~/.agents/skills`。
-**`<仓库>/skills/` 不在扫描根里** —— 它是内容源头（唯一真相），必须被注册进上面任一根才能被 `skill()` 找到：
+WRONG：体检红灯时先提交、后补。
 
-```cmd
-mklink /J "%USERPROFILE%\.agents\skills\websurf-workflow" "%CD%\skills\websurf-workflow"
-rem   必须在**仓库根**执行：`..\skills\...` 会按当前目录解析，从别的目录跑会建出空壳 junction
-```
+RIGHT：体检与提交串成一步（`&&`），红灯即终止；本仓出过红灯提交。
 
-三个技能各建一次（`agentmemory-usage` / `websurf-env-traps` / `websurf-workflow`）。注册是机器本地行为，不随仓库走；新机器上先注册再开工。
+## Checklist
+
+- 开轮确认过知识库在哪一层（`kb-fallback probe`），并知道写不进去时落哪。
+- `progress/board.jsonl` 该行有「进行中 · \<agent\> · \<日期\>」留痕，`claim` 已通过。
+- 只读类文件走完了 `approve → 改 → sync`，没有留下未落实的审批。
+- 四道门禁全 0：`check-doc-drift.mjs` / `check-memory-sync.mjs` / `check-memory-sync.mjs --keys` / `docflow.mjs check`。
+- 提交信息带 `T-###`；纯格式类改动写「无待办影响」。
+
+## See also
+
+- `websurf-env-traps`：本仓环境与流程陷阱，开工前读。
+- `memory-discipline`：记忆库读写时机（官方技能）。
+- `agentmemory-mcp-tools`：记忆库工具索引与参数（官方技能）。
+
+## Reference
+
+每步的强制力矩阵、`close-round` 两条命令详解、知识库三层兜底、并发约定、提交钩子、技能注册：见 REFERENCE.md。

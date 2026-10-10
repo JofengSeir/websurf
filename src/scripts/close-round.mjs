@@ -84,12 +84,12 @@ function checkRound() {
   const files = sh(staged ? 'git diff --cached --name-only' : ('git diff --name-only ' + arg('base', 'origin/main'))).out.split('\n').filter(Boolean);
   const code = files.filter((f) => /^(apps|src)\//.test(f) && !/^src\/scripts\//.test(f));
   if (!code.length) { console.log('本轮没有代码改动（apps/** 或 src/**），无需留痕检查'); process.exit(0); }
-  const todo = files.includes('TODO.md');
+  const todo = files.includes('progress/board.jsonl');
   const led = files.includes('progress/memory-index.jsonl');
   const gap = [];
-  if (!todo) gap.push('  改了 ' + code.length + ' 个代码文件，但本轮没有 TODO.md 改动（改代码须看板留痕）');
+  if (!todo) gap.push('  改了 ' + code.length + ' 个代码文件，但本轮没有 progress/board.jsonl 改动（改代码须看板留痕）');
   if (!led) gap.push('  改了 ' + code.length + ' 个代码文件，但本轮没有新的进展条目（progress/memory-index.jsonl 没有新增行）');
-  if (!gap.length) { console.log('留痕检查通过：' + code.length + ' 个代码文件 + TODO.md + 进展台账'); process.exit(0); }
+  if (!gap.length) { console.log('留痕检查通过：' + code.length + ' 个代码文件 + progress/board.jsonl + 进展台账'); process.exit(0); }
   console.log((has('soft') ? '[提示] ' : '[留痕缺口] ') + '本轮代码改动缺留痕：');
   gap.forEach((g) => console.log(g));
   console.log('  补法：node src/scripts/close-round.mjs --note <正文> …（见 --help 头注释）');

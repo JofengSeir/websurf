@@ -83,3 +83,5 @@ apps/game/scripts/wasm-hash-pin.mjs
 .DS_Store
 Thumbs.db
 desktop.ini
+
+!progress/board.jsonl

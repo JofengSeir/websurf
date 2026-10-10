@@ -6,7 +6,7 @@
  * continue-on-error 运行；本脚本自身默认 exit 0，只有显式 --strict 才 exit 1。
  *
  * 判据：本次改动触及 `src/` / `apps/` / `documents/` / `progress/` / `skills/` / `.github/`，
- * 但既没改 `TODO.md`，提交信息里也没有 `T-###` 或「无待办影响」字样 ⇒ 打一条提示。
+ * 但既没改 `progress/board.jsonl`，提交信息里也没有 `T-###` 或「无待办影响」字样 ⇒ 打一条提示。
  * （`progress/` 等三支于 2026-10-10 补入：此前删 15 个 `progress/` 跟踪文件零提示。）
  *
  * 用法：
@@ -41,14 +41,14 @@ if (staged) {
 }
 
 const touched = files.filter((f) => /^(src|apps|documents|progress|skills|\.github)\//.test(f));
-const boardTouched = files.includes('TODO.md');
+const boardTouched = files.includes('progress/board.jsonl');
 const noted = /T-\d{3}/.test(messages) || /无待办影响/.test(messages);
 
-console.log('[看板提示] 本次涉及 ' + files.length + ' 个文件，其中代码/文档 ' + touched.length + ' 个；TODO.md ' + (boardTouched ? '已更新' : '未更新'));
+console.log('[看板提示] 本次涉及 ' + files.length + ' 个文件，其中代码/文档 ' + touched.length + ' 个；progress/board.jsonl ' + (boardTouched ? '已更新' : '未更新'));
 if (!touched.length || boardTouched || noted) {
   console.log('[看板提示] 与 AGENTS.md §0.1 一致（改了代码或文档就同提交更新对应行，或已注明无待办影响）。');
   process.exit(0);
 }
-console.log('[看板提示] ⚠ 触及 ' + touched.length + ' 个代码/文档文件，但既未更新 TODO.md，提交信息里也没有 T-### 或「无待办影响」。');
+console.log('[看板提示] ⚠ 触及 ' + touched.length + ' 个代码/文档文件，但既未更新 progress/board.jsonl，提交信息里也没有 T-### 或「无待办影响」。');
 console.log('            按 AGENTS.md §0.1 第 3/5 条：若改动触及既有结论，请同提交更新对应行；若不涉待办，请在提交信息写明「无待办影响」。本提示不拦提交。');
 process.exit(strict ? 1 : 0);
