@@ -368,7 +368,7 @@
   ],
   "board": {
     "source": "progress/board.jsonl",
-    "sha12": "7d603450c1fd",
+    "sha12": "4d2db8b867eb",
     "live": [
       "T-008",
       "T-046",
@@ -446,7 +446,8 @@
       "T-508",
       "T-650",
       "T-651",
-      "T-652"
+      "T-652",
+      "T-657"
     ],
     "closed": [
       "T-211",
@@ -491,7 +492,8 @@
       "已结案": 35,
       "阻塞（待 owner 目视，见 OWNER.md D-023）": 1,
       "待裁决": 3,
-      "进行中 · codebuddy · 2026-10-10": 2
+      "进行中 · codebuddy · 2026-10-10": 2,
+      "进行中 · dsh · 2026-10-11": 1
     }
   },
   "todo_md_note": "原 TODO.md 已于 2026-10-11 迁入 agentmemory（主题「待办看板（活动板）」）；机器可读镜像 = progress/board.jsonl（本文件 board 段是它的 ID 投影）"

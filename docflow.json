@@ -22,7 +22,7 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "adbc4aecbd5debdfe4fa1113ef235e683fef2fae3f9c659512e2fe931b7282e3",
-    "AGENTS.md": "6a0b5af2afc3d222b278ae39a0b4f94764d477d1c12ef258e6aef184c689afc5",
+    "AGENTS.md": "a767ea0393627360fc12626819a7bce32c271e68a10a6ef26477e68798c932c1",
     "skills/websurf-workflow/SKILL.md": "ca52a07bd2d32d270aad3f68d0441f9406f8254dda5fd4163fbb7d1996be564c"
   },
   "approvals": [
@@ -83,14 +83,6 @@
       "consumed": true
     },
     {
-      "path": "OWNER.md",
-      "by": "owner(2026-10-11)",
-      "reason": "T-653",
-      "at": "2026-10-11",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
       "by": "owner(2026-10-11)",
       "reason": "T-653",
@@ -125,7 +117,15 @@
     {
       "path": "AGENTS.md",
       "by": "owner(2026-10-11)",
-      "reason": "T-655",
+      "reason": "T-657",
+      "at": "2026-10-11",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "OWNER.md",
+      "by": "owner(2026-10-11)",
+      "reason": "T-657",
       "at": "2026-10-11",
       "task": "",
       "consumed": true

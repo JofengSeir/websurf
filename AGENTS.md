@@ -57,7 +57,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | # | 禁令 | 含义 |
 |---|---|---|
 | **B1** | 禁以旧注释为依据 | 不得摘抄、复述、沿用任何现有代码注释——语义只能从实现、调用点、测试取得 |
-| **B2** | 禁以文档代替事实 | 工程文档（`documents/**` 等，现已在 agentmemory，原文另存 `archive/memory/2026-10/`）**只作线索**；事实来源 = 当前源码 + 构建脚本/配置 + 门禁的**实际输出** |
+| **B2** | 禁以文档代替事实 | 工程文档（`documents/**` 等，现已在 agentmemory，原文未随仓库保留（曾归档 `archive/memory/2026-10/`，2026-10-11 核实该归档已空））**只作线索**；事实来源 = 当前源码 + 构建脚本/配置 + 门禁的**实际输出** |
 | **B3** | 禁推测 | 无法在代码中定位的结论标 `[待确认]` 并停下上报；禁止「应该/可能/大概是/历史上」。**例外**：日志与逐字引用类内容不受此禁约束，但必须带 `[source:路径#序号@sha12]`（sha12 = 该源文件 sha256 前 12 位） |
 
 **取证手段**：源码行、构建脚本、配置，以及 `cargo check` / `cargo test` / `npm run typecheck` / 漂移体检的实际输出。
@@ -69,7 +69,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | 位置 | 状态 |
 |---|---|
 | 根 `*.md` | `AGENTS.md`（本文件）｜ `OWNER.md`（owner 决策队列）｜ `README.md`、`CONTRIBUTING.md`、`SECURITY.md`（git 仓库项目文档）。**无 `CHANGELOG.md`**：2026-10-11 owner 决定取消——改动记录已全部在 commit 历史里，agent 不再维护该文件 |
-| `documents/` | **不存在**：原 47 篇工程/共享层/架构文档 + 3 篇规范已全部迁入 agentmemory，原文归档 `archive/memory/2026-10/` |
+| `documents/` | **不存在**：原 47 篇工程/共享层/架构文档 + 3 篇规范已全部迁入 agentmemory，原文未随仓库保留（该归档现已空） |
 | `progress/` | **3 个机器可读文件**：`memory-index.jsonl`（迁移台账 = manifest，`check-memory-sync.mjs` 的权威输入）、`control-ids.json`（控制层 ID 索引，门禁 `[G]` 判定「ID 已存在」的唯一来源）、`pending-kb.jsonl`（MCP 不可用时的待补写队列，见 §0 兜底）、**`board.jsonl`（看板机器可读镜像 = 门禁 `[G]` 权威输入）** |
 | `skills/**` | **两类**：① **本项目技能 3 篇**（顶层）`skills/websurf-workflow/`（**先读：工作流循环**）、`skills/websurf-env-traps/`（开工前先读）、`skills/agentmemory-usage/`（**用记忆库前先读**：本仓守则）—— 各含 `SKILL.md`（骨架，属只读类）+ `REFERENCE.md`（细则）；② **上游 agentmemory 官方技能 17 篇** 收在 `skills/agentmemory-usage/`（`memory-discipline`、`remember`/`recall`/`forget`、`lesson`、`agentmemory-mcp-tools`/`-config`/`-rest-api`/`-architecture`/`-hooks`/`-agents`、`recap`/`handoff`/`session-history`/`commit-context`/`commit-history`、`write-agentmemory-skill`）+ `skills/agentmemory-usage/_shared/TROUBLESHOOTING.md` —— 上游**原样复制、不得就地修改**，来源/版本/更新法见 `skills/agentmemory-usage/THIRD-PARTY.md`。仓库是唯一源头；**harness 只扫 `<仓库>/.agents/skills`、`<仓库>/.dsh/skills`、`~/.agents/skills`、`<dshHome>/skills` 四个根，不扫 `<仓库>/skills/`** ⇒ 新机器要把 `skills/` 下每个技能目录 junction 进任一根（见 `websurf-workflow` 的 REFERENCE「技能注册」节）。项目技能的 `SKILL.md` 进台账；官方技能不进（工具自带文档，随包更新） |
 | `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/`；`apps/viewer/dist-README.md` 是构建资产（被 `build-dist.mjs` 消费） |
@@ -114,7 +114,6 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 
 ### 3.1 脚本清单（供 `[O]` 文档契约覆盖判定）
 
-- `apps/debug/scripts/_input-replay-verify.mjs`
 - `apps/debug/scripts/build-dist.mjs`
 - `apps/debug/scripts/check-wasm-api.mjs`
 - `apps/game/scripts/build-dist.mjs`
