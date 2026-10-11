@@ -340,6 +340,45 @@ for (const app of APPS) {
   }
 }
 
+// ── [K] 注入缓存键不得常量（T-648）─────────────────────────────────────────
+// three 的 program 缓存键 = customProgramCacheKey()；键相同即复用同一份 program，
+// 而 program 是「第一个用该键编译的材质」的 onBeforeCompile 产物。若键是常量，
+// 后链式注入（world-transition / bumpmap）改过的 GLSL 不进键 ⇒ 复用时整段被丢弃 ⇒
+// 采样器落到 0 号单元 ⇒ surf_boreas 的 alpine_rock01 在 debug 上丢雪（T-648 根因）。
+// 本段断言：共享 shader 层内 0 处手写常量键，且每个注入点都经 injection-registry 登记。
+const SHADER_DIR = 'src/renderer-shared/shader/';
+const shaderFiles = files.filter((f) => f.startsWith(SHADER_DIR));
+const constantKeyHits = [];
+for (const f of shaderFiles) {
+  const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
+  // 形如 `customProgramCacheKey = () => '...'`：右侧若是字面量拼接（不含变量/调用）即判定为常量
+  for (const m of text.matchAll(/customProgramCacheKey\s*=\s*\(\)\s*=>\s*([^;\n]+)/g)) {
+    const rhs = m[1].trim();
+    const isLiteral = /^['"`].*['"`]\s*\+?\s*[^()]*$/.test(rhs) && !/\bkey\b/.test(rhs);
+    if (isLiteral) constantKeyHits.push(`${f}: ${rhs}`);
+  }
+}
+const registryText = fs.readFileSync(path.join(ROOT, SHADER_DIR, 'injection-registry.ts'), 'utf8');
+const registryPresent = /export function registerInjection/.test(registryText);
+const worldTransitionText = fs.readFileSync(path.join(ROOT, SHADER_DIR, 'world-transition.ts'), 'utf8');
+const bumpmapText = fs.readFileSync(path.join(ROOT, SHADER_DIR, 'bumpmap.ts'), 'utf8');
+const injectionCallSites = [
+  ...worldTransitionText.matchAll(/registerInjection\(\s*\w+\s*,\s*'([a-z-]+)'/g),
+  ...bumpmapText.matchAll(/registerInjection\(\s*\w+\s*,\s*'([a-z-]+)'/g),
+].map((m) => m[1]);
+if (!registryPresent) failures.push('  [K] 缺 src/renderer-shared/shader/injection-registry.ts（注入登记处）');
+if (constantKeyHits.length) {
+  failures.push(
+    `  [K] 共享 shader 层有 ${constantKeyHits.length} 处常量 customProgramCacheKey（必须经 registerInjection 生成）：` +
+      constantKeyHits.slice(0, 3).join(' | '),
+  );
+}
+for (const tag of ['world-transition', 'bumpmap']) {
+  if (!injectionCallSites.includes(tag)) {
+    failures.push(`  [K] 注入点 '${tag}' 未调用 registerInjection（其 GLSL 不入键 ⇒ program 复用时被丢弃）`);
+  }
+}
+
 // ── 结论 ───────────────────────────────────────────────────────────────────
 console.log('渲染同源门禁（apps/**）');
 console.log(`扫描面：${files.length} 个文件（git ls-files --cached --others --exclude-standard；排除 pkg/dist/node_modules）`);
@@ -354,6 +393,7 @@ console.log(`[G] 预编译顺序（挂载→预编译）：${orderReport.join('�
 console.log(`[H] 清屏色基准 ${BG_COLOR_LITERAL} 命中文件数：${bgReport.join('、')}`);
 console.log(`[I] 共享入口调用面：${callReport.join('、')}（共 ${callEntries.length} 项，import 不算）`);
 console.log(`[J] 视口声明对静态事实：${viewportReport.join('、')}`);
+console.log(`[K] 注入缓存键：常量键 ${constantKeyHits.length} 处、登记点 ${injectionCallSites.join('、')}（registry ${registryPresent ? '在' : '缺'}）`);
 if (failures.length) {
   console.log(`\n渲染同源门禁：失败 ${failures.length} 条\n` + failures.join('\n'));
   process.exit(1);

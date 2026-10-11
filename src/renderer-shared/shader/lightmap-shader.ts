@@ -69,6 +69,7 @@
 
 import * as THREE from 'three';
 import type { GLTF, GLTFParser } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { hasInjection, registerInjection } from './injection-registry.js';
 
 // ---------------------------------------------------------------------------
 // GLSL 片段：RGBExp32 解码 + 手写双线性采样
@@ -1110,7 +1111,7 @@ function injectLightmapShader(
 	const uniformValue = { value: atlasSize.clone() };
 	material.onBeforeCompile = (shader) => {
 		shader.uniforms.vbsp_AtlasSize = uniformValue;
-		shader.uniforms.vbspExposure = exposureUniform; registerInjectedMaterial(material); material.customProgramCacheKey = () => 'vbsp-fog' + fogMaxDensity;
+		shader.uniforms.vbspExposure = exposureUniform; registerInjectedMaterial(material); registerInjection(material, 'lightmap', String(fogMaxDensity));
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
 		shader.uniforms.vbspLightFloor = lightFloorUniform;
 		// 模式开关的运行期载体（全场景共享同一对象，见 `bakedMixUniform`）
@@ -1337,7 +1338,7 @@ function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.Mes
 function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.vbspExposure = exposureUniform;
-		shader.uniforms.vbspLightGamma = lightGammaUniform; registerInjectedMaterial(mat); mat.customProgramCacheKey = () => 'vbsp-fog' + fogMaxDensity;
+		shader.uniforms.vbspLightGamma = lightGammaUniform; registerInjectedMaterial(mat); registerInjection(mat, 'vertex-lighting', String(fogMaxDensity));
 		shader.uniforms.vbspBakedMix = bakedMixUniform; shader.uniforms.vbspLightFloor = lightFloorUniform; shader.uniforms.vbspAmbientScale = ambientScaleUniform;
 		// 声明必须来自共享常量（守卫断言"注入单元自洽"）
 		const decls = [...VBSP_LIGHTMAP_UNIFORM_DECLS, 'uniform float vbspAmbientScale;'].join('\n');
@@ -1427,7 +1428,7 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 	};
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.vbspAmbCube = uniformValue;
-		shader.uniforms.vbspExposure = exposureUniform; registerInjectedMaterial(mat); mat.customProgramCacheKey = () => 'vbsp-fog' + fogMaxDensity;
+		shader.uniforms.vbspExposure = exposureUniform; registerInjectedMaterial(mat); registerInjection(mat, 'ambient-cube', String(fogMaxDensity));
 		shader.uniforms.vbspLightGamma = lightGammaUniform;
 		shader.uniforms.vbspLightFloor = lightFloorUniform;
 		shader.uniforms.vbspAmbientScale = ambientScaleUniform;
@@ -1923,6 +1924,10 @@ installFogMaxDensity();
 /**
  * 设置雾密度上限（0..1）：值变化时标记已缓存的注入材质重编，
  * 兼容「先建材质、后拿到地图雾」的加载顺序。
+ *
+ * T-648：雾上限同时是**缓存键的变体分量**（见 `injection-registry.ts`），因此这里
+ * 先把新值刷进每个材质的键（键一变，`customProgramCacheKey` 返回值即变，three 下次
+ * 取程序自然拿到新 program），再补一次 `needsUpdate` 兜底既有语义。
  */
 export function setFogMaxDensity(v: number): void {
 	if (!Number.isFinite(v) || v <= 0) return;
@@ -1933,7 +1938,13 @@ export function setFogMaxDensity(v: number): void {
 	if (clamped === fogMaxDensity) return;
 	fogMaxDensity = clamped;
 	(globalThis as { __vbspFogCap?: number }).__vbspFogCap = clamped;
-	for (const m of injectedMaterials) m.needsUpdate = true;
+	for (const m of injectedMaterials) {
+		// 该材质当初是哪个注入点的产物，这里就以同 tag 重登记新变体值
+		for (const tag of ['lightmap', 'vertex-lighting', 'ambient-cube'] as const) {
+			if (hasInjection(m, tag)) registerInjection(m, tag, String(clamped));
+		}
+		m.needsUpdate = true;
+	}
 }
 
 

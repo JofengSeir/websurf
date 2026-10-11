@@ -12,6 +12,7 @@
  * 各端只需要提供一个宿主（`PoseHost`）：把它自己「怎么钉住位姿」的机制接上（game 走 `setHoldPoint`、
  * viewer 走 `FlyCam.setPose`、debug 走它的每帧相机写回覆盖）。**位姿语义与读数格式不允许各端自定义**。
  */
+import { Euler } from 'three';
 import type * as THREE from 'three';
 import { EYE_STAND } from '../../ts-shared/phys/constants.js';
 
@@ -68,13 +69,28 @@ export function yawPitchRadOf(spec: PoseSpec): [number, number] {
   return [spec.yawDeg * DEG2RAD, spec.pitchDeg * DEG2RAD];
 }
 
-/** 相机读数（三端唯一实现）：位置原值 + 角度四位小数 + fov/near/far。 */
+/**
+ * 相机朝向读数：按 **YXZ 序**从 `camera.quaternion` 显式分解出 yaw / pitch。
+ *
+ * T-648：此前本函数直接读 `camera.rotation.x/y`，而三端写相机的方式不同 ——
+ * `apps/game` 与 `apps/viewer` 写 `camera.rotation.set(pitch, yaw, 0, 'YXZ')`（读数精确），
+ * `apps/debug` 写 `camera.quaternion.setFromEuler(eulerYXZ)`，相机自带的 `rotation`
+ * 欧拉仍是默认的 **XYZ** 序，被 three 的 `onChange` 从四元数反解回来时给出的是
+ * XYZ 分解值：`yaw' = asin(sinθ·cosφ)`、`pitch' = atan2(sinφ, cosθ·cosφ)`。
+ * 于是请求 `yaw=-67.9 / pitch=-19.8` 在 debug 上读回 `-60.663 / -43.7393`，
+ * 跨端位姿比对与像素比对全部失真。
+ *
+ * 本函数改为不复用 `camera.rotation`，而是用一个临时 Euler 以 YXZ 序从四元数分解，
+ * 因此**无论各端怎么写相机，读数口径都一致**，且与写入侧（YXZ）同序、可往返。
+ */
 export function cameraPoseOf(camera: THREE.PerspectiveCamera | null | undefined): PoseReadout | null {
   if (!camera) return null;
+  // 与写入侧同序（YXZ）的显式分解：读四元数 ⇒ yaw/pitch，不受相机自身欧拉序影响
+  const euler = new Euler().setFromQuaternion(camera.quaternion, 'YXZ');
   return {
     pos: [camera.position.x, camera.position.y, camera.position.z],
-    yawDeg: +((camera.rotation.y * RAD2DEG)).toFixed(4),
-    pitchDeg: +((camera.rotation.x * RAD2DEG)).toFixed(4),
+    yawDeg: +(euler.y * RAD2DEG).toFixed(4),
+    pitchDeg: +(euler.x * RAD2DEG).toFixed(4),
     fov: camera.fov,
     near: camera.near,
     far: camera.far,

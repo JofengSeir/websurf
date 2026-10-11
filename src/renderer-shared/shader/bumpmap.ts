@@ -19,6 +19,7 @@
  *   （它们的 `$bumpmap` 没有可作用的通道，见 `TODO.md` T-627 的处置说明）。
  */
 import * as THREE from 'three';
+import { registerInjection } from './injection-registry.js';
 
 /** 材质 extras 里指向 glTF 法线贴图下标的键（与导出侧一致）。 */
 const BUMP_TEXTURE_KEY = 'vbsp_bumpmap';
@@ -94,6 +95,8 @@ export async function collectBumpTextures(gltf: unknown, root: THREE.Object3D): 
 export function applyBumpToMaterial(material: THREE.Material, bump: THREE.Texture, strength = DEFAULT_STRENGTH): void {
 	if (patched.has(material)) return;
 	patched.add(material);
+	// T-648：登记注入 ⇒ 缓存键带上 `bumpmap` tag（强度一并进键，变强度即换程序）
+	registerInjection(material, 'bumpmap', strength.toFixed(3));
 	const previous = material.onBeforeCompile;
 	material.onBeforeCompile = (shader, renderer) => {
 		if (typeof previous === 'function') previous.call(material, shader, renderer);

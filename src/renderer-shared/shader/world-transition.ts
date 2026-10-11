@@ -15,6 +15,7 @@
  * 收尾后调用，此时 lightmap 已挂好）。片元里按混合权重要求 `mix(第一贴图, 第二贴图)`。
  */
 import * as THREE from 'three';
+import { registerInjection } from './injection-registry.js';
 
 /** 材质 extras 里指向 glTF 第二贴图下标的键（与导出侧一致）。 */
 const SECOND_TEXTURE_KEY = 'vbsp_basetexture2';
@@ -76,6 +77,10 @@ export async function collectWorldTransitionTextures(gltf: unknown, root: THREE.
 export function applyWorldTransitionToMaterial(material: THREE.Material, second: THREE.Texture): void {
 	if (patched.has(material)) return;
 	patched.add(material);
+	// T-648：登记本次注入 ⇒ 缓存键带上 `world-transition` tag。这一段 GLSL 不进
+	// `onBeforeCompile.toString()`（那是 lightmap 链的源码），若不入键，复用同桶 program
+	// 时这段 mix 会被整段丢掉 ⇒ 采样器落到 0 号单元 ⇒ 雪混合退化成岩石。
+	registerInjection(material, 'world-transition');
 	const previous = material.onBeforeCompile;
 	material.onBeforeCompile = (shader, renderer) => {
 		if (typeof previous === 'function') previous.call(material, shader, renderer);
