@@ -12,7 +12,7 @@
  *   orphan  台账有、磁盘无：未标 `retired` 计 orphan（真丢源），标了计 retired（有意迁出）
  *   missing 迁出范围内的 md 在台账里没有 source 记录 ⇒ 漏迁
  *   leak    台账里出现排除前缀的 source（`.cargo-home` / `node_modules` / `test/project`）⇒ 越界入库
- *   arch    源已迁出仓库：原文与 `.meta.json` 落在 `archive/memory/`；此处核对**归档原文的 sha12 是否仍与 marker 一致**
+ *   arch    源已迁出仓库：原文与 `.meta.json` 落在 `archive/memory/`（owner 2026-10-11 起不再更新，缺失按 archive_absent 容忍）；此处核对**归档原文的 sha12 是否仍与 marker 一致**
  *           （`retired` 的计数含义即「源已归档」，与「这条知识作废」无关——两者语义不同，见 AUDIT.md）
  *   xproj   marker 的项目前缀不是本项目 ⇒ **跨项目串台**（agentmemory 单实例共享库，无自动隔离）
  *
@@ -37,7 +37,7 @@ const PROJECT = 'websurf';
 /** 迁移范围的保留项：不参与 missing 判定（见任务书 §四 与 AGENTS §0.1 第 6 条）。 */
 /** 迁出范围根：这些根下的 md 必须在台账里有记录（KEEP 除外）。 */
 const SCOPE_ROOTS = ['progress/'];
-/** 归档区：源迁出后原文与 `.meta.json` 落在 archive/memory/<yyyy-MM>/<原路径>。 */
+/** 归档区：源迁出后原文与 `.meta.json` 落在 archive/memory/<yyyy-MM>/<原路径>（该目录现为空，缺失按 archive_absent 容忍）。 */
 const ARCHIVE = path.join(ROOT, 'archive/memory');
 const KEEP = [
   // 当前为空：progress/** 与 documents/** 的 md 已全部迁出，仓库只剩非 md 的台账与 ID 索引。

@@ -17,15 +17,15 @@
  *   F 行尾与 BOM：**以索引 blob（提交形态）为准**——不得含 CR、不得含 UTF-8 BOM。
  *     注意：仓库 `core.autocrlf=true` 且无 `.gitattributes` ⇒ 规范形式是 **LF**，
  *     工作树里的 CRLF 只是检出产物（Linux CI 上会是 LF），故不能拿工作树行尾当判据。
- *   G 待办同源：① 全仓 `T-###` 引用必须能在根 TODO.md 里找到（悬空即失败）；
- *     ② TODO.md 与 progress/control-ids.json 的归档 ID 合计不得重复；③ 未结项的证据列不得为空（须写 `文件:行号` 或 `见详情`）；
+ *   G 待办同源：① 全仓 `T-###` 引用必须能在 `progress/board.jsonl` 里找到（悬空即失败）；
+ *     ② `progress/board.jsonl` 与 `progress/control-ids.json` 的归档 ID 合计不得重复；③ 未结项的证据列不得为空（须写 `文件:行号` 或 `见详情`）；
  *     ④ 「未结项」列表与总表的 ID 集合必须一致（两份表示同源）；
  *     ⑤ 未结项的「详情」列必须非空且路径可解析；
  *     ⑥ 进行中的行必须带认领后缀；⑦ 待修/进行中/阻塞 行的判据不得为 [待补]（硬门）；
  *     ⑧ 若仓库仍有 documents/** 或 progress/** 的 md，则每篇必须出现在对应导航（当前两者都已迁出，检查自动跳过）；
  *        [H] 流程性 md 体积（AGENTS 32 / TODO 96 / OWNER 16 / 其余 48 KB）、[J] 注释纪律（单行 ≤160 硬门，块长只计数）；⑨ 规范面文档不得自行声明待办状态
- *     （`状态：待裁决` 一类），状态只写在 TODO.md——过程记录 `progress/**` 与
- *     `TODO.md` / `AGENTS.md` 豁免。
+ *     （`状态：待裁决` 一类），状态只写在 `progress/board.jsonl`——过程记录 `progress/**` 与
+ *     `AGENTS.md` 豁免。
  *   L 文档缺口 ↔ 看板：终态行（已记录/已结案）的「详情」doc 里若仍引用该号，且该行没有
  *     「已消除 / 已修 / 已处置 / 已结案 / 已判定无需行动 / 已撤销 / ~~」标记 ⇒ 失败
  *     （文档不得留下假缺口）；详情不在 `documents/**`（如 `progress/`）的行不适用。
@@ -48,7 +48,7 @@
  *
  * 用法：
  *   node src/scripts/check-doc-drift.mjs                 # 全仓 md
- *   node src/scripts/check-doc-drift.mjs AGENTS.md TODO.md ...
+ *   node src/scripts/check-doc-drift.mjs AGENTS.md progress/board.jsonl ...
  *
  * 退出码：A / B / E / F / G / L / M 非空 → 1；C 与 D 只打印、不影响退出码。
  * 调用方：`.github/workflows/doc-drift.yml` 的 `Run doc drift check` 步骤直接跑本脚本。

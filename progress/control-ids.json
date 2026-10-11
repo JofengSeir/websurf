@@ -1,6 +1,6 @@
 {
   "generated_at": "2026-10-10",
-  "note": "控制层 ID 索引（机器可读）。T-### 只认行形态 | T-### |（与 check-doc-drift [G] 同口径）；D-### 认 \\bD-\\d{3}\\b。看板/已决分卷迁入 agentmemory 后，本文件是其「ID 已存在」投影；原文归档 archive/memory/2026-10/。",
+  "note": "控制层 ID 索引（机器可读）。T-### 只认行形态 | T-### |（与 check-doc-drift [G] 同口径）；D-### 认 \\bD-\\d{3}\\b。看板/已决分卷迁入 agentmemory 后，本文件是其「ID 已存在」投影；原文未随仓库保留（该归档现已空）。",
   "archived": {
     "t": [
       "T-001",
@@ -368,7 +368,7 @@
   ],
   "board": {
     "source": "progress/board.jsonl",
-    "sha12": "4d2db8b867eb",
+    "sha12": "dfa47212015e",
     "live": [
       "T-008",
       "T-046",
