@@ -107,7 +107,7 @@ pub struct TriMesh {
     ///
     /// 此前该字段在 `parse_tri_meshes` 的 `WasmTriMesh` 上**没有声明**，serde 按默认行为
     /// 忽略未知字段，于是 `export_model_phy_colliders` 明明吐了 `name`、落地后却查不到
-    /// 「这条三角形属于哪个模型」——`TODO.md T-065` 的待裁决第 ① 条就是它。
+    /// 「这条三角形属于哪个模型」——看板 `T-065` 的待裁决第 ① 条就是它。
     pub name: String,
     /// 顶点表（Y-up、HU）。
     pub vertices: Vec<V3>,
@@ -239,8 +239,8 @@ const CONTACT_FRAC_TIE: f64 = 1e-4;
 /// 因此它读作"否决路径被走到的次数"，而不是纯假进入计数。
 ///
 /// 唯一 Rust 读取方是 `src/phys/mod.rs` 的 `PhysWorld::gate_veto_count`；
-/// 消费方是三个排查脚本（`apps/game/scripts/phys-p2-trace.mjs`、
-/// `apps/game/scripts/phys-p2-ground.mjs`、`apps/game/scripts/phys-gate-probe2.mjs`
+/// 消费方是三个排查脚本（`apps/game/scripts/phys-p2-trace.mjs`（已移除）、
+/// `apps/game/scripts/phys-p2-ground.mjs`（已移除）、`apps/game/scripts/phys-gate-probe2.mjs`（已移除）
 /// 里的 `gate_veto_count` 调用）。
 pub static GATE_VETO_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 

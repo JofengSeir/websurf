@@ -24,9 +24,9 @@
 //!   大于门容差 `DIST_EPSILON / 8`），否决计数在此自增 1；
 //! - `p2_surface_landing_kept`：真实表面进入被保留。
 //!
-//! 夹具：`ramp()` 与 `apps/game/scripts/phys-p2-regression.mjs` 的
+//! 夹具：`ramp()` 与 `apps/game/scripts/phys-p2-regression.mjs`（已移除）的
 //! `rampDown(0, 1500, 3000)` 逐字段同参数；`p2_endcap_phantom_vetoed` 的线段与
-//! `apps/game/scripts/phys-gate-probe2.mjs` 的 `debug_trace` 调用参数逐字相同，
+//! `apps/game/scripts/phys-gate-probe2.mjs`（已移除）的 `debug_trace` 调用参数逐字相同，
 //! 长度恰为一次 64Hz 步进（Δz = 4.6875 = 300 × 1/64）。四个用例的盒子一律取站立箱
 //! `[-16, 0, -16] / [16, 72, 16]`，直接调 `trace_box(&start, &end, &mins, &maxs, &[&Brush])`，
 //! 不经 `World` 的空间索引。
@@ -40,7 +40,7 @@ fn p(n: [f64; 3], d: f64) -> Plane {
 }
 
 /// 60° 坡：法线 `(0, 0.5, 0.8660254037844386)`，表面 `y = -z·tan60°`，实体侧
-/// `0.5y + 0.866z <= 0`。与 `apps/game/scripts/phys-p2-regression.mjs` 的
+/// `0.5y + 0.866z <= 0`。与 `apps/game/scripts/phys-p2-regression.mjs`（已移除）的
 /// `rampDown(0, 1500, 3000)` 同参数：六个平面依次是坡面 / 底面 / ±x 侧墙 /
 /// z = 0 处的端帽平面（法线 `[0, 0, -1]`、`dist = 0`）/ z = 1500 的闭合面，
 /// AABB 为 `[-4000, -3000, 0] .. [4000, 0, 1500]`。
@@ -63,7 +63,7 @@ fn ramp() -> Brush {
 }
 
 /// 端帽幽灵面：坡在 z = 0 处的端帽平面不产生命中（`fraction` 保持 1.0）。
-/// 线段取自 `apps/game/scripts/phys-gate-probe2.mjs` 的 `debug_trace` 调用
+/// 线段取自 `apps/game/scripts/phys-gate-probe2.mjs`（已移除）的 `debug_trace` 调用
 /// （64Hz、H = 2.5、vz = 300 的第三个 tick）。
 #[test]
 fn p2_endcap_phantom_vetoed() {

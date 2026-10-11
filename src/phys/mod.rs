@@ -446,7 +446,7 @@ impl PhysWorld {
     ///
     /// 扫掠盒取玩家**当前**碰撞箱（`self.player.mins()` / `maxs()`）——
     /// 蹲伏时用的是蹲箱，所以同一线段在站/蹲两态下结果不同。未命中时法线回填 `[0,0,0]`。
-    /// 不推进物理、不改任何状态。消费方只有 `apps/game/scripts/phys-gate-probe2.mjs`。
+    /// 不推进物理、不改任何状态。消费方只有 `apps/game/scripts/phys-gate-probe2.mjs`（已移除）。
     pub fn debug_trace(&mut self, sx: f64, sy: f64, sz: f64, ex: f64, ey: f64, ez: f64) -> Vec<f64> {
         let mins = self.player.mins();
         let maxs = self.player.maxs();
@@ -519,7 +519,7 @@ impl PhysWorld {
     /// 碰撞箱取玩家**当前**箱，与 [`PhysWorld::debug_trace`] 同口径；不推进物理、不改状态。
     /// 名字经 [`PhysWorld::debug_tri_mesh_name`] 按下标 10 取。
     ///
-    /// 用途：`TODO.md T-065` 的待裁决第 ① 条 —— 查明把玩家判成实心的到底是
+    /// 用途：看板 `T-065` 的待裁决第 ① 条 —— 查明把玩家判成实心的到底是
     /// 世界 brush 还是某个模型的 .phy 三角网格，以及是哪一个模型。
     #[wasm_bindgen]
     pub fn debug_collide_attrib(&mut self, x: f64, y: f64, z: f64) -> Vec<f64> {
@@ -625,7 +625,7 @@ impl PhysWorld {
     /// （`set_hull(16, 72, 54)` ⇒ 高 72、z 半伸 54）。而玩家盒 z 半伸 54 意味着身体向前
     /// 探出 54 HU —— 在任何一个"前方地面比脚下高"的坡上，那 54 HU 内的坡面都会落进身体盒，
     /// 于是判据必然报"卡在实体里"。本表把"多小的盒才不误报"直接量出来，
-    /// 使 `TODO.md T-065` §7 第 ④ 条（判据是否选错盒）可裁决。
+    /// 使看板 `T-065` §7 第 ④ 条（判据是否选错盒）可裁决。
     #[wasm_bindgen]
     pub fn debug_free_table(
         &mut self,
@@ -657,7 +657,7 @@ impl PhysWorld {
         out
     }
 
-    /// 「沿指定方向能否脱身」的扫描：`TODO.md T-065` §8 修法 **E** 的实测入口。
+    /// 「沿指定方向能否脱身」的扫描：看板 `T-065` §8 修法 **E** 的实测入口。
     ///
     /// 对 `d = 1 ..= max_d` 每个整数距离，逐步做两件事并各记一个数：
     /// ① 用 `World::trace` 把当前盒体沿 `(nx,ny,nz)` 扫 `d` HU，取 `fraction`；
@@ -669,7 +669,7 @@ impl PhysWorld {
     /// 盒取玩家**当前**箱；不推进物理、不改任何状态。
     ///
     /// **为什么两个数都要**：只有 fraction = 1 不够 —— 沿法线抬起来可能仍落在实体里
-    /// （`TODO.md T-065` §7 实测：卡死点沿 +y 抬 1~8 HU 全部仍不空闲）。
+    /// （看板 `T-065` §7 实测：卡死点沿 +y 抬 1~8 HU 全部仍不空闲）。
     /// 只有终点空闲也不够 —— 终点可能恰好在实体的另一侧，中间隔着材料。
     /// **两个同时成立**才等于「这一步真的能脱身」。
     #[wasm_bindgen]
@@ -757,10 +757,10 @@ impl PhysWorld {
     /// 轻量预测步：走一次 `player_tick`（**一次调用 = 一个子步**），但不经 `step_core`——
     /// 即不检测传送、不判死亡、不处理 `reset` 键；noclip 下直接返回现状。
     ///
-    /// 需要多个子步就调用多次（`apps/game/scripts/phys-smoke.mjs` 的 `predict` 即连调两次）；
+    /// 需要多个子步就调用多次（`apps/game/scripts/phys-smoke.mjs`（已随 T-653 移除）T-653 `predict` 即连调两次）；
     /// 本方法内部不再细分 `dt`。返回新构造的状态对象。
     ///
-    /// 当前无生产调用方：只有 `apps/game/scripts/phys-smoke.mjs` 与 `phys-dual-pipe.mjs` 在用。
+    /// 当前无生产调用方：只有 `apps/game/scripts/phys-smoke.mjs`（已随 T-653 移除）T-653 `phys-dual-pipe.mjs`（已移除）在用。
     pub fn predict(
         &mut self,
         dt: f64,
