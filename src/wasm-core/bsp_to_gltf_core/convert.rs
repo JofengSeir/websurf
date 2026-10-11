@@ -68,6 +68,15 @@ fn build_lightmap_export(
     }))
 }
 
+/// prop 的**第 3 级光照**来源：按 `static_props` 下标给出的「所在 leaf 的 lightmap 颜色」。
+///
+/// 采样点与 `vbsp::Bsp::prop_ambient_cube` **完全一致**：`StaticPropLump::flags` 的 `0x2`
+/// 位置位时取 `lighting_origin`，否则取 `origin`，坐标不旋转、不做 `map_coords`。
+/// 少一处「光照采样点」就会与第 2 级 ambient cube 说的不是同一个位置，故口径必须共用。
+///
+/// 返回表长度 = `integrator.static_prop_count()`，与 `Placement::prop_index` 对齐；
+/// 某下标采不到（无 lightmap / 该 leaf 的面都没有区域）时留 `None`，由调用方保持原行为。
+
 /// 把 lightmap 契约写进 GLB JSON（`asset.extras.lightmap` 与
 /// `materials[*].extensions.__vbsp_lightmap__`），返回改写后的 JSON 字符串。
 fn apply_lightmap_json(
@@ -198,7 +207,6 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
     if let Some(integrator) = model_integrator {
         // 直接获取模型数据并添加到统一结构
         if let Err(e) = integrator.add_models_to_gltf(&mut root, &mut buffer) {
-            // 模型处理失败，返回 BSP 导出结果
             eprintln!("警告: 模型处理失败: {:?}", e);
             // 构建 BSP-only 结果
             return build_export_result(root, buffer, missing_resources, texture_collector, lightmap.as_ref());
@@ -1269,3 +1277,4 @@ pub struct BspVertexData {
     position: [f32; 3],
     uv: [f32; 2],
 }
+

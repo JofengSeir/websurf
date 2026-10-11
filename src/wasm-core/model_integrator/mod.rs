@@ -214,25 +214,50 @@ impl ModelIntegrator {
             }
 
             // 查找放置信息（**全部**实例；与碰撞体导出共用 resolve_placements）
-            let placements = resolve_placements(&in_mem.name, &resources.entities, &resources.static_props);
+            let mut placements = resolve_placements(&in_mem.name, &resources.entities, &resources.static_props);
             if placements.is_empty() {
                 // 未被任何静态道具/实体引用 → 不放到世界原点制造垃圾几何
                 continue;
             }
 
+            // 逐实例归一第 1 级光照，并把「没有可用信息」的实例交给第 3 级（lightmap）兜底。
+            //
+            // **两条顶点序**：`remap_strip_group_colors` 只认 strip group 序（长度 = `strip_vertex_total`），
+            // 而 `vhv::parse_vhv` 是按 `.vhv` 的 **mesh 头逐块拼接**的、总长 = **模型顶点数**。
+            // 两个数只在「每顶点恰好落进一个 strip group」时相等——石头 / 坡道恰好相等，
+            // 冰锥 / 树不等（实测 surf_boreas：icicle_06 `verts=1684` vs `strip=1458`、
+            // tree_pine05 `verts=2829` vs `strip=2275`），于是它们的 vhv 一进重排就被长度判负丢弃。
+            //
+            // 「有信息」= **存在非零顶点**；整块全零才按没有信息处理（走下面的第 3 级）。
+            // 详见 `usable` 处的注释：曾误加「非零占比 > 50%」阈值，把大面积为零的石头判成
+            // 没有信息、换成明亮 lightmap 兜底 ⇒ 石头过亮且丢了烘焙细节（owner 2026-10-11 报障，已撤销）。
+            let model_vertex_total = model.vertices().len();
+            for p in placements.iter_mut() {
+                // vhv 一律照用，不做任何过滤（owner 2026-10-11）：
+                // 「非零占比阈值」「全零判为无信息」这类限制都会把**真实的烘焙**当成缺失丢掉
+                // （石头 `rock03_epic` 77% 零、`rock03_giant` 75% 零，那是洞穴里正常的烘焙结果，
+                //  曾因阈值被整块丢弃、换成明亮 lightmap ⇒ 石头过亮且丢了烘焙细节）。
+                // 重排失败（长度对不上两种顶点序）时按模型顶点序原样透传。
+                p.vertex_lighting = p
+                    .vertex_lighting
+                    .as_ref()
+                    .and_then(|c| {
+                        model
+                            .remap_strip_group_colors(c)
+                            .or_else(|| (c.len() == model_vertex_total).then(|| c.clone()))
+                    });
+
+            }
+
             // 推送模型几何。**按"逐顶点光照"分组**：同一模型的多个实例各有自己的
             // `sp_<idx>.vhv`（prop_static 的逐顶点烘焙），必须各自成一个 mesh，
             // 否则共用网格就只能各自带 cube（第 2 级）—— 那正是"一面一个颜色"的成因。
-            let groups = group_placements_by_vertex_lighting(&placements, model.strip_vertex_total());
+            let groups = group_placements_by_vertex_lighting(&placements);
 
             for (vlight, idxs) in &groups {
-                // `.vhv` 块是 strip group 顶点序，须按 `origMeshVertID` 重排到模型顶点序；重排不成立、
-				// `.vhv` 块是 strip group 顶点序，按 `origMeshVertID` 重排到模型顶点序；重排不成立
-				// （长度对不上）才退回 leaf ambient cube。**不再按「暗顶点占比」丢弃**：洞穴内直接光本就大面积为零，
-				// 阈值丢弃会让整块 mesh 失去逐顶点烘焙，只剩近零 cube ⇒ 纯黑；而着色器本就按
-				// `pow(vlight) + cube` 组合，黑顶点贡献 0、由 cube 兜底 ⇒ 丢弃是多余且有害的。
-				let vlight = vlight.as_ref().and_then(|c| model.remap_strip_group_colors(c));
-
+                // 上面已把每个实例的 `.vhv` 归一到模型顶点序（长度 = `model.vertices().len()`），
+                // 这里**不能再重排一次**：石头那批 `strip == verts`，对已重排的数组再按
+                // `origMeshVertID` 置换一次会把光照贴到别的顶点上。
                 let mesh = self.push_model(
                     buffer, gltf, &model, Path::new(&in_mem.name),
                     vlight.as_deref(),
@@ -642,10 +667,23 @@ impl ModelIntegrator {
 
             // 自发光 / 无光照标注：写进 extras（GLTFLoader → material.userData.unlit）
             // `json::Extras` = `Option<Box<RawValue>>` ⇒ 直接给原始 JSON 文本
+            //
+            // **owner 2026-10-11 裁决：prop 的 `UnlitGeneric` 材质也上光照，不再标记 unlit。**
+            //
+            // 起因（本仓实测，见 progress/board.jsonl T-649）：`surf_boreas` 的冰锥
+            // `icicle_01`~`icicle_06` 材质是 `materials/project_tendies/ice03.vmt`，原文
+            // `"unlitgeneric" { "$basetexture" "silkroad/fgworld/ice2" "$surfaceprop" "ice" }`
+            // —— 它是这一图里**唯一没有任何受光材质**的 prop 家族（坡道 `ramp_*` 里也混着同族的
+            // `ice01`），于是即便第 1 级 `.vhv` 与第 3 级 lightmap 都已接上，渲染端 `isUnlit()`
+            // 仍会把它们整族跳过 ⇒ 画面上是「贴图原色、没有明暗」。
+            //
+            // 本仓此前**写** `unlit` 才是与 Source 语义一致的写法（`UnlitGeneric` 确实不吃
+            // lightmap / vhv / ambient cube）。owner 明确要求「现在必须要」，故此处**故意偏离**。
+            // **后续项**：透明材质处理未做（冰的半透 / `$translucent` 分层都没接），补上之后
+            // 应恢复按 VMT 的 `unlit` 判定，把本段连同渲染端 `isUnlit` 分支一起回收。
+            //
+            // 世界面（brush face）不受影响：材质由 `bsp_to_gltf_core` 另建，不走本函数。
             let mut ex = serde_json::Map::new();
-            if self.in_memory.material_unlit.contains(&material_name) {
-                ex.insert("unlit".into(), serde_json::json!(true));
-            }
             // `$envmap` 材质：把 `$envmaptint` 交给渲染端（`material.userData.vbsp_envmap`）。
             if let Some(t) = self.in_memory.material_envmap.get(&material_name) {
                 ex.insert("vbsp_envmap".into(), serde_json::json!(t));
@@ -1277,14 +1315,10 @@ pub fn resolve_placements(
 /// 实机观感即「一面一个颜色」。
 pub fn group_placements_by_vertex_lighting(
     placements: &[Placement],
-    vertex_count: usize,
 ) -> Vec<(Option<Vec<[f32; 3]>>, Vec<usize>)> {
     let mut groups: Vec<(Option<Vec<[f32; 3]>>, Vec<usize>)> = Vec::new();
     for (i, p) in placements.iter().enumerate() {
-        let vl = p
-            .vertex_lighting
-            .as_ref()
-            .filter(|v| v.len() == vertex_count);
+        let vl = p.vertex_lighting.as_ref();
         match vl {
             Some(v) => {
                 match groups

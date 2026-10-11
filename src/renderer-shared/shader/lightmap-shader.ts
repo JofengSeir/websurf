@@ -198,6 +198,52 @@ export const VBSP_AMBIENT_UNIFORM_DECLS = [
  */
 export const VERTEX_LIGHTING_ATTR = '_vbsp_vlight';
 
+/**
+ * three r165 `envmap_fragment` chunk 的**原始 include 锚点**。
+ *
+ * ⚠️ `onBeforeCompile` 拿到的是**尚未展开 `#include` 的原始源码**（`resolveIncludes` 发生在
+ * 更后面的 `WebGLProgram` 里）⇒ 要改 envmap 必须替换这条 `#include`，**不能**去匹配 chunk
+ * 展开后的 `outgoingLight += envColor.xyz * ...`——那条字符串在注入阶段根本不存在，
+ * `String.replace` 会**静默无操作**。（曾因此做过一次无效修复：洞内坡体依旧惨白、无明暗。）
+ */
+const ENVMAP_INCLUDE_SRC = '#include <envmap_fragment>';
+
+/**
+ * 替换用：与 three 的 chunk 同构，但**把反射项乘上本路径的光照项**（Source 语义）。
+ *
+ * 为什么必须调制：`outgoingLight = reflectedLight.indirectDiffuse` 之后才执行 envmap，
+ * 而本文件给 `indirectDiffuse` 乘的 `vbspVertexLightTerm()` / `vbspAmbientWeight()`
+ * **管不到它**。不调制 ⇒ `$envmap` 以**均匀天空常量**叠加。
+ *
+ * 实测（surf_boreas，`__vbspEnvMapAll=0` A/B）：带 `$envmap` 的 prop
+ * （`ice_transparent`，`$envmaptint` 0.66 ⇒ `applyReflectionEnvMap` 里
+ * `reflectivity = min(0.5, 0.66 × 0.35) = 0.231`）在洞内叠加出 **≈0.35** 的常量项，
+ * 而同一体素的烘焙项只有 **≈0.004**（线性）⇒ **envmap 是烘焙值的 ~90 倍**，
+ * 把逐顶点明暗完全盖住；又因反射源是均匀白天空、`MeshBasicMaterial` 的 `specularStrength`
+ * 也不随法线变 ⇒ 洞内坡体 / 冰锥渲染成一块**死亮、毫无明暗变化的板子**。
+ * A/B 关掉 envmap 后均值 171.3 → 134.1，木纹与明暗渐变恢复。
+ *
+ * 仅覆盖实际用到的两个分支（`applyReflectionEnvMap` 固定 `AddOperation`）。
+ */
+const ENVMAP_MODULATED = (termExpr: string): string =>
+	[
+		'#ifdef USE_ENVMAP',
+		'\tvec3 reflectVec = vReflect;',
+		'\t#ifdef ENVMAP_TYPE_CUBE',
+		'\t\tvec4 envColor = textureCube( envMap, envMapRotation * vec3( flipEnvMap * reflectVec.x, reflectVec.yz ) );',
+		'\t#else',
+		'\t\tvec4 envColor = vec4( 0.0 );',
+		'\t#endif',
+		'\t#ifdef ENVMAP_BLENDING_MULTIPLY',
+		'\t\toutgoingLight = mix( outgoingLight, outgoingLight * envColor.xyz, specularStrength * reflectivity * ' +
+			termExpr +
+			' );',
+		'\t#elif defined( ENVMAP_BLENDING_ADD )',
+		'\t\toutgoingLight += envColor.xyz * specularStrength * reflectivity * ' + termExpr + ';',
+		'\t#endif',
+		'#endif',
+	].join('\n');
+
 // 注入用的替换锚点与替换文本。
 //
 // three 0.165.0 的 `meshbasic_frag` 在 `#ifdef USE_LIGHTMAP` 分支里**内联**了 lightmap 采样
@@ -537,7 +583,16 @@ export function applyLightmapToMeshes(
 			// 第 1 级：逐顶点预烘焙（数据在几何上 ⇒ 材质全场景共享）。
 			// 必须**显式赋值**给 mesh：`acquire*` 只建/取缓存实例，不做赋值
 			// （只有 `applyFullbrightBasic` 内部赋值）。漏赋值 ⇒ 该 mesh 仍持旧材质。
-			reconstructVertexLighting(mesh); bakeVertexCubeAttribute(mesh, resolveAmbientCube(mesh));
+			reconstructVertexLighting(mesh);
+			// **不叠 leaf ambient cube**：`vradstaticprops.cpp:1427` 里
+			// `m_Color = VectorAdd(directColor, indirectColor, ...)`，`.vhv` 的逐顶点值
+			// **本身已含间接光**；再叠一遍 leaf ambient cube 等于把间接光算两次。
+			// 实测（surf_boreas，洞穴内坡体逐个统计）：vlight 均值 0.06~0.15（屏幕值，
+			// 着色器 `pow(v,2.2)` 后只剩 0.002~0.013），而 cube 均值 0.012~0.21（线性、不开幂）
+			// ⇒ **cube 比烘焙值大 10~20 倍**，且 cube 逐 leaf 近常量 ⇒ 洞内坡体渲染成均匀亮板。
+			// 这也是导出侧的既定意图：`model_integrator` 写 node extras 时注释
+			// 「第 1 级已接线 ⇒ 渲染端优先用它，**不再叠 cube**」。
+			bakeVertexCubeAttribute(mesh, undefined);
 			mesh.material = acquireVertexLightingMaterial(mesh);
 			vertexLightingRouted++;
 			fullbright++;
@@ -1372,7 +1427,9 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 		const mulSrc = 'reflectedLight.indirectDiffuse *= diffuseColor.rgb;';
 		const fsA = fs
 			.replace('#include <common>', decls + '\n' + fn + '\n#include <common>')
-			.replace(mulSrc, mulSrc.slice(0, -1) + ' * vbspVertexLightTerm();');
+			.replace(mulSrc, mulSrc.slice(0, -1) + ' * vbspVertexLightTerm();')
+			// `$envmap` 反射要被烘焙光照调制，见 `ENVMAP_MODULATED` 的实测说明
+			.replace(ENVMAP_INCLUDE_SRC, ENVMAP_MODULATED('vbspVertexLightTerm()'));
 		const fsChanged = fsA !== fs;
 		const applied = vsChanged && fsChanged;
 		(mat as unknown as { __vbspVertexLightingInject?: unknown }).__vbspVertexLightingInject = {
@@ -1474,7 +1531,9 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 			'reflectedLight.indirectDiffuse *= diffuseColor.rgb;';
 		const fsA = fs
 			.replace('#include <common>', ambFn + '\n#include <common>')
-			.replace(mulSrc, mulSrc.slice(0, -1) + ' * vbspAmbientWeight();');
+			.replace(mulSrc, mulSrc.slice(0, -1) + ' * vbspAmbientWeight();')
+			// 同上：`$envmap` 反射要被第 2 级 ambient 光照调制
+			.replace(ENVMAP_INCLUDE_SRC, ENVMAP_MODULATED('vbspAmbientWeight()'));
 		const fsChanged = fsA !== fs;
 		const applied = vsChanged && fsChanged;
 		(

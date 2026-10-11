@@ -150,7 +150,12 @@ pub fn parse_vhv(bytes: &[u8]) -> Option<PropVertexLighting> {
                 };
                 (avg(2), avg(1), avg(0))
             };
-            // 引擎口径：vVertexLighting = byte * (2.0 / 255.0)
+            // 引擎口径：`vVertexLighting = byte × (2.0 / 255.0)`，取值域 **[0, 2]**。
+            //
+            // ⚠️ 曾被我按 SDK `color_conversion.cpp` 的推导改成 `1.0/255` 并断定「凭空多了一倍」，
+            // **这是错的**（owner 2026-10-11 纠正）：`_VBSP_VLIGHT` 的语义就是**屏幕倍率**，
+            // 上界 2 而非 1，着色器再 `pow(v, 2.2/γ)` 还原成线性。只有「以数值看起来偏大」
+            // 就推翻既有约定，是没有依据的改动。已回退。
             const K: f32 = 2.0 / 255.0;
             colors.push([r as f32 * K, g as f32 * K, b as f32 * K]);
         }

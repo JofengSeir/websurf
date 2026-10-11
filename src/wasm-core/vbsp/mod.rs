@@ -696,6 +696,29 @@ impl Bsp {
         self.ambient_cube_at_point(p)
     }
 
+    /// Source 坐标（**不旋转、不做 `map_coords`**）→ 该点所在 leaf 在 `Bsp::leaves` 里的下标。
+    ///
+    /// 走 **BSP 树遍历**：从 `nodes[0]` 起，`plane.normal · p - plane.dist >= 0` 走
+    /// `children[0]`，否则 `children[1]`，遇到负 child 取 `!child` 当 leaf 下标；**最多循环 256 次**，
+    /// 用尽仍未落到 leaf 即返回 `None`。判定与 [`Self::leaf_at`] 同一套（`leaf_at` 无次数上限且
+    /// 失败时 `unwrap`  panic，故本方法供「取不到就放弃」的光照兜底使用）。
+    pub fn leaf_index_at_point(&self, p: [f32; 3]) -> Option<usize> {
+        let mut node_idx: i32 = 0;
+        for _ in 0..256 {
+            let node = &self.nodes[node_idx as usize];
+            let plane = &self.planes[node.plane_index as usize];
+            let side = plane.normal.x * p[0] + plane.normal.y * p[1] + plane.normal.z * p[2]
+                - plane.dist;
+            let child = if side >= 0.0 { node.children[0] } else { node.children[1] };
+            if child >= 0 {
+                node_idx = child;
+            } else {
+                return Some((!child) as usize);
+            }
+        }
+        None
+    }
+
     /// Source 坐标（**不旋转、不做 `map_coords`**）→ 该点所在 leaf 的最近采样 6 面 ambient cube。
     ///
     /// 实体放置模型（`prop_dynamic` 等）没有 `sp_<i>.vhv` 烘焙产物，只能按「实体 origin 所在 leaf」取
@@ -712,25 +735,8 @@ impl Bsp {
         if indices.is_empty() || samples.is_empty() {
             return Some(NEUTRAL_AMBIENT);
         }
-        // leaf 定位：与 leaf_at 同一套判定（侧面 >= 0 走 children[0]），差别是这里有 256 次上限
-        let mut node_idx: i32 = 0;
-        let mut leaf_idx: Option<usize> = None;
-        for _ in 0..256 {
-            let node = &self.nodes[node_idx as usize];
-            let plane = &self.planes[node.plane_index as usize];
-            let side = plane.normal.x * p[0] + plane.normal.y * p[1] + plane.normal.z * p[2]
-                - plane.dist;
-            let child = if side >= 0.0 { node.children[0] } else { node.children[1] };
-            if child >= 0 {
-                node_idx = child;
-            } else {
-                leaf_idx = Some((!child) as usize);
-                break;
-            }
-        }
-        let li = match leaf_idx {
-            Some(li) => li,
-            None => return Some(NEUTRAL_AMBIENT),
+        let Some(li) = self.leaf_index_at_point(p) else {
+            return Some(NEUTRAL_AMBIENT);
         };
         let Some(index) = indices.get(li) else {
             return Some(NEUTRAL_AMBIENT);
