@@ -21,6 +21,7 @@ const LEDGER = join(ROOT, 'progress/memory-index.jsonl');
 const IDS = join(ROOT, 'progress/control-ids.json');
 const SRC = 'progress/board.jsonl';
 const CHUNK_MAX = 8192;
+const VIEWER = process.env.AGENTMEMORY_VIEWER_URL || 'http://127.0.0.1:3113';
 const TERMINAL = ['已记录', '已结案'];
 
 const argv = process.argv.slice(2);
@@ -107,8 +108,26 @@ if (flag('status')) {
 }
 
 if (flag('done')) {
-  const pairs = String(value('ids') || '').split(',').map((s) => s.trim()).filter(Boolean).map((s) => { const i = s.indexOf('='); return { marker: s.slice(0, i), memoryId: s.slice(i + 1) }; });
-  if (!pairs.length) { console.error('--done 需要 --ids marker=id,marker=id,...'); process.exit(2); }
+  let pairs = String(value('ids') || '').split(',').map((s) => s.trim()).filter(Boolean).map((s) => { const i = s.indexOf('='); return { marker: s.slice(0, i), memoryId: s.slice(i + 1) }; });
+  if (!pairs.length) {
+    // 没给 --ids：自己从库里按 marker 认（库内条目的首行就是 [线索] marker）。
+    // 这样「plan → 逐条 memory_save → --done」三步里最后一步不需要人工抄 id。
+    const need = plan().map((it) => it.marker);
+    try {
+      const res = await fetch(VIEWER + '/memories?limit=4000', { signal: AbortSignal.timeout(30000) });
+      const live = (await res.json()).memories || [];
+      const got = new Map();
+      for (const m of live) {
+        const mk = (String(m.content || '').match(/^\[线索\] (\S+)/) || [])[1];
+        if (mk && need.indexOf(mk) >= 0 && !got.has(mk)) got.set(mk, m.id);
+      }
+      pairs = [...got].map(([marker, memoryId]) => ({ marker, memoryId }));
+      console.log('sync-board：自动解析到 ' + pairs.length + '/' + need.length + ' 条（库内按 marker 匹配）');
+    } catch (err) {
+      console.error('自动解析失败（库不可达？）：' + (err && err.message ? err.message : err));
+    }
+    if (pairs.length !== need.length) { console.error('--done 需要 ' + need.length + ' 条，只解析到 ' + pairs.length + ' 条 ⇒ 先按计划逐条 memory_save，或显式传 --ids marker=id,...'); process.exit(2); }
+  }
   const keep = ledger().filter((e) => e.source !== SRC);
   for (const it of pairs) {
     keep.push({

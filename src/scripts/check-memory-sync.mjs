@@ -127,9 +127,15 @@ for (const e of entries) {
   sources.add(rel);
   const abs = path.join(ROOT, rel);
   if (!fs.existsSync(abs)) {
-    if (!fs.existsSync(ARCHIVE)) { archiveAbsent++; continue; }
+    // 源已迁出且本机没留归档副本 ⇒ 按行容忍（owner 2026-10-11 起不再更新 archive/**；
+    // 归档区目录是否存在不该改变老条目的判定 —— 之前是全局开关，被别的轮次建目录顶掉过）。
+    const srcAbsent = !fs.existsSync(path.join(ROOT, rel));
+    if (!fs.existsSync(ARCHIVE) && srcAbsent) { archiveAbsent++; continue; }
     const a = archive.get(rel);
-    if (!a) { orphan.push('  ' + rel + '（台账有，但仓库与 archive/ 都无）'); continue; }
+    if (!a) {
+      if (srcAbsent && e.retired === true) { archiveAbsent++; continue; }
+      orphan.push('  ' + rel + '（台账有，但仓库与 archive/ 都无）'); continue;
+    }
     if (!a.exists) { orphan.push('  ' + rel + '（归档 .meta.json 在、原文缺）'); continue; }
     if (e.retired !== true) { orphan.push('  ' + rel + '（源已迁出）但台账未标 retired'); continue; }
     retired++;
