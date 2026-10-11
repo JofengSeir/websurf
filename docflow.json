@@ -21,8 +21,8 @@
     ".github/ISSUE_TEMPLATE/bug_report.md": "1c04607a70bd18dd118b6771a9f0fe12ea5d777ade9bf18c1992c3a500075ed5",
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
-    ".github/PULL_REQUEST_TEMPLATE.md": "d03524f66cdaae0abd96744d204ea954155e325413a23356708299207fa457a2",
-    "AGENTS.md": "d97ce926af624c7b467b9f51de2715c0943eeb5b0cb7372bc0435db22961f5dc",
+    ".github/PULL_REQUEST_TEMPLATE.md": "adbc4aecbd5debdfe4fa1113ef235e683fef2fae3f9c659512e2fe931b7282e3",
+    "AGENTS.md": "febdb1d8252f374d9e2fa7406d45009bc6a24d1bb0f4f316ffc53100a624faf3",
     "skills/websurf-workflow/SKILL.md": "ca52a07bd2d32d270aad3f68d0441f9406f8254dda5fd4163fbb7d1996be564c"
   },
   "approvals": [
@@ -67,30 +67,6 @@
       "consumed": true
     },
     {
-      "path": ".github/PULL_REQUEST_TEMPLATE.md",
-      "by": "Jofen",
-      "reason": "上一轮锚点写成相对路径 ci-gates.yml 导致指纹失效，改为全路径 .github/workflows/ci-gates.yml:355",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "OWNER.md",
-      "by": "owner(2026-10-10",
-      "reason": "9",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": ".github/PULL_REQUEST_TEMPLATE.md",
-      "by": "owner(2026-10-11)",
-      "reason": "R11（owner 指示）：移除 favicon 与 test:path-acceptance 门禁后同步锚点——ci-gates.yml 删步使 glb-parity job 由 285 前移到 279（`TODO.md` T-409 证据列）、三端 check:api 循环由 355 前移到 349（PR 模板契约门）；TODO.md 新增 T-643；AGENTS.md 去掉 path-acceptance.mjs 与 path-baseline.md 两处登记",
-      "at": "2026-10-10",
-      "task": "T-643",
-      "consumed": true
-    },
-    {
       "path": "TODO.md",
       "by": "owner(2026-10-11",
       "reason": "分卷：看板迁入",
@@ -123,7 +99,7 @@
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
+      "path": "skills/websurf-workflow/SKILL.md",
       "by": "owner(2026-10-11)",
       "reason": "队列滞留降级为提示（不挡提交）",
       "at": "2026-10-11",
@@ -131,9 +107,25 @@
       "consumed": true
     },
     {
-      "path": "skills/websurf-workflow/SKILL.md",
+      "path": "AGENTS.md",
       "by": "owner(2026-10-11)",
-      "reason": "队列滞留降级为提示（不挡提交）",
+      "reason": "T-653",
+      "at": "2026-10-11",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "OWNER.md",
+      "by": "owner(2026-10-11)",
+      "reason": "T-653",
+      "at": "2026-10-11",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "by": "owner(2026-10-11)",
+      "reason": "T-653",
       "at": "2026-10-11",
       "task": "",
       "consumed": true
@@ -213,9 +205,7 @@
     ".github/ISSUE_TEMPLATE/bug_report.md": {},
     ".github/ISSUE_TEMPLATE/feature_request.md": {},
     ".github/ISSUE_TEMPLATE/other.md": {},
-    ".github/PULL_REQUEST_TEMPLATE.md": {
-      ".github/workflows/ci-gates.yml:349:349": "17f00cc3"
-    },
+    ".github/PULL_REQUEST_TEMPLATE.md": {},
     "AGENTS.md": {},
     "CONTRIBUTING.md": {},
     "OWNER.md": {
@@ -232,6 +222,22 @@
     "apps/viewer/scripts/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "at": "2026-10-11T22:32:15.019Z",
+      "by": "agent",
+      "reason": "T-653",
+      "changed": 1,
+      "total": 0
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "at": "2026-10-11T22:28:52.686Z",
+      "by": "agent",
+      "reason": "T-653",
+      "changed": 1,
+      "total": 1
+    },
     {
       "path": "OWNER.md",
       "at": "2026-10-10T17:27:51.121Z",

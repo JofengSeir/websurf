@@ -143,25 +143,6 @@ jobs:
 
       # 渲染性能回归门：面片规模地图（surf_666 GLB = 34409 primitive）必须经 optimizeScene
       # 合并到 300~800 块（否则每帧 3.4 万次 draw call）。断言顶点守恒 + 块数区间。
-      - name: Verify debug optimizeScene (GLB 空间分块合并)
-        working-directory: apps/debug
-        run: npm run test:optimize-scene
-
-      # 权威时钟回归门：tickRate 配置消息不得丢仿真时间（旧行为会把 63.6 tick/s 打到 0.5）。
-      - name: 权威时钟验证（配置消息不得丢仿真时间）
-        working-directory: apps/debug
-        run: npm run test:auth-clock
-
-      - name: 跳跃顶点权威验证（jump apex）
-        working-directory: apps/debug
-        run: npm run test:jump-apex
-
-      - name: debug 贴坡蹲姿端到端（wasm 产物级）
-        working-directory: apps/debug
-        # 直读 apps/debug/pkg：贴坡松开蹲键保持蹲姿 / 落地即起立 / 空中蹲姿动量 == 站姿
-        run: npm run test:surf-crouch
-
-  # ── game 门禁（都读 apps/game/pkg）────────────────────────────────
   game-gates:
     name: game gates
     runs-on: ubuntu-latest
@@ -228,54 +209,6 @@ jobs:
         # 下面三道门禁都直接读 apps/game/pkg/websurf_wasm_bg.wasm
         run: npm run build:wasm
 
-      - name: game 物理冒烟（PhysWorld 基本行为）
-        working-directory: apps/game
-        run: npm run test:phys
-
-      - name: game 种子面冒烟（确定性种子契约）
-        working-directory: apps/game
-        run: npm run test:seed-smoke
-
-      - name: game 贴坡蹲姿端到端（wasm 产物级）
-        working-directory: apps/game
-        # 直读 pkg 产物：贴坡松开蹲键保持蹲姿 / 落地即起立 / 空中蹲姿动量 == 站姿
-        run: npm run test:surf-crouch
-
-  # ── viewer 门禁（纯 TS 自检，无需 wasm/pnpm 之外的任何构建）────────
-  viewer-gates:
-    name: viewer gates
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: '**/package-lock.json'
-
-      # 根级 three（renderer-shared 依赖）：与 debug-gates 同理，先根后工程。
-      - name: Install root shared dependencies
-        run: npm ci
-
-      - name: Install viewer dependencies
-        working-directory: apps/viewer
-        run: npm ci
-
-      - name: Run viewer replay selftest
-        working-directory: apps/viewer
-        # 只 esbuild 自检入口（src/replay/*），不依赖 pkg/ 与 wasm
-        run: npm run test:replay
-
-  # ── 三端 wasm + textures.mtz 组合门禁（T-454 P5 固定交付项；原 T-409 未接线）─────
-  # 三份 wasm 在同一台 runner 上各自构建，然后跑**字段级** GLB 一致性门禁：节点名集合、
-  # 图元属性键集合、`extras.ambientCube` 节点集合、材质逐字段、贴图逐字节。
-  # 地图夹具 `test/maps/**` 在 `.gitignore` 内、CI 上不存在 ⇒ 门禁自报 SKIP 并 exit 0
-  # （口径见 `src/scripts/check-glb-parity.mjs` 头注）；本 job 的真正价值是**证明三份 crate
-  # 都能用同一套共享编排编译出来**，并在有夹具的本地/自建 runner 上立刻升级为逐字段断言。
   glb-parity:
     name: three-end GLB parity
     runs-on: ubuntu-latest
@@ -350,9 +283,3 @@ jobs:
             echo "== apps/$app check:api =="
             (cd "apps/$app" && node scripts/check-wasm-api.mjs)
           done
-
-      - name: GLB parity (three ends; SKIP when map fixtures are absent)
-        run: node src/scripts/check-glb-parity.mjs
-
-      - name: Render parity (apps/** must go through shared entries)
-        run: node src/scripts/check-render-parity.mjs

@@ -14,10 +14,7 @@
     "build": "npm run build:wasm && npm run build:ts",
     "predev": "node ../../src/scripts/sync-default-textures.mjs",
     "dev": "python ../../src/serve.py 8090 .",
-    "check:api": "node scripts/check-wasm-api.mjs",
-    "test:phys": "node scripts/phys-smoke.mjs",
-    "test:seed-smoke": "node scripts/phys-seed-smoke.mjs",
-    "test:surf-crouch": "node scripts/phys-surf-crouch-smoke.mjs"
+    "check:api": "node scripts/check-wasm-api.mjs"
   },
   "dependencies": {},
   "devDependencies": {

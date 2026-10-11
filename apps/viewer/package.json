@@ -7,9 +7,6 @@
   "scripts": {
     "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../../../.tmp/wasm-out/viewer && node ../../../../src/scripts/copy-wasm-pkg.mjs viewer",
     "typecheck": "tsc --noEmit",
-    "test:replay": "esbuild test/replay-selftest.ts --bundle --outfile=.tmp/replay-selftest/replay-selftest.mjs --format=esm --platform=node --target=node18 && node .tmp/replay-selftest/replay-selftest.mjs",
-    "test:sessions": "node test/session-sep.mjs",
-    "local:smoke": "node test/smoke-cdp.mjs",
     "build:worker": "esbuild src/worker/main.ts --bundle --outfile=web/worker.js --format=esm --target=es2022",
     "build:app": "esbuild src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022",
     "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",

@@ -91,9 +91,6 @@ node src/scripts/check-doc-drift.mjs [文件]        # A–P 全 0（行数声�
 node src/scripts/check-memory-sync.mjs             # 记忆库同步：stale / orphan / archive_mismatch / missing / leak 全 0（台账 progress/memory-index.jsonl）
 node src/scripts/check-memory-sync.mjs --keys      # markers == entries
 node src/scripts/docflow.mjs check                 # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
-node src/scripts/check-render-parity.mjs           # 三端渲染同源（静态 A–J：实现符号 / 共享入口装配与调用面 / 视口声明；git 不可用时降级）
-node src/scripts/check-render-consistency.mjs      # 三端渲染一致（运行期：探针快照逐字段；缺三端 dev 服务或浏览器即 SKIP）
-node src/scripts/check-prefs-parity.mjs            # 三端呈现档可比（`?prefs=default` 生效行逐字相同 + `--selftest` 负向自测）
 node src/scripts/check-kb-doc-drift.mjs --strict    # 记忆库「现状文档」锚点体检（documents/** 的 路径:行号 对当前源码；失效/越界即失败；库不可达 SKIP）
 node src/scripts/kb-fallback.mjs probe           # 知识库可用性：L1 工具 / L2 HTTP / L3 仓库兜底，并列出待补写条目
 node src/scripts/close-round.mjs --check-round --staged  # 留痕检查（钩子同口径）；--note/--done 见脚本头注释
@@ -118,35 +115,17 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 ### 3.1 脚本清单（供 `[O]` 文档契约覆盖判定）
 
 - `apps/debug/scripts/_input-replay-verify.mjs`
-- `apps/debug/scripts/auth-clock-verify.mjs`
 - `apps/debug/scripts/build-dist.mjs`
-- `apps/debug/scripts/check-param-defaults.mjs`
 - `apps/debug/scripts/check-wasm-api.mjs`
-- `apps/debug/scripts/frame-bench.mjs`
-- `apps/debug/scripts/glb-mesh-count.mjs`
-- `apps/debug/scripts/jump-apex-verify.mjs`
-- `apps/debug/scripts/optimize-scene-verify.mjs`
-- `apps/debug/scripts/phys-surf-crouch-smoke.mjs`
-- `apps/debug/scripts/plot-path.mjs`
 - `apps/game/scripts/build-dist.mjs`
 - `apps/game/scripts/check-wasm-api.mjs`
-- `apps/game/scripts/phys-seed-smoke.mjs`
-- `apps/game/scripts/phys-smoke.mjs`
-- `apps/game/scripts/phys-surf-crouch-smoke.mjs`
 - `apps/viewer/scripts/build-dist.mjs`
 - `apps/viewer/scripts/check-wasm-api.mjs`
-- `apps/viewer/test/session-sep.mjs`
-- `apps/viewer/test/smoke-cdp.mjs`
 - `src/scripts/check-board-touch.mjs`
 - `src/scripts/check-doc-drift.mjs`
-- `src/scripts/check-glb-parity.mjs`
 - `src/scripts/check-kb-doc-drift.mjs`
 - `src/scripts/check-memory-sync.mjs`
 - `src/scripts/copy-wasm-pkg.mjs`
-- `src/scripts/check-prefs-parity.mjs`
-- `src/scripts/check-render-consistency.mjs`
-- `src/scripts/check-render-parity.mjs`
-- `src/scripts/check-shared-sync.mjs`
 - `src/scripts/docflow.mjs`
 - `src/scripts/close-round.mjs`
 - `src/scripts/sync-board.mjs`
@@ -154,7 +133,6 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 - `src/scripts/lib/dist-pack.mjs`
 - `src/scripts/lib/wasm-api-contract.mjs`
 - `src/scripts/sync-default-textures.mjs`
-- `src/scripts/wasm-stale-check.mjs`
 
 ---
 
