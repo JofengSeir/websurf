@@ -140,30 +140,7 @@
     }
   ],
   "cochange": [],
-  "claim": {
-    "task": "T-649",
-    "may": [
-      "src/wasm-core/**/*.rs",
-      "src/renderer-shared/**/*.ts",
-      "apps/*/web/websurf_*",
-      "apps/*/pkg/websurf_*"
-    ],
-    "must": [],
-    "base": {},
-    "at": "2026-10-11T20:04:54.133Z",
-    "pins": {
-      "README.md": "d32bb99c00258bc7a39290dfe7eba0ec96eea133aa269d0d350788d8947b7637",
-      "CONTRIBUTING.md": "b11e2f55b65f41f46d928bca3f7a819d2b86c0f5af406c68884502cddfe4ede6",
-      "SECURITY.md": "64196372b3a4cc4b35bc1d78dd31bde0d80dd7099ef28236fcdef46dd481597e",
-      "skills/websurf-env-traps/SKILL.md": "0b56637e989536fa35f5cffbc4286d6ed650ea2989707652a06a703f0b21d8f0",
-      ".github/ISSUE_TEMPLATE/bug_report.md": "1c04607a70bd18dd118b6771a9f0fe12ea5d777ade9bf18c1992c3a500075ed5",
-      ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
-      ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
-      ".github/PULL_REQUEST_TEMPLATE.md": "d03524f66cdaae0abd96744d204ea954155e325413a23356708299207fa457a2",
-      "AGENTS.md": "d97ce926af624c7b467b9f51de2715c0943eeb5b0cb7372bc0435db22961f5dc",
-      "skills/websurf-workflow/SKILL.md": "ca52a07bd2d32d270aad3f68d0441f9406f8254dda5fd4163fbb7d1996be564c"
-    }
-  },
+  "claim": null,
   "units": {
     "OWNER.md": {
       "match": "^\\|\\s*\\*{0,2}D-\\d{3}",
