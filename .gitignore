@@ -12,6 +12,8 @@
 **/web/app.js
 **/web/worker.js
 **/web/websurf_wasm_bg.wasm
+**/web/websurf_*wasm*.js
+**/web/websurf_*wasm*.d.ts
 # 三端 web/ 下的默认纹理包是 src/materials/textures.mtz 的本地开发副本（唯一源在 src/materials；构建产物由
 # build-dist.mjs 直接读 src/materials ⇒ dist/ 自带）。dev 起服务前用 src/scripts/sync-default-textures.mjs 同步。
 apps/*/web/textures.mtz

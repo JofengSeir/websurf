@@ -202,11 +202,16 @@ const todoPath = 'progress/board.jsonl';
 const boardFile = path.join(ROOT, todoPath);
 let todoRaw = '';
 let boardRowsRaw = [];
+const boardField = [];   // board.jsonl 字段不得含换行/竖线（合成 md 表会劈开行/列）
 if (fs.existsSync(boardFile)) {
   for (const ln of fs.readFileSync(boardFile, 'utf8').split(/\r?\n/)) {
     if (!ln.trim()) continue;
     let r; try { r = JSON.parse(ln); } catch { continue; }
     boardRowsRaw.push(r);
+    for (const k of ['id', 'title', 'type', 'owner', 'status', 'evidence', 'detail', 'criteria', 'origin']) {
+      const v = String(r[k] == null ? '' : r[k]);
+      if (/[\n\r|]/.test(v)) boardField.push('  ' + (r.id || '?') + ' 的 ' + k + ' 含换行或竖线 ⇒ 合成 md 表时会劈开行/列（症状是「列表里有它、总表未结里没有」）');
+    }
     todoRaw += '| ' + [r.id, r.title, r.type, r.owner, r.status, r.evidence, r.detail, r.criteria, r.origin].map((x) => String(x == null ? '' : x)).join(' | ') + ' |\n';
   }
   todoRaw += boardRowsRaw.filter((r) => !['已记录', '已结案'].includes(r.status)).map((r) => '- **' + r.id + '** ' + r.title).join('\n') + '\n';
@@ -497,7 +502,7 @@ try {
   else docflow.push('  docflow check 非 0 退出（排查：node src/scripts/docflow.mjs check）');
 }
 
-const fail = drift.length || badAnchor.length || missing.length || localPath.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length || docGap.length || falseClose.length || contract.length || docflow.length;
+const fail = boardField.length || drift.length || badAnchor.length || missing.length || localPath.length || broken.length || eolBad.length || dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length || docGap.length || falseClose.length || contract.length || docflow.length;
 console.log(`文档漂移体检：${mds.length} 篇 md ｜ 行数声明 ${claims}（漂移 ${drift.length}）｜锚点 ${anchors}（越界 ${badAnchor.length}）｜路径失效 ${missing.length} ｜本机路径 ${localPath.length} ｜歧义未判 ${ambiguous} ｜坏链 ${broken.length} ｜行尾/BOM ${eolBad.length} ｜待办同源 ${dangling.length + statusClaim.length + dupRows.length + noEvidence.length + outOfSync.length + badDetail.length + badClaim.length + idxMissing.length + badCrit.length + sizeBad.length + piMissing.length + cmtLong + parentMiss.length} ｜ 注释超长 ${cmtInFile.length} 块/${cmtHead.length} 头 ｜ 待修补判据 ${critPending} ｜ 缺口未标注 ${docGap.length} ｜ 假结案 ${falseClose.length} ｜ 脚本/入口契约 ${contract.length} ｜ 文档契约 ${docflow.length}`);
 const todoKB = Buffer.byteLength(todoRaw, 'utf8') / 1024;
 const todoRowCount = (todoRaw.match(/^\|\s*T-\d{3}\s*\|/gm) || []).length;
@@ -514,6 +519,7 @@ if (localPath.length) console.log('\n[P] 本机路径（失败）：\n' + [...ne
 if (docflowWarn.length) console.log('\n[WARN] 文档契约 docflow 未完成：\n' + [...new Set(docflowWarn)].join('\n') + '\n  —— 基础设施故障，不是契约通过');
 if (docflow.length) console.log('\n[O] 文档契约 docflow（失败）：\n' + docflow.join('\n'));
 if (contract.length) console.log('\n[N] 脚本与部署链契约（失败）：\n' + contract.join('\n'));
+if (boardField.length) console.log('\n[G] board 字段（失败）：\n' + boardField.join('\n'));
 if (docGap.length) console.log('\n[L] 文档缺口未标注（失败）：\n' + docGap.join('\n'));
 if (falseClose.length) console.log('\n[M] 假结案（失败）：\n' + falseClose.join('\n'));
 if (dangling.length || statusClaim.length || dupRows.length || noEvidence.length || outOfSync.length || badDetail.length || badClaim.length || idxMissing.length || badCrit.length || sizeBad.length || piMissing.length || cmtLong || parentMiss.length) console.log('\n[G] 待办同源（失败）：\n' + [...dangling, ...dupRows, ...statusClaim, ...noEvidence, ...outOfSync, ...badDetail, ...badClaim, ...badCrit, ...sizeBad, ...piMissing, ...idxMissing, ...parentMiss].join('\n'));
