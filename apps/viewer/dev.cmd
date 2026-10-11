@@ -110,9 +110,9 @@ REM its OWN minimized window (title below, visible on the taskbar): closing this
 REM window never kills the server, and the server can be stopped by closing that
 REM window (or Ctrl+C inside it) or by running stop.cmd in this folder.
 start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/web/index.html"
-REM src/serve.py takes its serve root from argv[2]; the literal here is "%~dp0." (this app
+REM src/scripts/serve.py takes its serve root from argv[2]; the literal here is "%~dp0." (this app
 REM root written with a trailing dot), and serve.py os.chdir()s to it before serving.
-start "WebSurf-viewer dev server :%PORT%" /min cmd /k python "%~dp0..\..\src\serve.py" %PORT% "%~dp0."
+start "WebSurf-viewer dev server :%PORT%" /min cmd /k python "%~dp0..\..\src\scripts\serve.py" %PORT% "%~dp0."
 echo [OK] Server launched in its own minimized window: "WebSurf-viewer dev server :%PORT%".
 echo      Stop it by closing that window or by running stop.cmd here.
 exit /b 0

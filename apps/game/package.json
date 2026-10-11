@@ -13,7 +13,7 @@
     "build:dist": "node scripts/build-dist.mjs",
     "build": "npm run build:wasm && npm run build:ts",
     "predev": "node ../../src/scripts/sync-default-textures.mjs",
-    "dev": "python ../../src/serve.py 8090 .",
+    "dev": "python ../../src/scripts/serve.py 8090 .",
     "check:api": "node scripts/check-wasm-api.mjs"
   },
   "dependencies": {},

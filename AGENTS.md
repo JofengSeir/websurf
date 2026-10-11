@@ -72,7 +72,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | `documents/` | **不存在**：原 47 篇工程/共享层/架构文档 + 3 篇规范已全部迁入 agentmemory，原文归档 `archive/memory/2026-10/` |
 | `progress/` | **3 个机器可读文件**：`memory-index.jsonl`（迁移台账 = manifest，`check-memory-sync.mjs` 的权威输入）、`control-ids.json`（控制层 ID 索引，门禁 `[G]` 判定「ID 已存在」的唯一来源）、`pending-kb.jsonl`（MCP 不可用时的待补写队列，见 §0 兜底）、**`board.jsonl`（看板机器可读镜像 = 门禁 `[G]` 权威输入）** |
 | `skills/**` | **两类**：① **本项目技能 3 篇**（顶层）`skills/websurf-workflow/`（**先读：工作流循环**）、`skills/websurf-env-traps/`（开工前先读）、`skills/agentmemory-usage/`（**用记忆库前先读**：本仓守则）—— 各含 `SKILL.md`（骨架，属只读类）+ `REFERENCE.md`（细则）；② **上游 agentmemory 官方技能 17 篇** 收在 `skills/agentmemory-usage/`（`memory-discipline`、`remember`/`recall`/`forget`、`lesson`、`agentmemory-mcp-tools`/`-config`/`-rest-api`/`-architecture`/`-hooks`/`-agents`、`recap`/`handoff`/`session-history`/`commit-context`/`commit-history`、`write-agentmemory-skill`）+ `skills/agentmemory-usage/_shared/TROUBLESHOOTING.md` —— 上游**原样复制、不得就地修改**，来源/版本/更新法见 `skills/agentmemory-usage/THIRD-PARTY.md`。仓库是唯一源头；**harness 只扫 `<仓库>/.agents/skills`、`<仓库>/.dsh/skills`、`~/.agents/skills`、`<dshHome>/skills` 四个根，不扫 `<仓库>/skills/`** ⇒ 新机器要把 `skills/` 下每个技能目录 junction 进任一根（见 `websurf-workflow` 的 REFERENCE「技能注册」节）。项目技能的 `SKILL.md` 进台账；官方技能不进（工具自带文档，随包更新） |
-| `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/`；`apps/viewer/scripts/dist-README.md` 是构建资产（被 `build-dist.mjs` 消费） |
+| `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/`；`apps/viewer/dist-README.md` 是构建资产（被 `build-dist.mjs` 消费） |
 | `src/**` | 共享层（phys / wasm-core / ts-shared / materials / renderer-shared）+ `src/scripts/**`（本地门禁与工具） |
 | `test/` | `test/maps/`（BSP 夹具）、`test/replay/`（录像样例）——两者 gitignore；`test/project/**` 为第三方参考资料 |
 | `.github/**` | `workflows/ci-gates.yml`、`workflows/deploy-pages.yml`、`workflows/doc-drift.yml`（**三者均入库**；`.gitignore:81` 的「已放行」注释即为此）+ `.github/**/*.md` 模板（功能性配置） |
@@ -80,7 +80,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
 | `archive/**` | 迁移原文与回滚存证（gitignore）；**不作依据** |
 
 **仓库内 md 清单**（体检 `[K]` 要求每篇都能被上级导航点到，故在此列全）：
-`.github/ISSUE_TEMPLATE/bug_report.md`、`.github/ISSUE_TEMPLATE/feature_request.md`、`.github/ISSUE_TEMPLATE/other.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`CONTRIBUTING.md`、`OWNER.md`、`README.md`、`SECURITY.md`、`apps/viewer/scripts/dist-README.md`、`skills/**`（全部 md：三篇项目技能各自的 `SKILL.md` + `REFERENCE.md`、`skills/agentmemory-usage/THIRD-PARTY.md`、`skills/agentmemory-usage/**` 下官方技能的 `SKILL.md`/`REFERENCE.md`/`EXAMPLES.md` 与 `_shared/TROUBLESHOOTING.md`）。
+`.github/ISSUE_TEMPLATE/bug_report.md`、`.github/ISSUE_TEMPLATE/feature_request.md`、`.github/ISSUE_TEMPLATE/other.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`CONTRIBUTING.md`、`OWNER.md`、`README.md`、`SECURITY.md`、`apps/viewer/dist-README.md`、`skills/**`（全部 md：三篇项目技能各自的 `SKILL.md` + `REFERENCE.md`、`skills/agentmemory-usage/THIRD-PARTY.md`、`skills/agentmemory-usage/**` 下官方技能的 `SKILL.md`/`REFERENCE.md`/`EXAMPLES.md` 与 `_shared/TROUBLESHOOTING.md`）。
 
 ---
 

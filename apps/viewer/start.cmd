@@ -41,8 +41,8 @@ where python >nul 2>nul
 if not errorlevel 1 (
   REM A detached "cmd /c" opens the page after timeout /t 1; the server call below blocks.
   start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
-  REM src/serve.py takes its serve root from argv[2]; here it is dist\ itself.
-  python "%~dp0..\..\src\serve.py" %PORT% "%~dp0dist"
+  REM src/scripts/serve.py takes its serve root from argv[2]; here it is dist\ itself.
+  python "%~dp0..\..\src\scripts\serve.py" %PORT% "%~dp0dist"
   exit /b %errorlevel%
 )
 where npx >nul 2>nul

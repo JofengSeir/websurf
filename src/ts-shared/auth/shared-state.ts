@@ -1017,7 +1017,7 @@ export interface ReadProbe {
 /** 跨线程状态通道（SAB / MsgState 统一类型）。 */
 export type SharedState = ShmState | MsgState;
 
-/** 主线程侧创建：`crossOriginIsolated`（本地 `src/serve.py` 带 COOP/COEP）→ SAB 高性能；
+/** 主线程侧创建：`crossOriginIsolated`（本地 `src/scripts/serve.py` 带 COOP/COEP）→ SAB 高性能；
  * 否则（静态部署无 COOP/COEP）→ `MsgState` 消息回退（功能等价，性能降级）。 */
 export function createMainSharedState(
   buffer: SharedArrayBuffer | null,

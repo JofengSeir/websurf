@@ -14,26 +14,18 @@
     "coverageMode": "hard"
   },
   "pins": {
-    "README.md": "d32bb99c00258bc7a39290dfe7eba0ec96eea133aa269d0d350788d8947b7637",
-    "CONTRIBUTING.md": "b11e2f55b65f41f46d928bca3f7a819d2b86c0f5af406c68884502cddfe4ede6",
-    "SECURITY.md": "64196372b3a4cc4b35bc1d78dd31bde0d80dd7099ef28236fcdef46dd481597e",
+    "README.md": "556b993fd49076114e4af33bea83a2bd9064520b661e258ec161d70072a9d77c",
+    "CONTRIBUTING.md": "cecc4b287608c70d5cf734f9e133b9ac08b388d7e256608ceb910387bff97957",
+    "SECURITY.md": "41d56d4ab34548cd6f75f04fc564cf67e5ecf453872e0dfc1a6f29292bdecf44",
     "skills/websurf-env-traps/SKILL.md": "0b56637e989536fa35f5cffbc4286d6ed650ea2989707652a06a703f0b21d8f0",
     ".github/ISSUE_TEMPLATE/bug_report.md": "1c04607a70bd18dd118b6771a9f0fe12ea5d777ade9bf18c1992c3a500075ed5",
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "adbc4aecbd5debdfe4fa1113ef235e683fef2fae3f9c659512e2fe931b7282e3",
-    "AGENTS.md": "febdb1d8252f374d9e2fa7406d45009bc6a24d1bb0f4f316ffc53100a624faf3",
+    "AGENTS.md": "3c6c635e6ac661e95dded5f989f250e411320ba276466a2b7f2d554056ce5c89",
     "skills/websurf-workflow/SKILL.md": "ca52a07bd2d32d270aad3f68d0441f9406f8254dda5fd4163fbb7d1996be564c"
   },
   "approvals": [
-    {
-      "path": "CONTRIBUTING.md",
-      "by": "owner(2026-10-10",
-      "reason": "迁出小节后残留的交叉引用",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
     {
       "path": ".github/ISSUE_TEMPLATE/bug_report.md",
       "by": "Jofen",
@@ -83,33 +75,9 @@
       "consumed": true
     },
     {
-      "path": "README.md",
-      "by": "owner(2026-10-11",
-      "reason": "取消",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "SECURITY.md",
-      "by": "owner(2026-10-11",
-      "reason": "取消",
-      "at": "2026-10-10",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "skills/websurf-workflow/SKILL.md",
       "by": "owner(2026-10-11)",
       "reason": "队列滞留降级为提示（不挡提交）",
-      "at": "2026-10-11",
-      "task": "",
-      "consumed": true
-    },
-    {
-      "path": "AGENTS.md",
-      "by": "owner(2026-10-11)",
-      "reason": "T-653",
       "at": "2026-10-11",
       "task": "",
       "consumed": true
@@ -126,6 +94,38 @@
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
       "by": "owner(2026-10-11)",
       "reason": "T-653",
+      "at": "2026-10-11",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "SECURITY.md",
+      "by": "owner(2026-10-11)",
+      "reason": "T-654",
+      "at": "2026-10-11",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "by": "owner(2026-10-11)",
+      "reason": "T-654",
+      "at": "2026-10-11",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "README.md",
+      "by": "owner(2026-10-11)",
+      "reason": "T-654",
+      "at": "2026-10-11",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "AGENTS.md",
+      "by": "owner(2026-10-11)",
+      "reason": "T-654",
       "at": "2026-10-11",
       "task": "",
       "consumed": true
@@ -212,16 +212,32 @@
       "src/wasm-core/render_bundle.rs:74:76": "6faa50e8"
     },
     "README.md": {
-      "src/serve.py:19:19": "5d85e228",
-      "src/serve.py:20:20": "41c93368",
-      "src/serve.py:21:21": "f1a915eb"
+      "src/scripts/serve.py:19:19": "5d85e228",
+      "src/scripts/serve.py:20:20": "41c93368",
+      "src/scripts/serve.py:21:21": "f1a915eb"
     },
     "SECURITY.md": {
-      "src/serve.py:40:41": "a4a62ad0"
+      "src/scripts/serve.py:40:41": "a4a62ad0"
     },
-    "apps/viewer/scripts/dist-README.md": {}
+    "apps/viewer/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "README.md",
+      "at": "2026-10-11T22:45:30.746Z",
+      "by": "agent",
+      "reason": "T-654",
+      "changed": 2,
+      "total": 3
+    },
+    {
+      "path": "README.md",
+      "at": "2026-10-11T22:44:40.355Z",
+      "by": "agent",
+      "reason": "T-654",
+      "changed": 2,
+      "total": 3
+    },
     {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
       "at": "2026-10-11T22:32:15.019Z",

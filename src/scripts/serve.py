@@ -1,6 +1,6 @@
 """WebSurf 开发服务器：为 WASM / BSP / Worker 提供正确 MIME 类型的静态服务。
 
-用法：python serve.py [port] [root_dir]
+用法：python src/scripts/serve.py [port] [root_dir]
   - port：默认 8080
   - root_dir：服务根目录（默认 = 本脚本所在目录，即仓库根的 src/）。
     启动时 os.chdir 到该目录，之后由 SimpleHTTPRequestHandler 按当前工作目录取文件。

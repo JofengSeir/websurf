@@ -7,7 +7,7 @@
 用 `.github/ISSUE_TEMPLATE/` 的模板（Bug 报告 / 功能请求 / 其他）提交，并注明：
 
 - **所属工程**：`apps/debug` / `apps/game` / `apps/viewer` / 共享层 `src/`；
-- **运行模式**：SAB 共享内存（HTTP + COOP/COEP，由 `src/serve.py` 注入）或消息回退；
+- **运行模式**：SAB 共享内存（HTTP + COOP/COEP，由 `src/scripts/serve.py` 注入）或消息回退；
 - **复现步骤与环境**：浏览器版本、操作系统、所用地图/录像文件，必要时附 Node 与 Rust 版本。
 
 ## 2. 改代码

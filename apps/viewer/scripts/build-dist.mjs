@@ -8,7 +8,7 @@
  *   `wasm-embedded.js`（fetch 失败时的内嵌回退副本），并把预缓存清单注入
  *   `web/coi-serviceworker.js` 后写进 dist，供 Pages 部署。
  *
- * 公共产物（两种模式都写）：`.nojekyll`、`README.md`（内容取自 `scripts/dist-README.md`）、
+ * 公共产物（两种模式都写）：`.nojekyll`、`README.md`（内容取自 `../dist-README.md`）、
  * `serve.py`（内联生成）、`play.cmd` / `play.sh`（内联生成：起静态服务 + 延时 1s 开浏览器），
  * 以及存在时的 `assets/maps/surf_null_4.replay` 示例录像。
  * single 侧额外：`index.html` / `app.js` / `styles.css`；
@@ -227,7 +227,7 @@ async function rebuildDist() {
 
   // ── 两种模式共用的产物 ──────────────────────────────────────────────
   await writeFile(join(dist, '.nojekyll'), '');
-  await copyFile(join(viewerRoot, 'scripts/dist-README.md'), join(dist, 'README.md'));
+  await copyFile(join(viewerRoot, 'dist-README.md'), join(dist, 'README.md'));
   await writeFile(join(dist, 'serve.py'), SERVE_PY);
   // .cmd 必须 CRLF：LF-only 的批处理会让 cmd.exe 解析错乱（行被撕开执行）
   await writeFile(join(dist, 'play.cmd'), PLAY_CMD.replace(/\n/g, '\r\n'));
