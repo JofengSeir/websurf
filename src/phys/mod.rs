@@ -757,10 +757,10 @@ impl PhysWorld {
     /// 轻量预测步：走一次 `player_tick`（**一次调用 = 一个子步**），但不经 `step_core`——
     /// 即不检测传送、不判死亡、不处理 `reset` 键；noclip 下直接返回现状。
     ///
-    /// 需要多个子步就调用多次（`apps/game/scripts/phys-smoke.mjs`（已随 T-653 移除）T-653 `predict` 即连调两次）；
+    /// 需要多个子步就调用多次（`apps/game/scripts/phys-smoke.mjs`（已随 T-653 移除）的 `predict` 即连调两次）；
     /// 本方法内部不再细分 `dt`。返回新构造的状态对象。
     ///
-    /// 当前无生产调用方：只有 `apps/game/scripts/phys-smoke.mjs`（已随 T-653 移除）T-653 `phys-dual-pipe.mjs`（已移除）在用。
+    /// 当前无生产调用方：只有 `apps/game/scripts/phys-smoke.mjs`（已随 T-653 移除）与 `phys-dual-pipe.mjs`（已移除）在用。
     pub fn predict(
         &mut self,
         dt: f64,
