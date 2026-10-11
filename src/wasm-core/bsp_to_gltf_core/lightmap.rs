@@ -783,7 +783,7 @@ pub fn inject_lightmap_json(
         "lightofsMax": atlas.lightofs_max,
     });
 
-    // asset.extras.lightmap —— 渲染端读取位置（`apps/debug/src/renderer/lightmap-shader.ts`
+    // asset.extras.lightmap —— 渲染端读取位置（`src/renderer-shared/shader/lightmap-shader.ts`
     // 的 `loadLightmapAtlas`；`apps/game` 与 `apps/viewer` 各有一份同构副本）
     let asset = root
         .entry("asset")

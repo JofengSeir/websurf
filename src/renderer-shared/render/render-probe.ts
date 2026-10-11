@@ -12,7 +12,7 @@
  *     `sky`（有无天空层组 / 子图元数）。
  *
  * 快照形状与字段口径**由本模块固定**，各端不得自定义（R1）；探针只读状态，不改任何渲染行为，
- * 不调用 `setPose`/不触发重绘。判定脚本见 `src/scripts/check-render-consistency.mjs`。
+ * 不调用 `setPose`/不触发重绘。判定脚本见 `src/scripts/check-render-consistency.mjs`（已随 T-653 移除）。
  */
 import { getReflectionEnvMapState } from '../shader/lightmap-shader.js';
 import { readRenderPrefs, renderPrefsFingerprint } from '../config/render-prefs.js';
@@ -51,7 +51,7 @@ export interface RenderProbeViewport {
   matches: boolean;
 }
 
-/** 三端一致性快照（形状固定；`check-render-consistency.mjs` 逐字段比对）。 */
+/** 三端一致性快照（形状固定；`check-render-consistency.mjs`（已随 T-653 移除） 逐字段比对）。 */
 export interface RenderProbeSnapshot {
   scope: PoseScope;
   prefs: {

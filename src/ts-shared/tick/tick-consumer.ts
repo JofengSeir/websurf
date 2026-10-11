@@ -38,7 +38,7 @@
  *   处理。
  * - 角度短弧插值只作用于 yaw，且结果不归一化（见 `lerpAngleDeg`）。
  *
- * 测试归属：工作区内没有测试文件引用本文件；同目录 `src/ts-shared/tick/ordering-gate.test.ts`
+ * 测试归属：工作区内没有测试文件引用本文件；同目录 `src/ts-shared/tick/ordering-gate.test.ts`（已随 T-653 移除）
  * 只覆盖 `ordering-gate.ts` 的导出面。三个工程的 tsconfig 都把 `src/ts-shared` 目录下的
  * 全部 `.ts` 纳入 include，故本文件的类型面由 `apps/debug`、`apps/game`、`apps/viewer` 的 `npm run typecheck`
  * 共同把关。

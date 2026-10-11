@@ -6,7 +6,7 @@
  * 后果不是编译错误，而是 `$envmap` 材质（冰/玻璃/水）在漏调的一端整体丢掉环境反射高光：
  * `lightmap-shader.ts` 的 `applyReflectionEnvMap` 遇到空源时静默 `return`（T-458 取证）。
  * 本模块把「背景 / 反射源 / 雾」的写入口收成一份；`apps/**` 不再直接写 `scene.background` /
- * `scene.fog`，也不再直接调 `setReflectionEnvMap`——该调用面由 `src/scripts/check-render-parity.mjs`
+ * `scene.fog`，也不再直接调 `setReflectionEnvMap`——该调用面由 `src/scripts/check-render-parity.mjs`（已随 T-653 移除）
  * 的 `[A]` 断言守（命中即失败）。
  *
  * 状态按 `WeakMap<Scene, state>` 记：同进程可能同时存在多个 `THREE.Scene`（换图重建、天空层调试），

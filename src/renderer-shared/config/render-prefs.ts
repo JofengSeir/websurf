@@ -20,7 +20,7 @@
  *
  * 跨 origin 可比性（T-460 WP2 / D1=A）：localStorage 按 origin 隔离 ⇒ 三端档无法共享，故补一条
  * **深链覆盖** `?prefs=default|<base64(JSON)>`（优先级最高、不落盘）与**档指纹**（`fp=`），
- * 由 `src/scripts/check-prefs-parity.mjs` 起三端逐字比对生效行。
+ * 由 `src/scripts/check-prefs-parity.mjs`（已随 T-653 移除） 起三端逐字比对生效行。
  */
 import {
   LIGHTING_PRESENTATION_DEFAULTS,
@@ -200,7 +200,7 @@ function decodeBase64(b64: string): string {
  *
  * 优先级**高于 localStorage，且不落盘**（只在取档时生效）；解析失败时告警并回落存档档。
  * 用途：localStorage 按 origin 隔离 ⇒ 三端在同一台机器上无法共享档（T-459），深链是唯一能让
- * 三端落到同一档的手段——门禁 `check-prefs-parity.mjs` 即按 `?prefs=default` 起三端比对生效行。
+ * 三端落到同一档的手段——门禁 `check-prefs-parity.mjs`（已随 T-653 移除） 即按 `?prefs=default` 起三端比对生效行。
  */
 function deepLinkPrefs(): RenderPrefs | null {
   if (typeof location === 'undefined' || typeof atob !== 'function') return null;

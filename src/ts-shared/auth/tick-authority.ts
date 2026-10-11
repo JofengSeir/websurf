@@ -17,7 +17,7 @@
  *   读）；放行裁决来自 `src/ts-shared/tick/ordering-gate.ts` 的 `createOrderingGate`。
  *
  * ── 接线状态：已实现、未接线 ─────────────────────────────────────────────
- * 全仓对 `createTickAuthority` 的调用只有 `src/ts-shared/auth/tick-authority.test.ts`
+ * 全仓对 `createTickAuthority` 的调用只有 `src/ts-shared/auth/tick-authority.test.ts`（已随 T-653 移除）
  * 一处；`apps/debug` 与 `apps/game` 的 `createAuthLoop` 装配点都不提供 `tickF4`，
  * 也没有任何工程 import 本模块。线上权威帧因此走的是
  * `src/ts-shared/auth/auth-loop.ts` 的 `stepPhysics` 里 `f4` 缺省的那条分支
@@ -25,7 +25,7 @@
  * 对账在当前工况下不参与线上运行。Rust 侧同理：`src/phys/mod.rs` 的 `tick_into` 与
  * `state_out_ptr` 由本文件与 `src/ts-shared/decoupled/decoupled-loop.ts` 驱动
  * （后者只读前 8 槽），`seed_from` 在本文件之外的调用点只有
- * `apps/game/scripts/phys-seed-smoke.mjs`（另见本文件的单测里对种子通道的桩调用）。
+ * `apps/game/scripts/phys-seed-smoke.mjs`（已随 T-653 移除）（另见本文件的单测里对种子通道的桩调用）。
  *
  * ── 关键不变量 ────────────────────────────────────────────────────────────
  * - 排序：标号 L 的乐观帧只有在权威已发 L-1 时才放行（门内比较
@@ -54,7 +54,7 @@
  * - world 重建 → 标号归零、锚置空（回到引导期）、段号 +1、整门重建。
  *
  * ── 测试归属 ──────────────────────────────────────────────────────────────
- * `src/ts-shared/auth/tick-authority.test.ts`（node 下 esbuild 打包后运行）用一个
+ * `src/ts-shared/auth/tick-authority.test.ts`（已随 T-653 移除）（node 下 esbuild 打包后运行）用一个
  * 确定性 `FakeWorld` 顶替真实 wasm 实例，实际断言：输入 peek 不消耗且按 maxStep
  * 饱和；引导期只计 `bootstrapSkips`；乐观帧的 `timeMs` 等于 due、位置等于
  * seed + 截断窗投影、三元组为 seg 沿用 / tick = L / evt = `AUTH_EVT_OPT`，并逐轮

@@ -16,7 +16,7 @@
  *   ⇒ 不建 TBN、不做法线光照扰动，法线图只当作「视图空间扰动量」用；
  * - 只对**有 `envMap` 的材质**注入（`vReflect` 只在 `USE_ENVMAP` 下存在）：把法线图的 XY 加在
  *   `vReflect` 上，反射随凹凸图案起波纹 = 冰面的凹凸高光。没有 `$envmap` 的材质本次不注入
- *   （它们的 `$bumpmap` 没有可作用的通道，见 `TODO.md` T-627 的处置说明）。
+ *   （它们的 `$bumpmap` 没有可作用的通道，见 看板 `T-627` 的处置说明）。
  */
 import * as THREE from 'three';
 import { registerInjection } from './injection-registry.js';
@@ -126,7 +126,7 @@ export function applyBumpToMaterial(material: THREE.Material, bump: THREE.Textur
 		// 细节通道（近似）：本渲染器的反射源是**均匀白天空**（天空盒立方体），单靠扰动反射方向看不出凹凸
 		// （实测：强度调到 3.0 仍逐像素相同），故同时把法线图的亮度当作「表面细节」按比例调制基色。
 		// 这是**近似**：法线图的 RGB 不是亮度纹理，`$bumpmap` 在引擎里作用在受光/反射上而非基色；
-		// 详见 `TODO.md` T-627 的处置说明与 `documents/` 对应篇。
+		// 详见 看板 `T-627` 的处置说明与记忆库里的对应篇。
 		const detail = [
 			'#include <map_fragment>',
 			'\t{',

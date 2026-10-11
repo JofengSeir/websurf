@@ -138,7 +138,7 @@ pub struct InMemoryResources {
     pub material_alpha_mode: HashMap<String, u8>,
     /// 自发光 / 无光照材质名集合。命中时 `push_material` 往 material `extras` 写 `unlit`，
     /// 渲染侧读 `material.userData.unlit` 走**全亮**（不吃 lightmap / ambient cube）
-    /// （`apps/game/src/renderer/lightmap-shader.ts` 的 `routeFullbright`）。
+    /// （`src/renderer-shared/shader/lightmap-shader.ts` 的 `routeFullbright`）。
     /// 来源是 `pakfile_models::parse_vmt`：着色器名以 `unlit` 开头，或 `$selfillum` 取非 `0` 的非空值。
     pub material_unlit: std::collections::HashSet<String>,
     /// `材质名 → $envmaptint`（仅 `$envmap` 材质）：写进材质 extras 的 `vbsp_envmap`，

@@ -51,8 +51,8 @@
  * - `extrapolateAuthPose` 把外推时长 clamp 到 `[0, EXTRAP_MAX_MS]`：超限后输出不再
  *   随 `nowMs` 变化，等于冻结在「权威帧位置 + 该上限对应的位移」。
  *
- * 测试归属：本文件无测试（`src/ts-shared/` 下的 `*.test.ts` 均不覆盖它）。唯一的
- * 自动化消费方是 `apps/debug/scripts/jump-apex-verify.mjs`（由 `apps/debug` 的
+ * 测试归属：本文件无测试（`src/ts-shared/` 下的 `*.test.ts` 已于 T-653 全部移除）。唯一的
+ * 自动化消费方是 `apps/debug/scripts/jump-apex-verify.mjs`（已随 T-653 移除）（由 `apps/debug` 的
  * `test:jump-apex` 脚本用 esbuild 打包本文件后驱动）：它注入桩 `deps` 构造
  * `AuthorityCalibrator`，并在关闭加速度外推的档位下覆写 `computeAuthAccel`。
  *
@@ -582,7 +582,7 @@ export class AuthorityCalibrator {
    * 非零时按分量 clamp 到 ±20000 u/s²。
    * 副作用：写 `prevAuthVel` / `prevAuthTimeMs`，并在抑制窗内递减
    * `accelSuppressFrames`。调用点：`correctFromAuthority` 的两处快照构造。
-   * 注意：方法名是外部脚本的接口 —— `apps/debug/scripts/jump-apex-verify.mjs` 会把它
+   * 注意：方法名是外部脚本的接口 —— `apps/debug/scripts/jump-apex-verify.mjs`（已随 T-653 移除） 会把它
    * 整体替换成返回零向量的桩函数。
    */
   private computeAuthAccel(

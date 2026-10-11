@@ -7,7 +7,7 @@
  * - `src/ts-shared/auth/auth-loop.ts`：用 `isAuthLineMode` 作缺省模式门（`resolveAuthGateOpen`）；
  * - `src/ts-shared/auth/worker-dispatch.ts`：用 `ComputeMode` 做 `set-mode` 消息的三值白名单校验，
  *   并只在模式确实变化时调用 `onSetMode` 钩子；
- * - `src/ts-shared/auth/compute-mode.test.ts`：断言两个谓词互斥、矩阵每行的两个 `*After`
+ * - `src/ts-shared/auth/compute-mode.test.ts`（已随 T-653 移除）：断言两个谓词互斥、矩阵每行的两个 `*After`
  *   字段等于对 `to` 调谓词的结果、四向 tick 行齐备。
  *
  * ## 两条线互斥
@@ -44,7 +44,7 @@ export function isAuthLineMode(mode: ComputeMode): boolean {
  * 解耦线是否推进：仅 `decoupled` 为真。
  *
  * 与 `isAuthLineMode` 构成互补对（任一模式恰好一真）。**生产路径零调用点**——
- * 目前只有 `src/ts-shared/auth/compute-mode.test.ts` 引用它做互斥断言。
+ * 目前只有 `src/ts-shared/auth/compute-mode.test.ts`（已随 T-653 移除） 引用它做互斥断言。
  */
 export function isDecoupledLineMode(mode: ComputeMode): boolean {
   return mode === 'decoupled';

@@ -2046,7 +2046,7 @@ function applyReflectionEnvMap(dst: THREE.Material, src: THREE.Material): void {
  * `$envmap` 材质已登记、但反射源为空时的缺源告警（首次一条 + 累计计数）。
  *
  * 定义在文件末尾：`setReflectionEnvMap` / `applyReflectionEnvMap` 的行号被文档锚点钉住
- * （`TODO.md` 的 T-458 行），插在中间会让锚点整体平移。
+ * （看板 `T-458`），插在中间会让锚点整体平移。
  */
 function noteEnvMapMissing(): void {
 	const g = globalThis as { __vbspEnvMapMissing?: number; __vbspEnvMapMissingWarned?: boolean };

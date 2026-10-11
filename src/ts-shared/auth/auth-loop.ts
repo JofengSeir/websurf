@@ -35,11 +35,11 @@
  * - `post` 缺省走 `self.postMessage`；环境里没有 `self`（node 内测试）时该缺省实现静默丢弃。
  *
  * 测试归属：
- * - `apps/debug/scripts/auth-clock-verify.mjs`：`apps/debug/package.json` 的 `test:auth-clock`
+ * - `apps/debug/scripts/auth-clock-verify.mjs`（已随 T-653 移除）：`apps/debug/package.json` 的 `test:auth-clock`
  *   脚本先用 esbuild 打包本文件，再由该脚本驱动真实循环统计权威步数。
- * - `src/ts-shared/auth/tick-authority.test.ts`：`createAuthLoop` 与 `tickF4` / `holdState`
+ * - `src/ts-shared/auth/tick-authority.test.ts`（已随 T-653 移除）：`createAuthLoop` 与 `tickF4` / `holdState`
  *   钩子的集成。
- * - `src/ts-shared/auth/compute-mode.test.ts`：`resolveAuthGateOpen` 的门语义。
+ * - `src/ts-shared/auth/compute-mode.test.ts`（已随 T-653 移除）：`resolveAuthGateOpen` 的门语义。
  *
  * 与相邻文件的边界：
  * - `src/ts-shared/auth/shared-state.ts`：槽位布局与 `ShmState` / `MsgState` 两个实现；本文件
@@ -227,7 +227,7 @@ const MAX_INPUT_PER_STEP_BASE = 1200;
  * - 两者都缺省 → 恒真。
  *
  * 钩子每次调用实时取值，故门可以在运行期翻转。调用点：本文件的 `loop`（每次唤醒判一次，门关时
- * 归零三个时钟量并早退）；`src/ts-shared/auth/compute-mode.test.ts` 覆盖三分支。
+ * 归零三个时钟量并早退）；`src/ts-shared/auth/compute-mode.test.ts`（已随 T-653 移除） 覆盖三分支。
  */
 export function resolveAuthGateOpen(
   env: Pick<AuthLoopEnv, 'modeGate' | 'getComputeMode'>,

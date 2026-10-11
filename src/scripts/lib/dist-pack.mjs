@@ -170,7 +170,7 @@ export async function cleanStale(distDir, keep) {
 /**
  * 从许可证唯一源 repoRoot/srcDir 下的 LICENSE 与 NOTICE 拷贝**产物级副本**到 distDir，
  * 目标名由 targets 给定（LICENSE.cs-movement / NOTICE.cs-movement）。源缺失即抛错，
- * 不静默跳过。dist/ 里的副本属产物内容：`src/scripts/check-shared-sync.mjs` 的
+ * 不静默跳过。dist/ 里的副本属产物内容：`src/scripts/check-shared-sync.mjs`（已随 T-653 移除） 的
  * `collectAppLicenseFiles` 跳过 dist 目录，故不会把它判成「apps/ 下的第二份许可源」。
  */
 export async function copyLicensePair({

@@ -6,7 +6,7 @@
 //!   `src/wasm-core/bsp_to_gltf_core/materials.rs` 的 `load_material_fallback_bsp` 提供。
 //! - 下游：产出 glTF 的 `Material` / `Texture` / `Image` / `buffer::View` 四类对象与
 //!   BIN 字节；材质侧只有 `wireframe` 一项写进 `extras`，由渲染端
-//!   `copyMaterialRenderState` 读取（`apps/game/src/renderer/lightmap-shader.ts`，
+//!   `copyMaterialRenderState` 读取（`src/renderer-shared/shader/lightmap-shader.ts`，
 //!   debug / viewer 各有一份同构副本）。
 //!
 //! 职责（与本文件的函数一一对应）：
@@ -198,7 +198,7 @@ fn texture_has_alpha_holes(image: &image::DynamicImage) -> bool {
 /// `wireframe == true` 时往 `extras` 写 `{"vbsp_wireframe": true}`；该 `RawValue`
 /// 构造失败则 `extras` 退回默认（不写）。渲染端 `copyMaterialRenderState`
 /// 读 `material.userData.vbsp_wireframe` 并在替换材质时置 `wireframe = true`
-/// （`apps/game/src/renderer/lightmap-shader.ts`）。
+/// （`src/renderer-shared/shader/lightmap-shader.ts`）。
 ///
 /// 副作用：`texture` 存在时向 `buffer`、`gltf.buffer_views` / `gltf.images` /
 /// `gltf.textures` 追加内容。**不写 `gltf.materials`**——追加由调用方完成。
@@ -277,7 +277,7 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
         // 线框标记：只有 `MaterialData::wireframe`（着色器名为 `Wireframe`，大小写不敏感，
         // 由 `src/wasm-core/bsp_to_gltf_core/materials.rs` 的 `load_material_bsp` 依 VMT 文本
         // 判定）为真才写这一项；键名 `vbsp_wireframe` 与渲染端读的 `material.userData` 键
-        // 一致（`apps/game/src/renderer/lightmap-shader.ts` 的 `copyMaterialRenderState`
+        // 一致（`src/renderer-shared/shader/lightmap-shader.ts` 的 `copyMaterialRenderState`
         // 据此置 `wireframe = true`）；`RawValue` 构造失败则 `extras` 退回默认，不写这一项。
         extras: if material.wireframe || second_index.is_some() {
             serde_json::value::to_raw_value(&serde_json::json!({

@@ -79,7 +79,7 @@ pub struct MaterialData {
     /// 只在 `vmt_parser::from_str` 失败的分支里赋值：这类 VMT 走不到 `vmt_parser`
     /// 的材质枚举，需要按原始文本的着色器名区分处理，否则会被当成普通不透明材质。
     /// 渲染端据 `extras.vbsp_wireframe` 置 `material.wireframe`
-    /// （`apps/game/src/renderer/lightmap-shader.ts` 的 `copyMaterialRenderState`）。
+    /// （`src/renderer-shared/shader/lightmap-shader.ts` 的 `copyMaterialRenderState`）。
     pub wireframe: bool, pub texture_absent: bool, pub basetexture2: Option<TextureData>, // texture_absent：声明了 $basetexture 但 VTF 取不到 ⇒ 缺失观测计入（「本无 basetexture」不计）；basetexture2：WorldVertexTransition 的第二贴图（无则 None）
 }
 

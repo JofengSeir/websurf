@@ -442,8 +442,8 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         //    `p.velocity[1] = jump_velocity` 是**赋值**而非累加，空中重赋即等于再跳一次。
         //  · 写速度会反转「权威是速度之主」的主从关系，并构成「渲染被膨胀的速度 → 权威 →
         //    再写回渲染」的正反馈。
-        // 回归门禁：`apps/debug` 的 `test:jump-apex`（`apps/debug/scripts/jump-apex-verify.mjs`）
-        // 与 `test:auth-clock`（`apps/debug/scripts/auth-clock-verify.mjs`）。
+        // 回归门禁：`apps/debug` 的 `test:jump-apex`（`apps/debug/scripts/jump-apex-verify.mjs`，已随 T-653 移除）
+        // 与 `test:auth-clock`（`apps/debug/scripts/auth-clock-verify.mjs`，已随 T-653 移除）。
         const cur = env.phys.current.state() as {
           velX: number;
           velY: number;

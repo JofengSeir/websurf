@@ -5,7 +5,7 @@
  * 唯一生产消费方是 `src/ts-shared/auth/tick-authority.ts`：它用 `createOrderingGate`
  * 建门（ε 取 `EPSILON_MAX_SETTIMEOUT_MS`），每发一帧权威结果调一次 `noteAuthoritative`，
  * 每次要发乐观帧前调一次 `authorizeOptimistic`。测试见
- * `src/ts-shared/tick/ordering-gate.test.ts`（`deriveLeadCapMs` / `isLeadWithinCap`
+ * `src/ts-shared/tick/ordering-gate.test.ts`（已随 T-653 移除）（`deriveLeadCapMs` / `isLeadWithinCap`
  * 目前只有测试引用）。
  * 本模块是纯函数 + 闭包计数：不注册计时器、不做 IO、每次调用不新建对象。
  *
