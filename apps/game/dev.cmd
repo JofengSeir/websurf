@@ -112,7 +112,8 @@ REM window (or Ctrl+C inside it) or by running stop.cmd in this folder.
 start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/web/index.html"
 REM src/scripts/serve.py takes its serve root from argv[2]; the literal here is "%~dp0." (this app
 REM root written with a trailing dot), and serve.py os.chdir()s to it before serving.
-start "WebSurf-game dev server :%PORT%" /min cmd /k python "%~dp0..\..\src\scripts\serve.py" %PORT% "%~dp0."
+start "WebSurf-game dev server :%PORT%" /min cmd /k node "%~dp0..\..\src\scripts\sync-web-assets.mjs"
+python "%~dp0..\..\src\scripts\serve.py" %PORT% "%~dp0."
 echo [OK] Server launched in its own minimized window: "WebSurf-game dev server :%PORT%".
 echo      Stop it by closing that window or by running stop.cmd here.
 exit /b 0

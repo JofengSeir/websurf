@@ -12,7 +12,7 @@
     "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
     "build:dist": "node scripts/build-dist.mjs",
     "build": "npm run build:wasm && npm run build:ts",
-    "predev": "node ../../src/scripts/sync-default-textures.mjs",
+    "predev": "node ../../src/scripts/sync-web-assets.mjs",
     "dev": "python ../../src/scripts/serve.py 8090 .",
     "check:api": "node scripts/check-wasm-api.mjs"
   },

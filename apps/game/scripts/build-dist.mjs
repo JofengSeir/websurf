@@ -14,7 +14,7 @@
  *   dist/worker.js  — ESM（module worker）
  *   dist/styles.css — web/styles.css 原样拷贝
  *   dist/websurf_wasm_bg.wasm、dist/textures.mtz — 外置，由页面按 URL 取
- *   dist/coi-serviceworker.js — 由 web/coi-serviceworker.js 注入预缓存清单与内容哈希缓存名
+ *   dist/coi-serviceworker.js — 由 src/web/coi-serviceworker.js 注入预缓存清单与内容哈希缓存名
  *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证产物级副本
  *
  * 运行时回退（实现在 apps/game/src/app.ts 与 src/ts-shared/auth/shared-state.ts）：
@@ -126,7 +126,7 @@ async function buildSingle(wasmPath) {
   if (!rewritten) {
     console.warn('[WARN] web/index.html 未命中 module script 特征串，dist/index.html 可能仍是 module script。');
   }
-  copyFileSync(STYLES, join(DIST, 'styles.css')); copyFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js')); // 样式表 / SW 模板外置（SW 未注入清单时走 typeof 回退，见 web/coi-serviceworker.js 头注）
+  copyFileSync(STYLES, join(DIST, 'styles.css')); copyFileSync(join(ROOT, '..', '..', 'src', 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js')); // 样式表 / SW 模板外置（SW 未注入清单时走 typeof 回退，见 web/coi-serviceworker.js 头注）
   console.log(`[single] dist/app.js: ${(bytes / 1024 / 1024).toFixed(2)} MB（single 全内嵌）`);
 }
 
@@ -176,7 +176,7 @@ async function buildMulti(wasmPath) {
   ].filter((f) => existsSync(join(DIST, f.slice(2)))); // 只留 dist/ 内实际存在的文件（清单项带 './' 前缀，故先切片）
 
   // 读 SW 模板，按占位符声明行整行替换；下面的 includes 检查即断言替换确实命中
-  const swTemplate = readFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), 'utf8');
+  const swTemplate = readFileSync(join(ROOT, '..', '..', 'src', 'web', 'coi-serviceworker.js'), 'utf8');
   // 缓存名按「预缓存内容哈希」派生：内容变 → SW 文件字节变 → 浏览器触发 install → 缓存刷新；
   // 固定缓存名会导致 SW 字节不变、缓存永不更新，部署后用户长期拿到旧 app.js。
   const cacheHash = createHash('sha256');
@@ -201,7 +201,7 @@ async function buildMulti(wasmPath) {
     swWithManifest.includes('typeof __CACHE_NAME__')
   ) {
     throw new Error(
-      '[build-dist] SW 占位符未被替换：web/coi-serviceworker.js 的声明行与构建脚本不一致'
+      '[build-dist] SW 占位符未被替换：src/web/coi-serviceworker.js 的声明行与构建脚本不一致'
     );
   }
   writeFileSync(join(DIST, 'coi-serviceworker.js'), swWithManifest);

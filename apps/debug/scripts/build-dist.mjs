@@ -14,7 +14,7 @@
  *   dist/app.js     — ESM，文件头注入 `globalThis.__VBSP_WASM_URL__`（指向同目录的 wasm 文件）
  *   dist/worker.js  — ESM（module worker）
  *   dist/websurf_wasm_bg.wasm、dist/textures.mtz — 外置，页面侧 fetch
- *   dist/coi-serviceworker.js — 由 web/coi-serviceworker.js 生成：把预缓存清单与按清单内容
+ *   dist/coi-serviceworker.js — 由 src/web/coi-serviceworker.js 生成：把预缓存清单与按清单内容
  *                     派生的缓存名写进脚本；两个占位符若有残留即抛错（不产出半成品）
  *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证的产物级副本
  *
@@ -107,7 +107,7 @@ async function buildSingle(wasmPath) {
     options: { logLevel: 'info' },
   });
 
-  console.log('[single] 写入 dist/（classic index.html + 内嵌 app.js）...'); copyFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js'));
+  console.log('[single] 写入 dist/（classic index.html + 内嵌 app.js）...'); copyFileSync(join(ROOT, '..', '..', 'src', 'web', 'coi-serviceworker.js'), join(DIST, 'coi-serviceworker.js'));
   const { bytes } = await writeEmbeddedPreamble({
     distDir: DIST,
     appCode,
@@ -169,7 +169,7 @@ async function buildMulti(wasmPath) {
     './coi-serviceworker.js',
   ].filter((f) => existsSync(join(DIST, f.slice(2)))); // 去掉 './' 前缀后探存在性，只把 dist/ 里确实有的项写进清单
 
-  const swTemplate = readFileSync(join(ROOT, 'web', 'coi-serviceworker.js'), 'utf8');
+  const swTemplate = readFileSync(join(ROOT, '..', '..', 'src', 'web', 'coi-serviceworker.js'), 'utf8');
   // 缓存名由「预缓存清单 + 各文件字节」的 sha256 前 12 位派生：分发的文件一变，SW 自身字节就变，
   // 浏览器随即重装 SW 并换缓存；缓存名固定时 SW 字节不变，旧的 app.js 会被长期命中。
   const cacheHash = createHash('sha256');
@@ -193,7 +193,7 @@ async function buildMulti(wasmPath) {
     swWithManifest.includes('typeof __CACHE_NAME__')
   ) {
     throw new Error(
-      '[build-dist] SW 占位符未被替换：web/coi-serviceworker.js 的声明行与构建脚本不一致'
+      '[build-dist] SW 占位符未被替换：src/web/coi-serviceworker.js 的声明行与构建脚本不一致'
     );
   }
   writeFileSync(join(DIST, 'coi-serviceworker.js'), swWithManifest);

@@ -6,7 +6,7 @@
  *   `index.html` 改写成 classic `<script>`（file:// 下 module script 会被浏览器拦），供本地双击；
  * - **multi（`--multi`）**：复制 `web/` 的 ESM 产物与外置 `websurf_viewer_wasm_bg.wasm`，另生成
  *   `wasm-embedded.js`（fetch 失败时的内嵌回退副本），并把预缓存清单注入
- *   `web/coi-serviceworker.js` 后写进 dist，供 Pages 部署。
+ *   `src/web/coi-serviceworker.js` 后写进 dist，供 Pages 部署。
  *
  * 公共产物（两种模式都写）：`.nojekyll`、`README.md`（内容取自 `../dist-README.md`）、
  * `serve.py`（内联生成）、`play.cmd` / `play.sh`（内联生成：起静态服务 + 延时 1s 开浏览器），
@@ -277,7 +277,7 @@ async function rebuildDist() {
       './coi-serviceworker.js',
     ].filter((f) => existsSync(join(dist, f.slice(2)))); // 仅存在的文件（去掉 './' 前缀）
 
-    const swTemplate = await readFile(join(viewerRoot, 'web', 'coi-serviceworker.js'), 'utf8');
+    const swTemplate = await readFile(join(viewerRoot, '..', '..', 'src', 'web', 'coi-serviceworker.js'), 'utf8');
     // 缓存名由「清单 + 各文件内容」的 sha256 派生：内容变 → SW 字节变 → 浏览器触发 install → 缓存刷新；
     // 固定缓存名会让 SW 字节不变，部署后长期命中旧缓存。
     const cacheHash = createHash('sha256');
@@ -301,7 +301,7 @@ async function rebuildDist() {
       swWithManifest.includes('typeof __CACHE_NAME__')
     ) {
       throw new Error(
-        '[build-dist] SW 占位符未被替换：web/coi-serviceworker.js 的声明行与构建脚本不一致'
+        '[build-dist] SW 占位符未被替换：src/web/coi-serviceworker.js 的声明行与构建脚本不一致'
       );
     }
     await writeFile(join(dist, 'coi-serviceworker.js'), swWithManifest);

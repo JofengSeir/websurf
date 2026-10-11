@@ -17,6 +17,8 @@
 # 三端 web/ 下的默认纹理包是 src/materials/textures.mtz 的本地开发副本（唯一源在 src/materials；构建产物由
 # build-dist.mjs 直接读 src/materials ⇒ dist/ 自带）。dev 起服务前用 src/scripts/sync-default-textures.mjs 同步。
 apps/*/web/textures.mtz
+# 三端 web/ 下的 COOP/COEP 补头 SW 同样是 src/web/coi-serviceworker.js 的本地开发副本（唯一源在 src/web）
+apps/*/web/coi-serviceworker.js
 
 # ── Cargo / wasm-pack 缓存（生成者：src/scripts/cargo-env.cmd 的 CARGO_HOME / WASM_PACK_CACHE）──
 **/.cargo-home/
