@@ -86,7 +86,7 @@ export interface RenderProbeEntry {
   describe(): string;
 }
 
-/** 判定「声明与实际一致」（静态部分由 `check-render-parity.mjs` 的 [J] 断言，这里是运行期核对）。 */
+/** 判定「声明与实际一致」（静态部分由 `check-render-parity.mjs`（已随 T-653 移除） 的 [J] 断言，这里是运行期核对）。 */
 function viewportMatches(source: ViewportSource, rect: { width: number; height: number }): boolean {
   const iw = typeof window === 'undefined' ? rect.width : window.innerWidth;
   const ih = typeof window === 'undefined' ? rect.height : window.innerHeight;

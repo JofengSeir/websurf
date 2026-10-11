@@ -8,7 +8,7 @@
 #     降到「最慢那个」。
 #   - 测试门禁不放在这里（见 ci-gates.yml）：任一测试门失败都不应让站点发布失败。
 #
-# 三工程构建链路（与本地 build-dist.cmd 一致）：
+# 三工程构建链路（与本地 build.cmd 一致）：
 #   1. wasm-pack 编译 crates/wasm → pkg/（wasm-bindgen-cli 0.2.128 与五份 Cargo.lock 匹配）
 #   2. esbuild 打包 TypeScript（worker + app）
 #   3. scripts/build-dist.mjs --multi → dist/（app.js + worker.js + wasm/mtz 外置）

@@ -165,7 +165,7 @@ export class ViewerScene {
     this.skyGroup = asm.skyGroup;
     this.skyParams = asm.skyGroup && sky?.skyCamera ? sky.skyCamera : null;
     const maxDim = asm.maxDim;
-    // 可见性（T-454 P4b：本工程此前全量绘制，见 TODO.md T-624）：收集可剔除块 + 按呈现档设剔除距离。
+    // 可见性（T-454 P4b：本工程此前全量绘制，见看板 `T-624`）：收集可剔除块 + 按呈现档设剔除距离。
     // 天空层（SKY_LAYER）由共享控制器在收集阶段跳过 ⇒ 第二相机那一遍不受影响。
     const rpCull = readRenderPrefs();
     this.visibility.enablePvs = rpCull.culling.pvs;

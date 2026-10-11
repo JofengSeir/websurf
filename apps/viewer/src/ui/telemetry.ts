@@ -17,7 +17,7 @@
  * 时间轴的网格右列（`apps/viewer/src/replay/session.ts` 的记录会话），随时间轴一起显隐。
  * 高亮判据是 `Clip.buttons[index]` 的 IN_* 位掩码与各键 `mask` 相与非 0，
  * 掩码值见下方常量（与 `apps/viewer/src/replay/types.ts` 的 `Clip.buttons` 注释、
- * `apps/viewer/test/replay-selftest.ts` 里 IN_FORWARD 记 8、IN_MOVELEFT 记 512 两条断言同源）。
+ * `apps/viewer/test/replay-selftest.ts`（已随 T-653 移除） 里 IN_FORWARD 记 8、IN_MOVELEFT 记 512 两条断言同源）。
  * **录像会话的 `Clip.buttons` 恒 `null`**（Source 只把录制者本人的输入写进 `usercmd`），
  * 故那条时间轴上根本不建按键簇 —— 不摆一排永远不亮的灯。
  *

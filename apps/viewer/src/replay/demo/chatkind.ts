@@ -7,7 +7,7 @@
  * 过关记录还要能**点一下跳到那一跑**，两件事都得先有一个稳定的分类判据。
  *
  * 分类判据来自**真实语料**（`test/replay/auto-20261001-050330-surf_gigapede.dem` 的 40 条，
- * 逐条抄在 `apps/viewer/test/replay-selftest.ts` 的合成用例里）：
+ * 逐条抄在 `apps/viewer/test/replay-selftest.ts`（已随 T-653 移除） 的合成用例里）：
  *
  * - **进服 / 掉线**：SourceMod 用 `▲` / `▼` 起头，正文含 `has joined` / `connected from` /
  *   `disconnected`；中文服另见「已连接 / 已断开 / 加入服务器」等写法。

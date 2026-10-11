@@ -39,9 +39,9 @@
  *
  * ## 测试归属
  * `src/ts-shared/auth/` 下没有与本文件同名的单测；行为覆盖落在 `apps/debug/scripts/` 的两个
- * 脚本：`auth-clock-verify.mjs` 用 esbuild 打包本文件，以桩 `WorkerDispatchEnv` 驱动
- * `createWorkerDispatch`（覆盖 `config` 分支的 tickRate 接线）；`jump-apex-verify.mjs` 与
- * `jump-apex-serve.mjs` 以本文件的 `sync-render-state` 分支为对照面（后者按源码文本切片生成
+ * 脚本：`auth-clock-verify.mjs`（已随 T-653 移除） 用 esbuild 打包本文件，以桩 `WorkerDispatchEnv` 驱动
+ * `createWorkerDispatch`（覆盖 `config` 分支的 tickRate 接线）；`jump-apex-verify.mjs`（已随 T-653 移除） 与
+ * `jump-apex-serve.mjs`（已随 T-653 移除） 以本文件的 `sync-render-state` 分支为对照面（后者按源码文本切片生成
  * 回退版，故该分支的代码行文本形态被脚本依赖）。
  *
  * ## 与相邻文件的边界

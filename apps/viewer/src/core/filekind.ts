@@ -15,7 +15,7 @@
  * `loadBspFile` 上抛），故这里定义唯一一处常量供分派用。
  *
  * 本文件刻意**只依赖纯 TS 解析模块**（不引 `core/bsp.ts`，那会把 wasm 胶水拖进依赖），
- * 因此可以在 Node 自检里直接跑（见 `apps/viewer/test/replay-selftest.ts`）。
+ * 因此可以在 Node 自检里直接跑（见 `apps/viewer/test/replay-selftest.ts`（已随 T-653 移除））。
  *
  * 用途：入口分派（`apps/viewer/src/app.ts` 的 `routeFile`）与两个面板的入口自查
  * （`apps/viewer/src/replay/panel.ts` 的 `loadFile` 收 `replay`/`rec`、`apps/viewer/src/replay/demopanel.ts` 的 `load` 只收 `demo`）——

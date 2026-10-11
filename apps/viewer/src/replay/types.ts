@@ -26,7 +26,7 @@ export interface RuleTransform {
  * - `shavit`（默认）：Source `[x,y,z]` → viewer `[y,z,x]`——与 `apps/viewer/crates/wasm/src/lib.rs`
  *   的 `rotate_yup`、地图 GLB 导出同一变换（坐标循环置换 ⇒ det=+1）。
  * - `raw`：`[x,y,z]` 直读（坐标序不合时的对照项）。
- * 对照用例见 `apps/viewer/test/replay-selftest.ts` 的「坐标映射切换」组。
+ * 对照用例见 `apps/viewer/test/replay-selftest.ts`（已随 T-653 移除） 的「坐标映射切换」组。
  */
 export type AxesMode = 'shavit' | 'raw';
 
@@ -95,7 +95,7 @@ export interface ReplayHeaderMeta {
   /**
    * 起点区 / 终点区的**亚 tick 份额**（非秒）：头部两个 f32，`<v8` 无该字段 → `[0, 0]`。
    * 与头部 fTime 的关系 `fTime ≈ (frameCount + zo0 − (1 − zo1)) × tickInterval` 由
-   * `apps/viewer/test/replay-selftest.ts` 闭环校验；本仓唯一消费者是
+   * `apps/viewer/test/replay-selftest.ts`（已随 T-653 移除） 闭环校验；本仓唯一消费者是
    * `apps/viewer/src/ui/replaymeta.ts`（值非零时并入 title，不上条面）。
    */
   zoneOffset: [number, number];

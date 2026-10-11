@@ -708,7 +708,7 @@ export class PathRecorder {
    * - `tick`：每项 `{t,x,y,z}`，仅当该节点有 `residual` 时多一个 `residual` 字段
    * 注意 `sampling`/`timebase`/`drawing` 是**代码里的字符串字面量**：`drawing` 原先写成三档，
    * 而 `turnColor` 实际只有两档（≤20° 琥珀 / >20° 红）——2026-10-09 已把该字面量改齐两档。
-   * 读法：消费方（如 `apps/debug/scripts/plot-path.mjs`）只读 `render`/`tick` 两个数组
+   * 读法：消费方（如 `apps/debug/scripts/plot-path.mjs`（已随 T-653 移除））只读 `render`/`tick` 两个数组
    * （后者要求两者都非空）。
    */
   toJson(meta?: Record<string, unknown>): string {

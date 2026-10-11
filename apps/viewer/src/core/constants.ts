@@ -29,7 +29,7 @@ export const DEG2RAD = Math.PI / 180;
  * 本文件**不持有该字面量**：只从共享单点 `src/ts-shared/phys/constants.ts` 再导出，
  * 使 `apps/viewer/src/core/fly.ts` 与 `apps/viewer/src/core/pose.ts` 的既有 import 路径
  * `./constants.js` 保持不变。共享层该值须与 Rust 权威 `src/phys/player.rs` 的 `EYE_STAND`
- * 逐位相等，这一点由 `src/scripts/check-shared-sync.mjs` 的 eye-stand 子检查强制。
+ * 逐位相等，这一点由 `src/scripts/check-shared-sync.mjs`（已随 T-653 移除） 的 eye-stand 子检查强制。
  */
 export { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
 
