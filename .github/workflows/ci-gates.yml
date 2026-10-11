@@ -27,7 +27,6 @@ on:
       - '**.md'
   pull_request:
     paths-ignore:
-      - 'documents/**'
       - '**.md'
   workflow_dispatch:
 
