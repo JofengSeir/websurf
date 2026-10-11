@@ -37,7 +37,7 @@ memory_smart_search("websurf 工作流 取活 收尾 自检")
      → 改 → 收尾(看板状态/证据 → ✍️ 写进展 → 四道门禁 → 提交推送) → 维护(stale 等归零)
 ```
 
-1. **① 队列滞留**：`progress/pending-kb.jsonl` 非空而知识库可达 ⇒ 体检 `pending` 红 + 钩子挡提交（回放：`kb-fallback plan` → `memory_save` → `done`）。
+1. **① 队列滞留（提示，不判红、不挡提交）**：`progress/pending-kb.jsonl` 非空 = 有进展还没写进库；**写通道可用时立刻回放**（`kb-fallback plan` → `memory_save` → `done`）。**刻意不判红**——队列就是给「写通道暂时不可用」用的，判红会让没有写通道的 agent 卡死（2026-10-11 实测过一次）。队列文件本身入库，条目不会丢。
 2. **② 代码改动缺留痕**：改了 `apps/**` 或 `src/**`（不含 `src/scripts/**`）却没动 `progress/board.jsonl` 或没新增台账行 ⇒ 钩子挡提交。
 3. **③ 已有条目失配**：`stale`/`orphan`/`archive_mismatch`/`missing`/`leak` 任一非 0 ⇒ `check-memory-sync` 红，必须重迁。
 

@@ -8,7 +8,7 @@
 |---|---|---|
 | 读知识库 | **只有诱因，没有检查** | 规则全文只在库里，不读不知道细则；但没读不会失败 |
 | 写本轮进展 | 弱强制 | `close-round --check-round` 在**改了 `apps/**` 或 `src/**`（不含 `src/scripts/**`）却没留痕**时挡提交 |
-| 待补写队列 | **强制** | `progress/pending-kb.jsonl` 非空且知识库可达 ⇒ 体检 `pending` 失败 + 钩子挡提交 |
+| 待补写队列 | **提示（不判红）** | `progress/pending-kb.jsonl` 非空 = 有进展没写进库；写通道可用时立刻回放。**刻意不挡提交**——队列就是给「写通道暂时不可用」用的，判红会让没有写通道的 agent 卡死（2026-10-11 实测） |
 | 维护已有条目 | **强制** | `stale` / `orphan` / `archive_mismatch` / `missing` / `leak` 任一非 0 ⇒ `check-memory-sync` 红 |
 | 控制层与受保护列 | **强制** | `[G]` 待办同源、`docflow` 受保护列、`claim` |
 | 加载技能 | 无检查 | 要主动调 `skill(<名>)`；技能内容默认不进上下文 |
@@ -51,7 +51,7 @@ node src/scripts/close-round.mjs --done --marker <marker> --id <memoryId>
 git config core.hooksPath .githooks      # 每个克隆启用一次；本地配置，不随仓库走
 ```
 
-钩子挡两类：代码改动缺留痕、待补写队列滞留未回放。跳过用 `git commit --no-verify` 或 `KB_HOOK=off git commit`。
+钩子挡**一类**：代码改动缺留痕（改了 `apps/**` 或 `src/**` 却没有 `progress/board.jsonl` 改动、也没有新台账行）。队列滞留只在钩子输出里提示，不挡提交。跳过用 `git commit --no-verify` 或 `KB_HOOK=off git commit`。
 
 ## 6. 技能注册（每台机器一次）
 

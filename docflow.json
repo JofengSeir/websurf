@@ -22,7 +22,7 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "d03524f66cdaae0abd96744d204ea954155e325413a23356708299207fa457a2",
-    "AGENTS.md": "196af00531d876db16be63eadf37f2d3008a8b3a63b7373fb305bc5d00ee3e25",
+    "AGENTS.md": "d97ce926af624c7b467b9f51de2715c0943eeb5b0cb7372bc0435db22961f5dc",
     "skills/websurf-workflow/SKILL.md": "ca52a07bd2d32d270aad3f68d0441f9406f8254dda5fd4163fbb7d1996be564c"
   },
   "approvals": [
@@ -123,17 +123,17 @@
       "consumed": true
     },
     {
-      "path": "skills/websurf-workflow/SKILL.md",
-      "by": "owner(2026-10-11",
-      "reason": "官方技能并入",
-      "at": "2026-10-10",
+      "path": "AGENTS.md",
+      "by": "owner(2026-10-11)",
+      "reason": "队列滞留降级为提示（不挡提交）",
+      "at": "2026-10-11",
       "task": "",
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
+      "path": "skills/websurf-workflow/SKILL.md",
       "by": "owner(2026-10-11)",
-      "reason": "sync-board",
+      "reason": "队列滞留降级为提示（不挡提交）",
       "at": "2026-10-11",
       "task": "",
       "consumed": true

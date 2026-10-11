@@ -8,11 +8,7 @@ node src/scripts/close-round.mjs --check-round --staged || {
   echo '            确有理由可跳过：git commit --no-verify'
   exit 1
 }
-node src/scripts/check-memory-sync.mjs --queue-only >/dev/null 2>&1 || {
-  echo ''
-  echo '[收尾门禁] 已挡下：progress/pending-kb.jsonl 有未回放的条目，而知识库可达。'
-  echo '            回放：node src/scripts/kb-fallback.mjs plan → memory_save → done --marker <m>'
-  exit 1
-}
+node src/scripts/check-memory-sync.mjs --queue-only 2>/dev/null | grep -q 'pending=0' || \
+  echo '[收尾门禁] 提示：progress/pending-kb.jsonl 有未回放条目（不挡提交，写通道可用时回放）'
 echo '[收尾门禁] 留痕与队列检查通过。记得跑四道门禁（AGENTS §3）。'
 exit 0
