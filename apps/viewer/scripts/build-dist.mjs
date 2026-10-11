@@ -277,7 +277,7 @@ async function rebuildDist() {
       './coi-serviceworker.js',
     ].filter((f) => existsSync(join(dist, f.slice(2)))); // 仅存在的文件（去掉 './' 前缀）
 
-    const swTemplate = await readFile(join(viewerRoot, '..', '..', 'src', 'web', 'coi-serviceworker.js'), 'utf8');
+    const swTemplate = (await readFile(join(viewerRoot, '..', '..', 'src', 'web', 'coi-serviceworker.js'), 'utf8')).replace(/\r\n/g, '\n');
     // 缓存名由「清单 + 各文件内容」的 sha256 派生：内容变 → SW 字节变 → 浏览器触发 install → 缓存刷新；
     // 固定缓存名会让 SW 字节不变，部署后长期命中旧缓存。
     const cacheHash = createHash('sha256');

@@ -169,7 +169,7 @@ async function buildMulti(wasmPath) {
     './coi-serviceworker.js',
   ].filter((f) => existsSync(join(DIST, f.slice(2)))); // 去掉 './' 前缀后探存在性，只把 dist/ 里确实有的项写进清单
 
-  const swTemplate = readFileSync(join(ROOT, '..', '..', 'src', 'web', 'coi-serviceworker.js'), 'utf8');
+  const swTemplate = readFileSync(join(ROOT, '..', '..', 'src', 'web', 'coi-serviceworker.js'), 'utf8').replace(/\r\n/g, '\n');
   // 缓存名由「预缓存清单 + 各文件字节」的 sha256 前 12 位派生：分发的文件一变，SW 自身字节就变，
   // 浏览器随即重装 SW 并换缓存；缓存名固定时 SW 字节不变，旧的 app.js 会被长期命中。
   const cacheHash = createHash('sha256');

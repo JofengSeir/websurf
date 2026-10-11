@@ -176,7 +176,7 @@ async function buildMulti(wasmPath) {
   ].filter((f) => existsSync(join(DIST, f.slice(2)))); // 只留 dist/ 内实际存在的文件（清单项带 './' 前缀，故先切片）
 
   // 读 SW 模板，按占位符声明行整行替换；下面的 includes 检查即断言替换确实命中
-  const swTemplate = readFileSync(join(ROOT, '..', '..', 'src', 'web', 'coi-serviceworker.js'), 'utf8');
+  const swTemplate = readFileSync(join(ROOT, '..', '..', 'src', 'web', 'coi-serviceworker.js'), 'utf8').replace(/\r\n/g, '\n');
   // 缓存名按「预缓存内容哈希」派生：内容变 → SW 文件字节变 → 浏览器触发 install → 缓存刷新；
   // 固定缓存名会导致 SW 字节不变、缓存永不更新，部署后用户长期拿到旧 app.js。
   const cacheHash = createHash('sha256');
