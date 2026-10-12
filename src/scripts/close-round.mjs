@@ -4,7 +4,7 @@
  *
  *  ① 生成本轮进展条目（写归档原文 + 算 marker + 打印可直接调用的 memory_save）
  *     node src/scripts/close-round.mjs --note <正文> [--slug <名>] [--task T-###]
- *  ② 登记结果（补台账 + 跑四道门禁 + 打印提交模板）
+ *  ② 登记结果（过闸 B + 补台账 + 跑五道门禁 + 打印提交模板）
  *     node src/scripts/close-round.mjs --done --marker <marker> --id <memoryId>
  *  ③ 检查「改了代码但没留痕」（本仓规则：改代码须看板留痕 + 本轮进展）
  *     node src/scripts/close-round.mjs --check-round [--staged] [--soft]
@@ -88,8 +88,8 @@ function done() {
   if (rest.length !== q.length) { fs.writeFileSync(QUEUE, rest.map((l) => l).join('\n') + (rest.length ? '\n' : ''), 'utf8'); console.log('待补写队列 -1 ⇒ ' + rest.length + ' 条'); }
   if (!has('no-gates')) {
     console.log('');
-    console.log('四道门禁：');
-    for (const c of ['node src/scripts/check-doc-drift.mjs', 'node src/scripts/check-memory-sync.mjs', 'node src/scripts/check-memory-sync.mjs --keys', 'node src/scripts/docflow.mjs check']) {
+    console.log('五道门禁（闸 B 的写入闸已在上面过掉了，这里再跑一次存量审计）：');
+    for (const c of ['node src/scripts/check-doc-drift.mjs', 'node src/scripts/check-memory-sync.mjs', 'node src/scripts/check-memory-sync.mjs --keys', 'node src/scripts/docflow.mjs check', 'node src/scripts/check-kb-gate.mjs --all']) {
       const r = sh(c);
       console.log('  exit=' + r.code + '  ' + c.replace('node ', ''));
       if (r.code !== 0) console.log(r.out.split('\n').slice(0, 6).map((l) => '    ' + l).join('\n'));
