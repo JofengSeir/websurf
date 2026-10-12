@@ -39,10 +39,47 @@
 
 | 层 | 状态 | 依据 |
 |---|---|---|
-| **MCP 工具**（54 个 `mcp__agentmemory__*`） | ✅ 可用 | `~/.dsh/profiles/web/cordis.patch.yml` 的 `mcp-agentmemory`（stdio，`failOnStartupError: false`） |
-| **迁入的 440 条 memory 记录** | ✅ 可检索 | 实测 `memory_recall`/`smart-search` 返回的 `obsId` 就是 memory id |
-| **观测层（sessions / observations）** | ⏳ **尚未有数据**（已于 2026-10-12 接上，待 DSH 重启生效） | 接线前 `capture.sinceStart` 全 0、`index.observations = 0` |
-| **自动捕获 hook** | ✅ **已接线**（2026-10-12 手工装） | agentmemory 0.9.30 自带 `dsh` 适配器：MCP 行 + `--with-hooks` 时的 `@deepseek-ai/dsh-hooks-claude-code` 行。CLI 在 Windows 有全局平台闸（`agentmemory connect` 直接拒绝），且适配器写的 `$DSH_HOME/cordis.patch.yml` 在本机**不存在**（本机是每 profile 一份）⇒ 按源码手工装到 `profiles/web/cordis.patch.yml` + `~/.dsh/agentmemory.hooks.json` |
+| **MCP 工具**（54 个 `mcp__agentmemory__*`） | ✅ 可用 | `~/.dsh/profiles/web/cordis.patch.yml` 的 `mcp-agentmemory`（stdio，`failOnStartupError: false`），**经健康门启动**（见 §0.25.1b） |
+| **迁入的 440+ 条 memory 记录** | ✅ 可检索 | 实测 `memory_recall`/`smart-search` 返回的 `obsId` 就是 memory id |
+| **观测层（sessions / observations）** | ✅ **已在产**（2026-10-12 打通） | `capture.accepted/completed` 持续增长、`index.observations > 0`、会话 `project` 正确 |
+| **自动捕获 hook** | ✅ **已接线并实测在跑** | agentmemory 0.9.30 自带 `dsh` 适配器：MCP 行 + `--with-hooks` 时的 `@deepseek-ai/dsh-hooks-claude-code` 行。CLI 在 Windows 有全局平台闸（`agentmemory connect` 直接拒绝），且适配器写的 `$DSH_HOME/cordis.patch.yml` 在本机**不存在**（本机是每 profile 一份）⇒ 按源码手工装到 `profiles/web/cordis.patch.yml` + `~/.dsh/agentmemory.hooks.json`。**patch 层是热重载的，不用重启 DSH** |
+
+**工具数量的三个数（别记混）**：
+
+| 情形 | 个数 | 触发条件 |
+|---|---|---|
+| 正常 | **54** | `AGENTMEMORY_TOOLS` 未设 或 =`all` ⇒ 返回全部（源码 `getVisibleTools()` 的默认分支） |
+| 精简 | **8** | `AGENTMEMORY_TOOLS=core` ⇒ 只留 `ESSENTIAL_TOOLS`（save/recall/consolidate/smart_search/sessions/diagnose/lesson_save/reflect） |
+| **服务不可达** | **7** | 上游桥的**旁路模式**：读写 `~/.agentmemory/standalone.json`，**真库看不到**、模型侧无感 ⇒ **已用健康门堵住** |
+
+> 注：包内 `node_modules/@agentmemory/agentmemory/AGENTS.md` 原写"8 visible by default, `AGENTMEMORY_TOOLS=all` for all"——**写反了**，已就地更正并留了标记（升包后需重施）。本仓 `agentmemory-mcp-tools/REFERENCE.md` 与 `agentmemory-config/SKILL.md`（上游副本）说的 54/8 是对的。
+
+### 0.25.1b 健康门：不让它"默默降级"（2026-10-12）
+
+`mcp-agentmemory` 的 `args` 指向 **agentmemory 仓库根下的 `mcp-gate.mjs`**，不是直接指向桥的 `bin.mjs`。
+门先探 `/agentmemory/livez`：
+
+- **探通** ⇒ 用 `AGENTMEMORY_FORCE_PROXY=1` 启动真桥（已确认服务在，之后**不给它静默降级的机会**；中途服务挂了调用会**报错**，可见）。
+- **探不通** ⇒ 打一段吵闹的 stderr 并 **exit 1** ⇒ DSH 表现为「工具不出现」，而不是「出现 7 个假工具」。**宁可没有，不要有假的。**
+- 逃生阀：`AGENTMEMORY_MCP_ALLOW_FALLBACK=1`（默认关）。
+
+**物证**：`~/.agentmemory/standalone.json` 曾被写过 4 条 2026-10-10 的"卡死验证探针"（`websurf/.tmp/wedge1..4`）
+⇒ 那次降级**真的落盘了**。该文件已归档到 `plan-v32-exec/backup/*-standalone-store/` 并删除；
+**它一旦重新出现，就说明又降级过**。
+反向自证：`plan-v32-exec/90b-mcp-gate-selftest.mjs`（服务在→54；死端口→exit 1 且无 `tools/list`；开逃生阀→7）。
+
+### 0.25.1c "清理干净了吗"要用对口径（D3）
+
+`forget` 之后 `index.sessions` **滞后约 2 分钟**才归零，而 `capture.sinceStart.*` 是**单调累计器、永不回退**——
+拿它当清理判据必然误判。正确判据：
+
+| 用 | 不用 |
+|---|---|
+| `GET /agentmemory/sessions`（**即时一致**） | `index.sessions`（滞后 ~2 分钟，只能当"最终会一致"的参考） |
+| `index.observations`（即时） | `capture.sinceStart.*`（单调，**不可**判清理） |
+| `GET /agentmemory/observations?sessionId=…` | |
+
+现成工具：`node plan-v32-exec/91-cleanup-verify.mjs --baseline` / `--check [--session=<id>]`。
 
 **已接线的事件**（DSH 的 hook 桥只支持 7 个）：`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop`
 （`hooks.codex.json` 里的 `PreCompact` 不受支持，被忽略；无害）。
