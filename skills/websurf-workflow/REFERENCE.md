@@ -13,19 +13,46 @@
 | 控制层与受保护列 | **强制** | `[G]` 待办同源、`docflow` 受保护列、`claim` |
 | 加载技能 | 无检查 | 要主动调 `skill(<名>)`；技能内容默认不进上下文 |
 
-## 2. 收尾两条命令
+## 2. 收尾两条命令（外加"第 1.5 步"）
 
 ```bash
-# ① 生成条目：写归档原文 + 算 marker + 打印可直接调用的 memory_save 参数
+# ① 生成条目：写归档原文 + 算 marker + 打印可直接调用的 memory_save 参数 + 建议的 newTitle
 node src/scripts/close-round.mjs --note "<本轮正文>" --slug <名> --task T-###
-# ② 登记：补台账 + 跑四道门禁 + 打印提交模板
+# ①.5 设语义标题（memory_save 之后立刻做）：compact 召回只返回 title，不设就是 content 前 80 字
+#      memory_evolve({ memoryId: <第①步返回的 id>, newContent: <原样>, newTitle: <①打印的建议标题> })
+# ② 登记：**过闸 B（库侧）** → 补台账 → 跑四道门禁 → 打印提交模板
 node src/scripts/close-round.mjs --done --marker <marker> --id <memoryId>
 ```
+
+- **①.5 不是可选项**：`title` 是 `memory_smart_search`（工作流默认入口，只回 compact 列表）唯一的可读信号。
+  实测未设标题时 **50%** 的召回结果 title 里一个查询词都没有；给 50 条设上后降到 **22.2%**。
+- **②现在还会过闸 B**（`check-kb-gate.mjs --row-file`）：台账追加前校验分档大小、悬空 supersedes、头部规范、
+  重迁须 supersede；非 0 即 **exit 2/3 且不写台账**（库不可达按"闸门不可用"处理，不静默放行）。
 
 - ①把原文落到 `archive/memory/<yyyy-MM>/progress/notes/<日期>-<名>.md`（gitignore），marker 形如 `websurf/progress/notes/....md#index0@<sha12>`。
 - ②校验 marker 的 sha12 与归档原文一致才登记；重复 marker 跳过追加。
 - `--check-round` 读 `git diff --name-only origin/main`（或 `--staged`），只看 `^(apps|src)/` 且排除 `src/scripts/`。
 - 知识库写不进时不要停：`node src/scripts/kb-fallback.mjs queue --marker <marker> --note <正文>`。
+
+## 2.5 谁改了源文件就要重迁（`skills/**`、`progress/**` 都是）
+
+`check-memory-sync` 的 stale 判据是「marker 里的 sha12 == 磁盘源文件」。所以**改了被迁入的文件**（典型：`skills/**`）
+就必须重迁，否则体检立刻红。重迁的两条硬约束：
+
+1. **同 `source#kind<seq>` 换 sha12** ⇒ 台账行换成新 marker + 新 memoryId（**就地改，不追加**，否则 dup）。
+2. **闸 B 规则 ④**：新条目必须 `supersede` 掉旧行的 memoryId（禁"先删后写"）。
+
+**机制要点**（读 dist 得出）：`memory_save` **不能**显式指定 `supersedes`——它的 supersedes 只由
+"Jaccard 相似度 > 0.7 自动匹配"决定；唯一能显式表达"新条目取代旧条目"的入口是 **`memory_evolve`**
+（它写 `supersedes: [existing.id, ...]`）。⇒ 重迁一律走 `memory_evolve(旧id, newContent=<新 marker + 新正文>, newTitle=<语义标题>)`，
+顺手把"第 1.5 步"也做了。
+
+现成工具：agentmemory 仓库的 `plan-v32-exec/86-remigrate.mjs --src=<仓库相对路径> [--apply]`
+（分块规则：`chunkN` 按行边界切、每片连同头部 ≤ 8192 B；`index0` = ≤3000 B 的行边界前缀；
+先打印 willEvolve/willCreate/willOrphan，加 `--apply` 才写，并自动备份台账与库出口）。
+
+**已知例外**：旧条目若是"无头版本"（`isLatest=false` 且无后继，历史异常）⇒ `evolve` 会被 **409 not_latest** 拒，
+此时脚本退用 `remember` 新建；上游 Jaccard 未触发时新条目**不会**带 supersedes，该行会在结果里点名。
 
 ## 3. 知识库不可用时的三层兜底
 

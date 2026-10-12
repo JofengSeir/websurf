@@ -21,7 +21,61 @@
 > `websurf/progress/owner/2026-Q4.md`）。这类内容**不是**控制层原件，迁入属既定实践，**不违反 R3**。
 > 判定口径一句话：**仓库里仍有一份、且是唯一权威的那份（AGENTS/TODO/OWNER/现行规范），不迁；
 > 已从仓库移走、只留线索的（细则/规程/历史），可迁。**
-> 另：即便迁入了，取回内容一律按 **R1** 只当线索——结论仍须回到仓库现行文件核到 `文件:行号`。
+> 另：即便迁入了，取回内容一律按 **R1** 只当线索——**但"回仓库核"要分两种情形**（2026-10-12 更正）：
+> **源仍在仓库** ⇒ 回仓库核到 `文件:行号`；**源已迁出**（`retired: true` / marker 源路径在仓库不存在，
+> 实测占 latest 的 **319/349 = 91.4%**）⇒ **库内那份就是权威存本**，核不到是预期，不要因此标 `[待确认]`。
+
+> **R2 的适用边界（2026-10-12 更正）**：R2 约束的是**新写入的结论型条目**（`kind = errata` / 交互条目）。
+> 存量 **226 条含 `文件:行号`** 中 **210 条是批量迁移产物固有**（`kind ∈ {chunk,index}`，行号用于定位原文，
+> 过期靠 marker 的 sha12 检测）——**不是违规，不要去"清理"它们**。
+> 闸 B 已把两者分开具名：`interactive-entry-with-file-lineno`（应改符号名）与
+> `batch-entry-with-file-lineno`（固有，只观测）。
+
+---
+
+## 0.25 本机能力边界与检索预算（**开工前先读这一节**）
+
+### 0.25.1 什么能用、什么不能用（2026-10-12 实测）
+
+| 层 | 状态 | 依据 |
+|---|---|---|
+| **MCP 工具**（54 个 `mcp__agentmemory__*`） | ✅ 可用 | `~/.dsh/profiles/web/cordis.patch.yml` 的 `mcp-agentmemory`（stdio，`failOnStartupError: false`） |
+| **迁入的 440 条 memory 记录** | ✅ 可检索 | 实测 `memory_recall`/`smart-search` 返回的 `obsId` 就是 memory id |
+| **观测层（sessions / observations）** | ❌ **空** | `capture.sinceStart` 全 0、`index.sessions = 0`、`index.observations = 0` |
+| **自动捕获 hook** | ❌ 不存在 | 上游 hook 是 **Claude Code 插件**；DSH 下无等价机制；`agentmemory connect` 在 native Windows 不支持 |
+
+**推论（重要）**：`handoff` / `recap` / `session-history` / `commit-context` / `commit-history` / `lesson` /
+`forget`（作用在观测条目上）这些技能**在本机没有数据可查**。找上下文只走：
+① 迁入的 memory 记录（`smart-search` / `recall`）；② 仓库里的 `progress/board.jsonl`、`progress/notes/**`、git 历史。
+
+**本仓的"人工捕获"替代**：`close-round --note` → `memory_save` → `close-round --done`（落台账）。
+这是 386 行台账与 349 条 latest 的来源，也是本仓唯一合法写入形状。
+
+### 0.25.2 检索预算：三个入口的真实成本（真实 BPE，`probe-workflow-cost.mjs`）
+
+| 入口 | 形态 | 一次真实 token | 有预算旋钮? |
+|---|---|---|---|
+| **`memory_smart_search`** limit=10（**默认该用它**） | compact | **≈1.1k** | ❌ 没有（schema 只有 query/expandIds/limit） |
+| `memory_smart_search` limit=3 | compact | ≈0.34k | ❌ |
+| `memory_recall` + `format:"compact"` + `token_budget` | compact | ≈0.58k | ✅ |
+| `memory_recall` + `format:"full"` + `token_budget:2000` | full | ≈0.97k（**多数查询被整体截断 ⇒ 返回 0 条**） | ✅ |
+| **`memory_recall` 默认参数**（不传 format/预算） | full | **≈33.3k**（25,415 / 25,890 / 48,706） | ✅ 但**不传＝没有** |
+
+**三条可判定规则**：
+1. 默认用 `memory_smart_search`；
+2. 要用 `memory_recall` 就**显式** `format:"compact"` + `token_budget`；
+3. **绝不调用默认参数的 `memory_recall`**（那是单次 33k）。
+   注：`format:"full"` 配小预算会**整体截断成 0 条**（`truncated: true`）——要么用 `compact`，要么把预算给够。
+
+### 0.25.3 语义标题（写入侧硬要求）
+
+`title` 是 **compact 形态唯一的可读信号**（`smart-search` 只回 title）。默认 `title = content.slice(0,80)`，
+而 marker 就吃掉约 68 字符 ⇒ 读到的是 marker 碎片。实测：**未设标题时 50% 的召回结果 title 里一个查询词都没有**；
+给 50 条（覆盖 26 条评测查询 top-5 命中位的 88/90）设了语义标题后降到 **22.2%**，命中 ≥2 词从 14.4% 升到 53.3%。
+
+⇒ 每次 `memory_save` 之后**立刻** `memory_evolve({memoryId, newContent: 原样, newTitle})`；
+`close-round --note` 已会打印建议标题（"第 1.5 步"）；闸 B 对 `title-not-semantic` 出告警。
+标题建议形状：`<proj> · <kind><seq> · <主题> · <摘要>`。
 
 ---
 

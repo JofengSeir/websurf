@@ -22,8 +22,8 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "adbc4aecbd5debdfe4fa1113ef235e683fef2fae3f9c659512e2fe931b7282e3",
-    "AGENTS.md": "9df98dbb2170360cdbddaa21da78e48988b28901094097a49dce1fa80fcdd293",
-    "skills/websurf-workflow/SKILL.md": "ca52a07bd2d32d270aad3f68d0441f9406f8254dda5fd4163fbb7d1996be564c"
+    "AGENTS.md": "11122cf65af037fd0650222ca49cb0749ce72d676e9aae2b2545bf453fa9b9ef",
+    "skills/websurf-workflow/SKILL.md": "8b1bf8b8507a18250186ae99eb8e244fe454dbab767a329cc407150847bef35e"
   },
   "approvals": [
     {
@@ -75,14 +75,6 @@
       "consumed": true
     },
     {
-      "path": "skills/websurf-workflow/SKILL.md",
-      "by": "owner(2026-10-11)",
-      "reason": "队列滞留降级为提示（不挡提交）",
-      "at": "2026-10-11",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
       "by": "owner(2026-10-11)",
       "reason": "T-653",
@@ -125,7 +117,15 @@
     {
       "path": "AGENTS.md",
       "by": "owner-delegated",
-      "reason": "登记闸 B 脚本 check-kb-gate.mjs（§3 命令清单 + §3.1 脚本清单）；owner 已授权执行方代决",
+      "reason": "§3 补第三道闸（闸 B）+ 全量闸门加 check-kb-gate --all",
+      "at": "2026-10-12",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "skills/websurf-workflow/SKILL.md",
+      "by": "owner-delegated",
+      "reason": "四道门禁改五道（含闸 B）+ 收尾插入第 1.5 步设语义标题 + 召回入口预算规则",
       "at": "2026-10-12",
       "task": "",
       "consumed": true

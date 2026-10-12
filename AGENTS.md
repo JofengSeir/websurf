@@ -105,11 +105,12 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 
 > **提交与体检必须串成一步、红灯即终止**：先跑体检，非 0 就停——不要把体检和 `git commit` 用「无论成败都继续」的链式写法连在一起。
 
-**两条闸门**：
+**两道闸门 + 一道库侧闸（闸 B）**：
 ① **记忆库同步**（`check-memory-sync.mjs`）：台账里每个 marker 的 sha12 必须与磁盘源文件一致（源变 ⇒ 条目已陈旧）；迁出的源须标 `retired`；迁出范围内不得漏迁；`cross_project_leak` 必须为 0（marker 项目前缀 `websurf/`）。**可判定口径**：一条内容可不可用，判据是**它的 sha 是否与仓库当前文件一致**，不是它「来自文档还是来自记忆库」。
 ② **检索质量回归**（无脚本，用 MCP 跑）：`memory_smart_search` 的命中结果必须遍历内容断言目标 marker **精确出现**——**分数与命中数都不能判存在性**；正确做法是 `GET http://localhost:3113/memories?limit=1000` 取全量再按 marker 比对。
+③ **闸 B**（`check-kb-gate.mjs`，库侧，`src/scripts/**`）：`--all` 审存量、`--row-file` 当**写入闸门**（`close-round --done` 已内置，非 0 即拒写台账）。四条：分档大小（`chunk`/`errata` ≤8 KiB、`index` ≤16 KiB）、悬空 `supersedes`、头部规范（首行 `[线索]` + `主题：`/`摘要：`）、**重迁须 supersede 旧条目**。
 
-**全量闸门**：漂移体检 A–P 全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；`check-memory-sync.mjs` 全 0。
+**全量闸门**：漂移体检 A–P 全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；`check-memory-sync.mjs` 全 0；`check-kb-gate.mjs --all` 无新增阻塞。
 
 ---
 

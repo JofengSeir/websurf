@@ -1,6 +1,6 @@
 ---
 name: websurf-workflow
-description: WebSurf 仓库一轮 agent 工作流的循环骨架：取活、认领、改、收尾留痕，以及提交前必须全 0 的四道门禁。当在本仓开工、需要确认这轮工作怎么走、写本轮进展、或准备提交时使用。
+description: WebSurf 仓库一轮 agent 工作流的循环骨架：取活、认领、改、收尾留痕，以及提交前必须全 0 的五道门禁。当在本仓开工、需要确认这轮工作怎么走、写本轮进展、或准备提交时使用。
 user-invocable: false
 ---
 
@@ -30,7 +30,9 @@ node src/scripts/close-round.mjs --done --marker <marker> --id <memoryId>
 4. `(门禁)` 认领：`docflow.mjs claim --task T-### --may/--must`；`claim` 之后必须真的改过 `must` 文件，`verify` 才通过。
 5. `(读库)` 取上下文：按主题召回工程文档。**召回是线索不是事实**，结论必须回源码核到 `文件:行号`；核不到就标 `[待确认]` 停下上报。
 6. 改：源码 / 配置 / 文档。`skills/**/SKILL.md`、`AGENTS.md`、根 `README/CONTRIBUTING/SECURITY`、`.github/**/*.md` 属只读类，走 `approve → 改 → sync` 三步闭环。
-7. `(写库)` `(门禁)` 收尾：`progress/board.jsonl` 补状态 + 证据 + 判据 → `close-round` ①生成条目、②写库并登记台账 → 四道门禁全 0 → 提交（信息带 `T-###`）。
+7. `(写库)` `(门禁)` 收尾：`progress/board.jsonl` 补状态 + 证据 + 判据 → `close-round` ①生成条目、②写库并登记台账 →
+   **②.5 立刻设语义标题**（`--note` 会打印"第 1.5 步"与建议的 `newTitle`；不设的话 compact 召回里 title 只是 marker 碎片）→
+   五道门禁全 0 → 提交（信息带 `T-###`）。
 8. `(写库)` 维护：`check-memory-sync` 的 `stale` / `orphan` / `archive_mismatch` / `missing` / `leak` 任一非 0 即为红，必须重迁，不许绕过。
 
 ## Anti-patterns
@@ -50,9 +52,14 @@ RIGHT：体检与提交串成一步（`&&`），红灯即终止；本仓出过�
 ## Checklist
 
 - 开轮确认过知识库在哪一层（`kb-fallback probe`），并知道写不进去时落哪。
+- 召回的入口选对：默认 `memory_smart_search`；用 `memory_recall` 就**显式** `format:"compact"` + `token_budget`
+  （默认参数是 `full` 且无预算，实测一次约 33k token）。
 - `progress/board.jsonl` 该行有「进行中 · \<agent\> · \<日期\>」留痕，`claim` 已通过。
 - 只读类文件走完了 `approve → 改 → sync`，没有留下未落实的审批。
-- 四道门禁全 0：`check-doc-drift.mjs` / `check-memory-sync.mjs` / `check-memory-sync.mjs --keys` / `docflow.mjs check`。
+- **五道门禁全 0**：`check-doc-drift.mjs` / `check-memory-sync.mjs` / `check-memory-sync.mjs --keys` /
+  `docflow.mjs check` / **`check-kb-gate.mjs --all`（闸 B：分档大小 / 悬空 supersedes / 头部规范 / 重迁须 supersede）**。
+  其中**写入闸**由 `close-round --done` 内置（台账追加前过闸，非 0 即拒写），不需要额外手动跑。
+- 收尾做了"**第 1.5 步**"：`memory_save` 后立刻 `memory_evolve(newTitle=…)` 设语义标题。
 - 提交信息带 `T-###`；纯格式类改动写「无待办影响」。
 
 ## See also
