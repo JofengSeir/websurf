@@ -92,6 +92,7 @@ node src/scripts/check-memory-sync.mjs             # 记忆库同步：stale / o
 node src/scripts/check-memory-sync.mjs --keys      # markers == entries
 node src/scripts/docflow.mjs check                 # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
 node src/scripts/check-kb-doc-drift.mjs --strict    # 记忆库「现状文档」锚点体检（documents/** 的 路径:行号 对当前源码；失效/越界即失败；库不可达 SKIP）
+node src/scripts/check-kb-gate.mjs --all           # 闸 B（库侧）：分档大小（chunk/errata ≤8 KiB、index ≤16 KiB）/ 悬空 supersedes / 头部规范 / 重迁须 supersede；写入闸门用 `--row-file`（close-round --done 已内置）
 node src/scripts/kb-fallback.mjs probe           # 知识库可用性：L1 工具 / L2 HTTP / L3 仓库兜底，并列出待补写条目
 node src/scripts/close-round.mjs --check-round --staged  # 留痕检查（钩子同口径）；--note/--done 见脚本头注释
 node src/scripts/sync-board.mjs                    # 改了看板 board.jsonl 后重迁入库：不带参数打印计划 → 逐条 memory_save → `--done`（自动按 marker 认 id）落台账
@@ -123,6 +124,7 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 - `src/scripts/check-board-touch.mjs`
 - `src/scripts/check-doc-drift.mjs`
 - `src/scripts/check-kb-doc-drift.mjs`
+- `src/scripts/check-kb-gate.mjs`
 - `src/scripts/check-memory-sync.mjs`
 - `src/scripts/copy-wasm-pkg.mjs`
 - `src/scripts/docflow.mjs`
