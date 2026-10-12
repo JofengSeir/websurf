@@ -51,11 +51,14 @@ curl -s 'http://127.0.0.1:3113/memories?limit=1'          # 权威存在性判�
 
 ## 本机能力边界（开工前必须知道）
 
-- **观测层是空的**：本机 `sessions = 0 / observations = 0`（上游 hook 捕获是 **Claude Code 插件**，DSH 下没有等价机制）。
-  ⇒ 依赖观测层的技能——`handoff`、`recap`、`session-history`、`commit-context`、`commit-history`、`lesson`、
-  `forget`（观测条目）——**在本机没有数据可查，不要靠它们找上下文**。
-- `memory_recall` / `memory_smart_search` **仍然可用**，因为检索面同时覆盖**迁入的 440 条 memory 记录**。
-- **本仓的过程记录靠人工捕获**：`close-round --note` → `memory_save` → `close-round --done`（落 `progress/memory-index.jsonl` 台账）。
+- **MCP 工具**：✅ 可用（54 个 `mcp__agentmemory__*`）。
+- **自动捕获（观测层）**：✅ **已接线**（2026-10-12 手工装 `@deepseek-ai/dsh-hooks-claude-code`），
+  **待 DSH 重启后生效**。生效后 `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`Stop` 会自动写观测，
+  `handoff` / `recap` / `session-history` / `commit-context` / `lesson` 这些依赖观测层的技能才有数据。
+  接线前观测层是空的（`observations = 0`），别再从那里找上下文。
+  默认**零 token**（`AGENTMEMORY_INJECT_CONTEXT` 关）；要看是否真的在采，查 `GET /agentmemory/status` 的 `capture.sinceStart`。
+- 不确定观测层现在有没有数据时：先 `GET http://127.0.0.1:3113/agentmemory/status` 看 `index.observations`，别猜。
+- **本仓的过程记录仍走人工通道**：`close-round --note` → `memory_save` → `close-round --done`（落 `progress/memory-index.jsonl` 台账）。
 
 ## 写入时的两条硬要求（2026-10-12 新增）
 

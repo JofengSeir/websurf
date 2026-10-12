@@ -41,15 +41,20 @@
 |---|---|---|
 | **MCP 工具**（54 个 `mcp__agentmemory__*`） | ✅ 可用 | `~/.dsh/profiles/web/cordis.patch.yml` 的 `mcp-agentmemory`（stdio，`failOnStartupError: false`） |
 | **迁入的 440 条 memory 记录** | ✅ 可检索 | 实测 `memory_recall`/`smart-search` 返回的 `obsId` 就是 memory id |
-| **观测层（sessions / observations）** | ❌ **空** | `capture.sinceStart` 全 0、`index.sessions = 0`、`index.observations = 0` |
-| **自动捕获 hook** | ❌ 不存在 | 上游 hook 是 **Claude Code 插件**；DSH 下无等价机制；`agentmemory connect` 在 native Windows 不支持 |
+| **观测层（sessions / observations）** | ⏳ **尚未有数据**（已于 2026-10-12 接上，待 DSH 重启生效） | 接线前 `capture.sinceStart` 全 0、`index.observations = 0` |
+| **自动捕获 hook** | ✅ **已接线**（2026-10-12 手工装） | agentmemory 0.9.30 自带 `dsh` 适配器：MCP 行 + `--with-hooks` 时的 `@deepseek-ai/dsh-hooks-claude-code` 行。CLI 在 Windows 有全局平台闸（`agentmemory connect` 直接拒绝），且适配器写的 `$DSH_HOME/cordis.patch.yml` 在本机**不存在**（本机是每 profile 一份）⇒ 按源码手工装到 `profiles/web/cordis.patch.yml` + `~/.dsh/agentmemory.hooks.json` |
 
-**推论（重要）**：`handoff` / `recap` / `session-history` / `commit-context` / `commit-history` / `lesson` /
-`forget`（作用在观测条目上）这些技能**在本机没有数据可查**。找上下文只走：
-① 迁入的 memory 记录（`smart-search` / `recall`）；② 仓库里的 `progress/board.jsonl`、`progress/notes/**`、git 历史。
+**已接线的事件**（DSH 的 hook 桥只支持 7 个）：`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop`
+（`hooks.codex.json` 里的 `PreCompact` 不受支持，被忽略；无害）。
+**零 token 成本**：`AGENTMEMORY_INJECT_CONTEXT` 默认关 ⇒ `PreToolUse` 直接 return、`SessionStart` 只注册会话；
+`UserPromptSubmit` / `PostToolUse` / `Stop` 是纯遥测。要开记忆注入再显式设 `AGENTMEMORY_INJECT_CONTEXT=true`。
 
-**本仓的"人工捕获"替代**：`close-round --note` → `memory_save` → `close-round --done`（落台账）。
-这是 386 行台账与 349 条 latest 的来源，也是本仓唯一合法写入形状。
+**手工验证过**（2026-10-12，装完直接喂 stdin 跑 `plugin/scripts/*.mjs`）：
+`capture accepted/completed 0 → 2`、`observationsIndexed 0 → 2`、会话 `project = websurf`（从 git toplevel 名推出）、
+`memory_smart_search` 能搜到那两条观测（title `prompt_submit` / `Write`）。验证用的探测数据已用 `/agentmemory/forget` 清理。
+
+**接线前的替代（历史）**：`close-round --note` → `memory_save` → `close-round --done`（落台账）。
+它是 386 行台账与 349 条 latest 的来源，仍然有效——只是现在**自动捕获也补上了**，两者并存。
 
 ### 0.25.2 检索预算：三个入口的真实成本（真实 BPE，`probe-workflow-cost.mjs`）
 
