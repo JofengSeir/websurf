@@ -46,6 +46,11 @@ function make() {
   console.log('第 1 步：用 MCP 写这条条目（参数如下）：');
   console.log(JSON.stringify({ project: 'websurf', type: 'workflow', concepts: 'websurf,进展', files: src, content }, null, 1));
   console.log('');
+  // P1-6：compact 召回只返回 title，而 title 默认是 content 前 80 字（marker 就吃满了）⇒ 显式设语义标题。
+  const suggestedTitle = ('websurf · index0 · ' + ('本轮进展 ' + String(arg('task', '')).slice(0, 20)).trim() + ' · ' + body.split('\n')[0].slice(0, 80)).slice(0, 150);
+  console.log('第 1.5 步（建议，P1-6）：保存后立刻设语义标题，否则 compact 召回里的 title 只是 content 前 80 字：');
+  console.log('  memory_evolve({ memoryId: <第 1 步返回的 id>, newContent: <同上 content 原样>, newTitle: ' + JSON.stringify(suggestedTitle) + ' })');
+  console.log('');
   console.log('第 2 步：node src/scripts/close-round.mjs --done --marker ' + marker + ' --id <上一步返回的 id>');
   console.log('（知识库不可用：node src/scripts/kb-fallback.mjs queue --marker ' + marker + ' --note <正文>）');
 }
@@ -62,7 +67,22 @@ function done() {
   const row = { marker, source: src, kind: m[2], seq: Number(m[3]), memoryId: id, at: new Date().toISOString().slice(0, 10), retired: true, shape: 'snapshot' };
   if (arg('task')) row.task = arg('task');
   const lines = fs.existsSync(LEDGER) ? fs.readFileSync(LEDGER, 'utf8').split('\n').filter(Boolean) : [];
-  if (lines.some((l) => l.includes(marker))) { console.log('台账已有该 marker，跳过追加'); } else { lines.push(JSON.stringify(row)); fs.writeFileSync(LEDGER, lines.join('\n') + '\n', 'utf8'); console.log('台账 +1 ⇒ ' + lines.length + ' 行'); }
+  const willAppend = !lines.some((l) => l.includes(marker));
+  // 闸 B（库侧）：追加之前先校验"将要追加的这一行"。仓侧的一半由 check-memory-sync.mjs 负责；
+  // 这里补它判不了的四条（分档大小 / 悬空 supersedes / 头部规范 / 重迁须 supersede）。见 check-kb-gate.mjs 头注释。
+  if (willAppend && !has('no-gates')) {
+    const rowFile = path.join(ROOT, '.tmp/kb-gate-row.json');
+    fs.mkdirSync(path.dirname(rowFile), { recursive: true });
+    fs.writeFileSync(rowFile, JSON.stringify(row), 'utf8');
+    const gate = sh('node src/scripts/check-kb-gate.mjs --row-file=.tmp/kb-gate-row.json');
+    if (gate.code !== 0) {
+      console.error('闸 B 拒绝本次写入（库侧校验未过，退出码 ' + gate.code + '）：');
+      console.error(gate.out.split('\n').slice(0, 20).map((l) => '    ' + l).join('\n'));
+      process.exit(3);
+    }
+    console.log('闸 B 通过（库侧：分档大小 / 悬空 supersedes / 头部规范 / 重迁 supersede）');
+  }
+  if (!willAppend) { console.log('台账已有该 marker，跳过追加'); } else { lines.push(JSON.stringify(row)); fs.writeFileSync(LEDGER, lines.join('\n') + '\n', 'utf8'); console.log('台账 +1 ⇒ ' + lines.length + ' 行'); }
   const q = fs.existsSync(QUEUE) ? fs.readFileSync(QUEUE, 'utf8').split('\n').filter(Boolean) : [];
   const rest = q.filter((l) => !l.includes(marker));
   if (rest.length !== q.length) { fs.writeFileSync(QUEUE, rest.map((l) => l).join('\n') + (rest.length ? '\n' : ''), 'utf8'); console.log('待补写队列 -1 ⇒ ' + rest.length + ' 条'); }
