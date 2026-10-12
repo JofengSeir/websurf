@@ -50,41 +50,66 @@
 |---|---|---|
 | 正常 | **54** | `AGENTMEMORY_TOOLS` 未设 或 =`all` ⇒ 返回全部（源码 `getVisibleTools()` 的默认分支） |
 | 精简 | **8** | `AGENTMEMORY_TOOLS=core` ⇒ 只留 `ESSENTIAL_TOOLS`（save/recall/consolidate/smart_search/sessions/diagnose/lesson_save/reflect） |
-| **服务不可达** | **7** | 上游桥的**旁路模式**：读写 `~/.agentmemory/standalone.json`，**真库看不到**、模型侧无感 ⇒ **已用健康门堵住** |
+| **服务不可达** | **7** | 上游桥的**旁路模式**：读写 `~/.agentmemory/standalone.json`，**真库看不到**、模型侧无感 ⇒ 已两层堵住（见 §0.25.1b） |
 
+> ⚠️ **`core` 这个开关要在「服务端」设，不是给它设**：`getVisibleTools()` 由 daemon 求值，
+> bridge 只是转发 `GET /agentmemory/mcp/tools`。**实测：在 bridge 进程上设 `AGENTMEMORY_TOOLS=core`，仍返回 54 个**
+> （独立验证者与父代理各测一次，结论一致）。要收窄就得改 daemon 的 `.env` 并重启服务。
+>
 > 注：包内 `node_modules/@agentmemory/agentmemory/AGENTS.md` 原写"8 visible by default, `AGENTMEMORY_TOOLS=all` for all"——**写反了**，已就地更正并留了标记（升包后需重施）。本仓 `agentmemory-mcp-tools/REFERENCE.md` 与 `agentmemory-config/SKILL.md`（上游副本）说的 54/8 是对的。
 
-### 0.25.1b 健康门：不让它"默默降级"（2026-10-12）
+### 0.25.1b 健康门 + vendor 补丁：不让它"默默降级"（2026-10-12，**分两层**）
 
 `mcp-agentmemory` 的 `args` 指向 **agentmemory 仓库根下的 `mcp-gate.mjs`**，不是直接指向桥的 `bin.mjs`。
-门先探 `/agentmemory/livez`：
 
-- **探通** ⇒ 用 `AGENTMEMORY_FORCE_PROXY=1` 启动真桥（已确认服务在，之后**不给它静默降级的机会**；中途服务挂了调用会**报错**，可见）。
-- **探不通** ⇒ 打一段吵闹的 stderr 并 **exit 1** ⇒ DSH 表现为「工具不出现」，而不是「出现 7 个假工具」。**宁可没有，不要有假的。**
+**① 启动期（门）**：先探 `/agentmemory/livez`，**重试 6 次 × 2.5s**（`AGENTMEMORY_GATE_ATTEMPTS` / `_RETRY_MS` 可调）：
+
+- **探通** ⇒ 用 `AGENTMEMORY_FORCE_PROXY=1` 启动真桥。
+- **一直探不通** ⇒ 打一段吵闹的 stderr 并 **exit 1** ⇒ DSH 表现为「工具不出现」，而不是「出现 7 个假工具」。**宁可没有，不要有假的。**
 - 逃生阀：`AGENTMEMORY_MCP_ALLOW_FALLBACK=1`（默认关）。
+
+**② 运行期（vendor 补丁，这才是真正的洞）**：⚠️ **`FORCE_PROXY=1` 只跳过"启动探测"，不封"运行期降级"**。
+上游 `dist/standalone.mjs` 的 `handleToolCall` 对两类工具**不对称**：非 `IMPLEMENTED_TOOLS`（47 个）的 catch 是 `throw err`；
+而 **`IMPLEMENTED_TOOLS`（7 个，含写入口 `memory_save`）的 catch 只 `invalidateHandle()` 然后 `return handleLocal(...)`**
+⇒ 内容写进旁路库，却返回 `{"saved":…}`、**`isError` 字段缺失（对调用方就是"成功"）**。**写丢了还报成功。**
+
+已打补丁 `plan-v32-exec/92b-patch-by-index.mjs`（改 `dist/standalone.mjs`，让这 7 个分支与另外 47 个一样 `throw err`）。
+**生效条件**：`AGENTMEMORY_FORCE_PROXY=1`（门自动注入）或 `AGENTMEMORY_NO_SILENT_FALLBACK=1`。
+**⚠️ 这是 node_modules 里的 vendor 补丁，`npm i` / 升包会覆盖 —— 升级后必须重跑那个脚本。**
 
 **物证**：`~/.agentmemory/standalone.json` 曾被写过 4 条 2026-10-10 的"卡死验证探针"（`websurf/.tmp/wedge1..4`）
 ⇒ 那次降级**真的落盘了**。该文件已归档到 `plan-v32-exec/backup/*-standalone-store/` 并删除；
 **它一旦重新出现，就说明又降级过**。
-反向自证：`plan-v32-exec/90b-mcp-gate-selftest.mjs`（服务在→54；死端口→exit 1 且无 `tools/list`；开逃生阀→7）。
+
+**反向自证**：`plan-v32-exec/90b2-gate-and-patch-ab.mjs` —— 门四态（服务在→**54**；死端口→**exit 1 且无 tools/list**；
+逃生阀→**7**；重试→**有重试日志且仍拒绝**）+ 中途降级 A/B（不带旗标→`isError` 缺字段 + 旁路库 **1 条**；
+带旗标→`isError=true` + 旁路库 **0 条**）。**六项全过才算通过。**
 
 ### 0.25.1c "清理干净了吗"要用对口径（D3）
 
-`forget` 之后 `index.sessions` **滞后约 2 分钟**才归零，而 `capture.sinceStart.*` 是**单调累计器、永不回退**——
+`forget` 之后 `index.sessions` **滞后**才归零（独立验证者实测 **≤ 约 31 秒**：会话创建后 API 侧 0.2s 可见、`index.sessions` 要 30.7s；
+删除后 `index.sessions` 回基线要 60.9s。原写"约 2 分钟"是早先的粗估），而 `capture.sinceStart.*` 是**单调累计器、永不回退**——
 拿它当清理判据必然误判。正确判据：
 
 | 用 | 不用 |
 |---|---|
-| `GET /agentmemory/sessions`（**即时一致**） | `index.sessions`（滞后 ~2 分钟，只能当"最终会一致"的参考） |
+| `GET /agentmemory/sessions`（**即时一致**） | `index.sessions`（滞后数十秒，只能当"最终会一致"的参考） |
 | `index.observations`（即时） | `capture.sinceStart.*`（单调，**不可**判清理） |
 | `GET /agentmemory/observations?sessionId=…` | |
 
 现成工具：`node plan-v32-exec/91-cleanup-verify.mjs --baseline` / `--check [--session=<id>]`。
 
-**已接线的事件**（DSH 的 hook 桥只支持 7 个）：`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop`
-（`hooks.codex.json` 里的 `PreCompact` 不受支持，被忽略；无害）。
+**已接线的事件（共 7 个，与桥的 `CLAUDE_EVENTS` 一一对齐）**：
+`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / **`SubagentStart`** / **`SubagentStop`**
+（上游 `hooks.codex.json` 里的 `PreCompact` 不在桥的支持集内，已剔除）。
 **零 token 成本**：`AGENTMEMORY_INJECT_CONTEXT` 默认关 ⇒ `PreToolUse` 直接 return、`SessionStart` 只注册会话；
 `UserPromptSubmit` / `PostToolUse` / `Stop` 是纯遥测。要开记忆注入再显式设 `AGENTMEMORY_INJECT_CONTEXT=true`。
+
+> ⚠️ **两个审计陷阱**（独立验证者实测）：① `PreToolUse` 的 matcher 是**字面量精确择一且大小写敏感**
+> （`pattern.split("|").includes(toolName)`），所以只覆盖 `edit|write|read|glob|grep` 五个文件工具 ——
+> `pwsh`/`todo_write`/`subagent`/`workflow`/`web_fetch` 与 MCP 工具**永不触发它**（它们只被无 matcher 的 `PostToolUse` 采）。
+> ② `SessionStart`/`SubagentStart`/`SubagentStop` 是 **detached 生命周期点，不写 `hook/invoked|result` 对** ——
+> 按日志统计会误判「这三个没接上」，实际它们在跑（反证见 `session-start.mjs`/`subagent-start.mjs` 产生的观测）。
 
 **手工验证过**（2026-10-12，装完直接喂 stdin 跑 `plugin/scripts/*.mjs`）：
 `capture accepted/completed 0 → 2`、`observationsIndexed 0 → 2`、会话 `project = websurf`（从 git toplevel 名推出）、
@@ -100,14 +125,19 @@
 | **`memory_smart_search`** limit=10（**默认该用它**） | compact | **≈1.1k** | ❌ 没有（schema 只有 query/expandIds/limit） |
 | `memory_smart_search` limit=3 | compact | ≈0.34k | ❌ |
 | `memory_recall` + `format:"compact"` + `token_budget` | compact | ≈0.58k | ✅ |
-| `memory_recall` + `format:"full"` + `token_budget:2000` | full | ≈0.97k（**多数查询被整体截断 ⇒ 返回 0 条**） | ✅ |
-| **`memory_recall` 默认参数**（不传 format/预算） | full | **≈33.3k**（25,415 / 25,890 / 48,706） | ✅ 但**不传＝没有** |
+| `memory_recall` + `format:"full"` + `token_budget:2000` | full | 实测 **1 条**（`tokens_used=1576`） | ✅ |
+| **`memory_recall` 默认参数**（不传 format/预算） | full | 父代理测 **≈33.3k**（25,415 / 25,890 / 48,706）；独立验证者走同一默认路径实测服务端 `tokens_used=17,314` | ✅ 但**不传＝没有** |
 
 **三条可判定规则**：
 1. 默认用 `memory_smart_search`；
 2. 要用 `memory_recall` 就**显式** `format:"compact"` + `token_budget`；
-3. **绝不调用默认参数的 `memory_recall`**（那是单次 33k）。
-   注：`format:"full"` 配小预算会**整体截断成 0 条**（`truncated: true`）——要么用 `compact`，要么把预算给够。
+3. **绝不调用默认参数的 `memory_recall`**（那是单次万字级）。
+
+> ⚠️ **预算的截断语义是「贪心前缀」，不是「整体截断」**（本行原先写反了，已更正）：
+> `applyTokenBudget` 按顺序累加条目，放不下就停 ⇒ **能放几条放几条**。
+> 独立验证者实测 `format:"full", limit:10`：`budget 6000 → 2 条`、`3000 → 1`、`2000 → 1`（`tokens_used=1576`）、`500 → 0`、`1 → 0`。
+> 所以"小预算会返回 0 条"**不成立**；但"小预算会返回很少甚至 0 条、且这些条目是**前缀**（可能不含你要的那条）"是对的 ——
+> **要正文就别靠预算碰运气，按 id 定点取**。
 
 ### 0.25.3 语义标题（写入侧硬要求）
 

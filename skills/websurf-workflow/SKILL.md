@@ -56,9 +56,11 @@ RIGHT：体检与提交串成一步（`&&`），红灯即终止；本仓出过�
   （默认参数是 `full` 且无预算，实测一次约 33k token）。
 - `progress/board.jsonl` 该行有「进行中 · \<agent\> · \<日期\>」留痕，`claim` 已通过。
 - 只读类文件走完了 `approve → 改 → sync`，没有留下未落实的审批。
-- **五道门禁全 0**：`check-doc-drift.mjs` / `check-memory-sync.mjs` / `check-memory-sync.mjs --keys` /
-  `docflow.mjs check` / **`check-kb-gate.mjs --all`（闸 B：分档大小 / 悬空 supersedes / 头部规范 / 重迁须 supersede）**。
-  其中**写入闸**由 `close-round --done` 内置（台账追加前过闸，非 0 即拒写），不需要额外手动跑。
+- **四道门禁全 0 + 一道"只跑不判"**：`check-doc-drift.mjs` / `check-memory-sync.mjs` / `check-memory-sync.mjs --keys` /
+  `docflow.mjs check` 这四道是**能真红**的判据；而 **`check-kb-gate.mjs --all` 恒为 exit 0**
+  （源码 L243：只有 `--new` / `--row-file` 两种模式才会因 `blocking_rows > 0` 返回 1）
+  ⇒ 它**只产出数字、不拦人**，看到 `blocking_rows` 非 0 也**不要**当成通过，要人读。
+  真正的**写入闸**由 `close-round --done` 内置（台账追加前调 `--row-file`，非 0 即拒写），那才是硬的。
 - 收尾做了"**第 1.5 步**"：`memory_save` 后立刻 `POST /agentmemory/evolve`（只传 newTitle，newContent 原样回传） 设语义标题。
 - 提交信息带 `T-###`；纯格式类改动写「无待办影响」。
 

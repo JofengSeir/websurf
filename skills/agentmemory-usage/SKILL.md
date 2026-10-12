@@ -51,13 +51,14 @@ curl -s 'http://127.0.0.1:3113/memories?limit=1'          # 权威存在性判�
 
 ## 本机能力边界（开工前必须知道）
 
-- **MCP 工具**：✅ 可用（54 个 `mcp__agentmemory__*`）。
-- **自动捕获（观测层）**：✅ **已接线**（2026-10-12 手工装 `@deepseek-ai/dsh-hooks-claude-code`），
-  **待 DSH 重启后生效**。生效后 `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`Stop` 会自动写观测，
-  `handoff` / `recap` / `session-history` / `commit-context` / `lesson` 这些依赖观测层的技能才有数据。
-  接线前观测层是空的（`observations = 0`），别再从那里找上下文。
-  默认**零 token**（`AGENTMEMORY_INJECT_CONTEXT` 关）；要看是否真的在采，查 `GET /agentmemory/status` 的 `capture.sinceStart`。
+- **MCP 工具**：✅ 可用（**54** 个 `mcp__agentmemory__*`；数法：默认/`all`=54，`AGENTMEMORY_TOOLS=core` 且在**服务端**设才=8，服务不可达的旁路=7）。
+- **自动捕获（观测层）**：✅ **已接线并实测在产**（2026-10-12）。**不需要重启 DSH**——patch 层是热重载的（实测写入后 5 秒即触发；"重启才生效"那个说法是错的）。
+  `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / `SubagentStart` / `SubagentStop`（共 7 个）会自动写观测，
+  `handoff` / `recap` / `session-history` / `commit-context` / `lesson` 这些依赖观测层的技能因此有数据了。
+  默认**零 token**（`AGENTMEMORY_INJECT_CONTEXT` 关）；要看是否真的在采，查 `GET /agentmemory/status` 的 `index.observations`（**不要**用 `capture.sinceStart`，它单调递增、只看得到"采过"）。
 - 不确定观测层现在有没有数据时：先 `GET http://127.0.0.1:3113/agentmemory/status` 看 `index.observations`，别猜。
+- ✅ **写入不会"悄悄丢"**：`mcp-gate.mjs` 健康门 + `standalone.mjs` vendor 补丁把两条静默降级路径都堵了；
+  若哪次看到 `memory_save` **返回成功但库里搜不到**，那就是降级又发生了——查 `~/.agentmemory/standalone.json` 是否出现。详见 REFERENCE §0.25.1b。
 - **本仓的过程记录仍走人工通道**：`close-round --note` → `memory_save` → `close-round --done`（落 `progress/memory-index.jsonl` 台账）。
 
 ## 写入时的两条硬要求（2026-10-12 新增）
