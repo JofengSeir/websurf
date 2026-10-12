@@ -124,8 +124,10 @@ function plan() {
     console.log('【' + (i + 1) + '】memory_save ' + JSON.stringify({ project: 'websurf', type: 'workflow', concepts: 'websurf,兜底补写', files: r.source, content: body }));
     console.log('  ledger: ' + JSON.stringify({ marker: r.marker, source: r.source, kind: 'index', seq: 0, memoryId: '<上一步返回的 id>', at: r.at.slice(0, 10), retired: true, shape: 'snapshot' }));
     // P1-6「第 1.5 步」：compact 召回只返回 title，不设就是 content 前 80 字（marker 就吃满了）
+    // ⚠️ 不是 MCP 工具（0.9.30 的 54 个 MCP 工具里没有 evolve），只能走 REST。
     const suggested = ('websurf · index0 · ' + String(r.note || '兜底补写').slice(0, 24) + ' · ' + String(r.note || '').slice(0, 80)).slice(0, 150);
-    console.log('  ↑ 保存后立刻设语义标题：memory_evolve({ memoryId: <上一步 id>, newContent: <同上 content>, newTitle: ' + JSON.stringify(suggested) + ' })');
+    console.log('  ↑ 保存后立刻设语义标题（REST，非 MCP 工具）：');
+    console.log('    curl -X POST http://127.0.0.1:3111/agentmemory/evolve -H "Authorization: Bearer $(cat ~/.agentmemory/secret)" -H "content-type: application/json" -d ' + JSON.stringify(JSON.stringify({ memoryId: '<上一步 id>', newContent: '<同上 content>', newTitle: suggested })));
   });
   console.log('');
   console.log('回放完一条就 done --marker <marker> 从队列删除。');

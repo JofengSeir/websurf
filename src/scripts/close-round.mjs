@@ -48,8 +48,9 @@ function make() {
   console.log('');
   // P1-6：compact 召回只返回 title，而 title 默认是 content 前 80 字（marker 就吃满了）⇒ 显式设语义标题。
   const suggestedTitle = ('websurf · index0 · ' + ('本轮进展 ' + String(arg('task', '')).slice(0, 20)).trim() + ' · ' + body.split('\n')[0].slice(0, 80)).slice(0, 150);
-  console.log('第 1.5 步（建议，P1-6）：保存后立刻设语义标题，否则 compact 召回里的 title 只是 content 前 80 字：');
-  console.log('  memory_evolve({ memoryId: <第 1 步返回的 id>, newContent: <同上 content 原样>, newTitle: ' + JSON.stringify(suggestedTitle) + ' })');
+  console.log('第 1.5 步（建议，P1-6）：保存后立刻设语义标题，否则 compact 召回里的 title 只是 content 前 80 字。');
+  console.log('  ⚠️ 它不是 MCP 工具（0.9.30 的 54 个 MCP 工具里没有 evolve），只能走 REST：');
+  console.log('  curl -X POST http://127.0.0.1:3111/agentmemory/evolve -H "Authorization: Bearer $(cat ~/.agentmemory/secret)" -H "content-type: application/json" -d ' + JSON.stringify(JSON.stringify({ memoryId: '<第 1 步返回的 id>', newContent: '<同上 content 原样>', newTitle: suggestedTitle })));
   console.log('');
   console.log('第 2 步：node src/scripts/close-round.mjs --done --marker ' + marker + ' --id <上一步返回的 id>');
   console.log('（知识库不可用：node src/scripts/kb-fallback.mjs queue --marker ' + marker + ' --note <正文>）');

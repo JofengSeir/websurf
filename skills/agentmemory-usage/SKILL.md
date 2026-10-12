@@ -64,7 +64,7 @@ curl -s 'http://127.0.0.1:3113/memories?limit=1'          # 权威存在性判�
 
 1. **过闸 B**：`close-round --done` 已内置（台账追加前调 `check-kb-gate.mjs --row-file`；非 0 即拒写）。
    新条目的分档上限：`chunk`/`errata` ≤ **8 KiB**、`index` ≤ **16 KiB**；重迁须 `supersede` 旧条目。
-2. **设语义标题（"第 1.5 步"）**：`memory_save` 之后立刻 `memory_evolve({memoryId, newContent: 原样, newTitle})`。
+2. **设语义标题（"第 1.5 步"）**：`memory_save` 之后立刻 `POST /agentmemory/evolve {memoryId, newContent: 原样, newTitle}`。
    不设的话 `title` 就是 `content` 前 80 字，而 **marker 就吃掉约 68 字符** ⇒ compact 召回里读到的是 marker 碎片，
    人/agent 都判不出相关性（实测：设标题前 **50%** 的召回结果 title 里一个查询词都没有，设了 50 条后降到 **22.2%**）。
    `close-round --note` 现在会直接打印建议的 `newTitle`。闸 B 也会对 `title-not-semantic` 出告警。
@@ -97,7 +97,7 @@ RIGHT：先判它是不是**已迁出**（91.4% 的条目源已不在仓库）�
 - 检索前：默认用 `memory_smart_search`；若要用 `memory_recall`，**显式** `format:"compact"` + `token_budget`。
 - 写入前：内容不违反 R1/R2/R3；确认是「库里真的没有」而不是「检索没命中」。
 - 写入时：带 marker、`project: websurf`、补一行台账；**过闸 B**（`close-round --done` 内置）。
-- 写入后：**立刻设语义标题**（"第 1.5 步"，`memory_evolve(newTitle=…)`）；`kb-fallback probe` 比「台账行数 vs 库内 total」；
+- 写入后：**立刻设语义标题**（"第 1.5 步"，`POST /agentmemory/evolve`（只传 newTitle，newContent 原样回传））；`kb-fallback probe` 比「台账行数 vs 库内 total」；
   `check-memory-sync.mjs` 与 `--keys` 全 0。
 - 改配置时：`OPENAI_EMBEDDING_BASE_URL` **不能带 `/v1`**；同时要设 `OPENAI_API_KEY`；slots 默认关。
 - 迁文档时：先判「该不该入库」（R3），再按记录边界切块（**≤8192 B/块**），末尾补 `#index0`（≤16 KiB）。

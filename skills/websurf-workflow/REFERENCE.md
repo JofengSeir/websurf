@@ -19,8 +19,11 @@
 # ① 生成条目：写归档原文 + 算 marker + 打印可直接调用的 memory_save 参数 + 建议的 newTitle
 node src/scripts/close-round.mjs --note "<本轮正文>" --slug <名> --task T-###
 # ①.5 设语义标题（memory_save 之后立刻做）：compact 召回只返回 title，不设就是 content 前 80 字
-#      memory_evolve({ memoryId: <第①步返回的 id>, newContent: <原样>, newTitle: <①打印的建议标题> })
-# ② 登记：**过闸 B（库侧）** → 补台账 → 跑四道门禁 → 打印提交模板
+#      ⚠️ 这**不是 MCP 工具**（agentmemory 0.9.30 的 54 个 MCP 工具里没有它）——只能走 REST：
+#      curl -X POST http://127.0.0.1:3111/agentmemory/evolve \
+#        -H "Authorization: Bearer $(cat ~/.agentmemory/secret)" \
+#        -d '{"memoryId":"<第①步返回的 id>","newContent":"<原样回传>","newTitle":"<①打印的建议标题>"}'
+# ② 登记：**过闸 B（库侧）** → 补台账 → 跑五道门禁 → 打印提交模板
 node src/scripts/close-round.mjs --done --marker <marker> --id <memoryId>
 ```
 
@@ -43,8 +46,8 @@ node src/scripts/close-round.mjs --done --marker <marker> --id <memoryId>
 2. **闸 B 规则 ④**：新条目必须 `supersede` 掉旧行的 memoryId（禁"先删后写"）。
 
 **机制要点**（读 dist 得出）：`memory_save` **不能**显式指定 `supersedes`——它的 supersedes 只由
-"Jaccard 相似度 > 0.7 自动匹配"决定；唯一能显式表达"新条目取代旧条目"的入口是 **`memory_evolve`**
-（它写 `supersedes: [existing.id, ...]`）。⇒ 重迁一律走 `memory_evolve(旧id, newContent=<新 marker + 新正文>, newTitle=<语义标题>)`，
+"Jaccard 相似度 > 0.7 自动匹配"决定；唯一能显式表达"新条目取代旧条目"的入口是 **REST `POST /agentmemory/evolve`**
+（它写 `supersedes: [existing.id, ...]`）。⇒ 重迁一律走 `POST /agentmemory/evolve {memoryId: 旧id, newContent: <新 marker + 新正文>, newTitle: <语义标题>}`，
 顺手把"第 1.5 步"也做了。
 
 现成工具：agentmemory 仓库的 `plan-v32-exec/86-remigrate.mjs --src=<仓库相对路径> [--apply]`

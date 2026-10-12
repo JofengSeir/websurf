@@ -59,7 +59,7 @@ RIGHT：体检与提交串成一步（`&&`），红灯即终止；本仓出过�
 - **五道门禁全 0**：`check-doc-drift.mjs` / `check-memory-sync.mjs` / `check-memory-sync.mjs --keys` /
   `docflow.mjs check` / **`check-kb-gate.mjs --all`（闸 B：分档大小 / 悬空 supersedes / 头部规范 / 重迁须 supersede）**。
   其中**写入闸**由 `close-round --done` 内置（台账追加前过闸，非 0 即拒写），不需要额外手动跑。
-- 收尾做了"**第 1.5 步**"：`memory_save` 后立刻 `memory_evolve(newTitle=…)` 设语义标题。
+- 收尾做了"**第 1.5 步**"：`memory_save` 后立刻 `POST /agentmemory/evolve`（只传 newTitle，newContent 原样回传） 设语义标题。
 - 提交信息带 `T-###`；纯格式类改动写「无待办影响」。
 
 ## See also

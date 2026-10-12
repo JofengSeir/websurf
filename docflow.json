@@ -23,7 +23,7 @@
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "adbc4aecbd5debdfe4fa1113ef235e683fef2fae3f9c659512e2fe931b7282e3",
     "AGENTS.md": "11122cf65af037fd0650222ca49cb0749ce72d676e9aae2b2545bf453fa9b9ef",
-    "skills/websurf-workflow/SKILL.md": "8b1bf8b8507a18250186ae99eb8e244fe454dbab767a329cc407150847bef35e"
+    "skills/websurf-workflow/SKILL.md": "364c6268aac35d14d8cee9014a190935461e87507f749ccdc260d030d90a300a"
   },
   "approvals": [
     {
@@ -125,7 +125,7 @@
     {
       "path": "skills/websurf-workflow/SKILL.md",
       "by": "owner-delegated",
-      "reason": "四道门禁改五道（含闸 B）+ 收尾插入第 1.5 步设语义标题 + 召回入口预算规则",
+      "reason": "修正工具名：memory_evolve 不是 MCP 工具，语义标题只能走 REST POST /agentmemory/evolve",
       "at": "2026-10-12",
       "task": "",
       "consumed": true

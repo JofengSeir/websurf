@@ -78,7 +78,7 @@
 而 marker 就吃掉约 68 字符 ⇒ 读到的是 marker 碎片。实测：**未设标题时 50% 的召回结果 title 里一个查询词都没有**；
 给 50 条（覆盖 26 条评测查询 top-5 命中位的 88/90）设了语义标题后降到 **22.2%**，命中 ≥2 词从 14.4% 升到 53.3%。
 
-⇒ 每次 `memory_save` 之后**立刻** `memory_evolve({memoryId, newContent: 原样, newTitle})`；
+⇒ 每次 `memory_save` 之后**立刻** `POST /agentmemory/evolve {memoryId, newContent: 原样, newTitle}`；
 `close-round --note` 已会打印建议标题（"第 1.5 步"）；闸 B 对 `title-not-semantic` 出告警。
 标题建议形状：`<proj> · <kind><seq> · <主题> · <摘要>`。
 
