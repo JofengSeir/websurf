@@ -10,5 +10,5 @@ node src/scripts/close-round.mjs --check-round --staged || {
 }
 node src/scripts/check-memory-sync.mjs --queue-only 2>/dev/null | grep -q 'pending=0' || \
   echo '[收尾门禁] 提示：progress/pending-kb.jsonl 有未回放条目（不挡提交，写通道可用时回放）'
-echo '[收尾门禁] 留痕与队列检查通过。记得跑四道门禁（AGENTS §3）。'
+echo '[收尾门禁] 留痕与队列检查通过。记得跑五道门禁（AGENTS §3）。'
 exit 0
