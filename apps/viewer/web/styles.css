@@ -10,15 +10,16 @@
  * 三工程区分：apps/debug 石墨青「仪表」、apps/game 深青「莱茵精工」、
  * apps/viewer 中性灰阶「导演工作台」。
  *   · 菱角分明：全文件 border-radius 一律 0，仅服务孔（1 处，位于侧栏左下）
- *     （1 处）保留 50% 圆；轨迹色点 .track-dot / .meta-dot 方形化；
+ *     与引导卡那一块（owner 2026-10-16 指定，见下方引导卡段）保留圆角；
+ *     轨迹色点 .track-dot / .meta-dot 方形化；
  *   · 切角系统：**已撤销**（owner 2026-10-16：右上切角"莫名其妙"，与 game 同口径）。
  *     最后两处（帮助浮层 `#help`、致命错误卡 `#fatal .card`）本轮一并删除；
  *     侧栏与主按钮更早前已是矩形。菱角语彙改由「零圆角 + 1px/2px 直线」表达。
  *   · 线宽系统：2px 结构线（HUD 铭牌左缘）/ 1px 发丝分隔 / 1px 点线
  *     （小节标题右端 3px 短竖刻度，同 game h4）；
  *   · 档案元素成套：两个 tabpane 档案编号（右上，VW-01 / VW-02，时间码黄）+
- *     页脚署名（右下）；硬件件计数：服务孔 1（侧栏左下）+ 引导卡拍板条铰链的 3 颗螺钉
- *     （上片 1 + 下片 2，见 v15 段）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层
+ *     页脚署名（右下）；硬件件计数：服务孔 1（侧栏左下）+ 引导卡铰链片的 3 颗螺钉
+ *     （上片 1 + 下片 2，见下方引导卡段）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层
  *     至多 1 件」适配，不套用 game 单窗口的 ≥2 口径；
  *   · **导演版条纹特色（owner 指定保留并强化，v3 扩展）**：时间轴上下缘
  *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**人字黑白条**顶条（各 9 条 + 末尾短黑 5%，
@@ -27,16 +28,15 @@
  *     时间码黄四段）、每个小节标题左端**调色卡竖条**（黑/白/黄三段）、
  *     （激活 = 场记板白底黑字）；
  *   · **影视语彙泛化（v4/v6）**：播放中时间码前缀 REC 红点、时间轴底部秒刻度尺、白竖线播放头、SMPTE 彩条、速度电平表、场记板黑白标签。
- *   · **引导卡场记板化（v15 段；2026-10-16 由 v20 回退到此版）**：拍板条 51px 高 ——
- *     上下两层 52° / -52° **镜像硬停渐变在条高中央折成 V**（各 9 条黑白交替 + 末尾短黑 5%，
- *     owner 2026-09-30 定稿：更早那版是彩色色带，被判「读作彩条测试卡」）；
- *     `.slate-screws` 再叠**贯通整条的 1.5px 转轴分缝** + **3 颗螺钉（上片 1 + 下片 2）**
- *     —— 上下两片因此能相对转动，板才打得响（4 颗同时钉死两片是错的）。
- *     板身 = 表格化单元格（112px 标签列 + 值列、1px 行线与竖线），抬头行用时间码黄；
- *     底部两枚按钮为板身末行。
- *     **为什么回退**：v19 / v20 两版（一版按截图目测排、一版按数值换算重排拍板条与板身）
- *     都被 owner 2026-10-16 判「不像」⇒ 整块退回这一版；那两版的类名与令牌已全部清掉
- *     （`slate-clapper` / `stick-move` / `slate-hinge` / `slate-body` / `slate-fields` … 均 0 命中）。
+ *   · **引导卡「Scene Slate」（owner 2026-10-16 定版）**：圆角铰链片（内联 SVG 画形状，
+ *     1px 描边随轮廓走）压住上下两根拍板条的左端 + RGB/CMYK 色标条（7 格逐格等宽）+
+ *     标题行（大字 WebSurf / SCENE SLATE + PRODUCTION / VERSION 两格印字）+
+ *     四格（STEP 01~03 引导 + ACTIONS 两枚按钮）+ 底部 FORMAT 行（BSP / REC / REPLAY / DEM）。
+ *     拍板条 = 上片抬起 −10°、两组 45° 斜纹方向镜像（硬停色块，无受光高光 / 无材质渐变）。
+ *     **这条是全文件唯一的圆角例外**（owner 指定，其余一律 0）；色标条的 6 个彩色只在卡内用，
+ *     不进 :root。前一版（v15 段的人字条 + 表格化板身）已整块替换 —— 相关类名
+ *     （`slate-stick` / `slate-stripes` / `slate-screws` / `slate-row` / `gstep` / `glabel` /
+ *     `gvalue` / `gtext` / `gbtns`）在本文件与 index.html 里均已 0 命中。
  *
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名驱动）：
  *   · 可见性钩子：.hidden、#help.hidden、#guideError.show、#dropzone.active、
@@ -679,136 +679,201 @@ select.tl-select:focus { border-color: var(--text); }
   padding: 0 calc(var(--sidebar-w) + 12px) 0 12px;
   background: var(--overlay);
 }
-/* ── 引导卡 = 场记板（v15 段）：按 owner 提供的实物照片**逐行实测**同构 —— 暗色板身 +
-   **2026-10-16 回退**：v19 / v20 两版（照参考实现的截图、源码各做一遍）都被 owner 判
-   「完全就不是一个东西」⇒ 整块退回这一版。以下为 v15 原注。
-   人字形拍板条。证据：`.tmp/audit/stripe-slope.py` 对照片（861×573）逐行追踪色界——
-   色界是两条直线、斜率 |dx/dy|≈0.77（≈52°），且在**条高中央折一次**；色序与占比
-   照实测（相对条纹区）：左灰阶 22.8 / 青 8.5 / 黄 10.5 / 蓝 8.8 / 红 9.6 / 白 9.0 /
-   灰 8.0 / 右暗阶 23.1（我方实测与之逐段相差 ≤0.2 点）。
-   全部硬停色块：无受光高光、无材质渐变、无圆角（符合"不拟物"）。── */
+/* ── 引导卡 = owner 2026-10-16 定的「Scene Slate」场记板（样张 test/slate.html 逐条落进来）：
+   圆角铰链片（内联 SVG，1px 描边随轮廓走）压住两根拍板条的左端 + RGB/CMYK 色标条（7 格等宽）+
+   标题行（大字 + PRODUCTION / VERSION）+ 四格（STEP 01~03 / ACTIONS）+ 底部 FORMAT 行。
+   ⚠ 本卡有两处**偏离全站口径、均为 owner 指定**：① 圆角 —— 它是「全文件 border-radius 0」
+   那条的唯一例外（旧口径见本文件头注）；② 色标条引入 6 个彩色，只出现在卡内，不进 :root。
+   拍板条的斜纹仍是硬停色块（无受光高光、无材质渐变）。── */
 #guide .card {
-  /* 板面整体放大（owner：大一些 + 空处多一些）：原 470 → 520px */
-  width: min(520px, calc(100vw - 32px));
+  /* 板面比旧卡宽：四格引导 + 色标条需要横向空间。上限取「让出右侧栏之后的自由区」，
+     故用 100% —— #guide 已经用 padding 把侧栏那一条排除掉了 */
+  width: min(760px, 100%);
   position: relative; text-align: left;
-  /* 内容区 = **较浅的深色**（owner 定调）：与上方"单一深色"的拍板条形成两级明度 */
-  background: #17181d;
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  /* 给抬起的上片与铰链片留位：它俩相对 .slate 顶边是负偏移（−84 / −105），而抬起的上片
+     在最右端还要再往上抬 ~0.176×条宽 ⇒ 视口越宽需求越大。用 vh 跟着视口高度走 */
+  padding-top: clamp(120px, 18vh, 190px);
 }
-/* 拍板条：44px 高。三段结构：**黑色铰链板**（色条渐变的第一段 0→28.6%）+
-   **人字彩条**（绿/黄/蓝/红/白/灰）+ **尾部单一深色**。
-   ⚠ 2026-09-30 更正：owner 说的"尾部改深色"指的是**尾部那几级不等比的深色渐变**
-   换成单一深色（那次几个色阶的宽度不成比例，看起来"不规则"）；我上一版误读成
-   "整条改单一深色"、把彩条全删了 —— 已恢复彩条，只把尾部收成一个色。
-   人字几何仍是实测值（上下两层 52°/-52° 镜像、色序反转，折点在条高中央）。 */
-.slate-stick {
-  position: relative;
-  /* 高度 44 → **51px**（owner：整体高度 +15%）。螺钉纵向位置（23%/77%）与缝（50%）
-     都是百分比定位，会随高度等比走；色带宽度是按条宽算的，不受高度影响。 */
-  height: 51px;
-  background: #0a0a0c;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+/* `.slate` 自己**不带 padding**：它就是拍板条与铰链片的包含块，带 padding 只会把在流的板身
+   推下去、条子却留在原处（实测两者之间裂开 48px、片顶还被切）。留位交给外层 `.card` */
+#guide .slate {
+  position: relative; isolation: isolate; width: 100%;
+  filter: drop-shadow(0 20px 26px rgba(0, 0, 0, 0.34));
 }
-/* 彩条：上下两层镜像渐变在条高中央折成 V；下半层**同时反转色序**，色带才在折点处连续 */
-.slate-stripes {
-  position: absolute; inset: 0;
-  background-image:
-    /* **黑白交替（上下同色）+ 末尾短黑 5% + 软边**（owner 2026-09-30 定稿）
-       - 每条色界两侧各 0.6px 过渡（`calc(x% ∓ 0.6px)`）：斜边是 1px 硬停，在 44px 高的条上
-         会有台阶感（锯齿），亚像素过渡交给抗锯齿抹平；
-       - 末尾短黑由 3.5% 调到 **5%**（owner：又感觉小了）；
-       - 缝画在 `#guide .slate-screws`（见该规则），本规则只管条面底色。
-       比例：黑板 23.5% ｜ 白/黑 交替 9 条（各 7.94%）｜ 短黑 5%。 */
-    linear-gradient(52deg,
-      #0a0a0c 0 calc(22.7% - 0.6px),
-      #ececf4 calc(22.7% + 0.6px) calc(30.4% - 0.6px),
-      #0a0a0c calc(30.4% + 0.6px) calc(38.1% - 0.6px),
-      #ececf4 calc(38.1% + 0.6px) calc(45.8% - 0.6px),
-      #0a0a0c calc(45.8% + 0.6px) calc(53.5% - 0.6px),
-      #ececf4 calc(53.5% + 0.6px) calc(61.2% - 0.6px),
-      #0a0a0c calc(61.2% + 0.6px) calc(68.9% - 0.6px),
-      #ececf4 calc(68.9% + 0.6px) calc(76.6% - 0.6px),
-      #0a0a0c calc(76.6% + 0.6px) calc(84.3% - 0.6px),
-      #ececf4 calc(84.3% + 0.6px) calc(92% - 0.6px),
-      #0a0a0c calc(92% + 0.6px) 100%),
-    linear-gradient(-52deg,
-      #0a0a0c 0 calc(8% - 0.6px),
-      #ececf4 calc(8% + 0.6px) calc(15.7% - 0.6px),
-      #0a0a0c calc(15.7% + 0.6px) calc(23.4% - 0.6px),
-      #ececf4 calc(23.4% + 0.6px) calc(31.1% - 0.6px),
-      #0a0a0c calc(31.1% + 0.6px) calc(38.8% - 0.6px),
-      #ececf4 calc(38.8% + 0.6px) calc(46.5% - 0.6px),
-      #0a0a0c calc(46.5% + 0.6px) calc(54.2% - 0.6px),
-      #ececf4 calc(54.2% + 0.6px) calc(61.9% - 0.6px),
-      #0a0a0c calc(61.9% + 0.6px) calc(69.6% - 0.6px),
-      #ececf4 calc(69.6% + 0.6px) calc(77.3% - 0.6px),
-      #0a0a0c calc(77.3% + 0.6px) 100%);
-  background-size: 100% 51%, 100% 51%;
-  background-position: 0 0, 0 100%;
-  background-repeat: no-repeat;
+/* 上下拍板条：上片抬起并向右上方倾斜；两组斜纹方向镜像，视觉上形成 >>>>（硬停色块） */
+#guide .clapstick {
+  position: absolute; left: -12px; right: -9px; overflow: hidden;
+  background: #0b0c0f; border: 1px solid #3c4049; border-radius: 7px;
 }
-/* 铰链：**贯通整条的水平缝**（上下板之间的缝，owner 定稿）+ **三颗螺钉**（上片 1 + 下片 2）。
-   按 owner 反馈：左列对齐（原先上 4.6% / 下 4.2% 差 2px）、下面两颗拉近（16% → 12%）。 */
-.slate-screws {
-  position: absolute; inset: 0; pointer-events: none;
-  background:
-    /* 上下板之间的缝：**1.5px**、`#4b4b57`。宽度定在 1~2px 之间：1px 在 125%/150% 分数缩放下
-       会被浏览器取整抹掉（owner 起初就是这么看不到的），2px 又偏粗；1.5px 保留辨识度且更细。
-       颜色沿用提对比后的 `#4b4b57`（比条底色亮 65 级），保证细也能看清。 */
-    linear-gradient(180deg,
-      transparent calc(50% - 0.75px), #4b4b57 calc(50% - 0.75px) calc(50% + 0.75px), transparent calc(50% + 0.75px)),
-    radial-gradient(circle at 4.4% 23%, #3c3c45 0 3px, transparent 3px),
-    radial-gradient(circle at 4.4% 77%, #3c3c45 0 3px, transparent 3px),
-    radial-gradient(circle at 9.5% 77%, #3c3c45 0 3px, transparent 3px);
-  background-repeat: no-repeat;
-  background-size: 100% 100%, auto, auto, auto;
+#guide .clapstick-top {
+  z-index: 4; top: -84px; height: 74px;
+  transform: rotate(-10deg); transform-origin: 7% 100%;
 }
-/* 板身行 = 场记板单元格：标签列（中文粗 / 英文等宽小字，竖向格线分隔）+ 值列；
-   行间 1px 白格线。格线与竖线是这块"板"的主要结构，不靠底色块表达分组。 */
-.slate-row, .gstep {
-  display: grid; grid-template-columns: 112px 1fr; gap: 0 18px; align-items: start;
-  /* 留白（owner：空处再多一些）——内边距与列间距一并放大 */
-  padding: 18px 26px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+#guide .clapstick-bottom { z-index: 3; top: -1px; height: 73px; }
+#guide .stripes { position: absolute; inset: 0; background-color: var(--strip-dark); }
+#guide .clapstick-top .stripes {
+  background-image: repeating-linear-gradient(135deg, var(--strip-light) 0 57px, var(--strip-dark) 57px 114px);
 }
-.glabel {
-  display: flex; flex-direction: column; gap: 2px;
-  padding-right: 12px;
-  border-right: 1px solid rgba(255, 255, 255, 0.28);
+#guide .clapstick-bottom .stripes {
+  background-image: repeating-linear-gradient(45deg, var(--strip-light) 0 57px, var(--strip-dark) 57px 114px);
 }
-.glabel .zh { font-size: 13.5px; font-weight: 600; color: rgba(255, 255, 255, 0.94); }
-.glabel .en {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em;
-  color: rgba(255, 255, 255, 0.55); text-transform: uppercase;
+/* 条子下缘的一道发丝高光：让两层条子之间有条可读的界 */
+#guide .clapstick::after {
+  content: ""; position: absolute; inset: auto 0 0; height: 1px; background: rgba(255, 255, 255, 0.17);
 }
-/* 抬头行用**时间码黄**把 片名 / 工程名 从板身里拎出来（板身其余部分保持中性白） */
-.slate-head { border-bottom: 1px solid rgba(255, 255, 255, 0.85); }
-.slate-head .glabel .zh { color: var(--accent); }
-.gvalue { font-size: 17px; font-weight: 600; color: var(--text); }
-.gtext { font-size: 14px; color: rgba(255, 255, 255, 0.78); line-height: 1.8; }
-.gtext code { font-size: 12px; color: var(--text); }
-/* 底部操作行：板身最后一行单元格。上缘的格线由上一行 `.gstep` 的 border-bottom
-   提供（此处不再画 border-top，否则两条 1px 线叠成 2px 的双线） */
-.gbtns {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
-  padding: 20px 26px 22px;
+/* 铰链片：压住两根条子的左端。形状由内联 SVG 画（`.hinge-plate`），这里只管盒子与螺钉定位。
+   盒子仍是 197×188 @ left:-25/top:-105 —— 螺钉坐标就写在这套局部坐标里，别改盒子。 */
+#guide .hinge { position: absolute; z-index: 6; left: -25px; top: -105px; width: 197px; height: 188px; }
+#guide .hinge-plate { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+/* 三颗螺钉：**上片 1 + 下片 2** —— 上下两片因此能相对转动、板才打得响（4 颗同时钉死两片是错的） */
+#guide .screw {
+  position: absolute; width: 24px; height: 24px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #d8dce4 0 17%, #8e95a3 28%, #555b67 65%, #292c34 72%);
+  border: 1px solid #17191e; box-shadow: 0 1px 2px #050608;
 }
-.gbtns .filebtn { width: 100%; text-align: center; }
-/* 错误行 #guideError：默认不占位，`.show` 时作为板身最末一行（REC 红）。
-   这里以前**没有任何规则**——`apps/viewer/src/ui/hud.ts` 会加 `.show` 并写入人话说明
-   与 `.raw` 原文，没有样式 ⇒ 报错文本以裸 `div` 形态挤在按钮下方。 */
-#guideError { display: none; }
-#guideError.show {
-  display: block;
-  padding: 12px 26px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.5);
-  font-size: 12.5px; line-height: 1.7; color: var(--err);
+#guide .screw.one { left: 44px; top: 50px; }
+#guide .screw.two { left: 44px; top: 126px; }
+#guide .screw.three { left: 129px; top: 126px; }
+/* 板身 = 卡片本体 */
+#guide .slate-body {
+  position: relative; z-index: 1;
+  padding: 88px 21px 0;
+  background: var(--panel-trans); border: 1px solid var(--border-strong); border-radius: 18px;
 }
-#guideError .raw {
-  display: block; margin-top: 4px;
-  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+/* 色标条：RGB 三格 + CMYK 四格，**7 格逐格等宽**（各 1/7）。K 与板面底色同为黑，不加 1px
+   内描边就看不见 —— 那样第 7 格读不出来，7 格等宽也白搭 */
+#guide .colorbar {
+  display: flex; height: 46px; margin: 0 24px 18px; overflow: hidden;
+  border-radius: 4px; background: var(--strip-dark);
+}
+#guide .colorbar span { flex: 1; min-width: 0; }
+#guide .colorbar .r { background: #a92d31; }
+#guide .colorbar .g { background: #258638; }
+#guide .colorbar .b { background: #1761c9; }
+#guide .colorbar .c { background: #2aaac3; }
+#guide .colorbar .m { background: #a92f80; }
+#guide .colorbar .y { background: #d6ad25; }
+#guide .colorbar .k { background: #101115; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+/* 标题行：左大字（产品名 + 副标），右侧两格印字（工程名 / 版本） */
+#guide .title-row {
+  display: grid; grid-template-columns: 0.95fr 1.05fr; min-height: 136px;
+  border-top: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong);
+}
+#guide .slate-name {
+  display: flex; flex-direction: column; justify-content: center; min-width: 0;
+  padding: 16px 18px; border-right: 1px solid var(--border-strong);
+}
+#guide .slate-name strong {
+  font-size: clamp(34px, 5.2vw, 54px); font-weight: 600; letter-spacing: -0.045em;
+  line-height: 1.08; overflow-wrap: anywhere;
+}
+#guide .slate-name span {
+  margin-top: 13px; color: var(--muted); font-family: var(--mono); font-size: 20px;
+  font-weight: 500; letter-spacing: 0.27em;
+}
+#guide .production { display: grid; grid-template-rows: 1fr 1fr; min-width: 0; }
+#guide .production div {
+  padding: 12px 26px; color: var(--muted); font-family: var(--mono); font-size: 15px; letter-spacing: 0.13em;
+}
+#guide .production div + div { border-top: 1px solid var(--border-strong); }
+#guide .production b { display: block; margin-top: 4px; color: var(--text); font-family: system-ui, sans-serif; font-size: 19px; font-weight: 500; }
+/* 四格：前三格等宽、操作格略宽（两枚按钮的文案比「01」长，不然会折成三行）。
+   实物板上这四格是 SCENE / TAKE / ROLL / DATE，这里换成三步引导 + 操作 */
+#guide .fields {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 1.3fr;
+  border-bottom: 1px solid var(--border-strong);
+}
+/* display:block 是**必须**的：应用里另有一条全局 .field{display:flex}（侧栏表单行，见本文件
+   表单段），不压掉会把卡内标签与正文摆成左右两列 */
+#guide .field { display: block; min-width: 0; padding: 20px 22px 20px; }
+#guide .field + .field { border-left: 1px solid var(--border-strong); }
+#guide .field > label {
+  display: block; margin-bottom: 9px; color: var(--muted);
+  font-family: var(--mono); font-size: 16px; letter-spacing: 0.1em;
+}
+/* 值：实物板上是短码（01 / 001），这张卡里换成整句话 —— 字号行高按正文调，仍是同一格 */
+#guide .field > span {
+  display: block; color: var(--muted); font-size: 15px; line-height: 1.75;
+}
+#guide .field code { font-family: var(--mono); font-size: 14px; font-weight: 500; color: var(--text); }
+/* 第四格 = 操作：两枚按钮是 `label[for]` 原生转发到隐藏 input；出错行也留在这格里。
+   全局 `.filebtn` 带 `white-space: nowrap`，这里必须放开，否则长标签会撑破格子 */
+#guide .field .filebtn {
+  display: block; width: 100%; margin-bottom: 9px; padding: 11px 12px; text-align: center;
+  color: var(--text); background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  font-family: var(--mono); font-size: 14px; font-weight: 500; letter-spacing: 0.05em; white-space: normal;
+}
+#guide .field .filebtn:hover { background: rgba(255, 255, 255, 0.07); border-color: var(--text); }
+#guide .field .filebtn.busy { opacity: 0.45; pointer-events: none; }
+/* 错误行 #guideError：默认不占位，`.show` 时出现在操作格里（REC 红 + `.raw` 原文） */
+#guide #guideError { display: none; }
+#guide #guideError.show {
+  display: block; margin-top: 10px;
+  color: var(--err); font-size: 13px; line-height: 1.6;
+}
+#guide #guideError .raw {
+  display: block; margin-top: 6px;
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--muted);
   word-break: break-all;
+}
+/* 底行：支持的格式（地图 + 三种记录 / 录像）；右侧斜杠是原设计的装饰 */
+#guide .format-row {
+  display: flex; align-items: center; gap: 46px; padding: 20px 25px 24px;
+  color: var(--muted); font-family: var(--mono); font-size: 15px; letter-spacing: 0.13em;
+}
+#guide .format-row strong { font-weight: 500; color: var(--text); }
+#guide .slashes {
+  margin-left: auto; color: var(--muted); font-size: 36px; letter-spacing: 0.12em; white-space: nowrap;
+}
+/* 窄视口：四格改竖排一列、铰链片与螺钉等比缩小、斜纹周期减半。
+   断点取 1080px：自由区宽 = 视口 − 右侧栏（348）− 两侧让位（24），四格并排约需 700px 自由区 ⇒
+   视口低于 ~1080px 时并排会挤到换行，不如直接竖排（也不至于把卡片撑高到溢出视口） */
+@media (max-width: 1080px) {
+  #guide .card { padding-top: 112px; }
+  #guide .clapstick { left: -7px; right: -6px; }
+  #guide .clapstick-top { top: -54px; height: 44px; }
+  #guide .clapstick-bottom { top: -1px; height: 43px; }
+  #guide .clapstick-top .stripes {
+    background-image: repeating-linear-gradient(135deg, var(--strip-light) 0 28px, var(--strip-dark) 28px 56px);
+  }
+  #guide .clapstick-bottom .stripes {
+    background-image: repeating-linear-gradient(45deg, var(--strip-light) 0 28px, var(--strip-dark) 28px 56px);
+  }
+  #guide .hinge { left: 0; top: -51px; width: 104px; height: 96px; }
+  #guide .screw { width: 14px; height: 14px; }
+  #guide .screw.one { left: 23px; top: 26px; }
+  #guide .screw.two { left: 23px; top: 64px; }
+  #guide .screw.three { left: 68px; top: 64px; }
+  #guide .slate-body { padding: 57px 10px 17px; border-radius: 12px; }
+  #guide .colorbar { height: 34px; margin: 0 11px 14px; }
+  #guide .title-row { min-height: 116px; }
+  #guide .slate-name { padding: 12px 10px; }
+  #guide .slate-name strong { font-size: clamp(25px, 7.5vw, 35px); }
+  #guide .slate-name span { margin-top: 8px; font-size: 9px; letter-spacing: 0.16em; }
+  #guide .production div { padding: 10px 10px; font-size: 9px; }
+  #guide .production b { margin-top: 4px; font-size: 16px; }
+  #guide .fields { grid-template-columns: 1fr; }
+  #guide .field { padding: 14px 11px 16px; }
+  #guide .field + .field { border-left: 0; border-top: 1px solid var(--border-strong); }
+  #guide .field > label { margin-bottom: 7px; font-size: 10px; letter-spacing: 0.06em; }
+  #guide .field > span { font-size: 13px; line-height: 1.65; }
+  #guide .field .filebtn { padding: 10px 12px; font-size: 12.5px; }
+  #guide .format-row { gap: 9px; padding: 17px 11px 15px; font-size: 9px; letter-spacing: 0.07em; }
+  #guide .slashes { font-size: 16px; }
+}
+/* 矮视口（≤820px 高）：卡片再压一档 —— 抬起的上片本身就占 ~210px，不压就会顶到视口外 */
+@media (max-height: 820px) {
+  #guide .card { padding-top: 96px; }
+  #guide .slate-body { padding-top: 78px; }
+  #guide .colorbar { height: 38px; margin: 0 24px 14px; }
+  #guide .title-row { min-height: 108px; }
+  #guide .slate-name { padding: 12px 18px; }
+  #guide .slate-name strong { font-size: clamp(30px, 4.6vw, 46px); }
+  #guide .production div { padding: 10px 26px; }
+  #guide .field { padding: 14px 22px; }
+  #guide .field > label { margin-bottom: 6px; }
+  #guide .format-row { padding: 14px 25px 16px; }
 }
 #dropzone {
   position: absolute; inset: 0; z-index: 9; display: none;

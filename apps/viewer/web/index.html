@@ -20,43 +20,68 @@
   </div>
 
   <!-- 首访引导层：`#guide`（其中的 `#guideError` 由 `apps/viewer/src/ui/hud.ts` 写入）
-       结构 = 场记板（v15 段；2026-10-16 由 v19 / v20 回退到此版 —— 那两版 owner 都判
-       「完全就不是一个东西」）：拍板条（铰链板 + 人字黑白条）+ 表格化板身（中英双语单元格
-       + 格线）+ 底部两枚按钮（`label[for]` 原生转发到隐藏 input，不需要 click 监听） -->
+       结构 = owner 2026-10-16 定的「Scene Slate」版场记板（样张 test/slate.html 逐条落进来）：
+       圆角铰链片（内联 SVG）压住上下两根拍板条的左端 + RGB/CMYK 色标条 + 标题行（大字 +
+       PRODUCTION / VERSION）+ 四格引导（STEP 01~03 / ACTIONS）+ 底部 FORMAT 行。
+       两枚按钮是 `label[for]` 原生转发到 `#topbar` 里的隐藏 input，不需要 click 监听 -->
   <div id="guide">
     <div class="card">
-      <!-- 拍板条：黑色铰链板（色条第一段）+ **黑白交替**人字条（各 9 条 + 末尾短黑 5%；
-           owner 2026-09-30 定稿 —— 更早那版是绿/黄/蓝/红彩色条，被判「读作彩条测试卡」）；
-           另有贯通整条的水平转轴分缝与三颗螺钉（**上片 1 + 下片 2**：上下两片因此能相对
-           转动、板才打得响；4 颗同时钉死两片是错的） -->
-      <div class="slate-stick">
-        <span class="slate-stripes"></span>
-        <span class="slate-screws"></span>
-      </div>
-      <div class="slate-row slate-head">
-        <span class="glabel"><span class="zh">片名</span><span class="en">PRODUCTION</span></span>
-        <span class="gvalue">WebSurf-viewer</span>
-      </div>
-      <div class="gstep">
-        <span class="glabel"><span class="zh">第一步</span><span class="en">STEP 01</span></span>
-        <span class="gtext">选择 <code>.bsp</code> 地图文件，或把 <code>.bsp</code> / <code>.replay</code> / <code>.dem</code> 拖进本窗口</span>
-      </div>
-      <div class="gstep">
-        <span class="glabel"><span class="zh">第二步</span><span class="en">STEP 02</span></span>
-        <span class="gtext">加载后点击画面锁定鼠标即可自由飞行</span>
-      </div>
-      <div class="gstep">
-        <span class="glabel"><span class="zh">第三步</span><span class="en">STEP 03</span></span>
-        <span class="gtext">右侧面板：地图信息与出生点跳转、记录 / 录像回放（换图入口在地图页顶部）；右上角「?」打开帮助</span>
-      </div>
-      <div class="gbtns">
-        <label class="filebtn" for="bspFile">选择地图（.bsp）</label>
-        <!-- 这一枚不预设类型：选到的文件由 `apps/viewer/src/app.ts` 的 `routeFile` 按文件头魔数分派
-             （`.replay` → 记录页、`.dem` → 录像页）。它**不指向记录页的 #replayFile** —— 那会
-             把 `.dem` 一起导进记录页（旧缺陷）。 -->
-        <label class="filebtn" for="importFile">导入记录 / 录像（.replay / .dem）</label>
-      </div>
-      <div id="guideError"></div>
+      <section class="slate">
+        <!-- 拍板条：上片抬起并向右上方倾斜（−10°），两组斜纹方向镜像；下片贴住板身。
+             斜纹是 45° 硬停色块（无受光高光、无材质渐变） -->
+        <div class="clapstick clapstick-top" aria-hidden="true"><span class="stripes"></span></div>
+        <div class="clapstick clapstick-bottom" aria-hidden="true"><span class="stripes"></span></div>
+        <!-- 铰链片：形状走内联 SVG（四个 90° 角 r12；右上 45° 斜边两端 r12 小圆角），1px 描边
+             跟着轮廓走 —— 用 `clip-path` 会把边线一起裁掉，看着像"被切了一刀"。
+             ⚠ 圆角切点到拐角的距离必须用 t = r·tan(转角/2)：写成 r/tan 会让切点拉开 ~6 倍，
+             弦长超过圆弧能跨的长度，渲染器会自动放大半径 ⇒ 两端各鼓出一个半圆。 -->
+        <div class="hinge" aria-hidden="true">
+          <svg class="hinge-plate" viewBox="0 0 197 188" preserveAspectRatio="none" focusable="false">
+            <defs>
+              <linearGradient id="hingePlate" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#252831"/><stop offset=".76" stop-color="#1a1c22"/>
+              </linearGradient>
+            </defs>
+            <path d="M1 13 A12 12 0 0 1 13 1 L101.9 1 A12 12 0 0 1 109.8 3.9 L191.9 85.7 A12 12 0 0 1 196 94.8 L196 175 A12 12 0 0 1 184 187 L13 187 A12 12 0 0 1 1 175 Z"
+                  fill="url(#hingePlate)" stroke="#50545e" stroke-width="1" vector-effect="non-scaling-stroke"/>
+          </svg>
+          <i class="screw one"></i><i class="screw two"></i><i class="screw three"></i>
+        </div>
+        <div class="slate-body">
+          <div class="colorbar" aria-label="RGB 与 CMYK 色标"><span class="r"></span><span class="g"></span><span class="b"></span><span class="c"></span><span class="m"></span><span class="y"></span><span class="k"></span></div>
+          <div class="title-row">
+            <div class="slate-name"><strong>WebSurf</strong><span>SCENE SLATE</span></div>
+            <!-- 版本串与三个面板页脚显示的是同一处（见 styles.css 的 pane::after 规则） -->
+            <div class="production"><div>PRODUCTION<b>WebSurf-viewer</b></div><div>VERSION<b>v0.1</b></div></div>
+          </div>
+          <!-- 四格：实物板印的是 SCENE / TAKE / ROLL / DATE，这张卡里换成三步引导 + 操作 -->
+          <div class="fields">
+            <div class="field">
+              <label>STEP 01</label>
+              <span>选 <code>.bsp</code> 地图，或把文件拖进窗口</span>
+            </div>
+            <div class="field">
+              <label>STEP 02</label>
+              <span>点画面锁定鼠标，即可自由飞行</span>
+            </div>
+            <div class="field">
+              <label>STEP 03</label>
+              <span>右侧面板：地图信息、出生点与回放；右上角「?」帮助</span>
+            </div>
+            <div class="field">
+              <label>ACTIONS</label>
+              <label class="filebtn" for="bspFile">选择地图（.bsp）</label>
+              <!-- 这一枚不预设类型：选到的文件由 `apps/viewer/src/app.ts` 的 `routeFile` 按文件头魔数
+                   分派（Shavit `.replay` / KSF `.rec` → 记录页、Source `.dem` → 录像页）。它**不指向
+                   记录页的 #replayFile** —— 那会把 `.dem` 一起导进记录页（旧缺陷）。 -->
+              <label class="filebtn" for="importFile">导入记录 / 录像（.rec / .replay / .dem）</label>
+              <!-- 出错行：hud.ts 写人话 + `.raw` 原文后加 `.show`（默认不占位） -->
+              <div id="guideError"></div>
+            </div>
+          </div>
+          <div class="format-row"><span>FORMAT</span><strong>BSP / REC / REPLAY / DEM</strong><span class="slashes">/////</span></div>
+        </div>
+      </section>
     </div>
   </div>
 
@@ -84,8 +109,10 @@
     <button class="iconbtn" id="sidebarToggle" type="button" title="显示 / 隐藏右侧面板">面板</button>
     <input id="bspFile" type="file" accept=".bsp" />
     <!-- 引导层「导入记录 / 录像」用的隐藏输入：类型由内容判定，不由 accept 决定去向
-         （`accept` 只影响系统对话框的默认过滤项）；`routeFile` 见 `apps/viewer/src/app.ts` -->
-    <input id="importFile" type="file" accept=".replay,.dem" />
+         （`accept` 只影响系统对话框的默认过滤项）；`routeFile` 见 `apps/viewer/src/app.ts`。
+         `.rec`（KSF/gokz 记录）与 `.replay` 同走记录页 —— 见 `src/replay/panel.ts` 的
+         `fileInput.accept = '.replay,.rec'` 与 `src/core/filekind.ts` 的 `rec` 条目 -->
+    <input id="importFile" type="file" accept=".replay,.rec,.dem" />
   </div>
 
   <!-- 操作帮助浮层 `#help`（非模态）：`apps/viewer/src/ui/hud.ts` 给 `#helpClose` 挂点击监听，并挂全局 `keydown`，任意 Escape 关闭 -->
