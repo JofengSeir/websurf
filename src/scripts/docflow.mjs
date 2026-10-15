@@ -309,9 +309,12 @@ function anchorPlan(d, targets) {
 /** 覆盖率：这些「公开面」必须被至少一篇文档（documents/** 或 AGENTS.md）以**仓库相对路径**提到。 */
 const COVER_GLOBS = ['apps/*/scripts/*.mjs', 'apps/*/scripts/*.js', 'src/scripts/*.mjs'];
 function coverageFiles() {
-  const list = execFileSync('git', ['ls-files', '-z', '--', 'apps', 'src'], { cwd: ROOT, maxBuffer: 64e6 }).toString('utf8').split('\u0000').filter(Boolean);
+  // 口径是「工作区里真实存在的公开面」，不是「已入库的公开面」：T-679 的 build-textures-mtz.mjs
+  // 新增时还是未跟踪文件，`--cached` 看不见 ⇒ 本地门禁全绿、一提交 CI 才报 [O] 覆盖率漏登记。
+  // 故与 listMd 同口径（--cached + 未忽略的 --others），再按磁盘存在性滤掉「已删除但仍在索引」的条目。
+  const list = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'apps', 'src'], { cwd: ROOT, maxBuffer: 64e6 }).toString('utf8').split('\u0000').filter(Boolean);
   const res = COVER_GLOBS.map(globToRe);
-  return list.filter((f) => res.some((r) => r.test(f))).sort();
+  return [...new Set(list)].filter((f) => fs.existsSync(path.join(ROOT, f))).filter((f) => res.some((r) => r.test(f))).sort();
 }
 /** 未被任何文档提到的公开面。同名脚本必须写全路径——裸文件名会被同名的另一份顶包。 */
 function checkCoverage(d) {

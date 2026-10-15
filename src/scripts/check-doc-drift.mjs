@@ -36,8 +36,9 @@
  *     引用面必须非零（本工程 package.json / CI / 同族脚本），否则须登记进该篇 §1.1 豁免表；
  *     ② deploy-pages.yml 的 matrix.app 与装配段 for 循环必须与 `apps/` 目录三者一致；
  *     ③ 三工程 `.cmd` 必须 @echo off + exit /b，且不得写死 `C:\Users\` 路径。
- *   O 文档契约（docflow）——直接调用 `node src/scripts/docflow.mjs check`（口径单源）：只读 md
- *     漂移 / 未落实审批 / 联动缺失 / 只读类新建与删除。划分与子命令见该脚本头注与 `docflow.json`。
+ *   O 文档契约（docflow）——调用 `node src/scripts/docflow.mjs check --all`（口径单源，**强制 CI 口径**：
+ *     docflow 默认只查「改动面」，与 CI 的全量判定不一致时会出现「本地绿、推上去才红」）：只读 md
+ *     漂移 / 未落实审批 / 联动缺失 / 只读类新建与删除 / 公开面覆盖率。划分与子命令见该脚本头注与 `docflow.json`。
  *   P 本机路径：全仓文本不得出现**私人目录名 / 本机绝对路径**（Windows 用户目录、`/Users/<真名>`、
  *     `/home/<真名>`、`<盘符>:\code\...` 一类）。占位符（`<用户>` / `<本地工作区>` / `<盘符>` …）豁免。
  *     规则与 2026-10-07 事故记录见 agentmemory `websurf/documents/norms/local-path-hygiene.md`。
@@ -520,7 +521,11 @@ const splitDocflow = (out) => {
   }
 };
 try {
-  splitDocflow(execFileSync('node', ['src/scripts/docflow.mjs', 'check', '--quiet'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  // `--all` 是刻意的：docflow 默认走「改动面模式」（只查工作树里变了的文件），而 CI 下它读到
+  // `process.env.CI` 就切全量 + `BASE=HEAD^`。两种口径不一样时会出现「提交后才红」——本地跑的
+  // 那次永远看不见已提交但未同步的钉/单元（T-679 的 [O] 就是这样漏的）。这里一律按 CI 口径跑，
+  // 保证「本地绿 ⇒ CI 绿」；`--quiet` 压掉汇总行，只留违规明细。
+  splitDocflow(execFileSync('node', ['src/scripts/docflow.mjs', 'check', '--all', '--quiet'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
 } catch (e) {
   const out = String(e.stdout || '').trim();
   if (out) splitDocflow(out);
