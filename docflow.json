@@ -107,14 +107,6 @@
       "consumed": true
     },
     {
-      "path": "OWNER.md",
-      "by": "owner(2026-10-11)",
-      "reason": "T-657",
-      "at": "2026-10-11",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "skills/websurf-workflow/SKILL.md",
       "by": "owner-delegated",
       "reason": "更正门禁清单：check-kb-gate --all 恒 exit 0（只跑不判），四道才是能真红的判据",
@@ -126,6 +118,14 @@
       "path": "AGENTS.md",
       "by": "owner-delegated",
       "reason": "CI 修复（T-679）：[O] 覆盖率要求 src/scripts/*.mjs 被 AGENTS.md 以仓库相对路径提到；build-textures-mtz.mjs 于 T-659 新增时未登记（当时未跟踪 ⇒ 门禁看不见），提交后 CI 报红",
+      "at": "2026-10-15",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "OWNER.md",
+      "by": "owner",
+      "reason": "分卷：owner 2026-10-15「确认收掉」D-111 / D-116 / D-117 / D-118 / D-119 五条已决行，移入记忆库已决卷 websurf/progress/owner/2026-10-15-resolved.md",
       "at": "2026-10-15",
       "task": "",
       "consumed": true
@@ -145,71 +145,41 @@
   "binds": [],
   "unitPins": {
     "OWNER.md": {
-      "D-111": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-10",
-        "line": 22
-      },
       "D-023": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-08",
-        "line": 23
+        "line": 22
       },
       "D-110": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-09",
-        "line": 24
+        "line": 23
       },
       "D-114": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-10",
-        "line": 25
+        "line": 24
       },
       "D-115": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-10",
-        "line": 26
-      },
-      "D-116": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-10",
-        "line": 27
-      },
-      "D-117": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-10",
-        "line": 28
-      },
-      "D-118": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-10",
-        "line": 29
-      },
-      "D-119": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-10",
-        "line": 30
+        "line": 25
       },
       "D-120": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-15",
-        "line": 31
+        "line": 26
       },
       "D-121": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-15",
-        "line": 32
+        "line": 27
       }
     }
   },
@@ -220,9 +190,7 @@
     ".github/PULL_REQUEST_TEMPLATE.md": {},
     "AGENTS.md": {},
     "CONTRIBUTING.md": {},
-    "OWNER.md": {
-      "src/wasm-core/render_bundle.rs:74:76": "dfe64fa0"
-    },
+    "OWNER.md": {},
     "README.md": {
       "src/scripts/serve.py:19:19": "5d85e228",
       "src/scripts/serve.py:20:20": "41c93368",
@@ -235,6 +203,14 @@
     "src/vendor/lzma/README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "OWNER.md",
+      "at": "2026-10-15T15:43:13.920Z",
+      "by": "agent",
+      "reason": "分卷：owner 2026-10-15「确认收掉」D-111 / D-116 / D-117 / D-118 / D-119 五条已决行，移入记忆库已决卷 websurf/progress/owner/2026-10-15-resolved.md",
+      "changed": 1,
+      "total": 0
+    },
     {
       "path": "OWNER.md",
       "at": "2026-10-14T18:19:29.411Z",
