@@ -474,7 +474,7 @@
   ],
   "board": {
     "source": "progress/board.jsonl",
-    "sha12": "c970f1e22be3",
+    "sha12": "ef5ba42881b7",
     "live": [
       "T-056",
       "T-109",

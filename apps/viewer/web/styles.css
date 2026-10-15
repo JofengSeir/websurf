@@ -10,8 +10,7 @@
  * 三工程区分：apps/debug 石墨青「仪表」、apps/game 深青「莱茵精工」、
  * apps/viewer 中性灰阶「导演工作台」。
  *   · 菱角分明：全文件 border-radius 一律 0，仅服务孔（1 处，位于侧栏左下）
- *     与引导卡那一块（owner 2026-10-16 指定，见下方引导卡段）保留圆角；
- *     轨迹色点 .track-dot / .meta-dot 方形化；
+ *     与螺钉保留 50% 圆；轨迹色点 .track-dot / .meta-dot 方形化；
  *   · 切角系统：**已撤销**（owner 2026-10-16：右上切角"莫名其妙"，与 game 同口径）。
  *     最后两处（帮助浮层 `#help`、致命错误卡 `#fatal .card`）本轮一并删除；
  *     侧栏与主按钮更早前已是矩形。菱角语彙改由「零圆角 + 1px/2px 直线」表达。
@@ -28,12 +27,12 @@
  *     时间码黄四段）、每个小节标题左端**调色卡竖条**（黑/白/黄三段）、
  *     （激活 = 场记板白底黑字）；
  *   · **影视语彙泛化（v4/v6）**：播放中时间码前缀 REC 红点、时间轴底部秒刻度尺、白竖线播放头、SMPTE 彩条、速度电平表、场记板黑白标签。
- *   · **引导卡「Scene Slate」（owner 2026-10-16 定版）**：圆角铰链片（内联 SVG 画形状，
+ *   · **引导卡「Scene Slate」（owner 2026-10-16 定版）**：直角铰链片（内联 SVG 画形状：四个 10px 硬切角 + 右上 45° 直斜边，
  *     1px 描边随轮廓走）压住上下两根拍板条的左端 + RGB/CMYK 色标条（7 格逐格等宽）+
  *     标题行（大字 WebSurf / SCENE SLATE + PRODUCTION / VERSION 两格印字）+
  *     四格（STEP 01~03 引导 + ACTIONS 两枚按钮）+ 底部 FORMAT 行（BSP / REC / REPLAY / DEM）。
  *     拍板条 = 上片抬起 −10°、两组 45° 斜纹方向镜像（硬停色块，无受光高光 / 无材质渐变）。
- *     **这条是全文件唯一的圆角例外**（owner 指定，其余一律 0）；色标条的 6 个彩色只在卡内用，
+ *     零圆角，与全站口径一致）；色标条的 6 个彩色只在卡内用，
  *     不进 :root。前一版（v15 段的人字条 + 表格化板身）已整块替换 —— 相关类名
  *     （`slate-stick` / `slate-stripes` / `slate-screws` / `slate-row` / `gstep` / `glabel` /
  *     `gvalue` / `gtext` / `gbtns`）在本文件与 index.html 里均已 0 命中。
@@ -672,23 +671,23 @@ select.tl-select:focus { border-color: var(--text); }
 #guide {
   position: absolute; inset: 0; z-index: 8;
   display: flex; align-items: center; justify-content: center;
-  /* 右侧让出侧栏那一条：`#app` 是 `position: fixed`（自成层叠上下文），而 `#sidebar`
-     是它的**兄弟**（z-index 6）—— 侧栏永远压在引导层之上，卡面一旦伸进侧栏那一条
-     就会被盖住（620px 宽 + 1150px 视口下实测被盖 107px，elementFromPoint 命中的
-     是 `pane-map`）。故把居中区域左移到侧栏左侧，卡片宽度改用自由区宽度。 */
-  padding: 0 calc(var(--sidebar-w) + 12px) 0 12px;
+  /* 卡片在**视口**里居中（owner 2026-10-16：不要整体左置）。注意 `#sidebar` 是 `#app`
+     的**兄弟**（z-index 6）且压在引导层之上 —— 卡面伸进侧栏那一条就会被盖住，所以
+     不再用 padding 让位，改由下面 `.card` 的宽度上限把「缩放后的可视宽度」限制在
+     侧栏左侧。 */
+  padding: 0 12px;
   background: var(--overlay);
 }
 /* ── 引导卡 = owner 2026-10-16 定的「Scene Slate」场记板（样张 test/slate.html 逐条落进来）：
    圆角铰链片（内联 SVG，1px 描边随轮廓走）压住两根拍板条的左端 + RGB/CMYK 色标条（7 格等宽）+
    标题行（大字 + PRODUCTION / VERSION）+ 四格（STEP 01~03 / ACTIONS）+ 底部 FORMAT 行。
-   ⚠ 本卡有两处**偏离全站口径、均为 owner 指定**：① 圆角 —— 它是「全文件 border-radius 0」
-   那条的唯一例外（旧口径见本文件头注）；② 色标条引入 6 个彩色，只出现在卡内，不进 :root。
-   拍板条的斜纹仍是硬停色块（无受光高光、无材质渐变）。── */
+   ⚠ 唯一偏离全站口径之处（owner 指定）：色标条引入 6 个彩色，只出现在卡内，不进 :root。
+   圆角一律 0（owner 2026-10-16 追加），拍板条的斜纹仍是硬停色块（无受光高光、无材质渐变）。── */
 #guide .card {
-  /* 板面比旧卡宽：四格引导 + 色标条需要横向空间。上限取「让出右侧栏之后的自由区」，
-     故用 100% —— #guide 已经用 padding 把侧栏那一条排除掉了 */
-  width: min(760px, 100%);
+  /* 板面比旧卡宽：四格引导 + 色标条需要横向空间。上限 = min(想要宽度, 不压到侧栏的可视上限)：
+     整块按 0.75 缩放后可视半宽 = 0.375 × 本宽度，居中时它不得超过 50vw − 侧栏宽
+     ⇒ 本宽度 ≤ (50vw − 侧栏宽) / 0.375。窄视口再兜一个 320px 下限，避免卡片被压没。 */
+  width: min(760px, max(320px, calc((50vw - var(--sidebar-w)) / 0.375)));
   position: relative; text-align: left;
   /* 给抬起的上片与铰链片留位：整块按 0.75 缩放后（见 `.slate` 的 transform），拍板条最右端
      只需 ~84px 净空（未缩放时是 ~212px，缩放把外伸部分一并收小了） */
@@ -707,7 +706,7 @@ select.tl-select:focus { border-color: var(--text); }
 /* 上下拍板条：上片抬起并向右上方倾斜；两组斜纹方向镜像，视觉上形成 >>>>（硬停色块） */
 #guide .clapstick {
   position: absolute; left: -12px; right: -9px; overflow: hidden;
-  background: #0b0c0f; border: 1px solid #3c4049; border-radius: 7px;
+  background: #0b0c0f; border: 1px solid #3c4049;
 }
 #guide .clapstick-top {
   z-index: 4; top: -84px; height: 74px;
@@ -742,13 +741,12 @@ select.tl-select:focus { border-color: var(--text); }
 #guide .slate-body {
   position: relative; z-index: 1;
   padding: 88px 21px 0;
-  background: var(--panel-trans); border: 1px solid var(--border-strong); border-radius: 18px;
+  background: var(--panel-trans); border: 1px solid var(--border-strong);
 }
 /* 色标条：RGB 三格 + CMYK 四格，**7 格逐格等宽**（各 1/7）。K 与板面底色同为黑，不加 1px
    内描边就看不见 —— 那样第 7 格读不出来，7 格等宽也白搭 */
 #guide .colorbar {
-  display: flex; height: 46px; margin: 0 24px 18px; overflow: hidden;
-  border-radius: 4px; background: var(--strip-dark);
+  display: flex; height: 46px; margin: 0 24px 18px; overflow: hidden; background: var(--strip-dark);
 }
 #guide .colorbar span { flex: 1; min-width: 0; }
 #guide .colorbar .r { background: #a92d31; }
@@ -768,19 +766,19 @@ select.tl-select:focus { border-color: var(--text); }
   padding: 16px 18px; border-right: 1px solid var(--border-strong);
 }
 #guide .slate-name strong {
-  font-size: clamp(34px, 5.2vw, 54px); font-weight: 600; letter-spacing: -0.045em;
+  font-size: clamp(35.25px, 5.2vw, 55.25px); font-weight: 600; letter-spacing: -0.045em;
   line-height: 1.08; overflow-wrap: anywhere;
 }
 #guide .slate-name span {
-  margin-top: 13px; color: var(--muted); font-family: var(--mono); font-size: 20px;
+  margin-top: 13px; color: var(--muted); font-family: var(--mono); font-size: 21.25px;
   font-weight: 500; letter-spacing: 0.27em;
 }
 #guide .production { display: grid; grid-template-rows: 1fr 1fr; min-width: 0; }
 #guide .production div {
-  padding: 12px 26px; color: var(--muted); font-family: var(--mono); font-size: 15px; letter-spacing: 0.13em;
+  padding: 12px 26px; color: var(--muted); font-family: var(--mono); font-size: 16.25px; letter-spacing: 0.13em;
 }
 #guide .production div + div { border-top: 1px solid var(--border-strong); }
-#guide .production b { display: block; margin-top: 4px; color: var(--text); font-family: system-ui, sans-serif; font-size: 19px; font-weight: 500; }
+#guide .production b { display: block; margin-top: 4px; color: var(--text); font-family: system-ui, sans-serif; font-size: 20.25px; font-weight: 500; }
 /* 四格：前三格等宽、操作格略宽（两枚按钮的文案比「01」长，不然会折成三行）。
    实物板上这四格是 SCENE / TAKE / ROLL / DATE，这里换成三步引导 + 操作 */
 #guide .fields {
@@ -793,20 +791,20 @@ select.tl-select:focus { border-color: var(--text); }
 #guide .field + .field { border-left: 1px solid var(--border-strong); }
 #guide .field > label {
   display: block; margin-bottom: 9px; color: var(--muted);
-  font-family: var(--mono); font-size: 16px; letter-spacing: 0.1em;
+  font-family: var(--mono); font-size: 17.25px; letter-spacing: 0.1em;
 }
 /* 值：实物板上是短码（01 / 001），这张卡里换成整句话 —— 字号行高按正文调，仍是同一格 */
 #guide .field > span {
-  display: block; color: var(--muted); font-size: 15px; line-height: 1.75;
+  display: block; color: var(--muted); font-size: 16.25px; line-height: 1.75;
 }
-#guide .field code { font-family: var(--mono); font-size: 14px; font-weight: 500; color: var(--text); }
+#guide .field code { font-family: var(--mono); font-size: 15.25px; font-weight: 500; color: var(--text); }
 /* 第四格 = 操作：两枚按钮是 `label[for]` 原生转发到隐藏 input；出错行也留在这格里。
    全局 `.filebtn` 带 `white-space: nowrap`，这里必须放开，否则长标签会撑破格子 */
 #guide .field .filebtn {
   display: block; width: 100%; margin-bottom: 9px; padding: 11px 12px; text-align: center;
   color: var(--text); background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-strong); border-radius: 6px;
-  font-family: var(--mono); font-size: 14px; font-weight: 500; letter-spacing: 0.05em; white-space: normal;
+  border: 1px solid var(--border-strong);
+  font-family: var(--mono); font-size: 15.25px; font-weight: 500; letter-spacing: 0.05em; white-space: normal;
 }
 #guide .field .filebtn:hover { background: rgba(255, 255, 255, 0.07); border-color: var(--text); }
 #guide .field .filebtn.busy { opacity: 0.45; pointer-events: none; }
@@ -814,21 +812,21 @@ select.tl-select:focus { border-color: var(--text); }
 #guide #guideError { display: none; }
 #guide #guideError.show {
   display: block; margin-top: 10px;
-  color: var(--err); font-size: 13px; line-height: 1.6;
+  color: var(--err); font-size: 14.25px; line-height: 1.6;
 }
 #guide #guideError .raw {
   display: block; margin-top: 6px;
-  font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--muted);
+  font-family: var(--mono); font-size: 12.75px; font-weight: 500; color: var(--muted);
   word-break: break-all;
 }
 /* 底行：支持的格式（地图 + 三种记录 / 录像）；右侧斜杠是原设计的装饰 */
 #guide .format-row {
   display: flex; align-items: center; gap: 46px; padding: 20px 25px 24px;
-  color: var(--muted); font-family: var(--mono); font-size: 15px; letter-spacing: 0.13em;
+  color: var(--muted); font-family: var(--mono); font-size: 16.25px; letter-spacing: 0.13em;
 }
 #guide .format-row strong { font-weight: 500; color: var(--text); }
 #guide .slashes {
-  margin-left: auto; color: var(--muted); font-size: 36px; letter-spacing: 0.12em; white-space: nowrap;
+  margin-left: auto; color: var(--muted); font-size: 37.25px; letter-spacing: 0.12em; white-space: nowrap;
 }
 /* 窄视口：四格改竖排一列、铰链片与螺钉等比缩小、斜纹周期减半。
    断点取 1080px：自由区宽 = 视口 − 右侧栏（348）− 两侧让位（24），四格并排约需 700px 自由区 ⇒
@@ -849,22 +847,22 @@ select.tl-select:focus { border-color: var(--text); }
   #guide .screw.one { left: 23px; top: 26px; }
   #guide .screw.two { left: 23px; top: 64px; }
   #guide .screw.three { left: 68px; top: 64px; }
-  #guide .slate-body { padding: 57px 10px 17px; border-radius: 12px; }
+  #guide .slate-body { padding: 57px 10px 17px; }
   #guide .colorbar { height: 34px; margin: 0 11px 14px; }
   #guide .title-row { min-height: 116px; }
   #guide .slate-name { padding: 12px 10px; }
-  #guide .slate-name strong { font-size: clamp(25px, 7.5vw, 35px); }
-  #guide .slate-name span { margin-top: 8px; font-size: 9px; letter-spacing: 0.16em; }
-  #guide .production div { padding: 10px 10px; font-size: 9px; }
-  #guide .production b { margin-top: 4px; font-size: 16px; }
+  #guide .slate-name strong { font-size: clamp(26.25px, 7.5vw, 36.25px); }
+  #guide .slate-name span { margin-top: 8px; font-size: 10.25px; letter-spacing: 0.16em; }
+  #guide .production div { padding: 10px 10px; font-size: 10.25px; }
+  #guide .production b { margin-top: 4px; font-size: 17.25px; }
   #guide .fields { grid-template-columns: 1fr; }
   #guide .field { padding: 14px 11px 16px; }
   #guide .field + .field { border-left: 0; border-top: 1px solid var(--border-strong); }
-  #guide .field > label { margin-bottom: 7px; font-size: 10px; letter-spacing: 0.06em; }
-  #guide .field > span { font-size: 13px; line-height: 1.65; }
-  #guide .field .filebtn { padding: 10px 12px; font-size: 12.5px; }
-  #guide .format-row { gap: 9px; padding: 17px 11px 15px; font-size: 9px; letter-spacing: 0.07em; }
-  #guide .slashes { font-size: 16px; }
+  #guide .field > label { margin-bottom: 7px; font-size: 11.25px; letter-spacing: 0.06em; }
+  #guide .field > span { font-size: 14.25px; line-height: 1.65; }
+  #guide .field .filebtn { padding: 10px 12px; font-size: 13.75px; }
+  #guide .format-row { gap: 9px; padding: 17px 11px 15px; font-size: 10.25px; letter-spacing: 0.07em; }
+  #guide .slashes { font-size: 17.25px; }
 }
 /* 矮视口（≤820px 高）：卡片再压一档 —— 抬起的上片本身就占 ~210px，不压就会顶到视口外 */
 @media (max-height: 820px) {
@@ -873,7 +871,7 @@ select.tl-select:focus { border-color: var(--text); }
   #guide .colorbar { height: 38px; margin: 0 24px 14px; }
   #guide .title-row { min-height: 108px; }
   #guide .slate-name { padding: 12px 18px; }
-  #guide .slate-name strong { font-size: clamp(30px, 4.6vw, 46px); }
+  #guide .slate-name strong { font-size: clamp(31.25px, 4.6vw, 47.25px); }
   #guide .production div { padding: 10px 26px; }
   #guide .field { padding: 14px 22px; }
   #guide .field > label { margin-bottom: 6px; }

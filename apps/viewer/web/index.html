@@ -31,10 +31,9 @@
              斜纹是 45° 硬停色块（无受光高光、无材质渐变） -->
         <div class="clapstick clapstick-top" aria-hidden="true"><span class="stripes"></span></div>
         <div class="clapstick clapstick-bottom" aria-hidden="true"><span class="stripes"></span></div>
-        <!-- 铰链片：形状走内联 SVG（四个 90° 角 r12；右上 45° 斜边两端 r12 小圆角），1px 描边
-             跟着轮廓走 —— 用 `clip-path` 会把边线一起裁掉，看着像"被切了一刀"。
-             ⚠ 圆角切点到拐角的距离必须用 t = r·tan(转角/2)：写成 r/tan 会让切点拉开 ~6 倍，
-             弦长超过圆弧能跨的长度，渲染器会自动放大半径 ⇒ 两端各鼓出一个半圆。 -->
+        <!-- 铰链片：形状走内联 SVG，**全部直角**（owner 2026-10-16）—— 四个角是 10px 硬切角、
+             右上是一条 45° 直斜边；1px 描边跟着轮廓走（用 `clip-path` 会把边线一起裁掉，
+             看着像"被切了一刀"，所以改由 SVG 画）。路径整体内缩 1px，描边才不会被视口裁掉。 -->
         <div class="hinge" aria-hidden="true">
           <svg class="hinge-plate" viewBox="0 0 197 188" preserveAspectRatio="none" focusable="false">
             <defs>
@@ -42,7 +41,7 @@
                 <stop offset="0" stop-color="#252831"/><stop offset=".76" stop-color="#1a1c22"/>
               </linearGradient>
             </defs>
-            <path d="M1 13 A12 12 0 0 1 13 1 L101.9 1 A12 12 0 0 1 109.8 3.9 L191.9 85.7 A12 12 0 0 1 196 94.8 L196 175 A12 12 0 0 1 184 187 L13 187 A12 12 0 0 1 1 175 Z"
+            <path d="M1 11 L11 1 L106.4 1 L196 90.3 L196 177 L186 187 L11 187 L1 177 Z"
                   fill="url(#hingePlate)" stroke="#50545e" stroke-width="1" vector-effect="non-scaling-stroke"/>
           </svg>
           <i class="screw one"></i><i class="screw two"></i><i class="screw three"></i>
