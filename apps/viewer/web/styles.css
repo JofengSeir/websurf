@@ -690,14 +690,18 @@ select.tl-select:focus { border-color: var(--text); }
      故用 100% —— #guide 已经用 padding 把侧栏那一条排除掉了 */
   width: min(760px, 100%);
   position: relative; text-align: left;
-  /* 给抬起的上片与铰链片留位：它俩相对 .slate 顶边是负偏移（−84 / −105），而抬起的上片
-     在最右端还要再往上抬 ~0.176×条宽 ⇒ 视口越宽需求越大。用 vh 跟着视口高度走 */
-  padding-top: clamp(120px, 18vh, 190px);
+  /* 给抬起的上片与铰链片留位：整块按 0.75 缩放后（见 `.slate` 的 transform），拍板条最右端
+     只需 ~84px 净空（未缩放时是 ~212px，缩放把外伸部分一并收小了） */
+  padding-top: clamp(96px, 13vh, 140px);
 }
 /* `.slate` 自己**不带 padding**：它就是拍板条与铰链片的包含块，带 padding 只会把在流的板身
-   推下去、条子却留在原处（实测两者之间裂开 48px、片顶还被切）。留位交给外层 `.card` */
+   推下去、条子却留在原处（实测两者之间裂开 48px、片顶还被切）。留位交给外层 `.card`。
+   **整块 0.75 缩放**（owner 2026-10-16）：用 transform 而不是逐个改尺寸 —— 卡片、条子、
+   铰链片、螺钉、字号一次性同比缩到 75%，且矢量与字体仍是原生清晰度；
+   `transform-origin: center` 让视觉中心留在原位（flex 居中的仍是未缩放的布局盒）。 */
 #guide .slate {
   position: relative; isolation: isolate; width: 100%;
+  transform: scale(0.75); transform-origin: center;
   filter: drop-shadow(0 20px 26px rgba(0, 0, 0, 0.34));
 }
 /* 上下拍板条：上片抬起并向右上方倾斜；两组斜纹方向镜像，视觉上形成 >>>>（硬停色块） */

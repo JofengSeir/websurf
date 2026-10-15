@@ -132,34 +132,7 @@
     }
   ],
   "cochange": [],
-  "claim": {
-    "task": "T-682",
-    "may": [
-      "apps/viewer/web/index.html",
-      "apps/viewer/web/styles.css"
-    ],
-    "must": [
-      "apps/viewer/web/index.html",
-      "apps/viewer/web/styles.css"
-    ],
-    "base": {
-      "apps/viewer/web/index.html": "987e634bb2b603213023829f1b12707a06a73385018142d15e7d1527dbf0e491",
-      "apps/viewer/web/styles.css": "e843c4ae80b5a2e0bfb96d3353b498b8d1a1de0c554336b7395b13ab446a3f4d"
-    },
-    "at": "2026-10-15T22:20:56.277Z",
-    "pins": {
-      "README.md": "556b993fd49076114e4af33bea83a2bd9064520b661e258ec161d70072a9d77c",
-      "CONTRIBUTING.md": "cecc4b287608c70d5cf734f9e133b9ac08b388d7e256608ceb910387bff97957",
-      "SECURITY.md": "41d56d4ab34548cd6f75f04fc564cf67e5ecf453872e0dfc1a6f29292bdecf44",
-      "skills/websurf-env-traps/SKILL.md": "0b56637e989536fa35f5cffbc4286d6ed650ea2989707652a06a703f0b21d8f0",
-      ".github/ISSUE_TEMPLATE/bug_report.md": "1c04607a70bd18dd118b6771a9f0fe12ea5d777ade9bf18c1992c3a500075ed5",
-      ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
-      ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
-      ".github/PULL_REQUEST_TEMPLATE.md": "adbc4aecbd5debdfe4fa1113ef235e683fef2fae3f9c659512e2fe931b7282e3",
-      "AGENTS.md": "7da3ce260b077301104ff04b8b8d9539ab2029d9a1ab1a082b2f63f180603df7",
-      "skills/websurf-workflow/SKILL.md": "7299f1bad07726f52718d242a02be2e9d397eed283b9f2db2ed897dcb6621951"
-    }
-  },
+  "claim": null,
   "units": {
     "OWNER.md": {
       "match": "^\\|\\s*\\*{0,2}D-\\d{3}",
