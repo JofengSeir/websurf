@@ -44,6 +44,13 @@ pub struct PakMaterials {
     /// `材质名 → PNG 字节`。键须与 `vmdl::TextureInfo::name` 逐字符一致，供 `push_texture` 查表。
     /// 只收 `$basetexture` 命中、VTF 取到且解码成功的条目；`decode_textures = false` 时整表为空。
     pub textures: HashMap<String, Vec<u8>>,
+    /// `材质名 → mosaic 字节码`，键与 [`PakMaterials::textures`] **逐一对应**（含 `#bump` 那条）。
+    ///
+    /// 为什么在这里顺手出：mosaic 只要把图缩到 ≤50 像素，而本函数本来就已经把 VTF 解成了图 ——
+    /// 分开算就等于把同一批贴图再解一遍。实测 `surf_kraken` 的整个 mosaic pass 要 45~57 s，其中
+    /// **模型那一半与 GLB 导出完全重复**（两边都跑 `collect_pakfile_models` + 本函数）；
+    /// 这份缓存让 `BspProcessor::export_mosaic_manifest` 不必再解析一遍模型材质。
+    pub mosaic: HashMap<String, String>,
     /// `材质名 → alpha_mode`（0 = Opaque，1 = Blend，2 = Mask）。
     /// VMT 未打包或候选路径全未命中时写 0；与是否解码纹理无关，只要扫到材质就写。
     pub alpha_modes: HashMap<String, u8>,
@@ -345,7 +352,25 @@ pub fn resolve_pakfile_materials(
             candidates.push(tex.name.clone());
 
             let Some(mut info) = candidates.iter().find_map(|c| fetch_vmt(c)) else {
-                // VMT 未打包 → 按不透明处理（保留碰撞）
+                // VMT 未打包 ⇒ 连 `$basetexture` 都无从得知。按**同一组候选键**（`<搜索路径>/<材质名>`
+                // 加末尾的裸名）查一次回退表：模型材质名常是裸基名（`metalfence007a`），其真实键却是
+                // 源资源路径（`materials/metal/metalfence007a`），`search_paths` 正是补前缀的来源。
+                // 查不到再按不透明处理（保留碰撞）。此前这里直接 `continue`，回退表永不参与（T-662）。
+                if decode_textures {
+                    if let Some(fallback) = fallback {
+                        let keys: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
+                        if let Some((png, code)) = bsp_to_gltf_core::fallback_texture_png(
+                            fallback,
+                            &keys,
+                            8,
+                        )
+                        .and_then(|png| png_with_mosaic(png, &tex.name))
+                        {
+                            out.textures.insert(tex.name.clone(), png);
+                            out.mosaic.insert(tex.name.clone(), code);
+                        }
+                    }
+                }
                 out.alpha_modes.insert(tex.name.clone(), 0);
                 continue;
             };
@@ -376,15 +401,31 @@ pub fn resolve_pakfile_materials(
             // `$bumpmap`（T-627/P8）：法线贴图也解成 PNG 进同一张贴图表，键用 `<材质名>#bump`
             // （与基色键同源且不会与基色/其它材质重名）；`bumpmaps` 记下这层映射，`push_material`
             // 据此把**纹理下标**写进材质 extras。与基色贴图无关：基色缺失也照样收法线图。
+            // 取图两路与基色同策：先 pakfile，再默认纹理包（T-667 —— 此前只有 pakfile 一路，
+            // 法线 VTF 没打进图的材质会**静默丢法线图**，实测地图 pakfile 内声明 `$bumpmap` 的
+            // VMT 里有约 6% 属这种情况）。查表键用 `$bumpmap` 路径本身：包内若以该路径为键，
+            // 那条内容就是这张法线图；材质名作为第二候选。
             if let Some(bump) = info.bumpmap.clone() {
-                if let Some(vtf_entry) = index.find(&bump, "vtf") {
-                    if let Ok(Some(vtf_bytes)) = bsp.pack.get(vtf_entry) {
-                        if let Some(png) = decode_vtf_png(&vtf_bytes) {
-                            let key = format!("{}#bump", tex.name);
-                            out.textures.insert(key.clone(), png);
-                            out.bumpmaps.insert(tex.name.clone(), key);
-                        }
-                    }
+                let key = format!("{}#bump", tex.name);
+                let from_pak = index
+                    .find(&bump, "vtf")
+                    .and_then(|e| bsp.pack.get(e).ok().flatten())
+                    .and_then(|b| decode_vtf_assets(&b, &key));
+                let got = from_pak.or_else(|| {
+                    fallback
+                        .and_then(|f| {
+                            bsp_to_gltf_core::fallback_texture_png(
+                                f,
+                                &[bump.as_str(), tex.name.as_str()],
+                                8,
+                            )
+                        })
+                        .and_then(|png| png_with_mosaic(png, &key))
+                });
+                if let Some((png, code)) = got {
+                    out.textures.insert(key.clone(), png);
+                    out.mosaic.insert(key.clone(), code);
+                    out.bumpmaps.insert(tex.name.clone(), key);
                 }
             }
             let Some(base) = info.basetexture else {
@@ -393,8 +434,9 @@ pub fn resolve_pakfile_materials(
             // 先在 pakfile 内按 `$basetexture` 找同路径 VTF（原始分辨率），解出 PNG 即用
             if let Some(vtf_entry) = index.find(&base, "vtf") {
                 if let Ok(Some(vtf_bytes)) = bsp.pack.get(vtf_entry) {
-                    if let Some(png) = decode_vtf_png(&vtf_bytes) {
+                    if let Some((png, code)) = decode_vtf_assets(&vtf_bytes, &tex.name) {
                         out.textures.insert(tex.name.clone(), png);
+                        out.mosaic.insert(tex.name.clone(), code);
                         continue;
                     }
                 }
@@ -404,12 +446,15 @@ pub fn resolve_pakfile_materials(
             // `$basetexture` 路径与材质名依次试：模型材质名常是裸基名（`metalfence007a`），
             // 包里的键却是源资源路径（`materials/metal/metalfence007a`）。
             if let Some(fallback) = fallback {
-                if let Some(png) = bsp_to_gltf_core::fallback_texture_png(
+                if let Some((png, code)) = bsp_to_gltf_core::fallback_texture_png(
                     fallback,
                     &[base.as_str(), tex.name.as_str()],
                     8,
-                ) {
+                )
+                .and_then(|png| png_with_mosaic(png, &tex.name))
+                {
                     out.textures.insert(tex.name.clone(), png);
+                    out.mosaic.insert(tex.name.clone(), code);
                 }
             }
         }
@@ -421,12 +466,19 @@ pub fn resolve_pakfile_materials(
 /// VTF 字节 → PNG 字节：取最高分辨率图的第 0 帧重新编码。
 ///
 /// 与各端导出的 `decode_vtf_to_png` 是同一实现的三步（VTF 解析 / 图像解码 / PNG 编码），
-/// 差别只在失败一律折成 `None`——本函数的唯一调用点（[`resolve_pakfile_materials`]）不区分
-/// 失败原因，需要带上下文的错误文本时由各端自己的导出函数给出。
-fn decode_vtf_png(data: &[u8]) -> Option<Vec<u8>> {
+/// VTF 字节 → `(PNG 字节, mosaic 字节码)`；VTF 解析或解码失败一律折成 `None`。
+///
+/// 两样一起出是刻意的：mosaic 只需把图缩到 ≤50 像素，而这里本来就已经解出了整张图。
+/// `name` 原样写进 mosaic 字节码的 `B[name:WxH]` 字段，须与调用方插进
+/// [`PakMaterials::mosaic`] 的键一致（口径同 `BspProcessor::export_mosaic_manifest`）。
+///
+/// 差别只在失败一律折成 `None`——调用点都不区分失败原因，需要带上下文的错误文本时由各端
+/// 自己的导出函数给出。
+fn decode_vtf_assets(data: &[u8], name: &str) -> Option<(Vec<u8>, String)> {
     let vtf = texture_utils::from_bytes(data).ok()?;
     let image = vtf.highres_image.decode(0).ok()?;
 
+    let mosaic = crate::mosaic::encode::img_to_code_dyn(&image, name);
     let mut output: Vec<u8> = Vec::new();
     image
         .write_to(
@@ -435,7 +487,16 @@ fn decode_vtf_png(data: &[u8]) -> Option<Vec<u8>> {
         )
         .ok()?;
 
-    Some(output)
+    Some((output, mosaic))
+}
+
+/// 给一条**只拿得到 PNG 字节**的通路补上 mosaic（默认纹理包的 `fallback_texture_png` 产物）。
+///
+/// 这条路上图已经被编成 PNG 了，所以这里必须解一次 PNG 才能算 mosaic —— VTF 那条路不走它
+/// （那条路图还在手里，见 [`decode_vtf_assets`]）。
+fn png_with_mosaic(png: Vec<u8>, name: &str) -> Option<(Vec<u8>, String)> {
+    let code = crate::mosaic::encode::img_to_code(&png, name).ok()?;
+    Some((png, code))
 }
 
 // ---------------------------------------------------------------------------

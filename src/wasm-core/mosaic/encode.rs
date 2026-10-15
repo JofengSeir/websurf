@@ -69,6 +69,26 @@ pub fn img_to_code(png: &[u8], name: &str) -> Result<String, String> {
     let img = image::load_from_memory(png)
         .map_err(|e| format!("打开图片失败: {e}"))?
         .to_rgba8();
+    Ok(img_to_code_rgba(&img, name))
+}
+
+/// 同上，但**直接吃已解码的图像**，省掉一次 PNG 往返。
+///
+/// 为什么需要：`img_to_code` 的入参是 PNG 字节，而调用方手里往往已经有解码好的图
+/// （`mosaic/manifest.rs` 的 `texture_to_code` 甚至要先 `write_to(Png)` 编一遍再传进来）。
+/// 编一张 4096×4096 的 PNG 要秒级，而本函数最终只用把图缩到 **≤50 像素** —— 这个往返纯属浪费。
+///
+/// 判据：同一张图走 `img_to_code`（先编码成 PNG）与走本函数，必须产出**逐字节相同**的字节码。
+pub fn img_to_code_dyn(img: &image::DynamicImage, name: &str) -> String {
+    match img.as_rgba8() {
+        // 常见情形（VTF 解码产物就是 Rgba8）直接借用，不复制整张图
+        Some(rgba) => img_to_code_rgba(rgba, name),
+        None => img_to_code_rgba(&img.to_rgba8(), name),
+    }
+}
+
+/// `img_to_code` 与 `img_to_code_dyn` 的公共实现：**已解码的 RGBA 图** → 字节码文本。
+fn img_to_code_rgba(img: &image::RgbaImage, name: &str) -> String {
     let (tw, th) = (img.width(), img.height());
 
     // 缩放：长边压到 50，短边同比取整；sc ≤ 1 故只缩不放，两轴各保底 1 格
@@ -222,5 +242,5 @@ pub fn img_to_code(png: &[u8], name: &str) -> Result<String, String> {
         line.push_str(&format!("R[{}]", b64(&packed)));
     }
     // 尾换行是格式的一部分（不是排版）：mtz 侧的 render_bytecode 同样以换行收尾
-    Ok(format!("#mosaic v4\n{line}\n"))
+    format!("#mosaic v4\n{line}\n")
 }

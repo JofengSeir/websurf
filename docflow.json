@@ -209,7 +209,7 @@
     "AGENTS.md": {},
     "CONTRIBUTING.md": {},
     "OWNER.md": {
-      "src/wasm-core/render_bundle.rs:74:76": "6faa50e8"
+      "src/wasm-core/render_bundle.rs:74:76": "dfe64fa0"
     },
     "README.md": {
       "src/scripts/serve.py:19:19": "5d85e228",
@@ -222,6 +222,14 @@
     "apps/viewer/dist-README.md": {}
   },
   "rebaselines": [
+    {
+      "path": "OWNER.md",
+      "at": "2026-10-14T18:19:29.411Z",
+      "by": "agent",
+      "reason": "T-670 在 render_bundle.rs 前部插入 PakMaterials.mosaic 字段与注释，D-111 引用的 collect_pakfile_models 文档注释由 :74-76 下移到 :81-83；断言内容未变（模型名口径固定逐字符精确相等），仅行号位移",
+      "changed": 1,
+      "total": 1
+    },
     {
       "path": "README.md",
       "at": "2026-10-11T22:45:30.746Z",

@@ -10,7 +10,7 @@ if not "%~1"=="" set PORT=%~1
 echo ============================================================
 echo   WebSurf-debug - dev
 echo   Full chain: toolchain check -^> deps -^> WASM rebuild -^> TS rebuild
-echo          -^> test gates -^> start dev server and open browser
+echo          -^> WASM API check -^> start dev server and open browser
 echo   Page:    http://localhost:%PORT%/web/index.html
 echo ============================================================
 
@@ -43,10 +43,10 @@ if errorlevel 1 (
   exit /b 1
 )
 echo [2/5] Node dependencies ready.
-echo [2/5] Syncing shared default textures (src/materials -^> web/)...
-call node "%~dp0..\..\src\scripts\sync-default-textures.mjs"
+echo [2/5] Syncing shared web assets (src/materials + src/web -^> web/)...
+call node "%~dp0..\..\src\scripts\sync-web-assets.mjs"
 if errorlevel 1 (
-  echo [ERROR] Texture sync failed.
+  echo [ERROR] Shared web asset sync failed.
   pause
   exit /b 1
 )
@@ -78,18 +78,15 @@ if errorlevel 1 (
 )
 echo [4/5] TypeScript ready.
 
-echo [5/5] Running test gates...
-for %%T in (test:optimize-scene test:auth-clock test:jump-apex test:surf-crouch) do (
-  echo   - npm run %%T
-  call npm run %%T
-  if errorlevel 1 (
-    echo [ERROR] Gate %%T failed.
-    echo [HINT] Fix the failure printed above, then retry.
-    pause
-    exit /b 1
-  )
+echo [5/5] Checking WASM API contract...
+call npm run check:api
+if errorlevel 1 (
+  echo [ERROR] WASM API contract check failed.
+  echo [HINT] Run npm run check:api, fix src/wasm.d.ts vs crates/wasm, then retry.
+  pause
+  exit /b 1
 )
-echo [5/5] All test gates passed.
+echo [5/5] WASM API contract OK.
 
 netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul 2>&1
 if errorlevel 1 goto :start_server

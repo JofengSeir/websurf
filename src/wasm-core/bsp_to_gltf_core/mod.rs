@@ -122,6 +122,13 @@ pub struct ExportResult {
     /// 登记发生在材质加载**之前**（`materials` 两条 `load_material_fallback*` 入口的第一条语句），
     /// 因此列表里既有加载成功的、也有加载失败的材质名；`ConvertOptions::textures == false` 时恒为空。
     pub textures: Vec<String>,
+    /// 导出期**逐张**产出的 mosaic 字节码：`(纹理名小写, 码)`，只对加载成功且带图的材质登记。
+    ///
+    /// 为什么在这里出：`mosaic/manifest.rs` 的 `build_mosaic_manifest` 要**自己再把世界面贴图
+    /// 解一遍**才能得到同样的码，而 `convert` 在装配材质时本来就已经解出了那些图 —— 一份数据两次
+    /// 解码。实测 `surf_kraken` 这一遍 5.8 s（占 GLB 导出 8%）。口径同 `build_mosaic_manifest`：
+    /// 单张失败只跳过该张。
+    pub mosaic: Vec<(String, String)>,
 }
 
 /// 导出选项。字段可经 serde 反序列化（键名即字段名），
@@ -186,14 +193,28 @@ pub struct ConvertOptions {
     /// `export_glb_with_pakfile_models_with_defaults_and_atlas_limit`）。默认 `0`。
     #[serde(default)]
     pub lightmap_max_atlas_area: u64,
+
+    /// **探针模式**：只回答「这张贴图能不能解出来」，不保留解码后的像素 —— `materials.rs` 的
+    /// `load_texture_bsp` 在命中且可解时返回一张 **1×1 占位图**，不可解时照旧报 `Err`，于是
+    /// `MaterialData.texture_absent` 的判定完全不变。给只问「有没有缺」的调用点用
+    /// （`mosaic/manifest.rs` 的 `collect_missing_textures`）：那里原先对每张不同材质都取一遍
+    /// VTF 并解码，只为得出一个布尔值。
+    ///
+    /// 实测这个开关**不是**那 857 s 的主因 —— 把取字节整段跳过只要 506 ms，说明时间全在
+    /// `Packfile::get` 的 LZMA 解压上（2708 那次定位）。真正的修复是 `Packfile` 的解压结果缓存；
+    /// 本开关省掉的是「取到之后还要解一遍像素」的那部分。
+    ///
+    /// **正常渲染路径必须保持 `false`**，否则贴图会变成 1×1。
+    #[serde(default)]
+    pub probe_only: bool,
 }
 
 impl ConvertOptions {
     /// 选项的哈希键（u64）：固定种子 `RandomState::with_seeds(1, 2, 3, 4)`，
     /// 只写入 `textures`、`texture_scale`（按 `to_le_bytes` 逐字节）与 `generate_missing_list` 三个字段。
     ///
-    /// `missing_fallback`、`vmt_stem_index`、`lightmap_max_atlas_area` **不参与**哈希，
-    /// 因此仅在这三个字段上不同的两组选项会得到同一个键。
+    /// `missing_fallback`、`vmt_stem_index`、`lightmap_max_atlas_area`、`probe_only` **不参与**哈希，
+    /// 因此仅在这些字段上不同的两组选项会得到同一个键。
     /// 本仓检索不到调用点（`key()` 的唯一出现处就是这条定义）。
     pub fn key(&self) -> u64 {
         let mut hasher = RandomState::with_seeds(1, 2, 3, 4).build_hasher();
@@ -215,6 +236,7 @@ impl Default for ConvertOptions {
             missing_fallback: std::collections::HashMap::new(),
             vmt_stem_index: std::collections::HashMap::new(),
             lightmap_max_atlas_area: 0,
+            probe_only: false,
         }
     }
 }

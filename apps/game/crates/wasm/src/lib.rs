@@ -181,6 +181,12 @@ pub struct BspProcessor {
     bsp: Option<std::sync::Arc<vbsp::Bsp>>,
     /// 构造时缓存的 PAKFILE 条目数（`metadata()` 直接复用，不再克隆 Packfile）
     packed_files: usize,
+    /// GLB 导出期**顺带产出**的 mosaic manifest（`纹理名小写 → 字节码`），由
+    /// [`BspProcessor::take_mosaic_manifest`] 取走。与 debug / viewer 的 `mosaic_cache` 同口径。
+    ///
+    /// 为什么不让 TS 侧照旧调 `export_mosaic_manifest`：那份 manifest 要自己再跑一遍
+    /// `collect_pakfile_models` + `resolve_pakfile_materials`，与 GLB 导出**完全重复**。
+    mosaic_cache: std::collections::HashMap<String, String>,
 }
 
 #[wasm_bindgen]
@@ -194,6 +200,7 @@ impl BspProcessor {
         Ok(BspProcessor {
             bsp: Some(std::sync::Arc::new(bsp)),
             packed_files,
+            mosaic_cache: std::collections::HashMap::new(),
         })
     }
 
@@ -324,6 +331,8 @@ impl BspProcessor {
         if models.is_empty() && !include_lights {
             let result = bsp_to_gltf_core::export_bsp(bsp, options(true))
                 .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
+            // 纯地图支路：manifest 只有世界面那一半（同样来自 convert 的收集器）
+            self.mosaic_cache = result.mosaic.iter().cloned().collect();
             let mut output: Vec<u8> = Vec::new();
             result
                 .glb
@@ -351,6 +360,19 @@ impl BspProcessor {
         let integrator = ModelIntegrator::from_in_memory(resources, ExportOptions { include_lights });
         let result = bsp_to_gltf_core::export_bsp_with_models(bsp, options(true), Some(&integrator))
             .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
+        // mosaic manifest 两半在此会合：世界面那一半来自 convert 的收集器（装配材质时顺手缩的），
+        // 模型那一半来自 resolve_pakfile_materials。不再需要重解一遍贴图。
+        self.mosaic_cache = result
+            .mosaic
+            .iter()
+            .cloned()
+            .chain(
+                materials
+                    .mosaic
+                    .iter()
+                    .map(|(n, c)| (n.to_ascii_lowercase(), c.clone())),
+            )
+            .collect();
         let mut output: Vec<u8> = Vec::new();
         result
             .glb
@@ -821,6 +843,18 @@ impl BspProcessor {
         }
         let map: std::collections::HashMap<String, String> = pairs.into_iter().collect();
         serde_json::to_string(&map).map_err(|e| to_js_err(e, "序列化 mosaic manifest 失败"))
+    }
+
+    /// 取 GLB 导出**顺带产出**的 mosaic manifest（JSON，`纹理名小写 → 字节码`）。
+    ///
+    /// 与 [`BspProcessor::export_mosaic_manifest`] 同口径（同样的键；`B[名字]` 那个装饰性字段的
+    /// 大小写来源可能不同，还原侧解析后即丢弃，不影响画面），但**不必再解析一遍模型材质** ——
+    /// 那份工作 GLB 导出已经做过（实测 `surf_kraken` 那一遍要 45~58 s）。也因此它**不借用 `bsp`**：
+    /// `export_glb*` 已把它消费掉，这正是本方法存在的原因。用法：`export_glb*` →
+    /// `take_mosaic_manifest()`；未导出过则返回 `"{}"`。
+    pub fn take_mosaic_manifest(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.mosaic_cache)
+            .map_err(|e| to_js_err(e, "序列化 mosaic manifest 失败"))
     }
 
     /// 导出缺失材质纹理列表（JSON 字符串数组）：判定与去重在

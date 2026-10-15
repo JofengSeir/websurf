@@ -176,11 +176,13 @@ pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<E
 
     // 提取纹理信息到局部变量
     let textures: Vec<String> = texture_collector.borrow().textures.iter().cloned().collect();
+    let mosaic: Vec<(String, String)> = texture_collector.borrow().mosaic.iter().cloned().collect();
     
     Ok(ExportResult {
         glb,
         missing_resources,
         textures,
+        mosaic,
     })
 }
 
@@ -283,11 +285,13 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
 
     // 提取纹理信息
     let textures: Vec<String> = texture_collector.borrow().textures.iter().cloned().collect();
+    let mosaic: Vec<(String, String)> = texture_collector.borrow().mosaic.iter().cloned().collect();
     
     Ok(ExportResult {
         glb,
         missing_resources,
         textures,
+        mosaic,
     })
 }
 
@@ -361,11 +365,13 @@ fn build_export_result(
 
     // 提取纹理信息
     let textures: Vec<String> = texture_collector.borrow().textures.iter().cloned().collect();
+    let mosaic: Vec<(String, String)> = texture_collector.borrow().mosaic.iter().cloned().collect();
     
     Ok(ExportResult {
         glb,
         missing_resources,
         textures,
+        mosaic,
     })
 }
 

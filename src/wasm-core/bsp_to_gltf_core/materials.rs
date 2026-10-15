@@ -12,14 +12,15 @@
 //! - [`load_material_fallback_bsp`] / [`load_material_fallback`]：失败时的容错包装
 //!   （记 `MissingResource`，回退贴图或纯白默认材质）
 //! - [`fallback_key`] / [`fallback_texture_png`]：缺失纹理回退表的键口径与查表解码
+//!   （精确键优先，全落空再按**唯一基名**兜一层）
 //! - `parse_shader_name` / `parse_dollar_color`：`vmt_parser` 不认的 VMT 文本的兜底取值
 //!
 //! 关键不变量：
 //! - VMT 与 VTF 各按 **4** 条候选路径依次查 pakfile：原名、全小写、全大写、`/` 换成 `_`
 //!   （前缀 `materials/`，后缀 `.vmt` / `.vtf`）。`resolve` 跟 include 时**先剥掉 include 自带的
 //!   `materials/` 前缀**（VBSP 生成的 patch 就这么写），再按原文与全小写两条候选查 pakfile。
-//! - pakfile 查找大小写敏感（`bsp.pack.get` 走 `zip.by_name`，按名精确匹配），
-//!   这正是候选里带全大写变体的原因。
+//! - pakfile 查找**先精确、再按 ASCII 小写不敏感**（`vbsp::data::Packfile::ci_name`）；
+//!   下面 4 条候选里的大小写变体是修复前为绕开精确匹配而加的，现已冗余，保留只为不改查找顺序。
 //! - 基名回退（`options.vmt_stem_index`）只在 4 条精确候选全部落空后启用；
 //!   它是精确 VMT 不在包内时获取 `$basetexture` 与透明度声明的替代通路。
 //! - 缺失贴图回退表的键统一经 [`fallback_key`] 归一为 `materials/<路径小写>`；
@@ -117,6 +118,16 @@ pub struct TextureData {
 pub struct TextureCollector {
     /// 已登记的小写材质名，去重且保持首次出现顺序。
     pub textures: Vec<String>,
+    /// 导出期逐张产出的 mosaic 字节码：`(纹理名小写, 码)`。只对**加载成功且带图**的材质登记
+    /// （见 `gltf_builder::push_or_get_material_bsp`），最终成为 `ExportResult::mosaic`。
+    ///
+    /// 不去重：同一张贴图被多个材质引用时会各登记一次，`collect` 进 HashMap 时后者覆盖前者、
+    /// 值相同，与 `mosaic/manifest.rs` 的 `build_mosaic_manifest` 行为一致。
+    pub mosaic: Vec<(String, String)>,
+    /// `mosaic` 的**已见贴图名**（小写）：mosaic 只与贴图有关，而本收集器是按**材质**逐条走的，
+    /// 同一张贴图会被多个材质引用。少了这层去重就是「按材质算一遍」，实测 `surf_kraken` 反而比
+    /// 原来按贴图算更慢（材质数远多于贴图数）。
+    pub mosaic_seen: std::collections::HashSet<String>,
 }
 
 impl TextureCollector {
@@ -124,6 +135,8 @@ impl TextureCollector {
     pub fn new() -> Self {
         TextureCollector {
             textures: Vec::new(),
+            mosaic: Vec::new(),
+            mosaic_seen: std::collections::HashSet::new(),
         }
     }
 
@@ -160,8 +173,18 @@ pub fn fallback_key(path: &str) -> String {
 ///
 /// 空串候选直接跳过。命中且解码成功就返回该 PNG 字节；命中但
 /// `mosaic::decode::code_to_img` 报错时继续试下一个候选；
-/// 全部未命中或全部解码失败返回 `None`（调用方保持原回退行为）。
+/// 全部未命中时再按**基名**兜一层，仍无返回 `None`（调用方保持原回退行为）。
 /// 返回的是 PNG 字节，不是已解码的图像，也不写盘。
+///
+/// **基名兜底层**：材质名与表里的键常常不同名 —— 模型材质名是裸基名（`metalfence007a`），
+/// 世界面 texinfo 给的是短路径（`METAL/METALGRATE013A2`），而表按源资源路径索引
+/// （`materials/metal/metalgrate013a2`）。MDL 的 `$cdmaterials` 只管得住一部分，精确键全落空
+/// 时就把候选的**基名**拿去表里找**唯一**同名键。做成运行时索引而不是往表里灌别名：实测灌
+/// 9259 条基名别名会让纹理包从 6.59 MB 涨到 12.18 MB（+85%），这里则是零体积代价。
+/// 基名在表内**不唯一就不兜**——宁可退回原行为，也不赌一张错的贴图。
+///
+/// 成本：只在精确键全落空时才扫一遍表（约 1 万键），而本函数每张材质至多调两次，
+/// 不会进入逐面热路径。
 pub fn fallback_texture_png(
     fallback: &std::collections::HashMap<String, String>,
     paths: &[&str],
@@ -172,6 +195,32 @@ pub fn fallback_texture_png(
             continue;
         }
         if let Some(code) = fallback.get(&fallback_key(p)) {
+            if let Ok(png) = crate::mosaic::decode::code_to_img(code, scale) {
+                return Some(png);
+            }
+        }
+    }
+    if fallback.is_empty() {
+        return None;
+    }
+    // 基名索引：值 `Some(code)` = 该基名唯一；`None` = 有多个同基名的键（歧义，不兜）
+    let mut stems: std::collections::HashMap<&str, Option<&String>> =
+        std::collections::HashMap::with_capacity(fallback.len());
+    for (k, code) in fallback {
+        let stem = k.rsplit('/').next().unwrap_or(k.as_str());
+        if let Some(slot) = stems.get_mut(stem) {
+            *slot = None;
+        } else {
+            stems.insert(stem, Some(code));
+        }
+    }
+    for p in paths {
+        if p.is_empty() {
+            continue;
+        }
+        let key = fallback_key(p);
+        let stem = key.rsplit('/').next().unwrap_or(key.as_str());
+        if let Some(Some(code)) = stems.get(stem) {
             if let Ok(png) = crate::mosaic::decode::code_to_img(code, scale) {
                 return Some(png);
             }
@@ -552,33 +601,17 @@ fn load_texture_bsp(
     bsp: &Bsp,
     options: &ConvertOptions,
 ) -> Result<DynamicImage, Error> {
-    let name = name.trim_end_matches(".vtf").trim_start_matches('/');
+    let vtf_data = find_vtf_bytes(name, bsp)?;
 
-    // 生成若干候选的 VTF 文件路径格式
-    let possible_paths = vec![
-        // 原始格式
-        format!("materials/{}.vtf", name),
-        // 小写格式
-        format!("materials/{}.vtf", name.to_lowercase()),
-        // 大写格式
-        format!("materials/{}.vtf", name.to_uppercase()),
-        // 替换斜杠为下划线
-        format!("materials/{}.vtf", name.replace('/', "_"))
-    ];
-
-    // 逐个尝试上面的候选路径
-    let vtf_data = possible_paths
-        .iter()
-        .find_map(|path| {
-            match bsp.pack.get(path) {
-                Ok(Some(data)) => Some(data),
-                _ => None,
-            }
-        })
-        .ok_or_else(|| {
-            let paths_str = possible_paths.join(", ");
-            Error::Other(format!("Can't find VTF file in BSP. Tried: {}", paths_str))
-        })?;
+    // 探针模式（`ConvertOptions::probe_only`）：只回答「能不能解」，不产出像素 —— 可解时给一张
+    // 1×1 占位图，不可解时照旧 `Err`，于是 `texture_absent` 的判定与真解码完全一致。调用点只有
+    // `mosaic/manifest.rs` 的 `collect_missing_textures`；渲染路径不得开这个开关。
+    if options.probe_only {
+        if !vtf_loadable(&vtf_data) {
+            return Err(Error::Other("探针：VTF 解不出来".into()));
+        }
+        return Ok(DynamicImage::new_rgba8(1, 1));
+    }
 
     // 两条 VTF 解码路径一致性（T-419）：外部 `vtf` crate 与 `texture_utils` 是两套独立实现，对
     // `Ia88` / `Bgra4444` 判定不一致（**crate 能读表头、decode 才报错**）。`and_then` 覆盖到解码，
@@ -596,6 +629,87 @@ fn load_texture_bsp(
     } else {
         Ok(image)
     }
+}
+
+/// 在 pakfile 里按 4 条候选路径找这张贴图的 VTF 字节（原态 / 全小写 / 全大写 / 斜杠换下划线）。
+///
+/// 与解码分开，是为了让探针路径（只判可解、不解像素）与真解码共用同一套路径口径 ——
+/// 两份实现一定会漂移。
+fn find_vtf_bytes(name: &str, bsp: &Bsp) -> Result<Vec<u8>, Error> {
+    let name = name.trim_end_matches(".vtf").trim_start_matches('/');
+
+    // 生成若干候选的 VTF 文件路径格式
+    let possible_paths = vec![
+        // 原始格式
+        format!("materials/{}.vtf", name),
+        // 小写格式
+        format!("materials/{}.vtf", name.to_lowercase()),
+        // 大写格式
+        format!("materials/{}.vtf", name.to_uppercase()),
+        // 替换斜杠为下划线
+        format!("materials/{}.vtf", name.replace('/', "_"))
+    ];
+
+    // 逐个尝试上面的候选路径
+    possible_paths
+        .iter()
+        .find_map(|path| {
+            match bsp.pack.get(path) {
+                Ok(Some(data)) => Some(data),
+                _ => None,
+            }
+        })
+        .ok_or_else(|| {
+            let paths_str = possible_paths.join(", ");
+            Error::Other(format!("Can't find VTF file in BSP. Tried: {}", paths_str))
+        })
+}
+
+/// 这张 VTF **能不能解出来**（`true` = 能）。用于探针路径，通常**不解像素**。
+///
+/// 快路：本仓 `texture_utils` 能解析头部 + 该格式在 `decode` 的解码臂表内 + 第 0 帧落在字节内。
+/// 这三条成立时 `decode` 必成 —— 第三条正是 T-661 给 `get_frame` 加的边界检查。
+///
+/// 慢路：快路判否时**真解一次**，结论与 [`load_texture_bsp`] 完全一致。这条兜底是必需的，否则会
+/// 引入假阴性：`vtf` crate 认而本仓不认的格式（T-419）、头部与数据不符的截断文件（Momentum 那批），
+/// 都只在真解时暴露。
+fn vtf_loadable(vtf_data: &[u8]) -> bool {
+    if let Ok(vtf) = crate::texture_utils::from_bytes(vtf_data) {
+        if has_decode_arm(vtf.highres_image.format) {
+            return vtf.highres_image.get_frame(0).is_ok();
+        }
+    }
+    let crate_try = vtf::vtf::VTF::read(vtf_data).and_then(|v| {
+        Ok(DynamicImage::ImageRgba8(v.highres_image.decode(0)?.into_rgba8()))
+    });
+    crate_try
+        .or_else(|e| decode_vtf_by_texture_utils(vtf_data, e))
+        .is_ok()
+}
+
+/// `texture_utils::image` 的 `decode` 有分支的格式（14 个）。
+///
+/// **保守方向**：将来给 `decode` 新增解码臂而这里没跟上时，那个格式会走慢路（真解一次）——
+/// 结论仍然正确，只是慢一些；**不会**把「能解」误判成「不能解」。
+fn has_decode_arm(f: crate::texture_utils::image::ImageFormat) -> bool {
+    use crate::texture_utils::image::ImageFormat as F;
+    matches!(
+        f,
+        F::Dxt1
+            | F::Dxt1Onebitalpha
+            | F::Dxt3
+            | F::Dxt5
+            | F::Rgba8888
+            | F::Rgb888
+            | F::Bgr888
+            | F::Bgra8888
+            | F::Abgr8888
+            | F::Argb8888
+            | F::Ia88
+            | F::Bgra4444
+            | F::I8
+            | F::Uv88
+    )
 }
 
 /// 从未被 `vmt_parser` 建模的 VMT 文本里取 `$basetexture2`（`WorldVertexTransition` 的第二贴图名）。

@@ -176,7 +176,9 @@ pub fn parse_phy(b: &[u8]) -> Result<Vec<PhySolid>, PhyError> {
     for block in text.split("solid") {
         let Some(open) = block.find('{') else { continue };
         let Some(close) = block.find('}') else { continue };
-        let body = &block[open + 1..close];
+        // 首个 `}` 落在首个 `{` 之前（畸形 / 截断的文本段）时 start > end ⇒ 字符串切片 panic；
+        // 用 get 取，取不到就跳过该块（与「缺花括号」同处理）。
+        let Some(body) = block.get(open + 1..close) else { continue };
         let mut idx: Option<u32> = None;
         let mut sprop: Option<String> = None;
         for kv in body.split('"') {

@@ -7,6 +7,7 @@
 
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
+import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
 import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
 import {
@@ -2375,8 +2376,10 @@ void main();
 // 浏览器不允许页面用 keydown preventDefault 拦截 Ctrl+W 这类浏览器快捷键，
 // 但 beforeunload 可以：标签页关闭 / 刷新 / 离开前弹**原生确认框**（「离开页面？」，
 // 文案由浏览器定、无法自定义；页面需先有过交互才弹——无激活时浏览器直接放行防滥用）。
-// BSP 长解析 / 长会话中途误关的页面在这里多一道反悔的机会。
+// BSP 长解析 / 长会话中途误关的页面在这里多一道反悔的机会；但**只在装了地图时拦**（T-056）——
+// 空态（什么都没加载）的刷新 / 关闭本来就不丢东西，无条件拦只是噪音。
 window.addEventListener('beforeunload', (e) => {
+  if (!shouldConfirmClose({ hasMap: teleportMapName !== '' })) return;
   e.preventDefault();
   e.returnValue = ''; // 触发确认框所必需（Chrome/Edge 约定）
 });

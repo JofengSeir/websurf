@@ -437,6 +437,7 @@ for (const a of appNames) {
     if (!/@echo off/i.test(t)) contract.push('  ' + rel + ' 缺 @echo off');
     if (!/exit\s*\/b/i.test(t)) contract.push('  ' + rel + ' 缺 exit /b（退出码口径）');
     if (/C:\\Users\\/i.test(t)) contract.push('  ' + rel + ' 写死了用户目录（换机器即失效）');
+    const appScripts = (() => { try { return JSON.parse(fs.readFileSync(path.join(appsDir, a, 'package.json'), 'utf8')).scripts || {}; } catch { return {}; } })();
     const cmdLines = t.split(/\r?\n/);
     cmdLines.forEach((l, i) => {
       // 死分支：`goto :x` 的下一行就是 `:x` ⇒ 条件不改变任何行为（T-629 的 dev.cmd 端口守卫）
@@ -447,6 +448,19 @@ for (const a of appNames) {
       // echo 行里未转义的 `>`（如 `->`）会被 cmd 当重定向：该行不打印，还生成一个杂散文件（T-642 实测）
       if (/^\s*@?echo\b/i.test(l) && /(?<!\^)>/.test(l)) {
         contract.push('  ' + rel + ':' + (i + 1) + ' echo 行含未转义 `>` ⇒ 会被当成重定向（不打印 + 生成杂散文件），应写 `^>`');
+      }
+      // 引用存在性（T-675）：`node|python|call "%~dp0<相对路径>"` 的目标必须真实存在。
+      // T-673 的两处断链（第 [2/5] 步调用已被删除的 sync-default-textures.mjs、第 [5/5] 步循环已被删除的
+      // test:* 门禁）就是这样在 2026-10-12 静默进来的：本段此前只查形态，不查目标是否存在。
+      for (const r of l.matchAll(/\b(?:node|python|call)\s+"?(%~dp0[^"\s]*)"?/gi)) {
+        const target = path.normalize(path.join('apps', a, r[1].slice(5)));
+        if (!fs.existsSync(path.join(ROOT, target))) {
+          contract.push('  ' + rel + ':' + (i + 1) + ' 引用 ' + r[1] + ' ⇒ 解析为 ' + target.replace(/\\/g, '/') + ' 不存在');
+        }
+      }
+      // `call npm run <脚本>` 的目标必须在本工程 package.json 的 scripts 里（T-675，与上一条同源）
+      for (const r of l.matchAll(/\bcall\s+npm\s+run\s+([A-Za-z0-9:_-]+)/gi)) {
+        if (!(r[1] in appScripts)) contract.push('  ' + rel + ':' + (i + 1) + ' `npm run ' + r[1] + '` 不在 apps/' + a + '/package.json 的 scripts 里');
       }
     });
   }

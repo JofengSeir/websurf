@@ -193,6 +193,8 @@ export async function buildWorldBundle(
   const colliderSource = options.colliderSource ?? 'auto';
   let brushJson = mapBrushJson;
   let triJson: string | undefined;
+  // 已知的实例数：auto 分支上面已得，其余分支留空（日志不再为了一行数字整表 JSON.parse）
+  let triCount: number | undefined;
   try {
     if (colliderSource === 'visual') {
       triJson = proc.export_model_tri_colliders();
@@ -205,15 +207,17 @@ export async function buildWorldBundle(
       const visArr = JSON.parse(proc.export_model_tri_colliders()) as Array<{ name: string }>;
       const fallback = visArr.filter((e) => !have.has(e.name));
       triJson = JSON.stringify(phyArr.concat(fallback));
+      triCount = phyArr.length + fallback.length;
       console.log(
         `[load-bsp] 模型碰撞(auto)：.phy ${phyArr.length} 实例 + 可视回退 ${fallback.length} 实例（${new Set(fallback.map((e) => e.name)).size} 模型）`,
       );
     } else {
       triJson = proc.export_model_phy_colliders();
     }
-    console.log(
-      `[load-bsp] 模型三角形碰撞网格(${colliderSource}): ${JSON.parse(triJson).length} 个实例`,
-    );
+    const triDesc = triCount === undefined
+      ? `${(triJson.length / 1048576).toFixed(1)} MB`
+      : `${triCount} 个实例`;
+    console.log(`[load-bsp] 模型三角形碰撞网格(${colliderSource}): ${triDesc}`);
   } catch (e) {
     console.warn('[load-bsp] 模型碰撞导出失败，回退可视网格:', e);
     try {

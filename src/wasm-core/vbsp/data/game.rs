@@ -2,7 +2,7 @@
 //!
 //! 定位：`vbsp` 解析链的下游。`bspfile.rs` 取 lump 字节、`reader.rs` 读目录与叶，本模块把
 //! 其中两条数据解释成结构体：
-//! - **`sprp`**：四套记录布局（V6 / V7 / V10 / V11）归一成 `StaticPropLump`；
+//! - **`sprp`**：六套记录布局（V4 / V5 / V6 / V7 / V10 / V11）归一成 `StaticPropLump`；
 //! - **leaf ambient cube**：`LeafAmbientSample` 与 `LeafAmbientIndex`。
 //!
 //! 上下游：
@@ -211,7 +211,7 @@ impl StaticPropLump {
 impl BinRead for StaticPropLump {
     type Args<'a> = (u16,);
 
-    /// 版本分派：`6` → V6；`7` 与 `10` → **共用** V10 布局；`11` → V11。
+    /// 版本分派：`4` → V4；`5` → V5；`6` → V6；`7` 与 `10` → **共用** V10 布局；`11` → V11。
     /// 其余版本返回 `binrw::Error::Custom`（内嵌 `UnsupportedLumpVersion`），
     /// 错误位置取 `reader.stream_position()`。
     fn read_options<R: Read + Seek>(
@@ -220,6 +220,8 @@ impl BinRead for StaticPropLump {
         args: Self::Args<'static>,
     ) -> BinResult<Self> {
         match args.0 {
+            4 => StaticPropLumpV4::read_options(reader, endian, ()).map(StaticPropLump::from),
+            5 => StaticPropLumpV5::read_options(reader, endian, ()).map(StaticPropLump::from),
             6 => StaticPropLumpV6::read_options(reader, endian, ()).map(StaticPropLump::from),
             7 | 10 => StaticPropLumpV10::read_options(reader, endian, ()).map(StaticPropLump::from),
             11 => StaticPropLumpV11::read_options(reader, endian, ()).map(StaticPropLump::from),
@@ -303,6 +305,54 @@ fn test_static_prop_lump_v6_bytes() {
     super::test_read_bytes::<StaticPropLumpV6>();
 }
 
+/// V4 记录（**56 B**）：Source 2006 / CS:S 时代的布局 —— `solid` 与 `flags` 各 1 字节、`flags`
+/// 排在 `skin` **之前**，末尾**既没有** `forced_fade_scale` 也**没有** DX 级别字段。
+/// 依据是 SDK 的 `gamebspfile.h` 里 `StaticPropLumpV4_t`。
+#[derive(BinRead)]
+struct StaticPropLumpV4 {
+    pub origin: Vector,
+    pub angles: Angles,
+    pub prop_type: u16,
+    pub first_leaf: u16,
+    pub leaf_count: u16,
+    pub solid: SolidType,
+    pub flags: StaticPropLumpFlagsV6,
+    pub skin: i32,
+    pub fade_min_distance: f32,
+    pub fade_max_distance: f32,
+    pub lighting_origin: Vector,
+}
+
+/// 断言 V4 记录的**读取字节数**等于 `size_of::<StaticPropLumpV4>()`。
+#[test]
+fn test_static_prop_lump_v4_bytes() {
+    super::test_read_bytes::<StaticPropLumpV4>();
+}
+
+/// V5 记录（**60 B**）：V4 再加末尾一个 `forced_fade_scale`；DX 级别字段仍然没有。
+/// 依据是 SDK 的 `StaticPropLumpV5_t`。
+#[derive(BinRead)]
+struct StaticPropLumpV5 {
+    pub origin: Vector,
+    pub angles: Angles,
+    pub prop_type: u16,
+    pub first_leaf: u16,
+    pub leaf_count: u16,
+    pub solid: SolidType,
+    pub flags: StaticPropLumpFlagsV6,
+    pub skin: i32,
+    pub fade_min_distance: f32,
+    pub fade_max_distance: f32,
+    pub lighting_origin: Vector,
+    pub forced_fade_scale: f32,
+}
+
+/// 断言 V5 记录的**读取字节数**等于 `size_of::<StaticPropLumpV5>()`。
+#[test]
+fn test_static_prop_lump_v5_bytes() {
+    super::test_read_bytes::<StaticPropLumpV5>();
+}
+
 /// V6 的 1 字节标志位（8 位，取值与归一 `StaticPropLumpFlags` 的前 8 位相同）。
 #[derive(BinRead, Debug, Clone, Copy)]
 struct StaticPropLumpFlagsV6(u8);
@@ -384,6 +434,58 @@ fn test_static_prop_lump_bytes() {
 // 编译期不变量：V10 与归一结构 `StaticPropLump` 的 `size_of` 必须相等。两者字段一一对应，
 // 若某次字段改动只落在一侧，这里会直接编译失败。
 static_assertions::const_assert_eq!(size_of::<StaticPropLumpV10>(), size_of::<StaticPropLump>());
+
+/// V4 → 归一结构：`forced_fade_scale` 按 SDK 的 `operator=(StaticPropLumpV4_t)` 取 **1.0**，
+/// DX 级别与 lightmap 分辨率取 0（V4 无这些字段）。
+///
+/// **与 SDK 的一处已知分歧**：SDK 的 `operator=` 链条（V4 → V5 → V6）会给 V4/V5/V6 都补上
+/// `STATIC_PROP_NO_PER_TEXEL_LIGHTING`（0x100）位，而本仓的 V6/V10/V11 转换都不补。这里跟随
+/// **本仓既有口径**（不补），以免同一字段在不同版本上表现不一致；该位在本仓没有消费点。
+impl From<StaticPropLumpV4> for StaticPropLump {
+    fn from(from: StaticPropLumpV4) -> Self {
+        StaticPropLump {
+            origin: from.origin,
+            angles: from.angles,
+            prop_type: from.prop_type,
+            first_leaf: from.first_leaf,
+            leaf_count: from.leaf_count,
+            solid: from.solid,
+            skin: from.skin,
+            fade_min_distance: from.fade_min_distance,
+            fade_max_distance: from.fade_max_distance,
+            lighting_origin: from.lighting_origin,
+            forced_fade_scale: 1.0,
+            min_dx_level: 0,
+            max_dx_level: 0,
+            flags: from.flags.into(),
+            lightmap_resolution: Default::default(),
+        }
+    }
+}
+
+/// V5 → 归一结构：与 V4 同，只有 `forced_fade_scale` 取记录里的值 —— SDK 的 V5 `operator=` 也是
+/// 「先按 V4 转、再覆盖这一个字段」。DX 级别与 lightmap 分辨率同样取 0（V5 无这些字段）。
+impl From<StaticPropLumpV5> for StaticPropLump {
+    fn from(from: StaticPropLumpV5) -> Self {
+        StaticPropLump {
+            origin: from.origin,
+            angles: from.angles,
+            prop_type: from.prop_type,
+            first_leaf: from.first_leaf,
+            leaf_count: from.leaf_count,
+            solid: from.solid,
+            skin: from.skin,
+            fade_min_distance: from.fade_min_distance,
+            fade_max_distance: from.fade_max_distance,
+            lighting_origin: from.lighting_origin,
+            forced_fade_scale: from.forced_fade_scale,
+            min_dx_level: 0,
+            max_dx_level: 0,
+            flags: from.flags.into(),
+            lightmap_resolution: Default::default(),
+        }
+    }
+}
 
 /// V6 → 归一结构：`flags` 经 `From` 零扩展；`lightmap_resolution` 填默认值（V6 无此字段）。
 impl From<StaticPropLumpV6> for StaticPropLump {

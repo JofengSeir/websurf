@@ -20,6 +20,7 @@
  * 与播放控制）与 `session`（当前上场的会话）。
  */
 
+import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
 import { DEG2RAD } from './core/constants.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../src/renderer-shared/camera/pose-entry.js';
 import { ViewerScene } from './core/scene.js';
 import { FlyCam } from './core/fly.js';
@@ -525,6 +526,9 @@ const guideBtns = Array.from(document.querySelectorAll<HTMLElement>('#guide .fil
 
 let bspLoading = false;
 
+/** 已装载的地图名（T-056 的关闭确认判据用；装载成功后置位）。 */
+let loadedMapName = '';
+
 /** 加载中：首访卡两个按钮 / 地图页「更换地图」都进 busy 态（`.busy` = 半透明 + 禁点）。 */
 function setLoadBusy(busy: boolean): void {
   for (const b of guideBtns) b.classList.toggle('busy', busy);
@@ -556,6 +560,7 @@ async function loadBsp(file: File): Promise<void> {
     //（都走 resolveInitialSpawn 这一个入口）。
     const init = resolveInitialSpawn(result.spawnPoints, result.primary, currentBox);
     mapPanel?.setMap(result, currentBox, init?.index);
+    loadedMapName = file.name; // T-056：关闭确认只在此后拦
     updateReplayMapStatus();
 
     const glbKb = Math.round(result.glbBytes.byteLength / 1024);
@@ -1052,8 +1057,10 @@ function poseText(p: Pose): string {  return (
 // 浏览器不允许页面用 keydown preventDefault 拦截 Ctrl+W 这类浏览器快捷键，
 // 但 beforeunload 可以：标签页关闭 / 刷新 / 离开前弹**原生确认框**（「离开页面？」，
 // 文案由浏览器定、无法自定义；页面需先有过交互才弹——无激活时浏览器直接放行防滥用）。
-// 记录 / 录像看到一半误关的页面在这里多一道反悔的机会。
+// 记录 / 录像看到一半误关的页面在这里多一道反悔的机会；但**只在装了地图或记录 / 录像会话进行中时拦**
+//（T-056）——「会话进行中」按 `ready`（已有可播放内容）判，空态刷新本来就不丢东西，无条件拦只是噪音。
 window.addEventListener('beforeunload', (e) => {
+  if (!shouldConfirmClose({ hasMap: loadedMapName !== '', hasSession: sessions.replay.ready || sessions.demo.ready })) return;
   e.preventDefault();
   e.returnValue = ''; // 触发确认框所必需（Chrome/Edge 约定）
 });

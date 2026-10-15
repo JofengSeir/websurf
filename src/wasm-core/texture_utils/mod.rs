@@ -13,14 +13,14 @@
 //!
 //! 关键数字与坑：
 //! - 魔数 `VTFHeader::SIGNATURE` = `0x00465456`，不符即 `InvalidSignature`。
-//! - `decode` 有分支的格式只有 8 个：`Dxt1`、`Dxt1Onebitalpha`、`Dxt3`、`Dxt5`、
-//!   `Rgba8888`、`Rgb888`、`Bgr888`、`Bgra8888`；其中 `Dxt1` 与 `Dxt1Onebitalpha` 都走
-//!   BC1（不单独处理 1bit alpha）。其余格式一律 `UnsupportedImageFormat`。
-//! - `frame_size` 的格式表与 `decode` 的分支表**口径不同**：前者还认识 `None` /
-//!   `Abgr8888` / `Rgb565` / `I8` / `Ia88` / `A8` / `Argb8888` / `Rgba16161616f` /
-//!   `Rgba16161616`，却**不含** `Dxt1Onebitalpha`。由于 `get_frame` 先调 `frame_size`，
-//!   `decode` 里那条 `Dxt1Onebitalpha` 分支实际上取不到——该格式会先落到
+//! - `decode` 有分支的格式 14 个：`Dxt1`、`Dxt1Onebitalpha`、`Dxt3`、`Dxt5`、`Rgba8888`、
+//!   `Rgb888`、`Bgr888`、`Bgra8888`、`Abgr8888`、`Argb8888`、`Ia88`、`Bgra4444`、`I8`、`Uv88`；
+//!   其中 `Dxt1` 与 `Dxt1Onebitalpha` 都走 BC1（不单独处理 1bit alpha）。其余格式一律
 //!   `UnsupportedImageFormat`。
+//! - `frame_size` 的格式表仍比 `decode` 多认识 `None` / `Rgb565` / `A8` / `Rgba16161616f` /
+//!   `Rgba16161616`，却**不含** `Dxt1Onebitalpha`。由于
+//!   `get_frame` 先调 `frame_size`，`decode` 里那条 `Dxt1Onebitalpha` 分支实际上取不到——
+//!   该格式会先落到 `UnsupportedImageFormat`。
 //! - `create` 要求宽高都是 2 的幂且 ≤ `u16::MAX`，否则 `InvalidImageSize`。
 //! - `UnsupportedEncodeImageFormat` 在本仓**没有构造点**（只保留在枚举里）。
 //!

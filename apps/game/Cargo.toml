@@ -13,6 +13,11 @@ resolver = "2"
 # 循环边界与索引公式）与 `src/vendor/vmdl/src/lib.rs` 的两处返回类型生命周期标注。
 [patch.crates-io]
 vmdl = { path = "../../src/vendor/vmdl" }
+# ── lzma vendor patch ──────────────────────────────────────────────
+# `zip-lzma` 的 LZMA 分支依赖 `lzma 0.2.2`，它的滑窗用 `Vec::insert` 维护 ⇒ 窗口绕回后每写
+# 一字节 O(n) 搬移（O(n²)），输出超过窗口大小（VBSP 固定 16 MB）的贴图会先磨几十秒、再报
+# Corrupted。仓库内副本只改 `Window::push` 一处为原地覆盖（逐字节语义不变）。
+lzma = { path = "../../src/vendor/lzma" }
 
 # ============================================================
 # 性能优化配置（只为本 workspace 的构建生效：LTO + opt-level 3 + codegen-units 1）

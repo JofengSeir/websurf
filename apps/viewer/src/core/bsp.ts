@@ -134,7 +134,7 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const proc = new BspProcessor(new Uint8Array(await file.arrayBuffer()));
   const meta = JSON.parse(proc.metadata()) as BspMeta;
   // parse_spawn_points 是借用方法，必须在取走 Bsp 实例的 GLB 导出之前调用
-  const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const pvsJson = proc.parse_pvs_data(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera = skyCameraFromEntities(entitiesJson); const mosaicManifestJson = proc.export_mosaic_manifest();
+  const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const pvsJson = proc.parse_pvs_data(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera = skyCameraFromEntities(entitiesJson);
   // 缺失纹理回退（与 game 同款）：装载失败回落 '{}'（无回退表），导出失败回落裸导出
   const defaultsJson = await loadDefaultsJson(decompress_mtz);
   let glb: Uint8Array;
@@ -144,6 +144,11 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
     console.warn('[bsp] 带默认纹理回退的 GLB 导出失败，回退无回退导出:', e);
     glb = proc.export_glb_with_pakfile_models();
   }
+  // mosaic manifest 必须在 GLB 导出**之后**取：GLB 导出解码 VTF 时会顺手把图缩成 mosaic，
+  // 这里直接复用那份结果。原先是在导出**之前**调 `export_mosaic_manifest()`，那会自己再解析
+  // 一遍模型材质（与 GLB 导出完全重复），是加载耗时的大头之一。`export_glb*` 消费 BSP，
+  // 因此这份结果只能由导出侧留存 —— 见 `take_mosaic_manifest`。
+  const mosaicManifestJson = proc.take_mosaic_manifest();
   const glbBytes = glb.buffer.slice(
     glb.byteOffset,
     glb.byteOffset + glb.byteLength,

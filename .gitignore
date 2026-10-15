@@ -44,6 +44,8 @@ test/maps/*
 test/replay/*
 test/project/*
 !test/replay/.gitkeep
+# 回退素材临时落点（T-658：从本机 HL2/CS:S VPK 与地图 pakfile 扒出的 VMT/VTF，不入库）
+test/fallback-src/
 *.bsp
 *.dem
 *.replay

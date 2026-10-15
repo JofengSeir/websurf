@@ -189,6 +189,13 @@ pub struct BspProcessor {
     bsp: Option<std::sync::Arc<vbsp::Bsp>>,
     /// 缓存的 pakfile 文件数，避免 metadata() 重复克隆 Packfile
     packed_files: usize,
+    /// GLB 导出期**顺带产出**的模型材质 mosaic 表（`材质名 → 字节码`，键同 `PakMaterials::mosaic`）。
+    ///
+    /// 供 `export_mosaic_manifest` 复用：那份 manifest 原先要自己再跑一遍
+    /// `collect_pakfile_models` + `resolve_pakfile_materials`，与 GLB 导出**完全重复**（实测
+    /// `surf_kraken` 的 mosaic pass 45~57 s 主要就是这一段）。**顺序要求**：先 `export_glb*`、
+    /// 后 `export_mosaic_manifest`；反之这张表为空，那时它按老路自己算（结果一致，只是慢）。
+    mosaic_cache: std::collections::HashMap<String, String>,
 }
 
 #[wasm_bindgen]
@@ -202,6 +209,7 @@ impl BspProcessor {
         Ok(BspProcessor {
             bsp: Some(std::sync::Arc::new(bsp)),
             packed_files,
+            mosaic_cache: std::collections::HashMap::new(),
         })
     }
 
@@ -468,6 +476,14 @@ impl BspProcessor {
         // 等标注 —— 缺这一条时该类世界面会退化成不透明且无贴图（格栅/铁丝网整块变实心）。
         let stem_index = build_vmt_stem_index(&entry_names);
 
+        // 画质切换用的 mosaic manifest 在本函数**顺带产出**（存进 `mosaic_cache`，由
+        // `take_mosaic_manifest` 取）。两半都不再需要「重解一遍贴图」：世界面那一半由 `convert`
+        // 装配材质时顺手缩出来（`ExportResult::mosaic`），模型那一半由 `resolve_pakfile_materials`
+        // 解码 VTF 时顺手缩出来。`export_mosaic_manifest` 那套之所以慢，就是因为它把这批贴图
+        // 整个又解了一遍。
+        let mut mosaic: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
         let options = |generate_missing_list: bool| bsp_to_gltf_core::ConvertOptions {
             missing_fallback: fallback.clone(),
             vmt_stem_index: stem_index.clone(),
@@ -481,6 +497,8 @@ impl BspProcessor {
         if models.is_empty() && !include_lights {
             let result = bsp_to_gltf_core::export_bsp(bsp, options(true))
                 .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
+            // 纯地图支路：manifest 只有世界面那一半（同样来自 convert 的收集器）
+            self.mosaic_cache = result.mosaic.iter().cloned().collect();
             let mut output: Vec<u8> = Vec::new();
             result
                 .glb
@@ -508,6 +526,15 @@ impl BspProcessor {
         let integrator = ModelIntegrator::from_in_memory(resources, ExportOptions { include_lights });
         let result = bsp_to_gltf_core::export_bsp_with_models(bsp, options(true), Some(&integrator))
             .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
+        // mosaic manifest 两半在此会合：世界面那一半来自 convert 的收集器，模型那一半来自
+        // resolve_pakfile_materials。键口径与 export_mosaic_manifest 一致（统一小写）。
+        for (name, code) in &materials.mosaic {
+            mosaic.insert(name.to_ascii_lowercase(), code.clone());
+        }
+        for (name, code) in &result.mosaic {
+            mosaic.insert(name.clone(), code.clone());
+        }
+        self.mosaic_cache = mosaic;
         let mut output: Vec<u8> = Vec::new();
         result
             .glb
@@ -868,6 +895,19 @@ impl BspProcessor {
         }
         let map: std::collections::HashMap<String, String> = pairs.into_iter().collect();
         serde_json::to_string(&map).map_err(|e| to_js_err(e, "序列化 mosaic manifest 失败"))
+    }
+
+    /// 取 [`BspProcessor::export_glb_with_defaults_opts`] **顺带产出**的 mosaic manifest（JSON）。
+    ///
+    /// 与 [`BspProcessor::export_mosaic_manifest`] 的产物**同口径**（同样的键、同样的字节码），
+    /// 但不需要再解析一遍模型材质 —— 那份工作 GLB 导出已经做过，mosaic 就是在解码 VTF 时顺手
+    /// 缩出来的。也因此它**不借用 `bsp`**：`export_glb*` 已经把它消费掉了，这正是本方法存在的
+    /// 原因（`export_mosaic_manifest` 在 GLB 导出之后无法再调用）。
+    ///
+    /// 用法：`export_glb*` → `take_mosaic_manifest()`。若尚未导出过 GLB，返回 `"{}"`。
+    pub fn take_mosaic_manifest(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.mosaic_cache)
+            .map_err(|e| to_js_err(e, "序列化 mosaic manifest 失败"))
     }
 
     /// 导出缺失材质纹理列表（VMT/VTF 缺失或解码失败 → 占位色）JSON 字符串数组。
@@ -3182,4 +3222,82 @@ pub fn export_displacement_colliders(data: &[u8]) -> Result<String, JsValue> {
         }
     }
     serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化置换面碰撞失败"))
+}
+
+/// 压缩 textures.json 文本 → MTZ 容器字节（`src/materials/textures.mtz` 的**写出方向**）。
+///
+/// 与 [`decompress_mtz`] 互逆：文本是 `{ "materials/<小写路径>": "#mosaic v4 字节码" }` 的逐行形式
+/// （见 `websurf_wasm_core::mosaic::mtz` 的 `parse_json` / `render_json`）。
+/// **仅供构建期工具 `src/scripts/build-textures-mtz.mjs` 重建默认纹理包使用**，运行时链路不调用。
+#[wasm_bindgen]
+pub fn compress_mtz(json: &str) -> Result<Vec<u8>, JsValue> {
+    websurf_wasm_core::mosaic::mtz::compress_json(json)
+        .map_err(|e| JsValue::from_str(&format!("compress_mtz: {e}")))
+}
+
+/// 模型 / prop 材质的**取不到贴图**名单（世界面那一批见 [`BspProcessor::export_missing_textures`]）。
+///
+/// 口径：按 `resolve_pakfile_materials(.., decode_textures = true, fallback)` 的结果算——
+/// `alpha_modes` 会登记每个被引用的模型材质名，`textures` 只含真正解出贴图的，两者之差即缺口。
+/// `defaults_json` 同 `export_glb_with_pakfile_models_with_defaults`：默认纹理包解压出的
+/// `{ "materials/<小写路径>": "<字节码>" }`；传 `"{}"` 即**无回退**口径（T-660 首次普查用的就是它，
+/// 故那次的 34 个是「无回退缺口」，不等于实际缺口）。
+/// 与 `export_missing_textures` 互补：那个只走 BSP 的世界面（`models() → faces()`），**看不到模型材质**。
+/// 返回 JSON 字符串数组（按名排序）。借用式，不消费 `self.bsp`。
+#[wasm_bindgen]
+impl BspProcessor {
+    pub fn export_missing_model_textures(&self, defaults_json: &str) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
+        let fallback: std::collections::HashMap<String, String> = serde_json::from_str(defaults_json)
+            .map_err(|e| to_js_err(e, "默认纹理包 JSON 解析失败"))?;
+        let (models, _static_props, entry_names) =
+            collect_pakfile_models(bsp, VhvLog::Never).map_err(|e| JsValue::from_str(&e))?;
+        let index = pakfile_models::PakIndex::build(&entry_names);
+        let mat = resolve_pakfile_materials(bsp, &models, &index, true, Some(&fallback));
+        let mut missing: Vec<String> = mat
+            .alpha_modes
+            .keys()
+            .filter(|n| !mat.textures.contains_key(*n))
+            .cloned()
+            .collect();
+        missing.sort();
+        serde_json::to_string(&missing).map_err(|e| to_js_err(e, "序列化模型缺失纹理列表失败"))
+    }
+}
+
+/// 性能定位用：PAKFILE 的取用计数。**只读，不参与任何判定**。
+///
+/// 返回 JSON 数组 `[get 次数, 缓存命中, 实际解压次数, 解压字节, ci_name 次数, ci_name 比较条目数]`。
+/// 起因：`surf_axil` 的 `export_missing_textures` 要 **857 s**，而把取字节整段跳过只要 506 ms ——
+/// 时间全在 pakfile 取用上。这组计数用来判定到底是「重复解压」还是「大小写扫描」。
+#[wasm_bindgen]
+impl BspProcessor {
+    pub fn pack_stats(&self) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
+        let s = bsp.pack.stats();
+        serde_json::to_string(&s).map_err(|e| to_js_err(e, "序列化 pakfile 计数失败"))
+    }
+
+    /// 性能/正确性定位用：取一个 pakfile 条目，返回**解压后**的字节。取不到返回 `null`。
+    ///
+    /// 与 [`BspProcessor::pack_stats`] 同批加的诊断口。用途之一是**差分验证**：把这里的字节与
+    /// Python 标准库 `zipfile`（底层 liblzma，独立实现）的产物逐字节对读 —— 修 vendored `lzma`
+    /// 的滑窗复杂度时，就是靠它证明「解出来的字节一个都没变」。
+    pub fn pack_get(&self, name: &str) -> Result<Option<Vec<u8>>, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
+        match bsp.pack.get(name) {
+            Ok(Some(v)) => Ok(Some(v)),
+            Ok(None) => Ok(None),
+            Err(e) => Err(to_js_err(e, "取 pakfile 条目失败")),
+        }
+    }
 }

@@ -42,8 +42,8 @@
 //! - [`get_offset`] 把 `frame` 与 `face` 加成一个线性项，头里没有面数字段；本仓唯一调用点
 //!   （`src/wasm-core/texture_utils/image.rs` 的 `VTFImage::get_frame`）固定传 `face = 0` /
 //!   `slice = 0` / `mip_level = 0`。
-//! - 偏移与尺寸全程 `u32`，不做溢出检查，也不校验算出的偏移是否落在字节切片内——越界要等
-//!   `VTFImage::get_frame` 切片时 panic。
+//! - 偏移与尺寸全程 `u32`，不做溢出检查，也不校验算出的偏移是否落在字节切片内——越界由
+//!   `VTFImage::get_frame` 的边界检查转成 `Err(InvalidImageData)`（2026-10-13 前是 panic）。
 //!
 //! 边界：不解码像素（在兄弟模块 `texture_utils::image` 的 `VTFImage::decode` 里）、不生成
 //! mipmap、不读 zip / pakfile、不校验像素数据与格式是否自洽。唯一的落盘点是
@@ -65,8 +65,8 @@ use std::vec::Vec;
 /// `header` 是所有权的原件，两个图像视图各持它的克隆；三个字段都借用**同一份** `bytes`
 /// （`VTFImage` 只存切片与起始偏移，不复制像素）。
 ///
-/// 只由 [`VTF::read`] 构造，构造时不校验偏移是否落在 `bytes` 内：越界要等
-/// `VTFImage::get_frame` 切片时 panic。
+/// 只由 [`VTF::read`] 构造，构造时不校验偏移是否落在 `bytes` 内：越界由
+/// `VTFImage::get_frame` 的边界检查转成 `Err(InvalidImageData)`（2026-10-13 前是 panic）。
 #[derive(Debug)]
 pub struct VTF<'a> {
     /// 整份 VTF 头（两个视图各持一份克隆）。
@@ -157,7 +157,7 @@ impl<'a> VTF<'a> {
     /// 返回值不是一份可解码的 VTF：7.1 分支下 `VTFHeader::write` 实写 63 字节，而写进头长度
     /// 字段的 `VTFHeader::size()` 是 64。把它回灌 [`VTF::read`]，`lowres_offset` 取到头里的
     /// 64 已越过缓冲末尾，`decode` 不是先返回 `UnsupportedImageFormat`，就是在
-    /// `VTFImage::get_frame` 的切片处越界 panic。
+    /// `VTFImage::get_frame` 的边界检查处返回 `Err(InvalidImageData)`。
     pub fn create(image: DynamicImage, image_format: ImageFormat) -> Result<Vec<u8>, Error> {
         if !image.width().is_power_of_two()
             || !image.height().is_power_of_two()

@@ -1,21 +1,18 @@
-# WebSurf: 测试门禁（不含部署）
+# WebSurf: 构建与契约门禁（不含部署）
 #
 # 结构：门禁与部署解耦——部署只构建/发布 apps（见 deploy-pages.yml 的 build job），门禁在 PR 与
 # main 上独立跑；三个 app 的 Rust 编译各在自己的 job 内进行。
 #
-# 门禁清单（与各工程 package.json 的 test:* 对齐）：
+# 本文件实际跑的清单：
 #   rust-unit-tests — `cargo test -p websurf-phys`（共享层物理单测；含蹲姿/surf 回归、P2 幻影门）
 #   source-contract — `apps/viewer` 的 `check-wasm-api.mjs --source-only`（Rust serde 键名 ↔ TS 接口键名；
 #                     只读源码、不装 wasm 工具链、不建 pkg ⇒ 最便宜的一道，D-022 选项 (a)）
-#   debug           — test:optimize-scene / test:auth-clock / test:jump-apex /
-#                     test:surf-crouch（四道都在 apps/debug 内跑：optimize-scene 会把
-#                     `src/renderer/renderer-main.ts` 及其 `../pkg/websurf_wasm.js` 打成 Node bundle，
-#                     jump-apex 与 surf-crouch 直读 `apps/debug/pkg/` ⇒ 本 job 先建 debug wasm）
-#   game            — test:phys / test:seed-smoke / test:surf-crouch（都读 apps/game/pkg）
-#   viewer          — test:replay（纯 TS 自检，不依赖 pkg ⇒ 本 job 不建 wasm）
+#   glb-parity      — 三端 `npm run build:wasm` + 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
+#   debug-gates / game-gates — **只剩 `npm run build:wasm`**：只证明这两端的 wasm 能在干净环境构建
 #
-# 注：`debug:test:surf-crouch` 与 game 侧脚本逐字节相同；debug 的 pkg 本就要为 optimizeScene 门
-# 构建，故顺带跑掉这一道，边际成本为零。
+# 历史：2026-10-12 的 T-653（削减验证层，删 26 个验证脚本/测试）把三端 package.json 的 test:*
+# 门禁连同 CI 里调用它们的 step 一并删除，本文件自此不再跑 app 级回归门；两个 job 名保留原样
+# （改名会打断分支保护里按 job 名登记的必需检查）。若日后恢复 app 级回归，需先重建对应测试脚本。
 
 name: CI Gates
 
@@ -67,7 +64,7 @@ jobs:
         working-directory: apps/viewer
         run: node scripts/check-wasm-api.mjs --source-only
 
-  # ── debug 门禁（五道都在 apps/debug 内跑，先建本工程 pkg）─────────────────
+  # ── debug：wasm 构建冒烟（T-653 削减验证层后，本 job 只剩 build:wasm）────────
   debug-gates:
     name: debug gates
     runs-on: ubuntu-latest
@@ -134,13 +131,11 @@ jobs:
 
       - name: Build debug WASM
         working-directory: apps/debug
-        # debug 的门禁会把 `src/renderer/renderer-main.ts`（及其 `../pkg/websurf_wasm.js`）
-        # 用 esbuild 打包成 Node bundle ⇒ **必须先有 pkg/**，否则 esbuild 直接报
-        # "Could not resolve ../../pkg/websurf_wasm.js"（2026-09-21 实测）。
+        # 本 job 现在只做构建冒烟：确认 debug 的 wasm 能在干净环境构建出来。
+        # （原注释依据的「门禁要用 esbuild 打包 renderer-main ⇒ 必须先有 pkg/」已随 T-653 失效。）
         run: npm run build:wasm
 
-      # 渲染性能回归门：面片规模地图（surf_666 GLB = 34409 primitive）必须经 optimizeScene
-      # 合并到 300~800 块（否则每帧 3.4 万次 draw call）。断言顶点守恒 + 块数区间。
+  # ── game：wasm 构建冒烟（同上，T-653 后本 job 只剩 build:wasm）──────────────
   game-gates:
     name: game gates
     runs-on: ubuntu-latest
@@ -204,7 +199,7 @@ jobs:
 
       - name: Build game WASM
         working-directory: apps/game
-        # 下面三道门禁都直接读 apps/game/pkg/websurf_wasm_bg.wasm
+        # 本 job 现在只做构建冒烟：确认 game 的 wasm 能在干净环境构建出来（T-653 后已无门禁 step 读 pkg/）。
         run: npm run build:wasm
 
   glb-parity:

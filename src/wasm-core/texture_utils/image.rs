@@ -51,15 +51,18 @@ impl<'a> VTFImage<'a> {
     /// 取第 `frame` 帧的**原始字节**（未解码），长度 = `frame_size(width, height)`。
     ///
     /// 起始位置 = 本视图的 `offset` + `get_offset(header, format, frame, 0, 0, 0)`，
-    /// 即 face / slice / mip 层都取 0。格式不支持时返回 `Err`；`bytes` 不够长时**直接
-    /// panic**（切片索引，本函数不做边界检查）。
+    /// 即 face / slice / mip 层都取 0。格式不支持时返回 `Err`；**切片越界时返回
+    /// `Err(InvalidImageData)`，不 panic**——实测 Momentum 的 `hl2_dir.vpk` 里有一批 VTF
+    /// 的字节短于自己头部声明的长度（同名文件在 CS:S 的包里更长且能解），而越界切片在 wasm
+    /// 里会变成 `unreachable`，把调用方那条「先 crate、再本模块」的两路回退整条打断。
     pub fn get_frame(&self, frame: u32) -> Result<&[u8], Error> {
         let frame_size = self
             .format
             .frame_size(self.width as u32, self.height as u32)? as usize;
         let base: usize =
             self.offset + get_offset(&self.header, &self.format, frame, 0, 0, 0)? as usize;
-        Ok(&self.bytes[base..base + frame_size])
+        let end = base.checked_add(frame_size).ok_or(Error::InvalidImageData)?;
+        self.bytes.get(base..end).ok_or(Error::InvalidImageData)
     }
 
     /// 用 `texpresso` 把一块 BC 数据解成 `width × height × 4` 的 **RGBA8** 缓冲。
@@ -100,7 +103,7 @@ impl<'a> VTFImage<'a> {
 
     /// 解码第 `frame` 帧为 `DynamicImage`。
     ///
-    /// 有分支的格式共 8 个：
+    /// 有分支的格式共 12 个：
     /// - `Dxt1` 与 `Dxt1Onebitalpha` → BC1、`Dxt3` → BC2、`Dxt5` → BC3，结果都是 RGBA8；
     /// - `Rgba8888` 原样按 RGBA8；`Rgb888` 原样按 RGB8；
     /// - `Bgr888` 按 3 字节块交换 B/R（`convert_bgr`）后按 `ImageRgb8` 解释，缓冲与像素类型
@@ -110,7 +113,10 @@ impl<'a> VTFImage<'a> {
     ///   多出的 25% 容量会滞留容器，PNG 编码按 `color()` 算期望长度即 panic；
     /// - `Ia88`（2 B/像素、`[I][A]`）与 `Bgra4444`（小端 u16、位序 `A4R4G4B4`、4 位按 `v*17` 展宽）
     ///   各有一臂，输出同为 RGBA8；
-    /// - 其余格式（含 `Dxt1Onebitalpha` 之外的全部未列表格式）→ `UnsupportedImageFormat`。
+    /// - `I8`（1 B/像素灰度）与 `Uv88`（2 B/像素 `[U][V]`，中值 128 表示 0）各有一臂：前者
+    ///   r=g=b=I、a=255，后者 r=U、g=V、b=128、a=255。两者都只是**近似**呈现，目的是让这两类贴图
+    ///   不再落成占位色（实测命中 `surf_minigolf/grid.vtf` 与 `dev/water_dudv.vtf`）；
+    /// - 其余格式（未列表的全部）→ `UnsupportedImageFormat`。
     ///
     /// 不做：不选 mip 层（固定 0）、不做色彩空间转换、不处理 Bluescreen 变体。
     pub fn decode(&self, frame: u32) -> Result<DynamicImage, Error> {
@@ -146,6 +152,23 @@ impl<'a> VTFImage<'a> {
                 convert_bgra(&mut bgra);
                 self.image_from_buffer(bgra, DynamicImage::ImageRgba8)
             }
+            // `Abgr8888`（判别值 1）：4 字节/像素，**内存序 A,B,G,R** —— 与 `Bgra8888` 不是
+            // 同一件事（后者是 B,G,R,A）。整像素反转即得 RGBA8。
+            ImageFormat::Abgr8888 => {
+                let mut abgr = bytes.to_vec();
+                for px in abgr.chunks_exact_mut(4) {
+                    px.reverse();
+                }
+                self.image_from_buffer(abgr, DynamicImage::ImageRgba8)
+            }
+            // `Argb8888`（判别值 11）：4 字节/像素，**内存序 A,R,G,B**，左旋一个字节即得 RGBA8。
+            ImageFormat::Argb8888 => {
+                let mut argb = bytes.to_vec();
+                for px in argb.chunks_exact_mut(4) {
+                    px.rotate_left(1);
+                }
+                self.image_from_buffer(argb, DynamicImage::ImageRgba8)
+            }
             // `Ia88`：2 字节/像素（8 位强度 + 8 位 alpha），字节序 `[I][A]`（同 D3D `A8L8`）。
             // 输出统一成 RGBA8（r=g=b=I），与其余分支同一容器口径。
             ImageFormat::Ia88 => {
@@ -167,6 +190,25 @@ impl<'a> VTFImage<'a> {
                     rgba.push((((v >> 4) & 0xF) as u8) * 17);
                     rgba.push(((v & 0xF) as u8) * 17);
                     rgba.push((((v >> 12) & 0xF) as u8) * 17);
+                }
+                self.image_from_buffer(rgba, DynamicImage::ImageRgba8)
+            }
+            // `I8`：1 字节/像素的灰度，无 alpha 通道；输出统一成 RGBA8（r=g=b=I、a=255）。
+            ImageFormat::I8 => {
+                let n = self.width as usize * self.height as usize;
+                let mut rgba = Vec::with_capacity(n * 4);
+                for &i in bytes.iter().take(n) {
+                    rgba.extend_from_slice(&[i, i, i, 255]);
+                }
+                self.image_from_buffer(rgba, DynamicImage::ImageRgba8)
+            }
+            // `Uv88`：2 字节/像素的 `[U][V]`（中值 128 表示 0，本是 DUDV 扰动图格式）。没有第三
+            // 通道与 alpha，按中性值补齐（b=128）——当基色贴图看是灰蓝噪声，但比占位色接近原意。
+            ImageFormat::Uv88 => {
+                let n = self.width as usize * self.height as usize;
+                let mut rgba = Vec::with_capacity(n * 4);
+                for px in bytes.chunks_exact(2).take(n) {
+                    rgba.extend_from_slice(&[px[0], px[1], 128, 255]);
                 }
                 self.image_from_buffer(rgba, DynamicImage::ImageRgba8)
             }
@@ -236,12 +278,12 @@ impl ImageFormat {
     /// 单帧字节数（**不含 mip**，按传入的 `width × height` 直接算）。
     ///
     /// 表内口径：`None` → 0；`Rgba8888` / `Abgr8888` / `Argb8888` / `Bgra8888` → `w*h*4`；
-    /// `Rgb888` / `Bgr888` → `w*h*3`；`Rgb565` / `Ia88` → `w*h*2`；`I8` / `A8` → `w*h`；
+    /// `Rgb888` / `Bgr888` → `w*h*3`；`Rgb565` / `Ia88` / `Uv88` → `w*h*2`；`I8` / `A8` → `w*h`；
     /// `Rgba16161616f` / `Rgba16161616` → `w*h*8`；`Dxt1` → 每个 4×4 块 8B；
     /// `Dxt3` / `Dxt5` → 每个 4×4 块 16B。
     ///
     /// 块数按 `((w + 3) / 4) * ((h + 3) / 4)` 向上取整，边长不是 4 的倍数时按整块算。
-    /// 表外格式（`Dxt1Onebitalpha`、`P8`、`Bgrx8888`、`Uv88` 等）→ `UnsupportedImageFormat`。
+    /// 表外格式（`Dxt1Onebitalpha`、`P8`、`Bgrx8888` 等）→ `UnsupportedImageFormat`。
     pub fn frame_size(&self, width: u32, height: u32) -> Result<u32, Error> {
         match self {
             ImageFormat::None => Ok(0),
@@ -251,6 +293,7 @@ impl ImageFormat {
             ImageFormat::Bgr888 => Ok(width * height * 3),
             ImageFormat::Rgb565 => Ok(width * height * 2),
             ImageFormat::Bgra4444 => Ok(width * height * 2),
+            ImageFormat::Uv88 => Ok(width * height * 2),
             ImageFormat::I8 => Ok(width * height),
             ImageFormat::Ia88 => Ok(width * height * 2),
             ImageFormat::A8 => Ok(width * height),

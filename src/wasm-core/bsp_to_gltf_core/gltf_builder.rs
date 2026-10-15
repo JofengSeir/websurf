@@ -98,6 +98,17 @@ pub fn push_or_get_material_bsp(
             if let Some(tc) = texture_collector {
                 let mut tc_mut = tc.borrow_mut();
                 let material = crate::bsp_to_gltf_core::materials::load_material_fallback_bsp(&material, &[String::new()], bsp, options, missing_resources, Some(&mut tc_mut));
+                // 顺手把这张材质的 mosaic 缩出来（图还在手里，只要 ≤50 像素）：这样
+                // `build_mosaic_manifest` 就不必再把同一批世界面贴图解一遍。放在 `push_material`
+                // 取走 `texture` 之前。
+                if let Some(tex) = material.texture.as_ref() {
+                    let key = tex.name.to_ascii_lowercase();
+                    // 按**贴图**去重：本函数是逐材质走的，同一张贴图会被多个材质引用
+                    if tc_mut.mosaic_seen.insert(key.clone()) {
+                        let code = crate::mosaic::encode::img_to_code_dyn(&tex.image, &tex.name);
+                        tc_mut.mosaic.push((key, code));
+                    }
+                }
                 let index = gltf.materials.len() as u32;
                 let material = push_material(buffer, gltf, material);
                 gltf.materials.push(material);

@@ -19,7 +19,7 @@
 
 use crate::bsp_to_gltf_core::materials::load_material_bsp;
 use crate::bsp_to_gltf_core::ConvertOptions;
-use crate::mosaic::encode::img_to_code;
+use crate::mosaic::encode::img_to_code_dyn;
 use crate::vbsp::Bsp;
 
 /// 遍历全部 model 的 face，收集**可见** face 的材质名（转小写）并按首次出现顺序去重。
@@ -47,9 +47,13 @@ pub fn collect_face_texture_names(bsp: &Bsp) -> Vec<String> {
 /// 判据有两条：`load_material_bsp` 返回 `Err`（缺 VMT、解码失败等），或返回 `Ok` 但
 /// `MaterialData.texture_absent` 为真（`$basetexture` 指向的 `.vtf` 取不到）。
 /// 「本就没有 `$basetexture`」（Water）不算缺失。与 `build_mosaic_manifest` 互补。
+///
+/// **开探针模式**（`ConvertOptions::probe_only`）：这里只要一个布尔结论，原先却对每张不同材质
+/// **完整解码**一遍 VTF。实测 `surf_axil` 因此要 857 s、`surf_kraken` 8.2 s；探针只做「头部可解析 +
+/// 格式有解码臂 + 帧长落在字节内」，判否时才真解一次兜底，结论不变。
 pub fn collect_missing_textures(bsp: &Bsp) -> Vec<String> {
     let names = collect_face_texture_names(bsp);
-    let options = ConvertOptions::default();
+    let options = ConvertOptions { probe_only: true, ..ConvertOptions::default() };
     let mut missing = Vec::new();
     for name in &names {
         match load_material_bsp(name, &[String::new()], bsp, &options) {
@@ -91,12 +95,8 @@ fn texture_to_code(
     let texture = material
         .texture
         .ok_or_else(|| crate::bsp_to_gltf_core::Error::Other(format!("{material_name}: 无贴图")))?;
-    let mut png: Vec<u8> = Vec::new();
-    texture
-        .image
-        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .map_err(|e| crate::bsp_to_gltf_core::Error::Other(format!("PNG 编码失败: {e}")))?;
-    let code = img_to_code(&png, &texture.name)
-        .map_err(|e| crate::bsp_to_gltf_core::Error::Other(e))?;
+    // 直接喂已解码的图：原先这里先 `write_to(Png)` 编一遍、`img_to_code` 再 `load_from_memory`
+    // 解回来，而本链路只要一张 ≤50 像素的缩略 —— 4096×4096 上这轮往返是秒级纯浪费。
+    let code = img_to_code_dyn(&texture.image, &texture.name);
     Ok((texture.name.to_ascii_lowercase(), code))
 }

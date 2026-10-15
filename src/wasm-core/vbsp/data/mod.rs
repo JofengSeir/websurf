@@ -743,13 +743,68 @@ pub struct VertNormalIndex {
 /// `zip` 私有且必须持锁访问，所以对外只有 `read` / `get` / `has` / `into_zip` 四个口子。
 pub struct Packfile {
     zip: Mutex<ZipArchive<Cursor<Vec<u8>>>>,
+    /// 解压结果缓存（见 [`PackCache`]）。
+    cache: Mutex<PackCache>,
+    /// 取用计数：`get` 次数 / 缓存命中 / 实际解压次数与字节 / `ci_name` 扫描次数与比较条目数。
+    /// 只用于定位性能瓶颈（`BspProcessor::pack_stats`），不参与任何判定。
+    stats: Mutex<[u64; 6]>,
+}
+
+/// 解压结果缓存上限（**解压后**字节数合计）。
+///
+/// 为什么需要：一次加载里同一份 pakfile 会被反复取同样的条目 —— `export_mosaic_manifest` 与 GLB
+/// 导出各走一遍、`collect_missing_textures` 对引用同一张贴图的多个材质各取一次、世界面与模型两条
+/// 通路也各取一次；而**每次取都要现场解压**。实测 `surf_axil`：它的 492 个条目全是 LZMA，53 个
+/// VTF 解压后合计 **111 MB**，同一张被取 5~6 次 ⇒ `export_missing_textures` 一项就要 **857 s**；
+/// 把取字节整段跳过则只要 **506 ms**，可见时间几乎全花在重复解压上。
+const PACK_CACHE_BUDGET: usize = 128 * 1024 * 1024;
+
+/// 单个条目超过这个大小就不进缓存：它一张就能吃光预算，而缓存的意义在于「同一张被反复取」。
+const PACK_CACHE_MAX_ENTRY: usize = 32 * 1024 * 1024;
+
+/// `Packfile` 的解压结果缓存：按条目名存解压后的字节，按**插入序 FIFO** 淘汰到预算以内。
+///
+/// 不做真 LRU（命中不回挪）：搬动是 O(n) 且收益有限，而缓存只要覆盖住「一次加载的工作集」就够了。
+#[derive(Default)]
+struct PackCache {
+    map: std::collections::HashMap<String, Vec<u8>>,
+    order: std::collections::VecDeque<String>,
+    bytes: usize,
+}
+
+impl PackCache {
+    /// 命中返回**一份拷贝**（调用方的接口就是 `Vec<u8>`）。拷 11 MB 约 1 ms，而重新 LZMA 解压
+    /// 同一份要 2~3 s —— 拷贝的代价可以忽略。
+    fn get(&self, key: &str) -> Option<Vec<u8>> {
+        self.map.get(key).cloned()
+    }
+
+    fn put(&mut self, key: String, data: &[u8]) {
+        if data.len() > PACK_CACHE_MAX_ENTRY || self.map.contains_key(&key) {
+            return;
+        }
+        self.bytes += data.len();
+        self.order.push_back(key.clone());
+        self.map.insert(key, data.to_vec());
+        while self.bytes > PACK_CACHE_BUDGET {
+            let Some(old) = self.order.pop_front() else { break };
+            if let Some(v) = self.map.remove(&old) {
+                self.bytes -= v.len();
+            }
+        }
+    }
 }
 
 impl Clone for Packfile {
     /// 深拷贝整个 `ZipArchive`（含底层字节缓冲），因此克隆不便宜；克隆期间持锁，锁中毒会 panic。
+    ///
+    /// **缓存不随克隆带走**（新实例从冷启动开始）：克隆的用途是 `bsp.pack.clone().into_zip()`
+    /// （模型解析要一份自有 zip），而把上百 MB 的解压缓存再拷一份纯属浪费。
     fn clone(&self) -> Self {
         Packfile {
             zip: Mutex::new(self.zip.lock().unwrap().clone()),
+            cache: Mutex::new(PackCache::default()),
+            stats: Mutex::new([0; 6]),
         }
     }
 }
@@ -781,43 +836,95 @@ impl Packfile {
     pub fn read(data: Cow<[u8]>) -> BspResult<Self> {
         let reader = Cursor::new(data.into_owned());
         let zip = Mutex::new(ZipArchive::new(reader)?);
-        Ok(Packfile { zip })
+        Ok(Packfile { zip, cache: Mutex::new(PackCache::default()), stats: Mutex::new([0; 6]) })
+    }
+
+    /// 取用计数快照：`get / 命中 / 解压次数 / 解压字节 / ci_name 次数 / ci_name 比较条目数`。
+    /// 仅用于性能定位（`BspProcessor::pack_stats`）。
+    pub fn stats(&self) -> [u64; 6] {
+        *self.stats.lock().unwrap()
     }
 
     /// 按条目名取内容，返回该条目**解压后**的字节。
     ///
-    /// 三种结果：命中 → `Ok(Some(bytes))`；`ZipError::FileNotFound` → `Ok(None)`（“没有这个
-    /// 文件”不算错误）；其他 zip 错误（条目损坏等）→ `Err(BspError::Zip)`。按名精确匹配，
-    /// 大小写敏感。整段读取期间持锁。
+    /// 三种结果：命中 → `Ok(Some(bytes))`；精确与不敏感两条匹配都落空 → `Ok(None)`（“没有
+    /// 这个文件”不算错误）；其他 zip 错误（条目损坏等）→ `Err(BspError::Zip)`。匹配**先精确、
+    /// 再按 ASCII 小写不敏感**（原因见 `Packfile::ci_name`）。整段读取期间持锁。
     pub fn get(&self, name: &str) -> BspResult<Option<Vec<u8>>> {
         let mut zip = self.zip.lock().unwrap();
-        let mut entry = match zip.by_name(name) {
-            Ok(entry) => entry,
-            Err(ZipError::FileNotFound) => {
-                return Ok(None);
-            }
-            Err(e) => {
-                return Err(e.into());
-            }
+        // 这条 let 语句结束即释放 by_name 借走的 zip，下文才能再对 zip 取不可变借用。
+        let exact = match zip.by_name(name) {
+            Ok(_) => Ok(true),
+            Err(ZipError::FileNotFound) => Ok(false),
+            Err(e) => Err(e),
         };
+        let real = match exact {
+            Ok(true) => name.to_string(),
+            Err(e) => return Err(e.into()),
+            Ok(false) => match self.ci_name(&zip, name) {
+                Some(real) => real,
+                None => return Ok(None),
+            },
+        };
+        self.stats.lock().unwrap()[0] += 1;
+        // 缓存命中就免掉这一次解压（世界面/模型/mosaic/GLB 四条通路会反复取同一张 VTF）
+        if let Some(hit) = self.cache.lock().unwrap().get(&real) {
+            self.stats.lock().unwrap()[1] += 1;
+            return Ok(Some(hit));
+        }
+        let mut entry = zip.by_name(&real)?;
         let mut buff = vec![0; entry.size() as usize];
         entry.read_exact(&mut buff)?;
+        drop(entry);
+        self.cache.lock().unwrap().put(real, &buff);
+        {
+            let mut s = self.stats.lock().unwrap();
+            s[2] += 1;
+            s[3] += buff.len() as u64;
+        }
         Ok(Some(buff))
     }
 
-    /// 只回答条目是否存在：匹配规则与错误分类同 `get`，但不解压内容。
+    /// 只回答条目是否存在：匹配规则与错误分类同 `get`（先精确、再大小写不敏感），但不解压内容。
     pub fn has(&self, name: &str) -> BspResult<bool> {
         let mut zip = self.zip.lock().unwrap();
-        let result = match zip.by_name(name) {
+        let exact = match zip.by_name(name) {
             Ok(_) => Ok(true),
-            Err(ZipError::FileNotFound) => {
-                return Ok(false);
-            }
-            Err(e) => {
-                return Err(e.into());
-            }
+            Err(ZipError::FileNotFound) => Ok(false),
+            Err(e) => Err(e),
         };
-        result
+        match exact {
+            Ok(true) => Ok(true),
+            Err(e) => Err(e.into()),
+            Ok(false) => Ok(self.ci_name(&zip, name).is_some()),
+        }
+    }
+
+    /// 大小写不敏感地解析条目在 zip 内的真实名：按 ASCII 小写逐条比对，返回包内实际写法的名字。
+    ///
+    /// 为什么需要：VBSP 打包保留作者写的大小写（实测 `materials/RealWorldTextures/de_artcenter/…`、
+    /// `materials/Silkroad/Ground/…`、`materials/WaterSource/River/…`），而材质加载侧只枚举 4 条
+    /// 候选名（原名 / 全小写 / 全大写 / 斜杠换下划线，见 `bsp_to_gltf_core::materials`），混合大小写的
+    /// 条目会全部落空、世界面就被当成「材质缺失」。只在精确匹配落空时调用，热路径不受影响。
+    ///
+    /// **每次比较都 `to_ascii_lowercase()` 分配一个 String** —— 代价是「条目数 × 落空次数」。
+    /// 计数落在 `stats[4]`（次数）与 `stats[5]`（累计比较条目数），供性能定位。
+    fn ci_name(&self, zip: &ZipArchive<Cursor<Vec<u8>>>, name: &str) -> Option<String> {
+        let lower = name.to_ascii_lowercase();
+        let mut scanned = 0u64;
+        let hit = zip
+            .file_names()
+            .find(|n| {
+                scanned += 1;
+                n.to_ascii_lowercase() == lower
+            })
+            .map(|n| n.to_string());
+        {
+            let mut s = self.stats.lock().unwrap();
+            s[4] += 1;
+            s[5] += scanned;
+        }
+        hit
     }
 
     /// 交出内层 `Mutex<ZipArchive<…>>`（所有权转移，不再拷贝）。

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 把 wasm-pack 的产物从「沙箱可写区」拷进应用（T-643）。
+ * 把 wasm-pack 的产物从「沙箱可写区」拷进应用（T-643），拷完**逐项校验 sha256**（T-652）。
  *
  * ## 为什么需要这一层
  *
@@ -19,9 +19,16 @@
  *
  * 只拷 wasm-pack 的四类产物（`*.js` / `*.d.ts` / `*.wasm` / `*.wasm.d.ts`），**不碰** `pkg/.gitignore`，
  * 也不拷 wasm-pack 生成的 `package.json`（仓库内无人读它）。`*_bg.wasm` 额外拷一份到 `<app>/web/`。
+ *
+ * ## 拷后校验（T-652）
+ *
+ * 历史症状：`npm run build:wasm` 报成功，但 `apps/<app>/pkg|web` 下仍是**旧产物**（T-649 全程手动比对
+ * 字节数才没被假数据带偏）。故本脚本拷完后**重新读回目标文件**、与源逐项比 sha256；任一项不一致就
+ * 逐条列出并 **exit 1**，让 `build:wasm` 整条链失败 —— 宁可报错，也不把旧 wasm 当成功交付。
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -51,11 +58,33 @@ if (bgBytes < 1024 * 1024) {
   process.exit(1);
 }
 
+const sha256 = (p) => createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+const targets = [
+  ...wanted.map((f) => ({ src: path.join(srcDir, f), dst: path.join(pkgDir, f), label: 'pkg/' + f })),
+  { src: path.join(srcDir, bg), dst: path.join(webDir, bg), label: 'web/' + bg },
+];
+
 fs.mkdirSync(pkgDir, { recursive: true });
-for (const f of wanted) fs.copyFileSync(path.join(srcDir, f), path.join(pkgDir, f));
 fs.mkdirSync(webDir, { recursive: true });
-fs.copyFileSync(path.join(srcDir, bg), path.join(webDir, bg));
+for (const t of targets) fs.copyFileSync(t.src, t.dst);
+
+// 拷后回读校验：源与目标逐项比 sha256（目标缺失也算失败）
+const bad = [];
+for (const t of targets) {
+  const s = sha256(t.src);
+  const d = fs.existsSync(t.dst) ? sha256(t.dst) : null;
+  if (s !== d) {
+    bad.push('  ' + t.label + '：源 ' + s.slice(0, 12) + ' ≠ 目标 ' + (d ? d.slice(0, 12) : '(缺失)') + '（源 ' + fs.statSync(t.src).size + ' B）');
+  }
+}
+if (bad.length) {
+  console.error('[copy-wasm] ' + app + '：拷入后 sha256 校验失败 ' + bad.length + ' / ' + targets.length + ' 项：');
+  for (const b of bad) console.error(b);
+  console.error('[copy-wasm] 目标可能被占用/只读，或写入被宿主策略拦下 ⇒ 重跑 build:wasm（必要时先关掉占用它的窗口）');
+  process.exit(1);
+}
 
 console.log(
-  '[copy-wasm] ' + app + '：' + wanted.length + ' 个产物拷入 pkg/（' + bg + ' = ' + bgBytes + ' B），并拷一份到 web/',
+  '[copy-wasm] ' + app + '：' + wanted.length + ' 个产物拷入 pkg/（' + bg + ' = ' + bgBytes + ' B），'
+  + 'web/ 1 份；sha256 逐项校验通过 ' + targets.length + '/' + targets.length,
 );
