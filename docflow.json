@@ -22,7 +22,7 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "adbc4aecbd5debdfe4fa1113ef235e683fef2fae3f9c659512e2fe931b7282e3",
-    "AGENTS.md": "11122cf65af037fd0650222ca49cb0749ce72d676e9aae2b2545bf453fa9b9ef",
+    "AGENTS.md": "7da3ce260b077301104ff04b8b8d9539ab2029d9a1ab1a082b2f63f180603df7",
     "skills/websurf-workflow/SKILL.md": "7299f1bad07726f52718d242a02be2e9d397eed283b9f2db2ed897dcb6621951"
   },
   "approvals": [
@@ -115,18 +115,18 @@
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
+      "path": "skills/websurf-workflow/SKILL.md",
       "by": "owner-delegated",
-      "reason": "§3 补第三道闸（闸 B）+ 全量闸门加 check-kb-gate --all",
+      "reason": "更正门禁清单：check-kb-gate --all 恒 exit 0（只跑不判），四道才是能真红的判据",
       "at": "2026-10-12",
       "task": "",
       "consumed": true
     },
     {
-      "path": "skills/websurf-workflow/SKILL.md",
+      "path": "AGENTS.md",
       "by": "owner-delegated",
-      "reason": "更正门禁清单：check-kb-gate --all 恒 exit 0（只跑不判），四道才是能真红的判据",
-      "at": "2026-10-12",
+      "reason": "CI 修复（T-679）：[O] 覆盖率要求 src/scripts/*.mjs 被 AGENTS.md 以仓库相对路径提到；build-textures-mtz.mjs 于 T-659 新增时未登记（当时未跟踪 ⇒ 门禁看不见），提交后 CI 报红",
+      "at": "2026-10-15",
       "task": "",
       "consumed": true
     }
@@ -198,6 +198,18 @@
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-10",
         "line": 30
+      },
+      "D-120": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-15",
+        "line": 31
+      },
+      "D-121": {
+        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
+        "at": "2026-10-15",
+        "line": 32
       }
     }
   },
@@ -219,7 +231,8 @@
     "SECURITY.md": {
       "src/scripts/serve.py:40:41": "a4a62ad0"
     },
-    "apps/viewer/dist-README.md": {}
+    "apps/viewer/dist-README.md": {},
+    "src/vendor/lzma/README.md": {}
   },
   "rebaselines": [
     {

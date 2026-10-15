@@ -431,6 +431,15 @@ for (const a of appNames) {
       contract.push('  ' + rel + ' 引用面为 0（本工程 package.json / CI / 同族脚本都没提它）⇒ 接线或登记进 AGENTS.md §3.1');
     }
   }
+  // 目标是否被 gitignore（构建产物 / 本地生成物）：git check-ignore 按**规则**判定，路径不存在也有效
+  const ignoredCache = new Map();
+  const isGitIgnored = (relPath) => {
+    if (ignoredCache.has(relPath)) return ignoredCache.get(relPath);
+    let ig = false;
+    try { execFileSync('git', ['check-ignore', '-q', '--', relPath], { cwd: ROOT, stdio: 'ignore' }); ig = true; } catch { ig = false; }
+    ignoredCache.set(relPath, ig);
+    return ig;
+  };
   for (const f of fs.readdirSync(path.join(appsDir, a)).filter((x) => x.endsWith('.cmd'))) {
     const rel = 'apps/' + a + '/' + f;
     const t = fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -453,10 +462,12 @@ for (const a of appNames) {
       // T-673 的两处断链（第 [2/5] 步调用已被删除的 sync-default-textures.mjs、第 [5/5] 步循环已被删除的
       // test:* 门禁）就是这样在 2026-10-12 静默进来的：本段此前只查形态，不查目标是否存在。
       for (const r of l.matchAll(/\b(?:node|python|call)\s+"?(%~dp0[^"\s]*)"?/gi)) {
-        const target = path.normalize(path.join('apps', a, r[1].slice(5)));
-        if (!fs.existsSync(path.join(ROOT, target))) {
-          contract.push('  ' + rel + ':' + (i + 1) + ' 引用 ' + r[1] + ' ⇒ 解析为 ' + target.replace(/\\/g, '/') + ' 不存在');
-        }
+        // ① 反斜杠先归一：CI 在 Linux 上跑，'..\\..\\src\\x' 在那边是**一个文件名**（不是路径）
+        const target = path.normalize(path.join('apps', a, r[1].slice(5).replace(/\\/g, '/')));
+        if (fs.existsSync(path.join(ROOT, target))) continue;
+        // ② 被 gitignore 的目标（构建产物如 apps/<app>/dist/**）在干净检出里本就不存在 ⇒ 不算断链
+        if (isGitIgnored(target)) continue;
+        contract.push('  ' + rel + ':' + (i + 1) + ' 引用 ' + r[1] + ' ⇒ 解析为 ' + target.replace(/\\/g, '/') + ' 不存在');
       }
       // `call npm run <脚本>` 的目标必须在本工程 package.json 的 scripts 里（T-675，与上一条同源）
       for (const r of l.matchAll(/\bcall\s+npm\s+run\s+([A-Za-z0-9:_-]+)/gi)) {

@@ -122,6 +122,7 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 - `apps/game/scripts/check-wasm-api.mjs`
 - `apps/viewer/scripts/build-dist.mjs`
 - `apps/viewer/scripts/check-wasm-api.mjs`
+- `src/scripts/build-textures-mtz.mjs`
 - `src/scripts/check-board-touch.mjs`
 - `src/scripts/check-doc-drift.mjs`
 - `src/scripts/check-kb-doc-drift.mjs`
