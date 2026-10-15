@@ -19,14 +19,16 @@
     </div>
   </div>
 
-  <!-- 首访引导层：`#guide`（其中的 `#guideError` 由 `apps/viewer/src/ui/hud.ts` 写入）-->
-<!-- 首访引导层：`#guide`（其中的 `#guideError` 由 `apps/viewer/src/ui/hud.ts` 写入）
-       结构 = 场记板：拍板条（铰链板 + 人字彩条）+ 表格化板身（中英双语单元格 + 格线）
-       + 底部两枚按钮（`label[for]` 原生转发到隐藏 input，不需要 click 监听） -->
+  <!-- 首访引导层：`#guide`（其中的 `#guideError` 由 `apps/viewer/src/ui/hud.ts` 写入）
+       结构 = 场记板（v15 段；2026-10-16 由 v19 / v20 回退到此版 —— 那两版 owner 都判
+       「完全就不是一个东西」）：拍板条（铰链板 + 人字黑白条）+ 表格化板身（中英双语单元格
+       + 格线）+ 底部两枚按钮（`label[for]` 原生转发到隐藏 input，不需要 click 监听） -->
   <div id="guide">
     <div class="card">
-      <!-- 拍板条：黑色铰链板（色条第一段）+ 人字彩条（绿/黄/蓝/红/白/灰）+ **尾部单一深色**；
-           另有水平转轴分缝与三颗螺钉（上片 1 + 下片 2，左列对齐） -->
+      <!-- 拍板条：黑色铰链板（色条第一段）+ **黑白交替**人字条（各 9 条 + 末尾短黑 5%；
+           owner 2026-09-30 定稿 —— 更早那版是绿/黄/蓝/红彩色条，被判「读作彩条测试卡」）；
+           另有贯通整条的水平转轴分缝与三颗螺钉（**上片 1 + 下片 2**：上下两片因此能相对
+           转动、板才打得响；4 颗同时钉死两片是错的） -->
       <div class="slate-stick">
         <span class="slate-stripes"></span>
         <span class="slate-screws"></span>
@@ -57,7 +59,6 @@
       <div id="guideError"></div>
     </div>
   </div>
-</div>
 
 <!-- 拖拽高亮反馈条：`#dropzone`，拖拽期间由 `apps/viewer/src/ui/hud.ts` 切换 `active` 类 -->
   <div id="dropzone">松开鼠标：.bsp 加载地图、.replay 导入记录、.dem 导入录像</div>

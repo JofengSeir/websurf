@@ -11,37 +11,32 @@
  * apps/viewer 中性灰阶「导演工作台」。
  *   · 菱角分明：全文件 border-radius 一律 0，仅服务孔（1 处，位于侧栏左下）
  *     （1 处）保留 50% 圆；轨迹色点 .track-dot / .meta-dot 方形化；
- *   · 切角系统：右上切角（clip-path polygon）结构级 10px（侧栏、帮助卡、
- *     引导卡、致命错误卡、主按钮、**激活 tab**）；本工程无嵌件级切角；
+ *   · 切角系统：**已撤销**（owner 2026-10-16：右上切角"莫名其妙"，与 game 同口径）。
+ *     最后两处（帮助浮层 `#help`、致命错误卡 `#fatal .card`）本轮一并删除；
+ *     侧栏与主按钮更早前已是矩形。菱角语彙改由「零圆角 + 1px/2px 直线」表达。
  *   · 线宽系统：2px 结构线（HUD 铭牌左缘）/ 1px 发丝分隔 / 1px 点线
  *     （小节标题右端 3px 短竖刻度，同 game h4）；
  *   · 档案元素成套：两个 tabpane 档案编号（右上，VW-01 / VW-02，时间码黄）+
- *     页脚署名（右下）；硬件件计数：服务孔 1（侧栏左下）——引导卡场记板化后不再放螺丝
- *     （侧栏左下）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层至多
- *     1 件」适配，不套用 game 单窗口的 ≥2 口径；
+ *     页脚署名（右下）；硬件件计数：服务孔 1（侧栏左下）+ 引导卡拍板条铰链的 3 颗螺钉
+ *     （上片 1 + 下片 2，见 v15 段）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层
+ *     至多 1 件」适配，不套用 game 单窗口的 ≥2 口径；
  *   · **导演版条纹特色（owner 指定保留并强化，v3 扩展）**：时间轴上下缘
- *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**人字彩条**顶条（尾部单一深色，见 v17）、
+ *     胶片齿孔条（硬停重复条纹）、引导卡顶部场记板**人字黑白条**顶条（各 9 条 + 末尾短黑 5%，
+ *     owner 2026-09-30 定稿；见 v15 段），
  *     拖拽态上下缘黑白遮幅条、录像信息条左端**调色卡条**（黑/灰/白/
  *     时间码黄四段）、每个小节标题左端**调色卡竖条**（黑/白/黄三段）、
- *     （激活 = 场记板白底黑字，**不切角**——切角只留在大结构上）；
+ *     （激活 = 场记板白底黑字）；
  *   · **影视语彙泛化（v4/v6）**：播放中时间码前缀 REC 红点、时间轴底部秒刻度尺、白竖线播放头、SMPTE 彩条、速度电平表、场记板黑白标签。
- *   · **引导卡场记板化（v15，按实物照片逐行实测同构）**：拍板条 = 左 29.3% **纯黑铰链板**
- *     （照片里发灰是抛光金属反光）——**上片 1 颗 + 下片 2 颗螺钉 + 一条水平转轴分缝**
- *     （实测：上 4.6%/23%，下 4.2% 与 16%/76%，分缝在纵 50%）
- *     + **人字形彩条**（上下两层 52°/-52°
- *     硬停渐变在条高中央折成 V，色序照实测：左灰阶 / 青 / 黄 / 蓝 / 红 / 白 / 灰 /
- *     右暗阶）；板身 = **表格化单元格**（中英双语标签 + 1px 竖格线 + 行间格线），
- *     实物白板黑线按 owner 要求**反相**成深板白线；底部两枚按钮为板身末行。
- *     几何与配色的证据：`.tmp/audit/stripe-slope.py` 对照片逐行追踪色界所得
- *     （斜率 |dx/dy|=0.77、折点在条高中央；各色带相对**条纹区**宽度：左灰阶 22.8 /
- *     青 8.5 / 黄 10.5 / 蓝 8.8 / 红 9.6 / 白 9.0 / 灰 8.0 / 右暗阶 23.1）。
- *     条高 44px；黑板做成色条渐变的**第一段**，右缘因此自然跟着人字折线走
- *     （实测折点处 29.2% vs 照片 29.3%）；**六个色带取等宽**（各 8.5%），
- *     右暗阶 19.7%；螺钉/分缝用平涂圆点与 1px 线（#3c3c45 / #2e2e36）。
- *     v6/v7 的毛病：拍板条画成竖条只铺左半（读作进度条）、改成 78° 单斜（方向错）、
- *     `::after` 被重复定义成 1×3px 彩条（肉眼看到的"莫名其妙的绿点"）。
- *     仍为**平面化**：全部硬停色块，无受光高光、无材质渐变、无投影/圆角/贴图。
- *     （激活 = 场记板白底黑字 + 右上 10px 切角）。
+ *   · **引导卡场记板化（v15 段；2026-10-16 由 v20 回退到此版）**：拍板条 51px 高 ——
+ *     上下两层 52° / -52° **镜像硬停渐变在条高中央折成 V**（各 9 条黑白交替 + 末尾短黑 5%，
+ *     owner 2026-09-30 定稿：更早那版是彩色色带，被判「读作彩条测试卡」）；
+ *     `.slate-screws` 再叠**贯通整条的 1.5px 转轴分缝** + **3 颗螺钉（上片 1 + 下片 2）**
+ *     —— 上下两片因此能相对转动，板才打得响（4 颗同时钉死两片是错的）。
+ *     板身 = 表格化单元格（112px 标签列 + 值列、1px 行线与竖线），抬头行用时间码黄；
+ *     底部两枚按钮为板身末行。
+ *     **为什么回退**：v19 / v20 两版（一版按截图目测排、一版按数值换算重排拍板条与板身）
+ *     都被 owner 2026-10-16 判「不像」⇒ 整块退回这一版；那两版的类名与令牌已全部清掉
+ *     （`slate-clapper` / `stick-move` / `slate-hinge` / `slate-body` / `slate-fields` … 均 0 命中）。
  *
  * 与 JS 的接线（本文件只负责外观；显隐与取值由类名驱动）：
  *   · 可见性钩子：.hidden、#help.hidden、#guideError.show、#dropzone.active、
@@ -139,7 +134,8 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 }
 #topbar .iconbtn:first-child { font-weight: 700; }
 
-/* ── 帮助浮层 #help（非模态）：右上 10px 切角 + 单层发丝压槽；
+/* ── 帮助浮层 #help（非模态）：完整矩形 + 单层发丝压槽（原右上 10px 切角已按
+   owner 2026-10-16「莫名其妙」的裁决撤销，与 game 同口径）；
    点击 #helpClose 或按 Esc 关闭，均由 apps/viewer/src/ui/hud.ts 处理 ── */
 #help {
   position: absolute; top: 46px; right: 12px; z-index: 7;
@@ -147,7 +143,6 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
   overflow-y: auto; overscroll-behavior: contain;
   padding: 10px 12px;
   background: var(--panel); border: 1px solid var(--border-strong);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 6px 20px rgba(0, 0, 0, 0.35);
@@ -197,8 +192,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
   z-index: 1; pointer-events: none;
 }
 #tabs { display: flex; gap: 8px; padding: 10px 12px; }
-/* 标签 = 状态标签条形态（同 game 标签条：无圆角 1px 边；激活 = 场记板
-   白底黑字 + 右上 10px 切角） */
+/* 标签 = 状态标签条形态（同 game 标签条：无圆角 1px 边；激活 = 场记板白底黑字） */
 .tab {
   font-family: inherit; font-size: 12.5px; color: var(--muted);
   padding: 5px 14px; background: none;
@@ -210,7 +204,7 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
   color: var(--strip-dark); background: var(--strip-light);
   border-color: var(--strip-light);
 }
-/* 激活 tab 的聚焦指示：clip-path 会裁掉外部 outline，改内嵌 1px 暗线 */
+/* 激活 tab 的聚焦指示：白底上外描边不显眼，改内嵌 1px 暗线（与全站「不外加描边」一致） */
 .tab.active:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 1px var(--border-strong);
@@ -464,7 +458,12 @@ select.field-select:focus { border-color: var(--text); }
   /* 左列 1fr：滑杆随 dock 全宽贯通（owner 定稿——试过 680px 上限 + space-between，
      中段空缺被读作「轨道断了」，撤）。两端与边界 / 相邻组件的距离由 padding
      13px 10px 保证；wrap 不再外扩（见 .tl-sliderwrap 注释）。 */
-  display: grid; grid-template-columns: 1fr auto; column-gap: 14px;
+  /* `column-gap: 0` 是 2026-10-16 的修复：原先这里写 `column-gap: 14px`，而第二列只在
+     记录会话那条上才有内容（`.tm-keys` 按键簇，`apps/viewer/src/ui/telemetry.ts` 只挂进
+     `#timeline`）——录像会话的 `#timelineDemo` **没有按键簇**，但 14px 的列间距照样占位，
+     表现就是滑杆走到离右端 14px 就「少了一段」。间距改由按键簇自己带（`margin-left`），
+     没有按键簇 ⇒ 不占位。 */
+  display: grid; grid-template-columns: 1fr auto; column-gap: 0;
   padding: 13px 10px;
   background: var(--panel-trans); border: 1px solid var(--border);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
@@ -619,6 +618,9 @@ select.tl-select:focus { border-color: var(--text); }
    构造点见 apps/viewer/src/ui/telemetry.ts */
 .tm-keys {
   grid-column: 2; grid-row: 1 / span 3; align-self: center;
+  /* 与左列的间距由自己带（见 `.timeline` 的 `column-gap: 0` 注释）：这样没有按键簇的
+     那条时间轴（录像会话 `#timelineDemo`）不会被凭空占掉 14px。 */
+  margin-left: 14px;
   display: grid; grid-template-columns: repeat(3, 24px); grid-auto-rows: 24px; gap: 3px;
 }
 .tm-key {
@@ -670,9 +672,16 @@ select.tl-select:focus { border-color: var(--text); }
 #guide {
   position: absolute; inset: 0; z-index: 8;
   display: flex; align-items: center; justify-content: center;
+  /* 右侧让出侧栏那一条：`#app` 是 `position: fixed`（自成层叠上下文），而 `#sidebar`
+     是它的**兄弟**（z-index 6）—— 侧栏永远压在引导层之上，卡面一旦伸进侧栏那一条
+     就会被盖住（620px 宽 + 1150px 视口下实测被盖 107px，elementFromPoint 命中的
+     是 `pane-map`）。故把居中区域左移到侧栏左侧，卡片宽度改用自由区宽度。 */
+  padding: 0 calc(var(--sidebar-w) + 12px) 0 12px;
   background: var(--overlay);
 }
-/* ── 引导卡 = 场记板（v15）：按 owner 提供的实物照片**逐行实测**同构 —— 暗色板身 +
+/* ── 引导卡 = 场记板（v15 段）：按 owner 提供的实物照片**逐行实测**同构 —— 暗色板身 +
+   **2026-10-16 回退**：v19 / v20 两版（照参考实现的截图、源码各做一遍）都被 owner 判
+   「完全就不是一个东西」⇒ 整块退回这一版。以下为 v15 原注。
    人字形拍板条。证据：`.tmp/audit/stripe-slope.py` 对照片（861×573）逐行追踪色界——
    色界是两条直线、斜率 |dx/dy|≈0.77（≈52°），且在**条高中央折一次**；色序与占比
    照实测（相对条纹区）：左灰阶 22.8 / 青 8.5 / 黄 10.5 / 蓝 8.8 / 红 9.6 / 白 9.0 /
@@ -830,7 +839,6 @@ select.tl-select:focus { border-color: var(--text); }
   max-width: 480px; margin: 0 16px; padding: 22px 26px;
   position: relative;
   background: var(--panel); border: 1px solid var(--border-strong);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 6px 20px rgba(0, 0, 0, 0.35);
