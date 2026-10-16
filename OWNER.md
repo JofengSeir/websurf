@@ -30,6 +30,7 @@
 
 > **已决行已按 `AGENTS §0.4` 分卷**至 agentmemory 记忆库 websurf/progress/owner/2026-Q4.md（agentmemory 记忆库 websurf/progress/owner/2026-Q4.md）（2026-Q4，35 行）。
 > `D-###` 的**存在性**以该卷与本文的并集为准（体检 `[G]⑥` 同口径）；**待决行永远只在本文件**。
+> **D-122（2026-10-16，owner 当场裁决；本行未随上卷分卷，结论与论证见台账 `T-685`~`T-688` 与同号进展卷）**：三端渲染/物理参数**按端隔离**——键 `vbsp:renderPrefs:<viewer|debug|game>`，作用域由各端 `web/index.html` 注入的 `globalThis.__VBSP_APP__` 决定；**覆盖 D-108 中「默认档统一到共享层」的部分**（该设计在线上三端同 origin 下会让 game 面板把 `ambientScale` 调到 0 后三端 prop 全黑，2026-10-16 实测事故）。共享的只剩代码里的默认档 `defaultRenderPrefs()`；要「三端同画面」验收就走 `?prefs=default|<base64>` 深链（优先级最高、不落盘）。debug 为全功能面板、game 精简（只补缺）、viewer 只有画面显示设置。
 ## 维护规则
 
 1. **只增不改历史**：已决行保留；若要推翻，新开一行并注明「推翻 D-10X」。
