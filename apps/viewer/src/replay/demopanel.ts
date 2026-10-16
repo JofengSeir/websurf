@@ -140,10 +140,38 @@ interface TrackFacts {
 
 /**
  * @param tickInterval 秒/tick（= 头部 `playbackTime / playbackTicks`），用于把 tick 换算成秒。
+ * @param ranges 只统计落在这些 tick 区间里的采样（缺省 = 整条轨迹）。
+ *
+ * **同一实体被多条身份行共用时必须给区间**（T-719）：花名册一行 = 一个身份，而位姿按实体存 ——
+ * 不裁切就把前后几位占用者的采样一起算进这一行的队伍 / 生命 / 阵亡里，同一实体的两行读数一模一样。
+ * 区间由调用方保证互不重叠、按起点升序（`mergeSpans` 的产物）；段与段之间不算位移、不算时长
+ * （中间那段时间他不在场，那些采样是别人的）。区间内一条采样都没有时返回 `null`。
  */
-function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null {
-  const s = track.samples;
-  if (s.length === 0) return null;
+function trackFacts(
+  track: PlayerTrack,
+  tickInterval: number,
+  ranges?: ReadonlyArray<{ from: number; to: number }>,
+): TrackFacts | null {
+  const all = track.samples;
+  if (all.length === 0) return null;
+  // **切段**：没给区间就是整条一段；给了就逐段收集（采样按 tick 升序 ⇒ 一趟扫描即可）
+  const segs: PlayerSample[][] = [];
+  if (!ranges || ranges.length === 0) {
+    segs.push(all);
+  } else {
+    let k = 0;
+    for (const r of ranges) {
+      const seg: PlayerSample[] = [];
+      while (k < all.length && all[k].tick < r.from) k++;
+      while (k < all.length && all[k].tick <= r.to) {
+        seg.push(all[k]);
+        k++;
+      }
+      if (seg.length > 0) segs.push(seg);
+    }
+    // 该身份区间内一条采样都没有 ⇒ 如实返回 null，不拿别人的数据顶替这一行
+    if (segs.length === 0) return null;
+  }
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   let ylo = Infinity;
@@ -155,53 +183,59 @@ function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null
   let observeFrames = 0;
   let totalSeconds = 0;
   let observeSeconds = 0;
+  let frames = 0;
   const deaths: number[] = [];
   const deathTicks = new Set<number>();
-  for (let i = 0; i < s.length; i++) {
-    const p = s[i];
-    for (let k = 0; k < 3; k++) {
-      const v = p.pos[k];
-      if (v < min[k]) min[k] = v;
-      if (v > max[k]) max[k] = v;
-    }
-    // 朝向跨幅同样只在本人操作时统计（观察时 yaw 是镜头的）
-    if (!isObserveSample(p)) {
-      if (p.yaw < ylo) ylo = p.yaw;
-      if (p.yaw > yhi) yhi = p.yaw;
-    }
-    if (p.team !== null) teams.add(p.team);
-    // **每条采样代表它到下一条之间的时长**（最后一条沿用前一段的间隔）——占比按时间加权
-    const dur = (i + 1 < s.length ? s[i + 1].tick - p.tick : i > 0 ? p.tick - s[i - 1].tick : 0) * tickInterval;
-    if (dur > 0) totalSeconds += dur;
-    if (p.team === 0 || p.team === 1) {
-      observeFrames++;
-      if (dur > 0) observeSeconds += dur;
-    }
-    if (p.health !== null) {
-      hpMin = hpMin === null ? p.health : Math.min(hpMin, p.health);
-      hpMax = hpMax === null ? p.health : Math.max(hpMax, p.health);
-      if (p.health <= 0 || p.lifeState === 2) deadFrames++;
-    }
-    if (i > 0) {
-      const prev = s[i - 1];
-      const byLife = prev.lifeState !== 2 && p.lifeState !== null && p.lifeState === 2;
-      const byHp = (prev.health === null || prev.health > 0) && p.health !== null && p.health <= 0;
-      if ((byLife || byHp) && !deathTicks.has(p.tick)) {
-        deathTicks.add(p.tick);
-        deaths.push(p.tick * tickInterval);
+  for (const s of segs) {
+    frames += s.length;
+    for (let i = 0; i < s.length; i++) {
+      const p = s[i];
+      for (let k = 0; k < 3; k++) {
+        const v = p.pos[k];
+        if (v < min[k]) min[k] = v;
+        if (v > max[k]) max[k] = v;
+      }
+      // 朝向跨幅同样只在本人操作时统计（观察时 yaw 是镜头的）
+      if (!isObserveSample(p)) {
+        if (p.yaw < ylo) ylo = p.yaw;
+        if (p.yaw > yhi) yhi = p.yaw;
+      }
+      if (p.team !== null) teams.add(p.team);
+      // **每条采样代表它到下一条之间的时长**（段内最后一条沿用本段前一段的间隔）——占比按时间加权
+      const dur = (i + 1 < s.length ? s[i + 1].tick - p.tick : i > 0 ? p.tick - s[i - 1].tick : 0) * tickInterval;
+      if (dur > 0) totalSeconds += dur;
+      if (isObserveSample(p)) {
+        observeFrames++;
+        if (dur > 0) observeSeconds += dur;
+      }
+      if (p.health !== null) {
+        hpMin = hpMin === null ? p.health : Math.min(hpMin, p.health);
+        hpMax = hpMax === null ? p.health : Math.max(hpMax, p.health);
+        if (p.health <= 0 || p.lifeState === 2) deadFrames++;
+      }
+      if (i > 0) {
+        const prev = s[i - 1];
+        const byLife = prev.lifeState !== 2 && p.lifeState !== null && p.lifeState === 2;
+        const byHp = (prev.health === null || prev.health > 0) && p.health !== null && p.health <= 0;
+        if ((byLife || byHp) && !deathTicks.has(p.tick)) {
+          deathTicks.add(p.tick);
+          deaths.push(p.tick * tickInterval);
+        }
       }
     }
   }
   let distance = 0;
-  for (let i = 1; i < s.length; i++) {
-    // 观察时段的位移不算他的（镜头在跟别人）；两侧任一为观察态就跳过这一步
-    if (isObserveSample(s[i - 1]) || isObserveSample(s[i])) continue;
-    const a = s[i - 1].pos;
-    const b = s[i].pos;
-    distance += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  for (const s of segs) {
+    for (let i = 1; i < s.length; i++) {
+      // 观察时段的位移不算他的（镜头在跟别人）；两侧任一为观察态就跳过这一步
+      if (isObserveSample(s[i - 1]) || isObserveSample(s[i])) continue;
+      const a = s[i - 1].pos;
+      const b = s[i].pos;
+      distance += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    }
   }
   return {
-    frames: s.length,
+    frames,
     distance,
     yawRange: yhi - ylo,
     teams: [...teams].sort((a, b) => a - b),
@@ -401,6 +435,39 @@ interface OccupancySession {
   from: number;
   to: number;
 }
+
+/**
+ * 详情面板的**取值主体**：一个身份，以及**只属于它**的那些读数。
+ *
+ * 为什么需要这个中间层（T-719）：位姿按**实体**存，而花名册一行 = 一个**身份** —— 同一实体先后被
+ * 三个人占用时，按实体号回查只会拿到「第一条同实体的行」和整条实体轨迹的读数（实测两人读数一字不差）。
+ * 现在 `jumpTo` 每次都以「用户点的那一行」为主体、按它自己的 `spans` 裁切统计，再交给 `renderDetail`。
+ */
+interface DetailSubject {
+  /** 身份名：用户点的那一行为准；没有点时用该身份自己的账号名。 */
+  name: string;
+  /** 实际要看的实体号（可以是该身份的另一段占用）。 */
+  entity: number;
+  slot: number;
+  userId: number;
+  guid: string;
+  isBot: boolean;
+  track: PlayerTrack | null;
+  /** 按 `spans` 裁切后的队伍 / 生命 / 阵亡；区间里没有任何采样时为 `null`。 */
+  facts: TrackFacts | null;
+  /** 该身份自己的在场区间（tick，升序）；空 = 没切出段（那时 `facts` 是整条轨迹口径）。 */
+  spans: Array<{ from: number; to: number; entity: number }>;
+  /** 该身份占过的全部实体号（供「同一身份另有实体」那一行）。 */
+  entities: number[];
+  /**
+   * 主体来自哪条花名册行（回查得到时）。
+   *
+   * 为什么留着它：自动跟随是**按实体号**换绑的（`apps/viewer/src/app.ts` 的 `pickEntity(seg.entity)`），
+   * 而同一实体可以被多条身份行共用 —— 不留住「现在看的是谁」，逐帧换绑就会把主体换成同实体的
+   * 另一个人（浏览器实测：点「？！刚刚？！」后详情又跳回「西绪弗斯」）。
+   */
+  identity: RosterRow | null;
+}
 export class DemoPanel {
   private readonly opts: DemoPanelOptions;
   /**
@@ -438,13 +505,14 @@ export class DemoPanel {
   /** 「档案里连不到账号的名字」提示行（T-717）；元素缺失时静默跳过。 */
   private aliasHint: HTMLElement | null = null;
   /**
-   * **用户刚在花名册点的那一行**（详情名牌以它为准）。
+   * **详情面板当前读的身份**（不是「当前跟随的实体」）。
    *
-   * 为什么需要它：同一实体可能被多条身份行共用（boreas2 实测西绪弗斯与 GenShinEnjoyer8267 都用过实体 #6），
-   * 而 `renderDetail` 原先按签名表匹配到的槽位取名字 ⇒ 点 GenShin 显示「西绪弗斯」、点西绪弗斯显示「GenShinEnjoyer8267」
-   * （浏览器实测，两人完全对调）。其他选择路径（过关记录跳转 / 自动跟随）把它清空，回落到原口径。
+   * 为什么不能只按实体号回查（T-719）：同一实体可能被多条身份行共用（boreas2 实测西绪弗斯与
+   * GenShinEnjoyer8267 都用过实体 #6）—— ① 按实体号在 `rows` 里 findIndex 只会拿到**第一条**同实体的
+   * 条目，点第三条仍是第一条的名字；② 区间与生命体征取整条实体轨迹，同一实体的几行读数一模一样。
+   * 现在每次跳转都以「用户点的那一行」为主体（自动跟随 / 过关记录跳转则按实体号回查身份）。
    */
-  private pickedRoster: RosterRow | null = null;
+  private detailSubject: DetailSubject | null = null;
   /**
    * 四个类别里**被勾选要过滤掉**的那些（缺省全不勾 = 一条都不滤）。
    * 语义按 owner 的说法：「过滤掉…相关的」——**勾上 = 不显示这一类**。
@@ -571,6 +639,8 @@ export class DemoPanel {
     // 换文件即作废所有「载入后不变」的缓存（它们全是从上一份 `result` 里算出来的）
     this.presenceCache = null;
     this.sessionsCache = null;
+    // 详情主体也随之作废：它引用的是上一份录像里的身份与区间
+    this.detailSubject = null;
     this.meta.textContent = `解析中…（${file.name}，${(file.size / 1048576).toFixed(1)} MB）`;
     this.detail.innerHTML = '';
     this.note.textContent = '';
@@ -1051,7 +1121,10 @@ export class DemoPanel {
    * 逐段判断才能在他**第二段**进场时自动切过去；缺口期间返回 null，由调用方退回「跟当前最快的那位」。
    */
   spanAt(entity: number, tick: number): { from: number; to: number; entity: number } | null {
-    const row = this.rosterFor(entity);
+    // **身份解析走 `identityFor`**（T-719）：同一实体被多条身份行共用时，`rosterFor` 只会给
+    // 「进场最早的那条」——实测点「？！刚刚？！」后，这里把当前段判成「西绪弗斯 51:28–51:37」
+    // （实体号不同）⇒ `app.ts` 的逐帧换绑立刻把视角与详情都换成西绪弗斯。
+    const row = this.identityFor(entity);
     if (!row) return null;
     return row.spans.find((s) => tick >= s.from && tick <= s.to) ?? null;
   }
@@ -1747,23 +1820,91 @@ export class DemoPanel {
     return out;
   }
 
+  /**
+   * 按「一个身份 + 实际要看的那个实体」拼出详情主体。
+   *
+   * 为什么要分别给「身份」与「实体」（T-719）：同一身份可以先后占多个实体（`identity.spans` 的每段
+   * 自带实体号），跳转落到的是**此刻那一段**的实体；而读数要按**整个身份**的在场区间裁切。
+   */
+  private subjectFor(entity: number, identity: RosterRow | null, name?: string): DetailSubject {
+    const info = this.rows.find((x) => x.info.entityIndex === entity)?.info ?? null;
+    const track = this.result?.players.find((t) => t.entityIndex === entity) ?? null;
+    const spans = identity?.spans ?? [];
+    const slot = info ? info.slot : entity - 1;
+    return {
+      name: (name ?? identity?.name ?? '').trim() || this.nameAtSlot(slot) || (info?.name ?? '') || `槽 ${slot}`,
+      entity,
+      slot,
+      userId: info?.userId ?? 0,
+      guid: identity?.guid || info?.guid || '',
+      isBot: identity?.isBot ?? info?.isBot ?? false,
+      track,
+      // **区间裁切**：该身份自己的在场区间 —— 同一实体被多位占用者共用时，不裁切就会把别人的
+      // 队伍 / 生命 / 阵亡算进这一行（T-719 实测两人读数一字不差）
+      facts: track ? trackFacts(track, this.tickInterval, spans.length > 0 ? spans : undefined) : null,
+      spans,
+      entities: identity?.entities ?? [entity],
+      identity,
+    };
+  }
+
+  /**
+   * **按实体号回查身份 —— 但优先沿用「现在正在看的那个人」**。
+   *
+   * 花名册一行 = 一个身份，位姿却按实体存：同一实体先后被多人占用时（boreas2 实测槽 4/5 都出现过）
+   * 单纯按实体号回查只会拿到**第一条**同实体的行。自动跟随是逐帧按实体号换绑的（`app.ts` 的
+   * `pickEntity(seg.entity)`），于是刚点中的人会被同实体的另一个人顶掉（浏览器实测：
+   * 点「？！刚刚？！」后详情又跳回「西绪弗斯」）。判据取『当前主体占过这个实体』，
+   * 命中就继续用它；没命中（真的是另一个人/别的段）才按实体号回查。
+   */
+  private identityFor(entity: number): RosterRow | null {
+    const cur = this.detailSubject?.identity ?? null;
+    if (cur && cur.entities.includes(entity)) return cur;
+    return this.rosterFor(entity);
+  }
+
+  /**
+   * 详情面板当前该显示的那个**身份**（T-719）。
+   *
+   * 两条来源归一成一种形状：① `detailSubject`（用户刚点了花名册某一行 / 刚跳转到某人）——它是权威，
+   * 因为同一实体可能被多条身份行共用；② 没有主体时（首渲染、载入后的默认详情）按 `rows[selected]`
+   * 的实体回查身份。两条都**按该身份自己的 spans 裁切**读数，拿不到区间才退回整条轨迹并如实标注。
+   */
+  private detailView(): DetailSubject | null {
+    if (this.detailSubject) return this.detailSubject;
+    if (this.selected < 0 || this.selected >= this.rows.length) return null;
+    const entity = this.rows[this.selected].info.entityIndex;
+    return this.subjectFor(entity, this.rosterFor(entity));
+  }
+
   /** 选中玩家的详细信息；缺失项如实写「未采到」并给出原因，不留空也不编造。 */
   private renderDetail(): void {
-    if (this.selected < 0 || this.selected >= this.rows.length) {
+    const v = this.detailView();
+    if (v === null) {
       this.detail.innerHTML = '<div class="dmp-empty">本录像的 `userinfo` 表里没有可解出的玩家条目。</div>';
       this.note.textContent =
         '说明：玩家名单来自 `userinfo` 字符串表（按 `player_info_s` 布局解码）。表里没有条目时本面板无内容可显示。';
       return;
     }
-    const row = this.rows[this.selected];
-    const i = row.info;
+    // 渲染主体一律走 `v`；`i` / `row` 两个名字保持原样，只为让下面那段模板不必重排
+    const i = { slot: v.slot, entityIndex: v.entity, userId: v.userId, guid: v.guid, isBot: v.isBot, name: v.name };
+    const row = { facts: v.facts, track: v.track, span: null };
     const kind = i.isBot ? '服务器机器人' : i.guid ? '真人' : '真伪未知';
     // **取舍**：看板上只留「看录像时要判断的几件事」——**身份**（真人还是脚本）、**在场区间**、
     // **队伍 / 生命**、**位姿有没有采到**。槽号 / 实体号 / userID / guid / 采样帧数 / 世界跨度 /
     // yaw 跨幅 / 类别与属性表名 / 阵亡时刻都是解析内部量，堆在板上只会挤占视线；
     // 它们全部收进悬停提示（`title`），需要排查时停一下就能读到。
     const facts = row.facts;
-    const spanText = row.span ? `${row.span.from.toFixed(1)} – ${row.span.to.toFixed(1)} s` : '—';
+    // **在场 = 这个身份自己的区间**（T-719）：`spans` 按起点升序且已并段，首段起点与末段终点就是这一行的时间范围。
+    // 原先取整条实体轨迹的窗口 ⇒ 同一实体上先后三位占用者的读数完全一样。
+    const spanText =
+      v.spans.length > 0
+        ? this.fmtClock(this.secAt(v.spans[0].from)) +
+          '–' +
+          this.fmtClock(this.secAt(v.spans[v.spans.length - 1].to)) +
+          (v.spans.length > 1 ? `（在场分 ${v.spans.length} 段）` : '')
+        : '—';
+
     const teamText = facts && facts.teams.length > 0 ? facts.teams.map((t) => teamLabel(t)).join(' / ') : '—';
     // 生命：区间 + 阵亡次数 + 阵亡时刻（后两项直接来自 `PlayerSample.health` / `lifeState`）
     const hpText = facts?.hp
@@ -1775,18 +1916,24 @@ export class DemoPanel {
       facts && facts.deaths.length > 0
         ? `；阵亡时刻 ${facts.deaths.map((s2) => this.fmtClock(s2)).join('、')}`
         : '';
-    // **同一身份占过多个槽位时如实列出**（花名册按身份合并成一行，位姿却是按实体存的）：
-    // 跳转只能落到主实体，其余实体在这里点名，避免读者以为「这个人只有这一条轨迹」。
-    // 身份信息在 `RosterRow` 上（本类的 `rows` 是「按 userinfo 条目」的另一张表，不含该字段）。
-    const identity = this.rosterFor(i.entityIndex);
-    const others = (identity?.entities ?? []).filter((e) => e !== i.entityIndex);
+    // **同一身份占过多个实体时如实列出**（花名册按身份合并成一行，位姿却是按实体存的）：
+    // 跳转只能落到当前这一段的主实体，其余实体在这里点名，避免读者以为「这个人只有这一条轨迹」。
+    // 身份信息来自 `detailView()`（`rows` 是「按 userinfo 条目」的另一张表，同一实体的多行无法区分）。
+    const others = v.entities.filter((e) => e !== i.entityIndex);
     const alsoAt = others.length > 0 ? `；同一身份另有实体 ${others.map((e) => `#${e}`).join('、')}` : '';
+    // **读数口径如实写出来**（T-719）：是切到这个身份自己的区间，还是只能退回整条轨迹
+    const scopeNote =
+      v.spans.length === 0
+        ? '读数口径 整条实体轨迹（该身份未切出在场段）'
+        : v.facts === null
+          ? '读数口径 该身份在场区间内没有任何采样'
+          : `读数口径 该身份自己那 ${v.spans.length} 段在场区间`;
     const internals = facts
       ? `槽号 ${i.slot}；实体号 #${i.entityIndex}；userID ${i.userId}；guid ${i.guid || '（空）'}；` +
         `类别 ${row.track?.className ?? '—'}（${row.track?.dtName ?? '—'}，classId ${row.track?.classId ?? '—'}）；` +
         `采样帧数 ${facts.frames}；世界跨度 ${facts.distance.toFixed(0)} u；yaw 跨幅 ${facts.yawRange.toFixed(1)}°；` +
-        `已死采样 ${facts.deadFrames} 条${deathTimes}${alsoAt}`
-      : `槽号 ${i.slot}；实体号 #${i.entityIndex}；userID ${i.userId}；guid ${i.guid || '（空）'}；未采到位姿${alsoAt}`;
+        `已死采样 ${facts.deadFrames} 条${deathTimes}${alsoAt}；${scopeNote}`
+      : `槽号 ${i.slot}；实体号 #${i.entityIndex}；userID ${i.userId}；guid ${i.guid || '（空）'}；未采到位姿${alsoAt}；${scopeNote}`;
     // **人物名牌**（与「录像」页同一套语彙）：轨迹色点 + 名字 + 角色标签。
     // 色点取该实体的**轨迹配色**（`rows` 里按序号分配，与录像页的 `.track-dot` 同源），
     // 这样「看板上这个人 / 3D 里那条轨迹」一眼能对上，不必读文字。
@@ -1798,8 +1945,8 @@ export class DemoPanel {
         <span class="dmp-who-name">${this.esc(
           // **以用户点的那一行为准**（跨实体号也认）：同一实体被多条身份行共用时，按签名表槽位
           // 取名字会把两个人对调（浏览器实测：点 GenShin 显示西绪弗斯、反之亦然）。
-          // 其他选择路径（过关记录跳转 / 自动跟随）会在 jumpTo 里把它清空，回落到原口径。
-          this.pickedRoster?.name || this.nameAtSlot(i.slot) || i.name || `槽 ${i.slot}`,
+          // 自动跟随 / 过关记录跳转没有「点的那一行」，改按实体号回查身份（见 `detailView`）。
+          v.name,
         )}</span>
         <span class="dmp-who-tag${i.isBot ? '' : ' human'}">${tag}</span>
       </div>
@@ -1842,8 +1989,8 @@ export class DemoPanel {
     // **优先用「用户点的那一行」**（T-718 剩余半环）：同一实体可能被多条身份行共用 ——
     // boreas2 实测西绪弗斯与 GenShinEnjoyer8267 都用过实体 #6，只按实体号回查身份会拿到**别人的**区间，
     // 于是点 GenShin 却跳到西绪弗斯的段首（实测时钟从 0:00 跳到 5:50，而 GenShin 的段首是 41:41）。
-    this.pickedRoster = picked ?? null;
-    const identity = picked ? { spans: picked.spans } : this.rosterFor(entityIndex);
+    // 身份解析「先认现在看的是谁」（见 `identityFor`）：自动换绑只换段、不偷偷换人
+    const identity = picked ?? this.identityFor(entityIndex);
     let target = entityIndex;
     let seekTo: number | null = null;
     if (identity) {
@@ -1861,6 +2008,10 @@ export class DemoPanel {
     }
     const track = r?.players.find((t) => t.entityIndex === target);
     if (!r || !track || track.samples.length < 2) {
+      // 没采到位姿也照样把详情切到这个人：点了谁就该看到谁，只是读数里如实写「未采到位姿」
+      this.detailSubject = this.subjectFor(entityIndex, identity, picked?.name);
+      this.lastPickedEntity = entityIndex;
+      this.renderDetail();
       (this.opts.onNotice ?? ((s: string) => { this.note.textContent = s; }))(
         `实体 #${entityIndex} 在本录像里没有可用位姿（该层解析尚未对齐），无法切到它的视角。`,
       );
@@ -1881,21 +2032,19 @@ export class DemoPanel {
     const label =
       rosterName ||
       (row?.info.name && row.info.name.length > 0 ? row.info.name : `#${entityIndex} ${track.className}`);
-    // **详情面板要跟着换人**：`selected` 是 `renderDetail()` 唯一的取值来源，而它此前只在
-    // `buildRows()` 里被设成 0、之后再没人改过 —— 于是无论点谁，「身份」那一栏始终显示第 0 行的
-    // （owner 实测到的「显示的身份不是当前看的视角」）。这里按实体号把它同步过去。
+    // **详情面板要跟着换人**：这条路径以前只同步 `selected`，而 `selected` 按实体号找的是
+    // **第一条**同实体的条目 ⇒ 同一实体被多条身份行共用时点第三条仍显示第一条（T-719）。
     // **记住"当前跟随的是谁"**：详情名牌与信息条都以它为准（见 `refreshRosterState`）。
     this.lastPickedEntity = entityIndex;
     this.lastReportedName = label;
     const idx = this.rows.findIndex((x) => x.info.entityIndex === entityIndex);
     if (idx >= 0) {
       this.selected = idx;
-      this.renderDetail();
     } else {
       // **`userinfo` 条目表里没有这个人**（实测这些录像该表只覆盖部分槽位，中途加入的真人不在其中）⇒
       // 补一条兜底行并按实体号回推槽位：槽号取 `实体号 − 1` 而不是 -1，这样详情名牌能继续按 tick 轮换
       // （`refreshRosterState` → `nameAtSlot(槽号, tick)`）；`userId` / `guid` 如实留空。
-      // 不补的话 `selected` 指不到他，详情名牌会停在上一个人身上，而视角已经切走了。
+      // 不补的话 `selected` 指不到他，`refreshRosterState` 的改名通知会停在上一个人身上。
       const s = track.samples;
       this.rows.push({
         info: { slot: rosterRow ? entityIndex - 1 : -1, entityIndex, name: label, userId: 0, guid: '', isBot: false },
@@ -1907,8 +2056,11 @@ export class DemoPanel {
         facts: trackFacts(track, this.tickInterval),
       });
       this.selected = this.rows.length - 1;
-      this.renderDetail();
     }
+    // **详情主体 = 这个人**（T-719）：同一实体被多条身份行共用时只有「点的那一行」能区分开；
+    // 主体带着该身份自己的在场区间，队伍 / 生命 / 阵亡都按它裁切（详见 `subjectFor`）。
+    this.detailSubject = this.subjectFor(entityIndex, identity, label);
+    this.renderDetail();
     const clip = trackToClip(track, r, rule, () => label);
     this.opts.onClip?.(clip);
     // **最后再动播放头**：onClip 里 app 会建轨道 / 切视角，先 seek 会被它覆盖（T-715）
