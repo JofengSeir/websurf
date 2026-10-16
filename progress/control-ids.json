@@ -506,7 +506,7 @@
   ],
   "board": {
     "source": "progress/board.jsonl",
-    "sha12": "aa22d141022b",
+    "sha12": "1bae6343ca6b",
     "live": [
       "T-109",
       "T-115",
