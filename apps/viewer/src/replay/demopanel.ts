@@ -120,6 +120,15 @@ interface TrackFacts {
   frames: number;
   distance: number;
   yawRange: number;
+  /**
+   * **本人走位跨度**（世界包围盒对角线，HU）：只取**非观察**采样的包围盒。
+   *
+   * 与 `distance` 的分工：`distance` 是沿走位累加的路径长度，这里是活动范围的对角线 ——
+   * 自动跟随靠它分辨「全程挂机的录制机器人」与「真的在动的人」（见 `apps/viewer/src/app.ts`
+   * 的 `MOVING_MIN`）。T-726 起由本汇总统一给出：原先它在 `presenceWindows` 里另算一遍，
+   * 而花名册行取的是**整条轨迹**的粒度 ⇒ 同一实体被多身份共用时几行的读数一字不差。
+   */
+  extent: number;
   teams: number[];
   hp: { min: number; max: number } | null;
   deaths: number[];
@@ -148,43 +157,47 @@ interface TrackFacts {
 }
 
 /**
- * @param tickInterval 秒/tick（= 头部 `playbackTime / playbackTicks`），用于把 tick 换算成秒。
- * @param ranges 只统计落在这些 tick 区间里的采样（缺省 = 整条轨迹）。
+ * 从一条轨迹的采样里切出落在 `ranges`（升序、互不重叠）内的采样段，追加到 `out`。
  *
- * **同一实体被多条身份行共用时必须给区间**（T-719）：花名册一行 = 一个身份，而位姿按实体存 ——
- * 不裁切就把前后几位占用者的采样一起算进这一行的队伍 / 生命 / 阵亡里，同一实体的两行读数一模一样。
- * 区间由调用方保证互不重叠、按起点升序（`mergeSpans` 的产物）；段与段之间不算位移、不算时长
- * （中间那段时间他不在场，那些采样是别人的）。区间内一条采样都没有时返回 `null`。
+ * 采样按 tick 升序 ⇒ 一趟扫描即可；某个区间内一条采样都没有时**不追加**任何段
+ * （不拿别人的数据顶替这一段）。
  */
-function trackFacts(
-  track: PlayerTrack,
-  tickInterval: number,
-  ranges?: ReadonlyArray<{ from: number; to: number }>,
-): TrackFacts | null {
-  const all = track.samples;
-  if (all.length === 0) return null;
-  // **切段**：没给区间就是整条一段；给了就逐段收集（采样按 tick 升序 ⇒ 一趟扫描即可）
-  const segs: PlayerSample[][] = [];
-  if (!ranges || ranges.length === 0) {
-    segs.push(all);
-  } else {
-    let k = 0;
-    for (const r of ranges) {
-      const seg: PlayerSample[] = [];
-      while (k < all.length && all[k].tick < r.from) k++;
-      while (k < all.length && all[k].tick <= r.to) {
-        seg.push(all[k]);
-        k++;
-      }
-      if (seg.length > 0) segs.push(seg);
+function collectSegments(
+  samples: ReadonlyArray<PlayerSample>,
+  ranges: ReadonlyArray<{ from: number; to: number }>,
+  out: PlayerSample[][],
+): void {
+  let k = 0;
+  for (const r of ranges) {
+    const seg: PlayerSample[] = [];
+    while (k < samples.length && samples[k].tick < r.from) k++;
+    while (k < samples.length && samples[k].tick <= r.to) {
+      seg.push(samples[k]);
+      k++;
     }
-    // 该身份区间内一条采样都没有 ⇒ 如实返回 null，不拿别人的数据顶替这一行
-    if (segs.length === 0) return null;
+    if (seg.length > 0) out.push(seg);
   }
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
+}
+
+/**
+ * **一份采样集合的运动 + 生命体征汇总 —— 全仓唯一实现**（花名册行与详情都走这里）。
+ *
+ * `segs` 是**互不重叠、按时间升序**的采样段列表：每段来自**一条轨迹的一段在场区间**。
+ * 段与段之间不算位移、不算时长（中间那段时间他不在场，那些采样是别人的）；一个身份先后占过
+ * 多个实体时，段可以来自**不同轨迹** —— 段列表就是「这个人自己的采样」的完整表达（T-726）。
+ *
+ * @param tickInterval 秒/tick（= 头部 `playbackTime / playbackTicks`），用于把 tick 换算成秒。
+ */
+function factsFromSegments(segs: ReadonlyArray<PlayerSample[]>, tickInterval: number): TrackFacts | null {
+  if (segs.length === 0) return null;
+  // 段可能来自不同轨迹 ⇒ 按起始 tick 排一次，`deaths` 才是升序的
+  // （其余读数都与顺序无关：极值、集合、求和、逐段位移）
+  const ordered = [...segs].sort((a, b) => a[0].tick - b[0].tick);
+  const bmin = [Infinity, Infinity, Infinity];
+  const bmax = [-Infinity, -Infinity, -Infinity];
   let ylo = Infinity;
   let yhi = -Infinity;
+  let ownFrames = 0;
   const teams = new Set<number>();
   let hpMin: number | null = null;
   let hpMax: number | null = null;
@@ -196,17 +209,19 @@ function trackFacts(
   let frames = 0;
   const deaths: number[] = [];
   const deathTicks = new Set<number>();
-  for (const s of segs) {
+  for (const s of ordered) {
     frames += s.length;
     for (let i = 0; i < s.length; i++) {
       const p = s[i];
-      for (let k = 0; k < 3; k++) {
-        const v = p.pos[k];
-        if (v < min[k]) min[k] = v;
-        if (v > max[k]) max[k] = v;
-      }
-      // 朝向跨幅同样只在本人操作时统计（观察时 yaw 是镜头的）
+      // 观察时段的位姿是**镜头跟着别人**：既不算他的走位（包围盒 / 朝向 / 位移），
+      // 也不算「本人操作」的采样条数 —— 实测一位 98% 时间在观察的人，排除后跨度 46638 → 237 HU（T-707）
       if (!isObserveSample(p)) {
+        ownFrames++;
+        for (let k = 0; k < 3; k++) {
+          const v = p.pos[k];
+          if (v < bmin[k]) bmin[k] = v;
+          if (v > bmax[k]) bmax[k] = v;
+        }
         if (p.yaw < ylo) ylo = p.yaw;
         if (p.yaw > yhi) yhi = p.yaw;
       }
@@ -239,7 +254,7 @@ function trackFacts(
     }
   }
   let distance = 0;
-  for (const s of segs) {
+  for (const s of ordered) {
     for (let i = 1; i < s.length; i++) {
       // 观察时段的位移不算他的（镜头在跟别人）；两侧任一为观察态就跳过这一步
       if (isObserveSample(s[i - 1]) || isObserveSample(s[i])) continue;
@@ -251,7 +266,10 @@ function trackFacts(
   return {
     frames,
     distance,
-    yawRange: yhi - ylo,
+    // 一条「本人操作」的采样都没有（全程观察）时朝向跨幅无定义 ⇒ 记 0，不写 -Infinity
+    yawRange: ownFrames > 0 ? yhi - ylo : 0,
+    extent:
+      ownFrames > 0 ? Math.round(Math.hypot(bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2])) : 0,
     teams: [...teams].sort((a, b) => a - b),
     hp: hpMin === null || hpMax === null ? null : { min: hpMin, max: hpMax },
     deaths,
@@ -261,6 +279,50 @@ function trackFacts(
     seconds: totalSeconds,
     observeSeconds,
   };
+}
+
+/**
+ * 一整条轨迹的汇总（= 把这个实体的全部采样当一段）—— 用于「身份没有切出在场段」或
+ * 「按实体而非身份看」的场合（`buildRows` / `jumpTo` 的整条口径）。
+ *
+ * @param tickInterval 秒/tick（= 头部 `playbackTime / playbackTicks`）。
+ */
+function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null {
+  if (track.samples.length === 0) return null;
+  return factsFromSegments([track.samples], tickInterval);
+}
+
+/**
+ * **一个身份自己的读数** —— 按它自己的在场区间逐段裁切，并跨轨迹合并（T-726）。
+ *
+ * 为什么必须这么取（T-719 的剩余半环，T-726 收口）：位姿按**实体**存，而花名册一行 = 一个**身份** ——
+ * 同一实体先后被三个人占用时（boreas2 槽 4 实测），取整条实体轨迹会让那几行的队伍 / 阵亡 /
+ * 观察时段 / 死后自由视角**一模一样**；反过来，一个身份也可能先后占过多个实体
+ * （`spans[i].entity` 各不相同）⇒ 逐段取「该段那条轨迹」再合并，才是这个人自己的读数。
+ *
+ * `tracks` 是**可用视角**的轨迹表（`DemoPanel.viewTracks()`，过滤口径同 `presenceWindows`）——
+ * 花名册行与详情传同一张表，两处口径才不会分叉。区间内一条采样都没有时返回 `null`
+ * （如实留白，不拿别人的数据顶替）。
+ */
+function trackFactsAcross(
+  tracks: ReadonlyMap<number, PlayerTrack>,
+  spans: ReadonlyArray<{ from: number; to: number; entity: number }>,
+  tickInterval: number,
+): TrackFacts | null {
+  // 逐实体分组：同一实体的多段用一趟扫描切（`spans` 已按起点升序且互不重叠）
+  const rangesByEntity = new Map<number, Array<{ from: number; to: number }>>();
+  for (const s of spans) {
+    const list = rangesByEntity.get(s.entity);
+    if (list) list.push({ from: s.from, to: s.to });
+    else rangesByEntity.set(s.entity, [{ from: s.from, to: s.to }]);
+  }
+  const segs: PlayerSample[][] = [];
+  for (const [entity, ranges] of rangesByEntity) {
+    const track = tracks.get(entity);
+    if (!track || track.samples.length === 0) continue;
+    collectSegments(track.samples, ranges, segs);
+  }
+  return factsFromSegments(segs, tickInterval);
 }
 
 /** 面板与 3D 场景的挂钩：选中一条有轨迹的对象时把它变成可播放的轨道并切到对应视角。 */
@@ -431,7 +493,20 @@ interface PresenceWindow {
   isBot: boolean;
   from: number;
   to: number;
+  /**
+   * **本人走位跨度**（非观察采样的世界包围盒对角线，HU）= 该轨迹 `trackFacts().extent`。
+   *
+   * 自动跟随靠它分辨「全程挂机的录制机器人」与「真的在动的人」（`apps/viewer/src/app.ts`
+   * 的 `MOVING_MIN`）。T-726 起不再在这里另算，改由读数汇总一并给出。
+   */
   moving: number;
+  /**
+   * 该窗口对应的**轨迹本身**。
+   *
+   * 为什么把轨迹带在窗口里（T-726）：花名册行与详情要按**该身份自己的在场区间逐段裁切**读数，
+   * 裁切用的正是这些轨迹（`trackFactsAcross`）；带的是引用，不复制采样。
+   */
+  track: PlayerTrack;
   team: number | null;
   deaths: number;
   /** 观察/未分配的采样条数与总采样条数（条数口径，仅留档；占比请用下面的秒数）。 */
@@ -564,6 +639,18 @@ export class DemoPanel {
   private presenceCache: PresenceWindow[] | null = null;
   /** 占用会话缓存（同上；`occupancySessions()` 的结果载入后不再变）。 */
   private sessionsCache: OccupancySession[] | null = null;
+  /**
+   * **花名册缓存**（载入后不变）。
+   *
+   * 为什么必须缓存（T-726）：行的读数现在按该身份自己的 `spans` **逐段裁切并跨轨迹合并**
+   * （`trackFactsAcross`）—— 那是一趟采样扫描，而 `roster()` 被帧循环每帧调用
+   * （`refreshRosterState` 刷新在线态）。不缓存就是每帧把所有身份的采样重扫一遍。
+   * 行的每个字段都只依赖载入后不变的数据（区间、别名、读数；在线/离线由 `refreshRosterState`
+   * 另按当前 tick 管），故整表缓存安全。
+   */
+  private rosterCache: RosterRow[] | null = null;
+  /** 「可用视角」轨迹表缓存（`viewTracks()`；口径同 `presenceWindows`）。 */
+  private viewTrackCache: Map<number, PlayerTrack> | null = null;
   /** 秒/tick（头部 `playbackTime / playbackTicks`）；`tickRate()` 是它的倒数。 */
   private tickInterval = 1 / 66;
 
@@ -658,6 +745,8 @@ export class DemoPanel {
     // 换文件即作废所有「载入后不变」的缓存（它们全是从上一份 `result` 里算出来的）
     this.presenceCache = null;
     this.sessionsCache = null;
+    this.rosterCache = null;
+    this.viewTrackCache = null;
     // 详情主体也随之作废：它引用的是上一份录像里的身份与区间
     this.detailSubject = null;
     this.meta.textContent = `解析中…（${file.name}，${(file.size / 1048576).toFixed(1)} MB）`;
@@ -899,7 +988,7 @@ export class DemoPanel {
       const to = t.samples[t.samples.length - 1].tick;
       const name = this.nameFor(slot, t.entityIndex, to);
       const guidIsBot = r.playerInfos.find((p) => p.slot === slot)?.isBot ?? true;
-      // **运动量**（世界包围盒对角线）：给自动跟随当判据用。
+      // **运动量**（本人走位跨度＝非观察采样的世界包围盒对角线）：给自动跟随当判据用。
       //
       // 为什么需要它：录制机器人自己也是一个**合法占用者** —— 实测实体 #1 就是
       // `ERDY-SURF Recorder`，它有名字、有 `playerInfo`、有一条覆盖全场的轨道，
@@ -907,27 +996,9 @@ export class DemoPanel {
       // 电平表与按键永远不亮（owner 实测）。而"按进场时间"或"按有无名字"都分不开它
       // 与真人（真人 `Mon3tr` 26:05 才进场，之前那段只能从机器人里挑）。
       // 唯一分得开的是**它到底动没动**：静物的包围盒是 0，冲浪的人动辄几千单位。
-      let dx = 0;
-      let dy = 0;
-      let dz = 0;
-      {
-        // **只统计本人操作时的位置**（T-707）：观察期间位姿是镜头跟着别人，算进去会让
-        // 「几乎全程在观察」的人看起来比谁都活跃（实测 46638 → 237）。
-        const own = t.samples.filter((s2) => !isObserveSample(s2));
-        const p0 = (own.length > 0 ? own[0] : t.samples[0]).pos;
-        let minX = p0[0], minY = p0[1], minZ = p0[2];
-        let maxX = minX, maxY = minY, maxZ = minZ;
-        for (let i = 1; i < own.length; i++) {
-          const p = own[i].pos;
-          if (p[0] < minX) minX = p[0]; else if (p[0] > maxX) maxX = p[0];
-          if (p[1] < minY) minY = p[1]; else if (p[1] > maxY) maxY = p[1];
-          if (p[2] < minZ) minZ = p[2]; else if (p[2] > maxZ) maxZ = p[2];
-        }
-        dx = maxX - minX; dy = maxY - minY; dz = maxZ - minZ;
-      }
-      const moving = Math.round(Math.hypot(dx, dy, dz));
-      // **生命体征摘要**（队伍 / 阵亡）：`trackFacts` 是唯一一处读 `PlayerSample.team` 与
-      // `PlayerSample.health` / `lifeState` 的地方，花名册与详情都从这里取，口径只有一份。
+      // 这个数由 `trackFacts` 一并给出（T-726 之前在这里另算一遍，且花名册行取的是整条轨迹粒度）。
+      // **生命体征 + 运动量摘要**：`factsFromSegments`（`trackFacts` / `trackFactsAcross`）是唯一一处
+      // 读 `PlayerSample.team` / `health` / `lifeState` 与算走位跨度的地方，花名册与详情都从这里取。
       const facts = trackFacts(t, this.tickInterval);
       out.push({
         slot,
@@ -935,7 +1006,8 @@ export class DemoPanel {
         isBot: guidIsBot,
         from,
         to,
-        moving,
+        track: t,
+        moving: facts ? facts.extent : 0,
         team: facts && facts.teams.length > 0 ? facts.teams[0] : null,
         deaths: facts ? facts.deaths.length : 0,
         observeFrames: facts ? facts.observeFrames : 0,
@@ -1577,8 +1649,12 @@ export class DemoPanel {
   roster(ratio: number): RosterRow[] {
     void ratio;
     if (!this.result) return [];
+    // 载入后不变 ⇒ 整表缓存（见 `rosterCache` 的说明）；帧循环每帧都会调到这里
+    if (this.rosterCache) return this.rosterCache;
     const rows: RosterRow[] = [];
     const wins = new Map(this.presenceWindows().map((p) => [p.slot + 1, p]));
+    // 读数裁切用的轨迹表（口径同 `presenceWindows`）—— 行与详情共用同一张，见 `viewTracks`
+    const tracks = this.viewTracks();
     const covered = new Set<number>();
     // ── ① 占用身份（已按身份合并）──
     for (const g of this.occupancyIdentities()) {
@@ -1607,17 +1683,17 @@ export class DemoPanel {
       // （早先取「采样最长的那段」，于是 0 s 点 `LuoXuan` 会越过第一段、直接跳到第二段开头 —— owner 实测）。
       const entity = spans.length > 0 ? spans[0].entity : g.entities[0];
       const slot = entity - 1;
-      // 生命体征（队伍 / 阵亡 / 运动）取**采样跨度最长**的那条轨迹：数据最多，
-      // 而「他最早那段」往往只有几十秒、统计不出什么。
-      const withWin = g.entities
-        .map((e) => ({ e, win: wins.get(e) }))
-        .filter((x): x is { e: number; win: PresenceWindow } => !!x.win)
-        .sort((a, b) => b.win.to - b.win.from - (a.win.to - a.win.from));
-      const factsWin = withWin[0] ?? null;
-      // 区间（并集，供排序与读数用）：有位姿取**组内全部实体的采样窗口并集**，
-      // 没有任何位姿才退回占用事件的并集（那时只有更新流能作证）。
-      // **行的读数区间取自 spans**（与进度条上画的区间、点击跳转同口径）：`mergeSpans` 已按 from 升序
-      // ⇒ 首段起点、末段终点就是这一行的时间范围。早先用实体窗口 ⇒ 同一槽位多身份的行读数一模一样。
+      // **读数 = 该身份自己的那几段在场区间的汇总**（T-726）：逐段取「该段那条轨迹」再合并。
+      // 早先取「该身份占过的实体里采样跨度最长的那条轨迹」的**整条**口径 ⇒ 同一实体被多身份共用时
+      // 几行读数一字不差（boreas2 实测三行都是「观察时段 2%」「本人走位跨度 45460 HU」；
+      // 西绪弗斯**行**报「死后自由视角 81 秒（2%）」，而他的**详情**是「已死采样 0 条」）。
+      // 现在行与详情走同一份实现（`trackFactsAcross` + 同一张轨迹表），口径不可能再分叉。
+      const facts = trackFactsAcross(tracks, spans, this.tickInterval);
+      // 该身份有没有「可用视角」（任一实体有采样窗口）—— 无位姿的行照常列出，只是点它切不过去。
+      const hasTrack = g.entities.some((e) => wins.has(e));
+      // **行的区间取自 `spans`**（与进度条上画的区间、点击跳转同口径，见上面那段 `mergeSpans` 的说明）：
+      // `spans` 已按 from 升序 ⇒ 首段起点、末段终点就是这一行的时间范围。没有任何位姿时才退回
+      // 占用事件本身的并集（那时只有更新流能作证）。早先用实体窗口 ⇒ 同一槽位多身份的行读数一模一样。
       const from = spans.length > 0 ? spans[0].from : g.from;
       const to = spans.length > 0 ? spans[spans.length - 1].to : g.to;
       // 名字可能整场都取不到（T-700 实测：存档里该槽位的 userinfo 值长度为 0，见 boreas dem 的键 2/3）
@@ -1634,12 +1710,12 @@ export class DemoPanel {
         name: rowName,
         aliases: this.aliasesFor(g.guid, rowName),
         guid: g.guid,
-        observeFrames: factsWin ? factsWin.win.observeFrames : 0,
-        sampledFrames: factsWin ? factsWin.win.sampledFrames : 0,
-        seconds: factsWin ? factsWin.win.seconds : 0,
-        observeSeconds: factsWin ? factsWin.win.observeSeconds : 0,
+        observeFrames: facts ? facts.observeFrames : 0,
+        sampledFrames: facts ? facts.frames : 0,
+        seconds: facts ? facts.seconds : 0,
+        observeSeconds: facts ? facts.observeSeconds : 0,
         // 死后自由视角（T-714）：与观察时长分开标注，不参与观察占比
-        deadSeconds: factsWin ? factsWin.win.deadSeconds : 0,
+        deadSeconds: facts ? facts.deadSeconds : 0,
         isBot: g.isBot,
         human: g.human,
         entity,
@@ -1647,10 +1723,10 @@ export class DemoPanel {
         spans,
         from,
         to,
-        moving: factsWin ? factsWin.win.moving : 0,
-        hasTrack: withWin.length > 0,
-        team: factsWin ? teamLabel(factsWin.win.team) : '—',
-        deaths: factsWin ? factsWin.win.deaths : 0,
+        moving: facts ? facts.extent : 0,
+        hasTrack,
+        team: facts && facts.teams.length > 0 ? teamLabel(facts.teams[0]) : '—',
+        deaths: facts ? facts.deaths.length : 0,
       });
     }
     // ── ② 有轨迹但更新流里没有的实体（录制机器人：只在签名表里、从不更新 userinfo）──
@@ -1682,7 +1758,22 @@ export class DemoPanel {
         deaths: p.deaths,
       });
     }
-    return rows.sort((a, b) => a.from - b.from);
+    this.rosterCache = rows.sort((a, b) => a.from - b.from);
+    return this.rosterCache;
+  }
+
+  /**
+   * **「可用视角」的轨迹表**（实体号 → 轨迹），过滤口径同 `presenceWindows`
+   * （采样够多、玩家类、实体号 1..64）。
+   *
+   * 花名册行与详情的读数裁切都从这张表取（`trackFactsAcross`）—— 表只有这一份，
+   * 两处口径才不会分叉（T-726 判据③）。
+   */
+  private viewTracks(): Map<number, PlayerTrack> {
+    if (!this.viewTrackCache) {
+      this.viewTrackCache = new Map(this.presenceWindows().map((p) => [p.slot + 1, p.track]));
+    }
+    return this.viewTrackCache;
   }
 
   /**
@@ -1871,9 +1962,16 @@ export class DemoPanel {
       guid: identity?.guid || info?.guid || '',
       isBot: identity?.isBot ?? info?.isBot ?? false,
       track,
-      // **区间裁切**：该身份自己的在场区间 —— 同一实体被多位占用者共用时，不裁切就会把别人的
-      // 队伍 / 生命 / 阵亡算进这一行（T-719 实测两人读数一字不差）
-      facts: track ? trackFacts(track, this.tickInterval, spans.length > 0 ? spans : undefined) : null,
+      // **区间裁切 + 跨轨迹合并**：该身份自己的在场区间 —— 同一实体被多位占用者共用时，不裁切就会把
+      // 别人的队伍 / 生命 / 阵亡算进这一行（T-719 实测两人读数一字不差）；一个身份占过多个实体时，
+      // 只取其中一条轨迹又会漏掉别的段（T-726）。故与花名册行走同一份实现 `trackFactsAcross`。
+      // 该身份没切出在场段（`spans` 为空）时才退回「整条实体轨迹」的整条口径，并在读数说明里注明。
+      facts:
+        spans.length > 0
+          ? trackFactsAcross(this.viewTracks(), spans, this.tickInterval)
+          : track
+            ? trackFacts(track, this.tickInterval)
+            : null,
       spans,
       entities: identity?.entities ?? [entity],
       identity,
