@@ -634,10 +634,12 @@ export function decodePlayerInfoRecords(value: Uint8Array | null | undefined, sl
       }
       return dec.decode(v.subarray(from, end)).trim();
     };
-    const name = cstr(0, 32);
-    const guid = cstr(36, 32);
+    // **清洗而不是丢弃**（T-700 实测）：名字字段只有 32 字节，中文名常在这里被切成半个 UTF-8 序列
+    // （boreas dem 的回放 bot：hex 末尾是 `e59b9ee69400` ⇒ 解码成 U+FFFD）。旧口径遇到 U+FFFD 就
+    // 整条丢弃 ⇒ 一个真实存在的 bot 直接从名单里消失。改为**截到第一个坏字符之前**保留前缀。
+    const name = cleanField(cstr(0, 32));
     if (name.length === 0) continue;
-    if (!isPrintable(name) || !isPrintable(guid)) continue;
+    const guid = cleanField(cstr(36, 32));
     const userId = (v[32] | (v[33] << 8) | (v[34] << 16) | (v[35] << 24)) >>> 0;
     if (userId > 0xffff) continue;
     const slotNo = slotBase + ci;
@@ -646,20 +648,31 @@ export function decodePlayerInfoRecords(value: Uint8Array | null | undefined, sl
       entityIndex: slotNo + 1,
       name,
       userId,
-      guid,
+      // 形态不符（被截断 / 根本不是 SteamID）⇒ 交空串：槽位身份仍成立，但不会被当成「真账号」去合并
+      guid: isSteamGuidLike(guid) ? guid : '',
       isBot: guid.toUpperCase() === 'BOT' || v[100] === 1,
     });
   }
   return out;
 }
 
-/** 可打印性：控制字符与替换字符都算不可打印（切分错位的记录靠这一步挡住）。 */
-function isPrintable(s: string): boolean {
+/**
+ * 清洗一个名字/guid 字段：**截到第一个坏字符（控制字符 / 替换字符）之前**并 trim。
+ *
+ * 与「丢弃整条记录」的区别在 T-700 实测过：32 字节的名字字段常把中文名切成半个 UTF-8 序列，
+ * 丢弃会让真实玩家消失，截断只是显示得短一点（存档本来就没给全）。
+ */
+function cleanField(s: string): string {
   for (let k = 0; k < s.length; k++) {
     const c = s.charCodeAt(k);
-    if (c < 0x20 || c === 0x7f || c === 0xfffd) return false;
+    if (c < 0x20 || c === 0x7f || c === 0xfffd) return s.slice(0, k).trim();
   }
-  return true;
+  return s.trim();
+}
+
+/** guid 形态：`BOT` / `STEAM_x:y:z` / `[U:1:n]`。形态不符的一律按空 guid 处理（当不成真账号，但仍保留这条记录）。 */
+function isSteamGuidLike(s: string): boolean {
+  return /^BOT$/i.test(s) || /^STEAM_[0-9]:[0-9]:[0-9]+$/i.test(s) || /^\[U:[0-9]:[0-9]+\]$/.test(s);
 }
 
 /** 单条 `player_info_s` 的字节数（`name[32] + userID + steamID[32] + extra + friendsID + friendsName[32]

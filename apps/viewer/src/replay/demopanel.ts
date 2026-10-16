@@ -1311,7 +1311,9 @@ export class DemoPanel {
       const to = withWin.length > 0 ? Math.max(...withWin.map((x) => x.win.to)) : g.to;
       rows.push({
         key: rows.length,
-        name: this.nameFor(slot, entity, to),
+        // 名字可能整场都取不到（T-700 实测：存档里该槽位的 userinfo 值长度为 0，见 boreas dem 的键 2/3）
+        // ⇒ 与其留空，不如把「存档没给名字」这件事写在名字位上。
+        name: this.nameFor(slot, entity, to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`,
         isBot: g.isBot,
         human: g.human,
         entity,
@@ -1331,7 +1333,7 @@ export class DemoPanel {
       if (covered.has(entity)) continue;
       rows.push({
         key: rows.length,
-        name: this.nameFor(p.slot, entity, p.to),
+        name: this.nameFor(p.slot, entity, p.to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`,
         isBot: p.isBot,
         // 这一支来自「可用轨迹」而没有 `userinfo` 会话 ⇒ 无 guid 可判，**不当作真账号**
         human: false,
