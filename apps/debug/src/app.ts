@@ -1239,6 +1239,10 @@ function setupRenderPanel(): void {
 			if (item.apply !== 'live') {
 				console.info('[render-panel] ' + item.label + '：' + (item.apply === 'reload' ? '刷新页面后生效' : '重新加载地图后生效'));
 			}
+			// **重载类改完自动重建地图**（owner 清单 P2-①）：不再需要用户自己去刷一次。
+			// apply === 'reload' 的那些**不自动做** —— 那是整页刷新，会把当前载入的地图、回放与面板状态
+			// 全丢掉，代价远大于收益，仍按小字提示走人工。
+			if (item.apply === 'rebuild') scheduleMapReload();
 		},
 	};
 	renderPanelHandle = buildRenderPanel(host, api);
@@ -1806,6 +1810,29 @@ function buildPredictionParams(config: RuntimeConfig): Record<string, unknown> {
 }
 
 /** 文件入口：读字节 → 主线程解析（BspProcessor → 渲染 + 物理世界）。 */
+/** 面板「重载类」项改完后的重建计时器（250 ms 内多次写入只重建一次）。 */
+let mapReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * **重载类面板项改完后自动重建地图**（owner 清单 P2-①）。
+ *
+ * 为什么要防抖：apply === 'rebuild' 的项有 7 个，而「全部恢复默认」会一次写很多项 ——
+ * 不合并就会连着重建好几次世界。250 ms 足够把同一批写入并成一次。
+ * 没载入过地图时**如实说明**（提示「载入后生效」），不假装重建过。
+ */
+function scheduleMapReload(): void {
+	if (mapReloadTimer !== null) clearTimeout(mapReloadTimer);
+	mapReloadTimer = setTimeout(() => {
+		mapReloadTimer = null;
+		const file = lastBspFile;
+		if (!file) {
+			setStatus('面板已改；当前未载入地图，载入后生效。', '');
+			return;
+		}
+		void handleBspFile(file).then(() => setStatus('已按新设置重新加载地图。', 'success'));
+	}, 250);
+}
+
 async function handleBspFile(file: File): Promise<void> {
 	lastBspFile = file; // 供 __wsInput.reloadForTest 重建世界（诊断用）
 	// 主线程 wasm 就绪（BspProcessor/decompress_mtz 依赖；失败则继续由下方 try 报错）
