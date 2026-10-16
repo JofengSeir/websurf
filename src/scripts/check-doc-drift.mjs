@@ -371,7 +371,11 @@ for (const f of live) {
 
 // [L] 文档缺口 ↔ 看板状态：终态行（已记录/已结案）的「详情」doc 里若仍引用该号，必须已标注解除
 const RESOLVED_RE = /已消除|已修|已处置|已结案|已判定无需行动|已撤销|~~/;
+// **终态判据按前缀**（2026-10-16 修）：实际状态带日期后缀（「已结案 · 2026-10-16」），
+// 原先的 `TERMINAL.includes(status)` 精确相等 ⇒ 当天所有结案行**全部跳过** [L]/[M]，
+// 门禁看着是绿的、其实一个都没查（自查发现的静默盲点）。
 const TERMINAL = ['已记录', '已结案'];
+const isTerminal = (s) => TERMINAL.some((t) => String(s ?? '').startsWith(t));
 const boardRows = [];
 todoRaw.split(/\r?\n/).forEach((line) => {
   const s = line.trim();
@@ -383,7 +387,7 @@ todoRaw.split(/\r?\n/).forEach((line) => {
 const docGap = [];
 const falseClose = [];
 boardRows.forEach((c) => {
-  if (!TERMINAL.includes(c[4])) return;
+  if (!isTerminal(c[4])) return;
   // [L]
   (c[6] || '').split(/[；;、]/).map((x) => x.trim()).filter((d) => d.startsWith('documents/') && d.endsWith('.md')).forEach((d) => {
     const fp = path.join(ROOT, d);

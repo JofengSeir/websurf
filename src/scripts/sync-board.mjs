@@ -23,6 +23,9 @@ const SRC = 'progress/board.jsonl';
 const CHUNK_MAX = 8192;
 const VIEWER = process.env.AGENTMEMORY_VIEWER_URL || 'http://127.0.0.1:3113';
 const TERMINAL = ['已记录', '已结案'];
+// **终态按前缀认**（2026-10-16 修）：实际状态带日期后缀（「已结案 · 2026-10-16」），
+// 原先的精确相等让当天结案行仍被算作「未结项」—— 盘面「取活」列表里混进一堆已结案行。
+const isTerminal = (s) => TERMINAL.some((t) => String(s ?? '').startsWith(t));
 
 const argv = process.argv.slice(2);
 const flag = (n) => argv.includes('--' + n);
@@ -32,7 +35,7 @@ if (!existsSync(BOARD)) { console.error('缺少 ' + SRC); process.exit(2); }
 const raw = readFileSync(BOARD, 'utf8');
 const sha12 = createHash('sha256').update(raw).digest('hex').slice(0, 12);
 const rows = raw.split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
-const live = rows.filter((r) => !TERMINAL.includes(r.status));
+const live = rows.filter((r) => !isTerminal(r.status));
 const count = {};
 for (const r of rows) count[r.status] = (count[r.status] || 0) + 1;
 
@@ -42,7 +45,7 @@ const shaOf = (e) => (String(e.marker).match(/@([0-9a-f]{12})$/) || [])[1];
 
 function render() {
   const cell = (r) => [r.id, r.title, r.type, r.owner, r.status, r.evidence, r.detail, r.criteria, r.origin].join(' | ');
-  const groups = Object.keys(count).filter((k) => !TERMINAL.includes(k)).map((k) => k.slice(0, 12) + ' ' + count[k]).join(' / ');
+  const groups = Object.keys(count).filter((k) => !isTerminal(k)).map((k) => k.slice(0, 12) + ' ' + count[k]).join(' / ');
   return [
     '# 待办看板（已迁入 agentmemory）',
     '',
@@ -141,7 +144,7 @@ if (flag('done')) {
   }
   writeFileSync(LEDGER, keep.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf8');
   const cid = JSON.parse(readFileSync(IDS, 'utf8'));
-  cid.board = { source: SRC, sha12, live: live.map((r) => r.id), closed: rows.filter((r) => TERMINAL.includes(r.status)).map((r) => r.id), by_status: count };
+  cid.board = { source: SRC, sha12, live: live.map((r) => r.id), closed: rows.filter((r) => isTerminal(r.status)).map((r) => r.id), by_status: count };
   writeFileSync(IDS, JSON.stringify(cid, null, 2) + '\n', 'utf8');
   console.log('sync-board：台账更新 ' + pairs.length + ' 条 ｜ control-ids.board.sha12=' + sha12 + ' ｜ live ' + live.length);
   console.log('下一步：node src/scripts/check-memory-sync.mjs --keys');
