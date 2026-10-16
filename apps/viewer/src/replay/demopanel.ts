@@ -1284,7 +1284,13 @@ export class DemoPanel {
       const nameEl = btn.querySelector<HTMLElement>('.dmp-whoname');
       if (nameEl) {
         const nm = this.nameAtSlot(p.entity - 1, tick) || p.name;
-        if (nameEl.textContent !== nm) nameEl.textContent = nm;
+        // **只改第一个文本节点**：`textContent = nm` 会把名字后面的标签（队伍、观察「观」）整块冲掉
+        // —— 浏览器实测（T-703）：每帧刷新后 `<i class="dmp-who-team">` 与 `<i class="dmp-who-observe">`
+        // 都不在 DOM 里，看板上永远看不到这两个标记。首渲染时名字就是第一个文本节点，故这里能安全只改文本。
+        const first = nameEl.firstChild;
+        if (first && first.nodeType === 3) {
+          if (first.nodeValue !== nm) first.nodeValue = nm;
+        } else if (nameEl.textContent !== nm) nameEl.textContent = nm;
       }
     }
     // **详情里的「人物名牌」也要跟着 tick 走**：它此前取建行时烘焙的 `row.info.name`，
@@ -1396,7 +1402,13 @@ export class DemoPanel {
       const to = withWin.length > 0 ? Math.max(...withWin.map((x) => x.win.to)) : g.to;
       // 名字可能整场都取不到（T-700 实测：存档里该槽位的 userinfo 值长度为 0，见 boreas dem 的键 2/3）
       // ⇒ 与其留空，不如把「存档没给名字」这件事写在名字位上。
-      const rowName = this.nameFor(slot, entity, to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`;
+      // **名字优先取「该身份自己的 userinfo 名」**（T-703 浏览器实测抓到的 bug）：`nameFor(slot, entity, to)`
+      // 取的是**该槽位在行尾那一刻**的名字，而槽位会被后来的人复用 ⇒ 身份被贴上别人的名字
+      // （boreas2 实测：`？！刚刚？！` 与 `GenShinEnjoyer8267` 两行变成了后来那个回放 bot 的名字，
+      // 看起来像"两个人不见了"）。guid 的名字来自 userinfo 记录本身，不受槽位复用影响。
+      const ownNames = g.guid ? [...(this.aliases.namesByGuid.get(g.guid) ?? [])] : [];
+      const rowName =
+        ownNames[0] || this.nameFor(slot, entity, to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`;
       rows.push({
         key: rows.length,
         name: rowName,
