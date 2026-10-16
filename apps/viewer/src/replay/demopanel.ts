@@ -124,15 +124,18 @@ interface TrackFacts {
   hp: { min: number; max: number } | null;
   deaths: number[];
   deadFrames: number;
-  /**
-   * **观察/未分配**的采样条数（`team === 1` 观察者，或 `team === 0` 未选阵营）。
-   *
-   * 为什么要这个数：观察期间玩家的实体位姿是**镜头跟着别人**，不是他本人在走 ——
-   * 这段的轨迹与移动量都不属于他。花名册据此如实标出「观察时段 N%」（T-702 实测：
-   * boreas dem 里 `[U:1:1142669713]` 有 47% 的采样是 team 0/1，另一个 dem 里
-   * `GenShinEnjoyer8267` 高达 98%——这条录像里他基本全程在观察）。
-   */
+  /** **观察/未分配**的采样条数（`team === 0` 未选阵营 / `1` 观察者）。 */
   observeFrames: number;
+  /**
+   * 这些采样点覆盖的**总时长（秒）**与其中观察/未分配的时长 —— 占比一律用这两个数算。
+   *
+   * 为什么不能用条数算占比（T-713 实测）：`playerPosed` 模式下采样是**事件驱动**的，
+   * 隔一条的中位间隔只有 2 tick，但同一条轨迹里最大空档可达 **171370 tick**（半场）。
+   * 同一实体按条数算是「观察 47%」、按时间加权只有 **7%** —— 条数会被"某段时间更新密集"
+   * 带偏，所以花名册的「观察时段 N%」必须按时间加权。
+   */
+  seconds: number;
+  observeSeconds: number;
 }
 
 /**
@@ -150,6 +153,8 @@ function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null
   let hpMax: number | null = null;
   let deadFrames = 0;
   let observeFrames = 0;
+  let totalSeconds = 0;
+  let observeSeconds = 0;
   const deaths: number[] = [];
   const deathTicks = new Set<number>();
   for (let i = 0; i < s.length; i++) {
@@ -165,7 +170,13 @@ function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null
       if (p.yaw > yhi) yhi = p.yaw;
     }
     if (p.team !== null) teams.add(p.team);
-    if (p.team === 0 || p.team === 1) observeFrames++;
+    // **每条采样代表它到下一条之间的时长**（最后一条沿用前一段的间隔）——占比按时间加权
+    const dur = (i + 1 < s.length ? s[i + 1].tick - p.tick : i > 0 ? p.tick - s[i - 1].tick : 0) * tickInterval;
+    if (dur > 0) totalSeconds += dur;
+    if (p.team === 0 || p.team === 1) {
+      observeFrames++;
+      if (dur > 0) observeSeconds += dur;
+    }
     if (p.health !== null) {
       hpMin = hpMin === null ? p.health : Math.min(hpMin, p.health);
       hpMax = hpMax === null ? p.health : Math.max(hpMax, p.health);
@@ -198,6 +209,8 @@ function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null
     deaths,
     deadFrames,
     observeFrames,
+    seconds: totalSeconds,
+    observeSeconds,
   };
 }
 
@@ -297,6 +310,9 @@ function fmtSize(bytes: number): string {
   /** 观察/未分配的采样条数与该行统计用的总采样条数（比例见 `sampledFrames`；0 表示没统计到）。 */
   observeFrames: number;
   sampledFrames: number;
+  /** 时长口径（秒）：观察占比用它算，避免采样密度带偏（见 `TrackFacts.seconds`）。 */
+  seconds: number;
+  observeSeconds: number;
   isBot: boolean;
   /**
    * 该行是不是**真账号**（依据：`userinfo` 更新流里出现过 **非空且不是 `BOT`** 的 guid）。
@@ -362,9 +378,12 @@ interface PresenceWindow {
   moving: number;
   team: number | null;
   deaths: number;
-  /** 观察/未分配的采样条数与总采样条数（比例用；见 `TrackFacts.observeFrames`）。 */
+  /** 观察/未分配的采样条数与总采样条数（条数口径，仅留档；占比请用下面的秒数）。 */
   observeFrames: number;
   sampledFrames: number;
+  /** 该窗口覆盖的时长（秒）与其中观察/未分配时长 —— 占比一律按这两个数算（见 `TrackFacts.seconds`）。 */
+  seconds: number;
+  observeSeconds: number;
 }
 
 /** 「占用会话」：一个槽位一次「进服 → 换人/退场」（由 `occupancySessions()` 计算并缓存）。 */
@@ -848,6 +867,8 @@ export class DemoPanel {
         deaths: facts ? facts.deaths.length : 0,
         observeFrames: facts ? facts.observeFrames : 0,
         sampledFrames: facts ? facts.frames : 0,
+        seconds: facts ? facts.seconds : 0,
+        observeSeconds: facts ? facts.observeSeconds : 0,
       });
     }
     this.presenceCache = out;
@@ -876,7 +897,8 @@ export class DemoPanel {
     const rows = roster
       .map((p, i) => {
         // 观察占比：观察期间实体位姿是**镜头跟着别人**（T-702），必须让用户看得见，否则会以为轨迹是他走的
-        const obsPct = p.sampledFrames > 0 ? Math.round((p.observeFrames / p.sampledFrames) * 100) : 0;
+        // **按时间加权**（T-713）：采样事件驱动、间隔极不均，按条数算会失真（实测同一实体 47% → 7%）
+        const obsPct = p.seconds > 0 ? Math.round((p.observeSeconds / p.seconds) * 100) : 0;
         const tip =
           (p.hasTrack
             ? '点击切到他的视角'
@@ -1534,6 +1556,8 @@ export class DemoPanel {
         guid: g.guid,
         observeFrames: factsWin ? factsWin.win.observeFrames : 0,
         sampledFrames: factsWin ? factsWin.win.sampledFrames : 0,
+        seconds: factsWin ? factsWin.win.seconds : 0,
+        observeSeconds: factsWin ? factsWin.win.observeSeconds : 0,
         isBot: g.isBot,
         human: g.human,
         entity,
@@ -1559,6 +1583,8 @@ export class DemoPanel {
         guid: '',
         observeFrames: p.observeFrames,
         sampledFrames: p.sampledFrames,
+        seconds: p.seconds,
+        observeSeconds: p.observeSeconds,
         isBot: p.isBot,
         // 这一支来自「可用轨迹」而没有 `userinfo` 会话 ⇒ 无 guid 可判，**不当作真账号**
         human: false,
