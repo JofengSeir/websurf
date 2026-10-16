@@ -426,18 +426,25 @@ const demoPanel = demoPane
           autoPickInFlight = false;
         }
         demo.player.seek(toSec);
-        // 进度条上把「刚跳到的那一段」画出来（落点 → 播报时刻）；播放头走过它就消失（帧循环负责清）。
+        hud.flashStatus(
+          `跳到 ${player || '这一跑'}${level ? ' · ' + level : ''} 的起点 ${fmtClock(toSec)}` +
+            `（播报 − ${durationSec.toFixed(3)} 秒 − 5 秒缓冲）`,
+        );
+      },
+      // **观看扣减**（owner 2026-10-16 从跳转里拆出来）：只标区间、不动播放头。
+      onRecordDeduct: (toSec, announceSec, player, level, durationSec) => {
+        // 进度条上把这一跑画出来（落点 → 播报时刻）；播放头走过它就消失（帧循环负责清）。
         demo.timeline.setJumpSpan({
           from: toSec,
           to: announceSec,
           title:
-            `刚跳到 ${player || '这一跑'}${level ? ' · ' + level : ''}：用时 ${durationSec.toFixed(3)} 秒` +
+            `观看扣减 ${player || '这一跑'}${level ? ' · ' + level : ''}：用时 ${durationSec.toFixed(3)} 秒` +
             `（播报 ${fmtClock(announceSec)} − 用时 − 5 秒缓冲 = ${fmtClock(toSec)}）` +
             ' —— 播放头走过这一段它就消失',
         });
         hud.flashStatus(
-          `跳到 ${player || '这一跑'}${level ? ' · ' + level : ''} 的起点 ${fmtClock(toSec)}` +
-            `（播报 − ${durationSec.toFixed(3)} 秒 − 5 秒缓冲）`,
+          `观看扣减 ${fmtClock(toSec)} → ${fmtClock(announceSec)}` +
+            `（${player || '这一跑'}${level ? ' · ' + level : ''}，用时 ${durationSec.toFixed(3)} 秒 + 5 秒缓冲）`,
         );
       },
       onLoaded: () => {

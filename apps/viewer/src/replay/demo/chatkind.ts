@@ -284,12 +284,18 @@ export function recordJumpSeconds(announceSec: number, durationSec: number, buff
   return Math.max(0, Math.min(announceSec, announceSec - dur - buf));
 }
 
-/** 过滤：把**选中要隐藏**的类别去掉（`hidden` 里为真的类别不返回）。 */
+/**
+ * 过滤：`allow` 是**白名单**（只留这些类别）；传 `null` = 不过滤、全留。
+ *
+ * 语义在 2026-10-16 按 owner 要求反过来：面板上的勾 = 「**只看勾的那些**」，
+ * 全勾 = 等于没勾（默认全显示）。换算在调用方 `DemoPanel.chatAllow()` 一处做完，
+ * 这里只认白名单，避免两处各写一套口径。
+ */
 export function filterChat<T extends { text: string }>(
   lines: readonly T[],
-  hidden: Readonly<Partial<Record<ChatKind, boolean>>>,
+  allow: ReadonlySet<ChatKind> | null,
 ): T[] {
-  return lines.filter((l) => !hidden[classifyChat(l.text)]);
+  return allow ? lines.filter((l) => allow.has(classifyChat(l.text))) : [...lines];
 }
 
 /** 每条类别各有几条（看板的过滤行用它显示「3/40」这类实时读数）。 */

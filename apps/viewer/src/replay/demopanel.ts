@@ -207,7 +207,10 @@ export interface DemoPanelOptions {
    * `announceSec` 是这一行的会话内秒（= 播报时刻，区间带的右端）、`player` / `level` / `durationSec` 一并给出来，让 app 侧能顺手把视角切到过的那个人
    * （名字重复很少见，按名字认人足够；认不出来就只跳时间、不动视角）。
    */
+  /** 跳到这一跑的起点（挂在行首灰色时间上）。 */
   onRecordJump?: (toSec: number, announceSec: number, player: string, level: string, durationSec: number) => void;
+  /** 观看扣减：把这一跑标进进度条、从观看时长里扣（挂在行尾按钮上）。 */
+  onRecordDeduct?: (toSec: number, announceSec: number, player: string, level: string, durationSec: number) => void;
   /**
    * **消息过滤（四个类别勾选框）变了** ⇒ 通知外部按新的可见集合重推一次消息。
    *
@@ -365,7 +368,11 @@ export class DemoPanel {
    * 四个类别里**被勾选要过滤掉**的那些（缺省全不勾 = 一条都不滤）。
    * 语义按 owner 的说法：「过滤掉…相关的」——**勾上 = 不显示这一类**。
    */
-  private chatHidden: Record<ChatKind, boolean> = { chat: false, join: false, announce: false, record: false };
+  /**
+   * 过滤勾选：`true` = **只看这一类**（owner 2026-10-16 定）。
+   * 全不勾 = 全勾 = 默认全显示；只有勾了一部分时才真的过滤（见 `chatAllow()`）。
+   */
+  private chatOnly: Record<ChatKind, boolean> = { chat: false, join: false, announce: false, record: false };
   private rows: DemoPlayerRow[] = [];
   private result: DemoParseResult | null = null;
   private duration = 0;
@@ -966,18 +973,27 @@ export class DemoPanel {
     for (const box of Array.from(this.chatFilter.querySelectorAll<HTMLInputElement>('input[data-kind]'))) {
       box.addEventListener('change', () => {
         const k = box.dataset.kind as ChatKind;
-        this.chatHidden[k] = box.checked;
-        this.renderChat(); // 重画列表时一并刷新每类条数与删除线
+        this.chatOnly[k] = box.checked;
+        this.renderChat(); // 重画列表时一并刷新每类条数与勾选态
         this.opts.onChatFilter?.(); // 浮层吃同一份消息，过滤要一起生效
       });
     }
   }
 
   /**
+   * 当前生效的白名单：**一个都没勾**或**全勾**都返回 `null`（= 不过滤，默认全显示）；
+   * 只有勾了一部分时，才只留勾上的那几类。
+   */
+  private chatAllow(): Set<ChatKind> | null {
+    const on = CHAT_KINDS.filter((k) => this.chatOnly[k]);
+    return on.length === 0 || on.length === CHAT_KINDS.length ? null : new Set(on);
+  }
+
+  /**
    * 过滤后的消息（浮层与「当前这一刻说了什么」都用这一份）；`tick` 原样保留，口径不变。
    */
   filteredChat(): ReadonlyArray<{ tick: number; text: string }> {
-    return filterChat(this.result?.chat ?? [], this.chatHidden);
+    return filterChat(this.result?.chat ?? [], this.chatAllow());
   }
 
   /**
@@ -1003,9 +1019,10 @@ export class DemoPanel {
     for (const k of CHAT_KINDS) {
       const n = this.chatFilter.querySelector<HTMLElement>('[data-n="' + k + '"]');
       if (n) n.textContent = counts[k] > 0 ? '×' + counts[k] : '';
+      // 勾上的高亮（.on），没勾的压暗（.off）—— 不再用删除线（owner 2026-10-16）
       this.chatFilter
         .querySelector<HTMLElement>('label[data-kind="' + k + '"]')
-        ?.classList.toggle('off', this.chatHidden[k]);
+        ?.classList.toggle('on', this.chatOnly[k]);
     }
     // 兜底读数：没命中任何具体规则、被归到「服务器公告」的条数（非零才显示）——
     // 新录像里出现没见过的写法时它会涨，悬停能读到「拿这些行去补判据」的提示。
@@ -1029,41 +1046,36 @@ export class DemoPanel {
     // 与看板其余部分同一套语彙：等宽小字、行间发丝线、不铺色块。
     // `data-at` 是**会话内秒数**（与时间轴同一口径）；正文原样转义，不解析颜色码。
     const rows: string[] = [];
+    const allow = this.chatAllow();
     let shown = 0;
     for (const m of msgs) {
       const det = classifyChatDetailed(m.text);
       const kind = det.kind;
-      if (this.chatHidden[kind]) continue;
+      if (allow && !allow.has(kind)) continue;
       shown++;
       const sec = this.secAt(m.tick);
       const rec = kind === 'record' ? parseChatRecord(m.text) : null;
-      let jump = '';
-      if (rec) {
-        const to = recordJumpSeconds(sec, rec.durationSec);
-        jump =
-          '<button type="button" class="dmp-chat-jump" data-jump="' +
-          to.toFixed(3) +
-          // 播报时刻（这一行的会话内秒）也挂到按钮上：点它时要拿它当**区间带的右端**，
-          // 而 data-at 只在**行**上、按钮读不到（本轮实测：读成 0 ⇒ 区间被判成空、画不出来）。
-          '" data-at="' +
-          sec.toFixed(3) +
-          '" data-player="' +
-          this.esc(rec.player) +
-          '" data-level="' +
-          this.esc(rec.level) +
-          '" data-dur="' +
-          rec.durationSec +
-          '" title="跳到这一跑：播报 ' +
-          this.fmtClock(sec) +
-          ' − 用时 ' +
-          rec.durationSec.toFixed(3) +
-          ' 秒 − 5 秒缓冲 = ' +
-          this.fmtClock(to) +
-          (rec.level ? '（' + this.esc(rec.level) + '）' : '') +
-          '">↦ ' +
-          this.fmtClock(to) +
-          '</button>';
-      }
+      // owner 2026-10-16：把两个相近但需求不同的功能拆开 ——
+      //   · **跳转**挂在行首那个灰色时间上（点它 = 切到那人 + 跳到这一跑起点）
+      //   · **观看扣减**留在行尾按钮上（把 落点→播报 这一段标进进度条、从观看时长里扣）
+      const to = rec ? recordJumpSeconds(sec, rec.durationSec) : 0;
+      const dataAttrs = rec
+        ? ' data-jump="' + to.toFixed(3) +
+          '" data-at="' + sec.toFixed(3) +
+          '" data-player="' + this.esc(rec.player) +
+          '" data-level="' + this.esc(rec.level) +
+          '" data-dur="' + rec.durationSec + '"'
+        : '';
+      const jumpTitle = rec
+        ? '跳到这一跑：播报 ' + this.fmtClock(sec) + ' − 用时 ' + rec.durationSec.toFixed(3) +
+          ' 秒 − 5 秒缓冲 = ' + this.fmtClock(to) + (rec.level ? '（' + this.esc(rec.level) + '）' : '')
+        : '';
+      const deduct = rec
+        ? '<button type="button" class="dmp-chat-deduct"' + dataAttrs +
+          ' title="观看扣减：把这一跑（' + this.fmtClock(to) + ' → ' + this.fmtClock(sec) +
+          '，含 ' + rec.durationSec.toFixed(3) + ' 秒用时与 5 秒缓冲）标进进度条、从观看时长里扣掉">扣减 ' +
+          this.fmtClock(to) + '</button>'
+        : '';
       rows.push(
         '<div class="dmp-chat-line' +
           (rec ? ' dmp-chat-rec' : '') +
@@ -1076,32 +1088,41 @@ export class DemoPanel {
           '" title="' +
           this.esc(CHAT_KIND_LABEL[kind] + '：' + CHAT_RULE_HINT[det.rule]) +
           '">' +
-          '<span class="dmp-chat-t">' +
-          this.fmtClock(sec) +
-          '</span>' +
+          (rec
+            ? '<button type="button" class="dmp-chat-t dmp-chat-t-jump"' + dataAttrs +
+              ' title="' + jumpTitle + '">' + this.fmtClock(sec) + '</button>'
+            : '<span class="dmp-chat-t">' + this.fmtClock(sec) + '</span>') +
           '<span class="dmp-chat-x">' +
           this.esc(m.text) +
           '</span>' +
-          jump +
+          deduct +
           '</div>',
       );
     }
     this.chat.innerHTML =
       shown > 0
         ? rows.join('')
-        : '<div class="dmp-chat-empty">四个类别都被过滤掉了' +
-          '<span class="dmp-chat-hint">（把上面的勾去掉就能看到）</span></div>';
-    for (const b of Array.from(this.chat.querySelectorAll<HTMLButtonElement>('.dmp-chat-jump'))) {
-      b.addEventListener('click', () => {
-        this.opts.onRecordJump?.(
-          Number(b.dataset.jump ?? '0'),
-          Number(b.dataset.at ?? '0'), // 播报时刻 = 这一行的会话内秒（区间带的右端）
-          b.dataset.player ?? '',
-          b.dataset.level ?? '',
-          Number(b.dataset.dur ?? '0'),
-        );
-      });
-    }
+        : '<div class="dmp-chat-empty">勾选的类别里没有消息' +
+          '<span class="dmp-chat-hint">（默认全显示：全勾或全不勾都是全显示，只有勾了一部分才过滤）</span></div>';
+    /** 两个按钮共用同一份 data-*，参数口径也一致；区别只在调哪个回调。 */
+    const bindRecordBtn = (
+      sel: string,
+      fire: (to: number, at: number, player: string, level: string, dur: number) => void,
+    ): void => {
+      for (const b of Array.from(this.chat.querySelectorAll<HTMLButtonElement>(sel))) {
+        b.addEventListener('click', () => {
+          fire(
+            Number(b.dataset.jump ?? '0'),
+            Number(b.dataset.at ?? '0'), // 播报时刻 = 这一行的会话内秒（区间带的右端）
+            b.dataset.player ?? '',
+            b.dataset.level ?? '',
+            Number(b.dataset.dur ?? '0'),
+          );
+        });
+      }
+    };
+    bindRecordBtn('.dmp-chat-t-jump', (to, at, player, level, dur) => this.opts.onRecordJump?.(to, at, player, level, dur));
+    bindRecordBtn('.dmp-chat-deduct', (to, at, player, level, dur) => this.opts.onRecordDeduct?.(to, at, player, level, dur));
   }
 
   /**
