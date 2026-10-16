@@ -305,6 +305,60 @@ function makeControl(item: RenderPanelItem, skin: RenderPanelSkin, api: RenderPa
     });
     return select;
   }
+  if (item.kind === 'tags') {
+    // **标签式输入**（owner 2026-10-16）：**存储口径不变**（仍是逗号分隔字符串，面板 prefs 与
+    // 实现读的都是它），只是界面从「一个纯文本框」换成「胶囊 + 输入框」—— 回车或逗号成一枚，
+    // 点胶囊上的 × 删一枚。多名字时不必在一行里数逗号。
+    const wrap = document.createElement('div');
+    wrap.className = 'rp-tags';
+    const input = document.createElement('input');
+    input.type = 'text';
+    // **id 必须留在 input 上**：`syncRenderPanel` 是按 id 找控件回写值的（见该函数）
+    input.id = id;
+    input.className = skin.textClass;
+    input.title = '回车或逗号分隔；点标签上的 × 移除';
+    const names = (): string[] => input.value.split(',').map((s) => s.trim()).filter(Boolean);
+    const paint = (): void => {
+      for (const chip of [...wrap.querySelectorAll('.rp-tag')]) chip.remove();
+      for (const nm of names()) {
+        const chip = document.createElement('span');
+        chip.className = 'rp-tag';
+        chip.textContent = nm;
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'rp-tag-x';
+        x.textContent = '×';
+        x.title = '移除 ' + nm;
+        x.addEventListener('click', () => {
+          input.value = names().filter((other) => other !== nm).join(',');
+          commit();
+        });
+        chip.append(x);
+        wrap.append(chip);
+      }
+      wrap.append(input);
+    };
+    const commit = (): void => {
+      const uniq = [...new Set(names())];
+      const joined = uniq.join(',');
+      if (joined !== input.value) input.value = joined;
+      api.write(item, joined);
+      api.afterWrite?.(item);
+      paint();
+      onChange();
+    };
+    input.addEventListener('change', commit);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ',') {
+        ev.preventDefault();
+        commit();
+      }
+    });
+    // 同步循环回写 input.value 之后要重画胶囊（「全部恢复默认」/ 外部写入都跟上）
+    (input as HTMLInputElement & { __rpTags?: () => void }).__rpTags = paint;
+    paint();
+    return wrap;
+  }
   if (item.kind === 'text') {
     const input = document.createElement('input');
     input.type = 'text';
@@ -414,7 +468,11 @@ export function syncRenderPanel(host: HTMLElement, api: RenderPanelApi): void {
     const focused = document.activeElement;
     if (el instanceof HTMLInputElement && el.type === 'checkbox') el.checked = v === true;
     else if (el instanceof HTMLSelectElement) { if (el !== focused) el.value = String(v); }
-    else if (el instanceof HTMLInputElement) { if (el !== focused) el.value = String(v); }
+    else if (el instanceof HTMLInputElement) {
+      if (el !== focused) el.value = String(v);
+      // tags 控件的胶囊跟着重画：否则「全部恢复默认」之后旧胶囊还挂着
+      (el as HTMLInputElement & { __rpTags?: () => void }).__rpTags?.();
+    }
     if (num && num !== focused) num.value = String(v);
   }
 }

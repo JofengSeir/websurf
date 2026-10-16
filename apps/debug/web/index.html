@@ -507,7 +507,15 @@
       width: 100%; padding: 2px 4px; background: var(--bg); color: var(--text);
       border: 1px solid var(--border); border-radius: var(--r); font-size: 11px;
     }
-  </style>
+      /* 标签式输入（P2-③）：多名字的材质项用它，值仍是逗号分隔串 */
+    .rp-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+    .rp-tags .rp-tag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px;
+      border: 1px solid var(--border); border-radius: 3px; font-size: 11px; color: var(--text); background: var(--panel); }
+    .rp-tags .rp-tag-x { padding: 0 2px; font: inherit; line-height: 1; cursor: pointer;
+      color: var(--muted); background: none; border: 0; }
+    .rp-tags .rp-tag-x:hover { color: var(--accent); }
+    .rp-tags input { flex: 1 1 90px; min-width: 60px; }
+</style>
 </head>
 <body>
   <div id="app">

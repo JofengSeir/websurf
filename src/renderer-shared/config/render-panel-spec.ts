@@ -23,7 +23,7 @@ export type RenderPanelApp = 'debug' | 'viewer' | 'game';
 export type RenderPanelApply = 'live' | 'reload' | 'rebuild';
 
 /** 控件类型。 */
-export type RenderPanelKind = 'slider' | 'toggle' | 'select' | 'text';
+export type RenderPanelKind = 'slider' | 'toggle' | 'select' | 'text' | 'tags';
 
 /** 面板分组（顺序即渲染顺序）。 */
 export const RENDER_PANEL_GROUPS = ['光照', '材质与法线', '剔除与相机', '雾', '排查开关'] as const;
@@ -422,9 +422,9 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
   {
     id: 'swFullbrightNames',
     label: '全亮材质名',
-    title: '逗号分隔的材质名：这些材质走无光照路径（排查用）',
+    title: '这些材质走无光照路径（排查用）：加一个名字回车即成一枚标签，点标签上的 × 移除',
     group: '排查开关',
-    kind: 'text',
+    kind: 'tags',
     pref: 'debug.fullbrightNames',
     apply: 'reload',
     apps: D,

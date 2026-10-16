@@ -1145,3 +1145,12 @@ button.dmp-chat-t:hover { color: var(--accent); border-bottom-style: solid; }
 /* 输入中的非法值（越界/非数字）：沿用本页 .invalid 的语义，只标色不改值 */
 .rp-field .field-input.rp-invalid { border-color: var(--err); }
 .rp-unit { color: var(--muted); font-size: 11.5px; flex: none; }
+
+/* 标签式输入（P2-③）：多名字的材质项用它，值仍是逗号分隔串 */
+.rp-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.rp-tags .rp-tag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px;
+  border: 1px solid var(--border); border-radius: 3px; font-size: 11px; color: var(--text); background: var(--panel); }
+.rp-tags .rp-tag-x { padding: 0 2px; font: inherit; line-height: 1; cursor: pointer;
+  color: var(--muted); background: none; border: 0; }
+.rp-tags .rp-tag-x:hover { color: var(--accent); }
+.rp-tags input { flex: 1 1 90px; min-width: 60px; }
