@@ -22,7 +22,7 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "adbc4aecbd5debdfe4fa1113ef235e683fef2fae3f9c659512e2fe931b7282e3",
-    "AGENTS.md": "da0fbffb03327cb22305f96cf357c906d7a07cdece76b764b2512c0857017aec",
+    "AGENTS.md": "447416d0a99e12d955b213a06bac364f2ddad5e76afd4d9bdb51bd99d44f5272",
     "skills/websurf-workflow/SKILL.md": "7299f1bad07726f52718d242a02be2e9d397eed283b9f2db2ed897dcb6621951"
   },
   "approvals": [
@@ -99,14 +99,6 @@
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
-      "by": "owner",
-      "reason": "T-684：删掉 apps/viewer/dist-README.md（产物说明书）与其构建引用后，AGENTS §2 的三处提及（apps/** 行、.gitignore 行号引用、md 清单）同步更正",
-      "at": "2026-10-16",
-      "task": "T-684",
-      "consumed": true
-    },
-    {
       "path": "README.md",
       "by": "dsh",
       "reason": "serve.py 用法注释 +1 行，PORT/ROOT/os.chdir 三条语句整体下移一行（19/20/21 → 20/21/22），断言本身未变",
@@ -126,6 +118,14 @@
       "path": "OWNER.md",
       "by": "dsh",
       "reason": "D-115 已决：行移出待决表，原文逐字进记忆库已决卷 progress/owner/2026-10-17-resolved.md（分卷/归档）",
+      "at": "2026-10-16",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "AGENTS.md",
+      "by": "dsh",
+      "reason": "T-729 口径落地：闸 B 补「历史冻结件豁免」一条（--all 单列 exempt、写入闸不认该标记）",
       "at": "2026-10-16",
       "task": "",
       "consumed": true
