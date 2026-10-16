@@ -420,6 +420,34 @@ export function applyRenderExtras(e: RenderExtrasPrefs): void {
   g.__vbspBumpDetail = e.bumpDetail;
 }
 
+/**
+ * 面板用：按 \`a.b\` 路径读档字段（读不到时返回 0，控件至少不会是 NaN）。
+ * 有它面板就不必各写一份「路径 → 字段」的映射（三端同一份规格表）。
+ */
+export function readPrefsPath(p: RenderPrefs, path: string): number | boolean | string {
+  const o = p as unknown as Record<string, unknown>;
+  const dot = path.indexOf('.');
+  if (dot < 0) {
+    const v = o[path];
+    return typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' ? v : 0;
+  }
+  const seg = o[path.slice(0, dot)] as Record<string, unknown> | undefined;
+  const v = seg ? seg[path.slice(dot + 1)] : undefined;
+  return typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' ? v : 0;
+}
+
+/** 面板用：按 \`a.b\` 路径生成写补丁（四段之外的顶层字段按 textureQuality 处理）。 */
+export function prefsPathPatch(path: string, value: number | boolean | string): RenderPrefsPatch {
+  const dot = path.indexOf('.');
+  if (dot < 0) return { textureQuality: value } as RenderPrefsPatch;
+  const key = path.slice(0, dot);
+  const leaf = path.slice(dot + 1);
+  if (key === 'lighting') return { lighting: { [leaf]: value } as never };
+  if (key === 'culling') return { culling: { [leaf]: value } as never };
+  if (key === 'camera') return { camera: { [leaf]: value } as never };
+  return { extras: { [leaf]: value } as never };
+}
+
 /** 生效值的单行描述（三端同格式；判据直接比对这一行）。 */
 export function describeRenderPrefs(p: RenderPrefs): string {
   const l = p.lighting;

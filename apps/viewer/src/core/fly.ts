@@ -15,9 +15,10 @@
  * `applyTo(camera)`；回放第一人称时把 `drivesCamera` / `allowMove` 置假，改用 `setWorld`
  * 与 `applyToWithRoll` 让录像驱动相机。
  *
- * 文件末尾的 `MOVE_KEYS` 是参与位移的键集合（W/A/S/D、C、Space、左右 Shift、左右 Ctrl）：
- * 只有集合内的键会被 `preventDefault` 并记入状态，左右 Shift 决定用 `FLY_SPEED` 还是
- * `FLY_SPEED_FAST`，Space 上升，C 与左右 Ctrl 下降。
+ * 文件末尾的 `MOVE_KEYS` 是参与位移的键集合（W/A/S/D、Q/E、左右 Shift）：只有集合内的键会被
+ * `preventDefault` 并记入状态，左右 Shift 决定用 `FLY_SPEED` 还是 `FLY_SPEED_FAST`。
+ * 位移口径与 debug 的 noclip 完全一致（`src/phys/mod.rs` 的 `noclip_step`）：前进沿**视线**（含俯仰）、
+ * 左右为水平平移、**没有独立升降键**，Q/E 原地转向。
  *
  * 未接线字段：`allowPointerLock` 全仓只有声明（无写入点、无读取点）；`onLockChange` 只有
  * 调用点（`attach` 内），没有任何赋值点。
@@ -175,17 +176,18 @@ export class FlyCam {
     if (this.locked && this.allowMove && this.keys.size > 0) {
       const fast = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
       const speed = fast ? FLY_SPEED_FAST : FLY_SPEED;
-      this.fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      // 前进沿视线（含俯仰）：朝上看时按 W 就往上飞——与 debug noclip 同一口径
+      const cp = Math.cos(this.pitch);
+      this.fwd.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
       this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+      // Q/E 原地转向（与游戏内 noclip 一致）
+      if (this.keys.has('KeyQ')) this.yaw += YAW_KEY_RATE * dt;
+      if (this.keys.has('KeyE')) this.yaw -= YAW_KEY_RATE * dt;
       this.move.set(0, 0, 0);
       if (this.keys.has('KeyW')) this.move.add(this.fwd);
       if (this.keys.has('KeyS')) this.move.sub(this.fwd);
       if (this.keys.has('KeyD')) this.move.add(this.right);
       if (this.keys.has('KeyA')) this.move.sub(this.right);
-      if (this.keys.has('Space')) this.move.y += 1;
-      if (this.keys.has('KeyC') || this.keys.has('ControlLeft') || this.keys.has('ControlRight')) {
-        this.move.y -= 1;
-      }
       if (this.move.lengthSq() > 0) {
         this.pos.addScaledVector(this.move.normalize(), speed * dt);
       }
@@ -238,10 +240,11 @@ const MOVE_KEYS = new Set([
   'KeyA',
   'KeyS',
   'KeyD',
-  'KeyC',
-  'Space',
+  'KeyQ',
+  'KeyE',
   'ShiftLeft',
   'ShiftRight',
-  'ControlLeft',
-  'ControlRight',
 ]);
+
+/** Q/E 原地转向速率（弧度/秒；≈137°/s，与 debug noclip 的手感同量级）。 */
+const YAW_KEY_RATE = 2.4;

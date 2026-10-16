@@ -198,6 +198,21 @@ export class ViewerScene {
    * 两种模式共用同一条加载路径 ⇒ 切换不重建场景、不重编译材质、不打断视角；
    * 传入与当前相同的模式时提前返回，不重复写 uniform。
    */
+  /** 面板用：即时改剔除距离（0 = 自动，按包围盒对角线一半）。 */
+  setCullDistance(dist: number): void {
+    const box = this.worldBox();
+    if (!box) return;
+    const auto = Math.max(box.getSize(new THREE.Vector3()).length() * 0.5, 1);
+    this.visibility.setCullDistance(auto, dist);
+  }
+
+  /** 面板用：即时改相机 FOV。 */
+  setFov(fov: number): void {
+    if (!Number.isFinite(fov) || fov <= 0) return;
+    this.camera.fov = fov;
+    this.camera.updateProjectionMatrix();
+  }
+
   setLightingMode(mode: LightingMode): void {
     if (getLightingMode() === mode) return;
     setLightingModeInShader(mode);

@@ -121,7 +121,7 @@
     <div class="help-title">操作帮助 <span class="help-close" id="helpClose" title="关闭（Esc）">×</span></div>
     <div class="help-sec">
       <div class="help-h">鼠标与键盘</div>
-      <p>点击画面锁定鼠标后自由飞行：<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移、<kbd>空格</kbd>/<kbd>C</kbd> 升降、<kbd>Shift</kbd> 加速（×4）、<kbd>Esc</kbd> 解锁。</p>
+      <p>点击画面锁定鼠标后自由飞行：<kbd>W</kbd>/<kbd>S</kbd> 沿视线前进后退（朝上看就往上飞）、<kbd>A</kbd>/<kbd>D</kbd> 水平平移、<kbd>Q</kbd>/<kbd>E</kbd> 原地转向、<kbd>Shift</kbd> 加速（×4）、<kbd>Esc</kbd> 解锁。</p>
       <p>记录回放：<kbd>K</kbd> 播放 / 暂停，<kbd>,</kbd> / <kbd>.</kbd> 逐帧，<kbd>I</kbd> / <kbd>O</kbd> 设区间 A / B。输入框内这些键不生效。</p>
     </div>
     <div class="help-sec">
@@ -139,6 +139,7 @@
       <button class="tab active" data-tab="map" type="button">地图</button>
       <button class="tab" data-tab="replay" type="button">记录</button>
       <button class="tab" data-tab="demo" type="button">录像</button>
+      <button class="tab" data-tab="display" type="button">显示</button>
     </div>
     <div class="tabpane active" id="pane-map"></div>
     <div class="tabpane" id="pane-replay"></div>
@@ -148,6 +149,7 @@
          后两次修复都只补了引导卡，直到本次才补回；`apps/viewer/src/app.ts` 的
          `activeTab`/`demoPane` 与 `replay/demopanel.ts` 一直按它存在来写。 -->
     <div class="tabpane" id="pane-demo"></div>
+    <div class="tabpane" id="pane-display"></div>
   </aside>
 
   <!-- 底部 dock `#dock`：**两个回放会话各占一层**，同一时刻只有一层 `.active` 可见。

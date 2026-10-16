@@ -44,6 +44,8 @@ import { ReplaySession } from './replay/session.js';
 import type { SessionKind } from './replay/session.js';
 import { looksLikeShavitReplay, SHAVIT_SNIFF_BYTES } from './replay/shavit-replay.js';
 import { defaultRule, unionBbox } from './replay/types.js';
+import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, readPrefsPath, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js';
+import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js';
 import type { Track } from './replay/types.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement | null;
@@ -1052,6 +1054,47 @@ function poseText(p: Pose): string {  return (
     `ang (yaw ${p.ang[0].toFixed(1)}°, pitch ${p.ang[1].toFixed(1)}°)`
   );
 }
+
+// ── 显示设置（T-687）─────────────────────────────────────────────────
+// 控件清单来自共享规格表 src/renderer-shared/config/render-panel-spec.ts：viewer 只显示「画面相关」的项
+// （规格表里 apps 含 viewer 的那些），物理/玩法项不会出现。值落在本端键 vbsp:renderPrefs:viewer。
+
+function setupDisplayPanel(): void {
+  const host = document.getElementById('pane-display');
+  if (!host) return;
+  /** 当前场景（init 里才赋值；面板只会在 init 之后被用户触发，故这里只做空值兜底）。 */
+  const applyLive = (item: { pref?: string }, value: RenderPanelValue): void => {
+    applyRenderPrefs(readRenderPrefs());
+    const s = scene as ViewerScene | undefined;
+    if (item.pref === 'culling.distance') s?.setCullDistance(Number(value));
+    if (item.pref === 'camera.fov') s?.setFov(Number(value));
+  };
+  const api: RenderPanelApi = {
+    app: 'viewer',
+    read(item) {
+      return item.pref ? readPrefsPath(readRenderPrefs(), item.pref) : 0;
+    },
+    write(item, value) {
+      if (!item.pref) return;
+      writeRenderPrefs(prefsPathPatch(item.pref, value));
+      applyLive(item, value);
+    },
+    reset(item) {
+      if (!item.pref) return;
+      const def = readPrefsPath(defaultRenderPrefs(), item.pref);
+      writeRenderPrefs(prefsPathPatch(item.pref, def));
+      applyLive(item, def);
+    },
+    afterWrite(item) {
+      if (item.apply !== 'live') {
+        console.info('[render-panel] ' + item.label + '：' + (item.apply === 'reload' ? '刷新页面后生效' : '重新加载地图后生效'));
+      }
+    },
+  };
+  buildRenderPanel(host, api);
+}
+
+setupDisplayPanel();
 
 // ── 关闭确认兜底（Ctrl+W 防误关）─────────────────────────────────────
 // 浏览器不允许页面用 keydown preventDefault 拦截 Ctrl+W 这类浏览器快捷键，

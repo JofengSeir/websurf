@@ -34,7 +34,7 @@ import type {
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
-import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, type RenderPrefsPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js'; import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
+import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, readPrefsPath as readPrefsField, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js'; import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
 import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
 import { formatTime, GameState } from './game-state.js';
@@ -1202,31 +1202,6 @@ function loadUiPrefs(): void {
 // 控件清单在 src/renderer-shared/config/render-panel-spec.ts（三端共用）；这里只管「落到哪 + 怎么施加」。
 // 本端已手写的同项（光照模式 / 纹理画质 / 视距上限 / 近平面 / 环境光强度）不在面板里重复。
 
-/** 按 'a.b' 路径读渲染档字段（找不到时给 0，控件至少不会 NaN）。 */
-function readPrefsPath(path: string): number | boolean | string {
-	const p = readRenderPrefs() as unknown as Record<string, unknown>;
-	const dot = path.indexOf('.');
-	if (dot < 0) {
-		const v = p[path];
-		return typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' ? v : 0;
-	}
-	const seg = p[path.slice(0, dot)] as Record<string, unknown> | undefined;
-	const v = seg ? seg[path.slice(dot + 1)] : undefined;
-	return typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' ? v : 0;
-}
-
-/** 按 'a.b' 路径生成写补丁（四段之外的顶层字段走 textureQuality）。 */
-function prefsPathPatch(path: string, value: RenderPanelValue): RenderPrefsPatch {
-	const dot = path.indexOf('.');
-	if (dot < 0) return { textureQuality: value } as RenderPrefsPatch;
-	const key = path.slice(0, dot);
-	const leaf = path.slice(dot + 1);
-	if (key === 'lighting') return { lighting: { [leaf]: value } as never };
-	if (key === 'culling') return { culling: { [leaf]: value } as never };
-	if (key === 'camera') return { camera: { [leaf]: value } as never };
-	return { extras: { [leaf]: value } as never };
-}
-
 /** 出帧开关读值：toggle 按「未设置时的默认」（defaultOn）解释，select 缺省 auto，text 是逗号分隔的数组。 */
 function readSwitchGlobal(item: RenderPanelItem): number | boolean | string {
 	const v = (globalThis as Record<string, unknown>)[item.global ?? ''];
@@ -1255,7 +1230,7 @@ function setupRenderPanel(): void {
 	const api: RenderPanelApi = {
 		app: 'debug',
 		read(item) {
-			return item.pref ? readPrefsPath(item.pref) : readSwitchGlobal(item);
+			return item.pref ? readPrefsField(readRenderPrefs(), item.pref) : readSwitchGlobal(item);
 		},
 		write(item, value) {
 			if (!item.pref) { writeSwitchGlobal(item, value); return; }
@@ -1270,11 +1245,7 @@ function setupRenderPanel(): void {
 				if (item.global) delete (globalThis as Record<string, unknown>)[item.global];
 				return;
 			}
-			const d = defaultRenderPrefs() as unknown as Record<string, unknown>;
-			const dot = item.pref.indexOf('.');
-			const leaf = dot < 0 ? item.pref : item.pref.slice(dot + 1);
-			const seg = dot < 0 ? d : (d[item.pref.slice(0, dot)] as Record<string, unknown>);
-			const def = seg ? seg[leaf] : 0;
+			const def = readPrefsField(defaultRenderPrefs(), item.pref);
 			writeRenderPrefs(prefsPathPatch(item.pref, (def ?? 0) as RenderPanelValue));
 			applyRenderPrefs(readRenderPrefs());
 			if (item.pref === 'culling.distance') rendererMain?.setCullDistance(Number(def ?? 0));
