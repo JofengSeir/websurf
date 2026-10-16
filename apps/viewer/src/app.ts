@@ -415,7 +415,10 @@ const demoPanel = demoPane
        */
       onRecordJump: (toSec, announceSec, player, level, durationSec) => {
         const who = player.trim();
-        const row = who.length > 0 ? demoPanel?.roster(0).find((p) => p.name.trim() === who) : undefined;
+        // **按名字找人走面板的别名表**（T-701）：服务器改过名的人（记录里是旧名 / 聊天里带前缀）
+        // 早先按字符串相等找不到 ⇒ 点了记录只跳时间、不切视角。
+        const entity = who.length > 0 ? (demoPanel?.resolveEntityByName(who) ?? null) : null;
+        const row = entity !== null ? demoPanel?.roster(0).find((p) => p.entity === entity) : undefined;
         // **顺序不能反**：先切视角、**最后**再定位播放头。
         // `pickEntity` 会走到「播放头不在这个人的区间里就 seek 到区间起点」那条路（`jumpTo`），
         // 于是它自己会动播放头 —— 先 seek 再切视角的话，我们算好的目标时刻会被它覆盖

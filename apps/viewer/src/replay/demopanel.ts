@@ -31,6 +31,7 @@ import {
 } from './demo/chatkind.js';
 import { userinfoTimeline } from './demo/net.js';
 import { decodePlayerInfoRecords } from './demo/demo.js';
+import { buildAliasRegistry, normalizeName, type AliasRegistry } from './identity.js';
 import { trackToClip } from './democlip.js';
 import { TRACK_PALETTE } from './tracks.js';
 import { FILE_KIND_LABEL, sniffFileKind } from '../core/filekind.js';
@@ -254,6 +255,14 @@ function fmtSize(bytes: number): string {
 /** 花名册行：一次在场（占用会话）或一条可用轨迹，二者合并后的呈现单位。 */export interface RosterRow {
   key: number;
   name: string;
+  /**
+   * 这个人在录像里出现过的**全部写法**（本行当前显示名 + 聊天/连接行里同账号的其它名字）。
+   *
+   * 存在的理由：服务器会给玩家改名（实测同一个 `[U:1:1142669713]` 在 userinfo 里叫「她不一样」，
+   * 而聊天里是带服务器前缀的 `[yuzusoft] GalgameEnjoyer1337`），只显示一个名字会让人以为名单里少了一个人。
+   * 只登记**能连到账号**的名字（连接行的 SteamID 或与 userinfo 名字完全一致），连不上的另见详情里的说明。
+   */
+  aliases: string[];
   isBot: boolean;
   /**
    * 该行是不是**真账号**（依据：`userinfo` 更新流里出现过 **非空且不是 `BOT`** 的 guid）。
@@ -373,6 +382,9 @@ export class DemoPanel {
    * 过滤勾选：`true` = **只看这一类**（owner 2026-10-16 定）。
    * 全不勾 = 全勾 = 默认全显示；只有勾了一部分时才真的过滤（见 `chatAllow()`）。
    */
+  /** 身份别名表（解析完成后建，见 `accountNames`）。 */
+  private aliases: AliasRegistry = { namesByGuid: new Map(), guidByName: new Map(), unlinkedNames: new Set() };
+
   private chatOnly: Record<ChatKind, boolean> = { chat: false, join: false, announce: false, record: false };
   private rows: DemoPlayerRow[] = [];
   private result: DemoParseResult | null = null;
@@ -522,6 +534,8 @@ export class DemoPanel {
     // **载入成功即通知外部**：底部那条胶片进度条要立刻放出来，而不是等用户点了某个玩家、
     // 建出第一条轨道之后才出现 —— 那时进度条才冒出来会显得"没加载成功"。
     // 同时把解析产物推给**录像信息条**（服务器 / 天空盒 / 协议 / 事件 / 实体流 / 字符串表）。
+    // 身份别名表（T-701）：连接行的 SteamID + 已知账号名 ⇒ 同一个人在这份录像里的多个写法能对上
+    this.aliases = buildAliasRegistry(result.chat ?? [], this.accountNames());
     this.opts.onParsed?.(result, file, this.roster(0).length);
     this.opts.onLoaded?.();
   }
@@ -781,9 +795,11 @@ export class DemoPanel {
     const total = Math.max(1, this.totalTicks);
     const rows = roster
       .map((p, i) => {
-        const tip = p.hasTrack
-          ? '点击切到他的视角'
-          : '该玩家的位姿尚未被本工程实体流采到（该层未逐位对齐）——点它会说明原因，不会切视角';
+        const tip =
+          (p.hasTrack
+            ? '点击切到他的视角'
+            : '该玩家的位姿尚未被本工程实体流采到（该层未逐位对齐）——点它会说明原因，不会切视角') +
+          (p.aliases.length > 1 ? '；别名：' + p.aliases.join('、') : '');
         // 无位姿的行：区间条改**弱色**（内联，避免为这一个状态新增 CSS 规则）、时间读数后带「· 无位姿」。
         // 别用 `opacity` 内联压暗整行——`refreshRosterState` 每帧用它切换 `.off`（在线/离线），内联会盖掉它。
         const barFill = p.hasTrack ? '' : ';background:var(--muted)';
@@ -841,6 +857,48 @@ export class DemoPanel {
    * 供 `apps/viewer/src/app.ts` 在「跟随某人」时取他的**全部在场区间**（画人物叠加带用）——
    * 一个人中途退出又进来时，条上必须是分开的几段。
    */
+  /**
+   * 真账号的已知名字（guid → userinfo 里见到的名字）。别名表用它把聊天里的候选名按**完全同名**连回账号
+   * （实测 boreas2 的 `KKKsc01` 没有连接行，只能这样连）。
+   */
+  private accountNames(): Map<string, Set<string>> {
+    const out = new Map<string, Set<string>>();
+    for (const snap of userinfoTimeline) {
+      for (const e of snap.entries) {
+        for (const rec of decodePlayerInfoRecords(e.value, e.idx)) {
+          if (!rec.guid || rec.guid === 'BOT') continue;
+          const set = out.get(rec.guid) ?? new Set<string>();
+          set.add(rec.name);
+          out.set(rec.guid, set);
+        }
+      }
+    }
+    return out;
+  }
+
+  /** 该账号的别名集合（含本行当前显示名）；没有额外写法时只含它自己。 */
+  private aliasesFor(guid: string, ownName: string): string[] {
+    const set = new Set<string>();
+    if (ownName) set.add(ownName);
+    for (const n2 of this.aliases.namesByGuid.get(guid) ?? []) set.add(n2);
+    return [...set];
+  }
+
+  /**
+   * **按名字找人**（供「点过关记录跳转」切视角）：先原样比，再按归一化名（剥服务器前缀）比，
+   * 最后查别名表 —— 服务器改过名的人也能被认出来（T-701）。
+   */
+  resolveEntityByName(name: string): number | null {
+    const want = normalizeName(name);
+    if (!want) return null;
+    const roster = this.roster(0);
+    const hit =
+      roster.find((p) => p.name.trim() === name.trim()) ??
+      roster.find((p) => normalizeName(p.name) === want) ??
+      roster.find((p) => p.aliases.some((a) => normalizeName(a) === want));
+    return hit ? hit.entity : null;
+  }
+
   rosterFor(entity: number): RosterRow | null {
     return this.roster(0).find((p) => p.entity === entity || p.entities.includes(entity)) ?? null;
   }
@@ -1309,11 +1367,13 @@ export class DemoPanel {
       // 没有任何位姿才退回占用事件的并集（那时只有更新流能作证）。
       const from = withWin.length > 0 ? Math.min(...withWin.map((x) => x.win.from)) : g.from;
       const to = withWin.length > 0 ? Math.max(...withWin.map((x) => x.win.to)) : g.to;
+      // 名字可能整场都取不到（T-700 实测：存档里该槽位的 userinfo 值长度为 0，见 boreas dem 的键 2/3）
+      // ⇒ 与其留空，不如把「存档没给名字」这件事写在名字位上。
+      const rowName = this.nameFor(slot, entity, to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`;
       rows.push({
         key: rows.length,
-        // 名字可能整场都取不到（T-700 实测：存档里该槽位的 userinfo 值长度为 0，见 boreas dem 的键 2/3）
-        // ⇒ 与其留空，不如把「存档没给名字」这件事写在名字位上。
-        name: this.nameFor(slot, entity, to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`,
+        name: rowName,
+        aliases: this.aliasesFor(g.guid, rowName),
         isBot: g.isBot,
         human: g.human,
         entity,
@@ -1334,6 +1394,8 @@ export class DemoPanel {
       rows.push({
         key: rows.length,
         name: this.nameFor(p.slot, entity, p.to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`,
+        // 这一支没有 userinfo 会话 ⇒ 没有 guid 可查别名（聊天里连不连得上另说，见详情面板的说明）
+        aliases: [],
         isBot: p.isBot,
         // 这一支来自「可用轨迹」而没有 `userinfo` 会话 ⇒ 无 guid 可判，**不当作真账号**
         human: false,
@@ -1372,6 +1434,8 @@ export class DemoPanel {
    */
   private occupancyIdentities(): Array<{
     entities: number[];
+    /** 真账号的 guid（bot 为空串）；别名表按它取该人的其它写法。 */
+    guid: string;
     isBot: boolean;
     /** 该身份是不是**真账号**（`userinfo` 里 guid 非空且不是 `BOT`）。见 `RosterRow.human`。 */
     human: boolean;
@@ -1383,6 +1447,7 @@ export class DemoPanel {
       string,
       {
         entities: Set<number>;
+        guid: string;
         isBot: boolean;
         human: boolean;
         from: number;
@@ -1398,6 +1463,7 @@ export class DemoPanel {
       if (!cur) {
         groups.set(key, {
           entities: new Set([s.slot + 1]),
+          guid: human ? s.guid : '',
           isBot: s.isBot,
           human,
           from: s.from,
@@ -1415,6 +1481,7 @@ export class DemoPanel {
     }
     return [...groups.values()].map((g) => ({
       entities: [...g.entities].sort((a, b) => a - b),
+      guid: g.guid,
       isBot: g.isBot,
       human: g.human,
       from: g.from,
