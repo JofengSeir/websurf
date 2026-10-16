@@ -327,6 +327,8 @@ function bindInput(): void {
     const file = input.files?.[0];
     if (!file || !renderer) return;
     input.value = '';
+    // 记住 File 引用（不复制字节、不额外占内存）：面板「重载类」项改完要重建这张图
+    lastMapFile = file;
     await handleLoadBsp(file.name, await file.arrayBuffer());
   });
 
@@ -496,6 +498,31 @@ function updateKeyHud(state: KeyState): void {
  * 公共化：BspProcessor 导出管线收敛到 ts-shared buildWorldBundle（colliderSource
  * auto + 默认纹理包回退 + GLB 导出 + 出生点解析全部共享）。
  */
+/** 最近一次载入的地图文件引用（面板重载类项改完要重建它；File 引用不占内存）。 */
+let lastMapFile: File | null = null;
+/** 面板「重载类」项改完后的重建计时器（250 ms 内多次写入只重建一次）。 */
+let mapReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * **重载类面板项改完后自动重建地图**（owner 清单 P2-①）。
+ *
+ * 为什么要防抖：apply === 'rebuild' 的项有 7 个，而「全部恢复默认」会一次写很多项 ——
+ * 不合并就会连着重建好几次世界（每次都要重新解析 BSP）。250 ms 足够并成一次。
+ * 没载入过地图时**如实说明**（提示「载入后生效」），不假装重建过。
+ */
+function scheduleMapReload(): void {
+  if (mapReloadTimer !== null) clearTimeout(mapReloadTimer);
+  mapReloadTimer = setTimeout(() => {
+    mapReloadTimer = null;
+    const file = lastMapFile;
+    if (!file) {
+      setStatus('面板已改；当前未载入地图，载入后生效。', '');
+      return;
+    }
+    void file.arrayBuffer().then((bytes) => handleLoadBsp(file.name, bytes));
+  }, 250);
+}
+
 async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void> {
   if (!renderer) {
     setError('渲染器未就绪');
@@ -873,6 +900,8 @@ function setupRenderPanel(): void {
       if (item.apply !== 'live') {
         console.info('[render-panel] ' + item.label + '：' + (item.apply === 'reload' ? '刷新页面后生效' : '重新加载地图后生效'));
       }
+      // **重载类改完自动重建地图**（owner 清单 P2-①）。整页刷新那类（apply === 'reload'）不自动做。
+      if (item.apply === 'rebuild') scheduleMapReload();
     },
   };
   renderPanelHandle = buildRenderPanel(host, api);
