@@ -391,6 +391,8 @@ const demoPanel = demoPane
       // `.dem` 独有的服务器身份 / 天空盒 / 协议 / 事件 / 实体流规模 / 字符串表 / 包走读。
       // 它只写**录像会话**容器里的那个元素，记录会话的 `#replayMeta` 由 `ReplayMetaPanel` 管。
       onParsed: (result, file, rosterCount) => {
+        // 标记「有录像会话」：重载类面板项改完时据此跳过自动重建地图（见 scheduleMapReload）
+        demoSessionActive = !!result;
         demoInfo.set(result ? { fileName: file.name, result, rosterCount } : null);
         // **画面左下角的对话浮层**：数据就是同一份解析产物里的 `chat`（每条带 tick），
         // 在这里一次性换算成**会话内秒**交给浮层；解析失败（`result === null`）⇒ 清空
@@ -554,7 +556,39 @@ function setLoadBusy(busy: boolean): void {
   if (bspFileInput) bspFileInput.disabled = busy;
 }
 
+/** 最近一次载入的 BSP（面板重载类项改完要重建它）。 */
+let lastBspFile: File | null = null;
+/** 当前是否有一份已解析的录像会话（viewer 特有：看录像时不自动重建地图）。 */
+let demoSessionActive = false;
+/** 面板「重载类」项改完后的重建计时器（250 ms 内多次写入只重建一次）。 */
+let mapReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * **重载类面板项改完后自动重建地图**（owner 清单 P2-①）。
+ *
+ * viewer 与 debug/game 的差别：这里可能正在看录像 —— 重建地图会把录像会话的轨道与时间轴
+ * 一起打断，得不偿失。所以**正在看录像时跳过自动重载**，只如实说明一句（用户想看新设置可以
+ * 先卸掉录像再改）。没载入地图时同样如实说明，不假装重建过。
+ */
+function scheduleMapReload(): void {
+  if (mapReloadTimer !== null) clearTimeout(mapReloadTimer);
+  mapReloadTimer = setTimeout(() => {
+    mapReloadTimer = null;
+    if (demoSessionActive) {
+      hud.flashStatus('面板已改；正在看录像，未自动重载地图（换图会打断录像会话）', 6000);
+      return;
+    }
+    const file = lastBspFile;
+    if (!file) {
+      hud.flashStatus('面板已改；当前未载入地图，载入后生效', 5000);
+      return;
+    }
+    void loadBsp(file).then(() => hud.flashStatus('已按新设置重新加载地图', 4000));
+  }, 250);
+}
+
 async function loadBsp(file: File): Promise<void> {
+  lastBspFile = file;
   if (bspLoading) return;
   bspLoading = true;
   // 关闭确认（Ctrl+W）在这里就武装：与 game 的 `handleLoadBsp`、debug 的 `routeFile` 同口径
@@ -1117,6 +1151,8 @@ function setupDisplayPanel(): void {
       if (item.apply !== 'live') {
         console.info('[render-panel] ' + item.label + '：' + (item.apply === 'reload' ? '刷新页面后生效' : '重新加载地图后生效'));
       }
+      // **重载类改完自动重建地图**（owner 清单 P2-①）。整页刷新那类（apply === 'reload'）不自动做。
+      if (item.apply === 'rebuild') scheduleMapReload();
     },
   };
   displayPanelHandle = buildRenderPanel(host, api);

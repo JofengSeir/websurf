@@ -506,7 +506,7 @@
   ],
   "board": {
     "source": "progress/board.jsonl",
-    "sha12": "5f189ab72412",
+    "sha12": "b465e924086e",
     "live": [
       "T-109",
       "T-115",
@@ -553,7 +553,7 @@
       "已结案 · 2026-10-16": 26,
       "未结项 · 待补判据": 1,
       "未结项 · 待实施": 1,
-      "部分完成（debug 端已做并验收，game/viewer 待接）": 1
+      "部分完成（debug + viewer 已做并验收，game 待接）": 1
     }
   },
   "todo_md_note": "原 TODO.md 已于 2026-10-11 迁入 agentmemory（主题「待办看板（活动板）」）；机器可读镜像 = progress/board.jsonl（本文件 board 段是它的 ID 投影）"
