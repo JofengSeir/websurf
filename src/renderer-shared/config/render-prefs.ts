@@ -1,12 +1,15 @@
 /**
  * 三端渲染呈现档的**唯一来源**（T-454 P1；任务书 `.tmp/task-unify-render/TASK.md` §2/L6）。
  *
- * 为什么有这一层：此前三端各持一份渲染档——game 从面板偏好 `vbsp:panelPrefs` 读
- * exposure / lightGamma / ambientScale / 画质档 / fov / 渲染距离，debug 从 `vbsp:uiPrefs` 读画质档，
- * viewer 两者皆无（只用共享默认档）⇒ 同一台机器三端可以呈现不同亮度与清晰度，验收时无法用
- * 「三端同画面」当基线（`OWNER.md` D-108，2026-10-09 已决：默认档统一到共享层，面板持久化只在
- * game 保留，画质档三端都接）。本模块把**生效值**收到唯一键 `vbsp:renderPrefs`：三端都从这里读，
- * 只有代表用户写入的一端（game 面板 / debug 画质档控件）经 `writeRenderPrefs` 写。
+ * 为什么有这一层：三端**各持一份**渲染档（2026-10-16 owner 裁决：三端参数绝不互相影响）。
+ * 键按端作用域化 = `vbsp:renderPrefs:<viewer|debug|game>`；作用域由各端 `web/index.html` 注入的
+ * `globalThis.__VBSP_APP__` 决定，注入缺失时回退 URL 路径里的 `/viewer|/debug|/game` 段。
+ *
+ * 历史与现代价：2026-10-09 曾按 `OWNER.md` D-108 把三端收到**唯一键** `vbsp:renderPrefs`（图的是
+ * 面板只在 game + 「三端同画面」可验收）——但线上三端同 origin ⇒ localStorage 本就共享，game 面板把
+ * 「模型光照」(`ambientScale`) 拖到 0 之后**三端的 prop 一起全黑**（2026-10-16 事故）。⇒ 改为按端隔离：
+ * 共享的只剩代码里的默认档 `defaultRenderPrefs()`；要「三端同画面」走**深链覆盖** `?prefs=`（见下）。
+ * 旧共用键 `vbsp:renderPrefs` 只作**迁移来源**、且**只迁给 game**（它才是旧档的作者）。
  *
  * 字段与生效阶段（本阶段只把 `lighting` / `textureQuality` 接上，其余先声明、由后续阶段消费）：
  *   - `lighting.*`：**P1 生效**（三端 init 调 `applyRenderPrefs`，值取本模块）；
@@ -14,13 +17,13 @@
  *   - `culling.*`：P4 生效（`visibility-controller.ts` 消费；`distance` 语义 = 显式距离，0 = 自动 `maxDim × 0.5`）；
  *   - `camera.fov`：P3 生效（相机统一时消费）。
  *
- * 旧键只读兼容：新键缺失时按 `vbsp:panelPrefs`（game）/ `vbsp:uiPrefs`（debug）的对应字段**迁移一次**并
- * 落回新键；旧键不删（回退不丢用户设置）。迁移只搬语义相同的字段——debug 的 `lod.cullDistance`
- * （默认 12800，与 game 的「0 = 自动」不同义）不搬，留给 P4 按统一口径处理。
+ * 旧键只读兼容：**只有 game 作用域**迁移一次——先试旧共用键，再退到面板旧档 `vbsp:panelPrefs`
+ * （lighting / hud.fov / hud.renderDistance / texture.quality）；debug 与 viewer 一律从默认档起步，
+ * 不继承任何旧值（debug 的 `vbsp:uiPrefs` 是它自己的面板档，画质档不再从中搬）。旧键一律不删。
  *
- * 跨 origin 可比性（T-460 WP2 / D1=A）：localStorage 按 origin 隔离 ⇒ 三端档无法共享，故补一条
- * **深链覆盖** `?prefs=default|<base64(JSON)>`（优先级最高、不落盘）与**档指纹**（`fp=`），
- * 由 `src/scripts/check-prefs-parity.mjs`（已随 T-653 移除） 起三端逐字比对生效行。
+ * 跨端可比性（T-460 WP2 / D1=A）：**深链覆盖** `?prefs=default|<base64(JSON)>`（优先级最高、不落盘）
+ * 与**档指纹**（`fp=`）是唯一让三端落到同一档的手段——本地三端各占一个端口、线上三端同 origin，
+ * 都不该靠共享存档来对齐。判据 = 各端控制台的 `[render-prefs] 生效：… fp=… scope=…` 一行。
  */
 import {
   LIGHTING_PRESENTATION_DEFAULTS,
@@ -33,13 +36,54 @@ import {
   type LightingMode,
 } from '../shader/lightmap-shader.js';
 
-/** 唯一存储键（三端同键；`apps/**` 不得再出现这个字面量，见 P1 判据）。 */
-export const RENDER_PREFS_KEY = 'vbsp:renderPrefs';
+/** 旧版**共用**键（2026-10-16 起只作迁移来源、不再写入；`apps/**` 不得出现这个字面量）。 */
+export const LEGACY_RENDER_PREFS_KEY = 'vbsp:renderPrefs';
+
+/** 按端作用域的键前缀：实际键 = 前缀 + `<viewer|debug|game>`。 */
+export const RENDER_PREFS_KEY_PREFIX = LEGACY_RENDER_PREFS_KEY + ':';
+
+/** 三端作用域（每端一份档，互不影响）。 */
+export type RenderPrefsScope = 'viewer' | 'debug' | 'game';
+const SCOPES: readonly string[] = ['viewer', 'debug', 'game'];
+
+/** 判不出所属端时的兜底作用域（只读默认档、不迁移）。 */
+export const RENDER_PREFS_FALLBACK_SCOPE = 'shared';
+
+let scopeCache: string | null = null;
+
+/**
+ * 本端作用域：① 各端 `web/index.html` 注入的 `globalThis.__VBSP_APP__`（最可靠）；
+ * ② URL 路径里的 `/viewer|/debug|/game` 段（dev 与部署都命中）；③ `'shared'`。
+ */
+export function renderPrefsScope(): string {
+  if (scopeCache) return scopeCache;
+  let injected = '';
+  try {
+    const g = globalThis as { __VBSP_APP__?: unknown };
+    if (typeof g.__VBSP_APP__ === 'string') injected = g.__VBSP_APP__;
+  } catch {
+    /* 无 globalThis：忽略 */
+  }
+  let fromPath = '';
+  try {
+    const m = /\/(viewer|debug|game)(?:\/|$)/.exec(location.pathname);
+    if (m) fromPath = m[1];
+  } catch {
+    /* 无 location（worker 等）：忽略 */
+  }
+  scopeCache = SCOPES.includes(injected) ? injected : SCOPES.includes(fromPath) ? fromPath : RENDER_PREFS_FALLBACK_SCOPE;
+  return scopeCache;
+}
+
+/** 本端的存储键（`vbsp:renderPrefs:<scope>`）。 */
+export function renderPrefsKey(): string {
+  return RENDER_PREFS_KEY_PREFIX + renderPrefsScope();
+}
 
 /** 结构版本：字段增删时递增；版本不符按「丢弃存档、用默认档」处理（与面板偏好同口径）。 */
 export const RENDER_PREFS_VERSION = 1;
 
-/** 只读兼容的旧键（迁移来源，不删）。 */
+/** 只读兼容的旧键（迁移来源，不删）：[0] = game 面板旧档（game 作用域迁移用）。 */
 export const LEGACY_PREFS_KEYS = ['vbsp:panelPrefs', 'vbsp:uiPrefs'] as const;
 
 /** 画质档（与 `scene/texture-quality.ts` 的 mosaic 数据源选择同义）。 */
@@ -132,17 +176,45 @@ function readRaw(key: string): unknown {
 
 function writeRaw(p: RenderPrefs): void {
   try {
-    localStorage.setItem(RENDER_PREFS_KEY, JSON.stringify(p));
+    localStorage.setItem(renderPrefsKey(), JSON.stringify(p));
   } catch (err) {
     console.warn('[render-prefs] 保存失败:', err);
   }
 }
 
-/** 旧键迁移：只搬语义相同的字段（game 的面板偏好 + debug 的画质档）；没有任何可搬项时返回 null。 */
+/**
+ * `ambientScale === 0` 复位：0 本身是合法的滑块位置，但 2026-10-16 的事故是**旧共用档里被置 0**
+ * 之后传染三端（prop 全黑）。迁移是「搬别人写的值」的唯一时机 ⇒ 只在迁移这一步修这一个已知污染值；
+ * 用户此后仍可在面板上手动调到 0。
+ */
+function repairPoisonedLighting(p: RenderPrefs): { prefs: RenderPrefs; repaired: boolean } {
+  if (p.lighting.ambientScale !== 0) return { prefs: p, repaired: false };
+  return {
+    prefs: { ...p, lighting: { ...p.lighting, ambientScale: defaultRenderPrefs().lighting.ambientScale } },
+    repaired: true,
+  };
+}
+
+/** 旧档迁移（**只有 game 作用域会真的搬**）：旧共用键 → 面板旧档 `vbsp:panelPrefs` → null（默认档）。 */
 function migrateLegacy(): RenderPrefs | null {
+  if (renderPrefsScope() !== 'game') return null;
+  const shared = readRaw(LEGACY_RENDER_PREFS_KEY) as Record<string, unknown> | null;
+  if (shared && shared.version === RENDER_PREFS_VERSION) {
+    const { prefs, repaired } = repairPoisonedLighting(normalize(shared));
+    writeRaw(prefs);
+    console.info(
+      '[render-prefs] 已把旧共用键 ' + LEGACY_RENDER_PREFS_KEY + ' 迁移到 ' + renderPrefsKey() +
+        (repaired ? '（ambientScale=0 判为污染，已复位 ' + prefs.lighting.ambientScale + '）' : ''),
+    );
+    return prefs;
+  }
+  return migrateGamePanelPrefs();
+}
+
+/** game 面板旧档里语义相同的字段：lighting / hud.fov / hud.renderDistance / texture.quality。 */
+function migrateGamePanelPrefs(): RenderPrefs | null {
   const panel = readRaw(LEGACY_PREFS_KEYS[0]) as Record<string, unknown> | null;
-  const ui = readRaw(LEGACY_PREFS_KEYS[1]) as Record<string, unknown> | null;
-  if (!panel && !ui) return null;
+  if (!panel) return null;
   const base = defaultRenderPrefs();
   let touched = false;
   const section = (o: Record<string, unknown> | null, name: string): Record<string, unknown> => {
@@ -163,20 +235,23 @@ function migrateLegacy(): RenderPrefs | null {
     base.culling.distance = num(panelHud.renderDistance, base.culling.distance);
     touched = true;
   }
-  for (const src of [section(panel, 'texture'), section(ui, 'texture')]) {
-    if (src.quality !== undefined) {
-      base.textureQuality = quality(src.quality, base.textureQuality);
-      touched = true;
-    }
+  const panelTexture = section(panel, 'texture');
+  if (panelTexture.quality !== undefined) {
+    base.textureQuality = quality(panelTexture.quality, base.textureQuality);
+    touched = true;
   }
   if (!touched) return null;
-  writeRaw(base);
-  console.info('[render-prefs] 已从旧键迁移呈现档（vbsp:panelPrefs / vbsp:uiPrefs → ' + RENDER_PREFS_KEY + '）');
-  return base;
+  const { prefs, repaired } = repairPoisonedLighting(base);
+  writeRaw(prefs);
+  console.info(
+    '[render-prefs] 已从 ' + LEGACY_PREFS_KEYS[0] + ' 迁移呈现档到 ' + renderPrefsKey() +
+      (repaired ? '（ambientScale=0 判为污染，已复位 ' + prefs.lighting.ambientScale + '）' : ''),
+  );
+  return prefs;
 }
 
 function loadStored(): RenderPrefs {
-  const raw = readRaw(RENDER_PREFS_KEY) as Record<string, unknown> | null;
+  const raw = readRaw(renderPrefsKey()) as Record<string, unknown> | null;
   if (raw && raw.version === RENDER_PREFS_VERSION) return normalize(raw);
   if (raw) console.warn('[render-prefs] 存档版本 ' + String(raw.version) + ' ≠ ' + RENDER_PREFS_VERSION + '，改用默认档');
   return migrateLegacy() ?? defaultRenderPrefs();
@@ -199,8 +274,8 @@ function decodeBase64(b64: string): string {
  * 深链覆盖：`?prefs=default` 强制默认档；`?prefs=<base64(JSON)>` 强制指定档（经 `normalize` 归一）。
  *
  * 优先级**高于 localStorage，且不落盘**（只在取档时生效）；解析失败时告警并回落存档档。
- * 用途：localStorage 按 origin 隔离 ⇒ 三端在同一台机器上无法共享档（T-459），深链是唯一能让
- * 三端落到同一档的手段——门禁 `check-prefs-parity.mjs`（已随 T-653 移除） 即按 `?prefs=default` 起三端比对生效行。
+ * 用途：三端档现已按端隔离（互不影响）⇒ 需要「三端同画面」做 A/B 或验收时，用深链把同一份档
+ * 同时喂给三端（`?prefs=default` 或 `?prefs=<base64(JSON)>`），比对各自控制台的生效行 `fp=`。
  */
 function deepLinkPrefs(): RenderPrefs | null {
   if (typeof location === 'undefined' || typeof atob !== 'function') return null;
@@ -310,7 +385,9 @@ export function describeRenderPrefs(p: RenderPrefs): string {
     ' fp=' +
     renderPrefsFingerprint(p) +
     ' source=' +
-    (deepLinkActive ? 'deep-link' : 'storage')
+    (deepLinkActive ? 'deep-link' : 'storage') +
+    ' scope=' +
+    renderPrefsScope()
   );
 }
 
