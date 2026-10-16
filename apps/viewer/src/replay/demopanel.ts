@@ -30,7 +30,7 @@ import {
   type ChatKind,
 } from './demo/chatkind.js';
 import { userinfoTimeline } from './demo/net.js';
-import { decodePlayerInfoRecords } from './demo/demo.js';
+import { decodePlayerInfoRecords, type PlayerSample } from './demo/demo.js';
 import { buildAliasRegistry, normalizeName, type AliasRegistry } from './identity.js';
 import { trackToClip } from './democlip.js';
 import { TRACK_PALETTE } from './tracks.js';
@@ -73,6 +73,18 @@ function mergeSpans(list: Array<{ from: number; to: number; entity: number }>): 
     out.push({ from: s.from, to: s.to, entity: s.entity });
   }
   return out;
+}
+
+/**
+ * 一条采样是不是**观察/未分配**状态（team 0 = 未选阵营、1 = 观察者）。
+ *
+ * 为什么要单独一个判据并到处用：观察期间玩家实体的位姿是**镜头跟着别人**，不是他本人在走
+ * —— 算运动量、算世界跨度、自动跟随挑人**都必须把这段排除**。实测（T-707）：
+ * boreas2 里 98% 时间在观察的 `GenShinEnjoyer8267`，原始跨度 46638 HU，排除观察后只剩 **237** HU，
+ * 而他的原始值还是全场最大 ⇒ 自动跟随会优先锁上他。
+ */
+function isObserveSample(p: PlayerSample): boolean {
+  return p.team === 0 || p.team === 1;
 }
 
 /** Source 队伍号 → 显示标签（CS:S：0 未分配、1 观察者、2 T、3 CT）。 */
@@ -147,8 +159,11 @@ function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null
       if (v < min[k]) min[k] = v;
       if (v > max[k]) max[k] = v;
     }
-    if (p.yaw < ylo) ylo = p.yaw;
-    if (p.yaw > yhi) yhi = p.yaw;
+    // 朝向跨幅同样只在本人操作时统计（观察时 yaw 是镜头的）
+    if (!isObserveSample(p)) {
+      if (p.yaw < ylo) ylo = p.yaw;
+      if (p.yaw > yhi) yhi = p.yaw;
+    }
     if (p.team !== null) teams.add(p.team);
     if (p.team === 0 || p.team === 1) observeFrames++;
     if (p.health !== null) {
@@ -168,6 +183,8 @@ function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null
   }
   let distance = 0;
   for (let i = 1; i < s.length; i++) {
+    // 观察时段的位移不算他的（镜头在跟别人）；两侧任一为观察态就跳过这一步
+    if (isObserveSample(s[i - 1]) || isObserveSample(s[i])) continue;
     const a = s[i - 1].pos;
     const b = s[i].pos;
     distance += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
@@ -762,11 +779,14 @@ export class DemoPanel {
       let dy = 0;
       let dz = 0;
       {
-        const p0 = t.samples[0].pos;
+        // **只统计本人操作时的位置**（T-707）：观察期间位姿是镜头跟着别人，算进去会让
+        // 「几乎全程在观察」的人看起来比谁都活跃（实测 46638 → 237）。
+        const own = t.samples.filter((s2) => !isObserveSample(s2));
+        const p0 = (own.length > 0 ? own[0] : t.samples[0]).pos;
         let minX = p0[0], minY = p0[1], minZ = p0[2];
         let maxX = minX, maxY = minY, maxZ = minZ;
-        for (let i = 1; i < t.samples.length; i++) {
-          const p = t.samples[i].pos;
+        for (let i = 1; i < own.length; i++) {
+          const p = own[i].pos;
           if (p[0] < minX) minX = p[0]; else if (p[0] > maxX) maxX = p[0];
           if (p[1] < minY) minY = p[1]; else if (p[1] > maxY) maxY = p[1];
           if (p[2] < minZ) minZ = p[2]; else if (p[2] > maxZ) maxZ = p[2];
@@ -823,7 +843,8 @@ export class DemoPanel {
             : '该玩家的位姿尚未被本工程实体流采到（该层未逐位对齐）——点它会说明原因，不会切视角') +
           (p.aliases.length > 1 ? '；别名：' + p.aliases.join('、') : '') +
           (obsPct > 0
-            ? '；观察时段 ' + obsPct + '%（这段里他的位姿是镜头跟着别人，不是本人走位）'
+            ? '；观察时段 ' + obsPct + '%（这段里他的位姿是镜头跟着别人，不是本人走位）' +
+              '；本人走位跨度 ' + p.moving + ' HU（已排除观察时段）'
             : '');
         // 无位姿的行：区间条改**弱色**（内联，避免为这一个状态新增 CSS 规则）、时间读数后带「· 无位姿」。
         // 别用 `opacity` 内联压暗整行——`refreshRosterState` 每帧用它切换 `.off`（在线/离线），内联会盖掉它。
