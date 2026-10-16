@@ -555,19 +555,31 @@ export class PanelController {
     // 步进以实参写回两个控件（滑块与数值框共用同一个 step）
     el.step = String(step);
     if (num) num.step = String(step);
+    const clamp = (v: number): number => Math.min(max, Math.max(min, v));
+    // 滑块拖动：实时生效（拖动本来就该跟手），但**不落盘**
     el.addEventListener('input', () => {
       const v = parseFloat(el.value);
       if (num && Number.isFinite(v)) num.value = String(v);
       onInput(v);
-      this.savePanelPrefs(); // 落盘偏好
     });
-    // 数值框输入：解析 → 钳到 [min, max] → 回写滑块、数值框自身文本与 config（T-021）
+    el.addEventListener('change', () => this.savePanelPrefs()); // 松手才落盘一次
     if (num) {
+      // 数值框输入中：只做软校验（打标记，不改值、不夹取、不回写文本）
+      // owner 2026-10-16：输入 "6"（想打 64）时被当场夹成下限 48，就是这个写法造成的
       num.addEventListener('input', () => {
-        const v = parseFloat(num.value);
-        if (!Number.isFinite(v)) return;
-        el.value = String(Math.min(max, Math.max(min, v))); num.value = el.value;
-        onInput(Math.min(max, Math.max(min, v)));
+        const raw = num.value.trim();
+        const v = Number(raw);
+        num.classList.toggle('rp-invalid', raw === '' || !Number.isFinite(v) || v < min || v > max);
+      });
+      // 失焦 / 回车才提交：夹取 → 回写两个控件 → 应用 → 落盘
+      num.addEventListener('change', () => {
+        const raw = parseFloat(num.value);
+        if (!Number.isFinite(raw)) { num.value = el.value; num.classList.remove('rp-invalid'); return; }
+        const v = clamp(raw);
+        el.value = String(v);
+        num.value = String(v);
+        num.classList.remove('rp-invalid');
+        onInput(v);
         this.savePanelPrefs();
       });
     }

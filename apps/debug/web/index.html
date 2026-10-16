@@ -500,6 +500,8 @@
        数字框撑满整列会把单位挤到下一行） */
     #renderPanel .val { min-width: 0; display: flex; justify-content: flex-end; align-items: baseline; gap: 2px; }
     #renderPanel .val input.param-num { width: auto; flex: 0 1 auto; min-width: 0; }
+    /* 输入中的非法值（越界/非数字）：只标色，不改值、不夹取 */
+    .ctrl-grid input.rp-invalid { border-color: var(--err, #e5484d); }
     .ctrl-grid input.rp-text {
       width: 100%; padding: 2px 4px; background: var(--bg); color: var(--text);
       border: 1px solid var(--border); border-radius: var(--r); font-size: 11px;

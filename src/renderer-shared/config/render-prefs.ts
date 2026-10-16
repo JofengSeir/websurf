@@ -265,6 +265,44 @@ function normalize(raw: unknown): RenderPrefs {
   };
 }
 
+/**
+ * 存档档的内存缓存（**按键区分**）与落盘合并（T-694）。
+ *
+ * 为什么：面板滑块是 `input` 级高频事件，原先每动一下都 `localStorage.setItem`（还有 JSON 序列化）
+ * —— 拖动一次几十次写盘。现在写入立刻进内存缓存并**合并**成一次落盘（180ms / 页面隐藏时冲一次），
+ * 「读」永远看到最新值（面板同步、指纹、生效行都不受影响），只有磁盘写入被合并。
+ * 缓存按 `renderPrefsKey()` 区分，键一变即失效 —— 三端分键的隔离语义不受影响。
+ */
+const FLUSH_MS = 180;
+let cacheKey: string | null = null;
+let cachePrefs: RenderPrefs | null = null;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cacheFor(): RenderPrefs | null {
+  return cacheKey === renderPrefsKey() ? cachePrefs : null;
+}
+
+function putCache(p: RenderPrefs): void {
+  cacheKey = renderPrefsKey();
+  cachePrefs = p;
+}
+
+/** 立刻落盘（迁移这类一次性写入走它，避免「写完就关页面」丢掉）。 */
+function writeRawNow(p: RenderPrefs): void {
+  putCache(p);
+  try {
+    localStorage.setItem(renderPrefsKey(), JSON.stringify(p));
+  } catch (err) {
+    console.warn('[render-prefs] 保存失败:', err);
+  }
+}
+
+/** 合并落盘：180ms 内的连续写入只落最后一次。 */
+export function flushRenderPrefs(): void {
+  if (flushTimer !== null) { clearTimeout(flushTimer); flushTimer = null; }
+  if (cachePrefs) writeRawNow(cachePrefs);
+}
+
 function readRaw(key: string): unknown {
   try {
     const raw = localStorage.getItem(key);
@@ -276,11 +314,17 @@ function readRaw(key: string): unknown {
 }
 
 function writeRaw(p: RenderPrefs): void {
-  try {
-    localStorage.setItem(renderPrefsKey(), JSON.stringify(p));
-  } catch (err) {
-    console.warn('[render-prefs] 保存失败:', err);
-  }
+  putCache(p);
+  if (flushTimer !== null) clearTimeout(flushTimer);
+  flushTimer = setTimeout(flushRenderPrefs, FLUSH_MS);
+}
+
+// 页面隐藏/卸载时把合并中的最后一次写入冲出去（不依赖 beforeunload 是否弹框）
+if (typeof globalThis.addEventListener === 'function') {
+  globalThis.addEventListener('pagehide', flushRenderPrefs);
+  globalThis.addEventListener('visibilitychange', () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') flushRenderPrefs();
+  });
 }
 
 /**
@@ -302,7 +346,7 @@ function migrateLegacy(): RenderPrefs | null {
   const shared = readRaw(LEGACY_RENDER_PREFS_KEY) as Record<string, unknown> | null;
   if (shared && shared.version === RENDER_PREFS_VERSION) {
     const { prefs, repaired } = repairPoisonedLighting(normalize(shared));
-    writeRaw(prefs);
+    writeRawNow(prefs); // 迁移是一次性写入：立刻落盘
     console.info(
       '[render-prefs] 已把旧共用键 ' + LEGACY_RENDER_PREFS_KEY + ' 迁移到 ' + renderPrefsKey() +
         (repaired ? '（ambientScale=0 判为污染，已复位 ' + prefs.lighting.ambientScale + '）' : ''),
@@ -352,6 +396,8 @@ function migrateGamePanelPrefs(): RenderPrefs | null {
 }
 
 function loadStored(): RenderPrefs {
+  const cached = cacheFor();
+  if (cached) return cached; // 内存缓存优先：拖动中的最新值不必等落盘
   const raw = readRaw(renderPrefsKey()) as Record<string, unknown> | null;
   if (raw && raw.version === RENDER_PREFS_VERSION) return normalize(raw);
   if (raw) console.warn('[render-prefs] 存档版本 ' + String(raw.version) + ' ≠ ' + RENDER_PREFS_VERSION + '，改用默认档');

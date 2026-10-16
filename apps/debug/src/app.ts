@@ -1339,10 +1339,13 @@ function bindUI(): void {
 		inputBridge?.sendConfig('input', { sensitivity: val });
 		saveUiPrefs();
 	});
-	dom.mouseSensNum?.addEventListener('input', (e) => {
-		const val = parseFloat((e.target as HTMLInputElement).value);
-		if (!Number.isFinite(val)) return;
-		if (dom.mouseSensRange) dom.mouseSensRange.value = String(Math.min(5, Math.max(0.1, val)));
+	dom.mouseSensNum?.addEventListener('input', () => softValidateNum(dom.mouseSensNum));
+	dom.mouseSensNum?.addEventListener('change', (e) => {
+		const raw = parseFloat((e.target as HTMLInputElement).value);
+		if (!Number.isFinite(raw)) return;
+		const val = Math.min(5, Math.max(0.1, raw)); // 夹取只在提交时做，且用夹取后的值（原先滑块夹、config 存原值，两边不一致）
+		if (dom.mouseSensRange) dom.mouseSensRange.value = String(val);
+		if (dom.mouseSensNum) dom.mouseSensNum.value = String(val);
 		config.input.sensitivity = val;
 		inputBridge?.sendConfig('input', { sensitivity: val });
 		saveUiPrefs();
@@ -1356,10 +1359,13 @@ function bindUI(): void {
 		inputBridge?.sendConfig('input', { yawBindSpeed: val });
 		saveUiPrefs();
 	});
-	dom.yawBindSpeedNum?.addEventListener('input', (e) => {
-		const val = parseFloat((e.target as HTMLInputElement).value);
-		if (!Number.isFinite(val)) return;
-		if (dom.yawBindSpeedRange) dom.yawBindSpeedRange.value = String(Math.min(720, Math.max(0, val)));
+	dom.yawBindSpeedNum?.addEventListener('input', () => softValidateNum(dom.yawBindSpeedNum));
+	dom.yawBindSpeedNum?.addEventListener('change', (e) => {
+		const raw = parseFloat((e.target as HTMLInputElement).value);
+		if (!Number.isFinite(raw)) return;
+		const val = Math.min(720, Math.max(0, raw));
+		if (dom.yawBindSpeedRange) dom.yawBindSpeedRange.value = String(val);
+		if (dom.yawBindSpeedNum) dom.yawBindSpeedNum.value = String(val);
 		applyConfigPatch(config, 'input', { yawBindSpeed: val });
 		inputBridge?.sendConfig('input', { yawBindSpeed: val });
 		saveUiPrefs();
@@ -1382,11 +1388,14 @@ function bindUI(): void {
 		inputBridge?.sendSetCullDistance(val);
 		saveUiPrefs();
 	});
-	dom.cullDistNum?.addEventListener('input', (e) => {
-		const val = parseFloat((e.target as HTMLInputElement).value);
-		if (!Number.isFinite(val)) return;
+	dom.cullDistNum?.addEventListener('input', () => softValidateNum(dom.cullDistNum));
+	dom.cullDistNum?.addEventListener('change', (e) => {
+		const raw = parseFloat((e.target as HTMLInputElement).value);
+		if (!Number.isFinite(raw)) return;
 		const max = parseFloat(dom.cullDistRange?.max ?? '100000');
-		if (dom.cullDistRange) dom.cullDistRange.value = String(Math.min(max, Math.max(1000, val)));
+		const val = Math.min(max, Math.max(1000, raw));
+		if (dom.cullDistRange) dom.cullDistRange.value = String(val);
+		if (dom.cullDistNum) dom.cullDistNum.value = String(val);
 		applyConfigPatch(config, 'lod', { cullDistance: val });
 		rendererMain?.setCullDistance(val);
 		inputBridge?.sendSetCullDistance(val);
@@ -1727,6 +1736,19 @@ function bindUI(): void {
 /**
  * 滑块 ↔ 数字输入框双向同步绑定（round 统一取整；apply 实时回调）。
  */
+/**
+ * 数字框「输入中只软校验」：越界 / 非数字时打 `rp-invalid`，**不改值、不夹取、不回写文本**。
+ * 提交语义由各自的 `change` 处理（owner 2026-10-16：输入 "6" 想打 64 时不许当场被夹成下限）。
+ */
+function softValidateNum(el: HTMLInputElement | null | undefined): void {
+	if (!el) return;
+	const raw = el.value.trim();
+	const v = Number(raw);
+	const min = el.min === '' ? -Infinity : Number(el.min);
+	const max = el.max === '' ? Infinity : Number(el.max);
+	el.classList.toggle('rp-invalid', raw === '' || !Number.isFinite(v) || v < min || v > max);
+}
+
 function bindSlider(
 	range: HTMLInputElement | null,
 	num: HTMLInputElement | null,
@@ -2089,11 +2111,14 @@ function initPhysicsPanel(): void {
 			duckHeight: Math.round(54 * s),
 		});
 	});
-	dom.hullScaleNum?.addEventListener('input', () => {
+	dom.hullScaleNum?.addEventListener('input', () => softValidateNum(dom.hullScaleNum));
+	dom.hullScaleNum?.addEventListener('change', () => {
 		if (panelSuppress) return;
-		const s = Number(dom.hullScaleNum!.value);
-		if (!Number.isFinite(s)) return;
-		if (dom.hullScale) dom.hullScale.value = String(Math.min(2, Math.max(0.5, s)));
+		const raw = Number(dom.hullScaleNum!.value);
+		if (!Number.isFinite(raw)) return;
+		const s = Math.min(2, Math.max(0.5, raw)); // 夹取后的值同时用于滑块与三围换算
+		if (dom.hullScaleNum) dom.hullScaleNum.value = String(s);
+		if (dom.hullScale) dom.hullScale.value = String(s);
 		inputBridge?.sendSetHull({
 			halfWidth: Math.round(16 * s),
 			standHeight: Math.round(72 * s),
@@ -2112,22 +2137,31 @@ function initPhysicsPanel(): void {
 		syncHullNum();
 		sendHullFromInputs();
 	});
-	dom.hullHalfWidthNum?.addEventListener('input', () => {
+	dom.hullHalfWidthNum?.addEventListener('input', () => softValidateNum(dom.hullHalfWidthNum));
+	dom.hullHalfWidthNum?.addEventListener('change', () => {
 		if (panelSuppress) return;
 		const v = Number(dom.hullHalfWidthNum!.value);
-		if (Number.isFinite(v) && dom.hullHalfWidth) dom.hullHalfWidth.value = String(v);
+		if (!Number.isFinite(v)) return;
+		// range 的 .value 读取即已按 min/max 夹取 ⇒ 把它的值回写给数字框，用户能立刻看到被夹到哪儿
+		if (dom.hullHalfWidth) { dom.hullHalfWidth.value = String(v); dom.hullHalfWidthNum!.value = dom.hullHalfWidth.value; }
 		sendHullFromInputs();
 	});
-	dom.hullStandHeightNum?.addEventListener('input', () => {
+	dom.hullStandHeightNum?.addEventListener('input', () => softValidateNum(dom.hullStandHeightNum));
+	dom.hullStandHeightNum?.addEventListener('change', () => {
 		if (panelSuppress) return;
 		const v = Number(dom.hullStandHeightNum!.value);
-		if (Number.isFinite(v) && dom.hullStandHeight) dom.hullStandHeight.value = String(v);
+		if (!Number.isFinite(v)) return;
+		// range 的 .value 读取即已按 min/max 夹取 ⇒ 把它的值回写给数字框，用户能立刻看到被夹到哪儿
+		if (dom.hullStandHeight) { dom.hullStandHeight.value = String(v); dom.hullStandHeightNum!.value = dom.hullStandHeight.value; }
 		sendHullFromInputs();
 	});
-	dom.hullDuckHeightNum?.addEventListener('input', () => {
+	dom.hullDuckHeightNum?.addEventListener('input', () => softValidateNum(dom.hullDuckHeightNum));
+	dom.hullDuckHeightNum?.addEventListener('change', () => {
 		if (panelSuppress) return;
 		const v = Number(dom.hullDuckHeightNum!.value);
-		if (Number.isFinite(v) && dom.hullDuckHeight) dom.hullDuckHeight.value = String(v);
+		if (!Number.isFinite(v)) return;
+		// range 的 .value 读取即已按 min/max 夹取 ⇒ 把它的值回写给数字框，用户能立刻看到被夹到哪儿
+		if (dom.hullDuckHeight) { dom.hullDuckHeight.value = String(v); dom.hullDuckHeightNum!.value = dom.hullDuckHeight.value; }
 		sendHullFromInputs();
 	});
 	dom.resetHullBtn?.addEventListener('click', () => inputBridge?.sendResetHull());

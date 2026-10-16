@@ -46,6 +46,15 @@ interface RenderPanelSkin {
   checkRowClass: string;
   /** checkbox 行用 `<label>` 还是 `<div>` 作容器（viewer 是 label，点哪都能勾）。 */
   checkRowTag: 'div' | 'label';
+  /**
+   * checkbox 行里控件是否在标注**之前**。
+   * 逐端读实现得到：debug 的 `.ctrl-checkbox-row`（`apps/debug/web/index.html:703`）与
+   * viewer 的 `.field.field-check`（`apps/viewer/src/core/dom.ts:125`）都是 input 在前；
+   * 而 game 的 `#panel .row` 是「label 占第 1 列、checkbox 用 grid-column:3 落读数位」
+   * （`apps/game/web/styles.css:417/438`）⇒ input 若排在前，grid 自动排布会把后面的标注挤到下一行
+   * （owner 2026-10-16 报的「PVS 复选框与行错开」就是这个）。
+   */
+  checkInputFirst: boolean;
   /** 标注元素标签（viewer 用 `span.field-label`；debug/game 用裸 `<label>`）。 */
   labelTag: 'label' | 'span';
   labelClass: string;
@@ -79,6 +88,7 @@ const SKINS: Record<RenderPanelApp, RenderPanelSkin> = {
     rowClass: '',
     checkRowClass: 'ctrl-checkbox-row ctrl-full',
     checkRowTag: 'div',
+    checkInputFirst: true,
     labelTag: 'label',
     labelClass: '',
     wrapLabel: true,
@@ -104,6 +114,7 @@ const SKINS: Record<RenderPanelApp, RenderPanelSkin> = {
     rowClass: 'row rp-row',
     checkRowClass: 'row rp-row',
     checkRowTag: 'div',
+    checkInputFirst: false,
     labelTag: 'label',
     labelClass: '',
     wrapLabel: true,
@@ -129,6 +140,7 @@ const SKINS: Record<RenderPanelApp, RenderPanelSkin> = {
     rowClass: 'field rp-field',
     checkRowClass: 'field field-check rp-field',
     checkRowTag: 'label',
+    checkInputFirst: true,
     labelTag: 'span',
     labelClass: 'field-label',
     wrapLabel: false,
@@ -182,6 +194,28 @@ function makeReset(item: RenderPanelItem, skin: RenderPanelSkin, api: RenderPane
   return btn;
 }
 
+/** 输入过程中只判合法（不改值、不夹取、不回写文本）——owner 2026-10-16：输入 "6" 想打 64 时不许当场被夹成下限。 */
+function markValidity(num: HTMLInputElement, item: RenderPanelItem): void {
+  const raw = num.value.trim();
+  const v = Number(raw);
+  const bad = raw === '' || !Number.isFinite(v) || (item.min !== undefined && v < item.min) || (item.max !== undefined && v > item.max);
+  num.classList.toggle('rp-invalid', bad);
+}
+
+/** 提交（失焦 / 回车）：夹到 [min,max] → 回写控件 → 应用。 */
+function commitNumber(num: HTMLInputElement, item: RenderPanelItem, api: RenderPanelApi, onChange: () => void): void {
+  const v = Number(num.value);
+  if (!Number.isFinite(v)) { onChange(); return; }
+  const min = item.min ?? v;
+  const max = item.max ?? v;
+  const clamped = Math.min(max, Math.max(min, v));
+  num.value = String(clamped);
+  num.classList.remove('rp-invalid');
+  api.write(item, clamped);
+  api.afterWrite?.(item);
+  onChange();
+}
+
 function makeNumber(item: RenderPanelItem, skin: RenderPanelSkin, api: RenderPanelApi, onChange: () => void): HTMLElement {
   const num = document.createElement('input');
   num.type = 'number';
@@ -190,16 +224,11 @@ function makeNumber(item: RenderPanelItem, skin: RenderPanelSkin, api: RenderPan
   num.min = String(item.min ?? 0);
   num.max = String(item.max ?? 1);
   num.step = String(item.step ?? 0.01);
+  num.addEventListener('input', () => markValidity(num, item));
   const unit = item.unit;
   if (!skin.valueCellClass && unit) {
     // viewer 没有 .val 包裹层：数字输入直接是 flex 子项，单位跟在它后面
-    num.addEventListener('change', () => {
-      const v = Number(num.value);
-      if (!Number.isFinite(v)) return;
-      api.write(item, v);
-      api.afterWrite?.(item);
-      onChange();
-    });
+    num.addEventListener('change', () => commitNumber(num, item, api, onChange));
     const wrap = document.createElement('span');
     wrap.className = 'rp-value';
     wrap.append(num);
@@ -317,7 +346,9 @@ function buildToggleRow(item: RenderPanelItem, skin: RenderPanelSkin, api: Rende
   if (skin.labelClass) label.className = skin.labelClass;
   if (label instanceof HTMLLabelElement) label.htmlFor = id;
   label.textContent = item.label;
-  row.append(box, label);
+  // 顺序按各端原生行来（game 必须「标注在前」：它的 checkbox 被钉在第 3 列，input 在前会把标注挤到下一行）
+  if (skin.checkInputFirst) row.append(box, label);
+  else row.append(label, box);
   if (!skin.wrapLabel) row.append(makeReset(item, skin, api, onChange));
   return row;
 }
