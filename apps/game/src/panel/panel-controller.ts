@@ -797,10 +797,12 @@ export class PanelController {
       const delBtn = document.createElement('button');
       delBtn.className = 'small danger';
       delBtn.textContent = '×';
-      delBtn.title = '删除该存点（会先确认）';
+      // owner 2026-10-16：删除存点**直接删**，不弹确认框（弹窗打断游玩节奏）。
+      // 与 `onSavePointDelete` 的文档口径一致（见本类的回调声明：无确认）。
+      delBtn.title = '删除该存点';
       delBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (window.confirm(`删除第 ${i + 1} 个存点？`)) this.onSavePointDelete?.(i);
+        this.onSavePointDelete?.(i);
       });
       row.appendChild(loadBtn);
       row.appendChild(delBtn);

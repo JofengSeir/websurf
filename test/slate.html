@@ -1,0 +1,188 @@
+<!doctype html>
+<!-- ════════════════════════════════════════════════════════════════════════
+     WebSurf · Scene Slate —— 场记板（首访引导卡）独立设计样张
+
+     单文件、零外链、不用构建也不用起服务：浏览器直接打开即可（file:// 也行）。
+     权威副本在应用里：apps/viewer/web/index.html 的 `#guide` 块 +
+     apps/viewer/web/styles.css 的「引导卡 = 场记板」段，**改完要回填那边**。
+
+     内容全填在 owner 定的框里（没有新增行/块）：
+       · 标题行左：大字 = 产品名，副标 = SCENE SLATE（原样保留）
+       · 标题行右两格：PRODUCTION → WebSurf-viewer ／ VERSION → v0.1
+         （v0.1 就是应用面板页脚自己显示的那个版本串；原 DIRECTOR 无真值可填，故改名）
+       · 四格：实物板上的 SCENE / TAKE / ROLL / DATE 换成这张卡的三步 + 操作
+         （第四格里是两枚按钮，`label[for]` 原生转发到页面底部的隐藏 input）
+       · 底行：FORMAT → BSP / REC / REPLAY / DEM（.bsp 地图 + 三种回放/记录：KSF `.rec`、
+         Shavit `.replay`、Source `.dem`），斜杠是原装饰
+
+     回填应用时要一并改的两处**应用侧陈旧文案**（本样张已按实际填对）：
+       · `apps/viewer/web/index.html` 的导入按钮写的是「导入记录 / 录像（.replay / .dem）」，
+         漏了 `.rec`；同一个文件的 `<input id="importFile" accept=".replay,.dem">` 也漏了 `.rec`
+         —— 而应用实际是收 `.rec` 的（`apps/viewer/src/core/filekind.ts:45`、
+         `apps/viewer/src/replay/panel.ts:96` 的 `accept = '.replay,.rec'`、`importer.ts:201`）。
+
+     功能钩子（改样式时别丢）：
+       · `#bspFile` / `#importFile` 是隐藏 input；`.filebtn.busy` 是 app.ts 切的忙态；
+       · `#guideError` 由 apps/viewer/src/ui/hud.ts 写入（人话 + `.raw` 原文）并加 `.show`
+         —— 默认 `display:none` 不占位，藏在第四格里，只有真出错才出现；
+       · `#guide` 的显隐由 hud.ts 切 `.hidden`（样张默认可见，好观察）。
+
+     一处要 owner 拍板的取舍：这版用了圆角 + 少量渐变 + 投影，与 viewer 现行全站口径
+     （零圆角、硬停色块、无受光高光）**不同** —— 回填时要么这张卡破例，要么全站换语言。
+     ════════════════════════════════════════════════════════════════════════ -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebSurf · Scene Slate</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#101114;
+  --panel:rgba(22,22,25,.92);
+  --line:#626873;
+  --text:#d9dce3;
+  --muted:#9299a7;
+  --red:#a92d31; --green:#258638; --blue:#1761c9;
+  --cyan:#2aaac3; --magenta:#a92f80; --yellow:#d6ad25;
+  --mono:ui-monospace,"Cascadia Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{min-height:100%;margin:0}
+body{
+  min-height:100vh;display:grid;place-items:center;padding:44px 18px;
+  color:var(--text);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  background:radial-gradient(ellipse at 52% 38%,#1b1d23 0%,#111216 58%,#0d0e11 100%);
+}
+.slate-wrap{width:min(900px,100%);padding-top:230px;filter:drop-shadow(0 24px 28px rgba(0,0,0,.32));}
+.slate{position:relative;isolation:isolate;width:100%;}
+/* 上下拍板条：上片抬起并向右上方倾斜；两组斜纹方向镜像，视觉上形成 >>>> */
+.clapstick{position:absolute;left:-12px;right:-9px;overflow:hidden;background:#0b0c0f;border:1px solid #3c4049;border-radius:7px;}
+.clapstick-top{z-index:4;top:-84px;height:74px;transform:rotate(-10deg);transform-origin:7% 100%;}
+.clapstick-bottom{z-index:3;top:-1px;height:73px;}
+.stripes{position:absolute;inset:0;background-color:#101115;}
+.clapstick-top .stripes{background-image:repeating-linear-gradient(135deg,#dfe1e5 0 57px,#111216 57px 114px);}
+.clapstick-bottom .stripes{background-image:repeating-linear-gradient(45deg,#dfe1e5 0 57px,#111216 57px 114px);}
+.clapstick:after{content:"";position:absolute;inset:auto 0 0;height:1px;background:rgba(255,255,255,.17)}
+/* 左侧铰接片覆盖上下拍板条的连接处；三颗紧固件按参考图的位置布置。
+   形状走内联 SVG（同一个外轮廓：右上仍旧顺着抬起的上片斜过去），但**拐角改成弧形**、
+   **描边跟着轮廓走** —— 原先用 clip-path 硬切，斜边与拐角上连 1px 边线都被裁掉了，
+   看着像"板子被切了一刀"。SVG 里 stroke 配 vector-effect="non-scaling-stroke"，
+   窄屏按 104×96 缩放时边线仍是 1px。 */
+.hinge{position:absolute;z-index:6;left:-25px;top:-105px;width:197px;height:188px;}
+.hinge-plate{position:absolute;inset:0;display:block;width:100%;height:100%;overflow:visible}
+.screw{position:absolute;width:24px;height:24px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#d8dce4 0 17%,#8e95a3 28%,#555b67 65%,#292c34 72%);border:1px solid #17191e;box-shadow:0 1px 2px #050608;}
+.screw.one{left:44px;top:50px}.screw.two{left:44px;top:126px}.screw.three{left:129px;top:126px;width:24px;height:24px}
+.slate-body{position:relative;z-index:1;padding:97px 21px 0;background:var(--panel);border:1px solid #414650;border-radius:18px;}
+.colorbar{display:flex;height:58px;margin:0 24px 24px;overflow:hidden;border-radius:4px;background:#101115;}
+.colorbar span{flex:1;min-width:0}.colorbar .r{background:var(--red)}.colorbar .g{background:var(--green)}.colorbar .b{background:var(--blue)}.colorbar .c{background:var(--cyan)}.colorbar .m{background:var(--magenta)}.colorbar .y{background:var(--yellow)}
+/* 7 格**逐格等宽**（3 格三原色 + 4 格四原印刷色，每格都是 1/7）；K 那格与板面底色同为黑，
+   不加内描边就看不见，故给它一道 1px 内描边把第 7 格框出来 */
+.colorbar .k{background:#101115;box-shadow:inset 0 0 0 1px rgba(255,255,255,.16)}
+.title-row{display:grid;grid-template-columns:.95fr 1.05fr;min-height:198px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+.slate-name{display:flex;flex-direction:column;justify-content:center;min-width:0;padding:20px 18px;border-right:1px solid var(--line);}
+.slate-name strong{font-size:clamp(42px,6.7vw,68px);font-weight:600;letter-spacing:-.045em;line-height:1.08;overflow-wrap:anywhere;}
+.slate-name span{margin-top:13px;color:#858c9b;font:500 20px var(--mono);letter-spacing:.27em;}
+.production{display:grid;grid-template-rows:1fr 1fr;min-width:0;}
+.production div{padding:15px 30px;color:#a4abba;font:16px var(--mono);letter-spacing:.13em;}
+.production div+div{border-top:1px solid var(--line)}
+.production b{display:block;margin-top:6px;color:#a0a6b3;font:500 21px system-ui,sans-serif;}
+/* 四格宽度：前三格等宽，操作格略宽一点（两枚按钮的文案比「01」长，不然会折成三行） */
+.fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 1.3fr;border-bottom:1px solid var(--line);}
+.field{min-width:0;padding:35px 25px 30px}.field+.field{border-left:1px solid var(--line)}
+.field label{display:block;margin-bottom:12px;color:#a4abba;font:16px var(--mono);letter-spacing:.1em}
+/* 值：实物板上是短码（01 / 001），这张卡里换成整句话 —— 字号行高按正文调，仍是同一格 */
+.field span{display:block;color:#9ca3b1;font:400 15px/1.75 system-ui,-apple-system,"Segoe UI","PingFang SC",sans-serif}
+.field code{font:500 14px var(--mono);color:#c8cdd6}
+/* 第四格 = 操作：两枚按钮仍是 `label[for]` 原生转发到隐藏 input；出错行也留在这格里 */
+.field .filebtn{display:block;width:100%;margin-bottom:9px;padding:11px 12px;text-align:center;cursor:pointer;
+  color:var(--text);background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:6px;
+  font:500 14px var(--mono);letter-spacing:.05em;}
+.field .filebtn:hover{background:rgba(255,255,255,.07);border-color:#7d8593}
+.field .filebtn.busy{opacity:.45;pointer-events:none}
+#bspFile,#importFile{display:none}
+#guideError{display:none}
+#guideError.show{display:block;margin-top:10px;color:#d9706f;font:400 13px/1.6 system-ui,sans-serif}
+#guideError .raw{display:block;margin-top:6px;font:500 11.5px var(--mono);color:var(--muted);word-break:break-all}
+.format-row{display:flex;align-items:center;gap:46px;padding:43px 25px 51px;color:#9ca3b1;font:15px var(--mono);letter-spacing:.13em;}
+.format-row strong{font-weight:500;color:#aeb4c0}.slashes{margin-left:auto;color:#858c9b;font-size:36px;letter-spacing:.12em;white-space:nowrap}
+@media(max-width:520px){
+ body{padding:36px 14px}.slate-wrap{padding-top:112px}
+ .clapstick{left:-7px;right:-6px}.clapstick-top{top:-54px;height:44px;transform:rotate(-10deg)}.clapstick-bottom{top:-1px;height:43px}
+ .hinge{left:0;top:-51px;width:104px;height:96px}.screw{width:14px;height:14px}.screw.one{left:23px;top:26px}.screw.two{left:23px;top:64px}.screw.three{left:68px;top:64px;width:14px;height:14px}
+ .slate-body{padding:57px 10px 17px}.colorbar{height:34px;margin:0 11px 14px}
+ .title-row{min-height:116px}.slate-name{padding:12px 10px}.slate-name strong{font-size:clamp(25px,7.5vw,35px)}.slate-name span{font-size:9px;letter-spacing:.16em;margin-top:8px}
+ .production div{padding:10px 10px;font-size:9px}.production b{font-size:16px;margin-top:4px}
+ /* 窄屏：四格改一列竖排（整句话在 1/4 宽度里排不开） */
+ .fields{grid-template-columns:1fr}.field{padding:14px 11px 16px}.field+.field{border-left:0;border-top:1px solid var(--line)}
+ .field label{font-size:10px;letter-spacing:.06em;margin-bottom:7px}.field span{font-size:13px;line-height:1.65}
+ .field .filebtn{font-size:12.5px;padding:10px 12px}
+ .format-row{gap:9px;padding:17px 11px 15px;font-size:9px;letter-spacing:.07em}.slashes{font-size:16px}
+ .clapstick-top .stripes{background-image:repeating-linear-gradient(135deg,#dfe1e5 0 28px,#111216 28px 56px)}
+ .clapstick-bottom .stripes{background-image:repeating-linear-gradient(45deg,#dfe1e5 0 28px,#111216 28px 56px)}
+}
+</style>
+</head>
+<body>
+  <main class="slate-wrap" aria-label="WebSurf 场记板">
+    <section class="slate">
+      <div class="clapstick clapstick-top" aria-hidden="true"><span class="stripes"></span></div>
+      <div class="clapstick clapstick-bottom" aria-hidden="true"><span class="stripes"></span></div>
+      <div class="hinge" aria-hidden="true">
+        <!-- 外轮廓（局部坐标；四个角全部是**切角圆角**，没有一个外鼓的弧）：
+             · 左上 1,13 → 13,1、右下 196,175 → 184,187、左下 13,187 → 1,175 都是 90° 拐角，r12
+               （切点距拐角 t = r·tan(90/2) = 12）；
+             · 右上 45° 斜边两端是两个小拐角：起点 (106.4,1) 处转角 ≈41°、终点 (196,89.3) 处 ≈49°，
+               r12 对应 t = r·tan(转角/2) = 4.5 / 5.5 ⇒ 切点 (101.9,1)→(109.8,3.9)、
+               (191.9,85.7)→(196,94.8)。
+               ⚠ 这里必须用 t = r·**tan**(转角/2)：早先写成 r/tan 让切点拉开 ~6 倍，
+               弦长超过圆弧能跨的长度 ⇒ 渲染器自动放大半径 ⇒ 两端各鼓出一个半圆。 -->
+        <svg class="hinge-plate" viewBox="0 0 197 188" preserveAspectRatio="none" focusable="false">
+          <defs>
+            <linearGradient id="hingePlate" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#252831"/><stop offset=".76" stop-color="#1a1c22"/>
+            </linearGradient>
+          </defs>
+          <path d="M1 13 A12 12 0 0 1 13 1 L101.9 1 A12 12 0 0 1 109.8 3.9 L191.9 85.7 A12 12 0 0 1 196 94.8 L196 175 A12 12 0 0 1 184 187 L13 187 A12 12 0 0 1 1 175 Z"
+                fill="url(#hingePlate)" stroke="#50545e" stroke-width="1" vector-effect="non-scaling-stroke"/>
+        </svg>
+        <i class="screw one"></i><i class="screw two"></i><i class="screw three"></i>
+      </div>
+      <div class="slate-body">
+        <div class="colorbar" aria-label="RGB 与 CMYK 色标"><span class="r"></span><span class="g"></span><span class="b"></span><span class="c"></span><span class="m"></span><span class="y"></span><span class="k"></span></div>
+        <div class="title-row">
+          <div class="slate-name"><strong>WebSurf</strong><span>SCENE SLATE</span></div>
+          <div class="production"><div>PRODUCTION<b>WebSurf-viewer</b></div><div>VERSION<b>v0.1</b></div></div>
+        </div>
+        <!-- 四格：实物板印的是 SCENE / TAKE / ROLL / DATE，这张卡里换成三步 + 操作 -->
+        <div class="fields">
+          <div class="field">
+            <label>STEP 01</label>
+            <span>选 <code>.bsp</code> 地图，或把文件拖进窗口</span>
+          </div>
+          <div class="field">
+            <label>STEP 02</label>
+            <span>点画面锁定鼠标，即可自由飞行</span>
+          </div>
+          <div class="field">
+            <label>STEP 03</label>
+            <span>右侧面板：地图信息、出生点与回放；右上角「?」帮助</span>
+          </div>
+          <div class="field">
+            <label>ACTIONS</label>
+            <label class="filebtn" for="bspFile">选择地图（.bsp）</label>
+            <label class="filebtn" for="importFile">导入记录 / 录像（.rec / .replay / .dem）</label>
+            <!-- 出错行（hud.ts 写人话 + `.raw` 原文后加 `.show`）；想预览就把注释去掉 -->
+            <div id="guideError"><!-- 载入失败：文件头不是 BSP / 录像格式，或压缩包读坏。<span class="raw">Error: invalid BSP magic 0x00000000</span> --></div>
+          </div>
+        </div>
+        <div class="format-row"><span>FORMAT</span><strong>BSP / REC / REPLAY / DEM</strong><span class="slashes">/////</span></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 应用里这两枚 input 在顶栏（`#bspFile` / `#importFile`，display:none） -->
+  <input id="bspFile" type="file" />
+  <input id="importFile" type="file" />
+</body>
+</html>

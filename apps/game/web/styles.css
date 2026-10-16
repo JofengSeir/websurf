@@ -6,10 +6,12 @@
  *   · 菱角分明：全文件 border-radius 一律 0，仅螺丝（1 处）与服务孔
  *     （1 处）保留 50% 圆；准星圆点与状态 LED 改方形（菱角语彙延伸到
  *     HUD，游戏语义不变）；
- *   · 切角系统：右上切角（clip-path polygon），**按尺度两级**——结构级
- *     10px（主按钮、激活标签条、面板窗口右上角、加载卡右上角，与螺丝
- *     同位成组）、嵌件级 4px（滑块游标；游标仅 10×14px，10px 切角会把它
- *     切没）；两级之外不得再出现第三种切角尺寸；
+ *   · 切角系统：**已撤销**（owner 2026-10-16 裁决：右上切角"莫名其妙"，
+ *     全文件不再有任何 clip-path 切角）。此前它分结构级 10px（主按钮、
+ *     激活标签条、面板窗口右上角、加载卡右上角）与嵌件级 4px（滑块游标）
+ *     两级，连同 `#panel::before` 的斜边补线与加载卡的 `<i class="load-chamfer">`
+ *     一并删除；窗口/按钮/加载卡一律为完整矩形，菱角语彙只靠「零圆角 +
+ *     1px/2px 直线」表达，不再靠斜切。
  *   · 线宽系统：2px 结构线（窗口顶缘压槽沿、激活左条）/ 1px 分隔线
  *     （行组、节点、边框）/ 1px 点线（字段引导线，4px 节距）；
  *   · 基础件细节：滚动条自绘（方角 thumb=分隔色、1px 轨道沿、hover 琥珀
@@ -201,10 +203,8 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.85);
 }
 
-/* ── ESC 设置面板：素色遮罩 + 磨砂窗口（右上 10px 切角 = 菱角主语彙，
-   与右上螺丝同位成组）。切角斜边由 #panel::before 补 1px 边线（.win 的
-   两个伪元素已被嵌片与螺丝占用；线按固定 760×580 居中几何定位，
-   max-width:100% 的窄视口下不追随——本工程为桌面定宽场景）。
+/* ── ESC 设置面板：素色遮罩 + 磨砂窗口。窗口为完整矩形（右上切角已按
+   owner 2026-10-16 裁决撤销，原 `#panel::before` 的斜边补线随之删除）。
    高度（owner 复核后定）：固定 580px——内容驱动的 auto 会随 pane
    变来变去；稀疏 pane 的留白由页脚署名收尾（8.4-6）。 ── */
 #panel {
@@ -212,20 +212,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   display: flex; align-items: center; justify-content: center;
   padding: 20px;
   background: var(--overlay);
-}
-/* 切角斜边 1px 边线：几何随**窗口实际尺寸**走，而不是写死 760×580。
-   `.win` 是 `width: 760px; max-width: 100%` + `height: 580px; max-height: 92vh`，居中于 #panel，
-   故半宽 = `min(380px, 50% - 20px)`（20px = #panel 的 padding）、半高 = `min(290px, 46vh)`；
-   切角斜边的中点在窗口右上角内缩 5px 处（斜边从 (右-10, 顶) 到 (右, 顶+10)）。
-   2026-10-09 实测：写死值时 800×600 偏差 56px、600×800 偏差 89px。 */
-#panel::before {
-  content: ""; position: absolute;
-  top: calc(50% - min(290px, 46vh) + 5px);
-  left: calc(50% + min(380px, 50% - 20px) - 5px);
-  width: 14px; height: 1px;
-  background: var(--border-strong);
-  transform: translate(-50%, -50%) rotate(45deg);
-  z-index: 1; /* 压槽嵌片与螺丝都在 .win 层——边线必须抬到其上才可见 */
 }
 #panel .win {
   position: relative;
@@ -236,7 +222,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   backdrop-filter: blur(12px) saturate(1.15);
   -webkit-backdrop-filter: blur(12px) saturate(1.15);
   border: 1px solid var(--border-strong);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
     inset 0 2px 0 rgba(0, 0, 0, 0.55),
@@ -320,8 +305,8 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 /* 导航不再有页脚（owner 2026-09-29 决定删除）：关闭功能上移到窗口右上角的
    .win-close（螺丝按钮），兜底为点击 #panel 遮罩空白处。留白由 pane 页脚署名收尾。 */
 
-/* 通用模块：全宽主操作按钮 #panel .map-btn（P2/D4：琥珀实底 + 右上 10px 切角；
-   高度 ≥40px；切角与窗口/标签条同规格成组） */
+/* 通用模块：全宽主操作按钮 #panel .map-btn（P2/D4：琥珀实底；高度 ≥40px。
+   原右上 10px 切角已随全站切角一并撤销，现为完整矩形） */
 #panel .map-btn {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   width: 100%; min-height: 40px; margin: 2px 0 8px; padding: 10px 12px;
@@ -329,7 +314,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   color: var(--on-accent);
   background: var(--accent);
   border: none; cursor: pointer;
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
 }
 #panel .map-btn:hover:not(:disabled) { background: var(--accent-hover); }
 #panel .map-btn:disabled { opacity: 0.45; pointer-events: none; }
@@ -373,7 +357,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel .mod-pane { display: none; position: relative; }
 #panel .mod-pane.active { display: flex; flex-direction: column; flex: 1; }
 
-/* 页头层级：标题 + 说明 + 分隔线 + 档案编号（右上，琥珀，与切角同侧） */
+/* 页头层级：标题 + 说明 + 分隔线 + 档案编号（右上，琥珀） */
 #panel .pane-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
 #panel .pane-desc {
   font-size: 12.5px; color: var(--muted); line-height: 1.6;
@@ -455,7 +439,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel .row > input[type="color"] { grid-column: 3; justify-self: stretch; }
 
 /* 滑块（P2 自绘 + R1-3 重绘：2px 实线轨道（去点状虚线）+ 琥珀方角嵌件
-   游标（右下 4px 切角，与全站切角同语彙）；webkit/moz 双轨；
+   游标（矩形，原 4px 切角已随全站切角撤销）；webkit/moz 双轨；
    accent-color 保留作无障碍回落） */
 #panel input[type="range"] {
   flex: 1; min-width: 0; width: 100%; height: 18px;
@@ -470,7 +454,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   -webkit-appearance: none; appearance: none;
   width: 10px; height: 14px; margin-top: -6px;
   background: var(--accent); border: 1px solid var(--bg);
-  clip-path: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%);
 }
 #panel input[type="range"]::-moz-range-track {
   height: 2px; background: var(--border-strong);
@@ -478,7 +461,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel input[type="range"]::-moz-range-thumb {
   width: 10px; height: 14px; background: var(--accent);
   border: 1px solid var(--bg);
-  clip-path: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%);
 }
 
 /* 读数区 #panel .val（8.4-3：去边框为「读数」——等宽右对齐文本 + 单位，
@@ -544,8 +526,8 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel select:focus { border-color: var(--accent); }
 #panel select:disabled { opacity: 0.45; cursor: default; }
 
-/* 状态标签条（8.3：12px 高、无圆角、1px 边；激活态带右上 10px 切角）——
-   button.small 与 .key-chip 统一此形态 */
+/* 状态标签条（8.3：12px 高、无圆角、1px 边；激活态 = 琥珀边 + 琥珀字，
+   原右上切角已撤销）——button.small 与 .key-chip 统一此形态 */
 #panel button.small {
   font-family: inherit;
   font-size: 12px; color: var(--text); padding: 2px 10px;
@@ -555,7 +537,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel button.small:hover { color: var(--accent); border-color: var(--accent); }
 #panel button.small.active {
   color: var(--accent); border-color: var(--accent);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
 }
 #panel button.small:disabled { opacity: 0.45; pointer-events: none; }
 
@@ -651,7 +632,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   backdrop-filter: blur(12px) saturate(1.15);
   -webkit-backdrop-filter: blur(12px) saturate(1.15);
   border: 1px solid var(--border-strong);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
     inset 0 2px 0 rgba(0, 0, 0, 0.55),
@@ -661,14 +641,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   content: ""; position: absolute; top: 0; left: 18px;
   width: 32px; height: 2px; background: var(--accent);
 }
-/* 切角斜边 1px 边线（与 #panel::before 同技法；卡片两个伪元素已被嵌片与
-   螺丝占用，借页面里的 <i class="load-chamfer"> 画线，几何 = 10px 切角中点） */
-#loadingOverlay .load-chamfer {
-  position: absolute; top: 4.5px; right: -2px; width: 14px; height: 1px;
-  background: var(--border-strong); transform: rotate(45deg);
-  pointer-events: none;
-}
-/* 档案编号（与 pane 页头编号同类：mono 12px 琥珀，右上、避开切角） */
+/* 档案编号（与 pane 页头编号同类：mono 12px 琥珀，右上） */
 #loadingOverlay .load-code {
   position: absolute; top: 10px; right: 14px;
   font-family: var(--mono); font-size: 12px; color: var(--accent);
@@ -727,8 +700,6 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   /* 引导线端点跟随 120/72 栅格（= 列宽 + gap 12 再各收 4px，与定宽口径一致） */
   #panel .row:has(> input[type="checkbox"])::before,
   #panel .row:has(> input[type="color"])::before { left: 128px; right: 80px; }
-  /* #panel 的 padding 在本档降到 10px ⇒ 切角边线的半宽公式同步换底（实测不换会差 10px） */
-  #panel::before { left: calc(50% + min(380px, 50% - 10px) - 5px); }
   #panel .row label, #panel .key-row .kname { font-size: 13px; }
   #stats { font-size: 17px; }
 }

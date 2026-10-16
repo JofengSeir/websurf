@@ -85,7 +85,8 @@ export class SavePointStore {
     return [...this.list];
   }
 
-  /** 删除指定索引的存点（二次确认在面板侧）；索引越界时不改列表、不写存储，并打告警（T-213）。 */
+  /** 删除指定索引的存点（**无二次确认**：owner 2026-10-16 裁决，点「×」即删，不弹窗打断游玩）；
+   * 索引越界时不改列表、不写存储，并打告警（T-213）。 */
   delete(index: number): SavePoint[] {
     if (index >= 0 && index < this.list.length) {
       this.list.splice(index, 1);

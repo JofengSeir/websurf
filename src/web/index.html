@@ -5,12 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WebSurf · 入口</title>
 <style>
+  /* 页面：整屏不滚动（owner 要求：不要任何上下滚动的余量），内容强制居中 */
+  html, body { height: 100%; }
+  html { overflow: hidden; }
   body {
-    margin: 0; min-height: 100vh;
+    margin: 0; height: 100%; overflow: hidden;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     background: #f7f7f7; color: #333;
     font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
-    padding: 24px; text-align: center;
+    padding: 24px; box-sizing: border-box; text-align: center;
   }
   h1 { font-size: 28px; font-weight: 600; margin: 0 0 4px; }
   .sub { font-size: 14px; color: #666; margin-bottom: 32px; }
@@ -19,54 +22,103 @@
   .entry a { color: #2b6cb0; text-decoration: none; white-space: nowrap; }
   .entry a:hover { text-decoration: underline; }
   .entry .desc { color: #888; font-size: 13px; }
-  kbd {
-    font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11.5px;
-    background: #fff; border: 1px solid #d5d5d5; border-bottom-width: 2px;
-    border-radius: 4px; padding: 1px 5px; color: #444; white-space: nowrap;
-  }
   code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 11.5px; }
   .note { margin-top: 40px; font-size: 12.5px; color: #999; max-width: 560px; line-height: 1.8; }
   footer { margin-top: 16px; font-size: 12px; color: #bbb; }
-  /* ── 部署提示遮罩：每次部署弹一次，关闭按钮有 5s 阅读闸（逻辑见页尾脚本）── */
-  .overlay {
-    position: fixed; inset: 0; z-index: 50;
-    background: rgba(15, 18, 22, 0.5);
-    display: flex; padding: 20px; overflow-y: auto;
+
+  /* ── 侧边提示抽屉（Ctrl + W 说明）：贴右缘、垂直居中滑出，首次访问自动弹出。
+     2026-10-16 收敛：入口页本身是「灰底 + 纯文字 + 一个蓝色链接」的极简稿，抽屉必须
+     长在同一套语言里 —— 白底、黑字、1px 发丝线、零强调色；上一版那块深墨 + 琥珀
+     色条的面板把整页的注意力全抢走了，判为过突出，整块重做。现在的对比度只比页面
+     高一档（白 vs 灰底），靠边框和投影分面，不靠颜色。── */
+  .ws-drawer {
+    position: fixed; top: 50%; right: 0; z-index: 60;
+    width: 372px; max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 32px);
+    display: flex; flex-direction: column;
+    /* 闭合态：整体推出右缘并移出无障碍树（visibility 顺带挡掉隐藏时的 Tab 焦点） */
+    transform: translate(calc(100% + 16px), -50%);
+    visibility: hidden;
+    background: #fff; color: #444;
+    border: 1px solid #dcdcdc; border-right: none;
+    box-shadow: 0 2px 14px rgba(0, 0, 0, 0.07);
+    transition: transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1), visibility 260ms;
   }
-  .overlay[hidden] { display: none; }
-  .modal {
-    margin: auto; width: 100%; max-width: 660px; max-height: 100%; overflow-y: auto;
-    background: #fff; color: #444; border-radius: 10px; padding: 20px 24px 16px;
-    box-shadow: 0 14px 44px rgba(0, 0, 0, 0.28);
-    text-align: left; font-size: 12.5px; line-height: 1.85;
+  .ws-drawer.ws-open { transform: translate(0, -50%); visibility: visible; }
+
+  /* 顶条：一行小字 + 关闭钮。关闭钮做成裸 ×（无边框），与页面不出现任何按钮控件呼应 */
+  .ws-bar {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 10px 10px 10px 20px;
+    border-bottom: 1px solid #ececec;
   }
-  .modal-h { font-size: 15.5px; font-weight: 600; color: #333; margin: 0 0 6px; }
-  .modal p { margin: 8px 0; }
-  .modal ol { margin: 6px 0 10px; padding-left: 22px; }
-  .modal li { margin: 7px 0; }
-  .modal a { color: #2b6cb0; text-decoration: none; }
-  .modal a:hover { text-decoration: underline; }
-  .modal-sub { color: #777; }
-  .modal-cons { display: inline-block; margin-top: 4px; color: #8a5a00; }
-  .modal .modal-warn {
-    color: #8a5a00; background: #fdf5e2; border-radius: 6px;
-    padding: 8px 10px; margin: 10px 0 0;
+  .ws-bar .ws-tag { font-size: 12px; color: #9a9a9a; }
+  .ws-bar .ws-spacer { flex: 1; }
+  .ws-bar .ws-x {
+    width: 22px; height: 22px; padding: 0; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; color: #b0b0b0;
+    cursor: pointer;
   }
-  .modal .stale-tip {
-    color: #8a5a00; background: #fdf5e2; border-radius: 6px;
-    padding: 8px 10px; margin: 12px 0 0;
+  .ws-bar .ws-x svg { width: 10px; height: 10px; stroke: currentColor; stroke-width: 1.4; fill: none; }
+  .ws-bar .ws-x:not(:disabled):hover { color: #666; }
+  .ws-bar .ws-x:disabled { opacity: 0.45; cursor: default; }
+  .ws-bar .ws-x:focus-visible { outline: 1px solid #999; outline-offset: 1px; }
+
+  /* 正文：与页面同一套字号行距（12.5px / 1.85），只是颜色更深一档保证读得下去 */
+  .ws-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 20px 4px; text-align: left; }
+  .ws-title { margin: 0 0 10px; font-size: 15px; font-weight: 600; color: #333; line-height: 1.5; }
+  .ws-body p { margin: 0 0 10px; font-size: 12.5px; line-height: 1.85; color: #555; }
+  .ws-body p.ws-hit { color: #333; }
+  /* 键帽：细描边空心方块，克制版（既有视觉形体，又不抢戏） */
+  .ws-key {
+    display: inline-block;     padding: 0 5px; margin: 0 1px;
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-size: 11px; line-height: 1.6; color: #333;
+    border: 1px solid #d8d8d8; border-radius: 2px;
   }
-  .modal-foot {
-    margin-top: 14px; padding-top: 10px; border-top: 1px solid #eee;
-    display: flex; align-items: center; gap: 12px;
+  /* 键帽的「去盒」变体：给 chrome:// 这类长路径用（描边框不住，也没意义） */
+  .ws-key.ws-path { padding: 0; border: none; color: #666; font-size: 11px; }
+  .ws-hr { height: 1px; background: #ececec; margin: 12px 0; }
+  /* 两条解决办法：靠序号 + 加粗标题分组，不用色块也不用列表点 */
+  .ws-opt { display: flex; gap: 10px; margin-bottom: 12px; }
+  .ws-opt .ws-no {
+    flex: none; font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-size: 10.5px; color: #b5b5b5; padding-top: 3px;
   }
-  .modal-meta { margin-right: auto; color: #aaa; font-size: 11.5px; }
-  .modal-close {
-    font-size: 13.5px; padding: 7px 18px; border: 1px solid #2b6cb0;
-    border-radius: 6px; background: #2b6cb0; color: #fff; cursor: pointer;
+  .ws-opt .ws-h { font-size: 12.5px; font-weight: 600; color: #333; margin-bottom: 3px; }
+  .ws-opt p { margin-bottom: 6px; }
+  .ws-opt .ws-caveat { color: #909090; }
+  .ws-opt a { color: #2b6cb0; text-decoration: none; }
+  .ws-opt a:hover { text-decoration: underline; }
+  /* 注意行：左侧一道极淡竖线，不用整块底色 */
+  .ws-warn {
+    margin: 0 0 12px; padding-left: 10px;
+    border-left: 1px solid #e0e0e0;
+    font-size: 12px; line-height: 1.8; color: #7a7a7a;
   }
-  .modal-close:disabled { opacity: 0.55; cursor: default; }
-  .modal-close:not(:disabled):hover { background: #22598f; }
+  .ws-stale {
+    margin: 0 0 12px; padding: 8px 10px;
+    background: #f6f6f6; color: #666; font-size: 12px; line-height: 1.75;
+  }
+  .ws-stale[hidden] { display: none; }
+
+  /* 底条：5s 阅读进度条 + 确认钮；进度走完才解除禁用。
+     两个控件都做成页面那一档的描边按钮，没有实心底色。 */
+  .ws-foot {
+    flex: none; display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px 12px 20px; border-top: 1px solid #ececec;
+  }
+  .ws-meter { flex: 1; height: 1px; background: #ececec; overflow: hidden; }
+  .ws-meter i { display: block; height: 100%; width: 0; background: #c2c2c2; }
+  .ws-meter i.ws-run { width: 100%; transition: width 5000ms linear; }
+  .ws-go {
+    flex: none; padding: 5px 13px; font-size: 12.5px; font-family: inherit;
+    color: #555; background: #fff; border: 1px solid #d5d5d5; cursor: pointer;
+  }
+  .ws-go:disabled { color: #b0b0b0; border-color: #e6e6e6; cursor: default; }
+  .ws-go:not(:disabled):hover { border-color: #a8a8a8; color: #333; }
+  .ws-go:focus-visible { outline: 1px solid #999; outline-offset: 1px; }
 </style>
 </head>
 <body>
@@ -83,64 +135,79 @@
 
   <footer>由 GitHub Actions 自动构建部署 · 部署 <span class="deploy-meta">__DEPLOY_ID__ · __DEPLOY_TIME__</span></footer>
 
-  <div class="overlay" id="noticeOverlay" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="noticeTitle">
-      <h2 class="modal-h" id="noticeTitle">关于 Ctrl + W：页面被关掉不是闪退</h2>
-      <p>
-        浏览器里 <kbd>Ctrl</kbd> + <kbd>W</kbd> 就是「关闭当前标签页」。本项目的默认蹲键也是
-        <kbd>Ctrl</kbd>，所以「蹲下 + 前进」时很容易顺手把页面关掉 ——
-        <strong>这不是闪退，也不是项目缺陷</strong>，是浏览器快捷键抢占。
-      </p>
-      <p class="modal-sub">三个站点均已注册<strong>关闭确认兜底</strong>：关闭 / 刷新前会弹浏览器原生的「离开页面？」确认，选「取消」即可留下（确认框文案由浏览器决定，无法自定义）。</p>
-      <p class="modal-sub">想彻底避免，下面两种方式任选其一：</p>
-      <ol>
-        <li>
-          <strong>改游戏内键位</strong>（推荐，不用装任何东西）：进入页面后按 <kbd>ESC</kbd>
-          打开面板 → <strong>按键</strong> → 把「蹲」从 <kbd>Ctrl</kbd> 改绑到别的键（例如
-          <kbd>Shift</kbd>）。改完 <kbd>Ctrl</kbd> + <kbd>W</kbd> 自然就不会再触发。
-        </li>
-        <li>
-          <strong>装浏览器扩展，把 Ctrl + W 改掉</strong>：安装
-          <a href="https://chromewebstore.google.com/detail/more-better-ctrl-w/fhgdipcimngeleeemdhkinodbkkmcgjm" target="_blank" rel="noopener">More Better Ctrl-W</a>，
-          然后在地址栏打开 <code>chrome://extensions/shortcuts</code>，找到该扩展的
-          <strong>Do absolutely nothing</strong> 一项，把它设为 <kbd>Ctrl</kbd> + <kbd>W</kbd>。
-          此后 <kbd>Ctrl</kbd> + <kbd>W</kbd> 不再关闭页面。<br>
-          <span class="modal-cons">代价：这一改法会让「<strong>先按 Ctrl 蹲、再按 W 前进</strong>」
-          这个组合被阻断 1 秒以上（「先按 W 前进、再按 Ctrl 蹲」不受影响）。若你习惯先蹲后走，
-          用上面第 1 种方式改键位更合适。</span>
-        </li>
-      </ol>
-      <p class="modal-warn">
-        <strong>注意：</strong>录快捷键时，输入框里直接按 <kbd>Ctrl</kbd> + <kbd>W</kbd>
-        可能当场把设置页也一起关掉；若被占用录不进去，可试着<strong>先按 <kbd>W</kbd> 再按 <kbd>Ctrl</kbd></strong>。
-      </p>
-      <p class="stale-tip" id="staleTip" hidden>
-        <strong>检测到站点已发布新版本</strong>：本页是旧部署的浏览器缓存。关闭本提示后将自动刷新到新版。
-      </p>
-      <div class="modal-foot">
-        <span class="modal-meta deploy-meta">__DEPLOY_ID__ · __DEPLOY_TIME__</span>
-        <button type="button" class="modal-close" id="noticeClose" disabled>请阅读 5s</button>
-      </div>
+  <!-- 侧边提示抽屉：内容只讲 Ctrl + W（首次访问自动滑出，可关闭） -->
+  <aside id="wsDrawer" class="ws-drawer" role="dialog" aria-modal="false" aria-labelledby="wsTitle">
+    <div class="ws-bar">
+      <span class="ws-tag">提示</span>
+      <span class="ws-spacer"></span>
+      <button type="button" class="ws-x" id="wsX" aria-label="关闭提示" disabled>
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 0.5 L9.5 9.5 M9.5 0.5 L0.5 9.5" /></svg>
+      </button>
     </div>
-  </div>
+
+    <div class="ws-body">
+      <h2 class="ws-title" id="wsTitle">蹲下时别顺手按 W：那会关掉标签页</h2>
+      <p class="ws-hit">
+        浏览器把 <span class="ws-key">Ctrl</span> + <span class="ws-key">W</span> 定义成「关闭当前标签页」，而本项目的默认蹲键也是
+        <span class="ws-key">Ctrl</span>。于是「蹲下 + 前进」很容易把页面一起关掉。
+      </p>
+      <p class="ws-hit">这不是闪退，也不是缺陷——是浏览器快捷键抢占。三个站点都注册了离开确认，关闭 / 刷新前会先问一句，选「取消」就能留下。</p>
+
+      <div class="ws-hr"></div>
+
+      <div class="ws-opt">
+        <span class="ws-no">01</span>
+        <div>
+          <div class="ws-h">改游戏内键位（推荐，不用装东西）</div>
+          <p>进入页面后按 <span class="ws-key">ESC</span> 打开面板 → <b>按键</b> → 把「蹲」从 <span class="ws-key">Ctrl</span> 改绑到别的键（例如 <span class="ws-key">Shift</span>）。改完自然就不会再触发。</p>
+        </div>
+      </div>
+
+      <div class="ws-opt">
+        <span class="ws-no">02</span>
+        <div>
+          <div class="ws-h">装扩展，把 Ctrl + W 接管掉</div>
+          <p>
+            安装 <a href="https://chromewebstore.google.com/detail/more-better-ctrl-w/fhgdipcimngeleeemdhkinodbkkmcgjm" target="_blank" rel="noopener">More Better Ctrl-W</a>，
+            再打开 <span class="ws-key ws-path">chrome://extensions/shortcuts</span>，把该扩展的
+            <b>Do absolutely nothing</b> 设为 <span class="ws-key">Ctrl</span> + <span class="ws-key">W</span>。
+          </p>
+          <p class="ws-caveat">代价：这一改法会阻断「先 Ctrl 蹲、再 W 前进」1 秒以上（先 W 再 Ctrl 不受影响）。习惯先蹲后走的话，用第 01 条更合适。</p>
+        </div>
+      </div>
+
+      <div class="ws-warn">
+        录快捷键时在输入框里直接按 <span class="ws-key">Ctrl</span> + <span class="ws-key">W</span> 可能当场把设置页一起关掉；录不进去就先按 <span class="ws-key">W</span> 再按 <span class="ws-key">Ctrl</span>。
+      </div>
+
+      <p class="ws-stale" id="wsStale" hidden>检测到站点已发布新版本（本页是旧部署的缓存），关闭本提示后自动刷新到新版。</p>
+    </div>
+
+    <div class="ws-foot">
+      <span class="ws-meter"><i id="wsMeter"></i></span>
+      <button type="button" class="ws-go" id="wsGo" disabled>请阅读 5s</button>
+    </div>
+  </aside>
 
   <script>
   (function () {
     'use strict';
     // 部署 id 由 deploy-pages.yml 在组装时以 sed 烙印（run_number + 短 SHA，每次部署必变）。
-    // 本地直接打开模板时占位符未替换，IS_DEPLOYED 为假，跳过远端核对、只走本地弹窗逻辑。
+    // 本地直接打开模板时占位符未替换，IS_DEPLOYED 为假，跳过远端核对、只走本地弹出逻辑。
     var DEPLOY_ID = '__DEPLOY_ID__';
     var SEEN_KEY = 'ws-deploy-notice-seen';
     var RELOAD_KEY = 'ws-deploy-stale-reloaded';
-    var GATE_SECONDS = 5;
+    var GATE_MS = 5000;
     var IS_DEPLOYED = DEPLOY_ID.indexOf('__') !== 0;
 
-    var overlay = document.getElementById('noticeOverlay');
-    var closeBtn = document.getElementById('noticeClose');
-    var staleTip = document.getElementById('staleTip');
+    var drawer = document.getElementById('wsDrawer');
+    var closeX = document.getElementById('wsX');
+    var goBtn = document.getElementById('wsGo');
+    var meter = document.getElementById('wsMeter');
+    var staleTip = document.getElementById('wsStale');
     var remoteId = null;
     var stale = false;
-    var timer = null;
+    var gateTimer = null;
 
     function seenId() {
       try { return localStorage.getItem(SEEN_KEY); } catch (e) { return null; }
@@ -149,22 +216,30 @@
       try { localStorage.setItem(SEEN_KEY, id); } catch (e) { /* 隐私模式等：每次访问都会再弹 */ }
     }
 
-    function openModal(asStale) {
+    // 5s 阅读闸：进度条走满后两个关闭控件同时可用（保留原有的「先读再关」设计，
+    // 只是把倒计时从按钮文字挪到底部的进度条上）。
+    function armGate() {
+      closeX.disabled = true;
+      goBtn.disabled = true;
+      goBtn.textContent = '请阅读 5s';
+      meter.classList.remove('ws-run');
+      // 强制一次重排，让 width 0 → 100% 的过渡从头开始（重复弹出时也必须重放）
+      void meter.offsetWidth;
+      meter.classList.add('ws-run');
+      clearTimeout(gateTimer);
+      gateTimer = setTimeout(function () {
+        closeX.disabled = false;
+        goBtn.disabled = false;
+        goBtn.textContent = '我知道了';
+        goBtn.focus();
+      }, GATE_MS);
+    }
+
+    function openDrawer(asStale) {
       stale = asStale;
-      if (stale) staleTip.hidden = false;
-      overlay.hidden = false;
-      var left = GATE_SECONDS;
-      closeBtn.disabled = true;
-      closeBtn.textContent = '请阅读 ' + left + 's';
-      timer = setInterval(function () {
-        left -= 1;
-        if (left > 0) { closeBtn.textContent = '请阅读 ' + left + 's'; return; }
-        clearInterval(timer);
-        timer = null;
-        closeBtn.disabled = false;
-        closeBtn.textContent = '我已阅读，关闭';
-        closeBtn.focus();
-      }, 1000);
+      staleTip.hidden = !asStale;
+      drawer.classList.add('ws-open');
+      armGate();
     }
 
     function tryReloadOnce() {
@@ -176,9 +251,10 @@
       location.reload();
     }
 
-    function closeModal() {
-      if (closeBtn.disabled) return;
-      overlay.hidden = true;
+    function closeDrawer() {
+      if (goBtn.disabled) return;
+      clearTimeout(gateTimer);
+      drawer.classList.remove('ws-open');
       // 过期路径把「已读」记到远端新 id 上：刷新后不再二弹，本次部署恰好完整读过一次。
       markSeen(remoteId || DEPLOY_ID);
       if (stale) tryReloadOnce();
@@ -186,18 +262,23 @@
 
     function freshPage() {
       try { sessionStorage.removeItem(RELOAD_KEY); } catch (e) { /* 忽略 */ }
-      if (seenId() !== DEPLOY_ID) openModal(false);
+      if (seenId() !== DEPLOY_ID) openDrawer(false);
     }
 
-    closeBtn.addEventListener('click', closeModal);
+    closeX.addEventListener('click', closeDrawer);
+    goBtn.addEventListener('click', closeDrawer);
+    // Esc 也能收起（仅在本抽屉打开时生效，不拦截页面其它行为）
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && drawer.classList.contains('ws-open')) closeDrawer();
+    });
 
     if (!IS_DEPLOYED) { freshPage(); return; }
     // 缓存核对：bust 参数保证绕过浏览器缓存取到当前部署的 id；
-    // 与本页烙印 id 不一致 ⇒ 本页是旧部署的缓存 ⇒ 强制弹提示，关闭后自动刷新一次。
+    // 与本页烙印 id 不一致 ⇒ 本页是旧部署的缓存 ⇒ 强制弹出，关闭后自动刷新一次。
     fetch('version.json?bust=' + Date.now(), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (v) {
-        if (v && v.id && v.id !== DEPLOY_ID) { remoteId = v.id; openModal(true); return; }
+        if (v && v.id && v.id !== DEPLOY_ID) { remoteId = v.id; openDrawer(true); return; }
         freshPage();
       })
       .catch(function () { freshPage(); });

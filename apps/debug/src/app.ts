@@ -1076,12 +1076,22 @@ function bindInput(canvas: HTMLCanvasElement): void {
 	// 2026-09-21 修：旧实现绑在 canvas 上 ⇒ 只要有浮层（缺失纹理弹窗、面板）盖住落点，点击事件就不冒泡到
 	// canvas ⇒ **永远拿不到 pointer lock**，用户症状就是"debug 进去后转不动视角"（弹窗盖满画布时尤其明显）。
 	// 现在只要点击目标不在 UI 内（面板 / 弹窗 / 按钮）就请求锁定；UI 内点击不抢锁定。
+	//
+	// 2026-10-16 修：命中表按「元素」列（`button, select, ...`）漏了两类落点——
+	// ① 手风琴标题 `<summary>`（不是 button / label）→ 展开/收起的同时被判定为「点在画布上」；
+	// ② 侧边栏里的空白与纯文本（`<p>` 提示段、行间留白、`#status` 等）→ 同样穿透。
+	// 症状就是「点面板会穿透触发锁定画布」。容器级判据（`#sidebar` / `#topbar`）一次覆盖整块
+	// 区域内的所有落点，元素级判据只作兜底（弹窗与未来新增的游离控件）。
 	const UI_HIT_SELECTOR =
-		'#panel, #panelClose, .mt-modal, .mt-modal-box, .mt-actions, .mt-ok, button, select, input, label, [data-ui-block-lock]';
+		'#sidebar, #topbar, #panel, #panelClose, .mt-modal, .mt-modal-box, .mt-actions, .mt-ok, ' +
+		'button, select, input, textarea, label, summary, details, a, [data-ui-block-lock]';
 	document.addEventListener('click', (e) => {
 		if (!sceneReady || pointerLock.isLocked()) return;
 		const target = e.target as Element | null;
 		if (target && typeof target.closest === 'function' && target.closest(UI_HIT_SELECTOR)) return;
+		// 结构性兜底：点击根本不在预览区（即落在页面其它 chrome 上）时也不抢锁定。
+		const inPreview = target && typeof target.closest === 'function' && target.closest('#previewArea');
+		if (!inPreview) return;
 		void pointerLock.requestLock(canvas);
 	});
 

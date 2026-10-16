@@ -519,8 +519,8 @@
           </div>
         </details>
 
-        <!-- 渲染与视距 -->
-        <details open>
+        <!-- 渲染与视距（初始收起：面板默认只展开「文件输入」与「视角与操作」） -->
+        <details>
           <summary>渲染与视距</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
@@ -574,8 +574,9 @@
              tick 物理线取 Worker 权威帧（只在权威版本号变化时落点，节点率 = 权威固定步长的倒数，步长由面板 tickRate 交给
              `src/ts-shared/auth/auth-loop.ts` 的 `AuthLoop.setFixedDt`）。节点之间直连直线段、不插值；相邻节点距离 > JUMP_BREAK（100 HU）处不连线。
              tick 节点时间戳取「该帧发布所依据的渲染采样时刻 τ」，未投影时回落到轮询时刻。折角着色两档：≤20° 保持琥珀、>20° 染红
-             （`apps/debug/src/renderer/path-recorder.ts` 的 `turnColor`）。导出均为原始节点，带 t 供外部按时间对齐。 -->
-        <details open>
+             （`apps/debug/src/renderer/path-recorder.ts` 的 `turnColor`）。导出均为原始节点，带 t 供外部按时间对齐。
+             初始收起：面板默认只展开「文件输入」与「视角与操作」。 -->
+        <details>
           <summary>路径记录</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
@@ -622,8 +623,8 @@
           </div>
         </details>
 
-        <!-- 物理 -->
-        <details open>
+        <!-- 物理（初始收起：面板默认只展开「文件输入」与「视角与操作」） -->
+        <details>
           <summary>物理</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
@@ -737,8 +738,8 @@
           </div>
         </details>
 
-        <!-- 准星与 HUD -->
-        <details open>
+        <!-- 准星与 HUD（初始收起：面板默认只展开「文件输入」与「视角与操作」） -->
+        <details>
           <summary>准星与 HUD</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
