@@ -26,7 +26,7 @@ export type RenderPanelApply = 'live' | 'reload' | 'rebuild';
 export type RenderPanelKind = 'slider' | 'toggle' | 'select' | 'text' | 'tags';
 
 /** 面板分组（顺序即渲染顺序）。 */
-export const RENDER_PANEL_GROUPS = ['光照', '材质与法线', '剔除与相机', '雾', '排查开关'] as const;
+export const RENDER_PANEL_GROUPS = ['光照', '材质与法线', '剔除与相机', '雾', '排查·光照', '排查·材质'] as const;
 export type RenderPanelGroup = (typeof RENDER_PANEL_GROUPS)[number];
 
 export interface RenderPanelItem {
@@ -312,7 +312,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swLightmapStage',
     label: '光照阶段对照',
     title: '强制光照注入的某个阶段（auto = 正常路径）',
-    group: '排查开关',
+    group: '排查·光照',
     kind: 'select',
     options: (
       [
@@ -334,7 +334,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swOutputGamma22',
     label: '输出端 γ2.2',
     title: '关掉 = 保留 three 的分段 sRGB（A/B 用）',
-    group: '排查开关',
+    group: '排查·光照',
     kind: 'toggle',
     pref: 'debug.outputGamma22',
     apply: 'reload',
@@ -346,7 +346,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swVertexLightingOff',
     label: '关第 1 级顶点光照',
     title: '所有 prop 改走第 2 级 ambient cube、忽略 sp_<i>.vhv（单变量对照）',
-    group: '排查开关',
+    group: '排查·光照',
     kind: 'toggle',
     pref: 'debug.vertexLightingOff',
     apply: 'rebuild',
@@ -357,7 +357,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swBumpOff',
     label: '关法线注入',
     title: '不注入法线扰动（A/B 用）',
-    group: '排查开关',
+    group: '排查·材质',
     kind: 'toggle',
     pref: 'debug.bumpOff',
     apply: 'reload',
@@ -368,7 +368,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swWorldTransitionOff',
     label: '关世界过渡',
     title: '不注入世界过渡（$basetexture2）着色器',
-    group: '排查开关',
+    group: '排查·材质',
     kind: 'toggle',
     pref: 'debug.worldTransitionOff',
     apply: 'reload',
@@ -379,7 +379,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swEnvMapAll',
     label: '强制全部反射',
     title: '给所有材质加 $envmap 反射（排查反射路径用）',
-    group: '排查开关',
+    group: '排查·材质',
     kind: 'toggle',
     pref: 'debug.envMapAll',
     apply: 'reload',
@@ -390,7 +390,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swDebugAlbedoOnly',
     label: '只看 albedo',
     title: '只输出贴图原色，不施加 lightmap',
-    group: '排查开关',
+    group: '排查·光照',
     kind: 'toggle',
     pref: 'debug.albedoOnly',
     apply: 'reload',
@@ -401,7 +401,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swDebugLightmapOnly',
     label: '只看 lightmap',
     title: '只输出 lightmap 项，去掉 albedo',
-    group: '排查开关',
+    group: '排查·光照',
     kind: 'toggle',
     pref: 'debug.lightmapOnly',
     apply: 'reload',
@@ -412,7 +412,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swDebugTexLinear',
     label: '贴图按线性读',
     title: '把 albedo 贴图当线性数据（排查双重 sRGB 解码造成的暗部压低）',
-    group: '排查开关',
+    group: '排查·材质',
     kind: 'toggle',
     pref: 'debug.texLinear',
     apply: 'reload',
@@ -423,7 +423,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     id: 'swFullbrightNames',
     label: '全亮材质名',
     title: '这些材质走无光照路径（排查用）：加一个名字回车即成一枚标签，点标签上的 × 移除',
-    group: '排查开关',
+    group: '排查·材质',
     kind: 'tags',
     pref: 'debug.fullbrightNames',
     apply: 'reload',
