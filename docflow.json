@@ -107,14 +107,6 @@
       "consumed": true
     },
     {
-      "path": "OWNER.md",
-      "by": "dsh",
-      "reason": "D-023/D-110 已决：两行移出待决表，原文逐字进记忆库已决卷 progress/owner/2026-10-16-resolved.md（分卷/归档）",
-      "at": "2026-10-16",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "README.md",
       "by": "dsh",
       "reason": "serve.py 用法注释 +1 行，PORT/ROOT/os.chdir 三条语句整体下移一行（19/20/21 → 20/21/22），断言本身未变",
@@ -126,6 +118,14 @@
       "path": "SECURITY.md",
       "by": "dsh",
       "reason": "serve.py 用法注释 +1 行，COOP/COEP 两个 send_header 下移一行（40/41 → 41/42），断言本身未变",
+      "at": "2026-10-16",
+      "task": "",
+      "consumed": true
+    },
+    {
+      "path": "OWNER.md",
+      "by": "dsh",
+      "reason": "D-115 已决：行移出待决表，原文逐字进记忆库已决卷 progress/owner/2026-10-17-resolved.md（分卷/归档）",
       "at": "2026-10-16",
       "task": "",
       "consumed": true
@@ -151,23 +151,17 @@
         "at": "2026-10-10",
         "line": 22
       },
-      "D-115": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-10",
-        "line": 23
-      },
       "D-120": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-15",
-        "line": 24
+        "line": 23
       },
       "D-121": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-15",
-        "line": 25
+        "line": 24
       }
     }
   },
