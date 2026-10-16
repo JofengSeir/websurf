@@ -438,6 +438,14 @@ export class DemoPanel {
   /** 「档案里连不到账号的名字」提示行（T-717）；元素缺失时静默跳过。 */
   private aliasHint: HTMLElement | null = null;
   /**
+   * **用户刚在花名册点的那一行**（详情名牌以它为准）。
+   *
+   * 为什么需要它：同一实体可能被多条身份行共用（boreas2 实测西绪弗斯与 GenShinEnjoyer8267 都用过实体 #6），
+   * 而 `renderDetail` 原先按签名表匹配到的槽位取名字 ⇒ 点 GenShin 显示「西绪弗斯」、点西绪弗斯显示「GenShinEnjoyer8267」
+   * （浏览器实测，两人完全对调）。其他选择路径（过关记录跳转 / 自动跟随）把它清空，回落到原口径。
+   */
+  private pickedRoster: RosterRow | null = null;
+  /**
    * 四个类别里**被勾选要过滤掉**的那些（缺省全不勾 = 一条都不滤）。
    * 语义按 owner 的说法：「过滤掉…相关的」——**勾上 = 不显示这一类**。
    */
@@ -1787,7 +1795,12 @@ export class DemoPanel {
     this.detail.innerHTML = `
       <div class="dmp-who-head">
         <span class="dmp-who-dot" style="background:${color}" title="轨迹配色（与录像页的轨迹点同源）"></span>
-        <span class="dmp-who-name">${this.esc(this.nameAtSlot(i.slot) || i.name || `槽 ${i.slot}`)}</span>
+        <span class="dmp-who-name">${this.esc(
+          // **以用户点的那一行为准**（跨实体号也认）：同一实体被多条身份行共用时，按签名表槽位
+          // 取名字会把两个人对调（浏览器实测：点 GenShin 显示西绪弗斯、反之亦然）。
+          // 其他选择路径（过关记录跳转 / 自动跟随）会在 jumpTo 里把它清空，回落到原口径。
+          this.pickedRoster?.name || this.nameAtSlot(i.slot) || i.name || `槽 ${i.slot}`,
+        )}</span>
         <span class="dmp-who-tag${i.isBot ? '' : ' human'}">${tag}</span>
       </div>
       <div class="dmp-grid" title="解析内部量（排查用）：${this.esc(internals)}">
@@ -1829,6 +1842,7 @@ export class DemoPanel {
     // **优先用「用户点的那一行」**（T-718 剩余半环）：同一实体可能被多条身份行共用 ——
     // boreas2 实测西绪弗斯与 GenShinEnjoyer8267 都用过实体 #6，只按实体号回查身份会拿到**别人的**区间，
     // 于是点 GenShin 却跳到西绪弗斯的段首（实测时钟从 0:00 跳到 5:50，而 GenShin 的段首是 41:41）。
+    this.pickedRoster = picked ?? null;
     const identity = picked ? { spans: picked.spans } : this.rosterFor(entityIndex);
     let target = entityIndex;
     let seekTo: number | null = null;
