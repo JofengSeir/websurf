@@ -31,7 +31,7 @@ import {
 } from './demo/chatkind.js';
 import { userinfoTimeline } from './demo/net.js';
 import { decodePlayerInfoRecords, type PlayerSample } from './demo/demo.js';
-import { addNameAlias, buildAliasRegistry, normalizeName, readNameAliases, type AliasRegistry } from './identity.js';
+import { buildAliasRegistry, normalizeName, type AliasRegistry } from './identity.js';
 import { trackToClip } from './democlip.js';
 import { TRACK_PALETTE } from './tracks.js';
 import { FILE_KIND_LABEL, sniffFileKind } from '../core/filekind.js';
@@ -253,8 +253,13 @@ export interface DemoPanelOptions {
    */
   /** 跳到这一跑的起点（挂在行首灰色时间上）。 */
   onRecordJump?: (toSec: number, announceSec: number, player: string, level: string, durationSec: number) => void;
-  /** 观看扣减：把这一跑标进进度条、从观看时长里扣（挂在行尾按钮上）。 */
-  onRecordDeduct?: (toSec: number, announceSec: number, player: string, level: string, durationSec: number) => void;
+  /** 行尾按钮：把这一跑标进进度条并跳到它的起点（owner 2026-10-16：不再叫「扣减」）。 */
+  onRecordSpan?: (toSec: number, announceSec: number, player: string, level: string, durationSec: number) => void;
+  /**
+   * **让面板能动播放头**（T-715）：点花名册一行时，若播放头不在该身份的任何区间内，
+   * 要跳到「下一段开头」（没有下一段则回第一段开头）。面板不持有播放器，故开这个通道。
+   */
+  onSeek?: (sec: number) => void;
   /**
    * **消息过滤（四个类别勾选框）变了** ⇒ 通知外部按新的可见集合重推一次消息。
    *
@@ -430,11 +435,8 @@ export class DemoPanel {
   private readonly chat: HTMLElement;
   /** 消息过滤的四个勾选框（`renderChat` 里顺带刷新每类的实时条数）。 */
   private readonly chatFilter: HTMLElement;
-  /** 手工并入名字那一格（T-709）；元素缺失时全链路静默跳过。 */
-  private aliasBox: HTMLElement | null = null;
-  private aliasInput: HTMLInputElement | null = null;
-  private aliasList: HTMLDataListElement | null = null;
-  private aliasState: HTMLElement | null = null;
+  /** 「档案里连不到账号的名字」提示行（T-717）；元素缺失时静默跳过。 */
+  private aliasHint: HTMLElement | null = null;
   /**
    * 四个类别里**被勾选要过滤掉**的那些（缺省全不勾 = 一条都不滤）。
    * 语义按 owner 的说法：「过滤掉…相关的」——**勾上 = 不显示这一类**。
@@ -443,9 +445,6 @@ export class DemoPanel {
    * 过滤勾选：`true` = **只看这一类**（owner 2026-10-16 定）。
    * 全不勾 = 全勾 = 默认全显示；只有勾了一部分时才真的过滤（见 `chatAllow()`）。
    */
-  /** 用户刚在花名册里点选的人（手工并入名字的目标）。 */
-  private lastRosterEntity: number | null = null;
-
   /** 身份别名表（解析完成后建，见 `accountNames`）。 */
   private aliases: AliasRegistry = { namesByGuid: new Map(), guidByName: new Map(), unlinkedNames: new Set() };
 
@@ -506,14 +505,8 @@ export class DemoPanel {
                进服 → 过关 → 服务器公告 → 玩家对话 → 兜底算公告）。
                这一行同时是**实时读数**：每个框后面跟「已隐藏 / 共几条」。 -->
           <div class="dmp-chat-filter" id="demoChatFilter"></div>
-          <!-- 手工并入名字（T-709）：只在「档案里连不上账号」的名字上有用 —— 程序不硬猜，由用户指认一次 -->
-          <div class="dmp-alias" id="demoAliasBox">
-            <span class="dmp-alias-t">名字并入选中的人：</span>
-            <input type="text" id="demoAliasName" list="demoAliasNames" placeholder="例如 [yuzusoft] GalgameEnjoyer1337" />
-            <datalist id="demoAliasNames"></datalist>
-            <button type="button" id="demoAliasAdd">并入</button>
-            <span class="dmp-alias-s" id="demoAliasState"></span>
-          </div>
+          <!-- 歧义名提示（T-717）：档案里连不到账号的名字如实列出 —— 只说明，不需要用户操作 -->
+          <div class="dmp-alias-hint" id="demoAliasHint"></div>
           <!-- 录像内的文本消息（svc_Print / svc_StringCmd / svc_Disconnect，以及
                svc_UserMessage 的 SayText2——玩家聊天与 SourceMod 播报走它，
                由解析层按「控制字节边界 + UTF-8」解出可读文本）。
@@ -533,23 +526,7 @@ export class DemoPanel {
     this.note = root.querySelector<HTMLElement>('#demoNote')!;
     this.chat = root.querySelector<HTMLElement>('#demoChat')!;
     this.chatFilter = root.querySelector<HTMLElement>('#demoChatFilter')!;
-    this.aliasBox = root.querySelector<HTMLElement>('#demoAliasBox');
-    this.aliasInput = root.querySelector<HTMLInputElement>('#demoAliasName');
-    this.aliasList = root.querySelector<HTMLDataListElement>('#demoAliasNames');
-    this.aliasState = root.querySelector<HTMLElement>('#demoAliasState');
-    root.querySelector<HTMLButtonElement>('#demoAliasAdd')?.addEventListener('click', () => {
-      const name = (this.aliasInput?.value ?? '').trim();
-      const target = this.lastRosterEntity !== null ? this.roster(0).find((p) => p.entity === this.lastRosterEntity) : undefined;
-      if (!name) { this.setAliasState('先填一个名字'); return; }
-      if (!target) { this.setAliasState('先在花名册里点一个人'); return; }
-      if (!target.guid) { this.setAliasState('这个人没有账号 guid（存档 userinfo 为空），没法绑定'); return; }
-      addNameAlias(target.guid, name);
-      this.rebuildAliases();
-      if (this.aliasInput) this.aliasInput.value = '';
-      this.renderTimeline();
-      this.refreshAliasBox();
-      this.setAliasState('已并入「' + target.name + '」：' + name);
-    });
+    this.aliasHint = root.querySelector<HTMLElement>('#demoAliasHint');
     this.buildChatFilter();
     // 注：**「运动优先（实验展平顺序）」开关已撤除**（owner：用不上了）。它当时只切换
     // `demo/tables.ts` 里的属性展平顺序实验分支（`SPROP_CHANGES_OFTEN` 排头还是排尾），
@@ -614,7 +591,6 @@ export class DemoPanel {
     // 而它读的是 `this.aliases`；先前把建表放在 `onParsed` 之前（更靠后）⇒ 首次载入时行提示里
     // 看不到用户手工并入的别名（手动并入那次因为当场重渲染才看着正常）。
     this.rebuildAliases();
-    this.lastRosterEntity = null;
     this.parseMs = performance.now() - t0;
     this.duration = Math.max(1e-3, result.header.playbackTime);
     this.totalTicks = Math.max(1, result.header.playbackTicks);
@@ -629,7 +605,7 @@ export class DemoPanel {
     // 建出第一条轨道之后才出现 —— 那时进度条才冒出来会显得"没加载成功"。
     // 同时把解析产物推给**录像信息条**（服务器 / 天空盒 / 协议 / 事件 / 实体流 / 字符串表）。
     // 身份别名表（T-701）：连接行的 SteamID + 已知账号名 ⇒ 同一个人在这份录像里的多个写法能对上
-    this.refreshAliasBox();
+    this.refreshAliasHint();
     this.opts.onParsed?.(result, file, this.roster(0).length);
     this.opts.onLoaded?.();
   }
@@ -956,12 +932,7 @@ export class DemoPanel {
       const spans: Array<[number, number]> = p.spans.map((s) => [this.secAt(s.from), this.secAt(s.to)] as [number, number]);
       btn.addEventListener('mouseenter', () => this.opts.onHoverSpan?.(spans));
       btn.addEventListener('mouseleave', () => this.opts.onHoverSpan?.(null));
-      btn.addEventListener('click', () => {
-        // 记住「用户刚点的是谁」：手工并入名字时要问"并到哪个人名下"
-        this.lastRosterEntity = p.entity;
-        this.refreshAliasBox();
-        this.jumpTo(p.entity);
-      });
+      btn.addEventListener('click', () => this.jumpTo(p.entity, p));
     }
     this.refreshRosterState();
   }
@@ -978,8 +949,6 @@ export class DemoPanel {
    */
   private accountNames(): Map<string, Set<string>> {
     const out = new Map<string, Set<string>>();
-    // 先放**用户手工并入**的名字：它与 userinfo 名字同权，别名表据此把它连到账号
-    for (const [guid, names] of Object.entries(readNameAliases())) out.set(guid, new Set(names));
     for (const snap of userinfoTimeline) {
       for (const e of snap.entries) {
         for (const rec of decodePlayerInfoRecords(e.value, e.idx)) {
@@ -993,7 +962,7 @@ export class DemoPanel {
     return out;
   }
 
-  /** 重建别名表（落盘的别名变化后调用：userinfo 名字 + 连接行 + 手工映射一起重算）。 */
+  /** 重建别名表（userinfo 名字 + 连接行 + 聊天发送者槽位一起重算）。 */
   private rebuildAliases(): void {
     this.aliases = buildAliasRegistry(
       this.result?.chat ?? [],
@@ -1021,26 +990,17 @@ export class DemoPanel {
     return best;
   }
 
-  /** 更新并入格下方的状态行与候选名字列表（候选 = 别名表里"连不到账号"的那些）。 */
-  private refreshAliasBox(): void {
-    if (!this.aliasBox) return;
-    if (this.aliasList) {
-      this.aliasList.innerHTML = [...this.aliases.unlinkedNames]
-        .map((nm) => '<option value="' + this.esc(nm) + '"></option>')
-        .join('');
-    }
-    const target = this.lastRosterEntity !== null ? this.roster(0).find((p) => p.entity === this.lastRosterEntity) : undefined;
-    this.setAliasState(
-      target
-        ? target.guid
-          ? '目标：' + target.name + '（' + target.guid + '）'
-          : '目标：' + target.name + '（无 guid，无法绑定）'
-        : '先在花名册里点一个人',
-    );
-  }
-
-  private setAliasState(text: string): void {
-    if (this.aliasState) this.aliasState.textContent = text;
+  /**
+   * 刷新「档案里连不到账号的名字」提示（T-717，只读）：这些名字在聊天里出现过，但**没有任何字段**
+   * 能把它们连到账号（同一个显示名可能被两个账号先后用过 ⇒ 程序不硬猜，如实列出即可，不需要用户操作）。
+   */
+  private refreshAliasHint(): void {
+    if (!this.aliasHint) return;
+    const names = [...this.aliases.unlinkedNames].filter((x) => x.length > 0);
+    this.aliasHint.textContent =
+      names.length > 0
+        ? '另有 ' + names.length + ' 个名字在档案里连不到账号（可能被多个账号先后用过）：' + names.join('、')
+        : '';
   }
 
   /** 该账号的别名集合（含本行当前显示名）；没有额外写法时只含它自己。 */
@@ -1294,10 +1254,13 @@ export class DemoPanel {
         ? '跳到这一跑：播报 ' + this.fmtClock(sec) + ' − 用时 ' + rec.durationSec.toFixed(3) +
           ' 秒 − 5 秒缓冲 = ' + this.fmtClock(to) + (rec.level ? '（' + this.esc(rec.level) + '）' : '')
         : '';
+      // **标区间按钮**（owner 2026-10-16 定稿）：标签 = 符号 + 记录开始时间（与行首灰色时间同口径）；
+      // 点击 = 把这一跑标进进度条 **并跳到它的起点**。名字里不再出现「扣减」（那只是 owner 解释需求用的词），
+      // 早先 tooltip 还写着「从观看时长里扣掉」—— 那是一句**没有实现**的承诺（全仓没有观看时长记账）。
       const deduct = rec
         ? '<button type="button" class="dmp-chat-deduct"' + dataAttrs +
-          ' title="观看扣减：把这一跑（' + this.fmtClock(to) + ' → ' + this.fmtClock(sec) +
-          '，含 ' + rec.durationSec.toFixed(3) + ' 秒用时与 5 秒缓冲）标进进度条、从观看时长里扣掉">扣减 ' +
+          ' title="标出这一跑（' + this.fmtClock(to) + ' → ' + this.fmtClock(sec) + '，含 ' +
+          rec.durationSec.toFixed(3) + ' 秒用时与 5 秒缓冲）并跳到起点 ' + this.fmtClock(to) + '">⏱ ' +
           this.fmtClock(to) + '</button>'
         : '';
       rows.push(
@@ -1346,7 +1309,7 @@ export class DemoPanel {
       }
     };
     bindRecordBtn('.dmp-chat-t-jump', (to, at, player, level, dur) => this.opts.onRecordJump?.(to, at, player, level, dur));
-    bindRecordBtn('.dmp-chat-deduct', (to, at, player, level, dur) => this.opts.onRecordDeduct?.(to, at, player, level, dur));
+    bindRecordBtn('.dmp-chat-deduct', (to, at, player, level, dur) => this.opts.onRecordSpan?.(to, at, player, level, dur));
   }
 
   /**
@@ -1421,25 +1384,19 @@ export class DemoPanel {
       btn.classList.toggle('on', on);
       btn.classList.toggle('off', !on);
       // **名字按当前 tick 取**（`roster()` 里给的是窗口末端那一刻的名字，只作初值）。
-      const nameEl = btn.querySelector<HTMLElement>('.dmp-whoname');
-      if (nameEl) {
-        const nm = this.nameAtSlot(p.entity - 1, tick) || p.name;
-        // **只改第一个文本节点**：`textContent = nm` 会把名字后面的标签（队伍、观察「观」）整块冲掉
-        // —— 浏览器实测（T-703）：每帧刷新后 `<i class="dmp-who-team">` 与 `<i class="dmp-who-observe">`
-        // 都不在 DOM 里，看板上永远看不到这两个标记。首渲染时名字就是第一个文本节点，故这里能安全只改文本。
-        const first = nameEl.firstChild;
-        if (first && first.nodeType === 3) {
-          if (first.nodeValue !== nm) first.nodeValue = nm;
-        } else if (nameEl.textContent !== nm) nameEl.textContent = nm;
-      }
+      // **行名不再跟着播放头改名**（owner 2026-10-16 明确，T-715）：早先每帧用
+      // `nameAtSlot(p.entity - 1, tick)` 覆盖行名，而槽位会被后来的人复用 ⇒ 同一时刻三行都显示
+      // 当时占用该槽位那个人的名字（boreas2 实测 tick 135354/180000/212700 三处都是「？！刚刚？！」×3），
+      // 点 A 显示 B 也由此而来。行名一律用该身份自己的账号名（首渲染写好，含队伍/观察标签）。
+      void tick;
     }
     // **详情里的「人物名牌」也要跟着 tick 走**：它此前取建行时烘焙的 `row.info.name`，
     // 于是花名册在换名、详情却停在上一个名字（owner 实测「滚动名称没起效、被锁死」）。
     if (this.selected >= 0 && this.selected < this.rows.length) {
       const row = this.rows[this.selected];
+      // **详情名牌也不再按 tick 改名**（T-715，理由同行名）：它取的 `row.info.slot` 来自签名表匹配，
+      // 槽位复用后会显示成别人的名字（owner 实测：点 GenShinEnjoyer8267 显示「？！刚刚？！」）。
       const nm = this.nameAtSlot(row.info.slot, tick) || row.info.name;
-      const shown = this.detail.querySelector<HTMLElement>('.dmp-who-name');
-      if (shown && nm.length > 0 && shown.textContent !== nm) shown.textContent = nm;
       // **跟随中那个人改了名 ⇒ 通知外部**（信息条据此改跟随轨道名；去重，避免每帧刷新）
       if (
         this.lastPickedEntity !== null &&
@@ -1519,11 +1476,22 @@ export class DemoPanel {
       // **逐次在场的区间列表**（合并身份会抹掉「退出又进来」这件事）：每次占用一条，
       // 有位姿就用该实体的采样窗口（与点击跳转同口径），没有就用占用事件本身的 tick 区间；
       // 相邻/重叠的再并成一段，免得同一段被画成两条。
+      // **区间 =「这次占用自己的时间」∩「该实体有采样的时间」**（T-718 根因修复）。
+      // 原先直接取实体窗口（`w.from/w.to`）：同一槽位先后被多人占用时他们共用同一条实体轨迹，
+      // 于是三段的区间全被写成同一整条 —— 实测 boreas2 槽 4 的三个身份（西绪弗斯 22760→132274、
+      // ？！刚刚？！ 132274→370060、回放 bot 370060→386727）区间全变成 `#5 23232→373006`，
+      // 结果：多个身份行同源、读数相同、点谁都不跳（区间覆盖全场 ⇒ jumpTo 认为播放头已在段内）。
       const spans = mergeSpans(
-        g.sessions.map((s) => {
-          const w = wins.get(s.entity);
-          return { from: w ? w.from : s.from, to: w ? w.to : s.to, entity: s.entity };
-        }),
+        g.sessions
+          .map((s) => {
+            const w = wins.get(s.entity);
+            const from = w ? Math.max(w.from, s.from) : s.from;
+            const to = w ? Math.min(w.to, s.to) : s.to;
+            return { from, to, entity: s.entity };
+          })
+          // 该次占用期间实体没有任何采样（比如那时它还没进实体流）⇒ 这一段没有位姿，丢掉；
+          // 丢掉后 spans 为空时，下面用占用事件本身的区间兜底并与旧行为一致。
+          .filter((s) => s.to > s.from),
       );
       // **主实体 = 他最早那一段的实体**：点花名册就是「从头看他」，`jumpTo` 也以它为跳转基准
       // （早先取「采样最长的那段」，于是 0 s 点 `LuoXuan` 会越过第一段、直接跳到第二段开头 —— owner 实测）。
@@ -1538,8 +1506,10 @@ export class DemoPanel {
       const factsWin = withWin[0] ?? null;
       // 区间（并集，供排序与读数用）：有位姿取**组内全部实体的采样窗口并集**，
       // 没有任何位姿才退回占用事件的并集（那时只有更新流能作证）。
-      const from = withWin.length > 0 ? Math.min(...withWin.map((x) => x.win.from)) : g.from;
-      const to = withWin.length > 0 ? Math.max(...withWin.map((x) => x.win.to)) : g.to;
+      // **行的读数区间取自 spans**（与进度条上画的区间、点击跳转同口径）：`mergeSpans` 已按 from 升序
+      // ⇒ 首段起点、末段终点就是这一行的时间范围。早先用实体窗口 ⇒ 同一槽位多身份的行读数一模一样。
+      const from = spans.length > 0 ? spans[0].from : g.from;
+      const to = spans.length > 0 ? spans[spans.length - 1].to : g.to;
       // 名字可能整场都取不到（T-700 实测：存档里该槽位的 userinfo 值长度为 0，见 boreas dem 的键 2/3）
       // ⇒ 与其留空，不如把「存档没给名字」这件事写在名字位上。
       // **名字优先取「该身份自己的 userinfo 名」**（T-703 浏览器实测抓到的 bug）：`nameFor(slot, entity, to)`
@@ -1850,18 +1820,30 @@ export class DemoPanel {
     this.jumpTo(entityIndex);
   }
 
-  private jumpTo(entityIndex: number): void {
+  private jumpTo(entityIndex: number, picked?: RosterRow): void {
     const r = this.result;
     // **点一个人 = 从他「该看的那一段」进去**（一行会对应多段 / 多条实体轨迹）：
     // · 播放头**正落在**他某一段里 ⇒ 就那一段（不把播放头甩到他另一段的起点）；
     // · 否则 ⇒ 调用方给的那条（点花名册给的是**他最早那一段**的实体；时间轴自动跳过缺口时
     //   给的是**下一段**的实体 —— 两者都靠「不给覆盖项就原样用」这条统一处理）。
-    const identity = this.rosterFor(entityIndex);
+    // **优先用「用户点的那一行」**（T-718 剩余半环）：同一实体可能被多条身份行共用 ——
+    // boreas2 实测西绪弗斯与 GenShinEnjoyer8267 都用过实体 #6，只按实体号回查身份会拿到**别人的**区间，
+    // 于是点 GenShin 却跳到西绪弗斯的段首（实测时钟从 0:00 跳到 5:50，而 GenShin 的段首是 41:41）。
+    const identity = picked ? { spans: picked.spans } : this.rosterFor(entityIndex);
     let target = entityIndex;
+    let seekTo: number | null = null;
     if (identity) {
       const nowTick = this.opts.currentTick ? this.opts.currentTick() : -1;
       const covering = identity.spans.find((s) => nowTick >= s.from && nowTick <= s.to) ?? null;
-      if (covering) target = covering.entity;
+      if (covering) {
+        // **段内 ⇒ 不动播放头**（owner 2026-10-16 规则）
+        target = covering.entity;
+      } else if (identity.spans.length > 0) {
+        // **段外 ⇒ 跳到「播放头之后的第一段」开头；没有下一段就回第一段开头**（同一条规则）
+        const next = identity.spans.find((s) => s.from > nowTick) ?? identity.spans[0];
+        target = next.entity;
+        seekTo = this.secAt(next.from);
+      }
     }
     const track = r?.players.find((t) => t.entityIndex === target);
     if (!r || !track || track.samples.length < 2) {
@@ -1880,7 +1862,8 @@ export class DemoPanel {
     // 于是看板行写着 `LuoXuan`、详情却退回 `#5 CCSPlayer`（两者当场互相打脸）。
     const rosterRow = this.rosterFor(entityIndex);
     const row = this.rows.find((x) => x.info.entityIndex === entityIndex);
-    const rosterName = rosterRow?.name.trim() ?? '';
+    // 名字同样以「点的那一行」为准（同一实体被多行共用时，回查会拿到别人的名字）
+    const rosterName = (picked?.name ?? rosterRow?.name ?? '').trim();
     const label =
       rosterName ||
       (row?.info.name && row.info.name.length > 0 ? row.info.name : `#${entityIndex} ${track.className}`);
@@ -1914,6 +1897,8 @@ export class DemoPanel {
     }
     const clip = trackToClip(track, r, rule, () => label);
     this.opts.onClip?.(clip);
+    // **最后再动播放头**：onClip 里 app 会建轨道 / 切视角，先 seek 会被它覆盖（T-715）
+    if (seekTo !== null) this.opts.onSeek?.(seekTo);
   }
 
   private esc(s: string): string {

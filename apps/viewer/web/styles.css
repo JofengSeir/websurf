@@ -1052,14 +1052,10 @@ select.tl-select:focus { border-color: var(--text); }
    类别判据见 `apps/viewer/src/replay/demo/chatkind.ts`：进服 / 过关 / 服务器公告 / 玩家对话。
    每个框后面跟该类共几条（`×N`），勾上后标签加删除线并压暗 —— 让「我滤掉的是不是我以为的那类」
    一眼可核对。整行允许折行（四个类别 + 读数在窄侧栏里放不下一行）。 */
-/* 手工并入名字（T-709）：档案里连不上账号的名字，由用户指认一次 */
-.dmp-alias { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 6px 0 0; font-size: 11px; color: var(--muted); }
-.dmp-alias input { flex: 1 1 180px; min-width: 120px; padding: 3px 6px; font: inherit; font-size: 11px;
-  color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 3px; }
-.dmp-alias button { padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer;
-  color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 3px; }
-.dmp-alias button:hover { border-color: var(--accent); color: var(--accent); }
-.dmp-alias-s { flex: 1 1 100%; color: var(--muted); }
+/* 档案里连不到账号的名字（T-717）：只说明，不需要用户操作 */
+.dmp-alias-hint { margin: 4px 0 0; font-size: 10px; line-height: 1.5; color: var(--muted); }
+.dmp-alias-hint:empty { display: none; }
+
 .dmp-chat-filter {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
   padding: 6px 0 7px; border-bottom: 1px solid var(--border);

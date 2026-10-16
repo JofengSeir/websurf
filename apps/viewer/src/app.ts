@@ -404,6 +404,9 @@ const demoPanel = demoPane
       },
       // **勾选框变了 ⇒ 浮层跟着换一份**（浮层与侧栏列表必须同一口径，否则「滤掉了却还在飘」）。
       onChatFilter: () => feedChatOverlay(),
+      // **面板要动播放头时走这里**（T-715）：点花名册一行、播放头又不在该身份任何区间内时，
+      // 面板算出「下一段开头」交来这里；播放态不动。
+      onSeek: (sec) => demo.player.seek(sec),
       /**
        * **点了一条过关记录 ⇒ 跳到那一跑**（owner 要求）。
        *
@@ -434,19 +437,22 @@ const demoPanel = demoPane
             `（播报 − ${durationSec.toFixed(3)} 秒 − 5 秒缓冲）`,
         );
       },
-      // **观看扣减**（owner 2026-10-16 从跳转里拆出来）：只标区间、不动播放头。
-      onRecordDeduct: (toSec, announceSec, player, level, durationSec) => {
+      // **行尾按钮**（owner 2026-10-16 定稿）：把这一跑标进进度条 **并跳到它的起点**。
+      // 早先只标区间、不动播放头，还写着「从观看时长里扣掉」（没实现的承诺），已按 owner 要求改掉。
+      onRecordSpan: (toSec, announceSec, player, level, durationSec) => {
         // 进度条上把这一跑画出来（落点 → 播报时刻）；播放头走过它就消失（帧循环负责清）。
         demo.timeline.setJumpSpan({
           from: toSec,
           to: announceSec,
           title:
-            `观看扣减 ${player || '这一跑'}${level ? ' · ' + level : ''}：用时 ${durationSec.toFixed(3)} 秒` +
+            `这一跑 ${player || '这一跑'}${level ? ' · ' + level : ''}：用时 ${durationSec.toFixed(3)} 秒` +
             `（播报 ${fmtClock(announceSec)} − 用时 − 5 秒缓冲 = ${fmtClock(toSec)}）` +
             ' —— 播放头走过这一段它就消失',
         });
+        // **跳到这一跑起点**（owner 要求；播放态不动，与跳转那条同一规矩）
+        demo.player.seek(toSec);
         hud.flashStatus(
-          `观看扣减 ${fmtClock(toSec)} → ${fmtClock(announceSec)}` +
+          `标出这一跑 ${fmtClock(toSec)} → ${fmtClock(announceSec)}，已跳到起点` +
             `（${player || '这一跑'}${level ? ' · ' + level : ''}，用时 ${durationSec.toFixed(3)} 秒 + 5 秒缓冲）`,
         );
       },

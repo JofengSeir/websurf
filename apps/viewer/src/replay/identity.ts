@@ -38,63 +38,6 @@ export function normalizeName(s: string): string {
   return stripChatPrefixes(s).replace(TAG_RE, '').trim();
 }
 
-/**
- * **用户手工指定的名字 → 账号**映射（localStorage，跨录像生效）。
- *
- * 为什么必须有这条出口：有些改名在档案里**没有任何字段能连起来** —— 实测 boreas dem 里
- * `[yuzusoft] GalgameEnjoyer1337` 只出现在聊天**发言行**（发言行不带 SteamID），而 userinfo 与
- * 连接行给的是改名后的「她不一样」。程序不能硬猜，只能让用户指认一次，之后按 guid 一直生效。
- */
-const NAME_ALIAS_KEY = 'vbsp:demNameAliases';
-
-/** 读落盘的名字别名表（guid → 名字数组）；读不到给空表。 */
-export function readNameAliases(): Record<string, string[]> {
-  try {
-    const raw = localStorage.getItem(NAME_ALIAS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object') return {};
-    const out: Record<string, string[]> = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (Array.isArray(v)) out[k] = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-/** 把一个名字并入某个 guid（去重、trim、立即落盘），返回更新后的表。 */
-export function addNameAlias(guid: string, name: string): Record<string, string[]> {
-  const g = guid.trim();
-  const nm = name.trim();
-  const table = readNameAliases();
-  if (!g || !nm) return table;
-  const list = table[g] ?? [];
-  if (!list.includes(nm)) list.push(nm);
-  table[g] = list;
-  try {
-    localStorage.setItem(NAME_ALIAS_KEY, JSON.stringify(table));
-  } catch (err) {
-    console.warn('[dem-alias] 保存失败（本次仍生效）:', err);
-  }
-  return table;
-}
-
-/** 从某个 guid 上摘掉一个名字，返回更新后的表。 */
-export function removeNameAlias(guid: string, name: string): Record<string, string[]> {
-  const table = readNameAliases();
-  const list = (table[guid] ?? []).filter((x) => x !== name);
-  if (list.length > 0) table[guid] = list;
-  else delete table[guid];
-  try {
-    localStorage.setItem(NAME_ALIAS_KEY, JSON.stringify(table));
-  } catch (err) {
-    console.warn('[dem-alias] 保存失败:', err);
-  }
-  return table;
-}
-
 /** 从聊天行里能连出的别名。 */
 export interface AliasRegistry {
   /** guid（`[U:1:…]` / `BOT`）→ 见到的所有名字（含带前缀的原样写法）。 */
