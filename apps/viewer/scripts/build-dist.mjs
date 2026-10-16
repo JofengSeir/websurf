@@ -34,6 +34,7 @@ import {
   rewriteIndexToClassicScript,
   cleanDist,
   cleanStale,
+  distLaunchers,
   printTree,
 } from '../../../src/scripts/lib/dist-pack.mjs';
 
@@ -68,155 +69,13 @@ const KEEP_MULTI = [
   'coi-serviceworker.js',
 ];
 
-const SERVE_PY = `"""WebSurf-viewer 静态服务器（本地预览；部署时任意静态托管均可）。
+const { servePy: SERVE_PY, playCmd: PLAY_CMD, playSh: PLAY_SH } = distLaunchers({
+  appName: 'WebSurf-viewer',
+  port: 8101,
+  // 只有 viewer 认 ?replay= 深链，故示例录像只在这里出现
+  demoReplay: 'assets/maps/surf_null_4.replay',
+});
 
-用法：python serve.py [port]   # 默认 8101，服务目录 = 本脚本所在目录
-"""
-import http.server
-import socketserver
-import os
-import sys
-
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8101
-ROOT = os.path.dirname(os.path.abspath(__file__))
-os.chdir(ROOT)
-
-
-class Handler(http.server.SimpleHTTPRequestHandler):
-    extensions_map = {
-        **http.server.SimpleHTTPRequestHandler.extensions_map,
-        ".wasm": "application/wasm",
-        ".bsp": "application/octet-stream",
-        ".js": "text/javascript; charset=utf-8",
-        ".mjs": "text/javascript; charset=utf-8",
-        ".html": "text/html; charset=utf-8",
-    }
-
-    def end_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Cache-Control", "no-cache")
-        super().end_headers()
-
-    def log_message(self, fmt, *args):
-        sys.stderr.write(f"{self.address_string()} - {fmt % args}\\n")
-
-
-DEMO = "/index.html?replay=assets/maps/surf_null_4.replay"
-
-
-class Server(socketserver.TCPServer):
-    # SO_REUSEADDR：关窗后立刻重开不会被 TIME_WAIT 卡死（"通常每个套接字地址
-    # 只允许使用一次"）；占用中的活动端口仍会报错，由下方 OSError 提示兜底
-    allow_reuse_address = True
-
-
-try:
-    server = Server(("", PORT), Handler)
-except OSError as e:
-    print(f"[ERROR] 端口 {PORT} 无法监听：{e}")
-    print(f"[HINT] 端口可能已被占用——换一个端口：python serve.py {PORT + 1}")
-    sys.exit(1)
-
-with server:
-    print(f"Serving {ROOT} at http://localhost:{PORT}/")
-    print(f"  App:  http://localhost:{PORT}/index.html")
-    if os.path.isdir(os.path.join(ROOT, "assets")):
-        print(f"  Demo: http://localhost:{PORT}{DEMO}")
-    print("  Quit: Ctrl+C")
-    sys.stdout.flush()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\\nShutting down.")
-`;
-
-/**
- * dist/play.cmd —— 双击启动入口（Windows）。
- * 契约：`python` 优先；缺失时打印提示并改用 `npx --yes serve -l <port> .`；两者都缺则打印指引 +
- * `pause` 后退出；打印普通页与示例深链两个地址；用 `start` 起一个延时 1s 的异步子进程开浏览器，
- * 前台交给 `serve.py`（端口取首个参数，默认 8101）。
- * ⚠️ 全文纯 ASCII，且写盘时统一转 CRLF：cmd.exe 解析非 ASCII 或 LF-only 的批处理时会把行撕开执行。
- */
-const PLAY_CMD = `@echo off
-chcp 65001 >nul
-rem WebSurf-viewer local preview: serve dist and open browser (Windows)
-rem usage: play.cmd [port] (default 8101; close this window to stop, Ctrl+C also works)
-setlocal EnableExtensions
-cd /d "%~dp0"
-
-set PORT=8101
-if not "%~1"=="" set PORT=%~1
-
-rem -- toolchain: python first, fallback to npx serve --
-where python >nul 2>nul
-if errorlevel 1 (
-  echo [WARN] python not found -- install Python 3 first ^(https://www.python.org/downloads/^).
-  where npx >nul 2>nul
-  if errorlevel 1 (
-    echo [WARN] npx not found either -- install Node.js ^(https://nodejs.org/^).
-    echo [HINT] install Python 3 or Node.js and retry; or run: npx serve -l %PORT% .
-    pause
-    exit /b 1
-  )
-  echo [INFO] python missing - using Node fallback: npx serve.
-  echo [INFO] starting: npx --yes serve -l %PORT% .
-  start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
-  npx --yes serve -l %PORT% .
-  exit /b %errorlevel%
-)
-
-echo ============================================================
-echo  WebSurf-viewer local preview ^(close this window to stop^)
-echo   page    http://localhost:%PORT%/index.html
-echo   demo    http://localhost:%PORT%/index.html?replay=assets/maps/surf_null_4.replay
-echo ============================================================
-rem open browser after 1s (async, does not block server startup)
-start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
-python serve.py %PORT%
-`;
-
-/**
- * dist/play.sh —— 双击启动入口（macOS/Linux）。行为对齐 play.cmd：
- * `python3` → `python` → `npx --yes serve -l <port> .` 依次回退；两者都缺时打印中文指引并 `exit 1`。
- */
-const PLAY_SH = `#!/usr/bin/env bash
-# WebSurf-viewer 本地预览：起静态服务并自动打开浏览器（macOS/Linux）
-# 用法：./play.sh [port]（默认 8101；关闭本窗口即停止服务，Ctrl+C 亦可）
-set -e
-cd "$(dirname "$0")"
-PORT="\${1:-8101}"
-
-open_browser() {
-  ( sleep 1
-    if command -v xdg-open >/dev/null 2>&1; then xdg-open "http://localhost:$PORT/index.html" >/dev/null 2>&1
-    elif command -v open >/dev/null 2>&1; then open "http://localhost:$PORT/index.html" >/dev/null 2>&1
-    fi
-  ) &
-}
-
-if command -v python3 >/dev/null 2>&1; then PY=python3
-elif command -v python >/dev/null 2>&1; then PY=python
-else
-  echo "[HINT] 未找到 python —— 请先安装 Python 3（https://www.python.org/downloads/）。"
-  if command -v npx >/dev/null 2>&1; then
-    echo "[HINT] 使用 Node 备选：npx serve（python 缺失，自动安装并启动）。"
-    echo "[HINT] 正在启动：npx --yes serve -l $PORT ."
-    open_browser
-    exec npx --yes serve -l "$PORT" .
-  fi
-  echo "[HINT] 也未找到 npx —— 需要 Node.js（https://nodejs.org/）。"
-  echo "[HINT] 手动备选：安装 Python 3 或 Node.js 后重试；或装好任意静态服务器后运行  npx serve -l $PORT ."
-  exit 1
-fi
-
-echo "============================================================"
-echo " WebSurf-viewer 本地预览（关闭本窗口即停止服务；Ctrl+C 亦可）"
-echo "  普通页  http://localhost:$PORT/index.html"
-echo "  示例    http://localhost:$PORT/index.html?replay=assets/maps/surf_null_4.replay"
-echo "============================================================"
-open_browser
-exec "$PY" serve.py "$PORT"
-`;
 
 async function rebuildDist() {
   // 全量重建：先清空 dist，产物只由本轮写入（不留上一次的残留）
@@ -226,8 +85,9 @@ async function rebuildDist() {
   // ── 两种模式共用的产物 ──────────────────────────────────────────────
   await writeFile(join(dist, '.nojekyll'), '');
   await writeFile(join(dist, 'serve.py'), SERVE_PY);
-  // .cmd 必须 CRLF：LF-only 的批处理会让 cmd.exe 解析错乱（行被撕开执行）
-  await writeFile(join(dist, 'play.cmd'), PLAY_CMD.replace(/\n/g, '\r\n'));
+  // play.cmd **已经是 CRLF**（`distLaunchers` 里转好的）：cmd.exe 解析 LF-only 批处理会把行撕开执行，
+  // 这一步不能漏、也不能在这里再转一次（会把 \r\n 变成 \r\r\n）
+  await writeFile(join(dist, 'play.cmd'), PLAY_CMD);
   await writeFile(join(dist, 'play.sh'), PLAY_SH);
 
   // ── 示例录像（深链演示用；本地夹具缺失时告警并跳过）──────────────

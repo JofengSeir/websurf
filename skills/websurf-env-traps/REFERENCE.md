@@ -30,7 +30,7 @@ test/maps/*  test/replay/*  .tmp/  .cargo-home/  .wasm-pack-cache/
 apps/*/scripts/_*.mjs
 ```
 
-实例（差点误判）：`apps/viewer/dist/play.cmd` 不在树里，但它是 `apps/viewer/scripts/build-dist.mjs:233` 的**生成物**，不能据此把 `T-135` 结案。
+实例（差点误判）：`apps/viewer/dist/play.cmd` 不在树里，但它是**生成物**（生成器 `src/scripts/lib/dist-pack.mjs` 的 `distLaunchers`，由各工程 `scripts/build-dist.mjs` 调用写盘 —— 2026-10-16 T-628 把三份内联模板收敛到这里），不能据此把 `T-135` 结案。
 
 **做法**：判「某物是否还在」走**全工作区文件索引**（含未跟踪），不要用 `git grep` 的 0 命中下结论。
 

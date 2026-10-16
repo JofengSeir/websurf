@@ -46,10 +46,17 @@ const shaOf = (e) => (String(e.marker).match(/@([0-9a-f]{12})$/) || [])[1];
 function render() {
   const cell = (r) => [r.id, r.title, r.type, r.owner, r.status, r.evidence, r.detail, r.criteria, r.origin].join(' | ');
   const groups = Object.keys(count).filter((k) => !isTerminal(k)).map((k) => k.slice(0, 12) + ' ' + count[k]).join(' / ');
+  // **取活列表按优先级排**（行上的可选字段 `prio`：P0/P1/P2；缺省排最后）。
+  // 优先级只影响这一份渲染的顺序与标注，**不进总表**（总表列数被 `check-doc-drift` 的 [G] 按位解析，不能动）。
+  const PRIO_ORDER = { P0: 0, P1: 1, P2: 2 };
+  const liveSorted = [...live].sort(
+    (a, b) => (PRIO_ORDER[a.prio] ?? 9) - (PRIO_ORDER[b.prio] ?? 9) || String(a.id).localeCompare(String(b.id)),
+  );
   return [
     '# 待办看板（已迁入 agentmemory）',
     '',
     '来源：`' + SRC + '`（机器可读镜像，sha12 `' + sha12 + '`）。本条目是它的人类可读渲染，供 agent 取活/收尾阅读。',
+    '行上的 `prio`（P0/P1/P2）只用于本节的排序与标注；状态口径见下。',
     '',
     '## 状态口径',
     '',
@@ -63,9 +70,9 @@ function render() {
     '| 已记录 | 已知事实 / 工具边界，无需行动，仅备查 |',
     '| 已结案 | 已按结论改完，或已判定无需行动 |',
     '',
-    '## 取活（未结项 ' + live.length + ' 条：' + groups + '）',
+    '## 取活（未结项 ' + live.length + ' 条，按优先级：' + groups + '）',
     '',
-    ...live.map((r) => '- **' + r.id + '** ' + r.title + '　`' + r.owner + '`（' + r.status + '）'),
+    ...liveSorted.map((r) => '- **' + r.id + '**' + (r.prio ? '（' + r.prio + '）' : '') + ' ' + r.title + '　`' + r.owner + '`（' + r.status + '）'),
     '',
     '## 总表（' + rows.length + ' 条）',
     '',

@@ -7,6 +7,7 @@
  *                     __VBSP_WORKER_JS__ / __VBSP_TEXTURES_MTZ_B64__ 三个全局键，再接 app 代码
  *   dist/styles.css — web/styles.css 原样拷贝
  *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证产物级副本
+ *   dist/serve.py、dist/play.cmd、dist/play.sh — 产物自带启动器（`distLaunchers` 内联生成：起静态服务 + 打开浏览器）
  *
  * ── multi（--multi，GitHub Pages / 任意 HTTP 托管）───────────────
  *   dist/index.html — web/index.html 原样拷贝（保留 module script）
@@ -16,6 +17,7 @@
  *   dist/websurf_wasm_bg.wasm、dist/textures.mtz — 外置，由页面按 URL 取
  *   dist/coi-serviceworker.js — 由 src/web/coi-serviceworker.js 注入预缓存清单与内容哈希缓存名
  *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证产物级副本
+ *   dist/serve.py、dist/play.cmd、dist/play.sh — 同上（两种形态都写）
  *
  * 运行时回退（实现在 apps/game/src/app.ts 与 src/ts-shared/auth/shared-state.ts）：
  *   __VBSP_WORKER_JS__ 存在 → Worker 用 Blob URL 装载（file:// 下 module worker 被 CORS 拒）；
@@ -42,6 +44,8 @@ import {
   cleanDist,
   cleanStale,
   copyLicensePair,
+  distLaunchers,
+  DIST_LAUNCHER_FILES,
   printTree,
 } from '../../../src/scripts/lib/dist-pack.mjs';
 
@@ -57,7 +61,7 @@ const MTZ = join(REPO, 'src', 'materials', 'textures.mtz'); // 默认纹理包�
 const HEADER = '/* WebSurf-game embedded build — auto-generated, do not edit */\n'; // 内嵌形态 app.js 的 banner
 
 // single 形态保留的 dist/ 顶层文件（cleanStale 按它删掉多余文件）
-const KEEP_SINGLE = ['index.html', 'app.js', 'styles.css', 'coi-serviceworker.js', 'LICENSE.cs-movement', 'NOTICE.cs-movement'];
+const KEEP_SINGLE = ['index.html', 'app.js', 'styles.css', 'coi-serviceworker.js', ...DIST_LAUNCHER_FILES, 'LICENSE.cs-movement', 'NOTICE.cs-movement'];
 // multi 形态保留的 dist/ 顶层文件（多出 worker.js、外置 wasm / 纹理包与 coi-serviceworker.js）
 const KEEP_MULTI = [
   'index.html',
@@ -67,6 +71,7 @@ const KEEP_MULTI = [
   WASM_FILE,
   'textures.mtz',
   'coi-serviceworker.js',
+  ...DIST_LAUNCHER_FILES,
   'LICENSE.cs-movement',
   'NOTICE.cs-movement',
 ];
@@ -208,6 +213,20 @@ async function buildMulti(wasmPath) {
   console.log(`[multi] 注入 SW 预缓存清单: ${precacheManifest.length} 个资源`);
 }
 
+/**
+ * dist 自带的**本地预览启动器**（`serve.py` / `play.cmd` / `play.sh`）。
+ *
+ * 契约与 viewer / debug 完全同一份实现（`dist-pack.mjs` 的 `distLaunchers`，T-628 收敛）：双击即起静态
+ * 服务并打开浏览器，`python` 优先、缺失回退 `npx serve`。game 不认 `?replay=` 深链 ⇒ 不传 `demoReplay`。
+ * 端口取 8091，与 dev 端口 8090 同尾数。
+ */
+function writeLaunchers() {
+  const { servePy, playCmd, playSh } = distLaunchers({ appName: 'WebSurf-game', port: 8091 });
+  writeFileSync(join(DIST, 'serve.py'), servePy);
+  writeFileSync(join(DIST, 'play.cmd'), playCmd); // 已是 CRLF，不要再replace
+  writeFileSync(join(DIST, 'play.sh'), playSh);
+}
+
 async function main() {
   const wasmPath = requireInputs();
 
@@ -216,6 +235,9 @@ async function main() {
 
   if (multi) await buildMulti(wasmPath);
   else await buildSingle(wasmPath);
+
+  // 启动器（两种形态都写）：必须在 cleanStale 之前写，且名字已在 KEEP 名单里，否则会被当残留删掉
+  writeLaunchers();
 
   // 许可证产物级副本：唯一源是 src/phys/ 的 LICENSE / NOTICE（copyLicensePair 缺源即抛错）
   await copyLicensePair({

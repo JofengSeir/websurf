@@ -30,7 +30,7 @@ npm run dev            # python ../../src/scripts/serve.py 8080 .
 | `apps/<app>/start.cmd` | **只启动**，不做任何构建：服务已打包的 `dist/`（缺 `dist/` 会提示先跑 `build.cmd`）；viewer 存在 `dist\play.cmd` 时转给它 | debug 8081 / game 8091 / viewer 8101 |
 | `apps/<app>/stop.cmd` | **停止服务**：按端口（dev + start 两个）找 LISTENING 进程，只杀 python（不误伤同端口的外部程序）；可选参数指定单端口。dev 服务的独立最小化窗口（标题 `WebSurf-<app> dev server :<port>`）关窗或本脚本均可停止 | debug 8080+8081 / game 8090+8091 / viewer 8100+8101 |
 
-**静态服务**：`src/scripts/serve.py` 只做一件事——按正确 MIME 提供本地文件：端口取 `argv[1]`（默认 8080，`src/scripts/serve.py:19`），服务根取 `argv[2]`（`src/scripts/serve.py:20`），启动时 `os.chdir` 到该根（`src/scripts/serve.py:21`），并为所有响应加 COOP/COEP，页面才能拿到 `SharedArrayBuffer`。
+**静态服务**：`src/scripts/serve.py` 只做一件事——按正确 MIME 提供本地文件：端口取 `argv[1]`（默认 8080，`src/scripts/serve.py:20`），服务根取 `argv[2]`（`src/scripts/serve.py:21`），启动时 `os.chdir` 到该根（`src/scripts/serve.py:22`），并为所有响应加 COOP/COEP，页面才能拿到 `SharedArrayBuffer`。
 
 ## 2. 参与与许可
 

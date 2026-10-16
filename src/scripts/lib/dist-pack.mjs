@@ -198,6 +198,181 @@ export async function copyLicensePair({
  * 递归目录树：目录行 `  名字/` + 子项，文件行 `  名字  N KB`（N = size / 1024 取整）。
  * 返回字符串数组，调用方 join 换行后打印。
  */
+/**
+ * dist 自带的**本地预览启动器**（三个文件，由构建脚本内联生成，见各工程 `scripts/build-dist.mjs`）。
+ *
+ * 契约（三端一致，T-628 收敛到这一份实现）：
+ *   `serve.py` 起静态服务（补 `.wasm` / `.bsp` / `.js` / `.mjs` 的 MIME + no-cache + 允许跨域），
+ *   `play.cmd`（Windows）与 `play.sh`（macOS/Linux）双击即用：`python` 优先，
+ *   缺失时回退 `npx --yes serve -l <port> .`，两者都缺则打印安装指引后退出。
+ *
+ * @param appName 展示名（`WebSurf-viewer` / `WebSurf-debug` / `WebSurf-game`）
+ * @param port 默认端口（viewer 8101 / debug 8081 / game 8091，与各端 dev 端口同尾数）
+ * @param demoReplay 可选的示例录像（相对 dist 的路径，如 `assets/maps/surf_null_4.replay`）——
+ *   只有认这条深链的端才传（当前只有 viewer）；不传时启动器里不出现示例地址那几行。
+ * @returns `{ servePy, playCmd, playSh }`；**`playCmd` 已转 CRLF**
+ *   （cmd.exe 解析 LF-only 批处理会把行撕开执行，这一步不能留给调用方）。
+ */
+export function distLaunchers({ appName, port, demoReplay = '' }) {
+  const demoPy = demoReplay
+    ? `DEMO = "/index.html?replay=${demoReplay}"
+
+
+`
+    : '';
+  const demoPrintPy = demoReplay
+    ? `    if os.path.isdir(os.path.join(ROOT, "assets")):
+        print(f"  Demo: http://localhost:{PORT}{DEMO}")
+`
+    : '';
+  const servePy =
+    `"""${appName} 静态服务器（本地预览；部署时任意静态托管均可）。
+
+用法：python serve.py [port]   # 默认 ${port}，服务目录 = 本脚本所在目录
+"""
+import http.server
+import socketserver
+import os
+import sys
+
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else ${port}
+ROOT = os.path.dirname(os.path.abspath(__file__))
+os.chdir(ROOT)
+
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        ".wasm": "application/wasm",
+        ".bsp": "application/octet-stream",
+        ".js": "text/javascript; charset=utf-8",
+        ".mjs": "text/javascript; charset=utf-8",
+        ".html": "text/html; charset=utf-8",
+    }
+
+    def end_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write(f"{self.address_string()} - {fmt % args}\\n")
+
+
+${demoPy}class Server(socketserver.TCPServer):
+    # SO_REUSEADDR：关窗后立刻重开不会被 TIME_WAIT 卡死（"通常每个套接字地址
+    # 只允许使用一次"）；占用中的活动端口仍会报错，由下方 OSError 提示兜底
+    allow_reuse_address = True
+
+
+try:
+    server = Server(("", PORT), Handler)
+except OSError as e:
+    print(f"[ERROR] 端口 {PORT} 无法监听：{e}")
+    print(f"[HINT] 端口可能已被占用——换一个端口：python serve.py {PORT + 1}")
+    sys.exit(1)
+
+with server:
+    print(f"Serving {ROOT} at http://localhost:{PORT}/")
+    print(f"  App:  http://localhost:{PORT}/index.html")
+${demoPrintPy}    print("  Quit: Ctrl+C")
+    sys.stdout.flush()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\\nShutting down.")
+`;
+  const demoEchoCmd = demoReplay
+    ? `echo   demo    http://localhost:%PORT%/index.html?replay=${demoReplay}
+`
+    : '';
+  const playCmd = (
+    `@echo off
+chcp 65001 >nul
+rem ${appName} local preview: serve dist and open browser (Windows)
+rem usage: play.cmd [port] (default ${port}; close this window to stop, Ctrl+C also works)
+setlocal EnableExtensions
+cd /d "%~dp0"
+
+set PORT=${port}
+if not "%~1"=="" set PORT=%~1
+
+rem -- toolchain: python first, fallback to npx serve --
+where python >nul 2>nul
+if errorlevel 1 (
+  echo [WARN] python not found -- install Python 3 first ^(https://www.python.org/downloads/^).
+  where npx >nul 2>nul
+  if errorlevel 1 (
+    echo [WARN] npx not found either -- install Node.js ^(https://nodejs.org/^).
+    echo [HINT] install Python 3 or Node.js and retry; or run: npx serve -l %PORT% .
+    pause
+    exit /b 1
+  )
+  echo [INFO] python missing - using Node fallback: npx serve.
+  echo [INFO] starting: npx --yes serve -l %PORT% .
+  start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
+  npx --yes serve -l %PORT% .
+  exit /b %errorlevel%
+)
+
+echo ============================================================
+echo  ${appName} local preview ^(close this window to stop^)
+echo   page    http://localhost:%PORT%/index.html
+${demoEchoCmd}echo ============================================================
+rem open browser after 1s (async, does not block server startup)
+start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/index.html"
+python serve.py %PORT%
+`
+  ).replace(/\n/g, '\r\n');
+  const demoEchoSh = demoReplay
+    ? `echo "  示例    http://localhost:$PORT/index.html?replay=${demoReplay}"
+`
+    : '';
+  const playSh = `#!/usr/bin/env bash
+# ${appName} 本地预览：起静态服务并自动打开浏览器（macOS/Linux）
+# 用法：./play.sh [port]（默认 ${port}；关闭本窗口即停止服务，Ctrl+C 亦可）
+set -e
+cd "$(dirname "$0")"
+PORT="\${1:-${port}}"
+
+open_browser() {
+  ( sleep 1
+    if command -v xdg-open >/dev/null 2>&1; then xdg-open "http://localhost:$PORT/index.html" >/dev/null 2>&1
+    elif command -v open >/dev/null 2>&1; then open "http://localhost:$PORT/index.html" >/dev/null 2>&1
+    fi
+  ) &
+}
+
+if command -v python3 >/dev/null 2>&1; then PY=python3
+elif command -v python >/dev/null 2>&1; then PY=python
+else
+  echo "[HINT] 未找到 python —— 请先安装 Python 3（https://www.python.org/downloads/）。"
+  if command -v npx >/dev/null 2>&1; then
+    echo "[HINT] 使用 Node 备选：npx serve（python 缺失，自动安装并启动）。"
+    echo "[HINT] 正在启动：npx --yes serve -l $PORT ."
+    open_browser
+    exec npx --yes serve -l "$PORT" .
+  fi
+  echo "[HINT] 也未找到 npx —— 需要 Node.js（https://nodejs.org/）。"
+  echo "[HINT] 手动备选：安装 Python 3 或 Node.js 后重试；或装好任意静态服务器后运行  npx serve -l $PORT ."
+  exit 1
+fi
+
+echo "============================================================"
+echo " ${appName} 本地预览（关闭本窗口即停止服务；Ctrl+C 亦可）"
+echo "  普通页  http://localhost:$PORT/index.html"
+${demoEchoSh}echo "============================================================"
+open_browser
+exec "$PY" serve.py "$PORT"
+`;
+  return { servePy, playCmd, playSh };
+}
+
+/**
+ * `cleanStale` 的保留名单里要带上启动器三个文件名 —— 漏了会在下一步被当成残留删掉。
+ */
+export const DIST_LAUNCHER_FILES = ['serve.py', 'play.cmd', 'play.sh'];
+
 export async function printTree(dir) {
   const out = [];
   for (const name of (await readdir(dir)).sort()) {
