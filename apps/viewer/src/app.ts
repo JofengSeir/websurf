@@ -541,6 +541,11 @@ function setLoadBusy(busy: boolean): void {
 async function loadBsp(file: File): Promise<void> {
   if (bspLoading) return;
   bspLoading = true;
+  // 关闭确认（Ctrl+W）在这里就武装：与 game 的 `handleLoadBsp`、debug 的 `routeFile` 同口径
+  //（两边都在解析之前赋值）。原先只在解析成功之后赋值 ⇒ 载图途中（大图几十秒）按 Ctrl+W
+  // 会直接关掉、连一次确认都没有，三端行为不一致；放在这里还能覆盖拖放进来的文件
+  //（拖放不走 `#bspFile` 的 change）。
+  loadedMapName = file.name;
   setLoadBusy(true);
   hud.clearGuideError();
   const prevStatus = hud.statusText(); // 换图失败后要还原的旧地图摘要
@@ -562,7 +567,7 @@ async function loadBsp(file: File): Promise<void> {
     //（都走 resolveInitialSpawn 这一个入口）。
     const init = resolveInitialSpawn(result.spawnPoints, result.primary, currentBox);
     mapPanel?.setMap(result, currentBox, init?.index);
-    loadedMapName = file.name; // T-056：关闭确认只在此后拦
+    loadedMapName = file.name; // 与换图入口同口径（守卫在交文件时就已武装，这里只是重复一次同名赋值）
     updateReplayMapStatus();
 
     const glbKb = Math.round(result.glbBytes.byteLength / 1024);
@@ -619,7 +624,9 @@ function initialPoseNote(init: ResolvedSpawn | null): string {
 bspFileInput?.addEventListener('change', () => {
   const file = bspFileInput.files?.[0];
   bspFileInput.value = '';
-  if (file) void loadBsp(file);
+  if (file) {
+    void loadBsp(file); // 守卫在 loadBsp 内部武装（覆盖拖放与输入两条路）
+  }
 });
 // 引导层第二条按钮走的输入：不预设类型，一律按内容分派
 importFileInput?.addEventListener('change', () => {
