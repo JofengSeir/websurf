@@ -225,7 +225,15 @@ export class NetContext {
    * 并实时滚动到当前那条（owner 要求：进度走到哪儿、光打到哪儿，且那条必须在视野里）。
    * 只留文本的话这件事没有任何依据可算 —— 时间戳与文本一样是解析产物。
    */
-  readonly chat: Array<{ tick: number; text: string }> = [];
+  /**
+   * 留档的文本消息（见 `CHAT_LINE_LIMIT`）。`from` = **发送者槽位**（`SayText2` 载荷首字节
+   * `ent_idx`，0..63）；`svc_Print` / `svc_StringCmd` / `svc_Disconnect` 这类服务端打印没有发送者，记 null。
+   *
+   * 为什么必须留它（T-712）：服务器会给玩家改名（实测同一账号 userinfo 叫「她不一样」、聊天里却是
+   * 带服务器前缀的 `[yuzusoft] GalgameEnjoyer1337`），按名字对不上就永远连不回账号；而 `ent_idx` 是
+   * **槽位**，与 userinfo 时间线同一坐标系 ⇒ 能把发言唯一地归到某个 guid。
+   */
+  readonly chat: Array<{ tick: number; text: string; from: number | null }> = [];
   /**
    * 字符串表**序号 → 表名**（按 `dem_stringtables` 的创建顺序）。
    *
@@ -467,7 +475,7 @@ function dispatch(type: number, r: BitReader, ctx: NetContext, stats: DemoParseS
       // 文本消息：内含服务器打印/聊天/连接公告（「X connected」之类），是**不依赖实体流**的
       // 玩家名单来源，故留档供上层取用（限量，避免长录像把内存吃光）。
       const text = r.str();
-      if (ctx.chat.length < CHAT_LINE_LIMIT) ctx.chat.push({ tick: currentTickRef.tick, text });
+      if (ctx.chat.length < CHAT_LINE_LIMIT) ctx.chat.push({ tick: currentTickRef.tick, text, from: null });
       return !r.overflowed;
     }
     case NetMsgType.ServerInfo:
@@ -547,7 +555,10 @@ function dispatch(type: number, r: BitReader, ctx: NetContext, stats: DemoParseS
         const bytes = r.readBytes(Math.min(Math.ceil(umBits / 8), 512));
         r.overflowed = wasOvf; // 载荷截断只影响本条文本，不能拖垮整包
         const text = decodeSayText2(bytes);
-        if (text.length > 0 && ctx.chat.length < CHAT_LINE_LIMIT) ctx.chat.push({ tick: currentTickRef.tick, text });
+        // 载荷首字节 = `ent_idx`（发送者槽位），第二字节 = `bWantsToChat`；文本能正确解出说明
+        // 载荷是字节对齐的（否则整段文本会是被移位搅烂的乱码）。槽位越界时如实记 null，不硬猜。
+        const from = bytes.length > 0 && bytes[0] <= 63 ? bytes[0] : null;
+        if (text.length > 0 && ctx.chat.length < CHAT_LINE_LIMIT) ctx.chat.push({ tick: currentTickRef.tick, text, from });
         r.seek(pos0 + umBits);
         return !r.overflowed;
       }

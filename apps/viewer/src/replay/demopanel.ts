@@ -973,7 +973,30 @@ export class DemoPanel {
 
   /** 重建别名表（落盘的别名变化后调用：userinfo 名字 + 连接行 + 手工映射一起重算）。 */
   private rebuildAliases(): void {
-    this.aliases = buildAliasRegistry(this.result?.chat ?? [], this.accountNames());
+    this.aliases = buildAliasRegistry(
+      this.result?.chat ?? [],
+      this.accountNames(),
+      // 发送者槽位 → guid：聊天行的 `from`（ent_idx）与 userinfo 同一坐标系，据此把发言连回账号
+      (slot, tick) => {
+        const at = this.nameAndGuidAtSlot(slot, tick);
+        return at ? at.guid : '';
+      },
+    );
+  }
+
+  /** 某槽位在 tick 时刻的 userinfo 名字与 guid（取最后一个 <= tick 的快照；没有则 null）。 */
+  private nameAndGuidAtSlot(slot: number, tick: number): { name: string; guid: string } | null {
+    let best: { name: string; guid: string } | null = null;
+    for (const snap of userinfoTimeline) {
+      if (snap.tick > tick) break;
+      for (const e of snap.entries) {
+        if (e.idx !== slot) continue;
+        for (const rec of decodePlayerInfoRecords(e.value, e.idx)) {
+          if (rec.slot === slot) best = { name: rec.name, guid: rec.guid };
+        }
+      }
+    }
+    return best;
   }
 
   /** 更新并入格下方的状态行与候选名字列表（候选 = 别名表里"连不到账号"的那些）。 */

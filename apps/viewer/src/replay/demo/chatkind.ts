@@ -151,7 +151,11 @@ export function stripChatPrefixes(text: string): string {
   for (let i = 0; i < 6; i++) {
     const before = s;
     s = s.replace(/^\*[^*]{1,16}\*\s*/, ''); // *SPEC* / *DEAD*
-    s = s.replace(/^\([^)]{1,16}\)\s*/, ''); // (Spectator) / (CT) / (T)
+    // **客户端号 / 编号**：别的服会在最前面印 `c86`、`727`（T-712 实测）。不剥掉的话它挡在
+    // 方括号标签前面，后面的 `[ A d m i n ]` 永远剥不到 ⇒ 整条落到兜底。
+    s = s.replace(/^[A-Za-z]?\d{1,4}\s*/, '');
+    // 队伍名最长见 `(Counter-Terrorist)`（括号内 17 字符）—— 原先上限 16 会整条漏掉（T-712 实测）。
+    s = s.replace(/^\([^)]{1,24}\)\s*/, ''); // (Spectator) / (Counter-Terrorist) / (CT) / (T)
     // 方括号两边都**必须转义**：JS 里 `[]]` 会被解析成「空字符类 + 字面量 ]」⇒ 永不匹配
     // （这一版就是踩了这个：`*SPEC*` 剥掉了、`[ 标签 ]` 没剥掉，于是聊天全落到兜底 —— 实测 62 条）
     s = s.replace(/^\[[^\]]{1,24}\]\s*/, ''); // [ 标签 ]（含 [ V e t e r a n ] 这种字间带空格的）
@@ -233,6 +237,26 @@ export const CHAT_RULE_HINT: Record<ChatRule, string> = {
 };
 
 /** 分类结果 + 命中的判据（`classifyChat` 是它的薄封装）。 */
+/**
+ * 从一条消息里取出**说话人**（取不到给空串）。
+ *
+ * 分类与「聊天名字连回账号」共用这一处口径 —— 两边各写一套前缀规则就会各自漏一种形态
+ * （T-712 实测：分类漏了 `c86[…]` / `(Counter-Terrorist)`，身份表又把计时播报 `- 地图剩余时间`
+ * 当成了发言人）。
+ */
+export function parseSpeaker(text: string): string {
+  const body = stripChatPrefixes(text);
+  const m = /^([^:：<>]{1,40}?)\s*[:：]\s*\S/.exec(body);
+  if (m) return m[1].trim();
+  // **无冒号形态**：`*SPEC* cnm 为什么过不去`（观察者发言实测就长这样）。只认行首带状态星标的，
+  // 否则服务端打印（`- 地图剩余时间 5:00`）也会被抓成发言人。
+  if (/^\s*\*[^*]{1,16}\*/.test(text)) {
+    const m2 = /^([^\s:：<>]{1,40})\s+\S/.exec(body);
+    if (m2) return m2[1].trim();
+  }
+  return '';
+}
+
 export function classifyChatDetailed(text: string): { kind: ChatKind; rule: ChatRule } {
   if (RE_JOIN_ARROW.test(text)) return { kind: 'join', rule: 'join-arrow' };
   if (RE_JOIN_WORDS.test(text)) return { kind: 'join', rule: 'join-words' };
@@ -241,10 +265,7 @@ export function classifyChatDetailed(text: string): { kind: ChatKind; rule: Chat
   // 玩家对话：剥掉**可叠加的**前缀（`*SPEC*` / `(Spectator)` / `[ 标签 ]`）后是「说话人: 正文」。
   // 注意顺序：带标签的服务器播报（`[ Timer ] - 正文`）在上面已被 announce-shape 认走，
   // 所以这里剥到「`地图剩余时间: 20 分钟。`」也不会被误判成聊天。
-  const body = stripChatPrefixes(text);
-  if (/^[^:：<>[\]]{1,32}\s*[:：]\s*\S/.test(body)) {
-    return { kind: 'chat', rule: 'chat-speaker' };
-  }
+  if (parseSpeaker(text).length > 0) return { kind: 'chat', rule: 'chat-speaker' };
   return { kind: 'announce', rule: 'fallback' };
 }
 

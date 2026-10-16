@@ -27,11 +27,15 @@ export function steamIdToGuid(raw: string): string {
 }
 
 /** 服务器特色名字前缀：`[tag] 名字` / `[a|b] 名字`（可能叠多层）。 */
+// 发言人 / 前缀归一都复用分类器那一处实现（T-712）：两边各写一套前缀规则必然各自漏形态
+import { classifyChat, parseSpeaker, stripChatPrefixes } from './demo/chatkind.js';
+
 const TAG_RE = /^(\s*\[[^\]]*\]\s*)+/;
 
-/** 归一化名字：剥掉服务器特色前缀并 trim。花名册与按名字找人都用这一套，避免两种写法算两个人。 */
+
+/** 归一化名字：先剥服务器前缀（客户端号 / 状态 / 队伍 / 军衔），再剥特色标签并 trim。 */
 export function normalizeName(s: string): string {
-  return s.replace(TAG_RE, '').trim();
+  return stripChatPrefixes(s).replace(TAG_RE, '').trim();
 }
 
 /**
@@ -109,9 +113,15 @@ export interface AliasRegistry {
  * 其中 `< Admin >` 那种没有 SteamID ⇒ 只能当候选名。
  */
 export function buildAliasRegistry(
-  chat: ReadonlyArray<{ text: string }>,
+  chat: ReadonlyArray<{ text: string; from?: number | null; tick?: number }>,
   /** 已知账号名字（guid → userinfo 里见到的名字）：把聊天候选名按**完全同名**连回账号。 */
   knownNames?: ReadonlyMap<string, ReadonlySet<string>>,
+  /**
+   * **发送者槽位 → guid** 的查询（T-712/T-712）：`SayText2` 的 `ent_idx` 是发言者的槽位，
+   * 与 userinfo 同一坐标系 ⇒ 用它把「聊天里那个名字」直接连到账号，不必再靠用户手工指认。
+   * 返回空串表示该时刻这个槽位没有已知账号。
+   */
+  guidAtSlot?: (slot: number, tick: number) => string,
 ): AliasRegistry {
   const namesByGuid = new Map<string, Set<string>>();
   const guidByName = new Map<string, string>();
@@ -130,6 +140,7 @@ export function buildAliasRegistry(
   };
   for (const line of chat) {
     const text = String(line.text ?? '');
+    // 说明：`line.from`（发送者槽位）与 `line.tick` 由 `net.ts` 的 SayText2 解码提供
     // 连接/断开行：`▲ 名字 < 身份 >`（身份可能是 SteamID、Admin、IP+SteamID 组合）
     const conn = /^[▲▼]\s*(.+?)\s*<([^>]*)>/.exec(text);
     if (conn) {
@@ -141,12 +152,23 @@ export function buildAliasRegistry(
       else unlinkedNames.add(normalizeName(name));
       continue;
     }
-    // 发言行：`[标签] 名字: 正文`
-    const say = /^(\[[^\]]*\]\s*)?([^:<]{1,32}?)\s*[:：]\s+\S/.exec(text);
-    if (say && say[2]) {
-      const name = say[2].trim();
-      const base = normalizeName(name);
-      if (base && !guidByName.has(base)) unlinkedNames.add(base);
+    // 发言行：**只听分类器的判决**（`classifyChat === 'chat'`），说话人再从 parseSpeaker 取。
+    // 为什么不能只看 parseSpeaker：服务器播报 `[ Timer ] - 地图剩余时间: 20 分钟。` 与过关记录
+    // `X 在 Normal模式 下以用时 18.7 完成了 …` **都带冒号**，光看"有冒号"会把它们当发言人
+    // （T-712 实测：`未连上` 里混进了「地图剩余时间」「X 在 Normal模式 下以用时 1」）。
+    // 分类器里「公告形状 / 过关记录」优先级更高，正是为了挡这一类。
+    if (classifyChat(text) !== 'chat') continue;
+    const speaker = parseSpeaker(text);
+    if (speaker.length > 0) {
+      const base = normalizeName(speaker);
+      if (!base) continue;
+      // **优先用发送者槽位连账号**：连上了就把这个名字登记为该账号的别名（发言人自己写什么就是什么）
+      const guid = typeof line.from === 'number' && typeof line.tick === 'number' && guidAtSlot
+        ? guidAtSlot(line.from, line.tick)
+        : '';
+      if (guid) addName(guid, base);
+      else if (!guidByName.has(base)) unlinkedNames.add(base);
+      continue;
     }
   }
   // 收尾：聊天候选名与账号名完全相等 ⇒ 连回该账号（boreas2 的 KKKsc01 就是这种：没有连接行，
@@ -156,6 +178,28 @@ export function buildAliasRegistry(
     for (const cand of [...unlinkedNames]) {
       for (const [guid, names] of knownNames) if (names.has(cand)) { addName(guid, cand); break; }
     }
+  }
+  // **歧义名字不硬猜**（T-712 实测）：服务器会把**显示名**改来改去，同一个显示名可能被两个账号
+  // 先后用过 —— boreas 里 `S-f4Ce` 既出现在 [U:1:1425188194] 的发言里，也出现在槽位 6
+  // （账号 [U:1:162031570]、userinfo 名 GenShinEnjoyer8267）的发言里。这类名字连给谁都是猜，
+  // 一律从表里摘掉、放进 unlinkedNames，交给用户用面板上的「名字并入选中的人」指认一次。
+  const owners = new Map<string, Set<string>>();
+  for (const [guid, names] of namesByGuid) {
+    for (const nm of names) {
+      const set = owners.get(nm) ?? new Set<string>();
+      set.add(guid);
+      owners.set(nm, set);
+    }
+  }
+  for (const [nm, guids] of owners) {
+    if (guids.size <= 1) continue;
+    for (const guid of guids) {
+      const names = namesByGuid.get(guid);
+      names?.delete(nm);
+      if (names && names.size === 0) namesByGuid.delete(guid);
+    }
+    guidByName.delete(nm);
+    unlinkedNames.add(nm);
   }
   return { namesByGuid, guidByName, unlinkedNames };
 }

@@ -98,7 +98,7 @@ export interface DemoParseResult {
    * 玩家名单来源，也是侧栏「对话」区按播放头点亮 / 压暗的依据（容量上限见 `demo/net.ts` 的
    * `CHAT_LINE_LIMIT`）。
    */
-  chat: Array<{ tick: number; text: string }>;
+  chat: Array<{ tick: number; text: string; from: number | null }>;
   /** 录像里的玩家信息（按已验证的 `player_info_s` 布局解码；见 `readPlayerInfos`）。 */
   playerInfos: DemoPlayerInfo[];
   /** 解析结束时每个玩家实体的属性快照（诊断用，仅取关注字段）。 */
