@@ -38,6 +38,9 @@ import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain } from './renderer/renderer-main.js';
 import { PanelController } from './panel/panel-controller.js';
 import { SavePointStore, SAVEPOINT_MAX, type SavePoint } from './savepoint.js';
+import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, readPrefsPath, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js';
+import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js';
+import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
 
 const config: RuntimeConfig = createConfig();
 
@@ -829,6 +832,48 @@ function setError(msg: string): void {
   }
   console.error(`[app] ${msg}`);
 }
+
+// ── 更多画面项（T-688）────────────────────────────────────────────────
+// 控件来自共享规格表；game 只显示本页还没有的项（规格表里 apps 含 game 的那些）。
+/** 面板写档后同步回 config：本页原生控件保存时是拿 \`config.lighting\` 整体覆盖，不同步会被旧值顶掉。 */
+function mirrorRenderPrefToConfig(item: RenderPanelItem, value: RenderPanelValue): void {
+  if (!item.pref) return;
+  if (item.pref.startsWith('lighting.')) {
+    (config.lighting as unknown as Record<string, unknown>)[item.pref.slice('lighting.'.length)] = value;
+  }
+}
+
+function setupRenderPanel(): void {
+  const host = document.getElementById('renderPanel');
+  if (!host) return;
+  const api: RenderPanelApi = {
+    app: 'game',
+    read(item) {
+      return item.pref ? readPrefsPath(readRenderPrefs(), item.pref) : 0;
+    },
+    write(item, value) {
+      if (!item.pref) return; // game 不显示排查开关
+      writeRenderPrefs(prefsPathPatch(item.pref, value));
+      mirrorRenderPrefToConfig(item, value);
+      applyRenderPrefs(readRenderPrefs());
+    },
+    reset(item) {
+      if (!item.pref) return;
+      const def = readPrefsPath(defaultRenderPrefs(), item.pref);
+      writeRenderPrefs(prefsPathPatch(item.pref, def));
+      mirrorRenderPrefToConfig(item, def);
+      applyRenderPrefs(readRenderPrefs());
+    },
+    afterWrite(item) {
+      if (item.apply !== 'live') {
+        console.info('[render-panel] ' + item.label + '：' + (item.apply === 'reload' ? '刷新页面后生效' : '重新加载地图后生效'));
+      }
+    },
+  };
+  buildRenderPanel(host, api);
+}
+
+setupRenderPanel();
 
 void main();
 

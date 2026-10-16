@@ -90,7 +90,8 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     step: 0.01,
     pref: 'lighting.exposure',
     apply: 'live',
-    apps: ALL,
+    // game 面板已有同名控件（走它自己的 config 写档 + setter），面板里不再重复
+    apps: ['debug', 'viewer'],
   },
   {
     id: 'lightGamma',
@@ -103,7 +104,8 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     step: 0.01,
     pref: 'lighting.lightGamma',
     apply: 'live',
-    apps: ALL,
+    // game 面板已有同名控件（走它自己的 config 写档 + setter），面板里不再重复
+    apps: ['debug', 'viewer'],
   },
   {
     id: 'ambientScale',
@@ -116,7 +118,8 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     step: 0.01,
     pref: 'lighting.ambientScale',
     apply: 'live',
-    apps: ALL,
+    // game 面板已有同名控件（走它自己的 config 写档 + setter），面板里不再重复
+    apps: ['debug', 'viewer'],
   },
   {
     id: 'lightFloor',
@@ -255,7 +258,8 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     step: 0.1,
     pref: 'camera.fov',
     apply: 'live',
-    apps: ALL,
+    // game 面板已有「视野 FOV」，不重复
+    apps: ['debug', 'viewer'],
   },
   {
     id: 'nearPlaneScale',
@@ -268,7 +272,8 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     step: 0.05,
     pref: 'extras.nearPlaneScale',
     apply: 'live',
-    apps: ['game'],
+    // debug 与 game 各自有「探测距离 + 收缩系数」两项（setNearParams 体系）；只有 viewer 没有近裁面控件
+    apps: ['viewer'],
   },
   // ── 雾 ──────────────────────────────────────────────────────────────────
   {
