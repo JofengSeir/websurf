@@ -41,6 +41,7 @@ import {
   type DataTables,
   type FlatProp,
   type SendProp,
+  type ServerClass,
 } from './tables.js';
 
 /**
@@ -336,6 +337,46 @@ export class NetContext {
   flattenOptions: { childFirst?: boolean; stablePriority?: boolean; includeInsideArray?: boolean; emitDataTableProps?: boolean } = {};
 
   constructor(readonly dataTables: DataTables) {}
+
+  /**
+   * 按类别 id 取类别（`dataTables.classes.find` 的 **O(1) 替代**，懒建索引、全录像共用）。
+   *
+   * 为什么要它（T-723 profile 实测）：`samplePlayers` 每个数据包都要为**每个已知实体**查一次类别，
+   * 真录像上「每包实体数」中位 74~177，整份录像合计数千万次 `find` —— 线性扫描是那次 profile 里
+   * 采样阶段的主要开销。索引只依赖 `dataTables`，故缓存在上下文里（每次解析新建一个上下文）。
+   */
+  classOf(classId: number): ServerClass | undefined {
+    let m = this.classByIdCache;
+    if (!m) {
+      m = new Map(this.dataTables.classes.map((c) => [c.id, c]));
+      this.classByIdCache = m;
+    }
+    return m.get(classId);
+  }
+
+  /** `classOf` 的索引缓存（首次用到时建，见其注释）。 */
+  private classByIdCache: Map<number, ServerClass> | null = null;
+
+  /**
+   * `m_vecOrigin` 的**候选序**（按所属表优先级排好的展平项），按类别缓存。
+   *
+   * 与 `flatFor` 同类：只依赖类别与展平选项，却曾被 `pickOrigin` 在**每个实体每次采样**时
+   * 重算一遍（`filter` + `sort`；T-723 profile 里数玩家采样数百万次）。排序口径见 `pickOrigin`。
+   */
+  originCands(classId: number): FlatProp[] {
+    let c = this.originCandsCache.get(classId);
+    if (c) return c;
+    const rank = (owner: string): number =>
+      /NonLocalPlayerExclusive/i.test(owner) ? 0 : /LocalPlayerExclusive/i.test(owner) ? 1 : 2;
+    c = this.flatFor(classId)
+      .filter((f) => f.prop.name === 'm_vecOrigin')
+      .sort((a, b) => rank(a.ownerTable) - rank(b.ownerTable));
+    this.originCandsCache.set(classId, c);
+    return c;
+  }
+
+  /** `originCands` 的缓存（见其注释）。 */
+  private originCandsCache = new Map<number, FlatProp[]>();
 
   /** 取某类别展平后的属性序列（缓存）。类别不存在时返回空序列。 */
   flatFor(classId: number): FlatProp[] {

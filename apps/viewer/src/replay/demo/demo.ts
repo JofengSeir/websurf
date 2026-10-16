@@ -896,7 +896,9 @@ function effectiveProp(ctx: NetContext, classId: number, props: EntityProps, key
 }
 
 function pickOrigin(props: EntityProps, ctx: NetContext, classId: number): unknown {
-  const flat = ctx.flatFor(classId);
+  // **候选序按类别缓存**（T-723）：`filter + sort` 只依赖类别（`flatFor` 的结果本来就按类别缓存），
+  // 而它此前是在**每个实体每次采样**时重算一遍（真录像上合计数百万次 filter+sort）。
+  const cands = ctx.originCands(classId);
   // `m_vecOrigin` 在三张表里各有一份：`DT_CSPlayer`（基础定义）、`DT_CSLocalPlayerExclusive`（**本机
   // 玩家**自己的坐标）、`DT_CSNonLocalPlayerExclusive`（**其他玩家**的坐标）。引擎按客户端**只发其中
   // 一份**。本工程处理的是 **SourceTV 录像，视角不属于任何玩家，因此所有玩家都是"非本机"** ——
@@ -904,11 +906,6 @@ function pickOrigin(props: EntityProps, ctx: NetContext, classId: number): unkno
   //（`tf2-demo-parser` 的 `gamestateanalyser.rs`：`DT_TFLocalPlayerExclusive` / `DT_TFNonLocalPlayerExclusive`）。
   // 早先只按 `SPROP_COORD` 过滤、**不看所属表**，可能挑中 Local 那份 —— 位置就此读错（实测玩家槽位
   // 实体的包围盒退化成轴对齐直线、三个实体完全相同）。
-  const rank = (owner: string): number =>
-    /NonLocalPlayerExclusive/i.test(owner) ? 0 : /LocalPlayerExclusive/i.test(owner) ? 1 : 2;
-  const cands = flat
-    .filter((f) => f.prop.name === 'm_vecOrigin')
-    .sort((a, b) => rank(a.ownerTable) - rank(b.ownerTable));
   if (isWorldVec(effectiveProp(ctx, classId, props, 'm_vecOrigin'))) {
     for (const f of cands) {
       const v = effectiveProp(ctx, classId, props, `m_vecOrigin#${f.index}`);
@@ -934,6 +931,18 @@ function isWorldVec(v: unknown): v is [number, number, number] {
 }
 
 /**
+ * 角度归一化到 (-180, 180]。
+ *
+ * 线上角度按 0..360 编码，负角会以 ~350/~360 出现；不归一化时播放会在 10° 与 360° 之间插值、
+ * 扫过 90°（表现为「垂直朝下看」）—— 实测 #3 有 23415 帧落在 |pitch| > 88，其中绝大多数来自这种
+ * 绕回而非真实俯角。T-723 提到模块级：原先在采样循环里现建这个闭包（每实体一次），语义相同。
+ */
+function normAngle(a: number): number {
+  const m = a % 360;
+  return m > 180 ? m - 360 : m <= -180 ? m + 360 : m;
+}
+
+/**
  * 位姿采样：把当前 tick 的实体位姿追加到轨迹上。
  *
  * `mode` 取 `'players'` 时只采玩家类；取 `'posed'` 时采任何「同时有世界坐标与朝向」的实体
@@ -949,14 +958,19 @@ export function samplePlayers(
   mode: 'players' | 'playerPosed' | 'posed' = 'players',
 ): void {
   for (const [entityIndex, classId] of ctx.entityClass) {
-    const cls = dt.classes.find((c) => c.id === classId);
+    // **槽位判据前置**（T-723 profile 实测）：真录像里 `ctx.entityClass` 每包有 74~177 个实体，
+    // 而玩家实体号恒落在 `1..MAX_PLAYER_SLOT`（Source 按最大人数编号）。先做这一次整数比较，就能把
+    // 「每包每个实体一次 `classes.find` + `isPlayerClass` 正则 + 两次 Map 取用」全部省掉 ——
+    // 那是采样阶段的主要开销。
+    // 为什么非要过滤（原注释，逐字保留理由）：实测真录像里 `CCSPlayer` / `CBasePlayer` 会出现在
+    // #78、#120、#147、#196、#225 这类远超槽位的实体号上——那些不可能是玩家（玩家必然占 1..N 的槽位），
+    // 是「实体号 → 类别」误判的产物；不过滤的话 viewer 里会列出「一堆站着不动的玩家」，把真正的玩家淹没掉。
+    // `posed` 口径要所有实体（道具/机关也用），不做这个前置过滤。
+    if (mode !== 'posed' && (entityIndex < 1 || entityIndex > MAX_PLAYER_SLOT)) continue;
+    // 类别查询走 O(1) 索引（`classOf`），不用 `dt.classes.find`（后者在热路径里被调过千万次）
+    const cls = ctx.classOf(classId);
     if (!cls) continue;
     if (mode !== 'posed' && !isPlayerClass(cls.name)) continue;
-    // 玩家槽位过滤：Source 的玩家实体号恒落在 `1..MAX_PLAYERS`（按服务器最大人数，取 64 为上限）。
-    // 实测真录像里 `CCSPlayer` / `CBasePlayer` 会出现在 #78、#120、#147、#196、#225 这类远超槽位的
-    // 实体号上——那些不可能是玩家（玩家必然占 1..N 的槽位），是「实体号 → 类别」误判的产物。
-    // 不过滤的话，viewer 里会列出「一堆站着不动的玩家」，把真正的玩家淹没掉。
-    if (mode !== 'posed' && (entityIndex < 1 || entityIndex > MAX_PLAYER_SLOT)) continue;
     const props = ctx.entityProps.get(entityIndex);
     if (!props) continue;
     if (diag) {
@@ -969,22 +983,14 @@ export function samplePlayers(
     const origin = pickOrigin(props, ctx, classId);
     // 视角：`m_angEyeAngles` 是「向量元素组」合并后的一项（元素 0 = 俯仰，元素 1 = 偏航）；
     // 若展平未合并则退回 `m_angEyeAngles[0]` / `[1]` 两个独立属性名；再退回 `m_angRotation`。
+    // **每个属性只取一次**（T-723：原先在嵌套三元里把同一个 key 取两遍，等于每个实体多跑 2~3 次
+    // `effectiveProp` —— 它要走「本帧 delta → 类基线」两条 Map）。
     const eye = effectiveProp(ctx, classId, props, 'm_angEyeAngles');
     const rot = effectiveProp(ctx, classId, props, 'm_angRotation');
-    const yaw = Array.isArray(eye)
-      ? eye[1]
-      : typeof effectiveProp(ctx, classId, props, 'm_angEyeAngles[1]') === 'number'
-        ? effectiveProp(ctx, classId, props, 'm_angEyeAngles[1]')
-        : Array.isArray(rot)
-          ? rot[1]
-          : undefined;
-    const pitch = Array.isArray(eye)
-      ? eye[0]
-      : typeof effectiveProp(ctx, classId, props, 'm_angEyeAngles[0]') === 'number'
-        ? effectiveProp(ctx, classId, props, 'm_angEyeAngles[0]')
-        : Array.isArray(rot)
-          ? rot[0]
-          : undefined;
+    const eye0 = Array.isArray(eye) ? eye[0] : effectiveProp(ctx, classId, props, 'm_angEyeAngles[0]');
+    const eye1 = Array.isArray(eye) ? eye[1] : effectiveProp(ctx, classId, props, 'm_angEyeAngles[1]');
+    const yaw = Array.isArray(eye) ? eye[1] : typeof eye1 === 'number' ? eye1 : Array.isArray(rot) ? rot[1] : undefined;
+    const pitch = Array.isArray(eye) ? eye[0] : typeof eye0 === 'number' ? eye0 : Array.isArray(rot) ? rot[0] : undefined;
     if (diag) {
       if (Array.isArray(origin)) diag.originOk++;
       if (typeof yaw === 'number') diag.yawOk++;
@@ -999,15 +1005,12 @@ export function samplePlayers(
     // - `posed`      任何有坐标的实体（含非玩家），朝向缺失记 0。
     const hasAng = typeof yaw === 'number' && typeof pitch === 'number';
     if (!hasAng && mode === 'players') continue;
-    // 角度归一化到 (-180, 180]：线上角度按 0..360 编码，负角会以 ~350/~360 出现。
+    // 角度归一化到 (-180, 180]（`normAngle`）：线上角度按 0..360 编码，负角会以 ~350/~360 出现。
     // 不归一化时播放会在 10° 与 360° 之间插值、扫过 90°（表现为「垂直朝下看」）——
     // 实测 #3 有 23415 帧落在 |pitch| > 88，其中绝大多数来自这种绕回而非真实俯角。
-    const norm = (a: number): number => {
-      const m = a % 360;
-      return m > 180 ? m - 360 : m <= -180 ? m + 360 : m;
-    };
-    const yawV = hasAng ? norm(yaw as number) : 0;
-    const pitchV = hasAng ? norm(pitch as number) : 0;
+    // （T-723：原来在循环里现建这个闭包，每个实体一次；语义相同，提到模块级。）
+    const yawV = hasAng ? normAngle(yaw as number) : 0;
+    const pitchV = hasAng ? normAngle(pitch as number) : 0;
     let track = tracks.find((t) => t.entityIndex === entityIndex);
     if (!track) {
       track = { entityIndex, classId, className: cls.name, dtName: cls.dtName, samples: [] };
