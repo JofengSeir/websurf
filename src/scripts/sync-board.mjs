@@ -9,6 +9,12 @@
  *   node src/scripts/sync-board.mjs --status                         # 只比「磁盘 sha12 vs 台账 sha12」，失配 exit 1
  *
  * 切块口径与迁移时一致：按记录边界（表格行/列表项/标题/有序项）切，上限 8192 字节；末尾补一条 #index0 索引。
+ *
+ * **重迁的写入顺序（T-729 实测的坑）**：库里同 marker 再写一条时，服务端**会按同源/相似内容自动
+ * supersede 既有条目**（新条目的 `supersedes` 指向旧 id）。所以写入方必须**只建不删** ——
+ * 先建新条目、再把旧条目删掉，会让新条目挂着一个已不存在的 id（`check-kb-gate` 的
+ * `dangling-supersedes`）。要修这种悬空只有一条路：**先删该 marker 的全部版本，再建**。
+ * `--done` 不删任何库内条目；老版本作为被 supersede 的历史版本保留即可。
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -139,13 +145,23 @@ if (flag('done')) {
     if (pairs.length !== need.length) { console.error('--done 需要 ' + need.length + ' 条，只解析到 ' + pairs.length + ' 条 ⇒ 先按计划逐条 memory_save，或显式传 --ids marker=id,...'); process.exit(2); }
   }
   const keep = ledger().filter((e) => e.source !== SRC);
+  // **豁免标记随行保留**（T-729）：`index_exempt` / `audit_exempt` 是**这一行**（同 source + kind + seq）
+  // 的性质，不因重迁（内容变 ⇒ 新 sha12）而改变 —— 早先这里一律重写新行，于是每次看板重迁都会把
+  // 看板索引那条的 `index_exempt`（>16 KiB 的显式豁免）与历史行的 `audit_exempt` 悄悄丢掉，
+  // 下一次 `check-kb-gate --all` 就多出几条 blocking。键用 `kind+seq`（marker 里的 sha12 每次都变）。
+  const prevByKey = new Map(ledger().filter((e) => e.source === SRC).map((e) => [e.kind + e.seq, e]));
   for (const it of pairs) {
+    const kind = /#index/.test(it.marker) ? 'index' : 'chunk';
+    const seq = Number((it.marker.match(/#chunk(\d+)/) || [])[1] || 0);
+    const prev = prevByKey.get(kind + seq) ?? {};
+    const carried = {};
+    for (const f of ['index_exempt', 'audit_exempt']) if (prev[f] !== undefined) carried[f] = prev[f];
     keep.push({
       marker: it.marker, source: SRC,
-      kind: /#index/.test(it.marker) ? 'index' : 'chunk',
-      seq: Number((it.marker.match(/#chunk(\d+)/) || [])[1] || 0),
+      kind, seq,
       memoryId: it.memoryId,
       at: new Date().toISOString().slice(0, 10),
+      ...carried,
       retired: true, shape: 'snapshot',
     });
   }

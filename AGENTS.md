@@ -92,7 +92,7 @@ node src/scripts/check-memory-sync.mjs             # 记忆库同步：stale / o
 node src/scripts/check-memory-sync.mjs --keys      # markers == entries
 node src/scripts/docflow.mjs check                 # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
 node src/scripts/check-kb-doc-drift.mjs --strict    # 记忆库「现状文档」锚点体检（documents/** 的 路径:行号 对当前源码；失效/越界即失败；库不可达 SKIP）
-node src/scripts/check-kb-gate.mjs --all           # 闸 B（库侧）：分档大小（chunk/errata ≤8 KiB、index ≤16 KiB）/ 悬空 supersedes / 头部规范 / 重迁须 supersede；写入闸门用 `--row-file`（close-round --done 已内置）
+node src/scripts/check-kb-gate.mjs --all           # 闸 B（库侧）：分档大小（chunk/errata ≤8 KiB、index ≤16 KiB）/ 悬空 supersedes / 头部规范 / 重迁须 supersede；写入闸门用 `--row-file`（close-round --done 已内置）；历史冻结件（台账行 `audit_exempt`）在 --all 里单列 exempt、不计 blocking，写入闸不认该标记
 node src/scripts/kb-fallback.mjs probe           # 知识库可用性：L1 工具 / L2 HTTP / L3 仓库兜底，并列出待补写条目
 node src/scripts/close-round.mjs --check-round --staged  # 留痕检查（钩子同口径）；--note/--done 见脚本头注释
 node src/scripts/sync-board.mjs                    # 改了看板 board.jsonl 后重迁入库：不带参数打印计划 → 逐条 memory_save → `--done`（自动按 marker 认 id）落台账
@@ -108,7 +108,7 @@ cd apps/<app> && npm run typecheck                 # TS 侧
 **两道闸门 + 一道库侧闸（闸 B）**：
 ① **记忆库同步**（`check-memory-sync.mjs`）：台账里每个 marker 的 sha12 必须与磁盘源文件一致（源变 ⇒ 条目已陈旧）；迁出的源须标 `retired`；迁出范围内不得漏迁；`cross_project_leak` 必须为 0（marker 项目前缀 `websurf/`）。**可判定口径**：一条内容可不可用，判据是**它的 sha 是否与仓库当前文件一致**，不是它「来自文档还是来自记忆库」。
 ② **检索质量回归**（无脚本，用 MCP 跑）：`memory_smart_search` 的命中结果必须遍历内容断言目标 marker **精确出现**——**分数与命中数都不能判存在性**；正确做法是 `GET http://localhost:3113/memories?limit=1000` 取全量再按 marker 比对。
-③ **闸 B**（`check-kb-gate.mjs`，库侧，`src/scripts/**`）：`--all` 审存量、`--row-file` 当**写入闸门**（`close-round --done` 已内置，非 0 即拒写台账）。四条：分档大小（`chunk`/`errata` ≤8 KiB、`index` ≤16 KiB）、悬空 `supersedes`、头部规范（首行 `[线索]` + `主题：`/`摘要：`）、**重迁须 supersede 旧条目**。
+③ **闸 B**（`check-kb-gate.mjs`，库侧，`src/scripts/**`）：`--all` 审存量、`--row-file` 当**写入闸门**（`close-round --done` 已内置，非 0 即拒写台账）。四条：分档大小（`chunk`/`errata` ≤8 KiB、`index` ≤16 KiB）、悬空 `supersedes`、头部规范（首行 `[线索]` + `主题：`/`摘要：`）、**重迁须 supersede 旧条目**。**历史冻结件豁免（`T-729`，owner 2026-10-17 批准口径）**：台账行带 `audit_exempt`（值 = 理由）时，`--all` **只**把「口径类」违规（体积三条 + 悬空 `supersedes` + 重迁未 supersede）转成 `exempt_rows` / `exempt_by_rule` **单列展示**、不计入 `blocking_rows`；**结构类**（marker 形状/重复、条目不在库、头部规范、sha12/源缺失）照旧硬查；**写入闸不认这个标记**——新行自带 `audit_exempt` 直接报 `exemption-not-allowed-for-new-rows`。
 
 **全量闸门**：漂移体检 A–P 全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；`check-memory-sync.mjs` 全 0；`check-kb-gate.mjs --all` 无新增阻塞。
 
