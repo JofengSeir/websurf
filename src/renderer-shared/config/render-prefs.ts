@@ -33,6 +33,8 @@ import {
   setPropVertexRelax,
   setPropVertexFlatten,
   setLightingMode,
+  setLightFloor,
+  setFogMaxDensity,
   type LightingMode,
 } from '../shader/lightmap-shader.js';
 
@@ -99,12 +101,38 @@ export interface RenderLightingPrefs {
   mode: LightingMode;
 }
 
+/**
+ * 面板可调、但不属于既有四段的渲染项（T-686）。
+ *
+ * 这些值都有「本模块之外的真实默认」——数字抄自各自实现的常量，改这里就等于改默认档：
+ * \`lightFloor\` 0（关）、\`propCubeGain\` 2.44（\`PROP_CUBE_GAIN\`）、\`bumpStrength\` 0.35、
+ * \`bumpDetail\` 0.6、\`fogMaxDensity\` 0（不限制）、\`nearPlaneScale\` 1（不缩放自动近裁面）。
+ */
+export interface RenderExtrasPrefs {
+  lightFloor: number;
+  propCubeGain: number;
+  bumpStrength: number;
+  bumpDetail: number;
+  fogMaxDensity: number;
+  nearPlaneScale: number;
+}
+
+export const RENDER_EXTRAS_DEFAULTS: RenderExtrasPrefs = {
+  lightFloor: 0,
+  propCubeGain: 2.44,
+  bumpStrength: 0.35,
+  bumpDetail: 0.6,
+  fogMaxDensity: 0,
+  nearPlaneScale: 1,
+};
+
 export interface RenderPrefs {
   version: number;
   lighting: RenderLightingPrefs;
   textureQuality: TextureQualityPref;
   culling: { distance: number; pvs: boolean };
   camera: { fov: number };
+  extras: RenderExtrasPrefs;
 }
 
 /** 写入用补丁（逐段合并，缺省字段保持原值）。 */
@@ -113,6 +141,7 @@ export interface RenderPrefsPatch {
   textureQuality?: TextureQualityPref;
   culling?: Partial<RenderPrefs['culling']>;
   camera?: Partial<RenderPrefs['camera']>;
+  extras?: Partial<RenderExtrasPrefs>;
 }
 
 /** 相机 FOV 默认值（度）：三端现状一致（`apps/game/src/config.ts` 的 `hud.fov`、debug/viewer 的常量都是 73.6）。 */
@@ -132,6 +161,7 @@ export function defaultRenderPrefs(): RenderPrefs {
     textureQuality: 'original',
     culling: { distance: RENDER_DEFAULT_CULL_DISTANCE, pvs: RENDER_DEFAULT_PVS },
     camera: { fov: RENDER_DEFAULT_FOV },
+    extras: { ...RENDER_EXTRAS_DEFAULTS },
   };
 }
 
@@ -148,6 +178,7 @@ function normalize(raw: unknown): RenderPrefs {
   const l = (o.lighting ?? {}) as Record<string, unknown>;
   const c = (o.culling ?? {}) as Record<string, unknown>;
   const cam = (o.camera ?? {}) as Record<string, unknown>;
+  const ex = (o.extras ?? {}) as Record<string, unknown>;
   return {
     version: RENDER_PREFS_VERSION,
     lighting: {
@@ -161,6 +192,15 @@ function normalize(raw: unknown): RenderPrefs {
     textureQuality: quality(o.textureQuality, d.textureQuality),
     culling: { distance: num(c.distance, d.culling.distance), pvs: c.pvs === true },
     camera: { fov: num(cam.fov, d.camera.fov) },
+    extras: {
+      lightFloor: num(ex.lightFloor, d.extras.lightFloor),
+      propCubeGain: num(ex.propCubeGain, d.extras.propCubeGain),
+      bumpStrength: num(ex.bumpStrength, d.extras.bumpStrength),
+      bumpDetail: num(ex.bumpDetail, d.extras.bumpDetail),
+      fogMaxDensity: num(ex.fogMaxDensity, d.extras.fogMaxDensity),
+      // 缩放系数必须为正，否则 near 会退化成 0/负值把整个场景裁掉
+      nearPlaneScale: num(ex.nearPlaneScale, d.extras.nearPlaneScale) > 0 ? num(ex.nearPlaneScale, d.extras.nearPlaneScale) : d.extras.nearPlaneScale,
+    },
   };
 }
 
@@ -311,6 +351,8 @@ export function renderPrefsFingerprint(p: RenderPrefs): string {
     p.textureQuality,
     p.culling.distance, p.culling.pvs,
     p.camera.fov,
+    p.extras.lightFloor, p.extras.propCubeGain, p.extras.bumpStrength,
+    p.extras.bumpDetail, p.extras.fogMaxDensity, p.extras.nearPlaneScale,
   ]);
   let h = 0x811c9dc5;
   for (let i = 0; i < key.length; i++) {
@@ -347,6 +389,7 @@ export function writeRenderPrefs(patch: RenderPrefsPatch): RenderPrefs {
     lighting: { ...cur.lighting, ...(patch.lighting ?? {}) },
     culling: { ...cur.culling, ...(patch.culling ?? {}) },
     camera: { ...cur.camera, ...(patch.camera ?? {}) },
+    extras: { ...cur.extras, ...(patch.extras ?? {}) },
   });
   writeRaw(next);
   return next;
@@ -356,6 +399,25 @@ export function writeRenderPrefs(patch: RenderPrefsPatch): RenderPrefs {
 export function applyRenderPrefs(p: RenderPrefs): void {
   applyLightingPresentation(p.lighting);
   setLightingMode(p.lighting.mode);
+  applyRenderExtras(p.extras);
+}
+
+/**
+ * 施加 `extras`：有 setter 的走 setter（`lightFloor` / `fogMaxDensity`），只有 global 覆盖口的
+ * （`propCubeGain` / `bumpStrength` / `bumpDetail`）写 globalThis——它们本来就在「加载前注入」这一层，
+ * 面板改完提示「需重新加载地图」即可生效；`nearPlaneScale` 无全局口，由相机侧每帧读档。
+ */
+export function applyRenderExtras(e: RenderExtrasPrefs): void {
+  setLightFloor(e.lightFloor);
+  setFogMaxDensity(e.fogMaxDensity);
+  const g = globalThis as {
+    __vbspPropCubeGain?: number;
+    __vbspBumpStrength?: number;
+    __vbspBumpDetail?: number;
+  };
+  g.__vbspPropCubeGain = e.propCubeGain;
+  g.__vbspBumpStrength = e.bumpStrength;
+  g.__vbspBumpDetail = e.bumpDetail;
 }
 
 /** 生效值的单行描述（三端同格式；判据直接比对这一行）。 */
@@ -384,6 +446,18 @@ export function describeRenderPrefs(p: RenderPrefs): string {
     (p.culling.pvs ? 'on' : 'off') +
     ' fp=' +
     renderPrefsFingerprint(p) +
+    ' lightFloor=' +
+    p.extras.lightFloor +
+    ' cubeGain=' +
+    p.extras.propCubeGain +
+    ' bump=' +
+    p.extras.bumpStrength +
+    '/' +
+    p.extras.bumpDetail +
+    ' fogMax=' +
+    p.extras.fogMaxDensity +
+    ' nearScale=' +
+    p.extras.nearPlaneScale +
     ' source=' +
     (deepLinkActive ? 'deep-link' : 'storage') +
     ' scope=' +

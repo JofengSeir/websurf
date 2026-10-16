@@ -756,6 +756,14 @@ export class RendererMain {
   }
 
   /** 设置视距剔除距离：交给 `LodManager.setCullDistance`（夹到 [0, maxCull]，并写共享档 `culling.distance`），再把结果写回 config。 */
+  /** 面板用：即时改相机 FOV（原来只在场景加载时由 applySceneCamera 套一次）。 */
+  setFov(fov: number): void {
+    const cam = this.camera;
+    if (!Number.isFinite(fov) || fov <= 0 || !cam) return;
+    cam.fov = fov;
+    cam.updateProjectionMatrix();
+  }
+
   setCullDistance(dist: number): void {
     this.lodManager.setCullDistance(dist);
     this.config.lod.cullDistance = this.lodManager.cullDistance;

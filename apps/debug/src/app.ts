@@ -34,7 +34,7 @@ import type {
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
-import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs } from '../../../src/renderer-shared/config/render-prefs.js';
+import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, type RenderPrefsPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js'; import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
 import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
 import { formatTime, GameState } from './game-state.js';
@@ -356,6 +356,7 @@ async function main(): Promise<void> {
 	bindInput(dom.canvas);
 	// 3.2 面板偏好持久化：读取 → 合并 config → 同步控件 → 应用准星 → 下发双端
 	loadUiPrefs();
+	setupRenderPanel();
 	syncPrefsControls();
 	applyCrosshairStyle();
 	sendPrefsToWorker();
@@ -1195,6 +1196,97 @@ function loadUiPrefs(): void {
 	} catch (err) {
 		console.warn('[app] UI 偏好加载失败:', err);
 	}
+}
+
+// ── 共享渲染面板（T-686）────────────────────────────────────────────────────────
+// 控件清单在 src/renderer-shared/config/render-panel-spec.ts（三端共用）；这里只管「落到哪 + 怎么施加」。
+// 本端已手写的同项（光照模式 / 纹理画质 / 视距上限 / 近平面 / 环境光强度）不在面板里重复。
+
+/** 按 'a.b' 路径读渲染档字段（找不到时给 0，控件至少不会 NaN）。 */
+function readPrefsPath(path: string): number | boolean | string {
+	const p = readRenderPrefs() as unknown as Record<string, unknown>;
+	const dot = path.indexOf('.');
+	if (dot < 0) {
+		const v = p[path];
+		return typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' ? v : 0;
+	}
+	const seg = p[path.slice(0, dot)] as Record<string, unknown> | undefined;
+	const v = seg ? seg[path.slice(dot + 1)] : undefined;
+	return typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' ? v : 0;
+}
+
+/** 按 'a.b' 路径生成写补丁（四段之外的顶层字段走 textureQuality）。 */
+function prefsPathPatch(path: string, value: RenderPanelValue): RenderPrefsPatch {
+	const dot = path.indexOf('.');
+	if (dot < 0) return { textureQuality: value } as RenderPrefsPatch;
+	const key = path.slice(0, dot);
+	const leaf = path.slice(dot + 1);
+	if (key === 'lighting') return { lighting: { [leaf]: value } as never };
+	if (key === 'culling') return { culling: { [leaf]: value } as never };
+	if (key === 'camera') return { camera: { [leaf]: value } as never };
+	return { extras: { [leaf]: value } as never };
+}
+
+/** 出帧开关读值：toggle 按「未设置时的默认」（defaultOn）解释，select 缺省 auto，text 是逗号分隔的数组。 */
+function readSwitchGlobal(item: RenderPanelItem): number | boolean | string {
+	const v = (globalThis as Record<string, unknown>)[item.global ?? ''];
+	if (item.kind === 'toggle') return v === undefined ? item.defaultOn === true : v === true;
+	if (item.kind === 'text') return Array.isArray(v) ? (v as string[]).join(', ') : '';
+	return typeof v === 'string' ? v : 'auto';
+}
+
+/** 出帧开关写值：显式写布尔/字符串/数组（不清键，保证「关」也能表达）；复位时才删键。 */
+function writeSwitchGlobal(item: RenderPanelItem, value: RenderPanelValue): void {
+	const key = item.global;
+	if (!key) return;
+	const g = globalThis as Record<string, unknown>;
+	if (item.kind === 'text') {
+		const names = String(value).split(',').map((s) => s.trim()).filter(Boolean);
+		g[key] = names;
+		return;
+	}
+	g[key] = value;
+}
+
+/** 装配共享渲染面板：读值 / 写值 / 复位 / 写后施加。 */
+function setupRenderPanel(): void {
+	const host = document.getElementById('renderPanel');
+	if (!host) return;
+	const api: RenderPanelApi = {
+		app: 'debug',
+		read(item) {
+			return item.pref ? readPrefsPath(item.pref) : readSwitchGlobal(item);
+		},
+		write(item, value) {
+			if (!item.pref) { writeSwitchGlobal(item, value); return; }
+			writeRenderPrefs(prefsPathPatch(item.pref, value));
+			// 施加：光照/模式/extras 走共享施加口；剔除距离与 FOV 有各自的活动口
+			applyRenderPrefs(readRenderPrefs());
+			if (item.pref === 'culling.distance') rendererMain?.setCullDistance(Number(value));
+			if (item.pref === 'camera.fov') rendererMain?.setFov(Number(value));
+		},
+		reset(item) {
+			if (!item.pref) {
+				if (item.global) delete (globalThis as Record<string, unknown>)[item.global];
+				return;
+			}
+			const d = defaultRenderPrefs() as unknown as Record<string, unknown>;
+			const dot = item.pref.indexOf('.');
+			const leaf = dot < 0 ? item.pref : item.pref.slice(dot + 1);
+			const seg = dot < 0 ? d : (d[item.pref.slice(0, dot)] as Record<string, unknown>);
+			const def = seg ? seg[leaf] : 0;
+			writeRenderPrefs(prefsPathPatch(item.pref, (def ?? 0) as RenderPanelValue));
+			applyRenderPrefs(readRenderPrefs());
+			if (item.pref === 'culling.distance') rendererMain?.setCullDistance(Number(def ?? 0));
+			if (item.pref === 'camera.fov') rendererMain?.setFov(Number(def ?? 0));
+		},
+		afterWrite(item) {
+			if (item.apply !== 'live') {
+				console.info('[render-panel] ' + item.label + '：' + (item.apply === 'reload' ? '刷新页面后生效' : '重新加载地图后生效'));
+			}
+		},
+	};
+	buildRenderPanel(host, api);
 }
 
 /** 应用准星风格到 DOM（CSS 变量 + 可见性 + 描边/中心点）。 */

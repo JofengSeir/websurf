@@ -476,6 +476,20 @@
       width: 6px; height: 6px; margin-right: 6px;
       background: currentColor;
     }
+
+    /* ── 共享渲染面板（render-panel-ui.ts 生成的 rp-* 结构；配色沿用本页仪表主题）── */
+    .rp-group { grid-column: 1 / -1; margin: 6px 0 2px; }
+    .rp-group-title { color: var(--acc, #e6a45c); font-size: 12px; letter-spacing: .06em; margin: 6px 0 4px; }
+    .rp-row { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; padding: 2px 0; }
+    .rp-head { display: flex; align-items: center; gap: 6px; }
+    .rp-head label { flex: 1; }
+    .rp-reset { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit; opacity: .7; font-size: 11px; padding: 0 5px; cursor: pointer; }
+    .rp-reset:hover { opacity: 1; }
+    .rp-body { grid-column: 2; min-width: 180px; display: flex; justify-content: flex-end; }
+    .rp-slider { display: flex; gap: 6px; align-items: center; width: 100%; }
+    .rp-slider input[type="range"] { flex: 1; }
+    .rp-slider input[type="number"] { width: 72px; }
+    .rp-note { grid-column: 1 / -1; font-size: 11px; opacity: .55; margin: -2px 0 3px; }
   </style>
 </head>
 <body>
@@ -518,6 +532,16 @@
               <input type="range" id="pitchLimit" min="10" max="89" step="1" value="89" />
               <div class="val"><input type="number" id="pitchLimitNum" class="param-num" min="10" max="89" step="any" value="89" /></div>
             </div>
+          </div>
+        </details>
+
+        <!-- 画面与光照（全功能）：控件由共享规格表 src/renderer-shared/config/render-panel-spec.ts 生成、
+             绑定点在 apps/debug/src/app.ts 的 setupRenderPanel —— 「渲染与视距」里已有的项（视距/纹理画质/
+             光照模式/环境光/近平面）不在这里重复。 -->
+        <details open>
+          <summary>画面与光照（全功能）</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid" id="renderPanel"></div>
           </div>
         </details>
 
