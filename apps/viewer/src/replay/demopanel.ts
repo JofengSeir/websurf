@@ -31,7 +31,7 @@ import {
 } from './demo/chatkind.js';
 import { userinfoTimeline } from './demo/net.js';
 import { decodePlayerInfoRecords, type PlayerSample } from './demo/demo.js';
-import { buildAliasRegistry, normalizeName, type AliasRegistry } from './identity.js';
+import { addNameAlias, buildAliasRegistry, normalizeName, readNameAliases, type AliasRegistry } from './identity.js';
 import { trackToClip } from './democlip.js';
 import { TRACK_PALETTE } from './tracks.js';
 import { FILE_KIND_LABEL, sniffFileKind } from '../core/filekind.js';
@@ -292,6 +292,8 @@ function fmtSize(bytes: number): string {
    * 只登记**能连到账号**的名字（连接行的 SteamID 或与 userinfo 名字完全一致），连不上的另见详情里的说明。
    */
   aliases: string[];
+  /** 真账号的 guid（bot / 无 userinfo 的行为空串）；用户手工并入名字时用它当键。 */
+  guid: string;
   /** 观察/未分配的采样条数与该行统计用的总采样条数（比例见 `sampledFrames`；0 表示没统计到）。 */
   observeFrames: number;
   sampledFrames: number;
@@ -409,6 +411,11 @@ export class DemoPanel {
   private readonly chat: HTMLElement;
   /** 消息过滤的四个勾选框（`renderChat` 里顺带刷新每类的实时条数）。 */
   private readonly chatFilter: HTMLElement;
+  /** 手工并入名字那一格（T-709）；元素缺失时全链路静默跳过。 */
+  private aliasBox: HTMLElement | null = null;
+  private aliasInput: HTMLInputElement | null = null;
+  private aliasList: HTMLDataListElement | null = null;
+  private aliasState: HTMLElement | null = null;
   /**
    * 四个类别里**被勾选要过滤掉**的那些（缺省全不勾 = 一条都不滤）。
    * 语义按 owner 的说法：「过滤掉…相关的」——**勾上 = 不显示这一类**。
@@ -417,6 +424,9 @@ export class DemoPanel {
    * 过滤勾选：`true` = **只看这一类**（owner 2026-10-16 定）。
    * 全不勾 = 全勾 = 默认全显示；只有勾了一部分时才真的过滤（见 `chatAllow()`）。
    */
+  /** 用户刚在花名册里点选的人（手工并入名字的目标）。 */
+  private lastRosterEntity: number | null = null;
+
   /** 身份别名表（解析完成后建，见 `accountNames`）。 */
   private aliases: AliasRegistry = { namesByGuid: new Map(), guidByName: new Map(), unlinkedNames: new Set() };
 
@@ -477,6 +487,14 @@ export class DemoPanel {
                进服 → 过关 → 服务器公告 → 玩家对话 → 兜底算公告）。
                这一行同时是**实时读数**：每个框后面跟「已隐藏 / 共几条」。 -->
           <div class="dmp-chat-filter" id="demoChatFilter"></div>
+          <!-- 手工并入名字（T-709）：只在「档案里连不上账号」的名字上有用 —— 程序不硬猜，由用户指认一次 -->
+          <div class="dmp-alias" id="demoAliasBox">
+            <span class="dmp-alias-t">名字并入选中的人：</span>
+            <input type="text" id="demoAliasName" list="demoAliasNames" placeholder="例如 [yuzusoft] GalgameEnjoyer1337" />
+            <datalist id="demoAliasNames"></datalist>
+            <button type="button" id="demoAliasAdd">并入</button>
+            <span class="dmp-alias-s" id="demoAliasState"></span>
+          </div>
           <!-- 录像内的文本消息（svc_Print / svc_StringCmd / svc_Disconnect，以及
                svc_UserMessage 的 SayText2——玩家聊天与 SourceMod 播报走它，
                由解析层按「控制字节边界 + UTF-8」解出可读文本）。
@@ -496,6 +514,23 @@ export class DemoPanel {
     this.note = root.querySelector<HTMLElement>('#demoNote')!;
     this.chat = root.querySelector<HTMLElement>('#demoChat')!;
     this.chatFilter = root.querySelector<HTMLElement>('#demoChatFilter')!;
+    this.aliasBox = root.querySelector<HTMLElement>('#demoAliasBox');
+    this.aliasInput = root.querySelector<HTMLInputElement>('#demoAliasName');
+    this.aliasList = root.querySelector<HTMLDataListElement>('#demoAliasNames');
+    this.aliasState = root.querySelector<HTMLElement>('#demoAliasState');
+    root.querySelector<HTMLButtonElement>('#demoAliasAdd')?.addEventListener('click', () => {
+      const name = (this.aliasInput?.value ?? '').trim();
+      const target = this.lastRosterEntity !== null ? this.roster(0).find((p) => p.entity === this.lastRosterEntity) : undefined;
+      if (!name) { this.setAliasState('先填一个名字'); return; }
+      if (!target) { this.setAliasState('先在花名册里点一个人'); return; }
+      if (!target.guid) { this.setAliasState('这个人没有账号 guid（存档 userinfo 为空），没法绑定'); return; }
+      addNameAlias(target.guid, name);
+      this.rebuildAliases();
+      if (this.aliasInput) this.aliasInput.value = '';
+      this.renderTimeline();
+      this.refreshAliasBox();
+      this.setAliasState('已并入「' + target.name + '」：' + name);
+    });
     this.buildChatFilter();
     // 注：**「运动优先（实验展平顺序）」开关已撤除**（owner：用不上了）。它当时只切换
     // `demo/tables.ts` 里的属性展平顺序实验分支（`SPROP_CHANGES_OFTEN` 排头还是排尾），
@@ -556,6 +591,11 @@ export class DemoPanel {
       return;
     }
     this.result = result;
+    // **别名表必须在渲染之前建好**（T-709 浏览器实测）：`renderTimeline` 在下面第 601 行就画了，
+    // 而它读的是 `this.aliases`；先前把建表放在 `onParsed` 之前（更靠后）⇒ 首次载入时行提示里
+    // 看不到用户手工并入的别名（手动并入那次因为当场重渲染才看着正常）。
+    this.rebuildAliases();
+    this.lastRosterEntity = null;
     this.parseMs = performance.now() - t0;
     this.duration = Math.max(1e-3, result.header.playbackTime);
     this.totalTicks = Math.max(1, result.header.playbackTicks);
@@ -570,7 +610,7 @@ export class DemoPanel {
     // 建出第一条轨道之后才出现 —— 那时进度条才冒出来会显得"没加载成功"。
     // 同时把解析产物推给**录像信息条**（服务器 / 天空盒 / 协议 / 事件 / 实体流 / 字符串表）。
     // 身份别名表（T-701）：连接行的 SteamID + 已知账号名 ⇒ 同一个人在这份录像里的多个写法能对上
-    this.aliases = buildAliasRegistry(result.chat ?? [], this.accountNames());
+    this.refreshAliasBox();
     this.opts.onParsed?.(result, file, this.roster(0).length);
     this.opts.onLoaded?.();
   }
@@ -894,7 +934,12 @@ export class DemoPanel {
       const spans: Array<[number, number]> = p.spans.map((s) => [this.secAt(s.from), this.secAt(s.to)] as [number, number]);
       btn.addEventListener('mouseenter', () => this.opts.onHoverSpan?.(spans));
       btn.addEventListener('mouseleave', () => this.opts.onHoverSpan?.(null));
-      btn.addEventListener('click', () => this.jumpTo(p.entity));
+      btn.addEventListener('click', () => {
+        // 记住「用户刚点的是谁」：手工并入名字时要问"并到哪个人名下"
+        this.lastRosterEntity = p.entity;
+        this.refreshAliasBox();
+        this.jumpTo(p.entity);
+      });
     }
     this.refreshRosterState();
   }
@@ -911,6 +956,8 @@ export class DemoPanel {
    */
   private accountNames(): Map<string, Set<string>> {
     const out = new Map<string, Set<string>>();
+    // 先放**用户手工并入**的名字：它与 userinfo 名字同权，别名表据此把它连到账号
+    for (const [guid, names] of Object.entries(readNameAliases())) out.set(guid, new Set(names));
     for (const snap of userinfoTimeline) {
       for (const e of snap.entries) {
         for (const rec of decodePlayerInfoRecords(e.value, e.idx)) {
@@ -922,6 +969,33 @@ export class DemoPanel {
       }
     }
     return out;
+  }
+
+  /** 重建别名表（落盘的别名变化后调用：userinfo 名字 + 连接行 + 手工映射一起重算）。 */
+  private rebuildAliases(): void {
+    this.aliases = buildAliasRegistry(this.result?.chat ?? [], this.accountNames());
+  }
+
+  /** 更新并入格下方的状态行与候选名字列表（候选 = 别名表里"连不到账号"的那些）。 */
+  private refreshAliasBox(): void {
+    if (!this.aliasBox) return;
+    if (this.aliasList) {
+      this.aliasList.innerHTML = [...this.aliases.unlinkedNames]
+        .map((nm) => '<option value="' + this.esc(nm) + '"></option>')
+        .join('');
+    }
+    const target = this.lastRosterEntity !== null ? this.roster(0).find((p) => p.entity === this.lastRosterEntity) : undefined;
+    this.setAliasState(
+      target
+        ? target.guid
+          ? '目标：' + target.name + '（' + target.guid + '）'
+          : '目标：' + target.name + '（无 guid，无法绑定）'
+        : '先在花名册里点一个人',
+    );
+  }
+
+  private setAliasState(text: string): void {
+    if (this.aliasState) this.aliasState.textContent = text;
   }
 
   /** 该账号的别名集合（含本行当前显示名）；没有额外写法时只含它自己。 */
@@ -1434,6 +1508,7 @@ export class DemoPanel {
         key: rows.length,
         name: rowName,
         aliases: this.aliasesFor(g.guid, rowName),
+        guid: g.guid,
         observeFrames: factsWin ? factsWin.win.observeFrames : 0,
         sampledFrames: factsWin ? factsWin.win.sampledFrames : 0,
         isBot: g.isBot,
@@ -1458,6 +1533,7 @@ export class DemoPanel {
         name: this.nameFor(p.slot, entity, p.to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`,
         // 这一支没有 userinfo 会话 ⇒ 没有 guid 可查别名（聊天里连不连得上另说，见详情面板的说明）
         aliases: [],
+        guid: '',
         observeFrames: p.observeFrames,
         sampledFrames: p.sampledFrames,
         isBot: p.isBot,
