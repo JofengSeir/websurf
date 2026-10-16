@@ -1205,11 +1205,15 @@ function loadUiPrefs(): void {
 // 本端已手写的同项（光照模式 / 纹理画质 / 视距上限 / 近平面 / 环境光强度）不在面板里重复。
 
 /** 装配共享渲染面板：读值 / 写值 / 复位 / 写后施加。 */
+/** 共享面板句柄（载图后调 sync() 刷新顶部「未载图」状态行）。 */
+let renderPanelHandle: { sync: () => void } | null = null;
+
 function setupRenderPanel(): void {
 	const host = document.getElementById('renderPanel');
 	if (!host) return;
 	const api: RenderPanelApi = {
 		app: 'debug',
+		hasMap: () => teleportMapName !== '',
 		read(item) {
 			return item.pref ? readPrefsField(readRenderPrefs(), item.pref) : 0;
 		},
@@ -1237,7 +1241,7 @@ function setupRenderPanel(): void {
 			}
 		},
 	};
-	buildRenderPanel(host, api);
+	renderPanelHandle = buildRenderPanel(host, api);
 }
 
 /** 应用准星风格到 DOM（CSS 变量 + 可见性 + 描边/中心点）。 */
@@ -1814,6 +1818,7 @@ async function handleBspFile(file: File): Promise<void> {
 	rendererMain?.disposeScene();
 	sceneReady = false;
 	teleportMapName = file.name;
+	renderPanelHandle?.sync(); // 顶部「未载入地图」状态行随之收起
 	// 换地图重置出生点传送去重（新地图选相同索引也应生效）
 	lastTeleportIdx = -1;
 	if (dom.spawnSelect) dom.spawnSelect.innerHTML = '';

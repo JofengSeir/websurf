@@ -491,6 +491,7 @@
     }
     .rp-reset:hover { color: var(--accent); border-bottom-color: var(--accent); opacity: 1; }
     .ctrl-grid .rp-unit { color: var(--muted); font-size: 10px; margin-left: 2px; }
+    .ctrl-grid .rp-mapstate { font-size: 11px; color: var(--muted); line-height: 1.5; margin: 0 0 6px; }
     .ctrl-grid .rp-note { font-size: 11px; color: var(--muted); line-height: 1.4; margin: -2px 0 2px; }
     /* 读数列必须装得下数字框：原生行是 50px 列配 56px 的 .param-num，会溢出被侧栏裁掉
        （range 的 min-content 撑着 1fr 不让位，整条栅格比容器宽）。这里让 range 可以收缩、
@@ -567,8 +568,8 @@
           <div class="acc-body">
             <div class="ctrl-grid">
               <label title="视距剔除距离（HU）：超出此距离的几何体不渲染">视距上限</label>
-              <input type="range" id="cullDistance" min="1000" max="50000" step="1" value="12800" />
-              <div class="val"><input type="number" id="cullDistanceNum" class="param-num" min="1000" max="100000" step="any" value="12800" /></div>
+              <input type="range" id="cullDistance" min="1000" max="200000" step="1" value="12800" />
+              <div class="val"><input type="number" id="cullDistanceNum" class="param-num" min="1000" max="200000" step="any" value="12800" /></div>
 
               <!-- 本区不提供 PVS 开关：debug 侧剔除判据只有距离（`apps/debug/src/renderer/lod-manager.ts` 的 `update`），
                    LodStats.pvsHidden 每轮刷新写 0，故 #cullStats 的「PVS」列不反映隐藏数。 -->
@@ -594,15 +595,15 @@
               <p class="hint ctrl-full" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
 
               <label title="场景环境光强度（AmbientLight，即时生效）">环境光强度</label>
-              <input type="range" id="ambientIntensity" min="0" max="2" step="0.05" value="0.6" />
-              <div class="val"><input type="number" id="ambientIntensityNum" class="param-num" min="0" max="2" step="any" value="0.6" /></div>
+              <input type="range" id="ambientIntensity" min="0" max="5" step="0.05" value="0.6" />
+              <div class="val"><input type="number" id="ambientIntensityNum" class="param-num" min="0" max="5" step="any" value="0.6" /></div>
 
               <div class="ctrl-full acc-divider"></div>
               <div class="ctrl-full acc-section-title">近平面（防贴墙透视）</div>
 
               <label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到（防透视），性能开销略增">探测距离</label>
-              <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />
-              <div class="val"><input type="number" id="nearProbeDistNum" class="param-num" min="16" max="128" step="any" value="100" /></div>
+              <input type="range" id="nearProbeDist" min="8" max="256" step="1" value="100" />
+              <div class="val"><input type="number" id="nearProbeDistNum" class="param-num" min="8" max="256" step="any" value="100" /></div>
 
               <label title="贴墙时 near = 最近几何距离 × 此系数：越小越不易裁墙（更保守），远处深度精度略降">收缩系数</label>
               <input type="range" id="nearRatio" min="0.1" max="1" step="0.01" value="0.3" />

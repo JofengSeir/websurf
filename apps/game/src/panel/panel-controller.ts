@@ -427,21 +427,21 @@ export class PanelController {
     });
 
     // 视野 FOV（度，60..110，步进 0.1）→ config.hud.fov + 渲染器 setFov
-    this.bindSlider('fov', 60, 110, 0.1, (v) => {
+    this.bindSlider('fov', 20, 150, 0.1, (v) => {
       this.config.hud.fov = v;
       this.onSyncFov?.(v);
     });
 
     // 渲染距离（0..60000，步进 500）→ config.hud.renderDistance + 渲染器 setRenderDistance；
     // 0 = 自动（地图包围盒对角线的一半），正值按世界单位（≈1 英寸）把超距空间块置 visible=false
-    this.bindSlider('renderDistance', 0, 60000, 500, (v) => {
+    this.bindSlider('renderDistance', 0, 200000, 500, (v) => {
       this.config.hud.renderDistance = v;
       this.onSyncRenderDistance?.(v);
     });
 
     // 曝光（0.1..8，步进 0.01）→ config.lighting.exposure + 渲染器 setExposure：
     // 显示侧亮度倍率，乘在光照项上，不改变烘焙数据；默认值见 apps/game/src/config.ts 的 DEFAULT_CONFIG。
-    this.bindSlider('exposure', 0.1, 8, 0.01, (v) => {
+    this.bindSlider('exposure', 0.02, 40, 0.01, (v) => {
       this.config.lighting.exposure = v;
       this.onSyncExposure?.(v);
     });
@@ -449,14 +449,14 @@ export class PanelController {
     // 暗部提升 γ（0.5..6，步进 0.01）→ config.lighting.lightGamma + 渲染器 setLightGamma：
     // 着色器对光照项做 pow(L, 1/γ)（γ>1 抬暗部、γ<1 压暗部）；
  // 渲染端的 setLightGamma 接受 (0, 8]（2026-10-08 起），滑块取值会写进共享 uniform。
-    this.bindSlider('lightGamma', 0.5, 6, 0.01, (v) => {
+    this.bindSlider('lightGamma', 0.1, 8, 0.01, (v) => {
       this.config.lighting.lightGamma = v;
       this.onSyncLightGamma?.(v);
     });
 
     // 模型光照（0..3，步进 0.01）→ config.lighting.ambientScale + 渲染器 setAmbientScale：
     // 只作用于 prop 的 ambient cube 路径，不影响 world lightmap。
-    this.bindSlider('ambientScale', 0, 3, 0.01, (v) => {
+    this.bindSlider('ambientScale', 0, 10, 0.01, (v) => {
       this.config.lighting.ambientScale = v;
       this.onSyncAmbientScale?.(v);
     });

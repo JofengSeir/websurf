@@ -220,20 +220,20 @@
           <div class="row"><label>中心点</label>
             <input type="checkbox" id="chDot" /></div>
           <div class="row"><label>视野 FOV</label>
-            <input type="range" id="fov" min="60" max="110" step="0.1" value="73.6" />
-            <div class="val"><input id="fovNum" type="number" min="60" max="110" value="73.6" /><span class="unit">°</span></div></div>
+            <input type="range" id="fov" min="20" max="150" step="0.1" value="73.6" />
+            <div class="val"><input id="fovNum" type="number" min="20" max="150" value="73.6" /><span class="unit">°</span></div></div>
           <div class="row"><label>亮度（曝光）</label>
-            <input type="range" id="exposure" min="0.1" max="8" step="0.01" value="2" />
-            <div class="val"><input id="exposureNum" type="number" min="0.1" max="8" step="0.01" value="2" /></div></div>
+            <input type="range" id="exposure" min="0.02" max="40" step="0.01" value="2" />
+            <div class="val"><input id="exposureNum" type="number" min="0.02" max="40" step="0.01" value="2" /></div></div>
           <div class="row"><label>暗部提升（γ）</label>
-            <input type="range" id="lightGamma" min="0.50" max="6.00" step="0.01" value="1" />
-            <div class="val"><input id="lightGammaNum" type="number" min="0.50" max="6.00" step="0.01" value="1" /></div></div>
+            <input type="range" id="lightGamma" min="0.10" max="8.00" step="0.01" value="1" />
+            <div class="val"><input id="lightGammaNum" type="number" min="0.10" max="8.00" step="0.01" value="1" /></div></div>
           <div class="row"><label>模型光照</label>
-            <input type="range" id="ambientScale" min="0" max="3" step="0.01" value="1" />
-            <div class="val"><input id="ambientScaleNum" type="number" min="0" max="3" step="0.01" value="1" /></div></div>
+            <input type="range" id="ambientScale" min="0" max="10" step="0.01" value="1" />
+            <div class="val"><input id="ambientScaleNum" type="number" min="0" max="10" step="0.01" value="1" /></div></div>
           <div class="row"><label title="0 = 自动（按地图包围盒对角线的一半）；单位 ≈ 1 英寸。超出的空间块不渲染（省 draw call）">渲染距离</label>
-            <input type="range" id="renderDistance" min="0" max="60000" step="500" value="0" />
-            <div class="val"><input id="renderDistanceNum" type="number" min="0" max="60000" step="500" value="0" /><span class="unit">HU</span></div></div>
+            <input type="range" id="renderDistance" min="0" max="200000" step="500" value="0" />
+            <div class="val"><input id="renderDistanceNum" type="number" min="0" max="200000" step="500" value="0" /><span class="unit">HU</span></div></div>
           <h4>速度面板</h4>
           <div class="row"><label>模式</label>
             <select id="speedMode">
@@ -256,8 +256,8 @@
           <p class="hint" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
           <h4>近平面（防贴墙透视）</h4>
           <div class="row"><label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到，性能开销略增">探测距离</label>
-            <input type="range" id="nearProbeDist" min="16" max="128" step="1" value="100" />
-            <div class="val"><input id="nearProbeDistNum" type="number" min="16" max="128" step="any" value="100" /></div></div>
+            <input type="range" id="nearProbeDist" min="8" max="256" step="1" value="100" />
+            <div class="val"><input id="nearProbeDistNum" type="number" min="8" max="256" step="any" value="100" /></div></div>
           <div class="row"><label title="贴墙时 near = 最近几何距离 × 此系数：越小越不易裁墙，远处深度精度略降">收缩系数</label>
             <input type="range" id="nearRatio" min="0.1" max="1" step="0.01" value="0.3" />
             <div class="val"><input id="nearRatioNum" type="number" min="0.1" max="1" step="any" value="0.3" /></div></div>

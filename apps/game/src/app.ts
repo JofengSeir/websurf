@@ -503,6 +503,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   }
   // 存点按地图持久化：记录地图名并加载该地图存点列表（换地图清空/载入）
   currentMapName = fileName.replace(/\.bsp$/i, '');
+  renderPanelHandle?.sync(); // 顶部「未载入地图」状态行随之收起
   savePointStore.load(currentMapName);
   panel?.renderSavePoints(savePointStore.all());
   // 读取地图后退出面板，改用加载进度覆盖层
@@ -843,11 +844,15 @@ function mirrorRenderPrefToConfig(item: RenderPanelItem, value: RenderPanelValue
   }
 }
 
+/** 共享面板句柄（载图后调 sync() 刷新顶部「未载图」状态行）。 */
+let renderPanelHandle: { sync: () => void } | null = null;
+
 function setupRenderPanel(): void {
   const host = document.getElementById('renderPanel');
   if (!host) return;
   const api: RenderPanelApi = {
     app: 'game',
+    hasMap: () => currentMapName !== '',
     read(item) {
       return item.pref ? readPrefsPath(readRenderPrefs(), item.pref) : 0;
     },
@@ -870,7 +875,7 @@ function setupRenderPanel(): void {
       }
     },
   };
-  buildRenderPanel(host, api);
+  renderPanelHandle = buildRenderPanel(host, api);
 }
 
 setupRenderPanel();

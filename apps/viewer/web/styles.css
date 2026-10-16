@@ -1109,6 +1109,7 @@ select.tl-select:focus { border-color: var(--text); }
 /* ── 显示页签的渲染设置行（rp-*）：沿用本页既有元件（.sec / .sec-title / .sec-body / .field /
       .field-label / .field-input.field-num / .note.note-info / .btn.small，见 styles.css:249-313），
       只补本页原先没有的三样：滑块、复位按钮、数值单位。标注列定宽 96px、长标注列内换行，不挤压滑块。── */
+.rp-mapstate { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 0 0 8px; }
 .rp-field .field-label { flex: 0 0 96px; line-height: 1.35; }
 .rp-field input[type="range"].field-range {
   flex: 1; min-width: 0; height: 15px;

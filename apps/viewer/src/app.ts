@@ -546,6 +546,7 @@ async function loadBsp(file: File): Promise<void> {
   // 会直接关掉、连一次确认都没有，三端行为不一致；放在这里还能覆盖拖放进来的文件
   //（拖放不走 `#bspFile` 的 change）。
   loadedMapName = file.name;
+  displayPanelHandle?.sync(); // 顶部「未载入地图」状态行随之收起
   setLoadBusy(true);
   hud.clearGuideError();
   const prevStatus = hud.statusText(); // 换图失败后要还原的旧地图摘要
@@ -1066,6 +1067,9 @@ function poseText(p: Pose): string {  return (
 // 控件清单来自共享规格表 src/renderer-shared/config/render-panel-spec.ts：viewer 只显示「画面相关」的项
 // （规格表里 apps 含 viewer 的那些），物理/玩法项不会出现。值落在本端键 vbsp:renderPrefs:viewer。
 
+/** 共享面板句柄（载图后调 sync() 刷新顶部「未载图」状态行）。 */
+let displayPanelHandle: { sync: () => void } | null = null;
+
 function setupDisplayPanel(): void {
   const host = document.getElementById('pane-display');
   if (!host) return;
@@ -1078,6 +1082,7 @@ function setupDisplayPanel(): void {
   };
   const api: RenderPanelApi = {
     app: 'viewer',
+    hasMap: () => loadedMapName !== '',
     read(item) {
       return item.pref ? readPrefsPath(readRenderPrefs(), item.pref) : 0;
     },
@@ -1098,7 +1103,7 @@ function setupDisplayPanel(): void {
       }
     },
   };
-  buildRenderPanel(host, api);
+  displayPanelHandle = buildRenderPanel(host, api);
 }
 
 setupDisplayPanel();

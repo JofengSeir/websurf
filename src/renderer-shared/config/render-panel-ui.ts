@@ -35,6 +35,12 @@ export interface RenderPanelApi {
   reset(item: RenderPanelItem): void;
   /** 写完之后要不要提示「需重新加载地图 / 刷新页面」（由调用方按 apply 决定）。 */
   afterWrite?(item: RenderPanelItem): void;
+  /**
+   * 当前是否已载入地图（三端各自的「当前地图名非空」）。
+   * 给了就在面板顶部渲染一行状态：没载图时明说「以下改动会在下次加载地图后生效」，
+   * 而不是让用户改了没反应还以为坏了（owner 2026-10-16：面板通路要交代清楚）。
+   */
+  hasMap?(): boolean;
 }
 
 /** `grid` = 行元素直接挂进宿主栅格（debug）；`row` = 每行一个容器（game / viewer）。 */
@@ -395,7 +401,16 @@ export function syncRenderPanel(host: HTMLElement, api: RenderPanelApi): void {
 export function buildRenderPanel(host: HTMLElement, api: RenderPanelApi): { sync: () => void } {
   host.textContent = '';
   const skin = SKINS[api.app];
-  const sync = () => syncRenderPanel(host, api);
+  // 顶部状态行（只有调用方给了 hasMap 才渲染；载图后由调用方再调 sync() 刷新）
+  const state = api.hasMap ? document.createElement('div') : null;
+  if (state) {
+    state.className = 'rp-mapstate';
+    host.append(state);
+  }
+  const sync = () => {
+    syncRenderPanel(host, api);
+    if (state) state.textContent = api.hasMap?.() ? '' : '当前未载入地图 —— 以下改动会在下次加载地图后生效';
+  };
   for (const group of panelGroupsFor(api.app)) {
     const items = panelItemsFor(api.app).filter((i) => i.group === group);
     if (!items.length) continue;
