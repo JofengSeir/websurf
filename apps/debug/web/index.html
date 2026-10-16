@@ -594,9 +594,8 @@
               <!-- 说明段：静态文本（该 id 无读取点）；实际切换由单选触发 `apps/debug/src/app.ts` 的监听，再落到 `apps/debug/src/renderer/renderer-main.ts` 的 `setLightingMode`。 -->
               <p class="hint ctrl-full" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
 
-              <label title="场景环境光强度（AmbientLight，即时生效）">环境光强度</label>
-              <input type="range" id="ambientIntensity" min="0" max="5" step="0.05" value="0.6" />
-              <div class="val"><input type="number" id="ambientIntensityNum" class="param-num" min="0" max="5" step="any" value="0.6" /></div>
+              <!-- 环境光强度（AmbientLight）已移除：地图与 prop 全走 lightmap 注入的 MeshBasicMaterial，
+                   不参与光照计算 ⇒ 该控件对画面无任何作用（owner 2026-10-16 指出，配置字段保留供协议兼容） -->
 
               <div class="ctrl-full acc-divider"></div>
               <div class="ctrl-full acc-section-title">近平面（防贴墙透视）</div>

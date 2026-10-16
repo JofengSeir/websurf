@@ -1266,7 +1266,8 @@ function applyCrosshairStyle(): void {
 function syncPrefsControls(): void {
 	const setNum = (id: string, val: number): void => {
 		const el = document.getElementById(id) as HTMLInputElement | null;
-		if (el) el.value = String(val);
+		// 正在输入的框不回写：否则会把用户的光标顶回开头（owner 2026-10-16：输入小数时变成 |66）
+		if (el && document.activeElement !== el) el.value = String(val);
 	};
 	const setChk = (id: string, val: boolean): void => {
 		const el = document.getElementById(id) as HTMLInputElement | null;

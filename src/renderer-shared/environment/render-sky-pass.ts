@@ -48,18 +48,55 @@ export interface SkyPassInput {
 }
 
 /**
+ * 雾浓度倍率（T-696）：>1 更浓。地图雾是 `THREE.Fog` 的**距离雾**（没有 density 字段），
+ * 所以实现为 `near/far` 同除倍率（雾更早合上）；原来那个 `setFogMaxDensity` 只是**上限**
+ * （`fogMaxDensityDefine` 只在 <1 时才发 `#define FOG_MAX_DENSITY`），表达不了"更浓"。
+ * 改倍率即时生效：基准 near/far 存在 `fog.userData.vbspFogBase`，遍历已登记场景重算。
+ */
+let fogScale = 1;
+/** 已挂雾场景 → 基准 near/far（three 的 Fog 类型不暴露这两个字段，故基准值自己存）。 */
+const fogBases = new Map<THREE.Scene, { near: number; far: number }>();
+
+/** 把倍率写到某个场景的雾上（three 的 Fog 类型未声明 near/far，这里按结构取）。 */
+function writeScaledFog(scene: THREE.Scene, base: { near: number; far: number }): void {
+  const f = scene.fog as unknown as { near: number; far: number } | null;
+  if (!f) return;
+  f.near = base.near / fogScale;
+  f.far = base.far / fogScale;
+}
+
+/** 设置雾浓度倍率并即时重算已挂雾的场景（<=0 / 非有限数按 1 处理）。 */
+export function setFogScale(v: number): void {
+  const next = Number.isFinite(v) && v > 0 ? v : 1;
+  fogScale = next;
+  for (const [s, base] of fogBases) writeScaledFog(s, base);
+}
+
+export function fogScaleValue(): number {
+  return fogScale;
+}
+
+// 渲染档改动（applyRenderExtras）经此钩子即时推倍率，避免共享层反向依赖渲染模块
+(globalThis as { __vbspApplyFogScale?: (v: number) => void }).__vbspApplyFogScale = setFogScale;
+
+/**
  * 建地图线性雾并设置雾上限（**不**挂场景）：雾上限的唯一取值口径在这里。
  * 返回新建的雾实例（无参数时为 null），供 `LightManager` 之类需要自己持有实例的调用方使用。
  */
 export function createMapFog(params: MapFogParams | null | undefined): THREE.Fog | null {
   setFogMaxDensity(params?.maxDensity ?? 1);
-  return params ? new THREE.Fog(params.color, params.start, params.end) : null;
+  if (!params) return null;
+  // 缩放只在挂场景时写（基准值按场景存），建实例这一层给出同样的初始值
+  return new THREE.Fog(params.color, params.start / fogScale, params.end / fogScale);
 }
 
 /** 装配期的地图雾入口：建雾（含上限）并挂到 `scene.fog`，返回实例供调用方留档。 */
 export function applyMapFog(scene: THREE.Scene, params: MapFogParams | null | undefined): THREE.Fog | null {
   const fog = createMapFog(params);
   scene.fog = fog;
+  // 登记/注销场景基准值，供 setFogScale 即时重算（换图无雾时移除）
+  if (fog && params) { fogBases.set(scene, { near: params.start, far: params.end }); writeScaledFog(scene, { near: params.start, far: params.end }); }
+  else fogBases.delete(scene);
   return fog;
 }
 

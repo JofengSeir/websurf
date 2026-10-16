@@ -294,6 +294,19 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     apply: 'live',
     apps: ALL,
   },
+  {
+    id: 'fogScale',
+    label: '雾浓度',
+    title: '雾浓度倍率：1 = 地图原样；>1 更浓（雾更早合上）；<1 更淡。改完即时生效，不用重载地图',
+    group: '雾',
+    kind: 'slider',
+    min: 0.1,
+    max: 4,
+    step: 0.05,
+    pref: 'extras.fogScale',
+    apply: 'live',
+    apps: ALL,
+  },
   // ── 排查开关（只有 debug；不落档）────────────────────────────────────────
   {
     id: 'swLightmapStage',

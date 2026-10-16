@@ -208,14 +208,29 @@ function markValidity(num: HTMLInputElement, item: RenderPanelItem): void {
   num.classList.toggle('rp-invalid', bad);
 }
 
-/** 提交（失焦 / 回车）：夹到 [min,max] → 回写控件 → 应用。 */
+/**
+ * 按 `step` 对齐：步进 1 的项提交 66.7 必须落到 67（否则滑块与数字框会不一致）。
+ * 小数位取 step 的位数，避免 0.1 步进出现 66.70000000000001。
+ */
+export function snapToStep(v: number, step: number | undefined, min: number | undefined): number {
+  if (!Number.isFinite(step) || (step ?? 0) <= 0) return v;
+  const base = min ?? 0;
+  const snapped = Math.round((v - base) / (step as number)) * (step as number) + base;
+  const decimals = Math.min(6, (String(step).split('.')[1] ?? '').length);
+  return Number(snapped.toFixed(decimals));
+}
+
+/**
+ * 提交（失焦 / 回车）：夹到 [min,max] → 按 step 对齐 → 回写控件 → 应用。
+ * **回写只在本框没有焦点时做**（否则会把用户的光标顶回开头，表现为「打了个 . 就变成 |66」）。
+ */
 function commitNumber(num: HTMLInputElement, item: RenderPanelItem, api: RenderPanelApi, onChange: () => void): void {
   const v = Number(num.value);
   if (!Number.isFinite(v)) { onChange(); return; }
   const min = item.min ?? v;
   const max = item.max ?? v;
-  const clamped = Math.min(max, Math.max(min, v));
-  num.value = String(clamped);
+  const clamped = snapToStep(Math.min(max, Math.max(min, v)), item.step, min);
+  if (document.activeElement !== num) num.value = String(clamped);
   num.classList.remove('rp-invalid');
   api.write(item, clamped);
   api.afterWrite?.(item);
@@ -355,7 +370,15 @@ function buildToggleRow(item: RenderPanelItem, skin: RenderPanelSkin, api: Rende
   // 顺序按各端原生行来（game 必须「标注在前」：它的 checkbox 被钉在第 3 列，input 在前会把标注挤到下一行）
   if (skin.checkInputFirst) row.append(box, label);
   else row.append(label, box);
-  if (!skin.wrapLabel) row.append(makeReset(item, skin, api, onChange));
+  // 每个可改项都要有独立复位（owner 2026-10-16：默认按钮设置不全）
+  if (skin.wrapLabel) {
+    const cell = document.createElement('span');
+    cell.className = 'rp-toggle-reset';
+    cell.append(makeReset(item, skin, api, onChange));
+    row.append(cell);
+  } else {
+    row.append(makeReset(item, skin, api, onChange));
+  }
   return row;
 }
 
@@ -387,10 +410,12 @@ export function syncRenderPanel(host: HTMLElement, api: RenderPanelApi): void {
     const id = CSS.escape(renderPanelControlId(item));
     const el = host.querySelector<HTMLInputElement | HTMLSelectElement>('#' + id);
     const num = host.querySelector<HTMLInputElement>('#' + CSS.escape(renderPanelControlId(item) + '-num'));
+    // 正在输入的控件不回写：任何同步都不许动用户的光标（owner 2026-10-16：输入小数时光标被顶回开头）
+    const focused = document.activeElement;
     if (el instanceof HTMLInputElement && el.type === 'checkbox') el.checked = v === true;
-    else if (el instanceof HTMLSelectElement) el.value = String(v);
-    else if (el instanceof HTMLInputElement) el.value = String(v);
-    if (num) num.value = String(v);
+    else if (el instanceof HTMLSelectElement) { if (el !== focused) el.value = String(v); }
+    else if (el instanceof HTMLInputElement) { if (el !== focused) el.value = String(v); }
+    if (num && num !== focused) num.value = String(v);
   }
 }
 
@@ -430,6 +455,17 @@ export function buildRenderPanel(host: HTMLElement, api: RenderPanelApi): { sync
     }
     for (const item of items) body.append(...buildItem(item, skin, api, sync));
   }
+  // 面板级复位：本面板所有项一次性回到默认（owner 2026-10-16：tab 内也要有一个全局重置）
+  const all = document.createElement('button');
+  all.type = 'button';
+  all.className = 'rp-reset-all';
+  all.textContent = '全部恢复默认';
+  all.title = '把本面板所有项恢复为默认值';
+  all.addEventListener('click', () => {
+    for (const item of panelItemsFor(api.app)) api.reset(item);
+    sync();
+  });
+  host.append(all);
   sync();
   return { sync };
 }

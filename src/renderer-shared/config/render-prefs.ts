@@ -115,6 +115,12 @@ export interface RenderExtrasPrefs {
   bumpStrength: number;
   bumpDetail: number;
   fogMaxDensity: number;
+  /**
+   * 雾浓度倍率（T-696）：>1 更浓。场景雾是 `THREE.Fog(color, start, end)` 的**距离雾**（没有 density），
+   * 所以实现是 `start/end ÷ 倍率`（雾更早合上）；原来那个 `fogMaxDensity` 只是**上限**（<1 才发 define），
+   * 表达不了"更浓"。
+   */
+  fogScale: number;
   nearPlaneScale: number;
 }
 
@@ -124,6 +130,7 @@ export const RENDER_EXTRAS_DEFAULTS: RenderExtrasPrefs = {
   bumpStrength: 0.35,
   bumpDetail: 0.6,
   fogMaxDensity: 0,
+  fogScale: 1,
   nearPlaneScale: 1,
 };
 
@@ -247,6 +254,7 @@ function normalize(raw: unknown): RenderPrefs {
       bumpStrength: num(ex.bumpStrength, d.extras.bumpStrength),
       bumpDetail: num(ex.bumpDetail, d.extras.bumpDetail),
       fogMaxDensity: num(ex.fogMaxDensity, d.extras.fogMaxDensity),
+      fogScale: num(ex.fogScale, d.extras.fogScale) > 0 ? num(ex.fogScale, d.extras.fogScale) : d.extras.fogScale,
       // 缩放系数必须为正，否则 near 会退化成 0/负值把整个场景裁掉
       nearPlaneScale: num(ex.nearPlaneScale, d.extras.nearPlaneScale) > 0 ? num(ex.nearPlaneScale, d.extras.nearPlaneScale) : d.extras.nearPlaneScale,
     },
@@ -459,7 +467,7 @@ export function renderPrefsFingerprint(p: RenderPrefs): string {
     p.culling.distance, p.culling.pvs,
     p.camera.fov,
     p.extras.lightFloor, p.extras.propCubeGain, p.extras.bumpStrength,
-    p.extras.bumpDetail, p.extras.fogMaxDensity, p.extras.nearPlaneScale,
+    p.extras.bumpDetail, p.extras.fogMaxDensity, p.extras.fogScale, p.extras.nearPlaneScale,
     p.debug.lightmapStage, p.debug.outputGamma22, p.debug.vertexLightingOff, p.debug.bumpOff,
     p.debug.worldTransitionOff, p.debug.envMapAll, p.debug.albedoOnly, p.debug.lightmapOnly,
     p.debug.texLinear, p.debug.fullbrightNames,
@@ -529,6 +537,9 @@ export function applyRenderExtras(e: RenderExtrasPrefs): void {
   g.__vbspPropCubeGain = e.propCubeGain;
   g.__vbspBumpStrength = e.bumpStrength;
   g.__vbspBumpDetail = e.bumpDetail;
+  // 雾浓度倍率：场景雾由 scene-environment 装配，那边会挂一个即时应用钩子（换场景时重新挂）
+  const hook = (globalThis as { __vbspApplyFogScale?: (v: number) => void }).__vbspApplyFogScale;
+  if (typeof hook === 'function') hook(e.fogScale);
 }
 
 /**
@@ -612,6 +623,8 @@ export function describeRenderPrefs(p: RenderPrefs): string {
     p.extras.bumpDetail +
     ' fogMax=' +
     p.extras.fogMaxDensity +
+    ' fogScale=' +
+    p.extras.fogScale +
     ' nearScale=' +
     p.extras.nearPlaneScale +
     ' source=' +
