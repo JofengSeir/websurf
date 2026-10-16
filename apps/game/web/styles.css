@@ -718,15 +718,22 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
   margin: 0;
 }
 
-/* ── 更多画面项面板（T-688；render-panel-ui.ts 生成的 rp-* 结构）── */
-.rp-group { margin: 2px 0 8px; }
-.rp-group-title { font-size: 11px; letter-spacing: .06em; opacity: .7; margin: 6px 0 3px; }
-.rp-row { display: grid; grid-template-columns: 1fr; gap: 2px; padding: 2px 0; }
-.rp-head { display: flex; align-items: baseline; gap: 6px; }
-.rp-head label { flex: 1; }
-.rp-reset { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit; opacity: .6; font-size: 10px; padding: 0 4px; cursor: pointer; }
-.rp-reset:hover { opacity: 1; }
-.rp-slider { display: flex; gap: 6px; align-items: center; }
-.rp-slider input[type="range"] { flex: 1; min-width: 0; }
-.rp-slider input[type="number"] { width: 66px; }
-.rp-note { font-size: 10px; opacity: .5; }
+/* ── 更多画面项（rp-*）：结构与本页 #panel .row 同构 —— 每行一个 .row（168 / 1fr / 88，
+      styles.css:415），标注格 + 复位按钮占第 1 列（定宽、长标注列内换行，不挤压滑块列），
+      读数是 .val > input（+ .val .unit），提示条在行内跨整行，小节标题沿用本页 h4。── */
+#panel .row > .rp-label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+#panel .row > .rp-label > label {
+  flex: 1; min-width: 0; font-size: 14px; color: var(--muted); line-height: 1.35; overflow-wrap: anywhere;
+}
+#panel .rp-reset {
+  flex: none; width: auto; padding: 0 4px; line-height: 16px; white-space: nowrap;
+  font-size: 11px; background: transparent; color: var(--muted);
+  border: 1px solid var(--border); cursor: pointer; opacity: .7;
+}
+#panel .rp-reset:hover { color: var(--accent); border-color: var(--accent); opacity: 1; }
+#panel .row > .rp-note { grid-column: 1 / -1; font-size: 11px; color: var(--muted); line-height: 1.4; margin-top: -3px; }
+#panel .rp-unit { font-size: 11px; color: var(--muted); flex: none; }
+#panel .row > input.rp-text {
+  min-width: 0; width: 100%; font-family: inherit; font-size: 13px; color: var(--text);
+  background: transparent; border: none; border-bottom: 1px solid var(--border-strong); padding: 2px 0;
+}

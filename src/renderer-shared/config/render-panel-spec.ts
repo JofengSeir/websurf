@@ -52,6 +52,8 @@ export interface RenderPanelItem {
   apps: readonly RenderPanelApp[];
   /** 仅 toggle 用：globalThis 未设置时的默认是否为「开」（如 __vbspOutputGamma22 缺省即开）。 */
   defaultOn?: boolean;
+  /** 读数单位后缀（debug/game 落在读数位、viewer 跟在数字框后）；无单位留空。 */
+  unit?: string;
   /** 额外说明（UI 上以小字显示；例如「debug 需重新加载地图」）。 */
   note?: string;
 }
@@ -232,6 +234,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     max: 40000,
     step: 100,
     pref: 'culling.distance',
+    unit: 'HU',
     apply: 'live',
     // 同上：debug「视距上限」、game「渲染距离」已手写
     apps: ['viewer'],
@@ -257,6 +260,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     max: 110,
     step: 0.1,
     pref: 'camera.fov',
+    unit: '°',
     apply: 'live',
     // game 面板已有「视野 FOV」，不重复
     apps: ['debug', 'viewer'],
@@ -271,6 +275,7 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     max: 4,
     step: 0.05,
     pref: 'extras.nearPlaneScale',
+    unit: '×',
     apply: 'live',
     // debug 与 game 各自有「探测距离 + 收缩系数」两项（setNearParams 体系）；只有 viewer 没有近裁面控件
     apps: ['viewer'],

@@ -1106,15 +1106,24 @@ select.tl-select:focus { border-color: var(--text); }
   overflow-wrap: anywhere;
 }
 .co-line.co-on { opacity: 1; }
-/* ── 共享渲染面板（T-687；render-panel-ui.ts 生成的 rp-* 结构）── */
-.rp-group { margin: 4px 0 10px; }
-.rp-group-title { font-size: 11px; letter-spacing: .08em; opacity: .75; margin: 6px 0 4px; border-bottom: 1px solid rgba(255,255,255,.12); padding-bottom: 3px; }
-.rp-row { display: grid; grid-template-columns: 1fr; gap: 3px; padding: 3px 0; }
-.rp-head { display: flex; align-items: baseline; gap: 6px; }
-.rp-head label { flex: 1; }
-.rp-reset { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit; opacity: .6; font-size: 10px; padding: 0 4px; cursor: pointer; }
-.rp-reset:hover { opacity: 1; }
-.rp-slider { display: flex; gap: 6px; align-items: center; }
-.rp-slider input[type="range"] { flex: 1; min-width: 0; }
-.rp-slider input[type="number"] { width: 68px; }
-.rp-note { font-size: 10px; opacity: .5; }
+/* ── 显示页签的渲染设置行（rp-*）：沿用本页既有元件（.sec / .sec-title / .sec-body / .field /
+      .field-label / .field-input.field-num / .note.note-info / .btn.small，见 styles.css:249-313），
+      只补本页原先没有的三样：滑块、复位按钮、数值单位。标注列定宽 96px、长标注列内换行，不挤压滑块。── */
+.rp-field .field-label { flex: 0 0 96px; line-height: 1.35; }
+.rp-field input[type="range"].field-range {
+  flex: 1; min-width: 0; height: 15px;
+  appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer;
+}
+.rp-field input[type="range"].field-range::-webkit-slider-runnable-track { height: 1px; background: var(--border-strong); }
+.rp-field input[type="range"].field-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 3px; height: 13px; margin-top: -6px;
+  background: var(--text); border: 0; border-radius: 0;
+}
+.rp-field input[type="range"].field-range::-moz-range-track { height: 1px; background: var(--border-strong); }
+.rp-field input[type="range"].field-range::-moz-range-thumb {
+  width: 3px; height: 13px; background: var(--text); border: 0; border-radius: 0;
+}
+.rp-field .rp-value { display: flex; align-items: baseline; gap: 3px; flex: 0 0 auto; }
+.rp-field .rp-value input { width: 64px; }
+.rp-reset.btn.small { flex: none; padding: 2px 6px; font-size: 11px; }
+.rp-unit { color: var(--muted); font-size: 11.5px; flex: none; }

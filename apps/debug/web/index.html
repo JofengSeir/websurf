@@ -477,19 +477,33 @@
       background: currentColor;
     }
 
-    /* ── 共享渲染面板（render-panel-ui.ts 生成的 rp-* 结构；配色沿用本页仪表主题）── */
-    .rp-group { grid-column: 1 / -1; margin: 6px 0 2px; }
-    .rp-group-title { color: var(--acc, #e6a45c); font-size: 12px; letter-spacing: .06em; margin: 6px 0 4px; }
-    .rp-row { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; padding: 2px 0; }
-    .rp-head { display: flex; align-items: center; gap: 6px; }
-    .rp-head label { flex: 1; }
-    .rp-reset { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit; opacity: .7; font-size: 11px; padding: 0 5px; cursor: pointer; }
-    .rp-reset:hover { opacity: 1; }
-    .rp-body { grid-column: 2; min-width: 180px; display: flex; justify-content: flex-end; }
-    .rp-slider { display: flex; gap: 6px; align-items: center; width: 100%; }
-    .rp-slider input[type="range"] { flex: 1; }
-    .rp-slider input[type="number"] { width: 72px; }
-    .rp-note { grid-column: 1 / -1; font-size: 11px; opacity: .55; margin: -2px 0 3px; }
+    /* ── 共享渲染面板（rp-*）：结构与本页 .ctrl-grid 同构 —— 行的三个元素（标注格 / 滑块 / 读数）
+          都是栅格的直接子元素，列宽仍是 110 / 1fr / 50（web/index.html:134）；标注列定宽、长标注在列内
+          换行，绝不挤压控件列；复位按钮挂在标注格里，不额外加列（免得与同面板原生行的控件列错位）。── */
+    .ctrl-grid .rp-label { display: flex; align-items: center; gap: 4px; min-width: 0; }
+    .ctrl-grid .rp-label > label {
+      flex: 1; min-width: 0; color: var(--muted); line-height: 1.35; overflow-wrap: anywhere;
+    }
+    .rp-reset {
+      flex: none; width: auto; padding: 0 3px; line-height: 14px; white-space: nowrap;
+      font-size: 10px; background: transparent; color: var(--muted);
+      border: 0; border-bottom: 1px solid transparent; cursor: pointer; opacity: .65;
+    }
+    .rp-reset:hover { color: var(--accent); border-bottom-color: var(--accent); opacity: 1; }
+    .ctrl-grid .rp-unit { color: var(--muted); font-size: 10px; margin-left: 2px; }
+    .ctrl-grid .rp-note { font-size: 11px; color: var(--muted); line-height: 1.4; margin: -2px 0 2px; }
+    /* 读数列必须装得下数字框：原生行是 50px 列配 56px 的 .param-num，会溢出被侧栏裁掉
+       （range 的 min-content 撑着 1fr 不让位，整条栅格比容器宽）。这里让 range 可以收缩、
+       数字框填满自己的列，列宽仍是 110 / 1fr / 50，与同面板原生行的控件列保持齐平。 */
+    #renderPanel input[type="range"] { min-width: 0; }
+    /* 读数列：数字与单位同一行右对齐（原生行的 .val 是块级 + text-align:right，
+       数字框撑满整列会把单位挤到下一行） */
+    #renderPanel .val { min-width: 0; display: flex; justify-content: flex-end; align-items: baseline; gap: 2px; }
+    #renderPanel .val input.param-num { width: auto; flex: 0 1 auto; min-width: 0; }
+    .ctrl-grid input.rp-text {
+      width: 100%; padding: 2px 4px; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--r); font-size: 11px;
+    }
   </style>
 </head>
 <body>
