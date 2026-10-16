@@ -124,6 +124,15 @@ interface TrackFacts {
   hp: { min: number; max: number } | null;
   deaths: number[];
   deadFrames: number;
+  /**
+   * **死亡后的自由视角**时长（秒，时间加权，口径同 `observeSeconds`）。
+   *
+   * 为什么要单独一档（T-714，owner 2026-10-16 裁定「分开标注」）：死后 `m_iTeamNum` 仍是 2/3、
+   * 不算 `team 0/1`，但那段位姿同样**不是本人走位**（是死后镜头的自由观察）。
+   * 它与 `observeSeconds` 是**同一批采样的两个视角**（死后挂观察的人两边各计一次），
+   * 故只作标注，**不**改动 `distance` / `yawRange` 的既有口径。
+   */
+  deadSeconds: number;
   /** **观察/未分配**的采样条数（`team === 0` 未选阵营 / `1` 观察者）。 */
   observeFrames: number;
   /**
@@ -180,6 +189,7 @@ function trackFacts(
   let hpMin: number | null = null;
   let hpMax: number | null = null;
   let deadFrames = 0;
+  let deadSeconds = 0;
   let observeFrames = 0;
   let totalSeconds = 0;
   let observeSeconds = 0;
@@ -211,7 +221,11 @@ function trackFacts(
       if (p.health !== null) {
         hpMin = hpMin === null ? p.health : Math.min(hpMin, p.health);
         hpMax = hpMax === null ? p.health : Math.max(hpMax, p.health);
-        if (p.health <= 0 || p.lifeState === 2) deadFrames++;
+        if (p.health <= 0 || p.lifeState === 2) {
+          deadFrames++;
+          // 死后自由视角的时长：与 `observeSeconds` 同一套「每条采样代表它到下一条之间的时长」
+          if (dur > 0) deadSeconds += dur;
+        }
       }
       if (i > 0) {
         const prev = s[i - 1];
@@ -242,6 +256,7 @@ function trackFacts(
     hp: hpMin === null || hpMax === null ? null : { min: hpMin, max: hpMax },
     deaths,
     deadFrames,
+    deadSeconds,
     observeFrames,
     seconds: totalSeconds,
     observeSeconds,
@@ -352,6 +367,8 @@ function fmtSize(bytes: number): string {
   /** 时长口径（秒）：观察占比用它算，避免采样密度带偏（见 `TrackFacts.seconds`）。 */
   seconds: number;
   observeSeconds: number;
+  /** **死亡后自由视角**时长（秒），与 `observeSeconds` 分开标注（T-714；两者可能重叠，见 `TrackFacts`）。 */
+  deadSeconds: number;
   isBot: boolean;
   /**
    * 该行是不是**真账号**（依据：`userinfo` 更新流里出现过 **非空且不是 `BOT`** 的 guid）。
@@ -423,6 +440,8 @@ interface PresenceWindow {
   /** 该窗口覆盖的时长（秒）与其中观察/未分配时长 —— 占比一律按这两个数算（见 `TrackFacts.seconds`）。 */
   seconds: number;
   observeSeconds: number;
+  /** 其中**死亡后自由视角**的时长（秒）；与 `observeSeconds` 分开标注（T-714）。 */
+  deadSeconds: number;
 }
 
 /** 「占用会话」：一个槽位一次「进服 → 换人/退场」（由 `occupancySessions()` 计算并缓存）。 */
@@ -923,6 +942,7 @@ export class DemoPanel {
         sampledFrames: facts ? facts.frames : 0,
         seconds: facts ? facts.seconds : 0,
         observeSeconds: facts ? facts.observeSeconds : 0,
+        deadSeconds: facts ? facts.deadSeconds : 0,
       });
     }
     this.presenceCache = out;
@@ -953,6 +973,9 @@ export class DemoPanel {
         // 观察占比：观察期间实体位姿是**镜头跟着别人**（T-702），必须让用户看得见，否则会以为轨迹是他走的
         // **按时间加权**（T-713）：采样事件驱动、间隔极不均，按条数算会失真（实测同一实体 47% → 7%）
         const obsPct = p.seconds > 0 ? Math.round((p.observeSeconds / p.seconds) * 100) : 0;
+        // **死亡后的自由视角**（T-714，owner 裁定「与观察时段分开标注」）：死后 `m_iTeamNum` 仍是 2/3、
+        // 不计入观察占比，但那段位姿同样不是本人走位（是死后镜头的自由观察）⇒ 单独给一条读数与一枚标记。
+        const deadPct = p.seconds > 0 ? Math.round((p.deadSeconds / p.seconds) * 100) : 0;
         const tip =
           (p.hasTrack
             ? '点击切到他的视角'
@@ -961,6 +984,10 @@ export class DemoPanel {
           (obsPct > 0
             ? '；观察时段 ' + obsPct + '%（这段里他的位姿是镜头跟着别人，不是本人走位）' +
               '；本人走位跨度 ' + p.moving + ' HU（已排除观察时段）'
+            : '') +
+          (deadPct > 0
+            ? '；死后自由视角 ' + Math.round(p.deadSeconds) + ' 秒（' + deadPct + '%，死亡期间镜头可以自由看，不是本人走位；' +
+              '与观察时段可能重叠）'
             : '');
         // 无位姿的行：区间条改**弱色**（内联，避免为这一个状态新增 CSS 规则）、时间读数后带「· 无位姿」。
         // 别用 `opacity` 内联压暗整行——`refreshRosterState` 每帧用它切换 `.off`（在线/离线），内联会盖掉它。
@@ -979,6 +1006,8 @@ export class DemoPanel {
         const team = p.team !== '—' ? '<i class="dmp-who-team">' + this.esc(p.team) + '</i>' : '';
         // 过半时间在观察 ⇒ 名字后加一枚「观」标记（不占文字宽度，长名仍省略号收尾）
         const observeTag = obsPct >= 50 ? '<i class="dmp-who-observe" title="过半时间在观察（这段位姿是镜头跟着别人）">观</i>' : '';
+        // 过半时间已死 ⇒ 一枚「亡」标记（与「观」并列；T-714：死后自由视角同样不是本人走位）
+        const deadTag = deadPct >= 50 ? '<i class="dmp-who-dead" title="过半时间已死（死亡期间镜头自由观察，不是本人走位）">亡</i>' : '';
         const deaths = p.deaths > 0 ? ' · 阵亡 ' + p.deaths : '';
         // 时间读数：多段时先报段数（读数格窄，逐段列全会被省略号吃掉），逐段时刻进悬停提示。
         const seg = p.spans.length > 1 ? p.spans.length + ' 段 ' : '';
@@ -992,7 +1021,7 @@ export class DemoPanel {
             : '';
         return (
           '<button class="dmp-who' + (p.hasTrack ? '' : ' dmp-who-notrack') + '" type="button" data-who="' + i + '" title="' + this.esc(tip + segDetail) + '">' +
-          '<span class="dmp-whoname">' + this.esc(p.name) + team + observeTag + '</span>' +
+          '<span class="dmp-whoname">' + this.esc(p.name) + team + observeTag + deadTag + '</span>' +
           '<span class="dmp-whobar">' + bars + '</span>' +
           '<span class="dmp-whotime">' + seg + this.fmtClock(this.secAt(p.from)) + '–' + this.fmtClock(this.secAt(p.to)) + (p.hasTrack ? deaths : ' · 无位姿') + '</span>' +
           '</button>'
@@ -1609,6 +1638,8 @@ export class DemoPanel {
         sampledFrames: factsWin ? factsWin.win.sampledFrames : 0,
         seconds: factsWin ? factsWin.win.seconds : 0,
         observeSeconds: factsWin ? factsWin.win.observeSeconds : 0,
+        // 死后自由视角（T-714）：与观察时长分开标注，不参与观察占比
+        deadSeconds: factsWin ? factsWin.win.deadSeconds : 0,
         isBot: g.isBot,
         human: g.human,
         entity,
@@ -1636,6 +1667,7 @@ export class DemoPanel {
         sampledFrames: p.sampledFrames,
         seconds: p.seconds,
         observeSeconds: p.observeSeconds,
+        deadSeconds: p.deadSeconds,
         isBot: p.isBot,
         // 这一支来自「可用轨迹」而没有 `userinfo` 会话 ⇒ 无 guid 可判，**不当作真账号**
         human: false,
@@ -1916,6 +1948,13 @@ export class DemoPanel {
       facts && facts.deaths.length > 0
         ? `；阵亡时刻 ${facts.deaths.map((s2) => this.fmtClock(s2)).join('、')}`
         : '';
+    // **死亡后的自由视角**（T-714，单独一格，不并进观察占比）：死后 `m_iTeamNum` 仍是 2/3，
+    // 但那段位姿同样不是本人走位。没有这一段时这一格整对不渲染，不占地方。
+    const deadText =
+      facts && facts.deadSeconds > 0
+        ? `${Math.round(facts.deadSeconds)} 秒` +
+          (facts.seconds > 0 ? `（${Math.round((facts.deadSeconds / facts.seconds) * 100)}%）` : '')
+        : '';
     // **同一身份占过多个实体时如实列出**（花名册按身份合并成一行，位姿却是按实体存的）：
     // 跳转只能落到当前这一段的主实体，其余实体在这里点名，避免读者以为「这个人只有这一条轨迹」。
     // 身份信息来自 `detailView()`（`rows` 是「按 userinfo 条目」的另一张表，同一实体的多行无法区分）。
@@ -1932,7 +1971,9 @@ export class DemoPanel {
       ? `槽号 ${i.slot}；实体号 #${i.entityIndex}；userID ${i.userId}；guid ${i.guid || '（空）'}；` +
         `类别 ${row.track?.className ?? '—'}（${row.track?.dtName ?? '—'}，classId ${row.track?.classId ?? '—'}）；` +
         `采样帧数 ${facts.frames}；世界跨度 ${facts.distance.toFixed(0)} u；yaw 跨幅 ${facts.yawRange.toFixed(1)}°；` +
-        `已死采样 ${facts.deadFrames} 条${deathTimes}${alsoAt}；${scopeNote}`
+        `已死采样 ${facts.deadFrames} 条` +
+        (facts.deadSeconds > 0 ? `（其中死亡后的自由视角 ${Math.round(facts.deadSeconds)} 秒，时间加权）` : '') +
+        `${deathTimes}${alsoAt}；${scopeNote}`
       : `槽号 ${i.slot}；实体号 #${i.entityIndex}；userID ${i.userId}；guid ${i.guid || '（空）'}；未采到位姿${alsoAt}；${scopeNote}`;
     // **人物名牌**（与「录像」页同一套语彙）：轨迹色点 + 名字 + 角色标签。
     // 色点取该实体的**轨迹配色**（`rows` 里按序号分配，与录像页的 `.track-dot` 同源），
@@ -1953,7 +1994,10 @@ export class DemoPanel {
       <div class="dmp-grid" title="解析内部量（排查用）：${this.esc(internals)}">
         <span>在场</span><b>${spanText}</b>
         <span>队伍</span><b>${this.esc(teamText)}</b>
-        <span>生命</span><b>${this.esc(hpText)}</b>
+        <span>生命</span><b>${this.esc(hpText)}</b>${
+          // **死亡后的自由视角**（T-714）：与观察时段分开一格；没有这一段时整对不渲染
+          deadText ? `\n        <span>死后视角</span><b>${this.esc(deadText)}</b>` : ''
+        }
       </div>
       </div>`;
     // **这里原先还有一个「tick 采样点」复选框**（逐实体的 `.dmp-opts`）—— owner 实测：
