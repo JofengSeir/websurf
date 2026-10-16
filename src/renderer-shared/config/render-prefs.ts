@@ -36,6 +36,7 @@ import {
   setLightFloor,
   setFogMaxDensity,
   type LightingMode,
+  type LightmapStage,
 } from '../shader/lightmap-shader.js';
 
 /** 旧版**共用**键（2026-10-16 起只作迁移来源、不再写入；`apps/**` 不得出现这个字面量）。 */
@@ -126,6 +127,45 @@ export const RENDER_EXTRAS_DEFAULTS: RenderExtrasPrefs = {
   nearPlaneScale: 1,
 };
 
+/**
+ * debug 端「排查开关」档（T-692）。
+ *
+ * 这些开关原先只写 globalThis：刷新即丢，而面板小字又说「刷新后生效」——自相矛盾，等于让 debug 白调。
+ * 现在随 **debug 本端**渲染档保存（键 `vbsp:renderPrefs:debug`，内容绝不进 viewer/game），
+ * 由 `applyRenderDebugSwitches()` 在渲染器**建材质之前**装回。
+ *
+ * 取值口径逐条读实现：阶段名见 `lightmap-shader.ts` 的 `LightmapStage`；布尔项一律显式写 true/false；
+ * `fullbrightNames` 存逗号分隔字符串（面板就是这个形状），装回时再 split 成数组（实现读的是数组）。
+ */
+export interface RenderDebugPrefs {
+  lightmapStage: LightmapStage;
+  outputGamma22: boolean;
+  vertexLightingOff: boolean;
+  bumpOff: boolean;
+  worldTransitionOff: boolean;
+  envMapAll: boolean;
+  albedoOnly: boolean;
+  lightmapOnly: boolean;
+  texLinear: boolean;
+  fullbrightNames: string;
+}
+
+export const RENDER_DEBUG_DEFAULTS: RenderDebugPrefs = {
+  lightmapStage: 'auto',
+  outputGamma22: true,
+  vertexLightingOff: false,
+  bumpOff: false,
+  worldTransitionOff: false,
+  envMapAll: false,
+  albedoOnly: false,
+  lightmapOnly: false,
+  texLinear: false,
+  fullbrightNames: '',
+};
+
+/** 全部合法光照阶段（与 `lightmap-shader.ts` 的 `LightmapStage` 同集合；用于归一到合法值）。 */
+const LIGHTMAP_STAGES: readonly LightmapStage[] = ['auto', 'off', 'broken', 'native', 'channel0', 'channel1', 'noinject'];
+
 export interface RenderPrefs {
   version: number;
   lighting: RenderLightingPrefs;
@@ -133,6 +173,7 @@ export interface RenderPrefs {
   culling: { distance: number; pvs: boolean };
   camera: { fov: number };
   extras: RenderExtrasPrefs;
+  debug: RenderDebugPrefs;
 }
 
 /** 写入用补丁（逐段合并，缺省字段保持原值）。 */
@@ -142,6 +183,7 @@ export interface RenderPrefsPatch {
   culling?: Partial<RenderPrefs['culling']>;
   camera?: Partial<RenderPrefs['camera']>;
   extras?: Partial<RenderExtrasPrefs>;
+  debug?: Partial<RenderDebugPrefs>;
 }
 
 /** 相机 FOV 默认值（度）：三端现状一致（`apps/game/src/config.ts` 的 `hud.fov`、debug/viewer 的常量都是 73.6）。 */
@@ -162,11 +204,17 @@ export function defaultRenderPrefs(): RenderPrefs {
     culling: { distance: RENDER_DEFAULT_CULL_DISTANCE, pvs: RENDER_DEFAULT_PVS },
     camera: { fov: RENDER_DEFAULT_FOV },
     extras: { ...RENDER_EXTRAS_DEFAULTS },
+    debug: { ...RENDER_DEBUG_DEFAULTS },
   };
 }
 
 const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+
+const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
+
+const stage = (v: unknown, fallback: LightmapStage): LightmapStage =>
+  typeof v === 'string' && (LIGHTMAP_STAGES as readonly string[]).includes(v) ? (v as LightmapStage) : fallback;
 
 const quality = (v: unknown, fallback: TextureQualityPref): TextureQualityPref =>
   v === 'original' || v === 'mini' ? v : fallback;
@@ -179,6 +227,7 @@ function normalize(raw: unknown): RenderPrefs {
   const c = (o.culling ?? {}) as Record<string, unknown>;
   const cam = (o.camera ?? {}) as Record<string, unknown>;
   const ex = (o.extras ?? {}) as Record<string, unknown>;
+  const db = (o.debug ?? {}) as Record<string, unknown>;
   return {
     version: RENDER_PREFS_VERSION,
     lighting: {
@@ -200,6 +249,18 @@ function normalize(raw: unknown): RenderPrefs {
       fogMaxDensity: num(ex.fogMaxDensity, d.extras.fogMaxDensity),
       // 缩放系数必须为正，否则 near 会退化成 0/负值把整个场景裁掉
       nearPlaneScale: num(ex.nearPlaneScale, d.extras.nearPlaneScale) > 0 ? num(ex.nearPlaneScale, d.extras.nearPlaneScale) : d.extras.nearPlaneScale,
+    },
+    debug: {
+      lightmapStage: stage(db.lightmapStage, d.debug.lightmapStage),
+      outputGamma22: bool(db.outputGamma22, d.debug.outputGamma22),
+      vertexLightingOff: bool(db.vertexLightingOff, d.debug.vertexLightingOff),
+      bumpOff: bool(db.bumpOff, d.debug.bumpOff),
+      worldTransitionOff: bool(db.worldTransitionOff, d.debug.worldTransitionOff),
+      envMapAll: bool(db.envMapAll, d.debug.envMapAll),
+      albedoOnly: bool(db.albedoOnly, d.debug.albedoOnly),
+      lightmapOnly: bool(db.lightmapOnly, d.debug.lightmapOnly),
+      texLinear: bool(db.texLinear, d.debug.texLinear),
+      fullbrightNames: typeof db.fullbrightNames === 'string' ? db.fullbrightNames : d.debug.fullbrightNames,
     },
   };
 }
@@ -353,6 +414,9 @@ export function renderPrefsFingerprint(p: RenderPrefs): string {
     p.camera.fov,
     p.extras.lightFloor, p.extras.propCubeGain, p.extras.bumpStrength,
     p.extras.bumpDetail, p.extras.fogMaxDensity, p.extras.nearPlaneScale,
+    p.debug.lightmapStage, p.debug.outputGamma22, p.debug.vertexLightingOff, p.debug.bumpOff,
+    p.debug.worldTransitionOff, p.debug.envMapAll, p.debug.albedoOnly, p.debug.lightmapOnly,
+    p.debug.texLinear, p.debug.fullbrightNames,
   ]);
   let h = 0x811c9dc5;
   for (let i = 0; i < key.length; i++) {
@@ -390,6 +454,7 @@ export function writeRenderPrefs(patch: RenderPrefsPatch): RenderPrefs {
     culling: { ...cur.culling, ...(patch.culling ?? {}) },
     camera: { ...cur.camera, ...(patch.camera ?? {}) },
     extras: { ...cur.extras, ...(patch.extras ?? {}) },
+    debug: { ...cur.debug, ...(patch.debug ?? {}) },
   });
   writeRaw(next);
   return next;
@@ -445,7 +510,24 @@ export function prefsPathPatch(path: string, value: number | boolean | string): 
   if (key === 'lighting') return { lighting: { [leaf]: value } as never };
   if (key === 'culling') return { culling: { [leaf]: value } as never };
   if (key === 'camera') return { camera: { [leaf]: value } as never };
+  if (key === 'debug') return { debug: { [leaf]: value } as never };
   return { extras: { [leaf]: value } as never };
+}
+
+/** debug 排查开关的单行摘要（只列非默认项；默认档返回空串），供 `describeRenderPrefs` 的真机核对用。 */
+function debugSwitchesSummary(d: RenderDebugPrefs): string {
+  const parts: string[] = [];
+  if (d.lightmapStage !== RENDER_DEBUG_DEFAULTS.lightmapStage) parts.push('stage=' + d.lightmapStage);
+  if (d.outputGamma22 !== RENDER_DEBUG_DEFAULTS.outputGamma22) parts.push('g22=' + (d.outputGamma22 ? 'on' : 'off'));
+  if (d.vertexLightingOff) parts.push('noVLight');
+  if (d.bumpOff) parts.push('noBump');
+  if (d.worldTransitionOff) parts.push('noWorldTrans');
+  if (d.envMapAll) parts.push('envAll');
+  if (d.albedoOnly) parts.push('albedoOnly');
+  if (d.lightmapOnly) parts.push('lmOnly');
+  if (d.texLinear) parts.push('texLinear');
+  if (d.fullbrightNames) parts.push('fullbright=' + d.fullbrightNames);
+  return parts.join(',');
 }
 
 /** 生效值的单行描述（三端同格式；判据直接比对这一行）。 */
@@ -488,6 +570,9 @@ export function describeRenderPrefs(p: RenderPrefs): string {
     p.extras.nearPlaneScale +
     ' source=' +
     (deepLinkActive ? 'deep-link' : 'storage') +
+    // debug 排查开关只列「非默认」项，便于真机核对「改了之后刷新还在不在」
+    ' dbg=' +
+    (debugSwitchesSummary(p.debug) || '-') +
     ' scope=' +
     renderPrefsScope()
   );
@@ -500,6 +585,31 @@ export function describeRenderPrefs(p: RenderPrefs): string {
  * ① 各端初始化把配置对象里的现值写进共享 uniform（值仍是各自的 `config.lighting`）；
  * ② 面板滑块单点改写（每次只动一个字段），不因拖动而反复解析 localStorage 存档。
  */
+/**
+ * 把 debug 排查开关装回 globalThis（**必须在渲染器建材质之前**调用——这些都是材质编译期读取的口）。
+ *
+ * 与 `applyRenderPrefs` 分开的理由：那些开关只有 debug 端会用，塞进三端共用的施加口会平白给
+ * viewer/game 写一堆调试全局变量。`lightmapStage === 'auto'` 与空 `fullbrightNames` 视为「不覆盖」，
+ * 直接删键，回到实现自身的正常路径。
+ */
+export function applyRenderDebugSwitches(d: RenderDebugPrefs): void {
+  const g = globalThis as Record<string, unknown>;
+  if (d.lightmapStage === 'auto') delete g.__vbspLightmapStage;
+  else g.__vbspLightmapStage = d.lightmapStage;
+  // 布尔项显式写：实现里多处判 `=== true` / `=== false`，「未设置」与「关」语义不同必须能区分
+  g.__vbspOutputGamma22 = d.outputGamma22;
+  g.__vbspVertexLightingOff = d.vertexLightingOff;
+  g.__vbspBumpOff = d.bumpOff;
+  g.__vbspWorldTransitionOff = d.worldTransitionOff;
+  g.__vbspEnvMapAll = d.envMapAll;
+  g.__vbspDebugAlbedoOnly = d.albedoOnly;
+  g.__vbspDebugLightmapOnly = d.lightmapOnly;
+  g.__vbspDebugTexLinear = d.texLinear;
+  const names = d.fullbrightNames.split(',').map((s) => s.trim()).filter(Boolean);
+  if (names.length) g.__vbspFullbrightNames = names;
+  else delete g.__vbspFullbrightNames;
+}
+
 export function applyLightingPresentation(patch: Partial<RenderLightingPrefs>): void {
   if (patch.exposure !== undefined) setExposure(patch.exposure);
   if (patch.lightGamma !== undefined) setLightGamma(patch.lightGamma);

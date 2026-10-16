@@ -34,7 +34,7 @@ import type {
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
-import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, readPrefsPath as readPrefsField, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js'; import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
+import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, applyRenderDebugSwitches, defaultRenderPrefs, readPrefsPath as readPrefsField, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi } from '../../../src/renderer-shared/config/render-panel-ui.js';
 import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
 import { formatTime, GameState } from './game-state.js';
@@ -338,6 +338,8 @@ async function main(): Promise<void> {
 	};
 	// 主线程渲染物理事件（Rust take_event 产出：teleport / death）→ 计时挑战状态机
 	rendererMain.onPhysEvent = onRenderPhysEvent;
+	// 装回 debug 本端的排查开关：这些口是**材质编译期**读取的，必须在 rendererMain.init 之前写
+	applyRenderDebugSwitches(readRenderPrefs().debug);
 	rendererMain.init(
 		dom.canvas,
 		dom.canvas.clientWidth,
@@ -1202,27 +1204,6 @@ function loadUiPrefs(): void {
 // 控件清单在 src/renderer-shared/config/render-panel-spec.ts（三端共用）；这里只管「落到哪 + 怎么施加」。
 // 本端已手写的同项（光照模式 / 纹理画质 / 视距上限 / 近平面 / 环境光强度）不在面板里重复。
 
-/** 出帧开关读值：toggle 按「未设置时的默认」（defaultOn）解释，select 缺省 auto，text 是逗号分隔的数组。 */
-function readSwitchGlobal(item: RenderPanelItem): number | boolean | string {
-	const v = (globalThis as Record<string, unknown>)[item.global ?? ''];
-	if (item.kind === 'toggle') return v === undefined ? item.defaultOn === true : v === true;
-	if (item.kind === 'text') return Array.isArray(v) ? (v as string[]).join(', ') : '';
-	return typeof v === 'string' ? v : 'auto';
-}
-
-/** 出帧开关写值：显式写布尔/字符串/数组（不清键，保证「关」也能表达）；复位时才删键。 */
-function writeSwitchGlobal(item: RenderPanelItem, value: RenderPanelValue): void {
-	const key = item.global;
-	if (!key) return;
-	const g = globalThis as Record<string, unknown>;
-	if (item.kind === 'text') {
-		const names = String(value).split(',').map((s) => s.trim()).filter(Boolean);
-		g[key] = names;
-		return;
-	}
-	g[key] = value;
-}
-
 /** 装配共享渲染面板：读值 / 写值 / 复位 / 写后施加。 */
 function setupRenderPanel(): void {
 	const host = document.getElementById('renderPanel');
@@ -1230,26 +1211,25 @@ function setupRenderPanel(): void {
 	const api: RenderPanelApi = {
 		app: 'debug',
 		read(item) {
-			return item.pref ? readPrefsField(readRenderPrefs(), item.pref) : readSwitchGlobal(item);
+			return item.pref ? readPrefsField(readRenderPrefs(), item.pref) : 0;
 		},
 		write(item, value) {
-			if (!item.pref) { writeSwitchGlobal(item, value); return; }
-			writeRenderPrefs(prefsPathPatch(item.pref, value));
-			// 施加：光照/模式/extras 走共享施加口；剔除距离与 FOV 有各自的活动口
-			applyRenderPrefs(readRenderPrefs());
+			if (!item.pref) return;
+			const next = writeRenderPrefs(prefsPathPatch(item.pref, value));
+			// 施加：光照/模式/extras 走共享施加口；排查开关单独装回；剔除距离与 FOV 有各自的活动口
+			applyRenderPrefs(next);
+			applyRenderDebugSwitches(next.debug);
 			if (item.pref === 'culling.distance') rendererMain?.setCullDistance(Number(value));
 			if (item.pref === 'camera.fov') rendererMain?.setFov(Number(value));
 		},
 		reset(item) {
-			if (!item.pref) {
-				if (item.global) delete (globalThis as Record<string, unknown>)[item.global];
-				return;
-			}
+			if (!item.pref) return;
 			const def = readPrefsField(defaultRenderPrefs(), item.pref);
-			writeRenderPrefs(prefsPathPatch(item.pref, (def ?? 0) as RenderPanelValue));
-			applyRenderPrefs(readRenderPrefs());
-			if (item.pref === 'culling.distance') rendererMain?.setCullDistance(Number(def ?? 0));
-			if (item.pref === 'camera.fov') rendererMain?.setFov(Number(def ?? 0));
+			const next = writeRenderPrefs(prefsPathPatch(item.pref, def));
+			applyRenderPrefs(next);
+			applyRenderDebugSwitches(next.debug);
+			if (item.pref === 'culling.distance') rendererMain?.setCullDistance(Number(def));
+			if (item.pref === 'camera.fov') rendererMain?.setFov(Number(def));
 		},
 		afterWrite(item) {
 			if (item.apply !== 'live') {
