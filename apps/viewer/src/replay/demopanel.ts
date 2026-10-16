@@ -30,6 +30,7 @@ import {
   type ChatKind,
 } from './demo/chatkind.js';
 import { userinfoTimeline } from './demo/net.js';
+import { decodePlayerInfoRecords } from './demo/demo.js';
 import { trackToClip } from './democlip.js';
 import { TRACK_PALETTE } from './tracks.js';
 import { FILE_KIND_LABEL, sniffFileKind } from '../core/filekind.js';
@@ -537,15 +538,13 @@ export class DemoPanel {
     let best = '';
     for (const snap of userinfoTimeline) {
       if (snap.tick > now) break;
+      // 一个条目里可能有多条 `player_info_s`（见 `decodePlayerInfoRecords`）⇒ 必须逐条比槽号，
+      // 不能再拿 `e.idx` 直接当槽号（那只会读到该条目里的第一条）。
       for (const e of snap.entries) {
-        if (e.idx !== slot) continue;
-        let end = Math.min(32, e.value.length);
-        for (let q = 0; q < end; q++) if (e.value[q] === 0) { end = q; break; }
-        const nm = new TextDecoder('utf-8', { fatal: false }).decode(e.value.subarray(0, end));
-        // **拒绝非法名**：录像末段有个别条目解码后是乱码（替换字符 / 控制字符）。取名的用途是显示，
-        // 与其把乱码显示出来，不如**保留上一个合法名** —— 轮换的语义（"当前记录的是哪一关"）不受影响，
-        // 因为乱码那条本身不携带可读信息。
-        if (nm.length > 0 && !/[\uFFFD\u0000-\u001f]/.test(nm)) best = nm;
+        for (const rec of decodePlayerInfoRecords(e.value, e.idx)) {
+          // 解码器已经把乱码挡掉（控制字符 / 替换字符 / 不可能的 userID）⇒ 这里保留上一个合法名的语义不变
+          if (rec.slot === slot && rec.name.length > 0) best = rec.name;
+        }
       }
     }
     return best;
@@ -1496,26 +1495,17 @@ export class DemoPanel {
    * 解码出替换字符（U+FFFD）的条目是录像里个别未解对的记录，**跳过而不展示乱码**。
    */
   private buildEvents(): Array<{ tick: number; slot: number; name: string; userId: number; guid: string; isBot: boolean }> {
-    const dec = new TextDecoder('utf-8', { fatal: false });
-    const cstr = (v: Uint8Array, at: number, n: number): string => {
-      let end = Math.min(at + n, v.length);
-      for (let q = at; q < end; q++) if (v[q] === 0) { end = q; break; }
-      return dec.decode(v.subarray(at, end));
-    };
-    const i32 = (v: Uint8Array, at: number): number =>
-      v.length < at + 4 ? 0 : (v[at] | (v[at + 1] << 8) | (v[at + 2] << 16) | (v[at + 3] << 24)) | 0;
     const out: Array<{ tick: number; slot: number; name: string; userId: number; guid: string; isBot: boolean }> = [];
+    // 去重键是**记录自己的槽号**（一个条目可能含多条 `player_info_s`，槽号 ≠ 条目键）；
+    // 名字/guid 的可打印性与 userID 合理性统一在解码器里判（T-699 收敛口径）。
     const lastUid = new Map<number, number>();
     for (const snap of userinfoTimeline) {
       for (const ent of snap.entries) {
-        const name = cstr(ent.value, 0, 32);
-        if (name.length === 0 || /\uFFFD/.test(name)) continue;
-        const userId = i32(ent.value, 32);
-        const guid = cstr(ent.value, 36, 33);
-        if (/\uFFFD/.test(guid)) continue;
-        if (lastUid.get(ent.idx) === userId) continue;
-        lastUid.set(ent.idx, userId);
-        out.push({ tick: snap.tick, slot: ent.idx, name, userId, guid, isBot: guid === 'BOT' });
+        for (const rec of decodePlayerInfoRecords(ent.value, ent.idx)) {
+          if (lastUid.get(rec.slot) === rec.userId) continue;
+          lastUid.set(rec.slot, rec.userId);
+          out.push({ tick: snap.tick, slot: rec.slot, name: rec.name, userId: rec.userId, guid: rec.guid, isBot: rec.isBot });
+        }
       }
     }
     return out;

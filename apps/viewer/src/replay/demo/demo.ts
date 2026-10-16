@@ -592,59 +592,74 @@ export function readPlayerInfos(tables: DemoStringTable[]): DemoPlayerInfo[] {
   const ui = tables.find((t) => t.name === 'userinfo');
   if (!ui) return [];
   const out: DemoPlayerInfo[] = [];
-  const dec = new TextDecoder('utf-8', { fatal: false });
   for (const [i, e] of ui.entries) {
-    const v0 = e.value;
-    if (!v0 || v0.length < 40) continue;
     const slot = Number.isFinite(Number(e.key)) ? Number(e.key) : i;
-    // **一个条目里可能塞着多条 `player_info_s`**：实测 `userinfo` 更新条目的 userdata 是
-    // **1056 字节 = 8 × 132**（132 正是逐字段验证过的单条记录长度）。早先整段当成**一条**读，
-    // 于是只能读出第一条、且字段错位 —— 这就是"名字只有 1～2 个"的直接原因。
-    // 这里按 132 字节切分，逐条解；不足 132 的按单条处理（签入期槽 0 就是恰好 132）。
-    const chunks: Array<{ off: number; len: number }> = [];
-    if (v0.length > RECORD_BYTES && v0.length % RECORD_BYTES === 0) {
-      for (let off = 0; off < v0.length; off += RECORD_BYTES) chunks.push({ off, len: RECORD_BYTES });
-    } else {
-      chunks.push({ off: 0, len: v0.length });
-    }
-    for (let ci = 0; ci < chunks.length; ci++) {
-      const { off } = chunks[ci];
-      const v = v0.subarray(off, off + chunks[ci].len);
-      const cstr = (from: number, max: number): string => {
-        let end = Math.min(from + max, v.length);
-        for (let k = from; k < end; k++) {
-          if (v[k] === 0) {
-            end = k;
-            break;
-          }
-        }
-        return dec.decode(v.subarray(from, end)).trim();
-      };
-      const guid = cstr(36, 32);
-      const name = cstr(0, 32);
-      if (name.length === 0) continue;
-      // 可打印性：名字里不该有控制字符（切分错的块会被这一步挡住）
-      let printable = true;
-      for (let k = 0; k < name.length; k++) {
-        const c = name.charCodeAt(k);
-        if (c < 0x20 || c === 0x7f) {
-          printable = false;
+    out.push(...decodePlayerInfoRecords(e.value, slot));
+  }
+  return out;
+}
+
+/**
+ * **userinfo 条目值 → 玩家记录**（唯一口径，T-699）：面板与 `readPlayerInfos` 都走这里。
+ *
+ * 一个条目里可能塞着多条 `player_info_s`（实测 1056 字节 = 8 × 132），必须按 132 字节切分逐条解；
+ * 面板那一侧早先只读第一条 ⇒ **同一快照里其余槽位的人永远不会成为身份**（owner 报「很多人识别不出来」）。
+ *
+ * 校验（切分错位、没解对的记录一律挡掉，别把乱码当成人）：
+ *   · 名字与 guid 必须**可打印**（无控制字符、无 U+FFFD）；
+ *   · `userId` 必须 ≤ 0xFFFF —— 实测错位记录会解出 9 亿 / 4 亿这种不可能的 userID；
+ *   · 名字为空则丢弃。
+ * 记录槽号 = 条目键 + 该条目内的第几条（引擎自上而下排）。
+ */
+export function decodePlayerInfoRecords(value: Uint8Array | null | undefined, slotBase: number): DemoPlayerInfo[] {
+  const v0 = value;
+  if (!v0 || v0.length < 40) return [];
+  const out: DemoPlayerInfo[] = [];
+  const dec = new TextDecoder('utf-8', { fatal: false });
+  const chunks: Array<{ off: number; len: number }> = [];
+  if (v0.length > RECORD_BYTES && v0.length % RECORD_BYTES === 0) {
+    for (let off = 0; off < v0.length; off += RECORD_BYTES) chunks.push({ off, len: RECORD_BYTES });
+  } else {
+    chunks.push({ off: 0, len: v0.length });
+  }
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const v = v0.subarray(chunks[ci].off, chunks[ci].off + chunks[ci].len);
+    const cstr = (from: number, max: number): string => {
+      let end = Math.min(from + max, v.length);
+      for (let k = from; k < end; k++) {
+        if (v[k] === 0) {
+          end = k;
           break;
         }
       }
-      if (!printable) continue;
-      const slotNo = slot + ci;
-      out.push({
-        slot: slotNo,
-        entityIndex: slotNo + 1,
-        name,
-        userId: (v[32] | (v[33] << 8) | (v[34] << 16) | (v[35] << 24)) >>> 0,
-        guid,
-        isBot: guid.toUpperCase() === 'BOT' || v[100] === 1,
-      });
-    }
+      return dec.decode(v.subarray(from, end)).trim();
+    };
+    const name = cstr(0, 32);
+    const guid = cstr(36, 32);
+    if (name.length === 0) continue;
+    if (!isPrintable(name) || !isPrintable(guid)) continue;
+    const userId = (v[32] | (v[33] << 8) | (v[34] << 16) | (v[35] << 24)) >>> 0;
+    if (userId > 0xffff) continue;
+    const slotNo = slotBase + ci;
+    out.push({
+      slot: slotNo,
+      entityIndex: slotNo + 1,
+      name,
+      userId,
+      guid,
+      isBot: guid.toUpperCase() === 'BOT' || v[100] === 1,
+    });
   }
   return out;
+}
+
+/** 可打印性：控制字符与替换字符都算不可打印（切分错位的记录靠这一步挡住）。 */
+function isPrintable(s: string): boolean {
+  for (let k = 0; k < s.length; k++) {
+    const c = s.charCodeAt(k);
+    if (c < 0x20 || c === 0x7f || c === 0xfffd) return false;
+  }
+  return true;
 }
 
 /** 单条 `player_info_s` 的字节数（`name[32] + userID + steamID[32] + extra + friendsID + friendsName[32]
