@@ -22,13 +22,13 @@
     ".github/ISSUE_TEMPLATE/feature_request.md": "e716690da462864749f36089656e753425c0c65471f718dea26ecf5584f5fccb",
     ".github/ISSUE_TEMPLATE/other.md": "5a507a4ab87d0c7132c0a742e05fcc9069f827c15a426dba436b8939b1236a01",
     ".github/PULL_REQUEST_TEMPLATE.md": "adbc4aecbd5debdfe4fa1113ef235e683fef2fae3f9c659512e2fe931b7282e3",
-    "AGENTS.md": "7da3ce260b077301104ff04b8b8d9539ab2029d9a1ab1a082b2f63f180603df7",
+    "AGENTS.md": "da0fbffb03327cb22305f96cf357c906d7a07cdece76b764b2512c0857017aec",
     "skills/websurf-workflow/SKILL.md": "7299f1bad07726f52718d242a02be2e9d397eed283b9f2db2ed897dcb6621951"
   },
   "approvals": [
     {
       "path": ".github/ISSUE_TEMPLATE/bug_report.md",
-      "by": "Jofen",
+      "by": "owner",
       "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
       "at": "2026-10-10",
       "task": "",
@@ -36,7 +36,7 @@
     },
     {
       "path": ".github/ISSUE_TEMPLATE/feature_request.md",
-      "by": "Jofen",
+      "by": "owner",
       "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
       "at": "2026-10-10",
       "task": "",
@@ -44,7 +44,7 @@
     },
     {
       "path": ".github/ISSUE_TEMPLATE/other.md",
-      "by": "Jofen",
+      "by": "owner",
       "reason": "按 owner 优先级「项目实际 > skill 红线 > 文档记录」修口径：工程选项与 serve.py 行号对齐当前实际",
       "at": "2026-10-10",
       "task": "",
@@ -52,7 +52,7 @@
     },
     {
       "path": "skills/agentmemory-usage/SKILL.md",
-      "by": "Jofen",
+      "by": "owner",
       "reason": "子代理独立审查发现的口径错误：doc-drift.yml 入库状态、viewer 非 single-only、归档目录描述、PR 模板漏 viewer 契约门、agentmemory §8 与 §16 矛盾及台账名/行数/CLI 路径、workflow 注册相对路径与进行中格式",
       "at": "2026-10-10",
       "task": "",
@@ -115,19 +115,19 @@
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
-      "by": "owner-delegated",
-      "reason": "CI 修复（T-679）：[O] 覆盖率要求 src/scripts/*.mjs 被 AGENTS.md 以仓库相对路径提到；build-textures-mtz.mjs 于 T-659 新增时未登记（当时未跟踪 ⇒ 门禁看不见），提交后 CI 报红",
-      "at": "2026-10-15",
-      "task": "",
-      "consumed": true
-    },
-    {
       "path": "OWNER.md",
       "by": "owner",
       "reason": "分卷：owner 2026-10-15「确认收掉」D-111 / D-116 / D-117 / D-118 / D-119 五条已决行，移入记忆库已决卷 websurf/progress/owner/2026-10-15-resolved.md",
       "at": "2026-10-15",
       "task": "",
+      "consumed": true
+    },
+    {
+      "path": "AGENTS.md",
+      "by": "owner",
+      "reason": "T-684：删掉 apps/viewer/dist-README.md（产物说明书）与其构建引用后，AGENTS §2 的三处提及（apps/** 行、.gitignore 行号引用、md 清单）同步更正",
+      "at": "2026-10-16",
+      "task": "T-684",
       "consumed": true
     }
   ],
@@ -199,7 +199,6 @@
     "SECURITY.md": {
       "src/scripts/serve.py:40:41": "a4a62ad0"
     },
-    "apps/viewer/dist-README.md": {},
     "src/vendor/lzma/README.md": {}
   },
   "rebaselines": [

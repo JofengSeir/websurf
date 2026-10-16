@@ -1,92 +1,99 @@
-# WebSurf 仓库级 .gitignore
+# WebSurf 仓库级 .gitignore（2026-10-16 重整：高危目录「整体忽略 + 白名单」）
 #
-# 收录范围（2026-09-22 按现工况精简）：① 当前工作区里**真实存在**且不入库的产物；
-# ② 本仓脚本**确实会生成**的产物（规则上方注明生成者）。空转规则已删除。
-# 分层：各工程/共享层另有自身 .gitignore 补充特有排除；规则按「后出现的覆盖先出现的」排序。
+# 口径：产物 / 夹具 / 工具目录先 `dir/*` 整体忽略，再用 `!` 逐条放行**必须入库**的文件。
+#   ⇒ 新增产物（新扩展名、新构建输出）不用改规则；只有新增「要入库」的文件才加白名单。
+# 分层：**本文件是唯一的忽略文件**（2026-10-16 起 apps/*/.gitignore 与 src/.gitignore 已删，
+# 其内容全部并入下面的白名单规则）。
+# 目录现状与「哪些该入库」的判据见 AGENTS.md §2；治理层为何入库见文末「agent 工作流层」。
+# 注意：git 的忽略文件**不支持行尾注释**，生成者等信息一律写在规则上方。
 
-# ── 构建产物（生成者：cargo / npm / wasm-pack / esbuild 与各工程 scripts/build-dist.mjs）──
-**/dist/
-**/pkg/
-**/target/
-**/node_modules/
-**/web/app.js
-**/web/worker.js
-**/web/websurf_wasm_bg.wasm
-**/web/websurf_*wasm*.js
-**/web/websurf_*wasm*.d.ts
-# 三端 web/ 下的默认纹理包是 src/materials/textures.mtz 的本地开发副本（唯一源在 src/materials；构建产物由
-# build-dist.mjs 直接读 src/materials ⇒ dist/ 自带）。dev 起服务前用 src/scripts/sync-default-textures.mjs 同步。
-apps/*/web/textures.mtz
-# 三端 web/ 下的 COOP/COEP 补头 SW 同样是 src/web/coi-serviceworker.js 的本地开发副本（唯一源在 src/web）
-apps/*/web/coi-serviceworker.js
+# ── 高危目录①：三端 web/ ──
+# 只有 index.html / styles.css 是手写的，其余全是生成物：app.js、worker.js、
+# websurf_*wasm*、textures.mtz（src/materials/textures.mtz 的本地开发副本）、
+# coi-serviceworker.js（src/web/coi-serviceworker.js 的本地开发副本）。
+apps/*/web/*
+!apps/*/web/index.html
+!apps/*/web/styles.css
 
-# ── Cargo / wasm-pack 缓存（生成者：src/scripts/cargo-env.cmd 的 CARGO_HOME / WASM_PACK_CACHE）──
-**/.cargo-home/
-**/.wasm-pack-cache/
+# ── 高危目录②：progress/ ──
+# 只放行 4 个机器可读控制层文件：门禁 [G] 的权威输入 board.jsonl、ID 索引 control-ids.json、
+# 迁移台账 memory-index.jsonl、待补写队列 pending-kb.jsonl；notes/ 之类一律不进。
+progress/*
+!progress/board.jsonl
+!progress/control-ids.json
+!progress/memory-index.jsonl
+!progress/pending-kb.jsonl
 
-# ── 临时 / 验证产物（生成者：本仓脚本默认写 .tmp/；各工程 temp/ 存一次性构建日志）──
-**/.tmp/
-**/temp/
-# 生成者：已随 T-653 移除的 plot-path 工具（输出目录为 <输入 json 目录>/plot-<输入基名>/）
-**/plot-*/
-
-# ── 图表产物（生成者：archify 技能；每次执行生成一份带时间戳的目录，过程产物，不作事实来源）──
-.archify/
-
-# ── Python 运行期（生成者：python src/scripts/serve.py，见各工程 dev.cmd / start.cmd）──
-__pycache__/
-*.pyc
-
-# ── test/ 夹具目录：只上传目录本身（.gitkeep 占位），内容留在本地不入库 ──
-# 地图与录像体积大（test/maps 下单个最大 144 MB，超 GitHub 单文件 100 MB 上限），且属本地数据
+# ── 高危目录③：test/ ──
+# 夹具与第三方 SDK 都留本地（单个地图最大 144 MB，超 GitHub 单文件 100 MB 上限），只留目录占位。
+test/*
+!test/maps/
+!test/replay/
 test/maps/*
 !test/maps/.gitkeep
 test/replay/*
-test/project/*
 !test/replay/.gitkeep
-# 回退素材临时落点（T-658：从本机 HL2/CS:S VPK 与地图 pakfile 扒出的 VMT/VTF，不入库）
-test/fallback-src/
 *.bsp
 *.dem
 *.replay
 
-# ── Agent 工作记忆（非文档树、不入库）──
-**/.workbuddy/
-# ZCode 会话的工作区（计划文件 .zcode/plans/** 等，工具自动生成；漂移体检不应扫描它们）
+# ── 构建产物 / 缓存 / 归档 / 工具目录：整体忽略，不留白名单 ──
+# 生成者：**/dist/ = 各端 build-dist.mjs（唯一产出口）；**/pkg/ = wasm-pack；
+# **/target/ = cargo（根与三工程各一份）；**/node_modules/ = npm；
+# **/.cargo-home/ 与 **/.wasm-pack-cache/ = src/scripts/cargo-env.cmd；
+# **/.tmp/ = 本仓脚本默认临时落点；**/temp/ = 各工程一次性构建日志；
+# **/plot-*/ = 已随 T-653 移除的 plot-path 工具的输出目录；
+# .archify/ = archify 技能的过程产物（不作事实来源）；
+# archive/ = 迁移原文与回滚存证（agent 可暴力解读项目重建，不入库）；
+# **/.workbuddy/ = 其它 agent 的工作记忆（只作过程线索）；__pycache__/ = python 运行期。
+**/dist/
+**/pkg/
+**/target/
+**/node_modules/
+**/.cargo-home/
+**/.wasm-pack-cache/
+**/.tmp/
+**/temp/
+**/plot-*/
+.archify/
 .zcode/
 .zcodeignore
-# agent 计划区（任务书 / 方案草稿，工具与 owner 生成；同 .zcode/ 与 AGENTS §0.1 第 6 条：过程产物不入库）
-# 不忽略会让漂移体检扫描它：本机绝对路径计入 [P]、举例待办号计入 [G]（2026-10-10 实测 19+5 处）
 .plan/
-
-# ── 归档文件──
 **/.archive/
-# 迁移派生归档（原文副本 + .meta.json；可从 agentmemory 与 git 重建，见 T-637）
 archive/
+**/.workbuddy/
+__pycache__/
+*.pyc
+
+# ── 机密 / 日志 / 编辑器与系统噪声（高危类型，宁可多几条）──
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+*.orig
+*.rej
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
 
 # ── 一次性实验 / 诊断脚本（本地保留、不入库）──
-# 判据：`package.json` 的 script、CI workflow、工程 `.cmd`、构建与门禁链**都不引用**它们；
-# 它们的引用面只有同族脚本之间的互提及与文档描述（2026-09-27 全仓引用面实测）。
-# 保留在本地是为了复现当时的实验；入库会把一次性探针变成"看起来要维护"的资产。
-# 同族约定：新建的临时调试脚本请以 `_` 前缀命名（`apps/game/.gitignore` 已有 `scripts/_*.mjs`）。
-# 2026-10-07 依 T-035 退回本地实验件：apps/debug/scripts/input-replay-verify.mjs → `_input-replay-verify.mjs`
+# 判据：`package.json` 的 script、CI workflow、工程 `.cmd`、构建与门禁链都不引用它们；
+# 同族约定：新建的临时调试脚本请以 `_` 前缀命名。
 apps/*/scripts/_*.mjs
 apps/game/scripts/t13-input-surface-probe.mjs
 apps/game/scripts/t13-literal-sweep.mjs
 apps/game/scripts/t13-ulp-sensitivity-control.mjs
 apps/game/scripts/wasm-hash-pin.mjs
-# （原 apps/viewer/test/shot.mjs 一次性截图工具已随 T-653 移除）
 
 # ── agent 工作流层（2026-10-10 owner 指令：改为入库）──
 # 判据：远端必须在**没有本地知识库**的前提下也能重新解读项目并重建工作流 ⇒
-#   入口 AGENTS.md + 控制层 TODO.md/OWNER.md + 台账 progress/** + 引导 skills/**
-#   + 机制 docflow.json / 6 个治理脚本 / doc-drift.yml —— 全部入库。
-# 仍不入库：archive/**（迁移原文；agent 可暴力解读项目重新总结）、.archify/、.workbuddy/。
-# 已放行：AGENTS.md TODO.md OWNER.md docflow.json progress/ skills/
-!progress/board.jsonl
-#   src/scripts/{docflow,check-doc-drift,check-board-touch,check-memory-sync}.mjs
-#   .github/workflows/doc-drift.yml
-# ── 操作系统噪声（跨平台协作常带进来的文件）──
-.DS_Store
-Thumbs.db
-desktop.ini
+#   AGENTS.md + OWNER.md + docflow.json + progress/ 的 4 个文件 + skills/** +
+#   src/scripts/{docflow,check-doc-drift,check-board-touch,check-memory-sync}.mjs +
+#   .github/workflows/doc-drift.yml —— 全部入库。
+# 仍不入库：archive/**、.archify/、.workbuddy/。

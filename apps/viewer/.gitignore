@@ -1,4 +1,0 @@
-# WebSurf-viewer 构建产物（web/ dev 运行文件；pkg/ target/ node_modules/ temp/ 由仓库根 .gitignore 覆盖）
-/web/app.js
-/web/worker.js
-/web/websurf_viewer_wasm_bg.wasm
