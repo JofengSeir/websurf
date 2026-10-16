@@ -112,6 +112,15 @@ interface TrackFacts {
   hp: { min: number; max: number } | null;
   deaths: number[];
   deadFrames: number;
+  /**
+   * **观察/未分配**的采样条数（`team === 1` 观察者，或 `team === 0` 未选阵营）。
+   *
+   * 为什么要这个数：观察期间玩家的实体位姿是**镜头跟着别人**，不是他本人在走 ——
+   * 这段的轨迹与移动量都不属于他。花名册据此如实标出「观察时段 N%」（T-702 实测：
+   * boreas dem 里 `[U:1:1142669713]` 有 47% 的采样是 team 0/1，另一个 dem 里
+   * `GenShinEnjoyer8267` 高达 98%——这条录像里他基本全程在观察）。
+   */
+  observeFrames: number;
 }
 
 /**
@@ -128,6 +137,7 @@ function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null
   let hpMin: number | null = null;
   let hpMax: number | null = null;
   let deadFrames = 0;
+  let observeFrames = 0;
   const deaths: number[] = [];
   const deathTicks = new Set<number>();
   for (let i = 0; i < s.length; i++) {
@@ -140,6 +150,7 @@ function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null
     if (p.yaw < ylo) ylo = p.yaw;
     if (p.yaw > yhi) yhi = p.yaw;
     if (p.team !== null) teams.add(p.team);
+    if (p.team === 0 || p.team === 1) observeFrames++;
     if (p.health !== null) {
       hpMin = hpMin === null ? p.health : Math.min(hpMin, p.health);
       hpMax = hpMax === null ? p.health : Math.max(hpMax, p.health);
@@ -169,6 +180,7 @@ function trackFacts(track: PlayerTrack, tickInterval: number): TrackFacts | null
     hp: hpMin === null || hpMax === null ? null : { min: hpMin, max: hpMax },
     deaths,
     deadFrames,
+    observeFrames,
   };
 }
 
@@ -263,6 +275,9 @@ function fmtSize(bytes: number): string {
    * 只登记**能连到账号**的名字（连接行的 SteamID 或与 userinfo 名字完全一致），连不上的另见详情里的说明。
    */
   aliases: string[];
+  /** 观察/未分配的采样条数与该行统计用的总采样条数（比例见 `sampledFrames`；0 表示没统计到）。 */
+  observeFrames: number;
+  sampledFrames: number;
   isBot: boolean;
   /**
    * 该行是不是**真账号**（依据：`userinfo` 更新流里出现过 **非空且不是 `BOT`** 的 guid）。
@@ -328,6 +343,9 @@ interface PresenceWindow {
   moving: number;
   team: number | null;
   deaths: number;
+  /** 观察/未分配的采样条数与总采样条数（比例用；见 `TrackFacts.observeFrames`）。 */
+  observeFrames: number;
+  sampledFrames: number;
 }
 
 /** 「占用会话」：一个槽位一次「进服 → 换人/退场」（由 `occupancySessions()` 计算并缓存）。 */
@@ -768,6 +786,8 @@ export class DemoPanel {
         moving,
         team: facts && facts.teams.length > 0 ? facts.teams[0] : null,
         deaths: facts ? facts.deaths.length : 0,
+        observeFrames: facts ? facts.observeFrames : 0,
+        sampledFrames: facts ? facts.frames : 0,
       });
     }
     this.presenceCache = out;
@@ -795,11 +815,16 @@ export class DemoPanel {
     const total = Math.max(1, this.totalTicks);
     const rows = roster
       .map((p, i) => {
+        // 观察占比：观察期间实体位姿是**镜头跟着别人**（T-702），必须让用户看得见，否则会以为轨迹是他走的
+        const obsPct = p.sampledFrames > 0 ? Math.round((p.observeFrames / p.sampledFrames) * 100) : 0;
         const tip =
           (p.hasTrack
             ? '点击切到他的视角'
             : '该玩家的位姿尚未被本工程实体流采到（该层未逐位对齐）——点它会说明原因，不会切视角') +
-          (p.aliases.length > 1 ? '；别名：' + p.aliases.join('、') : '');
+          (p.aliases.length > 1 ? '；别名：' + p.aliases.join('、') : '') +
+          (obsPct > 0
+            ? '；观察时段 ' + obsPct + '%（这段里他的位姿是镜头跟着别人，不是本人走位）'
+            : '');
         // 无位姿的行：区间条改**弱色**（内联，避免为这一个状态新增 CSS 规则）、时间读数后带「· 无位姿」。
         // 别用 `opacity` 内联压暗整行——`refreshRosterState` 每帧用它切换 `.off`（在线/离线），内联会盖掉它。
         const barFill = p.hasTrack ? '' : ';background:var(--muted)';
@@ -815,6 +840,8 @@ export class DemoPanel {
         // 队伍与阵亡来自 `PlayerSample.team` / `health` / `lifeState`（`trackFacts` 汇总）：
         // 队伍做成一枚小标签贴在名字后，阵亡数接在时间读数后 —— 都不占新格子，长名仍然省略号收尾。
         const team = p.team !== '—' ? '<i class="dmp-who-team">' + this.esc(p.team) + '</i>' : '';
+        // 过半时间在观察 ⇒ 名字后加一枚「观」标记（不占文字宽度，长名仍省略号收尾）
+        const observeTag = obsPct >= 50 ? '<i class="dmp-who-observe" title="过半时间在观察（这段位姿是镜头跟着别人）">观</i>' : '';
         const deaths = p.deaths > 0 ? ' · 阵亡 ' + p.deaths : '';
         // 时间读数：多段时先报段数（读数格窄，逐段列全会被省略号吃掉），逐段时刻进悬停提示。
         const seg = p.spans.length > 1 ? p.spans.length + ' 段 ' : '';
@@ -828,7 +855,7 @@ export class DemoPanel {
             : '';
         return (
           '<button class="dmp-who' + (p.hasTrack ? '' : ' dmp-who-notrack') + '" type="button" data-who="' + i + '" title="' + this.esc(tip + segDetail) + '">' +
-          '<span class="dmp-whoname">' + this.esc(p.name) + team + '</span>' +
+          '<span class="dmp-whoname">' + this.esc(p.name) + team + observeTag + '</span>' +
           '<span class="dmp-whobar">' + bars + '</span>' +
           '<span class="dmp-whotime">' + seg + this.fmtClock(this.secAt(p.from)) + '–' + this.fmtClock(this.secAt(p.to)) + (p.hasTrack ? deaths : ' · 无位姿') + '</span>' +
           '</button>'
@@ -1374,6 +1401,8 @@ export class DemoPanel {
         key: rows.length,
         name: rowName,
         aliases: this.aliasesFor(g.guid, rowName),
+        observeFrames: factsWin ? factsWin.win.observeFrames : 0,
+        sampledFrames: factsWin ? factsWin.win.sampledFrames : 0,
         isBot: g.isBot,
         human: g.human,
         entity,
@@ -1396,6 +1425,8 @@ export class DemoPanel {
         name: this.nameFor(p.slot, entity, p.to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`,
         // 这一支没有 userinfo 会话 ⇒ 没有 guid 可查别名（聊天里连不连得上另说，见详情面板的说明）
         aliases: [],
+        observeFrames: p.observeFrames,
+        sampledFrames: p.sampledFrames,
         isBot: p.isBot,
         // 这一支来自「可用轨迹」而没有 `userinfo` 会话 ⇒ 无 guid 可判，**不当作真账号**
         human: false,

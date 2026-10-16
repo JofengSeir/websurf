@@ -995,6 +995,8 @@ select.tl-select:focus { border-color: var(--text); }
 .dmp-who.off { opacity: 0.4; }
 .dmp-whoname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 队伍标签（PlayerSample.team → 观察者 / T / CT）：贴在名字后的小方框，与人物名牌的 `.dmp-who-tag` 同语彙 */
+/* 观察标记（T-702）：过半时间在观察 —— 这段位姿是镜头跟着别人，不是本人走位 */
+.dmp-who-observe { margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-style: normal; color: var(--bg); background: var(--muted); }
 .dmp-who-team { margin-left: 6px; padding: 0 4px; font-style: normal; font-size: 10px; line-height: 1.5; color: var(--muted); border: 1px solid var(--border-strong); }
 .dmp-whobar { position: relative; display: block; height: 6px; background: rgba(255, 255, 255, 0.06); }
 .dmp-whobar i { position: absolute; top: 0; bottom: 0; background: var(--accent); }
