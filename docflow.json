@@ -115,17 +115,17 @@
       "consumed": true
     },
     {
-      "path": "OWNER.md",
+      "path": "AGENTS.md",
       "by": "dsh",
-      "reason": "D-115 已决：行移出待决表，原文逐字进记忆库已决卷 progress/owner/2026-10-17-resolved.md（分卷/归档）",
+      "reason": "T-729 口径落地：闸 B 补「历史冻结件豁免」一条（--all 单列 exempt、写入闸不认该标记）",
       "at": "2026-10-16",
       "task": "",
       "consumed": true
     },
     {
-      "path": "AGENTS.md",
+      "path": "OWNER.md",
       "by": "dsh",
-      "reason": "T-729 口径落地：闸 B 补「历史冻结件豁免」一条（--all 单列 exempt、写入闸不认该标记）",
+      "reason": "D-114 已决（废弃 + 整条转交）：行移出待决表，原文逐字进记忆库已决卷 progress/owner/2026-10-17-resolved.md（分卷/归档）",
       "at": "2026-10-16",
       "task": "",
       "consumed": true
@@ -145,23 +145,17 @@
   "binds": [],
   "unitPins": {
     "OWNER.md": {
-      "D-114": {
-        "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
-        "at": "2026-10-10",
-        "line": 22
-      },
       "D-120": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-15",
-        "line": 23
+        "line": 22
       },
       "D-121": {
         "p": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "s": "1b46d5b47f731f1704e81d35bee5685361b289891ad0f470de59eb4ea3d29797",
         "at": "2026-10-15",
-        "line": 24
+        "line": 23
       }
     }
   },
