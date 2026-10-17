@@ -57,7 +57,7 @@ AMH 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md`
 2. **取上下文**：`recall` 1–2 条聚焦查询（任务/模块/前次 handoff），`--limit 3–5`；同时读 `TODO.md` 对应任务与 `OWNER.md` 待决（AMH 不是状态表）。
 3. **改代码**。
 4. **收尾**：有决定/修复/可复用结论时 `save` 一条；纯查询、无结论不写：
-   - `type`: `architecture`（决定/取舍）、`bug`（根因/修复）、`pattern`（可复用做法）、`workflow`（流程/交接）、`fact`（稳定事实）。
+   - `type`: `architecture`（决定/取舍）、`bug`（根因/修复）、`pattern`（可复用做法）、`workflow`（流程/交接）、`fact`（稳定事实）、`preference`（用户偏好）。
    - `concepts`: `agent:<name>`（来源）、`task:<T-###>`（可选）、`area:<模块>`、`handoff`（交接时）。
    - `marker`: `AMH-YYYYMMDD-<slug>`，一次写入一个唯一 marker。
    - `content`: 做了什么、为什么、证据（文件:行号/命令）、下一步。
@@ -71,7 +71,7 @@ AMH 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md`
 - 分派、顺序、互斥、冲突合并、纠错由人/DSH/仓库负责；AMH 没有 claim/lock/lease/task，不要假装它有。
 - 交接：上一位 `save` 一条记录（type 取最贴近的，通常 `workflow`），content 以 `HANDOFF <task>:` 开头，写清 status/done/next/files；`concepts` 含 `agent:<name>,task:<T-###>,handoff,area:<x>`；下一位 `recall "HANDOFF T-###"`。AMH 记录的 `files` 字段 CLI 不填，把 files 写进 content。marker 带 agent 或随机后缀避免撞；读交接优先 `isLatest=true`。
 - 两个 agent 不要同时改同一组文件；并行用 git worktree 或分开目录，冲突由 git 处理。
-- `TODO.md` / `OWNER.md` 继续作为任务与决定文件；AMH 只存耐久的决定/根因/模式/交接（它没有 update/delete，不能当状态表）。
+- `TODO.md` / `OWNER.md` 继续作为任务与决定文件；AMH 只存耐久的决定/根因/模式/交接（它没有 update/delete，不能当状态表）。`OWNER.md` 的 `D-###` 正文仍以文件为准，AMH 最多存 `task:D-###` 指针/理由，不复制全文；AMH 是本机 cache，跨机结论仍落 `OWNER.md` / `TODO.md`。
 
 ### 3.3 工具与已知坑
 
@@ -84,6 +84,7 @@ AMH 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md`
 - `recall` 可能返回被 supersede 的旧记录；以 `isLatest=true` 为准，需要清单用 `list --latest`。
 - 数据少时 `recall` 可能把所有记录都返回；`score>1` 才是相关性信号。
 - `brief` 是 latest 清单（含 curator/DSH capture），不是 handoff 查询；找交接用 `recall "HANDOFF <task>"` + `verify`。
+- `list` 空页不代表到底，只有 `nextCursor === null` 才是；`list --latest` 只用于清单，不用于语义检索。
 - `excluded_unverified` 是被项目归属/验证过滤掉的搜索命中，不是本项目丢记录；项目总数看 `counts.project.total`。
 - `amh-cli` exit 3 可能是 Hub 不可达，也可能是写已发出后 fetch 失败（outcome_unknown）；先 `verify --marker`，不要据此判断"没写"。成功调用的进度行前缀是 `[amh-cli]`。
 - 代码/构建产物的 sha/哈希对照（例如 T-730 的 GLB/tri/phy）是代码验收，不是记忆台账；不要把它做成常驻门禁。
