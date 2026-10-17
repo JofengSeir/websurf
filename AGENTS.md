@@ -83,7 +83,7 @@ AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/S
 
 ### 3.3 工具与坑
 
-- 命令/规则在 `.dsh/skills/amh-memory/SKILL.md`；`.amh/config.json` 只有 hub/binding/project；token 用 `AMH_CLIENT_TOKEN`。
+- 命令/规则在 `.dsh/skills/amh-memory/SKILL.md`；`.amh/config.json` 有 hub/binding/project 和本地 token；`AMH_CLIENT_TOKEN` 可覆盖身份。
 - 原生工具面 48 个（实例 20 实测），不是旧 7 个；gateway 只挡 6 个结构性跨边界工具。
 - **concepts 已修**（commit `629c786`）：`client.mjs save --concepts "a,b"` 现在传字符串，不再丢；只有很旧的 client 才需要 `call memory_save --args-file` 兜底。`--files` 正常。
 - 旧 `amh-cli` / `health` / `counts` / `verify` / `brief` / `marker` 路线已删除，不要找。
