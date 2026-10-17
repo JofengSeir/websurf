@@ -47,6 +47,10 @@ CI 仍会跑 `ci-gates.yml`：`cargo test`、viewer 的源码契约、三端 was
 
 ## 3. 项目记忆（AMH gateway）
 
+> **当前状态（2026-10-18）：DSH profile 未装 native MCP，只能走 A（项目 client）。**
+> `client.mjs` 有 6 条 + `call`，能访问 48 个 native 工具；但模型看不到原生工具列表，
+> 17 个 skill 不能直调，只能按 skill 顶部提示走 `client.mjs call`。要 B 需 profile entry + token + 重启。
+
 **旧的独立 agentmemory / mcp-hub 路线已卸载：不要恢复。** 当前 AMH gateway 的 backend 是 agentmemory（0.9.30），只经 gateway 访问；不要直连 `:3111` 或实例 REST。
 
 AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md` 为准。项目契约 `.amh/config.json`（`hub` / `binding` / `project`，本地文件，不写进仓库）。旧的 `amh-cli` / 7 工具 / marker / verify / counts / brief 路线已删除，不要再用。
