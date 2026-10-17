@@ -64,19 +64,20 @@ AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/S
 5. **save 失败**：先读错误，不要盲重试；用 `sessions` / `recall` 查是否已有同内容。gateway 没有旧的 marker/verify/504 语义。
 6. 验收只用 gateway/native 的实际结果 + CI；不写本地台账/哈希/checklist。
 
-### 3.2 两条通道（A/B）
+### 3.2 通道（A 正式，B 不采用）
 
 | 通道 | 能力 | 代价 |
 |---|---|---|
-| A. 项目 client | `client.mjs` 六条：`sessions/recall/search/save/tools/call`；`call` 可访问全部 native 工具，含 action/lease/signal/checkpoint | 模型看不到原生工具列表；每个 agent 需 `AMH_CLIENT_TOKEN` 才有独立身份 |
-| B. native MCP | 模型直接看到 48 个 native 工具；17 个官方 skill 可直调 | 需要 DSH profile entry + token + 重启 |
+| A. 项目 client（正式） | `client.mjs` 六条：`sessions/recall/search/save/tools/call`；`call` 可访问全部 native 工具，含 action/lease/signal/checkpoint | 模型看不到原生工具列表；每个 agent 需 `AMH_CLIENT_TOKEN` 才有独立身份 |
+| B. native MCP（不采用） | 模型直接看到 48 个 native 工具；17 个官方 skill 可直调 | 需要 DSH profile entry + token + 重启；加 `web` 会污染所有项目，另建 profile 只适配 DSH |
 
 规则：
 
-- **native MCP 是 canonical；项目 client 是兼容/回退**。同一项目、同一笔写入只走一条，不双写。
+- **A 是正式路线**；B 不采用，不要新建 `amh` profile。原因见 AMH `docs/DSH-PROFILE-DECISION.md`。
+- 同一项目、同一笔写入只走一条，不双写。
 - `binding` 定项目；`token` 定 agentId。没有 token 时所有 agent 用 binding 的 agentId。
 - 多 agent 的 action/lease/signal 必须各自 token；否则身份相同，不要假装能区分。
-- `call` 只是 CLI 包装，不是原生工具发现；要 skill 直调就上 B。
+- `call` 只是 CLI 包装，不是原生工具发现；17 个 skill 缺 native 工具时按顶部提示走 CLI。
 - 没有 lease 时，分派/互斥仍由人/DSH 负责；不要自己造 gate。
 - 交接：`memory_save`（type 通常 `workflow`/`pattern`），concepts 含 `task:<id>,handoff`，content 以 `HANDOFF <task>:` 开头；files 用 `--files` 或 `call --args-file`。
 - `TODO.md` / `OWNER.md` 仍是任务/决定文件；AMH 不是状态表；`D-###` 正文以 OWNER 为准。
