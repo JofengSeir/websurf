@@ -50,6 +50,10 @@ test/replay/*
 # AMH Hub 项目侧接入（本机 binding / 技能，路径与 Hub 有关，不随仓库走）
 .amh/
 .dsh/
+# 旧 agent 工作流本地残留（2026-10-18 已删除；旧脚本重建也不入库）
+progress/
+# 旧根级 web/（历史产物；防止旧脚本重建后入库）
+/web/
 .zcode/
 .zcodeignore
 .plan/

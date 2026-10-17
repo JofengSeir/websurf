@@ -18,7 +18,7 @@
 | `git status --porcelain` 不加 `-uall` | 未跟踪**目录**塌缩成一行 | 当文件清单用会读目录（`EISDIR`）⇒ 加 `-uall` |
 | `git show "HEAD:<路径>"` 用反斜杠 | 参照集为空 → 假通过 | 必须正斜杠 |
 | PowerShell 里 `try{…}catch{}` 挤成一行 | `The Try statement is missing its Catch or Finally block` | 必须多行；PS 5.1 一行式直接语法错 |
-| `web_fetch` 直连 `raw.githubusercontent.com` | 30 s 超时 | 走代理：`Invoke-WebRequest -UseBasicParsing -Proxy http://127.0.0.1:7897 -OutFile …` |
+| `web_fetch` 直连 `raw.githubusercontent.com` | 30 s 超时 | 走代理：`Invoke-WebRequest -UseBasicParsing -Proxy $env:HTTPS_PROXY -OutFile …`（代理地址走环境变量，不写死） |
 
 ## 2. 生成物与本地物（不在 git 树上，≠ 不存在）
 
@@ -86,10 +86,10 @@ apps/*/scripts/_*.mjs  .amh/  .dsh/
 
 ## 10. GitHub 网络
 
-直连不稳 → 先挂本机代理。`git push/fetch/clone` 报 `Connection was reset` / `Failed to connect to github.com:443` 时，不要以为没网 —— 本机走 Clash，加代理即通：
+直连不稳 → 先挂本机代理。`git push/fetch/clone` 报 `Connection was reset` / `Failed to connect to github.com:443` 时，不要以为没网 —— 本机通常走 Clash，加代理即通；代理地址从 `HTTPS_PROXY` 环境变量取，不写进仓库：
 
-~~~bash
-git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin main
+~~~powershell
+git -c http.proxy=$env:HTTPS_PROXY -c https.proxy=$env:HTTPS_PROXY push origin main
 ~~~
 
-也可先设 `HTTPS_PROXY` / `HTTP_PROXY=http://127.0.0.1:7897`。实测：直连连续失败 7 次，挂代理第 1 次成功。
+没有这个环境变量时，先按本机代理软件的实际地址设置 `HTTPS_PROXY` / `HTTP_PROXY`。实测：直连连续失败 7 次，挂代理第 1 次成功。
