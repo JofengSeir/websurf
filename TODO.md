@@ -5,12 +5,12 @@
 
 ## T-730 — `collect_pakfile_models` 一次加载被重跑 4 遍（debug / game）
 
-**状态**：待验收（缓存已落地；game 两图已验证，debug / viewer 待 wasm 实跑）。
+**状态**：未满足（缓存已落地；game 两图通过，debug / viewer、基线 sha、内存峰值未做）。
 **现象**：`src/wasm-core/render_bundle.rs` 的 `collect_pakfile_models(bsp, vhv_log)` 在 debug / game 的一次加载里被 `export_model_tri_colliders` + `export_model_phy_colliders` + `export_mosaic_manifest` + `export_glb_with_pakfile_models*` 各调一次，合计 4 遍；viewer 只走 1 遍。
 **实测**：同一进程按加载顺序调用 4 个导出（game wasm）—— `surf_concretejungle_fix`（17 MB）= 310 + 85 + 1440 + 1476 = **3311 ms**；`surf_kraken`（193 MB）= 7849 + 2392 + 22262 + 29339 = **61842 ms**。collect 单次成本近似：concretejungle 暖态 555 ms / 冷态 1376 ms；kraken 以最便宜的调用者暖态约 2.2 s 为上界。
 **修法**：在 `BspProcessor` 里加一份收集结果缓存（`RefCell<Option<Rc<(...)>>>`，`Rc` 共享以免克隆三件套的大缓冲），把各处 `collect_pakfile_models(bsp, VhvLog::Always)` 换成 `self.collect_models()?`。注意 `VhvLog` 逐端不同（viewer `Never` / game `Always` / debug `IfAnyProp`）：缓存要按调用方口径决定首建那次打不打印，或把日志从缓存路径剥离。
 **代价/风险**：① 缓存让模型三件套在整次加载期间常驻（kraken 632 个模型，量级待测）；② 要动 3 个 crate 的调用点（debug 7 / game 6 / viewer 3）；③ 这些导出会消费 BSP 数据，缓存只能前向复用，不能把「消费之后本该失败」的调用变成成功。
-**判据**：① 至少两图（`surf_concretejungle_fix` + `surf_kraken`）的 tri / phy / GLB sha256 与改前相同；mosaic manifest 因 `HashMap` 顺序不稳定，改比「解析 JSON、按键排序后的语义 sha」；② 同一加载顺序的 4 个导出合计耗时下降；③ 加载期间 wasm 线性内存峰值增幅有实测数字；④ 三端 `typecheck` + `build:wasm` 通过；⑤ 三端 wasm 对同一图给同一组 sha。
+**判据**：① 至少两图（当前本地用 `surf_concretejungle_fix` + `surf_666`；`surf_kraken` 夹具不在本地）的 tri / phy / GLB sha256 与改前基线相同；mosaic manifest 因 `HashMap` 顺序不稳定，改比「解析 JSON、按键排序后的语义 sha」；② 同一加载顺序的 4 个导出合计耗时下降（记录改前/改后两个数）；③ 加载期间 wasm 线性内存峰值用 `WebAssembly.Memory.buffer.byteLength` 前后差记录数字；④ 三端 `typecheck` + `build:wasm` 通过；⑤ 三端 wasm 对同一图给同一组 GLB sha（mosaic 另按语义 sha）。
 
 **2026-10-18 进展（game 实测）**：三个 `BspProcessor` 加 `RefCell<Option<(VhvLog, Rc<PakfileModels>)>>` 缓存；共享层加 `PakfileModels` / `collect_pakfile_models_bundle`；只读入口（tri / phy / mosaic / missing-model-textures）共享 `Rc`，消费 BSP 的 GLB 入口用 `take_models_for` 取走所有权，避免复制模型字节。game wasm 实测（同一进程按 phy → tri → mosaic → glb 顺序）：
 - `surf_concretejungle_fix`：phy 288→294 ms、tri 78→4 ms、mosaic 1285→1199 ms、glb 1430→1135 ms；tri / phy / GLB 的 sha256 与改前相同。
