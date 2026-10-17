@@ -18,7 +18,9 @@
 //! `apps/debug`、`apps/game`、`apps/viewer` 的 `crates/` 下各只有 `wasm` 一个 crate；解析层与物理层
 //! 由三个工程共用同一份源码，本工程内不存在隔离副本。
 
+use std::cell::RefCell;
 use std::io::Cursor;
+use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 
@@ -27,8 +29,8 @@ use model_integrator::{ExportOptions, InMemoryResources, ModelIntegrator};
 // 导出编排（PAKFILE 模型 / 材质 / 光源 / 碰撞体派生）：仓库根 `src/wasm-core/render_bundle.rs`
 use websurf_wasm_core::render_bundle::{
     aabb_volume, brush_model_indices, build_brush_model_origins, build_vmt_stem_index,
-    collect_light_entities, collect_pakfile_models, entity_is_non_solid, load_vmdl,
-    model_classnames, resolve_pakfile_materials, ColliderFilter, VhvLog,
+    collect_light_entities, collect_pakfile_models_bundle, entity_is_non_solid, load_vmdl,
+    model_classnames, resolve_pakfile_materials, ColliderFilter, PakfileModels, VhvLog,
 };
 
 // 共享解析层：仓库根 src/wasm-core（Cargo 包名 websurf-wasm-core）。
@@ -187,6 +189,8 @@ pub struct BspProcessor {
     /// 为什么不让 TS 侧照旧调 `export_mosaic_manifest`：那份 manifest 要自己再跑一遍
     /// `collect_pakfile_models` + `resolve_pakfile_materials`，与 GLB 导出**完全重复**。
     mosaic_cache: std::collections::HashMap<String, String>,
+    /// T-730：一次加载里多个导出入口共用的 PAKFILE 模型收集结果。
+    pak_models: RefCell<Option<(VhvLog, Rc<PakfileModels>)>>,
 }
 
 #[wasm_bindgen]
@@ -201,7 +205,43 @@ impl BspProcessor {
             bsp: Some(std::sync::Arc::new(bsp)),
             packed_files,
             mosaic_cache: std::collections::HashMap::new(),
+            pak_models: RefCell::new(None),
         })
+    }
+
+    /// 取（或建立）缓存的 PAKFILE 模型收集结果；`vhv_log` 口径不同则重建。
+    fn collect_models_for(&self, bsp: &vbsp::Bsp, vhv_log: VhvLog) -> Result<Rc<PakfileModels>, JsValue> {
+        if let Some((cached_log, pak)) = self.pak_models.borrow().as_ref() {
+            if *cached_log == vhv_log {
+                return Ok(Rc::clone(pak));
+            }
+        }
+        let pak = Rc::new(
+            collect_pakfile_models_bundle(bsp, vhv_log).map_err(|e| JsValue::from_str(&e))?,
+        );
+        *self.pak_models.borrow_mut() = Some((vhv_log, Rc::clone(&pak)));
+        Ok(pak)
+    }
+
+    /// 只读入口用。
+    fn collect_models(&self, vhv_log: VhvLog) -> Result<Rc<PakfileModels>, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
+        self.collect_models_for(bsp, vhv_log)
+    }
+
+    /// GLB 入口用：取走缓存（没有就现算）并解包成所有权。
+    fn take_models_for(&mut self, bsp: &vbsp::Bsp, vhv_log: VhvLog) -> Result<PakfileModels, JsValue> {
+        if let Some((cached_log, pak)) = self.pak_models.borrow_mut().take() {
+            if cached_log == vhv_log {
+                if let Ok(pak) = Rc::try_unwrap(pak) {
+                    return Ok(pak);
+                }
+            }
+        }
+        collect_pakfile_models_bundle(bsp, vhv_log).map_err(|e| JsValue::from_str(&e))
     }
 
     /// 克隆出 `Arc<Bsp>` 句柄（**不**清空 `self.bsp`）。
@@ -311,7 +351,8 @@ impl BspProcessor {
         let fallback: std::collections::HashMap<String, String> =
             serde_json::from_str(defaults_json).map_err(|e| to_js_err(e, "默认纹理包 JSON 解析失败"))?;
 
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let PakfileModels { models, static_props, entry_names } =
+            self.take_models_for(&bsp, VhvLog::Always)?;
 
         // 世界面材质的**基名 VMT 回退**索引（填进 `ConvertOptions::vmt_stem_index`）：
         // texinfo 给的名字（如 `METAL/METALGRATE013A2`）在包内没有精确路径时，改按基名
@@ -394,7 +435,8 @@ impl BspProcessor {
         let bsp = self.take_bsp()?;
 
         // 1~3 步（见 `collect_pakfile_models`）：模型三件套 + 静态道具放置表 + PAKFILE 条目清单
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let PakfileModels { models, static_props, entry_names } =
+            self.take_models_for(&bsp, VhvLog::Always)?;
 
         // 4. 未打包任何模型 → 退回纯地图导出（不装配整合器）
         if models.is_empty() {
@@ -451,7 +493,8 @@ impl BspProcessor {
     pub fn export_glb_with_pakfile_models_with_lights(&mut self) -> Result<Vec<u8>, JsValue> {
         let bsp = self.take_bsp()?;
 
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let PakfileModels { models, static_props, entry_names } =
+            self.take_models_for(&bsp, VhvLog::Always)?;
 
         // 解析 PAKFILE 内的 VMT/VTF：贴图字节 + 内置透明度标注
         let index = pakfile_models::PakIndex::build(&entry_names);
@@ -518,7 +561,9 @@ impl BspProcessor {
             .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
 
         // 三件套收集顺带回的条目名表只服务材质查询；本函数已不看材质，故丢弃。
-        let (models, static_props, _entry_names) = collect_pakfile_models(bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let pak = self.collect_models(VhvLog::Always)?;
+        let models = &pak.models;
+        let static_props = &pak.static_props;
         if models.is_empty() {
             return Ok("[]".to_string());
         }
@@ -541,13 +586,13 @@ impl BspProcessor {
         let mut out: Vec<TriMeshOut> = Vec::new();
         let mut tri_total = 0usize;
 
-        for m in &models {
+        for m in models {
             if tri_total >= MAX_TRI_TOTAL {
                 break;
             }
 
             let placements =
-                model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
+                model_integrator::resolve_placements(&m.name, &no_entities, static_props);
             let placements: Vec<_> = placements
                 .into_iter()
                 .filter(|p| p.solid != Some(0))
@@ -679,7 +724,9 @@ impl BspProcessor {
             .as_ref()
             .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
 
-        let (models, static_props, _entry_names) = collect_pakfile_models(bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))?;
+        let pak = self.collect_models(VhvLog::Always)?;
+        let models = &pak.models;
+        let static_props = &pak.static_props;
         if models.is_empty() {
             return Ok("[]".to_string());
         }
@@ -700,13 +747,13 @@ impl BspProcessor {
         let mut out: Vec<TriMeshOut> = Vec::new();
         let mut tri_total = 0usize;
 
-        for m in &models {
+        for m in models {
             if tri_total >= MAX_TRI_TOTAL {
                 break;
             }
             // 只处理被 static_props 引用的模型；无 .phy 条目或解析失败即跳过该模型
             let placements =
-                model_integrator::resolve_placements(&m.name, &no_entities, &static_props);
+                model_integrator::resolve_placements(&m.name, &no_entities, static_props);
             let placements: Vec<_> = placements
                 .into_iter()
                 .filter(|p| p.solid != Some(0))
@@ -830,11 +877,9 @@ impl BspProcessor {
             .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
         let mut pairs = websurf_wasm_core::mosaic::manifest::build_mosaic_manifest(bsp);
         // 模型贴图（材质名 → PNG → mosaic）；失败静默跳过（不影响地图纹理覆盖）
-        if let Ok((models, _props, entry_names)) =
-            collect_pakfile_models(bsp, VhvLog::Always).map_err(|e| JsValue::from_str(&e))
-        {
-            let index = pakfile_models::PakIndex::build(&entry_names);
-            let materials = resolve_pakfile_materials(bsp, &models, &index, true, None);
+        if let Ok(pak) = self.collect_models(VhvLog::Always) {
+            let index = pakfile_models::PakIndex::build(&pak.entry_names);
+            let materials = resolve_pakfile_materials(bsp, &pak.models, &index, true, None);
             for (name, png) in materials.textures {
                 if let Ok(code) = websurf_wasm_core::mosaic::encode::img_to_code(&png, &name) {
                     pairs.push((name.to_ascii_lowercase(), code));

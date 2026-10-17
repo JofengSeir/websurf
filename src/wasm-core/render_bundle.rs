@@ -73,6 +73,24 @@ pub enum VhvLog {
     IfAnyProp,
 }
 
+/// 一次 [`collect_pakfile_models`] 的完整产物；三份数据一起缓存，供同一个 `BspProcessor`
+/// 的多个导出入口复用（T-730：debug / game 一次加载会跑 4 遍同一份收集）。
+pub struct PakfileModels {
+    pub models: Vec<InMemoryModel>,
+    pub static_props: Vec<StaticProp>,
+    pub entry_names: Vec<String>,
+}
+
+/// [`collect_pakfile_models`] 的命名结构体版本；调用方用 `Rc<PakfileModels>` 缓存后即可
+/// 在多个只读导出入口之间共享，最后由消费 BSP 的 GLB 入口 `Rc::try_unwrap` 取走所有权。
+pub fn collect_pakfile_models_bundle(
+    bsp: &vbsp::Bsp,
+    vhv_log: VhvLog,
+) -> Result<PakfileModels, String> {
+    let (models, static_props, entry_names) = collect_pakfile_models(bsp, vhv_log)?;
+    Ok(PakfileModels { models, static_props, entry_names })
+}
+
 /// 提取被静态道具或带模型实体引用、且 `.mdl` / `.vvd` / `.dx90.vtx` 三件齐全的模型。
 ///
 /// 返回 `(模型三件套, 静态道具放置表, PAKFILE 全部条目名)`；第三项是**未过滤**的全部条目名，

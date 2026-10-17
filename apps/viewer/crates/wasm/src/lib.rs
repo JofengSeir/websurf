@@ -22,7 +22,9 @@
 //! 顺序契约：两个 `export_glb_*` 都会取走内部 `Bsp` 实例，必须排在另外两个方法之后；
 //! 取走之后再调那两个方法一律得到错误，而不是旧值。
 
+use std::cell::RefCell;
 use std::io::Cursor;
+use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 
@@ -32,8 +34,8 @@ use model_integrator::{ExportOptions, InMemoryResources, ModelIntegrator};
 
 // 导出编排（PAKFILE 模型 / 材质 / 光源）：仓库根 `src/wasm-core/render_bundle.rs`
 use websurf_wasm_core::render_bundle::{
-    build_vmt_stem_index, collect_light_entities, collect_pakfile_models,
-    resolve_pakfile_materials, VhvLog,
+    build_vmt_stem_index, collect_light_entities, collect_pakfile_models_bundle,
+    resolve_pakfile_materials, PakfileModels, VhvLog,
 };
 
 // ---------------------------------------------------------------------------
@@ -146,6 +148,8 @@ pub struct BspProcessor {
     /// 模型那一半在 `resolve_pakfile_materials` 解码 VTF 时顺手就能缩出来；世界面那一半在本文件
     /// 组装导出结果时用 `build_mosaic_manifest` 取一次。
     mosaic_cache: std::collections::HashMap<String, String>,
+    /// T-730：一次加载里多个导出入口共用的 PAKFILE 模型收集结果。
+    pak_models: RefCell<Option<(VhvLog, Rc<PakfileModels>)>>,
 }
 
 #[wasm_bindgen]
@@ -164,7 +168,43 @@ impl BspProcessor {
             packed_files,
             cached_static_props,
             mosaic_cache: std::collections::HashMap::new(),
+            pak_models: RefCell::new(None),
         })
+    }
+
+    /// 取（或建立）缓存的 PAKFILE 模型收集结果；`vhv_log` 口径不同则重建。
+    fn collect_models_for(&self, bsp: &vbsp::Bsp, vhv_log: VhvLog) -> Result<Rc<PakfileModels>, JsValue> {
+        if let Some((cached_log, pak)) = self.pak_models.borrow().as_ref() {
+            if *cached_log == vhv_log {
+                return Ok(Rc::clone(pak));
+            }
+        }
+        let pak = Rc::new(
+            collect_pakfile_models_bundle(bsp, vhv_log).map_err(|e| JsValue::from_str(&e))?,
+        );
+        *self.pak_models.borrow_mut() = Some((vhv_log, Rc::clone(&pak)));
+        Ok(pak)
+    }
+
+    /// 只读入口用。
+    fn collect_models(&self, vhv_log: VhvLog) -> Result<Rc<PakfileModels>, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
+        self.collect_models_for(bsp, vhv_log)
+    }
+
+    /// GLB 入口用：取走缓存（没有就现算）并解包成所有权。
+    fn take_models_for(&mut self, bsp: &vbsp::Bsp, vhv_log: VhvLog) -> Result<PakfileModels, JsValue> {
+        if let Some((cached_log, pak)) = self.pak_models.borrow_mut().take() {
+            if cached_log == vhv_log {
+                if let Ok(pak) = Rc::try_unwrap(pak) {
+                    return Ok(pak);
+                }
+            }
+        }
+        collect_pakfile_models_bundle(bsp, vhv_log).map_err(|e| JsValue::from_str(&e))
     }
 
     /// 元数据 JSON 字符串；借用内部 `Bsp`，不消耗它。
@@ -321,7 +361,8 @@ impl BspProcessor {
             .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
 
         // 1~3. 三件套 + 放置表 + PAKFILE 条目名
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Never).map_err(|e| JsValue::from_str(&e))?;
+        let PakfileModels { models, static_props, entry_names } =
+            self.take_models_for(&bsp, VhvLog::Never)?;
 
         // 4. 没有任何被引用模型：纯地图导出（Bsp 同样已被取走）
         if models.is_empty() {
@@ -398,7 +439,7 @@ impl BspProcessor {
             .take()
             .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
         // 失败不消费实例：实现核拿的是 Arc 克隆，失败时把原 Arc 放回，TS 侧可回退裸导出
-        match Self::export_glb_with_defaults_impl(bsp.clone(), defaults_json, true) {
+        match self.export_glb_with_defaults_impl(bsp.clone(), defaults_json, true) {
             Ok((result, mosaic)) => {
                 // 导出顺手产出的 mosaic manifest 存下来，TS 侧用 take_mosaic_manifest() 取
                 self.mosaic_cache = mosaic;
@@ -419,6 +460,7 @@ impl BspProcessor {
     /// [`BspProcessor::export_glb_with_pakfile_models_with_defaults_and_lights`] 的实现核
     /// （消费传入的 `Bsp`；`include_lights` 决定是否注入 `KHR_lights_punctual` 灯实体）。
     fn export_glb_with_defaults_impl(
+        &mut self,
         bsp: std::sync::Arc<vbsp::Bsp>,
         defaults_json: &str,
         include_lights: bool,
@@ -433,7 +475,8 @@ impl BspProcessor {
             serde_json::from_str(defaults_json)
                 .map_err(|e| to_js_err(e, "默认纹理包 JSON 解析失败"))?;
 
-        let (models, static_props, entry_names) = collect_pakfile_models(&bsp, VhvLog::Never).map_err(|e| JsValue::from_str(&e))?;
+        let PakfileModels { models, static_props, entry_names } =
+            self.take_models_for(&bsp, VhvLog::Never)?;
 
         // 世界面材质的基名 VMT 回退索引（texinfo 给的贴图名在包内无精确路径时按基名命中）
         let stem_index = build_vmt_stem_index(&entry_names);
@@ -748,11 +791,9 @@ impl BspProcessor {
             .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
         let mut pairs = websurf_wasm_core::mosaic::manifest::build_mosaic_manifest(bsp);
         // 模型贴图（材质名 → PNG → mosaic）；失败静默跳过（不影响地图纹理覆盖）
-        if let Ok((models, _props, entry_names)) =
-            collect_pakfile_models(bsp, VhvLog::Never).map_err(|e| JsValue::from_str(&e))
-        {
-            let index = pakfile_models::PakIndex::build(&entry_names);
-            let materials = resolve_pakfile_materials(bsp, &models, &index, true, None);
+        if let Ok(pak) = self.collect_models(VhvLog::Never) {
+            let index = pakfile_models::PakIndex::build(&pak.entry_names);
+            let materials = resolve_pakfile_materials(bsp, &pak.models, &index, true, None);
             for (name, png) in materials.textures {
                 if let Ok(code) = websurf_wasm_core::mosaic::encode::img_to_code(&png, &name) {
                     pairs.push((name.to_ascii_lowercase(), code));
