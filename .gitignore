@@ -4,7 +4,7 @@
 #   ⇒ 新增产物（新扩展名、新构建输出）不用改规则；只有新增「要入库」的文件才加白名单。
 # 分层：**本文件是唯一的忽略文件**（2026-10-16 起 apps/*/.gitignore 与 src/.gitignore 已删，
 # 其内容全部并入下面的白名单规则）。
-# 目录现状与「哪些该入库」的判据见 AGENTS.md §2；治理层为何入库见文末「agent 工作流层」。
+# 目录现状与「哪些该入库」的判据见 AGENTS.md §1。
 # 注意：git 的忽略文件**不支持行尾注释**，生成者等信息一律写在规则上方。
 
 # ── 高危目录①：三端 web/ ──
@@ -14,15 +14,6 @@
 apps/*/web/*
 !apps/*/web/index.html
 !apps/*/web/styles.css
-
-# ── 高危目录②：progress/ ──
-# 只放行 4 个机器可读控制层文件：门禁 [G] 的权威输入 board.jsonl、ID 索引 control-ids.json、
-# 迁移台账 memory-index.jsonl、待补写队列 pending-kb.jsonl；notes/ 之类一律不进。
-progress/*
-!progress/board.jsonl
-!progress/control-ids.json
-!progress/memory-index.jsonl
-!progress/pending-kb.jsonl
 
 # ── 高危目录③：test/ ──
 # 夹具与第三方 SDK 都留本地（单个地图最大 144 MB，超 GitHub 单文件 100 MB 上限），只留目录占位。
@@ -56,6 +47,9 @@ test/replay/*
 **/temp/
 **/plot-*/
 .archify/
+# AMH Hub 项目侧接入（本机 binding / 技能，路径与 Hub 有关，不随仓库走）
+.amh/
+.dsh/
 .zcode/
 .zcodeignore
 .plan/
@@ -91,9 +85,6 @@ apps/game/scripts/t13-literal-sweep.mjs
 apps/game/scripts/t13-ulp-sensitivity-control.mjs
 apps/game/scripts/wasm-hash-pin.mjs
 
-# ── agent 工作流层（2026-10-10 owner 指令：改为入库）──
-# 判据：远端必须在**没有本地知识库**的前提下也能重新解读项目并重建工作流 ⇒
-#   AGENTS.md + OWNER.md + docflow.json + progress/ 的 4 个文件 + skills/** +
-#   src/scripts/{docflow,check-doc-drift,check-board-touch,check-memory-sync}.mjs +
-#   .github/workflows/doc-drift.yml —— 全部入库。
-# 仍不入库：archive/**、.archify/、.workbuddy/。
+# ── agent 接入层（2026-10-18 起不再有强制工作流）──
+# 入库：AGENTS.md、OWNER.md、TODO.md、skills/websurf-env-traps/**。
+# 不入库：.amh/**、.dsh/**（本机 AMH Hub 绑定）、archive/**、.archify/、.workbuddy/。

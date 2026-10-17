@@ -670,7 +670,7 @@ impl ModelIntegrator {
             //
             // **owner 2026-10-11 裁决：prop 的 `UnlitGeneric` 材质也上光照，不再标记 unlit。**
             //
-            // 起因（本仓实测，见 progress/board.jsonl T-649）：`surf_boreas` 的冰锥
+            // 起因（本仓实测，T-649）：`surf_boreas` 的冰锥
             // `icicle_01`~`icicle_06` 材质是 `materials/project_tendies/ice03.vmt`，原文
             // `"unlitgeneric" { "$basetexture" "silkroad/fgworld/ice2" "$surfaceprop" "ice" }`
             // —— 它是这一图里**唯一没有任何受光材质**的 prop 家族（坡道 `ramp_*` 里也混着同族的

@@ -1,176 +1,87 @@
-# AGENTS.md — 仓库 Agent 规范与工作流入口（唯一入口）
+# AGENTS.md — WebSurf 仓库作业指南
 
-> 本文件是所有 agent 工具的**约定入口**。**工作流本体在 agentmemory**——本文件只做四件事：
-> ① 告诉你**去哪取**工作流；② 声明**控制层在哪**；③ 列出**自检命令**；④ 记录**目录现状**。
+> 本文件是 agent 进入仓库的入口。**2026-10-18 起，仓库不再有强制 agent 工作流**：没有看板、没有 claim / close-round、没有记忆库同步门禁、没有 docflow、没有 pre-commit 钩子。
+> 旧流程的完整文件与台账保存在 git tag `checkpoint/pre-amh-reset-20261018`。
+>
+> 仍然成立的是工程事实：构建与测试要过，结论要有证据，提交信息要能独立读懂。
 
-- **控制层**：**看板（`T-###`）在 agentmemory**（主题「待办看板（活动板）」），机器可读镜像 `progress/board.jsonl`（门禁 `[G]` 的权威输入）；需要真人拍板的只在根 `OWNER.md`（`D-###`）。
-- **工作流规则 / 规程 / 技能 / 历史归档**：全部在 **agentmemory**（marker 前缀 `websurf/`；细则条目的主题里保留原小节号，如「0.1 看板使用规程」）。
-- 工程文档树、过程记录、规范（`norms/**`）、看板分卷与已决分卷**已全部迁入记忆库**；仓库侧只留**本文件 + `OWNER.md` 两篇流程文档** + `skills/**` + git 仓库项目文档（看板已迁库，仓库侧只留机器可读镜像 `progress/board.jsonl`）。
+## 1. 仓库地图
 
-## 0. 开工第一步：从记忆库取工作流
+| 位置 | 内容 |
+|---|---|
+| `apps/debug`、`apps/game`、`apps/viewer` | 三端工程；各自是独立 npm 工程，另有 `crates/` |
+| `src/phys` | 共享物理（Rust，`cargo test -p websurf-phys`） |
+| `src/wasm-core` | BSP / 模型 / 材质 / 渲染导出的 wasm 核心（Rust） |
+| `src/ts-shared`、`src/renderer-shared` | 共享 TS 层；three 的单实例装在仓库根 `node_modules` |
+| `src/materials`、`src/web` | 材质包与共享 web 资产 |
+| `src/scripts` | 本地开发/构建工具：`serve.py`、`build-textures-mtz.mjs`、`copy-wasm-pkg.mjs`、`sync-web-assets.mjs`、工具链 `.cmd` |
+| `test/` | `maps/`、`replay/` 夹具（gitignore，本地自备）；`project/` 第三方 SDK 参考 |
+| `skills/websurf-env-traps` | 本仓 Windows 作业陷阱（开工前读） |
+| `.github/workflows` | `ci-gates.yml`（构建/测试）、`deploy-pages.yml`（部署） |
+| `TODO.md` | 可选的未结清单；不是门禁 |
+| `OWNER.md` | 需要 owner 拍板的决定（`D-###`） |
+| `.amh/`、`.dsh/` | AMH Hub 项目侧本地接入（gitignore；是否接入见 §3） |
+
+`progress/`、`documents/`、`docflow.json` 已不存在；不要再从这些路径取规则或状态。
+
+## 2. 构建与验证
 
 ```bash
-memory_smart_search("websurf 工作流 取活 收尾 自检")
+npm ci                         # 仓库根：shared 层的 three
+cd apps/<app> && npm ci        # debug / game / viewer 各自装
+npm run build:wasm             # wasm-pack → pkg/，并复制到 web/
+npm run typecheck              # TS 类型检查
+npm run build:ts               # typecheck + esbuild
+npm run build:dist             # 打包 dist/（single 或 --multi）
+npm run dev                    # 起本地服务（debug 8080 / game 8090 / viewer 8100）
 ```
 
-命中的**第 1 条是工作流总纲**，它列出全部细则条目；按下表的主题词逐条取。
-
-| 环节 | 召回提示（`memory_smart_search` 的查询词） |
-|---|---|
-| 看板（取活 / 状态流转 / 收尾 / 认领） | `websurf 待办看板 取活` ／ `websurf 看板规程 状态流转 收尾 认领` |
-| 日常改动流程（挑活 / 留痕 / claim / 验收判据） | `websurf 日常改动流程 挑活 留痕 claim 验收判据` |
-| 需要真人拍板 → `OWNER.md` 登记 | `websurf 需要真人拍板 OWNER 登记 优先级` |
-| 文档体积与分卷 | `websurf 文档体积 分卷 上限 导航` |
-| 代码注释纪律 | `websurf 代码注释纪律 小作文 行号 符号名` |
-| 上报约定（六类停下） | `websurf 上报约定 六类 停下上报` |
-| 技能（环境陷阱 / 记忆库用法） | `websurf 环境陷阱 Windows 沙箱` ／ `agentmemory 使用规则 踩坑清单` |
-| 规范（注释规范 / 路径卫生 / 脚本与 CI 契约） | `本机路径卫生 禁止绝对路径` ／ `脚本与 CI 契约 部署链` ／ `注释书写规范 锚点写法` |
-| 历史归档（看板分卷 / 已决分卷 / 旧进展卷） | `websurf 看板分卷 T-###` ／ `OWNER 已决分卷 2026-Q4` ／ `进展纪要 2026-10` |
-
-**取法**：marker 是**标识**不是查询串（同篇兄弟条目共享前缀 token，按 marker 搜会被稀释）——用上表的主题词搜。
-**取回内容只作线索**：落结论仍须回当前源码核到 `文件:行号`。
-
-**一轮的循环**（细节见技能 `websurf-workflow`；下面 ①②③ 会被门禁挡下）：
-
-```
-开轮 → 📖 取工作流(记忆库) → 取活(看板未结项 + 状态留痕) → docflow claim 认领 → 📖 取上下文
-     → 改 → 收尾(看板状态/证据 → ✍️ 写进展 → 四道门禁 → 提交推送) → 维护(stale 等归零)
-```
-
-1. **① 队列滞留（提示，不判红、不挡提交）**：`progress/pending-kb.jsonl` 非空 = 有进展还没写进库；**写通道可用时立刻回放**（`kb-fallback plan` → `memory_save` → `done`）。**刻意不判红**——队列就是给「写通道暂时不可用」用的，判红会让没有写通道的 agent 卡死（2026-10-11 实测过一次）。队列文件本身入库，条目不会丢。
-2. **② 代码改动缺留痕**：改了 `apps/**` 或 `src/**`（不含 `src/scripts/**`）却没动 `progress/board.jsonl` 或没新增台账行 ⇒ 钩子挡提交。
-3. **③ 已有条目失配**：`stale`/`orphan`/`archive_mismatch`/`missing`/`leak` 任一非 0 ⇒ `check-memory-sync` 红，必须重迁。
-
-开工前先加载技能：`skill("websurf-workflow")`（循环与强制力）、`skill("websurf-env-traps")`（环境陷阱）；用记忆库前 `skill("agentmemory-usage")`（**本仓守则**：判定口径 / 红线 / 配置坑，细则在其 `REFERENCE.md`）。上游 agentmemory 官方技能 17 篇在 `skills/agentmemory-usage/`，来源与更新法见 `skills/agentmemory-usage/THIRD-PARTY.md`。
-
-**本机没有记忆库 / MCP 工具不可用时——不要停**：先跑 `node src/scripts/kb-fallback.mjs probe`，按它给出的那层走。三层兜底：
-1. **L1（正常）**：`memory_*` 工具可用 ⇒ 按上表召回、按 §5 写进展。
-2. **L2（服务在、工具不在）**：读用 `GET http://127.0.0.1:3113/memories?limit=1000`（判存在性比检索可靠）；写不了先落 L3 队列。服务没起就先跑 `start-agentmemory.cmd`（probe 会打印实际路径）。
-3. **L3（只有仓库）**：规则从本文件 + `skills/**` + **门禁脚本**重建——`check-doc-drift.mjs` 的 A–P 段就是文档规则、`docflow.json` 就是只读/认领/审批规则、`check-memory-sync.mjs` 就是台账约定；控制层照常（`progress/board.jsonl` 取活、`OWNER.md` 登记待决）。
-4. **当轮进展不许丢**：写不进知识库就用 `node src/scripts/kb-fallback.mjs queue --marker <marker> --note <文本>` 落 `progress/pending-kb.jsonl`；恢复后 `plan` 打印可直接调用的 `memory_save` 参数，逐条回放并补台账，再 `done --marker <marker>` 删除。
-5. 需要完整规则文本时：按 3 重新总结项目，或从 git 历史取旧版 `AGENTS.md`（本仓历史里有）。
-
----
-
-## 1. 三条硬禁令（违反即返工）
-
-| # | 禁令 | 含义 |
-|---|---|---|
-| **B1** | 禁以旧注释为依据 | 不得摘抄、复述、沿用任何现有代码注释——语义只能从实现、调用点、测试取得 |
-| **B2** | 禁以文档代替事实 | 工程文档（`documents/**` 等，现已在 agentmemory，原文未随仓库保留（曾归档 `archive/memory/2026-10/`，2026-10-11 核实该归档已空））**只作线索**；事实来源 = 当前源码 + 构建脚本/配置 + 门禁的**实际输出** |
-| **B3** | 禁推测 | 无法在代码中定位的结论标 `[待确认]` 并停下上报；禁止「应该/可能/大概是/历史上」。**例外**：日志与逐字引用类内容不受此禁约束，但必须带 `[source:路径#序号@sha12]`（sha12 = 该源文件 sha256 前 12 位） |
-
-**取证手段**：源码行、构建脚本、配置，以及 `cargo check` / `cargo test` / `npm run typecheck` / 漂移体检的实际输出。
-
----
-
-## 2. 目录现状（改动前以此为准）
-
-| 位置 | 状态 |
-|---|---|
-| 根 `*.md` | `AGENTS.md`（本文件）｜ `OWNER.md`（owner 决策队列）｜ `README.md`、`CONTRIBUTING.md`、`SECURITY.md`（git 仓库项目文档）。**无 `CHANGELOG.md`**：2026-10-11 owner 决定取消——改动记录已全部在 commit 历史里，agent 不再维护该文件 |
-| `documents/` | **不存在**：原 47 篇工程/共享层/架构文档 + 3 篇规范已全部迁入 agentmemory，原文未随仓库保留（该归档现已空） |
-| `progress/` | **3 个机器可读文件**：`memory-index.jsonl`（迁移台账 = manifest，`check-memory-sync.mjs` 的权威输入）、`control-ids.json`（控制层 ID 索引，门禁 `[G]` 判定「ID 已存在」的唯一来源）、`pending-kb.jsonl`（MCP 不可用时的待补写队列，见 §0 兜底）、**`board.jsonl`（看板机器可读镜像 = 门禁 `[G]` 权威输入）** |
-| `skills/**` | **两类**：① **本项目技能 3 篇**（顶层）`skills/websurf-workflow/`（**先读：工作流循环**）、`skills/websurf-env-traps/`（开工前先读）、`skills/agentmemory-usage/`（**用记忆库前先读**：本仓守则）—— 各含 `SKILL.md`（骨架，属只读类）+ `REFERENCE.md`（细则）；② **上游 agentmemory 官方技能 17 篇** 收在 `skills/agentmemory-usage/`（`memory-discipline`、`remember`/`recall`/`forget`、`lesson`、`agentmemory-mcp-tools`/`-config`/`-rest-api`/`-architecture`/`-hooks`/`-agents`、`recap`/`handoff`/`session-history`/`commit-context`/`commit-history`、`write-agentmemory-skill`）+ `skills/agentmemory-usage/_shared/TROUBLESHOOTING.md` —— 上游**原样复制、不得就地修改**，来源/版本/更新法见 `skills/agentmemory-usage/THIRD-PARTY.md`。仓库是唯一源头；**harness 只扫 `<仓库>/.agents/skills`、`<仓库>/.dsh/skills`、`~/.agents/skills`、`<dshHome>/skills` 四个根，不扫 `<仓库>/skills/`** ⇒ 新机器要把 `skills/` 下每个技能目录 junction 进任一根（见 `websurf-workflow` 的 REFERENCE「技能注册」节）。项目技能的 `SKILL.md` 进台账；官方技能不进（工具自带文档，随包更新） |
-| `apps/**` | 三端工程 `apps/debug`、`apps/game`、`apps/viewer` + 各 `crates/` |
-| `src/**` | 共享层（phys / wasm-core / ts-shared / materials / renderer-shared / web 共享 web 资产）+ `src/scripts/**`（本地门禁与工具） |
-| `test/` | `test/maps/`（BSP 夹具）、`test/replay/`（录像样例）——两者 gitignore；`test/project/**` 为第三方参考资料 |
-| `.github/**` | `workflows/ci-gates.yml`、`workflows/deploy-pages.yml`、`workflows/doc-drift.yml`（**三者均入库**；见仓库根 `.gitignore` 末尾「agent 工作流层」注释）+ `.github/**/*.md` 模板（功能性配置） |
-| `.workbuddy/memory/**` | 其他 agent 的工作记忆；只作过程线索，不作依据 |
-| `archive/**` | 迁移原文与回滚存证（gitignore）；**不作依据** |
-
-**仓库内 md 清单**（体检 `[K]` 要求每篇都能被上级导航点到，故在此列全）：
-`.github/ISSUE_TEMPLATE/bug_report.md`、`.github/ISSUE_TEMPLATE/feature_request.md`、`.github/ISSUE_TEMPLATE/other.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`CONTRIBUTING.md`、`OWNER.md`、`README.md`、`SECURITY.md`、`skills/**`（全部 md：三篇项目技能各自的 `SKILL.md` + `REFERENCE.md`、`skills/agentmemory-usage/THIRD-PARTY.md`、`skills/agentmemory-usage/**` 下官方技能的 `SKILL.md`/`REFERENCE.md`/`EXAMPLES.md` 与 `_shared/TROUBLESHOOTING.md`）。
-
----
-
-## 3. 自检命令（每个改动提交前必跑）
+Rust 侧：
 
 ```bash
-node src/scripts/check-doc-drift.mjs [文件]        # A–P 全 0（行数声明 / 锚点 / 路径 / 坏链 / 行尾与 BOM / 待办同源 / 体积 / 注释纪律 / 上级覆盖 / 缺口↔看板 / 假结案 / 脚本契约 / 文档契约 / 本机路径）
-node src/scripts/check-memory-sync.mjs             # 记忆库同步：stale / orphan / archive_mismatch / missing / leak 全 0（台账 progress/memory-index.jsonl）
-node src/scripts/check-memory-sync.mjs --keys      # markers == entries
-node src/scripts/docflow.mjs check                 # 只读 md 漂移 / 未落实审批 / 联动（体检 [O] 同口径）
-node src/scripts/check-kb-doc-drift.mjs --strict    # 记忆库「现状文档」锚点体检（documents/** 的 路径:行号 对当前源码；失效/越界即失败；库不可达 SKIP）
-node src/scripts/check-kb-gate.mjs --all           # 闸 B（库侧）：分档大小（chunk/errata ≤8 KiB、index ≤16 KiB）/ 悬空 supersedes / 头部规范 / 重迁须 supersede；写入闸门用 `--row-file`（close-round --done 已内置）；历史冻结件（台账行 `audit_exempt`）在 --all 里单列 exempt、不计 blocking，写入闸不认该标记
-node src/scripts/kb-fallback.mjs probe           # 知识库可用性：L1 工具 / L2 HTTP / L3 仓库兜底，并列出待补写条目
-node src/scripts/close-round.mjs --check-round --staged  # 留痕检查（钩子同口径）；--note/--done 见脚本头注释
-node src/scripts/sync-board.mjs                    # 改了看板 board.jsonl 后重迁入库：不带参数打印计划 → 逐条 memory_save → `--done`（自动按 marker 认 id）落台账
-git config core.hooksPath .githooks                  # 每个克隆启用一次提交门禁（本地配置，不随仓库走）
-node src/scripts/check-board-touch.mjs --staged    # 软提示：改了代码却没动 progress/board.jsonl
-grep -n -E "据文档|据注释|原设计|历史上|应该|可能|大概|似乎|推测" <新稿>   # 0 命中
-cargo check -p websurf-phys                        # 或工程内 cargo check
-cd apps/<app> && npm run typecheck                 # TS 侧
+cargo check -p websurf-phys
+cargo test -p websurf-phys
 ```
 
-> **提交与体检必须串成一步、红灯即终止**：先跑体检，非 0 就停——不要把体检和 `git commit` 用「无论成败都继续」的链式写法连在一起。
+CI 仍会跑 `ci-gates.yml`：`cargo test`、viewer 的源码契约、三端 wasm 构建与 GLB 一致性。提交前至少跑与改动相关的构建/类型检查；没有跑成功的项要在提交信息里写清楚。
 
-**两道闸门 + 一道库侧闸（闸 B）**：
-① **记忆库同步**（`check-memory-sync.mjs`）：台账里每个 marker 的 sha12 必须与磁盘源文件一致（源变 ⇒ 条目已陈旧）；迁出的源须标 `retired`；迁出范围内不得漏迁；`cross_project_leak` 必须为 0（marker 项目前缀 `websurf/`）。**可判定口径**：一条内容可不可用，判据是**它的 sha 是否与仓库当前文件一致**，不是它「来自文档还是来自记忆库」。
-② **检索质量回归**（无脚本，用 MCP 跑）：`memory_smart_search` 的命中结果必须遍历内容断言目标 marker **精确出现**——**分数与命中数都不能判存在性**；正确做法是 `GET http://localhost:3113/memories?limit=1000` 取全量再按 marker 比对。
-③ **闸 B**（`check-kb-gate.mjs`，库侧，`src/scripts/**`）：`--all` 审存量、`--row-file` 当**写入闸门**（`close-round --done` 已内置，非 0 即拒写台账）。四条：分档大小（`chunk`/`errata` ≤8 KiB、`index` ≤16 KiB）、悬空 `supersedes`、头部规范（首行 `[线索]` + `主题：`/`摘要：`）、**重迁须 supersede 旧条目**。**历史冻结件豁免（`T-729`，owner 2026-10-17 批准口径）**：台账行带 `audit_exempt`（值 = 理由）时，`--all` **只**把「口径类」违规（体积三条 + 悬空 `supersedes` + 重迁未 supersede）转成 `exempt_rows` / `exempt_by_rule` **单列展示**、不计入 `blocking_rows`；**结构类**（marker 形状/重复、条目不在库、头部规范、sha12/源缺失）照旧硬查；**写入闸不认这个标记**——新行自带 `audit_exempt` 直接报 `exemption-not-allowed-for-new-rows`。
+## 3. 记忆（可选，AMH Hub）
 
-**全量闸门**：漂移体检 A–P 全 0；`cargo test -p websurf-phys` 通过；三工程 `npm run typecheck` 通过；`check-memory-sync.mjs` 全 0；`check-kb-gate.mjs --all` 无新增阻塞。
+**agentmemory 已从本机卸载：不要再调用 `memory_*` 工具，不要再连 `:3111` / `:3113`，也不要尝试恢复。**
 
----
+目标记忆系统是本地 AMH Hub（项目侧接法见 AMH 工作区的 `PROJECT-INTEGRATION.md` 与 `examples/project-side/`；本机的 AMH 工作区路径不写进仓库）。它是**增强，不是门禁**：没有 Hub 时照常工作，不要把任务卡在记忆上。
 
-### 3.1 脚本清单（供 `[O]` 文档契约覆盖判定）
+- **已接入**：仓库里有 `.amh/config.json` 与 `.dsh/skills/amh-memory/SKILL.md` 时，按该技能用 `amh-cli health` → `recall` → `save`。`health.embedding_verified=false` 时只读、不写。
+- **未接入**：跳过。结论写进提交信息、`TODO.md` 或 `OWNER.md`。
+- **接入命令**（Hub 已起、实例与 binding 已登记；路径用本机 AMH 工作区）：
+  ```powershell
+  node <AMH>\mcp-hub\src\hub-setup.mjs --add --instance <N> --project WEBSURF --project-dir <repo>
+  # 然后 stop.bat && start-all.bat，让 Hub 重新加载 binding
+  ```
+  也可以只用项目侧初始化：`node <AMH>\mcp-hub\bin\amh-project.mjs init --dir <repo> --binding <binding>`。
+- 同一笔写入只走一条路：有当前项目的原生 MCP 工具就优先用它，否则用 CLI；不要两边都写。
+- 不写 secrets、原始对话、临时进度日志。
 
-- `apps/debug/scripts/build-dist.mjs`
-- `apps/debug/scripts/check-wasm-api.mjs`
-- `apps/game/scripts/build-dist.mjs`
-- `apps/game/scripts/check-wasm-api.mjs`
-- `apps/viewer/scripts/build-dist.mjs`
-- `apps/viewer/scripts/check-wasm-api.mjs`
-- `src/scripts/build-textures-mtz.mjs`
-- `src/scripts/check-board-touch.mjs`
-- `src/scripts/check-doc-drift.mjs`
-- `src/scripts/check-kb-doc-drift.mjs`
-- `src/scripts/check-kb-gate.mjs`
-- `src/scripts/check-memory-sync.mjs`
-- `src/scripts/copy-wasm-pkg.mjs`
-- `src/scripts/docflow.mjs`
-- `src/scripts/close-round.mjs`
-- `src/scripts/sync-board.mjs`
-- `src/scripts/kb-fallback.mjs`
-- `src/scripts/lib/dist-pack.mjs`
-- `src/scripts/lib/wasm-api-contract.mjs`
-- `src/scripts/sync-web-assets.mjs`
+## 4. 取证据的规矩
 
----
+- 代码语义只从**实现、调用点、测试**取；现有注释和旧文档只能当线索。
+- 不能在代码里定位的结论标 `[待确认]` 并说明缺什么，不要用「应该 / 可能 / 大概」补。
+- 判断「某物是否还在」用全工作区索引（含未跟踪），不要用 `git grep` 的 0 命中下结论；`dist/`、`pkg/`、`test/maps/` 等是生成物/本地物。
+- 公开面（README / AGENTS / 源码注释）不写本机绝对路径；本地路径放 `.amh/`、`.dsh/` 或环境变量。
+- 改 `.cmd` / `.bat` / `.ps1` 保持 CRLF，并实跑一次。
+- 渲染/物理改动先做基线 A/B，再一次只动一个变量；验证 wasm 产物真的被使用（字节数/哈希），不要只看「注入成功」。
 
-## 4. 上报约定
+## 5. 未结工作与待拍板
 
-**六类必须停下上报**（不得「先写着」）：① 代码自相矛盾；② 疑似代码缺陷（只记录不修）；③ 断言无法在代码中定位；④ 锚点越界且无法判断指向；⑤ 需改代码/构建配置才能让文档成立；⑥ 涉及夹具、依赖锁、CI 配置。
+- `TODO.md`：可选清单，直接增删；不需要同步到任何台账，也没有 ID 格式要求。
+- `OWNER.md`：只有「不可逆 / 改范围 / 改语义」的决定才登记；能按现有约定做的就直接做。
 
-上报后文件保持**未提交**。升级路径：直接上报 owner（仓库所有者；本仓没有中间层）。
+## 6. 环境陷阱
 
----
+开工前加载技能 `websurf-env-traps`（长输出截断、生成物误判、沙箱边界、行尾、GitHub 网络等）。它的细则在 `skills/websurf-env-traps/REFERENCE.md`。
 
-## 5. 进度纪要（指针）
+## 7. 提交
 
-> 逐条进展原文全部在 **agentmemory**（marker 前缀 `websurf/progress/`）。
-> 新进展用 MCP `memory_save` 写入，并在 `progress/memory-index.jsonl` 追加一行台账。
-> 三步走：`node src/scripts/close-round.mjs --note "…"` → `memory_save` → `--done --marker <m> --id <id>`（自动补台账 + 跑门禁 + 给提交模板）。
-> 权威存在性判据：`GET http://localhost:3113/memories?limit=1000`（**不要用检索命中判存在性**）。
-
-**仍生效的规则**
-
-| 规则 | 出处 |
-|---|---|
-| 子代理并发 ≤3（19 并发被掐断的复盘结论） | 归档 ID `T-019`（见 `progress/control-ids.json`） |
-
-历史沿革（工作组状态、待决明细、下一步顺序、旧台账、看板与已决分卷）全部在记忆库；
-按主题召回：`websurf 工作组状态` ／ `websurf 待决 明细` ／ `websurf 已决分卷`。
-
----
-
-## 附录 A：仓库构建与验证速查
-
-| 用途 | 命令 |
-|---|---|
-| 共享物理 | `cargo check -p websurf-phys`、`cargo test -p websurf-phys` |
-| 工程构建 | 各工程 `npm run typecheck` / `build:ts` / `build:dist`；改 Rust 后需 `npm run build:wasm` |
-| 文档体检 | `node src/scripts/check-doc-drift.mjs [文件]` |
-| dev 端口 | debug 8080 / game 8090 / viewer 8100 |
-
+- 先 `git status --short`，只 add 自己改的文件；不要用 `git checkout -- <文件>` 清理别人的在途改动。
+- 提交信息说清：改了什么、为什么、怎么验证。纯格式/注释改动写「无行为变化」。
+- 行尾：仓库 `core.autocrlf=true`，索引是 LF、工作树是 CRLF；不要顺手统一。
