@@ -45,22 +45,42 @@ cargo test -p websurf-phys
 
 CI 仍会跑 `ci-gates.yml`：`cargo test`、viewer 的源码契约、三端 wasm 构建与 GLB 一致性。提交前至少跑与改动相关的构建/类型检查；没有跑成功的项要在提交信息里写清楚。
 
-## 3. 记忆（可选，AMH Hub）
+## 3. 项目记忆（AMH Hub）
 
-**agentmemory 已从本机卸载：不要再调用 `memory_*` 工具，不要再连 `:3111` / `:3113`，也不要尝试恢复。**
+**agentmemory 已卸载：不要再调 `memory_*` / `:3111` / `:3113`，不要恢复。**
 
-目标记忆系统是本地 AMH Hub（项目侧接法见 AMH 工作区的 `PROJECT-INTEGRATION.md` 与 `examples/project-side/`；本机的 AMH 工作区路径不写进仓库）。它是**增强，不是门禁**：没有 Hub 时照常工作，不要把任务卡在记忆上。
+AMH 是项目记忆的唯一入口；仓库不再维护派生台账、哈希或记忆门禁。当前 binding `hub-i21-a` / `WEBSURF`，项目侧 CLI 已接通；如果以后出现原生 MCP 工具（`mcp__...__memory_*`），优先用原生，同一笔写入只走一条。
 
-- **已接入**：仓库里有 `.amh/config.json` 与 `.dsh/skills/amh-memory/SKILL.md` 时，按该技能用 `amh-cli health` → `recall` → `save`。`health.embedding_verified=false` 时只读、不写。
-- **未接入**：跳过。结论写进提交信息、`TODO.md` 或 `OWNER.md`。
-- **接入命令**（Hub 已起、实例与 binding 已登记；路径用本机 AMH 工作区）：
-  ```powershell
-  node <AMH>\mcp-hub\src\hub-setup.mjs --add --instance <N> --project WEBSURF --project-dir <repo>
-  # 然后 stop.bat && start-all.bat，让 Hub 重新加载 binding
-  ```
-  也可以只用项目侧初始化：`node <AMH>\mcp-hub\bin\amh-project.mjs init --dir <repo> --binding <binding>`。
-- 同一笔写入只走一条路：有当前项目的原生 MCP 工具就优先用它，否则用 CLI；不要两边都写。
-- 不写 secrets、原始对话、临时进度日志。
+### 3.1 一轮
+
+1. **开工**：`health`。`embedding_verified=false` 或 Hub 不可达 ⇒ **停下并报告**，不要用本地文件/旧记忆兜底。这是唯一的记忆门禁，由 AMH 判定；不另写本地脚本。
+2. **取上下文**：`recall` 1–2 条聚焦查询（任务/模块/前次 handoff），`--limit 3–5`。
+3. **改代码**。
+4. **收尾**：`save` 一条记录：
+   - `type`: `architecture`（决定/取舍）、`bug`（根因/修复）、`pattern`（可复用做法）、`workflow`（流程/交接）、`fact`（稳定事实）。
+   - `concepts`: `area:<模块>`、`task:<T-###>`（可选）、`handoff`（交接时）。
+   - `marker`: `AMH-YYYYMMDD-<slug>`，一次写入一个唯一 marker。
+   - `content`: 做了什么、为什么、证据（文件:行号/命令）、下一步。
+5. **504 / `outcome_unknown`**：先 `verify --marker`；`found=true` 就不要再写；`found=false` 才用同一个 marker 重写。
+6. 提交信息带 memory id 或 marker；不写本地台账。
+
+### 3.2 多 agent（共享 + 交接，不是调度）
+
+- 所有 agent 共用同一个 binding；读共享，`agentId` 只是来源标签，不是权限/锁。
+- 任务分派、顺序、互斥由人/DSH 负责；AMH 没有 claim/lock/lease/task，不要假装它有。
+- 交接：上一位 `save` 一条 `type=workflow`、`concepts` 含 `handoff` / `task:<T-###>` 的记录，写清 status/done/next/files；下一位 `recall "HANDOFF T-###"`。
+- 需要区分“谁写的”时才加 `--pair` 的第二条 `-b` binding；默认不加，所有写入同一标签。
+- 两个 agent 不要同时改同一组文件；并行用 git worktree 或分开目录，冲突由 git 处理。
+- `TODO.md` / `OWNER.md` 继续作为任务与决定文件；AMH 只存耐久的决定/根因/模式/交接（它没有 update/delete，不能当状态表）。
+
+### 3.3 工具与已知坑
+
+- 当前用项目侧 CLI，命令路径在 `.dsh/skills/amh-memory/SKILL.md`；`.amh/config.json` 只有 hub/binding/project。
+- `counts.project.total` 才是总数；`memoryCount` 不是项目总数。
+- `verify` 未命中也是 exit 0，要看 `found`。
+- CLI 的 `[amh-cli] ...` 进度行走 stderr；exit 0 就是成功，不要把 PowerShell 的 NativeCommandError 当失败。
+- 当前只有 1 条记忆时，`recall` 对任何查询都会返回它；`score>1` 才是相关性信号。
+- 不写 secrets、原始对话、临时日志。
 
 ## 4. 取证据的规矩
 
