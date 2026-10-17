@@ -56,25 +56,32 @@ AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/S
 1. **开工**：`node <gateway>\bin\client.mjs sessions`（或原生 `memory_sessions`）。gateway 不可达 / 401 / 无 binding ⇒ **不写记忆，停下报告**；不要自己 start/stop AMH（owner/安装者）。
 2. **取上下文**：`recall` 或 `search` 1–2 条；同时读 `TODO.md` 对应任务与 `OWNER.md` 待决。
 3. **改代码**。
-4. **收尾**：`save --content ... --type ... --concepts ...`。原生 `memory_save` 还支持 `files`；项目侧 client 不暴露 `--files`，把 files 写进 content。
+4. **收尾**：`save --content ... --type ... --concepts ... [--files ...]`。其余原生字段用 `client.mjs call memory_save --args-file <json>`。
 5. **save 失败**：先读错误，不要盲重试；用 `sessions` / `recall` 查是否已有同内容。gateway 没有旧的 marker/verify/504 语义。
 6. 验收只用 gateway/native 的实际结果 + CI；不写本地台账/哈希/checklist。
 
-### 3.2 多 agent（native 能力，项目侧 client 只开 4 条）
+### 3.2 两条通道（A/B）
 
-- gateway 的 token 决定 `agentId`；没有 token 时用 binding 的 agentId。多 agent 要各自 token，否则 lease/signal 的身份相同。
-- 原生工具（需 native MCP 或能调 48 工具的客户端）：`memory_action_create/update/next`（任务/DAG）、`memory_lease`（独占）、`memory_signal_send/read`（消息）、`memory_sessions`、`memory_checkpoint`。
-- 项目侧 `client.mjs` 只有 `sessions/recall/search/save`，**不能** claim/lease/signal；不要假装能。
+| 通道 | 能力 | 代价 |
+|---|---|---|
+| A. 项目 client | `client.mjs` 六条：`sessions/recall/search/save/tools/call`；`call` 可访问全部 native 工具，含 action/lease/signal/checkpoint | 模型看不到原生工具列表；每个 agent 需 `AMH_CLIENT_TOKEN` 才有独立身份 |
+| B. native MCP | 模型直接看到 48 个 native 工具；17 个官方 skill 可直调 | 需要 DSH profile entry + token + 重启 |
+
+规则：
+
+- **native MCP 是 canonical；项目 client 是兼容/回退**。同一项目、同一笔写入只走一条，不双写。
+- `binding` 定项目；`token` 定 agentId。没有 token 时所有 agent 用 binding 的 agentId。
+- 多 agent 的 action/lease/signal 必须各自 token；否则身份相同，不要假装能区分。
+- `call` 只是 CLI 包装，不是原生工具发现；要 skill 直调就上 B。
 - 没有 lease 时，分派/互斥仍由人/DSH 负责；不要自己造 gate。
-- 交接：`memory_save`（type 取最贴近的，通常 `workflow`/`pattern`），concepts 含 `task:<id>,handoff`，content 以 `HANDOFF <task>:` 开头并写 files；native 可用 `files` 字段。
+- 交接：`memory_save`（type 通常 `workflow`/`pattern`），concepts 含 `task:<id>,handoff`，content 以 `HANDOFF <task>:` 开头；files 用 `--files` 或 `call --args-file`。
 - `TODO.md` / `OWNER.md` 仍是任务/决定文件；AMH 不是状态表；`D-###` 正文以 OWNER 为准。
 
 ### 3.3 工具与坑
 
-- 命令路径在 `.dsh/skills/amh-memory/SKILL.md`；`.amh/config.json` 只有 hub/binding/project；token 用 `AMH_CLIENT_TOKEN`。
-- 当前 skill 已切到 `gateway/bin/client.mjs`；不要找 `amh-cli` / `health` / `counts` / `verify` / `brief` / `marker`。
-- 原生工具面是 48 个（实例 20 实测），不是旧 7 个；gateway 只挡 6 个结构性跨边界工具。
-- `client.mjs` 只暴露 4 条；要 actions/leases/signals 必须走 native MCP（或扩客户端），否则明说能力不可用。
+- 命令/规则在 `.dsh/skills/amh-memory/SKILL.md`；`.amh/config.json` 只有 hub/binding/project；token 用 `AMH_CLIENT_TOKEN`。
+- 原生工具面 48 个（实例 20 实测），不是旧 7 个；gateway 只挡 6 个结构性跨边界工具。
+- 旧 `amh-cli` / `health` / `counts` / `verify` / `brief` / `marker` 路线已删除，不要找。
 - 原生 MCP 入口 / token 由 owner/安装者配置；agent 不自己加第二入口、不自己发 token。
 - `amh status` 只读；gateway 没起就停写报告，不要启停。
 - 不写 secrets、原始对话、临时日志。
