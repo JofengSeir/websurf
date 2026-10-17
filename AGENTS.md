@@ -20,7 +20,7 @@
 | `.github/workflows` | `ci-gates.yml`（构建/测试）、`deploy-pages.yml`（部署） |
 | `TODO.md` | 可选的未结清单；不是门禁 |
 | `OWNER.md` | 需要 owner 拍板的决定（`D-###`） |
-| `.amh/`、`.dsh/` | AMH Hub 项目侧本地接入（gitignore；是否接入见 §3） |
+| `.amh/`、`.dsh/` | AMH gateway 项目侧本地接入（gitignore；是否接入见 §3） |
 
 `progress/`、`documents/`、`docflow.json` 已不存在；不要再从这些路径取规则或状态。
 
@@ -45,49 +45,38 @@ cargo test -p websurf-phys
 
 CI 仍会跑 `ci-gates.yml`：`cargo test`、viewer 的源码契约、三端 wasm 构建与 GLB 一致性。提交前至少跑与改动相关的构建/类型检查；没有跑成功的项要在提交信息里写清楚。
 
-## 3. 项目记忆（AMH Hub）
+## 3. 项目记忆（AMH gateway）
 
-**agentmemory 已卸载：不要再调 `memory_*` / `:3111` / `:3113`，不要恢复。**
+**旧的独立 agentmemory / mcp-hub 路线已卸载：不要恢复。** 当前 AMH gateway 的 backend 是 agentmemory（0.9.30），只经 gateway 访问；不要直连 `:3111` 或实例 REST。
 
-AMH 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md` 为准。当前 binding/project 见 `.amh/config.json`（本地文件，不写进仓库），项目侧 CLI 已接通；**不要自己加原生 MCP entry / 第二条 binding / hooks / 门禁 / 台账 / claim-lock-lease**。拓扑问题（`--pair`、多 binding、原生入口）只由 AMH 安装者决定；agent 觉得需要就停下报告。
+AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md` 为准。项目契约 `.amh/config.json`（`hub` / `binding` / `project`，本地文件，不写进仓库）。旧的 `amh-cli` / 7 工具 / marker / verify / counts / brief 路线已删除，不要再用。
 
 ### 3.1 一轮
 
-1. **开工**：`health`。必须同时满足 `reachable===true` 且 `embedding_verified===true`；只有 `ok:true` / HTTP 200 / exit 0 **不算**可用。任一不满足 ⇒ **不写记忆，停下报告**；不要用本地文件/旧记忆兜底，也不要自己 start/stop AMH（由 owner/AMH 安装者处理）。
-2. **取上下文**：`recall` 1–2 条聚焦查询（任务/模块/前次 handoff），`--limit 3–5`；同时读 `TODO.md` 对应任务与 `OWNER.md` 待决（AMH 不是状态表）。
+1. **开工**：`node <gateway>\bin\client.mjs sessions`（或原生 `memory_sessions`）。gateway 不可达 / 401 / 无 binding ⇒ **不写记忆，停下报告**；不要自己 start/stop AMH（owner/安装者）。
+2. **取上下文**：`recall` 或 `search` 1–2 条；同时读 `TODO.md` 对应任务与 `OWNER.md` 待决。
 3. **改代码**。
-4. **收尾**：有决定/修复/可复用结论时 `save` 一条；纯查询、无结论不写：
-   - `type`: `architecture`（决定/取舍）、`bug`（根因/修复）、`pattern`（可复用做法）、`workflow`（流程/交接）、`fact`（稳定事实）、`preference`（用户偏好）。
-   - `concepts`: `agent:<name>`（来源）、`task:<T-###>`（可选）、`area:<模块>`、`handoff`（交接时）。
-   - `marker`: `AMH-YYYYMMDD-<slug>`，一次写入一个唯一 marker。
-   - `content`: 做了什么、为什么、证据（文件:行号/命令）、下一步。
-5. **504 / `outcome_unknown`**：save 必须带唯一 marker（CLI 没有 marker 就无法 verify）。先等落盘窗口（约 2.5s）再 `verify --marker`：`found=true` 不要重写；只有 `found=false && truncated=false` 才用同一个 marker 重写；`truncated=true` 时停下报告，不要重写。
-6. 验收只用 `health` / `verify` / `counts` + CI；涉及记忆写入的提交信息带 memory id 或 marker，不写本地台账/哈希/checklist。save 失败时提交信息写 `memory not saved: <error>`。
+4. **收尾**：`save --content ... --type ... --concepts ...`。原生 `memory_save` 还支持 `files`；项目侧 client 不暴露 `--files`，把 files 写进 content。
+5. **save 失败**：先读错误，不要盲重试；用 `sessions` / `recall` 查是否已有同内容。gateway 没有旧的 marker/verify/504 语义。
+6. 验收只用 gateway/native 的实际结果 + CI；不写本地台账/哈希/checklist。
 
-### 3.2 多 agent（共享 + 交接，不是调度）
+### 3.2 多 agent（native 能力，项目侧 client 只开 4 条）
 
-- 一个项目一条 binding；读共享。`agentId` 是 binding 级来源标签，不是 per-agent 身份。
-- 不要用 `--pair` / `-b` 区分 agent；来源/归属写进 `concepts agent:<name>`。
-- 分派、顺序、互斥、冲突合并、纠错由人/DSH/仓库负责；AMH 没有 claim/lock/lease/task，不要假装它有。
-- 交接：上一位 `save` 一条记录（type 取最贴近的，通常 `workflow`），content 以 `HANDOFF <task>:` 开头，写清 status/done/next/files；`concepts` 含 `agent:<name>,task:<T-###>,handoff,area:<x>`；下一位 `recall "HANDOFF T-###"`。AMH 记录的 `files` 字段 CLI 不填，把 files 写进 content。marker 带 agent 或随机后缀避免撞；读交接优先 `isLatest=true`。
-- 两个 agent 不要同时改同一组文件；并行用 git worktree 或分开目录，冲突由 git 处理。
-- `TODO.md` / `OWNER.md` 继续作为任务与决定文件；AMH 只存耐久的决定/根因/模式/交接（它没有 update/delete，不能当状态表）。`OWNER.md` 的 `D-###` 正文仍以文件为准，AMH 最多存 `task:D-###` 指针/理由，不复制全文；AMH 是本机 cache，跨机结论仍落 `OWNER.md` / `TODO.md`。
+- gateway 的 token 决定 `agentId`；没有 token 时用 binding 的 agentId。多 agent 要各自 token，否则 lease/signal 的身份相同。
+- 原生工具（需 native MCP 或能调 48 工具的客户端）：`memory_action_create/update/next`（任务/DAG）、`memory_lease`（独占）、`memory_signal_send/read`（消息）、`memory_sessions`、`memory_checkpoint`。
+- 项目侧 `client.mjs` 只有 `sessions/recall/search/save`，**不能** claim/lease/signal；不要假装能。
+- 没有 lease 时，分派/互斥仍由人/DSH 负责；不要自己造 gate。
+- 交接：`memory_save`（type 取最贴近的，通常 `workflow`/`pattern`），concepts 含 `task:<id>,handoff`，content 以 `HANDOFF <task>:` 开头并写 files；native 可用 `files` 字段。
+- `TODO.md` / `OWNER.md` 仍是任务/决定文件；AMH 不是状态表；`D-###` 正文以 OWNER 为准。
 
-### 3.3 工具与已知坑
+### 3.3 工具与坑
 
-- 当前用项目侧 CLI，命令路径在 `.dsh/skills/amh-memory/SKILL.md`；`.amh/config.json` 只有 hub/binding/project。
-- `counts.project.total` 才是总数；`memoryCount` 只代表本次响应条数。
-- `health` 可能 200/ok:true 但 `reachable:false`；必须同时看 `reachable` 与 `embedding_verified`。
-- `verify` 未命中也是 exit 0，要看 `found`；没有 marker/id 时无法 verify，`found=false && truncated=true` 不代表可重写。
-- CLI 的 `[amh-cli] ...` 进度行走 stderr；exit 0 只表示 CLI 完成，业务结果看 JSON（`found` / `reachable` / `truncated`），不要当失败也不要当成功。
-- 只用 `.amh/config.json` 的默认 binding；不要用 `--project` / `--hub` / `--binding` 覆盖或依赖 `AMH_*` 环境变量（可跨项目写错）。
-- `recall` 可能返回被 supersede 的旧记录；以 `isLatest=true` 为准，需要清单用 `list --latest`。
-- 数据少时 `recall` 可能把所有记录都返回；`score>1` 才是相关性信号。
-- `brief` 是 latest 清单（含 curator/DSH capture），不是 handoff 查询；找交接用 `recall "HANDOFF <task>"` + `verify`。
-- `list` 空页不代表到底，只有 `nextCursor === null` 才是；`list --latest` 只用于清单，不用于语义检索。
-- `excluded_unverified` 是被项目归属/验证过滤掉的搜索命中，不是本项目丢记录；项目总数看 `counts.project.total`。
-- `amh-cli` exit 3 可能是 Hub 不可达，也可能是写已发出后 fetch 失败（outcome_unknown）；先 `verify --marker`，不要据此判断"没写"。成功调用的进度行前缀是 `[amh-cli]`。
-- 代码/构建产物的 sha/哈希对照（例如 T-730 的 GLB/tri/phy）是代码验收，不是记忆台账；不要把它做成常驻门禁。
+- 命令路径在 `.dsh/skills/amh-memory/SKILL.md`；`.amh/config.json` 只有 hub/binding/project；token 用 `AMH_CLIENT_TOKEN`。
+- 当前 skill 已切到 `gateway/bin/client.mjs`；不要找 `amh-cli` / `health` / `counts` / `verify` / `brief` / `marker`。
+- 原生工具面是 48 个（实例 20 实测），不是旧 7 个；gateway 只挡 6 个结构性跨边界工具。
+- `client.mjs` 只暴露 4 条；要 actions/leases/signals 必须走 native MCP（或扩客户端），否则明说能力不可用。
+- 原生 MCP 入口 / token 由 owner/安装者配置；agent 不自己加第二入口、不自己发 token。
+- `amh status` 只读；gateway 没起就停写报告，不要启停。
 - 不写 secrets、原始对话、临时日志。
 
 ## 4. 取证据的规矩
