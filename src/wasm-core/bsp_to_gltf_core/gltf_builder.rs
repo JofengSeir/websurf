@@ -290,13 +290,28 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
         // 判定）为真才写这一项；键名 `vbsp_wireframe` 与渲染端读的 `material.userData` 键
         // 一致（`src/renderer-shared/shader/lightmap-shader.ts` 的 `copyMaterialRenderState`
         // 据此置 `wireframe = true`）；`RawValue` 构造失败则 `extras` 退回默认，不写这一项。
-        extras: if material.wireframe || second_index.is_some() {
-            serde_json::value::to_raw_value(&serde_json::json!({
-                "vbsp_wireframe": material.wireframe,
-                "vbsp_basetexture2": second_index.map(|index| index.value()),
-            }))
-            .map(Some)
-            .unwrap_or_default()
+        // **透明标记必须可判定**（T-650 判据③）：`$translucent` / `$alphatest` 除映射到
+        // glTF 的 BLEND / MASK，还要在 extras 留原始声明，验收脚本不必反推 alphaMode。
+        extras: if material.wireframe
+            || second_index.is_some()
+            || material.translucent
+            || material.alpha_test.is_some()
+        {
+            let mut ex = serde_json::Map::new();
+            ex.insert("vbsp_wireframe".into(), serde_json::json!(material.wireframe));
+            ex.insert(
+                "vbsp_basetexture2".into(),
+                serde_json::json!(second_index.map(|index| index.value())),
+            );
+            if material.translucent {
+                ex.insert("vbsp_translucent".into(), serde_json::json!(true));
+            }
+            if let Some(cutoff) = material.alpha_test {
+                ex.insert("vbsp_alpha_test".into(), serde_json::json!(cutoff));
+            }
+            serde_json::value::to_raw_value(&ex)
+                .map(Some)
+                .unwrap_or_default()
         } else {
             Extras::default()
         },

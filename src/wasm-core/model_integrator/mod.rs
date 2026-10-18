@@ -692,6 +692,13 @@ impl ModelIntegrator {
             if let Some(idx) = bump_texture_index {
                 ex.insert("vbsp_bumpmap".into(), serde_json::json!(idx));
             }
+            // 透明标记（T-650）：与世界面同一套键名，验收脚本按 extras 判定而不必反推 alphaMode。
+            if alpha_key == 1 {
+                ex.insert("vbsp_translucent".into(), serde_json::json!(true));
+            }
+            if alpha_key == 2 {
+                ex.insert("vbsp_alpha_test".into(), serde_json::json!(0.5));
+            }
             let extras: json::Extras = if ex.is_empty() {
                 Default::default()
             } else {

@@ -31,12 +31,8 @@
 
 ## T-650 — 透明材质未做半透/分层渲染（待 owner 拍板 D-120）
 
-**状态**：待裁决。
+**状态**：实施中（D-120 选 (a) 做；2026-10-18 起）。
 **现象**：`ice03` / `ice01` / `ice_transparent` 是 UnlitGeneric / `$translucent`，现按 owner 裁决吃光照，但没有半透明与分层渲染（owner 明确点过的缺口）。透明排序/混合未实现。
+**本轮进度**：VMT 实测 —— `ice01/ice03` 是 UnlitGeneric 且**没有** `$translucent`；`ice_transparent` 是 LightmappedGeneric + `$translucent 1`（`ice02` 与 `models/ice_transparent` 是 VertexLitGeneric + `$translucent 1`）。GLB 侧 `ice_transparent` 已是 `BLEND`、`doubleSided`；本轮补：材质 extras 增加 `vbsp_translucent` / `vbsp_alpha_test`（世界面与模型两条路径），渲染端对 BLEND 材质强制 `depthWrite=false`。待三端实跑与逐像素验收。
 **判据**：三端同视点下 `ice_transparent` 呈半透明（可透过看到后方几何）且三端逐像素一致；`$translucent` 材质在 GLB 材质 extras 有可判定的透明标记；三端 `npm run typecheck` exit 0 + 渲染一致性检查 exit 0。
 
-## T-651 — 洞顶冰锥 `.vhv` 全 0（待 owner 拍板 D-121）
-
-**状态**：待裁决。
-**现象**：`icicle_01~05` 的 `.vhv` 全 0 —— VRAD 判定顶点落在岩石内部（`vradstaticprops.cpp` 的 PositionInSolid）⇒ 明确留黑，数据层面无解，须换光源策略。
-**判据**：owner 选定光源策略（例如给冰锥指定 lighting origin / 独立环境光）后，三端同视点冰锥有明暗且逐像素一致；未拍板前不改数据。

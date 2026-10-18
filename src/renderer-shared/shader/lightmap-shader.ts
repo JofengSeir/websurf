@@ -1346,6 +1346,9 @@ function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.Mes
 	if (typeof s.transparent === 'boolean') dst.transparent = s.transparent;
 	if (typeof s.opacity === 'number') dst.opacity = s.opacity;
 	if (typeof s.depthWrite === 'boolean') dst.depthWrite = s.depthWrite;
+	// **透明材质不写深度**（T-650）：GLTFLoader 对 BLEND 只置 transparent，depthWrite 仍是 true；
+	// 写深度会让后画的透明面互相遮挡，冰/玻璃叠层看起来像实心。
+	if (dst.transparent) dst.depthWrite = false;
 	if (typeof s.depthTest === 'boolean') dst.depthTest = s.depthTest;
 	if (typeof s.blending === 'number') dst.blending = s.blending;
 	if (typeof s.polygonOffset === 'boolean') dst.polygonOffset = s.polygonOffset;
