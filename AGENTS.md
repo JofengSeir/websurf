@@ -82,7 +82,23 @@ AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/S
 - 交接：`memory_save`（type 通常 `workflow`/`pattern`），concepts 含 `task:<id>,handoff`，content 以 `HANDOFF <task>:` 开头；files 用 `--files` 或 `call --args-file`。
 - `TODO.md` / `OWNER.md` 仍是任务/决定文件；AMH 不是状态表；`D-###` 正文以 OWNER 为准。
 
-### 3.3 工具与坑
+### 3.3 记录强度（中度约束，不是闭环）
+
+代码 / 样式 / 脚本类改动（`.rs .ts .tsx .js .mjs .cjs .css .html .toml .py .ps1 .cmd .bat .sh`）提交时，
+提交信息末行必须带三选一：
+
+```
+AMH: <memory-id>     # 已写入 AMH
+AMH: none            # 明确判定这次改动无需记录
+AMH: down            # gateway 不可用（正文说明）
+```
+
+- 纯文档（`.md` / `.txt`）、纯数据、`.dsh/` `.amh/` `.tmp/` 等忽略目录不强制；
+- 检查由**本地** `commit-msg` 钩子执行：`.dsh/hooks/commit-msg` + `git config core.hooksPath .dsh/hooks`（文件在 gitignore 里，只对本机生效）；
+- `git commit --no-verify` 可绕过，但要在正文写明原因；
+- 这是**中度约束**：不保证每次都写记忆，只保证「改行为时必须有明确的记录决定」。它不是门禁，也不是闭环 —— 缺记录时提交会失败，仅此而已。
+
+### 3.4 工具与坑
 
 - 17 个 skill 在 `.dsh/skills` 中是指向 AMH `gateway/skills` 的目录 junction，不是副本；不要手工复制一套。
 - 命令/规则在 `.dsh/skills/amh-memory/SKILL.md`；`.amh/config.json` 有 hub/binding/project 和本地 token；`AMH_CLIENT_TOKEN` 可覆盖身份。
