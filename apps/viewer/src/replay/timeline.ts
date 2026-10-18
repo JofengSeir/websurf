@@ -477,17 +477,22 @@ export class Timeline {
         const drop = segs.pop();
         drop?.remove();
       }
+      // **最小可见宽度**：被连踢的人每段只隔几秒（90 分钟录像里 3 秒 ≈ 0.05%），按真实比例画会直接消失。
+      // 统一给 0.35% 的下限，并保证右端不越界 —— 让人在进度条上至少能看到"这里有一段"。
+      const MIN_W = 0.0035;
       for (let i = 0; i < spans.length; i++) {
         const seg = segs[i];
-        const left = clamp01((spans[i][0] - p.rangeStart) / win);
-        const right = clamp01((spans[i][1] - p.rangeStart) / win);
-        if (right - left <= 0.0005) {
+        const left0 = clamp01((spans[i][0] - p.rangeStart) / win);
+        const right0 = clamp01((spans[i][1] - p.rangeStart) / win);
+        if (right0 <= left0 && right0 <= 0) {
           seg.style.display = 'none';
           continue;
         }
+        const width = Math.max(right0 - left0, MIN_W);
+        const left = Math.min(left0, 1 - MIN_W);
         seg.style.display = '';
         seg.style.left = (left * 100).toFixed(3) + '%';
-        seg.style.width = ((right - left) * 100).toFixed(3) + '%';
+        seg.style.width = (width * 100).toFixed(3) + '%';
       }
     };
     sync(this.activeZone, this.activeSpans);

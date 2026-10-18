@@ -1087,19 +1087,6 @@ export class DemoPanel {
         // **死亡后的自由视角**（T-714，owner 裁定「与观察时段分开标注」）：死后 `m_iTeamNum` 仍是 2/3、
         // 不计入观察占比，但那段位姿同样不是本人走位（是死后镜头的自由观察）⇒ 单独给一条读数与一枚标记。
         const deadPct = p.seconds > 0 ? Math.round((p.deadSeconds / p.seconds) * 100) : 0;
-        const tip =
-          (p.hasTrack
-            ? '点击切到他的视角'
-            : '该玩家的位姿尚未被本工程实体流采到（该层未逐位对齐）——点它会说明原因，不会切视角') +
-          (p.aliases.length > 1 ? '；别名：' + p.aliases.join('、') : '') +
-          (obsPct > 0
-            ? '；观察时段 ' + obsPct + '%（这段里他的位姿是镜头跟着别人，不是本人走位）' +
-              '；本人走位跨度 ' + p.moving + ' HU（已排除观察时段）'
-            : '') +
-          (deadPct > 0
-            ? '；死后自由视角 ' + Math.round(p.deadSeconds) + ' 秒（' + deadPct + '%，死亡期间镜头可以自由看，不是本人走位；' +
-              '与观察时段可能重叠）'
-            : '');
         // 无位姿的行：区间条改**弱色**（内联，避免为这一个状态新增 CSS 规则）、时间读数后带「· 无位姿」。
         // 别用 `opacity` 内联压暗整行——`refreshRosterState` 每帧用它切换 `.off`（在线/离线），内联会盖掉它。
         const barFill = p.hasTrack ? '' : ';background:var(--muted)';
@@ -1127,7 +1114,8 @@ export class DemoPanel {
           .join('');
         // 队伍与阵亡来自 `PlayerSample.team` / `health` / `lifeState`（`trackFacts` 汇总）：
         // 队伍做成一枚小标签贴在名字后，阵亡数接在时间读数后 —— 都不占新格子，长名仍然省略号收尾。
-        const team = p.team !== '—' ? '<i class="dmp-who-team">' + this.esc(p.team) + '</i>' : '';
+        // **队伍不标**：这份录像里回放/观察实体也带 m_iTeamNum，和"当前观看者到底是观察、CT 还是 T"对不上，
+        // 标了只会误导；要看队伍去详情页的原始字段。
         // 过半时间在观察 ⇒ 名字后加一枚「观」标记（不占文字宽度，长名仍省略号收尾）
         const observeTag = obsPct >= 50 ? '<i class="dmp-who-observe" title="过半时间在观察（这段位姿是镜头跟着别人）">观</i>' : '';
         // 过半时间已死 ⇒ 一枚「亡」标记（与「观」并列；T-714：死后自由视角同样不是本人走位）
@@ -1137,18 +1125,19 @@ export class DemoPanel {
         const kicks = p.kicks > 0 ? ' · 被踢 ' + p.kicks : '';
         // 时间读数：多段时先报段数（读数格窄，逐段列全会被省略号吃掉），逐段时刻进悬停提示。
         const seg = p.spans.length > 1 ? p.spans.length + ' 段 ' : '';
-        const segDetail =
-          (p.spans.length > 1
-            ? '；在场分 ' +
-              p.spans.length +
-              ' 段：' +
-              p.spans.map((s) => this.fmtClock(this.secAt(s.from)) + '–' + this.fmtClock(this.secAt(s.to))).join('、') +
-              '（中途退出过）'
-            : '') +
-          (p.kicks > 0 ? '；被管理员踢出 ' + p.kicks + ' 次（见对话区）' : '');
+        const spanList = p.spans.map((s) => this.fmtClock(this.secAt(s.from)) + '–' + this.fmtClock(this.secAt(s.to))).join('、');
+        const alts = [...new Set(p.aliases.filter((a) => a && a !== p.name))];
+        // **悬停只列解析出来的数据**（别名 / 区间 / 被踢次数 / 有无位姿），不写解释性长句。
+        const tip = [
+          alts.length > 0 ? '别名：' + alts.join(' / ') : '',
+          spanList ? '区间：' + spanList : '',
+          p.kicks > 0 ? '被踢 ' + p.kicks + ' 次' : '',
+          p.hasTrack ? '' : '无位姿',
+        ].filter(Boolean).join(' · ');
+        const nameText = [p.name, ...alts.slice(0, 2)].filter(Boolean).join(' / ');
         return (
-          '<button class="dmp-who' + (p.hasTrack ? '' : ' dmp-who-notrack') + '" type="button" data-who="' + i + '" title="' + this.esc(tip + segDetail) + '">' +
-          '<span class="dmp-whoname">' + this.esc(p.name) + team + observeTag + deadTag + '</span>' +
+          '<button class="dmp-who' + (p.hasTrack ? '' : ' dmp-who-notrack') + '" type="button" data-who="' + i + '" title="' + this.esc(tip) + '">' +
+          '<span class="dmp-whoname">' + this.esc(nameText) + observeTag + deadTag + '</span>' +
           '<span class="dmp-whobar">' + connBars + bars + '</span>' +
           '<span class="dmp-whotime">' + seg + this.fmtClock(this.secAt(p.from)) + '–' + this.fmtClock(this.secAt(p.to)) + (p.hasTrack ? deaths : ' · 无位姿') + kicks + '</span>' +
           '</button>'
@@ -1262,6 +1251,19 @@ export class DemoPanel {
 
   rosterFor(entity: number): RosterRow | null {
     return this.roster(0).find((p) => p.entity === entity || p.entities.includes(entity)) ?? null;
+  }
+
+  /**
+   * **此刻这个实体属于哪个身份**（同一实体被先后占用时按各自的 spans 判断）。
+   *
+   * 为什么需要它：进度条上的人物带与「当前在看谁」必须随**身份**走，不能随实体号走 ——
+   * 实测 boreas 实体 5 先是「她不一样」（00:38–06:59），49:49 起被回放 bot 占用；
+   * 用 `rosterFor(entity)` 只会拿到"进场最早的那一行"，于是看到 bot 时条上画的还是前一个人的区间。
+   */
+  identityAtTick(entity: number, tick: number): RosterRow | null {
+    const rows = this.roster(0).filter((r) => r.entity === entity || r.entities.includes(entity));
+    if (rows.length === 0) return null;
+    return rows.find((r) => r.spans.some((s) => tick >= s.from && tick <= s.to)) ?? rows[0];
   }
 
   /** tick → 秒（整场口径，与 `secAt` 同一换算）；供外部换算花名册区间。 */

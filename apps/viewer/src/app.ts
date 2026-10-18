@@ -500,7 +500,7 @@ const demoPanel = demoPane
         // **条上画出「当前视角人物」的活跃区间**（录像会话时间轴的 `.tl-zone-active`）。
         // **按身份给全部区间**：同一个人会中途退出又进来（两段甚至更多），压成一段会把那个断口抹掉；
         // 拿不到身份行时退回这条轨道自己的区间（那是「这条轨迹在这段时间有位姿」的口径）。
-        const who = demoPanel?.rosterFor(demEntity);
+        const who = demoPanel?.identityAtTick(demEntity, Math.round(demo.player.time * demoPanel.tickRate())) ?? demoPanel?.rosterFor(demEntity);
         const whoSpans = who && who.spans.length > 0 ? who.spans : null;
         demo.timeline.setActiveSpan(
           clip.count > 0
@@ -919,6 +919,12 @@ function frame(now: number): void {
 
     const nowSec = s.player.time;
     const nowTick = Math.round(nowSec * demoPanel.tickRate());
+    // **进度条的人物带随当前身份更新**：同一实体号被先后占用时（boreas 实体 5：她不一样 → 回放 bot），
+    // 只按实体号取行会一直画「进场最早那条」的区间。这里每帧按 tick 查当前身份，再写活跃区间。
+    if (demoTrackEntity !== null) {
+      const band = demoPanel.identityAtTick(demoTrackEntity, nowTick);
+      if (band) demo.timeline.setActiveSpan(band.spans.map((sp): [number, number] => [demoPanel.secondsAt(sp.from), demoPanel.secondsAt(sp.to)]));
+    }
 
     // ── **按区间把视角绑到「正在看的那个人」此刻那一段**（每帧都做，与播放/暂停、自动跟随开关无关）──
     //
