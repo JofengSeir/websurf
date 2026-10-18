@@ -486,7 +486,9 @@ select.field-select:focus { border-color: var(--text); }
    `align-content: space-between` 让三行在这个固定高度里**均匀分布**，余量摊到行与行之间，
    而不是全堆在底部。两条共用 `.timeline` 一个类，所以这一条规则同时作用于它们（owner 要的正是「都」）。
    注：数值取自 owner 的窗口宽度；若窗口窄到控件折行更多，内容会高过这个定值（那时把 106 调大）。 */
-.timeline { height: 106px; align-content: space-between; }
+/* 三行高度也定死：两条时间轴同一套行高（记录 22/29/27 是它内容自然高度，录像那条此前
+   由内容算出 22.66/29.67/25.67，同高同结构却看起来'差一点'）。 */
+.timeline { height: 106px; align-content: space-between; grid-template-rows: 22px 29px 27px; }
 
 /* 滑杆外观与两条人物叠加带（活跃区间 / 悬停高亮）共用同一个坐标系，见下滑杆块。 */
 .tl-sliderwrap {

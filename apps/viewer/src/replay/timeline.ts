@@ -47,6 +47,8 @@ export interface TimelineProfile {
   runZone: boolean;
   /** 人物叠加带：当前视角人物的活跃区间 + 悬停高亮（由会话调 `setActiveSpan` / `setHighlight` 驱动）。 */
   personZones: boolean;
+  /** 微调按钮口径：`frame` = 逐帧（记录，有定长帧）；`tick` = 逐 tick（录像，按载入后的 tick 率）。 */
+  step?: 'frame' | 'tick';
 }
 
 export class Timeline {
@@ -81,6 +83,18 @@ export class Timeline {
   private onStage = false;
   /** 是否正在拖动滑杆：为 true 时 refresh 不回写滑杆值（避免与拖动抢夺）。 */
   private dragging = false;
+  /** 录像会话的秒/tick（逐 tick 微调用）；记录会话用不到。 */
+  private tickInterval = 1 / 66.6667;
+
+  /** 由录像面板在载入完成后写入真实 tick 率（tickInterval = playbackTime / playbackTicks）。 */
+  setTickInterval(secPerTick: number): void {
+    if (Number.isFinite(secPerTick) && secPerTick > 0) this.tickInterval = secPerTick;
+  }
+
+  /** 逐 tick 微调（夹在窗口内）。 */
+  private stepTick(n: number): void {
+    this.player.seek(this.player.time + n * this.tickInterval);
+  }
   /**
    * **用户自己动了进度条**时的通报钩子（拖动中的每一次 `input` 都调一次）。
    *
@@ -169,13 +183,20 @@ export class Timeline {
     stopBtn.addEventListener('click', () => this.player.stop());
     controls.appendChild(stopBtn);
 
-    if (profile.frameStep) {
-      const prevBtn = el('button', 'btn small', '◀ 帧', { type: 'button', title: '上一帧（,）' });
-      prevBtn.addEventListener('click', () => this.player.stepFrames(-1));
+    if (profile.frameStep || profile.step === 'tick') {
+      const tick = profile.step === 'tick';
+      const prevBtn = el('button', 'btn small', tick ? '◀ tick' : '◀ 帧', {
+        type: 'button',
+        title: tick ? '上一 tick' : '上一帧（,）',
+      });
+      prevBtn.addEventListener('click', () => (tick ? this.stepTick(-1) : this.player.stepFrames(-1)));
       controls.appendChild(prevBtn);
 
-      const nextBtn = el('button', 'btn small', '帧 ▶', { type: 'button', title: '下一帧（.）' });
-      nextBtn.addEventListener('click', () => this.player.stepFrames(1));
+      const nextBtn = el('button', 'btn small', tick ? 'tick ▶' : '帧 ▶', {
+        type: 'button',
+        title: tick ? '下一 tick' : '下一帧（.）',
+      });
+      nextBtn.addEventListener('click', () => (tick ? this.stepTick(1) : this.player.stepFrames(1)));
       controls.appendChild(nextBtn);
     }
 

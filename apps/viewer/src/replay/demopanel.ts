@@ -341,6 +341,8 @@ export interface DemoPanelOptions {
   onNotice?: (text: string) => void;
   /** 面板自己的文件框选中文件后，交给 app 的 `routeFile`（与拖放走同一条入口，才能先清 tab 状态）。 */
   onRequestLoad?: (file: File) => void;
+  /** 载入后把秒/tick 交给时间轴（逐 tick 微调按钮用它）。 */
+  onTickRate?: (secPerTick: number) => void;
   /**
    * 取当前播放位置的 **tick**（秒 × tick 率）。用于**名称轮换**：记录机器人共用同一人物、
    * 改名显示当前记录的关卡 ⇒ 名字是时变属性，必须按当前 tick 取，而不是取最后一张快照。
@@ -839,6 +841,7 @@ export class DemoPanel {
     this.totalTicks = Math.max(1, result.header.playbackTicks);
     // 秒/tick 由头部两个字段推出（头部不直接记 tick 率）；花名册与阵亡时刻都按它换算
     this.tickInterval = this.duration / this.totalTicks;
+    this.opts.onTickRate?.(this.tickInterval);
     this.buildRows();
     this.renderMeta(file);
     this.renderTimeline();

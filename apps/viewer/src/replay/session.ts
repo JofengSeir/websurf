@@ -44,6 +44,7 @@ export const SESSION_PROFILES: Record<SessionKind, TimelineProfile> = {
   replay: {
     clock: 'run',
     frameStep: true,
+    step: 'frame',
     abRange: true,
     runZone: true,
     personZones: false,
@@ -51,6 +52,7 @@ export const SESSION_PROFILES: Record<SessionKind, TimelineProfile> = {
   demo: {
     clock: 'wall',
     frameStep: false,
+    step: 'tick',
     abRange: false,
     runZone: false,
     personZones: true,
