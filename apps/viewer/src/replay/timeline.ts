@@ -185,14 +185,14 @@ export class Timeline {
 
     if (profile.frameStep || profile.step === 'tick') {
       const tick = profile.step === 'tick';
-      const prevBtn = el('button', 'btn small', '◀帧', {
+      const prevBtn = el('button', 'btn small', '◀ 帧', {
         type: 'button',
         title: tick ? '上一 tick（.dem 无定长帧，按 tick 步进）' : '上一帧（,）',
       });
       prevBtn.addEventListener('click', () => (tick ? this.stepTick(-1) : this.player.stepFrames(-1)));
       controls.appendChild(prevBtn);
 
-      const nextBtn = el('button', 'btn small', '帧▶', {
+      const nextBtn = el('button', 'btn small', '帧 ▶', {
         type: 'button',
         title: tick ? '下一 tick（.dem 无定长帧，按 tick 步进）' : '下一帧（.）',
       });
