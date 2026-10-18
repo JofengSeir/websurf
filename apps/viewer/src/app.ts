@@ -367,6 +367,8 @@ const demoPanel = demoPane
       // **选错文件就改送**：录像页的文件框只收 `.dem`，但用户在系统对话框里可以切「所有文件」
       // 硬选一份 `.replay`/`.bsp` ——本面板按内容复核后交回 `routeFile`，由它切到对应页面。
       onForeignFile: (f) => void routeFile(f),
+      // 面板文件框选中的文件也交给 `routeFile`：与拖放同一条入口（先清 tab 状态再 load）。
+      onRequestLoad: (f) => void routeFile(f),
       // **名称轮换**：把当前播放位置换算成 tick 交给面板 —— 记录机器人会沿用同一个人物改名显示
       // 当前记录的关卡，故名字必须按 tick 取。tick 率取**本会话播放器**的当前位置与本录像头
       // 的真实值（总 tick / 总秒数）：这份录像实际是 66.67 tick，写死 100 会让「当前 tick」

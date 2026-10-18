@@ -339,6 +339,8 @@ export interface DemoPanelOptions {
   onForeignFile?: (file: File) => void;
   /** 无法提供位姿时的提示出口。 */
   onNotice?: (text: string) => void;
+  /** 面板自己的文件框选中文件后，交给 app 的 `routeFile`（与拖放走同一条入口，才能先清 tab 状态）。 */
+  onRequestLoad?: (file: File) => void;
   /**
    * 取当前播放位置的 **tick**（秒 × tick 率）。用于**名称轮换**：记录机器人共用同一人物、
    * 改名显示当前记录的关卡 ⇒ 名字是时变属性，必须按当前 tick 取，而不是取最后一张快照。
@@ -732,7 +734,11 @@ export class DemoPanel {
     // 故先提供这条**能直接看到全部名单**的通道，同时保留 .dem 通道继续收敛。
     this.input.addEventListener('change', () => {
       const f = this.input.files?.[0];
-      if (f) void this.load(f);
+      // 清空 value：再次选同一个文件也要触发 change；并且走 app 的 routeFile，和拖放同一条入口。
+      this.input.value = '';
+      if (!f) return;
+      if (this.opts.onRequestLoad) this.opts.onRequestLoad(f);
+      else void this.load(f);
     });
   }
 
@@ -786,6 +792,10 @@ export class DemoPanel {
         `${file.name} 不是 ${FILE_KIND_LABEL.demo}文件（识别为 ${FILE_KIND_LABEL[kind]}）——本页只收 .dem`;
       return;
     }
+    // **在 load 内部先做一次全量清空**：文件框（`#demoFile`）这条入口不经过 app 的 `routeFile`，
+    // 之前只清缓存不清结果/DOM，第二份的解析与第一份的结果叠在一起（内存与 UI 都受影响）。
+    // 清空放在这里，两条入口（拖放 / 文件框）就都走同一条路径。
+    this.reset();
     this.lastFile = file;
     // 换文件即作废所有「载入后不变」的缓存（它们全是从上一份 `result` 里算出来的）
     this.presenceCache = null;
@@ -819,6 +829,7 @@ export class DemoPanel {
       return;
     }
     this.result = result;
+    console.info('[demo] loaded', file.name, result.header.mapName, result.header.playbackTicks, 'ticks');
     // **别名表必须在渲染之前建好**（T-709 浏览器实测）：`renderTimeline` 在下面第 601 行就画了，
     // 而它读的是 `this.aliases`；先前把建表放在 `onParsed` 之前（更靠后）⇒ 首次载入时行提示里
     // 看不到用户手工并入的别名（手动并入那次因为当场重渲染才看着正常）。
