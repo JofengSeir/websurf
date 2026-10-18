@@ -741,6 +741,35 @@ export class DemoPanel {
    * 转发（`.replay` 会被改送到记录页、`.bsp` 会被当地图加载），本面板不解析它；
    * 确认是 `.dem` 后才开始解析。解析失败时只显示错误文本，不清空既有内容以外的状态。
    */
+  /**
+   * **清空本面板的载入态**（换文件 / 关标签前调用）。
+   *
+   * 为什么需要它：`load()` 只重置"载入后不变"的缓存，详情主体、花名册 DOM、对话区、别名表仍是上一份的；
+   * 连续载入两份 .dem 时用户会看到旧详情/旧名单，误以为第二份没载入。这里把**结果与 DOM 一起清掉**，
+   * 再走正式载入。
+   */
+  reset(): void {
+    this.result = null;
+    this.rows = [];
+    this.selected = -1;
+    this.lastFile = null;
+    this.parseMs = 0;
+    this.duration = 0;
+    this.totalTicks = 0;
+    this.presenceCache = null;
+    this.sessionsCache = null;
+    this.rosterCache = null;
+    this.viewTrackCache = null;
+    this.detailSubject = null;
+    this.aliases = { namesByGuid: new Map(), guidByName: new Map(), unlinkedNames: new Set() };
+    this.meta.textContent = '';
+    this.detail.innerHTML = '';
+    this.note.textContent = '';
+    this.track.innerHTML = '';
+    this.track.hidden = true;
+    this.chat.innerHTML = '';
+  }
+
   async load(file: File): Promise<void> {
     const kind = await sniffFileKind(file);
     if (kind !== 'demo') {

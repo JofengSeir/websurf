@@ -709,6 +709,23 @@ importFileInput?.addEventListener('change', () => {
  * `.dem` → 录像会话 `DemoPanel.load`。三种都不命中时按「是否已加载地图」选提示通道。
  * 两个面板各自按内容复核，非本页类型经 `onForeignFile` 交回这里 —— 一次分派、两条复核，没有第二条路径。
  */
+/** 清空录像 tab 的会话状态（换 dem 时先调用，再 `demoPanel.load`）。 */
+function resetDemoSession(): void {
+  demo.player.load(null);
+  if (demoTrackId) {
+    demo.player.removeTrack(demoTrackId);
+    demoTrackId = null;
+  }
+  demoTrackEntity = null;
+  autoFollowEntity = null;
+  autoFollowSkippedTo = null;
+  demo.timeline.setActiveSpan(null);
+  demo.timeline.setJumpSpan(null);
+  chatOverlay.set(null);
+  demoInfo.set(null);
+  demoPanel?.reset();
+}
+
 async function routeFile(file: File): Promise<void> {
   const kind = await sniffFileKind(file);
   if (kind === 'bsp') {
@@ -721,6 +738,9 @@ async function routeFile(file: File): Promise<void> {
     return;
   }
   if (kind === 'demo') {
+    // **先清空录像 tab 的旧状态，再正式载入**：上一份的轨道 / 跟随实体 / 人物带 / 对话浮层 / 面板 DOM
+    // 都属于上一份数据，留着会让用户看到旧详情与旧花名册（连续载入两份 .dem 时的实际表现）。
+    resetDemoSession();
     activateTab('demo');
     await demoPanel?.load(file);
     return;
