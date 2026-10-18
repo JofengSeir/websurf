@@ -31,7 +31,7 @@ import {
 } from './demo/chatkind.js';
 import { userinfoTimeline } from './demo/net.js';
 import { decodePlayerInfoRecords, type PlayerSample } from './demo/demo.js';
-import { buildAliasRegistry, normalizeName, type AliasRegistry } from './identity.js';
+import { buildAliasRegistry, normalizeName, parseDisconnectEvents, type AliasRegistry, type DisconnectEvent } from './identity.js';
 import { trackToClip } from './democlip.js';
 import { TRACK_PALETTE } from './tracks.js';
 import { FILE_KIND_LABEL, sniffFileKind } from '../core/filekind.js';
@@ -466,6 +466,11 @@ function fmtSize(bytes: number): string {
    * 每段自带 `entity`：跳转要落到「此刻这一段」的那条轨迹上。
    */
   spans: Array<{ from: number; to: number; entity: number }>;
+  /**
+   * **连接区间**（会话口径，与位姿无关）：被踢的人在重连窗口里"连着但没出生"，`spans` 里没有段，
+   * 这里仍算在场。`spans` 回答"能不能看他的位姿"，`connected` 回答"他在不在服务器上"。
+   */
+  connected: Array<{ from: number; to: number }>;
   from: number;
   to: number;
   moving: number;
@@ -481,6 +486,8 @@ function fmtSize(bytes: number): string {
   team: string;
   /** 该行区间内的阵亡次数（无轨迹时为 0）。 */
   deaths: number;
+  /** 该身份在场期间被管理员踢出的次数（出自断开公告）。 */
+  kicks: number;
 }
 
 /**
@@ -528,6 +535,10 @@ interface OccupancySession {
   isBot: boolean;
   from: number;
   to: number;
+  /** 会话是怎么结束的：下一条 userinfo / 断开公告（`被管理员踢出` 等）/ 片尾。 */
+  endReason?: string;
+  /** 该次结束是断开公告给出的（而不是被下一条 userinfo 截断）⇒ 可精确到秒。 */
+  fromDisconnect?: boolean;
 }
 
 /**
@@ -639,6 +650,8 @@ export class DemoPanel {
   private presenceCache: PresenceWindow[] | null = null;
   /** 占用会话缓存（同上；`occupancySessions()` 的结果载入后不再变）。 */
   private sessionsCache: OccupancySession[] | null = null;
+  /** 断开公告（`identity.parseDisconnectEvents`）——会话截断与「被踢」标注的唯一来源。 */
+  private disconnectCache: DisconnectEvent[] | null = null;
   /**
    * **花名册缓存**（载入后不变）。
    *
@@ -745,6 +758,7 @@ export class DemoPanel {
     // 换文件即作废所有「载入后不变」的缓存（它们全是从上一份 `result` 里算出来的）
     this.presenceCache = null;
     this.sessionsCache = null;
+    this.disconnectCache = null;
     this.rosterCache = null;
     this.viewTrackCache = null;
     // 详情主体也随之作废：它引用的是上一份录像里的身份与区间
@@ -838,10 +852,17 @@ export class DemoPanel {
     const count = this.meta.querySelector<HTMLElement>('.dmp-live-n');
     if (!head || this.rows.length === 0) return;
     const now = this.opts.currentTick ? this.opts.currentTick() : 0;
+    // **只列此刻真的在区间里的人**：原先遍历 `this.rows`（签名表快照）逐个取 `nameAtSlot`，
+    // 不看这一行在不在场 ⇒ 06:59 就走的人到 49:49 还挂在「在服」里。改成按花名册行的 `spans`
+    // 过滤；名字仍按当前 tick 取（记录机器人会改名），查不到时退回行名。
     const live: string[] = [];
-    for (const row of this.rows) {
-      const nm = this.nameAtSlot(row.info.slot, now);
-      if (nm.length > 0) live.push(nm);
+    const seen = new Set<string>();
+    for (const row of this.roster(0)) {
+      if (!row.connected.some((s) => now >= s.from && now <= s.to)) continue;
+      const nm = this.nameAtSlot(row.entity - 1, now) || row.name;
+      if (nm.length === 0 || seen.has(nm)) continue;
+      seen.add(nm);
+      live.push(nm);
     }
     const text = live.length > 0 ? live.join(' · ') : '—';
     if (head.textContent !== text) head.textContent = text;
@@ -1099,21 +1120,24 @@ export class DemoPanel {
         // 过半时间已死 ⇒ 一枚「亡」标记（与「观」并列；T-714：死后自由视角同样不是本人走位）
         const deadTag = deadPct >= 50 ? '<i class="dmp-who-dead" title="过半时间已死（死亡期间镜头自由观察，不是本人走位）">亡</i>' : '';
         const deaths = p.deaths > 0 ? ' · 阵亡 ' + p.deaths : '';
+        // 被管理员踢出：断开公告里带原因，踢几次就在读数后标几次（时间轴上的断口与这句互为佐证）。
+        const kicks = p.kicks > 0 ? ' · 被踢 ' + p.kicks : '';
         // 时间读数：多段时先报段数（读数格窄，逐段列全会被省略号吃掉），逐段时刻进悬停提示。
         const seg = p.spans.length > 1 ? p.spans.length + ' 段 ' : '';
         const segDetail =
-          p.spans.length > 1
+          (p.spans.length > 1
             ? '；在场分 ' +
               p.spans.length +
               ' 段：' +
               p.spans.map((s) => this.fmtClock(this.secAt(s.from)) + '–' + this.fmtClock(this.secAt(s.to))).join('、') +
               '（中途退出过）'
-            : '';
+            : '') +
+          (p.kicks > 0 ? '；被管理员踢出 ' + p.kicks + ' 次（见对话区）' : '');
         return (
           '<button class="dmp-who' + (p.hasTrack ? '' : ' dmp-who-notrack') + '" type="button" data-who="' + i + '" title="' + this.esc(tip + segDetail) + '">' +
           '<span class="dmp-whoname">' + this.esc(p.name) + team + observeTag + deadTag + '</span>' +
           '<span class="dmp-whobar">' + bars + '</span>' +
-          '<span class="dmp-whotime">' + seg + this.fmtClock(this.secAt(p.from)) + '–' + this.fmtClock(this.secAt(p.to)) + (p.hasTrack ? deaths : ' · 无位姿') + '</span>' +
+          '<span class="dmp-whotime">' + seg + this.fmtClock(this.secAt(p.from)) + '–' + this.fmtClock(this.secAt(p.to)) + (p.hasTrack ? deaths : ' · 无位姿') + kicks + '</span>' +
           '</button>'
         );
       })
@@ -1747,11 +1771,13 @@ export class DemoPanel {
         entity,
         entities: g.entities,
         spans,
+        connected: mergeSpans(g.sessions.map((s) => ({ from: s.from, to: s.to, entity: s.entity }))).map((s) => ({ from: s.from, to: s.to })),
         from,
         to,
         moving: facts ? facts.extent : 0,
         hasTrack,
         team: facts && facts.teams.length > 0 ? teamLabel(facts.teams[0]) : '—',
+        kicks: g.sessions.filter((s) => /踢|kick/i.test(s.reason ?? '')).length,
         deaths: facts ? facts.deaths.length : 0,
       });
     }
@@ -1786,11 +1812,13 @@ export class DemoPanel {
         entity,
         entities: [entity],
         spans,
+        connected: spans.map((s) => ({ from: s.from, to: s.to })),
         from: spans[0].from,
         to: spans[spans.length - 1].to,
         moving: facts ? facts.extent : 0,
         hasTrack: true,
         team: facts && facts.teams.length > 0 ? teamLabel(facts.teams[0]) : '—',
+        kicks: 0,
         deaths: facts ? facts.deaths.length : 0,
       });
     }
@@ -1840,7 +1868,7 @@ export class DemoPanel {
     human: boolean;
     from: number;
     to: number;
-    sessions: Array<{ entity: number; from: number; to: number }>;
+    sessions: Array<{ entity: number; from: number; to: number; reason?: string }>;
   }> {
     const groups = new Map<
       string,
@@ -1851,13 +1879,13 @@ export class DemoPanel {
         human: boolean;
         from: number;
         to: number;
-        sessions: Array<{ entity: number; from: number; to: number }>;
+        sessions: Array<{ entity: number; from: number; to: number; reason?: string }>;
       }
     >();
     for (const s of this.occupancySessions()) {
       const human = s.guid.length > 0 && s.guid !== 'BOT';
       const key = human ? `g:${s.guid}` : `s:${s.slot}`;
-      const one = { entity: s.slot + 1, from: s.from, to: s.to };
+      const one = { entity: s.slot + 1, from: s.from, to: s.to, reason: s.endReason };
       const cur = groups.get(key);
       if (!cur) {
         groups.set(key, {
@@ -1918,6 +1946,19 @@ export class DemoPanel {
           to: i + 1 < evs.length ? evs[i + 1].tick : total,
         });
       }
+    }
+    // **断开公告收口会话**：会话原本止于「该槽位的下一条 userinfo」，但被踢的人可能几秒后才重连
+    // （或在片尾都不再重连）⇒ 会话被拖长、踢人也看不见。聊天里的 `▼ 名字 < STEAM_x:y:z > disconnected. ( 被管理员踢出 )`
+    // 自带 tick 与原因，按 guid 精确截断；这一步之后 02:59/03:06/03:16/03:21/03:25 各自成一段。
+    const disconnects = this.disconnectCache ?? parseDisconnectEvents(this.result?.chat ?? []);
+    this.disconnectCache = disconnects;
+    for (const s of out) {
+      if (!s.guid || s.guid === 'BOT') continue;
+      const d = disconnects.find((e) => e.guid === s.guid && e.tick > s.from && e.tick <= s.to);
+      if (!d) continue;
+      s.to = d.tick;
+      s.endReason = d.reason || 'disconnected';
+      s.fromDisconnect = true;
     }
     this.sessionsCache = out;
     return out;

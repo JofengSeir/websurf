@@ -151,3 +151,36 @@ export function buildAliasRegistry(
   return { namesByGuid, guidByName, unlinkedNames };
 }
 
+/** 聊天里的「离开」公告（`▼ 名字 < STEAM_x:y:z > disconnected. ( 原因 )`）。 */
+export interface DisconnectEvent {
+  tick: number;
+  name: string;
+  guid: string;
+  reason: string;
+}
+
+/**
+ * 从聊天流里抽出**断开事件**，把「谁什么时候离开」变成可查的时间点。
+ *
+ * 为什么必须用它：会话结束原先只看「该槽位的下一次 userinfo」，而中途 00:55 进服、02:59 被踢的人
+ * 下一条 userinfo 可能到 03:03 才来（或干脆没有）⇒ 会话被拖长、踢人也完全不可见。断开公告自带
+ * tick 与原因（`被管理员踢出` / `Client Disconnect`），是唯一能精确切会话的证据。
+ *
+ * 只认带 SteamID 的公告：`< Admin >` 这类没有账号可对，保留原样（不猜）。
+ */
+export function parseDisconnectEvents(
+  chat: ReadonlyArray<{ tick?: number; text: string }>,
+): DisconnectEvent[] {
+  const out: DisconnectEvent[] = [];
+  const re = /^▼\s*(.+?)\s*<([^>]*)>\s*disconnected\.\s*(?:\((.*?)\))?\s*$/;
+  for (const line of chat) {
+    if (typeof line.tick !== 'number') continue;
+    const m = re.exec(String(line.text ?? ''));
+    if (!m) continue;
+    const steam = /(STEAM_[0-9]:[0-9]:[0-9]+)/.exec(m[2]);
+    const guid = steam ? steamIdToGuid(steam[1]) : m[2].trim().toUpperCase() === 'BOT' ? 'BOT' : '';
+    if (!guid) continue;
+    out.push({ tick: line.tick, name: m[1].trim(), guid, reason: (m[3] ?? '').trim() });
+  }
+  return out.sort((a, b) => a.tick - b.tick);
+}
