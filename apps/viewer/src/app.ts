@@ -391,6 +391,17 @@ const demoPanel = demoPane
       // `.dem` 独有的服务器身份 / 天空盒 / 协议 / 事件 / 实体流规模 / 字符串表 / 包走读。
       // 它只写**录像会话**容器里的那个元素，记录会话的 `#replayMeta` 由 `ReplayMetaPanel` 管。
       onParsed: (result, file, rosterCount) => {
+        // **换文件先拆旧状态**：上一份录像建的轨道、跟随实体、人物带/跳转带都属于上一份数据，
+        // 不清掉的话第二份会继续用旧实体号去查位姿（表现为视角/人物带错位、甚至看起来"没加载"）。
+        if (demoTrackId) {
+          demo.player.removeTrack(demoTrackId);
+          demoTrackId = null;
+        }
+        demoTrackEntity = null;
+        autoFollowEntity = null;
+        autoFollowSkippedTo = null;
+        demo.timeline.setActiveSpan(null);
+        demo.timeline.setJumpSpan(null);
         demoInfo.set(result ? { fileName: file.name, result, rosterCount } : null);
         // **画面左下角的对话浮层**：数据就是同一份解析产物里的 `chat`（每条带 tick），
         // 在这里一次性换算成**会话内秒**交给浮层；解析失败（`result === null`）⇒ 清空

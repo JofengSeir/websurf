@@ -363,7 +363,7 @@ export interface DemoPanelOptions {
    * `announceSec` 是这一行的会话内秒（= 播报时刻，区间带的右端）、`player` / `level` / `durationSec` 一并给出来，让 app 侧能顺手把视角切到过的那个人
    * （名字重复很少见，按名字认人足够；认不出来就只跳时间、不动视角）。
    */
-  /** 跳到这一跑的起点（挂在行首灰色时间上）。 */
+  /** 跳到这一跑的起点（旧入口，保留兼容；新 UI 的灰色时间改为跳消息本身）。 */
   onRecordJump?: (toSec: number, announceSec: number, player: string, level: string, durationSec: number) => void;
   /** 行尾按钮：把这一跑标进进度条并跳到它的起点（owner 2026-10-16：不再叫「扣减」）。 */
   onRecordSpan?: (toSec: number, announceSec: number, player: string, level: string, durationSec: number) => void;
@@ -1488,7 +1488,7 @@ export class DemoPanel {
           '" data-dur="' + rec.durationSec + '"'
         : '';
       const jumpTitle = rec
-        ? '跳到这一跑：播报 ' + this.fmtClock(sec) + ' − 用时 ' + rec.durationSec.toFixed(3) +
+        ? '跳到这一跑开始前 5 秒：播报 ' + this.fmtClock(sec) + ' − 用时 ' + rec.durationSec.toFixed(3) +
           ' 秒 − 5 秒缓冲 = ' + this.fmtClock(to) + (rec.level ? '（' + this.esc(rec.level) + '）' : '')
         : '';
       // **标区间按钮**（owner 2026-10-16 定稿）：标签 = 符号 + 记录开始时间（与行首灰色时间同口径）；
@@ -1496,8 +1496,8 @@ export class DemoPanel {
       // 早先 tooltip 还写着「从观看时长里扣掉」—— 那是一句**没有实现**的承诺（全仓没有观看时长记账）。
       const deduct = rec
         ? '<button type="button" class="dmp-chat-deduct"' + dataAttrs +
-          ' title="标出这一跑（' + this.fmtClock(to) + ' → ' + this.fmtClock(sec) + '，含 ' +
-          rec.durationSec.toFixed(3) + ' 秒用时与 5 秒缓冲）并跳到起点 ' + this.fmtClock(to) + '">⏱ ' +
+          ' title="跳到记录开始前 5 秒（播报 ' + this.fmtClock(sec) + ' − 用时 ' +
+          rec.durationSec.toFixed(3) + ' 秒 − 5 秒 = ' + this.fmtClock(to) + '），并把这一跑标进进度条">⏱ ' +
           this.fmtClock(to) + '</button>'
         : '';
       rows.push(
@@ -1512,10 +1512,9 @@ export class DemoPanel {
           '" title="' +
           this.esc(CHAT_KIND_LABEL[kind] + '：' + CHAT_RULE_HINT[det.rule]) +
           '">' +
-          (rec
-            ? '<button type="button" class="dmp-chat-t dmp-chat-t-jump"' + dataAttrs +
-              ' title="' + jumpTitle + '">' + this.fmtClock(sec) + '</button>'
-            : '<span class="dmp-chat-t">' + this.fmtClock(sec) + '</span>') +
+          // **每一行的灰色时间都可点**：跳到这条消息自己的时刻（不是"记录才可点"）。
+          '<button type="button" class="dmp-chat-t dmp-chat-t-seek" data-at="' + sec.toFixed(3) +
+          '" title="跳到 ' + this.fmtClock(sec) + '">' + this.fmtClock(sec) + '</button>' +
           '<span class="dmp-chat-x">' +
           this.esc(m.text) +
           '</span>' +
@@ -1545,7 +1544,10 @@ export class DemoPanel {
         });
       }
     };
-    bindRecordBtn('.dmp-chat-t-jump', (to, at, player, level, dur) => this.opts.onRecordJump?.(to, at, player, level, dur));
+    // 灰色时间：一律跳到该条消息自己的时刻。
+    for (const b of Array.from(this.chat.querySelectorAll<HTMLButtonElement>('.dmp-chat-t-seek'))) {
+      b.addEventListener('click', () => this.opts.onSeek?.(Number(b.dataset.at ?? '0')));
+    }
     bindRecordBtn('.dmp-chat-deduct', (to, at, player, level, dur) => this.opts.onRecordSpan?.(to, at, player, level, dur));
   }
 
