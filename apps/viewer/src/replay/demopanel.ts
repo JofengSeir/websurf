@@ -984,10 +984,27 @@ export class DemoPanel {
       // agent 工作流拆除移出仓库树）⇒ 真人全被滤掉、槽 0 那位又常无位姿轨迹 ⇒ **花名册整个为空** ⇒ 自动跟随选不出人
       // ⇒ 信息条与详情名牌永远停在第一个人身上（owner 报的「滚动名称被锁死」）。
       // 名字本来就不必是判据：下面一行就有兜底（`|| className #实体号`）。
-      const from = t.samples[0].tick;
-      const to = t.samples[t.samples.length - 1].tick;
-      const name = this.nameFor(slot, t.entityIndex, to);
-      const guidIsBot = r.playerInfos.find((p) => p.slot === slot)?.isBot ?? true;
+      // **按采样断口切成多段**（实体号会被回收给下一个占用者）：实测 boreas 实体 #5 上
+      // 「她不一样」0:37–6:58 走人，49:46 同一个槽被回放 bot 顶替，中间 42 分钟没有采样。
+      // 早先取「首帧..末帧」一个窗 ⇒ 两个身份共用一条窗，花名册两行的区间、相机、读数全相同。
+      // 断口阈值按 tick 率折算（约 4 秒）：连续在场的人逐帧都有 m_flSimulationTime，不会出现秒级空档。
+      const gapTicks = Math.max(60, Math.round(4 / Math.max(1e-6, this.tickInterval)));
+      const runs: Array<{ from: number; to: number; seg: PlayerSample[] }> = [];
+      let run: { from: number; to: number; seg: PlayerSample[] } | null = null;
+      for (const s of t.samples) {
+        if (!run) run = { from: s.tick, to: s.tick, seg: [s] };
+        else if (s.tick - run.to > gapTicks) {
+          runs.push(run);
+          run = { from: s.tick, to: s.tick, seg: [s] };
+        } else {
+          run.to = s.tick;
+          run.seg.push(s);
+        }
+      }
+      if (run) runs.push(run);
+      for (const w of runs) {
+      const name = this.nameFor(slot, t.entityIndex, w.to);
+      const guidIsBot = (this.nameAndGuidAtSlot(slot, w.to)?.guid ?? 'BOT') === 'BOT';
       // **运动量**（本人走位跨度＝非观察采样的世界包围盒对角线）：给自动跟随当判据用。
       //
       // 为什么需要它：录制机器人自己也是一个**合法占用者** —— 实测实体 #1 就是
@@ -999,13 +1016,13 @@ export class DemoPanel {
       // 这个数由 `trackFacts` 一并给出（T-726 之前在这里另算一遍，且花名册行取的是整条轨迹粒度）。
       // **生命体征 + 运动量摘要**：`factsFromSegments`（`trackFacts` / `trackFactsAcross`）是唯一一处
       // 读 `PlayerSample.team` / `health` / `lifeState` 与算走位跨度的地方，花名册与详情都从这里取。
-      const facts = trackFacts(t, this.tickInterval);
+      const facts = factsFromSegments([w.seg], this.tickInterval);
       out.push({
         slot,
         name,
         isBot: guidIsBot,
-        from,
-        to,
+        from: w.from,
+        to: w.to,
         track: t,
         moving: facts ? facts.extent : 0,
         team: facts && facts.teams.length > 0 ? facts.teams[0] : null,
@@ -1016,6 +1033,7 @@ export class DemoPanel {
         observeSeconds: facts ? facts.observeSeconds : 0,
         deadSeconds: facts ? facts.deadSeconds : 0,
       });
+      }
     }
     this.presenceCache = out;
     return out;
@@ -1652,7 +1670,13 @@ export class DemoPanel {
     // 载入后不变 ⇒ 整表缓存（见 `rosterCache` 的说明）；帧循环每帧都会调到这里
     if (this.rosterCache) return this.rosterCache;
     const rows: RosterRow[] = [];
-    const wins = new Map(this.presenceWindows().map((p) => [p.slot + 1, p]));
+    // 一个实体可能有多段在场窗（实体号被回收，见 `presenceWindows` 的分段）⇒ 值必须是数组
+    const wins = new Map<number, PresenceWindow[]>();
+    for (const p of this.presenceWindows()) {
+      const list = wins.get(p.slot + 1);
+      if (list) list.push(p);
+      else wins.set(p.slot + 1, [p]);
+    }
     // 读数裁切用的轨迹表（口径同 `presenceWindows`）—— 行与详情共用同一张，见 `viewTracks`
     const tracks = this.viewTracks();
     const covered = new Set<number>();
@@ -1669,15 +1693,17 @@ export class DemoPanel {
       // 结果：多个身份行同源、读数相同、点谁都不跳（区间覆盖全场 ⇒ jumpTo 认为播放头已在段内）。
       const spans = mergeSpans(
         g.sessions
-          .map((s) => {
-            const w = wins.get(s.entity);
-            const from = w ? Math.max(w.from, s.from) : s.from;
-            const to = w ? Math.min(w.to, s.to) : s.to;
-            return { from, to, entity: s.entity };
+          .flatMap((s) => {
+            const ws = wins.get(s.entity) ?? [];
+            // 没有窗的实体（还没进实体流）沿用占用事件本身的区间；有窗的交集可能不止一段。
+            if (ws.length === 0) return [{ from: s.from, to: s.to, entity: s.entity }];
+            return ws
+              .map((w) => ({ from: Math.max(w.from, s.from), to: Math.min(w.to, s.to), entity: s.entity }))
+              .filter((x) => x.to > x.from);
           })
-          // 该次占用期间实体没有任何采样（比如那时它还没进实体流）⇒ 这一段没有位姿，丢掉；
+          // 该次占用期间实体没有任何采样 ⇒ 这一段没有位姿，丢掉；
           // 丢掉后 spans 为空时，下面用占用事件本身的区间兜底并与旧行为一致。
-          .filter((s) => s.to > s.from),
+          ,
       );
       // **主实体 = 他最早那一段的实体**：点花名册就是「从头看他」，`jumpTo` 也以它为跳转基准
       // （早先取「采样最长的那段」，于是 0 s 点 `LuoXuan` 会越过第一段、直接跳到第二段开头 —— owner 实测）。
@@ -1690,7 +1716,7 @@ export class DemoPanel {
       // 现在行与详情走同一份实现（`trackFactsAcross` + 同一张轨迹表），口径不可能再分叉。
       const facts = trackFactsAcross(tracks, spans, this.tickInterval);
       // 该身份有没有「可用视角」（任一实体有采样窗口）—— 无位姿的行照常列出，只是点它切不过去。
-      const hasTrack = g.entities.some((e) => wins.has(e));
+      const hasTrack = g.entities.some((e) => (wins.get(e)?.length ?? 0) > 0);
       // **行的区间取自 `spans`**（与进度条上画的区间、点击跳转同口径，见上面那段 `mergeSpans` 的说明）：
       // `spans` 已按 from 升序 ⇒ 首段起点、末段终点就是这一行的时间范围。没有任何位姿时才退回
       // 占用事件本身的并集（那时只有更新流能作证）。早先用实体窗口 ⇒ 同一槽位多身份的行读数一模一样。
@@ -1730,32 +1756,42 @@ export class DemoPanel {
       });
     }
     // ── ② 有轨迹但更新流里没有的实体（录制机器人：只在签名表里、从不更新 userinfo）──
+    // 同一实体可能有多段在场窗（实体号回收）⇒ 先按实体归组，一行画多段，不拆成多行。
+    const winByEntity = new Map<number, PresenceWindow[]>();
     for (const p of this.presenceWindows()) {
       const entity = p.slot + 1;
+      const list = winByEntity.get(entity);
+      if (list) list.push(p);
+      else winByEntity.set(entity, [p]);
+    }
+    for (const [entity, ws] of winByEntity) {
       if (covered.has(entity)) continue;
+      const spans = ws.map((w) => ({ from: w.from, to: w.to, entity }));
+      const facts = trackFactsAcross(tracks, spans, this.tickInterval);
+      const head = ws[0];
       rows.push({
         key: rows.length,
-        name: this.nameFor(p.slot, entity, p.to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`,
+        name: this.nameFor(head.slot, entity, head.to) || `未知名 · 实体 #${entity}（存档 userinfo 为空）`,
         // 这一支没有 userinfo 会话 ⇒ 没有 guid 可查别名（聊天里连不连得上另说，见详情面板的说明）
         aliases: [],
         guid: '',
-        observeFrames: p.observeFrames,
-        sampledFrames: p.sampledFrames,
-        seconds: p.seconds,
-        observeSeconds: p.observeSeconds,
-        deadSeconds: p.deadSeconds,
-        isBot: p.isBot,
+        observeFrames: facts ? facts.observeFrames : 0,
+        sampledFrames: facts ? facts.frames : 0,
+        seconds: facts ? facts.seconds : 0,
+        observeSeconds: facts ? facts.observeSeconds : 0,
+        deadSeconds: facts ? facts.deadSeconds : 0,
+        isBot: head.isBot,
         // 这一支来自「可用轨迹」而没有 `userinfo` 会话 ⇒ 无 guid 可判，**不当作真账号**
         human: false,
         entity,
         entities: [entity],
-        spans: [{ from: p.from, to: p.to, entity }],
-        from: p.from,
-        to: p.to,
-        moving: p.moving,
+        spans,
+        from: spans[0].from,
+        to: spans[spans.length - 1].to,
+        moving: facts ? facts.extent : 0,
         hasTrack: true,
-        team: teamLabel(p.team),
-        deaths: p.deaths,
+        team: facts && facts.teams.length > 0 ? teamLabel(facts.teams[0]) : '—',
+        deaths: facts ? facts.deaths.length : 0,
       });
     }
     this.rosterCache = rows.sort((a, b) => a.from - b.from);

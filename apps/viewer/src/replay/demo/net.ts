@@ -85,6 +85,8 @@ export const enum NetMsgType {
   Menu = 29,
   GameEventList = 30,
   GetCvarValue = 31,
+  /** `SVC_CmdKeyValues`（协议 24 的 32）：`u32 字节长 + KeyValues 原始块`，本工程只跳过。 */
+  CmdKeyValues = 32,
 }
 
 /** 位宽常量（`netcontants.h`）。 */
@@ -427,6 +429,13 @@ export function parsePacket(bytes: Uint8Array, ctx: NetContext, stats: DemoParse
     if (ok) stats.seenByType[`${type}`] = (stats.seenByType[`${type}`] ?? 0) + 1;
     if (ctx.trace) ctx.trace.push(`type=${type} @${before}..${r.pos} ok=${ok}`);
     if (!ok) {
+      // **包尾的孤立消息头按填充处理**：CS:S 的签入包 2 末尾只剩 6 位，恰好读成 32（本工程枚举外），
+      // 后面没有任何载荷。早先把它记成一次失败，整份录像的 `packetsFailed` 因此恒为 2。
+      // 判据：读掉类型头后游标已到包尾 ⇒ 这 6 位不可能是真消息（真消息至少还要有长度/载荷）。
+      if (r.pos >= limit) {
+        stats.warnings.push(`包 ${ctx.packetIndex}：包尾 ${type} 位按填充忽略`);
+        break;
+      }
       const key = `${type}`;
       stats.failureByType[key] = (stats.failureByType[key] ?? 0) + 1;
       break;
@@ -649,10 +658,21 @@ function dispatch(type: number, r: BitReader, ctx: NetContext, stats: DemoParseS
       r.u(32);
       r.str();
       return !r.overflowed;
+    case NetMsgType.CmdKeyValues: {
+      // 权威布局（本仓 `test/project/tf2-demo-parser` 的 `CmdKeyValuesMessage`）：u32 字节长 + 该长度的 KV 块。
+      // 早先没有这个 case ⇒ 每份 CS:S 夹具的签入包都在这里失败、其后全部消息被丢（实测每份恒 1 次）。
+      const len = r.u(32);
+      if (len * 8 > r.remaining) return false;
+      r.skip(len * 8);
+      return !r.overflowed;
+    }
     case NetMsgType.File:
+      // 权威布局（本仓 `test/project/tf2-demo-parser` 的 `FileMessage`）：u32 transfer_id + 文件名 + **1 位** requested。
+      // 早先读 8 位 ⇒ 每次 `svc_File` 之后整条位流前移 7 位，后面的消息类型全读成垃圾（实测：签入包里
+      // 读出一个不存在的 32 号消息，整包被弃）。
       r.u(32);
       r.str();
-      r.u(8);
+      r.u(1);
       return !r.overflowed;
     case NetMsgType.HLTV:
     case NetMsgType.TerrainMod:
@@ -772,7 +792,20 @@ function readCreateStringTable(r: BitReader, ctx: NetContext, stats: DemoParseSt
     return !r.overflowed;
   }
   const dataStart = r.pos;
-  readStringTableEntries(r, dataBits, numEntries, table, maxEntries, fixed, userDataSizeBits, 0, 14);
+  // **条目流解错不得毁掉整包**：早先这里解完直接 seek。CS:S 的 `downloadables`（max=8192、97 条）
+  // 在现布局下解到一半就越界 ⇒ `overflowed` 置位后 seek 也清不掉，整包被判失败，包里后续消息全丢
+  // （实测每份夹具都恰好失败 1 个包）。改为：先解到临时表，溢出就丢弃内容、只按声明长度跳过去。
+  if (dataBits > r.remaining) {
+    stats.warnings.push(`包 ${ctx.packetIndex}：字符串表 ${name} 声明 ${dataBits} 位超出包剩余 ${r.remaining} 位，跳过`);
+    r.seek(r.limit);
+    return !r.overflowed;
+  }
+  const wasOvf = r.overflowed;
+  const decoded = new Map<number, { key: string; value: Uint8Array | null }>();
+  readStringTableEntries(r, dataBits, numEntries, decoded, maxEntries, fixed, userDataSizeBits, 0, 14);
+  if (!r.overflowed) for (const [k, v] of decoded) table.set(k, v);
+  else stats.warnings.push(`包 ${ctx.packetIndex}：字符串表 ${name} 条目流未解对，保留空表`);
+  r.overflowed = wasOvf;
   r.seek(dataStart + dataBits);
   return !r.overflowed;
 }
