@@ -1103,6 +1103,19 @@ export class DemoPanel {
         // 无位姿的行：区间条改**弱色**（内联，避免为这一个状态新增 CSS 规则）、时间读数后带「· 无位姿」。
         // 别用 `opacity` 内联压暗整行——`refreshRosterState` 每帧用它切换 `.off`（在线/离线），内联会盖掉它。
         const barFill = p.hasTrack ? '' : ';background:var(--muted)';
+        // **连接段先画一层浅色**：被踢/重连但没出生的时间在 `connected` 里有、在 `spans` 里没有，
+        // 只画位姿条会把「他在服务器上但没出生」这段画成空白；浅色层让断口与重连一眼可见。
+        const connFill = ';background:var(--muted);opacity:.35';
+        const connBars = p.hasTrack
+          ? p.connected
+              .map((s) => {
+                const left = clamp((s.from / total) * 100, 0, 100);
+                const right = clamp((s.to / total) * 100, 0, 100);
+                const w = Math.max(0.4, right - left);
+                return '<i style="left:' + left.toFixed(3) + '%;width:' + w.toFixed(3) + '%' + connFill + '"></i>';
+              })
+              .join('')
+          : '';
         // **区间条按 `spans` 逐段画**（此前一行只画一根条）：同一身份中途退出又进来时，断口在这里可见。
         const bars = p.spans
           .map((s) => {
@@ -1136,7 +1149,7 @@ export class DemoPanel {
         return (
           '<button class="dmp-who' + (p.hasTrack ? '' : ' dmp-who-notrack') + '" type="button" data-who="' + i + '" title="' + this.esc(tip + segDetail) + '">' +
           '<span class="dmp-whoname">' + this.esc(p.name) + team + observeTag + deadTag + '</span>' +
-          '<span class="dmp-whobar">' + bars + '</span>' +
+          '<span class="dmp-whobar">' + connBars + bars + '</span>' +
           '<span class="dmp-whotime">' + seg + this.fmtClock(this.secAt(p.from)) + '–' + this.fmtClock(this.secAt(p.to)) + (p.hasTrack ? deaths : ' · 无位姿') + kicks + '</span>' +
           '</button>'
         );
