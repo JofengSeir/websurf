@@ -545,10 +545,14 @@ function dispatch(type: number, r: BitReader, ctx: NetContext, stats: DemoParseS
       return readCreateStringTable(r, ctx, stats);
     case NetMsgType.UpdateStringTable:
       return readUpdateStringTable(r, ctx, stats);
-    case NetMsgType.VoiceInit:
+    case NetMsgType.VoiceInit: {
+      // 权威 `VoiceInitMessage`：codec 串 + quality u8；**quality == 255 时再跟 u16 采样率**。
+      // 早先漏了这一个可选字段 ⇒ 该消息之后整条位流偏移 16 位，签入包读出假消息号（实测恒失败 1 包）。
       r.str();
-      r.u(8);
-      return true;
+      const quality = r.u(8);
+      if (quality === 255) r.u(16);
+      return !r.overflowed;
+    }
     case NetMsgType.VoiceData: {
       r.u(8); // 发送者槽位
       r.u(8); // 邻近度
@@ -778,7 +782,10 @@ function readCreateStringTable(r: BitReader, ctx: NetContext, stats: DemoParseSt
     userDataSizeBits = r.u(4);
     void fixedBytes;
   }
-  const compressed = ctx.readCompressedFlag ? r.bit() === 1 : false;
+  // **compressed 位必须读**（权威 `CreateStringTableMessage::parse`：fixed 之后无条件读 1 位 compressed）。
+  // 早先由 `ctx.readCompressedFlag` 控制且缺省 false ⇒ 每条 CreateStringTable 少读 1 位，其后整包位流前移，
+  // 读出不存在的消息号（实测 32/63 等），签入包因此整包被弃。
+  const compressed = r.bit() === 1;
   const table = ctx.stringTables.get(name) ?? new Map<number, { key: string; value: Uint8Array | null }>();
   ctx.stringTables.set(name, table);
   ctx.stringTableMaxEntries.set(name, maxEntries);
