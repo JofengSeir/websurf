@@ -956,9 +956,11 @@ function readUpdateStringTable(r: BitReader, ctx: NetContext, stats: DemoParseSt
   // 多读时把游标留在数据段之外，同样会让后续消息错位）。
   if (r.pos !== dataEnd) r.seek(dataEnd);
   // **名称时间线**：每次 userinfo 更新后快照一次（tick + 条目值），供面板按时间轮换显示。
-  if (name === 'userinfo' && userinfoTimeline.length < 4000) {
+  // 快照上限：几十号人反复进出时，每个快照都会复制当时**全部**条目的值（每条约 132B）。
+  // 只设条数上限会在人多时提前截断、丢后面的改名事件；这里加一条字节预算，两个上限取先到。
+  if (name === 'userinfo' && userinfoTimeline.length < USERINFO_SNAPSHOT_MAX && userinfoSnapshotBytes < USERINFO_SNAPSHOT_BUDGET) {
     const snap: Array<{ idx: number; value: Uint8Array }> = [];
-    for (const [k, v] of table) if (v.value && v.value.length > 0) snap.push({ idx: k, value: v.value });
+    for (const [k, v] of table) if (v.value && v.value.length > 0) { snap.push({ idx: k, value: v.value }); userinfoSnapshotBytes += v.value.length; }
     userinfoTimeline.push({ tick: currentTickRef.tick, entries: snap });
   }
   return !r.overflowed;
@@ -1492,6 +1494,18 @@ export const classBitsDiag = { maxClasses: -1, n: -1, classes: -1, bits: -1 };
 /** **名称时间线**：记录机器人会**共用同一人物、改名显示当前关卡** ⇒ 名字是时变属性，
  * 必须按 (tick, 槽位) 记录成历史，面板按当前 tick 取用，而不是只留一张快照。 */
 export const userinfoTimeline: Array<{ tick: number; entries: Array<{ idx: number; value: Uint8Array }> }> = [];
+/** 名称时间线的条数上限（几十人进出时不够用的旧值是 4000）。 */
+const USERINFO_SNAPSHOT_MAX = 20000;
+/** 名称时间线的字节预算：快照会复制全部条目值，人多时先撞这一条。 */
+const USERINFO_SNAPSHOT_BUDGET = 24 * 1024 * 1024;
+/** 已累计的快照字节数（模块级，解析开始时由 `resetUserinfoTimeline` 清零）。 */
+let userinfoSnapshotBytes = 0;
+
+/** 清空名称时间线与字节计数（每次解析新录像前调用，避免上一份的量把这一份的预算吃掉）。 */
+export function resetUserinfoTimeline(): void {
+  userinfoTimeline.length = 0;
+  userinfoSnapshotBytes = 0;
+}
 
 /** 当前消息的 tick（由 parseSourceDemo 的消息循环写入）。 */
 export const currentTickRef = { tick: 0 };

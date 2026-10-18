@@ -23,7 +23,7 @@
  */
 
 import { BitReader } from './bits.js';
-import { currentTickRef, type DemoServerInfo, type EntityProps, NetContext, parsePacket, userinfoTimeline, type DemoParseStats } from './net.js';
+import { currentTickRef, type DemoServerInfo, type EntityProps, NetContext, parsePacket, resetUserinfoTimeline, userinfoTimeline, type DemoParseStats } from './net.js';
 import { readDataTables, type DataTables } from './tables.js';
 
 /** 文件头字段（`demoheader_t`）。 */
@@ -253,7 +253,7 @@ export function parseSourceDemo(bytes: Uint8Array, opts: DemoParseOptions = {}):
   // 它们的 tick 坐标是**相对本份录像**的。不清的话，在同一页里载入第二份 `.dem` 时，
   // 旧录像的条目会与新录像的混在一条时间线上 ⇒ 名字/在线态按错误的 tick 取（表现为「换了一份
   // 录像，花名册里的名字还是上一场的」）。
-  userinfoTimeline.length = 0;
+  resetUserinfoTimeline();
   usercmdDiag.count = 0;
   usercmdDiag.maxLen = 0;
   usercmdDiag.samples.length = 0;

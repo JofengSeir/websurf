@@ -31,7 +31,8 @@ import {
 } from './demo/chatkind.js';
 import { userinfoTimeline } from './demo/net.js';
 import { decodePlayerInfoRecords, type PlayerSample } from './demo/demo.js';
-import { buildAliasRegistry, normalizeName, parseDisconnectEvents, type AliasRegistry, type DisconnectEvent } from './identity.js';
+import { buildAliasRegistry, normalizeName, type AliasRegistry } from './identity.js';
+import { buildSessions } from './demo/sessions.js';
 import { trackToClip } from './democlip.js';
 import { TRACK_PALETTE } from './tracks.js';
 import { FILE_KIND_LABEL, sniffFileKind } from '../core/filekind.js';
@@ -650,8 +651,6 @@ export class DemoPanel {
   private presenceCache: PresenceWindow[] | null = null;
   /** 占用会话缓存（同上；`occupancySessions()` 的结果载入后不再变）。 */
   private sessionsCache: OccupancySession[] | null = null;
-  /** 断开公告（`identity.parseDisconnectEvents`）——会话截断与「被踢」标注的唯一来源。 */
-  private disconnectCache: DisconnectEvent[] | null = null;
   /**
    * **花名册缓存**（载入后不变）。
    *
@@ -758,7 +757,6 @@ export class DemoPanel {
     // 换文件即作废所有「载入后不变」的缓存（它们全是从上一份 `result` 里算出来的）
     this.presenceCache = null;
     this.sessionsCache = null;
-    this.disconnectCache = null;
     this.rosterCache = null;
     this.viewTrackCache = null;
     // 详情主体也随之作废：它引用的是上一份录像里的身份与区间
@@ -1935,46 +1933,24 @@ export class DemoPanel {
   /**
    * **占用会话表**：某槽位一次「进服 → 换人/退场」= 一条。
    *
-   * `from` = 该次占用的进服 tick；`to` = **该槽位的下一次占用事件**的 tick（= 这次占用结束），
-   * 没有下一次的记到片尾。粒度是「占用事件」而不是「实体」——**一个实体可以先后被多个人占用**
-   * （记录机器人换 uid 重连、回放机器人轮流上任），实测本仓夹具的 4 个槽位共发生十余次换人。
+   * 由 `demo/sessions.ts` 的状态机产出：同槽同 `userId` 的 userinfo 只算改名、换 `userId` 才切会话，
+   * 聊天里的断开公告（带 SteamID + 原因）优先于"下一条 userinfo"收口。粒度是「占用会话」而不是「实体」——
+   * 一个实体可以先后被多个人占用（记录机器人换 uid 重连、回放机器人轮流上任），且槽位被谁占用不依赖顺序。
    */
   private occupancySessions(): OccupancySession[] {
     if (this.sessionsCache) return this.sessionsCache;
-    const total = Math.max(1, this.totalTicks);
-    const bySlot = new Map<number, Array<{ tick: number; name: string; guid: string; isBot: boolean }>>();
-    for (const e of this.buildEvents()) {
-      const list = bySlot.get(e.slot) ?? [];
-      list.push({ tick: e.tick, name: e.name, guid: e.guid, isBot: e.isBot });
-      bySlot.set(e.slot, list);
-    }
-    const out: OccupancySession[] = [];
-    for (const [slot, evs] of bySlot) {
-      evs.sort((a, b) => a.tick - b.tick);
-      for (let i = 0; i < evs.length; i++) {
-        out.push({
-          slot,
-          name: evs[i].name,
-          guid: evs[i].guid,
-          isBot: evs[i].isBot,
-          from: evs[i].tick,
-          to: i + 1 < evs.length ? evs[i + 1].tick : total,
-        });
-      }
-    }
-    // **断开公告收口会话**：会话原本止于「该槽位的下一条 userinfo」，但被踢的人可能几秒后才重连
-    // （或在片尾都不再重连）⇒ 会话被拖长、踢人也看不见。聊天里的 `▼ 名字 < STEAM_x:y:z > disconnected. ( 被管理员踢出 )`
-    // 自带 tick 与原因，按 guid 精确截断；这一步之后 02:59/03:06/03:16/03:21/03:25 各自成一段。
-    const disconnects = this.disconnectCache ?? parseDisconnectEvents(this.result?.chat ?? []);
-    this.disconnectCache = disconnects;
-    for (const s of out) {
-      if (!s.guid || s.guid === 'BOT') continue;
-      const d = disconnects.find((e) => e.guid === s.guid && e.tick > s.from && e.tick <= s.to);
-      if (!d) continue;
-      s.to = d.tick;
-      s.endReason = d.reason || 'disconnected';
-      s.fromDisconnect = true;
-    }
+    if (!this.result) return [];
+    // 会话由 `demo/sessions.ts` 的状态机统一产出（按事件推，不依赖槽位顺序）；这里只做形状适配。
+    const out: OccupancySession[] = buildSessions(this.result, this.totalTicks).map((s) => ({
+      slot: s.slot,
+      name: s.name,
+      guid: s.guid,
+      isBot: s.isBot,
+      from: s.from,
+      to: s.to,
+      endReason: s.endReason,
+      fromDisconnect: s.end === 'disconnect',
+    }));
     this.sessionsCache = out;
     return out;
   }
