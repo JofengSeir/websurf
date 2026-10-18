@@ -31,6 +31,11 @@ export class ReplayPlayer {
 
   /** A-B 区间（秒，主时钟）。rangeEnd <= rangeStart 表示未设区间、按整段播放。 */
   rangeStart = 0;
+  /**
+   * 「多轨只看一条」的聚焦窗口（start/stop 主时钟秒）。非 null 时时间轴表示的是**正在看的这条**：
+   * 读数用它自己的长度、滑杆按它自己的跨度铺满，而不是所有轨道并集。
+   */
+  private focusWindow: { trackId: string; start: number; stop: number } | null = null;
   rangeEnd = 0;
 
   /** 状态变化回调：时间推进、播放态、区间、轨道增删都会触发。 */
@@ -139,6 +144,29 @@ export class ReplayPlayer {
     this.notify();
   }
 
+  /** 时间轴读数是否处于「只看一条」的聚焦窗口。 */
+  get focusActive(): boolean {
+    return this.focusWindow !== null;
+  }
+
+  /**
+   * **时间轴表示的时长**：聚焦窗口存在时 = 窗口长度（正在看的那条），否则 = 主时钟总长。
+   * 时间轴读数、区间带、跑段带一律用它，避免「窗口已经收窄、读数还写着最长轨道」。
+   */
+  get viewDuration(): number {
+    return this.focusWindow ? Math.max(0, this.focusWindow.stop - this.focusWindow.start) : this.duration;
+  }
+
+  /** 聚焦窗口内的相对时间（非聚焦时就是主时钟）。 */
+  get viewTime(): number {
+    return this.focusWindow ? this.time - this.focusWindow.start : this.time;
+  }
+
+  /** 退出聚焦窗口（用户手设 A-B、清区间、无轨道时调用）。 */
+  clearFocus(): void {
+    this.focusWindow = null;
+  }
+
   /** 清空全部轨道（等价于 load(null)）。 */
   clearTracks(): void {
     this.load(null);
@@ -152,6 +180,7 @@ export class ReplayPlayer {
     const track = this.tracks.follow;
     if (!track || this.tracks.tracks.length <= 1) {
       // 回到单轨/无轨：恢复整段窗口（多轨时收过的窗口要放开）
+      this.clearFocus();
       this.clearRange();
       return;
     }
@@ -161,6 +190,7 @@ export class ReplayPlayer {
     const t1 = c.t[c.count - 1] + track.offset;
     this.rangeStart = Math.min(0, t0);
     this.rangeEnd = Math.max(t1, this.rangeStart + 1e-6);
+    this.focusWindow = { trackId: track.id, start: this.rangeStart, stop: this.rangeStop };
     this.time = Math.max(this.rangeStart, Math.min(this.rangeStop, this.time));
     this.notify();
   }
@@ -185,6 +215,7 @@ export class ReplayPlayer {
    * 主时钟 0 = 起跑帧的语义不变；首帧 t[0] 为负（prerun）时窗口起点即片头。
    */
   clearRange(): void {
+    this.clearFocus();
     this.applyFullRange();
     this.time = Math.max(this.rangeStart, Math.min(this.rangeStop, this.time));
     this.notify();

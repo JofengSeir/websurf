@@ -316,6 +316,7 @@ export class Timeline {
   /** 设 A 点 = 当前主时钟时间：终点不晚于新起点（未设或已失效）时把终点顶到主时钟总长，保证区间立刻可用；随后 seek 到当前时间并刷新读数。 */
   private setRangeStart(): void {
     const p = this.player;
+    p.clearFocus();
     p.rangeStart = p.time;
     if (p.rangeEnd <= p.rangeStart) p.rangeEnd = p.duration;
     p.seek(p.time);
@@ -325,6 +326,7 @@ export class Timeline {
   /** 设 B 点 = 当前主时钟时间：终点不晚于起点时把起点退回 0；随后 seek 到当前时间并刷新读数。 */
   private setRangeEnd(): void {
     const p = this.player;
+    p.clearFocus();
     p.rangeEnd = p.time;
     if (p.rangeEnd <= p.rangeStart) p.rangeStart = 0;
     p.seek(p.time);
@@ -430,10 +432,13 @@ export class Timeline {
     this.playBtn.classList.toggle('active', p.playing);
     // 录像档按**录像内绝对时刻**（`26:05 / 59:58`）显示：长会话里 `0.00 / 3598.00 s` 这种
     // 秒计数读不出「第几分钟」。
+    // 多轨聚焦时读数用**正在看的那条**（viewTime / viewDuration），否则仍是整场。
+    const vt = p.viewTime;
+    const vd = p.viewDuration;
     this.timeEl.textContent =
       this.profile.clock === 'wall'
-        ? clock(p.time) + ' / ' + clock(p.duration)
-        : `${fmtTime(p.time)} / ${fmtTime(p.duration)} s`;
+        ? clock(vt) + ' / ' + clock(vd)
+        : `${fmtTime(vt)} / ${fmtTime(vd)} s`;
     // 播放中时间码前缀亮 REC 红点（暂停/停止熄灭）——录制指示语彙
     this.timeEl.classList.toggle('rec', p.playing);
     if (this.frameEl) this.frameEl.textContent = frameText(p);
