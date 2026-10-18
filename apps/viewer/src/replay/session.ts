@@ -71,6 +71,8 @@ export class ReplaySession {
 
   /** 本会话当前是否上场（决定 3D 对象显隐与是否推进主时钟）。 */
   private active = false;
+  /** 上一次 sync 时的「轨道数:跟随 id」（变化 ⇒ 多轨时把窗口收到正在看的那一条）。 */
+  private lastWindowKey = '';
 
   constructor(
     readonly kind: SessionKind,
@@ -130,6 +132,14 @@ export class ReplaySession {
 
   /** 轨道增删 / 跟随切换 / 会话长度变化后同步：3D、时间轴可见性与读数、信息条。 */
   sync(): void {
+    // **多轨时窗口跟着「正在看的那条」走**：否则 rec + replay 同时载入时进度条按最长轨道显示，
+    // 短的那条被压扁。只在跟随目标真的变了时收窗一次，避免每帧改用户设的 A-B 区间。
+    const tracks0 = this.player.tracks.tracks;
+    const windowKey = tracks0.length + ':' + this.player.tracks.followId;
+    if (windowKey !== this.lastWindowKey) {
+      this.lastWindowKey = windowKey;
+      this.player.focusFollowWindow();
+    }
     const tracks = this.player.tracks.tracks;
     this.visuals.setTracks(tracks);
     if (this.active) {

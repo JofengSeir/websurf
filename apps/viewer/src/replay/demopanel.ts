@@ -651,6 +651,8 @@ export class DemoPanel {
   private presenceCache: PresenceWindow[] | null = null;
   /** 占用会话缓存（同上；`occupancySessions()` 的结果载入后不再变）。 */
   private sessionsCache: OccupancySession[] | null = null;
+  /** 载入序号：连续放入两份 .dem 时，只有最后一次载入允许写 UI（防止先发后至的解析覆盖新文件）。 */
+  private loadSeq = 0;
   /**
    * **花名册缓存**（载入后不变）。
    *
@@ -771,7 +773,9 @@ export class DemoPanel {
   }
 
   async load(file: File): Promise<void> {
+    const seq = ++this.loadSeq;
     const kind = await sniffFileKind(file);
+    if (seq !== this.loadSeq) return; // 这次载入已被后一次取代
     if (kind !== 'demo') {
       if (this.opts.onForeignFile) {
         // 去向与文案都归 `routeFile`（本面板不替它决定是记录页还是地图）
@@ -798,6 +802,7 @@ export class DemoPanel {
     const t0 = performance.now();
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
+      if (seq !== this.loadSeq) return; // 等 buffer 期间又放入了新文件
       // **口径 = `'playerPosed'`（玩家类 + 有世界坐标即可，朝向缺省记 0）**，不是 `'posed'`。
       // `'posed'` 会给**任何**有坐标的实体逐 tick 建采样 —— 一个 30 分钟的录像里那是 200 多条
       // 地图物件 / NPC 轨迹、上千万个采样点（实测 227 条 × 59,948 帧 ≈ 2 GB，浏览器 Worker 直接

@@ -144,9 +144,32 @@ export class ReplayPlayer {
     this.load(null);
   }
 
+  /**
+   * **多轨时把播放窗口收到跟随轨道那一段**（进度条长度 = 正在看的那条，而不是所有轨道的最长值）。
+   * 单轨 / 无轨不动，保持「整段」语义。
+   */
+  focusFollowWindow(): void {
+    const track = this.tracks.follow;
+    if (!track || this.tracks.tracks.length <= 1) {
+      // 回到单轨/无轨：恢复整段窗口（多轨时收过的窗口要放开）
+      this.clearRange();
+      return;
+    }
+    const c = track.clip;
+    if (c.count === 0) return;
+    const t0 = c.t[0] + track.offset;
+    const t1 = c.t[c.count - 1] + track.offset;
+    this.rangeStart = Math.min(0, t0);
+    this.rangeEnd = Math.max(t1, this.rangeStart + 1e-6);
+    this.time = Math.max(this.rangeStart, Math.min(this.rangeStop, this.time));
+    this.notify();
+  }
+
   /** 切换跟随轨道（第一人称相机与速度读数取它）；TrackSet.setFollow 只接受已存在的 id。 */
   followTrack(id: string): void {
     this.tracks.setFollow(id);
+    // 切人即把窗口收到那一条（多轨时进度条长度跟着正在看的走）
+    this.focusFollowWindow();
     this.notify();
   }
 

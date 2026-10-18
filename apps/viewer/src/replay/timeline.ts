@@ -556,10 +556,12 @@ export class Timeline {
         const left = Math.max(0, rel(track.offset));
         const width = ((track.offset + Math.min(runEndLocal, track.clip.duration) - Math.max(track.offset, winStart)) / winLen) * 100;
         // 跑段占满或缺失窗口时高亮无信息量，不画
-        if (width > 0.05 && width < 99.95) {
+        // **跑段覆盖整条也画**：.rec 没有 prerun/postrun，跑段 = 全长；原先 width>=99.95 就当「无信息量」不画，
+        // 于是记录 tab 里 .rec 看不到那条条纹。现在允许画满，只挡没有宽度的退化情况。
+        if (width > 0.05) {
           this.runZone.style.display = '';
-          this.runZone.style.left = `${left}%`;
-          this.runZone.style.width = `${width}%`;
+          this.runZone.style.left = `${Math.max(0, Math.min(100, left))}%`;
+          this.runZone.style.width = `${Math.min(100, width)}%`;
         } else {
           this.runZone.style.display = 'none';
         }
