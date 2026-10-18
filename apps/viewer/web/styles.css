@@ -526,6 +526,9 @@ select.field-select:focus { border-color: var(--text); }
    端线 = 入点/出点）；A-B 区间带 = 白框——两种带形态/纹理刻意区分，无需文字即可分辨；
    灰阶区间语彙（时间码黄只给数字，不给区间面），改色须同步帮助文本 */
 .tl-zone-run {
+  /* **与人物活跃带同高**：.tl-zone 基类是 top/bottom 2px（14px 高），而人物带是 3px（12px 高），
+     两条斜纹带并排时录像那条会显得更高。这里覆写为 3px，与 #timelineDemo 的活跃带一致。 */
+  top: 3px; bottom: 3px;
   background:
     repeating-linear-gradient(-45deg, rgba(232, 232, 228, 0.2) 0 3px, transparent 3px 8px),
     rgba(232, 232, 228, 0.13);
