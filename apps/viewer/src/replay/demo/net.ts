@@ -609,9 +609,12 @@ function dispatch(type: number, r: BitReader, ctx: NetContext, stats: DemoParseS
         const bytes = r.readBytes(Math.min(Math.ceil(umBits / 8), 512));
         r.overflowed = wasOvf; // 载荷截断只影响本条文本，不能拖垮整包
         const text = decodeSayText2(bytes);
-        // 载荷首字节 = `ent_idx`（发送者槽位），第二字节 = `bWantsToChat`；文本能正确解出说明
-        // 载荷是字节对齐的（否则整段文本会是被移位搅烂的乱码）。槽位越界时如实记 null，不硬猜。
-        const from = bytes.length > 0 && bytes[0] <= 63 ? bytes[0] : null;
+        // 载荷首字节 = `ent_idx`，第二字节 = `bWantsToChat`。**CS:S 的 `ent_idx` 是实体号（1-based），
+        // 不是 0-based 客户端槽位**：实测 boreas 里服务器打印 = 1、她不一样（槽 4）= 5、S-f4Ce（槽 5）= 6、
+        // GenShin（槽 6）= 7。userinfo 的槽位 = `ent_idx - 1`；直接拿 ent_idx 当槽位会把每个发言者的名字
+        // 挂到下一位账号上（实测 `GalgameEnjoyer1337` 被记到 S-f4Ce 的 guid）。
+        // 越界（0 / >64）时如实记 null，不硬猜。
+        const from = bytes.length > 0 && bytes[0] >= 1 && bytes[0] <= 64 ? bytes[0] - 1 : null;
         if (text.length > 0 && ctx.chat.length < CHAT_LINE_LIMIT) ctx.chat.push({ tick: currentTickRef.tick, text, from });
         r.seek(pos0 + umBits);
         return !r.overflowed;

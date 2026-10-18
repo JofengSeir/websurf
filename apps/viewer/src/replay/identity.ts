@@ -122,10 +122,14 @@ export function buildAliasRegistry(
       for (const [guid, names] of knownNames) if (names.has(cand)) { addName(guid, cand); break; }
     }
   }
-  // **歧义名字不硬猜**（T-712 实测）：服务器会把**显示名**改来改去，同一个显示名可能被两个账号
-  // 先后用过 —— boreas 里 `S-f4Ce` 既出现在 [U:1:1425188194] 的发言里，也出现在槽位 6
-  // （账号 [U:1:162031570]、userinfo 名 GenShinEnjoyer8267）的发言里。这类名字连给谁都是猜，
-  // 一律从表里摘掉、放进 unlinkedNames，交给用户用面板上的「名字并入选中的人」指认一次。
+  // **歧义名字不硬猜**（T-712）：服务器会把**显示名**改来改去，同一个显示名可能被两个账号
+  // 先后用过。这类名字连给谁都是猜，一律从表里摘掉、放进 unlinkedNames，交给用户指认一次。
+  //
+  // 注意：曾经把 `S-f4Ce` 判成"两个账号都用过"其实是个坐标错误 —— CS:S 的 `SayText2.ent_idx`
+  // 是**实体号（1-based）**，userinfo 槽位 = ent_idx - 1。按 ent_idx 直接当槽位查，S-f4Ce 的发言
+  // 会落到下一位（GenShin 的账号）上，于是看起来像"一个名字被两个账号用过"。修正后
+  // `S-f4Ce` 只属于 [U:1:1425188194]，`GalgameEnjoyer1337` 归到 [U:1:1142669713]（其 userinfo
+  // 显示名是服务器给的「她不一样」）。
   const owners = new Map<string, Set<string>>();
   for (const [guid, names] of namesByGuid) {
     for (const nm of names) {
