@@ -509,21 +509,23 @@ pub(crate) fn load_material_bsp(
         ];
 
         // 逐个尝试上面的候选路径
-        let data = possible_paths
-            .iter()
-            .find_map(|full_path| {
-                match bsp.pack.get(full_path) {
-                    Ok(Some(data)) => Some(data),
-                    _ => None,
-                }
-            })
-            .ok_or_else(|| {
-                let paths_str = possible_paths.join(", ");
-                Error::Other(format!("Can't find file in BSP. Tried: {}", paths_str))
-            })?;
-
-        let vdf = String::from_utf8(data.to_vec())?;
-        Ok::<_, Error>(vdf)
+        let hit = possible_paths.iter().find_map(|full_path| {
+            match bsp.pack.get(full_path) {
+                Ok(Some(data)) => Some(data),
+                _ => None,
+            }
+        });
+        if let Some(data) = hit {
+            let vdf = String::from_utf8(data.to_vec())?;
+            return Ok::<_, Error>(vdf);
+        }
+        // 回退 VMT 文本：地图 patch 材质 `$include` 的基 VMT 往往不在 pakfile（游戏本体自带），
+        // 与顶层查找共用同一张表；查不到才报错（数据缺失，不编造）。
+        if let Some(text) = options.vmt_fallback.get(&path.to_ascii_lowercase()) {
+            return Ok::<_, Error>(text.clone());
+        }
+        let paths_str = possible_paths.join(", ");
+        Err(Error::Other(format!("Can't find file in BSP. Tried: {}", paths_str)))
     })?;
 
     let base_texture = match material.base_texture() {
