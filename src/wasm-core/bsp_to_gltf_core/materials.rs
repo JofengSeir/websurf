@@ -521,7 +521,12 @@ pub(crate) fn load_material_bsp(
         }
         // 回退 VMT 文本：地图 patch 材质 `$include` 的基 VMT 往往不在 pakfile（游戏本体自带），
         // 与顶层查找共用同一张表；查不到才报错（数据缺失，不编造）。
-        if let Some(text) = options.vmt_fallback.get(&path.to_ascii_lowercase()) {
+        // 键归一：include 路径可能带 `.vmt` 后缀/反斜杠，表里的键是「无后缀、正斜杠、小写」。
+        let fallback_key = path
+            .replace('\\', "/")
+            .trim_end_matches(".vmt")
+            .to_ascii_lowercase();
+        if let Some(text) = options.vmt_fallback.get(&fallback_key) {
             return Ok::<_, Error>(text.clone());
         }
         let paths_str = possible_paths.join(", ");

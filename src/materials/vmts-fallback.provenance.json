@@ -1,0 +1,354 @@
+{
+ "dev/dev_water2": {
+  "vpk": "existing (061e78a/8647b2d)",
+  "sha256": "ea470b6b0646b0da096c130c780974b6e3f06dd5de41782de403ddc68f5b9e5f"
+ },
+ "dev/dev_waterbeneath2": {
+  "vpk": "existing (061e78a/8647b2d)",
+  "sha256": "c04a0b6d6ddb02ad0f27577577e45753f468d90e9c732dd40867dac9482861f6"
+ },
+ "glass/glasswindow007a": {
+  "vpk": "existing (061e78a/8647b2d)",
+  "sha256": "31235cebd65e8b0f0dc3aa1b9148af96f6fc052aed982d0c94a9b73a6e833fef"
+ },
+ "glass/unbreakable": {
+  "vpk": "existing (061e78a/8647b2d)",
+  "sha256": "4609db93a91dd9d3e975de0106e33907581dcf9aefeca35556583b645c8b4ff7"
+ },
+ "nature/water_canals03": {
+  "vpk": "existing (061e78a/8647b2d)",
+  "sha256": "98397552e8d1ead6e07595047d1ecfcdc8a04b098b68663a79e7227fffee0872"
+ },
+ "nature/water_canals03_beneath": {
+  "vpk": "existing (061e78a/8647b2d)",
+  "sha256": "ab4a67550d07735ac83804186453e4681afadff354886c92e4aee25b0c4fd2fc"
+ },
+ "brick/brickfloor001a": {
+  "bytes": 236,
+  "sha256": "ca2aa439a5b6d6433b1d7ba827993e1afda269a6564917e35860652f4915414e"
+ },
+ "brick/brickwall049a": {
+  "bytes": 364,
+  "sha256": "ebe0bc14d2c4f5ad24e37f8c91179d957f24a07d268c9245a5eccf76b8a1d0fb"
+ },
+ "buildings/carpet002": {
+  "bytes": 101,
+  "sha256": "72c0444e90cce1f6658e2bfd9956354e83e30fe1aa6c7d8d5b30d8e909c35064"
+ },
+ "concrete/concretefloor008a": {
+  "bytes": 307,
+  "sha256": "ac37624f93a9c8867bdea03ac3d7757da61f2595a2ec3fa0be5e26029fb37741"
+ },
+ "concrete/concretefloor011a": {
+  "bytes": 127,
+  "sha256": "905beb9475e631d13a30d67308ea6e8fe7a34f76be02ed6932da4b999d9a197c"
+ },
+ "concrete/concretefloor011a_c17": {
+  "bytes": 500,
+  "sha256": "0dbe4d1d54c5638956cd6e6b9f9d9f412069bc446802abd3d5e4adb07976af15"
+ },
+ "concrete/concretefloor014a": {
+  "bytes": 291,
+  "sha256": "e2926a4b2dc61f66c24db10468c4b55baa829b3ffccac864ff905c2972a106fd"
+ },
+ "concrete/concretefloor031a": {
+  "bytes": 291,
+  "sha256": "bbfecc90f5dc10c1c61167885bfc06f498cd19492f18a41d88d8b0e12cc741c7"
+ },
+ "concrete/concretefloor038b": {
+  "bytes": 264,
+  "sha256": "4e60c3c8ab3e7d15271d27da8cbd1147e3dfe49d9b4814479ae64390792eaa7f"
+ },
+ "concrete/concretewall001a": {
+  "bytes": 250,
+  "sha256": "adeff7199e8da326a4c03e737ebd941fb216754e59b658854da9b010a77f35d8"
+ },
+ "concrete/concretewall011c": {
+  "bytes": 202,
+  "sha256": "6437b2440b45519a99f276a331a378bfc2998f28c36ce965989e9791d0bc7ec6"
+ },
+ "concrete/concretewall036a": {
+  "bytes": 288,
+  "sha256": "3fd84dacde512a098f6de8ffd3ebd36140d42968c126451d61b2bcb4825d2884"
+ },
+ "concrete/concretewall059d": {
+  "bytes": 298,
+  "sha256": "b9c2444a9ff1cbb55a9cefdde0f92a80b1026a834a1dfb76a88cc093d932123a"
+ },
+ "concrete/concretewall065a": {
+  "bytes": 250,
+  "sha256": "f40982f0f5f8f7441226b99a05242ab62730ecdfb434b10c4b9c1ff220001161"
+ },
+ "concrete/concretewall071d": {
+  "bytes": 250,
+  "sha256": "b080cf66d1ee0a5250fd2fbb642ec4187f2bd407db6cd243f848572ebded6c0a"
+ },
+ "concrete/prodstepfrnt": {
+  "bytes": 97,
+  "sha256": "915e75d5f270795e3eefc32ca101e748c3a2c5248b921b2587d2f148bb9ec984"
+ },
+ "cs_havana/ground01grass": {
+  "bytes": 118,
+  "sha256": "13242a8a3c5e53aec2ff6a60f254329f6e08c5458a945b7ff8bafd6ad0803f9f"
+ },
+ "cs_havana/white": {
+  "bytes": 57,
+  "sha256": "b885e235177d85cb89825c097f9e6b203a95274252e8e2447005aa770884d56d"
+ },
+ "cs_havana/woodm": {
+  "bytes": 111,
+  "sha256": "1bae983c802af3d2eb56f23410073a5e5bcc7c339c85d64c2aa2d8f7504b891e"
+ },
+ "cs_italy/black": {
+  "bytes": 62,
+  "sha256": "435b7e6437ce6f9a3ec78f1e0a50d45949250ff974929e75a582acd921de7d4f"
+ },
+ "cs_italy/custairsa": {
+  "bytes": 125,
+  "sha256": "44fb3b68783d99d42d6bda63a67b0e2c3c9de4955e1a6fccb34645eb72517b5b"
+ },
+ "cs_italy/marketwall01a": {
+  "bytes": 164,
+  "sha256": "0c5ab58e513c50c8b04eba2e90a8e306e4530d3c86172c24c095d74edcd1a471"
+ },
+ "cs_italy/marketwall04": {
+  "bytes": 164,
+  "sha256": "3ace2ec1c0ee49b20c8aae4277c8d4f75386020895772fd085fe9f9287b2bb84"
+ },
+ "cs_italy/pwood1": {
+  "bytes": 125,
+  "sha256": "a2f3431e9e304fb00fbe5b995b6b08e8471ded6be38d37fccfb3a23e8c380a37"
+ },
+ "cstrike/{tk_grate": {
+  "bytes": 109,
+  "sha256": "3ff4c06422ec43a4024fdfaeb373b01e7739a976fca656b2d8c4a89ee2314daa"
+ },
+ "de_cbble/woodfloor01": {
+  "bytes": 218,
+  "sha256": "1d1732eb073174ccb5ad0e4c5545bece3998f564612dde1620db3492fdc61a41"
+ },
+ "de_chateau/wllc": {
+  "bytes": 114,
+  "sha256": "90dfccf51f42953ba8ff52a14235df22a31dba172b59b83dc89c4a546898e49a"
+ },
+ "de_dust/door011": {
+  "bytes": 180,
+  "sha256": "a6eaf90076ff278a972df0544b2b4d14211396a31fa71540c57f4718d7be4183"
+ },
+ "de_dust/groundsand03": {
+  "bytes": 117,
+  "sha256": "ad27c713fe3b523324b4518b54c4e9cfa774914bd5927d0677e79714c1ca456f"
+ },
+ "de_dust/stonewall02c": {
+  "bytes": 160,
+  "sha256": "aea92efa81e86197fdbf1a862b444b3ae779fdde18e03506d30cce25c88f3a3c"
+ },
+ "de_nuke/nuke_metalvent": {
+  "bytes": 116,
+  "sha256": "b52b4a0f37feddd8dbd5d6a06251bbafb50dfb270e1b350d362769da80f17b0a"
+ },
+ "de_prodigy/concrete01": {
+  "bytes": 122,
+  "sha256": "d7a0f92410ba541a87ea496522421a6d16d2bc513604ea2569d600de66230017"
+ },
+ "de_tides/tides_grass_a": {
+  "bytes": 95,
+  "sha256": "65c1547685d070b07b312b4487739d0d96e6581edc97b8e7c44bbc32f1bf377e"
+ },
+ "de_train/train_cement_floor_01": {
+  "bytes": 106,
+  "sha256": "f651252ff999ecdf5ebc9a3285a27cd98ef4d02aa62391a645448f0207561ead"
+ },
+ "de_train/train_metalceiling_02": {
+  "bytes": 108,
+  "sha256": "28f9e3066f541af36145554215a6059de56f17adf8bbd696af1b4196cade47f5"
+ },
+ "decals/tides_redcarpet": {
+  "bytes": 130,
+  "sha256": "862fffee1fb89aa9b0dc67d0a3b49ebe0d7ad9ad2b366a1305670efb57a18ffe"
+ },
+ "dev/dev_concretefloor006a": {
+  "bytes": 141,
+  "sha256": "0e98819c5f5522e9a418c69df2767801578fb583637c8f6aab2da1e215d721c2"
+ },
+ "dust_massive/dust_massive_water_underground": {
+  "bytes": 1000,
+  "sha256": "484a0ad693d17bffb3039784e4e3918779fe45f3cd8a53a67082546f355bf253"
+ },
+ "effects/alyxmonitor_talk": {
+  "bytes": 446,
+  "sha256": "f6ff56a843e63dcbce5cdff41694dd8a31bd2ec2c9e74cd19cdf62a8ff198260"
+ },
+ "effects/combine_binocoverlay": {
+  "bytes": 135,
+  "sha256": "b68dd413f51ff41caaccee1837ee8d4967e66469927ee142d2723c2071615b5f"
+ },
+ "effects/combineshield/comshieldwall": {
+  "bytes": 1847,
+  "sha256": "24f14e8ff4d92da3a6661ee4c9f2775eca5ee1311b60c9e07b19efaef50f1edc"
+ },
+ "lights/fluorescentcool003a": {
+  "bytes": 165,
+  "sha256": "8ed42f6869fd38965c94a296fd531f894f835de95c6389c4bbf69f215de2a18d"
+ },
+ "lights/white": {
+  "bytes": 113,
+  "sha256": "bdc3439033ac069d7dc9f377e63ebe65d3ece462a3e836e198d86294c5d4a767"
+ },
+ "metal/citadel_tilefloor016a_cheap": {
+  "bytes": 341,
+  "sha256": "a67e1602c8411da514b2982a37c4520cb19a60595072aea2dcf1245415bf813d"
+ },
+ "metal/hr_metal/inferno/metal_a": {
+  "bytes": 582,
+  "sha256": "b66f6aebeada8dc4ba301508d84713ad5b9433a5844da60fdbd8aac8f99ca86a"
+ },
+ "metal/metalfloor005a": {
+  "bytes": 243,
+  "sha256": "ac7fc11c87d6f625246d6b4af03b91141c7ae91a5fae6b5d7b899ff2b1ff10c8"
+ },
+ "metal/metalgrate013a": {
+  "bytes": 236,
+  "sha256": "e4653e994d28e52dc90b5a57f74ca2b7d52660b665d6740cd92481057e4d7d87"
+ },
+ "metal/metalgrate013a2": {
+  "bytes": 236,
+  "sha256": "e4653e994d28e52dc90b5a57f74ca2b7d52660b665d6740cd92481057e4d7d87"
+ },
+ "metal/metalgrate013b": {
+  "bytes": 201,
+  "sha256": "02b9fa41f284709231f254f5d43e3e79cbeb6b3802332a9fc9ebf3b2cd5bcfbf"
+ },
+ "metal/metalwall074a": {
+  "bytes": 288,
+  "sha256": "7eab659b03a9b09cfa4baa1a9dfe45149432ba28ca0f3df508ca6adfea625de1"
+ },
+ "metal/prodcaution": {
+  "bytes": 90,
+  "sha256": "2ce3191d82e66a0f9fc5043de3322c46adfad6df4b0ad845bc5dd69be0ad7527"
+ },
+ "metal/vertigo_ibeam": {
+  "bytes": 211,
+  "sha256": "95f6fe6559242cfd53cf44233510ee1345c69208a6981549fbd39de859724a0d"
+ },
+ "nature/blendgrassgravel001b": {
+  "bytes": 339,
+  "sha256": "4f590562ac1c8b9a32df85cf55f8a18bffcc2bb54bf88c0a8d659f8a223f11dc"
+ },
+ "nature/blendrocksgrass005a": {
+  "bytes": 409,
+  "sha256": "6f4cc1bc36fe56e91656c2550b00d806a18e22251370b9b683ab7dfdc2e5089e"
+ },
+ "nature/dirtfloor005c": {
+  "bytes": 156,
+  "sha256": "b2133541d4c3815548bfa2c75e30295a33dca79dac8460ff5f5d100847fef2d3"
+ },
+ "plaster/plasterceiling_int_01": {
+  "bytes": 118,
+  "sha256": "93da96d3ce043416fd5178ef64c3964220c35abe2fb8bcb5bd8d073ce456d771"
+ },
+ "props/carpetfloor008a": {
+  "bytes": 159,
+  "sha256": "fec6da5ca34eab5ca5d55b26c1f909e109ec79feafe2bdc1383787fc4a842df7"
+ },
+ "props/metalcrate002d": {
+  "bytes": 138,
+  "sha256": "6d6237c7920c3848cd1dd2f19e9647d1c748a476fcaf8ca9b0c9530abc004997"
+ },
+ "stone/infflra": {
+  "bytes": 86,
+  "sha256": "14121990e9c3e48ad4c928d1640690bb225aaf8c31ab41bee10d98aef4a856d3"
+ },
+ "stone/infflrd": {
+  "bytes": 85,
+  "sha256": "e76b88c8109eeb08eb94b8e5d924bfb70a65ddfca6069efe3c4dfbffdf3a19b1"
+ },
+ "stone/marblefloor001b": {
+  "bytes": 179,
+  "sha256": "67df0855410b1b0ae33e46552aa3a5adf7fcf152a5890c9ac52910aefe172c52"
+ },
+ "stone/stonefloor008a": {
+  "bytes": 245,
+  "sha256": "3e88564b9f88b8d517516b262cdca0afb49563e9341e2ee43e7e2b775b11a419"
+ },
+ "stone/stonefloor011a": {
+  "bytes": 290,
+  "sha256": "b48304bfc298b73ed7902b981ee0d1dd0da5ae729240c81c0ecff1b0f4317848"
+ },
+ "stone/stonewall005a": {
+  "bytes": 276,
+  "sha256": "57c2c4771df4fca07d63ca70782922c80435c621f27743c422023fc6c07182dc"
+ },
+ "stone/stonewall006a": {
+  "bytes": 278,
+  "sha256": "3bd3effd8c2e51930147fde7d266b94148609e9e3061c3b23f8143dab46e735a"
+ },
+ "stone/stonewall006b": {
+  "bytes": 276,
+  "sha256": "1ffa8c6b6a1b9adfcb068502c6ace6df718f80a55e2f093d3b16eef4888c725b"
+ },
+ "stone/stonewall032a": {
+  "bytes": 286,
+  "sha256": "1d8cfdb95030d4cc11cd26a340f4e5b0ac3ac1c7b11f9267e7b487fd0330a05b"
+ },
+ "tools/toolsblack": {
+  "bytes": 64,
+  "sha256": "91c97f13f4c5a1187cbc6560a45a991d2c6dfbda73bb3d7c5e7e79fab03bc62c"
+ },
+ "wood/hr_w/venice/doge_wainscoting_1": {
+  "bytes": 382,
+  "sha256": "1fb012e1fa28d634f20fdfec152f9c880e7c29e9e8b7280f4e69b4c22bf02939"
+ },
+ "wood/infdoorc": {
+  "bytes": 85,
+  "sha256": "ee7488430c4698cf10430caf4f487e6a98503a0d14da80be0c3301d39a2c09d5"
+ },
+ "wood/woodstair002c": {
+  "bytes": 120,
+  "sha256": "e3067e0487b6898efcc73effecceb48d0526208761021d1aa8ebf78a984c74ba"
+ },
+ "de_cbble/stain_glass/stain_glass_b": {
+  "bytes": 353,
+  "sha256": "3608c5479b496fa118801b2648c7e154e994cdde90406945e3b4c7831daac1d9"
+ },
+ "effects/com_shield003a": {
+  "bytes": 1864,
+  "sha256": "79b16d3f818c7671f54ca5ca8aef937199db914e9866d6bca006551b8963af6e"
+ },
+ "metal/hr_metal/inferno/metal_ground_trim_a": {
+  "bytes": 431,
+  "sha256": "725d5492041586c49f604a32d76c7e0a01b4bf1d64478bbe0fefe81742dc6855"
+ },
+ "metal/metaldoor059a": {
+  "bytes": 438,
+  "sha256": "3b462417175248f8edae326485525f4e38f776893d185df4e97370dd76f8b09f"
+ },
+ "metal/metalwall033a": {
+  "bytes": 361,
+  "sha256": "3ff2325b603a4b7de06eaeab984ea3956ae76b45b5bbb823b69d6b21b6a6cbd7"
+ },
+ "metal/metalwall048a": {
+  "bytes": 431,
+  "sha256": "5665a3b6f2b0b31b5dac5d5dfa50d49770ce80f38c8afd9963a27c9a9469b9e5"
+ },
+ "metal/prodventa": {
+  "bytes": 186,
+  "sha256": "2bb1c00154342260f3d6646f0a97baff5fb2db6ec2508d2b29de7d65bc927c8f"
+ },
+ "nature/sandfloor010a": {
+  "bytes": 318,
+  "sha256": "3e2d8a6865aec09b86686d81c9522d4cdd6769240532ec65a4ddb8f00a8f37d5"
+ },
+ "plaster/wall_red04": {
+  "bytes": 363,
+  "sha256": "2d2aa5882cac9989088164affb1c3d4ca7f356017e2b8fac2f968c12479b119d"
+ },
+ "vehicle/rubbertrainfloor001a": {
+  "bytes": 310,
+  "sha256": "6f24aaf5257f702d057dfbebb11c807ad9c9b1af701cbd3faadd6b38104b9c9d"
+ },
+ "vehicle/rubbertrainfloor002a": {
+  "bytes": 310,
+  "sha256": "91021b38fbf3270bc76b0d2a09438d467dfab03072515a312bd06ac7e8113355"
+ }
+}
