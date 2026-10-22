@@ -191,6 +191,9 @@ pub struct BspProcessor {
     mosaic_cache: std::collections::HashMap<String, String>,
     /// T-730：一次加载里多个导出入口共用的 PAKFILE 模型收集结果。
     pak_models: RefCell<Option<(VhvLog, Rc<PakfileModels>)>>,
+    /// 回退 VMT 文本表（材质名小写 → VMT 原文）：来源须能对上游戏本体 VPK。
+    /// TS 侧在导出前用 `setVmtFallback(json)` 装入；空表 = 不启用。
+    vmt_fallback: std::collections::HashMap<String, String>,
 }
 
 #[wasm_bindgen]
@@ -206,7 +209,22 @@ impl BspProcessor {
             packed_files,
             mosaic_cache: std::collections::HashMap::new(),
             pak_models: RefCell::new(None),
+            vmt_fallback: std::collections::HashMap::new(),
         })
+    }
+
+    /// 装入**回退 VMT 文本表**（`{ "<材质名小写>": "<VMT 原文>" }`）。
+    ///
+    /// 地图 pakfile 里没有、但**游戏本体自带**的材质（如 `dev/dev_water2`）靠它拿到真实
+    /// `$fogcolor` / `$translucent` 等参数；来源必须能与游戏安装目录的 VPK 逐字节对上
+    /// （`src/materials/vmts-fallback.json`；dev 由 `src/scripts/sync-web-assets.mjs` 分发，dist 由 `build-dist.mjs` 复制）。
+    /// 空表 = 不启用；查不到就按「数据缺失」处理，不编造缺省值。
+    #[wasm_bindgen(js_name = setVmtFallback)]
+    pub fn set_vmt_fallback(&mut self, json: &str) -> Result<(), JsValue> {
+        let map: std::collections::HashMap<String, String> =
+            serde_json::from_str(json).map_err(|e| to_js_err(e, "回退 VMT 表 JSON 解析失败"))?;
+        self.vmt_fallback = map;
+        Ok(())
     }
 
     /// 取（或建立）缓存的 PAKFILE 模型收集结果；`vhv_log` 口径不同则重建。
@@ -358,10 +376,12 @@ impl BspProcessor {
         // texinfo 给的名字（如 `METAL/METALGRATE013A2`）在包内没有精确路径时，改按基名
         // `metalgrate013a2.vmt` 命中作者写的 VMT，取其中的 `$basetexture` 等标注。
         let stem_index = build_vmt_stem_index(&entry_names);
+        let vmt_fallback = self.vmt_fallback.clone();
 
         let options = |generate_missing_list: bool| bsp_to_gltf_core::ConvertOptions {
             missing_fallback: fallback.clone(),
             vmt_stem_index: stem_index.clone(),
+            vmt_fallback: vmt_fallback.clone(),
             generate_missing_list,
             lightmap_max_atlas_area,
             ..bsp_to_gltf_core::ConvertOptions::default()
@@ -913,7 +933,12 @@ impl BspProcessor {
             .bsp
             .as_ref()
             .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
-        let missing = websurf_wasm_core::mosaic::manifest::collect_missing_textures(bsp);
+        let options = websurf_wasm_core::bsp_to_gltf_core::ConvertOptions {
+            probe_only: true,
+            vmt_fallback: self.vmt_fallback.clone(),
+            ..websurf_wasm_core::bsp_to_gltf_core::ConvertOptions::default()
+        };
+        let missing = websurf_wasm_core::mosaic::manifest::collect_missing_textures_with(bsp, &options);
         serde_json::to_string(&missing).map_err(|e| to_js_err(e, "序列化缺失纹理列表失败"))
     }
 

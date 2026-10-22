@@ -37,6 +37,7 @@
 
 import { bspYawToCsYaw } from './angles.js';
 import { loadDefaultsJson } from '../materials/defaults.js';
+import { installVmtFallback } from '../materials/vmt-fallback.js';
 
 /**
  * 本函数用到的 `BspProcessor` 结构面（各工程 `pkg` 的 `BspProcessor` 都满足）。
@@ -263,6 +264,8 @@ export async function buildWorldBundle(
   if (options.decompressMtz) {
     defaultsJson = await loadDefaultsJson(options.decompressMtz);
   }
+  // 回退 VMT 文本表（游戏本体自带材质的原文）：必须在导出前装入；取不到只降级为「缺 VMT」
+  await installVmtFallback(proc);
   let glbBytes: Uint8Array;
   try {
     glbBytes = proc.export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson);

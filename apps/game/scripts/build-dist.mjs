@@ -57,6 +57,7 @@ const INDEX_HTML = join(ROOT, 'web', 'index.html'); // single 改写它、multi 
 const STYLES = join(ROOT, 'web', 'styles.css'); // 两种形态都原样拷贝
 const WASM_FILE = 'websurf_wasm_bg.wasm'; // 外置 wasm 的文件名，multi 下同时用作 URL
 const MTZ = join(REPO, 'src', 'materials', 'textures.mtz'); // 默认纹理包（仓库根共享资产）
+const VMTS = join(REPO, 'src', 'materials', 'vmts-fallback.json'); // 回退 VMT 文本表（游戏本体自带材质）
 
 const HEADER = '/* WebSurf-game embedded build — auto-generated, do not edit */\n'; // 内嵌形态 app.js 的 banner
 
@@ -70,6 +71,7 @@ const KEEP_MULTI = [
   'styles.css',
   WASM_FILE,
   'textures.mtz',
+  'vmts.json',
   'coi-serviceworker.js',
   ...DIST_LAUNCHER_FILES,
   'LICENSE.cs-movement',
@@ -163,6 +165,8 @@ async function buildMulti(wasmPath) {
   console.log('[multi] 复制 WASM / 默认纹理包...');
   copyFileSync(wasmPath, join(DIST, WASM_FILE));
   copyFileSync(MTZ, join(DIST, 'textures.mtz'));  // 默认纹理包外置
+  // 回退 VMT 文本表（缺 VMT 的游戏本体材质）：6.4 KB，取不到只降级为「缺 VMT」
+  copyFileSync(VMTS, join(DIST, 'vmts.json'));
 
   console.log('[multi] 复制 index.html / styles.css（module script 原样）...');
   copyFileSync(INDEX_HTML, join(DIST, 'index.html'));
@@ -176,6 +180,7 @@ async function buildMulti(wasmPath) {
     './worker.js',
     './' + WASM_FILE,
     './textures.mtz',
+    './vmts.json',
     './styles.css',
     './coi-serviceworker.js',
   ].filter((f) => existsSync(join(DIST, f.slice(2)))); // 只留 dist/ 内实际存在的文件（清单项带 './' 前缀，故先切片）

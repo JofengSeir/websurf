@@ -52,8 +52,19 @@ pub fn collect_face_texture_names(bsp: &Bsp) -> Vec<String> {
 /// **完整解码**一遍 VTF。实测 `surf_axil` 因此要 857 s、`surf_kraken` 8.2 s；探针只做「头部可解析 +
 /// 格式有解码臂 + 帧长落在字节内」，判否时才真解一次兜底，结论不变。
 pub fn collect_missing_textures(bsp: &Bsp) -> Vec<String> {
+    collect_missing_textures_with(bsp, &ConvertOptions::default())
+}
+
+/// 同 `collect_missing_textures`，但接受调用方的选项（至少带上回退 VMT 表）。
+///
+/// 为什么需要：P1 之后，地图 pakfile 里没有、但游戏本体自带的 VMT 由
+/// `ConvertOptions::vmt_fallback` 救回；诊断面板若仍用空表，会把已救回的材质继续报成缺失。
+/// `probe_only` 由本函数强制为真（诊断只问「能不能解」）。
+pub fn collect_missing_textures_with(bsp: &Bsp, options: &ConvertOptions) -> Vec<String> {
     let names = collect_face_texture_names(bsp);
-    let options = ConvertOptions { probe_only: true, ..ConvertOptions::default() };
+    let mut options = options.clone();
+    options.probe_only = true;
+    let options = options;
     let mut missing = Vec::new();
     for name in &names {
         match load_material_bsp(name, &[String::new()], bsp, &options) {

@@ -150,6 +150,9 @@ pub struct BspProcessor {
     mosaic_cache: std::collections::HashMap<String, String>,
     /// T-730：一次加载里多个导出入口共用的 PAKFILE 模型收集结果。
     pak_models: RefCell<Option<(VhvLog, Rc<PakfileModels>)>>,
+    /// 回退 VMT 文本表（材质名小写 → VMT 原文）：来源须能对上游戏本体 VPK。
+    /// TS 侧在导出前用 `setVmtFallback(json)` 装入；空表 = 不启用。
+    vmt_fallback: std::collections::HashMap<String, String>,
 }
 
 #[wasm_bindgen]
@@ -169,9 +172,53 @@ impl BspProcessor {
             cached_static_props,
             mosaic_cache: std::collections::HashMap::new(),
             pak_models: RefCell::new(None),
+            vmt_fallback: std::collections::HashMap::new(),
         })
     }
 
+    /// 装入**回退 VMT 文本表**（`{ "<材质名小写>": "<VMT 原文>" }`）。
+    ///
+    /// 地图 pakfile 里没有、但**游戏本体自带**的材质（如 `dev/dev_water2`）靠它拿到真实
+    /// `$fogcolor` / `$translucent` 等参数；来源必须能与游戏安装目录的 VPK 逐字节对上
+    /// （`src/materials/vmts-fallback.json`；dev 由 `src/scripts/sync-web-assets.mjs` 分发，dist 由 `build-dist.mjs` 复制）。
+    /// 空表 = 不启用；查不到就按「数据缺失」处理，不编造缺省值。
+    #[wasm_bindgen(js_name = setVmtFallback)]
+    pub fn set_vmt_fallback(&mut self, json: &str) -> Result<(), JsValue> {
+        let map: std::collections::HashMap<String, String> =
+            serde_json::from_str(json).map_err(|e| to_js_err(e, "回退 VMT 表 JSON 解析失败"))?;
+        self.vmt_fallback = map;
+        Ok(())
+    }
+
+    /// **诊断**：只跑一遍材质/贴图解析（probe_only，不产出像素、不落 GLB），
+    /// 返回缺失资源清单 JSON：{"missing":[{"name","reason"}...],"textures":[...]}。
+    ///
+    /// 与 export_glb* 不同，本方法**不消费** BSP（只克隆 Arc），可对同一实例多次调用；
+    /// `src/scripts/audit-missing.mjs` 用它对比「有/无回退 VMT 表」「有/无默认纹理包」的缺口。
+    #[wasm_bindgen(js_name = probeMissingResources)]
+    pub fn probe_missing_resources(&self, defaults_json: &str) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?
+            .clone();
+        let fallback: std::collections::HashMap<String, String> =
+            serde_json::from_str(defaults_json).unwrap_or_default();
+        let options = bsp_to_gltf_core::ConvertOptions {
+            probe_only: true,
+            missing_fallback: fallback,
+            vmt_fallback: self.vmt_fallback.clone(),
+            ..bsp_to_gltf_core::ConvertOptions::default()
+        };
+        let result = bsp_to_gltf_core::export_bsp(bsp, options)
+            .map_err(|e| to_js_err(e, "缺失资源探针失败"))?;
+        let missing: Vec<serde_json::Value> = result
+            .missing_resources
+            .iter()
+            .map(|m| serde_json::json!({ "name": m.name, "reason": m.reason }))
+            .collect();
+        Ok(serde_json::json!({ "missing": missing, "textures": result.textures }).to_string())
+    }
     /// 取（或建立）缓存的 PAKFILE 模型收集结果；`vhv_log` 口径不同则重建。
     fn collect_models_for(&self, bsp: &vbsp::Bsp, vhv_log: VhvLog) -> Result<Rc<PakfileModels>, JsValue> {
         if let Some((cached_log, pak)) = self.pak_models.borrow().as_ref() {
@@ -484,6 +531,7 @@ impl BspProcessor {
         let options = bsp_to_gltf_core::ConvertOptions {
             missing_fallback: fallback.clone(),
             vmt_stem_index: stem_index,
+            vmt_fallback: self.vmt_fallback.clone(),
             ..bsp_to_gltf_core::ConvertOptions::default()
         };
 

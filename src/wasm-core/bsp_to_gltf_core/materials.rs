@@ -444,30 +444,38 @@ pub(crate) fn load_material_bsp(
     let (vmt_path, vmt_data) = match found {
         Some(v) => v,
         None => {
-            let stem = name
-                .replace('\\', "/")
-                .rsplit('/')
-                .next()
-                .unwrap_or(name)
-                .to_ascii_lowercase();
-            let stem_hit = options.vmt_stem_index.get(&stem).cloned();
-            match stem_hit {
-                Some(hit) => match bsp.pack.get(&format!("materials/{}.vmt", hit)) {
-                    Ok(Some(data)) => (format!("materials/{}.vmt", hit), data),
-                    _ => {
+            // 回退 VMT 文本（游戏本体自带材质的原文，来源须能对上游戏安装 VPK）：
+            // 命中就当作「从包里读到的 VMT」继续走同一套解析，参数全部来自真实材质。
+            // 查不到再走基名回退；两者都没有才报错（数据缺失，不编造）。
+            let fallback_key = name.replace('\\', "/").to_ascii_lowercase();
+            if let Some(text) = options.vmt_fallback.get(&fallback_key) {
+                (format!("fallback/{}", fallback_key), text.as_bytes().to_vec())
+            } else {
+                let stem = name
+                    .replace('\\', "/")
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(name)
+                    .to_ascii_lowercase();
+                let stem_hit = options.vmt_stem_index.get(&stem).cloned();
+                match stem_hit {
+                    Some(hit) => match bsp.pack.get(&format!("materials/{}.vmt", hit)) {
+                        Ok(Some(data)) => (format!("materials/{}.vmt", hit), data),
+                        _ => {
+                            let paths_str = possible_paths.join(", ");
+                            return Err(Error::Other(format!(
+                                "Can't find VMT file in BSP. Tried: {} (+stem {})",
+                                paths_str, hit
+                            )));
+                        }
+                    },
+                    None => {
                         let paths_str = possible_paths.join(", ");
                         return Err(Error::Other(format!(
-                            "Can't find VMT file in BSP. Tried: {} (+stem {})",
-                            paths_str, hit
+                            "Can't find VMT file in BSP. Tried: {}",
+                            paths_str
                         )));
                     }
-                },
-                None => {
-                    let paths_str = possible_paths.join(", ");
-                    return Err(Error::Other(format!(
-                        "Can't find VMT file in BSP. Tried: {}",
-                        paths_str
-                    )));
                 }
             }
         }

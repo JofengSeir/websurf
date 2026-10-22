@@ -22,7 +22,9 @@
 
 import { BspProcessor, decode_vtf_to_png, decompress_mtz, initSync, mosaic_decode } from '../../pkg/websurf_viewer_wasm.js';
 import { base64ToBytes, readEmbeddedWasmB64 } from '../../../../src/ts-shared/wasm/loader.js';
-import { loadDefaultsJson } from '../../../../src/ts-shared/materials/defaults.js'; import { fogParamsFromEntities } from '../../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../../src/renderer-shared/environment/skybox.js';
+import { loadDefaultsJson } from '../../../../src/ts-shared/materials/defaults.js';
+import { installVmtFallback } from '../../../../src/ts-shared/materials/vmt-fallback.js';
+import { fogParamsFromEntities } from '../../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../../src/renderer-shared/environment/skybox.js';
 
 export interface BspMeta {
   schema_version?: number;
@@ -137,6 +139,8 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const pvsJson = proc.parse_pvs_data(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera = skyCameraFromEntities(entitiesJson);
   // 缺失纹理回退（与 game 同款）：装载失败回落 '{}'（无回退表），导出失败回落裸导出
   const defaultsJson = await loadDefaultsJson(decompress_mtz);
+  // 回退 VMT 文本表（游戏本体自带材质的原文）：必须在导出前装入；取不到只降级为「缺 VMT」
+  await installVmtFallback(proc);
   let glb: Uint8Array;
   try {
     glb = proc.export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson);

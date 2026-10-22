@@ -53,6 +53,7 @@ const DIST = join(ROOT, 'dist');
 const INDEX_HTML = join(ROOT, 'web', 'index.html');
 const WASM_FILE = 'websurf_wasm_bg.wasm';
 const MTZ = join(REPO, 'src', 'materials', 'textures.mtz');
+const VMTS = join(REPO, 'src', 'materials', 'vmts-fallback.json'); // 回退 VMT 文本表（游戏本体自带材质）
 
 const HEADER = '/* WebSurf single-file build — auto-generated, do not edit */\n';
 const UPSTREAM_LICENSE =
@@ -71,6 +72,7 @@ const KEEP_MULTI = [
   'worker.js',
   WASM_FILE,
   'textures.mtz',
+  'vmts.json',
   'coi-serviceworker.js',
   ...DIST_LAUNCHER_FILES,
   'LICENSE.cs-movement',
@@ -159,7 +161,9 @@ async function buildMulti(wasmPath) {
 
   console.log('[multi] 复制 WASM / 默认纹理包...');
   copyFileSync(wasmPath, join(DIST, WASM_FILE));
-  copyFileSync(MTZ, join(DIST, 'textures.mtz'));  // COI serviceworker：静态托管上补发 COOP/COEP 响应头，使页面处于 crossOriginIsolated
+  copyFileSync(MTZ, join(DIST, 'textures.mtz'));
+  // 回退 VMT 文本表（缺 VMT 的游戏本体材质）：6.4 KB，取不到只降级为「缺 VMT」
+  copyFileSync(VMTS, join(DIST, 'vmts.json'));
 
   console.log('[multi] 复制 index.html（module script 原样，与 web/ 同构）...');
   copyFileSync(INDEX_HTML, join(DIST, 'index.html'));
@@ -171,6 +175,7 @@ async function buildMulti(wasmPath) {
     './worker.js',
     './' + WASM_FILE,
     './textures.mtz',
+    './vmts.json',
     './coi-serviceworker.js',
   ].filter((f) => existsSync(join(DIST, f.slice(2)))); // 去掉 './' 前缀后探存在性，只把 dist/ 里确实有的项写进清单
 

@@ -43,6 +43,7 @@ const viewerRoot = join(HERE, '..'); // apps/viewer
 const repoRoot = join(viewerRoot, '..', '..'); // 仓库根
 const dist = join(viewerRoot, 'dist');
 const MTZ = join(repoRoot, 'src', 'materials', 'textures.mtz'); // 默认纹理包（仓库根共享资产）
+const VMTS = join(repoRoot, 'src', 'materials', 'vmts-fallback.json'); // 回退 VMT 文本表（游戏本体自带材质）
 
 const multi = process.argv.includes('--multi');
 
@@ -66,6 +67,7 @@ const KEEP_MULTI = [
   'websurf_viewer_wasm_bg.wasm',
   'wasm-embedded.js',
   'textures.mtz',
+  'vmts.json',
   'coi-serviceworker.js',
 ];
 
@@ -114,6 +116,8 @@ async function rebuildDist() {
     // 默认纹理包外置（缺失纹理回退的数据源，2026-10-04 起与 game 同款）
     await copyFile(MTZ, join(dist, 'textures.mtz'));
     console.log('[multi] 复制 textures.mtz（缺失纹理回退数据源）…');
+    // 回退 VMT 文本表：缺 VMT 的游戏本体材质靠它拿真实参数（取不到只降级，不编造）
+    await copyFile(VMTS, join(dist, 'vmts.json'));
     console.log('[multi] 生成 wasm-embedded.js（fetch 失败时的内嵌回退副本）…');
     const wasmBytes = await readFile(join(viewerRoot, 'web/websurf_viewer_wasm_bg.wasm'));
     await writeFile(
@@ -130,6 +134,7 @@ async function rebuildDist() {
       './websurf_viewer_wasm_bg.wasm',
       './wasm-embedded.js',
       './textures.mtz',
+      './vmts.json',
       './styles.css',
       './coi-serviceworker.js',
     ].filter((f) => existsSync(join(dist, f.slice(2)))); // 仅存在的文件（去掉 './' 前缀）

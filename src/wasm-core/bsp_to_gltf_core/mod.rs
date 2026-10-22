@@ -179,6 +179,16 @@ pub struct ConvertOptions {
     /// `ConvertOptions::default()` 就是空表。
     #[serde(default)]
     pub vmt_stem_index: std::collections::HashMap<String, String>,
+    /// **回退 VMT 文本表**：`{ "<材质名小写>": "<VMT 原文>" }`。
+    ///
+    /// 用途：地图 pakfile 里没有该 VMT 时（典型是引擎自带材质 `dev/dev_water2` 这类），
+    /// 用这张表里**来源可证**的原文继续走同一套解析（`$fogcolor` / `$translucent` / `$bumpmap`）。
+    /// 查不到就按「数据缺失」处理（不编造缺省值，材质侧会标记并告警）。
+    ///
+    /// 来源约束（owner 2026-10-22）：只收**游戏本体自带**的材质，且必须能与游戏安装目录的
+    /// VPK 逐字节对上（`test/fallback-src/materials/**` 是该来源的副本）。空表即不启用。
+    #[serde(default)]
+    pub vmt_fallback: std::collections::HashMap<String, String>,
     /// 单页图集面积上界（px²）的**显式覆盖**：`0` = 用政策上界
     /// `MAX_ATLAS_PAGE_AREA = 4096 × 4096 / 2 = 8,388,608`（即 4096×2048）。
     ///
@@ -235,6 +245,7 @@ impl Default for ConvertOptions {
             generate_missing_list: true,
             missing_fallback: std::collections::HashMap::new(),
             vmt_stem_index: std::collections::HashMap::new(),
+            vmt_fallback: std::collections::HashMap::new(),
             lightmap_max_atlas_area: 0,
             probe_only: false,
         }
