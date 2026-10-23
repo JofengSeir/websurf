@@ -28,6 +28,18 @@ const OPT_MAX_CELLS = 800;
 const OPT_CELL_MIN = 128;
 const OPT_CELL_MAX = 4096;
 /**
+ * 半透明图元专用的 cell 细化倍率（分桶时把 cellSize 除以本值后再归 cell）。
+ *
+ * 为什么单列：three 给合并产物算的排序键 z 是**整个合并几何的包围球中心**，同一个 chunk 的
+ * 所有材质槽共用这一个 z（three 0.165 `WebGLRenderer.js:1342-1370` 的材质数组分支，循环内
+ * z 不重新计算）⇒ 挤在同一块里的多个半透明槽，其绘制次序与摄像机位置无关、只取决于它们在
+ * 材质数组里的下标。cell 越小，一块里的半透明越少，排序就越细。
+ *
+ * 代价是半透明块数变多；半透明在 BSP 地图里是少数（玻璃/水/冰），且不透明侧完全不受影响，
+ * 故只对半透明这一路细化。取 4 = 每维 4 倍分辨率，块数上界仍是「半透明图元数」。
+ */
+const OPT_TRANS_CELL_DIV = 4;
+/**
  * 视锥外保留圈的半径膨胀系数（分块结束时乘到每块的包围球半径上）。
  * three 的视锥剔除按 geometry.boundingSphere 判定，膨胀后视锥外一圈的块仍参与渲染 ⇒
  * 快速转动时新进入视野的块上一帧已在画，边缘不闪空。只影响剔除判定，不改几何与材质。
@@ -45,6 +57,18 @@ interface OptMeshInfo {
 /** cell 键：世界坐标三分量各除以 cellSize 后向下取整，拼成字符串（一次性分桶）。 */
 function optCellKey(x: number, y: number, z: number, cellSize: number): string {
   return Math.floor(x / cellSize) + '|' + Math.floor(y / cellSize) + '|' + Math.floor(z / cellSize);
+}
+
+/**
+ * 这只 mesh 的材质是不是半透明。
+ *
+ * 判定直接取 `material.transparent` —— 它是 GLB 的 `alphaMode=BLEND` 经 GLTFLoader 落地的
+ * 结果（`GLTFLoader.js:3573-3574`），而不是去读导出侧 extras 里的 `vbsp_translucent`：
+ * 后者目前在本仓库的 TS 侧没有任何读取点（写了没人用），拿它当判据会把分块结果绑在一条
+ * 无人验证的契约上。收集阶段已排除多材质 mesh，这里的数组分支只是类型收窄。
+ */
+function optIsTranslucent(m: THREE.Material | THREE.Material[]): boolean {
+  return !Array.isArray(m) && m.transparent === true;
 }
 
 /** 统计给定 cellSize 下的非空 cell 数（cell 大小自适应循环用）。 */
@@ -324,10 +348,15 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     cellSize = Math.min(Math.max(cellSize * scale, OPT_CELL_MIN), OPT_CELL_MAX);
   }
 
-  // ③ 分桶：按每个 mesh 的世界包围盒中心归 cell（横跨多 cell 的归中心所在 cell）
+  // ③ 分桶：按每个 mesh 的世界包围盒中心归 cell（横跨多 cell 的归中心所在 cell）。
+  //    半透明另起一套更细的 cell 并单独成桶 —— 排序键 z 是「整块包围球中心、块内槽共用」，
+  //    见 OPT_TRANS_CELL_DIV 处的说明。键前缀把两类桶彻底隔开：哪怕半透明细化后的 cell 编号
+  //    与不透明的撞上，也进不到同一个桶。不透明侧的键与产物与改前逐字相同。
   const cells = new Map<string, OptMeshInfo[]>();
   for (const it of infos) {
-    const key = optCellKey(it.cx, it.cy, it.cz, cellSize);
+    const isTrans = optIsTranslucent(it.mesh.material);
+    const cs = isTrans ? cellSize / OPT_TRANS_CELL_DIV : cellSize;
+    const key = (isTrans ? 'T' : 'O') + optCellKey(it.cx, it.cy, it.cz, cs);
     let arr = cells.get(key);
     if (!arr) {
       arr = [];
