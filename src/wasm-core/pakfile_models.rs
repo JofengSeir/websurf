@@ -63,6 +63,9 @@ pub struct VmtInfo {
     /// `patch` 材质自身可以没有 `$basetexture`，只写 `include "materials/xxx.vmt"`
     /// 加若干 `replace` / `insert` 覆盖项；调用方需再取一次被引用的 VMT 才能拿到贴图。
     pub include: Option<String>,
+    /// `Water` 着色器（或 `%compilewater`）的 `$fogcolor` / 扰动 / `$abovewater` 等参数：
+    /// 模型通路的材质也要拿到 `vbsp_water`，否则模型内部的水体没有涟漪/反射。
+    pub water: Option<crate::bsp_to_gltf_core::materials::WaterParams>,
 }
 
 /// 把一行 KeyValues 切成 token，**成对双引号内**的空白不切分。
@@ -254,6 +257,12 @@ pub fn parse_vmt(text: &str) -> VmtInfo {
     } else {
         0
     };
+    // 水面：与 BSP 世界面共用同一套 VMT 解析（`parse_water_params`），模型内部的水体
+    // 因此也能拿到 `vbsp_water`；非水材质保持 None（不注入水面着色器）。
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("%compilewater") || lower.trim_start().starts_with("\"water\"") {
+        info.water = Some(crate::bsp_to_gltf_core::materials::parse_water_params(text));
+    }
     info
 }
 

@@ -861,6 +861,10 @@ export function applyLightmapToMeshes(
 				: '-',
 			// `Wireframe` 着色器标记也必须进键（线框与实体面不能共用同一替换材质）
 			(firstOrig.userData as { vbsp_wireframe?: boolean } | undefined)?.vbsp_wireframe ? 'wf' : '-',
+			// **extras 整块进键**：水面材质靠 userData.vbsp_water 注入，若只按 map/颜色/透明度
+			// 去重，boreas 的 water01 与 water_pure_beneath（同色同透明度）会共用一个材质 ⇒
+			// 后者拿到前者的参数（甚至被当成非水材质）。vbsp_envmap / unlit 同理。
+			JSON.stringify(firstOrig.userData ?? {}),
 		].join('|');
 		let mat = vertexLightingCache.get(key);
 		if (!mat) {
@@ -899,6 +903,8 @@ export function applyLightmapToMeshes(
 		String((firstOrig as THREE.Material & { side?: number }).side ?? 0),
 		String((firstOrig as THREE.Material & { depthWrite?: boolean }).depthWrite ?? true),
 		(firstOrig.userData as { vbsp_wireframe?: boolean } | undefined)?.vbsp_wireframe ? 'wf' : '-',
+		// 同 vertexLightingCache：extras 整块进键，避免不同水材质/反射参数被并成一个。
+		JSON.stringify(firstOrig.userData ?? {}),
 	].join('|');
 	let mat = fullbrightCache.get(key);
 	if (!mat) {

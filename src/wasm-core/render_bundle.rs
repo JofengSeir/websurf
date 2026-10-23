@@ -60,6 +60,9 @@ pub struct PakMaterials {
     /// `材质名 → $envmaptint`（仅 `$envmap` 材质）：渲染端据此挂 env_cubemap 近似反射。
     pub bumpmaps: HashMap<String, String>, // `材质名 → 法线贴图表键`（T-627/P8）：值形如 `<材质名>#bump`，指向 `textures` 里解出的 `$bumpmap` PNG；材质 extras 只记这个键
     pub envmap_tints: HashMap<String, [f32; 3]>,
+    /// `材质名 → WaterParams`（仅 `Water` / `%compilewater` 材质）：模型通路据此写 `vbsp_water`，
+    /// 让模型内部的水体也有涟漪/反射。
+    pub waters: HashMap<String, crate::bsp_to_gltf_core::materials::WaterParams>,
 }
 
 /// `collect_pakfile_models` 末尾那条 `vhv` 统计日志的口径（三端历史差异，逐端保留）。
@@ -411,6 +414,9 @@ pub fn resolve_pakfile_materials(
             }
             if let Some(t) = info.envmap_tint {
                 out.envmap_tints.insert(tex.name.clone(), t);
+            }
+            if let Some(w) = info.water.clone() {
+                out.waters.insert(tex.name.clone(), w);
             }
 
             if !decode_textures {

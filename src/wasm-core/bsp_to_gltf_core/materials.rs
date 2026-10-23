@@ -585,7 +585,7 @@ fn strip_nested_blocks(vdf: &str) -> String {
 
 /// 从 VMT 文本解析 [`WaterParams`]（先剥掉 `//` 行注释与嵌套子块：Source 的水材质里被注释掉的
 /// `//"$reflecttint"` / `//"$fogcolor"` 很常见，DX8/DX9 子块又覆盖同名参数，两者都会让平扫取错值）。
-fn parse_water_params(vdf: &str) -> WaterParams {
+pub(crate) fn parse_water_params(vdf: &str) -> WaterParams {
     let cleaned: String = strip_nested_blocks(
         &vdf
             .split('\n')

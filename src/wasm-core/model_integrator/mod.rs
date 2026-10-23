@@ -145,6 +145,9 @@ pub struct InMemoryResources {
     /// 渲染端据此挂 env_cubemap 近似反射。
     pub material_bumpmap: std::collections::HashMap<String, String>, // `材质名 → 法线贴图表键`（T-627/P8）：键指向 `textures` 里的 `$bumpmap` PNG；`push_material` 据此推贴图并把纹理下标写进 extras `vbsp_bumpmap`
     pub material_envmap: std::collections::HashMap<String, [f32; 3]>,
+    /// `材质名 → WaterParams`（仅 `Water` / `%compilewater` 材质）：写进 extras `vbsp_water`，
+    /// 让模型内部的水体也走水面着色器（涟漪/反射）。来源同 `parse_vmt`。
+    pub material_water: std::collections::HashMap<String, crate::bsp_to_gltf_core::materials::WaterParams>,
 }
 
 /// 模型整合器：一次导出期间持有内存资源与两张去重缓存。
@@ -687,6 +690,29 @@ impl ModelIntegrator {
             // `$envmap` 材质：把 `$envmaptint` 交给渲染端（`material.userData.vbsp_envmap`）。
             if let Some(t) = self.in_memory.material_envmap.get(&material_name) {
                 ex.insert("vbsp_envmap".into(), serde_json::json!(t));
+            }
+            if let Some(w) = self.in_memory.material_water.get(&material_name) {
+                ex.insert(
+                    "vbsp_water".into(),
+                    serde_json::json!({
+                        "fog": w.fog_color,
+                        "refractTint": w.refract_tint,
+                        "reflectTint": w.reflect_tint,
+                        "refractAmount": w.refract_amount,
+                        "reflectAmount": w.reflect_amount,
+                        "aboveWater": w.above_water,
+                        "fogStart": w.fog_start,
+                        "fogEnd": w.fog_end,
+                        "scroll1": w.scroll1,
+                        "scroll2": w.scroll2,
+                        "scale": w.scale,
+                        "bumpmap": w.bumpmap,
+                        "normalmap": w.normalmap,
+                        "bumpScale": w.bump_scale,
+                        "bumpRotate": w.bump_rotate,
+                        "waterDepth": w.water_depth,
+                    }),
+                );
             }
             // `$bumpmap` 材质：把**纹理下标**交给渲染端（`material.userData.vbsp_bumpmap`）。
             if let Some(idx) = bump_texture_index {

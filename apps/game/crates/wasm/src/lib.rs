@@ -411,7 +411,7 @@ impl BspProcessor {
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
             material_unlit: materials.unlit,
-            material_envmap: materials.envmap_tints, material_bumpmap: materials.bumpmaps,
+            material_envmap: materials.envmap_tints, material_bumpmap: materials.bumpmaps, material_water: materials.waters,
             light_entities: if include_lights {
                 collect_light_entities(&bsp)
             } else {
@@ -482,7 +482,7 @@ impl BspProcessor {
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
             material_unlit: materials.unlit,
-            material_envmap: materials.envmap_tints, material_bumpmap: materials.bumpmaps,
+            material_envmap: materials.envmap_tints, material_bumpmap: materials.bumpmaps, material_water: materials.waters,
             light_entities: Vec::new(),
         };
 
@@ -527,7 +527,7 @@ impl BspProcessor {
             textures: materials.textures,
             material_alpha_mode: materials.alpha_modes,
             material_unlit: materials.unlit,
-            material_envmap: materials.envmap_tints, material_bumpmap: materials.bumpmaps,
+            material_envmap: materials.envmap_tints, material_bumpmap: materials.bumpmaps, material_water: materials.waters,
             light_entities: collect_light_entities(&bsp),
         };
 
