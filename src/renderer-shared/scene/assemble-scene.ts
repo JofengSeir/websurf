@@ -23,6 +23,7 @@ import { mergeIntoChunks, padBoundingSpheres } from './scene-optimizer.js';
 import { extractSkyArea, SKY_LAYER, type SkyCameraParams } from '../environment/miniature-sky.js';
 import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../shader/world-transition.js';
 import { applyBumpShaders, collectBumpTextures } from '../shader/bumpmap.js';
+import { applyWaterShaders } from '../shader/water.js';
 import { fullbrightUnlitLitMaterials } from '../shader/lightmap-shader.js';
 
 /** PVS 查询面（只用到 cluster 查询；各端的 PvsManager 结构兼容）。 */
@@ -103,12 +104,16 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
 
   const converged = fullbrightUnlitLitMaterials(root);
   applyWorldTransitionShaders(root);
+  // 水面材质整槽替换：必须在**合并之后**（合并按材质实例分组，早替换会被合并丢掉），
+  // 也要**早于** bump（bump 会把水面着色器改写成法线注入）。
+  applyWaterShaders(root);
   // 反射扰动注入必须在**合并之后**：合并按材质实例分组，早注入会漏掉合并新建的实例。
   applyBumpShaders(root);
   let skyConverged = 0;
   if (skyGroup) {
     skyConverged = fullbrightUnlitLitMaterials(skyGroup);
     applyWorldTransitionShaders(skyGroup);
+    applyWaterShaders(skyGroup);
     applyBumpShaders(skyGroup);
   }
   if (converged > 0) {

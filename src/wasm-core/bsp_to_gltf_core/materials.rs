@@ -43,6 +43,127 @@ use image::DynamicImage;
 use tf_asset_loader::Loader;
 use crate::vbsp::Bsp;
 
+/// 半透明材质在**没有任何 alpha 来源**时的占位 alpha（0..255，51 ≈ 0.2）。
+///
+/// 只在同时满足下面三条时才用：声明了半透明、VMT 没写 `$alpha`、贴图也拿不到。
+/// 这条是兜底而不是口径——BLEND 配上 alpha=1 会把烟/雾画成一堵白墙，
+/// 而这一路连贴图 alpha 通道都指望不上。真正生效的数值一律来自 VMT 的 `$alpha`。
+pub(crate) const TRANSLUCENT_PLACEHOLDER_ALPHA: u8 = 51;
+
+/// 水面在**没有任何地图参数**时的上游口径半透明水色（RGBA，128 ≈ 0.5）。
+///
+/// **泛白**（owner 2026-10-19 裁决）：Source 的水面观感来自 `$fogcolor` —— 实测 `surf_boreas`
+/// 的 `materials/project_tendies/water01.vmt` 写的是 `"$fogcolor" "{255 255 255}"`（纯白）
+/// 加 `"srgb?$fogcolor" "{120 200 255}"`，`$reflecttint "[1 .95 .85]"` —— 即作者要的就是
+/// "白到发亮的水"。而 VMT 不在 pakfile 里时（`surf_666` 的 `dev/dev_water2` 只有 VBSP 生成的
+/// `…_depth_<n>.vmt` patch）读不到这些值 ⇒ 兜底必须是同一路的**泛白**，不能是早期随手挑的
+/// 蓝 `[82,180,217]`（那会把没打包水材质的图渲染成一片青绿）。
+pub(crate) const WATER_COLOR: [u8; 4] = [222, 233, 237, 128];
+
+/// 缺 VMT 时水面**没有** `$envmaptint` 的反射强度（渲染端 `reflectivity = tint × 0.8` ⇒ 0.4）。
+///
+/// 为什么不是其他 envmap 材质的缺省 `[1,1,1]`（⇒ 0.8）：Source 的水面反射由
+/// `$reflectamount` 压着（`dev_water2` = 1.0、`water_canals03` = 0.5），而本仓 fallback
+/// 材质库里唯一显式声明过 tint 的水面 `watersource/river/river_clear.vmt` 写的是
+/// `$envmaptint "[.5 .5 .5]"` ⇒ 取它当水面缺省，避免水面在掠射角糊成一张白板。
+pub(crate) const WATER_DEFAULT_ENVMAP_TINT: [f32; 3] = [0.5, 0.5, 0.5];
+
+/// Source `Water` 材质里本工程用得到的参数（口径见 SDK
+/// `src/materialsystem/stdshaders/water.cpp` 的 `SHADER_PARAM` 与
+/// `water_ps2x_helper.h` 的 `DrawWater`）。
+///
+/// 关键语义（别按名字猜）：
+/// - `$refractamount` / `$reflectamount` 是**扰动幅度**，不是混合系数 —— `DrawWater` 拿它们
+///   缩放 DU/DV 法线对折射 / 反射 UV 的偏移（`vDependentTexCoords = vN * vNormal.a *
+///   reflectRefractScale`），`x,y` = reflect、`z,w` = refract。
+/// - 最终颜色是 `lerp(refract, reflect, fFresnel)`，`fFresnel = pow(1 - saturate(N·V), 5)`，
+///   且**没有 basetexture 时**再乘 `saturate((depth - 0.05) * 20)` —— 水浅（底近）→ 纯折射
+///   （看得见底），水深 → 纯反射。`depth` 取自折射缓冲的 alpha（屏幕空间深度）。
+/// - `$fogcolor` 是**深水色**：`vRefractColor = lerp(refract, fogColor, saturate(depth - 0.05))`。
+/// - `$reflecttint` 在 `water.cpp` 里被 `GammaToLinear(tint) * 4.0` 放大（overbright 4 倍）。
+///
+/// 注意：**不是 `Copy`**（含 `$bumpmap`/`$normalmap` 的 `String`），取值处用引用或 `clone()`。
+#[derive(Debug, Clone)]
+pub struct WaterParams {
+    /// `$fogcolor`（gamma 色，0..1）。
+    pub fog_color: [f32; 3],
+    /// `$refracttint`（缺省 `[1 1 1]`）。
+    pub refract_tint: [f32; 3],
+    /// `$reflecttint`（缺省 `[1 1 1]`）。
+    pub reflect_tint: [f32; 3],
+    /// `$refractamount`（缺省 `0`）。
+    pub refract_amount: f32,
+    /// `$reflectamount`（缺省 `0.8`）。
+    pub reflect_amount: f32,
+    /// `$abovewater`（缺省 `1`；`_beneath` 系列是 `0`）。
+    pub above_water: bool,
+    /// `$fogstart` / `$fogend`（水下雾距离，仅 `$abovewater 0` 时 Source 才用）。
+    pub fog_start: f32,
+    pub fog_end: f32,
+    /// `$scroll1` / `$scroll2` 的前两维：DU/DV 两层涟漪的 UV 滚动速率（UV/秒）。
+    ///
+    /// 来源是 VMT 里的显式声明（`surf_boreas` 的 `water01.vmt`：`$scroll1 "[.01 .01 .05]"`、
+    /// `$scroll2 "[-.025 .025 .075]"`，第三维是帧动画速率，本工程不用）。
+    pub scroll1: [f32; 2],
+    pub scroll2: [f32; 2],
+    /// `$scale`：水面的贴图缩放（`surf_boreas` 的 `water01.vmt` / `dev_water2.vmt` 都写 `[1 1]`）。
+    /// Source 用它缩放水面 UV（DU/DV 的平铺密度），渲染端乘在平铺密度上。
+    pub scale: [f32; 2],
+    /// `$waterdepth`：该水面 patch 的水深（世界单位）。VBSP 给每块水生成
+    /// `maps/<map>/<mat>_<x>_<y>_<z>_depth_<n>.vmt`，`n` 就是这个值（`surf_666` 的
+    /// `dev_water2_depth_192`、`surf_boreas` 的 `water01_..._depth_453`）。
+    ///
+    /// 渲染端拿它当源里 `_rt_WaterRefraction.a`（归一化水层深度）的替代：
+    /// 有它就能做 `saturate((depth-0.05)*20)` 的浅水/深水门控与 `$fogcolor` 混合，
+    /// 不必去反投影深度缓冲（实测 `DepthTexture` 在本机 RT 里读出来是远平面）。
+    pub water_depth: Option<f32>,
+    /// `$bumpmap`：失真图路径（`dev/water_dudv`）。渲染端据此**选用哪张失真图**，
+    /// 不再写死；声明了本工程没内嵌的图时会告警并回退。
+    pub bumpmap: Option<String>,
+    /// `$normalmap`：水面法线图路径（`dev/water_normal`）。仅记录（本工程暂不用它做光照）。
+    pub normalmap: Option<String>,
+    /// `$bumptransform` 里的 `scale`（两维）与 `rotate`（角度，度）：作用在主采样 UV 上。
+    /// 形如 `center .5 .5 scale 1 1 rotate 0`；`surf_boreas` 的写法是 `texturescrollrate`（解析不出 ⇒ 用缺省）。
+    pub bump_scale: [f32; 2],
+    pub bump_rotate: f32,
+}
+
+impl Default for WaterParams {
+    /// 缺省 = `water.cpp` 的 `SHADER_PARAM` 缺省值 + 上游口径的**泛白**水色。
+    ///
+    /// `$fogcolor` 是唯一必须由材质声明的键（Source 缺它时打警告并塞 `(1,0,0)` 红色占位），
+    /// 这里用 [`WATER_COLOR`] 归一化后的**泛白**（见该常量的说明）。`$refractamount` 缺省 `0`
+    /// 会让折射完全不扰动，而本工程没有真实折射缓冲、涟漪是程序化的，故缺省取
+    /// [`WATER_DEFAULT_REFRACT_AMOUNT`]。`$scroll1/$scroll2` 用 Valve 水材质里最常见的取值。
+    fn default() -> Self {
+        Self {
+            fog_color: [
+                WATER_COLOR[0] as f32 / 255.0,
+                WATER_COLOR[1] as f32 / 255.0,
+                WATER_COLOR[2] as f32 / 255.0,
+            ],
+            refract_tint: [1.0, 1.0, 1.0],
+            reflect_tint: [1.0, 1.0, 1.0],
+            refract_amount: WATER_DEFAULT_REFRACT_AMOUNT,
+            reflect_amount: 0.8,
+            above_water: true,
+            fog_start: 0.0,
+            fog_end: 0.0,
+            scroll1: [0.01, 0.01],
+            scroll2: [-0.025, 0.025],
+            scale: [1.0, 1.0],
+            water_depth: None,
+            bumpmap: None,
+            normalmap: None,
+            bump_scale: [1.0, 1.0],
+            bump_rotate: 0.0,
+        }
+    }
+}
+
+/// 缺 VMT 的水面用的折射扰动幅度（Source 的 `$refractamount` 缺省是 0 = 不扰动）。
+pub(crate) const WATER_DEFAULT_REFRACT_AMOUNT: f32 = 0.6;
+
 /// 单个材质的解析结果。
 ///
 /// 由 `load_material_bsp` 的三条返回路径产出：解析成功、`vmt_parser` 不认该着色器、
@@ -75,6 +196,14 @@ pub struct MaterialData {
     /// `$basetexture` 的 UV 变换；等于 `TextureTransform::default()` 时归 `None`。
     /// `push_material` 把其中的 `rotate` 由度转弧度。
     pub transform: Option<vmt_parser::TextureTransform>,
+    /// `$envmap` 的反射色（`$envmaptint`，缺省 `[1,1,1]`）；`None` 表示 VMT 没写 `$envmap`。
+    /// `push_material` 把它写进 glTF `extras.vbsp_envmap`（**与模型通路同键名**），
+    /// 渲染端据此给材质挂环境反射 —— 这是冰/玻璃「晶莹」感的来源，alpha 只负责能看见后面。
+    pub envmap_tint: Option<[f32; 3]>,
+    /// Source `Water` 材质的参数（`$fogcolor` / 两个 tint / 两个 amount / `$abovewater` …）；
+    /// `None` = 不是水面。`push_material` 把它写进 extras `vbsp_water`，渲染端据此建
+    /// 折射 + 菲涅尔反射的水面材质（口径见 [`WaterParams`]）。
+    pub water: Option<WaterParams>,
     /// 着色器名为 `Wireframe`（大小写不敏感）时为真 → glTF `extras.vbsp_wireframe`。
     ///
     /// 只在 `vmt_parser::from_str` 失败的分支里赋值：这类 VMT 走不到 `vmt_parser`
@@ -96,7 +225,7 @@ impl Default for MaterialData {
             translucent: false,
             no_cull: false,
             transform: None,
-            wireframe: false, texture_absent: false, basetexture2: None,
+            wireframe: false, texture_absent: false, basetexture2: None, envmap_tint: None, water: None,
         }
     }
 }
@@ -275,6 +404,260 @@ fn parse_dollar_color(vdf: &str) -> Option<[u8; 4]> {
     Some([ch(nums[0]), ch(nums[1]), ch(nums[2]), 255])
 }
 
+/// 取 VMT 文本里某个 `$key` 之后**第一对引号内的值**（返回原文切片，大小写保留）。
+///
+/// 理由：`vmt_parser 0.2.1` 的 `material/mod.rs` **没有 envmap 相关 API**（grep 零命中），
+/// 而 `$envmap` 是冰/玻璃/水视觉上唯一的高光来源 ⇒ 只能自己扫文本，与
+/// [`parse_dollar_color`] 同一套手法：在**小写副本**里定位键，再按同一字节偏移切原文
+/// （`to_ascii_lowercase()` 不改变字节长度 ⇒ 下标仍然对齐）。
+///
+/// 值不是「引号开头」时返回 `None`（例如键后面直接换行、或值没加引号）：宁可漏判成
+/// 无反射，也不要把下一个键的键名当成值。
+fn parse_dollar_value<'a>(vdf: &'a str, lower: &str, key: &str) -> Option<&'a str> {
+    let at = lower.find(key)?;
+    let rest = &vdf[at + key.len()..];
+    let t = rest.trim_start();
+    if !t.starts_with('"') {
+        return None;
+    }
+    let s = &t[1..];
+    let close = s.find('"')?;
+    let out = s[..close].trim();
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// 解析 `"[r g b]"` / `"{r g b}"` / 单值 —— 取能解析成 `f32` 的前三个数；
+/// 只有单值时按 Source 的写法三通道同值。一个都解析不出来返回 `None`。
+fn parse_vec3(raw: &str) -> Option<[f32; 3]> {
+    let nums: Vec<f32> = raw
+        .trim_matches(|c| c == '[' || c == ']' || c == '{' || c == '}')
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<f32>().ok())
+        .collect();
+    let first = *nums.first()?;
+    let at = |i: usize| nums.get(i).copied().unwrap_or(first);
+    Some([at(0), at(1), at(2)])
+}
+
+/// 取 VMT 的 `$envmap` 意图：写了 `$envmap` 且值不是空 / `"0"` ⇒ 有环境反射，
+/// 颜色取自 `$envmaptint`（缺省 `[1,1,1]`）。两者缺任一都不成立。
+///
+/// **必须与模型通路同口径**：渲染端 `lightmap-shader.ts` 的 `applyReflectionEnvMap` 只读
+/// extras 键 `vbsp_envmap`，而模型通路（`pakfile_models.rs:198-206`）早已写这个键 ——
+/// 世界面不写 ⇒ 世界面的冰/玻璃**永远静默跳过反射**（T-458 取证里那批「坡体惨白」的
+/// 材质全是模型 prop，世界面一次都没进过）。
+fn parse_dollar_envmap(vdf: &str, default_tint: [f32; 3]) -> Option<[f32; 3]> {
+    let lower = vdf.to_ascii_lowercase();
+    let val = parse_dollar_value(vdf, &lower, "\"$envmap\"")?;
+    if val == "0" {
+        return None;
+    }
+    let tint = parse_dollar_value(vdf, &lower, "\"$envmaptint\"")
+        .and_then(parse_vec3)
+        .unwrap_or(default_tint);
+    Some(tint)
+}
+
+/// 某材质名在 BSP texinfo 上的**标志位并集**（该名字不在任何 texinfo 里时返回 `None`）。
+///
+/// 为什么需要：texinfo 的 flags 是 **VBSP 编译期按材质写下的语义**，比 VMT 更可靠地知道
+/// 「这块面是什么」—— VMT 可以不在 pakfile 里（`Water` 材质就只有 VBSP 生成的
+/// `maps/<map>/…_depth_<n>.vmt` patch，母材质在包外），但 flags 一定在。
+/// 只读遍历，无分配；调用点只在 VMT 加载失败之后。
+fn texinfo_flags_of(bsp: &Bsp, name: &str) -> Option<u32> {
+    let mut acc: Option<u32> = None;
+    for texinfo in bsp.textures() {
+        if texinfo.name().eq_ignore_ascii_case(name) {
+            acc = Some(acc.unwrap_or(0) | texinfo.flags.bits());
+        }
+    }
+    acc
+}
+
+/// 从材质名尾巴的 `_depth_<n>` 里读水深（VBSP 给水面生成的 depth patch 命名，
+/// 例 `dev/dev_water2_depth_192` ⇒ 192；`nature/water_canals03_depth_64` ⇒ 64）。
+fn depth_from_name(name: &str) -> Option<f32> {
+    let lower = name.to_ascii_lowercase();
+    let idx = lower.rfind("_depth_")?;
+    let tail = &lower[idx + "_depth_".len()..];
+    let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse::<f32>().ok()
+}
+
+/// 取 `$key` 的单个 `f32` 值。
+///
+/// 先按「引号内的值」取（`parse_dollar_value`）；取不到再接受**未加引号的数值**——
+/// Source 的 VMT 允许 `"$abovewater" 0` / `"$fogend" 400.00` 这种写法（实测 666 的
+/// `dev/dev_water2.vmt` 就是），而只看引号会把这些参数静默落成缺省值（abovewater=true、
+/// fog=0），导致水下/水面参数不对。只收能解析成 `f32` 的 token，字符串值仍走引号分支。
+fn parse_dollar_f32(vdf: &str, lower: &str, key: &str) -> Option<f32> {
+    if let Some(v) = parse_dollar_value(vdf, lower, key) {
+        if let Ok(n) = v.trim().parse::<f32>() {
+            return Some(n);
+        }
+    }
+    let at = lower.find(key)?;
+    let rest = vdf[at + key.len()..].trim_start();
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == ',' || c == '}' || c == '{' || c == '"')
+        .unwrap_or(rest.len());
+    rest[..end].trim().parse::<f32>().ok()
+}
+
+/// 取 `$key` 的三分量颜色：`{22 20 10}`（0–255）与 `[1 1 1]`（0–1）两种写法都吃。
+///
+/// 判据是**任一分量 > 1** ⇒ 按 0–255 归一（Source 的 `{22 20 10}` 与 `[0.66 0.66 0.66]`
+/// 在 VMT 里混着写，见 `dev/dev_water2.vmt` 的 `$fogcolor "{22 20 10}"` 与
+/// `nature/water_canals03.vmt`）。
+fn parse_dollar_color3(vdf: &str, lower: &str, key: &str) -> Option<[f32; 3]> {
+    let v = parse_vec3(parse_dollar_value(vdf, lower, key)?)?;
+    if v.iter().any(|c| *c > 1.0) {
+        Some([v[0] / 255.0, v[1] / 255.0, v[2] / 255.0])
+    } else {
+        Some(v)
+    }
+}
+
+/// 把 VMT 里**嵌套的 `"名字" { … }` 子块**（`Water_DX80` / `Water_DX81` / `Proxies` …）整段剥掉，
+/// 只留最外层主体。
+///
+/// 为什么必须剥：Source 的 DX8/DX9 子块会覆盖同名 `$` 参数，而平扫取的是"首个命中"。
+/// 实测 `surf_boreas` 的 `materials/project_tendies/water01.vmt`：
+/// `Water_DX80 { "$refractamount" ".13" "$reflectamount" "2.5" }` 出现在主体
+/// `"$reflectamount" ".75"` **之前** ⇒ 不剥就会把 DX8 的 2.5 当成 DX9 的反射强度。
+fn strip_nested_blocks(vdf: &str) -> String {
+    let bytes = vdf.as_bytes();
+    let mut out = String::with_capacity(vdf.len());
+    let mut i = 0usize;
+    let mut depth: i32 = 0;
+    let mut last_was_string = false;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '"' {
+            let start = i;
+            i += 1;
+            while i < bytes.len() && bytes[i] != b'"' {
+                i += 1;
+            }
+            i = (i + 1).min(bytes.len());
+            out.push_str(&vdf[start..i]);
+            last_was_string = true;
+            continue;
+        }
+        if c == '{' {
+            depth += 1;
+            // 最外层主体（`"Water" {`，depth 1）保留；再往里且紧跟在名字后面 ⇒ 整个子块丢掉
+            if last_was_string && depth >= 2 {
+                let mut d = 1;
+                i += 1;
+                while i < bytes.len() && d > 0 {
+                    match bytes[i] {
+                        b'{' => d += 1,
+                        b'}' => d -= 1,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                depth -= 1;
+            } else {
+                out.push('{');
+                i += 1;
+            }
+            last_was_string = false;
+            continue;
+        }
+        if c == '}' {
+            depth = (depth - 1).max(0);
+        }
+        out.push(c);
+        if !c.is_whitespace() {
+            last_was_string = false;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// 从 VMT 文本解析 [`WaterParams`]（先剥掉 `//` 行注释与嵌套子块：Source 的水材质里被注释掉的
+/// `//"$reflecttint"` / `//"$fogcolor"` 很常见，DX8/DX9 子块又覆盖同名参数，两者都会让平扫取错值）。
+fn parse_water_params(vdf: &str) -> WaterParams {
+    let cleaned: String = strip_nested_blocks(
+        &vdf
+            .split('\n')
+            .map(|line| match line.find("//") {
+                Some(i) => &line[..i],
+                None => line,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let lower = cleaned.to_ascii_lowercase();
+    let d = WaterParams::default();
+    WaterParams {
+        // `srgb?$fogcolor` 优先：源在 sRGB 模式下走这个分支（`water01.vmt` 里
+        // `$fogcolor {255 255 255}` 是 linear 分支、`srgb?$fogcolor {120 200 255}` 才是引擎实际
+        // 用的那条）⇒ 本工程输出就是 sRGB，取 srgb 分支才对得上游戏画面。
+        fog_color: parse_dollar_color3(&cleaned, &lower, "\"srgb?$fogcolor\"")
+            .or_else(|| parse_dollar_color3(&cleaned, &lower, "\"$fogcolor\""))
+            .unwrap_or(d.fog_color),
+        refract_tint: parse_dollar_color3(&cleaned, &lower, "\"$refracttint\"").unwrap_or(d.refract_tint),
+        reflect_tint: parse_dollar_color3(&cleaned, &lower, "\"$reflecttint\"").unwrap_or(d.reflect_tint),
+        refract_amount: parse_dollar_f32(&cleaned, &lower, "\"$refractamount\"").unwrap_or(d.refract_amount),
+        reflect_amount: parse_dollar_f32(&cleaned, &lower, "\"$reflectamount\"").unwrap_or(d.reflect_amount),
+        above_water: parse_dollar_f32(&cleaned, &lower, "\"$abovewater\"")
+            .map(|v| v != 0.0)
+            .unwrap_or(d.above_water),
+        fog_start: parse_dollar_f32(&cleaned, &lower, "\"$fogstart\"").unwrap_or(d.fog_start),
+        fog_end: parse_dollar_f32(&cleaned, &lower, "\"$fogend\"").unwrap_or(d.fog_end),
+        // `$scroll1 "[.01 .01 .05]"`：只取前两维（第三维是帧动画速率）
+        scroll1: parse_dollar_value(&cleaned, &lower, "\"$scroll1\"")
+            .and_then(parse_vec3)
+            .map(|v| [v[0], v[1]])
+            .unwrap_or(d.scroll1),
+        scroll2: parse_dollar_value(&cleaned, &lower, "\"$scroll2\"")
+            .and_then(parse_vec3)
+            .map(|v| [v[0], v[1]])
+            .unwrap_or(d.scroll2),
+        scale: parse_dollar_value(&cleaned, &lower, "\"$scale\"")
+            .and_then(parse_vec3)
+            .map(|v| [v[0], v[1]])
+            .unwrap_or(d.scale),
+        // `$waterdepth`：VBSP 给每块水写的 depth patch 里带的**水深**（世界单位）。
+        // 名字兜底在调用点做（`depth_from_name`），因为这里拿不到材质名。
+        water_depth: parse_dollar_f32(&cleaned, &lower, "\"$waterdepth\""),
+        // `$bumpmap` / `$normalmap`：直接是路径字符串（去引号）。渲染端据此**选用**哪张失真图。
+        bumpmap: parse_dollar_value(&cleaned, &lower, "\"$bumpmap\"").map(str::to_string),
+        normalmap: parse_dollar_value(&cleaned, &lower, "\"$normalmap\"").map(str::to_string),
+        // `$bumptransform "center .5 .5 scale 1 1 rotate 0"`：只吃 scale / rotate 两个数。
+        // 注意有些水材质写的是 `texturescrollrate`（不是 transform）⇒ 解析不出就用缺省、不报错。
+        bump_scale: parse_bumptransform_scale(&cleaned, &lower).unwrap_or(d.bump_scale),
+        bump_rotate: parse_bumptransform_rotate(&cleaned, &lower).unwrap_or(d.bump_rotate),
+    }
+}
+
+/// 取 `$bumptransform` 里的 `scale sx sy`（缺省 `None`）。
+fn parse_bumptransform_scale(vdf: &str, lower: &str) -> Option<[f32; 2]> {
+    let v = parse_dollar_value(vdf, lower, "\"$bumptransform\"")?;
+    let toks: Vec<&str> = v.split_whitespace().collect();
+    let i = toks.iter().position(|t| t.eq_ignore_ascii_case("scale"))?;
+    let a = toks.get(i + 1)?.parse::<f32>().ok()?;
+    let b = toks.get(i + 2).and_then(|s| s.parse::<f32>().ok()).unwrap_or(a);
+    Some([a, b])
+}
+
+/// 取 `$bumptransform` 里的 `rotate <度>`（缺省 `None`）。
+fn parse_bumptransform_rotate(vdf: &str, lower: &str) -> Option<f32> {
+    let v = parse_dollar_value(vdf, lower, "\"$bumptransform\"")?;
+    let toks: Vec<&str> = v.split_whitespace().collect();
+    let i = toks.iter().position(|t| t.eq_ignore_ascii_case("rotate"))?;
+    toks.get(i + 1)?.parse::<f32>().ok()
+}
+
 /// 加载材质（非 BSP 通路的容错包装）。
 ///
 /// 返回：加载成功返回解析结果；失败返回纯白默认材质（`path` 为空串），
@@ -354,6 +737,33 @@ pub fn load_material_fallback_bsp(
                     possible_source: ResourceSource::BspFile,
                 });
             }
+            // VMT 找不到（母材质不在包里）时的**兜底语义**取自 BSP texinfo 的 flags ——
+            // 那是 VBSP 编译期按材质写下的，比 VMT 更不容易缺：
+            //  - `WARP`（0x8，湍流水面扭曲）⇒ **这是水面**。Source 的 `Water` 材质永远没有
+            //    `$basetexture`（颜色来自 `_rt_WaterRefraction` / `_rt_WaterReflection` 两个
+            //    渲染目标），而 VBSP 只为它生成 `maps/<map>/…_depth_<n>.vmt` patch、母材质
+            //    留在包外 ⇒ 此前一律落到下面"纯白 + 不透明"的兜底，水面画成一块白板
+            //    （实测 surf_666：`dev/dev_water2` 176 面、`dev/dev_waterbeneath2` 175 面、
+            //    `nature/water_canals03`(+`_beneath`) 16 面）。这里给上游口径的水色 + 半透明
+            //    + 水面缺省反射强度，与「VMT 解析出 `Water`」的那条通路同结果。
+            //  - `TRANS`（0x10，纹理半透明）⇒ 至少开混合（瀑布等 `Refract` 材质既不在包里
+            //    也没有 `$translucent` 可读，只有这个标记能证明它是半透明面）。
+            let tex_flags = texinfo_flags_of(bsp, name).unwrap_or(0);
+            if tex_flags & 0x8 != 0 {
+                // 水面但母材质 VMT 不在 pakfile、也不在回退表里：**不编造任何参数**。
+                // `water: None` ⇒ 渲染端不注入水面着色器；alpha=0 ⇒ 该层不绘制（空缺），
+                // 缺失记录已在上面的 `missing_resources.push` 里（与缺材质同形）。
+                // 想看到真实水面，必须让该 VMT 能被解析到（pakfile 或 vmts-fallback）。
+                return MaterialData {
+                    name: name.to_string(),
+                    path: String::new(),
+                    color: [255, 255, 255, 0],
+                    translucent: true,
+                    ..MaterialData::default()
+                };
+            }
+            let tex_translucent = tex_flags & 0x10 != 0;
+
             // 缺失纹理回退：按材质名查表（VMT 都找不到时没有 `$basetexture` 可用），
             // 解出的低清纹理随 GLB 一起下发。透明度未知，链路上的 `push_material`
             // 会按贴图自身的 alpha 镂空补判 MASK。
@@ -368,13 +778,17 @@ pub fn load_material_fallback_bsp(
                         name: name.to_string(),
                         image,
                     }),
+                    // 贴图自带 alpha 通道时混合系数保持 1（透明度交给贴图），只开混合档位。
+                    translucent: tex_translucent,
                     ..MaterialData::default()
                 };
             }
             MaterialData {
                 name: name.to_string(),
                 path: String::new(),
-                color: [255, 255, 255, 255],
+                // 声明半透明却连贴图都没有 ⇒ 用占位 alpha（与 `$translucent` 无 alpha 来源同策）
+                color: [255, 255, 255, if tex_translucent { TRANSLUCENT_PLACEHOLDER_ALPHA } else { 255 }],
+                translucent: tex_translucent,
                 ..MaterialData::default()
             }
         }
@@ -495,11 +909,24 @@ pub(crate) fn load_material_bsp(
                 wireframe: parse_shader_name(&vdf)
                     .map(|s| s.eq_ignore_ascii_case("wireframe"))
                     .unwrap_or(false),
+                // `vmt_parser` 不认这个着色器 ⇒ 整条 typped 通路都走不到，
+                // 但 VMT 文本里写的 `$envmap` 仍然算数（否则这类玻璃一律零反射）。
+                envmap_tint: parse_dollar_envmap(&vdf, [1.0, 1.0, 1.0]),
                 ..MaterialData::default()
             });
         }
     };
 
+    // `patch` 材质 include 到的**母材质原文**（VBSP 为 `$envmap env_cubemap` 生成的
+    // `maps/<map>/<材质>_<x>_<y>_<z>.vmt` 只写 `include` + 一条 `replace $envmap`）。
+    //
+    // 为什么必须留：`vmt_parser` 的 `resolve` 会把母材质的**类型化**字段（`$translucent` /
+    // `$alpha` / `$basetexture`）并进来，但本文件的 `parse_dollar_*` 系列是**扁平文本扫描**，
+    // 只看 `vdf` 自己 ⇒ 母材质里的 `$envmaptint` / `$color` / `$basetexture2` 一律看不到，
+    // 于是 reflectivity 退回 `$envmaptint` 缺省 `[1,1,1]`（实测 surf_boreas 的 21 个
+    // `$envmap` patch 全部如此，作者意图是 0.02~0.66）。这里把原文拼在 patch 之后给扫描用：
+    // 同名键 patch 在前 ⇒ patch 自己的声明仍然优先。
+    let mut included_vdf: Option<String> = None;
     let material = material.resolve(|path| {
         // 生成若干候选的路径格式
         let path = path.trim_start_matches('/').trim_start_matches("materials/"); // 剥掉 VBSP patch include 自带的 materials/ 前缀
@@ -517,30 +944,76 @@ pub(crate) fn load_material_bsp(
         });
         if let Some(data) = hit {
             let vdf = String::from_utf8(data.to_vec())?;
+            if included_vdf.is_none() {
+                included_vdf = Some(vdf.clone());
+            }
             return Ok::<_, Error>(vdf);
         }
         // 回退 VMT 文本：地图 patch 材质 `$include` 的基 VMT 往往不在 pakfile（游戏本体自带），
-        // 与顶层查找共用同一张表；查不到才报错（数据缺失，不编造）。
-        // 键归一：include 路径可能带 `.vmt` 后缀/反斜杠，表里的键是「无后缀、正斜杠、小写」。
+        // 与顶层查找共用同一张表；键归一（去 .vmt 后缀/反斜杠/小写）后再查，查不到才报错。
         let fallback_key = path
             .replace('\\', "/")
             .trim_end_matches(".vmt")
             .to_ascii_lowercase();
         if let Some(text) = options.vmt_fallback.get(&fallback_key) {
+            if included_vdf.is_none() {
+                included_vdf = Some(text.clone());
+            }
             return Ok::<_, Error>(text.clone());
         }
         let paths_str = possible_paths.join(", ");
         Err(Error::Other(format!("Can't find file in BSP. Tried: {}", paths_str)))
     })?;
 
+    // 扁平扫描用文本：patch 原文 + 母材质原文（见 `included_vdf` 的说明）。
+    let vdf = match included_vdf {
+        Some(included) => format!("{}\n{}", vdf, included),
+        None => vdf,
+    };
+
     let base_texture = match material.base_texture() {
         Some(texture) => texture,
         None => {
             let water = matches!(material, vmt_parser::material::Material::Water(_)); // Water 无 $basetexture ⇒ 上游口径的半透明水色
+            // `Refract`（河流 / 瀑布 / 冰面折射）：Source 里这类材质**折射背景**，是"看得穿"的表面。
+            // 它们的 VMT 只有 `$normalmap` / `$refractamount`，既没有 `$basetexture` 也没有
+            // `$translucent`（`waterfallsoft…` 有，但 `vmt_parser 0.2.1` 的 Refract 不解析它）
+            // ⇒ 落到这里时按**半透明**处理，否则整面画成不透明白板（实测 surf_666 的
+            // `watersource/river/river_clear` 15 面 + `watersource/waterfall/waterfallsoft_1024_nrm_clear` 21 面）。
+            let refract = matches!(material, vmt_parser::material::Material::Refract(_));
+            let mut color = if water {
+                WATER_COLOR
+            } else {
+                parse_dollar_color(&vdf).unwrap_or([255, 255, 255, 255])
+            };
+            // 折射面没有任何 alpha 来源（没有 `$alpha`、这一路也没有贴图）⇒ 用占位 alpha
+            // （与 `$translucent` 无 alpha 来源同策：BLEND+alpha=1 等于不透明）。
+            if refract && color[3] == 255 {
+                color[3] = TRANSLUCENT_PLACEHOLDER_ALPHA;
+            }
             return Ok(MaterialData {
                 name: name.to_string(), path: vmt_path,
-                color: if water { [82, 180, 217, 128] } else { parse_dollar_color(&vdf).unwrap_or([255, 255, 255, 255]) },
-                translucent: water,
+                color,
+                translucent: water || refract,
+                // 水面的 tint 缺省用 `WATER_DEFAULT_ENVMAP_TINT`（Source 的 `$reflectamount` 量级），
+                // 其余材质保持 `$envmaptint` 缺省 `[1,1,1]`。
+                envmap_tint: parse_dollar_envmap(
+                    &vdf,
+                    if water { WATER_DEFAULT_ENVMAP_TINT } else { [1.0, 1.0, 1.0] },
+                ),
+                // 水面参数：`Water` 着色器走这条通路（VMT 在包里时能读到 `$fogcolor` /
+                // `$refractamount` / `$abovewater` …）。
+                water: if water {
+                    let mut w = parse_water_params(&vdf);
+                    // 水深兜底：VMT 里没有 `$waterdepth` 时，从材质名尾巴的 `_depth_<n>` 读
+                    // （VBSP 生成的 depth patch 命名，例 `dev/dev_water2_depth_192`）。
+                    if w.water_depth.is_none() {
+                        w.water_depth = depth_from_name(name);
+                    }
+                    Some(w)
+                } else {
+                    None
+                },
                 ..MaterialData::default()
             });
         }
@@ -556,6 +1029,13 @@ pub(crate) fn load_material_bsp(
     let alpha_test = material
         .alpha_test()
         .map(|reference| if reference >= 1.0 || reference <= 0.0 { 0.5 } else { reference });
+
+    // `$alpha`（[0,1]，1 = 完全不透明）：直接取 VMT 的解析值。
+    // `vmt-parser 0.2.1` 的 `Material::alpha()` 对未声明的键返还 1.0、对不支持的着色器
+    // 同样返还 1.0（`material/mod.rs:169-180`）⇒ 缺省即不透明，不需要额外判定。
+    // 越界值（≤ 0 会让材质整体隐形、≥ 1 无意义）统一归一到 1.0。
+    let vmt_alpha = material.alpha();
+    let alpha01 = if vmt_alpha > 0.0 && vmt_alpha < 1.0 { vmt_alpha } else { 1.0 };
 
     // 尝试加载纹理，如果失败则使用默认材质数据
     let texture_data = match load_texture_bsp(base_texture, bsp, options) {
@@ -589,8 +1069,23 @@ pub(crate) fn load_material_bsp(
         .filter(|transform| **transform != vmt_parser::TextureTransform::default())
         .cloned(); let second_texture = load_second_texture(bsp, options, &vdf);
 
+    // 基色 alpha 通道的取值优先级：
+    //   ① VMT 声明了 `$alpha < 1` ⇒ 直接用解析值（这是唯一"活"的数值来源，与有无贴图无关）；
+    //   ② 没声明、但贴图本身带 alpha 通道 ⇒ 这里给 255，透明度交给贴图的 alpha 通道
+    //      （glTF 的 `baseColorTexture.a` 会自然参与混合，不需要在 factor 上重复表达）；
+    //   ③ 两者都没有、却声明了半透明 ⇒ 落到 [TRANSLUCENT_PLACEHOLDER_ALPHA] 占位。
+    // 旧口径把 ② 也写成 255 却**只对无贴图的情形**给 51，导致带贴图的半透明材质
+    // 在 glTF 里是 BLEND 而实际 alpha 恒为 1 ⇒ 视觉与不透明逐像素相同。
+    let alpha_u8 = if alpha01 < 1.0 {
+        (alpha01 * 255.0).round() as u8
+    } else if (translucent | glass) && texture_data.is_none() {
+        TRANSLUCENT_PLACEHOLDER_ALPHA
+    } else {
+        255
+    };
+
     Ok(MaterialData {
-        color: [255, 255, 255, if (translucent | glass) && texture_data.is_none() { 51 } else { 255 }],
+        color: [255, 255, 255, alpha_u8],
         name: name.to_string(),
         path: vmt_path,
         texture_absent: material.base_texture().is_some() && texture_data.is_none(), texture: texture_data, basetexture2: second_texture,
@@ -598,7 +1093,10 @@ pub(crate) fn load_material_bsp(
         translucent: translucent | glass,
         no_cull: material.no_cull(),
         transform,
+        envmap_tint: parse_dollar_envmap(&vdf, [1.0, 1.0, 1.0]),
         wireframe: false,
+        // 有 `$basetexture` 的材质不是水面（`Water` 着色器走上面的无 basetexture 分支）。
+        water: None,
     })
 }
 

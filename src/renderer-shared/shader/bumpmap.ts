@@ -168,6 +168,9 @@ export function applyBumpShaders(root: THREE.Object3D): number {
 	for (const material of seen) {
 		const bump = bumpByFirstTexture.get(keyOf(material));
 		if (!bump) continue;
+		// 水面材质优先：水着色器已把 `$bumpmap` 当**失真场**用掉（三组 UV + 逐帧 + 位移），
+		// 这里再套一层 bump 会改写整个水面着色器，实测会出现「加载期开关有效、逐帧 uniform 全失效」。
+		if ((material as unknown as { __vbspWaterInject?: boolean }).__vbspWaterInject === true) continue;
 		// 注入块用基色贴图的 UV varying（`vMapUv`）采样法线图 ⇒ 没有基色贴图的材质直接跳过，
 		// 否则引用了不存在的 varying 会让程序编译失败。
 		if (!(material as THREE.MeshBasicMaterial).map) {

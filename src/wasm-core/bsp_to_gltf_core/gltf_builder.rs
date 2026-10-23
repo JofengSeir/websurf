@@ -296,6 +296,8 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
             || second_index.is_some()
             || material.translucent
             || material.alpha_test.is_some()
+            // 水面参数（$fogcolor / 扰动幅度 / $abovewater）：渲染端据此建折射 + 菲涅尔反射。
+            || material.water.is_some()
         {
             let mut ex = serde_json::Map::new();
             ex.insert("vbsp_wireframe".into(), serde_json::json!(material.wireframe));
@@ -308,6 +310,38 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
             }
             if let Some(cutoff) = material.alpha_test {
                 ex.insert("vbsp_alpha_test".into(), serde_json::json!(cutoff));
+            }
+            // 反射强度只给**水面**写：世界面全量下发 `vbsp_envmap` 会把整张图提亮
+            // （渲染端 `applyReflectionEnvMap` 是加法混合）。
+            if material.water.is_some() {
+                if let Some(tint) = material.envmap_tint {
+                    ex.insert("vbsp_envmap".into(), serde_json::json!(tint));
+                }
+            }
+            // 水面参数：键名 `vbsp_water`，扁平对象（渲染端 `water.ts` 逐项读）。
+            // 单位与 Source VMT 一致：颜色 0..1（gamma）、amount 是无量纲扰动幅度。
+            if let Some(w) = material.water.as_ref() {
+                ex.insert(
+                    "vbsp_water".into(),
+                    serde_json::json!({
+                        "fog": w.fog_color,
+                        "refractTint": w.refract_tint,
+                        "reflectTint": w.reflect_tint,
+                        "refractAmount": w.refract_amount,
+                        "reflectAmount": w.reflect_amount,
+                        "aboveWater": w.above_water,
+                        "fogStart": w.fog_start,
+                        "fogEnd": w.fog_end,
+                        "scroll1": w.scroll1,
+                        "scroll2": w.scroll2,
+                        "scale": w.scale,
+                        "bumpmap": w.bumpmap,
+                        "normalmap": w.normalmap,
+                        "bumpScale": w.bump_scale,
+                        "bumpRotate": w.bump_rotate,
+                        "waterDepth": w.water_depth,
+                    }),
+                );
             }
             serde_json::value::to_raw_value(&ex)
                 .map(Some)
