@@ -105,9 +105,10 @@ export class ViewerScene {
       mosaicManifest: sky?.mosaicManifest ?? null,
       quality: readRenderPrefs().textureQuality,
     });
+    const cull = Number.isFinite(result.defaultCull) ? result.defaultCull.toFixed(1) : '全加载';
     console.info(
       `[viewer][render-session] 装载完成：maxDim=${result.maxDim.toFixed(1)} ` +
-        `diagonal=${result.diagonal.toFixed(1)} 剔除=${result.defaultCull.toFixed(1)} ` +
+        `diagonal=${result.diagonal.toFixed(1)} 剔除=${cull} ` +
         `merge=${result.merge ? result.merge.meshes + '→' + result.merge.chunks : '未合并'}`,
     );
   }

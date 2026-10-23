@@ -42,5 +42,5 @@
 
 **已完成**：新增 `src/renderer-shared/scene/render-session.ts`，把 GLB 之后的共享接线（装配/合并/环境/天空/相机/可见性/近平面/画质/探针/每帧天空+主世界）收成一份；viewer/game/debug 改为薄壳，删除 debug 的 `LodManager`。静态门禁 `src/scripts/check-render-parity.mjs` + CI `render-parity` job；文档 `docs/render-parity.md`；同机位截图工具 `src/scripts/capture-render.mjs`。AMH `mem_mvkhr473_1b3a3431f24c`。
 
-**待 owner 定（剔除）**：当前可见性仍按**块中心**距离判定。main `79cff4b`（块表面距离）实测 666 有 44/108 个机位误杀、3 分钟后被 `588ebe2` 回退未写原因；rebuild `19b1d4a`（默认全加载 + 块表面 + 近裁面 10 射线，tag `safety-19b1d4a`）未采用。下一步候选：按**块 AABB 到相机**的距离判定，保留显式视距；恢复前用同机位三张图 + `__vbspPose` 做 A/B。
+**已定（2026-10-23 owner）：默认全加载**。`cullDistance = Infinity`，不按距离藏块；显式正值才按**块表面**距离剔除（`dist > 视距 + 块半径`）。旧「块中心距离 / 默认 maxDim×0.5」已删除。未采用 `19b1d4a` 同批的「近裁面 10 射线」——先只解决「块被整块藏掉」；若仍有贴脸几何被 near 裁掉，再单独做近裁面 A/B。
 

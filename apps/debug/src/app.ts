@@ -429,15 +429,17 @@ async function onSceneReadyUi(
 	);
 	// 缺失材质纹理：与默认纹理包比对后列出，等待用户确认
 	void showMissingTextures(msg.missingTextures);
-	// 动态设置视距剔除滑块范围（真实值由主线程 LOD 计算；控件本身进入地图前已可用）
+	// 动态设置视距剔除滑块范围（真实值由主线程 LOD 计算；控件本身进入地图前已可用）。
+	// 默认全加载（`Infinity`）时 UI 用 0 表达；0 也正好是「自动/全加载」的档值。
 	if (dom.cullDistRange && diag) {
-		dom.cullDistRange.min = '1000';
+		dom.cullDistRange.min = '0';
 		dom.cullDistRange.max = String(Math.ceil(diag.maxCull));
-		dom.cullDistRange.value = String(diag.defaultCull);
+		dom.cullDistRange.value = String(Number.isFinite(diag.defaultCull) ? diag.defaultCull : 0);
 	}
 	if (dom.cullDistNum && diag) {
+		dom.cullDistNum.min = '0';
 		dom.cullDistNum.max = String(Math.ceil(diag.maxCull));
-		dom.cullDistNum.value = String(diag.defaultCull);
+		dom.cullDistNum.value = String(Number.isFinite(diag.defaultCull) ? diag.defaultCull : 0);
 	}
 	// 启用控件（进入地图前即可设置的：物理模式/碰撞来源/视距已在 HTML 初始可用）
 	if (dom.respawnBtn) dom.respawnBtn.disabled = false;
@@ -603,7 +605,7 @@ function updateCullStatsUI(msg: CullStatsLike): void {
 	if (dom.cullStatsEl) {
 		const p = msg.pvs;
 		dom.cullStatsEl.innerHTML =
-			`<span class="label">可见</span> <span class="v">${msg.visible}/${msg.total}</span>  <span class="label">视距</span> <span class="v">${msg.cullDist.toFixed(0)}</span>  ` +
+			`<span class="label">可见</span> <span class="v">${msg.visible}/${msg.total}</span>  <span class="label">视距</span> <span class="v">${Number.isFinite(msg.cullDist) ? msg.cullDist.toFixed(0) : '全加载'}</span>  ` +
 			`<span class="label">cluster</span> <span class="v">${p.cluster >= 0 ? p.cluster : '—'}</span>  <span class="label">PVS</span> <span class="v">${p.totalClusters > 0 ? `${p.visibleClusters}/${p.totalClusters} 隐藏${p.pvsHidden}` : '未接线'}</span>  ` +
 			`<span class="label">LOD</span> <span class="v">近${p.near}/远${p.far}</span>`;
 	}
@@ -1402,7 +1404,8 @@ function bindUI(): void {
 		const raw = parseFloat((e.target as HTMLInputElement).value);
 		if (!Number.isFinite(raw)) return;
 		const max = parseFloat(dom.cullDistRange?.max ?? '100000');
-		const val = Math.min(max, Math.max(1000, raw));
+		// 0 = 全加载（不按距离藏块）；正值才按块表面距离剔除
+		const val = Math.min(max, Math.max(0, raw));
 		if (dom.cullDistRange) dom.cullDistRange.value = String(val);
 		if (dom.cullDistNum) dom.cullDistNum.value = String(val);
 		applyConfigPatch(config, 'lod', { cullDistance: val });

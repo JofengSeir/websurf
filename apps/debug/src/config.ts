@@ -208,7 +208,8 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   },
   lod: {
     updateInterval: 1,
-    cullDistance: 12800, // 构造期默认视距；`loadScene` 之后被 lod-manager 的 `setup` 校准值覆盖
+    // 0 = 全加载（不按距离藏块；只靠相机视锥）。`loadScene` 之后由共享会话按同一档值校准。
+    cullDistance: 0,
   },
   lighting: {
     ambientColor: 0xffffff,

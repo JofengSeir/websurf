@@ -83,14 +83,15 @@ node src/scripts/capture-render.mjs ^
 
 同机位截图（666 的坡面机位）三端画面内容一致；差异只剩 canvas 比例与端特有 HUD/overlay。
 
-## 6. 待定：可见性剔除
+## 6. 可见性剔除：默认全加载（2026-10-23 owner 决定）
 
-当前 `VisibilityController` 仍按**块中心**距离判定（`src/renderer-shared/scene/visibility-controller.ts`）。已知误杀：
+`src/renderer-shared/scene/visibility-controller.ts`：
 
-- main `79cff4b` 实测 666 有 44/108 个机位会把「块面距相机 <500」的块整块藏掉，最近面距到过 0；该提交 3 分钟后被 `588ebe2` 回退，未写原因。
-- rebuild 分支 `19b1d4a`（tag `safety-19b1d4a`）是「默认全加载 + 块表面距离 + 近裁面 10 射线」，当前分支未采用。
+- **默认（档值 0）= 全加载**：`cullDistance = Infinity`，不按距离藏任何块；只靠 three 的相机视锥。
+- **显式正值**才按**块表面**距离剔除（`dist > 视距 + 块半径`）——避免大合并块「中心在视距外、几何贴在脸上」被整块误杀（main `79cff4b` 实测 666 有 44/108 个机位误杀，最近面距到过 0）。
+- 旧行为（块中心距离、默认 `maxDim × 0.5`）已删除。
 
-owner 2026-10-23 决定：**先不动剔除**，等渲染收口完成后再一起定。若恢复，优先考虑按**块 AABB 到相机**的距离（比球面半径更准确），而不是直接退回无限视距。
+未采用：rebuild `19b1d4a` 同批的「近裁面 10 射线」（tag `safety-19b1d4a`）。全加载先只解决「块被整块藏掉」；若仍有贴脸几何被 near 裁掉，再单独做近裁面 A/B，不把它混进这次决定。
 
 ## 7. 加新渲染特性时的检查清单
 

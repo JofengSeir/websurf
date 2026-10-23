@@ -8,7 +8,8 @@
  *
  *   - 判定顺序固定：**距离优先**（`dist > cullDistance` ⇒ 远），距离内再看 PVS（启用且相机 cluster 有效
  *     且该块有 clusterId 且全部不可见 ⇒ 隐藏）；
- *   - `cullDistance = 0` 表示自动（`maxDim × 0.5`，下限 1000，§12.2），显式值直接覆盖；
+ *   - `cullDistance = 0`（默认）= **全加载**（`Infinity`，不按距离藏任何块）；显式值才按
+ *     **块表面**距离剔除（`dist > 视距 + 块半径`，避免大合并块中心在视距外、几何贴在脸上被整块误杀）；
  *   - **天空层永不剔除**：`SKY_LAYER` 上的 mesh 在收集阶段就跳过（它们由第二相机单独渲染）；
  *   - 相机不在任何 cluster（出生在固体里/地图外）时跳过 PVS，只按距离判定，避免「可见集为空 ⇒ 全剔」；
  *   - 结果写回 `mesh.visible` 与 `mesh.userData.lodLevel`（三端同字段，供调试面板/统计读）。
@@ -56,12 +57,25 @@ export interface VisibilityUpdateResult {
   changed: boolean;
 }
 
-/** 距离判定（共享唯一口径）：块中心到相机是否超过剔除距离。本控制器与 debug 的 `LodManager` 都调它。 */
-export function isBeyondCullDistance(center: THREE.Vector3, cameraPos: THREE.Vector3, cullDistance: number): boolean {
+/**
+ * 距离判定（共享唯一口径）：**块表面**到相机是否超过剔除距离。
+ *
+ * 必须把块的包围球半径算进去（`cullDistance + radius`）。按块中心判定时，合并块越大越容易误杀：
+ * surf 图的块半径上万，中心在视距外而几何体贴在相机脸上。默认 `cullDistance = Infinity` 时本函数
+ * 恒为 false（全加载）；只有面板显式设了视距才真正剔除。
+ */
+export function isBeyondCullDistance(
+  center: THREE.Vector3,
+  cameraPos: THREE.Vector3,
+  cullDistance: number,
+  radius = 0,
+): boolean {
+  if (!Number.isFinite(cullDistance)) return false;
   const dx = cameraPos.x - center.x;
   const dy = cameraPos.y - center.y;
   const dz = cameraPos.z - center.z;
-  return dx * dx + dy * dy + dz * dz > cullDistance * cullDistance;
+  const reach = cullDistance + Math.max(0, radius);
+  return dx * dx + dy * dy + dz * dz > reach * reach;
 }
 
 /** 收集/剔除的唯一实现。一个端持一个实例即可（换图时 `clear()` 再 `collect()`）。 */
@@ -78,10 +92,17 @@ export class VisibilityController {
     this.items.length = 0;
   }
 
-  /** 按 map 尺寸设置自动剔除距离，并按配置值决定生效值（`configValue > 0` 覆盖自动值）。 */
+  /**
+   * 设置生效剔除距离。
+   *
+   * ⚠️ **默认（`configValue = 0`）不按距离剔除**：`cullDistance = Infinity` ⇒ 全量绘制。
+   * 只靠相机视锥（three 每对象自带、保守且正确）决定看不看得到，不再用「块中心/块表面距离」
+   * 把整块藏掉——实测大合并块会被误杀（远处中心 + 贴脸几何）。面板显式给正值时恢复距离剔除，
+   * 且按块表面判定（见 `isBeyondCullDistance`）。
+   */
   setCullDistance(autoValue: number, configValue = 0): number {
     this.autoCullDistance = Math.max(autoValue, CULL_DISTANCE_MIN);
-    this.cullDistance = configValue > 0 ? configValue : this.autoCullDistance;
+    this.cullDistance = configValue > 0 ? configValue : Number.POSITIVE_INFINITY;
     return this.cullDistance;
   }
 
@@ -151,7 +172,7 @@ export class VisibilityController {
     const pvsClusterValid = pvs !== null && pvs.currentClusterId >= 0;
     if (this.enablePvs && pvs) pvs.update(camPos);
     for (const item of this.items) {
-      const beyond = isBeyondCullDistance(item.center, camPos, this.cullDistance);
+      const beyond = isBeyondCullDistance(item.center, camPos, this.cullDistance, item.radius);
       let level = LOD_NEAR;
       if (beyond) {
         level = LOD_FAR;
