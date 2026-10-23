@@ -148,6 +148,8 @@ export interface RenderDebugPrefs {
   lightmapStage: LightmapStage;
   outputGamma22: boolean;
   vertexLightingOff: boolean;
+  /** 半透明单独分块（T/O 分桶 + 细 cell）；关 = 与不透明并块（A/B 复现用）。 */
+  transChunking: boolean;
   bumpOff: boolean;
   worldTransitionOff: boolean;
   envMapAll: boolean;
@@ -161,6 +163,7 @@ export const RENDER_DEBUG_DEFAULTS: RenderDebugPrefs = {
   lightmapStage: 'auto',
   outputGamma22: true,
   vertexLightingOff: false,
+  transChunking: true,
   bumpOff: false,
   worldTransitionOff: false,
   envMapAll: false,
@@ -262,6 +265,7 @@ function normalize(raw: unknown): RenderPrefs {
       lightmapStage: stage(db.lightmapStage, d.debug.lightmapStage),
       outputGamma22: bool(db.outputGamma22, d.debug.outputGamma22),
       vertexLightingOff: bool(db.vertexLightingOff, d.debug.vertexLightingOff),
+      transChunking: bool(db.transChunking, d.debug.transChunking),
       bumpOff: bool(db.bumpOff, d.debug.bumpOff),
       worldTransitionOff: bool(db.worldTransitionOff, d.debug.worldTransitionOff),
       envMapAll: bool(db.envMapAll, d.debug.envMapAll),
@@ -658,6 +662,7 @@ export function applyRenderDebugSwitches(d: RenderDebugPrefs): void {
   // 布尔项显式写：实现里多处判 `=== true` / `=== false`，「未设置」与「关」语义不同必须能区分
   g.__vbspOutputGamma22 = d.outputGamma22;
   g.__vbspVertexLightingOff = d.vertexLightingOff;
+  g.__vbspTransChunking = d.transChunking;
   g.__vbspBumpOff = d.bumpOff;
   g.__vbspWorldTransitionOff = d.worldTransitionOff;
   g.__vbspEnvMapAll = d.envMapAll;

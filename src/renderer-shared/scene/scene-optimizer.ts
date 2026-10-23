@@ -142,6 +142,8 @@ export function normalizeMergeGroup(geoms: THREE.BufferGeometry[]): THREE.Buffer
  */
 export interface MergeOptions {
   normalizeGroup?: (geoms: THREE.BufferGeometry[]) => THREE.BufferGeometry[];
+  /** 半透明是否单独成块（T/O 分桶 + `cellSize/4`）。默认 `true`；`false` 用于 A/B 复现并块问题。 */
+  translucentSplit?: boolean;
 }
 
 /** mergeIntoChunks 的产物：chunks / keptMeshes 由调用方自行挂载，统计字段供诊断日志用。 */
@@ -354,7 +356,8 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
   //    与不透明的撞上，也进不到同一个桶。不透明侧的键与产物与改前逐字相同。
   const cells = new Map<string, OptMeshInfo[]>();
   for (const it of infos) {
-    const isTrans = optIsTranslucent(it.mesh.material);
+    // 面板可关：关掉后半透明与不透明同块（复现「水面被并进大块 ⇒ RT 自采样/放射反射」）。
+    const isTrans = opts?.translucentSplit !== false && optIsTranslucent(it.mesh.material);
     const cs = isTrans ? cellSize / OPT_TRANS_CELL_DIV : cellSize;
     const key = (isTrans ? 'T' : 'O') + optCellKey(it.cx, it.cy, it.cz, cs);
     let arr = cells.get(key);

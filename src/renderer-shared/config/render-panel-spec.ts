@@ -365,6 +365,18 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     note: SWITCH_NOTE,
   },
   {
+    id: 'swTransChunking',
+    label: '半透明单独分块',
+    title: '开 = 半透明单独成块（默认）；关 = 与不透明并块，复现「水面被并进大块 ⇒ 折射 RT 自采样 / 中心放射反射」',
+    group: '排查·材质',
+    kind: 'toggle',
+    pref: 'debug.transChunking',
+    apply: 'rebuild',
+    defaultOn: true,
+    apps: D,
+    note: SWITCH_NOTE,
+  },
+  {
     id: 'swWorldTransitionOff',
     label: '关世界过渡',
     title: '不注入世界过渡（$basetexture2）着色器',

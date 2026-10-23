@@ -1381,7 +1381,10 @@ export class RendererMain {
   // LOD·PVS 注册之前的空间分块合并：算法已下沉渲染共享核（`src/renderer-shared/scene/scene-optimizer.ts`，
   // 与 game 同一份），本方法只保留入口——合并前的归一由共享核的默认钩子承担（T-460 WP4）。
   private optimizeScene(bspRoot: THREE.Scene, gltfScene: THREE.Object3D): void {
-    optimizeSceneShared(bspRoot, gltfScene, this.camera, FOV);
+    // 面板「排查·材质 → 半透明单独分块」：关掉后与不透明同块（A/B 复现用）。
+    // 缺省（未设置）= 开，与迁移 main 后的行为一致。
+    const split = (globalThis as { __vbspTransChunking?: unknown }).__vbspTransChunking !== false;
+    optimizeSceneShared(bspRoot, gltfScene, this.camera, FOV, { translucentSplit: split });
   }
 
   // 复用向量
