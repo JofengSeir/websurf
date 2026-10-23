@@ -14,7 +14,7 @@
 | `src/wasm-core` | BSP / 模型 / 材质 / 渲染导出的 wasm 核心（Rust） |
 | `src/ts-shared`、`src/renderer-shared` | 共享 TS 层；three 的单实例装在仓库根 `node_modules` |
 | `src/materials`、`src/web` | 材质包与共享 web 资产 |
-| `src/scripts` | 本地开发/构建工具：`serve.py`、`build-textures-mtz.mjs`、`copy-wasm-pkg.mjs`、`sync-web-assets.mjs`、工具链 `.cmd` |
+| `src/scripts` | 本地开发/构建/流程工具：`serve.py`、`build-textures-mtz.mjs`、`copy-wasm-pkg.mjs`、`sync-web-assets.mjs`、`agent-memory.mjs`、`check-render-parity.mjs`、`capture-render.mjs`、工具链 `.cmd` |
 | `test/` | `maps/`、`replay/` 夹具（gitignore，本地自备）；`project/` 第三方 SDK 参考 |
 | `skills/websurf-env-traps` | 本仓 Windows 作业陷阱（开工前读） |
 | `.github/workflows` | `ci-gates.yml`（构建/测试）、`deploy-pages.yml`（部署） |
@@ -59,60 +59,71 @@ CI 仍会跑 `ci-gates.yml`：`cargo test`、viewer 的源码契约、三端 was
 
 **旧的独立 agentmemory / mcp-hub 路线已卸载：不要恢复。** 当前 AMH gateway 的 backend 是 agentmemory（0.9.30），只经 gateway 访问；不要直连 `:3111` 或实例 REST。
 
-AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md` 为准。项目契约 `.amh/config.json`（`hub` / `binding` / `project`，本地文件，不写进仓库）。旧的 `amh-cli` / 7 工具 / marker / verify / counts / brief 路线已删除，不要再用。
+AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md` 为准，但其中“brief/handoff 失败就停”的旧约定由 §3.1 覆盖：gateway 不可用落 `.dsh/amh-outbox`，不阻塞。项目契约 `.amh/config.json`（`hub` / `binding` / `project`，本地文件，不写进仓库）。旧的 `amh-cli` / 7 工具 / marker / verify / counts 路线已删除；**`brief` 仍可用**。
 
-### 3.1 一轮
+### 3.1 三条命令（弱 agent 也能走通）
 
-1. **开工**：`node <gateway>\bin\client.mjs sessions`（或原生 `memory_sessions`）。gateway 不可达 / 401 / 无 binding ⇒ **不写记忆，停下报告**；不要自己 start/stop AMH（owner/安装者）。
-2. **取上下文**：`recall` 或 `search` 1–2 条；同时读 `TODO.md` 对应任务与 `OWNER.md` 待决。
-3. **改代码**。
-4. **收尾**：`save --content ... --type ... --concepts ... [--files ...]`。其余原生字段用 `client.mjs call memory_save --args-file <json>`。
-5. **save 失败**：先读错误，不要盲重试；用 `sessions` / `recall` 查是否已有同内容。gateway 没有旧的 marker/verify/504 语义。
-6. 验收只用 gateway/native 的实际结果 + CI；不写本地台账/哈希/checklist。
+脚本：[`src/scripts/agent-memory.mjs`](src/scripts/agent-memory.mjs)。根目录也提供 `npm run agent:brief` / `agent:save` / `agent:handoff` / `agent:flush`。
 
-### 3.2 通道（A 正式，B 不采用）
+```bash
+# 开工：只打印 gateway 状态、HEAD/干净度、最近 3 条 handoff、最近 5 条写入、outbox 数
+node src/scripts/agent-memory.mjs brief
 
-| 通道 | 能力 | 代价 |
-|---|---|---|
-| A. 项目 client（正式） | `client.mjs` 六条：`sessions/recall/search/save/tools/call`；`call` 可访问全部 native 工具，含 action/lease/signal/checkpoint | 模型看不到原生工具列表；每个 agent 需 `AMH_CLIENT_TOKEN` 才有独立身份 |
-| B. native MCP（不采用） | 模型直接看到 48 个 native 工具；17 个官方 skill 可直调 | 需要 DSH profile entry + token + 重启；加 `web` 会污染所有项目，另建 profile 只适配 DSH |
+# 过程中：决定/非显然修复落一条
+node src/scripts/agent-memory.mjs save --content "..." --type fact --concepts "area,topic" --files "src/file.ts"
+
+# 收尾：content 必填；task/status/next 缺省会填占位值（尽量自己写清楚）
+node src/scripts/agent-memory.mjs handoff --task T-650 --status "partial" --content "..." --next "..." --files "a.ts,b.ts"
+
+# gateway 恢复后补写离线记录
+node src/scripts/agent-memory.mjs flush
+node src/scripts/agent-memory.mjs doctor
+```
 
 规则：
 
-- **A 是正式路线**；B 不采用，不要新建 `amh` profile。原因见 AMH `docs/DSH-PROFILE-DECISION.md`。
+- **不要一次读 20 条旧 handoff**。`brief` 只给最近 3 条；更早的用 `recall "<关键词>"` 按需查。旧 handoff 可能已被后续提交覆盖，必须回 `git`/代码复核。
+- **gateway 不可用不阻塞**：`save`/`handoff` 自动把内容写到 `.dsh/amh-outbox/*.json`（gitignore），agent 继续改代码；提交信息写 `AMH: down`，gateway 恢复后 `flush`。不要自己 start/stop AMH。
+- **brief 失败也不阻塞**：用 `git log/status` + 代码继续；不要因为记忆不可读就停在原地。
+- `--app` 默认 `dsh`；不知道应用名就用默认。不要猜别的 token，也不要建 `amh` profile。
+- 直接调 client 仍可用（`brief/sessions/recall/search/save/handoff/tools/call`），但推荐 wrapper：它处理 JSON 形状、outbox、摘要和失败回退。
+
+### 3.2 通道与身份（A 正式，B 不采用）
+
+| 通道 | 能力 | 代价 |
+|---|---|---|
+| A. 项目 client（正式） | `client.mjs` 六条 + `call`；`call` 可访问全部 native 工具 | 模型看不到原生工具列表；每个 agent 需自己的 token 才有独立身份 |
+| B. native MCP（不采用） | 模型直接看到 native 工具 | 需要 profile entry + token + 重启；DSH 加 `web` 会污染所有项目 |
+
+- **A 是正式路线**；B 不采用，不要新建 `amh` profile。
 - 同一项目、同一笔写入只走一条，不双写。
-- `binding` 定项目；`token` 定 agentId。没有 token 时所有 agent 用 binding 的 agentId。
-- 多 agent 的 action/lease/signal 必须各自 token；否则身份相同，不要假装能区分。
-- `call` 只是 CLI 包装，不是原生工具发现；17 个 skill 缺 native 工具时按顶部提示走 CLI。
-- 没有 lease 时，分派/互斥仍由人/DSH 负责；不要自己造 gate。
-- 交接：`memory_save`（type 通常 `workflow`/`pattern`），concepts 含 `task:<id>,handoff`，content 以 `HANDOFF <task>:` 开头；files 用 `--files` 或 `call --args-file`。
-- `TODO.md` / `OWNER.md` 仍是任务/决定文件；AMH 不是状态表；`D-###` 正文以 OWNER 为准。
+- `binding` 定项目；`--app`/token 定 agentId。多 agent 的 action/lease/signal 必须各自 token；没有 lease 时互斥由人/DSH 负责，不要自己造 gate。
+- 交接的 concepts 含 `task:<id>,handoff`；`content` 以 `HANDOFF <task>:` 开头（wrapper 已按 client 格式写）。
+- `TODO.md` / `OWNER.md` 仍是可选任务/决定文件；AMH 不是状态表；`D-###` 正文以 OWNER 为准。
 
-### 3.3 记录强度（中度约束，不是闭环）
+### 3.3 提交记录（建议，不是门禁）
 
-代码 / 样式 / 脚本类改动（`.rs .ts .tsx .js .mjs .cjs .css .html .toml .py .ps1 .cmd .bat .sh`）提交时，
-提交信息末行必须带三选一：
+代码 / 脚本改动提交时，末行**建议**带三选一：
 
 ```
-AMH: <memory-id>     # 已写入 AMH
+AMH: <memory-id>     # wrapper save/handoff 返回的 id
 AMH: none            # 明确判定这次改动无需记录
 AMH: down            # gateway 不可用（正文说明）
 ```
 
-- 纯文档（`.md` / `.txt`）、纯数据、`.dsh/` `.amh/` `.tmp/` 等忽略目录不强制；
-- 检查由**本地** `commit-msg` 钩子执行：`.dsh/hooks/commit-msg` + `git config core.hooksPath .dsh/hooks`（文件在 gitignore 里，只对本机生效）；
-- `git commit --no-verify` 可绕过，但要在正文写明原因；
-- 这是**中度约束**：不保证每次都写记忆，只保证「改行为时必须有明确的记录决定」。它不是门禁，也不是闭环 —— 缺记录时提交会失败，仅此而已。
+- **不要依赖 commit-msg 钩子**：本仓不把它当门禁，`.dsh/hooks/` 可能不存在。缺尾注不阻塞提交；不要为了“守规矩”去加一个会卡住别的 agent 的钩子。
+- 纯文档/数据、`.dsh/` `.amh/` `.tmp/` 等忽略目录不强制。
+- 如果将来有人装了钩子：不要用 `--no-verify` 逃；先修流程。`AMH: none` 是合法决定，不是失败。
 
 ### 3.4 工具与坑
 
 - 17 个 skill 在 `.dsh/skills` 中是指向 AMH `gateway/skills` 的目录 junction，不是副本；不要手工复制一套。
-- 命令/规则在 `.dsh/skills/amh-memory/SKILL.md`；`.amh/config.json` 有 hub/binding/project 和本地 token；`AMH_CLIENT_TOKEN` 可覆盖身份。
+- gateway 路径读 `.amh/gateway.path`；`AMH_CLIENT` 可覆盖 client 路径。`.amh/config.json` 有 hub/binding/project 和本地 token；不要把 token 写进仓库/公开面。
 - 原生工具面 48 个（实例 20 实测），不是旧 7 个；gateway 只挡 6 个结构性跨边界工具。
-- **concepts 已修**（commit `629c786`）：`client.mjs save --concepts "a,b"` 现在传字符串，不再丢；只有很旧的 client 才需要 `call memory_save --args-file` 兜底。`--files` 正常。
-- 旧 `amh-cli` / `health` / `counts` / `verify` / `brief` / `marker` 路线已删除，不要找。
+- `client.mjs save --concepts "a,b"` 传字符串；`--files` 正常。旧 `call memory_save --args-file` 只作兜底。
+- `brief` **仍可用**（旧 AGENTS 写“已删除”是错的）；`sessions` 往往只有旧 capture，别把它当当前会话列表。
+- `brief.handoffs` 不过滤状态，会混入新旧 handoff；wrapper 只取最近 3 条，仍要按时间/HEAD 判断。
 - 不装 native MCP、不新建 `amh` profile；agent 不自己加第二入口、不自己发 token。
-- `amh status` 只读；gateway 没起就停写报告，不要启停。
 - 不写 secrets、原始对话、临时日志。
 
 ## 4. 取证据的规矩

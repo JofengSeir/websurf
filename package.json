@@ -1,7 +1,14 @@
 {
   "name": "websurf",
   "private": true,
-  "description": "WebSurf 仓库根：只承载跨工程共享的 npm 依赖（src/renderer-shared 等共享层由此解析 three），不含脚本与工作区。",
+  "description": "WebSurf 仓库根：承载跨工程共享的 npm 依赖（src/renderer-shared 等共享层由此解析 three）与少量流程/门禁脚本。",
+  "scripts": {
+    "agent:brief": "node src/scripts/agent-memory.mjs brief",
+    "agent:save": "node src/scripts/agent-memory.mjs save",
+    "agent:handoff": "node src/scripts/agent-memory.mjs handoff",
+    "agent:flush": "node src/scripts/agent-memory.mjs flush",
+    "check:render-parity": "node src/scripts/check-render-parity.mjs"
+  },
   "dependencies": {
     "three": "^0.165.0"
   },

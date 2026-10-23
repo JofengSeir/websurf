@@ -35,6 +35,7 @@ npm run dev            # python ../../src/scripts/serve.py 8080 .
 ## 2. 参与与许可
 
 - 改动流程与提交规范 → [CONTRIBUTING.md](CONTRIBUTING.md)
+- Agent 记忆/交接流程（弱 agent 可离线继续，不阻塞） → [AGENTS.md](AGENTS.md) §3 + `src/scripts/agent-memory.mjs`
 - 渲染归属与三端等价（共享 `RenderSession`、静态门禁、同机位看图） → [docs/render-parity.md](docs/render-parity.md)
 - 漏洞报告与安全事实 → [SECURITY.md](SECURITY.md)
 
