@@ -584,8 +584,8 @@ export function optimizeScene(
  * `worldBox` 都按根切换）。收集与合并算法、失败回退、垫球口径与 `optimizeScene` 同一份。
  * 副作用：`src` 下被合并掉的原始几何会 dispose；`src` 本身**不**从任何父节点摘除。
  */
-export function mergeIntoNewRoot(src: THREE.Object3D): THREE.Group {
-  const r = mergeIntoChunks(src);
+export function mergeIntoNewRoot(src: THREE.Object3D, opts?: MergeOptions): THREE.Group {
+  const r = mergeIntoChunks(src, opts);
   const root = new THREE.Group();
   for (const m of r.chunks) root.add(m);
   for (const m of r.keptMeshes) root.add(m);

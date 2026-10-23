@@ -7,6 +7,8 @@
 #   rust-unit-tests — `cargo test -p websurf-phys`（共享层物理单测；含蹲姿/surf 回归、P2 幻影门）
 #   source-contract — `apps/viewer` 的 `check-wasm-api.mjs --source-only`（Rust serde 键名 ↔ TS 接口键名；
 #                     只读源码、不装 wasm 工具链、不建 pkg ⇒ 最便宜的一道，D-022 选项 (a)）
+#   render-parity   — `check-render-parity.mjs`：三端渲染入口必须走共享 RenderSession，
+#                     apps 内不得再出现渲染器/装配/天空/可见性/画质等步骤（2026-10-23）
 #   glb-parity      — 三端 `npm run build:wasm` + 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
 #   debug-gates / game-gates — **只剩 `npm run build:wasm`**：只证明这两端的 wasm 能在干净环境构建
 #
@@ -63,6 +65,23 @@ jobs:
       - name: viewer Rust serde ↔ TS interface keys
         working-directory: apps/viewer
         run: node scripts/check-wasm-api.mjs --source-only
+
+  # ── 渲染归属：三端不得重写共享渲染步骤（2026-10-23 收口；纯源码检查，秒级）──────
+  render-parity:
+    name: render ownership (shared RenderSession)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: apps must not reimplement shared render steps
+        run: node src/scripts/check-render-parity.mjs
 
   # ── debug：wasm 构建冒烟（T-653 削减验证层后，本 job 只剩 build:wasm）────────
   debug-gates:

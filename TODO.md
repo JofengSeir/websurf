@@ -38,3 +38,9 @@
 **2026-10-18 验证（wasm 三端，`surf_boreas`）**：`ice_transparent` / `ice02` / `snowiceblend` 均为 `alphaMode=BLEND` 且 extras 带 `vbsp_translucent:true`；三端材质元数据逐项相同。GLB 字节数 game = debug = 123956464，viewer = 123956376（差 88 B，仍是已知的 `accessors.min/max` 浮点末位格式差异）。`ice01` / `ice03` 的 VMT 没有 `$translucent`（UnlitGeneric + `$surfaceprop ice`），保持 OPAQUE 是资产事实，不是漏做。**剩余**：浏览器三端同视点逐像素验收（本机无 headless 文件选择）。
 **判据**：三端同视点下 `ice_transparent` 呈半透明（可透过看到后方几何）且三端逐像素一致；`$translucent` 材质在 GLB 材质 extras 有可判定的透明标记；三端 `npm run typecheck` exit 0 + 渲染一致性检查 exit 0。
 
+## 渲染归属收口（2026-10-23）
+
+**已完成**：新增 `src/renderer-shared/scene/render-session.ts`，把 GLB 之后的共享接线（装配/合并/环境/天空/相机/可见性/近平面/画质/探针/每帧天空+主世界）收成一份；viewer/game/debug 改为薄壳，删除 debug 的 `LodManager`。静态门禁 `src/scripts/check-render-parity.mjs` + CI `render-parity` job；文档 `docs/render-parity.md`；同机位截图工具 `src/scripts/capture-render.mjs`。AMH `mem_mvkhr473_1b3a3431f24c`。
+
+**待 owner 定（剔除）**：当前可见性仍按**块中心**距离判定。main `79cff4b`（块表面距离）实测 666 有 44/108 个机位误杀、3 分钟后被 `588ebe2` 回退未写原因；rebuild `19b1d4a`（默认全加载 + 块表面 + 近裁面 10 射线，tag `safety-19b1d4a`）未采用。下一步候选：按**块 AABB 到相机**的距离判定，保留显式视距；恢复前用同机位三张图 + `__vbspPose` 做 A/B。
+

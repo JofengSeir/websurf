@@ -9,19 +9,22 @@
  *
  * 场景数据来源：`loadScene` 收 `apps/debug/src/worker/worker-types.ts` 的 `SceneDataMessage`，
  * 由 `apps/debug/src/app.ts` 的 `handleLoadBsp` 经 `buildWorldBundle`
- * （`src/ts-shared/phys/world-builder.ts`）在主线程解析后传入。GLB 装配走共享
- * `buildMapScene`（`src/renderer-shared/scene/scene-builder.ts`：清根旋转 + 世界包围盒 +
- * 摘 punctual 灯，2026-10-04 起与 game/viewer 同一条链路），碰撞体交 `adaptBrushes`、
- * 可见集交 `PvsManager`、传送触发器交 `TeleportManager`、静态光照交共享 `applyLightmap`。
+ * （`src/ts-shared/phys/world-builder.ts`）在主线程解析后传入。
  *
- * 子管理器全部由本类持有：`CameraController`（视角输入）、`LightManager`（灯光/阴影/雾）、
- * `LodManager`（分块与剔除距离）、`ColliderDebug`（碰撞体与触发器可视化）、
- * `PathRecorder`（物理轨迹取样）、`PlaneInspector`（准星射线）；权威帧对齐交
- * `AuthorityCalibrator`（`src/ts-shared/phys/authority-calibrator.ts`）。
+ * **渲染装配与每帧绘制全部委托共享 `RenderSession`**（`src/renderer-shared/scene/render-session.ts`）：
+ * renderer/scene/camera、GLB 装配、分块合并、天空层、环境/雾、可见性、近平面、贴图画质、探针
+ * 都只在共享层存在一份；本类只保留 debug 特有线（物理、相机输入、灯光、可视网格、路径/准星、
+ * 按需渲染）与数据源。碰撞体交 `adaptBrushes`、传送触发器交 `TeleportManager`。
+ *
+ * debug 侧子管理器：`CameraController`（视角输入）、`LightManager`（灯光/阴影/雾）、
+ * `ColliderDebug`（碰撞体与触发器可视化）、`PathRecorder`（物理轨迹取样）、
+ * `PlaneInspector`（准星射线）；权威帧对齐交 `AuthorityCalibrator`
+ * （`src/ts-shared/phys/authority-calibrator.ts`）。
  * 渲染采样写入共享内存的口径见本文件内紧随共享内存导入的那段说明。
  */
 
-import { applyRenderPrefs, readRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js'; import { createRenderer, precompileScene } from '../../../../src/renderer-shared/render/create-renderer.js'; import { installPoseEntry, cameraPoseOf, yawPitchRadOf } from '../../../../src/renderer-shared/camera/pose-entry.js'; import { applySceneCamera, shrinkNearPlane } from '../../../../src/renderer-shared/camera/scene-camera.js';
+import { writeRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
+import { installPoseEntry, cameraPoseOf, yawPitchRadOf } from '../../../../src/renderer-shared/camera/pose-entry.js';
 import * as THREE from 'three';
 // mosaic 画质切换：主线程懒初始化同一 wasm 模块（与 worker 实例互不影响）
 import { ensureMainWasm, mosaic_decode } from '../main-wasm.js';
@@ -32,29 +35,20 @@ import type { PlaneInfo, SceneDataMessage } from '../worker/worker-types.js';
 import type { SharedState } from '../../../../src/ts-shared/auth/shared-state.js';
 import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-calibrator.js';
 import type { Brush } from '../physics/physics/Collision/Collision.types.js';
-import { PvsManager } from '../../../../src/ts-shared/world/pvs-manager.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
 import { TeleportManager } from '../world/teleport-manager.js';
 import { adaptBrushes } from '../world/collider-adapter.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
 import type { PhyBevelPiece } from './collider-debug.js';
-import { disposeObject } from '../../../../src/renderer-shared/scene/dispose.js';
-import { applySceneTextureQuality } from '../../../../src/renderer-shared/scene/texture-quality.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
-import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../../../../src/renderer-shared/environment/miniature-sky.js'; import { renderSkyPass } from '../../../../src/renderer-shared/environment/render-sky-pass.js'; import { setSceneEnvironment, clearSceneEnvironment } from '../../../../src/renderer-shared/environment/scene-environment.js';
-import { LodManager } from './lod-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
 import type { InputReplayInitialState, InputReplayHull } from '../input/input-recorder.js';
 import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
-import { mergeStatsOf, optimizeScene as optimizeSceneShared } from '../../../../src/renderer-shared/scene/scene-optimizer.js'; import { installRenderProbe } from '../../../../src/renderer-shared/render/render-probe.js';
-import {
-  assembleScene,
-} from '../../../../src/renderer-shared/scene/assemble-scene.js';
-import { setLightingMode as setLightingModeInShader, getLightingMode, type LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
-import { NearPlaneController } from '../../../../src/renderer-shared/camera/near-plane.js';
+import type { LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
+import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」
@@ -72,20 +66,15 @@ import { NearPlaneController } from '../../../../src/renderer-shared/camera/near
  *   回落墙钟 `now`。
  */
 
-/** 相机垂直视场角（度）：`init` 建 `THREE.PerspectiveCamera` 时传入，另在 `optimizeScene`
- * 的可见块估算里用于算半角余弦；运行期不改。 */
-const FOV = 73.6;
 /** 准星射线检测间距（帧）：`planeInspectCounter` 计满该值才调一次 `inspectPlane` 并清零。 */
 const PLANE_INSPECT_INTERVAL = 6;
 
 /** HUD 剔除统计（`emitCullStats` 组装，交给 app.ts 注册的 `onCullStats`）。
- * `visible/total/cullDist` 与 `pvs.near/far/pvsHidden` 取自 `LodManager.getStats`——判定本体在
- * 共享 `VisibilityController`（距离优先、档 `culling.pvs` 为真时再看 PVS），`near` = 可见块数、
- * `far` = 距离剔除块数、`pvsHidden` = PVS 剔除块数（T-633 之前恒 0）。
- * `pvs.cluster/visibleClusters/totalClusters` 取自 `PvsManager.getStats`：本文件只构造
- * `PvsManager`、把它的 `getClusterAt` 交给 `LodManager.assignClusterIds` 用、并读
- * `getStats`/`currentClusterId`，**从不直接调 `update`**（PVS 刷新由共享控制器在档开启时调），
- * 故未开档时 `cluster` 恒 -1、`visibleClusters` 恒 0。`lodManager.itemCount <= 0` 时整个回调不下发。 */
+ * `visible/total/cullDist` 与 `pvs.near/far/pvsHidden` 取自共享 `RenderSession.stats()`——判定
+ * 本体在共享 `VisibilityController`（距离优先、档 `culling.pvs` 为真时再看 PVS），`near` =
+ * 可见块数、`far` = 距离剔除块数、`pvsHidden` = PVS 剔除块数。
+ * `pvs.cluster/visibleClusters/totalClusters` 取自共享会话持有的 `PvsManager`；无 PVS 时
+ * `cluster` 恒 -1、`visibleClusters` 恒 0。块数为 0 时整个回调不下发。 */
 export interface CullStatsLike {
   visible: number;
   total: number;
@@ -128,11 +117,13 @@ const OPTIMIZE_SCENE_ENABLED = true;
 /** 主线程渲染器：持有 WebGL 渲染器、场景、相机与全部子管理器。相机不再本地插值——
  * 每个渲染帧由 `tick` 用 `predPhys.state()` 直接摆放。 */
 export class RendererMain {
+  /** 三端唯一渲染会话（`init` 建）：renderer/scene/camera 与所有共享渲染步骤都在里面。 */
+  private session: RenderSession | null = null;
+  /** 会话字段的本地别名（物理/可视化/探针既有读点；只读，不另建实例）。 */
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
   private cameraController: CameraController | null = null; /** 位姿冻结（共享位姿入口写入；每帧相机同步消费，见 `tick`）。 */ poseHold: { x: number; y: number; z: number; yawRad: number; pitchRad: number } | null = null;
-  private pvsManager: PvsManager | null = null;
   private teleportManager: { getTriggers(): readonly TeleportTrigger[] } | null = null;
   /** 实体碰撞体列表 = `solids` + `ladders`（`ColliderDebug` 的碰撞箱可视化数据源）。 */
   private colliders: Brush[] = [];
@@ -142,24 +133,13 @@ export class RendererMain {
   private ladders: Brush[] = [];
   /** 传送触发器（`TeleportManager.getTriggers` 的快照；可视化与准星射线共用）。 */
   private triggers: TeleportTrigger[] = [];
-  /** BSP 模型场景根（`loadScene` 挂到 `scene` 下；`optimizeScene`、近平面候选收集、
-   * `inspectPlane`、`applyTextureQuality` 都从它开始遍历）。 */
+  /** BSP 模型场景根（共享会话合并后的根；`inspectPlane` / 可视网格从它开始遍历）。 */
   private bspModelScene: THREE.Object3D | null = null;
-
-  /** 3D 天空盒：天空相机（由 `sky_camera` 驱动）与它单独渲染的天空区组（见 `miniature-sky.ts`）。 */
-  private skyCamera: THREE.PerspectiveCamera | null = null;
-  private skyGroup: THREE.Group | null = null;
-  /** 天空相机参数（`sky_camera` 的 origin/scale/雾）；为 null 表示本图没有 3D 天空盒。 */
-  private skyParams: SkyCameraParams | null = null;
-  /** 天空遍专用的雾实例（`sky_camera` 自己的雾参数 + start/end 乘 1/scale，见 `renderFrame`）。 */
-  private skyFog: THREE.Fog | null = null;
 
   /** 灯光与光照参数（`init` 里 `applyLights`；lighting 段 patch 时 `syncFromConfig`）。 */
   private readonly lightManager = new LightManager();
   /** 物理轨迹记录器：渲染物理线每物理步一点、tick 物理线每条新权威帧一点，采样点均为脚底中心。 */
   private readonly pathRecorder = new PathRecorder();
-  /** 分块可见性管理器：`setup` 收集块、`assignClusterIds` 借 PVS 定位 cluster、`update` 按相机距离判可见。 */
-  private readonly lodManager = new LodManager();
   /** 碰撞体/触发器/三角面可视化；`hasDebugWork` 为假时 `tick` 跳过它的 `update`。 */
   private readonly colliderDebug = new ColliderDebug();
   /** 准星射线检测器：从相机前方发射，与 mesh/碰撞体/触发器求交，结果经 `getPlaneInfo` 给 HUD。 */
@@ -168,10 +148,6 @@ export class RendererMain {
   private planeInfoEnabled = false;
   private planeInspectCounter = 0;
   private lastPlaneInfo: PlaneInfo | null = null;
-
-  // ── 近平面贴墙自适应（面板可实时调节）────────────────────
-  /** 近平面贴墙自适应：实现在渲染共享层 `src/renderer-shared/camera/near-plane.ts`（面板经 setNearParams 调参）。 */
-  private readonly nearPlane = new NearPlaneController();
 
   /** 运行期配置（`init` 赋值；`applyConfigPatch` 就地改写其子段）。 */
   private config: RuntimeConfig = null as unknown as RuntimeConfig;
@@ -248,9 +224,6 @@ export class RendererMain {
     this.shared.resetRenderSample();
   }
 
-  /** 探测节拍：每个物理帧翻转一次，只在为真（隔帧）时执行一次近平面探测。 */
-  private nearCheckToggle = false;
-
   /** 剔除统计回调（app.ts 注册为 HUD 刷新；`emitCullStats` 最多每 100ms 触发一次）。 */
   onCullStats: ((stats: CullStatsLike) => void) | null = null;
   /** 场景加载完成回调：`loadScene` 末尾传出场景包围盒最小 Y（死亡阈值的下界）。 */
@@ -275,12 +248,6 @@ export class RendererMain {
   /** 渲染物理事件回调（`consumePhysEvents` 逐条转发；app.ts 注册为计时挑战状态机）。 */
   onPhysEvent: ((ev: RenderPhysEvent) => void) | null = null;
 
-  // ── 纹理画质切换（mosaic）──────────────────────────────────
-  /** 画质 manifest（`loadScene` 从 `SceneDataMessage.mosaicManifest` 解析）：
-   * 键为小写纹理名、值为 mosaic 字节码；null 表示该地图没有可切换数据。 */
-  private mosaicManifest: Record<string, string> | null = null;
-  /** 原图缓存：切到 mini 前存下 `map.image`，切回 original 时写回并强制重建 GPU 纹理。 */
-  private readonly origTextureImages = new Map<THREE.Texture, unknown>();
 
   constructor(
     private readonly shared: SharedState,
@@ -305,47 +272,31 @@ export class RendererMain {
    * `CameraController`，装灯光与碰撞可视化，并把 config 里的四组调试开关灌下去。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
-    // 光照模式（面板「预烘焙 / 纯纹理」）：模块级开关，交由 lightmap-shader 的
-    // applyLightmapToMeshes 分流；在加载地图前设定，使该图的所有材质从一开始就按同一模式注入。
-    setLightingModeInShader(config.lighting?.mode ?? 'baked');
-
-
-
-
-	// 静态光照呈现参数：取自共享层唯一呈现档（`vbsp:renderPrefs`，不要在这里逐项写死）
-	applyRenderPrefs(readRenderPrefs());
     // 跨线程通道形态与本地采样世代计数（诊断用；世代不参与协议，见 sampleEpoch）
     console.log(`[renderer] 跨线程通道: ${this.shared.isShared ? 'SAB' : 'MsgState'}（阶段 1 渲染直读本地物理）`);
     console.log(`[renderer] 渲染采样失效世代计数（本地诊断，非协议值）: ${this.sampleEpoch}`);
 
-    this.renderer = createRenderer({ canvas, width, height, dpr });
+    this.session = new RenderSession({
+      canvas,
+      width,
+      height,
+      dpr,
+      app: 'debug',
+      backgroundColor: config.lighting?.bgColor ?? 0x222222,
+      // debug 的画质切换要等主线程 wasm 就绪（`ensureMainWasm`）
+      mosaic: { decode: mosaic_decode, ensureWasm: ensureMainWasm },
+      viewportSource: 'layout-canvas',
+    });
+    this.renderer = this.session.renderer;
+    this.scene = this.session.scene;
+    this.camera = this.session.camera;
+    this.camera.position.set(2000, 2000, 2000);
 
-    this.scene = new THREE.Scene();
     // 物理路径可视化挂在根场景而不是 bspModelScene 下：后者每次换图重建，而路径要跨图保留；
     // 该 group 自身 frustumCulled=false，不受剔除影响
     this.scene.add(this.pathRecorder.group);
 
-    const aspect = width / Math.max(height, 1);
-    this.camera = new THREE.PerspectiveCamera(FOV, aspect, 0.1, 100000);
-    this.camera.position.set(2000, 2000, 2000);
-
-    // 3D 天空盒：天空相机与天空层——主相机不看天空层，天空相机只看天空层；
-    // 两遍法渲染见 `renderFrame`。
-    this.camera.layers.disable(SKY_LAYER);
-    this.skyCamera = createSkyCamera();
-
     this.cameraController = new CameraController(this.camera, config.input); installPoseEntry({ applyPose: (p) => { const [yawRad, pitchRad] = yawPitchRadOf(p); this.poseHold = { x: p.pos[0], y: p.pos[1], z: p.pos[2], yawRad, pitchRad }; }, readPose: () => cameraPoseOf(this.camera), releasePose: () => { this.poseHold = null; } }, 'debug'); (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality = (q) => this.applyTextureQuality(q);
-
-    // 只读渲染状态探针（T-460 WP7）：三端一致性门禁的唯一读入口，只读状态、不改渲染行为
-    installRenderProbe({
-      scope: 'debug',
-      viewportSource: 'layout-canvas',
-      canvas: () => document.querySelector('canvas'),
-      cull: () => ({ distance: this.lodManager.cullDistance, auto: this.lodManager.autoCullDistance, configured: readRenderPrefs().culling.distance }),
-      pvs: () => ({ enabled: this.lodManager.pvsEnabled, pvsHidden: this.lodManager.getStats().pvsHidden, clusters: this.pvsManager?.getStats().visibleCount ?? 0 }),
-      merge: () => mergeStatsOf(this.bspModelScene),
-      sky: () => ({ hasGroup: !!this.skyGroup, children: this.skyGroup?.children.length ?? 0 }),
-    });
 
     this.lightManager.applyLights(this.scene, config);
     this.colliderDebug.init(this.scene);
@@ -377,27 +328,11 @@ export class RendererMain {
    * `LightManager` 的灯光不在此列——它按 config 替换式更新。
    */
   disposeScene(): void {
-    // 1. BSP 模型子树：递归释放 geometry/material/纹理
-    if (this.scene) {
-      for (let i = this.scene.children.length - 1; i >= 0; i--) {
-        const child = this.scene.children[i];
-      if (child.userData?.isBspModel || child.userData?.isMiniatureSky) {
-          disposeObject(child);
-          this.scene.remove(child);
-        }
-      }
-    }
-    if (this.scene) clearSceneEnvironment(this.scene, { disposeBackground: true }); this.bspModelScene = null;
-    // 天空区组已随上面的 isMiniatureSky 分支 dispose；这里只清引用
-    this.skyGroup = null;
-    this.skyParams = null;
+    // 渲染资源（根/天空/环境/渲染列表/PVS/可见性）全部由共享会话释放
+    this.session?.disposeScene();
+    this.bspModelScene = null;
 
-    // 2. three.js 渲染列表缓存
-    this.renderer?.renderLists?.dispose();
-
-    // 3. 子管理器与本地引用清零
-    this.lodManager.dispose();
-    this.pvsManager = null;
+    // 子管理器与本地引用清零
     this.teleportManager = null;
     this.colliders = [];
     this.solids = [];
@@ -406,7 +341,7 @@ export class RendererMain {
     // 碰撞可视化清空（group 与 scene 引用保留，新地图直接复用）
     this.colliderDebug.clearAll();
 
-    // 4. 渲染物理线状态清零（待喂输入一并清掉）
+    // 渲染物理线状态清零（待喂输入一并清掉）
     this.predPhys = null;
     this.predReady = false;
     this.pendingDx = 0;
@@ -428,68 +363,36 @@ export class RendererMain {
    * 不打断输入与物理。模式与当前一致时直接返回。
    */
   setLightingMode(mode: LightingMode): void {
-    if (getLightingMode() === mode) return;
-    setLightingModeInShader(mode);
-    console.info(`[lighting] 光照模式 → ${mode}（运行期 uniform 切换，未重建场景）`);
+    this.session?.setLightingMode(mode);
   }
 
-  /** 当前光照模式（面板回填与日志用；读的是 lightmap-shader 的模块级值）。 */
+  /** 当前光照模式（面板回填与日志用；读共享会话）。 */
   getLightingMode(): LightingMode {
-    return getLightingMode();
+    return this.session?.getLightingMode() ?? 'baked';
   }
 
   /** 加载一副地图：GLB → lightmap atlas → 空间分块合并 → 包围盒与 near/far → LOD/PVS/
    * 传送触发器/贴图 manifest/碰撞体，返回 `LodManager.setup` 给出的对角线信息。 */
   async loadScene(data: SceneDataMessage): Promise<{ diagonal: number; defaultCull: number; maxCull: number } | null> {
-    if (!this.scene || !this.camera) return null;
-    this.disposeScene();
+    if (!this.session) return null;
 
-    // 共享装配核（T-454 P3b-2 起三端同一条链路）：GLB → 摘 punctual 灯 → 双贴图登记 → lightmap
-    // → 摘天空区 → 主模型合并 → 天空区合并 → 终扫，顺序即契约（见 `scene/assemble-scene.ts` 文件头）。
-    // 此前本工程自持 loadGlb + 手工装配，GLB 内嵌的灯会全部保留进场景（重复计光且推高 uniform）。
-    this.pvsManager = new PvsManager(data.pvsJson);
-    const asm = await assembleScene({
+    const result = await this.session.loadScene({
       glb: data.glb,
-      logPrefix: 'debug',
-      pvs: this.pvsManager,
+      pvsJson: data.pvsJson,
       skyCamera: data.skyCamera ?? null,
-      meshInCluster: (m, c) => this.meshInCluster(m, c),
+      fogParams: data.fogParams ?? null,
+      skyboxTexture: data.skyboxTexture ?? null,
+      mosaicManifest: data.mosaicManifest
+        ? (JSON.parse(data.mosaicManifest) as Record<string, string>)
+        : null,
+      quality: this.config.texture.quality,
+      // debug 的 A/B 开关：半透明单独分块（默认开）
+      translucentSplit: (globalThis as { __vbspTransChunking?: unknown }).__vbspTransChunking !== false,
+      merge: OPTIMIZE_SCENE_ENABLED,
       onRootReady: (root) => this.collectMetadata(root),
-      mergeMain: OPTIMIZE_SCENE_ENABLED ? (root, gltf) => { this.optimizeScene(root, gltf.scene); } : undefined,
     });
-    const mapRoot = asm.root, boundingBox = asm.bbox, maxDim = asm.maxDim;
-    this.skyGroup = asm.skyGroup;
-    this.skyParams = asm.skyGroup && data.skyCamera ? data.skyCamera : null;
 
-    mapRoot.updateMatrixWorld(true);
-
-    // 摘除旧的 BSP 模型子树引用（资源已由开头的 disposeScene 释放，这里只防场景里叠加两份）
-    for (let i = this.scene.children.length - 1; i >= 0; i--) {
-      const child = this.scene.children[i];
-      if (child.userData?.isBspModel) {
-        this.scene.remove(child);
-      }
-    }
-    this.bspModelScene = mapRoot;
-    this.scene.add(mapRoot);
-    if (this.skyGroup) {
-      this.scene.add(this.skyGroup);
-      console.info(`[skybox] 3D 天空盒：天空区 ${this.skyGroup.children.length} 个图元挂第 ${SKY_LAYER} 层，由第二相机渲染`);
-    } else {
-      console.info('[skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层');
-    }
-
-    // 预编译着色器程序（2026-10-04 起与 game 同款）：把「首次可见才编译」的卡顿挪到加载期。
-    // 失败不致命（three 仍按需编译），故只告警。
-    // 顺序与 game 一致：**必须晚于** `scene.add(mapRoot)`——早于它则编译的是空场景，预编译形同未做。
-    if (this.renderer && this.scene && this.camera) precompileScene(this.renderer, this.scene, this.camera);
-
-    applySceneCamera(this.camera, this.nearPlane, maxDim, readRenderPrefs().camera.fov);
-
-    // LOD 与 PVS：setup 收集块并按对角线定剔除距离，随后用 PVS 给每个块分配 clusterId
-    // （pvsManager 已在天空区摘取前建好）
-    const diagInfo = this.lodManager.setup(mapRoot, this.config, maxDim);
-    this.lodManager.assignClusterIds(this.pvsManager);
+    this.bspModelScene = result.root;
 
     // 传送触发器：进碰撞可视化，同时作为准星射线的 trigger 命中面
     this.teleportManager = new TeleportManager(data.teleportJson);
@@ -502,30 +405,22 @@ export class RendererMain {
       this.colliderDebug.setPhyBevels(JSON.parse(data.phyBevelsJson) as PhyBevelPiece[]);
     }
 
-    // 纹理画质 manifest 就位后，按配置里的当前画质立即应用一次
-    this.mosaicManifest = data.mosaicManifest
-      ? (JSON.parse(data.mosaicManifest) as Record<string, string>)
-      : null;
-    void this.applyTextureQuality(this.config.texture.quality);
-
     // 实体碰撞体：solids 与 ladders 分别留档（可视化用合并列表，准星射线用分类列表）
     const adaptResult = adaptBrushes(data.brushJson);
     this.colliders = [...adaptResult.solids, ...adaptResult.ladders];
     this.solids = adaptResult.solids;
     this.ladders = adaptResult.ladders;
 
-    // 本文件不设 scene.fog：near/far 只按上面的场景尺寸静态设定，不随相机位置变化。
-
-    // 剔除距离以 LOD 管理器的校准结果为准（面板滑块只改这个值）
-    this.config.lod.cullDistance = this.lodManager.cullDistance;
+    // 剔除距离以共享会话的校准结果为准（面板滑块只改这个值）
+    this.config.lod.cullDistance = result.defaultCull;
 
     this.needsRender = true;
-    setSceneEnvironment(this.scene, data.skyboxTexture ? { background: data.skyboxTexture, skyboxReflection: data.skyboxTexture, fog: data.fogParams ?? null } : { fog: data.fogParams ?? null }); this.onSceneLoaded?.(boundingBox.min.y);
+    this.onSceneLoaded?.(result.bbox.min.y);
     this.emitCullStats();
     return {
-      diagonal: diagInfo.diagonal,
-      defaultCull: diagInfo.defaultCull,
-      maxCull: diagInfo.maxCull,
+      diagonal: result.diagonal,
+      defaultCull: result.defaultCull,
+      maxCull: result.maxCull,
     };
   }
 
@@ -625,11 +520,6 @@ export class RendererMain {
       const camY = hold ? hold.y : st.posY + st.eyeHeight;
       cc.setPosition(hold ? hold.x : st.posX, camY, hold ? hold.z : st.posZ);
 
-      // 近平面自适应：隔帧执行一次；noclip 下位置不受碰撞约束，跳过探测
-      this.nearCheckToggle = !this.nearCheckToggle;
-      if (this.nearCheckToggle && !this.noclipActive && this.bspModelScene) {
-        shrinkNearPlane(this.nearPlane, this.camera, this.bspModelScene, st.posX, camY, st.posZ, [this.bspModelScene]);
-      }
     } else if (this.stepGated) {
       // 闸门跳过物理的帧也要推进墙钟基准，否则闸门恢复时会拿到一个异常大的 dt
       this.lastTickMs = now;
@@ -637,12 +527,9 @@ export class RendererMain {
 
     const camPos = this.camera.position;
 
-    // ② 视距剔除：块中心到相机的距离超过 cullDistance 即隐藏；返回真表示可见性有变化
-    if (this.lodManager.itemCount > 0) {
-      if (this.lodManager.update(camPos, this.config)) {
-        this.needsRender = true;
-      }
-    }
+    // ② 可见性：共享会话判定（距离优先 → PVS）；有变化时按需渲染补一帧
+    const vis = this.session?.updateVisibility();
+    if (vis?.changed) this.needsRender = true;
 
     // ③ 碰撞体/触发器/三角面可视化
     if (this.colliderDebug.hasDebugWork) {
@@ -662,10 +549,14 @@ export class RendererMain {
       this.lastPlaneInfo = null;
     }
 
-    // ⑤ 渲染：物理就绪后每帧都渲染；needsRender 只用于物理未就绪时的强制刷新
+    // ⑤ 渲染：物理就绪后每帧都渲染；needsRender 只用于物理未就绪时的强制刷新。
+    // 近平面在 noclip 下跳过（位置不受碰撞约束）。
     const shouldRender = this.predReady || this.needsRender;
     if (shouldRender) {
-      this.renderFrame();
+      this.session?.frame({
+        updateVisibility: false,
+        updateNearPlane: !this.noclipActive && !!this.bspModelScene,
+      });
       this.needsRender = false;
     }
 
@@ -674,44 +565,6 @@ export class RendererMain {
       this.lastStatsAt = now;
       this.emitCullStats();
     }
-  }
-
-  /**
-   * 一帧的 draw call。有 3D 天空盒时按起源的两遍法（`CSkyboxView::DrawInternal`）：
-   * ① 天空相机（位姿见 `syncSkyCamera`）把 **2D 天空盒背景 + 天空层图元** 画进后台缓冲；
-   * ② 清深度（引擎的 `VIEW_CLEAR_DEPTH`）后主相机画主世界——这一遍**必须摘掉背景**，
-   * 否则 three 的背景 pass 会把第 ① 遍整片盖掉（`scene.background` 为空时不触发 clear）。
-   * 无 3D 天空盒时退回单遍。
-   */
-  private renderFrame(): void {
-    // 两遍法唯一实现：共享环境模块 `environment/render-sky-pass.ts`（主世界 + 天空层，含天空遍雾）
-    this.skyFog = renderSkyPass({ renderer: this.renderer, scene: this.scene, camera: this.camera, skyCamera: this.skyCamera, skyGroup: this.skyGroup, skyParams: this.skyParams, skyFog: this.skyFog });
-  }
-
-  /**
-   * 判某个 mesh 是否落在指定 BSP cluster：取包围盒中心与 6 个 ±r 轴点各查一次
-   * `PvsManager.getClusterAt`（`r` = 最长半边的一半），任一点命中即算——与
-   * `.tmp/mapsurvey/skysel.mjs` 验证过的采样口径一致（该口径选出 361 个图元，
-   * 与「种子 + 包围盒簇扩张」同批）。
-   */
-  private meshInCluster(mesh: THREE.Mesh, cluster: number): boolean {
-    const pvs = this.pvsManager;
-    if (!pvs) return false;
-    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-    const box = mesh.geometry.boundingBox;
-    if (!box) return false;
-    const center = box.getCenter(new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
-    if (pvs.getClusterAt(center) === cluster) return true;
-    const size = box.getSize(new THREE.Vector3());
-    const r = Math.max(1, Math.max(size.x, size.y, size.z) * 0.25);
-    for (const axis of ['x', 'y', 'z'] as const) {
-      for (const sign of [1, -1]) {
-        const probe = center.clone();
-        probe[axis] += sign * r;
-        if (pvs.getClusterAt(probe) === cluster) return true;
-      }
-    }
-    return false;
   }
 
   /** 上次下发剔除统计的墙钟毫秒。 */
@@ -735,7 +588,7 @@ export class RendererMain {
   /** 面板实时调整近平面参数：转发共享控制器（判据见 `src/renderer-shared/camera/near-plane.ts`）；
    * debug 的按需渲染标记照旧置位。 */
   setNearParams(probeDist?: number, ratio?: number): void {
-    this.nearPlane.setParams(probeDist, ratio);
+    this.session?.setNearParams(probeDist, ratio);
     this.needsRender = true;
   }
 
@@ -748,25 +601,23 @@ export class RendererMain {
 
   /** 调整渲染器与相机的输出尺寸（aspect = width / max(height, 1)，与 near/far 无关）。 */
   resize(width: number, height: number): void {
-    if (!this.renderer || !this.camera) return;
-    this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / Math.max(height, 1);
-    this.camera.updateProjectionMatrix();
+    this.session?.resize(width, height);
     this.needsRender = true;
   }
 
-  /** 设置视距剔除距离：交给 `LodManager.setCullDistance`（夹到 [0, maxCull]，并写共享档 `culling.distance`），再把结果写回 config。 */
-  /** 面板用：即时改相机 FOV（原来只在场景加载时由 applySceneCamera 套一次）。 */
+  /** 面板用：即时改相机 FOV。 */
   setFov(fov: number): void {
-    const cam = this.camera;
-    if (!Number.isFinite(fov) || fov <= 0 || !cam) return;
-    cam.fov = fov;
-    cam.updateProjectionMatrix();
+    this.session?.setFov(fov);
+    this.needsRender = true;
   }
 
+  /** 设置视距剔除距离：夹到 [0, maxCull] 后交给共享会话，并写共享档 `culling.distance`。 */
   setCullDistance(dist: number): void {
-    this.lodManager.setCullDistance(dist);
-    this.config.lod.cullDistance = this.lodManager.cullDistance;
+    if (!this.session) return;
+    const clamped = Math.max(0, Math.min(dist, this.session.stats().maxCull));
+    const applied = this.session.setCullDistance(clamped);
+    writeRenderPrefs({ culling: { distance: clamped } });
+    this.config.lod.cullDistance = applied;
     this.needsRender = true;
   }
 
@@ -922,15 +773,9 @@ export class RendererMain {
    * `ensureMainWasm` 钩子与 `needsRender` 置位（按需渲染）。
    */
   async applyTextureQuality(quality: 'original' | 'mini'): Promise<void> {
-    const manifest = this.mosaicManifest;
-    console.log(
-      `[renderer] 画质切换 → ${quality}，manifest ${manifest ? Object.keys(manifest).length : 0} 条，bspModelScene=${!!this.bspModelScene}`,
-    );
-    if (!manifest || !this.bspModelScene) return;
-    const stats = await applySceneTextureQuality({
-      mainRoot: this.bspModelScene, skyRoot: this.skyGroup, manifest, quality,
-      origImages: this.origTextureImages, deps: { decode: mosaic_decode, ensureWasm: ensureMainWasm },
-    });
+    console.log(`[renderer] 画质切换 → ${quality}，bspModelScene=${!!this.bspModelScene}`);
+    const stats = await this.session?.applyTextureQuality(quality);
+    if (!stats) return;
     console.log(`[renderer] 场景贴图 ${stats.mapCount} 个`);
     console.log(
       `[renderer] mini 匹配 ${stats.matched}/${stats.mapCount}；未匹配:`,
@@ -1273,7 +1118,7 @@ export class RendererMain {
 
   /** 当前 PVS cluster（HUD cluster 显示用；无 PVS = -1）。 */
   getPvsCluster(): number {
-    return this.pvsManager?.currentClusterId ?? -1;
+    return this.session?.pvsManager?.currentClusterId ?? -1;
   }
 
   /**
@@ -1351,40 +1196,25 @@ export class RendererMain {
     });
   }
 
-  /** 回传剔除统计（主线程本地 LOD/PVS 数据）。 */
+  /** 回传剔除统计（共享会话的可见性 + PVS 数据）。 */
   private emitCullStats(): void {
-    if (!this.onCullStats) return;
-    if (this.lodManager.itemCount <= 0) return;
-    const lodStats = this.lodManager.getStats();
-    const pvsStats = this.pvsManager?.getStats();
+    if (!this.onCullStats || !this.session) return;
+    const lodStats = this.session.stats();
+    if (lodStats.total <= 0) return;
+    const pvsStats = this.session.pvsStats();
     this.onCullStats({
       visible: lodStats.visible,
       total: lodStats.total,
       cullDist: lodStats.cullDistance,
       pvs: {
-        cluster: pvsStats?.currentCluster ?? -1,
-        visibleClusters: pvsStats?.visibleCount ?? 0,
-        totalClusters: pvsStats?.totalClusters ?? 0,
+        cluster: pvsStats.currentCluster,
+        visibleClusters: pvsStats.visibleCount,
+        totalClusters: pvsStats.totalClusters,
         pvsHidden: lodStats.pvsHidden,
         near: lodStats.near,
         far: lodStats.far,
       },
     });
-  }
-
-  // ── 空间分块合并（optimizeScene：GLB 挂载后执行一次）─────────────
-  // 渲染减负核心：3.4 万 Mesh（每帧遍历/剔除/draw call 开销）→ 数百~数千空间块。
-  // 移植自 game/src/renderer/renderer-main.ts::optimizeScene（算法与 game 同一份）。
-  // 载体与 game 一致：直接在 BSP 根（bspRoot，userData.isBspModel 保留不变）内替换内容——
-  // 移除 gltf.scene、块 mesh 直接挂 BSP 根。
-  // 时序：loadScene 中 scene.add(gltf.scene) + lightmap 之后、updateMatrixWorld / boundingBox /
-  // LOD·PVS 注册之前的空间分块合并：算法已下沉渲染共享核（`src/renderer-shared/scene/scene-optimizer.ts`，
-  // 与 game 同一份），本方法只保留入口——合并前的归一由共享核的默认钩子承担（T-460 WP4）。
-  private optimizeScene(bspRoot: THREE.Scene, gltfScene: THREE.Object3D): void {
-    // 面板「排查·材质 → 半透明单独分块」：关掉后与不透明同块（A/B 复现用）。
-    // 缺省（未设置）= 开，与迁移 main 后的行为一致。
-    const split = (globalThis as { __vbspTransChunking?: unknown }).__vbspTransChunking !== false;
-    optimizeSceneShared(bspRoot, gltfScene, this.camera, FOV, { translucentSplit: split });
   }
 
   // 复用向量

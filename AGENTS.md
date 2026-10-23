@@ -43,6 +43,12 @@ cargo check -p websurf-phys
 cargo test -p websurf-phys
 ```
 
+渲染归属（三端不得重写共享渲染步骤；规则与同机位看图见 `docs/render-parity.md`）：
+
+```bash
+node src/scripts/check-render-parity.mjs
+```
+
 CI 仍会跑 `ci-gates.yml`：`cargo test`、viewer 的源码契约、三端 wasm 构建与 GLB 一致性。提交前至少跑与改动相关的构建/类型检查；没有跑成功的项要在提交信息里写清楚。
 
 ## 3. 项目记忆（AMH gateway）
