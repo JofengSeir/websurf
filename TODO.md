@@ -13,7 +13,7 @@
 **2026-10-18 验证（wasm 三端，`surf_boreas`）**：`ice_transparent` / `ice02` / `snowiceblend` 均为 `alphaMode=BLEND` 且 extras 带 `vbsp_translucent:true`；三端材质元数据逐项相同。GLB 字节数 game = debug = 123956464，viewer = 123956376（差 88 B，仍是已知的 `accessors.min/max` 浮点末位格式差异）。`ice01` / `ice03` 的 VMT 没有 `$translucent`（UnlitGeneric + `$surfaceprop ice`），保持 OPAQUE 是资产事实，不是漏做。**剩余**：浏览器三端同视点逐像素验收（本机无 headless 文件选择）。
 **判据**：三端同视点下 `ice_transparent` 呈半透明（可透过看到后方几何）且三端逐像素一致；`$translucent` 材质在 GLB 材质 extras 有可判定的透明标记；三端 `npm run typecheck` exit 0 + 渲染一致性检查 exit 0。
 
-**当前主战线（2026-10-24 晚，W0 红灯后重校准）**：水体观感。~~任务书 v1（打空像素四档）~~ 前提已被 W0 字节级探针推翻——HEAD 上图一深度**有效**（射线穿膜命中膜下 ~600 HU 坑底、折射 RT 有内容），「一体透蓝」来自**有效但过深的雾罩**而非兜底分支；此前 §11 的相反结论系陈旧 viewer 构建所致（已勘误）。v2 方向待 owner 裁决：对照「bad 机位的游戏原版观感」定**保真校准**（雾曲线/折射内容提亮——旧记录已标过深水色偏暗 95,145,182 vs 游戏 120,200,255）还是**风格化**（口径 α：命中深度 > waterThickness 视为打穿、按浅水渲染——引擎会按真实深度给雾，属有意偏离）。v1 任务书已挂停（`docs/T-650-water-void-composition-task.md` 顶部状态）；W0 全套证据 `.tmp/water-ab/w0/`。
+**当前主战线（2026-10-24 晚，D-126 已决，v2 就绪）**：**结构优先水体**（structure-first water）——owner 定调：浏览器内展示地图结构 > 复刻游戏观感，要求任意角度水下结构可读。W0 已证 HEAD 深度有效、折射 RT 有内容，差图 = 过深雾罩盖暗内容；v1（打空像素四档）前提被推翻已挂停。**v2 任务书**：`docs/T-650-water-structure-first-task.md`（五条规则 R1–R5 只挂亮雾流、与已否决方向的边界表、最差角度优先调参、666 sha256 零回归、7 机位 owner 逐张验收）。红线：P1 不得白板化、666 字节不等即停。
 
 ## Agent 约束加强（Tier 1 已落地，2026-10-24）
 
