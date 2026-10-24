@@ -1180,7 +1180,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'float vbspFres0 = pow( clamp( 1.0 - clamp( dot( normalize( vbspWaterN ), normalize( vbspWaterV ) ), 0.0, 1.0 ), 0.0, 1.0 ), 5.0 );',
       'float vbspReflAlpha = clamp( vbspFres0 * vbspWaterReflStrength, 0.0, 1.0 );',
       'if ( vbspWaterRefrOn > 0.5 ) {',
-      '	diffuseColor.a = max( vbspShoreT, vbspReflAlpha * vbspWaterShoreRefl );',
+      // Source `DrawWater`：有折射 RT 时水面是**合成结果**（refr/fog/reflect 已经算进
+      // outgoingLight），alpha 恒 1，不再靠 alpha 混合。此前把浅水 alpha 压到 ~0，
+      // 水面/涟漪/反射被整层透明掉（owner 2026-10-24 报“玻璃下看不到水体涟漪”）。
+      '	diffuseColor.a = 1.0;',
       '} else {',
       '	diffuseColor.a = mix( vbspWaterNearAlpha, vbspWaterFarAlpha, vbspDepthV );',
       '}',
