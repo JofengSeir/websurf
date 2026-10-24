@@ -98,6 +98,10 @@ const g = globalThis as {
   __vbspWaterShade?: unknown;
   /** 无 `$waterdepth` 时的归一化水层深度（0..1，缺省 0.35）。 */
   __vbspWaterDefaultDepth?: unknown;
+  /** T-650 v4 W-A：深水像素合成档（0=关/1=天空镜面/2=厚度稳定雾/3=深渊暗色；暗雾流恒 0）。 */
+  __vbspWaterVoidMode?: unknown;
+  /** T-650 v4 W-A：深水判定的归一化深度阈值（0..1，缺省 0.5，PS 上可 live 调）。 */
+  __vbspWaterDeepV?: unknown;
   /** 反射强度（缺省 0.28；owner 反馈反射过强）。 */
   __vbspWaterReflectStrength?: unknown;
   __vbspWaterDepthGateOff?: unknown;
@@ -933,7 +937,12 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     shader.uniforms.vbspWaterBlueStart = { value: Math.max(0, num(g.__vbspWaterBlueStart, 60)) };
     shader.uniforms.vbspWaterBlueEnd = { value: Math.max(1, num(g.__vbspWaterBlueEnd, 800)) };
     shader.uniforms.vbspWaterReflTint = { value: new THREE.Vector3().fromArray(w.reflectTint ?? [1, 1, 1]) };
-    shader.uniforms.vbspWaterReflMix = { value: Math.min(1, Math.max(0, num(w.reflectAmount, 0.8))) };    // 涟漪滚动速率：优先地图自带的 `$scroll1`/`$scroll2`
+    shader.uniforms.vbspWaterReflMix = { value: Math.min(1, Math.max(0, num(w.reflectAmount, 0.8))) };
+    // T-650 v4 W-A：深水像素合成（A0 触发集：有效且 depthV≥阈值）；暗雾流恒 0 ⇒ 666 零改动。
+    shader.uniforms.vbspWaterVoidMode = {
+      value: darkFog ? 0 : Math.min(3, Math.max(0, Math.round(num(g.__vbspWaterVoidMode, 0)))),
+    };
+    shader.uniforms.vbspWaterDeepV = { value: Math.min(1, Math.max(0, num(g.__vbspWaterDeepV, 0.5))) };    // 涟漪滚动速率：优先地图自带的 `$scroll1`/`$scroll2`
     shader.uniforms.vbspWaterScroll1 = { value: new THREE.Vector2(scroll1[0], scroll1[1]) };
     shader.uniforms.vbspWaterScroll2 = { value: new THREE.Vector2(scroll2[0], scroll2[1]) };
     shader.uniforms.vbspWaterRippleScale = { value: (1 / rippleSizeOf()) * scale };
@@ -1087,6 +1096,8 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'uniform float vbspWaterGrazAtt;',
       'uniform float vbspWaterReflCap;',
       'uniform vec3 vbspWaterBeneathFog;',
+      'uniform float vbspWaterVoidMode;',
+      'uniform float vbspWaterDeepV;',
       'uniform float vbspWaterR5On;',
       // 图集行坐标：**先 `fract`**（世界 UV 是要平铺的，会到几十的整数倍；不平铺就会取到
       // 图集里别的帧/别的行 ⇒ 水面出现方格、抖动成乱纹、"定格"，2026-10-20 owner 报的方格就是这个），
@@ -1248,6 +1259,12 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // 雾量 = **只看竖直深度**（final-b 那版公式，owner 觉得蓝量合适）。
       // 之前那个 `* vbspHitDist`（乘视线距离）会把整片水推成饱和蓝，已删除。
       'float vbspFogAlpha = vbspDepthV;',
+      // ── T-650 v4 W-A：深水像素触发集（A0 修正：有效且 depthV ≥ 阈值；模式 0 = 零改动）──
+      'float vbspDeepMask = 0.0;',
+      '	if ( vbspWaterVoidMode > 0.5 && vbspDistValid && vbspDepthV >= vbspWaterDeepV ) vbspDeepMask = 1.0;',
+      '	if ( vbspWaterVoidMode > 1.5 && vbspWaterVoidMode < 2.5 ) {',
+      '		vbspFogAlpha = mix( vbspFogAlpha, vbspWaterDeepV, vbspDeepMask );',
+      '	}',
       // 折射内容兜底：RT 里没有几何（采到清屏色/纯黑）时，按深度给水色，别给白/黑块。
       'if ( vbspWaterRefrOn > 0.5 && vbspNoGeom ) {',
       '	vbspRefrColor = mix( vbspWaterFog, vbspWaterBaseColor, 0.35 );',
@@ -1353,6 +1370,17 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // mirror/refr 覆盖，平墙反射时看起来完全没有波纹（owner 2026-10-24 报“连涟漪都消失”）。
       '	outgoingLight = mix( outgoingLight, vbspShaded, clamp( vbspWaterShadeStrength * 0.5, 0.0, 1.0 ) );',
       '	outgoingLight = mix( outgoingLight, vbspWaterBaseColor, vbspWaterTintStrength );',
+      // ── T-650 v4 W-A 档 1/3：深水像素的后合成覆盖（模式 0/2 不进此分支）──
+      '	if ( vbspDeepMask > 0.5 && vbspWaterVoidMode < 1.5 ) {',
+      // 档 1 天空镜面：丢弃暗内容输出平面反射（对照项，预期非主选）
+      '		vec2 vbspMirrorMuv = clamp( vbspWaterMirrorUv.xy / max( 1e-4, vbspWaterMirrorUv.w ), vec2( 0.001 ), vec2( 0.999 ) );',
+      '		outgoingLight = texture2D( vbspWaterMirror, vbspMirrorMuv ).rgb;',
+      '		diffuseColor.a = 1.0;',
+      '	} else if ( vbspDeepMask > 0.5 && vbspWaterVoidMode > 2.5 ) {',
+      // 档 3 深渊暗色：真实内容向 beneath 深色收敛（内容保留型）
+      '		outgoingLight = mix( outgoingLight, vbspWaterBeneathFog, 0.85 );',
+      '		diffuseColor.a = 1.0;',
+      '	}',
       // R5（T-650 v2）：真·打空像素的安静回落——向 beneath 深色收敛（beneathDeep 取 beneath
       // 材质 $fogcolor 解析原值按线性使用，实测样例 (10,39,67)；缺省退本材质 fog×0.25），
       // alpha 提到 1（不漏主画面）；命中像素 vbspVoidR5=0 完全不受影响。
