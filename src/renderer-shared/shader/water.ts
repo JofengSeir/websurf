@@ -418,7 +418,7 @@ const depthScaleUniform = { value: 1200 };
 const planeA = { value: new THREE.Vector4() };
 const planeB = { value: new THREE.Vector4() };
 const planeCount = { value: 0 };
-let refrDone = false;
+// （T-650 v4 后折射/深度 RT 每帧由 renderWaterFramePasses 无条件重渲，旧的 refrDone 每帧一次门已删。）
 let refrRendering = false;
 
 function refractionOff(): boolean {
@@ -650,7 +650,6 @@ export function resetWaterShaders(): void {
   textureMatrix.identity();
   mirrorRendering = false;
   refrRendering = false;
-  refrDone = false;
 }
 
 /** 渲染某一层水面的镜像 RT（每层每帧一次；在该层第一个水面 mesh 的 `onBeforeRender` 里调用）。 */
@@ -770,7 +769,6 @@ function tick(): void {
   dbg.frameIndex = n > 1 && rate > 0 ? Math.floor(t * rate) % n : 0;
   (globalThis as { __vbspWaterDebug?: unknown }).__vbspWaterDebug = dbg;
   for (const p of mirrorPlanes.values()) p.done = false; // 新的一帧 ⇒ 每层允许渲一次镜像 RT
-  refrDone = false;
   if (frozen !== null) return; // 旧冻结语义原样保留：不再排队（管线停摆，只作诊断用）
   requestAnimationFrame(tick); // pin 不在此列：继续排队 ⇒ RT 每帧重渲，管线与非冻结一致
 }
