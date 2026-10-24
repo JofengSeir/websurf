@@ -13,6 +13,8 @@
 **2026-10-18 验证（wasm 三端，`surf_boreas`）**：`ice_transparent` / `ice02` / `snowiceblend` 均为 `alphaMode=BLEND` 且 extras 带 `vbsp_translucent:true`；三端材质元数据逐项相同。GLB 字节数 game = debug = 123956464，viewer = 123956376（差 88 B，仍是已知的 `accessors.min/max` 浮点末位格式差异）。`ice01` / `ice03` 的 VMT 没有 `$translucent`（UnlitGeneric + `$surfaceprop ice`），保持 OPAQUE 是资产事实，不是漏做。**剩余**：浏览器三端同视点逐像素验收（本机无 headless 文件选择）。
 **判据**：三端同视点下 `ice_transparent` 呈半透明（可透过看到后方几何）且三端逐像素一致；`$translucent` 材质在 GLB 材质 extras 有可判定的透明标记；三端 `npm run typecheck` exit 0 + 渲染一致性检查 exit 0。
 
+**当前主战线（2026-10-24）**：水体「打空像素」合成规则改造（engine conformance）。图一/图二实测定案（因果链文档 §11）：图一全场走「RT 无效→兜底当最深」+ 折射 RT 全空，「一体透蓝」由两条自创兜底制造（空=最深、空=降 alpha 漏主画面）。**任务书**：`docs/T-650-water-void-composition-task.md`（四档 `__vbspWaterVoidMode` A/B、§5 逐项 PASS 判定、666 零回归锚、W0 先重验 §8 作废条目）。图一旧「兜底透蓝」观感将退役，owner 以新截图定档验收。
+
 ## Agent 约束加强（Tier 1 已落地，2026-10-24）
 
 **方案书**：`.dsh/plans/agent-constraints-plan.md`（**本地文件，不入库**；含任务卡、判据、风险/假阳性、回滚、CI 成本）。方向 owner 已认可：在 AMH 流程基座上加强，不推翻 2026-10-18 重置。
