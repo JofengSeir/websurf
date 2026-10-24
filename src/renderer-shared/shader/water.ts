@@ -1247,6 +1247,11 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // 2 = 常量绿：验证调试分支确实被执行（若屏幕没变绿 ⇒ 分支没进/被后续 fog 覆盖）
       '		outgoingLight = vec3( 0.0, 1.0, 0.0 );',
       '		diffuseColor.a = 1.0;',
+      '	} else if ( vbspWaterDebugDepth > 5.5 ) {',
+      // 6 = 直接输出镜像 RT：确认“水下的反射图”本身是什么；放射/空洞/整片单色都在这里看
+      '		vec2 vbspDbgMuv = clamp( vbspWaterMirrorUv.xy / max( 1e-4, vbspWaterMirrorUv.w ), vec2( 0.001 ), vec2( 0.999 ) );',
+      '		outgoingLight = texture2D( vbspWaterMirror, vbspDbgMuv ).rgb;',
+      '		diffuseColor.a = 1.0;',
       '	} else if ( vbspWaterDebugDepth > 4.5 ) {',
       // 5 = **雾量场** `vbspFogAlpha`（0=透明，1=最深/最蓝）：与着色同量，分箱统计才有意义
       '		outgoingLight = vec3( vbspFogAlpha );',

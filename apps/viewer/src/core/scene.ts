@@ -49,6 +49,37 @@ export class ViewerScene {
       (q) => this.applyTextureQuality(q);
     // 诊断：水面反射/材质定位需要遍历真实场景（只读；不参与渲染逻辑）
     (globalThis as unknown as { __vbspViewerScene?: THREE.Scene }).__vbspViewerScene = this.session.scene;
+    (globalThis as unknown as { __vbspViewerCamera?: THREE.PerspectiveCamera }).__vbspViewerCamera =
+      this.session.camera;
+    (globalThis as unknown as { __vbspRaycast?: (x: number, y: number) => unknown })
+      .__vbspRaycast = (x, y) => {
+        const rc = new THREE.Raycaster();
+        rc.setFromCamera(new THREE.Vector2(x, y), this.session.camera);
+        return rc.intersectObject(this.session.scene, true).slice(0, 12).map((h) => {
+          const mesh = h.object as THREE.Mesh;
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          const table = (mesh.geometry?.userData as { websurfMergeSourceTable?: { ranges?: { meshName?: string }[] } })
+            ?.websurfMergeSourceTable;
+          const ranges = table?.ranges ?? [];
+          const names = ranges
+            .filter((r) => r.meshName)
+            .map((r) => r.meshName)
+            .filter((n, i, a) => a.indexOf(n) === i)
+            .slice(0, 4);
+          return {
+            distance: h.distance,
+            point: h.point.toArray(),
+            sources: names,
+            mats: mats.map((m) => ({
+              name: m.name,
+              transparent: m.transparent,
+              depthWrite: m.depthWrite,
+              envmap: (m.userData as { vbsp_envmap?: unknown }).vbsp_envmap ?? null,
+              water: (m.userData as { vbsp_water?: unknown }).vbsp_water ?? null,
+            })),
+          };
+        });
+      };
   }
 
   /** three 渲染器（回放/HUD 读 `domElement` 用；只读）。 */

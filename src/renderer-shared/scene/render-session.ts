@@ -156,6 +156,9 @@ export class RenderSession {
   private pvs: PvsManager | null = null;
   /** 主模型根（`mergeIntoNewRoot` 的产物；未合并时是 `assembleScene` 的 mapRoot）。 */
   private root: THREE.Object3D | null = null;
+  /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `sortTransparentChunks`）。 */
+  private transparentChunks: THREE.Mesh[] = [];
+  private readonly transparentSortPos = new THREE.Vector3();
   /** 天空层：第二相机 + 只挂 `SKY_LAYER` 的图元组。 */
   private skyCamera: THREE.PerspectiveCamera | null = null;
   private skyGroup: THREE.Group | null = null;
@@ -287,6 +290,7 @@ export class RenderSession {
     this.bbox = asm.bbox;
     this.maxDim = asm.maxDim;
     this.scene.add(this.root);
+    this.collectTransparentChunks();
 
     this.skyGroup = asm.skyGroup;
     this.skyParams = asm.skyGroup && input.skyCamera ? input.skyCamera : null;
@@ -355,6 +359,7 @@ export class RenderSession {
       this.skyGroup = null;
     }
     resetWaterShaders();
+    this.transparentChunks = [];
     clearSceneEnvironment(this.scene, { disposeBackground: true });
     this.renderer.renderLists.dispose();
     this.pvs = null;
@@ -399,6 +404,7 @@ export class RenderSession {
         [this.root],
       );
     }
+    this.sortTransparentChunks(this.camera);
     this.skyFog = renderSkyPass({
       renderer: this.renderer,
       scene: this.scene,
@@ -503,6 +509,56 @@ export class RenderSession {
   }
 
   // ── 内部 ────────────────────────────────────────────────────────────────
+
+  /**
+   * 收集主根里的半透明块。
+   *
+   * 为什么需要：合并后的块 `position` 都是 `(0,0,0)`，three 的半透明排序在
+   * `groupOrder/renderOrder` 相同后按对象 z（这里全为 0）再按 id ⇒ **退化成创建顺序**。
+   * surf_666 的模型容器里，玻璃块 id 比水面块小 ⇒ 玻璃先画、水后画；水的 alpha 随视角
+   * 变化，就把玻璃“盖淡”甚至盖没（owner 2026-10-24 报的“玻璃板有时像消失”）。
+   */
+  private collectTransparentChunks(): void {
+    this.transparentChunks = [];
+    this.root?.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      if (!mats.some((m) => m && m.transparent === true)) return;
+      if (mesh.userData.__vbspTransparentBaseOrder === undefined) {
+        mesh.userData.__vbspTransparentBaseOrder = mesh.renderOrder;
+      }
+      this.transparentChunks.push(mesh);
+    });
+  }
+
+  /** 每帧把半透明块按相机距离**远→近**重排 `renderOrder`（three 升序绘制）。 */
+  private sortTransparentChunks(camera: THREE.Camera): void {
+    const list = this.transparentChunks;
+    if (list.length === 0) return;
+    const p = this.transparentSortPos;
+    for (const mesh of list) {
+      const geom = mesh.geometry;
+      if (!geom) continue;
+      if (!geom.boundingSphere) geom.computeBoundingSphere();
+      const center = geom.boundingSphere?.center;
+      if (!center) {
+        mesh.userData.__vbspTransparentDist = 0;
+        continue;
+      }
+      p.copy(center).applyMatrix4(mesh.matrixWorld);
+      mesh.userData.__vbspTransparentDist = p.distanceToSquared(camera.position);
+    }
+    list.sort((a, b) => {
+      const da = (a.userData.__vbspTransparentDist as number | undefined) ?? 0;
+      const db = (b.userData.__vbspTransparentDist as number | undefined) ?? 0;
+      return db - da;
+    });
+    for (let i = 0; i < list.length; i++) {
+      const base = (list[i].userData.__vbspTransparentBaseOrder as number | undefined) ?? 0;
+      list[i].renderOrder = base + i;
+    }
+  }
 
   /** 主模型分块合并：三端唯一包装（新根口径；旧的 game/debug 原地挂回已废弃）。 */
   private mergeMain(root: THREE.Scene): THREE.Object3D {
