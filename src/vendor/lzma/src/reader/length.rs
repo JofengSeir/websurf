@@ -45,14 +45,14 @@ impl Length {
 
 	/// Decode a length.
 	pub fn decode<T: Read>(&mut self, mut stream: T, range: &mut Range, state: usize) -> Result<usize, Error> {
-		if !try!(range.probabilistic(stream.by_ref(), &mut self.choice[0])) {
-			Ok(try!(self.low[state].decode(stream.by_ref(), range)))
+		if !range.probabilistic(stream.by_ref(), &mut self.choice[0])? {
+			Ok(self.low[state].decode(stream.by_ref(), range)?)
 		}
-		else if !try!(range.probabilistic(stream.by_ref(), &mut self.choice[1])) {
-			Ok(8 + try!(self.mid[state].decode(stream.by_ref(), range)))
+		else if !range.probabilistic(stream.by_ref(), &mut self.choice[1])? {
+			Ok(8 + self.mid[state].decode(stream.by_ref(), range)?)
 		}
 		else {
-			Ok(16 + try!(self.hig.decode(stream.by_ref(), range)))
+			Ok(16 + self.hig.decode(stream.by_ref(), range)?)
 		}
 	}
 }

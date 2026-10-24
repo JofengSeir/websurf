@@ -46,10 +46,10 @@ impl Range {
 
 	/// Seeds the decoder from the given stream.
 	pub fn seed<T: Read>(&mut self, mut stream: T) -> Result<(), Error> {
-		let control = try!(stream.read_u8());
+		let control = stream.read_u8()?;
 
 		for _ in 0 .. 4 {
-			self.code = (self.code << 8) | try!(stream.read_u8()) as u32;
+			self.code = (self.code << 8) | stream.read_u8()? as u32;
 		}
 
 		if control != 0 || self.code == self.range {
@@ -73,7 +73,7 @@ impl Range {
 	fn normalize<T: Read>(&mut self, mut stream: T) -> Result<(), Error> {
 		if self.range < TOP_VALUE {
 			self.range <<= 8;
-			self.code    = (self.code << 8) | try!(stream.read_u8()) as u32;
+			self.code    = (self.code << 8) | stream.read_u8()? as u32;
 		}
 
 		Ok(())
@@ -94,7 +94,7 @@ impl Range {
 				return Err(Error::Corrupted);
 			}
 
-			try!(self.normalize(stream.by_ref()));
+			self.normalize(stream.by_ref())?;
 
 			result <<= 1;
 			result  += t.wrapping_add(1) as usize;
@@ -122,7 +122,7 @@ impl Range {
 			true
 		};
 
-		try!(self.normalize(stream));
+		self.normalize(stream)?;
 
 		*prob = v;
 

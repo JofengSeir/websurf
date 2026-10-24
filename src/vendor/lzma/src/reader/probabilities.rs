@@ -9,7 +9,6 @@ use super::Range;
 #[derive(Clone, Debug)]
 pub struct Probabilities {
 	buffer: Vec<u16>,
-	size:   usize,
 }
 
 impl Probabilities {
@@ -17,7 +16,6 @@ impl Probabilities {
 	pub fn new(size: usize) -> Self {
 		Probabilities {
 			buffer: vec![PROBABILITY_INITIAL_VALUE; size],
-			size:   size,
 		}
 	}
 
@@ -51,7 +49,7 @@ pub fn reverse<T: Read>(mut stream: T, probs: &mut [u16], bits: usize, range: &m
 	let mut distance = 0;
 
 	for i in 0 .. bits {
-		let bit = try!(range.probabilistic(stream.by_ref(), &mut probs[m]));
+		let bit = range.probabilistic(stream.by_ref(), &mut probs[m])?;
 
 		m <<= 1;
 

@@ -17,6 +17,8 @@ vmdl = { path = "../../src/vendor/vmdl" }
 # `zip-lzma` 的 LZMA 分支依赖 `lzma 0.2.2`，它的滑窗用 `Vec::insert` 维护 ⇒ 窗口绕回后每写
 # 一字节 O(n) 搬移（O(n²)），输出超过窗口大小（VBSP 固定 16 MB）的贴图会先磨几十秒、再报
 # Corrupted。仓库内副本只改 `Window::push` 一处为原地覆盖（逐字节语义不变）。
+# 2026-10-24 追加无语义变化的告警清理：41 处 try!→?、error.rs 改 Display 持有文案并补
+# source()、删 Probabilities 只写不读的 size 字段、Cache::new 返回类型补 '_。
 lzma = { path = "../../src/vendor/lzma" }
 
 # ============================================================

@@ -30,7 +30,7 @@ use Error;
 
 /// Open a file as a LZMA stream.
 pub fn open<T: AsRef<Path>>(path: T) -> Result<Reader<BufReader<File>>, Error> {
-	read(BufReader::new(try!(File::open(path))))
+	read(BufReader::new(File::open(path)?))
 }
 
 /// Create a LZMA stream from another stream.

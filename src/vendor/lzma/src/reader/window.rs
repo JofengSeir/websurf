@@ -64,7 +64,7 @@ impl Window {
 
 	/// Pushes a byte to the window and the given writer.
 	pub fn push<W: Write>(&mut self, mut stream: W, byte: u8) -> Result<(), Error> {
-		try!(stream.write_u8(byte));
+		stream.write_u8(byte)?;
 
 		// ── WebSurf 补丁（本 vendored 副本相对上游 0.2.2 的唯一改动）────────────────────
 		// 上游在这里写的是「把 byte 插进 buffer 的 position 处」。用的是插入（insert），会把插入点
@@ -97,7 +97,7 @@ impl Window {
 	pub fn copy<W: Write>(&mut self, mut stream: W, distance: u32, length: usize) -> Result<(), Error> {
 		for _ in 0 .. length {
 			let b = self[distance];
-			try!(self.push(stream.by_ref(), b));
+			self.push(stream.by_ref(), b)?;
 		}
 
 		Ok(())

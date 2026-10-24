@@ -12,7 +12,7 @@ pub struct Cache<'a> {
 
 impl<'a> Cache<'a> {
 	/// Creates a new cache.
-	pub fn new(cursor: Cursor<&mut [u8]>) -> Cache {
+	pub fn new(cursor: Cursor<&mut [u8]>) -> Cache<'_> {
 		Cache {
 			cursor: cursor,
 			buffer: None,
@@ -27,14 +27,14 @@ impl<'a> Cache<'a> {
 
 impl<'a> Write for Cache<'a> {
 	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-		let mut written = try!(self.cursor.write(buf));
+		let mut written = self.cursor.write(buf)?;
 
 		if written != buf.len() {
 			if self.buffer.is_none() {
 				self.buffer = Some(Vec::with_capacity(buf.len() - written));
 			}
 
-			written += try!(self.buffer.as_mut().unwrap().write(&buf[written..]));
+			written += self.buffer.as_mut().unwrap().write(&buf[written..])?;
 		}
 
 		Ok(written)

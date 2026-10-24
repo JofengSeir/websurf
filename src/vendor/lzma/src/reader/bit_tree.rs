@@ -36,7 +36,7 @@ impl BitTree {
 		let mut m = 1usize;
 
 		for _ in 0 .. self.bits() {
-			if try!(range.probabilistic(stream.by_ref(), &mut self.probabilities[m])) {
+			if range.probabilistic(stream.by_ref(), &mut self.probabilities[m])? {
 				m <<= 1;
 				m  += 1;
 			}

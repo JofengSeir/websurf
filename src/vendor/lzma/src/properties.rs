@@ -26,7 +26,7 @@ pub struct Properties {
 
 /// Read the model properties from a stream.
 pub fn read<T: Read>(mut stream: T) -> Result<Properties, Error> {
-	let d = try!(stream.read_u8());
+	let d = stream.read_u8()?;
 
 	if d >= (9 * 5 * 5) {
 		return Err(Error::InvalidProperties);
@@ -37,7 +37,7 @@ pub fn read<T: Read>(mut stream: T) -> Result<Properties, Error> {
 	let pb = d / 5;
 	let lp = d % 5;
 
-	let dictionary = match try!(stream.read_u32::<LittleEndian>()) {
+	let dictionary = match stream.read_u32::<LittleEndian>()? {
 		n if n < MINIMUM_DICTIONARY_SIZE =>
 			MINIMUM_DICTIONARY_SIZE,
 
@@ -45,7 +45,7 @@ pub fn read<T: Read>(mut stream: T) -> Result<Properties, Error> {
 			n
 	};
 
-	let uncompressed = match try!(stream.read_u64::<LittleEndian>()) {
+	let uncompressed = match stream.read_u64::<LittleEndian>()? {
 		u64::MAX =>
 			None,
 
