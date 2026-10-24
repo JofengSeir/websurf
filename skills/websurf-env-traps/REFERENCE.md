@@ -97,6 +97,11 @@ apps/*/scripts/_*.mjs  .amh/  .dsh/
 
 ## 9. 其它实测教训
 
+- **onBeforeRender 等绘制回调内禁止 `renderer.render`（嵌套渲染状态炸弹）**：嵌套 render 会被外层主渲染的半途状态（排序/override/当前目标）污染，且**随视角排序变化**——表现为「同场景不同角度时好时坏」，极难排查（T-650 蓝板总根源，2026-10-25 定案：对调两个嵌套 pass 顺序、内容互换即坐实）。RT/镜像 pass 一律在主渲染前的干净上下文执行（本仓范式：`renderWaterFramePasses` 由 `RenderSession.frame` 调用）。
+- **RT 清屏色必须携带「无内容」语义（透明黑 alpha=0）**：清成天空色 alpha=1 会让失败像素「看似有内容」，绕过一切 NoGeom 透明兜底，被雾罩成不透明色板；失败路径的降级方向必须是「更透明」（NoGeom ⇒ alpha≤0.25 让主画面透出），结构性杜绝「测不到→涂满」。
+- **静态截图测不出「飞一会才坏」的状态累积**：逐次重载的截图永远干净；必须用**单会话多航点飞行模拟**（`.tmp/water-v4/flight-test.mjs` 范式：一页 12 航点、首尾同机位对照）。
+- **视觉转述模型会编造读数**（T-650 两次实锤：把空 RT 读成「有内容」、把纯黑读成「有结构」）：观感终审=owner 眼睛，诊断判读=确定性像素测量（文件体积/逐像素 diff/调试档通道分解）；转述模型永久不进验收与诊断链。
+- **旧服务进程锁 dist 且伺候旧包**：`build:dist` 报 EBUSY 即查端口（serve.py `os.chdir` 进 dist 会持锁）；按 stop.cmd 规矩只杀占端口的 python，重打后 owner 必须重开入口。
 - **验 wasm-core 只能靠「重建 wasm + 探针」**：宿主 `cargo test/check -p websurf-wasm-core` 会因缺 `dlltool.exe` 失败；TS 探针用 `npx esbuild x.ts --bundle --format=esm --platform=node --outfile=x.mjs` 打包后再 `node` 跑（探针放 `.tmp/`）。
 - **判据要落到「拓扑 / 语义」，不要只看位置**：实测一个网格的顶点位置全对、三角形却连错顶点（顶点数组展平顺序被转置）——用浮点四舍五入的位置键比对会产生大量假差异（f32 vs f64），要用**整数拓扑键**或与 SDK 规则逐项对齐。
 - **Pages 站点会被「从分支构建」静默顶掉**：站点源一旦是「Deploy from a branch」，GitHub 内部的 `pages-build-deployment` 会在**每次推送**（含纯文档推送）把仓库根按 Jekyll 发布 ⇒ 站点根被 README 渲染页顶掉（出现 `Jekyll v3.10.0` + `style.css?v=<sha>` 即中招），Actions 产物的 `/debug/`、`/game/`、`/viewer/`、`/version.json` 全 404。查源：`GET /repos/{owner}/{repo}/pages` 的 `build_type`（须为 `workflow`）；修：`PUT` 同路径 `{"build_type":"workflow"}`，再 `POST .../actions/workflows/<id>/dispatches` 重跑部署。取证别只看仓库——设置改动不在 git 里，要查浏览器历史与各 agent 日志；取 token 用 `git credential fill`（PowerShell 管道，bash 下会挂）。
