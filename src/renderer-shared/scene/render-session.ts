@@ -25,7 +25,7 @@ import { installRenderProbe } from '../render/render-probe.js';
 import { assembleScene } from './assemble-scene.js';
 import { mergeIntoNewRoot, mergeStatsOf, type MergeStats } from './scene-optimizer.js';
 import { disposeObject } from './dispose.js';
-import { resetWaterShaders } from '../shader/water.js';
+import { resetWaterShaders, renderWaterFramePasses } from '../shader/water.js';
 import {
   clearSceneEnvironment,
   setSceneBackgroundColor,
@@ -406,6 +406,9 @@ export class RenderSession {
       );
     }
     this.sortTransparentChunks(this.camera);
+    // 水面折射/深度 RT：必须在主渲染**之前**的干净上下文渲染（T-650 v4：原先嵌套在
+    // 水面 onBeforeRender 里，嵌套 render 状态被外层半途状态污染且随视角变化，§12.9）。
+    renderWaterFramePasses(this.renderer, this.scene, this.camera);
     this.skyFog = renderSkyPass({
       renderer: this.renderer,
       scene: this.scene,

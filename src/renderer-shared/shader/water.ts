@@ -102,6 +102,8 @@ const g = globalThis as {
   __vbspWaterVoidMode?: unknown;
   /** T-650 v4 W-A：深水判定的归一化深度阈值（0..1，缺省 0.5，PS 上可 live 调）。 */
   __vbspWaterDeepV?: unknown;
+  /** T-650 v4 W-A2：暗内容曝光倍率（1=现状；黑区岩壁随增大显露）。 */
+  __vbspWaterContentLift?: unknown;
   /** 反射强度（缺省 0.28；owner 反馈反射过强）。 */
   __vbspWaterReflectStrength?: unknown;
   __vbspWaterDepthGateOff?: unknown;
@@ -567,6 +569,22 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
 }
 
 /**
+ * 每帧折射/深度 RT pass 的**干净入口**（T-650 v4：移出 onBeforeRender 嵌套）。
+ * 由 RenderSession.frame 在主渲染**之前**调用——嵌套在主渲染回调里执行时，
+ * three 的渲染状态（排序/override/当前目标）会被外层半途状态污染，且随视角
+ * 变化（owner 实测：同池不同角度时好时坏；对调两 pass 顺序则内容互换——
+ * 深度编码色漏进颜色 RT，见 §12.9）。
+ */
+export function renderWaterFramePasses(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+): void {
+  if (waterMaterials.size === 0 || refrOnUniform.value <= 0.5) return;
+  renderRefraction(renderer, scene, camera);
+}
+
+/**
  * 当前要用的水面高度（水平镜面 + 折射/深度 pass 的隐藏层）。
  *
  * ⚠️ 不能只按 `|camY - h|` 取最近：surf_666 的水面有多层（-16064 / -11968 / -11071 /
@@ -693,11 +711,8 @@ function attachMirrorDriver(mesh: THREE.Mesh, height: number): void {
     if (typeof prev === 'function') prev.call(mesh, renderer, scene, camera, geometry, material, group);
     if (mirrorRendering || refrRendering) return;
     const gl = renderer as THREE.WebGLRenderer;
-    // 折射 RT 先渲（它要隐藏水面材质；镜像 RT 用镜像相机，两者互不影响）
-    if (!refrDone && refrOnUniform.value > 0.5) {
-      refrDone = true; // 每帧只渲一次
-      renderRefraction(gl, scene, camera);
-    }
+    // 折射/深度 RT 已移至 renderWaterFramePasses（RenderSession.frame 主渲染前调用）——
+    // 不再在 onBeforeRender 里嵌套 render（T-650 v4：嵌套状态污染随视角变化，§12.9）。
     if (reflOnUniform.value < 0.5) return;
     if (!plane.done) {
       plane.done = true;
@@ -942,7 +957,9 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     shader.uniforms.vbspWaterVoidMode = {
       value: darkFog ? 0 : Math.min(3, Math.max(0, Math.round(num(g.__vbspWaterVoidMode, 0)))),
     };
-    shader.uniforms.vbspWaterDeepV = { value: Math.min(1, Math.max(0, num(g.__vbspWaterDeepV, 0.5))) };    // 涟漪滚动速率：优先地图自带的 `$scroll1`/`$scroll2`
+    shader.uniforms.vbspWaterDeepV = { value: Math.min(1, Math.max(0, num(g.__vbspWaterDeepV, 0.5))) };
+    // T-650 v4 W-A2：暗内容曝光倍率（1=现状；>1 越暗提越多，黑区岩壁显露）。
+    shader.uniforms.vbspWaterContentLift = { value: Math.max(1, num(g.__vbspWaterContentLift, 1)) };    // 涟漪滚动速率：优先地图自带的 `$scroll1`/`$scroll2`
     shader.uniforms.vbspWaterScroll1 = { value: new THREE.Vector2(scroll1[0], scroll1[1]) };
     shader.uniforms.vbspWaterScroll2 = { value: new THREE.Vector2(scroll2[0], scroll2[1]) };
     shader.uniforms.vbspWaterRippleScale = { value: (1 / rippleSizeOf()) * scale };
@@ -1098,6 +1115,7 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'uniform vec3 vbspWaterBeneathFog;',
       'uniform float vbspWaterVoidMode;',
       'uniform float vbspWaterDeepV;',
+      'uniform float vbspWaterContentLift;',
       'uniform float vbspWaterR5On;',
       // 图集行坐标：**先 `fract`**（世界 UV 是要平铺的，会到几十的整数倍；不平铺就会取到
       // 图集里别的帧/别的行 ⇒ 水面出现方格、抖动成乱纹、"定格"，2026-10-20 owner 报的方格就是这个），
@@ -1205,6 +1223,12 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // 此前用位移后的 vbspRefrShifted：采样点被噪声推出"有几何"区时亮度骤降 ⇒ NoGeom 翻转
       // ⇒ 精致区边缘被误判成采空，蓝板/结构的分界呈锯齿（owner 实测机位 PS，DudvOff 后分界
       // 变平滑即此故）。位移从此只作用于折射**颜色**采样，有效性判定全部走未位移坐标。
+      // ── T-650 v4 W-A2：暗内容曝光提升（d8 定案：黑区=有几何未被照亮，lum<0.02 被误判 NoGeom 平涂）──
+      '	float vbspBaseLum = dot( vbspRefrBase, vec3( 0.3333 ) );',
+      '	if ( vbspWaterContentLift > 1.0001 ) {',
+      '		float vbspDarkness = 1.0 - smoothstep( 0.0, 0.35, vbspBaseLum );',
+      '		vbspRefrBase *= 1.0 + ( vbspWaterContentLift - 1.0 ) * vbspDarkness;',
+      '	}',
       'float vbspLum0 = dot( vbspRefrBase, vec3( 0.3333 ) );',
       'bool vbspNoGeom = ( vbspRefrBase4.a < 0.5 ) || ( vbspLum0 < 0.02 );',
       'if ( vbspWaterRefrOn > 0.5 && vbspNoGeom ) { vbspRefrColor = vbspWaterScatter; }',
@@ -1399,6 +1423,11 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       '	} else if ( vbspWaterDebugDepth > 1.5 && vbspWaterDebugDepth < 2.5 ) {',
       // 2 = 常量绿：验证调试分支确实被执行（若屏幕没变绿 ⇒ 分支没进/被后续 fog 覆盖）
       '		outgoingLight = vec3( 0.0, 1.0, 0.0 );',
+      '		diffuseColor.a = 1.0;',
+      '	} else if ( vbspWaterDebugDepth > 7.5 ) {',
+      // 8 = 折射 RT 未位移采样的通道分解：R=RT alpha（0=空 1=有渲染），G=内容亮度×5，B=0。
+      // 定「黑区」身份：R 低 ⇒ RT 里根本没渲染（空）；R 高 G 低 ⇒ 有渲染但近黑（未照亮内容）。
+      '		outgoingLight = vec3( vbspRefrBase4.a, vbspLum0 * 5.0, 0.0 );',
       '		diffuseColor.a = 1.0;',
       '	} else if ( vbspWaterDebugDepth > 6.5 ) {',
       // 7 = v4 A0 归因分类：R=深度RT有效性（未位移判定），G=归一化竖直深度，B=NoGeom。
