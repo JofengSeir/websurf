@@ -1246,19 +1246,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       '		vbspMuv += vbspSlope * vbspWaterDistort;',
       '		vec3 vbspMirror = texture2D( vbspWaterMirror, vbspMuv ).rgb * vbspWaterReflTint;',
       '		float vbspMix = clamp( vbspFres * vbspWaterReflStrength, 0.0, 0.40 );',
-      // 单层水 = 零厚度薄膜（boreas）：平面反射拍到的是同一高度的亮雪/地面，
-      // 图二会整片白。薄膜不参与平面反射，保留折射/fog/透明表层；666 多层水体不受影响。
-      '		if ( vbspWaterPlaneCount < 1.5 ) vbspMix = 0.0;',
       '		outgoingLight = mix( outgoingLight, vbspMirror, vbspMix );',
       // 反射越强越不透（Source 的 `lerp(refract, reflect, fresnel)` 同样是替换而不是叠加）
       '		diffuseColor.a = mix( diffuseColor.a, 1.0, vbspMix );',
       '	}',
-      // 零厚度薄膜（boreas）没有水体积：不允许 alpha 被 depth pass/shore 推到接近 1，
-      // 否则图二会变成不透明白板；同时把颜色往水 fog 色收敛，保证不是“透明到消失”。
-      'if ( vbspWaterPlaneCount < 1.5 ) {',
-      '	outgoingLight = mix( outgoingLight, vbspWaterFog, 0.45 );',
-      '	diffuseColor.a = clamp( diffuseColor.a, 0.35, 0.60 );',
-      '}',
       // ② 没有平面反射时退回天空盒 envMap（近白，形同环境光；仅作兜底）
       '	#ifdef USE_ENVMAP',
       '		if ( vbspWaterReflOn < 0.5 ) {',
