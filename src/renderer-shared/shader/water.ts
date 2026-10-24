@@ -78,6 +78,8 @@ const g = globalThis as {
   __vbspWaterFlow?: unknown;
   __vbspWaterOff?: unknown;
   __vbspWaterTime?: unknown;
+  /** 只读 time pin（T-650 v2 V0）：数字 = 钉在该秒；true = 钉在 0。不停 tick/RT。 */
+  __vbspWaterTimePin?: unknown;
   __vbspWaterFogMix?: unknown;
   __vbspWaterFallbackFogEnd?: unknown;
   __vbspWaterRippleSize?: unknown;
@@ -127,6 +129,12 @@ const g = globalThis as {
   __vbspWaterDeepMix?: unknown;
   /** 雾量上限（缺省 0.55）与软化曲线（缺省 1.35）：控制"水底有多蓝"。 */
   __vbspWaterFogMax?: unknown;
+  /** T-650 v2 R2：折射内容乘性提亮上限（亮雾流缺省 1.35；暗雾流恒 1 = 不提亮）。 */
+  __vbspWaterLift?: unknown;
+  /** T-650 v2 R3：掠射位移下限（亮雾流缺省 0.35；视线越平位移越收紧；1 = 关闭）。 */
+  __vbspWaterGrazAtt?: unknown;
+  /** T-650 v2 R4：反射混合权重上限（亮雾流缺省 0.25；暗雾流保持 0.40）。 */
+  __vbspWaterReflCap?: unknown;
   __vbspWaterFogCurve?: unknown;
   /** 雾量下限（缺省 0 = tp-more 那档）。 */
   __vbspWaterFogFloor?: unknown;
@@ -305,6 +313,10 @@ const waterMaterials = new Set<THREE.MeshBasicMaterial>();
 const materialHeight = new Map<THREE.Material, number>();
 /** 材质 → 水深 uniform 持有者（水深 = 同一水体的顶面与底面高度差）。 */
 const materialDepth = new Map<THREE.Material, { depth: { value: number }; use: { value: number } }>();
+/** 材质 → beneath 深色 uniform 持有者（T-650 v2 R5：真·打空像素的安静回落色；值在装配后回填）。 */
+const beneathFogHolders = new Map<THREE.MeshBasicMaterial, { value: THREE.Vector3 }>();
+/** `*_beneath` 类水底材质的（高度, $fogcolor 原值）候选表；R5 回落色按"最近下方"配对。 */
+const beneathFogCandidates: { y: number; fog: THREE.Color }[] = [];
 const timeUniform = { value: 0 };
 /** 换帧相位（秒）；片元里用 `vbspWaterFrameMix` 在 A/B 两帧间淡化。 */
 const frameUniform = { value: 0 };
@@ -598,6 +610,8 @@ export function resetWaterShaders(): void {
   waterMaterials.clear();
   materialHeight.clear();
   materialDepth.clear();
+  beneathFogHolders.clear();
+  beneathFogCandidates.length = 0;
   refrRT?.dispose();
   depthRT?.dispose();
 
@@ -705,8 +719,15 @@ const dbg = {
 
 /** 水面唯一的动态：按 `AnimatedTexture` 的帧率换帧（默认 30fps，源 VMT 就是这个值）。 */
 function tick(): void {
+  // 只读 pin（T-650 v2 V0）：`__vbspWaterTimePin` 数字 = 把水面时间钉在该值，但**不停 tick**——
+  // 镜像/折射 RT 每帧照常重渲（refrDone/p.done 照常复位）。v1 用的 `__vbspWaterTime` 冻结会停掉
+  // 重排队 ⇒ RT 停在首帧状态（W0 实测：冻结版 debug5 全黑、暗水），A/B 截图一律用 pin 不用 freeze。
+  // `true` 等价于钉在 0；优先级 pin > frozen > 实时。
+  const pin = typeof g.__vbspWaterTimePin === 'number'
+    ? (g.__vbspWaterTimePin as number)
+    : g.__vbspWaterTimePin === true ? 0 : null;
   const frozen = typeof g.__vbspWaterTime === 'number' ? (g.__vbspWaterTime as number) : null;
-  const t = frozen ?? performance.now() / 1000;
+  const t = pin !== null ? pin : (frozen ?? performance.now() / 1000);
   // 兜底自愈：镜像/折射 pass 若因异常（或嵌套）把水面材质留在 `visible=false`，水面就会整个消失。
   // 每帧（不在任何 RT pass 内时）恢复一次，成本只有几个材质。
   if (!refrRendering && !mirrorRendering) {
@@ -734,8 +755,8 @@ function tick(): void {
   (globalThis as { __vbspWaterDebug?: unknown }).__vbspWaterDebug = dbg;
   for (const p of mirrorPlanes.values()) p.done = false; // 新的一帧 ⇒ 每层允许渲一次镜像 RT
   refrDone = false;
-  if (frozen !== null) return; // 冻结：不再排队（确定性 A/B）
-  requestAnimationFrame(tick);
+  if (frozen !== null) return; // 旧冻结语义原样保留：不再排队（管线停摆，只作诊断用）
+  requestAnimationFrame(tick); // pin 不在此列：继续排队 ⇒ RT 每帧重渲，管线与非冻结一致
 }
 
 function startAnimation(): void {
@@ -812,6 +833,20 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   }
   const shadeStrength = shadeStrengthOf();
 
+  // ── T-650 v2 五规则参数（全部挂**亮雾流**：暗雾流取中性值 = 行为不变，保护清单 §3.1）──
+  // R2 折射内容提亮：乘性、只作用于已有内容（禁常量色叠加 = 已否决的「保底上色」的边界）。
+  const lift = darkFog ? 1.0 : Math.max(1, num(g.__vbspWaterLift, 1.35));
+  // R3 掠射采样稳定：位移 × att，视线越接近水平越收紧（只动采样坐标，不补偿任何观感量）。
+  const grazAtt = darkFog ? 1.0 : Math.min(1, Math.max(0, num(g.__vbspWaterGrazAtt, 0.35)));
+  // R4 反射限幅：混合权重 clamp 上限；反射仍然存在（与被否决的「关反射」方向 #4 的本质区别）。
+  const reflCap = darkFog ? 0.4 : Math.min(1, Math.max(0, num(g.__vbspWaterReflCap, 0.25)));
+  // R5 真·打空像素：只在亮雾流启用；回落色缺省 = 本材质 fog 线性值 ×0.25，
+  // 装配完成后按「最近下方 beneath 材质的 $fogcolor 原值（按线性使用）」回填。
+  const r5on = darkFog ? 0 : 1;
+  const fogLin0 = fog.clone().convertSRGBToLinear();
+  const beneathFogHolder = { value: new THREE.Vector3(fogLin0.r * 0.25, fogLin0.g * 0.25, fogLin0.b * 0.25) };
+  beneathFogHolders.set(material, beneathFogHolder);
+
   material.onBeforeCompile = (shader) => {
     shader.uniforms.vbspWaterTime = timeUniform;
     shader.uniforms.vbspWaterTex = { value: rippleTexture() };
@@ -875,9 +910,11 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // 用深度 pass 的真实"到地形距离"当水厚（**缺省开**：目标要的是"水底离水面多远"）。
     // 想退回常数膜厚模型：`__vbspWaterUseDepthPass=false`。
     shader.uniforms.vbspWaterUseDepthPass = { value: g.__vbspWaterUseDepthPass === false ? 0 : 1 };
-    // 「水底太蓝了，浅一些」：fogMix 上限 + 中段软化曲线
-    // tp-more 那档（owner 选定）：上限 0.45
-    shader.uniforms.vbspWaterFogMax = { value: Math.min(1, Math.max(0, num(g.__vbspWaterFogMax, 0.45))) };
+    // 「水底太蓝了，浅一些」：fogMix 上限 + 中段软化曲线。
+    // R1（T-650 v2）：雾罩封顶挂亮雾流 —— 上限 0.45 → 0.30（暗雾流保持 0.45，666 零回归）。
+    shader.uniforms.vbspWaterFogMax = {
+      value: Math.min(1, Math.max(0, num(g.__vbspWaterFogMax, darkFog ? 0.45 : 0.30))),
+    };
     // 「稍微白点、近似透明」：水色下限（tp-more 用的是 0）
     shader.uniforms.vbspWaterFogFloor = {
       value: Math.min(1, Math.max(0, num(g.__vbspWaterFogFloor, 0.0))),
@@ -940,6 +977,12 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     shader.uniforms.vbspWaterDebugDepth = { value: Math.max(0, num(g.__vbspWaterDebugDepth, 0)) };
     // 1 = 只测 ripple 段（品红）、2 = 只测 env 段（红）；数字方便区分两段是否都执行。
     shader.uniforms.vbspWaterCanary = { value: Math.max(0, num(g.__vbspWaterCanary, 0)) };
+    // T-650 v2 五规则 uniforms（参数的亮/暗雾流分流见 onBeforeCompile 之前的同步段）。
+    shader.uniforms.vbspWaterLift = { value: lift };
+    shader.uniforms.vbspWaterGrazAtt = { value: grazAtt };
+    shader.uniforms.vbspWaterReflCap = { value: reflCap };
+    shader.uniforms.vbspWaterBeneathFog = beneathFogHolder;
+    shader.uniforms.vbspWaterR5On = { value: r5on };
 
     // ── 顶点：自带 uv / 视空间法线与视线 / 视距 / 镜像 UV ──
     //
@@ -1039,6 +1082,12 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'uniform float vbspWaterShadeStrength;',
       'uniform float vbspWaterDebugDepth;',
       'uniform float vbspWaterCanary;',
+      // ── T-650 v2 结构优先五规则（R1 雾罩封顶走 FogMax 缺省分流，无新 uniform）──
+      'uniform float vbspWaterLift;',
+      'uniform float vbspWaterGrazAtt;',
+      'uniform float vbspWaterReflCap;',
+      'uniform vec3 vbspWaterBeneathFog;',
+      'uniform float vbspWaterR5On;',
       // 图集行坐标：**先 `fract`**（世界 UV 是要平铺的，会到几十的整数倍；不平铺就会取到
       // 图集里别的帧/别的行 ⇒ 水面出现方格、抖动成乱纹、"定格"，2026-10-20 owner 报的方格就是这个），
       // 再把局部 v 压到 1/frames 并抬到第 frame 行。
@@ -1124,7 +1173,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'vec2 vbspScreenUv = gl_FragCoord.xy / vbspWaterScreen;',
       // 源的 `scale *= depthValue`（无 basetexture 分支）：水浅则位移更小。
       // 幅度也要小：owner 反馈"光散过于分散、边缘不该是散点"。
-      'vec2 vbspRefrUv = vbspScreenUv + vbspSlope * ( 0.010 * max( 0.25, vbspWaterRefractAmt ) * mix( 0.35, 1.0, vbspWaterDepthValue ) );',
+      // R3（T-650 v2）：位移 × att —— 视线越贴近水面（graz→0）位移越收紧，掠射采样
+      // 不再飞出水区内容（只动采样坐标，不补偿观感量；暗雾流 grazAtt=1 = 原样）。
+      'float vbspGraz = saturate( normalize( cameraPosition - vbspWaterWorld ).y );',
+      'vec2 vbspRefrUv = vbspScreenUv + vbspSlope * ( 0.010 * max( 0.25, vbspWaterRefractAmt ) * mix( 0.35, 1.0, vbspWaterDepthValue ) * mix( vbspWaterGrazAtt, 1.0, vbspGraz ) );',
       // 位移采样若落进"没有几何"的区域（RT 背景是黑的），会沿轮廓出现黑边噪点 ⇒
       // 与未位移处比较亮度，明显变暗就回退到未位移样本（常见的 refraction 边缘修正）。
       'vec3 vbspRefrShifted = texture2D( vbspWaterRefr, vbspRefrUv ).rgb;',
@@ -1149,6 +1201,8 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // "距离我越远越看不到蓝色"）。乘上视线距离后，薄膜在掠射远处也会累积成蓝，符合源的表现。
       'float vbspDepthVert = -1.0;',
       'float vbspHitDist = 0.0;',
+      // R5（T-650 v2）：真·打空像素标记 = 深度 RT 无效（HEAD 上少量；多层配对命中的像素不会进这分支）。
+      'float vbspVoidR5 = 0.0;',
       // (a) 有真实水体积：水面层 − 它下方最近的那层（层表，纯竖直差）
       'if ( vbspWaterPlaneCount > 0.5 ) {',
       '	float vbspLower = -1e9;',
@@ -1174,7 +1228,9 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       '	} else {',
       '		vbspDepthVert = vbspWaterDepthScale;',
       '		vbspHitDist = max( vbspWaterDist, vbspWaterDepthScale );',
+      '		vbspVoidR5 = 1.0;',
       '	}',
+      '	vbspVoidR5 *= vbspWaterR5On; // 暗雾流恒 0 = 零改动',
       '}',
       'if ( vbspDepthVert < 0.0 ) vbspDepthVert = 0.0;',
       'if ( vbspHitDist < 1.0 ) vbspHitDist = vbspWaterDist;',
@@ -1200,9 +1256,13 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // 带一点点水色（少量白蓝），近看仍然近似透明。
       'float vbspFogMix = pow( saturate( vbspFogAlpha - 0.05 ), vbspWaterFogCurve );',
       'vbspFogMix = clamp( vbspFogMix, vbspWaterFogFloor, vbspWaterFogMax );',
+      'vbspFogMix *= ( 1.0 - vbspVoidR5 ); // R5：打空像素不灌 $fogcolor 雾罩',
       'vbspRefrColor = mix( vbspRefrColor * vbspWaterRefractTint, vbspWaterFog, vbspFogMix );',
       // 深水吸收：雾量越大压得越暗一点，避免远处变成一条发亮的蓝雾带。
       'vbspRefrColor *= mix( 1.0, 0.88, vbspFogMix );',
+      // R2（T-650 v2）：折射内容乘性提亮（只作用于已有内容；深水实测 95,145,182 →
+      // 目标色调 rgb(120,200,255) 方向；暗雾流 lift=1 = 原样）。
+      'vbspRefrColor *= mix( 1.0, vbspWaterLift, saturate( vbspDepthV ) );',
       'diffuseColor.rgb = vbspRefrColor;',
       // ⚠️ **必须同时写 `outgoingLight`**：`<opaque_fragment>` 输出的是 `outgoingLight`，而它在本
       // 材质里由 `reflectedLight.indirectDiffuse` 初始化（lightmap 那套），与 `diffuseColor.rgb`
@@ -1256,7 +1316,8 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       '		vbspMuv = clamp( vbspMuv, vec2( 0.001 ), vec2( 0.999 ) );',
       '		vbspMuv += vbspSlope * vbspWaterDistort;',
       '		vec3 vbspMirror = texture2D( vbspWaterMirror, vbspMuv ).rgb * vbspWaterReflTint;',
-      '		float vbspMix = clamp( vbspFres * vbspWaterReflStrength, 0.0, 0.40 );',
+      // R4（T-650 v2）：反射混合权重上限（亮雾流 0.25、暗雾流保持 0.40）——反射仍在，只限幅。
+      '		float vbspMix = clamp( vbspFres * vbspWaterReflStrength, 0.0, vbspWaterReflCap );',
       '		outgoingLight = mix( outgoingLight, vbspMirror, vbspMix );',
       // 反射越强越不透（Source 的 `lerp(refract, reflect, fresnel)` 同样是替换而不是叠加）
       '		diffuseColor.a = mix( diffuseColor.a, 1.0, vbspMix );',
@@ -1286,6 +1347,13 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // mirror/refr 覆盖，平墙反射时看起来完全没有波纹（owner 2026-10-24 报“连涟漪都消失”）。
       '	outgoingLight = mix( outgoingLight, vbspShaded, clamp( vbspWaterShadeStrength * 0.5, 0.0, 1.0 ) );',
       '	outgoingLight = mix( outgoingLight, vbspWaterBaseColor, vbspWaterTintStrength );',
+      // R5（T-650 v2）：真·打空像素的安静回落——向 beneath 深色收敛（beneathDeep 取 beneath
+      // 材质 $fogcolor 解析原值按线性使用，实测样例 (10,39,67)；缺省退本材质 fog×0.25），
+      // alpha 提到 1（不漏主画面）；命中像素 vbspVoidR5=0 完全不受影响。
+      '	if ( vbspVoidR5 > 0.5 ) {',
+      '		outgoingLight = mix( outgoingLight, vbspWaterBeneathFog, 0.85 );',
+      '		diffuseColor.a = 1.0;',
+      '	}',
       // 调试：`__vbspWaterDebugDepth` 时把中间量直接输出成颜色（R=raw depth, G=厚度/深度尺度,
       // B=视距/深度尺度），用来**量化**深度还原到底错在哪（不靠肉眼猜）。
       '	if ( vbspWaterCanary > 1.5 ) {',
@@ -1410,6 +1478,14 @@ export function applyWaterShaders(root: THREE.Object3D): number {
         });
       }
       for (const mm of mats) if (readWater(mm)) materialHeight.set(mm, h);
+      // R5（T-650 v2）：登记 `*_beneath`（$bottommaterial 派生底面）材质的 $fogcolor 原值候选，
+      // 供装配后按「最近下方」给亮雾流水面配对回落色。
+      for (const mm of mats) {
+        const wb = readWater(mm);
+        if (wb && /beneath/i.test(mm.name) && Array.isArray(wb.fog) && wb.fog.length >= 3 && beneathFogCandidates.length < 8) {
+          beneathFogCandidates.push({ y: h, fog: new THREE.Color(wb.fog[0], wb.fog[1], wb.fog[2]) });
+        }
+      }
       // 体检清单①：水下几何/材质清单 —— 记下每个水面块用的材质、朝向（法线 y 均值）、
       // y 范围、双面与否。用来判断 `*_beneath`（`$bottommaterial` 派生的底面）到底在不在画、
       // 朝向对不对（源里它是水体积的底面，从上看应当被水面挡住、从下看才是"水底"）。
@@ -1461,6 +1537,15 @@ export function applyWaterShaders(root: THREE.Object3D): number {
     // 单层薄膜（如 boreas，只有 y=197）⇒ 无间隔，落回缺省值。
     depthScaleUniform.value = planeDepthRange(planeHeights, depthScaleOf());
     console.info(`[water] 水面高度表（世界 y，升序）：${planeHeights.join(' / ')}`);
+  }
+  // R5（T-650 v2）：给每个亮雾流水面材质回填「最近下方」beneath 材质的 $fogcolor 原值
+  // （按线性使用，实测样例 (10,39,67)）；没有 beneath 材质的图保持缺省（本材质 fog×0.25）。
+  for (const [material, holder] of beneathFogHolders) {
+    const h = materialHeight.get(material);
+    const below = beneathFogCandidates
+      .filter((c) => h === undefined || c.y <= h + 1.5)
+      .sort((a, b) => b.y - a.y)[0];
+    if (below) holder.value.set(below.fog.r, below.fog.g, below.fog.b);
   }
   if (injected > 0) {
     // 记录算出的水深（顶面-底面高度差），验收时能直接看出"这片水有多深"
