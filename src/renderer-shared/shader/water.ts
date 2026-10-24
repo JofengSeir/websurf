@@ -530,14 +530,10 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
   const prevAlpha = renderer.getClearAlpha();
   try {
     renderer.setRenderTarget(refrRT);
-    const bg = scene.background;
-    if (bg instanceof THREE.Color) {
-      renderer.setClearColor(bg, 1);
-    } else {
-      // 透明黑：alpha=0 表示“这里没有水下几何”。水面 shader 用 alpha 判断后
-      // 降低自身 alpha，让主画面的冰/岩透出来；不再清成天空白/雾蓝。
-      renderer.setClearColor(0x000000, 0);
-    }
+    // T-650 v4：**无条件清成透明黑**（c61f188 原始设计）。此前当 scene.background 是颜色时
+    // （pre-frame 钩子先于 renderSkyPass 执行时必然如此）清成天空色 alpha=1——无几何水域
+    // 的 RT 像素因此"看似有内容"（不触发 NoGeom 透明兜底）又被雾罩 ⇒ 一定机位下蓝板复现。
+    renderer.setClearColor(0x000000, 0);
     renderer.clear();
     renderer.render(scene, camera);
     // 深度 pass：同一相机、同一"隐藏水面"集合，用自带 shader 把视线距离写进颜色。
@@ -582,6 +578,15 @@ export function renderWaterFramePasses(
 ): void {
   if (waterMaterials.size === 0 || refrOnUniform.value <= 0.5) return;
   renderRefraction(renderer, scene, camera);
+  // 镜面 RT 同步去嵌套（T-650 v4：与折射同因——嵌套 render 污染主渲染状态且随视角排序变化）。
+  if (reflOnUniform.value > 0.5) {
+    for (const p of mirrorPlanes.values()) {
+      if (!p.done) {
+        p.done = true;
+        renderMirrorPlane(renderer, scene, camera, p);
+      }
+    }
+  }
 }
 
 /**
@@ -710,16 +715,8 @@ function attachMirrorDriver(mesh: THREE.Mesh, height: number): void {
   mesh.onBeforeRender = (renderer, scene, camera, geometry, material, group) => {
     if (typeof prev === 'function') prev.call(mesh, renderer, scene, camera, geometry, material, group);
     if (mirrorRendering || refrRendering) return;
-    const gl = renderer as THREE.WebGLRenderer;
-    // 折射/深度 RT 已移至 renderWaterFramePasses（RenderSession.frame 主渲染前调用）——
-    // 不再在 onBeforeRender 里嵌套 render（T-650 v4：嵌套状态污染随视角变化，§12.9）。
-    if (reflOnUniform.value < 0.5) return;
-    if (!plane.done) {
-      plane.done = true;
-      renderMirrorPlane(gl, scene, camera, plane);
-    }
-    // 这一块 mesh 用**它自己高度**的镜面 RT/矩阵；材质共享这些 uniform 对象，
-    // 在每次 draw 前赋值即可（three 的 onBeforeRender 早于 uniform 上传）。
+    // T-650 v4：镜面 RT 的渲染已移至 renderWaterFramePasses（主渲染前干净上下文）；
+    // 这里只剩**每块网格的 uniform 绑定**（用本块高度的镜面纹理/矩阵，draw 前赋值即可）。
     mirrorUniform.value = plane.texture;
     textureMatrix.copy(plane.matrix);
   };
