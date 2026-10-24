@@ -29,6 +29,8 @@ const map = arg('map');
 const out = arg('out', 'render.png');
 const waitMs = Number(arg('wait', '300000'));
 const poseArg = arg('pose');
+/** 页面加载前注入的诊断全局（例：globalThis.__vbspWaterReflectOff=true）。 */
+const initScript = arg('init');
 if (!url) {
   console.error('缺少 --url');
   process.exit(2);
@@ -85,6 +87,7 @@ async function evaluate(expression) {
 await send('Runtime.enable');
 await send('Page.enable');
 await send('DOM.enable');
+if (initScript) await send('Page.addScriptToEvaluateOnNewDocument', { source: initScript });
 await send('Page.navigate', { url });
 
 const started = Date.now();

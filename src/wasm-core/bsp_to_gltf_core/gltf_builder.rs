@@ -259,6 +259,8 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
     let extensions = transform.map(|transform| gltf_json::extensions::texture::Info {
         texture_transform: Some(transform),
     });
+    // 名字在 `Material { name: Some(material.name) }` 处被 move，提前算好玻璃判定。
+    let glass = material.name.to_ascii_lowercase().contains("glass");
 
     Material {
         name: Some(material.name),
@@ -311,9 +313,14 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
             if let Some(cutoff) = material.alpha_test {
                 ex.insert("vbsp_alpha_test".into(), serde_json::json!(cutoff));
             }
-            // 反射强度只给**水面**写：世界面全量下发 `vbsp_envmap` 会把整张图提亮
+            // 反射强度只给**水面**与**玻璃**写：世界面全量下发 `vbsp_envmap` 会把整张图提亮
             // （渲染端 `applyReflectionEnvMap` 是加法混合）。
-            if material.water.is_some() {
+            //
+            // 玻璃必须单独放行：`glass/unbreakable` 这类 VMT 声明了 `$envmap env_cubemap`，
+            // 但前一轮把 envmap 收窄到水面后，玻璃（以及玻璃下面的水体观感）变成一块无反射的
+            // 透明片，owner 在 surf_666 的 `mesh_12_33074/33295` 上直接看到了。这里只放行名字
+            // 含 `glass` 的材质，不恢复“所有带 $envmap 的世界面”那条会让整图提亮 3 倍的路。
+            if material.water.is_some() || glass {
                 if let Some(tint) = material.envmap_tint {
                     ex.insert("vbsp_envmap".into(), serde_json::json!(tint));
                 }

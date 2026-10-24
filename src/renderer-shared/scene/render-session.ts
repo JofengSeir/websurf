@@ -25,6 +25,7 @@ import { installRenderProbe } from '../render/render-probe.js';
 import { assembleScene } from './assemble-scene.js';
 import { mergeIntoNewRoot, mergeStatsOf, type MergeStats } from './scene-optimizer.js';
 import { disposeObject } from './dispose.js';
+import { resetWaterShaders } from '../shader/water.js';
 import {
   clearSceneEnvironment,
   setSceneBackgroundColor,
@@ -353,6 +354,7 @@ export class RenderSession {
       this.scene.remove(this.skyGroup);
       this.skyGroup = null;
     }
+    resetWaterShaders();
     clearSceneEnvironment(this.scene, { disposeBackground: true });
     this.renderer.renderLists.dispose();
     this.pvs = null;

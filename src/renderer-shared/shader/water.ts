@@ -310,17 +310,50 @@ let animating = false;
 // 取"离相机最近的水面块"的高度当**水平镜像平面**（BSP 水面法线本来就是竖直的；45° 的
 // 瀑布/河流走 `Refract` 通路、没有 `vbsp_water`，不在本通路里），整帧只渲一次 RT。
 const MIRROR_SIZE = 1024;
-let mirrorRT: THREE.WebGLRenderTarget | null = null;
-let mirrorTexture: THREE.Texture | null = null;
+/**
+ * 每个**水面高度**一张镜像 RT。
+ *
+ * 为什么不能共用一张：surf_666 同时有 -16064 / -11968 / -11071 / 15296 / 15312 五层水面。
+ * 水平镜面 = 相机关于该层 y 镜像；用“离相机最近的那层”的 RT 去投另一层，UV 投影会随视角
+ * 绕一个点放射（owner 报的“放射反射倒影”），因为镜面相机与像素所在平面不是同一个。
+ * 现在按 mesh 自己的高度取对应 RT；每帧只为**实际被绘制到的层**渲一次（视锥外自然不渲）。
+ */
+interface MirrorPlane {
+  height: number;
+  rt: THREE.WebGLRenderTarget | null;
+  texture: THREE.Texture | null;
+  matrix: THREE.Matrix4;
+  camera: THREE.PerspectiveCamera;
+  done: boolean;
+}
+const mirrorPlanes = new Map<number, MirrorPlane>();
 const textureMatrix = new THREE.Matrix4();
-const virtualCamera = new THREE.PerspectiveCamera();
 const mirrorMeshes = new Map<THREE.Mesh, number>(); // mesh → 世界高度（包围球中心 y）
 let mirrorRendering = false;
-let mirrorDone = false;
 const reflOnUniform = { value: 1 };
 const mirrorUniform = { value: null as THREE.Texture | null };
 const textureMatrixUniform = { value: textureMatrix };
 const BIAS = new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
+const _mirrorDir = new THREE.Vector3();
+const _mirrorLook = new THREE.Vector3();
+const _mirrorUp = new THREE.Vector3();
+
+function mirrorPlaneOf(height: number): MirrorPlane {
+  const key = Math.round(height * 100) / 100;
+  let p = mirrorPlanes.get(key);
+  if (!p) {
+    p = {
+      height: key,
+      rt: null,
+      texture: null,
+      matrix: new THREE.Matrix4(),
+      camera: new THREE.PerspectiveCamera(),
+      done: false,
+    };
+    mirrorPlanes.set(key, p);
+  }
+  return p;
+}
 
 function reflectOff(): boolean {
   return (g as { __vbspWaterReflectOff?: unknown }).__vbspWaterReflectOff === true;
@@ -504,50 +537,99 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
     ((globalThis as { __vbspWaterRefrRenders?: number }).__vbspWaterRefrRenders ?? 0) + 1;
 }
 
-/** 离相机最近的水面块的高度（水平镜面）。没有水面返回 `null`。 */
+/**
+ * 当前要用的水面高度（水平镜面 + 折射/深度 pass 的隐藏层）。
+ *
+ * ⚠️ 不能只按 `|camY - h|` 取最近：surf_666 的水面有多层（-16064 / -11968 / -11071 /
+ * 15296 / 15312）。相机在 -11071 与 -11968 之间向下看池底时，`|camY-h|` 会选到**头顶的
+ * -11071**，于是：① 镜面相机按错误平面镜像；② 折射 pass 不隐藏真正在看的 -11968 水面
+ * ⇒ RT 采到水面自身，表现为随视角移动的放射状倒影/自采样。
+ *
+ * 规则按**视线方向**选层：向下看取最近的**下方**水面，向上看取最近的**上方**水面；
+ * 水平视线才退回绝对最近。没有对应方向的层时再回退另一侧。
+ */
+const _nearestDir = new THREE.Vector3();
 function nearestWaterHeight(camera: THREE.Camera): number | null {
-  let best: number | null = null;
-  let bestD = Infinity;
+  camera.getWorldDirection(_nearestDir);
   const camY = camera.position.y;
+  let below: number | null = null;
+  let belowD = Infinity;
+  let above: number | null = null;
+  let aboveD = Infinity;
+  let any: number | null = null;
+  let anyD = Infinity;
   for (const [mesh, h] of mirrorMeshes) {
     if (!mesh.visible) continue;
     const d = Math.abs(camY - h);
-    if (d < bestD) {
-      bestD = d;
-      best = h;
+    if (d < anyD) { anyD = d; any = h; }
+    if (h <= camY + 0.001) {
+      const dh = camY - h;
+      if (dh < belowD) { belowD = dh; below = h; }
+    } else {
+      const dh = h - camY;
+      if (dh < aboveD) { aboveD = dh; above = h; }
     }
   }
-  return best;
+  // 诊断 A/B：复现旧口径（纯 |camY-h|），验证“选错层”假设；默认不走。
+  if ((g as { __vbspWaterLegacyNearest?: unknown }).__vbspWaterLegacyNearest === true) return any;
+  if (_nearestDir.y < -0.05) return below ?? above ?? any;
+  if (_nearestDir.y > 0.05) return above ?? below ?? any;
+  return any;
 }
 
-/** 渲染镜像 RT（每帧一次；在第一个水面 mesh 的 `onBeforeRender` 里调用）。 */
-function renderMirror(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, height: number): void {
-  if (!mirrorRT) {
-    mirrorRT = new THREE.WebGLRenderTarget(MIRROR_SIZE, MIRROR_SIZE);
-    mirrorTexture = mirrorRT.texture;
-    mirrorUniform.value = mirrorTexture;
+/** 换图/卸载：释放每层镜像 RT 与本地登记，避免旧图水材质/平面表污染新图。 */
+export function resetWaterShaders(): void {
+  for (const p of mirrorPlanes.values()) p.rt?.dispose();
+  mirrorPlanes.clear();
+  mirrorMeshes.clear();
+  waterMaterials.clear();
+  materialHeight.clear();
+  materialDepth.clear();
+  refrRT?.dispose();
+  depthRT?.dispose();
+  refrRT = null;
+  depthRT = null;
+  refrUniform.value = null;
+  sceneDistUniform.value = null;
+  mirrorUniform.value = null;
+  textureMatrix.identity();
+  mirrorRendering = false;
+  refrRendering = false;
+  refrDone = false;
+}
+
+/** 渲染某一层水面的镜像 RT（每层每帧一次；在该层第一个水面 mesh 的 `onBeforeRender` 里调用）。 */
+function renderMirrorPlane(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, plane: MirrorPlane): void {
+  if (!plane.rt) {
+    plane.rt = new THREE.WebGLRenderTarget(MIRROR_SIZE, MIRROR_SIZE);
+    plane.texture = plane.rt.texture;
   }
+  const height = plane.height;
+  const vcam = plane.camera;
   // 水平镜面：相机关于 y=height 镜像，看向对称点，up 取反
-  virtualCamera.position.set(camera.position.x, 2 * height - camera.position.y, camera.position.z);
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  const look = new THREE.Vector3().copy(camera.position).add(dir);
-  look.y = 2 * height - look.y;
-  virtualCamera.up.set(0, -1, 0);
-  virtualCamera.lookAt(look);
-  virtualCamera.near = (camera as THREE.PerspectiveCamera).near;
-  virtualCamera.far = (camera as THREE.PerspectiveCamera).far;
-  virtualCamera.fov = (camera as THREE.PerspectiveCamera).fov ?? virtualCamera.fov;
-  virtualCamera.aspect = (camera as THREE.PerspectiveCamera).aspect ?? virtualCamera.aspect;
-  virtualCamera.updateMatrixWorld();
-  virtualCamera.projectionMatrix.copy((camera as THREE.PerspectiveCamera).projectionMatrix);
-  // 共享纹理矩阵：**不含 modelMatrix**（各水位块的 modelMatrix 在顶点着色器里乘）
-  textureMatrix.copy(BIAS).multiply(virtualCamera.projectionMatrix).multiply(virtualCamera.matrixWorldInverse);
+  vcam.position.set(camera.position.x, 2 * height - camera.position.y, camera.position.z);
+  camera.getWorldDirection(_mirrorDir);
+  _mirrorLook.copy(camera.position).add(_mirrorDir);
+  _mirrorLook.y = 2 * height - _mirrorLook.y;
+  // ⚠️ up 必须是**主相机自身 up 关于水平面的镜像**，不能写死 `(0,-1,0)`：
+  // 写死时俯视/仰视（如 pitch -80°）下 up 与镜像视线接近平行，lookAt 会退化/滚转，
+  // 反射图随视角绕一个点旋转——owner 报的“放射反射倒影”就是这个。
+  _mirrorUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+  _mirrorUp.y = -_mirrorUp.y;
+  vcam.up.copy(_mirrorUp);
+  vcam.lookAt(_mirrorLook);
+  vcam.near = (camera as THREE.PerspectiveCamera).near;
+  vcam.far = (camera as THREE.PerspectiveCamera).far;
+  vcam.fov = (camera as THREE.PerspectiveCamera).fov ?? vcam.fov;
+  vcam.aspect = (camera as THREE.PerspectiveCamera).aspect ?? vcam.aspect;
+  vcam.updateMatrixWorld();
+  vcam.projectionMatrix.copy((camera as THREE.PerspectiveCamera).projectionMatrix);
+  // 纹理矩阵：**不含 modelMatrix**（各水面块的 modelMatrix 在顶点着色器里乘）
+  plane.matrix.copy(BIAS).multiply(vcam.projectionMatrix).multiply(vcam.matrixWorldInverse);
 
   const prevTarget = renderer.getRenderTarget();
   mirrorRendering = true;
-  // 水面在镜像 pass 里必须隐藏：否则水面会采样"上一帧的镜面纹理"形成**自反馈**，
-  // 表现为反射里叠出方格马赛克（owner 报的"方格是真实存在的"就是这个）。
+  // 水面在镜像 pass 里必须隐藏：否则水面会采样"上一帧的镜面纹理"形成**自反馈**。
   const hidden: THREE.Material[] = [];
   for (const m of waterMaterials) {
     if (m.visible) {
@@ -556,12 +638,11 @@ function renderMirror(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera:
     }
   }
   try {
-    renderer.setRenderTarget(mirrorRT);
+    renderer.setRenderTarget(plane.rt);
     renderer.clear();
-    renderer.render(scene, virtualCamera);
+    renderer.render(scene, vcam);
   } finally {
-    // ⚠️ 必须 finally：中途抛错会让水面材质永远停在 `visible=false` ⇒ 水面直接消失
-    // （2026-10-21 owner 报"水没了"就是这类状态的后果）。
+    // ⚠️ 必须 finally：中途抛错会让水面材质永远停在 `visible=false` ⇒ 水面直接消失。
     renderer.setRenderTarget(prevTarget);
     for (const m of hidden) m.visible = true;
     mirrorRendering = false;
@@ -570,9 +651,10 @@ function renderMirror(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera:
     ((globalThis as { __vbspWaterMirrorRenders?: number }).__vbspWaterMirrorRenders ?? 0) + 1;
 }
 
-/** 给水面 mesh 挂 `onBeforeRender`：整帧第一块水面负责渲染镜像 RT。 */
+/** 给水面 mesh 挂 `onBeforeRender`：按这块 mesh 自己的高度渲染/绑定对应层的镜像 RT。 */
 function attachMirrorDriver(mesh: THREE.Mesh, height: number): void {
   mirrorMeshes.set(mesh, height);
+  const plane = mirrorPlaneOf(height);
   const prev = mesh.onBeforeRender;
   // 签名固定 6 参（three 的 `Object3D.onBeforeRender`）；转发时逐个透传
   mesh.onBeforeRender = (renderer, scene, camera, geometry, material, group) => {
@@ -584,11 +666,15 @@ function attachMirrorDriver(mesh: THREE.Mesh, height: number): void {
       refrDone = true; // 每帧只渲一次
       renderRefraction(gl, scene, camera);
     }
-    if (reflOnUniform.value < 0.5 || mirrorDone) return;
-    const h = nearestWaterHeight(camera);
-    if (h === null) return;
-    mirrorDone = true; // 每帧只渲一次（首块水面）
-    renderMirror(gl, scene, camera, h);
+    if (reflOnUniform.value < 0.5) return;
+    if (!plane.done) {
+      plane.done = true;
+      renderMirrorPlane(gl, scene, camera, plane);
+    }
+    // 这一块 mesh 用**它自己高度**的镜面 RT/矩阵；材质共享这些 uniform 对象，
+    // 在每次 draw 前赋值即可（three 的 onBeforeRender 早于 uniform 上传）。
+    mirrorUniform.value = plane.texture;
+    textureMatrix.copy(plane.matrix);
   };
 }
 
@@ -632,7 +718,7 @@ function tick(): void {
   dbg.frames = n;
   dbg.frameIndex = n > 1 && rate > 0 ? Math.floor(t * rate) % n : 0;
   (globalThis as { __vbspWaterDebug?: unknown }).__vbspWaterDebug = dbg;
-  mirrorDone = false; // 新的一帧 ⇒ 允许渲一次镜像/折射 RT
+  for (const p of mirrorPlanes.values()) p.done = false; // 新的一帧 ⇒ 每层允许渲一次镜像 RT
   refrDone = false;
   if (frozen !== null) return; // 冻结：不再排队（确定性 A/B）
   requestAnimationFrame(tick);

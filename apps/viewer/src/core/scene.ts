@@ -47,6 +47,8 @@ export class ViewerScene {
     });
     (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality =
       (q) => this.applyTextureQuality(q);
+    // 诊断：水面反射/材质定位需要遍历真实场景（只读；不参与渲染逻辑）
+    (globalThis as unknown as { __vbspViewerScene?: THREE.Scene }).__vbspViewerScene = this.session.scene;
   }
 
   /** three 渲染器（回放/HUD 读 `domElement` 用；只读）。 */
