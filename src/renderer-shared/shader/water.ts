@@ -782,7 +782,13 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   // 在亮冰面上只会被冲淡成白，所以取一个更饱和的深蓝做水体色，浅蓝留给远处的蓝调渐变。
   // 水面基色：**饱和青蓝**（数值目标是 owner 游戏截图里的水面均色 `#2a91d3` / `#1399e6`）。
   // `$fogcolor`（`water01` 的 srgb 分支 (120,200,255)）本身太浅，直接混会把水面冲成浅灰。
+  // 水体色优先用**地图解析到的 `$fogcolor`**（sRGB → linear），不再写死青色。
+  // 666 的 `$fogcolor` 是暗棕 (22,20,10)，硬编码青色会把亮地板/墙冲成奶白；
+  // 只有 VMT 缺 `$fogcolor` 时才回退到旧的青色兜底。
   const baseColor = new THREE.Color(0.12, 0.52, 0.72);
+  if (Array.isArray(w.fog) && w.fog.length >= 3) {
+    baseColor.copy(fog).convertSRGBToLinear();
+  }
   material.color.copy(baseColor);
   // 调试：覆盖基色（isolate 判断波纹形状时用明显颜色）
   const colorOverride = g.__vbspWaterColor;
@@ -830,7 +836,7 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // 水体色（最终往它收敛）+ 收敛强度
     shader.uniforms.vbspWaterBaseColor = { value: new THREE.Vector3(baseColor.r, baseColor.g, baseColor.b) };
     shader.uniforms.vbspWaterTintStrength = {
-      value: Math.min(1, Math.max(0, num(g.__vbspWaterTint, 0.0))),
+      value: Math.min(1, Math.max(0, num(g.__vbspWaterTint, 0.3))),
     };
     // 体积吸收（owner 指出的正确方向）：`absorb` 是每世界单位衰减系数、`thickness` 是水层厚度、
     // `scatter` 是水体散射色（取 owner 游戏截图实测的 #2a91d3 附近）。
