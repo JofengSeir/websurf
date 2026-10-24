@@ -1204,6 +1204,43 @@ fn push_bsp_face_bsp(
         sparse: None,
     });
 
+    // 逐顶点 BSP face 序号。primitive extras 在 GLTFLoader 里**不会**落到
+    // `mesh.userData`（实测 merge 来源表 faceIndex=null），所以把序号做成顶点属性
+    // `_VBSP_FACE`，合并后仍能逐三角形/逐面恢复前后关系。
+    let face_ids: Vec<f32> = vec![face_index as f32; vertex_count as usize];
+    let face_buffer_start = buffer.len() as u64;
+    buffer.extend_from_slice(bytemuck::cast_slice::<f32, u8>(&face_ids));
+    let face_view = Index::new(gltf.buffer_views.len() as u32);
+    gltf.buffer_views.push(gltf_json::buffer::View {
+        buffer: Index::new(0),
+        byte_length: USize64(buffer.len() as u64 - face_buffer_start),
+        byte_offset: Some(USize64(face_buffer_start)),
+        byte_stride: None,
+        extensions: Default::default(),
+        extras: Default::default(),
+        name: None,
+        target: Some(gltf_json::validation::Checked::Valid(
+            gltf_json::buffer::Target::ArrayBuffer,
+        )),
+    });
+    let face_accessor = Index::new(gltf.accessors.len() as u32);
+    gltf.accessors.push(gltf_json::Accessor {
+        buffer_view: Some(face_view),
+        byte_offset: Some(USize64(0)),
+        count: USize64(vertex_count),
+        component_type: gltf_json::validation::Checked::Valid(
+            gltf_json::accessor::GenericComponentType(gltf_json::accessor::ComponentType::F32),
+        ),
+        extensions: Default::default(),
+        extras: Default::default(),
+        type_: gltf_json::validation::Checked::Valid(gltf_json::accessor::Type::Scalar),
+        min: None,
+        max: None,
+        name: None,
+        normalized: false,
+        sparse: None,
+    });
+
     let material_index = if options.textures {
         Some(push_or_get_material_bsp(
             buffer,
@@ -1239,6 +1276,12 @@ fn push_bsp_face_bsp(
                     "VBSP_BLEND".into(),
                 )),
                 blend_accessor,
+            );
+            map.insert(
+                gltf_json::validation::Checked::Valid(gltf_json::mesh::Semantic::Extras(
+                    "VBSP_FACE".into(),
+                )),
+                face_accessor,
             );
             map
         },

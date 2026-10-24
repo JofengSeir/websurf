@@ -534,6 +534,76 @@ export class RenderSession {
   }
 
   /**
+   * 半透明网格内部的**逐三角形**前后排序（通用口径，不依赖材质/水面分组）。
+   *
+   * three 只能按 object 排 `renderOrder`；同一块里的重叠玻璃面仍会按索引顺序画。
+   * 这里直接按三角形中心到相机的距离重写 index buffer（远→近），组内保持材质组
+   * 边界不变；非索引几何先补一条顺序 index。来源位置用几何原生 position，不重采样。
+   */
+  private sortTransparentFaces(mesh: THREE.Mesh, camera: THREE.Camera): void {
+    const geom = mesh.geometry;
+    const pos = geom.attributes.position as THREE.BufferAttribute | undefined;
+    if (!pos) return;
+    type Tri = { a: number; b: number; c: number; group: number };
+    type Cache = { positionCount: number; indexCount: number; tris: Tri[]; dists: Float64Array };
+    let cache = mesh.userData.__vbspFaceSort as Cache | undefined;
+    let idx = geom.index;
+    if (!idx) {
+      const n = pos.count;
+      const arr = n > 65535 ? new Uint32Array(n) : new Uint16Array(n);
+      for (let i = 0; i < n; i++) arr[i] = i;
+      geom.setIndex(new THREE.BufferAttribute(arr, 1));
+      idx = geom.index;
+    }
+    if (!idx) return;
+    if (!cache || cache.positionCount !== pos.count || cache.indexCount !== idx.count) {
+      const groups = geom.groups.length > 0
+        ? geom.groups
+        : [{ start: 0, count: idx.count, materialIndex: 0 }];
+      const tris: Tri[] = [];
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
+        for (let i = g.start; i + 2 < g.start + g.count; i += 3) {
+          tris.push({ a: idx.getX(i), b: idx.getX(i + 1), c: idx.getX(i + 2), group: gi });
+        }
+      }
+      cache = { positionCount: pos.count, indexCount: idx.count, tris, dists: new Float64Array(tris.length) };
+      mesh.userData.__vbspFaceSort = cache;
+    }
+    const c = cache;
+    const cam = camera.position;
+    const p = this.transparentSortPoint;
+    for (let i = 0; i < c.tris.length; i++) {
+      const t = c.tris[i];
+      p.set(
+        (pos.getX(t.a) + pos.getX(t.b) + pos.getX(t.c)) / 3,
+        (pos.getY(t.a) + pos.getY(t.b) + pos.getY(t.c)) / 3,
+        (pos.getZ(t.a) + pos.getZ(t.b) + pos.getZ(t.c)) / 3,
+      ).applyMatrix4(mesh.matrixWorld);
+      c.dists[i] = p.distanceToSquared(cam);
+    }
+    const idxArr = idx.array as unknown as number[];
+    const order: number[] = [];
+    for (let i = 0; i < c.tris.length; i++) order.push(i);
+    order.sort((a, b) => c.dists[b] - c.dists[a]);
+    // 组内写回：每组 `start/count` 不变，组顺序仍是材质组顺序。
+    const groups = geom.groups.length > 0
+      ? geom.groups
+      : [{ start: 0, count: idx.count, materialIndex: 0 }];
+    for (let gi = 0; gi < groups.length; gi++) {
+      let cursor = groups[gi].start;
+      for (const oi of order) {
+        if (c.tris[oi].group !== gi) continue;
+        const t = c.tris[oi];
+        idxArr[cursor++] = t.a;
+        idxArr[cursor++] = t.b;
+        idxArr[cursor++] = t.c;
+      }
+    }
+    idx.needsUpdate = true;
+  }
+
+  /**
    * 每帧把半透明块按**相机到该块最近表面**的距离远→近重排 `renderOrder`（three 升序绘制）。
    *
    * 之前按“材质/水位归组”是补丁；通用口径应该来自几何本身：对每块取世界 AABB，
@@ -559,6 +629,7 @@ export class RenderSession {
       box.copy(local).applyMatrix4(mesh.matrixWorld);
       box.clampPoint(cameraPos, point);
       mesh.userData.__vbspTransparentDist = point.distanceToSquared(cameraPos);
+      this.sortTransparentFaces(mesh, camera);
     }
     list.sort((a, b) => {
       const da = (a.userData.__vbspTransparentDist as number | undefined) ?? 0;
