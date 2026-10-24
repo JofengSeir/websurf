@@ -13,9 +13,9 @@
 **2026-10-18 验证（wasm 三端，`surf_boreas`）**：`ice_transparent` / `ice02` / `snowiceblend` 均为 `alphaMode=BLEND` 且 extras 带 `vbsp_translucent:true`；三端材质元数据逐项相同。GLB 字节数 game = debug = 123956464，viewer = 123956376（差 88 B，仍是已知的 `accessors.min/max` 浮点末位格式差异）。`ice01` / `ice03` 的 VMT 没有 `$translucent`（UnlitGeneric + `$surfaceprop ice`），保持 OPAQUE 是资产事实，不是漏做。**剩余**：浏览器三端同视点逐像素验收（本机无 headless 文件选择）。
 **判据**：三端同视点下 `ice_transparent` 呈半透明（可透过看到后方几何）且三端逐像素一致；`$translucent` 材质在 GLB 材质 extras 有可判定的透明标记；三端 `npm run typecheck` exit 0 + 渲染一致性检查 exit 0。
 
-**当前主战线（2026-10-24 晚，D-126 已决，v2 就绪）**：**结构优先水体**（structure-first water）——owner 定调：浏览器内展示地图结构 > 复刻游戏观感，要求任意角度水下结构可读。W0 已证 HEAD 深度有效、折射 RT 有内容，差图 = 过深雾罩盖暗内容；v1（打空像素四档）前提被推翻已挂停。**v2 任务书**：`docs/T-650-water-structure-first-task.md`（五条规则 R1–R5 只挂亮雾流、与已否决方向的边界表、最差角度优先调参、666 sha256 零回归、7 机位 owner 逐张验收）。红线：P1 不得白板化、666 字节不等即停。
+**v2 执行状态（2026-10-24 深夜）**：五规则实现并固化（`ea571f3`），冻结帧机位全过、666 逐字节回归——但 **owner 二次实机打回：活态仍透蓝**。§12.5 定案：全部观感验收材料冻结在 `__vbspWaterTimePin=1`，恰好抽中清晰帧；活态同机位复现 = 80-85% 平坦蓝板，与 owner 实机一致。v2 **B1 fail 拒收**（两次仪器事故：陈旧构建、冻结帧，均由 owner 实机暴露）。
 
-**v2 执行状态（2026-10-24 深夜，V0–V3 完成，待 owner 验收）**：五规则已实现并固化终值（FogMax 亮流 0.30 / Lift 1.35 / GrazAtt 0.35 / ReflCap 0.25 / R5 beneath 深色回落），P4 初值一轮即达标零迭代；666 机位 sha256 与基线逐字节相等；三端 typecheck/build:ts/check:api + parity 全绿；新增 `__vbspWaterTimePin` 只读 pin（旧 `__vbspWaterTime` 冻结会停摆 RT，A/B 一律用 pin）。执行记录入因果链 §12；7 机位矩阵与调参证据在 `.tmp/water-sfw/`（本地）。**待办：owner 看 7 张图逐张点头（B1/B2）→ 验收方按任务书 §10 收尾。**
+**当前主战线（2026-10-24 深夜，v3 就绪）**：**精致水体（live-first，owner 终审制）**——任务书 `docs/T-650-water-v3-task.md`。三个不可协商项：**精致结构 / 活态每一帧 / 任何角度**。验收架构：观感裁决只属 owner 眼睛（每轮活态序列 + 三联对比，逐项裁决）；代码度量不量化审美（owner 否决）；视觉模型不进验收链；执行方与验收方只管**保真 / 回归 / 送达**（构建指纹、666 逐字节、全入口含 dist）。调参菜单（每轮一个变量）：涟漪幅度 / 位移-深度解耦 / 时不变对比度下限 / 节奏放慢 / 回退 v2 单规则。连续 6 轮无「过」即停回设计层。参考图 `.tmp/water-v3/ref/`。
 
 ## Agent 约束加强（Tier 1 已落地，2026-10-24）
 
