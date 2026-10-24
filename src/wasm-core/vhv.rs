@@ -217,7 +217,10 @@ mod tests {
     #[test]
     fn rejects_truncated_vertex_data() {
         let mut b = sample();
-        b.truncate(80);
+        // 丢最后一个顶点：头里声明 vert_count=3，只剩 2 个顶点的字节 ⇒ parse 必须返回 None。
+        // 原先写死 truncate(80) 是空操作——sample() 全长恰好 80 B，等于没截断，
+        // 测试从未真正覆盖过越界分支（本测试此前从未在任何地方执行过，见 ci-gates 的 wasm-core-tests）。
+        b.truncate(b.len() - 4);
         assert!(parse_vhv(&b).is_none());
     }
 
