@@ -788,7 +788,7 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   const fogPeak = Math.max(fog.r, fog.g, fog.b);
   const darkFog = Array.isArray(w.fog) && w.fog.length >= 3 && fogPeak < 0.3;
   if (w.waterThickness !== undefined) {
-    const list = ((globalThis as { __vbspWaterThickness?: unknown[] }).__vbspWaterThickness ??= []);
+    const list = ((globalThis as { __vbspWaterVolumeThickness?: unknown[] }).__vbspWaterVolumeThickness ??= []);
     list.push({ name: material.name, thickness: w.waterThickness });
   }
   const baseColor = darkFog ? fog.clone().convertSRGBToLinear() : new THREE.Color(0.12, 0.52, 0.72);
