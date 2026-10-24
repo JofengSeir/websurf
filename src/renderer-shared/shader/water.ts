@@ -166,10 +166,11 @@ const fogMixOf = () => Math.min(1, Math.max(0, num(g.__vbspWaterFogMix, 0.55)));
  */
 /** 调试：强制不透明（配合 `__vbspWaterColor` 单独判断波纹形状）。 */
 const opaqueDebug = () => g.__vbspWaterOpaque === true;
-/** 波纹法线着色强度：**缺省 0**（按 SDK，水面没有 basetexture 时观感全部来自
- *  lerp(refract, reflect, fresnel)；噪声失真图不是法线）。留旋钮做实验用：
- *  `__vbspWaterDebugShade` ⇒ 1。 */
-const shadeStrengthOf = () => (g.__vbspWaterDebugShade === true ? 1 : num(g.__vbspWaterShade, 0));
+/** 波纹法线着色强度：缺省 0.35。SDK 的无 basetexture 分支没有这层，但只靠
+ *  lerp(refract, reflect, fresnel) 时，平墙反射上看不到波纹（666 模型容器实测）；
+ *  0.35 是“能看到涟漪、又不把水染成白板”的折中。`__vbspWaterDebugShade` ⇒ 1。 */
+const shadeStrengthOf = () =>
+  g.__vbspWaterDebugShade === true ? 1 : num(g.__vbspWaterShade, 0.35);
 /** `$fogstart/$fogend` 缺失时的距离雾终点（世界单位）。 */
 const fallbackFogEndOf = () => Math.max(1, num(g.__vbspWaterFallbackFogEnd, 2400));
 /** 涟漪在一个平铺里覆盖的世界尺寸（越小越密）；用世界坐标 ⇒ 各图一致。
@@ -814,10 +815,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // 诊断：`__vbspWaterDepthGateOff` ⇒ 不再按“水浅”把 Fresnel 归零；用于确认
     // 浅水/模型容器里“没有反射”是不是 depth gate 造成的。
     shader.uniforms.vbspWaterDepthGate = { value: g.__vbspWaterDepthGateOff === true ? 0 : 1 };
-    // 0.35 是“透明水面 + 可见涟漪/倒影”的折中：alpha=1 会把水面变成整块不透明瓷砖，
-    // 把倒影压掉（owner 2026-10-24 报“水倒影消失”）；0 则涟漪又看不见。
+    // 折射合成默认 alpha=1（Source DrawWater）；涟漪/倒影改用后面的法线着色补，
+    // 不再靠 alpha 混合。0.35 的旧折中会把倒影压弱（owner 2026-10-24 报“倒影消失”）。
     shader.uniforms.vbspWaterAlphaFloor = {
-      value: Math.max(0, Math.min(1, num(g.__vbspWaterAlphaFloor, 0.35))),
+      value: Math.max(0, Math.min(1, num(g.__vbspWaterAlphaFloor, 1))),
     };
     // 水体色（最终往它收敛）+ 收敛强度
     shader.uniforms.vbspWaterBaseColor = { value: new THREE.Vector3(baseColor.r, baseColor.g, baseColor.b) };
@@ -1249,6 +1250,9 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // "青绿的水"，同时保留折射/反射带来的明暗层次（只是被水色统一）。
       // 注意：必须改 `outgoingLight`（`<opaque_fragment>` 用的是它；写 `diffuseColor.rgb`
       // 在这之后不会被采纳 —— 第一版就踩了这个，画面完全没变化）。
+      // 涟漪法线着色必须**在反射/折射之后**再混一层：只改 diffuseColor 会被后面的
+      // mirror/refr 覆盖，平墙反射时看起来完全没有波纹（owner 2026-10-24 报“连涟漪都消失”）。
+      '	outgoingLight = mix( outgoingLight, vbspShaded, clamp( vbspWaterShadeStrength * 0.5, 0.0, 1.0 ) );',
       '	outgoingLight = mix( outgoingLight, vbspWaterBaseColor, vbspWaterTintStrength );',
       // 调试：`__vbspWaterDebugDepth` 时把中间量直接输出成颜色（R=raw depth, G=厚度/深度尺度,
       // B=视距/深度尺度），用来**量化**深度还原到底错在哪（不靠肉眼猜）。
