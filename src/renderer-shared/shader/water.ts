@@ -1207,6 +1207,8 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'float vbspHitDist = 0.0;',
       // R5（T-650 v2）：真·打空像素标记 = 深度 RT 无效（HEAD 上少量；多层配对命中的像素不会进这分支）。
       'float vbspVoidR5 = 0.0;',
+      // v4 A0：有效性提到外层——调试档 7（归因分类）与 A 线 void 判据共用同一 bool。
+      'bool vbspDistValid = false;',
       // (a) 有真实水体积：水面层 − 它下方最近的那层（层表，纯竖直差）
       'if ( vbspWaterPlaneCount > 0.5 ) {',
       '	float vbspLower = -1e9;',
@@ -1223,7 +1225,7 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       '	float vbspSceneDist = ( vbspDistPack3.r + vbspDistPack3.g / 255.0 + vbspDistPack3.b / 65025.0 ) * vbspWaterDepthRange;',
       // 量程尽头 / 背景 = 没测到。**测不到就按"深水"处理**：远处本来该是蓝的，
       // 不能因为"这一帧没量到"就退化成透明（那会让颜色随站位变化，owner 报的就是这个）。
-      '	bool vbspDistValid = vbspSceneDist > 1.0 && vbspSceneDist < vbspWaterDepthRange * 0.995;',
+      '	vbspDistValid = vbspSceneDist > 1.0 && vbspSceneDist < vbspWaterDepthRange * 0.995;',
       '	if ( vbspDistValid ) {',
       '		vec3 vbspRayDir = normalize( vbspWaterWorld.xyz - cameraPosition );',
       '		float vbspHitY = cameraPosition.y + vbspRayDir.y * vbspSceneDist;',
@@ -1369,6 +1371,11 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       '	} else if ( vbspWaterDebugDepth > 1.5 && vbspWaterDebugDepth < 2.5 ) {',
       // 2 = 常量绿：验证调试分支确实被执行（若屏幕没变绿 ⇒ 分支没进/被后续 fog 覆盖）
       '		outgoingLight = vec3( 0.0, 1.0, 0.0 );',
+      '		diffuseColor.a = 1.0;',
+      '	} else if ( vbspWaterDebugDepth > 6.5 ) {',
+      // 7 = v4 A0 归因分类：R=深度RT有效性（未位移判定），G=归一化竖直深度，B=NoGeom。
+      // 配合档 2（水面像素纯绿掩码）即可逐像素分类蓝板：「真·无几何」vs「有几何但雾顶格」。
+      '		outgoingLight = vec3( vbspDistValid ? 1.0 : 0.0, saturate( vbspDepthV ), vbspNoGeom ? 1.0 : 0.0 );',
       '		diffuseColor.a = 1.0;',
       '	} else if ( vbspWaterDebugDepth > 5.5 ) {',
       // 6 = 直接输出镜像 RT：确认“水下的反射图”本身是什么；放射/空洞/整片单色都在这里看
