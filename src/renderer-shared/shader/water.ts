@@ -937,8 +937,11 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // tp-more 那档：折射内容亮度上限 0.78
     shader.uniforms.vbspWaterContentMax = { value: Math.max(0.05, num(g.__vbspWaterContentMax, 0.78)) };
     // 岸边透明带：宽度（世界单位，竖直深度口径）与"岸边反射可见度"。
-    // 40 是实测选定值：140 太大（水深才 400，整片都被淡化），40 只影响真正的岸线。
-    shader.uniforms.vbspWaterShoreWidth = { value: Math.max(1, num(g.__vbspWaterShoreWidth, 40)) };
+    // 亮雾流 60（owner 2026-10-25 从 w40/60/80 条带选 60：「60的看起来还不错」——比 40 宽 50%，
+    // 岸线过渡更缓）；暗雾流保持 40（666 观感刚过 owner 门，零回归；同 FogMax 的分流先例）。
+    shader.uniforms.vbspWaterShoreWidth = {
+      value: Math.max(1, num(g.__vbspWaterShoreWidth, darkFog ? 40 : 60)),
+    };
     shader.uniforms.vbspWaterShoreRefl = { value: Math.min(1, Math.max(0, num(g.__vbspWaterShoreRefl, 1.0))) };
     // 近处近乎透明（看得清水底）、远处带蓝且更不透（"水底形如蓝天"）
     shader.uniforms.vbspWaterNearAlpha = { value: Math.min(1, Math.max(0, num(g.__vbspWaterNearAlpha, 0.15))) };
