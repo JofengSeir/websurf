@@ -1485,6 +1485,88 @@ export function applyWaterShaders(root: THREE.Object3D): number {
     (globalThis as { __vbspWaterNames?: unknown }).__vbspWaterNames = [...byName.keys()];
     (globalThis as { __vbspWaterPlanes?: unknown }).__vbspWaterPlanes = planes;
     (globalThis as { __vbspWaterBeneath?: unknown }).__vbspWaterBeneath = beneathInfo.slice(0, 24);
+    (globalThis as { __vbspWaterShoreField?: unknown }).__vbspWaterShoreField =
+      buildShoreDistanceProbe(beneathInfo);
   }
   return injected;
+}
+
+/**
+ * 数据探针：按水层把水块 XZ 矩形栅格化，再用 BFS 算“水内到边界”的距离。
+ * 只暴露统计，不接 shader；验证边界/距离场是否值得作为 foam/shore 的数据源。
+ */
+function buildShoreDistanceProbe(rects: { y: number; xMin: number; xMax: number; zMin: number; zMax: number }[]) {
+  const cell = 128;
+  const byLayer = new Map<number, typeof rects>();
+  for (const r of rects) {
+    if (!(r.xMax > r.xMin && r.zMax > r.zMin)) continue;
+    const key = Math.round(r.y);
+    const list = byLayer.get(key) ?? [];
+    list.push(r);
+    byLayer.set(key, list);
+  }
+  const layers: unknown[] = [];
+  for (const [y, list] of byLayer) {
+    const minX = Math.min(...list.map((r) => r.xMin));
+    const maxX = Math.max(...list.map((r) => r.xMax));
+    const minZ = Math.min(...list.map((r) => r.zMin));
+    const maxZ = Math.max(...list.map((r) => r.zMax));
+    const w = Math.max(1, Math.ceil((maxX - minX) / cell));
+    const h = Math.max(1, Math.ceil((maxZ - minZ) / cell));
+    const inside = new Uint8Array(w * h);
+    for (const r of list) {
+      const x0 = Math.max(0, Math.floor((r.xMin - minX) / cell));
+      const x1 = Math.min(w - 1, Math.floor((r.xMax - minX) / cell));
+      const z0 = Math.max(0, Math.floor((r.zMin - minZ) / cell));
+      const z1 = Math.min(h - 1, Math.floor((r.zMax - minZ) / cell));
+      for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) inside[z * w + x] = 1;
+    }
+    // 边界水格 dist=0，向水内 BFS；非水格不参与。
+    const dist = new Int32Array(w * h).fill(-1);
+    const queue: number[] = [];
+    for (let z = 0; z < h; z++) {
+      for (let x = 0; x < w; x++) {
+        const i = z * w + x;
+        if (!inside[i]) continue;
+        if (x === 0 || z === 0 || x === w - 1 || z === h - 1 ||
+            !inside[i - 1] || !inside[i + 1] || !inside[i - w] || !inside[i + w]) {
+          dist[i] = 0;
+          queue.push(i);
+        }
+      }
+    }
+    for (let q = 0; q < queue.length; q++) {
+      const i = queue[q];
+      const x = i % w;
+      const z = (i / w) | 0;
+      const next = dist[i] + 1;
+      if (x > 0 && inside[i - 1] && dist[i - 1] < 0) { dist[i - 1] = next; queue.push(i - 1); }
+      if (x + 1 < w && inside[i + 1] && dist[i + 1] < 0) { dist[i + 1] = next; queue.push(i + 1); }
+      if (z > 0 && inside[i - w] && dist[i - w] < 0) { dist[i - w] = next; queue.push(i - w); }
+      if (z + 1 < h && inside[i + w] && dist[i + w] < 0) { dist[i + w] = next; queue.push(i + w); }
+    }
+    let waterCells = 0;
+    let boundaryCells = 0;
+    let maxCells = 0;
+    let sum = 0;
+    for (let i = 0; i < inside.length; i++) {
+      if (!inside[i]) continue;
+      waterCells++;
+      if (dist[i] === 0) boundaryCells++;
+      if (dist[i] > maxCells) maxCells = dist[i];
+      if (dist[i] > 0) sum += dist[i];
+    }
+    layers.push({
+      y,
+      cell,
+      width: w,
+      height: h,
+      waterCells,
+      boundaryCells,
+      maxDistance: maxCells * cell,
+      meanDistance: waterCells > boundaryCells ? (sum / Math.max(1, waterCells - boundaryCells)) * cell : 0,
+      bounds: [minX, minZ, maxX, maxZ],
+    });
+  }
+  return { layers };
 }
