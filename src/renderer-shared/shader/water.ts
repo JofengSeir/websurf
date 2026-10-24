@@ -98,6 +98,7 @@ const g = globalThis as {
   __vbspWaterReflectStrength?: unknown;
   __vbspWaterDepthGateOff?: unknown;
   __vbspWaterDepthGate?: unknown;
+  __vbspWaterHideAllRefr?: unknown;
   __vbspWaterAlphaFloor?: unknown;
   /** 近处/远处的水面不透明度（缺省 0.10 / 0.45）：近处近乎透明、远处带蓝更像水。 */
   __vbspWaterNearAlpha?: unknown;
@@ -494,7 +495,8 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
     const bb = mesh.geometry.boundingBox;
     if (!bb) return;
     const top = bb.max.y; // 这些合并网格都是水平整层 ⇒ bbox.max.y 就是该层高度
-    if (nearest !== null && Math.abs(top - nearest) < 1.5) {
+    const hideAll = g.__vbspWaterHideAllRefr === true;
+    if (hideAll || (nearest !== null && Math.abs(top - nearest) < 1.5)) {
       mesh.visible = false;
       hidden.push(mesh);
     }
@@ -811,7 +813,7 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // ⇒ 幅度从 0.05 降到 0.012，并把反射混合再乘一个可调强度（缺省 0.55）。
     shader.uniforms.vbspWaterDistort = { value: 0.012 * Math.max(0.1, num(w.reflectAmount, 0.8)) };
     shader.uniforms.vbspWaterReflStrength = {
-      value: Math.min(1, Math.max(0, num(g.__vbspWaterReflectStrength, 0.5))),
+      value: Math.min(1, Math.max(0, num(g.__vbspWaterReflectStrength, 0.3))),
     };
     // 诊断：`__vbspWaterDepthGateOff` ⇒ 不再按“水浅”把 Fresnel 归零；用于确认
     // 浅水/模型容器里“没有反射”是不是 depth gate 造成的。
@@ -820,10 +822,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     shader.uniforms.vbspWaterDepthGate = {
       value: g.__vbspWaterDepthGateOff === true ? 0 : Math.max(0, Math.min(1, num(g.__vbspWaterDepthGate, 0))),
     };
-    // 折射合成默认 alpha=1（Source DrawWater）；涟漪/倒影改用后面的法线着色补，
-    // 不再靠 alpha 混合。0.35 的旧折中会把倒影压弱（owner 2026-10-24 报“倒影消失”）。
+    // 浅水近透明：alpha 下限 0.2，反射强度 0.3 只留轻微倒影。alpha=1 会让浅水
+    // 变成不透明白板（owner 2026-10-24 报“泛白”）；0 又会让反射/涟漪完全透明掉。
     shader.uniforms.vbspWaterAlphaFloor = {
-      value: Math.max(0, Math.min(1, num(g.__vbspWaterAlphaFloor, 1))),
+      value: Math.max(0, Math.min(1, num(g.__vbspWaterAlphaFloor, 0.2))),
     };
     // 水体色（最终往它收敛）+ 收敛强度
     shader.uniforms.vbspWaterBaseColor = { value: new THREE.Vector3(baseColor.r, baseColor.g, baseColor.b) };
