@@ -5,12 +5,16 @@
 #
 # 本文件实际跑的清单：
 #   rust-unit-tests — `cargo test -p websurf-phys`（共享层物理单测；含蹲姿/surf 回归、P2 幻影门）
+#   wasm-core-tests — `cargo test -p websurf-wasm-core`（宿主单测，2026-10-24 起第一次有 CI 覆盖；
+#                     test/maps 缺失时夹具类测试自行跳过，详见该 job 注释）
 #   source-contract — `apps/viewer` 的 `check-wasm-api.mjs --source-only`（Rust serde 键名 ↔ TS 接口键名；
 #                     只读源码、不装 wasm 工具链、不建 pkg ⇒ 最便宜的一道，D-022 选项 (a)）
 #   render-parity   — `check-render-parity.mjs`：三端渲染入口必须走共享 RenderSession，
 #                     apps 内不得再出现渲染器/装配/天空/可见性/画质等步骤（2026-10-23）
+#   ts-typecheck    — 三端 `npm run typecheck`（tsc；此前 TS 类型错误只在合并后的 deploy-pages 才暴露）
 #   glb-parity      — 三端 `npm run build:wasm` + 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
-#   debug-gates / game-gates — **只剩 `npm run build:wasm`**：只证明这两端的 wasm 能在干净环境构建
+#   debug-gates / game-gates — `npm run build:wasm` + `npm run build:ts`（wasm 构建冒烟 +
+#                     tsc/esbuild 打包冒烟）
 #
 # 历史：2026-10-12 的 T-653（削减验证层，删 26 个验证脚本/测试）把三端 package.json 的 test:*
 # 门禁连同 CI 里调用它们的 step 一并删除，本文件自此不再跑 app 级回归门；两个 job 名保留原样
@@ -21,7 +25,7 @@ name: CI Gates
 on:
   push:
     branches: [main]
-    # 纯文档改动不跑门禁（文档由 Doc Drift Check 负责）
+    # 纯文档改动不跑门禁（接受的现状：文档无自动检查）
     paths-ignore:
       - '**.md'
   pull_request:
@@ -47,6 +51,35 @@ jobs:
 
       - name: cargo test -p websurf-phys
         run: cargo test -p websurf-phys
+
+  # ── wasm-core 宿主单测（2026-10-24 加；host 构建含完整依赖树，冷构建 12~18 min ⇒ 必须带缓存）──
+  wasm-core-tests:
+    name: wasm-core unit tests (host)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo (registry + target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: wasm-core-host-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      # 夹具说明（盘点于 2026-10-24，宿主共 34 个测试）：
+      # - phyfile::tests::parse_s2_pillbig_phy 依赖 test/maps/surf_666.bsp（gitignore 本地物），
+      #   缺失时自行跳过（.ok() + return），CI 上不算失败；
+      # - vbsp::tests::tf2_file 本就 #[ignore]（需要未随仓库分发的 koth_bagel_rc2a.bsp）；
+      # - 其余测试为合成输入，无文件依赖。预期：32 过 + 1 跳过 + 1 忽略。
+      - name: cargo test -p websurf-wasm-core
+        run: cargo test -p websurf-wasm-core
 
   # ── 源码级契约（不装 wasm 工具链、不建 pkg；D-022 选项 (a)）────────────────
   source-contract:
@@ -82,6 +115,34 @@ jobs:
 
       - name: apps must not reimplement shared render steps
         run: node src/scripts/check-render-parity.mjs
+
+  # ── 三端 TS 类型检查（tsc；renderer-shared 依赖仓库根 three，必须先装根级再装工程级）──
+  ts-typecheck:
+    name: three-end TS typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: Install root shared dependencies
+        run: npm ci
+
+      - name: Typecheck (debug / game / viewer)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in debug game viewer; do
+            echo "== apps/$app =="
+            (cd "apps/$app" && npm ci && npm run typecheck)
+          done
 
   # ── debug：wasm 构建冒烟（T-653 削减验证层后，本 job 只剩 build:wasm）────────
   debug-gates:
@@ -150,9 +211,14 @@ jobs:
 
       - name: Build debug WASM
         working-directory: apps/debug
-        # 本 job 现在只做构建冒烟：确认 debug 的 wasm 能在干净环境构建出来。
+        # 本 job 只做构建冒烟：确认 debug 的 wasm 能在干净环境构建出来。
         # （原注释依据的「门禁要用 esbuild 打包 renderer-main ⇒ 必须先有 pkg/」已随 T-653 失效。）
         run: npm run build:wasm
+
+      - name: Build TypeScript (typecheck + bundle smoke)
+        working-directory: apps/debug
+        # build:ts = tsc + esbuild；顺序依赖 pkg/（上一步已产出）。
+        run: npm run build:ts
 
   # ── game：wasm 构建冒烟（同上，T-653 后本 job 只剩 build:wasm）──────────────
   game-gates:
@@ -218,8 +284,13 @@ jobs:
 
       - name: Build game WASM
         working-directory: apps/game
-        # 本 job 现在只做构建冒烟：确认 game 的 wasm 能在干净环境构建出来（T-653 后已无门禁 step 读 pkg/）。
+        # 本 job 只做构建冒烟：确认 game 的 wasm 能在干净环境构建出来（T-653 后已无门禁 step 读 pkg/）。
         run: npm run build:wasm
+
+      - name: Build TypeScript (typecheck + bundle smoke)
+        working-directory: apps/game
+        # build:ts = tsc + esbuild；顺序依赖 pkg/（上一步已产出）。
+        run: npm run build:ts
 
   glb-parity:
     name: three-end GLB parity
