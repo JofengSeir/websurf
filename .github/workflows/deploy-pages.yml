@@ -75,7 +75,14 @@ jobs:
           cache-dependency-path: '**/package-lock.json'
 
       - name: Install wasm-pack
-        uses: jetli/wasm-pack-action@v0.4.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=0.15.0
+          archive="wasm-pack-v${version}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL "https://github.com/rustwasm/wasm-pack/releases/download/v${version}/${archive}" -o "$RUNNER_TEMP/${archive}"
+          tar -xzf "$RUNNER_TEMP/${archive}" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/wasm-pack-v${version}-x86_64-unknown-linux-musl/wasm-pack" "$HOME/.cargo/bin/wasm-pack"
 
       # wasm-bindgen-cli 的策略见 ci-gates.yml 同名步骤：缓存 → 预编译包 → cargo install 兜底。
       # 三个矩阵 job 共用同一个 cache key（并发写入时后到者静默失败，不影响构建）。
