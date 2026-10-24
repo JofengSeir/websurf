@@ -96,6 +96,7 @@ const g = globalThis as {
   __vbspWaterDefaultDepth?: unknown;
   /** 反射强度（缺省 0.28；owner 反馈反射过强）。 */
   __vbspWaterReflectStrength?: unknown;
+  __vbspWaterDepthGateOff?: unknown;
   /** 近处/远处的水面不透明度（缺省 0.10 / 0.45）：近处近乎透明、远处带蓝更像水。 */
   __vbspWaterNearAlpha?: unknown;
   __vbspWaterFarAlpha?: unknown;
@@ -809,6 +810,9 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     shader.uniforms.vbspWaterReflStrength = {
       value: Math.min(1, Math.max(0, num(g.__vbspWaterReflectStrength, 0.12))),
     };
+    // 诊断：`__vbspWaterDepthGateOff` ⇒ 不再按“水浅”把 Fresnel 归零；用于确认
+    // 浅水/模型容器里“没有反射”是不是 depth gate 造成的。
+    shader.uniforms.vbspWaterDepthGate = { value: g.__vbspWaterDepthGateOff === true ? 0 : 1 };
     // 水体色（最终往它收敛）+ 收敛强度
     shader.uniforms.vbspWaterBaseColor = { value: new THREE.Vector3(baseColor.r, baseColor.g, baseColor.b) };
     shader.uniforms.vbspWaterTintStrength = {
@@ -938,6 +942,7 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'uniform vec3 vbspWaterReflTint;',
       'uniform float vbspWaterReflMix;',
       'uniform float vbspWaterReflStrength;',
+      'uniform float vbspWaterDepthGate;',
       'uniform vec3 vbspWaterBaseColor;',
       'uniform float vbspWaterTintStrength;',
       'uniform float vbspWaterAbsorb;',
@@ -1204,7 +1209,7 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       '	float vbspFres = pow( clamp( 1.0 - clamp( dot( normalize( vbspWaterN ), normalize( vbspWaterV ) ), 0.0, 1.0 ), 0.0, 1.0 ), 5.0 );',
       // 源的**无 basetexture 分支**：`fFresnel *= saturate((depth - 0.05) * 20)`
       // —— 水浅（水底近）几乎不反射，水深才成镜面。有了折射 RT 的深度就能照抄。
-      '	if ( vbspWaterRefrOn > 0.5 ) { vbspFres *= saturate( ( vbspFogAlpha - 0.05 ) * 20.0 ); }',
+      '	if ( vbspWaterRefrOn > 0.5 && vbspWaterDepthGate > 0.5 ) { vbspFres *= saturate( ( vbspFogAlpha - 0.05 ) * 20.0 ); }',
       // ① three `Water.js` 的平面反射：镜面 UV + 双层滚动法线的扭曲
       '	if ( vbspWaterReflOn > 0.5 ) {',
       '		vec2 vbspMuv = vbspWaterMirrorUv.xy / max( 1e-4, vbspWaterMirrorUv.w );',
