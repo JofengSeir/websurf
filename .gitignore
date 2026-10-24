@@ -89,3 +89,11 @@ apps/game/scripts/wasm-hash-pin.mjs
 # ── agent 接入层（2026-10-18 起不再有强制工作流）──
 # 入库：AGENTS.md、OWNER.md、TODO.md、skills/websurf-env-traps/**。
 # 不入库：.amh/**、.dsh/**（本机 AMH Hub 绑定）、.archify/、.workbuddy/。
+
+# ── 内部实验记录（本地保留，不入库）──
+# 只保留 docs/render-parity.md 作为公开的渲染归属说明；T-650 过程台账/机位/诊断留在本机。
+docs/T-650-*
+docs/666-*
+docs/blind-*
+docs/boreas-*
+docs/water-render-*
