@@ -7,6 +7,7 @@
     "agent:save": "node src/scripts/agent-memory.mjs save",
     "agent:handoff": "node src/scripts/agent-memory.mjs handoff",
     "agent:flush": "node src/scripts/agent-memory.mjs flush",
+    "agent:audit": "node src/scripts/agent-audit.mjs",
     "check:render-parity": "node src/scripts/check-render-parity.mjs"
   },
   "dependencies": {
