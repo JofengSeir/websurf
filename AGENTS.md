@@ -1,9 +1,25 @@
 # AGENTS.md — WebSurf 仓库作业指南
 
-> 本文件是 agent 进入仓库的入口。**2026-10-18 起，仓库不再有强制 agent 工作流**：没有看板、没有 claim / close-round、没有记忆库同步门禁、没有 docflow、没有 pre-commit 钩子。
-> 旧流程的完整文件与台账保存在 git tag `checkpoint/pre-amh-reset-20261018`。
+> 本文件是 agent 进入仓库的**入口文档**，规则以本文为准。
 >
-> 仍然成立的是工程事实：构建与测试要过，结论要有证据，提交信息要能独立读懂。
+> - **2026-10-18 起没有强制 agent 工作流**：无看板、无 claim / close-round、无记忆库同步门禁、无 docflow、无 pre-commit 钩子。旧流程的完整文件与台账在 git tag `checkpoint/pre-amh-reset-20261018`。
+> - 仍然成立的是工程事实：**构建与测试要过，结论要有证据，提交信息要能独立读懂。**
+
+## 0. 开工速览
+
+按顺序做四件事，其余按需查对应章节：
+
+1. 加载技能 `websurf-env-traps`（见 §6）：本机 Windows 作业陷阱，开工前读。
+2. `git status --short -uall`：确认没有其他 agent 的在途改动。
+3. 按 §2 跑与改动相关的构建 / 类型检查，按 §4 取证据。
+4. 按 §7 提交；记忆写入（可选）按 §3。
+
+四条红线（违反会破坏别人的工作或得出错误结论）：
+
+- **禁止**在 `main` 上提交或改动：当前工作分支是 `rebuild/from-remote`；本地 `main` 是已分歧的历史实验线（领先 `origin/main` 36 笔），只许 owner 处置；推送只推 `git push origin rebuild/from-remote`，**绝不推 `origin/main`**。
+- **禁止**从 `progress/`、`documents/`、`docflow.json` 取规则或状态——它们已不存在。
+- **禁止**恢复旧的 agentmemory / mcp-hub 路线（见 §3.0）。
+- **禁止**用 `git checkout -- <文件>` 清理工作区（会抹掉未提交成果）。
 
 ## 1. 仓库地图
 
@@ -26,6 +42,8 @@
 
 ## 2. 构建与验证
 
+### 2.1 Node 侧（TS / 打包 / 本地服务）
+
 ```bash
 npm ci                         # 仓库根：shared 层的 three
 cd apps/<app> && npm ci        # debug / game / viewer 各自装
@@ -36,72 +54,71 @@ npm run build:dist             # 打包 dist/（single 或 --multi）
 npm run dev                    # 起本地服务（debug 8080 / game 8090 / viewer 8100）
 ```
 
-Rust 侧：
+### 2.2 Rust 侧
 
 ```bash
 cargo check -p websurf-phys
 cargo test -p websurf-phys
 ```
 
-渲染归属（三端不得重写共享渲染步骤；规则与同机位看图见 `docs/render-parity.md`）：
+### 2.3 渲染归属（三端不得重写共享渲染步骤）
+
+- 规则与同机位看图流程：`docs/render-parity.md`。
+- 静态门禁：
 
 ```bash
 node src/scripts/check-render-parity.mjs
 ```
 
-CI 仍会跑 `ci-gates.yml`：`cargo test`、viewer 的源码契约、三端 wasm 构建与 GLB 一致性。提交前至少跑与改动相关的构建/类型检查；没有跑成功的项要在提交信息里写清楚。
+### 2.4 CI
 
-## 3. 项目记忆（AMH gateway）
+CI 跑 `.github/workflows/ci-gates.yml`：`cargo test`、viewer 的源码契约、三端 wasm 构建与 GLB 一致性。
 
-> **当前状态（2026-10-18）：DSH profile 未装 native MCP，只能走 A（项目 client）。**
-> `client.mjs` 有 6 条 + `call`，能访问 48 个 native 工具；但模型看不到原生工具列表，
-> 17 个 skill 不能直调，只能按 skill 顶部提示走 `client.mjs call`。要 B 需 profile entry + token + 重启。
+**提交前**至少跑与改动相关的构建 / 类型检查；**没跑成功的项要在提交信息里写清楚**。
 
-**旧的独立 agentmemory / mcp-hub 路线已卸载：不要恢复。** 当前 AMH gateway 的 backend 是 agentmemory（0.9.30），只经 gateway 访问；不要直连 `:3111` 或实例 REST。
+## 3. 项目记忆（AMH gateway，可选但推荐）
 
-AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md` 为准，但其中“brief/handoff 失败就停”的旧约定由 §3.1 覆盖：gateway 不可用落 `.dsh/amh-outbox`，不阻塞。项目契约 `.amh/config.json`（`hub` / `binding` / `project`，本地文件，不写进仓库）。旧的 `amh-cli` / 7 工具 / marker / verify / counts 路线已删除；**`brief` 仍可用**。
+### 3.0 现状（2026-10-18）
+
+- DSH profile 未装 native MCP，只能走**通道 A（项目 client）**：`client.mjs` 有 6 条命令 + `call`，能访问 48 个 native 工具；但模型看不到原生工具列表，17 个 skill 不能直调，只能按 skill 顶部提示走 `client.mjs call`。要走 B 需要 profile entry + token + 重启（B 不采用，见 §3.2）。
+- **旧的独立 agentmemory / mcp-hub 路线已卸载：不要恢复。** 当前 AMH gateway 的 backend 是 agentmemory（0.9.30），只经 gateway 访问；**不要直连 `:3111` 或实例 REST**。
+- AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md` 为准，但其中「brief/handoff 失败就停」的旧约定由 §3.1 覆盖：gateway 不可用落 `.dsh/amh-outbox`，不阻塞。
+- 项目契约 `.amh/config.json`（`hub` / `binding` / `project`，本地文件，不写进仓库）。
+- 旧的 `amh-cli` / 7 工具 / marker / verify / counts 路线已删除；**`brief` 仍可用**。
 
 ### 3.1 三条命令（弱 agent 也能走通）
 
-脚本：[`src/scripts/agent-memory.mjs`](src/scripts/agent-memory.mjs)。根目录也提供 `npm run agent:brief` / `agent:save` / `agent:handoff` / `agent:flush`。
+脚本：`src/scripts/agent-memory.mjs`。根目录也提供 `npm run agent:brief` / `agent:save` / `agent:handoff` / `agent:flush`。
 
-```bash
-# 开工：只打印 gateway 状态、HEAD/干净度、最近 3 条 handoff、最近 5 条写入、outbox 数
-node src/scripts/agent-memory.mjs brief
-
-# 过程中：决定/非显然修复落一条
-node src/scripts/agent-memory.mjs save --content "..." --type fact --concepts "area,topic" --files "src/file.ts"
-
-# 收尾：content 必填；task/status/next 缺省会填占位值（尽量自己写清楚）
-node src/scripts/agent-memory.mjs handoff --task T-650 --status "partial" --content "..." --next "..." --files "a.ts,b.ts"
-
-# gateway 恢复后补写离线记录
-node src/scripts/agent-memory.mjs flush
-node src/scripts/agent-memory.mjs doctor
-```
-
-规则：
-
-- **不要一次读 20 条旧 handoff**。`brief` 只给最近 3 条；更早的用 `recall "<关键词>"` 按需查。旧 handoff 可能已被后续提交覆盖，必须回 `git`/代码复核。
-- **gateway 不可用不阻塞**：`save`/`handoff` 自动把内容写到 `.dsh/amh-outbox/*.json`（gitignore），agent 继续改代码；提交信息写 `AMH: down`，gateway 恢复后 `flush`。不要自己 start/stop AMH。
-- **brief 失败也不阻塞**：用 `git log/status` + 代码继续；不要因为记忆不可读就停在原地。
-- `--app` 默认 `dsh`；不知道应用名就用默认。不要猜别的 token，也不要建 `amh` profile。
-- 直接调 client 仍可用（`brief/sessions/recall/search/save/handoff/tools/call`），但推荐 wrapper：它处理 JSON 形状、outbox、摘要和失败回退。
-
-### 3.2 通道与身份（A 正式，B 不采用）
-
-| 通道 | 能力 | 代价 |
+| 时机 | 命令 | 说明 |
 |---|---|---|
-| A. 项目 client（正式） | `client.mjs` 六条 + `call`；`call` 可访问全部 native 工具 | 模型看不到原生工具列表；每个 agent 需自己的 token 才有独立身份 |
-| B. native MCP（不采用） | 模型直接看到 native 工具 | 需要 profile entry + token + 重启；DSH 加 `web` 会污染所有项目 |
+| 开工 | `node src/scripts/agent-memory.mjs brief` | 只打印 gateway 状态、HEAD/干净度、最近 3 条 handoff、最近 5 条写入、outbox 数 |
+| 过程中 | `node src/scripts/agent-memory.mjs save --content "..." --type fact --concepts "area,topic" --files "src/file.ts"` | 决定 / 非显然修复落一条 |
+| 收尾 | `node src/scripts/agent-memory.mjs handoff --task T-650 --status "partial" --content "..." --next "..." --files "a.ts,b.ts"` | content 必填；task/status/next 缺省会填占位值（尽量自己写清楚） |
+| gateway 恢复后 | `node src/scripts/agent-memory.mjs flush`；`node src/scripts/agent-memory.mjs doctor` | 补写离线记录 / 体检 |
 
-- **A 是正式路线**；B 不采用，不要新建 `amh` profile。
-- 同一项目、同一笔写入只走一条，不双写。
-- `binding` 定项目；`--app`/token 定 agentId。多 agent 的 action/lease/signal 必须各自 token；没有 lease 时互斥由人/DSH 负责，不要自己造 gate。
-- 交接的 concepts 含 `task:<id>,handoff`；`content` 以 `HANDOFF <task>:` 开头（wrapper 已按 client 格式写）。
-- `TODO.md` / `OWNER.md` 仍是可选任务/决定文件；AMH 不是状态表；`D-###` 正文以 OWNER 为准。
+使用规则：
 
-### 3.3 提交记录（建议，不是门禁）
+1. **不要一次读 20 条旧 handoff**：`brief` 只给最近 3 条；更早的用 `recall "<关键词>"` 按需查。旧 handoff 可能已被后续提交覆盖，必须回 `git` / 代码复核。
+2. **gateway 不可用不阻塞**：`save` / `handoff` 自动把内容写到 `.dsh/amh-outbox/*.json`（gitignore），agent 继续改代码；提交信息写 `AMH: down`，gateway 恢复后 `flush`。**不要自己 start/stop AMH**。
+3. **brief 失败也不阻塞**：用 `git log/status` + 代码继续，不要停在原地。
+4. `--app` 默认 `dsh`；不知道应用名就用默认。**不要猜别的 token，也不要建 `amh` profile。**
+5. 直接调 client 仍可用（`brief/sessions/recall/search/save/handoff/tools/call`），但推荐 wrapper：它处理 JSON 形状、outbox、摘要和失败回退。
+
+### 3.2 通道与身份
+
+| 通道 | 能力 | 代价 | 结论 |
+|---|---|---|---|
+| A. 项目 client | `client.mjs` 六条 + `call`；`call` 可访问全部 native 工具 | 模型看不到原生工具列表；每个 agent 需自己的 token 才有独立身份 | **正式路线** |
+| B. native MCP | 模型直接看到 native 工具 | 需要 profile entry + token + 重启；DSH 加 `web` 会污染所有项目 | **不采用** |
+
+- **禁止**新建 `amh` profile。
+- 同一项目、同一笔写入只走一条，**不双写**。
+- `binding` 定项目；`--app` / token 定 agentId。多 agent 的 action / lease / signal 必须各自 token；没有 lease 时互斥由人 / DSH 负责，**不要自己造 gate**。
+- 交接格式（wrapper 已按 client 格式写，手动调用时注意）：concepts 含 `task:<id>,handoff`；content 以 `HANDOFF <task>:` 开头。
+- `TODO.md` / `OWNER.md` 仍是可选任务 / 决定文件；AMH 不是状态表；`D-###` 正文以 OWNER 为准。
+
+### 3.3 提交尾注（建议，不是门禁）
 
 代码 / 脚本改动提交时，末行**建议**带三选一：
 
@@ -111,34 +128,43 @@ AMH: none            # 明确判定这次改动无需记录
 AMH: down            # gateway 不可用（正文说明）
 ```
 
-- **不要依赖 commit-msg 钩子**：本仓不把它当门禁，`.dsh/hooks/` 可能不存在。缺尾注不阻塞提交；不要为了“守规矩”去加一个会卡住别的 agent 的钩子。
-- 纯文档/数据、`.dsh/` `.amh/` `.tmp/` 等忽略目录不强制。
-- 如果将来有人装了钩子：不要用 `--no-verify` 逃；先修流程。`AMH: none` 是合法决定，不是失败。
+- **不要依赖 commit-msg 钩子**：本仓不把它当门禁，`.dsh/hooks/` 可能不存在。缺尾注不阻塞提交；**不要**为了「守规矩」去加一个会卡住别的 agent 的钩子。
+- 纯文档 / 数据、`.dsh/` `.amh/` `.tmp/` 等忽略目录不强制。
+- 如果将来有人装了钩子：**不要**用 `--no-verify` 逃；先修流程。`AMH: none` 是合法决定，不是失败。
 
-### 3.4 工具与坑
+### 3.4 工具与已知坑
 
-- 17 个 skill 在 `.dsh/skills` 中是指向 AMH `gateway/skills` 的目录 junction，不是副本；不要手工复制一套。
-- gateway 路径读 `.amh/gateway.path`；`AMH_CLIENT` 可覆盖 client 路径。`.amh/config.json` 有 hub/binding/project 和本地 token；不要把 token 写进仓库/公开面。
-- 原生工具面 48 个（实例 20 实测），不是旧 7 个；gateway 只挡 6 个结构性跨边界工具。
-- `client.mjs save --concepts "a,b"` 传字符串；`--files` 正常。旧 `call memory_save --args-file` 只作兜底。
-- `brief` **仍可用**（旧 AGENTS 写“已删除”是错的）；`sessions` 往往只有旧 capture，别把它当当前会话列表。
-- `brief.handoffs` 不过滤状态，会混入新旧 handoff；wrapper 只取最近 3 条，仍要按时间/HEAD 判断。
-- 不装 native MCP、不新建 `amh` profile；agent 不自己加第二入口、不自己发 token。
-- 不写 secrets、原始对话、临时日志。
+| # | 事实 / 坑 | 规则 |
+|---|---|---|
+| 1 | 17 个 skill 在 `.dsh/skills` 是指向 AMH `gateway/skills` 的目录 junction，不是副本 | 不要手工复制一套 |
+| 2 | gateway 路径读 `.amh/gateway.path`；`AMH_CLIENT` 可覆盖 client 路径 | 路径问题先查这两处 |
+| 3 | `.amh/config.json` 有 hub/binding/project 和本地 token | 不要把 token 写进仓库 / 公开面 |
+| 4 | 原生工具面 48 个（实例 20 实测），不是旧 7 个；gateway 只挡 6 个结构性跨边界工具 | — |
+| 5 | `client.mjs save --concepts "a,b"` 传字符串；`--files` 正常 | 旧 `call memory_save --args-file` 只作兜底 |
+| 6 | `brief` 仍可用（旧 AGENTS 写「已删除」是错的） | — |
+| 7 | `sessions` 往往只有旧 capture | 别把它当当前会话列表 |
+| 8 | `brief.handoffs` 不过滤状态，会混入新旧 handoff | wrapper 只取最近 3 条，仍要按时间 / HEAD 判断 |
+| 9 | — | 不装 native MCP、不新建 `amh` profile；不自己加第二入口、不自己发 token |
+| 10 | — | 不写 secrets、原始对话、临时日志 |
 
 ## 4. 取证据的规矩
 
-- 代码语义只从**实现、调用点、测试**取；现有注释和旧文档只能当线索。
-- 不能在代码里定位的结论标 `[待确认]` 并说明缺什么，不要用「应该 / 可能 / 大概」补。
-- 判断「某物是否还在」用全工作区索引（含未跟踪），不要用 `git grep` 的 0 命中下结论；`dist/`、`pkg/`、`test/maps/` 等是生成物/本地物。
-- 公开面（README / AGENTS / 源码注释）不写本机绝对路径；本地路径放 `.amh/`、`.dsh/` 或环境变量。
-- 改 `.cmd` / `.bat` / `.ps1` 保持 CRLF，并实跑一次。
-- 渲染/物理改动先做基线 A/B，再一次只动一个变量；验证 wasm 产物真的被使用（字节数/哈希），不要只看「注入成功」。
+| # | 必须 | 禁止 |
+|---|---|---|
+| 1 | 代码语义从**实现、调用点、测试**取 | 把现有注释 / 旧文档当事实来源（只能当线索） |
+| 2 | 定不了位的结论标 `[待确认]`，并说明缺什么 | 用「应该 / 可能 / 大概」补结论 |
+| 3 | 判「某物是否还在」用**全工作区索引**（含未跟踪）；`dist/`、`pkg/`、`test/maps/` 等是生成物 / 本地物 | 用 `git grep` 的 0 命中下结论 |
+| 4 | 公开面（README / AGENTS / 源码注释）不写本机绝对路径；本地路径放 `.amh/`、`.dsh/` 或环境变量 | — |
+| 5 | 改 `.cmd` / `.bat` / `.ps1` 保持 **CRLF**，并实跑一次 | — |
+| 6 | 渲染 / 物理改动先做基线 A/B，一次只动一个变量 | — |
+| 7 | 验证 wasm 产物真的被使用（字节数 / 哈希） | 只看「注入成功」 |
 
 ## 5. 未结工作与待拍板
 
-- `TODO.md`：可选清单，直接增删；不需要同步到任何台账，也没有 ID 格式要求。
-- `OWNER.md`：只有「不可逆 / 改范围 / 改语义」的决定才登记；能按现有约定做的就直接做。
+| 文件 | 用途 | 规则 |
+|---|---|---|
+| `TODO.md` | 可选的未结清单 | 直接增删；不同步任何台账；没有 ID 格式要求 |
+| `OWNER.md` | 需要 owner 拍板的决定 | 只有「不可逆 / 改范围 / 改语义」才登记；能按现有约定做的直接做 |
 
 ## 6. 环境陷阱
 
@@ -146,6 +172,10 @@ AMH: down            # gateway 不可用（正文说明）
 
 ## 7. 提交
 
-- 先 `git status --short`，只 add 自己改的文件；不要用 `git checkout -- <文件>` 清理别人的在途改动。
-- 提交信息说清：改了什么、为什么、怎么验证。纯格式/注释改动写「无行为变化」。
-- 行尾：仓库 `core.autocrlf=true`，索引是 LF、工作树是 CRLF；不要顺手统一。
+提交前 checklist（按序执行）：
+
+1. 确认当前分支是 `rebuild/from-remote`（`git branch --show-current`）；**禁止在 `main` 上提交**（§0 红线）。
+2. `git status --short`：只 `git add` 自己改的文件；别人的在途改动原样保留。
+3. 验证与提交串成一步（`&&`），红灯即终止。
+4. 提交信息说清：**改了什么、为什么、怎么验证**；纯格式 / 注释改动写「无行为变化」。
+5. 行尾：仓库 `core.autocrlf=true`，索引是 LF、工作树是 CRLF；**不要顺手统一**。

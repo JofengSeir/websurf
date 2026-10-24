@@ -1,3 +1,5 @@
+> **仓内 vendored 副本**：本目录经仓库根 `Cargo.toml` 的 `[patch.crates-io]` 替换 crates.io `lzma 0.2.2`。相对上游改动了 `src/reader/window.rs` 的 `Window::push`（滑窗由 `Vec::insert` 改原地覆盖，逐字节语义不变）并做过告警清理（`try!`→`?` 等，无语义变化）；台账见仓库根 `Cargo.toml` 注释。以下为上游原文 README。
+
 LZMA
 ====
 [![Build Status](https://travis-ci.org/meh/rust-lzma.svg?branch=master)](https://travis-ci.org/meh/rust-lzma)

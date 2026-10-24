@@ -1,7 +1,15 @@
 # 渲染归属与三端等价（2026-10-23 收口）
 
-> 规则一句话：**渲染步骤只允许存在于 `src/renderer-shared/scene/render-session.ts`；apps 只保留数据源、输入、端特有 overlay。**
->
+## 0. 规则速览
+
+**一句话**：渲染步骤只允许存在于 `src/renderer-shared/scene/render-session.ts`；apps 只保留数据源、输入、端特有 overlay。
+
+| 必须 | 禁止 |
+|---|---|
+| 新渲染步骤先进 `RenderSession` / `assembleScene` | 在 `apps/<app>/src` 里构造 renderer / 相面、写 `scene.background/fog`、做装配 / 合并 / 天空 / 可见性 / 画质步骤 |
+| 端特有对象挂到 `session.scene` | 修一处只在某一个端生效（根因都是「接线没共享」） |
+| 改渲染后跑 `node src/scripts/check-render-parity.mjs` + 三端 `npm run typecheck` | 用像素脚本代替人工判断 |
+
 > 事故背景：回退 VMT 表最初只在 viewer 的 `core/bsp.ts` 里 `fetch('vmts.json')`，debug/game 没装 ⇒ debug 水层被判缺 VMT、`alpha=0` 不绘制。同类问题还有：`meshInCluster` 三份、`loadScene` 三份、环境/天空/可见性/画质注册三份。修一处只在某一个端看起来有效果，根因都是「接线没共享」。
 
 ## 1. 共享会话负责什么
@@ -66,9 +74,9 @@ node src/scripts/capture-render.mjs ^
 
 注意：
 
-- `--pose` 是**相机位姿**（HU + 度），经各端共享 `globalThis.__vbspPose` 钉住；game/debug 需要约 2.5s 等物理 hold 生效。
-- 三端 canvas 比例可能不同（debug 是布局内画布，game/viewer 整窗）；**先看内容是否一致，再讨论裁切/比例**。
-- 控制台里 `THREE.BufferGeometryUtils: mergeGeometries() failed ... normal attribute` 是**既有**的合批回退告警（合并失败会保留独立几何），不是本次收口引入的渲染错误。
+1. `--pose` 是**相机位姿**（HU + 度），经各端共享 `globalThis.__vbspPose` 钉住；game/debug 需要约 2.5s 等物理 hold 生效。
+2. 三端 canvas 比例可能不同（debug 是布局内画布，game/viewer 整窗）；**先看内容是否一致，再讨论裁切/比例**。
+3. 控制台里 `THREE.BufferGeometryUtils: mergeGeometries() failed ... normal attribute` 是**既有**的合批回退告警（合并失败会保留独立几何），不是本次收口引入的渲染错误。
 
 ## 5. 已实测的结构等价（2026-10-23，headless Edge）
 
@@ -83,13 +91,13 @@ node src/scripts/capture-render.mjs ^
 
 同机位截图（666 的坡面机位）三端画面内容一致；差异只剩 canvas 比例与端特有 HUD/overlay。
 
-## 6. 可见性剔除：默认全加载（2026-10-23 owner 决定）
+## 6. 可见性剔除：默认全加载（2026-10-23 owner 决定 D-123）
 
 `src/renderer-shared/scene/visibility-controller.ts`：
 
-- **默认（档值 0）= 全加载**：`cullDistance = Infinity`，不按距离藏任何块；只靠 three 的相机视锥。
-- **显式正值**才按**块表面**距离剔除（`dist > 视距 + 块半径`）——避免大合并块「中心在视距外、几何贴在脸上」被整块误杀（main `79cff4b` 实测 666 有 44/108 个机位误杀，最近面距到过 0）。
-- 旧行为（块中心距离、默认 `maxDim × 0.5`）已删除。
+1. **默认（档值 0）= 全加载**：`cullDistance = Infinity`，不按距离藏任何块；只靠 three 的相机视锥。
+2. **显式正值**才按**块表面**距离剔除（`dist > 视距 + 块半径`）——避免大合并块「中心在视距外、几何贴在脸上」被整块误杀（main `79cff4b` 实测 666 有 44/108 个机位误杀，最近面距到过 0）。
+3. 旧行为（块中心距离、默认 `maxDim × 0.5`）已删除。
 
 未采用：rebuild `19b1d4a` 同批的「近裁面 10 射线」（tag `safety-19b1d4a`）。全加载先只解决「块被整块藏掉」；若仍有贴脸几何被 near 裁掉，再单独做近裁面 A/B，不把它混进这次决定。
 
