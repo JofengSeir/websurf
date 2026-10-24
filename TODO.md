@@ -15,6 +15,8 @@
 
 **当前主战线（2026-10-24 晚，D-126 已决，v2 就绪）**：**结构优先水体**（structure-first water）——owner 定调：浏览器内展示地图结构 > 复刻游戏观感，要求任意角度水下结构可读。W0 已证 HEAD 深度有效、折射 RT 有内容，差图 = 过深雾罩盖暗内容；v1（打空像素四档）前提被推翻已挂停。**v2 任务书**：`docs/T-650-water-structure-first-task.md`（五条规则 R1–R5 只挂亮雾流、与已否决方向的边界表、最差角度优先调参、666 sha256 零回归、7 机位 owner 逐张验收）。红线：P1 不得白板化、666 字节不等即停。
 
+**v2 执行状态（2026-10-24 深夜，V0–V3 完成，待 owner 验收）**：五规则已实现并固化终值（FogMax 亮流 0.30 / Lift 1.35 / GrazAtt 0.35 / ReflCap 0.25 / R5 beneath 深色回落），P4 初值一轮即达标零迭代；666 机位 sha256 与基线逐字节相等；三端 typecheck/build:ts/check:api + parity 全绿；新增 `__vbspWaterTimePin` 只读 pin（旧 `__vbspWaterTime` 冻结会停摆 RT，A/B 一律用 pin）。执行记录入因果链 §12；7 机位矩阵与调参证据在 `.tmp/water-sfw/`（本地）。**待办：owner 看 7 张图逐张点头（B1/B2）→ 验收方按任务书 §10 收尾。**
+
 ## Agent 约束加强（Tier 1 已落地，2026-10-24）
 
 **方案书**：`.dsh/plans/agent-constraints-plan.md`（**本地文件，不入库**；含任务卡、判据、风险/假阳性、回滚、CI 成本）。方向 owner 已认可：在 AMH 流程基座上加强，不推翻 2026-10-18 重置。
