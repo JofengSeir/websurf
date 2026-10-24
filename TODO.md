@@ -13,11 +13,13 @@
 **2026-10-18 验证（wasm 三端，`surf_boreas`）**：`ice_transparent` / `ice02` / `snowiceblend` 均为 `alphaMode=BLEND` 且 extras 带 `vbsp_translucent:true`；三端材质元数据逐项相同。GLB 字节数 game = debug = 123956464，viewer = 123956376（差 88 B，仍是已知的 `accessors.min/max` 浮点末位格式差异）。`ice01` / `ice03` 的 VMT 没有 `$translucent`（UnlitGeneric + `$surfaceprop ice`），保持 OPAQUE 是资产事实，不是漏做。**剩余**：浏览器三端同视点逐像素验收（本机无 headless 文件选择）。
 **判据**：三端同视点下 `ice_transparent` 呈半透明（可透过看到后方几何）且三端逐像素一致；`$translucent` 材质在 GLB 材质 extras 有可判定的透明标记；三端 `npm run typecheck` exit 0 + 渲染一致性检查 exit 0。
 
-## Agent 约束加强（方案已分发，2026-10-24）
+## Agent 约束加强（Tier 1 已落地，2026-10-24）
 
-**方案书**：`.dsh/plans/agent-constraints-plan.md`（**本地文件，不入库**——owner 2026-10-24 决定 docs 不上传 GitHub；含任务卡、判据、风险/假阳性、回滚、CI 成本）。方向已获 owner 认可：在 AMH 流程基座上加强，不推翻 2026-10-18 重置。
+**方案书**：`.dsh/plans/agent-constraints-plan.md`（**本地文件，不入库**；含任务卡、判据、风险/假阳性、回滚、CI 成本）。方向 owner 已认可：在 AMH 流程基座上加强，不推翻 2026-10-18 重置。
 
-执行顺序：**Tier 1（卡 C1~C3，改 ci-gates.yml，单 agent 单 PR 串行）→ C4 分支保护登记（owner 手动）→ Tier 2/3 等 D-124 / D-125 拍板**。领任务前先读方案书 §3 编排规则。
+**已落地**：Tier 1 三卡（`0fc6ce9` ts-typecheck / wasm-core-tests 两 job + debug/game-gates 补 build:ts；`6bdff72` C2 前置盘点修两个先天坏测试）；§6.4 度量脚本（`5e23e66`）；§6.1 worktree 约定与 §6.3 元规则（随 6c53ae0 后一笔文档提交）。
+
+**待 owner 四件**：① `git push origin main` 看新 job 首跑——wasm-core-tests 预期 32 过 + 1 跳 + 1 忽略，结果回填方案书 §4 卡 C2；② 分支保护登记 `three-end TS typecheck`、`wasm-core unit tests (host)`；③ 拍板 D-124 / D-125（OWNER.md 待决表）；④ lightmap 测试语义：现钉「最小可用页」实际行为，若要「钉死 2048²」属生产语义改动，需另行立项。
 
 ## 已结索引
 

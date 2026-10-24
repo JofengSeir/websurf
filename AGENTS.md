@@ -16,7 +16,7 @@
 
 四条红线（违反会破坏别人的工作或得出错误结论）：
 
-- **禁止**在 `main` 上提交或改动：当前工作分支是 `rebuild/from-remote`；本地 `main` 是已分歧的历史实验线（领先 `origin/main` 36 笔），只许 owner 处置；推送只推 `git push origin rebuild/from-remote`，**绝不推 `origin/main`**。
+- **禁止**改动 `dev` 分支：日常工作线是 `main`（原 `rebuild/from-remote`，2026-10-24 起换名顶替）；`dev` 是旧实验线（原 `main`，2026-10-22 止，领先 `origin/main` 36 笔），仅 owner 可动。**agent 不自行推送**，推送由 owner 发起。
 - **禁止**从 `progress/`、`documents/`、`docflow.json` 取规则或状态——它们已不存在。
 - **禁止**恢复旧的 agentmemory / mcp-hub 路线（见 §3.0）。
 - **禁止**用 `git checkout -- <文件>` 清理工作区（会抹掉未提交成果）。
@@ -174,8 +174,19 @@ AMH: down            # gateway 不可用（正文说明）
 
 提交前 checklist（按序执行）：
 
-1. 确认当前分支是 `rebuild/from-remote`（`git branch --show-current`）；**禁止在 `main` 上提交**（§0 红线）。
+1. 确认当前分支是 `main`（`git branch --show-current`）；**禁止在 `dev` 上提交或改动**（§0 红线）。
 2. `git status --short`：只 `git add` 自己改的文件；别人的在途改动原样保留。
 3. 验证与提交串成一步（`&&`），红灯即终止。
 4. 提交信息说清：**改了什么、为什么、怎么验证**；纯格式 / 注释改动写「无行为变化」。
 5. 行尾：仓库 `core.autocrlf=true`，索引是 LF、工作树是 CRLF；**不要顺手统一**。
+6. 多 agent 并行改代码时，**后开工的**用 `git worktree add ../websurf-wt-<task> <base>` 在独立工作树作业，主工作树留给收尾提交方（T-730 验收有先例）。
+
+## 8. 约束变更留痕（元规则）
+
+任何门禁 / 钩子 / 流程约束的**增、删、改**，必须同时：
+
+1. 修改 AGENTS.md 对应章节（工具与文档不得漂移）；
+2. 提交信息写明动机与影响；
+3. 若反转既有决定（含本文条款），先在 OWNER.md 登记 `D-###` 并获 owner 回复。
+
+禁止只改工具不改文档，或只删工具不留记录——2026-10-17 `a8eefc0` 引入的 commit-msg 钩子即因此无声消失。
