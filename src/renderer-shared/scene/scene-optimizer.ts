@@ -186,6 +186,8 @@ export interface MergeSourceRange {
   count: number;
   /** 原 mesh 的节点名（GLTFLoader 写入；未命名时为空串）。 */
   meshName: string;
+  /** 原 primitive 的 BSP 面序号（GLTF extras `faceIndex`；缺失时 undefined）。 */
+  faceIndex?: number;
   /** 原 mesh 的 `userData.vbsp`（同一对象按引用带过，不复制）。 */
   vbsp?: MergeSourceMeta;
 }
@@ -202,8 +204,10 @@ type MergeSourceSeed = Omit<MergeSourceRange, 'start' | 'count'>;
 
 /** 读一只 mesh 的来源元数据（节点名 + `userData.vbsp` 引用）。 */
 function meshSourceSeed(mesh: THREE.Mesh): MergeSourceSeed {
+  const raw = (mesh.userData as { faceIndex?: unknown } | undefined)?.faceIndex;
   return {
     meshName: mesh.name ?? '',
+    faceIndex: typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined,
     vbsp: mesh.userData?.vbsp as MergeSourceMeta | undefined,
   };
 }
@@ -221,7 +225,7 @@ function buildSourceTable(geometries: THREE.BufferGeometry[], seeds: MergeSource
   let cursor = 0;
   for (let i = 0; i < geometries.length; i++) {
     const count = mergeBufferLength(geometries[i]);
-    ranges.push({ start: cursor, count, meshName: seeds[i].meshName, vbsp: seeds[i].vbsp });
+    ranges.push({ start: cursor, count, meshName: seeds[i].meshName, faceIndex: seeds[i].faceIndex, vbsp: seeds[i].vbsp });
     cursor += count;
   }
   return { indexed: geometries.length > 0 && geometries[0].index !== null, ranges };
@@ -243,7 +247,7 @@ function concatSourceTables(
     const table = tables[i];
     if (!table) return null;
     for (const r of table.ranges) {
-      ranges.push({ start: r.start + cursor, count: r.count, meshName: r.meshName, vbsp: r.vbsp });
+      ranges.push({ start: r.start + cursor, count: r.count, meshName: r.meshName, faceIndex: r.faceIndex, vbsp: r.vbsp });
     }
     cursor += mergeBufferLength(geometries[i]);
   }

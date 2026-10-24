@@ -158,7 +158,8 @@ export class RenderSession {
   private root: THREE.Object3D | null = null;
   /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `sortTransparentChunks`）。 */
   private transparentChunks: THREE.Mesh[] = [];
-  private readonly transparentSortPos = new THREE.Vector3();
+  private readonly transparentSortBox = new THREE.Box3();
+  private readonly transparentSortPoint = new THREE.Vector3();
   /** 天空层：第二相机 + 只挂 `SKY_LAYER` 的图元组。 */
   private skyCamera: THREE.PerspectiveCamera | null = null;
   private skyGroup: THREE.Group | null = null;
@@ -533,84 +534,40 @@ export class RenderSession {
   }
 
   /**
-   * 每帧把半透明块按相机距离**远→近**重排 `renderOrder`（three 升序绘制）。
+   * 每帧把半透明块按**相机到该块最近表面**的距离远→近重排 `renderOrder`（three 升序绘制）。
    *
-   * ⚠️ 必须按**组**排，不能逐块排：同一块玻璃板会被合并成多个重叠的 chunk，它们共享
-   * 同一材质；逐块给不同 renderOrder 会让 chunk 重叠处的混合顺序随视角变化，出现
-   * 1024 HU 的方格/某块突然变淡。水面同理按**水位**归组（同一层的水 chunk 一起画）。
+   * 之前按“材质/水位归组”是补丁；通用口径应该来自几何本身：对每块取世界 AABB，
+   * 把相机点 clamp 到盒内得到最近点，用这个距离决定前后。这样不猜材质，也不受
+   * 合并后 `position=(0,0,0)`、three 退化成 id 顺序的影响。地图解析侧的
+   * `faceIndex` 已随来源区间表保留，后续要升级到逐面排序时可直接用。
    */
   private sortTransparentChunks(camera: THREE.Camera): void {
     const list = this.transparentChunks;
     if (list.length === 0) return;
-    const p = this.transparentSortPos;
-    const n = list.length;
-    const parent = Array.from({ length: n }, (_, i) => i);
-    const find = (i: number): number => {
-      let r = i;
-      while (parent[r] !== r) r = parent[r];
-      while (parent[i] !== i) {
-        const next = parent[i];
-        parent[i] = r;
-        i = next;
-      }
-      return r;
-    };
-    const union = (a: number, b: number): void => {
-      const ra = find(a);
-      const rb = find(b);
-      if (ra !== rb) parent[rb] = ra;
-    };
-
-    const byMaterial = new Map<number, number>();
-    const byWaterHeight = new Map<string, number>();
-    const dists = new Array<number>(n).fill(0);
-    for (let i = 0; i < n; i++) {
-      const mesh = list[i];
+    const box = this.transparentSortBox;
+    const point = this.transparentSortPoint;
+    const cameraPos = camera.position;
+    for (const mesh of list) {
       const geom = mesh.geometry;
       if (!geom) continue;
-      if (!geom.boundingSphere) geom.computeBoundingSphere();
-      const center = geom.boundingSphere?.center;
-      if (!center) continue;
-      p.copy(center).applyMatrix4(mesh.matrixWorld);
-      dists[i] = p.distanceToSquared(camera.position);
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const water = mats.find((m) => m && (m.userData as { vbsp_water?: unknown }).vbsp_water);
-      if (water) {
-        // 水面：同层（同世界 y）的水 chunk 一起画；不同层不能合并，否则层间排序错。
-        const key = (center.y + mesh.position.y).toFixed(1);
-        const prev = byWaterHeight.get(key);
-        if (prev !== undefined) union(i, prev);
-        else byWaterHeight.set(key, i);
+      if (!geom.boundingBox) geom.computeBoundingBox();
+      const local = geom.boundingBox;
+      if (!local) {
+        mesh.userData.__vbspTransparentDist = 0;
         continue;
       }
-      // 非水面（玻璃等）：**共享任一材质**的 chunk 归为同一组（并查集）。
-      // 不能按材质 id 集合相等：同一块玻璃板的不同 chunk 可能一个带框材质、一个不带。
-      for (const m of mats) {
-        if (!m) continue;
-        const prev = byMaterial.get(m.id);
-        if (prev !== undefined) union(i, prev);
-        else byMaterial.set(m.id, i);
-      }
+      box.copy(local).applyMatrix4(mesh.matrixWorld);
+      box.clampPoint(cameraPos, point);
+      mesh.userData.__vbspTransparentDist = point.distanceToSquared(cameraPos);
     }
-
-    const groups = new Map<number, { dist: number; meshes: number[] }>();
-    for (let i = 0; i < n; i++) {
-      const root = find(i);
-      const g = groups.get(root);
-      if (g) {
-        g.meshes.push(i);
-        if (dists[i] < g.dist) g.dist = dists[i];
-      } else {
-        groups.set(root, { dist: dists[i], meshes: [i] });
-      }
-    }
-    const ordered = [...groups.values()].sort((a, b) => b.dist - a.dist);
-    for (let i = 0; i < ordered.length; i++) {
-      for (const idx of ordered[i].meshes) {
-        const mesh = list[idx];
-        const base = (mesh.userData.__vbspTransparentBaseOrder as number | undefined) ?? 0;
-        mesh.renderOrder = base + i;
-      }
+    list.sort((a, b) => {
+      const da = (a.userData.__vbspTransparentDist as number | undefined) ?? 0;
+      const db = (b.userData.__vbspTransparentDist as number | undefined) ?? 0;
+      return db - da;
+    });
+    for (let i = 0; i < list.length; i++) {
+      const base = (list[i].userData.__vbspTransparentBaseOrder as number | undefined) ?? 0;
+      list[i].renderOrder = base + i;
     }
   }
 
