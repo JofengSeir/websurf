@@ -1190,7 +1190,11 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // ⇒ 我改 `material.color` 的效果全部被覆盖（这就是"改颜色没反应"的根因，
       // 2026-10-21 用金丝雀测试证实：注入确实控制这些像素，但颜色来自被覆盖后的 diffuse）。
       'vec3 vbspRefrColor = vbspWaterRefrOn > 0.5 ? vbspRefrShifted : vbspWaterBaseColor;',
-      'float vbspLum0 = dot( vbspRefrShifted, vec3( 0.3333 ) );',
+      // T-650 v4 B 线（判定与位移解耦）：`vbspLum0` 必须取**未位移**的 vbspRefrBase——
+      // 此前用位移后的 vbspRefrShifted：采样点被噪声推出"有几何"区时亮度骤降 ⇒ NoGeom 翻转
+      // ⇒ 精致区边缘被误判成采空，蓝板/结构的分界呈锯齿（owner 实测机位 PS，DudvOff 后分界
+      // 变平滑即此故）。位移从此只作用于折射**颜色**采样，有效性判定全部走未位移坐标。
+      'float vbspLum0 = dot( vbspRefrBase, vec3( 0.3333 ) );',
       'bool vbspNoGeom = ( vbspRefrBase4.a < 0.5 ) || ( vbspLum0 < 0.02 );',
       'if ( vbspWaterRefrOn > 0.5 && vbspNoGeom ) { vbspRefrColor = vbspWaterScatter; }',
       // ── 竖直深度 + 视线距离（照抄 SDK `common_ps_fxc.h:213-230` 的 `CalcWaterFogAlpha`）──
