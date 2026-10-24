@@ -25,6 +25,15 @@
 
 **待 owner 四件**：① `git push origin main` 看新 job 首跑——wasm-core-tests 预期 32 过 + 1 跳 + 1 忽略，结果回填方案书 §4 卡 C2；② 分支保护登记 `three-end TS typecheck`、`wasm-core unit tests (host)`；③ 拍板 D-124 / D-125（OWNER.md 待决表）；④ lightmap 测试语义：现钉「最小可用页」实际行为，若要「钉死 2048²」属生产语义改动，需另行立项。
 
+## 下一批任务（2026-10-25 立项，任务书本地下发）
+
+任务书都在 `.dsh/plans/`（本地不入库），均已带代码事实、排证序列、验收架构与仪器纪律：
+
+- **T-731** game 进图悬空/缓慢下坠（切自由视角后自愈）——双物理线（渲染预测 + Worker 权威）耦合缺陷，四假设 H1 出生点嵌入 / H2 权威停滞+速度覆盖 / H3 重锚闭环 / H4 伴生时序。书：`.dsh/plans/T-731-game-spawn-hover-task.md`。
+- **T-732** 模型内部区域异常发暗（boreas `dekelmdl` / 666 `s1_ramp1b_1`）——prop 三级光照路由归因；owner 截图在 `.dsh/plans/assets/t732/`，**由执行 agent 读图**（防造假协议已写入任务书）。书：`.dsh/plans/T-732-model-dark-lighting-task.md`。
+- **T-733** mesh 地面行走顿挫——预期管理：bevel/补面机制仓库已有两套（BSP 原生 bevel side + `.phy` 凸体合成 bevel），疑点在「非凸块退回无补面的三角路径」与块间接缝；须先建走行度量再动刀。书：`.dsh/plans/T-733-mesh-ground-stutter-task.md`。
+- **T-734** PVS / 大地图加载优化**调研**（不改代码）——预期管理：PVS 基础设施已完整存在（解析→导出→PvsManager→VisibilityController，默认关）；调研核心是「开了省多少/错杀多少、粒度要不要重组、要不要拆 GLB/惰性装配」，产出带数字的报告与分阶段决策请求。书：`.dsh/plans/T-734-pvs-research-task.md`。
+
 ## 已结索引
 
 - **T-730 — `collect_pakfile_models` 一次加载重跑 4 遍**：2026-10-18 完成（commit `9ac0cce`：三个 `BspProcessor` 加 `RefCell<Option<(VhvLog, Rc<PakfileModels>)>>` 缓存 + 共享层 `collect_pakfile_models_bundle`）。三端两图实测：4 导出合计耗时下降（如 concretejungle game 3081→2632 ms、surf_666 game 14750→12090 ms）；tri / phy / GLB sha 改前 = 改后，game 与 debug GLB 逐字节相同；mosaic 语义 sha 三端一致；三端 typecheck + build:wasm 通过；内存峰值有记录（cj 306.4 MB、666 655.5 MB 量级）。
