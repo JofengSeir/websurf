@@ -97,6 +97,7 @@ const g = globalThis as {
   /** 反射强度（缺省 0.28；owner 反馈反射过强）。 */
   __vbspWaterReflectStrength?: unknown;
   __vbspWaterDepthGateOff?: unknown;
+  __vbspWaterDepthGate?: unknown;
   __vbspWaterAlphaFloor?: unknown;
   /** 近处/远处的水面不透明度（缺省 0.10 / 0.45）：近处近乎透明、远处带蓝更像水。 */
   __vbspWaterNearAlpha?: unknown;
@@ -166,11 +167,11 @@ const fogMixOf = () => Math.min(1, Math.max(0, num(g.__vbspWaterFogMix, 0.55)));
  */
 /** 调试：强制不透明（配合 `__vbspWaterColor` 单独判断波纹形状）。 */
 const opaqueDebug = () => g.__vbspWaterOpaque === true;
-/** 波纹法线着色强度：缺省 0.35。SDK 的无 basetexture 分支没有这层，但只靠
- *  lerp(refract, reflect, fresnel) 时，平墙反射上看不到波纹（666 模型容器实测）；
- *  0.35 是“能看到涟漪、又不把水染成白板”的折中。`__vbspWaterDebugShade` ⇒ 1。 */
+/** 波纹法线着色强度：缺省 0（按 SDK，水面没有 basetexture 时观感全部来自
+ *  lerp(refract, reflect, fresnel)；噪声失真图不是法线）。留旋钮做实验用：
+ *  `__vbspWaterDebugShade` ⇒ 1。 */
 const shadeStrengthOf = () =>
-  g.__vbspWaterDebugShade === true ? 1 : num(g.__vbspWaterShade, 0.35);
+  g.__vbspWaterDebugShade === true ? 1 : num(g.__vbspWaterShade, 0);
 /** `$fogstart/$fogend` 缺失时的距离雾终点（世界单位）。 */
 const fallbackFogEndOf = () => Math.max(1, num(g.__vbspWaterFallbackFogEnd, 2400));
 /** 涟漪在一个平铺里覆盖的世界尺寸（越小越密）；用世界坐标 ⇒ 各图一致。
@@ -810,11 +811,15 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // ⇒ 幅度从 0.05 降到 0.012，并把反射混合再乘一个可调强度（缺省 0.55）。
     shader.uniforms.vbspWaterDistort = { value: 0.012 * Math.max(0.1, num(w.reflectAmount, 0.8)) };
     shader.uniforms.vbspWaterReflStrength = {
-      value: Math.min(1, Math.max(0, num(g.__vbspWaterReflectStrength, 0.12))),
+      value: Math.min(1, Math.max(0, num(g.__vbspWaterReflectStrength, 0.5))),
     };
     // 诊断：`__vbspWaterDepthGateOff` ⇒ 不再按“水浅”把 Fresnel 归零；用于确认
     // 浅水/模型容器里“没有反射”是不是 depth gate 造成的。
-    shader.uniforms.vbspWaterDepthGate = { value: g.__vbspWaterDepthGateOff === true ? 0 : 1 };
+    // 默认关闭浅水 Fresnel gate：666 模型容器的水只有几 HU 深，gate 会把反射直接乘成 0
+    // （owner 2026-10-24 报“水倒影消失”）；`__vbspWaterDepthGate=1` 可复现旧口径。
+    shader.uniforms.vbspWaterDepthGate = {
+      value: g.__vbspWaterDepthGateOff === true ? 0 : Math.max(0, Math.min(1, num(g.__vbspWaterDepthGate, 0))),
+    };
     // 折射合成默认 alpha=1（Source DrawWater）；涟漪/倒影改用后面的法线着色补，
     // 不再靠 alpha 混合。0.35 的旧折中会把倒影压弱（owner 2026-10-24 报“倒影消失”）。
     shader.uniforms.vbspWaterAlphaFloor = {
