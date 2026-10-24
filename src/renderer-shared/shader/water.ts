@@ -778,17 +778,20 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   material.opacity = 1;
   material.transparent = !opaque;
   material.depthWrite = false;
-  // 水面基色：往"深蓝"方向压（owner 目标："水底形如蓝天"）。直接混浅蓝 `$fogcolor`
-  // 在亮冰面上只会被冲淡成白，所以取一个更饱和的深蓝做水体色，浅蓝留给远处的蓝调渐变。
-  // 水面基色：**饱和青蓝**（数值目标是 owner 游戏截图里的水面均色 `#2a91d3` / `#1399e6`）。
-  // `$fogcolor`（`water01` 的 srgb 分支 (120,200,255)）本身太浅，直接混会把水面冲成浅灰。
-  // 水体色优先用**地图解析到的 `$fogcolor`**（sRGB → linear），不再写死青色。
-  // 666 的 `$fogcolor` 是暗棕 (22,20,10)，硬编码青色会把亮地板/墙冲成奶白；
-  // 只有 VMT 缺 `$fogcolor` 时才回退到旧的青色兜底。
-  const baseColor = new THREE.Color(0.12, 0.52, 0.72);
-  if (Array.isArray(w.fog) && w.fog.length >= 3) {
-    baseColor.copy(fog).convertSRGBToLinear();
-  }
+  // 水体色不能一律用 `$fogcolor`：666 的 `$fogcolor` 是暗棕 (22,20,10)，用它当基色能压住
+  // 亮地板；boreas 的 `$fogcolor` 是亮蓝，直接当基色 + 常量 tint 会把“按深度 fog、表层透明、
+  // 近岸过渡”整片染蓝。按解析值分开：
+  //   · 暗色 fog（峰值 < 0.3）⇒ 用 fog 作基色，tint 0.3、alpha 下限 0.2；
+  //   · 亮色/蓝色 fog ⇒ 保留原来的青色基色，tint 0，alpha 走深度/岸边公式（无下限）。
+  const fogPeak = Math.max(fog.r, fog.g, fog.b);
+  const darkFog = Array.isArray(w.fog) && w.fog.length >= 3 && fogPeak < 0.3;
+  const baseColor = darkFog ? fog.clone().convertSRGBToLinear() : new THREE.Color(0.12, 0.52, 0.72);
+  const tintDefault = darkFog ? 0.3 : 0;
+  const alphaFloorDefault = darkFog ? 0.2 : 0;
+  // 亮色 fog（boreas）保留原来的反射强度/深度 gate；暗色 fog（666）才为浅水反射
+  // 关 gate、提高强度。
+  const reflectDefault = darkFog ? 0.3 : 0.12;
+  const depthGateDefault = darkFog ? 0 : 1;
   material.color.copy(baseColor);
   // 调试：覆盖基色（isolate 判断波纹形状时用明显颜色）
   const colorOverride = g.__vbspWaterColor;
@@ -819,24 +822,26 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // ⇒ 幅度从 0.05 降到 0.012，并把反射混合再乘一个可调强度（缺省 0.55）。
     shader.uniforms.vbspWaterDistort = { value: 0.012 * Math.max(0.1, num(w.reflectAmount, 0.8)) };
     shader.uniforms.vbspWaterReflStrength = {
-      value: Math.min(1, Math.max(0, num(g.__vbspWaterReflectStrength, 0.3))),
+      value: Math.min(1, Math.max(0, num(g.__vbspWaterReflectStrength, reflectDefault))),
     };
     // 诊断：`__vbspWaterDepthGateOff` ⇒ 不再按“水浅”把 Fresnel 归零；用于确认
     // 浅水/模型容器里“没有反射”是不是 depth gate 造成的。
     // 默认关闭浅水 Fresnel gate：666 模型容器的水只有几 HU 深，gate 会把反射直接乘成 0
     // （owner 2026-10-24 报“水倒影消失”）；`__vbspWaterDepthGate=1` 可复现旧口径。
     shader.uniforms.vbspWaterDepthGate = {
-      value: g.__vbspWaterDepthGateOff === true ? 0 : Math.max(0, Math.min(1, num(g.__vbspWaterDepthGate, 0))),
+      value: g.__vbspWaterDepthGateOff === true
+        ? 0
+        : Math.max(0, Math.min(1, num(g.__vbspWaterDepthGate, depthGateDefault))),
     };
-    // 浅水近透明：alpha 下限 0.2，反射强度 0.3 只留轻微倒影。alpha=1 会让浅水
-    // 变成不透明白板（owner 2026-10-24 报“泛白”）；0 又会让反射/涟漪完全透明掉。
+    // 暗色 fog（666）：浅水 alpha 下限 0.2，近透明但有轻微倒影；
+    // 亮色 fog（boreas）：下限 0，按深度/岸边公式保持表层透明。
     shader.uniforms.vbspWaterAlphaFloor = {
-      value: Math.max(0, Math.min(1, num(g.__vbspWaterAlphaFloor, 0.2))),
+      value: Math.max(0, Math.min(1, num(g.__vbspWaterAlphaFloor, alphaFloorDefault))),
     };
     // 水体色（最终往它收敛）+ 收敛强度
     shader.uniforms.vbspWaterBaseColor = { value: new THREE.Vector3(baseColor.r, baseColor.g, baseColor.b) };
     shader.uniforms.vbspWaterTintStrength = {
-      value: Math.min(1, Math.max(0, num(g.__vbspWaterTint, 0.3))),
+      value: Math.min(1, Math.max(0, num(g.__vbspWaterTint, tintDefault))),
     };
     // 体积吸收（owner 指出的正确方向）：`absorb` 是每世界单位衰减系数、`thickness` 是水层厚度、
     // `scatter` 是水体散射色（取 owner 游戏截图实测的 #2a91d3 附近）。
