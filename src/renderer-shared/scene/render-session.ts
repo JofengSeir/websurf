@@ -629,7 +629,9 @@ export class RenderSession {
       box.copy(local).applyMatrix4(mesh.matrixWorld);
       box.clampPoint(cameraPos, point);
       mesh.userData.__vbspTransparentDist = point.distanceToSquared(cameraPos);
-      this.sortTransparentFaces(mesh, camera);
+      if ((globalThis as { __vbspNoFaceSort?: unknown }).__vbspNoFaceSort !== true) {
+        this.sortTransparentFaces(mesh, camera);
+      }
     }
     list.sort((a, b) => {
       const da = (a.userData.__vbspTransparentDist as number | undefined) ?? 0;

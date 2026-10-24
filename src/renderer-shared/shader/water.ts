@@ -97,6 +97,7 @@ const g = globalThis as {
   /** 反射强度（缺省 0.28；owner 反馈反射过强）。 */
   __vbspWaterReflectStrength?: unknown;
   __vbspWaterDepthGateOff?: unknown;
+  __vbspWaterAlphaFloor?: unknown;
   /** 近处/远处的水面不透明度（缺省 0.10 / 0.45）：近处近乎透明、远处带蓝更像水。 */
   __vbspWaterNearAlpha?: unknown;
   __vbspWaterFarAlpha?: unknown;
@@ -813,6 +814,11 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // 诊断：`__vbspWaterDepthGateOff` ⇒ 不再按“水浅”把 Fresnel 归零；用于确认
     // 浅水/模型容器里“没有反射”是不是 depth gate 造成的。
     shader.uniforms.vbspWaterDepthGate = { value: g.__vbspWaterDepthGateOff === true ? 0 : 1 };
+    // 0.35 是“透明水面 + 可见涟漪/倒影”的折中：alpha=1 会把水面变成整块不透明瓷砖，
+    // 把倒影压掉（owner 2026-10-24 报“水倒影消失”）；0 则涟漪又看不见。
+    shader.uniforms.vbspWaterAlphaFloor = {
+      value: Math.max(0, Math.min(1, num(g.__vbspWaterAlphaFloor, 0.35))),
+    };
     // 水体色（最终往它收敛）+ 收敛强度
     shader.uniforms.vbspWaterBaseColor = { value: new THREE.Vector3(baseColor.r, baseColor.g, baseColor.b) };
     shader.uniforms.vbspWaterTintStrength = {
@@ -943,6 +949,7 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'uniform float vbspWaterReflMix;',
       'uniform float vbspWaterReflStrength;',
       'uniform float vbspWaterDepthGate;',
+      'uniform float vbspWaterAlphaFloor;',
       'uniform vec3 vbspWaterBaseColor;',
       'uniform float vbspWaterTintStrength;',
       'uniform float vbspWaterAbsorb;',
@@ -1180,10 +1187,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'float vbspFres0 = pow( clamp( 1.0 - clamp( dot( normalize( vbspWaterN ), normalize( vbspWaterV ) ), 0.0, 1.0 ), 0.0, 1.0 ), 5.0 );',
       'float vbspReflAlpha = clamp( vbspFres0 * vbspWaterReflStrength, 0.0, 1.0 );',
       'if ( vbspWaterRefrOn > 0.5 ) {',
-      // Source `DrawWater`：有折射 RT 时水面是**合成结果**（refr/fog/reflect 已经算进
-      // outgoingLight），alpha 恒 1，不再靠 alpha 混合。此前把浅水 alpha 压到 ~0，
-      // 水面/涟漪/反射被整层透明掉（owner 2026-10-24 报“玻璃下看不到水体涟漪”）。
-      '	diffuseColor.a = 1.0;',
+      // 保留 Source 的浅水透明公式，但给一个很低的下限：纯 0 会让涟漪/倒影整层透明掉，
+      // 纯 1 又会让水面变成不透明瓷砖、把倒影压掉；0.35 是两种验收症状之间的折中。
+      '	diffuseColor.a = max( vbspShoreT, vbspReflAlpha * vbspWaterShoreRefl );',
+      '	if ( vbspWaterAlphaFloor > 0.0 ) diffuseColor.a = max( diffuseColor.a, vbspWaterAlphaFloor );',
       '} else {',
       '	diffuseColor.a = mix( vbspWaterNearAlpha, vbspWaterFarAlpha, vbspDepthV );',
       '}',
