@@ -390,6 +390,9 @@ let depthMat: THREE.ShaderMaterial | null = null;
 const DEPTH_RANGE = 16384;
 const sceneDistUniform = { value: null as THREE.Texture | null };
 const refrUniform = { value: null as THREE.Texture | null };
+/** 折射 RT 没有几何时的背景色：水 fog 色，不能是天空白（否则水面穿透成白板）。 */
+const refrClearColor = new THREE.Color(0xdfe9f2);
+let refrClearPeak = -1;
 const refrOnUniform = { value: 0 };
 const refrScreen = { value: new THREE.Vector2(1, 1) };
 const refrProjInv = { value: new THREE.Matrix4() };
@@ -514,7 +517,7 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
     renderer.setRenderTarget(refrRT);
     const bg = scene.background;
     if (bg instanceof THREE.Color) renderer.setClearColor(bg, 1);
-    else renderer.setClearColor(0xdfe9f2, 1);
+    else renderer.setClearColor(refrClearColor, 1);
     renderer.clear();
     renderer.render(scene, camera);
     // 深度 pass：同一相机、同一"隐藏水面"集合，用自带 shader 把视线距离写进颜色。
@@ -595,6 +598,8 @@ export function resetWaterShaders(): void {
   materialDepth.clear();
   refrRT?.dispose();
   depthRT?.dispose();
+  refrClearPeak = -1;
+  refrClearColor.setHex(0xdfe9f2);
   refrRT = null;
   depthRT = null;
   refrUniform.value = null;
@@ -786,6 +791,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   //   · 暗色 fog（峰值 < 0.3）⇒ 用 fog 作基色，tint 0.3、alpha 下限 0.2；
   //   · 亮色/蓝色 fog ⇒ 保留原来的青色基色，tint 0，alpha 走深度/岸边公式（无下限）。
   const fogPeak = Math.max(fog.r, fog.g, fog.b);
+  if (Array.isArray(w.fog) && fogPeak > refrClearPeak) {
+    refrClearPeak = fogPeak;
+    refrClearColor.copy(fog);
+  }
   const darkFog = Array.isArray(w.fog) && w.fog.length >= 3 && fogPeak < 0.3;
   if (w.waterThickness !== undefined) {
     const list = ((globalThis as { __vbspWaterVolumeThickness?: unknown[] }).__vbspWaterVolumeThickness ??= []);
