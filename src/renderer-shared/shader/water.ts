@@ -65,6 +65,8 @@ interface WaterExtras {
   bumpRotate?: number;
   /** `$waterdepth`：该水面 patch 的水深（世界单位）。源里对应折射缓冲 alpha 的归一化深度。 */
   waterDepth?: number | null;
+  /** #2 导出：该水材质/水体块在 BSP 里的 top-bottom 世界厚度（boreas=0，666>0）。 */
+  waterThickness?: number;
 }
 
 function num(v: unknown, d: number): number {
@@ -785,6 +787,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   //   · 亮色/蓝色 fog ⇒ 保留原来的青色基色，tint 0，alpha 走深度/岸边公式（无下限）。
   const fogPeak = Math.max(fog.r, fog.g, fog.b);
   const darkFog = Array.isArray(w.fog) && w.fog.length >= 3 && fogPeak < 0.3;
+  if (w.waterThickness !== undefined) {
+    const list = ((globalThis as { __vbspWaterThickness?: unknown[] }).__vbspWaterThickness ??= []);
+    list.push({ name: material.name, thickness: w.waterThickness });
+  }
   const baseColor = darkFog ? fog.clone().convertSRGBToLinear() : new THREE.Color(0.12, 0.52, 0.72);
   const tintDefault = darkFog ? 0.3 : 0;
   const alphaFloorDefault = darkFog ? 0.2 : 0;

@@ -116,6 +116,9 @@ pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<E
         root.nodes.push(node);
     }
 
+    // #2：BSP 水面 top/bottom 厚度写进材质 extras（只加数据，不改渲染）。
+    apply_water_thickness(&mut root, &bsp);
+
     // 构建根节点
     let node_indices = 0..root.nodes.len();
     let root_rotation = Quaternion::<f32>::from_angle_y(Deg(90.0));
@@ -204,6 +207,9 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
         let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
         root.nodes.push(node);
     }
+
+    // #2：BSP 水面 top/bottom 厚度写进材质 extras（只加数据，不改渲染）。
+    apply_water_thickness(&mut root, &bsp);
 
     // 2. 若提供模型集成器，将模型数据添加到统一结构
     if let Some(integrator) = model_integrator {
@@ -1314,6 +1320,71 @@ fn bounding_box(vertices: impl IntoIterator<Item = crate::vbsp::Vector>) -> ([f3
         max.z = f32::max(max.z, point.z);
     }
     (min.into(), max.into())
+}
+
+/// 水面材质名归一化：把 `_beneath` / `beneath` 底面并回母材质，便于 top/bottom 配对。
+fn water_key(name: &str) -> String {
+    let mut key = name.to_ascii_lowercase();
+    for suffix in ["_beneath", "beneath"] {
+        if key.ends_with(suffix) {
+            key.truncate(key.len() - suffix.len());
+            break;
+        }
+    }
+    key
+}
+
+/// #2：按 BSP 面的世界 y 范围算每个水材质/水体块的 top-bottom 厚度，写入
+/// `vbsp_water.waterThickness`。只加数据，不改渲染；boreas 单层薄膜得到 0，
+/// 666 多层池得到明显厚度。
+fn apply_water_thickness(root: &mut Root, bsp: &Bsp) {
+    use std::collections::{BTreeSet, HashMap};
+    // 同一水材质会出现在地图多个池子/高度；span 会把整张地图算进去（13312）。
+    // 真正的水层厚度是**相邻水层的最小正间隔**：666 的 15296/15312 ⇒ 16，
+    // boreas 只有 197 一层 ⇒ 0。
+    let mut layers: HashMap<String, BTreeSet<i32>> = HashMap::new();
+    if let Ok(models) = bsp_models(bsp) {
+        for (model, _) in models {
+            for face in model.faces() {
+                if !face.is_visible() {
+                    continue;
+                }
+                let key = water_key(face.texture().name());
+                let set = layers.entry(key).or_default();
+                for p in face.vertex_positions() {
+                    // 水面三角面的顶点 y 有 1~2 单位的法线抖动；按 16 HU 量化再找间隔，
+                    // 否则 666 的 16 厚池子会被算成 1。Source 的 brush 网格也是 16 对齐。
+                    set.insert((p.y / 16.0).round() as i32);
+                }
+            }
+        }
+    }
+    for material in &mut root.materials {
+        let Some(name) = material.name.as_deref() else { continue };
+        let Some(set) = layers.get(&water_key(name)) else { continue };
+        let mut thickness = 0.0f32;
+        let mut prev: Option<i32> = None;
+        let mut best = i32::MAX;
+        for &y in set {
+            if let Some(p) = prev {
+                let gap = y - p;
+                if gap > 0 && gap < best {
+                    best = gap;
+                }
+            }
+            prev = Some(y);
+        }
+        if best != i32::MAX {
+            thickness = best as f32 * 16.0;
+        }
+        let Some(extras) = material.extras.as_ref() else { continue };
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(extras.get()) else { continue };
+        let Some(water) = value.get_mut("vbsp_water") else { continue };
+        water["waterThickness"] = serde_json::json!(thickness);
+        if let Ok(raw) = serde_json::value::to_raw_value(&value) {
+            material.extras = Some(raw);
+        }
+    }
 }
 
 /// 逐顶点写入顶点 buffer 的布局：`position`（3 × f32）+ `uv`（2 × f32），stride 20 B。
