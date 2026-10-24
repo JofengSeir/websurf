@@ -390,9 +390,6 @@ let depthMat: THREE.ShaderMaterial | null = null;
 const DEPTH_RANGE = 16384;
 const sceneDistUniform = { value: null as THREE.Texture | null };
 const refrUniform = { value: null as THREE.Texture | null };
-/** 折射 RT 没有几何时的背景色：水 fog 色，不能是天空白（否则水面穿透成白板）。 */
-const refrClearColor = new THREE.Color(0xdfe9f2);
-let refrClearPeak = -1;
 const refrOnUniform = { value: 0 };
 const refrScreen = { value: new THREE.Vector2(1, 1) };
 const refrProjInv = { value: new THREE.Matrix4() };
@@ -516,8 +513,13 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
   try {
     renderer.setRenderTarget(refrRT);
     const bg = scene.background;
-    if (bg instanceof THREE.Color) renderer.setClearColor(bg, 1);
-    else renderer.setClearColor(refrClearColor, 1);
+    if (bg instanceof THREE.Color) {
+      renderer.setClearColor(bg, 1);
+    } else {
+      // 透明黑：alpha=0 表示“这里没有水下几何”。水面 shader 用 alpha 判断后
+      // 降低自身 alpha，让主画面的冰/岩透出来；不再清成天空白/雾蓝。
+      renderer.setClearColor(0x000000, 0);
+    }
     renderer.clear();
     renderer.render(scene, camera);
     // 深度 pass：同一相机、同一"隐藏水面"集合，用自带 shader 把视线距离写进颜色。
@@ -598,8 +600,7 @@ export function resetWaterShaders(): void {
   materialDepth.clear();
   refrRT?.dispose();
   depthRT?.dispose();
-  refrClearPeak = -1;
-  refrClearColor.setHex(0xdfe9f2);
+
   refrRT = null;
   depthRT = null;
   refrUniform.value = null;
@@ -791,10 +792,6 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   //   · 暗色 fog（峰值 < 0.3）⇒ 用 fog 作基色，tint 0.3、alpha 下限 0.2；
   //   · 亮色/蓝色 fog ⇒ 保留原来的青色基色，tint 0，alpha 走深度/岸边公式（无下限）。
   const fogPeak = Math.max(fog.r, fog.g, fog.b);
-  if (Array.isArray(w.fog) && fogPeak > refrClearPeak) {
-    refrClearPeak = fogPeak;
-    refrClearColor.copy(fog);
-  }
   const darkFog = Array.isArray(w.fog) && w.fog.length >= 3 && fogPeak < 0.3;
   if (w.waterThickness !== undefined) {
     const list = ((globalThis as { __vbspWaterVolumeThickness?: unknown[] }).__vbspWaterVolumeThickness ??= []);
@@ -1131,19 +1128,18 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // 位移采样若落进"没有几何"的区域（RT 背景是黑的），会沿轮廓出现黑边噪点 ⇒
       // 与未位移处比较亮度，明显变暗就回退到未位移样本（常见的 refraction 边缘修正）。
       'vec3 vbspRefrShifted = texture2D( vbspWaterRefr, vbspRefrUv ).rgb;',
-      'vec3 vbspRefrBase = texture2D( vbspWaterRefr, vbspScreenUv ).rgb;',
+      'vec4 vbspRefrBase4 = texture2D( vbspWaterRefr, vbspScreenUv );',
+      'vec3 vbspRefrBase = vbspRefrBase4.rgb;',
       'if ( dot( vbspRefrShifted, vec3( 0.3333 ) ) < dot( vbspRefrBase, vec3( 0.3333 ) ) * 0.35 ) { vbspRefrShifted = vbspRefrBase; }',
-      // RT 里"没有几何"的两类样本都不要当内容：
-      //   ① 纯黑（未渲染）；② 接近清屏色 `#dfe9f2`（我们给 RT 设的天光兜底色）。
-      // 否则薄水会把这些空白透成白色/黑斑（owner 报的"白 X"与"白板"都属这类）。
+      // 折射 RT 用**透明黑**清屏：alpha=0 就是“这里没有水下几何”（天空/背景穿透）。
+      // 此时不要铺雾色，降低水面 alpha 让主画面的冰/岩透出来；有几何的地方 alpha=1 保持细节。
       // ⚠️ 用 `vbspWaterBaseColor` 这个 **uniform**，不要用 `diffuseColor.rgb`：
       // 水面材质的 `material.color` 在渲染前会被光照/fullbright 那条路按 lightmap 重设
       // ⇒ 我改 `material.color` 的效果全部被覆盖（这就是"改颜色没反应"的根因，
       // 2026-10-21 用金丝雀测试证实：注入确实控制这些像素，但颜色来自被覆盖后的 diffuse）。
       'vec3 vbspRefrColor = vbspWaterRefrOn > 0.5 ? vbspRefrShifted : vbspWaterBaseColor;',
       'float vbspLum0 = dot( vbspRefrShifted, vec3( 0.3333 ) );',
-      'float vbspClearDist = distance( vbspRefrShifted, vec3( 0.874, 0.914, 0.949 ) );',
-      'bool vbspNoGeom = ( vbspLum0 < 0.02 ) || ( vbspClearDist < 0.05 );',
+      'bool vbspNoGeom = ( vbspRefrBase4.a < 0.5 ) || ( vbspLum0 < 0.02 );',
       'if ( vbspWaterRefrOn > 0.5 && vbspNoGeom ) { vbspRefrColor = vbspWaterScatter; }',
       // ── 竖直深度 + 视线距离（照抄 SDK `common_ps_fxc.h:213-230` 的 `CalcWaterFogAlpha`）──
       //   flDepthFromWater = 水面 y − 命中点 y              ← 竖直深度
@@ -1265,6 +1261,9 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       // 反射越强越不透（Source 的 `lerp(refract, reflect, fresnel)` 同样是替换而不是叠加）
       '		diffuseColor.a = mix( diffuseColor.a, 1.0, vbspMix );',
       '	}',
+      // 没有水下几何（RT alpha=0）⇒ 水几乎透明，让主画面的冰/岩透出来；
+      // 不能铺雾蓝，否则就是 owner 看到的“整片蓝板”。
+      'if ( vbspNoGeom ) diffuseColor.a = min( diffuseColor.a, 0.25 );',
       // ② 没有平面反射时退回天空盒 envMap（近白，形同环境光；仅作兜底）
       '	#ifdef USE_ENVMAP',
       '		if ( vbspWaterReflOn < 0.5 ) {',
