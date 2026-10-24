@@ -60,7 +60,7 @@ if errorlevel 1 (
 )
 if errorlevel 1 (
   echo [ERROR] WASM build failed twice.
-  echo [HINT] If the log says "failed to write ... pkg\websurf_wasm_bg.wasm" ^(os error 5 / 拒绝访问^):
+  echo [HINT] If the log says "failed to write ... pkg\websurf_wasm_bg.wasm" ^(os error 5 / access denied^):
   echo [HINT]   a file lock or a second build window holds it - close other dev/build windows, then retry.
   echo [HINT] Otherwise install Rust + wasm-pack ^(rustup + cargo install wasm-pack^), then retry.
   pause

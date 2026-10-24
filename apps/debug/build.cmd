@@ -17,8 +17,8 @@ exit /b 1
 
 echo ============================================================
 echo   WebSurf-debug - build
-echo   重编译并打包：工具链 -^> 依赖 -^> WASM -^> 契约检查
-echo                -^> TS -^> dist 打包 ^(mode: %DIST_MODE%^)
+echo   Rebuild and package: toolchain -^> deps -^> WASM -^> contract check
+echo                -^> TS -^> dist packaging ^(mode: %DIST_MODE%^)
 echo ============================================================
 
 echo [1/6] Checking toolchain...
@@ -57,7 +57,7 @@ if errorlevel 1 (
 )
 if errorlevel 1 (
   echo [ERROR] WASM build failed twice.
-  echo [HINT] If the log says "failed to write ... pkg\websurf_wasm_bg.wasm" ^(os error 5 / 拒绝访问^):
+  echo [HINT] If the log says "failed to write ... pkg\websurf_wasm_bg.wasm" ^(os error 5 / access denied^):
   echo [HINT]   a file lock or a second build window holds it - close other dev/build windows, then retry.
   echo [HINT] Otherwise install Rust + wasm-pack ^(rustup + cargo install wasm-pack^), then retry.
   pause
