@@ -79,6 +79,9 @@ mod step_gate_tests;
 /// 卡死判据着地门回归（2 项）：前方地面更高时不得原地抖动。
 #[cfg(test)]
 mod stuck_gate_tests;
+/// 出生点去嵌入回归（3 项，T-731/F1）：嵌入 relocate / 全封闭保持 / 空闲零位移。
+#[cfg(test)]
+mod spawn_deembed_tests;
 /// 贴面推开的步长无关性回归（2 项）：高刷屏步长下贴墙不得被"每次撞面都推"推着走。
 #[cfg(test)]
 mod contact_push_tests;
@@ -325,6 +328,37 @@ impl PhysWorld {
         // 5. 出生点 + 玩家
         self.spawn = [spawn_x, spawn_y, spawn_z];
         self.player = create_player(self.spawn, &self.params);
+        // T-731/F1：出生点通用去嵌入。create_player 只落位不判嵌入（本文件 build_world
+        // 原注释与 player.rs 的 create_player 文档一致：出生点是否悬空由第一个 tick 决定），
+        // 而出生盒一旦与几何相交，后续每个 tick 的 check_stuck 都走"全候选失败 → 清速 +
+        // 整帧跳过"链 = 永久悬空（T-731 实测：非默认体型进 surf_666 即全程冻结）。
+        // 这里按 check_stuck 同一套候选集（player::find_free_origin，方向/距离/顺序同源）
+        // 找最近空闲位；找到就把 spawn 字段一并搬过去（respawn 与死亡重生都回这个点），
+        // 找不到保持原位并留日志。不用纯 +Y 上搜：surf_666 出生间顶部 12 HU 即实心，
+        // +Y 方向在 1~34 全堵，只有全候选集才有解。
+        {
+            let mins = self.player.mins();
+            let maxs = self.player.maxs();
+            if !self.world.is_position_free(&self.spawn, &mins, &maxs) {
+                match player::find_free_origin(&mut self.world, &self.spawn, &mins, &maxs) {
+                    Some(free) => {
+                        eprintln!(
+                            "[phys] 出生点嵌入 {:?}，已搬到最近空闲位 {:?}（候选集内首个空闲点）",
+                            self.spawn, free
+                        );
+                        self.spawn = free;
+                        self.player.origin = free;
+                    }
+                    None => {
+                        eprintln!(
+                            "[phys] 出生点嵌入 {:?} 且候选集（34 HU 内 60 候选）无空闲位，保持原位；\
+                             该体型在近邻空间放不下，后续 tick 将持续判卡死",
+                            self.spawn
+                        );
+                    }
+                }
+            }
+        }
         self.player.yaw = spawn_yaw;
         self.player.prev_origin = self.spawn;
         self.ready = true;

@@ -1349,6 +1349,28 @@ const STUCK_DIRS: [[f64; 3]; 10] = [
     [0.0, -1.0, 0.0],
 ];
 
+/// 候选挤出搜索：从 `origin` 出发按 `STUCK_DIRS` × `dist ∈ {1,2,4,8,16,34}` 的固定顺序
+/// 找**第一个**使整盒（`mins`/`maxs`）空闲的位置并返回；全部候选都放不下时返回 `None`。
+///
+/// 语义单一来源：`check_stuck` 的挤出枚举与 `PhysWorld::build_world` 的出生点去嵌入
+/// （T-731/F1）共用本函数——方向表、距离序列、命中顺序三者绑定，改一处两边同步。
+/// 顺序敏感：`STUCK_DIRS[0]` 是 +Y，先近后远，与既有 check_stuck 行为逐位一致。
+pub(crate) fn find_free_origin(world: &mut World, origin: &V3, mins: &V3, maxs: &V3) -> Option<V3> {
+    for dist in [1, 2, 4, 8, 16, 34] {
+        for dir in STUCK_DIRS {
+            let tmp = [
+                origin[0] + dir[0] * dist as f64,
+                origin[1] + dir[1] * dist as f64,
+                origin[2] + dir[2] * dist as f64,
+            ];
+            if world.is_position_free(&tmp, mins, maxs) {
+                return Some(tmp);
+            }
+        }
+    }
+    None
+}
+
 /// 卡死挤出：位置已处于实心内时就近找一个空闲点，返回"是否彻底卡死"。
 ///
 /// **着地时直接返回 false（修法 A，看板 `T-065` §8 第 1 条）**：
@@ -1407,19 +1429,10 @@ fn check_stuck(world: &mut World, p: &mut Player) -> bool {
         p.stuck_ticks = 0;
         return false;
     }
-    for dist in [1, 2, 4, 8, 16, 34] {
-        for dir in STUCK_DIRS {
-            let tmp = [
-                p.origin[0] + dir[0] * dist as f64,
-                p.origin[1] + dir[1] * dist as f64,
-                p.origin[2] + dir[2] * dist as f64,
-            ];
-            if world.is_position_free(&tmp, &mins, &maxs) {
-                p.origin = tmp;
-                p.stuck_ticks = 0;
-                return false;
-            }
-        }
+    if let Some(tmp) = find_free_origin(world, &p.origin, &mins, &maxs) {
+        p.origin = tmp;
+        p.stuck_ticks = 0;
+        return false;
     }
     p.stuck_ticks += 1;
     p.velocity = [0.0, 0.0, 0.0];
