@@ -164,7 +164,8 @@ if (isolated) {
 
   // 2. 渲染器 = 主线程唯一物理线（BSP 解析/物理/渲染全在主线程）
   renderer = new RendererMain(shared);
-  renderer.onSceneLoaded = (deathY) => renderer?.setDeathY(deathY);
+  // T-731/F3：只记值不写——此刻物理实例未建，setDeathY 会空跑
+  renderer.onSceneLoaded = (deathY) => { pendingDeathY = deathY; };
   // 渲染主线 → 权威反向同步：真位置突变（teleport=true）清双端未消费输入增量；
   // 常规反向重锚（teleport=false，缺陷修复 A）只注入状态、**不清输入**
   renderer.onSyncRenderState = (s, teleport) => {
@@ -500,6 +501,9 @@ function updateKeyHud(state: KeyState): void {
  */
 /** 最近一次载入的地图文件引用（面板重载类项改完要重建它；File 引用不占内存）。 */
 let lastMapFile: File | null = null;
+/** T-731/F3：loadScene 回调先记下场景包围盒最小 Y（death_y）；buildPredictionWorld 之后再写双端
+ *  ——回调到达时 predPhys 还是 null，当场 setDeathY 是空跑。 */
+let pendingDeathY: number | null = null;
 /** 面板「重载类」项改完后的重建计时器（250 ms 内多次写入只重建一次）。 */
 let mapReloadTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -571,6 +575,15 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       teleportJson: bundle.teleportJson,
       spawn: bundle.spawn,
     });
+    // T-731/F3：death_y 双端补设。loadScene 回调先到（此时 predPhys 还是 null，setDeathY
+    // 空跑），权威端则从未有发送方（InputBridge.sendSetDeathThreshold 此前零调用点）——
+    // 两端都保持 Rust 默认 -100_000，掉出地图永不死亡重生。现在渲染实例已就绪：
+    // bridge.sendSetDeathThreshold = 渲染端 setDeathY + Worker `set-death-threshold`（分发器
+    // 会写入全部权威实例并记忆，世界重建后 reapplyDeathY 重放）。
+    if (pendingDeathY !== null) {
+      bridge?.sendSetDeathThreshold(pendingDeathY);
+      pendingDeathY = null;
+    }
     // Worker 权威物理世界（地图碰撞；独立固定步长权威帧计算）
     //
     // ⚠️ **顺序已回退为"主线程世界建完再发"**（2026-09-20 实测）：
