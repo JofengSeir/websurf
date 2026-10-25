@@ -25,14 +25,14 @@
 
 **待 owner 四件**：① `git push origin main` 看新 job 首跑——wasm-core-tests 预期 32 过 + 1 跳 + 1 忽略，结果回填方案书 §4 卡 C2；② 分支保护登记 `three-end TS typecheck`、`wasm-core unit tests (host)`；③ 拍板 D-124 / D-125（OWNER.md 待决表）；④ lightmap 测试语义：现钉「最小可用页」实际行为，若要「钉死 2048²」属生产语义改动，需另行立项。
 
-## 下一批任务（2026-10-25 立项，任务书本地下发）
+## 下一批任务（2026-10-25 立项并当日执行完毕；任务书本地下发）
 
-任务书都在 `.dsh/plans/`（本地不入库），均已带代码事实、排证序列、验收架构与仪器纪律：
+执行方式：executor=GLM-5.3-Flash（workflow 钉模型），主会话逐任务独立复核证据后放行下一个；任务书与证据在 `.dsh/plans/`、`.tmp/`（本地不入库）。
 
-- **T-731** game 进图悬空/缓慢下坠（切自由视角后自愈）——双物理线（渲染预测 + Worker 权威）耦合缺陷，四假设 H1 出生点嵌入 / H2 权威停滞+速度覆盖 / H3 重锚闭环 / H4 伴生时序。书：`.dsh/plans/T-731-game-spawn-hover-task.md`。
-- **T-732** 模型内部区域异常发暗（boreas `dekelmdl` / 666 `s1_ramp1b_1`）——prop 三级光照路由归因；owner 截图在 `.dsh/plans/assets/t732/`，**由执行 agent 读图**（防造假协议已写入任务书）。书：`.dsh/plans/T-732-model-dark-lighting-task.md`。
-- **T-733** mesh 地面行走顿挫——预期管理：bevel/补面机制仓库已有两套（BSP 原生 bevel side + `.phy` 凸体合成 bevel），疑点在「非凸块退回无补面的三角路径」与块间接缝；须先建走行度量再动刀。书：`.dsh/plans/T-733-mesh-ground-stutter-task.md`。
-- **T-734** PVS / 大地图加载优化**调研**（不改代码）——预期管理：PVS 基础设施已完整存在（解析→导出→PvsManager→VisibilityController，默认关）；调研核心是「开了省多少/错杀多少、粒度要不要重组、要不要拆 GLB/惰性装配」，产出带数字的报告与分阶段决策请求。书：`.dsh/plans/T-734-pvs-research-task.md`。
+- **T-731 修复完成**（`6829f61` 出生点去嵌入 / `5635f77` lastTickMs 复位 / `5b66560` death_y 双端接通）：进图悬空=出生盒嵌入→check_stuck 整帧跳过；物理回归 36→40 项全绿，两图冷加载 6/6 过。待 owner：①终审 ②确认报障时面板「体型」是否非默认（executor 15 次默认体型不复现，机制靠非默认体型复现）③胖体型无解时是否启 auto_restore_hull ④传送目的地是否也接去嵌入。
+- **T-732 归因 C1 + 试档旋钮**（`6131f47`，默认关零行为变化）：暗区=地图自带 vhv 烘焙（缺陷类候选 C2-C5 全排除）；`__vbspVhvGain` 旋钮已落，**OWNER.md D-127** 待拍档（建议 ≈2，SDK 口径 4.5948）；A/B 材料 `.dsh/plans/assets/t732/ab/`。勘误：模型实名 **dek01mdl**（「dekelmdl」在 bsp 内 0 命中已证）。
+- **T-733 归因结案（零代码）**：顿挫=surf_boreas 六面天空盒壳墙被地形画穿的**隐形墙**（18093 穿面采样点；r3a/r1 原始 tick 已复核），补面机制无罪；`skip_sky:false` 为既有决定。待 owner：A 改图（需 .bsp 源）或 B 接受现状（外坡不作走行区）。
+- **T-734 调研完成（零代码）**：报告 `.dsh/plans/T-734-pvs-research-report.md`（264 行，R1-R6 全带数字）。要点：PVS on 剔块 87-97%、666/fornax 帧时间回 34-80fps，但**两处语义级错杀（fornax spawn \|S\|=1、相机出界保留旧集）暂不能默认开**；粒度不是瓶颈（不重组 chunk）；sedona 最重（GLB 315MB/内存 1.5GB）；连续换图 Edge WS 2.8→17.5GB 不回落（观察项）。分阶段决策请求见报告 R6。待 owner：默认开 PVS 档位语义（涉 D-123）与实施优先级。
 
 ## 已结索引
 
