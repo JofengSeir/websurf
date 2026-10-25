@@ -239,6 +239,11 @@ export class RendererMain {
     this.session?.disposeScene();
     this.predPhys = null;
     this.predReady = false;
+    // T-731/F4：复位物理帧时基。lastTickMs 只在本文件 tick 内写，换图不清会带着上一张图
+    // 的最后 rAF 时戳进入新图 —— 新图首个物理帧的 dt = (now − 旧时戳)/1000 被钳到 0.1s
+    // （实测 warm reload 间隔 10.5s 时首帧 dt=0.1），一步积分 0.1 秒的物理。归零让首帧
+    // 走「首个物理帧取 1/64」的既有分支。
+    this.lastTickMs = 0;
     this.pendingDx = 0;
     this.pendingDy = 0;
     this.pendingKeys = 0;
@@ -308,6 +313,8 @@ export class RendererMain {
     );
     this.predPhys = phys;
     this.predReady = true;
+    // T-731/F4：新世界首帧 dt 取 1/64，不继承上一张图的 rAF 时戳（同 disposeScene 处的说明）
+    this.lastTickMs = 0;
     // 权威帧校准状态清零（首帧权威帧将作为新起点）
     this.calibrator.clear();
     // 新世界：渲染采样流不连续 → 索引空间重启（世代 +1，Worker 丢弃旧世界缓存）
