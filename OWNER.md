@@ -7,6 +7,7 @@
 
 | 编号 | 决定 | 优先级 | 建议 | 不决定的后果 |
 |---|---|---|---|---|
+| D-127 | prop 静态烘焙（vhv，L1）暗部呈现档位。T-732 探针结论：boreas `dek01` 甲板暗条与 666 `s1_ramp1b` 坡面暗带均为**地图自带烘焙数据**（重排正确、与世界 lightmap 阴影自洽、渲染公式忠实；材料 `.dsh/plans/assets/t732/ab/`）。要提亮属呈现语义改动，默认值未动；已落**默认关旋钮** `window.__vbspVhvGain`（L1 vhv 项专属增益，加载前注入，默认 1=现状）。档位参照：`1`≈净系数×1.516；`4.5948`（=2^2.2）≈SDK 引擎口径净系数×2.0。全局旋钮 `__vbspLightFloor`/`__vbspLightGamma` 也可选但会波及 world（666 全景回归需另验） | 中 | 若要提亮 prop 暗部：默认档取 `__vbspVhvGain≈2`（暗部可辨、亮部不饱和）；改默认值前先出 666 全景+boreas 水体前后对照 | 模型内部暗区维持地图烘焙原貌（现状即 `gain=1`，无回归风险） |
 | D-124 | 本地 pre-commit **机械钩子**：staged 的 `.cmd/.bat/.ps1` 必须纯 CRLF+纯 ASCII、禁 stage 生成物路径（`pkg/`、`dist/`、`web/*.wasm`、`.tmp/`、`.dsh/`、`.amh/`）；逻辑在 `src/scripts/precheck-staged.mjs`（含逃生门去留）。全案见 `.dsh/plans/agent-constraints-plan.md` §5（本地，不入库） | 中 | 采用 | `.cmd` 两类已发生事故（LF 行尾、chcp 65001 非 ASCII）继续零机械拦截，全靠自觉 |
 | D-125 | AMH 提交尾注从「建议」升「**必须三选一**」（`AMH: <id>` / `AMH: none` / `AMH: down`；文档级，钩子级并入 D-124 一并定） | 低 | 采用文档级 | 尾注执行率 27%（10-18 后 48 笔中 13 笔），记忆链稀疏、跨 agent 交接断层 |
 

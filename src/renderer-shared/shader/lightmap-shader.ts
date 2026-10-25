@@ -1404,8 +1404,10 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 		shader.uniforms.vbspExposure = exposureUniform;
 		shader.uniforms.vbspLightGamma = lightGammaUniform; registerInjectedMaterial(mat); registerInjection(mat, 'vertex-lighting', String(fogMaxDensity));
 		shader.uniforms.vbspBakedMix = bakedMixUniform; shader.uniforms.vbspLightFloor = lightFloorUniform; shader.uniforms.vbspAmbientScale = ambientScaleUniform;
+		// T-732：vhv 项专属增益（默认 1 = 关；试档旋钮，不参与任何默认观感）
+		shader.uniforms.vbspVhvGain = vhvGainUniform;
 		// 声明必须来自共享常量（守卫断言"注入单元自洽"）
-		const decls = [...VBSP_LIGHTMAP_UNIFORM_DECLS, 'uniform float vbspAmbientScale;'].join('\n');
+		const decls = [...VBSP_LIGHTMAP_UNIFORM_DECLS, 'uniform float vbspAmbientScale;', 'uniform float vbspVhvGain;'].join('\n');
 		// ⚠️ 这个数组进的是 **fragment** shader ⇒ **不能出现 `attribute`**
 		// （GLSL 里 `attribute` 仅限 vertex 阶段，出现在 fragment 里时编译报
 		//  `'attribute' : Illegal use of reserved word` ⇒ program 无效 ⇒ 模型不渲染）。
@@ -1416,7 +1418,8 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 			// 纯纹理模式：逐顶点烘焙项恒 1.0（= 贴图原色），与 world 路径同一开关语义
 			'	if (vbspBakedMix < 0.5) { return vec3(1.0); }',
 			'	float g = max(vbspLightGamma, 0.001);',
-			'	return (pow(max(vbspVLight, vec3(vbspLightFloor)), vec3(2.2 / g)) + pow(max(vbspVCube, vec3(vbspLightFloor)), vec3(1.0 / g)) * vbspAmbientScale) * vbspExposure;',
+			// vbspVhvGain 只乘 vhv 项（cube 项量级走数据侧 PROP_CUBE_GAIN / ambientScale，两套口径不能混）
+			'	return (pow(max(vbspVLight, vec3(vbspLightFloor)), vec3(2.2 / g)) * vbspVhvGain + pow(max(vbspVCube, vec3(vbspLightFloor)), vec3(1.0 / g)) * vbspAmbientScale) * vbspExposure;',
 			'}',
 		].join('\n');
 		const vs = shader.vertexShader;
@@ -1655,6 +1658,30 @@ const ambientScaleUniform = { value: readAmbientScaleOverride() ?? LIGHTING_PRES
  * prop 路径 `vbspAmbientWeight()` 同式。
  */
 const lightFloorUniform = { value: readLightFloorOverride() ?? 0 };
+
+/**
+ * **L1 逐顶点烘焙项（vhv）专属增益**——默认 **1 = 关**（数据原样），仅乘 `vbspVertexLightTerm()`
+ * 里 `pow(_vbsp_vlight, 2.2/γ)` 这一项，**不碰 world lightmap / 第 2 级 cube** 的量级
+ * （第 2 级的量级补偿是数据侧 `PROP_CUBE_GAIN`，与本旋钮无关）。
+ *
+ * ## 为什么需要（T-732 结论）
+ *
+ * `surf_boreas` 的 `dek01` 甲板暗条与 `surf_666` 的 `s1_ramp1b` 坡面暗带，探针证实都是
+ * **地图自带的 vhv 烘焙值**（重排正确、与世界 lightmap 的阴影自洽），渲染公式忠实呈现；
+ * 暗 = 数据，不是管线丢光。要提亮只能动呈现语义——按 owner 裁决（W-A 先例）落**默认关的
+ * 试档旋钮**，不改任何默认值。
+ *
+ * ## 档位参照（屏幕值口径 `albedo_srgb × vlight × (gain·exposure)^(1/2.2)`）
+ *
+ * - `1`（默认）= 现状：净系数 `exposure=2 ⇒ 2^(1/2.2) ≈ 1.516`；
+ * - `4.5948`（= `2^2.2`）：净系数恰为 **×2.0**，即 SDK 引擎口径
+ *   （`common_vertexlitgeneric_dx9.h:268-274` 的 `GammaToLinear(staticLightingColor × cOverbright)`
+ *   折回屏幕域等价于 vhv 项 ×2；本工程默认只给到 ×1.516）；
+ * - 更高 = 继续提亮暗部（亮部会先饱和到贴图原色，无需担心过曝白板）。
+ *
+ * 免重建 A/B：加载前注入 `window.__vbspVhvGain = N`（材质编译期读取，改值需重载地图）。
+ */
+const vhvGainUniform = { value: readVhvGainOverride() ?? 1 };
 
 /**
  * **prop 光照基线倍率 = `2^2.2 = 4.5948`**（外部参照实现平价）。
@@ -1898,6 +1925,17 @@ export function setExposure(value: number): void {
 function readAmbientScaleOverride(): number | null {
 	const g = globalThis as { __vbspAmbientScale?: unknown };
 	const v = g.__vbspAmbientScale;
+	return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+}
+
+/**
+ * 运行期覆盖 L1 vhv 项增益：`window.__vbspVhvGain = N`（材质**编译期**读取，改值需重载地图；
+ * 与 `readPropCubeGainOverride` 同型）。非法（非有限 / 负数）一律忽略，保持默认 1 = 关。
+ * 只作用于第 1 级逐顶点烘焙路径，见 `vhvGainUniform` 的档位说明。
+ */
+function readVhvGainOverride(): number | null {
+	const g = globalThis as { __vbspVhvGain?: unknown };
+	const v = g.__vbspVhvGain;
 	return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
 }
 
