@@ -440,7 +440,7 @@ const demoPanel = demoPane
         // **顺序不能反**：先切视角、**最后**再定位播放头。
         // `pickEntity` 会走到「播放头不在这个人的区间里就 seek 到区间起点」那条路（`jumpTo`），
         // 于是它自己会动播放头 —— 先 seek 再切视角的话，我们算好的目标时刻会被它覆盖
-        // （本轮实测：点 9:37 的过关记录，播放头落到了他这一段开头的 4:36）。
+        // （实测：点 9:37 的过关记录，播放头落到了他这一段开头的 4:36）。
         if (row && row.hasTrack) {
           autoPickInFlight = true;
           demoPanel?.pickEntity(row.entity);

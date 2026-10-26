@@ -32,13 +32,14 @@ npm run dev          # ⑤ 起本地服务：python ../../src/scripts/serve.py 8
 
 ### 1.3 静态服务
 
-`src/scripts/serve.py` 只做一件事——按正确 MIME 提供本地文件：
+`src/scripts/serve.py` 做两件事：按正确 MIME 提供本地文件，并为所有响应注入跨源/隔离/禁缓存头：
 
 | 要素 | 位置 / 规则 |
 |---|---|
 | 端口 | `argv[1]`（默认 8080，`src/scripts/serve.py:20`） |
 | 服务根 | `argv[2]`（`src/scripts/serve.py:21`）；启动时 `os.chdir` 到该根（`src/scripts/serve.py:22`） |
 | COOP/COEP | 为所有响应加（`src/scripts/serve.py:41-42`），页面才能拿到 `SharedArrayBuffer` |
+| CORS + 禁缓存 | 所有响应带 `Access-Control-Allow-Origin: *`（`src/scripts/serve.py:37`）与 `Cache-Control: no-store`（`src/scripts/serve.py:45`；产物是固定文件名、无内容 hash，禁缓存避免页面拿到旧 JS/WASM） |
 
 ## 2. 文档导航
 

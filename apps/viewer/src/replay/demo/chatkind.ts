@@ -114,7 +114,7 @@ function levelFrom(body: string): string {
     if (g.length === 0) continue;
     // 只跳过「明显是标签」的那几个词：`StripLeadTag` 之后一般不会剩下它们，
     // 留一道保险免得把 `[ SM ]` 当成关卡名。**不能再按「纯 ASCII」跳** ——
-    // 实测英文服把关卡写成 `[ Stage 1 ]`，早先那条 ASCII 规则会把关卡名吞掉（本轮实测）。
+    // 实测英文服把关卡写成 `[ Stage 1 ]`，早先那条 ASCII 规则会把关卡名吞掉。
     if (/^(timer|sm|server|sourcemod|admin|vip|spec|spectator)$/i.test(g)) continue;
     return g;
   }
@@ -125,7 +125,7 @@ function levelFrom(body: string): string {
  * 剥掉「`[ 标签 ]`」与紧随的分隔短横 —— 公告与过关记录都带这层壳。
  *
  * 为什么必须先剥：`[ Timer ] - LuoXuan 在 Segmented模式 下以用时 18.714 …` 里，
- * 取名字时若把 `[ Timer ]` 留在句首，句首取词会取到 `[`（本轮实测踩过）。
+ * 取名字时若把 `[ Timer ]` 留在句首，句首取词会取到 `[`（实测踩过）。
  */
 export function stripLeadTag(text: string): string {
   return text.replace(RE_LEAD_TAG, '').replace(/^\s*[-–—]\s*/, '');
