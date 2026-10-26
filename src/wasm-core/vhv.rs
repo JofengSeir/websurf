@@ -35,18 +35,26 @@
 //! ① 版本必须等于 2；② `mesh_count ∈ (0, 4096]` 且 `vert_count ∈ (0, 4_000_000]`；
 //! ③ 顶点数据必须完整落在字节切片内——任何一条不满足都返回 `None`，不产出部分结果。
 //!
+//! ## 只收 LOD0
+//!
+//! VRAD 对**每个 LOD** 各写一块（`ApplyLightingToStaticProp` 的 `for nLod` 循环），
+//! 例如 surf_boreas 的 `sp_49.vhv` 有 2275/1737/1123/687 四块。本模块只收 `lod == 0`：
+//! 渲染端几何与 strip group 都是 LOD0，颜色总数必须恰好等于 LOD0 的 strip 顶点总数，
+//! 否则调用方的重排（`Model::remap_strip_group_colors`）会因长度不符整块丢弃，
+//! 该 prop 退回 leaf ambient cube（观感 = 压根没预烘焙）。
+//!
 //! ## 数值口径
 //!
 //! 顶点色字节 `v` 是"整数部分 = 光照、小数部分 = albedo 调制"的打包形式；本文件读到的
 //! 是单个整数字节，故小数部分恒为 0（调制 = 1）。本模块直接产出**屏幕倍率**
 //! `v * 2/255`（常量 `K`），即每顶点 RGB，值域 [0, 2]。
 
-/// 解析结果：逐顶点屏幕倍率（RGB，值域 [0, 2]，按 mesh 顺序拼接 = 模型顶点顺序）。
+/// 解析结果：逐顶点屏幕倍率（RGB，值域 [0, 2]，按 mesh→strip group 顺序拼接，**只含 LOD0**）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PropVertexLighting {
-    /// `vert_count` 个顶点的 RGB 倍率（mesh 顺序拼接；与模型顶点表同序）。
+    /// LOD0 各块（mesh→strip group 顺序）的 RGB 倍率拼接；调用方按 strip group 重排到模型顶点序。
     pub colors: Vec<[f32; 3]>,
-    /// 每个 mesh 的顶点数（诊断用；累加应等于 `colors.len()`）。
+    /// 每个 LOD0 块的顶点数（诊断用；累加应等于 `colors.len()`）。
     pub mesh_vert_counts: Vec<u32>,
 }
 
@@ -122,10 +130,22 @@ pub fn parse_vhv(bytes: &[u8]) -> Option<PropVertexLighting> {
     let mut meshes = Vec::with_capacity(mesh_count as usize);
     for k in 0..mesh_count as usize {
         let p = hdr_base + k * 28;
+        let lod = read_i32(bytes, p)?;
         let vc = read_i32(bytes, p + 4)?;
         let vo = read_i32(bytes, p + 8)?;
         if vc < 0 || vo < 0 {
             return None;
+        }
+        // 只收 LOD0 块。VRAD 的写序是 bodypart→model→LOD→mesh→strip group
+        // （utils/vrad/vradstaticprops.cpp 的 ApplyLightingToStaticProp），每个 LOD 各写一块：
+        // 例如 surf_boreas 的 sp_49.vhv = 2275 / 1737 / 1123 / 687（四个 LOD），
+        // 而渲染端只用 LOD0（模型几何与 strip group 都是 LOD0）。
+        // 把 LOD1+ 也拼进 colors 会让总数 ≠ strip 顶点总数 ⇒
+        // Model::remap_strip_group_colors 长度判负返回 None、identity 兜底也不等 ⇒
+        // 整个 prop 的逐顶点光照被丢弃，退回 leaf ambient cube（观感 = 压根没预烘焙）。
+        // 实测 surf_boreas 1587 个 sp 文件中 1294 个（82%）带 LOD>0 块、surf_666 为 138/629。
+        if lod != 0 {
+            continue;
         }
         meshes.push((vc as u32, vo as usize));
     }
@@ -230,5 +250,42 @@ mod tests {
         let mut b = sample();
         b[20..24].copy_from_slice(&(-5i32).to_le_bytes());
         assert!(parse_vhv(&b).is_none());
+    }
+
+    /// 只收 LOD0：两个块（lod=0 三顶点 / lod=1 两顶点），解析结果必须只含 LOD0 的三个顶点。
+    /// 回归背景：VRAD 每个 LOD 各写一块，混进来会让颜色总数 ≠ strip 顶点总数 ⇒
+    /// 调用方重排失败、整个 prop 丢掉逐顶点光照（退回 ambient cube）。
+    #[test]
+    fn keeps_only_lod0_blocks() {
+        let mut v = Vec::new();
+        v.extend_from_slice(&2u32.to_le_bytes()); // version
+        v.extend_from_slice(&0i32.to_le_bytes()); // checksum
+        v.extend_from_slice(&4u32.to_le_bytes()); // vert_flags
+        v.extend_from_slice(&4u32.to_le_bytes()); // vert_size
+        v.extend_from_slice(&5u32.to_le_bytes()); // vert_count（全 LOD 合计）
+        v.extend_from_slice(&2i32.to_le_bytes()); // mesh_count
+        v.extend_from_slice(&[0u8; 16]); // 头到 40
+        // 块 0：lod=0, 3 顶点, 偏移 96
+        v.extend_from_slice(&0i32.to_le_bytes());
+        v.extend_from_slice(&3i32.to_le_bytes());
+        v.extend_from_slice(&96i32.to_le_bytes());
+        v.extend_from_slice(&[0u8; 16]);
+        // 块 1：lod=1, 2 顶点, 偏移 108
+        v.extend_from_slice(&1i32.to_le_bytes());
+        v.extend_from_slice(&2i32.to_le_bytes());
+        v.extend_from_slice(&108i32.to_le_bytes());
+        v.extend_from_slice(&[0u8; 16]);
+        assert_eq!(v.len(), 96);
+        for r in [10u8, 20, 30] {
+            v.extend_from_slice(&[0, 0, r, 255]);
+        }
+        for r in [200u8, 250] {
+            v.extend_from_slice(&[0, 0, r, 255]);
+        }
+        let p = parse_vhv(&v).expect("应能解析");
+        assert_eq!(p.colors.len(), 3, "只应包含 LOD0 的 3 个顶点");
+        assert_eq!(p.mesh_vert_counts, vec![3], "块计数也只应记 LOD0");
+        assert!((p.colors[0][0] - 10.0 * 2.0 / 255.0).abs() < 1e-6);
+        assert!((p.colors[2][0] - 30.0 * 2.0 / 255.0).abs() < 1e-6);
     }
 }
