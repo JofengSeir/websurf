@@ -1621,7 +1621,12 @@ export const LIGHTING_PRESENTATION_DEFAULTS = {
 	exposure: 2.0,
 	lightGamma: 1.0,
 	ambientScale: 1,
-	propVertexRelax: 1,
+	// T-732（2026-10-27）：`propVertexRelax = 0` = 直接用烘焙值，不做任何几何侧重写。
+	// 默认 1 时会在**低模**上伪造色带：接缝焊接之后的空间鲁棒滤波把「与 2 环邻域中位数相差 >0.1」
+	// 的顶点整条拉回中位数，而 `s1_ramp1b` 每行只有 2~6 个顶点 ⇒ 相邻行互相被拉平，
+	// 同一张连续曲面上出现硬边人字带（owner 报的「黑带」）。关掉后与引擎口径一致：
+	// 屏 = 贴图 sRGB × vlight（v = 2×byte/255），烘焙明暗原样保留。
+	propVertexRelax: 0,
 	propVertexFlatten: 0,
 } as const;
 const LIGHTMAP_EXPOSURE_DEFAULT = LIGHTING_PRESENTATION_DEFAULTS.exposure;
