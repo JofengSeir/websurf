@@ -59,10 +59,6 @@ export interface PlayerConfig {
  * 与 `TRIGGER_COOLDOWN`（0.5 s）；地面速度上限由 `PhysicsConfig.maxSpeed` 经
  * `set_params` 的 `run_speed` 决定。 */
 export interface LodConfig {
-  /** 重判定间隔（帧）。原消费者 `LodManager.update` 已随 D-123 删除；当前全仓无读取点，
-   *  `sendConfig('lod')` 也不落在 Worker 的应用分支（worker-dispatch 只认 physics/input）。
-   *  留存待定去留。 */
-  updateInterval: number;
   /** 视距剔除距离（HU）：构造期默认值；共享会话 `loadScene` 用校准结果就地覆盖
    *  （`renderer-main.ts` 写回 `result.defaultCull`），面板滑块经 `setCullDistance` 写入
    *  夹取后的值并同步进共享档 `culling.distance`。 */
@@ -213,7 +209,6 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     eyeOffset: 8,
   },
   lod: {
-    updateInterval: 1,
     // 0 = 全加载（不按距离藏块；只靠相机视锥）。`loadScene` 之后由共享会话按同一档值校准。
     cullDistance: 0,
   },
