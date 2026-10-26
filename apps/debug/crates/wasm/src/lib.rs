@@ -2833,8 +2833,8 @@ impl BspProcessor {
 // ---------------------------------------------------------------------------
 // visleaf + PVS 二进制导出（WASM 版 export-vis-pvs，供 Node 脚本离线导出）
 //
-// 与 crates/vbsp/src/bin/export-vis-pvs.rs 的 compute_core + export_binary 一致，
-// 输出字节完全相同的 .visleaf.bin / .pvs.bin（格式 v1）。
+// 契约：输出 .visleaf.bin / .pvs.bin（格式 v1），字节与旧工作区对照实现（crates/vbsp 的
+// export-vis-pvs bin，从未入库、已不存在）完全一致；本导出是该格式当前的唯一实现。
 // 依赖 vbsp 修复：leaves lump version 1 解析 + vis data 完整基址。
 // ---------------------------------------------------------------------------
 

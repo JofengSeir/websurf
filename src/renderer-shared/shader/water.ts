@@ -1330,7 +1330,8 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       '	diffuseColor.a = mix( vbspWaterNearAlpha, vbspWaterFarAlpha, vbspDepthV );',
       '}',
       // 旧的"按视距混蓝 / 按视线光程吸收 / 按水厚映射"三版已全部删除：
-      // 它们的自变量都与"离水面多远"无关，被 owner 判定为错误方向（见 docs/water-depth-blue-derivation.md）。
+      // 它们的自变量都与"离水面多远"无关，被 owner（2026-10-21 前后）判定为错误方向；
+      // 当时的推导文档与深度量程实验只在旧实验线 dev（4f53ea3 / f5d5480），现 main 线未保留。
       // 金丝雀（ripple 段）：这段若没执行，水面不会变品红 ⇒ 区分"注入没进"与"颜色算法不对"。
       'if ( vbspWaterCanary > 0.5 && vbspWaterCanary < 1.5 ) { diffuseColor.rgb = vec3( 1.0, 0.0, 1.0 ); diffuseColor.a = 1.0; }',
     ].join('\n');
