@@ -1622,7 +1622,11 @@ export const LIGHTING_PRESENTATION_DEFAULTS = {
 	lightGamma: 1.0,
 	ambientScale: 1,
 	propVertexRelax: 1,
-	propVertexFlatten: 0,
+	// T-732（2026-10-26 复核）：vhv 的逐顶点场在**平滑边**上也会整段跳变（实测 666 s1_ramp1b：
+	// 同法线、相距 32 HU 的边 luma 跳 0.35~0.44），画面上就是「同一张连续曲面一半暗一半亮」。
+	// ④ 的方差压缩按 prop 自适应（面内 luma 极差中位数 ≥ PROP_FLATTEN_MIN_TRI_DELTA 才压），
+	// 默认开：均值严格不变，只把「一块一块」的分布压平；正常 prop（面内一致）走 flattenSkipped 分支不受影响。
+	propVertexFlatten: 1,
 } as const;
 const LIGHTMAP_EXPOSURE_DEFAULT = LIGHTING_PRESENTATION_DEFAULTS.exposure;
 
@@ -1666,10 +1670,11 @@ const lightFloorUniform = { value: readLightFloorOverride() ?? 0 };
  *
  * ## 为什么需要（T-732 结论）
  *
- * `surf_boreas` 的 `dek01` 甲板暗条与 `surf_666` 的 `s1_ramp1b` 坡面暗带，探针证实都是
- * **地图自带的 vhv 烘焙值**（重排正确、与世界 lightmap 的阴影自洽），渲染公式忠实呈现；
- * 暗 = 数据，不是管线丢光。要提亮只能动呈现语义——按 owner 裁决（W-A 先例）落**默认关的
- * 试档旋钮**，不改任何默认值。
+ * `surf_boreas` 的 `dek01` 甲板暗条与 `surf_666` 的 `s1_ramp1b` 坡面暗带，探针证实暗值**在
+ * 地图自带的 vhv 里**（重排正确、渲染公式忠实）。但 2026-10-26 复核补了一条反证：该 vhv 在
+ * **平滑边**上也不连续（666 s1_ramp1b：同法线、相距 32 HU 的边 luma 跳 0.35~0.44），
+ * 所以「数据合理、只需提亮」不成立——默认改由 ④ 方差压缩（按 prop 自适应）处理，
+ * 本旋钮保持 1 = 关，仅作试档口。
  *
  * ## 档位参照（屏幕值口径 `albedo_srgb × vlight × (gain·exposure)^(1/2.2)`）
  *
