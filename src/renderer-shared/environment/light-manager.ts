@@ -2,7 +2,7 @@
  * WebSurf — 灯光管理器
  *
  * 归属：渲染共享层 `src/renderer-shared/environment/`（2026-10-02 自 debug 工程
- * `apps/debug/src/renderer/light-manager.ts` 下沉；唯二改动 = 头注归属说明 +
+ * `apps/debug/src/renderer/light-manager.ts`（原文件此后已删）下沉；唯二改动 = 头注归属说明 +
  * 入参类型从应用侧 `RuntimeConfig` 换成本文件的结构等价接口 `ConfigWithLighting`，
  * 逻辑零改动）。当前唯一消费方仍是 `apps/debug/src/renderer/renderer-main.ts`。
  *
