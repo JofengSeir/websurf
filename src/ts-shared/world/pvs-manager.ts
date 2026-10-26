@@ -8,8 +8,9 @@
  * `apps/game/src/renderer/renderer-main.ts` 各持一个实例。
  *
  * ## 成员的实际消费面（实测调用点）
- * - `getClusterAt`：debug 的 `apps/debug/src/renderer/lod-manager.ts` `assignClusterIds`
- *   与 game 的 mesh 采样循环，把 mesh 的采样点映射成 cluster 集合
+ * - `getClusterAt`：`visibility-controller.ts` 的 `assignClusters`（三端共用的块→cluster
+ *   7 点采样映射）、`render-session.ts` 的 `meshInCluster` 命中检测，以及装配时按天空
+ *   相机 origin 定位 cluster（`assemble-scene.ts`）
  * - `update` / `isVisible` / `enabled`：**只有 game** 调用（`ENABLE_PVS` 为真时每帧刷新，
  *   再按「任一 cluster 可见即整块可见」剔除）
  * - `currentClusterId` / `getStats`：debug 的 HUD 读数
@@ -262,8 +263,8 @@ export class PvsManager {
   /**
    * 取世界坐标点所在 leaf 的 cluster，不做可见性判定。
    *
-   * 用于把 mesh 的包围盒采样点批量映射成 cluster 集合（debug 的 `assignClusterIds`、
-   * game 的采样循环都是这个用法）。无 PVS、或 leaf 定位失败时返回 -1；命中固体 leaf 时
+   * 用于把 mesh 的包围盒采样点批量映射成 cluster 集合（`visibility-controller.ts` 的
+   * `assignClusters` 7 点采样、`render-session.ts` 的 `meshInCluster` 都是这个用法）。无 PVS、或 leaf 定位失败时返回 -1；命中固体 leaf 时
    * 返回该 leaf 的负值 cluster 原样（调用方按 `>= 0` 过滤）。
    *
    * @param pos 世界坐标（Y-up）。

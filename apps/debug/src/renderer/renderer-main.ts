@@ -104,8 +104,8 @@ export interface RenderPhysEvent {
 
 // ── 空间分块合并（optimizeScene：GLB 挂载后执行一次；算法与参数在渲染共享核 ──
 // 动机：GLTFLoader 对 GLB 的每个 primitive 建一个 THREE.Mesh，未合并时每帧三处开销都随
-// Mesh 数线性增长——renderer.render 的视锥剔除与逐 mesh draw call、LodManager.update 的
-// 逐项距离判定、近平面自适应的整树 traverse + 包围球测试。合并把对象压成「块」，一块的
+// Mesh 数线性增长——renderer.render 的视锥剔除与逐 mesh draw call、可见性控制器的
+// 逐项距离判定（`visibility-controller.ts`）、近平面自适应的整树 traverse + 包围球测试。合并把对象压成「块」，一块的
 // draw call 数 = 该块的材质数。载体见 `optimizeScene` 薄委托；合并前的归一由共享核的默认钩子承担
 // （`scene-optimizer.ts` 的 `normalizeMergeGroup`，T-460 WP4 起三端同一份）。
 
@@ -371,8 +371,9 @@ export class RendererMain {
     return this.session?.getLightingMode() ?? 'baked';
   }
 
-  /** 加载一副地图：GLB → lightmap atlas → 空间分块合并 → 包围盒与 near/far → LOD/PVS/
-   * 传送触发器/贴图 manifest/碰撞体，返回 `LodManager.setup` 给出的对角线信息。 */
+  /** 加载一副地图：GLB → lightmap atlas → 空间分块合并 → 包围盒与 near/far → 可见性/PVS/
+   *  传送触发器/贴图 manifest/碰撞体，返回共享会话校准出的对角线与剔除距离
+   *  （`diagonal` / `defaultCull` / `maxCull`）。 */
   async loadScene(data: SceneDataMessage): Promise<{ diagonal: number; defaultCull: number; maxCull: number } | null> {
     if (!this.session) return null;
 

@@ -48,7 +48,9 @@ export interface PlayerConfig {
   eyeOffset: number;
 }
 
-/** 视距剔除（LOD）参数；实现在 `apps/debug/src/renderer/lod-manager.ts`。
+/** 视距剔除（LOD）参数。实现在共享层 `src/renderer-shared/scene/visibility-controller.ts`
+ *  （`RenderSession.setCullDistance`），debug 经 `renderer-main.ts` 的 `setCullDistance`
+ *  包装接线（D-123 起默认全加载，显式正值才按块表面距离剔除）。
  *
  * 2026-09-26 清理：原 `pvsEnabled`（PVS 开关）与本仓三条死段 `MovementConfig` /
  * `SmoothingConfig` / `TeleportConfig` 一并删除——它们**既无读取点、页面也无控件**，
@@ -57,9 +59,13 @@ export interface PlayerConfig {
  * 与 `TRIGGER_COOLDOWN`（0.5 s）；地面速度上限由 `PhysicsConfig.maxSpeed` 经
  * `set_params` 的 `run_speed` 决定。 */
 export interface LodConfig {
-  /** 重判定间隔（帧）：`LodManager.setup` 与 `LodManager.update` 都从它取；只在计数达到该值时执行一次距离判定。 */
+  /** 重判定间隔（帧）。原消费者 `LodManager.update` 已随 D-123 删除；当前全仓无读取点，
+   *  `sendConfig('lod')` 也不落在 Worker 的应用分支（worker-dispatch 只认 physics/input）。
+   *  留存待定去留。 */
   updateInterval: number;
-  /** 视距剔除距离（HU）：构造期默认值；`LodManager.setup` 返回校准值后由 `loadScene` 就地覆盖，面板滑块写的是覆盖后的值。 */
+  /** 视距剔除距离（HU）：构造期默认值；共享会话 `loadScene` 用校准结果就地覆盖
+   *  （`renderer-main.ts` 写回 `result.defaultCull`），面板滑块经 `setCullDistance` 写入
+   *  夹取后的值并同步进共享档 `culling.distance`。 */
   cullDistance: number;
 }
 

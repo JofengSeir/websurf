@@ -131,8 +131,8 @@ export class VisibilityController {
   /**
    * 为已收集的块补 cluster 集合：包围球中心 + 6 个 ±r 轴上点共 7 点采样，非负结果去重。
    *
-   * 与 `collect(root, pvs)` 分开是因为 PVS 载荷可能晚于块收集就绪（debug 侧是 `setup` 之后才
-   * `assignClusterIds`）；两处共用本方法 ⇒ 采样口径全仓只有一份。
+   * 与 `collect(root, pvs)` 分开是因为 PVS 载荷可能晚于块收集就绪（D-123 前 debug 的
+   * `LodManager` 就是这种时序）；两处共用本方法 ⇒ 采样口径全仓只有一份。
    *
    * @returns 采到至少一个 cluster 的块数。
    */

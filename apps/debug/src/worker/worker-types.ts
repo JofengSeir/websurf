@@ -154,7 +154,8 @@ export interface SetAutoRestoreHullMessage {
  *
  * Worker 侧无处理分支：`createWorkerDispatch` 不认这个 `type`，消息落到 `onExtraMessage`
  * → `PhysicsWorker.handleMessage` 也不认，返回 `false` 之后被丢弃。剔除由主线程
- * `apps/debug/src/renderer/lod-manager.ts` 的 `setCullDistance` 执行。
+ * `apps/debug/src/renderer/renderer-main.ts` 的 `setCullDistance`（夹取后交共享会话
+ * `RenderSession.setCullDistance`）执行。
  */
 export interface SetCullDistanceMessage {
   type: 'set-cull-distance';
