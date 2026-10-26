@@ -1,5 +1,5 @@
 /**
- * 三端渲染呈现档的**唯一来源**（T-454 P1；任务书 `.tmp/task-unify-render/TASK.md` §2/L6）。
+ * 三端渲染呈现档的**唯一来源**（T-454 P1）。
  *
  * 为什么有这一层：三端**各持一份**渲染档（2026-10-16 owner 裁决：三端参数绝不互相影响）。
  * 键按端作用域化 = `vbsp:renderPrefs:<viewer|debug|game>`；作用域由各端 `web/index.html` 注入的

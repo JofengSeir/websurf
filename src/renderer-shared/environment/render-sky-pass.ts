@@ -1,5 +1,5 @@
 /**
- * 两遍法（主世界 + 3D 天空层）与地图雾的**唯一实现**（T-454 P7；任务书 `.tmp/task-unify-render/TASK.md` §2/L6、§3 P7）。
+ * 两遍法（主世界 + 3D 天空层）与地图雾的**唯一实现**（T-454 P7）。
  *
  * 为什么有这一层：三端此前各写一遍同一段骨架（`apps/{debug,game}/src/renderer/renderer-main.ts` 的
  * `renderFrame`、`apps/viewer/src/core/scene.ts` 的 `render`），逐行同构、差异只在字段名与注释；

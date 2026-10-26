@@ -91,7 +91,7 @@ export function createSkyCamera(): THREE.PerspectiveCamera {
  * `VectorScale(origin, 1/scale)` 后 `VectorAdd(origin, sky3dparams.origin)`，与
  * `env_headcrabcanister_shared.cpp` 的 `vecSkyboxOrigin + pos/scale` 同式；朝向与投影抄主相机。
  *
- * 实测（`.tmp/mapsurvey/skyfrontface.mjs`，surf_boreas 的 163 个出生点）：本式让
+ * 实测（本地 mapsurvey 台架，脚本未入库已清；surf_boreas 的 163 个出生点）：本式让
  * **359.8/361** 个天空图元的正面朝向相机；换成绕相机缩放的相对式 `CAM + (P-CAM)/scale`
  * 只剩 235.6/361，且 163/163 个出生点都是本式更优。
  */
@@ -122,7 +122,7 @@ export function syncSkyCamera(sky: THREE.PerspectiveCamera, main: THREE.Perspect
  *
  * 调用方（`apps/debug` 的 `RendererMain.loadScene`）用的判据是「图元采样点落在 `sky_camera`
  * 所在 BSP cluster」——实测它与本模块上一版的「种子 + 包围盒簇扩张」选出**同一批** 361 个图元
- * （`.tmp/mapsurvey/skysel.mjs`：两条独立判据互证）。
+ * （两条独立判据互证，同为本地台架实测）。
  */
 export function extractSkyArea(mapRoot: THREE.Object3D, isSkyMesh: (mesh: THREE.Mesh) => boolean): THREE.Group | null {
 	mapRoot.updateMatrixWorld(true);

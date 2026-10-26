@@ -1,5 +1,5 @@
 /**
- * 三端唯一的渲染器构造点与预编译包装（T-454 P2；任务书 `.tmp/task-unify-render/TASK.md` §2/L6）。
+ * 三端唯一的渲染器构造点与预编译包装（T-454 P2）。
  *
  * 为什么有这一层：`new THREE.WebGLRenderer` 与随后的输出链参数此前在三端各写一遍
  * （`apps/debug/src/renderer/renderer-main.ts`、`apps/game/src/renderer/renderer-main.ts`、

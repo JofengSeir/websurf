@@ -77,7 +77,7 @@ fn two_level_world() -> World {
 /// `test/project/source-sdk-2013-master/src/game/shared/gamemovement.cpp:1515`）在直接移动被挡后
 /// **总是**尝试"抬 `stepsize + DIST_EPSILON` → 滑 → 落回"，落点可站就采用 —— 它**不要求头顶
 /// 有东西**；参考实现同夹具实测：12 HU 台阶被走上，单 tick 净抬 **+12.00 HU**、水平速度保持
-/// 260（`.tmp/ledge-ref.mjs`）。
+/// 260（早期 ledge 参考台架实测，脚本未入库）。
 ///
 /// 本测试同时封住"每 tick 无条件抬 18 HU"那个真缺陷的另一面：**平地上 400 tick 不得有任何
 /// 净上升**（抬升与落回必须抵消），否则说明抬升不再受落点判据约束。

@@ -1,5 +1,5 @@
 /**
- * 三端唯一的**场景相机装配**与**近平面收缩口径**（T-454 P3b；任务书 `.tmp/task-unify-render/TASK.md` §2/L6）。
+ * 三端唯一的**场景相机装配**与**近平面收缩口径**（T-454 P3b）。
  *
  * 为什么有这一层：`near` / `far` / `fov` 此前三端各写一遍（debug `renderer-main.ts`、game 同文件、viewer
  * `core/scene.ts` 的 `fitCamera`），三处口径已有实测分叉——viewer 的 `far` 多一档 `CAMERA_INIT_FAR`

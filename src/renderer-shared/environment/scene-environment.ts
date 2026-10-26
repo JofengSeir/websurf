@@ -1,5 +1,5 @@
 /**
- * 场景环境的**唯一登记入口**（T-460 WP1；任务书 `.tmp/task-render-parity/TASK.md` §3 WP1）。
+ * 场景环境的**唯一登记入口**（T-460 WP1）。
  *
  * 为什么有这一层：环境登记此前分散在三端——debug 走 `LightManager.setSkybox/setFog`、game 直接写
  * `scene.background` 再手调 `setReflectionEnvMap`、viewer 只写 `scene.background`（**零反射源**）。
