@@ -141,15 +141,6 @@ export interface LightingConfig {
    *  与 world lightmap 的曝光 / γ 相互独立。读点：`renderer-main.ts` 初始化装配、
    *  `lightmap-shader.ts` 的 `setAmbientScale`（接受有限非负数）、面板控件（量程 0..3）。 */
   ambientScale: number;
-  /** 第 1 级逐顶点预烘焙光照的**重建平滑次数**（只作用于几何侧重建，不改烘焙值）。
-   *  0 = 原样使用；1 = 接缝焊接 + 1 次 Laplacian 松弛；2~3 = 更平滑。
-   *  读点：`renderer-main.ts` 初始化装配 → `lightmap-shader.ts` 的 `setPropVertexRelax`
-   *  （取整后使用，负数忽略）。面板无控件。 */
-  propVertexRelax: number;
-  /** 第 1 级逐顶点光照的**方差压缩**（0..1）：`v ← mean + (1-flatten)·(v-mean)`，均值不变。
-   *  0 = 保留烘焙值的原始分布；1 = 该 prop 均匀受光。读点同 `propVertexRelax`
-   *  （`setPropVertexFlatten`，取值被钳到上限 1）。面板无控件。 */
-  propVertexFlatten: number;
   /** 光照模式（面板「预烘焙 / 纯纹理」）：
    *  - `baked`：世界面吃 lightmap atlas，prop 吃逐顶点烘焙 / leaf ambient cube；
    *  - `texture`：只上漫反射贴图原色（`MeshBasicMaterial`），不解码 atlas。
@@ -220,15 +211,11 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   lighting: {
     // 默认取 **SDK 呈现口径**：引擎 `(albedo_lin × light_lin) × OverBright2` 之后只做一次屏幕 gamma
     // （`MathLib_Init(gamma 2.2, overbright 2.0)`）；three 输出端已做那次 sRGB 编码 ⇒ 光照项保持线性（lightGamma 1）。
-    // `LIGHTMAP_EXPOSURE_DEFAULT` 1、gamma 1、`ambientScaleUniform` 1、`propVertexRelaxPasses` 1、
-    // `propVertexFlattenAmount` 0、`lightingMode` 'baked'。地图自带的整体亮度即烘焙结果（world lightmap
+    // `LIGHTMAP_EXPOSURE_DEFAULT` 1、gamma 1、`ambientScaleUniform` 1、`lightingMode` 'baked'。
+    // 地图自带的整体亮度即烘焙结果（world lightmap
     exposure: LIGHTING_PRESENTATION_DEFAULTS.exposure,
     lightGamma: LIGHTING_PRESENTATION_DEFAULTS.lightGamma,
     ambientScale: 1,
-    // 1 = 接缝焊接 + 1 次 Laplacian 松弛；0 = 原样使用烘焙值
-    propVertexRelax: 1,
-    // 0 = 原样使用烘焙值；0.85 = 压掉大部分方差（项目自调档，需要时再开）
-    propVertexFlatten: 0,
     // 预烘焙；纯纹理由面板切换
     mode: 'baked',
   },

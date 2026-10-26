@@ -834,7 +834,7 @@ export class PanelController {
     display: [
       { section: 'hud', keys: ['showCrosshair', 'speedMode', 'fov', 'renderDistance', 'crosshair'] },
       { section: 'texture', keys: ['quality'] },
-      { section: 'lighting', keys: ['exposure', 'lightGamma', 'ambientScale', 'propVertexRelax', 'propVertexFlatten', 'mode'] },
+      { section: 'lighting', keys: ['exposure', 'lightGamma', 'ambientScale', 'mode'] },
     ],
     view: [{ section: 'physics', keys: ['mode'] }, { section: 'input', keys: ['noclipSpeed'] }],
   };
