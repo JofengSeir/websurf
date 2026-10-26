@@ -1,6 +1,6 @@
 # TODO — 未结工作（可选清单）
 
-> 2026-10-18 从旧 `progress/board.jsonl` 拆出。原看板、台账、claim、close-round 已删除；历史全文在 git tag `checkpoint/pre-amh-reset-20261018`。
+> 2026-10-18 从旧 `progress/board.jsonl` 拆出。原看板、台账、claim、close-round 已删除；历史全文在 git 历史（该 tag 已于 2026-10-27 按 owner 要求删除，提交 `fec9810` 仍在 main 祖先链上）。
 > 这里不是门禁：直接增删行，不需要同步到任何地方。旧 ID 只作历史标签保留。
 > 已结条目压缩成文末一行索引；验收全文在 git 历史（本文件旧版本 / 对应 commit）。
 

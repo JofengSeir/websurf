@@ -2,7 +2,7 @@
 
 > 本文件是 agent 进入仓库的**入口文档**，规则以本文为准。
 >
-> - **2026-10-18 起没有强制 agent 工作流**：无看板、无 claim / close-round、无记忆库同步门禁、无 docflow。**唯一的机械钩子是 D-124 的 pre-commit 检查**（生成物路径 / `.cmd/.bat/.ps1` 的 CRLF+ASCII，见 §7-0）。旧流程的完整文件与台账在 git tag `checkpoint/pre-amh-reset-20261018`。
+> - **2026-10-18 起没有强制 agent 工作流**：无看板、无 claim / close-round、无记忆库同步门禁、无 docflow。**唯一的机械钩子是 D-124 的 pre-commit 检查**（生成物路径 / `.cmd/.bat/.ps1` 的 CRLF+ASCII，见 §7-0）。旧流程的完整文件与台账在 git 历史里（原 tag `checkpoint/pre-amh-reset-20261018` 已按 owner 要求于 2026-10-27 删除，其提交 `fec9810` 仍在 main 祖先链上，`git show fec9810` 可看）。
 > - 仍然成立的是工程事实：**构建与测试要过，结论要有证据，提交信息要能独立读懂。**
 
 ## 0. 开工速览

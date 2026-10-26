@@ -1,7 +1,7 @@
 # OWNER.md — 需要 owner 拍板的决定
 
 > 这不是门禁。只有「不可逆 / 改范围 / 改语义」的决定才登记；agent 能按现有约定做的就直接做。
-> 编号 `D-###` 只增不改；历史全文在 git 历史（tag `checkpoint/pre-amh-reset-20261018`）。
+> 编号 `D-###` 只增不改；历史全文在 git 历史（原 tag `checkpoint/pre-amh-reset-20261018` 已于 2026-10-27 按 owner 要求删除，提交 `fec9810` 仍在 main 祖先链上）。
 
 ## 待决
 
