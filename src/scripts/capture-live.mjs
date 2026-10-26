@@ -4,6 +4,7 @@
  * 铁律（docs/T-650-water-v3-task.md §0/§6）：观感材料禁止 pin/freeze；本脚本永不注入
  * 时间 pin。`--init` 只用于 R0 这类「改变渲染态」的开关（如 `__vbspWaterDudvOff=true`）。
  * Edge 由调用方以**硬件 GPU** 启动（不加 swiftshader 参数）。
+ * T-650 已结案（2026-10-27）；本工具不在任何构建/CI 链上，保留作水体 A/B 台架——无自动引用是有意为之。
  *
  * 用法（仓库根）：
  *   node src/scripts/capture-live.mjs --cdp http://127.0.0.1:9224 \

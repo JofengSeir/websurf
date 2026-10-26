@@ -19,4 +19,5 @@ npm run build          # build:wasm + typecheck + esbuild 打包
 ```
 
 - 涉及物理、时序或渲染回归的改动，须跑对应门禁（见 `.github/workflows/ci-gates.yml`）并附实测输出。
+- 提交前读 [AGENTS.md](AGENTS.md)：分支与提交规则（§0/§7）、pre-commit 机械检查（D-124，`npm run hooks:install` 启用）、代码/脚本改动的 `AMH:` 尾注三选一（§3.3，D-125）。
 - 提交 PR：说明改动与验证方式，并按 `.github/PULL_REQUEST_TEMPLATE.md` 勾选测试项。
