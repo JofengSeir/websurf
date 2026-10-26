@@ -583,16 +583,10 @@ export function applyLightmapToMeshes(
 			// 第 1 级：逐顶点预烘焙（数据在几何上 ⇒ 材质全场景共享）。
 			// 必须**显式赋值**给 mesh：`acquire*` 只建/取缓存实例，不做赋值
 			// （只有 `applyFullbrightBasic` 内部赋值）。漏赋值 ⇒ 该 mesh 仍持旧材质。
-			reconstructVertexLighting(mesh);
-			// **不叠 leaf ambient cube**：`vradstaticprops.cpp:1427` 里
-			// `m_Color = VectorAdd(directColor, indirectColor, ...)`，`.vhv` 的逐顶点值
-			// **本身已含间接光**；再叠一遍 leaf ambient cube 等于把间接光算两次。
-			// 实测（surf_boreas，洞穴内坡体逐个统计）：vlight 均值 0.06~0.15（屏幕值，
-			// 着色器 `pow(v,2.2)` 后只剩 0.002~0.013），而 cube 均值 0.012~0.21（线性、不开幂）
-			// ⇒ **cube 比烘焙值大 10~20 倍**，且 cube 逐 leaf 近常量 ⇒ 洞内坡体渲染成均匀亮板。
-			// 这也是导出侧的既定意图：`model_integrator` 写 node extras 时注释
-			// 「第 1 级已接线 ⇒ 渲染端优先用它，**不再叠 cube**」。
-			bakeVertexCubeAttribute(mesh, undefined);
+			// **不做任何几何侧重写**（T-732 2026-10-27）：直接吃 GLB 的 `_VBSP_VLIGHT`。
+			// 之前的接缝焊接 / 空间鲁棒滤波 / 拉普拉斯 / 方差压缩会在低模上伪造硬边色带
+			// （`s1_ramp1b` 每行只有 2~6 个顶点 ⇒ 相邻行被中位数互相拉平），已整段删除。
+			// **不叠 leaf ambient cube**：`.vhv` 的逐顶点值本身就含间接光（vrad 的 direct+indirect）。
 			mesh.material = acquireVertexLightingMaterial(mesh);
 			vertexLightingRouted++;
 			fullbright++;
@@ -620,217 +614,6 @@ export function applyLightmapToMeshes(
 		return !!g && !!g.getAttribute && !!g.getAttribute(VERTEX_LIGHTING_ATTR);
 	};
 
-	/** 已做过重建的几何（同一 geometry 只重建一次）。 */
-	const reconstructedGeoms = new WeakSet<THREE.BufferGeometry>();
-	/** 已做过方差压缩的**属性**（多 primitive 共享同一份缓冲 ⇒ 按属性去重而非按 geometry）。 */
-	const flattenedAttrs = new WeakSet<THREE.BufferAttribute>();
-	/** 重建统计（模块级，供 `getVertexLightingRelaxStats()` 读出）。 */
-	const relaxStats = vertexLightingRelaxStats;
-	/** 每次装配重置统计（同一页面可多次加载地图）。 */
-	vertexLightingRelaxStats.meshes = 0;
-	vertexLightingRelaxStats.welded = 0;
-	vertexLightingRelaxStats.relaxed = 0;
-	vertexLightingRelaxStats.medianFixed = 0;
-	vertexLightingRelaxStats.flattened = 0;
-	vertexLightingRelaxStats.flattenSkipped = 0;
-	vertexLightingRelaxStats.meanAbsDelta = 0;
-	vertexLightingRelaxStats.maxAbsDelta = 0;
-	vertexLightingRelaxStats.samples = 0;
-
-	/**
-	 * 第 1 级逐顶点光照的**几何侧重建设置**：接缝焊接 + Laplacian 松弛。
-	 *
-	 * 适用面：烘焙值只落在**网格顶点**上，大三角形内部由 Gouraud 插值给出大段线性渐变，
-	 * 三角形之间只有 C0 连续 ⇒ 逐顶点场的分布与真实光照不一致时，观感是"一块一块的色阶"。
-	 *
-	 * 三步（都不改 pakfile 数据，只改渲染用的几何属性；`propVertexRelax = 0` 时整体跳过）：
-	 * 1. **接缝焊接**：位置相同且法线相同的顶点是同一个着色点（UV 接缝复制），
-	 *    按点烘焙本应给同一个值 ⇒ 取均值。
-	 * 2. **空间鲁棒滤波**（`propVertexRelax ≥ 1`，默认开）：与"同法线的 2 环空间邻域"的
-	 *    中位数相差超过 `MEDIAN_THRESHOLD` 的顶点，判为与邻域不一致并拉回中位数；
-	 *    未判不一致的顶点一个都不动。邻域要求法线同向（`dot > 0.9`）。
-	 * 3. **Laplacian 松弛**（`propVertexRelax ≥ 3`）：更"平"，但会整体偏离烘焙值，
-	 *    属口味档（次数由 `propVertexRelaxPasses` 决定）。
-	 */
-	const reconstructVertexLighting = (mesh: THREE.Mesh): void => {
-		const passes = Math.max(0, Math.floor(readPropVertexRelax()));
-		if (passes <= 0) return;
-		const g = mesh.geometry as THREE.BufferGeometry | undefined;
-		if (!g || reconstructedGeoms.has(g)) return;
-		const attr = g.getAttribute(VERTEX_LIGHTING_ATTR) as THREE.BufferAttribute | undefined;
-		const pos = g.getAttribute('position') as THREE.BufferAttribute | undefined;
-		if (!attr || !pos || !attr.array) return;
-		reconstructedGeoms.add(g);
-		relaxStats.meshes++;
-		const arr = attr.array as Float32Array;
-		const n = Math.min(attr.count, pos.count);
-		const before = arr.slice(0, n * 3);
-		const lu = (i: number): number =>
-			0.299 * arr[i * 3] + 0.587 * arr[i * 3 + 1] + 0.114 * arr[i * 3 + 2];
-
-		// ① 接缝焊接：位置 + 法线都相同 ⇒ 同一着色点
-		const nrm = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
-		if (nrm) {
-			const buckets = new Map<string, number[]>();
-			for (let i = 0; i < n; i++) {
-				const key =
-					`${pos.getX(i).toFixed(2)},${pos.getY(i).toFixed(2)},${pos.getZ(i).toFixed(2)}` +
-					`|${nrm.getX(i).toFixed(2)},${nrm.getY(i).toFixed(2)},${nrm.getZ(i).toFixed(2)}`;
-				const b = buckets.get(key);
-				if (b) b.push(i);
-				else buckets.set(key, [i]);
-			}
-			for (const ids of buckets.values()) {
-				if (ids.length < 2) continue;
-				relaxStats.welded++;
-				for (let c = 0; c < 3; c++) {
-					let s = 0;
-					for (const i of ids) s += arr[i * 3 + c];
-					s /= ids.length;
-					for (const i of ids) arr[i * 3 + c] = s;
-				}
-			}
-		}
-
-		// ② 空间鲁棒滤波：把**与空间邻域不一致**的顶点拉回邻域中位数。
-		// 判据：同法线（`dot > 0.9`）的 2 环邻域中位数与当前顶点的 Luma 相差超过
-		// `MEDIAN_THRESHOLD` ⇒ 该顶点不可信，拉回中位数（未超阈值的顶点不动）。
-		// 邻域用**索引图 2 环**（O(E)，不做事先的空间哈希），
-		// 且只有当偏差超过阈值才替换 ⇒ 真实的明暗梯度不会被抹平。
-		const index = g.getIndex();
-		const ring: number[][] = Array.from({ length: n }, () => []);
-		const link = (a: number, b: number): void => {
-			if (a === b || a < 0 || b < 0 || a >= n || b >= n) return;
-			ring[a].push(b);
-			ring[b].push(a);
-		};
-		if (index) {
-			for (let t = 0; t + 2 < index.count; t += 3) {
-				const a = index.getX(t), b = index.getX(t + 1), c = index.getX(t + 2);
-				link(a, b); link(b, c); link(c, a);
-			}
-		} else {
-			for (let t = 0; t + 2 < n; t += 3) {
-				link(t, t + 1); link(t + 1, t + 2); link(t + 2, t);
-			}
-		}
-		// 2 环邻域（去重）
-		const twoRing: number[][] = ring.map((r) => {
-			const s = new Set<number>(r);
-			for (const j of r) for (const k of ring[j]) s.add(k);
-			s.delete(-1);
-			return [...s];
-		});
-		const MEDIAN_THRESHOLD = 0.1; // 亮度单位（0~2 量纲），超过才认为该顶点不可信
-		const medianOf = (ids: number[], c: number): number => {
-			const s: number[] = [];
-			for (const j of ids) {
-				if (nrm && dotNormal(i0, j) < 0.9) continue;
-				s.push(arr[j * 3 + c]);
-			}
-			if (!s.length) return NaN;
-			s.sort((x, y) => x - y);
-			return s[s.length >> 1];
-		};
-		function dotNormal(a: number, b: number): number {
-			if (!nrm) return 1;
-			return nrm.getX(a) * nrm.getX(b) + nrm.getY(a) * nrm.getY(b) + nrm.getZ(a) * nrm.getZ(b);
-		}
-		let i0 = 0;
-		let fixed = 0;
-		const snapshot = arr.slice(0, n * 3);
-		for (i0 = 0; i0 < n; i0++) {
-			const ids = twoRing[i0];
-			if (!ids.length) continue;
-			const cur = 0.299 * snapshot[i0 * 3] + 0.587 * snapshot[i0 * 3 + 1] + 0.114 * snapshot[i0 * 3 + 2];
-			const med = [0, 1, 2].map((c) => medianOf(ids, c));
-			if (med.some((v) => Number.isNaN(v))) continue;
-			const medLuma = 0.299 * med[0] + 0.587 * med[1] + 0.114 * med[2];
-			if (Math.abs(cur - medLuma) <= MEDIAN_THRESHOLD) continue;
-			for (let c = 0; c < 3; c++) arr[i0 * 3 + c] = med[c];
-			fixed++;
-		}
-		relaxStats.medianFixed += fixed;
-
-		// ③ propVertexRelax ≥ 3 时再叠加 Laplacian 松弛（更"平"，但会偏离烘焙值）
-		if (passes >= 3) {			const W = 0.5;
-			const next = new Float32Array(arr.length);
-			for (let pass = 0; pass < passes - 2; pass++) {
-				next.set(arr.subarray(0, n * 3));
-				for (let i = 0; i < n; i++) {
-					const nb = ring[i];
-					if (!nb.length) continue;
-					for (let c = 0; c < 3; c++) {
-						let s = 0;
-						for (const j of nb) s += arr[j * 3 + c];
-						next[i * 3 + c] = (1 - W) * arr[i * 3 + c] + W * (s / nb.length);
-					}
-				}
-				arr.set(next.subarray(0, n * 3));
-				relaxStats.relaxed++;
-			}
-		}
-
-		attr.needsUpdate = true;
-		relaxStats.samples += n;
-		for (let i = 0; i < n; i++) {
-			const d = Math.abs(lu(i) - (0.299 * before[i * 3] + 0.587 * before[i * 3 + 1] + 0.114 * before[i * 3 + 2]));
-			relaxStats.meanAbsDelta += d;
-			if (d > relaxStats.maxAbsDelta) relaxStats.maxAbsDelta = d;
-		}
-		// 与原始烘焙值的平均偏移（诊断；同时是"这份重建偏离数据多少"的可核对数字）
-		relaxStats.meanAbsDelta /= n;
-
-		// ④ 向**本 prop 的面积加权均值**收敛（`propVertexFlatten`，0..1）。
-		//
-		// 本步把场写成 `mean + (1-flatten)×(v-mean)`：均值严格不变，只有方差被压。
-		// flatten=1 等价于"该 prop 均匀受光"。逐顶点场"量级对、分布错"时，
-		// 观感是"一块一块的色阶"，本步正是压这个分布。
-		const flattenRaw = readPropVertexFlatten();
-		const flatten = Number.isFinite(flattenRaw) ? Math.min(1, Math.max(0, flattenRaw)) : 0;
-		if (flatten > 0 && !flattenedAttrs.has(attr)) {
-			// ⚠️ **按 prop 自适应**：全局压方差会把面内本来就一致的正常 prop 一起改掉。
-			// 判据用**面内**亮度差（Luma 的 max-min，取全体三角形的**中位数**）：
-			//   · 面内不一致（条纹型，该压）⇒ medianTri ≥ `PROP_FLATTEN_MIN_TRI_DELTA`（0.10）⇒ 压平
-			//   · 面间差异大但面内一致（正常）⇒ medianTri 低于阈值 ⇒ `flattenSkipped++`，保留原样
-			// ⚠️ 判别必须在**原始烘焙值**（`before` 快照）上做：本函数第②步的鲁棒滤波会把离群顶点
-			// 拉回邻域中位数，若在它之后判别，条纹型 prop 会被误判为"面内一致"而全部跳过压平。
-			let medianTri = 0;
-			if (index) {
-				const triDelta: number[] = [];
-				for (let t = 0; t + 2 < index.count; t += 3) {
-					const a = index.getX(t), b = index.getX(t + 1), c = index.getX(t + 2);
-					if (a >= n || b >= n || c >= n) continue;
-					const la = 0.299 * before[a * 3] + 0.587 * before[a * 3 + 1] + 0.114 * before[a * 3 + 2];
-					const lb = 0.299 * before[b * 3] + 0.587 * before[b * 3 + 1] + 0.114 * before[b * 3 + 2];
-					const lc = 0.299 * before[c * 3] + 0.587 * before[c * 3 + 1] + 0.114 * before[c * 3 + 2];
-					triDelta.push(Math.max(la, lb, lc) - Math.min(la, lb, lc));
-				}
-				if (triDelta.length) {
-					triDelta.sort((x, y) => x - y);
-					medianTri = triDelta[triDelta.length >> 1];
-				}
-			}
-			if (medianTri < PROP_FLATTEN_MIN_TRI_DELTA) {
-				relaxStats.flattenSkipped++; // 面内本来就一致 ⇒ 保留原样烘焙值
-			} else {
-				// 按**属性**去重（`flattenedAttrs`）：glTF 多 primitive 共享同一份顶点缓冲
-				// （三个材质三条索引），若按 geometry 去重会跑 3 次、每次用自己的索引范围均值
-				// ⇒ **最后写入者获胜**。
-				// 取均值也必须用**整份缓冲**（= 该 prop 实例的整个模型），才是"该道具一个值"。
-				flattenedAttrs.add(attr);
-				const sum = [0, 0, 0];
-				for (let i = 0; i < n; i++) for (let ch = 0; ch < 3; ch++) sum[ch] += arr[i * 3 + ch];
-				const mean = sum.map((s) => s / n);
-				for (let i = 0; i < n; i++) {
-					for (let ch = 0; ch < 3; ch++) {
-						arr[i * 3 + ch] = mean[ch] + (1 - flatten) * (arr[i * 3 + ch] - mean[ch]);
-					}
-				}
-				relaxStats.flattened++;
-			}
-		}
-	};
 
 	/**
 	 * 第 1 级（逐顶点烘焙）材质的**共享**缓存：属性在几何上 ⇒ 所有这类 mesh 共用同一个材质，
@@ -1413,25 +1196,25 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 		//  `'attribute' : Illegal use of reserved word` ⇒ program 无效 ⇒ 模型不渲染）。
 		// 属性声明只在下面的 vertex 侧 `vsA` 里出现。
 		const fn = [
-			'varying vec3 vbspVLight;\nvarying vec3 vbspVCube;',
+			'varying vec3 vbspVLight;',
 			'vec3 vbspVertexLightTerm() {',
 			// 纯纹理模式：逐顶点烘焙项恒 1.0（= 贴图原色），与 world 路径同一开关语义
 			'	if (vbspBakedMix < 0.5) { return vec3(1.0); }',
 			'	float g = max(vbspLightGamma, 0.001);',
-			// vbspVhvGain 只乘 vhv 项（cube 项量级走数据侧 PROP_CUBE_GAIN / ambientScale，两套口径不能混）
-			'	return (pow(max(vbspVLight, vec3(vbspLightFloor)), vec3(2.2 / g)) * vbspVhvGain + pow(max(vbspVCube, vec3(vbspLightFloor)), vec3(1.0 / g)) * vbspAmbientScale) * vbspExposure;',
+			// 第 1 级只有 vhv 一项（cube 项已随重建层一起删除；不叠 cube 是为了不把间接光算两次）
+			'	return pow(max(vbspVLight, vec3(vbspLightFloor)), vec3(2.2 / g)) * vbspVhvGain * vbspExposure;',
 			'}',
 		].join('\n');
 		const vs = shader.vertexShader;
 		const vsA = vs.replace(
 			'#include <common>',
-			'attribute vec3 ' + VERTEX_LIGHTING_ATTR + ';\nattribute vec3 ' + VERTEX_CUBE_ATTR + ';\nvarying vec3 vbspVLight;\nvarying vec3 vbspVCube;\n#include <common>',
+			'attribute vec3 ' + VERTEX_LIGHTING_ATTR + ';\nvarying vec3 vbspVLight;\n#include <common>',
 		);
 		const vsB =
 			vsA !== vs
 				? vsA.replace(
 						'#include <begin_vertex>',
-						'#include <begin_vertex>\n\tvbspVLight = ' + VERTEX_LIGHTING_ATTR + ';\n\tvbspVCube = ' + VERTEX_CUBE_ATTR + ';',
+						'#include <begin_vertex>\n\tvbspVLight = ' + VERTEX_LIGHTING_ATTR + ';',
 					)
 				: vsA;
 		const vsChanged = vsB !== vs;
@@ -1621,13 +1404,8 @@ export const LIGHTING_PRESENTATION_DEFAULTS = {
 	exposure: 2.0,
 	lightGamma: 1.0,
 	ambientScale: 1,
-	// T-732（2026-10-27）：`propVertexRelax = 0` = 直接用烘焙值，不做任何几何侧重写。
-	// 默认 1 时会在**低模**上伪造色带：接缝焊接之后的空间鲁棒滤波把「与 2 环邻域中位数相差 >0.1」
-	// 的顶点整条拉回中位数，而 `s1_ramp1b` 每行只有 2~6 个顶点 ⇒ 相邻行互相被拉平，
-	// 同一张连续曲面上出现硬边人字带（owner 报的「黑带」）。关掉后与引擎口径一致：
-	// 屏 = 贴图 sRGB × vlight（v = 2×byte/255），烘焙明暗原样保留。
-	propVertexRelax: 0,
-	propVertexFlatten: 0,
+	// 逐顶点光照**不做任何几何侧重写**（T-732 2026-10-27 删除）：直接吃 GLB 的 _VBSP_VLIGHT，
+	// 屏 = 贴图 sRGB × vlight（v = 2×byte/255），与引擎口径一致。
 } as const;
 const LIGHTMAP_EXPOSURE_DEFAULT = LIGHTING_PRESENTATION_DEFAULTS.exposure;
 
@@ -1731,15 +1509,6 @@ const vhvGainUniform = { value: readVhvGainOverride() ?? 1 };
 const PROP_CUBE_GAIN = 2.44;
 
 /**
- * 触发「方差压缩」的最小**面内**亮度差（中位数，lightitem 量纲 0..2）。
- *
- * 判据：`medianTri` 低于它时记为 `flattenSkipped` 并保留原样烘焙值，否则压平。
- * `medianTri` 取每个三角形三个顶点 Luma 的 max-min、再对全体三角形取中位数，
- * 故"面间差异大但面内一致"的正常 prop 落在阈值以下、不被改动。
- */
-const PROP_FLATTEN_MIN_TRI_DELTA = 0.1;
-
-/**
  * 运行期覆盖 prop 量级补偿：`window.__vbspPropCubeGain = 4`（需在**加载前**注入，
  * 因为补偿烘在 cube 上、材质编译时读取）。用于免重建的 A/B。
  */
@@ -1754,93 +1523,12 @@ function effectivePropCubeGain(): number {
 	return readPropCubeGainOverride() ?? PROP_CUBE_GAIN;
 }
 
-/** 第 1 级逐顶点光照**重建**的诊断统计（跨函数读取）。 */
-const vertexLightingRelaxStats = {
-	/** 参与重建的 mesh 数。 */
-	meshes: 0,
-	/** 接缝焊接的顶点组数。 */
-	welded: 0,
-	/** 累计执行的松弛次数（每次 = 一遍全顶点）。 */
-	relaxed: 0,
-	/** 被空间鲁棒滤波判定为"与邻域不一致"并拉回中位数的顶点数。 */
-	medianFixed: 0,
-	/** 做了方差压缩（向 prop 均值收敛）的 mesh 数。 */
-	flattened: 0,
-	/** 因「面内本来就一致」而**跳过**方差压缩的 mesh 数（保留原样烘焙值）。 */
-	flattenSkipped: 0,
-	/** 逐 mesh 平均的 |Δluma|（重建后 vs 原始烘焙值）。 */
-	meanAbsDelta: 0,
-	/** 单顶点最大 |Δluma|。 */
-	maxAbsDelta: 0,
-	/** 参与统计的顶点数。 */
-	samples: 0,
-};
-
-/**
- * 第 1 级重建统计（`[vertex-lighting]` 日志用）。
- * 注意 `meanAbsDelta` 是**逐 mesh 平均后再平均**，用于判断"这份重建偏离烘焙数据多少"。
- */
-export function getVertexLightingRelaxStats(): Readonly<typeof vertexLightingRelaxStats> {
-	return vertexLightingRelaxStats;
-}
-
-/**
- * 第 1 级逐顶点光照的**重建平滑次数**（0 = 原样使用烘焙值）。
- * 由 `renderer-main` 从 `config.lighting.propVertexRelax` 注入；也可免重建 A/B：
- * 加载前设 `window.__vbspPropVertexRelax = 0|1|2`。
- */
-let propVertexRelaxPasses: number = LIGHTING_PRESENTATION_DEFAULTS.propVertexRelax;
-
-/** 设置重建平滑次数（≥0；0 = 关闭，最忠于烘焙数据）。 */
-export function setPropVertexRelax(passes: number): void {
-	if (Number.isFinite(passes) && passes >= 0) propVertexRelaxPasses = Math.floor(passes);
-}
-
-/** 读取当前重建平滑次数。 */
-export function getPropVertexRelax(): number {
-	return propVertexRelaxPasses;
-}
-
-/**
- * 第 1 级逐顶点光照的**方差压缩**（0..1）：`v ← mean + (1-flatten)·(v-mean)`，
- * 均值严格不变、只压方差。1 = 该 prop 均匀受光（逐顶点梯度被完全抹平），
- * 0 = 保留烘焙值的原始分布。
- * 由 `renderer-main` 从 `config.lighting.propVertexFlatten` 注入；
- * 免重建 A/B：加载前设 `window.__vbspPropVertexFlatten = 0|0.85|1`。
- */
-let propVertexFlattenAmount: number = LIGHTING_PRESENTATION_DEFAULTS.propVertexFlatten;
-
-/** 设置方差压缩量（0 = 不压；1 = 完全压平到 prop 均值）。 */
 /** 应用共享层默认档（三端 init 的唯一调用点；不要在 apps/ 里逐项写死）。 */
 export function applyLightingPresentationDefaults(): void {
 	const d = LIGHTING_PRESENTATION_DEFAULTS;
 	setExposure(d.exposure);
 	setLightGamma(d.lightGamma);
 	setAmbientScale(d.ambientScale);
-	setPropVertexRelax(d.propVertexRelax);
-	setPropVertexFlatten(d.propVertexFlatten);
-}
-export function setPropVertexFlatten(v: number): void {
-	if (Number.isFinite(v) && v >= 0) propVertexFlattenAmount = Math.min(1, v);
-}
-
-/** 读取当前方差压缩量。 */
-export function getPropVertexFlatten(): number {
-	return propVertexFlattenAmount;
-}
-
-/** 全局覆盖（`window.__vbspPropVertexFlatten`）优先于配置——免重建 A/B。 */
-function readPropVertexFlatten(): number {
-	const g = globalThis as { __vbspPropVertexFlatten?: unknown };
-	const v = g.__vbspPropVertexFlatten;
-	return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(1, v) : propVertexFlattenAmount;
-}
-
-/** 全局覆盖（`window.__vbspPropVertexRelax`）优先于配置——用于免重建 A/B。 */
-function readPropVertexRelax(): number {
-	const g = globalThis as { __vbspPropVertexRelax?: unknown };
-	const v = g.__vbspPropVertexRelax;
-	return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : propVertexRelaxPasses;
 }
 
 /**
@@ -1949,48 +1637,6 @@ export function setAmbientScale(value: number): void {
 	if (!Number.isFinite(value) || value < 0) return;
 	if (readAmbientScaleOverride() !== null) return;
 	ambientScaleUniform.value = value;
-}
-
-
-/**
- * 与 `_VBSP_VLIGHT` **相加**的 leaf ambient cube 顶点项（D-016 的引擎 2013 口径
- * `m_Color = direct + indirect`）。
- *
- * 为什么烘成几何属性而不是逐 prop uniform：第 1 级的前提是「数据在几何上 ⇒ 材质全场景共享」，
- * 逐 prop uniform 会让每个 prop 各占一个材质实例，丢掉 `optimizeScene` 的按材质合并。
- *
- * 值 = `Σ_i c_i · n_i²`（与片元侧 `vbspAmbientRaw()` 同式、同下标约定），`c_i` 已乘
- * `effectivePropCubeGain()`（与第 2 级同口径）⇒ 片元侧仍按 `pow(v, 1/γ) × 曝光 × ambientScale` 解码。
- * 几何缺该属性时 GLSL 的 attribute 读 (0,0,0) ⇒ 相加项为 0，行为与改动前一致。
- */
-const VERTEX_CUBE_ATTR = '_vbsp_vcube';
-
-/** 见 `VERTEX_CUBE_ATTR` 的文档。cube 不可用（缺 18 分量 / 无几何 / 无 normal）时不写属性。
- *  **两套轴**：cube 下标是 Source 轴序（`[+X,-X,+Y,-Y,+Z,-Z]`，见 `LeafAmbientSample::cube`），
- *  而几何法线是渲染轴（渲染 z ← Source X）⇒ 下面对 `n.z` 用 `0/1` 不是笔误；
- *  与片元 `vbspAmbientRaw()` 同式，改一处必须改另一处。
- *
- * 片元里的光照项是 `(direct + indirect) × vbspExposure`——`exposure` 只套在**求和之后**
- * （两条路径各自乘一次会重复曝光，D-016 之前的两条乘法路径正是各自乘的）。 */
-function bakeVertexCubeAttribute(mesh: THREE.Mesh, rawCube: unknown): void {
-	const g = mesh.geometry as THREE.BufferGeometry | undefined;
-	if (!g || !Array.isArray(rawCube) || rawCube.length !== 18) return;
-	const nrm = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
-	if (!nrm) return;
-	const gain = effectivePropCubeGain();
-	const c = rawCube.map((v) => (typeof v === 'number' ? v * gain : 0));
-	const out = new Float32Array(nrm.count * 3);
-	for (let i = 0; i < nrm.count; i++) {
-		const nx = nrm.getX(i), ny = nrm.getY(i), nz = nrm.getZ(i);
-		const sx = nx * nx, sy = ny * ny, sz = nz * nz;
-		for (let k = 0; k < 3; k++) {
-			out[i * 3 + k] =
-				c[(nz < 0 ? 1 : 0) * 3 + k] * sz +
-				c[(nx < 0 ? 3 : 2) * 3 + k] * sx +
-				c[(ny < 0 ? 5 : 4) * 3 + k] * sy;
-		}
-	}
-	g.setAttribute(VERTEX_CUBE_ATTR, new THREE.BufferAttribute(out, 3));
 }
 
 // ---------------------------------------------------------------------------

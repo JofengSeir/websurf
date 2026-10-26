@@ -58,8 +58,6 @@ export interface RenderProbeSnapshot {
     exposure: number;
     lightGamma: number;
     ambientScale: number;
-    propVertexRelax: number;
-    propVertexFlatten: number;
     mode: string;
     quality: string;
     fov: number;
@@ -137,8 +135,6 @@ function takeSnapshot(s: RenderProbeSuppliers): RenderProbeSnapshot {
       exposure: rp.lighting.exposure,
       lightGamma: rp.lighting.lightGamma,
       ambientScale: rp.lighting.ambientScale,
-      propVertexRelax: rp.lighting.propVertexRelax,
-      propVertexFlatten: rp.lighting.propVertexFlatten,
       mode: rp.lighting.mode,
       quality: rp.textureQuality,
       fov: rp.camera.fov,

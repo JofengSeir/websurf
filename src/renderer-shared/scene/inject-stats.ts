@@ -5,7 +5,7 @@
  */
 
 import * as THREE from 'three';
-import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, getPropVertexFlatten } from '../shader/lightmap-shader.js';
+import { VERTEX_LIGHTING_ATTR } from '../shader/lightmap-shader.js';
   /**
    * 注入生效性统计（由 renderer-main 的 `tick` 在首帧 `renderer.render()` 之后调用一次；2026-10-02 自同名私有方法原样抽出，入参 = 渲染场景）。
    *
@@ -157,17 +157,9 @@ import { VERTEX_LIGHTING_ATTR, getVertexLightingRelaxStats, getPropVertexRelax, 
         }
       });
       if (vlOk + vlBad + vlUnlit + vlMissed > 0) {
-        const rs = getVertexLightingRelaxStats();
         console.info(
-          `[vertex-lighting] 第 1 级（逐顶点预烘焙）注入：生效材质=${vlOk}，失败=${vlBad}，` +
+          `[vertex-lighting] 第 1 级（逐顶点预烘焙，直接使用烘焙值、无几何重建）注入：生效材质=${vlOk}，失败=${vlBad}，` +
             `自发光 unlit（按 VMT 语义不吃光照，正确）=${vlUnlit}，**真漏网**=${vlMissed}`,
-        );
-        console.info(
-          `[vertex-lighting] 几何重建（${getPropVertexRelax() === 0 ? '**关闭**：原样使用烘焙值' : `平滑档 ${getPropVertexRelax()}`}）：` +
-            `mesh=${rs.meshes}，接缝焊接组=${rs.welded}，空间不一致顶点=${rs.medianFixed}，松弛遍数=${rs.relaxed}，` +
-            `方差压缩 mesh=${rs.flattened}（**跳过 ${rs.flattenSkipped}**：面内本来就一致 ⇒ 保留原样烘焙值，flatten=${getPropVertexFlatten()}），` +
-            `平均偏移=${(rs.meanAbsDelta * 100).toFixed(1)}%（单顶点最大 ${(rs.maxAbsDelta * 100).toFixed(1)}%，` +
-            `样本顶点=${rs.samples}）`,
         );
       }
       if (vlMissed > 0) {

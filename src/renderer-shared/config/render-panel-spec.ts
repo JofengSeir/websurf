@@ -9,7 +9,7 @@
  * 生效方式（`apply`）是**读实现得出**的硬事实，不是设计愿望：
  *   - `live`    ：改完即时可见（走 uniform 或共享 setter）；
  *   - `reload`  ：在材质编译/着色器注入期读一次（如 `__vbspDebugAlbedoOnly`、`textureQuality`）；
- *   - `rebuild` ：在地图加载期烘焙进几何/属性（如 `propVertexRelax`、`propCubeGain`、`bumpStrength`）。
+ *   - `rebuild` ：在地图加载期烘焙进几何/属性（如 `propCubeGain`、`bumpStrength`）。
  *
  * 落档规则：有 `pref` 的项写进**本端**的渲染档（键 `vbsp:renderPrefs:<端>`，T-685 起按端隔离）；
  * 只有 `global` 的项（「排查开关」组）**不落档**、刷新即复位——它们是出帧/排查用的一次性开关。
@@ -135,34 +135,6 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     pref: 'extras.lightFloor',
     apply: 'live',
     apps: ALL,
-  },
-  {
-    id: 'propVertexRelax',
-    label: 'prop 顶点平滑',
-    title: '第 1 级逐顶点光照的重建平滑次数（0 = 最忠于烘焙值）',
-    group: '光照',
-    kind: 'slider',
-    min: 0,
-    max: 8,
-    step: 1,
-    pref: 'lighting.propVertexRelax',
-    apply: 'rebuild',
-    apps: ALL,
-    note: '需重新加载地图',
-  },
-  {
-    id: 'propVertexFlatten',
-    label: 'prop 顶点压平',
-    title: '第 1 级逐顶点光照的方差压缩（1 = 完全抹平梯度，均值不变）',
-    group: '光照',
-    kind: 'slider',
-    min: 0,
-    max: 1,
-    step: 0.05,
-    pref: 'lighting.propVertexFlatten',
-    apply: 'rebuild',
-    apps: ALL,
-    note: '需重新加载地图',
   },
   {
     id: 'propCubeGain',

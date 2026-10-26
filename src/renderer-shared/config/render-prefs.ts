@@ -30,8 +30,7 @@ import {
   setExposure,
   setLightGamma,
   setAmbientScale,
-  setPropVertexRelax,
-  setPropVertexFlatten,
+
   setLightingMode,
   setLightFloor,
   setFogMaxDensity,
@@ -97,8 +96,6 @@ export interface RenderLightingPrefs {
   exposure: number;
   lightGamma: number;
   ambientScale: number;
-  propVertexRelax: number;
-  propVertexFlatten: number;
   mode: LightingMode;
 }
 
@@ -244,8 +241,6 @@ function normalize(raw: unknown): RenderPrefs {
       exposure: num(l.exposure, d.lighting.exposure),
       lightGamma: num(l.lightGamma, d.lighting.lightGamma),
       ambientScale: num(l.ambientScale, d.lighting.ambientScale),
-      propVertexRelax: num(l.propVertexRelax, d.lighting.propVertexRelax),
-      propVertexFlatten: num(l.propVertexFlatten, d.lighting.propVertexFlatten),
       mode: l.mode === 'texture' ? 'texture' : 'baked',
     },
     textureQuality: quality(o.textureQuality, d.textureQuality),
@@ -465,8 +460,7 @@ function load(): RenderPrefs {
  */
 export function renderPrefsFingerprint(p: RenderPrefs): string {
   const key = JSON.stringify([
-    p.lighting.exposure, p.lighting.lightGamma, p.lighting.ambientScale,
-    p.lighting.propVertexRelax, p.lighting.propVertexFlatten, p.lighting.mode,
+    p.lighting.exposure, p.lighting.lightGamma, p.lighting.ambientScale, p.lighting.mode,
     p.textureQuality,
     p.culling.distance, p.culling.pvs,
     p.camera.fov,
@@ -601,10 +595,6 @@ export function describeRenderPrefs(p: RenderPrefs): string {
     l.lightGamma +
     ' ambientScale=' +
     l.ambientScale +
-    ' propVertexRelax=' +
-    l.propVertexRelax +
-    ' propVertexFlatten=' +
-    l.propVertexFlatten +
     ' mode=' +
     l.mode +
     ' quality=' +
@@ -678,6 +668,5 @@ export function applyLightingPresentation(patch: Partial<RenderLightingPrefs>): 
   if (patch.exposure !== undefined) setExposure(patch.exposure);
   if (patch.lightGamma !== undefined) setLightGamma(patch.lightGamma);
   if (patch.ambientScale !== undefined) setAmbientScale(patch.ambientScale);
-  if (patch.propVertexRelax !== undefined) setPropVertexRelax(patch.propVertexRelax);
-  if (patch.propVertexFlatten !== undefined) setPropVertexFlatten(patch.propVertexFlatten);
+
 }
