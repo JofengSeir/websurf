@@ -1,0 +1,3 @@
+#!/bin/sh
+# D-124：机械检查（生成物路径 / .cmd/.bat/.ps1 的 CRLF+ASCII）。逻辑在 src/scripts/precheck-staged.mjs。
+exec node "$(git rev-parse --show-toplevel)/src/scripts/precheck-staged.mjs"

@@ -2,7 +2,7 @@
 
 > 本文件是 agent 进入仓库的**入口文档**，规则以本文为准。
 >
-> - **2026-10-18 起没有强制 agent 工作流**：无看板、无 claim / close-round、无记忆库同步门禁、无 docflow、无 pre-commit 钩子。旧流程的完整文件与台账在 git tag `checkpoint/pre-amh-reset-20261018`。
+> - **2026-10-18 起没有强制 agent 工作流**：无看板、无 claim / close-round、无记忆库同步门禁、无 docflow。**唯一的机械钩子是 D-124 的 pre-commit 检查**（生成物路径 / `.cmd/.bat/.ps1` 的 CRLF+ASCII，见 §7-0）。旧流程的完整文件与台账在 git tag `checkpoint/pre-amh-reset-20261018`。
 > - 仍然成立的是工程事实：**构建与测试要过，结论要有证据，提交信息要能独立读懂。**
 
 ## 0. 开工速览
@@ -118,9 +118,9 @@ CI 跑 `.github/workflows/ci-gates.yml`：`cargo test`、viewer 的源码契约�
 - 交接格式（wrapper 已按 client 格式写，手动调用时注意）：concepts 含 `task:<id>,handoff`；content 以 `HANDOFF <task>:` 开头。
 - `TODO.md` / `OWNER.md` 仍是可选任务 / 决定文件；AMH 不是状态表；`D-###` 正文以 OWNER 为准。
 
-### 3.3 提交尾注（建议，不是门禁）
+### 3.3 提交尾注（**必须**，文档级；不挂 commit-msg 钩子 —— D-125 2026-10-27）
 
-代码 / 脚本改动提交时，末行**建议**带三选一：
+代码 / 脚本改动提交时，末行**必须**带三选一（漏了不阻塞提交，但视为流程缺陷，review 时补）：
 
 ```
 AMH: <memory-id>     # wrapper save/handoff 返回的 id
@@ -128,7 +128,7 @@ AMH: none            # 明确判定这次改动无需记录
 AMH: down            # gateway 不可用（正文说明）
 ```
 
-- **不要依赖 commit-msg 钩子**：本仓不把它当门禁，`.dsh/hooks/` 可能不存在。缺尾注不阻塞提交；**不要**为了「守规矩」去加一个会卡住别的 agent 的钩子。
+- **不挂 commit-msg 钩子**：尾注是**文档级必须**，不是机械门禁。缺尾注不阻塞提交；**不要**为了「守规矩」去加一个会卡住别的 agent 的钩子。
 - 纯文档 / 数据、`.dsh/` `.amh/` `.tmp/` 等忽略目录不强制。
 - 如果将来有人装了钩子：**不要**用 `--no-verify` 逃；先修流程。`AMH: none` 是合法决定，不是失败。
 
@@ -155,7 +155,7 @@ AMH: down            # gateway 不可用（正文说明）
 | 2 | 定不了位的结论标 `[待确认]`，并说明缺什么 | 用「应该 / 可能 / 大概」补结论 |
 | 3 | 判「某物是否还在」用**全工作区索引**（含未跟踪）；`dist/`、`pkg/`、`test/maps/` 等是生成物 / 本地物 | 用 `git grep` 的 0 命中下结论 |
 | 4 | 公开面（README / AGENTS / 源码注释）不写本机绝对路径；本地路径放 `.amh/`、`.dsh/` 或环境变量 | — |
-| 5 | 改 `.cmd` / `.bat` / `.ps1` 保持 **CRLF**，并实跑一次 | — |
+| 5 | 改 `.cmd` / `.bat` / `.ps1` 保持 **CRLF + 纯 ASCII**，并实跑一次（D-124 起由 pre-commit 机械检查） | — |
 | 6 | 渲染 / 物理改动先做基线 A/B，一次只动一个变量 | — |
 | 7 | 验证 wasm 产物真的被使用（字节数 / 哈希） | 只看「注入成功」 |
 
@@ -174,6 +174,7 @@ AMH: down            # gateway 不可用（正文说明）
 
 提交前 checklist（按序执行）：
 
+0. 首次克隆执行 `npm run hooks:install`（D-124：`core.hooksPath=.githooks`）；它拦两类机械问题——staged 生成物/本地目录（`pkg/`、`dist/`、`web/*.wasm`、`.tmp/`、`.dsh/`、`.amh/`），以及 `.cmd/.bat/.ps1` 的 LF 行尾/非 ASCII。确知无害时用 `PRECHECK_BYPASS=1` 并在提交信息里写明原因。
 1. 确认当前分支是 `main`（`git branch --show-current`）；**禁止在 `dev` 上提交或改动**（§0 红线）。
 2. `git status --short`：只 `git add` 自己改的文件；别人的在途改动原样保留。
 3. 验证与提交串成一步（`&&`），红灯即终止。
