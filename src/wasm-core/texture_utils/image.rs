@@ -1,3 +1,13 @@
+//! VTF 图像数据层：[`VTFImage`]（VTF 里一张图——低清图或高清帧——的字节视图）与像素格式桥接。
+//!
+//! 上游：`texture_utils/mod.rs` 的 `from_bytes` 组装 [`VTFImage`]——头来自 [`super::vtf`]，
+//! 字节切片借用整份 VTF 缓冲（本文件不读文件、不持有缓冲）；帧的字节定位消费 `vtf.rs`
+//! 的 `get_offset`。
+//! 下游：`get_frame` / `decode` 产像素数据，`mod.rs` 据此得到 `DynamicImage` 再交调用方编 PNG。
+//!
+//! 职责：① [`ImageFormat`] 描述 VTF 像素格式（判别值来自 VTF 头，`TryFromPrimitive` 兜异常值），
+//! 块压缩类经 `texpresso` 解成 RGBA8（`decode_dxt`）；② BGR(A) → RGB(A) 通道重排；
+//! ③ 帧级只读访问——`bytes`/`offset` 私有，取像素只能走 `get_frame` / `decode`。
 use crate::texture_utils::vtf::VTFHeader;
 use crate::texture_utils::vtf::get_offset;
 use crate::texture_utils::Error;
