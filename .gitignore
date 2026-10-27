@@ -86,11 +86,12 @@ apps/game/scripts/t13-literal-sweep.mjs
 apps/game/scripts/t13-ulp-sensitivity-control.mjs
 apps/game/scripts/wasm-hash-pin.mjs
 
-# ── 文档 / agent 流程（2026-10-27 起一律不入库，只在本机保留）──
-# owner 要求：GitHub 上只放工程本体，文档类不上传。
-# 不入库：AGENTS.md、OWNER.md、TODO.md、docs/**、skills/**、.amh/**、.dsh/**、.archify/、.workbuddy/。
-/AGENTS.md
+# ── 文档 / agent 流程（2026-10-27 定稿）──
+# 入库：AGENTS.md、skills/websurf-env-traps/**、docs/render-parity.md —— 为了从仓库拉下来就能
+#       最小化复原 agent 工作流（规则 + 环境陷阱技能 + 渲染归属说明）。
+# 不入库（只在本机）：TODO.md、OWNER.md（本项目的未结清单/待拍板状态，属"记忆"）、
+#       docs/ 下其余过程台账、.amh/**、.dsh/**、.archify/、.workbuddy/。
 /OWNER.md
 /TODO.md
-/docs/
-/skills/
+/docs/*
+!/docs/render-parity.md

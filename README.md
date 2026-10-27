@@ -46,9 +46,12 @@ npm run dev          # ⑤ 起本地服务：python ../../src/scripts/serve.py 8
 | 想做什么 | 看哪里 |
 |---|---|
 | 报告问题 / 改动流程与提交规范 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Agent 作业规范（规则 / 记忆 / 提交流程） | [AGENTS.md](AGENTS.md) |
+| 渲染归属与三端等价（共享 `RenderSession`、静态门禁、同机位看图） | [docs/render-parity.md](docs/render-parity.md) |
+| 环境陷阱（Windows 作业：长输出、生成物、沙箱、行尾） | [skills/websurf-env-traps/SKILL.md](skills/websurf-env-traps/SKILL.md) |
 | 漏洞报告与安全事实 | [SECURITY.md](SECURITY.md) |
 
-> Agent 作业规范（AGENTS.md）、未结清单（TODO.md）、待拍板决定（OWNER.md）、渲染归属说明（docs/）与技能（skills/）只在本机保留，不入库。
+> 未结清单（TODO.md）与待拍板决定（OWNER.md）属本机状态，不入库。
 
 ## 3. 第三方组件与许可
 
