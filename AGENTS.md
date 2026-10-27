@@ -16,7 +16,7 @@
 
 四条红线（违反会破坏别人的工作或得出错误结论）：
 
-- **禁止**改动 `dev` 分支：日常工作线是 `main`（原 `rebuild/from-remote`，2026-10-24 起换名顶替）；`dev` 是旧实验线（原 `main`，2026-10-22 止，领先 `origin/main` 36 笔），仅 owner 可动。**agent 不自行推送**，推送由 owner 发起。
+- **工作线是 `dev`**（owner 2026-10-27 重建自 `main`；旧 dev 实验线共 36 笔已废弃删除）。`main` 保留为发布/对照线：**不往 `main` 提交**（owner 明确要求时除外）。**agent 不自行推送**，推送由 owner 发起。
 - **禁止**从 `progress/`、`documents/`、`docflow.json` 取规则或状态——它们已不存在。
 - **禁止**恢复旧的 agentmemory / mcp-hub 路线（见 §3.0）。
 - **禁止**用 `git checkout -- <文件>` 清理工作区（会抹掉未提交成果）。
@@ -178,7 +178,7 @@ AMH: down            # gateway 不可用（正文说明）
 提交前 checklist（按序执行）：
 
 0. 首次克隆执行 `npm run hooks:install`（D-124：`core.hooksPath=.githooks`）；它拦两类机械问题——staged 生成物/本地目录（`pkg/`、`dist/`、`web/*.wasm`、`.tmp/`、`.dsh/`、`.amh/`），以及 `.cmd/.bat/.ps1` 的 LF 行尾/非 ASCII。确知无害时用 `PRECHECK_BYPASS=1` 并在提交信息里写明原因。
-1. 确认当前分支是 `main`（`git branch --show-current`）；**禁止在 `dev` 上提交或改动**（§0 红线）。
+1. 确认当前分支是 `dev`（`git branch --show-current`）；**不要在 `main` 上提交**——它是发布/对照线（§0 红线）。
 2. `git status --short`：只 `git add` 自己改的文件；别人的在途改动原样保留。
 3. 验证与提交串成一步（`&&`），红灯即终止。
 4. 提交信息说清：**改了什么、为什么、怎么验证**；纯格式 / 注释改动写「无行为变化」。
