@@ -165,7 +165,7 @@ function brief() {
     for (const x of recent) console.log(`- [${x.type ?? '?'}] ${String(x.title ?? x.id ?? '').slice(0, 160)}`);
   }
   console.log('--- 下一步 ---');
-  console.log('先读 AGENTS.md 与 docs/render-parity.md；改完跑三端 typecheck/相关构建；收尾用 agent-memory handoff。');
+  console.log('先读 AGENTS.md；改完跑三端 typecheck/相关构建；收尾用 agent-memory handoff。');
 }
 
 function save() {
