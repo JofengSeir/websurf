@@ -84,6 +84,7 @@ CI 跑 `.github/workflows/ci-gates.yml`：`cargo test`、viewer 的源码契约�
 - **旧的独立 agentmemory / mcp-hub 路线已卸载：不要恢复。** 当前 AMH gateway 的 backend 是 agentmemory（0.9.30），只经 gateway 访问；**不要直连 `:3111` 或实例 REST**。
 - AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md` 为准，但其中「brief/handoff 失败就停」的旧约定由 §3.1 覆盖：gateway 不可用落 `.dsh/amh-outbox`，不阻塞。
 - 项目契约 `.amh/config.json`（`hub` / `binding` / `project`，本地文件，不写进仓库）。
+- **新克隆的仓库里没有 `.amh/` / `.dsh/`**：`brief` 会显示 `gateway=DOWN` 并给出提示，`save` / `handoff` 自动落 `.dsh/amh-outbox/`（exit 0），不影响改代码与提交；要接记忆再按本机流程配一次 binding。工作流骨架（AGENTS / skills / docs/render-parity / `.githooks` / scripts）在仓库里，拉下来执行 `npm run hooks:install` 即可。
 - 旧的 `amh-cli` / 7 工具 / marker / verify / counts 路线已删除；**`brief` 仍可用**。
 
 ### 3.1 三条命令（弱 agent 也能走通）
