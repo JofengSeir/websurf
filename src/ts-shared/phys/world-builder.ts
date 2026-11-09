@@ -57,6 +57,13 @@ export interface BspProcessorLike {
   export_model_phy_bevels?(): string;
   export_mosaic_manifest(): string;
   export_missing_textures(): string;
+  /**
+   * Source 实体 I/O 无损数据（`render_bundle::EntityIoData` 的 JSON）。
+   * **可选**：只有重建过 wasm 的三端 pkg 才有这个方法；老产物没有时整条 I/O 链降级为不启用，
+   * 不影响 GLB / 碰撞 / 传送等既有导出。
+   * 必须在 `export_glb*` 之前调用（那几个导出会消费 BSP 数据）。
+   */
+  export_entity_io?(): string;
   export_glb_with_pakfile_models_with_defaults(defaultsJson: string): Uint8Array;
   export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson: string): Uint8Array;
   export_glb_with_pakfile_models(): Uint8Array;
@@ -109,6 +116,12 @@ export interface WorldBundle {
   mosaicManifest?: string;
   /** 缺失材质纹理列表（collectMissingTextures 时收集；失败时缺省）。 */
   missingTextures?: string[];
+  /**
+   * Source 实体 I/O 原文 + 全部 `model="*N"` 实体体积（`export_entity_io()` 的 JSON 文本）。
+   * `proc` 没有该方法（wasm 未重建）或导出抛错时保持 `undefined`，三端据此跳过实体运行期。
+   * 与 `teleportJson` 并存但互不影响：后者仍服务旧的 Rust 物理传送判定。
+   */
+  entityIoJson?: string;
   /** 初始出生点（Y-up 坐标 + cs-movement yaw）。 */
   spawn: { x: number; y: number; z: number; yawDeg: number };
   /** 全部出生点列表（spawn 下拉切换用；[[x,y,z,yaw], ...]）。 */
@@ -183,6 +196,16 @@ export async function buildWorldBundle(
   const spawnJson = proc.parse_spawn_points();
   const teleportJson = proc.parse_teleports();
   const pvsJson = proc.parse_pvs_data();
+  // 实体 I/O 必须在 export_glb* 之前取（同一条「GLB 消费 BSP」理由）。
+  // 老 wasm 产物没有这个方法 ⇒ 不启用新运行期，其余字段照常产出。
+  let entityIoJson: string | undefined;
+  if (typeof proc.export_entity_io === 'function') {
+    try {
+      entityIoJson = proc.export_entity_io();
+    } catch (e) {
+      console.warn('[load-bsp] 实体 I/O 导出失败，本图不启用 Source 实体运行期:', e);
+    }
+  }
 
   await stage('导出碰撞体');
   const mapBrushJson = proc.export_brushes_planes(
@@ -314,6 +337,7 @@ export async function buildWorldBundle(
     glbBytes: glbBuffer,
     mosaicManifest,
     missingTextures,
+    entityIoJson,
     spawn,
     spawnList,
   };

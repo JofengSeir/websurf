@@ -64,17 +64,22 @@ impl<'a> LumpReader<Cursor<Cow<'a, [u8]>>> {
 }
 
 impl<R: BinReaderExt + Read> LumpReader<R> {
-    /// 读实体 lump：把 `length` 声明的整段字节按 UTF-8 解码，再**整体转小写**后包成 `Entities`。
+    /// 读实体 lump：把 `length` 声明的整段字节按 UTF-8 解码，同时保留两份视图。
+    ///
+    /// - `entities`：**整体小写**，供既有 `Entities::iter` / `RawEntity::prop` 调用点使用
+    ///   （它们逐字节比较键，全仓都传小写字面量）。
+    /// - `raw`：**无损原文**，供 Source 实体 I/O 解析使用（输出键大小写、重复键、
+    ///   `AddOutput` 参数、ESC 分隔的输出串都依赖原文）。
     ///
     /// 不做键值解析——那是 `data/entity.rs` 的职责；本方法只保证文本可用。
     /// 非 UTF-8 字节返回 `StringError`，不做 Latin-1 兜底。
     pub fn read_entities(&mut self) -> BspResult<Entities> {
         let mut data: Vec<u8> = vec![0; self.length];
         self.inner.read_exact(&mut data)?;
-        let entities = String::from_utf8(data)
-            .map_err(|e| StringError::from(e.utf8_error()))?
-            .to_ascii_lowercase();
-        Ok(Entities { entities })
+        let raw = String::from_utf8(data)
+            .map_err(|e| StringError::from(e.utf8_error()))?;
+        let entities = raw.to_ascii_lowercase();
+        Ok(Entities { entities, raw })
     }
 
     /// 把 lump 当作等长记录数组读取，逐条交给 `f` 解析。

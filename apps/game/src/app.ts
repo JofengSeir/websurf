@@ -565,6 +565,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       glbSizeKb: Math.round(bundle.glbBytes.byteLength / 1024),
       numSpawnPoints: bundle.spawnList.length,
       hasPvs: bundle.pvsJson.length > 2, skyboxTexture, fogParams, skyCamera,
+      entityIoJson: bundle.entityIoJson,
     });
 
     // 主线程物理世界（渲染线）

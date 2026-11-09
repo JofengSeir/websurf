@@ -57,8 +57,16 @@ use vdf_reader::VdfError;
 /// 其余位置只经 `Entities::iter` 读取。字段本身不含任何切分结果，也不保证花括号成对。
 #[derive(Clone)]
 pub struct Entities {
-    /// 原文（已由 `read_entities` 转成小写）。切块逻辑在 `iter`，本字段不做校验。
+    /// 已转成小写的视图。切块逻辑在 `iter`，本字段不做校验。
+    ///
+    /// 保留小写视图是为了不改动既有调用点：`RawEntity::prop` 是逐字节比较键，
+    /// 全仓传的都是小写字面量（`"classname"` / `"startdisabled"` / ...）。
     pub entities: String,
+    /// entities lump 的**无损原文**：保留键与值的大小写、重复键、输出键 `OnXxx` 的原貌。
+    ///
+    /// Source 的 I/O 连接串（`OnTrigger` 等）与 `AddOutput` 参数必须按原文解析；
+    /// `entities` 的整体小写化对它们是有损的。新代码一律走 `raw()`。
+    pub raw: String,
 }
 
 /// 打印成 `Entities { entities: [...] }`，每个元素是 `RawEntity` 自己的 `Debug`（键值表）。
@@ -82,6 +90,14 @@ impl fmt::Debug for Entities {
 }
 
 impl Entities {
+    /// 返回 entities lump 的无损原文（含全部 `{...}` 块、原始大小写与重复键）。
+    ///
+    /// 这是 Source `CEntityMapData` 在 `ParseMapData` 里看到的字节序列；
+    /// 实体 I/O 的解析必须基于它，不能用 `iter()` / `prop()` 的小写视图。
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
     /// 按出现顺序切出 `{ ... }` 块，**含两端花括号**，产出借用原文的 `RawEntity`。
     ///
     /// 切法：从当前游标起找最近的 `{`，再从该 `{` 之后找最近的 `}`，切出这段闭区间，游标推到

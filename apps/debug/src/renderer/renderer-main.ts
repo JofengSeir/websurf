@@ -38,6 +38,10 @@ import type { Brush } from '../physics/physics/Collision/Collision.types.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
 import { TeleportManager } from '../world/teleport-manager.js';
 import { adaptBrushes } from '../world/collider-adapter.js';
+import { EntitySystem, type EntitySystemStats } from '../../../../src/ts-shared/entity/entity-system.js';
+import { attachEntitySystem } from '../../../../src/ts-shared/entity/attach.js';
+import { playerStateFromRaw, type RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
+import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
 import type { PhyBevelPiece } from './collider-debug.js';
@@ -158,6 +162,10 @@ export class RendererMain {
   /** 渲染循环开关：`stop` 置假后 `tick` 直接返回。 */
   private running = false;
 
+  // ── Source 实体运行期 ────────────────────────────────────────
+  /** 由 `entityIoJson` 装配的通用 I/O / trigger / logic 系统；`tick` 与物理同帧推进。 */
+  private entitySystem: EntitySystem | null = null;
+
   // ── 主线程物理线（渲染直读 state()，无插值副本）──
   /** 渲染物理实例：`buildPredictionWorld` 里构造并 `build_world`，`disposeScene` 置空。 */
   private predPhys: PhysWorld | null = null;
@@ -228,6 +236,8 @@ export class RendererMain {
   onCullStats: ((stats: CullStatsLike) => void) | null = null;
   /** 场景加载完成回调：`loadScene` 末尾传出场景包围盒最小 Y（死亡阈值的下界）。 */
   onSceneLoaded: ((deathThresholdY: number) => void) | null = null;
+  /** 实体系统观测回调：I/O 输入、宿主副作用请求都会送到这里（缺省丢弃）。 */
+  onEntityEvent: ((event: EntityEvent) => void) | null = null;
 
   /**
    * 渲染物理线 → 权威侧的反向同步回调（由 `AuthorityCalibrator` 在兜底重锚/首次起点对齐时
@@ -328,6 +338,8 @@ export class RendererMain {
    * `LightManager` 的灯光不在此列——它按 config 替换式更新。
    */
   disposeScene(): void {
+    this.entitySystem?.dispose();
+    this.entitySystem = null;
     // 渲染资源（根/天空/环境/渲染列表/PVS/可见性）全部由共享会话释放
     this.session?.disposeScene();
     this.bspModelScene = null;
@@ -417,12 +429,33 @@ export class RendererMain {
 
     this.needsRender = true;
     this.onSceneLoaded?.(result.bbox.min.y);
+    this.setupEntitySystem(data.entityIoJson);
     this.emitCullStats();
     return {
       diagonal: result.diagonal,
       defaultCull: result.defaultCull,
       maxCull: result.maxCull,
     };
+  }
+
+  /**
+   * 装配通用 Source 实体运行期（观测模式，副作用只上报不施加，理由见 `attach.ts`）。
+   * debug 端把事件接到 `onEntityEvent`，面板可据此显示 I/O 链与未处理输入。
+   */
+  private setupEntitySystem(entityIoJson?: string): void {
+    this.entitySystem?.dispose();
+    this.entitySystem = attachEntitySystem({
+      entityIoJson,
+      getPlayerState: () => playerStateFromRaw(
+        (this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 },
+      ),
+      onEvent: (event) => this.onEntityEvent?.(event),
+    });
+  }
+
+  /** 实体运行期统计（实体浏览器 / 诊断面板）；未装配返回 null。 */
+  entityStats(): EntitySystemStats | null {
+    return this.entitySystem?.stats() ?? null;
   }
 
   /** 启动渲染循环（幂等：已在运行时直接返回）。 */
@@ -521,6 +554,8 @@ export class RendererMain {
       const camY = hold ? hold.y : st.posY + st.eyeHeight;
       cc.setPosition(hold ? hold.x : st.posX, camY, hold ? hold.z : st.posZ);
 
+      // Source 实体运行期：与物理同帧推进（touch 用本帧 state，0 延迟输出当帧消费）。
+      this.entitySystem?.frame(dt);
     } else if (this.stepGated) {
       // 闸门跳过物理的帧也要推进墙钟基准，否则闸门恢复时会拿到一个异常大的 dt
       this.lastTickMs = now;

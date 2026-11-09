@@ -29,6 +29,9 @@ import type { ResolvedSpawn, SpawnSource } from './core/spawn.js';
 import type { Pose } from './core/pose.js';
 import { humanizeBspError, loadBspFile } from './core/bsp.js';
 import type { BspLoadResult } from './core/bsp.js';
+import type { EntitySystem } from '../../../src/ts-shared/entity/entity-system.js';
+import { attachEntitySystem } from '../../../src/ts-shared/entity/attach.js';
+import { playerStateFromRaw } from '../../../src/ts-shared/entity/host.js';
 import { sniffFileKind } from './core/filekind.js';
 import { qs } from './core/dom.js';
 import { Hud } from './ui/hud.js';
@@ -77,6 +80,20 @@ try {
 const fly = new FlyCam(); installPoseEntry({ applyPose: (p) => { fly.setPose({ pos: [p.pos[0], feetFromCameraPose(p)[1], p.pos[2]], ang: [p.yawDeg, p.pitchDeg] }); }, readPose: () => cameraPoseOf(scene.camera), releasePose: () => {} }, 'viewer');
 fly.attach(gameCanvas);
 fly.onLockError = () => hud.flashStatus('鼠标锁定失败，请再点击一次画布重试');
+
+/** 通用 Source 实体运行期：viewer 无玩家物理，用自由相机/回放相机的脚底位姿作玩家状态。
+ *  副作用走观测模式（只上报不施加），详见 `src/ts-shared/entity/attach.ts`。 */
+let entitySystem: EntitySystem | null = null;
+function setupEntitySystem(entityIoJson?: string): void {
+  entitySystem?.dispose();
+  entitySystem = attachEntitySystem({
+    entityIoJson,
+    getPlayerState: () => {
+      const p = fly.getPose();
+      return playerStateFromRaw({ posX: p.pos[0], posY: p.pos[1], posZ: p.pos[2], yaw: p.ang[0], pitch: p.ang[1] });
+    },
+  });
+}
 
 // ── 侧栏与标签页 / 底部 dock（两个会话各一层）────────────────────────
 const sidebarEl = qs('sidebar');
@@ -616,6 +633,7 @@ async function loadBsp(file: File): Promise<void> {
     hud.setStatus(`正在解析 ${file.name}（主线程 BSP 解析）…`);
     const result: BspLoadResult = await loadBspFile(file);
     await scene.mountGlb(result.glbBytes, result.skyboxTexture, { fogParams: result.fogParams, skyCamera: result.skyCamera, pvsJson: result.pvsJson, mosaicManifest: result.mosaicManifest });
+    setupEntitySystem(result.entityIoJson);
 
     const box = scene.worldBox();
     if (box && Number.isFinite(box.min.x)) {
@@ -1099,6 +1117,9 @@ function frame(now: number): void {
   }
 
   scene.render();
+
+  // Source 实体运行期：与渲染同帧推进（相机位姿即玩家状态，0 延迟输出当帧消费）。
+  entitySystem?.frame(dt);
 
   if (now - hudAt >= 80) {
     hudAt = now;

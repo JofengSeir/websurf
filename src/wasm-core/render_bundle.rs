@@ -726,3 +726,302 @@ pub fn aabb_volume(verts: &[[f32; 3]]) -> f32 {
     }
     (max[0] - min[0]) * (max[1] - min[1]) * (max[2] - min[2])
 }
+
+// ---------------------------------------------------------------------------
+// 实体 I/O 数据：无损实体原文 + 全部 brush 实体的世界凸包
+// ---------------------------------------------------------------------------
+
+/// entities lump 的无损原文 + 每个 `model="*N"` 实体的 brush 体积。
+///
+/// 这条通路是 Source 实体 I/O 的数据入口，与 `parse_entities()`（小写化 + `BTreeMap`
+/// 丢重复键 + outputs 裸字符串）**互不影响**：新系统只读本结构。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EntityIoData {
+    /// entities lump 无损原文：保留键/值大小写、重复键、`OnXxx` 输出键、
+    /// 以及 ESC(`0x1b`) / 逗号分隔的 I/O 连接串。等价于引擎 `CEntityMapData` 的输入。
+    pub entities_text: String,
+    /// 有 `model="*N"` 的实体（trigger_* / func_* 等 brush 实体）。
+    pub volumes: Vec<EntityVolume>,
+}
+
+/// 一个 brush 实体的全部凸包（Hammer 允许把多个分散 brush 绑到同一实体）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EntityVolume {
+    /// 实体在 `Entities::iter()` 中的序号，与 `parse_entities()` 的 `index` 同源，
+    /// 用于把体积挂回原文解析出的实体。
+    pub index: usize,
+    pub model: String,
+    /// 实体 origin（Y-up 世界坐标）。
+    pub origin: [f32; 3],
+    pub brushes: Vec<EntityBrushVolume>,
+}
+
+/// Y-up 世界坐标下的凸包；平面法线朝外，内部满足 `dot(n,p) - dist <= 0`
+/// （与 `src/phys/teleport.rs` 的 `TeleportTrigger.planes` 同一约定）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EntityBrushVolume {
+    pub mins: [f32; 3],
+    pub maxs: [f32; 3],
+    /// `[nx, ny, nz, dist]`。
+    pub planes: Vec<[f32; 4]>,
+}
+
+/// `[x,y,z] -> [y,z,x]`（det=+1 正交变换，BSP Z-up → Three.js / 本项目物理 Y-up）。
+fn io_rotate_yup(v: [f32; 3]) -> [f32; 3] {
+    [v[1], v[2], v[0]]
+}
+
+/// 三平面求交（Cramer 法则），退化（行列式近 0）返回 None。
+fn io_plane_intersect(
+    p1: &vbsp::Plane,
+    p2: &vbsp::Plane,
+    p3: &vbsp::Plane,
+) -> Option<[f32; 3]> {
+    let (n1, n2, n3) = (&p1.normal, &p2.normal, &p3.normal);
+    let c23 = [
+        n2.y * n3.z - n2.z * n3.y,
+        n2.z * n3.x - n2.x * n3.z,
+        n2.x * n3.y - n2.y * n3.x,
+    ];
+    let det = n1.x * c23[0] + n1.y * c23[1] + n1.z * c23[2];
+    if det.abs() < 1e-6 {
+        return None;
+    }
+    let c31 = [
+        n3.y * n1.z - n3.z * n1.y,
+        n3.z * n1.x - n3.x * n1.z,
+        n3.x * n1.y - n3.y * n1.x,
+    ];
+    let c12 = [
+        n1.y * n2.z - n1.z * n2.y,
+        n1.z * n2.x - n1.x * n2.z,
+        n1.x * n2.y - n1.y * n2.x,
+    ];
+    let inv = 1.0 / det;
+    Some([
+        (c23[0] * p1.dist + c31[0] * p2.dist + c12[0] * p3.dist) * inv,
+        (c23[1] * p1.dist + c31[1] * p2.dist + c12[1] * p3.dist) * inv,
+        (c23[2] * p1.dist + c31[2] * p2.dist + c12[2] * p3.dist) * inv,
+    ])
+}
+
+/// 取某个 model 下每个 brush 的局部凸包（BSP Z-up、相对实体 origin）。
+///
+/// 返回 `(局部 AABB min, 局部 AABB max, 局部平面 [nx,ny,nz,dist])`。
+/// 算法与三端 `parse_teleports` 的 `model_brush_aabbs` 一致，差别只在用 `BTreeSet`
+/// 收集 brush 下标——保证导出顺序确定，便于 A/B 逐字节比对。
+fn model_brush_convexes(
+    bsp: &vbsp::Bsp,
+    model_idx: usize,
+) -> Vec<([f32; 3], [f32; 3], Vec<[f32; 4]>)> {
+    use std::collections::BTreeSet;
+
+    let Some(model) = bsp.models.get(model_idx) else {
+        return Vec::new();
+    };
+    let mut stack: Vec<i32> = vec![model.head_node];
+    let mut brush_set: BTreeSet<usize> = BTreeSet::new();
+    while let Some(ni) = stack.pop() {
+        if ni < 0 {
+            let li = (!ni) as usize;
+            let Some(leaf) = bsp.leaves.get(li) else {
+                continue;
+            };
+            let start = leaf.first_leaf_brush as usize;
+            let count = leaf.leaf_brush_count as usize;
+            for k in start..(start + count).min(bsp.leaf_brushes.len()) {
+                if let Some(lb) = bsp.leaf_brushes.get(k) {
+                    brush_set.insert(lb.brush as usize);
+                }
+            }
+        } else if let Some(node) = bsp.nodes.get(ni as usize) {
+            stack.push(node.children[0] as i32);
+            stack.push(node.children[1] as i32);
+        }
+    }
+
+    let mut out = Vec::new();
+    for bi in brush_set {
+        let Some(brush) = bsp.brushes.get(bi) else {
+            continue;
+        };
+        let start = brush.brush_side as usize;
+        let count = brush.num_brush_sides as usize;
+        let mut ps: Vec<&vbsp::Plane> = Vec::new();
+        for s in start..(start + count).min(bsp.brush_sides.len()) {
+            if let Some(side) = bsp.brush_sides.get(s) {
+                if let Some(pl) = bsp.planes.get(side.plane as usize) {
+                    ps.push(pl);
+                }
+            }
+        }
+        if ps.len() < 4 {
+            continue;
+        }
+        let mut verts: Vec<[f32; 3]> = Vec::new();
+        for i in 0..ps.len() {
+            for j in (i + 1)..ps.len() {
+                for k in (j + 1)..ps.len() {
+                    let Some(v) = io_plane_intersect(ps[i], ps[j], ps[k]) else {
+                        continue;
+                    };
+                    let mut valid = true;
+                    for p in &ps {
+                        let d = p.normal.x * v[0] + p.normal.y * v[1] + p.normal.z * v[2] - p.dist;
+                        if d > 1.0 {
+                            valid = false;
+                            break;
+                        }
+                    }
+                    if !valid {
+                        continue;
+                    }
+                    let dup = verts.iter().any(|ev| {
+                        let dx = ev[0] - v[0];
+                        let dy = ev[1] - v[1];
+                        let dz = ev[2] - v[2];
+                        dx * dx + dy * dy + dz * dz < 0.01
+                    });
+                    if !dup {
+                        verts.push(v);
+                    }
+                }
+            }
+        }
+        if verts.len() < 4 {
+            continue;
+        }
+        let mut mn = [f32::INFINITY; 3];
+        let mut mx = [f32::NEG_INFINITY; 3];
+        for v in &verts {
+            for a in 0..3 {
+                mn[a] = mn[a].min(v[a]);
+                mx[a] = mx[a].max(v[a]);
+            }
+        }
+        let planes: Vec<[f32; 4]> = ps
+            .iter()
+            .map(|p| [p.normal.x, p.normal.y, p.normal.z, p.dist])
+            .collect();
+        out.push((mn, mx, planes));
+    }
+    out
+}
+
+/// model 下标 → 实体 origin（BSP Z-up）。权威来源是 entities lump 的 `origin` keyvalue，
+/// 与 `build_brush_model_origins` / `parse_teleports` 口径一致。
+fn entity_model_origins(bsp: &vbsp::Bsp) -> Vec<Option<[f32; 3]>> {
+    let mut origins: Vec<Option<[f32; 3]>> = vec![None; bsp.models.len()];
+    for ent in bsp.entities.iter() {
+        let Ok(model_raw) = ent.prop("model") else {
+            continue;
+        };
+        if !model_raw.starts_with('*') {
+            continue;
+        }
+        let Ok(mi) = model_raw[1..].parse::<usize>() else {
+            continue;
+        };
+        if mi == 0 || mi >= origins.len() || origins[mi].is_some() {
+            continue;
+        }
+        let Ok(origin_raw) = ent.prop("origin") else {
+            continue;
+        };
+        let Ok(v) = origin_raw.parse::<vbsp::Vector>() else {
+            continue;
+        };
+        origins[mi] = Some([v.x, v.y, v.z]);
+    }
+    origins
+}
+
+/// 导出 Source 实体 I/O 所需的全部地图侧数据。
+///
+/// 不改动任何既有导出：`entities_text` 取自 `Entities::raw()`；`volumes` 覆盖
+/// **所有** `model="*N"` 实体（不只是 `trigger_teleport`），因此 `trigger_once` /
+/// `func_button` / `func_door` 等同样能拿到几何做 touch / 阻挡 / 交互判定。
+/// 无 `origin` 的 brush 实体（如旋转门）按原点 0 处理；凸包求交失败的 model
+/// 回退到 `dmodel_t.mins/maxs` 的总包围盒（无平面，消费端走 AABB 判据）。
+pub fn export_entity_io_data(bsp: &vbsp::Bsp) -> EntityIoData {
+    let model_origins = entity_model_origins(bsp);
+    let mut volumes: Vec<EntityVolume> = Vec::new();
+
+    for (index, ent) in bsp.entities.iter().enumerate() {
+        let Ok(model_raw) = ent.prop("model") else {
+            continue;
+        };
+        if !model_raw.starts_with('*') {
+            continue;
+        }
+        let Ok(mi) = model_raw[1..].parse::<usize>() else {
+            continue;
+        };
+        let Some(model) = bsp.models.get(mi) else {
+            continue;
+        };
+        if mi == 0 {
+            continue; // worldspawn 不是实体 brush
+        }
+        let origin = model_origins[mi].unwrap_or([0.0; 3]);
+        let origin_yup = io_rotate_yup(origin);
+        let convexes = model_brush_convexes(bsp, mi);
+
+        let mut brushes: Vec<EntityBrushVolume> = Vec::with_capacity(convexes.len());
+        for (mn, mx, planes) in convexes {
+            let mn_local = io_rotate_yup(mn);
+            let mx_local = io_rotate_yup(mx);
+            let planes_world: Vec<[f32; 4]> = planes
+                .iter()
+                .map(|p| {
+                    let n = io_rotate_yup([p[0], p[1], p[2]]);
+                    // p_world = p_local + origin ⇒ dot(n,p_world) - (d + n·origin) <= 0
+                    let d = p[3] + p[0] * origin[0] + p[1] * origin[1] + p[2] * origin[2];
+                    [n[0], n[1], n[2], d]
+                })
+                .collect();
+            let mut mins = [0.0; 3];
+            let mut maxs = [0.0; 3];
+            for a in 0..3 {
+                let lo = origin_yup[a] + mn_local[a].min(mx_local[a]);
+                let hi = origin_yup[a] + mn_local[a].max(mx_local[a]);
+                mins[a] = lo;
+                maxs[a] = hi;
+            }
+            brushes.push(EntityBrushVolume {
+                mins,
+                maxs,
+                planes: planes_world,
+            });
+        }
+
+        if brushes.is_empty() {
+            // 回退：model 总包围盒（BSP Z-up → Y-up 世界）
+            let mn = io_rotate_yup([model.mins.x, model.mins.y, model.mins.z]);
+            let mx = io_rotate_yup([model.maxs.x, model.maxs.y, model.maxs.z]);
+            let mut mins = [0.0; 3];
+            let mut maxs = [0.0; 3];
+            for a in 0..3 {
+                mins[a] = origin_yup[a] + mn[a].min(mx[a]);
+                maxs[a] = origin_yup[a] + mn[a].max(mx[a]);
+            }
+            brushes.push(EntityBrushVolume {
+                mins,
+                maxs,
+                planes: Vec::new(),
+            });
+        }
+
+        volumes.push(EntityVolume {
+            index,
+            model: model_raw.to_string(),
+            origin: origin_yup,
+            brushes,
+        });
+    }
+
+    EntityIoData {
+        entities_text: bsp.entities.raw().to_string(),
+        volumes,
+    }
+}

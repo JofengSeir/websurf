@@ -32,6 +32,8 @@ apps/*/web/*
 test/*
 !test/maps/
 !test/replay/
+# 实体 I/O 自测是源码夹具（.ts），不是地图/demo：随仓库走，否则 check-entity-io.mjs 无入口。
+!test/entity-io/
 test/maps/*
 !test/maps/.gitkeep
 test/replay/*

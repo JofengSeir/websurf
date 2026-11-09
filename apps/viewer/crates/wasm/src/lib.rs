@@ -594,6 +594,21 @@ pub fn decompress_mtz(bytes: &[u8]) -> Result<String, JsValue> {
 #[wasm_bindgen]
 impl BspProcessor {
     /// 实体集合 JSON：字段与 debug / game 的同名导出一致（天空盒取 `worldspawn.skyname`）。
+    /// 导出 Source 实体 I/O 数据：无损 entities lump 原文 + 所有 `model="*N"` 实体的世界凸包。
+    ///
+    /// 与 `parse_entities()` 并存但互不影响：后者是「整体小写 + BTreeMap」的旧视图，
+    /// 只供雾 / 天空参数读取；本方法是通用实体系统的唯一数据入口，保留重复键、
+    /// `OnXxx` 输出键与 ESC 分隔的连接串。**必须在 `export_glb*`（会消费 BSP）之前调用。**
+    pub fn export_entity_io(&self) -> Result<String, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
+        let data = websurf_wasm_core::render_bundle::export_entity_io_data(bsp);
+        serde_json::to_string(&data)
+            .map_err(|e| JsValue::from_str(&format!("序列化失败: {e}")))
+    }
+
     pub fn parse_entities(&self) -> Result<String, JsValue> {
         let bsp = self
             .bsp

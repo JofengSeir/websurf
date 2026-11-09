@@ -435,6 +435,11 @@ export interface SceneDataMessage {
   spawnJson: string;
   pvsJson: string;
   teleportJson: string;
+  /**
+   * Source 实体 I/O 无损数据（`buildWorldBundle` 的 `entityIoJson`）。
+   * 渲染主线程据此装配通用 `EntitySystem`；wasm 未重建时缺省 ⇒ 不启用新运行期。
+   */
+  entityIoJson?: string;
   metadata: {
     mapName: string;
     numFaces: number;

@@ -134,6 +134,11 @@ export interface SceneDataMessage {
   fogParams?: { color: number; start: number; end: number; maxDensity: number } | null;
   /** 3D 天空盒的 `sky_camera` 参数（见 renderer-shared/environment/miniature-sky.js）；无则不加天空层。 */
   skyCamera?: { origin: [number, number, number]; scale: number; fog?: { enable: boolean; color: number; start: number; end: number } | null } | null;
+  /**
+   * Source 实体 I/O 无损数据（`buildWorldBundle` 的 `entityIoJson`）。
+   * 渲染主线程据此装配通用 `EntitySystem`；wasm 未重建时缺省 ⇒ 不启用新运行期。
+   */
+  entityIoJson?: string;
 }
 
 /** `stats`：**本工程内无发送方、无接收点**（HUD 速度值由主线程

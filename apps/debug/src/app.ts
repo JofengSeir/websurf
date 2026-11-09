@@ -1893,6 +1893,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 		spawnJson: bundle.spawnJson,
 		pvsJson: bundle.pvsJson,
 		teleportJson: bundle.teleportJson,
+		entityIoJson: bundle.entityIoJson,
 		metadata: {
 			mapName: bundle.metadata.mapName,
 			numFaces: bundle.metadata.numFaces,

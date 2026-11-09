@@ -57,6 +57,11 @@ export interface BspLoadResult {
   skyCamera: SkyCameraParams | null;
   /** `parse_pvs_data()` 的载荷（天空区判据按 cluster 采样用）。 */
   pvsJson: string;
+  /**
+   * Source 实体 I/O 无损数据（`export_entity_io()`，必须在 GLB 导出之前取）。
+   * wasm 未重建时缺省 ⇒ viewer 不启用通用实体运行期，其余产物照常。
+   */
+  entityIoJson?: string;
   /** 解析 + GLB 导出的耗时（ms），`performance.now()` 前后差值。 */
   elapsedMs: number;
 }
@@ -137,6 +142,17 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const meta = JSON.parse(proc.metadata()) as BspMeta;
   // parse_spawn_points 是借用方法，必须在取走 Bsp 实例的 GLB 导出之前调用
   const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const pvsJson = proc.parse_pvs_data(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera = skyCameraFromEntities(entitiesJson);
+  // 实体 I/O 必须在 `export_glb*` 之前取（那些导出会消费 BSP 实例）。
+  // 老 wasm 产物没有该方法 ⇒ 保持 undefined，viewer 降级为「不启用实体运行期」。
+  let entityIoJson: string | undefined;
+  const ioExporter = (proc as { export_entity_io?: () => string }).export_entity_io;
+  if (typeof ioExporter === 'function') {
+    try {
+      entityIoJson = ioExporter.call(proc);
+    } catch (e) {
+      console.warn('[bsp] 实体 I/O 导出失败，本图不启用 Source 实体运行期:', e);
+    }
+  }
   // 缺失纹理回退（与 game 同款）：装载失败回落 '{}'（无回退表），导出失败回落裸导出
   const defaultsJson = await loadDefaultsJson(decompress_mtz);
   // 回退 VMT 文本表（游戏本体自带材质的原文）：必须在导出前装入；取不到只降级为「缺 VMT」
@@ -167,7 +183,7 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
   const spawnPoints = spawnData.spawn_points ?? [];
   const primary = spawnData.primary ?? 0;
 
-  return { fileName: file.name, meta, spawnPoints, primary, glbBytes, skyboxTexture, fogParams, skyCamera, pvsJson, elapsedMs, mosaicManifest: JSON.parse(mosaicManifestJson) as Record<string, string> };
+  return { fileName: file.name, meta, spawnPoints, primary, glbBytes, skyboxTexture, fogParams, skyCamera, pvsJson, entityIoJson, elapsedMs, mosaicManifest: JSON.parse(mosaicManifestJson) as Record<string, string> };
 }
 
 /**

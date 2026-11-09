@@ -42,6 +42,11 @@ import type { LightingMode } from '../../../../src/renderer-shared/shader/lightm
 import { applyLightingPresentation, type RenderLightingPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
 import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js';
 import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
+import { EntitySystem, type EntitySystemStats } from '../../../../src/ts-shared/entity/entity-system.js';
+import { attachEntitySystem } from '../../../../src/ts-shared/entity/attach.js';
+import { playerStateFromRaw, type RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
+import { Variant } from '../../../../src/ts-shared/entity/variant.js';
+import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 
 const DEG2RAD = Math.PI / 180;
 
@@ -120,6 +125,10 @@ export class RendererMain {
   /** 注入生效性统计是否已跑（幂等保护，跨地图由 `disposeScene` 复位）。 */
   private injectReported = false;
 
+  // ── Source 实体运行期 ────────────────────────────────────────
+  /** 由 `entityIoJson` 装配的通用 I/O / trigger / logic 系统；`tick` 与物理同帧推进。 */
+  private entitySystem: EntitySystem | null = null;
+
 
 
   /** 共享状态通道（SAB 实现或消息回退实现）；校准器从它读权威帧，`tick` 向它写输入与渲染采样。 */
@@ -139,6 +148,9 @@ export class RendererMain {
   /** 场景装载完成回调（`loadScene` 用场景包围盒最小 Y 调用一次）；`apps/game/src/app.ts` 注册它
    *  并转成 `setDeathY`。 */
   onSceneLoaded: ((deathThresholdY: number) => void) | null = null;
+
+  /** 实体系统观测回调：I/O 输入、宿主副作用请求都会送到这里（缺省丢弃）。 */
+  onEntityEvent: ((event: EntityEvent) => void) | null = null;
 
   /** 失效世代 +1（本地计数器）并调 `shared.resetRenderSample()` 让 Worker 丢弃既有采样配对。 */
   private bumpSampleEpoch(): void {
@@ -209,6 +221,45 @@ export class RendererMain {
     this.pendingInjectReport = result.applied;
     // 回传场景包围盒最小 Y（`onSceneLoaded` 的调用方把它当死亡阈值转给 setDeathY）
     this.onSceneLoaded?.(result.bbox.min.y);
+    this.setupEntitySystem(data.entityIoJson);
+  }
+
+  /**
+   * 装配通用 Source 实体运行期。
+   *
+   * 宿主采用**观测模式**：每个世界副作用都经 `onEntityEvent` 上报而不直接改物理。
+   * 理由是 teleport / damage 目前仍由 Rust `build_world(teleportJson, ...)` 那条链承担，
+   * 两条链同时施加会重复传送。上层要「完全收编」时，把 sink 的实现接到
+   * `PhysWorld.teleport_to` / worker `teleport-to-pos` 并停用旧链即可，实体层无需改动。
+   */
+  private setupEntitySystem(entityIoJson?: string): void {
+    this.entitySystem?.dispose();
+    this.entitySystem = attachEntitySystem({
+      entityIoJson,
+      getPlayerState: () => playerStateFromRaw(
+        (this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 },
+      ),
+      onEvent: (event) => this.onEntityEvent?.(event),
+      log: (message) => {
+        if (!message.startsWith('unhandled input')) return;
+        this.onEntityEvent?.({
+          kind: 'entity:unhandled', detail: message,
+          entityIndex: -1, classname: '', targetname: '', time: this.entitySystem?.time ?? 0,
+        });
+      },
+    });
+  }
+
+  /** 实体运行期统计（调试面板 / 控制台诊断）；未装配返回 null。 */
+  entityStats(): EntitySystemStats | null {
+    return this.entitySystem?.stats() ?? null;
+  }
+
+  /** 从宿主按名字注入一条输入（调试 / 未来 +use 接线的入口）。 */
+  entityFireInput(target: string, inputName: string, parameter?: string): number {
+    if (!this.entitySystem) return 0;
+    const value = parameter === undefined ? Variant.void() : Variant.fromString(parameter);
+    return this.entitySystem.acceptInputOn(target, inputName, value);
   }
 
   /** 贴图画质切换：算法与状态在共享会话，本端只转发。 */
@@ -236,6 +287,8 @@ export class RendererMain {
    *  物理、丢弃待喂输入、复位注入统计开关与校准器、重启渲染采样流。
    *  不销毁 renderer/scene/camera 本身——换图后由 `loadScene` 继续复用。 */
   disposeScene(): void {
+    this.entitySystem?.dispose();
+    this.entitySystem = null;
     this.session?.disposeScene();
     this.predPhys = null;
     this.predReady = false;
@@ -558,6 +611,9 @@ export class RendererMain {
       this.camera.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
       this.camera.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);
 
+      // Source 实体运行期：与物理同帧推进。touch 用本帧 state，0 延迟输出在
+      // ServiceEvents 里当帧消费（顺序见 entity-system.ts 文件头）。
+      this.entitySystem?.frame(dt);
     }
 
     // 2+3. 共享会话：可见性判定 → 近平面贴墙（隔帧）→ 天空/主世界绘制。
