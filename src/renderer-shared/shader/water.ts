@@ -641,12 +641,38 @@ function visibleWaterHeights(camera: THREE.Camera): Set<number> | null {
  * 变化（owner 实测：同池不同角度时好时坏；对调两 pass 顺序则内容互换——
  * 深度编码色漏进颜色 RT，见 §12.9）。
  */
+/**
+ * 水下底面（`*_beneath` / `$bottommaterial` 派生）的可见性门控。
+ *
+ * 事实：这些面朝下（法线 −y），相机在水面上方时 three 的背面剔除让它们一个像素都不出，
+ * 但**每个材质槽仍是一次 draw**（boreas：水面 160 块，每块 1 个 `_beneath` 槽 ⇒ 160 draw）。
+ * 做法：按 `materialHeight`（装配时写入的该层水位）与相机 y 直接置 `visible`，与背面剔除等价。
+ *
+ * 只在相机**低于**该层水位 1 HU 以上时才打开（水下视角需要水底），保留原语义。
+ * 材质名判据与 `beneathFogCandidates` 同源（`/beneath/i`），不引入新的分类口径。
+ */
+function cullBeneathMaterials(camera: THREE.Camera): void {
+  if ((g as { __vbspBeneathCull?: boolean }).__vbspBeneathCull === false) return;
+  const camY = camera.position.y;
+  for (const m of waterMaterials) {
+    if (!/beneath/i.test(m.name)) continue;
+    const h = materialHeight.get(m);
+    if (h === undefined) continue;
+    m.visible = camY < h - 1;
+  }
+}
+
 export function renderWaterFramePasses(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
   camera: THREE.Camera,
 ): void {
   if (waterMaterials.size === 0 || refrOnUniform.value <= 0.5) return;
+  // 水下底面（`*_beneath`，源 `$bottommaterial`）的面朝下：相机在水面之上时它们被背面剔除，
+  // 但每块仍各占一次 draw（boreas 水面 160 块 × 1 槽 = 160 draw，占全帧 412 的 39%）。
+  // 这里按「材质高度 vs 相机 y」直接置 `visible`，像素层面等价于背面剔除。
+  // A/B：`__vbspBeneathCull = false` 关掉（同构建内对照，确认画面无差）。
+  cullBeneathMaterials(camera);
   // ⚠️ 屏幕空间折射的 uniform 必须每帧刷新（相机在动），否则水面会按旧投影采样而扭曲。
   updateRefrUniforms(camera, renderer);
   // 视线里根本没有水面时不画整场景 RT：抬头看天/低头看地时水面在视锥外，
@@ -752,7 +778,25 @@ function nearestWaterHeight(camera: THREE.Camera): number | null {
   mirrors: number;
   heights: number[];
   spheres: Array<{ h: number; c: [number, number, number]; r: number }>;
+  /** 材质去重现状：同名/同贴图/同色/同渲染态的水面材质有几个实例（诊断 draw 数用）。 */
+  keys: Array<[string, number]>;
 } {
+  // 水面 draw ≈ 每个水面材质实例 × 每个几何组一次 ⇒ 材质实例数是 draw 数的下限。
+  // 这里把每个实例按「名字|贴图|颜色|side|alphaTest|opacity」归并，直接看出能不能共享。
+  const keyCount = new Map<string, number>();
+  for (const m of waterMaterials) {
+    const map = (m as unknown as { map?: THREE.Texture | null }).map;
+    const k = [
+      m.name || '(anon)',
+      map ? map.uuid.slice(0, 6) : '-',
+      m.color.getHexString(),
+      String(m.side),
+      String(m.alphaTest),
+      String(m.opacity),
+    ].join('|');
+    keyCount.set(k, (keyCount.get(k) ?? 0) + 1);
+  }
+  const keys = [...keyCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
   const heights = [...new Set([...mirrorMeshes.values()])].sort((a, b) => a - b);
   const spheres: Array<{ h: number; c: [number, number, number]; r: number }> = [];
   for (const [mesh, h] of mirrorMeshes) {
@@ -763,7 +807,7 @@ function nearestWaterHeight(camera: THREE.Camera): number | null {
     const c = bs.center.clone().applyMatrix4(mesh.matrixWorld);
     spheres.push({ h, c: [c.x, c.y, c.z], r: bs.radius });
   }
-  return { materials: waterMaterials.size, mirrors: mirrorMeshes.size, heights, spheres };
+  return { materials: waterMaterials.size, mirrors: mirrorMeshes.size, heights, spheres, keys };
 }
 
 export function resetWaterShaders(): void {  for (const p of mirrorPlanes.values()) p.rt?.dispose();
