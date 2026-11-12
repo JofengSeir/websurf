@@ -45,11 +45,13 @@ if (typeof window === "undefined") {
     const r = event.request;
     if (r.cache === "only-if-cached" && r.mode !== "same-origin") return;
     if (r.method !== 'GET') return;
+    // 网络优先：开发期 `npm run build:ts` 重建的 app.js 必须立刻可见；
+    // 旧实现 cache-first 会把首轮构建永久钉死（服务端 no-store 也绕不过 SW 缓存）。
+    // 离线 / 网络失败时才回缓存（预缓存清单仍由 install 期写入）。
     event.respondWith(
-      caches.match(r).then((cached) => {
-        if (cached) return withCOI(cached);
-        return fetch(r).then(withCOI).catch(() => fetch(r));
-      })
+      fetch(r)
+        .then(withCOI)
+        .catch(() => caches.match(r).then((cached) => (cached ? withCOI(cached) : fetch(r))))
     );
   });
 } else {
@@ -62,6 +64,8 @@ if (typeof window === "undefined") {
       navigator.serviceWorker
         .register('./coi-serviceworker.js')
         .then((reg) => {
+          // 主动查一次 SW 更新：否则浏览器可能沿用旧脚本 + 旧缓存最长 24h
+          reg.update().catch(() => {});
           // 等待 SW 真正控制当前页面（controllerchange），而非仅 ready（仅激活）
           return new Promise((resolve) => {
             if (navigator.serviceWorker.controller) {

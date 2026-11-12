@@ -255,8 +255,15 @@ export class PvsManager {
       return false;
     }
 
+    // 全零行 = 该 cluster 的 PVS 数据缺失（部分第三方编译器会留空）；直接采信会把整张图剔黑，
+    // 所以当作「本帧无判定」处理：保留上一次的可见集与 currentCluster，退回保守可见。
+    const decoded = this.decodePvsRow(newCluster);
+    if (decoded.size === 0) {
+      return false;
+    }
+
     this.currentCluster = newCluster;
-    this.visibleSet = this.decodePvsRow(newCluster);
+    this.visibleSet = decoded;
     return true;
   }
 
@@ -279,6 +286,41 @@ export class PvsManager {
       return -1;
     }
     return this.leaves[leafIdx].cluster;
+  }
+
+  /**
+   * 取世界坐标点**附近**的 cluster：点落在固体 leaf 时，用 6 方向偏移再找一次。
+   *
+   * 只给「相机所在 cluster」用（每帧 1 次）。贴墙、站在栏杆/斜坡里、出生点嵌在地板里时，
+   * 相机点会落进固体 leaf 得到 -1；上层若退回「上一次有效 cluster」，那个房间可能在地图另一端，
+   * 按它的 PVS 行剔块就会把眼前的墙整片剔掉（实测 surf_666 一次丢了 4 个块、画面直接露天空）。
+   * 偏移半径取玩家半宽量级，命中即返回最近的那个非固体 cluster。
+   *
+   * 注意**不要**把它用于批量网格采样（`assignClusters` 的每顶点查询）：那里固体命中很常见，
+   * 每次多查 12 个 leaf 会把装载时间拖到秒级。
+   *
+   * @param pos 世界坐标（Y-up）。
+   * @param radius 首个偏移半径（HU），依次尝试 `radius` 与 `radius*3`。
+   * @returns cluster id；仍找不到返回 -1。
+   */
+  getClusterNear(pos: PvsVec3, radius = 24): number {
+    const direct = this.getClusterAt(pos);
+    if (direct >= 0) return direct;
+    if (!this.hasPvs) return -1;
+    for (const r of [radius, radius * 3]) {
+      for (const [dx, dy, dz] of [
+        [r, 0, 0],
+        [-r, 0, 0],
+        [0, r, 0],
+        [0, -r, 0],
+        [0, 0, r],
+        [0, 0, -r],
+      ]) {
+        const c = this.getClusterAt({ x: pos.x + dx, y: pos.y + dy, z: pos.z + dz });
+        if (c >= 0) return c;
+      }
+    }
+    return -1;
   }
 
   /**
@@ -313,6 +355,40 @@ export class PvsManager {
       return -1;
     }
     return this.faceClusters[faceIndex];
+  }
+
+  /**
+   * 诊断：某个 cluster 覆盖的空间范围（由同 cluster 的 leaf AABB 合并而来）。
+   *
+   * 用途：判断「块被分到的 cluster 离它自己有多远」——PVS 误剔的两个候选根因
+   * （块↔cluster 映射错位 / PVS 行本身错）就是靠这个和 `visibleClustersOf` 区分的。
+   *
+   * @param cluster cluster id；负数（固体）或越界返回 null。
+   */
+  clusterBounds(cluster: number): { count: number; min: [number, number, number]; max: [number, number, number] } | null {
+    if (cluster < 0) return null;
+    let count = 0;
+    const min: [number, number, number] = [Infinity, Infinity, Infinity];
+    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    for (const leaf of this.leaves) {
+      if (leaf.cluster !== cluster) continue;
+      count++;
+      for (let i = 0; i < 3; i++) {
+        if (leaf.mins[i] < min[i]) min[i] = leaf.mins[i];
+        if (leaf.maxs[i] > max[i]) max[i] = leaf.maxs[i];
+      }
+    }
+    return count > 0 ? { count, min, max } : null;
+  }
+
+  /**
+   * 诊断：解码任意 cluster 的 PVS 行（不改变当前可见集）。
+   *
+   * 与 `isVisible` 的区别是它回答「**从** cluster 看到什么」，因此可以做双向校验：
+   * `visibleClustersOf(6284).includes(7739)` 为假而同房间两块相距几百 HU，才是真异常。
+   */
+  visibleClustersOf(cluster: number): number[] {
+    return [...this.decodePvsRow(cluster)];
   }
 
   /**

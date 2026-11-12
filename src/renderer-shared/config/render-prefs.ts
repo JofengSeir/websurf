@@ -82,8 +82,14 @@ export function renderPrefsKey(): string {
   return RENDER_PREFS_KEY_PREFIX + renderPrefsScope();
 }
 
-/** 结构版本：字段增删时递增；版本不符按「丢弃存档、用默认档」处理（与面板偏好同口径）。 */
-export const RENDER_PREFS_VERSION = 1;
+/**
+ * 结构版本：字段增删时递增；版本不符按「丢弃存档、用默认档」处理（与面板偏好同口径）。
+ *
+ * v2（2026-11-12）：`culling.distance` 的语义从「PVS 之外再叠一层距离」改成
+ * 「距离场 + PVS 两层同时生效，默认距离场 18000 HU」。旧存档里的 200000 / 8156 都是
+ * 早前 A/B 的实验残留，留着会把距离场压成任意值（表现为远景忽隐忽现），所以整档作废一次。
+ */
+export const RENDER_PREFS_VERSION = 2;
 
 /** 只读兼容的旧键（迁移来源，不删）：[0] = game 面板旧档（game 作用域迁移用）。 */
 export const LEGACY_PREFS_KEYS = ['vbsp:panelPrefs', 'vbsp:uiPrefs'] as const;
@@ -196,11 +202,13 @@ export interface RenderPrefsPatch {
 /** 相机 FOV 默认值（度）：三端现状一致（`apps/game/src/config.ts` 的 `hud.fov`、debug/viewer 的常量都是 73.6）。 */
 export const RENDER_DEFAULT_FOV = 73.6;
 
-/** 剔除距离默认值：0 = 自动（`maxDim × 0.5`，与 game `hud.renderDistance` 同义）；P4 消费。 */
+/** 剔除距离默认值：0 = 自动（PVS 开 = 18000 HU 的距离场，PVS 关 = `maxDim × 0.25`）；P4 消费。 */
 export const RENDER_DEFAULT_CULL_DISTANCE = 0;
 
-/** PVS 剔除默认值：三端现状均为关（game `ENABLE_PVS = false`）；P4 消费。 */
-export const RENDER_DEFAULT_PVS = false;
+/** PVS 剔除默认值：开（2026-11-11 起）。PVS 按 player cluster 只保留潜在可见块，
+ * 实测 surf_boreas 全视距 118→320fps，且同机位截图与「全画」逐像素一致；
+ * 首次启用有一次顶点采样开销（本图 ≈170ms）。显式关掉即回退到纯距离剔除。 */
+export const RENDER_DEFAULT_PVS = true;
 
 /** 共享层默认档（唯一来源是 `LIGHTING_PRESENTATION_DEFAULTS`，本函数只补 mode 与其余档位）。 */
 export function defaultRenderPrefs(): RenderPrefs {

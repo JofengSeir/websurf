@@ -128,11 +128,36 @@ export function renderSkyPass(input: SkyPassInput): THREE.Fog | null {
   }
   renderer.autoClear = false;
   renderer.clear();
+  const dbg = (globalThis as { __vbspDrawDebug?: { on?: boolean } }).__vbspDrawDebug?.on;
+  const tSky = dbg ? performance.now() : 0;
   renderer.render(scene, skyCamera);
+  const skyMs = dbg ? performance.now() - tSky : 0;
+  // 分段 draw 计数（仅 `__vbspDrawDebug.on` 时写）：天空遍和主遍各画了多少 —— three 每次
+  // `render()` 都会重置 `info.render.calls`，只有在这里夹住才能分别读到。
+  if (dbg) {
+    (globalThis as { __vbspPassDraws?: unknown }).__vbspPassDraws = {
+      sky: renderer.info.render.calls,
+      skyTris: renderer.info.render.triangles,
+    };
+  }
   scene.fog = mapFog;
   renderer.clearDepth();
   scene.background = null;
+  const tMain = dbg ? performance.now() : 0;
   renderer.render(scene, camera);
+  if (dbg) {
+    const prev = (globalThis as { __vbspPassDraws?: { sky?: number; skyTris?: number } }).__vbspPassDraws;
+    (globalThis as { __vbspPassDraws?: unknown }).__vbspPassDraws = {
+      sky: prev?.sky ?? 0,
+      skyTris: prev?.skyTris ?? 0,
+      main: renderer.info.render.calls,
+      mainTris: renderer.info.render.triangles,
+    };
+    (globalThis as { __vbspPassTimes?: unknown }).__vbspPassTimes = {
+      sky: +(skyMs).toFixed(2),
+      main: +(performance.now() - tMain).toFixed(2),
+    };
+  }
   scene.background = background;
   return skyFog;
 }

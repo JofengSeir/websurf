@@ -917,6 +917,11 @@ export class RendererMain {
         });
         return { replaced };
       },
+      /** 外部自动化脚本：注入一帧输入（与真实键鼠同一条 `feedInput` 通道），
+       *  用于量「移动/转视角时」的帧率（静止帧率会掩盖逐帧重排、上传、剔除开销）。 */
+      drive(dx: number, dy: number, mask = 0): void {
+        self.feedInput(dx, dy, mask);
+      },
     };
     (globalThis as unknown as { __vbspFrameProbe?: unknown }).__vbspFrameProbe = probe; installPoseEntry({ applyPose: (p) => { self.setHoldPoint({ x: p.pos[0], y: feetFromCameraPose(p)[1], z: p.pos[2], yaw: p.yawDeg, pitch: p.pitchDeg, onGround: true }); }, readPose: () => cameraPoseOf(self.camera), releasePose: () => { self.holdPoint = null; } }, 'game'); (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality = (q) => self.applyTextureQuality(q);
   }

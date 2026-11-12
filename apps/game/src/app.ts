@@ -386,17 +386,76 @@ function bindInput(): void {
   }, (v) => Math.round(v * 100) / 100);
 }
 
+/** 低帧自检：把「为什么这台机器只有 N FPS」一次性打出来（GPU/焦点/视口），
+ *  避免用户只能报「帧率不行」而无定位信息。仅在低帧时打印，正常机器零噪音。 */
+let lowFpsWarnedAt = 0;
+let lowFpsStreak = 0;
+let frameDeltas: number[] = [];
+function reportLowFps(fps: number, now: number): void {
+  if (!sceneReady) return; // 加载/合并期本来就会掉帧，不算问题
+  lowFpsStreak++;
+  if (lowFpsStreak < 3 || now - lowFpsWarnedAt < 8000) return;
+  lowFpsWarnedAt = now;
+  lowFpsStreak = 0;
+  const sorted = frameDeltas.slice().sort((a, b) => a - b);
+  const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+  let gpu = '?';
+  try {
+    const canvas = document.querySelector('canvas');
+    const gl = canvas?.getContext('webgl2') as WebGL2RenderingContext | null;
+    const dbg = gl?.getExtension('WEBGL_debug_renderer_info');
+    gpu = dbg ? String(gl!.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : 'unmasked-unavailable';
+  } catch {
+    /* 取不到就不写 */
+  }
+  const canvas = document.querySelector('canvas');
+  const mem = (performance as unknown as { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } }).memory;
+  const info = {
+    fps,
+    frameMs: +median.toFixed(2),
+    gpu,
+    canvas: canvas ? `${canvas.width}x${canvas.height}` : 'none',
+    cssSize: `${innerWidth}x${innerHeight}`,
+    dpr: devicePixelRatio,
+    visible: document.visibilityState,
+    focused: document.hasFocus(),
+    heapMB: mem ? +(mem.usedJSHeapSize / 1048576).toFixed(0) : undefined,
+  };
+  console.warn('[perf] 低帧自检', info);
+  if (dom.fpsEl) {
+    const hint = /swiftshader|software|basic render/i.test(info.gpu)
+      ? '软件渲染（浏览器没启用 GPU：设置 → 系统和性能 → 使用硬件加速 → 重启浏览器）'
+      : /intel/i.test(info.gpu)
+        ? '核显渲染'
+        : info.visible !== 'visible'
+          ? '页面在后台被限帧'
+          : !info.focused
+            ? '窗口未聚焦（浏览器可能限帧）'
+            : `GPU: ${info.gpu}`;
+    dom.fpsEl.title = `${JSON.stringify(info, null, 2)}\n${hint}`;
+    dom.fpsEl.textContent = `${fps} FPS ⚠`;
+  }
+}
+
 /** 主线程 rAF 循环：按键 → SAB 输入槽 + 预测实例；渲染已在 RendererMain。 */
 function startInputLoop(): void {
   let fpsFrames = 0;
   let fpsTime = 0;
   let lastQeMs = 0;
+  let lastFrameAt = 0;
   const tick = (now: number): void => {
     requestAnimationFrame(tick);
     // FPS 显示（左上角，每秒刷新；不依赖场景就绪）
     fpsFrames++;
+    if (lastFrameAt !== 0) {
+      frameDeltas.push(now - lastFrameAt);
+      if (frameDeltas.length > 120) frameDeltas.shift();
+    }
+    lastFrameAt = now;
     if (now - fpsTime >= 1000) {
-      if (dom.fpsEl) dom.fpsEl.textContent = `${fpsFrames} FPS`;
+      if (dom.fpsEl) dom.fpsEl.textContent = fpsFrames < 50 ? `${fpsFrames} FPS ⚠` : `${fpsFrames} FPS`;
+      if (fpsFrames < 50) reportLowFps(fpsFrames, now);
+      else lowFpsStreak = 0;
       fpsFrames = 0;
       fpsTime = now;
     }

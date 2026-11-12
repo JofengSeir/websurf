@@ -71,6 +71,39 @@ function optIsTranslucent(m: THREE.Material | THREE.Material[]): boolean {
   return !Array.isArray(m) && m.transparent === true;
 }
 
+/**
+ * 几何的「属性布局签名」。
+ *
+ * why：`mergeGeometries` 以组内第一份几何的属性键集合为基准，要求其余几何不多不少、
+ * 同名属性 itemSize / normalized / 数组类型一致，且索引形态一致。GLB 里同一材质实例的
+ * mesh 常有的带 `normal` / `uv1`、有的不带（水面、unlit prop 常见）。过去它们被塞进
+ * 同一个合并组，两层合并（按材质子合并 + 多材质块最终合并）都会返回 null，只能回退成
+ * 「各自保留独立几何」⇒ draw call 随组内 mesh 数线性增长。
+ *
+ * 做法：把签名并入两层分组键，让属性布局不同的几何自然落到不同组，每组都能真正合并。
+ * **不改写任何几何数据**（补零法线会改变 vertex-lighting / lightmap 的材质路由，
+ * 实测会造出 220 个「真漏网」mesh），签名是确定性字符串，Map 迭代仍按插入顺序。
+ */
+function optGeometrySignature(g: THREE.BufferGeometry): string {
+  const parts: string[] = [`ix:${g.index ? 1 : 0}`];
+  for (const name of Object.keys(g.attributes).sort()) {
+    const a = g.attributes[name] as THREE.BufferAttribute;
+    const holder = a as unknown as {
+      gpuType?: number;
+      isInterleavedBufferAttribute?: boolean;
+      array?: { constructor?: { name?: string } };
+      data?: { array?: { constructor?: { name?: string } } };
+    };
+    parts.push(
+      `${name}:${a.itemSize}:${a.normalized ? 1 : 0}` +
+      `:${holder.array?.constructor?.name ?? holder.data?.array?.constructor?.name ?? 'interleaved'}` +
+      `:${holder.gpuType ?? 0}:${holder.isInterleavedBufferAttribute ? 1 : 0}`,
+    );
+  }
+  parts.push(`morph:${Object.keys(g.morphAttributes).sort().join(',')}:${g.morphTargetsRelative ? 1 : 0}`);
+  return parts.join('|');
+}
+
 /** 统计给定 cellSize 下的非空 cell 数（cell 大小自适应循环用）。 */
 function optCountCells(infos: OptMeshInfo[], cellSize: number): number {
   const keys = new Set<string>();
@@ -144,6 +177,22 @@ export interface MergeOptions {
   normalizeGroup?: (geoms: THREE.BufferGeometry[]) => THREE.BufferGeometry[];
   /** 半透明是否单独成块（T/O 分桶 + `cellSize/4`）。默认 `true`；`false` 用于 A/B 复现并块问题。 */
   translucentSplit?: boolean;
+  /**
+   * 目标块数（默认 512，主世界用）。只给**天空区**这类「一次整片可见、不需要逐块剔除」的对象
+   * 调小：天空遍实测在水平线要画 160 多块（1.7ms），是俯仰掉帧的主要来源；天空区怎么合并都
+   * 整片显示，块数只影响 draw 数。
+   */
+  targetCells?: number;
+  /**
+   * **不透明**图元的目标块数（默认与 `targetCells` 相同）。只给不透明桶用：半透明桶的 cell 边长
+   * 永远由 `targetCells` 决定（再除以 `OPT_TRANS_CELL_DIV`），所以调这个值不会改变水面/冰面等
+   * 半透明块的切分与镜面高度来源 —— 2026-11-13「合并粒度调粗导致水体消失」就是粗合并动了
+   * 半透明桶，这里把两者拆开。
+   *
+   * 主世界用它换 draw 数：实测单 draw ≈ 7~10µs，开阔路段 344~368 块 / 344~503 draw 时主遍
+   * 3~4.4ms，超过 320fps 的 3.12ms 预算；不透明块细分粒度减半能砍掉一半左右的 draw。
+   */
+  opaqueTargetCells?: number;
 }
 
 /** mergeIntoChunks 的产物：chunks / keptMeshes 由调用方自行挂载，统计字段供诊断日志用。 */
@@ -344,14 +393,35 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
   //     都回退成「保留各自独立几何」，不存在"合并失败就丢弃"的路径。
 
   // ② cell 边长自适应：初值取世界包围盒对角线 / cbrt(目标块数)，随后按非空 cell 数缩放（收敛到
-  //    OPT_MIN_CELLS..OPT_MAX_CELLS）
+  //    OPT_MIN_CELLS..OPT_MAX_CELLS；给了 `targetCells` 时按同一比例收窄上下限）
+  const targetCells = Math.max(1, Math.round(opts?.targetCells ?? OPT_TARGET_CELLS));
+  const minCells = Math.max(1, Math.min(OPT_MIN_CELLS, Math.round(targetCells * 0.6)));
+  const maxCells = Math.max(minCells, Math.min(OPT_MAX_CELLS, Math.round(targetCells * 1.6)));
   const diag = Math.max(worldBox.getSize(new THREE.Vector3()).length(), 1);
-  let cellSize = Math.min(Math.max(diag / Math.cbrt(OPT_TARGET_CELLS), OPT_CELL_MIN), OPT_CELL_MAX);
+  let cellSize = Math.min(Math.max(diag / Math.cbrt(targetCells), OPT_CELL_MIN), OPT_CELL_MAX);
   for (let i = 0; i < 6; i++) {
     const n = optCountCells(infos, cellSize);
-    if (n >= OPT_MIN_CELLS && n <= OPT_MAX_CELLS) break;
-    const scale = Math.min(Math.max(Math.cbrt(n / OPT_TARGET_CELLS), 0.55), 1.8);
+    if (n >= minCells && n <= maxCells) break;
+    const scale = Math.min(Math.max(Math.cbrt(n / targetCells), 0.55), 1.8);
     cellSize = Math.min(Math.max(cellSize * scale, OPT_CELL_MIN), OPT_CELL_MAX);
+  }
+
+  // ②b 不透明桶的 cell 边长（可选）：与半透明桶**分开算**，这样调粗不透明块不会顺带改变水面
+  //    块的切分（半透明桶仍用 ② 算出的 `cellSize / OPT_TRANS_CELL_DIV`）。
+  const opaqueInfos = opts?.translucentSplit !== false ? infos.filter((it) => !optIsTranslucent(it.mesh.material)) : infos;
+  let cellSizeO = cellSize;
+  if (opts?.opaqueTargetCells && opaqueInfos.length > 0) {
+    const oTarget = Math.max(1, Math.round(opts.opaqueTargetCells));
+    const oMin = Math.max(1, Math.min(OPT_MIN_CELLS, Math.round(oTarget * 0.6)));
+    const oMax = Math.max(oMin, Math.min(OPT_MAX_CELLS, Math.round(oTarget * 1.6)));
+    let cs = Math.min(Math.max(diag / Math.cbrt(oTarget), OPT_CELL_MIN), OPT_CELL_MAX);
+    for (let i = 0; i < 6; i++) {
+      const n = optCountCells(opaqueInfos, cs);
+      if (n >= oMin && n <= oMax) break;
+      const scale = Math.min(Math.max(Math.cbrt(n / oTarget), 0.55), 1.8);
+      cs = Math.min(Math.max(cs * scale, OPT_CELL_MIN), OPT_CELL_MAX);
+    }
+    cellSizeO = cs;
   }
 
   // ③ 分桶：按每个 mesh 的世界包围盒中心归 cell（横跨多 cell 的归中心所在 cell）。
@@ -362,7 +432,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
   for (const it of infos) {
     // 面板可关：关掉后半透明与不透明同块（复现「水面被并进大块 ⇒ RT 自采样/放射反射」）。
     const isTrans = opts?.translucentSplit !== false && optIsTranslucent(it.mesh.material);
-    const cs = isTrans ? cellSize / OPT_TRANS_CELL_DIV : cellSize;
+    const cs = isTrans ? cellSize / OPT_TRANS_CELL_DIV : cellSizeO;
     const key = (isTrans ? 'T' : 'O') + optCellKey(it.cx, it.cy, it.cz, cs);
     let arr = cells.get(key);
     if (!arr) {
@@ -402,16 +472,21 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
 
     // 多 mesh cell：按材质实例分组，组内合并成一个几何（每组对应一个材质槽）。
     // 来源元数据与几何并行收集（同一下标），供合并后拼区间表用。
-    const byMat = new Map<THREE.Material, { geoms: THREE.BufferGeometry[]; seeds: MergeSourceSeed[] }>();
+    const byMat = new Map<string, {
+      mat: THREE.Material;
+      geoms: THREE.BufferGeometry[];
+      seeds: MergeSourceSeed[];
+    }>();
     for (const it of arr) {
       const m = it.mesh;
       const mat = m.material as THREE.Material;
       const baked = m.geometry.clone();
       baked.applyMatrix4(m.matrixWorld);
-      let group = byMat.get(mat);
+      const key = `${mat.uuid}|${optGeometrySignature(baked)}`;
+      let group = byMat.get(key);
       if (!group) {
-        group = { geoms: [], seeds: [] };
-        byMat.set(mat, group);
+        group = { mat, geoms: [], seeds: [] };
+        byMat.set(key, group);
       }
       group.geoms.push(baked);
       group.seeds.push(meshSourceSeed(m));
@@ -420,7 +495,8 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     // 与 mergedGeoms 同下标的来源表（null = 这一份没有表，最终合并出的块也不带表）
     const mergedTables: (MergeSourceTable | null)[] = [];
     const mats: THREE.Material[] = [];
-    for (const [mat, group] of byMat) {
+    for (const group of byMat.values()) {
+      const mat = group.mat;
       const geomsRaw = group.geoms;
       const geoms = (opts?.normalizeGroup ?? normalizeMergeGroup)(geomsRaw);
       // 钩子须逐项对应（长度不变）才谈得上"哪份几何进了哪段缓冲"
@@ -451,37 +527,59 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       for (const it of arr) it.mesh.geometry.dispose();
       continue;
     }
-    let chunk: THREE.Mesh;
-    if (mergedGeoms.length === 1) {
-      chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
-      attachSourceTable(mergedGeoms[0], mergedTables[0]);
-      drawCallEst++;
-    } else {
-      // 归一后的数组既做最终合并的入参，也定区间表的长度口径（逐项对应）
-      const normalized = (opts?.normalizeGroup ?? normalizeMergeGroup)(mergedGeoms);
-      const final = mergeGeometries(normalized, true);
-      if (final) {
-        for (const g of mergedGeoms) if (g !== final) g.dispose();
-        chunk = new THREE.Mesh(final, mats);
-        drawCallEst += final.groups.length;
-        attachSourceTable(final, concatSourceTables(normalized, mergedTables));
+    // ⑤ 最终合并：按属性签名分桶，每桶单独合成一个 Mesh + 材质数组。
+    //    不同签名的几何硬塞进一次 mergeGeometries 必然返回 null；过去的防御分支只能
+    //    「每个材质单独一块」，draw call 随之暴涨。分桶只改变分块边界，不改几何数据。
+    const finalGroups = new Map<string, {
+      geoms: THREE.BufferGeometry[];
+      mats: THREE.Material[];
+      tables: (MergeSourceTable | null)[];
+    }>();
+    for (let i = 0; i < mergedGeoms.length; i++) {
+      const sig = optGeometrySignature(mergedGeoms[i]);
+      let grp = finalGroups.get(sig);
+      if (!grp) {
+        grp = { geoms: [], mats: [], tables: [] };
+        finalGroups.set(sig, grp);
+      }
+      grp.geoms.push(mergedGeoms[i]);
+      grp.mats.push(mats[i]);
+      grp.tables.push(mergedTables[i]);
+    }
+    for (const grp of finalGroups.values()) {
+      let chunk: THREE.Mesh;
+      if (grp.geoms.length === 1) {
+        chunk = new THREE.Mesh(grp.geoms[0], grp.mats[0]);
+        attachSourceTable(grp.geoms[0], grp.tables[0]);
+        drawCallEst++;
       } else {
-        // 最终合并失败（极端防御）：每个材质单独一块
-        chunk = new THREE.Mesh(mergedGeoms[0], mats[0]);
-        attachSourceTable(mergedGeoms[0], mergedTables[0]);
-        for (let i = 1; i < mergedGeoms.length; i++) {
-          const extra = new THREE.Mesh(mergedGeoms[i], mats[i]);
-          attachSourceTable(mergedGeoms[i], mergedTables[i]);
-          chunks.push(extra);
-          chunkCount++;
+        // 归一后的数组既做最终合并的入参，也定区间表的长度口径（逐项对应）
+        const normalized = (opts?.normalizeGroup ?? normalizeMergeGroup)(grp.geoms);
+        const final = mergeGeometries(normalized, true);
+        if (final) {
+          for (const g of grp.geoms) if (g !== final) g.dispose();
+          chunk = new THREE.Mesh(final, grp.mats);
+          drawCallEst += final.groups.length;
+          attachSourceTable(final, concatSourceTables(normalized, grp.tables));
+        } else {
+          // 极端防御：签名相同却仍失败时，每份单独一块
+          chunk = new THREE.Mesh(grp.geoms[0], grp.mats[0]);
+          attachSourceTable(grp.geoms[0], grp.tables[0]);
           drawCallEst++;
+          for (let i = 1; i < grp.geoms.length; i++) {
+            const extra = new THREE.Mesh(grp.geoms[i], grp.mats[i]);
+            attachSourceTable(grp.geoms[i], grp.tables[i]);
+            chunks.push(extra);
+            chunkCount++;
+            drawCallEst++;
+          }
         }
       }
+      chunks.push(chunk);
+      chunkCount++;
     }
     for (const it of arr) it.mesh.geometry.dispose();
-    chunkCount++;
     for (const g of mergedGeoms) vertsTotal += g.attributes.position.count;
-    chunks.push(chunk);
   }
 
   return { infos, keptMeshes, chunks, cellSize, cellsCount: cells.size, chunkCount, vertsTotal, drawCallEst };

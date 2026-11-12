@@ -90,7 +90,9 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   const root = mergedRoot ?? mapRoot;
 
   if (skyGroup) {
-    const skyMerged = mergeIntoChunks(skyGroup);
+    // 天空区整片一次可见、不做逐块剔除，块数只影响天空遍的 draw 数（实测水平线 160+ 块 = 1.7ms）；
+    // 目标给 16 块，天空是静态远景，合并粒度粗一点也不会有可见差异。
+    const skyMerged = mergeIntoChunks(skyGroup, { targetCells: 16 });
     skyGroup.clear();
     for (const m of skyMerged.chunks) skyGroup.add(m);
     for (const m of skyMerged.keptMeshes) skyGroup.add(m);

@@ -33,7 +33,12 @@ import {
 } from '../environment/scene-environment.js';
 import { renderSkyPass, type MapFogParams } from '../environment/render-sky-pass.js';
 import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../environment/miniature-sky.js';
-import { VisibilityController, type VisibilityUpdateResult } from './visibility-controller.js';
+import {
+  CULL_DISTANCE_PVS_DEFAULT,
+  VisibilityController,
+  type VisibilityUpdateResult,
+} from './visibility-controller.js';
+import { PvsRegionOverlay } from './pvs-region-overlay.js';
 import { applySceneCamera, shrinkNearPlane } from '../camera/scene-camera.js';
 import { NearPlaneController } from '../camera/near-plane.js';
 import {
@@ -42,6 +47,13 @@ import {
   type TextureQualityResult,
 } from './texture-quality.js';
 import { applyRenderPrefs, readRenderPrefs } from '../config/render-prefs.js';
+
+/**
+ * 渲染代码版本标记：`__vbspCulling.state().rev` 会带出来。
+ * 排查「现象还在」时先看它——不一致就说明浏览器跑的是旧包（Service Worker / 磁盘缓存），
+ * 别在旧构建上做判断。改渲染语义时顺手递增。
+ */
+export const RENDER_REV = '2026-11-12.4-pitch-perf';
 import { getLightingMode, setLightingMode as setLightingModeInShader, type LightingMode } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import type { PoseScope } from '../camera/pose-entry.js';
@@ -133,6 +145,10 @@ export interface RenderSessionStats {
   cullDistance: number;
   diagonal: number;
   maxCull: number;
+  /** 渲染代码版本（见 `RENDER_REV`）：HUD/控制台都能直接看到，用来识别「浏览器还在跑旧包」。 */
+  rev: string;
+  /** 可见块「凭什么被画」的分项计数：`pvs` = PVS 判可见、`distance` = 只有距离档（PVS 关）。 */
+  reasons: { pvs: number; distance: number };
 }
 
 /**
@@ -150,6 +166,12 @@ export class RenderSession {
 
   /** 可见性判定本体（距离优先、PVS 可选；天空层不参与）。 */
   private readonly visibility = new VisibilityController();
+  /** PVS 区域着色（debug 诊断）：按 cluster 给块上色。 */
+  private readonly pvsOverlay = new PvsRegionOverlay();
+  /** 诊断覆盖：`__vbspCulling.pvs()` 设的值优先于 prefs（null = 跟随 prefs）。 */
+  private pvsOverride: boolean | null = null;
+  /** 上一帧「PVS 是开还是关」，用来在开关变化时重算自动距离档（`null` = 还没算过）。 */
+  private pvsAutoCull: boolean | null = null;
   /** 探针读的「上一帧判定结果」。 */
   private lastVisibility: VisibilityUpdateResult | null = null;
   /** PVS 查询器（`loadScene` 按 `pvsJson` 建；无 PVS 时 null）。 */
@@ -287,6 +309,92 @@ export class RenderSession {
     });
 
     this.root = asm.root;
+    // 诊断口：主根之外的可见 mesh（道具/实体）统计——PVS 只覆盖主根，这些不受它约束。
+    (globalThis as { __vbspSceneStats?: unknown }).__vbspSceneStats = () => this.drawnChunkStats();
+    (globalThis as { __vbspChunkAudit?: unknown }).__vbspChunkAudit = (limit?: number) => this.chunkAudit(limit);
+    (globalThis as { __vbspProbeChunk?: unknown }).__vbspProbeChunk = (name: string) => this.probeChunk(name);
+    (globalThis as { __vbspRayCheck?: unknown }).__vbspRayCheck = (idx: number) => this.rayCheck(idx);
+    (globalThis as { __vbspFrustumAudit?: unknown }).__vbspFrustumAudit = (sx?: number, sy?: number) => this.frustumAudit(sx, sy);
+    (globalThis as { __vbspPvsInfo?: unknown }).__vbspPvsInfo = (limit?: number) => this.pvsInfo(limit);
+    (globalThis as { __vbspPickAt?: unknown }).__vbspPickAt = (x?: number, y?: number) => this.pickAt(x, y);
+    (globalThis as { __vbspChunkDetail?: unknown }).__vbspChunkDetail = (idx: number, near?: number) => this.chunkClusterDetail(idx, near);
+    // 诊断：世界坐标 → BSP leaf 的 cluster（-1 = 固体），以及两个 cluster 的 PVS 互见性。
+    (globalThis as { __vbspClusterAt?: unknown }).__vbspClusterAt = (x: number, y: number, z: number) =>
+      this.pvs ? this.pvs.getClusterAt({ x, y, z }) : -1;
+    // 诊断：相机世界坐标与朝向（沿视线采样 leaf/cluster 用）
+    (globalThis as { __vbspCam?: unknown }).__vbspCam = () => {
+      const p = this.camera.position;
+      const d = this.camera.getWorldDirection(new THREE.Vector3());
+      return { pos: [p.x, p.y, p.z], dir: [d.x, d.y, d.z] };
+    };
+    // 诊断：cluster 的空间范围 / 任意 cluster 的 PVS 行（判断「块↔cluster 映射错」还是「PVS 行错」）
+    (globalThis as { __vbspClusterBounds?: unknown }).__vbspClusterBounds = (c: number) =>
+      this.pvs ? this.pvs.clusterBounds(c) : null;
+    (globalThis as { __vbspPvsRow?: unknown }).__vbspPvsRow = (c: number, target?: number) => {
+      if (!this.pvs) return null;
+      const ids = this.pvs.visibleClustersOf(c);
+      return { cluster: c, count: ids.length, sample: ids.slice(0, 20), hasTarget: target === undefined ? null : ids.includes(target) };
+    };
+    // 诊断：地图世界包围盒（min/max），网格采样找「室内」机位用。
+    (globalThis as { __vbspBounds?: unknown }).__vbspBounds = () => {
+      const box = this.worldBox();
+      return box ? { min: box.min.toArray(), max: box.max.toArray() } : null;
+    };
+    // 诊断：运行期切剔除档（0 = 自动 maxDim×0.5），用于 A/B「这面墙是被距离剔除吃掉的吗」。
+    // 注意：`pvs()` 必须写 override，`updateVisibility()` 每帧都会用 prefs 覆盖 `enablePvs`。
+    (globalThis as { __vbspCulling?: unknown }).__vbspCulling = {
+      distance: (v: number) => this.setCullDistance(v),
+      pvs: (on: boolean) => {
+        this.pvsOverride = on;
+        this.visibility.enablePvs = on;
+        return this.visibility.enablePvs;
+      },
+      /** 仅取证用：关掉距离场（无限远），得到「只按 PVS」或「全画」的对照图。 */
+      full: () => {
+        this.visibility.setCullDistance(Number.POSITIVE_INFINITY, 0);
+        return this.visibility.cullDistance;
+      },
+      state: () => ({
+        cull: this.visibility.cullDistance,
+        auto: this.visibility.autoCullDistance,
+        pvs: this.visibility.enablePvs,
+        pvsOverride: this.pvsOverride,
+        maxDim: this.maxDim,
+        rev: RENDER_REV,
+      }),
+    };
+    // 诊断：天空层内容体检。`extractSkyArea` 的判据是「任一采样点落在 sky_camera 所在 cluster」，
+    // 一个跨区的合并 mesh 只要有一个采点命中就整块搬去天空层（主相机永远不画）。
+    // 这里报出天空层每块的世界包围盒大小，与主根包围盒对比即可看出是否「误摘」。
+    (globalThis as { __vbspSkyDiag?: unknown }).__vbspSkyDiag = () => {
+      const g = this.skyGroup;
+      if (!g) return { hasGroup: false };
+      const world = this.worldBox();
+      const mainSize = world ? world.getSize(new THREE.Vector3()) : null;
+      const items = g.children
+        .filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh)
+        .map((m) => {
+          const b = new THREE.Box3().setFromObject(m);
+          const s = b.getSize(new THREE.Vector3());
+          const tris = m.geometry.index ? m.geometry.index.count / 3 : m.geometry.attributes.position.count / 3;
+          return {
+            name: m.name,
+            tris,
+            size: [+s.x.toFixed(1), +s.y.toFixed(1), +s.z.toFixed(1)],
+            diag: +Math.max(s.x, s.y, s.z).toFixed(1),
+            min: b.min.toArray().map((v) => +v.toFixed(0)),
+            max: b.max.toArray().map((v) => +v.toFixed(0)),
+          };
+        })
+        .sort((a, b) => b.diag - a.diag);
+      return {
+        hasGroup: true,
+        children: g.children.length,
+        mainSize: mainSize ? [+mainSize.x.toFixed(0), +mainSize.y.toFixed(0), +mainSize.z.toFixed(0)] : null,
+        largest: items.slice(0, 8),
+        totalTris: items.reduce((s, i) => s + i.tris, 0),
+      };
+    };
     if (this.markBspModel) this.root.userData.isBspModel = true;
     this.bbox = asm.bbox;
     this.maxDim = asm.maxDim;
@@ -318,7 +426,13 @@ export class RenderSession {
     const size = box ? box.getSize(new THREE.Vector3()) : new THREE.Vector3();
     this.diagonal = size.length();
     this.maxCull = Math.ceil((this.diagonal * 4) / 100) * 100;
-    const defaultCull = this.visibility.setCullDistance(this.maxDim * 0.5, rp.culling.distance);
+    // 默认剔除距离：**距离场 + PVS 两层同时生效**（用户 2026-11-12 定的运行模型）——
+    // 以玩家为球心、半径 `CULL_DISTANCE_PVS_DEFAULT`（18000 HU）的距离场先判一次：场外的块直接不画、
+    // **也不参与 PVS 判定**（省掉这部分的 `isVisible` 查询与提交）；场内的块再交给 PVS 决定画不画。
+    // PVS 关 = 纯距离档，退回最大边 × 0.25（旧默认全量绘制 2789 draw / 53fps，那一档靠距离兜底）。
+    // 面板显式设的「视距」照常覆盖默认值（两层都按 `setCullDistance` 的同一口径）。
+    const autoCull = rp.culling.pvs ? CULL_DISTANCE_PVS_DEFAULT : this.maxDim * 0.25;
+    const defaultCull = this.visibility.setCullDistance(autoCull, this.cullConfigValue(rp.culling.distance));
 
     // 环境：背景/反射源/雾逐字段登记（无天空盒时用纯色回落）
     setSceneEnvironment(this.scene, {
@@ -374,16 +488,47 @@ export class RenderSession {
     this.mosaicManifest = null;
     this.origTextureImages.clear();
     this.visibility.clear();
+    this.pvsOverlay.reset();
     this.lastVisibility = null;
     this.nearCheckToggle = false;
   }
 
   /** 只做可见性判定（debug 的按需渲染需要在决定是否出帧前先知道有无变化）。 */
   updateVisibility(): VisibilityUpdateResult {
-    // 档即开关：面板/深链改 `culling.pvs` 后下一帧生效
-    this.visibility.enablePvs = readRenderPrefs().culling.pvs;
+    // 档即开关：面板/深链改 `culling.pvs` 后下一帧生效。
+    // 区域着色开启时强制关掉 PVS 剔除——否则「不可见的区域」根本不会被画出来，就看不到对照。
+    this.visibility.enablePvs = this.pvsOverride ?? (!this.pvsOverlay.enabled && readRenderPrefs().culling.pvs);
+    // PVS 开关一变，自动距离档跟着换：PVS 开 ⇒ 距离场半径 `CULL_DISTANCE_PVS_DEFAULT`（18000）；
+    // PVS 关 ⇒ `maxDim × 0.25` 的纯距离档。两层同时生效时**距离场先判**（场外不画、也不进 PVS），
+    // 面板显式「视距」始终覆盖默认值。
+    if (this.pvsAutoCull !== this.visibility.enablePvs) {
+      this.pvsAutoCull = this.visibility.enablePvs;
+      const rp = readRenderPrefs();
+      this.visibility.setCullDistance(
+        this.pvsAutoCull ? CULL_DISTANCE_PVS_DEFAULT : this.maxDim * 0.25,
+        this.cullConfigValue(rp.culling.distance),
+      );
+    }
     this.lastVisibility = this.visibility.update(this.camera, this.pvs);
     return this.lastVisibility;
+  }
+
+  /** PVS 区域着色开关（debug 面板用；开启期间不按 PVS/距离剔除，只上色，才能看清「不可见的区域」）。 */
+  setPvsRegionOverlay(on: boolean): boolean {
+    this.pvsOverlay.setEnabled(on, this.root, this.pvs);
+    if (on) {
+      // 暂时关掉距离剔除：否则远处块根本不画，看不到「存在但从当前簇不可见」的灰区
+      this.visibility.setCullDistance(Number.POSITIVE_INFINITY, 0);
+      // 立刻按当前相机算一遍，避免第一帧全是「不可见」灰
+      this.pvsOverlay.update(this.root, this.pvs, this.camera.position);
+    } else {
+      const rp = readRenderPrefs();
+      this.visibility.setCullDistance(
+        rp.culling.pvs ? CULL_DISTANCE_PVS_DEFAULT : this.maxDim * 0.25,
+        this.cullConfigValue(rp.culling.distance),
+      );
+    }
+    return this.pvsOverlay.enabled;
   }
 
   /**
@@ -392,7 +537,22 @@ export class RenderSession {
    * 调用方负责先把相机位姿写好（game/debug 从物理状态、viewer 从自由飞行）。
    */
   frame(opts: RenderFrameOptions = {}): VisibilityUpdateResult | null {
+    // 分阶段耗时采样：默认关闭（只在每帧多几次 performance.now()），排查「某一帧突然变长」
+    // 时在控制台执行 `__vbspDrawDebug = { on: true }`，帧末可从 `__vbspDraws.times` 读到
+    // vis/near/sort/water/sky 各段的毫秒数（2026-11 定位「人一动就掉帧」用的就是它）。
+    const dbgOn = !!(globalThis as { __vbspDrawDebug?: { on?: boolean } }).__vbspDrawDebug?.on;
+    const tFrame = dbgOn ? performance.now() : 0;
+    const times: Record<string, number> = {};
+    let tLast = dbgOn ? performance.now() : 0;
+    const mark = (n: string): void => {
+      if (!dbgOn) return;
+      const now = performance.now();
+      times[n] = +(now - tLast).toFixed(2);
+      tLast = now;
+    };
     if (opts.updateVisibility !== false) this.updateVisibility();
+    mark('vis');
+    if (this.pvsOverlay.enabled) this.pvsOverlay.update(this.root, this.pvs, this.camera.position);
     this.nearCheckToggle = !this.nearCheckToggle;
     if (opts.updateNearPlane !== false && this.nearCheckToggle && this.root) {
       shrinkNearPlane(
@@ -405,10 +565,13 @@ export class RenderSession {
         [this.root],
       );
     }
+    mark('near');
     this.sortTransparentChunks(this.camera);
+    mark('sort');
     // 水面折射/深度 RT：必须在主渲染**之前**的干净上下文渲染（T-650 v4：原先嵌套在
     // 水面 onBeforeRender 里，嵌套 render 状态被外层半途状态污染且随视角变化，§12.9）。
     renderWaterFramePasses(this.renderer, this.scene, this.camera);
+    mark('water');
     this.skyFog = renderSkyPass({
       renderer: this.renderer,
       scene: this.scene,
@@ -418,6 +581,24 @@ export class RenderSession {
       skyParams: this.skyParams,
       skyFog: this.skyFog,
     });
+    mark('sky');
+    if (dbgOn) {
+      times.frame = +(performance.now() - tFrame).toFixed(2);
+      (globalThis as { __vbspDraws?: unknown }).__vbspDraws = {
+        total: this.renderer.info.render.calls,
+        tris: this.renderer.info.render.triangles,
+        programs: this.renderer.info.programs?.length ?? 0,
+        textures: this.renderer.info.memory.textures,
+        geometries: this.renderer.info.memory.geometries,
+        times,
+      };
+      // 逐帧环形日志（最近 600 帧）：抓「偶发长帧」用——轮询只会看到中位数，看不到尖峰。
+      // 用法：`__vbspDrawDebug={on:true}` 跑一段，之后在控制台读 `__vbspFrameLog`。
+      const g = globalThis as { __vbspFrameLog?: Array<Record<string, number>> };
+      const log = g.__vbspFrameLog ?? (g.__vbspFrameLog = []);
+      log.push(times);
+      if (log.length > 600) log.splice(0, log.length - 600);
+    }
     return this.lastVisibility;
   }
 
@@ -433,9 +614,26 @@ export class RenderSession {
     this.camera.updateProjectionMatrix();
   }
 
-  /** 面板/配置改剔除距离（0 = 自动 `maxDim×0.5`）；返回生效值。 */
+  /**
+   * 存档/面板给的「视距」有效值：0、非有限值、或超过地图对角线（`maxDim`）都按「自动档」处理。
+   *
+   * 超过地图尺寸的距离物理上等价于「不按距离剔除」，但旧版本会把它当显式值直接采用；
+   * 早前 A/B 留下的 200000 / 8156 就会一直压着默认距离场（表现为默认档不是 18000）。
+   */
+  cullConfigValue(dist: number): number {
+    return Number.isFinite(dist) && dist > 0 && dist <= this.maxDim ? dist : 0;
+  }
+
+  /**
+   * 面板/配置改剔除距离（0 = 自动：PVS 开时为 `CULL_DISTANCE_PVS_DEFAULT`（18000）的距离场，
+   * PVS 关时为 `maxDim×0.25`）；返回生效值。
+   *
+   * 距离场与 PVS **同时生效**：场外的块不画、也不进 PVS 判定；场内的块由 PVS 决定。
+   */
   setCullDistance(dist: number): number {
-    return this.visibility.setCullDistance(this.visibility.autoCullDistance, dist);
+    const auto = this.visibility.enablePvs ? CULL_DISTANCE_PVS_DEFAULT : this.maxDim * 0.25;
+    this.visibility.autoCullDistance = auto;
+    return this.visibility.setCullDistance(auto, this.cullConfigValue(dist));
   }
 
   /** 面板/配置改 FOV（度）：写相机并刷新投影矩阵。 */
@@ -481,9 +679,322 @@ export class RenderSession {
     return this.quality;
   }
 
+  /** 诊断：主根（PVS 作用域）之外的可见 mesh 数 / 最远距离 / 前几个名字。 */
+  sceneOutsideRootStats(): { meshes: number; maxDist: number; sample: string[] } {
+    return { meshes: 0, maxDist: 0, sample: [] };
+  }
+
+  /**
+   * 诊断：逐块审计（谁在画、离多远、有几个 cluster、PVS 怎么判的）。
+   * `clusters === 0` 的块**不参与 PVS 剔除**（`update` 里要求 `clusterIds.length > 0` 才剔），
+   * 只要落在距离档内就无条件画——「PVS 区域外还有东西」先查这一类。
+   */
+  chunkAudit(limit = 40): {
+    cull: number;
+    total: number;
+    drawn: number;
+    noCluster: number;
+    pvsActive: boolean;
+    far: Array<{ name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }>;
+    nearCulled: Array<{ idx: number; name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; tris: number }>;
+  } {
+    const p = this.camera.position;
+    const items = this.visibility.items;
+    const pvsActive = !!(this.visibility.enablePvs && this.pvs?.enabled);
+    const all: Array<{ name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }> = [];
+    const nearCulled: Array<{ idx: number; name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; tris: number }> = [];
+    let drawn = 0;
+    let noCluster = 0;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const g = item.mesh.geometry as THREE.BufferGeometry | undefined;
+      const tris = g?.index ? g.index.count / 3 : (g?.getAttribute('position')?.count ?? 0) / 3;
+      const d = item.center.distanceTo(p);
+      if (item.clusterIds.length === 0) noCluster++;
+      const pvsVisible = item.clusterIds.length === 0 ? null : item.clusterIds.some((c) => this.pvs?.isVisible(c) ?? false);
+      if (!item.mesh.visible) {
+        // 近处被剔的块 = 「本该出现在眼前却没了」的头号嫌疑（缺墙 / 玻璃消失）。
+        if (d < 8000) {
+          nearCulled.push({ idx: i, name: item.mesh.name || '(anon)', d: Math.round(d), r: Math.round(item.radius), clusters: item.clusterIds.length, pvsVisible, tris: Math.round(tris) });
+        }
+        continue;
+      }
+      drawn++;
+      all.push({
+        name: item.mesh.name || '(anon)',
+        d: Math.round(d),
+        r: Math.round(item.radius),
+        clusters: item.clusterIds.length,
+        pvsVisible,
+        visible: true,
+        tris: Math.round(tris),
+      });
+    }
+    all.sort((a, b) => b.d - a.d);
+    nearCulled.sort((a, b) => a.d - b.d);
+    return { cull: this.visibility.cullDistance, total: items.length, drawn, noCluster, pvsActive, far: all.slice(0, limit), nearCulled: nearCulled.slice(0, limit) };
+  }
+
+  /**
+   * 诊断：几何真值——从相机朝该块的最近顶点射一条线，看**第一个挡住它的是谁**。
+   * `sameChunk: true` 就说明「这块肉眼可见却被剔了」＝PVS 判错（先用它区分 PVS 误剔与单纯背对相机）。
+   */
+  rayCheck(idx: number): { name: string; chunkVisible: boolean; sameChunk: boolean; hitName: string; hitDist: number; targetDist: number } | null {
+    const item = this.visibility.items[idx];
+    if (!item || !this.root) return null;
+    const cam = this.camera.position;
+    const g = item.mesh.geometry as THREE.BufferGeometry;
+    const pos = g.getAttribute('position') as THREE.BufferAttribute | undefined;
+    if (!pos) return null;
+    const m = new THREE.Matrix4();
+    item.mesh.updateWorldMatrix(true, false);
+    m.copy(item.mesh.matrixWorld);
+    const v = new THREE.Vector3();
+    const best = new THREE.Vector3();
+    let bestD = Infinity;
+    const step = Math.max(1, Math.floor(pos.count / 4000));
+    for (let i = 0; i < pos.count; i += step) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m);
+      const d = v.distanceToSquared(cam);
+      if (d < bestD) { bestD = d; best.copy(v); }
+    }
+    if (!Number.isFinite(bestD)) return null;
+    const dir = best.clone().sub(cam);
+    const targetDist = dir.length();
+    if (targetDist < 1e-3) return null;
+    dir.divideScalar(targetDist);
+    const rc = new THREE.Raycaster(cam.clone(), dir, 0.1, targetDist + 50);
+    const hits = rc.intersectObject(this.root!, true);
+    const first = hits.find((h) => (h.object as THREE.Mesh).isMesh && h.object.visible);
+    return {
+      name: item.mesh.name || '(anon)',
+      chunkVisible: item.mesh.visible,
+      sameChunk: !!first && first.object === item.mesh,
+      hitName: first ? ((first.object as THREE.Mesh).name || '(anon)') : '(nothing)',
+      hitDist: first ? Math.round(first.distance) : -1,
+      targetDist: Math.round(targetDist),
+    };
+  }
+
+  /**
+   * 诊断：视锥网格射线审计——「眼前这一片，第一眼看到的东西里有多少是被剔掉的块」。
+   * 这是 PVS 误剔的**像素级真值**：`culledFirst` 就是「本该画却没了」的采样点，
+   * 比看截图快，也不需要知道相机朝向。
+   */
+  frustumAudit(sx = 40, sy = 24): { rays: number; hits: number; culledFirst: number; samples: Array<{ name: string; d: number; clusters: number; pvsVisible: boolean | null }> } {
+    const out = { rays: 0, hits: 0, culledFirst: 0, samples: [] as Array<{ name: string; d: number; clusters: number; pvsVisible: boolean | null }> };
+    if (!this.root) return out;
+    const byMesh = new Map<THREE.Object3D, number>();
+    for (let i = 0; i < this.visibility.items.length; i++) byMesh.set(this.visibility.items[i].mesh, i);
+    const cam = this.camera;
+    const rc = new THREE.Raycaster();
+    rc.far = 60000;
+    const ndc = new THREE.Vector2();
+    for (let y = 0; y < sy; y++) {
+      for (let x = 0; x < sx; x++) {
+        ndc.set(((x + 0.5) / sx) * 2 - 1, -(((y + 0.5) / sy) * 2 - 1));
+        rc.setFromCamera(ndc, cam);
+        out.rays++;
+        const hits = rc.intersectObject(this.root, true);
+        const first = hits.find((h) => (h.object as THREE.Mesh).isMesh);
+        if (!first) continue;
+        out.hits++;
+        const obj = first.object as THREE.Mesh;
+        if (obj.visible) continue;
+        const idx = byMesh.get(obj);
+        if (idx === undefined) continue;
+        const item = this.visibility.items[idx];
+        out.culledFirst++;
+        if (out.samples.length < 12) {
+          out.samples.push({
+            name: obj.name || '(anon)',
+            d: Math.round(first.distance),
+            clusters: item.clusterIds.length,
+            pvsVisible: item.clusterIds.length === 0 ? null : item.clusterIds.some((c) => this.pvs?.isVisible(c) ?? false),
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 诊断：PVS 判定链路的现场快照——相机在哪个 leaf/cluster、可见集多大、
+   * 最近 N 个块的 cluster 集合里是否含相机 cluster（不含才是「看不见自己所在房间」的真因）。
+   */
+  pvsInfo(limit = 8): {
+    camera: number[];
+    clusterAtCamera: number;
+    current: number;
+    visible: number;
+    total: number;
+    selfVisible: boolean | null;
+    nearest: Array<{ name: string; d: number; clusters: number[]; hasCamera: boolean; visible: boolean }>;
+  } | null {
+    if (!this.pvs) return null;
+    const p = this.camera.position;
+    const at = this.pvs.getClusterAt({ x: p.x, y: p.y, z: p.z });
+    const st = this.pvs.getStats();
+    const near = this.visibility.items
+      .map((it) => ({ it, d: it.center.distanceTo(p) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, limit)
+      .map(({ it, d }) => ({
+        name: it.mesh.name || '(anon)',
+        d: Math.round(d),
+        clusters: it.clusterIds.slice(0, 8),
+        hasCamera: it.clusterIds.includes(at),
+        visible: it.mesh.visible,
+      }));
+    return {
+      camera: [p.x, p.y, p.z].map(Math.round),
+      clusterAtCamera: at,
+      current: st.currentCluster,
+      visible: st.visibleCount,
+      total: st.totalClusters,
+      selfVisible: at >= 0 ? this.pvs.isVisible(at) : null,
+      nearest: near,
+    };
+  }
+
+  /** 诊断：屏幕某点（NDC）射线打中的第一个块，及其 cluster / 可见性——「眼前这面墙到底被谁剔了」。 */
+  pickAt(ndcX = 0, ndcY = 0): { idx: number; name: string; d: number; clusters: number[]; cameraCluster: number; hasCamera: boolean; pvsVisible: boolean | null; visible: boolean } | null {
+    if (!this.root) return null;
+    const rc = new THREE.Raycaster();
+    rc.far = 60000;
+    rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+    const hits = rc.intersectObject(this.root, true);
+    const first = hits.find((h) => (h.object as THREE.Mesh).isMesh);
+    if (!first) return null;
+    const obj = first.object as THREE.Mesh;
+    const idx = this.visibility.items.findIndex((it) => it.mesh === obj);
+    const item = idx >= 0 ? this.visibility.items[idx] : null;
+    const p = this.camera.position;
+    const camCluster = this.pvs ? this.pvs.getClusterAt({ x: p.x, y: p.y, z: p.z }) : -1;
+    const clusters = item ? item.clusterIds : [];
+    return {
+      idx,
+      name: obj.name || '(anon)',
+      d: Math.round(first.distance),
+      clusters: clusters.slice(0, 12),
+      cameraCluster: camCluster,
+      hasCamera: clusters.includes(camCluster),
+      pvsVisible: item ? (clusters.length === 0 ? null : clusters.some((c) => this.pvs?.isVisible(c) ?? false)) : null,
+      visible: obj.visible,
+    };
+  }
+
+  /**
+   * 诊断：某个块（按索引）的 cluster 采样明细——每个顶点落到哪个 cluster、多少落进固体、
+   * 以及**离相机最近的顶点们**分别落在哪个 cluster。
+   *
+   * 用途：缺墙时判断「块里靠相机那部分的顶点根本没采到房间 cluster」还是「采到了但 PVS 不认」。
+   */
+  chunkClusterDetail(idx: number, nearHU = 600): {
+    name: string;
+    tris: number;
+    verts: number;
+    solid: number;
+    clusters: Array<{ c: number; n: number }>;
+    nearVerts: Array<{ d: number; c: number }>;
+    center: [number, number, number];
+    radius: number;
+    matrixBaked: boolean;
+  } | null {
+    const item = this.visibility.items[idx];
+    if (!item || !this.pvs) return null;
+    const mesh = item.mesh;
+    const geom = mesh.geometry;
+    const pos = geom.attributes.position;
+    const nrm = geom.attributes.normal;
+    const cam = this.camera.position;
+    const counts = new Map<number, number>();
+    const nearVerts: Array<{ d: number; c: number }> = [];
+    const v = new THREE.Vector3();
+    let solid = 0;
+    for (let i = 0; i < pos.count; i++) {
+      v.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+      if (nrm) v.addScaledVector(new THREE.Vector3(nrm.getX(i), nrm.getY(i), nrm.getZ(i)), 4);
+      v.applyMatrix4(mesh.matrixWorld);
+      const c = this.pvs.getClusterAt({ x: v.x, y: v.y, z: v.z });
+      if (c < 0) solid++;
+      else counts.set(c, (counts.get(c) ?? 0) + 1);
+      const d = v.distanceTo(cam);
+      if (d <= nearHU) nearVerts.push({ d: Math.round(d), c });
+    }
+    const clusters = [...counts.entries()].map(([c, n]) => ({ c, n })).sort((a, b) => b.n - a.n).slice(0, 12);
+    nearVerts.sort((a, b) => a.d - b.d);
+    const m = mesh.matrixWorld.elements;
+    const matrixBaked = m[12] === 0 && m[13] === 0 && m[14] === 0 && m[0] === 1 && m[5] === 1 && m[10] === 1;
+    return {
+      name: mesh.name || '(anon)',
+      tris: pos.count / 3,
+      verts: pos.count,
+      solid,
+      clusters,
+      nearVerts: nearVerts.slice(0, 16),
+      center: [item.center.x, item.center.y, item.center.z].map(Math.round) as [number, number, number],
+      radius: Math.round(item.radius),
+      matrixBaked,
+    };
+  }
+
+  /** 诊断：按名字查块级可见性（「这个模型到底是被剔了还是没画」）。 */  probeChunk(name: string): { name: string; found: number; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number; collider: boolean } | null {
+    const key = name.trim();
+    for (const item of this.visibility.items) {
+      const n = item.mesh.name || '';
+      if (n !== key) continue;
+      const g = item.mesh.geometry as THREE.BufferGeometry | undefined;
+      const tris = g?.index ? g.index.count / 3 : (g?.getAttribute('position')?.count ?? 0) / 3;
+      return {
+        name: n,
+        found: 1,
+        d: Math.round(item.center.distanceTo(this.camera.position)),
+        r: Math.round(item.radius),
+        clusters: item.clusterIds.length,
+        pvsVisible: item.clusterIds.length === 0 ? null : item.clusterIds.some((c) => this.pvs?.isVisible(c) ?? false),
+        visible: item.mesh.visible,
+        tris: Math.round(tris),
+        collider: false,
+      };
+    }
+    return null;
+  }
+
+  /** 诊断：主根内「当前被绘制」的块按距离分桶（判断 PVS 是否把很远的东西也留着）。 */
+  drawnChunkStats(): { drawn: number; buckets: Record<string, number>; far: string[] } {
+    const p = this.camera.position;
+    const v = new THREE.Vector3();
+    const buckets: Record<string, number> = { '0-2k': 0, '2-5k': 0, '5-10k': 0, '10-20k': 0, '>20k': 0 };
+    const far: string[] = [];
+    let drawn = 0;
+    if (!this.root) return { drawn, buckets, far };
+    this.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.visible) return;
+      drawn++;
+      const g = m.geometry as THREE.BufferGeometry | undefined;
+      if (!g) return;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      const bs = g.boundingSphere;
+      if (!bs) return;
+      // 合并块的几何已烘焙世界坐标、mesh 自身矩阵通常是单位阵 ⇒ 必须用包围球心，不能取 matrixWorld 平移。
+      v.copy(bs.center).applyMatrix4(m.matrixWorld);
+      const d = v.distanceTo(p);
+      if (d < 2000) buckets['0-2k']++;
+      else if (d < 5000) buckets['2-5k']++;
+      else if (d < 10000) buckets['5-10k']++;
+      else if (d < 20000) buckets['10-20k']++;
+      else {
+        buckets['>20k']++;
+        if (far.length < 5) far.push(`${m.name || '(anon)'}@${Math.round(d)}`);
+      }
+    });
+    return { drawn, buckets, far };
+  }
+
   /** 可见性统计（形状与 debug 的 `LodStats` 兼容）。 */
-  stats(): RenderSessionStats {
-    const r = this.lastVisibility;
+  stats(): RenderSessionStats {    const r = this.lastVisibility;
     return {
       visible: r?.visible ?? this.visibility.items.length,
       total: this.visibility.items.length,
@@ -493,6 +1004,8 @@ export class RenderSession {
       cullDistance: this.visibility.cullDistance,
       diagonal: this.diagonal,
       maxCull: this.maxCull,
+      rev: RENDER_REV,
+      reasons: r?.reasons ?? { pvs: 0, distance: 0 },
     };
   }
 
@@ -548,7 +1061,7 @@ export class RenderSession {
     const pos = geom.attributes.position as THREE.BufferAttribute | undefined;
     if (!pos) return;
     type Tri = { a: number; b: number; c: number; group: number };
-    type Cache = { positionCount: number; indexCount: number; tris: Tri[]; dists: Float64Array };
+    type Cache = { positionCount: number; indexCount: number; tris: Tri[]; dists: Float64Array; prevIdx: number[] | null };
     let cache = mesh.userData.__vbspFaceSort as Cache | undefined;
     let idx = geom.index;
     if (!idx) {
@@ -570,7 +1083,7 @@ export class RenderSession {
           tris.push({ a: idx.getX(i), b: idx.getX(i + 1), c: idx.getX(i + 2), group: gi });
         }
       }
-      cache = { positionCount: pos.count, indexCount: idx.count, tris, dists: new Float64Array(tris.length) };
+      cache = { positionCount: pos.count, indexCount: idx.count, tris, dists: new Float64Array(tris.length), prevIdx: null };
       mesh.userData.__vbspFaceSort = cache;
     }
     const c = cache;
@@ -593,17 +1106,33 @@ export class RenderSession {
     const groups = geom.groups.length > 0
       ? geom.groups
       : [{ start: 0, count: idx.count, materialIndex: 0 }];
+    // 先把排序结果按材质组分桶（一次 O(tris)），再逐组连续写回；
+    // 原写法对每个组都把 order 全扫一遍（O(groups×tris)），多材质大块时是纯浪费。
+    const buckets: number[][] = groups.map(() => []);
+    for (const oi of order) buckets[c.tris[oi].group].push(oi);
+    let changed = false;
+    const prevIdx = c.prevIdx;
+    if (!prevIdx || prevIdx.length !== idxArr.length) {
+      changed = true;
+    }
+    let k = 0;
     for (let gi = 0; gi < groups.length; gi++) {
       let cursor = groups[gi].start;
-      for (const oi of order) {
-        if (c.tris[oi].group !== gi) continue;
+      for (const oi of buckets[gi]) {
         const t = c.tris[oi];
-        idxArr[cursor++] = t.a;
-        idxArr[cursor++] = t.b;
-        idxArr[cursor++] = t.c;
+        if (!changed && (prevIdx![k] !== t.a || prevIdx![k + 1] !== t.b || prevIdx![k + 2] !== t.c)) changed = true;
+        idxArr[cursor] = t.a;
+        idxArr[cursor + 1] = t.b;
+        idxArr[cursor + 2] = t.c;
+        cursor += 3;
+        k += 3;
       }
     }
-    idx.needsUpdate = true;
+    // 只有排列真的变了才重传（three 的 WebGLAttributes.update 会整块 bufferSubData）。
+    if (changed) {
+      c.prevIdx = Array.from(idxArr as ArrayLike<number>);
+      idx.needsUpdate = true;
+    }
   }
 
   /**
@@ -623,6 +1152,7 @@ export class RenderSession {
     for (const mesh of list) {
       const geom = mesh.geometry;
       if (!geom) continue;
+      if (!mesh.visible) continue; // 被剔除的块不排序：省掉它的逐三角形重排
       if (!geom.boundingBox) geom.computeBoundingBox();
       const local = geom.boundingBox;
       if (!local) {
@@ -649,7 +1179,9 @@ export class RenderSession {
 
   /** 主模型分块合并：三端唯一包装（新根口径；旧的 game/debug 原地挂回已废弃）。 */
   private mergeMain(root: THREE.Scene): THREE.Object3D {
-    const optRoot = mergeIntoNewRoot(root, { translucentSplit: this.translucentSplit });
+    // 不透明块细分粒度减半（半透明/水面块不受影响，见 MergeOptions.opaqueTargetCells 注释）：
+    // 实测开阔路段 344~503 draw ⇒ 主遍 3~4.4ms，砍半是唯一能进 320fps 预算的杠杆。
+    const optRoot = mergeIntoNewRoot(root, { translucentSplit: this.translucentSplit, opaqueTargetCells: 256 });
     const stats = mergeStatsOf(optRoot);
     if (stats) {
       console.log(

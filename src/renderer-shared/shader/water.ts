@@ -354,6 +354,14 @@ interface MirrorPlane {
 const mirrorPlanes = new Map<number, MirrorPlane>();
 const textureMatrix = new THREE.Matrix4();
 const mirrorMeshes = new Map<THREE.Mesh, number>(); // mesh → 世界高度（包围球中心 y）
+// 取证口：列出已注册的水面网格（名字 + 水面高度 + 世界包围盒中心），用于挑机位看水。
+// 例：`__vbspWaterMeshes()`；`{name, y, center:[x,y,z]}`。
+(g as { __vbspWaterMeshes?: () => unknown }).__vbspWaterMeshes = () =>
+  [...mirrorMeshes].map(([m, h]) => {
+    const b = new THREE.Box3().setFromObject(m);
+    const c = b.getCenter(new THREE.Vector3());
+    return { name: m.name, y: h, center: [+c.x.toFixed(1), +c.y.toFixed(1), +c.z.toFixed(1)] };
+  });
 let mirrorRendering = false;
 const reflOnUniform = { value: 1 };
 const mirrorUniform = { value: null as THREE.Texture | null };
@@ -394,12 +402,19 @@ function reflectOff(): boolean {
 //   · 厚度 → `saturate(depth-0.05)`：浅水纯折射、深水混 `$fogcolor`、且浅水几乎不反射
 //   · 最终 `lerp(refr, refl, fresnel)`，alpha 写 1（和源一致）
 const REFR_SCALE = 0.5; // 折射 RT 相对画布的分辨率（会被 DU/DV 扰动，降分辨率看不出来）
+/**
+ * 折射颜色 RT：**单缓冲、同帧写入后立刻采样**。
+ *
+ * 曾经改成双缓冲（ping-pong）试图消除「写后读」停顿，实测 p95/p99 完全没有变化
+ * （8.9/15.25 vs 8.97/15.17），却让水面材质采到**上一轮**的 RT：相机在动时等于用新投影
+ * 采样旧画面，反射/折射整体滞后 1~3 帧，表现为水面"拖影"。已回退成单缓冲。
+ */
 let refrRT: THREE.WebGLRenderTarget | null = null;
 /**
  * 深度 RT：把**到相机的视线距离**直接写进颜色通道（`vec3(dist/scale)`）。
  * 不用 `DepthTexture`（本机自建 RT 里恒读回远平面），也不用 `MeshDepthMaterial(RGBADepthPacking)`
  * （被天空覆盖成 1）—— 自己的 `ShaderMaterial` 输出线性距离，8 位精度在 2000 单位范围内
- * 约 8 单位/级，算水厚足够。
+ * 约 8 单位/级，算水厚足够。与颜色 RT 同样单缓冲。
  */
 let depthRT: THREE.WebGLRenderTarget | null = null;
 let depthMat: THREE.ShaderMaterial | null = null;
@@ -457,17 +472,21 @@ function planeDepthRange(sortedHeights: number[], fallback: number): number {
 /** 渲染折射 RT：隐藏水面材质后把同一相机看到的场景渲进 color+depth。 */
 function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
   const canvas = renderer.getDrawingBufferSize(new THREE.Vector2());
-  const w = Math.max(64, Math.floor(canvas.x * REFR_SCALE));
-  const h = Math.max(64, Math.floor(canvas.y * REFR_SCALE));
+  // 只用于 A/B 取证：`__vbspWaterRefrScale = 0.25` 看「RT 分辨率是不是瓶颈」（改了会触发一次重建）。
+  const scale = (g as { __vbspWaterRefrScale?: number }).__vbspWaterRefrScale ?? REFR_SCALE;
+  const w = Math.max(64, Math.floor(canvas.x * scale));
+  const h = Math.max(64, Math.floor(canvas.y * scale));
   if (!refrRT || refrRT.width !== w || refrRT.height !== h) {
     refrRT?.dispose();
     depthRT?.dispose();
-    refrRT = new THREE.WebGLRenderTarget(w, h);
-    refrRT.texture.colorSpace = THREE.NoColorSpace;
+    const mkRT = (): THREE.WebGLRenderTarget => {
+      const t = new THREE.WebGLRenderTarget(w, h);
+      t.texture.colorSpace = THREE.NoColorSpace;
+      return t;
+    };
+    refrRT = mkRT();
+    depthRT = mkRT();
     refrUniform.value = refrRT.texture;
-    // 深度 RT（线性视线距离写进颜色）
-    depthRT = new THREE.WebGLRenderTarget(w, h);
-    depthRT.texture.colorSpace = THREE.NoColorSpace;
     sceneDistUniform.value = depthRT.texture;
     if (!depthMat) {
       depthMat = new THREE.ShaderMaterial({
@@ -529,7 +548,7 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
   const prevClear = renderer.getClearColor(new THREE.Color());
   const prevAlpha = renderer.getClearAlpha();
   try {
-    renderer.setRenderTarget(refrRT);
+    if (refrRT && depthRT) renderer.setRenderTarget(refrRT);
     // T-650 v4：**无条件清成透明黑**（c61f188 原始设计）。此前当 scene.background 是颜色时
     // （pre-frame 钩子先于 renderSkyPass 执行时必然如此）清成天空色 alpha=1——无几何水域
     // 的 RT 像素因此"看似有内容"（不触发 NoGeom 透明兜底）又被雾罩 ⇒ 一定机位下蓝板复现。
@@ -565,6 +584,57 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
 }
 
 /**
+ * 只刷新折射用的相机矩阵/屏幕尺寸 uniform（不重渲 RT）。
+ *
+ * 为什么要有：RT 隔帧更新时，相机每帧都在动，屏幕空间折射查表用的 `refrProjInv/refrViewInv/refrCamPos`
+ * 若停留在旧帧，水面会按错位的投影采样（2/3 的帧出现扭曲）。所以 uniform 必须**每帧**更新，
+ * 只有 `renderer.render` 那部分才节流。
+ */
+function updateRefrUniforms(camera: THREE.Camera, renderer: THREE.WebGLRenderer): void {
+  refrOnUniform.value = 1;
+  const canvas = renderer.getDrawingBufferSize(new THREE.Vector2());
+  refrScreen.value.set(canvas.x, canvas.y);
+  const cam = camera as THREE.PerspectiveCamera;
+  refrProjInv.value.copy(cam.projectionMatrix).invert();
+  refrViewInv.value.copy(cam.matrixWorld);
+  refrCamPos.value.setFromMatrixPosition(cam.matrixWorld);
+}
+
+const _waterFrustum = new THREE.Frustum();
+const _waterProjScreen = new THREE.Matrix4();
+const _waterSphere = new THREE.Sphere();
+
+/**
+ * 视锥里出现了哪些水面高度（镜面网格的世界包围球 vs 相机视锥）。
+ *
+ * 用途：折射/深度/镜面都是**整场景** pass。水面高度可以有多层（surf_666 有 5 层），
+ * 而 `mirrorPlanes` 每层每帧都要重渲一次整场景 —— 实测俯仰扫视时水最多的那一段
+ * 3.3~3.5ms/帧（29 块主画面却要 5 趟整场景），是垂直扫视掉到 230fps 的主因。
+ * 只渲染「真的在画面里」的那几层，看不见的层保留上一帧 RT 即可。
+ *
+ * 返回 `null` 表示不做门控（没有登记镜面网格时保持旧行为）。
+ */
+function visibleWaterHeights(camera: THREE.Camera): Set<number> | null {
+  if (mirrorMeshes.size === 0) return null;
+  const cam = camera as THREE.PerspectiveCamera;
+  cam.updateMatrixWorld();
+  _waterProjScreen.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+  _waterFrustum.setFromProjectionMatrix(_waterProjScreen);
+  const out = new Set<number>();
+  for (const [mesh, h] of mirrorMeshes) {
+    if (!mesh.visible) continue;
+    mesh.updateMatrixWorld();
+    const geo = mesh.geometry;
+    if (!geo.boundingSphere) geo.computeBoundingSphere();
+    const bs = geo.boundingSphere;
+    if (!bs) return null;
+    _waterSphere.copy(bs).applyMatrix4(mesh.matrixWorld);
+    if (_waterFrustum.intersectsSphere(_waterSphere)) out.add(Math.round(h * 100) / 100);
+  }
+  return out;
+}
+
+/**
  * 每帧折射/深度 RT pass 的**干净入口**（T-650 v4：移出 onBeforeRender 嵌套）。
  * 由 RenderSession.frame 在主渲染**之前**调用——嵌套在主渲染回调里执行时，
  * three 的渲染状态（排序/override/当前目标）会被外层半途状态污染，且随视角
@@ -577,16 +647,63 @@ export function renderWaterFramePasses(
   camera: THREE.Camera,
 ): void {
   if (waterMaterials.size === 0 || refrOnUniform.value <= 0.5) return;
+  // ⚠️ 屏幕空间折射的 uniform 必须每帧刷新（相机在动），否则水面会按旧投影采样而扭曲。
+  updateRefrUniforms(camera, renderer);
+  // 视线里根本没有水面时不画整场景 RT：抬头看天/低头看地时水面在视锥外，
+  // 此时三趟整场景 pass 是纯浪费（实测俯仰扫视里最多 1.7ms/帧）。
+  // 用镜面网格的世界包围球做视锥测试；没有登记的水面网格时不做门控（保持旧行为）。
+  // A/B 取证：`__vbspWaterFrustumGate = false` 关掉这道门（同构建内对照，验证画面无差）。
+  const gateOn = (g as { __vbspWaterFrustumGate?: boolean }).__vbspWaterFrustumGate !== false;
+  const visibleHeights = gateOn ? visibleWaterHeights(camera) : null;
+  if (visibleHeights && visibleHeights.size === 0) return;
+  // 静止时跳过：镜面/折射内容只随相机变，相机没动就没有任何可见差异。
+  if (!cameraChangedSinceRt(camera)) return;
+  // **每帧都重渲**：曾经把折射/镜面按 3 帧交错（省整场景 pass），代价是水面采到 1~3 帧前的画面
+  // ——新投影采旧画面，反射整体滞后，肉眼就是「拖影」。PVS 上线后整场景 pass 只剩几十~一百多
+  // 个 draw，这点开销不值得用画质换（实测 320fps 仍满帧，见 TASK-BOOK §4g）。
   renderRefraction(renderer, scene, camera);
   // 镜面 RT 同步去嵌套（T-650 v4：与折射同因——嵌套 render 污染主渲染状态且随视角排序变化）。
+  // 只渲「这一帧真的在画面里」的水面层：surf_666 有 5 层水，每层一趟整场景，
+  // 全渲是 3.4ms/帧（俯仰扫视掉到 230fps 的主因）；看不见的层保留上一帧 RT。
   if (reflOnUniform.value > 0.5) {
     for (const p of mirrorPlanes.values()) {
-      if (!p.done) {
-        p.done = true;
-        renderMirrorPlane(renderer, scene, camera, p);
-      }
+      if (p.done) continue;
+      if (visibleHeights && !visibleHeights.has(Math.round(p.height * 100) / 100)) continue;
+      p.done = true;
+      renderMirrorPlane(renderer, scene, camera, p);
     }
   }
+}
+
+/** 上一轮水面 RT 用的相机位姿（位置 + 前向）；用于「相机没动就别重渲整场景」的门控。 */
+const _rtLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+const _rtLastDir = new THREE.Vector3();
+const _rtDir = new THREE.Vector3();
+/**
+ * 位移门限（HU）与转角门限（cos 值）。
+ *
+ * 曾经是 8 HU / 0.5°（隔 3 帧才重渲一次）——水面倒影因此比主画面滞后 1~3 帧，肉眼就是「拖影」。
+ * 实测每帧重渲的代价只有 ~1.26ms（PVS 之后整场景只剩几十~一百多个 draw），而 fps 与隔帧版
+ * 几乎相同（313 vs 314，p95 反而更低：4.96 vs 5.98，因为不再扎堆）。所以门限收到「肉眼不可辨」
+ * 的量级：走着走着一帧 ~2 HU，0.5 HU 触发即等于每帧更新。
+ */
+const RT_MOVE_EPS = 0.5;
+const RT_TURN_COS = 0.999999;
+
+/**
+ * 运行时覆盖两个门限（只用于 A/B 取证，正常游戏不设）：
+ * `__vbspWaterRtEps = 0` ⇒ 相机一动就重渲，用来看「每帧更新」的帧率代价。
+ */
+function cameraChangedSinceRt(camera: THREE.Camera): boolean {
+  camera.getWorldDirection(_rtDir);
+  const eps = (g as { __vbspWaterRtEps?: number }).__vbspWaterRtEps ?? RT_MOVE_EPS;
+  const cos = (g as { __vbspWaterRtCos?: number }).__vbspWaterRtCos ?? RT_TURN_COS;
+  const moved = _rtLastPos.distanceTo(camera.position) > eps;
+  const turned = _rtLastDir.dot(_rtDir) < cos;
+  if (!moved && !turned) return false;
+  _rtLastPos.copy(camera.position);
+  _rtLastDir.copy(_rtDir);
+  return true;
 }
 
 /**
@@ -630,8 +747,26 @@ function nearestWaterHeight(camera: THREE.Camera): number | null {
 }
 
 /** 换图/卸载：释放每层镜像 RT 与本地登记，避免旧图水材质/平面表污染新图。 */
-export function resetWaterShaders(): void {
-  for (const p of mirrorPlanes.values()) p.rt?.dispose();
+/** 水面统计（诊断用）：登记了多少材质/镜面层、各层高度、各层包围球（世界坐标）。 */export function waterStats(): {
+  materials: number;
+  mirrors: number;
+  heights: number[];
+  spheres: Array<{ h: number; c: [number, number, number]; r: number }>;
+} {
+  const heights = [...new Set([...mirrorMeshes.values()])].sort((a, b) => a - b);
+  const spheres: Array<{ h: number; c: [number, number, number]; r: number }> = [];
+  for (const [mesh, h] of mirrorMeshes) {
+    const g = mesh.geometry;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    const bs = g.boundingSphere;
+    if (!bs) continue;
+    const c = bs.center.clone().applyMatrix4(mesh.matrixWorld);
+    spheres.push({ h, c: [c.x, c.y, c.z], r: bs.radius });
+  }
+  return { materials: waterMaterials.size, mirrors: mirrorMeshes.size, heights, spheres };
+}
+
+export function resetWaterShaders(): void {  for (const p of mirrorPlanes.values()) p.rt?.dispose();
   mirrorPlanes.clear();
   mirrorMeshes.clear();
   waterMaterials.clear();
@@ -778,6 +913,7 @@ function startAnimation(): void {
   // 装配若发生在无 rAF 的环境（worker / 测试），只跳过逐帧动画，不抛错。
   if (typeof requestAnimationFrame !== 'function') return;
   animating = true;
+  (globalThis as { __vbspWaterStats?: unknown }).__vbspWaterStats = waterStats;
   requestAnimationFrame(tick);
 }
 
