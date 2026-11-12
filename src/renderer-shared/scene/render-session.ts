@@ -53,7 +53,7 @@ import { applyRenderPrefs, readRenderPrefs } from '../config/render-prefs.js';
  * 排查「现象还在」时先看它——不一致就说明浏览器跑的是旧包（Service Worker / 磁盘缓存），
  * 别在旧构建上做判断。改渲染语义时顺手递增。
  */
-export const RENDER_REV = '2026-11-13.3-baked-matrix-fix';
+export const RENDER_REV = '2026-11-13.4-exact-distance';
 import { getLightingMode, setLightingMode as setLightingModeInShader, type LightingMode } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import type { PoseScope } from '../camera/pose-entry.js';
@@ -702,13 +702,13 @@ export class RenderSession {
     drawn: number;
     noCluster: number;
     pvsActive: boolean;
-    far: Array<{ name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }>;
+    far: Array<{ name: string; d: number; r: number; boxD: number | null; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }>;
     nearCulled: Array<{ idx: number; name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; tris: number }>;
   } {
     const p = this.camera.position;
     const items = this.visibility.items;
     const pvsActive = !!(this.visibility.enablePvs && this.pvs?.enabled);
-    const all: Array<{ name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }> = [];
+    const all: Array<{ name: string; d: number; r: number; boxD: number | null; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }> = [];
     const nearCulled: Array<{ idx: number; name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; tris: number }> = [];
     let drawn = 0;
     let noCluster = 0;
@@ -731,6 +731,7 @@ export class RenderSession {
         name: item.mesh.name || '(anon)',
         d: Math.round(d),
         r: Math.round(item.radius),
+        boxD: item.box ? Math.round(item.box.distanceToPoint(p)) : null,
         clusters: item.clusterIds.length,
         pvsVisible,
         visible: true,

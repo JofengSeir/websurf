@@ -87,6 +87,8 @@ export interface VisibilityItem {
   clusterGeom?: string;
   /** 空集合的重算次数（有上限，避免每帧重试）。 */
   clusterTries?: number;
+  /** 世界空间 AABB（距离场判定用；按当前几何与 `matrixWorld` 每帧刷新，无分配）。 */
+  box?: THREE.Box3;
 }
 
 export interface VisibilityUpdateResult {
@@ -123,6 +125,29 @@ export function isBeyondCullDistance(
   const dz = cameraPos.z - center.z;
   const reach = cullDistance + Math.max(0, radius);
   return dx * dx + dy * dy + dz * dz > reach * reach;
+}
+
+/**
+ * 距离场判定（精确版）：**块的轴对齐盒**到相机是否在球外。
+ *
+ * `isBeyondCullDistance` 用「中心 + 包围球半径」，对合并块是**上界**：一块半径 5000 的合并块，
+ * 中心在 21000 处也会被算成「球内」（21000 − 5000 < 18000），结果把隔着大半个地图的另一片区域
+ * 拖进画面（surf_666 窗外结构就是这么漏的）。盒判定按**离相机最近的那个面**算，球外即剔，
+ * 与用户要的「球形距离场」语义一致。几何烘焙成世界坐标、mesh 矩阵恒等，盒可直接用几何 AABB。
+ */
+export function isBeyondCullDistanceBox(
+  box: THREE.Box3,
+  cameraPos: THREE.Vector3,
+  cullDistance: number,
+): boolean {
+  if (!Number.isFinite(cullDistance)) return false;
+  const x = cameraPos.x < box.min.x ? box.min.x : cameraPos.x > box.max.x ? box.max.x : cameraPos.x;
+  const y = cameraPos.y < box.min.y ? box.min.y : cameraPos.y > box.max.y ? box.max.y : cameraPos.y;
+  const z = cameraPos.z < box.min.z ? box.min.z : cameraPos.z > box.max.z ? box.max.z : cameraPos.z;
+  const dx = cameraPos.x - x;
+  const dy = cameraPos.y - y;
+  const dz = cameraPos.z - z;
+  return dx * dx + dy * dy + dz * dz > cullDistance * cullDistance;
 }
 
 /** 可见性控制器：`clear()` 后重新 `collect()`，每帧调一次 `update()`。 */
@@ -440,10 +465,17 @@ export class VisibilityController {
           item.center.copy(bs.center).applyMatrix4(item.mesh.matrixWorld);
           item.radius = bs.radius;
         }
+        if (!g.boundingBox) g.computeBoundingBox();
+        if (g.boundingBox) {
+          if (!item.box) item.box = new THREE.Box3();
+          item.box.copy(g.boundingBox).applyMatrix4(item.mesh.matrixWorld);
+        }
       }
       const near = item.center.distanceToSquared(camPos) < 2000 * 2000;
       if (near) nearTotal++;
-      const beyond = isBeyondCullDistance(item.center, camPos, this.cullDistance, item.radius);
+      const beyond = item.box
+        ? isBeyondCullDistanceBox(item.box, camPos, this.cullDistance)
+        : isBeyondCullDistance(item.center, camPos, this.cullDistance, item.radius);
       // 严格 PVS：块的 cluster 集合为空 ⇒ 它不在任何房间里（装到地图外壳外的重复道具、
       // 悬空装饰），没有任何 PVS 行会把它判为可见 ⇒ 不画。**不按距离兜底**，否则又回到
       // 「距离参与可见性」。距离场外的块连这次查询都不做。
