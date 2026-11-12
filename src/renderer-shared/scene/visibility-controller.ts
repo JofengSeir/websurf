@@ -160,6 +160,8 @@ export class VisibilityController {
   autoCullDistance = CULL_DISTANCE_MIN;
   /** 是否启用 PVS 剔除（三端默认参见 `RENDER_DEFAULT_PVS`）。 */
   enablePvs = false;
+  /** 场景里是否已有「逐三角形 cluster 表」的块（cluster-filter.ts）；有则这些块不按块判可见性。 */
+  chunkIndexActive = false;
   /**
    * 相机定位不到任何房间（在实体里/在地图外）时的告警去抖标记。
    * 这种帧**不做任何距离兜底**——PVS 档下剔除只由 PVS 说话，距离档一插手就会吃掉看得见的几何。
@@ -509,8 +511,11 @@ export class VisibilityController {
       // 严格 PVS：块的 cluster 集合为空 ⇒ 它不在任何房间里（装到地图外壳外的重复道具、
       // 悬空装饰），没有任何 PVS 行会把它判为可见 ⇒ 不画。**不按距离兜底**，否则又回到
       // 「距离参与可见性」。距离场外的块连这次查询都不做。
+      // 有逐三角形 cluster 表的块不按块判：它的 index 已按可见集裁好（见 cluster-filter.ts），
+      // 块级再判一次会把「部分可见」的块整块剔掉 = 开洞。
+      const triFiltered = this.chunkIndexActive && !!item.mesh.userData.clusterIndex;
       const willCull =
-        !beyond && pvsActive && pvsClusterValid && !item.clusterIds.some((c) => pvs!.isVisible(c));
+        !beyond && !triFiltered && pvsActive && pvsClusterValid && !item.clusterIds.some((c) => pvs!.isVisible(c));
       let level = LOD_NEAR;
       if (beyond) {
         level = LOD_FAR;

@@ -39,7 +39,7 @@ import {
   type VisibilityUpdateResult,
 } from './visibility-controller.js';
 import { PvsRegionOverlay } from './pvs-region-overlay.js';
-import { splitChunksByCluster, type ClusterSplitStats } from './cluster-split.js';
+import { applyClusterIndex, prepareClusterIndex, type ClusterIndexStats } from './cluster-filter.js';
 import { applySceneCamera, shrinkNearPlane } from '../camera/scene-camera.js';
 import { NearPlaneController } from '../camera/near-plane.js';
 import {
@@ -181,7 +181,7 @@ export class RenderSession {
   /** PVS 查询器（`loadScene` 按 `pvsJson` 建；无 PVS 时 null）。 */
   private pvs: PvsManager | null = null;
   /** 装载期按 cluster 拆分合并块的统计（`state().split` 可读）。 */
-  private clusterSplit: ClusterSplitStats | null = null;
+  private clusterIndex: ClusterIndexStats | null = null;
   /** 主模型根（`mergeIntoNewRoot` 的产物；未合并时是 `assembleScene` 的 mapRoot）。 */
   private root: THREE.Object3D | null = null;
   /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `sortTransparentChunks`）。 */
@@ -369,7 +369,7 @@ export class RenderSession {
         pvsOverride: this.pvsOverride,
         maxDim: this.maxDim,
         rev: RENDER_REV,
-        split: this.clusterSplit,
+        index: this.clusterIndex,
       }),
     };
     // 诊断：按 cluster 拆分后的分片体检（块数、每片记的 cluster 数、几何三角形数）。
@@ -457,26 +457,15 @@ export class RenderSession {
     this.visibility.collect(this.root, this.pvs);
     // PVS 粒度下沉：合并块经常横跨多个房间，而运行期只能判「块里有没有一个 cluster 可见」，
     // 于是「任一分区可见 ⇒ 整块画」会把别的房间的三角形一起画出来（666 隔着窗看到别处关卡结构）。
-    // 这里按三角形所属 cluster 把这类块拆成若干子 Mesh（共享顶点属性、只重建 index），
-    // 拆完每片只属于一个 cluster，PVS 判定就精确到房间；单 cluster 的块不动，draw 数基本不变。
-    // 只在 PVS 真正启用时拆：PVS 关掉时拆片不会少画任何东西，只会让 draw 数翻几倍。
-    this.clusterSplit = this.visibility.enablePvs
-      ? splitChunksByCluster(this.root, this.visibility, this.pvs, {
-          // 小到 96 个三角形的块也拆：666 里「窗外看到别处」的块大多只有 300~1200 个三角形，
-          // 阈值定高（256）会把一半泄漏源留在块级并集里（实测仍有 52% 三角形属于不可见 cluster）。
-          minTris: 128, minClusters: 4,
-          // 单块最多 8 片；再多的并进最大片并记并集（并集片只会在其中任一 cluster 可见时画，不会开洞）。
-          maxPieces: 8,
-          // 不设全局片数上限：片数增长的代价由 minTris 控住（666 候选 151 块 → 约 400 片）。
-          maxNewPieceRatio: 1.2,
-        })
+    // PVS 粒度下沉（不拆 mesh）：合并块常横跨多个房间，运行期只能判「块里有没有一个 cluster
+    // 可见」，于是「任一分区可见 ⇒ 整块画」会把别的房间的三角形一起画出来（666 隔窗看到别处
+    // 关卡结构、boreas 冰坡时隐时现都源自此）。这里给跨房间的块建「逐三角形 → cluster」表，
+    // 相机换房间时按可见集重建 index，只留可见三角形：draw 数不变、精度到三角形。
+    this.clusterIndex = this.visibility.enablePvs && this.pvs
+      ? prepareClusterIndex(this.visibility.items, this.pvs, 64)
       : null;
-    if (this.clusterSplit && this.clusterSplit.split > 0) {
-      // 场景图变了：重新收集可见块（新片的 clusterIds 由 assignClusters 重新算，必然是单元素）。
-      this.visibility.collect(this.root, this.pvs);
-      this.collectTransparentChunks();
-      precompileScene(this.renderer, this.scene, this.camera);
-    }
+    if (!this.clusterIndex) this.visibility.chunkIndexActive = false;
+    else this.visibility.chunkIndexActive = this.clusterIndex.prepared > 0;
     const box = this.worldBox();
     const size = box ? box.getSize(new THREE.Vector3()) : new THREE.Vector3();
     this.diagonal = size.length();
@@ -564,25 +553,19 @@ export class RenderSession {
         this.cullConfigValue(rp.culling.distance),
       );
     }
-    // PVS 是**装载之后**才被打开的（面板勾选、或存档里上次是关的）时补做簇拆分：
-    // 装载期那条快路径会跳过拆分（`enablePvs` 当时还是 false），一旦后来打开 PVS，
-    // 不拆就会一直停在块级并集上——正是「窗外看到别区结构」又回来的原因。
-    if (this.visibility.enablePvs && !this.clusterSplit && this.pvs) {
-      // 先补算 cluster：PVS 打开前 `collect()` 没采样过，空 clusterIds 会让拆分没有候选。
+    // PVS 是**装载之后**才被打开的（面板勾选、或存档里上次是关的）时补建逐三角形 cluster 表：
+    // 装载期那条快路径会跳过（`enablePvs` 当时还是 false），不补建就一直停在块级并集上。
+    if (this.visibility.enablePvs && !this.clusterIndex && this.pvs) {
+      // 先补算 cluster：PVS 打开前 `collect()` 没采样过，空 clusterIds 会让过滤没有候选。
       this.visibility.ensureClusters(this.pvs);
-      const split = splitChunksByCluster(this.root!, this.visibility, this.pvs, {
-        minTris: 128, minClusters: 4,
-        maxPieces: 8,
-        maxNewPieceRatio: 1.2,
-      });
-      this.clusterSplit = split;
-      if (split.split > 0) {
-        this.visibility.collect(this.root!, this.pvs);
-        this.collectTransparentChunks();
-        precompileScene(this.renderer, this.scene, this.camera);
-      }
+      this.clusterIndex = prepareClusterIndex(this.visibility.items, this.pvs, 64);
+      this.visibility.chunkIndexActive = this.clusterIndex.prepared > 0;
     }
     this.lastVisibility = this.visibility.update(this.camera, this.pvs);
+    // 相机换房间才重建 index（PVS 与视角无关）：可见三角形集合一次算好，逐帧零成本。
+    if (this.clusterIndex && this.clusterIndex.prepared > 0 && this.pvs) {
+      applyClusterIndex(this.visibility.items, this.pvs, this.pvs.currentClusterId);
+    }
     return this.lastVisibility;
   }
 
@@ -842,7 +825,13 @@ export class RenderSession {
       const index = g?.index ?? null;
       if (!pos) continue;
       // 合并块有两种：带 index 的（多材质 groups）与不带 index 的（单材质）。两种都要能采样。
-      const tris = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
+      // 逐三角形过滤的块只画 `drawRange` 里的三角形：采样必须跟着 drawRange，否则会把
+      // 「已经裁掉、根本没画」的三角形算成泄漏，指标直接失真（曾把 15% 的精确过滤读成 89%）。
+      const total = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
+      const drawnTris = g && g.drawRange.count !== Infinity
+        ? Math.min(total, Math.floor(g.drawRange.count / 3))
+        : total;
+      const tris = drawnTris;
       if (tris === 0) continue;
       const matrix = item.mesh.matrixWorld;
       const stride = Math.max(1, Math.ceil(tris / 48));
