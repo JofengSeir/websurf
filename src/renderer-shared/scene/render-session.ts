@@ -1179,8 +1179,10 @@ export class RenderSession {
 
   /** 主模型分块合并：三端唯一包装（新根口径；旧的 game/debug 原地挂回已废弃）。 */
   private mergeMain(root: THREE.Scene): THREE.Object3D {
-    // 不透明块细分粒度减半（半透明/水面块不受影响，见 MergeOptions.opaqueTargetCells 注释）：
-    // 实测开阔路段 344~503 draw ⇒ 主遍 3~4.4ms，砍半是唯一能进 320fps 预算的杠杆。
+    // 不透明块细分粒度：512 的一半（半透明/水面块不受影响，见 MergeOptions.opaqueTargetCells 注释）。
+    // 实测开阔路段 344~503 draw ⇒ 主遍 3~4.4ms，不透明桶砍半是能进 320fps 预算的杠杆。
+    // 再往细分（160）反而更差：同机位 route1 t=7000 311fps / t=12000 309fps（256 是 314 / 316），
+    // 因为单块三角形变多、视锥裁剪变粗 ⇒ 顶点着色与填充反而上涨。256 是这里的最优点。
     const optRoot = mergeIntoNewRoot(root, { translucentSplit: this.translucentSplit, opaqueTargetCells: 256 });
     const stats = mergeStatsOf(optRoot);
     if (stats) {
