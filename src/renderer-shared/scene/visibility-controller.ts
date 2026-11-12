@@ -64,6 +64,11 @@ export interface PvsQuery extends PvsSampler {
    * 只给**相机**用（一次调用），批量顶点采样仍走 `getClusterAt`。
    */
   getClusterNear?(p: { x: number; y: number; z: number }): number;
+  /**
+   * 把可见集直接切到指定 cluster（相机点落在固体 leaf 时的兜底）。
+   * 返回 false 表示该行数据缺失/全零 ⇒ 调用方本帧不按 PVS 剔除。
+   */
+  updateToCluster?(clusterId: number): boolean;
 }
 
 /** 采样面（只依赖「点 → cluster」）：装载期归属判定与相机定位都走它。 */
@@ -396,8 +401,18 @@ export class VisibilityController {
     // （surf_666 实测 44 → 1076 块 / 320 → 151fps）；也不能直接拿上一个房间的 PVS 行剔块，
     // 那个房间可能在地图另一端（实测 P1 机位 current=8069、真所在 6918 ⇒ 一次丢了 4 个块、画面露天空）。
     const camLeafCluster = pvsActive && pvs ? (pvs.getClusterNear ? pvs.getClusterNear(camPos) : pvs.getClusterAt(camPos)) : -1;
-    const camCluster = camLeafCluster >= 0 ? camLeafCluster : pvs ? pvs.currentClusterId : -1;
-    const pvsClusterValid = camCluster >= 0;
+    // 只用**真正定位到的房间**。不要退回 `pvs.currentClusterId`：`update(pos)` 在相机点落进
+    // 固体 leaf 时会保留上一个房间的可见集（穿墙瞬移不闪变），那个房间可能在地图另一端——
+    // 按它的 PVS 行剔块，就会把眼前真实可见的块整片剔掉（2026-11-13 冰坡消失现场：
+    // clusterAtCamera = -1、current = 旧房间，可见集只有 6 个 cluster ⇒ 画面几乎全空）。
+    // 定位到了但 `update(pos)` 走的是固体分支时，把可见集**切到**这个邻近房间再判。
+    let pvsClusterValid = camLeafCluster >= 0;
+    if (pvsClusterValid && pvs && pvs.updateToCluster) {
+      if (!pvs.updateToCluster(camLeafCluster)) {
+        // 该行数据缺失/全零（部分第三方编译器留空）：本帧 PVS 无从判定，退回不剔。
+        pvsClusterValid = false;
+      }
+    }
     if (pvsActive && !pvsClusterValid && !this.pvsUnlocated) {
       // 相机连「附近的房间」都定位不到（在实体里/在地图外）：这一帧 PVS 无从判定。
       // **这里不补任何距离剔除**——距离档一旦插手剔除，就必然出现「看得见却被距离吃掉」；

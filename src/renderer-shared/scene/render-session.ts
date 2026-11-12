@@ -53,7 +53,7 @@ import { applyRenderPrefs, readRenderPrefs } from '../config/render-prefs.js';
  * 排查「现象还在」时先看它——不一致就说明浏览器跑的是旧包（Service Worker / 磁盘缓存），
  * 别在旧构建上做判断。改渲染语义时顺手递增。
  */
-export const RENDER_REV = '2026-11-13.2-beneath-cull';
+export const RENDER_REV = '2026-11-13.3-baked-matrix-fix';
 import { getLightingMode, setLightingMode as setLightingModeInShader, type LightingMode } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import type { PoseScope } from '../camera/pose-entry.js';
@@ -399,6 +399,13 @@ export class RenderSession {
     this.bbox = asm.bbox;
     this.maxDim = asm.maxDim;
     this.scene.add(this.root);
+    // 合并后的块把顶点烘焙成世界坐标、local 矩阵清成单位阵，但 `matrixWorld` 要等一次
+    // updateMatrixWorld 才会跟上（mergeIntoChunks 里只调了 `m.updateMatrix()`，从未刷新
+    // matrixWorld；`renderer.compile` 也不刷）。PVS 采样按 `mesh.matrixWorld` 把几何点变换到
+    // 世界空间，这里若拿到旧矩阵就是**二次变换**：cluster 非空但全错，且因为「非空」连
+    // 「空集合补算」都救不回来 —— 2026-11-13 owner 报的「冰坡透明材质消失 / 666 窗外又露出
+    // 别区结构」就是这一条（同一个错映射既可能误剔、也可能误留）。必须先刷矩阵再收集。
+    this.root.updateMatrixWorld(true);
     this.collectTransparentChunks();
 
     this.skyGroup = asm.skyGroup;

@@ -324,6 +324,36 @@ export class PvsManager {
   }
 
   /**
+   * 直接把可见集切到指定 cluster（世界坐标定位失败时的兜底入口）。
+   *
+   * 为什么需要它：`update(pos)` 在相机点落进固体 leaf 时**保留上一次可见集**
+   * （`currentCluster` 也是旧的）。上层若改用 `getClusterNear` 找到的邻近房间，
+   * 却仍用 `isVisible` 查旧集合，就会出现「眼前真实可见的块被另一个房间的 PVS 行剔掉」
+   * ——2026-11-13 owner 报的 surf_boreas 冰坡消失即属此类（相机贴在/嵌进冰坡里）。
+   *
+   * 与 `update` 一致的容错：cluster < 0、越界、或该行全零（数据缺失）时**不改状态**并返回
+   * false，调用方据此判定「本帧 PVS 无从判定」，退回不剔。
+   *
+   * @param clusterId 目标 cluster id（调用方已确认 >= 0）。
+   * @returns true 表示可见集已切到该 cluster。
+   */
+  updateToCluster(clusterId: number): boolean {
+    if (!this.hasPvs || clusterId < 0 || clusterId >= this.clusterCount) {
+      return false;
+    }
+    if (clusterId === this.currentCluster) {
+      return true;
+    }
+    const decoded = this.decodePvsRow(clusterId);
+    if (decoded.size === 0) {
+      return false;
+    }
+    this.currentCluster = clusterId;
+    this.visibleSet = decoded;
+    return true;
+  }
+
+  /**
    * 查 cluster 是否在**当前**可见集内。
    *
    * 三个返回 `true` 的短路分支（取保守方向，宁可多画不可误剔）：无 PVS；
