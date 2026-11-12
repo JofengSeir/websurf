@@ -217,6 +217,19 @@ export class VisibilityController {
   }
 
   /**
+   * 确保 cluster 归属已经算过（幂等）。
+   *
+   * 为什么需要：PVS 可以在**装载之后**才被打开（面板勾选 / 存档里上次是关的）。那条路径上
+   * `collect()` 当时没采样，块的 `clusterIds` 是空的——直接开 PVS 会把「没有任何 cluster」
+   * 当成「哪儿都看不见」而把全场景剔空（实测 drawn 0）。
+   */
+  ensureClusters(pvs: PvsSampler): void {
+    if (this.clustersReady) return;
+    this.assignClusters(pvs);
+    this.clustersReady = true;
+  }
+
+  /**
    * 装载期给每个块算出它覆盖的 cluster 集合。
    *
    * **优先逐顶点定位**（顶点沿法线外偏 4 HU 后查 BSP leaf → cluster，去重成集合）：合并块的
@@ -231,6 +244,23 @@ export class VisibilityController {
     let mapped = 0;
     for (const item of this.items) {
       if (only && item !== only) continue;
+      // 按 cluster 拆出来的子块：**不要重新采样**。它们的几何与源块共享同一批顶点属性
+      // （`position` 里是整个源块的顶点），再按顶点采样会把别的房间的 cluster 又收回来，
+      // 拆分就白做了。这类块的归属在拆分时已按三角形定好，直接采用。
+      const splitClusters = item.mesh.userData?.splitClusters;
+      if (Array.isArray(splitClusters) && splitClusters.length > 0) {
+        item.clusterIds = splitClusters.slice();
+        item.clusterGeom = (item.mesh.geometry as THREE.BufferGeometry | undefined)?.uuid ?? '';
+        mapped++;
+        continue;
+      }
+      const splitCluster = item.mesh.userData?.splitCluster;
+      if (typeof splitCluster === 'number') {
+        item.clusterIds = [splitCluster];
+        item.clusterGeom = (item.mesh.geometry as THREE.BufferGeometry | undefined)?.uuid ?? '';
+        mapped++;
+        continue;
+      }
       const set = new Set<number>();
       const geom = (item.mesh.geometry as THREE.BufferGeometry | undefined);
       const pos = geom?.attributes.position as THREE.BufferAttribute | undefined;
