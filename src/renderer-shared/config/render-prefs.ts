@@ -89,7 +89,7 @@ export function renderPrefsKey(): string {
  * 「距离场 + PVS 两层同时生效，默认距离场 18000 HU」。旧存档里的 200000 / 8156 都是
  * 早前 A/B 的实验残留，留着会把距离场压成任意值（表现为远景忽隐忽现），所以整档作废一次。
  */
-export const RENDER_PREFS_VERSION = 3;
+export const RENDER_PREFS_VERSION = 2;
 
 /** 只读兼容的旧键（迁移来源，不删）：[0] = game 面板旧档（game 作用域迁移用）。 */
 export const LEGACY_PREFS_KEYS = ['vbsp:panelPrefs', 'vbsp:uiPrefs'] as const;

@@ -64,11 +64,6 @@ export interface PvsQuery extends PvsSampler {
    * 只给**相机**用（一次调用），批量顶点采样仍走 `getClusterAt`。
    */
   getClusterNear?(p: { x: number; y: number; z: number }): number;
-  /**
-   * 把可见集直接切到指定 cluster（相机点落在固体 leaf 时的兜底）。
-   * 返回 false 表示该行数据缺失/全零 ⇒ 调用方本帧不按 PVS 剔除。
-   */
-  updateToCluster?(clusterId: number): boolean;
 }
 
 /** 采样面（只依赖「点 → cluster」）：装载期归属判定与相机定位都走它。 */
@@ -87,8 +82,6 @@ export interface VisibilityItem {
   clusterGeom?: string;
   /** 空集合的重算次数（有上限，避免每帧重试）。 */
   clusterTries?: number;
-  /** 世界空间 AABB（距离场判定用；按当前几何与 `matrixWorld` 每帧刷新，无分配）。 */
-  box?: THREE.Box3;
 }
 
 export interface VisibilityUpdateResult {
@@ -125,29 +118,6 @@ export function isBeyondCullDistance(
   const dz = cameraPos.z - center.z;
   const reach = cullDistance + Math.max(0, radius);
   return dx * dx + dy * dy + dz * dz > reach * reach;
-}
-
-/**
- * 距离场判定（精确版）：**块的轴对齐盒**到相机是否在球外。
- *
- * `isBeyondCullDistance` 用「中心 + 包围球半径」，对合并块是**上界**：一块半径 5000 的合并块，
- * 中心在 21000 处也会被算成「球内」（21000 − 5000 < 18000），结果把隔着大半个地图的另一片区域
- * 拖进画面（surf_666 窗外结构就是这么漏的）。盒判定按**离相机最近的那个面**算，球外即剔，
- * 与用户要的「球形距离场」语义一致。几何烘焙成世界坐标、mesh 矩阵恒等，盒可直接用几何 AABB。
- */
-export function isBeyondCullDistanceBox(
-  box: THREE.Box3,
-  cameraPos: THREE.Vector3,
-  cullDistance: number,
-): boolean {
-  if (!Number.isFinite(cullDistance)) return false;
-  const x = cameraPos.x < box.min.x ? box.min.x : cameraPos.x > box.max.x ? box.max.x : cameraPos.x;
-  const y = cameraPos.y < box.min.y ? box.min.y : cameraPos.y > box.max.y ? box.max.y : cameraPos.y;
-  const z = cameraPos.z < box.min.z ? box.min.z : cameraPos.z > box.max.z ? box.max.z : cameraPos.z;
-  const dx = cameraPos.x - x;
-  const dy = cameraPos.y - y;
-  const dz = cameraPos.z - z;
-  return dx * dx + dy * dy + dz * dz > cullDistance * cullDistance;
 }
 
 /** 可见性控制器：`clear()` 后重新 `collect()`，每帧调一次 `update()`。 */
@@ -217,19 +187,6 @@ export class VisibilityController {
   }
 
   /**
-   * 确保 cluster 归属已经算过（幂等）。
-   *
-   * 为什么需要：PVS 可以在**装载之后**才被打开（面板勾选 / 存档里上次是关的）。那条路径上
-   * `collect()` 当时没采样，块的 `clusterIds` 是空的——直接开 PVS 会把「没有任何 cluster」
-   * 当成「哪儿都看不见」而把全场景剔空（实测 drawn 0）。
-   */
-  ensureClusters(pvs: PvsSampler): void {
-    if (this.clustersReady) return;
-    this.assignClusters(pvs);
-    this.clustersReady = true;
-  }
-
-  /**
    * 装载期给每个块算出它覆盖的 cluster 集合。
    *
    * **优先逐顶点定位**（顶点沿法线外偏 4 HU 后查 BSP leaf → cluster，去重成集合）：合并块的
@@ -244,23 +201,6 @@ export class VisibilityController {
     let mapped = 0;
     for (const item of this.items) {
       if (only && item !== only) continue;
-      // 按 cluster 拆出来的子块：**不要重新采样**。它们的几何与源块共享同一批顶点属性
-      // （`position` 里是整个源块的顶点），再按顶点采样会把别的房间的 cluster 又收回来，
-      // 拆分就白做了。这类块的归属在拆分时已按三角形定好，直接采用。
-      const splitClusters = item.mesh.userData?.splitClusters;
-      if (Array.isArray(splitClusters) && splitClusters.length > 0) {
-        item.clusterIds = splitClusters.slice();
-        item.clusterGeom = (item.mesh.geometry as THREE.BufferGeometry | undefined)?.uuid ?? '';
-        mapped++;
-        continue;
-      }
-      const splitCluster = item.mesh.userData?.splitCluster;
-      if (typeof splitCluster === 'number') {
-        item.clusterIds = [splitCluster];
-        item.clusterGeom = (item.mesh.geometry as THREE.BufferGeometry | undefined)?.uuid ?? '';
-        mapped++;
-        continue;
-      }
       const set = new Set<number>();
       const geom = (item.mesh.geometry as THREE.BufferGeometry | undefined);
       const pos = geom?.attributes.position as THREE.BufferAttribute | undefined;
@@ -456,18 +396,8 @@ export class VisibilityController {
     // （surf_666 实测 44 → 1076 块 / 320 → 151fps）；也不能直接拿上一个房间的 PVS 行剔块，
     // 那个房间可能在地图另一端（实测 P1 机位 current=8069、真所在 6918 ⇒ 一次丢了 4 个块、画面露天空）。
     const camLeafCluster = pvsActive && pvs ? (pvs.getClusterNear ? pvs.getClusterNear(camPos) : pvs.getClusterAt(camPos)) : -1;
-    // 只用**真正定位到的房间**。不要退回 `pvs.currentClusterId`：`update(pos)` 在相机点落进
-    // 固体 leaf 时会保留上一个房间的可见集（穿墙瞬移不闪变），那个房间可能在地图另一端——
-    // 按它的 PVS 行剔块，就会把眼前真实可见的块整片剔掉（2026-11-13 冰坡消失现场：
-    // clusterAtCamera = -1、current = 旧房间，可见集只有 6 个 cluster ⇒ 画面几乎全空）。
-    // 定位到了但 `update(pos)` 走的是固体分支时，把可见集**切到**这个邻近房间再判。
-    let pvsClusterValid = camLeafCluster >= 0;
-    if (pvsClusterValid && pvs && pvs.updateToCluster) {
-      if (!pvs.updateToCluster(camLeafCluster)) {
-        // 该行数据缺失/全零（部分第三方编译器留空）：本帧 PVS 无从判定，退回不剔。
-        pvsClusterValid = false;
-      }
-    }
+    const camCluster = camLeafCluster >= 0 ? camLeafCluster : pvs ? pvs.currentClusterId : -1;
+    const pvsClusterValid = camCluster >= 0;
     if (pvsActive && !pvsClusterValid && !this.pvsUnlocated) {
       // 相机连「附近的房间」都定位不到（在实体里/在地图外）：这一帧 PVS 无从判定。
       // **这里不补任何距离剔除**——距离档一旦插手剔除，就必然出现「看得见却被距离吃掉」；
@@ -495,17 +425,10 @@ export class VisibilityController {
           item.center.copy(bs.center).applyMatrix4(item.mesh.matrixWorld);
           item.radius = bs.radius;
         }
-        if (!g.boundingBox) g.computeBoundingBox();
-        if (g.boundingBox) {
-          if (!item.box) item.box = new THREE.Box3();
-          item.box.copy(g.boundingBox).applyMatrix4(item.mesh.matrixWorld);
-        }
       }
       const near = item.center.distanceToSquared(camPos) < 2000 * 2000;
       if (near) nearTotal++;
-      const beyond = item.box
-        ? isBeyondCullDistanceBox(item.box, camPos, this.cullDistance)
-        : isBeyondCullDistance(item.center, camPos, this.cullDistance, item.radius);
+      const beyond = isBeyondCullDistance(item.center, camPos, this.cullDistance, item.radius);
       // 严格 PVS：块的 cluster 集合为空 ⇒ 它不在任何房间里（装到地图外壳外的重复道具、
       // 悬空装饰），没有任何 PVS 行会把它判为可见 ⇒ 不画。**不按距离兜底**，否则又回到
       // 「距离参与可见性」。距离场外的块连这次查询都不做。

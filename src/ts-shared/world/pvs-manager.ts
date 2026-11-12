@@ -307,11 +307,7 @@ export class PvsManager {
     const direct = this.getClusterAt(pos);
     if (direct >= 0) return direct;
     if (!this.hasPvs) return -1;
-    // 由近到远扫：半径只到 72 时，站在窗框/门套/装饰 brush 里的相机（眼睛落在固体 leaf）
-    // 就找不到房间 ⇒ 调用方只能整帧关掉 PVS，于是 18k 内的其他关卡区域全画出来。
-    // surf_666 的室内就是这个距离量级（实测最近的有效 cluster 在 +Z 192 HU）。
-    // 先试 6 轴，再试 8 个对角方向，取最近命中；仍找不到才放弃。
-    for (const r of [radius, radius * 3, radius * 6, radius * 10, radius * 16, radius * 24, radius * 32]) {
+    for (const r of [radius, radius * 3]) {
       for (const [dx, dy, dz] of [
         [r, 0, 0],
         [-r, 0, 0],
@@ -319,48 +315,12 @@ export class PvsManager {
         [0, -r, 0],
         [0, 0, r],
         [0, 0, -r],
-        [r, r, 0],
-        [-r, r, 0],
-        [0, r, r],
-        [0, r, -r],
-        [r, 0, r],
-        [-r, 0, -r],
       ]) {
         const c = this.getClusterAt({ x: pos.x + dx, y: pos.y + dy, z: pos.z + dz });
         if (c >= 0) return c;
       }
     }
     return -1;
-  }
-
-  /**
-   * 直接把可见集切到指定 cluster（世界坐标定位失败时的兜底入口）。
-   *
-   * 为什么需要它：`update(pos)` 在相机点落进固体 leaf 时**保留上一次可见集**
-   * （`currentCluster` 也是旧的）。上层若改用 `getClusterNear` 找到的邻近房间，
-   * 却仍用 `isVisible` 查旧集合，就会出现「眼前真实可见的块被另一个房间的 PVS 行剔掉」
-   * ——2026-11-13 owner 报的 surf_boreas 冰坡消失即属此类（相机贴在/嵌进冰坡里）。
-   *
-   * 与 `update` 一致的容错：cluster < 0、越界、或该行全零（数据缺失）时**不改状态**并返回
-   * false，调用方据此判定「本帧 PVS 无从判定」，退回不剔。
-   *
-   * @param clusterId 目标 cluster id（调用方已确认 >= 0）。
-   * @returns true 表示可见集已切到该 cluster。
-   */
-  updateToCluster(clusterId: number): boolean {
-    if (!this.hasPvs || clusterId < 0 || clusterId >= this.clusterCount) {
-      return false;
-    }
-    if (clusterId === this.currentCluster) {
-      return true;
-    }
-    const decoded = this.decodePvsRow(clusterId);
-    if (decoded.size === 0) {
-      return false;
-    }
-    this.currentCluster = clusterId;
-    this.visibleSet = decoded;
-    return true;
   }
 
   /**

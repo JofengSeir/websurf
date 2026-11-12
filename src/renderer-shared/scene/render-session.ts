@@ -39,7 +39,6 @@ import {
   type VisibilityUpdateResult,
 } from './visibility-controller.js';
 import { PvsRegionOverlay } from './pvs-region-overlay.js';
-import { splitChunksByCluster, type ClusterSplitStats } from './cluster-split.js';
 import { applySceneCamera, shrinkNearPlane } from '../camera/scene-camera.js';
 import { NearPlaneController } from '../camera/near-plane.js';
 import {
@@ -54,10 +53,7 @@ import { applyRenderPrefs, readRenderPrefs } from '../config/render-prefs.js';
  * 排查「现象还在」时先看它——不一致就说明浏览器跑的是旧包（Service Worker / 磁盘缓存），
  * 别在旧构建上做判断。改渲染语义时顺手递增。
  */
-export const RENDER_REV = '2026-11-13.5-cluster-split';
-
-/** 泄漏采样时沿面法线外推的距离（HU）：面本身是边界，重心必然贴着 brush。 */
-const CLUSTER_LEAK_PROBE_PUSH = [4, 16, 64, 192] as const;
+export const RENDER_REV = '2026-11-12.4-pitch-perf';
 import { getLightingMode, setLightingMode as setLightingModeInShader, type LightingMode } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import type { PoseScope } from '../camera/pose-entry.js';
@@ -180,8 +176,6 @@ export class RenderSession {
   private lastVisibility: VisibilityUpdateResult | null = null;
   /** PVS 查询器（`loadScene` 按 `pvsJson` 建；无 PVS 时 null）。 */
   private pvs: PvsManager | null = null;
-  /** 装载期按 cluster 拆分合并块的统计（`state().split` 可读）。 */
-  private clusterSplit: ClusterSplitStats | null = null;
   /** 主模型根（`mergeIntoNewRoot` 的产物；未合并时是 `assembleScene` 的 mapRoot）。 */
   private root: THREE.Object3D | null = null;
   /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `sortTransparentChunks`）。 */
@@ -318,8 +312,6 @@ export class RenderSession {
     // 诊断口：主根之外的可见 mesh（道具/实体）统计——PVS 只覆盖主根，这些不受它约束。
     (globalThis as { __vbspSceneStats?: unknown }).__vbspSceneStats = () => this.drawnChunkStats();
     (globalThis as { __vbspChunkAudit?: unknown }).__vbspChunkAudit = (limit?: number) => this.chunkAudit(limit);
-    // 诊断：块级并集泄漏量（逐三角形质心查 cluster，统计「画了但不可见」的比例）。
-    (globalThis as { __vbspChunkLeak?: unknown }).__vbspChunkLeak = (limit?: number) => this.chunkLeak(limit);
     (globalThis as { __vbspProbeChunk?: unknown }).__vbspProbeChunk = (name: string) => this.probeChunk(name);
     (globalThis as { __vbspRayCheck?: unknown }).__vbspRayCheck = (idx: number) => this.rayCheck(idx);
     (globalThis as { __vbspFrustumAudit?: unknown }).__vbspFrustumAudit = (sx?: number, sy?: number) => this.frustumAudit(sx, sy);
@@ -369,25 +361,7 @@ export class RenderSession {
         pvsOverride: this.pvsOverride,
         maxDim: this.maxDim,
         rev: RENDER_REV,
-        split: this.clusterSplit,
       }),
-    };
-    // 诊断：按 cluster 拆分后的分片体检（块数、每片记的 cluster 数、几何三角形数）。
-    (globalThis as { __vbspPieceAudit?: unknown }).__vbspPieceAudit = (limit = 12) => {
-      const rows = this.visibility.items
-        .filter((it) => Array.isArray((it.mesh.userData as { splitClusters?: number[] }).splitClusters))
-        .map((it) => {
-          const g = it.mesh.geometry as THREE.BufferGeometry;
-          const tris = (g.index ? g.index.count : (g.getAttribute('position') as THREE.BufferAttribute).count) / 3;
-          return {
-            name: it.mesh.name,
-            tris: Math.round(tris),
-            clusters: it.clusterIds.length,
-            declared: ((it.mesh.userData as { splitClusters?: number[] }).splitClusters ?? []).length,
-            visible: it.mesh.visible,
-          };
-        });
-      return { pieces: rows.length, rows: rows.slice(0, limit) };
     };
     // 诊断：天空层内容体检。`extractSkyArea` 的判据是「任一采样点落在 sky_camera 所在 cluster」，
     // 一个跨区的合并 mesh 只要有一个采点命中就整块搬去天空层（主相机永远不画）。
@@ -425,13 +399,6 @@ export class RenderSession {
     this.bbox = asm.bbox;
     this.maxDim = asm.maxDim;
     this.scene.add(this.root);
-    // 合并后的块把顶点烘焙成世界坐标、local 矩阵清成单位阵，但 `matrixWorld` 要等一次
-    // updateMatrixWorld 才会跟上（mergeIntoChunks 里只调了 `m.updateMatrix()`，从未刷新
-    // matrixWorld；`renderer.compile` 也不刷）。PVS 采样按 `mesh.matrixWorld` 把几何点变换到
-    // 世界空间，这里若拿到旧矩阵就是**二次变换**：cluster 非空但全错，且因为「非空」连
-    // 「空集合补算」都救不回来 —— 2026-11-13 owner 报的「冰坡透明材质消失 / 666 窗外又露出
-    // 别区结构」就是这一条（同一个错映射既可能误剔、也可能误留）。必须先刷矩阵再收集。
-    this.root.updateMatrixWorld(true);
     this.collectTransparentChunks();
 
     this.skyGroup = asm.skyGroup;
@@ -455,28 +422,6 @@ export class RenderSession {
     // 可见性：收集主根块 → 补 PVS cluster → 定剔除距离（天空层在收集阶段跳过）
     this.visibility.enablePvs = rp.culling.pvs;
     this.visibility.collect(this.root, this.pvs);
-    // PVS 粒度下沉：合并块经常横跨多个房间，而运行期只能判「块里有没有一个 cluster 可见」，
-    // 于是「任一分区可见 ⇒ 整块画」会把别的房间的三角形一起画出来（666 隔着窗看到别处关卡结构）。
-    // 这里按三角形所属 cluster 把这类块拆成若干子 Mesh（共享顶点属性、只重建 index），
-    // 拆完每片只属于一个 cluster，PVS 判定就精确到房间；单 cluster 的块不动，draw 数基本不变。
-    // 只在 PVS 真正启用时拆：PVS 关掉时拆片不会少画任何东西，只会让 draw 数翻几倍。
-    this.clusterSplit = this.visibility.enablePvs
-      ? splitChunksByCluster(this.root, this.visibility, this.pvs, {
-          // 小到 96 个三角形的块也拆：666 里「窗外看到别处」的块大多只有 300~1200 个三角形，
-          // 阈值定高（256）会把一半泄漏源留在块级并集里（实测仍有 52% 三角形属于不可见 cluster）。
-          minTris: 32,
-          // 单块最多 8 片；再多的并进最大片并记并集（并集片只会在其中任一 cluster 可见时画，不会开洞）。
-          maxPieces: 64,
-          // 不设全局片数上限：片数增长的代价由 minTris 控住（666 候选 151 块 → 约 400 片）。
-          maxNewPieceRatio: 8,
-        })
-      : null;
-    if (this.clusterSplit && this.clusterSplit.split > 0) {
-      // 场景图变了：重新收集可见块（新片的 clusterIds 由 assignClusters 重新算，必然是单元素）。
-      this.visibility.collect(this.root, this.pvs);
-      this.collectTransparentChunks();
-      precompileScene(this.renderer, this.scene, this.camera);
-    }
     const box = this.worldBox();
     const size = box ? box.getSize(new THREE.Vector3()) : new THREE.Vector3();
     this.diagonal = size.length();
@@ -563,24 +508,6 @@ export class RenderSession {
         this.pvsAutoCull ? CULL_DISTANCE_PVS_DEFAULT : this.maxDim * 0.25,
         this.cullConfigValue(rp.culling.distance),
       );
-    }
-    // PVS 是**装载之后**才被打开的（面板勾选、或存档里上次是关的）时补做簇拆分：
-    // 装载期那条快路径会跳过拆分（`enablePvs` 当时还是 false），一旦后来打开 PVS，
-    // 不拆就会一直停在块级并集上——正是「窗外看到别区结构」又回来的原因。
-    if (this.visibility.enablePvs && !this.clusterSplit && this.pvs) {
-      // 先补算 cluster：PVS 打开前 `collect()` 没采样过，空 clusterIds 会让拆分没有候选。
-      this.visibility.ensureClusters(this.pvs);
-      const split = splitChunksByCluster(this.root!, this.visibility, this.pvs, {
-        minTris: 32,
-        maxPieces: 64,
-        maxNewPieceRatio: 8,
-      });
-      this.clusterSplit = split;
-      if (split.split > 0) {
-        this.visibility.collect(this.root!, this.pvs);
-        this.collectTransparentChunks();
-        precompileScene(this.renderer, this.scene, this.camera);
-      }
     }
     this.lastVisibility = this.visibility.update(this.camera, this.pvs);
     return this.lastVisibility;
@@ -768,13 +695,13 @@ export class RenderSession {
     drawn: number;
     noCluster: number;
     pvsActive: boolean;
-    far: Array<{ name: string; d: number; r: number; boxD: number | null; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }>;
+    far: Array<{ name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }>;
     nearCulled: Array<{ idx: number; name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; tris: number }>;
   } {
     const p = this.camera.position;
     const items = this.visibility.items;
     const pvsActive = !!(this.visibility.enablePvs && this.pvs?.enabled);
-    const all: Array<{ name: string; d: number; r: number; boxD: number | null; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }> = [];
+    const all: Array<{ name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }> = [];
     const nearCulled: Array<{ idx: number; name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; tris: number }> = [];
     let drawn = 0;
     let noCluster = 0;
@@ -797,7 +724,6 @@ export class RenderSession {
         name: item.mesh.name || '(anon)',
         d: Math.round(d),
         r: Math.round(item.radius),
-        boxD: item.box ? Math.round(item.box.distanceToPoint(p)) : null,
         clusters: item.clusterIds.length,
         pvsVisible,
         visible: true,
@@ -807,89 +733,6 @@ export class RenderSession {
     all.sort((a, b) => b.d - a.d);
     nearCulled.sort((a, b) => a.d - b.d);
     return { cull: this.visibility.cullDistance, total: items.length, drawn, noCluster, pvsActive, far: all.slice(0, limit), nearCulled: nearCulled.slice(0, limit) };
-  }
-
-  /**
-   * 诊断：块级并集到底放进来多少「来自不可见 cluster」的三角形。
-   *
-   * 语义背景：一个合并块可以横跨多个房间（`clusterIds` 有多个），运行期只要**任一个**
-   * cluster 在可见集里就整块画 ⇒ 别的房间的三角形跟着出来，这是「看得见才画」的粒度上限。
-   * 这里逐三角形质心 → BSP leaf → cluster，统计每块里 PVS 判不可见的占比，
-   * 给出「块级并集」实际泄漏量的直接证据（质心采样，不是精确面积）。
-   */
-  chunkLeak(limit = 20): {
-    pvsActive: boolean;
-    sampled: number;
-    leaked: number;
-    farLeaked: number;
-    chunks: Array<{ name: string; tris: number; sampled: number; leaked: number; farLeaked: number; clusters: number }>;
-  } {
-    const empty = { pvsActive: false, sampled: 0, leaked: 0, farLeaked: 0, chunks: [] };
-    const pvs = this.pvs;
-    if (!this.visibility.enablePvs || !pvs) return empty;
-    const out = { pvsActive: true, sampled: 0, leaked: 0, farLeaked: 0, chunks: [] as Array<{ name: string; tris: number; sampled: number; leaked: number; farLeaked: number; clusters: number }> };
-    const cam = this.camera.position;
-    const a = new THREE.Vector3();
-    const b = new THREE.Vector3();
-    const c = new THREE.Vector3();
-    for (const item of this.visibility.items) {
-      if (!item.mesh.visible) continue;
-      // 单 cluster 的块过去被跳过（那时它不可能「半块泄漏」）。拆分之后正好相反：绝大多数
-      // 画着的块都是单 cluster 片，必须一起采样，否则这个指标看不出「拆分是否真的精确」。
-      if (item.clusterIds.length === 0) continue;
-      const g = item.mesh.geometry as THREE.BufferGeometry | undefined;
-      const pos = g?.getAttribute('position') as THREE.BufferAttribute | undefined;
-      const index = g?.index ?? null;
-      if (!pos) continue;
-      // 合并块有两种：带 index 的（多材质 groups）与不带 index 的（单材质）。两种都要能采样。
-      const tris = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
-      if (tris === 0) continue;
-      const matrix = item.mesh.matrixWorld;
-      const stride = Math.max(1, Math.ceil(tris / 48));
-      let sampled = 0;
-      let leaked = 0;
-      let farLeaked = 0;
-      for (let t = 0; t < tris; t += stride) {
-        const i0 = index ? index.getX(t * 3) : t * 3;
-        const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
-        const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-        a.fromBufferAttribute(pos, i0);
-        b.fromBufferAttribute(pos, i1);
-        c.fromBufferAttribute(pos, i2);
-        // 面法线：三角形重心**落在表面上**，直接查 leaf 会经常落进 brush 内部（cluster -1），
-        // 那是判据噪声不是泄漏。按法线往外推几档再查，才是「这个面朝向的那间房」。
-        a.add(b).add(c).multiplyScalar(1 / 3);
-        const e1x = b.x - a.x, e1y = b.y - a.y, e1z = b.z - a.z;
-        const e2x = c.x - a.x, e2y = c.y - a.y, e2z = c.z - a.z;
-        let nx = e1y * e2z - e1z * e2y;
-        let ny = e1z * e2x - e1x * e2z;
-        let nz = e1x * e2y - e1y * e2x;
-        const nl = Math.hypot(nx, ny, nz) || 1;
-        nx /= nl; ny /= nl; nz /= nl;
-        a.applyMatrix4(matrix);
-        let cluster = -1;
-        for (const push of CLUSTER_LEAK_PROBE_PUSH) {
-          const px = a.x + nx * push, py = a.y + ny * push, pz = a.z + nz * push;
-          cluster = pvs.getClusterAt({ x: px, y: py, z: pz });
-          if (cluster >= 0) break;
-          const bx = a.x - nx * push, by = a.y - ny * push, bz = a.z - nz * push;
-          cluster = pvs.getClusterAt({ x: bx, y: by, z: bz });
-          if (cluster >= 0) break;
-        }
-        if (cluster < 0) continue; // 两侧都采不到房间（纯内部面），不参与判定
-        sampled++;
-        if (pvs.isVisible(cluster)) continue;
-        leaked++;
-        if (a.distanceTo(cam) > 12000) farLeaked++;
-      }
-      out.sampled += sampled;
-      out.leaked += leaked;
-      out.farLeaked += farLeaked;
-      if (leaked > 0) out.chunks.push({ name: item.mesh.name || '(anon)', tris, sampled, leaked, farLeaked, clusters: item.clusterIds.length });
-    }
-    out.chunks.sort((x, y) => y.leaked - x.leaked);
-    out.chunks.splice(limit);
-    return out;
   }
 
   /**
@@ -1336,10 +1179,8 @@ export class RenderSession {
 
   /** 主模型分块合并：三端唯一包装（新根口径；旧的 game/debug 原地挂回已废弃）。 */
   private mergeMain(root: THREE.Scene): THREE.Object3D {
-    // 不透明块细分粒度：512 的一半（半透明/水面块不受影响，见 MergeOptions.opaqueTargetCells 注释）。
-    // 实测开阔路段 344~503 draw ⇒ 主遍 3~4.4ms，不透明桶砍半是能进 320fps 预算的杠杆。
-    // 再往细分（160）反而更差：同机位 route1 t=7000 311fps / t=12000 309fps（256 是 314 / 316），
-    // 因为单块三角形变多、视锥裁剪变粗 ⇒ 顶点着色与填充反而上涨。256 是这里的最优点。
+    // 不透明块细分粒度减半（半透明/水面块不受影响，见 MergeOptions.opaqueTargetCells 注释）：
+    // 实测开阔路段 344~503 draw ⇒ 主遍 3~4.4ms，砍半是唯一能进 320fps 预算的杠杆。
     const optRoot = mergeIntoNewRoot(root, { translucentSplit: this.translucentSplit, opaqueTargetCells: 256 });
     const stats = mergeStatsOf(optRoot);
     if (stats) {
