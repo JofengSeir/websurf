@@ -129,8 +129,11 @@ export function renderSkyPass(input: SkyPassInput): THREE.Fog | null {
   renderer.autoClear = false;
   renderer.clear();
   const dbg = (globalThis as { __vbspDrawDebug?: { on?: boolean } }).__vbspDrawDebug?.on;
+  // 取证开关（不是功能开关）：`__vbspSkyPassOff = true` 跳过天空遍，用来量「天空遍本身值多少毫秒」。
+  // 关掉后背景会是清屏色（天空层不在了），只用于 A/B 计时，不要留在任何默认路径上。
+  const skipSky = (globalThis as { __vbspSkyPassOff?: boolean }).__vbspSkyPassOff === true;
   const tSky = dbg ? performance.now() : 0;
-  renderer.render(scene, skyCamera);
+  if (!skipSky) renderer.render(scene, skyCamera);
   const skyMs = dbg ? performance.now() - tSky : 0;
   // 分段 draw 计数（仅 `__vbspDrawDebug.on` 时写）：天空遍和主遍各画了多少 —— three 每次
   // `render()` 都会重置 `info.render.calls`，只有在这里夹住才能分别读到。
