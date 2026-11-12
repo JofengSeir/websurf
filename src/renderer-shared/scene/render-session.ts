@@ -54,7 +54,7 @@ import { applyRenderPrefs, readRenderPrefs } from '../config/render-prefs.js';
  * 排查「现象还在」时先看它——不一致就说明浏览器跑的是旧包（Service Worker / 磁盘缓存），
  * 别在旧构建上做判断。改渲染语义时顺手递增。
  */
-export const RENDER_REV = '2026-11-13.6-tri-filter';
+export const RENDER_REV = '2026-11-13.7-tri-filter-groups';
 
 /** 泄漏采样时沿面法线外推的距离（HU）：面本身是边界，重心必然贴着 brush。 */
 const CLUSTER_LEAK_PROBE_PUSH = [4, 16, 64, 192] as const;
