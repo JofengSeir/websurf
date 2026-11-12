@@ -53,7 +53,7 @@ import { applyRenderPrefs, readRenderPrefs } from '../config/render-prefs.js';
  * 排查「现象还在」时先看它——不一致就说明浏览器跑的是旧包（Service Worker / 磁盘缓存），
  * 别在旧构建上做判断。改渲染语义时顺手递增。
  */
-export const RENDER_REV = '2026-11-12.4-pitch-perf';
+export const RENDER_REV = '2026-11-13.2-beneath-cull';
 import { getLightingMode, setLightingMode as setLightingModeInShader, type LightingMode } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import type { PoseScope } from '../camera/pose-entry.js';
