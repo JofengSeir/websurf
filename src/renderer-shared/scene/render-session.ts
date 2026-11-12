@@ -555,7 +555,9 @@ export class RenderSession {
     }
     // PVS 是**装载之后**才被打开的（面板勾选、或存档里上次是关的）时补建逐三角形 cluster 表：
     // 装载期那条快路径会跳过（`enablePvs` 当时还是 false），不补建就一直停在块级并集上。
-    if (this.visibility.enablePvs && !this.clusterIndex && this.pvs) {
+    // `prepared === 0` 也要重试：装载期那趟可能因为 clusterIds 还没算出来而整批跳过，
+    // 只记下一个 prepared=0 的统计对象；不重试就永远停在块级并集上（踩过）。
+    if (this.visibility.enablePvs && (!this.clusterIndex || this.clusterIndex.prepared === 0) && this.pvs) {
       // 先补算 cluster：PVS 打开前 `collect()` 没采样过，空 clusterIds 会让过滤没有候选。
       this.visibility.ensureClusters(this.pvs);
       this.clusterIndex = prepareClusterIndex(this.visibility.items, this.pvs, 64);

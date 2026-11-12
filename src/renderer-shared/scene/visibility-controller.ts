@@ -529,10 +529,18 @@ export class VisibilityController {
         if (near) nearVisible++;
         reasons.pvs++;
       }
+      // 逐三角形过滤的块还要看「有没有可见三角形」：`cluster-filter.ts` 只裁 PVS 不可见的面，
+      // 距离场外的块仍必须整块不画（visible 只在 lodLevel===LOD_NEAR 时才可能为 true）。
+      const triState = triFiltered
+        ? ((item.mesh.userData as { clusterIndex?: { visTris: number } }).clusterIndex?.visTris ?? -1)
+        : -1;
       if (item.mesh.userData.lodLevel !== level) {
         item.mesh.userData.lodLevel = level;
-        item.mesh.visible = level === LOD_NEAR;
+        item.mesh.visible = level === LOD_NEAR && (triState !== 0);
         changed = true;
+      } else if (triFiltered) {
+        // lodLevel 没变但可见三角形变了（相机换房间才发生，由 applyClusterIndex 写回）。
+        item.mesh.visible = level === LOD_NEAR && triState !== 0;
       }
     }
     return { visible, culledByDistance, culledByPvs, cullDistance: this.cullDistance, pvsActive, changed, reasons };
