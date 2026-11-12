@@ -48,6 +48,8 @@ import type { PhyBevelPiece } from './collider-debug.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
+import { FlightPathRecorder } from './flight-path.js';
+import type { FlightFileMeta, FlightLoadResult, FlightPathStatus } from './flight-path.js';
 import type { InputReplayInitialState, InputReplayHull } from '../input/input-recorder.js';
 import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
@@ -91,6 +93,10 @@ export interface CullStatsLike {
     near: number;
     far: number;
   };
+  /** 共享渲染代码版本（`RENDER_REV`），HUD 直接显示，用来识别「还在跑旧包」。 */
+  rev: string;
+  /** 可见块「凭什么被画」的分项计数：`pvs` = PVS 判可见、`distance` = 只有距离档。 */
+  reasons: { pvs: number; distance: number };
 }
 
 /** 渲染物理事件（`PhysWorld.take_event` 逐条取出、一次性消费；取到 null 即结束本轮）。
@@ -144,6 +150,31 @@ export class RendererMain {
   private readonly lightManager = new LightManager();
   /** 物理轨迹记录器：渲染物理线每物理步一点、tick 物理线每条新权威帧一点，采样点均为脚底中心。 */
   private readonly pathRecorder = new PathRecorder();
+  /**
+   * 飞行轨迹（相机位姿）录制/复播：noclip 自由飞一遍再原样重放，用于复现「说不清坐标」的场景。
+   * 与 `pathRecorder` 的区别见 `flight-path.ts` 文件头：这个是相机、那个是物理节点。
+   */
+  private readonly flightPath = new FlightPathRecorder();
+  /** 当前地图名（导出轨迹时写进 meta，换图后一眼能看出轨迹属于哪张图）。 */
+  private flightMapName = '';
+  /**
+   * 复播状态；`null` = 没在复播。复播不驱动物理，只把样本位姿写进 `poseHold`（与
+   * `__vbspPose.setPose()` 同一条路），因此 noclip 穿过几何也能重放，且可反复 seek 截图。
+   */
+  private flightPlayback: {
+    /** 已播放到的轨迹时间（毫秒）。 */
+    tMs: number;
+    /** 播放速率（1 = 原速）。 */
+    speed: number;
+    /** 播到末尾是否回绕。 */
+    loop: boolean;
+    /** 暂停时只重摆位姿、不推进时钟。 */
+    paused: boolean;
+    /** 上一帧墙钟（毫秒）：每帧用它算增量，暂停/seek 后重设以丢弃间隙。 */
+    lastWallMs: number;
+    /** 复播前用户原本的位姿冻结（结束时还原，避免把 `__vbspPose.setPose` 的钉点弄丢）。 */
+    holdBackup: { x: number; y: number; z: number; yawRad: number; pitchRad: number } | null;
+  } | null = null;
   /** 碰撞体/触发器/三角面可视化；`hasDebugWork` 为假时 `tick` 跳过它的 `update`。 */
   private readonly colliderDebug = new ColliderDebug();
   /** 准星射线检测器：从相机前方发射，与 mesh/碰撞体/触发器求交，结果经 `getPlaneInfo` 给 HUD。 */
@@ -307,6 +338,25 @@ export class RendererMain {
     this.scene.add(this.pathRecorder.group);
 
     this.cameraController = new CameraController(this.camera, config.input); installPoseEntry({ applyPose: (p) => { const [yawRad, pitchRad] = yawPitchRadOf(p); this.poseHold = { x: p.pos[0], y: p.pos[1], z: p.pos[2], yawRad, pitchRad }; }, readPose: () => cameraPoseOf(this.camera), releasePose: () => { this.poseHold = null; } }, 'debug'); (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality = (q) => this.applyTextureQuality(q);
+    // 飞行轨迹入口（自动化脚本用）：录一条 noclip 飞行、导出、之后再 load + seek 复播截图。
+    // 面板按同样的方法接（`apps/debug/src/app.ts` 的「飞行轨迹」区）。
+    (globalThis as unknown as { __vbspFlight?: unknown }).__vbspFlight = {
+      start: (): void => this.startFlightRecording(),
+      stop: (): void => this.stopFlightRecording(),
+      clear: (): void => this.clearFlightPath(),
+      status: (): FlightPathStatus & { playback: ReturnType<RendererMain['getFlightPlayback']> } => ({
+        ...this.flightPath.status(),
+        playback: this.getFlightPlayback(),
+      }),
+      export: (meta?: FlightFileMeta): string => this.exportFlightJson(meta),
+      load: (text: string): FlightLoadResult => this.loadFlightJson(text),
+      play: (opts?: { speed?: number; loop?: boolean }): boolean => this.playFlight(opts),
+      pause: (): void => this.pauseFlight(),
+      resume: (): void => this.resumeFlight(),
+      seek: (tMs: number): void => this.seekFlight(tMs),
+      stopPlay: (): void => this.stopFlightPlayback(),
+      map: (name?: string): string => (name === undefined ? this.flightMapName : this.setFlightMapName(name)),
+    };
 
     this.lightManager.applyLights(this.scene, config);
     this.colliderDebug.init(this.scene);
@@ -362,6 +412,8 @@ export class RendererMain {
     this.noclipActive = false;
     this.lastTickMs = 0;
     this.deathY = null;
+    // 换图时停掉飞行复播（轨迹本身保留：同一张图重载后还能直接 seek）
+    this.stopFlightPlayback();
     // 权威校准状态清零（旧图的权威帧不得注入新图）
     this.calibrator.clear();
     // 换图使采样流不连续 → 采样失效世代 +1
@@ -488,6 +540,10 @@ export class RendererMain {
     this.rafId = requestAnimationFrame(this.boundTick);
     if (!this.renderer || !this.scene || !this.camera || !this.cameraController) return;
 
+    // ⓪ 飞行轨迹复播：先按墙钟推进样本、写进 `poseHold`，下面的物理段再把它摆到相机上。
+    //    放在物理段之前是必须的——相机摆放只读 `poseHold`，放在后面就会晚一帧。
+    this.advanceFlightPlayback(now);
+
     // ①-1 输入写共享内存（Worker 权威模拟消费同一份输入）→ 权威帧校准 → 推进本地物理。
     // 回放步长只有 replayMode 为真时才会取到（`replayPending`）；取不到就回落墙钟 dt——
     // 两条路都要推进物理，`setReplayMode(true)` 同时被只关权威耦合的录制路径使用，
@@ -561,6 +617,13 @@ export class RendererMain {
       this.lastTickMs = now;
     }
 
+    // ⓪-2 飞行轨迹录制：记**相机**位姿（不是脚底），所以放在相机摆放之后、渲染之前；
+    //      复播中也照记（可以把一条轨迹的某一段再录成新轨迹）。
+    if (this.flightPath.isRecording) {
+      const pose = cameraPoseOf(this.camera);
+      if (pose) this.flightPath.add(now, pose.pos[0], pose.pos[1], pose.pos[2], pose.yawDeg, pose.pitchDeg);
+    }
+
     const camPos = this.camera.position;
 
     // ② 可见性：共享会话判定（距离优先 → PVS）；有变化时按需渲染补一帧
@@ -626,6 +689,13 @@ export class RendererMain {
   setNearParams(probeDist?: number, ratio?: number): void {
     this.session?.setNearParams(probeDist, ratio);
     this.needsRender = true;
+  }
+
+  /** PVS 区域着色开关（debug 面板）：转发共享 RenderSession；返回是否真的开启。 */
+  setPvsRegionOverlay(on: boolean): boolean {
+    const applied = this.session?.setPvsRegionOverlay(on) ?? false;
+    this.needsRender = true;
+    return applied;
   }
 
   // ── 外部接口 ───────────────────────────────────────────────
@@ -761,6 +831,191 @@ export class RendererMain {
   /** 导出 CSV，列为 line,t_ms,x_hu,y_hu,z_hu。 */
   exportPathCsv(): string {
     return this.pathRecorder.toCsv();
+  }
+
+  // ── 飞行轨迹录制 / 复播（面板「飞行轨迹」与 `__vbspFlight` 共用）──────────
+  // 与上面的物理路径记录是两件事：这里采的是**相机**位姿，复播直接把相机钉到样本上，
+  // 不推进物理、不吃输入，所以 noclip 穿过几何、反复 seek 到同一时刻，画面都一致。
+
+  /** 开始录制飞行轨迹（清空旧轨迹；复播中调用会先停掉复播，避免把复播位姿录进去）。 */
+  startFlightRecording(): void {
+    this.stopFlightPlayback();
+    this.flightPath.start(performance.now());
+    this.needsRender = true;
+  }
+
+  /** 停止录制：已落的点保留，可继续导出 / 复播。 */
+  stopFlightRecording(): void {
+    this.flightPath.stop();
+  }
+
+  /** 是否正在录制飞行轨迹。 */
+  isFlightRecording(): boolean {
+    return this.flightPath.isRecording;
+  }
+
+  /** 清空飞行轨迹（不改录制状态；复播中调用会先停掉复播）。 */
+  clearFlightPath(): void {
+    this.stopFlightPlayback();
+    this.flightPath.clear();
+    this.needsRender = true;
+  }
+
+  /** 记录当前地图名（导出轨迹时写进 meta；`loadScene` 成功后由 app.ts 调用）。 */
+  setFlightMapName(name: string): string {
+    this.flightMapName = name;
+    return this.flightMapName;
+  }
+
+  /** 轨迹状态：点数、时长、是否在录（复播状态另见 `getFlightPlayback()`）。 */
+  getFlightStatus(): FlightPathStatus {
+    return this.flightPath.status();
+  }
+
+  /** 导出轨迹 JSON：`meta.map` 缺省填当前地图名。 */
+  exportFlightJson(meta: FlightFileMeta = {}): string {
+    return this.flightPath.toJson({ map: this.flightMapName, ...meta });
+  }
+
+  /** 载入轨迹 JSON（替换当前轨迹，不开始录制）；格式错时抛错，由 UI/脚本显示。 */
+  loadFlightJson(text: string): FlightLoadResult {
+    const result = this.flightPath.loadJson(text);
+    this.needsRender = true;
+    return result;
+  }
+
+  /**
+   * 从头复播（需要已载入轨迹）。`speed` 夹到 [0.05, 16]，`loop` 为真时播到末尾回绕。
+   * 复播期间输入被清零（否则物理会把角色推走），相机完全由轨迹决定。
+   */
+  playFlight(opts: { speed?: number; loop?: boolean } = {}): boolean {
+    if (this.flightPath.count === 0) return false;
+    this.flightPlayback = {
+      tMs: 0,
+      speed: Math.max(0.05, Math.min(opts.speed ?? 1, 16)),
+      loop: opts.loop === true,
+      paused: false,
+      lastWallMs: performance.now(),
+      holdBackup: this.poseHold,
+    };
+    this.pendingDx = 0;
+    this.pendingDy = 0;
+    this.pendingKeys = 0;
+    this.needsRender = true;
+    return true;
+  }
+
+  /** 暂停复播：停住时钟，但仍每帧把当前样本摆到相机上。 */
+  pauseFlight(): void {
+    if (this.flightPlayback) this.flightPlayback.paused = true;
+  }
+
+  /** 继续复播（丢弃暂停期间的时间间隙）。 */
+  resumeFlight(): void {
+    const pb = this.flightPlayback;
+    if (!pb) return;
+    pb.paused = false;
+    pb.lastWallMs = performance.now();
+  }
+
+  /**
+   * 定位到轨迹 `tMs` 并不再自动前进（复播中调用则改为暂停在该时刻）。
+   * 截图脚本用它：`load` → `seek(t)` → 等两帧 → 截图。
+   */
+  seekFlight(tMs: number): void {
+    const duration = this.flightPath.durationMs;
+    const t = Math.max(0, Math.min(Number.isFinite(tMs) ? tMs : 0, duration));
+    const now = performance.now();
+    const pb = this.flightPlayback;
+    if (pb) {
+      pb.tMs = t;
+      pb.paused = true;
+      pb.lastWallMs = now;
+    } else {
+      this.flightPlayback = {
+        tMs: t,
+        speed: 1,
+        loop: false,
+        paused: true,
+        lastWallMs: now,
+        holdBackup: this.poseHold,
+      };
+    }
+    this.pendingDx = 0;
+    this.pendingDy = 0;
+    this.pendingKeys = 0;
+    this.needsRender = true;
+  }
+
+  /** 结束复播并把位姿冻结还原成复播前的状态（相机随即回到物理/用户钉点）。 */
+  stopFlightPlayback(): void {
+    const pb = this.flightPlayback;
+    if (!pb) return;
+    this.flightPlayback = null;
+    this.poseHold = pb.holdBackup;
+    this.needsRender = true;
+  }
+
+  /** 是否处于复播（含暂停）。 */
+  isFlightPlaying(): boolean {
+    return this.flightPlayback !== null;
+  }
+
+  /** 运行期改复播速率（面板下拉即时生效，不必重播）。 */
+  setFlightSpeed(speed: number): void {
+    const pb = this.flightPlayback;
+    if (!pb || !Number.isFinite(speed)) return;
+    pb.speed = Math.max(0.05, Math.min(speed, 16));
+  }
+
+  /** 运行期改循环开关（播到末尾时才用得上）。 */
+  setFlightLoop(loop: boolean): void {
+    if (this.flightPlayback) this.flightPlayback.loop = loop;
+  }
+
+  /** 复播进度快照（面板状态行/脚本用）；未复播返回 null。 */
+  getFlightPlayback(): { tMs: number; durationMs: number; speed: number; loop: boolean; paused: boolean } | null {
+    const pb = this.flightPlayback;
+    if (!pb) return null;
+    return { tMs: pb.tMs, durationMs: this.flightPath.durationMs, speed: pb.speed, loop: pb.loop, paused: pb.paused };
+  }
+
+  /**
+   * 每帧推进复播：按墙钟前进 `tMs`，取插值样本写进 `poseHold`。
+   * 播到末尾时 `loop` 回绕，否则停在末尾（保持画面，不弹回玩家位置）。
+   */
+  private advanceFlightPlayback(nowMs: number): void {
+    const pb = this.flightPlayback;
+    if (!pb) return;
+    const duration = this.flightPath.durationMs;
+    if (!pb.paused) {
+      pb.tMs += Math.max(0, nowMs - pb.lastWallMs) * pb.speed;
+      pb.lastWallMs = nowMs;
+      if (pb.tMs >= duration) {
+        if (pb.loop && duration > 0) pb.tMs = pb.tMs % duration;
+        else {
+          pb.tMs = duration;
+          pb.paused = true;
+        }
+      }
+    }
+    // 复播期不让输入影响物理：相机由轨迹决定，但角色乱跑会把实体/触发器带偏
+    this.pendingDx = 0;
+    this.pendingDy = 0;
+    this.pendingKeys = 0;
+    const sample = this.flightPath.sampleAt(pb.tMs);
+    if (!sample) {
+      this.stopFlightPlayback();
+      return;
+    }
+    this.poseHold = {
+      x: sample.x,
+      y: sample.y,
+      z: sample.z,
+      yawRad: sample.yaw * DEG2RAD,
+      pitchRad: sample.pitch * DEG2RAD,
+    };
+    this.needsRender = true;
   }
 
   /** 应用配置 patch：先按 `section` 把字段并进 `config[section]`，再做该段的联动——
@@ -1242,6 +1497,8 @@ export class RendererMain {
       visible: lodStats.visible,
       total: lodStats.total,
       cullDist: lodStats.cullDistance,
+      rev: lodStats.rev,
+      reasons: lodStats.reasons,
       pvs: {
         cluster: pvsStats.currentCluster,
         visibleClusters: pvsStats.visibleCount,

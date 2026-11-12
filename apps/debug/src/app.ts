@@ -114,6 +114,17 @@ const dom = {
 	pathDeviVisibleChk: document.getElementById('pathDeviVisibleChk') as HTMLInputElement | null,
 	pathDotsVisibleChk: document.getElementById('pathDotsVisibleChk') as HTMLInputElement | null,
 	pathCountsEl: document.getElementById('pathCounts') as HTMLElement | null,
+	// 飞行轨迹（noclip 复播）：录相机位姿，导出 JSON 后可原样重放
+	flightRecBtn: document.getElementById('flightRecBtn') as HTMLButtonElement | null,
+	flightPlayBtn: document.getElementById('flightPlayBtn') as HTMLButtonElement | null,
+	flightStopBtn: document.getElementById('flightStopBtn') as HTMLButtonElement | null,
+	flightClearBtn: document.getElementById('flightClearBtn') as HTMLButtonElement | null,
+	flightExportBtn: document.getElementById('flightExportBtn') as HTMLButtonElement | null,
+	flightImportBtn: document.getElementById('flightImportBtn') as HTMLButtonElement | null,
+	flightImportInput: document.getElementById('flightImportInput') as HTMLInputElement | null,
+	flightSpeedSel: document.getElementById('flightSpeed') as HTMLSelectElement | null,
+	flightLoopChk: document.getElementById('flightLoopChk') as HTMLInputElement | null,
+	flightStatusEl: document.getElementById('flightStatus') as HTMLElement | null,
 	// 显示设置（显示设置面板）
 	showSolidsChk: document.getElementById('showSolids') as HTMLInputElement | null,
 	showBevelChk: document.getElementById('showBevel') as HTMLInputElement | null,
@@ -127,6 +138,7 @@ const dom = {
 	phyViewDistanceRange: document.getElementById('phyViewDistance') as HTMLInputElement | null,
 	phyViewDistanceNum: document.getElementById('phyViewDistanceNum') as HTMLInputElement | null,
 	showVisChk: document.getElementById('showVis') as HTMLInputElement | null,
+	pvsRegionsChk: document.getElementById('showPvsRegions') as HTMLInputElement | null,
 	visViewDistanceRange: document.getElementById('visViewDistance') as HTMLInputElement | null,
 	visViewDistanceNum: document.getElementById('visViewDistanceNum') as HTMLInputElement | null,
 	showPlaneInfoChk: document.getElementById('showPlaneInfo') as HTMLInputElement | null,
@@ -607,9 +619,14 @@ function updateCullStatsUI(msg: CullStatsLike): void {
 		dom.cullStatsEl.innerHTML =
 			`<span class="label">可见</span> <span class="v">${msg.visible}/${msg.total}</span>  <span class="label">视距</span> <span class="v">${Number.isFinite(msg.cullDist) ? msg.cullDist.toFixed(0) : '全加载'}</span>  ` +
 			`<span class="label">cluster</span> <span class="v">${p.cluster >= 0 ? p.cluster : '—'}</span>  <span class="label">PVS</span> <span class="v">${p.totalClusters > 0 ? `${p.visibleClusters}/${p.totalClusters} 隐藏${p.pvsHidden}` : '未接线'}</span>  ` +
-			`<span class="label">LOD</span> <span class="v">近${p.near}/远${p.far}</span>`;
+			`<span class="label">LOD</span> <span class="v">近${p.near}/远${p.far}</span>  ` +
+			// 可见块「凭什么被画」：严格语义下只有 pvs（PVS 判可见）/ distance（仅有距离档）。
+			`<span class="label">凭什么画</span> <span class="v">pvs${msg.reasons?.pvs ?? 0} 距离${msg.reasons?.distance ?? 0}</span>  ` +
+			// 渲染代码版本：排查「现象还在」时先看这里，对不上就是浏览器/Service Worker 还在跑旧包。
+			`<span class="label">rev</span> <span class="v">${msg.rev ?? '—'}</span>`;
 	}
 	updatePathCountsUI(); // 顺带刷新路径记录点数（~10Hz，够用）
+	updateFlightStatusUI(); // 飞行轨迹状态行同频刷新（录/播状态与进度）
 }
 
 // ---------------------------------------------------------------------------
@@ -652,6 +669,93 @@ function updatePathCountsUI(): void {
 	dom.pathCountsEl.innerHTML =
 		`${rec} · 渲染 ${c.render} 点 / tick ${c.tick} 点${perp}${devi}${resid}${shape}`;
 }
+
+// ---------------------------------------------------------------------------
+// 飞行轨迹（noclip 复播，面板接线）
+//
+// 录的是**相机**位姿：先 noclip 飞一遍、导出 JSON；之后 `__vbspFlight.load(text)` +
+// `seek(ms)` 就能把任一时刻的画面复现出来（「从头复播」走同一条路，只多了个时钟）。
+// 复播不推进物理、不读键鼠：相机完全由轨迹决定，所以穿过几何也能重放、可反复重来。
+// ---------------------------------------------------------------------------
+
+/** 刷新飞行轨迹状态行与录制/复播按钮文案（~10Hz，跟剔除统计一起刷；动作后也手动调）。 */
+function updateFlightStatusUI(): void {
+	if (!dom.flightStatusEl || !rendererMain) return;
+	const st = rendererMain.getFlightStatus();
+	const pb = rendererMain.getFlightPlayback();
+	const secs = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
+	const mode = st.recording ? '● 录制中' : pb ? (pb.paused ? '⏸ 复播（暂停）' : '▶ 复播中') : st.count > 0 ? '已有轨迹' : '未录';
+	const progress = pb
+		? `　进度 ${secs(pb.tMs)} / ${secs(pb.durationMs)}　${pb.speed}×${pb.loop ? ' 循环' : ''}`
+		: '';
+	dom.flightStatusEl.textContent = `${mode} · ${st.count} 点 · 时长 ${secs(st.durationMs)}${progress}`;
+	if (dom.flightRecBtn) dom.flightRecBtn.textContent = st.recording ? '停止录制' : '开始录制';
+	if (dom.flightPlayBtn) dom.flightPlayBtn.textContent = pb && !pb.paused ? '暂停复播' : pb ? '继续复播' : '从头复播';
+}
+
+dom.flightRecBtn?.addEventListener('click', () => {
+	if (!rendererMain) return;
+	if (rendererMain.isFlightRecording()) rendererMain.stopFlightRecording();
+	else rendererMain.startFlightRecording();
+	updateFlightStatusUI();
+});
+
+dom.flightPlayBtn?.addEventListener('click', () => {
+	if (!rendererMain) return;
+	const pb = rendererMain.getFlightPlayback();
+	if (pb && !pb.paused) rendererMain.pauseFlight();
+	else if (pb) rendererMain.resumeFlight();
+	else {
+		rendererMain.playFlight({
+			speed: Number(dom.flightSpeedSel?.value ?? '1'),
+			loop: dom.flightLoopChk?.checked ?? false,
+		});
+	}
+	updateFlightStatusUI();
+});
+
+dom.flightStopBtn?.addEventListener('click', () => {
+	rendererMain?.stopFlightPlayback();
+	updateFlightStatusUI();
+});
+
+dom.flightClearBtn?.addEventListener('click', () => {
+	rendererMain?.clearFlightPath();
+	updateFlightStatusUI();
+});
+
+dom.flightExportBtn?.addEventListener('click', () => {
+	if (!rendererMain) return;
+	if (rendererMain.getFlightStatus().count === 0) return;
+	// map 用当前载入的地图名：轨迹换图后没有意义，导出文件里留个认领线索
+	downloadText(`flight-path-${pathStamp()}.json`, rendererMain.exportFlightJson({ map: teleportMapName }), 'application/json');
+});
+
+dom.flightImportBtn?.addEventListener('click', () => dom.flightImportInput?.click());
+
+dom.flightImportInput?.addEventListener('change', async () => {
+	const file = dom.flightImportInput?.files?.[0];
+	if (!file || !rendererMain) return;
+	try {
+		const res = rendererMain.loadFlightJson(await file.text());
+		console.info('[flight] 已载入轨迹', res);
+		setError('');
+	} catch (err) {
+		setError(`飞行轨迹载入失败：${err instanceof Error ? err.message : String(err)}`);
+	}
+	if (dom.flightImportInput) dom.flightImportInput.value = '';
+	updateFlightStatusUI();
+});
+
+dom.flightSpeedSel?.addEventListener('change', () => {
+	rendererMain?.setFlightSpeed(Number(dom.flightSpeedSel?.value ?? '1'));
+	updateFlightStatusUI();
+});
+
+dom.flightLoopChk?.addEventListener('change', () => {
+	rendererMain?.setFlightLoop(dom.flightLoopChk?.checked ?? false);
+	updateFlightStatusUI();
+});
 
 /** 以隐藏 anchor + Blob URL 触发浏览器下载。 */
 function downloadText(filename: string, text: string, mime: string): void {
@@ -1336,6 +1440,13 @@ function bindUI(): void {
 		setStatus('碰撞来源已切换，重新加载地图后生效。', '');
 	});
 
+	// PVS 区域着色：当前 cluster 红、可见 cluster 各一色、不可见暗灰（开启期间不按 PVS 剔除）
+	dom.pvsRegionsChk?.addEventListener('change', () => {
+		const on = dom.pvsRegionsChk?.checked === true;
+		const applied = rendererMain?.setPvsRegionOverlay(on) ?? false;
+		if (on && !applied) setStatus('PVS 区域着色：地图尚未加载或无 PVS 数据。', 'error');
+	});
+
 	// 物理 tick 率（权威固定步长，即时生效；不随 UI 偏好持久化）
 	bindSlider(dom.tickRateRange, dom.tickRateNum, (v) => {
 		applyConfigPatch(config, 'physics', { tickRate: v });
@@ -1958,6 +2069,8 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 	);
 
 	sceneReady = true;
+	// 飞行轨迹导出时把地图名写进 meta（换图后能看出轨迹属于哪张图）
+	rendererMain.setFlightMapName(fileName);
 	// 出生点下拉（与 Worker spawn-options 幂等）
 	if (dom.spawnSelect) {
 		const spawnPoints = (JSON.parse(bundle.spawnJson) as { spawn_points?: Array<{ classname: string; origin: number[] }> })

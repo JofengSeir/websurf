@@ -673,6 +673,47 @@
           </div>
         </details>
 
+        <!-- 飞行轨迹（noclip 复播）：与上面的「路径记录」是两件事——那个记物理节点（脚底位置，用来对比
+             两条物理线是否一致），这个记**相机**位姿（世界位置 + yaw/pitch）。用途：有些场景坐标很难描述
+             （越界区域、模型背面、贴图拼接处），noclip 飞一遍录下来，导出 JSON，之后原样复播/按时间 seek
+             截图。复播不驱动物理、不吃输入，直接把相机钉到样本上，所以穿过几何也能重放、可反复重来。 -->
+        <details>
+          <summary>飞行轨迹（noclip 复播）</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid">
+              <div class="ctrl-full path-counts" id="flightStatus"
+                   title="录的是相机位姿（世界坐标 + 朝向），采样 100Hz。复播时不推进物理、不读键鼠：相机完全由轨迹决定，因此同一时刻反复 seek 画面一致。">
+                未录 · 0 点
+              </div>
+
+              <div class="ctrl-full btn-row">
+                <button id="flightRecBtn">开始录制</button>
+                <button id="flightPlayBtn">从头复播</button>
+                <button id="flightStopBtn">停止复播</button>
+                <button id="flightClearBtn">清空</button>
+                <button id="flightExportBtn">导出 JSON</button>
+                <button id="flightImportBtn">载入 JSON…</button>
+                <input type="file" id="flightImportInput" accept=".json,application/json" hidden />
+              </div>
+
+              <label title="复播速度倍数（运行中改也即时生效）">复播速度</label>
+              <select id="flightSpeed">
+                <option value="0.25">0.25×</option>
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1×</option>
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+              </select>
+
+              <label class="ctrl-check-row ctrl-full" title="播到末尾回到开头继续（录制时来回飞一圈的轨迹适合开着看）">
+                <input type="checkbox" id="flightLoopChk" /> 循环复播
+              </label>
+
+              <p class="hint ctrl-full">录制：切到「物理 → Noclip 自由飞行」，按 <b>开始录制</b> 后正常飞（这是相机位姿，不是脚底）。导出 JSON 交给自动化脚本后，用 <code>__vbspFlight.load(text)</code> + <code>seek(毫秒)</code> 就能把任一时刻的画面复现出来；面板的「从头复播」走同一条路。</p>
+            </div>
+          </div>
+        </details>
+
         <!-- 物理（初始收起：面板默认只展开「文件输入」与「视角与操作」） -->
         <details>
           <summary>物理</summary>
@@ -845,6 +886,10 @@
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showSolids" />
                 <label for="showSolids" title="玩家附近碰撞箱线框：地面绿/斜坡黄/墙红">显示brush碰撞</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPvsRegions" />
+                <label for="showPvsRegions" title="按 PVS cluster 给场景上色：红=你所在的 cluster；彩色=从它可见的其它 cluster（同簇同色）；暗灰=不可见。开启期间不按 PVS 剔除，方便对照。">显示PVS区域</label>
               </div>
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showBevel" />
