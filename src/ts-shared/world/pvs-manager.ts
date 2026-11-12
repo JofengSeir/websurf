@@ -307,7 +307,11 @@ export class PvsManager {
     const direct = this.getClusterAt(pos);
     if (direct >= 0) return direct;
     if (!this.hasPvs) return -1;
-    for (const r of [radius, radius * 3]) {
+    // 由近到远扫：半径只到 72 时，站在窗框/门套/装饰 brush 里的相机（眼睛落在固体 leaf）
+    // 就找不到房间 ⇒ 调用方只能整帧关掉 PVS，于是 18k 内的其他关卡区域全画出来。
+    // surf_666 的室内就是这个距离量级（实测最近的有效 cluster 在 +Z 192 HU）。
+    // 先试 6 轴，再试 8 个对角方向，取最近命中；仍找不到才放弃。
+    for (const r of [radius, radius * 3, radius * 6, radius * 10, radius * 16, radius * 24, radius * 32]) {
       for (const [dx, dy, dz] of [
         [r, 0, 0],
         [-r, 0, 0],
@@ -315,6 +319,12 @@ export class PvsManager {
         [0, -r, 0],
         [0, 0, r],
         [0, 0, -r],
+        [r, r, 0],
+        [-r, r, 0],
+        [0, r, r],
+        [0, r, -r],
+        [r, 0, r],
+        [-r, 0, -r],
       ]) {
         const c = this.getClusterAt({ x: pos.x + dx, y: pos.y + dy, z: pos.z + dz });
         if (c >= 0) return c;
