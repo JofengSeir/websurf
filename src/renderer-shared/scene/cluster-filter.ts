@@ -294,8 +294,39 @@ export function applyClusterIndex(
   return rebuilt;
 }
 
-/** 相机 cluster 变化后需要重建的块数（诊断用）。 */
-export function clusterIndexStates(items: readonly { mesh: THREE.Mesh }[]): number {
+/**
+ * 关掉 PVS 时把逐三角形 index 还原成原始全量。
+ *
+ * `applyClusterIndex` 写进去的 index 是「当前房间可见集」，关掉 PVS 后不会自己复原：
+ * drawRange 与 groups 仍停在上一间房的结果上，用户看到的是「PVS 明明关了、墙还是缺一块」。
+ * 这里按 `origIndex` 全量写回，并复位 `lastCluster`，下次开 PVS 会按当前房间重算。
+ */
+export function restoreClusterIndex(items: readonly { mesh: THREE.Mesh }[]): number {
+  let restored = 0;
+  for (const item of items) {
+    const st = (item.mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex;
+    if (!st) continue;
+    const geom = item.mesh.geometry;
+    const total = st.origIndex.length;
+    st.outIndex.set(st.origIndex);
+    geom.clearGroups();
+    let start = 0;
+    for (const g of st.groups) {
+      const count = g.tris.length * 3;
+      if (count > 0) geom.addGroup(start, count, g.materialIndex);
+      start += count;
+    }
+    st.attr.needsUpdate = true;
+    st.visTris = total / 3;
+    st.lastCluster = -1;
+    geom.setDrawRange(0, total);
+    item.mesh.visible = item.mesh.userData.lodLevel === 0;
+    restored++;
+  }
+  return restored;
+}
+
+/** 相机 cluster 变化后需要重建的块数（诊断用）。 */export function clusterIndexStates(items: readonly { mesh: THREE.Mesh }[]): number {
   let n = 0;
   for (const item of items) if ((item.mesh.userData as { clusterIndex?: unknown }).clusterIndex) n++;
   return n;

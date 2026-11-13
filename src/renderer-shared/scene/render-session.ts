@@ -39,7 +39,7 @@ import {
   type VisibilityUpdateResult,
 } from './visibility-controller.js';
 import { PvsRegionOverlay } from './pvs-region-overlay.js';
-import { applyClusterIndex, prepareClusterIndex, type ClusterIndexStats } from './cluster-filter.js';
+import { applyClusterIndex, prepareClusterIndex, restoreClusterIndex, type ClusterIndexStats } from './cluster-filter.js';
 import { applySceneCamera, shrinkNearPlane } from '../camera/scene-camera.js';
 import { NearPlaneController } from '../camera/near-plane.js';
 import {
@@ -190,6 +190,8 @@ export class RenderSession {
   private pvs: PvsManager | null = null;
   /** 装载期按 cluster 拆分合并块的统计（`state().split` 可读）。 */
   private clusterIndex: ClusterIndexStats | null = null;
+  /** 逐三角形 index 当前是否处于「按房间裁过」的状态（关 PVS 时要还原）。 */
+  private pvsIndexActive = false;
   /** 主模型根（`mergeIntoNewRoot` 的产物；未合并时是 `assembleScene` 的 mapRoot）。 */
   private root: THREE.Object3D | null = null;
   /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `sortTransparentChunks`）。 */
@@ -474,6 +476,7 @@ export class RenderSession {
       : null;
     if (!this.clusterIndex) this.visibility.chunkIndexActive = false;
     else this.visibility.chunkIndexActive = this.clusterIndex.prepared > 0;
+    this.pvsIndexActive = false;
     const box = this.worldBox();
     const size = box ? box.getSize(new THREE.Vector3()) : new THREE.Vector3();
     this.diagonal = size.length();
@@ -573,8 +576,15 @@ export class RenderSession {
     }
     this.lastVisibility = this.visibility.update(this.camera, this.pvs);
     // 相机换房间才重建 index（PVS 与视角无关）：可见三角形集合一次算好，逐帧零成本。
-    if (this.clusterIndex && this.clusterIndex.prepared > 0 && this.pvs) {
+    if (this.visibility.enablePvs && this.clusterIndex && this.clusterIndex.prepared > 0 && this.pvs) {
       applyClusterIndex(this.visibility.items, this.pvs, this.pvs.currentClusterId);
+      this.pvsIndexActive = true;
+    } else if (this.pvsIndexActive) {
+      // 关 PVS（面板/深链/区域着色）后必须把裁过的 index 还原：`applyClusterIndex` 只认相机 cluster，
+      // 不会因为开关关掉就把墙补回来；不还原就是「PVS 关了、缺的那块还在」。
+      restoreClusterIndex(this.visibility.items);
+      this.visibility.chunkIndexActive = false;
+      this.pvsIndexActive = false;
     }
     return this.lastVisibility;
   }
