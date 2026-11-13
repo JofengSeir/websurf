@@ -204,23 +204,40 @@ export function prepareClusterIndex(
           cx += v.x; cy += v.y; cz += v.z;
         }
         cx /= 3; cy /= 3; cz /= 3;
-        let c = -1;
         n.set(0, 1, 0);
         if (nrm) {
           const vi = index ? index.getX(t * 3) : t * 3;
           n.fromBufferAttribute(nrm, vi);
           if (n.lengthSq() < 1e-6) n.set(0, 1, 0); else n.normalize();
+        } else {
+          // 合并块没有 normal 属性：用三角形叉积，不能默认朝上（竖直面会全落进天花/实体）。
+          const ia = index ? index.getX(t * 3) : t * 3;
+          const ib = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+          const ic = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+          scratchA.fromBufferAttribute(pos, ia).applyMatrix4(mw);
+          scratchB.fromBufferAttribute(pos, ib).applyMatrix4(mw);
+          v.fromBufferAttribute(pos, ic).applyMatrix4(mw);
+          n.crossVectors(scratchB.sub(scratchA), v.sub(scratchA));
+          if (n.lengthSq() < 1e-12) n.set(0, 1, 0); else n.normalize();
         }
         // 先在重心试，再沿 ±法线 8/32/96 HU 试：墙内侧是实体，外侧才是房间。
-        for (const off of [0, 8, -8, 32, -32, 96, -96]) {
-          v.set(cx + n.x * off, cy + n.y * off, cz + n.z * off);
-          const r = get(v);
-          if (r >= 0) { c = r; break; }
-        }
-        if (c < 0) unmapped++;
-        triClusters[t] = c < 0 ? 0xffff : c;
-        triClustersN[t] = triClusters[t];
-        triClustersN2[t] = triClusters[t];
+        const sample = (x: number, y: number, z: number): number => {
+          for (const off of [0, 8, -8, 32, -32, 96, -96]) {
+            v.set(x + n.x * off, y + n.y * off, z + n.z * off);
+            const rr = get(v);
+            if (rr >= 0) return rr;
+          }
+          return -1;
+        };
+        const c0 = sample(cx, cy, cz);
+        // 只取重心会把这个大面判成「最近的那间房」。再沿 ±法线各取一个远样本，
+        // 三个来源任一可见就画（对应有 face 属性的块的三来源判据）。
+        const c1 = sample(cx + n.x * 96, cy + n.y * 96, cz + n.z * 96);
+        const c2 = sample(cx - n.x * 96, cy - n.y * 96, cz - n.z * 96);
+        if (c0 < 0 && c1 < 0 && c2 < 0) unmapped++;
+        triClusters[t] = c0 < 0 ? 0xffff : c0;
+        triClustersN[t] = c1 < 0 ? 0xffff : c1;
+        triClustersN2[t] = c2 < 0 ? 0xffff : c2;
       }
     } else {
       why('noface');
@@ -285,7 +302,12 @@ export function applyClusterIndex(
         const ca = triClusters[t];
         const cn = triClustersN[t];
         const cn2 = triClustersN2[t];
+        // 三个来源全定不到位（都在实体/虚空里，比如薄斜柱的中段三角形）时**照画**：
+        // 判据是「已知不可见才剔」，不是「没查清就剔」。没查清就剔的代价是直接看穿到后面的
+        // 砖墙（用户报的缺三角面），而多画的代价只是几个三角形。
+        const unknown = ca === 0xffff && cn === 0xffff && cn2 === 0xffff;
         const on =
+          unknown ||
           (ca !== 0xffff && pvs.isVisible(ca)) ||
           (cn !== 0xffff && pvs.isVisible(cn)) ||
           (cn2 !== 0xffff && pvs.isVisible(cn2));
