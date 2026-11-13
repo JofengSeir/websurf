@@ -1006,7 +1006,7 @@ export class RenderSession {
   }
 
   /** 诊断：屏幕某点（NDC）射线打中的第一个块，及其 cluster / 可见性——「眼前这面墙到底被谁剔了」。 */
-  pickAt(ndcX = 0, ndcY = 0): { idx: number; name: string; d: number; clusters: number[]; cameraCluster: number; hasCamera: boolean; pvsVisible: boolean | null; visible: boolean } | null {
+  pickAt(ndcX = 0, ndcY = 0): { idx: number; name: string; d: number; clusters: number[]; cameraCluster: number; hasCamera: boolean; pvsVisible: boolean | null; visible: boolean; mat: string; matTransparent: boolean; matMap: string; matWater: boolean } | null {
     if (!this.root) return null;
     const rc = new THREE.Raycaster();
     rc.far = 60000;
@@ -1020,6 +1020,10 @@ export class RenderSession {
     const p = this.camera.position;
     const camCluster = this.pvs ? this.pvs.getClusterAt({ x: p.x, y: p.y, z: p.z }) : -1;
     const clusters = item ? item.clusterIds : [];
+    // 材质名 + 是否透明：用来区分「被剔了」和「画了但材质/贴图不对」（两种现象看起来都是「空的」）。
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    const g = first.face?.materialIndex ?? 0;
+    const mat = mats[Math.min(g, mats.length - 1)] as THREE.Material | undefined;
     return {
       idx,
       name: obj.name || '(anon)',
@@ -1029,6 +1033,10 @@ export class RenderSession {
       hasCamera: clusters.includes(camCluster),
       pvsVisible: item ? (clusters.length === 0 ? null : clusters.some((c) => this.pvs?.isVisible(c) ?? false)) : null,
       visible: obj.visible,
+      mat: mat?.name || '(unnamed)',
+      matTransparent: mat?.transparent ?? false,
+      matMap: (mat as THREE.MeshBasicMaterial | undefined)?.map?.name || '(nomap)',
+      matWater: (mat?.userData as { vbsp_water?: unknown } | undefined)?.vbsp_water != null,
     };
   }
 
