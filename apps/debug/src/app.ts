@@ -556,8 +556,16 @@ function updateStatsUI(): void {
 	if (!st) return;
 	const cluster = rendererMain?.getPvsCluster() ?? -1;
 	const lateral = Math.hypot(st.vel.x, st.vel.z);
+	// 相机位姿与物理状态分开给：复现画面要用**相机**的坐标与朝向（脚底坐标 + 物理 yaw
+	// 会差一个眼高和视角回摆，按它复刻永远差一点）。朝向用一度精度，够复刻且不刷屏。
+	const cam = rendererMain?.getCameraPose() ?? null;
+	const camText = cam
+		? `<span class="label">相机</span> <span class="v">${cam.pos[0].toFixed(0)},${cam.pos[1].toFixed(0)},${cam.pos[2].toFixed(0)}</span>  ` +
+			`<span class="label">朝向</span> <span class="v">${cam.yawDeg.toFixed(1)},${cam.pitchDeg.toFixed(1)}</span>  `
+		: '';
 	const text =
 		`<span class="label">FPS</span> <span class="v">${localFps}</span>  <span class="label">位置</span> <span class="v">${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}</span>  ` +
+		camText +
 		`<span class="label">速度</span> <span class="v">${lateral.toFixed(0)}</span>  <span class="label">状态</span> <span class="v">${st.onGround ? '地面' : '空中'}</span>  <span class="label">cluster</span> <span class="v">${cluster >= 0 ? cluster : '—'}</span>`;
 	dom.statsEl.innerHTML = text;
 	if (dom.planeInfoEl) {

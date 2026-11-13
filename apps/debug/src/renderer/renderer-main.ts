@@ -1413,6 +1413,19 @@ export class RendererMain {
   }
 
   /**
+   * 当前**相机**位姿（HUD 朝向显示 / 复现截图用）。
+   *
+   * 注意：`getCurrentState()` 给的是**脚底**与物理 yaw/pitch，而相机受 `poseHold`、眼高、
+   * 视角回摆影响，两者可能不一致。要复现一张截图必须用相机位姿——HUD 里没有朝向时，
+   * 只靠脚底坐标根本没法复刻视角（这是我反复复现失败的原因）。
+   */
+  getCameraPose(): { pos: [number, number, number]; yawDeg: number; pitchDeg: number } | null {
+    const pose = cameraPoseOf(this.camera);
+    if (!pose) return null;
+    return { pos: pose.pos, yawDeg: pose.yawDeg, pitchDeg: pose.pitchDeg };
+  }
+
+  /**
    * 输入回放起点快照（debug 专属；见 input/input-recorder.ts）。
    *
    * 返回"要让回放逐帧复现必须原样写回渲染物理"的那一组量：
