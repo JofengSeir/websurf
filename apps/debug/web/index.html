@@ -602,6 +602,11 @@
               <!-- 说明段：静态文本（该 id 无读取点）；实际切换由单选触发 `apps/debug/src/app.ts` 的监听，再落到 `apps/debug/src/renderer/renderer-main.ts` 的 `setLightingMode`。 -->
               <p class="hint ctrl-full" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
 
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="vhvLinearChk" />
+                <label for="vhvLinearChk" title="只作用于 prop 的逐顶点烘焙项（.vhv）。关闭 = 现状：把 vhv 值当线性光，先 pow(v, 2.2) 再乘（暗处更黑、相邻顶点差被放大）；开启 = Source 语义：.vhv 存的是屏幕倍率，直接在伽马空间当乘数用（整体更亮、曲面条带更淡）。即时生效，不改默认档。">vhv 线性（去伽马）</label>
+              </div>
+
               <!-- 环境光强度（AmbientLight）已移除：地图与 prop 全走 lightmap 注入的 MeshBasicMaterial，
                    不参与光照计算 ⇒ 该控件对画面无任何作用（owner 2026-10-16 指出，配置字段保留供协议兼容） -->
 

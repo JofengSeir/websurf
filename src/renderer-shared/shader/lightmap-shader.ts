@@ -199,71 +199,97 @@ export const VBSP_AMBIENT_UNIFORM_DECLS = [
 export const VERTEX_LIGHTING_ATTR = '_vbsp_vlight';
 
 /**
- * `_vbsp_vlight` 去接缝的**空间格子边长**（HU）。
+ * `_vbsp_vlight` 去接缝的**采样半径**（HU）。
  *
  * 2026-11-13 实测（s666 / `s1_ramp1_b`、`s1_window01_1`）：`baked` 光模式下曲面出现
  * 边界清晰的明暗条带；切 `texture` 模式、或把本属性整体替换为常量后条带完全消失
  * ⇒ 条带 100% 来自本属性（贴图/UV/几何/世界光贴图均已逐一排除）。
  * 数据侧同一位置不同法线的副本可差 2%，相邻条带可差 3 倍；Gouraud 把这些跳变画成硬边。
- * 取 24 HU ≈ 玩家 1/4 身高，足以跨过条带而不越过折角。
+ *
+ * ⚠️ 第一版按 24HU 的**格子取均值**，在 s3_ramp1b_2 等曲面上引入了「按格子分块」的新接缝
+ * （每格一个常量 ⇒ 相邻格子之间硬跳变）。现在改成**距离加权的连续核**：权重 `1-d/R`
+ * 在球面上连续衰减到 0，不存在格子边界；同一位置的副本会收敛到同一结果。
  */
-const VLIGHT_SMOOTH_CELL = 24;
+const VLIGHT_SMOOTH_RADIUS = 16;
 
-/** 一个格子里顶点颜色的最大分量差超过该值才改写（0.02 ≈ 5/255，低于此值肉眼不可见）。 */
-const VLIGHT_SMOOTH_MIN_DELTA = 0.02;
+/** 连续核平滑的遍数：两遍足以把 3 倍跳变压到 <10%，再多次会明显改变整体明暗。 */
+const VLIGHT_SMOOTH_PASSES = 2;
 
 /**
- * 逐顶点预烘焙光照（`_VBSP_VLIGHT`）的**去分段接缝**：按 {@link VLIGHT_SMOOTH_CELL} HU 的
- * 空间格子聚类，对同格顶点取颜色均值，只改写差异超过 {@link VLIGHT_SMOOTH_MIN_DELTA} 的格子
- * （幂等：再跑一次不会继续变暗/变亮）。
+ * 逐顶点预烘焙光照（`_VBSP_VLIGHT`）的**去分段接缝**：对每个顶点取 `R` 半径内顶点的
+ * 距离加权平均（自身权重 1），跑 {@link VLIGHT_SMOOTH_PASSES} 遍。
  *
- * ⚠️ **必须按位置聚类，不能把法线也放进 key**（2026-11-13 实测：带法线 key 时只修掉
- * 8/432 格，条带依旧；纯位置聚类修掉 81 格，条带消失）。相接的条带法线本来就差十几度，
- * 按法线分桶就永远跨不过条带。
- * 代价：薄墙正反面（间距 < 24 HU）会被并入同一格 —— 实测两侧光差很小，无可见影响。
- * 返回值 = 被改写的格子数（诊断用）。
+ * 为什么在渲染侧做：`.vhv` 是 VRAD 按 strip group 顶点烘焙的，同一位置的不同副本
+ * （法线分裂）本来就可以有不同值；这里做**空间重采样**，把条带之间的 3 倍跳变压成
+ * 平滑过渡，权重对称 ⇒ 整体亮度不变。
+ * 返回值 = 变化超过 1/255 的顶点数（诊断用）。
  */
 export function smoothVertexLighting(geom: THREE.BufferGeometry): number {
 	const attr = geom.getAttribute(VERTEX_LIGHTING_ATTR) as THREE.BufferAttribute | undefined;
 	const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
 	if (!attr || !pos) return 0;
-	const buckets = new Map<string, number[]>();
-	for (let i = 0; i < pos.count; i++) {
-		const key =
-			Math.round(pos.getX(i) / VLIGHT_SMOOTH_CELL) +
-			',' +
-			Math.round(pos.getY(i) / VLIGHT_SMOOTH_CELL) +
-			',' +
-			Math.round(pos.getZ(i) / VLIGHT_SMOOTH_CELL);
-		const list = buckets.get(key);
+	const n = pos.count;
+	const r = VLIGHT_SMOOTH_RADIUS;
+	const r2 = r * r;
+	// 位置不变 ⇒ 网格只建一次，两遍平滑复用。
+	const grid = new Map<string, number[]>();
+	for (let i = 0; i < n; i++) {
+		const k =
+			Math.floor(pos.getX(i) / r) + ',' + Math.floor(pos.getY(i) / r) + ',' + Math.floor(pos.getZ(i) / r);
+		const list = grid.get(k);
 		if (list) list.push(i);
-		else buckets.set(key, [i]);
+		else grid.set(k, [i]);
 	}
+	const out = new Float32Array(n * 3);
 	let changed = 0;
-	buckets.forEach((ids) => {
-		if (ids.length < 2) return;
-		let r = 0;
-		let g = 0;
-		let b = 0;
-		for (const i of ids) {
-			r += attr.getX(i);
-			g += attr.getY(i);
-			b += attr.getZ(i);
+	for (let pass = 0; pass < VLIGHT_SMOOTH_PASSES; pass++) {
+		changed = 0;
+		for (let i = 0; i < n; i++) {
+			const xi = pos.getX(i);
+			const yi = pos.getY(i);
+			const zi = pos.getZ(i);
+			const gx = Math.floor(xi / r);
+			const gy = Math.floor(yi / r);
+			const gz = Math.floor(zi / r);
+			let wsum = 1;
+			let cr = attr.getX(i);
+			let cg = attr.getY(i);
+			let cb = attr.getZ(i);
+			for (let dx = -1; dx <= 1; dx++) {
+				for (let dy = -1; dy <= 1; dy++) {
+					for (let dz = -1; dz <= 1; dz++) {
+						const list = grid.get(gx + dx + ',' + (gy + dy) + ',' + (gz + dz));
+						if (!list) continue;
+						for (const j of list) {
+							if (j === i) continue;
+							const ddx = pos.getX(j) - xi;
+							const ddy = pos.getY(j) - yi;
+							const ddz = pos.getZ(j) - zi;
+							const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
+							if (d2 >= r2) continue;
+							const w = 1 - Math.sqrt(d2) / r;
+							wsum += w;
+							cr += w * attr.getX(j);
+							cg += w * attr.getY(j);
+							cb += w * attr.getZ(j);
+						}
+					}
+				}
+			}
+			out[i * 3] = cr / wsum;
+			out[i * 3 + 1] = cg / wsum;
+			out[i * 3 + 2] = cb / wsum;
+			if (
+				Math.abs(out[i * 3] - attr.getX(i)) +
+					Math.abs(out[i * 3 + 1] - attr.getY(i)) +
+					Math.abs(out[i * 3 + 2] - attr.getZ(i)) >
+				0.004
+			) {
+				changed++;
+			}
 		}
-		r /= ids.length;
-		g /= ids.length;
-		b /= ids.length;
-		let maxDelta = 0;
-		for (const i of ids) {
-			maxDelta = Math.max(
-				maxDelta,
-				Math.abs(attr.getX(i) - r) + Math.abs(attr.getY(i) - g) + Math.abs(attr.getZ(i) - b),
-			);
-		}
-		if (maxDelta <= VLIGHT_SMOOTH_MIN_DELTA) return;
-		for (const i of ids) attr.setXYZ(i, r, g, b);
-		changed++;
-	});
+		for (let i = 0; i < n; i++) attr.setXYZ(i, out[i * 3], out[i * 3 + 1], out[i * 3 + 2]);
+	}
 	if (changed > 0) attr.needsUpdate = true;
 	return changed;
 }
@@ -544,6 +570,26 @@ let lightingMode: LightingMode = 'baked';
  * `vbspVertexLightTerm`、`vbspAmbientWeight`）。
  */
 const bakedMixUniform: { value: number } = { value: 1 };
+
+/**
+ * vhv 逐顶点烘焙的伽马处理（调试面板「vhv 线性（去伽马）」）：
+ * - `0` = 现状：把 vhv 值当**线性光**，先 `pow(v, 2.2)` 再乘（暗处压得更黑、相邻顶点差被放大）；
+ * - `1` = Source 语义：`.vhv` 存的是屏幕倍率（`v*2/255`），直接在**伽马空间**当乘数用。
+ *
+ * 与 `bakedMixUniform` 同样做成全场景共享的运行期载体：改值下一次绘制即生效，
+ * 不重编译 program、不重建场景。
+ */
+const vhvLinearUniform: { value: number } = { value: 0 };
+
+/** 设置 vhv 项的伽马处理：`true` = 伽马空间直接乘（去 2.2 幂），`false` = 现状。 */
+export function setVhvLinear(on: boolean): void {
+	vhvLinearUniform.value = on ? 1 : 0;
+}
+
+/** 当前 vhv 伽马处理（面板回填用）。 */
+export function getVhvLinear(): boolean {
+	return vhvLinearUniform.value >= 0.5;
+}
 
 /** 设置光照模式：改共享 uniform（下一次绘制即生效）+ 记模式（供 UI / 日志）。 */
 export function setLightingMode(mode: LightingMode): void {
@@ -1264,8 +1310,10 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 		shader.uniforms.vbspBakedMix = bakedMixUniform; shader.uniforms.vbspLightFloor = lightFloorUniform; shader.uniforms.vbspAmbientScale = ambientScaleUniform;
 		// T-732：vhv 项专属增益（默认 1 = 关；试档旋钮，不参与任何默认观感）
 		shader.uniforms.vbspVhvGain = vhvGainUniform;
+		// 调试面板：vhv 项的伽马处理（0 = pow(2.2)，1 = 伽马空间直接乘）
+		shader.uniforms.vbspVhvLinear = vhvLinearUniform;
 		// 声明必须来自共享常量（守卫断言"注入单元自洽"）
-		const decls = [...VBSP_LIGHTMAP_UNIFORM_DECLS, 'uniform float vbspAmbientScale;', 'uniform float vbspVhvGain;'].join('\n');
+		const decls = [...VBSP_LIGHTMAP_UNIFORM_DECLS, 'uniform float vbspAmbientScale;', 'uniform float vbspVhvGain;', 'uniform float vbspVhvLinear;'].join('\n');
 		// ⚠️ 这个数组进的是 **fragment** shader ⇒ **不能出现 `attribute`**
 		// （GLSL 里 `attribute` 仅限 vertex 阶段，出现在 fragment 里时编译报
 		//  `'attribute' : Illegal use of reserved word` ⇒ program 无效 ⇒ 模型不渲染）。
@@ -1277,7 +1325,9 @@ function applyVertexLightingShader(mat: THREE.MeshBasicMaterial): void {
 			'	if (vbspBakedMix < 0.5) { return vec3(1.0); }',
 			'	float g = max(vbspLightGamma, 0.001);',
 			// 第 1 级只有 vhv 一项（cube 项已随重建层一起删除；不叠 cube 是为了不把间接光算两次）
-			'	return pow(max(vbspVLight, vec3(vbspLightFloor)), vec3(2.2 / g)) * vbspVhvGain * vbspExposure;',
+			// ex = 2.2/g（把 vhv 当线性光）或 1（Source 语义：vhv 是伽马空间乘数，直接乘）。
+			'	float ex = mix(2.2 / g, 1.0, clamp(vbspVhvLinear, 0.0, 1.0));',
+			'	return pow(max(vbspVLight, vec3(vbspLightFloor)), vec3(ex)) * vbspVhvGain * vbspExposure;',
 			'}',
 		].join('\n');
 		const vs = shader.vertexShader;

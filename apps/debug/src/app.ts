@@ -99,6 +99,8 @@ const dom = {
 	textureQualityRadios: document.querySelectorAll('input[name="textureQuality"]') as NodeListOf<HTMLInputElement>,
 	// 光照模式（预烘焙 / 纯纹理：预烘焙纹理多、进图更卡；纯纹理最快但无明暗）
 	lightingModeRadios: document.querySelectorAll('input[name="lightingMode"]') as NodeListOf<HTMLInputElement>,
+	// vhv 逐顶点烘焙项的伽马处理（运行期 uniform 切换，见 renderer-main.setVhvLinear）
+	vhvLinearChk: document.getElementById('vhvLinearChk') as HTMLInputElement | null,
 	// 缺失材质纹理确认弹窗
 	missingTexturesModal: document.getElementById('missingTexturesModal') as HTMLElement | null,
 	missingTexturesSummary: document.getElementById('missingTexturesSummary') as HTMLElement | null,
@@ -484,6 +486,8 @@ async function onSceneReadyUi(
 	dom.lightingModeRadios.forEach((radio) => {
 		radio.checked = radio.value === (config.lighting.mode ?? 'baked');
 	});
+	// vhv 伽马处理：默认关（= 现有观感），按运行期现状回填
+	if (dom.vhvLinearChk) dom.vhvLinearChk.checked = rendererMain?.getVhvLinear() ?? false;
 }
 
 // ---------------------------------------------------------------------------
@@ -1773,6 +1777,12 @@ function bindUI(): void {
 			rendererMain?.setLightingMode(mode);
 			saveUiPrefs();
 		});
+	});
+
+	// vhv 线性（去伽马）：只改共享 uniform，下一次绘制即生效；默认关，不改既有观感。
+	// 语义见 `src/renderer-shared/shader/lightmap-shader.ts` 的 `vhvLinearUniform`。
+	dom.vhvLinearChk?.addEventListener('change', () => {
+		rendererMain?.setVhvLinear(dom.vhvLinearChk?.checked === true);
 	});
 
 	// 环境光强度（渲染即时生效；lighting 不随 UI 偏好持久化）

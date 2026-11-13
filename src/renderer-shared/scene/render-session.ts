@@ -62,6 +62,8 @@ import {
 	getLightingMode,
 	setLightingMode as setLightingModeInShader,
 	smoothVertexLighting,
+	setVhvLinear as setVhvLinearInShader,
+	getVhvLinear,
 	type LightingMode,
 } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
@@ -716,6 +718,21 @@ export class RenderSession {
   /** 读当前光照模式。 */
   getLightingMode(): LightingMode {
     return getLightingMode();
+  }
+
+  /**
+   * 调试面板「vhv 线性（去伽马）」：决定 prop 逐顶点烘焙项是否先 `pow(2.2)`。
+   * 只改共享 uniform，下一次绘制即生效（不重编译材质）。
+   */
+  setVhvLinear(on: boolean): void {
+    if (getVhvLinear() === on) return;
+    setVhvLinearInShader(on);
+    console.info(`[${this.app}][lighting] vhv 伽马处理 → ${on ? 'gamma-space（直接乘）' : 'linear（pow 2.2）'}`);
+  }
+
+  /** 读 vhv 伽马处理。 */
+  getVhvLinear(): boolean {
+    return getVhvLinear();
   }
 
   /** 近平面探测参数（debug/game 面板的「探测距离 + 收缩系数」）。 */

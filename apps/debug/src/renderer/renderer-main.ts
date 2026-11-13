@@ -435,6 +435,19 @@ export class RendererMain {
     return this.session?.getLightingMode() ?? 'baked';
   }
 
+  /**
+   * 调试面板「vhv 线性（去伽马）」：转交共享会话，改全场景材质共享的 uniform，
+   * 下一次绘制即生效（不重建场景、不重编译材质）。
+   */
+  setVhvLinear(on: boolean): void {
+    this.session?.setVhvLinear(on);
+  }
+
+  /** 当前 vhv 伽马处理（面板回填用）。 */
+  getVhvLinear(): boolean {
+    return this.session?.getVhvLinear() ?? false;
+  }
+
   /** 加载一副地图：GLB → lightmap atlas → 空间分块合并 → 包围盒与 near/far → 可见性/PVS/
    *  传送触发器/贴图 manifest/碰撞体，返回共享会话校准出的对角线与剔除距离
    *  （`diagonal` / `defaultCull` / `maxCull`）。 */
