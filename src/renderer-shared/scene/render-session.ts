@@ -67,6 +67,7 @@ import {
 	type LightingMode,
 } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
+import { subdivideVertexLit } from './vlight-subdivide.js';
 import type { PoseScope } from '../camera/pose-entry.js';
 
 /** 三端标识（同时用于探针 `scope` 与日志前缀）。 */
@@ -1366,14 +1367,19 @@ export class RenderSession {
     // `_vbsp_vlight`；vhv 的条带采样不连续，Gouraud 会把跳变画成硬边（见 shader 侧
     // `smoothVertexLighting` 的说明）。放在合并之后：`applyLightmapToMeshes` 在建场景时
     // 早于这些 prop 挂载，扫不到它们。
+    // 先按网格尺度均匀细分：地板/坡道这类只有 2~3 列顶点的面，靠改原顶点的值去不掉
+    // 「逐行线性插值」的条带（见 vlight-subdivide.ts 的说明）；细分把插值带压到视觉以下，
+    // 再做拓扑平滑收敛中点值。顺序不能反：细分后平滑才有足够的顶点可用。
     let smoothed = 0;
+    let subdivided = 0;
     optRoot.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh || !mesh.geometry) return;
       if (!mesh.geometry.getAttribute('_vbsp_vlight')) return;
+      subdivided += subdivideVertexLit(mesh.geometry);
       smoothed += smoothVertexLighting(mesh.geometry);
     });
-    if (smoothed > 0) console.info(`[optimizeScene] 逐顶点光照去接缝: 改写 ${smoothed} 个空间格子`);
+    if (smoothed > 0) console.info(`[optimizeScene] 逐顶点光照去接缝: 细分 ${subdivided} 层, 改写 ${smoothed} 个空间格子`);
     const stats = mergeStatsOf(optRoot);
     if (stats) {
       console.log(
