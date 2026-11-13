@@ -18,6 +18,10 @@
  */
 import * as THREE from 'three';
 
+/** 装载期求几何法线的临时向量（`normalSideCluster` 无 `normal` 属性时用）。 */
+const scratchA = new THREE.Vector3();
+const scratchB = new THREE.Vector3();
+
 /** 只用到这两个查询，避免把 PvsManager 的实现类型拖进来。 */
 export interface PvsFilterQuery {
   getFaceCluster(face: number): number;
@@ -89,6 +93,18 @@ function normalSideCluster(
     const vi = index ? index.getX(t * 3) : t * 3;
     n.fromBufferAttribute(nrm, vi);
     if (n.lengthSq() < 1e-6) n.set(0, 1, 0); else n.normalize();
+  } else {
+    // 合并后的世界块大多没有 `normal`（它们是无光照的 BasicMaterial）。不能默认朝上：
+    // 竖直墙面沿 +Y 偏 8/32 HU 会落进实体或天花，normalSide 永远采不到房间，三角形就只能
+    // 靠 `faceClusters`（可能记的是楼下/隔壁那间）判定 ⇒ 贴在眼前仍被剔除。
+    const ia = index ? index.getX(t * 3) : t * 3;
+    const ib = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+    const ic = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+    scratchA.fromBufferAttribute(pos, ia).applyMatrix4(mw);
+    scratchB.fromBufferAttribute(pos, ib).applyMatrix4(mw);
+    v.fromBufferAttribute(pos, ic).applyMatrix4(mw);
+    n.crossVectors(scratchB.sub(scratchA), v.sub(scratchA));
+    if (n.lengthSq() < 1e-12) n.set(0, 1, 0); else n.normalize();
   }
   for (const off of [8, 32, 0, -8, -32]) {
     v.set(cx + n.x * off, cy + n.y * off, cz + n.z * off);
