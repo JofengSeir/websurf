@@ -26,9 +26,21 @@ export interface PvsFilterQuery {
   getClusterAt?(pos: { x: number; y: number; z: number }): number;
 }
 
-/** 每块记：三角形 → cluster、原始 index 备份、输出 index、分组归属。 */
+/**
+ * 每块记：三角形 → cluster（两个来源）、原始 index 备份、输出 index、分组归属。
+ *
+ * 为什么要两个来源：`faceClusters[]` 是 BSP 导出时「按 leaf 顺序填第一个引用该面的非固体
+ * leaf」——它只是**引用**了这张面，不代表面朝着那个房间。一块地板常常先被楼下/隔壁的 leaf
+ * 引用，于是拿到别的房间的 cluster：站在地板上、人贴着脸，PVS 照样把它判成不可见 ⇒ 地面开洞、
+ * 直接看穿到下层区域。用户看到的「人都贴跟前了还看不到」就是这个。
+ *
+ * 所以再沿**面法线**取一次「面朝向的那个房间」：`triClustersN`。两个来源任一可见就画；
+ * 只有两个都定不到位（都在墙外/虚空）才剔——这才是「悬空尖刺」该被剔的情形。
+ */
 interface ClusterIndexState {
   triClusters: Uint16Array;
+  /** 沿面法线采样得到的 cluster（面真正朝向的房间），0xffff = 采不到。 */
+  triClustersN: Uint16Array;
   origIndex: Uint32Array;
   outIndex: Uint32Array;
   attr: THREE.BufferAttribute;
@@ -47,6 +59,43 @@ export interface ClusterIndexStats {
   reasons: Record<string, number>;
   tris: number;
   preparedMs: number;
+}
+
+/**
+ * 沿面法线取「这张面朝向的那个房间」的 cluster。
+ *
+ * 先用重心、再沿 +法线 8/32 HU（面朝向的一侧是房间，背面是实体），最后退一步试 -法线
+ * （双面材质/倒角朝外的情况）。全部落空返回 -1（= 在墙外/虚空，不参与 PVS）。
+ */
+function normalSideCluster(
+  index: THREE.BufferAttribute | null,
+  pos: THREE.BufferAttribute,
+  nrm: THREE.BufferAttribute | null,
+  mw: THREE.Matrix4,
+  t: number,
+  get: (p: { x: number; y: number; z: number }) => number,
+  v: THREE.Vector3,
+  n: THREE.Vector3,
+): number {
+  let cx = 0, cy = 0, cz = 0;
+  for (let k = 0; k < 3; k++) {
+    const vi = index ? index.getX(t * 3 + k) : t * 3 + k;
+    v.fromBufferAttribute(pos, vi).applyMatrix4(mw);
+    cx += v.x; cy += v.y; cz += v.z;
+  }
+  cx /= 3; cy /= 3; cz /= 3;
+  n.set(0, 1, 0);
+  if (nrm) {
+    const vi = index ? index.getX(t * 3) : t * 3;
+    n.fromBufferAttribute(nrm, vi);
+    if (n.lengthSq() < 1e-6) n.set(0, 1, 0); else n.normalize();
+  }
+  for (const off of [8, 32, 0, -8, -32]) {
+    v.set(cx + n.x * off, cy + n.y * off, cz + n.z * off);
+    const r = get(v);
+    if (r >= 0) return r;
+  }
+  return -1;
 }
 
 /** `_vbsp_face` 顶点属性 → face 号 → cluster。没有该属性时放弃（不猜）。 */
@@ -95,25 +144,30 @@ export function prepareClusterIndex(
     if (item.clusterIds.length < 2) { why('onecluster'); continue; }
 
     const triClusters = new Uint16Array(tris);
+    const triClustersN = new Uint16Array(tris);
+    triClustersN.fill(0xffff);
     const origIndex = new Uint32Array(tris * 3);
+    const nrm = geom.getAttribute('normal') as THREE.BufferAttribute | undefined;
+    const mw = mesh.matrixWorld;
+    const get = pvs.getClusterAt ? pvs.getClusterAt.bind(pvs) : null;
+    const v = new THREE.Vector3();
+    const n = new THREE.Vector3();
     let unmapped = 0;
     if (faces) {
       for (let t = 0; t < tris; t++) {
         const vi = index ? index.getX(t * 3) : t * 3;
         const face = faces.getX(vi);
         const c = pvs.getFaceCluster(face);
-        if (c < 0) unmapped++;
         triClusters[t] = c < 0 ? 0xffff : c;
         for (let k = 0; k < 3; k++) origIndex[t * 3 + k] = index ? index.getX(t * 3 + k) : t * 3 + k;
+        // 第二个来源：面朝向的那个房间（`faceClusters` 只是「引用过这张面的第一个 leaf」）。
+        const cn = get ? normalSideCluster(index, pos, nrm ?? null, mw, t, get, v, n) : -1;
+        if (cn >= 0) triClustersN[t] = cn;
+        if (c < 0 && cn < 0) unmapped++;
       }
-    } else if (pvs.getClusterAt) {
+    } else if (get) {
       // 没有 face 属性（合并时没带过来的那批块）：退回几何采样。
       // 沿**面法线**双向偏移取样，才能跨过共面墙进到房间中心；只取重心会大面积落进实体。
-      const nrm = geom.getAttribute('normal') as THREE.BufferAttribute | undefined;
-      const mw = mesh.matrixWorld;
-      const v = new THREE.Vector3();
-      const n = new THREE.Vector3();
-      const get = pvs.getClusterAt.bind(pvs);
       for (let t = 0; t < tris; t++) {
         let cx = 0, cy = 0, cz = 0;
         for (let k = 0; k < 3; k++) {
@@ -138,6 +192,7 @@ export function prepareClusterIndex(
         }
         if (c < 0) unmapped++;
         triClusters[t] = c < 0 ? 0xffff : c;
+        triClustersN[t] = triClusters[t];
       }
     } else {
       why('noface');
@@ -166,7 +221,7 @@ export function prepareClusterIndex(
     attr.setUsage(THREE.DynamicDrawUsage);
     geom.setIndex(attr);
     (mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex = {
-      triClusters, origIndex, outIndex, attr, groups, lastCluster: -1, visTris: tris,
+      triClusters, triClustersN, origIndex, outIndex, attr, groups, lastCluster: -1, visTris: tris,
     };
     stats.prepared++;
     stats.tris += tris;
@@ -190,7 +245,7 @@ export function applyClusterIndex(
     const st = (item.mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex;
     if (!st) continue;
     if (st.lastCluster === camCluster) continue;
-    const { triClusters, origIndex, outIndex, attr, groups } = st;
+    const { triClusters, triClustersN, origIndex, outIndex, attr, groups } = st;
     const geom = item.mesh.geometry;
     let n = 0;
     geom.clearGroups();
@@ -198,10 +253,12 @@ export function applyClusterIndex(
       const start = n;
       for (let i = 0; i < g.tris.length; i++) {
         const t = g.tris[i];
-        const c = triClusters[t];
-        // 0xffff = 三角形不在任何房间（墙外/虚空/装到地图外壳的重复道具）：判为不可见。
-        // 早期把它当可见，结果「悬空尖刺/浮空平面」这类东西永远画出来（它们采样不到房间）。
-        if (c !== 0xffff && pvs.isVisible(c)) {
+        // 两个来源任一可见就画：face 引用映射可能是「楼下/隔壁的房间」，法线采样才是面朝向的房间。
+        const ca = triClusters[t];
+        const cn = triClustersN[t];
+        const on = (ca !== 0xffff && pvs.isVisible(ca)) || (cn !== 0xffff && pvs.isVisible(cn));
+        // 两个来源都定不到位（墙外/虚空/地图外壳的重复道具）才剔——「悬空尖刺」正是这一类。
+        if (on) {
           const s = t * 3;
           outIndex[n++] = origIndex[s];
           outIndex[n++] = origIndex[s + 1];
