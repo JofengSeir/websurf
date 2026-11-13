@@ -252,7 +252,7 @@ function normalize(raw: unknown): RenderPrefs {
       mode: l.mode === 'texture' ? 'texture' : 'baked',
     },
     textureQuality: quality(o.textureQuality, d.textureQuality),
-    culling: { distance: num(c.distance, d.culling.distance), pvs: c.pvs === true },
+    culling: { distance: num(c.distance, d.culling.distance), pvs: bool(c.pvs, d.culling.pvs) },
     camera: { fov: num(cam.fov, d.camera.fov) },
     extras: {
       lightFloor: num(ex.lightFloor, d.extras.lightFloor),

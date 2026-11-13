@@ -58,7 +58,12 @@ export const RENDER_REV = '2026-11-13.9-face-normal-cluster';
 
 /** 泄漏采样时沿面法线外推的距离（HU）：面本身是边界，重心必然贴着 brush。 */
 const CLUSTER_LEAK_PROBE_PUSH = [4, 16, 64, 192] as const;
-import { getLightingMode, setLightingMode as setLightingModeInShader, type LightingMode } from '../shader/lightmap-shader.js';
+import {
+	getLightingMode,
+	setLightingMode as setLightingModeInShader,
+	smoothVertexLighting,
+	type LightingMode,
+} from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import type { PoseScope } from '../camera/pose-entry.js';
 
@@ -1340,6 +1345,18 @@ export class RenderSession {
     // 再往细分（160）反而更差：同机位 route1 t=7000 311fps / t=12000 309fps（256 是 314 / 316），
     // 因为单块三角形变多、视锥裁剪变粗 ⇒ 顶点着色与填充反而上涨。256 是这里的最优点。
     const optRoot = mergeIntoNewRoot(root, { translucentSplit: this.translucentSplit, opaqueTargetCells: 256 });
+    // 逐顶点烘焙的 prop 曲面（`s1_ramp1_b` / `s1_window01_1` 这类）在 merged chunk 上仍带
+    // `_vbsp_vlight`；vhv 的条带采样不连续，Gouraud 会把跳变画成硬边（见 shader 侧
+    // `smoothVertexLighting` 的说明）。放在合并之后：`applyLightmapToMeshes` 在建场景时
+    // 早于这些 prop 挂载，扫不到它们。
+    let smoothed = 0;
+    optRoot.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry) return;
+      if (!mesh.geometry.getAttribute('_vbsp_vlight')) return;
+      smoothed += smoothVertexLighting(mesh.geometry);
+    });
+    if (smoothed > 0) console.info(`[optimizeScene] 逐顶点光照去接缝: 改写 ${smoothed} 个空间格子`);
     const stats = mergeStatsOf(optRoot);
     if (stats) {
       console.log(

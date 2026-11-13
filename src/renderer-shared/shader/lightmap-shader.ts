@@ -199,6 +199,77 @@ export const VBSP_AMBIENT_UNIFORM_DECLS = [
 export const VERTEX_LIGHTING_ATTR = '_vbsp_vlight';
 
 /**
+ * `_vbsp_vlight` 去接缝的**空间格子边长**（HU）。
+ *
+ * 2026-11-13 实测（s666 / `s1_ramp1_b`、`s1_window01_1`）：`baked` 光模式下曲面出现
+ * 边界清晰的明暗条带；切 `texture` 模式、或把本属性整体替换为常量后条带完全消失
+ * ⇒ 条带 100% 来自本属性（贴图/UV/几何/世界光贴图均已逐一排除）。
+ * 数据侧同一位置不同法线的副本可差 2%，相邻条带可差 3 倍；Gouraud 把这些跳变画成硬边。
+ * 取 24 HU ≈ 玩家 1/4 身高，足以跨过条带而不越过折角。
+ */
+const VLIGHT_SMOOTH_CELL = 24;
+
+/** 一个格子里顶点颜色的最大分量差超过该值才改写（0.02 ≈ 5/255，低于此值肉眼不可见）。 */
+const VLIGHT_SMOOTH_MIN_DELTA = 0.02;
+
+/**
+ * 逐顶点预烘焙光照（`_VBSP_VLIGHT`）的**去分段接缝**：按 {@link VLIGHT_SMOOTH_CELL} HU 的
+ * 空间格子聚类，对同格顶点取颜色均值，只改写差异超过 {@link VLIGHT_SMOOTH_MIN_DELTA} 的格子
+ * （幂等：再跑一次不会继续变暗/变亮）。
+ *
+ * ⚠️ **必须按位置聚类，不能把法线也放进 key**（2026-11-13 实测：带法线 key 时只修掉
+ * 8/432 格，条带依旧；纯位置聚类修掉 81 格，条带消失）。相接的条带法线本来就差十几度，
+ * 按法线分桶就永远跨不过条带。
+ * 代价：薄墙正反面（间距 < 24 HU）会被并入同一格 —— 实测两侧光差很小，无可见影响。
+ * 返回值 = 被改写的格子数（诊断用）。
+ */
+export function smoothVertexLighting(geom: THREE.BufferGeometry): number {
+	const attr = geom.getAttribute(VERTEX_LIGHTING_ATTR) as THREE.BufferAttribute | undefined;
+	const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
+	if (!attr || !pos) return 0;
+	const buckets = new Map<string, number[]>();
+	for (let i = 0; i < pos.count; i++) {
+		const key =
+			Math.round(pos.getX(i) / VLIGHT_SMOOTH_CELL) +
+			',' +
+			Math.round(pos.getY(i) / VLIGHT_SMOOTH_CELL) +
+			',' +
+			Math.round(pos.getZ(i) / VLIGHT_SMOOTH_CELL);
+		const list = buckets.get(key);
+		if (list) list.push(i);
+		else buckets.set(key, [i]);
+	}
+	let changed = 0;
+	buckets.forEach((ids) => {
+		if (ids.length < 2) return;
+		let r = 0;
+		let g = 0;
+		let b = 0;
+		for (const i of ids) {
+			r += attr.getX(i);
+			g += attr.getY(i);
+			b += attr.getZ(i);
+		}
+		r /= ids.length;
+		g /= ids.length;
+		b /= ids.length;
+		let maxDelta = 0;
+		for (const i of ids) {
+			maxDelta = Math.max(
+				maxDelta,
+				Math.abs(attr.getX(i) - r) + Math.abs(attr.getY(i) - g) + Math.abs(attr.getZ(i) - b),
+			);
+		}
+		if (maxDelta <= VLIGHT_SMOOTH_MIN_DELTA) return;
+		for (const i of ids) attr.setXYZ(i, r, g, b);
+		changed++;
+	});
+	if (changed > 0) attr.needsUpdate = true;
+	return changed;
+}
+
+
+/**
  * three r165 `envmap_fragment` chunk 的**原始 include 锚点**。
  *
  * ⚠️ `onBeforeCompile` 拿到的是**尚未展开 `#include` 的原始源码**（`resolveIncludes` 发生在
@@ -703,6 +774,10 @@ export function applyLightmapToMeshes(
 		const mesh = obj as THREE.Mesh;
 		const geom = mesh.geometry as THREE.BufferGeometry;
 		if (!geom) return;
+
+		// 第 1 级逐顶点烘焙：先消掉条带之间的光照跳变（否则 Gouraud 会画成硬边）。
+		// 只对带该属性的几何生效；无属性时零开销。
+		if (hasVertexLightingAttr(mesh)) smoothVertexLighting(geom);
 
 		// `extras.hasLightmap === false` 表示该图元只有中性占位 UV，不得施加 lightmap。
 		//
