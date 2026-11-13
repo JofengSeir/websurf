@@ -242,7 +242,7 @@ pub fn collect_pakfile_models(
 /// `_constant_attn` / `_linear_attn` / `_quadratic_attn`，外加 `pitch`；这些键缺失时对应字段为
 /// `None`。消费方据此写 `KHR_lights_punctual`。
 pub fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> {
-    const LIGHT_CLASSNAMES: &[&str] = &["light", "light_spot", "light_environment"];
+    const LIGHT_CLASSNAMES: &[&str] = &["light", "light_spot", "point_spotlight", "light_environment"];
     let mut out = Vec::new();
     for ent in bsp.entities.iter() {
         let Ok(classname) = ent.prop("classname") else {
@@ -266,6 +266,8 @@ pub fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> 
                 linear_attn: prop("_linear_attn"),
                 quadratic_attn: prop("_quadratic_attn"),
                 pitch: prop("pitch"),
+                spotlight_width: prop("spotlightwidth"),
+                spotlight_length: prop("spotlightlength"),
             }, ambient_cube: None, // 灯实体没有模型，不查 leaf ambient cube
         });
     }

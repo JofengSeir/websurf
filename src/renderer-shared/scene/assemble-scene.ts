@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { applyLightmap, buildMapScene } from './scene-builder.js';
+import { buildSpotBeams, type PunctualSpot } from './spot-beams.js';
 import { mergeIntoChunks, padBoundingSpheres } from './scene-optimizer.js';
 import { extractSkyArea, SKY_LAYER, type SkyCameraParams } from '../environment/miniature-sky.js';
 import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../shader/world-transition.js';
@@ -63,6 +64,8 @@ export interface AssembleSceneResult {
   /** 终扫收敛的受光 mesh 数（主根 / 天空组）。 */
   converged: number;
   skyConverged: number;
+  /** spot 光源的可见光柱（无 spot 时为 null）；未挂进任何场景，由调用方决定挂载。 */
+  spotBeams: THREE.Group | null;
 }
 
 /** 三端唯一的装配序列；顺序即契约（见文件头）。 */
@@ -257,5 +260,7 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
         '（默认不加灯，受光材质恒黑；unlit 图元不吃 ambient cube）',
     );
   }
-  return { gltf, root, bbox, maxDim, skyGroup, skyCluster, applied, converged, skyConverged };
+  // 合并**之后**才建可见光柱：它属于「运行时效果」，不能参与块合并。
+  const spotBeams = buildSpotBeams((mapRoot.userData.punctualSpots as PunctualSpot[] | undefined) ?? []);
+  return { gltf, root, bbox, maxDim, skyGroup, skyCluster, applied, converged, skyConverged, spotBeams };
 }

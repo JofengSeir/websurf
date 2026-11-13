@@ -64,6 +64,8 @@ import {
 	smoothVertexLighting,
 	setVhvLinear as setVhvLinearInShader,
 	getVhvLinear,
+	setSpotLights,
+	type SpotLightInput,
 	type LightingMode,
 } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
@@ -201,6 +203,8 @@ export class RenderSession {
   /** 天空层：第二相机 + 只挂 `SKY_LAYER` 的图元组。 */
   private skyCamera: THREE.PerspectiveCamera | null = null;
   private skyGroup: THREE.Group | null = null;
+  /** spot 光源的可见光柱（`point_spotlight`）；null = 本图没有 spot。 */
+  private spotBeams: THREE.Group | null = null;
   private skyParams: SkyCameraParams | null = null;
   private skyFog: THREE.Fog | null = null;
 
@@ -435,6 +439,9 @@ export class RenderSession {
     this.bbox = asm.bbox;
     this.maxDim = asm.maxDim;
     this.scene.add(this.root);
+    // spot 光源的可见光柱（起源 point_spotlight 的锥面/光斑观感）：不参与剔块，单独挂场景。
+    this.spotBeams = asm.spotBeams;
+    if (this.spotBeams) this.scene.add(this.spotBeams);
     // 合并后的块把顶点烘焙成世界坐标、local 矩阵清成单位阵，但 `matrixWorld` 要等一次
     // updateMatrixWorld 才会跟上（mergeIntoChunks 里只调了 `m.updateMatrix()`，从未刷新
     // matrixWorld；`renderer.compile` 也不刷）。PVS 采样按 `mesh.matrixWorld` 把几何点变换到
@@ -528,6 +535,11 @@ export class RenderSession {
       this.scene.remove(this.skyGroup);
       this.skyGroup = null;
     }
+    if (this.spotBeams) {
+      disposeObject(this.spotBeams);
+      this.scene.remove(this.spotBeams);
+      this.spotBeams = null;
+    }
     resetWaterShaders();
     this.transparentChunks = [];
     clearSceneEnvironment(this.scene, { disposeBackground: true });
@@ -586,7 +598,53 @@ export class RenderSession {
       this.visibility.chunkIndexActive = false;
       this.pvsIndexActive = false;
     }
+    this.updateSpotLights();
     return this.lastVisibility;
+  }
+
+  /**
+   * 每帧挑选「离相机最近的 8 盏 spot」送进 lightmap 注入的 uniform。
+   *
+   * 为什么不是全部：世界材质共享同一套 uniform，`KHR_lights_punctual` 在本图有 57 盏 spot
+   * （其余 2000+ 是 point，不参与这里）；只按距离取前 8 盏，既够覆盖视野，又不会让
+   * uniform 数组无限膨胀。
+   */
+  private updateSpotLights(): void {
+    const spots = this.spotBeams?.userData.spots as
+      | {
+          position: [number, number, number];
+          direction: [number, number, number];
+          color: [number, number, number];
+          intensity: number;
+          range: number;
+          innerConeAngle: number;
+          outerConeAngle: number;
+        }[]
+      | undefined;
+    if (!spots || spots.length === 0) {
+      setSpotLights([]);
+      return;
+    }
+    const cam = this.camera.position;
+    const ranked = spots
+      .map((s) => {
+        const dx = s.position[0] - cam.x;
+        const dy = s.position[1] - cam.y;
+        const dz = s.position[2] - cam.z;
+        return { s, d2: dx * dx + dy * dy + dz * dz };
+      })
+      .sort((a, b) => a.d2 - b.d2)
+      .slice(0, 8)
+      .map(({ s }) => ({
+        position: s.position,
+        direction: s.direction,
+        color: s.color,
+        intensity: s.intensity,
+        range: s.range,
+        cosOuter: Math.cos(s.outerConeAngle),
+        cosInner: Math.cos(s.innerConeAngle),
+      }) satisfies SpotLightInput);
+    setSpotLights(ranked);
   }
 
   /** PVS 区域着色开关（debug 面板用；开启期间不按 PVS/距离剔除，只上色，才能看清「不可见的区域」）。 */

@@ -350,6 +350,91 @@ const ENVMAP_MODULATED = (termExpr: string): string =>
 // `CHUNK_*` 是给走 `#include <lightmap_fragment>` 的材质准备的防御性通道。
 // three 0.165.0 的 `ShaderChunk` 只导出 `lightmap_pars_fragment`，没有 `lightmap_fragment`，
 // 故此通道在本版本命中数恒为 0；命中数仍被统计，见 `injectLightmapShader`。
+// ---------------------------------------------------------------------------
+// spot 光源（起源 `point_spotlight` / `light_spot`）的有界直接光
+// ---------------------------------------------------------------------------
+//
+// 烘焙 lightmap 只含**静态灯**的贡献；`point_spotlight` 由引擎运行时生成，烘焙里没有。
+// 这里按「最多 8 盏、按相机距离挑最近的」把它加成直接光：锥内 + 距离衰减 + 朗伯项。
+//
+// 法线取片元导数叉积（世界材质是 MeshBasicMaterial，几何上没有 normal 属性，合并块也没有），
+// 用 `abs(dot)` 双面接受——墙面/薄板不会因为朝向判反而丢掉光。
+const SPOT_MAX = 8;
+
+const spotUniforms = {
+	vbspSpotCount: { value: 0 },
+	vbspSpotPos: { value: Array.from({ length: SPOT_MAX }, () => new THREE.Vector3()) },
+	vbspSpotDir: { value: Array.from({ length: SPOT_MAX }, () => new THREE.Vector3(0, -1, 0)) },
+	vbspSpotColor: { value: Array.from({ length: SPOT_MAX }, () => new THREE.Color(0, 0, 0)) },
+	vbspSpotRange: { value: new Float32Array(SPOT_MAX) },
+	vbspSpotCosOuter: { value: new Float32Array(SPOT_MAX) },
+	vbspSpotCosInner: { value: new Float32Array(SPOT_MAX) },
+	vbspSpotScale: { value: 0.0025 },
+};
+
+/** 供渲染端每帧/每次可见性更新时调用：填入离相机最近的 spot。 */
+export interface SpotLightInput {
+	position: [number, number, number];
+	direction: [number, number, number];
+	color: [number, number, number];
+	intensity: number;
+	range: number;
+	cosOuter: number;
+	cosInner: number;
+}
+
+export function setSpotLights(list: SpotLightInput[]): void {
+	const n = Math.min(SPOT_MAX, list.length);
+	for (let i = 0; i < n; i++) {
+		const s = list[i];
+		spotUniforms.vbspSpotPos.value[i].set(s.position[0], s.position[1], s.position[2]);
+		spotUniforms.vbspSpotDir.value[i].set(s.direction[0], s.direction[1], s.direction[2]);
+		// 颜色 × 亮度：导出侧 intensity = brightness × 5（来源 `_light` 第 4 个数）。
+		spotUniforms.vbspSpotColor.value[i].setRGB(
+			s.color[0] * s.intensity,
+			s.color[1] * s.intensity,
+			s.color[2] * s.intensity,
+		);
+		spotUniforms.vbspSpotRange.value[i] = s.range;
+		spotUniforms.vbspSpotCosOuter.value[i] = s.cosOuter;
+		spotUniforms.vbspSpotCosInner.value[i] = s.cosInner;
+	}
+	spotUniforms.vbspSpotCount.value = n;
+}
+
+const SPOT_FRAG_DECLS = `
+uniform int vbspSpotCount;
+uniform vec3 vbspSpotPos[${SPOT_MAX}];
+uniform vec3 vbspSpotDir[${SPOT_MAX}];
+uniform vec3 vbspSpotColor[${SPOT_MAX}];
+uniform float vbspSpotRange[${SPOT_MAX}];
+uniform float vbspSpotCosOuter[${SPOT_MAX}];
+uniform float vbspSpotCosInner[${SPOT_MAX}];
+uniform float vbspSpotScale;
+varying vec3 vbspSpotWPos;
+
+vec3 vbspSpotLight(vec3 P) {
+	vec3 N = normalize(cross(dFdx(P), dFdy(P)));
+	vec3 sum = vec3(0.0);
+	for (int i = 0; i < ${SPOT_MAX}; i++) {
+		if (i >= vbspSpotCount) break;
+		vec3 toL = vbspSpotPos[i] - P;
+		float d = length(toL);
+		if (d <= 0.001 || d > vbspSpotRange[i]) continue;
+		vec3 L = toL / d;
+		float ndl = abs(dot(N, L));
+		float att = 1.0 - d / vbspSpotRange[i];
+		att *= att;
+		float cd = dot(-L, vbspSpotDir[i]);
+		float cone = smoothstep(vbspSpotCosOuter[i], vbspSpotCosInner[i], cd);
+		sum += vbspSpotColor[i] * (att * cone * ndl);
+	}
+	return sum * vbspSpotScale;
+}
+`;
+
+const SPOT_VERT_DECL = 'varying vec3 vbspSpotWPos;\n';
+
 const BASIC_INLINE_LIGHTMAP_SRC =
 	'vec4 lightMapTexel = texture2D( lightMap, vLightMapUv );\n\t\treflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;';
 
@@ -1191,6 +1276,25 @@ function injectLightmapShader(
 
 		// 插入函数定义 + uniform 声明（vbspExposure 与 atlasSize 并列，S1 曝光旋钮）
 		updated = VBSP_LIGHTMAP_UNIFORM_DECLS.join('\n') + '\n' + injected + updated;
+
+		// spot 直接光：声明 + 在 lightmap 项之后累加（无 spot 时 count=0，循环体直接 break，零开销）。
+		updated = SPOT_FRAG_DECLS + updated;
+		// 内联路径与 `#include <lightmap_fragment>` 路径最终都会换成同一句
+		// `... += vbsp_ApplyLightmap(...)`；不能按内联原文找（chunk 路径下它已不在），
+		// 必须按这个稳定调用点追加，否则 spot 项会被静默丢掉。
+		const APPLY_LIGHTMAP_CALL = 'reflectedLight.indirectDiffuse += vbsp_ApplyLightmap(lightMap, vLightMapUv);';
+		updated = updated.replace(
+			APPLY_LIGHTMAP_CALL,
+			APPLY_LIGHTMAP_CALL + '\n\treflectedLight.indirectDiffuse += vbspSpotLight(vbspSpotWPos);',
+		);
+		// 调试：临时把 spot 结果画出来（验证完必须删掉）。
+		shader.uniforms = Object.assign(shader.uniforms, spotUniforms);
+		shader.vertexShader =
+			SPOT_VERT_DECL +
+			shader.vertexShader.replace(
+				'#include <project_vertex>',
+				'#include <project_vertex>\n\tvbspSpotWPos = transformed;',
+			);
 
 		shader.fragmentShader = fogMaxDensityDefine() + updated;
 	};

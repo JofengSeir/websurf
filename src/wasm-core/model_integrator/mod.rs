@@ -468,7 +468,13 @@ impl ModelIntegrator {
         // 独立 buffer view（紧凑 f32×3），**不塞进 interleaved 的 ModelVertex**：
         //   ① 只有 prop 需要它，world 面不付代价；② 改 ModelVertex 会动到所有导出路径。
         // 长度必须等于模型顶点数；不等 ⇒ 报错返回 None（调用方回退 cube 路径，不静默错位）。
-        let vlight = vlight.filter(|v| v.len() == vertex_count as usize)?;
+        // 全零的 vhv 视为「没有烘焙数据」：vrad 对少数 prop（如 surf_666 的 s3_d_4 / s3_d_4_1）
+        // 会写出全 0 的 block，若照抄成属性，屏幕 = 纹理 × 0 = 纯黑；这里让它退回第 2 级
+        // ambient cube（`applyAmbientCubeIfAny`），与「本来就没有 vhv」同一条路径。
+        let vlight = vlight.filter(|v| {
+            v.len() == vertex_count as usize
+                && v.iter().any(|c| c[0] > 0.0 || c[1] > 0.0 || c[2] > 0.0)
+        })?;
         let vl_start = buffer.len() as u64;
         for c in vlight {
             for f in c {
@@ -922,7 +928,9 @@ impl ModelIntegrator {
 
                     // 按 classname 决定光源类型
                     let (light_type, has_spot, has_direction) = match classname {
-                        "light_spot" => ("spot", true, true),
+                        // `point_spotlight` 在起源里是引擎运行时生成光锥/光斑的射灯：
+                        // 与 `light_spot` 一样按 spot 导出（方向来自 `angles`）。
+                        "light_spot" | "point_spotlight" => ("spot", true, true),
                         "light_environment" => ("directional", false, true),
                         _ => ("point", false, false),
                     };
@@ -954,6 +962,13 @@ impl ModelIntegrator {
                         spot.insert("innerConeAngle".to_string(), serde_json::json!(inner));
                         spot.insert("outerConeAngle".to_string(), serde_json::json!(outer));
                         light.insert("spot".to_string(), serde_json::Value::Object(spot));
+                        // `point_spotlight` 的可见光柱尺寸（HU）：渲染端据此画锥面。
+                        let w = light_entity.properties.spotlight_width.as_ref().and_then(|s| s.trim().parse::<f32>().ok());
+                        let l = light_entity.properties.spotlight_length.as_ref().and_then(|s| s.trim().parse::<f32>().ok());
+                        if let (Some(w), Some(l)) = (w, l) {
+                            light.insert("vbspSpotlightWidth".to_string(), serde_json::json!(w));
+                            light.insert("vbspSpotlightLength".to_string(), serde_json::json!(l));
+                        }
                     }
 
                     // spot / directional 额外加 direction
@@ -1192,6 +1207,11 @@ pub struct EntityProperties {
     pub quadratic_attn: Option<String>,
     #[serde(rename = "pitch")]
     pub pitch: Option<String>,
+    /// `point_spotlight` 的可见光柱尺寸（HU）：宽度 / 长度。其余实体为 `None`。
+    #[serde(rename = "spotlightwidth")]
+    pub spotlight_width: Option<String>,
+    #[serde(rename = "spotlightlength")]
+    pub spotlight_length: Option<String>,
 }
 
 /// 实体
@@ -1491,6 +1511,8 @@ pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<Entity> {
                 linear_attn: None,
                 quadratic_attn: None,
                 pitch: None,
+                spotlight_width: None,
+                spotlight_length: None,
             }, ambient_cube: prop("origin").and_then(|o| parse_origin_source(&o)).and_then(|p| bsp.ambient_cube_at_point(p)),
         });
     }

@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { loadLightmapAtlas, applyLightmapToMeshes, getLightingMode } from '../shader/lightmap-shader.js';
+import { collectPunctualSpots } from './spot-beams.js';
 
 /** 复用的 GLTFLoader（buildMapScene 每次 loadAsync）。 */
 const gltfLoader = new GLTFLoader();
@@ -78,6 +79,7 @@ export async function buildMapScene(glb: ArrayBuffer): Promise<{
   //     渲染面不施加这些灯：烘焙 lightmap 已含这些实体的贡献，运行时再打就是重复计光。
   //
   //     两处都必须对，缺一个就是整批几何不渲染（判据见本函数文档）：
+  const spots = collectPunctualSpots((gltf.parser as unknown as { json?: unknown })?.json);
   const lightsToRemove: THREE.Object3D[] = [];
   scene.traverse((obj) => {
     if ((obj as THREE.Light).isLight) lightsToRemove.push(obj);
@@ -89,6 +91,13 @@ export async function buildMapScene(glb: ArrayBuffer): Promise<{
         '烘焙 lightmap 已含其贡献（VRAD），运行时再打会重复计光；' +
         '且 2000+ 盏会把受光材质的 uniform 推到 1024 上限 ⇒ program 无效 ⇒ 该批 mesh 一个像素都不画。',
     );
+  }
+  // 但 `point_spotlight` 这类「引擎运行时才生成光柱」的灯，烘焙里没有可见部分：
+  // 把数据留在 userData，由装配层在**合并之后**用加法混合锥面画出来
+  // （不能在这里加进 mapRoot：合并会把该 Group 的 mesh 一起并进块几何）。
+  if (spots.length > 0) {
+    scene.userData.punctualSpots = spots;
+    console.info(`[lights] spot 光源 ${spots.length} 盏（point_spotlight=${spots.filter((s) => s.beamWidth != null).length}）→ 交由装配层画可见光柱。`);
   }
 
   return { gltf, scene, bbox, maxDim };
