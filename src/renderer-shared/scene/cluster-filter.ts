@@ -38,13 +38,16 @@ export interface PvsFilterQuery {
  * 引用，于是拿到别的房间的 cluster：站在地板上、人贴着脸，PVS 照样把它判成不可见 ⇒ 地面开洞、
  * 直接看穿到下层区域。用户看到的「人都贴跟前了还看不到」就是这个。
  *
- * 所以再沿**面法线**取一次「面朝向的那个房间」：`triClustersN`。两个来源任一可见就画；
- * 只有两个都定不到位（都在墙外/虚空）才剔——这才是「悬空尖刺」该被剔的情形。
+ * 所以再沿**面法线**取一次「面朝向的那个房间」：`triClustersN`；以及沿**反法线**取一次
+ * 背面房间：`triClustersN2`（厚墙/大面板两侧各属一间，只记一侧会在另一侧看穿）。
+ * 三个来源任一可见就画；全都定不到位（都在墙外/虚空）才剔——这才是「悬空尖刺」该被剔的情形。
  */
 interface ClusterIndexState {
   triClusters: Uint16Array;
   /** 沿面法线采样得到的 cluster（面真正朝向的房间），0xffff = 采不到。 */
   triClustersN: Uint16Array;
+  /** 沿**反**法线采样得到的 cluster（面的背面房间），0xffff = 采不到。 */
+  triClustersN2: Uint16Array;
   origIndex: Uint32Array;
   outIndex: Uint32Array;
   attr: THREE.BufferAttribute;
@@ -80,6 +83,7 @@ function normalSideCluster(
   get: (p: { x: number; y: number; z: number }) => number,
   v: THREE.Vector3,
   n: THREE.Vector3,
+  flip = false,
 ): number {
   let cx = 0, cy = 0, cz = 0;
   for (let k = 0; k < 3; k++) {
@@ -106,6 +110,8 @@ function normalSideCluster(
     n.crossVectors(scratchB.sub(scratchA), v.sub(scratchA));
     if (n.lengthSq() < 1e-12) n.set(0, 1, 0); else n.normalize();
   }
+  // `flip` = 取背面的房间：厚墙/大面板两侧常常各属一个房间，只记一侧会在另一侧看穿。
+  if (flip) n.negate();
   for (const off of [8, 32, 0, -8, -32]) {
     v.set(cx + n.x * off, cy + n.y * off, cz + n.z * off);
     const r = get(v);
@@ -161,7 +167,9 @@ export function prepareClusterIndex(
 
     const triClusters = new Uint16Array(tris);
     const triClustersN = new Uint16Array(tris);
+    const triClustersN2 = new Uint16Array(tris);
     triClustersN.fill(0xffff);
+    triClustersN2.fill(0xffff);
     const origIndex = new Uint32Array(tris * 3);
     const nrm = geom.getAttribute('normal') as THREE.BufferAttribute | undefined;
     const mw = mesh.matrixWorld;
@@ -179,6 +187,9 @@ export function prepareClusterIndex(
         // 第二个来源：面朝向的那个房间（`faceClusters` 只是「引用过这张面的第一个 leaf」）。
         const cn = get ? normalSideCluster(index, pos, nrm ?? null, mw, t, get, v, n) : -1;
         if (cn >= 0) triClustersN[t] = cn;
+        // 背面房间：厚墙/大面板两侧各属一间时，站在背面这一侧不能因为正面房间不可见就被剔。
+        const cn2 = get ? normalSideCluster(index, pos, nrm ?? null, mw, t, get, v, n, true) : -1;
+        if (cn2 >= 0) triClustersN2[t] = cn2;
         if (c < 0 && cn < 0) unmapped++;
       }
     } else if (get) {
@@ -209,6 +220,7 @@ export function prepareClusterIndex(
         if (c < 0) unmapped++;
         triClusters[t] = c < 0 ? 0xffff : c;
         triClustersN[t] = triClusters[t];
+        triClustersN2[t] = triClusters[t];
       }
     } else {
       why('noface');
@@ -237,7 +249,7 @@ export function prepareClusterIndex(
     attr.setUsage(THREE.DynamicDrawUsage);
     geom.setIndex(attr);
     (mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex = {
-      triClusters, triClustersN, origIndex, outIndex, attr, groups, lastCluster: -1, visTris: tris,
+      triClusters, triClustersN, triClustersN2, origIndex, outIndex, attr, groups, lastCluster: -1, visTris: tris,
     };
     stats.prepared++;
     stats.tris += tris;
@@ -261,7 +273,7 @@ export function applyClusterIndex(
     const st = (item.mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex;
     if (!st) continue;
     if (st.lastCluster === camCluster) continue;
-    const { triClusters, triClustersN, origIndex, outIndex, attr, groups } = st;
+    const { triClusters, triClustersN, triClustersN2, origIndex, outIndex, attr, groups } = st;
     const geom = item.mesh.geometry;
     let n = 0;
     geom.clearGroups();
@@ -272,7 +284,11 @@ export function applyClusterIndex(
         // 两个来源任一可见就画：face 引用映射可能是「楼下/隔壁的房间」，法线采样才是面朝向的房间。
         const ca = triClusters[t];
         const cn = triClustersN[t];
-        const on = (ca !== 0xffff && pvs.isVisible(ca)) || (cn !== 0xffff && pvs.isVisible(cn));
+        const cn2 = triClustersN2[t];
+        const on =
+          (ca !== 0xffff && pvs.isVisible(ca)) ||
+          (cn !== 0xffff && pvs.isVisible(cn)) ||
+          (cn2 !== 0xffff && pvs.isVisible(cn2));
         // 两个来源都定不到位（墙外/虚空/地图外壳的重复道具）才剔——「悬空尖刺」正是这一类。
         if (on) {
           const s = t * 3;
