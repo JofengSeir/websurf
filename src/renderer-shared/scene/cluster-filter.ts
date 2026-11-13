@@ -199,7 +199,9 @@ export function applyClusterIndex(
       for (let i = 0; i < g.tris.length; i++) {
         const t = g.tris[i];
         const c = triClusters[t];
-        if (c === 0xffff || pvs.isVisible(c)) {
+        // 0xffff = 三角形不在任何房间（墙外/虚空/装到地图外壳的重复道具）：判为不可见。
+        // 早期把它当可见，结果「悬空尖刺/浮空平面」这类东西永远画出来（它们采样不到房间）。
+        if (c !== 0xffff && pvs.isVisible(c)) {
           const s = t * 3;
           outIndex[n++] = origIndex[s];
           outIndex[n++] = origIndex[s + 1];
