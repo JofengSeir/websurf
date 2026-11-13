@@ -598,6 +598,8 @@ function formatPlaneInfo(info: PlaneInfo | null): string {
 				: '';
 			return (
 				`准星 模型「${info.meshName ?? ''}」 ${dist}HU [${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}]` +
+				(info.bspFace != null ? ` 面#${info.bspFace}` : '') +
+				(info.sourceTri != null && info.sourceTri >= 0 ? ` tri${info.sourceTri}` : '') +
 				(info.materialName ? ` 材质:${info.materialName}` : '') +
 				(info.textureName ? ` 纹理:${info.textureName}` : '') +
 				(flags ? ` (${flags})` : '')

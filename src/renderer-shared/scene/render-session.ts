@@ -23,7 +23,7 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createRenderer, precompileScene } from '../render/create-renderer.js';
 import { installRenderProbe } from '../render/render-probe.js';
 import { assembleScene } from './assemble-scene.js';
-import { mergeIntoNewRoot, mergeStatsOf, type MergeStats } from './scene-optimizer.js';
+import { lookupMergeSource, mergeIntoNewRoot, mergeStatsOf, type MergeStats } from './scene-optimizer.js';
 import { disposeObject } from './dispose.js';
 import { resetWaterShaders, renderWaterFramePasses } from '../shader/water.js';
 import {
@@ -1029,7 +1029,7 @@ export class RenderSession {
   }
 
   /** 诊断：屏幕某点（NDC）射线打中的第一个块，及其 cluster / 可见性——「眼前这面墙到底被谁剔了」。 */
-  pickAt(ndcX = 0, ndcY = 0): { idx: number; name: string; d: number; clusters: number[]; cameraCluster: number; hasCamera: boolean; pvsVisible: boolean | null; visible: boolean; mat: string; matTransparent: boolean; matMap: string; matWater: boolean } | null {
+  pickAt(ndcX = 0, ndcY = 0): { idx: number; name: string; d: number; clusters: number[]; cameraCluster: number; hasCamera: boolean; pvsVisible: boolean | null; visible: boolean; mat: string; matTransparent: boolean; matMap: string; matWater: boolean; srcMesh: string; srcFace: number | null; srcTri: number } | null {
     if (!this.root) return null;
     const rc = new THREE.Raycaster();
     rc.far = 60000;
@@ -1047,6 +1047,9 @@ export class RenderSession {
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     const g = first.face?.materialIndex ?? 0;
     const mat = mats[Math.min(g, mats.length - 1)] as THREE.Material | undefined;
+    // 来源面：合并块本身无名，按 faceIndex 反查区间表 → 来源 glTF 网格名 + BSP 面号（extras.faceIndex）。
+    const src = lookupMergeSource(obj.geometry, first.faceIndex);
+    const srcTri = src && first.faceIndex != null ? Math.floor((first.faceIndex * 3 - src.start) / 3) : -1;
     return {
       idx,
       name: obj.name || '(anon)',
@@ -1060,6 +1063,9 @@ export class RenderSession {
       matTransparent: mat?.transparent ?? false,
       matMap: (mat as THREE.MeshBasicMaterial | undefined)?.map?.name || '(nomap)',
       matWater: (mat?.userData as { vbsp_water?: unknown } | undefined)?.vbsp_water != null,
+      srcMesh: src?.meshName || '(unknown)',
+      srcFace: src?.faceIndex ?? null,
+      srcTri,
     };
   }
 

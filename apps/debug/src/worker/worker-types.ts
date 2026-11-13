@@ -385,6 +385,10 @@ export interface PlaneInfo {
   meshName?: string;
   /** 材质名（取不到的来源几何/未合并 mesh 上为空串）。 */
   materialName?: string;
+  /** 来源 primitive 的 BSP 面序号（GLB extras `faceIndex`；取不到时为 null）。 */
+  bspFace?: number | null;
+  /** 命中三角形在该来源 primitive 内的序号（取不到时为 -1）。 */
+  sourceTri?: number;
   /** 纹理名（同上）。 */
   textureName?: string;
   /** 材质属性标记（来源几何没有合并元数据时整体为 undefined）。 */

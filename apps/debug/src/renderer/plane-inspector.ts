@@ -178,6 +178,11 @@ export class PlaneInspector {
 			brushIndex: -1,
 			// 名字优先级：命中的来源几何名 → mesh 自身名 → 兜底串
 			meshName: source?.meshName || mesh.name || '(unnamed mesh)',
+			bspFace: source?.faceIndex ?? null,
+			sourceTri:
+				source && hit.faceIndex !== null && hit.faceIndex !== undefined
+					? Math.floor((hit.faceIndex * 3 - source.start) / 3)
+					: -1,
 			materialName: meta?.materialName ?? '',
 			textureName: meta?.textureName ?? '',
 			// 六项分类标记缺一即按 false 填；meta 整体缺失时 meshMeta 写 undefined

@@ -50,6 +50,9 @@ use crate::vbsp::Bsp;
 /// 而这一路连贴图 alpha 通道都指望不上。真正生效的数值一律来自 VMT 的 `$alpha`。
 pub(crate) const TRANSLUCENT_PLACEHOLDER_ALPHA: u8 = 51;
 
+/// `Refract` 拿到了贴图时的 alpha：水面要能透出背景，但不能像占位值那样几乎看不见。
+pub(crate) const REFRACT_TEXTURED_ALPHA: u8 = 235;
+
 /// 水面在**没有任何地图参数**时的上游口径半透明水色（RGBA，128 ≈ 0.5）。
 ///
 /// **泛白**（owner 2026-10-19 裁决）：Source 的水面观感来自 `$fogcolor` —— 实测 `surf_boreas`
@@ -981,19 +984,35 @@ pub(crate) fn load_material_bsp(
             // ⇒ 落到这里时按**半透明**处理，否则整面画成不透明白板（实测 surf_666 的
             // `watersource/river/river_clear` 15 面 + `watersource/waterfall/waterfallsoft_1024_nrm_clear` 21 面）。
             let refract = matches!(material, vmt_parser::material::Material::Refract(_));
+            // `Refract` 没有 `$basetexture`，但水面纹理在默认纹理包里按**材质名**存了一份
+            // （`build-textures-mtz.mjs` 把 `watersource/river/river.vtf` 编成
+            // `materials/watersource/river/river_clear`）。取得到就用它当基色贴图，
+            // 取不到才退回占位 alpha —— 否则河流/瀑布整面都是「白 + 0.2」的灰板。
+            let refract_texture = if refract {
+                fallback_texture_png(&options.missing_fallback, &[name], 8)
+                    .and_then(|png| image::load_from_memory(&png).ok())
+                    .map(|image| TextureData { name: name.to_string(), image })
+            } else {
+                None
+            };
             let mut color = if water {
                 WATER_COLOR
             } else {
                 parse_dollar_color(&vdf).unwrap_or([255, 255, 255, 255])
             };
-            // 折射面没有任何 alpha 来源（没有 `$alpha`、这一路也没有贴图）⇒ 用占位 alpha
+            // 折射面没有任何 alpha 来源（没有 `$alpha`）⇒ 有贴图时留一点透明，没贴图时用占位 alpha
             // （与 `$translucent` 无 alpha 来源同策：BLEND+alpha=1 等于不透明）。
             if refract && color[3] == 255 {
-                color[3] = TRANSLUCENT_PLACEHOLDER_ALPHA;
+                color[3] = if refract_texture.is_some() {
+                    REFRACT_TEXTURED_ALPHA
+                } else {
+                    TRANSLUCENT_PLACEHOLDER_ALPHA
+                };
             }
             return Ok(MaterialData {
                 name: name.to_string(), path: vmt_path,
                 color,
+                texture: refract_texture,
                 translucent: water || refract,
                 // 水面的 tint 缺省用 `WATER_DEFAULT_ENVMAP_TINT`（Source 的 `$reflectamount` 量级），
                 // 其余材质保持 `$envmaptint` 缺省 `[1,1,1]`。

@@ -66,6 +66,134 @@ export interface AssembleSceneResult {
 }
 
 /** 三端唯一的装配序列；顺序即契约（见文件头）。 */
+/**
+ * 河流水面的兜底着色。
+ *
+ * `Refract`（河流 / 瀑布 / 冰面）在 Source 里折射背景，本身没有 albedo：
+ * - 拿不到贴图时上游给「白 + 占位 alpha 0.2」，隔着玻璃看是黑洞 ⇒ 补可见水色；
+ * - 拿到的是它的水面纹理（多半是法线/流动图，RGB 偏蓝）⇒ 压暗成深水色，避免像蓝塑料。
+ * 只动 river，瀑布/水下层的占位白是刻意的泡沫色，不碰。
+ */
+/**
+ * 河流/折射水面的自研兜底材质。
+ *
+ * `Refract` 在 Source 里没有 albedo，靠折射背景成色；我们用 three.js 直接渲染，
+ * 既没有 refraction pass，也不能把流水法线图当 albedo（会发蓝塑料）。
+ * 这里给一个便宜、可控的透明水体：深水底色 + 掠射角菲涅尔提亮/加不透明度，
+ * 贴图只作为轻微流动扰动。观感目标是「能看穿的水」，不是镜面。
+ */
+const RIVER_SHADER_VERT = /* glsl */ `
+varying vec2 vUv;
+varying vec3 vNormalW;
+varying vec3 vViewW;
+void main() {
+  vUv = uv;
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vNormalW = normalize(mat3(modelMatrix) * normal);
+  vViewW = normalize(cameraPosition - wp.xyz);
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+const RIVER_SHADER_FRAG = /* glsl */ `
+uniform vec3 uDeep;
+uniform vec3 uShallow;
+uniform float uAlpha;
+uniform float uTime;
+uniform sampler2D uMap;
+uniform float uHasMap;
+varying vec2 vUv;
+varying vec3 vNormalW;
+varying vec3 vViewW;
+void main() {
+  float ndv = abs(dot(normalize(vNormalW), normalize(vViewW)));
+  float fres = pow(1.0 - ndv, 3.0);
+  vec3 col = mix(uDeep, uShallow, clamp(fres * 0.85, 0.0, 1.0));
+  if (uHasMap > 0.5) {
+    vec2 flow = vec2(sin(uTime * 0.08 + vUv.y * 7.0), cos(uTime * 0.06 + vUv.x * 5.0)) * 0.012;
+    vec3 tex = texture2D(uMap, vUv + flow).rgb;
+    col = mix(col, col * 1.15 + tex * 0.06, 0.6);
+  }
+  float alpha = mix(uAlpha, min(1.0, uAlpha + 0.4), fres);
+  gl_FragColor = vec4(col, alpha);
+  #include <colorspace_fragment>
+}
+`;
+
+function makeRiverFallbackMaterial(src: THREE.MeshBasicMaterial): THREE.ShaderMaterial {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uDeep: { value: new THREE.Color(0x3d6b78) },
+      uShallow: { value: new THREE.Color(0xc2e2e8) },
+      uAlpha: { value: 0.58 },
+      uTime: { value: 0 },
+      uMap: { value: src.map ?? null },
+      uHasMap: { value: src.map ? 1 : 0 },
+    },
+    vertexShader: RIVER_SHADER_VERT,
+    fragmentShader: RIVER_SHADER_FRAG,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  mat.name = src.name;
+  // 用 onBeforeRender 推进时间，避免依赖渲染循环改动
+  mat.onBeforeRender = () => {
+    mat.uniforms.uTime.value = performance.now() / 1000;
+  };
+  return mat;
+}
+
+function seedRiverWater(root: THREE.Object3D): number {
+  const done = new Set<THREE.Material>();
+  let n = 0;
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (let i = 0; i < mats.length; i++) {
+      const mat = mats[i] as THREE.MeshBasicMaterial;
+      if (!mat || !mat.transparent || done.has(mat)) continue;
+      if (!/river/i.test(mat.name || '')) continue;
+      const repl = makeRiverFallbackMaterial(mat);
+      done.add(mat);
+      if (Array.isArray(mesh.material)) mesh.material[i] = repl;
+      else mesh.material = repl;
+      n++;
+    }
+  });
+  return n;
+}
+
+function tintTexturelessWater(root: THREE.Object3D): number {
+  const tinted = new THREE.Color(0x5f7f86);
+  const graded = new THREE.Color(0x222c30);
+  let n = 0;
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const m of mats) {
+      const mat = m as THREE.MeshBasicMaterial;
+      if (!mat || !mat.transparent) continue;
+      // 已经被水面兜底 shader 接管的，不再改色（ShaderMaterial 没有 color/opacity）。
+      if ((mat as unknown as { isShaderMaterial?: boolean }).isShaderMaterial) continue;
+      // 只认平流水面（river）：瀑布/水下层的白是刻意的泡沫色，染成水蓝会画成蓝墙。
+      if (mat.opacity > 0.95 || !/river/i.test(mat.name || '')) continue;
+      if (mat.map) {
+        mat.color.copy(graded);
+        mat.opacity = 0.55;
+      } else {
+        mat.color.copy(tinted);
+        mat.opacity = Math.max(mat.opacity, 0.55);
+      }
+      mat.needsUpdate = true;
+      n++;
+    }
+  });
+  return n;
+}
+
 export async function assembleScene(opts: AssembleSceneOptions): Promise<AssembleSceneResult> {
   const { gltf, scene: mapRoot, bbox, maxDim } = await buildMapScene(opts.glb);
   await collectWorldTransitionTextures(gltf, mapRoot);
@@ -108,14 +236,19 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   applyWorldTransitionShaders(root);
   // 水面材质整槽替换：必须在**合并之后**（合并按材质实例分组，早替换会被合并丢掉），
   // 也要**早于** bump（bump 会把水面着色器改写成法线注入）。
+  const seededRiver = seedRiverWater(root);
   applyWaterShaders(root);
+  tintTexturelessWater(root);
+  if (seededRiver > 0) console.info('[' + opts.logPrefix + '][water] 河道补水面参数：' + seededRiver + ' 槽');
   // 反射扰动注入必须在**合并之后**：合并按材质实例分组，早注入会漏掉合并新建的实例。
   applyBumpShaders(root);
   let skyConverged = 0;
   if (skyGroup) {
     skyConverged = fullbrightUnlitLitMaterials(skyGroup);
     applyWorldTransitionShaders(skyGroup);
+    seedRiverWater(skyGroup);
     applyWaterShaders(skyGroup);
+    tintTexturelessWater(skyGroup);
     applyBumpShaders(skyGroup);
   }
   if (converged > 0) {
