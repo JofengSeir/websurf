@@ -71,6 +71,7 @@ import {
 } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import { subdivideVertexLit } from './vlight-subdivide.js';
+import { collectTextureScrolls, updateTextureScrolls, type TextureScrollEntry } from '../shader/texture-scroll.js';
 import type { PoseScope } from '../camera/pose-entry.js';
 
 /** 三端标识（同时用于探针 `scope` 与日志前缀）。 */
@@ -197,6 +198,10 @@ export class RenderSession {
   private pvsIndexActive = false;
   /** 主模型根（`mergeIntoNewRoot` 的产物；未合并时是 `assembleScene` 的 mapRoot）。 */
   private root: THREE.Object3D | null = null;
+  /** 声明了 Source `TextureScroll` 的共享贴图（装配后收集一次，见 `frame()`）。 */
+  private textureScrolls: TextureScrollEntry[] = [];
+  /** 上一帧时间戳（毫秒）：给 `TextureScroll` 算 `dt`。 */
+  private lastFrameAt = 0;
   /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `sortTransparentChunks`）。 */
   private transparentChunks: THREE.Mesh[] = [];
   private readonly transparentSortBox = new THREE.Box3();
@@ -330,8 +335,20 @@ export class RenderSession {
     });
 
     this.root = asm.root;
+    // Source `TextureScroll` proxy（烟幕/水面流动）：装配后收集一次「共享贴图 + 每秒 UV 周期」，
+    // 之后每帧在 `frame()` 里推进（见 `shader/texture-scroll.ts`）。
+    this.textureScrolls = collectTextureScrolls(asm.root);
+    this.lastFrameAt = 0;
     // 诊断口：主根之外的可见 mesh（道具/实体）统计——PVS 只覆盖主根，这些不受它约束。
     (globalThis as { __vbspSceneStats?: unknown }).__vbspSceneStats = () => this.drawnChunkStats();
+    // 诊断：Source `TextureScroll` 的收集结果与当前 offset（验证烟幕真的在滚）。
+    (globalThis as { __vbspTextureScroll?: unknown }).__vbspTextureScroll = () =>
+      this.textureScrolls.map((entry) => ({
+        uuid: entry.map.uuid,
+        rate: entry.rate,
+        offset: [+entry.map.offset.x.toFixed(4), +entry.map.offset.y.toFixed(4)],
+        wrap: entry.map.wrapS,
+      }));
     (globalThis as { __vbspChunkAudit?: unknown }).__vbspChunkAudit = (limit?: number) => this.chunkAudit(limit);
     // 诊断：块级并集泄漏量（逐三角形质心查 cluster，统计「画了但不可见」的比例）。
     (globalThis as { __vbspChunkLeak?: unknown }).__vbspChunkLeak = (limit?: number) => this.chunkLeak(limit);
@@ -526,6 +543,9 @@ export class RenderSession {
 
   /** 换图/卸载：释放根、天空组、环境与渲染列表；renderer/scene/camera 本身复用。 */
   disposeScene(): void {
+    // 滚动贴图是旧根的贴图对象，disposeScene 后不能再推进（会写已释放的贴图）。
+    this.textureScrolls = [];
+    this.lastFrameAt = 0;
     if (this.root) {
       disposeObject(this.root);
       this.scene.remove(this.root);
@@ -704,6 +724,14 @@ export class RenderSession {
       times[n] = +(now - tLast).toFixed(2);
       tLast = now;
     };
+    // Source `TextureScroll`：按真实时间推进 UV offset（烟幕以 0.25 周期/秒 滚动）。
+    // 放在可见性之前：滚动不影响剔除，但它要吃到本帧的 dt，越早算越准。
+    if (this.textureScrolls.length > 0) {
+      const now = performance.now();
+      const dt = this.lastFrameAt > 0 ? Math.min(0.1, (now - this.lastFrameAt) / 1000) : 0;
+      this.lastFrameAt = now;
+      updateTextureScrolls(this.textureScrolls, dt);
+    }
     if (opts.updateVisibility !== false) this.updateVisibility();
     mark('vis');
     if (this.pvsOverlay.enabled) this.pvsOverlay.update(this.root, this.pvs, this.camera.position);

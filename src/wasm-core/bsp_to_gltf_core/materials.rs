@@ -201,6 +201,13 @@ pub struct MaterialData {
     /// 的烟幕面 —— 按普通 alpha 混合会画成「一堵白墙」。`push_material` 写进
     /// `extras.vbsp_additive`，渲染端据此置 `THREE.AdditiveBlending`。
     pub additive: bool,
+    /// `TextureScroll` proxy 的滚动速率（UV 周期/秒，`[u, v]`）。
+    ///
+    /// Source 语义（`game/client/texturescrollmaterialproxy.cpp`）：
+    /// `sOffset = curtime * cos(angle°) * rate`、`tOffset = curtime * sin(angle°) * rate`，
+    /// `rate` 的单位是**每秒 UV 周期数**（0.25 ⇒ 4 秒滚完一张），`angle` 缺省 0° ⇒ 只滚 +U。
+    /// `vmt_parser 0.2.1` 不解析 Proxies，只能扫原文。典型用例 `project_tendies/tendies_endsmoke`。
+    pub texture_scroll: Option<[f32; 2]>,
     /// `$basetexture` 的 UV 变换；等于 `TextureTransform::default()` 时归 `None`。
     /// `push_material` 把其中的 `rotate` 由度转弧度。
     pub transform: Option<vmt_parser::TextureTransform>,
@@ -233,6 +240,7 @@ impl Default for MaterialData {
             translucent: false,
             no_cull: false,
             additive: false,
+            texture_scroll: None,
             transform: None,
             wireframe: false, texture_absent: false, basetexture2: None, envmap_tint: None, water: None,
         }
@@ -454,6 +462,61 @@ fn parse_dollar_flag(vdf: &str, key: &str) -> bool {
         }
         None => false,
     }
+}
+
+/// 读 Source `TextureScroll` proxy 的滚动速率（UV 周期/秒，`[u, v]`）。
+///
+/// Source 语义（`game/client/texturescrollmaterialproxy.cpp` 的 `OnBind`）：
+/// `sOffset = curtime * cos(angle°) * rate`、`tOffset = curtime * sin(angle°) * rate`；
+/// `rate` 单位是**每秒 UV 周期数**（0.25 ⇒ 4 秒滚完一张），`angle` 缺省 0° ⇒ 只滚 +U。
+/// `vmt_parser 0.2.1` 不解析 `Proxies`，只能扫 VMT 原文。
+///
+/// 只扫 `"TextureScroll"` 之后 512 字节，避免误吃同一份 VMT 里别的 proxy 的 rate。
+fn parse_texture_scroll(vdf: &str) -> Option<[f32; 2]> {
+    // **先去掉 `//` 行注释**：VMT 里被注释掉的参数仍然在文本里，直接扫会把
+    // `//"texturescrollangle" 180` 当成生效值（boreas 的 `tendies_endsmoke.vmt` 正是如此，
+    // 结果滚成 −U）。Source 的 VMT 解析器同样忽略 `//` 之后的内容。
+    let cleaned: Vec<&str> = vdf
+        .lines()
+        .map(|line| match line.find("//") {
+            Some(i) => &line[..i],
+            None => line,
+        })
+        .collect();
+    let lower = cleaned.join("\n").to_ascii_lowercase();
+    let start = lower.find("\"texturescroll\"")?;
+    let end = (start + 512).min(lower.len());
+    let block = &lower[start..end];
+    let rate = parse_proxy_number(block, "texturescrollrate")
+        .or_else(|| parse_proxy_number(block, "scrollrate"))?;
+    if rate == 0.0 {
+        return None;
+    }
+    let angle = parse_proxy_number(block, "texturescrollangle").unwrap_or(0.0);
+    let rad = angle.to_radians();
+    Some([rad.cos() * rate, rad.sin() * rate])
+}
+
+/// 在 proxy 文本里读 `"key" "value"` 或 `"key" value` 形式的数值（`key` 必须已小写、不带引号）。
+///
+/// **两种写法都要认**：Source 的 VMT 里 proxy 参数既可能加引号（`"texturescrollrate" "0.25"`），
+/// 也可能不加（boreas 的 `tendies_endsmoke.vmt` 就是 `"texturescrollrate"	0.25`）。
+fn parse_proxy_number(text: &str, key: &str) -> Option<f32> {
+    let start = text.find(key)? + key.len();
+    let rest = &text[start..];
+    // key 的右引号 → 跳过它 → 值。
+    let key_close = rest.find('"')?;
+    let after = rest[key_close + 1..].trim_start();
+    if let Some(quoted) = after.strip_prefix('"') {
+        let close = quoted.find('"')?;
+        return quoted[..close].trim().parse::<f32>().ok();
+    }
+    // 不加引号的写法：吃到第一个非数字字符为止。
+    let token: String = after
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+'))
+        .collect();
+    token.parse::<f32>().ok()
 }
 
 /// 解析 `"[r g b]"` / `"{r g b}"` / 单值 —— 取能解析成 `f32` 的前三个数；
@@ -940,6 +1003,7 @@ pub(crate) fn load_material_bsp(
                 envmap_tint: parse_dollar_envmap(&vdf, [1.0, 1.0, 1.0]),
                 // 加色混合（烟幕/光晕类 UnlitGeneric 常用）：文本扫描，`vmt_parser` 不解析。
                 additive: parse_dollar_flag(&vdf, "\"$additive\""),
+                texture_scroll: parse_texture_scroll(&vdf),
                 ..MaterialData::default()
             });
         }
@@ -998,6 +1062,9 @@ pub(crate) fn load_material_bsp(
         Some(included) => format!("{}\n{}", vdf, included),
         None => vdf,
     };
+    // `TextureScroll` proxy（UV 周期/秒）：只有 `UnlitGeneric`/`Sprite` 类会写，
+    // 但扫描是纯文本的，对所有材质都算一次（命中才 Some）。
+    let texture_scroll = parse_texture_scroll(&vdf);
 
     let base_texture = match material.base_texture() {
         Some(texture) => texture,
@@ -1058,6 +1125,7 @@ pub(crate) fn load_material_bsp(
                 } else {
                     None
                 },
+                texture_scroll,
                 ..MaterialData::default()
             });
         }
@@ -1140,6 +1208,7 @@ pub(crate) fn load_material_bsp(
         // 典型用例 `project_tendies/tendies_endsmoke`：Source 里是加法滚动的烟幕，
         // 按普通 alpha 混合会画成一堵白墙（boreas 光柱旁那根白柱）。
         additive: parse_dollar_flag(&vdf, "\"$additive\""),
+        texture_scroll,
         transform,
         envmap_tint: parse_dollar_envmap(&vdf, [1.0, 1.0, 1.0]),
         wireframe: false,

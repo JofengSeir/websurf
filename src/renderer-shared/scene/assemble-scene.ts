@@ -32,6 +32,15 @@ export interface SkyClusterQuery {
   getClusterAt(p: { x: number; y: number; z: number }): number;
 }
 
+/**
+ * 半透明实体（`rendercolor` + `$translucent`，如符文盘 `end_wiccan`）的整体不透明度上限。
+ *
+ * Source 的盘面填充靠贴图 alpha 衰减；我们的 GLB 材质 alpha 与贴图 alpha 相乘后仍偏实
+ * （scout 实测盘面 meanL 比 Source 高 31%、盘内 L>200 像素多 6 倍），压到 0.75 让盘下
+ * 地面纹理透出来。0.6 是第二个 A/B 档，先给观感更接近的 0.75。
+ */
+const ENTITY_TRANSLUCENT_OPACITY = 0.75;
+
 export interface AssembleSceneOptions {
   /** BSP 导出的 GLB 字节。 */
   glb: ArrayBuffer;
@@ -222,6 +231,13 @@ function applyEntityRenderColors(root: THREE.Object3D): number {
       const apply = (m: THREE.Material): THREE.Material => {
         const clone = m.clone() as THREE.MeshBasicMaterial;
         clone.color = clone.color.clone().multiply(tint);
+        // 半透明实体（符文盘 `$translucent`）：Source 里贴图 alpha 是填充衰减，
+        // 我们的 GLTF alpha 与贴图 alpha 相乘后仍然偏实（scout 实测盘面 meanL 比 Source
+        // 高 31%、盘内 L>200 像素多 6 倍），压一档让盘下的地面纹理透出来。
+        // 加色材质（`alch_symbols` 那类光晕）不加压：它们靠加色本身产生亮度。
+        if (clone.transparent && clone.blending !== THREE.AdditiveBlending) {
+          clone.opacity = Math.min(clone.opacity, ENTITY_TRANSLUCENT_OPACITY);
+        }
         clone.userData = { ...(clone.userData ?? {}), vbsp_render_color: rgb };
         return clone;
       };

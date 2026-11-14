@@ -1486,7 +1486,9 @@ function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.Mes
 		// Source 的 `$vertexalpha 1` 会让烟幕按顶点 alpha 淡出；我们的 BSP 导出还没有
 		// 顶点色的 alpha 通道，8 层位移面叠在一起会把柱心加到纯白。给一个统一的
 		// 整体不透明度近似那层淡出，避免「一堵白墙」。
-		dst.opacity = 0.16;
+		// 2026-11-15 按 scout 量测（远景观测盘内白像素 22.8% vs Source 6.7%）从 0.16 压到
+		// 0.10：0.16 时烟幕仍盖住符文盘中心，0.06~0.10 是建议区间。
+		dst.opacity = 0.10;
 	}
 	if (typeof s.polygonOffset === 'boolean') dst.polygonOffset = s.polygonOffset;
 	if (typeof s.polygonOffsetFactor === 'number') dst.polygonOffsetFactor = s.polygonOffsetFactor;

@@ -317,6 +317,11 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
             if material.additive {
                 ex.insert("vbsp_additive".into(), serde_json::json!(true));
             }
+            // `TextureScroll` proxy（UV 周期/秒，`[u, v]`）：Source 的滚动烟幕。
+            // 渲染端每帧把 `u*dt` / `v*dt` 累加到贴图 offset（`texture-scroll.ts`）。
+            if let Some([u, v]) = material.texture_scroll {
+                ex.insert("vbsp_texture_scroll".into(), serde_json::json!([u, v]));
+            }
             if let Some(cutoff) = material.alpha_test {
                 ex.insert("vbsp_alpha_test".into(), serde_json::json!(cutoff));
             }
