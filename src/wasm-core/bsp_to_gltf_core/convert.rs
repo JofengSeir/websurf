@@ -110,9 +110,9 @@ pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<E
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
     // 只处理地图结构，不处理模型
-    for (model, offset, tint) in bsp_models(&bsp)? {
+    for (model, offset, tint, rot) in bsp_models(&bsp)? {
         let tc_clone = texture_collector.clone();
-        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, tint, &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
+        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, tint, rot.as_ref(), &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
         root.nodes.push(node);
     }
 
@@ -202,9 +202,9 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
     // 1. 处理BSP结构
-    for (model, offset, tint) in bsp_models(&bsp)? {
+    for (model, offset, tint, rot) in bsp_models(&bsp)? {
         let tc_clone = texture_collector.clone();
-        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, tint, &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
+        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, tint, rot.as_ref(), &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
         root.nodes.push(node);
     }
 
@@ -918,41 +918,75 @@ pub fn map_coords<C: Into<[f32; 3]>>(vec: C) -> [f32; 3] {
     [vec[1], vec[2], vec[0]]
 }
 
+/// `momentary_rot_button` 的旋转参数：写进 GLB 节点 extras `vbsp_rot_button`，
+/// 渲染端据此把该模型的 mesh 从合并块里摘出来、挂到 pivot 上做旋转动画。
+///
+/// `id` 在「本次导出的旋钮实体」里递增且唯一：同一个实体的多个 primitive/mesh
+/// 共用同一个 `id`，渲染端按它分组。
+#[derive(Debug, Clone)]
+struct RotButtonExport {
+    id: usize,
+    /// `map_coords` 之后的世界坐标（= 旋转中心，three 的 Y 轴是 Source 的 Z 轴）。
+    origin: [f32; 3],
+    /// 角速度（度/秒）。
+    speed: f32,
+    /// 开到位需要转过的角度（度），符号表示方向。
+    distance: f32,
+    spawn_flags: u32,
+    target: Option<String>,
+    parent: Option<String>,
+}
+
 /// 收集要导出的模型及其世界偏移：brush 实体各一个，**世界模型排最后**（origin 取 `(0,0,0)`）。
 ///
-/// 只认四种 brush 实体（`Entity::Brush` / `BrushIllusionary` / `BrushWall` / `BrushWallToggle`），
-/// 其余实体一律跳过；模型的 `handle` 取自 `brush.model` 去掉首字符后的下标（`*1` 这类写法），
-/// 下标解析失败或越界时**静默丢弃该实例**（不报错）。
+/// 只认五种 brush 实体（`Entity::Brush` / `BrushIllusionary` / `BrushWall` / `BrushWallToggle`
+/// / `MomentaryRotButton`），其余实体一律跳过；模型的 `handle` 取自 `brush.model` 去掉首字符
+/// 后的下标（`*1` 这类写法），下标解析失败或越界时**静默丢弃该实例**（不报错）。
 ///
 /// 一个模型都没有（`bsp.models()` 为空）时报 `Error::Other("No world model")`。
-fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Model>, crate::vbsp::Vector, Option<[u8; 4]>)>, Error> {
+fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Model>, crate::vbsp::Vector, Option<[u8; 4]>, Option<RotButtonExport>)>, Error> {
     let world_model = bsp
         .models()
         .next()
         .ok_or(Error::Other("No world model".into()))?;
 
-    let mut models: Vec<_> = bsp
-        .entities
-        .iter()
-        .flat_map(|ent| ent.parse())
-        .filter_map(|ent| match ent {
+    let mut models = Vec::new();
+    let mut rot_index = 0usize;
+    for ent in bsp.entities.iter().flat_map(|ent| ent.parse()) {
+        match ent {
             Entity::Brush(ent)
             | Entity::BrushIllusionary(ent)
             | Entity::BrushWall(ent)
-            | Entity::BrushWallToggle(ent) => Some((ent, None)),
+            | Entity::BrushWallToggle(ent) => {
+                if let Some(model) = model_of(bsp, ent.model) {
+                    models.push((model, ent.origin, None, None));
+                }
+            }
             // `momentary_rot_button` 是带染色与旋转的 brush 实体（boreas 的符文盘就是
             // 5 个这样的实体）。它的 `rendercolor` 是 Source 的实体染色
             // （`rendermode 1` = kRenderTransColor，把颜色乘到贴图上），必须一路带到 GLB
             // 节点 extras：材质本身是白色 UnlitGeneric，不带染色就显示成白色符文线。
+            // 旋转参数同样要带走：`logic_auto` 在 OnMapSpawn 里给这类实体发
+            // `SetPosition 1`，地图意图是开图就让它们按 `speed` 转到 `distance`。
             Entity::MomentaryRotButton(ent) => {
-                let tint = Some([ent.color.r, ent.color.g, ent.color.b, 255]);
-                Some((ent, tint))
+                if let Some(model) = model_of(bsp, ent.model) {
+                    let tint = Some([ent.color.r, ent.color.g, ent.color.b, 255]);
+                    let rot = RotButtonExport {
+                        id: rot_index,
+                        origin: map_coords(ent.origin),
+                        speed: ent.speed.unwrap_or(0.0),
+                        distance: ent.distance.unwrap_or(0.0),
+                        spawn_flags: ent.spawn_flags,
+                        target: ent.target.map(str::to_owned),
+                        parent: ent.parent.map(str::to_owned),
+                    };
+                    rot_index += 1;
+                    models.push((model, ent.origin, tint, Some(rot)));
+                }
             }
-            _ => None,
-        })
-        .flat_map(|(brush, tint)| Some((brush.model[1..].parse::<usize>().ok()?, brush.origin, tint)))
-        .flat_map(|(index, origin, tint)| Some((bsp.models().nth(index)?, origin, tint)))
-        .collect();
+            _ => {}
+        }
+    }
     models.push((
         world_model,
         crate::vbsp::Vector {
@@ -962,9 +996,16 @@ fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Mod
         },
         // 世界模型没有实体染色（它的面颜色全部来自 lightmap 与材质本身）。
         None,
+        None,
     ));
 
     Ok(models)
+}
+
+/// 把实体里的 `"*N"` 模型引用解成 `Bsp.models` 的下标；空串/非 `*` 开头/越界都返回 `None`。
+fn model_of<'a>(bsp: &'a Bsp, model: &str) -> Option<crate::vbsp::Handle<'a, crate::vbsp::Model>> {
+    let index = model.strip_prefix('*')?.parse::<usize>().ok()?;
+    bsp.models().nth(index)
 }
 
 /// 把一个模型推成一个 GLB 节点：逐 face 生成 primitive（**只取 `face.is_visible()` 的面**），
@@ -982,6 +1023,9 @@ fn push_bsp_model_bsp(
     // 实体染色（`rendercolor`）。`Some` 时写进节点 extras `vbsp_render_color`，
     // 渲染端据此把颜色乘到该节点所有子 mesh 的材质上（Source `rendermode 1` 的语义）。
     tint: Option<[u8; 4]>,
+    // `momentary_rot_button` 的旋转参数。`Some` 时写进节点 extras `vbsp_rot_button`，
+    // 渲染端把该模型的 mesh 从合并块里摘出来挂到 pivot 上做旋转动画。
+    rot: Option<&RotButtonExport>,
     options: &ConvertOptions,
     missing_resources: &mut Vec<MissingResource>,
     texture_collector: Option<std::rc::Rc<std::cell::RefCell<crate::bsp_to_gltf_core::materials::TextureCollector>>>,
@@ -1019,15 +1063,36 @@ fn push_bsp_model_bsp(
     let mesh_index = gltf.meshes.len() as u32;
     gltf.meshes.push(mesh);
 
-    // 实体染色：写到节点 extras（不是材质 extras），因为染色是「这个实体」的属性，
+    // 实体 extras：染色写节点 extras（不是材质 extras），因为染色是「这个实体」的属性，
     // 而材质按贴图名去重、可能被世界面共用。渲染端在装配前把该节点的子 mesh 材质
-    // 克隆后乘色，染色不会污染共用材质。
-    let node_extras = tint.and_then(|[r, g, b, _a]| {
-        serde_json::value::RawValue::from_string(
-            format!(r#"{{"vbsp_render_color":[{},{},{}]}}"#, r, g, b),
-        )
-        .ok()
-    });
+    // 克隆后乘色，染色不会污染共用材质。旋转参数同理挂在节点上（渲染端按 id 分组、
+    // 把 mesh 从合并块里摘出来挂 pivot）。
+    let mut extra_fields: Vec<String> = Vec::new();
+    if let Some([r, g, b, _a]) = tint {
+        extra_fields.push(format!(r#""vbsp_render_color":[{},{},{}]"#, r, g, b));
+    }
+    if let Some(meta) = rot {
+        let mut rot_fields = format!(
+            r#""id":{},"origin":[{},{},{}],"speed":{},"distance":{},"spawnflags":{}"#,
+            meta.id, meta.origin[0], meta.origin[1], meta.origin[2], meta.speed, meta.distance, meta.spawn_flags,
+        );
+        if let Some(target) = &meta.target {
+            if let Ok(json) = serde_json::to_string(target) {
+                rot_fields.push_str(&format!(r#","targetname":{}"#, json));
+            }
+        }
+        if let Some(parent) = &meta.parent {
+            if let Ok(json) = serde_json::to_string(parent) {
+                rot_fields.push_str(&format!(r#","parentname":{}"#, json));
+            }
+        }
+        extra_fields.push(format!(r#""vbsp_rot_button":{{{}}}"#, rot_fields));
+    }
+    let node_extras = if extra_fields.is_empty() {
+        None
+    } else {
+        serde_json::value::RawValue::from_string(format!("{{{}}}", extra_fields.join(","))).ok()
+    };
 
     Node {
         camera: None,
@@ -1367,7 +1432,7 @@ fn apply_water_thickness(root: &mut Root, bsp: &Bsp) {
     // boreas 只有 197 一层 ⇒ 0。
     let mut layers: HashMap<String, BTreeSet<i32>> = HashMap::new();
     if let Ok(models) = bsp_models(bsp) {
-        for (model, _, _) in models {
+        for (model, _, _, _) in models {
             for face in model.faces() {
                 if !face.is_visible() {
                     continue;

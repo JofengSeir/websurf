@@ -72,6 +72,7 @@ import {
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import { subdivideVertexLit } from './vlight-subdivide.js';
 import { collectTextureScrolls, updateTextureScrolls, type TextureScrollEntry } from '../shader/texture-scroll.js';
+import { setupRotButtons, updateRotButtons, type RotButtonPivot } from './rot-buttons.js';
 import type { PoseScope } from '../camera/pose-entry.js';
 
 /** 三端标识（同时用于探针 `scope` 与日志前缀）。 */
@@ -202,6 +203,8 @@ export class RenderSession {
   private textureScrolls: TextureScrollEntry[] = [];
   /** 上一帧时间戳（毫秒）：给 `TextureScroll` 算 `dt`。 */
   private lastFrameAt = 0;
+  /** `momentary_rot_button` 实体（符文盘等）的 pivot；空 = 本图没有旋转实体。 */
+  private rotButtons: RotButtonPivot[] = [];
   /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `sortTransparentChunks`）。 */
   private transparentChunks: THREE.Mesh[] = [];
   private readonly transparentSortBox = new THREE.Box3();
@@ -339,6 +342,12 @@ export class RenderSession {
     // 之后每帧在 `frame()` 里推进（见 `shader/texture-scroll.ts`）。
     this.textureScrolls = collectTextureScrolls(asm.root);
     this.lastFrameAt = 0;
+    // Source `momentary_rot_button`（符文盘这类会转的 brush 实体）：装配时已在合并阶段被
+    // 保留下来（`rot-buttons.ts` 打标 + `mergeMain` 的 exclude），这里把它们挂到各自 pivot 上。
+    this.rotButtons = setupRotButtons(asm.root);
+    if (this.rotButtons.length > 0) {
+      console.info(`[${this.app}][rot] 旋转实体 ${this.rotButtons.length} 个 pivot`);
+    }
     // 诊断口：主根之外的可见 mesh（道具/实体）统计——PVS 只覆盖主根，这些不受它约束。
     (globalThis as { __vbspSceneStats?: unknown }).__vbspSceneStats = () => this.drawnChunkStats();
     // 诊断：Source `TextureScroll` 的收集结果与当前 offset（验证烟幕真的在滚）。
@@ -348,6 +357,16 @@ export class RenderSession {
         rate: entry.rate,
         offset: [+entry.map.offset.x.toFixed(4), +entry.map.offset.y.toFixed(4)],
         wrap: entry.map.wrapS,
+      }));
+    // 诊断：`momentary_rot_button` 的 pivot 清单与当前角度（验证符文盘真的在转）。
+    (globalThis as { __vbspRotButtons?: unknown }).__vbspRotButtons = () =>
+      this.rotButtons.map((entry) => ({
+        id: entry.meta.id,
+        speed: entry.meta.speed,
+        distance: entry.meta.distance,
+        angleDeg: +(entry.angle * (180 / Math.PI)).toFixed(2),
+        origin: entry.meta.origin.map((v) => +v.toFixed(1)),
+        pivot: entry.pivot.position.toArray().map((v) => +v.toFixed(1)),
       }));
     (globalThis as { __vbspChunkAudit?: unknown }).__vbspChunkAudit = (limit?: number) => this.chunkAudit(limit);
     // 诊断：块级并集泄漏量（逐三角形质心查 cluster，统计「画了但不可见」的比例）。
@@ -545,6 +564,8 @@ export class RenderSession {
   disposeScene(): void {
     // 滚动贴图是旧根的贴图对象，disposeScene 后不能再推进（会写已释放的贴图）。
     this.textureScrolls = [];
+    // pivot 是旧根的子树（mesh 已被 disposeObject 释放），清空引用即可。
+    this.rotButtons = [];
     this.lastFrameAt = 0;
     if (this.root) {
       disposeObject(this.root);
@@ -724,13 +745,14 @@ export class RenderSession {
       times[n] = +(now - tLast).toFixed(2);
       tLast = now;
     };
-    // Source `TextureScroll`：按真实时间推进 UV offset（烟幕以 0.25 周期/秒 滚动）。
-    // 放在可见性之前：滚动不影响剔除，但它要吃到本帧的 dt，越早算越准。
-    if (this.textureScrolls.length > 0) {
+    // Source `TextureScroll` / `momentary_rot_button`：按真实时间推进。
+    // 放在可见性之前：滚动/旋转不影响剔除，但它们要吃到本帧的 dt，越早算越准。
+    if (this.textureScrolls.length > 0 || this.rotButtons.length > 0) {
       const now = performance.now();
       const dt = this.lastFrameAt > 0 ? Math.min(0.1, (now - this.lastFrameAt) / 1000) : 0;
       this.lastFrameAt = now;
-      updateTextureScrolls(this.textureScrolls, dt);
+      if (this.textureScrolls.length > 0) updateTextureScrolls(this.textureScrolls, dt);
+      if (this.rotButtons.length > 0) updateRotButtons(this.rotButtons, dt);
     }
     if (opts.updateVisibility !== false) this.updateVisibility();
     mark('vis');
@@ -1484,7 +1506,13 @@ export class RenderSession {
     // 实测开阔路段 344~503 draw ⇒ 主遍 3~4.4ms，不透明桶砍半是能进 320fps 预算的杠杆。
     // 再往细分（160）反而更差：同机位 route1 t=7000 311fps / t=12000 309fps（256 是 314 / 316），
     // 因为单块三角形变多、视锥裁剪变粗 ⇒ 顶点着色与填充反而上涨。256 是这里的最优点。
-    const optRoot = mergeIntoNewRoot(root, { translucentSplit: this.translucentSplit, opaqueTargetCells: 256 });
+    // `exclude`：`momentary_rot_button`（符文盘）这类要单独挂 pivot 转的实体不并进块，
+    // 否则顶点被烘焙到世界空间后找不回模型边界（见 `rot-buttons.ts`）。
+    const optRoot = mergeIntoNewRoot(root, {
+      translucentSplit: this.translucentSplit,
+      opaqueTargetCells: 256,
+      exclude: (m) => Boolean((m.userData as { vbspRot?: unknown }).vbspRot),
+    });
     // 逐顶点烘焙的 prop 曲面（`s1_ramp1_b` / `s1_window01_1` 这类）在 merged chunk 上仍带
     // `_vbsp_vlight`；vhv 的条带采样不连续，Gouraud 会把跳变画成硬边（见 shader 侧
     // `smoothVertexLighting` 的说明）。放在合并之后：`applyLightmapToMeshes` 在建场景时

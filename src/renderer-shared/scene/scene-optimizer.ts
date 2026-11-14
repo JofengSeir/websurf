@@ -193,6 +193,14 @@ export interface MergeOptions {
    * 3~4.4ms，超过 320fps 的 3.12ms 预算；不透明块细分粒度减半能砍掉一半左右的 draw。
    */
   opaqueTargetCells?: number;
+  /**
+   * 排除谓词：返回 true 的 mesh 不进合并块，原样进入 `keptMeshes`（几何仍烘焙到世界
+   * 空间、变换清成单位阵，与多材质保留口径一致）。
+   *
+   * 用途：需要保留模型身份、之后还要单独做变换的对象——`momentary_rot_button` 的符文盘
+   * 就是这类（`rot-buttons.ts` 要把它们挂到 pivot 上转，合并掉就找不回模型边界了）。
+   */
+  exclude?: (mesh: THREE.Mesh) => boolean;
 }
 
 /** mergeIntoChunks 的产物：chunks / keptMeshes 由调用方自行挂载，统计字段供诊断日志用。 */
@@ -362,6 +370,21 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     const m = obj as THREE.Mesh;
     if (!m.isMesh) return;
     if (!m.geometry || !m.geometry.attributes.position) return;
+    // 需要保留模型身份的对象（旋钮/符文盘这类要单独做变换的实体）：烘焙到世界空间后
+    // 原样保留，不进合并块。口径与下面的多材质保留一致（顶点已在世界空间、变换清单位阵），
+    // 方便调用方之后按自身 pivot 重新挂载。
+    if (opts?.exclude?.(m)) {
+      const baked = m.geometry.clone();
+      baked.applyMatrix4(m.matrixWorld);
+      m.geometry.dispose();
+      m.geometry = baked;
+      m.position.set(0, 0, 0);
+      m.rotation.set(0, 0, 0);
+      m.scale.set(1, 1, 1);
+      m.updateMatrix();
+      keptMeshes.push(m);
+      return;
+    }
     if (Array.isArray(m.material) || !m.material) {
       // 多材质：烘焙到世界空间后整体保留（不参与分块合并）
       if (Array.isArray(m.material)) {

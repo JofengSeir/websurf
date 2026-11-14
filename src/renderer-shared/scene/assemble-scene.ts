@@ -21,6 +21,7 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { applyLightmap, buildMapScene } from './scene-builder.js';
 import { buildSpotBeams, type PunctualSpot } from './spot-beams.js';
 import { mergeIntoChunks, padBoundingSpheres } from './scene-optimizer.js';
+import { markRotButtons } from './rot-buttons.js';
 import { extractSkyArea, SKY_LAYER, type SkyCameraParams } from '../environment/miniature-sky.js';
 import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../shader/world-transition.js';
 import { applyBumpShaders, collectBumpTextures } from '../shader/bumpmap.js';
@@ -282,6 +283,15 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   const skyGroup = opts.skyCamera && skyCluster >= 0
     ? extractSkyArea(mapRoot, (m) => opts.meshInCluster(m, skyCluster))
     : null;
+
+  // 旋钮实体（`momentary_rot_button`，如符文盘）必须**在合并前**打标：合并会把顶点烘焙成
+  // 世界坐标、丢掉模型身份，之后就无法把整块盘面挂到 pivot 上转。打标后由各端 mergeMain
+  // 的 `exclude` 保留这些 mesh（见 `rot-buttons.ts`）。
+  const rotMarked = markRotButtons(mapRoot);
+  __mark('rotButtons');
+  if (rotMarked > 0) {
+    console.info(`[${opts.logPrefix}][rot] 旋转实体保留模型边界：${rotMarked} 个 mesh（合并时排除）`);
+  }
 
   const mergedRoot = opts.mergeMain?.(mapRoot, gltf);
   __mark('merge');

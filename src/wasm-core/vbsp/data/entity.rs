@@ -525,11 +525,11 @@ mod typed {
         #[serde(borrow)]
         BrushWallToggle(BrushEntity<'a>),
         /// 可旋转按钮/符文环：brush 实体，`model` 引用 BSP model（boreas 的符文盘
-        /// 就是这类实体的 `*1/*2/*3/*4/*5`）。复用 `BrushEntity`（它同样带
-        /// `rendercolor`），因此也能被 `bsp_models` 收集导出。
+        /// 就是这类实体的 `*1/*2/*3/*4/*5`）。载荷见 [`RotButton`]：除染色外还带
+        /// `speed` / `distance` / `spawnflags` / `parentname`，渲染端据此做旋转动画。
         #[serde(rename = "momentary_rot_button")]
         #[serde(borrow)]
-        MomentaryRotButton(BrushEntity<'a>),
+        MomentaryRotButton(RotButton<'a>),
         // 六个补给品 classname 共用两个只有 origin 的载荷类型：AmmoPack 与 HealthPack
         #[serde(rename = "item_ammopack_small")]
         AmmoPackSmall(AmmoPack),
@@ -862,6 +862,42 @@ mod typed {
         pub start_disabled: bool,
         #[serde(rename = "rendercolor")]
         pub color: Color,
+    }
+
+    /// `momentary_rot_button` 实体：会绕自身竖轴旋转的 brush 实体（boreas 的符文盘
+    /// 就是 5 个这样的实体：内盘 `*1` 反向慢转、外环 `*3` 带 3 根辐条 `*2/*4/*5`）。
+    ///
+    /// 与 [`BrushEntity`] 的唯一区别是多出旋转相关键；`rendercolor` 仍是必填（地图
+    /// 里这些实体都写了 `rendercolor`，缺键会让整条实体解析失败、模型被静默丢弃）。
+    ///
+    /// 语义（Source `CMomentaryRotButton`）：`distance` 是开到位需要转过的角度（度），
+    /// 带负号表示反向；`speed` 是角速度（度/秒）；`spawnflags` 位 `32` 表示 "Use
+    /// 打开"、位 `1` 表示 "Not solid"；`parentname` 的实体随父实体一起转。
+    #[derive(Debug, Clone, Deserialize)]
+    pub struct RotButton<'a> {
+        /// 形如 `"*12"` 的模型引用；首字符是 `*`，其余部分是 `Bsp.models` 的下标。
+        pub model: &'a str,
+        /// 世界坐标，同时是旋转的中心（pivot）。
+        pub origin: Vector,
+        #[serde(rename = "startdisabled", default)]
+        #[serde(deserialize_with = "bool_from_int")]
+        pub start_disabled: bool,
+        #[serde(rename = "rendercolor")]
+        pub color: Color,
+        /// 角速度（度/秒）；缺键时由调用方按 0 处理。
+        #[serde(rename = "speed", default)]
+        pub speed: Option<f32>,
+        /// 转过多少度算「开到位」，符号表示方向；缺键时按 0 处理。
+        #[serde(rename = "distance", default)]
+        pub distance: Option<f32>,
+        #[serde(rename = "spawnflags", default)]
+        pub spawn_flags: u32,
+        #[serde(rename = "targetname", default)]
+        pub target: Option<&'a str>,
+        /// 父实体名：子实体随父实体的旋转一起绕父的 pivot 公转（Source
+        /// `CBaseEntity::SetParent` 的 `SetParentAttachment` 口径）。
+        #[serde(rename = "parentname", default)]
+        pub parent: Option<&'a str>,
     }
 
     /// `env_lightglow` 实体：光晕的尺寸、颜色与可见距离。
