@@ -197,6 +197,41 @@ function tintTexturelessWater(root: THREE.Object3D): number {
   return n;
 }
 
+/**
+ * Source brush 实体的 `rendercolor`（`rendermode 1` = kRenderTransColor）：
+ * 导出侧把它写在 GLB 节点 extras `vbsp_render_color`（`[r,g,b]`，0–255）上，
+ * 这里乘到该节点所有子 mesh 的材质颜色上。
+ *
+ * 为什么必须克隆材质：GLB 材质按贴图名去重，符文盘的 `end_wiccan` 可能与别处
+ * 共用，直接改 `material.color` 会污染共用材质；克隆后只影响这个实体的面。
+ * 为什么必须早于 `applyLightmap()`：lightmap 会另建材质、不搬 `userData`，
+ * 等它跑完再染色就得重跑整条材质链。
+ */
+function applyEntityRenderColors(root: THREE.Object3D): number {
+  const tint = new THREE.Color();
+  let tinted = 0;
+  root.traverse((obj) => {
+    const rgb = (obj.userData as { vbsp_render_color?: number[] }).vbsp_render_color;
+    if (!Array.isArray(rgb) || rgb.length < 3) return;
+    // `rendercolor` 是 Source 里的 sRGB 颜色（`201 168 255`），按 sRGB 解释才是
+    // 玩家看到的那种紫。
+    tint.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+    obj.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.material) return;
+      const apply = (m: THREE.Material): THREE.Material => {
+        const clone = m.clone() as THREE.MeshBasicMaterial;
+        clone.color = clone.color.clone().multiply(tint);
+        clone.userData = { ...(clone.userData ?? {}), vbsp_render_color: rgb };
+        return clone;
+      };
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(apply) : apply(mesh.material);
+      tinted++;
+    });
+  });
+  return tinted;
+}
+
 export async function assembleScene(opts: AssembleSceneOptions): Promise<AssembleSceneResult> {
   const __t0 = performance.now();
   const __timings: Record<string, number> = {};
@@ -206,6 +241,11 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   };
   const { gltf, scene: mapRoot, bbox, maxDim } = await buildMapScene(opts.glb);
   __mark('buildMapScene');
+  const tintedEntities = applyEntityRenderColors(mapRoot);
+  __mark('entityColors');
+  if (tintedEntities > 0) {
+    console.info(`[${opts.logPrefix}][entity-color] 实体染色 ${tintedEntities} 个 mesh`);
+  }
   await collectWorldTransitionTextures(gltf, mapRoot);
   __mark('worldTransition');
   // `$bumpmap`（T-627/P8）登记必须同样早于 lightmap：lightmap 会另建材质、不搬 userData，

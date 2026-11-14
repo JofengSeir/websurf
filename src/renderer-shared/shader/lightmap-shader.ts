@@ -1483,6 +1483,10 @@ function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.Mes
 		dst.transparent = true;
 		dst.blending = THREE.AdditiveBlending;
 		dst.depthWrite = false;
+		// Source 的 `$vertexalpha 1` 会让烟幕按顶点 alpha 淡出；我们的 BSP 导出还没有
+		// 顶点色的 alpha 通道，8 层位移面叠在一起会把柱心加到纯白。给一个统一的
+		// 整体不透明度近似那层淡出，避免「一堵白墙」。
+		dst.opacity = 0.55;
 	}
 	if (typeof s.polygonOffset === 'boolean') dst.polygonOffset = s.polygonOffset;
 	if (typeof s.polygonOffsetFactor === 'number') dst.polygonOffsetFactor = s.polygonOffsetFactor;

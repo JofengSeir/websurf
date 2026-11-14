@@ -110,9 +110,9 @@ pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<E
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
     // 只处理地图结构，不处理模型
-    for (model, offset) in bsp_models(&bsp)? {
+    for (model, offset, tint) in bsp_models(&bsp)? {
         let tc_clone = texture_collector.clone();
-        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
+        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, tint, &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
         root.nodes.push(node);
     }
 
@@ -202,9 +202,9 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
     // 1. 处理BSP结构
-    for (model, offset) in bsp_models(&bsp)? {
+    for (model, offset, tint) in bsp_models(&bsp)? {
         let tc_clone = texture_collector.clone();
-        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
+        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, tint, &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
         root.nodes.push(node);
     }
 
@@ -925,7 +925,7 @@ pub fn map_coords<C: Into<[f32; 3]>>(vec: C) -> [f32; 3] {
 /// 下标解析失败或越界时**静默丢弃该实例**（不报错）。
 ///
 /// 一个模型都没有（`bsp.models()` 为空）时报 `Error::Other("No world model")`。
-fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Model>, crate::vbsp::Vector)>, Error> {
+fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Model>, crate::vbsp::Vector, Option<[u8; 4]>)>, Error> {
     let world_model = bsp
         .models()
         .next()
@@ -939,12 +939,19 @@ fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Mod
             Entity::Brush(ent)
             | Entity::BrushIllusionary(ent)
             | Entity::BrushWall(ent)
-            | Entity::BrushWallToggle(ent)
-            | Entity::MomentaryRotButton(ent) => Some(ent),
+            | Entity::BrushWallToggle(ent) => Some((ent, None)),
+            // `momentary_rot_button` 是带染色与旋转的 brush 实体（boreas 的符文盘就是
+            // 5 个这样的实体）。它的 `rendercolor` 是 Source 的实体染色
+            // （`rendermode 1` = kRenderTransColor，把颜色乘到贴图上），必须一路带到 GLB
+            // 节点 extras：材质本身是白色 UnlitGeneric，不带染色就显示成白色符文线。
+            Entity::MomentaryRotButton(ent) => {
+                let tint = Some([ent.color.r, ent.color.g, ent.color.b, 255]);
+                Some((ent, tint))
+            }
             _ => None,
         })
-        .flat_map(|brush| Some((brush.model[1..].parse::<usize>().ok()?, brush.origin)))
-        .flat_map(|(index, origin)| Some((bsp.models().nth(index)?, origin)))
+        .flat_map(|(brush, tint)| Some((brush.model[1..].parse::<usize>().ok()?, brush.origin, tint)))
+        .flat_map(|(index, origin, tint)| Some((bsp.models().nth(index)?, origin, tint)))
         .collect();
     models.push((
         world_model,
@@ -953,6 +960,8 @@ fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Mod
             y: 0.0,
             z: 0.0,
         },
+        // 世界模型没有实体染色（它的面颜色全部来自 lightmap 与材质本身）。
+        None,
     ));
 
     Ok(models)
@@ -970,6 +979,9 @@ fn push_bsp_model_bsp(
     bsp: &Bsp,
     model: &crate::vbsp::Handle<crate::vbsp::Model>,
     offset: crate::vbsp::Vector,
+    // 实体染色（`rendercolor`）。`Some` 时写进节点 extras `vbsp_render_color`，
+    // 渲染端据此把颜色乘到该节点所有子 mesh 的材质上（Source `rendermode 1` 的语义）。
+    tint: Option<[u8; 4]>,
     options: &ConvertOptions,
     missing_resources: &mut Vec<MissingResource>,
     texture_collector: Option<std::rc::Rc<std::cell::RefCell<crate::bsp_to_gltf_core::materials::TextureCollector>>>,
@@ -1007,11 +1019,21 @@ fn push_bsp_model_bsp(
     let mesh_index = gltf.meshes.len() as u32;
     gltf.meshes.push(mesh);
 
+    // 实体染色：写到节点 extras（不是材质 extras），因为染色是「这个实体」的属性，
+    // 而材质按贴图名去重、可能被世界面共用。渲染端在装配前把该节点的子 mesh 材质
+    // 克隆后乘色，染色不会污染共用材质。
+    let node_extras = tint.and_then(|[r, g, b, _a]| {
+        serde_json::value::RawValue::from_string(
+            format!(r#"{{"vbsp_render_color":[{},{},{}]}}"#, r, g, b),
+        )
+        .ok()
+    });
+
     Node {
         camera: None,
         children: None,
         extensions: Default::default(),
-        extras: Default::default(),
+        extras: node_extras,
         matrix: None,
         mesh: Some(Index::new(mesh_index)),
         name: Some("bsp".into()),
@@ -1345,7 +1367,7 @@ fn apply_water_thickness(root: &mut Root, bsp: &Bsp) {
     // boreas 只有 197 一层 ⇒ 0。
     let mut layers: HashMap<String, BTreeSet<i32>> = HashMap::new();
     if let Ok(models) = bsp_models(bsp) {
-        for (model, _) in models {
+        for (model, _, _) in models {
             for face in model.faces() {
                 if !face.is_visible() {
                     continue;
