@@ -54,6 +54,15 @@ const ENTRY_FILES = [
   'apps/debug/src/renderer/renderer-main.ts',
 ];
 
+/**
+ * 允许自带 `WebGLRenderer` 的**独立预览页**（不属于三端渲染入口）。
+ *
+ * `apps/debug/src/preview-particles.ts` 是 PCF 粒子的空白场景预览：它只实例化
+ * `ParticleSystems`，不装配地图、不加载 GLB，用途是脱离世界光照单独迭代粒子观感。
+ * 因此它不需要也不应该走 `RenderSession`；列为显式例外，避免门禁误报。
+ */
+const ALLOWED_FILES = new Set(['apps/debug/src/preview-particles.ts']);
+
 const SHARED_SESSION = 'src/renderer-shared/scene/render-session.ts';
 
 /** 保留行号的注释剥离（块注释里的换行保留，行号不漂）。 */
@@ -78,6 +87,8 @@ for (const app of ['apps/debug', 'apps/game', 'apps/viewer']) {
   const src = join(ROOT, app, 'src');
   if (!existsSync(src)) continue;
   for (const file of walk(src)) {
+    // Windows 下 `relative` 返回反斜杠，统一成 `/` 再与例外表比对。
+    if (ALLOWED_FILES.has(relative(ROOT, file).replace(/\\/g, '/'))) continue;
     const code = stripComments(readFileSync(file, 'utf8'));
     const lines = code.split('\n');
     for (const [needle, what] of FORBIDDEN) {

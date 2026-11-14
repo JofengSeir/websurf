@@ -1474,6 +1474,16 @@ function copyMaterialRenderState(src: THREE.Material | undefined, dst: THREE.Mes
 	if (dst.transparent) dst.depthWrite = false;
 	if (typeof s.depthTest === 'boolean') dst.depthTest = s.depthTest;
 	if (typeof s.blending === 'number') dst.blending = s.blending;
+	// `extras.vbsp_additive`（Source `$additive 1`）：加色混合，`dst = dst + src`。
+	// 典型用例 `project_tendies/tendies_endsmoke` 的烟幕面 —— 按普通 alpha 混合会画成
+	// 「一堵白墙」（boreas 光柱旁那根白柱），加色后才是柔和的假体积烟。
+	// three 的 `AdditiveBlending` 默认 `blendSrc = SrcAlpha`（与 Source 的
+	// `kRenderTransAdd` 一致），因此贴图 alpha 依然参与衰减。
+	if ((src.userData as { vbsp_additive?: boolean } | undefined)?.vbsp_additive) {
+		dst.transparent = true;
+		dst.blending = THREE.AdditiveBlending;
+		dst.depthWrite = false;
+	}
 	if (typeof s.polygonOffset === 'boolean') dst.polygonOffset = s.polygonOffset;
 	if (typeof s.polygonOffsetFactor === 'number') dst.polygonOffsetFactor = s.polygonOffsetFactor;
 	if (typeof s.polygonOffsetUnits === 'number') dst.polygonOffsetUnits = s.polygonOffsetUnits;

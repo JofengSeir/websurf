@@ -196,6 +196,11 @@ pub struct MaterialData {
     pub translucent: bool,
     /// 不做背面剔除（`vmt_parser` 的 `no_cull()`）→ glTF `double_sided`。
     pub no_cull: bool,
+    /// VMT 原文里的 `$additive 1`（`vmt_parser 0.2.1` 不解析这个键，只能自己扫文本）。
+    /// Source 里是加色混合（`dst = dst + src`），典型用例：`project_tendies/tendies_endsmoke`
+    /// 的烟幕面 —— 按普通 alpha 混合会画成「一堵白墙」。`push_material` 写进
+    /// `extras.vbsp_additive`，渲染端据此置 `THREE.AdditiveBlending`。
+    pub additive: bool,
     /// `$basetexture` 的 UV 变换；等于 `TextureTransform::default()` 时归 `None`。
     /// `push_material` 把其中的 `rotate` 由度转弧度。
     pub transform: Option<vmt_parser::TextureTransform>,
@@ -227,6 +232,7 @@ impl Default for MaterialData {
             alpha_test: None,
             translucent: false,
             no_cull: false,
+            additive: false,
             transform: None,
             wireframe: false, texture_absent: false, basetexture2: None, envmap_tint: None, water: None,
         }
@@ -430,6 +436,23 @@ fn parse_dollar_value<'a>(vdf: &'a str, lower: &str, key: &str) -> Option<&'a st
         None
     } else {
         Some(out)
+    }
+}
+
+/// 读一个 Source 风格的开关属性（`"$additive" "1"` / `"$vertexalpha" "1"`）：
+/// 值为空或 `"0"` 视为关闭，其余非空值视为开启。
+///
+/// 为什么单独写：`vmt_parser 0.2.1` 的 `UnlitGeneric` 不解析 `$additive` / `$vertexalpha`
+/// （它只认 `$translucent` / `$nocull` / `$alpha` / `$alphatest`），而这两个键正是
+/// 「烟幕/光晕」类材质与普通半透明面的区别所在。
+fn parse_dollar_flag(vdf: &str, key: &str) -> bool {
+    let lower = vdf.to_ascii_lowercase();
+    match parse_dollar_value(vdf, &lower, key) {
+        Some(v) => {
+            let v = v.trim();
+            !v.is_empty() && v != "0"
+        }
+        None => false,
     }
 }
 
@@ -915,6 +938,8 @@ pub(crate) fn load_material_bsp(
                 // `vmt_parser` 不认这个着色器 ⇒ 整条 typped 通路都走不到，
                 // 但 VMT 文本里写的 `$envmap` 仍然算数（否则这类玻璃一律零反射）。
                 envmap_tint: parse_dollar_envmap(&vdf, [1.0, 1.0, 1.0]),
+                // 加色混合（烟幕/光晕类 UnlitGeneric 常用）：文本扫描，`vmt_parser` 不解析。
+                additive: parse_dollar_flag(&vdf, "\"$additive\""),
                 ..MaterialData::default()
             });
         }
@@ -1111,6 +1136,10 @@ pub(crate) fn load_material_bsp(
         alpha_test,
         translucent: translucent | glass,
         no_cull: material.no_cull(),
+        // 加色混合：`vmt_parser 0.2.1` 的 UnlitGeneric 不解析 `$additive`，按原文扫。
+        // 典型用例 `project_tendies/tendies_endsmoke`：Source 里是加法滚动的烟幕，
+        // 按普通 alpha 混合会画成一堵白墙（boreas 光柱旁那根白柱）。
+        additive: parse_dollar_flag(&vdf, "\"$additive\""),
         transform,
         envmap_tint: parse_dollar_envmap(&vdf, [1.0, 1.0, 1.0]),
         wireframe: false,

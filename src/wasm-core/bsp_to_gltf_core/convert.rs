@@ -939,7 +939,8 @@ fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Mod
             Entity::Brush(ent)
             | Entity::BrushIllusionary(ent)
             | Entity::BrushWall(ent)
-            | Entity::BrushWallToggle(ent) => Some(ent),
+            | Entity::BrushWallToggle(ent)
+            | Entity::MomentaryRotButton(ent) => Some(ent),
             _ => None,
         })
         .flat_map(|brush| Some((brush.model[1..].parse::<usize>().ok()?, brush.origin)))

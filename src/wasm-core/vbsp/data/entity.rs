@@ -524,6 +524,12 @@ mod typed {
         #[serde(rename = "func_wall_toggle")]
         #[serde(borrow)]
         BrushWallToggle(BrushEntity<'a>),
+        /// 可旋转按钮/符文环：brush 实体，`model` 引用 BSP model（boreas 的符文盘
+        /// 就是这类实体的 `*1/*2/*3/*4/*5`）。复用 `BrushEntity`（它同样带
+        /// `rendercolor`），因此也能被 `bsp_models` 收集导出。
+        #[serde(rename = "momentary_rot_button")]
+        #[serde(borrow)]
+        MomentaryRotButton(BrushEntity<'a>),
         // 六个补给品 classname 共用两个只有 origin 的载荷类型：AmmoPack 与 HealthPack
         #[serde(rename = "item_ammopack_small")]
         AmmoPackSmall(AmmoPack),

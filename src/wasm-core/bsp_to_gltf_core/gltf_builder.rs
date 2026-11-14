@@ -298,6 +298,9 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
             || second_index.is_some()
             || material.translucent
             || material.alpha_test.is_some()
+            // 加色混合（`$additive`）：渲染端据此置 `THREE.AdditiveBlending`。
+            // 必须单独留标记 —— glTF 没有「加色」的 alphaMode，只能靠 extras 传。
+            || material.additive
             // 水面参数（$fogcolor / 扰动幅度 / $abovewater）：渲染端据此建折射 + 菲涅尔反射。
             || material.water.is_some()
         {
@@ -309,6 +312,10 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
             );
             if material.translucent {
                 ex.insert("vbsp_translucent".into(), serde_json::json!(true));
+            }
+            // `$additive`（加色混合）：`project_tendies/tendies_endsmoke` 这类烟幕/光晕面。
+            if material.additive {
+                ex.insert("vbsp_additive".into(), serde_json::json!(true));
             }
             if let Some(cutoff) = material.alpha_test {
                 ex.insert("vbsp_alpha_test".into(), serde_json::json!(cutoff));
