@@ -118,12 +118,17 @@ export async function applyLightmap(scene: THREE.Scene, gltf: GLTF): Promise<boo
   try {
     // atlas 在两种光照模式下都要加载：模式只是片元里的共享 uniform 分支（`vbspBakedMix`），
     // 纯纹理模式下若不带 atlas，面板切回预烘焙就得重建场景
+    const __m = (globalThis as { __vbspLoadTimings?: Record<string, number> }).__vbspLoadTimings;
+    const __t = performance.now();
     const atlas = await loadLightmapAtlas(gltf.parser, gltf);
+    if (__m) __m.atlasLoad = +(performance.now() - __t).toFixed(1);
     if (!atlas) {
       console.info('[lightmap] GLB 未携带 atlas（asset.extras.lightmap 缺失），跳过静态光照');
       return false;
     }
+    const __t2 = performance.now();
     const applied = applyLightmapToMeshes(scene, atlas);
+    if (__m) __m.applyToMeshes = +(performance.now() - __t2).toFixed(1);
     const image = atlas?.image as { width?: number; height?: number } | undefined;
     // 这里不做注入生效性统计：本函数在建场景时调用，three 还没编译材质，onBeforeCompile 尚未
     // 回填注入记录 ⇒ 统计只会得到全 0。统计放到首帧渲染之后，见 renderer-main 的 tick 里的

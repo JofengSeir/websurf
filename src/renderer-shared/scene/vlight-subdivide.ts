@@ -56,11 +56,26 @@ function resampleFromSparse(geom: THREE.BufferGeometry, sparse: SparseSample[], 
 
   const R = Math.max(RESAMPLE_RADIUS_MIN, edge * RESAMPLE_EDGE_SCALE);
   const invR = 1 / R;
-  const cells = new Map<string, SparseSample[]>();
-  const keyOf = (x: number, y: number, z: number): string =>
-    `${Math.floor(x * invR)},${Math.floor(y * invR)},${Math.floor(z * invR)}`;
-  for (const s of sparse) {
-    const k = keyOf(s.x, s.y, s.z);
+  // 位置分桶用数字键（每顶点要查 27 个格子，字符串拼接在大网格上很贵）。
+  const cellKey = (gx: number, gy: number, gz: number): number =>
+    (gx + 2048) * 4194304 + (gy + 2048) * 2048 + (gz + 2048);
+  const sx = new Float32Array(sparse.length);
+  const sy = new Float32Array(sparse.length);
+  const sz = new Float32Array(sparse.length);
+  const sr = new Float32Array(sparse.length);
+  const sg = new Float32Array(sparse.length);
+  const sb = new Float32Array(sparse.length);
+  for (let s = 0; s < sparse.length; s++) {
+    sx[s] = sparse[s].x;
+    sy[s] = sparse[s].y;
+    sz[s] = sparse[s].z;
+    sr[s] = sparse[s].r;
+    sg[s] = sparse[s].g;
+    sb[s] = sparse[s].b;
+  }
+  const cells = new Map<number, number[]>();
+  for (let s = 0; s < sparse.length; s++) {
+    const k = cellKey(Math.floor(sx[s] * invR), Math.floor(sy[s] * invR), Math.floor(sz[s] * invR));
     let arr = cells.get(k);
     if (!arr) {
       arr = [];
@@ -84,16 +99,17 @@ function resampleFromSparse(geom: THREE.BufferGeometry, sparse: SparseSample[], 
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         for (let dz = -1; dz <= 1; dz++) {
-          const arr = cells.get(`${cx + dx},${cy + dy},${cz + dz}`);
+          const arr = cells.get(cellKey(cx + dx, cy + dy, cz + dz));
           if (!arr) continue;
-          for (const s of arr) {
-            const d2 = (s.x - x) ** 2 + (s.y - y) ** 2 + (s.z - z) ** 2;
+          for (let t = 0; t < arr.length; t++) {
+            const s = arr[t];
+            const d2 = (sx[s] - x) ** 2 + (sy[s] - y) ** 2 + (sz[s] - z) ** 2;
             const d = Math.sqrt(d2);
             if (d >= R) continue;
             const w = (1 - d * invR) ** 2;
-            wr += s.r * w;
-            wg += s.g * w;
-            wb += s.b * w;
+            wr += sr[s] * w;
+            wg += sg[s] * w;
+            wb += sb[s] * w;
             wsum += w;
           }
         }

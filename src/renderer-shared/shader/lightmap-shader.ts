@@ -229,66 +229,145 @@ export function smoothVertexLighting(geom: THREE.BufferGeometry): number {
 	const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
 	if (!attr || !pos) return 0;
 	const n = pos.count;
+	if (n < 2) return 0;
 	const r = VLIGHT_SMOOTH_RADIUS;
 	const r2 = r * r;
-	// 位置不变 ⇒ 网格只建一次，两遍平滑复用。
-	const grid = new Map<string, number[]>();
+
+	// 1) 位置焊接：法线分裂会让同一位置出现 2~4 份顶点，平滑只需按位置算一次，
+	//    写完再投影回所有副本——大 prop 的顶点数能直接砍掉一多半。
+	const weld = new Map<string, number>();
+	const rep = new Int32Array(n);
+	const ux: number[] = [];
+	const uy: number[] = [];
+	const uz: number[] = [];
 	for (let i = 0; i < n; i++) {
-		const k =
-			Math.floor(pos.getX(i) / r) + ',' + Math.floor(pos.getY(i) / r) + ',' + Math.floor(pos.getZ(i) / r);
-		const list = grid.get(k);
-		if (list) list.push(i);
-		else grid.set(k, [i]);
+		const x = pos.getX(i);
+		const y = pos.getY(i);
+		const z = pos.getZ(i);
+		const k = Math.round(x * 100) + ',' + Math.round(y * 100) + ',' + Math.round(z * 100);
+		let u = weld.get(k);
+		if (u === undefined) {
+			u = ux.length;
+			weld.set(k, u);
+			ux.push(x);
+			uy.push(y);
+			uz.push(z);
+		}
+		rep[i] = u;
 	}
-	const out = new Float32Array(n * 3);
-	let changed = 0;
-	for (let pass = 0; pass < VLIGHT_SMOOTH_PASSES; pass++) {
-		changed = 0;
-		for (let i = 0; i < n; i++) {
-			const xi = pos.getX(i);
-			const yi = pos.getY(i);
-			const zi = pos.getZ(i);
-			const gx = Math.floor(xi / r);
-			const gy = Math.floor(yi / r);
-			const gz = Math.floor(zi / r);
-			let wsum = 1;
-			let cr = attr.getX(i);
-			let cg = attr.getY(i);
-			let cb = attr.getZ(i);
-			for (let dx = -1; dx <= 1; dx++) {
-				for (let dy = -1; dy <= 1; dy++) {
-					for (let dz = -1; dz <= 1; dz++) {
-						const list = grid.get(gx + dx + ',' + (gy + dy) + ',' + (gz + dz));
-						if (!list) continue;
-						for (const j of list) {
-							if (j === i) continue;
-							const ddx = pos.getX(j) - xi;
-							const ddy = pos.getY(j) - yi;
-							const ddz = pos.getZ(j) - zi;
-							const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
-							if (d2 >= r2) continue;
-							const w = 1 - Math.sqrt(d2) / r;
-							wsum += w;
-							cr += w * attr.getX(j);
-							cg += w * attr.getY(j);
-							cb += w * attr.getZ(j);
-						}
+	const m = ux.length;
+	// 性能护栏：这只是渲染期的观感修补，单块超过 8 万个独立位置时跳过，
+	// 免得把地图加载拖成几十秒（boreas 的个别大 prop 会命中）。
+	if (m > 80000) return 0;
+
+	// 2) 空间桶（数字键，避免每遍几十万次字符串拼接）
+	const key = (gx: number, gy: number, gz: number): number =>
+		(gx + 1024) * 4194304 + (gy + 1024) * 2048 + (gz + 1024);
+	const cellOf = (v: number): number => Math.floor(v / r);
+	const grid = new Map<number, number[]>();
+	for (let u = 0; u < m; u++) {
+		const k = key(cellOf(ux[u]), cellOf(uy[u]), cellOf(uz[u]));
+		const list = grid.get(k);
+		if (list) list.push(u);
+		else grid.set(k, [u]);
+	}
+
+	// 3) 邻接表（CSR）：先计数，再填。权重只算一次，后面每遍都是纯乘法。
+	const start = new Int32Array(m + 1);
+	for (let u = 0; u < m; u++) {
+		const gx = cellOf(ux[u]);
+		const gy = cellOf(uy[u]);
+		const gz = cellOf(uz[u]);
+		let c = 0;
+		for (let dx = -1; dx <= 1; dx++) {
+			for (let dy = -1; dy <= 1; dy++) {
+				for (let dz = -1; dz <= 1; dz++) {
+					const list = grid.get(key(gx + dx, gy + dy, gz + dz));
+					if (!list) continue;
+					for (let t = 0; t < list.length; t++) {
+						const v = list[t];
+						if (v === u) continue;
+						const ddx = ux[v] - ux[u];
+						const ddy = uy[v] - uy[u];
+						const ddz = uz[v] - uz[u];
+						if (ddx * ddx + ddy * ddy + ddz * ddz < r2) c++;
 					}
 				}
 			}
-			out[i * 3] = cr / wsum;
-			out[i * 3 + 1] = cg / wsum;
-			out[i * 3 + 2] = cb / wsum;
-			if (
-				Math.abs(out[i * 3] - attr.getX(i)) +
-					Math.abs(out[i * 3 + 1] - attr.getY(i)) +
-					Math.abs(out[i * 3 + 2] - attr.getZ(i)) >
-				0.004
-			) {
-				changed++;
+		}
+		start[u + 1] = start[u] + c;
+	}
+	const total = start[m];
+	const nbr = new Int32Array(total);
+	const wgt = new Float32Array(total);
+	const fill = new Int32Array(m);
+	for (let u = 0; u < m; u++) {
+		const gx = cellOf(ux[u]);
+		const gy = cellOf(uy[u]);
+		const gz = cellOf(uz[u]);
+		let p = start[u];
+		for (let dx = -1; dx <= 1; dx++) {
+			for (let dy = -1; dy <= 1; dy++) {
+				for (let dz = -1; dz <= 1; dz++) {
+					const list = grid.get(key(gx + dx, gy + dy, gz + dz));
+					if (!list) continue;
+					for (let t = 0; t < list.length; t++) {
+						const v = list[t];
+						if (v === u) continue;
+						const ddx = ux[v] - ux[u];
+						const ddy = uy[v] - uy[u];
+						const ddz = uz[v] - uz[u];
+						const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
+						if (d2 >= r2) continue;
+						nbr[p] = v;
+						wgt[p] = 1 - Math.sqrt(d2) / r;
+						p++;
+					}
+				}
 			}
 		}
-		for (let i = 0; i < n; i++) attr.setXYZ(i, out[i * 3], out[i * 3 + 1], out[i * 3 + 2]);
+		fill[u] = p;
+	}
+
+	// 4) 逐遍平滑（双缓冲，纯 typed array 读写）
+	let src = new Float32Array(m * 3);
+	for (let u = 0; u < m; u++) {
+		src[u * 3] = attr.getX(u);
+	}
+	let dst = new Float32Array(m * 3);
+	for (let pass = 0; pass < VLIGHT_SMOOTH_PASSES; pass++) {
+		for (let u = 0; u < m; u++) {
+			let w = 1;
+			let cr = src[u * 3];
+			let cg = src[u * 3 + 1];
+			let cb = src[u * 3 + 2];
+			for (let p = start[u]; p < fill[u]; p++) {
+				const v = nbr[p];
+				const ww = wgt[p];
+				w += ww;
+				cr += ww * src[v * 3];
+				cg += ww * src[v * 3 + 1];
+				cb += ww * src[v * 3 + 2];
+			}
+			dst[u * 3] = cr / w;
+			dst[u * 3 + 1] = cg / w;
+			dst[u * 3 + 2] = cb / w;
+		}
+		const t = src;
+		src = dst;
+		dst = t;
+	}
+	let changed = 0;
+	// 收口：把平滑后的唯一值写回属性
+	for (let i = 0; i < n; i++) {
+		const u = rep[i];
+		if (
+			Math.abs(src[u * 3] - attr.getX(i)) +
+			Math.abs(src[u * 3 + 1] - attr.getY(i)) +
+			Math.abs(src[u * 3 + 2] - attr.getZ(i)) > 0.004) {
+			changed++;
+		}
+		attr.setXYZ(i, src[u * 3], src[u * 3 + 1], src[u * 3 + 2]);
 	}
 	if (changed > 0) attr.needsUpdate = true;
 	return changed;
@@ -960,7 +1039,8 @@ export function applyLightmapToMeshes(
 
 		// 第 1 级逐顶点烘焙：先消掉条带之间的光照跳变（否则 Gouraud 会画成硬边）。
 		// 只对带该属性的几何生效；无属性时零开销。
-		if (hasVertexLightingAttr(mesh)) smoothVertexLighting(geom);
+		// 逐顶点光照去接缝统一在**合并之后**做（见 render-session 的 mergeMain）：
+		// 这里每 mesh 跑一遍会在载图时重复一遍同样的计算（boreas 实测多花十几秒）。
 
 		// `extras.hasLightmap === false` 表示该图元只有中性占位 UV，不得施加 lightmap。
 		//

@@ -198,14 +198,24 @@ function tintTexturelessWater(root: THREE.Object3D): number {
 }
 
 export async function assembleScene(opts: AssembleSceneOptions): Promise<AssembleSceneResult> {
+  const __t0 = performance.now();
+  const __timings: Record<string, number> = {};
+  (globalThis as { __vbspLoadTimings?: Record<string, number> }).__vbspLoadTimings = __timings;
+  const __mark = (name: string): void => {
+    __timings[name] = +(performance.now() - __t0).toFixed(1);
+  };
   const { gltf, scene: mapRoot, bbox, maxDim } = await buildMapScene(opts.glb);
+  __mark('buildMapScene');
   await collectWorldTransitionTextures(gltf, mapRoot);
+  __mark('worldTransition');
   // `$bumpmap`（T-627/P8）登记必须同样早于 lightmap：lightmap 会另建材质、不搬 userData，
   // 但第一贴图实例被沿用（注册表以它为键），所以要在建材质之前把贴图实例取到手。
   await collectBumpTextures(gltf, mapRoot);
+  __mark('bumpTextures');
   opts.onRootReady?.(mapRoot, gltf);
 
   const applied = await applyLightmap(mapRoot, gltf);
+  __mark('lightmap');
   if (!applied) {
     console.info('[' + opts.logPrefix + '][lightmap] 未施加静态光照（无 atlas 或施加失败），地图为贴图原色');
   }
@@ -218,6 +228,7 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
     : null;
 
   const mergedRoot = opts.mergeMain?.(mapRoot, gltf);
+  __mark('merge');
   const root = mergedRoot ?? mapRoot;
 
   if (skyGroup) {
@@ -245,6 +256,7 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   if (seededRiver > 0) console.info('[' + opts.logPrefix + '][water] 河道补水面参数：' + seededRiver + ' 槽');
   // 反射扰动注入必须在**合并之后**：合并按材质实例分组，早注入会漏掉合并新建的实例。
   applyBumpShaders(root);
+  __mark('shaders');
   let skyConverged = 0;
   if (skyGroup) {
     skyConverged = fullbrightUnlitLitMaterials(skyGroup);
@@ -262,5 +274,6 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   }
   // 合并**之后**才建可见光柱：它属于「运行时效果」，不能参与块合并。
   const spotBeams = buildSpotBeams((mapRoot.userData.punctualSpots as PunctualSpot[] | undefined) ?? [], root);
+  __mark('spotBeams');
   return { gltf, root, bbox, maxDim, skyGroup, skyCluster, applied, converged, skyConverged, spotBeams };
 }
