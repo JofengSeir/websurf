@@ -55,6 +55,7 @@ import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
 import type { LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
+import { ParticleSystems, collectParticleEntities } from '../../../../src/renderer-shared/scene/particles.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」
@@ -196,6 +197,10 @@ export class RendererMain {
   // ── Source 实体运行期 ────────────────────────────────────────
   /** 由 `entityIoJson` 装配的通用 I/O / trigger / logic 系统；`tick` 与物理同帧推进。 */
   private entitySystem: EntitySystem | null = null;
+  /** PCF 粒子系统的 three.js 最小实现（`src/renderer-shared/scene/particles.ts`）；无粒子实体时为 null。 */
+  private particleSystems: ParticleSystems | null = null;
+  /** 粒子推进用的上一帧墙钟（与物理步长独立，物理停走时粒子仍动）。 */
+  private particleLastMs = 0;
 
   // ── 主线程物理线（渲染直读 state()，无插值副本）──
   /** 渲染物理实例：`buildPredictionWorld` 里构造并 `build_world`，`disposeScene` 置空。 */
@@ -390,6 +395,9 @@ export class RendererMain {
   disposeScene(): void {
     this.entitySystem?.dispose();
     this.entitySystem = null;
+    this.particleSystems?.dispose();
+    this.particleSystems = null;
+    this.particleLastMs = 0;
     // 渲染资源（根/天空/环境/渲染列表/PVS/可见性）全部由共享会话释放
     this.session?.disposeScene();
     this.bspModelScene = null;
@@ -495,6 +503,7 @@ export class RendererMain {
     this.needsRender = true;
     this.onSceneLoaded?.(result.bbox.min.y);
     this.setupEntitySystem(data.entityIoJson);
+    this.setupParticleSystems(data.entityIoJson);
     this.emitCullStats();
     return {
       diagonal: result.diagonal,
@@ -516,6 +525,27 @@ export class RendererMain {
       ),
       onEvent: (event) => this.onEntityEvent?.(event),
     });
+  }
+
+  /**
+   * 装配 PCF 粒子（最小 three.js 实现，见 `src/renderer-shared/scene/particles.ts`）：
+   * 只处理 `info_particle_system` 实体里有可视化配置的效果；没有可渲染效果时不建组、不挂场景（零开销）。
+   */
+  private setupParticleSystems(entityIoJson?: string): void {
+    this.particleSystems?.dispose();
+    this.particleSystems = null;
+    this.particleLastMs = 0;
+    if (!this.scene) return;
+    const entities = collectParticleEntities(entityIoJson);
+    if (entities.length === 0) return;
+    const systems = new ParticleSystems(entities);
+    if (systems.root.children.length === 0) {
+      systems.dispose();
+      return;
+    }
+    this.particleSystems = systems;
+    this.scene.add(systems.root);
+    (globalThis as Record<string, unknown>)['__vbspParticles'] = systems;
   }
 
   /** 实体运行期统计（实体浏览器 / 诊断面板）；未装配返回 null。 */
@@ -659,6 +689,16 @@ export class RendererMain {
       }
     } else if (this.lastPlaneInfo !== null) {
       this.lastPlaneInfo = null;
+    }
+
+    // ④-2 PCF 粒子：按墙钟推进（物理停走时仍动），纹理滚动/辉光呼吸在 `update` 内。
+    if (this.particleSystems) {
+      const pdt = this.particleLastMs === 0 ? 1 / 64 : Math.min((now - this.particleLastMs) / 1000, 0.1);
+      this.particleLastMs = now;
+      this.particleSystems.update(pdt);
+      this.needsRender = true;
+    } else {
+      this.particleLastMs = 0;
     }
 
     // ⑤ 渲染：物理就绪后每帧都渲染；needsRender 只用于物理未就绪时的强制刷新。
