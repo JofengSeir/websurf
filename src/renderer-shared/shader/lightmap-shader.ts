@@ -240,6 +240,8 @@ export function smoothVertexLighting(geom: THREE.BufferGeometry): number {
 	const ux: number[] = [];
 	const uy: number[] = [];
 	const uz: number[] = [];
+	// 每个唯一位置的代表顶点：颜色要从它身上取，不能拿唯一位置下标当顶点下标用。
+	const firstVertex: number[] = [];
 	for (let i = 0; i < n; i++) {
 		const x = pos.getX(i);
 		const y = pos.getY(i);
@@ -252,6 +254,7 @@ export function smoothVertexLighting(geom: THREE.BufferGeometry): number {
 			ux.push(x);
 			uy.push(y);
 			uz.push(z);
+			firstVertex.push(i);
 		}
 		rep[i] = u;
 	}
@@ -272,82 +275,54 @@ export function smoothVertexLighting(geom: THREE.BufferGeometry): number {
 		else grid.set(k, [u]);
 	}
 
-	// 3) 邻接表（CSR）：先计数，再填。权重只算一次，后面每遍都是纯乘法。
-	const start = new Int32Array(m + 1);
-	for (let u = 0; u < m; u++) {
-		const gx = cellOf(ux[u]);
-		const gy = cellOf(uy[u]);
-		const gz = cellOf(uz[u]);
-		let c = 0;
-		for (let dx = -1; dx <= 1; dx++) {
-			for (let dy = -1; dy <= 1; dy++) {
-				for (let dz = -1; dz <= 1; dz++) {
-					const list = grid.get(key(gx + dx, gy + dy, gz + dz));
-					if (!list) continue;
-					for (let t = 0; t < list.length; t++) {
-						const v = list[t];
-						if (v === u) continue;
-						const ddx = ux[v] - ux[u];
-						const ddy = uy[v] - uy[u];
-						const ddz = uz[v] - uz[u];
-						if (ddx * ddx + ddy * ddy + ddz * ddz < r2) c++;
-					}
-				}
-			}
-		}
-		start[u + 1] = start[u] + c;
-	}
-	const total = start[m];
-	const nbr = new Int32Array(total);
-	const wgt = new Float32Array(total);
-	const fill = new Int32Array(m);
-	for (let u = 0; u < m; u++) {
-		const gx = cellOf(ux[u]);
-		const gy = cellOf(uy[u]);
-		const gz = cellOf(uz[u]);
-		let p = start[u];
-		for (let dx = -1; dx <= 1; dx++) {
-			for (let dy = -1; dy <= 1; dy++) {
-				for (let dz = -1; dz <= 1; dz++) {
-					const list = grid.get(key(gx + dx, gy + dy, gz + dz));
-					if (!list) continue;
-					for (let t = 0; t < list.length; t++) {
-						const v = list[t];
-						if (v === u) continue;
-						const ddx = ux[v] - ux[u];
-						const ddy = uy[v] - uy[u];
-						const ddz = uz[v] - uz[u];
-						const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
-						if (d2 >= r2) continue;
-						nbr[p] = v;
-						wgt[p] = 1 - Math.sqrt(d2) / r;
-						p++;
-					}
-				}
-			}
-		}
-		fill[u] = p;
-	}
-
-	// 4) 逐遍平滑（双缓冲，纯 typed array 读写）
+	// 3) 逐遍平滑：每顶点最多取 MAX_NEIGHBORS 个邻居（双缓冲 typed array）。
+	//    邻居上限是硬要求——boreas 的密集岩石网格里，几万个唯一位置可能两两都落在半径内，
+	//    不限量建邻接表会把主线程卡死（曾把载图跑成无限等待）。
+	const MAX_NEIGHBORS = 128;
 	let src = new Float32Array(m * 3);
 	for (let u = 0; u < m; u++) {
-		src[u * 3] = attr.getX(u);
+		const i = firstVertex[u];
+		src[u * 3] = attr.getX(i);
+		src[u * 3 + 1] = attr.getY(i);
+		src[u * 3 + 2] = attr.getZ(i);
 	}
 	let dst = new Float32Array(m * 3);
+	const t0 = performance.now();
 	for (let pass = 0; pass < VLIGHT_SMOOTH_PASSES; pass++) {
 		for (let u = 0; u < m; u++) {
 			let w = 1;
 			let cr = src[u * 3];
 			let cg = src[u * 3 + 1];
 			let cb = src[u * 3 + 2];
-			for (let p = start[u]; p < fill[u]; p++) {
-				const v = nbr[p];
-				const ww = wgt[p];
-				w += ww;
-				cr += ww * src[v * 3];
-				cg += ww * src[v * 3 + 1];
-				cb += ww * src[v * 3 + 2];
+			let taken = 0;
+			const x = ux[u];
+			const y = uy[u];
+			const z = uz[u];
+			const gx = cellOf(x);
+			const gy = cellOf(y);
+			const gz = cellOf(z);
+			gather: for (let dx = -1; dx <= 1; dx++) {
+				for (let dy = -1; dy <= 1; dy++) {
+					for (let dz = -1; dz <= 1; dz++) {
+						const list = grid.get(key(gx + dx, gy + dy, gz + dz));
+						if (!list) continue;
+						for (let t = 0; t < list.length; t++) {
+							const v = list[t];
+							if (v === u) continue;
+							const ddx = ux[v] - x;
+							const ddy = uy[v] - y;
+							const ddz = uz[v] - z;
+							const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
+							if (d2 >= r2) continue;
+							const ww = 1 - Math.sqrt(d2) / r;
+							w += ww;
+							cr += ww * src[v * 3];
+							cg += ww * src[v * 3 + 1];
+							cb += ww * src[v * 3 + 2];
+							if (++taken >= MAX_NEIGHBORS) break gather;
+						}
+					}
+				}
 			}
 			dst[u * 3] = cr / w;
 			dst[u * 3 + 1] = cg / w;
@@ -356,6 +331,8 @@ export function smoothVertexLighting(geom: THREE.BufferGeometry): number {
 		const t = src;
 		src = dst;
 		dst = t;
+		// 观感修补不该把载图拖成几十秒：单块预算 80ms，超了就停在这一遍的结果上。
+		if (performance.now() - t0 > 80) break;
 	}
 	let changed = 0;
 	// 收口：把平滑后的唯一值写回属性
