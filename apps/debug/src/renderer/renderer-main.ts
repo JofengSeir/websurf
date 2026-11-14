@@ -695,7 +695,7 @@ export class RendererMain {
     if (this.particleSystems) {
       const pdt = this.particleLastMs === 0 ? 1 / 64 : Math.min((now - this.particleLastMs) / 1000, 0.1);
       this.particleLastMs = now;
-      this.particleSystems.update(pdt);
+      this.particleSystems.update(pdt, this.camera);
       this.needsRender = true;
     } else {
       this.particleLastMs = 0;
