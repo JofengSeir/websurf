@@ -360,6 +360,8 @@ const ENVMAP_MODULATED = (termExpr: string): string =>
 // 法线取片元导数叉积（世界材质是 MeshBasicMaterial，几何上没有 normal 属性，合并块也没有），
 // 用 `abs(dot)` 双面接受——墙面/薄板不会因为朝向判反而丢掉光。
 const SPOT_MAX = 8;
+/** 起源 `point_spotlight` 命中点会额外分配一盏 dlight（宽而软的光斑），最多同时 2 盏。 */
+const DLIGHT_MAX = 2;
 
 const spotUniforms = {
 	vbspSpotCount: { value: 0 },
@@ -369,8 +371,24 @@ const spotUniforms = {
 	vbspSpotRange: { value: new Float32Array(SPOT_MAX) },
 	vbspSpotCosOuter: { value: new Float32Array(SPOT_MAX) },
 	vbspSpotCosInner: { value: new Float32Array(SPOT_MAX) },
-	vbspSpotScale: { value: 0.0025 },
+	vbspSpotScale: { value: 0.0010 },
+	vbspDLightCount: { value: 0 },
+	vbspDLightPos: { value: Array.from({ length: DLIGHT_MAX }, () => new THREE.Vector3()) },
+	vbspDLightColor: { value: Array.from({ length: DLIGHT_MAX }, () => new THREE.Color(0, 0, 0)) },
+	vbspDLightRange: { value: new Float32Array(DLIGHT_MAX) },
+	vbspDLightScale: { value: 0.35 },
 };
+
+/**
+ * 诊断用：直接改 spot 直接光的全局强度（0 = 关闭）。
+ * 供页面里做「开灯 / 关灯」的 A/B 截图，不参与正式逻辑。
+ */
+export function setSpotScale(v: number): void {
+	spotUniforms.vbspSpotScale.value = v;
+}
+if (typeof window !== 'undefined') {
+	(window as unknown as { __vbspSetSpotScale?: (v: number) => void }).__vbspSetSpotScale = setSpotScale;
+}
 
 /** 供渲染端每帧/每次可见性更新时调用：填入离相机最近的 spot。 */
 export interface SpotLightInput {
@@ -402,6 +420,24 @@ export function setSpotLights(list: SpotLightInput[]): void {
 	spotUniforms.vbspSpotCount.value = n;
 }
 
+/** 供渲染端：填入 `point_spotlight` 命中点的 dlight（宽而软的光斑）。 */
+export interface DLightInput {
+	position: [number, number, number];
+	color: [number, number, number];
+	range: number;
+}
+
+export function setDLights(list: DLightInput[]): void {
+	const n = Math.min(DLIGHT_MAX, list.length);
+	for (let i = 0; i < n; i++) {
+		const d = list[i];
+		spotUniforms.vbspDLightPos.value[i].set(d.position[0], d.position[1], d.position[2]);
+		spotUniforms.vbspDLightColor.value[i].setRGB(d.color[0], d.color[1], d.color[2]);
+		spotUniforms.vbspDLightRange.value[i] = d.range;
+	}
+	spotUniforms.vbspDLightCount.value = n;
+}
+
 const SPOT_FRAG_DECLS = `
 uniform int vbspSpotCount;
 uniform vec3 vbspSpotPos[${SPOT_MAX}];
@@ -411,6 +447,11 @@ uniform float vbspSpotRange[${SPOT_MAX}];
 uniform float vbspSpotCosOuter[${SPOT_MAX}];
 uniform float vbspSpotCosInner[${SPOT_MAX}];
 uniform float vbspSpotScale;
+uniform int vbspDLightCount;
+uniform vec3 vbspDLightPos[${DLIGHT_MAX}];
+uniform vec3 vbspDLightColor[${DLIGHT_MAX}];
+uniform float vbspDLightRange[${DLIGHT_MAX}];
+uniform float vbspDLightScale;
 varying vec3 vbspSpotWPos;
 
 vec3 vbspSpotLight(vec3 P) {
@@ -429,7 +470,18 @@ vec3 vbspSpotLight(vec3 P) {
 		float cone = smoothstep(vbspSpotCosOuter[i], vbspSpotCosInner[i], cd);
 		sum += vbspSpotColor[i] * (att * cone * ndl);
 	}
-	return sum * vbspSpotScale;
+	for (int i = 0; i < ${DLIGHT_MAX}; i++) {
+		if (i >= vbspDLightCount) break;
+		vec3 toL = vbspDLightPos[i] - P;
+		float d = length(toL);
+		if (d <= 0.001 || d > vbspDLightRange[i]) continue;
+		vec3 L = toL / d;
+		float att = 1.0 - d / vbspDLightRange[i];
+		sum += vbspDLightColor[i] * (att * att * abs(dot(N, L)) * vbspDLightScale);
+	}
+	// 软上限：spot 是加法光，白贴图上直接叠很容易过曝成纯白（观感像闪光灯）。
+	// 这里限幅到 0.55，保留亮斑又不会把材质细节烧掉。
+	return min(sum * vbspSpotScale, vec3(0.55));
 }
 `;
 

@@ -65,6 +65,7 @@ import {
 	setVhvLinear as setVhvLinearInShader,
 	getVhvLinear,
 	setSpotLights,
+	setDLights,
 	type SpotLightInput,
 	type LightingMode,
 } from '../shader/lightmap-shader.js';
@@ -645,6 +646,25 @@ export class RenderSession {
         cosInner: Math.cos(s.innerConeAngle),
       }) satisfies SpotLightInput);
     setSpotLights(ranked);
+    // 命中点的 dlight：宽而软的光斑，按距离取最近 2 个。
+    const dlights = this.spotBeams?.userData.dlights as
+      | { position: [number, number, number]; color: [number, number, number]; range: number }[]
+      | undefined;
+    if (dlights && dlights.length > 0) {
+      const rankedD = dlights
+        .map((d) => {
+          const dx = d.position[0] - cam.x;
+          const dy = d.position[1] - cam.y;
+          const dz = d.position[2] - cam.z;
+          return { d, d2: dx * dx + dy * dy + dz * dz };
+        })
+        .sort((a, b) => a.d2 - b.d2)
+        .slice(0, 2)
+        .map(({ d }) => d);
+      setDLights(rankedD);
+    } else {
+      setDLights([]);
+    }
   }
 
   /** PVS 区域着色开关（debug 面板用；开启期间不按 PVS/距离剔除，只上色，才能看清「不可见的区域」）。 */

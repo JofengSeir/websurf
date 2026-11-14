@@ -261,6 +261,6 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
     );
   }
   // 合并**之后**才建可见光柱：它属于「运行时效果」，不能参与块合并。
-  const spotBeams = buildSpotBeams((mapRoot.userData.punctualSpots as PunctualSpot[] | undefined) ?? []);
+  const spotBeams = buildSpotBeams((mapRoot.userData.punctualSpots as PunctualSpot[] | undefined) ?? [], root);
   return { gltf, root, bbox, maxDim, skyGroup, skyCluster, applied, converged, skyConverged, spotBeams };
 }

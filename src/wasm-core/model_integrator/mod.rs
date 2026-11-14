@@ -973,8 +973,16 @@ impl ModelIntegrator {
 
                     // spot / directional 额外加 direction
                     if has_direction {
-                        let direction = self.parse_light_direction(light_entity)
+                        let mut direction = self.parse_light_direction(light_entity)
                             .unwrap_or([0.0, -1.0, 0.0]);
+                        // 起源 `angles` 的 pitch 正值表示「朝下」（与视图角度一致），
+                        // 而 `parse_light_direction` 用的是几何 `sin(pitch)`（正值为上）。
+                        // 起源 `angles` 的 pitch 正值是低头，而 `parse_light_direction` 用的是几何
+                        // `sin(pitch)`（正值为上）；只有 `point_spotlight` 的光柱朝 `+forward`，
+                        // 需要把竖直分量翻转，`light_spot` 的光朝 `-forward`，保持原样。
+                        if classname == "point_spotlight" {
+                            direction[1] = -direction[1];
+                        }
                         light.insert("direction".to_string(), serde_json::json!([direction[0], direction[1], direction[2]]));
                     }
 
