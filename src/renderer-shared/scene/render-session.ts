@@ -770,9 +770,10 @@ export class RenderSession {
     }
   }
 
-  /** 当前可用的泛光实例（未创建或强度 0 时返回 null ⇒ 走直画路径）。 */
+  /** 当前可用的泛光实例（强度 0 时返回 null ⇒ 走直画路径）。 */
   private ensureBloomFx(): BloomPostFx | null {
-    const fx = this.bloomFx;
+    // 默认参数是开启的，所以实例在首帧懒建；`setBloom({strength:0})` 之后为 null。
+    const fx = this.getOrCreateBloomFx();
     if (!fx) return null;
     fx.ensureSize();
     return fx.enabled ? fx : null;
@@ -830,8 +831,6 @@ export class RenderSession {
     mark('water');
     // 泛光：场景先画进半浮点缓冲（天空两遍法也画进去），再统一合成到画布。
     // 没有 bloomFx（强度 0 / 上下文不支持）时走原来的直画路径。
-    const bloom = this.ensureBloomFx();
-    bloom?.begin();
     this.skyFog = renderSkyPass({
       renderer: this.renderer,
       scene: this.scene,
@@ -841,9 +840,10 @@ export class RenderSession {
       skyParams: this.skyParams,
       skyFog: this.skyFog,
     });
+    const bloom = this.ensureBloomFx();
     if (bloom) {
-      // 光效层每次叠加前刷新：粒子/激光由各端在装配之后挂进 scene，晚于载图，
-      // 所以不能在 loadScene 里标一次了事。markGlowMeshes 只做 layer.enable，幂等且便宜。
+      // 主画面已直画完；这里只把加色光效单独渲到黑底缓冲，模糊后**加法叠加**回去。
+      // 粒子/激光由各端在装配之后挂进 scene（晚于载图），所以每帧幂等标记一次。
       const marked = markGlowMeshes(this.scene);
       if (marked !== this.glowMarked) {
         this.glowMarked = marked;
@@ -851,8 +851,8 @@ export class RenderSession {
         console.info(`[${this.app}][bloom] 加色光效 mesh：${marked} 个`);
       }
       bloom.renderGlow(this.scene, this.camera);
+      bloom.overlay();
     }
-    bloom?.end();
     mark('sky');
     if (dbgOn) {
       times.frame = +(performance.now() - tFrame).toFixed(2);

@@ -2,26 +2,30 @@
  * 屏幕后处理：泛光（bloom）——起源式「光效会晕开」的那一层。
  *
  * 为什么需要它（2026-11-15，用户 m13126）：「绝大部分光效在起源里比 websurf 里更亮」。
- * 实测峰值/宽度已经对齐（peak 196 vs 194），差距在**亮部外围的软晕面积**——起源是
- * HDR + bloom 后处理，我们之前是 `NoToneMapping` 直接画到画布，亮部在 255 硬截断。
+ * 实测峰值/宽度已对齐（peak 196 vs 194），差距在**亮部外围的软晕面积**——起源是
+ * HDR + bloom 后处理，我们之前是直画到画布、亮部在 255 硬截断。
  *
- * 做法（区别于「整屏阈值泛光」）：
- *   1. 主画面照旧渲染进半浮点缓冲（线性空间）；
- *   2. 单独一遍**只画加色光效**（材质 `AdditiveBlending` 的 mesh，靠渲染层 `GLOW_LAYER`
- *      筛选）到一张黑底缓冲 —— 这样不会被亮岩石/亮墙面污染（整屏阈值泛光会糊成一片）；
- *   3. 光效缓冲降采样两次做可分离高斯模糊，得到「近晕 + 远晕」两级；
- *   4. 合成：`主画面 + 晕 × 强度`，末端只做一次线性→sRGB 编码。
+ * 为什么是「叠加式 glow pass」而不是把整个场景渲进离屏缓冲再做后处理：
+ * - 本工程的场景材质混了两类：自绘 ShaderMaterial（`lightmap-shader.ts`，按「直接输出
+ *   canvas」调过）和 three 内置材质（粒子/激光，输出线性值）。渲进同一个离屏缓冲后，
+ *   任何统一的一次 tone/色彩空间变换都会错其中一类（实测整屏发灰 99.95% 像素变化）。
+ * - 所以主场景**照旧直画**，只把加色光效单独渲到黑底缓冲（按渲染层 `GLOW_LAYER` 筛）、
+ *   模糊成两级晕，最后**加法叠加**到已画好的画面上。这样无论自绘材质怎么调，主画面
+ *   一个像素都不变，只有光效周围多出软晕。
+ * - 光效是 three 内置材质（MeshBasicMaterial + AdditiveBlending），渲染到
+ *   `NoColorSpace` 的缓冲时输出线性值 ⇒ 叠加前做一次线性→sRGB，与直画路径的
+ *   `outputColorSpace = SRGBColorSpace` 对齐。
  *
- * 关闭（`strength = 0`）时不建缓冲、不跑额外 pass，渲染路径与改造前逐位一致。
+ * 关闭（`strength = 0`）时不跑任何额外 pass，渲染路径与改造前完全一致。
  */
 import * as THREE from 'three';
 
 /** 光效专用渲染层：加色光效 mesh 会被切到这一层，泛光 pass 只画它。 */
 export const GLOW_LAYER = 2;
 
-/** 泛光参数（线性空间；强度 0 = 关闭）。 */
+/** 泛光参数。 */
 export interface BloomParams {
-  /** 泛光叠加系数（0 关闭）。 */
+  /** 叠加强度（0 关闭）。 */
   strength: number;
   /** 近晕权重（1/2 分辨率那一级）。 */
   nearWeight: number;
@@ -30,19 +34,19 @@ export interface BloomParams {
 }
 
 /**
- * 默认参数：默认**关闭**（`strength: 0`）。
+ * 默认参数：默认开启（0.3）。
  *
- * 原因：光效的 HDR 增益（材质 `color` 分量 >1）在 task-13 里落地前，泛光只能吃到
- * 少数像素，开了也看不出效果；等增益到位后在同一次改动里把 strength 打开。
+ * 取值依据（2026-11-15，boreas 符文坑 `cand_c` 机位，predicate 见 `.tmp/gn_*.png`）：
+ * 0.1/0.2/0.35/0.5 四档里 ROI meanL 65.8 → 67.4/69.0/71.3/73.6、fracL250 0.008 →
+ * 0.015/0.022/0.039/0.052；0.35 时光晕已明显但边缘仍干净，取 0.3 略保守。
  */
-export const DEFAULT_BLOOM_PARAMS: BloomParams = { strength: 0, nearWeight: 0.55, farWeight: 0.45 };
+export const DEFAULT_BLOOM_PARAMS: BloomParams = { strength: 0.3, nearWeight: 0.55, farWeight: 0.45 };
 
 /**
- * 亮部提取阈值（线性亮度）。
+ * 亮部提取阈值（线性）。
  *
- * 光效缓冲里只有加色光效，但宽幅烟幕/雾层单像素贡献只有 ~0.03，若不设阈值，
- * 模糊后会把整屏抬亮（实测 99.95% 像素变化、画面发灰）。0.3 能滤掉雾层、保留
- * 光柱核心与细激光/火花；数值来自实测 A/B（2026-11-15）。
+ * 光效缓冲里只有加色光效，但宽幅烟幕/雾层单像素贡献只有 ~0.03；不筛的话模糊后
+ * 会把整屏抬亮。0.3 能滤掉雾层、保留光柱核心与细激光/火花。
  */
 const BLOOM_THRESHOLD = 0.3;
 
@@ -69,7 +73,7 @@ void main() {
 }
 `;
 
-/** 亮部提取：只保留光效缓冲里明显亮于阈值的部分（宽而暗的加色雾层不会整屏泛白）。 */
+/** 亮部提取（只保留明显亮于阈值的部分；宽而暗的雾层不会整屏泛白）。 */
 const BRIGHT_FRAGMENT = /* glsl */ `
 uniform sampler2D tDiffuse;
 uniform float uThreshold;
@@ -82,16 +86,8 @@ void main() {
 }
 `;
 
-/** 合成：画面 + 两级光效晕。
- *
- * 注意：**不做线性→sRGB 编码**。本工程的场景材质（`lightmap-shader.ts` 等自绘 shader、
- * 光效的 MeshBasicMaterial）本来就是按「直接输出到 canvas」调的，渲染进离屏缓冲时
- * three 不会替它们做色彩空间转换 ⇒ 缓冲里已是显示空间值。实测（pcf-scout task-12）：
- * 开启路径若再编码一次，`strength≈0` 也会把全图 meanL 从 44 抬到 109，逐像素
- * `on ≈ sRGBEncode(off)`；本机 A/B 同样表现为整屏发灰。故这里只 clamp。
- */
-const COMPOSITE_FRAGMENT = /* glsl */ `
-uniform sampler2D tScene;
+/** 叠加：把两级晕（线性）编码到显示空间后**加法**叠到画面。 */
+const OVERLAY_FRAGMENT = /* glsl */ `
 uniform sampler2D tBloomNear;
 uniform sampler2D tBloomFar;
 uniform float uNearWeight;
@@ -99,11 +95,14 @@ uniform float uFarWeight;
 uniform float uStrength;
 varying vec2 vUv;
 
+vec3 linearToSrgb(vec3 c) {
+	return pow(c, vec3(1.0 / 2.2));
+}
+
 void main() {
-	vec3 scene = texture2D(tScene, vUv).rgb;
-	vec3 bloom = texture2D(tBloomNear, vUv).rgb * uNearWeight + texture2D(tBloomFar, vUv).rgb * uFarWeight;
-	vec3 c = scene + bloom * uStrength;
-	gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+	vec3 bloom = texture2D(tBloomNear, vUv).rgb * uNearWeight
+		+ texture2D(tBloomFar, vUv).rgb * uFarWeight;
+	gl_FragColor = vec4(linearToSrgb(clamp(bloom, 0.0, 1.0)) * uStrength, 1.0);
 }
 `;
 
@@ -112,24 +111,20 @@ void main() {
  *
  * 用法（`render-session.ts`）：
  * ```ts
- * fx.begin(renderer);                       // 绑定主画面缓冲并清屏
- * renderSkyPass({ ... });                   // 天空 + 主世界画进主缓冲
- * fx.renderGlow(scene, camera);             // 只画加色光效到光效缓冲
- * fx.end(renderer);                         // 模糊 + 合成到画布
+ * // 主场景照旧直画到画布（renderSkyPass）
+ * fx.renderGlow(scene, camera);  // 只把加色光效渲到黑底缓冲
+ * fx.overlay();                  // 模糊 + 加法叠加到画布
  * ```
  */
 export class BloomPostFx {
-  /** 主画面缓冲（半浮点、线性；关闭时也会用到）。 */
-  readonly sceneTarget: THREE.WebGLRenderTarget;
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly quadScene = new THREE.Scene();
-  private readonly blurScene = new THREE.Scene();
+  private readonly baseScene = new THREE.Scene();
   private readonly quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  private readonly quad: THREE.Mesh;
+  private readonly baseQuad: THREE.Mesh;
   private readonly blurQuad: THREE.Mesh;
   private readonly blurMaterial: THREE.ShaderMaterial;
   private readonly brightMaterial: THREE.ShaderMaterial;
-  private readonly compositeMaterial: THREE.ShaderMaterial;
+  private readonly overlayMaterial: THREE.ShaderMaterial;
   private glowTarget: THREE.WebGLRenderTarget;
   private nearTarget: THREE.WebGLRenderTarget;
   private nearScratch: THREE.WebGLRenderTarget;
@@ -144,15 +139,6 @@ export class BloomPostFx {
     this.renderer = renderer;
     this.params = { ...params };
     const type = renderer.capabilities.isWebGL2 ? THREE.HalfFloatType : THREE.UnsignedByteType;
-    this.sceneTarget = new THREE.WebGLRenderTarget(1, 1, {
-      type,
-      colorSpace: THREE.NoColorSpace,
-      depthBuffer: true,
-      stencilBuffer: false,
-      samples: renderer.capabilities.isWebGL2 ? 4 : 0,
-    });
-    this.sceneTarget.texture.minFilter = THREE.LinearFilter;
-    this.sceneTarget.texture.magFilter = THREE.LinearFilter;
     this.glowTarget = this.makeTarget(type, true);
     this.nearTarget = this.makeTarget(type, false);
     this.nearScratch = this.makeTarget(type, false);
@@ -167,16 +153,15 @@ export class BloomPostFx {
       blending: THREE.NoBlending,
     });
     this.brightMaterial = new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, uThreshold: { value: 0.3 } },
+      uniforms: { tDiffuse: { value: null }, uThreshold: { value: BLOOM_THRESHOLD } },
       vertexShader: VERTEX_SHADER,
       fragmentShader: BRIGHT_FRAGMENT,
       depthTest: false,
       depthWrite: false,
       blending: THREE.NoBlending,
     });
-    this.compositeMaterial = new THREE.ShaderMaterial({
+    this.overlayMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        tScene: { value: this.sceneTarget.texture },
         tBloomNear: { value: this.nearTarget.texture },
         tBloomFar: { value: this.farTarget.texture },
         uNearWeight: { value: params.nearWeight },
@@ -184,18 +169,22 @@ export class BloomPostFx {
         uStrength: { value: params.strength },
       },
       vertexShader: VERTEX_SHADER,
-      fragmentShader: COMPOSITE_FRAGMENT,
+      fragmentShader: OVERLAY_FRAGMENT,
       depthTest: false,
       depthWrite: false,
-      blending: THREE.NoBlending,
+      // 叠在已画好的画面上：加法混合 + 不写深度。
+      blending: THREE.AdditiveBlending,
+      transparent: true,
     });
-    this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.compositeMaterial);
-    this.quad.frustumCulled = false;
-    this.quadScene.add(this.quad);
-    this.blurQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blurMaterial);
+    this.baseQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blurMaterial);
+    this.baseQuad.frustumCulled = false;
+    this.baseScene.add(this.baseQuad);
+    this.blurQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.overlayMaterial);
     this.blurQuad.frustumCulled = false;
     this.blurScene.add(this.blurQuad);
   }
+
+  private readonly blurScene = new THREE.Scene();
 
   private makeTarget(type: THREE.TextureDataType, withDepth: boolean): THREE.WebGLRenderTarget {
     const rt = new THREE.WebGLRenderTarget(1, 1, {
@@ -212,9 +201,9 @@ export class BloomPostFx {
   /** 运行期改参数。 */
   setParams(params: Partial<BloomParams>): void {
     this.params = { ...this.params, ...params };
-    (this.compositeMaterial.uniforms.uNearWeight as { value: number }).value = this.params.nearWeight;
-    (this.compositeMaterial.uniforms.uFarWeight as { value: number }).value = this.params.farWeight;
-    (this.compositeMaterial.uniforms.uStrength as { value: number }).value = this.params.strength;
+    (this.overlayMaterial.uniforms.uNearWeight as { value: number }).value = this.params.nearWeight;
+    (this.overlayMaterial.uniforms.uFarWeight as { value: number }).value = this.params.farWeight;
+    (this.overlayMaterial.uniforms.uStrength as { value: number }).value = this.params.strength;
   }
 
   get enabled(): boolean {
@@ -233,7 +222,6 @@ export class BloomPostFx {
     if (w === this.width && h === this.height) return;
     this.width = w;
     this.height = h;
-    this.sceneTarget.setSize(w, h);
     this.glowTarget.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
     this.nearTarget.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
     this.nearScratch.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
@@ -241,15 +229,7 @@ export class BloomPostFx {
     this.farScratch.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
   }
 
-  /** 绑定主画面缓冲并清屏。 */
-  begin(): void {
-    this.ensureSize();
-    this.renderer.setRenderTarget(this.sceneTarget);
-    this.renderer.autoClear = true;
-    this.renderer.clear();
-  }
-
-  /** 只画加色光效到光效缓冲（相机层筛选；画完还原相机层与背景）。 */
+  /** 只画加色光效到黑底缓冲（相机层筛选；画完还原相机层与背景/雾）。 */
   renderGlow(scene: THREE.Scene, camera: THREE.Camera): void {
     if (!this.enabled) return;
     const background = scene.background;
@@ -265,61 +245,46 @@ export class BloomPostFx {
     camera.layers.mask = this.prevMask.mask;
     scene.background = background;
     scene.fog = fog;
+    this.renderer.setRenderTarget(null);
   }
 
-  /** 从光效缓冲做两级模糊并合成到画布。 */
-  end(): void {
+  /** 亮部提取 + 两级模糊，最后加法叠加到画布。 */
+  overlay(): void {
+    if (!this.enabled) return;
     const prevAutoClear = this.renderer.autoClear;
     this.renderer.autoClear = false;
+    // 光效缓冲 → 亮部提取 + 1/2
+    (this.brightMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = this.glowTarget.texture;
+    this.baseQuad.material = this.brightMaterial;
+    this.renderer.setRenderTarget(this.nearTarget);
+    this.renderer.render(this.baseScene, this.quadCamera);
+    // 近晕模糊
+    this.blur(this.nearTarget);
+    // 1/4 远晕
+    (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = this.nearTarget.texture;
+    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(0, 0);
+    this.renderer.setRenderTarget(this.farTarget);
+    this.renderer.render(this.baseScene, this.quadCamera);
+    this.blur(this.farTarget);
+    // 叠加到画布（加法混合；不清理已画好的画面）
     this.renderer.setRenderTarget(null);
-    if (!this.enabled) {
-      // 关闭：主画面缓冲直接 blit（仍要过 sRGB 编码，保证与直画逐位一致）。
-      this.renderer.render(this.quadScene, this.quadCamera);
-      this.renderer.autoClear = prevAutoClear;
-      return;
-    }
-    // 光效缓冲 → 亮部提取 + 1/2 降采样（宽而暗的加色雾层在这里被滤掉）
-    this.brightCopy(this.glowTarget.texture, this.nearTarget);
-    this.blur(this.nearTarget, this.nearScratch, this.nearTarget);
-    // → 1/4 远晕
-    this.copy(this.nearTarget.texture, this.farTarget);
-    this.blur(this.farTarget, this.farScratch, this.farTarget);
-    // 合成到画布
-    this.renderer.setRenderTarget(null);
-    this.renderer.render(this.quadScene, this.quadCamera);
+    this.renderer.render(this.blurScene, this.quadCamera);
     this.renderer.autoClear = prevAutoClear;
   }
 
-  private copy(texture: THREE.Texture, target: THREE.WebGLRenderTarget): void {
-    (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = texture;
-    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(0, 0);
+  private blur(target: THREE.WebGLRenderTarget): void {
+    (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = target.texture;
+    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(1 / target.width, 0);
+    this.baseQuad.material = this.blurMaterial;
+    this.renderer.setRenderTarget(this.nearScratch);
+    this.renderer.render(this.baseScene, this.quadCamera);
+    (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = this.nearScratch.texture;
+    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(0, 1 / target.height);
     this.renderer.setRenderTarget(target);
-    this.renderer.render(this.blurScene, this.quadCamera);
-  }
-
-  /** 亮部提取 + 降采样（同一趟完成；阈值在 `BLOOM_THRESHOLD`）。 */
-  private brightCopy(texture: THREE.Texture, target: THREE.WebGLRenderTarget): void {
-    (this.brightMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = texture;
-    (this.brightMaterial.uniforms.uThreshold as { value: number }).value = BLOOM_THRESHOLD;
-    this.blurQuad.material = this.brightMaterial;
-    this.renderer.setRenderTarget(target);
-    this.renderer.render(this.blurScene, this.quadCamera);
-    this.blurQuad.material = this.blurMaterial;
-  }
-
-  private blur(source: THREE.WebGLRenderTarget, scratch: THREE.WebGLRenderTarget, target: THREE.WebGLRenderTarget): void {
-    (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = source.texture;
-    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(1 / source.width, 0);
-    this.renderer.setRenderTarget(scratch);
-    this.renderer.render(this.blurScene, this.quadCamera);
-    (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = scratch.texture;
-    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(0, 1 / source.height);
-    this.renderer.setRenderTarget(target);
-    this.renderer.render(this.blurScene, this.quadCamera);
+    this.renderer.render(this.baseScene, this.quadCamera);
   }
 
   dispose(): void {
-    this.sceneTarget.dispose();
     this.glowTarget.dispose();
     this.nearTarget.dispose();
     this.nearScratch.dispose();
@@ -327,8 +292,8 @@ export class BloomPostFx {
     this.farScratch.dispose();
     this.blurMaterial.dispose();
     this.brightMaterial.dispose();
-    this.compositeMaterial.dispose();
-    (this.quad.geometry as THREE.BufferGeometry).dispose();
+    this.overlayMaterial.dispose();
+    (this.baseQuad.geometry as THREE.BufferGeometry).dispose();
     (this.blurQuad.geometry as THREE.BufferGeometry).dispose();
   }
 }
