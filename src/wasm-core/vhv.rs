@@ -58,26 +58,6 @@ pub struct PropVertexLighting {
     pub mesh_vert_counts: Vec<u32>,
 }
 
-/// 三通道亮度（Rec.601 加权）——与 [`PropVertexLighting::luma_stats`] 同一口径。
-pub fn luma(c: [f32; 3]) -> f32 {
-    0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
-}
-
-/// RGB 倍率切片的中位亮度；空切片返回 `None`。
-///
-/// 为什么需要它：`vrad` 在**没开静态 prop 光照**时也会写 `.vhv`，内容接近全黑
-/// （surf_boreas：1587 个 `sp_*.vhv` 的中位亮度 0.048，对应字节 ≈ 6/255）。这类数据
-/// 不是"暗"，是"没烘焙"——照用会把整张图的 prop 乘成黑剪影（树/冰柱/坡道道具全黑）。
-/// 调用方据此判「不可用」并按「本来就没有 vhv」走回退路径。
-pub fn median_luma(colors: &[[f32; 3]]) -> Option<f32> {
-    if colors.is_empty() {
-        return None;
-    }
-    let mut v: Vec<f32> = colors.iter().map(|c| luma(*c)).collect();
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    Some(v[v.len() / 2])
-}
-
 impl PropVertexLighting {
     /// 逐顶点亮度的统计量，诊断/日志用；亮度按 `0.299/0.587/0.114` 对 RGB 加权。
     ///

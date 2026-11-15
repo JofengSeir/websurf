@@ -58,18 +58,6 @@ use serde::Deserialize;
 use thiserror::Error;
 use vmdl::{Mdl, Model as VmdlModel, Vtx, Vvd};
 
-/// 判「这份 `.vhv` 到底有没有烘焙」的亮度下限（逐实例媒体，口径见 [`crate::vhv::median_luma`]）。
-///
-/// 为什么需要：`vrad` 在**没开 StaticPropLighting** 时仍会写 `.vhv`，内容接近全黑。
-/// surf_boreas 实测该图 1587 个 `sp_*.vhv` 的中位亮度只有 0.048（= 字节 6/255，值域 [0,2]），
-/// 照用会把整张图的 prop 乘成黑剪影（树/冰柱/坡道道具全黑，scout 已取证
-/// `.tmp/pcf/BLACK_TREE.md`）。这类数据不是「暗」而是「没烘焙」：读进来没有信息量，
-/// 调增益也救不回来（要 ~9× 才能回到正常亮度，会把噪声一起放大）。
-///
-/// 阈值取 0.15：正常烘焙的暗部（洞穴里 0.2–0.4）仍保留，只有「成片中位接近 0」才丢。
-/// 丢弃后 prop 按「本来就没有 vhv」走回退（无 vlight ⇒ 纯贴图/环境立方那一级）。
-const MIN_USABLE_VLIGHT_LUMA: f32 = 0.15;
-
 /// 模型整合错误。
 ///
 /// 四个变体的实际来源：[`ModelIntegratorError::Model`] 由 `load_model_from_bytes` 的三次解析
@@ -486,11 +474,6 @@ impl ModelIntegrator {
         let vlight = vlight.filter(|v| {
             v.len() == vertex_count as usize
                 && v.iter().any(|c| c[0] > 0.0 || c[1] > 0.0 || c[2] > 0.0)
-                // 「暗到不像烘焙」同样按没有数据处理，见 `vhv::median_luma` 的说明：
-                // vrad 未开 StaticPropLighting 时仍会写 .vhv，值接近全黑（surf_boreas
-                // 全图 1587 个文件的中位亮度 0.048 = 字节 6/255），照用会把该图所有 prop
-                // 乘成黑剪影。判据取**逐实例媒体**而非逐顶点：洞穴里某块很暗是正常烘焙。
-                && crate::vhv::median_luma(v).is_some_and(|m| m >= MIN_USABLE_VLIGHT_LUMA)
         })?;
         let vl_start = buffer.len() as u64;
         for c in vlight {
