@@ -1193,7 +1193,12 @@ export class RendererMain {
       phys.set_death_y(this.deathY);
     }
     this.predPhys = phys;
-    this.predReady = true;
+    // 物理世界就绪后用 `MASK_SOLID` 口径重新截断 env_laser：零体积线段扫掠只认实体 brush，
+    // 触发体 / nodraw / 水面天然被忽略（之前用渲染网格 Raycaster 会把梁误截，坡上该有的光线消失）。
+    this.laserBeams?.trace(null, (s, e) => {
+      const r = phys.debug_line_trace(s.x, s.y, s.z, e.x, e.y, e.z);
+      return r[0];
+    });    this.predReady = true;
     this.noclipActive = false;
     this.lastTickMs = 0;
     // 权威帧校准状态清零（首帧权威帧将作为新起点）

@@ -476,6 +476,19 @@ impl PhysWorld {
         world::GATE_VETO_COUNT.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// 诊断/表现用**零体积线段**扫掠（等价源引擎 `UTIL_TraceLine` + `MASK_SOLID`），
+    /// 返回 `[fraction, normal_x, normal_y, normal_z]`；未命中时法线回填 `[0,0,0]`。
+    ///
+    /// 与 [`PhysWorld::debug_trace`] 的区别：那个用玩家碰撞箱做盒扫，贴墙时会把线提前截断；
+    /// 这里盒半径 0，只判断线段本身是否碰到实体 brush（触发体/水面不在物理世界里，
+    /// 天然被忽略）。用途：`env_laser` 的静态截断。
+    pub fn debug_line_trace(&mut self, sx: f64, sy: f64, sz: f64, ex: f64, ey: f64, ez: f64) -> Vec<f64> {
+        let zero = [0.0, 0.0, 0.0];
+        let r = self.world.trace(&[sx, sy, sz], &[ex, ey, ez], &zero, &zero);
+        let n = r.normal.unwrap_or([0.0, 0.0, 0.0]);
+        vec![r.fraction, n[0], n[1], n[2]]
+    }
+
     /// 诊断：对给定线段做一次扫掠，返回 `[fraction, normal_x, normal_y, normal_z]`。
     ///
     /// 扫掠盒取玩家**当前**碰撞箱（`self.player.mins()` / `maxs()`）——

@@ -133,6 +133,14 @@ export class BloomPostFx {
   private width = 0;
   private height = 0;
   private params: BloomParams;
+  /** 深度预渲用的「只写深度」材质（光效层需要墙体深度才能被遮挡）。 */
+  private readonly depthOnlyMaterial = new THREE.MeshBasicMaterial({
+    colorWrite: false,
+    depthWrite: true,
+    depthTest: true,
+    blending: THREE.NoBlending,
+    fog: false,
+  });
   private readonly prevMask = new THREE.Layers();
 
   constructor(renderer: THREE.WebGLRenderer, params: BloomParams = DEFAULT_BLOOM_PARAMS) {
@@ -229,18 +237,42 @@ export class BloomPostFx {
     this.farScratch.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
   }
 
-  /** 只画加色光效到黑底缓冲（相机层筛选；画完还原相机层与背景/雾）。 */
-  renderGlow(scene: THREE.Scene, camera: THREE.Camera): void {
+  /**
+   * 只画加色光效到黑底缓冲（相机层筛选；画完还原相机层与背景/雾）。
+   *
+   * **先做一遍深度预渲**：光效层单独渲染时缓冲里没有墙体的深度，否则隔着岩壁也能看到
+   * 光柱/光球（用户报的「光效穿透实体、很远也看得到」）。所以先用只写深度的材质把整场景
+   * 画一遍（跳过光效 mesh 本身，免得透明层互相写深度），再画光效层，让光效被实体正确遮挡。
+   */
+  renderGlow(scene: THREE.Scene, camera: THREE.Camera, glowMeshes: readonly THREE.Object3D[] = []): void {
     if (!this.enabled) return;
     const background = scene.background;
     const fog = scene.fog;
     this.prevMask.mask = camera.layers.mask;
-    camera.layers.set(GLOW_LAYER);
     scene.background = null;
     scene.fog = null;
+
+    // ① 深度预渲：整场景（所有层）只写深度。光效 mesh 先隐藏，避免加法层也写深度、
+    //    把后面的透明层挡掉（它们本身就是透明的，不该参与遮挡）。
+    const hidden: THREE.Object3D[] = [];
+    for (const obj of glowMeshes) {
+      if (obj.visible) {
+        obj.visible = false;
+        hidden.push(obj);
+      }
+    }
+    const override = scene.overrideMaterial;
+    camera.layers.mask = 0xffffffff;
+    scene.overrideMaterial = this.depthOnlyMaterial;
     this.renderer.setRenderTarget(this.glowTarget);
     this.renderer.autoClear = true;
-    this.renderer.clear();
+    this.renderer.clear(true, true, false);
+    this.renderer.render(scene, camera);
+    scene.overrideMaterial = override;
+    for (const obj of hidden) obj.visible = true;
+
+    // ② 光效层：只画 GLOW_LAYER，深度测试相对上面的实体深度。
+    camera.layers.set(GLOW_LAYER);
     this.renderer.render(scene, camera);
     camera.layers.mask = this.prevMask.mask;
     scene.background = background;
@@ -303,17 +335,21 @@ export class BloomPostFx {
  *
  * 判据是材质 `blending === AdditiveBlending`（光柱 rope/trail、env_laser、sparks、
  * 加色烟幕都属于这一类）；受光面、水面、天空不会被选中，所以亮岩石不会糊进泛光。
- * 装配完成后调用一次即可（`render-session.ts`）；返回命中的 mesh 数，便于日志核对。
+ * 例外：mesh 上标了 `userData.vbspNoGlow` 的不参与（例如细激光要「实」不要泛光）。
+ * 装配完成后调用一次即可（`render-session.ts`）；命中 mesh 会填进 `out`（供深度预渲跳过），
+ * 返回命中的 mesh 数，便于日志核对。
  */
-export function markGlowMeshes(root: THREE.Object3D): number {
+export function markGlowMeshes(root: THREE.Object3D, out?: THREE.Object3D[]): number {
   let count = 0;
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
+    if (mesh.userData.vbspNoGlow) return;
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const additive = mats.some((m) => m && (m as THREE.Material).blending === THREE.AdditiveBlending);
     if (!additive) return;
     mesh.layers.enable(GLOW_LAYER);
+    out?.push(mesh);
     count += 1;
   });
   return count;

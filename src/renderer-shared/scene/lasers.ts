@@ -78,6 +78,8 @@ export interface LaserBeam {
   readonly scrollRate: number;
   /** 加法色：rendercolor/255 × renderamt/255。 */
   readonly color: THREE.Color;
+  /** `trace()` 命中的材质名（诊断用；未命中为 undefined）。 */
+  hitMaterial?: string;
 }
 
 /** `sprites/laserbeam.spr` 缺失，程序化重建：横向亮核 + 柔边，纵向轻微亮带。 */
@@ -182,16 +184,18 @@ function isVisibleInHierarchy(object: THREE.Object3D): boolean {
 }
 
 /**
- * 水面不是 `MASK_SOLID` 的一部分（源引擎的 `env_laser` trace 用 `MASK_SOLID`，
- * 能穿过水），而 `Raycaster` 会命中水面 mesh，导致梁被水下/水面几何提前截断。
- * BSP 水面是独立 mesh 且带具名材质（`water*`），按材质名排除即可。
+ * 非实体表面：`env_laser` 的 trace 走 `MASK_SOLID`，水面、触发体、clip 刷、nodraw、天空盒
+ * 都不参与命中；而 `Raycaster` 会命中它们的 mesh，导致梁被提前截断（用户报的「坡上该有的
+ * 光线没画出来」多半就是这类误截）。BSP 里这些面都是具名材质，按材质名排除。
  */
 function isNonSolidSurface(object: THREE.Object3D): boolean {
   const mesh = object as THREE.Mesh;
   const material = mesh.material;
   if (!material) return false;
   const materials = Array.isArray(material) ? material : [material];
-  return materials.some((m) => typeof m?.name === 'string' && /water/i.test(m.name));
+  return materials.some(
+    (m) => typeof m?.name === 'string' && /water|trigger|tools[\\/]|nodraw|clip|sky/i.test(m.name),
+  );
 }
 
 /** 渲染层：一个 BatchMesh（每束 Core + Glow 共 8 顶点 4 三角），每帧按相机重建面向相机的窄带。 */
@@ -256,27 +260,46 @@ export class LaserBeams {
     this.mesh = new THREE.Mesh(geometry, this.material);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 13;
+    // 细激光要「实」不要泛光：不参与 bloom 光效层，保持清晰的加法亮线。
+    this.mesh.userData.vbspNoGlow = true;
     this.root.add(this.mesh);
   }
 
   /**
    * 对场景几何做一次 `UTIL_TraceLine` 等价截断（12 条梁，静态地图只需一次）。
-   * `worldRoot` 是 BSP 主 mesh 根；命中则把梁缩短到命中点，否则用目标的 origin。
-   * 只认「可见」命中：场景里还有 241 个隐藏 brush mesh（旋转按钮的初始隐藏态、skybox 等），
-   * three 的 Raycaster 不会跳过它们，必须手动过滤，否则梁会在起点附近 30 HU 处被截断。
+   *
+   * 两种口径：
+   * - 传 `physTrace` 时用**物理世界**的线段扫掠（只认实体 brush，天然忽略触发体/nodraw/水面，
+   *   与 `MASK_SOLID` 同口径）——这是首选，`apps/debug` 有 `PhysWorld.debug_trace`；
+   * - 否则退回 `Raycaster` + 材质名过滤（`trace(worldRoot)`），用于没有物理线的端。
    */
-  trace(worldRoot: THREE.Object3D | null): void {
-    if (!worldRoot) return;
-    const ray = new THREE.Raycaster();
+  trace(
+    worldRoot: THREE.Object3D | null,
+    physTrace?: (start: THREE.Vector3, end: THREE.Vector3) => number,
+  ): void {
     const dir = new THREE.Vector3();
     for (const beam of this.beams) {
       dir.subVectors(beam.end, beam.start);
       const length = dir.length();
       if (length < 0.1) {
         beam.clippedEnd.copy(beam.end);
+        beam.hitMaterial = undefined;
         continue;
       }
       dir.multiplyScalar(1 / length);
+      if (physTrace) {
+        const frac = physTrace(beam.start, beam.end);
+        if (frac >= 0 && frac < 1) {
+          beam.clippedEnd.copy(beam.start).addScaledVector(dir, Math.max(0, length * frac - 0.5));
+          beam.hitMaterial = '(phys)';
+        } else {
+          beam.clippedEnd.copy(beam.end);
+          beam.hitMaterial = undefined;
+        }
+        continue;
+      }
+      if (!worldRoot) return;
+      const ray = new THREE.Raycaster();
       ray.set(beam.start, dir);
       ray.near = 0.5;
       ray.far = Math.max(0.5, length - 0.5);
@@ -284,8 +307,12 @@ export class LaserBeams {
       const hit = hits.find((h) => isVisibleInHierarchy(h.object) && !isNonSolidSurface(h.object));
       if (hit) {
         beam.clippedEnd.copy(beam.start).addScaledVector(dir, hit.distance);
+        const mat = (hit.object as THREE.Mesh).material;
+        const first = Array.isArray(mat) ? mat[0] : mat;
+        beam.hitMaterial = typeof first?.name === 'string' ? first.name : '(anon)';
       } else {
         beam.clippedEnd.copy(beam.end);
+        beam.hitMaterial = undefined;
       }
     }
   }
@@ -414,6 +441,15 @@ export class LaserBeams {
       if (cut < full - 0.5) clipped++;
     }
     return { beams: this.beams.length, clipped, length: Math.round(length) };
+  }
+
+  /** 逐条诊断：全长/实画长度/命中材质（排查「该有的梁缺失」用）。 */
+  detail(): Array<{ full: number; drawn: number; hit: string | null }> {
+    return this.beams.map((beam) => ({
+      full: Math.round(beam.start.distanceTo(beam.end)),
+      drawn: Math.round(beam.start.distanceTo(beam.clippedEnd)),
+      hit: beam.hitMaterial ?? null,
+    }));
   }
 
   dispose(): void {
