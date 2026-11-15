@@ -28,6 +28,13 @@ export interface PvsFilterQuery {
   isVisible(clusterId: number): boolean;
   /** 没有 `_vbsp_face` 的块退回「三角形重心 + 法线偏移」采样。 */
   getClusterAt?(pos: { x: number; y: number; z: number }): number;
+  /**
+   * 当前可见集的稠密位图（下标 = cluster，1 = 可见；`PvsManager.visibleRow()`）。
+   *
+   * 重建一次要判 120 万三角形 × 3 个来源，逐次 `isVisible()`（Set.has + 虚调用）实测
+   * 单次 15–25 ms；摊平成 `Uint8Array` 后按下标读，配合下面的「块可见签名」跳过可省到 1/3 以下。
+   */
+  visibleRow?(): Uint8Array | null;
 }
 
 /**
@@ -57,6 +64,13 @@ interface ClusterIndexState {
   lastCluster: number;
   /** 上次重建后可见三角形数。 */
   visTris: number;
+  /**
+   * 该块用到的 cluster 去重表（装载期生成）。运行期用「可见签名」判断要不要重建：
+   * 签名只由这些 cluster 的可见位决定，签名不变 ⇒ 选中的三角形不变 ⇒ 跳过重建。
+   */
+  clusters: Uint16Array;
+  /** 上次重建时的可见签名（FNV-1a）；0 = 还没算过。 */
+  sig: number;
 }
 
 export interface ClusterIndexStats {
@@ -246,6 +260,21 @@ export function prepareClusterIndex(
     // 一半以上三角形定不到位 ⇒ 这张脸的映射不可信，宁可整块按老办法（块级）处理。
     if (unmapped > tris * 0.5) { stats.skipped++; continue; }
 
+    // 本块用到的 cluster 去重表：运行期「可见签名」只需遍历这张小表（几十个 id），
+    // 不用逐三角形重算一遍可见性，就能判断上次写进去的 index 是否仍然正确。
+    const uniq = new Set<number>();
+    for (let t = 0; t < tris; t++) {
+      const a = triClusters[t];
+      if (a !== 0xffff) uniq.add(a);
+      const b = triClustersN[t];
+      if (b !== 0xffff) uniq.add(b);
+      const c2 = triClustersN2[t];
+      if (c2 !== 0xffff) uniq.add(c2);
+    }
+    const clusters = new Uint16Array(uniq.size);
+    let ci = 0;
+    for (const c of uniq) clusters[ci++] = c;
+
     // 按 geometry.groups 切成「materialIndex + 三角形列表」。没有 groups 就是单一材质。
     const rawGroups = geom.groups.length > 0 ? geom.groups : [{ start: 0, count: index ? index.count : pos.count, materialIndex: 0 }];
     const groups: { materialIndex: number; tris: Uint32Array }[] = [];
@@ -267,6 +296,7 @@ export function prepareClusterIndex(
     geom.setIndex(attr);
     (mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex = {
       triClusters, triClustersN, triClustersN2, origIndex, outIndex, attr, groups, lastCluster: -1, visTris: tris,
+      clusters, sig: 0,
     };
     stats.prepared++;
     stats.tris += tris;
@@ -285,11 +315,34 @@ export function applyClusterIndex(
   pvs: PvsFilterQuery,
   camCluster: number,
 ): number {
+  const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   let rebuilt = 0;
+  let skipped = 0;
+  // 稠密可见位图（下标 = cluster）：360 万次 `Set.has` 换成按下标读 Uint8Array。
+  // 无 PVS / 尚未 update 时返回 null，退回原来的 `isVisible` 路径。
+  const row = pvs.visibleRow ? pvs.visibleRow() : null;
   for (const item of items) {
     const st = (item.mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex;
     if (!st) continue;
     if (st.lastCluster === camCluster) continue;
+    // 快路径：本块用到的 cluster 可见性没变 ⇒ 上次写进 index 的三组三角形集合仍然是正确的，
+    // 直接跳过（换房间时绝大多数块都属于这一类；全量重排 123 万三角实测 15–25ms）。
+    if (row && st.lastCluster !== -1 && st.clusters.length > 0) {
+      let sig = 0x811c9dc5;
+      const cl = st.clusters;
+      for (let i = 0; i < cl.length; i++) {
+        const c = cl[i];
+        sig ^= c < row.length ? row[c] : 0;
+        sig = Math.imul(sig, 0x01000193);
+      }
+      sig >>>= 0;
+      if (sig === st.sig && st.sig !== 0) {
+        st.lastCluster = camCluster;
+        skipped++;
+        continue;
+      }
+      st.sig = sig;
+    }
     const { triClusters, triClustersN, triClustersN2, origIndex, outIndex, attr, groups } = st;
     const geom = item.mesh.geometry;
     let n = 0;
@@ -306,11 +359,15 @@ export function applyClusterIndex(
         // 判据是「已知不可见才剔」，不是「没查清就剔」。没查清就剔的代价是直接看穿到后面的
         // 砖墙（用户报的缺三角面），而多画的代价只是几个三角形。
         const unknown = ca === 0xffff && cn === 0xffff && cn2 === 0xffff;
-        const on =
-          unknown ||
-          (ca !== 0xffff && pvs.isVisible(ca)) ||
-          (cn !== 0xffff && pvs.isVisible(cn)) ||
-          (cn2 !== 0xffff && pvs.isVisible(cn2));
+        const on = row
+          ? unknown ||
+            (ca !== 0xffff && ca < row.length && row[ca] === 1) ||
+            (cn !== 0xffff && cn < row.length && row[cn] === 1) ||
+            (cn2 !== 0xffff && cn2 < row.length && row[cn2] === 1)
+          : unknown ||
+            (ca !== 0xffff && pvs.isVisible(ca)) ||
+            (cn !== 0xffff && pvs.isVisible(cn)) ||
+            (cn2 !== 0xffff && pvs.isVisible(cn2));
         // 两个来源都定不到位（墙外/虚空/地图外壳的重复道具）才剔——「悬空尖刺」正是这一类。
         if (on) {
           const s = t * 3;
@@ -329,6 +386,14 @@ export function applyClusterIndex(
     item.mesh.visible = st.visTris > 0 && item.mesh.userData.lodLevel === 0;
     rebuilt++;
   }
+  // 诊断：换房间那一下到底重排了多少块、跳过了多少块、花了多少毫秒（飞行回放调参用）。
+  (globalThis as { __vbspClusterRebuild?: unknown }).__vbspClusterRebuild = {
+    rebuilt,
+    skipped,
+    total: items.length,
+    ms: (typeof performance !== 'undefined' ? performance.now() : 0) - t0,
+    pvsRow: row ? row.length : 0,
+  };
   return rebuilt;
 }
 
