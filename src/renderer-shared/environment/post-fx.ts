@@ -271,9 +271,14 @@ export class BloomPostFx {
     scene.overrideMaterial = override;
     for (const obj of hidden) obj.visible = true;
 
-    // ② 光效层：只画 GLOW_LAYER，深度测试相对上面的实体深度。
+    // ② 光效层：只画 GLOW_LAYER，深度测试相对上面①写好的实体深度。
+    //    必须先关 autoClear：render() 默认会清色/深度，一清就把①的预渲深度抹掉，
+    //    遮挡等于没做（实测 bloom on/off 在岩壁后仍有 2–4% 差异）。
     camera.layers.set(GLOW_LAYER);
+    const prevAutoClear = this.renderer.autoClear;
+    this.renderer.autoClear = false;
     this.renderer.render(scene, camera);
+    this.renderer.autoClear = prevAutoClear;
     camera.layers.mask = this.prevMask.mask;
     scene.background = background;
     scene.fog = fog;
