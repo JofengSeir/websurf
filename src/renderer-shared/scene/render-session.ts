@@ -32,6 +32,7 @@ import {
   setSceneEnvironment,
 } from '../environment/scene-environment.js';
 import { renderSkyPass, type MapFogParams } from '../environment/render-sky-pass.js';
+import { BloomPostFx, DEFAULT_BLOOM_PARAMS, markGlowMeshes, type BloomParams } from '../environment/post-fx.js';
 import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../environment/miniature-sky.js';
 import {
   CULL_DISTANCE_PVS_DEFAULT,
@@ -216,6 +217,14 @@ export class RenderSession {
   private spotBeams: THREE.Group | null = null;
   private skyParams: SkyCameraParams | null = null;
   private skyFog: THREE.Fog | null = null;
+  /**
+   * 屏幕泛光（HDR 亮部软晕）。起源的「光效看起来更亮」大半来自 bloom：我们把场景画进
+   * 半浮点缓冲再提取亮部做两级模糊，最后合成回画布（见 `environment/post-fx.ts`）。
+   * 懒建于首帧（要等 renderer 尺寸确定）；`setBloom` 可运行期开关。
+   */
+  private bloomFx: BloomPostFx | null = null;
+  /** 上一次标记到 `GLOW_LAYER` 的加色光效 mesh 数（变化时打日志，便于核对）。 */
+  private glowMarked = 0;
 
   private bbox = new THREE.Box3();
   private maxDim = 0;
@@ -358,6 +367,9 @@ export class RenderSession {
         offset: [+entry.map.offset.x.toFixed(4), +entry.map.offset.y.toFixed(4)],
         wrap: entry.map.wrapS,
       }));
+    // 诊断：泛光参数读写/开关（实例懒建于第一次传参时；无参读当前参数）。
+    (globalThis as { __vbspBloom?: (p?: Partial<BloomParams> | null) => BloomParams | null }).__vbspBloom = (p) =>
+      p === undefined ? this.bloom : this.setBloom(p);
     // 诊断：`momentary_rot_button` 的 pivot 清单与当前角度（验证符文盘真的在转）。
     (globalThis as { __vbspRotButtons?: unknown }).__vbspRotButtons = () =>
       this.rotButtons.map((entry) => ({
@@ -726,6 +738,46 @@ export class RenderSession {
     return this.pvsOverlay.enabled;
   }
 
+  /** 泛光诊断/调参口（debug HUD、CDP A/B 用）。 */
+  get bloom(): BloomParams | null {
+    return this.bloomFx?.currentParams ?? null;
+  }
+
+  /**
+   * 运行期开关/调参泛光：`null` 关闭（回到直画），对象则按参数启用并更新。
+   * 关闭后再打开需要重建，故这里只改参数、不销毁实例（强度 0 = 关闭）。
+   */
+  setBloom(params: Partial<BloomParams> | null): BloomParams | null {
+    if (params === null) {
+      this.bloomFx?.setParams({ strength: 0 });
+      return this.bloomFx?.currentParams ?? null;
+    }
+    const fx = this.getOrCreateBloomFx();
+    fx?.setParams(params);
+    return fx?.currentParams ?? null;
+  }
+
+  /** 懒建泛光实例（首次 setBloom 时；上下文不支持时返回 null）。 */
+  private getOrCreateBloomFx(): BloomPostFx | null {
+    if (this.bloomFx) return this.bloomFx;
+    try {
+      this.bloomFx = new BloomPostFx(this.renderer, DEFAULT_BLOOM_PARAMS);
+      return this.bloomFx;
+    } catch (err) {
+      console.warn('[render] 泛光初始化失败，回退直画：', err);
+      this.bloomFx = null;
+      return null;
+    }
+  }
+
+  /** 当前可用的泛光实例（未创建或强度 0 时返回 null ⇒ 走直画路径）。 */
+  private ensureBloomFx(): BloomPostFx | null {
+    const fx = this.bloomFx;
+    if (!fx) return null;
+    fx.ensureSize();
+    return fx.enabled ? fx : null;
+  }
+
   /**
    * 每帧绘制：可见性 → 近平面贴墙（隔帧）→ 起源两遍法（天空相机 + 主相机）。
    *
@@ -776,6 +828,10 @@ export class RenderSession {
     // 水面 onBeforeRender 里，嵌套 render 状态被外层半途状态污染且随视角变化，§12.9）。
     renderWaterFramePasses(this.renderer, this.scene, this.camera);
     mark('water');
+    // 泛光：场景先画进半浮点缓冲（天空两遍法也画进去），再统一合成到画布。
+    // 没有 bloomFx（强度 0 / 上下文不支持）时走原来的直画路径。
+    const bloom = this.ensureBloomFx();
+    bloom?.begin();
     this.skyFog = renderSkyPass({
       renderer: this.renderer,
       scene: this.scene,
@@ -785,6 +841,18 @@ export class RenderSession {
       skyParams: this.skyParams,
       skyFog: this.skyFog,
     });
+    if (bloom) {
+      // 光效层每次叠加前刷新：粒子/激光由各端在装配之后挂进 scene，晚于载图，
+      // 所以不能在 loadScene 里标一次了事。markGlowMeshes 只做 layer.enable，幂等且便宜。
+      const marked = markGlowMeshes(this.scene);
+      if (marked !== this.glowMarked) {
+        this.glowMarked = marked;
+        (globalThis as { __vbspGlowMarked?: number }).__vbspGlowMarked = marked;
+        console.info(`[${this.app}][bloom] 加色光效 mesh：${marked} 个`);
+      }
+      bloom.renderGlow(this.scene, this.camera);
+    }
+    bloom?.end();
     mark('sky');
     if (dbgOn) {
       times.frame = +(performance.now() - tFrame).toFixed(2);
@@ -1345,6 +1413,8 @@ export class RenderSession {
   /** 页面卸载：释放当前图 + renderer。 */
   dispose(): void {
     this.disposeScene();
+    this.bloomFx?.dispose();
+    this.bloomFx = null;
     this.renderer.dispose();
   }
 
