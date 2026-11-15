@@ -87,6 +87,28 @@ export interface NearPlaneOptions {
   vertical?: boolean;
 }
 
+/** 三角形数量少于这个值的块不值得建网格（线性扫更快）。 */
+const NEAR_GRID_MIN_TRIS = 512;
+
+/** `probeChunk` 用的块级三角形空间网格（局部空间，见 `triGridOf`）。 */
+interface TriGrid {
+  id: string;
+  minX: number;
+  minY: number;
+  minZ: number;
+  csx: number;
+  csy: number;
+  csz: number;
+  nx: number;
+  ny: number;
+  nz: number;
+  /** 每格在 `items` 里的起始下标（长度 cells+1，前缀和）。 */
+  start: Int32Array;
+  items: Int32Array;
+  /** 跨格太多的大三角形（每次探测都扫）。 */
+  big: Int32Array;
+}
+
 export class NearPlaneController {
   /** 探测距离（HU，`setParams` 可改；面板「近平面探测距离」量程 16..128）。 */
   private nearProbeDist = NEAR_PROBE_DIST_DEFAULT;
@@ -131,7 +153,92 @@ export class NearPlaneController {
   }
 
   /**
-   * 单块探测：先按三角形 AABB 把「离探测球 probe 之外」的面丢掉，再对剩下的几十个面求
+   * 块级三角形空间网格（局部空间），挂在 `mesh.userData.__nearGrid`，按 geometry.uuid 失效。
+   *
+   * 为什么：`probeChunk` 原本每次探测都把整块三角形扫一遍（合并块常在 1~3 万面），
+   * CPU profile 里 `probeChunk` + `getVertexPosition` + `intersectTriangle` 合计约占主线程 12%。
+   * 三角形在块内分布稀疏，而探测球半径只有 `probe`（默认 100 HU）⇒ 用网格把候选三角形
+   * 收窄到「球覆盖的格子 + 邻格 + 少量大三角形」，结果与全扫**完全等价**（后面仍做精确
+   * 点到三角形距离），只是少了十几万次 AABB 比较。
+   */
+  private triGridOf(mesh: THREE.Mesh, geom: THREE.BufferGeometry, pos: THREE.BufferAttribute, idx: ArrayLike<number> | undefined, triCount: number): TriGrid | null {
+    if (triCount < NEAR_GRID_MIN_TRIS) return null;
+    const cached = mesh.userData.__nearGrid as (TriGrid & { id: string }) | undefined;
+    if (cached && cached.id === geom.uuid) return cached;
+    if (!geom.boundingBox) geom.computeBoundingBox();
+    const bb = geom.boundingBox;
+    if (!bb) return null;
+    const lenX = Math.max(bb.max.x - bb.min.x, 1e-3);
+    const lenY = Math.max(bb.max.y - bb.min.y, 1e-3);
+    const lenZ = Math.max(bb.max.z - bb.min.z, 1e-3);
+    // 目标「每格约 1 个三角形」；单轴格数封顶 64，避免超长块产生百万格。
+    const ideal = Math.cbrt((lenX * lenY * lenZ) / triCount) * 1.4;
+    const cellSize = Math.min(Math.max(ideal, 4), Math.max(lenX, lenY, lenZ) / 4);
+    const nx = Math.min(64, Math.max(1, Math.ceil(lenX / cellSize)));
+    const ny = Math.min(64, Math.max(1, Math.ceil(lenY / cellSize)));
+    const nz = Math.min(64, Math.max(1, Math.ceil(lenZ / cellSize)));
+    const csx = lenX / nx;
+    const csy = lenY / ny;
+    const csz = lenZ / nz;
+    const arr = pos.array as ArrayLike<number>;
+    const cellCount = nx * ny * nz;
+    const counts = new Int32Array(cellCount + 1);
+    const bigIdx: number[] = [];
+    const forEachCell = (t: number, visit: (cell: number) => void): void => {
+      const i0 = idx ? idx[t * 3] : t * 3;
+      const i1 = idx ? idx[t * 3 + 1] : t * 3 + 1;
+      const i2 = idx ? idx[t * 3 + 2] : t * 3 + 2;
+      const ax = arr[i0 * 3], ay = arr[i0 * 3 + 1], az = arr[i0 * 3 + 2];
+      const bx = arr[i1 * 3], by = arr[i1 * 3 + 1], bz = arr[i1 * 3 + 2];
+      const cx = arr[i2 * 3], cy = arr[i2 * 3 + 1], cz = arr[i2 * 3 + 2];
+      const loX = Math.min(ax, bx, cx), hiX = Math.max(ax, bx, cx);
+      const loY = Math.min(ay, by, cy), hiY = Math.max(ay, by, cy);
+      const loZ = Math.min(az, bz, cz), hiZ = Math.max(az, bz, cz);
+      const x0 = Math.max(0, Math.min(nx - 1, Math.floor((loX - bb.min.x) / csx)));
+      const x1 = Math.max(0, Math.min(nx - 1, Math.floor((hiX - bb.min.x) / csx)));
+      const y0 = Math.max(0, Math.min(ny - 1, Math.floor((loY - bb.min.y) / csy)));
+      const y1 = Math.max(0, Math.min(ny - 1, Math.floor((hiY - bb.min.y) / csy)));
+      const z0 = Math.max(0, Math.min(nz - 1, Math.floor((loZ - bb.min.z) / csz)));
+      const z1 = Math.max(0, Math.min(nz - 1, Math.floor((hiZ - bb.min.z) / csz)));
+      if ((x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) > 27) {
+        // 跨太多格的大三角形（水面/贴墙大面）：单独登记，每次探测都扫，避免漏
+        bigIdx.push(t);
+        return;
+      }
+      for (let z = z0; z <= z1; z++) {
+        for (let y = y0; y <= y1; y++) {
+          const row = (z * ny + y) * nx;
+          for (let x = x0; x <= x1; x++) visit(row + x);
+        }
+      }
+    };
+    for (let t = 0; t < triCount; t++) forEachCell(t, (cell) => counts[cell + 1]++);
+    for (let c = 0; c < cellCount; c++) counts[c + 1] += counts[c];
+    const startOffset = Int32Array.from(counts);
+    const fillCursor = Int32Array.from(counts);
+    const items = new Int32Array(counts[cellCount]);
+    for (let t = 0; t < triCount; t++) forEachCell(t, (cell) => { items[fillCursor[cell]++] = t; });
+    const grid = {
+      id: geom.uuid,
+      minX: bb.min.x,
+      minY: bb.min.y,
+      minZ: bb.min.z,
+      csx,
+      csy,
+      csz,
+      nx,
+      ny,
+      nz,
+      start: startOffset,
+      items,
+      big: Int32Array.from(bigIdx),
+    };
+    mesh.userData.__nearGrid = grid;
+    return grid;
+  }
+
+  /**
+   * 逐块探测：先按三角形 AABB 把「离探测球 probe 之外」的面丢掉，再对剩下的几十个面求
    * **点到三角形最近距离**，返回最近表面距离（无命中为 `Infinity`；非等比缩放返回 `NaN` 由调用方回退）。
    *
    * 为什么不用 `Raycaster.intersectObjects`：它会对传入 mesh 的**全部**三角形求交。合并块常在
@@ -161,7 +268,7 @@ export class NearPlaneController {
     const tris = this._nearTris;
     tris.length = 0;
     const reach = localProbe * localProbe;
-    for (let t = 0; t < triCount; t++) {
+    const pushTri = (t: number): void => {
       const i0 = idx ? idx[t * 3] : t * 3;
       const i1 = idx ? idx[t * 3 + 1] : t * 3 + 1;
       const i2 = idx ? idx[t * 3 + 2] : t * 3 + 2;
@@ -169,11 +276,41 @@ export class NearPlaneController {
       const bx = arr[i1 * 3], by = arr[i1 * 3 + 1], bz = arr[i1 * 3 + 2];
       const cx = arr[i2 * 3], cy = arr[i2 * 3 + 1], cz = arr[i2 * 3 + 2];
       // 三角形 AABB 到球心的平方距离（分量钳制）——球外 ⇒ 最近表面距离必然 > probe，丢掉
-      const dx = ox < Math.min(ax, bx, cx) ? Math.min(ax, bx, cx) - ox : ox > Math.max(ax, bx, cx) ? ox - Math.max(ax, bx, cx) : 0;
-      const dy = oy < Math.min(ay, by, cy) ? Math.min(ay, by, cy) - oy : oy > Math.max(ay, by, cy) ? oy - Math.max(ay, by, cy) : 0;
-      const dz = oz < Math.min(az, bz, cz) ? Math.min(az, bz, cz) - oz : oz > Math.max(az, bz, cz) ? oz - Math.max(az, bz, cz) : 0;
-      if (dx * dx + dy * dy + dz * dz > reach) continue;
+      const loX = ax < bx ? (ax < cx ? ax : cx) : bx < cx ? bx : cx;
+      const hiX = ax > bx ? (ax > cx ? ax : cx) : bx > cx ? bx : cx;
+      const loY = ay < by ? (ay < cy ? ay : cy) : by < cy ? by : cy;
+      const hiY = ay > by ? (ay > cy ? ay : cy) : by > cy ? by : cy;
+      const loZ = az < bz ? (az < cz ? az : cz) : bz < cz ? bz : cz;
+      const hiZ = az > bz ? (az > cz ? az : cz) : bz > cz ? bz : cz;
+      const dx = ox < loX ? loX - ox : ox > hiX ? ox - hiX : 0;
+      const dy = oy < loY ? loY - oy : oy > hiY ? oy - hiY : 0;
+      const dz = oz < loZ ? loZ - oz : oz > hiZ ? oz - hiZ : 0;
+      if (dx * dx + dy * dy + dz * dz > reach) return;
       tris.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+    };
+    const grid = this.triGridOf(mesh, geom, pos, idx, triCount);
+    if (grid) {
+      // 球覆盖的格子再往外扩 1 格：三角形按「自身 AABB 覆盖的格子」登记，扩一格保证不漏边界。
+      const gx0 = Math.max(0, Math.floor((ox - localProbe - grid.minX) / grid.csx) - 1);
+      const gx1 = Math.min(grid.nx - 1, Math.floor((ox + localProbe - grid.minX) / grid.csx) + 1);
+      const gy0 = Math.max(0, Math.floor((oy - localProbe - grid.minY) / grid.csy) - 1);
+      const gy1 = Math.min(grid.ny - 1, Math.floor((oy + localProbe - grid.minY) / grid.csy) + 1);
+      const gz0 = Math.max(0, Math.floor((oz - localProbe - grid.minZ) / grid.csz) - 1);
+      const gz1 = Math.min(grid.nz - 1, Math.floor((oz + localProbe - grid.minZ) / grid.csz) + 1);
+      if (gx0 <= gx1 && gy0 <= gy1 && gz0 <= gz1) {
+        for (let z = gz0; z <= gz1; z++) {
+          for (let y = gy0; y <= gy1; y++) {
+            const row = (z * grid.ny + y) * grid.nx;
+            const from = grid.start[row + gx0];
+            const to = grid.start[row + gx1 + 1];
+            for (let k = from; k < to; k++) pushTri(grid.items[k]);
+          }
+        }
+      }
+      const big = grid.big;
+      for (let k = 0; k < big.length; k++) pushTri(big[k]);
+    } else {
+      for (let t = 0; t < triCount; t++) pushTri(t);
     }
     if (tris.length === 0) return Infinity;
     let bestSq = Infinity;
