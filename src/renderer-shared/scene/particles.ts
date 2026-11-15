@@ -499,6 +499,35 @@ function makeGlowTexture(): THREE.Texture {
 }
 
 /**
+ * 柱底「白热光球」的 sprite 贴图。
+ *
+ * 来源（pcf-scout task-15 / `BASE_BALL.md`）：实机那颗球是 `tendies_endparticle04`
+ * ——`render_animated_sprites` + `particle_glow_11`，24–32 个 1600 HU 的加法光斑叠在同一处，
+ * 于是中心直接饱和成纯白：白核直径实测 531±30 HU、过曝像素占球 bbox 61–64%、粉紫晕到 ~400 HU。
+ * stock `particle_glow_11` 的 VTF 不在 pakfile，这里按「硬核 + 陡肩 + 长尾」近似：
+ * 半径 34% 以内 alpha 全 1（对应 1600×0.34≈540 HU 白核），之后快速衰减，尾部留到边缘。
+ */
+function makeBallTexture(): THREE.Texture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.Texture();
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0.0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.34, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.5, 'rgba(255,244,252,0.55)');
+  gradient.addColorStop(0.72, 'rgba(240,220,255,0.18)');
+  gradient.addColorStop(1.0, 'rgba(220,200,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/**
  * 粒子链 ribbon：模拟 PCF rope 的发射/重力/寿命，每帧重建面向相机的条带；
  * 颜色 = 顶点点色 × 生命周期 alpha（fade in 0.25s / fade out 到 1s，最后边缘到 0）。
  */
@@ -1036,6 +1065,7 @@ export class ParticleSystems {
   readonly root = new THREE.Group();
   private readonly beamTexture: THREE.Texture;
   private readonly glowTexture: THREE.Texture;
+  private readonly ballTexture: THREE.Texture;
   private readonly softBarTexture: THREE.Texture;
   private readonly ropes: RopeRibbon[] = [];
   private readonly glowClusters: GlowCluster[] = [];
@@ -1052,6 +1082,7 @@ export class ParticleSystems {
     this.root.name = 'particle-systems';
     this.beamTexture = makeBeamTexture();
     this.glowTexture = makeGlowTexture();
+    this.ballTexture = makeBallTexture();
     this.softBarTexture = makeSoftBarTexture();
     this.hazeTexture = makeHazeTexture();
 
@@ -1075,28 +1106,42 @@ export class ParticleSystems {
         const inner = new RopeRibbon(entity, rope, this.beamTexture, 0.10, 0.10);
         this.ropes.push(core, halo, plateau, inner);
         this.root.add(core.mesh, halo.mesh, plateau.mesh, inner.mesh);
-        // 光柱底部的亮核
-        const baseGlow = new THREE.Sprite(
-          new THREE.SpriteMaterial({
-            map: this.glowTexture,
-            color: 0xe8ecff,
-            transparent: true,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            fog: false,
-            toneMapped: false,
-            // round-3（task-11）：baseGlow 与 flares 是「柱底大亮核」的非 PCF 近似（源里是 04 的
-            // radius 800 大光斑 + 6 条 sprite_trail 白雾），叠加后是 wEff/底部饱和的一次因；
-            // task-14 增益：0.07→0.10、scale 330→350 —— 柱底 ROOT meanL 196 vs ref 252 的直接缺口。
-            opacity: 0.10,
-          }),
-        );
-        baseGlow.position.set(entity.origin[0], entity.origin[1] + 90, entity.origin[2]);
-        // 360→330：task-8 取证（LOOK_FORENSICS §5）把底部亮核略收小，避免近景过曝。
-        baseGlow.scale.setScalar(330);
-        baseGlow.renderOrder = 12;
-        this.root.add(baseGlow);
-        this.baseGlows.push(baseGlow);
+        // 柱底「白热光球」= `tendies_endparticle04`（pcf-scout task-15 实测）：
+        // render_animated_sprites + particle_glow_11，radius 800（半宽 ⇒ 单 sprite 1600 HU），
+        // 64 发/s、寿命 0.25–0.5s、max 32，位置 Box z −400..−512 ⇒ 24–32 个 1600 HU 加法光斑
+        // 叠在同一点，中心直接饱和。实机白核直径 531±30 HU、过曝占 bbox 61–64%、粉紫晕到 ~400 HU。
+        // 这里用 28 个 sprite（scale 1500–1700、per-sprite opacity 0.078 ⇒ 中心 28×0.078≈2.2 叠加）
+        // 收拢在 ±70 HU 内，得到硬白核 + 外圈紫晕；不再用「单张大光晕」近似。
+        const ball = new THREE.Group();
+        ball.name = 'base-ball';
+        ball.position.set(entity.origin[0], entity.origin[1], entity.origin[2]);
+        const BALL_SPRITES = 28;
+        for (let i = 0; i < BALL_SPRITES; i += 1) {
+          const sprite = new THREE.Sprite(
+            new THREE.SpriteMaterial({
+              map: this.ballTexture,
+              color: 0xffeef6,
+              transparent: true,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+              fog: false,
+              toneMapped: false,
+              opacity: 0.078,
+            }),
+          );
+          const angle = i * 2.399963; // 黄金角散布，避免规则条纹
+          const spread = i % 6 === 0 ? 0 : 20 + (i % 5) * 12;
+          sprite.position.set(
+            Math.cos(angle) * spread,
+            40 + (i % 5) * 24,
+            Math.sin(angle) * spread,
+          );
+          sprite.scale.setScalar(1500 + (i % 7) * 32);
+          sprite.renderOrder = 12;
+          ball.add(sprite);
+          this.baseGlows.push(sprite);
+        }
+        this.root.add(ball);
         const motes = new BeamMotes(new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]), rope.width, 4200, 42, this.glowTexture, 0xd8ccff);
         this.root.add(motes.points);
         this.motes.push(motes);
@@ -1247,6 +1292,7 @@ export class ParticleSystems {
     this.root.clear();
     this.beamTexture.dispose();
     this.glowTexture.dispose();
+    this.ballTexture.dispose();
     for (const motes of this.motes) motes.dispose();
     for (const flare of this.flares) {
       for (const child of flare.children) {
