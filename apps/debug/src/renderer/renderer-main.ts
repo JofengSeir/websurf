@@ -56,6 +56,7 @@ import { PlaneInspector } from './plane-inspector.js';
 import type { LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
 import { ParticleSystems, collectParticleEntities } from '../../../../src/renderer-shared/scene/particles.js';
+import { LaserBeams, collectLaserBeams } from '../../../../src/renderer-shared/scene/lasers.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」
@@ -201,6 +202,10 @@ export class RendererMain {
   private particleSystems: ParticleSystems | null = null;
   /** 粒子推进用的上一帧墙钟（与物理步长独立，物理停走时粒子仍动）。 */
   private particleLastMs = 0;
+  /** `env_laser` 加法光束（`src/renderer-shared/scene/lasers.ts`）；无可见梁时为 null。 */
+  private laserBeams: LaserBeams | null = null;
+  /** 光束推进用的上一帧墙钟（UV 滚动；与粒子钟独立）。 */
+  private laserLastMs = 0;
 
   // ── 主线程物理线（渲染直读 state()，无插值副本）──
   /** 渲染物理实例：`buildPredictionWorld` 里构造并 `build_world`，`disposeScene` 置空。 */
@@ -398,6 +403,9 @@ export class RendererMain {
     this.particleSystems?.dispose();
     this.particleSystems = null;
     this.particleLastMs = 0;
+    this.laserBeams?.dispose();
+    this.laserBeams = null;
+    this.laserLastMs = 0;
     // 渲染资源（根/天空/环境/渲染列表/PVS/可见性）全部由共享会话释放
     this.session?.disposeScene();
     this.bspModelScene = null;
@@ -504,6 +512,7 @@ export class RendererMain {
     this.onSceneLoaded?.(result.bbox.min.y);
     this.setupEntitySystem(data.entityIoJson);
     this.setupParticleSystems(data.entityIoJson);
+    this.setupLaserBeams(data.entityIoJson);
     this.emitCullStats();
     return {
       diagonal: result.diagonal,
@@ -546,6 +555,25 @@ export class RendererMain {
     this.particleSystems = systems;
     this.scene.add(systems.root);
     (globalThis as Record<string, unknown>)['__vbspParticles'] = systems;
+  }
+
+  /**
+   * 装配 `env_laser` 光束（见 `src/renderer-shared/scene/lasers.ts`）：
+   * 只画 `spawnflags 1` 的 start 实体，端点由 `LaserTarget` 解析；加载后对 BSP 主 mesh 做一次
+   * raycast 截断（等价 `UTIL_TraceLine`，静止地图无需每帧重算）。无可见梁时不建节点。
+   */
+  private setupLaserBeams(entityIoJson?: string): void {
+    this.laserBeams?.dispose();
+    this.laserBeams = null;
+    this.laserLastMs = 0;
+    if (!this.scene) return;
+    const beams = collectLaserBeams(entityIoJson);
+    if (beams.length === 0) return;
+    const lasers = new LaserBeams(beams);
+    lasers.trace(this.bspModelScene);
+    this.laserBeams = lasers;
+    this.scene.add(lasers.root);
+    (globalThis as Record<string, unknown>)['__vbspLasers'] = lasers;
   }
 
   /** 实体运行期统计（实体浏览器 / 诊断面板）；未装配返回 null。 */
@@ -699,6 +727,16 @@ export class RendererMain {
       this.needsRender = true;
     } else {
       this.particleLastMs = 0;
+    }
+
+    // ④-3 env_laser 光束：面向相机的窄带按相机重建；UV 滚动/端点截断在 `update` 内。
+    if (this.laserBeams) {
+      const ldt = this.laserLastMs === 0 ? 1 / 64 : Math.min((now - this.laserLastMs) / 1000, 0.1);
+      this.laserLastMs = now;
+      this.laserBeams.update(ldt, this.camera);
+      this.needsRender = true;
+    } else {
+      this.laserLastMs = 0;
     }
 
     // ⑤ 渲染：物理就绪后每帧都渲染；needsRender 只用于物理未就绪时的强制刷新。
