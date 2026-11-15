@@ -432,7 +432,11 @@ const spotUniforms = {
 	vbspDLightPos: { value: Array.from({ length: DLIGHT_MAX }, () => new THREE.Vector3()) },
 	vbspDLightColor: { value: Array.from({ length: DLIGHT_MAX }, () => new THREE.Color(0, 0, 0)) },
 	vbspDLightRange: { value: new Float32Array(DLIGHT_MAX) },
-	vbspDLightScale: { value: 0.35 },
+	// dlight 强度倍率。起源的 dlight 在 HDR + tonemap 之后只是一层淡光；我们直接把加色
+	// 叠在烘焙结果上。0.35→0.18 的 A/B（`cand_c` 机位，`.tmp/look_base_dlight.png` vs
+	// `.tmp/look_dlight018.png`）只改变 1.1% 像素，集中在光柱根部亮斑 —— 根部明显更接近
+	// 实机参考的柔和感，其余地面来自烘焙 lightmap、不受影响，故取 0.18。
+	vbspDLightScale: { value: 0.18 },
 };
 
 /**
