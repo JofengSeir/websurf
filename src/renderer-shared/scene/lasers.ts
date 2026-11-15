@@ -13,7 +13,12 @@
  *
  * 本图 12 对 `env_laser` 里只有 12 个 `spawnflags 1` 的 start 可见：width 0.5（→1 HU）、
  * rendercolor "203 249 254"、renderamt 100；另 12 个 `spawnflags 0` 的 endpoint 锚点不画。
- * 贴图 `sprites/laserbeam.spr` 不在 pakfile 里，这里用程序化横条贴图重建「亮核 + 柔边」。
+ *
+ * 观感口径（2026-11-16 用户明确要求）：**必须是硬边实线，不允许任何泛光/软晕**。
+ * 起源靠 HDR + bloom 把 1 HU 细梁晕成 2–4 px 软带，本工程没有 bloom、用户也不要补，
+ * 所以这里只画一条忠实宽度的核心带：贴图横向是阶梯硬边（对应 laser01 的 U 剖面），
+ * 几何半宽 = width，远处用「屏幕空间 ≥1 px 宽」兜底保证可见，但不加宽、不加软晕、
+ * 不叠第二层辉光 quad。
  */
 
 import * as THREE from 'three';
@@ -21,41 +26,20 @@ import * as THREE from 'three';
 import { parseEntityBlocks, parseVec3 } from './particles.js';
 
 /**
- * 辉光外扩半宽（HU）。Source 用 HDR + bloom 把 1 HU 的细梁「晕」到几个像素宽；
- * 本工程的加色管线没有 bloom，只画 Core 会在远处淡到看不见。这里在 Core（忠实 2×width）
- * 外面再叠一圈低强度加法 quad 模拟辉光 —— 几何宽度仍按 SDK，只补视觉上的发光扩散。
- *
- * task-8：按 `.tmp/pcf/LOOK_FORENSICS.md` §2/§3 的建议取 2–4 HU 区间上沿 4 HU
- * （实机 17 px 的梁几乎全是 bloom；我们此前 3 HU 在 2000+ HU 处仍只剩 1–2 px）。
+ * 屏幕空间最小**全宽**（px）：细梁在远处不足 1 px 时会随机闪烁甚至整条消失，
+ * 这里按到梁中点的距离反算最小半宽保证 1 px。只保证可见，不加宽、不产生软边。
  */
-const LASER_GLOW_HU = 4;
-/** 辉光强度（乘以 beam 颜色；加色混合下等价于 Alpha）。取证建议 0.10–0.20，取 0.20 上沿。 */
-const LASER_GLOW_INTENSITY = 0.20;
+const LASER_MIN_CORE_PX = 1;
 /**
- * Core 亮度补偿：PCF 颜色是 rendercolor×(renderamt/255)=0.392，几何宽度又只有 2×width=1 HU；
- * 没有 bloom 时细芯在近/中距离偏暗。这里只给 Core 顶点色乘 1.2（几何宽度不变），
- * 相当于补回一部分 bloom 的能量，见 LOOK_FORENSICS §3 的「实机 17 px 几乎全是 bloom」。
+ * Core 亮度补偿：PCF 颜色是 rendercolor×(renderamt/255)=0.392，几何宽度只有 2×width=1 HU。
+ * 改成硬边阶梯剖面后只剩中心 30% 满亮（不再有第二层辉光 quad 叠亮度），实测峰值从 L≈240
+ * 掉到 L≈115 偏暗，乘 3 让中心亮带饱和到接近白色（宽度与边缘硬度不变）。
  */
-const LASER_CORE_BOOST = 1.2;
-/**
- * 远距可见性补偿（近似缺失的 HDR bloom）。Source 里 1 HU 细梁靠 HDR+bloom 在中远距离仍有
- * 2–4 px 的软晕；本工程没有 bloom，2200 HU 处 Core 只剩 ~0.3 px、4 HU Glow 只有 ~2.6 px，
- * 实测 L≈80 几乎不可见（见 `.tmp/look_after_auto42_far.png`）。这里做两件事，几何 Core 仍
- * 按 SDK 的 1 HU 不变：
- *  a) 屏幕空间最小 Glow 半宽：按相机 fov 与到梁中点的距离反算，保证 Glow 全宽 ≥ 4 px；
- *  b) 距离增益：500 HU 内增益 1（近景保持取证值），之后线性放大到最多 12 倍（≈2000 HU 以上），
- *     只在加色四边形的顶点色上乘，等效于把 bloom 扩散的能量手工补回来。
- */
-const LASER_MIN_GLOW_PX = 4;
-const LASER_FAR_GAIN_START_HU = 500;
-const LASER_FAR_END_HU = 2000;
-const LASER_FAR_GAIN_MAX = 12;
-/** 最小屏幕宽反算出的 Glow 半宽上限，避免极远时 quad 宽到穿帮。 */
-const LASER_GLOW_HU_MAX = 60;
+const LASER_CORE_BOOST = 3;
 /**
  * 中距亮度增益（task-14 / BRIGHTNESS_GAP §7 #9）：Auto42 实测 near/far 已对齐起源
  * （178.9/170.5 vs ref 174.4），只有 mid（≈600 HU）的 150.3 偏低 14%。这里只在中距
- * 窗口对 Core/Glow 顶点色乘 ×1.15（300–1500 HU，两端各留 150 HU 平滑过渡），
+ * 窗口对顶点色乘 ×1.15（300–1500 HU，两端各留 150 HU 平滑过渡），
  * near(<300) 与 far(>1500) 的强度保持不变。
  */
 const LASER_MID_GAIN = 1.15;
@@ -82,7 +66,15 @@ export interface LaserBeam {
   hitMaterial?: string;
 }
 
-/** `sprites/laserbeam.spr` 缺失，程序化重建：横向亮核 + 柔边，纵向轻微亮带。 */
+/**
+ * `sprites/laserbeam.spr` 缺失，按 pakfile 里唯一可用的 `laser01.vtf`（32×64 DXT5）重建：
+ * 横向是**阶梯亮带**而不是高斯软边——中心 30% 满亮、往两侧掉到约 0.40 的肩部、再往外迅速
+ * 归零（对应 scout 实测 laser01 的 U 剖面：U3-4 L240 / U0-1 L97 / U18-21 黑）。加色混合下
+ * 亮度全部编码进 RGB，alpha 恒 255；纵向轻微明暗只为避免完全平条的塑料感。
+ *
+ * 这样一条 1 HU 宽的忠实四边形在近处仍是一条**硬边细线**（中心亮带 + 一点很窄的肩），
+ * 不会像高斯剖面那样把整个四边形铺成一片软晕——用户要求坡上激光「非常实」。
+ */
 function makeLaserTexture(): THREE.Texture {
   const size = 64;
   const canvas = document.createElement('canvas');
@@ -93,19 +85,21 @@ function makeLaserTexture(): THREE.Texture {
   const img = ctx.createImageData(size, size);
   for (let y = 0; y < size; y++) {
     const v = y / (size - 1);
-    // 贴图 V 方向一个周期内轻微明暗（laserbeam sprite 的脉冲观感，幅度压小以免出现横带）
-    const band = 0.88 + 0.12 * (0.5 + 0.5 * Math.cos(v * Math.PI * 2));
+    const band = 0.92 + 0.08 * (0.5 + 0.5 * Math.cos(v * Math.PI * 2));
     for (let x = 0; x < size; x++) {
       const u = x / (size - 1);
-      const d = u - 0.5;
-      const core = Math.exp(-Math.pow(d / 0.10, 2));
-      const halo = Math.exp(-Math.pow(d / 0.34, 2));
-      const profile = Math.min(1, core * 1.15 + halo * 0.42) * band;
+      const d = Math.abs(u - 0.5) * 2;
+      // 阶梯剖面：中心 30% = 1.0，肩部到 62% 线性降到 0.40，62% 之后快速归零。
+      let profile: number;
+      if (d <= 0.3) profile = 1;
+      else if (d <= 0.62) profile = 1 - ((d - 0.3) / 0.32) * 0.6;
+      else profile = Math.max(0, 0.4 * (1 - (d - 0.62) / 0.16));
+      const l = Math.round(profile * band * 255);
       const i = (y * size + x) * 4;
-      img.data[i] = 255;
-      img.data[i + 1] = 255;
-      img.data[i + 2] = 255;
-      img.data[i + 3] = Math.max(0, Math.min(255, Math.round(profile * 255)));
+      img.data[i] = l;
+      img.data[i + 1] = l;
+      img.data[i + 2] = l;
+      img.data[i + 3] = 255;
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -219,26 +213,20 @@ export class LaserBeams {
     this.root.name = 'env-lasers';
     this.beams = beams;
     this.texture = makeLaserTexture();
-    const vertsPerBeam = 8; // 前 4 = Core，后 4 = Glow
+    const vertsPerBeam = 4;
     this.positions = new Float32Array(beams.length * vertsPerBeam * 3);
     this.colors = new Float32Array(beams.length * vertsPerBeam * 3);
     const uvs = new Float32Array(beams.length * vertsPerBeam * 2);
     const indices: number[] = [];
     for (let i = 0; i < beams.length; i++) {
       const v = i * vertsPerBeam;
-      // 每个 quad 的四角顺序：start+perp, start-perp, end-perp, end+perp（U 横跨宽度，V 沿长度）
+      // 四角顺序：start+perp, start-perp, end-perp, end+perp（U 横跨宽度，V 沿长度）
       uvs.set([0, 0, 1, 0, 1, 1, 0, 1], i * vertsPerBeam * 2);
-      uvs.set([0, 0, 1, 0, 1, 1, 0, 1], (i * vertsPerBeam + 4) * 2);
       indices.push(v, v + 1, v + 2, v, v + 2, v + 3);
-      indices.push(v + 4, v + 5, v + 6, v + 4, v + 6, v + 7);
       const c = beams[i].color;
       for (let k = 0; k < 4; k++) {
-        // Core：忠实颜色 ×1.2 亮度补偿（几何宽度仍是 2×width，见 LASER_CORE_BOOST）。
+        // 忠实颜色 × 亮度补偿（几何宽度仍是 2×width，见 LASER_CORE_BOOST）。
         this.colors.set([c.r * LASER_CORE_BOOST, c.g * LASER_CORE_BOOST, c.b * LASER_CORE_BOOST], (i * vertsPerBeam + k) * 3);
-        this.colors.set(
-          [c.r * LASER_GLOW_INTENSITY, c.g * LASER_GLOW_INTENSITY, c.b * LASER_GLOW_INTENSITY],
-          (i * vertsPerBeam + 4 + k) * 3,
-        );
       }
     }
     const geometry = new THREE.BufferGeometry();
@@ -335,12 +323,12 @@ export class LaserBeams {
     const camPos = camera.position;
     for (let i = 0; i < this.beams.length; i++) {
       const beam = this.beams[i];
-      const base = i * 8;
+      const base = i * 4;
       dir.subVectors(beam.clippedEnd, beam.start);
       const length = dir.length();
       if (length < 0.1) {
-        // 退化梁：八个顶点都收到起点，不可见
-        for (let k = 0; k < 8; k++) {
+        // 退化梁：四个顶点都收到起点，不可见
+        for (let k = 0; k < 4; k++) {
           const off = (base + k) * 3;
           pa[off] = beam.start.x;
           pa[off + 1] = beam.start.y;
@@ -357,10 +345,9 @@ export class LaserBeams {
       mid.addVectors(beam.start, beam.clippedEnd).multiplyScalar(0.5);
       const midDist = Math.max(1, mid.distanceTo(camPos));
       const pxPerHU = focalPx / midDist;
-      const minHalfHU = (LASER_MIN_GLOW_PX * 0.5) / Math.max(1e-4, pxPerHU);
-      const halfCore = beam.width;
-      // Glow = 忠实宽度 + 取证辉光；若远处仍不足 3 px 宽，则用屏幕空间下限反算的半宽兜底。
-      const halfGlow = Math.min(LASER_GLOW_HU_MAX, Math.max(beam.width + LASER_GLOW_HU, minHalfHU));
+      // 远处不足 1 px 时用屏幕空间下限反算半宽（只保证可见，不是泛光软边）。
+      const minHalfHU = (LASER_MIN_CORE_PX * 0.5) / Math.max(1e-4, pxPerHU);
+      const halfCore = Math.max(beam.width, minHalfHU);
       const writeQuad = (vertBase: number, half: number): void => {
         const b = vertBase * 3;
         // 0=start+perp, 1=start-perp, 2=end-perp, 3=end+perp
@@ -378,17 +365,12 @@ export class LaserBeams {
         pa[b + 11] = beam.clippedEnd.z + perp.z * half;
       };
       writeQuad(base, halfCore);
-      writeQuad(base + 4, halfGlow);
-      // 距离增益只乘在 Glow 顶点色上：500 HU 内 gain=1（取证强度 0.20 不变），到 2000 HU
-      // 线性放大到 12×，把缺失的 HDR bloom 能量手工补回来（见文件头 LASER_FAR_GAIN_* 注释）。
-      const farT = Math.min(1, Math.max(0, (midDist - LASER_FAR_GAIN_START_HU) / (LASER_FAR_END_HU - LASER_FAR_GAIN_START_HU)));
-      const gain = 1 + farT * (LASER_FAR_GAIN_MAX - 1);
       // 中距增益：300→450 HU 平滑升到 1.15，1200→1500 HU 平滑回到 1（near/far 不变）。
       const midIn = Math.min(1, Math.max(0, (midDist - LASER_MID_GAIN_RAMP_IN_HU) / (LASER_MID_GAIN_FULL_HU - LASER_MID_GAIN_RAMP_IN_HU)));
       const midOut = Math.min(1, Math.max(0, (midDist - LASER_MID_GAIN_FADE_START_HU) / (LASER_MID_GAIN_RAMP_OUT_HU - LASER_MID_GAIN_FADE_START_HU)));
       const midGain = 1 + (LASER_MID_GAIN - 1) * (midIn * (1 - midOut));
       const c = beam.color;
-      // Core 顶点色逐帧写（中距增益依赖相机距离）：忠实颜色 ×1.2 亮度补偿 × midGain。
+      // 顶点色逐帧写（中距增益依赖相机距离）：忠实颜色 × 亮度补偿 × midGain。
       const cr = c.r * LASER_CORE_BOOST * midGain;
       const cg = c.g * LASER_CORE_BOOST * midGain;
       const cb = c.b * LASER_CORE_BOOST * midGain;
@@ -398,15 +380,6 @@ export class LaserBeams {
         this.colors[off + 1] = cg;
         this.colors[off + 2] = cb;
       }
-      const gr = c.r * LASER_GLOW_INTENSITY * gain * midGain;
-      const gg = c.g * LASER_GLOW_INTENSITY * gain * midGain;
-      const gb = c.b * LASER_GLOW_INTENSITY * gain * midGain;
-      for (let k = 0; k < 4; k++) {
-        const off = (base + 4 + k) * 3;
-        this.colors[off] = gr;
-        this.colors[off + 1] = gg;
-        this.colors[off + 2] = gb;
-      }
     }
     const uvAttr = this.geometry.getAttribute('uv') as THREE.BufferAttribute;
     for (let i = 0; i < this.beams.length; i++) {
@@ -414,15 +387,11 @@ export class LaserBeams {
       const length = beam.clippedEnd.distanceTo(beam.start);
       const v0 = beam.scrollRate * this.elapsed;
       const v1 = v0 + length / 100;
-      const uvBase = i * 8;
+      const uvBase = i * 4;
       uvAttr.setXY(uvBase, 0, v0);
       uvAttr.setXY(uvBase + 1, 1, v0);
       uvAttr.setXY(uvBase + 2, 1, v1);
       uvAttr.setXY(uvBase + 3, 0, v1);
-      uvAttr.setXY(uvBase + 4, 0, v0);
-      uvAttr.setXY(uvBase + 5, 1, v0);
-      uvAttr.setXY(uvBase + 6, 1, v1);
-      uvAttr.setXY(uvBase + 7, 0, v1);
     }
     uvAttr.needsUpdate = true;
     (this.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
