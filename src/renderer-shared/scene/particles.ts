@@ -1065,10 +1065,14 @@ export class ParticleSystems {
         //   inner   = laser01 阶梯窄刃（补黑带细节）
         // 依据 `.tmp/pcf/LOOK_FORENSICS.md` §5：实机 w90=51 / w60=121 / w40=237 / wEff=236 HU，
         // 峰值中位 194 且无 L≥250。round-2 交付时 w90 已对齐，但 w60/w40 偏宽近 2 倍 ⇒ 本层拆分。
-        const core = new RopeRibbon(entity, rope, this.beamTexture, 0.06, 0.30);
-        const halo = new RopeRibbon(entity, rope, this.softBarTexture, 0.32, 0.60);
-        const plateau = new RopeRibbon(entity, rope, this.softBarTexture, 0.34, 0.44);
-        const inner = new RopeRibbon(entity, rope, this.beamTexture, 0.08, 0.10);
+        // task-14（BRIGHTNESS_GAP §7 增益表）：峰值/宽度已对齐，缺口是「整体强度」——
+        // ROI meanL 83.9 vs ref 89.4、rowFrac250 0.037 vs 0.090、ROOT meanL 196 vs 252。
+        // 故只加 opacity（不加宽，保住 w90≤65 / w60≥137.6 / w40≥206.5）；halo 宽度 0.60→0.70
+        // 是表中唯一加宽项，用于补 w60 缺口（178.9 vs ref 215.6）。
+        const core = new RopeRibbon(entity, rope, this.beamTexture, 0.10, 0.30);
+        const halo = new RopeRibbon(entity, rope, this.softBarTexture, 0.35, 0.70);
+        const plateau = new RopeRibbon(entity, rope, this.softBarTexture, 0.46, 0.44);
+        const inner = new RopeRibbon(entity, rope, this.beamTexture, 0.10, 0.10);
         this.ropes.push(core, halo, plateau, inner);
         this.root.add(core.mesh, halo.mesh, plateau.mesh, inner.mesh);
         // 光柱底部的亮核
@@ -1083,8 +1087,8 @@ export class ParticleSystems {
             toneMapped: false,
             // round-3（task-11）：baseGlow 与 flares 是「柱底大亮核」的非 PCF 近似（源里是 04 的
             // radius 800 大光斑 + 6 条 sprite_trail 白雾），叠加后是 wEff/底部饱和的一次因；
-            // 0.10→0.07（-30%），峰值缺口由 plateau 层补。
-            opacity: 0.07,
+            // task-14 增益：0.07→0.10、scale 330→350 —— 柱底 ROOT meanL 196 vs ref 252 的直接缺口。
+            opacity: 0.10,
           }),
         );
         baseGlow.position.set(entity.origin[0], entity.origin[1] + 90, entity.origin[2]);
@@ -1109,7 +1113,7 @@ export class ParticleSystems {
             depthWrite: false,
             fog: false,
             toneMapped: false,
-            opacity: 0.007,
+            opacity: 0.009,
           });
           const sp = new THREE.Sprite(mat);
           const ang = Math.random() * Math.PI * 2;
@@ -1140,7 +1144,7 @@ export class ParticleSystems {
             toneMapped: false,
             // round-3（task-11）：满高度雾面是「梁外背景中位 L」偏高的主因（0.11→0.035，
             // 实测背景 300–600HU medL 78→66.6、600–1200HU 59→51.6，目标 55–70）。
-            opacity: 0.035,
+            opacity: 0.022,
           }),
         );
         haze.position.set(entity.origin[0], entity.origin[1] + 2000, entity.origin[2]);

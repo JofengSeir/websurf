@@ -52,6 +52,17 @@ const LASER_FAR_END_HU = 2000;
 const LASER_FAR_GAIN_MAX = 12;
 /** 最小屏幕宽反算出的 Glow 半宽上限，避免极远时 quad 宽到穿帮。 */
 const LASER_GLOW_HU_MAX = 60;
+/**
+ * 中距亮度增益（task-14 / BRIGHTNESS_GAP §7 #9）：Auto42 实测 near/far 已对齐起源
+ * （178.9/170.5 vs ref 174.4），只有 mid（≈600 HU）的 150.3 偏低 14%。这里只在中距
+ * 窗口对 Core/Glow 顶点色乘 ×1.15（300–1500 HU，两端各留 150 HU 平滑过渡），
+ * near(<300) 与 far(>1500) 的强度保持不变。
+ */
+const LASER_MID_GAIN = 1.15;
+const LASER_MID_GAIN_RAMP_IN_HU = 300;
+const LASER_MID_GAIN_FULL_HU = 450;
+const LASER_MID_GAIN_FADE_START_HU = 1200;
+const LASER_MID_GAIN_RAMP_OUT_HU = 1500;
 
 /** 一条可见 `env_laser`（两头坐标已换到 Y-up 世界坐标）。 */
 export interface LaserBeam {
@@ -345,10 +356,24 @@ export class LaserBeams {
       // 线性放大到 12×，把缺失的 HDR bloom 能量手工补回来（见文件头 LASER_FAR_GAIN_* 注释）。
       const farT = Math.min(1, Math.max(0, (midDist - LASER_FAR_GAIN_START_HU) / (LASER_FAR_END_HU - LASER_FAR_GAIN_START_HU)));
       const gain = 1 + farT * (LASER_FAR_GAIN_MAX - 1);
+      // 中距增益：300→450 HU 平滑升到 1.15，1200→1500 HU 平滑回到 1（near/far 不变）。
+      const midIn = Math.min(1, Math.max(0, (midDist - LASER_MID_GAIN_RAMP_IN_HU) / (LASER_MID_GAIN_FULL_HU - LASER_MID_GAIN_RAMP_IN_HU)));
+      const midOut = Math.min(1, Math.max(0, (midDist - LASER_MID_GAIN_FADE_START_HU) / (LASER_MID_GAIN_RAMP_OUT_HU - LASER_MID_GAIN_FADE_START_HU)));
+      const midGain = 1 + (LASER_MID_GAIN - 1) * (midIn * (1 - midOut));
       const c = beam.color;
-      const gr = c.r * LASER_GLOW_INTENSITY * gain;
-      const gg = c.g * LASER_GLOW_INTENSITY * gain;
-      const gb = c.b * LASER_GLOW_INTENSITY * gain;
+      // Core 顶点色逐帧写（中距增益依赖相机距离）：忠实颜色 ×1.2 亮度补偿 × midGain。
+      const cr = c.r * LASER_CORE_BOOST * midGain;
+      const cg = c.g * LASER_CORE_BOOST * midGain;
+      const cb = c.b * LASER_CORE_BOOST * midGain;
+      for (let k = 0; k < 4; k++) {
+        const off = (base + k) * 3;
+        this.colors[off] = cr;
+        this.colors[off + 1] = cg;
+        this.colors[off + 2] = cb;
+      }
+      const gr = c.r * LASER_GLOW_INTENSITY * gain * midGain;
+      const gg = c.g * LASER_GLOW_INTENSITY * gain * midGain;
+      const gb = c.b * LASER_GLOW_INTENSITY * gain * midGain;
       for (let k = 0; k < 4; k++) {
         const off = (base + 4 + k) * 3;
         this.colors[off] = gr;
