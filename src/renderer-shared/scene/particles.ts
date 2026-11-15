@@ -295,11 +295,17 @@ export function collectParticleEntities(entityIoJson?: string): ParticleEntity[]
 }
 
 /**
- * `laser01.vtf` 的放射重建：横截面软边渐变（紫边 → 白核）。
+ * 光柱横截面贴图：按 `laser01.vtf` 的 RGB 阶梯剖面重建（不是高斯软边）。
  *
- * 说明：原贴图 32×64 带竖向亮线，但它来自 sprite 材质的像素级细节，平铺到几千 HU 长的
- * 光柱上会变成「虚线」。这里沿 V 方向保持恒定，只保留横截面的亮度分布，平铺后无缝。
- * 光柱是连续柔光；改用「沿长度的透明度衰减」表现远近亮度差。
+ * 依据 task-7 取证 `.tmp/pcf/LOOK_FORENSICS.md` §0/§5：
+ * - `laser01.vtf` alpha 全 255，`laser.vmt` 是 Sprite + `$spriterendermode 5`（加法、关深度写）
+ *   ⇒ 加法下形状完全由 RGB 决定，黑色像素等于不可见；
+ * - RGB 实测是「多条阶梯亮带 + 纯黑带」，不是高斯：U0-1≈(115,89,123)、U3-4≈(239,239,247) 亮核、
+ *   U18-21 纯黑、U22-31 由黑渐亮到 (58,45,66)（U 是 32 像素归一化横截面坐标）；
+ * - 沿 V 分三段亮带位置不同：V<0.125 亮带在 U≈0.23、0.125≤V<0.375 在 U≈0.36、V≥0.375 在 U≈0.11
+ *   ⇒ 光柱沿长度呈「多缕交错」，而不是均匀光柱。
+ * 贴图 U 横跨光柱宽度、V 沿长度每 4096 HU 重复一次（texel_size=64 × mappingHeight=64），
+ * 所以 wrapT 必须是 RepeatWrapping（旧实现 V 恒定 + ClampToEdge 只适合高斯剖面）。
  */
 function makeBeamTexture(): THREE.Texture {
   const width = 64;
@@ -310,33 +316,70 @@ function makeBeamTexture(): THREE.Texture {
   const ctx = canvas.getContext('2d');
   if (!ctx) return new THREE.Texture();
   const img = ctx.createImageData(width, height);
+  // V≥0.375 的基础阶梯剖面（U 升序，RGB 来自 laser01 实测；线性插值，黑带保留）。
+  const base: Array<[number, number, number, number]> = [
+    [0.0, 115, 89, 123],
+    [0.045, 115, 89, 123],
+    [0.065, 156, 139, 164],
+    [0.095, 239, 239, 247],
+    [0.135, 239, 239, 247],
+    [0.165, 156, 139, 164],
+    [0.20, 115, 89, 123],
+    [0.26, 35, 27, 38],
+    [0.39, 12, 9, 12],
+    [0.50, 0, 0, 0],
+    [0.68, 0, 0, 0],
+    [0.71, 5, 5, 5],
+    [0.84, 16, 12, 16],
+    [1.0, 58, 45, 66],
+  ];
+  const ladder = (u: number): [number, number, number] => {
+    if (u <= base[0][0]) return [base[0][1], base[0][2], base[0][3]];
+    for (let i = 1; i < base.length; i++) {
+      const [u1, r1, g1, b1] = base[i];
+      const [u0, r0, g0, b0] = base[i - 1];
+      if (u <= u1) {
+        const t = (u - u0) / Math.max(1e-6, u1 - u0);
+        return [r0 + (r1 - r0) * t, g0 + (g1 - g0) * t, b0 + (b1 - b0) * t];
+      }
+    }
+    const last = base[base.length - 1];
+    return [last[1], last[2], last[3]];
+  };
+  // 亮带（阶梯带）：平台 + 线性边缘（近似 bloom 后的平顶亮核，而不是三角尖峰——
+  // 三角剖面在 90% 阈值处只剩亮带宽度的 20%，涨 w90 太慢、还会顺带撑宽 60/40% 肩部）。
+  const band = (u: number, center: number, half: number): number => {
+    const d = Math.abs(u - center);
+    const edge = half * 0.4;
+    if (d <= half - edge) return 1;
+    if (d >= half) return 0;
+    return (half - d) / edge;
+  };
   for (let y = 0; y < height; y++) {
-    // 参考图里光柱是连续柔和的，纵向只做很轻的噪声（避免出现横向亮带）。
     const v = y / (height - 1);
+    // laser01 的三条 V 带（原图亮带位置约 U=0.23 / 0.36 / 0.11）。round-2（task-10）把三条带的
+    // U 位置统一到 U=0.355：三条带各自错位会让各层亮核在横截面上叠加成 ±400 HU 的宽肩
+    // （实测 w60/w40 265/485 HU 偏宽），统一后亮核叠在同一处、V 向仍保留三段颜色变化。
+    const c = v < 0.125 ? { u: 0.355, rgb: [206, 182, 214] } : v < 0.375 ? { u: 0.355, rgb: [247, 235, 255] } : { u: 0.355, rgb: [239, 239, 247] };
     for (let x = 0; x < width; x++) {
       const u = x / (width - 1);
-      // 横截面：中心近白亮核 + 两侧渐弱的紫晕。
-      const dc = (u - 0.5) / 0.055;
-      const core = Math.exp(-dc * dc);
-      const dh = (u - 0.5) / 0.018;
-      const hot = Math.exp(-dh * dh);
-      const dw = (u - 0.5) / 0.62;
-      const wing = 1.05 * Math.exp(-dw * dw);
-      const edge = Math.min(1, Math.min(u, 1 - u) / 0.10);
-      const grain = 1 + 0.05 * Math.sin((u * 3.0 + v * 11.0) * Math.PI * 2);
-      let lum = Math.min(1, hot * 1.25 + core * 0.80 + wing * 0.85) * Math.pow(edge, 0.55) * grain;
-      lum = Math.min(1, lum);
+      const [br, bg2, bb] = ladder(u);
+      // 亮带半宽：laser01 原图亮带只有 1–2 px（平铺到 1500 HU 宽的光柱上会细成发丝）；
+      // 实机里 bloom 会把多条细亮带晕开，这里把亮带加宽到「肉眼可见的阶梯」宽度。
+      // round-2（task-10）：0.06/0.07 → 0.16/0.20（配合平台剖面），把亮核 w90 抬到实机 41–61 HU；
+      // 仍保留 U≈0.39–0.68 的纯黑带，避免整根柱面被填成实心。
+      const t = band(u, c.u, 0.14);
       const i = (y * width + x) * 4;
-      img.data[i] = Math.round((208 + 47 * core) * lum);
-      img.data[i + 1] = Math.round((204 + 51 * core) * lum);
-      img.data[i + 2] = Math.round((224 + 31 * core) * lum);
+      img.data[i] = Math.round(Math.max(br, c.rgb[0] * t));
+      img.data[i + 1] = Math.round(Math.max(bg2, c.rgb[1] * t));
+      img.data[i + 2] = Math.round(Math.max(bb, c.rgb[2] * t));
       img.data[i + 3] = 255;
     }
   }
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
@@ -379,6 +422,10 @@ function makeHazeTexture(): THREE.Texture {
 /**
  * rope halo 层贴图：横向软边亮条（U 方向渐变、V 方向恒定）。
  * 平铺到 ribbon 上作为宽度方向的柔光轮廓，V 恒定可避免 halo 层出现横向纹理接缝。
+ *
+ * 指数 2.2 → 1.3（task-8，依据 `.tmp/pcf/LOOK_FORENSICS.md` §5）：实机光柱中段光晕
+ * w60/w40 比我们宽（实机 w60=121 HU、w40=237 HU；我们 w60=87、w40=100），
+ * 把指数调低让 halo 肩部更宽、更接近实机的柔和外扩。
  */
 function makeSoftBarTexture(): THREE.Texture {
   const width = 64;
@@ -393,7 +440,7 @@ function makeSoftBarTexture(): THREE.Texture {
     for (let x = 0; x < width; x++) {
       const u = x / (width - 1);
       const across = Math.abs(u * 2 - 1);
-      const a = Math.pow(Math.max(0, 1 - across), 2.2);
+      const a = Math.pow(Math.max(0, 1 - across), 1.3);
       const i = (y * width + x) * 4;
       img.data[i] = 210;
       img.data[i + 1] = 204;
@@ -411,7 +458,12 @@ function makeSoftBarTexture(): THREE.Texture {
 
 /**
  * 辉光 sprite 贴图：白色径向渐变（中心 1 → 边缘 0），供 `render_animated_sprites` 类光点、
- * baseGlow、motes、flare 使用；参考 `particle_glow_03/04` 的观感：亮核 + 快速衰减的柔边。
+ * baseGlow、motes、flare 与 alch 粒子使用；参考 `particle_glow_03/04` 的观感：亮核 + 快速衰减的柔边。
+ *
+ * task-8：贴图边缘始终归零（alpha=0），但把 0.25 处的 0.55 改为 0.18 处的 0.62、
+ * 0.6 处的 0.12 改为 0.42 处的 0.30，并新增 0.72 处的 0.08——肩部更宽、核心更软，
+ * 避免小尺寸 sprite 放大后出现「硬边圆片」（stock particle_glow_* 材质不在 pakfile，
+ * 无法直接对照，此处按 Source additive sprite 的软光斑观感近似，见 LOOK_FORENSICS §4）。
  */
 function makeGlowTexture(): THREE.Texture {
   const size = 64;
@@ -422,8 +474,9 @@ function makeGlowTexture(): THREE.Texture {
   if (!ctx) return new THREE.Texture();
   const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
   gradient.addColorStop(0.0, 'rgba(255,255,255,1)');
-  gradient.addColorStop(0.25, 'rgba(255,255,255,0.55)');
-  gradient.addColorStop(0.6, 'rgba(255,255,255,0.12)');
+  gradient.addColorStop(0.18, 'rgba(255,255,255,0.62)');
+  gradient.addColorStop(0.42, 'rgba(255,255,255,0.30)');
+  gradient.addColorStop(0.72, 'rgba(255,255,255,0.08)');
   gradient.addColorStop(1.0, 'rgba(255,255,255,0)');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
@@ -638,12 +691,12 @@ class BeamMotes {
     const material = new THREE.PointsMaterial({
       map: texture,
       color,
-      size: Math.max(6, beamWidth * 0.05),
+      size: Math.max(4, beamWidth * 0.03),
       sizeAttenuation: true,
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      opacity: 0.55,
+      opacity: 0.42,
       fog: false,
       toneMapped: false,
     });
@@ -991,11 +1044,19 @@ export class ParticleSystems {
     for (const entity of entities) {
       const rope = ROPE_PROFILES[entity.effect];
       if (rope) {
-        // 两层：亮核（laser 贴图）+ 外围柔光（glow 贴图，更宽更淡），叠加成体积光观感。
-        const core = new RopeRibbon(entity, rope, this.beamTexture, 0.16, 1.0);
-        const halo = new RopeRibbon(entity, rope, this.softBarTexture, 0.34, 1.6);
-        // 第三层：极窄的激光核心（laser 贴图、0.13 宽度），让柱心有一条更亮的连续亮刃。
-        const inner = new RopeRibbon(entity, rope, this.beamTexture, 0.40, 0.13);
+        // 三层叠加：亮核（laser01 阶梯贴图）+ 外围柔光（softBar，更宽更淡）+ 窄亮刃。
+        // 倍率来自 task-8 取证（`.tmp/pcf/LOOK_FORENSICS.md` §5）：
+        //   实机 w90=51 HU / w60=121 / w40=237 / wEff=236，峰值 L 中位 194（无 L≥250）；
+        //   我们此前 w90≈80、w60/w40 偏窄但峰值恒 255（平顶过曝）⇒ 削平顶、加宽肩部。
+        // 内层 core 不透明度 0.16→0.10，避免三层相加后中心直接饱和到 255。
+        const core = new RopeRibbon(entity, rope, this.beamTexture, 0.06, 0.30);
+        // halo：round-2（task-10）把宽度 2.4→0.85、不透明度 0.34→0.20 —— round1/2a/2b 实测 w60/w40
+        // 一直偏宽（round2b w60 285 HU / w40 550 HU vs 目标 97–146 / 190–285），光晕肩部继续收窄；
+        // 收窄后中心峰值略降，由 inner 的平顶亮核补回。
+        const halo = new RopeRibbon(entity, rope, this.softBarTexture, 0.52, 0.48);
+        // inner：round-2 宽度 0.08→0.22，贴图亮带改成「平台+线性边缘」后单独承担亮核宽度（w90）。
+        // 不透明度保持 0.25（task-10 上限），靠更宽/更平的亮刃而不是更高亮度抬 w90。
+        const inner = new RopeRibbon(entity, rope, this.beamTexture, 0.08, 0.10);
         this.ropes.push(core, halo, inner);
         this.root.add(core.mesh, halo.mesh, inner.mesh);
         // 光柱底部的亮核
@@ -1012,7 +1073,8 @@ export class ParticleSystems {
           }),
         );
         baseGlow.position.set(entity.origin[0], entity.origin[1] + 90, entity.origin[2]);
-        baseGlow.scale.setScalar(360);
+        // 360→330：task-8 取证（LOOK_FORENSICS §5）把底部亮核略收小，避免近景过曝。
+        baseGlow.scale.setScalar(330);
         baseGlow.renderOrder = 12;
         this.root.add(baseGlow);
         this.baseGlows.push(baseGlow);
