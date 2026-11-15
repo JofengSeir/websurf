@@ -74,8 +74,15 @@ import { LaserBeams, collectLaserBeams } from '../../../../src/renderer-shared/s
  *   回落墙钟 `now`。
  */
 
-/** 准星射线检测间距（帧）：`planeInspectCounter` 计满该值才调一次 `inspectPlane` 并清零。 */
-const PLANE_INSPECT_INTERVAL = 6;
+/**
+ * 准星射线检测间距（帧）：`planeInspectCounter` 计满该值才调一次 `inspectPlane` 并清零。
+ *
+ * 为什么从 6 放宽到 12：这条射线要对**合并后的整块几何**逐三角形求交，实测单次 2.5 ms
+ * （cand_c 机位、78 个可见块、最大块 1.5 万三角），每 6 帧一次的节奏在 3.2 ms 的基线上
+ * 就是可见的周期性掉帧（回放实测 p90 9.36→6.28 ms、同段帧数 +22%）。准星读数本身是
+ * 给人看的，12 帧 ≈ 200 ms 更新一次足够。
+ */
+const PLANE_INSPECT_INTERVAL = 12;
 
 /** HUD 剔除统计（`emitCullStats` 组装，交给 app.ts 注册的 `onCullStats`）。
  * `visible/total/cullDist` 与 `pvs.near/far/pvsHidden` 取自共享 `RenderSession.stats()`——判定
