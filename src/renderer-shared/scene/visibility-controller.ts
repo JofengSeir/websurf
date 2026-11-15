@@ -104,6 +104,22 @@ export interface VisibilityUpdateResult {
    * `distance` = 只有距离档在起作用（PVS 关）。
    */
   reasons: { pvs: number; distance: number };
+  /**
+   * 本帧**真正用于可见性判定**的相机 cluster（`getClusterNear` 解析出来的房间，不一定等于
+   * `pvs.currentClusterId`）；-1 = 相机连邻近房间都定位不到（嵌在实体里/地图外）。
+   *
+   * 逐三角形过滤必须用这个值：`pvs.currentClusterId` 在相机落进固体 leaf 时会保留上一个房间，
+   * 拿它裁三角形就会把眼前真实可见的面整片裁掉（穿透相机看到的「破洞」）。
+   */
+  clusterAtCamera: number;
+  /** 相机 cluster 是否有效；false 时本帧不做块级 PVS 剔除，逐三角形 index 也不能按它裁。 */
+  pvsClusterValid: boolean;
+  /**
+   * 相机点本身落在**固体 leaf** 里（穿墙 / 相机嵌进 brush）。这种情况下 `getClusterNear` 找到的是
+   * 隔壁房间，按它的 PVS 行裁三角形会把「隔着墙看过去、真实可见」的面裁掉——穿透视角下的
+   * 三角破洞就是这么来的。上层据此跳过逐三角形裁剪（宁可多画）。
+   */
+  cameraInSolid: boolean;
 }
 
 /**
@@ -457,13 +473,19 @@ export class VisibilityController {
     // 仍找不到才沿用上一次有效 cluster。**不能**整帧关掉 PVS——那样一贴墙就把 1000+ 块全画出来
     // （surf_666 实测 44 → 1076 块 / 320 → 151fps）；也不能直接拿上一个房间的 PVS 行剔块，
     // 那个房间可能在地图另一端（实测 P1 机位 current=8069、真所在 6918 ⇒ 一次丢了 4 个块、画面露天空）。
-    const camLeafCluster = pvsActive && pvs ? (pvs.getClusterNear ? pvs.getClusterNear(camPos) : pvs.getClusterAt(camPos)) : -1;
+    const camDirectCluster = pvsActive && pvs ? pvs.getClusterAt(camPos) : -1;
+    const camLeafCluster =
+      camDirectCluster >= 0 ? camDirectCluster : pvsActive && pvs && pvs.getClusterNear ? pvs.getClusterNear(camPos) : camDirectCluster;
     // 只用**真正定位到的房间**。不要退回 `pvs.currentClusterId`：`update(pos)` 在相机点落进
     // 固体 leaf 时会保留上一个房间的可见集（穿墙瞬移不闪变），那个房间可能在地图另一端——
     // 按它的 PVS 行剔块，就会把眼前真实可见的块整片剔掉（2026-11-13 冰坡消失现场：
     // clusterAtCamera = -1、current = 旧房间，可见集只有 6 个 cluster ⇒ 画面几乎全空）。
     // 定位到了但 `update(pos)` 走的是固体分支时，把可见集**切到**这个邻近房间再判。
-    let pvsClusterValid = camLeafCluster >= 0;
+    // 判定门槛用**直接**定位结果：`camDirectCluster < 0` 表示相机点本身在固体 leaf 里（穿墙）。
+    // Source 的对应行为是「leaf 0 没有 PVS，引擎整帧不做可见性剔除」；这里照此处理——若改用
+    // `getClusterNear` 找到的隔壁房间来剔，隔墙看过去真实可见的面会被整片/按三角形剔掉
+    // （用户报的「穿透状态下几何缺失」）。`camLeafCluster` 保留给日志与诊断。
+    let pvsClusterValid = camDirectCluster >= 0;
     if (pvsClusterValid && pvs && pvs.updateToCluster) {
       if (!pvs.updateToCluster(camLeafCluster)) {
         // 该行数据缺失/全零（部分第三方编译器留空）：本帧 PVS 无从判定，退回不剔。
@@ -471,7 +493,7 @@ export class VisibilityController {
       }
     }
     if (pvsActive && !pvsClusterValid && !this.pvsUnlocated) {
-      // 相机连「附近的房间」都定位不到（在实体里/在地图外）：这一帧 PVS 无从判定。
+      // 相机点在实体里（穿墙）或在图外：这一帧 PVS 无从判定。
       // **这里不补任何距离剔除**——距离档一旦插手剔除，就必然出现「看得见却被距离吃掉」；
       // 宁可这一帧按「全画」慢下来（surf_666 1126 块 ≈ 151fps），等相机回到空间里立刻恢复。
       this.pvsUnlocated = true;
@@ -543,6 +565,17 @@ export class VisibilityController {
         item.mesh.visible = level === LOD_NEAR && triState !== 0;
       }
     }
-    return { visible, culledByDistance, culledByPvs, cullDistance: this.cullDistance, pvsActive, changed, reasons };
+    return {
+      visible,
+      culledByDistance,
+      culledByPvs,
+      cullDistance: this.cullDistance,
+      pvsActive,
+      changed,
+      reasons,
+      clusterAtCamera: pvsActive ? camLeafCluster : -1,
+      pvsClusterValid: pvsActive && pvsClusterValid,
+      cameraInSolid: pvsActive && camDirectCluster < 0,
+    };
   }
 }

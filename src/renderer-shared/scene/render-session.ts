@@ -435,6 +435,10 @@ export class RenderSession {
         maxDim: this.maxDim,
         rev: RENDER_REV,
         index: this.clusterIndex,
+        /** 本帧用于可见性判定的相机 cluster（-1 = 定位不到房间，此时不做三角级裁剪）。 */
+        clusterAtCamera: this.lastVisibility?.clusterAtCamera ?? -1,
+        clusterValid: this.lastVisibility?.pvsClusterValid === true,
+        cameraInSolid: this.lastVisibility?.cameraInSolid === true,
       }),
     };
     // 诊断：按 cluster 拆分后的分片体检（块数、每片记的 cluster 数、几何三角形数）。
@@ -644,9 +648,22 @@ export class RenderSession {
     }
     this.lastVisibility = this.visibility.update(this.camera, this.pvs);
     // 相机换房间才重建 index（PVS 与视角无关）：可见三角形集合一次算好，逐帧零成本。
+    // ⚠ 必须用本帧**真正定位到**的 `clusterAtCamera`，不能用 `pvs.currentClusterId`：相机嵌进
+    // 实体（穿墙/贴脸）时后者保留的是上一个房间，拿它裁三角形会把眼前可见的面整片裁掉——
+    // 表现就是「相机穿透状态下坡面缺一块块三角形」。
+    const camCluster = this.lastVisibility?.clusterAtCamera ?? -1;
+    const camClusterValid = this.lastVisibility?.pvsClusterValid === true;
+    const camInSolid = this.lastVisibility?.cameraInSolid === true;
     if (this.visibility.enablePvs && this.clusterIndex && this.clusterIndex.prepared > 0 && this.pvs) {
-      applyClusterIndex(this.visibility.items, this.pvs, this.pvs.currentClusterId);
-      this.pvsIndexActive = true;
+      if (camClusterValid && camCluster >= 0 && !camInSolid) {
+        applyClusterIndex(this.visibility.items, this.pvs, camCluster);
+        this.pvsIndexActive = true;
+      } else if (this.pvsIndexActive) {
+        // 相机嵌在实体里（或根本定位不到房间）：这一帧不按任何 PVS 行裁三角形，先还原全量。
+        // 穿透视角下隔壁房间的 PVS 行不包含「隔墙可见」的面，按它裁就会切出一块块三角破洞。
+        restoreClusterIndex(this.visibility.items);
+        this.pvsIndexActive = false;
+      }
     } else if (this.pvsIndexActive) {
       // 关 PVS（面板/深链/区域着色）后必须把裁过的 index 还原：`applyClusterIndex` 只认相机 cluster，
       // 不会因为开关关掉就把墙补回来；不还原就是「PVS 关了、缺的那块还在」。
