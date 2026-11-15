@@ -423,9 +423,18 @@ function makeHazeTexture(): THREE.Texture {
  * rope halo 层贴图：横向软边亮条（U 方向渐变、V 方向恒定）。
  * 平铺到 ribbon 上作为宽度方向的柔光轮廓，V 恒定可避免 halo 层出现横向纹理接缝。
  *
- * 指数 2.2 → 1.3（task-8，依据 `.tmp/pcf/LOOK_FORENSICS.md` §5）：实机光柱中段光晕
+ * task-8：指数 2.2 → 1.3（依据 `.tmp/pcf/LOOK_FORENSICS.md` §5）：实机光柱中段光晕
  * w60/w40 比我们宽（实机 w60=121 HU、w40=237 HU；我们 w60=87、w40=100），
  * 把指数调低让 halo 肩部更宽、更接近实机的柔和外扩。
+ *
+ * task-11 round-3：幂律 `(1-f)^1.3` 的 w90:w60:w40 比例恒在 1:4.2:6.6 左右，而实机是
+ * 1:2.37:4.63（w90 51.2 / w60 121.3 / w40 237.2 HU）——纯幂律/单高斯无法在保持亮核的
+ * 同时收窄翼展。改为「平顶 + 陡肩 + 短尾」三段（f = |2u-1|，半宽按各层 widthScale 定）：
+ *   f ≤ 0.08         → 1.0            （亮核平顶；halo 半宽 0.6×750 时约 36 HU 半宽）
+ *   0.08 < f ≤ 0.26  → 线性 1.0→0.40   （陡肩，w60/w40 主要由它和 halo 宽度控制）
+ *   0.26 < f ≤ 0.40  → 线性 0.40→0    （短尾，wEff 靠它控住）
+ * 同一张软边贴图给两条 ribbon 用：宽 halo（翼展）+ 窄 plateau（亮核），把 w90 与翼展解耦
+ * （lead 建议：核心平台独立一条窄 ribbon 撑住，宽度 0.10–0.14 量级、软边贴图）。
  */
 function makeSoftBarTexture(): THREE.Texture {
   const width = 64;
@@ -439,13 +448,17 @@ function makeSoftBarTexture(): THREE.Texture {
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const u = x / (width - 1);
-      const across = Math.abs(u * 2 - 1);
-      const a = Math.pow(Math.max(0, 1 - across), 1.3);
+      const f = Math.abs(u * 2 - 1);
+      let a: number;
+      if (f <= 0.08) a = 1;
+      else if (f <= 0.26) a = 1 - ((f - 0.08) / 0.18) * 0.60;
+      else if (f <= 0.40) a = 0.40 * (1 - (f - 0.26) / 0.14);
+      else a = 0;
       const i = (y * width + x) * 4;
       img.data[i] = 210;
       img.data[i + 1] = 204;
       img.data[i + 2] = 255;
-      img.data[i + 3] = Math.round(255 * a);
+      img.data[i + 3] = Math.round(255 * Math.max(0, Math.min(1, a)));
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -624,8 +637,9 @@ class RopeRibbon {
       const alpha = this.alphaOf(p.age);
       // 锥形：越靠上（越老）越宽，形成「喇叭口」的体积感
       const frac = i / Math.max(1, n - 1);
-      // 源贴图：顶端（V=0）碎裂且更宽、底部连续亮刃更窄 => 上宽下窄。
-      const widen = 0.34 + 2.40 * Math.pow(frac, 2.6);
+      // 源贴图：顶端（V=0）碎裂且更宽、底部连续亮刃更窄 => 上宽下窄（喇叭口）。
+      // round-3（task-11）：底部翼展 2.40→1.70，配合 halo 宽度控制 wEff（收窄光晕翼展）。
+      const widen = 0.34 + 1.70 * Math.pow(frac, 2.6);
       const tint = frac;
       const wob = (Math.sin(p.age * 1.1 + i * 0.55) * 0.07 + Math.sin(p.age * 0.4 + i * 0.19) * 0.05) * halfW * (1 - frac);
       for (let side = 0; side < 2; side++) {
@@ -1044,21 +1058,19 @@ export class ParticleSystems {
     for (const entity of entities) {
       const rope = ROPE_PROFILES[entity.effect];
       if (rope) {
-        // 三层叠加：亮核（laser01 阶梯贴图）+ 外围柔光（softBar，更宽更淡）+ 窄亮刃。
-        // 倍率来自 task-8 取证（`.tmp/pcf/LOOK_FORENSICS.md` §5）：
-        //   实机 w90=51 HU / w60=121 / w40=237 / wEff=236，峰值 L 中位 194（无 L≥250）；
-        //   我们此前 w90≈80、w60/w40 偏窄但峰值恒 255（平顶过曝）⇒ 削平顶、加宽肩部。
-        // 内层 core 不透明度 0.16→0.10，避免三层相加后中心直接饱和到 255。
+        // 四层叠加（task-11 round-3：把「亮核宽度 w90」与「光晕翼展 w60/w40」解耦）：
+        //   core    = laser01 阶梯贴图，窄亮刃（左偏 U≈0.113 的激光刃，非对称细节）
+        //   halo    = softBar 宽翼展（控制 w60/w40；宽度 0.48→0.60、opacity 0.52→0.35）
+        //   plateau = softBar 窄亮核（w90 由它撑住；宽度 0.29、opacity 0.40）
+        //   inner   = laser01 阶梯窄刃（补黑带细节）
+        // 依据 `.tmp/pcf/LOOK_FORENSICS.md` §5：实机 w90=51 / w60=121 / w40=237 / wEff=236 HU，
+        // 峰值中位 194 且无 L≥250。round-2 交付时 w90 已对齐，但 w60/w40 偏宽近 2 倍 ⇒ 本层拆分。
         const core = new RopeRibbon(entity, rope, this.beamTexture, 0.06, 0.30);
-        // halo：round-2（task-10）把宽度 2.4→0.85、不透明度 0.34→0.20 —— round1/2a/2b 实测 w60/w40
-        // 一直偏宽（round2b w60 285 HU / w40 550 HU vs 目标 97–146 / 190–285），光晕肩部继续收窄；
-        // 收窄后中心峰值略降，由 inner 的平顶亮核补回。
-        const halo = new RopeRibbon(entity, rope, this.softBarTexture, 0.52, 0.48);
-        // inner：round-2 宽度 0.08→0.22，贴图亮带改成「平台+线性边缘」后单独承担亮核宽度（w90）。
-        // 不透明度保持 0.25（task-10 上限），靠更宽/更平的亮刃而不是更高亮度抬 w90。
+        const halo = new RopeRibbon(entity, rope, this.softBarTexture, 0.32, 0.60);
+        const plateau = new RopeRibbon(entity, rope, this.softBarTexture, 0.34, 0.44);
         const inner = new RopeRibbon(entity, rope, this.beamTexture, 0.08, 0.10);
-        this.ropes.push(core, halo, inner);
-        this.root.add(core.mesh, halo.mesh, inner.mesh);
+        this.ropes.push(core, halo, plateau, inner);
+        this.root.add(core.mesh, halo.mesh, plateau.mesh, inner.mesh);
         // 光柱底部的亮核
         const baseGlow = new THREE.Sprite(
           new THREE.SpriteMaterial({
@@ -1069,7 +1081,10 @@ export class ParticleSystems {
             depthWrite: false,
             fog: false,
             toneMapped: false,
-            opacity: 0.10,
+            // round-3（task-11）：baseGlow 与 flares 是「柱底大亮核」的非 PCF 近似（源里是 04 的
+            // radius 800 大光斑 + 6 条 sprite_trail 白雾），叠加后是 wEff/底部饱和的一次因；
+            // 0.10→0.07（-30%），峰值缺口由 plateau 层补。
+            opacity: 0.07,
           }),
         );
         baseGlow.position.set(entity.origin[0], entity.origin[1] + 90, entity.origin[2]);
@@ -1082,8 +1097,10 @@ export class ParticleSystems {
         this.root.add(motes.points);
         this.motes.push(motes);
         // 柱底大光斑（源 render_animated_sprites 04：radius 800 => 1600x1600 的 32 个大光斑堆在底部）
+        // round-3（task-11）：32 个加法 sprite 在中心叠加会抬高 wEff/造成底部行饱和；28 个、opacity
+        // 0.010→0.007（约 -30%），峰值缺口由 plateau 层补，不偏离 PCF 语义（这层本就是近似）。
         const flare = new THREE.Group();
-        for (let i = 0; i < 32; i++) {
+        for (let i = 0; i < 28; i++) {
           const mat = new THREE.SpriteMaterial({
             map: this.glowTexture,
             color: i % 3 === 0 ? 0xf4f6ff : 0xd9deff,
@@ -1092,7 +1109,7 @@ export class ParticleSystems {
             depthWrite: false,
             fog: false,
             toneMapped: false,
-            opacity: 0.010,
+            opacity: 0.007,
           });
           const sp = new THREE.Sprite(mat);
           const ang = Math.random() * Math.PI * 2;
@@ -1121,7 +1138,9 @@ export class ParticleSystems {
             side: THREE.DoubleSide,
             fog: false,
             toneMapped: false,
-            opacity: 0.11,
+            // round-3（task-11）：满高度雾面是「梁外背景中位 L」偏高的主因（0.11→0.035，
+            // 实测背景 300–600HU medL 78→66.6、600–1200HU 59→51.6，目标 55–70）。
+            opacity: 0.035,
           }),
         );
         haze.position.set(entity.origin[0], entity.origin[1] + 2000, entity.origin[2]);
