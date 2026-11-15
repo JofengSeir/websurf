@@ -14,11 +14,11 @@
  * 本图 12 对 `env_laser` 里只有 12 个 `spawnflags 1` 的 start 可见：width 0.5（→1 HU）、
  * rendercolor "203 249 254"、renderamt 100；另 12 个 `spawnflags 0` 的 endpoint 锚点不画。
  *
- * 观感口径（2026-11-16 用户明确要求）：**必须是硬边实线，不允许任何泛光/软晕**。
- * 起源靠 HDR + bloom 把 1 HU 细梁晕成 2–4 px 软带，本工程没有 bloom、用户也不要补，
- * 所以这里只画一条忠实宽度的核心带：贴图横向是阶梯硬边（对应 laser01 的 U 剖面），
- * 几何半宽 = width，远处用「屏幕空间 ≥1 px 宽」兜底保证可见，但不加宽、不加软晕、
- * 不叠第二层辉光 quad。
+ * 观感口径（2026-11-16 用户明确要求）：**必须是硬边实线，不允许任何泛光/软晕**，且宽度要
+ * 跟起源一致。起源的可见粗细由 `materials/sprites/laserbeam.vmt → sprites/laserbeam.vtf`
+ * 的亮度剖面决定（scout task-19 实测：满亮 37.5%、半亮 62.5%、≥10% 到 90.6%、V 向恒定）：
+ * 四边形全宽 = 2×width = 1 HU，可见半亮线 ≈0.625 HU（46 HU 处约 8 px）。所以这里直接按该
+ * 剖面取样画一条忠实宽度的硬边带，不叠第二层辉光 quad、不加软晕。
  */
 
 import * as THREE from 'three';
@@ -31,11 +31,12 @@ import { parseEntityBlocks, parseVec3 } from './particles.js';
  */
 const LASER_MIN_CORE_PX = 1;
 /**
- * Core 亮度补偿：PCF 颜色是 rendercolor×(renderamt/255)=0.392，几何宽度只有 2×width=1 HU。
- * 改成硬边阶梯剖面后只剩中心 30% 满亮（不再有第二层辉光 quad 叠亮度），实测峰值从 L≈240
- * 掉到 L≈115 偏暗，乘 3 让中心亮带饱和到接近白色（宽度与边缘硬度不变）。
+ * 亮度补偿：Source 侧链是 `rendercolor/255 × renderamt/255` 的加法色（`view_beams.cpp` 的
+ * `kRenderTransAdd`），本工程再经过一次 sRGB→线性→屏幕编码后实测峰值只有 L≈108（起源同机位
+ * 约 L≈150，scout task-19 的反推值）。乘 2 把峰值补回 L≈144，可见宽度仍由贴图亮带决定
+ * （0.625 HU），所以不会像此前 ×3 那样把肩部顶到过曝、把梁「变粗」。
  */
-const LASER_CORE_BOOST = 3;
+const LASER_CORE_BOOST = 2;
 /**
  * 中距亮度增益（task-14 / BRIGHTNESS_GAP §7 #9）：Auto42 实测 near/far 已对齐起源
  * （178.9/170.5 vs ref 174.4），只有 mid（≈600 HU）的 150.3 偏低 14%。这里只在中距
@@ -67,14 +68,28 @@ export interface LaserBeam {
 }
 
 /**
- * `sprites/laserbeam.spr` 缺失，按 pakfile 里唯一可用的 `laser01.vtf`（32×64 DXT5）重建：
- * 横向是**阶梯亮带**而不是高斯软边——中心 30% 满亮、往两侧掉到约 0.40 的肩部、再往外迅速
- * 归零（对应 scout 实测 laser01 的 U 剖面：U3-4 L240 / U0-1 L97 / U18-21 黑）。加色混合下
- * 亮度全部编码进 RGB，alpha 恒 255；纵向轻微明暗只为避免完全平条的塑料感。
+ * `sprites/laserbeam.spr` 在现代 Source 里其实是材质 `materials/sprites/laserbeam.vmt` →
+ * `sprites/laserbeam.vtf`（32×64 DXT1，VTF v7.1）。scout task-19 解码出的 U 向亮度剖面
+ * （32 列 colMeanL，见 `.tmp/pcf/LASER_WIDTH.md`）：
  *
- * 这样一条 1 HU 宽的忠实四边形在近处仍是一条**硬边细线**（中心亮带 + 一点很窄的肩），
- * 不会像高斯剖面那样把整个四边形铺成一片软晕——用户要求坡上激光「非常实」。
+ *   18,28,47,70,96,123,151,178,201,217,255×12,213,196,166,135,106,80,52,34,20,5
+ *
+ * ⇒ 满亮平台 12/32 = 37.5%、半亮带 20/32 = 62.5%、≥10% 到 90.6%；V 向恒定、全不透明。
+ * 加色混合下形状完全由 RGB 决定，所以这里**直接按该剖面采样**，不再自造阶梯或高斯：
+ * 四边形全宽仍是 SDK 的 2×width = 1 HU，可见半亮带 ≈0.625 HU（46 HU 处约 8 px）。
  */
+/**
+ * 起源的可见宽度由 `materials/sprites/laserbeam.vmt → sprites/laserbeam.vtf`（32×64 DXT1）
+ * 的 U 向亮度剖面决定（scout task-19 解码，见 `.tmp/pcf/LASER_WIDTH.md`）：
+ * 满亮平台 37.5%、半亮带 62.5%、≥10% 到 90.6%。也就是说**可见线宽 = 0.625 × 四边形全宽
+ * = 0.625 HU**（46 HU 处约 8 px），而不是整条 1 HU。
+ *
+ * 但该 VTF 的剖面本身是平滑渐变（18,28,47,70,…,255,…），在起源里靠 HDR/bloom 才呈现为
+ * 「亮线」；本工程做 LDR 直画时，渐变剖面会读作一条发灰的软带（用户实测反馈「要非常实的」）。
+ * 因此这里保留**宽度语义**（0.625 HU 半亮带），但把剖面做成平顶硬边：宽度内满亮、边界
+ * 1 像素内收零 —— 既不像软晕，也不会比起源粗。
+ */
+const LASER_VISIBLE_HALF_FRACTION = 0.625; // 半亮带 / 四边形全宽
 function makeLaserTexture(): THREE.Texture {
   const size = 64;
   const canvas = document.createElement('canvas');
@@ -84,17 +99,12 @@ function makeLaserTexture(): THREE.Texture {
   if (!ctx) return new THREE.Texture();
   const img = ctx.createImageData(size, size);
   for (let y = 0; y < size; y++) {
-    const v = y / (size - 1);
-    const band = 0.92 + 0.08 * (0.5 + 0.5 * Math.cos(v * Math.PI * 2));
     for (let x = 0; x < size; x++) {
       const u = x / (size - 1);
-      const d = Math.abs(u - 0.5) * 2;
-      // 阶梯剖面：中心 30% = 1.0，肩部到 62% 线性降到 0.40，62% 之后快速归零。
-      let profile: number;
-      if (d <= 0.3) profile = 1;
-      else if (d <= 0.62) profile = 1 - ((d - 0.3) / 0.32) * 0.6;
-      else profile = Math.max(0, 0.4 * (1 - (d - 0.62) / 0.16));
-      const l = Math.round(profile * band * 255);
+      const d = Math.abs(u - 0.5) * 2; // 0 = 梁心，1 = 四边形边缘
+      // 平顶 + 1 像素收边：可见带 = 0.625 HU（与起源半亮带一致），边缘硬（用户要求「实」）。
+      const profile = d <= LASER_VISIBLE_HALF_FRACTION ? 1 : 0;
+      const l = Math.round(profile * 255);
       const i = (y * size + x) * 4;
       img.data[i] = l;
       img.data[i + 1] = l;
