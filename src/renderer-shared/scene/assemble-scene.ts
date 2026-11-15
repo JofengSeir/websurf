@@ -223,6 +223,11 @@ function applyEntityRenderColors(root: THREE.Object3D): number {
   root.traverse((obj) => {
     const rgb = (obj.userData as { vbsp_render_color?: number[] }).vbsp_render_color;
     if (!Array.isArray(rgb) || rgb.length < 3) return;
+    // Source `rendermode`：1 = kRenderTransColor、5 = kRenderTransAdd，两者都是加法混合
+    // （TransColor 用 rendercolor 当染色罩、贴图 RGB 不参与）。符文盘在实机里是一圈发光
+    // 符文 + 淡淡的紫色光雾，就是因为它是加法画在坑底上的；按普通半透明画只剩一层暗膜。
+    const mode = (obj.userData as { vbsp_render_mode?: number }).vbsp_render_mode;
+    const additive = mode === 1 || mode === 5;
     // `rendercolor` 是 Source 里的 sRGB 颜色（`201 168 255`），按 sRGB 解释才是
     // 玩家看到的那种紫。
     tint.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
@@ -232,14 +237,25 @@ function applyEntityRenderColors(root: THREE.Object3D): number {
       const apply = (m: THREE.Material): THREE.Material => {
         const clone = m.clone() as THREE.MeshBasicMaterial;
         clone.color = clone.color.clone().multiply(tint);
-        // 半透明实体（符文盘 `$translucent`）：Source 里贴图 alpha 是填充衰减，
-        // 我们的 GLTF alpha 与贴图 alpha 相乘后仍然偏实（scout 实测盘面 meanL 比 Source
-        // 高 31%、盘内 L>200 像素多 6 倍），压一档让盘下的地面纹理透出来。
-        // 加色材质（`alch_symbols` 那类光晕）不加压：它们靠加色本身产生亮度。
-        if (clone.transparent && clone.blending !== THREE.AdditiveBlending) {
+        if (additive) {
+          // 加法混合：贴图 alpha 当遮罩（符线亮、盘面填充很淡），颜色不再压暗，
+          // 光晕由共享层的 glow pass 产生（见 `environment/post-fx.ts`）。
+          clone.transparent = true;
+          clone.blending = THREE.AdditiveBlending;
+          clone.depthWrite = false;
+          clone.opacity = 1;
+        } else if (clone.transparent && clone.blending !== THREE.AdditiveBlending) {
+          // 半透明实体（符文盘 `$translucent`）：Source 里贴图 alpha 是填充衰减，
+          // 我们的 GLTF alpha 与贴图 alpha 相乘后仍然偏实（scout 实测盘面 meanL 比 Source
+          // 高 31%、盘内 L>200 像素多 6 倍），压一档让盘下的地面纹理透出来。
+          // 加色材质（`alch_symbols` 那类光晕）不加压：它们靠加色本身产生亮度。
           clone.opacity = Math.min(clone.opacity, ENTITY_TRANSLUCENT_OPACITY);
         }
-        clone.userData = { ...(clone.userData ?? {}), vbsp_render_color: rgb };
+        clone.userData = {
+          ...(clone.userData ?? {}),
+          vbsp_render_color: rgb,
+          ...(additive ? { vbsp_additive_entity: true } : {}),
+        };
         return clone;
       };
       mesh.material = Array.isArray(mesh.material) ? mesh.material.map(apply) : apply(mesh.material);

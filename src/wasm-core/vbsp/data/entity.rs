@@ -898,6 +898,11 @@ mod typed {
         /// `CBaseEntity::SetParent` 的 `SetParentAttachment` 口径）。
         #[serde(rename = "parentname", default)]
         pub parent: Option<&'a str>,
+        /// 渲染模式（Source `rendermode`）：`1` = `kRenderTransColor`（`rendercolor` 作为
+        /// 加法染色罩在贴图上）、`5` = `kRenderTransAdd`（纯加法）。符文盘的发光观感就
+        /// 来自这一项：不按加法画，盘面只是一层半透明膜，跟不上实机的亮斑与泛光。
+        #[serde(rename = "rendermode", default)]
+        pub render_mode: u8,
     }
 
     /// `env_lightglow` 实体：光晕的尺寸、颜色与可见距离。

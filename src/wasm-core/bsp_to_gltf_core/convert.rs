@@ -935,6 +935,8 @@ struct RotButtonExport {
     spawn_flags: u32,
     target: Option<String>,
     parent: Option<String>,
+    /// Source `rendermode`：`1`/`5` 需要按加法混合画出「发光」观感（符文盘盘面）。
+    render_mode: u8,
 }
 
 /// 收集要导出的模型及其世界偏移：brush 实体各一个，**世界模型排最后**（origin 取 `(0,0,0)`）。
@@ -979,6 +981,7 @@ fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Mod
                         spawn_flags: ent.spawn_flags,
                         target: ent.target.map(str::to_owned),
                         parent: ent.parent.map(str::to_owned),
+                        render_mode: ent.render_mode,
                     };
                     rot_index += 1;
                     models.push((model, ent.origin, tint, Some(rot)));
@@ -1087,6 +1090,7 @@ fn push_bsp_model_bsp(
             }
         }
         extra_fields.push(format!(r#""vbsp_rot_button":{{{}}}"#, rot_fields));
+        extra_fields.push(format!(r#""vbsp_render_mode":{}"#, meta.render_mode));
     }
     let node_extras = if extra_fields.is_empty() {
         None
