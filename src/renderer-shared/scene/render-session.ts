@@ -261,6 +261,11 @@ export class RenderSession {
     applyRenderPrefs(readRenderPrefs());
 
     this.scene = new THREE.Scene();
+    // 一帧内会调 6~9 次 `renderer.render(scene, …)`（水面折射/深度/镜像、天空两遍、光效 glow
+    // 深预渲、合成），每次 render 都会 `scene.updateMatrixWorld()`。这里关掉自动更新，改由
+    // `frame()` 每帧刷新一次：动态对象（旋钮 pivot / 粒子 / 激光）在 frame 前已经摆好，
+    // 多次 pass 复用同一份矩阵，实测省掉重复遍历与矩阵乘（见 `frame()` 里的手动刷新）。
+    this.scene.matrixWorldAutoUpdate = false;
     setSceneBackgroundColor(this.scene, this.backgroundColor);
 
     const w = Math.max(opts.width, 1);
@@ -518,6 +523,14 @@ export class RenderSession {
       console.info(`[${this.app}][skybox] 无可用 3D 天空盒（无 sky_camera 或天空区不可分离）⇒ 不加天空层`);
     }
 
+    // 静态矩阵冻结：到这一步场景里的对象（世界块、天空盒、光柱）已经全部挂好、矩阵已刷新，
+    // 之后只有「旋钮 pivot 每帧转」和运行期才挂的粒子/激光会动。逐帧 `scene.updateMatrixWorld()`
+    // 是 tick 的第二大 JS 开销（飞行回放 CPU 采样 9.6%）：把不再移动的对象置
+    // `matrixAutoUpdate=false`，每帧只遍历、不做矩阵乘；pivot 的 rotation 变化仍会以 force
+    // 传给子节点，位置照常生效。
+    this.scene.updateMatrixWorld(true);
+    this.freezeStaticMatrices();
+
     // 预编译必须在 scene.add(root) 之后：早于它编译的是空场景（game/debug 旧注释的同一约束）。
     precompileScene(this.renderer, this.scene, this.camera);
 
@@ -576,6 +589,27 @@ export class RenderSession {
       maxCull: this.maxCull,
       merge: mergeStatsOf(this.root),
     };
+  }
+
+  /**
+   * 冻结静态对象的本地矩阵（`matrixAutoUpdate = false`）。
+   *
+   * 只跳过自己每帧改变换的对象：旋钮 pivot（`userData.vbspRotPivot`，`updateRotButtons`
+   * 每帧写 `rotation`）、Sprite（billboard 走 shader，但飞行回放里 smoke sprite 不移动，
+   * 冻结同样安全）以外的全部对象。子节点在父节点矩阵变化时会收到 `force=true`，
+   * 所以 pivot 旋转后其下 mesh 的 `matrixWorld` 仍会正确刷新。
+   *
+   * @returns 冻结的对象数（诊断口 `__vbspStaticFrozen`）。
+   */
+  private freezeStaticMatrices(): number {
+    let frozen = 0;
+    this.scene.traverse((obj) => {
+      if (obj.userData.vbspRotPivot === true) return;
+      obj.matrixAutoUpdate = false;
+      frozen++;
+    });
+    (globalThis as { __vbspStaticFrozen?: number }).__vbspStaticFrozen = frozen;
+    return frozen;
   }
 
   /** 换图/卸载：释放根、天空组、环境与渲染列表；renderer/scene/camera 本身复用。 */
@@ -826,6 +860,10 @@ export class RenderSession {
       if (this.textureScrolls.length > 0) updateTextureScrolls(this.textureScrolls, dt);
       if (this.rotButtons.length > 0) updateRotButtons(this.rotButtons, dt);
     }
+    // 动态对象（旋钮 pivot 等）刚改过变换：本帧在这里刷新一次世界矩阵，后面 6~9 趟
+    // `renderer.render` 直接复用（`scene.matrixWorldAutoUpdate` 在构造函数里关掉了）。
+    this.scene.updateMatrixWorld();
+    mark('mat');
     if (opts.updateVisibility !== false) this.updateVisibility();
     mark('vis');
     if (this.pvsOverlay.enabled) this.pvsOverlay.update(this.root, this.pvs, this.camera.position);

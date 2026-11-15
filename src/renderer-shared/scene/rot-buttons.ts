@@ -96,6 +96,8 @@ export function setupRotButtons(root: THREE.Object3D): RotButtonPivot[] {
   for (const [id, group] of byId) {
     const pivot = new THREE.Group();
     pivot.name = `rot-button:${id}`;
+    // 标记：载图后的「静态矩阵冻结」要放过这些 pivot（它们每帧改 rotation）。
+    pivot.userData.vbspRotPivot = true;
     // 世界坐标 pivot：mesh 几何已在世界空间，把 mesh 反向平移，视觉位置不动。
     const [x, y, z] = group.meta.origin;
     pivot.position.set(x, y, z);
