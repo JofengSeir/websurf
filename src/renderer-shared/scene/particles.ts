@@ -1114,8 +1114,14 @@ export class ParticleSystems {
         // 收拢在 ±70 HU 内，得到硬白核 + 外圈紫晕；不再用「单张大光晕」近似。
         const ball = new THREE.Group();
         ball.name = 'base-ball';
-        ball.position.set(entity.origin[0], entity.origin[1], entity.origin[2]);
-        const BALL_SPRITES = 28;
+        // 球心在符文盘平面**之下**（用户 m14239 对照实机指出：大部分球体低于符文高度）。
+        // pcf-scout task-16 复核（`.tmp/pcf/ball-geometry.json`）：
+        //   04 的 `Position Within Box Random` 是 local space 偏移 min (0,0,−400) / max (0,0,−512)，
+        //   mean −456 ⇒ 球心 world y = 725.312 − 456 = 269.3，位于内盘顶面 756.59 之下 487 HU；
+        //   盘面到世界地面（−469）之间**没有实体面**，球就悬在坑洞里。
+        ball.position.set(entity.origin[0], entity.origin[1] - 456, entity.origin[2]);
+        // 白核对齐实机 531 HU：单 sprite 1600 HU × 34% = 544 HU，靠「近同心 + 少量散布」保持核心不被撑大。
+        const BALL_SPRITES = 24;
         for (let i = 0; i < BALL_SPRITES; i += 1) {
           const sprite = new THREE.Sprite(
             new THREE.SpriteMaterial({
@@ -1126,17 +1132,17 @@ export class ParticleSystems {
               depthWrite: false,
               fog: false,
               toneMapped: false,
-              opacity: 0.078,
+              opacity: 0.085,
             }),
           );
           const angle = i * 2.399963; // 黄金角散布，避免规则条纹
-          const spread = i % 6 === 0 ? 0 : 20 + (i % 5) * 12;
+          const spread = i < 8 ? 0 : 8 + (i % 5) * 8;
           sprite.position.set(
             Math.cos(angle) * spread,
-            40 + (i % 5) * 24,
+            8 + (i % 5) * 10,
             Math.sin(angle) * spread,
           );
-          sprite.scale.setScalar(1500 + (i % 7) * 32);
+          sprite.scale.setScalar(1500 + (i % 5) * 30);
           sprite.renderOrder = 12;
           ball.add(sprite);
           this.baseGlows.push(sprite);
@@ -1165,7 +1171,7 @@ export class ParticleSystems {
           const rad = Math.random() * 260;
           sp.position.set(
             entity.origin[0] + Math.cos(ang) * rad,
-            entity.origin[1] - 200 + Math.random() * 260,
+            entity.origin[1] - 456 + (Math.random() - 0.5) * 260,
             entity.origin[2] + Math.sin(ang) * rad,
           );
           const sc = 700 + Math.random() * 900;
