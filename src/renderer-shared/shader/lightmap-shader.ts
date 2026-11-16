@@ -225,6 +225,14 @@ const VLIGHT_SMOOTH_PASSES = 2;
  * 返回值 = 变化超过 1/255 的顶点数（诊断用）。
  */
 export function smoothVertexLighting(geom: THREE.BufferGeometry): number {
+	// A/B 开关：默认走快速实现；设 `globalThis.__vbspVLightFast = false` 回退到旧实现（数值语义完全一致）。
+	const g = globalThis as { __vbspVLightFast?: boolean };
+	if (g.__vbspVLightFast === false) return smoothVertexLightingLegacy(geom);
+	return smoothVertexLightingFast(geom);
+}
+
+/** 旧实现（保留作 A/B 基准）：每遍重新扫 27 个 cell、每遍重算 sqrt 权重。 */
+function smoothVertexLightingLegacy(geom: THREE.BufferGeometry): number {
 	const attr = geom.getAttribute(VERTEX_LIGHTING_ATTR) as THREE.BufferAttribute | undefined;
 	const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
 	if (!attr || !pos) return 0;
@@ -347,6 +355,216 @@ export function smoothVertexLighting(geom: THREE.BufferGeometry): number {
 		attr.setXYZ(i, src[u * 3], src[u * 3 + 1], src[u * 3 + 2]);
 	}
 	if (changed > 0) attr.needsUpdate = true;
+	return changed;
+}
+
+/**
+ * 快速实现：数值语义与 legacy **逐位一致**（同一焊接量化、同一邻居遍历顺序与 MAX_NEIGHBORS 上限、
+ * 同一权重公式 `1 - sqrt(d2)/r`、同一两遍双缓冲与除法），只做了三件事：
+ *  1) 焊接键从字符串 `"rx,ry,rz"` 换成数字哈希桶 + 精确三元组比较（省掉每顶点字符串拼接）；
+ *  2) 邻居表（v 下标 + 权重）只构建一次、两遍复用（legacy 是每遍重扫 27 cell、重算 sqrt）；
+ *  3) 邻居表用 growable typed array，避免大量 number[] 装箱。
+ * 仍保留 legacy 的「单块 80ms 预算」语义（超预算就停在这一遍的结果上）。
+ */
+function smoothVertexLightingFast(geom: THREE.BufferGeometry): number {
+	const attr = geom.getAttribute(VERTEX_LIGHTING_ATTR) as THREE.BufferAttribute | undefined;
+	const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
+	if (!attr || !pos) return 0;
+	const n = pos.count;
+	if (n < 2) return 0;
+	const r = VLIGHT_SMOOTH_RADIUS;
+	const r2 = r * r;
+	// 临时分项计时（A 的收益归因用；`__vbspVLightPerf` 可读累计值）
+	const gp = globalThis as {
+		__vbspVLightPerf?: {
+			chunks: number; weld: number; grid: number; nbr: number; pass: number; write: number;
+			mSum: number; eSum: number; nSum: number;
+		};
+	};
+	const perf = (gp.__vbspVLightPerf ??= { chunks: 0, weld: 0, grid: 0, nbr: 0, pass: 0, write: 0, mSum: 0, eSum: 0, nSum: 0 });
+	const tA = performance.now();
+
+	// 1) 位置焊接（量化与 legacy 相同）
+	const rep = new Int32Array(n);
+	const ux: number[] = [];
+	const uy: number[] = [];
+	const uz: number[] = [];
+	const qx: number[] = [];
+	const qy: number[] = [];
+	const qz: number[] = [];
+	const firstVertex: number[] = [];
+	const weld = new Map<number, number[]>();
+	for (let i = 0; i < n; i++) {
+		const x = pos.getX(i);
+		const y = pos.getY(i);
+		const z = pos.getZ(i);
+		const ex = Math.round(x * 100);
+		const ey = Math.round(y * 100);
+		const ez = Math.round(z * 100);
+		const h = (Math.imul(ex, 0x9e3779b1) ^ Math.imul(ey, 0x85ebca77) ^ Math.imul(ez, 0xc2b2ae3d)) >>> 0;
+		let bucket = weld.get(h);
+		let u = -1;
+		if (bucket !== undefined) {
+			for (let t = 0; t < bucket.length; t++) {
+				const c = bucket[t];
+				if (qx[c] === ex && qy[c] === ey && qz[c] === ez) {
+					u = c;
+					break;
+				}
+			}
+		} else {
+			bucket = [];
+			weld.set(h, bucket);
+		}
+		if (u < 0) {
+			u = ux.length;
+			bucket.push(u);
+			ux.push(x);
+			uy.push(y);
+			uz.push(z);
+			qx.push(ex);
+			qy.push(ey);
+			qz.push(ez);
+			firstVertex.push(i);
+		}
+		rep[i] = u;
+	}
+	const m = ux.length;
+	if (m > 80000) return 0;
+
+	const tB = performance.now();
+	perf.weld += tB - tA;
+
+	// 2) 空间桶（与 legacy 同键）
+	const key = (gx: number, gy: number, gz: number): number =>
+		(gx + 1024) * 4194304 + (gy + 1024) * 2048 + (gz + 1024);
+	const cellOf = (v: number): number => Math.floor(v / r);
+	const grid = new Map<number, number[]>();
+	for (let u = 0; u < m; u++) {
+		const k = key(cellOf(ux[u]), cellOf(uy[u]), cellOf(uz[u]));
+		const list = grid.get(k);
+		if (list) list.push(u);
+		else grid.set(k, [u]);
+	}
+
+	const tC = performance.now();
+	perf.grid += tC - tB;
+
+	// 3) 邻居表（顺序/权重/上限与 legacy 的 gather 完全一致）
+	const MAX_NEIGHBORS = 128;
+	const nbrStart = new Int32Array(m + 1);
+	let nbrCap = Math.max(1024, m * 4);
+	let nbrCount = 0;
+	let nbrV = new Int32Array(nbrCap);
+	let nbrW = new Float64Array(nbrCap);
+	const growNeighbors = (need: number): void => {
+		if (need <= nbrCap) return;
+		let cap = nbrCap;
+		while (cap < need) cap *= 2;
+		const nv = new Int32Array(cap);
+		nv.set(nbrV.subarray(0, nbrCount));
+		const nw = new Float64Array(cap);
+		nw.set(nbrW.subarray(0, nbrCount));
+		nbrV = nv;
+		nbrW = nw;
+		nbrCap = cap;
+	};
+	for (let u = 0; u < m; u++) {
+		nbrStart[u] = nbrCount;
+		const x = ux[u];
+		const y = uy[u];
+		const z = uz[u];
+		const gx = cellOf(x);
+		const gy = cellOf(y);
+		const gz = cellOf(z);
+		let taken = 0;
+		gather: for (let dx = -1; dx <= 1; dx++) {
+			for (let dy = -1; dy <= 1; dy++) {
+				for (let dz = -1; dz <= 1; dz++) {
+					const list = grid.get(key(gx + dx, gy + dy, gz + dz));
+					if (!list) continue;
+					for (let t = 0; t < list.length; t++) {
+						const v = list[t];
+						if (v === u) continue;
+						const ddx = ux[v] - x;
+						const ddy = uy[v] - y;
+						const ddz = uz[v] - z;
+						const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
+						if (d2 >= r2) continue;
+						const ww = 1 - Math.sqrt(d2) / r;
+						growNeighbors(nbrCount + 1);
+						nbrV[nbrCount] = v;
+						nbrW[nbrCount] = ww;
+						nbrCount++;
+						if (++taken >= MAX_NEIGHBORS) break gather;
+					}
+				}
+			}
+		}
+	}
+	nbrStart[m] = nbrCount;
+	const tD = performance.now();
+	perf.nbr += tD - tC;
+
+	// 4) 两遍平滑（双缓冲、算术顺序与 legacy 相同）
+	let src = new Float32Array(m * 3);
+	for (let u = 0; u < m; u++) {
+		const i = firstVertex[u];
+		src[u * 3] = attr.getX(i);
+		src[u * 3 + 1] = attr.getY(i);
+		src[u * 3 + 2] = attr.getZ(i);
+	}
+	let dst = new Float32Array(m * 3);
+	const t0 = performance.now();
+	for (let pass = 0; pass < VLIGHT_SMOOTH_PASSES; pass++) {
+		for (let u = 0; u < m; u++) {
+			let w = 1;
+			let cr = src[u * 3];
+			let cg = src[u * 3 + 1];
+			let cb = src[u * 3 + 2];
+			const s = nbrStart[u];
+			const e = nbrStart[u + 1];
+			for (let k = s; k < e; k++) {
+				const ww = nbrW[k];
+				const v = nbrV[k];
+				w += ww;
+				cr += ww * src[v * 3];
+				cg += ww * src[v * 3 + 1];
+				cb += ww * src[v * 3 + 2];
+			}
+			dst[u * 3] = cr / w;
+			dst[u * 3 + 1] = cg / w;
+			dst[u * 3 + 2] = cb / w;
+		}
+		const t = src;
+		src = dst;
+		dst = t;
+		if (performance.now() - t0 > 80) break;
+	}
+
+	const tE = performance.now();
+	perf.pass += tE - tD;
+
+	// 5) 写回 + changed 统计（与 legacy 相同判定）
+	let changed = 0;
+	for (let i = 0; i < n; i++) {
+		const u = rep[i];
+		if (
+			Math.abs(src[u * 3] - attr.getX(i)) +
+			Math.abs(src[u * 3 + 1] - attr.getY(i)) +
+			Math.abs(src[u * 3 + 2] - attr.getZ(i)) > 0.004) {
+			changed++;
+		}
+		attr.setXYZ(i, src[u * 3], src[u * 3 + 1], src[u * 3 + 2]);
+	}
+	if (changed > 0) attr.needsUpdate = true;
+	const tF = performance.now();
+	perf.write += tF - tE;
+	perf.chunks++;
+	perf.mSum += m;
+	perf.eSum += nbrCount;
+	perf.nSum += n;
+	if (perf.chunks % 100 === 0) console.info('[vlight-perf] ' + JSON.stringify(perf));
 	return changed;
 }
 

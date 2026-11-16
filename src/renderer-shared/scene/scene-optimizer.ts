@@ -46,6 +46,29 @@ const OPT_TRANS_CELL_DIV = 4;
  */
 const FRUSTUM_PAD = 1.6;
 
+/**
+ * 合并期细粒度计时（诊断用，默认零开销）：页面把 `globalThis.__vbspMergePerf = true` 后加载地图，
+ * 合并结束会 `console.info('[merge-perf] …')` 打一行 JSON 分项，供 task-25 的链路分析取数。
+ * 只在合并开始/结束与每个 cell 的粗粒度区间取 `performance.now()`，不改变任何几何/材质行为。
+ */
+interface MergePerf {
+  t0: number;
+  collect: number;
+  cellAdapt: number;
+  bucket: number;
+  mergeTotal: number;
+  multiBake: number;
+  groupMerge: number;
+  finalMerge: number;
+  meshes: number;
+  cells: number;
+  chunks: number;
+}
+
+function mergePerfOn(): boolean {
+  return (globalThis as unknown as { __vbspMergePerf?: boolean }).__vbspMergePerf === true;
+}
+
 /** 分块收集项：mesh + 它的世界包围盒中心（分桶键用）。 */
 interface OptMeshInfo {
   mesh: THREE.Mesh;
@@ -358,8 +381,23 @@ export function lookupMergeSource(
  * 的收集（多材质烘焙）已经完成，调用方按各自语义处理空集路径。
  */
 export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions): MergeResult {
+  const perfOn = mergePerfOn();
+  const perf: MergePerf = {
+    t0: perfOn ? performance.now() : 0,
+    collect: 0,
+    cellAdapt: 0,
+    bucket: 0,
+    mergeTotal: 0,
+    multiBake: 0,
+    groupMerge: 0,
+    finalMerge: 0,
+    meshes: 0,
+    cells: 0,
+    chunks: 0,
+  };
   // ① 收集：先刷新 matrixWorld 作为世界变换基准。多材质 mesh（GLB primitive 恒单材质，此处是
   //    防御路径）烘焙到世界空间后保留；无材质 mesh 原样跳过。两者都不参与分块
+  const tCollect = perfOn ? performance.now() : 0;
   collectRoot.updateMatrixWorld(true);
   const infos: OptMeshInfo[] = [];
   const keptMeshes: THREE.Mesh[] = [];
@@ -408,6 +446,8 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     box.getCenter(center);
     infos.push({ mesh: m, cx: center.x, cy: center.y, cz: center.z });
   });
+  if (perfOn) perf.collect = performance.now() - tCollect;
+  perf.meshes = infos.length;
   if (infos.length === 0) {
     return { infos, keptMeshes, chunks: [], cellSize: 0, cellsCount: 0, chunkCount: 0, vertsTotal: 0, drawCallEst: 0 };
   }
@@ -417,6 +457,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
 
   // ② cell 边长自适应：初值取世界包围盒对角线 / cbrt(目标块数)，随后按非空 cell 数缩放（收敛到
   //    OPT_MIN_CELLS..OPT_MAX_CELLS；给了 `targetCells` 时按同一比例收窄上下限）
+  const tCell = perfOn ? performance.now() : 0;
   const targetCells = Math.max(1, Math.round(opts?.targetCells ?? OPT_TARGET_CELLS));
   const minCells = Math.max(1, Math.min(OPT_MIN_CELLS, Math.round(targetCells * 0.6)));
   const maxCells = Math.max(minCells, Math.min(OPT_MAX_CELLS, Math.round(targetCells * 1.6)));
@@ -446,11 +487,13 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     }
     cellSizeO = cs;
   }
+  if (perfOn) perf.cellAdapt = performance.now() - tCell;
 
   // ③ 分桶：按每个 mesh 的世界包围盒中心归 cell（横跨多 cell 的归中心所在 cell）。
   //    半透明另起一套更细的 cell 并单独成桶 —— 排序键 z 是「整块包围球中心、块内槽共用」，
   //    见 OPT_TRANS_CELL_DIV 处的说明。键前缀把两类桶彻底隔开：哪怕半透明细化后的 cell 编号
   //    与不透明的撞上，也进不到同一个桶。不透明侧的键与产物与改前逐字相同。
+  const tBucket = perfOn ? performance.now() : 0;
   const cells = new Map<string, OptMeshInfo[]>();
   for (const it of infos) {
     // 面板可关：关掉后半透明与不透明同块（复现「水面被并进大块 ⇒ RT 自采样/放射反射」）。
@@ -464,6 +507,10 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     }
     arr.push(it);
   }
+  if (perfOn) {
+    perf.bucket = performance.now() - tBucket;
+    perf.cells = cells.size;
+  }
 
   // ④ 合并：单 mesh 的 cell 保留原 mesh（几何烘焙到世界空间、变换清零）；多 mesh 的 cell
   //    先按材质实例分组子合并，再 mergeGeometries(useGroups = true) 合成一个 Mesh + 材质数组
@@ -472,6 +519,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
   let chunkCount = 0;
   let drawCallEst = 0;
   let vertsTotal = 0;
+  const tMerge = perfOn ? performance.now() : 0;
   for (const arr of cells.values()) {
     if (arr.length === 1) {
       const m = arr[0].mesh;
@@ -500,6 +548,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       geoms: THREE.BufferGeometry[];
       seeds: MergeSourceSeed[];
     }>();
+    const tBake = perfOn ? performance.now() : 0;
     for (const it of arr) {
       const m = it.mesh;
       const mat = m.material as THREE.Material;
@@ -514,10 +563,12 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       group.geoms.push(baked);
       group.seeds.push(meshSourceSeed(m));
     }
+    if (perfOn) perf.multiBake += performance.now() - tBake;
     const mergedGeoms: THREE.BufferGeometry[] = [];
     // 与 mergedGeoms 同下标的来源表（null = 这一份没有表，最终合并出的块也不带表）
     const mergedTables: (MergeSourceTable | null)[] = [];
     const mats: THREE.Material[] = [];
+    const tGroup = perfOn ? performance.now() : 0;
     for (const group of byMat.values()) {
       const mat = group.mat;
       const geomsRaw = group.geoms;
@@ -546,6 +597,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
         mats.push(mat);
       }
     }
+    if (perfOn) perf.groupMerge += performance.now() - tGroup;
     if (mergedGeoms.length === 0) {
       for (const it of arr) it.mesh.geometry.dispose();
       continue;
@@ -553,6 +605,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     // ⑤ 最终合并：按属性签名分桶，每桶单独合成一个 Mesh + 材质数组。
     //    不同签名的几何硬塞进一次 mergeGeometries 必然返回 null；过去的防御分支只能
     //    「每个材质单独一块」，draw call 随之暴涨。分桶只改变分块边界，不改几何数据。
+    const tFinal = perfOn ? performance.now() : 0;
     const finalGroups = new Map<string, {
       geoms: THREE.BufferGeometry[];
       mats: THREE.Material[];
@@ -569,6 +622,8 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       grp.mats.push(mats[i]);
       grp.tables.push(mergedTables[i]);
     }
+    if (perfOn) perf.finalMerge += performance.now() - tFinal;
+    const tFinalMerge = perfOn ? performance.now() : 0;
     for (const grp of finalGroups.values()) {
       let chunk: THREE.Mesh;
       if (grp.geoms.length === 1) {
@@ -601,8 +656,16 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       chunks.push(chunk);
       chunkCount++;
     }
+    if (perfOn) perf.finalMerge += performance.now() - tFinalMerge;
     for (const it of arr) it.mesh.geometry.dispose();
     for (const g of mergedGeoms) vertsTotal += g.attributes.position.count;
+  }
+
+  if (perfOn) {
+    perf.mergeTotal = performance.now() - tMerge;
+    perf.chunks = chunkCount;
+    perf.t0 = performance.now() - perf.t0;
+    console.info('[merge-perf] ' + JSON.stringify(perf));
   }
 
   return { infos, keptMeshes, chunks, cellSize, cellsCount: cells.size, chunkCount, vertsTotal, drawCallEst };

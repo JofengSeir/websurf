@@ -259,6 +259,13 @@ function subdivideOnce(geom: THREE.BufferGeometry): boolean {
 
 /** 返回细分层数（0 表示没动）。 */
 export function subdivideVertexLit(geom: THREE.BufferGeometry): number {
+  const fast = (globalThis as { __vbspVLightFast?: boolean }).__vbspVLightFast !== false;
+  const gs = globalThis as {
+    __vbspSubdivPerf?: {
+      chunks: number; median: number; capture: number; resample: number; levels0: number; levelsN: number;
+    };
+  };
+  const perf = (gs.__vbspSubdivPerf ??= { chunks: 0, median: 0, capture: 0, resample: 0, levels0: 0, levelsN: 0 });
   const vAttr = geom.getAttribute('_vbsp_vlight');
   const idx = geom.getIndex();
   const pos = geom.getAttribute('position');
@@ -266,19 +273,40 @@ export function subdivideVertexLit(geom: THREE.BufferGeometry): number {
 
   const triCount = Math.floor(idx.count / 3);
   if (triCount === 0) return 0;
+  const tm = performance.now();
   const edge = medianEdge(geom, triCount);
+  perf.median += performance.now() - tm;
   const levels = edge > SUBDIV_EDGE_L2 ? 2 : edge > SUBDIV_EDGE_L1 ? 1 : 0;
 
   // 不细分不等于不用管：细密网格上的 vhv 仍可能是硬边（s3_ramp1b 这类）。
   // 没有新增顶点时也做一次重采样，等价于「按真实空间尺度做一次连续核平滑」。
   if (levels === 0) {
-    const sparse0 = captureSparse(geom);
-    if (sparse0.length > 1) resampleFromSparse(geom, sparse0, edge);
+    perf.levels0++;
+    const tc = performance.now();
+    let fastSparse: SparseFast | null = null;
+    let legacySparse: SparseSample[] | null = null;
+    if (fast) fastSparse = captureSparseFast(geom);
+    else legacySparse = captureSparse(geom);
+    perf.capture += performance.now() - tc;
+    if ((fast && fastSparse!.count > 1) || (!fast && legacySparse!.length > 1)) {
+      const tr = performance.now();
+      if (fast) resampleFast(geom, fastSparse!, edge);
+      else resampleFromSparse(geom, legacySparse!, edge);
+      perf.resample += performance.now() - tr;
+    }
+    perf.chunks++;
+    if (perf.chunks % 100 === 0) console.info('[subdiv-perf] ' + JSON.stringify(perf));
     return 0;
   }
+  perf.levelsN++;
   if (triCount * 16 ** levels > SUBDIV_MAX_INDICES) return 0;
 
-  const sparse = captureSparse(geom);
+  const tc = performance.now();
+  let fastSparse: SparseFast | null = null;
+  let legacySparse: SparseSample[] | null = null;
+  if (fast) fastSparse = captureSparseFast(geom);
+  else legacySparse = captureSparse(geom);
+  perf.capture += performance.now() - tc;
   let done = 0;
   for (let l = 0; l < levels; l++) {
     if (!subdivideOnce(geom)) break;
@@ -286,7 +314,12 @@ export function subdivideVertexLit(geom: THREE.BufferGeometry): number {
   }
   // 细分本身只是把同一张线性插值切得更碎，视觉不变；必须**重采样**才有效：
   // 按细分前稀疏顶点的值做半径加权平均，得到连续的场，再写到细分后的每个顶点上。
-  if (done > 0) resampleFromSparse(geom, sparse, edge);
+  if (done > 0) {
+    const tr = performance.now();
+    if (fast) resampleFast(geom, fastSparse!, edge);
+    else resampleFromSparse(geom, legacySparse!, edge);
+    perf.resample += performance.now() - tr;
+  }
 
   // 合并来源区间表跟着放大（诊断/单模型渲染依赖它）
   const table = geom.userData?.websurfMergeSourceTable as
@@ -299,5 +332,267 @@ export function subdivideVertexLit(geom: THREE.BufferGeometry): number {
       r.count *= f;
     }
   }
+  perf.chunks++;
+  if (perf.chunks % 100 === 0) console.info('[subdiv-perf] ' + JSON.stringify(perf));
   return done;
+}
+
+// ---------------------------------------------------------------------------
+// 等价加速实现（A/B：`globalThis.__vbspVLightFast = false` 回退到上面的 legacy 路径）。
+// 语义（量化 Math.round(x*2)、示例顺序、半径、权重、层数判定）与 legacy 完全一致，
+// 只替换实现：焊接 key 从字符串 Set 换成数字哈希桶 + 精确三元组比较；
+// resample 用「每个顶点 cell 的 27 邻域样本索引缓存 + 直接写回属性数组」，
+// 避免每个顶点 27 次 Map.get 与一次额外 out 数组往返。
+// ---------------------------------------------------------------------------
+
+interface SparseFast {
+  count: number;
+  sx: Float64Array;
+  sy: Float64Array;
+  sz: Float64Array;
+  sr: Float64Array;
+  sg: Float64Array;
+  sb: Float64Array;
+}
+
+function emptySparseFast(): SparseFast {
+  return {
+    count: 0,
+    sx: new Float64Array(0),
+    sy: new Float64Array(0),
+    sz: new Float64Array(0),
+    sr: new Float64Array(0),
+    sg: new Float64Array(0),
+    sb: new Float64Array(0),
+  };
+}
+
+function captureSparseFast(geom: THREE.BufferGeometry): SparseFast {
+  const pos = geom.getAttribute('position');
+  const col = geom.getAttribute('_vbsp_vlight');
+  if (!pos || !col) return emptySparseFast();
+  const n = pos.count;
+  if (n === 0) return emptySparseFast();
+  const sx = new Float64Array(n);
+  const sy = new Float64Array(n);
+  const sz = new Float64Array(n);
+  const sr = new Float64Array(n);
+  const sg = new Float64Array(n);
+  const sb = new Float64Array(n);
+  const qx = new Int32Array(n);
+  const qy = new Int32Array(n);
+  const qz = new Int32Array(n);
+  const weld = new Map<number, number[]>();
+  const posIA = (pos as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute === true;
+  const colIA = (col as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute === true;
+  const pa =
+    !posIA && pos.itemSize === 3 && pos.array instanceof Float32Array
+      ? (pos.array as Float32Array)
+      : null;
+  const ca =
+    !colIA && col.itemSize === 3 && col.array instanceof Float32Array
+      ? (col.array as Float32Array)
+      : null;
+  let m = 0;
+  for (let i = 0; i < n; i++) {
+    const x = pa ? pa[i * 3] : pos.getX(i);
+    const y = pa ? pa[i * 3 + 1] : pos.getY(i);
+    const z = pa ? pa[i * 3 + 2] : pos.getZ(i);
+    const ex = Math.round(x * 2);
+    const ey = Math.round(y * 2);
+    const ez = Math.round(z * 2);
+    const h = (Math.imul(ex, 0x9e3779b1) ^ Math.imul(ey, 0x85ebca77) ^ Math.imul(ez, 0xc2b2ae3d)) >>> 0;
+    const bucket = weld.get(h);
+    let found = false;
+    if (bucket !== undefined) {
+      for (let t = 0; t < bucket.length; t++) {
+        const c = bucket[t];
+        if (qx[c] === ex && qy[c] === ey && qz[c] === ez) {
+          found = true;
+          break;
+        }
+      }
+    }
+    if (found) continue;
+    const arr = bucket ?? [];
+    if (bucket === undefined) weld.set(h, arr);
+    arr.push(m);
+    qx[m] = ex;
+    qy[m] = ey;
+    qz[m] = ez;
+    sx[m] = x;
+    sy[m] = y;
+    sz[m] = z;
+    sr[m] = ca ? ca[i * 3] : col.getX(i);
+    sg[m] = ca ? ca[i * 3 + 1] : col.getY(i);
+    sb[m] = ca ? ca[i * 3 + 2] : col.getZ(i);
+    m++;
+  }
+  return {
+    count: m,
+    sx: sx.subarray(0, m),
+    sy: sy.subarray(0, m),
+    sz: sz.subarray(0, m),
+    sr: sr.subarray(0, m),
+    sg: sg.subarray(0, m),
+    sb: sb.subarray(0, m),
+  };
+}
+
+function resampleFast(geom: THREE.BufferGeometry, sparse: SparseFast, edge: number): void {
+  const col = geom.getAttribute('_vbsp_vlight');
+  const pos = geom.getAttribute('position');
+  if (!col || !pos || sparse.count === 0) return;
+  const n = pos.count;
+  const R = Math.max(RESAMPLE_RADIUS_MIN, edge * RESAMPLE_EDGE_SCALE);
+  const invR = 1 / R;
+  const cellKey = (gx: number, gy: number, gz: number): number =>
+    (gx + 2048) * 4194304 + (gy + 2048) * 2048 + (gz + 2048);
+  const { count, sx, sy, sz, sr, sg, sb } = sparse;
+
+  // 样本分桶（与 legacy 相同：Map<key, 样本下标数组>，数组内按样本顺序）
+  const cells = new Map<number, number[]>();
+  for (let s = 0; s < count; s++) {
+    const k = cellKey(Math.floor(sx[s] * invR), Math.floor(sy[s] * invR), Math.floor(sz[s] * invR));
+    let arr = cells.get(k);
+    if (!arr) {
+      arr = [];
+      cells.set(k, arr);
+    }
+    arr.push(s);
+  }
+
+  // 27 邻域偏移（dx→dy→dz 升序，与 legacy 的循环顺序一致）
+  const offsets = new Int32Array(27);
+  {
+    let w = 0;
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dz = -1; dz <= 1; dz++) offsets[w++] = dx * 4194304 + dy * 2048 + dz;
+  }
+  // 顶点 cell -> 有序 27 邻域样本下标缓存（同一 cell 的所有顶点复用同一顺序表）
+  const cache = new Map<number, Int32Array>();
+  const posIA = (pos as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute === true;
+  const colIA = (col as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute === true;
+  const pa =
+    !posIA && pos.itemSize === 3 && pos.array instanceof Float32Array
+      ? (pos.array as Float32Array)
+      : null;
+  const ca =
+    !colIA && col.itemSize === 3 && col.array instanceof Float32Array
+      ? (col.array as Float32Array)
+      : null;
+  // 顶点去重：合并块里同一位置 + 同一 vlight 值会被多个三角形/分组重复持有；
+  // 结果只依赖 (位置, 原值) ⇒ 每个唯一组合只算一次，再按 rep 写回（位级结果不变）。
+  const rep = new Int32Array(n);
+  const repX = new Float64Array(n);
+  const repY = new Float64Array(n);
+  const repZ = new Float64Array(n);
+  const repR = new Float64Array(n);
+  const repG = new Float64Array(n);
+  const repB = new Float64Array(n);
+  const buckets = new Map<number, number[]>();
+  const tmpF = new Float32Array(6);
+  const tmpU = new Uint32Array(tmpF.buffer);
+  let repCount = 0;
+  for (let i = 0; i < n; i++) {
+    const x = pa ? pa[i * 3] : pos.getX(i);
+    const y = pa ? pa[i * 3 + 1] : pos.getY(i);
+    const z = pa ? pa[i * 3 + 2] : pos.getZ(i);
+    const cr = ca ? ca[i * 3] : col.getX(i);
+    const cg = ca ? ca[i * 3 + 1] : col.getY(i);
+    const cb = ca ? ca[i * 3 + 2] : col.getZ(i);
+    tmpF[0] = x; tmpF[1] = y; tmpF[2] = z; tmpF[3] = cr; tmpF[4] = cg; tmpF[5] = cb;
+    const h = (Math.imul(tmpU[0], 73856093)
+      ^ Math.imul(tmpU[1], 19349663)
+      ^ Math.imul(tmpU[2], 83492791)
+      ^ Math.imul(tmpU[3], 50331653)
+      ^ Math.imul(tmpU[4], 16777619)
+      ^ Math.imul(tmpU[5], 2654435761)) >>> 0;
+    let bucket = buckets.get(h);
+    let found = -1;
+    if (bucket !== undefined) {
+      for (let t = 0; t < bucket.length; t++) {
+        const c = bucket[t];
+        if (Object.is(repX[c], x) && Object.is(repY[c], y) && Object.is(repZ[c], z)
+          && Object.is(repR[c], cr) && Object.is(repG[c], cg) && Object.is(repB[c], cb)) { found = c; break; }
+      }
+    }
+    if (found >= 0) { rep[i] = found; continue; }
+    const c = repCount++;
+    rep[i] = c;
+    repX[c] = x; repY[c] = y; repZ[c] = z; repR[c] = cr; repG[c] = cg; repB[c] = cb;
+    if (bucket !== undefined) bucket.push(c); else buckets.set(h, [c]);
+  }
+
+  const outR = new Float64Array(repCount);
+  const outG = new Float64Array(repCount);
+  const outB = new Float64Array(repCount);
+  const safeR2 = (R * 1.000001) * (R * 1.000001);
+  for (let q = 0; q < repCount; q++) {
+    const x = repX[q];
+    const y = repY[q];
+    const z = repZ[q];
+    const baseKey = cellKey(Math.floor(x * invR), Math.floor(y * invR), Math.floor(z * invR));
+    let cand = cache.get(baseKey);
+    if (cand === undefined) {
+      const list: number[] = [];
+      for (let k = 0; k < 27; k++) {
+        const arr = cells.get(baseKey + offsets[k]);
+        if (!arr) continue;
+        for (let t = 0; t < arr.length; t++) list.push(arr[t]);
+      }
+      cand = Int32Array.from(list);
+      cache.set(baseKey, cand);
+    }
+    let wr = 0;
+    let wg = 0;
+    let wb = 0;
+    let wsum = 0;
+    for (let k = 0; k < cand.length; k++) {
+      const s = cand[k];
+      const dx = sx[s] - x;
+      const dy = sy[s] - y;
+      const dz = sz[s] - z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      // 只跳过「必然 d>=R」的样本（留 1ppm 安全余量）；边界样本仍走 sqrt 做与 legacy 相同的精确判定
+      if (d2 > safeR2) continue;
+      const d = Math.sqrt(d2);
+      if (d >= R) continue;
+      const e = 1 - d * invR;
+      const w = e * e;
+      wr += sr[s] * w;
+      wg += sg[s] * w;
+      wb += sb[s] * w;
+      wsum += w;
+    }
+    // wsum===0 时保持原值（等价于 legacy 的 else 分支写回 col.getX/Y/Z(i)）
+    if (wsum > 0) {
+      const inv = 1 / wsum;
+      outR[q] = wr * inv;
+      outG[q] = wg * inv;
+      outB[q] = wb * inv;
+    } else {
+      outR[q] = repR[q];
+      outG[q] = repG[q];
+      outB[q] = repB[q];
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    const q = rep[i];
+    const r = outR[q];
+    const g = outG[q];
+    const b = outB[q];
+    if (ca) {
+      ca[i * 3] = r;
+      ca[i * 3 + 1] = g;
+      ca[i * 3 + 2] = b;
+    } else {
+      col.setXYZ(i, r, g, b);
+    }
+  }
+  col.needsUpdate = true;
+  const ud = geom.userData as { __vlResampled?: number };
+  ud.__vlResampled = ud.__vlResampled ?? 0;
+  ud.__vlResampled += 1;
 }
