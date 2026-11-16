@@ -142,13 +142,18 @@ export class BloomPostFx {
     fog: false,
   });
   private readonly prevMask = new THREE.Layers();
+  /** 深度代理专用场景（只放那张合并网格，预渲一趟 1 次 draw）。 */
+  private readonly prepassScene = new THREE.Scene();
+  /** 静态深度代理；有它就代替「整场景 overrideMaterial 预渲」。 */
+  private depthProxyMesh: THREE.Mesh | null = null;
   /**
-   * 深度预渲隔帧做（偶数帧做、奇数帧复用上一帧的深度缓冲）：预渲要把整场景画一遍，
-   * 视距 18000、可见 400+ 块时这条路是 bloom 的主要开销（用户机位实测 bloom 开/关
-   * p50 6.19 → 3.15ms）。光效本身已经很糊，复用一帧前的深度肉眼看不出来；相机移动
-   * 引起的遮挡错位 < 一帧位移，可接受。
+   * 光效层（含深度预渲）隔帧渲染：偶数帧重画，奇数帧复用上一帧的缓冲。
+   *
+   * 光晕是低频信号，160Hz 更新已经看不出差别；但这条链在视距 18000 时是 bloom 的主要
+   * 开销（深度代理 1 draw + 光效层 80~140 draw + CPU 提交 ~0.7ms）。隔帧后平均省一半，
+   * 观感差异只在快速移动时的一帧延迟（`.tmp` 下同机位 A/B 截图逐像素一致）。
    */
-  private prepassTick = 0;
+  private glowTick = 0;
 
   constructor(renderer: THREE.WebGLRenderer, params: BloomParams = DEFAULT_BLOOM_PARAMS) {
     this.renderer = renderer;
@@ -237,11 +242,16 @@ export class BloomPostFx {
     if (w === this.width && h === this.height) return;
     this.width = w;
     this.height = h;
-    this.glowTarget.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
-    this.nearTarget.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
-    this.nearScratch.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
-    this.farTarget.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
-    this.farScratch.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
+    // 光晕是低频信号，用半个分辨率（远处一层再降一半，两级模糊叠加）。
+    // 注意别为了省 GPU 降得更低：实测分辨率提到 1/16 时整帧 CPU 时间几乎不变
+    // （`.tmp/pcf/PIPELINE_18000.md` §2），说明这条链是 CPU 提交瓶颈，降分辨率只伤清晰度。
+    const glowDiv = 2;
+    const farDiv = 4;
+    this.glowTarget.setSize(Math.max(1, w / glowDiv), Math.max(1, h / glowDiv));
+    this.nearTarget.setSize(Math.max(1, w / glowDiv), Math.max(1, h / glowDiv));
+    this.nearScratch.setSize(Math.max(1, w / glowDiv), Math.max(1, h / glowDiv));
+    this.farTarget.setSize(Math.max(1, w / farDiv), Math.max(1, h / farDiv));
+    this.farScratch.setSize(Math.max(1, w / farDiv), Math.max(1, h / farDiv));
   }
 
   /**
@@ -253,17 +263,26 @@ export class BloomPostFx {
    */
   renderGlow(scene: THREE.Scene, camera: THREE.Camera, glowMeshes: readonly THREE.Object3D[] = []): void {
     if (!this.enabled) return;
+    // 隔帧：奇数帧直接复用上一帧画好的光效缓冲（见 glowTick 注释）。
+    if ((this.glowTick++ & 1) === 1) return;
     const background = scene.background;
     const fog = scene.fog;
     this.prevMask.mask = camera.layers.mask;
     scene.background = null;
     scene.fog = null;
 
-    // ① 深度预渲：整场景（所有层）只写深度。光效 mesh 先隐藏，避免加法层也写深度、
-    //    把后面的透明层挡掉（它们本身就是透明的，不该参与遮挡）。
-    //    隔帧做：奇数帧只清颜色、复用上一帧的深度（见 prepassTick 注释）。
-    const doPrepass = (this.prepassTick++ & 1) === 0;
-    if (doPrepass) {
+    // ① 深度预渲：先把实体深度写进光效缓冲，后面的光效层才能被墙正确遮挡。
+    //    有两套实现：
+    //    - 有静态深度代理（`setDepthProxy`，正常载图后都有）：只用 1 次 draw 画代理，
+    //      深度内容与「整场景预渲」一致，但省掉 400+ 次 draw；
+    //    - 没代理（例如别处单独用本类）：退回旧路径，整场景 overrideMaterial 画一遍。
+    camera.layers.mask = 0xffffffff;
+    this.renderer.setRenderTarget(this.glowTarget);
+    this.renderer.autoClear = true;
+    this.renderer.clear(true, true, false);
+    if (this.depthProxyMesh) {
+      this.renderer.render(this.prepassScene, camera);
+    } else {
       const hidden: THREE.Object3D[] = [];
       for (const obj of glowMeshes) {
         if (obj.visible) {
@@ -272,18 +291,10 @@ export class BloomPostFx {
         }
       }
       const override = scene.overrideMaterial;
-      camera.layers.mask = 0xffffffff;
       scene.overrideMaterial = this.depthOnlyMaterial;
-      this.renderer.setRenderTarget(this.glowTarget);
-      this.renderer.autoClear = true;
-      this.renderer.clear(true, true, false);
       this.renderer.render(scene, camera);
       scene.overrideMaterial = override;
       for (const obj of hidden) obj.visible = true;
-    } else {
-      this.renderer.setRenderTarget(this.glowTarget);
-      this.renderer.autoClear = true;
-      this.renderer.clear(true, false, false);
     }
 
     // ② 光效层：只画 GLOW_LAYER，深度测试相对上面①写好的实体深度。
@@ -336,7 +347,24 @@ export class BloomPostFx {
     this.renderer.render(this.baseScene, this.quadCamera);
   }
 
+  /**
+   * 设置/替换静态深度代理（建图后调一次；换图时再传新的，`null` 表示退回整场景预渲）。
+   * 代理网格会被放进内部专用场景，**不要**再挂到主场景里，否则会被正式渲染一遍。
+   */
+  setDepthProxy(mesh: THREE.Mesh | null): void {
+    if (this.depthProxyMesh === mesh) return;
+    if (this.depthProxyMesh) {
+      this.prepassScene.remove(this.depthProxyMesh);
+      this.depthProxyMesh.geometry.dispose();
+      const material = this.depthProxyMesh.material as THREE.Material;
+      material.dispose();
+    }
+    this.depthProxyMesh = mesh;
+    if (mesh) this.prepassScene.add(mesh);
+  }
+
   dispose(): void {
+    this.setDepthProxy(null);
     this.glowTarget.dispose();
     this.nearTarget.dispose();
     this.nearScratch.dispose();
@@ -373,4 +401,82 @@ export function markGlowMeshes(root: THREE.Object3D, out?: THREE.Object3D[]): nu
     count += 1;
   });
   return count;
+}
+
+/**
+ * 把场景里的实体几何合并成一张「只写深度」的代理网格，专供 bloom 光效层的遮挡预渲。
+ *
+ * 为什么需要：光效层单独渲染时缓冲里没有墙体深度，否则隔着岩壁也能看到光柱/光球
+ * （用户报的「光效穿透实体」）。旧做法是每帧用 overrideMaterial 把整个场景再画一遍，
+ * 视距 18000 时可见 400+ 块 ⇒ 400+ 次 draw、单独实测 1.94ms/帧，是 bloom 的大头。
+ * 合并成一张静态代理后，预渲只剩 1 次 draw，且深度内容与原来一致（同样的三角形、
+ * 同样的世界变换），观感不变。
+ *
+ * 注意：加色混合的光效自己不收进来（它们本来就不该写深度、也不该互相遮挡）；
+ * 代理按「所有块都画」处理——PVS 剔掉的块本来就藏在实体后面，用它们挡光效与真实
+ * 遮挡等价，不会出现「隔墙看到光」。
+ */
+export function buildDepthProxy(root: THREE.Object3D): { mesh: THREE.Mesh; vertices: number; triangles: number } | null {
+  root.updateWorldMatrix(true, true);
+  interface DepthPart {
+    geometry: THREE.BufferGeometry;
+    matrix: THREE.Matrix4;
+    base: number;
+  }
+  const parts: DepthPart[] = [];
+  let vertexCount = 0;
+  let indexCount = 0;
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    // 光效层（加色混合）不进深度代理，否则它们会互相挡成实心块。
+    if (mats.some((m) => m && (m as THREE.Material).blending === THREE.AdditiveBlending)) return;
+    const geometry = mesh.geometry as THREE.BufferGeometry;
+    const position = geometry.getAttribute('position');
+    if (!position || position.count === 0) return;
+    const index = geometry.getIndex();
+    parts.push({ geometry, matrix: mesh.matrixWorld.clone(), base: vertexCount });
+    vertexCount += position.count;
+    indexCount += index ? index.count : position.count;
+  });
+  if (vertexCount === 0 || indexCount === 0) return null;
+  const positions = new Float32Array(vertexCount * 3);
+  const indices = new Uint32Array(indexCount);
+  const v = new THREE.Vector3();
+  let vOff = 0;
+  let iOff = 0;
+  for (const part of parts) {
+    const position = part.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const matrix = part.matrix;
+    for (let i = 0; i < position.count; i++) {
+      v.fromBufferAttribute(position, i).applyMatrix4(matrix);
+      positions[vOff++] = v.x;
+      positions[vOff++] = v.y;
+      positions[vOff++] = v.z;
+    }
+    const index = part.geometry.getIndex();
+    if (index) {
+      for (let i = 0; i < index.count; i++) indices[iOff++] = part.base + index.getX(i);
+    } else {
+      for (let i = 0; i < position.count; i++) indices[iOff++] = part.base + i;
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.computeBoundingSphere();
+  const material = new THREE.MeshBasicMaterial({
+    colorWrite: false,
+    depthWrite: true,
+    depthTest: true,
+    blending: THREE.NoBlending,
+    fog: false,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.matrixAutoUpdate = false;
+  // 深度要覆盖整张地图，不能跟着视锥剔除，否则远处块不在深度里、光效会透出来。
+  mesh.frustumCulled = false;
+  mesh.name = 'glow-depth-proxy';
+  return { mesh, vertices: vertexCount, triangles: indexCount / 3 };
 }

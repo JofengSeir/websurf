@@ -32,7 +32,7 @@ import {
   setSceneEnvironment,
 } from '../environment/scene-environment.js';
 import { renderSkyPass, type MapFogParams } from '../environment/render-sky-pass.js';
-import { BloomPostFx, DEFAULT_BLOOM_PARAMS, markGlowMeshes, type BloomParams } from '../environment/post-fx.js';
+import { BloomPostFx, DEFAULT_BLOOM_PARAMS, buildDepthProxy, markGlowMeshes, type BloomParams } from '../environment/post-fx.js';
 import { createSkyCamera, SKY_LAYER, type SkyCameraParams } from '../environment/miniature-sky.js';
 import {
   CULL_DISTANCE_PVS_DEFAULT,
@@ -227,6 +227,11 @@ export class RenderSession {
   private glowMarked = 0;
   /** 上一帧标进泛光层的加色 mesh（供 `renderGlow` 的深度预渲跳过它们）。 */
   private readonly glowMeshes: THREE.Object3D[] = [];
+  /**
+   * bloom 光效层的**静态深度代理**：建图后把实体几何合并成一张网格（1 次 draw），
+   * 替代每帧「整场景只写深度」的 400+ 次 draw。null = 退回旧的整场景预渲。
+   */
+  private glowDepthProxy: THREE.Mesh | null = null;
 
   private bbox = new THREE.Box3();
   private maxDim = 0;
@@ -534,6 +539,10 @@ export class RenderSession {
     // 预编译必须在 scene.add(root) 之后：早于它编译的是空场景（game/debug 旧注释的同一约束）。
     precompileScene(this.renderer, this.scene, this.camera);
 
+    // bloom 的遮挡预渲：把实体几何合并成一张静态深度代理（1 次 draw）。旧做法是每帧把
+    // 整场景用 overrideMaterial 再画一遍，视距 18000、可见 400+ 块时单独 1.94ms/帧。
+    this.applyGlowDepthProxy(buildDepthProxy(this.root));
+
     // 相机 near/far/fov：共享口径（viewer 原 far 下限已取消，三端同一个 maxDim×100）
     applySceneCamera(this.camera, this.nearPlane, this.maxDim, rp.camera.fov);
 
@@ -652,6 +661,8 @@ export class RenderSession {
     this.pvsOverlay.reset();
     this.lastVisibility = null;
     this.nearCheckToggle = false;
+    // 深度代理是主根的合并副本，换图后必须释放（几何可能几十 MB）。
+    this.applyGlowDepthProxy(null);
   }
 
   /** 只做可见性判定（debug 的按需渲染需要在决定是否出帧前先知道有无变化）。 */
@@ -815,11 +826,39 @@ export class RenderSession {
     if (this.bloomFx) return this.bloomFx;
     try {
       this.bloomFx = new BloomPostFx(this.renderer, DEFAULT_BLOOM_PARAMS);
+      this.bloomFx.setDepthProxy(this.glowDepthProxy);
       return this.bloomFx;
     } catch (err) {
       console.warn('[render] 泛光初始化失败，回退直画：', err);
       this.bloomFx = null;
       return null;
+    }
+  }
+
+  /**
+   * 安装/替换 bloom 光效层的静态深度代理（建图后一次）。实例可能还没懒建，
+   * 所以先存到 session 上，等 `getOrCreateBloomFx` 时再挂过去。
+   */
+  private applyGlowDepthProxy(
+    proxy: { mesh: THREE.Mesh; vertices: number; triangles: number } | null,
+  ): void {
+    const mesh = proxy?.mesh ?? null;
+    if (this.glowDepthProxy === mesh) return;
+    // bloom 实例不存在时没人替我们释放旧代理。
+    if (this.glowDepthProxy && !this.bloomFx) {
+      this.glowDepthProxy.geometry.dispose();
+      (this.glowDepthProxy.material as THREE.Material).dispose();
+    }
+    this.glowDepthProxy = mesh;
+    this.bloomFx?.setDepthProxy(mesh);
+    if (proxy) {
+      (globalThis as { __vbspDepthProxy?: { vertices: number; triangles: number } }).__vbspDepthProxy = {
+        vertices: proxy.vertices,
+        triangles: proxy.triangles,
+      };
+      console.info(
+        `[${this.app}][bloom] 深度代理：${proxy.triangles.toFixed(0)} 三角 / ${proxy.vertices} 顶点，预渲由整场景改为 1 次 draw`,
+      );
     }
   }
 
@@ -1639,7 +1678,11 @@ export class RenderSession {
     // 否则顶点被烘焙到世界空间后找不回模型边界（见 `rot-buttons.ts`）。
     const optRoot = mergeIntoNewRoot(root, {
       translucentSplit: this.translucentSplit,
-      opaqueTargetCells: 256,
+      // 视距 18000 时主遍是「可见块数 × 单 draw 提交」的瓶颈（实测 5µs/draw、GPU 只忙 24%）。
+      // 不透明桶再压一档（256→128）换 draw 数：`OPT_CELL_MIN = 128 HU` 会把 cell 边长夹住，
+      // 所以 128 与更小的取值等价，这里写 128 表示「已到最粗」。半透明/水面桶不受影响，
+      // 几何与材质不变 ⇒ cand_c 同机位截图与改前逐像素一致（diff 0 px）。
+      opaqueTargetCells: 128,
       exclude: (m) => Boolean((m.userData as { vbspRot?: unknown }).vbspRot),
     });
     // 逐顶点烘焙的 prop 曲面（`s1_ramp1_b` / `s1_window01_1` 这类）在 merged chunk 上仍带
