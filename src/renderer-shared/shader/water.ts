@@ -430,7 +430,7 @@ const refrViewInv = { value: new THREE.Matrix4() };
 const refrCamPos = { value: new THREE.Vector3() };
 const depthScaleUniform = { value: 1200 };
 /**
- * ① 折射深度的取法（2026-11-17）：直接采样**颜色 RT 的深度附件**，取代原来那趟
+ * ① 折射深度的取法：直接采样**颜色 RT 的深度附件**，取代原来那趟
  * 「同一相机 + 同一隐藏水面集合 + overrideMaterial」的整场景 depth pass。
  *
  * 为什么可以等价：color pass 本来就是同一台相机、同一批隐藏水面后渲的整场景，
@@ -440,14 +440,20 @@ const depthScaleUniform = { value: 1200 };
  *
  * 历史坑（注释原话）：早年在自建 RT 上挂 `DepthTexture` 读到恒为远平面 —— 这次是
  * 在**真正渲染这个 RT 的那一趟**之前挂好附件，并用 `depthTexture.needsUpdate`
- * 由 three 自己分配；A/B 用 `__vbspWaterDepthTex=false` 退回旧 pass（会重建 RT）。
+ * 由 three 自己分配。
+ *
+ * 2026-11-17：**默认关闭**。实测两条路性能等价（同页交错 A/B：mean 3.132 vs 3.136、
+ * p90 3.17~3.19，均在噪声内 —— 因为真正的收益来自折射/镜面隔帧，depth pass 本身很便宜），
+ * 而深度附件路径与旧构建有 ~1.9% 的岸线细边像素差（深度精度），旧 pass 与旧构建是
+ * 0.017%（逐像素一致）。既然不省时间，就默认用旧 pass 保住「画面与之前一致」。
+ * A/B 用 `__vbspWaterDepthTex=true` 打开（会重建 RT）。
  */
 const depthTexUniform = { value: null as THREE.Texture | null };
 const depthTexOn = { value: 1 };
 /** 当前 RT 是否按「深度附件」模式建（`null` = 还没建过）；与开关不一致时重建 RT。 */
 let refrDepthTexMode: boolean | null = null;
 function depthTexEnabled(): boolean {
-  return (g as { __vbspWaterDepthTex?: unknown }).__vbspWaterDepthTex !== false;
+  return (g as { __vbspWaterDepthTex?: unknown }).__vbspWaterDepthTex === true;
 }
 /** 水面高度表（世界 y），升序，最多 8 层：像素自己找下方最近的一层算水厚。 */
 const planeA = { value: new THREE.Vector4() };
@@ -720,7 +726,7 @@ function cullBeneathMaterials(camera: THREE.Camera): void {
  * 折射是慢帧的主要增量（同构建 A/B：`__vbspWaterRefrOn=false` ⇒ 慢帧 18.2%→4.9%）。
  * 逃生舱：`__vbspWaterRefrCadence=1` 回全帧率，`=3` 更省（画质未验证）。
  */
-let refrFrameCounter = 0;
+let refrSinceRender = 0;
 function refrCadence(): number {
   const forced = (g as { __vbspWaterRefrCadence?: number }).__vbspWaterRefrCadence;
   if (typeof forced === 'number' && Number.isFinite(forced) && forced > 0) {
@@ -731,10 +737,9 @@ function refrCadence(): number {
 }
 
 /**
- * 镜面 RT 的降频计数（task-33 C1 降级点②）。只在 `renderWaterFramePasses` 里有水且相机
- * 真的动过时推进；每 `cadence` 帧渲一次镜面。
+ * 镜面 RT 的降频计数（task-33 C1 降级点②）。每帧推进，只在真正渲过镜面之后清零。
  */
-let mirrorFrameCounter = 0;
+let mirrorSinceRender = 0;
 
 /**
  * 当前镜面 RT 的重渲间隔（帧）。默认 2 = 隔帧。
@@ -785,53 +790,52 @@ export function renderWaterFramePasses(
   const gateOn = (g as { __vbspWaterFrustumGate?: boolean }).__vbspWaterFrustumGate !== false;
   const visibleHeights = gateOn ? visibleWaterHeights(camera) : null;
   if (visibleHeights && visibleHeights.size === 0) return;
+  // 计数在**每次调用**都推进（含水位在视锥外/相机静止的帧），这样一动起来就立刻重渲，
+  // 不会先给一帧旧 RT；只有真正渲过之后才清零。
+  refrSinceRender++;
+  mirrorSinceRender++;
   // 静止时跳过：镜面/折射内容只随相机变，相机没动就没有任何可见差异。
   // 注意：这里只**判断**不动状态，标记位姿由下面真正重渲的分支做（见 rtCameraMoved 注释）。
   const refrMoved = refrCameraMoved(camera);
   const reflOn = reflOnUniform.value > 0.5;
   const mirrorMoved = reflOn ? mirrorCameraMoved(camera) : false;
   if (!refrMoved && !mirrorMoved) return;
-  // **每帧都重渲**：曾经把折射/镜面按 3 帧交错（省整场景 pass），代价是水面采到 1~3 帧前的画面
-  // ——新投影采旧画面，反射整体滞后，肉眼就是「拖影」。PVS 上线后整场景 pass 只剩几十~一百多
-  // 个 draw，这点开销不值得用画质换（实测 320fps 仍满帧，见 TASK-BOOK §4g）。
-  //
-  // ② 2026-11-17 复核：上面的结论对**镜面**成立（拖影主要来自倒影），但折射是半分辨率 +
-  // 噪声位移采样，1 帧滞后不可辨；而 `__vbspWaterRefrOn=false` 的同构建 A/B 显示折射是
-  // 慢帧的主要增量（18.2%→4.9%）。因此折射单独支持隔帧（`__vbspWaterRefrCadence`），
-  // 默认 2。RT 还没建时必须至少跑一次。
-  if (refrMoved) {
-    refrFrameCounter++;
-    const refrEvery = refrCadence();
-    if (refrEvery <= 1 || refrFrameCounter % refrEvery === 0 || !refrRT) {
-      renderRefraction(renderer, scene, camera);
-      markRefrPose(camera); // 只有真渲过才标记，跳过的帧留到下一帧补渲
-    }
+  // ⚠️ 每帧**最多一趟**整场景 RT pass。折射/镜面都是整场景重渲，撞在同一帧就是那一帧多付
+  // 一整趟：实测预算 2 级（镜面 cadence 3、折射 cadence 2）时每 6 帧必撞一次
+  // （212/1274 帧），撞帧比单趟帧慢 ~1ms —— 窗口大的机器上直接掉一个 vsync 槽
+  // （owner 报的「走动时间歇掉到 160」）。所以用一个「超期比例更大者优先、相等时折射优先」
+  // 的调度：本帧渲了折射，镜面就顺延到下一帧补渲（滞后最多 +1 帧，远小于 3 帧交错的可见阈值）。
+  // 早期「每帧都重渲」的结论对**画质**成立（拖影主要来自倒影滞后），但代价是双趟帧扎堆。
+  const refrEvery = refrCadence();
+  const mirrorEvery = mirrorCadence();
+  const refrDue = refrMoved && (refrEvery <= 1 || refrSinceRender >= refrEvery || !refrRT);
+  const mirrorDue = mirrorMoved && (mirrorEvery <= 1 || mirrorSinceRender >= mirrorEvery);
+  if (!refrDue && !mirrorDue) return;
+  // 优先级按「超期比例」= 距上次真渲的帧数 ÷ 自己的 cadence（都刚渲过则相等、折射优先）。
+  // 注意不能用「cadence<=1 时给固定分」：逃生舱 `__vbspWaterRefrCadence=1` 会让折射每帧
+  // 都是固定高分，镜面永远排不到队、倒影被冻住。
+  const refrScore = refrSinceRender / refrEvery;
+  const mirrorScore = mirrorSinceRender / mirrorEvery;
+  if (refrDue && (!mirrorDue || refrScore >= mirrorScore)) {
+    refrSinceRender = 0;
+    renderRefraction(renderer, scene, camera);
+    markRefrPose(camera); // 只有真渲过才标记，跳过的帧留到下一帧补渲
+    return; // 本帧只跑这一趟
   }
+  if (!mirrorDue) return;
+  mirrorSinceRender = 0;
   // 镜面 RT 同步去嵌套（T-650 v4：与折射同因——嵌套 render 污染主渲染状态且随视角排序变化）。
   // 只渲「这一帧真的在画面里」的水面层：surf_666 有 5 层水，每层一趟整场景，
   // 全渲是 3.4ms/帧（俯仰扫视掉到 230fps 的主因）；看不见的层保留上一帧 RT。
-  //
-  // ② 2026-11-17：镜面默认也隔帧（`mirrorCadence()` 默认 2，理由与实测见该函数注释：
-  // p90 6.25→3.23ms、慢帧 17~20%→9~12%）。task-33 C1 降级点②保留：帧预算升到 2 级时
-  // 再降到每 3 帧（`__vbspWaterMirrorBudget=false` 关降级、`__vbspWaterMirrorCadence` 强制）。
-  // ⚠️ **相位错开**：折射与镜面都是整场景 pass，如果两条 cadence 计数器同步（都只在相机
-  // 动过的帧 +1），隔帧时它们会**撞在同一帧** ⇒ 那一帧 3 趟整场景，实测 p90 从 3.2 回到 6.2
-  // （同一帧两趟 RT 就吃满一个 3.125ms 槽）。所以镜面用 `+1` 的相位偏移：折射在偶数计数、
-  // 镜面在奇数计数 ⇒ 每帧最多一趟整场景 RT。
-  if (mirrorMoved) {
-    mirrorFrameCounter++;
-    const cadence = mirrorCadence();
-    const phase = cadence <= 1 ? 0 : 1;
-    if (cadence <= 1 || (mirrorFrameCounter + phase) % cadence === 0) {
-      for (const p of mirrorPlanes.values()) {
-        if (p.done) continue;
-        if (visibleHeights && !visibleHeights.has(Math.round(p.height * 100) / 100)) continue;
-        p.done = true;
-        renderMirrorPlane(renderer, scene, camera, p);
-      }
-      markMirrorPose(camera); // 同上：跳过的帧不标记，下一帧补渲
-    }
+  // 折射默认 cadence 2、镜面默认 cadence 2；预算升到 2 级时镜面降到 3（task-33 C1 降级点②，
+  // `__vbspWaterMirrorBudget=false` 关降级、`__vbspWaterMirrorCadence` 可强制数值）。
+  for (const p of mirrorPlanes.values()) {
+    if (p.done) continue;
+    if (visibleHeights && !visibleHeights.has(Math.round(p.height * 100) / 100)) continue;
+    p.done = true;
+    renderMirrorPlane(renderer, scene, camera, p);
   }
+  markMirrorPose(camera); // 同上：跳过的帧不标记，下一帧补渲
 }
 
 /** 上一轮水面 RT 用的相机位姿（位置 + 前向）；用于「相机没动就别重渲整场景」的门控。 */
@@ -979,6 +983,8 @@ export function resetWaterShaders(): void {  for (const p of mirrorPlanes.values
   refrRT = null;
   depthRT = null;
   refrDepthTexMode = null;
+  refrSinceRender = 0;
+  mirrorSinceRender = 0;
   _rtLastPos.set(Number.NaN, Number.NaN, Number.NaN);
   _mirrorLastPos.set(Number.NaN, Number.NaN, Number.NaN);
   depthTexUniform.value = null;
