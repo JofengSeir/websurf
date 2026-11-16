@@ -142,6 +142,13 @@ export class BloomPostFx {
     fog: false,
   });
   private readonly prevMask = new THREE.Layers();
+  /**
+   * 深度预渲隔帧做（偶数帧做、奇数帧复用上一帧的深度缓冲）：预渲要把整场景画一遍，
+   * 视距 18000、可见 400+ 块时这条路是 bloom 的主要开销（用户机位实测 bloom 开/关
+   * p50 6.19 → 3.15ms）。光效本身已经很糊，复用一帧前的深度肉眼看不出来；相机移动
+   * 引起的遮挡错位 < 一帧位移，可接受。
+   */
+  private prepassTick = 0;
 
   constructor(renderer: THREE.WebGLRenderer, params: BloomParams = DEFAULT_BLOOM_PARAMS) {
     this.renderer = renderer;
@@ -254,22 +261,30 @@ export class BloomPostFx {
 
     // ① 深度预渲：整场景（所有层）只写深度。光效 mesh 先隐藏，避免加法层也写深度、
     //    把后面的透明层挡掉（它们本身就是透明的，不该参与遮挡）。
-    const hidden: THREE.Object3D[] = [];
-    for (const obj of glowMeshes) {
-      if (obj.visible) {
-        obj.visible = false;
-        hidden.push(obj);
+    //    隔帧做：奇数帧只清颜色、复用上一帧的深度（见 prepassTick 注释）。
+    const doPrepass = (this.prepassTick++ & 1) === 0;
+    if (doPrepass) {
+      const hidden: THREE.Object3D[] = [];
+      for (const obj of glowMeshes) {
+        if (obj.visible) {
+          obj.visible = false;
+          hidden.push(obj);
+        }
       }
+      const override = scene.overrideMaterial;
+      camera.layers.mask = 0xffffffff;
+      scene.overrideMaterial = this.depthOnlyMaterial;
+      this.renderer.setRenderTarget(this.glowTarget);
+      this.renderer.autoClear = true;
+      this.renderer.clear(true, true, false);
+      this.renderer.render(scene, camera);
+      scene.overrideMaterial = override;
+      for (const obj of hidden) obj.visible = true;
+    } else {
+      this.renderer.setRenderTarget(this.glowTarget);
+      this.renderer.autoClear = true;
+      this.renderer.clear(true, false, false);
     }
-    const override = scene.overrideMaterial;
-    camera.layers.mask = 0xffffffff;
-    scene.overrideMaterial = this.depthOnlyMaterial;
-    this.renderer.setRenderTarget(this.glowTarget);
-    this.renderer.autoClear = true;
-    this.renderer.clear(true, true, false);
-    this.renderer.render(scene, camera);
-    scene.overrideMaterial = override;
-    for (const obj of hidden) obj.visible = true;
 
     // ② 光效层：只画 GLOW_LAYER，深度测试相对上面①写好的实体深度。
     //    必须先关 autoClear：render() 默认会清色/深度，一清就把①的预渲深度抹掉，
