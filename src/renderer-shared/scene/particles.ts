@@ -1061,6 +1061,44 @@ class AlchParticleField {
 /**
  * 粒子系统集合：运行时按实体创建光柱/辉光，`update(dt, camera)` 推进模拟与 billboard。
  */
+/** 光效对象的距离剔除上限（HU）。取地图剔除档的上限量级：更远时块本身已被剔除，光效没有意义。 */
+const PARTICLE_CULL_DISTANCE = 18000;
+
+/** 求顶层对象的包围球（局部坐标 == root 坐标，root 恒为单位变换）。sprite 用位置+缩放近似。 */
+function cullBoundOf(obj: THREE.Object3D): { center: THREE.Vector3; radius: number } | null {
+  const center = new THREE.Vector3();
+  let radius = 0;
+  let any = false;
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  const tmp = new THREE.Box3();
+  obj.traverse((node) => {
+    const sprite = node as THREE.Sprite;
+    if (sprite.isSprite) {
+      const s = sprite.scale;
+      const r = Math.max(Math.abs(s.x), Math.abs(s.y), 1) * 0.75;
+      const p = new THREE.Vector3().setFromMatrixPosition(sprite.matrixWorld);
+      box.expandByPoint(p.clone().addScalar(-r));
+      box.expandByPoint(p.clone().addScalar(r));
+      any = true;
+      return;
+    }
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) return;
+    const geom = mesh.geometry as THREE.BufferGeometry;
+    if (!geom.boundingBox) geom.computeBoundingBox();
+    if (!geom.boundingBox) return;
+    tmp.copy(geom.boundingBox).applyMatrix4(mesh.matrixWorld);
+    box.union(tmp);
+    any = true;
+  });
+  if (!any || box.isEmpty()) return null;
+  box.getBoundingSphere(new THREE.Sphere(center, 0));
+  radius = box.getBoundingSphere(new THREE.Sphere()).radius;
+  // 动态部分（粒子飘移/缩放脉动）留 15% 余量
+  return { center, radius: radius * 1.15 + 8 };
+}
+
 export class ParticleSystems {
   readonly root = new THREE.Group();
   private readonly beamTexture: THREE.Texture;
@@ -1077,6 +1115,10 @@ export class ParticleSystems {
   /** 符文祭坛（alch）的两层 PCF 粒子（环几何由 brush 实体负责，不在这里）。 */
   private readonly alchFields: AlchParticleField[] = [];
   private elapsed = 0;
+  private readonly _cullProj = new THREE.Matrix4();
+  private readonly _cullFrustum = new THREE.Frustum();
+  private readonly _cullSphere = new THREE.Sphere();
+  private readonly _cullCam = new THREE.Vector3();
 
   constructor(entities: ParticleEntity[]) {
     this.root.name = 'particle-systems';
@@ -1216,6 +1258,9 @@ export class ParticleSystems {
         this.root.add(field.group);
       }
     }
+    // 所有光效对象都是「实体挂件」，不进合并块 ⇒ 块级 PVS/距离剔除管不到它们。
+    // 构造完给每个顶层对象记包围球，`update()` 里按视锥 + 距离做粗剔除。
+    this.tagCullBounds();
   }
 
   private buildGlow(entity: ParticleEntity, glow: { size: number; color: number; count: number }): GlowCluster {
@@ -1277,6 +1322,39 @@ export class ParticleSystems {
           base.z + Math.cos(t * 0.9) * 4,
         );
       }
+    }
+    this.cullByCamera(camera);
+  }
+
+  /**
+   * 光效不参与块级 PVS/距离剔除（它们挂在实体上、不在合并块里），旧实现是「永远画」：
+   * 远处/身后的大面积加法面片照样提交、照样过一遍混合与泛光，末尾水区这类视野里会明显掉帧。
+   * 这里按「每个顶层对象构造时算好的包围球」做视锥 + 距离粗剔除（半径已带余量，只在这种
+   * 粗粒度上剔除，不会出现面片突然被切掉的观感）。距离上限取地图剔除档的上限量级。
+   */
+  private cullByCamera(camera: THREE.Camera): void {
+    const proj = this._cullProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this._cullFrustum.setFromProjectionMatrix(proj);
+    const camPos = this._cullCam.setFromMatrixPosition(camera.matrixWorld);
+    const maxDist = PARTICLE_CULL_DISTANCE;
+    for (const child of this.root.children) {
+      const bound = child.userData.cullBound as { center: THREE.Vector3; radius: number } | undefined;
+      if (!bound) continue;
+      if (camPos.distanceTo(bound.center) - bound.radius > maxDist) {
+        child.visible = false;
+        continue;
+      }
+      this._cullSphere.center.copy(bound.center);
+      this._cullSphere.radius = bound.radius;
+      child.visible = this._cullFrustum.intersectsSphere(this._cullSphere);
+    }
+  }
+
+  /** 构造完成后给每个顶层对象记一份包围球（只算一次；动态部分留了余量）。 */
+  private tagCullBounds(): void {
+    for (const child of this.root.children) {
+      const bound = cullBoundOf(child);
+      if (bound) child.userData.cullBound = bound;
     }
   }
 

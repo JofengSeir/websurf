@@ -90,6 +90,15 @@ export interface LaserBeam {
  * 1 像素内收零 —— 既不像软晕，也不会比起源粗。
  */
 const LASER_VISIBLE_HALF_FRACTION = 0.625; // 半亮带 / 四边形全宽
+
+/**
+ * 激光的视锥/距离剔除上限（HU，地图剔除档的上限量级）。
+ *
+ * 激光是实体挂件：`mesh.frustumCulled = false` 且不参与块级 PVS/距离剔除，旧实现等于「永远画」。
+ * 12 条梁里 10 条被物理截断后仍是全长的几个面片，在远处/身后照样提交；这里按每束的包围球做
+ * 粗剔除，超限或不在视锥内就把四边形塌成零面积（不产生可见像素）。
+ */
+const LASER_CULL_DISTANCE = 18000;
 function makeLaserTexture(): THREE.Texture {
   const size = 64;
   const canvas = document.createElement('canvas');
@@ -217,6 +226,9 @@ export class LaserBeams {
   private readonly tmpPerp = new THREE.Vector3();
   private readonly tmpUp = new THREE.Vector3(0, 1, 0);
   private readonly tmpMid = new THREE.Vector3();
+  private readonly _cullProj = new THREE.Matrix4();
+  private readonly _cullFrustum = new THREE.Frustum();
+  private readonly _cullSphere = new THREE.Sphere();
   private elapsed = 0;
 
   constructor(beams: LaserBeam[]) {
@@ -331,6 +343,17 @@ export class LaserBeams {
     const fovRad = persp.isPerspectiveCamera ? (persp.fov * Math.PI) / 180 : Math.PI / 3;
     const focalPx = viewH / 2 / Math.tan(fovRad / 2);
     const camPos = camera.position;
+    // 激光是实体挂件（不在合并块里），块级 PVS/距离剔除管不到 ⇒ 这里按「束的包围球」做
+    // 视锥 + 距离粗剔除：看不见的束直接退化成零面积，不产生可见像素也不额外占 draw。
+    this._cullFrustum.setFromProjectionMatrix(this._cullProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    const collapse = (base: number, start: THREE.Vector3): void => {
+      for (let k = 0; k < 4; k++) {
+        const off = (base + k) * 3;
+        pa[off] = start.x;
+        pa[off + 1] = start.y;
+        pa[off + 2] = start.z;
+      }
+    };
     for (let i = 0; i < this.beams.length; i++) {
       const beam = this.beams[i];
       const base = i * 4;
@@ -338,22 +361,28 @@ export class LaserBeams {
       const length = dir.length();
       if (length < 0.1) {
         // 退化梁：四个顶点都收到起点，不可见
-        for (let k = 0; k < 4; k++) {
-          const off = (base + k) * 3;
-          pa[off] = beam.start.x;
-          pa[off + 1] = beam.start.y;
-          pa[off + 2] = beam.start.z;
-        }
+        collapse(base, beam.start);
         continue;
       }
       dir.multiplyScalar(1 / length);
+      mid.addVectors(beam.start, beam.clippedEnd).multiplyScalar(0.5);
+      const midDist = Math.max(1, mid.distanceTo(camPos));
+      const beamRadius = length * 0.5 + Math.max(4, beam.width * 2);
+      if (midDist - beamRadius > LASER_CULL_DISTANCE) {
+        collapse(base, beam.start);
+        continue;
+      }
+      this._cullSphere.center.copy(mid);
+      this._cullSphere.radius = beamRadius;
+      if (!this._cullFrustum.intersectsSphere(this._cullSphere)) {
+        collapse(base, beam.start);
+        continue;
+      }
       // ComputeBeamPerpendicular: perp = normalize(Cross(viewForward, beamDir))
       perp.crossVectors(forward, dir);
       if (perp.lengthSq() < 1e-6) perp.copy(fallback);
       else perp.normalize();
       // DrawSegs: m_flWidth = width*2，CBeamSegDraw 偏移 ±m_flWidth*0.5 ⇒ 半宽 = width。
-      mid.addVectors(beam.start, beam.clippedEnd).multiplyScalar(0.5);
-      const midDist = Math.max(1, mid.distanceTo(camPos));
       const pxPerHU = focalPx / midDist;
       // 远处不足 1 px 时用屏幕空间下限反算半宽（只保证可见，不是泛光软边）。
       const minHalfHU = (LASER_MIN_CORE_PX * 0.5) / Math.max(1e-4, pxPerHU);
