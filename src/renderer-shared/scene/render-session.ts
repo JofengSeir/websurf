@@ -715,13 +715,29 @@ export class RenderSession {
     const savedAutoCull = this.visibility.autoCullDistance;
     const savedCull = this.visibility.cullDistance;
     const savedAutoFlag = this.pvsAutoCull;
-    const savedWaterGate = (globalThis as { __vbspWaterFrustumGate?: boolean }).__vbspWaterFrustumGate;
+    const gw = globalThis as {
+      __vbspWaterFrustumGate?: boolean;
+      __vbspWaterRefrCadence?: number;
+      __vbspWaterMirrorCadence?: number;
+      __vbspBudgetOn?: boolean;
+    };
+    const savedWaterGate = gw.__vbspWaterFrustumGate;
+    // 水面折射默认隔帧（`water.ts` `refrCadence` 默认 2），镜面在预算升到 2 级时每 3 帧一次；
+    // 帧预算控制器还可能已经升过级。预热帧要把「每种 pass 形态」都真跑一遍，否则那个形态的
+    // program 要等首飞第一次轮到它才编：实测预热帧被 cadence 跳过镜面 ⇒ 冷跑首飞补编 7 个
+    // 1024² 镜面 RT 变体、单帧 28ms。这里临时强制全帧率 + 冻结预算档，finally 还原。
+    const savedRefrCadence = gw.__vbspWaterRefrCadence;
+    const savedMirrorCadence = gw.__vbspWaterMirrorCadence;
+    const savedBudgetOn = gw.__vbspBudgetOn;
     this.pvsOverride = false;
     this.pvsAutoCull = false; // 与 enablePvs 一致 ⇒ updateVisibility() 的自动距离分支不覆盖 ∞
     this.visibility.enablePvs = false;
     this.visibility.autoCullDistance = Number.POSITIVE_INFINITY;
     this.visibility.cullDistance = Number.POSITIVE_INFINITY;
-    (globalThis as { __vbspWaterFrustumGate?: boolean }).__vbspWaterFrustumGate = false;
+    gw.__vbspWaterFrustumGate = false;
+    gw.__vbspWaterRefrCadence = 1;
+    gw.__vbspWaterMirrorCadence = 1;
+    gw.__vbspBudgetOn = false;
     const t0 = performance.now();
     let ok = true;
     // 预热序号：既用于诊断，也用于相机挪动幅度——两趟预热不能挪到同一个坐标，
@@ -734,6 +750,14 @@ export class RenderSession {
     const info = this.renderer.info;
     const prevAutoReset = info.autoReset;
     const progsBefore = info.programs?.length ?? 0;
+    // 水面 pass 计数（water.ts 的 `__vbspWaterRefrRenders` / `__vbspWaterMirrorRenders`）：
+    // 预热帧到底跑没跑折射/镜面直接看这两个增量，不用靠猜。
+    const waterCounters = globalThis as {
+      __vbspWaterRefrRenders?: number;
+      __vbspWaterMirrorRenders?: number;
+    };
+    const refrBefore = waterCounters.__vbspWaterRefrRenders ?? 0;
+    const mirrorBefore = waterCounters.__vbspWaterMirrorRenders ?? 0;
     info.autoReset = false;
     info.reset();
     let draws = 0;
@@ -772,7 +796,10 @@ export class RenderSession {
       this.visibility.autoCullDistance = savedAutoCull;
       this.visibility.cullDistance = savedCull;
       this.pvsAutoCull = savedAutoFlag;
-      (globalThis as { __vbspWaterFrustumGate?: boolean }).__vbspWaterFrustumGate = savedWaterGate;
+      gw.__vbspWaterFrustumGate = savedWaterGate;
+      gw.__vbspWaterRefrCadence = savedRefrCadence;
+      gw.__vbspWaterMirrorCadence = savedMirrorCadence;
+      gw.__vbspBudgetOn = savedBudgetOn;
       for (let i = restore.length - 1; i >= 0; i--) restore[i]();
       // 按真实状态重算一次：把 PVS 裁过的 index / 块可见性还原成出生点该有的样子。
       try {
@@ -783,6 +810,8 @@ export class RenderSession {
     }
     const total = +(performance.now() - t0).toFixed(1);
     const programs = this.renderer.info.programs?.length ?? null;
+    const refrDelta = (waterCounters.__vbspWaterRefrRenders ?? 0) - refrBefore;
+    const mirrorDelta = (waterCounters.__vbspWaterMirrorRenders ?? 0) - mirrorBefore;
     g.__vbspPrewarmPasses = {
       call: callNo,
       total,
@@ -792,10 +821,13 @@ export class RenderSession {
       progsBefore,
       kids: this.scene.children.length,
       nearGrids,
+      refr: refrDelta,
+      mirror: mirrorDelta,
     };
     console.info(
       `[${this.app}][prewarm] #${callNo} 整帧预热 ${total}ms（放开 ${restore.length} 项，已还原）` +
-        ` draws=${draws} programs=${progsBefore}→${programs ?? '?'} nearGrids=${nearGrids} kids=${this.scene.children.length}`,
+        ` draws=${draws} programs=${progsBefore}→${programs ?? '?'} nearGrids=${nearGrids}` +
+        ` refr=${refrDelta} mirror=${mirrorDelta} kids=${this.scene.children.length}`,
     );
   }
 

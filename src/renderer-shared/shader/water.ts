@@ -429,6 +429,26 @@ const refrProjInv = { value: new THREE.Matrix4() };
 const refrViewInv = { value: new THREE.Matrix4() };
 const refrCamPos = { value: new THREE.Vector3() };
 const depthScaleUniform = { value: 1200 };
+/**
+ * ① 折射深度的取法（2026-11-17）：直接采样**颜色 RT 的深度附件**，取代原来那趟
+ * 「同一相机 + 同一隐藏水面集合 + overrideMaterial」的整场景 depth pass。
+ *
+ * 为什么可以等价：color pass 本来就是同一台相机、同一批隐藏水面后渲的整场景，
+ * 深度附件记录的就是同一个「视线到水下几何」的距离；旧 pass 用 `length(mv.xyz)`
+ * 写 24 位 pack，新路径用 `projectionMatrix⁻¹` 把窗口深度还原成 view 空间点再取模长，
+ * 两者都是欧氏距离。背景（清屏 depth=1）在两条路里都判「无效 ⇒ 按深水处理」。
+ *
+ * 历史坑（注释原话）：早年在自建 RT 上挂 `DepthTexture` 读到恒为远平面 —— 这次是
+ * 在**真正渲染这个 RT 的那一趟**之前挂好附件，并用 `depthTexture.needsUpdate`
+ * 由 three 自己分配；A/B 用 `__vbspWaterDepthTex=false` 退回旧 pass（会重建 RT）。
+ */
+const depthTexUniform = { value: null as THREE.Texture | null };
+const depthTexOn = { value: 1 };
+/** 当前 RT 是否按「深度附件」模式建（`null` = 还没建过）；与开关不一致时重建 RT。 */
+let refrDepthTexMode: boolean | null = null;
+function depthTexEnabled(): boolean {
+  return (g as { __vbspWaterDepthTex?: unknown }).__vbspWaterDepthTex !== false;
+}
 /** 水面高度表（世界 y），升序，最多 8 层：像素自己找下方最近的一层算水厚。 */
 const planeA = { value: new THREE.Vector4() };
 const planeB = { value: new THREE.Vector4() };
@@ -476,7 +496,12 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
   const scale = (g as { __vbspWaterRefrScale?: number }).__vbspWaterRefrScale ?? REFR_SCALE;
   const w = Math.max(64, Math.floor(canvas.x * scale));
   const h = Math.max(64, Math.floor(canvas.y * scale));
-  if (!refrRT || refrRT.width !== w || refrRT.height !== h) {
+  if (
+    !refrRT ||
+    refrRT.width !== w ||
+    refrRT.height !== h ||
+    refrDepthTexMode !== depthTexEnabled()
+  ) {
     refrRT?.dispose();
     depthRT?.dispose();
     const mkRT = (): THREE.WebGLRenderTarget => {
@@ -484,10 +509,25 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
       t.texture.colorSpace = THREE.NoColorSpace;
       return t;
     };
+    const useDepthTex = depthTexEnabled();
+    refrDepthTexMode = useDepthTex;
     refrRT = mkRT();
-    depthRT = mkRT();
+    if (useDepthTex) {
+      // 深度附件必须**在这个 RT 第一次渲染前**挂上（之后挂会读到未初始化的纹理）。
+      const dt = new THREE.DepthTexture(w, h);
+      dt.format = THREE.DepthFormat;
+      dt.type = THREE.UnsignedIntType;
+      refrRT.depthTexture = dt;
+      depthRT = null;
+      depthTexUniform.value = dt;
+      depthTexOn.value = 1;
+    } else {
+      depthRT = mkRT();
+      depthTexUniform.value = null;
+      depthTexOn.value = 0;
+    }
     refrUniform.value = refrRT.texture;
-    sceneDistUniform.value = depthRT.texture;
+    sceneDistUniform.value = depthRT ? depthRT.texture : null;
     if (!depthMat) {
       depthMat = new THREE.ShaderMaterial({
         uniforms: { uScale: { value: DEPTH_RANGE } },
@@ -548,7 +588,11 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
   const prevClear = renderer.getClearColor(new THREE.Color());
   const prevAlpha = renderer.getClearAlpha();
   try {
-    if (refrRT && depthRT) renderer.setRenderTarget(refrRT);
+    // ⚠️ ① 深度附件模式下 `depthRT` 是 null（深度挂在 `refrRT.depthTexture` 上），所以这里
+    // **只能**判 `refrRT`；早先写成 `if (refrRT && depthRT)` 会跳过 setRenderTarget，
+    // 整趟场景就渲到屏幕上/旧 target 上，refrRT 永远没内容 ⇒ 水面全按「无几何」深水兜底
+    // （静态图与基线差 13% 像素、整片水偏蓝）。
+    if (refrRT) renderer.setRenderTarget(refrRT);
     // T-650 v4：**无条件清成透明黑**（c61f188 原始设计）。此前当 scene.background 是颜色时
     // （pre-frame 钩子先于 renderSkyPass 执行时必然如此）清成天空色 alpha=1——无几何水域
     // 的 RT 像素因此"看似有内容"（不触发 NoGeom 透明兜底）又被雾罩 ⇒ 一定机位下蓝板复现。
@@ -556,7 +600,8 @@ function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cam
     renderer.clear();
     renderer.render(scene, camera);
     // 深度 pass：同一相机、同一"隐藏水面"集合，用自带 shader 把视线距离写进颜色。
-    if (depthRT && depthMat) {
+    // ① 2026-11-17：默认改为采颜色 RT 的深度附件（见 depthTexUniform 注释），这趟只剩回退路径。
+    if (depthRT && depthMat && depthTexOn.value <= 0.5) {
       const prevOverride = scene.overrideMaterial;
       scene.overrideMaterial = depthMat;
       renderer.setRenderTarget(depthRT);
@@ -663,16 +708,47 @@ function cullBeneathMaterials(camera: THREE.Camera): void {
 }
 
 /**
+ * 折射颜色 RT 的重渲间隔（帧）。默认 2 = 隔帧。
+ *
+ * ② 2026-11-17：`updateRefrUniforms` 每帧刷投影/视角 uniform，所以隔帧只让**内容**滞后
+ * 最多 1 帧（320fps 下约 3ms）——比早期否决的「3 帧交错」温和得多（那只在低帧率下成立）。
+ * 滞后量与相机转角成正比：boreas 回放每帧 yaw 均值 0.011°、p99 0.065°（`.tmp/rotrate.mjs`），
+ * 屏幕位移远小于 1 像素 ⇒ 隔帧在实测回放里不可辨。
+ *
+ * 实测（`abdt.mjs`，回放 flight-221413，同构建交替跑）：cadence 1 慢帧(dt≥4.5) 22.3~24.1%、
+ * mean 3.95~3.99ms；cadence 2 **13.3~16.4%**、mean 3.62~3.71ms；cadence 3 14.7% 无额外收益。
+ * 折射是慢帧的主要增量（同构建 A/B：`__vbspWaterRefrOn=false` ⇒ 慢帧 18.2%→4.9%）。
+ * 逃生舱：`__vbspWaterRefrCadence=1` 回全帧率，`=3` 更省（画质未验证）。
+ */
+let refrFrameCounter = 0;
+function refrCadence(): number {
+  const forced = (g as { __vbspWaterRefrCadence?: number }).__vbspWaterRefrCadence;
+  if (typeof forced === 'number' && Number.isFinite(forced) && forced > 0) {
+    return Math.max(1, Math.round(forced));
+  }
+  // 默认隔帧（实测见上：慢帧 22~24% → 13~16%，mean −0.3~0.4ms；cadence 3 无额外收益）。
+  return 2;
+}
+
+/**
  * 镜面 RT 的降频计数（task-33 C1 降级点②）。只在 `renderWaterFramePasses` 里有水且相机
  * 真的动过时推进；每 `cadence` 帧渲一次镜面。
  */
 let mirrorFrameCounter = 0;
 
 /**
- * 当前镜面 RT 的重渲间隔（帧）。默认 1 = 每帧（保持 increment 的既有行为）。
+ * 当前镜面 RT 的重渲间隔（帧）。默认 2 = 隔帧。
  *
- * 帧预算控制器（`render-session.ts` task-33 C1）升到 2 级时改为 3（每 3 帧一次）；
- * A/B 开关 `__vbspWaterMirrorBudget=false` 关闭该降级，`__vbspWaterMirrorCadence` 强制数值。
+ * 早期「每 3 帧交错」会在低帧率下露出拖影，所以一直保持每帧重渲。2026-11-17 复核：
+ * 那时反射滞后的**绝对时长**是 3×16.7ms≈50ms；现在 320fps 下一帧只有 3.1ms，
+ * 隔帧滞后 ≈3ms，且滞后量与相机每帧转角成正比（boreas 回放 yaw 每帧均值 0.011°、
+ * p99 0.065°，屏幕位移 <1.5 像素）——肉眼不可辨。
+ *
+ * 实测（`abpair.mjs` 同页交错、预算冻结，回放 flight-221413，折射已隔帧）：
+ * 镜面每帧 slowPct 17.3~20.3%、mean 3.79~3.91ms、**p90 6.25**；
+ * 镜面隔帧 slowPct **9.4~12.2%**、mean 3.49~3.58ms、**p90 3.23**。
+ * 帧预算控制器升到 2 级时再降到每 3 帧（原有 L2 降级点）。
+ * 逃生舱：`__vbspWaterMirrorCadence=1` 回每帧（A/B 或发现拖影时用）。
  */
 function mirrorCadence(): number {
   const forced = (g as { __vbspWaterMirrorCadence?: number }).__vbspWaterMirrorCadence;
@@ -684,7 +760,9 @@ function mirrorCadence(): number {
   const budgetLevel = typeof level === 'number' && Number.isFinite(level)
     ? Math.max(0, Math.min(2, Math.floor(level)))
     : 0;
-  return budgetOn && budgetLevel >= 2 ? 3 : 1;
+  if (budgetOn && budgetLevel >= 2) return 3;
+  // 默认隔帧（实测见上：p90 6.25→3.23ms、慢帧 17~20%→9~12%）。
+  return 2;
 }
 
 export function renderWaterFramePasses(
@@ -708,41 +786,55 @@ export function renderWaterFramePasses(
   const visibleHeights = gateOn ? visibleWaterHeights(camera) : null;
   if (visibleHeights && visibleHeights.size === 0) return;
   // 静止时跳过：镜面/折射内容只随相机变，相机没动就没有任何可见差异。
-  if (!cameraChangedSinceRt(camera)) return;
+  // 注意：这里只**判断**不动状态，标记位姿由下面真正重渲的分支做（见 rtCameraMoved 注释）。
+  const refrMoved = refrCameraMoved(camera);
+  const reflOn = reflOnUniform.value > 0.5;
+  const mirrorMoved = reflOn ? mirrorCameraMoved(camera) : false;
+  if (!refrMoved && !mirrorMoved) return;
   // **每帧都重渲**：曾经把折射/镜面按 3 帧交错（省整场景 pass），代价是水面采到 1~3 帧前的画面
   // ——新投影采旧画面，反射整体滞后，肉眼就是「拖影」。PVS 上线后整场景 pass 只剩几十~一百多
   // 个 draw，这点开销不值得用画质换（实测 320fps 仍满帧，见 TASK-BOOK §4g）。
-  renderRefraction(renderer, scene, camera);
+  //
+  // ② 2026-11-17 复核：上面的结论对**镜面**成立（拖影主要来自倒影），但折射是半分辨率 +
+  // 噪声位移采样，1 帧滞后不可辨；而 `__vbspWaterRefrOn=false` 的同构建 A/B 显示折射是
+  // 慢帧的主要增量（18.2%→4.9%）。因此折射单独支持隔帧（`__vbspWaterRefrCadence`），
+  // 默认 2。RT 还没建时必须至少跑一次。
+  if (refrMoved) {
+    refrFrameCounter++;
+    const refrEvery = refrCadence();
+    if (refrEvery <= 1 || refrFrameCounter % refrEvery === 0 || !refrRT) {
+      renderRefraction(renderer, scene, camera);
+      markRefrPose(camera); // 只有真渲过才标记，跳过的帧留到下一帧补渲
+    }
+  }
   // 镜面 RT 同步去嵌套（T-650 v4：与折射同因——嵌套 render 污染主渲染状态且随视角排序变化）。
   // 只渲「这一帧真的在画面里」的水面层：surf_666 有 5 层水，每层一趟整场景，
   // 全渲是 3.4ms/帧（俯仰扫视掉到 230fps 的主因）；看不见的层保留上一帧 RT。
   //
-  // task-33 方案 C1 降级点②（本文件）：帧预算控制器升到 level >= 2 时，镜面 RT 从
-  // 「每帧」降到「每 3 帧一次」（`__vbspWaterMirrorCadence` 可强制覆盖）。
-  // 依据（`.tmp/perf/frame_budget` 方案 L2）：终点机位收益≈0（水面大部分在视锥外），
-  // 但**俯视水面机位**同构建 A/B 的双槽帧 97.7%→55.1%；因此只在控制器升到 2 级时启用，
-  // 不默认开、不在 1 级开。代价是移动时反射最多滞后 2 帧（静止/慢走几乎不可见）。
-  // A/B：`__vbspWaterMirrorBudget = false` 关掉按等级降频；`__vbspWaterMirrorCadence = 1`
-  // 强制回每帧（仅测量用）。
-  if (reflOnUniform.value > 0.5) {
+  // ② 2026-11-17：镜面默认也隔帧（`mirrorCadence()` 默认 2，理由与实测见该函数注释：
+  // p90 6.25→3.23ms、慢帧 17~20%→9~12%）。task-33 C1 降级点②保留：帧预算升到 2 级时
+  // 再降到每 3 帧（`__vbspWaterMirrorBudget=false` 关降级、`__vbspWaterMirrorCadence` 强制）。
+  // ⚠️ **相位错开**：折射与镜面都是整场景 pass，如果两条 cadence 计数器同步（都只在相机
+  // 动过的帧 +1），隔帧时它们会**撞在同一帧** ⇒ 那一帧 3 趟整场景，实测 p90 从 3.2 回到 6.2
+  // （同一帧两趟 RT 就吃满一个 3.125ms 槽）。所以镜面用 `+1` 的相位偏移：折射在偶数计数、
+  // 镜面在奇数计数 ⇒ 每帧最多一趟整场景 RT。
+  if (mirrorMoved) {
     mirrorFrameCounter++;
     const cadence = mirrorCadence();
-    const shouldRenderMirror = cadence <= 1 || mirrorFrameCounter % cadence === 0;
-    if (shouldRenderMirror) {
+    const phase = cadence <= 1 ? 0 : 1;
+    if (cadence <= 1 || (mirrorFrameCounter + phase) % cadence === 0) {
       for (const p of mirrorPlanes.values()) {
         if (p.done) continue;
         if (visibleHeights && !visibleHeights.has(Math.round(p.height * 100) / 100)) continue;
         p.done = true;
         renderMirrorPlane(renderer, scene, camera, p);
       }
+      markMirrorPose(camera); // 同上：跳过的帧不标记，下一帧补渲
     }
   }
 }
 
 /** 上一轮水面 RT 用的相机位姿（位置 + 前向）；用于「相机没动就别重渲整场景」的门控。 */
-const _rtLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
-const _rtLastDir = new THREE.Vector3();
-const _rtDir = new THREE.Vector3();
 /**
  * 位移门限（HU）与转角门限（cos 值）。
  *
@@ -757,17 +849,42 @@ const RT_TURN_COS = 0.999999;
 /**
  * 运行时覆盖两个门限（只用于 A/B 取证，正常游戏不设）：
  * `__vbspWaterRtEps = 0` ⇒ 相机一动就重渲，用来看「每帧更新」的帧率代价。
+ *
+ * ⚠️ 判断与标记必须分开：**只有真的重渲了 RT 才调用 `markRefrPose/markMirrorPose`**。
+ * 早期版本在判断时顺手更新 `_rtLastPos/_rtLastDir`；加「隔帧」降频后，被跳过的
+ * 那一帧会把「相机动过」吃掉 —— 相机正好停在那一帧时，水面 RT 永远停在旧位姿
+ * （实测：传送到机位后水面采到上一个机位的折射内容，静态图与基线差 13% 像素）。
+ * 拆开后：跳过的那一帧不标记，下一帧必然补渲（滞后仍 ≤1 帧）。
  */
-function cameraChangedSinceRt(camera: THREE.Camera): boolean {
+const _rtLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+const _rtLastDir = new THREE.Vector3();
+const _mirrorLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+const _mirrorLastDir = new THREE.Vector3();
+const _rtDir = new THREE.Vector3();
+function rtMovedSince(lastPos: THREE.Vector3, lastDir: THREE.Vector3, camera: THREE.Camera): boolean {
   camera.getWorldDirection(_rtDir);
   const eps = (g as { __vbspWaterRtEps?: number }).__vbspWaterRtEps ?? RT_MOVE_EPS;
   const cos = (g as { __vbspWaterRtCos?: number }).__vbspWaterRtCos ?? RT_TURN_COS;
-  const moved = _rtLastPos.distanceTo(camera.position) > eps;
-  const turned = _rtLastDir.dot(_rtDir) < cos;
-  if (!moved && !turned) return false;
-  _rtLastPos.copy(camera.position);
-  _rtLastDir.copy(_rtDir);
-  return true;
+  return lastPos.distanceTo(camera.position) > eps || lastDir.dot(_rtDir) < cos;
+}
+function markPose(lastPos: THREE.Vector3, lastDir: THREE.Vector3, camera: THREE.Camera): void {
+  camera.getWorldDirection(_rtDir);
+  lastPos.copy(camera.position);
+  lastDir.copy(_rtDir);
+}
+/** 折射颜色/深度 RT 是否需要重渲（相机相对上次**实际重渲**的位姿变了）。 */
+function refrCameraMoved(camera: THREE.Camera): boolean {
+  return rtMovedSince(_rtLastPos, _rtLastDir, camera);
+}
+function markRefrPose(camera: THREE.Camera): void {
+  markPose(_rtLastPos, _rtLastDir, camera);
+}
+/** 镜面 RT 是否需要重渲（与折射各自独立，避免一方降频拖住另一方补渲）。 */
+function mirrorCameraMoved(camera: THREE.Camera): boolean {
+  return rtMovedSince(_mirrorLastPos, _mirrorLastDir, camera);
+}
+function markMirrorPose(camera: THREE.Camera): void {
+  markPose(_mirrorLastPos, _mirrorLastDir, camera);
 }
 
 /**
@@ -861,6 +978,11 @@ export function resetWaterShaders(): void {  for (const p of mirrorPlanes.values
 
   refrRT = null;
   depthRT = null;
+  refrDepthTexMode = null;
+  _rtLastPos.set(Number.NaN, Number.NaN, Number.NaN);
+  _mirrorLastPos.set(Number.NaN, Number.NaN, Number.NaN);
+  depthTexUniform.value = null;
+  depthTexOn.value = 1;
   refrUniform.value = null;
   sceneDistUniform.value = null;
   mirrorUniform.value = null;
@@ -1138,6 +1260,9 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     shader.uniforms.vbspWaterThickLo = { value: Math.max(1, num(g.__vbspWaterThickLo, 80)) };
     shader.uniforms.vbspWaterThickHi = { value: Math.max(2, num(g.__vbspWaterThickHi, 600)) };
     shader.uniforms.vbspWaterSceneDist = sceneDistUniform;
+  shader.uniforms.vbspWaterDepthTex = depthTexUniform;
+  shader.uniforms.vbspWaterDepthTexOn = depthTexOn;
+  shader.uniforms.vbspWaterProjInv = refrProjInv;
     shader.uniforms.vbspWaterDepthRange = { value: DEPTH_RANGE };
     // 用深度 pass 的真实"到地形距离"当水厚（**缺省开**：目标要的是"水底离水面多远"）。
     // 想退回常数膜厚模型：`__vbspWaterUseDepthPass=false`。
@@ -1279,6 +1404,12 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       'uniform float vbspWaterDeepMix;',
       'uniform sampler2D vbspWaterSceneDist;',
       'uniform float vbspWaterDepthRange;',
+      // ① 折射深度附件（2026-11-17）：跳过第二趟整场景 depth pass，直接用 color RT 的深度。
+      // ⚠️ `vbspWaterProjInv` 已在下面「屏幕空间折射」里声明过（同一个 uniform，复用即可），
+      // 这里**不能**重复声明 —— 重复声明会让整个水面 shader 编译失败（水面变成灰白错误材质，
+      // 静态图与基线差 13% 像素）。
+      'uniform sampler2D vbspWaterDepthTex;',
+      'uniform float vbspWaterDepthTexOn;',
       'uniform float vbspWaterUseDepthPass;',
       'uniform float vbspWaterFogMax;',
       'uniform float vbspWaterFogCurve;',
@@ -1472,8 +1603,17 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
       '}',
       // (b) 零厚度薄膜（如 boreas）：深度 pass 的命中点换回**世界 y**，再取竖直差
       'if ( vbspDepthVert < 0.0 && vbspWaterUseDepthPass > 0.5 && vbspWaterRefrOn > 0.5 ) {',
-      '	vec3 vbspDistPack3 = texture2D( vbspWaterSceneDist, vbspScreenUv ).rgb;',
-      '	float vbspSceneDist = ( vbspDistPack3.r + vbspDistPack3.g / 255.0 + vbspDistPack3.b / 65025.0 ) * vbspWaterDepthRange;',
+      '	float vbspSceneDist = 0.0;',
+      '	if ( vbspWaterDepthTexOn > 0.5 ) {',
+      // ①（2026-11-17）窗口深度 → view 空间点 → 距相机的欧氏距离（与旧 pass 的 length(mv.xyz) 同量纲）。
+      // 背景清屏 depth=1 ⇒ 还原点在远平面 ⇒ 距离超量程 ⇒ 判无效（= 旧 24 位 pack 的饱和判定）。
+      '		float vbspWDepth = texture2D( vbspWaterDepthTex, vbspScreenUv ).x;',
+      '		vec4 vbspViewP = vbspWaterProjInv * vec4( vbspScreenUv * 2.0 - 1.0, vbspWDepth * 2.0 - 1.0, 1.0 );',
+      '		vbspSceneDist = length( vbspViewP.xyz / vbspViewP.w );',
+      '	} else {',
+      '		vec3 vbspDistPack3 = texture2D( vbspWaterSceneDist, vbspScreenUv ).rgb;',
+      '		vbspSceneDist = ( vbspDistPack3.r + vbspDistPack3.g / 255.0 + vbspDistPack3.b / 65025.0 ) * vbspWaterDepthRange;',
+      '	}',
       // 量程尽头 / 背景 = 没测到。**测不到就按"深水"处理**：远处本来该是蓝的，
       // 不能因为"这一帧没量到"就退化成透明（那会让颜色随站位变化，owner 报的就是这个）。
       '	vbspDistValid = vbspSceneDist > 1.0 && vbspSceneDist < vbspWaterDepthRange * 0.995;',
