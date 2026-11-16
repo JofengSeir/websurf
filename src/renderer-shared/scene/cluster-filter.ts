@@ -71,6 +71,32 @@ interface ClusterIndexState {
   clusters: Uint16Array;
   /** 上次重建时的可见签名（FNV-1a）；0 = 还没算过。 */
   sig: number;
+  /**
+   * 单 group（整块单材质槽）块的增量重建状态。全量重排 123 万三角实测 15–25ms，而换房间时
+   * 一行 PVS 通常只翻几十个 cluster 的可见位；增量路径只处理「翻位 cluster → 三角形」的
+   * 那一小撮，可见→隐藏用 swap-remove（O(1)/三角形），隐藏→可见 append。
+   * 多 group 块仍走全量路径（group 顺序语义复杂，收益也小）。
+   */
+  incremental?: IncrementalState;
+  /** 上次更新时对应的全局可见行版本（`rowVersion`）；-1 表示还没按行更新过。 */
+  rowVersion: number;
+}
+
+/** 单 group 块的增量重建状态：cluster → 三角形倒排 + 输出缓冲里的位置索引。 */
+interface IncrementalState {
+  /** outIndex 里每个位置放的三角形序号。 */
+  posOfTri: Int32Array;
+  /** 每个 outIndex 槽位放的三角形序号（与 visTris 前缀配合）。 */
+  slotTri: Int32Array;
+  /** 该块用到的 cluster，升序（只用来二分「本帧翻位」的那几个 cluster）。 */
+  clusterKeys: Uint16Array;
+  /** CSR 倒排：clusterKeys[i] 的三角形在 triIds[offsets[i]..offsets[i+1])。 */
+  offsets: Uint32Array;
+  triIds: Uint32Array;
+  /** 每帧按 epoch 去重（同一三角形可能被多个 cluster 命中）。 */
+  marks: Uint32Array;
+  /** 该块的单 group materialIndex（重建 groups 时用）。 */
+  materialIndex: number;
 }
 
 export interface ClusterIndexStats {
@@ -80,6 +106,239 @@ export interface ClusterIndexStats {
   reasons: Record<string, number>;
   tris: number;
   preparedMs: number;
+}
+
+// ── 可见行差分缓存（每个 renderer 进程一份）─────────────────────────────────────────────
+// PVS 可见行只在相机换 cluster 时变。这里保存上一帧的可见行快照，把「本帧翻位的 cluster」
+// 摊成一个小数组；增量块只处理这些 cluster 对应的三角形，而不是全块重排。
+let lastRow: Uint8Array | null = null;
+/** 行版本号：每次可见行变化 +1（增量块按「上次更新时的版本」判断差分是否连续）。 */
+let rowVersion = 0;
+/** 自上次快照以来翻位的 cluster（升序不保证；增量块内部按需二分）。 */
+const pendingChanged: number[] = [];
+/** true = 快照刚建立 / 长度变化，必须全量重建。 */
+let pendingFull = true;
+/** 增量翻位去重用的 epoch（每帧 +1，避免每帧清 marks 数组）。 */
+let flipEpoch = 0;
+/** 装载期建倒排用的 cluster→局部下标临时表（65536 项，建完复位，避免每块 256KB 常驻）。 */
+const probeIndex = new Int32Array(0x10000).fill(-1);
+
+/** 更新可见行快照并计算差分。必须在 applyClusterIndex 的每帧开头调用一次。 */
+function refreshRowDiff(row: Uint8Array | null): void {
+  if (!row) {
+    if (lastRow) lastRow = null;
+    pendingChanged.length = 0;
+    pendingFull = true;
+    return;
+  }
+  if (!lastRow || lastRow.length !== row.length) {
+    lastRow = new Uint8Array(row.length);
+    lastRow.set(row);
+    pendingChanged.length = 0;
+    pendingFull = true;
+    rowVersion++;
+    return;
+  }
+  const list = pendingChanged;
+  list.length = 0;
+  let changed = false;
+  for (let i = 0; i < row.length; i++) {
+    const v = row[i];
+    if (lastRow[i] !== v) {
+      lastRow[i] = v;
+      list.push(i);
+      changed = true;
+    }
+  }
+  pendingFull = false;
+  if (changed) rowVersion++;
+}
+
+/** 升序 Uint16 表里二分查找（找不到返回 -1）。 */
+function locateCluster(keys: Uint16Array, id: number): number {
+  let lo = 0;
+  let hi = keys.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const v = keys[mid];
+    if (v === id) return mid;
+    if (v < id) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return -1;
+}
+
+/** 单个三角形在当前可见行下是否要画（三来源任一可见 / 全定不到位照画）。 */
+function triVisible(
+  st: ClusterIndexState,
+  t: number,
+  row: Uint8Array | null,
+  pvs: PvsFilterQuery,
+): boolean {
+  const ca = st.triClusters[t];
+  const cn = st.triClustersN[t];
+  const cn2 = st.triClustersN2[t];
+  if (ca === 0xffff && cn === 0xffff && cn2 === 0xffff) return true;
+  if (row) {
+    return (
+      (ca !== 0xffff && ca < row.length && row[ca] === 1) ||
+      (cn !== 0xffff && cn < row.length && row[cn] === 1) ||
+      (cn2 !== 0xffff && cn2 < row.length && row[cn2] === 1)
+    );
+  }
+  return (
+    (ca !== 0xffff && pvs.isVisible(ca)) ||
+    (cn !== 0xffff && pvs.isVisible(cn)) ||
+    (cn2 !== 0xffff && pvs.isVisible(cn2))
+  );
+}
+
+/** 装载期：给单 group 块建「cluster → 三角形」倒排（扫描计数 + 前缀和填充）。 */
+function buildIncremental(
+  tris: number,
+  triClusters: Uint16Array,
+  triClustersN: Uint16Array,
+  triClustersN2: Uint16Array,
+  clusters: Uint16Array,
+  materialIndex: number,
+): IncrementalState {
+  const clusterKeys = Uint16Array.from(clusters);
+  clusterKeys.sort();
+  const k = clusterKeys.length;
+  for (let i = 0; i < k; i++) probeIndex[clusterKeys[i]] = i;
+  const counts = new Uint32Array(k);
+  const addCount = (id: number): void => {
+    if (id === 0xffff) return;
+    const idx = probeIndex[id];
+    if (idx >= 0) counts[idx]++;
+  };
+  for (let t = 0; t < tris; t++) {
+    addCount(triClusters[t]);
+    addCount(triClustersN[t]);
+    addCount(triClustersN2[t]);
+  }
+  const offsets = new Uint32Array(k + 1);
+  for (let i = 0; i < k; i++) offsets[i + 1] = offsets[i] + counts[i];
+  const triIds = new Uint32Array(offsets[k]);
+  const cursor = offsets.slice(0, k);
+  const addTri = (id: number, t: number): void => {
+    if (id === 0xffff) return;
+    const idx = probeIndex[id];
+    if (idx >= 0) triIds[cursor[idx]++] = t;
+  };
+  for (let t = 0; t < tris; t++) {
+    addTri(triClusters[t], t);
+    addTri(triClustersN[t], t);
+    addTri(triClustersN2[t], t);
+  }
+  for (let i = 0; i < k; i++) probeIndex[clusterKeys[i]] = -1;
+  const posOfTri = new Int32Array(tris);
+  const slotTri = new Int32Array(tris);
+  for (let t = 0; t < tris; t++) {
+    posOfTri[t] = t;
+    slotTri[t] = t;
+  }
+  return { posOfTri, slotTri, clusterKeys, offsets, triIds, marks: new Uint32Array(tris), materialIndex };
+}
+
+/** 增量：把三角形插到可见前缀末尾。 */
+function insertTri(
+  inc: IncrementalState,
+  outIndex: Uint32Array,
+  origIndex: Uint32Array,
+  t: number,
+  visTris: number,
+): number {
+  const pos = visTris;
+  const s = t * 3;
+  outIndex[pos * 3] = origIndex[s];
+  outIndex[pos * 3 + 1] = origIndex[s + 1];
+  outIndex[pos * 3 + 2] = origIndex[s + 2];
+  inc.posOfTri[t] = pos;
+  inc.slotTri[pos] = t;
+  return visTris + 1;
+}
+
+/** 增量：把三角形从可见前缀里 swap-remove（O(1)，不整体压缩）。 */
+function removeTri(
+  inc: IncrementalState,
+  outIndex: Uint32Array,
+  t: number,
+  visTris: number,
+): number {
+  const pos = inc.posOfTri[t];
+  const last = visTris - 1;
+  if (pos !== last) {
+    const lastTri = inc.slotTri[last];
+    const from = last * 3;
+    const to = pos * 3;
+    outIndex[to] = outIndex[from];
+    outIndex[to + 1] = outIndex[from + 1];
+    outIndex[to + 2] = outIndex[from + 2];
+    inc.slotTri[pos] = lastTri;
+    inc.posOfTri[lastTri] = pos;
+  }
+  inc.slotTri[last] = -1;
+  inc.posOfTri[t] = -1;
+  return last;
+}
+
+/** 单 group 块的全量重建（首次 / 行不连续 / 无可见行时用）。 */
+function rebuildIncrementalFull(
+  st: ClusterIndexState,
+  row: Uint8Array | null,
+  pvs: PvsFilterQuery,
+): void {
+  const inc = st.incremental;
+  if (!inc) return;
+  const tris = st.triClusters.length;
+  const { origIndex, outIndex } = st;
+  inc.posOfTri.fill(-1);
+  inc.slotTri.fill(-1);
+  let n = 0;
+  for (let t = 0; t < tris; t++) {
+    if (!triVisible(st, t, row, pvs)) continue;
+    const s = t * 3;
+    outIndex[n * 3] = origIndex[s];
+    outIndex[n * 3 + 1] = origIndex[s + 1];
+    outIndex[n * 3 + 2] = origIndex[s + 2];
+    inc.posOfTri[t] = n;
+    inc.slotTri[n] = t;
+    n++;
+  }
+  st.visTris = n;
+}
+
+/** 增量：只翻本帧变了的 cluster 名下的三角形。返回可见三角形数。 */
+function flipChangedClusters(
+  st: ClusterIndexState,
+  row: Uint8Array | null,
+  pvs: PvsFilterQuery,
+  changed: readonly number[],
+  epoch: number,
+): void {
+  const inc = st.incremental;
+  if (!inc) return;
+  const { origIndex, outIndex } = st;
+  let visTris = st.visTris;
+  for (let ci = 0; ci < changed.length; ci++) {
+    const slot = locateCluster(inc.clusterKeys, changed[ci]);
+    if (slot < 0) continue;
+    const end = inc.offsets[slot + 1];
+    for (let k = inc.offsets[slot]; k < end; k++) {
+      const t = inc.triIds[k];
+      if (inc.marks[t] === epoch) continue;
+      inc.marks[t] = epoch;
+      const on = triVisible(st, t, row, pvs);
+      const pos = inc.posOfTri[t];
+      if (on) {
+        if (pos < 0) visTris = insertTri(inc, outIndex, origIndex, t, visTris);
+      } else if (pos >= 0) {
+        visTris = removeTri(inc, outIndex, t, visTris);
+      }
+    }
+  }
+  st.visTris = visTris;
 }
 
 /**
@@ -294,9 +553,14 @@ export function prepareClusterIndex(
     const attr = new THREE.BufferAttribute(outIndex, 1);
     attr.setUsage(THREE.DynamicDrawUsage);
     geom.setIndex(attr);
+    // 单 group 且覆盖全部三角形的块走增量路径；多 group 块保留全量重排（group 顺序语义复杂）。
+    const singleGroup = groups.length === 1 && groups[0].tris.length === tris;
+    const incremental = singleGroup
+      ? buildIncremental(tris, triClusters, triClustersN, triClustersN2, clusters, groups[0].materialIndex)
+      : undefined;
     (mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex = {
       triClusters, triClustersN, triClustersN2, origIndex, outIndex, attr, groups, lastCluster: -1, visTris: tris,
-      clusters, sig: 0,
+      clusters, sig: 0, incremental, rowVersion: -1,
     };
     stats.prepared++;
     stats.tris += tris;
@@ -318,13 +582,48 @@ export function applyClusterIndex(
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   let rebuilt = 0;
   let skipped = 0;
+  let flipped = 0;
   // 稠密可见位图（下标 = cluster）：360 万次 `Set.has` 换成按下标读 Uint8Array。
   // 无 PVS / 尚未 update 时返回 null，退回原来的 `isVisible` 路径。
   const row = pvs.visibleRow ? pvs.visibleRow() : null;
+  // 每帧更新一次可见行快照 + 差分（换房间时真正翻位的 cluster 通常只有几十个）。
+  refreshRowDiff(row);
+  const epoch = ++flipEpoch;
   for (const item of items) {
     const st = (item.mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex;
     if (!st) continue;
     if (st.lastCluster === camCluster) continue;
+    const geom = item.mesh.geometry;
+    const inc = st.incremental;
+    if (inc) {
+      // 增量块：①行没变 ⇒ 上次写进去的 index 仍然正确，只更新 lastCluster；
+      // ②行变了且本块状态正好停在上一版行上 ⇒ 只翻本帧变了的 cluster；
+      // ③其余（首次/行长度变化/状态落后多版）⇒ 全量重建一次兜底。
+      if (row && !pendingFull && st.lastCluster !== -1 && st.rowVersion === rowVersion) {
+        st.lastCluster = camCluster;
+        skipped++;
+        continue;
+      }
+      const canFlip =
+        row !== null && !pendingFull && st.lastCluster !== -1 && st.rowVersion === rowVersion - 1;
+      if (canFlip) {
+        flipChangedClusters(st, row, pvs, pendingChanged, epoch);
+        flipped++;
+      } else {
+        rebuildIncrementalFull(st, row, pvs);
+        rebuilt++;
+      }
+      st.lastCluster = camCluster;
+      st.rowVersion = rowVersion;
+      // 注：这里仍是整段 index 上传（three 侧按 attribute 粒度脏标记）；后续可用
+      // `attr.addUpdateRange` 收窄到 [0, visTris*3) 以减少换房间那一下的 GPU 上传量。
+      st.attr.needsUpdate = true;
+      geom.setDrawRange(0, st.visTris * 3);
+      // 距离场优先：`visibility-controller` 已把场外块标成 LOD_FAR，这里不能把它重新点亮。
+      item.mesh.visible = st.visTris > 0 && item.mesh.userData.lodLevel === 0;
+      continue;
+    }
+    // 多 group 块：保留原来的「块可见签名」快路径 + 全量重排。
     // 快路径：本块用到的 cluster 可见性没变 ⇒ 上次写进 index 的三组三角形集合仍然是正确的，
     // 直接跳过（换房间时绝大多数块都属于这一类；全量重排 123 万三角实测 15–25ms）。
     if (row && st.lastCluster !== -1 && st.clusters.length > 0) {
@@ -338,13 +637,13 @@ export function applyClusterIndex(
       sig >>>= 0;
       if (sig === st.sig && st.sig !== 0) {
         st.lastCluster = camCluster;
+        st.rowVersion = rowVersion;
         skipped++;
         continue;
       }
       st.sig = sig;
     }
     const { triClusters, triClustersN, triClustersN2, origIndex, outIndex, attr, groups } = st;
-    const geom = item.mesh.geometry;
     let n = 0;
     geom.clearGroups();
     for (const g of groups) {
@@ -380,6 +679,7 @@ export function applyClusterIndex(
     }
     st.visTris = n / 3;
     st.lastCluster = camCluster;
+    st.rowVersion = rowVersion;
     attr.needsUpdate = true;
     geom.setDrawRange(0, n);
     // 距离场优先：`visibility-controller` 已把场外块标成 LOD_FAR，这里不能把它重新点亮。
@@ -390,6 +690,7 @@ export function applyClusterIndex(
   (globalThis as { __vbspClusterRebuild?: unknown }).__vbspClusterRebuild = {
     rebuilt,
     skipped,
+    flipped,
     total: items.length,
     ms: (typeof performance !== 'undefined' ? performance.now() : 0) - t0,
     pvsRow: row ? row.length : 0,
@@ -412,6 +713,16 @@ export function restoreClusterIndex(items: readonly { mesh: THREE.Mesh }[]): num
     const geom = item.mesh.geometry;
     const total = st.origIndex.length;
     st.outIndex.set(st.origIndex);
+    if (st.incremental) {
+      // 增量状态复位：identity 顺序 = 全部三角形都可见（与 outIndex 全量一致）。
+      const inc = st.incremental;
+      const tris = st.triClusters.length;
+      for (let t = 0; t < tris; t++) {
+        inc.posOfTri[t] = t;
+        inc.slotTri[t] = t;
+      }
+      st.visTris = tris;
+    }
     geom.clearGroups();
     let start = 0;
     for (const g of st.groups) {
@@ -422,6 +733,9 @@ export function restoreClusterIndex(items: readonly { mesh: THREE.Mesh }[]): num
     st.attr.needsUpdate = true;
     st.visTris = total / 3;
     st.lastCluster = -1;
+    // 行版本/签名复位：下次开 PVS 不能把「关之前的行」误当成当前行。
+    st.rowVersion = -1;
+    st.sig = 0;
     geom.setDrawRange(0, total);
     item.mesh.visible = item.mesh.userData.lodLevel === 0;
     restored++;
@@ -429,7 +743,8 @@ export function restoreClusterIndex(items: readonly { mesh: THREE.Mesh }[]): num
   return restored;
 }
 
-/** 相机 cluster 变化后需要重建的块数（诊断用）。 */export function clusterIndexStates(items: readonly { mesh: THREE.Mesh }[]): number {
+/** 相机 cluster 变化后需要重建的块数（诊断用）。 */
+export function clusterIndexStates(items: readonly { mesh: THREE.Mesh }[]): number {
   let n = 0;
   for (const item of items) if ((item.mesh.userData as { clusterIndex?: unknown }).clusterIndex) n++;
   return n;

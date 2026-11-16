@@ -23,7 +23,7 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createRenderer, precompileScene } from '../render/create-renderer.js';
 import { installRenderProbe } from '../render/render-probe.js';
 import { assembleScene } from './assemble-scene.js';
-import { lookupMergeSource, mergeIntoNewRoot, mergeStatsOf, type MergeStats } from './scene-optimizer.js';
+import { lookupMergeSource, mergeIntoNewRoot, mergeOpaqueByMaterial, mergeStatsOf, type MergeStats } from './scene-optimizer.js';
 import { disposeObject } from './dispose.js';
 import { resetWaterShaders, renderWaterFramePasses } from '../shader/water.js';
 import {
@@ -236,6 +236,22 @@ export class RenderSession {
    * 替代每帧「整场景只写深度」的 400+ 次 draw。null = 退回旧的整场景预渲。
    */
   private glowDepthProxy: THREE.Mesh | null = null;
+  /**
+   * 帧预算控制器的状态（task-33 C1）：0=不降级，1=bloom 光晕降频，2=再叠加水面镜面降频。
+   * 由 `updateFrameBudget()` 每帧推进，通过 `globalThis.__vbspBudgetLevel` 暴露给各降级点。
+   */
+  private budgetLevel = 0;
+  private budgetUp = 0;
+  private budgetDown = 0;
+  private budgetLastMs = 0;
+  /** 上一帧 `frame()` 的进入时刻，用于算 rAF 帧间隔（控制器主信号）。 */
+  private budgetLastStart = 0;
+  /** 最近 60 帧的帧间隔环形缓冲 + 游标 + 已填样本数。 */
+  private readonly budgetDt = new Float32Array(60);
+  private budgetDtAt = 0;
+  private budgetDtCount = 0;
+  /** 距下一次评估还有多少帧。 */
+  private budgetEvaluateIn = 30;
 
   private bbox = new THREE.Box3();
   private maxDim = 0;
@@ -881,6 +897,14 @@ export class RenderSession {
    * 调用方负责先把相机位姿写好（game/debug 从物理状态、viewer 从自由飞行）。
    */
   frame(opts: RenderFrameOptions = {}): VisibilityUpdateResult | null {
+    // 帧预算控制器（task-33 方案 C1）：rAF 只有 320Hz 一档（3.125ms/帧），一帧渲染提交
+    // 只要超过 3.125ms 就会被推到 6.25ms 槽 ⇒ 观感「320/160 交替」。这里用「渲染段实测
+    // 毫秒数」做滞回：连续 3 帧超预算升一级，连续 20 帧低于 T−0.2ms 降一级；等级通过
+    // `globalThis.__vbspBudgetLevel` 暴露给各降级点（bloom 光晕 cadence、水面镜面 cadence 等）。
+    // 采样用渲染段而不是整帧 tick：物理/粒子抖动不应触发画质降级。
+    const tBudget = performance.now();
+    const budgetDt = this.budgetLastStart > 0 ? tBudget - this.budgetLastStart : 0;
+    this.budgetLastStart = tBudget;
     // 分阶段耗时采样：默认关闭（只在每帧多几次 performance.now()），排查「某一帧突然变长」
     // 时在控制台执行 `__vbspDrawDebug = { on: true }`，帧末可从 `__vbspDraws.times` 读到
     // vis/near/sort/water/sky 各段的毫秒数（2026-11 定位「人一动就掉帧」用的就是它）。
@@ -973,7 +997,81 @@ export class RenderSession {
       log.push(times);
       if (log.length > 600) log.splice(0, log.length - 600);
     }
+    this.updateFrameBudget(performance.now() - tBudget, budgetDt);
     return this.lastVisibility;
+  }
+
+  /**
+   * 帧预算状态机（task-33 方案 C1 的修订版）。**主信号改成 rAF 帧间隔**，而不是渲染段 CPU：
+   * 实测（pcf-semantics 2026-11-16）终点机位渲染段 CPU 只有 1.5~2.8ms，却仍有 3.1/6.2ms
+   * 交替 —— 说明超时的那一帧卡在 GPU/合成等待上，用 CPU 时长做阈值永远不触发。
+   *
+   * 判定：滚动窗口 60 帧，双槽帧（dt>4.8ms）占比 ≥25% 且窗口内出现过单槽帧（dt<3.6ms，
+   * 说明 320Hz 档确实可达）⇒ 升一级；双槽占比 ≤5% ⇒ 降一级。每 30 帧评估一次，最多 2 级。
+   * 为什么要求「出现过单槽帧」：如果显示器本身就是 160Hz（dt 恒 6.25），控制器不该一直降级。
+   *
+   * 关闭开关：`globalThis.__vbspBudgetOn = false`；强制档位：`__vbspBudgetForce = 0|1|2`。
+   */
+  private updateFrameBudget(cpuMs: number, dtMs: number): void {
+    this.budgetLastMs = cpuMs;
+    const g = globalThis as {
+      __vbspBudgetOn?: boolean;
+      __vbspBudgetForce?: number;
+      __vbspBudgetLevel?: number;
+      __vbspBudget?: { level: number; ms: number; dt: number; doublePct: number; up: number; down: number };
+    };
+    // 滚动窗口采样 rAF 帧间隔。
+    if (dtMs > 0) {
+      this.budgetDt[this.budgetDtAt] = dtMs;
+      this.budgetDtAt = (this.budgetDtAt + 1) % this.budgetDt.length;
+      this.budgetDtCount = Math.min(this.budgetDtCount + 1, this.budgetDt.length);
+    }
+    const write = (): void => {
+      g.__vbspBudgetLevel = this.budgetLevel;
+      g.__vbspBudget = {
+        level: this.budgetLevel,
+        ms: +this.budgetLastMs.toFixed(3),
+        dt: +dtMs.toFixed(3),
+        doublePct: this.budgetDoublePct(),
+        up: this.budgetUp,
+        down: this.budgetDown,
+      };
+    };
+    if (g.__vbspBudgetOn === false) {
+      this.budgetLevel = 0;
+      write();
+      return;
+    }
+    if (typeof g.__vbspBudgetForce === 'number') {
+      this.budgetLevel = Math.max(0, Math.min(2, Math.floor(g.__vbspBudgetForce)));
+      write();
+      return;
+    }
+    // 每 30 帧评估一次；窗口未填满前不动作。
+    this.budgetEvaluateIn--;
+    if (this.budgetEvaluateIn > 0 || this.budgetDtCount < 30) {
+      write();
+      return;
+    }
+    this.budgetEvaluateIn = 30;
+    const ratio = this.budgetDoublePct();
+    if (ratio >= 0.25 && this.budgetLevel < 2) {
+      this.budgetLevel++;
+      this.budgetUp++;
+    } else if (ratio <= 0.05 && this.budgetLevel > 0) {
+      this.budgetLevel--;
+      this.budgetDown++;
+    }
+    write();
+  }
+
+  /** 滚动窗口里「双槽帧」占比（dt>4.8ms）；窗口未填满按已有样本算。 */
+  private budgetDoublePct(): number {
+    const n = this.budgetDtCount;
+    if (n === 0) return 0;
+    let dbl = 0;
+    for (let i = 0; i < n; i++) if (this.budgetDt[i] > 4.8) dbl++;
+    return +(dbl / n).toFixed(3);
   }
 
   /** 端特有动画/叠加层用：重画一帧但不重复可见性/近平面（只做天空+主世界 draw）。 */
@@ -1732,6 +1830,21 @@ export class RenderSession {
       smoothed += smoothVertexLighting(mesh.geometry);
     });
     if (smoothed > 0) console.info(`[optimizeScene] 逐顶点光照去接缝: 细分 ${subdivided} 层, 改写 ${smoothed} 个空间格子`);
+    // 二级合批：把「同材质、不同 chunk/不同槽」的重复提交按材质并成 1 个 draw。
+    // 依据（2026-11-16 实测）：终点机位可见不透明 154 mesh / 259 材质槽，但只有 55 种材质 ——
+    // 主遍 306 draw / 2.30ms 的大头就是这种「同材质被切碎」。合并后仍保留 `_vbsp_face` 属性与
+    // 来源区间表，PVS 三角级过滤由 `cluster-filter.ts` 的增量路径继续负责（见该文件注释）。
+    // A/B：装载期 `__vbspOpaqueMatMergeOff = true` 关闭；`__vbspOpaqueMatMergeCell = HU` 开空间二级分桶。
+    // 必须在这一步（vlight 平滑之后、装配返回之前）做：可见性索引与深度代理都在之后建立，
+    // 会自动看到合并后的网格。
+    const matStats = mergeOpaqueByMaterial(optRoot);
+    if (matStats) {
+      console.info(
+        `[optimizeScene] 材质二级合批: ${matStats.meshes} mesh / ${matStats.slots} 槽 / ${matStats.materials} 材质` +
+          ` → ${matStats.drawCallsAfter} draw（合并 ${matStats.mergedMeshes} 个，移除 ${matStats.removedMeshes} 个，` +
+          `${matStats.tris} 三角，${matStats.ms.toFixed(1)}ms${matStats.failed > 0 ? `，失败 ${matStats.failed}` : ''}）`,
+      );
+    }
     const stats = mergeStatsOf(optRoot);
     if (stats) {
       console.log(

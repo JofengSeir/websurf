@@ -781,3 +781,340 @@ export function mergeIntoNewRoot(src: THREE.Object3D, opts?: MergeOptions): THRE
   attachMergeStats(root, { meshes: r.infos.length, chunks: r.chunkCount, drawCallEst: r.drawCallEst });
   return root;
 }
+
+// ── 不透明几何按材质全局合批（task-30 / PERF_ARCH_PLAN §2-A）────────────────────────────
+// 现状：mergeIntoChunks 以 chunk(cell) 为一级分桶，同一材质在不同 chunk 各成一组 draw
+// （surf_boreas 终点机位实测 154 块 / 259 材质组，只有 55 种材质）。这里在 chunk 合并之后
+// 再做一级「按材质」合批：同材质（+ 属性签名 + 父节点，可选空间格）跨 chunk 合成一个
+// 单材质 Mesh（无 groups ⇒ 1 draw）。保留三样东西：
+// - 世界坐标/单位变换（与 chunk 一致，新 mesh 直接挂回同一父节点）；
+// - 顶点属性（含 `_vbsp_face`，cluster-filter 的逐三角形 PVS 过滤靠它按三角形取 cluster）；
+// - 来源区间表（`lookupMergeSource` 拾取仍能按面号反查原 mesh / faceIndex / vbsp 元数据）。
+// 安全边界：只处理「全部材质槽都不透明」的 Mesh；旋钮/符文盘（`userData.vbspRot`）、
+// 半透明/水面/天空、以及多材质里混了透明槽的块一律不动。关掉（A/B，装载期读一次）：
+// `globalThis.__vbspOpaqueMatMergeOff = true`。
+const OPAQUE_MAT_MERGED_KEY = 'vbspOpaqueMatMerged';
+
+export interface OpaqueMatMergeOptions {
+  /** 额外的材质过滤（默认只做上面的基础判定）。 */
+  includeMaterial?: (material: THREE.Material) => boolean;
+  /** >0 时再按世界空间格二级分桶（HU；0/未给 = 只按材质全局合批）。A/B：`__vbspOpaqueMatMergeCell`。 */
+  spatialCell?: number;
+  /** true = 只统计不改场景（诊断）。 */
+  dryRun?: boolean;
+}
+
+export interface OpaqueMatMergeStats {
+  /** 输入 Mesh 数（root 下被扫到的）。 */
+  meshes: number;
+  /** 参与合并的材质槽数（≈ 合并前的 draw 数）。 */
+  slots: number;
+  /** 唯一材质数。 */
+  materials: number;
+  /** 实际合成的 Mesh 数（单槽桶保留原 mesh，不新建）。 */
+  mergedMeshes: number;
+  /** 合并后新增/保留的 draw 数（= 新建 mesh 数 + 未合并的单槽原 mesh 数）。 */
+  drawCallsAfter: number;
+  removedMeshes: number;
+  failed: number;
+  tris: number;
+  ms: number;
+  skipped: Record<string, number>;
+}
+
+/** 材质槽提取结果：几何（与源共享属性数组或整份原几何）+ 自己的来源表。 */
+interface OpaqueSlotSource {
+  mesh: THREE.Mesh;
+  parent: THREE.Object3D;
+  /** 单材质 mesh 直接用整份几何；多材质 mesh 按 group 切出来的新几何（共享属性）。 */
+  geometry: THREE.BufferGeometry;
+  table: MergeSourceTable | null;
+  material: THREE.Material;
+  renderOrder: number;
+  layersMask: number;
+}
+
+/** 一只 mesh 的合并资格与清理状态。 */
+interface OpaqueMeshState {
+  parent: THREE.Object3D;
+  /** 该 mesh 贡献的材质槽数（单材质 mesh = 1；多材质 = groups 数）。 */
+  slots: number;
+  /** 需要额外 dispose 的临时几何（烘焙克隆 / group 切片）。 */
+  tempGeoms: THREE.BufferGeometry[];
+}
+
+export function mergeOpaqueByMaterial(
+  root: THREE.Object3D,
+  opts?: OpaqueMatMergeOptions,
+): OpaqueMatMergeStats | null {
+  const globals = globalThis as unknown as {
+    __vbspOpaqueMatMergeOff?: boolean;
+    __vbspOpaqueMatMergeCell?: number;
+  };
+  if (globals.__vbspOpaqueMatMergeOff === true) return null;
+  const cellSize = Math.max(0, Math.round(opts?.spatialCell ?? globals.__vbspOpaqueMatMergeCell ?? 0));
+  const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+  const skipped: Record<string, number> = {};
+  const why = (k: string): void => {
+    skipped[k] = (skipped[k] ?? 0) + 1;
+  };
+  const stats: OpaqueMatMergeStats = {
+    meshes: 0, slots: 0, materials: 0, mergedMeshes: 0, drawCallsAfter: 0, removedMeshes: 0,
+    failed: 0, tris: 0, ms: 0, skipped,
+  };
+
+  // ① 收集：扫 root 下所有 mesh，逐个材质槽判断资格（不透明才收）。
+  interface Bucket {
+    material: THREE.Material;
+    parent: THREE.Object3D;
+    renderOrder: number;
+    layersMask: number;
+    slots: OpaqueSlotSource[];
+  }
+  const buckets = new Map<string, Bucket>();
+  const materialSet = new Set<string>();
+  const meshStates = new Map<THREE.Mesh, OpaqueMeshState>();
+  const center = new THREE.Vector3();
+  root.updateMatrixWorld(true);
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const geom = mesh.geometry as THREE.BufferGeometry | undefined;
+    if (!geom || !geom.getAttribute('position')) return;
+    if ((mesh.userData as { vbspRot?: unknown })?.vbspRot) { why('rot'); return; }
+    if (Object.keys(geom.morphAttributes).length > 0) { why('morph'); return; }
+    if ((mesh as unknown as { isSkinnedMesh?: boolean }).isSkinnedMesh) { why('skinned'); return; }
+    if ((mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) { why('instanced'); return; }
+    const rawMat = mesh.material;
+    const mats = Array.isArray(rawMat) ? rawMat : [rawMat];
+    if (mats.length === 0 || mats.some((m) => !m)) { why('noMaterial'); return; }
+    if (mats.some((m) => !isOpaqueMergeMaterial(m as THREE.Material, opts?.includeMaterial))) {
+      why('transparent');
+      return;
+    }
+    if (mesh.visible === false) { why('hidden'); return; }
+    stats.meshes++;
+    const parent = mesh.parent ?? root;
+    const state: OpaqueMeshState = { parent, slots: 0, tempGeoms: [] };
+    meshStates.set(mesh, state);
+    const srcTable = (geom.userData?.[MERGE_SOURCE_TABLE_KEY] as MergeSourceTable | undefined) ?? null;
+    let baked = geom;
+    if (!isIdentityMatrix(mesh.matrixWorld)) {
+      baked = geom.clone();
+      baked.applyMatrix4(mesh.matrixWorld);
+      state.tempGeoms.push(baked);
+    }
+    const addSlot = (slotGeom: THREE.BufferGeometry, table: MergeSourceTable | null, material: THREE.Material): void => {
+      const sig = optGeometrySignature(slotGeom);
+      let cellKey = '';
+      if (cellSize > 0) {
+        if (!slotGeom.boundingBox) slotGeom.computeBoundingBox();
+        slotGeom.boundingBox?.getCenter(center);
+        cellKey = '|' + optCellKey(center.x, center.y, center.z, cellSize);
+      }
+      const key =
+        parent.uuid + '|' + material.uuid + '|' + sig + '|' + mesh.renderOrder + '|' + mesh.layers.mask + cellKey;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = { material, parent, renderOrder: mesh.renderOrder, layersMask: mesh.layers.mask, slots: [] };
+        buckets.set(key, bucket);
+      }
+      bucket.slots.push({ mesh, parent, geometry: slotGeom, table, material, renderOrder: mesh.renderOrder, layersMask: mesh.layers.mask });
+      stats.slots++;
+      state.slots++;
+      materialSet.add(material.uuid);
+    };
+    if (!Array.isArray(rawMat)) {
+      // 单材质：整份几何一个槽（来源表随几何走；没有表就让下游兜底建一条）。
+      addSlot(baked, srcTable, mats[0] as THREE.Material);
+      return;
+    }
+    // 多材质：按 groups 逐槽切几何；先全部切成功再入桶，避免「半合并 + 原 mesh 又保留」的重复 draw。
+    if (baked.groups.length === 0) {
+      why('nogroups');
+      meshStates.delete(mesh);
+      return;
+    }
+    const pending: Array<{ geometry: THREE.BufferGeometry; table: MergeSourceTable | null; material: THREE.Material }> = [];
+    for (const g of baked.groups) {
+      const material = g.materialIndex === undefined ? undefined : (mats[g.materialIndex] as THREE.Material | undefined);
+      if (!material) { why('groupMaterial'); meshStates.delete(mesh); return; }
+      const extracted = extractSlotGeometry(baked, g.start, g.count);
+      if (!extracted) { why('extract'); meshStates.delete(mesh); return; }
+      state.tempGeoms.push(extracted);
+      pending.push({ geometry: extracted, table: srcTable ? sliceSourceTable(srcTable, g.start, g.count) : null, material });
+    }
+    for (const p of pending) addSlot(p.geometry, p.table, p.material);
+  });
+  if (buckets.size === 0) {
+    // 全是「一次性槽」：没有可合并的桶，场景保持原样（draw 数 = 收集到的槽数）。
+    for (const state of meshStates.values()) {
+      for (const g of state.tempGeoms) g.dispose();
+    }
+    stats.drawCallsAfter = stats.slots;
+    stats.ms = (typeof performance !== 'undefined' ? performance.now() : 0) - t0;
+    return stats;
+  }
+
+  // ② 只保留「全部槽都会进多槽桶」的 mesh：落在单槽桶里的 mesh 原样保留，避免合并副本 + 原 mesh
+  //    重复绘制（同一三角形画两遍虽不可见，但白花一次 draw；也会让 draw 统计失真）。
+  for (;;) {
+    let single: Bucket | null = null;
+    for (const b of buckets.values()) {
+      if (b.slots.length === 1) { single = b; break; }
+    }
+    if (!single) break;
+    const mesh = single.slots[0].mesh;
+    const keys = Array.from(buckets.keys());
+    for (const k of keys) {
+      const b = buckets.get(k);
+      if (!b) continue;
+      b.slots = b.slots.filter((s) => s.mesh !== mesh);
+      if (b.slots.length === 0) buckets.delete(k);
+    }
+  }
+
+  // ③ 逐桶合并：mergeGeometries 合成单材质 Mesh（无 groups ⇒ 1 draw）。
+  const mergedSlots = new Map<THREE.Mesh, number>();
+  for (const bucket of buckets.values()) {
+    const geoms = bucket.slots.map((s) => s.geometry);
+    const tables = bucket.slots.map(
+      (s) => s.table ?? buildSourceTable([s.geometry], [meshSourceSeed(s.mesh)]),
+    );
+    let merged = mergeGeometries(geoms, false);
+    let tableGeoms = geoms;
+    if (!merged) {
+      const norm = normalizeMergeGroup(geoms);
+      merged = mergeGeometries(norm, false);
+      if (merged) tableGeoms = norm;
+    }
+    if (!merged) {
+      // 合并失败：该桶原样保留（没有 mergedSlots 记账，原 mesh 不会被摘除）。
+      stats.failed++;
+      continue;
+    }
+    if (opts?.dryRun) {
+      merged.dispose();
+      stats.mergedMeshes++;
+      continue;
+    }
+    // 几何已在世界坐标；包围球/盒重算并垫同样的视锥余量（与 chunk 一致）。
+    merged.computeBoundingSphere();
+    merged.computeBoundingBox();
+    if (merged.boundingSphere) (merged.boundingSphere as THREE.Sphere).radius *= FRUSTUM_PAD;
+    const mesh = new THREE.Mesh(merged, bucket.material);
+    mesh.name = `matBatch:${bucket.material.name || bucket.material.uuid}`;
+    mesh.renderOrder = bucket.renderOrder;
+    mesh.layers.mask = bucket.layersMask;
+    mesh.userData[OPAQUE_MAT_MERGED_KEY] = true;
+    attachSourceTable(merged, concatSourceTables(tableGeoms, tables));
+    bucket.parent.add(mesh);
+    stats.mergedMeshes++;
+    stats.tris += merged.index ? merged.index.count / 3 : (merged.getAttribute('position') as THREE.BufferAttribute).count / 3;
+    for (const s of bucket.slots) {
+      mergedSlots.set(s.mesh, (mergedSlots.get(s.mesh) ?? 0) + 1);
+    }
+  }
+
+  // ④ 替换：所有槽都被合并的 mesh 摘除 + dispose（临时烘焙/切片几何一并释放）。
+  //    dryRun 时只统计、不动场景。
+  let keptDraws = 0;
+  for (const [mesh, state] of meshStates) {
+    const covered = mergedSlots.get(mesh) ?? 0;
+    if (!opts?.dryRun && covered > 0 && covered >= state.slots) {
+      state.parent.remove(mesh);
+      mesh.geometry.dispose();
+      stats.removedMeshes++;
+    }
+    for (const g of state.tempGeoms) {
+      if (g !== mesh.geometry) g.dispose();
+    }
+    // 没被合并掉的 mesh 原样留在场景里（单槽桶被排除 / 桶合并失败），draw 按原槽数计。
+    if (covered < state.slots) keptDraws += state.slots - covered;
+  }
+  stats.drawCallsAfter = opts?.dryRun ? stats.slots : stats.mergedMeshes + keptDraws;
+
+  stats.materials = materialSet.size;
+  stats.ms = (typeof performance !== 'undefined' ? performance.now() : 0) - t0;
+  return stats;
+}
+
+/** 材质是否可按「不透明」合批：普通不透明（含 alphaTest 镂空）才收，混合/透明/不写深度一律不收。 */
+function isOpaqueMergeMaterial(
+  mat: THREE.Material,
+  include?: (m: THREE.Material) => boolean,
+): boolean {
+  if (!mat) return false;
+  if (mat.visible === false) return false;
+  if (mat.transparent === true) return false;
+  if (mat.blending !== THREE.NormalBlending) return false;
+  if (mat.depthWrite === false) return false;
+  if ((mat.userData as { vbspNoMatMerge?: boolean })?.vbspNoMatMerge === true) return false;
+  return include ? include(mat) : true;
+}
+
+/** 矩阵是否单位阵（内容比较，不看 matrixWorldNeedsUpdate）。 */
+function isIdentityMatrix(m: THREE.Matrix4): boolean {
+  const e = m.elements;
+  const id = IDENTITY_ELEMENTS;
+  for (let i = 0; i < 16; i++) {
+    if (Math.abs(e[i] - id[i]) > 1e-9) return false;
+  }
+  return true;
+}
+const IDENTITY_ELEMENTS = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+/**
+ * 从几何里切出一个 group 区间的子几何。索引几何只复制 index 缓冲（属性数组共享，最终
+ * mergeGeometries 会把数据复制走，因此不会把源几何的缓冲区搞坏）；非索引几何按顶点区间
+ * 逐属性切片。返回 null 表示该形态（交错属性/异常区间）不支持，调用方保守跳过。
+ */
+function extractSlotGeometry(
+  geom: THREE.BufferGeometry,
+  start: number,
+  count: number,
+): THREE.BufferGeometry | null {
+  if (!(count > 0)) return null;
+  const index = geom.index;
+  const pos = geom.getAttribute('position');
+  const maxLen = index ? index.count : pos ? pos.count : 0;
+  const from = Math.max(0, Math.floor(start));
+  const to = Math.min(maxLen, from + Math.floor(count));
+  if (to <= from) return null;
+  const out = new THREE.BufferGeometry();
+  if (index) {
+    const src = index.array as ArrayLike<number>;
+    const idx = new Uint32Array(to - from);
+    for (let i = from; i < to; i++) idx[i - from] = src[i];
+    for (const name of Object.keys(geom.attributes)) out.setAttribute(name, geom.attributes[name]);
+    out.setIndex(new THREE.BufferAttribute(idx, 1));
+  } else {
+    for (const name of Object.keys(geom.attributes)) {
+      const attr = geom.attributes[name];
+      if ((attr as unknown as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute) return null;
+      const a = attr as THREE.BufferAttribute;
+      const itemSize = a.itemSize;
+      const arr = a.array as ArrayLike<number>;
+      const begin = from * itemSize;
+      const end = to * itemSize;
+      const slice = new (a.array.constructor as new (n: number) => Float32Array)(end - begin);
+      for (let i = begin; i < end; i++) slice[i - begin] = arr[i];
+      out.setAttribute(name, new THREE.BufferAttribute(slice, itemSize, a.normalized));
+    }
+  }
+  return out;
+}
+
+/** 把来源区间表裁到某个 group 区间（`start/count` 与表自己的缓冲口径一致）。 */
+function sliceSourceTable(table: MergeSourceTable, start: number, count: number): MergeSourceTable | null {
+  const from = start;
+  const to = start + count;
+  const ranges: MergeSourceRange[] = [];
+  for (const r of table.ranges) {
+    const s = Math.max(r.start, from);
+    const e = Math.min(r.start + r.count, to);
+    if (e <= s) continue;
+    ranges.push({ start: s - from, count: e - s, meshName: r.meshName, faceIndex: r.faceIndex, vbsp: r.vbsp });
+  }
+  return ranges.length > 0 ? { indexed: table.indexed, ranges } : null;
+}
