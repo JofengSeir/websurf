@@ -529,6 +529,15 @@ export class RendererMain {
     this.setupEntitySystem(data.entityIoJson);
     this.setupParticleSystems(data.entityIoJson);
     this.setupLaserBeams(data.entityIoJson);
+    // 上面三步把粒子/激光等在 `session.loadScene()` 之后才挂进场景，它们的材质不在载图期
+    // 预热帧内。端侧的网格/材质是在 `update()` 里才建出来的，所以先手动推一拍 `update()`
+    // 让它们成型，再做一次幂等预热——否则首飞第一次画到它们时会现编 7 个 srgb-linear
+    // 折射变体（实测单帧 84ms）。
+    if (this.camera) {
+      this.particleSystems?.update(1 / 64, this.camera);
+      this.laserBeams?.update(1 / 64, this.camera);
+    }
+    this.session.prewarmPasses();
     this.emitCullStats();
     return {
       diagonal: result.diagonal,

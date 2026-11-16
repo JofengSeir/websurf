@@ -338,6 +338,39 @@ export class NearPlaneController {
     this.defaultNear = v;
   }
 
+  /**
+   * 预建块级三角形空间网格（`triGridOf` 的缓存），返回本次真正新建的块数。
+   *
+   * 为什么：网格是**首次探测时懒建**的，整图所有合并块建一遍实测 ~58ms。冷启动首飞第一帧
+   * 正是第一次探测（`tick` 每 2 帧一次、`updateNearPlane` 在物理就绪后才开），这笔开销就落在
+   * 首飞那一帧上：`.tmp/perf/ph3` 实测 near 段 57.66ms、整帧 64.91ms（program 数没变 ⇒ 不是
+   * 着色器编译）。载图期先建好，把一次性成本挪进载图（相对 8.7s 载图可忽略）。
+   *
+   * 幂等：已建过的块按 `geometry.uuid` 命中缓存，第二次调用返回 0。
+   */
+  prewarmGrids(root: THREE.Object3D | null): number {
+    if (!root) return 0;
+    let built = 0;
+    root.traverse((obj) => {
+      // 预热是「锦上添花」：任何一块的几何异常都不该让载图失败，单块失败就跳过
+      // （那一块的网格退化成首次探测时全扫，行为与未预热一致）。
+      try {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.geometry) return;
+        const geom = mesh.geometry as THREE.BufferGeometry;
+        const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
+        if (!pos) return;
+        const idx = geom.index?.array as ArrayLike<number> | undefined;
+        const triCount = idx ? idx.length / 3 : pos.count / 3;
+        const before = mesh.userData.__nearGrid;
+        if (this.triGridOf(mesh, geom, pos, idx, triCount) && mesh.userData.__nearGrid !== before) built++;
+      } catch {
+        /* 单块跳过 */
+      }
+    });
+    return built;
+  }
+
   /** 面板实时调整探测距离与收缩系数：两项都只在传入正数时写，ratio 还需 ≤ 1；下一帧探测生效。 */
   setParams(probeDist?: number, ratio?: number): void {
     if (probeDist !== undefined && probeDist > 0) {

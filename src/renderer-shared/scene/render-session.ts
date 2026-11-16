@@ -605,6 +605,13 @@ export class RenderSession {
     this.quality = input.quality ?? rp.textureQuality;
     if (this.mosaicManifest && this.mosaic) void this.applyTextureQuality(this.quality);
 
+    // 走到这里相机/可见性/环境/贴图档都已就位，可以做「整帧预热」：
+    // 把场景全部对象临时置可见并关掉视锥剔除，跑一帧真实 frame()（主遍 + 水面折射/镜像 +
+    // 天空 + 泛光 pas 全部执行），让每个材质在**每种 pass 的 render target 形态**下都编译一次。
+    // 冷启动实测（`.tmp/flight-195645.json`）：不做这一步时首飞途中才编译 31 个 program，
+    // 单帧 159~200ms；做完后飞行途中应为 0 新增。
+    this.prewarmPasses();
+
     return {
       root: this.root,
       skyGroup: this.skyGroup,
@@ -639,6 +646,157 @@ export class RenderSession {
     });
     (globalThis as { __vbspStaticFrozen?: number }).__vbspStaticFrozen = frozen;
     return frozen;
+  }
+
+  /**
+   * 载图期「整帧预热」：临时放开可见性/视锥剔除/PVS/视距，让整张图在真实 pass 下画一遍，
+   * 把 主遍 / 水面折射 / 水面镜像 / 天空 / 泛光 各形态的 program 都编译并链接好。
+   *
+   * 为什么需要：冷启动实测（.tmp/flight-195645.json）首飞途中才编译 31~35 个 program
+   * （806×458 RGBA8 + NoColorSpace 的折射 RT 24 个、screen 11 个），最长一帧 159~200ms，
+   * 玩家看到的就是一次明显卡死；同页热跑 max 只有 18~22ms。
+   *
+   * 为什么不是 renderer.compile()：three r165 的 cacheKey 里 RT 的 format/type **不进 key**，
+   * 只带 outputColorSpace(sRGB/LinearSRGB)、fog、灯数、对象 flags、注入 key；而 compile()
+   * 会把 render target 置 null 再编，所以「按假 RT compile」既编不出 LinearRT 变体，也编不到
+   * 水面/泛光自己的材质（实测冷跑仍 +31、max 171.88ms）。只有真跑一帧、真进各 pass 的 RT
+   * 状态才拿得到正确变体。
+   *
+   * 为什么还要强制 PVS/视距：光放开 visible 不够 —— chunk 几何被 applyClusterIndex 按相机
+   * 所在房间裁成 drawRange，场外/别处的块 drawRange=0，一帧只覆盖出生点附近的材质（实测
+   * 393 个材质只画了 148 个）。这里改走「PVS 关 + 视距 ∞ + 全量 index」，一帧覆盖整张图。
+   *
+   * 代价：一次性约 300~800ms 载图时间（取决于对象数/待编译数），运行期零新增编译。
+   * 开关：__vbspPrewarmPassesEnabled = false；诊断：__vbspPrewarmPasses。
+   *
+   * 幂等：第二次起 program 全命中缓存（实测 10 连调 `[+14, 0×9]`），只是再画一遍整帧。
+   * 因此**载图后才挂上的对象**（debug 端的粒子/激光在 `renderer-main.ts` 的
+   * `setupLaserBeams()` 之后才进场景）需要在挂完后再调一次本方法：它们的材质在载图期
+   * 预热帧里不存在，否则首飞第一次被画到时会现编（实测剩 7 个 srgb-linear 折射变体、
+   * 单帧 84ms）。
+   */
+  prewarmPasses(): void {
+    const g = globalThis as {
+      __vbspPrewarmPasses?: unknown;
+      __vbspPrewarmPassesEnabled?: boolean;
+    };
+    if (g.__vbspPrewarmPassesEnabled === false) return;
+    // 临时放开「不可见 / 视锥剔除」，让整帧 pass 覆盖到全部对象；结束后按逆序还原。
+    // ⚠️ 不能放开**灯**：`LightManager` 的 8 槽点光源池在生产态恒为 `visible=false`
+    // （`updatePointLights` 无调用点），three r165 的 program cacheKey 里带 `numPointLights`，
+    // 把灯临时点亮预热会编出 pt=8 的变体（实测载图后 progs 68→102，但首飞仍 +34 个 pt=0 变体）。
+    const restore: Array<() => void> = [];
+    this.scene.traverse((obj) => {
+      if ((obj as THREE.Object3D & { isLight?: boolean }).isLight === true) return;
+      if (obj.visible === false) {
+        restore.push(() => {
+          obj.visible = false;
+        });
+        obj.visible = true;
+      }
+      const mesh = obj as THREE.Mesh;
+      if (mesh.isMesh && mesh.frustumCulled !== false) {
+        restore.push(() => {
+          mesh.frustumCulled = true;
+        });
+        mesh.frustumCulled = false;
+      }
+    });
+    const prevTarget = this.renderer.getRenderTarget();
+    // 近平面探测的块级三角形网格也是懒建的（整图建一遍实测 ~58ms）。首飞第一帧正好是第一次
+    // 探测（`tick` 每 2 帧一次、物理就绪后才开），这笔开销会整段落在那一帧上（实测 near 段
+    // 57.66ms / 整帧 64.91ms，且 program 数没变 ⇒ 与着色器无关）。载图期先建好；幂等。
+    const nearGrids = this.nearPlane.prewarmGrids(this.root);
+    // 临时关 PVS、剔除距离放到无穷、关水面「视锥高度门控」：预热帧要把整张图都画一遍。
+    // 还原时刻意写字段而不是调 setCullDistance()：后者会按当前 PVS 档重算 auto 距离，
+    // 覆盖掉存档里的面板视距；这里要的是**逐字段原样**。
+    const savedPvsOverride = this.pvsOverride;
+    const savedEnablePvs = this.visibility.enablePvs;
+    const savedAutoCull = this.visibility.autoCullDistance;
+    const savedCull = this.visibility.cullDistance;
+    const savedAutoFlag = this.pvsAutoCull;
+    const savedWaterGate = (globalThis as { __vbspWaterFrustumGate?: boolean }).__vbspWaterFrustumGate;
+    this.pvsOverride = false;
+    this.pvsAutoCull = false; // 与 enablePvs 一致 ⇒ updateVisibility() 的自动距离分支不覆盖 ∞
+    this.visibility.enablePvs = false;
+    this.visibility.autoCullDistance = Number.POSITIVE_INFINITY;
+    this.visibility.cullDistance = Number.POSITIVE_INFINITY;
+    (globalThis as { __vbspWaterFrustumGate?: boolean }).__vbspWaterFrustumGate = false;
+    const t0 = performance.now();
+    let ok = true;
+    // 预热序号：既用于诊断，也用于相机挪动幅度——两趟预热不能挪到同一个坐标，
+    // 否则第二趟会被 `cameraChangedSinceRt` 判成「没动」而整趟跳过水面折射/镜像
+    // （实测第二趟 draws 只有 645 = 仅主遍，programs 只 +7；折射变体一个都没编）。
+    const callNo = ((g as { __vbspPrewarmCalls?: number }).__vbspPrewarmCalls ?? 0) + 1;
+    (g as { __vbspPrewarmCalls?: number }).__vbspPrewarmCalls = callNo;
+    // 诊断：这一帧到底画了多少 draw、编了多少 program、场景里有几个子节点。
+    // autoReset=false + reset() 才能让 info.render.calls 累计整帧（含折射/镜像/泛光各 pass）。
+    const info = this.renderer.info;
+    const prevAutoReset = info.autoReset;
+    const progsBefore = info.programs?.length ?? 0;
+    info.autoReset = false;
+    info.reset();
+    let draws = 0;
+    // 水面折射/镜像 pass 有「相机没动就跳过」的门控（`water.ts` `cameraChangedSinceRt`）。
+    // 预热常在相机静止时调用（载图后立刻预热、或挂完粒子再预热一次），不挪一下相机这趟 pass
+    // 根本不跑 ⇒ 折射 RT 的 LinearSRGB 变体编不出来（实测首飞补编 7 个、单帧 ~60ms）。
+    // 这里只把相机挪 1 HU 并在 finally 还原：预热帧的画面坐标无关紧要，不写回玩家相机。
+    const savedCamPos = this.camera.position.clone();
+    const savedCamWorld = this.camera.matrixWorld.clone();
+    this.camera.position.set(
+      savedCamPos.x + 1 + callNo,
+      savedCamPos.y,
+      savedCamPos.z,
+    );
+    this.camera.updateMatrixWorld(true);
+    try {
+      // 全量 index（restoreClusterIndex）+ 全部块可见，再跑一帧真实 pass。
+      this.updateVisibility();
+      this.frame({ updateVisibility: false, updateNearPlane: false });
+    } catch (err) {
+      ok = false;
+      console.warn(`[${this.app}][prewarm] 预热帧失败（不影响运行，着色器将按需编译）:`, err);
+    } finally {
+      draws = info.render.calls;
+      info.autoReset = prevAutoReset;
+      info.reset();
+      this.renderer.setRenderTarget(prevTarget);
+      // 相机还原（含 matrixWorld，避免析构帧仍用挪过的位姿）：只影响下一帧画面，
+      // 下一帧的 `frame()` 会自己重算矩阵。
+      this.camera.position.copy(savedCamPos);
+      this.camera.matrixWorld.copy(savedCamWorld);
+      this.camera.matrixWorldInverse.copy(savedCamWorld).invert();
+      this.camera.updateMatrixWorld(true);
+      this.pvsOverride = savedPvsOverride;
+      this.visibility.enablePvs = savedEnablePvs;
+      this.visibility.autoCullDistance = savedAutoCull;
+      this.visibility.cullDistance = savedCull;
+      this.pvsAutoCull = savedAutoFlag;
+      (globalThis as { __vbspWaterFrustumGate?: boolean }).__vbspWaterFrustumGate = savedWaterGate;
+      for (let i = restore.length - 1; i >= 0; i--) restore[i]();
+      // 按真实状态重算一次：把 PVS 裁过的 index / 块可见性还原成出生点该有的样子。
+      try {
+        this.updateVisibility();
+      } catch (err) {
+        console.warn(`[${this.app}][prewarm] 预热后恢复可见性失败:`, err);
+      }
+    }
+    const total = +(performance.now() - t0).toFixed(1);
+    const programs = this.renderer.info.programs?.length ?? null;
+    g.__vbspPrewarmPasses = {
+      call: callNo,
+      total,
+      ok,
+      draws,
+      programs,
+      progsBefore,
+      kids: this.scene.children.length,
+      nearGrids,
+    };
+    console.info(
+      `[${this.app}][prewarm] #${callNo} 整帧预热 ${total}ms（放开 ${restore.length} 项，已还原）` +
+        ` draws=${draws} programs=${progsBefore}→${programs ?? '?'} nearGrids=${nearGrids} kids=${this.scene.children.length}`,
+    );
   }
 
   /** 换图/卸载：释放根、天空组、环境与渲染列表；renderer/scene/camera 本身复用。 */
