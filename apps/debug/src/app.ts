@@ -1516,12 +1516,20 @@ function bindUI(): void {
 	}, (v) => v);
 
 	// 视距剔除距离（渲染器实时生效 + Worker 协议兼容保留）
+	// **必须同时写渲染偏好**：载图（含回放换图、重生）时 `RenderSession` 是按
+	// `readRenderPrefs().culling.distance` 重新设剔除距离的；只写 UI 偏好的话，
+	// 下一次载图会退回自动档（PVS 开 = 18000），用户设的 2000 就丢了。
+	// 2026-11-16 实测：同一段 47s 飞行，末尾 12 等分段 p50 从 6.2ms（18000）回到 3.13ms（2000）。
+	const persistCullDistance = (val: number): void => {
+		writeRenderPrefs(prefsPathPatch('culling.distance', val));
+	};
 	dom.cullDistRange?.addEventListener('input', (e) => {
 		const val = parseFloat((e.target as HTMLInputElement).value);
 		if (dom.cullDistNum && Number.isFinite(val)) dom.cullDistNum.value = String(val);
 		applyConfigPatch(config, 'lod', { cullDistance: val });
 		rendererMain?.setCullDistance(val);
 		inputBridge?.sendSetCullDistance(val);
+		if (Number.isFinite(val)) persistCullDistance(val);
 		saveUiPrefs();
 	});
 	dom.cullDistNum?.addEventListener('input', () => softValidateNum(dom.cullDistNum));
@@ -1536,6 +1544,7 @@ function bindUI(): void {
 		applyConfigPatch(config, 'lod', { cullDistance: val });
 		rendererMain?.setCullDistance(val);
 		inputBridge?.sendSetCullDistance(val);
+		persistCullDistance(val);
 		saveUiPrefs();
 	});
 
