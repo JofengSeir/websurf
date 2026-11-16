@@ -1085,8 +1085,11 @@ function cullBoundOf(obj: THREE.Object3D): { center: THREE.Vector3; radius: numb
     }
     const mesh = node as THREE.Mesh;
     if (!mesh.isMesh || !mesh.geometry) return;
-    const geom = mesh.geometry as THREE.BufferGeometry;
-    if (!geom.boundingBox) geom.computeBoundingBox();
+    const geom = (node as THREE.Mesh).geometry as THREE.BufferGeometry;
+    const pos = geom.getAttribute('position');
+    // 顶点每帧都在动（rope 尾迹/飘移粒子），旧包围盒不可复用，重算。
+    if (!pos || pos.count === 0) return;
+    geom.computeBoundingBox();
     if (!geom.boundingBox) return;
     tmp.copy(geom.boundingBox).applyMatrix4(mesh.matrixWorld);
     box.union(tmp);
@@ -1111,6 +1114,10 @@ export class ParticleSystems {
   private readonly flares: THREE.Group[] = [];
   private readonly hazes: THREE.Mesh[] = [];
   private readonly hazeTexture: THREE.Texture;
+  /** 包围球是否已经算过（首帧模拟跑完才算，见 update）。 */
+  private cullTagged = false;
+  /** 包围球刷新计数：rope/尾迹顶点每帧在动，隔帧刷新避免用旧包围球误剔。 */
+  private cullTagFrame = 0;
   private readonly motes: BeamMotes[] = [];
   /** 符文祭坛（alch）的两层 PCF 粒子（环几何由 brush 实体负责，不在这里）。 */
   private readonly alchFields: AlchParticleField[] = [];
@@ -1258,9 +1265,9 @@ export class ParticleSystems {
         this.root.add(field.group);
       }
     }
-    // 所有光效对象都是「实体挂件」，不进合并块 ⇒ 块级 PVS/距离剔除管不到它们。
-    // 构造完给每个顶层对象记包围球，`update()` 里按视锥 + 距离做粗剔除。
-    this.tagCullBounds();
+    // 所有光效对象都是「实体挂件」，不进合并块 ⇒ 块级 PVS/距离剔除管不到它们，
+    // 由 `update()` 里按视锥 + 距离做粗剔除。包围球必须等第一帧模拟跑完再算：
+    // 构造时 rope/尾迹的顶点缓冲还是空的，算出来的包围球贴在原点，会把整片光效误剔除。
   }
 
   private buildGlow(entity: ParticleEntity, glow: { size: number; color: number; count: number }): GlowCluster {
@@ -1323,6 +1330,13 @@ export class ParticleSystems {
         );
       }
     }
+    // 包围球：首帧模拟跑完再算（构造时 rope/尾迹顶点缓冲还是空的，算出来会贴在原点；
+    // 那样整片光效都会被判到视锥外而消失）；之后每 30 帧刷新一次，rope 顶点一直在动。
+    this.cullTagFrame++;
+    if (!this.cullTagged || this.cullTagFrame % 30 === 0) {
+      this.tagCullBounds();
+      this.cullTagged = true;
+    }
     this.cullByCamera(camera);
   }
 
@@ -1333,6 +1347,12 @@ export class ParticleSystems {
    * 粗粒度上剔除，不会出现面片突然被切掉的观感）。距离上限取地图剔除档的上限量级。
    */
   private cullByCamera(camera: THREE.Camera): void {
+    const dbg = globalThis as { __vbspParticleCullOff?: boolean };
+    if (dbg.__vbspParticleCullOff) {
+      // 诊断口：关掉剔除，用来 A/B 判断「光效是不是被剔掉了」。
+      for (const child of this.root.children) child.visible = true;
+      return;
+    }
     const proj = this._cullProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this._cullFrustum.setFromProjectionMatrix(proj);
     const camPos = this._cullCam.setFromMatrixPosition(camera.matrixWorld);

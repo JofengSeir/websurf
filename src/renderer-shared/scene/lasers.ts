@@ -343,8 +343,10 @@ export class LaserBeams {
     const fovRad = persp.isPerspectiveCamera ? (persp.fov * Math.PI) / 180 : Math.PI / 3;
     const focalPx = viewH / 2 / Math.tan(fovRad / 2);
     const camPos = camera.position;
+    const dbg = globalThis as { __vbspLaserCullOff?: boolean };
     // 激光是实体挂件（不在合并块里），块级 PVS/距离剔除管不到 ⇒ 这里按「束的包围球」做
     // 视锥 + 距离粗剔除：看不见的束直接退化成零面积，不产生可见像素也不额外占 draw。
+    // `__vbspLaserCullOff` 是诊断口，关掉剔除做 A/B 用。
     this._cullFrustum.setFromProjectionMatrix(this._cullProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     const collapse = (base: number, start: THREE.Vector3): void => {
       for (let k = 0; k < 4; k++) {
@@ -368,13 +370,13 @@ export class LaserBeams {
       mid.addVectors(beam.start, beam.clippedEnd).multiplyScalar(0.5);
       const midDist = Math.max(1, mid.distanceTo(camPos));
       const beamRadius = length * 0.5 + Math.max(4, beam.width * 2);
-      if (midDist - beamRadius > LASER_CULL_DISTANCE) {
+      if (!dbg.__vbspLaserCullOff && midDist - beamRadius > LASER_CULL_DISTANCE) {
         collapse(base, beam.start);
         continue;
       }
       this._cullSphere.center.copy(mid);
       this._cullSphere.radius = beamRadius;
-      if (!this._cullFrustum.intersectsSphere(this._cullSphere)) {
+      if (!dbg.__vbspLaserCullOff && !this._cullFrustum.intersectsSphere(this._cullSphere)) {
         collapse(base, beam.start);
         continue;
       }
