@@ -210,6 +210,10 @@ export class RenderSession {
   private transparentChunks: THREE.Mesh[] = [];
   private readonly transparentSortBox = new THREE.Box3();
   private readonly transparentSortPoint = new THREE.Vector3();
+  /** 上次半透明排序时的相机位置与可见集指纹；用于「没动就别排」。 */
+  private readonly transparentSortLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+  private transparentSortLastHash = 0;
+  private transparentSortLastVisible = -1;
   /** 天空层：第二相机 + 只挂 `SKY_LAYER` 的图元组。 */
   private skyCamera: THREE.PerspectiveCamera | null = null;
   private skyGroup: THREE.Group | null = null;
@@ -1634,12 +1638,38 @@ export class RenderSession {
    * 合并后 `position=(0,0,0)`、three 退化成 id 顺序的影响。地图解析侧的
    * `faceIndex` 已随来源区间表保留，后续要升级到逐面排序时可直接用。
    */
+  /** 上次逐面排序时的相机位置；位置没动就不必重算三角形距离（转视角不改距离）。 */
+  private readonly faceSortLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
   private sortTransparentChunks(camera: THREE.Camera): void {
     const list = this.transparentChunks;
     if (list.length === 0) return;
     const box = this.transparentSortBox;
     const point = this.transparentSortPoint;
     const cameraPos = camera.position;
+    // 早退：排序结果只取决于「相机位置」和「这帧哪些半透明块可见」。原地转视角（Q/E）相机位置不变，
+    // 可见集不变时重排是纯浪费 —— pose3 实测 sortTransparentFaces 占整帧 CPU 的 7%（≈0.22ms），
+    // 而它算的三角形-相机距离一个都没变。哈希用 id 的加权和，碰撞只会让顺序不变时多做一次排序。
+    let visHash = 0;
+    let visCount = 0;
+    for (const mesh of list) {
+      if (!mesh.visible) continue;
+      visCount++;
+      visHash = (visHash * 31 + mesh.id) | 0;
+    }
+    // 逐面排序（每块逐三角形算距离 + 重排 + index 重传）只在相机位置真的变了才做：
+    // 转视角时相机位置不变 ⇒ 距离不变 ⇒ 排序结果与上一帧逐位相同（实测占整帧 7%）。
+    const moved = cameraPos.distanceToSquared(this.faceSortLastPos) > 0.0625;
+    if (moved) this.faceSortLastPos.copy(cameraPos);
+    if (
+      visCount === this.transparentSortLastVisible &&
+      visHash === this.transparentSortLastHash &&
+      !moved
+    ) {
+      return;
+    }
+    this.transparentSortLastVisible = visCount;
+    this.transparentSortLastHash = visHash;
+    this.transparentSortLastPos.copy(cameraPos);
     for (const mesh of list) {
       const geom = mesh.geometry;
       if (!geom) continue;
@@ -1653,7 +1683,7 @@ export class RenderSession {
       box.copy(local).applyMatrix4(mesh.matrixWorld);
       box.clampPoint(cameraPos, point);
       mesh.userData.__vbspTransparentDist = point.distanceToSquared(cameraPos);
-      if ((globalThis as { __vbspNoFaceSort?: unknown }).__vbspNoFaceSort !== true) {
+      if (moved && (globalThis as { __vbspNoFaceSort?: unknown }).__vbspNoFaceSort !== true) {
         this.sortTransparentFaces(mesh, camera);
       }
     }
