@@ -26,6 +26,7 @@ import { extractSkyArea, SKY_LAYER, type SkyCameraParams } from '../environment/
 import { applyWorldTransitionShaders, collectWorldTransitionTextures } from '../shader/world-transition.js';
 import { applyBumpShaders, collectBumpTextures } from '../shader/bumpmap.js';
 import { applyWaterShaders } from '../shader/water.js';
+import { mergeWaterSurfaces } from './water-merge.js';
 import { fullbrightUnlitLitMaterials } from '../shader/lightmap-shader.js';
 
 /** PVS 查询面（只用到 cluster 查询；各端的 PvsManager 结构兼容）。 */
@@ -312,6 +313,17 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   const mergedRoot = opts.mergeMain?.(mapRoot, gltf);
   __mark('merge');
   const root = mergedRoot ?? mapRoot;
+
+  // task-28：水面块归并。必须在 `mergeMain` 之后（逐块合并已产出水面小块）、
+  // `applyWaterShaders` 之前（水面着色器/镜面驱动按 mesh 遍历注入，归并后只做一次）。
+  // 归并只动 mesh 组织，不改几何顶点数据/材质数值；A/B 开关 `__vbspWaterMergeOff`。
+  const waterMerge = mergeWaterSurfaces(root);
+  __mark('waterMerge');
+  if (waterMerge) {
+    console.info(
+      `[${opts.logPrefix}][water-merge] 组 ${waterMerge.groups} / 归并 ${waterMerge.mergedMeshes} 个 mesh / 删除 ${waterMerge.removedMeshes}`,
+    );
+  }
 
   if (skyGroup) {
     // 天空区整片一次可见、不做逐块剔除，块数只影响天空遍的 draw 数（实测水平线 160+ 块 = 1.7ms）；
