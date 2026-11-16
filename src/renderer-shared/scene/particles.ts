@@ -527,67 +527,295 @@ function makeBallTexture(): THREE.Texture {
   return tex;
 }
 
+/** 相机朝向 billboard 的基向量（世界空间：相机矩阵的右/上轴列向量）。 */
+interface BillboardBasis {
+  rx: number;
+  ry: number;
+  rz: number;
+  ux: number;
+  uy: number;
+  uz: number;
+}
+
 /**
- * 粒子链 ribbon：模拟 PCF rope 的发射/重力/寿命，每帧重建面向相机的条带；
- * 颜色 = 顶点点色 × 生命周期 alpha（fade in 0.25s / fade out 到 1s，最后边缘到 0）。
+ * 取相机的右/上轴（世界空间）。沿这两个轴偏移顶点不改变顶点的视线方向投影深度，
+ * 因此等价于 three `Sprite` 着色器里的「view 空间 XY 偏移」——透视投影下逐像素一致。
  */
-class RopeRibbon {
+function billboardBasisOf(camera: THREE.Camera, out: BillboardBasis): BillboardBasis {
+  const m = camera.matrixWorld.elements;
+  out.rx = m[0];
+  out.ry = m[1];
+  out.rz = m[2];
+  out.ux = m[4];
+  out.uy = m[5];
+  out.uz = m[6];
+  return out;
+}
+
+/**
+ * 加法光效合批容器（task-32）：把大量「贴图 × 顶点色 × alpha」的四边形写进一张动态
+ * BufferGeometry，一次 draw 画完。语义与原来的 `THREE.Sprite`／单 quad 光效 mesh 对齐：
+ *   - additive 混合：出射 = 贴图色(线性) × 顶点色(线性)，alpha = 贴图 a × 顶点 a × material.opacity；
+ *   - depthWrite=false、depthTest=true；加法混合与绘制顺序无关，所以任意合批都不改变观感；
+ *   - 顶点色是 RGBA（three 0.165 的 vertexAlphas 路径），逐 quad 控颜色/alpha。
+ *
+ * 槽位是绝对下标：调用方持有自己的 slot，可任意顺序写入（begin/end 只负责可见性与上传标记）。
+ * 每帧所有槽位要么写入真实四边形、要么 `collapseAt` 成零面积——drawRange 恒定，也不会读到
+ * 上一帧的旧顶点。
+ */
+class AdditiveQuadBatch {
   readonly mesh: THREE.Mesh;
-  private readonly profile: RopeProfile;
-  private readonly origin: THREE.Vector3;
-  private readonly points: RopePoint[] = [];
-  private readonly spawnAccum: { value: number };
-  private readonly positions: Float32Array;
-  private readonly uvs: Float32Array;
-  private readonly colors: Float32Array;
   private readonly geometry: THREE.BufferGeometry;
-  private readonly maxPoints: number;
-  private readonly scrollOffset = { value: 0 };
-  private readonly widthScale: number;
+  private readonly positions: Float32Array;
+  private readonly colors: Float32Array;
+  private readonly capacity: number;
+  private live = 0;
 
-  constructor(
-    entity: ParticleEntity,
-    profile: RopeProfile,
-    texture: THREE.Texture,
-    opacityScale = 1,
-    widthScale = 1,
-  ) {
-    this.profile = profile;
-    this.widthScale = widthScale;
-    this.origin = new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]);
-    this.maxPoints = Math.ceil(profile.rate * profile.lifetime) + 2;
-    this.positions = new Float32Array(this.maxPoints * 2 * 3);
-    this.uvs = new Float32Array(this.maxPoints * 2 * 2);
-    this.colors = new Float32Array(this.maxPoints * 2 * 4);
-    this.spawnAccum = { value: 0 };
-
+  constructor(texture: THREE.Texture, capacity: number, renderOrder: number, noGlow: boolean) {
+    this.capacity = Math.max(1, Math.floor(capacity));
+    const quads = this.capacity;
+    this.positions = new Float32Array(quads * 12);
+    this.colors = new Float32Array(quads * 16);
+    const uvs = new Float32Array(quads * 8);
+    const indices: number[] = [];
+    for (let q = 0; q < quads; q++) {
+      const v = q * 4;
+      uvs[q * 8] = 0;
+      uvs[q * 8 + 1] = 0;
+      uvs[q * 8 + 2] = 1;
+      uvs[q * 8 + 3] = 0;
+      uvs[q * 8 + 4] = 1;
+      uvs[q * 8 + 5] = 1;
+      uvs[q * 8 + 6] = 0;
+      uvs[q * 8 + 7] = 1;
+      indices.push(v, v + 1, v + 2, v, v + 2, v + 3);
+    }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    geometry.setAttribute('uv', new THREE.BufferAttribute(this.uvs, 2));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 4));
-    const index: number[] = [];
-    for (let i = 0; i < this.maxPoints - 1; i++) {
-      const a = i * 2;
-      index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-    }
-    geometry.setIndex(index);
-    geometry.setDrawRange(0, 0);
+    geometry.setIndex(indices);
+    geometry.setDrawRange(0, quads * 6);
     this.geometry = geometry;
-
     const material = new THREE.MeshBasicMaterial({
       map: texture,
       vertexColors: true,
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      // 屏幕朝向 quad 的绕序在极端视角下可能翻面；加法混合下双面与单面等价，
+      // 用 DoubleSide 省掉绕序校验（原 Sprite 走的是自己的着色器，不存在这个问题）。
       side: THREE.DoubleSide,
       fog: false,
       toneMapped: false,
-      opacity: profile.opacity * opacityScale,
     });
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = 10;
+    this.mesh.renderOrder = renderOrder;
+    // 全局合批网格不参与 tagCullBounds/cullByCamera 的整片剔除（见 tagCullBounds）。
+    this.mesh.userData.vbspNoCull = true;
+    // 首帧 update 之前没有顶点，先不画（否则多一次空 draw）。
+    this.mesh.visible = false;
+    // 原来是 Sprite 的光效不进 bloom 光效层（markGlowMeshes 只认 Mesh）；合批成 Mesh 后
+    // 必须显式标记 vbspNoGlow，否则会额外多出一份泛光。
+    if (noGlow) this.mesh.userData.vbspNoGlow = true;
+  }
+
+  begin(): void {
+    this.live = 0;
+  }
+
+  /** 写一个世界空间的四边形：p0/p1/p2/p3 依次对应 UV (0,0)/(1,0)/(1,1)/(0,1)。 */
+  orientedQuadAt(
+    slot: number,
+    x0: number,
+    y0: number,
+    z0: number,
+    x1: number,
+    y1: number,
+    z1: number,
+    x2: number,
+    y2: number,
+    z2: number,
+    x3: number,
+    y3: number,
+    z3: number,
+    r: number,
+    g: number,
+    b: number,
+    a: number,
+  ): void {
+    if (slot < 0 || slot >= this.capacity) return;
+    const v = slot * 4;
+    this.writeVert(v, x0, y0, z0, r, g, b, a);
+    this.writeVert(v + 1, x1, y1, z1, r, g, b, a);
+    this.writeVert(v + 2, x2, y2, z2, r, g, b, a);
+    this.writeVert(v + 3, x3, y3, z3, r, g, b, a);
+    this.live++;
+  }
+
+  /** 写一个屏幕朝向的 billboard：中心 (cx,cy,cz)、世界尺寸 size（HU）。 */
+  billboardAt(
+    slot: number,
+    cx: number,
+    cy: number,
+    cz: number,
+    size: number,
+    basis: BillboardBasis,
+    r: number,
+    g: number,
+    b: number,
+    a: number,
+  ): void {
+    if (slot < 0 || slot >= this.capacity) return;
+    const h = size * 0.5;
+    const rx = basis.rx * h;
+    const ry = basis.ry * h;
+    const rz = basis.rz * h;
+    const ux = basis.ux * h;
+    const uy = basis.uy * h;
+    const uz = basis.uz * h;
+    const v = slot * 4;
+    this.writeVert(v, cx - rx - ux, cy - ry - uy, cz - rz - uz, r, g, b, a);
+    this.writeVert(v + 1, cx + rx - ux, cy + ry - uy, cz + rz - uz, r, g, b, a);
+    this.writeVert(v + 2, cx + rx + ux, cy + ry + uy, cz + rz + uz, r, g, b, a);
+    this.writeVert(v + 3, cx - rx + ux, cy - ry + uy, cz - rz + uz, r, g, b, a);
+    this.live++;
+  }
+
+  /** 把槽位塌成零面积（不可见），用于「这个槽位本帧没有粒子」。 */
+  collapseAt(slot: number, x = 0, y = 0, z = 0): void {
+    if (slot < 0 || slot >= this.capacity) return;
+    const v = slot * 4;
+    this.writeVert(v, x, y, z, 0, 0, 0, 0);
+    this.writeVert(v + 1, x, y, z, 0, 0, 0, 0);
+    this.writeVert(v + 2, x, y, z, 0, 0, 0, 0);
+    this.writeVert(v + 3, x, y, z, 0, 0, 0, 0);
+  }
+
+  end(): void {
+    (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+    (this.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
+    this.mesh.visible = this.live > 0;
+  }
+
+  private writeVert(vi: number, x: number, y: number, z: number, r: number, g: number, b: number, a: number): void {
+    const p = vi * 3;
+    this.positions[p] = x;
+    this.positions[p + 1] = y;
+    this.positions[p + 2] = z;
+    const c = vi * 4;
+    this.colors[c] = r;
+    this.colors[c + 1] = g;
+    this.colors[c + 2] = b;
+    this.colors[c + 3] = a;
+  }
+
+  dispose(): void {
+    this.geometry.dispose();
+    (this.mesh.material as THREE.Material).dispose();
+  }
+}
+
+/**
+ * rope 光柱的一层：贴图只有两种，各层只是「宽度系数 + 不透明度系数」不同。
+ * （task-11 round-3 的分层依据见 `ParticleSystems` 构造处注释，AB 结论不变。）
+ */
+interface RopeLayerSpec {
+  /** 用哪张贴图：laser01 阶梯纹理 / softBar 软边纹理。 */
+  texture: 'beam' | 'softBar';
+  /** 相对 `RopeProfile.opacity` 的不透明度系数（原 material.opacity 的乘子）。 */
+  opacity: number;
+  /** 相对 `profile.width / 2` 的宽度系数（原 widthScale）。 */
+  widthScale: number;
+}
+
+/** 4 层叠加顺序与 task-11 round-3 一致：core / halo / plateau / inner。 */
+const ROPE_LAYERS: RopeLayerSpec[] = [
+  { texture: 'beam', opacity: 0.1, widthScale: 0.3 },
+  { texture: 'softBar', opacity: 0.35, widthScale: 0.7 },
+  { texture: 'softBar', opacity: 0.46, widthScale: 0.44 },
+  { texture: 'beam', opacity: 0.1, widthScale: 0.1 },
+];
+
+/** 同一贴图下的若干层共用一套动态顶点缓冲（层从底部预热点开始逐层排布）。 */
+interface RopeLayerGroup {
+  layers: RopeLayerSpec[];
+  positions: Float32Array;
+  uvs: Float32Array;
+  colors: Float32Array;
+  geometry: THREE.BufferGeometry;
+  /** 每个层面片对应的 index 数量（顶点位置/uv/color 每条目 2 个顶点）。 */
+  indexCount: number;
+}
+
+/**
+ * 粒子链 ribbon：模拟 PCF rope 的发射/重力/寿命，每帧重建面向相机的条带；
+ * 颜色 = 顶点点色 × 生命周期 alpha（fade in 0.25s / fade out 到 1s，最后边缘到 0）。
+ *
+ * task-32 合批：一条 rope 的 4 层原来各建 1 个 Mesh（4 draw），现在按贴图分成 2 组，
+ * 每组内 2 层共用一个 geometry + 材质（2 draw）。层的宽度/抖动/alpha 逐顶点各自计算，
+ * 每帧动画语义不变（模拟只有一份：4 层参数完全相同，原本就是 4 份等价模拟）。
+ */
+class RopeRibbon {
+  /** 按贴图分组后的网格（beam 层组 / softBar 层组），每组 1 个 draw。 */
+  readonly meshes: THREE.Mesh[] = [];
+  private readonly groups: RopeLayerGroup[] = [];
+  private readonly profile: RopeProfile;
+  private readonly origin: THREE.Vector3;
+  private readonly points: RopePoint[] = [];
+  private readonly spawnAccum: { value: number };
+  private readonly maxPoints: number;
+  private readonly scrollOffset = { value: 0 };
+
+  constructor(entity: ParticleEntity, profile: RopeProfile, textures: { beam: THREE.Texture; softBar: THREE.Texture }) {
+    this.profile = profile;
+    this.origin = new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]);
+    this.maxPoints = Math.ceil(profile.rate * profile.lifetime) + 2;
+    this.spawnAccum = { value: 0 };
+
+    const byTexture: Record<'beam' | 'softBar', RopeLayerSpec[]> = { beam: [], softBar: [] };
+    for (const layer of ROPE_LAYERS) byTexture[layer.texture].push(layer);
+    for (const name of ['beam', 'softBar'] as const) {
+      const layers = byTexture[name];
+      if (layers.length === 0) continue;
+      const verts = this.maxPoints * 2 * layers.length;
+      const positions = new Float32Array(verts * 3);
+      const uvs = new Float32Array(verts * 2);
+      const colors = new Float32Array(verts * 4);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 4));
+      const index: number[] = [];
+      for (let l = 0; l < layers.length; l++) {
+        const base = l * this.maxPoints * 2;
+        for (let i = 0; i < this.maxPoints - 1; i++) {
+          const a = base + i * 2;
+          index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+        }
+      }
+      geometry.setIndex(index);
+      const indexCount = index.length;
+      geometry.setDrawRange(0, indexCount);
+      // 层的不透明度烘进顶点 alpha（步 3 的 color.a），材质保持 opacity=1：
+      // additive 的贡献 = 贴图 × 顶点色 × 顶点 alpha × material.opacity，与原实现等价。
+      const material = new THREE.MeshBasicMaterial({
+        map: textures[name],
+        vertexColors: true,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        fog: false,
+        toneMapped: false,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 10;
+      this.groups.push({ layers, positions, uvs, colors, geometry, indexCount });
+      this.meshes.push(mesh);
+    }
 
     // 预热：先跑满一个寿命周期，避免第一帧只有几个点
     const steps = Math.ceil(profile.lifetime * 60);
@@ -638,65 +866,93 @@ class RopeRibbon {
     this.step(dt);
     const n = this.points.length;
     if (n < 2) {
-      this.geometry.setDrawRange(0, 0);
+      // 顶点全部清到原点（零面积），避免残留上一帧的旧几何。
+      for (const group of this.groups) {
+        group.positions.fill(0);
+        group.colors.fill(0);
+        (group.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+        (group.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
+      }
+      for (const mesh of this.meshes) mesh.visible = false;
       return;
     }
+    for (const mesh of this.meshes) mesh.visible = true;
     const cameraPos = camera.position;
     const up = new THREE.Vector3(0, 1, 0);
     const dir = new THREE.Vector3();
     const perp = new THREE.Vector3();
     const toCam = new THREE.Vector3();
     let dist = 0;
-    const halfW = (this.profile.width / 2) * this.widthScale;
 
-    for (let i = 0; i < n; i++) {
-      const p = this.points[i];
-      if (i > 0) dist += p.pos.distanceTo(this.points[i - 1].pos);
-      // 端点处的切线用相邻点差分
-      if (i < n - 1) dir.subVectors(this.points[i + 1].pos, p.pos);
-      else dir.subVectors(p.pos, this.points[i - 1].pos);
-      if (dir.lengthSq() < 1e-6) dir.copy(up);
-      dir.normalize();
-      toCam.subVectors(cameraPos, p.pos);
-      perp.crossVectors(dir, toCam);
-      if (perp.lengthSq() < 1e-6) perp.set(1, 0, 0);
-      else perp.normalize();
-      perp.multiplyScalar(halfW);
-
-      const alpha = this.alphaOf(p.age);
+    // 点列只算一份；层与层的差别只有 halfW（宽度系数）、wob 幅度与顶点 alpha。
+    // 末尾空槽（i >= n）填成最后一个点 ⇒ 三角形零面积，drawRange 恒定。
+    for (let i = 0; i < this.maxPoints; i++) {
+      const hasPoint = i < n;
+      const p = this.points[Math.min(i, n - 1)];
+      if (hasPoint) {
+        if (i > 0) dist += p.pos.distanceTo(this.points[i - 1].pos);
+        // 端点处的切线用相邻点差分
+        if (i < n - 1) dir.subVectors(this.points[i + 1].pos, p.pos);
+        else dir.subVectors(p.pos, this.points[i - 1].pos);
+        if (dir.lengthSq() < 1e-6) dir.copy(up);
+        dir.normalize();
+        toCam.subVectors(cameraPos, p.pos);
+        perp.crossVectors(dir, toCam);
+        if (perp.lengthSq() < 1e-6) perp.set(1, 0, 0);
+        else perp.normalize();
+      }
+      const alpha = hasPoint ? this.alphaOf(p.age) : 0;
       // 锥形：越靠上（越老）越宽，形成「喇叭口」的体积感
       const frac = i / Math.max(1, n - 1);
       // 源贴图：顶端（V=0）碎裂且更宽、底部连续亮刃更窄 => 上宽下窄（喇叭口）。
       // round-3（task-11）：底部翼展 2.40→1.70，配合 halo 宽度控制 wEff（收窄光晕翼展）。
       const widen = 0.34 + 1.70 * Math.pow(frac, 2.6);
       const tint = frac;
-      const wob = (Math.sin(p.age * 1.1 + i * 0.55) * 0.07 + Math.sin(p.age * 0.4 + i * 0.19) * 0.05) * halfW * (1 - frac);
-      for (let side = 0; side < 2; side++) {
-        const vi = (i * 2 + side) * 3;
-        const sign = side === 0 ? -1 : 1;
-        this.positions[vi] = p.pos.x + wob + perp.x * sign * widen;
-        this.positions[vi + 1] = p.pos.y + perp.y * sign * widen;
-        this.positions[vi + 2] = p.pos.z + wob * 0.6 + perp.z * sign * widen;
-        const ui = (i * 2 + side) * 2;
-        this.uvs[ui] = side;
-        this.uvs[ui + 1] = dist / this.profile.texelSize - this.scrollOffset.value;
-        const ci = (i * 2 + side) * 4;
-        this.colors[ci] = 1 - 0.2 * tint;
-        this.colors[ci + 1] = 1 - 0.3 * tint;
-        this.colors[ci + 2] = 1;
-        this.colors[ci + 3] = Math.min(1, alpha * (0.52 + 0.30 * frac));
+      for (const group of this.groups) {
+        for (let li = 0; li < group.layers.length; li++) {
+          const layer = group.layers[li];
+          const halfW = (this.profile.width / 2) * layer.widthScale;
+          const wob =
+            (Math.sin(p.age * 1.1 + i * 0.55) * 0.07 + Math.sin(p.age * 0.4 + i * 0.19) * 0.05) *
+            halfW *
+            (1 - frac);
+          const base = (li * this.maxPoints + i) * 2;
+          for (let side = 0; side < 2; side++) {
+            const vi = (base + side) * 3;
+            const sign = side === 0 ? -1 : 1;
+            // 原实现先 perp *= halfW 再乘 widen；这里 perp 保持单位向量，等价写成
+            // perp * sign * widen * halfW（逐层 halfW 不同）。
+            const half = widen * halfW;
+            group.positions[vi] = p.pos.x + wob + perp.x * sign * half;
+            group.positions[vi + 1] = p.pos.y + perp.y * sign * half;
+            group.positions[vi + 2] = p.pos.z + wob * 0.6 + perp.z * sign * half;
+            const ui = (base + side) * 2;
+            group.uvs[ui] = side;
+            group.uvs[ui + 1] = dist / this.profile.texelSize - this.scrollOffset.value;
+            const ci = (base + side) * 4;
+            group.colors[ci] = 1 - 0.2 * tint;
+            group.colors[ci + 1] = 1 - 0.3 * tint;
+            group.colors[ci + 2] = 1;
+            // 层不透明度乘以原 material.opacity（profile.opacity × layer.opacity），
+            // 与其他因子相乘后仍是 min(1, ...) 之外的同一个 additive 贡献。
+            group.colors[ci + 3] = Math.min(1, alpha * (0.52 + 0.30 * frac)) * this.profile.opacity * layer.opacity;
+          }
+        }
       }
     }
     this.scrollOffset.value += dt * this.profile.scroll;
-    (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    (this.geometry.getAttribute('uv') as THREE.BufferAttribute).needsUpdate = true;
-    (this.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
-    this.geometry.setDrawRange(0, (n - 1) * 6);
+    for (const group of this.groups) {
+      (group.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+      (group.geometry.getAttribute('uv') as THREE.BufferAttribute).needsUpdate = true;
+      (group.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
+    }
   }
 
   dispose(): void {
-    this.geometry.dispose();
-    (this.mesh.material as THREE.Material).dispose();
+    for (const group of this.groups) group.geometry.dispose();
+    for (const mesh of this.meshes) (mesh.material as THREE.Material).dispose();
+    this.meshes.length = 0;
+    this.groups.length = 0;
   }
 }
 
@@ -768,11 +1024,30 @@ class BeamMotes {
   }
 }
 
+/**
+ * 静态光球/光斑/辉光簇的描述（task-32）：原来是独立的 `THREE.Sprite`（每个 1 draw），
+ * 现在只记参数，`ParticleSystems.update` 每帧按当前相机基向量写进共享的 `AdditiveQuadBatch`。
+ * `r/g/b` 是线性工作空间的颜色（与原来 SpriteMaterial.color 的取值一致）。
+ */
+interface StaticBillboard {
+  x: number;
+  y: number;
+  z: number;
+  size: number;
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
 interface GlowCluster {
-  sprites: THREE.Sprite[];
   basePositions: THREE.Vector3[];
   phases: number[];
   drift: number[];
+  sizeScales: number[];
+  color: THREE.Color;
+  slots: number[];
+  count: number;
   elapsed: number;
 }
 
@@ -828,18 +1103,21 @@ interface AlchTrailParticle {
  * 环的 brush 几何与旋转由 ALCH_SYMBOLS 实体负责，这里不再重复造环。
  */
 class AlchParticleField {
-  readonly group = new THREE.Group();
-  private readonly origin: THREE.Vector3;
+  /** 站点中心（世界空间）；父层光点与子层拖尾都从这里散布。 */
+  readonly origin: THREE.Vector3;
+  /** 剔除用粗包围球半径：粒子会向上飘，要把「散布距离 + 上飘位移」都包住。 */
+  readonly cullRadius: number;
+  /** 父层光点占用的槽位数（诊断 stats 用）。 */
+  readonly spriteCount: number;
   private readonly profile: AlchProfile;
-  private readonly spritePool: THREE.Sprite[] = [];
+  private readonly spriteBatch: AdditiveQuadBatch;
+  private readonly spriteSlot: number;
+  private readonly trailBatch: AdditiveQuadBatch;
+  private readonly trailSlot: number;
+  private readonly spriteColor: THREE.Color;
+  private readonly trailTint: THREE.Color;
   private readonly spriteParticles: AlchSpriteParticle[] = [];
   private readonly trailParticles: AlchTrailParticle[] = [];
-  private readonly trailPositions: Float32Array;
-  private readonly trailColors: Float32Array;
-  private readonly trailGeometry: THREE.BufferGeometry;
-  private readonly trailMaterial: THREE.MeshBasicMaterial;
-  private readonly trailMesh: THREE.Mesh;
-  private readonly trailTint: THREE.Color;
   private readonly tmpDir = new THREE.Vector3();
   private readonly tmpDelta = new THREE.Vector3();
   private readonly tmpTangent = new THREE.Vector3();
@@ -847,62 +1125,27 @@ class AlchParticleField {
   private spriteAccum = 0;
   private trailAccum = 0;
 
-  constructor(entity: ParticleEntity, profile: AlchProfile, glowTexture: THREE.Texture) {
+  constructor(
+    entity: ParticleEntity,
+    profile: AlchProfile,
+    spriteBatch: AdditiveQuadBatch,
+    spriteSlot: number,
+    trailBatch: AdditiveQuadBatch,
+    trailSlot: number,
+  ) {
     this.origin = new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]);
     this.profile = profile;
-    this.group.name = `alch-particles:${entity.effect}`;
+    this.spriteCount = profile.sprite.maxParticles;
+    this.spriteBatch = spriteBatch;
+    this.spriteSlot = spriteSlot;
+    this.trailBatch = trailBatch;
+    this.trailSlot = trailSlot;
+    this.spriteColor = new THREE.Color(profile.sprite.color);
     this.trailTint = new THREE.Color(profile.trail.color);
-    // 父层：每个光点独立 sprite 材质，才能逐粒子控制 opacity。
-    const spriteColor = new THREE.Color(profile.sprite.color);
-    for (let i = 0; i < profile.sprite.maxParticles; i++) {
-      const material = new THREE.SpriteMaterial({
-        map: glowTexture,
-        color: spriteColor,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-        toneMapped: false,
-        opacity: 0,
-      });
-      const sprite = new THREE.Sprite(material);
-      sprite.visible = false;
-      sprite.renderOrder = 11;
-      this.group.add(sprite);
-      this.spritePool.push(sprite);
-    }
-    // 子层：拖尾 quad 批（每粒子 4 顶点 2 三角），宽度方向 U=0/1、长度方向 V=0/1。
-    const maxTrail = profile.trail.maxParticles;
-    this.trailPositions = new Float32Array(maxTrail * 4 * 3);
-    this.trailColors = new Float32Array(maxTrail * 4 * 4);
-    const uvs = new Float32Array(maxTrail * 4 * 2);
-    const indices: number[] = [];
-    for (let i = 0; i < maxTrail; i++) {
-      uvs.set([0, 0, 1, 0, 1, 1, 0, 1], i * 8);
-      const v = i * 4;
-      indices.push(v, v + 1, v + 2, v, v + 2, v + 3);
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(this.trailPositions, 3));
-    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    geometry.setAttribute('color', new THREE.BufferAttribute(this.trailColors, 4));
-    geometry.setIndex(indices);
-    geometry.setDrawRange(0, 0);
-    this.trailGeometry = geometry;
-    this.trailMaterial = new THREE.MeshBasicMaterial({
-      map: glowTexture,
-      vertexColors: true,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      fog: false,
-      toneMapped: false,
-    });
-    this.trailMesh = new THREE.Mesh(geometry, this.trailMaterial);
-    this.trailMesh.frustumCulled = false;
-    this.trailMesh.renderOrder = 10;
-    this.group.add(this.trailMesh);
+    this.cullRadius =
+      Math.max(profile.sprite.distanceMax, profile.trail.distanceMax) +
+      profile.sprite.maxVelocity * profile.sprite.lifeMax +
+      profile.trail.maxVelocity * profile.trail.lifeMax;
     // 预热一个最大寿命周期，避免首次进入场景时只有零星粒子。
     const warm = Math.max(profile.sprite.lifeMax, profile.trail.lifeMax);
     for (let i = 0; i < Math.ceil(warm * 60); i++) this.step(1 / 60);
@@ -975,14 +1218,22 @@ class AlchParticleField {
     }
   }
 
-  update(dt: number, camera: THREE.Camera): void {
+  update(dt: number, camera: THREE.Camera, basis: BillboardBasis): void {
     this.step(dt);
     const spriteLayer = this.profile.sprite;
-    for (let i = 0; i < this.spritePool.length; i++) {
-      const sprite = this.spritePool[i];
+    const trailLayer = this.profile.trail;
+    // 距离粗剔除：原来按 group 包围球做，合批后没有独立顶层对象可挂 visible，改在这里整体塌掉。
+    const far = camera.position.distanceTo(this.origin) - this.cullRadius > PARTICLE_CULL_DISTANCE;
+    if (far) {
+      for (let i = 0; i < spriteLayer.maxParticles; i++) this.spriteBatch.collapseAt(this.spriteSlot + i);
+      for (let i = 0; i < trailLayer.maxParticles; i++) this.trailBatch.collapseAt(this.trailSlot + i);
+      return;
+    }
+    for (let i = 0; i < spriteLayer.maxParticles; i++) {
+      const slot = this.spriteSlot + i;
       const particle = this.spriteParticles[i];
       if (!particle) {
-        sprite.visible = false;
+        this.spriteBatch.collapseAt(slot);
         continue;
       }
       const t = particle.age / particle.life;
@@ -990,14 +1241,23 @@ class AlchParticleField {
       const fadeIn = t < 0.5 ? spline01(t / 0.5) : 1;
       const fadeOut = t <= 0.5 ? 1 : 1 - spline01((t - 0.5) / 0.5);
       const alpha = particle.alpha0 * fadeIn * fadeOut;
-      const material = sprite.material as THREE.SpriteMaterial;
-      material.opacity = alpha;
-      sprite.visible = alpha > 0.002;
-      sprite.position.copy(particle.pos);
-      sprite.scale.setScalar(particle.radius * 2);
+      if (alpha <= 0.002) {
+        this.spriteBatch.collapseAt(slot);
+        continue;
+      }
+      this.spriteBatch.billboardAt(
+        slot,
+        particle.pos.x,
+        particle.pos.y,
+        particle.pos.z,
+        particle.radius * 2,
+        basis,
+        this.spriteColor.r,
+        this.spriteColor.g,
+        this.spriteColor.b,
+        alpha,
+      );
     }
-    void spriteLayer;
-    const trailLayer = this.profile.trail;
     let active = 0;
     for (const particle of this.trailParticles) {
       const speed = particle.vel.length();
@@ -1018,43 +1278,34 @@ class AlchParticleField {
       const head = particle.pos;
       const tail = this.tmpTail;
       const tan = this.tmpTangent;
-      const p3 = active * 12;
-      // 0: head+tan, 1: head-tan, 2: tail-tan, 3: tail+tan
-      this.trailPositions[p3] = head.x + tan.x;
-      this.trailPositions[p3 + 1] = head.y + tan.y;
-      this.trailPositions[p3 + 2] = head.z + tan.z;
-      this.trailPositions[p3 + 3] = head.x - tan.x;
-      this.trailPositions[p3 + 4] = head.y - tan.y;
-      this.trailPositions[p3 + 5] = head.z - tan.z;
-      this.trailPositions[p3 + 6] = tail.x - tan.x;
-      this.trailPositions[p3 + 7] = tail.y - tan.y;
-      this.trailPositions[p3 + 8] = tail.z - tan.z;
-      this.trailPositions[p3 + 9] = tail.x + tan.x;
-      this.trailPositions[p3 + 10] = tail.y + tan.y;
-      this.trailPositions[p3 + 11] = tail.z + tan.z;
-      const c4 = active * 16;
-      const r = this.trailTint.r;
-      const g = this.trailTint.g;
-      const b = this.trailTint.b;
-      for (let v = 0; v < 4; v++) {
-        this.trailColors[c4 + v * 4] = r;
-        this.trailColors[c4 + v * 4 + 1] = g;
-        this.trailColors[c4 + v * 4 + 2] = b;
-        this.trailColors[c4 + v * 4 + 3] = alpha;
-      }
+      // 0: head+tan, 1: head-tan, 2: tail-tan, 3: tail+tan（与 CollectSpriteTrail 的 quad 顺序一致）
+      this.trailBatch.orientedQuadAt(
+        this.trailSlot + active,
+        head.x + tan.x,
+        head.y + tan.y,
+        head.z + tan.z,
+        head.x - tan.x,
+        head.y - tan.y,
+        head.z - tan.z,
+        tail.x - tan.x,
+        tail.y - tan.y,
+        tail.z - tan.z,
+        tail.x + tan.x,
+        tail.y + tan.y,
+        tail.z + tan.z,
+        this.trailTint.r,
+        this.trailTint.g,
+        this.trailTint.b,
+        alpha,
+      );
       active++;
     }
-    this.trailGeometry.setDrawRange(0, active * 6);
-    this.trailMesh.visible = active > 0;
-    (this.trailGeometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    (this.trailGeometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
+    for (let i = active; i < trailLayer.maxParticles; i++) this.trailBatch.collapseAt(this.trailSlot + i);
   }
 
   dispose(): void {
-    for (const sprite of this.spritePool) (sprite.material as THREE.Material).dispose();
-    this.trailGeometry.dispose();
-    this.trailMaterial.dispose();
-    this.group.clear();
+    this.spriteParticles.length = 0;
+    this.trailParticles.length = 0;
   }
 }
 
@@ -1110,8 +1361,6 @@ export class ParticleSystems {
   private readonly softBarTexture: THREE.Texture;
   private readonly ropes: RopeRibbon[] = [];
   private readonly glowClusters: GlowCluster[] = [];
-  private readonly baseGlows: THREE.Sprite[] = [];
-  private readonly flares: THREE.Group[] = [];
   private readonly hazes: THREE.Mesh[] = [];
   private readonly hazeTexture: THREE.Texture;
   /** 包围球是否已经算过（首帧模拟跑完才算，见 update）。 */
@@ -1121,7 +1370,20 @@ export class ParticleSystems {
   private readonly motes: BeamMotes[] = [];
   /** 符文祭坛（alch）的两层 PCF 粒子（环几何由 brush 实体负责，不在这里）。 */
   private readonly alchFields: AlchParticleField[] = [];
+  /** rope 底部光球/底光斑的静态参数（合批后每帧按相机基向量摆 quad）。 */
+  private readonly ropeBillboards: {
+    ribbon: RopeRibbon;
+    balls: StaticBillboard[];
+    flares: StaticBillboard[];
+    ballSlot: number;
+    flareSlot: number;
+  }[] = [];
+  /** 合批容器：底部光球 / 光斑+辉光簇+alch 光点 / alch 拖尾，各 1 个 draw。 */
+  private readonly ballBatch: AdditiveQuadBatch;
+  private readonly spriteBatch: AdditiveQuadBatch;
+  private readonly trailBatch: AdditiveQuadBatch;
   private elapsed = 0;
+  private readonly basis: BillboardBasis = { rx: 1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0 };
   private readonly _cullProj = new THREE.Matrix4();
   private readonly _cullFrustum = new THREE.Frustum();
   private readonly _cullSphere = new THREE.Sphere();
@@ -1134,6 +1396,46 @@ export class ParticleSystems {
     this.ballTexture = makeBallTexture();
     this.softBarTexture = makeSoftBarTexture();
     this.hazeTexture = makeHazeTexture();
+
+    // 合批容量在建对象前一次算好：每条 rope = 24 底部光球 + 28 底光斑；每个辉光簇 = glow.count；
+    // 每个 alch 站点 = maxParticles 个父层光点 + maxParticles 个拖尾 quad。
+    const BALL_SPRITES = 24;
+    const FLARE_SPRITES = 28;
+    let ropeCount = 0;
+    let glowSpriteCount = 0;
+    let alchCount = 0;
+    for (const entity of entities) {
+      if (ROPE_PROFILES[entity.effect]) {
+        ropeCount += 1;
+        continue;
+      }
+      const glowProfile = GLOW_PROFILES[entity.effect];
+      if (glowProfile) {
+        glowSpriteCount += glowProfile.count;
+        continue;
+      }
+      if (ALCH_PROFILES[entity.effect]) alchCount += 1;
+    }
+    const alchProfiles = Object.values(ALCH_PROFILES);
+    const alchSpriteMax = alchProfiles.reduce((max, p) => Math.max(max, p.sprite.maxParticles), 0);
+    const alchTrailMax = alchProfiles.reduce((max, p) => Math.max(max, p.trail.maxParticles), 0);
+    // renderOrder 与原 Sprite 一致：底部光球 12、底光斑/辉光簇/alch 光点 11、alch 拖尾 10。
+    // 前两个批的来源是 Sprite（过去不进 bloom 光效层）⇒ vbspNoGlow；拖尾来源是 Mesh（会进）⇒ 保留。
+    this.ballBatch = new AdditiveQuadBatch(this.ballTexture, ropeCount * BALL_SPRITES, 12, true);
+    this.spriteBatch = new AdditiveQuadBatch(
+      this.glowTexture,
+      ropeCount * FLARE_SPRITES + glowSpriteCount + alchCount * alchSpriteMax,
+      11,
+      true,
+    );
+    this.trailBatch = new AdditiveQuadBatch(this.glowTexture, alchCount * alchTrailMax, 10, false);
+    // 合批网格是「全局一张」：不参与光效的距离/视锥剔除，细粒度可见性由各站点在 update 里
+    // 把槽位塌成零面积（等价于原来逐个 Sprite/Group 改 visible）。
+    this.root.add(this.ballBatch.mesh, this.spriteBatch.mesh, this.trailBatch.mesh);
+
+    let ballSlot = 0;
+    let spriteSlot = 0;
+    let trailSlot = 0;
 
     for (const entity of entities) {
       const rope = ROPE_PROFILES[entity.effect];
@@ -1149,87 +1451,67 @@ export class ParticleSystems {
         // ROI meanL 83.9 vs ref 89.4、rowFrac250 0.037 vs 0.090、ROOT meanL 196 vs 252。
         // 故只加 opacity（不加宽，保住 w90≤65 / w60≥137.6 / w40≥206.5）；halo 宽度 0.60→0.70
         // 是表中唯一加宽项，用于补 w60 缺口（178.9 vs ref 215.6）。
-        const core = new RopeRibbon(entity, rope, this.beamTexture, 0.10, 0.30);
-        const halo = new RopeRibbon(entity, rope, this.softBarTexture, 0.35, 0.70);
-        const plateau = new RopeRibbon(entity, rope, this.softBarTexture, 0.46, 0.44);
-        const inner = new RopeRibbon(entity, rope, this.beamTexture, 0.10, 0.10);
-        this.ropes.push(core, halo, plateau, inner);
-        this.root.add(core.mesh, halo.mesh, plateau.mesh, inner.mesh);
+        // task-32 合批：4 层按贴图并成 2 个 Mesh（beam 组 = core+inner / softBar 组 = halo+plateau），
+        // 模拟只跑一份（4 层参数本来完全一致）；宽度/不透明度仍按 ROPE_LAYERS 逐层生效。
+        const ribbon = new RopeRibbon(entity, rope, { beam: this.beamTexture, softBar: this.softBarTexture });
+        this.ropes.push(ribbon);
+        this.root.add(...ribbon.meshes);
         // 柱底「白热光球」= `tendies_endparticle04`（pcf-scout task-15 实测）：
         // render_animated_sprites + particle_glow_11，radius 800（半宽 ⇒ 单 sprite 1600 HU），
         // 64 发/s、寿命 0.25–0.5s、max 32，位置 Box z −400..−512 ⇒ 24–32 个 1600 HU 加法光斑
         // 叠在同一点，中心直接饱和。实机白核直径 531±30 HU、过曝占 bbox 61–64%、粉紫晕到 ~400 HU。
-        // 这里用 28 个 sprite（scale 1500–1700、per-sprite opacity 0.078 ⇒ 中心 28×0.078≈2.2 叠加）
+        // 这里用 24 个 sprite（scale 1500–1700、per-sprite opacity 0.085 ⇒ 中心 24×0.085≈2.0 叠加）
         // 收拢在 ±70 HU 内，得到硬白核 + 外圈紫晕；不再用「单张大光晕」近似。
-        const ball = new THREE.Group();
-        ball.name = 'base-ball';
         // 球心在符文盘平面**之下**（用户 m14239 对照实机指出：大部分球体低于符文高度）。
         // pcf-scout task-16 复核（`.tmp/pcf/ball-geometry.json`）：
         //   04 的 `Position Within Box Random` 是 local space 偏移 min (0,0,−400) / max (0,0,−512)，
         //   mean −456 ⇒ 球心 world y = 725.312 − 456 = 269.3，位于内盘顶面 756.59 之下 487 HU；
         //   盘面到世界地面（−469）之间**没有实体面**，球就悬在坑洞里。
-        ball.position.set(entity.origin[0], entity.origin[1] - 456, entity.origin[2]);
+        const ballColor = new THREE.Color(0xffeef6);
+        const ballCenterY = entity.origin[1] - 456;
         // 白核对齐实机 531 HU：单 sprite 1600 HU × 34% = 544 HU，靠「近同心 + 少量散布」保持核心不被撑大。
-        const BALL_SPRITES = 24;
+        const balls: StaticBillboard[] = [];
         for (let i = 0; i < BALL_SPRITES; i += 1) {
-          const sprite = new THREE.Sprite(
-            new THREE.SpriteMaterial({
-              map: this.ballTexture,
-              color: 0xffeef6,
-              transparent: true,
-              blending: THREE.AdditiveBlending,
-              depthWrite: false,
-              fog: false,
-              toneMapped: false,
-              opacity: 0.085,
-            }),
-          );
           const angle = i * 2.399963; // 黄金角散布，避免规则条纹
           const spread = i < 8 ? 0 : 8 + (i % 5) * 8;
-          sprite.position.set(
-            Math.cos(angle) * spread,
-            8 + (i % 5) * 10,
-            Math.sin(angle) * spread,
-          );
-          sprite.scale.setScalar(1500 + (i % 5) * 30);
-          sprite.renderOrder = 12;
-          ball.add(sprite);
-          this.baseGlows.push(sprite);
+          balls.push({
+            x: entity.origin[0] + Math.cos(angle) * spread,
+            y: ballCenterY + 8 + (i % 5) * 10,
+            z: entity.origin[2] + Math.sin(angle) * spread,
+            size: 1500 + (i % 5) * 30,
+            r: ballColor.r,
+            g: ballColor.g,
+            b: ballColor.b,
+            a: 0.085,
+          });
         }
-        this.root.add(ball);
         const motes = new BeamMotes(new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]), rope.width, 4200, 42, this.glowTexture, 0xd8ccff);
         this.root.add(motes.points);
         this.motes.push(motes);
         // 柱底大光斑（源 render_animated_sprites 04：radius 800 => 1600x1600 的 32 个大光斑堆在底部）
         // round-3（task-11）：32 个加法 sprite 在中心叠加会抬高 wEff/造成底部行饱和；28 个、opacity
         // 0.010→0.007（约 -30%），峰值缺口由 plateau 层补，不偏离 PCF 语义（这层本就是近似）。
-        const flare = new THREE.Group();
-        for (let i = 0; i < 28; i++) {
-          const mat = new THREE.SpriteMaterial({
-            map: this.glowTexture,
-            color: i % 3 === 0 ? 0xf4f6ff : 0xd9deff,
-            transparent: true,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            fog: false,
-            toneMapped: false,
-            opacity: 0.009,
-          });
-          const sp = new THREE.Sprite(mat);
+        const flareWarm = new THREE.Color(0xf4f6ff);
+        const flareCool = new THREE.Color(0xd9deff);
+        const flares: StaticBillboard[] = [];
+        for (let i = 0; i < FLARE_SPRITES; i++) {
+          const color = i % 3 === 0 ? flareWarm : flareCool;
           const ang = Math.random() * Math.PI * 2;
           const rad = Math.random() * 260;
-          sp.position.set(
-            entity.origin[0] + Math.cos(ang) * rad,
-            entity.origin[1] - 456 + (Math.random() - 0.5) * 260,
-            entity.origin[2] + Math.sin(ang) * rad,
-          );
-          const sc = 700 + Math.random() * 900;
-          sp.scale.set(sc, sc, 1);
-          sp.renderOrder = 11;
-          flare.add(sp);
+          flares.push({
+            x: entity.origin[0] + Math.cos(ang) * rad,
+            y: ballCenterY + (Math.random() - 0.5) * 260,
+            z: entity.origin[2] + Math.sin(ang) * rad,
+            size: 700 + Math.random() * 900,
+            r: color.r,
+            g: color.g,
+            b: color.b,
+            a: 0.009,
+          });
         }
-        this.root.add(flare);
-        this.flares.push(flare);
+        this.ropeBillboards.push({ ribbon, balls, flares, ballSlot, flareSlot: spriteSlot });
+        ballSlot += BALL_SPRITES;
+        spriteSlot += FLARE_SPRITES;
         // 柱体外围的大范围淡紫体积雾（源里来自 6 条 sprite_trail 白雾 + 04 大光斑的叠加包围感）
         const haze = new THREE.Mesh(
           new THREE.PlaneGeometry(rope.width * 3.6, 4400),
@@ -1255,14 +1537,17 @@ export class ParticleSystems {
       }
       const glow = GLOW_PROFILES[entity.effect];
       if (glow) {
-        this.glowClusters.push(this.buildGlow(entity, glow));
+        this.glowClusters.push(this.buildGlow(entity, glow, spriteSlot));
+        spriteSlot += glow.count;
         continue;
       }
       const alch = ALCH_PROFILES[entity.effect];
       if (alch) {
-        const field = new AlchParticleField(entity, alch, this.glowTexture);
+        // task-32：父层光点 / 子层拖尾都写进共享批（不再各自建 Sprite / Mesh）。
+        const field = new AlchParticleField(entity, alch, this.spriteBatch, spriteSlot, this.trailBatch, trailSlot);
         this.alchFields.push(field);
-        this.root.add(field.group);
+        spriteSlot += alch.sprite.maxParticles;
+        trailSlot += alch.trail.maxParticles;
       }
     }
     // 所有光效对象都是「实体挂件」，不进合并块 ⇒ 块级 PVS/距离剔除管不到它们，
@@ -1270,65 +1555,50 @@ export class ParticleSystems {
     // 构造时 rope/尾迹的顶点缓冲还是空的，算出来的包围球贴在原点，会把整片光效误剔除。
   }
 
-  private buildGlow(entity: ParticleEntity, glow: { size: number; color: number; count: number }): GlowCluster {
-    const sprites: THREE.Sprite[] = [];
+  /**
+   * 辉光簇（`tendies_snow01` 类）改成描述符：每帧按相机基向量写进共享的 sprite 批
+   * （原来每个光点一个 `THREE.Sprite` = 1 draw）。随机数调用顺序与原实现一致。
+   */
+  private buildGlow(entity: ParticleEntity, glow: { size: number; color: number; count: number }, firstSlot: number): GlowCluster {
     const basePositions: THREE.Vector3[] = [];
     const phases: number[] = [];
     const drift: number[] = [];
+    const sizeScales: number[] = [];
+    const slots: number[] = [];
     for (let i = 0; i < glow.count; i++) {
-      const material = new THREE.SpriteMaterial({
-        map: this.glowTexture,
-        color: glow.color,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-        toneMapped: false,
-        opacity: 0.32,
-      });
-      const sprite = new THREE.Sprite(material);
       const offset = new THREE.Vector3(
         (Math.random() - 0.5) * glow.size * 0.8,
         Math.random() * glow.size * 1.4,
         (Math.random() - 0.5) * glow.size * 0.8,
       );
       const base = new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]).add(offset);
-      sprite.position.copy(base);
-      sprite.scale.setScalar(glow.size * (0.5 + Math.random() * 0.7));
-      sprite.renderOrder = 11;
-      sprites.push(sprite);
       basePositions.push(base);
+      sizeScales.push(glow.size * (0.5 + Math.random() * 0.7));
+      slots.push(firstSlot + i);
       phases.push(Math.random() * Math.PI * 2);
       drift.push(8 + Math.random() * 18);
-      this.root.add(sprite);
     }
-    return { sprites, basePositions, phases, drift, elapsed: Math.random() * 4 };
+    return {
+      basePositions,
+      phases,
+      drift,
+      sizeScales,
+      // SpriteMaterial.color 会按 SRGB→线性转换；THREE.Color 构造同源，逐像素等价。
+      color: new THREE.Color(glow.color),
+      slots,
+      count: glow.count,
+      elapsed: Math.random() * 4,
+    };
   }
 
-  /** 每帧推进：`dt` 秒；`camera` 用于 rope 的 billboard 与朝向。 */
+  /** 每帧推进：`dt` 秒；`camera` 用于 billboard 与朝向。 */
   update(dt: number, camera: THREE.Camera): void {
     this.elapsed += dt;
     for (const rope of this.ropes) rope.update(dt, camera);
     for (const motes of this.motes) motes.update(dt);
-    for (const field of this.alchFields) field.update(dt, camera);
     for (const haze of this.hazes) {
       haze.quaternion.copy(camera.quaternion);
       haze.rotateY(Math.PI);
-    }
-    for (const cluster of this.glowClusters) {
-      cluster.elapsed += dt;
-      for (let i = 0; i < cluster.sprites.length; i++) {
-        const t = cluster.elapsed * 0.5 + cluster.phases[i];
-        const sprite = cluster.sprites[i];
-        const material = sprite.material as THREE.SpriteMaterial;
-        material.opacity = 0.14 + 0.18 * (0.5 + 0.5 * Math.sin(t));
-        const base = cluster.basePositions[i];
-        sprite.position.set(
-          base.x + Math.sin(t * 0.7) * 4,
-          base.y + ((cluster.elapsed * cluster.drift[i]) % 24),
-          base.z + Math.cos(t * 0.9) * 4,
-        );
-      }
     }
     // 包围球：首帧模拟跑完再算（构造时 rope/尾迹顶点缓冲还是空的，算出来会贴在原点；
     // 那样整片光效都会被判到视锥外而消失）；之后每 30 帧刷新一次，rope 顶点一直在动。
@@ -1338,6 +1608,69 @@ export class ParticleSystems {
       this.cullTagged = true;
     }
     this.cullByCamera(camera);
+
+    // task-32：光效四边形全部写进三张共享批。drawRange 恒定，所以每帧每个槽位要么写
+    // 真实四边形、要么塌成零面积（否则会残留上一帧的顶点）。
+    billboardBasisOf(camera, this.basis);
+    this.ballBatch.begin();
+    this.spriteBatch.begin();
+    this.trailBatch.begin();
+    // rope 底部光球/底光斑：同一条 rope 的两层光柱共用一片区域，任一层可见就画。
+    for (const rig of this.ropeBillboards) {
+      const visible = rig.ribbon.meshes.some((mesh) => mesh.visible);
+      for (let i = 0; i < rig.balls.length; i++) {
+        const b = rig.balls[i];
+        if (visible) {
+          this.ballBatch.billboardAt(rig.ballSlot + i, b.x, b.y, b.z, b.size, this.basis, b.r, b.g, b.b, b.a);
+        } else {
+          this.ballBatch.collapseAt(rig.ballSlot + i);
+        }
+      }
+      for (let i = 0; i < rig.flares.length; i++) {
+        const f = rig.flares[i];
+        if (visible) {
+          this.spriteBatch.billboardAt(rig.flareSlot + i, f.x, f.y, f.z, f.size, this.basis, f.r, f.g, f.b, f.a);
+        } else {
+          this.spriteBatch.collapseAt(rig.flareSlot + i);
+        }
+      }
+    }
+    // 辉光簇：呼吸 alpha + 上飘漂移（公式与原 Sprite 版逐项一致）；远处按距离整簇塌掉，
+    // 等价于原来每个 Sprite 各自的包围球距离剔除。
+    const maxDist = PARTICLE_CULL_DISTANCE;
+    for (const cluster of this.glowClusters) {
+      cluster.elapsed += dt;
+      for (let i = 0; i < cluster.count; i++) {
+        const base = cluster.basePositions[i];
+        const dx = base.x - camera.position.x;
+        const dy = base.y - camera.position.y;
+        const dz = base.z - camera.position.z;
+        // 原剔除判据是「中心距 − 包围球半径 > maxDist」，这里同样留出 sprite 半径。
+        const reach = maxDist + cluster.sizeScales[i];
+        if (dx * dx + dy * dy + dz * dz > reach * reach) {
+          this.spriteBatch.collapseAt(cluster.slots[i]);
+          continue;
+        }
+        const t = cluster.elapsed * 0.5 + cluster.phases[i];
+        this.spriteBatch.billboardAt(
+          cluster.slots[i],
+          base.x + Math.sin(t * 0.7) * 4,
+          base.y + ((cluster.elapsed * cluster.drift[i]) % 24),
+          base.z + Math.cos(t * 0.9) * 4,
+          cluster.sizeScales[i],
+          this.basis,
+          cluster.color.r,
+          cluster.color.g,
+          cluster.color.b,
+          0.14 + 0.18 * (0.5 + 0.5 * Math.sin(t)),
+        );
+      }
+    }
+    // alch 站点自己处理父层/子层槽位（内含弹道模拟与距离粗剔除）。
+    for (const field of this.alchFields) field.update(dt, camera, this.basis);
+    this.ballBatch.end();
+    this.spriteBatch.end();
+    this.trailBatch.end();
   }
 
   /**
@@ -1373,6 +1706,9 @@ export class ParticleSystems {
   /** 构造完成后给每个顶层对象记一份包围球（只算一次；动态部分留了余量）。 */
   private tagCullBounds(): void {
     for (const child of this.root.children) {
+      // 合批网格是全局一张（细粒度可见性由槽位塌陷负责），不要给它算包围球，
+      // 否则整张批会被一个错的包围球整片剔掉。
+      if (child.userData.vbspNoCull) continue;
       const bound = cullBoundOf(child);
       if (bound) child.userData.cullBound = bound;
     }
@@ -1383,6 +1719,9 @@ export class ParticleSystems {
     this.ropes.length = 0;
     for (const field of this.alchFields) field.dispose();
     this.alchFields.length = 0;
+    this.ballBatch.dispose();
+    this.spriteBatch.dispose();
+    this.trailBatch.dispose();
     this.root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (mesh.geometry) mesh.geometry.dispose();
@@ -1397,15 +1736,12 @@ export class ParticleSystems {
     this.beamTexture.dispose();
     this.glowTexture.dispose();
     this.ballTexture.dispose();
+    this.softBarTexture.dispose();
+    this.hazeTexture.dispose();
     for (const motes of this.motes) motes.dispose();
-    for (const flare of this.flares) {
-      for (const child of flare.children) {
-        const sprite = child as THREE.Sprite;
-        sprite.material.dispose();
-      }
-    }
     this.motes.length = 0;
     this.glowClusters.length = 0;
+    this.ropeBillboards.length = 0;
   }
 
   /** 诊断：当前挂了多少光柱 / 辉光 / 祭坛粒子（面板或 CDP 用）。 */
@@ -1413,7 +1749,12 @@ export class ParticleSystems {
     return {
       ropes: this.ropes.length,
       glowClusters: this.glowClusters.length,
-      sprites: this.glowClusters.reduce((sum, c) => sum + c.sprites.length, 0),
+      // 合批后「sprites」= 写进 sprite 批的光点总数（光斑 + 辉光簇 + alch 父层），
+      // 不再等于 draw 数（全部合并成 1 draw）。
+      sprites:
+        this.ropeBillboards.reduce((sum, rig) => sum + rig.balls.length + rig.flares.length, 0) +
+        this.glowClusters.reduce((sum, c) => sum + c.count, 0) +
+        this.alchFields.reduce((sum, f) => sum + f.spriteCount, 0),
       points: this.motes.reduce((sum, m) => sum + (m.points.geometry.getAttribute('position') as THREE.BufferAttribute).count, 0),
       alchFields: this.alchFields.length,
     };
