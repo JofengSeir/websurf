@@ -50,6 +50,45 @@ export const DEFAULT_BLOOM_PARAMS: BloomParams = { strength: 0.3, nearWeight: 0.
  */
 const BLOOM_THRESHOLD = 0.3;
 
+/**
+ * 运行期调试/测量用覆盖（默认值 = 正式行为，不改参数时与旧版完全一致）。
+ *
+ * 只为 task-29（终点机位双槽帧）做 A/B 归因/试验用；正常游玩不会设置这些全局。
+ * - `__vbspBloomDiv`：光晕缓冲分辨率除数（默认 2；实测 GPU 填充是双槽帧主因，可试 4）。
+ * - `__vbspBloomCadence`：强制光效层重画间隔（默认按帧预算等级自动：2 = 隔帧，降级档 4）。
+ * - `__vbspBloomBudgetCadence = false`：关闭「按 `__vbspBudgetLevel` 自动降级 cadence」
+ *   （A/B 用，强制回到默认的隔帧节奏）。
+ * - `__vbspBloomSkipDepth`：跳过光效层的深度预渲（仅测量用：相机静止时深度沿用上一帧）。
+ */
+const globalScope = globalThis as Record<string, unknown>;
+
+function envPositiveNumber(name: string, fallback: number): number {
+  const value = globalScope[name];
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fallback;
+  return value;
+}
+
+function envFlag(name: string): boolean {
+  return globalScope[name] === true;
+}
+
+/** 显式 `= false` 时返回 true（供「默认开启、可关」的 A/B 开关用）。 */
+function envDisabled(name: string): boolean {
+  return globalScope[name] === false;
+}
+
+/**
+ * 帧预算控制器（task-33 方案 C1，`render-session.ts` 每帧写入）当前降级等级：
+ * 0=不降级，1=bloom 光晕降频，2=再叠加水面镜面降频。
+ *
+ * 只读；res-session 是唯一写入方。缺失/非法值按 0 处理（控制器未加载时保持默认画质）。
+ */
+function budgetLevel(): number {
+  const level = globalScope['__vbspBudgetLevel'];
+  if (typeof level !== 'number' || !Number.isFinite(level)) return 0;
+  return Math.max(0, Math.min(2, Math.floor(level)));
+}
+
 const VERTEX_SHADER = /* glsl */ `
 varying vec2 vUv;
 void main() {
@@ -132,6 +171,8 @@ export class BloomPostFx {
   private farScratch: THREE.WebGLRenderTarget;
   private width = 0;
   private height = 0;
+  /** 已应用的光晕分辨率除数（`__vbspBloomDiv` 覆盖时用于触发重建）。 */
+  private appliedGlowDiv = 2;
   private params: BloomParams;
   /** 深度预渲用的「只写深度」材质（光效层需要墙体深度才能被遮挡）。 */
   private readonly depthOnlyMaterial = new THREE.MeshBasicMaterial({
@@ -152,6 +193,9 @@ export class BloomPostFx {
    * 光晕是低频信号，160Hz 更新已经看不出差别；但这条链在视距 18000 时是 bloom 的主要
    * 开销（深度代理 1 draw + 光效层 80~140 draw + CPU 提交 ~0.7ms）。隔帧后平均省一半，
    * 观感差异只在快速移动时的一帧延迟（`.tmp` 下同机位 A/B 截图逐像素一致）。
+   *
+   * 帧预算控制器（task-33 C1）升到 1 级时改为每 4 帧一次（见 `renderGlow` 注释），A/B
+   * 开关 `__vbspBloomBudgetCadence=false`。
    */
   private glowTick = 0;
 
@@ -239,14 +283,15 @@ export class BloomPostFx {
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     const w = Math.max(1, Math.floor(size.x));
     const h = Math.max(1, Math.floor(size.y));
-    if (w === this.width && h === this.height) return;
+    const glowDiv = Math.max(1, Math.round(envPositiveNumber('__vbspBloomDiv', 2)));
+    if (w === this.width && h === this.height && glowDiv === this.appliedGlowDiv) return;
     this.width = w;
     this.height = h;
-    // 光晕是低频信号，用半个分辨率（远处一层再降一半，两级模糊叠加）。
-    // 注意别为了省 GPU 降得更低：实测分辨率提到 1/16 时整帧 CPU 时间几乎不变
-    // （`.tmp/pcf/PIPELINE_18000.md` §2），说明这条链是 CPU 提交瓶颈，降分辨率只伤清晰度。
-    const glowDiv = 2;
-    const farDiv = 4;
+    this.appliedGlowDiv = glowDiv;
+    // 光晕是低频信号，默认用半个分辨率（远处一层再降一半，两级模糊叠加）。
+    // 终点机位实测双槽帧是 **GPU 填充**瓶颈（136 draw 的光效层 + 深度代理），降分辨率
+    // 直接省填充；模糊半径按分辨率缩放，保持屏幕空间光晕范围不变（见 `blur()`）。
+    const farDiv = glowDiv * 2;
     this.glowTarget.setSize(Math.max(1, w / glowDiv), Math.max(1, h / glowDiv));
     this.nearTarget.setSize(Math.max(1, w / glowDiv), Math.max(1, h / glowDiv));
     this.nearScratch.setSize(Math.max(1, w / glowDiv), Math.max(1, h / glowDiv));
@@ -264,7 +309,19 @@ export class BloomPostFx {
   renderGlow(scene: THREE.Scene, camera: THREE.Camera, glowMeshes: readonly THREE.Object3D[] = []): void {
     if (!this.enabled) return;
     // 隔帧：奇数帧直接复用上一帧画好的光效缓冲（见 glowTick 注释）。
-    if ((this.glowTick++ & 1) === 1) return;
+    //
+    // task-33 方案 C1 降级点①（本文件）：帧预算控制器升到 level>=1 时，把光效层从
+    // 「隔帧（2）」降到「每 4 帧一次」；`overlay()` 仍每帧执行（只复用更旧的光晕缓冲）。
+    // 依据（`.tmp/perf/frame_budget` 方案 L1，唯一有同构建 A/B 证据的一级）：
+    // bloom 全关时 6.2ms 双槽帧占比 slow6 77.9%→53.3%、约省 0.35ms/帧；降到 1/4 是
+    // 「保留光晕、只牺牲快速移动时的更新率」的折中。A/B：`__vbspBloomBudgetCadence=false`
+    // 关掉按等级降级；`__vbspBloomCadence` 数值仍可强制指定（仅测量用）。
+    const budgetCadence = envDisabled('__vbspBloomBudgetCadence')
+      ? 2
+      : budgetLevel() >= 1 ? 4 : 2;
+    const cadence = Math.max(1, Math.round(envPositiveNumber('__vbspBloomCadence', budgetCadence)));
+    if (this.glowTick++ % cadence !== 0) return;
+    const skipDepth = envFlag('__vbspBloomSkipDepth');
     const background = scene.background;
     const fog = scene.fog;
     this.prevMask.mask = camera.layers.mask;
@@ -279,9 +336,12 @@ export class BloomPostFx {
     camera.layers.mask = 0xffffffff;
     this.renderer.setRenderTarget(this.glowTarget);
     this.renderer.autoClear = true;
-    this.renderer.clear(true, true, false);
-    if (this.depthProxyMesh) {
+    // 跳过深度预渲时必须保留上一帧深度：相机静止时深度内容仍然有效。
+    this.renderer.clear(true, !skipDepth, false);
+    if (!skipDepth && this.depthProxyMesh) {
       this.renderer.render(this.prepassScene, camera);
+    } else if (skipDepth) {
+      // 测量路径：跳过整张地图的深度预渲，光效层直接吃上一帧留下的深度。
     } else {
       const hidden: THREE.Object3D[] = [];
       for (const obj of glowMeshes) {
@@ -336,13 +396,15 @@ export class BloomPostFx {
   }
 
   private blur(target: THREE.WebGLRenderTarget): void {
+    // 步长按分辨率除数缩放：div 越大同样像素数的模糊在屏幕空间越宽，乘 2/div 保持光晕半径。
+    const stepScale = 2 / Math.max(1, this.appliedGlowDiv);
     (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = target.texture;
-    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(1 / target.width, 0);
+    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set((1 / target.width) * stepScale, 0);
     this.baseQuad.material = this.blurMaterial;
     this.renderer.setRenderTarget(this.nearScratch);
     this.renderer.render(this.baseScene, this.quadCamera);
     (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = this.nearScratch.texture;
-    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(0, 1 / target.height);
+    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(0, (1 / target.height) * stepScale);
     this.renderer.setRenderTarget(target);
     this.renderer.render(this.baseScene, this.quadCamera);
   }

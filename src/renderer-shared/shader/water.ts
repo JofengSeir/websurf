@@ -662,6 +662,31 @@ function cullBeneathMaterials(camera: THREE.Camera): void {
   }
 }
 
+/**
+ * 镜面 RT 的降频计数（task-33 C1 降级点②）。只在 `renderWaterFramePasses` 里有水且相机
+ * 真的动过时推进；每 `cadence` 帧渲一次镜面。
+ */
+let mirrorFrameCounter = 0;
+
+/**
+ * 当前镜面 RT 的重渲间隔（帧）。默认 1 = 每帧（保持 increment 的既有行为）。
+ *
+ * 帧预算控制器（`render-session.ts` task-33 C1）升到 2 级时改为 3（每 3 帧一次）；
+ * A/B 开关 `__vbspWaterMirrorBudget=false` 关闭该降级，`__vbspWaterMirrorCadence` 强制数值。
+ */
+function mirrorCadence(): number {
+  const forced = (g as { __vbspWaterMirrorCadence?: number }).__vbspWaterMirrorCadence;
+  if (typeof forced === 'number' && Number.isFinite(forced) && forced > 0) {
+    return Math.max(1, Math.round(forced));
+  }
+  const budgetOn = (g as { __vbspWaterMirrorBudget?: boolean }).__vbspWaterMirrorBudget !== false;
+  const level = (g as { __vbspBudgetLevel?: number }).__vbspBudgetLevel;
+  const budgetLevel = typeof level === 'number' && Number.isFinite(level)
+    ? Math.max(0, Math.min(2, Math.floor(level)))
+    : 0;
+  return budgetOn && budgetLevel >= 2 ? 3 : 1;
+}
+
 export function renderWaterFramePasses(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
@@ -691,12 +716,25 @@ export function renderWaterFramePasses(
   // 镜面 RT 同步去嵌套（T-650 v4：与折射同因——嵌套 render 污染主渲染状态且随视角排序变化）。
   // 只渲「这一帧真的在画面里」的水面层：surf_666 有 5 层水，每层一趟整场景，
   // 全渲是 3.4ms/帧（俯仰扫视掉到 230fps 的主因）；看不见的层保留上一帧 RT。
+  //
+  // task-33 方案 C1 降级点②（本文件）：帧预算控制器升到 level >= 2 时，镜面 RT 从
+  // 「每帧」降到「每 3 帧一次」（`__vbspWaterMirrorCadence` 可强制覆盖）。
+  // 依据（`.tmp/perf/frame_budget` 方案 L2）：终点机位收益≈0（水面大部分在视锥外），
+  // 但**俯视水面机位**同构建 A/B 的双槽帧 97.7%→55.1%；因此只在控制器升到 2 级时启用，
+  // 不默认开、不在 1 级开。代价是移动时反射最多滞后 2 帧（静止/慢走几乎不可见）。
+  // A/B：`__vbspWaterMirrorBudget = false` 关掉按等级降频；`__vbspWaterMirrorCadence = 1`
+  // 强制回每帧（仅测量用）。
   if (reflOnUniform.value > 0.5) {
-    for (const p of mirrorPlanes.values()) {
-      if (p.done) continue;
-      if (visibleHeights && !visibleHeights.has(Math.round(p.height * 100) / 100)) continue;
-      p.done = true;
-      renderMirrorPlane(renderer, scene, camera, p);
+    mirrorFrameCounter++;
+    const cadence = mirrorCadence();
+    const shouldRenderMirror = cadence <= 1 || mirrorFrameCounter % cadence === 0;
+    if (shouldRenderMirror) {
+      for (const p of mirrorPlanes.values()) {
+        if (p.done) continue;
+        if (visibleHeights && !visibleHeights.has(Math.round(p.height * 100) / 100)) continue;
+        p.done = true;
+        renderMirrorPlane(renderer, scene, camera, p);
+      }
     }
   }
 }
