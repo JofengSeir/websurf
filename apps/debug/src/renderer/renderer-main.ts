@@ -75,14 +75,21 @@ import { LaserBeams, collectLaserBeams } from '../../../../src/renderer-shared/s
  */
 
 /**
- * 准星射线检测间距（帧）：`planeInspectCounter` 计满该值才调一次 `inspectPlane` 并清零。
+ * 准星射线检测间距（帧）：`planeInspectCounter` 计满 `planeInspectInterval` 才调一次
+ * `inspectPlane` 并清零。
  *
  * 为什么从 6 放宽到 12：这条射线要对**合并后的整块几何**逐三角形求交，实测单次 2.5 ms
  * （cand_c 机位、78 个可见块、最大块 1.5 万三角），每 6 帧一次的节奏在 3.2 ms 的基线上
  * 就是可见的周期性掉帧（回放实测 p90 9.36→6.28 ms、同段帧数 +22%）。准星读数本身是
  * 给人看的，12 帧 ≈ 200 ms 更新一次足够。
+ *
+ * 为什么再改成自适应：开阔视野（视距 32000、大合并块）下单次求交可到 6~19 ms（2026-11-16
+ * 实测该机位每 12 帧一次、p99 18.7 ms），固定 12 帧仍会周期性掉 3~6 个 rAF 槽。改成
+ * 「按上次耗时翻倍/减半」的区间调度（12~96 帧）后，重机位自动降到 96 帧一次（≈300 ms
+ * 刷新，仍在可读范围），轻机位恢复 12 帧；读数本身是调试信息，不影响画面。
  */
-const PLANE_INSPECT_INTERVAL = 12;
+const PLANE_INSPECT_INTERVAL_MIN = 12;
+const PLANE_INSPECT_INTERVAL_MAX = 96;
 
 /** HUD 剔除统计（`emitCullStats` 组装，交给 app.ts 注册的 `onCullStats`）。
  * `visible/total/cullDist` 与 `pvs.near/far/pvsHidden` 取自共享 `RenderSession.stats()`——判定
@@ -191,6 +198,8 @@ export class RendererMain {
 
   private planeInfoEnabled = false;
   private planeInspectCounter = 0;
+  /** 当前自适应间距（帧）：按 `inspectPlane` 实测耗时在 MIN~MAX 之间翻倍/减半。 */
+  private planeInspectInterval = PLANE_INSPECT_INTERVAL_MIN;
   private lastPlaneInfo: PlaneInfo | null = null;
 
   /** 运行期配置（`init` 赋值；`applyConfigPatch` 就地改写其子段）。 */
@@ -715,12 +724,20 @@ export class RendererMain {
       }
     }
 
-    // ④ 准星射线：计数器满 PLANE_INSPECT_INTERVAL 才检测一次；开关关闭时清掉上次结果
+    // ④ 准星射线：计数器满自适应间距才检测一次；开关关闭时清掉上次结果
     if (this.planeInfoEnabled) {
       this.planeInspectCounter++;
-      if (this.planeInspectCounter >= PLANE_INSPECT_INTERVAL) {
+      if (this.planeInspectCounter >= this.planeInspectInterval) {
         this.planeInspectCounter = 0;
+        const t0 = performance.now();
         this.inspectPlane();
+        const cost = performance.now() - t0;
+        // 单次超过 4 ms 就让下一轮间隔翻倍（上限 96 帧），低于 1 ms 再减半（下限 12 帧）。
+        if (cost > 4 && this.planeInspectInterval < PLANE_INSPECT_INTERVAL_MAX) {
+          this.planeInspectInterval = Math.min(PLANE_INSPECT_INTERVAL_MAX, this.planeInspectInterval * 2);
+        } else if (cost < 1 && this.planeInspectInterval > PLANE_INSPECT_INTERVAL_MIN) {
+          this.planeInspectInterval = Math.max(PLANE_INSPECT_INTERVAL_MIN, Math.floor(this.planeInspectInterval / 2));
+        }
       }
     } else if (this.lastPlaneInfo !== null) {
       this.lastPlaneInfo = null;
