@@ -524,6 +524,28 @@ export const BaseEntityClass: EntityClass = {
     { name: 'gravity', type: 'float', defaultValue: 1 },
     { name: 'health', type: 'int', defaultValue: 0 },
     { name: 'StartDisabled', type: 'bool', defaultValue: false },
+    {
+      // `CBaseEntity` datamap：`DEFINE_KEYFIELD( m_vecBaseVelocity, FIELD_VECTOR, "basevelocity" )`
+      // （baseentity.cpp:2107）。地图脚本用 `AddOutput basevelocity 0 0 750` 给玩家一次
+      // 竖直冲量——surf_hades2 的三个 `trigger_multiple` 就在 `OnEndTouch` 里这么做，
+      // 用来抬高起跳高度。
+      //
+      // SDK 语义（player_command.cpp:115-120）：`m_vecBaseVelocity` 若没有
+      // `FL_BASEVELOCITY` 标记，会在下一帧 `CheckMovingGround()` 里经
+      // `ApplyAbsVelocityImpulse((1 + frametime/2) * base)` 一次性转成真实速度后清零，
+      // 即「一次性冲量」。trigger_push 常规路径才会打 FL_BASEVELOCITY 做持续基准速度，
+      // 那条路已由 `classes/triggers.ts` 的 `SetBaseVelocity` 单独实现。
+      name: 'basevelocity',
+      type: 'vec3',
+      apply: (entity, raw) => {
+        // 当前只有玩家有真实速度积分；其它实体暂不模拟速度，仅记录键值（不报错）。
+        if (!entity.isPlayer()) return;
+        // 键值在 entities lump 里是 Source Z-up，引擎物理是 Y-up（见 map-data.ts）。
+        const engine = bspVec3ToYup(parseVec3(raw));
+        // 冲量系数 (1+frametime/2) 在 64~1000Hz 下是 1.001~1.008，可忽略。
+        entity.runtime.host.addPlayerVelocity(engine);
+      },
+    },
   ],
   inputs: [
     { name: 'SetTeam', type: FIELD_INTEGER, key: 'teamnum' },
