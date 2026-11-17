@@ -6,7 +6,8 @@
 //! - 上游：`websurf-wasm-core` 的 `vbsp`（BSP 解析）、`bsp_to_gltf_core`（GLB 装配）、
 //!   `model_integrator`（模型 / 静态道具集成）、`pakfile_models`（PAKFILE 条目索引与 VMT 解析）、
 //!   `texture_utils`（VTF 解码）、`mosaic`（图集编解码与 `.mtz` 解压）、`vhv`（prop 逐顶点光照）。
-//!   物理侧 `websurf_phys::phys::PhysWorld` 由本文件 `pub use` 原样再导出，本文件不加包装。
+//!   物理侧 `PhysWorld` 经共享 `websurf-wasm-bindings`（feature `phys`）再导出；本文件仍直接用
+//!   `websurf_phys::phys::hull_bevels`（debug-tools 的 .phy 补面导出），故保留该直接依赖。
 //! - 下游：`apps/debug/src/main-wasm.ts` 取 `initSync` / `mosaic_decode` / `decompress_mtz`，
 //!   在主线程建一份与 Worker 互不影响、相互独立的 wasm 实例；`apps/debug/src/app.ts` 取
 //!   `BspProcessor` / `decompress_mtz`；`apps/debug/src/renderer/renderer-main.ts` 经
@@ -42,13 +43,12 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::Cursor;
 use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 
 // 共享解析层：仓库根 `src/wasm-core/`（crate `websurf-wasm-core`）
-use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, phyfile, texture_utils, vbsp};
+use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, phyfile, vbsp};
 use model_integrator::{ExportOptions, InMemoryModel, InMemoryResources, ModelIntegrator};
 
 // 导出编排（PAKFILE 模型 / 材质 / 光源 / 碰撞体派生）：仓库根 `src/wasm-core/render_bundle.rs`
@@ -59,7 +59,9 @@ use websurf_wasm_core::render_bundle::{
 };
 
 // 共享物理层：仓库根 `src/`（crate `websurf-phys`）；整类型原样再导出，本文件不另加包装
-pub use websurf_phys::phys::PhysWorld;
+// 三端共享 wasm-bindgen 导出层（P4）：core 四个无状态纹理导出 + phys 的 PhysWorld 再导出。
+// 本文件只做 `pub use`，实现都在 `src/wasm-bindings/src/{texture,phys}.rs`。
+pub use websurf_wasm_bindings::*;
 
 // ---------------------------------------------------------------------------
 // 错误处理辅助：Rust 错误 → JsValue
@@ -3091,53 +3093,10 @@ pub fn export_visleaf_pvs(data: &[u8]) -> Result<JsValue, JsValue> {
 }
 
 // ---------------------------------------------------------------------------
-// VTF 解码
+// 纹理与图集导出已迁至共享 `websurf-wasm-bindings`（feature `core`）：
+// decode_vtf_to_png / mosaic_encode / mosaic_decode / decompress_mtz 由本文件顶部的
+// `pub use websurf_wasm_bindings::*;` 原样再导出，错误文本与迁移前逐字一致。
 // ---------------------------------------------------------------------------
-
-/// 将 VTF 字节数组解码为 PNG 字节数组。
-///
-/// 默认解码高分辨率第一帧。
-#[wasm_bindgen]
-pub fn decode_vtf_to_png(data: &[u8]) -> Result<Vec<u8>, JsValue> {
-    let vtf = texture_utils::from_bytes(data).map_err(|e| to_js_err(e, "VTF 解析失败"))?;
-    let image = vtf
-        .highres_image
-        .decode(0)
-        .map_err(|e| to_js_err(e, "VTF 图像解码失败"))?;
-
-    let mut output: Vec<u8> = Vec::new();
-    image
-        .write_to(&mut Cursor::new(&mut output), image::ImageFormat::Png)
-        .map_err(|e| to_js_err(e, "PNG 编码失败"))?;
-
-    Ok(output)
-}
-
-// ---------------------------------------------------------------------------
-// 纹理画质切换（mosaic 共享模块：压缩/还原低清纹理）
-// ---------------------------------------------------------------------------
-
-/// PNG 字节 → mosaic v4 纹理字节码（压缩）。
-#[wasm_bindgen]
-pub fn mosaic_encode(png: &[u8], name: &str) -> Result<String, JsValue> {
-    websurf_wasm_core::mosaic::encode::img_to_code(png, name)
-        .map_err(|e| JsValue::from_str(&format!("mosaic_encode: {e}")))
-}
-
-/// mosaic v4 字节码 → PNG 字节（低清还原，最近邻放大 ×scale，默认 ×8）。
-#[wasm_bindgen]
-pub fn mosaic_decode(code: &str, scale: u32) -> Result<Vec<u8>, JsValue> {
-    websurf_wasm_core::mosaic::decode::code_to_img(code, scale)
-        .map_err(|e| JsValue::from_str(&format!("mosaic_decode: {e}")))
-}
-
-/// 解压默认配置纹理包（textures.mtz，MTZ5 容器）→ textures.json 文本。
-/// 纹理键 = `materials/xxx`（与 basetexture 一致），供缺失纹理比对。
-#[wasm_bindgen]
-pub fn decompress_mtz(bytes: &[u8]) -> Result<String, JsValue> {
-    websurf_wasm_core::mosaic::mtz::decompress_mtz(bytes)
-        .map_err(|e| JsValue::from_str(&format!("decompress_mtz: {e}")))
-}
 
 // ---------------------------------------------------------------------------
 // 初始化入口

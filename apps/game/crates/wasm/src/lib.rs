@@ -19,7 +19,6 @@
 //! 由三个工程共用同一份源码，本工程内不存在隔离副本。
 
 use std::cell::RefCell;
-use std::io::Cursor;
 use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
@@ -35,10 +34,11 @@ use websurf_wasm_core::render_bundle::{
 
 // 共享解析层：仓库根 src/wasm-core（Cargo 包名 websurf-wasm-core）。
 // 注意 `model_integrator` 亦经此处引入 crate 根，上面的 `use model_integrator::{…}` 走同名条目。
-use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, phyfile, texture_utils, vbsp};
+use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, phyfile, vbsp};
 
-// 共享物理层：仓库根 src（Cargo 包名 websurf-phys）；转出 PhysWorld 供 JS 直接构造物理世界。
-pub use websurf_phys::phys::PhysWorld;
+// 三端共享 wasm-bindgen 导出层（P4）：core 四个无状态纹理导出 + phys 的 PhysWorld 再导出。
+// 本工程不再直接依赖 websurf-phys；实现都在 `src/wasm-bindings/src/{texture,phys}.rs`。
+pub use websurf_wasm_bindings::*;
 
 // ---------------------------------------------------------------------------
 // 错误处理辅助
@@ -49,49 +49,11 @@ fn to_js_err<E: std::fmt::Debug>(e: E, ctx: &str) -> JsValue {
     JsValue::from_str(&format!("{}: {:?}", ctx, e))
 }
 
-/// VTF 字节 → PNG 字节：取最高分辨率图的第 0 帧重新编码（T-416 起导出，供 TS 天空盒解码复用）。
-/// 内部 PAKFILE 材质解析与 TS 侧天空盒共用同一实现。
-#[wasm_bindgen] pub fn decode_vtf_to_png(data: &[u8]) -> Result<Vec<u8>, JsValue> {
-    let vtf = texture_utils::from_bytes(data).map_err(|e| to_js_err(e, "VTF 解析失败"))?;
-    let image = vtf
-        .highres_image
-        .decode(0)
-        .map_err(|e| to_js_err(e, "VTF 图像解码失败"))?;
-
-    let mut output: Vec<u8> = Vec::new();
-    image
-        .write_to(&mut Cursor::new(&mut output), image::ImageFormat::Png)
-        .map_err(|e| to_js_err(e, "PNG 编码失败"))?;
-
-    Ok(output)
-}
-
 // ---------------------------------------------------------------------------
-// 纹理画质切换：转发共享解析层 src/wasm-core/mosaic 的马赛克编解码与 MTZ 解压
+// 纹理与图集导出已迁至共享 `websurf-wasm-bindings`（feature `core`）：
+// decode_vtf_to_png / mosaic_encode / mosaic_decode / decompress_mtz 由本文件顶部的
+// `pub use websurf_wasm_bindings::*;` 原样再导出，错误文本与迁移前逐字一致。
 // ---------------------------------------------------------------------------
-
-/// PNG 字节 → `#mosaic v4` 字节码文本；错误文本前缀 `mosaic_encode`。
-#[wasm_bindgen]
-pub fn mosaic_encode(png: &[u8], name: &str) -> Result<String, JsValue> {
-    websurf_wasm_core::mosaic::encode::img_to_code(png, name)
-        .map_err(|e| JsValue::from_str(&format!("mosaic_encode: {e}")))
-}
-
-/// `#mosaic v4` 字节码 → PNG 字节；`scale` 是最近邻放大倍数，错误文本前缀 `mosaic_decode`。
-#[wasm_bindgen]
-pub fn mosaic_decode(code: &str, scale: u32) -> Result<Vec<u8>, JsValue> {
-    websurf_wasm_core::mosaic::decode::code_to_img(code, scale)
-        .map_err(|e| JsValue::from_str(&format!("mosaic_decode: {e}")))
-}
-
-/// MTZ 容器字节（魔数 `MTZ6`，兼容读 `MTZ5`）→ JSON 对象文本：`键 → "#mosaic v4 字节码"`。
-/// 键取条目 `B[名字:宽x高]` 的名段里 `|` 之前的一段（形如 `materials/buildings/antn00`）；
-/// 错误文本前缀 `decompress_mtz`，本工程由 `apps/game/src/app.ts` 注入 `buildWorldBundle`。
-#[wasm_bindgen]
-pub fn decompress_mtz(bytes: &[u8]) -> Result<String, JsValue> {
-    websurf_wasm_core::mosaic::mtz::decompress_mtz(bytes)
-        .map_err(|e| JsValue::from_str(&format!("decompress_mtz: {e}")))
-}
 
 
 

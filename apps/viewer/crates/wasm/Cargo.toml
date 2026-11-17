@@ -17,6 +17,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # 共享解析层：仓库根 src/wasm-core/（crate websurf-wasm-core），解析与 GLB 装配都由它完成
 websurf-wasm-core = { path = "../../../../src/wasm-core" }
+# 三端共享 wasm-bindgen 导出层（P4）：viewer 只开 core（VTF/mosaic/MTZ 无状态导出），
+# 无 phys（本工程不含物理绑定）。
+websurf-wasm-bindings = { path = "../../../../src/wasm-bindings", features = ["core"] }
 
 # WASM 绑定：本工程锁到 wasm-bindgen 0.2.128（apps/viewer/Cargo.lock），
 # wasm-bindgen-cli 由 src/scripts/install-wasm-bindgen.cmd 按同一版本安装。

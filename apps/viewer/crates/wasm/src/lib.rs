@@ -23,13 +23,12 @@
 //! 取走之后再调那两个方法一律得到错误，而不是旧值。
 
 use std::cell::RefCell;
-use std::io::Cursor;
 use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 
 // 解析层来自仓库根的共享 crate websurf-wasm-core（路径依赖 ../../../../src/wasm-core）
-use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, texture_utils, vbsp};
+use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, vbsp};
 use model_integrator::{ExportOptions, InMemoryResources, ModelIntegrator};
 
 // 导出编排（PAKFILE 模型 / 材质 / 光源）：仓库根 `src/wasm-core/render_bundle.rs`
@@ -37,6 +36,10 @@ use websurf_wasm_core::render_bundle::{
     build_vmt_stem_index, collect_light_entities, collect_pakfile_models_bundle,
     resolve_pakfile_materials, PakfileModels, VhvLog,
 };
+
+// 三端共享 wasm-bindgen 导出层（P4）：viewer 只开 `core`（四个无状态纹理导出），
+// 无 phys（本工程不导出物理/碰撞）。实现见 `src/wasm-bindings/src/texture.rs`。
+pub use websurf_wasm_bindings::*;
 
 // ---------------------------------------------------------------------------
 // 错误翻译：把 Rust 侧错误压成带上下文的 JS 字符串
@@ -49,25 +52,10 @@ fn to_js_err<E: std::fmt::Debug>(e: E, ctx: &str) -> JsValue {
 }
 
 // ---------------------------------------------------------------------------
-// 纹理解码导出：VTF 字节 → PNG 字节
+// 纹理解码与图集/MTZ 导出已迁至共享 `websurf-wasm-bindings`（feature `core`）：
+// decode_vtf_to_png / mosaic_encode / mosaic_decode / decompress_mtz 由本文件顶部的
+// `pub use websurf_wasm_bindings::*;` 原样再导出。
 // ---------------------------------------------------------------------------
-
-/// 单个 VTF 字节 → PNG 字节（导出给 TS 侧天空盒解码；内部材质解析同样调用它）。
-/// 只解最高分辨率图的第 0 帧；三条失败链各自带上下文：VTF 解析 / 图像解码 / PNG 编码。
-#[wasm_bindgen] pub fn decode_vtf_to_png(data: &[u8]) -> Result<Vec<u8>, JsValue> {
-    let vtf = texture_utils::from_bytes(data).map_err(|e| to_js_err(e, "VTF 解析失败"))?;
-    let image = vtf
-        .highres_image
-        .decode(0)
-        .map_err(|e| to_js_err(e, "VTF 图像解码失败"))?;
-
-    let mut output: Vec<u8> = Vec::new();
-    image
-        .write_to(&mut Cursor::new(&mut output), image::ImageFormat::Png)
-        .map_err(|e| to_js_err(e, "PNG 编码失败"))?;
-
-    Ok(output)
-}
 
 // ---------------------------------------------------------------------------
 // 元数据与解析入口
@@ -575,15 +563,7 @@ impl BspProcessor {
     }
 }
 
-/// MTZ 容器字节（魔数 `MTZ6`，兼容读 `MTZ5`）→ JSON 对象文本：`键 → "#mosaic v4 字节码"`。
-/// 键取条目 `B[名字:宽x高]` 的名段里 `|` 之前的一段（形如 `materials/buildings/antn00`）；
-/// 错误文本前缀 `decompress_mtz`，本工程由 `apps/viewer/src/core/bsp.ts` 构建 defaults_json 用
-/// （2026-10-04 起，与 game/debug 同款）。
-#[wasm_bindgen]
-pub fn decompress_mtz(bytes: &[u8]) -> Result<String, JsValue> {
-    websurf_wasm_core::mosaic::mtz::decompress_mtz(bytes)
-        .map_err(|e| JsValue::from_str(&format!("decompress_mtz: {e}")))
-}
+
 
 
 // ---------------------------------------------------------------------------
@@ -819,23 +799,7 @@ impl BspProcessor {
     }
 }
 
-/// mosaic v4 字节码 → PNG 字节（低清还原，最近邻放大 ×scale，默认 ×8）。
-/// T-454 P5：本工程导出面此前缺 `mosaic_decode`（debug / game 都有），补齐后三端共用同一条解码路径
-/// （画质档「低清」在图集缺失时的兜底解码；纯 Rust 转发，wasm-bindgen 只出现在本文件的导出层）。
-#[wasm_bindgen]
-pub fn mosaic_decode(code: &str, scale: u32) -> Result<Vec<u8>, JsValue> {
-    websurf_wasm_core::mosaic::decode::code_to_img(code, scale)
-        .map_err(|e| JsValue::from_str(&format!("mosaic_decode: {e}")))
-}
 
-/// PNG 字节 → `#mosaic v4` 字节码文本；错误文本前缀 `mosaic_encode`。
-/// T-454 P5-3：与 `mosaic_decode` 成对补齐（debug / game 都有这一对），viewer 侧供画质档产出/回归比对用；
-/// 纯 Rust 转发，wasm-bindgen 只出现在本导出层。
-#[wasm_bindgen]
-pub fn mosaic_encode(png: &[u8], name: &str) -> Result<String, JsValue> {
-    websurf_wasm_core::mosaic::encode::img_to_code(png, name)
-        .map_err(|e| JsValue::from_str(&format!("mosaic_encode: {e}")))
-}
 
 /// 生成纹理画质 manifest：`{ 纹理名(小写 VMT 路径): mosaic v4 字节码 }` JSON。
 ///

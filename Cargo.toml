@@ -1,6 +1,7 @@
 # WebSurf — 仓库根 Cargo workspace（共享层）
 #
-# 本 workspace 只收共享层 crate：websurf-phys（src/）与 websurf-wasm-core（src/wasm-core）。
+# 本 workspace 只收共享层 crate：websurf-phys（src/）、websurf-wasm-core（src/wasm-core）
+# 与 websurf-wasm-bindings（src/wasm-bindings，P4 三端共享 wasm-bindgen 导出层）。
 #
 # ── 为什么三个工程的 wasm crate 不在本 workspace ─────────────────────
 # debug 与 game 的 crates/wasm 同名：apps/debug/crates/wasm/Cargo.toml 与
@@ -23,8 +24,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "src",            # websurf-phys：共享物理系统
-    "src/wasm-core",  # websurf-wasm-core：共享 BSP/GLB/模型解析导出
+    "src",                  # websurf-phys：共享物理系统
+    "src/wasm-core",        # websurf-wasm-core：共享 BSP/GLB/模型解析导出
+    "src/wasm-bindings",    # websurf-wasm-bindings：三端共享 wasm-bindgen 导出层（P4，按 features）
 ]
 
 [patch.crates-io]

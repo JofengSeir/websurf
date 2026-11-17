@@ -21,8 +21,10 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# 共享物理系统：仓库根 src/（crate websurf-phys），phys::PhysWorld 由 apps/game/crates/wasm/src/lib.rs 原样再导出
-websurf-phys = { path = "../../../../src" }
+# 三端共享 wasm-bindgen 导出层（P4）：本工程不再直接依赖 websurf-phys ——
+# PhysWorld 由本共享 crate 的 `phys` feature 再导出，与 debug/viewer 走同一份导出实现。
+# core = VTF/mosaic/MTZ 无状态导出；phys = PhysWorld 再导出。
+websurf-wasm-bindings = { path = "../../../../src/wasm-bindings", features = ["core", "phys"] }
 # 共享解析层：仓库根 src/wasm-core/（crate websurf-wasm-core），上列解析与导出模块均由它提供
 websurf-wasm-core = { path = "../../../../src/wasm-core" }
 

@@ -1,11 +1,14 @@
 /**
  * 依赖/导出面一致性门禁（task-57 G4）。
  *
- * 背景：三端各自独立 Cargo workspace（debug/game 依赖共享 `websurf-phys` 路径 crate，viewer 只依赖
+ * 背景：三端各自独立 Cargo workspace（物理内核 `websurf-phys` 在共享 `src/`，viewer 只依赖
  * `websurf-wasm-core`）；wasm 导出面因 feature 差异天然不同（debug 94 / game 80 / viewer 27）。
  * 没有机械门禁时，这些差异会静默漂移。本脚本把「允许的差异」写成显式白名单：
- *   - 物理内核：debug/game 的 crates/wasm/Cargo.toml 必须 path 依赖同一个 `../../../../src`；
- *     viewer 必须不含 websurf-phys；Cargo.lock 中 websurf-phys 只出现在 debug/game；
+ *   - 物理内核：debug/game 的 crates/wasm/Cargo.toml 必须把 `../../../../src` 接进依赖图——
+ *     直接 path 依赖 `websurf-phys`，或经共享 `src/wasm-bindings` crate 的 `phys` feature 间接依赖
+ *     （两条路都必须落回同一路径；P4 切片后 game 走后者）；
+ *     viewer 必须不含 websurf-phys 且不得启用 bindings 的 phys feature；Cargo.lock 中 websurf-phys
+ *     只出现在 debug/game；
  *   - 共同包版本：debug↔game 的共同包版本必须一致，只允许已登记的小版本差（3 个）；
  *   - 共享核心 crate：wasm-bindgen/serde/serde_json/js-sys 三端版本一致；
  *   - wasm 导出面：game ⊆ debug（game 独有必须为空）；debug 独有必须正好等于登记清单；
@@ -94,13 +97,25 @@ if (lockKeys.length === 0) {
     `debug/game 共同包 ${commonDG.length}，已登记版本差 ${allowedSeen.join(',') || '(none)'}；viewer 与 debug 版本差 ${viewerDiffCount}（INFO，独立 workspace）`);
 }
 
-// Cargo.toml 路径依赖（比 lock 更直接：确认是同一个 crate 路径）
+// Cargo.toml 路径依赖（比 lock 更直接：确认物理内核确实接进依赖图）
+// 两条合法路径：① app crate 直接 path 依赖 `../../../../src`；② 经共享
+// `src/wasm-bindings` 的 `phys` feature 间接依赖。两者都必须落回同一路径，且②还要求
+// bindings crate 自身把 `websurf-phys`（path=".."）接在 phys feature 上，避免断链。
+const BINDINGS_TOML = join(ROOT, 'src', 'wasm-bindings', 'Cargo.toml');
+const bindingsTomlText = existsSync(BINDINGS_TOML) ? readFileSync(BINDINGS_TOML, 'utf8') : '';
+const bindingsPhysDep = new RegExp(`${PHYS_PATH_DEP}\\s*=\\s*\\{[^}]*path\\s*=\\s*"\\.\\."`).test(bindingsTomlText);
+const bindingsPhysFeature = /^\s*phys\s*=\s*\[[^\]]*dep:websurf-phys/m.test(bindingsTomlText);
 for (const app of ['debug', 'game']) {
   const p = join(ROOT, 'apps', app, 'crates', 'wasm', 'Cargo.toml');
   if (!existsSync(p)) { fail(`apps/${app}/crates/wasm/Cargo.toml 不存在`); continue; }
   const text = readFileSync(p, 'utf8');
-  if (!new RegExp(`${PHYS_PATH_DEP}\\s*=\\s*\\{[^}]*path\\s*=\\s*"\\.\\./\\.\\./\\.\\./\\.\\./src"`).test(text)) {
-    fail(`apps/${app}/crates/wasm/Cargo.toml 未 path 依赖 ../../../../src（${PHYS_PATH_DEP}）`);
+  const direct = new RegExp(`${PHYS_PATH_DEP}\\s*=\\s*\\{[^}]*path\\s*=\\s*"\\.\\./\\.\\./\\.\\./\\.\\./src"`).test(text);
+  const viaBindings = /websurf-wasm-bindings\s*=\s*\{[^}]*path\s*=\s*"\.\.\/\.\.\/\.\.\/\.\.\/src\/wasm-bindings"[^}]*features\s*=\s*\[[^\]]*"phys"/s.test(text);
+  if (!direct && !viaBindings) {
+    fail(`apps/${app}/crates/wasm/Cargo.toml 既未 path 依赖 ../../../../src（${PHYS_PATH_DEP}），也未经 ../../../../src/wasm-bindings 的 phys feature 接入物理内核`);
+  }
+  if (viaBindings && !(bindingsPhysDep && bindingsPhysFeature)) {
+    fail(`src/wasm-bindings/Cargo.toml 未把 ${PHYS_PATH_DEP}（path=".."）接到 phys feature；apps/${app} 的间接依赖断链`);
   }
 }
 const viewerToml = join(ROOT, 'apps', 'viewer', 'crates', 'wasm', 'Cargo.toml');
@@ -109,6 +124,9 @@ if (existsSync(viewerToml)) {
   const tomlCode = readFileSync(viewerToml, 'utf8').replace(/#[^\n]*/g, '');
   if (new RegExp(`^\\s*${PHYS_PATH_DEP}\\s*=`, 'm').test(tomlCode)) {
     fail('apps/viewer/crates/wasm/Cargo.toml 依赖 websurf-phys（viewer 无物理是架构约定）');
+  }
+  if (/websurf-wasm-bindings\s*=\s*\{[^}]*features\s*=\s*\[[^\]]*"phys"/s.test(tomlCode)) {
+    fail('apps/viewer/crates/wasm/Cargo.toml 启用了 bindings 的 phys feature（viewer 无物理是架构约定）');
   }
 }
 

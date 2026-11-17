@@ -1970,6 +1970,16 @@ dependencies = [
  "serde_json",
  "vmdl",
  "wasm-bindgen",
+ "websurf-wasm-bindings",
+ "websurf-wasm-core",
+]
+
+[[package]]
+name = "websurf-wasm-bindings"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "wasm-bindgen",
  "websurf-wasm-core",
 ]
 
