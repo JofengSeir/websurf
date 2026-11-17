@@ -14,10 +14,8 @@
  */
 
 import { findParamDef, PARAM_DEFS, type ParamSource, type ParamState } from './param-defs.js';
+import { DEFAULT_HULL } from '../../../../src/ts-shared/phys/param-defaults.js';
 import type { PhysWorld } from '../../pkg/websurf_wasm.js';
-
-/** 默认碰撞箱体型（HU）：与 `src/phys/player.rs` 的 `DEFAULT_HULL_HALF_WIDTH` / `DEFAULT_HULL_STAND_HEIGHT` / `DEFAULT_HULL_DUCK_HEIGHT` 同值。 */
-const DEFAULT_HULL = { halfWidth: 16, standHeight: 72, duckHeight: 54 };
 
 /** 面板参数名 → Rust `set_params` 的 snake_case 键名（13 项）。
  *
@@ -44,9 +42,12 @@ export const PARAM_TO_RUST: Record<string, string> = {
   pushOutOnlyWhenSolid: 'push_out_only_when_solid',
 };
 
+/** 碰撞箱三围（可变副本；`DEFAULT_HULL` 是只读默认值）。 */
+export interface HullSize { halfWidth: number; standHeight: number; duckHeight: number }
+
 /** 碰撞箱面板状态（`getHullState` 的返回结构）。 */
 export interface HullState {
-  hull: typeof DEFAULT_HULL;
+  hull: HullSize;
   source: ParamSource;
   /** 当前三围是否与 `DEFAULT_HULL` 逐项相等。 */
   isDefault: boolean;
@@ -57,7 +58,7 @@ export class PhysicsParams {
   /** 覆盖表：参数名 → {值, 来源}；表内没有的项按 `PARAM_DEFS` 的默认值与 `mode-default` 上报。 */
   private readonly overrides = new Map<string, { value: number | boolean; source: ParamSource }>();
   /** 当前箱体三围（`setHull` / `resetHull` 写入，`getHullState` 读）。 */
-  private hull: typeof DEFAULT_HULL = { ...DEFAULT_HULL };
+  private hull: HullSize = { ...DEFAULT_HULL };
   /** 箱体来源（`setHull` 置 manual，`resetHull` 置 mode-default）。 */
   private hullSource: ParamSource = 'mode-default';
   /** 碰撞箱自动恢复开关（初值 true）。写路径是 `set-auto-restore-hull` 消息，读路径只进
@@ -126,7 +127,7 @@ export class PhysicsParams {
   }
 
   /** 设置碰撞箱三围（来源记 manual）并立即写 Rust。 */
-  setHull(hull: typeof DEFAULT_HULL): void {
+  setHull(hull: HullSize): void {
     this.hull = { ...hull };
     this.hullSource = 'manual';
     this.phys?.set_hull(hull.halfWidth, hull.standHeight, hull.duckHeight);

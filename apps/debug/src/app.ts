@@ -2330,8 +2330,12 @@ function initPhysicsPanel(): void {
 			const rangeEl = document.querySelector(`[data-param="${name}"]`) as HTMLInputElement | null;
 			if (rangeEl && Number.isFinite(value)) rangeEl.value = String(value);
 		}
-		// 发 Worker（权威 set_params；快照回传后镜像主线程实例）
-		if (Number.isFinite(value)) inputBridge?.sendSetPhysicsParam(name, value);
+		// 发 Worker（权威 set_params；快照回传后镜像主线程实例）。
+		// 注意布尔开关：`Number.isFinite(true/false)` 恒为 false——2026-11-18 前这里只放行数字，
+		// 面板上的「自动连跳 / 连跳限速 / 推开仅在嵌入时」三个开关点了不发消息、Worker 收不到。
+		if (typeof value === 'boolean' || Number.isFinite(value)) {
+			inputBridge?.sendSetPhysicsParam(name, value);
+		}
 	});
 
 	// 碰撞箱体型（缩放/逐项）

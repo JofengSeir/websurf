@@ -7,7 +7,13 @@
  * `{ type: 'config', section, patch }` 发往 Worker；Worker 侧由
  * `src/ts-shared/auth/worker-dispatch.ts` 的 `config` 分支接收（该分支只对 `physics` 与
  * `input` 两段做键名归一，其余段原样透传）。
+ *
+ * 默认值的唯一来源是 `src/ts-shared/phys/param-defaults.ts` 的 `PHYSICS_PARAM_DEFAULTS`：
+ * 面板（`physics/param-defs.ts`）、本文件的物理默认值、Worker 与主线程预测参数都从它取值，
+ * 不再各写一份字面量（2026-11-18 修「面板上有的都必须可调、写死的都是错的」）。
  */
+
+import { PHYSICS_PARAM_DEFAULTS } from '../../../src/ts-shared/phys/param-defaults.js';
 
 export interface PhysicsConfig {
   mode: 'noclip' | 'physics';
@@ -19,6 +25,18 @@ export interface PhysicsConfig {
   gravity: number;
   jumpSpeed: number;
   maxSpeed: number;
+  /** 走路速度（HU/s，Shift 慢走）→ Rust `walk_speed`；面板「走路速度」行同参。
+   *  2026-11-18 起进 config：过去 Worker 与主线程预测参数写死 130，面板改了也不一定生效
+   *  （用户要求「面板上有的都必须可调，写死的都是错的」）。默认值见
+   *  `src/ts-shared/phys/param-defaults.ts`。 */
+  walkSpeed: number;
+  /** 蹲走速度（HU/s）→ Rust `crouch_speed`；默认值同 `PHYSICS_PARAM_DEFAULTS.crouchSpeed`。 */
+  crouchSpeed: number;
+  /** 自动连跳（按住跳跃键持续起跳）→ Rust `autobhop`；面板「自动连跳」行同参。 */
+  autobhop: boolean;
+  /** 连跳限速（true = 起跳水平速度钳制到 1.1×地速）→ Rust `bhop_speed_clamp`；
+   *  面板「连跳限速」行同参。默认值见 `PHYSICS_PARAM_DEFAULTS.bhopSpeedClamp`。 */
+  bhopSpeedClamp: boolean;
   friction: number;
   accelerate: number;
   airAccel: number;
@@ -185,21 +203,25 @@ export interface RuntimeConfig {
   texture: TextureConfig;
 }
 
-/** 全量默认值；物理段取值与 `src/phys/player.rs` 的 `PhysParams::default` 及 `PARAM_DEFS` 对齐。 */
+/** 全量默认值；物理段取值统一引用 `src/ts-shared/phys/param-defaults.ts`（与 `PARAM_DEFS`、Worker/主线程预测参数同源）。 */
 export const DEFAULT_CONFIG: RuntimeConfig = {
   physics: {
     mode: 'physics',
     colliderSource: 'auto',
-    gravity: 800,
+    gravity: PHYSICS_PARAM_DEFAULTS.gravity,
     jumpSpeed: 302,
-    maxSpeed: 250,
-    friction: 4,
-    accelerate: 10,
-    airAccel: 150,
-    stopSpeed: 100,
+    maxSpeed: PHYSICS_PARAM_DEFAULTS.maxSpeed,
+    walkSpeed: PHYSICS_PARAM_DEFAULTS.walkSpeed,
+    crouchSpeed: PHYSICS_PARAM_DEFAULTS.crouchSpeed,
+    autobhop: PHYSICS_PARAM_DEFAULTS.autobhop,
+    bhopSpeedClamp: PHYSICS_PARAM_DEFAULTS.bhopSpeedClamp,
+    friction: PHYSICS_PARAM_DEFAULTS.friction,
+    accelerate: PHYSICS_PARAM_DEFAULTS.accelerate,
+    airAccel: PHYSICS_PARAM_DEFAULTS.airAccelerate,
+    stopSpeed: PHYSICS_PARAM_DEFAULTS.stopSpeed,
     groundAngle: (30 * Math.PI) / 180,
     slideAngle: (70 * Math.PI) / 180,
-    tickRate: 64,
+    tickRate: PHYSICS_PARAM_DEFAULTS.tickRate,
     teleportGateTicks: 3,
   },
   player: {

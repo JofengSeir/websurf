@@ -10,8 +10,9 @@
  * - `apps/debug/src/app.ts` 的 `buildPredictionParams`（`buildPredictionWorld` 用同一份喂
  *   主线程渲染物理实例）。
  *
- * debug 没有独立的走路 / 蹲走配置项：`walkSpeed` / `crouchSpeed` 写死 130 / 85，
- * `autobhop` 与 `bhopSpeedClamp` 写死 true，与 `PARAM_DEFS` 的定义默认值一致。
+ * 2026-11-18 起走路/蹲走/自动连跳/连跳限速也来自 `config.physics`（默认值见
+ * `src/ts-shared/phys/param-defaults.ts`），不再写死字面量：面板改了就会落到这里，
+ * 主线程预测与权威 Worker 仍吃同一份参数。
  */
 import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../../../src/ts-shared/phys/params.js';
 import type { RuntimeConfig } from '../config.js';
@@ -31,11 +32,10 @@ export function buildDebugPredictionParams(config: RuntimeConfig): Record<string
       jumpSpeed: p.jumpSpeed,
       airAccel: p.airAccel,
       maxSpeed: p.maxSpeed,
-      // debug 无独立走路/蹲走配置：取面板定义默认值（与 Worker PhysicsParams 默认一致）
-      walkSpeed: 130,
-      crouchSpeed: 85,
-      autobhop: true,
-      bhopSpeedClamp: true,
+      walkSpeed: p.walkSpeed,
+      crouchSpeed: p.crouchSpeed,
+      autobhop: p.autobhop,
+      bhopSpeedClamp: p.bhopSpeedClamp,
       teleportGateTicks: p.teleportGateTicks,
     },
     {

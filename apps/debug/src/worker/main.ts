@@ -4,7 +4,8 @@
  * 2026-11-18 起，**通用装配已下沉到共享层** `src/ts-shared/app/worker-runtime.ts`
  * （`createWorkerRuntime`）：debug 与 game 的 Worker 入口曾经各自复制 ~380 行完全相同的
  * 渲染轨迹采样源、健康守护与 dispatch 装配，只靠人肉同步。本文件现在只保留 debug 独有的部分：
- * - config 副本与参数映射（`syncParamsToWasm`：面板无 walk/crouch/autobhop 配置项，写死默认值）；
+ * - config 副本与参数映射（`syncParamsToWasm`：全部物理参数从 `config.physics` 取，
+ *   默认值统一声明在 `src/ts-shared/phys/param-defaults.ts`）；
  * - 物理面板协调器 `PhysicsWorker`（参数/碰撞箱写权威实例 + `physics-snapshot` 回传）；
  * - 内嵌纹理包留存（`setMtzB64`）；
  * - 面板 tickRate 变化 → 权威固定步长（`authLoop.setFixedDt` + `reset`）。
@@ -46,8 +47,9 @@ const physicsWorker = new PhysicsWorker();
  *  - 字段与主线程 `apps/debug/src/physics/prediction-params.ts` 的 `buildDebugPredictionParams`
  *    同构（同一份参数喂双端物理），映射本身收敛在 `src/ts-shared/phys/params.ts` 的
  *    `buildPhysicsParams`；
- *  - 面板没有独立的走路/蹲走配置项，这两个值写死为面板定义默认值 130 / 85，自动连跳与连跳
- *    限速同样写死为 true。
+ *  - 走路/蹲走/自动连跳/连跳限速同样来自 `config.physics`（默认值由
+ *    `src/ts-shared/phys/param-defaults.ts` 统一声明）。2026-11-18 前这里写死 130/85/true/true，
+ *    与面板默认值各存一份、改一侧就会分叉；用户要求「面板上有的都必须可调，写死的都是错的」。
  */
 function syncParamsToWasm(): void {
   if (!phys.current) return;
@@ -61,11 +63,10 @@ function syncParamsToWasm(): void {
       jumpSpeed: p.jumpSpeed,
       airAccel: p.airAccel,
       maxSpeed: p.maxSpeed,
-      // 面板无独立走路/蹲走配置：写死为 PARAM_DEFS 的默认值 130 / 85
-      walkSpeed: 130,
-      crouchSpeed: 85,
-      autobhop: true,
-      bhopSpeedClamp: true,
+      walkSpeed: p.walkSpeed,
+      crouchSpeed: p.crouchSpeed,
+      autobhop: p.autobhop,
+      bhopSpeedClamp: p.bhopSpeedClamp,
       teleportGateTicks: p.teleportGateTicks,
     },
     {

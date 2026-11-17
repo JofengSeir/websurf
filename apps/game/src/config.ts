@@ -19,6 +19,7 @@
 
 import { LIGHTING_PRESENTATION_DEFAULTS } from '../../../src/renderer-shared/shader/lightmap-shader.js';
 import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../../src/ts-shared/phys/params.js';
+import { PHYSICS_PARAM_DEFAULTS } from '../../../src/ts-shared/phys/param-defaults.js';
 
 export interface PhysicsConfig {
   /** 物理模式：physics（权威物理）/ noclip（自由视角，禁物理/传送）。
@@ -168,16 +169,18 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   physics: {
     mode: 'physics',
     tickRate: LOCKED_TICK_RATE,
-    gravity: 800,
+    gravity: PHYSICS_PARAM_DEFAULTS.gravity,
     jumpSpeed: 302,
-    maxSpeed: 250,
-    friction: 4,
-    accelerate: 10,
-    airAccel: 150,
-    stopSpeed: 100,
-    autobhop: true,
-    walkSpeed: 130,
-    crouchSpeed: 85,
+    maxSpeed: PHYSICS_PARAM_DEFAULTS.maxSpeed,
+    friction: PHYSICS_PARAM_DEFAULTS.friction,
+    accelerate: PHYSICS_PARAM_DEFAULTS.accelerate,
+    airAccel: PHYSICS_PARAM_DEFAULTS.airAccelerate,
+    stopSpeed: PHYSICS_PARAM_DEFAULTS.stopSpeed,
+    autobhop: PHYSICS_PARAM_DEFAULTS.autobhop,
+    walkSpeed: PHYSICS_PARAM_DEFAULTS.walkSpeed,
+    crouchSpeed: PHYSICS_PARAM_DEFAULTS.crouchSpeed,
+    // 有意覆盖共享默认值 true：本端默认关闭连跳限速，对应地图 sv_enablebunnyhopping 1（不限速）。
+    // 面板「连跳限速」开关实时可切（2596877 的默认值保留在这里，不再写死在 Worker）。
     bhopSpeedClamp: false,
     teleportGateTicks: 3,
   },
