@@ -739,10 +739,6 @@
               </select>
               <div class="ctrl-hint">重新加载地图生效</div>
 
-              <label title="权威物理固定步长（Hz）：越高越精确，性能开销越大；即时生效">物理 tick 率</label>
-              <input type="range" id="tickRate" min="48" max="128" step="1" value="64" />
-              <div class="val"><input type="number" id="tickRateNum" class="param-num" min="48" max="128" step="any" value="64" /></div>
-
               <div class="ctrl-full btn-row">
                 <button id="respawnBtn" disabled>重生</button>
               </div>
@@ -790,7 +786,7 @@
               <div class="param-footer">
                 <button id="resetAllPhysicsBtn">恢复全部默认</button>
                 <span class="src-note">
-                  来源：<span class="src-default">模式默认</span> / <span class="src-manual">手动修改</span>
+                  来源：<span class="src-default">模式默认</span> / <span class="src-manual">手动修改</span>（仅本会话生效，不写入 UI 偏好）
                 </span>
               </div>
             </div>

@@ -85,8 +85,6 @@ const dom = {
 	chDotChk: document.getElementById('chDot') as HTMLInputElement | null,
 	physicsModeSelect: document.getElementById('physicsMode') as HTMLSelectElement | null,
 	colliderSourceSelect: document.getElementById('colliderSource') as HTMLSelectElement | null,
-	tickRateRange: document.getElementById('tickRate') as HTMLInputElement | null,
-	tickRateNum: document.getElementById('tickRateNum') as HTMLInputElement | null,
 	mouseSensRange: document.getElementById('mouseSens') as HTMLInputElement | null,
 	mouseSensNum: document.getElementById('mouseSensNum') as HTMLInputElement | null,
 	yawBindSpeedRange: document.getElementById('yawBindSpeed') as HTMLInputElement | null,
@@ -1580,7 +1578,6 @@ function syncPrefsControls(): void {
 	setNum('mouseSens', config.input.sensitivity);
 	setNum('yawBindSpeed', config.input.yawBindSpeed);
 	setNum('pitchLimit', config.input.pitchLimit);
-	setNum('tickRate', config.physics.tickRate);
 	setNum('ambientIntensity', config.lighting.ambientIntensity);
 	setNum('cullDistance', config.lod.cullDistance);
 	setChk('showSolids', config.debug.showSolids);
@@ -1641,11 +1638,7 @@ function bindUI(): void {
 		if (on && !applied) setStatus('PVS 区域着色：地图尚未加载或无 PVS 数据。', 'error');
 	});
 
-	// 物理 tick 率（权威固定步长，即时生效；不随 UI 偏好持久化）
-	bindSlider(dom.tickRateRange, dom.tickRateNum, (v) => {
-		applyConfigPatch(config, 'physics', { tickRate: v });
-		inputBridge?.sendConfig('physics', { tickRate: v });
-	}, (v) => v);
+	// 物理 tick 率只在「力学参数」面板行（PARAM_DEFS 的 tickRate）维护，避免两套控件互不同步。
 
 	// 鼠标灵敏度（cs-movement 乘数：有效灵敏度 = sensitivity * m_yaw 0.022 deg/px）
 	dom.mouseSensRange?.addEventListener('input', (e) => {
