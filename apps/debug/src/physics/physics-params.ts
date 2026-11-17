@@ -15,9 +15,14 @@
 
 import { findParamDef, PARAM_DEFS, type ParamSource, type ParamState } from './param-defs.js';
 import { DEFAULT_HULL } from '../../../../src/ts-shared/phys/param-defaults.js';
+import { PANEL_TO_RUST } from '../../../../src/ts-shared/phys/param-names.js';
 import type { PhysWorld } from '../../pkg/websurf_wasm.js';
 
 /** 面板参数名 → Rust `set_params` 的 snake_case 键名（13 项）。
+ *
+ * 表本体在共享层 `src/ts-shared/phys/param-names.ts`：地图 convar 映射
+ * （`map-cvars.ts`）与 Worker 分发器也要用同一张表，三处各写一份会漂移。
+ * 本文件只保留历史导出名 `PARAM_TO_RUST` 供 debug 内部引用。
  *
  * 面板参数 `tickRate` 不在本表：它是 JS 驱动层的固定步长，不是 Rust 键。
  *
@@ -26,21 +31,7 @@ import type { PhysWorld } from '../../pkg/websurf_wasm.js';
  * `src/ts-shared/phys/params.ts` 的 `buildPhysicsParams` 一次性写全（调用点见
  * `apps/debug/src/worker/main.ts` 的 `syncParamsToWasm`，以及
  * `apps/debug/src/physics/prediction-params.ts` 的 `buildDebugPredictionParams`）。 */
-export const PARAM_TO_RUST: Record<string, string> = {
-  maxSpeed: 'run_speed',
-  walkSpeed: 'walk_speed',
-  crouchSpeed: 'crouch_speed',
-  airAccelerate: 'air_accelerate',
-  gravity: 'gravity',
-  accelerate: 'accelerate',
-  friction: 'friction',
-  stopSpeed: 'stop_speed',
-  jumpHeight: 'jump_height',
-  autobhop: 'autobhop',
-  bhopSpeedClamp: 'bhop_speed_clamp',
-  pushOut: 'push_out',
-  pushOutOnlyWhenSolid: 'push_out_only_when_solid',
-};
+export const PARAM_TO_RUST: Record<string, string> = PANEL_TO_RUST;
 
 /** 碰撞箱三围（可变副本；`DEFAULT_HULL` 是只读默认值）。 */
 export interface HullSize { halfWidth: number; standHeight: number; duckHeight: number }
@@ -87,6 +78,9 @@ export class PhysicsParams {
       phys.set_params(JSON.stringify(patch));
     }
     phys.set_hull(this.hull.halfWidth, this.hull.standHeight, this.hull.duckHeight);
+    // autoRestoreHull 的 UI 默认是「开」，而 Rust 实例默认 false（`src/phys/mod.rs:222`）：
+    // 不在 attach 时补发一次，面板会显示「开」但权威实际「关」，要 toggle 两次才生效。
+    phys.set_auto_restore_hull(this.autoRestoreHull);
     // tickRate 不在 Rust 参数里：这里补一次回调，使面板在进图前调好的值
     // 覆盖 world-json 构建时按 config.physics.tickRate 设下的固定步长
     const tickRate = this.overrides.get('tickRate');

@@ -55,6 +55,19 @@ export class PhysicsWorker {
   }
 
   /**
+   * 地图 `servercommand` 带来的物理参数（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）：
+   * 以「地图」来源写进覆盖表并回传快照，面板徽标显示「地图」而不是「默认」。
+   *
+   * 权威实例的写入由共享分发器完成（它已写主/并列/第三实例）；这里再走
+   * `PhysicsParams.setParamFromMap`，一是让覆盖表记住来源（后续 `config` 重放时
+   * `attach()` 会把它再写一遍，不会被配置默认值冲掉），二是刷新面板快照。
+   */
+  applyMapParam(name: string, value: number | boolean): void {
+    this.physicsParams.setParamFromMap(name, value);
+    this.emitPhysicsSnapshot();
+  }
+
+  /**
    * 面板消息入口：命中下面五个 `case` 之一则处理后返回 `true`；`msg` 非对象、或 `type`
    * 不在这五个之内（例如分发层没有分支、直接落到本入口的 `set-cull-distance`）返回
    * `false`。返回值在唯一调用点 `src/ts-shared/auth/worker-dispatch.ts` 的

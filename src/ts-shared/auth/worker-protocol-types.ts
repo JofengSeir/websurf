@@ -37,6 +37,7 @@ export type WorkerInboundType =
   | 'set-push-velocity'
   | 'set-speed-cap'
   | 'set-jump-height'
+  | 'set-map-physics-param'
   | 'set-mode'
   | 'set-hold';
 
@@ -191,6 +192,15 @@ export interface SetJumpHeightMessage {
   height: number;
 }
 
+/** `set-map-physics-param`：地图 `servercommand`（如 `sv_airaccelerate`、`sv_enablebunnyhopping`）
+ *  映射出的单个物理参数（`name` 是物理面板参数名，`value` 已按 convar 语义换算）。
+ *  地图级设置 ⇒ 值被记忆并在世界重建后重放。 */
+export interface SetMapPhysicsParamMessage {
+  type: 'set-map-physics-param';
+  name: string;
+  value: number | boolean;
+}
+
 /** `set-mode`：计算模式握手。值域白名单三值；同 mode 重复到达只回 `mode-ack`、不重复执行
  *  钩子；切换所需的状态载荷随消息透传给 `onSetMode`。当前三端均无发送方（coupled 之外的
  *  两模式尚未接线），分派分支保留。 */
@@ -226,5 +236,6 @@ export type WorkerInboundMessage =
   | SetPushVelocityMessage
   | SetSpeedCapMessage
   | SetJumpHeightMessage
+  | SetMapPhysicsParamMessage
   | SetModeMessage
   | SetHoldMessage;

@@ -58,6 +58,9 @@ export interface WorkerRuntimeHooks {
   onConfigApplied?: () => void;
   /** 未识别消息的扩展点（debug 的物理面板消息在这里交给协调器；返回 true = 已处理）。 */
   onExtraMessage?: (msg: unknown) => boolean | void;
+  /** 地图 `servercommand` 映射出的物理参数（debug 把它写进面板覆盖表并回传快照；
+   *  game 把它写进 config 副本后重新同步 wasm）。 */
+  onMapPhysicsParam?: (name: string, value: number | boolean) => void;
   /** 收到每条消息之前（game 用它给 `world-json` 记诊断起点）。返回 false 可拦下该条消息。 */
   onBeforeMessage?: (msg: unknown) => boolean | void;
 }
@@ -463,6 +466,7 @@ export function createWorkerRuntime(options: CreateWorkerRuntimeOptions): Worker
       hooks.onConfigApplied?.();
     },
     onExtraMessage: (msg) => hooks.onExtraMessage?.(msg) === true,
+    onMapPhysicsParam: (name, value) => hooks.onMapPhysicsParam?.(name, value),
   });
 
   /** `self.onmessage`：先给 app 一条观察消息的机会（诊断计时等），再整体交给分发器。 */

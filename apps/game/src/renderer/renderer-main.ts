@@ -217,6 +217,8 @@ export class RendererMain {
   onJumpHeightChange: ((height: number) => void) | null = null;
   /** 玩家 targetname 变化（传送 filter 门控；权威侧需要它判 `filter_activator_name`）。 */
   onPlayerNameChange: ((name: string) => void) | null = null;
+  /** 地图 `servercommand` 映射出的物理参数（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）。 */
+  onMapPhysicsParam: ((name: string, value: number | boolean) => void) | null = null;
 
   /** 失效世代 +1（本地计数器）并调 `shared.resetRenderSample()` 让 Worker 丢弃既有采样配对。 */
   private bumpSampleEpoch(): void {
@@ -317,6 +319,7 @@ export class RendererMain {
       onSpeedCapChange: (cap) => this.onSpeedCapChange?.(cap),
       onJumpHeightChange: (height) => this.onJumpHeightChange?.(height),
       onPlayerNameChange: (name) => this.onPlayerNameChange?.(name),
+      onMapPhysicsParam: (name, value) => this.onMapPhysicsParam?.(name, value),
     });
     this.gameplay.load(entityIoJson);
   }

@@ -105,6 +105,10 @@ const runtime = createWorkerRuntime({
     },
     /** 未识别消息的扩展点：物理面板消息在这里交给协调器。 */
     onExtraMessage: (msg) => physicsWorker.handleMessage(msg as WorkerMessage | { type?: string }),
+    /** 地图 `servercommand` 映射出的物理参数：以「地图」来源进面板覆盖表并回传快照。 */
+    onMapPhysicsParam: (name, value) => {
+      physicsWorker.applyMapParam(name, value);
+    },
   },
 });
 

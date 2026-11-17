@@ -413,6 +413,12 @@ export class RendererMain {
     return this.gameplay?.jumpHeightApplied ?? null;
   }
 
+  /**
+   * 地图 `servercommand` 映射出的物理参数（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）
+   * → app.ts 转发给权威 Worker。渲染物理已由共享宿主直接写入，这里只负责权威侧同值下发。
+   */
+  onMapPhysicsParam: ((name: string, value: number | boolean) => void) | null = null;
+
   /** config 默认起跳高度（HU）：`jumpSpeed²/(2·gravity)`，debug 默认 302/800 = 57。 */
   private defaultJumpHeight = 57;
 
@@ -781,6 +787,7 @@ export class RendererMain {
       onSpeedCapChange: (cap) => this.onSpeedCapChange?.(cap),
       onJumpHeightChange: (height) => this.onJumpHeightChange?.(height),
       onPlayerNameChange: (name) => this.onPlayerNameChange?.(name),
+      onMapPhysicsParam: (name, value) => this.onMapPhysicsParam?.(name, value),
     });
     this.gameplay.load(entityIoJson);
     // 实体装配完成后把带体积的 trigger（加速板等）送进碰撞可视化；换图时会被下次装配覆盖。

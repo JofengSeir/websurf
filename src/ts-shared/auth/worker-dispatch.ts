@@ -70,6 +70,7 @@ import type {
   SavePointLike,
   SyncRenderStateLike,
 } from '../decoupled/decoupled-loop.js';
+import { PANEL_TO_RUST } from '../phys/param-names.js';
 
 /** 物理参数键名归一表：`src/ts-shared/phys/params.ts` 的 `buildPhysicsParams` 产出的
  * snake_case 键 → 工程 config 的 camelCase 字段。
@@ -191,6 +192,9 @@ export interface WorkerDispatchEnv {
   onConfigApplied?(section: string, patch: Record<string, unknown>): void;
   /** 未识别消息的扩展点。返回值本文件**不使用**：是否已处理不反馈给调用方。 */
   onExtraMessage?(msg: unknown): boolean;
+  /** `set-map-physics-param` 生效后触发（入参是物理面板参数名与已按 convar 语义换算的值）。
+   * 供宿主把值同步进自己的配置副本/面板来源（debug 面板显示「地图」）。 */
+  onMapPhysicsParam?(name: string, value: number | boolean): void;
 }
 
 /**
@@ -275,6 +279,27 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     env.phys.current?.set_jump_height?.(lastJumpHeight);
     env.tickPhys?.current?.set_jump_height?.(lastJumpHeight);
     env.scratch?.current?.set_jump_height?.(lastJumpHeight);
+  };
+
+  /**
+   * 最近一次收到的地图物理参数（`set-map-physics-param` 记忆，参数名 → 值）。
+   *
+   * 与速度上限/起跳高度同理：`world-json` 重建全部实例后这些参数回到 config 默认值，
+   * 不重放则地图 `sv_airaccelerate` / `sv_enablebunnyhopping` 在换图/重载后失效。
+   * 按「参数名」记录（后到的同项覆盖先到的），重放时按 `PANEL_TO_RUST` 翻回 Rust 键。
+   */
+  const lastMapPhysicsParams = new Map<string, number | boolean>();
+  /** 把记忆的地图物理参数重放到全部已注入实例（世界重建之后调用）。 */
+  const reapplyMapPhysicsParams = (): void => {
+    if (lastMapPhysicsParams.size === 0) return;
+    for (const [name, value] of lastMapPhysicsParams) {
+      const rustName = PANEL_TO_RUST[name];
+      if (!rustName) continue;
+      const patch = JSON.stringify({ [rustName]: value });
+      env.phys.current?.set_params(patch);
+      env.tickPhys?.current?.set_params(patch);
+      env.scratch?.current?.set_params(patch);
+    }
   };
 
   /** wasm 就绪标志：仅 `initWasm` 成功置位；`world-json` 以它作前置守卫。 */
@@ -391,6 +416,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       reapplyPlayerName(); // 重放记忆的玩家名/门控开关（同上，不在种子面）
       reapplySpeedCap(); // 重放记忆的手动水平速度上限（地图 sv_maxvelocity，同上）
       reapplyJumpHeight(); // 重放记忆的起跳高度（跳跃增幅区，同上）
+      reapplyMapPhysicsParams(); // 重放记忆的地图物理参数（sv_airaccelerate 等，同上）
       env.decoupledLoop?.publishCurrentState(); // 立刻发布一帧，首帧状态即刻可见
       env.onWorldBuilt?.(p);
       env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 出生点 Y + 已记忆的阈值（可为 null）
@@ -665,6 +691,29 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         env.phys.current?.set_jump_height?.(height);
         env.tickPhys?.current?.set_jump_height?.(height);
         env.scratch?.current?.set_jump_height?.(height);
+      }
+      return;
+    }
+    if (type === 'set-map-physics-param') {
+      // 地图 `servercommand` 映射出的物理参数（如 `sv_airaccelerate 150`、
+      // `sv_enablebunnyhopping 1` → 面板「连跳限速」关闭）。名字是物理面板参数名，
+      // 由 `src/ts-shared/phys/map-cvars.ts` 换算后经宿主下发。
+      // 与速度上限/起跳高度同理是地图级设置 ⇒ 记忆并在 `world-json` 重建后重放。
+      const mp = msg as { name?: unknown; value?: unknown };
+      const name = typeof mp.name === 'string' ? mp.name : null;
+      const value = mp.value;
+      if (name && (typeof value === 'number' || typeof value === 'boolean')) {
+        if (typeof value === 'number' && !Number.isFinite(value)) return;
+        const rustName = PANEL_TO_RUST[name];
+        if (rustName) {
+          lastMapPhysicsParams.set(name, value);
+          const patch = JSON.stringify({ [rustName]: value });
+          env.phys.current?.set_params(patch);
+          env.tickPhys?.current?.set_params(patch);
+          env.scratch?.current?.set_params(patch);
+        }
+        // 即便参数名不在映射表里也回调：宿主可用来提示未识别项（面板来源等）。
+        env.onMapPhysicsParam?.(name, value);
       }
       return;
     }

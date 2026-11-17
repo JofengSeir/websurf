@@ -125,4 +125,10 @@ export class InputBridge {
   sendSetJumpHeight(height: number): void {
     this.worker.postMessage({ type: 'set-jump-height', height });
   }
+
+  /** 发 `set-map-physics-param`：地图 `servercommand` 映射出的物理参数
+   *  （`name` 是物理面板参数名，`value` 已按 convar 语义换算；地图级设置会被记忆重放）。 */
+  sendSetMapPhysicsParam(name: string, value: number | boolean): void {
+    this.worker.postMessage({ type: 'set-map-physics-param', name, value });
+  }
 }

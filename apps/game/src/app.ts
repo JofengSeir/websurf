@@ -205,6 +205,7 @@ if (isolated) {
   renderer.onSpeedCapChange = (cap) => bridge?.sendSetSpeedCap(cap);
   renderer.onJumpHeightChange = (height) => bridge?.sendSetJumpHeight(height);
   renderer.onPlayerNameChange = (name) => bridge?.sendSetPlayerName(name);
+  renderer.onMapPhysicsParam = (name, value) => bridge?.sendSetMapPhysicsParam(name, value);
   syncFullConfig();
 
   // 4. 面板（参数变更实时同步主线程物理）

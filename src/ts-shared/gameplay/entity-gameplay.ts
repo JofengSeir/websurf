@@ -21,6 +21,8 @@ import { attachEntitySystem } from '../entity/attach.js';
 import { DEFAULT_HULL_MAXS, DEFAULT_HULL_MINS, playerStateFromRaw, type RawPlayerState } from '../entity/host.js';
 import type { EntitySystem, EntitySystemStats } from '../entity/entity-system.js';
 import type { EntityEvent } from '../entity/types.js';
+import { mapCvarsToPhysicsParams } from '../phys/map-cvars.js';
+import { PANEL_TO_RUST } from '../phys/param-names.js';
 
 /**
  * 「跳跃增幅区」（surf_null 的 `autohop_zone`）内的起跳高度（HU）。
@@ -39,6 +41,9 @@ export interface GameplayPhysLike {
   set_jump_height?(height: number): void;
   set_teleport_player_name?(name: string): void;
   set_teleport_filter_enabled?(enabled: boolean): void;
+  /** 通用参数写入（地图 `servercommand` 映射出的 `sv_airaccelerate` 等；JSON 是
+   * `set_params` 的 snake_case patch）。 */
+  set_params?(json: string): void;
 }
 
 /** 带体积的 trigger（可视化 / 调试用）；与 debug `ColliderDebug` 的 `EntityTriggerBoxView` 同形。 */
@@ -66,6 +71,8 @@ export interface EntityGameplayOptions {
   onJumpHeightChange?: (height: number) => void;
   /** 玩家 targetname 变化（传送 filter 门控用；首次为空串也会回调一次）。 */
   onPlayerNameChange?: (name: string) => void;
+  /** 地图 `servercommand` 映射出的物理参数（`name` 是物理面板参数名）。 */
+  onMapPhysicsParam?: (name: string, value: number | boolean) => void;
 }
 
 /** 浮点比较阈值：跳高目标值只在跨过 1e-6 时下发。 */
@@ -226,20 +233,34 @@ export class EntityGameplay {
   }
 
   /**
-   * 处理地图脚本下发的 `servercommand`：目前只认 `sv_maxvelocity <n>`。
+   * 处理地图脚本下发的 `servercommand`（`logic_auto OnMapSpawn → point_servercommand`）。
    *
-   * Source 里它是「速度上限」，默认 3500，`CheckVelocity` 每步多次钳位；surf_666 的
-   * `logic_auto OnMapSpawn` 会把本图改成 10000——按 Source 语义应以地图为准（用户若想
-   * 强制 3500 需要显式覆盖地图 cvar）。
+   * 一条命令里可能有多条 cvar（`;` 或换行分隔）。分两类：
+   * - `sv_maxvelocity <n>`：速度上限，走 `set_max_horizontal_speed`（只钳水平模长；
+   *   Source 默认 3500，surf_666 的 logic_auto 会改成 10000 —— 以地图为准）；
+   * - 其余在 `map-cvars.ts` 表里的（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）：
+   *   翻成物理面板参数名，先写渲染物理线，再经 `onMapPhysicsParam` 转发给权威 Worker
+   *   （两侧必须同参，否则权威与渲染手感分叉）。
    */
   private applyServerCommand(command: string): void {
-    const m = /^\s*sv_maxvelocity\s+(-?\d+(?:\.\d+)?)\s*$/i.exec(command);
-    if (!m) return;
-    const cap = Number(m[1]);
-    if (!Number.isFinite(cap)) return;
-    this.speedCap = cap;
-    this.options.getPhys()?.set_max_horizontal_speed?.(cap);
-    this.options.onSpeedCapChange?.(cap);
+    for (const line of command.split(/[;\n]/)) {
+      const m = /^\s*sv_maxvelocity\s+(-?\d+(?:\.\d+)?)\s*$/i.exec(line);
+      if (m) {
+        const cap = Number(m[1]);
+        if (!Number.isFinite(cap)) continue;
+        this.speedCap = cap;
+        this.options.getPhys()?.set_max_horizontal_speed?.(cap);
+        this.options.onSpeedCapChange?.(cap);
+        continue;
+      }
+      for (const { name, value } of mapCvarsToPhysicsParams(line)) {
+        const rustName = PANEL_TO_RUST[name];
+        if (rustName) {
+          this.options.getPhys()?.set_params?.(JSON.stringify({ [rustName]: value }));
+        }
+        this.options.onMapPhysicsParam?.(name, value);
+      }
+    }
   }
 
   /**

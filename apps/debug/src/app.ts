@@ -373,6 +373,11 @@ async function main(): Promise<void> {
 	rendererMain.onJumpHeightChange = (height) => {
 		inputBridge?.sendSetJumpHeight(height);
 	};
+	// 地图 servercommand 映射出的物理参数（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）：
+	// 渲染物理线已由共享宿主直接写入，这里把同一个值转给权威 Worker，两边参数必须同源。
+	rendererMain.onMapPhysicsParam = (name, value) => {
+		inputBridge?.sendSetMapPhysicsParam(name, value);
+	};
 	// 渲染主线 → 权威反向同步：teleport=true（真位置突变）由权威侧清未消费输入增量；
 	// teleport=false 走常规重锚，只注入状态、保留输入增量——清输入会造成可见的瞄准顿挫。
 	rendererMain.onSyncRenderState = (s, teleport) => {

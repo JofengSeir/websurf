@@ -70,6 +70,21 @@ function syncParamsToWasm(): void {
  */
 let worldJsonRecvAt = 0;
 
+/** 地图 `servercommand` 的物理参数名（面板名）→ game config 字段名。
+ *
+ * 只有 `airAccelerate` 与 config 不同名（config 沿用历史短名 `airAccel`），其余同形；
+ * 不认识的参数名直接忽略（例如 `pushOut` 不在 game config 里）。
+ */
+const MAP_PARAM_TO_CONFIG: Record<string, keyof RuntimeConfig['physics']> = {
+  maxSpeed: 'maxSpeed',
+  accelerate: 'accelerate',
+  airAccelerate: 'airAccel',
+  friction: 'friction',
+  stopSpeed: 'stopSpeed',
+  gravity: 'gravity',
+  bhopSpeedClamp: 'bhopSpeedClamp',
+};
+
 /** 共享 Worker 运行时：权威循环/分发/采样/健康守护都在共享层，这里只注入 game 的映射与诊断。 */
 const runtime = createWorkerRuntime({
   shared,
@@ -111,6 +126,14 @@ const runtime = createWorkerRuntime({
         worldJsonRecvAt = 0;
         postMessage({ type: 'world-build-ms', ms: +ms.toFixed(1) });
       }
+    },
+    /** 地图 convar（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）落到 config 副本：
+     * 之后任何一次 `syncParamsToWasm` / 换图重放都会带上地图值，不会被配置默认值冲掉。 */
+    onMapPhysicsParam: (name, value) => {
+      const field = MAP_PARAM_TO_CONFIG[name];
+      if (!field) return;
+      (config.physics as unknown as Record<string, unknown>)[field] = value;
+      syncParamsToWasm();
     },
   },
 });
