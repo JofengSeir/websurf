@@ -910,7 +910,15 @@
 
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showTriggers" />
-                <label for="showTriggers" title="触发区域线框：传送类 青=已链接/紫=孤儿/灰=禁用/橙=非玩家；实体 trigger 绿=加速板(trigger_push)/黄=其它">显示触发区域</label>
+                <label for="showTriggers" title="传送触发器线框：青=已链接/紫=孤儿/灰=禁用/橙=非玩家（在地图脚本里负责回卷/传送）">显示传送触发器</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPushTriggers" />
+                <label for="showPushTriggers" title="加速板体积线框（绿色，trigger_push）：站上去会被「设置速度」的区域">显示加速板区域</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showOtherTriggers" />
+                <label for="showOtherTriggers" title="其它实体 trigger 体积线框（黄色，trigger_multiple 等）：改名区、开关区等">显示其它触发区</label>
               </div>
               <label title="触发区域线框显示可视距离（HU）：0 = 全量显示">触发区域距离</label>
               <input type="range" id="triggerViewDistance" min="0" max="16384" step="64" value="0" />

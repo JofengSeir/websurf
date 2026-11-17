@@ -156,6 +156,23 @@ function parseVelocityDetail(detail: string | undefined): [number, number, numbe
   }
 }
 
+/**
+ * 读取会话级调试开关（localStorage；`'1'` 真 / `'0'` 假，缺省用 fallback）。
+ *
+ * 触发区线框的「加速板 / 其它实体」两组开关只做会话内持久化：它们不属于共享的表现配置，
+ * 写 `render-prefs.ts` 会把调试偏好带进三端通用存档。
+ */
+function readLocalDebugFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = globalThis.localStorage?.getItem(key);
+    if (v === '1') return true;
+    if (v === '0') return false;
+  } catch {
+    /* 隐私模式 / 无 localStorage：用默认值 */
+  }
+  return fallback;
+}
+
 
 /** 主线程渲染器：持有 WebGL 渲染器、场景、相机与全部子管理器。相机不再本地插值——
  * 每个渲染帧由 `tick` 用 `predPhys.state()` 直接摆放。 */
@@ -381,6 +398,24 @@ export class RendererMain {
   onPlayerVelocity: ((vel: [number, number, number], mode: 'add' | 'set') => void) | null = null;
 
   /**
+   * 地图 convar → 宿主回调（目前只有 `sv_maxvelocity` 的水平速度上限）。
+   *
+   * 渲染物理线在这里立即生效，同时把 cap 回调给 app.ts 转发给权威 Worker——否则主线程按
+   * 地图值钳、权威按默认 3500 跑，两侧速度会分叉。地图像 surf_666 那样自己写
+   * `sv_maxvelocity 10000` 时以地图为准；没写就用 Rust 侧默认 3500（Source 默认值）。
+   */
+  onSpeedCapChange: ((cap: number) => void) | null = null;
+
+  /** 最近一次生效的水平速度上限（HU/s）；`null` = 还没收到过 `sv_maxvelocity`。
+   *  公开只读字段：HUD/脚本排查要能看到当前地图实际生效的 cap。 */
+  speedCapApplied: number | null = null;
+
+  /** 加速板（trigger_push）线框开关（会话内，默认开；与传送触发器分开）。 */
+  private pushTriggerDebugVisible = readLocalDebugFlag('vbsp:debug:pushTriggers', true);
+  /** 其它实体 trigger 体积线框开关（会话内，默认开）。 */
+  private otherTriggerDebugVisible = readLocalDebugFlag('vbsp:debug:otherTriggers', true);
+
+  /**
    * 渲染物理线 → 权威侧的反向同步回调（由 `AuthorityCalibrator` 在兜底重锚/首次起点对齐时
    * 触发）。app.ts 收到后 postMessage `sync-render-state` 给 Worker。
    *
@@ -484,6 +519,11 @@ export class RendererMain {
     );
     this.colliderDebug.setBevelVisible(config.debug.showBevel);
     this.colliderDebug.setPhyBevelVisible(config.debug.showPhyBevel);
+    // 实体 trigger 的两类线框（加速板 / 其它）是会话内开关，不来自共享 config
+    this.colliderDebug.setEntityTriggerVisibility(
+      this.pushTriggerDebugVisible,
+      this.otherTriggerDebugVisible,
+    );
     this.planeInfoEnabled = config.debug.showPlaneInfo;
 
     this.needsRender = true;
@@ -658,6 +698,11 @@ export class RendererMain {
         } else if (event.kind === 'entity:baseVelocity') {
           const v = parseVelocityDetail(event.detail);
           if (v) this.applyPlayerVelocity(v, 'set');
+        } else if (event.kind === 'servercommand') {
+          // 地图脚本的 `servercommand`（logic_auto OnMapSpawn 等）：目前只认速度上限
+          // `sv_maxvelocity`——surf 图靠它把满速抬到 3500/10000；没这条命令时 Rust 侧
+          // 用默认 3500 兜底（见 `PhysWorld::max_horizontal_speed`）。
+          this.applyServerCommand(event.detail ?? '');
         }
         this.onEntityEvent?.(event);
       },
@@ -706,6 +751,42 @@ export class RendererMain {
       this.predPhys?.add_velocity?.(vel[0], vel[1], vel[2]);
     }
     this.onPlayerVelocity?.(vel, mode);
+  }
+
+  /**
+   * 处理地图脚本下发的 `servercommand`：目前只认 `sv_maxvelocity <n>`。
+   *
+   * Source 里它是「速度上限」，默认 3500，`CheckVelocity` 每步多次钳位；surf_666 的
+   * `logic_auto OnMapSpawn` 会把本图改成 10000——按 Source 语义应以地图为准（用户若想
+   * 强制 3500 需要显式覆盖地图 cvar）。
+   */
+  private applyServerCommand(command: string): void {
+    const m = /^\s*sv_maxvelocity\s+(-?\d+(?:\.\d+)?)\s*$/i.exec(command);
+    if (!m) return;
+    const cap = Number(m[1]);
+    if (!Number.isFinite(cap)) return;
+    this.speedCapApplied = cap;
+    this.predPhys?.set_max_horizontal_speed?.(cap);
+    this.onSpeedCapChange?.(cap);
+  }
+
+  /**
+   * 触发区线框的三段式开关：传送触发器仍走 `config.debug.showTriggers`，本方法只控制
+   * 实体层的「加速板 / 其它」两类（会话内持久化到 localStorage）。
+   *
+   * 用户反馈原来三类全塞在「触发区域」一个按钮里太复杂；拆开后按语义各自开关。
+   */
+  setEntityTriggerVisibility(showPush: boolean, showOther: boolean): void {
+    this.pushTriggerDebugVisible = showPush;
+    this.otherTriggerDebugVisible = showOther;
+    try {
+      globalThis.localStorage?.setItem('vbsp:debug:pushTriggers', showPush ? '1' : '0');
+      globalThis.localStorage?.setItem('vbsp:debug:otherTriggers', showOther ? '1' : '0');
+    } catch {
+      /* 隐私模式 / 无 localStorage：只影响下次启动的初值 */
+    }
+    this.colliderDebug.setEntityTriggerVisibility(showPush, showOther);
+    this.needsRender = true;
   }
 
   /**
@@ -1349,6 +1430,10 @@ export class RendererMain {
       );
       this.colliderDebug.setBevelVisible(this.config.debug.showBevel);
       this.colliderDebug.setPhyBevelVisible(this.config.debug.showPhyBevel);
+      this.colliderDebug.setEntityTriggerVisibility(
+        this.pushTriggerDebugVisible,
+        this.otherTriggerDebugVisible,
+      );
       this.planeInfoEnabled = this.config.debug.showPlaneInfo;
       this.needsRender = true;
     } else if (section === 'input' && this.cameraController) {

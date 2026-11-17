@@ -23,7 +23,8 @@
  *    两工程都在加载地图之前发出 `wasm-init` 消息。
  * 2. **主实例恒在**：`env.phys` 是唯一必选实例槽；`tickPhys` / `scratch` 是可选并列槽，
  *    凡改动实例参数或状态的分支都在 `phys` 之后按同一实参同步它们，避免同一世界出现参数分叉。
- * 3. **死亡阈值与玩家名跨世界重建存续**：`set-death-threshold` / `set-player-name` 的值由闭包
+ * 3. **死亡阈值、玩家名与水平速度上限跨世界重建存续**：`set-death-threshold` / `set-player-name` /
+ *    `set-speed-cap` 的值由闭包
  *    变量记忆，`world-json` 重建实例后经 `reapplyDeathY` / `reapplyPlayerName` 重放（Rust 侧
  *    这两个字段都不在种子面，重建即回默认值）。
  * 4. **幂等**：`authLoop.start()` 由 `loopStarted` 守卫只执行一次；`set-mode` 与当前模式
@@ -245,6 +246,21 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     }
   };
 
+  /**
+   * 最近一次收到的手动水平速度上限（`set-speed-cap` 记忆）。
+   *
+   * 与死亡阈值/玩家名同理：`world-json` 重建全部实例后 `max_horizontal_speed` 回到默认值，
+   * 不重放则地图 `sv_maxvelocity` 在换图/重载后失效。地图级设置，`cap <= 0` 表示关闭钳制。
+   */
+  let lastSpeedCap: number | null = null;
+  /** 把记忆的水平速度上限重放到全部已注入实例（世界重建之后调用）。 */
+  const reapplySpeedCap = (): void => {
+    if (lastSpeedCap === null) return;
+    env.phys.current?.set_max_horizontal_speed?.(lastSpeedCap);
+    env.tickPhys?.current?.set_max_horizontal_speed?.(lastSpeedCap);
+    env.scratch?.current?.set_max_horizontal_speed?.(lastSpeedCap);
+  };
+
   /** wasm 就绪标志：仅 `initWasm` 成功置位；`world-json` 以它作前置守卫。 */
   let ready = false;
   /** `authLoop.start()` 只允许执行一次的守卫。 */
@@ -357,6 +373,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       env.authLoop.reset();
       reapplyDeathY(); // 重放记忆的死亡阈值，避免退回 Rust 侧默认值
       reapplyPlayerName(); // 重放记忆的玩家名/门控开关（同上，不在种子面）
+      reapplySpeedCap(); // 重放记忆的手动水平速度上限（地图 sv_maxvelocity，同上）
       env.decoupledLoop?.publishCurrentState(); // 立刻发布一帧，首帧状态即刻可见
       env.onWorldBuilt?.(p);
       env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 出生点 Y + 已记忆的阈值（可为 null）
@@ -601,6 +618,20 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         env.phys.current?.set_push_velocity?.(vx, vy, vz);
         env.tickPhys?.current?.set_push_velocity?.(vx, vy, vz);
         env.scratch?.current?.set_push_velocity?.(vx, vy, vz);
+      }
+      return;
+    }
+    if (type === 'set-speed-cap') {
+      // 地图 `sv_maxvelocity` 的宿主下发（HU/s）：只钳水平模长，竖直分量不受限。
+      // 与死亡阈值/玩家名同理是地图级设置 ⇒ 记忆并在 `world-json` 重建后重放。
+      // `cap <= 0` 表示关闭钳制（Rust 侧同样按 `<= 0` 不钳）。
+      const sc = msg as { cap?: unknown };
+      const cap = sc.cap;
+      if (typeof cap === 'number' && Number.isFinite(cap)) {
+        lastSpeedCap = cap;
+        env.phys.current?.set_max_horizontal_speed?.(cap);
+        env.tickPhys?.current?.set_max_horizontal_speed?.(cap);
+        env.scratch?.current?.set_max_horizontal_speed?.(cap);
       }
       return;
     }

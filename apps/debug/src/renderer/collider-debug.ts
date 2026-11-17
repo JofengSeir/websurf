@@ -596,6 +596,10 @@ export class ColliderDebug {
 	private brushViewDistance = 512;
 	/** 触发器开关。 */
 	private showTriggers = false;
+	/** 加速板（`trigger_push`）体积线框开关：与传送触发器分开控制（会话内，默认开）。 */
+	private showPushTriggers = true;
+	/** 其它实体 trigger 体积（`trigger_multiple` 等）线框开关：与传送触发器分开控制（默认开）。 */
+	private showOtherTriggers = true;
 	/** bevel 辅助碰撞面开关（默认关）：独立于 showSolids，可视距离复用 brushViewDistance。 */
 	private showBevel = false;
 	/** `.phy` 生成补面开关（默认关）：独立于 showBevel，可视距离复用 phyViewDistance。 */
@@ -684,6 +688,28 @@ export class ColliderDebug {
 		this.entityTriggerBoxes = boxes;
 	}
 
+	/**
+	 * 设置实体 trigger 线框的两类语义开关（加速板 / 其它）。
+	 *
+	 * 用户反馈「线框全堆在『触发区域』一个按钮里太复杂」：传送触发器、加速板、其它实体
+	 * 触发区应当是三个独立开关。本方法只管后两类；传送触发器仍走 `setDebugFlags`。
+	 */
+	setEntityTriggerVisibility(showPush: boolean, showOther: boolean): void {
+		this.showPushTriggers = showPush;
+		this.showOtherTriggers = showOther;
+		this.refreshTriggerGroupVisibility();
+		this.frameCounter = REBUILD_INTERVAL;
+	}
+
+	/** 按三组开关的并集决定 triggerGroup 的可见性；全关时清空内容。 */
+	private refreshTriggerGroupVisibility(): void {
+		const group = this.triggerGroup;
+		if (!group) return;
+		const any = this.showTriggers || this.showPushTriggers || this.showOtherTriggers;
+		group.visible = any;
+		if (!any) this.clearGroup(group);
+	}
+
 	/** 设置实体碰撞箱/触发器开关与各自可视距离（distance 传 undefined 表示保持原值）；关闭时清空对应 Group。 */
 	setDebugFlags(
 		showSolids: boolean,
@@ -704,8 +730,7 @@ export class ColliderDebug {
 			if (!showSolids) this.clearGroup(this.solidGroup);
 		}
 		if (this.triggerGroup) {
-			this.triggerGroup.visible = showTriggers;
-			if (!showTriggers) this.clearGroup(this.triggerGroup);
+			this.refreshTriggerGroupVisibility();
 		}
 		this.frameCounter = REBUILD_INTERVAL;
 	}
@@ -826,8 +851,11 @@ export class ColliderDebug {
 			}
 		}
 
-		// 2. 触发碰撞箱：开关打开即每帧重建（数量少，不限流）
-		if (this.showTriggers && this.triggerGroup) {
+		// 2. 触发区线框：传送触发器 / 加速板 / 其它实体 trigger 三组开关任一打开即重建（数量少，不限流）
+		if (
+			(this.showTriggers || this.showPushTriggers || this.showOtherTriggers) &&
+			this.triggerGroup
+		) {
 			this.rebuildTriggers(cameraPos);
 			rebuilt = true;
 		}
@@ -842,6 +870,8 @@ export class ColliderDebug {
 			this.showBevel ||
 			this.showPhyBevel ||
 			this.showTriggers ||
+			this.showPushTriggers ||
+			this.showOtherTriggers ||
 			this.showPhy ||
 			this.showVis
 		);
@@ -1293,6 +1323,8 @@ export class ColliderDebug {
 	 */
 	private rebuildTriggers(cameraPos: THREE.Vector3): void {
 		this.clearGroup(this.triggerGroup!);
+		const anyEnabled = this.showTriggers || this.showPushTriggers || this.showOtherTriggers;
+		if (!anyEnabled) return;
 		if (this.triggers.length === 0 && this.entityTriggerBoxes.length === 0) return;
 
 		const pos = cameraPos;
@@ -1305,6 +1337,8 @@ export class ColliderDebug {
 		// 实体层 trigger 体积（加速板等）：整体 AABB 线框，push 绿、其它黄。
 		// 放在传送触发器之前，颜色一眼可分：青/紫/橙/灰=传送类，绿/黄=实体逻辑类。
 		for (const box of this.entityTriggerBoxes) {
+			const isPush = box.classname === 'trigger_push';
+			if (isPush ? !this.showPushTriggers : !this.showOtherTriggers) continue;
 			if (!full) {
 				const nx = Math.max(box.min.x, Math.min(pos.x, box.max.x));
 				const nz = Math.max(box.min.z, Math.min(pos.z, box.max.z));
@@ -1313,12 +1347,13 @@ export class ColliderDebug {
 				if (dx * dx + dz * dz > radiusSq) continue;
 			}
 			const color =
-				box.classname === 'trigger_push'
+				isPush
 					? COLOR_ENTITY_TRIGGER_PUSH
 					: COLOR_ENTITY_TRIGGER_OTHER;
 			pushAabbEdges(positions, colors, box.min, box.max, color);
 		}
 
+		if (this.showTriggers) {
 		for (const trigger of this.triggers) {
 			if (!trigger.mins || !trigger.maxs) continue;
 			if (!full) {
@@ -1364,6 +1399,7 @@ export class ColliderDebug {
 			} else {
 				pushAabbEdges(positions, colors, trigger.mins, trigger.maxs, color);
 			}
+		}
 		}
 
 		if (positions.length === 0) return;

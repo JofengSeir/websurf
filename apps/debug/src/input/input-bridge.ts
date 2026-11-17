@@ -114,4 +114,9 @@ export class InputBridge {
   sendSetPushVelocity(vel: [number, number, number]): void {
     this.worker.postMessage({ type: 'set-push-velocity', vel });
   }
+
+  /** 发 `set-speed-cap`：地图 `sv_maxvelocity` 的宿主下发（HU/s，只钳水平模长；`<= 0` 关闭）。 */
+  sendSetSpeedCap(cap: number): void {
+    this.worker.postMessage({ type: 'set-speed-cap', cap });
+  }
 }

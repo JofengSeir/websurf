@@ -136,6 +136,8 @@ const dom = {
 	brushViewDistanceRange: document.getElementById('brushViewDistance') as HTMLInputElement | null,
 	brushViewDistanceNum: document.getElementById('brushViewDistanceNum') as HTMLInputElement | null,
 	showTriggersChk: document.getElementById('showTriggers') as HTMLInputElement | null,
+	showPushTriggersChk: document.getElementById('showPushTriggers') as HTMLInputElement | null,
+	showOtherTriggersChk: document.getElementById('showOtherTriggers') as HTMLInputElement | null,
 	triggerViewDistanceRange: document.getElementById('triggerViewDistance') as HTMLInputElement | null,
 	triggerViewDistanceNum: document.getElementById('triggerViewDistanceNum') as HTMLInputElement | null,
 	showPhyChk: document.getElementById('showPhy') as HTMLInputElement | null,
@@ -362,6 +364,11 @@ async function main(): Promise<void> {
 		if (mode === 'set') inputBridge?.sendSetPushVelocity(vel);
 		else inputBridge?.sendAddVelocity(vel);
 	};
+	// 地图 convar `sv_maxvelocity`（速度上限）：渲染物理线在 renderer 内部已生效，
+	// 这里转发给权威 Worker；不发的话主线程按地图值钳、权威按默认 3500 跑，速度会分叉。
+	rendererMain.onSpeedCapChange = (cap) => {
+		inputBridge?.sendSetSpeedCap(cap);
+	};
 	// 渲染主线 → 权威反向同步：teleport=true（真位置突变）由权威侧清未消费输入增量；
 	// teleport=false 走常规重锚，只注入状态、保留输入增量——清输入会造成可见的瞄准顿挫。
 	rendererMain.onSyncRenderState = (s, teleport) => {
@@ -499,6 +506,18 @@ async function onSceneReadyUi(
 	if (dom.showBevelChk) dom.showBevelChk.checked = config.debug.showBevel;
 	if (dom.showPhyBevelChk) dom.showPhyBevelChk.checked = config.debug.showPhyBevel;
 	if (dom.showTriggersChk) dom.showTriggersChk.checked = config.debug.showTriggers;
+	// 实体 trigger 线框的两类开关是会话内偏好（localStorage），不来自共享 config
+	{
+		const readFlag = (k: string): boolean => {
+			try {
+				return globalThis.localStorage?.getItem(k) !== '0';
+			} catch {
+				return true;
+			}
+		};
+		if (dom.showPushTriggersChk) dom.showPushTriggersChk.checked = readFlag('vbsp:debug:pushTriggers');
+		if (dom.showOtherTriggersChk) dom.showOtherTriggersChk.checked = readFlag('vbsp:debug:otherTriggers');
+	}
 	if (dom.triggerViewDistanceRange) dom.triggerViewDistanceRange.value = String(config.debug.triggerViewDistance);
 	if (dom.triggerViewDistanceNum) dom.triggerViewDistanceNum.value = String(config.debug.triggerViewDistance);
 	if (dom.showPhyChk) dom.showPhyChk.checked = config.debug.showPhy;
@@ -1867,6 +1886,17 @@ function bindUI(): void {
 		inputBridge?.sendConfig('debug', { showTriggers: enabled });
 		saveUiPrefs();
 	});
+	// 触发区线框按语义拆成三类：传送触发器（共享 config）/ 加速板 / 其它实体 trigger
+	// （后两类是会话内开关，由 renderer 自己持久化）。改任一实体类开关时把两类一起下发，
+	// 因为 renderer 的接口是成对的。
+	const applyEntityTriggerVisibility = (): void => {
+		rendererMain?.setEntityTriggerVisibility(
+			dom.showPushTriggersChk?.checked ?? true,
+			dom.showOtherTriggersChk?.checked ?? true,
+		);
+	};
+	dom.showPushTriggersChk?.addEventListener('change', applyEntityTriggerVisibility);
+	dom.showOtherTriggersChk?.addEventListener('change', applyEntityTriggerVisibility);
 	bindSlider(dom.triggerViewDistanceRange, dom.triggerViewDistanceNum, (v) => {
 		applyConfigPatch(config, 'debug', { triggerViewDistance: v });
 		rendererMain?.applyConfigPatch('debug', { triggerViewDistance: v });

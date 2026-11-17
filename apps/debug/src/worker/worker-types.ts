@@ -247,7 +247,17 @@ export interface SetPushVelocityMessage {
   vel: [number, number, number];
 }
 
-/** 主线程 → Worker 的消息类型（21 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
+/** 设置水平速度上限（HU/s，**不含竖直分量**；对应 Source 的 `sv_maxvelocity`）。
+ *
+ * 由宿主按地图 `logic_auto` 的 `servercommand sv_maxvelocity <n>` 下发；`cap <= 0` 关闭钳制。
+ * 值被记忆并在世界重建后重放（地图级设置，重建后仍需生效）。
+ */
+export interface SetSpeedCapMessage {
+  type: 'set-speed-cap';
+  cap: number;
+}
+
+/** 主线程 → Worker 的消息类型（22 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
  *  分发层处理的消息，未在本联合中声明。 */
 export type WorkerMessage =
   | WasmInitMessage
@@ -270,7 +280,8 @@ export type WorkerMessage =
   | SetDeathThresholdMessage
   | SetPlayerNameMessage
   | AddVelocityMessage
-  | SetPushVelocityMessage;
+  | SetPushVelocityMessage
+  | SetSpeedCapMessage;
 
 // ── Worker → 主线程 ──────────────────────────────────────────
 

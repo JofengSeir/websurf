@@ -169,6 +169,13 @@ pub struct PhysWorld {
     /// 最近一次物理事件（传送/死亡）。一次 `step_core` 至多产生一个，
     /// 由 `take_event` 取走后置空；不取则被下一次事件覆盖。
     event: Option<PhysEvent>,
+    /// 水平速度上限（HU/s，**不含竖直分量**）：对应 Source 的 `sv_maxvelocity`。
+    ///
+    /// 只钳水平模长 `hypot(vx, vz)`，竖直速度不受限（surf 语义：竖直方向的冲量
+    /// 与重力需要保留，否则板子/斜坡的抛射会被整个削平）。默认 3500（Source 默认值），
+    /// 地图 `logic_auto` 的 `sv_maxvelocity` 经 `set_max_horizontal_speed` 覆盖（surf_666 写的是 10000）。
+    /// `<= 0` 表示关闭钳制（调试用）。
+    max_horizontal_speed: f64,
     /// 零分配输出缓冲：`tick_into` 的唯一状态出口，JS 侧经 `state_out_ptr` 在 wasm
     /// 线性内存上建 `Float64Array` 视图直读，不构造 wasm→JS 对象。
     ///
@@ -209,6 +216,7 @@ impl PhysWorld {
             ready: false,
             hull_stats: [0; 4],
             event: None,
+            max_horizontal_speed: 3500.0,
             state_out: [0.0; 22],
         }
     }
@@ -798,7 +806,11 @@ impl PhysWorld {
                 self.player.input.reset = false;
                 self.player.respawn(&self.spawn);
             }
+            // Source 的 `sv_maxvelocity` 在加速前与移动（含碰撞）后再各钳一次；只钳水平，
+            // 竖直分量保留（板子/斜坡/传送的抛射需要它）。
+            self.clamp_horizontal_speed();
             player_tick(&mut self.world, &mut self.player, &self.params, dt); self.maybe_restore_hull();
+            self.clamp_horizontal_speed();
         }
     }
 
@@ -827,6 +839,7 @@ impl PhysWorld {
             .pitch
             .max(-player::PITCH_CLAMP)
             .min(player::PITCH_CLAMP);
+        self.clamp_horizontal_speed();
         player_tick(&mut self.world, &mut self.player, &self.params, dt);
         Ok(self.state_js())
     }
@@ -921,18 +934,66 @@ impl PhysWorld {
     }
 
     /// 把玩家速度**设成**给定向量（HU/s，Y-up），对应 `trigger_push` 非 `SF_TRIG_PUSH_ONCE`
-    /// 分支的「设置速度」语义：玩家在触发区内时每帧把速度置为该方向/大小，离开后保持，
-    /// 不再按帧累加——否则 320fps 下每帧 +3000 会迅速涨到 40 万 HU/s
-    /// （surf_666 起点 4 块板实测）。
+    /// 分支的「设置速度」语义：玩家在触发区内时把水平速度置为该方向/大小。
     ///
-    /// 语义：`velocity = (vx, vy, vz)`；`vy > 0`（向上弹）时同时脱地，否则
-    /// `stay_on_ground` 会把向上分量按回地面（与 `add_velocity` 同理由）。
+    /// **竖直分量特殊处理**：`pushdir` 的 vy 为 0 时**保留玩家当前 vy**——板子/斜坡上
+    /// 由碰撞投影积累起来的上升速度不能被每帧清零（旧实现 `velocity = [vx,vy,vz]`
+    /// 会把它归零，导致「过了斜坡垂直速度没了」，surf_666 起点实测）。只有地图真的
+    /// 给了竖直推送分量（`vy != 0`）时才覆盖竖直速度，并按需脱地。
+    ///
+    /// **竖直分量完全不动**：Source 里 base velocity 的竖直分量只在 `StartGravity` 加一次，
+    /// 不该被每帧 touch 覆盖——旧实现 `velocity = [vx, vy, vz]` 会把斜坡上积累的上升速度
+    /// 抹掉（surf_666 lane1 顶部板 `pushdir.vy≈-15` 即触发该 bug，task-50 实测 vy 1191→-15）。
+    /// 只有地图真的给了**明显竖直**推送分量（|vy| > 25 HU/s）时才把 `vy*dt` 叠进竖直速度，
+    /// 并按需脱地。
+    ///
+    /// 水平大小取 `max(当前水平速度, |pushdir|*speed)`：进板不丢已有动量；斜坡把速度投影成
+    /// 水平+竖直后，下一帧仍接触板时还能把水平补回 push 值（「过斜坡掉 600」的可感知来源）。
+    /// 水平模长另受 `max_horizontal_speed` 钳制（Source `sv_maxvelocity`）。
     ///
     /// 不改位置/朝向，不产生事件；由实体层 `host.setPlayerBaseVelocity` 事件驱动。
     pub fn set_push_velocity(&mut self, vx: f64, vy: f64, vz: f64) {
-        self.player.velocity = [vx, vy, vz];
-        if vy > 0.0 {
-            self.player.on_ground = false;
+        let speed = (vx * vx + vz * vz).sqrt();
+        if speed <= 1e-9 {
+            return;
+        }
+        let cur_h = (self.player.velocity[0] * self.player.velocity[0]
+            + self.player.velocity[2] * self.player.velocity[2])
+            .sqrt();
+        let target = speed.max(cur_h);
+        let inv = 1.0 / speed;
+        self.player.velocity[0] = vx * inv * target;
+        self.player.velocity[2] = vz * inv * target;
+        if vy.abs() > 25.0 {
+            self.player.velocity[1] += vy / 64.0;
+            if vy > 0.0 {
+                self.player.on_ground = false;
+            }
+        }
+    }
+
+    /// 设置水平速度上限（HU/s，**不含竖直分量**）：`<= 0` 表示关闭钳制。
+    ///
+    /// 对应 Source 的 `sv_maxvelocity`（默认 3500）。宿主在地图加载后按
+    /// `logic_auto` 的 `servercommand sv_maxvelocity <n>` 调用；surf_666 写的是 10000。
+    /// 只钳水平模长：板子/斜坡/传送带来的竖直速度需要保留。
+    pub fn set_max_horizontal_speed(&mut self, cap: f64) {
+        self.max_horizontal_speed = cap;
+    }
+
+    /// 把水平速度模长钳到 `max_horizontal_speed`（竖直分量原样保留）。
+    fn clamp_horizontal_speed(&mut self) {
+        let cap = self.max_horizontal_speed;
+        if cap <= 0.0 {
+            return;
+        }
+        let vx = self.player.velocity[0];
+        let vz = self.player.velocity[2];
+        let h = (vx * vx + vz * vz).sqrt();
+        if h > cap && h > 1e-9 {
+            let scale = cap / h;
+            self.player.velocity[0] = vx * scale;
+            self.player.velocity[2] = vz * scale;
         }
     }
 
