@@ -232,14 +232,23 @@ export const TriggerPushClass: EntityClass = {
     e.set('__pushDir', pushDirToYup(dir));
   },
   touch: (e, other) => {
+    if (e.getBool('touchDisabled', false)) return;
     if (!passesTriggerFilters(e, other)) return;
     const dir = e.get<Vec3>('__pushDir') ?? [0, 0, 0];
-    const speed = e.getNumber('speed', 100) * e.getNumber('alternateticksfix', 1);
+    // `alternateticksfix` 只在 `sv_alternateticks` 开启时才是缩放系数
+    // （Source SDK `triggers.cpp:2230-2242` `CTriggerPush::Activate`：否则 `m_flPushSpeed = m_flSpeed`）。
+    // 本引擎固定 64Hz、没有 alternate ticks，所以直接用 `speed`；早期版本无条件相乘，
+    // 把 surf_666 起点 4 块 `alternateticksfix 0` + `speed 3000` 的加速板乘成了 0（完全不弹）。
+    const speed = e.getNumber('speed', 100);
     const v: Vec3 = [dir[0] * speed, dir[1] * speed, dir[2] * speed];
     if (e.hasSpawnFlags(SF_TRIGGER.PUSH_ONCE)) {
       e.runtime.host.addPlayerVelocity(v);
       if (v[1] > 0) e.runtime.host.setPlayerBaseVelocity(null);
-      removeSoon(e); // 真正在 Touch 内调度删除（triggers.cpp:2277）
+      // Source 在 Touch 内直接 `UTIL_Remove(this)`（triggers.cpp:2277）；本实现不在 touch 回调里
+      // 直接删自己，等价做法是先断 touch（`touchDisabled`）再 0.1s 后移除——否则这 0.1s 内
+      // 每帧 Touch 都会再叠一次 3000 HU/s（实测一帧 +3000、连叠数帧直接飞出地图）。
+      e.set('touchDisabled', true);
+      removeSoon(e);
       return;
     }
     e.runtime.host.setPlayerBaseVelocity(v);

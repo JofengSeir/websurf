@@ -223,7 +223,19 @@ export interface SetPlayerNameMessage {
   filterEnabled?: boolean;
 }
 
-/** 主线程 → Worker 的消息类型（19 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
+/** 给玩家叠加速度冲量（HU/s，Y-up；地图脚本 `trigger_push` 等）。
+ *
+ * 语义见 `PhysWorld::add_velocity`：`velocity += v`，`vy > 0` 时同时脱地。
+ * 实体运行期是「每帧 touch 一次就发一次」——`SF_TRIG_PUSH_ONCE` 只会在第一次 Touch
+ * 触发一次，非 ONCE 的弹力区每帧叠加一次（与 Source 的 FL_BASEVELOCITY 每帧加成同阶）。
+ * 不记忆、不重放：冲量是瞬时的，世界重建后不该补发。
+ */
+export interface AddVelocityMessage {
+  type: 'add-velocity';
+  vel: [number, number, number];
+}
+
+/** 主线程 → Worker 的消息类型（20 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
  *  分发层处理的消息，未在本联合中声明。 */
 export type WorkerMessage =
   | WasmInitMessage
@@ -244,7 +256,8 @@ export type WorkerMessage =
   | SetSpawnPointsMessage
   | SyncRenderStateMessage
   | SetDeathThresholdMessage
-  | SetPlayerNameMessage;
+  | SetPlayerNameMessage
+  | AddVelocityMessage;
 
 // ── Worker → 主线程 ──────────────────────────────────────────
 

@@ -117,6 +117,10 @@ export interface PhysWorldLike {
   set_teleport_player_name?(name: string): void;
   /** 名门控总开关：`false` = 忽略全部门控（`__vbspTeleportFilterOff` 回退路径）。 */
   set_teleport_filter_enabled?(enabled: boolean): void;
+  /** 叠加速度冲量（HU/s，Y-up；地图脚本 `trigger_push` 等）。
+   * 语义由 `PhysWorld::add_velocity` 定义：`velocity += v`，`vy > 0` 时脱地。
+   * 可选：测试桩缺失时忽略。 */
+  add_velocity?(vx: number, vy: number, vz: number): void;
   /** 释放 wasm 实例（wasm-bindgen 的 free）。本文件从不调用它；world 重建时由
    * `src/ts-shared/auth/worker-dispatch.ts` 的 `createWorkerDispatch` 释放旧实例。声明为可选，
    * 使没有 free 的注入实现（node 内测试桩）也能满足接口。 */

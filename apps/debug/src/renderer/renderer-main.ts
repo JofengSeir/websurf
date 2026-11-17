@@ -139,6 +139,22 @@ export interface RenderPhysEvent {
 /** 分块合并总开关：false 时 `loadScene` 不调 `optimizeScene`，保留 GLTFLoader 原始场景图。 */
 const OPTIMIZE_SCENE_ENABLED = true;
 
+/**
+ * 解析实体层上报的速度冲量 detail（`attach.ts` 里 `JSON.stringify(vec3)`）。
+ * 非法 / `null`（`setPlayerBaseVelocity(null)` 清除语义）时返回 null，调用方直接忽略。
+ */
+function parseVelocityDetail(detail: string | undefined): [number, number, number] | null {
+  if (!detail || detail === 'null') return null;
+  try {
+    const v = JSON.parse(detail) as unknown;
+    if (!Array.isArray(v) || v.length !== 3) return null;
+    if (!v.every((x): x is number => typeof x === 'number' && Number.isFinite(x))) return null;
+    return [v[0], v[1], v[2]];
+  } catch {
+    return null;
+  }
+}
+
 
 /** 主线程渲染器：持有 WebGL 渲染器、场景、相机与全部子管理器。相机不再本地插值——
  * 每个渲染帧由 `tick` 用 `predPhys.state()` 直接摆放。 */
@@ -307,6 +323,15 @@ export class RendererMain {
    * 首帧也会触发一次（空串也得同步，否则门控总开关/默认状态在权威侧不可知）。
    */
   onPlayerNameChange: ((name: string) => void) | null = null;
+
+  /**
+   * 玩家速度冲量回调（地图脚本 `trigger_push` → `host.addPlayerVelocity` / `baseVelocity`）。
+   *
+   * 实体运行期是观测模式：push 只上报不上力，所以这里把冲量同时打到渲染物理线
+   * （`predPhys.add_velocity`）并回调给 app.ts 转发给权威 Worker——两边必须同帧同参，
+   * 否则渲染线被弹飞、权威线还留在原地（或反之）。
+   */
+  onPlayerVelocity: ((vel: [number, number, number]) => void) | null = null;
 
   /**
    * 渲染物理线 → 权威侧的反向同步回调（由 `AuthorityCalibrator` 在兜底重锚/首次起点对齐时
@@ -572,8 +597,24 @@ export class RendererMain {
       getPlayerState: () => playerStateFromRaw(
         (this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 },
       ),
-      onEvent: (event) => this.onEntityEvent?.(event),
+      onEvent: (event) => {
+        // trigger_push 一类「瞬时冲量」副作用：观测模式下 host 只 emit，在这里落到物理线。
+        // `entity:addVelocity` = SF_TRIG_PUSH_ONCE（一次性冲量）；
+        // `entity:baseVelocity` = 非 ONCE 弹力区（每帧 touch 一次就叠一次，与 Source 的
+        // FL_BASEVELOCITY 每帧加成同阶）。
+        if (event.kind === 'entity:addVelocity' || event.kind === 'entity:baseVelocity') {
+          const v = parseVelocityDetail(event.detail);
+          if (v) this.applyPlayerVelocity(v);
+        }
+        this.onEntityEvent?.(event);
+      },
     });
+  }
+
+  /** 把实体层上报的速度冲量同时施加到渲染物理线并回调给宿主（权威 Worker）。 */
+  private applyPlayerVelocity(vel: [number, number, number]): void {
+    this.predPhys?.add_velocity?.(vel[0], vel[1], vel[2]);
+    this.onPlayerVelocity?.(vel);
   }
 
   /**

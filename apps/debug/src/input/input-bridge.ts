@@ -102,4 +102,10 @@ export class InputBridge {
   sendSetPlayerName(name: string, filterEnabled?: boolean): void {
     this.worker.postMessage({ type: 'set-player-name', name, filterEnabled });
   }
+
+  /** 发 `add-velocity`：地图脚本（`trigger_push` 等）给玩家叠加速度冲量（HU/s，Y-up）。
+   *  权威侧 `PhysWorld::add_velocity` 语义：`velocity += v`，`vy > 0` 时同时脱地。 */
+  sendAddVelocity(vel: [number, number, number]): void {
+    this.worker.postMessage({ type: 'add-velocity', vel });
+  }
 }

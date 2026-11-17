@@ -566,6 +566,24 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       }
       return;
     }
+    if (type === 'add-velocity') {
+      // 地图脚本 `trigger_push` 等叠加速度冲量（HU/s，Y-up）。
+      // 语义由 `PhysWorld::add_velocity` 定义：`velocity += v`，`vy > 0` 时同时脱地。
+      // 不记忆、不重放（瞬时冲量，世界重建后补发会造成二次弹射）；三槽都写。
+      const av = msg as { vel?: unknown };
+      const vel = av.vel;
+      if (
+        Array.isArray(vel) &&
+        vel.length === 3 &&
+        vel.every((v) => typeof v === 'number' && Number.isFinite(v))
+      ) {
+        const [vx, vy, vz] = vel as [number, number, number];
+        env.phys.current?.add_velocity?.(vx, vy, vz);
+        env.tickPhys?.current?.add_velocity?.(vx, vy, vz);
+        env.scratch?.current?.add_velocity?.(vx, vy, vz);
+      }
+      return;
+    }
     if (type === 'set-mode') {
       // 模式握手：值域白名单校验（三值）→ 与当前模式不同才执行钩子 → 无条件回 mode-ack。
       // 同 mode 重复到达只回 ack、不重复执行钩子；切换所需的状态载荷随消息一并透传给钩子。

@@ -902,6 +902,24 @@ impl PhysWorld {
         self.player.velocity = [vx, vy, vz];
     }
 
+    /// 给玩家叠加一个速度冲量（HU/s，Y-up），对应 Source 的
+    /// `CBaseEntity::ApplyAbsVelocityImpulse`（surf_666 的 4 块加速板就是
+    /// `trigger_push` + `SF_TRIG_PUSH_ONCE` 走这条路径，见 `triggers.cpp:2269-2278`）。
+    ///
+    /// 语义：`velocity += (vx, vy, vz)`；当 `vy > 0`（向上弹）时同时脱地——否则
+    /// `stay_on_ground` 会把玩家按回地面、向上冲量被吃掉（对应 SDK 里
+    /// `vecAbsDir.z > 0 ⇒ SetGroundEntity(NULL)`）。
+    ///
+    /// 不改位置/朝向，不产生事件；由实体层 `host.addPlayerVelocity` 事件驱动。
+    pub fn add_velocity(&mut self, vx: f64, vy: f64, vz: f64) {
+        self.player.velocity[0] += vx;
+        self.player.velocity[1] += vy;
+        self.player.velocity[2] += vz;
+        if vy > 0.0 {
+            self.player.on_ground = false;
+        }
+    }
+
     /// 设置玩家当前 targetname（实体层 `!activator AddOutput targetname` 改名后由宿主推送）。
     ///
     /// 只影响传送 trigger 的 `filter_activator_name` 门控（`TeleportManager::player_name`），
