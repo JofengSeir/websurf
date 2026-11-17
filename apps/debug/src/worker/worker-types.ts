@@ -201,8 +201,7 @@ export interface SyncRenderStateMessage {
   };
 }
 
-/**
- * 掉落死亡阈值（主线程从场景包围盒算出，权威与渲染同值）。
+/** 掉落死亡阈值（主线程从场景包围盒算出，权威与渲染同值）。
  *
  * 收到数值即被记忆，随后写全部已注入的权威实例；记忆值在世界重建时自动重放，因此
  * 本消息早于 `world-json` 到达也不会丢失。
@@ -212,7 +211,19 @@ export interface SetDeathThresholdMessage {
   value: number;
 }
 
-/** 主线程 → Worker 的消息类型（18 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
+/** 玩家实体当前 targetname（地图脚本用 `AddOutput targetname` 改名做传送门控）。
+ *
+ * 权威侧传送器按 `filter_activator_name` 静态解析出的名字模式判定是否响应；名字经本消息
+ * 从主线程实体系统回传。`filterEnabled` 缺省 = true；`false` 时权威忽略全部门控
+ * （`__vbspTeleportFilterOff=true` 的回退路径）。值被记忆并在世界重建后重放。
+ */
+export interface SetPlayerNameMessage {
+  type: 'set-player-name';
+  name: string;
+  filterEnabled?: boolean;
+}
+
+/** 主线程 → Worker 的消息类型（19 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
  *  分发层处理的消息，未在本联合中声明。 */
 export type WorkerMessage =
   | WasmInitMessage
@@ -232,7 +243,8 @@ export type WorkerMessage =
   | TeleportToPosMessage
   | SetSpawnPointsMessage
   | SyncRenderStateMessage
-  | SetDeathThresholdMessage;
+  | SetDeathThresholdMessage
+  | SetPlayerNameMessage;
 
 // ── Worker → 主线程 ──────────────────────────────────────────
 

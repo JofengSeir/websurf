@@ -784,7 +784,8 @@ impl PhysWorld {
                 });
                 self.apply_teleport(&dest.origin, dest.yaw);
                 self.teleport.on_teleported();
-                self.teleport.reset_cooldown();
+                // 不重置冷却：check 命中时已置 0.5 s，保留它可避免「落点仍在触发区内」
+                // 时每 tick 重复传送（surf_666 起点回卷点的实测症状）。
             }
             // 死亡判定
             if let Some(sp) = check_death(&self.player.origin, self.death_y, &self.spawn) {
@@ -839,10 +840,12 @@ impl PhysWorld {
 
     /// 立即传送到指定坐标，`yaw` 单位为度。
     ///
-    /// 经 `apply_teleport`：清零速度、`on_ground` 置 false、同步 `prev_origin`、
-    /// 复位传送冷却。**不做落地探测**——落点是否悬空由调用方负责。
+    /// 经 `apply_teleport`：清零速度、`on_ground` 置 false、同步 `prev_origin`；
+    /// 之后清传送冷却（外部重定位不应继承步内命中留下的冷却）。
+    /// **不做落地探测**——落点是否悬空由调用方负责。
     pub fn teleport_to(&mut self, x: f64, y: f64, z: f64, yaw: f64) {
         self.apply_teleport(&[x, y, z], yaw);
+        self.teleport.reset_cooldown();
     }
 
     /// 覆盖出生点列表，JSON 形如 `[[x,y,z,yaw], ...]`（`yaw` 单位为度）。
@@ -858,10 +861,11 @@ impl PhysWorld {
     }
 
     /// 传送到出生点列表中的第 `idx` 项。越界时静默忽略——不报错、不移动。
-    /// 传送路径与 `teleport_to` 相同（都走 `apply_teleport`）。
+    /// 传送路径与 `teleport_to` 相同（都走 `apply_teleport` + 清冷却）。
     pub fn teleport_to_spawn(&mut self, idx: usize) {
         if let Some(sp) = self.spawn_points.get(idx) {
             self.apply_teleport(&[sp[0], sp[1], sp[2]], sp[3]);
+            self.teleport.reset_cooldown();
         }
     }
 
@@ -896,6 +900,21 @@ impl PhysWorld {
     /// 与 `src/ts-shared/decoupled/decoupled-loop.ts` 的 `alignTickPhys`。
     pub fn set_velocity(&mut self, vx: f64, vy: f64, vz: f64) {
         self.player.velocity = [vx, vy, vz];
+    }
+
+    /// 设置玩家当前 targetname（实体层 `!activator AddOutput targetname` 改名后由宿主推送）。
+    ///
+    /// 只影响传送 trigger 的 `filter_activator_name` 门控（`TeleportManager::player_name`），
+    /// 不写 `state` 输出、不触发事件、不改位置/速度。宿主每帧检测到名字变化才推即可，
+    /// 相同名字重复调用无副作用（幂等、字符串覆盖）。
+    pub fn set_teleport_player_name(&mut self, name: &str) {
+        self.teleport.player_name = name.to_string();
+    }
+
+    /// 名门控总开关（默认开，`from_json` 置 true）。`false` = 忽略所有 `filter_name`，
+    /// 退回「碰到就传」的旧行为；供 `__vbspTeleportFilterOff` 逃生舱使用。
+    pub fn set_teleport_filter_enabled(&mut self, enabled: bool) {
+        self.teleport.filter_enabled = enabled;
     }
 
     /// 只覆盖 yaw / pitch（度）：位置、速度、着地均不动。
@@ -1099,16 +1118,16 @@ impl PhysWorld {
         obj.into()
     }
 
-    /// 传送的唯一写入口：落点、清零速度、离地、朝向、同步 `prev_origin`，并复位传送冷却。
+    /// 传送的唯一写入口：落点、清零速度、离地、朝向、同步 `prev_origin`。
     /// `teleport_to` / `teleport_to_spawn` / 步内触发传送三条路径都汇聚到这里，
-    /// 以保证"传送后字段集"始终一致。
+    /// 以保证"传送后字段集"始终一致。**不碰冷却**：是否清冷却由调用方决定
+    /// （步内命中保留 `check` 置的 0.5 s，外部重定位显式清零）。
     fn apply_teleport(&mut self, origin: &[f64; 3], yaw: f64) {
         self.player.origin = *origin;
         self.player.velocity = [0.0, 0.0, 0.0];
         self.player.on_ground = false;
         self.player.yaw = yaw;
         self.player.prev_origin = *origin;
-        self.teleport.reset_cooldown();
     }
 }
 

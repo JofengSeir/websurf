@@ -257,6 +257,10 @@ export class RendererMain {
   private stepQuota = 0;
   /** 死亡 Y 阈值：`loadScene` 末尾经 `onSceneLoaded` 回调上报，`setDeathY` 记录并透传物理实例。 */
   private deathY: number | null = null;
+  /** 已推送给权威侧的玩家 targetname（`null` = 尚未同步过，首帧必推一次）。 */
+  private playerNamePushed: string | null = null;
+  /** 已推送的名门控总开关（`null` = 尚未同步；`__vbspTeleportFilterOff` 翻转时也要重推）。 */
+  private teleportFilterPushed: boolean | null = null;
 
   // ── 权威帧校准（实现收敛到 src/ts-shared/phys/authority-calibrator.ts）──
   /** 权威帧校准器：`correctFromAuthority` / `calibrateVelocity` / `applyCollisionCorrection` /
@@ -295,6 +299,14 @@ export class RendererMain {
   onSceneLoaded: ((deathThresholdY: number) => void) | null = null;
   /** 实体系统观测回调：I/O 输入、宿主副作用请求都会送到这里（缺省丢弃）。 */
   onEntityEvent: ((event: EntityEvent) => void) | null = null;
+  /**
+   * 玩家实体 targetname 变化回调（地图脚本改名门控 → 传送 filter）。
+   *
+   * 名字在实体系统内部变迁（`AddOutput targetname`），权威侧 `src/phys/teleport.rs` 的
+   * `TeleportManager` 需要它才能判 `filter_activator_name`；本回调只在**值变化**时触发，
+   * 首帧也会触发一次（空串也得同步，否则门控总开关/默认状态在权威侧不可知）。
+   */
+  onPlayerNameChange: ((name: string) => void) | null = null;
 
   /**
    * 渲染物理线 → 权威侧的反向同步回调（由 `AuthorityCalibrator` 在兜底重锚/首次起点对齐时
@@ -444,6 +456,9 @@ export class RendererMain {
     this.noclipActive = false;
     this.lastTickMs = 0;
     this.deathY = null;
+    // 换图后实体系统重建：玩家名的「已推送」缓存清零，首帧重新同步给权威侧
+    this.playerNamePushed = null;
+    this.teleportFilterPushed = null;
     // 换图时停掉飞行复播（轨迹本身保留：同一张图重载后还能直接 seek）
     this.stopFlightPlayback();
     // 权威校准状态清零（旧图的权威帧不得注入新图）
@@ -606,6 +621,27 @@ export class RendererMain {
     return this.entitySystem?.stats() ?? null;
   }
 
+  /**
+   * 把玩家实体当前 targetname 同步给权威侧（变化才回调）。
+   *
+   * 来源是实体系统内部的玩家实体（`EntitySystem.getPlayer()`）——地图脚本用
+   * `AddOutput targetname krazy1/2/3` 在触碰时改名，传送器按 filter 里的名字模式决定是否响应。
+   * 名字不由物理状态携带（`PlayerState` 无 name 字段），故此路是唯一回传通道。
+   */
+  private syncPlayerName(): void {
+    const name = this.entitySystem?.getPlayer()?.targetname ?? '';
+    // 主线程渲染物理与权威 Worker 必须同参：两侧各自跑 teleport.check，名门控分叉会让
+    // 「权威回卷了、画面没回卷」或反之（渲染侧没有反向同步传送的通道）。
+    const filterEnabled =
+      (globalThis as unknown as { __vbspTeleportFilterOff?: boolean }).__vbspTeleportFilterOff !== true;
+    if (name === this.playerNamePushed && filterEnabled === this.teleportFilterPushed) return;
+    this.playerNamePushed = name;
+    this.teleportFilterPushed = filterEnabled;
+    this.predPhys?.set_teleport_player_name?.(name);
+    this.predPhys?.set_teleport_filter_enabled?.(filterEnabled);
+    this.onPlayerNameChange?.(name);
+  }
+
   /** 启动渲染循环（幂等：已在运行时直接返回）。 */
   start(): void {
     if (this.running) return;
@@ -708,6 +744,9 @@ export class RendererMain {
 
       // Source 实体运行期：与物理同帧推进（touch 用本帧 state，0 延迟输出当帧消费）。
       this.entitySystem?.frame(dt);
+      // 地图脚本用 `AddOutput targetname` 给玩家改名来做传送门控（filter_activator_name）：
+      // 名字只存在于实体系统内，权威侧传送器需要它才能判 filter，故每帧取一次、变化才回调。
+      this.syncPlayerName();
     } else if (this.stepGated) {
       // 闸门跳过物理的帧也要推进墙钟基准，否则闸门恢复时会拿到一个异常大的 dt
       this.lastTickMs = now;

@@ -120,6 +120,14 @@ pub struct TeleportTrigger {
     /// true = 该 trigger 从不参与判定（`check` 的第一道 `continue`）；
     /// JSON 缺该字段时取 false。
     pub start_disabled: bool,
+    /// 名门控（`filter_activator_name`）：`from_json` 的 `filter_name` 字段，值为
+    /// filter 实体 `filtername` 解析出的允许名模式。`None` = 无过滤；模式语义见
+    /// [`name_matches`]（大小写不敏感、只支持末尾 `*`）。
+    pub filter_name: Option<String>,
+    /// 名门控是否取反（`filter_negated`，来自 filter 实体的 `Negated` 键）。false =
+    /// 名字匹配才放行；true = **名字不匹配才放行**。surf_666 起点 3 条门控全是
+    /// Negated=1：默认无名反而放行回卷，拿到 krazy1/krazy3 才禁用对应回卷。
+    pub filter_negated: bool,
     /// 是否已进入过该区域。**没有任何判定读它**：写入点只有 `from_json` 的初值 false、
     /// `on_teleported` 的统一清零、以及种子面 `seed_trigger_inside`。
     pub inside: bool,
@@ -128,10 +136,19 @@ pub struct TeleportTrigger {
 /// 一张地图的全部 trigger / destination，加一个共享的冷却计时器。
 /// `triggers` / `destinations` 公开可读；`cooldown` 私有，写路径只有 `check`（置 0.5
 /// 或递减）、`reset_cooldown`（写 0.0）、`seed_cooldown`（写任意值）三条。
+///
+/// 注意 `Default` 派生的 `filter_enabled` 是 `false`；正常路径由
+/// [`TeleportManager::from_json`] 置 `true`（带名门控）。
 #[derive(Clone, Debug, Default)]
 pub struct TeleportManager {
     pub triggers: Vec<TeleportTrigger>,
     pub destinations: Vec<TeleportDestination>,
+    /// 玩家当前 targetname（实体层 `AddOutput targetname` 改名后由宿主推送，默认空串）。
+    /// `check` 用它做 `filter_name` 判定：空串匹配不了任何具名 filter。
+    pub player_name: String,
+    /// 名门控总开关（默认开）：关掉时 `check` 忽略所有 `filter_name`，退回旧行为。
+    /// 供 `__vbspTeleportFilterOff` 回退开关使用。
+    pub filter_enabled: bool,
     /// 冷却剩余时间（秒）。负数也会出现：`check` 只在 `> 0.0` 时递减，越过后就一直保持
     /// 那个负值，直到下一次命中或 `reset_cooldown`。
     cooldown: f64,
@@ -177,6 +194,11 @@ impl TeleportManager {
             model_planes: Option<Vec<[f64; 4]>>,
             spawnflags: Option<u32>,
             start_disabled: Option<bool>,
+            /// 名门控（`filter_activator_name` 解析结果）；缺省 = 无过滤。
+            filter_name: Option<String>,
+            /// 名门控是否取反（filter 实体 `Negated` 键）；缺省 false。
+            #[serde(default)]
+            filter_negated: bool,
         }
         #[derive(serde::Deserialize)]
         struct WasmTeleportReport {
@@ -228,6 +250,8 @@ impl TeleportManager {
                 dest_index: dest_idx,
                 spawnflags: t.spawnflags.unwrap_or(1),
                 start_disabled: t.start_disabled.unwrap_or(false),
+                filter_name: t.filter_name.clone(),
+                filter_negated: t.filter_negated,
                 inside: false,
             });
         }
@@ -235,6 +259,8 @@ impl TeleportManager {
         Ok(TeleportManager {
             triggers,
             destinations,
+            player_name: String::new(),
+            filter_enabled: true,
             cooldown: 0.0,
         })
     }
@@ -249,8 +275,10 @@ impl TeleportManager {
     /// ③ `surfing == true` → `None`（贴坡滑行不算进入传送区）。
     /// 随后取 `grounded = ground_ticks > 0`：它不是早退，只作 B 路径与 gap 的启用条件。
     ///
-    /// 再逐个 trigger 过滤：`start_disabled`、`spawnflags` 非 0 且 0x01 / 0x40 两位都
-    /// 不含、`dest_index < 0`（孤儿）、`dest_index` 越界；四道过滤都没跳过它，才试 A 路径
+    /// 再逐个 trigger 过滤：`start_disabled`、`filter_name` 名门控（匹配才放行，
+    /// `filter_negated` 时取反）、
+    /// `spawnflags` 非 0 且 0x01 / 0x40 两位都不含、`dest_index < 0`（孤儿）、
+    /// `dest_index` 越界；五道过滤都没跳过它，才试 A 路径
     /// （`in_trigger_zone`）、再试 B 路径（`grounded && probe_below_foot`）。
     /// 命中即写 `cooldown = TRIGGER_COOLDOWN`（0.5 s）并返回目标点克隆。
     ///
@@ -292,6 +320,17 @@ impl TeleportManager {
             if t.start_disabled {
                 continue;
             }
+            // 名门控（`filter_activator_name`）：玩家名要与 filter 匹配才放行；
+            // filter 实体带 `Negated=1` 时取反（**不匹配才放行**，surf_666 起点就是这种）。
+            // `filter_enabled=false` 是回退开关（`__vbspTeleportFilterOff`）。
+            if self.filter_enabled {
+                if let Some(f) = &t.filter_name {
+                    let matched = name_matches(f, &self.player_name);
+                    if matched == t.filter_negated {
+                        continue;
+                    }
+                }
+            }
             // 客户端掩码过滤：值非 0 且 0x01、0x40 两位都不含 → 该 trigger 对玩家不生效。
             // **值恰为 0 时不跳过**（0 绕过这一道过滤）；上游在键缺失或无法解析时给的是 1，
             // 所以 0 只来自实体上显式配置的 spawnflags=0。
@@ -319,11 +358,11 @@ impl TeleportManager {
     }
 
     /// 传送后的状态复位：把所有 trigger 的 `inside` 清回 false。
-    /// **不碰 `cooldown`** —— 冷却清零由 `reset_cooldown` 负责，步内触发时两个都会被调到
-    /// （同一处 `src/phys/mod.rs` 的 `PhysWorld::step_core`）。
+    /// **不碰 `cooldown`**：步内命中时 `check` 已经把冷却置为 0.5 s，这里刻意保留，
+    /// 防止落点仍在触发区内时每 tick 重复传送；外部重定位（`respawn` / `teleport_to` /
+    /// `teleport_to_spawn`）才用 `reset_cooldown` 清零。
     ///
-    /// 唯一调用点是步内触发路径；`PhysWorld::teleport_to` / `teleport_to_spawn` 不走这里
-    /// （它们只经 `apply_teleport` → `reset_cooldown`）。
+    /// 唯一调用点是步内触发路径；`PhysWorld::teleport_to` / `teleport_to_spawn` 不走这里。
     pub fn on_teleported(&mut self) {
         for t in &mut self.triggers {
             t.inside = false;
@@ -331,8 +370,9 @@ impl TeleportManager {
     }
 
     /// 冷却清零（直接写 0.0，不做递减）。
-    /// 调用点：步内触发传送后、掉落死亡后、`src/phys/mod.rs` 的 `PhysWorld::respawn` 与
-    /// `PhysWorld::apply_teleport`。
+    /// 调用点：掉落死亡后、`src/phys/mod.rs` 的 `PhysWorld::respawn` /
+    /// `PhysWorld::teleport_to` / `PhysWorld::teleport_to_spawn`。
+    /// **步内命中传送不调它**（否则落点若仍在触发区内会每 tick 重传）。
     pub fn reset_cooldown(&mut self) {
         self.cooldown = 0.0;
     }
@@ -345,9 +385,9 @@ impl TeleportManager {
     /// 种子面：直接写私有字段 `cooldown`，不做范围校验（负值、超过 0.5 的值都原样收下）。
     /// 读取方是 `cooldown_value`，进出通道是 `seed::SeedState.teleport_cooldown`。
     ///
-    /// **步进过程里这个值不会跨 tick 存活**：命中当 tick 就置 0.5，同一个 `step_core` 内
-    /// `apply_teleport` 又会 `reset_cooldown` 写回 0.0；下一步 `check` 只在 `> 0.0` 时递减，
-    /// 于是实例在两次 tick 之间读到的恒为 0。播种它只服务全量投影的字段完整性。
+    /// **命中后会跨 tick 存活**：`check` 命中置 0.5 s，`step_core` 不再把它清零，
+    /// 后续 tick 由 `check` 递减；落点仍在触发区内时也不会每 tick 重传。
+    /// 播种它用于全量投影的字段完整性，也可用于测试构造冷却中的状态。
     pub fn seed_cooldown(&mut self, v: f64) {
         self.cooldown = v;
     }
@@ -380,6 +420,24 @@ impl TeleportManager {
     /// `extract_seed` 用）。只读，不改任何状态。
     pub fn trigger_inside_vec(&self) -> Vec<bool> {
         self.triggers.iter().map(|t| t.inside).collect()
+    }
+}
+
+/// `filter_activator_name` 的名字匹配，语义与 TS 实体层 `NamesMatch`
+/// （`src/ts-shared/entity/entity-list.ts`）一致：
+/// - 大小写不敏感（ASCII 折叠）；
+/// - 只支持**末尾** `*` 通配（`krazy*` 匹配 `krazy1`/`krazy2`），中间 `*`/`?` 不当通配符；
+/// - 空模式不匹配任何名字（含空名），与 Source `CFilterName` 同口径。
+pub fn name_matches(pattern: &str, name: &str) -> bool {
+    if pattern.is_empty() {
+        return false;
+    }
+    match pattern.strip_suffix('*') {
+        Some(prefix) => match name.get(..prefix.len()) {
+            Some(head) => head.eq_ignore_ascii_case(prefix),
+            None => false,
+        },
+        None => name.eq_ignore_ascii_case(pattern),
     }
 }
 

@@ -111,6 +111,12 @@ export interface PhysWorldLike {
   teleport_to(x: number, y: number, z: number, yaw: number): void;
   set_spawn_points(json: string): void;
   set_death_y(y: number): void;
+  /** 玩家名门控（地图脚本改名 + `filter_activator_name`）：
+   * `src/phys/teleport.rs` 的 `TeleportManager` 按它判定门控传送是否响应。
+   * 声明为可选，兼容没有该能力的测试桩（缺省 = 门控不生效）。 */
+  set_teleport_player_name?(name: string): void;
+  /** 名门控总开关：`false` = 忽略全部门控（`__vbspTeleportFilterOff` 回退路径）。 */
+  set_teleport_filter_enabled?(enabled: boolean): void;
   /** 释放 wasm 实例（wasm-bindgen 的 free）。本文件从不调用它；world 重建时由
    * `src/ts-shared/auth/worker-dispatch.ts` 的 `createWorkerDispatch` 释放旧实例。声明为可选，
    * 使没有 free 的注入实现（node 内测试桩）也能满足接口。 */

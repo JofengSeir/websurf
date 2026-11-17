@@ -1319,7 +1319,13 @@ impl BspProcessor {
     /// 解析传送触发器与目的地（trigger_teleport + info_teleport_destination）。
     ///
     /// 返回 JSON：`{ "triggers": [{ index, target, classname, origin,
-    /// model_mins, model_maxs }], "links": [{ trigger_idx, dest_idx }] }`。
+    /// model_mins, model_maxs, spawnflags, start_disabled, filtername?,
+    /// filter_name?, filter_negated }], "links": [{ trigger_idx, dest_idx }], ... }`。
+    ///
+    /// **名门控**：`filtername` 是实体原始值（指向 filter 实体的 targetname）；
+    /// `filter_name` 是从 `filter_activator_name.filtername` 解析出的玩家名模式
+    /// （None = 无门控；静态解析，不跟踪 logic_* 运行时改写）；
+    /// `filter_negated` 来自 filter 实体的 `Negated` 键（1 = 不匹配才放行）。
     ///
     /// **坐标转换**：BSP Z-up → Three.js Y-up（`[x,y,z]→[y,z,x]`，det=+1）。
     /// `origin` 已旋转为 Y-up；`angles` 保持 BSP 原始 `[pitch, yaw, roll]`。
@@ -1357,6 +1363,16 @@ impl BspProcessor {
             spawnflags: u32,
             /// StartDisabled（0=启用, 1=禁用）；disabled 不应触发传送。
             start_disabled: bool,
+            /// 触发器自身的 `filtername`（原始值，指向 filter 实体的 targetname）。
+            /// `None` = 无门控。仅作溯源，运行时判定用 `filter_name`。
+            filtername: Option<String>,
+            /// 解析后的名门控模式：`filtername` → `filter_activator_name.filtername`
+            /// （filter 实体里真正要匹配的玩家名，支持末尾 `*`）。`None` = 无门控或解析不到。
+            filter_name: Option<String>,
+            /// 名门控是否取反：来自 filter 实体的 `Negated` 键（Source 的
+            /// `CBaseFilter::m_bNegated`）。默认 false = 匹配才放行；true = **不匹配才放行**
+            /// （surf_666 起点 3 条门控全是 Negated=1：默认名反而放行，拿到对应名字才禁用回卷）。
+            filter_negated: bool,
             origin_raw: String,
             model_raw: Option<String>,
         }
@@ -1545,6 +1561,31 @@ impl BspProcessor {
         let mut teleports: Vec<TeleportDest> = Vec::new();
         let mut triggers: Vec<TeleportTrigger> = Vec::new();
 
+        // 名门控表：`filter_activator_name` 的 targetname → (玩家名模式, 是否取反)。
+        //
+        // Source 语义链：trigger_teleport.filtername → filter 实体的 targetname；
+        // filter_activator_name.filtername 才是玩家名模式（`CFilterName`，末尾 `*` 通配、
+        // 大小写不敏感 → 见 `src/phys/teleport.rs::name_matches`）；
+        // filter 实体的 `Negated` 键 → `CBaseFilter::m_bNegated`，为 1 时**结果取反**。
+        // 这里做**静态解析**：不跟踪 logic_* 在运行时改 filtername / 禁用 filter 的情况；
+        // 解析不到就按「无门控」处理（保守：不阻塞旧地图的无 filter 触发器）。
+        let filter_names: std::collections::HashMap<String, (String, bool)> = bsp
+            .entities
+            .iter()
+            .filter(|ent| ent.prop("classname").map(|c| c == "filter_activator_name").unwrap_or(false))
+            .filter_map(|ent| {
+                let targetname = ent.prop("targetname").ok()?;
+                let filtername = ent.prop("filtername").ok()?;
+                // 「Negated」键在实体文本里可能被大小写化，prop() 查的是原始键，稳妥起见两种都试。
+                let negated = ent
+                    .prop("Negated")
+                    .or_else(|_| ent.prop("negated"))
+                    .map(|v| v == "1")
+                    .unwrap_or(false);
+                Some((targetname.to_string(), (filtername.to_string(), negated)))
+            })
+            .collect();
+
         for (idx, ent) in bsp.entities.iter().enumerate() {
             let Ok(classname) = ent.prop("classname") else {
                 continue;
@@ -1601,6 +1642,13 @@ impl BspProcessor {
                     .prop("startdisabled")
                     .map(|s| s == "1")
                     .unwrap_or(false);
+
+                // 名门控：trigger.filtername 指向 filter 实体，filter.filtername 是玩家名模式。
+                // 解析不到（比如指向不存在的 filter）按无门控处理，保持旧地图行为。
+                let filtername = ent.prop("filtername").ok().map(|s| s.to_string());
+                let mapped = filtername.as_ref().and_then(|f| filter_names.get(f.as_str()));
+                let filter_name = mapped.map(|(pattern, _)| pattern.clone());
+                let filter_negated = mapped.map(|(_, negated)| *negated).unwrap_or(false);
 
                 // model 格式 "*N" 指向 bsp.models[N]，几何为局部坐标（相对实体 origin）。
                 //
@@ -1698,6 +1746,9 @@ impl BspProcessor {
                         model_planes: None,
                         spawnflags,
                         start_disabled,
+                        filtername: filtername.clone(),
+                        filter_name: filter_name.clone(),
+                        filter_negated,
                         origin_raw,
                         model_raw,
                     });
@@ -1719,6 +1770,9 @@ impl BspProcessor {
                             },
                             spawnflags,
                             start_disabled,
+                            filtername: filtername.clone(),
+                            filter_name: filter_name.clone(),
+                            filter_negated,
                             origin_raw: origin_raw.clone(),
                             model_raw: model_raw.clone(),
                         });

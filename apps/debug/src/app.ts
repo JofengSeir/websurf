@@ -345,6 +345,13 @@ async function main(): Promise<void> {
 		rendererMain?.setDeathY(deathThresholdY);
 		inputBridge?.sendSetDeathThreshold(deathThresholdY);
 	};
+	// 地图脚本的玩家改名门控：实体系统内 `AddOutput targetname` 变化时回传权威 Worker，
+	// 供 `src/phys/teleport.rs` 判 `filter_activator_name`（起点 `krazy1/2/3` 免回卷/开回卷）。
+	// `__vbspTeleportFilterOff=true` 是整条门控的回退开关（权威侧相应忽略 filter）。
+	rendererMain.onPlayerNameChange = (name) => {
+		const filterOff = (globalThis as unknown as { __vbspTeleportFilterOff?: boolean }).__vbspTeleportFilterOff === true;
+		inputBridge?.sendSetPlayerName(name, !filterOff);
+	};
 	// 渲染主线 → 权威反向同步：teleport=true（真位置突变）由权威侧清未消费输入增量；
 	// teleport=false 走常规重锚，只注入状态、保留输入增量——清输入会造成可见的瞄准顿挫。
 	rendererMain.onSyncRenderState = (s, teleport) => {

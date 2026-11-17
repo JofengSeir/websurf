@@ -95,4 +95,11 @@ export class InputBridge {
   sendSetDeathThreshold(value: number): void {
     this.worker.postMessage({ type: 'set-death-threshold', value });
   }
+
+  /** 发 `set-player-name`：玩家实体当前 targetname（地图脚本改名门控）+ 门控总开关。
+   *  `filterEnabled` 省略时不改动总开关（只在名字变化时推名字的场景）；显式 `false` 用于
+   *  `__vbspTeleportFilterOff` 回退。 */
+  sendSetPlayerName(name: string, filterEnabled?: boolean): void {
+    this.worker.postMessage({ type: 'set-player-name', name, filterEnabled });
+  }
 }

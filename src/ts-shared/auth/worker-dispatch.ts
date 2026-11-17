@@ -23,8 +23,9 @@
  *    两工程都在加载地图之前发出 `wasm-init` 消息。
  * 2. **主实例恒在**：`env.phys` 是唯一必选实例槽；`tickPhys` / `scratch` 是可选并列槽，
  *    凡改动实例参数或状态的分支都在 `phys` 之后按同一实参同步它们，避免同一世界出现参数分叉。
- * 3. **死亡阈值跨世界重建存续**：`set-death-threshold` 的值由闭包变量记忆，`world-json`
- *    重建实例后经 `reapplyDeathY` 重放（Rust 侧该字段不在种子面，重建即回默认值）。
+ * 3. **死亡阈值与玩家名跨世界重建存续**：`set-death-threshold` / `set-player-name` 的值由闭包
+ *    变量记忆，`world-json` 重建实例后经 `reapplyDeathY` / `reapplyPlayerName` 重放（Rust 侧
+ *    这两个字段都不在种子面，重建即回默认值）。
  * 4. **幂等**：`authLoop.start()` 由 `loopStarted` 守卫只执行一次；`set-mode` 与当前模式
  *    相同时不调用 `onSetMode`，只回 `mode-ack`。
  * 5. 未识别消息不抛错：落到 `onExtraMessage`，未注入即静默丢弃。
@@ -221,6 +222,29 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     env.scratch?.current?.set_death_y(lastDeathY);
   };
 
+  /**
+   * 最近一次收到的玩家名（`set-player-name` 记忆）与名门控总开关。
+   *
+   * 必须记忆的原因与死亡阈值相同：`world-json` 会重建全部实例，而玩家名不在 Rust 侧种子面，
+   * 重建后回到空串——不重放会让「踩过改名区、已获得门控资格」的玩家在换图/重载后立刻失去
+   * 资格（起点回卷被错误放行或拦截）。
+   */
+  let lastPlayerName: string | null = null;
+  let lastTeleportFilterEnabled: boolean | null = null;
+  /** 把记忆的玩家名 / 门控总开关重放到全部已注入实例（世界重建之后调用）。 */
+  const reapplyPlayerName = (): void => {
+    if (lastPlayerName !== null) {
+      env.phys.current?.set_teleport_player_name?.(lastPlayerName);
+      env.tickPhys?.current?.set_teleport_player_name?.(lastPlayerName);
+      env.scratch?.current?.set_teleport_player_name?.(lastPlayerName);
+    }
+    if (lastTeleportFilterEnabled !== null) {
+      env.phys.current?.set_teleport_filter_enabled?.(lastTeleportFilterEnabled);
+      env.tickPhys?.current?.set_teleport_filter_enabled?.(lastTeleportFilterEnabled);
+      env.scratch?.current?.set_teleport_filter_enabled?.(lastTeleportFilterEnabled);
+    }
+  };
+
   /** wasm 就绪标志：仅 `initWasm` 成功置位；`world-json` 以它作前置守卫。 */
   let ready = false;
   /** `authLoop.start()` 只允许执行一次的守卫。 */
@@ -332,6 +356,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       env.authLoop.setFixedDt(env.getConfigTickRate()); // 重建后同步当前面板步长
       env.authLoop.reset();
       reapplyDeathY(); // 重放记忆的死亡阈值，避免退回 Rust 侧默认值
+      reapplyPlayerName(); // 重放记忆的玩家名/门控开关（同上，不在种子面）
       env.decoupledLoop?.publishCurrentState(); // 立刻发布一帧，首帧状态即刻可见
       env.onWorldBuilt?.(p);
       env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 出生点 Y + 已记忆的阈值（可为 null）
@@ -519,6 +544,25 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         env.phys.current?.set_death_y(dm.value);
         env.tickPhys?.current?.set_death_y(dm.value);
         env.scratch?.current?.set_death_y(dm.value); // 第三实例同一阈值
+      }
+      return;
+    }
+    if (type === 'set-player-name') {
+      // 玩家实体 targetname（地图脚本 `AddOutput targetname` 改名）→ 传送门控。
+      // 只影响 `src/phys/teleport.rs` 的 filter 判定（`name_matches`），不写 state、不推进物理。
+      // `filterEnabled` 缺省不改动总开关；显式 `false` 是 `__vbspTeleportFilterOff` 回退路径。
+      const pm = msg as { name?: string; filterEnabled?: boolean };
+      if (typeof pm.name === 'string') {
+        lastPlayerName = pm.name;
+        env.phys.current?.set_teleport_player_name?.(pm.name);
+        env.tickPhys?.current?.set_teleport_player_name?.(pm.name);
+        env.scratch?.current?.set_teleport_player_name?.(pm.name);
+      }
+      if (typeof pm.filterEnabled === 'boolean') {
+        lastTeleportFilterEnabled = pm.filterEnabled;
+        env.phys.current?.set_teleport_filter_enabled?.(pm.filterEnabled);
+        env.tickPhys?.current?.set_teleport_filter_enabled?.(pm.filterEnabled);
+        env.scratch?.current?.set_teleport_filter_enabled?.(pm.filterEnabled);
       }
       return;
     }
