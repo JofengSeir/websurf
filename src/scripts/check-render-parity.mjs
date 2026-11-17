@@ -101,7 +101,7 @@ const ASSEMBLY = [
   {
     needle: 'createMainSharedState(',
     what: '主线程共享状态（权威桥）',
-    files: ['apps/debug/src/app.ts', 'apps/game/src/app.ts'],
+    files: ['src/ts-shared/app/app-runtime.ts'],
   },
   {
     needle: 'attachEntitySystem(',
@@ -242,9 +242,13 @@ for (const rule of ASSEMBLY) {
       violations.push(`${allowed}  装配白名单文件不存在（${rule.what} 判据空转）`);
       continue;
     }
-    if (!hits.some((h) => h.rel === allowed)) {
-      violations.push(`${allowed}  未命中 ${rule.needle}（${rule.what} 判据空转：文件在但装配点没了）`);
+    if (hits.some((h) => h.rel === allowed)) continue;
+    // 装配点可以落在共享层文件（不在 apps 扫描集合内）：直接读文件复核，仍防白名单空转。
+    if (!files.some((f) => f.rel === allowed)) {
+      const shared = stripComments(readFileSync(join(ROOT, allowed), 'utf8'));
+      if (shared.includes(rule.needle)) continue;
     }
+    violations.push(`${allowed}  未命中 ${rule.needle}（${rule.what} 判据空转：文件在但装配点没了）`);
   }
 }
 

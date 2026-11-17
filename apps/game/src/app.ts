@@ -14,7 +14,6 @@
  * P2 Step2（共享 bootstrap）：通道判定/Worker 创建/wasm 注入/共享状态/桥接/渲染器+
  * 通用回调骨架/init·start/主线程 wasm 预热已下沉到 `src/ts-shared/app/app-runtime.ts`
  * 的 `createAppRuntime()`；本文件 `main()` 只保留端特有装配（面板/输入/HUD/载图）。
- * 回退：`globalThis.__vbspLegacyBootstrap === 1` 时走逐行保留的 `mainLegacy()`。
  *
  * 线程分工：Worker 独立跑固定步长权威模拟并回发权威帧与碰撞事件；主线程全速跑渲染物理。
  * 两者消费同一份输入——`RendererMain.tick` 每帧把 `feedInput` 暂存的鼠标增量与键位掩码
@@ -35,10 +34,9 @@ import { KeyboardInput } from './input/keyboard.js';
 import { ACTION_LABELS, codeLabel, loadKeymap, type BindableAction } from './input/keymap.js';
 import type { KeyState } from './worker/worker-types.js';
 import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
-import { handleWorkerReady, workerStaleMessage } from '../../../src/ts-shared/auth/worker-ready.js';
 import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
-import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
+import { keysToMask, KEY_MASK, type SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
 import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities, type SkyCameraParams } from '../../../src/renderer-shared/environment/miniature-sky.js';
 import { RendererMain } from './renderer/renderer-main.js';
@@ -86,10 +84,10 @@ const pointerLock = new PointerLockController();
 let fixWorker: Worker | null = null;
 let bridge: InputBridge | null = null;
 let renderer: RendererMain | null = null;
-/** 共享 bootstrap 实例（Step2）：死亡阈值等「端侧决定时机」的下发必须经它，旧路径用 mainLegacy 时为 null。 */
+/** 共享 bootstrap 实例（Step2）：死亡阈值等「端侧决定时机」的下发必须经它。 */
 let appRuntime: AppRuntime<RuntimeConfig, RendererMain, InputBridge> | null = null;
 let panel: PanelController | null = null;
-let sharedState: ReturnType<typeof createMainSharedState> | null = null;
+let sharedState: SharedState | null = null;
 let sceneReady = false;
 /** 主线程 wasm 初始化 promise：handleLoadBsp 调 buildWorldBundle 前 await 它（decompress_mtz 依赖）。 */
 let mainWasmReady: Promise<void> = Promise.resolve();
@@ -108,8 +106,6 @@ let holdPoint: SavePoint | null = null;
  * P2 Step2：game 薄入口——通道/Worker/wasm 注入/共享状态/桥接/渲染器+通用回调骨架/
  * init·start/主线程 wasm 预热全部走共享 createAppRuntime()（9 步固定序见 runtime 文件头）；
  * 本函数只保留端特有装配：共享内存判定与日志、面板、输入/HUD 与输入循环。
- *
- * 回退：`globalThis.__vbspLegacyBootstrap === 1` 时走 mainLegacy()（旧内联装配，逐行保留）。
  */
 async function main(): Promise<void> {
   if (!dom.canvas) {
@@ -151,159 +147,6 @@ async function main(): Promise<void> {
 
   // 4. 面板（参数变更实时同步主线程物理；构造与回调见 createPanel）
   panel = createPanel(bridge);
-
-  // 5. 输入绑定（按键簇标签先就位，避免首帧显示 HTML 里的默认键名）
-  initKeyHud();
-  bindInput();
-  startInputLoop();
-}
-
-/** 旧内联装配（回退路径，`globalThis.__vbspLegacyBootstrap === 1` 时启用）：P2 Step2 迁移前的逐行实现。 */
-async function mainLegacy(): Promise<void> {
-  if (!dom.canvas) {
-    console.error('[app] canvas#preview 未找到');
-    return;
-  }
-
-  // 0. 通道选择：crossOriginIsolated 且存在 SharedArrayBuffer 才建 SAB（需 COOP/COEP 响应头）；
-  //    否则 sharedBuffer 为 null，createMainSharedState 落到 MsgState postMessage 回退通道
-  const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
-if (isolated) {
-  console.log('[game] crossOriginIsolated 已启用，使用共享内存输入/物理通道');
-} else {
-  console.warn('[game] 未启用 crossOriginIsolated，回退 postMessage 输入通道（延迟较高）');
-}
-  const canSab = isolated && typeof SharedArrayBuffer !== 'undefined';
-  if (!canSab) {
-    setStatus('兼容模式（无 SharedArrayBuffer）：功能可用，性能降级', '');
-  }
-  const sharedBuffer = canSab ? new SharedArrayBuffer(SHARED_BUFFER_SIZE) : null;
-
-  // 1. 权威 Worker：经 world-json 拿到地图碰撞后，独立跑固定步长权威模拟并回发权威帧
-  //    内联脚本（__VBSP_WORKER_JS__）走 Blob URL —— file:// 下 module worker 被 CORS 拒绝；
-  //    否则装载 ./worker.js（type: module）
-  const embeddedWorkerJs = (globalThis as { __VBSP_WORKER_JS__?: string }).__VBSP_WORKER_JS__;
-  fixWorker = embeddedWorkerJs
-    ? new Worker(URL.createObjectURL(new Blob([embeddedWorkerJs], { type: 'text/javascript' })))
-    : new Worker('./worker.js', { type: 'module' });
-  fixWorker.onerror = (e) => setError(`Worker error: ${e.message}`);
-  fixWorker.onmessage = (e: MessageEvent<{ type?: string; ms?: number }>) => {
-    // 耗时诊断：world-build-ms 覆盖 build_world 段、world-parse-ms 覆盖两个 JSON 的解析段，
-    // 与主线程 postMessage(world-json) 的耗时合看，可定位首个权威帧的延迟落在传输还是构建
-    if (e.data?.type === 'world-build-ms') {
-      console.info(`[authority] Worker 内 world-json 处理（解析+build_world）= ${e.data.ms}ms`);
-    }
-    if (e.data?.type === 'world-parse-ms') {
-      const p = e.data as { brush?: number; tri?: number };
-      console.info(`[authority] JSON 解析（JS 代理）：brush=${p.brush}ms tri=${p.tri}ms`);
-    }
-    const msg = e.data;
-    if (!msg || typeof msg !== 'object') return;
-    if (msg.type === 'ready') {
-      // 协议版本对不上 = 跑的是旧 web/worker.js（`build:app` 只重建 app.js、不重建 worker），
-      // 此时新增的 worker 侧消息会被旧 worker 静默忽略；必须显式报错，避免「前端改了、权威行为没变」。
-      // 比对逻辑与文案都在共享 worker-ready 模块里（debug/game 同一份，不再各写一遍）。
-      const ready = handleWorkerReady(msg);
-      if (ready.ok) {
-        setStatus('Worker 已就绪。请加载 .bsp 文件。', 'success');
-      } else {
-        console.error(`[worker] 协议版本不一致：worker=${ready.got} app=${ready.expected}`);
-        setStatus(workerStaleMessage(ready), 'error');
-      }
-    } else if (msg.type === 'health-log') {
-      pushHealthLog((msg as { message?: string }).message ?? '');
-    } else if (msg.type === 'error') {
-      setError((msg as { message?: string }).message ?? 'Worker 错误');
-    } else if (msg.type === 'phys-event') {
-      // 权威碰撞事件：交给渲染器做碰撞修正（落地/撞墙瞬间微调位置并同步角度）
-      const ev = msg as { kind: 'land' | 'blocked'; pos: number[]; yawDeg: number; pitchDeg: number; vel?: number[] };
-      renderer?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg, ev.vel);
-    } else if (msg.type === 'phys-frame') {
-      // 仅 MsgState 回退通道会出现此消息：权威帧交给 recvFrame 缓存，SAB 通道直接读共享槽
-      const f = msg as { va: number; frame: { pos: { x: number; y: number; z: number }; yaw: number; pitch: number; vel: { x: number; y: number; z: number }; onGround: boolean; eyeHeight: number; timeMs: number } };
-      (sharedState as { recvFrame?: (frame: unknown, va: number) => void })?.recvFrame?.(f.frame, f.va);
-    }
-  };
-  fixWorker.postMessage({ type: 'init', shared: sharedBuffer });
-  // wasm-init：内联 base64（__VBSP_WASM_B64__）走 initSync —— file:// 下无法 fetch；否则给 wasmUrl
-  const embeddedWasm = (globalThis as { __VBSP_WASM_B64__?: string }).__VBSP_WASM_B64__;
-  if (embeddedWasm) {
-    fixWorker.postMessage({ type: 'wasm-init', wasmB64: embeddedWasm });
-  } else {
-    fixWorker.postMessage({ type: 'wasm-init', wasmUrl: './websurf_wasm_bg.wasm' });
-  }
-
-  // 通道创建：sharedBuffer 非空即 ShmState，否则 MsgState；两者同接口
-  sharedState = createMainSharedState(sharedBuffer, fixWorker);
-  const shared = sharedState;
-
-  // 2. 渲染器 = 主线程唯一物理线（BSP 解析/物理/渲染全在主线程）
-  renderer = new RendererMain(shared);
-  // T-731/F3：只记值不写——此刻物理实例未建，setDeathY 会空跑
-  renderer.onSceneLoaded = (deathY) => { pendingDeathY = deathY; };
-  // 渲染主线 → 权威反向同步：真位置突变（teleport=true）清双端未消费输入增量；
-  // 常规反向重锚（teleport=false，缺陷修复 A）只注入状态、**不清输入**
-  renderer.onSyncRenderState = (s, teleport) => {
-    fixWorker?.postMessage({ type: 'sync-render-state', state: s, teleport });
-  };
-  renderer.init(dom.canvas!, dom.canvas.clientWidth, dom.canvas.clientHeight, window.devicePixelRatio, config);
-  renderer.start();
-  // 出帧探针（自动化验证仪器；见 RendererMain.installFrameProbe 注释）。
-  // 只往 globalThis 挂一个对象，不改变任何渲染/物理行为。
-  renderer.installFrameProbe();
-  // 主线程 wasm 初始化（BspProcessor + PhysWorld 同模块；dist 内嵌 base64）。
-  // 保存 promise：handleLoadBsp 的 decompress_mtz 依赖 wasm 就绪（await 防竞态）。
-  mainWasmReady = renderer.initPrediction('./websurf_wasm_bg.wasm', embeddedWasm).catch((err) => {
-    setError(`主线程 WASM 初始化失败: ${err instanceof Error ? err.message : String(err)}`);
-  });
-
-  // 3. 桥（面板 → 双端物理：Worker 权威帧 + 主线程渲染物理，参数同参）
-  bridge = new InputBridge(fixWorker, renderer, config);
-  // 实体副作用（共享宿主 EntityGameplay）→ 权威 Worker：渲染物理线已由宿主写，这里只做转发。
-  // 过去 game 端没接这些回调，加速板/跳高/限速/传送门控全不生效（与 debug 不同步的原因）。
-  renderer.onPlayerVelocity = (vel, mode) => {
-    if (mode === 'set') bridge?.sendSetPushVelocity(vel);
-    else bridge?.sendAddVelocity(vel);
-  };
-  renderer.onSpeedCapChange = (cap) => bridge?.sendSetSpeedCap(cap);
-  renderer.onJumpHeightChange = (height) => bridge?.sendSetJumpHeight(height);
-  renderer.onPlayerNameChange = (name) => bridge?.sendSetPlayerName(name);
-  renderer.onMapPhysicsParam = (name, value) => bridge?.sendSetMapPhysicsParam(name, value);
-  syncFullConfig();
-
-  // 4. 面板（参数变更实时同步主线程物理）
-  panel = new PanelController(
-    config,
-    bridge,
-    () => pointerLock.isLocked(),
-    (params) => renderer?.setPredictionParams(params),
-    (hw, sh, dh) => renderer?.setPredictionHull(hw, sh, dh),
-    (active) => renderer?.setPredictionNoclip(active),
-    (quality) => void renderer?.applyTextureQuality(quality),
-    (fov) => renderer?.setFov(fov),
-    (dist) => renderer?.setRenderDistance(dist),
-    (exposure) => renderer?.applyLighting({ exposure }),
-    (gamma) => renderer?.applyLighting({ lightGamma: gamma }),
-    (scale) => renderer?.applyLighting({ ambientScale: scale }),
-    // 光照模式（预烘焙 / 纯纹理）：**运行期 uniform 切换**，只改共享 uniform ⇒ 立即生效、
-    // 不重建场景、不重编译材质、不打断视角与移动（详见 lightmap-shader.setLightingMode）。
-    // 面板偏好加载阶段也会回调一次 ⇒ 只是把模式初值定下来（两种模式加载路径一致）。
-    (mode) => renderer?.setLightingMode(mode),
-    // 存点列表：删除（无确认）→ 存储更新 + 回刷列表
-    (i) => {
-      const list = savePointStore.delete(i);
-      panel?.renderSavePoints(list);
-    },
-    // 存点列表：读取任意存点 → 恢复（主线程 + 权威同步）
-    (i) => {
-      const list = savePointStore.all();
-      const sp = list[i];
-      if (sp && renderer) {
-        renderer.loadSavepoint(sp);
-        setStatus(`已读点 #${i + 1} @ (${sp.x.toFixed(0)}, ${sp.y.toFixed(0)}, ${sp.z.toFixed(0)})`, 'success');
-      }
-    },
-  );
 
   // 5. 输入绑定（按键簇标签先就位，避免首帧显示 HTML 里的默认键名）
   initKeyHud();
@@ -827,8 +670,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
     // 的端侧调用点）= 渲染端 setDeathY + Worker `set-death-threshold`（分发器会写入全部权威
     // 实例并记忆，世界重建后 reapplyDeathY 重放）。
     if (pendingDeathY !== null) {
-      if (appRuntime) appRuntime.sendDeathThreshold(pendingDeathY);
-      else bridge?.sendSetDeathThreshold(pendingDeathY); // mainLegacy 回退路径
+      appRuntime?.sendDeathThreshold(pendingDeathY);
       pendingDeathY = null;
     }
     // Worker 权威物理世界（地图碰撞；独立固定步长权威帧计算）
@@ -1169,11 +1011,7 @@ function setupRenderPanel(): void {
 
 setupRenderPanel();
 
-// P2 Step2 回退开关：`globalThis.__vbspLegacyBootstrap === 1` → 旧内联装配 mainLegacy()；
-// 默认走共享 createAppRuntime() 的薄入口 main()。两者共用同一套模块级状态与后续 UI 代码。
-const legacyBootstrap =
-  (globalThis as unknown as { __vbspLegacyBootstrap?: number }).__vbspLegacyBootstrap === 1;
-void (legacyBootstrap ? mainLegacy() : main());
+void main();
 
 // ── 关闭确认兜底（Ctrl+W 防误关）─────────────────────────────────────
 // 浏览器不允许页面用 keydown preventDefault 拦截 Ctrl+W 这类浏览器快捷键，

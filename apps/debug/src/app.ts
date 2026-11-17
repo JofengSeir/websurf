@@ -23,16 +23,12 @@ import { ensureMainWasm, mainWasmUrl } from './main-wasm.js';
 import { BspProcessor, decode_vtf_to_png, decompress_mtz } from '../pkg/websurf_wasm.js';
 import type { RuntimeConfig } from './config.js';
 import type {
-	MainMessage,
 	SceneDataMessage,
-	PhysFrameMessage,
-	PhysEventMessage,
 	PhysicsSnapshotMessage,
 	PhysicsEventMessage,
 	PlaneInfo,
 } from './worker/worker-types.js';
-import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
-import { handleWorkerReady, workerStaleMessage } from '../../../src/ts-shared/auth/worker-ready.js';
+import { keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import { createAppRuntime, type AppHooks } from '../../../src/ts-shared/app/app-runtime.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
@@ -187,7 +183,6 @@ const keyboard = new KeyboardInput();
 const mouseBuffer = new MouseBuffer();
 const pointerLock = new PointerLockController();
 
-let worker: Worker | null = null;
 let inputBridge: InputBridge | null = null;
 /** 跨线程状态通道（src/ts-shared/auth/shared-state.ts 的 createMainSharedState）：有 SAB 时输入与权威帧走共享槽，无 SAB 时走 MsgState 的 postMessage 通道（phys-frame 由 recvFrame 收回）。 */
 let sharedState: SharedState | null = null;
@@ -284,8 +279,6 @@ let mainWasmReady: Promise<void> = Promise.resolve();
  * P2 Step1：入口前段（共享内存判定后的通道/Worker/wasm 注入/共享状态/渲染器与通用回调骨架）
  * 已下沉为 `src/ts-shared/app/app-runtime.ts` 的 createAppRuntime()；本函数只保留端特有点：
  * 共享内存可用性判定与日志、UI/面板/回放/输入循环装配。
- *
- * 回退：`globalThis.__vbspLegacyBootstrap === 1` 时走 mainLegacy()（旧内联装配，逐行保留）。
  */
 async function main(): Promise<void> {
 	if (!dom.canvas) {
@@ -314,7 +307,6 @@ async function main(): Promise<void> {
 	);
 
 	// 旧模块级引用直接指向 runtime 装配结果（后续 UI/加载/输入循环代码不改）
-	worker = runtime.worker;
 	sharedState = runtime.shared;
 	inputBridge = runtime.bridge;
 	rendererMain = runtime.renderer;
@@ -402,195 +394,6 @@ function createDebugHooks(): AppHooks<RuntimeConfig, RendererMain, InputBridge> 
 		},
 		onPhysEvent: (event) => onRenderPhysEvent(event as RenderPhysEvent),
 	};
-}
-
-/** 旧内联装配（回退路径，`globalThis.__vbspLegacyBootstrap === 1` 时启用）：P2 Step1 迁移前的逐行实现。 */
-async function mainLegacy(): Promise<void> {
-	if (!dom.canvas) {
-		console.error('[app] canvas#preview 元素未找到');
-		return;
-	}
-
-	// 0. 共享内存通道（SharedArrayBuffer 需 crossOriginIsolated；dev 已配 COOP/COEP）。
-	//    条件不满足则退回 postMessage 数据通道（功能等价、延迟更高）。
-	const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
-	let sharedBuffer: SharedArrayBuffer | null = null;
-	if (isolated && typeof SharedArrayBuffer !== 'undefined') {
-		sharedBuffer = new SharedArrayBuffer(SHARED_BUFFER_SIZE);
-		console.log('[app] crossOriginIsolated 已启用，使用共享内存输入/物理通道');
-	} else {
-		console.warn('[app] 未启用 crossOriginIsolated，回退 postMessage 输入通道（延迟较高）');
-	}
-
-	// 1. 创建 Worker + 共享状态
-	// 内嵌构建：用构建注入的 __VBSP_WORKER_JS__ 建 Blob URL（file:// 下 module worker 不可用）；
-	// dev 模式：从 ./worker.js 加载 ES module worker。
-	const embeddedWorker = (globalThis as unknown as { __VBSP_WORKER_JS__?: string }).__VBSP_WORKER_JS__;
-	if (embeddedWorker) {
-		const blob = new Blob([embeddedWorker], { type: 'text/javascript' });
-		worker = new Worker(URL.createObjectURL(blob));
-	} else {
-		worker = new Worker('./worker.js', { type: 'module' });
-	}
-	worker.onmessage = handleWorkerMessage;
-	worker.onerror = (e) => {
-		setError(`Worker error: ${e.message} (${e.filename}:${e.lineno})`);
-	};
-
-	// WASM 注入：内嵌模式把 __VBSP_WASM_B64__ 经 postMessage 交给 worker
-	//（Blob Worker 读不到主线程 global）；dev/multi 模式发 wasmUrl，由 worker 自行 fetch。
-	// 默认纹理包 base64 一并下发，Worker 侧只暂存（apps/debug/src/worker/main.ts 的 setMtzB64）。
-	const embeddedWasm = (globalThis as unknown as { __VBSP_WASM_B64__?: string }).__VBSP_WASM_B64__;
-	const embeddedMtz = (globalThis as unknown as { __VBSP_TEXTURES_MTZ_B64__?: string }).__VBSP_TEXTURES_MTZ_B64__;
-	if (embeddedWasm) {
-		worker.postMessage({ type: 'wasm-init', wasmB64: embeddedWasm, mtzB64: embeddedMtz });
-	} else {
-		worker.postMessage({
-			type: 'wasm-init',
-			wasmUrl: mainWasmUrl(),
-			mtzB64: embeddedMtz,
-		});
-	}
-
-	const sharedStateInstance = createMainSharedState(sharedBuffer, worker);
-	sharedState = sharedStateInstance;
-	inputBridge = new InputBridge(worker);
-	inputBridge.sendInit(
-		sharedBuffer,
-		dom.canvas.clientWidth,
-		dom.canvas.clientHeight,
-		window.devicePixelRatio,
-	);
-
-	// 2. 主线程渲染器
-	rendererMain = new RendererMain(sharedStateInstance);
-	rendererMain.onCullStats = updateCullStatsUI;
-	rendererMain.onSceneLoaded = (deathThresholdY) => {
-		// 双端设置掉落死亡阈值（主线程渲染物理 + 权威 Worker）。
-		// onSceneLoaded 早于 world-json 触发，故 handleLoadBsp 在 world-json 之后再发一次。
-		sceneDeathY = deathThresholdY;
-		rendererMain?.setDeathY(deathThresholdY);
-		inputBridge?.sendSetDeathThreshold(deathThresholdY);
-	};
-	// 地图脚本的玩家改名门控：实体系统内 `AddOutput targetname` 变化时回传权威 Worker，
-	// 供 `src/phys/teleport.rs` 判 `filter_activator_name`（起点 `krazy1/2/3` 免回卷/开回卷）。
-	// `__vbspTeleportFilterOff=true` 是整条门控的回退开关（权威侧相应忽略 filter）。
-	rendererMain.onPlayerNameChange = (name) => {
-		const filterOff = (globalThis as unknown as { __vbspTeleportFilterOff?: boolean }).__vbspTeleportFilterOff === true;
-		inputBridge?.sendSetPlayerName(name, !filterOff);
-	};
-	// 地图脚本 `trigger_push` 等给玩家的速度副作用：渲染物理线已在 renderer 内部施加，
-	// 这里只负责转发给权威 Worker（否则画面被弹飞、权威原地不动，位置会被反复拉回）。
-	// mode='add' 是 SF_TRIG_PUSH_ONCE 的一次性冲量；mode='set' 是非 ONCE 加速板的
-	// 「区内期间覆盖速度」语义（覆盖写，不会像累加那样涨到失控）。
-	rendererMain.onPlayerVelocity = (vel, mode) => {
-		if (mode === 'set') inputBridge?.sendSetPushVelocity(vel);
-		else inputBridge?.sendAddVelocity(vel);
-	};
-	// 地图 convar `sv_maxvelocity`（速度上限）：渲染物理线在 renderer 内部已生效，
-	// 这里转发给权威 Worker；不发的话主线程按地图值钳、权威按默认 3500 跑，速度会分叉。
-	rendererMain.onSpeedCapChange = (cap) => {
-		inputBridge?.sendSetSpeedCap(cap);
-	};
-	// 「跳跃增幅区」（surf_null 的 `autohop_zone`）：区内跳高临时抬高，渲染线已生效，
-	// 这里转发给权威 Worker——不发的话主线程跳得上台、权威端跳不上，位置会立刻分叉。
-	rendererMain.onJumpHeightChange = (height) => {
-		inputBridge?.sendSetJumpHeight(height);
-	};
-	// 地图 servercommand 映射出的物理参数（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）：
-	// 渲染物理线已由共享宿主直接写入，这里把同一个值转给权威 Worker，两边参数必须同源。
-	rendererMain.onMapPhysicsParam = (name, value) => {
-		inputBridge?.sendSetMapPhysicsParam(name, value);
-	};
-	// 渲染主线 → 权威反向同步：teleport=true（真位置突变）由权威侧清未消费输入增量；
-	// teleport=false 走常规重锚，只注入状态、保留输入增量——清输入会造成可见的瞄准顿挫。
-	rendererMain.onSyncRenderState = (s, teleport) => {
-		worker?.postMessage({ type: 'sync-render-state', state: s, teleport });
-	};
-	// 主线程渲染物理事件（Rust take_event 产出：teleport / death）→ 计时挑战状态机
-	rendererMain.onPhysEvent = onRenderPhysEvent;
-	// 装回 debug 本端的排查开关：这些口是**材质编译期**读取的，必须在 rendererMain.init 之前写
-	applyRenderDebugSwitches(readRenderPrefs().debug);
-	rendererMain.init(
-		dom.canvas,
-		dom.canvas.clientWidth,
-		dom.canvas.clientHeight,
-		window.devicePixelRatio,
-		config,
-	);
-	rendererMain.start();
-	// 主线程 wasm 懒初始化（mosaic 解压与地图加载依赖它；与 worker 的 wasm 实例互不影响）。
-	// 保存 promise：handleBspFile 开头 await，避免解析时 wasm 尚未就绪。
-	mainWasmReady = ensureMainWasm().catch((err) => {
-		setError(`主线程 WASM 初始化失败: ${err instanceof Error ? err.message : String(err)}`);
-	});
-
-	// 3. 绑定输入
-	bindInput(dom.canvas);
-	// 3.2 面板偏好持久化：读取 → 合并 config → 同步控件 → 应用准星 → 下发双端
-	loadUiPrefs();
-	setupRenderPanel();
-	syncPrefsControls();
-	applyCrosshairStyle();
-	sendPrefsToWorker();
-	bindUI();
-	// 3.3 初始控件状态（config 默认值 → 面板）
-	if (dom.colliderSourceSelect) dom.colliderSourceSelect.value = config.physics.colliderSource;
-	if (dom.physicsModeSelect) dom.physicsModeSelect.value = config.physics.mode;
-
-	// 4. 输入循环（设备 / 回放 / 合成三条路径 → 主线程渲染物理 + SAB 权威端）
-	startInputLoop();
-}
-
-// ---------------------------------------------------------------------------
-// Worker 消息处理
-// ---------------------------------------------------------------------------
-
-function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
-	const msg = e.data;
-	if (!msg || typeof msg !== 'object') return;
-	switch (msg.type) {
-		case 'ready': {
-			// 阶段 2：Worker 不再需要同步配置（world-json 后由 handleLoadBsp 发送）
-			// 协议版本对不上 = 跑的是旧 web/worker.js（`build:app` 不重建 worker），
-			// 此时新消息会被旧 worker 静默忽略（2026-11-17 名字门控失效事故），必须显式报错。
-			const ready = handleWorkerReady(msg);
-			if (ready.ok) {
-				setStatus('Worker 已就绪。请加载 .bsp 文件。', 'success');
-			} else {
-				console.error(`[worker] 协议版本不一致：worker=${ready.got} app=${ready.expected}`);
-				setStatus(workerStaleMessage(ready), 'error');
-			}
-			break;
-		}
-		case 'phys-frame': {
-			// 回退模式（MsgState）：缓存 Worker 权威帧（readAuthoritative 读取）
-			const f = msg as unknown as PhysFrameMessage;
-			(sharedState as { recvFrame?: (frame: PhysFrameMessage['frame'], va: number) => void })?.recvFrame?.(f.frame, f.va);
-			break;
-		}
-		case 'phys-event': {
-			// 权威碰撞事件（落地/撞墙）：位置微调 + 角度同步（权威仅碰撞时可影响渲染）
-			const ev = msg as unknown as PhysEventMessage;
-			rendererMain?.applyCollisionCorrection(ev.kind, ev.pos, ev.yawDeg, ev.pitchDeg, ev.vel);
-			break;
-		}
-		case 'physics-snapshot':
-			renderPhysicsSnapshot(msg);
-			break;
-		case 'physics-event':
-			onPhysicsEvent(msg);
-			break;
-		case 'health-log':
-			pushHealthLog(msg.message);
-			break;
-		case 'error':
-			setError(msg.message);
-			break;
-		default:
-			// 未知消息：忽略（向前兼容）
-			break;
-	}
 }
 
 /**
@@ -1309,7 +1112,6 @@ dom.pathExportCsvBtn?.addEventListener('click', () => {
 	if (!rendererMain) return;
 	downloadText(`phys-path-${pathStamp()}.csv`, rendererMain.exportPathCsv(), 'text/csv');
 });
-
 
 /** 计时挑战 HUD（主线程本地快照 + justDied 闪烁）。 */
 function updateGameStatsUI(): void {
@@ -2824,11 +2626,7 @@ function setError(msg: string): void {
 // 启动
 // ---------------------------------------------------------------------------
 
-// P2 Step1 回退开关：`globalThis.__vbspLegacyBootstrap === 1` → 旧内联装配 mainLegacy()；
-// 默认走共享 createAppRuntime() 的薄入口 main()。两者共用同一套模块级状态与后续 UI 代码。
-const legacyBootstrap =
-	(globalThis as unknown as { __vbspLegacyBootstrap?: number }).__vbspLegacyBootstrap === 1;
-void (legacyBootstrap ? mainLegacy() : main());
+void main();
 
 // ── 关闭确认兜底（Ctrl+W 防误关）─────────────────────────────────────
 // 浏览器不允许页面用 keydown preventDefault 拦截 Ctrl+W 这类浏览器快捷键，
