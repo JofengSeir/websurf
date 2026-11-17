@@ -75,7 +75,7 @@ import { subdivideVertexLit } from './vlight-subdivide.js';
 import { collectTextureScrolls, updateTextureScrolls, type TextureScrollEntry } from '../shader/texture-scroll.js';
 import { setupRotButtons, updateRotButtons, type RotButtonPivot } from './rot-buttons.js';
 import { collectLaserBeams, LaserBeams } from './lasers.js';
-import { collectParticleEntities, ParticleSystems } from './particles.js';
+import { collectParticleEntities, parseEntityIoBlocks, ParticleSystems } from './particles.js';
 import type { PoseScope } from '../camera/pose-entry.js';
 
 /** 三端标识（同时用于探针 `scope` 与日志前缀）。 */
@@ -913,7 +913,10 @@ export class RenderSession {
     this.disposeSceneExtras();
     if (!entityIoJson) return;
     try {
-      const beams = collectLaserBeams(entityIoJson);
+      // task-58：entityIoJson 只解析一次（JSON.parse + 实体块切分），lasers / particles 共享结果；
+      // 旧实现两个 collector 各自解析一遍，载图期白付一份解析成本。
+      const entityBlocks = parseEntityIoBlocks(entityIoJson);
+      const beams = collectLaserBeams(entityBlocks);
       if (beams.length > 0) {
         this.laserBeams = new LaserBeams(beams);
         this.scene.add(this.laserBeams.root);
@@ -921,7 +924,7 @@ export class RenderSession {
         // `setLaserPhysicsTrace` 用 MASK_SOLID 扫掠重截断。
         this.laserBeams.trace(this.root, this.laserPhysTrace ?? undefined);
       }
-      const entities = collectParticleEntities(entityIoJson);
+      const entities = collectParticleEntities(entityBlocks);
       if (entities.length > 0) {
         const systems = new ParticleSystems(entities);
         // 有实体但没有可渲染效果（配置未覆盖的效果）时不建组、不挂场景（零开销）。

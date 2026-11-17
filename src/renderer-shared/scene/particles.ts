@@ -16,6 +16,8 @@
 
 import * as THREE from 'three';
 
+import { parseEntityBlocks as parseEntityBlocksShared, type KeyValuePair } from '../../ts-shared/entity/map-data.js';
+
 /** 一条 `info_particle_system` 实体（已换算到 Y-up 世界坐标）。 */
 export interface ParticleEntity {
   effect: string;
@@ -233,35 +235,54 @@ interface RopePoint {
   age: number;
 }
 
-/** 解析 Source `.ent`/`entities_text` 的键值块（`{ "key" "value" ... }`），供粒子与激光共用。 */
-export function parseEntityBlocks(text: string): Array<Record<string, string>> {
-  const out: Array<Record<string, string>> = [];
-  let cur: Record<string, string> | null = null;
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.trim();
-    if (line.length === 0) continue;
-    if (line === '{') {
-      cur = {};
-      continue;
+/** 一次解析后的实体键值块（每块「首键优先」的扁平 key/value 记录）。 */
+export type EntityBlockRecords = Array<Record<string, string>>;
+
+/**
+ * 把 `KeyValuePair[][]`（`src/ts-shared/entity/map-data.ts` 的解析结果）合并成键值记录：
+ * 块顺序不变、块内重复键只保留第一次出现的值（与旧版逐行解析器的「首键优先」等价）。
+ */
+function toEntityBlockRecords(blocks: readonly KeyValuePair[][]): EntityBlockRecords {
+  const out: EntityBlockRecords = [];
+  for (const pairs of blocks) {
+    const rec: Record<string, string> = {};
+    for (const { key, value } of pairs) {
+      if (!(key in rec)) rec[key] = value;
     }
-    if (line === '}') {
-      if (cur) out.push(cur);
-      cur = null;
-      continue;
-    }
-    if (line.charCodeAt(0) !== 34 /* '"' */ || cur === null) continue;
-    const firstEnd = line.indexOf('"', 1);
-    if (firstEnd < 0) continue;
-    const key = line.slice(1, firstEnd);
-    let value = '';
-    const rest = line.slice(firstEnd + 1).trim();
-    if (rest.charCodeAt(0) === 34) {
-      const secondEnd = rest.indexOf('"', 1);
-      if (secondEnd > 0) value = rest.slice(1, secondEnd);
-    }
-    if (!(key in cur)) cur[key] = value;
+    out.push(rec);
   }
   return out;
+}
+
+/**
+ * 解析 Source `.ent`/`entities_text` 的键值块（`{ "key" "value" ... }`），供粒子与激光共用。
+ * 复用 `src/ts-shared/entity/map-data.ts` 的解析入口（与 Rust `Entities::iter()` 同序同数）。
+ */
+export function parseEntityBlocks(text: string): EntityBlockRecords {
+  return toEntityBlockRecords(parseEntityBlocksShared(text));
+}
+
+/**
+ * 解析 `entityIoJson`（`{ entities_text, volumes, ... }`）**一次**，得到全部实体键值记录。
+ * 供 `collectLaserBeams()` / `collectParticleEntities()` 共享，避免两边各自 `JSON.parse` + 切块
+ * （task-58：载图期同一份实体文本被解析两遍）。JSON 非法时返回空数组（与旧实现的静默回退一致）。
+ */
+export function parseEntityIoBlocks(entityIoJson?: string | null): EntityBlockRecords {
+  if (!entityIoJson) return [];
+  try {
+    const payload = JSON.parse(entityIoJson) as { entities_text?: string };
+    return parseEntityBlocks(payload.entities_text ?? '');
+  } catch {
+    return [];
+  }
+}
+
+/** collector 兼容入口：既接受原始 `entityIoJson` 字符串，也接受已解析好的实体键值记录。 */
+export function resolveEntityBlocks(
+  source?: string | EntityBlockRecords | null,
+): EntityBlockRecords {
+  if (!source) return [];
+  return typeof source === 'string' ? parseEntityIoBlocks(source) : source;
 }
 
 export function parseVec3(raw: string | undefined, fallback: [number, number, number]): [number, number, number] {
@@ -271,18 +292,12 @@ export function parseVec3(raw: string | undefined, fallback: [number, number, nu
   return [parts[0], parts[1], parts[2]];
 }
 
-/** 从 `entityIoJson` 解析出所有 `info_particle_system`。 */
-export function collectParticleEntities(entityIoJson?: string): ParticleEntity[] {
-  if (!entityIoJson) return [];
-  let text = '';
-  try {
-    const payload = JSON.parse(entityIoJson) as { entities_text?: string };
-    text = payload.entities_text ?? '';
-  } catch {
-    return [];
-  }
+/** 从 `entityIoJson`（或已解析的实体块）里收集所有 `info_particle_system`。 */
+export function collectParticleEntities(
+  entityIoJsonOrBlocks?: string | EntityBlockRecords | null,
+): ParticleEntity[] {
   const out: ParticleEntity[] = [];
-  for (const block of parseEntityBlocks(text)) {
+  for (const block of resolveEntityBlocks(entityIoJsonOrBlocks)) {
     if (block['classname'] !== 'info_particle_system') continue;
     const effect = block['effect_name'];
     if (!effect) continue;

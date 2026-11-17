@@ -23,7 +23,7 @@
 
 import * as THREE from 'three';
 
-import { parseEntityBlocks, parseVec3 } from './particles.js';
+import { parseVec3, resolveEntityBlocks, type EntityBlockRecords } from './particles.js';
 
 /**
  * 屏幕空间最小**全宽**（px）：细梁在远处不足 1 px 时会随机闪烁甚至整条消失，
@@ -129,17 +129,16 @@ function makeLaserTexture(): THREE.Texture {
   return tex;
 }
 
-/** 从 `entityIoJson` 的 `entities_text` 收集可见的 `env_laser`。 */
-export function collectLaserBeams(entityIoJson?: string): LaserBeam[] {
-  if (!entityIoJson) return [];
-  let text = '';
-  try {
-    const payload = JSON.parse(entityIoJson) as { entities_text?: string };
-    text = payload.entities_text ?? '';
-  } catch {
-    return [];
-  }
-  const blocks = parseEntityBlocks(text);
+/**
+ * 从 `entityIoJson`（或已解析的实体块）里收集可见的 `env_laser`。
+ *
+ * `entityIoJsonOrBlocks` 为字符串时保持旧行为（内部解析一次）；调用方也可先
+ * `parseEntityIoBlocks()` 解析一次再复用，避免 lasers / particles 各解析一遍（task-58）。
+ */
+export function collectLaserBeams(
+  entityIoJsonOrBlocks?: string | EntityBlockRecords | null,
+): LaserBeam[] {
+  const blocks = resolveEntityBlocks(entityIoJsonOrBlocks);
   // 先建 targetname → origin 索引，env_laser 的 LaserTarget 指向 endpoint 锚点的 targetname。
   const targets = new Map<string, THREE.Vector3>();
   for (const block of blocks) {
