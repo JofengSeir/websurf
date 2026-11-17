@@ -19,6 +19,8 @@
  *
  * 判据：
  *   1. `apps/<app>/src` 下的 TS 不得出现下列共享步骤的调用/构造（注释不算）；
+ *   1b. `src/ts-shared`、`src/renderer-shared` 下的 TS 也不得出现**装配点**调用（只许
+ *      出现在上面登记的白名单文件）——防「共享层第二个文件又 new 一份物理世界」；
  *   2. 三端渲染入口必须引用 `RenderSession`（viewer `core/scene.ts`、game/debug `renderer-main.ts`）；
  *   3. 共享 `render-session.ts` 必须真的包含装配/天空/可见性三件事（防它被掏空后仍过关）。
  *
@@ -101,12 +103,19 @@ const ASSEMBLY = [
   {
     needle: 'createMainSharedState(',
     what: '主线程共享状态（权威桥）',
-    files: ['src/ts-shared/app/app-runtime.ts'],
+    // 唯一调用点 app-runtime（P2 下沉后三端共用）+ 定义本体 shared-state.ts。
+    files: ['src/ts-shared/app/app-runtime.ts', 'src/ts-shared/auth/shared-state.ts'],
   },
   {
     needle: 'attachEntitySystem(',
     what: '实体系统挂载',
-    files: ['apps/viewer/src/app.ts'],
+    // 实体宿主的三处合法位置：viewer 观察模式（无物理）、共享 EntityGameplay（debug/game），
+    // 以及 attach.ts 里的定义本体。共享层第二个「自己再挂一套」的文件会因此被拦下。
+    files: [
+      'apps/viewer/src/app.ts',
+      'src/ts-shared/gameplay/entity-gameplay.ts',
+      'src/ts-shared/entity/attach.ts',
+    ],
   },
 ];
 
@@ -185,6 +194,20 @@ for (const app of APPS) {
   }
 }
 
+/**
+ * 共享层也要扫「装配点」：共享层是装配步骤的合法位置，但只允许登记的那几处。
+ * 防的是「共享层里又冒出第二个 new PhysWorld / createMainSharedState」这类暗分叉。
+ */
+const sharedFiles = [];
+for (const dir of ['src/ts-shared', 'src/renderer-shared']) {
+  const abs = join(ROOT, dir);
+  if (!existsSync(abs)) continue;
+  for (const file of walk(abs)) {
+    const rel = relative(ROOT, file).replace(/\\/g, '/');
+    sharedFiles.push({ abs: file, rel, code: stripComments(readFileSync(file, 'utf8')) });
+  }
+}
+
 const violations = [];
 
 // ── 1) 渲染禁词 + 物理 API 禁词（逐行字符串兜底）────────────────────────────
@@ -226,7 +249,7 @@ for (const f of files) {
 // ── 3) 装配点白名单：只许出现在登记文件，且登记文件必须真的命中 ─────────────
 for (const rule of ASSEMBLY) {
   const hits = [];
-  for (const f of files) {
+  for (const f of [...files, ...sharedFiles]) {
     const lines = f.code.split('\n');
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].includes(rule.needle)) hits.push({ rel: f.rel, line: i + 1 });
@@ -293,7 +316,7 @@ if (violations.length) {
   console.error(`[render-parity] 违规 ${violations.length} 处：`);
   for (const v of violations) console.error('  - ' + v);
   console.error('\n规则：渲染步骤只在 src/renderer-shared/scene/render-session.ts；物理副作用只在共享 EntityGameplay/worker-dispatch；' +
-    '装配点仅限登记的 worker/main.ts、renderer-main.ts、app.ts。');
+    '装配点仅限上面登记的白名单文件（含共享层唯一装配点），新增装配点必须显式登记。');
   process.exit(1);
 }
 console.log(`[render-parity] OK：三端渲染入口都走共享 RenderSession；apps 内没有重写渲染步骤/物理副作用；` +
