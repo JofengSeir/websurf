@@ -1588,6 +1588,10 @@ export class RendererMain {
     for (;;) {
       const ev = this.predPhys.take_event() as RenderPhysEvent | null;
       if (!ev) break;
+      // Rust 内部传送（地图触发区）是位置突变：必须让渲染采样流失效，否则跨线程发布位姿
+      // 会拿传送前后两个位置做线性插值。实测 surf_666 从 s1 传送到 krazysboner（42390 HU）
+      // 时多出一个 4.2 万 HU 外的伪中间点，分支判定/回卷检查都会拿它当真实位置。
+      if (ev.kind === 'teleport') this.bumpSampleEpoch();
       this.onPhysEvent?.(ev);
     }
   }
