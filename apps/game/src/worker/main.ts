@@ -70,7 +70,7 @@ import {
   type RenderTrajectorySource,
 } from '../../../../src/ts-shared/auth/auth-loop.js';
 import { createWorkerDispatch } from '../../../../src/ts-shared/auth/worker-dispatch.js';
-import { WORKER_PROTOCOL } from '../../../../src/ts-shared/auth/worker-protocol.js';
+import { makeReadyMessage } from '../../../../src/ts-shared/auth/worker-ready.js';
 import { buildPhysicsParams } from '../../../../src/ts-shared/phys/params.js';
 import { createConfig, applyConfigPatch } from '../config.js';
 import type { RuntimeConfig } from '../config.js';
@@ -478,7 +478,7 @@ const dispatch = createWorkerDispatch({
     initSync({ module } as unknown as ArrayBuffer)) as (module: ArrayBuffer) => void,
   // wasm 初始化完成回 `ready`（带协议版本）：主线程据此识别旧 web/worker.js，避免静默跑旧构建。
   onInit: () => {
-    postMessage({ type: 'ready', protocol: WORKER_PROTOCOL });
+    postMessage(makeReadyMessage());
   },
   post: (msg) => postMessage(msg),
   // 诊断：`world-json` 的 Worker 内处理耗时（从收到该消息到世界构建完成即本回调）。与主线程侧
