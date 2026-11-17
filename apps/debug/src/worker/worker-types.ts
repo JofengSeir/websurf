@@ -294,7 +294,8 @@ export type WorkerMessage =
   | SetPlayerNameMessage
   | AddVelocityMessage
   | SetPushVelocityMessage
-  | SetSpeedCapMessage;
+  | SetSpeedCapMessage
+  | SetJumpHeightMessage;
 
 // ── Worker → 主线程 ──────────────────────────────────────────
 

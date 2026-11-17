@@ -74,6 +74,8 @@ import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import { subdivideVertexLit } from './vlight-subdivide.js';
 import { collectTextureScrolls, updateTextureScrolls, type TextureScrollEntry } from '../shader/texture-scroll.js';
 import { setupRotButtons, updateRotButtons, type RotButtonPivot } from './rot-buttons.js';
+import { collectLaserBeams, LaserBeams } from './lasers.js';
+import { collectParticleEntities, ParticleSystems } from './particles.js';
 import type { PoseScope } from '../camera/pose-entry.js';
 
 /** 三端标识（同时用于探针 `scope` 与日志前缀）。 */
@@ -120,6 +122,12 @@ export interface RenderSceneInput {
   translucentSplit?: boolean;
   /** 是否做空间分块合并（debug 的 `OPTIMIZE_SCENE_ENABLED`）；缺省 true。 */
   merge?: boolean;
+  /**
+   * 实体 lump 原文（`export_entity_io()` 的 `entities_text`）：`env_laser` 光束与 Source
+   * 粒子（PCF）等「实体副产物」图元的数据源，由本会话统一装配（三端同一份）。
+   * 缺省/空串 = 本图没有实体数据，跳过这两类图元（与旧行为一致）。
+   */
+  entityIoJson?: string | null;
   /** 装配核在 lightmap 之前回调（debug 的 `collectMetadata` 用它）。 */
   onRootReady?: (root: THREE.Scene, gltf: GLTF) => void;
 }
@@ -219,6 +227,18 @@ export class RenderSession {
   private skyGroup: THREE.Group | null = null;
   /** spot 光源的可见光柱（`point_spotlight`）；null = 本图没有 spot。 */
   private spotBeams: THREE.Group | null = null;
+  /**
+   * 场景扩展图元：`env_laser` 光束与 PCF 粒子系统。它们不是 GLB 的一部分，而是实体 lump
+   * 的副产物（`lasers.ts` / `particles.ts`）。三端都在 `loadScene` 里装配这一份，避免
+   * 「只在 debug 装」再次造成端间画面不一致。
+   */
+  private laserBeams: LaserBeams | null = null;
+  private particleSystems: ParticleSystems | null = null;
+  /**
+   * 物理线扫掠（`debug_line_trace` 包装）：物理世界就绪后由宿主调 `setLaserPhysicsTrace`
+   * 重截断光束——只认实体 brush，触发体/nodraw/水面被忽略（渲染网格 Raycaster 会误截）。
+   */
+  private laserPhysTrace: ((start: THREE.Vector3, end: THREE.Vector3) => number) | null = null;
   private skyParams: SkyCameraParams | null = null;
   private skyFog: THREE.Fog | null = null;
   /**
@@ -556,6 +576,11 @@ export class RenderSession {
     this.scene.updateMatrixWorld(true);
     this.freezeStaticMatrices();
 
+    // 场景扩展（env_laser / PCF 粒子）：实体 lump 的副产物，三端统一在这里装配。
+    // 必须早于 `precompileScene`，且先推一拍 `update()`——粒子的网格/材质是在第一次
+    // update 里才建出来的；晚于预编译就会在首帧现编 program（debug 实测单帧 84ms）。
+    this.setupSceneExtras(input.entityIoJson);
+
     // 预编译必须在 scene.add(root) 之后：早于它编译的是空场景（game/debug 旧注释的同一约束）。
     precompileScene(this.renderer, this.scene, this.camera);
 
@@ -873,6 +898,90 @@ export class RenderSession {
     this.nearCheckToggle = false;
     // 深度代理是主根的合并副本，换图后必须释放（几何可能几十 MB）。
     this.applyGlowDepthProxy(null);
+    // 场景扩展（激光 / 粒子）也属于旧图，换图时一起释放。
+    this.disposeSceneExtras();
+  }
+
+  /**
+   * 装配 `env_laser` 光束与 PCF 粒子（实体 lump 的副产物），并先推一拍 `update()`。
+   *
+   * 三端共用：数据同源（`entityIoJson`），装配顺序固定为「建 → 挂场景 → 先截断 → 推一拍」，
+   * 这样预编译与整帧预热都能覆盖它们的材质（旧实现只在 debug 装配，且晚于预热帧）。
+   * 装配失败只告警并清空，不影响主场景（这两类图元是观感增强，不是必需）。
+   */
+  private setupSceneExtras(entityIoJson?: string | null): void {
+    this.disposeSceneExtras();
+    if (!entityIoJson) return;
+    try {
+      const beams = collectLaserBeams(entityIoJson);
+      if (beams.length > 0) {
+        this.laserBeams = new LaserBeams(beams);
+        this.scene.add(this.laserBeams.root);
+        // 先用渲染网格 Raycaster 截断（无物理时的等价行为）；物理就绪后宿主会调
+        // `setLaserPhysicsTrace` 用 MASK_SOLID 扫掠重截断。
+        this.laserBeams.trace(this.root, this.laserPhysTrace ?? undefined);
+      }
+      const entities = collectParticleEntities(entityIoJson);
+      if (entities.length > 0) {
+        const systems = new ParticleSystems(entities);
+        // 有实体但没有可渲染效果（配置未覆盖的效果）时不建组、不挂场景（零开销）。
+        if (systems.root.children.length > 0) {
+          this.particleSystems = systems;
+          this.scene.add(systems.root);
+        } else {
+          systems.dispose();
+        }
+      }
+      const g = globalThis as {
+        __vbspParticles?: ParticleSystems | null;
+        __vbspLasers?: LaserBeams | null;
+      };
+      g.__vbspParticles = this.particleSystems;
+      g.__vbspLasers = this.laserBeams;
+      if (!this.laserBeams && !this.particleSystems) return;
+      // 粒子的网格/材质在第一次 update 才创建：预热与预编译之前必须先建出来。
+      const t = 1 / 64;
+      this.laserBeams?.update(t, this.camera);
+      this.particleSystems?.update(t, this.camera);
+      console.info(
+        `[${this.app}][extras] env_laser ${beams.length} 条 / PCF 粒子 ${entities.length} 组已挂入场景`,
+      );
+    } catch (err) {
+      console.warn(`[${this.app}][extras] 场景扩展装配失败（跳过）：`, err);
+      this.disposeSceneExtras();
+    }
+  }
+
+  /** 释放场景扩展图元（激光束 / PCF 粒子）及其根节点；幂等。 */
+  private disposeSceneExtras(): void {
+    if (this.laserBeams) {
+      this.scene.remove(this.laserBeams.root);
+      this.laserBeams.dispose();
+      this.laserBeams = null;
+    }
+    if (this.particleSystems) {
+      this.scene.remove(this.particleSystems.root);
+      this.particleSystems.dispose();
+      this.particleSystems = null;
+    }
+    const g = globalThis as {
+      __vbspParticles?: ParticleSystems | null;
+      __vbspLasers?: LaserBeams | null;
+    };
+    g.__vbspParticles = null;
+    g.__vbspLasers = null;
+  }
+
+  /**
+   * 物理世界就绪后重截断 `env_laser`（三端在 buildPredictionWorld / 物理注入之后调一次）。
+   *
+   * 物理扫掠只认实体 brush：触发体 / nodraw / 水面天然被忽略，坡上该有的光线不会被误截
+   * （旧实现 debug 端在物理就绪后用同一口径重截过一次，这里收进会话，避免各端再写一遍）。
+   * 传 null = 回到渲染网格 Raycaster 口径。
+   */
+  setLaserPhysicsTrace(trace: ((start: THREE.Vector3, end: THREE.Vector3) => number) | null): void {
+    this.laserPhysTrace = trace;
+    this.laserBeams?.trace(null, trace ?? undefined);
   }
 
   /** 只做可见性判定（debug 的按需渲染需要在决定是否出帧前先知道有无变化）。 */
@@ -1108,14 +1217,20 @@ export class RenderSession {
       times[n] = +(now - tLast).toFixed(2);
       tLast = now;
     };
-    // Source `TextureScroll` / `momentary_rot_button`：按真实时间推进。
-    // 放在可见性之前：滚动/旋转不影响剔除，但它们要吃到本帧的 dt，越早算越准。
-    if (this.textureScrolls.length > 0 || this.rotButtons.length > 0) {
+    // Source `TextureScroll` / `momentary_rot_button` / 激光 UV / 粒子：按真实时间推进。
+    // 放在可见性之前：这些动画不影响剔除，但它们要吃到本帧的 dt，越早算越准；
+    // 后面 6~9 趟 `renderer.render` 复用同一份矩阵与顶点。
+    const extrasAnimating = this.laserBeams !== null || this.particleSystems !== null;
+    if (this.textureScrolls.length > 0 || this.rotButtons.length > 0 || extrasAnimating) {
       const now = performance.now();
       const dt = this.lastFrameAt > 0 ? Math.min(0.1, (now - this.lastFrameAt) / 1000) : 0;
       this.lastFrameAt = now;
+      // 首帧给一个固定小步长（与旧 debug 实现一致：1/64 秒），避免 dt=0 时激光/粒子不推进。
+      const animDt = dt > 0 ? dt : 1 / 64;
       if (this.textureScrolls.length > 0) updateTextureScrolls(this.textureScrolls, dt);
       if (this.rotButtons.length > 0) updateRotButtons(this.rotButtons, dt);
+      if (this.laserBeams) this.laserBeams.update(animDt, this.camera);
+      if (this.particleSystems) this.particleSystems.update(animDt, this.camera);
     }
     // 动态对象（旋钮 pivot 等）刚改过变换：本帧在这里刷新一次世界矩阵，后面 6~9 趟
     // `renderer.render` 直接复用（`scene.matrixWorldAutoUpdate` 在构造函数里关掉了）。

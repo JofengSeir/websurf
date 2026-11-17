@@ -28,6 +28,8 @@ export interface ViewerMapSky {
   skyCamera?: SkyCameraParams | null;
   pvsJson?: string;
   mosaicManifest?: Record<string, string> | null;
+  /** 实体 lump 原文：共享会话据此装配 PCF 粒子与 `env_laser` 光束（viewer 无物理，激光用 Raycaster 兜底截断）。 */
+  entityIoJson?: string | null;
 }
 
 export class ViewerScene {
@@ -137,6 +139,7 @@ export class ViewerScene {
       skyboxTexture: skyboxTexture ?? null,
       mosaicManifest: sky?.mosaicManifest ?? null,
       quality: readRenderPrefs().textureQuality,
+      entityIoJson: sky?.entityIoJson ?? null,
     });
     const cull = Number.isFinite(result.defaultCull) ? result.defaultCull.toFixed(1) : '全加载';
     console.info(

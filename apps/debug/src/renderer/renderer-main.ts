@@ -38,14 +38,13 @@ import type { Brush } from '../physics/physics/Collision/Collision.types.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
 import { TeleportManager } from '../world/teleport-manager.js';
 import { adaptBrushes } from '../world/collider-adapter.js';
-import { EntitySystem, type EntitySystemStats } from '../../../../src/ts-shared/entity/entity-system.js';
-import { attachEntitySystem } from '../../../../src/ts-shared/entity/attach.js';
-import { DEFAULT_HULL_MAXS, DEFAULT_HULL_MINS, playerStateFromRaw, type RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
+import type { EntitySystemStats } from '../../../../src/ts-shared/entity/entity-system.js';
+import type { RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
 import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
+import { EntityGameplay } from '../../../../src/ts-shared/gameplay/entity-gameplay.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
 import type { PhyBevelPiece } from './collider-debug.js';
-import type { EntityTriggerBoxView } from './collider-debug.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
@@ -56,8 +55,6 @@ import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
 import type { LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
-import { ParticleSystems, collectParticleEntities } from '../../../../src/renderer-shared/scene/particles.js';
-import { LaserBeams, collectLaserBeams } from '../../../../src/renderer-shared/scene/lasers.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」
@@ -91,17 +88,6 @@ import { LaserBeams, collectLaserBeams } from '../../../../src/renderer-shared/s
  */
 const PLANE_INSPECT_INTERVAL_MIN = 12;
 const PLANE_INSPECT_INTERVAL_MAX = 96;
-
-/**
- * 「跳跃增幅区」内的起跳高度（HU）。
- *
- * surf_null 用 9 个 `targetname = autohop_zone` 的 `trigger_multiple` 给服务器插件做区域
- * 接口；这些体积里是一片**比四周低 64 HU** 的格栅坑，坑里立着 8 块瓷砖水泥台（台面与坑底
- * 差 64 HU）。默认跳高 57 HU 差 7 HU 跳不上去，原服由 SourceMod 插件在区内抬高跳跃高度。
- * 本引擎没有插件层，改由宿主按同一语义在区内把跳高临时抬到 80 HU（64 + 16 余量，够落台且
- * 不会像 2 倍跳那样明显不协调；数值只影响这一个区域，改这里即可）。
- */
-const AUTOHOP_ZONE_JUMP_HEIGHT = 80;
 
 /** HUD 剔除统计（`emitCullStats` 组装，交给 app.ts 注册的 `onCullStats`）。
  * `visible/total/cullDist` 与 `pvs.near/far/pvsHidden` 取自共享 `RenderSession.stats()`——判定
@@ -150,22 +136,6 @@ export interface RenderPhysEvent {
 
 /** 分块合并总开关：false 时 `loadScene` 不调 `optimizeScene`，保留 GLTFLoader 原始场景图。 */
 const OPTIMIZE_SCENE_ENABLED = true;
-
-/**
- * 解析实体层上报的速度冲量 detail（`attach.ts` 里 `JSON.stringify(vec3)`）。
- * 非法 / `null`（`setPlayerBaseVelocity(null)` 清除语义）时返回 null，调用方直接忽略。
- */
-function parseVelocityDetail(detail: string | undefined): [number, number, number] | null {
-  if (!detail || detail === 'null') return null;
-  try {
-    const v = JSON.parse(detail) as unknown;
-    if (!Array.isArray(v) || v.length !== 3) return null;
-    if (!v.every((x): x is number => typeof x === 'number' && Number.isFinite(x))) return null;
-    return [v[0], v[1], v[2]];
-  } catch {
-    return null;
-  }
-}
 
 /**
  * 读取会话级调试开关（localStorage；`'1'` 真 / `'0'` 假，缺省用 fallback）。
@@ -256,17 +226,17 @@ export class RendererMain {
   /** 渲染循环开关：`stop` 置假后 `tick` 直接返回。 */
   private running = false;
 
-  // ── Source 实体运行期 ────────────────────────────────────────
-  /** 由 `entityIoJson` 装配的通用 I/O / trigger / logic 系统；`tick` 与物理同帧推进。 */
-  private entitySystem: EntitySystem | null = null;
-  /** PCF 粒子系统的 three.js 最小实现（`src/renderer-shared/scene/particles.ts`）；无粒子实体时为 null。 */
-  private particleSystems: ParticleSystems | null = null;
-  /** 粒子推进用的上一帧墙钟（与物理步长独立，物理停走时粒子仍动）。 */
-  private particleLastMs = 0;
-  /** `env_laser` 加法光束（`src/renderer-shared/scene/lasers.ts`）；无可见梁时为 null。 */
-  private laserBeams: LaserBeams | null = null;
-  /** 光束推进用的上一帧墙钟（UV 滚动；与粒子钟独立）。 */
-  private laserLastMs = 0;
+  // ── Source 实体运行期（共享宿主）────────────────────────────
+  /**
+   * 实体副作用宿主（`src/ts-shared/gameplay/entity-gameplay.ts`）：装配 `EntitySystem`、
+   * 把实体 I/O 落到渲染物理线并转发给权威 Worker、维护跳跃增幅区与玩家名门控。
+   *
+   * 过去这段是 debug 手写的（`setupEntitySystem`/`applyServerCommand`/…），game 端没接，
+   * 于是「debug 里加速板/跳高有效果、game 里没效果」。下沉到共享层后三端同一份实现。
+   * 粒子/激光场景节点也已下沉到 `RenderSession.loadScene`（`entityIoJson` 一路传入），
+   * 这里只剩物理副作用与碰撞可视化数据。
+   */
+  private gameplay: EntityGameplay | null = null;
 
   // ── 主线程物理线（渲染直读 state()，无插值副本）──
   /** 渲染物理实例：`buildPredictionWorld` 里构造并 `build_world`，`disposeScene` 置空。 */
@@ -319,7 +289,7 @@ export class RendererMain {
             cur: [cur.x, cur.y, cur.z],
             pos: [cur.px, cur.py, cur.pz],
             g: st.onGround ? 1 : 0,
-            name: this.entitySystem?.getPlayer()?.targetname ?? '',
+            name: this.gameplay?.playerName() ?? '',
             keys: this.pendingKeys,
             stack: String(new Error().stack ?? '').slice(0, 800),
           });
@@ -348,10 +318,6 @@ export class RendererMain {
   private stepQuota = 0;
   /** 死亡 Y 阈值：`loadScene` 末尾经 `onSceneLoaded` 回调上报，`setDeathY` 记录并透传物理实例。 */
   private deathY: number | null = null;
-  /** 已推送给权威侧的玩家 targetname（`null` = 尚未同步过，首帧必推一次）。 */
-  private playerNamePushed: string | null = null;
-  /** 已推送的名门控总开关（`null` = 尚未同步；`__vbspTeleportFilterOff` 翻转时也要重推）。 */
-  private teleportFilterPushed: boolean | null = null;
 
   // ── 权威帧校准（实现收敛到 src/ts-shared/phys/authority-calibrator.ts）──
   /** 权威帧校准器：`correctFromAuthority` / `calibrateVelocity` / `applyCollisionCorrection` /
@@ -418,8 +384,10 @@ export class RendererMain {
   onSpeedCapChange: ((cap: number) => void) | null = null;
 
   /** 最近一次生效的水平速度上限（HU/s）；`null` = 还没收到过 `sv_maxvelocity`。
-   *  公开只读字段：HUD/脚本排查要能看到当前地图实际生效的 cap。 */
-  speedCapApplied: number | null = null;
+   *  公开只读：HUD/脚本排查要能看到当前地图实际生效的 cap（值由共享宿主维护）。 */
+  get speedCapApplied(): number | null {
+    return this.gameplay?.speedCapApplied ?? null;
+  }
 
   /**
    * 起跳高度变化回调（「跳跃增幅区」进入/离开）→ app.ts 转发给权威 Worker。
@@ -430,11 +398,9 @@ export class RendererMain {
   onJumpHeightChange: ((height: number) => void) | null = null;
 
   /** 最近一次下发的起跳高度（HU）；`null` = 还没有下发过（首帧会补发默认值）。 */
-  jumpHeightApplied: number | null = null;
-
-  /** 「跳跃增幅区」体积（引擎 Y-up 的 AABB，来自 `targetname === 'autohop_zone'` 的
-   *  `trigger_multiple`；每张图装配实体系统时重建）。 */
-  private autohopZones: { min: [number, number, number]; max: [number, number, number] }[] = [];
+  get jumpHeightApplied(): number | null {
+    return this.gameplay?.jumpHeightApplied ?? null;
+  }
 
   /** config 默认起跳高度（HU）：`jumpSpeed²/(2·gravity)`，debug 默认 302/800 = 57。 */
   private defaultJumpHeight = 57;
@@ -573,15 +539,10 @@ export class RendererMain {
    * `LightManager` 的灯光不在此列——它按 config 替换式更新。
    */
   disposeScene(): void {
-    this.entitySystem?.dispose();
-    this.entitySystem = null;
-    this.particleSystems?.dispose();
-    this.particleSystems = null;
-    this.particleLastMs = 0;
-    this.laserBeams?.dispose();
-    this.laserBeams = null;
-    this.laserLastMs = 0;
-    // 渲染资源（根/天空/环境/渲染列表/PVS/可见性）全部由共享会话释放
+    // 实体副作用宿主（含实体系统）先释放：它持有玩家实体与 I/O 队列，换图必须重建
+    this.gameplay?.dispose();
+    this.gameplay = null;
+    // 渲染资源（根/天空/环境/渲染列表/PVS/可见性/粒子/激光）全部由共享会话释放
     this.session?.disposeScene();
     this.bspModelScene = null;
 
@@ -605,9 +566,6 @@ export class RendererMain {
     // 速度突降诊断的跨帧基准也清掉，避免换图后第一帧拿旧图的速度做比较
     this.dropDiagLast = null;
     this.deathY = null;
-    // 换图后实体系统重建：玩家名的「已推送」缓存清零，首帧重新同步给权威侧
-    this.playerNamePushed = null;
-    this.teleportFilterPushed = null;
     // 换图时停掉飞行复播（轨迹本身保留：同一张图重载后还能直接 seek）
     this.stopFlightPlayback();
     // 权威校准状态清零（旧图的权威帧不得注入新图）
@@ -663,6 +621,9 @@ export class RendererMain {
       // debug 的 A/B 开关：半透明单独分块（默认开）
       translucentSplit: (globalThis as { __vbspTransChunking?: unknown }).__vbspTransChunking !== false,
       merge: OPTIMIZE_SCENE_ENABLED,
+      // 实体 lump 原文：共享会话在载图期装配 PCF 粒子（`info_particle_system`）与
+      // `env_laser` 光束并预编译它们，三端同一份实现（过去只在 debug 侧手写，game/viewer 没有）。
+      entityIoJson: data.entityIoJson ?? null,
       onRootReady: (root) => this.collectMetadata(root),
     });
 
@@ -690,18 +651,9 @@ export class RendererMain {
 
     this.needsRender = true;
     this.onSceneLoaded?.(result.bbox.min.y);
-    this.setupEntitySystem(data.entityIoJson);
-    this.setupParticleSystems(data.entityIoJson);
-    this.setupLaserBeams(data.entityIoJson);
-    // 上面三步把粒子/激光等在 `session.loadScene()` 之后才挂进场景，它们的材质不在载图期
-    // 预热帧内。端侧的网格/材质是在 `update()` 里才建出来的，所以先手动推一拍 `update()`
-    // 让它们成型，再做一次幂等预热——否则首飞第一次画到它们时会现编 7 个 srgb-linear
-    // 折射变体（实测单帧 84ms）。
-    if (this.camera) {
-      this.particleSystems?.update(1 / 64, this.camera);
-      this.laserBeams?.update(1 / 64, this.camera);
-    }
-    this.session.prewarmPasses();
+    // 实体副作用宿主（实体 I/O → 物理线 + 权威 Worker）。渲染侧的粒子/激光已在
+    // `session.loadScene()` 内部装配并进了载图期预热帧，这里不再手动 update/预热。
+    this.setupGameplay(data.entityIoJson);
     this.emitCullStats();
     return {
       diagonal: result.diagonal,
@@ -711,148 +663,29 @@ export class RendererMain {
   }
 
   /**
-   * 装配通用 Source 实体运行期（观测模式，副作用只上报不施加，理由见 `attach.ts`）。
-   * debug 端把事件接到 `onEntityEvent`，面板可据此显示 I/O 链与未处理输入。
+   * 装配实体副作用宿主（实体 I/O → 物理线 + 权威 Worker；实现在
+   * `src/ts-shared/gameplay/entity-gameplay.ts`，与 game/viewer 共用）。
+   *
+   * 这里只负责注入 debug 的运行期依赖（物理线、面板回调）与把实体 trigger 体积交给
+   * 碰撞可视化；速度/限速/跳高/玩家名的具体副作用全部由宿主完成，避免三端再手写三份。
    */
-  private setupEntitySystem(entityIoJson?: string): void {
-    this.entitySystem?.dispose();
-    this.entitySystem = attachEntitySystem({
-      entityIoJson,
-      getPlayerState: () => playerStateFromRaw(
-        (this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 },
-      ),
-      onEvent: (event) => {
-        // trigger_push 一类速度副作用：观测模式下 host 只 emit，在这里落到物理线。
-        // `entity:addVelocity` = SF_TRIG_PUSH_ONCE（一次性冲量，累加）；
-        // `entity:baseVelocity` = 非 ONCE 弹力区——Source 语义是「围绕本帧位移叠加的基准速度」，
-        // 而本引擎按用户要求实现为「玩家在区内时把速度设成 pushdir*speed」（覆盖，不累加）；
-        // 早期按 add 处理时 320fps 下每帧 +3000，站上板子 1 秒就涨到 40 万 HU/s。
-        if (event.kind === 'entity:addVelocity') {
-          const v = parseVelocityDetail(event.detail);
-          if (v) this.applyPlayerVelocity(v, 'add');
-        } else if (event.kind === 'entity:baseVelocity') {
-          const v = parseVelocityDetail(event.detail);
-          if (v) this.applyPlayerVelocity(v, 'set');
-        } else if (event.kind === 'servercommand') {
-          // 地图脚本的 `servercommand`（logic_auto OnMapSpawn 等）：目前只认速度上限
-          // `sv_maxvelocity`——surf 图靠它把满速抬到 3500/10000；没这条命令时 Rust 侧
-          // 用默认 3500 兜底（见 `PhysWorld::max_horizontal_speed`）。
-          this.applyServerCommand(event.detail ?? '');
-        }
-        this.onEntityEvent?.(event);
-      },
+  private setupGameplay(entityIoJson?: string): void {
+    this.gameplay?.dispose();
+    this.gameplay = new EntityGameplay({
+      getPlayerState: () =>
+        ((this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 }),
+      getPhys: () => this.predPhys,
+      defaultJumpHeight: this.defaultJumpHeight,
+      onEntityEvent: (event) => this.onEntityEvent?.(event),
+      onPlayerVelocity: (vel, mode) => this.onPlayerVelocity?.(vel, mode),
+      onSpeedCapChange: (cap) => this.onSpeedCapChange?.(cap),
+      onJumpHeightChange: (height) => this.onJumpHeightChange?.(height),
+      onPlayerNameChange: (name) => this.onPlayerNameChange?.(name),
     });
-    // 实体装配完成后把带体积的 trigger（加速板等）送进碰撞可视化；换图时会被下次装配覆盖
-    this.refreshEntityTriggerBoxes();
-  }
-
-  /**
-   * 收集实体运行时里带体积的 `trigger_*`（排除 `trigger_teleport*`：传送触发器由
-   * `ColliderDebug.setTriggers` 用更精确的凸包绘制），注入 `ColliderDebug`。
-   *
-   * 这些体积原本完全不可见——玩家站上 `trigger_push` 加速板会被突然设速却看不到提示。
-   */
-  private refreshEntityTriggerBoxes(): void {
-    const boxes: EntityTriggerBoxView[] = [];
-    const zones: { min: [number, number, number]; max: [number, number, number] }[] = [];
-    const entities = this.entitySystem?.entList.entities ?? [];
-    for (const entity of entities) {
-      if (!entity.classname.startsWith('trigger')) continue;
-      if (entity.classname.startsWith('trigger_teleport')) continue;
-      for (const volume of entity.volumes) {
-        boxes.push({
-          classname: entity.classname,
-          targetname: entity.targetname,
-          min: { x: volume.mins[0], y: volume.mins[1], z: volume.mins[2] },
-          max: { x: volume.maxs[0], y: volume.maxs[1], z: volume.maxs[2] },
-        });
-        // 「跳跃增幅区」：surf_null 用 `autohop_zone` 这套 targetname 给服务器插件做区域
-        // 接口（地图本身没有输出/脚本）。原服插件在区内提高跳高，本引擎没有插件层，
-        // 所以在这里把体积收下来，由 `updateAutohopZoneJump()` 按玩家位置切换跳高。
-        if (entity.targetname === 'autohop_zone') {
-          zones.push({
-            min: [volume.mins[0], volume.mins[1], volume.mins[2]],
-            max: [volume.maxs[0], volume.maxs[1], volume.maxs[2]],
-          });
-        }
-      }
-    }
-    this.autohopZones = zones;
-    this.jumpHeightApplied = null; // 换图/重装实体后由下一帧重新判定并补发
-    this.colliderDebug.setEntityTriggerBoxes(boxes);
-  }
-
-  /**
-   * 把实体层上报的速度副作用同时施加到渲染物理线并回调给宿主（权威 Worker）。
-   *
-   * @param mode 'add' = 叠加冲量（`SF_TRIG_PUSH_ONCE`）；'set' = 覆盖速度
-   *   （`trigger_push` 非 ONCE 的加速板：区内每帧设成固定方向/大小，离开后保持）。
-   */
-  private applyPlayerVelocity(
-    vel: [number, number, number],
-    mode: 'add' | 'set',
-  ): void {
-    if (mode === 'set') {
-      this.predPhys?.set_push_velocity?.(vel[0], vel[1], vel[2]);
-    } else {
-      this.predPhys?.add_velocity?.(vel[0], vel[1], vel[2]);
-    }
-    this.onPlayerVelocity?.(vel, mode);
-  }
-
-  /**
-   * 处理地图脚本下发的 `servercommand`：目前只认 `sv_maxvelocity <n>`。
-   *
-   * Source 里它是「速度上限」，默认 3500，`CheckVelocity` 每步多次钳位；surf_666 的
-   * `logic_auto OnMapSpawn` 会把本图改成 10000——按 Source 语义应以地图为准（用户若想
-   * 强制 3500 需要显式覆盖地图 cvar）。
-   */
-  private applyServerCommand(command: string): void {
-    const m = /^\s*sv_maxvelocity\s+(-?\d+(?:\.\d+)?)\s*$/i.exec(command);
-    if (!m) return;
-    const cap = Number(m[1]);
-    if (!Number.isFinite(cap)) return;
-    this.speedCapApplied = cap;
-    this.predPhys?.set_max_horizontal_speed?.(cap);
-    this.onSpeedCapChange?.(cap);
-  }
-
-  /**
-   * 「跳跃增幅区」判定：玩家脚底是否在任一 `autohop_zone` 体积内，按结果切换起跳高度。
-   *
-   * 只在目标值变化时下发（进入 = 80 HU、离开 = config 默认值），避免每帧发消息；首次运行
-   * 或换图后 `jumpHeightApplied === null` 会补发一次默认值，保证权威侧与世界重建后的状态
-   * 与渲染线一致（世界重建会把 Rust 侧 `jump_height` 重放回默认值）。
-   */
-  private updateAutohopZoneJump(st: { posX: number; posY: number; posZ: number }): void {
-    if (!this.predPhys) return;
-    // 用玩家碰撞箱（与实体 touch 同一口径）与区域 AABB 求交，而不是只测脚底点：
-    // 格栅坑的地板比区域底沿还低 32 HU，站坑底时脚底在区域外但身体在区内——
-    // 实体层 `serviceTouch` 也是用 `state.origin + hullMins/Maxs` 建盒，口径必须一致。
-    const px0 = st.posX + DEFAULT_HULL_MINS[0];
-    const px1 = st.posX + DEFAULT_HULL_MAXS[0];
-    const py0 = st.posY + DEFAULT_HULL_MINS[1];
-    const py1 = st.posY + DEFAULT_HULL_MAXS[1];
-    const pz0 = st.posZ + DEFAULT_HULL_MINS[2];
-    const pz1 = st.posZ + DEFAULT_HULL_MAXS[2];
-    let inside = false;
-    for (const z of this.autohopZones) {
-      if (
-        px1 >= z.min[0] && px0 <= z.max[0] &&
-        py1 >= z.min[1] && py0 <= z.max[1] &&
-        pz1 >= z.min[2] && pz0 <= z.max[2]
-      ) {
-        inside = true;
-        break;
-      }
-    }
-    const target = inside
-      ? Math.max(this.defaultJumpHeight, AUTOHOP_ZONE_JUMP_HEIGHT)
-      : this.defaultJumpHeight;
-    if (this.jumpHeightApplied !== null && Math.abs(this.jumpHeightApplied - target) < 1e-6) return;
-    this.jumpHeightApplied = target;
-    this.predPhys.set_jump_height?.(target);
-    this.onJumpHeightChange?.(target);
+    this.gameplay.load(entityIoJson);
+    // 实体装配完成后把带体积的 trigger（加速板等）送进碰撞可视化；换图时会被下次装配覆盖。
+    // 传送触发器仍由 `ColliderDebug.setTriggers` 用更精确的凸包绘制。
+    this.colliderDebug.setEntityTriggerBoxes(this.gameplay.entityTriggerBoxes());
   }
 
   /**
@@ -874,70 +707,9 @@ export class RendererMain {
     this.needsRender = true;
   }
 
-  /**
-   * 装配 PCF 粒子（最小 three.js 实现，见 `src/renderer-shared/scene/particles.ts`）：
-   * 只处理 `info_particle_system` 实体里有可视化配置的效果；没有可渲染效果时不建组、不挂场景（零开销）。
-   */
-  private setupParticleSystems(entityIoJson?: string): void {
-    this.particleSystems?.dispose();
-    this.particleSystems = null;
-    this.particleLastMs = 0;
-    if (!this.scene) return;
-    const entities = collectParticleEntities(entityIoJson);
-    if (entities.length === 0) return;
-    const systems = new ParticleSystems(entities);
-    if (systems.root.children.length === 0) {
-      systems.dispose();
-      return;
-    }
-    this.particleSystems = systems;
-    this.scene.add(systems.root);
-    (globalThis as Record<string, unknown>)['__vbspParticles'] = systems;
-  }
-
-  /**
-   * 装配 `env_laser` 光束（见 `src/renderer-shared/scene/lasers.ts`）：
-   * 只画 `spawnflags 1` 的 start 实体，端点由 `LaserTarget` 解析；加载后对 BSP 主 mesh 做一次
-   * raycast 截断（等价 `UTIL_TraceLine`，静止地图无需每帧重算）。无可见梁时不建节点。
-   */
-  private setupLaserBeams(entityIoJson?: string): void {
-    this.laserBeams?.dispose();
-    this.laserBeams = null;
-    this.laserLastMs = 0;
-    if (!this.scene) return;
-    const beams = collectLaserBeams(entityIoJson);
-    if (beams.length === 0) return;
-    const lasers = new LaserBeams(beams);
-    lasers.trace(this.bspModelScene);
-    this.laserBeams = lasers;
-    this.scene.add(lasers.root);
-    (globalThis as Record<string, unknown>)['__vbspLasers'] = lasers;
-  }
-
   /** 实体运行期统计（实体浏览器 / 诊断面板）；未装配返回 null。 */
   entityStats(): EntitySystemStats | null {
-    return this.entitySystem?.stats() ?? null;
-  }
-
-  /**
-   * 把玩家实体当前 targetname 同步给权威侧（变化才回调）。
-   *
-   * 来源是实体系统内部的玩家实体（`EntitySystem.getPlayer()`）——地图脚本用
-   * `AddOutput targetname krazy1/2/3` 在触碰时改名，传送器按 filter 里的名字模式决定是否响应。
-   * 名字不由物理状态携带（`PlayerState` 无 name 字段），故此路是唯一回传通道。
-   */
-  private syncPlayerName(): void {
-    const name = this.entitySystem?.getPlayer()?.targetname ?? '';
-    // 主线程渲染物理与权威 Worker 必须同参：两侧各自跑 teleport.check，名门控分叉会让
-    // 「权威回卷了、画面没回卷」或反之（渲染侧没有反向同步传送的通道）。
-    const filterEnabled =
-      (globalThis as unknown as { __vbspTeleportFilterOff?: boolean }).__vbspTeleportFilterOff !== true;
-    if (name === this.playerNamePushed && filterEnabled === this.teleportFilterPushed) return;
-    this.playerNamePushed = name;
-    this.teleportFilterPushed = filterEnabled;
-    this.predPhys?.set_teleport_player_name?.(name);
-    this.predPhys?.set_teleport_filter_enabled?.(filterEnabled);
-    this.onPlayerNameChange?.(name);
+    return this.gameplay?.entityStats() ?? null;
   }
 
   /** 启动渲染循环（幂等：已在运行时直接返回）。 */
@@ -1051,13 +823,9 @@ export class RendererMain {
       const camY = hold ? hold.y : st.posY + st.eyeHeight;
       cc.setPosition(hold ? hold.x : st.posX, camY, hold ? hold.z : st.posZ);
 
-      // Source 实体运行期：与物理同帧推进（touch 用本帧 state，0 延迟输出当帧消费）。
-      this.entitySystem?.frame(dt);
-      // 「跳跃增幅区」（autohop_zone）：按本帧玩家位置切换起跳高度（触区/离开各发一次）。
-      this.updateAutohopZoneJump(st);
-      // 地图脚本用 `AddOutput targetname` 给玩家改名来做传送门控（filter_activator_name）：
-      // 名字只存在于实体系统内，权威侧传送器需要它才能判 filter，故每帧取一次、变化才回调。
-      this.syncPlayerName();
+      // Source 实体运行期 + 物理副作用（共享宿主）：与物理同帧推进；touch 用本帧 state，
+      // 0 延迟输出当帧消费。速度/限速/跳高/玩家名的变化由宿主写渲染物理线并回调权威 Worker。
+      this.gameplay?.update(dt);
     } else if (this.stepGated) {
       // 闸门跳过物理的帧也要推进墙钟基准，否则闸门恢复时会拿到一个异常大的 dt
       this.lastTickMs = now;
@@ -1100,26 +868,6 @@ export class RendererMain {
       }
     } else if (this.lastPlaneInfo !== null) {
       this.lastPlaneInfo = null;
-    }
-
-    // ④-2 PCF 粒子：按墙钟推进（物理停走时仍动），纹理滚动/辉光呼吸在 `update` 内。
-    if (this.particleSystems) {
-      const pdt = this.particleLastMs === 0 ? 1 / 64 : Math.min((now - this.particleLastMs) / 1000, 0.1);
-      this.particleLastMs = now;
-      this.particleSystems.update(pdt, this.camera);
-      this.needsRender = true;
-    } else {
-      this.particleLastMs = 0;
-    }
-
-    // ④-3 env_laser 光束：面向相机的窄带按相机重建；UV 滚动/端点截断在 `update` 内。
-    if (this.laserBeams) {
-      const ldt = this.laserLastMs === 0 ? 1 / 64 : Math.min((now - this.laserLastMs) / 1000, 0.1);
-      this.laserLastMs = now;
-      this.laserBeams.update(ldt, this.camera);
-      this.needsRender = true;
-    } else {
-      this.laserLastMs = 0;
     }
 
     // ⑤ 渲染：物理就绪后每帧都渲染；needsRender 只用于物理未就绪时的强制刷新。
@@ -1582,10 +1330,12 @@ export class RendererMain {
     this.predPhys = phys;
     // 物理世界就绪后用 `MASK_SOLID` 口径重新截断 env_laser：零体积线段扫掠只认实体 brush，
     // 触发体 / nodraw / 水面天然被忽略（之前用渲染网格 Raycaster 会把梁误截，坡上该有的光线消失）。
-    this.laserBeams?.trace(null, (s, e) => {
+    // 光束对象由共享会话持有（载图期装配），这里只把「物理线截断函数」注入给它。
+    this.session?.setLaserPhysicsTrace((s, e) => {
       const r = phys.debug_line_trace(s.x, s.y, s.z, e.x, e.y, e.z);
       return r[0];
-    });    this.predReady = true;
+    });
+    this.predReady = true;
     this.noclipActive = false;
     this.lastTickMs = 0;
     // 权威帧校准状态清零（首帧权威帧将作为新起点）

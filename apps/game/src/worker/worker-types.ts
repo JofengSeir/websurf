@@ -72,9 +72,63 @@ export interface SetDeathThresholdMessage {
   value: number;
 }
 
-/** 主线程 → Worker 的联合类型（T-048 补齐）：按实际收发面列全 13 条——`wasm-init` / `init` /
+/** 玩家实体当前 targetname（地图脚本用 `AddOutput targetname` 改名做传送门控）。
+ *
+ * 权威侧传送器按 `filter_activator_name` 静态解析出的名字模式判定是否响应；名字经本消息
+ * 从主线程实体系统回传。`filterEnabled` 缺省 = true；`false` 时权威忽略全部门控。
+ * 值被记忆并在世界重建后重放。
+ */
+export interface SetPlayerNameMessage {
+  type: 'set-player-name';
+  name: string;
+  filterEnabled?: boolean;
+}
+
+/** 给玩家叠加速度冲量（HU/s，Y-up；地图脚本 `trigger_push` 一次性弹力）。
+ *
+ * 语义见 `PhysWorld::add_velocity`：`velocity += v`，`vy > 0` 时同时脱地。
+ * 不记忆、不重放：冲量是瞬时的，世界重建后不该补发。
+ */
+export interface AddVelocityMessage {
+  type: 'add-velocity';
+  vel: [number, number, number];
+}
+
+/** 把玩家速度**设成**给定向量（HU/s，Y-up；`trigger_push` 非 ONCE 的加速板）。
+ *
+ * 语义见 `PhysWorld::set_push_velocity`：覆盖写而非累加；玩家在触发区内时实体层每帧
+ * touch 一次就发一次，速度稳定在 `pushdir * speed`（累加语义在 320fps 下会失控）。
+ * 不记忆、不重放。
+ */
+export interface SetPushVelocityMessage {
+  type: 'set-push-velocity';
+  vel: [number, number, number];
+}
+
+/** 设置水平速度上限（HU/s，不含竖直分量；对应 Source 的 `sv_maxvelocity`）。
+ *
+ * 由宿主按地图 `logic_auto` 的 `servercommand sv_maxvelocity <n>` 下发；`cap <= 0` 关闭钳制。
+ * 值被记忆并在世界重建后重放（地图级设置，重建后仍需生效）。
+ */
+export interface SetSpeedCapMessage {
+  type: 'set-speed-cap';
+  cap: number;
+}
+
+/** 设置起跳高度（HU；「跳跃增幅区」内临时抬高，离开时发回默认值）。
+ *
+ * 语义见 `PhysWorld::set_jump_height`：只改之后起跳的初速，不动当前速度。
+ * 值被记忆并在世界重建后重放（世界重建会把 `jump_height` 重放回 config 默认值）。
+ */
+export interface SetJumpHeightMessage {
+  type: 'set-jump-height';
+  height: number;
+}
+
+/** 主线程 → Worker 的联合类型（T-048 补齐）：按实际收发面列全 18 条——`wasm-init` / `init` /
  *  `config` / `respawn` / `teleport` / `set-death-threshold` / `world-json` / `input` /
- *  `sync-render-state` / `set-spawn-points` / `teleport-to-pos` / `set-mode` / `set-hold`。 */
+ *  `sync-render-state` / `set-spawn-points` / `teleport-to-pos` / `set-mode` / `set-hold` /
+ *  `set-player-name` / `add-velocity` / `set-push-velocity` / `set-speed-cap` / `set-jump-height`。 */
 export type WorkerMessage =
   | WasmInitMessage | InitMessage
   | ConfigMessage | RespawnMessage
@@ -82,7 +136,10 @@ export type WorkerMessage =
   | WorldJsonMessage | InputMessage
   | SyncRenderStateMessage | SetSpawnPointsMessage
   | TeleportToPosMessage | SetModeMessage
-  | SetHoldMessage;
+  | SetHoldMessage
+  | SetPlayerNameMessage | AddVelocityMessage
+  | SetPushVelocityMessage | SetSpeedCapMessage
+  | SetJumpHeightMessage;
 
 // ── Worker-A → 主线程（本组末尾两条 `WorldJsonMessage` / `InputMessage`
 //    实际方向相反，仍声明在原位）──────────────────────────────

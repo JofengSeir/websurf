@@ -42,9 +42,9 @@ import type { LightingMode } from '../../../../src/renderer-shared/shader/lightm
 import { applyLightingPresentation, type RenderLightingPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
 import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js';
 import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
-import { EntitySystem, type EntitySystemStats } from '../../../../src/ts-shared/entity/entity-system.js';
-import { attachEntitySystem } from '../../../../src/ts-shared/entity/attach.js';
-import { playerStateFromRaw, type RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
+import type { EntitySystemStats } from '../../../../src/ts-shared/entity/entity-system.js';
+import type { RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
+import { EntityGameplay } from '../../../../src/ts-shared/gameplay/entity-gameplay.js';
 import { Variant } from '../../../../src/ts-shared/entity/variant.js';
 import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 
@@ -125,9 +125,15 @@ export class RendererMain {
   /** 注入生效性统计是否已跑（幂等保护，跨地图由 `disposeScene` 复位）。 */
   private injectReported = false;
 
-  // ── Source 实体运行期 ────────────────────────────────────────
-  /** 由 `entityIoJson` 装配的通用 I/O / trigger / logic 系统；`tick` 与物理同帧推进。 */
-  private entitySystem: EntitySystem | null = null;
+  // ── Source 实体运行期（共享宿主）────────────────────────────
+  /**
+   * 实体副作用宿主（`src/ts-shared/gameplay/entity-gameplay.ts`）：装配 `EntitySystem`、
+   * 把实体 I/O 落到渲染物理线并转发给权威 Worker、维护跳跃增幅区与玩家名门控。
+   *
+   * 过去 game 端只把事件转给从未赋值的 `onEntityEvent`，accelerator/跳高/限速/传送门控
+   * 全都不生效（三端不同步的直接原因）。现在与 debug 共用同一份实现。
+   */
+  private gameplay: EntityGameplay | null = null;
 
 
 
@@ -151,6 +157,15 @@ export class RendererMain {
 
   /** 实体系统观测回调：I/O 输入、宿主副作用请求都会送到这里（缺省丢弃）。 */
   onEntityEvent: ((event: EntityEvent) => void) | null = null;
+
+  /** 玩家速度副作用（`add` = 冲量 / `set` = 加速板覆盖）→ app.ts 转发权威 Worker。 */
+  onPlayerVelocity: ((vel: [number, number, number], mode: 'add' | 'set') => void) | null = null;
+  /** 地图 convar `sv_maxvelocity` → 水平速度上限（渲染线与权威必须同参）。 */
+  onSpeedCapChange: ((cap: number) => void) | null = null;
+  /** 「跳跃增幅区」进入/离开 → 起跳高度（渲染线与权威必须同参）。 */
+  onJumpHeightChange: ((height: number) => void) | null = null;
+  /** 玩家 targetname 变化（传送 filter 门控；权威侧需要它判 `filter_activator_name`）。 */
+  onPlayerNameChange: ((name: string) => void) | null = null;
 
   /** 失效世代 +1（本地计数器）并调 `shared.resetRenderSample()` 让 Worker 丢弃既有采样配对。 */
   private bumpSampleEpoch(): void {
@@ -217,49 +232,48 @@ export class RendererMain {
       skyboxTexture: data.skyboxTexture ?? null,
       mosaicManifest,
       quality: this.config.texture.quality,
+      // 实体 lump 原文：共享会话在载图期装配 PCF 粒子与 `env_laser` 光束并预编译（三端同一份）。
+      entityIoJson: data.entityIoJson ?? null,
     });
     this.pendingInjectReport = result.applied;
     // 回传场景包围盒最小 Y（`onSceneLoaded` 的调用方把它当死亡阈值转给 setDeathY）
     this.onSceneLoaded?.(result.bbox.min.y);
-    this.setupEntitySystem(data.entityIoJson);
+    this.setupGameplay(data.entityIoJson);
   }
 
   /**
-   * 装配通用 Source 实体运行期。
+   * 装配实体副作用宿主（实体 I/O → 物理线 + 权威 Worker；实现在
+   * `src/ts-shared/gameplay/entity-gameplay.ts`，与 debug/viewer 共用）。
    *
-   * 宿主采用**观测模式**：每个世界副作用都经 `onEntityEvent` 上报而不直接改物理。
-   * 理由是 teleport / damage 目前仍由 Rust `build_world(teleportJson, ...)` 那条链承担，
-   * 两条链同时施加会重复传送。上层要「完全收编」时，把 sink 的实现接到
-   * `PhysWorld.teleport_to` / worker `teleport-to-pos` 并停用旧链即可，实体层无需改动。
+   * 宿主内部完成速度/限速/跳高/玩家名的落地，并把每次变化经 `on*Change` 回调交给 app.ts
+   * 转发给权威 Worker —— 渲染线与权威必须同参，否则位置分叉。
    */
-  private setupEntitySystem(entityIoJson?: string): void {
-    this.entitySystem?.dispose();
-    this.entitySystem = attachEntitySystem({
-      entityIoJson,
-      getPlayerState: () => playerStateFromRaw(
-        (this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 },
-      ),
-      onEvent: (event) => this.onEntityEvent?.(event),
-      log: (message) => {
-        if (!message.startsWith('unhandled input')) return;
-        this.onEntityEvent?.({
-          kind: 'entity:unhandled', detail: message,
-          entityIndex: -1, classname: '', targetname: '', time: this.entitySystem?.time ?? 0,
-        });
-      },
+  private setupGameplay(entityIoJson?: string): void {
+    this.gameplay?.dispose();
+    this.gameplay = new EntityGameplay({
+      getPlayerState: () =>
+        ((this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 }),
+      getPhys: () => this.predPhys,
+      onEntityEvent: (event) => this.onEntityEvent?.(event),
+      onPlayerVelocity: (vel, mode) => this.onPlayerVelocity?.(vel, mode),
+      onSpeedCapChange: (cap) => this.onSpeedCapChange?.(cap),
+      onJumpHeightChange: (height) => this.onJumpHeightChange?.(height),
+      onPlayerNameChange: (name) => this.onPlayerNameChange?.(name),
     });
+    this.gameplay.load(entityIoJson);
   }
 
   /** 实体运行期统计（调试面板 / 控制台诊断）；未装配返回 null。 */
   entityStats(): EntitySystemStats | null {
-    return this.entitySystem?.stats() ?? null;
+    return this.gameplay?.entityStats() ?? null;
   }
 
   /** 从宿主按名字注入一条输入（调试 / 未来 +use 接线的入口）。 */
   entityFireInput(target: string, inputName: string, parameter?: string): number {
-    if (!this.entitySystem) return 0;
+    const system = this.gameplay?.system;
+    if (!system) return 0;
     const value = parameter === undefined ? Variant.void() : Variant.fromString(parameter);
-    return this.entitySystem.acceptInputOn(target, inputName, value);
+    return system.acceptInputOn(target, inputName, value);
   }
 
   /** 贴图画质切换：算法与状态在共享会话，本端只转发。 */
@@ -287,8 +301,9 @@ export class RendererMain {
    *  物理、丢弃待喂输入、复位注入统计开关与校准器、重启渲染采样流。
    *  不销毁 renderer/scene/camera 本身——换图后由 `loadScene` 继续复用。 */
   disposeScene(): void {
-    this.entitySystem?.dispose();
-    this.entitySystem = null;
+    // 实体副作用宿主（含实体系统）先释放：持有玩家实体与 I/O 队列，换图必须重建
+    this.gameplay?.dispose();
+    this.gameplay = null;
     this.session?.disposeScene();
     this.predPhys = null;
     this.predReady = false;
@@ -365,6 +380,12 @@ export class RendererMain {
       world.spawn.yawDeg,
     );
     this.predPhys = phys;
+    // 物理世界就绪后用 `MASK_SOLID` 口径重新截断 env_laser（共享会话持有光束对象）：
+    // 零体积线段扫掠只认实体 brush，触发体 / nodraw / 水面天然被忽略。
+    this.session?.setLaserPhysicsTrace((s, e) => {
+      const r = phys.debug_line_trace(s.x, s.y, s.z, e.x, e.y, e.z);
+      return r[0];
+    });
     this.predReady = true;
     // T-731/F4：新世界首帧 dt 取 1/64，不继承上一张图的 rAF 时戳（同 disposeScene 处的说明）
     this.lastTickMs = 0;
@@ -613,7 +634,7 @@ export class RendererMain {
 
       // Source 实体运行期：与物理同帧推进。touch 用本帧 state，0 延迟输出在
       // ServiceEvents 里当帧消费（顺序见 entity-system.ts 文件头）。
-      this.entitySystem?.frame(dt);
+      this.gameplay?.update(dt);
     }
 
     // 2+3. 共享会话：可见性判定 → 近平面贴墙（隔帧）→ 天空/主世界绘制。

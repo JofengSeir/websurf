@@ -85,4 +85,31 @@ export class InputBridge {
     // 权威侧同值下发：共享 dispatch 的 set-death-threshold 分支 → Rust set_death_y
     this.worker.postMessage({ type: 'set-death-threshold', value });
   }
+
+  // ── 实体副作用 → 权威 Worker（共享宿主回调转发；世界重建后由共享 dispatch 重放）──
+
+  /** 玩家 targetname（传送 filter 门控）：渲染物理已由宿主写，权威侧同值下发。 */
+  sendSetPlayerName(name: string, filterEnabled?: boolean): void {
+    this.worker.postMessage({ type: 'set-player-name', name, filterEnabled });
+  }
+
+  /** 一次性速度冲量（`trigger_push` ONCE / 实体 `addVelocity`）。 */
+  sendAddVelocity(vel: [number, number, number]): void {
+    this.worker.postMessage({ type: 'add-velocity', vel });
+  }
+
+  /** 覆盖玩家速度（`trigger_push` 非 ONCE 加速板）。 */
+  sendSetPushVelocity(vel: [number, number, number]): void {
+    this.worker.postMessage({ type: 'set-push-velocity', vel });
+  }
+
+  /** 水平速度上限（地图 `sv_maxvelocity`）。 */
+  sendSetSpeedCap(cap: number): void {
+    this.worker.postMessage({ type: 'set-speed-cap', cap });
+  }
+
+  /** 起跳高度（「跳跃增幅区」内/外切换）。 */
+  sendSetJumpHeight(height: number): void {
+    this.worker.postMessage({ type: 'set-jump-height', height });
+  }
 }

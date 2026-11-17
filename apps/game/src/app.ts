@@ -184,6 +184,15 @@ if (isolated) {
 
   // 3. 桥（面板 → 双端物理：Worker 权威帧 + 主线程渲染物理，参数同参）
   bridge = new InputBridge(fixWorker, renderer, config);
+  // 实体副作用（共享宿主 EntityGameplay）→ 权威 Worker：渲染物理线已由宿主写，这里只做转发。
+  // 过去 game 端没接这些回调，加速板/跳高/限速/传送门控全不生效（与 debug 不同步的原因）。
+  renderer.onPlayerVelocity = (vel, mode) => {
+    if (mode === 'set') bridge?.sendSetPushVelocity(vel);
+    else bridge?.sendAddVelocity(vel);
+  };
+  renderer.onSpeedCapChange = (cap) => bridge?.sendSetSpeedCap(cap);
+  renderer.onJumpHeightChange = (height) => bridge?.sendSetJumpHeight(height);
+  renderer.onPlayerNameChange = (name) => bridge?.sendSetPlayerName(name);
   syncFullConfig();
 
   // 4. 面板（参数变更实时同步主线程物理）

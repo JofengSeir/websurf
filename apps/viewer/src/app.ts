@@ -632,7 +632,7 @@ async function loadBsp(file: File): Promise<void> {
   try {
     hud.setStatus(`正在解析 ${file.name}（主线程 BSP 解析）…`);
     const result: BspLoadResult = await loadBspFile(file);
-    await scene.mountGlb(result.glbBytes, result.skyboxTexture, { fogParams: result.fogParams, skyCamera: result.skyCamera, pvsJson: result.pvsJson, mosaicManifest: result.mosaicManifest });
+    await scene.mountGlb(result.glbBytes, result.skyboxTexture, { fogParams: result.fogParams, skyCamera: result.skyCamera, pvsJson: result.pvsJson, mosaicManifest: result.mosaicManifest, entityIoJson: result.entityIoJson ?? null });
     setupEntitySystem(result.entityIoJson);
 
     const box = scene.worldBox();
