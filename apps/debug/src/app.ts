@@ -33,6 +33,7 @@ import type {
 } from './worker/worker-types.js';
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import { handleWorkerReady, workerStaleMessage } from '../../../src/ts-shared/auth/worker-ready.js';
+import { createAppRuntime, type AppHooks } from '../../../src/ts-shared/app/app-runtime.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
 import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, applyRenderDebugSwitches, defaultRenderPrefs, readPrefsPath as readPrefsField, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi } from '../../../src/renderer-shared/config/render-panel-ui.js';
@@ -281,7 +282,132 @@ let mainWasmReady: Promise<void> = Promise.resolve();
 // 初始化
 // ---------------------------------------------------------------------------
 
+/**
+ * P2 Step1：入口前段（共享内存判定后的通道/Worker/wasm 注入/共享状态/渲染器与通用回调骨架）
+ * 已下沉为 `src/ts-shared/app/app-runtime.ts` 的 createAppRuntime()；本函数只保留端特有点：
+ * 共享内存可用性判定与日志、UI/面板/回放/输入循环装配。
+ *
+ * 回退：`globalThis.__vbspLegacyBootstrap === 1` 时走 mainLegacy()（旧内联装配，逐行保留）。
+ */
 async function main(): Promise<void> {
+	if (!dom.canvas) {
+		console.error('[app] canvas#preview 元素未找到');
+		return;
+	}
+
+	// 0. 共享内存通道判定（条件不满足退回 postMessage 数据通道；判定/提示是端体验的一部分）
+	const sharedMemory = resolveSharedMemory();
+
+	// 1-2. 通道/Worker/wasm/共享状态/渲染器/通用回调骨架 → 共享 bootstrap（9 步固定序见 runtime 文件头）
+	const runtime = createAppRuntime<RuntimeConfig, RendererMain, InputBridge>(
+		{
+			id: 'debug',
+			canvas: dom.canvas,
+			config,
+			sharedMemory,
+			worker: { inlineJs: readEmbedded('__VBSP_WORKER_JS__'), url: './worker.js' },
+			wasm: {
+				inlineB64: readEmbedded('__VBSP_WASM_B64__'),
+				mtzB64: readEmbedded('__VBSP_TEXTURES_MTZ_B64__'),
+				url: mainWasmUrl(),
+			},
+		},
+		createDebugHooks(),
+	);
+
+	// 旧模块级引用直接指向 runtime 装配结果（后续 UI/加载/输入循环代码不改）
+	worker = runtime.worker;
+	sharedState = runtime.shared;
+	inputBridge = runtime.bridge;
+	rendererMain = runtime.renderer;
+	mainWasmReady = runtime.wasmReady;
+
+	// 3. 绑定输入（以下均为端层：DOM/面板/回放/输入循环）
+	bindInput(dom.canvas);
+	loadUiPrefs();
+	setupRenderPanel();
+	syncPrefsControls();
+	applyCrosshairStyle();
+	sendPrefsToWorker();
+	bindUI();
+	// 3.3 初始控件状态（config 默认值 → 面板）
+	if (dom.colliderSourceSelect) dom.colliderSourceSelect.value = config.physics.colliderSource;
+	if (dom.physicsModeSelect) dom.physicsModeSelect.value = config.physics.mode;
+
+	// 4. 输入循环（设备 / 回放 / 合成三条路径）
+	startInputLoop();
+}
+
+/** 共享内存可用性判定 + 端侧提示（回退语义/日志措辞由端保留，runtime 只接收结果）。 */
+function resolveSharedMemory(): boolean {
+	const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
+	const sharedMemory = isolated && typeof SharedArrayBuffer !== 'undefined';
+	if (sharedMemory) {
+		console.log('[app] crossOriginIsolated 已启用，使用共享内存输入/物理通道');
+	} else {
+		console.warn('[app] 未启用 crossOriginIsolated，回退 postMessage 输入通道（延迟较高）');
+	}
+	return sharedMemory;
+}
+
+/** 读取构建注入的全局（内嵌 worker/wasm/纹理包 base64；dev 模式为 undefined）。 */
+function readEmbedded(
+	name: '__VBSP_WORKER_JS__' | '__VBSP_WASM_B64__' | '__VBSP_TEXTURES_MTZ_B64__',
+): string | undefined {
+	return (globalThis as unknown as Record<string, string | undefined>)[name];
+}
+
+/**
+ * debug 端特有 hook：createAppRuntime() 只负责通用 9 步骨架，端差异全部在这里声明。
+ * （game/viewer 迁移时各自实现同形 hooks；Step2 会把 scene-loader 的差异也收进来。）
+ */
+function createDebugHooks(): AppHooks<RuntimeConfig, RendererMain, InputBridge> {
+	return {
+		// 主线程 wasm 懒初始化：handleBspFile 解析前 await（与旧实现同一函数/时序）
+		ensureMainWasm: () => ensureMainWasm(),
+		// debug：onSceneLoaded 立即下发（world-json 后 handleLoadBsp 会再发一次）
+		deathThresholdPolicy: 'immediate',
+		// debug：InputBridge 早于 RendererMain 构建（sendInit 先到 worker）
+		bridgePhase: 'before-renderer',
+		// Step2（scene-loader）接管点：debug 的 renderMetadata / missingTextures 将迁到这里；
+		// Step1 不搬 BSP→SceneData 流程，故此处仅占位。
+		onSceneBundle: (_bundle, _message) => {},
+		createRenderer: (shared) => new RendererMain(shared),
+		createInputBridge: (ctx) => new InputBridge(ctx.worker),
+		initBridge: (bridge, ctx) => {
+			bridge.sendInit(ctx.sharedBuffer, ctx.width, ctx.height, ctx.dpr);
+		},
+		// 材质编译期开关：必须在 renderer.init 之前写（与旧实现同位置）
+		beforeRendererInit: () => {
+			applyRenderDebugSwitches(readRenderPrefs().debug);
+		},
+		status: (message, kind) => setStatus(message, kind ?? ''),
+		error: (message) => setError(message),
+		health: (message) => pushHealthLog(message),
+		// debug 独有的 Worker 消息（通用 ready/phys-frame/phys-event/health/error 由 runtime 处理）
+		onWorkerMessage: (message) => {
+			switch (message.type) {
+				case 'physics-snapshot':
+					renderPhysicsSnapshot(message as unknown as PhysicsSnapshotMessage);
+					return true;
+				case 'physics-event':
+					onPhysicsEvent(message as unknown as PhysicsEventMessage);
+					return true;
+				default:
+					return false;
+			}
+		},
+		onCullStats: (stats) => updateCullStatsUI(stats as CullStatsLike),
+		onSceneLoaded: (deathY) => {
+			// 双端阈值由 runtime 按 policy 立即下发；这里只记录端侧副本
+			sceneDeathY = deathY;
+		},
+		onPhysEvent: (event) => onRenderPhysEvent(event as RenderPhysEvent),
+	};
+}
+
+/** 旧内联装配（回退路径，`globalThis.__vbspLegacyBootstrap === 1` 时启用）：P2 Step1 迁移前的逐行实现。 */
+async function mainLegacy(): Promise<void> {
 	if (!dom.canvas) {
 		console.error('[app] canvas#preview 元素未找到');
 		return;
@@ -2705,7 +2831,11 @@ function setError(msg: string): void {
 // 启动
 // ---------------------------------------------------------------------------
 
-void main();
+// P2 Step1 回退开关：`globalThis.__vbspLegacyBootstrap === 1` → 旧内联装配 mainLegacy()；
+// 默认走共享 createAppRuntime() 的薄入口 main()。两者共用同一套模块级状态与后续 UI 代码。
+const legacyBootstrap =
+	(globalThis as unknown as { __vbspLegacyBootstrap?: number }).__vbspLegacyBootstrap === 1;
+void (legacyBootstrap ? mainLegacy() : main());
 
 // ── 关闭确认兜底（Ctrl+W 防误关）─────────────────────────────────────
 // 浏览器不允许页面用 keydown preventDefault 拦截 Ctrl+W 这类浏览器快捷键，

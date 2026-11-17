@@ -161,6 +161,9 @@ const APP_ONLY_ALLOW = {
   'src/ts-shared/input/pointer-lock.ts': ['debug', 'game'],
   'src/ts-shared/phys/constants.ts': ['game'],
   'src/renderer-shared/scene/inject-stats.ts': ['game'],
+  // P2 Step1（createAppRuntime bootstrap 下沉）先只迁 debug，game/viewer 迁移前该模块只在 debug
+  // 产物里；Step2 接入 game/viewer 后此行必须删除（否则白名单过期会被 gate 判为不符）。
+  'src/ts-shared/app/app-runtime.ts': ['debug'],
 };
 
 /** viewer 不得包含的物理/权威实现（viewer 无物理是架构约定）。 */
