@@ -58,6 +58,24 @@ export interface PathPoint {
    * ——开录前的节点只用于对齐 `i0`，不进导出文件。
    */
   rec?: boolean;
+  /**
+   * 以下五个字段只在**记录期**的 render 节点上出现，用于离线**逐帧确定性重放**：
+   * 之前的导出只有位置，遇到「速度突然清零」这类问题时无法复现（缺按键/步长/着地状态）。
+   * 2026-11-17 为排「传送后区域内间歇性速度清零」加入。
+   */
+  /** 该步结束后的速度（HU/s，PhysWorld 原样）。 */
+  vx?: number;
+  vy?: number;
+  vz?: number;
+  /** 该步结束后是否着地（0/1）。 */
+  g?: number;
+  /** 本步使用的按键掩码（与 `KEY_MASK` 同源）。 */
+  k?: number;
+  /** 本步推进的物理步长（秒）。 */
+  dt?: number;
+  /** 本步结束后的朝向（度，PhysWorld 原样）：离线重放时 `wishdir` 由它决定，缺了就复现不了移动。 */
+  yaw?: number;
+  pitch?: number;
 }
 
 /** 一组距离值的分布统计（HU）。 */
@@ -422,11 +440,32 @@ export class PathRecorder {
    * `shared.writeRenderSample(..., i0, ...)` 的 `i0` 一一对应，中途少压一个节点就会整体错位。
    * 绘制、导出、计数只看 `rec`：未记录时不更新 `prevRender`、不连线、不计数、不进导出。
    * @param t 主线程 `performance.now()`（ms）
+   * @param extra 可选的逐步状态（速度/着地/按键掩码/步长）：只在记录期节点上写入，
+   *   供离线逐帧重放定位「某一步速度被清零」这类问题（见 `PathPoint` 同名字段注释）。
    */
-  addRender(t: number, x: number, y: number, z: number): void {
+  addRender(
+    t: number,
+    x: number,
+    y: number,
+    z: number,
+    extra?: {
+      vx?: number; vy?: number; vz?: number; g?: number; k?: number; dt?: number;
+      yaw?: number; pitch?: number;
+    },
+  ): void {
     const p: PathPoint = { t, x, y, z };
     if (this.recording) {
       p.rec = true;
+      if (extra) {
+        p.vx = extra.vx;
+        p.vy = extra.vy;
+        p.vz = extra.vz;
+        p.g = extra.g;
+        p.k = extra.k;
+        p.dt = extra.dt;
+        p.yaw = extra.yaw;
+        p.pitch = extra.pitch;
+      }
       this.recordedRenderCount++;
       const prev = this.prevRender;
       if (prev && !isJump(prev, p)) this.renderBuf.pushPair([prev.x, prev.y, prev.z], [x, y, z], [0, 0, 0]);
@@ -729,9 +768,17 @@ export class PathRecorder {
           'tick 段按折角着色，只有两档：≤20° 保持 tick 线本色（琥珀）、>20° 染红标出硬折角。本导出为未做任何展开的原始节点',
         meta: meta ?? {},
         summary: this.deviStats(),
-        render: this.renderNodes
-          .filter((p) => p.rec)
-          .map((p) => ({ t: p.t, x: p.x, y: p.y, z: p.z })),
+        render: this.renderNodes.filter((p) => p.rec).map((p) => {
+          const out: Record<string, number> = { t: p.t, x: p.x, y: p.y, z: p.z };
+          // 逐步状态（速度/着地/按键/步长）：有就带上，供离线逐帧重放；
+          // 老调用方不传时字段自然缺席，导出形状保持向后兼容。
+          if (p.vx !== undefined) { out.vx = p.vx; out.vy = p.vy as number; out.vz = p.vz as number; }
+          if (p.g !== undefined) out.g = p.g;
+          if (p.k !== undefined) out.k = p.k;
+          if (p.dt !== undefined) out.dt = p.dt;
+          if (p.yaw !== undefined) { out.yaw = p.yaw; out.pitch = p.pitch as number; }
+          return out;
+        }),
         tick: this.tickNodes.map((p) =>
           p.residual === undefined
             ? { t: p.t, x: p.x, y: p.y, z: p.z }

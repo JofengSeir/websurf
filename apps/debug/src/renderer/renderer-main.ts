@@ -254,6 +254,52 @@ export class RendererMain {
   /** 上一物理步的墙钟毫秒（0 表示本帧用 1/64 秒兜底）。 */
   private lastTickMs = 0;
 
+  // ── 速度突降诊断（2026-11-17 排查「区域内速度被清零」）──
+  /**
+   * 物理段每个阶段后采样一次速度/位置；发现「水平速度从 >150 一步掉到 <40% 且掉了 >100」
+   * 就把这一跳记进 `globalThis.__vbspDropDiag`（最多 200 条，含阶段名与调用栈）。
+   * 只读诊断：不写物理、不改渲染；默认关闭，排障时在控制台先 `__vbspDropDiagOn = true` 再复现，
+   * 然后 `copy(JSON.stringify(__vbspDropDiag))` 取结果。
+   */
+  private dropDiagLast: { x: number; y: number; z: number; px: number; py: number; pz: number } | null = null;
+
+  /** 采样一次速度并与上一次比对（见 `dropDiagLast` 与 `__vbspDropDiag`）。 */
+  private diagVelocity(tag: string, now: number): void {
+    const phys = this.predPhys;
+    if (!phys) return;
+    // 默认关闭：每帧 4 次 state() 虽便宜，但不必在正常游玩时付这份开销
+    if ((globalThis as { __vbspDropDiagOn?: boolean }).__vbspDropDiagOn !== true) return;
+    const st = phys.state() as {
+      posX: number; posY: number; posZ: number;
+      velX: number; velY: number; velZ: number;
+      onGround: boolean;
+    };
+    const cur = { x: st.velX, y: st.velY, z: st.velZ, px: st.posX, py: st.posY, pz: st.posZ };
+    const prev = this.dropDiagLast;
+    if (prev) {
+      const hp = Math.hypot(prev.x, prev.z);
+      const hc = Math.hypot(cur.x, cur.z);
+      const dp = Math.hypot(cur.px - prev.px, cur.py - prev.py, cur.pz - prev.pz);
+      if (hp > 150 && hc < hp * 0.4 && hp - hc > 100) {
+        const g = globalThis as { __vbspDropDiag?: Array<Record<string, unknown>> };
+        const list = (g.__vbspDropDiag ??= []);
+        if (list.length < 200) {
+          list.push({
+            t: now, tag, hp, hc, dp,
+            prev: [prev.x, prev.y, prev.z],
+            cur: [cur.x, cur.y, cur.z],
+            pos: [cur.px, cur.py, cur.pz],
+            g: st.onGround ? 1 : 0,
+            name: this.entitySystem?.getPlayer()?.targetname ?? '',
+            keys: this.pendingKeys,
+            stack: String(new Error().stack ?? '').slice(0, 800),
+          });
+        }
+      }
+    }
+    this.dropDiagLast = cur;
+  }
+
   // ── 输入回放模式（debug 专属确定性复现工具；见 input/input-recorder.ts）──────
   /**
    * 回放期本帧的物理步长（秒）：由 app.ts 每帧写入，`tick` 消费后立刻置回 null。
@@ -480,6 +526,8 @@ export class RendererMain {
     this.pendingKeys = 0;
     this.noclipActive = false;
     this.lastTickMs = 0;
+    // 速度突降诊断的跨帧基准也清掉，避免换图后第一帧拿旧图的速度做比较
+    this.dropDiagLast = null;
     this.deathY = null;
     // 换图后实体系统重建：玩家名的「已推送」缓存清零，首帧重新同步给权威侧
     this.playerNamePushed = null;
@@ -734,10 +782,13 @@ export class RendererMain {
       this.lastTickMs = now;
       // 本帧输入 → 共享内存输入槽（Worker 权威模拟消费同一份输入）
       this.shared.addInput(this.pendingDx, this.pendingDy, this.pendingKeys);
+      this.diagVelocity('input', now);
       // 权威帧校准：记录新到的权威帧，必要时反向同步或把本地状态重新锚定
       if (!this.replayMode) this.correctFromAuthority();
+      this.diagVelocity('authority', now);
       // 权威速度外推校准（只改速度，不覆盖位置）
       if (!this.replayMode) this.calibrateVelocity(now);
+      this.diagVelocity('calib', now);
       // 路径记录 —— tick 物理线：只在权威帧真的更新（`va` 变化）时落点，不做定时轮询。
       // 时间戳用渲染时钟 τ = `readPublishedTau()`（本次发布所依据的渲染采样时刻）：权威发布
       // 位置本身就是渲染轨迹上的一个采样点，只有按 τ 对齐比较，重合的两点才读成同一个点。
@@ -760,6 +811,7 @@ export class RendererMain {
       }
       // 推进本地物理：keys/dx/dy 传完后立即清零增量（按键掩码由下一次 feedInput 覆盖）
       this.predPhys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
+      this.diagVelocity('tick', now);
       this.pendingDx = 0;
       this.pendingDy = 0;
       // 事件消费：把 Rust 侧这一帧产生的 teleport/death 事件交给回调（app.ts 的计时挑战状态机）
@@ -769,9 +821,16 @@ export class RendererMain {
         posX: number; posY: number; posZ: number;
         yaw: number; pitch: number;
         eyeHeight: number;
+        velX: number; velY: number; velZ: number;
+        onGround: boolean;
       };
       // 路径记录 —— 渲染物理线：每个 rAF 物理步一个节点，采样点是脚底（下面的相机 Y 还要再加 eyeHeight）
-      this.pathRecorder.addRender(now, st.posX, st.posY, st.posZ);
+      // 逐步状态（速度/着地/按键/步长）一并落盘：光有位置无法离线重放，遇到「某一步速度被清零」
+      // 这类问题时只能看现象、不能定位到具体 tick（2026-11-17 排速度清零时加的）。
+      this.pathRecorder.addRender(now, st.posX, st.posY, st.posZ, {
+        vx: st.velX, vy: st.velY, vz: st.velZ, g: st.onGround ? 1 : 0, k: this.pendingKeys, dt,
+        yaw: st.yaw, pitch: st.pitch,
+      });
       // 同一帧、同一三元组写入渲染采样传输（Worker 把权威发布位置投影到这条轨迹上）；
       // `i0` 即刚落点的渲染节点下标，故与 addRender 一一对应。
       // 不传世代：世代槽由 shared-state 在写入时就地读取。
