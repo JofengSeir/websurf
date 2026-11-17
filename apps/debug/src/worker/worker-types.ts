@@ -4,6 +4,12 @@
  * 本文件只有 `interface` 与 `type` 声明，编译后不产生运行时代码；两侧以消息的字符串
  * `type` 字段分发，故字段形状在这里是声明面契约，运行时由发送端与接收端各自断言。
  *
+ * 与共享层的关系（2026-11-18）：两端同形、且由共享分派器消费的消息统一声明在
+ * `src/ts-shared/auth/worker-protocol-types.ts`；本文件只 `import type` + `re-export`
+ * 保留既有导出名，不再重复声明。留在本文件的是 **debug 端独有** 消息（物理面板、
+ * 视距剔除、扫描数据）与 **Worker → 主线程 / 主线程本地结构**（`PlaneInfo`、
+ * `SceneDataMessage`、`KeyState` 等）。
+ *
  * 装配点与分发实现：
  * - Worker 侧：`apps/debug/src/worker/main.ts` 把 `self.onmessage` 接到
  *   `src/ts-shared/auth/worker-dispatch.ts` 的 `createWorkerDispatch`。该函数按 `type`
@@ -15,89 +21,52 @@
  * 方向约定：`WorkerMessage` 联合的成员由主线程发往 Worker；`MainMessage` 联合的成员由
  * Worker 发往主线程。两侧各自还有「已声明但当前无收发链路」与「运行时存在但未声明」的
  * 项，逐条记在对应成员上。
- */
-
-import type { RuntimeConfig } from '../config.js';
-
-// ── 主线程 → Worker ──────────────────────────────────────────
-
-/**
- * 注入 WASM 模块与内嵌默认纹理包。
  *
- * 实例化来源二选一：`wasmB64` 为真值时走同步解码分支；否则 `wasmUrl` 为真值时取字节后
- * 同步实例化；两者都缺席时分发层直接返回，wasm 就绪标志保持 false。`mtzB64` 与 wasm
- * 无关：它由 `apps/debug/src/worker/main.ts` 注册的 `onWasmInit` 钩子取走（该钩子在本
- * 消息处理流程里最先执行，早于解码与实例化），最终落到
- * `apps/debug/src/worker/mtz-data.ts` 的 `setMtzB64`。
+ * 协议版本：任一消息的 `type` 字面量或字段语义增删改 ⇒ 同步把
+ * `src/ts-shared/auth/worker-protocol.ts` 的 `WORKER_PROTOCOL` +1（旧 `web/worker.js`
+ * 无握手会静默忽略新消息；2026-11-17 事故）。
  */
-export interface WasmInitMessage {
-  type: 'wasm-init';
-  wasmB64?: string;
-  wasmUrl?: string;
-  /** 默认纹理包 base64（构建产物内嵌；主线程从 `globalThis.__VBSP_TEXTURES_MTZ_B64__` 读出）。 */
-  mtzB64?: string;
-}
 
-export interface InitMessage {
-  type: 'init';
-  /**
-   * 共享内存（SharedArrayBuffer）：
-   * - 非 null：Worker 侧建 `ShmState`——输入槽、权威帧槽、渲染采样槽全走共享内存 + 原子操作；
-   * - null：建 `MsgState`——改走 `input` / `phys-frame` 消息回退通道。
-   * 分发层只读本字段，随后调用 `onInit` 钩子（本工程在那里回一条 `ready`）。
-   */
-  shared: SharedArrayBuffer | null;
-  /** 画布宽高与设备像素比（`InputBridge.sendInit` 传画布客户区尺寸与 `window.devicePixelRatio`）。
-   *  渲染在主线程，Worker 侧没有这三个字段的读取点。 */
-  width: number;
-  height: number;
-  dpr: number;
-}
+import type {
+  AddVelocityMessage,
+  ConfigMessage,
+  InitMessage,
+  InputMessage,
+  RespawnMessage,
+  SetDeathThresholdMessage,
+  SetJumpHeightMessage,
+  SetPlayerNameMessage,
+  SetPushVelocityMessage,
+  SetSpeedCapMessage,
+  SetSpawnPointsMessage,
+  SyncRenderStateMessage,
+  TeleportMessage,
+  TeleportToPosMessage,
+  WasmInitMessage,
+  WorldJsonMessage,
+} from '../../../../src/ts-shared/auth/worker-protocol-types.js';
 
-/**
- * 输入状态消息（回退通道专用）：`MsgState` 侧每帧发一条，收到后累加 dx/dy 并无条件覆盖
- * keys（反映当前按键状态，松手即清零）。
- *
- * 分发层守卫：仅当通道不是共享内存（`isShared === false`）才处理本消息。运行时同一条消息
- * 还可携带 `rt` / `rx` / `ry` / `rz` / `ri0` / `repoch` 六个渲染采样字段（由
- * `MsgState.addInput` 附带；接收侧只在 `rt` 有值时才写采样槽），本接口不声明这六项。
- */
-export interface InputMessage {
-  type: 'input';
-  dx: number;
-  dy: number;
-  keys: number;
-}
+/** 两端同形的协议消息：共享层是唯一权威，此处原样 re-export 既有导出名。 */
+export type {
+  AddVelocityMessage,
+  ConfigMessage,
+  InitMessage,
+  InputMessage,
+  RespawnMessage,
+  SetDeathThresholdMessage,
+  SetJumpHeightMessage,
+  SetPlayerNameMessage,
+  SetPushVelocityMessage,
+  SetSpeedCapMessage,
+  SetSpawnPointsMessage,
+  SyncRenderStateMessage,
+  TeleportMessage,
+  TeleportToPosMessage,
+  WasmInitMessage,
+  WorldJsonMessage,
+};
 
-/**
- * 世界数据（主线程解析 BSP 后经 `InputBridge.sendWorldJson` 下发）。
- *
- * 前置条件：wasm 已就绪，否则整条消息被丢弃。处理动作：释放旧实例 → 新建实例 →
- * `build_world(brushJson, triJson, teleportJson, spawn.x, spawn.y, spawn.z, spawn.yawDeg)`
- * → 重放参数与固定步长 → 重放已记忆的死亡阈值 → 依次回调 `onWorldBuilt`、`onWorldSpawn`、
- * `onWorldRebuilt`。
- */
-export interface WorldJsonMessage {
-  type: 'world-json';
-  brushJson: string;
-  triJson: string;
-  teleportJson: string;
-  spawn: { x: number; y: number; z: number; yawDeg: number };
-}
-
-/**
- * 配置部分更新（`InputBridge.sendConfig`）。
- *
- * 前置条件：已有权威实例，否则整条丢弃。`physics` / `input` 两段的 patch 先做键名归一
- * （snake_case → camelCase，并把 `jump_height` 换算成 `jumpSpeed`），其余段原样透传；
- * 归一之后才写 Worker 自身的 config 副本，`physics` 段的 `tickRate` 随即使固定步长生效。
- * `section` 在运行时按字符串比较，`keyof RuntimeConfig` 只是声明面约束。
- */
-export interface ConfigMessage {
-  type: 'config';
-  section: keyof RuntimeConfig;
-  patch: Record<string, unknown>;
-}
+// ── 主线程 → Worker（debug 端独有消息）───────────────────────
 
 /**
  * 画布尺寸变化消息。
@@ -111,11 +80,6 @@ export interface ResizeMessage {
   type: 'resize';
   width: number;
   height: number;
-}
-
-/** 重生请求（`InputBridge.sendRespawn`）：重生到 `build_world` 给定的初始出生点。 */
-export interface RespawnMessage {
-  type: 'respawn';
 }
 
 /** 设置物理参数（物理面板）：`name` 取自 `apps/debug/src/physics/param-defs.ts` 的
@@ -162,116 +126,8 @@ export interface SetCullDistanceMessage {
   value: number;
 }
 
-/** 传送到出生点列表中的第 `target` 项（写全部已注入的权威实例）。 */
-export interface TeleportMessage {
-  type: 'teleport';
-  target: number;
-}
-
-/** 传送到任意坐标（自定义传送点面板 / 检查点回退）；`yaw` 缺省时保持权威当前朝向。 */
-export interface TeleportToPosMessage {
-  type: 'teleport-to-pos';
-  pos: [number, number, number];
-  yaw?: number;
-}
-
-/** 出生点列表（JSON 文本，形如 `[[x, y, z, yaw], ...]`）：只决定 `teleport_to_spawn`
- *  的可选目标，不改 `build_world` 给出的初始出生点。 */
-export interface SetSpawnPointsMessage {
-  type: 'set-spawn-points';
-  json: string;
-}
-
-/**
- * 渲染主线 → 权威的状态同步（大偏差兜底与传送豁免期同步；由
- * `apps/debug/src/renderer/renderer-main.ts` 的 `onSyncRenderState` 回调经 `app.ts` 转发）。
- *
- * 运行时同一条消息还带一个可选的 `teleport` 布尔字段（本接口不声明），Worker 按它分两支：
- * - `teleport === false`：常规重锚——位置与 yaw/pitch 取渲染状态，速度与 on_ground 从权威
- *   现读后原样写回，未消费的输入增量保留；
- * - 缺省或 `true`：全态注入——九个字段整体写入权威，并清空未消费的输入增量（键位保留）。
- */
-export interface SyncRenderStateMessage {
-  type: 'sync-render-state';
-  state: {
-    posX: number; posY: number; posZ: number;
-    yaw: number; pitch: number;
-    velX: number; velY: number; velZ: number;
-    onGround: boolean;
-  };
-}
-
-/** 掉落死亡阈值（主线程从场景包围盒算出，权威与渲染同值）。
- *
- * 收到数值即被记忆，随后写全部已注入的权威实例；记忆值在世界重建时自动重放，因此
- * 本消息早于 `world-json` 到达也不会丢失。
- */
-export interface SetDeathThresholdMessage {
-  type: 'set-death-threshold';
-  value: number;
-}
-
-/** 玩家实体当前 targetname（地图脚本用 `AddOutput targetname` 改名做传送门控）。
- *
- * 权威侧传送器按 `filter_activator_name` 静态解析出的名字模式判定是否响应；名字经本消息
- * 从主线程实体系统回传。`filterEnabled` 缺省 = true；`false` 时权威忽略全部门控
- * （`__vbspTeleportFilterOff=true` 的回退路径）。值被记忆并在世界重建后重放。
- */
-export interface SetPlayerNameMessage {
-  type: 'set-player-name';
-  name: string;
-  filterEnabled?: boolean;
-}
-
-/** 给玩家叠加速度冲量（HU/s，Y-up；地图脚本 `trigger_push` 等）。
- *
- * 语义见 `PhysWorld::add_velocity`：`velocity += v`，`vy > 0` 时同时脱地。
- * 实体运行期是「每帧 touch 一次就发一次」——`SF_TRIG_PUSH_ONCE` 只会在第一次 Touch
- * 触发一次，非 ONCE 的弹力区每帧叠加一次（与 Source 的 FL_BASEVELOCITY 每帧加成同阶）。
- * 不记忆、不重放：冲量是瞬时的，世界重建后不该补发。
- */
-export interface AddVelocityMessage {
-  type: 'add-velocity';
-  vel: [number, number, number];
-}
-
-/** 把玩家速度**设成**给定向量（HU/s，Y-up；`trigger_push` 非 ONCE 的「设置速度」语义）。
- *
- * 语义见 `PhysWorld::set_push_velocity`：`velocity = v`（不是累加），`vy > 0` 时脱地。
- * 玩家在触发区内时实体层每帧 touch 一次就发一次，因为是覆盖写，速度稳定在
- * `pushdir * speed`，不会像 `add-velocity` 那样按帧累加到失控（surf_666 起点实测 40 万）。
- * 不记忆、不重放：速度是瞬时状态，世界重建后由下一次 touch 重新设置。
- */
-export interface SetPushVelocityMessage {
-  type: 'set-push-velocity';
-  vel: [number, number, number];
-}
-
-/** 设置水平速度上限（HU/s，**不含竖直分量**；对应 Source 的 `sv_maxvelocity`）。
- *
- * 由宿主按地图 `logic_auto` 的 `servercommand sv_maxvelocity <n>` 下发；`cap <= 0` 关闭钳制。
- * 值被记忆并在世界重建后重放（地图级设置，重建后仍需生效）。
- */
-export interface SetSpeedCapMessage {
-  type: 'set-speed-cap';
-  cap: number;
-}
-
-/** 设置起跳高度（HU；「跳跃增幅区」内临时抬高，离开时发回默认值）。
- *
- * 语义见 `PhysWorld::set_jump_height`：只改之后起跳的初速 `sqrt(2·g·h)`，不动当前速度。
- * 由宿主在 `autohop_zone` 触发体积内/外切换时下发（surf_null 用这套区域名给服务器插件
- * 做接口，原服插件在区内提高跳跃高度，本引擎没有插件层，改由宿主按同一语义实现）。
- * 值被记忆并在世界重建后重放——世界重建会把 `jump_height` 重放回 config 默认值，玩家
- * 若正处在区内，不重放会让权威端跳得比渲染端低。
- */
-export interface SetJumpHeightMessage {
-  type: 'set-jump-height';
-  height: number;
-}
-
 /** 主线程 → Worker 的消息类型（23 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
- *  分发层处理的消息，未在本联合中声明。 */
+ *  分发层处理的消息（共享类型面已给出，见 `worker-protocol-types.ts`），本联合未收录。 */
 export type WorkerMessage =
   | WasmInitMessage
   | InitMessage
@@ -299,8 +155,8 @@ export type WorkerMessage =
 
 // ── Worker → 主线程 ──────────────────────────────────────────
 
-/** 就绪回执：由 `apps/debug/src/worker/main.ts` 的 `onInit` 钩子在 `init` 处理完之后发出；
- *  主线程据此更新状态栏提示。 */
+/** 就绪回执：由共享 `worker-runtime` 的 `onInit` 钩子自动发出（`makeReadyMessage()`）；
+ *  主线程经 `handleWorkerReady` 校验后更新状态栏提示。 */
 export interface ReadyMessage {
   type: 'ready';
   /**
@@ -399,7 +255,7 @@ export interface ErrorMessage {
   message: string;
 }
 
-/** 权威健康告警：由 `apps/debug/src/worker/main.ts` 的 `postHealth` 发出，文本前缀
+/** 权威健康告警：由共享 `worker-runtime` 的 `postHealth` 发出，文本前缀
  *  `[authority-health]`；主线程 `pushHealthLog` 写进面板「权威健康」控制台（最新在顶、
  *  上限 30 条），不写 console。 */
 export interface HealthLogMessage {
