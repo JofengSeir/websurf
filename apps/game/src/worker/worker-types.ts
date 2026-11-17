@@ -144,9 +144,14 @@ export type WorkerMessage =
 // ── Worker-A → 主线程（本组末尾两条 `WorldJsonMessage` / `InputMessage`
 //    实际方向相反，仍声明在原位）──────────────────────────────
 
-/** `ready`：**本工程内无发送方、无接收点**。 */
+/** `ready`：Worker 在 wasm 初始化完成后回一条，携带 `WORKER_PROTOCOL` 版本号。
+ *
+ *  主线程据此检测「跑的是旧 web/worker.js」——`build:app` 不重建 worker 时，新增的 worker 侧
+ *  消息会被旧 worker 静默忽略，必须显式报错（2026-11-17 名字门控失效事故）。
+ *  版本号只在消息语义增删改时 +1。 */
 export interface ReadyMessage {
   type: 'ready';
+  protocol: number;
 }
 
 /** `bsp-metadata`：**本工程内无发送方、无接收点**（BSP 元数据随 `SceneDataMessage.metadata`

@@ -135,7 +135,9 @@ export class RendererMain {
    */
   private gameplay: EntityGameplay | null = null;
 
-
+  /** 默认跳高（HU）：由 config 的 `jumpSpeed²/(2·gravity)` 反推（与共享 `params.ts` 同式），
+   *  「跳跃增幅区」离开时用这个值把跳高压回去；未 init 前保持 Rust 默认 57。 */
+  private defaultJumpHeight = 57;
 
   /** 共享状态通道（SAB 实现或消息回退实现）；校准器从它读权威帧，`tick` 向它写输入与渲染采样。 */
   constructor(private readonly shared: ShmState | MsgState) {
@@ -197,6 +199,12 @@ export class RendererMain {
   /** 建共享渲染会话并保留 renderer/scene/camera 别名；必须在 `loadScene` 之前调用。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
+    // 默认跳高由面板参数反推（与 debug 端和共享 `params.ts` 的 jump_height 同式）；
+    // 缺省留 57 是为了 init 之前就调用 `setupGameplay` 的异常路径。
+    const p = config.physics;
+    this.defaultJumpHeight = p.gravity > 0
+      ? (p.jumpSpeed * p.jumpSpeed) / (2 * p.gravity)
+      : 57;
     this.session = new RenderSession({
       canvas,
       width,
@@ -254,6 +262,7 @@ export class RendererMain {
       getPlayerState: () =>
         ((this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 }),
       getPhys: () => this.predPhys,
+      defaultJumpHeight: this.defaultJumpHeight,
       onEntityEvent: (event) => this.onEntityEvent?.(event),
       onPlayerVelocity: (vel, mode) => this.onPlayerVelocity?.(vel, mode),
       onSpeedCapChange: (cap) => this.onSpeedCapChange?.(cap),

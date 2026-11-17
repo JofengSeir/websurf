@@ -30,6 +30,7 @@ import { KeyboardInput } from './input/keyboard.js';
 import { ACTION_LABELS, codeLabel, loadKeymap, type BindableAction } from './input/keymap.js';
 import type { KeyState } from './worker/worker-types.js';
 import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
+import { WORKER_PROTOCOL } from '../../../src/ts-shared/auth/worker-protocol.js';
 import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
@@ -135,7 +136,21 @@ if (isolated) {
     }
     const msg = e.data;
     if (!msg || typeof msg !== 'object') return;
-    if (msg.type === 'health-log') {
+    if (msg.type === 'ready') {
+      // 协议版本对不上 = 跑的是旧 web/worker.js（`build:app` 只重建 app.js、不重建 worker），
+      // 此时新增的 worker 侧消息会被旧 worker 静默忽略；必须显式报错，避免「前端改了、权威行为没变」。
+      const got = (msg as { protocol?: number }).protocol;
+      if (got !== WORKER_PROTOCOL) {
+        const shown = got === undefined ? '无（旧构建）' : String(got);
+        console.error(`[worker] 协议版本不一致：worker=${shown} app=${WORKER_PROTOCOL}`);
+        setStatus(
+          `Worker 是旧构建（协议 ${shown}，需要 ${WORKER_PROTOCOL}）：请执行 npm run build:worker（或 build:ts）后硬刷新。`,
+          'error',
+        );
+      } else {
+        setStatus('Worker 已就绪。请加载 .bsp 文件。', 'success');
+      }
+    } else if (msg.type === 'health-log') {
       pushHealthLog((msg as { message?: string }).message ?? '');
     } else if (msg.type === 'error') {
       setError((msg as { message?: string }).message ?? 'Worker 错误');
