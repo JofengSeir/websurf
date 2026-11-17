@@ -11,6 +11,11 @@
  *    `PanelController` = ESC 面板，其构造回调直达 `RendererMain` 的对应 setter。
  * 4. `bindInput` 绑 DOM 事件，`startInputLoop` 起 rAF 输入循环。
  *
+ * P2 Step2（共享 bootstrap）：通道判定/Worker 创建/wasm 注入/共享状态/桥接/渲染器+
+ * 通用回调骨架/init·start/主线程 wasm 预热已下沉到 `src/ts-shared/app/app-runtime.ts`
+ * 的 `createAppRuntime()`；本文件 `main()` 只保留端特有装配（面板/输入/HUD/载图）。
+ * 回退：`globalThis.__vbspLegacyBootstrap === 1` 时走逐行保留的 `mainLegacy()`。
+ *
  * 线程分工：Worker 独立跑固定步长权威模拟并回发权威帧与碰撞事件；主线程全速跑渲染物理。
  * 两者消费同一份输入——`RendererMain.tick` 每帧把 `feedInput` 暂存的鼠标增量与键位掩码
  * 写入共享输入槽，Worker 从该槽取。
@@ -42,6 +47,7 @@ import { SavePointStore, SAVEPOINT_MAX, type SavePoint } from './savepoint.js';
 import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, readPrefsPath, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js';
 import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js';
 import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
+import { createAppRuntime, type AppHooks, type AppRuntime } from '../../../src/ts-shared/app/app-runtime.js';
 
 const config: RuntimeConfig = createConfig();
 
@@ -80,6 +86,8 @@ const pointerLock = new PointerLockController();
 let fixWorker: Worker | null = null;
 let bridge: InputBridge | null = null;
 let renderer: RendererMain | null = null;
+/** 共享 bootstrap 实例（Step2）：死亡阈值等「端侧决定时机」的下发必须经它，旧路径用 mainLegacy 时为 null。 */
+let appRuntime: AppRuntime<RuntimeConfig, RendererMain, InputBridge> | null = null;
 let panel: PanelController | null = null;
 let sharedState: ReturnType<typeof createMainSharedState> | null = null;
 let sceneReady = false;
@@ -96,7 +104,62 @@ const savePointStore = new SavePointStore();
 /** 按住 C 期间的冻结存点；非空即处于定身态，keyup 交给 endHoldPoint 释放。 */
 let holdPoint: SavePoint | null = null;
 
+/**
+ * P2 Step2：game 薄入口——通道/Worker/wasm 注入/共享状态/桥接/渲染器+通用回调骨架/
+ * init·start/主线程 wasm 预热全部走共享 createAppRuntime()（9 步固定序见 runtime 文件头）；
+ * 本函数只保留端特有装配：共享内存判定与日志、面板、输入/HUD 与输入循环。
+ *
+ * 回退：`globalThis.__vbspLegacyBootstrap === 1` 时走 mainLegacy()（旧内联装配，逐行保留）。
+ */
 async function main(): Promise<void> {
+  if (!dom.canvas) {
+    console.error('[app] canvas#preview 未找到');
+    return;
+  }
+
+  // 0. 共享内存通道判定（判定/提示属于端体验，runtime 只接收结果）
+  const sharedMemory = resolveSharedMemory();
+
+  // 1-2. 通道骨架 + 主线程 wasm 预热 → 共享 bootstrap
+  const runtime = createAppRuntime<RuntimeConfig, RendererMain, InputBridge>(
+    {
+      id: 'game',
+      canvas: dom.canvas,
+      config,
+      sharedMemory,
+      worker: { inlineJs: readEmbedded('__VBSP_WORKER_JS__'), url: './worker.js' },
+      wasm: {
+        inlineB64: readEmbedded('__VBSP_WASM_B64__'),
+        url: './websurf_wasm_bg.wasm',
+      },
+    },
+    createGameHooks(),
+  );
+  appRuntime = runtime;
+
+  // 3. 旧模块级引用直接指向 runtime 装配结果（面板/输入/载图与错误处理代码不改）
+  fixWorker = runtime.worker;
+  sharedState = runtime.shared;
+  renderer = runtime.renderer;
+  mainWasmReady = runtime.wasmReady;
+  bridge = runtime.bridge;
+  if (!bridge) {
+    setError('InputBridge 装配未完成（bridgePhase=after-init 应在 init/start 后创建）');
+    return;
+  }
+  syncFullConfig();
+
+  // 4. 面板（参数变更实时同步主线程物理；构造与回调见 createPanel）
+  panel = createPanel(bridge);
+
+  // 5. 输入绑定（按键簇标签先就位，避免首帧显示 HTML 里的默认键名）
+  initKeyHud();
+  bindInput();
+  startInputLoop();
+}
+
+/** 旧内联装配（回退路径，`globalThis.__vbspLegacyBootstrap === 1` 时启用）：P2 Step2 迁移前的逐行实现。 */
+async function mainLegacy(): Promise<void> {
   if (!dom.canvas) {
     console.error('[app] canvas#preview 未找到');
     return;
@@ -246,6 +309,107 @@ if (isolated) {
   initKeyHud();
   bindInput();
   startInputLoop();
+}
+
+/** 共享内存可用性判定 + 端侧提示（回退语义/日志措辞由端保留，runtime 只接收结果）。 */
+function resolveSharedMemory(): boolean {
+  const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
+  if (isolated) {
+    console.log('[game] crossOriginIsolated 已启用，使用共享内存输入/物理通道');
+  } else {
+    console.warn('[game] 未启用 crossOriginIsolated，回退 postMessage 输入通道（延迟较高）');
+  }
+  const canSab = isolated && typeof SharedArrayBuffer !== 'undefined';
+  if (!canSab) {
+    setStatus('兼容模式（无 SharedArrayBuffer）：功能可用，性能降级', '');
+  }
+  return canSab;
+}
+
+/** 读取构建注入的全局（内嵌 worker/wasm base64；dev 模式为 undefined）。 */
+function readEmbedded(name: string): string | undefined {
+  return (globalThis as unknown as Record<string, string | undefined>)[name];
+}
+
+/**
+ * game 端特有 hook：createAppRuntime() 只负责通用 9 步骨架，端差异全部在这里声明。
+ * - deathThresholdPolicy='after-scene'：loadScene 回调时 predPhys 未建，setDeathY 会空跑；
+ *   保留「buildPredictionWorld 之后经 bridge 发一次」的旧时序（见 handleLoadBsp）。
+ * - bridgePhase='after-init'：game 的 InputBridge 构造参数含 renderer，旧序在 init/start 后才建。
+ * - initWorker：game 无 InputBridge.sendInit，`{type:'init'}` 必须在 wasm-init 之前直接发。
+ */
+function createGameHooks(): AppHooks<RuntimeConfig, RendererMain, InputBridge> {
+  return {
+    // 主线程 wasm 懒初始化（BspProcessor + PhysWorld 同模块；dist 内嵌 base64）
+    ensureMainWasm: (ctx) =>
+      ctx.renderer!.initPrediction('./websurf_wasm_bg.wasm', readEmbedded('__VBSP_WASM_B64__')),
+    deathThresholdPolicy: 'after-scene',
+    bridgePhase: 'after-init',
+    // Step2 只迁装配骨架；BSP→SceneData 流程仍在 handleLoadBsp，Step3（scene-loader）再收。
+    onSceneBundle: (_bundle, _message) => {},
+    createRenderer: (shared) => new RendererMain(shared),
+    createInputBridge: (ctx) => new InputBridge(ctx.worker, ctx.renderer!, ctx.config),
+    initWorker: (ctx) => {
+      // 权威 Worker 的共享通道初始化：必须先于 wasm-init（否则 authLoop 以 shared=null 起步）
+      ctx.worker.postMessage({ type: 'init', shared: ctx.sharedBuffer });
+    },
+    afterRendererStart: (ctx) => {
+      // 出帧探针（自动化验证仪器；只往 globalThis 挂对象，不改变渲染/物理行为）
+      ctx.renderer?.installFrameProbe();
+    },
+    status: (message, kind) => setStatus(message, kind ?? ''),
+    error: (message) => setError(message),
+    health: (message) => pushHealthLog(message),
+    // game 独有的耗时诊断（旧 main 内联分支）；其余消息交 runtime 通用处理
+    onWorkerMessage: (message) => {
+      if (message.type === 'world-build-ms') {
+        console.info(`[authority] Worker 内 world-json 处理（解析+build_world）= ${String(message.ms)}ms`);
+        return true;
+      }
+      if (message.type === 'world-parse-ms') {
+        console.info(
+          `[authority] JSON 解析（JS 代理）：brush=${String(message.brush)}ms tri=${String(message.tri)}ms`,
+        );
+        return true;
+      }
+      return false;
+    },
+    // T-731/F3：只记录；下发仍由 handleLoadBsp 在 buildPredictionWorld 之后经 bridge 发一次
+    onSceneLoaded: (deathY) => {
+      pendingDeathY = deathY;
+    },
+  };
+}
+
+/** 面板构造（回调与旧 main 完全一致；从薄入口抽出以保持 main() <50 行）。 */
+function createPanel(bridgeImpl: InputBridge): PanelController {
+  return new PanelController(
+    config,
+    bridgeImpl,
+    () => pointerLock.isLocked(),
+    (params) => renderer?.setPredictionParams(params),
+    (hw, sh, dh) => renderer?.setPredictionHull(hw, sh, dh),
+    (active) => renderer?.setPredictionNoclip(active),
+    (quality) => void renderer?.applyTextureQuality(quality),
+    (fov) => renderer?.setFov(fov),
+    (dist) => renderer?.setRenderDistance(dist),
+    (exposure) => renderer?.applyLighting({ exposure }),
+    (gamma) => renderer?.applyLighting({ lightGamma: gamma }),
+    (scale) => renderer?.applyLighting({ ambientScale: scale }),
+    (mode) => renderer?.setLightingMode(mode),
+    (i) => {
+      const list = savePointStore.delete(i);
+      panel?.renderSavePoints(list);
+    },
+    (i) => {
+      const list = savePointStore.all();
+      const sp = list[i];
+      if (sp && renderer) {
+        renderer.loadSavepoint(sp);
+        setStatus(`已读点 #${i + 1} @ (${sp.x.toFixed(0)}, ${sp.y.toFixed(0)}, ${sp.z.toFixed(0)})`, 'success');
+      }
+    },
+  );
 }
 
 function bindInput(): void {
@@ -658,12 +822,13 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       spawn: bundle.spawn,
     });
     // T-731/F3：death_y 双端补设。loadScene 回调先到（此时 predPhys 还是 null，setDeathY
-    // 空跑），权威端则从未有发送方（InputBridge.sendSetDeathThreshold 此前零调用点）——
-    // 两端都保持 Rust 默认 -100_000，掉出地图永不死亡重生。现在渲染实例已就绪：
-    // bridge.sendSetDeathThreshold = 渲染端 setDeathY + Worker `set-death-threshold`（分发器
-    // 会写入全部权威实例并记忆，世界重建后 reapplyDeathY 重放）。
+    // 空跑），权威端则从未有发送方——两端都保持 Rust 默认 -100_000，掉出地图永不死亡重生。
+    // 现在渲染实例已就绪：经 runtime.sendDeathThreshold（deathThresholdPolicy='after-scene'
+    // 的端侧调用点）= 渲染端 setDeathY + Worker `set-death-threshold`（分发器会写入全部权威
+    // 实例并记忆，世界重建后 reapplyDeathY 重放）。
     if (pendingDeathY !== null) {
-      bridge?.sendSetDeathThreshold(pendingDeathY);
+      if (appRuntime) appRuntime.sendDeathThreshold(pendingDeathY);
+      else bridge?.sendSetDeathThreshold(pendingDeathY); // mainLegacy 回退路径
       pendingDeathY = null;
     }
     // Worker 权威物理世界（地图碰撞；独立固定步长权威帧计算）
@@ -1004,7 +1169,11 @@ function setupRenderPanel(): void {
 
 setupRenderPanel();
 
-void main();
+// P2 Step2 回退开关：`globalThis.__vbspLegacyBootstrap === 1` → 旧内联装配 mainLegacy()；
+// 默认走共享 createAppRuntime() 的薄入口 main()。两者共用同一套模块级状态与后续 UI 代码。
+const legacyBootstrap =
+  (globalThis as unknown as { __vbspLegacyBootstrap?: number }).__vbspLegacyBootstrap === 1;
+void (legacyBootstrap ? mainLegacy() : main());
 
 // ── 关闭确认兜底（Ctrl+W 防误关）─────────────────────────────────────
 // 浏览器不允许页面用 keydown preventDefault 拦截 Ctrl+W 这类浏览器快捷键，

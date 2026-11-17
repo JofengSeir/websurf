@@ -1,5 +1,5 @@
 /**
- * 三端 app 入口的通用 bootstrap 装配（P2 Step1，2026-11-18）。
+ * 三端 app 入口的通用 bootstrap 装配（P2 Step1/Step2，2026-11-18）。
  *
  * 背景：debug/game 的 `main()` 前段（SAB 通道 → Worker 创建 → wasm 注入 → 共享状态 →
  * 渲染器/桥接创建 → 通用回调注册 → init/start → 主线程 wasm 预热）顺序与依赖是同一套，
@@ -14,10 +14,18 @@
  * - `deathThresholdPolicy`：死亡阈值下发时机（debug 立即发 + world-json 后重发；
  *   game 等 buildPredictionWorld 后发）。
  * - `onSceneBundle`：端特有的 scene-bundle 后处理（Step2 由 scene-loader 调用）。
+ * - `initWorker`：可选——端侧需在 wasm-init 之前先发 `{type:'init'}`（game：Worker 先用 init
+ *   建立共享通道，再 wasm-init 启动 authLoop；debug 的 init 由 InputBridge.sendInit 在
+ *   桥接阶段发，故不传）。
  *
- * 顺序固定（9 步）：①共享内存判定（端侧）→ ②Worker 创建 → ③消息路由 → ④wasm 注入 →
- * ⑤共享状态 → ⑥桥接（按 bridgePhase）→ ⑦渲染器 + 通用回调骨架 → ⑧init/start →
- * ⑨主线程 wasm 预热。app 只在 hook 里做端特有动作。
+ * 顺序固定（按依赖，编号只为对照旧注释）：①共享内存判定（端侧）→ ②Worker 创建 →
+ * ⑤共享状态（`createMainSharedState` 纯构造、无副作用，故早于消息路由）→ ③消息路由 →
+ * （④前置：端侧 initWorker）→ ④wasm 注入 → ⑥桥接（按 bridgePhase）→ ⑦渲染器 + 通用回调骨架 →
+ * ⑧init/start → ⑨主线程 wasm 预热。app 只在 hook 里做端特有动作。
+ *
+ * 死亡阈值：runtime 只在 policy='immediate' 时自动下发；'after-scene' 端必须在世界建好后
+ * 显式调用 `runtime.sendDeathThreshold(y)`（game 在 buildPredictionWorld 之后）。
+ * `onSceneBundle` 目前是必选占位钩子（端侧空实现），等 Step3 scene-loader 下沉重构时才有执行路径。
  */
 
 import {
@@ -137,6 +145,11 @@ export interface AppHooks<C, R extends AppRendererLike, B extends AppBridgeLike>
 	createInputBridge(ctx: AppBootstrapContext<C, R, B>): B;
 	/** 桥接创建后立即初始化（debug=`sendInit(sharedBuffer,w,h,dpr)`；game 无）。 */
 	initBridge?(bridge: B, ctx: AppBootstrapContext<C, R, B>): void;
+	/**
+	 * 可选：wasm-init 之前先发端侧初始化消息（game=`{type:'init',shared}`；debug 无，
+	 * 其 init 由 InputBridge.sendInit 在桥接阶段发出）。必须在 ③ 消息路由挂好之后调用。
+	 */
+	initWorker?(ctx: AppBootstrapContext<C, R, B>): void;
 	/** renderer.init 之前（debug=`applyRenderDebugSwitches(readRenderPrefs().debug)`）。 */
 	beforeRendererInit?(ctx: AppBootstrapContext<C, R, B>): void;
 	/** renderer.start() 之后（game 的 installFrameProbe 等可挂这里）。 */
@@ -212,21 +225,21 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 	const sharedBuffer = profile.sharedMemory ? new SharedArrayBuffer(SHARED_BUFFER_SIZE) : null;
 
 	// ② Worker 创建
-	let worker: Worker;
+	let workerRef: Worker;
 	if (profile.worker.inlineJs) {
 		const blob = new Blob([profile.worker.inlineJs], { type: 'text/javascript' });
-		worker = new Worker(URL.createObjectURL(blob));
+		workerRef = new Worker(URL.createObjectURL(blob));
 	} else {
-		worker = new Worker(profile.worker.url, { type: 'module' });
+		workerRef = new Worker(profile.worker.url, { type: 'module' });
 	}
 
-	// ⑤ 共享状态先建（消息路由与回调都要用）
-	const shared = createMainSharedState(sharedBuffer, worker);
+	// ⑤ 共享状态先建（纯构造无副作用；消息路由与回调都要用）
+	const shared = createMainSharedState(sharedBuffer, workerRef);
 
 	let deathThresholdY = 0;
 	const ctx: AppBootstrapContext<C, R, B> = {
 		profile,
-		worker,
+		worker: workerRef,
 		canvas,
 		config,
 		sharedBuffer,
@@ -248,7 +261,7 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 	};
 
 	// ③ 消息路由（尽早挂上，避免 wasm 初始化早回的 ready 丢失）
-	worker.onmessage = (e: MessageEvent<unknown>): void => {
+	workerRef.onmessage = (e: MessageEvent<unknown>): void => {
 		const message = e.data as Record<string, unknown> | null;
 		if (!message || typeof message !== 'object') return;
 		if (hooks.onWorkerMessage?.(message, ctx)) return;
@@ -293,30 +306,36 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 				break;
 		}
 	};
-	worker.onerror = (e: ErrorEvent): void => {
+	workerRef.onerror = (e: ErrorEvent): void => {
 		hooks.error?.(`Worker error: ${e.message} (${e.filename}:${e.lineno})`);
 	};
+
+	// ④ 前置：端侧通道初始化（可选）。game 的 `{type:'init'}` 必须先于 wasm-init——
+	// Worker 端 init 建立共享通道（决定 SAB / MsgState），迟于 wasm-init 会让 authLoop
+	// 在 shared=null 时启动。debug 无此钩子（其 init 由 InputBridge.sendInit 在桥接阶段发，
+	// 与旧 main 的换序行为一致）。
+	hooks.initWorker?.(ctx);
 
 	// ④ wasm 注入：内嵌构建走 postMessage（Blob Worker 读不到主线程 global）；
 	// dev/multi 发 wasmUrl 由 worker 自行 fetch；mtzB64 两模式都带。
 	if (profile.wasm.inlineB64) {
-		worker.postMessage({ type: 'wasm-init', wasmB64: profile.wasm.inlineB64, mtzB64: profile.wasm.mtzB64 });
+		workerRef.postMessage({ type: 'wasm-init', wasmB64: profile.wasm.inlineB64, mtzB64: profile.wasm.mtzB64 });
 	} else {
-		worker.postMessage({ type: 'wasm-init', wasmUrl: profile.wasm.url, mtzB64: profile.wasm.mtzB64 });
+		workerRef.postMessage({ type: 'wasm-init', wasmUrl: profile.wasm.url, mtzB64: profile.wasm.mtzB64 });
 	}
 
 	// ⑥ 桥接（按 bridgePhase：debug 在 renderer 之前；game 在 init/start 之后）
 	const createBridge = (): void => {
-		const bridge = hooks.createInputBridge(ctx);
-		ctx.bridge = bridge;
-		hooks.initBridge?.(bridge, ctx);
+		const bridgeRef = hooks.createInputBridge(ctx);
+		ctx.bridge = bridgeRef;
+		hooks.initBridge?.(bridgeRef, ctx);
 	};
 	if (hooks.bridgePhase === 'before-renderer') createBridge();
 
 	// ⑦ 渲染器 + 通用回调骨架
-	const renderer = hooks.createRenderer(shared);
-	ctx.renderer = renderer;
-	const sink = renderer as unknown as RendererCallbackSink;
+	const rendererRef = hooks.createRenderer(shared);
+	ctx.renderer = rendererRef;
+	const sink = rendererRef as unknown as RendererCallbackSink;
 	sink.onCullStats = hooks.onCullStats ? (stats): void => hooks.onCullStats?.(stats) : null;
 	sink.onSceneLoaded = (deathY: number): void => {
 		// 记录与发送拆开：policy='immediate' 立即下发（debug 旧行为），否则等端侧显式调用
@@ -344,7 +363,7 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 		ctx.bridge?.sendSetMapPhysicsParam?.(name, value);
 	};
 	sink.onSyncRenderState = (state, teleport): void => {
-		worker.postMessage({ type: 'sync-render-state', state, teleport });
+		workerRef.postMessage({ type: 'sync-render-state', state, teleport });
 	};
 	sink.onPhysEvent = (event: unknown): void => {
 		hooks.onPhysEvent?.(event);
@@ -352,8 +371,8 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 
 	// ⑧ 固定序：beforeRendererInit → init → start →（after-init 桥接）→ afterRendererStart
 	hooks.beforeRendererInit?.(ctx);
-	renderer.init(canvas, width, height, dpr, config);
-	renderer.start();
+	rendererRef.init(canvas, width, height, dpr, config);
+	rendererRef.start();
 	if (hooks.bridgePhase === 'after-init') createBridge();
 	hooks.afterRendererStart?.(ctx);
 
@@ -364,7 +383,7 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 
 	return {
 		profile,
-		worker,
+		worker: workerRef,
 		canvas,
 		config,
 		sharedBuffer,
@@ -373,7 +392,7 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 		height,
 		dpr,
 		get renderer(): R {
-			return renderer;
+			return rendererRef;
 		},
 		get bridge(): B | null {
 			return ctx.bridge;
@@ -385,9 +404,9 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 		sendDeathThreshold,
 		notifySceneBundle,
 		dispose(): void {
-			worker.onmessage = null;
-			worker.onerror = null;
-			worker.terminate();
+			workerRef.onmessage = null;
+			workerRef.onerror = null;
+			workerRef.terminate();
 		},
 	};
 }
