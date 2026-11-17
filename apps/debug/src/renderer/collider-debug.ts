@@ -13,6 +13,8 @@
  * 六个 Group 与六个开关彼此独立，各有自己的可视距离：
  * - `showSolids`  实体碰撞体凸包线框，逐面按法线着色（地面绿 / 斜坡黄 / 墙红）；
  * - `showTriggers` 触发器凸包或 AABB 线框（青=已链接 / 紫=孤儿 / 灰=初始禁用 / 橙=非玩家）；
+ *   同一开关下还画实体层 `trigger_*` 体积（绿=`trigger_push` 加速板 / 黄=其它 trigger，
+ *   如 `trigger_multiple`；传送触发器不走这条，已由上面的凸包绘制覆盖）；
  * - `showPhy` / `showVis` 模型三角形线框（橙 / 紫）；
  * - `showBevel` BSP 原生 bevel 辅助碰撞面（白：bevel 平面被 brush AABB 截出的截面，
  *   半透明填充 + 描边；与既有真实面共面的重复 bevel 不画——那只是把实体面又贴一遍）。
@@ -42,6 +44,17 @@ import * as THREE from 'three';
 import type { Brush, TriMesh } from '../physics/physics/Collision/Collision.types.js';
 import type { RuntimeConfig } from '../config.js';
 import type { TeleportTrigger } from '../world/teleport-manager.js';
+
+/**
+ * 实体层 `trigger_*` 体积（世界 AABB，Y-up）：由 `renderer-main` 从实体运行时收集后注入。
+ * 传送触发器不进这里（走 `TeleportTrigger` 那条更精确的凸包路径）。
+ */
+export interface EntityTriggerBoxView {
+	classname: string;
+	targetname: string;
+	min: { x: number; y: number; z: number };
+	max: { x: number; y: number; z: number };
+}
 
 /** Y 向视野窗口的上下扩展量（HU）：脚底以下与本人体高以上各留这么多。 */
 const DEBUG_Y_EXTENT = 300;
@@ -74,6 +87,10 @@ const COLOR_TRIGGER_ORPHAN: RgbColor = { r: 0.6, g: 0.2, b: 0.9 };
 const COLOR_TRIGGER_DISABLED: RgbColor = { r: 0.5, g: 0.5, b: 0.5 };
 /** 触发碰撞箱：未禁用但 spawnflags 既无 Clients 也无 Everything（橙）。 */
 const COLOR_TRIGGER_NON_PLAYER: RgbColor = { r: 1.0, g: 0.6, b: 0.2 };
+/** 实体层 `trigger_push` 加速板体积（绿）：站上去会被设置速度，原先完全不可见。 */
+const COLOR_ENTITY_TRIGGER_PUSH: RgbColor = { r: 0.2, g: 1.0, b: 0.35 };
+/** 实体层其它带体积的 trigger（黄）：trigger_multiple / hurt / gravity 等。 */
+const COLOR_ENTITY_TRIGGER_OTHER: RgbColor = { r: 1.0, g: 0.85, b: 0.3 };
 
 /** `.phy` 生成补面的颜色（品红）：与 BSP 原生 bevel 的白分开两路。 */
 const PHY_BEVEL_COLOR = 0xff33ff;
@@ -601,6 +618,8 @@ export class ColliderDebug {
 	private triFrameCounter = 0;
 	/** 触发器列表（`renderer-main` 由 `TeleportManager.getTriggers` 注入，非 Worker 来源）。 */
 	private triggers: readonly TeleportTrigger[] = [];
+	/** 实体层 trigger 体积（`trigger_push` 等；传送触发器不走这里）。 */
+	private entityTriggerBoxes: readonly EntityTriggerBoxView[] = [];
 	/** 模型三角形网格（`renderer-main` 用 `buildWorldBundle` 的 triJson 注入）。 */
 	private triMeshes: TriMesh[] = [];
 	/** `.phy` 生成补面（`renderer-main` 用 `buildWorldBundle` 的 phyBevelsJson 注入）。 */
@@ -652,6 +671,17 @@ export class ColliderDebug {
 		this.triggers = triggers;
 		// 把限流计数推到上限：下一次 update 立即重建实体碰撞箱
 		this.frameCounter = REBUILD_INTERVAL;
+	}
+
+	/**
+	 * 注入实体层 trigger 体积（`trigger_push` 加速板 / `trigger_multiple` 等）。
+	 *
+	 * 这些体积此前完全不参与碰撞可视化：玩家站上加速板会被突然设速，但看不到任何提示。
+	 * 数据由 `renderer-main` 从实体运行时的 `volumes` 收集（去掉 `trigger_teleport*`，
+	 * 传送触发器已由 `setTriggers` 那条更精确的凸包路径绘制）。
+	 */
+	setEntityTriggerBoxes(boxes: readonly EntityTriggerBoxView[]): void {
+		this.entityTriggerBoxes = boxes;
 	}
 
 	/** 设置实体碰撞箱/触发器开关与各自可视距离（distance 传 undefined 表示保持原值）；关闭时清空对应 Group。 */
@@ -1263,7 +1293,7 @@ export class ColliderDebug {
 	 */
 	private rebuildTriggers(cameraPos: THREE.Vector3): void {
 		this.clearGroup(this.triggerGroup!);
-		if (this.triggers.length === 0) return;
+		if (this.triggers.length === 0 && this.entityTriggerBoxes.length === 0) return;
 
 		const pos = cameraPos;
 		const full = this.triggerViewDistance <= 0;
@@ -1271,6 +1301,23 @@ export class ColliderDebug {
 
 		const positions: number[] = [];
 		const colors: number[] = [];
+
+		// 实体层 trigger 体积（加速板等）：整体 AABB 线框，push 绿、其它黄。
+		// 放在传送触发器之前，颜色一眼可分：青/紫/橙/灰=传送类，绿/黄=实体逻辑类。
+		for (const box of this.entityTriggerBoxes) {
+			if (!full) {
+				const nx = Math.max(box.min.x, Math.min(pos.x, box.max.x));
+				const nz = Math.max(box.min.z, Math.min(pos.z, box.max.z));
+				const dx = pos.x - nx;
+				const dz = pos.z - nz;
+				if (dx * dx + dz * dz > radiusSq) continue;
+			}
+			const color =
+				box.classname === 'trigger_push'
+					? COLOR_ENTITY_TRIGGER_PUSH
+					: COLOR_ENTITY_TRIGGER_OTHER;
+			pushAabbEdges(positions, colors, box.min, box.max, color);
+		}
 
 		for (const trigger of this.triggers) {
 			if (!trigger.mins || !trigger.maxs) continue;

@@ -920,6 +920,22 @@ impl PhysWorld {
         }
     }
 
+    /// 把玩家速度**设成**给定向量（HU/s，Y-up），对应 `trigger_push` 非 `SF_TRIG_PUSH_ONCE`
+    /// 分支的「设置速度」语义：玩家在触发区内时每帧把速度置为该方向/大小，离开后保持，
+    /// 不再按帧累加——否则 320fps 下每帧 +3000 会迅速涨到 40 万 HU/s
+    /// （surf_666 起点 4 块板实测）。
+    ///
+    /// 语义：`velocity = (vx, vy, vz)`；`vy > 0`（向上弹）时同时脱地，否则
+    /// `stay_on_ground` 会把向上分量按回地面（与 `add_velocity` 同理由）。
+    ///
+    /// 不改位置/朝向，不产生事件；由实体层 `host.setPlayerBaseVelocity` 事件驱动。
+    pub fn set_push_velocity(&mut self, vx: f64, vy: f64, vz: f64) {
+        self.player.velocity = [vx, vy, vz];
+        if vy > 0.0 {
+            self.player.on_ground = false;
+        }
+    }
+
     /// 设置玩家当前 targetname（实体层 `!activator AddOutput targetname` 改名后由宿主推送）。
     ///
     /// 只影响传送 trigger 的 `filter_activator_name` 门控（`TeleportManager::player_name`），

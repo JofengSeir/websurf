@@ -584,6 +584,26 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       }
       return;
     }
+    if (type === 'set-push-velocity') {
+      // 地图脚本 `trigger_push` 非 ONCE 的「设置速度」语义（HU/s，Y-up）：
+      // 玩家在区内时每帧置为该方向/大小，离开后保持——不能像 `add-velocity` 那样按帧累加，
+      // 否则 320fps 下 +3000/帧会涨到 40 万（surf_666 起点实测）。
+      // 语义由 `PhysWorld::set_push_velocity` 定义：`velocity = v`，`vy > 0` 时脱地。
+      // 不记忆、不重放（瞬时状态，世界重建后由下一次 touch 重新设置）；三槽都写。
+      const sv = msg as { vel?: unknown };
+      const svel = sv.vel;
+      if (
+        Array.isArray(svel) &&
+        svel.length === 3 &&
+        svel.every((v) => typeof v === 'number' && Number.isFinite(v))
+      ) {
+        const [vx, vy, vz] = svel as [number, number, number];
+        env.phys.current?.set_push_velocity?.(vx, vy, vz);
+        env.tickPhys?.current?.set_push_velocity?.(vx, vy, vz);
+        env.scratch?.current?.set_push_velocity?.(vx, vy, vz);
+      }
+      return;
+    }
     if (type === 'set-mode') {
       // 模式握手：值域白名单校验（三值）→ 与当前模式不同才执行钩子 → 无条件回 mode-ack。
       // 同 mode 重复到达只回 ack、不重复执行钩子；切换所需的状态载荷随消息一并透传给钩子。

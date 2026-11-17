@@ -108,4 +108,10 @@ export class InputBridge {
   sendAddVelocity(vel: [number, number, number]): void {
     this.worker.postMessage({ type: 'add-velocity', vel });
   }
+
+  /** 发 `set-push-velocity`：地图脚本 `trigger_push` 非 ONCE 的「设置速度」语义（HU/s，Y-up）。
+   *  权威侧 `PhysWorld::set_push_velocity` 语义：`velocity = v`（覆盖而非累加），`vy > 0` 脱地。 */
+  sendSetPushVelocity(vel: [number, number, number]): void {
+    this.worker.postMessage({ type: 'set-push-velocity', vel });
+  }
 }

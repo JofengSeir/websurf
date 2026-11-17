@@ -121,6 +121,10 @@ export interface PhysWorldLike {
    * 语义由 `PhysWorld::add_velocity` 定义：`velocity += v`，`vy > 0` 时脱地。
    * 可选：测试桩缺失时忽略。 */
   add_velocity?(vx: number, vy: number, vz: number): void;
+  /** 把速度设成给定向量（HU/s，Y-up；`trigger_push` 非 ONCE 的「设置速度」语义）。
+   * 语义由 `PhysWorld::set_push_velocity` 定义：`velocity = v`（覆盖而非累加），
+   * `vy > 0` 时脱地。可选：测试桩缺失时忽略。 */
+  set_push_velocity?(vx: number, vy: number, vz: number): void;
   /** 释放 wasm 实例（wasm-bindgen 的 free）。本文件从不调用它；world 重建时由
    * `src/ts-shared/auth/worker-dispatch.ts` 的 `createWorkerDispatch` 释放旧实例。声明为可选，
    * 使没有 free 的注入实现（node 内测试桩）也能满足接口。 */

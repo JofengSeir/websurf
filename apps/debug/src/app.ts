@@ -354,10 +354,13 @@ async function main(): Promise<void> {
 		const filterOff = (globalThis as unknown as { __vbspTeleportFilterOff?: boolean }).__vbspTeleportFilterOff === true;
 		inputBridge?.sendSetPlayerName(name, !filterOff);
 	};
-	// 地图脚本 `trigger_push` 等给玩家的速度冲量：渲染物理线已在 renderer 内部施加，
+	// 地图脚本 `trigger_push` 等给玩家的速度副作用：渲染物理线已在 renderer 内部施加，
 	// 这里只负责转发给权威 Worker（否则画面被弹飞、权威原地不动，位置会被反复拉回）。
-	rendererMain.onPlayerVelocity = (vel) => {
-		inputBridge?.sendAddVelocity(vel);
+	// mode='add' 是 SF_TRIG_PUSH_ONCE 的一次性冲量；mode='set' 是非 ONCE 加速板的
+	// 「区内期间覆盖速度」语义（覆盖写，不会像累加那样涨到失控）。
+	rendererMain.onPlayerVelocity = (vel, mode) => {
+		if (mode === 'set') inputBridge?.sendSetPushVelocity(vel);
+		else inputBridge?.sendAddVelocity(vel);
 	};
 	// 渲染主线 → 权威反向同步：teleport=true（真位置突变）由权威侧清未消费输入增量；
 	// teleport=false 走常规重锚，只注入状态、保留输入增量——清输入会造成可见的瞄准顿挫。

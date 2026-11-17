@@ -45,6 +45,7 @@ import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
 import type { PhyBevelPiece } from './collider-debug.js';
+import type { EntityTriggerBoxView } from './collider-debug.js';
 import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
@@ -377,7 +378,7 @@ export class RendererMain {
    * （`predPhys.add_velocity`）并回调给 app.ts 转发给权威 Worker——两边必须同帧同参，
    * 否则渲染线被弹飞、权威线还留在原地（或反之）。
    */
-  onPlayerVelocity: ((vel: [number, number, number]) => void) | null = null;
+  onPlayerVelocity: ((vel: [number, number, number], mode: 'add' | 'set') => void) | null = null;
 
   /**
    * 渲染物理线 → 权威侧的反向同步回调（由 `AuthorityCalibrator` 在兜底重锚/首次起点对齐时
@@ -646,23 +647,65 @@ export class RendererMain {
         (this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 },
       ),
       onEvent: (event) => {
-        // trigger_push 一类「瞬时冲量」副作用：观测模式下 host 只 emit，在这里落到物理线。
-        // `entity:addVelocity` = SF_TRIG_PUSH_ONCE（一次性冲量）；
-        // `entity:baseVelocity` = 非 ONCE 弹力区（每帧 touch 一次就叠一次，与 Source 的
-        // FL_BASEVELOCITY 每帧加成同阶）。
-        if (event.kind === 'entity:addVelocity' || event.kind === 'entity:baseVelocity') {
+        // trigger_push 一类速度副作用：观测模式下 host 只 emit，在这里落到物理线。
+        // `entity:addVelocity` = SF_TRIG_PUSH_ONCE（一次性冲量，累加）；
+        // `entity:baseVelocity` = 非 ONCE 弹力区——Source 语义是「围绕本帧位移叠加的基准速度」，
+        // 而本引擎按用户要求实现为「玩家在区内时把速度设成 pushdir*speed」（覆盖，不累加）；
+        // 早期按 add 处理时 320fps 下每帧 +3000，站上板子 1 秒就涨到 40 万 HU/s。
+        if (event.kind === 'entity:addVelocity') {
           const v = parseVelocityDetail(event.detail);
-          if (v) this.applyPlayerVelocity(v);
+          if (v) this.applyPlayerVelocity(v, 'add');
+        } else if (event.kind === 'entity:baseVelocity') {
+          const v = parseVelocityDetail(event.detail);
+          if (v) this.applyPlayerVelocity(v, 'set');
         }
         this.onEntityEvent?.(event);
       },
     });
+    // 实体装配完成后把带体积的 trigger（加速板等）送进碰撞可视化；换图时会被下次装配覆盖
+    this.refreshEntityTriggerBoxes();
   }
 
-  /** 把实体层上报的速度冲量同时施加到渲染物理线并回调给宿主（权威 Worker）。 */
-  private applyPlayerVelocity(vel: [number, number, number]): void {
-    this.predPhys?.add_velocity?.(vel[0], vel[1], vel[2]);
-    this.onPlayerVelocity?.(vel);
+  /**
+   * 收集实体运行时里带体积的 `trigger_*`（排除 `trigger_teleport*`：传送触发器由
+   * `ColliderDebug.setTriggers` 用更精确的凸包绘制），注入 `ColliderDebug`。
+   *
+   * 这些体积原本完全不可见——玩家站上 `trigger_push` 加速板会被突然设速却看不到提示。
+   */
+  private refreshEntityTriggerBoxes(): void {
+    const boxes: EntityTriggerBoxView[] = [];
+    const entities = this.entitySystem?.entList.entities ?? [];
+    for (const entity of entities) {
+      if (!entity.classname.startsWith('trigger')) continue;
+      if (entity.classname.startsWith('trigger_teleport')) continue;
+      for (const volume of entity.volumes) {
+        boxes.push({
+          classname: entity.classname,
+          targetname: entity.targetname,
+          min: { x: volume.mins[0], y: volume.mins[1], z: volume.mins[2] },
+          max: { x: volume.maxs[0], y: volume.maxs[1], z: volume.maxs[2] },
+        });
+      }
+    }
+    this.colliderDebug.setEntityTriggerBoxes(boxes);
+  }
+
+  /**
+   * 把实体层上报的速度副作用同时施加到渲染物理线并回调给宿主（权威 Worker）。
+   *
+   * @param mode 'add' = 叠加冲量（`SF_TRIG_PUSH_ONCE`）；'set' = 覆盖速度
+   *   （`trigger_push` 非 ONCE 的加速板：区内每帧设成固定方向/大小，离开后保持）。
+   */
+  private applyPlayerVelocity(
+    vel: [number, number, number],
+    mode: 'add' | 'set',
+  ): void {
+    if (mode === 'set') {
+      this.predPhys?.set_push_velocity?.(vel[0], vel[1], vel[2]);
+    } else {
+      this.predPhys?.add_velocity?.(vel[0], vel[1], vel[2]);
+    }
+    this.onPlayerVelocity?.(vel, mode);
   }
 
   /**

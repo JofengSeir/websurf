@@ -235,7 +235,19 @@ export interface AddVelocityMessage {
   vel: [number, number, number];
 }
 
-/** 主线程 → Worker 的消息类型（20 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
+/** 把玩家速度**设成**给定向量（HU/s，Y-up；`trigger_push` 非 ONCE 的「设置速度」语义）。
+ *
+ * 语义见 `PhysWorld::set_push_velocity`：`velocity = v`（不是累加），`vy > 0` 时脱地。
+ * 玩家在触发区内时实体层每帧 touch 一次就发一次，因为是覆盖写，速度稳定在
+ * `pushdir * speed`，不会像 `add-velocity` 那样按帧累加到失控（surf_666 起点实测 40 万）。
+ * 不记忆、不重放：速度是瞬时状态，世界重建后由下一次 touch 重新设置。
+ */
+export interface SetPushVelocityMessage {
+  type: 'set-push-velocity';
+  vel: [number, number, number];
+}
+
+/** 主线程 → Worker 的消息类型（21 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
  *  分发层处理的消息，未在本联合中声明。 */
 export type WorkerMessage =
   | WasmInitMessage
@@ -257,7 +269,8 @@ export type WorkerMessage =
   | SyncRenderStateMessage
   | SetDeathThresholdMessage
   | SetPlayerNameMessage
-  | AddVelocityMessage;
+  | AddVelocityMessage
+  | SetPushVelocityMessage;
 
 // ── Worker → 主线程 ──────────────────────────────────────────
 
