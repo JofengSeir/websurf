@@ -40,7 +40,7 @@ import { TeleportManager } from '../world/teleport-manager.js';
 import { adaptBrushes } from '../world/collider-adapter.js';
 import { EntitySystem, type EntitySystemStats } from '../../../../src/ts-shared/entity/entity-system.js';
 import { attachEntitySystem } from '../../../../src/ts-shared/entity/attach.js';
-import { playerStateFromRaw, type RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
+import { DEFAULT_HULL_MAXS, DEFAULT_HULL_MINS, playerStateFromRaw, type RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
 import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
@@ -91,6 +91,17 @@ import { LaserBeams, collectLaserBeams } from '../../../../src/renderer-shared/s
  */
 const PLANE_INSPECT_INTERVAL_MIN = 12;
 const PLANE_INSPECT_INTERVAL_MAX = 96;
+
+/**
+ * 「跳跃增幅区」内的起跳高度（HU）。
+ *
+ * surf_null 用 9 个 `targetname = autohop_zone` 的 `trigger_multiple` 给服务器插件做区域
+ * 接口；这些体积里是一片**比四周低 64 HU** 的格栅坑，坑里立着 8 块瓷砖水泥台（台面与坑底
+ * 差 64 HU）。默认跳高 57 HU 差 7 HU 跳不上去，原服由 SourceMod 插件在区内抬高跳跃高度。
+ * 本引擎没有插件层，改由宿主按同一语义在区内把跳高临时抬到 80 HU（64 + 16 余量，够落台且
+ * 不会像 2 倍跳那样明显不协调；数值只影响这一个区域，改这里即可）。
+ */
+const AUTOHOP_ZONE_JUMP_HEIGHT = 80;
 
 /** HUD 剔除统计（`emitCullStats` 组装，交给 app.ts 注册的 `onCullStats`）。
  * `visible/total/cullDist` 与 `pvs.near/far/pvsHidden` 取自共享 `RenderSession.stats()`——判定
@@ -410,6 +421,24 @@ export class RendererMain {
    *  公开只读字段：HUD/脚本排查要能看到当前地图实际生效的 cap。 */
   speedCapApplied: number | null = null;
 
+  /**
+   * 起跳高度变化回调（「跳跃增幅区」进入/离开）→ app.ts 转发给权威 Worker。
+   *
+   * 渲染物理线在这里立即生效；权威侧不同步的话，主线程按 80 HU 跳上台、权威端按 57 HU
+   * 跳不上去，两侧位置立刻分叉（实测单帧就会被校准拽回）。
+   */
+  onJumpHeightChange: ((height: number) => void) | null = null;
+
+  /** 最近一次下发的起跳高度（HU）；`null` = 还没有下发过（首帧会补发默认值）。 */
+  jumpHeightApplied: number | null = null;
+
+  /** 「跳跃增幅区」体积（引擎 Y-up 的 AABB，来自 `targetname === 'autohop_zone'` 的
+   *  `trigger_multiple`；每张图装配实体系统时重建）。 */
+  private autohopZones: { min: [number, number, number]; max: [number, number, number] }[] = [];
+
+  /** config 默认起跳高度（HU）：`jumpSpeed²/(2·gravity)`，debug 默认 302/800 = 57。 */
+  private defaultJumpHeight = 57;
+
   /** 加速板（trigger_push）线框开关（会话内，默认开；与传送触发器分开）。 */
   private pushTriggerDebugVisible = readLocalDebugFlag('vbsp:debug:pushTriggers', true);
   /** 其它实体 trigger 体积线框开关（会话内，默认开）。 */
@@ -458,6 +487,12 @@ export class RendererMain {
    * `CameraController`，装灯光与碰撞可视化，并把 config 里的四组调试开关灌下去。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
+    // 默认跳高由面板参数反推（与 `src/ts-shared/phys/params.ts` 的 jump_height 同式），
+    // 「跳跃增幅区」离开时用这个值把跳高压回去。
+    const p = config.physics;
+    this.defaultJumpHeight = p.gravity > 0
+      ? (p.jumpSpeed * p.jumpSpeed) / (2 * p.gravity)
+      : 57;
     // 跨线程通道形态与本地采样世代计数（诊断用；世代不参与协议，见 sampleEpoch）
     console.log(`[renderer] 跨线程通道: ${this.shared.isShared ? 'SAB' : 'MsgState'}（阶段 1 渲染直读本地物理）`);
     console.log(`[renderer] 渲染采样失效世代计数（本地诊断，非协议值）: ${this.sampleEpoch}`);
@@ -719,6 +754,7 @@ export class RendererMain {
    */
   private refreshEntityTriggerBoxes(): void {
     const boxes: EntityTriggerBoxView[] = [];
+    const zones: { min: [number, number, number]; max: [number, number, number] }[] = [];
     const entities = this.entitySystem?.entList.entities ?? [];
     for (const entity of entities) {
       if (!entity.classname.startsWith('trigger')) continue;
@@ -730,8 +766,19 @@ export class RendererMain {
           min: { x: volume.mins[0], y: volume.mins[1], z: volume.mins[2] },
           max: { x: volume.maxs[0], y: volume.maxs[1], z: volume.maxs[2] },
         });
+        // 「跳跃增幅区」：surf_null 用 `autohop_zone` 这套 targetname 给服务器插件做区域
+        // 接口（地图本身没有输出/脚本）。原服插件在区内提高跳高，本引擎没有插件层，
+        // 所以在这里把体积收下来，由 `updateAutohopZoneJump()` 按玩家位置切换跳高。
+        if (entity.targetname === 'autohop_zone') {
+          zones.push({
+            min: [volume.mins[0], volume.mins[1], volume.mins[2]],
+            max: [volume.maxs[0], volume.maxs[1], volume.maxs[2]],
+          });
+        }
       }
     }
+    this.autohopZones = zones;
+    this.jumpHeightApplied = null; // 换图/重装实体后由下一帧重新判定并补发
     this.colliderDebug.setEntityTriggerBoxes(boxes);
   }
 
@@ -768,6 +815,44 @@ export class RendererMain {
     this.speedCapApplied = cap;
     this.predPhys?.set_max_horizontal_speed?.(cap);
     this.onSpeedCapChange?.(cap);
+  }
+
+  /**
+   * 「跳跃增幅区」判定：玩家脚底是否在任一 `autohop_zone` 体积内，按结果切换起跳高度。
+   *
+   * 只在目标值变化时下发（进入 = 80 HU、离开 = config 默认值），避免每帧发消息；首次运行
+   * 或换图后 `jumpHeightApplied === null` 会补发一次默认值，保证权威侧与世界重建后的状态
+   * 与渲染线一致（世界重建会把 Rust 侧 `jump_height` 重放回默认值）。
+   */
+  private updateAutohopZoneJump(st: { posX: number; posY: number; posZ: number }): void {
+    if (!this.predPhys) return;
+    // 用玩家碰撞箱（与实体 touch 同一口径）与区域 AABB 求交，而不是只测脚底点：
+    // 格栅坑的地板比区域底沿还低 32 HU，站坑底时脚底在区域外但身体在区内——
+    // 实体层 `serviceTouch` 也是用 `state.origin + hullMins/Maxs` 建盒，口径必须一致。
+    const px0 = st.posX + DEFAULT_HULL_MINS[0];
+    const px1 = st.posX + DEFAULT_HULL_MAXS[0];
+    const py0 = st.posY + DEFAULT_HULL_MINS[1];
+    const py1 = st.posY + DEFAULT_HULL_MAXS[1];
+    const pz0 = st.posZ + DEFAULT_HULL_MINS[2];
+    const pz1 = st.posZ + DEFAULT_HULL_MAXS[2];
+    let inside = false;
+    for (const z of this.autohopZones) {
+      if (
+        px1 >= z.min[0] && px0 <= z.max[0] &&
+        py1 >= z.min[1] && py0 <= z.max[1] &&
+        pz1 >= z.min[2] && pz0 <= z.max[2]
+      ) {
+        inside = true;
+        break;
+      }
+    }
+    const target = inside
+      ? Math.max(this.defaultJumpHeight, AUTOHOP_ZONE_JUMP_HEIGHT)
+      : this.defaultJumpHeight;
+    if (this.jumpHeightApplied !== null && Math.abs(this.jumpHeightApplied - target) < 1e-6) return;
+    this.jumpHeightApplied = target;
+    this.predPhys.set_jump_height?.(target);
+    this.onJumpHeightChange?.(target);
   }
 
   /**
@@ -968,6 +1053,8 @@ export class RendererMain {
 
       // Source 实体运行期：与物理同帧推进（touch 用本帧 state，0 延迟输出当帧消费）。
       this.entitySystem?.frame(dt);
+      // 「跳跃增幅区」（autohop_zone）：按本帧玩家位置切换起跳高度（触区/离开各发一次）。
+      this.updateAutohopZoneJump(st);
       // 地图脚本用 `AddOutput targetname` 给玩家改名来做传送门控（filter_activator_name）：
       // 名字只存在于实体系统内，权威侧传送器需要它才能判 filter，故每帧取一次、变化才回调。
       this.syncPlayerName();

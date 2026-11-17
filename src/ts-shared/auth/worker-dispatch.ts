@@ -261,6 +261,22 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     env.scratch?.current?.set_max_horizontal_speed?.(lastSpeedCap);
   };
 
+  /**
+   * 最近一次收到的起跳高度（`set-jump-height` 记忆，HU）。
+   *
+   * 与速度上限同理：`world-json` 重建全部实例后 `jump_height` 回到 config 默认值，
+   * 而玩家此刻可能正站在「跳跃增幅区」内（surf_null 的 `autohop_zone`）——不重放会让
+   * 权威端跳得比渲染端低，两侧分叉。离开区域时宿主会再发默认值把它压回去。
+   */
+  let lastJumpHeight: number | null = null;
+  /** 把记忆的起跳高度重放到全部已注入实例（世界重建之后调用）。 */
+  const reapplyJumpHeight = (): void => {
+    if (lastJumpHeight === null) return;
+    env.phys.current?.set_jump_height?.(lastJumpHeight);
+    env.tickPhys?.current?.set_jump_height?.(lastJumpHeight);
+    env.scratch?.current?.set_jump_height?.(lastJumpHeight);
+  };
+
   /** wasm 就绪标志：仅 `initWasm` 成功置位；`world-json` 以它作前置守卫。 */
   let ready = false;
   /** `authLoop.start()` 只允许执行一次的守卫。 */
@@ -374,6 +390,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       reapplyDeathY(); // 重放记忆的死亡阈值，避免退回 Rust 侧默认值
       reapplyPlayerName(); // 重放记忆的玩家名/门控开关（同上，不在种子面）
       reapplySpeedCap(); // 重放记忆的手动水平速度上限（地图 sv_maxvelocity，同上）
+      reapplyJumpHeight(); // 重放记忆的起跳高度（跳跃增幅区，同上）
       env.decoupledLoop?.publishCurrentState(); // 立刻发布一帧，首帧状态即刻可见
       env.onWorldBuilt?.(p);
       env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 出生点 Y + 已记忆的阈值（可为 null）
@@ -632,6 +649,22 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         env.phys.current?.set_max_horizontal_speed?.(cap);
         env.tickPhys?.current?.set_max_horizontal_speed?.(cap);
         env.scratch?.current?.set_max_horizontal_speed?.(cap);
+      }
+      return;
+    }
+    if (type === 'set-jump-height') {
+      // 「跳跃增幅区」的宿主下发（HU）：只改之后起跳的初速，不动当前速度/位置。
+      // surf_null 的 `autohop_zone` 触发体积内，地板比水泥台低 64 HU，标准 57 HU 跳不上，
+      // 原服插件在区内抬高跳跃高度；本引擎由宿主按同一语义在进入/离开区域时下发。
+      // 与速度上限同理是「跨世界重建仍需生效」的物理参数 ⇒ 记忆并在 world-json 后重放；
+      // 离开区域时宿主会再发默认值把它压回去。
+      const sj = msg as { height?: unknown };
+      const height = sj.height;
+      if (typeof height === 'number' && Number.isFinite(height) && height > 0) {
+        lastJumpHeight = height;
+        env.phys.current?.set_jump_height?.(height);
+        env.tickPhys?.current?.set_jump_height?.(height);
+        env.scratch?.current?.set_jump_height?.(height);
       }
       return;
     }

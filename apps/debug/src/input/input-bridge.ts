@@ -119,4 +119,10 @@ export class InputBridge {
   sendSetSpeedCap(cap: number): void {
     this.worker.postMessage({ type: 'set-speed-cap', cap });
   }
+
+  /** 发 `set-jump-height`：「跳跃增幅区」的宿主下发（HU，只改之后起跳的初速）。
+   *  进入 `autohop_zone` 时抬到区内跳高，离开时发回 config 默认值。 */
+  sendSetJumpHeight(height: number): void {
+    this.worker.postMessage({ type: 'set-jump-height', height });
+  }
 }

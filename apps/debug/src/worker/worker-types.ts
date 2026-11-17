@@ -257,7 +257,20 @@ export interface SetSpeedCapMessage {
   cap: number;
 }
 
-/** 主线程 → Worker 的消息类型（22 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
+/** 设置起跳高度（HU；「跳跃增幅区」内临时抬高，离开时发回默认值）。
+ *
+ * 语义见 `PhysWorld::set_jump_height`：只改之后起跳的初速 `sqrt(2·g·h)`，不动当前速度。
+ * 由宿主在 `autohop_zone` 触发体积内/外切换时下发（surf_null 用这套区域名给服务器插件
+ * 做接口，原服插件在区内提高跳跃高度，本引擎没有插件层，改由宿主按同一语义实现）。
+ * 值被记忆并在世界重建后重放——世界重建会把 `jump_height` 重放回 config 默认值，玩家
+ * 若正处在区内，不重放会让权威端跳得比渲染端低。
+ */
+export interface SetJumpHeightMessage {
+  type: 'set-jump-height';
+  height: number;
+}
+
+/** 主线程 → Worker 的消息类型（23 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
  *  分发层处理的消息，未在本联合中声明。 */
 export type WorkerMessage =
   | WasmInitMessage

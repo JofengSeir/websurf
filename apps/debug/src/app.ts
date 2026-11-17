@@ -369,6 +369,11 @@ async function main(): Promise<void> {
 	rendererMain.onSpeedCapChange = (cap) => {
 		inputBridge?.sendSetSpeedCap(cap);
 	};
+	// 「跳跃增幅区」（surf_null 的 `autohop_zone`）：区内跳高临时抬高，渲染线已生效，
+	// 这里转发给权威 Worker——不发的话主线程跳得上台、权威端跳不上，位置会立刻分叉。
+	rendererMain.onJumpHeightChange = (height) => {
+		inputBridge?.sendSetJumpHeight(height);
+	};
 	// 渲染主线 → 权威反向同步：teleport=true（真位置突变）由权威侧清未消费输入增量；
 	// teleport=false 走常规重锚，只注入状态、保留输入增量——清输入会造成可见的瞄准顿挫。
 	rendererMain.onSyncRenderState = (s, teleport) => {

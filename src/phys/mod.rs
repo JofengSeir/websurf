@@ -23,8 +23,9 @@
 //!   都以 `path = "../../../../src"` 指到本目录。`apps/viewer` 是纯查看器，
 //!   其 `crates/wasm` 只依赖 `websurf-wasm-core`，不含 `websurf-phys`。
 //!
-//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **25 个 `pub fn`**（含 `new`）。
+//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **26 个 `pub fn`**（含 `new`）。
 //! 其中 `set_yaw_pitch`在 `apps/**` 与 `src/**` 内无任何调用点；
+//! `set_jump_height`只由 debug 宿主在「跳跃增幅区」（surf_null 的 `autohop_zone`）内调用；
 //! `predict`只被 `apps/game/scripts` 的两个验证脚本调用；
 //! `gate_veto_count`与 `debug_trace`同样只服务脚本；
 //! `debug_hull_stats`是 `.phy` 凸体转 brush 的统计出口（核对接线量级，只读）。
@@ -46,8 +47,10 @@
 //! 实例与实例之间不共享可变状态，唯一跨实例可变量是诊断计数器
 //! `world::GATE_VETO_COUNT`（`src/phys/world.rs`，只增不减、无复位入口）。
 //!
-//! 测试归属：`p2_gate_tests`（4 项，盒-AABB 门校验回归）、`duck_surf_tests`（6 项，surf/蹲姿）；
-//! 其余四个模块文件无 `#[test]`。`cargo test -p websurf-phys` 实测 10 passed / 0 failed。
+//! 测试归属：`p2_gate_tests`（门校验）、`duck_surf_tests`（surf/蹲姿）、`ridge_contact_tests`、
+//! `step_gate_tests`、`stuck_gate_tests`、`spawn_deembed_tests`、`contact_push_tests`、
+//! `bevel_rest_tests`、`hull_bevel_tests`、`phy_hull_gate_tests`、`slope_speed_tests`、
+//! `tri_surface_tests`、`jump_height_tests`（起跳高度）；`cargo test -p websurf-phys` 全绿。
 
 pub mod player;
 pub mod teleport;
@@ -101,6 +104,10 @@ mod slope_speed_tests;
 
 #[cfg(test)]
 mod tri_surface_tests;
+
+/// 起跳高度回归（2 项）：「跳跃增幅区」的 `set_jump_height` 只改后续起跳初速。
+#[cfg(test)]
+mod jump_height_tests;
 
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
@@ -979,6 +986,22 @@ impl PhysWorld {
     /// 只钳水平模长：板子/斜坡/传送带来的竖直速度需要保留。
     pub fn set_max_horizontal_speed(&mut self, cap: f64) {
         self.max_horizontal_speed = cap;
+    }
+
+    /// 设置起跳高度（HU）：下一步起跳的初速按 `sqrt(2·gravity·height)` 反推。
+    ///
+    /// 默认值来自 `set_params` 的 `jump_height`（config 的 `jumpSpeed²/(2·gravity)`，
+    /// debug 默认 302 HU/s / 800 → 57 HU）。用途是「跳跃增幅区」：surf_null 的
+    /// `autohop_zone` 触发体积包围着一片比地面高 64 HU 的水泥台，标准 57 HU 跳不上去，
+    /// 原服由服务器插件在区内抬高跳跃高度；本引擎没有插件层，改由宿主在区内下发更大的
+    /// 跳高、离开时发回默认值（见 `apps/debug/src/renderer/renderer-main.ts`）。
+    ///
+    /// 只影响**之后**的起跳初速，不改当前速度/位置/姿态；`<= 0` 或非有限值忽略。
+    /// 不在种子面里（`seed_from` 不携带）——它属于宿主配置，世界重建后由宿主重放。
+    pub fn set_jump_height(&mut self, height: f64) {
+        if height.is_finite() && height > 0.0 {
+            self.params.jump_height = height;
+        }
     }
 
     /// 把水平速度模长钳到 `max_horizontal_speed`（竖直分量原样保留）。
