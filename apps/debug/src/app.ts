@@ -30,6 +30,7 @@ import type {
 } from './worker/worker-types.js';
 import { keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import { createAppRuntime, type AppHooks } from '../../../src/ts-shared/app/app-runtime.js';
+import { createConfigSync, type ConfigSync } from '../../../src/ts-shared/app/config-sync.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
 import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, applyRenderDebugSwitches, defaultRenderPrefs, readPrefsPath as readPrefsField, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi } from '../../../src/renderer-shared/config/render-panel-ui.js';
@@ -56,6 +57,19 @@ import { buildDebugPredictionParams } from './physics/prediction-params.js';
 // ---------------------------------------------------------------------------
 
 const config: RuntimeConfig = createConfig();
+
+/** config-sync（P5）：启动偏好段（与旧 sendPrefsToWorker 一致：5 段，无 renderer 副作用）。 */
+const CONFIG_PREFS_SECTIONS: ReadonlyArray<keyof RuntimeConfig> = ['input', 'hud', 'debug', 'lod', 'player'];
+/** config-sync（P5）：载图后全量段（与旧 syncFullConfig 一致：7 段，逐段 send + renderer 副作用）。 */
+const CONFIG_FULL_SECTIONS: ReadonlyArray<keyof RuntimeConfig> = [
+	'physics',
+	'player',
+	'lod',
+	'lighting',
+	'input',
+	'hud',
+	'debug',
+];
 
 const dom = {
 	canvas: document.getElementById('preview') as HTMLCanvasElement | null,
@@ -193,6 +207,8 @@ let sharedState: SharedState | null = null;
 let lastTeleportIdx = -1;
 /** 主线程渲染器：持主线程 WASM 物理与 Three.js 场景，渲染、剔除与面板即时生效都经它。 */
 let rendererMain: RendererMain | null = null;
+/** config 段同步实例（P5）：AppRuntime 就绪后构造；sendConfig + renderer.applyConfigPatch 走适配器。 */
+let configSync: ConfigSync<RuntimeConfig> | null = null;
 let sceneReady = false;
 
 /** 计时挑战状态机（主线程本地持有）：由渲染物理事件与输入循环驱动，权威 Worker 不参与。 */
@@ -312,13 +328,33 @@ async function main(): Promise<void> {
 	rendererMain = runtime.renderer;
 	mainWasmReady = runtime.wasmReady;
 
+	// 3. config 段同步实例（P5）：构造点=AppRuntime 就绪后（bridge/renderer 已存在）。
+	//    段顺序与副作用同旧实现：send=直接 sendConfig；render=逐段 renderer.applyConfigPatch；
+	//    applyPatch 用端 applyConfigPatch 以保留旧 `!patch`/非对象早退守卫。
+	configSync = createConfigSync<RuntimeConfig, RendererMain | null, InputBridge | null>({
+		config,
+		sections: CONFIG_FULL_SECTIONS,
+		applyPatch: (section, patch) => applyConfigPatch(config, section, patch),
+		send: (section, patch) => inputBridge?.sendConfig(section, patch),
+		render: {
+			physics: (patch) => rendererMain?.applyConfigPatch('physics', patch),
+			player: (patch) => rendererMain?.applyConfigPatch('player', patch),
+			lod: (patch) => rendererMain?.applyConfigPatch('lod', patch),
+			lighting: (patch) => rendererMain?.applyConfigPatch('lighting', patch),
+			input: (patch) => rendererMain?.applyConfigPatch('input', patch),
+			hud: (patch) => rendererMain?.applyConfigPatch('hud', patch),
+			debug: (patch) => rendererMain?.applyConfigPatch('debug', patch),
+		},
+	});
+
 	// 3. 绑定输入（以下均为端层：DOM/面板/回放/输入循环）
 	bindInput(dom.canvas);
 	loadUiPrefs();
 	setupRenderPanel();
 	syncPrefsControls();
 	applyCrosshairStyle();
-	sendPrefsToWorker();
+	// 启动期偏好下发：5 段、零 renderer 副作用（旧 sendPrefsToWorker 行为）
+	configSync.syncConfig({ sections: CONFIG_PREFS_SECTIONS, render: false });
 	bindUI();
 	// 3.3 初始控件状态（config 默认值 → 面板）
 	if (dom.colliderSourceSelect) dom.colliderSourceSelect.value = config.physics.colliderSource;
@@ -1394,16 +1430,6 @@ function syncPrefsControls(): void {
 	if (dom.chOutlineChk) dom.chOutlineChk.checked = config.hud.crosshair.outline;
 	if (dom.chDotChk) dom.chDotChk.checked = config.hud.crosshair.dot;
 	if (dom.hudEl) dom.hudEl.style.display = config.hud.visible ? '' : 'none';
-}
-
-/** 面板偏好 → Worker（启动时一次全量下发）。 */
-function sendPrefsToWorker(): void {
-	if (!inputBridge) return;
-	inputBridge.sendConfig('input', { ...config.input });
-	inputBridge.sendConfig('hud', { ...config.hud });
-	inputBridge.sendConfig('debug', { ...config.debug });
-	inputBridge.sendConfig('lod', { ...config.lod });
-	inputBridge.sendConfig('player', { ...config.player });
 }
 
 /** 全部 UI 控件绑定（文件选择/面板/传送点/准星/显示设置）。 */
@@ -2565,23 +2591,10 @@ function startInputLoop(): void {
 // ---------------------------------------------------------------------------
 
 function syncFullConfig(): void {
-	if (!inputBridge) return;
-	// 发送所有段到 Worker（让它有完整 config 副本）
-	const sections: Array<keyof RuntimeConfig> = [
-		'physics',
-		'player',
-		'lod',
-		'lighting',
-		'input',
-		'hud',
-		'debug',
-	];
-	for (const section of sections) {
-		const patch = config[section] as unknown as Record<string, unknown>;
-		inputBridge.sendConfig(section, patch);
-		// 渲染相关段（lighting/debug/input/lod）同步到主线程渲染器
-		rendererMain?.applyConfigPatch(section, patch);
-	}
+	if (!configSync) return;
+	// 时机：loadBsp 在 sendWorldJson/set-spawn-points 之后调用（world 未建时 Worker 会丢弃 config，既有行为）。
+	// 段顺序/每段 send+render 副作用由 createConfigSync 适配器保证（P5）。
+	configSync.syncConfig();
 }
 
 // ---------------------------------------------------------------------------

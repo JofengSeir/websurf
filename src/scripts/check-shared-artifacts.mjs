@@ -104,6 +104,7 @@ const REQUIRED = {
     'src/ts-shared/gameplay/entity-gameplay.ts',
     'src/renderer-shared/scene/lasers.ts',
     'src/renderer-shared/scene/particles.ts',
+    'src/ts-shared/app/config-sync.ts',
   ],
   'debug/worker': ['src/ts-shared/auth/worker-dispatch.ts', 'src/ts-shared/auth/worker-protocol.ts'],
   'game/app': [
@@ -114,6 +115,7 @@ const REQUIRED = {
     'src/ts-shared/gameplay/entity-gameplay.ts',
     'src/renderer-shared/scene/lasers.ts',
     'src/renderer-shared/scene/particles.ts',
+    'src/ts-shared/app/config-sync.ts',
   ],
   'game/worker': ['src/ts-shared/auth/worker-dispatch.ts', 'src/ts-shared/auth/worker-protocol.ts'],
   'viewer/app': [

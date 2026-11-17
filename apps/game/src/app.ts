@@ -26,7 +26,7 @@
  * `error`、`world-build-ms`、`world-parse-ms`。
  */
 
-import { createConfig, LOCKED_TICK_RATE } from './config.js'; import { optDom } from './dom-optional.js';
+import { createConfig, LOCKED_TICK_RATE, applyConfigPatch } from './config.js'; import { optDom } from './dom-optional.js';
 import type { RuntimeConfig } from './config.js';
 import { BspProcessor, decode_vtf_to_png, decompress_mtz } from '../pkg/websurf_wasm.js';
 import { InputBridge } from './input/input-bridge.js';
@@ -46,6 +46,7 @@ import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs
 import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js';
 import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
 import { createAppRuntime, type AppHooks, type AppRuntime } from '../../../src/ts-shared/app/app-runtime.js';
+import { createConfigSync, type ConfigSync } from '../../../src/ts-shared/app/config-sync.js';
 
 const config: RuntimeConfig = createConfig();
 
@@ -91,6 +92,11 @@ let sharedState: SharedState | null = null;
 let sceneReady = false;
 /** 主线程 wasm 初始化 promise：handleLoadBsp 调 buildWorldBundle 前 await 它（decompress_mtz 依赖）。 */
 let mainWasmReady: Promise<void> = Promise.resolve();
+
+/** config-sync（P5）：game 段清单（与旧 syncFullConfig 一致：4 段；副作用全在 bridge.sendConfig 内）。 */
+const CONFIG_SYNC_SECTIONS: ReadonlyArray<keyof RuntimeConfig> = ['physics', 'input', 'player', 'hud'];
+/** config 段同步实例（P5）：AppRuntime 就绪后构造。 */
+let configSync: ConfigSync<RuntimeConfig> | null = null;
 /** 速度面板刷新门控时刻（ms）：输入循环间隔 ≥125ms 才调 updateSpeedHud。 */
 let speedUpdateAt = 0;
 /** 滚轮跳待消费标志：wheel 事件置位，输入循环下一帧把它并入键位掩码后清零。 */
@@ -143,6 +149,16 @@ async function main(): Promise<void> {
     setError('InputBridge 装配未完成（bridgePhase=after-init 应在 init/start 后创建）');
     return;
   }
+
+  // 3.1 config 段同步实例（P5）：构造点=AppRuntime 就绪后；render 缺省（副作用全在 bridge.sendConfig 内）。
+  //     applyPatch 用端 applyConfigPatch 保留旧守卫；send 直接走 bridge。
+  configSync = createConfigSync<RuntimeConfig, RendererMain | null, InputBridge>({
+    config,
+    sections: CONFIG_SYNC_SECTIONS,
+    applyPatch: (section, patch) => applyConfigPatch(config, section, patch),
+    send: (section, patch) => bridge?.sendConfig(section, patch),
+  });
+  // 启动段：此时世界未建，Worker 会丢弃 config（既有行为，不在此修）
   syncFullConfig();
 
   // 4. 面板（参数变更实时同步主线程物理；构造与回调见 createPanel）
@@ -768,15 +784,14 @@ function endHoldPoint(): void {
   setStatus('已恢复存点速度', 'success');
 }
 
-function syncFullConfig(): void {  if (!bridge) return;
-  // V8/P2：锁定模式下强制 tickRate=64（防面板/外部消息绕过）
+function syncFullConfig(): void {
+  if (!bridge || !configSync) return;
+  // V8/P2：锁定模式下强制 tickRate=64（防面板/外部消息绕过）——保留在 sync 前（旧行为）
   if (config.lockTickRate) {
     config.physics.tickRate = LOCKED_TICK_RATE;
   }
-  const sections: Array<keyof RuntimeConfig> = ['physics', 'input', 'player', 'hud'];
-  for (const section of sections) {
-    bridge.sendConfig(section, config[section] as unknown as Record<string, unknown>);
-  }
+  // 段顺序/下发由 createConfigSync 保证（P5）：4 段，bridge.sendConfig 内部展开全量参数并做预测镜像。
+  configSync.syncConfig();
 }
 
 /** 权威健康消息缓冲（面板「权威健康」控制台；最新在顶，限 30 条）。 */
