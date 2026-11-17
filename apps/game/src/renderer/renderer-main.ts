@@ -45,6 +45,10 @@ import { RenderSession } from '../../../../src/renderer-shared/scene/render-sess
 import type { EntitySystemStats } from '../../../../src/ts-shared/entity/entity-system.js';
 import type { RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
 import { EntityGameplay } from '../../../../src/ts-shared/gameplay/entity-gameplay.js';
+import {
+  createPlayerPresentation,
+  type PlayerPresentation,
+} from '../../../../src/ts-shared/app/player-presentation.js';
 import { Variant } from '../../../../src/ts-shared/entity/variant.js';
 import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 
@@ -99,8 +103,12 @@ export class RendererMain {
   /** 权威帧校准器（`src/ts-shared/phys/authority-calibrator.ts` 的 `AuthorityCalibrator`）：
    *  本类只做转发，并把读权威帧、取/写主线程物理、清待喂输入、`onSyncRenderState` 注入给它。 */
   private readonly calibrator: AuthorityCalibrator;
-  /** 上一物理帧的 rAF 时间戳（ms）；0 = 本帧是首个物理帧（dt 取 1/64）。 */
-  private lastTickMs = 0;
+  /**
+   * 主线程「预测呈现」同意循环（共享 `player-presentation`）：dt 时基、输入写共享槽、
+   * 权威校准、推进预测物理、写渲染采样、摆相机、推进实体运行期——与 debug 共用同一份序列。
+   * game 的特色只有两处 hooks：holdPoint 冻结分支与直接写 camera（无回放/单步/诊断）。
+   */
+  private presentation: PlayerPresentation | null = null;
 
   // ── 渲染采样传输（Worker 按渲染时钟 τ 在本折线上取点后发布权威位置）──────
   // 契约见文件头（writeRenderSample / resetRenderSample）。
@@ -150,6 +158,47 @@ export class RendererMain {
         this.pendingKeys = 0;
       },
       onSyncRenderState: (s, teleport) => this.onSyncRenderState?.(s, teleport),
+    });
+
+    // 主线程物理/呈现同意循环：序列与 debug 共用一份（`src/ts-shared/app/player-presentation.ts`）。
+    // game 的特色只有两点——holdPoint 冻结（tick 后把物理写回存点位姿）与直接写 camera；
+    // 权威校准、输入写共享槽、渲染采样、实体运行期推进都在共享实现里。
+    this.presentation = createPlayerPresentation({
+      phys: () => this.predPhys,
+      shared: this.shared,
+      gameplay: () => this.gameplay,
+      input: () => ({ keys: this.pendingKeys, dx: this.pendingDx, dy: this.pendingDy }),
+      clearInputDeltas: () => {
+        // 鼠标增量是一次性的；键位掩码保留为按住状态（由下一次 feedInput 覆盖）。
+        this.pendingDx = 0;
+        this.pendingDy = 0;
+      },
+      nextRenderSampleIndex: () => this.renderSampleIndex++,
+      hooks: {
+        beginFrame: () => ({ run: this.predReady && this.predPhys !== null }),
+        beforeTick: (now) => {
+          // 消费权威帧（只读共享槽；首帧取起点、常规反向重锚、yaw 分叉兜底都在校准器内）。
+          this.correctFromAuthority();
+          // 权威速度外推校准（位置不由权威覆盖）。
+          this.calibrateVelocity(now);
+        },
+        afterTick: () => {
+          // 冻结分支：把物理写回存点位姿（位置/朝向 = 存点，速度 = 0，着地 = 存点值），
+          // 悬停到解除（`releaseHoldPoint`）。
+          if (this.holdPoint) {
+            const h = this.holdPoint;
+            this.predPhys?.set_state(h.x, h.y, h.z, h.yaw, h.pitch, 0, 0, 0, h.onGround);
+          }
+        },
+        applyCamera: (st) => {
+          // Rust 输出角度为度 → 弧度；相机直接跟随主线程物理状态（不另做平滑）。
+          // 相机在 `init()` 之前可能尚未创建（手动构造、单元测试路径），此时跳过即可。
+          const cam = this.camera;
+          if (!cam) return;
+          cam.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
+          cam.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);
+        },
+      },
     });
   }
 
@@ -316,11 +365,11 @@ export class RendererMain {
     this.session?.disposeScene();
     this.predPhys = null;
     this.predReady = false;
-    // T-731/F4：复位物理帧时基。lastTickMs 只在本文件 tick 内写，换图不清会带着上一张图
-    // 的最后 rAF 时戳进入新图 —— 新图首个物理帧的 dt = (now − 旧时戳)/1000 被钳到 0.1s
+    // T-731/F4：复位物理帧时基（共享呈现循环持有 lastTickMs）。换图不清会带着上一张图的
+    // 最后 rAF 时戳进入新图 —— 新图首个物理帧的 dt = (now − 旧时戳)/1000 被钳到 0.1s
     // （实测 warm reload 间隔 10.5s 时首帧 dt=0.1），一步积分 0.1 秒的物理。归零让首帧
     // 走「首个物理帧取 1/64」的既有分支。
-    this.lastTickMs = 0;
+    this.presentation?.resetTimebase();
     this.pendingDx = 0;
     this.pendingDy = 0;
     this.pendingKeys = 0;
@@ -397,7 +446,7 @@ export class RendererMain {
     });
     this.predReady = true;
     // T-731/F4：新世界首帧 dt 取 1/64，不继承上一张图的 rAF 时戳（同 disposeScene 处的说明）
-    this.lastTickMs = 0;
+    this.presentation?.resetTimebase();
     // 权威帧校准状态清零（首帧权威帧将作为新起点）
     this.calibrator.clear();
     // 新世界：渲染采样流不连续 → 索引空间重启（世代 +1，Worker 丢弃旧世界缓存）
@@ -608,43 +657,9 @@ export class RendererMain {
     this.rafId = requestAnimationFrame(this.boundTick);
     if (!this.renderer || !this.scene || !this.camera) return;
 
-    // 1. 主线程物理线：把输入交给 Worker 权威帧 → 消费权威帧 → 推进本地物理 → 取状态渲染
-    if (this.predReady && this.predPhys) {
-      const dt = this.lastTickMs === 0 ? 1 / 64 : Math.min((now - this.lastTickMs) / 1000, 0.1);
-      this.lastTickMs = now;
-      // 输入 → 共享槽（Worker 权威帧与主线程消费同一份输入）
-      this.shared.addInput(this.pendingDx, this.pendingDy, this.pendingKeys);
-      // 消费权威帧（只读共享槽；首帧取起点、常规反向重锚、yaw 分叉兜底都在校准器内）
-      this.correctFromAuthority();
-      // 权威速度外推校准（位置不由权威覆盖）
-      this.calibrateVelocity(now);
-      // 推进物理：碰撞/传送/死亡判定都在物理内部（noclip 时走无碰撞分支）
-      this.predPhys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
-      this.pendingDx = 0;
-      this.pendingDy = 0;
-      // 冻结分支：把物理写回存点位姿（位置/朝向 = 存点，速度 = 0，着地 = 存点值），悬停到解除
-      if (this.holdPoint) {
-        const h = this.holdPoint;
-        this.predPhys.set_state(h.x, h.y, h.z, h.yaw, h.pitch, 0, 0, 0, h.onGround);
-      }
-      // 渲染 = 主线程物理状态（相机直接跟随，不另做平滑）
-      const st = this.predPhys.state() as {
-        posX: number; posY: number; posZ: number;
-        yaw: number; pitch: number;
-        eyeHeight: number;
-      };
-      // 渲染采样：与渲染状态读取同拍同源，i0 每帧 +1（序号语义见 renderSampleIndex）。
-      // 不传世代：世代槽由 shared-state 的 resetRenderSample 独占并就地读，传调用方缓存值会把
-      // bumpSampleEpoch 刚做的自增写回旧值。
-      this.shared.writeRenderSample(now, st.posX, st.posY, st.posZ, this.renderSampleIndex++);
-      // Rust 输出角度为度 → 弧度
-      this.camera.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
-      this.camera.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);
-
-      // Source 实体运行期：与物理同帧推进。touch 用本帧 state，0 延迟输出在
-      // ServiceEvents 里当帧消费（顺序见 entity-system.ts 文件头）。
-      this.gameplay?.update(dt);
-    }
+    // 1. 主线程物理/呈现同意循环（共享 `player-presentation`）：输入 → 共享槽 → 权威校准 →
+    //    推进物理 → 冻结分支 → 渲染采样 → 相机；序列与 debug 共用一份，game 特色走构造期 hooks。
+    this.presentation?.update(now);
 
     // 2+3. 共享会话：可见性判定 → 近平面贴墙（隔帧）→ 天空/主世界绘制。
     // 近平面只在物理就绪后探测（物理未就绪时相机停在初始位姿，探测没有意义）。

@@ -42,6 +42,10 @@ import type { EntitySystemStats } from '../../../../src/ts-shared/entity/entity-
 import type { RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
 import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 import { EntityGameplay } from '../../../../src/ts-shared/gameplay/entity-gameplay.js';
+import {
+  createPlayerPresentation,
+  type PlayerPresentation,
+} from '../../../../src/ts-shared/app/player-presentation.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
 import type { PhyBevelPiece } from './collider-debug.js';
@@ -250,8 +254,15 @@ export class RendererMain {
   private pendingKeys = 0;
   /** noclip 标记（`setPredictionNoclip` 写入并透传 Rust `set_noclip`）：为真时 `tick` 跳过近平面探测。 */
   private noclipActive = false;
-  /** 上一物理步的墙钟毫秒（0 表示本帧用 1/64 秒兜底）。 */
-  private lastTickMs = 0;
+  /**
+   * 主线程「预测呈现」同意循环（共享 `player-presentation`）：dt 时基、输入写共享槽、
+   * 权威校准、推进预测物理、消费物理事件、写渲染采样、摆相机、推进实体运行期。
+   *
+   * 过去这套逐帧序列 debug 与 game 各写一份（且 game 缺校准/事件/相机细节），顺序一旦分叉就会
+   * 表现成「同一张图两端手感不同」。debug 的特色（回放步长、单步闸门、replayMode、路径记录、
+   * 速度诊断、poseHold 相机）全部在 `constructor` 构造时登记的 hooks 里，序列本身与 game 共用。
+   */
+  private presentation: PlayerPresentation | null = null;
 
   // ── 速度突降诊断（2026-11-17 排查「区域内速度被清零」）──
   /**
@@ -426,7 +437,7 @@ export class RendererMain {
     eyeHeight: number;
   }, teleport: boolean) => void) | null = null;
 
-  /** 渲染物理事件回调（`consumePhysEvents` 逐条转发；app.ts 注册为计时挑战状态机）。 */
+  /** 渲染物理事件回调（共享呈现循环的 `onPhysEvent` 钩子逐条转发；app.ts 注册为计时挑战状态机）。 */
   onPhysEvent: ((ev: RenderPhysEvent) => void) | null = null;
 
 
@@ -443,6 +454,94 @@ export class RendererMain {
         this.pendingKeys = 0;
       },
       onSyncRenderState: (s, teleport) => this.onSyncRenderState?.(s, teleport),
+    });
+
+    // 主线程物理/呈现同意循环：序列与 game 共用一份（`src/ts-shared/app/player-presentation.ts`）；
+    // debug 的特色行为（回放步长、单步闸门、replayMode 跳过权威、路径记录、速度诊断、poseHold
+    // 相机、传送事件使采样世代失效）全部以 hooks 形式注入，两个端只有这里不同。
+    this.presentation = createPlayerPresentation({
+      phys: () => this.predPhys,
+      shared: this.shared,
+      gameplay: () => this.gameplay,
+      input: () => ({ keys: this.pendingKeys, dx: this.pendingDx, dy: this.pendingDy }),
+      clearInputDeltas: () => {
+        // 鼠标增量是一次性的；按键掩码保留为「按住」状态（由下一次 feedInput 覆盖）。
+        this.pendingDx = 0;
+        this.pendingDy = 0;
+      },
+      nextRenderSampleIndex: () => this.renderSampleIndex++,
+      hooks: {
+        beginFrame: (_now) => {
+          // 单步闸门：打开时每帧最多推进一个物理步（配额见 `setManualSteps`），耗尽即跳过本帧物理。
+          const canRun = this.predReady && this.predPhys !== null && (!this.stepGated || this.stepQuota > 0);
+          if (!canRun) {
+            // 物理未就绪不动时基；单步闸门跳过的帧必须推进时基（与原 `else if (stepGated)` 一致），
+            // 否则闸门恢复时会拿到一个异常大的 dt。
+            return { run: false, stepTimebase: this.stepGated };
+          }
+          if (this.stepGated) this.stepQuota--;
+          // 录制步长是一次性载荷：只有 replayMode 为真时才会取到（`replayPending`），用掉即清；
+          // 取不到就回落墙钟 dt——两条路都要推进物理（录制点挂在物理步上）。
+          const dtOverride = this.replayMode ? this.replayDtS : null;
+          this.replayDtS = null;
+          return { run: true, dtOverride, skipAuthority: this.replayMode };
+        },
+        beforeTick: (now, _dt, skipAuthority) => {
+          this.diagVelocity('input', now);
+          // 权威帧校准：记录新到的权威帧，必要时反向同步或把本地状态重新锚定（replayMode 只关权威耦合）。
+          if (!skipAuthority) this.correctFromAuthority();
+          this.diagVelocity('authority', now);
+          // 权威速度外推校准（只改速度，不覆盖位置）
+          if (!skipAuthority) this.calibrateVelocity(now);
+          this.diagVelocity('calib', now);
+          // 路径记录 —— tick 物理线：只在权威帧真的更新（`va` 变化）时落点，不做定时轮询。
+          // 时间戳用渲染时钟 τ（本次发布所依据的渲染采样时刻），τ 为 0 时回落墙钟 `now`。
+          if (this.pathRecorder.isRecording) {
+            const auth = this.shared.readAuthoritative();
+            if (auth) {
+              const tau = this.shared.readPublishedTau();
+              // 权威 post-tick 位置与发布位置之差只在 Worker 侧算得出，共享内存未暴露该读数，
+              // 故 residual 固定传 undefined（记录器侧该组样本数保持 0）。
+              this.pathRecorder.addTick(
+                auth.va,
+                tau > 0 ? tau : now,
+                auth.frame.pos.x,
+                auth.frame.pos.y,
+                auth.frame.pos.z,
+                undefined,
+              );
+            }
+          }
+        },
+        afterTick: (now, _dt) => {
+          this.diagVelocity('tick', now);
+        },
+        onPhysEvent: (event) => {
+          const ev = event as RenderPhysEvent;
+          // Rust 内部传送（地图触发区）是位置突变：必须让渲染采样流失效，否则跨线程发布位姿
+          // 会拿传送前后两个位置做线性插值（surf_666 从 s1 传到 krazysboner 时 4.2 万 HU 外
+          // 的伪中间点即由此而来，分支判定/回卷检查都会拿它当真实位置）。
+          if (ev.kind === 'teleport') this.bumpSampleEpoch();
+          this.onPhysEvent?.(ev);
+        },
+        afterState: (st, dt, now) => {
+          // 路径记录 —— 渲染物理线：每个 rAF 物理步一个节点，采样点是脚底（相机 Y 还要再加
+          // eyeHeight）。逐步状态（速度/着地/按键/步长）一并落盘，离线重放才定得到具体 tick。
+          this.pathRecorder.addRender(now, st.posX, st.posY, st.posZ, {
+            vx: st.velX, vy: st.velY, vz: st.velZ, g: st.onGround ? 1 : 0, k: this.pendingKeys, dt,
+            yaw: st.yaw, pitch: st.pitch,
+          });
+        },
+        applyCamera: (st) => {
+          const cc = this.cameraController;
+          if (!cc) return;
+          const hold = this.poseHold;
+          cc.setYawPitch(hold ? hold.yawRad : st.yaw * DEG2RAD, hold ? hold.pitchRad : st.pitch * DEG2RAD, false);
+          cc.update();
+          // 相机放在眼睛高度（脚底 + eyeHeight），不做任何位置修正；poseHold 存在时用其位姿。
+          cc.setPosition(hold ? hold.x : st.posX, hold ? hold.y : st.posY + st.eyeHeight, hold ? hold.z : st.posZ);
+        },
+      },
     });
   }
 
@@ -562,7 +661,8 @@ export class RendererMain {
     this.pendingDy = 0;
     this.pendingKeys = 0;
     this.noclipActive = false;
-    this.lastTickMs = 0;
+    // 换图/重建物理后时基清零（共享呈现循环持有 lastTickMs，首帧重新取 1/64 秒）
+    this.presentation?.resetTimebase();
     // 速度突降诊断的跨帧基准也清掉，避免换图后第一帧拿旧图的速度做比较
     this.dropDiagLast = null;
     this.deathY = null;
@@ -746,90 +846,11 @@ export class RendererMain {
     //    放在物理段之前是必须的——相机摆放只读 `poseHold`，放在后面就会晚一帧。
     this.advanceFlightPlayback(now);
 
-    // ①-1 输入写共享内存（Worker 权威模拟消费同一份输入）→ 权威帧校准 → 推进本地物理。
-    // 回放步长只有 replayMode 为真时才会取到（`replayPending`）；取不到就回落墙钟 dt——
-    // 两条路都要推进物理，`setReplayMode(true)` 同时被只关权威耦合的录制路径使用，
-    // 缺步长就跳过物理会让录制点（挂在物理步上）一帧都收不到。
-    const replayPending = this.replayMode ? this.replayDtS : null;
-    if (this.predReady && this.predPhys && (!this.stepGated || this.stepQuota > 0)) {
-      // 单步闸门：打开时每帧最多推进一个物理步（配额见 setManualSteps），配额耗尽即跳过本帧物理。
-      if (this.stepGated) this.stepQuota--;
-      // 步长：有录制步长就用它，否则用墙钟间隔（首帧 lastTickMs 为 0 时取 1/64 秒），上限 0.1 秒。
-      const dt = replayPending !== null
-        ? replayPending
-        : (this.lastTickMs === 0 ? 1 / 64 : Math.min((now - this.lastTickMs) / 1000, 0.1));
-      // 录制步长是一次性载荷：用掉即清，等待回放端下一帧再提供
-      this.replayDtS = null;
-      this.lastTickMs = now;
-      // 本帧输入 → 共享内存输入槽（Worker 权威模拟消费同一份输入）
-      this.shared.addInput(this.pendingDx, this.pendingDy, this.pendingKeys);
-      this.diagVelocity('input', now);
-      // 权威帧校准：记录新到的权威帧，必要时反向同步或把本地状态重新锚定
-      if (!this.replayMode) this.correctFromAuthority();
-      this.diagVelocity('authority', now);
-      // 权威速度外推校准（只改速度，不覆盖位置）
-      if (!this.replayMode) this.calibrateVelocity(now);
-      this.diagVelocity('calib', now);
-      // 路径记录 —— tick 物理线：只在权威帧真的更新（`va` 变化）时落点，不做定时轮询。
-      // 时间戳用渲染时钟 τ = `readPublishedTau()`（本次发布所依据的渲染采样时刻）：权威发布
-      // 位置本身就是渲染轨迹上的一个采样点，只有按 τ 对齐比较，重合的两点才读成同一个点。
-      // 不用 `auth.frame.timeMs`：Worker 与主线程的时钟基准不同。τ 为 0 时回落墙钟 `now`。
-      if (this.pathRecorder.isRecording) {
-        const auth = this.shared.readAuthoritative();
-        if (auth) {
-          const tau = this.shared.readPublishedTau();
-          // 权威 post-tick 位置与发布位置之差（residual）只在 Worker 侧算得出，共享内存未暴露
-          // 该读数，故这里固定传 undefined，记录器侧该组统计的样本数保持 0。
-          this.pathRecorder.addTick(
-            auth.va,
-            tau > 0 ? tau : now,
-            auth.frame.pos.x,
-            auth.frame.pos.y,
-            auth.frame.pos.z,
-            undefined,
-          );
-        }
-      }
-      // 推进本地物理：keys/dx/dy 传完后立即清零增量（按键掩码由下一次 feedInput 覆盖）
-      this.predPhys.tick(dt, this.pendingKeys, this.pendingDx, this.pendingDy);
-      this.diagVelocity('tick', now);
-      this.pendingDx = 0;
-      this.pendingDy = 0;
-      // 事件消费：把 Rust 侧这一帧产生的 teleport/death 事件交给回调（app.ts 的计时挑战状态机）
-      this.consumePhysEvents();
-      // 取物理状态摆放相机（Rust 输出的角度是度，这里换成弧度）
-      const st = this.predPhys.state() as {
-        posX: number; posY: number; posZ: number;
-        yaw: number; pitch: number;
-        eyeHeight: number;
-        velX: number; velY: number; velZ: number;
-        onGround: boolean;
-      };
-      // 路径记录 —— 渲染物理线：每个 rAF 物理步一个节点，采样点是脚底（下面的相机 Y 还要再加 eyeHeight）
-      // 逐步状态（速度/着地/按键/步长）一并落盘：光有位置无法离线重放，遇到「某一步速度被清零」
-      // 这类问题时只能看现象、不能定位到具体 tick（2026-11-17 排速度清零时加的）。
-      this.pathRecorder.addRender(now, st.posX, st.posY, st.posZ, {
-        vx: st.velX, vy: st.velY, vz: st.velZ, g: st.onGround ? 1 : 0, k: this.pendingKeys, dt,
-        yaw: st.yaw, pitch: st.pitch,
-      });
-      // 同一帧、同一三元组写入渲染采样传输（Worker 把权威发布位置投影到这条轨迹上）；
-      // `i0` 即刚落点的渲染节点下标，故与 addRender 一一对应。
-      // 不传世代：世代槽由 shared-state 在写入时就地读取。
-      this.shared.writeRenderSample(now, st.posX, st.posY, st.posZ, this.renderSampleIndex++);
-      const cc = this.cameraController;
-      const hold = this.poseHold; cc.setYawPitch(hold ? hold.yawRad : st.yaw * DEG2RAD, hold ? hold.pitchRad : st.pitch * DEG2RAD, false);
-      cc.update();
-      // 相机放在眼睛高度（脚底 + eyeHeight），不做任何位置修正
-      const camY = hold ? hold.y : st.posY + st.eyeHeight;
-      cc.setPosition(hold ? hold.x : st.posX, camY, hold ? hold.z : st.posZ);
-
-      // Source 实体运行期 + 物理副作用（共享宿主）：与物理同帧推进；touch 用本帧 state，
-      // 0 延迟输出当帧消费。速度/限速/跳高/玩家名的变化由宿主写渲染物理线并回调权威 Worker。
-      this.gameplay?.update(dt);
-    } else if (this.stepGated) {
-      // 闸门跳过物理的帧也要推进墙钟基准，否则闸门恢复时会拿到一个异常大的 dt
-      this.lastTickMs = now;
-    }
+    // ① 物理/权威/呈现同意循环（共享 `player-presentation`）：输入写共享内存 → 权威帧校准 →
+    //    推进本地物理 → 消费物理事件 → 写渲染采样 → 摆相机 → 推进实体运行期。
+    //    debug 特色（回放步长、单步闸门、replayMode 跳过权威、路径记录、速度诊断、poseHold
+    //    相机、传送事件使采样世代失效）全部在构造时登记的 hooks 里，逐帧序列本身与 game 共用。
+    this.presentation?.update(now);
 
     // ⓪-2 飞行轨迹录制：记**相机**位姿（不是脚底），所以放在相机摆放之后、渲染之前；
     //      复播中也照记（可以把一条轨迹的某一段再录成新轨迹）。
@@ -1337,7 +1358,7 @@ export class RendererMain {
     });
     this.predReady = true;
     this.noclipActive = false;
-    this.lastTickMs = 0;
+    this.presentation?.resetTimebase();
     // 权威帧校准状态清零（首帧权威帧将作为新起点）
     this.calibrator.clear();
     // 新世界：渲染采样流不连续 → 失效代数 +1（Worker 丢弃旧世界缓存）
@@ -1603,21 +1624,6 @@ export class RendererMain {
    */
   applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number, vel?: number[]): void {
     this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg, vel);
-  }
-
-  /** 消费 Rust 物理事件（每帧 tick 后）：teleport/death → onPhysEvent 回调
-   * （app.ts 计时挑战状态机：检查点记录 / 死亡统计 + 检查点回退）。 */
-  private consumePhysEvents(): void {
-    if (!this.predPhys) return;
-    for (;;) {
-      const ev = this.predPhys.take_event() as RenderPhysEvent | null;
-      if (!ev) break;
-      // Rust 内部传送（地图触发区）是位置突变：必须让渲染采样流失效，否则跨线程发布位姿
-      // 会拿传送前后两个位置做线性插值。实测 surf_666 从 s1 传送到 krazysboner（42390 HU）
-      // 时多出一个 4.2 万 HU 外的伪中间点，分支判定/回卷检查都会拿它当真实位置。
-      if (ev.kind === 'teleport') this.bumpSampleEpoch();
-      this.onPhysEvent?.(ev);
-    }
   }
 
   /** 当前物理全状态（自定义传送点保存位置 / HUD 采样用）。 */
