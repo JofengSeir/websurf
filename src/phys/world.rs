@@ -452,7 +452,8 @@ fn clip_box_to_brush(
 /// 故障碍集是 `Tri ⊕ (-Box)`，它的面（facet）只有三类，**缺一类就漏接触**：
 ///
 /// 1. **三角面 ⊕ 盒顶点** ⇒ ±n 两张零厚度平面（Minkowski 扩张后自然带盒的厚度）；
-/// 2. **三角边 ⊕ 盒棱（沿盒轴）** ⇒ 每条边 ×3 条盒轴，法线 `normalize(cross(edge, axis))`；
+/// 2. **三角边 ⊕ 盒棱（沿盒轴）** ⇒ 每条边 ×3 条盒轴，法线 `±normalize(cross(edge, axis))`
+///    **两个朝向都要**（见下）；
 /// 3. **三角顶点 ⊕ 盒面** ⇒ ±x/±y/±z 六张，`dist` 取三角形在该轴向上的支撑值。
 ///
 /// 三类合起来等价于 SDK `CDispCollTree::SweepAABBTriIntersect`（`public/dispcoll_common.h`）：
@@ -470,6 +471,15 @@ fn clip_box_to_brush(
 /// 贴坡行走时盒的前缘会在相邻三角的棱线上被一张横法线挡住、法线又几乎与移动方向相反 ⇒
 /// 速度被整段剪掉、每 tick 只挪零点几 HU（表现为「脚底黏住」）。第 2 类的法线是斜的，
 /// 接触后盒沿坡面滑走。
+///
+/// **第 2 类必须两个朝向都压入**（2026-11-17 实测修复）：按上面的 `cross(edge, axis)`
+/// 只用**一个**朝向时，约一半的 (边, 盒轴) 组合拿到的是「反 inward」方向 —— 它仍是障碍集的
+/// 合法支撑面，但**不是外法线那张面**；真正的那张（`-u`，`dist = support(-u)`）漏掉后，
+/// 半空间交集比 `Tri ⊕ (-Box)` 大，盒在**两块三角的折痕附近**会被提前挡住。`surf_boreas`
+/// 雪山 `(-1148,11618)`（两块 512 HU 置换三角的对角折痕，法线相差约 20°）实测：32×72×32 盒
+/// 下扫命中 12603.44，而严格 SAT（盒 vs 三角 13 轴）真值是 12597.52 ⇒ 幽灵台阶高 5.92 HU；
+/// 补上 `-u` 后该点命中 12597.52（沿线 9 个采样点全部收敛到 SAT 值）。物理上这就是玩家
+/// 报的「慢速跨接缝时莫名抬升/下降几个单位，像走台阶」。
 ///
 /// 三角形不写 `start_solid` / `all_solid`：盒跨在面两侧是站/贴面的常态，不是嵌入实体；
 /// 写成实心会让贴面行走每 tick 命中一次「起点实心」把速度清零。
@@ -508,15 +518,22 @@ fn clip_box_to_triangle(
     let support = |u: &V3| dot(u, &va).max(dot(u, &vb)).max(dot(u, &vc));
 
     // 第 1 类：三角面 ⊕ 盒顶点（±n）
-    let mut planes: Vec<Plane> = Vec::with_capacity(17);
+    let mut planes: Vec<Plane> = Vec::with_capacity(26);
     planes.push(Plane { normal: n, dist: d });
     planes.push(Plane {
         normal: [-n[0], -n[1], -n[2]],
         dist: -d,
     });
 
-    // 第 2 类：三角边 ⊕ 盒棱（三条盒轴）
+    // 第 2 类：三角边 ⊕ 盒棱（三条盒轴）；±u 两个朝向都要（见函数注释：只压一个朝向时
+    // 折痕附近障碍集偏大，盒会被提前挡住形成幽灵台阶）
     let axes: [V3; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let push = |planes: &mut Vec<Plane>, u: V3| {
+        planes.push(Plane {
+            normal: u,
+            dist: support(&u),
+        });
+    };
     for (pa, pb) in [(&va, &vb), (&vb, &vc), (&vc, &va)] {
         let e = sub(pb, pa);
         for ax in &axes {
@@ -526,10 +543,8 @@ fn clip_box_to_triangle(
                 continue; // 边与盒轴平行 ⇒ 该面退化成零面积，跳过
             }
             let u = [raw[0] / len, raw[1] / len, raw[2] / len];
-            planes.push(Plane {
-                normal: u,
-                dist: support(&u),
-            });
+            push(&mut planes, u);
+            push(&mut planes, [-u[0], -u[1], -u[2]]);
         }
     }
 
@@ -545,7 +560,7 @@ fn clip_box_to_triangle(
         }
     }
     if planes.len() < 4 {
-        return; // 退化保护（正常路径恒 17 张）
+        return; // 退化保护（正常路径恒 26 张）
     }
 
     // 三角形自己的包围盒：与 brush 同一条必要校验路径（命中处盒 AABB 必须与它重叠）

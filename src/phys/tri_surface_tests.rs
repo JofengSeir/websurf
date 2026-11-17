@@ -1,4 +1,4 @@
-//! 三角形「面」语义回归（4 项）：置换面 / `.phy` 遗留三角是**面**，不是实体。
+//! 三角形「面」语义回归（6 项）：置换面 / `.phy` 遗留三角是**面**，不是实体。
 //!
 //! 钉住的契约（`src/phys/world.rs` 的 `clip_box_to_triangle`）：
 //! - **面没有内部**：盒跨在面两侧（贴地、贴坡的常态）**不算**嵌入实体 ⇒
@@ -6,9 +6,11 @@
 //!   实心凸体（±法线 + 三条边墙的 5 面闭集），贴面行走每 tick 被判「起点实心」，
 //!   `check_stuck` 冻结、或移动被剪成每 tick 零点几 HU —— owner 报的「脚底黏住」。
 //! - **面集是 Minkowski 和 `三角形 ⊕ 盒` 的精确面集**（SDK `CDispCollTree::SweepAABBTriIntersect`）：
-//!   面（±n）+ 边×盒轴（`cross(edge, axis)`）+ 盒轴（±x/±y/±z）。少掉后两类时，盒的脚印
+//!   面（±n）+ 边×盒轴（`±cross(edge, axis)`，两个朝向）+ 盒轴（±x/±y/±z）。少掉后两类时，盒的脚印
 //!   跨过三角形棱线会**一次接触都不产生**（面平面的支撑角落在三角面域之外 ⇒
 //!   `aabb_overlaps_at` 否决 ⇒ 盒从棱线处穿过去）。第 5 项钉住这一条。
+//!   「边×盒轴」只压一个朝向时面集**变大**（不是精确面集）⇒ 折痕附近盒提前被挡住、
+//!   出现「幽灵台阶」，第 6 项钉住这一条（`surf_boreas` 实测高 5.9 HU）。
 //! - **边墙不出法线**：接触法线恒取面法线 ±n。边墙若也参与接触，盒的前缘会在相邻三角
 //!   的**棱线**上被一张横法线挡住，法线又几乎与移动方向相反 ⇒ 速度被整段剪掉。
 //!   第 2 项（沿锯齿坡滑行不被边墙挡）与第 3 项（陡面仍按面法线挡）钉住这条的两侧；
@@ -224,5 +226,104 @@ fn a_box_descending_across_a_triangle_edge_is_caught() {
     assert!(
         hit_y > 690.0 && hit_y < 760.0,
         "落点应在该三角附近（±40 HU），实际 y={hit_y:.1}"
+    );
+}
+
+/// 6. 盒扫过两块三角的**折痕**时不得浮在诚实接触面之上（幽灵台阶）。
+/// 夹具是 `surf_boreas` 雪山 `(-1148, 11618)` 处的真实置换 quad（`__disp_55`）：
+/// 512 HU 方形四角**非共面**（第 4 点比另三点确定的平面低约 127 HU），按对角线拆成
+/// 两块三角后法线相差约 20°。盒 32×72×32 从上方下扫、脚印跨折痕时：
+/// - 修前（「三角边 × 盒轴」只压 `cross(edge, axis)` 一个朝向）命中 **12603.44**；
+/// - 严格 SAT（盒 vs 三角 13 轴分离检测）真值 **12597.52** ⇒ 高 5.92 HU。
+///
+/// 玩家侧表现就是 owner 报的「慢速跨 mesh 接缝时莫名往上抬升/往下下降几个单位，像走台阶」。
+/// 修法见 `src/phys/world.rs` 的 `clip_box_to_triangle`（±u 两个朝向都压入）。
+#[test]
+fn a_box_sweeping_over_a_triangle_crease_does_not_float_above_honest_contact() {
+    let m = mesh(
+        "disp55_quad",
+        vec![
+            [-1472.0, 12544.27, 11776.0],
+            [-960.0, 12661.54, 11776.0],
+            [-1472.0, 12455.48, 11264.0],
+            [-960.0, 12472.26, 11264.0],
+        ],
+        vec![[0, 1, 2], [1, 3, 2]],
+    );
+    let mut w = world(m);
+    let tr = w.trace(
+        &[-1148.0, 12750.0, 11618.0],
+        &[-1148.0, 12300.0, 11618.0],
+        &MINS,
+        &MAXS,
+    );
+    assert!(tr.fraction < 1.0, "折痕处的盒必须被接住，不能穿过去");
+    let hit_y = 12750.0 - 450.0 * tr.fraction;
+    assert!(
+        (hit_y - 12597.52).abs() < 0.35,
+        "折痕处应命中诚实接触面 y≈12597.5，实际 y={hit_y:.2}（修前是 12603.44，即幽灵台阶高 5.92 HU）"
+    );
+    let n = tr.normal.expect("命中必须给法线");
+    assert!(
+        n[1] > 0.9 && n[0] < 0.0,
+        "接触法线应取自较低那一块三角的面（≈ (-0.220, 0.961, -0.167)），实际 {n:?}"
+    );
+}
+
+/// 7. 玩家慢速走过折痕时**不得出现单 tick 抬升一个台阶**（玩家侧回归）。
+///
+/// 同一块 `__disp_55` quad：从 `x=-1230` 沿 +x 走上坡（坡度约 0.55），穿过
+/// `(-1148, 11618)` 的对角折痕。修前盒扫在折痕带上比真值高最多 5.9 HU，
+/// 表现为跨过时脚底在一个 tick 里被抬起 5~6 HU（owner 报的「像走台阶」）。
+///
+/// 断言：着地后的单 tick 竖直位移 < 3.0 HU（正常上坡每 tick ≈ 1.8~2 HU）。
+#[test]
+fn walking_over_a_triangle_crease_has_no_single_tick_step() {
+    let m = mesh(
+        "disp55_quad",
+        vec![
+            [-1472.0, 12544.27, 11776.0],
+            [-960.0, 12661.54, 11776.0],
+            [-1472.0, 12455.48, 11264.0],
+            [-960.0, 12472.26, 11264.0],
+        ],
+        vec![[0, 1, 2], [1, 3, 2]],
+    );
+    let mut w = world(m);
+
+    // 起点的着地高度（用玩家盒自己做一次竖直扫掠）
+    let z = 11618.0;
+    let x0 = -1230.0;
+    let tr = w.trace(&[x0, 13000.0, z], &[x0, 12000.0, z], &MINS, &MAXS);
+    assert!(tr.fraction < 1.0, "起点应落在 quad 上");
+    let floor = 13000.0 - 1000.0 * tr.fraction;
+
+    let params = PhysParams::default();
+    let mut p = create_player([x0, floor + 1.0, z], &params);
+    p.yaw = -90.0; // 面向 +x
+    for _ in 0..12 {
+        player_tick(&mut w, &mut p, &params, DT);
+    }
+
+    let mut prev_y = p.origin[1];
+    let mut max_step: f64 = 0.0;
+    for _ in 0..140 {
+        p.input.forward = true;
+        player_tick(&mut w, &mut p, &params, DT);
+        let dy = p.origin[1] - prev_y;
+        if p.on_ground && dy > max_step {
+            max_step = dy;
+        }
+        prev_y = p.origin[1];
+    }
+    let advanced = p.origin[0] - x0;
+    assert!(
+        advanced > 120.0,
+        "应能穿过折痕继续上坡：从 x={x0} 走了 {advanced:.1} HU（终点 x={:.1}）",
+        p.origin[0]
+    );
+    assert!(
+        max_step < 3.0,
+        "跨折痕不该出现单 tick 台阶：最大单 tick 抬升 {max_step:.2} HU（修前约 5.9 HU + 正常上坡）"
     );
 }
