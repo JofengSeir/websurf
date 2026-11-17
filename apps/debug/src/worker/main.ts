@@ -30,6 +30,7 @@ import {
   type RenderTrajectorySource,
 } from '../../../../src/ts-shared/auth/auth-loop.js';
 import { createWorkerDispatch } from '../../../../src/ts-shared/auth/worker-dispatch.js';
+import { WORKER_PROTOCOL } from '../../../../src/ts-shared/auth/worker-protocol.js';
 import { buildPhysicsParams } from '../../../../src/ts-shared/phys/params.js';
 import type { MainMessage, WorkerMessage } from './worker-types.js';
 import { createConfig, applyConfigPatch } from '../config.js';
@@ -481,7 +482,7 @@ self.onmessage = createWorkerDispatch({
   // ── 本工程注入的钩子 ─────────────────────────────────────────
   /** `init` 处理完之后回一条 `ready`（主线程据此更新状态栏）。 */
   onInit: () => {
-    postMessage({ type: 'ready' } satisfies MainMessage);
+    postMessage({ type: 'ready', protocol: WORKER_PROTOCOL } satisfies MainMessage);
   },
   /** `wasm-init` 的第一步：取走内嵌纹理包 base64（本工程只留存，不消费）。 */
   onWasmInit: (m) => {

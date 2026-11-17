@@ -49,10 +49,17 @@ npm ci                         # 仓库根：shared 层的 three
 cd apps/<app> && npm ci        # debug / game / viewer 各自装
 npm run build:wasm             # wasm-pack → pkg/，并复制到 web/
 npm run typecheck              # TS 类型检查
-npm run build:ts               # typecheck + esbuild
+npm run build:ts               # typecheck + esbuild（app + worker 两个 bundle）
+npm run build:app              # 只编 web/app.js；**prebuild 钩子会先重建 web/worker.js**
 npm run build:dist             # 打包 dist/（single 或 --multi）
 npm run dev                    # 起本地服务（debug 8080 / game 8090 / viewer 8100）
 ```
+
+> 两个 bundle：`web/app.js`（主线程）与 `web/worker.js`（权威物理 Worker）是**分开构建**的。
+> `build:app` 会自动先跑 `build:worker`（`prebuild:app` 钩子）；若手工跳过钩子只编 app，
+> 浏览器会跑旧 worker 且**没有报错**——2026-11-17 的「区域内间歇性速度清零」即此原因。
+> 另外，`worker.js` 会在 `ready` 消息里带 `WORKER_PROTOCOL`（`src/ts-shared/auth/worker-protocol.ts`），
+> 版本不一致时状态栏会显式报「旧构建」，改 `WorkerMessage` / `MainMessage` 语义时记得同步 +1。
 
 ### 2.2 Rust 侧
 

@@ -24,6 +24,7 @@ import { BspProcessor, decode_vtf_to_png, decompress_mtz } from '../pkg/websurf_
 import type { RuntimeConfig } from './config.js';
 import type {
 	MainMessage,
+	ReadyMessage,
 	SceneDataMessage,
 	PhysFrameMessage,
 	PhysEventMessage,
@@ -32,6 +33,7 @@ import type {
 	PlaneInfo,
 } from './worker/worker-types.js';
 import { createMainSharedState, SHARED_BUFFER_SIZE, keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
+import { WORKER_PROTOCOL } from '../../../src/ts-shared/auth/worker-protocol.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
 import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, applyRenderDebugSwitches, defaultRenderPrefs, readPrefsPath as readPrefsField, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi } from '../../../src/renderer-shared/config/render-panel-ui.js';
@@ -405,10 +407,23 @@ function handleWorkerMessage(e: MessageEvent<MainMessage>): void {
 	const msg = e.data;
 	if (!msg || typeof msg !== 'object') return;
 	switch (msg.type) {
-		case 'ready':
+		case 'ready': {
 			// 阶段 2：Worker 不再需要同步配置（world-json 后由 handleLoadBsp 发送）
-			setStatus('Worker 已就绪。请加载 .bsp 文件。', 'success');
+			// 协议版本对不上 = 跑的是旧 web/worker.js（`build:app` 不重建 worker），
+			// 此时新消息会被旧 worker 静默忽略（2026-11-17 名字门控失效事故），必须显式报错。
+			const ready = msg as ReadyMessage;
+			if (ready.protocol !== WORKER_PROTOCOL) {
+				const got = ready.protocol === undefined ? '无（旧构建）' : String(ready.protocol);
+				console.error(`[worker] 协议版本不一致：worker=${got} app=${WORKER_PROTOCOL}`);
+				setStatus(
+					`Worker 是旧构建（协议 ${got}，需要 ${WORKER_PROTOCOL}）：请执行 npm run build:worker（或 build:ts）后硬刷新。`,
+					'error',
+				);
+			} else {
+				setStatus('Worker 已就绪。请加载 .bsp 文件。', 'success');
+			}
 			break;
+		}
 		case 'phys-frame': {
 			// 回退模式（MsgState）：缓存 Worker 权威帧（readAuthoritative 读取）
 			const f = msg as unknown as PhysFrameMessage;

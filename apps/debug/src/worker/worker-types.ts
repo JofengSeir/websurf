@@ -265,6 +265,12 @@ export type WorkerMessage =
  *  主线程据此更新状态栏提示。 */
 export interface ReadyMessage {
   type: 'ready';
+  /**
+   * Worker 构建时的消息协议版本（见 `src/ts-shared/auth/worker-protocol.ts`）。
+   * 旧构建的 `web/worker.js` 不会带这个字段；主线程据此在状态栏告警，
+   * 避免「app.js 新、worker.js 旧」时静默跑错行为（2026-11-17 事故）。
+   */
+  protocol?: number;
 }
 
 /**

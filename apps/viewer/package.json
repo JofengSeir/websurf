@@ -8,13 +8,14 @@
     "build:wasm": "cd crates/wasm && wasm-pack build --release --target web --out-dir ../../../../.tmp/wasm-out/viewer && node ../../../../src/scripts/copy-wasm-pkg.mjs viewer",
     "typecheck": "tsc --noEmit",
     "build:worker": "esbuild src/worker/main.ts --bundle --outfile=web/worker.js --format=esm --target=es2022",
+    "prebuild:app": "npm run build:worker",
     "build:app": "esbuild src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022",
-    "build:ts": "npm run typecheck && npm run build:worker && npm run build:app",
+    "build:ts": "npm run typecheck && npm run build:app",
     "build": "npm run build:wasm && npm run build:ts",
     "build:dist": "node scripts/build-dist.mjs",
     "check:api": "node scripts/check-wasm-api.mjs",
-    "predev": "node ../../src/scripts/sync-web-assets.mjs",
-    "dev": "python ../../src/scripts/serve.py 8100 ."
+    "predev": "node ../../src/scripts/dev-preflight.mjs viewer && node ../../src/scripts/sync-web-assets.mjs",
+    "dev": "node ../../src/scripts/serve.mjs 8100 ."
   },
   "devDependencies": {
     "esbuild": "^0.23.0",
