@@ -12,7 +12,10 @@
 #   render-parity   — `check-render-parity.mjs`：三端渲染入口必须走共享 RenderSession，
 #                     apps 内不得再出现渲染器/装配/天空/可见性/画质等步骤（2026-10-23）
 #   ts-typecheck    — 三端 `npm run typecheck`（tsc；此前 TS 类型错误只在合并后的 deploy-pages 才暴露）
-#   glb-parity      — 三端 `npm run build:wasm` + 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
+#   glb-parity      — 三端 `npm run build:wasm` + `build:ts`（产物）+ 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
+#                     + `check-shared-artifacts.mjs`（产物内共享模块指纹，缺产物 SKIP）
+#                     + `check-lock-consistency.mjs`（Cargo.lock 归属/版本 + wasm 导出面）
+#                     + `check-glb-parity.mjs`（GLB BIN sha + f32 归一化 JSON sha + 结构计数等价，缺地图 SKIP）
 #   debug-gates / game-gates — `npm run build:wasm` + `npm run build:ts`（wasm 构建冒烟 +
 #                     tsc/esbuild 打包冒烟）
 #
@@ -416,3 +419,23 @@ jobs:
             echo "== apps/$app check:api =="
             (cd "apps/$app" && node scripts/check-wasm-api.mjs)
           done
+
+      # 产物级共享指纹：必须先 build:ts（生成 web/app.js + web/worker.js），否则脚本按 skip-safe 打印 SKIP。
+      # 脚本本身对「产物缺失」是 SKIP（本地没构建不阻塞），但 CI 这里已经构建过 ⇒ 实际会真检查。
+      - name: Build TypeScript bundles (shared-artifact fingerprints)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in debug game viewer; do
+            echo "== apps/$app build:ts =="
+            (cd "apps/$app" && npm run build:ts)
+          done
+
+      - name: Three-end shared artifact fingerprints (skip-safe)
+        run: node src/scripts/check-shared-artifacts.mjs
+
+      - name: Lock / wasm export consistency
+        run: node src/scripts/check-lock-consistency.mjs
+
+      - name: Three-end GLB equivalence (skip-safe without map fixtures)
+        run: node src/scripts/check-glb-parity.mjs
