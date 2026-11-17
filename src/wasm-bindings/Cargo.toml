@@ -4,12 +4,14 @@
 # 三个 app 的 crates/wasm 仍各自是 cdylib 包装 crate（名字不变 ⇒ pkg basename 不变），
 # 通过本 crate 的 features 选择导出面，避免同一份绑定代码在三个 app 里各写一遍。
 #
-# features（当前切片只实现 core/phys，其余先声明为占位、留 TODO）：
-# - core：三端共用、无状态的自由函数（VTF→PNG / mosaic 编解码 / MTZ 解压）
+# features（task-73 slice2 起全部实现；实现按「body 指纹」从三端 lib.rs 抽取，见
+# `.tmp/wasm-bindings/gen-slice2.mjs` 与 `.tmp/wasm-bindings/SLICE2.md`）：
+# - core：三端公共无状态导出（VTF→PNG / mosaic 编解码 / MTZ 解压）
 # - phys：PhysWorld 再导出（debug/game；实现仍在共享 src/phys/mod.rs）
-# - glb / glb-lite：BspProcessor 的 GLB 导出面（未迁移，占位）
-# - debug-tools：debug 独有的 BSP/PAKFILE 诊断、模型材质审计、.phy bevel 可视化等（未迁移，占位）
-# - viewer-export：viewer 独有导出（probeMissingResources / GLB 变体，未迁移，占位）
+# - glb：debug/game 相同的 BspProcessor GLB 方法
+# - glb-lite：game 使用的 GLB 变体集合（依赖 glb）
+# - debug-tools：debug 独有的 BSP/PAKFILE 诊断、模型材质审计、.phy bevel 可视化
+# - viewer-export：viewer 独有的 GLB 变体与 probeMissingResources
 #
 # 注意（.tmp/wasmspike/RESULT.md）：包装 crate 必须引用/再导出要导出的符号，否则 DCE；
 # wasm-bindgen 版本两侧必须一致（本 crate 与三端包装 crate 都写 0.2）。
@@ -30,17 +32,74 @@ default = []
 core = ["dep:websurf-wasm-core", "dep:image"]
 # 物理导出：PhysWorld（实现仍在共享 websurf-phys 内，本 crate 只再导出）
 phys = ["dep:websurf-phys"]
-# —— 以下为后续切片占位，当前未实现 ——
+# debug/game 共用的 BspProcessor GLB 方法
 glb = ["core"]
-glb-lite = ["core"]
+# game 使用的 GLB 变体集合（含 glb 中两端相同的方法）
+glb-lite = ["glb"]
+# debug 独有导出（BSP/PAKFILE 诊断、模型材质审计、.phy bevel 可视化）
 debug-tools = ["core", "phys"]
-viewer-export = ["glb-lite"]
+# viewer 独有导出（GLB 变体、probeMissingResources）
+viewer-export = ["core"]
 
 [dependencies]
 wasm-bindgen = "0.2"
 websurf-wasm-core = { path = "../wasm-core", optional = true }
 websurf-phys = { path = "..", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
+# WASM 绑定与数据编解码（三端 BspProcessor 实现共用）
+web-sys = { version = "0.3", features = ["console"] }
+js-sys = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+md5 = "0.8"
+# JS ↔ Rust 结构化数据反序列化（export_glb_with_models 的入参）
+serde-wasm-bindgen = "0.6"
+
+# 模型解析（原三端 lib.rs 直接使用）
+vmdl = "0.2"
+vtf = "0.3"
+vmt-parser = "0.2"
+tf-asset-loader = { version = "0.1.7", features = ["zip"] }
+
+# GLB 导出与 glTF 类型
+gltf = "1.4.1"
+gltf-json = { version = "1.4.1", features = ["KHR_texture_transform", "extras"] }
+cgmath = "0.18.0"
+bytemuck = { version = "1.17.1", features = ["derive"] }
+miette = "7.2.0"
+
+# BSP 解析与容器读取
+arrayvec = "0.7.6"
+binrw = "0.14.0"
+bitflags = "2.6.0"
+bv = "0.11.1"
+itertools = "0.13.0"
+lzma-rs = "0.3.0"
+num_enum = "0.7.2"
+static_assertions = "1.1.0"
+thiserror = "2.0.11"
+vdf-reader = "0.2.0"
+zip = { version = "0.6.3", package = "zip-lzma", features = ["lzma"], default-features = false }
+
+# 纹理解码
+byteorder = "1.5.0"
+texpresso = "2.0.2"
+parse-display = "0.9.0"
+
+# getrandom：0.2 开 js feature，0.3（重命名为 getrandom_03）开 wasm_js feature
+getrandom = { version = "0.2", features = ["js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+# path-dedot：由 tf-asset-loader 间接拉入，本 crate 直接声明以打开 use_unix_paths_on_wasm feature
+path-dedot = { version = "3", features = ["use_unix_paths_on_wasm"] }
+
+# ahash：default-features = false + compile-time-rng
+[dependencies.ahash]
+version = "0.8"
+default-features = false
+features = ["compile-time-rng"]
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

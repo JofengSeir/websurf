@@ -26,7 +26,7 @@ crate-type = ["cdylib", "rlib"]
 websurf-phys = { path = "../../../../src" }
 # 三端共享 wasm-bindgen 导出层（P4）：本工程经它与 game/viewer 共用同一份导出实现。
 # core = VTF/mosaic/MTZ 无状态导出；phys = PhysWorld 再导出（Hull bevels 等仍未迁移）。
-websurf-wasm-bindings = { path = "../../../../src/wasm-bindings", features = ["core", "phys"] }
+websurf-wasm-bindings = { path = "../../../../src/wasm-bindings", features = ["core", "phys", "glb", "debug-tools"] }
 # 共享解析层：仓库根 src/wasm-core/（crate websurf-wasm-core），上列解析与导出模块均由它提供
 websurf-wasm-core = { path = "../../../../src/wasm-core" }
 
