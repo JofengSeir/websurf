@@ -145,9 +145,11 @@ const BINDINGS_SRC = join(ROOT, 'src', 'wasm-bindings', 'src');
 const FEATURE_MODULES = {
   core: ['bsp/common.rs', 'texture.rs'],
   glb: ['bsp/glb.rs'],
-  'glb-lite': ['bsp/glb_lite.rs'],
+  // task-78（A2）：glb / glb-lite / viewer-export 的 GLB 绑定已合并进 bsp/glb.rs，
+  // 三个 feature 指向同一文件，块级 `#[cfg(feature = …)]` 由 deriveExports 求值过滤。
+  'glb-lite': ['bsp/glb.rs'],
   'debug-tools': ['bsp/debug_tools.rs'],
-  'viewer-export': ['bsp/viewer_export.rs'],
+  'viewer-export': ['bsp/glb.rs'],
 };
 const FEATURE_CLOSURE = {
   core: [],
@@ -232,6 +234,31 @@ function matchBrace(masked, open) {
   return -1;
 }
 
+/** 按顶层逗号切分 cfg 参数（支持嵌套 any/all/not）。 */
+function splitCfgArgs(inner) {
+  const out = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === ',' && depth === 0) { out.push(inner.slice(start, i)); start = i + 1; }
+  }
+  out.push(inner.slice(start));
+  return out.map((s) => s.trim()).filter(Boolean);
+}
+
+/** 求值 `#[cfg(...)]` 的谓词（只覆盖本项目用到的 feature/any/all/not 子集；未知谓词保守放行）。 */
+function evalCfgExpr(expr, features) {
+  const t = expr.trim();
+  let m;
+  if ((m = /^feature\s*=\s*"([^"]+)"$/.exec(t)) !== null) return features.has(m[1]);
+  if ((m = /^any\s*\(([\s\S]*)\)$/.exec(t)) !== null) return splitCfgArgs(m[1]).some((e) => evalCfgExpr(e, features));
+  if ((m = /^all\s*\(([\s\S]*)\)$/.exec(t)) !== null) return splitCfgArgs(m[1]).every((e) => evalCfgExpr(e, features));
+  if ((m = /^not\s*\(([\s\S]*)\)$/.exec(t)) !== null) return !evalCfgExpr(m[1], features);
+  return true; // target_arch/test 等：本项目未用于导出面分块，保守放行
+}
+
 /** 从 bindings 源码推导某 feature 集应导出的 wasm 名（不含脚手架与 physworld_*）。 */
 function deriveExports(features, app) {
   const names = new Set();
@@ -240,10 +267,37 @@ function deriveExports(features, app) {
   for (const rel of files) {
     const p = join(BINDINGS_SRC, rel);
     if (!existsSync(p)) { fail(`bindings 源文件缺失：src/wasm-bindings/src/${rel}（${app} 导出面推导失败）`); continue; }
-    const masked = maskRust(readFileSync(p, 'utf8'));
+    const raw = readFileSync(p, 'utf8');
+    const masked = maskRust(raw);
+    // 行号索引（属性求值需要原文，注释/字符串掩码版只能用于结构匹配）
+    const lineStarts = [0];
+    for (let i = 0; i < raw.length; i++) if (raw[i] === '\n') lineStarts.push(i + 1);
+    const lineOf = (idx) => {
+      let lo = 0, hi = lineStarts.length - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (lineStarts[mid] <= idx) lo = mid; else hi = mid - 1; }
+      return lo + 1;
+    };
+    const rawLines = raw.split('\n');
+    // 匹配项上方的连续属性行（`#[cfg(...)]` / `#[wasm_bindgen(...)]` 等；允许夹文档注释）。
+    const cfgAllows = (idx) => {
+      let l = lineOf(idx) - 2; // 上一行（0-based）
+      while (l >= 0) {
+        const t = rawLines[l].trim();
+        if (t.startsWith('///')) { l--; continue; } // doc 注释可夹在 cfg 与 #[wasm_bindgen] 之间
+        if (t.startsWith('#[')) {
+          const cm = /^#\[cfg\(([\s\S]*)\)\]$/.exec(t);
+          if (cm && !evalCfgExpr(cm[1], features)) return false;
+          l--;
+          continue;
+        }
+        break; // 空行 / 普通注释 / 其它内容 → 属性链结束
+      }
+      return true;
+    };
     // 顶层自由函数：属性行在 0 列，函数在 0 列（impl 内方法缩进，不匹配）
     const freeRe = /^#\[wasm_bindgen(?:\(([^)]*)\))?\]\s*$\n(?:^#\[[^\n]*\]\s*$\n)*^pub\s+(?:unsafe\s+)?fn\s+(\w+)/gm;
     for (const m of masked.matchAll(freeRe)) {
+      if (!cfgAllows(m.index)) continue;
       const args = m[1] ?? '';
       const jsName = /js_name\s*=\s*(\w+)/.exec(args);
       names.add(jsName ? jsName[1] : m[2]);
@@ -251,6 +305,7 @@ function deriveExports(features, app) {
     // 导出方法：`#[wasm_bindgen(...)]` + `impl BspProcessor {` 块内的 pub fn
     const implRe = /^#\[wasm_bindgen(?:\(([^)]*)\))?\]\s*$\n(?:^#\[[^\n]*\]\s*$\n)*^impl\s+BspProcessor\s*\{/gm;
     for (const m of masked.matchAll(implRe)) {
+      if (!cfgAllows(m.index)) continue;
       const open = masked.indexOf('{', m.index + m[0].length - 1);
       const close = matchBrace(masked, open);
       if (open < 0 || close < 0) { fail(`${rel} 的 impl BspProcessor 块括号不匹配（导出面推导失败）`); continue; }

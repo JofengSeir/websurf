@@ -1,6 +1,7 @@
 //! 三端共享 wasm-bindgen 导出层（P4）：BspProcessor 状态 + 按 feature 划分的导出面。
 //!
-//! 本文件 task-73 slice2 生成，请勿手改；改实现请改对应 feature 模块。
+//! task-73 slice2 生成；task-78（A2）把原 `glb.rs` / `glb_lite.rs` / `viewer_export.rs` 三份
+//! GLB 绑定合并为单文件 `glb.rs`（同名不同实现按 feature 分块），此处只保留模块分派。
 use wasm_bindgen::prelude::*;
 use websurf_wasm_core::render_bundle::{PakfileModels, VhvLog};
 use websurf_wasm_core::vbsp;
@@ -25,27 +26,19 @@ pub struct BspProcessor {
 
 #[cfg(feature = "core")]
 mod common;
-#[cfg(feature = "glb")]
+// glb / glb-lite / viewer-export 三份 GLB 绑定已合并为单文件 glb.rs（task-78 A2）；
+// glb-lite 只是 game 子集标记并依赖 glb，故 glb-lite 组合也由 feature "glb" 命中。
+#[cfg(any(feature = "glb", feature = "viewer-export"))]
 mod glb;
-#[cfg(feature = "glb-lite")]
-mod glb_lite;
 #[cfg(feature = "debug-tools")]
 mod debug_tools;
-#[cfg(feature = "viewer-export")]
-mod viewer_export;
 
 #[allow(unused_imports)]
 #[cfg(feature = "core")]
 pub use common::*;
 #[allow(unused_imports)]
-#[cfg(feature = "glb")]
+#[cfg(any(feature = "glb", feature = "viewer-export"))]
 pub use glb::*;
-#[allow(unused_imports)]
-#[cfg(feature = "glb-lite")]
-pub use glb_lite::*;
 #[allow(unused_imports)]
 #[cfg(feature = "debug-tools")]
 pub use debug_tools::*;
-#[allow(unused_imports)]
-#[cfg(feature = "viewer-export")]
-pub use viewer_export::*;
