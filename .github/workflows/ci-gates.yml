@@ -140,11 +140,13 @@ jobs:
 
       # pkg/ 是 wasm-pack 生成物（gitignore）；typecheck job 不构建 wasm，
       # 这里只补一个 CI 临时声明，让 tsc 能检查源码；真实 API 由 glb-parity 的契约 job 保。
+      # task-85 B4：apps/*/src/wasm.d.ts 过期副本已删除，debug 也必须由本 stub 覆盖
+      # （此前 debug 靠那份 13KB 通配声明兜底，删后若漏掉 debug，CI typecheck 会缺 pkg 类型）。
       - name: Stub generated wasm module for typecheck
         shell: bash
         run: |
           set -euo pipefail
-          for app in game viewer; do
+          for app in debug game viewer; do
             cat > "apps/$app/src/wasm-ci-stub.d.ts" <<'EOF'
           declare module '*/pkg/websurf_wasm.js' {
             export type BspProcessor = any;
@@ -430,6 +432,11 @@ jobs:
             echo "== apps/$app build:ts =="
             (cd "apps/$app" && npm run build:ts)
           done
+
+      # B5（task-86）契约门禁：按 Lead 协调，ci-gates.yml 由 B4（task-85）统一改，
+      # 本步消费 oit-research 交付的固定路径脚本；放在 build:ts 之后、产物指纹之前。
+      - name: Config sync contract (B5, task-86)
+        run: node src/scripts/check-config-sync-contract.mjs
 
       - name: Three-end shared artifact fingerprints (skip-safe)
         run: node src/scripts/check-shared-artifacts.mjs

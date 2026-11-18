@@ -18,7 +18,10 @@
  *       ③ debug-only / viewer-only 必须正好等于「推导差集 + 依赖图产物登记（DEP_GRAPH_EXPORTS）」，
  *          多余或缺失都 FAIL，不允许把新导出塞进白名单蒙混；
  *       ④ 物理导出（physworld_* 与 PhysWorld）debug/game 一致、viewer 为 0；
- *       ⑤ `.wasm` 体积预算：迁移前基线 ×1.05，超限 FAIL（防止 feature 泄漏把工具链塞进产品端）；
+ *       ⑤ `.wasm` 体积预算：task-81 真基线 ±3% 区间，超出（含明显变小）FAIL（防 feature 泄漏
+ *          把工具链塞进产品端，也防导出面/feature 被误删）；
+ *       ⑥ pkg 导出面基线：`pkg/*.d.ts` 的自由函数名集与 wasm 导出名集（剔除 `memory`/`__*`
+ *          内部脚手架）必须与 task-81 的逐名快照完全一致——缺一个/多一个都 FAIL；
  *   - wasm 字符串契约：三端 wasm 必须含 vbsp_* 6 个注入键 + take_mosaic_manifest/setVmtFallback/
  *     export_entity_io（CI_GLB_GATE 的立即可用替代，抓 viewer pkg 漂移）。
  *
@@ -163,9 +166,84 @@ const FEATURE_CLOSURE = {
  *  ChromaSampling = v_frame（rav1e 依赖链）在 wasm32 上的 `#[wasm_bindgen]` 枚举；
  *  2026-11-18 实测只有 debug 的依赖图保留它（game/viewer 无），prod 端不应新增此类项。 */
 const DEP_GRAPH_EXPORTS = { debug: ['ChromaSampling'], game: [], viewer: [] };
-/** 迁移前 .wasm 体积基线（P4 slice1 后 / slice2 前，字节）与容忍度（预算 = 基线 ×1.05）。 */
-const WASM_SIZE_BUDGET = { debug: 4211056, game: 4045966, viewer: 3660334 };
-const WASM_SIZE_TOLERANCE = 1.05;
+/** `.wasm` 体积真基线（字节；task-81 在 36cf19a 的干净构建实测）与容忍度（±3% 区间）。
+ *  下界与上界都判：体积异常变小通常意味着导出面/feature 被误删，与 ⑥ 的逐名基线互为补充。 */
+const WASM_SIZE_BASELINE = { debug: 4199231, game: 4036029, viewer: 3648919 };
+const WASM_SIZE_TOLERANCE = 0.03;
+/** pkg 导出面逐名基线（task-85 B4）。
+ *  来源：task-81 在 36cf19a 的干净构建（`.tmp/verifyA/baseline-real/exports-real.json`），
+ *  并在 HEAD 7c938b1 的当次 pkg 上复核一致（自由函数 11/6/5，wasm 契约导出 81/67/17）。
+ *  - fns：`pkg/*.d.ts` 的 `export function` 名集；
+ *  - wasmExports：`WebAssembly.Module.exports` 名集，剔除 `memory` 与 `__*`（wasm-bindgen
+ *    内部脚手架，随工具链版本可能变化，不属于契约面）。
+ *  改这里 = 改导出面契约：必须显式说明原因，不要为了过门禁而改基线。 */
+const PKG_EXPORT_BASELINE = {
+  debug: {
+    fns: [
+      'compress_mtz', 'decode_vtf_to_png', 'decompress_mtz', 'disp_vertex_alpha_stats', 'export_displacement_colliders', 'export_visleaf_pvs',
+      'initSync', 'mosaic_decode', 'mosaic_encode', 'parse_bsp', 'start',
+    ],
+    wasmExports: [
+      'bspprocessor_export_brushes_planes', 'bspprocessor_export_colliders', 'bspprocessor_export_colliders_with_filter', 'bspprocessor_export_entity_io',
+      'bspprocessor_export_glb', 'bspprocessor_export_glb_with_models', 'bspprocessor_export_glb_with_pakfile_models', 'bspprocessor_export_glb_with_pakfile_models_with_defaults',
+      'bspprocessor_export_glb_with_pakfile_models_with_defaults_and_atlas_limit', 'bspprocessor_export_glb_with_pakfile_models_with_defaults_and_lights', 'bspprocessor_export_glb_with_pakfile_models_with_lights', 'bspprocessor_export_missing_model_textures',
+      'bspprocessor_export_missing_textures', 'bspprocessor_export_model_phy_bevels', 'bspprocessor_export_model_phy_colliders', 'bspprocessor_export_model_tri_colliders',
+      'bspprocessor_export_mosaic_manifest', 'bspprocessor_is_alive', 'bspprocessor_list_pakfile', 'bspprocessor_metadata',
+      'bspprocessor_new', 'bspprocessor_pack_get', 'bspprocessor_pack_stats', 'bspprocessor_parse_entities',
+      'bspprocessor_parse_pvs_data', 'bspprocessor_parse_spawn_points', 'bspprocessor_parse_teleports', 'bspprocessor_read_pakfile_file',
+      'bspprocessor_read_pakfile_scripts', 'bspprocessor_setVmtFallback', 'bspprocessor_take_mosaic_manifest', 'compress_mtz',
+      'decode_vtf_to_png', 'decompress_mtz', 'disp_vertex_alpha_stats', 'export_displacement_colliders',
+      'export_visleaf_pvs', 'mosaic_decode', 'mosaic_encode', 'parse_bsp',
+      'physworld_add_velocity', 'physworld_build_world', 'physworld_debug_collide_attrib', 'physworld_debug_free_table',
+      'physworld_debug_hull', 'physworld_debug_hull_stats', 'physworld_debug_line_trace', 'physworld_debug_normal_escape',
+      'physworld_debug_position_probe', 'physworld_debug_stuck_probe', 'physworld_debug_trace', 'physworld_debug_tri_mesh_name',
+      'physworld_gate_veto_count', 'physworld_new', 'physworld_predict', 'physworld_respawn',
+      'physworld_seed_from', 'physworld_set_auto_restore_hull', 'physworld_set_death_y', 'physworld_set_hull',
+      'physworld_set_jump_height', 'physworld_set_max_horizontal_speed', 'physworld_set_noclip', 'physworld_set_params',
+      'physworld_set_push_velocity', 'physworld_set_spawn_points', 'physworld_set_state', 'physworld_set_state_ex',
+      'physworld_set_teleport_filter_enabled', 'physworld_set_teleport_player_name', 'physworld_set_velocity', 'physworld_set_yaw_pitch',
+      'physworld_state', 'physworld_state_full_json', 'physworld_state_out_ptr', 'physworld_take_event',
+      'physworld_teleport_to', 'physworld_teleport_to_spawn', 'physworld_tick', 'physworld_tick_into',
+      'start',
+    ],
+  },
+  game: {
+    fns: [
+      'decode_vtf_to_png', 'decompress_mtz', 'export_displacement_colliders', 'initSync', 'mosaic_decode', 'mosaic_encode',
+    ],
+    wasmExports: [
+      'bspprocessor_export_brushes_planes', 'bspprocessor_export_entity_io', 'bspprocessor_export_glb', 'bspprocessor_export_glb_with_pakfile_models',
+      'bspprocessor_export_glb_with_pakfile_models_with_defaults', 'bspprocessor_export_glb_with_pakfile_models_with_defaults_and_atlas_limit', 'bspprocessor_export_glb_with_pakfile_models_with_defaults_and_lights', 'bspprocessor_export_glb_with_pakfile_models_with_lights',
+      'bspprocessor_export_missing_textures', 'bspprocessor_export_model_phy_colliders', 'bspprocessor_export_model_tri_colliders', 'bspprocessor_export_mosaic_manifest',
+      'bspprocessor_is_alive', 'bspprocessor_metadata', 'bspprocessor_new', 'bspprocessor_parse_entities',
+      'bspprocessor_parse_pvs_data', 'bspprocessor_parse_spawn_points', 'bspprocessor_parse_teleports', 'bspprocessor_read_pakfile_file',
+      'bspprocessor_setVmtFallback', 'bspprocessor_take_mosaic_manifest', 'decode_vtf_to_png', 'decompress_mtz',
+      'export_displacement_colliders', 'mosaic_decode', 'mosaic_encode', 'physworld_add_velocity',
+      'physworld_build_world', 'physworld_debug_collide_attrib', 'physworld_debug_free_table', 'physworld_debug_hull',
+      'physworld_debug_hull_stats', 'physworld_debug_line_trace', 'physworld_debug_normal_escape', 'physworld_debug_position_probe',
+      'physworld_debug_stuck_probe', 'physworld_debug_trace', 'physworld_debug_tri_mesh_name', 'physworld_gate_veto_count',
+      'physworld_new', 'physworld_predict', 'physworld_respawn', 'physworld_seed_from',
+      'physworld_set_auto_restore_hull', 'physworld_set_death_y', 'physworld_set_hull', 'physworld_set_jump_height',
+      'physworld_set_max_horizontal_speed', 'physworld_set_noclip', 'physworld_set_params', 'physworld_set_push_velocity',
+      'physworld_set_spawn_points', 'physworld_set_state', 'physworld_set_state_ex', 'physworld_set_teleport_filter_enabled',
+      'physworld_set_teleport_player_name', 'physworld_set_velocity', 'physworld_set_yaw_pitch', 'physworld_state',
+      'physworld_state_full_json', 'physworld_state_out_ptr', 'physworld_take_event', 'physworld_teleport_to',
+      'physworld_teleport_to_spawn', 'physworld_tick', 'physworld_tick_into',
+    ],
+  },
+  viewer: {
+    fns: [
+      'decode_vtf_to_png', 'decompress_mtz', 'initSync', 'mosaic_decode', 'mosaic_encode',
+    ],
+    wasmExports: [
+      'bspprocessor_export_entity_io', 'bspprocessor_export_glb_with_pakfile_models', 'bspprocessor_export_glb_with_pakfile_models_with_defaults_and_lights', 'bspprocessor_export_mosaic_manifest',
+      'bspprocessor_metadata', 'bspprocessor_new', 'bspprocessor_parse_entities', 'bspprocessor_parse_pvs_data',
+      'bspprocessor_parse_spawn_points', 'bspprocessor_probeMissingResources', 'bspprocessor_read_pakfile_file', 'bspprocessor_setVmtFallback',
+      'bspprocessor_take_mosaic_manifest', 'decode_vtf_to_png', 'decompress_mtz', 'mosaic_decode',
+      'mosaic_encode',
+    ],
+  },
+};
 /** wasm-bindgen 生成的固定脚手架导出（三端等价，随 --target web 总会产出）。 */
 const WASM_SCAFFOLD = ['BspProcessor', 'InitInput', 'InitOutput', 'SyncInitInput', 'initSync'];
 
@@ -338,6 +416,8 @@ for (const app of APPS) {
 }
 const pkgPresent = Object.values(pkgDirs).filter(Boolean).length;
 const exportSets = {};
+const pkgFns = {};
+const pkgWasmExports = {};
 const wasmFiles = {};
 if (pkgPresent === 0) {
   skip('三端 apps/*/pkg 均不存在（CI 未构建 wasm 的 job；导出面/字符串契约部分跳过）');
@@ -350,12 +430,27 @@ if (pkgPresent === 0) {
     if (dts.length === 0) fail(`apps/${app}/pkg 中没有 .d.ts（导出面判据无法计算）`);
     if (wasm.length === 0) fail(`apps/${app}/pkg 中没有 .wasm（字符串契约判据无法计算）`);
     const names = new Set();
+    const fns = new Set();
     for (const f of dts) {
       const text = readFileSync(join(dir, f), 'utf8');
       for (const m of text.matchAll(/^export\s+(?:async\s+)?(?:function|class|const|let|var|type|interface|enum)\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]);
+      for (const m of text.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)) fns.add(m[1]);
     }
     exportSets[app] = names;
+    pkgFns[app] = fns;
     wasmFiles[app] = wasm.length ? join(dir, wasm[0]) : null;
+    if (wasmFiles[app]) {
+      try {
+        const mod = new WebAssembly.Module(readFileSync(wasmFiles[app]));
+        pkgWasmExports[app] = new Set(
+          WebAssembly.Module.exports(mod)
+            .map((e) => e.name)
+            .filter((n) => !/^(memory|__)/.test(n)),
+        );
+      } catch (e) {
+        fail(`apps/${app}/pkg 的 .wasm 无法解析为 WebAssembly 模块（导出面基线判据无法计算）：${e.message}`);
+      }
+    }
     if (names.size === 0) fail(`apps/${app}/pkg 的 d.ts 解析出 0 个导出（格式变化，判据无法计算）`);
   }
 }
@@ -405,14 +500,63 @@ if (pkgPresent > 0 && exportSets.debug && exportSets.game && exportSets.viewer) 
   if (JSON.stringify(physDebug) !== JSON.stringify(physGame)) fail(`debug/game 物理导出面不一致：debug=${physDebug.length} game=${physGame.length}`);
   if (physViewer.length !== 0) fail(`viewer wasm 出现物理导出（${physViewer.slice(0, 5).join(',')}…）`);
 
-  // ⑥ .wasm 体积预算（迁移前基线 ×1.05）
+  // ⑥ .wasm 体积预算（task-81 真基线 ±3% 区间；上下界都判）
   for (const app of APPS) {
     const f = wasmFiles[app];
     if (!f) continue;
     const size = statSync(f).size;
-    const budget = Math.round(WASM_SIZE_BUDGET[app] * WASM_SIZE_TOLERANCE);
-    if (size > budget) fail(`apps/${app} .wasm 体积 ${size} B 超出预算 ${budget} B（基线 ${WASM_SIZE_BUDGET[app]} ×${WASM_SIZE_TOLERANCE}；检查 feature 是否泄漏）`);
-    console.log(`[lock] ${app} .wasm = ${size} B（预算 ${budget} B / 基线 ${WASM_SIZE_BUDGET[app]} B）`);
+    const base = WASM_SIZE_BASELINE[app];
+    const lo = Math.round(base * (1 - WASM_SIZE_TOLERANCE));
+    const hi = Math.round(base * (1 + WASM_SIZE_TOLERANCE));
+    const delta = size - base;
+    if (size < lo || size > hi) {
+      fail(`apps/${app} .wasm 体积 ${size} B 超出 ±3% 区间 [${lo}, ${hi}] B（基线 ${base} B，Δ${delta >= 0 ? '+' : ''}${delta}；检查 feature 泄漏 / 导出面误删 / pkg 是否为当次产物）`);
+    }
+    console.log(`[lock] ${app} .wasm = ${size} B（±3% 区间 [${lo}, ${hi}] / 基线 ${base} B，Δ${delta >= 0 ? '+' : ''}${delta}）`);
+  }
+
+  // ⑦ pkg 导出面基线（task-85 B4）：自由函数名集 + wasm 导出名集逐名对比 task-81 快照
+  const diffNames = (actual, expected) => ({
+    missing: expected.filter((n) => !actual.includes(n)),
+    added: actual.filter((n) => !expected.includes(n)),
+  });
+  for (const app of APPS) {
+    const exp = PKG_EXPORT_BASELINE[app];
+    const fns = sorted(pkgFns[app] ?? []);
+    const wex = sorted(pkgWasmExports[app] ?? []);
+    const fd = diffNames(fns, [...exp.fns].sort());
+    const wd = diffNames(wex, [...exp.wasmExports].sort());
+    for (const n of fd.missing) fail(`${app} pkg 自由函数导出缺失（相对 task-81 基线）：${n}`);
+    for (const n of fd.added) fail(`${app} pkg 出现基线外自由函数导出：${n}`);
+    for (const n of wd.missing) fail(`${app} pkg wasm 导出缺失（相对 task-81 基线）：${n}`);
+    for (const n of wd.added) fail(`${app} pkg 出现基线外 wasm 导出：${n}`);
+    const clean = !fd.missing.length && !fd.added.length && !wd.missing.length && !wd.added.length;
+    console.log(`[lock] ${app} pkg 导出面基线：fns ${fns.length}/${exp.fns.length}，` +
+      `wasm 契约导出 ${wex.length}/${exp.wasmExports.length}（${clean ? '逐名一致' : '有差异，见违规'}）`);
+  }
+
+  // 本地任务证据快照（.tmp 不入库；CI 无 .tmp 属正常）只做 INFO 交叉核对，门禁以常量为准。
+  const localBaseline = join(ROOT, '.tmp', 'verifyA', 'baseline-real', 'exports-real.json');
+  if (existsSync(localBaseline)) {
+    try {
+      const snap = JSON.parse(readFileSync(localBaseline, 'utf8'));
+      for (const app of APPS) {
+        const e = snap.ends?.[app];
+        if (!e) continue;
+        const snapFns = [...(e.fns ?? [])].sort();
+        const snapWex = [...(e.wasmExports ?? [])]
+          .map((s) => s.replace(/^[a-z]+:/, ''))
+          .filter((n) => !/^(memory|__)/.test(n))
+          .sort();
+        const same = JSON.stringify(snapFns) === JSON.stringify([...PKG_EXPORT_BASELINE[app].fns].sort()) &&
+          JSON.stringify(snapWex) === JSON.stringify([...PKG_EXPORT_BASELINE[app].wasmExports].sort());
+        console.log(`[lock] ${app} 门禁基线与本地快照 exports-real.json：${same ? '一致' : '不一致（以常量为准；快照可能过期）'}`);
+      }
+    } catch (e) {
+      console.log(`[lock] 本地基线快照解析失败（INFO，不影响判据）：${e.message}`);
+    }
+  } else {
+    console.log('[lock] 未找到 .tmp/verifyA/baseline-real/exports-real.json（INFO；CI 无 .tmp 属正常）');
   }
 
   console.log(`[lock] 导出面（features 推导）：debug=${derived.debug.size} game=${derived.game.size} viewer=${derived.viewer.size} 项；` +
@@ -437,4 +581,4 @@ if (violations.length) {
   process.exit(1);
 }
 for (const s of skips) console.log(`[lock-consistency] SKIP：${s}`);
-console.log(`[lock-consistency] OK：物理内核归属/共同包版本/导出面（bindings features 推导）/字符串契约/体积预算均符合登记。${skips.length ? `（含 SKIP 项：${skips.join(';')}）` : ''}`);
+console.log(`[lock-consistency] OK：物理内核归属/共同包版本/导出面（bindings features 推导）/pkg 导出面基线（task-81 逐名）/体积区间（task-81 基线 ±3%）/字符串契约均符合登记。${skips.length ? `（含 SKIP 项：${skips.join(';')}）` : ''}`);
