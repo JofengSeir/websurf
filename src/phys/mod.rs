@@ -779,12 +779,10 @@ impl PhysWorld {
         if self.noclip {
             noclip_step(&mut self.player, dt, &self.params);
         } else {
-            // 传送检测（权威才检测；predict 禁用；surfing 滑行不触发；
-            // gate_ticks 参数已无效——check 内不使用，仅保留签名兼容）
+            // 传送检测（权威才检测；predict 禁用；surfing 滑行不触发）
             if let Some(dest) = self.teleport.check(
                 &self.player.origin,
                 self.player.contact_ticks,
-                self.params.teleport_gate_ticks,
                 dt,
                 false,
                 // 滑行（surfing）不触发传送
@@ -1052,15 +1050,13 @@ impl PhysWorld {
 
     /// 按 JSON patch 覆盖物理参数：**只处理出现过的键**，未出现的键保持原值。
     ///
-    /// 可接受的键（与下方 `Patch` 结构逐字对应，共 17 个）：`gravity` / `accelerate` /
+    /// 可接受的键（与下方 `Patch` 结构逐字对应，共 16 个）：`gravity` / `accelerate` /
     /// `friction` / `stop_speed` / `jump_height` / `air_accelerate` / `run_speed` /
     /// `walk_speed` / `crouch_speed` / `autobhop` / `bhop_speed_clamp` / `sensitivity` /
-    /// `yaw_bind_speed` / `noclip_speed` / `teleport_gate_ticks` / `push_out` /
+    /// `yaw_bind_speed` / `noclip_speed` / `push_out` /
     /// `push_out_only_when_solid`。
     ///
     /// 三项碰撞箱尺寸不在这里，走 `set_hull`。
-    /// `teleport_gate_ticks` 会被写进 `params`，但 `src/phys/teleport.rs` 的
-    /// `TeleportManager::check` 形参是 `_gate_ticks` 且函数体从不读它——**该键当前不改变任何行为**。
     /// JSON 解析失败返回 `Err`；逐字段赋值在解析之后，故失败时参数保持原值。
     pub fn set_params(&mut self, json: &str) -> Result<(), JsValue> {
         #[derive(serde::Deserialize)]
@@ -1079,7 +1075,6 @@ impl PhysWorld {
             sensitivity: Option<f64>,
             yaw_bind_speed: Option<f64>,
             noclip_speed: Option<f64>,
-            teleport_gate_ticks: Option<u32>,
             push_out: Option<f64>,
             push_out_only_when_solid: Option<bool>,
         }
@@ -1125,9 +1120,6 @@ impl PhysWorld {
         }
         if let Some(v) = p.noclip_speed {
             self.params.noclip_speed = v;
-        }
-        if let Some(v) = p.teleport_gate_ticks {
-            self.params.teleport_gate_ticks = v;
         }
         if let Some(v) = p.push_out {
             self.params.push_out = v;

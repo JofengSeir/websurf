@@ -74,7 +74,7 @@ import { PANEL_TO_RUST } from '../phys/param-names.js';
 
 /** 物理参数键名归一表：`src/ts-shared/phys/params.ts` 的 `buildPhysicsParams` 产出的
  * snake_case 键 → 工程 config 的 camelCase 字段。
- * 表内 10 项即两侧**不同形**的键；余下 5 个（`gravity` / `accelerate` / `friction` /
+ * 表内 9 项即两侧**不同形**的键；余下 5 个（`gravity` / `accelerate` / `friction` /
  * `autobhop` / `sensitivity`）与 game 侧桥追加的 `tickRate` 两侧同形，不登记也能由未命中
  * 分支原样穿透。
  * 命中只换键名、值原样搬运；`jump_height` 一项只服务「值不是 number」的兜底路径——值形态
@@ -87,7 +87,6 @@ const SNAKE_TO_CAMEL_PATCH_KEYS: Record<string, string> = {
   walk_speed: 'walkSpeed',
   crouch_speed: 'crouchSpeed',
   bhop_speed_clamp: 'bhopSpeedClamp',
-  teleport_gate_ticks: 'teleportGateTicks',
   yaw_bind_speed: 'yawBindSpeed',
   noclip_speed: 'noclipSpeed',
 };

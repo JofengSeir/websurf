@@ -204,10 +204,6 @@ pub struct PhysParams {
     /// noclip 单步位移的基准速度（HU/s）。实际位移 = 本值 ×（按住 walk 位 0x40 时 ×4）× dt，
     /// 默认 800 时即 800 / 3200 HU/s 两档。
     pub noclip_speed: f64,
-    /// 传送触发的落地稳定门槛（帧）。**当前不改变任何行为**：字段确实被 `src/phys/mod.rs` 的
-    /// `step_core` 传进 `TeleportManager::check`，但该形参名为 `_gate_ticks`
-    /// （`src/phys/teleport.rs`）且函数体从不读它 —— `check` 只用 `ground_ticks`（`> 0` 即算落地）。
-    pub teleport_gate_ticks: u32,
     /// 碰撞箱半宽（HU），x/z 两轴共用。
     pub hull_half_width: f64,
     /// 站立箱高（HU）。同时是 `eye_height()` 缩放 `EYE_STAND` 的比例基准。
@@ -224,7 +220,7 @@ pub struct PhysParams {
 /// 默认值：9 项直接取模块常量（gravity / jump_height / air_accelerate / run_speed /
 /// walk_speed / crouch_speed / hull_half_width / hull_stand_height / hull_duck_height），
 /// 另 10 项是字面量或本文件常量：accelerate 10.0、friction 4.0、stop_speed 100.0、
-/// sensitivity 1.5、yaw_bind_speed 210.0、noclip_speed 800.0、teleport_gate_ticks 3、
+/// sensitivity 1.5、yaw_bind_speed 210.0、noclip_speed 800.0、
 /// `push_out = PUSH_OUT`，以及三个默认打开的开关 autobhop / bhop_speed_clamp /
 /// `push_out_only_when_solid`。
 ///
@@ -247,7 +243,6 @@ impl Default for PhysParams {
             sensitivity: 1.5,
             yaw_bind_speed: 210.0,
             noclip_speed: 800.0,
-            teleport_gate_ticks: 3,
             hull_half_width: DEFAULT_HULL_HALF_WIDTH,
             hull_stand_height: DEFAULT_HULL_STAND_HEIGHT,
             hull_duck_height: DEFAULT_HULL_DUCK_HEIGHT,

@@ -355,13 +355,6 @@ export class PanelController {
       this.bridge.sendConfig('physics', { bhopSpeedClamp: v });
       this.pushPhysicsParams();
     });
-    // 传送门槛（帧，1..20）：映射为 teleport_gate_ticks
-    this.bindSlider('teleportGateTicks', 1, 20, 1, (v) => {
-      this.config.physics.teleportGateTicks = v;
-      this.bridge.sendConfig('physics', { teleportGateTicks: v });
-      this.pushPhysicsParams();
-    });
-
     // 体型：三个尺寸都经 sendHull() 下发（player 段 → set_hull 通道）
     this.bindSlider('hullHalfWidth', 4, 32, 1, (v) => {
       this.config.player.halfWidth = v;
@@ -703,7 +696,6 @@ export class PanelController {
     setVal('jumpSpeed', String(p.physics.jumpSpeed));
     setChecked('autobhop', p.physics.autobhop);
     setChecked('bhopSpeedClamp', p.physics.bhopSpeedClamp);
-    setVal('teleportGateTicks', String(p.physics.teleportGateTicks));
     // 体型（config.player）
     setVal('hullHalfWidth', String(p.player.halfWidth));
     setVal('hullStandHeight', String(p.player.standHeight));
@@ -828,7 +820,7 @@ export class PanelController {
    * （`resetKeymap`），通用是地图/出生点操作，健康是运行计数。
    */
   private static readonly PANE_RESET: Record<string, ReadonlyArray<{ section: 'physics' | 'input' | 'player' | 'hud' | 'texture' | 'lighting'; keys: readonly string[] }>> = {
-    physics: [{ section: 'physics', keys: ['tickRate', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp', 'teleportGateTicks'] }],
+    physics: [{ section: 'physics', keys: ['tickRate', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp'] }],
     hull: [{ section: 'player', keys: ['halfWidth', 'standHeight', 'duckHeight'] }],
     look: [{ section: 'input', keys: ['sensitivity', 'yawBindSpeed'] }],
     display: [

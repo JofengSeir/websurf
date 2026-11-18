@@ -57,8 +57,6 @@ export interface PhysicsConfig {
   crouchSpeed: number;
   /** 连跳速度钳制（true = 连跳不超过 maxSpeed）→ Rust `bhop_speed_clamp`。读点同 `gravity`。 */
   bhopSpeedClamp: boolean;
-  /** 传送触发所需的落地稳定帧数 → Rust `teleport_gate_ticks`。读点同 `gravity`。 */
-  teleportGateTicks: number;
 }
 
 export interface InputConfig {
@@ -182,7 +180,6 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     // 有意覆盖共享默认值 true：本端默认关闭连跳限速，对应地图 sv_enablebunnyhopping 1（不限速）。
     // 面板「连跳限速」开关实时可切（2596877 的默认值保留在这里，不再写死在 Worker）。
     bhopSpeedClamp: false,
-    teleportGateTicks: 3,
   },
   input: {
     sensitivity: 1.5,
@@ -259,7 +256,6 @@ export function buildPhysicsParams(config: RuntimeConfig): Record<string, unknow
       crouchSpeed: p.crouchSpeed,
       autobhop: p.autobhop,
       bhopSpeedClamp: p.bhopSpeedClamp,
-      teleportGateTicks: p.teleportGateTicks,
     },
     {
       yawBindSpeed: config.input.yawBindSpeed,

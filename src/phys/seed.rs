@@ -23,8 +23,6 @@
 //! `teleport.triggers` 的数量，`on_ladder` 必须落在本实例 `world.ladders` 下标范围内；
 //! 两条都是硬校验，超界返回 `Err` 而不夹取。`on_ladder` 只校验上界 —— 它指向本实例的
 //! 第几把梯子，由两实例的地图决定，故种子只在同图构建的实例之间有意义。
-//! `params` 侧的 `teleport_gate_ticks` 同样没有镜像字段：该键在 `TeleportManager::check`
-//! 内不被读取（形参名为 `_gate_ticks`），与 `mod.rs` 的 `set_params` 文档同一口径。
 //!
 //! 版本纪律：`apply_seed` 要求 `v == SEED_SCHEMA_VERSION`，不等即 `Err`。
 //! 容器级 `#[serde(default)]` 让缺省字段回退到 `Default for SeedState`，而该 `Default`

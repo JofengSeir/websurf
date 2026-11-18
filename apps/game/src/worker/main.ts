@@ -51,7 +51,6 @@ function syncParamsToWasm(): void {
       crouchSpeed: p.crouchSpeed,
       autobhop: p.autobhop,
       bhopSpeedClamp: p.bhopSpeedClamp,
-      teleportGateTicks: p.teleportGateTicks,
     },
     {
       yawBindSpeed: config.input.yawBindSpeed,

@@ -26,8 +26,8 @@ import type { PhysWorld } from '../../pkg/websurf_wasm.js';
  *
  * 面板参数 `tickRate` 不在本表：它是 JS 驱动层的固定步长，不是 Rust 键。
  *
- * `src/phys/mod.rs` 的 `set_params` 共接受 17 个键；本表不含 `sensitivity`、
- * `yaw_bind_speed`、`noclip_speed`、`teleport_gate_ticks` 四项 —— 它们由
+ * `src/phys/mod.rs` 的 `set_params` 共接受 16 个键；本表不含 `sensitivity`、
+ * `yaw_bind_speed`、`noclip_speed` 三项 —— 它们由
  * `src/ts-shared/phys/params.ts` 的 `buildPhysicsParams` 一次性写全（调用点见
  * `apps/debug/src/worker/main.ts` 的 `syncParamsToWasm`，以及
  * `apps/debug/src/physics/prediction-params.ts` 的 `buildDebugPredictionParams`）。 */

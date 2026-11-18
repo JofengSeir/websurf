@@ -48,11 +48,6 @@ export interface PhysicsConfig {
    * 步长，主线程侧的交错渲染循环按同一值步进。面板取值范围见
    * `apps/debug/src/physics/param-defs.ts` 的 `PARAM_DEFS` 中 `tickRate` 项（48–128）。 */
   tickRate: number;
-  /** 传送触发落地稳定门槛（帧）。经 `buildPhysicsParams` 写成 `set_params` 的
-   * `teleport_gate_ticks` 键并存进 `PhysParams`，但 `src/phys/teleport.rs` 的 `check` 形参
-   * 名为 `_gate_ticks` 且函数体从不读它 —— 该值不改变传送判定。默认 3，与
-   * `PhysParams::default` 同值。 */
-  teleportGateTicks: number;
 }
 
 export interface PlayerConfig {
@@ -222,7 +217,6 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     groundAngle: (30 * Math.PI) / 180,
     slideAngle: (70 * Math.PI) / 180,
     tickRate: PHYSICS_PARAM_DEFAULTS.tickRate,
-    teleportGateTicks: 3,
   },
   player: {
     radius: 16,

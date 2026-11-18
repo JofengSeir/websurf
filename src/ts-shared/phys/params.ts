@@ -28,8 +28,6 @@ export interface PhysicsParamsLike {
   crouchSpeed: number;
   autobhop: boolean;
   bhopSpeedClamp: boolean;
-  /** 传送触发落地稳定门槛（帧；Rust teleport_gate_ticks）。 */
-  teleportGateTicks: number;
 }
 
 /** 输入侧参数（两端 config.input 各自映射）。 */
@@ -41,8 +39,8 @@ export interface PhysicsInputLike {
 }
 
 /**
- * 构造 Rust `set_params` 兼容的参数对象：返回 **15 个键且恒为全量**（不是 patch），
- * 与 Rust 侧可接受的 15 个键一一对应。调用方按 JSON 序列化后传给 `set_params`
+ * 构造 Rust `set_params` 兼容的参数对象：返回 **14 个键且恒为全量**（不是 patch），
+ * 与 Rust 侧可接受的 14 个键一一对应。调用方按 JSON 序列化后传给 `set_params`
  * 或 `set_params` 对应通道。`jump_height` 在这里换算，`sensitivity` 在这里写死为 1
  * （原因见文件头）。
  */
@@ -67,6 +65,5 @@ export function buildPhysicsParams(
     sensitivity: 1,
     yaw_bind_speed: input.yawBindSpeed,
     noclip_speed: input.noclipSpeed,
-    teleport_gate_ticks: p.teleportGateTicks,
   };
 }

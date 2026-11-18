@@ -25,11 +25,7 @@
 //! - 命中即写 `TRIGGER_COOLDOWN`（0.5 s）并返回目标点；冷却期内每 tick 递减 `dt`
 //!   后直接返回 `None`。
 //!
-//! 三个容易读错的地方：
-//! - 形参 `_gate_ticks` **完全不被使用**：`player::PhysParams::teleport_gate_ticks`
-//!   字段存在（默认 3）、`src/phys/mod.rs` 的 `PhysWorld::set_params` 可写该键、
-//!   同一文件的 `PhysWorld::step_core` 也确实把它传了进来，但函数体内零引用
-//!   —— 改这个键不改变任何行为。
+//! 两个容易读错的地方：
 //! - `TeleportTrigger.inside` 不参与触发判定：它只在种子面接口里被读写。
 //! - `spawnflags` 为 0 的 trigger **不被跳过**（跳过条件要求"值非 0 且 0x01 / 0x40 两位
 //!   都不含"）；上游在字段缺失时给的是 1（`apps/game/crates/wasm/src/lib.rs` 的
@@ -288,7 +284,6 @@ impl TeleportManager {
     /// （秒，与调用方步长同单位）；
     /// `body_top` 是碰撞箱上沿相对 origin 的高度（站立 72 / 蹲伏 54，调用方传
     /// `Player::maxs()[1]`，同一处 `step_core`）。
-    /// **`_gate_ticks` 是惰性形参**：函数体内零引用，详见模块头。
     ///
     /// 命中时 `destinations.get(...)` 恒为 `Some`：越界已在过滤阶段排除。
     /// 本函数不写 trigger 的 `inside`，不清速度、不改位置。
@@ -296,7 +291,6 @@ impl TeleportManager {
         &mut self,
         pos: &V3,
         ground_ticks: u32,
-        _gate_ticks: u32,
         dt: f64,
         predict: bool,
         surfing: bool,
