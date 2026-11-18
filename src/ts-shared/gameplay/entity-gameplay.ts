@@ -16,6 +16,11 @@
  *      传送 filter」的状态镜像，只在变化时下发。
  *
  * 约束：本文件不 import three / renderer-shared；只有实体层与物理接口。
+ *
+ * 边界（D-129 已决 (c) 混合，2026-11-18）：速度类副作用（推力/基准速度/限速/跳高/玩家名门控）
+ * 已收编到本宿主；**传送仍走旧 Rust 链**（`parse_teleports` → `build_world(teleportJson)`），
+ * 本文件不接管 `entity:teleport`，避免两条链重复传送。若将来要全收编（D-129(b)），
+ * 需先做「同图同回放」A/B 基线再切。
  */
 import { attachEntitySystem } from '../entity/attach.js';
 import { DEFAULT_HULL_MAXS, DEFAULT_HULL_MINS, playerStateFromRaw, type RawPlayerState } from '../entity/host.js';
