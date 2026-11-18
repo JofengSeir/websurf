@@ -355,6 +355,17 @@ export class PanelController {
       this.bridge.sendConfig('physics', { bhopSpeedClamp: v });
       this.pushPhysicsParams();
     });
+    // B1（D3）：贴面推开两项，与 debug 物理面板对齐（presence 探测在 bindSlider/bindCheckbox 内）
+    this.bindSlider('pushOut', 0, 1, 0.01, (v) => {
+      this.config.physics.pushOut = v;
+      this.bridge.sendConfig('physics', { pushOut: v });
+      this.pushPhysicsParams();
+    });
+    this.bindCheckbox('pushOutOnlyWhenSolid', (v) => {
+      this.config.physics.pushOutOnlyWhenSolid = v;
+      this.bridge.sendConfig('physics', { pushOutOnlyWhenSolid: v });
+      this.pushPhysicsParams();
+    });
     // 体型：三个尺寸都经 sendHull() 下发（player 段 → set_hull 通道）
     this.bindSlider('hullHalfWidth', 4, 32, 1, (v) => {
       this.config.player.halfWidth = v;
@@ -696,6 +707,8 @@ export class PanelController {
     setVal('jumpSpeed', String(p.physics.jumpSpeed));
     setChecked('autobhop', p.physics.autobhop);
     setChecked('bhopSpeedClamp', p.physics.bhopSpeedClamp);
+    setVal('pushOut', String(p.physics.pushOut));
+    setChecked('pushOutOnlyWhenSolid', p.physics.pushOutOnlyWhenSolid);
     // 体型（config.player）
     setVal('hullHalfWidth', String(p.player.halfWidth));
     setVal('hullStandHeight', String(p.player.standHeight));
@@ -820,7 +833,7 @@ export class PanelController {
    * （`resetKeymap`），通用是地图/出生点操作，健康是运行计数。
    */
   private static readonly PANE_RESET: Record<string, ReadonlyArray<{ section: 'physics' | 'input' | 'player' | 'hud' | 'texture' | 'lighting'; keys: readonly string[] }>> = {
-    physics: [{ section: 'physics', keys: ['tickRate', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp'] }],
+    physics: [{ section: 'physics', keys: ['tickRate', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp', 'pushOut', 'pushOutOnlyWhenSolid'] }],
     hull: [{ section: 'player', keys: ['halfWidth', 'standHeight', 'duckHeight'] }],
     look: [{ section: 'input', keys: ['sensitivity', 'yawBindSpeed'] }],
     display: [

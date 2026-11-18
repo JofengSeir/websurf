@@ -5,7 +5,8 @@
  * （`createWorkerRuntime`）：权威自驱循环（`createAuthLoop`）、消息分发
  * （`createWorkerDispatch`）、渲染轨迹采样源与权威健康守护原先在 debug/game 两个 Worker 入口
  * 各自复制了一份，现在只有共享层一份。本文件只保留 game 特有的：
- * - config 副本与参数映射（`syncParamsToWasm`：walk/crouch/autobhop/bhopSpeedClamp 来自 config）；
+ * - config 副本与参数映射（`syncParamsToWasm`：全部物理参数（含 D3 新增的 pushOut 两项）
+ *   从 `config.physics` 取）；
  * - `initSync` 的 `{ module }` 包装形态转换（`apps/game/pkg/websurf_wasm.d.ts` 的胶水签名）；
  * - `world-json` 的 Worker 内诊断计时（`world-build-ms` / `world-parse-ms`）。
  *
@@ -20,8 +21,7 @@ import { PhysWorld, initSync } from '../../pkg/websurf_wasm.js';
 import type { ShmState, MsgState } from '../../../../src/ts-shared/auth/shared-state.js';
 import type { PhysWorldLike } from '../../../../src/ts-shared/auth/auth-loop.js';
 import { createWorkerRuntime } from '../../../../src/ts-shared/app/worker-runtime.js';
-import { buildPhysicsParams } from '../../../../src/ts-shared/phys/params.js';
-import { createConfig, applyConfigPatch } from '../config.js';
+import { createConfig, applyConfigPatch, buildPhysicsParams } from '../config.js';
 import type { RuntimeConfig } from '../config.js';
 
 const config: RuntimeConfig = createConfig();
@@ -31,32 +31,13 @@ const shared: { current: ShmState | MsgState | null } = { current: null };
 /** 权威 `PhysWorld` 槽：`world-json` 分支建实例后写入，实例方法全部经它调用。 */
 const phys: { current: PhysWorldLike | null } = { current: null };
 
-/** 本 Worker 的面板参数 → wasm `set_params` / `set_hull`。映射式在
- * `src/ts-shared/phys/params.ts` 的 `buildPhysicsParams`（physics 段与 input 段两个入参）；
+/** 本 Worker 的面板参数 → wasm `set_params` / `set_hull`。映射式在 `apps/game/src/config.ts`
+ * 的 `buildPhysicsParams`（共享 14 键 + `push_out` / `push_out_only_when_solid` 两项）；
  * 调用点是分发器的 `world-json` 尾部与除 `player` 外的 `config` 分支。主线程持另一份 config
  * 副本并各自映射，两端的 tickRate 同值下发。 */
 function syncParamsToWasm(): void {
   if (!phys.current) return;
-  const p = config.physics;
-  const params = buildPhysicsParams(
-    {
-      gravity: p.gravity,
-      accelerate: p.accelerate,
-      friction: p.friction,
-      stopSpeed: p.stopSpeed,
-      jumpSpeed: p.jumpSpeed,
-      airAccel: p.airAccel,
-      maxSpeed: p.maxSpeed,
-      walkSpeed: p.walkSpeed,
-      crouchSpeed: p.crouchSpeed,
-      autobhop: p.autobhop,
-      bhopSpeedClamp: p.bhopSpeedClamp,
-    },
-    {
-      yawBindSpeed: config.input.yawBindSpeed,
-      noclipSpeed: config.input.noclipSpeed,
-    },
-  );
+  const params = buildPhysicsParams(config);
   phys.current.set_params(JSON.stringify(params));
   const pl = config.player;
   phys.current.set_hull(pl.halfWidth, pl.standHeight, pl.duckHeight);

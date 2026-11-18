@@ -57,6 +57,14 @@ export interface PhysicsConfig {
   crouchSpeed: number;
   /** 连跳速度钳制（true = 连跳不超过 maxSpeed）→ Rust `bhop_speed_clamp`。读点同 `gravity`。 */
   bhopSpeedClamp: boolean;
+  /** 贴面推开量（HU）→ Rust `push_out`：玩家被卡进实体时沿接触法线推开的距离。
+   *  映射在 `buildPhysicsParams` 里追加（共享层映射只产出 14 个键，本项与下一项由本端补）。
+   *  读点：`buildPhysicsParams`、面板「贴面推开量」控件（量程 0..1，步长 0.01）、
+   *  面板偏好持久化（`panel-controller.ts` 的 `vbsp:panelPrefs`）。 */
+  pushOut: number;
+  /** 推开仅在嵌入时（true = 只在起点已嵌入实体时推开）→ Rust `push_out_only_when_solid`。
+   *  读点同 `pushOut`（面板「推开仅在嵌入时」复选框）。 */
+  pushOutOnlyWhenSolid: boolean;
 }
 
 export interface InputConfig {
@@ -180,6 +188,9 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     // 有意覆盖共享默认值 true：本端默认关闭连跳限速，对应地图 sv_enablebunnyhopping 1（不限速）。
     // 面板「连跳限速」开关实时可切（2596877 的默认值保留在这里，不再写死在 Worker）。
     bhopSpeedClamp: false,
+    // 与 debug 物理面板对齐（D3）：默认值取共享层常量（0.1 / true），面板可调并持久化
+    pushOut: PHYSICS_PARAM_DEFAULTS.pushOut,
+    pushOutOnlyWhenSolid: PHYSICS_PARAM_DEFAULTS.pushOutOnlyWhenSolid,
   },
   input: {
     sensitivity: 1.5,
@@ -240,10 +251,13 @@ export function applyConfigPatch(
 /** 构造 Rust `set_params` 兼容的全量参数对象（权威 Worker 与主线程预测实例共用）。
  *  本函数只做 `config` 字段名 → 统一入参接口（`PhysicsParamsLike` / `PhysicsInputLike`）的
  *  薄映射，键名与 `jump_height` 换算全在 `src/ts-shared/phys/params.ts` 的 `buildPhysicsParams`。
- *  注意入参是**整个 `RuntimeConfig`**（与 `input-bridge.ts` 的调用形式一致），不是 physics 段。 */
+ *  注意入参是**整个 `RuntimeConfig`**（与 `input-bridge.ts` 的调用形式一致），不是 physics 段。
+ *
+ *  共享映射只产出 14 个键；`push_out` / `push_out_only_when_solid` 两项（D3，与 debug 面板对齐）
+ *  在该函数之外**追加**，使本端的全量参数、主线程预测实例与 `config` 消息一致。 */
 export function buildPhysicsParams(config: RuntimeConfig): Record<string, unknown> {
   const p = config.physics;
-  return sharedBuildPhysicsParams(
+  const base = sharedBuildPhysicsParams(
     {
       gravity: p.gravity,
       accelerate: p.accelerate,
@@ -262,4 +276,9 @@ export function buildPhysicsParams(config: RuntimeConfig): Record<string, unknow
       noclipSpeed: config.input.noclipSpeed,
     },
   );
+  return {
+    ...base,
+    push_out: p.pushOut,
+    push_out_only_when_solid: p.pushOutOnlyWhenSolid,
+  };
 }
