@@ -11,6 +11,11 @@
  * `reapplyParams` 里调 `attach`。主线程经 `apps/debug/src/input/input-bridge.ts` 的
  * `sendSetPhysicsParam` / `sendResetPhysicsParam` / `sendSetHull` / `sendResetHull` /
  * `sendSetAutoRestoreHull` 操作；Worker 每条处理完回传一次 `physics-snapshot`。
+ *
+ * 持久化（D4）不在本类：本类实例运行在 Worker，而 Worker 没有 `localStorage`。主线程
+ * `apps/debug/src/app.ts` 负责 load/save（共享层 `src/ts-shared/phys/param-prefs.ts`）：
+ * 启动时逐项 `sendSetPhysicsParam` 回灌（本类 `setParam` 记为 source='manual'，world 未建
+ * 也安全，attach 时重放），随后在 `physics-snapshot` 上按 source='manual' 聚合回写。
  */
 
 import { findParamDef, PARAM_DEFS, type ParamSource, type ParamState } from './param-defs.js';

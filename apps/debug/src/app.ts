@@ -38,9 +38,16 @@ import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
 import { formatTime, GameState } from './game-state.js';
 // 物理控制面板：参数定义表（主线程渲染用，不含物理实现依赖）
-import { PARAM_DEFS, type ParamSource } from './physics/param-defs.js';
+import { PARAM_DEFS, PARAM_NAMES, type ParamSource } from './physics/param-defs.js';
 // 面板参数名 → Rust set_params snake_case（physics-params.ts 导出）
 import { PARAM_TO_RUST } from './physics/physics-params.js';
+// 物理参数持久化（D4）：主线程 localStorage 读写；Worker 没有 localStorage，故不在 physics-params.ts 内做
+import {
+	loadPhysicsParamPrefs,
+	savePhysicsParamPrefs,
+	clearPhysicsParamPrefs,
+	type PhysicsParamOverrides,
+} from '../../../src/ts-shared/phys/param-prefs.js';
 // 自定义传送点：localStorage 数据层
 import {
 	loadCustomTeleports,
@@ -1435,6 +1442,8 @@ function syncPrefsControls(): void {
 /** 全部 UI 控件绑定（文件选择/面板/传送点/准星/显示设置）。 */
 function bindUI(): void {
 	initPhysicsPanel();
+	// 持久化恢复放在面板建好之后：逐项下发后面板会收到 snapshot 并显示「手动」来源。
+	restorePhysicsParamPrefs();
 	dom.fileInput?.addEventListener('change', async (e) => {
 		const input = e.target as HTMLInputElement;
 		const file = input.files?.[0];
@@ -2246,6 +2255,56 @@ const SOURCE_LABEL: Record<ParamSource, { text: string; color: string }> = {
 /** 面板渲染抑制（snapshot 回填时防触发 input 事件回发 Worker，防循环）。 */
 let panelSuppress = false;
 
+/** 物理参数持久化的 app 键：debug/game 共用存储布局、按 app 隔离（game 侧将来接同一套）。 */
+const PHYSICS_PREFS_APP = 'debug';
+/** 保存 debounce：拖滑块时只写最后一次；localStorage 是同步 IO，不要每帧写。 */
+const PHYSICS_PREFS_SAVE_DEBOUNCE_MS = 300;
+
+/** 是否已执行过启动恢复：恢复前的快照不回写，避免把「默认值」误存成「手动值」。 */
+let physicsPrefsRestored = false;
+/** debounce 中的待保存手动参数（只含 source='manual' 的项）。 */
+let pendingPhysicsPrefs: PhysicsParamOverrides = {};
+/** debounce 计时器；`null` 表示当前没有待写（类型用 ReturnType 兼容 DOM/Node 两套 setTimeout）。 */
+let physicsPrefsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 启动恢复：逐项发 set-physics-param，Worker 的 `setParam` 会记为 source='manual'。 */
+function restorePhysicsParamPrefs(): void {
+	const prefs = loadPhysicsParamPrefs(PHYSICS_PREFS_APP, PARAM_NAMES);
+	physicsPrefsRestored = true;
+	for (const [name, value] of Object.entries(prefs)) {
+		inputBridge?.sendSetPhysicsParam(name, value);
+	}
+}
+
+/** 保存手动参数（300ms debounce）；空集合由共享层自动清 key（不留 `{"params":{}}` 脏键）。 */
+function schedulePhysicsPrefsSave(prefs: PhysicsParamOverrides): void {
+	if (!physicsPrefsRestored) return;
+	pendingPhysicsPrefs = prefs;
+	if (physicsPrefsSaveTimer !== null) clearTimeout(physicsPrefsSaveTimer);
+	physicsPrefsSaveTimer = setTimeout(() => {
+		physicsPrefsSaveTimer = null;
+		savePhysicsParamPrefs(PHYSICS_PREFS_APP, pendingPhysicsPrefs, PARAM_NAMES);
+	}, PHYSICS_PREFS_SAVE_DEBOUNCE_MS);
+}
+
+/** 立即写出待保存的手动参数（pagehide/beforeunload 时兜底）。 */
+function flushPhysicsPrefsSave(): void {
+	if (physicsPrefsSaveTimer === null) return;
+	clearTimeout(physicsPrefsSaveTimer);
+	physicsPrefsSaveTimer = null;
+	savePhysicsParamPrefs(PHYSICS_PREFS_APP, pendingPhysicsPrefs, PARAM_NAMES);
+}
+
+/** 清空持久化并取消待写（「恢复全部默认」时；随后空快照也会再清一次，幂等）。 */
+function clearPhysicsPrefs(): void {
+	if (physicsPrefsSaveTimer !== null) {
+		clearTimeout(physicsPrefsSaveTimer);
+		physicsPrefsSaveTimer = null;
+	}
+	pendingPhysicsPrefs = {};
+	clearPhysicsParamPrefs(PHYSICS_PREFS_APP);
+}
+
 /** 物理参数行初始化（静态定义渲染一次，值由 physics-snapshot 更新）。 */
 function initPhysicsPanel(): void {
 	if (!dom.physicsParamList) return;
@@ -2365,6 +2424,8 @@ function initPhysicsPanel(): void {
 	});
 	dom.resetAllPhysicsBtn?.addEventListener('click', () => {
 		if (confirm('恢复全部物理参数与碰撞箱到默认值？')) {
+			// 恢复默认 = 清持久化（无参 reset 会清掉全部手动覆盖；随后空快照再清一次，幂等）
+			clearPhysicsPrefs();
 			inputBridge?.sendResetPhysicsParam();
 			inputBridge?.sendResetHull();
 		}
@@ -2401,6 +2462,13 @@ function renderPhysicsSnapshot(msg: PhysicsSnapshotMessage): void {
 				else inputEl.value = String(p.value);
 			}
 		}
+		// 持久化（D4）：只把 source='manual' 的项写回 localStorage。
+		// map 来源不持久化——换图/重载时地图 servercommand 会重新下发；mode-default 同理。
+		const manualPrefs: PhysicsParamOverrides = {};
+		for (const p of msg.params) {
+			if (p.source === 'manual') manualPrefs[p.name] = p.value;
+		}
+		schedulePhysicsPrefsSave(manualPrefs);
 		// 碰撞箱回填（含比例缩放联动）
 		const { halfWidth, standHeight, duckHeight, source, isDefault } = msg.hull;
 		if (dom.hullHalfWidth) dom.hullHalfWidth.value = String(halfWidth);
@@ -2648,6 +2716,7 @@ void main();
 // BSP 长解析 / 长会话中途误关的页面在这里多一道反悔的机会；但**只在装了地图时拦**（T-056）——
 // 空态（什么都没加载）的刷新 / 关闭本来就不丢东西，无条件拦只是噪音。
 window.addEventListener('beforeunload', (e) => {
+  flushPhysicsPrefsSave(); // 300ms debounce 内的最后一次手动改动别丢
   if (!shouldConfirmClose({ hasMap: teleportMapName !== '' })) return;
   e.preventDefault();
   e.returnValue = ''; // 触发确认框所必需（Chrome/Edge 约定）

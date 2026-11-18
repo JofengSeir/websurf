@@ -119,6 +119,9 @@ export const PARAM_DEFS: ParamDef[] = [
   },
 ];
 
+/** 参数名白名单（持久化 `allowedNames` 用；顺序同 `PARAM_DEFS`，杜绝面板与存储两张表漂移）。 */
+export const PARAM_NAMES: readonly string[] = PARAM_DEFS.map((def) => def.name);
+
 /** 按 `name` 线性查找定义；未命中返回 undefined。 */
 export function findParamDef(name: string): ParamDef | undefined {
   return PARAM_DEFS.find((p) => p.name === name);
