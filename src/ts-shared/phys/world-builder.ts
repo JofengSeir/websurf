@@ -13,12 +13,16 @@
  * 3. `export_brushes_planes()` 导出地图 brush 凸包（过滤条件见下）；
  * 4. 模型碰撞体：按 `colliderSource` 选 `export_model_tri_colliders()` 或
  *    `export_model_phy_colliders()`，失败逐级回退；
- * 5. `export_mosaic_manifest()` 与（可选）`export_missing_textures()`——**必须在第 7 步之前**，
- *    因为 `export_glb*` 会消费掉 BSP 数据；
+ * 5. （可选）`export_missing_textures()`——**必须在第 7 步（GLB 导出）之前**：
+ *    它要读 BSP 的 face/材质数据，GLB 导出会消费这些数据；
  * 6. 默认纹理包（可选）：内嵌 base64 或 `fetch` `./textures.mtz`，交给调用方注入的解压函数；
  * 7. `export_glb_with_pakfile_models_with_defaults_and_lights()` 出 GLB，失败回退
  *    `export_glb_with_pakfile_models()`；
- * 8. 出生点 JSON 就地解析成 `spawn` / `spawnList`（yaw 经 `bspYawToCsYaw` 换算）。
+ * 8. `take_mosaic_manifest()` 取画质 manifest——**唯一必须在 GLB 之后取的数据**：
+ *    第 7 步解码 VTF 时已顺手产出 mosaic，take 直接复用；反过来说，在 GLB 之前调
+ *    `export_mosaic_manifest()` 会把模型材质/贴图二次解析一遍（载图耗时大头），
+ *    且 GLB 导出之后也无法再取到同一份数据；
+ * 9. 出生点 JSON 就地解析成 `spawn` / `spawnList`（yaw 经 `bspYawToCsYaw` 换算）。
  *
  * ## 抽象（调用方注入什么，就只做多少事）
  * - `colliderSource`：`'auto' | 'visual' | 'phy'`。`'visual'` 用可视网格三角形（与显示逐位一致）；
@@ -55,7 +59,12 @@ export interface BspProcessorLike {
   export_model_phy_colliders(): string;
   /** `.phy` 凸体的生成补面（VBSP `AddBrushBevels` 移植）；**只有 debug 的 pkg 导出**。 */
   export_model_phy_bevels?(): string;
-  export_mosaic_manifest(): string;
+  /**
+   * 取 `export_glb*` **顺带产出**的 mosaic manifest（画质切换数据源，JSON 文本）。
+   * 必须在 GLB 导出**之后**调用；尚未导出过 GLB 时返回 `"{}"`。
+   * 老产物没有该方法时调用点按 `try/catch` 降级为缺省 `undefined`（不影响 GLB 与其余字段）。
+   */
+  take_mosaic_manifest(): string;
   export_missing_textures(): string;
   /**
    * Source 实体 I/O 无损数据（`render_bundle::EntityIoData` 的 JSON）。
@@ -264,13 +273,8 @@ export async function buildWorldBundle(
   }
 
   await stage('导出 GLB（含 PAKFILE 模型）');
-  // manifest 与缺失纹理都必须在 export_glb* 之前取：那些导出会消费 BSP 数据。
-  let mosaicManifest: string | undefined;
-  try {
-    mosaicManifest = proc.export_mosaic_manifest();
-  } catch (e) {
-    console.warn('[load-bsp] mosaic manifest 生成失败（画质切换不可用）:', e);
-  }
+  // 缺失纹理必须在 export_glb* 之前取：导出会消费 BSP 的 face/材质数据。
+  // （mosaic manifest 相反，必须在 GLB 之后 take，见下方）
   let missingTextures: string[] | undefined;
   if (options.collectMissingTextures) {
     try {
@@ -301,6 +305,17 @@ export async function buildWorldBundle(
     glbBytes.byteOffset,
     glbBytes.byteOffset + glbBytes.byteLength,
   );
+
+  // mosaic manifest 是**唯一必须在 GLB 之后取**的数据：export_glb* 解码 VTF 时已顺手产出，
+  // take_mosaic_manifest() 直接复用那份结果；若仍在 GLB 之前 export_mosaic_manifest()，
+  // 会把模型材质/贴图二次解析一遍（载图耗时大头），且导出 GLB 之后无法再取到同一份数据。
+  // 老产物没有 take_mosaic_manifest 时由 catch 降级为缺省 undefined（画质切换不可用）。
+  let mosaicManifest: string | undefined;
+  try {
+    mosaicManifest = proc.take_mosaic_manifest();
+  } catch (e) {
+    console.warn('[load-bsp] mosaic manifest take 失败（画质切换不可用）:', e);
+  }
 
   // 出生点解析：primary 越界或为负时退到索引 0，再退到列表首项，最终退到固定占位点。
   // yaw 取 `angles[1]`（BSP 原始 Source yaw）经 `bspYawToCsYaw` 换算。
