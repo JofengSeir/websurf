@@ -1,23 +1,28 @@
 /**
- * 产物级共享指纹门禁（task-57 G2）。
+ * 产物级共享指纹门禁（task-57 G2；task-84/B3 收紧）。
  *
  * 背景：`src/renderer-shared` + `src/ts-shared` 是唯一实现源，但三端 app.js/worker.js 是各自
  * esbuild 产物（`git ls-files apps` 对生成物 0 命中）。本脚本解析 esbuild 产出的
  * `// <path>` 模块注释，从「真的进了 bundle 的模块」层面证明三端共用同一份共享层，
  * 并抓两类分叉：
- *   1) 共享模块在 debug/game app.js 中文本不再一致（esbuild 重名数字后缀归一化后比较）；
+ *   1) 共享模块在 debug/game app.js 中文本不再一致（数字后缀归一化只允许白名单模块）；
  *   2) 物理/权威模块被误打进 viewer（viewer 无物理是已定架构）。
  *
  * 判据（全部满足才 exit 0）：
  *   - 六个产物 app.js/worker.js 要么全缺（打印 SKIP，exit 0，CI 未构建场景），要么全在；
  *     部分缺失视为「产物存在但判据无法完整计算」⇒ FAIL；
  *   - 必需指纹矩阵（见 REQUIRED）：每端每产物必须含指定共享模块；
- *   - CORE_MODULES：三端 app.js 中归一化文本必须逐字节一致；
- *   - debug/game app.js 共同共享模块归一化一致（允许 NORM_DIFF_ALLOW 已知差异集）；
+ *   - CORE_MODULES：三端 app.js 文本必须一致；若只在 `NUMERIC_RENAME_ALLOW` 登记过的模块，
+ *     才允许「仅数字后缀不同」归一化后一致（task-84/B3：不再全局归一化）；
+ *   - debug/game app.js 共同共享模块同样按上面规则比对（`KNOWN_CONTENT_DIFF_ALLOW` 为
+ *     已知内容差异的显式登记，仅作跳过并做「登记仍有效」反空转）；
  *   - 单端独有共享模块必须正好等于 APP_ONLY_ALLOW（出现新独有模块 = 新分叉）；
  *   - viewer 产物不得含 FORBIDDEN_IN_VIEWER；
  *   - WORKER_PROTOCOL 字面量：bundle 内出现就必须等于源文件值，且至少一个 bundle 出现
- *     （防规则空转）。
+ *     （防规则空转）；
+ *   - 同一模块在同一产物类型（app/worker）跨端行数差 >15% 打印 WARN；差异 >2× 且未在
+ *     `LINE_COUNT_ALLOW` 登记 ⇒ FAIL（阈值理由见 .tmp/gates2/EVIDENCE.md：同一个模块在同类
+ *     产物中行数应基本不变，>15% 已说明树摇/条件分支变化，>2× 基本等于不同实现）。
  *
  * 用法：`node src/scripts/check-shared-artifacts.mjs [--root <dir>]`（--root 供反向样本）。
  */
@@ -36,10 +41,17 @@ const KINDS = ['app', 'worker'];
 const sha = (s) => createHash('sha256').update(s).digest('hex').slice(0, 12);
 
 const violations = [];
+const warnings = [];
 const fail = (msg) => violations.push(msg);
+const warn = (msg) => warnings.push(msg);
 
-/** esbuild 在 bundle 里为避免顶层重名会给标识符加数字后缀（px2/scene2/renderSession2）。 */
-const normText = (lines) => lines.map((l) => l.replace(/([A-Za-z_$][\w$]*?)(\d+)\b/g, '$1')).join('\n');
+/**
+ * esbuild 为避免顶层重名会给标识符加数字后缀（px2/scene2/renderSession2）。
+ * task-84/B3：只在 `NUMERIC_RENAME_ALLOW` 登记的模块上启用该归一化，且只用于「文本已不同」
+ * 的模块；未登记模块要求逐字节相同。
+ */
+const normNumeric = (lines) => lines.map((l) => l.replace(/([A-Za-z_$][\w$]*?)(\d+)\b/g, '$1')).join('\n');
+const rawText = (lines) => lines.join('\n');
 
 /** 从产物文本提取 `// <path>` 注释分隔的模块段。返回 Map<repo 相对路径, 行数组>。 */
 function parseModules(file, app) {
@@ -94,7 +106,7 @@ for (const k of keys) {
   if (art[k].mods.size === 0) fail(`${k}: 解析不到任何 esbuild 模块注释（产物格式变化或不是 esbuild 输出）`);
 }
 
-// ── 2) 判据常量（现状由 .tmp/gates/probe2.mjs 取证，EVIDENCE 记录）──────────
+// ── 2) 判据常量（现状由 .tmp/gates2/probe.mjs 取证，EVIDENCE 记录）───────────
 const REQUIRED = {
   'debug/app': [
     'src/renderer-shared/scene/render-session.ts',
@@ -129,7 +141,7 @@ const REQUIRED = {
   'viewer/worker': ['src/renderer-shared/config/render-prefs.ts'],
 };
 
-/** 三端 app.js 必须逐字节（归一化后）一致的共享渲染/数据核心。 */
+/** 三端 app.js 必须一致的共享渲染/数据核心。 */
 const CORE_MODULES = [
   'src/renderer-shared/scene/assemble-scene.ts',
   'src/renderer-shared/scene/visibility-controller.ts',
@@ -147,12 +159,39 @@ const CORE_MODULES = [
   'src/ts-shared/materials/vmt-fallback.ts',
 ];
 
-/** debug/game app.js 共同共享模块允许的已知文本差异（产物级：define/摇树，非实现分叉）。 */
-const NORM_DIFF_ALLOW = new Set([
-  'src/ts-shared/wasm/loader.ts',
-  'src/renderer-shared/config/render-prefs.ts',
-  'src/renderer-shared/camera/pose-entry.ts',
-  'src/renderer-shared/environment/render-sky-pass.ts',
+/**
+ * 允许「仅数字后缀不同」的模块（精确到文件+模块）。
+ * 来源：.tmp/gates2/probe.mjs 实测 esbuild 顶层重命名（同一源，三端命名冲突不同）。
+ * 未登记模块必须逐字节相同；登记条目若已无差异 ⇒ FAIL（白名单过期，防长期漂移）。
+ */
+const NUMERIC_RENAME_ALLOW = new Set([
+  // CORE 三端 app.js
+  'src/renderer-shared/scene/assemble-scene.ts',
+  'src/renderer-shared/scene/visibility-controller.ts',
+  'src/renderer-shared/scene/lasers.ts',
+  'src/renderer-shared/scene/particles.ts',
+  'src/renderer-shared/shader/water.ts',
+  'src/renderer-shared/environment/post-fx.ts',
+  'src/renderer-shared/environment/scene-environment.ts',
+  'src/renderer-shared/camera/near-plane.ts',
+  'src/ts-shared/entity/entity-system.ts',
+  'src/ts-shared/entity/classes/triggers.ts',
+  // 仅 debug/game app.js 对比里出现数字重命名的模块
+  'src/renderer-shared/render/create-renderer.ts',
+  'src/renderer-shared/shader/bumpmap.ts',
+  'src/renderer-shared/shader/world-transition.ts',
+  'src/ts-shared/phys/map-cvars.ts',
+]);
+
+/**
+ * debug/game app.js 共同共享模块允许的已知「非数字」内容差异（产物级：条件分支/摇树，
+ * 非实现分叉）。登记时必须写清原因；条目若已无差异 ⇒ FAIL（白名单过期）。
+ */
+const KNOWN_CONTENT_DIFF_ALLOW = new Map([
+  ['src/ts-shared/wasm/loader.ts', 'debug 走内嵌 wasm（__VBSP_WASM_B64__）分支，产物级条件差异'],
+  ['src/renderer-shared/config/render-prefs.ts', 'debug 多 applyRenderDebugSwitches 调试开关（已登记差异）'],
+  ['src/renderer-shared/camera/pose-entry.ts', 'debug 多 poseHold 注入点（回放/飞行相机）'],
+  ['src/renderer-shared/environment/render-sky-pass.ts', 'debug 多调试层参数（产物级条件差异）'],
 ]);
 
 /** 允许只出现在个别端 app.js 的共享模块（白名单，出现新的独有模块即分叉）。 */
@@ -163,9 +202,10 @@ const APP_ONLY_ALLOW = {
   'src/ts-shared/input/pointer-lock.ts': ['debug', 'game'],
   'src/ts-shared/phys/constants.ts': ['game'],
   'src/renderer-shared/scene/inject-stats.ts': ['game'],
-  // P2 Step2：createAppRuntime 已同时进入 debug/game app.js（共同共享模块，必须文本一致，无需白名单）。
-  // viewer 无 SAB/权威 Worker、无等价 bootstrap，本轮不接入；将来 viewer 引入通道后，
-  // 若 app-runtime 只进 viewer 或只进部分端，再按实际端在此登记（Step3 条件）。
+  // 物理参数持久化（B2/D4）：目前只有 debug 物理面板接入；game 的物理参数随面板
+  // 持久化走 apps/game/src/panel/panel-controller.ts 的 vbsp:panelPrefs，不引用本模块。
+  // 若 game/viewer 将来接入同一存档格式，必须删除本登记（回到跨端一致性比对）。
+  'src/ts-shared/phys/param-prefs.ts': ['debug'],
 };
 
 /** viewer 不得包含的物理/权威实现（viewer 无物理是架构约定）。 */
@@ -177,6 +217,17 @@ const FORBIDDEN_IN_VIEWER = [
   'src/renderer-shared/environment/light-manager.ts',
 ];
 
+/**
+ * 同一模块同类型产物跨端行数差异登记（超过 15% 时白名单可抑制 WARN；>2× 未登记会 FAIL）。
+ * maxRatio 用于让「已知且可解释」的差异保持静默。
+ */
+const LINE_COUNT_ALLOW = new Map([
+  ['src/ts-shared/wasm/loader.ts', { maxRatio: 1.4, reason: 'debug 内嵌 wasm 分支只在 debug 产物展开' }],
+  ['src/ts-shared/phys/param-defaults.ts', { maxRatio: 1.2, reason: 'debug worker 多物理调试默认值（doctor）' }],
+]);
+const LINE_WARN_RATIO = 1.15;
+const LINE_FAIL_RATIO = 2.0;
+
 // ── 3) 必需指纹 ─────────────────────────────────────────────────────────────
 for (const [k, modules] of Object.entries(REQUIRED)) {
   const a = art[k];
@@ -184,23 +235,38 @@ for (const [k, modules] of Object.entries(REQUIRED)) {
   for (const m of modules) if (!a.mods.has(m)) fail(`${k}: 缺少共享模块 ${m}（该共享步骤没有进产物）`);
 }
 
-// ── 4) 三端 CORE 模块归一化一致 ─────────────────────────────────────────────
+// ── 4) 三端 CORE 模块一致（仅白名单模块允许数字后缀归一化）──────────────────
+const numericUsed = new Set();
+const numericStale = new Set(NUMERIC_RENAME_ALLOW);
 for (const m of CORE_MODULES) {
-  const hashes = APPS.map((app) => {
+  const parts = APPS.map((app) => {
     const a = art[`${app}/app`];
-    return a && a.mods.has(m) ? sha(normText(a.mods.get(m))) : null;
+    return a && a.mods.has(m) ? a.mods.get(m) : null;
   });
-  const absent = APPS.filter((app, i) => hashes[i] === null);
+  const absent = APPS.filter((app, i) => parts[i] === null);
   if (absent.length) {
     fail(`CORE 模块 ${m}: 未进入 ${absent.join(',')} 的 app.js（三端必须都包含）`);
     continue;
   }
-  if (new Set(hashes).size !== 1) fail(`CORE 模块 ${m}: 三端 app.js 归一化文本不一致（${hashes.join(' / ')}）`);
+  const raws = parts.map(rawText);
+  if (new Set(raws).size === 1) continue; // 逐字节相同
+  if (!NUMERIC_RENAME_ALLOW.has(m)) {
+    fail(`CORE 模块 ${m}: 三端 app.js 文本不一致且未登记 NUMERIC_RENAME_ALLOW（${parts.map((p) => sha(rawText(p))).join(' / ')}）`);
+    continue;
+  }
+  const norms = parts.map((p) => normNumeric(p));
+  if (new Set(norms).size !== 1) {
+    fail(`CORE 模块 ${m}: 已登记数字重命名但仍不一致（${norms.map(sha).join(' / ')}）⇒ 共享层可能已分叉`);
+  } else {
+    numericUsed.add(m);
+    numericStale.delete(m);
+  }
 }
 
 // ── 5) debug/game 共享模块一致 + 单端独有白名单 ─────────────────────────────
 const dApp = art['debug/app'];
 const gApp = art['game/app'];
+const contentDiffStale = new Set(KNOWN_CONTENT_DIFF_ALLOW.keys());
 if (dApp && gApp) {
   const sharedPaths = (mods) => [...mods.keys()].filter((p) => /^src\/(renderer-shared|ts-shared)\//.test(p));
   const dSet = new Set(sharedPaths(dApp.mods));
@@ -209,10 +275,23 @@ if (dApp && gApp) {
     const inD = dSet.has(p);
     const inG = gSet.has(p);
     if (inD && inG) {
-      if (NORM_DIFF_ALLOW.has(p)) continue;
-      const hd = sha(normText(dApp.mods.get(p)));
-      const hg = sha(normText(gApp.mods.get(p)));
-      if (hd !== hg) fail(`${p}: debug/game app.js 归一化文本不一致（${hd} / ${hg}）⇒ 共享层可能已分叉`);
+      const raws = [rawText(dApp.mods.get(p)), rawText(gApp.mods.get(p))];
+      if (raws[0] === raws[1]) continue;
+      if (KNOWN_CONTENT_DIFF_ALLOW.has(p)) {
+        contentDiffStale.delete(p);
+        continue;
+      }
+      if (NUMERIC_RENAME_ALLOW.has(p)) {
+        const norms = [normNumeric(dApp.mods.get(p)), normNumeric(gApp.mods.get(p))];
+        if (norms[0] !== norms[1]) {
+          fail(`${p}: debug/game app.js 已登记数字重命名但仍不一致（${sha(norms[0])} / ${sha(norms[1])}）⇒ 共享层可能已分叉`);
+        } else {
+          numericUsed.add(p);
+          numericStale.delete(p);
+        }
+        continue;
+      }
+      fail(`${p}: debug/game app.js 文本不一致且未登记数字重命名/已知差异白名单（${sha(raws[0])} / ${sha(raws[1])}）`);
     } else {
       const only = inD ? 'debug' : 'game';
       const allowed = APP_ONLY_ALLOW[p];
@@ -226,14 +305,48 @@ if (dApp && gApp) {
   }
 }
 
-// ── 6) viewer 不得含物理/权威实现 ───────────────────────────────────────────
+// ── 6) 白名单反空转：登记了但已无差异 = 过期登记，必须删 ────────────────────
+for (const m of numericStale) fail(`NUMERIC_RENAME_ALLOW 条目已无差异：${m}（登记过期，请删除以免长期掩盖新分叉）`);
+for (const m of contentDiffStale) fail(`KNOWN_CONTENT_DIFF_ALLOW 条目已无差异：${m}（登记过期，请删除）`);
+
+// ── 7) 同一模块同类型产物跨端行数差（WARN；>2× 且未登记 ⇒ FAIL）─────────────
+const lineCount = {}; // key: "app|src/..." -> { debug: n, game: n, viewer: n }
+for (const app of APPS) {
+  for (const kind of KINDS) {
+    const a = art[`${app}/${kind}`];
+    if (!a) continue;
+    for (const [p, lines] of a.mods) {
+      if (!/^src\/(renderer-shared|ts-shared)\//.test(p)) continue;
+      const k = `${kind}|${p}`;
+      if (!lineCount[k]) lineCount[k] = {};
+      lineCount[k][app] = lines.length;
+    }
+  }
+}
+for (const [k, byApp] of Object.entries(lineCount)) {
+  const ends = Object.entries(byApp);
+  if (ends.length < 2) continue;
+  const [kind, p] = k.split('|');
+  const nums = ends.map(([, n]) => n);
+  const ratio = Math.max(...nums) / Math.min(...nums);
+  const allow = LINE_COUNT_ALLOW.get(p);
+  const detail = ends.map(([a, n]) => `${a}:${n}`).join(' ');
+  if (allow && ratio <= allow.maxRatio) continue;
+  if (ratio > LINE_FAIL_RATIO) {
+    fail(`${kind} 产物 ${p} 跨端行数比 ${ratio.toFixed(2)}× > ${LINE_FAIL_RATIO}×（${detail}）⇒ 疑似实现分叉；确认无问题请登记 LINE_COUNT_ALLOW`);
+  } else if (ratio > LINE_WARN_RATIO) {
+    warn(`${kind} 产物 ${p} 跨端行数比 ${ratio.toFixed(2)}×（${detail}）`);
+  }
+}
+
+// ── 8) viewer 不得含物理/权威实现 ───────────────────────────────────────────
 for (const k of ['viewer/app', 'viewer/worker']) {
   const a = art[k];
   if (!a) continue;
   for (const m of FORBIDDEN_IN_VIEWER) if (a.mods.has(m)) fail(`${k}: 出现了物理/权威模块 ${m}（viewer 无物理是架构约定）`);
 }
 
-// ── 7) WORKER_PROTOCOL 字面量一致（G3 的产物侧断言）─────────────────────────
+// ── 9) WORKER_PROTOCOL 字面量一致（G3 的产物侧断言）─────────────────────────
 const proto = join(ROOT, 'src', 'ts-shared', 'auth', 'worker-protocol.ts');
 if (!existsSync(proto)) {
   fail('src/ts-shared/auth/worker-protocol.ts 不存在（协议指纹规则无法计算）');
@@ -256,10 +369,16 @@ if (!existsSync(proto)) {
 }
 
 // ── 输出 ────────────────────────────────────────────────────────────────────
+if (warnings.length) {
+  console.error(`[shared-artifacts] WARN ${warnings.length} 处（不阻断）：`);
+  for (const w of warnings) console.error('  - ' + w);
+}
 if (violations.length) {
   console.error(`[shared-artifacts] 违规 ${violations.length} 处：`);
   for (const v of violations) console.error('  - ' + v);
   process.exit(1);
 }
 const modsSummary = keys.map((k) => `${k}=${art[k].mods.size}`).join(' ');
-console.log(`[shared-artifacts] OK：六产物共享指纹一致（${modsSummary}）；核心用例 ${CORE_MODULES.length} 个跨端逐字节相同；debug/game 差异仅 ${NORM_DIFF_ALLOW.size} 个已知产物级差异；viewer 无物理模块。`);
+console.log(`[shared-artifacts] OK：六产物共享指纹一致（${modsSummary}）；核心用例 ${CORE_MODULES.length} 个跨端一致` +
+  `（其中 ${numericUsed.size} 个仅数字后缀差异已在白名单登记）；debug/game 已知内容差异 ${KNOWN_CONTENT_DIFF_ALLOW.size} 个；` +
+  `行数差 WARN ${warnings.length} 处；viewer 无物理模块。`);
