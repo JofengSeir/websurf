@@ -39,6 +39,31 @@ import {
 	type ReadyMessageLike,
 } from '../auth/worker-ready.js';
 
+/**
+ * 错误文案归一：`hooks.error?(string)` 是唯一对外通道，但上游可能是 Error、ErrorEvent、
+ * 字符串、任意对象或空值；直接 `String(e)` 会得到 `[object Object]` 或空串。统一在此收口：
+ * - null/undefined → fallback；字符串 trim 后为空 → fallback；
+ * - Error → message（空则 fallback）；对象 → 取 message 字符串，否则 JSON，再否则 fallback；
+ * - 其他原始值 → `String(value)`。
+ */
+function errorText(value: unknown, fallback = '未知错误'): string {
+	if (value === null || value === undefined) return fallback;
+	if (typeof value === 'string') return value.trim() ? value : fallback;
+	if (value instanceof Error) return value.message.trim() ? value.message : fallback;
+	if (typeof value === 'object') {
+		const message = (value as { message?: unknown }).message;
+		if (typeof message === 'string' && message.trim()) return message;
+		try {
+			const json = JSON.stringify(value);
+			if (json && json !== '{}' && json !== '[]') return json;
+		} catch {
+			// 循环引用等无法序列化：落到 fallback
+		}
+		return fallback;
+	}
+	return String(value);
+}
+
 /** Worker 创建参数：内嵌构建用 Blob URL（file:// 下 module worker 不可用），dev 用入口 URL。 */
 export interface AppWorkerSpec {
 	/** 构建注入的 worker 源码（如 `__VBSP_WORKER_JS__`）；有则优先 Blob URL。 */
@@ -299,7 +324,7 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 				hooks.health?.(String(message.message ?? ''));
 				break;
 			case 'error':
-				hooks.error?.(String(message.message ?? ''));
+				hooks.error?.(errorText(message.message));
 				break;
 			default:
 				// 未知消息：忽略（向前兼容）
@@ -307,7 +332,9 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 		}
 	};
 	workerRef.onerror = (e: ErrorEvent): void => {
-		hooks.error?.(`Worker error: ${e.message} (${e.filename}:${e.lineno})`);
+		// ErrorEvent 本身不是 Error：优先取 message 字符串，再补 file:line（有才补）。
+		const where = e.filename ? ` (${e.filename}:${e.lineno})` : '';
+		hooks.error?.(`Worker error: ${errorText(e)}${where}`);
 	};
 
 	// ④ 前置：端侧通道初始化（可选）。game 的 `{type:'init'}` 必须先于 wasm-init——
@@ -378,7 +405,7 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 
 	// ⑨ 主线程 wasm 预热：catch 掉 rejection（失败转状态栏，不制造 unhandled rejection）
 	const wasmReady = hooks.ensureMainWasm(ctx).catch((err: unknown): void => {
-		hooks.error?.(`主线程 WASM 初始化失败: ${err instanceof Error ? err.message : String(err)}`);
+		hooks.error?.(`主线程 WASM 初始化失败: ${errorText(err)}`);
 	});
 
 	return {

@@ -10,6 +10,9 @@
  * （`worker-dispatch` 在 `phys.current == null` 时会丢弃 config 消息）。构造实例本身没有时序要求，
  * 但建议在 AppRuntime 已就绪（bridge/renderer 引用可用）之后构造，本模块不另设 init()。
  *
+ * 增量：面板拖动式改动走 `applyPatch()`——与模块记录的「最近一次成功下发快照」比对，只把真正
+ * 变化的字段做 render/send（无变化不产生消息）；`syncConfig()` 保持全量发送。
+ *
  * 注意：本模块不接管段顺序语义——顺序只在「世界未建好时」可能影响结果；等价判据见 PLAN §A4。
  */
 
@@ -54,7 +57,10 @@ export interface SyncConfigOptions<C extends object> {
 export interface ConfigSync<C extends object> {
 	/** 全量同步：按 sections 顺序逐段 apply → render → send。 */
 	syncConfig(options?: SyncConfigOptions<C>): void;
-	/** 单段增量：本地合并 → render → send。 */
+	/**
+	 * 单段增量（面板拖动用）：本地合并后与「上一份已同步快照」比对，
+	 * 只把实际变化的字段 render → send；无变化不产生消息。`syncConfig()` 仍是全量发送。
+	 */
 	applyPatch(section: keyof C, patch: ConfigSection): void;
 	/** 等价断言用：sections 的深拷贝快照。 */
 	snapshot(): Record<string, ConfigSection>;
@@ -64,19 +70,49 @@ function deepCopy<T>(value: T): T {
 	return JSON.parse(JSON.stringify(value)) as T;
 }
 
+/** 值等价：原始值 `===`；对象/数组按 JSON 文本比较（config 段都可 JSON 化）。 */
+function valueEqual(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+	try {
+		return JSON.stringify(a) === JSON.stringify(b);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * 只保留 `next` 中相对 `reference` 真正变化的字段（增量 patch）。
+ * 删除不产生消息：段按 patch 合并表达，旧 `applyConfigPatch` 同样不表达删除。
+ */
+function changedFields(next: ConfigSection, reference: ConfigSection): ConfigSection {
+	const delta: ConfigSection = {};
+	for (const [key, value] of Object.entries(next)) {
+		if (!valueEqual(value, reference[key])) delta[key] = value;
+	}
+	return delta;
+}
+
 export function createConfigSync<C extends object, R = unknown, B = unknown>(
 	options: ConfigSyncOptions<C, R, B>,
 ): ConfigSync<C> {
 	const { config, sections } = options;
 
-	const emit = (section: keyof C, patch: ConfigSection, withRender: boolean): void => {
+	/** 每段最近一次成功下发的快照（增量比对的参照物）。 */
+	const synced = new Map<keyof C, ConfigSection>();
+	const markSynced = (section: keyof C): void => {
+		synced.set(section, deepCopy(sectionOf(config, section)));
+	};
+
+	const emit = (section: keyof C, patch: ConfigSection, withRender: boolean): boolean => {
 		// transform 返回 null 表示「该段不发」——必须先判 null 再兜底，不能用 `?? patch`
 		// （`null ?? patch` 会把丢弃意图吞掉）。
 		const transformed = options.transform ? options.transform(section, patch) : patch;
-		if (transformed === null) return;
+		if (transformed === null) return false;
 		if (withRender) options.render?.[section]?.(transformed);
 		options.send(section, transformed);
 		options.afterSection?.(section, transformed);
+		return true;
 	};
 
 	const merge = (section: keyof C, patch: ConfigSection): void => {
@@ -92,12 +128,20 @@ export function createConfigSync<C extends object, R = unknown, B = unknown>(
 			const list = syncOptions?.sections ?? sections;
 			const withRender = syncOptions?.render !== false;
 			for (const section of list) {
-				emit(section, { ...sectionOf(config, section) }, withRender);
+				if (emit(section, { ...sectionOf(config, section) }, withRender)) markSynced(section);
 			}
 		},
 		applyPatch(section: keyof C, patch: ConfigSection): void {
+			// 增量：与「上一份已成功下发的快照」比对，只发真正变化的字段。
+			// 参照物优先用模块最近一次下发的快照，而不是 config 本身——两端面板会直接写 config，
+			// config 可能领先或滞后于 Worker/渲染侧；没同步过该段时退化为「合并前的 config 段」。
+			const before = sectionOf(config, section);
+			const reference = synced.get(section) ?? before;
+			const next = { ...before, ...patch };
+			const delta = changedFields(next, reference);
 			merge(section, patch);
-			emit(section, patch, true);
+			if (Object.keys(delta).length === 0) return;
+			if (emit(section, delta, true)) markSynced(section);
 		},
 		snapshot(): Record<string, ConfigSection> {
 			const out: Record<string, ConfigSection> = {};
