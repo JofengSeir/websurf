@@ -79,7 +79,8 @@ function envDisabled(name: string): boolean {
 
 /**
  * 帧预算控制器（task-33 方案 C1，`render-session.ts` 每帧写入）当前降级等级：
- * 0=不降级，1=bloom 光晕降频，2=再叠加水面镜面降频。
+ * 0=不降级；1=bloom 光晕降频 + 水面折射/镜面放宽到 3 帧；2=再放宽到 4 帧（2026-11-19 慢机 A/B：
+ * 水面 pass 是重载区超槽主因，见 `water.ts` 的 refrCadence/mirrorCadence 注释）。
  *
  * 只读；res-session 是唯一写入方。缺失/非法值按 0 处理（控制器未加载时保持默认画质）。
  */

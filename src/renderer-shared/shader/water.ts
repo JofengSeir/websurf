@@ -735,7 +735,16 @@ function refrCadence(): number {
   if (typeof forced === 'number' && Number.isFinite(forced) && forced > 0) {
     return Math.max(1, Math.round(forced));
   }
-  // 默认隔帧（实测见上：慢帧 22~24% → 13~16%，mean −0.3~0.4ms；cadence 3 无额外收益）。
+  // 默认隔帧（实测见上：慢帧 22~24% → 13~16%，mean −0.3~0.4ms）。
+  // 2026-11-19：慢机掉槽时按帧预算等级再放宽（见 mirrorCadence 同批实测，水面 pass 合计
+  // 约 1.3ms/帧，是重载区超槽的主因）。A/B：`__vbspWaterRefrBudget = false`。
+  const budgetOn = (g as { __vbspWaterRefrBudget?: boolean }).__vbspWaterRefrBudget !== false;
+  const level = (g as { __vbspBudgetLevel?: number }).__vbspBudgetLevel;
+  const budgetLevel = typeof level === 'number' && Number.isFinite(level)
+    ? Math.max(0, Math.min(2, Math.floor(level)))
+    : 0;
+  if (budgetOn && budgetLevel >= 2) return 4;
+  if (budgetOn && budgetLevel >= 1) return 3;
   return 2;
 }
 
@@ -768,7 +777,14 @@ function mirrorCadence(): number {
   const budgetLevel = typeof level === 'number' && Number.isFinite(level)
     ? Math.max(0, Math.min(2, Math.floor(level)))
     : 0;
-  if (budgetOn && budgetLevel >= 2) return 3;
+  // 2026-11-19 慢机 A/B（CDP CPU 降频 rate 1.4，boreas 回放 38–46s 重载段，同机位 8s）：
+  //   cadence 2（默认）frame p50 3.66ms、丢槽(dt>4.6) 52.4%、194.7fps
+  //   cadence 4        frame p50 3.09ms、丢槽 38.4%、226.0fps
+  //   水面 pass 全关  frame p50 2.36ms、丢槽 20.0%、263.9fps
+  // ⇒ 掉槽时把折射/镜面都放宽到 4 帧，能拿回约一半的水面成本。
+  // 静态观感：320fps 下 4 帧 ≈12.5ms 的重反射/折射滞后，回放里 yaw 每帧 0.011° ⇒ 屏移 <2px。
+  if (budgetOn && budgetLevel >= 2) return 4;
+  if (budgetOn && budgetLevel >= 1) return 3;
   // 默认隔帧（实测见上：p90 6.25→3.23ms、慢帧 17~20%→9~12%）。
   return 2;
 }
