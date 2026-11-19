@@ -86,6 +86,9 @@ const g = globalThis as {
   __vbspWaterFrameRate?: unknown;
   __vbspWaterOpacity?: unknown;
   __vbspWaterMirrorSize?: unknown;
+  /** 预热逃生舱（默认 undefined）：强制本帧只跑指定的那一趟整场景 RT（绕 cadence/优先级，
+   *  相机移动与水位门控仍生效）。仅载图期预热代码临时置位，见 render-session `prewarmPasses`。 */
+  __vbspWaterForcePass?: 'refr' | 'mirror';
   /** 调试：把水面强制做**不透明**（判断波纹形状用，隔离水底/雾/反射的干扰）。 */
   __vbspWaterOpaque?: unknown;
   /** 调试：覆盖水面基色（如 `[0.08,0.3,0.6]`）。 */
@@ -810,19 +813,33 @@ export function renderWaterFramePasses(
   const mirrorEvery = mirrorCadence();
   const refrDue = refrMoved && (refrEvery <= 1 || refrSinceRender >= refrEvery || !refrRT);
   const mirrorDue = mirrorMoved && (mirrorEvery <= 1 || mirrorSinceRender >= mirrorEvery);
-  if (!refrDue && !mirrorDue) return;
+  // 预热逃生舱（默认 undefined）：`__vbspWaterForcePass` 强制本帧只跑指定的一趟整场景 RT，
+  // 绕过 cadence 与「超期比例」调度（相机移动/水位门控仍生效）。载图期预热帧的 frame() 只会
+  // 走折射分支（两计数同步 +1 ⇒ refrScore == mirrorScore、折射优先），镜面 RT 要等首飞第一个
+  // 移动帧才渲；预热代码在 frame() 之后再调一次本函数并置 'mirror'，把镜面首渲前移到载图期。
+  const forcedPass = g.__vbspWaterForcePass;
+  let refrNow = refrDue;
+  let mirrorNow = mirrorDue;
+  if (forcedPass === 'refr') {
+    refrNow = refrMoved;
+    mirrorNow = false;
+  } else if (forcedPass === 'mirror') {
+    refrNow = false;
+    mirrorNow = mirrorMoved;
+  }
+  if (!refrNow && !mirrorNow) return;
   // 优先级按「超期比例」= 距上次真渲的帧数 ÷ 自己的 cadence（都刚渲过则相等、折射优先）。
   // 注意不能用「cadence<=1 时给固定分」：逃生舱 `__vbspWaterRefrCadence=1` 会让折射每帧
   // 都是固定高分，镜面永远排不到队、倒影被冻住。
   const refrScore = refrSinceRender / refrEvery;
   const mirrorScore = mirrorSinceRender / mirrorEvery;
-  if (refrDue && (!mirrorDue || refrScore >= mirrorScore)) {
+  if (refrNow && (!mirrorNow || refrScore >= mirrorScore)) {
     refrSinceRender = 0;
     renderRefraction(renderer, scene, camera);
     markRefrPose(camera); // 只有真渲过才标记，跳过的帧留到下一帧补渲
     return; // 本帧只跑这一趟
   }
-  if (!mirrorDue) return;
+  if (!mirrorNow) return;
   mirrorSinceRender = 0;
   // 镜面 RT 同步去嵌套（T-650 v4：与折射同因——嵌套 render 污染主渲染状态且随视角排序变化）。
   // 只渲「这一帧真的在画面里」的水面层：surf_666 有 5 层水，每层一趟整场景，

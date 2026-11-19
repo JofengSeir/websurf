@@ -695,10 +695,10 @@ export class RenderSession {
    * 开关：__vbspPrewarmPassesEnabled = false；诊断：__vbspPrewarmPasses。
    *
    * 幂等：第二次起 program 全命中缓存（实测 10 连调 `[+14, 0×9]`），只是再画一遍整帧。
-   * 因此**载图后才挂上的对象**（debug 端的粒子/激光在 `renderer-main.ts` 的
-   * `setupLaserBeams()` 之后才进场景）需要在挂完后再调一次本方法：它们的材质在载图期
-   * 预热帧里不存在，否则首飞第一次被画到时会现编（实测剩 7 个 srgb-linear 折射变体、
-   * 单帧 84ms）。
+   * 粒子/激光（`setupSceneExtras`）自 a77eee9 起在 loadScene 内、早于本方法装配；但它们的
+   * `visible` 会在 `frame()` 的 extras update 里被按相机重新裁剪，所以预热期间临时旁路剔除
+   * （`__vbspParticleCullOff`）；否则折射/镜面 RT 画不到它们，
+   * LinearSRGB 变体留到首飞现编。
    */
   prewarmPasses(): void {
     const g = globalThis as {
@@ -745,15 +745,25 @@ export class RenderSession {
       __vbspWaterRefrCadence?: number;
       __vbspWaterMirrorCadence?: number;
       __vbspBudgetOn?: boolean;
+      __vbspWaterForcePass?: 'refr' | 'mirror';
     };
     const savedWaterGate = gw.__vbspWaterFrustumGate;
     // 水面折射默认隔帧（`water.ts` `refrCadence` 默认 2），镜面在预算升到 2 级时每 3 帧一次；
     // 帧预算控制器还可能已经升过级。预热帧要把「每种 pass 形态」都真跑一遍，否则那个形态的
     // program 要等首飞第一次轮到它才编：实测预热帧被 cadence 跳过镜面 ⇒ 冷跑首飞补编 7 个
     // 1024² 镜面 RT 变体、单帧 28ms。这里临时强制全帧率 + 冻结预算档，finally 还原。
+    // ⚠️ 只强制 cadence 不够：`frame()` 内两计数同步 +1、平票时 water.ts 恒选折射，镜面 RT
+    // 仍不会渲 —— 由下面的 `__vbspWaterForcePass` 在 frame() 之后补一趟，见 try 内注释。
     const savedRefrCadence = gw.__vbspWaterRefrCadence;
     const savedMirrorCadence = gw.__vbspWaterMirrorCadence;
     const savedBudgetOn = gw.__vbspBudgetOn;
+    const savedForcePass = gw.__vbspWaterForcePass;
+    // 预热帧内旁路粒子/光效的「距离 + 视锥」剔除（`particles.ts` `cullByCamera` 的
+    // `__vbspParticleCullOff` 分支）：`frame()` 先跑 extras update，会按出生点相机把视锥外/
+    // 超距的光效重新置 `visible=false`，覆盖上面 traverse 的放开 ⇒ 它们的材质进不了水面
+    // 折射/镜面 RT，LinearSRGB 变体只能等首飞现编。finally 原样还原。
+    const gc = globalThis as { __vbspParticleCullOff?: boolean };
+    const savedParticleCullOff = gc.__vbspParticleCullOff;
     this.pvsOverride = false;
     this.pvsAutoCull = false; // 与 enablePvs 一致 ⇒ updateVisibility() 的自动距离分支不覆盖 ∞
     this.visibility.enablePvs = false;
@@ -763,6 +773,7 @@ export class RenderSession {
     gw.__vbspWaterRefrCadence = 1;
     gw.__vbspWaterMirrorCadence = 1;
     gw.__vbspBudgetOn = false;
+    gc.__vbspParticleCullOff = true;
     const t0 = performance.now();
     let ok = true;
     // 预热序号：既用于诊断，也用于相机挪动幅度——两趟预热不能挪到同一个坐标，
@@ -802,6 +813,15 @@ export class RenderSession {
       // 全量 index（restoreClusterIndex）+ 全部块可见，再跑一帧真实 pass。
       this.updateVisibility();
       this.frame({ updateVisibility: false, updateNearPlane: false });
+      // 补一趟镜面 RT（见 water.ts `__vbspWaterForcePass`）：单次 frame() 在折射/镜面都到期时
+      // 恒选折射，镜面 RT 会拖到首飞第一个移动帧才渲。此刻粒子/光效还处于上面的 cullOff
+      // 状态，随整场景 pass 一起进 program 缓存。失败只告警，不影响载图。
+      try {
+        gw.__vbspWaterForcePass = 'mirror';
+        renderWaterFramePasses(this.renderer, this.scene, this.camera);
+      } catch (err) {
+        console.warn(`[${this.app}][prewarm] 镜面 RT 预热失败（不影响运行，首飞会补编）:`, err);
+      }
     } catch (err) {
       ok = false;
       console.warn(`[${this.app}][prewarm] 预热帧失败（不影响运行，着色器将按需编译）:`, err);
@@ -825,6 +845,8 @@ export class RenderSession {
       gw.__vbspWaterRefrCadence = savedRefrCadence;
       gw.__vbspWaterMirrorCadence = savedMirrorCadence;
       gw.__vbspBudgetOn = savedBudgetOn;
+      gw.__vbspWaterForcePass = savedForcePass;
+      gc.__vbspParticleCullOff = savedParticleCullOff;
       for (let i = restore.length - 1; i >= 0; i--) restore[i]();
       // 按真实状态重算一次：把 PVS 裁过的 index / 块可见性还原成出生点该有的样子。
       try {
