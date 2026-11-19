@@ -44,6 +44,7 @@ import { PanelController } from './panel/panel-controller.js';
 import { SavePointStore, SAVEPOINT_MAX, type SavePoint } from './savepoint.js';
 import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, readPrefsPath, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js';
 import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js';
+import { setOptimizeFlags } from '../../../src/renderer-shared/config/optimize-flags.js';
 import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
 import { createAppRuntime, type AppHooks, type AppRuntime } from '../../../src/ts-shared/app/app-runtime.js';
 import { createConfigSync, type ConfigSync } from '../../../src/ts-shared/app/config-sync.js';
@@ -284,6 +285,10 @@ function createPanel(bridgeImpl: InputBridge): PanelController {
     // HUD「计算 xxxHz / 呈现 xxxfps」读模拟时钟统计（未接线时传 null 即显示 —）。
     (hz) => renderer?.setComputeRateCap(hz),
     () => renderer?.simClockStats ?? null,
+    // 优化处理（config.optimize 三开关，默认全关）：交给共享渲染层运行时开关
+    // （src/renderer-shared/config/optimize-flags.ts 的 setOptimizeFlags）。
+    // 启动时由 PanelController.sendAllPrefs 按 vbsp:panelPrefs 恢复一次，之后每次勾选再应用一次。
+    (flags) => setOptimizeFlags(flags),
   );
 }
 

@@ -1,5 +1,5 @@
 /**
- * 本工程的运行时配置：结构定义（`RuntimeConfig` 的七段）、默认值（`DEFAULT_CONFIG`）与三个工具函数。
+ * 本工程的运行时配置：结构定义（`RuntimeConfig` 的八段）、默认值（`DEFAULT_CONFIG`）与三个工具函数。
  *
  * 数据流：
  * - 主线程在 `apps/game/src/app.ts` 建一份副本（`createConfig()`）；面板改动由
@@ -21,6 +21,7 @@ import { LIGHTING_PRESENTATION_DEFAULTS } from '../../../src/renderer-shared/sha
 import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../../src/ts-shared/phys/params.js';
 import { PHYSICS_PARAM_DEFAULTS } from '../../../src/ts-shared/phys/param-defaults.js';
 import { COMPUTE_CAP_DEFAULT } from '../../../src/ts-shared/app/compute-cap.js';
+import { OPTIMIZE_DEFAULTS } from '../../../src/renderer-shared/config/optimize-flags.js';
 
 export interface PhysicsConfig {
   /** 物理模式：physics（权威物理）/ noclip（自由视角，禁物理/传送）。
@@ -162,6 +163,24 @@ export interface LightingConfig {
   mode: 'baked' | 'texture';
 }
 
+/** 「优化处理」配置：三个默认全关的性能兜底开关（都有画面代价，用户显式打开后才生效）。
+ *  键名与 `src/renderer-shared/config/optimize-flags.ts` 的 `OptimizeFlags` 一一对应，
+ *  默认值取该模块的 `OPTIMIZE_DEFAULTS`（全 false）。
+ *  读点：`apps/game/src/panel/panel-controller.ts` 的三个复选框 + `vbsp:panelPrefs` 偏好、
+ *  `apps/game/src/input/input-bridge.ts` 的 `sendConfig('optimize', …)`（本端副本 + Worker 副本）、
+ *  `apps/game/src/app.ts` 传给面板的 `setOptimizeFlags` 回调（写共享层运行时开关）。 */
+export interface OptimizeConfig {
+  /** 帧预算不足时跳过水面 RT 更新、复用上一帧（画面滞后 1 帧）。
+   *  实现：`src/renderer-shared/shader/water.ts` 的 `optimizeFlag('waterRtReuse')`。 */
+  waterRtReuse: boolean;
+  /** 帧预算不足时跳过光晕层直出（光效减弱）。
+   *  实现：`src/renderer-shared/environment/post-fx.ts` 的 `bloomDirectSkip`。 */
+  bloomDirect: boolean;
+  /** 水面镜面 RT 降为一半分辨率（1024² → 512²，倒影变糊）。
+   *  实现：`src/renderer-shared/shader/water.ts` 的镜面 RT 边长选取。 */
+  mirrorLowRes: boolean;
+}
+
 export interface RuntimeConfig {
   /** 锁定 tick 频率：true = `physics.tickRate` 固定为 `LOCKED_TICK_RATE` 且面板控件禁用；
    *  false = 面板 48..128 可调。读点：`apps/game/src/panel/panel-controller.ts`
@@ -173,6 +192,8 @@ export interface RuntimeConfig {
   hud: HudConfig;
   texture: TextureConfig;
   lighting: LightingConfig;
+  /** 优化处理：三个默认全关的帧预算兜底开关（有画面代价；面板「优化处理」分栏可勾选）。 */
+  optimize: OptimizeConfig;
 }
 export const LOCKED_TICK_RATE = 64; // 锁定 tick 频率时的固定值（默认值 / 下发 / 面板控件三处共用；改这里即全生效，T-205）
 export const DEFAULT_CONFIG: RuntimeConfig = {
@@ -238,6 +259,8 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     // 预烘焙；纯纹理由面板切换
     mode: 'baked',
   },
+  // 优化处理：默认全关（有画面代价的兜底手段，面板勾选后才生效；默认值取共享层 OPTIMIZE_DEFAULTS）
+  optimize: { ...OPTIMIZE_DEFAULTS },
 };
 
 export function createConfig(): RuntimeConfig {

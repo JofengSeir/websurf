@@ -8,7 +8,7 @@
  *   `buildPhysicsParams` 写死）⇒ 改灵敏度不会让两端物理参数分叉；
  * - `mode`（noclip）单发一条只含 `mode` 的 `physics` 段消息，不随全量参数下发，避免改任何
  *   参数时都把 `set_noclip(false)` 写下去；
- * - 除 `player` 段外，下发的 `patch` 都是 `buildPhysicsParams(this.config)` 的**全量物理参数**
+ * - 除 `player` / `optimize` 段外，下发的 `patch` 都是 `buildPhysicsParams(this.config)` 的**全量物理参数**
  *   （`section` 名原样保留），调用方传入的 patch 只用于更新本端副本，其效果经该全量参数带出。
  */
 
@@ -35,9 +35,9 @@ export class InputBridge {
 
   /** 面板参数下发。顺序固定：① 写本端 config 副本；② `patch` 带 `mode` 时单发一条只含
    *  `mode` 的 `physics` 段消息；③ `player` 段改走 `set_hull`（渲染端 `setPredictionHull`
-   *  + `config` 消息的 `player` 段）并返回；④ 其余段构造全量物理参数，写渲染端
-   *  （`setPredictionParams`）后以 `config` 消息发出（`physics` 段额外附加 `tickRate`，
-   *  它是 JS 驱动层参数、不进 Rust `set_params`）。 */
+   *  + `config` 消息的 `player` 段）并返回；④ `optimize` 段只发本段真实字段（见分支注释）；
+   *  ⑤ 其余段构造全量物理参数，写渲染端（`setPredictionParams`）后以 `config` 消息发出
+   *  （`physics` 段额外附加 `tickRate`，它是 JS 驱动层参数、不进 Rust `set_params`）。 */
   sendConfig(section: keyof RuntimeConfig, patch: Record<string, unknown>): void {
     applyConfigPatch(this.config, section, patch);
 
@@ -51,6 +51,14 @@ export class InputBridge {
       const hull = { halfWidth: p.halfWidth, standHeight: p.standHeight, duckHeight: p.duckHeight };
       this.renderer.setPredictionHull(hull.halfWidth, hull.standHeight, hull.duckHeight);
       this.worker.postMessage({ type: 'config', section: 'player', patch: hull });
+      return;
+    }
+
+    // optimize 段（「优化处理」三开关，默认全关）：只下发本段真实字段给 Worker 副本。
+    // 不能落到下面的全量物理参数路径——否则 snake_case 物理键会写进 config.optimize，
+    // 且每次勾选都会多余地重设一遍物理参数。
+    if (section === 'optimize') {
+      this.worker.postMessage({ type: 'config', section: 'optimize', patch: { ...this.config.optimize } });
       return;
     }
 

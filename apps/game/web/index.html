@@ -88,6 +88,7 @@
         <div tabindex="0" role="button" class="mod" data-mod="keys"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6.5" width="18" height="11" rx="2"/><path d="M7 10.2h.01M10.7 10.2h.01M14.4 10.2h.01M18 10.2h.01M7 13.8h.01M18 13.8h.01M10 13.8h4.2"/></svg></span>按键</div>
         <div tabindex="0" role="button" class="mod" data-mod="look"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3.2" width="8" height="17.6" rx="4"/><path d="M12 6.8v3.6"/></svg></span>操作</div>
         <div tabindex="0" role="button" class="mod" data-mod="display"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M9.5 20.5h5M12 17v3.5"/></svg></span>显示</div>
+        <div tabindex="0" role="button" class="mod" data-mod="optimize"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.5 4.8 14H11l-1 7.5 8.2-11.5H12Z"/></svg></span>优化处理</div>
         <div tabindex="0" role="button" class="mod" data-mod="view"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v17M3.5 12h17"/><path d="M9.8 5.7 12 3.5l2.2 2.2M9.8 18.3l2.2 2.2 2.2-2.2M5.7 9.8 3.5 12l2.2 2.2M18.3 9.8l2.2 2.2-2.2 2.2"/></svg></span>视角</div>
         <div tabindex="0" role="button" class="mod" data-mod="health"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-7 4 14 3-8H21"/></svg></span>权威健康</div>
       </div>
@@ -275,6 +276,22 @@
                绑定点在 src/app.ts 的 setupRenderPanel；本页已有的 FOV / 亮度 / 暗部提升 / 模型光照 /
                渲染距离 / 画质档 / 光照模式 / 近平面 两项不重复出现。 -->
           <div id="renderPanel"></div>
+        </div>
+
+        <!-- 优化处理：三个默认全关的帧预算兜底开关（勾选有画面代价）。键名必须与共享层
+             src/renderer-shared/config/optimize-flags.ts 的 OptimizeFlags 一致：
+             勾选写 config.optimize → 下发 Worker 副本 + 共享渲染层 setOptimizeFlags；
+             偏好落 vbsp:panelPrefs 的 optimize 段，启动时由 PanelController 恢复。 -->
+        <div class="mod-pane" data-pane="optimize">
+          <div class="pane-title">优化处理</div>
+          <div class="pane-desc">帧预算不足时的兜底开关 · 默认全关（勾选有画面代价）</div>
+          <h4>渲染兜底</h4>
+          <div class="row"><label title="帧预算不足时跳过水面反射 RT 更新，直接复用上一帧结果（画面滞后 1 帧，帧时间更稳）">掉槽时复用上一帧水面反射（画面滞后 1 帧）</label>
+            <input type="checkbox" id="waterRtReuse" /></div>
+          <div class="row"><label title="帧预算不足时跳过光晕层，直接输出画面（光效减弱，省掉后处理开销）">掉槽时跳过光晕直出（光效减弱）</label>
+            <input type="checkbox" id="bloomDirect" /></div>
+          <div class="row"><label title="水面镜面反射 RT 降为一半分辨率（1024² → 512²；倒影变糊，省显存与采样开销）">水面镜面反射半分辨率（倒影变糊）</label>
+            <input type="checkbox" id="mirrorLowRes" /></div>
         </div>
 
         <!-- 视角 -->

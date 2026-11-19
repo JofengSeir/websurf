@@ -378,6 +378,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel .mod-pane[data-pane="display"]::before { content: "DS-06"; }
 #panel .mod-pane[data-pane="view"]::before { content: "VW-07"; }
 #panel .mod-pane[data-pane="health"]::before { content: "MO-08"; }
+#panel .mod-pane[data-pane="optimize"]::before { content: "PF-09"; }
 /* 页脚署名位（8.3）：pane 名 + 版本短码，右下 11px muted；margin-top:auto
    在内容不足时收尾填补空白（8.4-6），上缘 1px 分隔刻线 */
 #panel .mod-pane::after {
@@ -394,6 +395,7 @@ canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 #panel .mod-pane[data-pane="display"]::after { content: "显示 · v0.1"; }
 #panel .mod-pane[data-pane="view"]::after { content: "视角 · v0.1"; }
 #panel .mod-pane[data-pane="health"]::after { content: "权威健康 · v0.1"; }
+#panel .mod-pane[data-pane="optimize"]::after { content: "优化处理 · 帧预算兜底 · v0.1"; }
 
 /* 小节标题 #panel h4（8.3 分组刻度尺：下分隔刻线 + 右端 3px 短竖刻度；
    P1：12px/600 + 0.06em 字距） */

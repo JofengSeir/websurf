@@ -2,7 +2,8 @@
  * ESC 控制面板控制器（`#panel`）：左栏 `.nav` 的 `data-mod` 切换右栏 `.mod-pane` 的
  * `data-pane`。分栏内容静态声明在 `apps/game/web/index.html`，依次为 general（通用）、
  * physics（物理）、hull（体型）、keys（按键）、look（操作）、display（显示）、
- * view（视角）、health（权威健康）；本类负责控件绑定、config 写回、偏好持久化与两端下发。
+ * optimize（优化处理）、view（视角）、health（权威健康）；本类负责控件绑定、config 写回、
+ * 偏好持久化与两端下发。
  *
  * 可见性：`updateVisibility` 取 `visible = !getLocked() || !sceneReady`——指针未锁定、
  * 或场景尚未就绪时显示面板。`apps/game/src/app.ts` 在 pointerlockchange 与 BSP 加载完成
@@ -20,7 +21,7 @@
  * + 权威 Worker 的 `config` 消息）。
  */
 
-import type { RuntimeConfig } from '../config.js';
+import type { OptimizeConfig, RuntimeConfig } from '../config.js';
 import { buildPhysicsParams, DEFAULT_CONFIG, LOCKED_TICK_RATE } from '../config.js';
 import { readRenderPrefs, writeRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
 import {
@@ -91,6 +92,10 @@ export class PanelController {
     private readonly onSyncComputeRateCap?: (hz: number) => void,
     /** task-95：主线程模拟时钟统计 `renderer.simClockStats` → HUD「计算 xxxHz」；未接线时显示 `—`。 */
     private readonly getSimClockStats?: () => SimClockStatsLike | null,
+    /** 「优化处理」三开关（`config.optimize`）→ 共享渲染层 `setOptimizeFlags`
+     *  （`src/renderer-shared/config/optimize-flags.ts`）：启动按偏好恢复一次，之后每次勾选再应用一次；
+     *  默认全关。Worker 不渲染，故运行时开关只在主线程应用。 */
+    private readonly onSyncOptimize?: (flags: OptimizeConfig) => void,
   ) {
     this.root = document.getElementById('panel') as HTMLElement;
     // 键位：与 app.ts 构造 KeyboardInput 时同源——都走 loadKeymap() 读 localStorage，缺省回默认表
@@ -521,6 +526,14 @@ export class PanelController {
       this.savePanelPrefs();
     });
 
+    // 优化处理（「优化处理」分栏）：三个默认全关的帧预算兜底开关。键名与共享层
+    // `src/renderer-shared/config/optimize-flags.ts` 的 OptimizeFlags 一一对应；
+    // 勾选写 config.optimize → sendConfig('optimize', …)（本端副本 + Worker 副本）→ onSyncOptimize
+    // 把全量开关交给共享层 setOptimizeFlags；偏好落盘由 bindCheckbox 的统一变更包装负责。
+    this.bindCheckbox('waterRtReuse', (v) => this.setOptimizeFlag('waterRtReuse', v));
+    this.bindCheckbox('bloomDirect', (v) => this.setOptimizeFlag('bloomDirect', v));
+    this.bindCheckbox('mirrorLowRes', (v) => this.setOptimizeFlag('mirrorLowRes', v));
+
     // noclip 开关按钮：`active` 类即状态；切换后写 physics.mode、发全量物理参数、通知预测实例
     const noclipBtn = document.getElementById('noclipToggle') as HTMLButtonElement | null;
     noclipBtn?.addEventListener('click', () => {
@@ -582,6 +595,15 @@ export class PanelController {
     this.onSyncPrediction?.(buildPhysicsParams(this.config));
   }
 
+  /** 「优化处理」开关统一写回：config.optimize → `sendConfig('optimize', patch)`（本端副本 + Worker 副本），
+   *  再把全量开关交给共享层 `setOptimizeFlags`（`src/renderer-shared/config/optimize-flags.ts`）。
+   *  偏好持久化由 `bindCheckbox` 的 change 包装统一落盘（`vbsp:panelPrefs` 的 optimize 段）。 */
+  private setOptimizeFlag(name: keyof OptimizeConfig, value: boolean): void {
+    this.config.optimize[name] = value;
+    this.bridge.sendConfig('optimize', { [name]: value });
+    this.onSyncOptimize?.({ ...this.config.optimize });
+  }
+
   private bindSlider(id: string, min: number, max: number, step: number, onInput: (v: number) => void): void {
     const el = document.getElementById(id) as HTMLInputElement | null;
     if (!el) { console.warn(`[panel] 找不到滑块控件 #${id}（页面结构与面板绑定不一致）`); return; }
@@ -640,7 +662,7 @@ export class PanelController {
    */
   private static readonly PREFS_VERSION = 2;
 
-  /** 收集待持久化的六段偏好（physics / player / input / hud / texture / lighting），并写入 `__version`。 */
+  /** 收集待持久化的七段偏好（physics / player / input / hud / texture / lighting / optimize），并写入 `__version`。 */
   private collectPrefs(): Record<string, unknown> {
     const p = this.config;
     return {
@@ -667,6 +689,8 @@ export class PanelController {
         // 光照模式也是持久化项：重开页面时由 loadPanelPrefs 合并回 config.lighting.mode
         mode: p.lighting.mode,
       },
+      // 优化处理三开关（默认全关；旧版本档没有该段时 loadPanelPrefs 跳过，保持默认）
+      optimize: { ...p.optimize },
     };
   }
 
@@ -704,7 +728,11 @@ export class PanelController {
       merge(this.config.input, prefs.input);
       merge(this.config.hud, prefs.hud);
       merge(this.config.texture, prefs.texture);
-      merge(this.config.lighting, prefs.lighting); consumeRenderPrefs(this.config);
+      merge(this.config.lighting, prefs.lighting);
+      // 旧版本档没有 optimize 段时 merge 直接返回 ⇒ 三个兜底开关保持默认全关（无需升 PREFS_VERSION）；
+      // 新档恢复用户上次勾选的开关。
+      merge(this.config.optimize, prefs.optimize);
+      consumeRenderPrefs(this.config);
     } catch (err) {
       console.warn('[panel] 面板偏好加载失败:', err);
     }
@@ -771,9 +799,13 @@ export class PanelController {
     // 视野（config.hud.fov / renderDistance）
     setVal('fov', String(p.hud.fov));
     setVal('renderDistance', String(p.hud.renderDistance));
+    // 优化处理（config.optimize：三个帧预算兜底开关，默认全关）
+    setChecked('waterRtReuse', p.optimize.waterRtReuse);
+    setChecked('bloomDirect', p.optimize.bloomDirect);
+    setChecked('mirrorLowRes', p.optimize.mirrorLowRes);
   }
 
-  /** 把加载后的偏好整体下发：3 条 sendConfig（physics / player / input）+ 预测参数与体型 + 渲染侧各 setter。 */
+  /** 把加载后的偏好整体下发：4 条 sendConfig（physics / player / input / optimize）+ 预测参数与体型 + 渲染侧各 setter。 */
   private sendAllPrefs(): void {
     const p = this.config;
     this.bridge.sendConfig('physics', { ...p.physics });
@@ -786,6 +818,10 @@ export class PanelController {
       yawBindSpeed: p.input.yawBindSpeed,
       noclipSpeed: p.input.noclipSpeed,
     });
+    // 「优化处理」段（默认全关）：启动按偏好恢复一次 —— Worker 副本 + 共享层运行时开关；
+    // 面板勾选后的增量更新走 setOptimizeFlag()。
+    this.bridge.sendConfig('optimize', { ...p.optimize });
+    this.onSyncOptimize?.({ ...p.optimize });
     this.pushPhysicsParams();
     this.sendHull();
     // 渲染侧初值由 RendererMain.init 按 config 当时的值设定，而 init 早于本构造函数执行，
@@ -929,7 +965,7 @@ export class PanelController {
    * 不会连带重置 `physics` 面板的滑块。没有可调项的面板不注入按钮：按键有自己的「恢复默认键位」
    * （`resetKeymap`），通用是地图/出生点操作，健康是运行计数。
    */
-  private static readonly PANE_RESET: Record<string, ReadonlyArray<{ section: 'physics' | 'input' | 'player' | 'hud' | 'texture' | 'lighting'; keys: readonly string[] }>> = {
+  private static readonly PANE_RESET: Record<string, ReadonlyArray<{ section: 'physics' | 'input' | 'player' | 'hud' | 'texture' | 'lighting' | 'optimize'; keys: readonly string[] }>> = {
     physics: [{ section: 'physics', keys: ['tickRate', 'computeRateCap', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp', 'pushOut', 'pushOutOnlyWhenSolid'] }],
     hull: [{ section: 'player', keys: ['halfWidth', 'standHeight', 'duckHeight'] }],
     look: [{ section: 'input', keys: ['sensitivity', 'yawBindSpeed'] }],
@@ -939,6 +975,8 @@ export class PanelController {
       { section: 'lighting', keys: ['exposure', 'lightGamma', 'ambientScale', 'mode'] },
     ],
     view: [{ section: 'physics', keys: ['mode'] }, { section: 'input', keys: ['noclipSpeed'] }],
+    // 「优化处理」的三个兜底开关（默认全关）：恢复默认 = 全部取消勾选
+    optimize: [{ section: 'optimize', keys: ['waterRtReuse', 'bloomDirect', 'mirrorLowRes'] }],
   };
 
   /** 给每个有可调项的面板注入一个「恢复默认」按钮（已有 `[data-reset-pane]` 的不重复注入）。 */

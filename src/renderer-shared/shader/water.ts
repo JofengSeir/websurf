@@ -39,6 +39,7 @@
  */
 import * as THREE from 'three';
 import { WATER_DUDV } from './water-dudv-data.js';
+import { optimizeFlag } from '../config/optimize-flags.js';
 
 /** glTF extras `vbsp_water` 的形态（`gltf_builder.rs` 的 `push_material` 写）。 */
 interface WaterExtras {
@@ -349,6 +350,8 @@ const MIRROR_SIZE = 1024;
 interface MirrorPlane {
   height: number;
   rt: THREE.WebGLRenderTarget | null;
+  /** 当前 RT 的边长（像素）。`mirrorLowRes` 开关切换时据此重建。 */
+  rtSize: number;
   texture: THREE.Texture | null;
   matrix: THREE.Matrix4;
   camera: THREE.PerspectiveCamera;
@@ -381,6 +384,7 @@ function mirrorPlaneOf(height: number): MirrorPlane {
     p = {
       height: key,
       rt: null,
+      rtSize: 0,
       texture: null,
       matrix: new THREE.Matrix4(),
       camera: new THREE.PerspectiveCamera(),
@@ -819,6 +823,8 @@ const waterBudgetStats = { skipped: 0, forced: 0, passes: 0, base: 0, cost: 0 };
 
 /** 判断本帧该不该跳过水面更新（true = 跳过）。调用点：已确认本帧有 due 的 pass。 */
 function waterBudgetSaysSkip(refrAge: number, refrEvery: number, mirrorAge: number, mirrorEvery: number): boolean {
+  // 面板「优化处理」开关：默认关（owner 2026-11-19）。关着时零行为变化。
+  if (!optimizeFlag('waterRtReuse')) return false;
   const off = (g as { __vbspWaterBudgetSkip?: boolean }).__vbspWaterBudgetSkip === false;
   if (off) return false;
   const lastFrame = (g as { __vbspLastFrameMs?: number }).__vbspLastFrameMs;
@@ -1097,10 +1103,22 @@ export function resetWaterShaders(): void {  for (const p of mirrorPlanes.values
   refrRendering = false;
 }
 
+/**
+ * 镜面 RT 的边长：默认 `MIRROR_SIZE`（1024）。面板「优化处理」里的 `mirrorLowRes` 打开时减半
+ * （512²，GPU 填充与带宽约 1/4，倒影会明显变糊——这是有画面代价的开关，默认关）。
+ */
+function mirrorSizeNow(): number {
+  return optimizeFlag('mirrorLowRes') ? Math.max(256, Math.round(MIRROR_SIZE / 2)) : MIRROR_SIZE;
+}
+
 /** 渲染某一层水面的镜像 RT（每层每帧一次；在该层第一个水面 mesh 的 `onBeforeRender` 里调用）。 */
 function renderMirrorPlane(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, plane: MirrorPlane): void {
-  if (!plane.rt) {
-    plane.rt = new THREE.WebGLRenderTarget(MIRROR_SIZE, MIRROR_SIZE);
+  const size = mirrorSizeNow();
+  if (!plane.rt || plane.rtSize !== size) {
+    // 开关切换时重建；旧 RT 显式释放，避免 GPU 内存堆积。
+    plane.rt?.dispose();
+    plane.rt = new THREE.WebGLRenderTarget(size, size);
+    plane.rtSize = size;
     plane.texture = plane.rt.texture;
   }
   const height = plane.height;

@@ -17,8 +17,12 @@
  *   `outputColorSpace = SRGBColorSpace` 对齐。
  *
  * 关闭（`strength = 0`）时不跑任何额外 pass，渲染路径与改造前完全一致。
+ *
+ * 帧预算兜底（Tier2，2026-11-19）：`optimize-flags.ts` 的 `bloomDirect` 打开后，掉槽/降级帧会
+ * **整条光晕链**跳过（主画面直出，见 `bloomDirectSkip`）；默认关，关着时本文件的执行路径与改造前一致。
  */
 import * as THREE from 'three';
+import { optimizeFlag } from '../config/optimize-flags.js';
 
 /** 光效专用渲染层：加色光效 mesh 会被切到这一层，泛光 pass 只画它。 */
 export const GLOW_LAYER = 2;
@@ -59,6 +63,8 @@ const BLOOM_THRESHOLD = 0.3;
  * - `__vbspBloomBudgetCadence = false`：关闭「按 `__vbspBudgetLevel` 自动降级 cadence」
  *   （A/B 用，强制回到默认的隔帧节奏）。
  * - `__vbspBloomSkipDepth`：跳过光效层的深度预渲（仅测量用：相机静止时深度沿用上一帧）。
+ * - `__vbspBloomDirectForce`：Tier2「掉槽跳过整条光晕链」的 A/B 覆盖（`=false` 强制关、`=true` 强制开）。
+ * - `__vbspBloomDirect`（诊断，只读）/ `__vbspBloomDirectReset()`：Tier2 捷径的 skipped/passes 计数。
  */
 const globalScope = globalThis as Record<string, unknown>;
 
@@ -89,6 +95,84 @@ function budgetLevel(): number {
   if (typeof level !== 'number' || !Number.isFinite(level)) return 0;
   return Math.max(0, Math.min(2, Math.floor(level)));
 }
+
+/** 上一帧到本帧的 rAF 间隔（ms）。`render-session.ts` 每帧写；缺失/非法按 0（视为未漏槽）。 */
+function lastFrameDt(): number {
+  const dt = globalScope['__vbspLastFrameDtMs'];
+  if (typeof dt !== 'number' || !Number.isFinite(dt) || dt <= 0) return 0;
+  return dt;
+}
+
+/**
+ * 漏槽判据：单槽 rAF 间隔 3.125ms（320Hz），>4.8ms 说明上一帧至少丢了一个槽。
+ * 与 `render-session.ts` 的帧预算控制器、`water.ts` 的预算兜底同一口径。
+ */
+export const BLOOM_DIRECT_MISSED_SLOT_MS = 4.8;
+
+/** 「优化处理」Tier2 捷径的判定输入（纯数据：不读全局、不碰渲染器，便于 node 侧单测）。 */
+export interface BloomDirectInputs {
+  /** 开关 `optimize-flags.ts` 的 `bloomDirect`（默认 false）。 */
+  flagOn: boolean;
+  /** 上一帧到本帧的 rAF 间隔（ms）；缺失/非法按 0。 */
+  lastFrameDtMs?: number;
+  /** 帧预算等级 0/1/2（`render-session.ts` 维护）；缺失/非法按 0。 */
+  budgetLevel?: number;
+  /** A/B 覆盖 `__vbspBloomDirectForce`：false 强制关（逃生舱）、true 强制开（仅验证/测量）。 */
+  force?: boolean;
+}
+
+/**
+ * 本帧是否跳过整条光晕链（Tier2，2026-11-19，owner：「部分舍弃计算，用画面差错换准时提交」）。
+ *
+ * 为什么能这么省：光晕链（深度预渲 + 光效层 + bright/blur/overlay）是**可选**的画质增强，
+ * 慢机重载区里它是掉槽的主要增量之一（bloom 全关实测约省 0.35ms/帧，`.tmp/perf/frame_budget`）；
+ * 主画面本来就**直画在画布上**，跳过它 = 直出，画面只少了「光效外围的软晕」。
+ *
+ * 触发（全部满足）：用户打开 `bloomDirect` && 未被 `__vbspBloomDirectForce=false` 关闭 &&
+ * （预算等级 >= 1 || 上一帧漏槽 dt>4.8ms）。
+ * 恢复：开关关、或等级回 0 且上一帧没漏槽 ⇒ 下一帧自动走回原路径（恢复帧的 `renderGlow`
+ * 会强制重画一次光效缓冲，避免叠加陈旧光晕）。
+ * 稳态（320Hz、等级 0、上一帧没漏槽）返回 false，与改造前完全一致；开关默认关 ⇒ 零行为变化。
+ */
+export function bloomDirectSkip(inputs: BloomDirectInputs): boolean {
+  if (inputs.force === false) return false;
+  if (inputs.force === true) return true;
+  if (!inputs.flagOn) return false;
+  const level = typeof inputs.budgetLevel === 'number' && Number.isFinite(inputs.budgetLevel)
+    ? Math.max(0, Math.min(2, Math.floor(inputs.budgetLevel)))
+    : 0;
+  if (level >= 1) return true;
+  const dt = typeof inputs.lastFrameDtMs === 'number' && Number.isFinite(inputs.lastFrameDtMs)
+    ? inputs.lastFrameDtMs
+    : 0;
+  return dt > BLOOM_DIRECT_MISSED_SLOT_MS;
+}
+
+/** A/B 覆盖：`__vbspBloomDirectForce` 为布尔时优先于开关与信号（逃生舱/验证用）。 */
+function bloomDirectForce(): boolean | undefined {
+  const value = globalScope['__vbspBloomDirectForce'];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+/** `__vbspBloomDirect` 诊断计数（只读；`__vbspBloomDirectReset()` 清零）。 */
+export interface BloomDirectStats {
+  /** 走捷径（跳过深度预渲/光效层/bright/blur/overlay 整条链）的帧数。 */
+  skipped: number;
+  /** 照常走光晕链的帧数（含 cadence 复用旧缓冲的帧）。 */
+  passes: number;
+  /** 当前连续走捷径的帧数（恢复帧据此强制重画光晕，避免叠加陈旧缓冲）。 */
+  streak: number;
+  /** 本帧判定时读到的预算等级与 rAF 间隔（排查「为什么触发/为什么不触发」）。 */
+  level: number;
+  dtMs: number;
+}
+
+const bloomDirectStats: BloomDirectStats = { skipped: 0, passes: 0, streak: 0, level: 0, dtMs: 0 };
+(globalScope as { __vbspBloomDirect?: BloomDirectStats }).__vbspBloomDirect = bloomDirectStats;
+(globalScope as { __vbspBloomDirectReset?: () => void }).__vbspBloomDirectReset = () => {
+  bloomDirectStats.skipped = 0;
+  bloomDirectStats.passes = 0;
+};
 
 const VERTEX_SHADER = /* glsl */ `
 varying vec2 vUv;
@@ -200,6 +284,14 @@ export class BloomPostFx {
    */
   private glowTick = 0;
 
+  /**
+   * 本帧是否跳过整条光晕链（Tier2 `bloomDirect`）：`renderGlow` 开头判定，`overlay` 同帧共享。
+   * 必须同帧共享这两次调用——只跳提取不跳叠加会残留上一帧光晕，只跳叠加又白做一趟提取。
+   */
+  private skipBloomThisFrame = false;
+  /** 连续走捷径的帧数；恢复帧据此清零 `glowTick` 强制重画，避免叠加陈旧光晕。 */
+  private bloomDirectStreak = 0;
+
   constructor(renderer: THREE.WebGLRenderer, params: BloomParams = DEFAULT_BLOOM_PARAMS) {
     this.renderer = renderer;
     this.params = { ...params };
@@ -309,6 +401,35 @@ export class BloomPostFx {
    */
   renderGlow(scene: THREE.Scene, camera: THREE.Camera, glowMeshes: readonly THREE.Object3D[] = []): void {
     if (!this.enabled) return;
+    // Tier2「优化处理」（2026-11-19）：帧预算紧张时整条光晕链让路。判定必须在最前面——
+    // 省掉的是本帧的深度预渲 + 光效层提交 + 下帧 `overlay()` 的 bright/blur/overlay 三趟。
+    // 主画面已由 `renderSkyPass` 整幅重画（含 clear）在画布上，跳过 = 直出：不黑屏、无残留。
+    // 触发/恢复见 `bloomDirectSkip` 注释；逃生舱 `__vbspBloomDirectForce=false`，开关默认关。
+    const level = budgetLevel();
+    const dt = lastFrameDt();
+    bloomDirectStats.level = level;
+    bloomDirectStats.dtMs = +dt.toFixed(3);
+    this.skipBloomThisFrame = bloomDirectSkip({
+      flagOn: optimizeFlag('bloomDirect'),
+      lastFrameDtMs: dt,
+      budgetLevel: level,
+      force: bloomDirectForce(),
+    });
+    if (this.skipBloomThisFrame) {
+      this.bloomDirectStreak += 1;
+      bloomDirectStats.skipped += 1;
+      bloomDirectStats.streak = this.bloomDirectStreak;
+      // 不推进 `glowTick`：恢复帧要按「刚重画」处理（见下面的恢复分支）。
+      return;
+    }
+    bloomDirectStats.passes += 1;
+    if (this.bloomDirectStreak > 0) {
+      // 从捷径恢复的第一帧：清 cadence 计数、强制重画光效缓冲再叠加。否则 cadence 可能
+      // 让 `overlay()` 叠上「跳过期间」的旧光晕（快速移动时是可见错位/拖影）。
+      this.bloomDirectStreak = 0;
+      this.glowTick = 0;
+    }
+    bloomDirectStats.streak = 0;
     // 隔帧：奇数帧直接复用上一帧画好的光效缓冲（见 glowTick 注释）。
     //
     // task-33 方案 C1 降级点①（本文件）：帧预算控制器升到 level>=1 时，把光效层从
@@ -375,6 +496,9 @@ export class BloomPostFx {
   /** 亮部提取 + 两级模糊，最后加法叠加到画布。 */
   overlay(): void {
     if (!this.enabled) return;
+    // 本帧判定在 `renderGlow` 开头算好（同帧两趟共享）：捷径帧连 bright/blur/overlay 三趟都不做。
+    // 主画面已是本帧新画的（`renderSkyPass` 每帧 clear + 重画）⇒ 不黑屏；本帧未叠加 ⇒ 无残留。
+    if (this.skipBloomThisFrame) return;
     const prevAutoClear = this.renderer.autoClear;
     this.renderer.autoClear = false;
     // 光效缓冲 → 亮部提取 + 1/2

@@ -35,6 +35,8 @@ import { COMPUTE_CAP_DEFAULT, formatComputeHudText } from '../../../src/ts-share
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
 import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, applyRenderDebugSwitches, defaultRenderPrefs, readPrefsPath as readPrefsField, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi } from '../../../src/renderer-shared/config/render-panel-ui.js';
+// 「优化处理」运行时开关：面板勾选 → config.optimize → setOptimizeFlags()（定义见共享模块头注释）
+import { setOptimizeFlags } from '../../../src/renderer-shared/config/optimize-flags.js';
 import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
 import { formatTime, GameState } from './game-state.js';
@@ -165,6 +167,11 @@ const dom = {
 	visViewDistanceNum: document.getElementById('visViewDistanceNum') as HTMLInputElement | null,
 	showPlaneInfoChk: document.getElementById('showPlaneInfo') as HTMLInputElement | null,
 	planeInfoEl: document.getElementById('planeInfo') as HTMLElement | null,
+	// 「优化处理」三个默认关的帧预算兜底开关（勾选 → config.optimize → setOptimizeFlags；
+	// 共享层 water.ts / post-fx.ts 每帧读 optimizeFlag()，见 src/renderer-shared/config/optimize-flags.ts）
+	optWaterRtReuseChk: document.getElementById('optWaterRtReuse') as HTMLInputElement | null,
+	optBloomDirectChk: document.getElementById('optBloomDirect') as HTMLInputElement | null,
+	optMirrorLowResChk: document.getElementById('optMirrorLowRes') as HTMLInputElement | null,
 	// 贴墙近平面自适应：两张滑块分别写 rendererMain.setNearParams 的探测距离与收缩系数
 	nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
 	nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
@@ -373,6 +380,8 @@ async function main(): Promise<void> {
 	// 3. 绑定输入（以下均为端层：DOM/面板/回放/输入循环）
 	bindInput(dom.canvas);
 	loadUiPrefs();
+	// 启动回填：把落盘的 optimize 段写进共享运行时开关（默认全关；之后每次勾选再走 applyOptimizeFlags）
+	applyOptimizeFlags();
 	setupRenderPanel();
 	syncPrefsControls();
 	applyCrosshairStyle();
@@ -1318,6 +1327,8 @@ function collectUiPrefs(): Record<string, unknown> {
 		debug: { ...config.debug },
 		lod: { ...config.lod },
 		player: { ...config.player },
+		// 「优化处理」三个开关随 UI 偏好落盘（默认全关；刷新后保持，见 applyOptimizeFlags/loadUiPrefs）
+		optimize: { ...config.optimize },
 		texture: { ...config.texture },
 	};
 }
@@ -1355,10 +1366,22 @@ function loadUiPrefs(): void {
 		merge('debug', prefs.debug);
 		merge('lod', prefs.lod);
 		merge('player', prefs.player);
+		merge('optimize', prefs.optimize);
 		merge('texture', prefs.texture); config.texture.quality = readRenderPrefs().textureQuality;
 	} catch (err) {
 		console.warn('[app] UI 偏好加载失败:', err);
 	}
+}
+
+/**
+ * 把 `config.optimize` 整段写进共享运行时开关（`src/renderer-shared/config/optimize-flags.ts`）。
+ * 面板勾选、启动回填两处都走这里；`water.ts` / `post-fx.ts` 每帧读 `optimizeFlag()` 即时生效。
+ *
+ * 不经过 `configSync`：debug 的段清单是静态契约（`src/scripts/check-config-sync-contract.mjs`
+ * 锁定启动 5 段 / 载图 7 段），且这些开关只作用主线程渲染，不需要下发给物理 Worker。
+ */
+function applyOptimizeFlags(): void {
+	setOptimizeFlags(config.optimize);
 }
 
 // ── 共享渲染面板（T-686）────────────────────────────────────────────────────────
@@ -1446,6 +1469,10 @@ function syncPrefsControls(): void {
 	setChk('showSolids', config.debug.showSolids);
 	setChk('showTriggers', config.debug.showTriggers);
 	setChk('showPlaneInfo', config.debug.showPlaneInfo);
+	// 「优化处理」：config（默认/落盘恢复值）→ 复选框
+	setChk('optWaterRtReuse', config.optimize.waterRtReuse);
+	setChk('optBloomDirect', config.optimize.bloomDirect);
+	setChk('optMirrorLowRes', config.optimize.mirrorLowRes);
 	if (dom.hudVisibleChk) dom.hudVisibleChk.checked = config.hud.visible;
 	if (dom.showCrosshairChk) dom.showCrosshairChk.checked = config.hud.showCrosshair;
 	if (dom.chColor) dom.chColor.value = config.hud.crosshair.color;
@@ -1921,6 +1948,24 @@ function bindUI(): void {
 	bindSlider(dom.visViewDistanceRange, dom.visViewDistanceNum, (v) => {
 		applyTriDebug({ visViewDistance: v });
 	}, (v) => Math.round(v / 64) * 64);
+
+	// 「优化处理」：3 个默认全关的帧预算兜底开关（勾选 → config.optimize → 共享运行时开关 + 落盘）。
+	// 唯一施加口是 setOptimizeFlags：water.ts / post-fx.ts 每帧读 optimizeFlag() 即时生效，
+	// 不重建场景/材质，也不下发 Worker（纯主线程渲染开关）。
+	const applyOptimizePatch = (patch: Record<string, boolean>): void => {
+		applyConfigPatch(config, 'optimize', patch);
+		applyOptimizeFlags();
+		saveUiPrefs();
+	};
+	dom.optWaterRtReuseChk?.addEventListener('change', (e) => {
+		applyOptimizePatch({ waterRtReuse: (e.target as HTMLInputElement).checked });
+	});
+	dom.optBloomDirectChk?.addEventListener('change', (e) => {
+		applyOptimizePatch({ bloomDirect: (e.target as HTMLInputElement).checked });
+	});
+	dom.optMirrorLowResChk?.addEventListener('change', (e) => {
+		applyOptimizePatch({ mirrorLowRes: (e.target as HTMLInputElement).checked });
+	});
 
 	// 近平面自适应参数（滑块 ↔ 输入框双向同步 + 渲染器实时生效）
 	bindNearParamControls();

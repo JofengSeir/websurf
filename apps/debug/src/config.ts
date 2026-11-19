@@ -15,6 +15,7 @@
 
 import { PHYSICS_PARAM_DEFAULTS } from '../../../src/ts-shared/phys/param-defaults.js';
 import { COMPUTE_CAP_DEFAULT } from '../../../src/ts-shared/app/compute-cap.js';
+import { OPTIMIZE_DEFAULTS, type OptimizeFlags } from '../../../src/renderer-shared/config/optimize-flags.js';
 
 export interface PhysicsConfig {
   mode: 'noclip' | 'physics';
@@ -184,6 +185,19 @@ export interface TextureConfig {
   quality: 'original' | 'mini';
 }
 
+/** 「优化处理」帧预算兜底开关（默认全关，见 `src/renderer-shared/config/optimize-flags.ts`）。
+ *
+ * 三个开关都是**掉槽（帧预算不足）时的止损手段**，打开会掉画质（水面滞后 1 帧 / 无光晕 /
+ * 倒影半分辨率），只在本端面板 `apps/debug/web/index.html` 的「优化处理」区勾选。
+ * 字段定义与运行时读写都在共享模块 `optimize-flags.ts`（`water.ts` / `post-fx.ts` 每帧读
+ * `optimizeFlag()`）；本段只负责把面板选择**落盘**（UI 偏好 `vbsp:uiPrefs`）与启动回填，
+ * 由 `apps/debug/src/app.ts` 的 `applyOptimizeFlags()` 整段写进 `setOptimizeFlags()`。
+ *
+ * 不放进 `CONFIG_PREFS_SECTIONS` / `CONFIG_FULL_SECTIONS`：debug 的段清单是静态契约
+ * （`src/scripts/check-config-sync-contract.mjs` 锁定 5/7 段），且这些开关只作用主线程渲染，
+ * 不需要下发给物理 Worker。 */
+export interface OptimizeConfig extends OptimizeFlags {}
+
 /** 全量运行时配置。子段按消费方分组：`physics` / `input` / `player` 进 Rust 参数与箱体，`lod` / `debug` / `lighting` / `texture` 只走渲染侧。 */
 export interface RuntimeConfig {
   /** 物理参数（进 Rust `set_params` / `set_noclip` 与 `set_hull`）。 */
@@ -200,6 +214,8 @@ export interface RuntimeConfig {
   hud: HudConfig;
   /** 调试可视化开关（只作用于渲染侧）。 */
   debug: DebugConfig;
+  /** 「优化处理」帧预算兜底开关（渲染侧；`app.ts` 启动/勾选时整段写共享运行时开关）。 */
+  optimize: OptimizeConfig;
   /** 纹理画质（渲染侧）。 */
   texture: TextureConfig;
 }
@@ -285,6 +301,8 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     visViewDistance: 1024,
     showPlaneInfo: false,
   },
+  // 「优化处理」默认全关（唯一来源：共享模块 `OPTIMIZE_DEFAULTS`），面板勾选后才生效。
+  optimize: { ...OPTIMIZE_DEFAULTS },
   texture: {
     quality: 'original',
   },
