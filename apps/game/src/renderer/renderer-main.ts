@@ -726,6 +726,24 @@ export class RendererMain {
       get ready(): boolean {
         return self.predReady && self.scene !== null && self.camera !== null;
       },
+      /**
+       * 预测物理世界句柄（验证仪器）：给行为回放脚本直接读写 `set_state` /
+       * `set_teleport_player_name` / `tick` 的能力，用于隔离「引擎行为」与「实体→权威转发链路」。
+       * 与 debug 端的 `__wsInput.renderer().predPhys` 同口径；不参与生产逻辑。
+       */
+      get phys(): unknown {
+        return self.predPhys;
+      },
+      /**
+       * 模拟实体宿主派发「玩家名变化」回调（验证仪器）：走与生产相同的
+       * `onPlayerNameChange` 通道 → app 侧转发给权威 Worker。用于验证转发链路是否接通，
+       * 不参与生产逻辑。
+       */
+      simulatePlayerName(name: string): boolean {
+        if (typeof self.onPlayerNameChange !== 'function') return false;
+        self.onPlayerNameChange(name);
+        return true;
+      },
       /** 当前相机的世界位姿（截图可复现性的直接证据；角度已从弧度换回度）。 */
       cameraPose(): {
         pos: [number, number, number];

@@ -150,6 +150,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  // 实体副作用（共享宿主 EntityGameplay）→ 权威 Worker：渲染物理线已由宿主写，这里只做转发。
+  // 注：这组转发在 P2 Step3 收口时随 legacy 块被误删（C1 行为回放回归发现），缺了会让
+  // 加速板/跳高/限速/玩家名门控只在主线程生效，权威与主线程速度、传送门控分叉。
+  renderer.onPlayerVelocity = (vel, mode) => {
+    if (mode === 'set') bridge?.sendSetPushVelocity(vel);
+    else bridge?.sendAddVelocity(vel);
+  };
+  renderer.onSpeedCapChange = (cap) => bridge?.sendSetSpeedCap(cap);
+  renderer.onJumpHeightChange = (height) => bridge?.sendSetJumpHeight(height);
+  renderer.onPlayerNameChange = (name) => bridge?.sendSetPlayerName(name);
+  renderer.onMapPhysicsParam = (name, value) => bridge?.sendSetMapPhysicsParam(name, value);
+
   // 3.1 config 段同步实例（P5）：构造点=AppRuntime 就绪后；render 缺省（副作用全在 bridge.sendConfig 内）。
   //     applyPatch 用端 applyConfigPatch 保留旧守卫；send 直接走 bridge。
   configSync = createConfigSync<RuntimeConfig, RendererMain | null, InputBridge>({
