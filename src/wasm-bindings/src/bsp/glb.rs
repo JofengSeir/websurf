@@ -1369,7 +1369,10 @@ impl BspProcessor {
         ///   `info_teleport_destination_*`；缺 `targetname` 的不入列表，`origin` 解析失败按 `[0,0,0]` 计。
         /// - `triggers[]`：`index` / `classname` / `target` / `origin`（Y-up）/ `model` /
         ///   `model_mins` / `model_maxs`（世界 AABB，Y-up）/ `model_planes`（世界凸包平面
-        ///   `[nx,ny,nz,dist]`，朝外）/ `spawnflags` / `start_disabled` / `origin_raw` / `model_raw`。
+        ///   `[nx,ny,nz,dist]`，朝外）/ `spawnflags` / `start_disabled` /
+        ///   `filtername` / `filter_name` / `filter_negated`（名门控，与 debug-tools 路径
+        ///   共用 `bsp/teleport_filters.rs`；`filter_name=None` 即无门控）/
+        ///   `origin_raw` / `model_raw`。
         ///   只收 `trigger_teleport` / `trigger_teleport_random` / `trigger_teleport_relative`；
         ///   缺 `target` 的不入列表，`spawnflags` 缺失或解析失败按 1 计。
         /// - `links[]`：`trigger_idx` → `dest_idx`，逐对比较 `trigger.target == dest.targetname`；
@@ -1414,6 +1417,15 @@ impl BspProcessor {
                 spawnflags: u32,
                 /// StartDisabled（0=启用, 1=禁用）；disabled 不应触发传送。
                 start_disabled: bool,
+                /// 触发器自身的 `filtername`（原始值，指向 filter 实体的 targetname）；
+                /// `None` = 无门控。仅作溯源，运行时判定用 `filter_name`。
+                filtername: Option<String>,
+                /// 解析后的名门控模式：`filtername` → `filter_activator_name.filtername`
+                /// （filter 实体里真正要匹配的玩家名，支持末尾 `*`）。`None` = 无门控或解析不到。
+                filter_name: Option<String>,
+                /// 名门控是否取反：来自 filter 实体的 `Negated` 键。默认 false = 匹配才放行；
+                /// true = **不匹配才放行**（surf_666 起点 3 条门控全是 Negated=1）。
+                filter_negated: bool,
                 origin_raw: String,
                 model_raw: Option<String>,
             }
@@ -1603,6 +1615,11 @@ impl BspProcessor {
             let mut teleports: Vec<TeleportDest> = Vec::new();
             let mut triggers: Vec<TeleportTrigger> = Vec::new();
 
+            // 名门控表：`filter_activator_name.targetname` → (玩家名模式, 是否取反)。
+            // 与 debug-tools 路径共用 `teleport_filters` 一份实现（2026-11-19：此前 glb-lite
+            // 这份缺名门控，game 端把 `*361` 当无门控 → 拿到 krazy1 仍每 0.5s 回卷）。
+            let filter_names = super::teleport_filters::build_filter_names(bsp);
+
             for (idx, ent) in bsp.entities.iter().enumerate() {
                 let Ok(classname) = ent.prop("classname") else {
                     continue;
@@ -1661,6 +1678,12 @@ impl BspProcessor {
                         .prop("startdisabled")
                         .map(|s| s == "1")
                         .unwrap_or(false);
+
+                    // 名门控：trigger.filtername 指向 filter 实体，filter.filtername 是玩家名模式。
+                    // 解析不到（比如指向不存在的 filter）按无门控处理，保持旧地图行为。
+                    let filtername_raw = ent.prop("filtername").ok().map(|s| s.to_string());
+                    let (filtername, filter_name, filter_negated) =
+                        super::teleport_filters::resolve_trigger_filter(&filter_names, filtername_raw);
 
                     // model 格式 "*N" 指向 bsp.models[N]，几何为局部坐标（相对实体 origin）。
                     // trigger 可把多个分散 brush 绑到同一实体（Hammer 的 Tie to entity），此时
@@ -1756,6 +1779,9 @@ impl BspProcessor {
                             model_planes: None,
                             spawnflags,
                             start_disabled,
+                            filtername,
+                            filter_name,
+                            filter_negated,
                             origin_raw,
                             model_raw,
                         });
@@ -1777,6 +1803,9 @@ impl BspProcessor {
                                 },
                                 spawnflags,
                                 start_disabled,
+                                filtername: filtername.clone(),
+                                filter_name: filter_name.clone(),
+                                filter_negated,
                                 origin_raw: origin_raw.clone(),
                                 model_raw: model_raw.clone(),
                             });

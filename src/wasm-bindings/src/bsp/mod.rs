@@ -32,6 +32,10 @@ mod common;
 mod glb;
 #[cfg(feature = "debug-tools")]
 mod debug_tools;
+// 传送名门控解析：glb-lite（game/viewer）与 debug-tools（debug）两条 parse_teleports
+// 路径共用同一份实现（此前两处各写一份，game 那份缺名门控 → 回卷不受 filter 约束）。
+#[cfg(any(feature = "glb", feature = "debug-tools"))]
+mod teleport_filters;
 
 #[allow(unused_imports)]
 #[cfg(feature = "core")]
