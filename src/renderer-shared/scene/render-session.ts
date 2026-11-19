@@ -272,6 +272,10 @@ export class RenderSession {
   private budgetDtCount = 0;
   /** 距下一次评估还有多少帧。 */
   private budgetEvaluateIn = 30;
+  /** 升档后的最短保持帧数（期间不降档，避免「降级→恢复→再掉」的振荡）。 */
+  private budgetHold = 0;
+  /** 连续「非双槽帧」的帧数：降档要求它够长（慢机会一直贴着槽边，不轻易恢复画质）。 */
+  private budgetStableFrames = 0;
 
   private bbox = new THREE.Box3();
   private maxDim = 0;
@@ -1336,9 +1340,13 @@ export class RenderSession {
    * 实测（pcf-semantics 2026-11-16）终点机位渲染段 CPU 只有 1.5~2.8ms，却仍有 3.1/6.2ms
    * 交替 —— 说明超时的那一帧卡在 GPU/合成等待上，用 CPU 时长做阈值永远不触发。
    *
-   * 判定：滚动窗口 60 帧，双槽帧（dt>4.8ms）占比 ≥25% 且窗口内出现过单槽帧（dt<3.6ms，
-   * 说明 320Hz 档确实可达）⇒ 升一级；双槽占比 ≤5% ⇒ 降一级。每 30 帧评估一次，最多 2 级。
-   * 为什么要求「出现过单槽帧」：如果显示器本身就是 160Hz（dt 恒 6.25），控制器不该一直降级。
+   * 判定（2026-11-19 改敏感版）：每 10 帧评估一次，最多 2 级；
+   * - 升 L1：最近 30 帧里双槽帧（dt>4.8ms）≥2（≈6.7%）或最近 60 帧占比 ≥8%；
+   * - 升 L2：L1 基础上最近 30 帧双槽 ≥5（≈16.7%）或 60 帧占比 ≥15%；
+   * - 降档：连续「非双槽帧」够久才降（L2→L1 需 3200 帧≈10s、L1→L0 需 1600 帧≈5s，且距上次升档已过 180 帧）
+   * 为什么要求「窗口内出现过单槽帧」：如果显示器本身就是 160Hz（dt 恒 6.25），控制器不该一直降级。
+   * 旧判据（60 帧占比 ≥25% 才升）在实测里几乎不触发：用户机是「每秒丢 15~20 帧」≈5~7% 双槽，
+   * 落在 5%~25% 死区里，导致水面 cadence 自适应从未生效（`__vbspBudgetLevel` 恒 0）。
    *
    * 关闭开关：`globalThis.__vbspBudgetOn = false`；强制档位：`__vbspBudgetForce = 0|1|2`。
    */
@@ -1348,13 +1356,26 @@ export class RenderSession {
       __vbspBudgetOn?: boolean;
       __vbspBudgetForce?: number;
       __vbspBudgetLevel?: number;
-      __vbspBudget?: { level: number; ms: number; dt: number; doublePct: number; up: number; down: number };
+      __vbspBudget?: {
+        level: number;
+        ms: number;
+        dt: number;
+        doublePct: number;
+        doubles30: number;
+        doubles60: number;
+        stable: number;
+        up: number;
+        down: number;
+        hold: number;
+      };
     };
     // 滚动窗口采样 rAF 帧间隔。
     if (dtMs > 0) {
       this.budgetDt[this.budgetDtAt] = dtMs;
       this.budgetDtAt = (this.budgetDtAt + 1) % this.budgetDt.length;
       this.budgetDtCount = Math.min(this.budgetDtCount + 1, this.budgetDt.length);
+      if (dtMs > 4.8) this.budgetStableFrames = 0;
+      else this.budgetStableFrames++;
     }
     const write = (): void => {
       g.__vbspBudgetLevel = this.budgetLevel;
@@ -1363,8 +1384,12 @@ export class RenderSession {
         ms: +this.budgetLastMs.toFixed(3),
         dt: +dtMs.toFixed(3),
         doublePct: this.budgetDoublePct(),
+        doubles30: this.budgetDoubles(30),
+        doubles60: this.budgetDoubles(60),
+        stable: this.budgetStableFrames,
         up: this.budgetUp,
         down: this.budgetDown,
+        hold: this.budgetHold,
       };
     };
     if (g.__vbspBudgetOn === false) {
@@ -1377,22 +1402,56 @@ export class RenderSession {
       write();
       return;
     }
-    // 每 30 帧评估一次；窗口未填满前不动作。
+    // 每 10 帧评估一次；窗口未填满前不动作。
     this.budgetEvaluateIn--;
+    if (this.budgetHold > 0) this.budgetHold--;
     if (this.budgetEvaluateIn > 0 || this.budgetDtCount < 30) {
       write();
       return;
     }
-    this.budgetEvaluateIn = 30;
-    const ratio = this.budgetDoublePct();
-    if (ratio >= 0.25 && this.budgetLevel < 2) {
-      this.budgetLevel++;
-      this.budgetUp++;
-    } else if (ratio <= 0.05 && this.budgetLevel > 0) {
-      this.budgetLevel--;
+    this.budgetEvaluateIn = 10;
+    const doubles30 = this.budgetDoubles(30);
+    const doubles60 = this.budgetDoubles(60);
+    const ratio60 = doubles60 / Math.max(1, this.budgetDtCount);
+    if (this.budgetLevel === 0) {
+      if ((doubles30 >= 2 || ratio60 >= 0.08) && this.budgetHasSingleSlot(60)) {
+        this.budgetLevel = 1;
+        this.budgetUp++;
+        this.budgetHold = 180;
+      }
+    } else if (this.budgetLevel === 1) {
+      if (doubles30 >= 5 || ratio60 >= 0.15) {
+        this.budgetLevel = 2;
+        this.budgetUp++;
+        this.budgetHold = 180;
+      } else if (this.budgetHold === 0 && this.budgetStableFrames >= 1600 && doubles60 === 0) {
+        this.budgetLevel = 0;
+        this.budgetDown++;
+      }
+    } else if (this.budgetHold === 0 && this.budgetStableFrames >= 3200 && doubles60 === 0) {
+      this.budgetLevel = 1;
       this.budgetDown++;
     }
     write();
+  }
+
+  /** 最近 `n` 帧样本里的双槽帧（dt>4.8ms）个数（按时间顺序取最后 n 个）。 */
+  private budgetDoubles(n: number): number {
+    const len = this.budgetDt.length;
+    const count = Math.min(this.budgetDtCount, n);
+    const start = (this.budgetDtAt - count + len * 2) % len;
+    let dbl = 0;
+    for (let i = 0; i < count; i++) if (this.budgetDt[(start + i) % len] > 4.8) dbl++;
+    return dbl;
+  }
+
+  /** 最近 `n` 帧里是否出现过单槽帧（dt<3.6ms）——证明这台机器的 320Hz 档确实可达。 */
+  private budgetHasSingleSlot(n: number): boolean {
+    const len = this.budgetDt.length;
+    const count = Math.min(this.budgetDtCount, n);
+    const start = (this.budgetDtAt - count + len * 2) % len;
+    for (let i = 0; i < count; i++) if (this.budgetDt[(start + i) % len] < 3.6) return true;
+    return false;
   }
 
   /** 滚动窗口里「双槽帧」占比（dt>4.8ms）；窗口未填满按已有样本算。 */
