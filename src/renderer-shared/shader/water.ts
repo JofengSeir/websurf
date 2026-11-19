@@ -738,13 +738,16 @@ function refrCadence(): number {
   // 默认隔帧（实测见上：慢帧 22~24% → 13~16%，mean −0.3~0.4ms）。
   // 2026-11-19：慢机掉槽时按帧预算等级再放宽（见 mirrorCadence 同批实测，水面 pass 合计
   // 约 1.3ms/帧，是重载区超槽的主因）。A/B：`__vbspWaterRefrBudget = false`。
+  // 2026-11-19 二次调：用户机「level 2 + cadence 4」时重载区仍有 24 条/秒掉槽（水面帧
+  // frame 3.4~4.1ms > 3.125ms 槽），本机 CPU 降频 1.35× 的 A/B：cad4 丢槽 30.9%、
+  // cad6 25.1%、cad8 22.2%，fps 236→263→268 ⇒ L2 取 6。
   const budgetOn = (g as { __vbspWaterRefrBudget?: boolean }).__vbspWaterRefrBudget !== false;
   const level = (g as { __vbspBudgetLevel?: number }).__vbspBudgetLevel;
   const budgetLevel = typeof level === 'number' && Number.isFinite(level)
     ? Math.max(0, Math.min(2, Math.floor(level)))
     : 0;
-  if (budgetOn && budgetLevel >= 2) return 4;
-  if (budgetOn && budgetLevel >= 1) return 3;
+  if (budgetOn && budgetLevel >= 2) return 6;
+  if (budgetOn && budgetLevel >= 1) return 4;
   return 2;
 }
 
@@ -783,8 +786,11 @@ function mirrorCadence(): number {
   //   水面 pass 全关  frame p50 2.36ms、丢槽 20.0%、263.9fps
   // ⇒ 掉槽时把折射/镜面都放宽到 4 帧，能拿回约一半的水面成本。
   // 静态观感：320fps 下 4 帧 ≈12.5ms 的重反射/折射滞后，回放里 yaw 每帧 0.011° ⇒ 屏移 <2px。
-  if (budgetOn && budgetLevel >= 2) return 4;
-  if (budgetOn && budgetLevel >= 1) return 3;
+  // 2026-11-19 二次调（同 refrCadence）：用户机 level 2 下 cad4 仍有 1.0~1.4ms 的水面帧超槽，
+  // 本机 CPU 降频 1.35×：cad4 丢槽 30.9% → cad6 25.1% → cad8 22.2% ⇒ L2 取 6（6 帧≈19ms 滞后，
+  // 仅在持续掉槽时启用）。
+  if (budgetOn && budgetLevel >= 2) return 6;
+  if (budgetOn && budgetLevel >= 1) return 4;
   // 默认隔帧（实测见上：p90 6.25→3.23ms、慢帧 17~20%→9~12%）。
   return 2;
 }
