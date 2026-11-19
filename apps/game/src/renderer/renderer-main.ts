@@ -744,6 +744,21 @@ export class RendererMain {
         self.onPlayerNameChange(name);
         return true;
       },
+      /**
+       * 确定性推进世界若干固定步（验证仪器）：物理 tick + 实体/宿主副作用（`gameplay.update`）。
+       * 用于隔离「实体层驱动物理」的行为（加速板/跳跃增幅区/传送门控），不依赖 rAF 与真实输入。
+       * 不参与生产逻辑。
+       */
+      stepWorld(frames: number, dt: number): boolean {
+        if (!self.predPhys || !self.gameplay) return false;
+        const n = Math.max(0, Math.min(100000, Math.floor(frames)));
+        const step = Number.isFinite(dt) && dt > 0 ? dt : 1 / 64;
+        for (let i = 0; i < n; i++) {
+          self.predPhys.tick(step, 0, 0, 0);
+          self.gameplay.update(step);
+        }
+        return true;
+      },
       /** 当前相机的世界位姿（截图可复现性的直接证据；角度已从弧度换回度）。 */
       cameraPose(): {
         pos: [number, number, number];
