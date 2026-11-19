@@ -50,7 +50,11 @@ import {
   type PlayerPresentation,
 } from '../../../../src/ts-shared/app/player-presentation.js';
 import { createSimClock, type SimClock, type SimClockStats } from '../../../../src/ts-shared/app/sim-clock.js';
-import { COMPUTE_CAP_FALLBACK } from '../../../../src/ts-shared/app/compute-cap.js';
+import {
+  COMPUTE_CAP_DEFAULT,
+  COMPUTE_CAP_MAX,
+  COMPUTE_CAP_MIN,
+} from '../../../../src/ts-shared/app/compute-cap.js';
 import { Variant } from '../../../../src/ts-shared/entity/variant.js';
 import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 
@@ -113,11 +117,11 @@ export class RendererMain {
   private presentation: PlayerPresentation | null = null;
 
   /**
-   * 计算频率上限（Hz）：固定步长模拟时钟的目标频率。默认值来自共享兜底
-   * `COMPUTE_CAP_FALLBACK`（480，面板启动时会用 `rAF×1.5` 探测值覆盖）；
-   * 量程 48–1000，由 `setComputeRateCap` 改写。
+   * 计算频率上限（Hz）：固定步长模拟时钟的目标频率。默认值来自共享常量
+   * `COMPUTE_CAP_DEFAULT`（1000Hz，owner 2026-11-19 指定；最高 2000）；
+   * 量程 48–2000，由 `setComputeRateCap` 改写。
    */
-  private computeRateCap = COMPUTE_CAP_FALLBACK;
+  private computeRateCap = COMPUTE_CAP_DEFAULT;
 
   /**
    * 固定步长模拟时钟（共享 `sim-clock`）：把「模拟」从 rAF 解耦——rAF 只负责渲染，
@@ -226,10 +230,10 @@ export class RendererMain {
     });
   }
 
-  /** 计算频率上限（Hz，48–1000）；面板控件通过 `setComputeRateCap` 写入，HUD 读 `simClockStats`。 */
+  /** 计算频率上限（Hz，48–2000）；面板控件通过 `setComputeRateCap` 写入，HUD 读 `simClockStats`。 */
   setComputeRateCap(hz: number): void {
     if (!Number.isFinite(hz)) return;
-    this.computeRateCap = Math.min(1000, Math.max(48, Math.round(hz)));
+    this.computeRateCap = Math.min(COMPUTE_CAP_MAX, Math.max(COMPUTE_CAP_MIN, Math.round(hz)));
   }
 
   /** 模拟时钟统计（HUD 用）：物理未就绪时返回 null，让 HUD 显示「—」。 */
@@ -295,7 +299,7 @@ export class RendererMain {
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
     // 计算帧率上限取独立参数 `physics.computeRateCap`（**不是** `physics.tickRate`：
-    // 后者是权威物理步长/难度，48–128）；面板启动时用 rAF×1.5 探测值覆盖它。
+    // 后者是权威物理步长/难度，48–128）；默认 1000Hz，面板可改（48–2000）。
     this.setComputeRateCap(config.physics.computeRateCap);
     // 默认跳高由面板参数反推（与 debug 端和共享 `params.ts` 的 jump_height 同式）；
     // 缺省留 57 是为了 init 之前就调用 `setupGameplay` 的异常路径。

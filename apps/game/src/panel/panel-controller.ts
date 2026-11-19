@@ -24,9 +24,9 @@ import type { RuntimeConfig } from '../config.js';
 import { buildPhysicsParams, DEFAULT_CONFIG, LOCKED_TICK_RATE } from '../config.js';
 import { readRenderPrefs, writeRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
 import {
+  COMPUTE_CAP_DEFAULT,
   COMPUTE_CAP_MAX,
   COMPUTE_CAP_MIN,
-  detectDefaultComputeCapHz,
   formatComputeHudText,
   type SimClockStatsLike,
 } from '../../../../src/ts-shared/app/compute-cap.js';
@@ -49,10 +49,8 @@ export class PanelController {
   private recordingAction: BindableAction | null = null; private sceneReady = false; // 场景就绪（updateVisibility 写入）
   /** 录制期间挂在 window 上的 keydown 监听器引用；`stopRecording` 用它配合 `{ capture: true }` 解绑。 */
   private recordingHandler: ((e: KeyboardEvent) => void) | null = null;
-  /** task-95：用户是否手动调过 computeRateCap（手动值优先于启动探测默认值，并走 panelPrefs 持久化）。 */
+  /** task-95：用户是否手动调过 computeRateCap（手动值优先于默认值，并走 panelPrefs 持久化）。 */
   private computeRateTouched = false;
-  /** task-95：启动探测到的「默认计算帧率上限」（Hz；null = 尚未探测）。 */
-  private detectedComputeCapHz: number | null = null;
   /** task-95：HUD「呈现 fps」rAF 自采样计数。 */
   private hudFpsFrames = 0;
   private hudFpsAt = 0;
@@ -107,8 +105,8 @@ export class PanelController {
     this.syncControlsFromConfig();
     this.sendAllPrefs();
     this.applyCrosshair();
-    // task-95：启动探测「计算帧率上限」默认值（异步，手动值优先）+ HUD 双指标
-    this.applyDetectedComputeCapDefault();
+    // task-95：启动「计算帧率上限」默认值（固定 1000Hz，存档手动值优先）+ HUD 双指标
+    this.applyDefaultComputeCap();
     this.startComputeHud();
   }
 
@@ -800,55 +798,46 @@ export class PanelController {
     this.onSyncLightingMode?.(p.lighting.mode);
   }
 
-  // ── task-95：计算帧率上限（physics.computeRateCap）默认值探测 + HUD 双指标 ─────────
+  // ── task-95：计算帧率上限（physics.computeRateCap）默认值 + HUD 双指标 ─────────
 
   /**
-   * 启动默认值探测：用户没手动改过 computeRateCap 时，把 rAF×1.5 的探测值当「默认值」下发
-   * （config + 主线程模拟时钟）。与物理步长 `tickRate`（48..128，控制难度）完全独立。
-   * 探测失败时共享模块返回 480（兜底），同样只在无手动值时生效。
+   * 启动默认值：`COMPUTE_CAP_DEFAULT`（1000Hz，owner 2026-11-19 指定；最高 2000Hz）。
+   * 只在「用户没手动改过、且存档也没给非默认值」时下发（config + 主线程模拟时钟）。
+   * 与物理步长 `tickRate`（48..128，控制难度）完全独立。
    */
-  private applyDetectedComputeCapDefault(): void {
-    void detectDefaultComputeCapHz().then((hz) => {
-      if (this.computeRateTouched) return;
-      this.detectedComputeCapHz = hz;
-      const stillDefault = this.config.physics.computeRateCap === DEFAULT_CONFIG.physics.computeRateCap;
-      if (!stillDefault) {
-        // 偏好存档/调用方给了非默认值：视为手动选择，只把模拟时钟对齐，不改值
-        this.onSyncComputeRateCap?.(this.config.physics.computeRateCap);
-        return;
-      }
-      this.config.physics.computeRateCap = hz;
-      const el = document.getElementById('computeRateCap') as HTMLInputElement | null;
-      const num = document.getElementById('computeRateCapNum') as HTMLInputElement | null;
-      if (el) el.value = String(hz);
-      if (num) num.value = String(hz);
-      this.bridge.sendConfig('physics', { computeRateCap: hz });
-      this.onSyncComputeRateCap?.(hz);
-    });
+  private applyDefaultComputeCap(): void {
+    if (this.computeRateTouched) {
+      this.onSyncComputeRateCap?.(this.config.physics.computeRateCap);
+      return;
+    }
+    const stillDefault = this.config.physics.computeRateCap === DEFAULT_CONFIG.physics.computeRateCap;
+    if (!stillDefault) {
+      // 偏好存档给了非默认值：视为手动选择，只把模拟时钟对齐，不改值
+      this.onSyncComputeRateCap?.(this.config.physics.computeRateCap);
+      return;
+    }
+    this.config.physics.computeRateCap = COMPUTE_CAP_DEFAULT;
+    const el = document.getElementById('computeRateCap') as HTMLInputElement | null;
+    const num = document.getElementById('computeRateCapNum') as HTMLInputElement | null;
+    if (el) el.value = String(COMPUTE_CAP_DEFAULT);
+    if (num) num.value = String(COMPUTE_CAP_DEFAULT);
+    this.bridge.sendConfig('physics', { computeRateCap: COMPUTE_CAP_DEFAULT });
+    this.onSyncComputeRateCap?.(COMPUTE_CAP_DEFAULT);
   }
 
   /**
-   * 恢复默认后把 computeRateCap 拉回「启动探测的计算帧率上限」（默认 rAF×1.5，不可测 480）。
-   *
-   * `DEFAULT_CONFIG.physics.computeRateCap` 是兜底值 480，不是本机探测值；只做 resetPane 会把
-   * 计算频率降到 480（或探测失败时的兜底值），与启动默认不一致，故重置物理分栏后重新下发探测值。
+   * 恢复默认后把 computeRateCap 拉回 `COMPUTE_CAP_DEFAULT`（1000Hz）。
    * 注意：`tickRate`（物理步长/难度）的恢复默认是另一件独立的事，不走这里。
    */
   private restoreComputeRateDefault(): void {
     this.computeRateTouched = false;
-    const apply = (hz: number): void => {
-      this.detectedComputeCapHz = hz;
-      this.config.physics.computeRateCap = hz;
-      const el = document.getElementById('computeRateCap') as HTMLInputElement | null;
-      const num = document.getElementById('computeRateCapNum') as HTMLInputElement | null;
-      if (el) el.value = String(hz);
-      if (num) num.value = String(hz);
-      this.bridge.sendConfig('physics', { computeRateCap: hz });
-      this.onSyncComputeRateCap?.(hz);
-    };
-    // 探测值还没到（例如启动时用户已手动改过）：补一次探测，避免落到兜底值。
-    if (this.detectedComputeCapHz === null) void detectDefaultComputeCapHz().then(apply);
-    else apply(this.detectedComputeCapHz);
+    this.config.physics.computeRateCap = COMPUTE_CAP_DEFAULT;
+    const el = document.getElementById('computeRateCap') as HTMLInputElement | null;
+    const num = document.getElementById('computeRateCapNum') as HTMLInputElement | null;
+    if (el) el.value = String(COMPUTE_CAP_DEFAULT);
+    if (num) num.value = String(COMPUTE_CAP_DEFAULT);
+    this.bridge.sendConfig('physics', { computeRateCap: COMPUTE_CAP_DEFAULT });
+    this.onSyncComputeRateCap?.(COMPUTE_CAP_DEFAULT);
   }
 
   /**

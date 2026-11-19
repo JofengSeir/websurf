@@ -14,7 +14,7 @@
  */
 
 import { PHYSICS_PARAM_DEFAULTS } from '../../../src/ts-shared/phys/param-defaults.js';
-import { COMPUTE_CAP_FALLBACK } from '../../../src/ts-shared/app/compute-cap.js';
+import { COMPUTE_CAP_DEFAULT } from '../../../src/ts-shared/app/compute-cap.js';
 
 export interface PhysicsConfig {
   mode: 'noclip' | 'physics';
@@ -50,9 +50,9 @@ export interface PhysicsConfig {
    * `apps/debug/src/physics/param-defs.ts` 的 `PARAM_DEFS` 中 `tickRate` 项（48–128）。
    * 注意：它控制的是**权威物理步长与手感/难度**，不是「计算帧率上限」（后者见 computeRateCap）。 */
   tickRate: number;
-  /** 计算帧率上限（Hz，默认按启动时 rAF×1.5 探测、兜底 480）：主线程固定步长模拟时钟的目标
+  /** 计算帧率上限（Hz，默认 1000、最高 2000）：主线程固定步长模拟时钟的目标
    * 频率，与呈现（rAF）解耦，只影响主线程每秒算多少步预测/呈现，**不影响**权威物理步长与难度
-   * （那是 `tickRate`）。面板取值范围见 `PARAM_DEFS` 的 `computeRateCap` 项（48–1000）。 */
+   * （那是 `tickRate`）。面板取值范围见 `PARAM_DEFS` 的 `computeRateCap` 项（48–2000）。 */
   computeRateCap: number;
 }
 
@@ -223,7 +223,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     groundAngle: (30 * Math.PI) / 180,
     slideAngle: (70 * Math.PI) / 180,
     tickRate: PHYSICS_PARAM_DEFAULTS.tickRate,
-    computeRateCap: COMPUTE_CAP_FALLBACK,
+    computeRateCap: COMPUTE_CAP_DEFAULT,
   },
   player: {
     radius: 16,

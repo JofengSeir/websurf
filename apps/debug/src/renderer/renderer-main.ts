@@ -48,7 +48,7 @@ import {
 } from '../../../../src/ts-shared/app/player-presentation.js';
 import { createSimClock, type SimClock, type SimClockStats } from '../../../../src/ts-shared/app/sim-clock.js';
 import {
-  COMPUTE_CAP_FALLBACK,
+  COMPUTE_CAP_DEFAULT,
   COMPUTE_CAP_MAX,
   COMPUTE_CAP_MIN,
 } from '../../../../src/ts-shared/app/compute-cap.js';
@@ -270,12 +270,12 @@ export class RendererMain {
   private presentation: PlayerPresentation | null = null;
 
   /**
-   * 计算频率上限（Hz）：固定步长模拟时钟的目标频率。默认值来自共享兜底
-   * `COMPUTE_CAP_FALLBACK`（480，面板启动时会用 `rAF×1.5` 的探测值覆盖）；
-   * 量程 48–1000，由 `setComputeRateCap` 改写。**不是** `physics.tickRate`
+   * 计算频率上限（Hz）：固定步长模拟时钟的目标频率。默认值来自共享常量
+   * `COMPUTE_CAP_DEFAULT`（1000Hz，owner 2026-11-19 指定；最高 2000）；
+   * 量程 48–2000，由 `setComputeRateCap` 改写。**不是** `physics.tickRate`
    * （那是权威物理步长/难度，48–128）。
    */
-  private computeRateCap = COMPUTE_CAP_FALLBACK;
+  private computeRateCap = COMPUTE_CAP_DEFAULT;
 
   /**
    * 固定步长模拟时钟（共享 `sim-clock`）：把「模拟」从 rAF 解耦——rAF 只负责渲染，
@@ -580,7 +580,7 @@ export class RendererMain {
     });
   }
 
-  /** 计算频率上限（Hz，48–1000）；面板控件通过 `setComputeRateCap` 写入，HUD 读 `simClockStats`。 */
+  /** 计算频率上限（Hz，48–2000）；面板控件通过 `setComputeRateCap` 写入，HUD 读 `simClockStats`。 */
   setComputeRateCap(hz: number): void {
     if (!Number.isFinite(hz)) return;
     this.computeRateCap = Math.min(COMPUTE_CAP_MAX, Math.max(COMPUTE_CAP_MIN, Math.round(hz)));
@@ -613,7 +613,7 @@ export class RendererMain {
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
     // 计算帧率上限取独立参数 `physics.computeRateCap`（**不是** `physics.tickRate`：
-    // 后者是权威物理步长/难度，48–128）；面板 app.ts 启动时用 rAF×1.5 探测值覆盖它。
+    // 后者是权威物理步长/难度，48–128）；默认 1000Hz，面板可改（48–2000）。
     this.setComputeRateCap(config.physics.computeRateCap);
     // 默认跳高由面板参数反推（与 `src/ts-shared/phys/params.ts` 的 jump_height 同式），
     // 「跳跃增幅区」离开时用这个值把跳高压回去。

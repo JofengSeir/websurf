@@ -12,7 +12,7 @@
  */
 import { PHYSICS_PARAM_DEFAULTS } from '../../../../src/ts-shared/phys/param-defaults.js';
 import {
-  COMPUTE_CAP_FALLBACK,
+  COMPUTE_CAP_DEFAULT,
   COMPUTE_CAP_MAX,
   COMPUTE_CAP_MIN,
 } from '../../../../src/ts-shared/app/compute-cap.js';
@@ -114,8 +114,8 @@ export const PARAM_DEFS: ParamDef[] = [
   },
   {
     name: 'computeRateCap', label: '计算帧率上限', unit: 'Hz',
-    kind: 'number', default: COMPUTE_CAP_FALLBACK, min: COMPUTE_CAP_MIN, max: COMPUTE_CAP_MAX, step: 1,
-    description: '主线程固定步长模拟时钟的目标频率（与 rAF 呈现解耦、独立于上面的物理模拟频率）：默认按启动时 rAF×1.5 探测（clamp 48..1000，不可测 480），只影响主线程每秒算多少步预测/呈现，不改权威物理步长与难度。',
+    kind: 'number', default: COMPUTE_CAP_DEFAULT, min: COMPUTE_CAP_MIN, max: COMPUTE_CAP_MAX, step: 1,
+    description: '主线程固定步长模拟时钟的目标频率（与 rAF 呈现解耦、独立于上面的物理模拟频率）：默认 1000Hz、最高 2000Hz（owner 2026-11-19 指定），只影响主线程每秒算多少步预测/呈现，不改权威物理步长与难度。',
   },
   {
     name: 'pushOut', label: '贴面推开量', unit: 'u',

@@ -119,10 +119,10 @@
             <input type="range" id="tickRate" min="48" max="128" step="1" value="64" />
             <div class="val"><input id="tickRateNum" type="number" value="64" /></div></div>
           <!-- task-95：独立于物理步长的「计算帧率上限」：主线程固定步长模拟时钟的目标频率，
-               默认由启动探测 rAF×1.5（clamp 48..1000，不可测 480）覆盖，见 compute-cap.ts -->
+               默认 1000Hz、最高 2000Hz（owner 2026-11-19 指定），见 compute-cap.ts -->
           <div class="row"><label>计算帧率上限 (Hz)</label>
-            <input type="range" id="computeRateCap" min="48" max="1000" step="1" value="480" />
-            <div class="val"><input id="computeRateCapNum" type="number" value="480" /></div></div>
+            <input type="range" id="computeRateCap" min="48" max="2000" step="1" value="1000" />
+            <div class="val"><input id="computeRateCapNum" type="number" value="1000" /></div></div>
           <div class="row"><label>重力</label>
             <input type="range" id="gravity" min="200" max="2000" step="1" value="800" />
             <div class="val"><input id="gravityNum" type="number" value="800" /></div></div>
