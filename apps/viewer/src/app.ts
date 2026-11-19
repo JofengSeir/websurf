@@ -944,6 +944,9 @@ window.addEventListener('resize', () => scene.resize(gameCanvas));
 
 let lastNow = performance.now();
 let hudAt = 0;
+/** task-95：HUD「呈现 fps」自采样（viewer 无主线程模拟时钟/无 rendererMain，只显示呈现侧；计算侧不伪造）。 */
+let hudFpsAt = performance.now();
+let hudFpsFrames = 0;
 
 /**
  * 自动跟随的「在动」阈值（世界单位，轨道包围盒对角线）：低于它视为挂机实体（花名册的 `moving`）。
@@ -954,6 +957,16 @@ const MOVING_MIN = 200;
 
 function frame(now: number): void {
   requestAnimationFrame(frame);
+
+  // task-95：HUD「呈现 xxxfps」——每 ~500ms 用 rAF 帧数折算（viewer 没有权威模拟时钟，
+  // 计算侧读数只在 debug/game 端存在；本端只显示呈现侧，不伪造「计算 —」以外的东西）。
+  hudFpsFrames += 1;
+  if (now - hudFpsAt >= 500) {
+    const fpsEl = document.getElementById('computeStats');
+    if (fpsEl) fpsEl.textContent = `呈现 ${Math.round((hudFpsFrames * 1000) / (now - hudFpsAt))}fps`;
+    hudFpsFrames = 0;
+    hudFpsAt = now;
+  }
 
   const s = activeSession();
 

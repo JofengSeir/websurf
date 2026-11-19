@@ -20,6 +20,7 @@
 import { LIGHTING_PRESENTATION_DEFAULTS } from '../../../src/renderer-shared/shader/lightmap-shader.js';
 import { buildPhysicsParams as sharedBuildPhysicsParams } from '../../../src/ts-shared/phys/params.js';
 import { PHYSICS_PARAM_DEFAULTS } from '../../../src/ts-shared/phys/param-defaults.js';
+import { COMPUTE_CAP_FALLBACK } from '../../../src/ts-shared/app/compute-cap.js';
 
 export interface PhysicsConfig {
   /** 物理模式：physics（权威物理）/ noclip（自由视角，禁物理/传送）。
@@ -30,9 +31,14 @@ export interface PhysicsConfig {
   /** 物理模拟频率（Hz）。读点：`apps/game/src/worker/main.ts` 的 `getConfigTickRate`
    *  （→ `src/ts-shared/auth/auth-loop.ts` 的 `setFixedDt`，固定步长 = 1 / max(tickRate, 1) 秒）、
    *  `apps/game/src/input/input-bridge.ts` 的 `sendConfig`（显式附加进 physics 下发参数）、
-   *  面板 tickRate 控件（量程 48..128）、`apps/game/src/app.ts` 的 `syncFullConfig`
-   *  （`lockTickRate` 为真时强制写 `LOCKED_TICK_RATE`）。 */
+   *  面板「模拟频率」控件（量程 48..128）、`apps/game/src/app.ts` 的 `syncFullConfig`
+   *  （`lockTickRate` 为真时强制写 `LOCKED_TICK_RATE`）。
+   *  它控制权威物理步长与手感/难度，**不是**「计算帧率上限」（后者是 `computeRateCap`）。 */
   tickRate: number;
+  /** 计算帧率上限（Hz）：主线程固定步长模拟时钟的目标频率（与 rAF 呈现解耦、独立于
+   *  `tickRate` 的物理步长/难度）。默认值按启动时 rAF×1.5 探测（clamp 48..1000，不可测 480，
+   *  见 `src/ts-shared/app/compute-cap.ts`）；面板「计算帧率上限」控件 48..1000。 */
+  computeRateCap: number;
   /** 重力加速度（HU/s²）→ Rust `gravity`。读点：`worker/main.ts` 的 `syncParamsToWasm`
    *  与 `buildPhysicsParams`；面板重力控件（量程 200..2000）。 */
   gravity: number;
@@ -191,6 +197,8 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     // 与 debug 物理面板对齐（D3）：默认值取共享层常量（0.1 / true），面板可调并持久化
     pushOut: PHYSICS_PARAM_DEFAULTS.pushOut,
     pushOutOnlyWhenSolid: PHYSICS_PARAM_DEFAULTS.pushOutOnlyWhenSolid,
+    // 主线程计算帧率上限（与物理步长 tickRate 解耦）：默认兜底 480，启动时由面板探测 rAF×1.5 覆盖
+    computeRateCap: COMPUTE_CAP_FALLBACK,
   },
   input: {
     sensitivity: 1.5,

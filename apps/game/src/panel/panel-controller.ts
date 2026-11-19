@@ -21,7 +21,15 @@
  */
 
 import type { RuntimeConfig } from '../config.js';
-import { buildPhysicsParams, DEFAULT_CONFIG, LOCKED_TICK_RATE } from '../config.js'; import { readRenderPrefs, writeRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
+import { buildPhysicsParams, DEFAULT_CONFIG, LOCKED_TICK_RATE } from '../config.js';
+import { readRenderPrefs, writeRenderPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
+import {
+  COMPUTE_CAP_MAX,
+  COMPUTE_CAP_MIN,
+  detectDefaultComputeCapHz,
+  formatComputeHudText,
+  type SimClockStatsLike,
+} from '../../../../src/ts-shared/app/compute-cap.js';
 import type { InputBridge } from '../input/input-bridge.js';
 import type { KeyboardInput } from '../input/keyboard.js';
 import {
@@ -41,6 +49,13 @@ export class PanelController {
   private recordingAction: BindableAction | null = null; private sceneReady = false; // 场景就绪（updateVisibility 写入）
   /** 录制期间挂在 window 上的 keydown 监听器引用；`stopRecording` 用它配合 `{ capture: true }` 解绑。 */
   private recordingHandler: ((e: KeyboardEvent) => void) | null = null;
+  /** task-95：用户是否手动调过 computeRateCap（手动值优先于启动探测默认值，并走 panelPrefs 持久化）。 */
+  private computeRateTouched = false;
+  /** task-95：启动探测到的「默认计算帧率上限」（Hz；null = 尚未探测）。 */
+  private detectedComputeCapHz: number | null = null;
+  /** task-95：HUD「呈现 fps」rAF 自采样计数。 */
+  private hudFpsFrames = 0;
+  private hudFpsAt = 0;
 
   constructor(
     private readonly config: RuntimeConfig,
@@ -74,6 +89,10 @@ export class PanelController {
     private readonly onSavePointDelete?: (index: number) => void,
     /** 读取存点（索引）→ `apps/game/src/app.ts` 取 `SavePointStore.all()` 的第 i 项交渲染器 `loadSavepoint`（`set_state` + 权威同步）。 */
     private readonly onSavePointLoad?: (index: number) => void,
+    /** task-95：计算帧率上限（`physics.computeRateCap`）→ 主线程模拟时钟 `renderer.setComputeRateCap`。 */
+    private readonly onSyncComputeRateCap?: (hz: number) => void,
+    /** task-95：主线程模拟时钟统计 `renderer.simClockStats` → HUD「计算 xxxHz」；未接线时显示 `—`。 */
+    private readonly getSimClockStats?: () => SimClockStatsLike | null,
   ) {
     this.root = document.getElementById('panel') as HTMLElement;
     // 键位：与 app.ts 构造 KeyboardInput 时同源——都走 loadKeymap() 读 localStorage，缺省回默认表
@@ -88,6 +107,9 @@ export class PanelController {
     this.syncControlsFromConfig();
     this.sendAllPrefs();
     this.applyCrosshair();
+    // task-95：启动探测「计算帧率上限」默认值（异步，手动值优先）+ HUD 双指标
+    this.applyDetectedComputeCapDefault();
+    this.startComputeHud();
   }
 
   /** 按指针锁定与场景就绪刷新可见性：`!getLocked() || !sceneReady` 时移除 `hidden` 类。 */
@@ -293,6 +315,8 @@ export class PanelController {
         tickRateNum.disabled = true;
       }
       this.bridge.sendConfig('physics', { tickRate: LOCKED_TICK_RATE });
+      // 计算帧率上限与 tickRate 无关：锁定态只锁物理步长，时钟仍按 computeRateCap 对齐
+      this.onSyncComputeRateCap?.(this.config.physics.computeRateCap);
     } else {
       this.bindSlider('tickRate', 48, 128, 1, (v) => {
         this.config.physics.tickRate = v;
@@ -300,6 +324,14 @@ export class PanelController {
         this.pushPhysicsParams();
       });
     }
+    // 计算帧率上限（独立于物理步长 tickRate）：主线程模拟时钟目标频率，面板 48..1000。
+    this.bindSlider('computeRateCap', COMPUTE_CAP_MIN, COMPUTE_CAP_MAX, 1, (v) => {
+      // 手动改动标记后优先于启动探测默认值
+      this.computeRateTouched = true;
+      this.config.physics.computeRateCap = v;
+      this.bridge.sendConfig('physics', { computeRateCap: v });
+      this.onSyncComputeRateCap?.(v);
+    });
     this.bindSlider('gravity', 200, 2000, 1, (v) => {
       this.config.physics.gravity = v;
       this.bridge.sendConfig('physics', { gravity: v });
@@ -696,6 +728,7 @@ export class PanelController {
     const p = this.config;
     // 物理（config.physics）
     setVal('tickRate', String(p.physics.tickRate));
+    setVal('computeRateCap', String(p.physics.computeRateCap));
     setVal('gravity', String(p.physics.gravity));
     setVal('accelerate', String(p.physics.accelerate));
     setVal('airAccel', String(p.physics.airAccel));
@@ -746,6 +779,9 @@ export class PanelController {
   private sendAllPrefs(): void {
     const p = this.config;
     this.bridge.sendConfig('physics', { ...p.physics });
+    // task-95：初始计算帧率上限同步给主线程模拟时钟；启动探测稍后（异步）会再次覆盖成
+    // 「用户未手动改过时的默认值」。注意与物理步长 tickRate 无关。
+    this.onSyncComputeRateCap?.(p.physics.computeRateCap);
     this.bridge.sendConfig('player', { ...p.player });
     this.bridge.sendConfig('input', {
       sensitivity: p.input.sensitivity,
@@ -762,6 +798,78 @@ export class PanelController {
     this.onSyncLightGamma?.(p.lighting.lightGamma);
     this.onSyncAmbientScale?.(p.lighting.ambientScale);
     this.onSyncLightingMode?.(p.lighting.mode);
+  }
+
+  // ── task-95：计算帧率上限（physics.computeRateCap）默认值探测 + HUD 双指标 ─────────
+
+  /**
+   * 启动默认值探测：用户没手动改过 computeRateCap 时，把 rAF×1.5 的探测值当「默认值」下发
+   * （config + 主线程模拟时钟）。与物理步长 `tickRate`（48..128，控制难度）完全独立。
+   * 探测失败时共享模块返回 480（兜底），同样只在无手动值时生效。
+   */
+  private applyDetectedComputeCapDefault(): void {
+    void detectDefaultComputeCapHz().then((hz) => {
+      if (this.computeRateTouched) return;
+      this.detectedComputeCapHz = hz;
+      const stillDefault = this.config.physics.computeRateCap === DEFAULT_CONFIG.physics.computeRateCap;
+      if (!stillDefault) {
+        // 偏好存档/调用方给了非默认值：视为手动选择，只把模拟时钟对齐，不改值
+        this.onSyncComputeRateCap?.(this.config.physics.computeRateCap);
+        return;
+      }
+      this.config.physics.computeRateCap = hz;
+      const el = document.getElementById('computeRateCap') as HTMLInputElement | null;
+      const num = document.getElementById('computeRateCapNum') as HTMLInputElement | null;
+      if (el) el.value = String(hz);
+      if (num) num.value = String(hz);
+      this.bridge.sendConfig('physics', { computeRateCap: hz });
+      this.onSyncComputeRateCap?.(hz);
+    });
+  }
+
+  /**
+   * 恢复默认后把 computeRateCap 拉回「启动探测的计算帧率上限」（默认 rAF×1.5，不可测 480）。
+   *
+   * `DEFAULT_CONFIG.physics.computeRateCap` 是兜底值 480，不是本机探测值；只做 resetPane 会把
+   * 计算频率降到 480（或探测失败时的兜底值），与启动默认不一致，故重置物理分栏后重新下发探测值。
+   * 注意：`tickRate`（物理步长/难度）的恢复默认是另一件独立的事，不走这里。
+   */
+  private restoreComputeRateDefault(): void {
+    this.computeRateTouched = false;
+    const apply = (hz: number): void => {
+      this.detectedComputeCapHz = hz;
+      this.config.physics.computeRateCap = hz;
+      const el = document.getElementById('computeRateCap') as HTMLInputElement | null;
+      const num = document.getElementById('computeRateCapNum') as HTMLInputElement | null;
+      if (el) el.value = String(hz);
+      if (num) num.value = String(hz);
+      this.bridge.sendConfig('physics', { computeRateCap: hz });
+      this.onSyncComputeRateCap?.(hz);
+    };
+    // 探测值还没到（例如启动时用户已手动改过）：补一次探测，避免落到兜底值。
+    if (this.detectedComputeCapHz === null) void detectDefaultComputeCapHz().then(apply);
+    else apply(this.detectedComputeCapHz);
+  }
+
+  /**
+   * HUD 双指标行：每 ~500ms 刷新「计算 xxxHz / 呈现 xxxfps」。
+   * 计算侧读 `renderer.simClockStats`（未接线/回放/单步闸门时显示 —）；呈现侧用 rAF 帧数自采样。
+   */
+  private startComputeHud(): void {
+    const el = document.getElementById('computeStats');
+    if (!el) return; // 页面未提供 HUD 行（测试/裁剪构建）→ 静默跳过
+    this.hudFpsAt = performance.now();
+    const tick = (now: number): void => {
+      requestAnimationFrame(tick);
+      this.hudFpsFrames += 1;
+      const elapsedMs = now - this.hudFpsAt;
+      if (elapsedMs < 500) return;
+      const fps = (this.hudFpsFrames * 1000) / elapsedMs;
+      this.hudFpsFrames = 0;
+      this.hudFpsAt = now;
+      el.textContent = formatComputeHudText(this.getSimClockStats?.() ?? null, fps);
+    };
+    requestAnimationFrame(tick);
   }
 
   /** 把准星样式写进 `#crosshair` 的行内 CSS 变量（--ch-color / --ch-size / --ch-thickness / --ch-gap），并切 `hidden` / `outline` / `no-dot` 三个类。 */
@@ -833,7 +941,7 @@ export class PanelController {
    * （`resetKeymap`），通用是地图/出生点操作，健康是运行计数。
    */
   private static readonly PANE_RESET: Record<string, ReadonlyArray<{ section: 'physics' | 'input' | 'player' | 'hud' | 'texture' | 'lighting'; keys: readonly string[] }>> = {
-    physics: [{ section: 'physics', keys: ['tickRate', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp', 'pushOut', 'pushOutOnlyWhenSolid'] }],
+    physics: [{ section: 'physics', keys: ['tickRate', 'computeRateCap', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp', 'pushOut', 'pushOutOnlyWhenSolid'] }],
     hull: [{ section: 'player', keys: ['halfWidth', 'standHeight', 'duckHeight'] }],
     look: [{ section: 'input', keys: ['sensitivity', 'yawBindSpeed'] }],
     display: [
@@ -876,6 +984,8 @@ export class PanelController {
     this.onTextureQualityChange?.(this.config.texture.quality);
     this.sendAllPrefs();
     this.savePanelPrefs();
+    // 物理分栏的「默认」= 启动探测的计算帧率上限（不是 DEFAULT_CONFIG 的 64Hz 锁定值）。
+    if (pane === 'physics') this.restoreComputeRateDefault();
   }
 }
 

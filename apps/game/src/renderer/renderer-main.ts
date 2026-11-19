@@ -49,6 +49,8 @@ import {
   createPlayerPresentation,
   type PlayerPresentation,
 } from '../../../../src/ts-shared/app/player-presentation.js';
+import { createSimClock, type SimClock, type SimClockStats } from '../../../../src/ts-shared/app/sim-clock.js';
+import { COMPUTE_CAP_FALLBACK } from '../../../../src/ts-shared/app/compute-cap.js';
 import { Variant } from '../../../../src/ts-shared/entity/variant.js';
 import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 
@@ -109,6 +111,20 @@ export class RendererMain {
    * game 的特色只有两处 hooks：holdPoint 冻结分支与直接写 camera（无回放/单步/诊断）。
    */
   private presentation: PlayerPresentation | null = null;
+
+  /**
+   * 计算频率上限（Hz）：固定步长模拟时钟的目标频率。默认值来自共享兜底
+   * `COMPUTE_CAP_FALLBACK`（480，面板启动时会用 `rAF×1.5` 探测值覆盖）；
+   * 量程 48–1000，由 `setComputeRateCap` 改写。
+   */
+  private computeRateCap = COMPUTE_CAP_FALLBACK;
+
+  /**
+   * 固定步长模拟时钟（共享 `sim-clock`）：把「模拟」从 rAF 解耦——rAF 只负责渲染，
+   * 时钟以 `1/computeRateCap` 固定步长推进预测物理/实体运行期。game 没有回放/单步模式，
+   * 正常游玩始终由时钟驱动；`holdPoint` 冻结在 hooks 的 `afterTick` 里完成。
+   */
+  private simClock: SimClock | null = null;
 
   // ── 渲染采样传输（Worker 按渲染时钟 τ 在本折线上取点后发布权威位置）──────
   // 契约见文件头（writeRenderSample / resetRenderSample）。
@@ -200,6 +216,34 @@ export class RendererMain {
         },
       },
     });
+
+    // 固定步长模拟时钟：正常游玩时由它按 `computeRateCap` 推进预测物理/实体，
+    // rAF 只负责渲染（`tick` 不再调 `presentation.update`）；物理未就绪时 step 内部让路。
+    this.simClock = createSimClock({
+      step: (dt) => this.stepFixedSimulation(dt),
+      getTargetHz: () => this.computeRateCap,
+      getCapHz: () => this.computeRateCap,
+    });
+  }
+
+  /** 计算频率上限（Hz，48–1000）；面板控件通过 `setComputeRateCap` 写入，HUD 读 `simClockStats`。 */
+  setComputeRateCap(hz: number): void {
+    if (!Number.isFinite(hz)) return;
+    this.computeRateCap = Math.min(1000, Math.max(48, Math.round(hz)));
+  }
+
+  /** 模拟时钟统计（HUD 用）：物理未就绪时返回 null，让 HUD 显示「—」。 */
+  get simClockStats(): SimClockStats | null {
+    if (!this.predReady) return null;
+    return this.simClock?.stats ?? null;
+  }
+
+  /** 固定步长模拟步（`sim-clock` 的 step 回调）：物理未就绪时让路，避免空转推进时基；
+   *  页面隐藏时不推进（时钟不依赖 rAF，后台泵帧只会空烧 CPU，欠账由时钟截顶丢弃）。 */
+  private stepFixedSimulation(dt: number): void {
+    if (!this.running || !this.predReady || !this.predPhys) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    this.presentation?.step(dt);
   }
 
   /** 场景装载完成回调（`loadScene` 用场景包围盒最小 Y 调用一次）；`apps/game/src/app.ts` 注册它
@@ -250,6 +294,9 @@ export class RendererMain {
   /** 建共享渲染会话并保留 renderer/scene/camera 别名；必须在 `loadScene` 之前调用。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
+    // 计算帧率上限取独立参数 `physics.computeRateCap`（**不是** `physics.tickRate`：
+    // 后者是权威物理步长/难度，48–128）；面板启动时用 rAF×1.5 探测值覆盖它。
+    this.setComputeRateCap(config.physics.computeRateCap);
     // 默认跳高由面板参数反推（与 debug 端和共享 `params.ts` 的 jump_height 同式）；
     // 缺省留 57 是为了 init 之前就调用 `setupGameplay` 的异常路径。
     const p = config.physics;
@@ -342,16 +389,18 @@ export class RendererMain {
     await this.session?.applyTextureQuality(quality);
   }
 
-  /** 启动 rAF 循环（重复调用无副作用：已在跑时直接返回）。 */
+  /** 启动 rAF 循环（重复调用无副作用：已在跑时直接返回）。模拟时钟一并启动，rAF 只负责渲染。 */
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.simClock?.start();
     this.rafId = requestAnimationFrame(this.boundTick);
   }
 
-  /** 停止 rAF 循环并注销句柄（在途回调由 `tick` 开头的 `running` 判定自行退出）。 */
+  /** 停止 rAF 循环并注销句柄（在途回调由 `tick` 开头的 `running` 判定自行退出）；模拟时钟一并停止。 */
   stop(): void {
     this.running = false;
+    this.simClock?.stop();
     if (this.rafId !== 0) {
       cancelAnimationFrame(this.rafId);
       this.rafId = 0;
@@ -662,7 +711,9 @@ export class RendererMain {
 
     // 1. 主线程物理/呈现同意循环（共享 `player-presentation`）：输入 → 共享槽 → 权威校准 →
     //    推进物理 → 冻结分支 → 渲染采样 → 相机；序列与 debug 共用一份，game 特色走构造期 hooks。
-    this.presentation?.update(now);
+    //    正常游玩由固定步长时钟 `simClock` 驱动（见 `stepFixedSimulation`），rAF 只负责渲染；
+    //    时钟未启动（物理/场景未就绪）时由这里兜底走 rAF 变步长，保证首帧即可推进。
+    if (!this.simClock?.running) this.presentation?.update(now);
 
     // 2+3. 共享会话：可见性判定 → 近平面贴墙（隔帧）→ 天空/主世界绘制。
     // 近平面只在物理就绪后探测（物理未就绪时相机停在初始位姿，探测没有意义）。

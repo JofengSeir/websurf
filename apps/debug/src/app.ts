@@ -31,6 +31,7 @@ import type {
 import { keysToMask, KEY_MASK } from '../../../src/ts-shared/auth/shared-state.js';
 import { createAppRuntime, type AppHooks } from '../../../src/ts-shared/app/app-runtime.js';
 import { createConfigSync, type ConfigSync } from '../../../src/ts-shared/app/config-sync.js';
+import { detectDefaultComputeCapHz, formatComputeHudText } from '../../../src/ts-shared/app/compute-cap.js';
 import type { SharedState } from '../../../src/ts-shared/auth/shared-state.js';
 import { layerMouseDelta, qeEquivalentDx } from '../../../src/ts-shared/input/input-layer.js';
 import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js'; import { buildSkyboxCubeTexture, collectSkyboxFaces, type SkyboxProcessorLike } from '../../../src/renderer-shared/environment/skybox.js'; import { fogParamsFromEntities } from '../../../src/renderer-shared/environment/fog-controller.js'; import { skyCameraFromEntities } from '../../../src/renderer-shared/environment/miniature-sky.js'; import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, applyRenderDebugSwitches, defaultRenderPrefs, readPrefsPath as readPrefsField, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js'; import { buildRenderPanel, type RenderPanelApi } from '../../../src/renderer-shared/config/render-panel-ui.js';
@@ -592,7 +593,7 @@ async function showMissingTextures(missing: string[] | undefined): Promise<void>
 // HUD（主线程本地采样，无 Worker 回传）
 // ---------------------------------------------------------------------------
 
-/** 主 HUD 统计行：位置/速度/onGround/PVS cluster 取自主线程渲染物理，FPS 取 localFps。 */
+/** 主 HUD 统计行：位置/速度/onGround/PVS cluster 取自主线程渲染物理；计算/呈现双指标读 simClockStats + localFps（task-95）。 */
 function updateStatsUI(): void {
 	if (!dom.statsEl) return;
 	const st = rendererMain?.getCurrentState();
@@ -606,8 +607,10 @@ function updateStatsUI(): void {
 		? `<span class="label">相机</span> <span class="v">${cam.pos[0].toFixed(0)},${cam.pos[1].toFixed(0)},${cam.pos[2].toFixed(0)}</span>  ` +
 			`<span class="label">朝向</span> <span class="v">${cam.yawDeg.toFixed(1)},${cam.pitchDeg.toFixed(1)}</span>  `
 		: '';
+	// task-95：双指标「计算 xxxHz / 呈现 xxxfps」；simClockStats 未就绪/回放/单步闸门时计算侧显示 —。
+	const computeText = formatComputeHudText(rendererMain?.simClockStats ?? null, localFps);
 	const text =
-		`<span class="label">FPS</span> <span class="v">${localFps}</span>  <span class="label">位置</span> <span class="v">${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}</span>  ` +
+		`<span class="v">${computeText}</span>  <span class="label">位置</span> <span class="v">${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}</span>  ` +
 		camText +
 		`<span class="label">速度</span> <span class="v">${lateral.toFixed(0)}</span>  <span class="label">状态</span> <span class="v">${st.onGround ? '地面' : '空中'}</span>  <span class="label">cluster</span> <span class="v">${cluster >= 0 ? cluster : '—'}</span>`;
 	dom.statsEl.innerHTML = text;
@@ -1459,6 +1462,8 @@ function bindUI(): void {
 	initPhysicsPanel();
 	// 持久化恢复放在面板建好之后：逐项下发后面板会收到 snapshot 并显示「手动」来源。
 	restorePhysicsParamPrefs();
+	// task-95：启动探测计算帧率上限默认值（异步；历史手动值/用户已改优先，见 applyDetectedComputeCapDefault）
+	void applyDetectedComputeCapDefault();
 	dom.fileInput?.addEventListener('change', async (e) => {
 		const input = e.target as HTMLInputElement;
 		const file = input.files?.[0];
@@ -2282,10 +2287,77 @@ let pendingPhysicsPrefs: PhysicsParamOverrides = {};
 /** debounce 计时器；`null` 表示当前没有待写（类型用 ReturnType 兼容 DOM/Node 两套 setTimeout）。 */
 let physicsPrefsSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * task-95：启动探测到的「默认计算帧率上限」（Hz；null = 尚未探测）。
+ * 计算帧率上限是独立参数 `computeRateCap`（不是 `tickRate`：后者是权威物理步长/难度，
+ * 48–128）。探测值只在用户没手动改过时当默认值下发，不落盘。
+ */
+let detectedComputeCapHz: number | null = null;
+/** 用户是否在面板手动调过 computeRateCap：手动值优先于探测默认值，并走既有 param-prefs 持久化。 */
+let computeCapUserTouched = false;
+/** 启动时是否从持久化偏好恢复了历史手动 computeRateCap（有则不再用探测值覆盖）。 */
+let computeCapRestoredFromPrefs = false;
+
+/** 当前快照项是否就是「启动探测出的默认 computeRateCap」（UI 显示「默认」且不写偏好）。 */
+function isDetectedComputeCapDefault(p: { name: string; value: number | boolean }): boolean {
+	return (
+		p.name === 'computeRateCap' &&
+		detectedComputeCapHz !== null &&
+		!computeCapUserTouched &&
+		!computeCapRestoredFromPrefs &&
+		p.value === detectedComputeCapHz
+	);
+}
+
+/**
+ * task-95：启动默认值探测 —— 用户没手动改过 computeRateCap 时，把 rAF×1.5 的探测值当
+ * 默认值下发（主线程 config + 主线程模拟时钟）；手动值优先。权威物理步长 tickRate 不受影响。
+ * Worker 的 `setParam` 会把来源记为 'manual'，但主线程这里按「探测默认值」对待：
+ * `renderPhysicsSnapshot` 回填时显示「默认」且不写 param-prefs，下次启动重新探测。
+ */
+async function applyDetectedComputeCapDefault(): Promise<void> {
+	const hz = await detectDefaultComputeCapHz();
+	if (computeCapUserTouched || computeCapRestoredFromPrefs) {
+		// 手动值优先：只把已有值同步给主线程模拟时钟
+		rendererMain?.setComputeRateCap(config.physics.computeRateCap);
+		return;
+	}
+	detectedComputeCapHz = hz;
+	config.physics.computeRateCap = hz;
+	inputBridge?.sendSetPhysicsParam('computeRateCap', hz);
+	rendererMain?.setComputeRateCap(hz);
+}
+
+/**
+ * 恢复默认后把 computeRateCap 拉回「启动探测的计算帧率上限」（默认 rAF×1.5，不可测 480）。
+ *
+ * 无参 `reset-physics-param` 会让 Worker 把 computeRateCap 回落到
+ * `PARAM_DEFS` 的定义默认值（480）；那只是兜底，不是本机探测值。若只清 prefs 不重下发，
+ * 主线程模拟时钟会掉到 480（或探测失败时的兜底值），与启动默认不一致。
+ * 注意：tickRate 的「恢复默认」是另一件独立的事（回 64Hz），不走这里。
+ */
+function restoreDetectedComputeCapDefault(): void {
+	computeCapUserTouched = false;
+	computeCapRestoredFromPrefs = false;
+	if (detectedComputeCapHz === null) {
+		// 探测值还没到（启动时用户就改过 computeRateCap 的情况）：补一次探测并下发，避免落到兜底 480。
+		void applyDetectedComputeCapDefault();
+		return;
+	}
+	const hz = detectedComputeCapHz;
+	config.physics.computeRateCap = hz;
+	rendererMain?.setComputeRateCap(hz);
+	// 顺序在 reset 之后发：Worker 先回默认快照，本值覆盖回去，快照回填时按「探测默认值」显示
+	// 「默认」且不写 param-prefs（`isDetectedComputeCapDefault`）。
+	inputBridge?.sendSetPhysicsParam('computeRateCap', hz);
+}
+
 /** 启动恢复：逐项发 set-physics-param，Worker 的 `setParam` 会记为 source='manual'。 */
 function restorePhysicsParamPrefs(): void {
 	const prefs = loadPhysicsParamPrefs(PHYSICS_PREFS_APP, PARAM_NAMES);
 	physicsPrefsRestored = true;
+	// task-95：历史手动调过 computeRateCap 的存档优先于启动探测默认值
+	if (Object.prototype.hasOwnProperty.call(prefs, 'computeRateCap')) computeCapRestoredFromPrefs = true;
 	for (const [name, value] of Object.entries(prefs)) {
 		inputBridge?.sendSetPhysicsParam(name, value);
 	}
@@ -2348,6 +2420,14 @@ function initPhysicsPanel(): void {
 		const name = el.dataset.param ?? el.dataset.paramInput;
 		if (!name) return;
 		const value = el.type === 'checkbox' ? el.checked : Number(el.value);
+		// task-95：手动改 computeRateCap（= 计算帧率上限）→ 标记手动优先，并立即镜像主线程模拟时钟
+		// （Worker 侧照旧走 sendSetPhysicsParam，Worker 的 setParam 会按 def.min/max 钳制）。
+		// 注意 tickRate（模拟频率/难度）不在这里处理：它是普通物理参数，只走 Worker 固定步长。
+		if (name === 'computeRateCap' && typeof value === 'number' && Number.isFinite(value)) {
+			computeCapUserTouched = true;
+			config.physics.computeRateCap = value;
+			rendererMain?.setComputeRateCap(value);
+		}
 		// 联动（range ↔ number）
 		if (el.dataset.param && el.type === 'range') {
 			const numEl = document.querySelector(`[data-param-input="${name}"]`) as HTMLInputElement | null;
@@ -2443,6 +2523,8 @@ function initPhysicsPanel(): void {
 			clearPhysicsPrefs();
 			inputBridge?.sendResetPhysicsParam();
 			inputBridge?.sendResetHull();
+			// 默认计算频率 = 启动探测值（rAF×1.5 / 兜底 480），不是 64Hz：reset 后重新下发。
+			restoreDetectedComputeCapDefault();
 		}
 	});
 }
@@ -2463,7 +2545,9 @@ function renderPhysicsSnapshot(msg: PhysicsSnapshotMessage): void {
 	panelSuppress = true;
 	try {
 		for (const p of msg.params) {
-			const label = SOURCE_LABEL[p.source as ParamSource] ?? SOURCE_LABEL['mode-default'];
+			// task-95：启动探测出的 computeRateCap 默认值在 UI 显示「默认」（Worker 侧会记为 manual）
+			const detectedDefault = isDetectedComputeCapDefault(p);
+			const label = SOURCE_LABEL[detectedDefault ? 'mode-default' : (p.source as ParamSource)] ?? SOURCE_LABEL['mode-default'];
 			const numEl = document.querySelector(`[data-param-input="${p.name}"]`) as HTMLInputElement | null;
 			const srcEl = document.querySelector(`[data-param-src="${p.name}"]`) as HTMLElement | null;
 			const inputEl = document.querySelector(`[data-param="${p.name}"]`) as HTMLInputElement | null;
@@ -2476,12 +2560,19 @@ function renderPhysicsSnapshot(msg: PhysicsSnapshotMessage): void {
 				if (inputEl.type === 'checkbox') inputEl.checked = Boolean(p.value);
 				else inputEl.value = String(p.value);
 			}
+			// task-95：computeRateCap 是主线程计算帧率上限 → 回填时同步主线程模拟时钟
+			// （覆盖恢复/用户手动两种来源）。它不影响权威 Worker 固定步长（那是 tickRate）。
+			if (p.name === 'computeRateCap' && typeof p.value === 'number') {
+				config.physics.computeRateCap = p.value;
+				rendererMain?.setComputeRateCap(p.value);
+			}
 		}
 		// 持久化（D4）：只把 source='manual' 的项写回 localStorage。
 		// map 来源不持久化——换图/重载时地图 servercommand 会重新下发；mode-default 同理。
+		// task-95：启动探测出的 computeRateCap 默认值不算手动值，不落盘（下次启动重新探测）。
 		const manualPrefs: PhysicsParamOverrides = {};
 		for (const p of msg.params) {
-			if (p.source === 'manual') manualPrefs[p.name] = p.value;
+			if (p.source === 'manual' && !isDetectedComputeCapDefault(p)) manualPrefs[p.name] = p.value;
 		}
 		schedulePhysicsPrefsSave(manualPrefs);
 		// 碰撞箱回填（含比例缩放联动）

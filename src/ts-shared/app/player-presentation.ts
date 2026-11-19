@@ -106,6 +106,13 @@ export interface CreatePlayerPresentationOptions {
 export interface PlayerPresentation {
   /** 推进一帧物理/呈现；返回本帧是否真的推进了物理。 */
   update(now: number): boolean;
+  /**
+   * 推进一个**固定步长**物理步（供 `sim-clock` 使用，与 rAF 解耦）。
+   * - `dtSeconds` 由时钟的 1/频率 给出，不再读墙钟间隔；
+   * - `now` 可缺省（缺省取 `performance.now()`），用于 app 钩子的诊断/采样时间戳；
+   * - 与 `update()` 互斥：启用固定步长时钟时，rAF 里不要再调 `update()`。
+   */
+  step(dtSeconds: number, now?: number): boolean;
   /** 复位墙钟时基（换图/重建物理后调用，等价于原 `lastTickMs = 0`）。 */
   resetTimebase(): void;
   /** 当前时基（诊断用；无历史返回 0）。 */
@@ -126,54 +133,74 @@ export function createPlayerPresentation(options: CreatePlayerPresentationOption
   const wallDt = (now: number): number =>
     lastTickMs === 0 ? 1 / 64 : Math.min((now - lastTickMs) / 1000, 0.1);
 
+  /** 一次物理步的共同实现：`dt` 由调用方决定（rAF 变步长 / 固定步长时钟）。 */
+  const runStep = (now: number, dt: number, skipAuthorityHint: boolean | null): boolean => {
+    const phys = options.phys();
+    if (!phys) return false;
+
+    const plan = hooks.beginFrame ? hooks.beginFrame(now) : { run: true };
+    // 固定步长模式下 skipAuthority 由 step() 传入（时钟模式下无回放语义，默认 false）。
+    const skipAuthority = skipAuthorityHint ?? plan.skipAuthority === true;
+    if (!plan.run) {
+      // 物理未推进：只有单步闸门这类「本帧跳过但时基要继续走」的场景才推进基准。
+      if (plan.stepTimebase !== false) lastTickMs = now;
+      hooks.onPhysicsSkipped?.(now);
+      return false;
+    }
+
+    lastTickMs = now;
+
+    // 输入 → 共享槽（Worker 权威模拟与主线程消费同一份输入）。
+    const input = options.input();
+    options.shared.addInput(input.dx, input.dy, input.keys);
+
+    // 权威帧消费 + 速度外推校准（debug 的 replayMode 经 skipAuthority 跳过）。
+    hooks.beforeTick?.(now, dt, skipAuthority);
+
+    // 推进本地预测物理：碰撞/传送/死亡判定都在物理内部。
+    phys.tick(dt, input.keys, input.dx, input.dy);
+    hooks.afterTick?.(now, dt);
+
+    // 鼠标增量是一次性的；按键掩码保留为「按住」状态。
+    options.clearInputDeltas();
+
+    // 物理事件：传送/死亡等；app 在 onPhysEvent 里做采样世代失效与状态机回调。
+    if (hooks.onPhysEvent && typeof phys.take_event === 'function') {
+      for (;;) {
+        const event = phys.take_event();
+        if (!event) break;
+        hooks.onPhysEvent(event);
+      }
+    }
+
+    // 读状态：渲染、采样、相机、实体都基于同一份状态（同拍同源）。
+    const state = phys.state();
+    hooks.afterState?.(state, dt, now);
+    options.shared.writeRenderSample(now, state.posX, state.posY, state.posZ, options.nextRenderSampleIndex());
+    hooks.applyCamera?.(state);
+
+    // 实体运行期与物理同帧推进（touch 用本帧 state，0 延迟输出当帧消费）。
+    options.gameplay()?.update(dt);
+    return true;
+  };
+
   return {
     update(now: number): boolean {
-      const phys = options.phys();
-      if (!phys) return false;
-
       const plan = hooks.beginFrame ? hooks.beginFrame(now) : { run: true };
       if (!plan.run) {
-        // 物理未推进：只有单步闸门这类「本帧跳过但时基要继续走」的场景才推进基准。
+        const phys = options.phys();
+        if (!phys) return false;
         if (plan.stepTimebase !== false) lastTickMs = now;
         hooks.onPhysicsSkipped?.(now);
         return false;
       }
-
       const dt = plan.dtOverride ?? wallDt(now);
-      lastTickMs = now;
+      return runStep(now, dt, plan.skipAuthority === true ? true : null);
+    },
 
-      // 输入 → 共享槽（Worker 权威模拟与主线程消费同一份输入）。
-      const input = options.input();
-      options.shared.addInput(input.dx, input.dy, input.keys);
-
-      // 权威帧消费 + 速度外推校准（debug 的 replayMode 经 skipAuthority 跳过）。
-      hooks.beforeTick?.(now, dt, plan.skipAuthority === true);
-
-      // 推进本地预测物理：碰撞/传送/死亡判定都在物理内部。
-      phys.tick(dt, input.keys, input.dx, input.dy);
-      hooks.afterTick?.(now, dt);
-
-      // 鼠标增量是一次性的；按键掩码保留为「按住」状态。
-      options.clearInputDeltas();
-
-      // 物理事件：传送/死亡等；app 在 onPhysEvent 里做采样世代失效与状态机回调。
-      if (hooks.onPhysEvent && typeof phys.take_event === 'function') {
-        for (;;) {
-          const event = phys.take_event();
-          if (!event) break;
-          hooks.onPhysEvent(event);
-        }
-      }
-
-      // 读状态：渲染、采样、相机、实体都基于同一份状态（同拍同源）。
-      const state = phys.state();
-      hooks.afterState?.(state, dt, now);
-      options.shared.writeRenderSample(now, state.posX, state.posY, state.posZ, options.nextRenderSampleIndex());
-      hooks.applyCamera?.(state);
-
-      // 实体运行期与物理同帧推进（touch 用本帧 state，0 延迟输出当帧消费）。
-      options.gameplay()?.update(dt);
-      return true;
+    step(dtSeconds: number, now?: number): boolean {
+      if (!(dtSeconds > 0) || !Number.isFinite(dtSeconds)) return false;
+      return runStep(now ?? performance.now(), dtSeconds, null);
     },
 
     resetTimebase(): void {

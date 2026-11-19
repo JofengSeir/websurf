@@ -93,6 +93,8 @@
     <div class="hud-line" id="pose">位姿 —</div>
     <div class="hud-line" id="bspStatus">未加载地图</div>
     <div class="hud-line" id="replayStatus"></div>
+    <!-- task-95：呈现侧 fps（viewer 无物理/无主线程模拟时钟，计算侧读数只在 debug/game 端有；由 app.ts 帧循环直写） -->
+    <div class="hud-line" id="computeStats">呈现 --fps</div>
   </div>
 
   <!-- 回放遥测 HUD：速度读数挂本元素 `#telemetry`，按键簇挂 `#timeline` 右列（均由 `apps/viewer/src/ui/telemetry.ts` 填充；定位由 `apps/viewer/web/styles.css` 的 `.telemetry` 决定） -->

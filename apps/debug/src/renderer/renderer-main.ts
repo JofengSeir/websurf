@@ -46,6 +46,12 @@ import {
   createPlayerPresentation,
   type PlayerPresentation,
 } from '../../../../src/ts-shared/app/player-presentation.js';
+import { createSimClock, type SimClock, type SimClockStats } from '../../../../src/ts-shared/app/sim-clock.js';
+import {
+  COMPUTE_CAP_FALLBACK,
+  COMPUTE_CAP_MAX,
+  COMPUTE_CAP_MIN,
+} from '../../../../src/ts-shared/app/compute-cap.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
 import type { PhyBevelPiece } from './collider-debug.js';
@@ -262,6 +268,21 @@ export class RendererMain {
    * 速度诊断、poseHold 相机）全部在 `constructor` 构造时登记的 hooks 里，序列本身与 game 共用。
    */
   private presentation: PlayerPresentation | null = null;
+
+  /**
+   * 计算频率上限（Hz）：固定步长模拟时钟的目标频率。默认值来自共享兜底
+   * `COMPUTE_CAP_FALLBACK`（480，面板启动时会用 `rAF×1.5` 的探测值覆盖）；
+   * 量程 48–1000，由 `setComputeRateCap` 改写。**不是** `physics.tickRate`
+   * （那是权威物理步长/难度，48–128）。
+   */
+  private computeRateCap = COMPUTE_CAP_FALLBACK;
+
+  /**
+   * 固定步长模拟时钟（共享 `sim-clock`）：把「模拟」从 rAF 解耦——rAF 只负责渲染，
+   * 时钟以 `1/computeRateCap` 固定步长推进预测物理/实体运行期。回放/单步闸门等
+   * debug 特色模式仍走 rAF 变步长路径（`presentation.update`），二者互斥。
+   */
+  private simClock: SimClock | null = null;
 
   // ── 速度突降诊断（2026-11-17 排查「区域内速度被清零」）──
   /**
@@ -548,6 +569,40 @@ export class RendererMain {
         },
       },
     });
+
+    // 固定步长模拟时钟：把预测物理/实体从 rAF 解耦，按 `computeRateCap` 稳定步进；
+    // 回放（replayMode）、单步闸门（stepGated）、未就绪等模式由 step 回调内部让路，
+    // 仍走 `presentation.update(now)` 的 rAF 变步长路径（见 `tick` 与 `stepFixedSimulation`）。
+    this.simClock = createSimClock({
+      step: (dt) => this.stepFixedSimulation(dt),
+      getTargetHz: () => this.computeRateCap,
+      getCapHz: () => this.computeRateCap,
+    });
+  }
+
+  /** 计算频率上限（Hz，48–1000）；面板控件通过 `setComputeRateCap` 写入，HUD 读 `simClockStats`。 */
+  setComputeRateCap(hz: number): void {
+    if (!Number.isFinite(hz)) return;
+    this.computeRateCap = Math.min(COMPUTE_CAP_MAX, Math.max(COMPUTE_CAP_MIN, Math.round(hz)));
+  }
+
+  /** 模拟时钟统计（HUD 用）：回放/单步闸门/物理未就绪时不代表真实物理频率，返回 null 让 HUD 显示「—」。 */
+  get simClockStats(): SimClockStats | null {
+    if (!this.predReady || this.replayMode || this.stepGated) return null;
+    return this.simClock?.stats ?? null;
+  }
+
+  /**
+   * 固定步长模拟步（`sim-clock` 的 step 回调）：只在「正在运行 + 物理就绪 + 非回放 + 非单步闸门」
+   * 时推进；其它模式由 rAF 的 `tick` 调 `presentation.update(now)`，避免同一物理被两条路径重复推进。
+   * 页面隐藏时也不推进：模拟时钟不依赖 rAF，若照常泵帧会在后台空烧 CPU/物理；隐藏期间
+   * 积攒的时间由时钟的欠账截顶（50ms）丢弃，回到前台后从当前状态继续。
+   */
+  private stepFixedSimulation(dt: number): void {
+    if (!this.running || !this.predReady || !this.predPhys) return;
+    if (this.replayMode || this.stepGated) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    this.presentation?.step(dt);
   }
 
   // ── 生命周期 ───────────────────────────────────────────────
@@ -557,6 +612,9 @@ export class RendererMain {
    * `CameraController` 与碰撞可视化，并把 config 里的四组调试开关灌下去。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
+    // 计算帧率上限取独立参数 `physics.computeRateCap`（**不是** `physics.tickRate`：
+    // 后者是权威物理步长/难度，48–128）；面板 app.ts 启动时用 rAF×1.5 探测值覆盖它。
+    this.setComputeRateCap(config.physics.computeRateCap);
     // 默认跳高由面板参数反推（与 `src/ts-shared/phys/params.ts` 的 jump_height 同式），
     // 「跳跃增幅区」离开时用这个值把跳高压回去。
     const p = config.physics;
@@ -820,12 +878,14 @@ export class RendererMain {
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.simClock?.start();
     this.rafId = requestAnimationFrame(this.boundTick);
   }
 
   /** 停止渲染循环并取消已登记的 rAF。 */
   stop(): void {
     this.running = false;
+    this.simClock?.stop();
     if (this.rafId !== 0) {
       cancelAnimationFrame(this.rafId);
       this.rafId = 0;
@@ -854,7 +914,9 @@ export class RendererMain {
     //    推进本地物理 → 消费物理事件 → 写渲染采样 → 摆相机 → 推进实体运行期。
     //    debug 特色（回放步长、单步闸门、replayMode 跳过权威、路径记录、速度诊断、poseHold
     //    相机、传送事件使采样世代失效）全部在构造时登记的 hooks 里，逐帧序列本身与 game 共用。
-    this.presentation?.update(now);
+    //    默认（正常游玩）由固定步长时钟 `simClock` 驱动，见 `stepFixedSimulation`；
+    //    回放/单步闸门这类需要 rAF 变步长的模式仍走这里的 `update(now)`。
+    if (this.replayMode || this.stepGated) this.presentation?.update(now);
 
     // ⓪-2 飞行轨迹录制：记**相机**位姿（不是脚底），所以放在相机摆放之后、渲染之前；
     //      复播中也照记（可以把一条轨迹的某一段再录成新轨迹）。
@@ -1299,6 +1361,10 @@ export class RendererMain {
       this.needsRender = true;
     } else if (section === 'input' && this.cameraController) {
       this.cameraController.applyInputConfig(this.config.input);
+    } else if (section === 'physics') {
+      // 计算帧率上限是独立参数 `physics.computeRateCap`（与权威物理步长 tickRate 无关），
+      // 运行期面板改动/配置回灌都从这里统一对齐时钟目标频率。
+      this.setComputeRateCap(this.config.physics.computeRateCap);
     } else if (section === 'lod') {
       this.needsRender = true;
     } else if (section === 'texture') {

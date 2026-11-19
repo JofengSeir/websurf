@@ -5,12 +5,17 @@
  * （`description` 落成参数行的 title 属性），Worker 侧 `apps/debug/src/physics/physics-params.ts`
  * 读 `default` 与 `min`/`max` 做回退与钳制。
  *
- * 14 项里 13 项经 `PARAM_TO_RUST` 映射成 `src/phys/mod.rs` 的 `set_params` 键；`tickRate` 是
- * JS 驱动层参数，不进 Rust。默认值统一引用 `src/ts-shared/phys/param-defaults.ts` 的
+ * 15 项里 13 项经 `PARAM_TO_RUST` 映射成 `src/phys/mod.rs` 的 `set_params` 键；`tickRate` 与
+ * `computeRateCap` 是 JS 驱动层参数，不进 Rust（前者=权威物理步长/难度，后者=主线程计算频率上限）。默认值统一引用 `src/ts-shared/phys/param-defaults.ts` 的
  * `PHYSICS_PARAM_DEFAULTS`（2026-11-18 起唯一来源，与 `config.ts` 的 `DEFAULT_CONFIG.physics`
  * 及 Worker / 主线程预测参数同源，避免「面板显示值」与「实际生效值」漂移）。
  */
 import { PHYSICS_PARAM_DEFAULTS } from '../../../../src/ts-shared/phys/param-defaults.js';
+import {
+  COMPUTE_CAP_FALLBACK,
+  COMPUTE_CAP_MAX,
+  COMPUTE_CAP_MIN,
+} from '../../../../src/ts-shared/app/compute-cap.js';
 
 /** 参数来源：定义默认值 / 面板手动 / 地图设置（面板标签见 `apps/debug/src/app.ts` 的 `SOURCE_LABEL`）。 */
 export type ParamSource = 'mode-default' | 'manual' | 'map';
@@ -105,7 +110,12 @@ export const PARAM_DEFS: ParamDef[] = [
   {
     name: 'tickRate', label: '模拟频率', unit: 'Hz',
     kind: 'number', default: PHYSICS_PARAM_DEFAULTS.tickRate, min: 48, max: 128, step: 1,
-    description: '物理模拟频率（固定步长 = 1/tickRate 秒，JS 驱动层参数，不进 Rust）。64=默认；调高更平滑但更吃 CPU，调低跳帧感增强。',
+    description: '物理模拟频率（固定步长 = 1/tickRate 秒，JS 驱动层参数，不进 Rust）。64=默认；调高更平滑但更吃 CPU，调低跳帧感增强。它控制权威物理的步长与手感/难度，不是「计算帧率上限」（后者是 computeRateCap）。',
+  },
+  {
+    name: 'computeRateCap', label: '计算帧率上限', unit: 'Hz',
+    kind: 'number', default: COMPUTE_CAP_FALLBACK, min: COMPUTE_CAP_MIN, max: COMPUTE_CAP_MAX, step: 1,
+    description: '主线程固定步长模拟时钟的目标频率（与 rAF 呈现解耦、独立于上面的物理模拟频率）：默认按启动时 rAF×1.5 探测（clamp 48..1000，不可测 480），只影响主线程每秒算多少步预测/呈现，不改权威物理步长与难度。',
   },
   {
     name: 'pushOut', label: '贴面推开量', unit: 'u',
