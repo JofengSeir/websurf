@@ -795,6 +795,59 @@ function mirrorCadence(): number {
   return 2;
 }
 
+/**
+ * 帧预算兜底（2026-11-19，owner：「部分舍弃计算，用画面差错换准时发出提交」）。
+ *
+ * 水面折射/镜面是每帧最大的**可选**开销（实测 1.0~1.4ms，`renderWaterFramePasses` 一趟整场景）。
+ * 慢机的重载区里，只要这一帧跑了水面,整帧就 3.3~4.1ms，超过 3.125ms 槽 ⇒ 掉一个 vsync。
+ * 与其按固定 cadence 撞帧，不如在**真渲之前**看预算：若「上一帧非水面成本 + 水面实测成本」
+ * 会超预算，就跳过这次更新（水面继续采样上一帧 RT，倒影/折射滞后一帧，肉眼几乎不可见），
+ * 把提交准时发出去。持续掉槽时更新自然变稀；但距上次真渲超过 `maxDeferFrames` 仍强制渲一次，
+ * 避免倒影完全冻住。
+ *
+ * 逃生舱：`__vbspWaterBudgetSkip = false` 关掉这道判断（A/B 用）。
+ */
+const WATER_SLOT_BUDGET_MS = 3.0;
+/** 上一趟水面 pass 的实测 CPU 成本（ms），0 = 还没量过。 */
+let lastWaterCostMs = 0;
+const waterBudgetStats = { skipped: 0, forced: 0, passes: 0, base: 0, cost: 0 };
+(g as { __vbspWaterBudgetReset?: () => void }).__vbspWaterBudgetReset = () => {
+  waterBudgetStats.skipped = 0;
+  waterBudgetStats.forced = 0;
+  waterBudgetStats.passes = 0;
+};
+
+/** 判断本帧该不该跳过水面更新（true = 跳过）。调用点：已确认本帧有 due 的 pass。 */
+function waterBudgetSaysSkip(refrAge: number, refrEvery: number, mirrorAge: number, mirrorEvery: number): boolean {
+  const off = (g as { __vbspWaterBudgetSkip?: boolean }).__vbspWaterBudgetSkip === false;
+  if (off) return false;
+  const lastFrame = (g as { __vbspLastFrameMs?: number }).__vbspLastFrameMs;
+  if (typeof lastFrame !== 'number' || !Number.isFinite(lastFrame) || lastFrame <= 0) return false;
+  const base = Math.max(0, lastFrame - lastWaterCostMs);
+  const cost = lastWaterCostMs > 0 ? lastWaterCostMs : 1.0;
+  waterBudgetStats.base = +base.toFixed(2);
+  waterBudgetStats.cost = +cost.toFixed(2);
+  (g as { __vbspWaterBudget?: typeof waterBudgetStats }).__vbspWaterBudget = waterBudgetStats;
+  const lastDt = (g as { __vbspLastFrameDtMs?: number }).__vbspLastFrameDtMs;
+  const missedSlot = typeof lastDt === 'number' && Number.isFinite(lastDt) && lastDt > 4.8;
+  if (!missedSlot && base + cost <= WATER_SLOT_BUDGET_MS) return false;
+  // 强制兜底：太久没更新就让这一趟跑（之后如果还是超，就再等下一轮）。
+  const forceRefr = refrAge >= Math.max(8, refrEvery * 2);
+  const forceMirror = mirrorAge >= Math.max(8, mirrorEvery * 2);
+  if (forceRefr || forceMirror) {
+    waterBudgetStats.forced++;
+    return false;
+  }
+  waterBudgetStats.skipped++;
+  return true;
+}
+
+/** 记录一趟水面 pass 的实测成本（EMA，0.6/0.4）——供下一帧的预算判断用。 */
+function recordWaterCost(ms: number): void {
+  if (!Number.isFinite(ms) || ms < 0) return;
+  lastWaterCostMs = lastWaterCostMs > 0 ? lastWaterCostMs * 0.6 + ms * 0.4 : ms;
+}
+
 export function renderWaterFramePasses(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
@@ -850,6 +903,8 @@ export function renderWaterFramePasses(
     mirrorNow = mirrorMoved;
   }
   if (!refrNow && !mirrorNow) return;
+  // 预算兜底：这一帧的水面更新会不会把整帧推出 3.125ms 槽？会就跳过（复用上一帧 RT）。
+  if (waterBudgetSaysSkip(refrSinceRender, refrEvery, mirrorSinceRender, mirrorEvery)) return;
   // 优先级按「超期比例」= 距上次真渲的帧数 ÷ 自己的 cadence（都刚渲过则相等、折射优先）。
   // 注意不能用「cadence<=1 时给固定分」：逃生舱 `__vbspWaterRefrCadence=1` 会让折射每帧
   // 都是固定高分，镜面永远排不到队、倒影被冻住。
@@ -857,7 +912,10 @@ export function renderWaterFramePasses(
   const mirrorScore = mirrorSinceRender / mirrorEvery;
   if (refrNow && (!mirrorNow || refrScore >= mirrorScore)) {
     refrSinceRender = 0;
+    const tPass = performance.now();
     renderRefraction(renderer, scene, camera);
+    recordWaterCost(performance.now() - tPass);
+    waterBudgetStats.passes++;
     markRefrPose(camera); // 只有真渲过才标记，跳过的帧留到下一帧补渲
     return; // 本帧只跑这一趟
   }
@@ -868,12 +926,15 @@ export function renderWaterFramePasses(
   // 全渲是 3.4ms/帧（俯仰扫视掉到 230fps 的主因）；看不见的层保留上一帧 RT。
   // 折射默认 cadence 2、镜面默认 cadence 2；预算升到 2 级时镜面降到 3（task-33 C1 降级点②，
   // `__vbspWaterMirrorBudget=false` 关降级、`__vbspWaterMirrorCadence` 可强制数值）。
+  const tMirror = performance.now();
   for (const p of mirrorPlanes.values()) {
     if (p.done) continue;
     if (visibleHeights && !visibleHeights.has(Math.round(p.height * 100) / 100)) continue;
     p.done = true;
     renderMirrorPlane(renderer, scene, camera, p);
   }
+  recordWaterCost(performance.now() - tMirror);
+  waterBudgetStats.passes++;
   markMirrorPose(camera); // 同上：跳过的帧不标记，下一帧补渲
 }
 

@@ -1331,7 +1331,14 @@ export class RenderSession {
       log.push(times);
       if (log.length > 600) log.splice(0, log.length - 600);
     }
-    this.updateFrameBudget(performance.now() - tBudget, budgetDt);
+    const frameCpuMs = performance.now() - tBudget;
+    // 供水面 RT 的「按预算跳过」判断用：上一帧的整帧 CPU 成本与 rAF 帧间隔（都含本帧之前的信息）。
+    // 每帧都写，不依赖调试开关。`__vbspLastFrameDtMs` = 上一帧起点到本帧起点的墙钟间隔，
+    // >4.8ms 说明上一帧漏了槽（单槽 3.125ms），这一帧适合把可选的整场景 pass 让出来。
+    const gLast = globalThis as { __vbspLastFrameMs?: number; __vbspLastFrameDtMs?: number };
+    gLast.__vbspLastFrameMs = frameCpuMs;
+    gLast.__vbspLastFrameDtMs = budgetDt;
+    this.updateFrameBudget(frameCpuMs, budgetDt);
     return this.lastVisibility;
   }
 
