@@ -54,6 +54,7 @@ import {
 } from '../../../../src/ts-shared/app/compute-cap.js';
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
+import { installDropRecorder, dropRecorderTick } from './drop-recorder.js';
 import type { PhyBevelPiece } from './collider-debug.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
@@ -646,6 +647,22 @@ export class RendererMain {
     this.scene.add(this.pathRecorder.group);
 
     this.cameraController = new CameraController(this.camera, config.input); installPoseEntry({ applyPose: (p) => { const [yawRad, pitchRad] = yawPitchRadOf(p); this.poseHold = { x: p.pos[0], y: p.pos[1], z: p.pos[2], yawRad, pitchRad }; }, readPose: () => cameraPoseOf(this.camera), releasePose: () => { this.poseHold = null; } }, 'debug'); (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality = (q) => this.applyTextureQuality(q);
+    // 掉帧记录器（**debug 专属**，不进共享层）：常驻记录单帧超阈值时的现场，
+    // 玩到掉帧后用控制台 `__vbspDropRec.dump()` 取 JSON。见 `./drop-recorder.ts`。
+    installDropRecorder({
+      getPose: () => this.getCameraPose(),
+      getPlayerState: () => {
+        const s = this.predPhys?.state();
+        return s
+          ? { posX: s.posX, posY: s.posY, posZ: s.posZ, velX: s.velX, velY: s.velY, velZ: s.velZ, onGround: s.onGround }
+          : null;
+      },
+      getDrawn: () => this.session?.drawnChunkStats().drawn ?? 0,
+      getComputeRateCap: () => this.computeRateCap,
+      getSimClockHz: () => this.simClockStats?.actualHz ?? null,
+      isReplay: () => this.replayMode,
+      getEntityStats: () => this.gameplay?.entityStats() ?? null,
+    });
     // 飞行轨迹入口（自动化脚本用）：录一条 noclip 飞行、导出、之后再 load + seek 复播截图。
     // 面板按同样的方法接（`apps/debug/src/app.ts` 的「飞行轨迹」区）。
     (globalThis as unknown as { __vbspFlight?: unknown }).__vbspFlight = {
@@ -904,6 +921,8 @@ export class RendererMain {
   private tick(now: number): void {
     if (!this.running) return;
     this.rafId = requestAnimationFrame(this.boundTick);
+    // 掉帧记录器钩子放最前：它只看 rAF 间隔与上一帧留下的分段数据，不参与渲染。
+    dropRecorderTick(now);
     if (!this.renderer || !this.scene || !this.camera || !this.cameraController) return;
 
     // ⓪ 飞行轨迹复播：先按墙钟推进样本、写进 `poseHold`，下面的物理段再把它摆到相机上。
