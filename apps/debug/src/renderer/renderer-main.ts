@@ -13,10 +13,10 @@
  *
  * **渲染装配与每帧绘制全部委托共享 `RenderSession`**（`src/renderer-shared/scene/render-session.ts`）：
  * renderer/scene/camera、GLB 装配、分块合并、天空层、环境/雾、可见性、近平面、贴图画质、探针
- * 都只在共享层存在一份；本类只保留 debug 特有线（物理、相机输入、灯光、可视网格、路径/准星、
+ * 都只在共享层存在一份；本类只保留 debug 特有线（物理、相机输入、可视网格、路径/准星、
  * 按需渲染）与数据源。碰撞体交 `adaptBrushes`、传送触发器交 `TeleportManager`。
  *
- * debug 侧子管理器：`CameraController`（视角输入）、`LightManager`（灯光/阴影/雾）、
+ * debug 侧子管理器：`CameraController`（视角输入）、
  * `ColliderDebug`（碰撞体与触发器可视化）、`PathRecorder`（物理轨迹取样）、
  * `PlaneInspector`（准星射线）；权威帧对齐交 `AuthorityCalibrator`
  * （`src/ts-shared/phys/authority-calibrator.ts`）。
@@ -49,7 +49,6 @@ import {
 import { CameraController } from './camera-controller.js';
 import { ColliderDebug } from './collider-debug.js';
 import type { PhyBevelPiece } from './collider-debug.js';
-import { LightManager } from '../../../../src/renderer-shared/environment/light-manager.js';
 import { PathRecorder } from './path-recorder.js';
 import type { DistStats } from './path-recorder.js';
 import { FlightPathRecorder } from './flight-path.js';
@@ -181,8 +180,8 @@ export class RendererMain {
   /** BSP 模型场景根（共享会话合并后的根；`inspectPlane` / 可视网格从它开始遍历）。 */
   private bspModelScene: THREE.Object3D | null = null;
 
-  /** 灯光与光照参数（`init` 里 `applyLights`；lighting 段 patch 时 `syncFromConfig`）。 */
-  private readonly lightManager = new LightManager();
+  // 三盏基础灯默认 intensity=0：渲染侧装配已移除以避免死代码；若将来要启用需同时接装回 LightManager（applyLights + syncFromConfig）。
+
   /** 物理轨迹记录器：渲染物理线每物理步一点、tick 物理线每条新权威帧一点，采样点均为脚底中心。 */
   private readonly pathRecorder = new PathRecorder();
   /**
@@ -555,7 +554,7 @@ export class RendererMain {
 
   /** 初始化渲染器、场景、相机与子管理器：设定光照模式，建 `WebGLRenderer`/`Scene`/
    * `PerspectiveCamera`（视场角 `FOV`，near/far 在 `loadScene` 中按场景尺寸重算）、
-   * `CameraController`，装灯光与碰撞可视化，并把 config 里的四组调试开关灌下去。 */
+   * `CameraController` 与碰撞可视化，并把 config 里的四组调试开关灌下去。 */
   init(canvas: HTMLCanvasElement, width: number, height: number, dpr: number, config: RuntimeConfig): void {
     this.config = config;
     // 默认跳高由面板参数反推（与 `src/ts-shared/phys/params.ts` 的 jump_height 同式），
@@ -609,7 +608,6 @@ export class RendererMain {
       map: (name?: string): string => (name === undefined ? this.flightMapName : this.setFlightMapName(name)),
     };
 
-    this.lightManager.applyLights(this.scene, config);
     this.colliderDebug.init(this.scene);
     this.colliderDebug.setDebugFlags(
       config.debug.showSolids,
@@ -641,7 +639,6 @@ export class RendererMain {
    * three.js 的 `scene.remove()` 只摘除场景图，geometry/material/纹理仍留在 GPU 侧，反复
    * 加载会持续占用显存与 JS 堆。本方法递归 dispose 每个 `userData.isBspModel` 子树，释放
    * three.js 的渲染列表缓存，再清空本地引用、子管理器状态、渲染物理线与权威校准状态。
-   * `LightManager` 的灯光不在此列——它按 config 替换式更新。
    */
   disposeScene(): void {
     // 实体副作用宿主（含实体系统）先释放：它持有玩家实体与 I/O 队列，换图必须重建
@@ -1269,14 +1266,15 @@ export class RendererMain {
   }
 
   /** 应用配置 patch：先按 `section` 把字段并进 `config[section]`，再做该段的联动——
-   * `lighting` 同步灯光、`debug` 重灌三组可视化开关与准星开关、`input` 交给相机控制器、
-   * `texture` 触发一次画质应用、`lod` 只需重渲一帧。段不存在或不是对象时直接返回。 */
+   * `lighting` 只标脏重渲（三盏基础灯已移除装配，见字段区注释）、`debug` 重灌三组可视化开关
+   * 与准星开关、`input` 交给相机控制器、`texture` 触发一次画质应用、`lod` 只需重渲一帧。
+   * 段不存在或不是对象时直接返回。 */
   applyConfigPatch(section: keyof RuntimeConfig, patch: Record<string, unknown>): void {
     const target = this.config[section];
     if (!target || typeof target !== 'object') return;
     Object.assign(target, patch);
     if (section === 'lighting') {
-      this.lightManager.syncFromConfig(this.config);
+      // 三盏基础灯已移除装配（默认 intensity=0，见字段区注释）：该段当前只需重渲一帧。
       this.needsRender = true;
     } else if (section === 'debug') {
       this.colliderDebug.setDebugFlags(

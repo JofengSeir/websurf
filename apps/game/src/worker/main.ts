@@ -53,7 +53,7 @@ let worldJsonRecvAt = 0;
 /** 地图 `servercommand` 的物理参数名（面板名）→ game config 字段名。
  *
  * 只有 `airAccelerate` 与 config 不同名（config 沿用历史短名 `airAccel`），其余同形；
- * 不认识的参数名直接忽略（例如 `pushOut` 不在 game config 里）。
+ * 认不出的参数名直接忽略（映射表未列出的 servercommand 参数不会写入 config）。
  */
 const MAP_PARAM_TO_CONFIG: Record<string, keyof RuntimeConfig['physics']> = {
   maxSpeed: 'maxSpeed',

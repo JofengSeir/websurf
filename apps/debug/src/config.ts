@@ -231,8 +231,9 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
   lighting: {
     ambientColor: 0xffffff,
     // 三盏基础灯默认归零（2026-10-04 owner 裁决三应用渲染对齐 game 纪律：烘焙 lightmap 已含
-    // 灯实体贡献，运行时再打是重复计光）。面板仍可拉高做光照对照实验；注意经装配后终扫收敛为
-    // fullbright 的 mesh 不再响应这些灯（材质已换 Basic，见 renderer-main 的 loadScene 终扫）。
+    // 灯实体贡献，运行时再打是重复计光）。经装配后终扫收敛为 fullbright 的 mesh 也不再响应这些
+    // 灯（材质已换 Basic，见 renderer-main 的 loadScene 终扫）。渲染侧装配已移除以避免死代码
+    // （默认 intensity=0 本就零影响）；若将来要启用需同时接装回 LightManager（applyLights + syncFromConfig）。
     ambientIntensity: 0,
     hemiSkyColor: 0xb0c4de,
     hemiGroundColor: 0x404030,

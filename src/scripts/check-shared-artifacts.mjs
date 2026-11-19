@@ -196,7 +196,6 @@ const KNOWN_CONTENT_DIFF_ALLOW = new Map([
 
 /** 允许只出现在个别端 app.js 的共享模块（白名单，出现新的独有模块即分叉）。 */
 const APP_ONLY_ALLOW = {
-  'src/renderer-shared/environment/light-manager.ts': ['debug'],
   'src/ts-shared/input/input-layer.ts': ['debug', 'game'],
   'src/ts-shared/input/mouse-buffer.ts': ['debug', 'game'],
   'src/ts-shared/input/pointer-lock.ts': ['debug', 'game'],
