@@ -202,10 +202,13 @@ export class EntityGameplay {
 
   private onEntityEvent(event: EntityEvent): void {
     // trigger_push 一类速度副作用：观测宿主只 emit，在这里落到物理线。
-    // `entity:addVelocity` = SF_TRIG_PUSH_ONCE（一次性冲量，累加）；
-    // `entity:baseVelocity` = 非 ONCE 弹力区——Source 语义是「围绕本帧位移叠加的基准速度」，
-    // 而本引擎按用户要求实现为「玩家在区内时把速度设成 pushdir*speed」（覆盖，不累加）；
-    // 早期按 add 处理时 320fps 下每帧 +3000，站上板子 1 秒就涨到 40 万 HU/s。
+    // `entity:addVelocity` = `ApplyAbsVelocityImpulse`（纯叠加）——ONCE 板与非 ONCE 板
+    //   共用：非 ONCE 板在**接触触发区的当下**立刻叠加一次 `pushdir*speed`（owner 2026-11-20 口径，
+    //   见 `classes/triggers.ts`），同一次接触不重复，离开后再接触会再给一次。
+    // `entity:baseVelocity` = 旧版 `SetBaseVelocity` 通道；trigger_push 已不再使用它
+    //   （历史实现是「区内每帧覆盖速度为 pushdir*speed」，与 Source 的 base-velocity 语义不符），
+    //   保留处理只为兼容 `trigger_gravity` 的 `setPlayerBaseVelocity(null)` 清理；
+    //   `set` 分支不再被常规实体路径触发。
     if (event.kind === 'entity:addVelocity') {
       const v = parseVelocityDetail(event.detail);
       if (v) this.applyPlayerVelocity(v, 'add');
@@ -224,8 +227,8 @@ export class EntityGameplay {
   /**
    * 把实体层上报的速度副作用同时施加到物理线并转发给权威 Worker。
    *
-   * @param mode 'add' = 叠加冲量（`SF_TRIG_PUSH_ONCE`）；'set' = 覆盖速度
-   *   （`trigger_push` 非 ONCE 的加速板：区内每帧设成固定方向/大小，离开后保持）。
+   * @param mode 'add' = 叠加冲量（ONCE 板 + 非 ONCE 板接触瞬间那一次）；'set' = 覆盖速度
+   *   （仅保留给旧通道 `entity:baseVelocity`，常规实体路径不再使用）。
    */
   private applyPlayerVelocity(velocity: [number, number, number], mode: 'add' | 'set'): void {
     const phys = this.options.getPhys();

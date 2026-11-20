@@ -231,9 +231,14 @@ export const TriggerPushClass: EntityClass = {
     const dir = e.get<Vec3>('pushdir') ?? [0, 0, 0];
     e.set('__pushDir', pushDirToYup(dir));
   },
+  // 接触「回合」开始：清掉上一次接触留下的已施加标记（离开后再进板会重新给一次）。
+  startTouch: (e) => {
+    e.set('__pushApplied', false);
+  },
   touch: (e, other) => {
     if (e.getBool('touchDisabled', false)) return;
     if (!passesTriggerFilters(e, other)) return;
+    if (!other.isPlayer()) return;
     const dir = e.get<Vec3>('__pushDir') ?? [0, 0, 0];
     // `alternateticksfix` 只在 `sv_alternateticks` 开启时才是缩放系数
     // （Source SDK `triggers.cpp:2230-2242` `CTriggerPush::Activate`：否则 `m_flPushSpeed = m_flSpeed`）。
@@ -243,7 +248,6 @@ export const TriggerPushClass: EntityClass = {
     const v: Vec3 = [dir[0] * speed, dir[1] * speed, dir[2] * speed];
     if (e.hasSpawnFlags(SF_TRIGGER.PUSH_ONCE)) {
       e.runtime.host.addPlayerVelocity(v);
-      if (v[1] > 0) e.runtime.host.setPlayerBaseVelocity(null);
       // Source 在 Touch 内直接 `UTIL_Remove(this)`（triggers.cpp:2277）；本实现不在 touch 回调里
       // 直接删自己，等价做法是先断 touch（`touchDisabled`）再 0.1s 后移除——否则这 0.1s 内
       // 每帧 Touch 都会再叠一次 3000 HU/s（实测一帧 +3000、连叠数帧直接飞出地图）。
@@ -251,7 +255,16 @@ export const TriggerPushClass: EntityClass = {
       removeSoon(e);
       return;
     }
-    e.runtime.host.setPlayerBaseVelocity(v);
+    // 非 ONCE：按 owner 2026-11-20 的口径——**接触触发区当下就立刻叠加一次
+    // `pushdir*speed` 冲量**（Source 的 `ApplyAbsVelocityImpulse` 语义：纯叠加，保留进板动量与
+    // 方向，不把速度定死），同一次接触里不再重复施加；离开后再次接触会重新给一次。
+    if (e.getBool('__pushApplied', false)) return;
+    e.set('__pushApplied', true);
+    e.runtime.host.addPlayerVelocity(v);
+  },
+  endTouch: (e, other) => {
+    e.set('__pushApplied', null);
+    baseTriggerEndTouch(e, other);
   },
 };
 

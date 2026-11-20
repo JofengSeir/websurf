@@ -941,6 +941,15 @@ impl PhysWorld {
     /// 把玩家速度**设成**给定向量（HU/s，Y-up），对应 `trigger_push` 非 `SF_TRIG_PUSH_ONCE`
     /// 分支的「设置速度」语义：玩家在触发区内时把水平速度置为该方向/大小。
     ///
+    /// **已弃用（2026-11-20）**：Source SDK 的 `CTriggerPush::Touch` 并不直接改速度，而是
+    /// `SetBaseVelocity(push)` + `AddFlag(FL_BASEVELOCITY)`；`CPlayerMove::CheckMovingGround()`
+    /// （player_command.cpp:93-125）只在 flag 未置位时才 `ApplyAbsVelocityImpulse((1+dt/2)*basevelocity)`，
+    /// 所以玩家**留在区内时速度不变**，**离开后的下一帧**才把 `≈pushdir*speed` 叠加到当前速度上
+    /// （进入越快、离开越快，且保留原有动量与方向）。实体层已改为「touch 记下待施加值、endTouch
+    /// 调 `add_velocity` 一次性叠加」（见 `src/ts-shared/entity/classes/triggers.ts`），本函数仅留作
+    /// 旧回放/兼容通道，常规路径不再调用。保留原实现避免 wasm 导出面与消息协议一起改动。
+    ///
+    /// 旧语义（历史）：水平方向取 pushdir 方向、大小取 `max(当前水平速度, |dir|*speed)`，`vy` 为 0 时保留当前 vy。
     /// **竖直分量特殊处理**：`pushdir` 的 vy 为 0 时**保留玩家当前 vy**——板子/斜坡上
     /// 由碰撞投影积累起来的上升速度不能被每帧清零（旧实现 `velocity = [vx,vy,vz]`
     /// 会把它归零，导致「过了斜坡垂直速度没了」，surf_666 起点实测）。只有地图真的
