@@ -573,7 +573,12 @@ fn default_true() -> bool {
 ///
 /// 这些实体 brush 不参与玩家碰撞（MASK_PLAYERSOLID 不包含 trigger 面）：
 /// `trigger_*` / `func_illusionary` / `func_occluder` / `func_dustmotes` / `func_areaportal` /
-/// `func_precipitation`。若导出为固体碰撞体，玩家会在触发区域踩到透明空气墙（用户实测的导出 bug）。
+/// `func_precipitation` / `func_dustcloud` / `func_smokevolume` / `func_lod`。
+/// 若导出为固体碰撞体，玩家会在触发区域踩到透明空气墙（用户实测的导出 bug）。
+///
+/// `func_dustcloud` / `func_smokevolume` 是纯视觉体积（`CFunc_DustCloud` / `CFuncSmokeVolume`
+/// 都 `SetSolid(SOLID_NONE)`）；`func_lod` 同理（`CFunc_LOD` 只做距离淡出）。surf_voyager 的
+/// 全部 64 个出生点都在一个 `func_dustcloud` 体积内，之前被当固体把玩家整局卡死（用户实测）。
 pub fn entity_is_non_solid(classname: &str) -> bool {
     classname.starts_with("trigger_")
         || classname == "func_illusionary"
@@ -581,6 +586,9 @@ pub fn entity_is_non_solid(classname: &str) -> bool {
         || classname == "func_dustmotes"
         || classname == "func_areaportal"
         || classname == "func_precipitation"
+        || classname == "func_dustcloud"
+        || classname == "func_smokevolume"
+        || classname == "func_lod"
 }
 
 /// 实体 → 模型 classname 映射（`model="*N"` 实体）；model[0]（worldspawn）为 None。
