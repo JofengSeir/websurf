@@ -40,6 +40,10 @@ export interface PhysicsConfig {
    *  `tickRate` 的物理步长/难度）。默认 1000Hz、最高 2000Hz（owner 2026-11-19 指定，
    *  见 `src/ts-shared/app/compute-cap.ts`）；面板「计算帧率上限」控件 48..2000。 */
   computeRateCap: number;
+  /** 横向（水平）速度模长上限（HU/s，0 = 关闭）：用户设置项，与地图 `sv_maxvelocity`
+   *  取更小者生效（只钳 `hypot(vx,vz)`，竖直不受限）。JS 驱动层参数，不进 Rust 参数表；
+   *  落地在共享 `EntityGameplay.setUserSpeedCap`。面板「横向限速」控件 0..20000。 */
+  maxHorizontalSpeed: number;
   /** 重力加速度（HU/s²）→ Rust `gravity`。读点：`worker/main.ts` 的 `syncParamsToWasm`
    *  与 `buildPhysicsParams`；面板重力控件（量程 200..2000）。 */
   gravity: number;
@@ -220,6 +224,8 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     pushOutOnlyWhenSolid: PHYSICS_PARAM_DEFAULTS.pushOutOnlyWhenSolid,
     // 主线程计算帧率上限（与物理步长 tickRate 解耦）：默认 1000Hz、最高 2000Hz
     computeRateCap: COMPUTE_CAP_DEFAULT,
+    // 横向限速（用户设置项）：默认 5000，0 = 关闭（只跟随地图 sv_maxvelocity）
+    maxHorizontalSpeed: PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed,
   },
   input: {
     sensitivity: 1.5,

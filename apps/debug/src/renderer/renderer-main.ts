@@ -587,6 +587,15 @@ export class RendererMain {
     this.computeRateCap = Math.min(COMPUTE_CAP_MAX, Math.max(COMPUTE_CAP_MIN, Math.round(hz)));
   }
 
+  /**
+   * 用户横向限速（HU/s，0 = 关闭）：面板「横向限速」项写入，实际生效值由共享
+   * `EntityGameplay` 与地图 `sv_maxvelocity` 取小后下发（渲染物理线与权威侧同参）。
+   */
+  setHorizontalSpeedCap(cap: number): void {
+    if (!Number.isFinite(cap)) return;
+    this.gameplay?.setUserSpeedCap(cap);
+  }
+
   /** 模拟时钟统计（HUD 用）：回放/单步闸门/物理未就绪时不代表真实物理频率，返回 null 让 HUD 显示「—」。 */
   get simClockStats(): SimClockStats | null {
     if (!this.predReady || this.replayMode || this.stepGated) return null;
@@ -854,6 +863,7 @@ export class RendererMain {
         ((this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 }),
       getPhys: () => this.predPhys,
       defaultJumpHeight: this.defaultJumpHeight,
+      initialUserSpeedCap: this.config.physics.maxHorizontalSpeed,
       onEntityEvent: (event) => this.onEntityEvent?.(event),
       onPlayerVelocity: (vel, mode) => this.onPlayerVelocity?.(vel, mode),
       onSpeedCapChange: (cap) => this.onSpeedCapChange?.(cap),
@@ -1384,6 +1394,8 @@ export class RendererMain {
       // 计算帧率上限是独立参数 `physics.computeRateCap`（与权威物理步长 tickRate 无关），
       // 运行期面板改动/配置回灌都从这里统一对齐时钟目标频率。
       this.setComputeRateCap(this.config.physics.computeRateCap);
+      // 横向限速同理：面板「横向限速」与地图 `sv_maxvelocity` 由共享宿主取小后下发。
+      this.setHorizontalSpeedCap(this.config.physics.maxHorizontalSpeed);
     } else if (section === 'lod') {
       this.needsRender = true;
     } else if (section === 'texture') {

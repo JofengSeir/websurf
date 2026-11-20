@@ -289,6 +289,9 @@ function createPanel(bridgeImpl: InputBridge): PanelController {
     // （src/renderer-shared/config/optimize-flags.ts 的 setOptimizeFlags）。
     // 启动时由 PanelController.sendAllPrefs 按 vbsp:panelPrefs 恢复一次，之后每次勾选再应用一次。
     (flags) => setOptimizeFlags(flags),
+    // 横向限速（physics.maxHorizontalSpeed，0=关闭）→ 共享宿主 EntityGameplay.setUserSpeedCap
+    // （生效值 = min(地图 sv_maxvelocity, 用户值)）。
+    (cap) => renderer?.setHorizontalSpeedCap(cap),
   );
 }
 

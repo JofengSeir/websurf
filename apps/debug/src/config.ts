@@ -55,6 +55,10 @@ export interface PhysicsConfig {
    * 频率，与呈现（rAF）解耦，只影响主线程每秒算多少步预测/呈现，**不影响**权威物理步长与难度
    * （那是 `tickRate`）。面板取值范围见 `PARAM_DEFS` 的 `computeRateCap` 项（48–2000）。 */
   computeRateCap: number;
+  /** 横向（水平）速度模长上限（HU/s，0 = 关闭）：用户设置项，与地图 `sv_maxvelocity`
+   * 取更小者生效（只钳 `hypot(vx,vz)`，竖直不受限）。JS 驱动层参数，不进 Rust 参数表；
+   * 落地在共享 `EntityGameplay.setUserSpeedCap`。面板「横向限速」行同参。 */
+  maxHorizontalSpeed: number;
 }
 
 export interface PlayerConfig {
@@ -240,6 +244,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     slideAngle: (70 * Math.PI) / 180,
     tickRate: PHYSICS_PARAM_DEFAULTS.tickRate,
     computeRateCap: COMPUTE_CAP_DEFAULT,
+    maxHorizontalSpeed: PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed,
   },
   player: {
     radius: 16,

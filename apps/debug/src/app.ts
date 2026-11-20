@@ -17,6 +17,7 @@ import {
 } from './input/input-recorder.js';
 import type { InputReplayMeta } from './input/input-recorder.js';
 import { createConfig, applyConfigPatch } from './config.js';
+import { PHYSICS_PARAM_DEFAULTS } from '../../../src/ts-shared/phys/param-defaults.js';
 import { loadDefaultTexturePack } from './default-pack.js';
 import { ensureMainWasm, mainWasmUrl } from './main-wasm.js';
 // 主线程侧的 WASM 入口：BSP 解析与 MTZ 解压（与 Worker 各自的 wasm 模块实例）
@@ -2457,6 +2458,12 @@ function initPhysicsPanel(): void {
 			config.physics.computeRateCap = value;
 			rendererMain?.setComputeRateCap(value);
 		}
+		// 横向限速（用户设置项）：0 = 关闭（只跟随地图 `sv_maxvelocity`）。生效值由共享
+		// `EntityGameplay` 取「地图值与用户值」的较小者后下发渲染物理线 + 权威侧；这里只镜像配置。
+		if (name === 'maxHorizontalSpeed' && typeof value === 'number' && Number.isFinite(value)) {
+			config.physics.maxHorizontalSpeed = value;
+			rendererMain?.setHorizontalSpeedCap(value);
+		}
 		// 联动（range ↔ number）
 		if (el.dataset.param && el.type === 'range') {
 			const numEl = document.querySelector(`[data-param-input="${name}"]`) as HTMLInputElement | null;
@@ -2554,6 +2561,9 @@ function initPhysicsPanel(): void {
 			inputBridge?.sendResetHull();
 			// 默认计算频率 = COMPUTE_CAP_DEFAULT（1000Hz），不是 64Hz：reset 后重新下发。
 			restoreDefaultComputeCap();
+			// 横向限速恢复默认 5000（用户设置项，0=关闭）
+			config.physics.maxHorizontalSpeed = PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed;
+			rendererMain?.setHorizontalSpeedCap(PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed);
 		}
 	});
 }
@@ -2594,6 +2604,11 @@ function renderPhysicsSnapshot(msg: PhysicsSnapshotMessage): void {
 			if (p.name === 'computeRateCap' && typeof p.value === 'number') {
 				config.physics.computeRateCap = p.value;
 				rendererMain?.setComputeRateCap(p.value);
+			}
+			// 横向限速同理：回填时镜像到共享宿主（生效值 = min(地图, 用户)，0 = 关闭）。
+			if (p.name === 'maxHorizontalSpeed' && typeof p.value === 'number') {
+				config.physics.maxHorizontalSpeed = p.value;
+				rendererMain?.setHorizontalSpeedCap(p.value);
 			}
 		}
 		// 持久化（D4）：只把 source='manual' 的项写回 localStorage。

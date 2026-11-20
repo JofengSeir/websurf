@@ -72,6 +72,10 @@ export interface EntityGameplayOptions {
   onPlayerVelocity?: (velocity: [number, number, number], mode: 'add' | 'set') => void;
   /** 地图 `sv_maxvelocity` 速度上限（HU/s，水平）。 */
   onSpeedCapChange?: (cap: number) => void;
+  /** 用户横向限速（HU/s；`0`/缺省 = 关闭，只跟随地图 `sv_maxvelocity`）。
+   *  初值由各端 config 的 `physics.maxHorizontalSpeed` 传入，之后可用
+   *  {@link EntityGameplay.setUserSpeedCap} 更新（面板改值）。 */
+  initialUserSpeedCap?: number;
   /** 跳跃增幅区内/外的起跳高度变化。 */
   onJumpHeightChange?: (height: number) => void;
   /** 玩家 targetname 变化（传送 filter 门控用；首次为空串也会回调一次）。 */
@@ -123,6 +127,10 @@ export class EntityGameplay {
   private triggerBoxes: EntityTriggerVolumeView[] = [];
   /** 最近一次下发的水平速度上限 / 跳高（null = 还没下发过）。 */
   private speedCap: number | null = null;
+  /** 地图 `sv_maxvelocity` 给的上限（null = 地图没设过）。 */
+  private mapSpeedCap: number | null = null;
+  /** 用户设置项 `physics.maxHorizontalSpeed`（null = 关闭，只跟随地图）。 */
+  private userSpeedCap: number | null = null;
   private jumpHeight: number | null = null;
   /** 已镜像给权威侧的玩家名与 filter 开关（`null` = 还没同步过）。 */
   private playerNamePushed: string | null = null;
@@ -131,11 +139,41 @@ export class EntityGameplay {
   constructor(options: EntityGameplayOptions) {
     this.options = options;
     this.defaultJumpHeight = options.defaultJumpHeight ?? 57;
+    const initialCap = options.initialUserSpeedCap;
+    if (initialCap != null && Number.isFinite(initialCap) && initialCap > 0) {
+      this.userSpeedCap = initialCap;
+    }
   }
 
   /** 当前下发的水平速度上限（诊断/测试用）。 */
   get speedCapApplied(): number | null {
     return this.speedCap;
+  }
+
+  /**
+   * 设置用户横向限速（`0`/负数/`null` = 关闭，此时只跟随地图 `sv_maxvelocity`）。
+   *
+   * Source 的 `sv_maxvelocity` 只钳水平模长（竖直不受限），我们沿用同一口径：
+   * 生效值取「地图值」与「用户值」的较小者——用户设置只能收紧、不能把地图限制放宽。
+   * 面板「横向限速」项与各端 config 的 `physics.maxHorizontalSpeed` 同参。
+   */
+  setUserSpeedCap(cap: number | null): void {
+    this.userSpeedCap = cap != null && Number.isFinite(cap) && cap > 0 ? cap : null;
+    this.applyEffectiveSpeedCap();
+  }
+
+  /** 按「地图值 ∩ 用户值」重算生效上限并下发渲染物理线 + 权威侧。 */
+  private applyEffectiveSpeedCap(): void {
+    const mapCap = this.mapSpeedCap;
+    const userCap = this.userSpeedCap;
+    let effective: number | null = null;
+    if (mapCap != null && userCap != null) effective = Math.min(mapCap, userCap);
+    else if (mapCap != null) effective = mapCap;
+    else if (userCap != null) effective = userCap;
+    if (effective == null || !Number.isFinite(effective) || effective <= 0) return;
+    this.speedCap = effective;
+    this.options.getPhys()?.set_max_horizontal_speed?.(effective);
+    this.options.onSpeedCapChange?.(effective);
   }
 
   /** 当前下发的起跳高度（诊断/测试用）。 */
@@ -159,6 +197,8 @@ export class EntityGameplay {
     this.collectTriggerVolumes();
     // 换图/重装实体后由下一帧重新判定并补发跳高（世界重建会把 Rust 侧 jump_height 回默认）。
     this.jumpHeight = null;
+    // 换图后地图 `sv_maxvelocity` 会重新下发；这里只清地图值，用户设置项（userSpeedCap）保留。
+    this.mapSpeedCap = null;
   }
 
   /** 每帧推进：实体 I/O → 跳跃增幅区 → 玩家名门控。物理未就绪时只跑实体。 */
@@ -194,6 +234,7 @@ export class EntityGameplay {
     this.triggerBoxes = [];
     this.jumpHeight = null;
     this.speedCap = null;
+    this.mapSpeedCap = null;
     this.playerNamePushed = null;
     this.teleportFilterPushed = null;
   }
@@ -256,9 +297,9 @@ export class EntityGameplay {
       if (m) {
         const cap = Number(m[1]);
         if (!Number.isFinite(cap)) continue;
-        this.speedCap = cap;
-        this.options.getPhys()?.set_max_horizontal_speed?.(cap);
-        this.options.onSpeedCapChange?.(cap);
+        // 地图值先记下，再与用户设置项取小（见 `setUserSpeedCap`）——用户只能收紧。
+        this.mapSpeedCap = cap;
+        this.applyEffectiveSpeedCap();
         continue;
       }
       for (const { name, value } of mapCvarsToPhysicsParams(line)) {

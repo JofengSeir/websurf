@@ -96,6 +96,9 @@ export class PanelController {
      *  （`src/renderer-shared/config/optimize-flags.ts`）：启动按偏好恢复一次，之后每次勾选再应用一次；
      *  默认全关。Worker 不渲染，故运行时开关只在主线程应用。 */
     private readonly onSyncOptimize?: (flags: OptimizeConfig) => void,
+    /** 横向限速（`physics.maxHorizontalSpeed`，0=关闭）→ 共享宿主
+     *  `EntityGameplay.setUserSpeedCap`（生效值 = min(地图 sv_maxvelocity, 用户值)）。 */
+    private readonly onSyncHorizontalSpeedCap?: (cap: number) => void,
   ) {
     this.root = document.getElementById('panel') as HTMLElement;
     // 键位：与 app.ts 构造 KeyboardInput 时同源——都走 loadKeymap() 读 localStorage，缺省回默认表
@@ -334,6 +337,12 @@ export class PanelController {
       this.config.physics.computeRateCap = v;
       this.bridge.sendConfig('physics', { computeRateCap: v });
       this.onSyncComputeRateCap?.(v);
+    });
+    // 横向限速（用户设置项，0 = 关闭）：与地图 `sv_maxvelocity` 取小后生效。
+    this.bindSlider('maxHorizontalSpeed', 0, 20000, 50, (v) => {
+      this.config.physics.maxHorizontalSpeed = v;
+      this.bridge.sendConfig('physics', { maxHorizontalSpeed: v });
+      this.onSyncHorizontalSpeedCap?.(v);
     });
     this.bindSlider('gravity', 200, 2000, 1, (v) => {
       this.config.physics.gravity = v;
@@ -755,6 +764,7 @@ export class PanelController {
     // 物理（config.physics）
     setVal('tickRate', String(p.physics.tickRate));
     setVal('computeRateCap', String(p.physics.computeRateCap));
+    setVal('maxHorizontalSpeed', String(p.physics.maxHorizontalSpeed));
     setVal('gravity', String(p.physics.gravity));
     setVal('accelerate', String(p.physics.accelerate));
     setVal('airAccel', String(p.physics.airAccel));
@@ -966,7 +976,7 @@ export class PanelController {
    * （`resetKeymap`），通用是地图/出生点操作，健康是运行计数。
    */
   private static readonly PANE_RESET: Record<string, ReadonlyArray<{ section: 'physics' | 'input' | 'player' | 'hud' | 'texture' | 'lighting' | 'optimize'; keys: readonly string[] }>> = {
-    physics: [{ section: 'physics', keys: ['tickRate', 'computeRateCap', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp', 'pushOut', 'pushOutOnlyWhenSolid'] }],
+    physics: [{ section: 'physics', keys: ['tickRate', 'computeRateCap', 'maxHorizontalSpeed', 'gravity', 'accelerate', 'airAccel', 'friction', 'maxSpeed', 'walkSpeed', 'crouchSpeed', 'stopSpeed', 'jumpSpeed', 'autobhop', 'bhopSpeedClamp', 'pushOut', 'pushOutOnlyWhenSolid'] }],
     hull: [{ section: 'player', keys: ['halfWidth', 'standHeight', 'duckHeight'] }],
     look: [{ section: 'input', keys: ['sensitivity', 'yawBindSpeed'] }],
     display: [

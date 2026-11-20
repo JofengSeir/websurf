@@ -242,6 +242,20 @@ export class RendererMain {
     return this.simClock?.stats ?? null;
   }
 
+  /**
+   * 用户横向限速（HU/s，0 = 关闭）：面板「横向限速」项写入，实际生效值由共享
+   * `EntityGameplay` 与地图 `sv_maxvelocity` 取小后下发（渲染物理线与权威侧同参）。
+   */
+  setHorizontalSpeedCap(cap: number): void {
+    if (!Number.isFinite(cap)) return;
+    this.gameplay?.setUserSpeedCap(cap);
+  }
+
+  /** 当前生效的横向限速（诊断/验收用；null = 尚未装配实体宿主或未下发）。 */
+  get speedCapApplied(): number | null {
+    return this.gameplay?.speedCapApplied ?? null;
+  }
+
   /** 固定步长模拟步（`sim-clock` 的 step 回调）：物理未就绪时让路，避免空转推进时基；
    *  页面隐藏时不推进（时钟不依赖 rAF，后台泵帧只会空烧 CPU，欠账由时钟截顶丢弃）。 */
   private stepFixedSimulation(dt: number): void {
@@ -365,6 +379,7 @@ export class RendererMain {
         ((this.predPhys?.state() as RawPlayerState | undefined) ?? { posX: 0, posY: 0, posZ: 0 }),
       getPhys: () => this.predPhys,
       defaultJumpHeight: this.defaultJumpHeight,
+      initialUserSpeedCap: this.config.physics.maxHorizontalSpeed,
       onEntityEvent: (event) => this.onEntityEvent?.(event),
       onPlayerVelocity: (vel, mode) => this.onPlayerVelocity?.(vel, mode),
       onSpeedCapChange: (cap) => this.onSpeedCapChange?.(cap),
@@ -1059,6 +1074,6 @@ export class RendererMain {
         self.feedInput(dx, dy, mask);
       },
     };
-    (globalThis as unknown as { __vbspFrameProbe?: unknown }).__vbspFrameProbe = probe; installPoseEntry({ applyPose: (p) => { self.setHoldPoint({ x: p.pos[0], y: feetFromCameraPose(p)[1], z: p.pos[2], yaw: p.yawDeg, pitch: p.pitchDeg, onGround: true }); }, readPose: () => cameraPoseOf(self.camera), releasePose: () => { self.holdPoint = null; } }, 'game'); (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality = (q) => self.applyTextureQuality(q);
+    (globalThis as unknown as { __vbspFrameProbe?: unknown }).__vbspFrameProbe = probe; installPoseEntry({ applyPose: (p) => { self.setHoldPoint({ x: p.pos[0], y: feetFromCameraPose(p)[1], z: p.pos[2], yaw: p.yawDeg, pitch: p.pitchDeg, onGround: true }); }, readPose: () => cameraPoseOf(self.camera), releasePose: () => { self.holdPoint = null; } }, 'game'); (globalThis as unknown as { __vbspTextureQuality?: (q: 'original' | 'mini') => Promise<void> }).__vbspTextureQuality = (q) => self.applyTextureQuality(q); (globalThis as unknown as { __vbspSpeedCap?: () => number | null }).__vbspSpeedCap = () => self.speedCapApplied;
   }
 }

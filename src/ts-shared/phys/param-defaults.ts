@@ -23,6 +23,12 @@
 export const PHYSICS_PARAM_DEFAULTS = {
   /** 地速上限（HU/s）→ Rust `run_speed`。 */
   maxSpeed: 250,
+  /** 横向（水平）速度模长上限（HU/s）：JS 驱动层参数，不进 Rust 参数表。
+   *  与地图 `sv_maxvelocity` 取更小者生效（`0` = 关闭，只跟随地图；Source 的
+   *  `sv_maxvelocity` 只钳水平模长、竖直不受限）。落地在共享
+   *  `EntityGameplay.setUserSpeedCap`，两端口径一致。默认 5000：surf_666 的地图值是
+   *  10000，用户要求按 5000 收（owner 2026-11-20）。 */
+  maxHorizontalSpeed: 5000,
   /** 走路速度（HU/s，Shift 慢走）→ Rust `walk_speed`。 */
   walkSpeed: 130,
   /** 蹲走速度（HU/s）→ Rust `crouch_speed`。 */

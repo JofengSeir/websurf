@@ -5,8 +5,9 @@
  * （`description` 落成参数行的 title 属性），Worker 侧 `apps/debug/src/physics/physics-params.ts`
  * 读 `default` 与 `min`/`max` 做回退与钳制。
  *
- * 15 项里 13 项经 `PARAM_TO_RUST` 映射成 `src/phys/mod.rs` 的 `set_params` 键；`tickRate` 与
- * `computeRateCap` 是 JS 驱动层参数，不进 Rust（前者=权威物理步长/难度，后者=主线程计算频率上限）。默认值统一引用 `src/ts-shared/phys/param-defaults.ts` 的
+ * 16 项里 13 项经 `PARAM_TO_RUST` 映射成 `src/phys/mod.rs` 的 `set_params` 键；`tickRate` /
+ * `computeRateCap` / `maxHorizontalSpeed` 是 JS 驱动层参数，不进 Rust（前者=权威物理步长/难度，
+ * 中者=主线程计算频率上限，后者=横向速度上限、由共享 `EntityGameplay` 与地图值取小后下发）。
  * `PHYSICS_PARAM_DEFAULTS`（2026-11-18 起唯一来源，与 `config.ts` 的 `DEFAULT_CONFIG.physics`
  * 及 Worker / 主线程预测参数同源，避免「面板显示值」与「实际生效值」漂移）。
  */
@@ -50,12 +51,17 @@ export interface ParamState extends ParamDef {
   source: ParamSource;
 }
 
-/** 全部参数定义（14 项）；面板行与快照都按本数组顺序。 */
+/** 全部参数定义（16 项）；面板行与快照都按本数组顺序。 */
 export const PARAM_DEFS: ParamDef[] = [
   {
     name: 'maxSpeed', label: '地速上限', unit: 'u/s',
     kind: 'number', default: PHYSICS_PARAM_DEFAULTS.maxSpeed, min: 50, max: 1000, step: 1,
     description: '地面移动速度上限（sv_maxspeed，对应 run_speed）。超过后地面加速不再生效；hns 模式下"拉不动地速"即此值被压低的典型表现。',
+  },
+  {
+    name: 'maxHorizontalSpeed', label: '横向限速', unit: 'u/s',
+    kind: 'number', default: PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed, min: 0, max: 20000, step: 50,
+    description: '横向（水平）速度模长上限：板上/斜坡加速后按此值收口，竖直分量不受限（Source 的 sv_maxvelocity 语义）。与地图 sv_maxvelocity 取更小者生效；0 = 关闭，只跟随地图。它是用户设置项、与地图无关（owner 2026-11-20）。',
   },
   {
     name: 'walkSpeed', label: '走路速度', unit: 'u/s',

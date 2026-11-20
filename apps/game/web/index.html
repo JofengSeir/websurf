@@ -124,6 +124,11 @@
           <div class="row"><label>计算帧率上限 (Hz)</label>
             <input type="range" id="computeRateCap" min="48" max="2000" step="1" value="1000" />
             <div class="val"><input id="computeRateCapNum" type="number" value="1000" /></div></div>
+          <!-- 横向限速（用户设置项，0 = 关闭）：与地图 sv_maxvelocity 取较小者生效，
+               只钳水平速度模长（竖直不受限），见共享 EntityGameplay.setUserSpeedCap -->
+          <div class="row"><label>横向限速 (u/s)</label>
+            <input type="range" id="maxHorizontalSpeed" min="0" max="20000" step="50" value="5000" />
+            <div class="val"><input id="maxHorizontalSpeedNum" type="number" value="5000" /></div></div>
           <div class="row"><label>重力</label>
             <input type="range" id="gravity" min="200" max="2000" step="1" value="800" />
             <div class="val"><input id="gravityNum" type="number" value="800" /></div></div>
