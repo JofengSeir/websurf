@@ -687,6 +687,14 @@ export class RendererMain {
     } catch (err) {
       console.error('[renderer] set_params 失败:', err);
     }
+    // 面板 `jumpSpeed` 应用时把由它反算的默认跳高同步给实体宿主：宿主 `load()` / 离开
+    // autohop_zone 都用 `defaultJumpHeight` 作基线，只在 init 时算一次会拿 stale config
+    // 把面板设定值覆盖回 57（panel prefs 晚于 renderer.init 合并）。
+    const jumpHeight = params.jump_height;
+    if (typeof jumpHeight === 'number' && Number.isFinite(jumpHeight) && jumpHeight > 0) {
+      this.defaultJumpHeight = jumpHeight;
+      this.gameplay?.setDefaultJumpHeight(jumpHeight);
+    }
   }
 
   /**

@@ -73,7 +73,8 @@ export interface EntityGameplayOptions {
   /** 地图 `sv_maxvelocity` 速度上限（HU/s，水平）。 */
   onSpeedCapChange?: (cap: number) => void;
   /** 用户横向限速（HU/s；`0`/缺省 = 关闭，只跟随地图 `sv_maxvelocity`）。
-   *  初值由各端 config 的 `physics.maxHorizontalSpeed` 传入，之后可用
+   *  初值由各端 config 的 `physics.maxHorizontalSpeed` 传入，在 {@link EntityGameplay.load}
+   *  里按「地图值 ∩ 用户值」生效（换图物理线重建后自动重放），之后可用
    *  {@link EntityGameplay.setUserSpeedCap} 更新（面板改值）。 */
   initialUserSpeedCap?: number;
   /** 跳跃增幅区内/外的起跳高度变化。 */
@@ -120,7 +121,10 @@ function parseVelocityDetail(detail: string | undefined): [number, number, numbe
 export class EntityGameplay {
   private entitySystem: EntitySystem | null = null;
   private readonly options: EntityGameplayOptions;
-  private readonly defaultJumpHeight: number;
+  /** 起跳高度默认值（HU）；面板 `jumpSpeed` 应用时由 {@link setDefaultJumpHeight} 更新。 */
+  private defaultJumpHeight: number;
+  /** 上次看到的物理实例；换图后主线程会建全新 `PhysWorld`，按实例镜像的状态需要重放。 */
+  private physRef: GameplayPhysLike | null = null;
   /** `autohop_zone` 体积（玩家碰撞箱与之求交决定跳高）。 */
   private autohopZones: { min: [number, number, number]; max: [number, number, number] }[] = [];
   /** 带体积的 trigger 列表（debug 碰撞可视化用；game 端可忽略）。 */
@@ -176,6 +180,25 @@ export class EntityGameplay {
     this.options.onSpeedCapChange?.(effective);
   }
 
+  /** 把已生效的上限重放到当前物理实例（宿主/物理实例重建用；不重复通知权威侧）。 */
+  private pushSpeedCapToPhys(): void {
+    if (this.speedCap == null) return;
+    this.options.getPhys()?.set_max_horizontal_speed?.(this.speedCap);
+  }
+
+  /**
+   * 更新起跳高度默认值（HU）：面板 `jumpSpeed` 应用时由宿主端按 `jumpSpeed²/(2·gravity)`
+   * 重算后调用。
+   *
+   * 为什么不能只留构造参数：`load()` 与「离开跳跃增幅区」都用默认值把跳高压回去。
+   * 若默认值停留在 renderer.init 时的旧 config（panel 偏好晚于 init 合并），换图/离区
+   * 会把面板设定值覆盖回 57。下一帧 `updateAutohopZoneJump()` 会按新基线重算并在变化时下发。
+   */
+  setDefaultJumpHeight(height: number): void {
+    if (!Number.isFinite(height) || height <= 0) return;
+    this.defaultJumpHeight = height;
+  }
+
   /** 当前下发的起跳高度（诊断/测试用）。 */
   get jumpHeightApplied(): number | null {
     return this.jumpHeight;
@@ -199,6 +222,11 @@ export class EntityGameplay {
     this.jumpHeight = null;
     // 换图后地图 `sv_maxvelocity` 会重新下发；这里只清地图值，用户设置项（userSpeedCap）保留。
     this.mapSpeedCap = null;
+    // 立即按「地图值 ∩ 用户值」重放一次生效限速（地图值若在实体装配期已由
+    // `servercommand sv_maxvelocity` 写入，则这里直接取两者较小者）。不能只存不发：
+    // 面板默认用户限速（5000）若不下发，Rust 侧会退回自己的兜底默认，面板值与权威实际
+    // 生效值分叉。物理线若晚于本调用建立，由 `update()` 的实例变更分支再重放。
+    this.applyEffectiveSpeedCap();
   }
 
   /** 每帧推进：实体 I/O → 跳跃增幅区 → 玩家名门控。物理未就绪时只跑实体。 */
@@ -206,6 +234,18 @@ export class EntityGameplay {
     if (!this.entitySystem) return;
     this.entitySystem.frame(dt);
     const phys = this.options.getPhys();
+    if (phys !== this.physRef) {
+      this.physRef = phys;
+      if (phys) {
+        // 换图后主线程是全新 `PhysWorld` 实例（`load()` 时它还不存在，见 loadScene →
+        // buildPredictionWorld 的顺序）：按实例镜像的状态整体重放一次。跳高置 null 让
+        // `updateAutohopZoneJump()` 用当前基线重发；玩家名/filter 也要重新推。
+        this.jumpHeight = null;
+        this.pushSpeedCapToPhys();
+        this.playerNamePushed = null;
+        this.teleportFilterPushed = null;
+      }
+    }
     const st = this.options.getPlayerState();
     this.updateAutohopZoneJump(st, phys);
     this.syncPlayerName(phys);
@@ -235,6 +275,7 @@ export class EntityGameplay {
     this.jumpHeight = null;
     this.speedCap = null;
     this.mapSpeedCap = null;
+    this.physRef = null;
     this.playerNamePushed = null;
     this.teleportFilterPushed = null;
   }
@@ -258,8 +299,9 @@ export class EntityGameplay {
       if (v) this.applyPlayerVelocity(v, 'set');
     } else if (event.kind === 'servercommand') {
       // 地图脚本的 `servercommand`（logic_auto OnMapSpawn 等）：目前只认速度上限
-      // `sv_maxvelocity`——surf 图靠它把满速抬到 3500/10000；没这条命令时 Rust 侧
-      // 用默认 3500 兜底（见 `PhysWorld::max_horizontal_speed`）。
+      // `sv_maxvelocity`——surf 图靠它把满速抬到 3500/10000；没这条命令时由用户限速 /
+      // 两端单源默认值兜底（见 `PhysWorld::max_horizontal_speed` 与
+      // `PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed`）。
       this.applyServerCommand(event.detail ?? '');
     }
     this.options.onEntityEvent?.(event);

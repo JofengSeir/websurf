@@ -822,6 +822,10 @@ export class PanelController {
     // task-95：初始计算帧率上限同步给主线程模拟时钟；启动探测稍后（异步）会再次覆盖成
     // 「用户未手动改过时的默认值」。注意与物理步长 tickRate 无关。
     this.onSyncComputeRateCap?.(p.physics.computeRateCap);
+    // 用户横向限速初值也要在这里下发：实体宿主构造后要等地图装配才 load()，面板偏好合并后
+    // 必须立即把值交给宿主，否则它只在面板滑块回调里才被应用（默认 5000 永远到不了物理线）。
+    // 生效值仍由宿主与地图 `sv_maxvelocity` 取小，用户只能收紧。
+    this.onSyncHorizontalSpeedCap?.(p.physics.maxHorizontalSpeed);
     this.bridge.sendConfig('player', { ...p.player });
     this.bridge.sendConfig('input', {
       sensitivity: p.input.sensitivity,

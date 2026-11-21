@@ -27,7 +27,8 @@ export const PHYSICS_PARAM_DEFAULTS = {
    *  与地图 `sv_maxvelocity` 取更小者生效（`0` = 关闭，只跟随地图；Source 的
    *  `sv_maxvelocity` 只钳水平模长、竖直不受限）。落地在共享
    *  `EntityGameplay.setUserSpeedCap`，两端口径一致。默认 5000：surf_666 的地图值是
-   *  10000，用户要求按 5000 收（owner 2026-11-20）。 */
+   *  10000，用户要求按 5000 收（owner 2026-11-20）。**Rust `PhysWorld::max_horizontal_speed`
+   *  的构造默认值也必须是本值**（`src/phys/mod.rs`），否则宿主未下发时的兜底与产品默认分叉。 */
   maxHorizontalSpeed: 5000,
   /** 走路速度（HU/s，Shift 慢走）→ Rust `walk_speed`。 */
   walkSpeed: 130,

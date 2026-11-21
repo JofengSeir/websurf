@@ -98,12 +98,14 @@ export interface AssembleSceneResult {
  */
 const RIVER_SHADER_VERT = /* glsl */ `
 varying vec2 vUv;
-varying vec3 vNormalW;
+varying vec3 vWPos;
 varying vec3 vViewW;
 void main() {
   vUv = uv;
   vec4 wp = modelMatrix * vec4(position, 1.0);
-  vNormalW = normalize(mat3(modelMatrix) * normal);
+  // BSP 导出的世界几何没有 normal 顶点属性（只有 POSITION/TEXCOORD/_VBSP_*），
+  // 法线改在片元用屏幕空间导数求（见 RIVER_SHADER_FRAG），这里只传世界坐标。
+  vWPos = wp.xyz;
   vViewW = normalize(cameraPosition - wp.xyz);
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
@@ -117,10 +119,18 @@ uniform float uTime;
 uniform sampler2D uMap;
 uniform float uHasMap;
 varying vec2 vUv;
-varying vec3 vNormalW;
+varying vec3 vWPos;
 varying vec3 vViewW;
 void main() {
-  float ndv = abs(dot(normalize(vNormalW), normalize(vViewW)));
+  // 水面几何是平面片：用屏幕空间导数 cross(dFdx, dFdy) 得到逐像素的世界几何法线。
+  // 不依赖顶点 normal 属性——BSP→GLTF 世界块不导 NORMAL，未绑定 attribute 恒为 0，
+  // normalize(0) 未定义 ⇒ 旧实现菲涅尔可能 NaN。WebGL2 下 dFdx/dFdy 是核心功能，
+  // 与 lightmap-shader 的片元导数光斑同一条路子，无需 #extension。
+  vec3 nrm = cross(dFdx(vWPos), dFdy(vWPos));
+  float nlen = length(nrm);
+  // 退化（极掠射/投影面积趋零）时导数为零向量，用 up 兜底，避免 normalize(0) 的 NaN。
+  vec3 nW = nlen > 1e-8 ? nrm / nlen : vec3(0.0, 1.0, 0.0);
+  float ndv = abs(dot(nW, normalize(vViewW)));
   float fres = pow(1.0 - ndv, 3.0);
   vec3 col = mix(uDeep, uShallow, clamp(fres * 0.85, 0.0, 1.0));
   if (uHasMap > 0.5) {
@@ -159,18 +169,36 @@ function makeRiverFallbackMaterial(src: THREE.MeshBasicMaterial): THREE.ShaderMa
 }
 
 function seedRiverWater(root: THREE.Object3D): number {
-  const done = new Set<THREE.Material>();
+  // 第一遍：按材质实例去重，建立「原材质 → 兜底 ShaderMaterial」映射。
+  // water-merge 会把同一条河按高度层拆成多个 mesh 但共享 first.materials（water-merge.ts:293），
+  // 若只替换首个遍历到的 mesh 的槽，其余部分仍走旧 MeshBasic，随后被 tintTexturelessWater
+  // 染成暗色平水 ⇒ 同一条河出现两种观感。
+  const replacements = new Map<THREE.Material, THREE.ShaderMaterial>();
+  const isRiver = (mat: THREE.Material | undefined): mat is THREE.MeshBasicMaterial => {
+    if (!mat || !mat.transparent || !/river/i.test(mat.name || '')) return false;
+    // 已经是兜底 shader（重复 seed）就不要再包一层。
+    return (mat as unknown as { isShaderMaterial?: boolean }).isShaderMaterial !== true;
+  };
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      if (!isRiver(mat) || replacements.has(mat)) continue;
+      replacements.set(mat, makeRiverFallbackMaterial(mat));
+    }
+  });
+  if (replacements.size === 0) return 0;
+  // 第二遍：遍历所有 mesh 的全部材质槽（数组/单值），引用到被替换实例的槽统一换成同一个
+  // 替换材质；共享实例因此「一处建、处处生效」，不会再出现部分 mesh 漏换。
   let n = 0;
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (let i = 0; i < mats.length; i++) {
-      const mat = mats[i] as THREE.MeshBasicMaterial;
-      if (!mat || !mat.transparent || done.has(mat)) continue;
-      if (!/river/i.test(mat.name || '')) continue;
-      const repl = makeRiverFallbackMaterial(mat);
-      done.add(mat);
+      const repl = replacements.get(mats[i]);
+      if (!repl) continue;
       if (Array.isArray(mesh.material)) mesh.material[i] = repl;
       else mesh.material = repl;
       n++;

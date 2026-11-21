@@ -1618,6 +1618,13 @@ export class RendererMain {
     } catch (err) {
       console.error('[renderer] set_params 失败:', err);
     }
+    // 与 game 端同一口径：面板 `jumpSpeed` 应用时把反算出的默认跳高同步给共享实体宿主，
+    // 否则宿主 `load()` / 离开 autohop_zone 会用 init 时的 stale 默认值覆盖面板设定。
+    const jumpHeight = params.jump_height;
+    if (typeof jumpHeight === 'number' && Number.isFinite(jumpHeight) && jumpHeight > 0) {
+      this.defaultJumpHeight = jumpHeight;
+      this.gameplay?.setDefaultJumpHeight(jumpHeight);
+    }
   }
 
   /** 碰撞箱体型（立即生效）。 */

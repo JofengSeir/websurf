@@ -55,7 +55,7 @@ import { applyRenderPrefs, readRenderPrefs } from '../config/render-prefs.js';
  * 排查「现象还在」时先看它——不一致就说明浏览器跑的是旧包（Service Worker / 磁盘缓存），
  * 别在旧构建上做判断。改渲染语义时顺手递增。
  */
-export const RENDER_REV = '2026-11-13.9-face-normal-cluster';
+export const RENDER_REV = '2026-11-21.1-budget-recovery-window';
 
 /** 泄漏采样时沿面法线外推的距离（HU）：面本身是边界，重心必然贴着 brush。 */
 const CLUSTER_LEAK_PROBE_PUSH = [4, 16, 64, 192] as const;
@@ -80,6 +80,24 @@ import type { PoseScope } from '../camera/pose-entry.js';
 
 /** 三端标识（同时用于探针 `scope` 与日志前缀）。 */
 export type RenderSessionApp = 'viewer' | 'debug' | 'game';
+
+// ── 帧预算控制器常量（`updateFrameBudget()` 用）──────────────────────────────
+//
+// 双槽阈值沿用 320Hz 档的 3.125ms/帧口径：dt>4.8ms（≈1.5 槽）算「漏了一槽」，
+// dt<3.6ms 算「单槽可达」。升档判据（30/60 帧双槽数与占比）保持不变。
+//
+// 恢复判据（2026-11-21 改，审查 P1-4）：旧实现要求「连续 1600/3200 帧无双槽」，
+// 慢机每秒仍会偶发双槽、切后台回来的首帧更是必然超长 ⇒ 实际永远达不到，降档后永久粘住。
+// 改为「最近 120 帧双槽 ≤1（≈0.8%，低于正常偶发抖动）+ 持续约 1s」：
+// 120 帧在 320Hz 下约 0.38s，单看窗口太短，加 1s 累计把「偶发 1 次抖动」和「持续健康」区分开；
+// 仍比旧的 5~10s 快一个数量级，且不再要求「一帧都不能掉」。
+const BUDGET_DOUBLE_SLOT_MS = 4.8;
+const BUDGET_SINGLE_SLOT_MS = 3.6;
+const BUDGET_RECOVER_WINDOW = 120;
+const BUDGET_RECOVER_MAX_DOUBLES = 1;
+const BUDGET_RECOVER_HOLD_MS = 1000;
+const BUDGET_EVALUATE_FIRST_FRAMES = 30;
+const BUDGET_EVALUATE_INTERVAL = 10;
 
 /** 会话构造参数：只保留「创建一次」的东西；每张图的数据走 `loadScene`。 */
 export interface RenderSessionOptions {
@@ -271,11 +289,28 @@ export class RenderSession {
   private budgetDtAt = 0;
   private budgetDtCount = 0;
   /** 距下一次评估还有多少帧。 */
-  private budgetEvaluateIn = 30;
+  private budgetEvaluateIn = BUDGET_EVALUATE_FIRST_FRAMES;
   /** 升档后的最短保持帧数（期间不降档，避免「降级→恢复→再掉」的振荡）。 */
   private budgetHold = 0;
-  /** 连续「非双槽帧」的帧数：降档要求它够长（慢机会一直贴着槽边，不轻易恢复画质）。 */
+  /** 连续「非双槽帧」的帧数：仅诊断（`__vbspBudget.stable`）；恢复判据已改为比例窗口。 */
   private budgetStableFrames = 0;
+  /** 最近 `BUDGET_RECOVER_WINDOW` 帧「是否双槽」的位环（FIFO 计数，恢复判据用）。 */
+  private readonly budgetRecoverRing = new Uint8Array(BUDGET_RECOVER_WINDOW);
+  private budgetRecoverAt = 0;
+  private budgetRecoverFilled = 0;
+  private budgetRecoverDoubles = 0;
+  /** 满足恢复窗口条件的累计时长（ms）：窗口条件破即清零，满 `BUDGET_RECOVER_HOLD_MS` 才允许降档。 */
+  private budgetRecoverMs = 0;
+  /** 页面隐藏/切回后的首帧 dt 跨了整个不可见期，丢弃一次采样。 */
+  private budgetSkipSampleOnce = false;
+  /**
+   * 后台/前台切换的软重置（审查 P1-4）：只清采样窗口/稳定计数，**保留档位与粘滞**。
+   * 隐藏期间不采样由 `updateFrameBudget()` 的 `document.hidden` 守卫兜底；切回后的第一帧
+   * 间隔跨越整个隐藏期（可达秒级），必须丢弃，否则一次切页就能把控制器推到 L1/L2。
+   */
+  private readonly onVisibilityChange = (): void => {
+    this.softResetBudgetWindow();
+  };
 
   private bbox = new THREE.Box3();
   private maxDim = 0;
@@ -343,6 +378,12 @@ export class RenderSession {
         sky: () => ({ hasGroup: !!this.skyGroup, children: this.skyGroup?.children.length ?? 0 }),
       });
     }
+
+    // 切后台会暂停 rAF；切回后的首帧间隔不可信（可达秒级）。挂一个软重置，
+    // 只在浏览器环境注册，`dispose()` 里对称摘掉。
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', this.onVisibilityChange);
+    }
   }
 
   /** 当前主模型根（供端特有功能挂射线/碰撞/拾取用；不要在这里改材质/可见性）。 */
@@ -387,6 +428,9 @@ export class RenderSession {
    * @returns 主根/天空组/包围盒与合并、可见性统计；各端只取自己需要的字段。
    */
   async loadScene(input: RenderSceneInput): Promise<RenderSceneResult> {
+    // 换图先把控制器打回干净状态（审查 P1-3）：旧图的 60 帧窗口/稳定计数只会误导新图，
+    // 而载图前后的长帧也不该算进新图的预算；档位清零让新图从默认画质起评。
+    this.resetFrameBudget();
     this.disposeScene();
     const rp = readRenderPrefs();
     this.pvs = input.pvsJson ? new PvsManager(input.pvsJson) : null;
@@ -710,6 +754,9 @@ export class RenderSession {
       __vbspPrewarmPassesEnabled?: boolean;
     };
     if (g.__vbspPrewarmPassesEnabled === false) return;
+    // 预热是「载图后的假帧」：再清一次采样窗口（async 载图期间旧图末尾的帧可能已经采过），
+    // 防止预热帧与载图长帧污染新图的预算评估（审查 P1-3）。
+    this.resetFrameBudget();
     // 临时放开「不可见 / 视锥剔除」，让整帧 pass 覆盖到全部对象；结束后按逆序还原。
     // ⚠️ 不能放开**灯**：`LightManager` 的 8 槽点光源池在生产态恒为 `visible=false`
     // （`updatePointLights` 无调用点），three r165 的 program cacheKey 里带 `numPointLights`，
@@ -851,6 +898,9 @@ export class RenderSession {
       gw.__vbspBudgetOn = savedBudgetOn;
       gw.__vbspWaterForcePass = savedForcePass;
       gc.__vbspParticleCullOff = savedParticleCullOff;
+      // 预热期间 `__vbspBudgetOn=false` 不采样；把起点清零，让预热后的第一帧 dt 记为 0。
+      // 否则那帧间隔会跨整个载图/预热段（数百 ms），被预算当成一次双槽（审查 P1-3）。
+      this.budgetLastStart = 0;
       for (let i = restore.length - 1; i >= 0; i--) restore[i]();
       // 按真实状态重算一次：把 PVS 裁过的 index / 块可见性还原成出生点该有的样子。
       try {
@@ -1343,17 +1393,28 @@ export class RenderSession {
   }
 
   /**
-   * 帧预算状态机（task-33 方案 C1 的修订版）。**主信号改成 rAF 帧间隔**，而不是渲染段 CPU：
+   * 帧预算状态机（task-33 方案 C1 的修订版）。**主信号是 rAF 帧间隔**，而不是渲染段 CPU：
    * 实测（pcf-semantics 2026-11-16）终点机位渲染段 CPU 只有 1.5~2.8ms，却仍有 3.1/6.2ms
    * 交替 —— 说明超时的那一帧卡在 GPU/合成等待上，用 CPU 时长做阈值永远不触发。
    *
-   * 判定（2026-11-19 改敏感版）：每 10 帧评估一次，最多 2 级；
+   * 采样与时钟口径（2026-11-21 修，审查 P1-3）：
+   * 1) `__vbspBudgetOn=false`（载图预热/用户 A/B）时**先返回、不采样**——预热帧是假帧，
+   *    且与上一帧的间隔跨整个载图段，采进来就是一次假双槽；
+   * 2) 页面隐藏期间与「切回后的第一帧」不采样（`document.hidden` / `budgetSkipSampleOnce`）；
+   * 3) `loadScene()` 与 `prewarmPasses()` 入口调 `resetFrameBudget()` 硬重置（清窗口/稳定计数/
+   *    粘滞/档位），否则新图第一帧拿到的评估窗口里混着旧图样本。
+   *
+   * 判定（2026-11-19 改敏感版，未变）：每 10 帧评估一次，最多 2 级；
    * - 升 L1：最近 30 帧里双槽帧（dt>4.8ms）≥2（≈6.7%）或最近 60 帧占比 ≥8%；
    * - 升 L2：L1 基础上最近 30 帧双槽 ≥5（≈16.7%）或 60 帧占比 ≥15%；
-   * - 降档：连续「非双槽帧」够久才降（L2→L1 需 3200 帧≈10s、L1→L0 需 1600 帧≈5s，且距上次升档已过 180 帧）
-   * 为什么要求「窗口内出现过单槽帧」：如果显示器本身就是 160Hz（dt 恒 6.25），控制器不该一直降级。
+   * - 为什么要求「窗口内出现过单槽帧」：如果显示器本身就是 160Hz（dt 恒 6.25），控制器不该一直降级。
    * 旧判据（60 帧占比 ≥25% 才升）在实测里几乎不触发：用户机是「每秒丢 15~20 帧」≈5~7% 双槽，
    * 落在 5%~25% 死区里，导致水面 cadence 自适应从未生效（`__vbspBudgetLevel` 恒 0）。
+   *
+   * 降档（2026-11-21 改，审查 P1-4）：升档后先保持 180 帧；之后按「最近 `BUDGET_RECOVER_WINDOW`
+   * 帧双槽 ≤ `BUDGET_RECOVER_MAX_DOUBLES` 且该状态累计 ≥ `BUDGET_RECOVER_HOLD_MS`」降一级。
+   * 旧的「连续 1600/3200 帧无双槽」在慢机上永远达不到（慢机双槽是常态），一旦误降就永久粘住；
+   * 现在允许窗口里有一次抖动，但要求约 1s 的持续健康（仍比旧实现快一个数量级）。
    *
    * 关闭开关：`globalThis.__vbspBudgetOn = false`；强制档位：`__vbspBudgetForce = 0|1|2`。
    */
@@ -1370,20 +1431,14 @@ export class RenderSession {
         doublePct: number;
         doubles30: number;
         doubles60: number;
+        doubles120: number;
+        recoverMs: number;
         stable: number;
         up: number;
         down: number;
         hold: number;
       };
     };
-    // 滚动窗口采样 rAF 帧间隔。
-    if (dtMs > 0) {
-      this.budgetDt[this.budgetDtAt] = dtMs;
-      this.budgetDtAt = (this.budgetDtAt + 1) % this.budgetDt.length;
-      this.budgetDtCount = Math.min(this.budgetDtCount + 1, this.budgetDt.length);
-      if (dtMs > 4.8) this.budgetStableFrames = 0;
-      else this.budgetStableFrames++;
-    }
     const write = (): void => {
       g.__vbspBudgetLevel = this.budgetLevel;
       g.__vbspBudget = {
@@ -1393,30 +1448,51 @@ export class RenderSession {
         doublePct: this.budgetDoublePct(),
         doubles30: this.budgetDoubles(30),
         doubles60: this.budgetDoubles(60),
+        doubles120: this.budgetRecoverDoubles,
+        recoverMs: Math.round(this.budgetRecoverMs),
         stable: this.budgetStableFrames,
         up: this.budgetUp,
         down: this.budgetDown,
         hold: this.budgetHold,
       };
     };
+    // ① 逃生舱/预热：不采样、不清窗口（窗口由 loadScene/prewarm 入口的硬重置负责）。
     if (g.__vbspBudgetOn === false) {
       this.budgetLevel = 0;
       write();
       return;
+    }
+    // ② 隐藏期间不采样，也不消费 skip 标记；切回后的首帧间隔跨了整个隐藏期，丢弃一次。
+    if (typeof document !== 'undefined' && document.hidden) {
+      write();
+      return;
+    }
+    if (this.budgetSkipSampleOnce) {
+      this.budgetSkipSampleOnce = false;
+      write();
+      return;
+    }
+    // ③ 滚动窗口采样 rAF 帧间隔 + 恢复窗口。
+    if (dtMs > 0) {
+      this.budgetDt[this.budgetDtAt] = dtMs;
+      this.budgetDtAt = (this.budgetDtAt + 1) % this.budgetDt.length;
+      this.budgetDtCount = Math.min(this.budgetDtCount + 1, this.budgetDt.length);
+      this.budgetStableFrames = dtMs > BUDGET_DOUBLE_SLOT_MS ? 0 : this.budgetStableFrames + 1;
+      this.sampleRecoverWindow(dtMs);
     }
     if (typeof g.__vbspBudgetForce === 'number') {
       this.budgetLevel = Math.max(0, Math.min(2, Math.floor(g.__vbspBudgetForce)));
       write();
       return;
     }
-    // 每 10 帧评估一次；窗口未填满前不动作。
+    // 每 `BUDGET_EVALUATE_INTERVAL` 帧评估一次；窗口未填满前不动作。
     this.budgetEvaluateIn--;
     if (this.budgetHold > 0) this.budgetHold--;
-    if (this.budgetEvaluateIn > 0 || this.budgetDtCount < 30) {
+    if (this.budgetEvaluateIn > 0 || this.budgetDtCount < BUDGET_EVALUATE_FIRST_FRAMES) {
       write();
       return;
     }
-    this.budgetEvaluateIn = 10;
+    this.budgetEvaluateIn = BUDGET_EVALUATE_INTERVAL;
     const doubles30 = this.budgetDoubles(30);
     const doubles60 = this.budgetDoubles(60);
     const ratio60 = doubles60 / Math.max(1, this.budgetDtCount);
@@ -1431,42 +1507,107 @@ export class RenderSession {
         this.budgetLevel = 2;
         this.budgetUp++;
         this.budgetHold = 180;
-      } else if (this.budgetHold === 0 && this.budgetStableFrames >= 1600 && doubles60 === 0) {
+      } else if (this.budgetHold === 0 && this.budgetRecoverReady()) {
         this.budgetLevel = 0;
         this.budgetDown++;
+        this.budgetRecoverMs = 0;
       }
-    } else if (this.budgetHold === 0 && this.budgetStableFrames >= 3200 && doubles60 === 0) {
+    } else if (this.budgetHold === 0 && this.budgetRecoverReady()) {
       this.budgetLevel = 1;
       this.budgetDown++;
+      this.budgetRecoverMs = 0;
     }
     write();
   }
 
-  /** 最近 `n` 帧样本里的双槽帧（dt>4.8ms）个数（按时间顺序取最后 n 个）。 */
+  /**
+   * 恢复窗口采样：最近 `BUDGET_RECOVER_WINDOW` 帧里双槽帧数 ≤ `BUDGET_RECOVER_MAX_DOUBLES`
+   * （≈0.8%，低于正常偶发抖动）才累计「干净时长」；条件一破即清零。
+   * 320Hz 下窗口只有约 0.38s，不够区分偶发抖动，所以再看累计时长 ≥ `BUDGET_RECOVER_HOLD_MS`。
+   */
+  private sampleRecoverWindow(dtMs: number): void {
+    const isDouble = dtMs > BUDGET_DOUBLE_SLOT_MS ? 1 : 0;
+    if (this.budgetRecoverFilled >= BUDGET_RECOVER_WINDOW) {
+      this.budgetRecoverDoubles -= this.budgetRecoverRing[this.budgetRecoverAt];
+    } else {
+      this.budgetRecoverFilled++;
+    }
+    this.budgetRecoverRing[this.budgetRecoverAt] = isDouble;
+    this.budgetRecoverDoubles += isDouble;
+    this.budgetRecoverAt = (this.budgetRecoverAt + 1) % BUDGET_RECOVER_WINDOW;
+    if (this.budgetRecoverFilled >= BUDGET_RECOVER_WINDOW
+      && this.budgetRecoverDoubles <= BUDGET_RECOVER_MAX_DOUBLES) {
+      this.budgetRecoverMs += dtMs;
+    } else {
+      this.budgetRecoverMs = 0;
+    }
+  }
+
+  /** 降档判据：窗口已填满且双槽数达标，并且该状态累计持续了 `BUDGET_RECOVER_HOLD_MS`。 */
+  private budgetRecoverReady(): boolean {
+    return this.budgetRecoverFilled >= BUDGET_RECOVER_WINDOW
+      && this.budgetRecoverDoubles <= BUDGET_RECOVER_MAX_DOUBLES
+      && this.budgetRecoverMs >= BUDGET_RECOVER_HOLD_MS;
+  }
+
+  /** 清空预算采样与恢复窗口；档位/粘滞等「决策状态」由调用方决定是否保留。 */
+  private clearBudgetSamples(): void {
+    this.budgetDt.fill(0);
+    this.budgetDtAt = 0;
+    this.budgetDtCount = 0;
+    this.budgetStableFrames = 0;
+    this.budgetRecoverRing.fill(0);
+    this.budgetRecoverAt = 0;
+    this.budgetRecoverFilled = 0;
+    this.budgetRecoverDoubles = 0;
+    this.budgetRecoverMs = 0;
+    this.budgetEvaluateIn = BUDGET_EVALUATE_FIRST_FRAMES;
+  }
+
+  /**
+   * 换图/预热的硬重置（审查 P1-3）：窗口、稳定计数、粘滞、档位全归零，下一帧 dt 记为 0。
+   * 不把 `budgetLastStart` 清零的话，新图第一帧的 dt 会跨整个载图段（数百 ms），直接算一次双槽。
+   */
+  private resetFrameBudget(): void {
+    this.clearBudgetSamples();
+    this.budgetHold = 0;
+    this.budgetLevel = 0;
+    this.budgetLastStart = 0;
+    this.budgetSkipSampleOnce = false;
+    (globalThis as { __vbspBudgetLevel?: number }).__vbspBudgetLevel = 0;
+  }
+
+  /** 可见性切换的软重置（审查 P1-4）：只清采样窗口，保留档位与粘滞（后台时间不是性能证据）。 */
+  private softResetBudgetWindow(): void {
+    this.clearBudgetSamples();
+    this.budgetSkipSampleOnce = true;
+  }
+
+  /** 最近 `n` 帧样本里的双槽帧（dt>BUDGET_DOUBLE_SLOT_MS）个数（按时间顺序取最后 n 个）。 */
   private budgetDoubles(n: number): number {
     const len = this.budgetDt.length;
     const count = Math.min(this.budgetDtCount, n);
     const start = (this.budgetDtAt - count + len * 2) % len;
     let dbl = 0;
-    for (let i = 0; i < count; i++) if (this.budgetDt[(start + i) % len] > 4.8) dbl++;
+    for (let i = 0; i < count; i++) if (this.budgetDt[(start + i) % len] > BUDGET_DOUBLE_SLOT_MS) dbl++;
     return dbl;
   }
 
-  /** 最近 `n` 帧里是否出现过单槽帧（dt<3.6ms）——证明这台机器的 320Hz 档确实可达。 */
+  /** 最近 `n` 帧里是否出现过单槽帧（dt<BUDGET_SINGLE_SLOT_MS）——证明这台机器的 320Hz 档确实可达。 */
   private budgetHasSingleSlot(n: number): boolean {
     const len = this.budgetDt.length;
     const count = Math.min(this.budgetDtCount, n);
     const start = (this.budgetDtAt - count + len * 2) % len;
-    for (let i = 0; i < count; i++) if (this.budgetDt[(start + i) % len] < 3.6) return true;
+    for (let i = 0; i < count; i++) if (this.budgetDt[(start + i) % len] < BUDGET_SINGLE_SLOT_MS) return true;
     return false;
   }
 
-  /** 滚动窗口里「双槽帧」占比（dt>4.8ms）；窗口未填满按已有样本算。 */
+  /** 滚动窗口里「双槽帧」占比（dt>BUDGET_DOUBLE_SLOT_MS）；窗口未填满按已有样本算。 */
   private budgetDoublePct(): number {
     const n = this.budgetDtCount;
     if (n === 0) return 0;
     let dbl = 0;
-    for (let i = 0; i < n; i++) if (this.budgetDt[i] > 4.8) dbl++;
+    for (let i = 0; i < n; i++) if (this.budgetDt[i] > BUDGET_DOUBLE_SLOT_MS) dbl++;
     return +(dbl / n).toFixed(3);
   }
 
@@ -2008,6 +2149,9 @@ export class RenderSession {
 
   /** 页面卸载：释放当前图 + renderer。 */
   dispose(): void {
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    }
     this.disposeScene();
     this.bloomFx?.dispose();
     this.bloomFx = null;

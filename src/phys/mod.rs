@@ -179,7 +179,9 @@ pub struct PhysWorld {
     /// 水平速度上限（HU/s，**不含竖直分量**）：对应 Source 的 `sv_maxvelocity`。
     ///
     /// 只钳水平模长 `hypot(vx, vz)`，竖直速度不受限（surf 语义：竖直方向的冲量
-    /// 与重力需要保留，否则板子/斜坡的抛射会被整个削平）。默认 3500（Source 默认值），
+    /// 与重力需要保留，否则板子/斜坡的抛射会被整个削平）。构造默认 5000 HU/s，与
+    /// `src/ts-shared/phys/param-defaults.ts` 的 `PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed`
+    /// 单源（owner 2026-11-20 定的产品默认；生效值 = min(地图 `sv_maxvelocity`, 用户值)）。
     /// 地图 `logic_auto` 的 `sv_maxvelocity` 经 `set_max_horizontal_speed` 覆盖（surf_666 写的是 10000）。
     /// `<= 0` 表示关闭钳制（调试用）。
     max_horizontal_speed: f64,
@@ -223,7 +225,7 @@ impl PhysWorld {
             ready: false,
             hull_stats: [0; 4],
             event: None,
-            max_horizontal_speed: 3500.0,
+            max_horizontal_speed: 5000.0,
             state_out: [0.0; 22],
         }
     }
@@ -988,8 +990,10 @@ impl PhysWorld {
 
     /// 设置水平速度上限（HU/s，**不含竖直分量**）：`<= 0` 表示关闭钳制。
     ///
-    /// 对应 Source 的 `sv_maxvelocity`（默认 3500）。宿主在地图加载后按
-    /// `logic_auto` 的 `servercommand sv_maxvelocity <n>` 调用；surf_666 写的是 10000。
+    /// 对应 Source 的 `sv_maxvelocity`。宿主在实体装载后按「地图 `logic_auto` 的
+    /// `servercommand sv_maxvelocity <n>` ∩ 用户面板限速」下发（见共享 `EntityGameplay`）；
+    /// 构造默认 5000 与 TS `PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed` 单源（owner 2026-11-20
+    /// 产品默认；Source 的 3500 不再作为兜底值）。surf_666 写的是 10000。
     /// 只钳水平模长：板子/斜坡/传送带来的竖直速度需要保留。
     pub fn set_max_horizontal_speed(&mut self, cap: f64) {
         self.max_horizontal_speed = cap;
