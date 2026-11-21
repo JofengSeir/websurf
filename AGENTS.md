@@ -28,9 +28,10 @@
 | `apps/debug`、`apps/game`、`apps/viewer` | 三端工程；各自是独立 npm 工程，另有 `crates/` |
 | `src/phys` | 共享物理（Rust，`cargo test -p websurf-phys`） |
 | `src/wasm-core` | BSP / 模型 / 材质 / 渲染导出的 wasm 核心（Rust） |
+| `src/wasm-bindings` | 三端共享的 wasm 绑定 / BSP 解析与 GLB 导出（Rust；三端 `crates/wasm` 已是薄壳 `pub use`） |
 | `src/ts-shared`、`src/renderer-shared` | 共享 TS 层；three 的单实例装在仓库根 `node_modules` |
 | `src/materials`、`src/web` | 材质包与共享 web 资产 |
-| `src/scripts` | 本地开发/构建/流程工具：`serve.py`、`build-textures-mtz.mjs`、`copy-wasm-pkg.mjs`、`sync-web-assets.mjs`、`agent-memory.mjs`、`check-render-parity.mjs`、`capture-render.mjs`、工具链 `.cmd` |
+| `src/scripts` | 本地开发/构建/流程工具：`serve.mjs` 静态服务、`dev-preflight`/`dev-port`/`wait-for-server` 开发链、`copy-wasm-pkg`/`sync-web-assets`/`build-textures-mtz` 资产、`agent-memory`/`agent-audit` 记忆与统计、`check-*.mjs` 门禁、`capture-*` 取证；`serve.py` 仅旧脚本兼容 |
 | `test/` | `maps/`、`replay/` 夹具（gitignore，本地自备）；`project/` 第三方 SDK 参考 |
 | `skills/websurf-env-traps` | 本仓 Windows 作业陷阱（开工前读） |
 | `.github/workflows` | `ci-gates.yml`（构建/测试）、`deploy-pages.yml`（部署） |
@@ -52,8 +53,11 @@ npm run typecheck              # TS 类型检查
 npm run build:ts               # typecheck + esbuild（app + worker 两个 bundle）
 npm run build:app              # 只编 web/app.js；**prebuild 钩子会先重建 web/worker.js**
 npm run build:dist             # 打包 dist/（single 或 --multi）
-npm run dev                    # 起本地服务（debug 8080 / game 8090 / viewer 8100）
+npm run dev                    # 起本地服务（Node serve.mjs；debug 8080 / game 8090 / viewer 8100）
 ```
+
+> 静态服务是 `src/scripts/serve.mjs`（Node，不需要系统 Python）；`serve.py` 只为旧脚本兼容。
+> 根目录 `npm run dev:check` = `dev-preflight --all`（三端产物 / 端口自检）。
 
 > 两个 bundle：`web/app.js`（主线程）与 `web/worker.js`（权威物理 Worker）是**分开构建**的。
 > `build:app` 会自动先跑 `build:worker`（`prebuild:app` 钩子）；若手工跳过钩子只编 app，
@@ -79,20 +83,21 @@ node src/scripts/check-render-parity.mjs
 
 ### 2.4 CI
 
-CI 跑 `.github/workflows/ci-gates.yml`：`cargo test`、viewer 的源码契约、三端 wasm 构建与 GLB 一致性。
+CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、三端 typecheck、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁一致性 / GLB 一致性（**GLB 在 CI 无 `test/maps` 夹具时 SKIP**）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
 
 **提交前**至少跑与改动相关的构建 / 类型检查；**没跑成功的项要在提交信息里写清楚**。
 
 ## 3. 项目记忆（AMH gateway，可选但推荐）
 
-### 3.0 现状（2026-10-18）
+### 3.0 现状（2026-11-21 复核）
 
-- DSH profile 未装 native MCP，只能走**通道 A（项目 client）**：`client.mjs` 有 6 条命令 + `call`，能访问 48 个 native 工具；但模型看不到原生工具列表，17 个 skill 不能直调，只能按 skill 顶部提示走 `client.mjs call`。要走 B 需要 profile entry + token + 重启（B 不采用，见 §3.2）。
+- DSH profile 未装 native MCP，只能走**通道 A（项目 client）**：`client.mjs` 有 9 条命令（`brief` / `handoff` / `sessions` / `recall` / `search` / `save` / `tools` / `call`（支持 `--args-file`）/ `delete`），能访问 gateway 暴露的 native 工具（实例 20 实测约 48 个，以 `client.mjs tools` 为准）；但模型看不到原生工具列表，skill 不能直调，只能按 skill 顶部提示走 `client.mjs call`。要走 B 需要 profile entry + token + 重启（B 不采用，见 §3.2）。
 - **旧的独立 agentmemory / mcp-hub 路线已卸载：不要恢复。** 当前 AMH gateway 的 backend 是 agentmemory（0.9.30），只经 gateway 访问；**不要直连 `:3111` 或实例 REST**。
 - AMH gateway 是项目记忆的唯一入口；细则以 `.dsh/skills/amh-memory/SKILL.md` 为准，但其中「brief/handoff 失败就停」的旧约定由 §3.1 覆盖：gateway 不可用落 `.dsh/amh-outbox`，不阻塞。
 - 项目契约 `.amh/config.json`（`hub` / `binding` / `project`，本地文件，不写进仓库）。
 - **新克隆的仓库里没有 `.amh/` / `.dsh/`**：`brief` 会显示 `gateway=DOWN` 并给出提示，`save` / `handoff` 自动落 `.dsh/amh-outbox/`（exit 0），不影响改代码与提交；要接记忆再按本机流程配一次 binding。工作流骨架（AGENTS / skills / `.githooks` / scripts）在仓库里，拉下来执行 `npm run hooks:install` 即可。
 - 旧的 `amh-cli` / 7 工具 / marker / verify / counts 路线已删除；**`brief` 仍可用**。
+- **本机 AMH 全栈当前停用**（2026-11-21 复核：client 依赖目录缺 `node_modules`、hub `:5598` 未监听、实例 20/21 `state=stopped`）。规则不变：不自行 start/stop、不装依赖；写操作落 outbox，提交写 `AMH: down`。恢复由 owner 执行：装 agentmemory 依赖 → `amh 21 -NoOllama` → 验 `gateway/livez` → `doctor` / `brief` → 人工过一遍 outbox 后 `flush`。
 
 ### 3.1 三条命令（弱 agent 也能走通）
 
@@ -100,24 +105,26 @@ CI 跑 `.github/workflows/ci-gates.yml`：`cargo test`、viewer 的源码契约�
 
 | 时机 | 命令 | 说明 |
 |---|---|---|
-| 开工 | `node src/scripts/agent-memory.mjs brief` | 只打印 gateway 状态、HEAD/干净度、最近 3 条 handoff、最近 5 条写入、outbox 数 |
+| 开工 | `node src/scripts/agent-memory.mjs brief` | 只打印 gateway 状态、HEAD/干净度、最近 3 天窗口内的 handoff（每 task 取最新、最多 3 条）、最近 5 条写入、outbox 数；`--days N` 可调窗口 |
 | 过程中 | `node src/scripts/agent-memory.mjs save --content "..." --type fact --concepts "area,topic" --files "src/file.ts"` | 决定 / 非显然修复落一条 |
 | 收尾 | `node src/scripts/agent-memory.mjs handoff --task T-650 --status "partial" --content "..." --next "..." --files "a.ts,b.ts"` | content 必填；task/status/next 缺省会填占位值（尽量自己写清楚） |
-| gateway 恢复后 | `node src/scripts/agent-memory.mjs flush`；`node src/scripts/agent-memory.mjs doctor` | 补写离线记录 / 体检 |
+| gateway 恢复后 | `node src/scripts/agent-memory.mjs flush`；`node src/scripts/agent-memory.mjs doctor` | 补写离线记录 / 体检；`flush` 有条目失败时 exit 1（失败条目保留在 outbox），全部成功才 exit 0 |
+
+另：根目录 `npm run agent:audit` = `agent-audit.mjs`，只读 `git log` 统计最近 50 笔的 AMH 尾注率与「无行为变化」占比。
 
 使用规则：
 
-1. **不要一次读 20 条旧 handoff**：`brief` 只给最近 3 条；更早的用 `recall "<关键词>"` 按需查。旧 handoff 可能已被后续提交覆盖，必须回 `git` / 代码复核。
+1. **不要一次读 20 条旧 handoff**：`brief` 只给最近 3 天窗口内（每 task 最新、最多 3 条）；更早的用 `recall "<关键词>"` 按需查。旧 handoff 可能已被后续提交覆盖，必须回 `git` / 代码复核。
 2. **gateway 不可用不阻塞**：`save` / `handoff` 自动把内容写到 `.dsh/amh-outbox/*.json`（gitignore），agent 继续改代码；提交信息写 `AMH: down`，gateway 恢复后 `flush`。**不要自己 start/stop AMH**。
 3. **brief 失败也不阻塞**：用 `git log/status` + 代码继续，不要停在原地。
 4. `--app` 默认 `dsh`；不知道应用名就用默认。**不要猜别的 token，也不要建 `amh` profile。**
-5. 直接调 client 仍可用（`brief/sessions/recall/search/save/handoff/tools/call`），但推荐 wrapper：它处理 JSON 形状、outbox、摘要和失败回退。
+5. 直接调 client 仍可用（命令见 `node gateway/bin/client.mjs help`，含 `tools` / `delete`），但推荐 wrapper：它处理 JSON 形状、outbox、摘要和失败回退。
 
 ### 3.2 通道与身份
 
 | 通道 | 能力 | 代价 | 结论 |
 |---|---|---|---|
-| A. 项目 client | `client.mjs` 六条 + `call`；`call` 可访问全部 native 工具 | 模型看不到原生工具列表；每个 agent 需自己的 token 才有独立身份 | **正式路线** |
+| A. 项目 client | `client.mjs` 9 条命令（`brief` / `handoff` / `sessions` / `recall` / `search` / `save` / `tools` / `call` / `delete`）；`call` 可访问全部 native 工具 | 模型看不到原生工具列表；每个 agent 需自己的 token 才有独立身份 | **正式路线** |
 | B. native MCP | 模型直接看到 native 工具 | 需要 profile entry + token + 重启；DSH 加 `web` 会污染所有项目 | **不采用** |
 
 - **禁止**新建 `amh` profile。
@@ -138,20 +145,21 @@ AMH: down            # gateway 不可用（正文说明）
 
 - **不挂 commit-msg 钩子**：尾注是**文档级必须**，不是机械门禁。缺尾注不阻塞提交；**不要**为了「守规矩」去加一个会卡住别的 agent 的钩子。
 - 纯文档 / 数据、`.dsh/` `.amh/` `.tmp/` 等忽略目录不强制。
+- `flush` 只打印 ok/fail 计数、不回传 memory-id；`AMH: <id>` 的 id 来自恢复后 `save` / `handoff` 的输出。
 - 如果将来有人装了钩子：**不要**用 `--no-verify` 逃；先修流程。`AMH: none` 是合法决定，不是失败。
 
 ### 3.4 工具与已知坑
 
 | # | 事实 / 坑 | 规则 |
 |---|---|---|
-| 1 | 17 个 skill 在 `.dsh/skills` 是指向 AMH `gateway/skills` 的目录 junction，不是副本 | 不要手工复制一套 |
-| 2 | gateway 路径读 `.amh/gateway.path`；`AMH_CLIENT` 可覆盖 client 路径 | 路径问题先查这两处 |
+| 1 | `.dsh/skills` 是指向 AMH `gateway/skills` 的目录 junction，不是副本（新机器没有） | 不要手工复制一套 |
+| 2 | gateway 路径读 `.amh/gateway.path`；`AMH_CLIENT` 可覆盖 client 路径、`AMH_GATEWAY` 可覆盖 gateway 路径 | 路径问题先查这三处 |
 | 3 | `.amh/config.json` 有 hub/binding/project 和本地 token | 不要把 token 写进仓库 / 公开面 |
-| 4 | 原生工具面 48 个（实例 20 实测），不是旧 7 个；gateway 只挡 6 个结构性跨边界工具 | — |
+| 4 | 原生工具面约 48 个（实例 20 实测；以 `client.mjs tools` 为准），不是旧 7 个；gateway 只挡 6 个结构性跨边界工具 | — |
 | 5 | `client.mjs save --concepts "a,b"` 传字符串；`--files` 正常 | 旧 `call memory_save --args-file` 只作兜底 |
 | 6 | `brief` 仍可用（旧 AGENTS 写「已删除」是错的） | — |
 | 7 | `sessions` 往往只有旧 capture | 别把它当当前会话列表 |
-| 8 | `brief.handoffs` 不过滤状态，会混入新旧 handoff | wrapper 只取最近 3 条，仍要按时间 / HEAD 判断 |
+| 8 | `brief.handoffs` 不过滤状态，会混入新旧 handoff | wrapper 取最近 3 天窗口内、每 task 最新、最多 3 条，仍要按时间 / HEAD 判断 |
 | 9 | — | 不装 native MCP、不新建 `amh` profile；不自己加第二入口、不自己发 token |
 | 10 | — | 不写 secrets、原始对话、临时日志 |
 

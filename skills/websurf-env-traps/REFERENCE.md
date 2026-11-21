@@ -57,6 +57,7 @@ apps/*/scripts/_*.mjs  .amh/  .dsh/
 | 2 | 受限模式下**程序不能开命名管道**：Node `child_process` 默认 `stdio:"pipe"` 抓别的程序输出会 `EPERM` | 这是**设计边界**，不要换写法重试——改 `stdio:"inherit"/"ignore"`，或用 PowerShell 自己的管道 |
 | 3 | 沙箱拒绝形如 `[sandbox: file access denied under <mode>]` | 那是**策略拒绝**，不是路径写错 ⇒ 不要换路径重试；删除 `.git`、工作区外文件通常需要一次性提权 |
 | 4 | **工作区写入模式并不等于可以删任何文件**：实测删除已跟踪文件会被拒 | 批量删除/提交用一次 `danger-full-access`，并在命令里先打印目标清单再删 |
+| 5 | 沙箱内起浏览器必失败：`Start-Process msedge` 进程创建后即退出/调试端口不监听（mojo `platform_channel` 打不开、命名管道被拒） | 浏览器必须在**沙箱外**启动（Win+R → 快捷方式 / `.cmd`，必要时点掉「安全警告」对话框的「运行(R)」），再连 CDP；不要重试沙箱内启动 |
 
 ## 4. git 与提交（本仓有并发 agent）
 
@@ -101,7 +102,8 @@ apps/*/scripts/_*.mjs  .amh/  .dsh/
 - **RT 清屏色必须携带「无内容」语义（透明黑 alpha=0）**：清成天空色 alpha=1 会让失败像素「看似有内容」，绕过一切 NoGeom 透明兜底，被雾罩成不透明色板；失败路径的降级方向必须是「更透明」（NoGeom ⇒ alpha≤0.25 让主画面透出），结构性杜绝「测不到→涂满」。
 - **静态截图测不出「飞一会才坏」的状态累积**：逐次重载的截图永远干净；必须用**单会话多航点飞行模拟**（`.tmp/water-v4/flight-test.mjs` 范式：一页 12 航点、首尾同机位对照）。
 - **视觉转述模型会编造读数**（T-650 两次实锤：把空 RT 读成「有内容」、把纯黑读成「有结构」）：观感终审=owner 眼睛，诊断判读=确定性像素测量（文件体积/逐像素 diff/调试档通道分解）；转述模型永久不进验收与诊断链。
-- **旧服务进程锁 dist 且伺候旧包**：`build:dist` 报 EBUSY 即查端口（serve.py `os.chdir` 进 dist 会持锁）；按 stop.cmd 规矩只杀占端口的 python，重打后 owner 必须重开入口。
+- **旧服务进程锁 dist 且伺候旧包**：`build:dist` 报 EBUSY 即查端口。静态服务现在是 Node `src/scripts/serve.mjs`（`serve.py` 仅旧脚本兼容）；`stop.cmd` / `dev-port.mjs` 只回收自己记录在 `.tmp/dev-server-<port>.pid`（或 dist 启动器）里的 Node 服务，**不误杀外来进程**；重打后 owner 必须重开入口。
+- **AMH outbox ≠ 补写成功**：gateway DOWN 时 `save` / `handoff` 落 `.dsh/amh-outbox/` 且 exit 0，不阻塞；`flush` 在 2026-11-21 前即使全部失败也 exit 0（已修为 exit 1）。恢复 gateway 后先看 `flush` 的 ok/fail、再确认 outbox 清零；**不自行 start/stop AMH**，恢复顺序见 `AGENTS.md` §3。
 - **验 wasm-core 只能靠「重建 wasm + 探针」**：宿主 `cargo test/check -p websurf-wasm-core` 会因缺 `dlltool.exe` 失败；TS 探针用 `npx esbuild x.ts --bundle --format=esm --platform=node --outfile=x.mjs` 打包后再 `node` 跑（探针放 `.tmp/`）。
 - **判据要落到「拓扑 / 语义」，不要只看位置**：实测一个网格的顶点位置全对、三角形却连错顶点（顶点数组展平顺序被转置）——用浮点四舍五入的位置键比对会产生大量假差异（f32 vs f64），要用**整数拓扑键**或与 SDK 规则逐项对齐。
 - **Pages 站点会被「从分支构建」静默顶掉**：站点源一旦是「Deploy from a branch」，GitHub 内部的 `pages-build-deployment` 会在**每次推送**（含纯文档推送）把仓库根按 Jekyll 发布 ⇒ 站点根被 README 渲染页顶掉（出现 `Jekyll v3.10.0` + `style.css?v=<sha>` 即中招），Actions 产物的 `/debug/`、`/game/`、`/viewer/`、`/version.json` 全 404。查源：`GET /repos/{owner}/{repo}/pages` 的 `build_type`（须为 `workflow`）；修：`PUT` 同路径 `{"build_type":"workflow"}`，再 `POST .../actions/workflows/<id>/dispatches` 重跑部署。取证别只看仓库——设置改动不在 git 里，要查浏览器历史与各 agent 日志；取 token 用 `git credential fill`（PowerShell 管道，bash 下会挂）。
@@ -116,4 +118,4 @@ apps/*/scripts/_*.mjs  .amh/  .dsh/
 git -c http.proxy=$env:HTTPS_PROXY -c https.proxy=$env:HTTPS_PROXY push origin main
 ~~~
 
-没有这个环境变量时，先按本机代理软件的实际地址设置 `HTTPS_PROXY` / `HTTP_PROXY`。实测：直连连续失败 7 次，挂代理第 1 次成功。
+没有这个环境变量时，先按本机代理软件的实际地址设置 `HTTPS_PROXY` / `HTTP_PROXY`。实测：直连连续失败 7 次，挂代理第 1 次成功。**`HTTPS_PROXY` 可能为空**（本机实测）；别把本机代理地址写进仓库，按实际端口设置后再跑。
