@@ -247,27 +247,87 @@ function applyRenameAll(field, style) {
   }
 }
 
-/**
- * 从 Rust 结构体源码里提取**序列化后的键名**。
- *
- * 定位第一个 `pub struct <structName>`，按花括号配对取结构体体；逐字段取 `pub <field>: <type>,`，
- * 字段前紧邻 `#[serde(rename = "x")]` 时取 `x`，结构体标 `#[serde(rename_all = "…")]` 时按该
- * 命名法改写。不覆盖 `#[serde(skip)]` / `flatten`（本仓未使用；真用到时本函数会多报键名，
- * 属保守失败——宁可报错也不静默放过）。
- *
- * @param {{ rustText: string, structName: string }} args
- * @returns {Set<string>}
- */
-export function extractRustSerdeKeys({ rustText, structName } = {}) {
-  if (!rustText || !structName) {
-    throw new Error('wasm-api-contract: extractRustSerdeKeys 缺少 rustText / structName');
+/** 递归收集目录下全部 `.rs` 文件（按路径排序，保证消歧结果可复现）。 */
+function collectRustFiles(rootDir) {
+  if (!existsSync(rootDir)) {
+    throw new Error(`wasm-api-contract: 共享 crate 源码目录不存在 ${rootDir}`);
   }
-  const at = rustText.search(new RegExp('\\bpub\\s+struct\\s+' + structName + '\\b'));
-  if (at < 0) throw new Error('wasm-api-contract: 未找到 pub struct ' + structName);
-  const open = rustText.indexOf('{', at);
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.rs')) out.push(full);
+    }
+  };
+  walk(rootDir);
+  return out.sort();
+}
+
+/**
+ * 判断某个 `pub struct` 定义前**紧邻**的连续属性/注释行里是否有
+ * `#[cfg(feature = "<feature>")]`。逐行向上越过注释与属性行，遇到第一行代码即停，
+ * 避免把上一条目的 cfg 误算到本结构体头上。
+ */
+function hasCfgFeature(text, at, feature) {
+  const lines = text.slice(0, at).split('\n');
+  const re = new RegExp('cfg\\s*\\([^)]*feature\\s*=\\s*"' + feature + '"');
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i].trim();
+    if (line === '' || line.startsWith('//') || line.startsWith('#')) {
+      if (re.test(line)) return true;
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
+/**
+ * 在若干候选源码里唯一确定 `pub struct <structName>` 的定义位置。
+ *
+ * 同名多定义（如 `src/wasm-bindings/src/bsp/glb.rs` 里 glb-lite 与 viewer-export 各一份
+ * `BspMetadata`）必须用 `cfgFeature` 按紧邻的 `#[cfg(feature = "…")]` 消歧；消不掉即报错
+ * （不猜、不取第一个）。
+ *
+ * @param {{ path: string, text: string }[]} sources
+ * @param {string} structName
+ * @param {string|undefined} cfgFeature
+ * @returns {{ text: string, at: number }}
+ */
+function selectStructSource(sources, structName, cfgFeature) {
+  let total = 0;
+  const hits = [];
+  for (const source of sources) {
+    for (const m of source.text.matchAll(new RegExp('\\bpub\\s+struct\\s+' + structName + '\\b', 'g'))) {
+      total += 1;
+      if (cfgFeature && !hasCfgFeature(source.text, m.index, cfgFeature)) continue;
+      hits.push({ text: source.text, at: m.index });
+    }
+  }
+  if (total === 0) throw new Error('wasm-api-contract: 未找到 pub struct ' + structName);
+  if (hits.length === 0) {
+    throw new Error(
+      `wasm-api-contract: 未找到带 #[cfg(feature = "${cfgFeature}")] 的 pub struct ${structName}` +
+        `（同名定义 ${total} 个，均不匹配该 feature）`,
+    );
+  }
+  if (hits.length > 1) {
+    throw new Error(
+      cfgFeature
+        ? `wasm-api-contract: pub struct ${structName} 有 ${hits.length} 个匹配 cfg(feature = "${cfgFeature}") 的定义，无法唯一确定`
+        : `wasm-api-contract: pub struct ${structName} 有 ${hits.length} 个同名定义，需提供 cfgFeature 消歧`,
+    );
+  }
+  return hits[0];
+}
+
+/** 从已定位的结构体源码里提取 serde 键名（定位见 selectStructSource）。 */
+function readStructKeys(text, at, structName) {
+  const open = text.indexOf('{', at);
   if (open < 0) throw new Error('wasm-api-contract: pub struct ' + structName + ' 缺花括号');
-  const body = rustText.slice(open + 1, matchBrace(rustText, open));
-  const head = rustText.slice(Math.max(0, at - 400), at);
+  const body = text.slice(open + 1, matchBrace(text, open));
+  const head = text.slice(Math.max(0, at - 400), at);
   const renameAll = /rename_all\s*=\s*"([^"]+)"/.exec(head);
   const keys = new Set();
   let pending = null;
@@ -284,6 +344,60 @@ export function extractRustSerdeKeys({ rustText, structName } = {}) {
     pending = null;
   }
   return keys;
+}
+
+/**
+ * 沿 `pub use <crate>::…` 找到共享 crate 的源码根，返回可能含该结构体的候选源码。
+ * 仅当 `rustPath` 自身不含 `pub struct <structName>` 时使用；`crateRoots` 由调用方显式传入，
+ * 引擎不猜任何工程路径。
+ */
+function resolveReexportSources({ rustPath, structName, crateRoots }) {
+  const text = readTextFile(rustPath);
+  if (new RegExp('\\bpub\\s+struct\\s+' + structName + '\\b').test(text)) {
+    return [{ path: rustPath, text }];
+  }
+  const reuse = /pub\s+use\s+([A-Za-z_]\w*)\s*::/.exec(text);
+  if (!reuse) {
+    throw new Error(
+      `wasm-api-contract: 未找到 pub struct ${structName}，且 ${rustPath} 未声明 pub use <crate>::…（无法沿共享 crate 解析）`,
+    );
+  }
+  const crateName = reuse[1];
+  const root = crateRoots && crateRoots[crateName];
+  if (!root) {
+    throw new Error(
+      `wasm-api-contract: ${rustPath} 重新导出 crate ${crateName}，但未提供 crateRoots["${crateName}"] 源码根目录`,
+    );
+  }
+  const marker = new RegExp('\\bpub\\s+struct\\s+' + structName + '\\b');
+  const sources = collectRustFiles(root)
+    .map((file) => ({ path: file, text: readTextFile(file) }))
+    .filter((source) => marker.test(source.text));
+  if (sources.length === 0) {
+    throw new Error(`wasm-api-contract: 共享 crate ${crateName}（${root}）内未找到 pub struct ${structName}`);
+  }
+  return sources;
+}
+
+/**
+ * 从 Rust 结构体源码里提取**序列化后的键名**。
+ *
+ * 定位 `pub struct <structName>`，按花括号配对取结构体体；逐字段取 `pub <field>: <type>,`，
+ * 字段前紧邻 `#[serde(rename = "x")]` 时取 `x`，结构体标 `#[serde(rename_all = "…")]` 时按该
+ * 命名法改写。不覆盖 `#[serde(skip)]` / `flatten`（本仓未使用；真用到时本函数会多报键名，
+ * 属保守失败——宁可报错也不静默放过）。
+ *
+ * 同名多定义时必须用 `cfgFeature` 按 `#[cfg(feature = "…")]` 消歧（见 selectStructSource）。
+ *
+ * @param {{ rustText: string, structName: string, cfgFeature?: string }} args
+ * @returns {Set<string>}
+ */
+export function extractRustSerdeKeys({ rustText, structName, cfgFeature } = {}) {
+  if (!rustText || !structName) {
+    throw new Error('wasm-api-contract: extractRustSerdeKeys 缺少 rustText / structName');
+  }
+  const hit = selectStructSource([{ path: '(rustText)', text: rustText }], structName, cfgFeature);
+  return readStructKeys(hit.text, hit.at, structName);
 }
 
 /**
@@ -316,18 +430,33 @@ export function extractTsInterfaceKeys({ tsText, interfaceName } = {}) {
  * 断言「Rust 结构体的序列化键名集合 == TS 接口的键名集合」——两侧都不把对方纳入编译期校验时，
  * 这条断言就是唯一的对齐门（字段改名即失败）。
  *
+ * `rustPath` 是**导出层**文件：其中直接有 `pub struct <structName>` 时按原逻辑解析；若它只做
+ * `pub use <crate>::…` 再导出（P4 三端绑定收敛后 viewer 即如此），则沿 `crateRoots` 给出的
+ * 共享 crate 源码根查找真实定义；同名多定义（如 glb.rs 的 glb-lite / viewer-export 两份
+ * BspMetadata）必须用 `cfgFeature` 按 `#[cfg(feature = "…")]` 选定，消不掉即失败。
+ *
  * 返回 { ok, missingInTs, missingInRust, message }：missingInTs = Rust 有而 TS 缺（TS 会静默
  * 拿到 undefined），missingInRust = TS 有而 Rust 缺（TS 侧多写了不存在的字段）。解析失败
- * （文件不可读 / 结构体或接口找不到）转成 ok=false + message，不抛异常。
+ * （文件不可读 / 结构体或接口找不到 / 无法唯一确定）转成 ok=false + message，不抛异常。
  *
- * @param {{ rustPath: string, structName: string, tsPath: string, interfaceName: string }} args
+ * @param {{ rustPath: string, structName: string, tsPath: string, interfaceName: string,
+ *           cfgFeature?: string, crateRoots?: Record<string, string> }} args
  * @returns {{ ok: boolean, missingInTs: string[], missingInRust: string[], message?: string }}
  */
-export function assertStructFieldsMatchInterface({ rustPath, structName, tsPath, interfaceName } = {}) {
+export function assertStructFieldsMatchInterface({
+  rustPath,
+  structName,
+  tsPath,
+  interfaceName,
+  cfgFeature,
+  crateRoots,
+} = {}) {
   let rustKeys;
   let tsKeys;
   try {
-    rustKeys = extractRustSerdeKeys({ rustText: readTextFile(rustPath), structName });
+    const sources = resolveReexportSources({ rustPath, structName, crateRoots });
+    const hit = selectStructSource(sources, structName, cfgFeature);
+    rustKeys = readStructKeys(hit.text, hit.at, structName);
     tsKeys = extractTsInterfaceKeys({ tsText: readTextFile(tsPath), interfaceName });
   } catch (error) {
     return { ok: false, missingInTs: [], missingInRust: [], message: error.message };

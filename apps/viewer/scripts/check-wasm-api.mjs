@@ -37,10 +37,14 @@ const VIEWER_API = ['initSync', 'decompress_mtz'];
 
 // 第三层先算（只读源码）：`--source-only` 在读 `pkg/` 之前就返回，故该模式不要求 build:wasm
 const metaFields = assertStructFieldsMatchInterface({
+  // 三端绑定已收敛到共享 crate（f763297）：BspMetadata 只在 src/wasm-bindings/src/bsp/glb.rs，
+  // 且同名有 glb-lite / viewer-export 两个变体，须按 viewer 实际启用的 feature 选定。
   rustPath: join(ROOT, 'crates', 'wasm', 'src', 'lib.rs'),
   structName: 'BspMetadata',
   tsPath: join(ROOT, 'src', 'core', 'bsp.ts'),
   interfaceName: 'BspMeta',
+  cfgFeature: 'viewer-export',
+  crateRoots: { websurf_wasm_bindings: join(ROOT, '..', '..', 'src', 'wasm-bindings', 'src') },
 });
 if (process.argv.includes('--source-only')) {
   if (metaFields.ok) {
