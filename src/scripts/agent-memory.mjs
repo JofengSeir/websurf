@@ -251,6 +251,12 @@ function flush() {
     }
   }
   console.log(`[agent-memory] flush 完成：ok=${ok} fail=${fail}，剩余=${outboxFiles().length}`);
+  // 有失败条目时用非 0 退出码，让脚本 / CI 能区分「补写完成」与「补写未完成」。
+  // dry-run 只做预检、不动 outbox，保持 0（fail 只代表有坏的 entry 需要人工处理）。
+  if (!DRY && fail > 0) {
+    console.error('[agent-memory] 注意：有 outbox 条目未补写（已保留），修复 gateway 后重跑 flush；本次 exit 1。');
+    process.exitCode = 1;
+  }
 }
 
 function doctor() {
