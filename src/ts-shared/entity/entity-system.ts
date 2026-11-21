@@ -99,6 +99,14 @@ function hasTouchBehaviour(entity: Entity): boolean {
 /**
  * 地图实体运行期。零 `three` / 零 DOM 依赖，可直接在 Node 里跑地图 I/O 夹具。
  */
+/**
+ * 诊断事件环形缓冲上限。
+ * `emit()` 每个输入/副作用都会 push 一条，而 `events` 只在 `unload()` 清空；长会话下
+ * 会无限增长（观测模式下这些事件大多被丢弃），造成堆占用与 GC 抖动。保留最近 1024 条
+ * 足够做诊断，且不影响 `onEvent` 回调（回调每次仍会收到完整事件）。
+ */
+const MAX_DIAG_EVENTS = 1024;
+
 export class EntitySystem implements EntityRuntime {
   readonly host: EntityHost;
   readonly allowDynamicOutputs: boolean;
@@ -157,6 +165,9 @@ export class EntitySystem implements EntityRuntime {
       time: g_Runtime.time,
     };
     this.events.push(full);
+    if (this.events.length > MAX_DIAG_EVENTS) {
+      this.events.splice(0, this.events.length - MAX_DIAG_EVENTS);
+    }
     this.options.onEvent?.(full);
   }
 
