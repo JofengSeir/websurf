@@ -1,14 +1,17 @@
-"""WebSurf 开发服务器：为 WASM / BSP / Worker 提供正确 MIME 类型的静态服务。
+"""WebSurf 静态服务器（Python 版，保留兼容；dev 链已改用 Node 版 serve.mjs）。
+
+⚠️ 三端 dev.cmd / npm run dev / start.cmd 的仓库内兜底**不再调用本文件**。
+   原因：Windows 上 `where python` 会命中 Microsoft Store 的 App Execution Alias
+   （WindowsApps\\python.exe）——检查返回 0，实际执行却静默失败，导致「工具链检查
+   通过、构建全过、服务器窗口空白、就绪探测 fetch failed」反复出现。
+   Node 版 src/scripts/serve.mjs 提供完全相同的 MIME / COOP-COEP / no-store 语义，
+   且只依赖 dev 链里本来就必须存在的 Node。本文件保留给旧脚本 / 外部工具调用。
 
 用法：python src/scripts/serve.py [port] [root_dir]
   - port：默认 8080
   - root_dir：服务根目录（默认 = 本脚本所在目录，即仓库根的 src/）。
     启动时 os.chdir 到该目录，之后由 SimpleHTTPRequestHandler 按当前工作目录取文件。
-    三个工程的 dev.cmd 都传各自工程目录（"%~dp0."，服务根 = 工程根 ⇒ /web/index.html 可访问）；
-    start.cmd 服务已打包的 dist/（三个工程都传 dist 目录本身 ⇒ 页面走 /index.html；它们优先委派
-    产物自带的 dist/play.cmd，只有该启动器不存在时才回落到这里的 python 兜底 —— 规范 §2.3 第 3 条），
-    三个 package.json 的 dev 脚本各传 "."，使 /web/index.html 能加载 /pkg 下的 WASM
-    与 /web/worker.js。
+    传工程目录 ⇒ /web/index.html 可访问；传 dist 目录本身 ⇒ 页面走 /index.html。
 
 本模块顶层即建服务器并 serve_forever（没有 __main__ 守卫）：导入即启动。
 """

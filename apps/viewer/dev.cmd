@@ -9,8 +9,8 @@ if not "%~1"=="" set PORT=%~1
 
 echo ============================================================
 echo   WebSurf-viewer - dev
-echo   Full chain: toolchain check -^> deps -^> WASM rebuild -^> TS rebuild
-echo          -^> WASM API check -^> start dev server and open browser
+echo   Full chain: toolchain -^> recycle stale server -^> deps -^> WASM rebuild
+echo          -^> TS rebuild -^> API check -^> start server -^> verify -^> open browser
 echo   Page:    http://localhost:%PORT%/web/index.html
 echo ============================================================
 
@@ -20,13 +20,21 @@ where npm >nul 2>nul
 if errorlevel 1 (echo   [!] npm not found. Install Node.js and add it to PATH.& set "TOOLCHAIN_OK=0") else (echo   npm: OK)
 where node >nul 2>nul
 if errorlevel 1 (echo   [!] node not found. Install Node.js and add it to PATH.& set "TOOLCHAIN_OK=0") else (echo   node: OK)
-where python >nul 2>nul
-if errorlevel 1 (echo   [!] python not found. Install Python 3 and add it to PATH.& set "TOOLCHAIN_OK=0") else (echo   python: OK)
+echo   static server: Node (no system Python required)
 where wasm-pack >nul 2>nul
 if errorlevel 1 (echo   [!] wasm-pack not found. Install with: cargo install wasm-pack& set "TOOLCHAIN_OK=0") else (echo   wasm-pack: OK)
 if not "%TOOLCHAIN_OK%"=="1" (
   echo [ERROR] Toolchain incomplete.
-  echo [HINT] Install Node.js ^(npm + node^), Python 3 and wasm-pack, then retry.
+  echo [HINT] Install Node.js ^(npm + node^) and wasm-pack, then retry.
+  pause
+  exit /b 1
+)
+
+echo [1/5] Recycling stale WebSurf server on port %PORT%...
+call node "%~dp0..\..\src\scripts\dev-port.mjs" %PORT%
+if errorlevel 1 (
+  echo [ERROR] Port %PORT% is unavailable - held by a non-WebSurf process or recycle failed.
+  echo [HINT] Use another port:  dev.cmd ^<port^>
   pause
   exit /b 1
 )
@@ -88,13 +96,6 @@ if errorlevel 1 (
 )
 echo [5/5] WASM API contract OK.
 
-netstat -ano | findstr ":%PORT% " | findstr "LISTENING" >nul 2>&1
-if errorlevel 1 goto :start_server
-echo [WARN] Port %PORT% is already in use.
-echo [WARN] Cannot verify the occupant serves this project's web\ - not opening the browser.
-echo [HINT] Use another port:  dev.cmd ^<port^>
-exit /b 0
-
 :start_server
 echo ============================================================
 echo   WebSurf-viewer - Dev Server (web/)
@@ -102,15 +103,25 @@ echo   Server:  http://localhost:%PORT%/
 echo   App:     http://localhost:%PORT%/web/index.html
 echo ============================================================
 
-REM A detached "cmd /c" opens the page after timeout /t 1. The server itself runs in
-REM its OWN minimized window (title below, visible on the taskbar): closing this build
-REM window never kills the server, and the server can be stopped by closing that
-REM window (or Ctrl+C inside it) or by running stop.cmd in this folder.
-start "" /min cmd /c "timeout /t 1 /nobreak >nul & start "" http://localhost:%PORT%/web/index.html"
-REM src/scripts/serve.py takes its serve root from argv[2]; the literal here is "%~dp0." (this app
-REM root written with a trailing dot), and serve.py os.chdir()s to it before serving.
-start "WebSurf-viewer dev server :%PORT%" /min cmd /k node "%~dp0..\..\src\scripts\sync-web-assets.mjs"
-python "%~dp0..\..\src\scripts\serve.py" %PORT% "%~dp0."
-echo [OK] Server launched in its own minimized window: "WebSurf-viewer dev server :%PORT%".
-echo      Stop it by closing that window or by running stop.cmd here.
+REM The server runs in its OWN minimized window (title below, on the taskbar).
+REM Closing this build window does NOT kill it; stop it by closing that window,
+REM pressing Ctrl+C inside it, or running stop.cmd in this folder.
+REM serve.mjs is the Node static server: NO system Python needed. Windows
+REM Store python aliases pass toolchain probes but cannot actually run.
+REM argv[2] = "%~dp0." (this app root) => /web/index.html is served.
+start "WebSurf-viewer dev server :%PORT%" /min cmd /k node "%~dp0..\..\src\scripts\serve.mjs" %PORT% "%~dp0."
+
+REM Open the browser ONLY after the server answers 200. The old fixed 1s delay
+REM opened a blank "connection failed" page whenever the server failed to bind.
+call node "%~dp0..\..\src\scripts\wait-for-server.mjs" %PORT%
+if errorlevel 1 (
+  echo [ERROR] Server did not become ready on port %PORT%.
+  echo [HINT] Check the "WebSurf-viewer dev server :%PORT%" window for the bind error.
+  echo [HINT] Or use another port:  dev.cmd ^<port^>
+  pause
+  exit /b 1
+)
+start "" http://localhost:%PORT%/web/index.html
+echo [OK] Server is live at http://localhost:%PORT%/web/index.html
+echo      Stop it by closing the dev server window, or run stop.cmd here.
 exit /b 0

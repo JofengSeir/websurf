@@ -7,7 +7,7 @@
  *                     __VBSP_WORKER_JS__ / __VBSP_TEXTURES_MTZ_B64__ 三个全局键，再接 app 代码
  *   dist/styles.css — web/styles.css 原样拷贝
  *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证产物级副本
- *   dist/serve.py、dist/play.cmd、dist/play.sh — 产物自带启动器（`distLaunchers` 内联生成：起静态服务 + 打开浏览器）
+ *   dist/serve.mjs、dist/play.cmd、dist/play.sh — 产物自带启动器（`distLaunchers` 内联生成：起静态服务 + 打开浏览器）
  *
  * ── multi（--multi，GitHub Pages / 任意 HTTP 托管）───────────────
  *   dist/index.html — web/index.html 原样拷贝（保留 module script）
@@ -17,7 +17,7 @@
  *   dist/websurf_wasm_bg.wasm、dist/textures.mtz — 外置，由页面按 URL 取
  *   dist/coi-serviceworker.js — 由 src/web/coi-serviceworker.js 注入预缓存清单与内容哈希缓存名
  *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证产物级副本
- *   dist/serve.py、dist/play.cmd、dist/play.sh — 同上（两种形态都写）
+ *   dist/serve.mjs、dist/play.cmd、dist/play.sh — 同上（两种形态都写）
  *
  * 运行时回退（实现在 apps/game/src/app.ts 与 src/ts-shared/auth/shared-state.ts）：
  *   __VBSP_WORKER_JS__ 存在 → Worker 用 Blob URL 装载（file:// 下 module worker 被 CORS 拒）；
@@ -219,15 +219,15 @@ async function buildMulti(wasmPath) {
 }
 
 /**
- * dist 自带的**本地预览启动器**（`serve.py` / `play.cmd` / `play.sh`）。
+ * dist 自带的**本地预览启动器**（`serve.mjs` / `play.cmd` / `play.sh`）。
  *
  * 契约与 viewer / debug 完全同一份实现（`dist-pack.mjs` 的 `distLaunchers`，T-628 收敛）：双击即起静态
- * 服务并打开浏览器，`python` 优先、缺失回退 `npx serve`。game 不认 `?replay=` 深链 ⇒ 不传 `demoReplay`。
+ * 服务并打开浏览器，只依赖 Node（不再依赖系统 Python）。game 不认 `?replay=` 深链 ⇒ 不传 `demoReplay`。
  * 端口取 8091，与 dev 端口 8090 同尾数。
  */
 function writeLaunchers() {
-  const { servePy, playCmd, playSh } = distLaunchers({ appName: 'WebSurf-game', port: 8091 });
-  writeFileSync(join(DIST, 'serve.py'), servePy);
+  const { serveMjs, playCmd, playSh } = distLaunchers({ appName: 'WebSurf-game', port: 8091 });
+  writeFileSync(join(DIST, 'serve.mjs'), serveMjs);
   writeFileSync(join(DIST, 'play.cmd'), playCmd); // 已是 CRLF，不要再replace
   writeFileSync(join(DIST, 'play.sh'), playSh);
 }

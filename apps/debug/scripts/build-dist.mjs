@@ -8,7 +8,7 @@
  *                     `__VBSP_TEXTURES_MTZ_B64__` 三个全局键（WASM、Worker 源码、默认纹理包全内嵌）；
  *                     页面侧据此建 Blob URL 起 worker，并把 WASM 与纹理包交给 worker
  *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证的产物级副本；dist/coi-serviceworker.js — 原样复制（未注入清单时走 typeof 回退，与 multi 同源）
- *   dist/serve.py、dist/play.cmd、dist/play.sh — 产物自带启动器（`distLaunchers` 内联生成：起静态服务 + 打开浏览器）
+ *   dist/serve.mjs、dist/play.cmd、dist/play.sh — 产物自带启动器（`distLaunchers` 内联生成：起静态服务 + 打开浏览器）
  *
  * ── multi（--multi，HTTP 部署）───────────────────────────────────
  *   dist/index.html — 原样复制 web/index.html
@@ -18,7 +18,7 @@
  *   dist/coi-serviceworker.js — 由 src/web/coi-serviceworker.js 生成：把预缓存清单与按清单内容
  *                     派生的缓存名写进脚本；两个占位符若有残留即抛错（不产出半成品）
  *   dist/LICENSE.cs-movement、dist/NOTICE.cs-movement — 许可证的产物级副本
- *   dist/serve.py、dist/play.cmd、dist/play.sh — 同上（两种形态都写）
+ *   dist/serve.mjs、dist/play.cmd、dist/play.sh — 同上（两种形态都写）
  *
  * 共用内核：`src/scripts/lib/dist-pack.mjs`（esbuild 的 build 由本脚本注入；`cleanDist` 先删后建；
  * `cleanStale` 按形态的 keep 名单清残留；许可证的唯一源是 `src/phys` 下的 LICENSE 与 NOTICE）。
@@ -211,15 +211,15 @@ async function buildMulti(wasmPath) {
 }
 
 /**
- * dist 自带的**本地预览启动器**（`serve.py` / `play.cmd` / `play.sh`）。
+ * dist 自带的**本地预览启动器**（`serve.mjs` / `play.cmd` / `play.sh`）。
  *
  * 契约与 viewer 完全同一份实现（`dist-pack.mjs` 的 `distLaunchers`，T-628 收敛）：双击即起静态服务并
- * 打开浏览器，`python` 优先、缺失回退 `npx serve`。debug 不认 `?replay=` 深链 ⇒ 不传 `demoReplay`
+ * 打开浏览器，只依赖 Node（不再依赖系统 Python）。debug 不认 `?replay=` 深链 ⇒ 不传 `demoReplay`
  * （启动器里因此没有示例地址那几行）。端口取 8081，与 dev 端口 8080 同尾数。
  */
 function writeLaunchers() {
-  const { servePy, playCmd, playSh } = distLaunchers({ appName: 'WebSurf-debug', port: 8081 });
-  writeFileSync(join(DIST, 'serve.py'), servePy);
+  const { serveMjs, playCmd, playSh } = distLaunchers({ appName: 'WebSurf-debug', port: 8081 });
+  writeFileSync(join(DIST, 'serve.mjs'), serveMjs);
   writeFileSync(join(DIST, 'play.cmd'), playCmd); // 已是 CRLF，不要再replace
   writeFileSync(join(DIST, 'play.sh'), playSh);
 }
