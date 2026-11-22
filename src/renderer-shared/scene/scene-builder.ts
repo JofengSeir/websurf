@@ -13,6 +13,7 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { loadLightmapAtlas, applyLightmapToMeshes, getLightingMode } from '../shader/lightmap-shader.js';
 import { collectPunctualSpots } from './spot-beams.js';
+import { tagBrushEntityOwners } from './scene-optimizer.js';
 
 /** 复用的 GLTFLoader（buildMapScene 每次 loadAsync）。 */
 const gltfLoader = new GLTFLoader();
@@ -47,7 +48,8 @@ function resetRootRotations(gltf: GLTF): void {
  *
  * 步骤与顺序（与抽取前 loadScene 的 1./1.1 两段逐行一致）：
  * 1. loadGlb → 新建 Scene（标记 `userData.isBspModel`，disposeScene 与 updateNearPlane 都按它识别）
- *    → 清零 GLB 根子节点 rotation → 挂载 → 刷新 matrixWorld → 算世界包围盒与最大边长；
+ *    → 清零 GLB 根子节点 rotation → 挂载 → 给 brush 实体的后代 mesh 盖实体身份（`tagBrushEntityOwners`，
+ *    必须早于任何 reparent）→ 刷新 matrixWorld → 算世界包围盒与最大边长；
  * 2. 中和 GLTFLoader 解析出的 KHR_lights_punctual 光源（渲染面不施加这些灯：烘焙 lightmap 已含
  *    这些实体的贡献，运行时再打就是重复计光）。
  *
@@ -70,6 +72,10 @@ export async function buildMapScene(glb: ArrayBuffer): Promise<{
   scene.userData.isBspModel = true;
   resetRootRotations(gltf);
   scene.add(gltf.scene);
+  // brush 实体身份盖到后代 mesh 的 userData 上：必须在任何 reparent（天空区抽取等）之前做完，
+  // 否则父链一断，合并后的来源表就答不出「这段三角形来自哪个实体」（见 tagBrushEntityOwners）。
+  const taggedBrushMeshes = tagBrushEntityOwners(scene);
+  if (taggedBrushMeshes > 0) console.info(`[merge] brush 实体身份标注：${taggedBrushMeshes} 个 mesh`);
   scene.updateMatrixWorld(true);
   const bbox = new THREE.Box3().setFromObject(scene);
   const size = bbox.getSize(new THREE.Vector3());

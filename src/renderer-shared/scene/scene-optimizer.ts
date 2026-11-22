@@ -282,11 +282,104 @@ export interface MergeSourceTable {
 /** 一份来源几何的元数据 = 区间表条目去掉 `[start, count)`。 */
 type MergeSourceSeed = Omit<MergeSourceRange, 'start' | 'count'>;
 
+/** brush 实体节点名前缀：GLB 导出器给 brush 实体节点写 `brush_<实体下标>`（见 wasm 侧 convert.rs）。 */
+const BRUSH_NODE_PREFIX = 'brush_';
+
+/** brush 实体身份复制到 mesh 自身 `userData` 上的键（节点 extras 同名键；装载期标注，reparent 后仍可查）。 */
+const BRUSH_ENTITY_NAME_KEY = 'vbsp_entity_name';
+const BRUSH_ENTITY_INDEX_KEY = 'vbsp_entity_index';
+
+/** 从 `brush_<实体下标>` 节点名解析实体下标；不是该前缀或后缀不是整数时返回 -1。 */
+function brushEntityIndexFromName(name: string): number {
+  if (!name.startsWith(BRUSH_NODE_PREFIX)) return -1;
+  const digits = name.slice(BRUSH_NODE_PREFIX.length);
+  if (!/^\d+$/.test(digits)) return -1;
+  const idx = Number(digits);
+  return Number.isSafeInteger(idx) ? idx : -1;
+}
+
+/**
+ * 沿父链找 mesh 所属的 brush 实体节点。
+ *
+ * why：一只 brush 实体的多个 primitive 会被 GLTFLoader 包成 `brush_<实体下标>` Group，子 mesh 名是
+ * `mesh_<meshIndex>*`（只有单 primitive 的实体，节点本身才是 Mesh、名字才直接是 `brush_<下标>`）；
+ * 实体身份记在节点名与 `userData.vbsp_entity_index` 上。合并时若只看 mesh 自身名字，多 primitive
+ * 实体的身份就会退化成 `mesh_<n>` ⇒ 运行期无法回答"这段三角形来自哪个实体"。
+ */
+function findBrushEntityNode(mesh: THREE.Object3D): THREE.Object3D | null {
+  let node: THREE.Object3D | null = mesh;
+  while (node) {
+    if (node.name.startsWith(BRUSH_NODE_PREFIX)) return node;
+    const idx = (node.userData as { vbsp_entity_index?: unknown } | undefined)?.vbsp_entity_index;
+    if (typeof idx === 'number' && Number.isFinite(idx)) return node;
+    node = node.parent;
+  }
+  return null;
+}
+
+/**
+ * 装载期一次性把 brush 实体身份盖到其**所有后代 mesh** 的 `userData` 上（返回新标注的 mesh 数）。
+ *
+ * why：实体身份原本只记在 `brush_<下标>` 节点名 / 节点 userData 上，得沿父链才问得到；而天空区抽取
+ * （`extractSkyArea`）会在合并前把 mesh `attach` 到别的 Group 下，父链一断身份就丢了（该实体在合并
+ * 后的来源表里退化成 `mesh_<n>`）。在 GLB 装载完成、任何 reparent 之前先复制到 mesh 自身，之后无论
+ * 被挂到哪都能回答「这段三角形来自哪个实体」。
+ *
+ * 约定：已有值不覆盖（节点自带 GLTF extras 的以它为准）；只写 `userData`，不碰几何 / 材质 / 场景树。
+ */
+export function tagBrushEntityOwners(root: THREE.Object3D): number {
+  let tagged = 0;
+  const visit = (node: THREE.Object3D, ownerName: string, ownerIndex: number): void => {
+    const ud = node.userData as { [key: string]: unknown };
+    let name = ownerName;
+    let index = ownerIndex;
+    const udIndex = ud[BRUSH_ENTITY_INDEX_KEY];
+    const nameIndex = brushEntityIndexFromName(node.name ?? '');
+    if (typeof udIndex === 'number' && Number.isFinite(udIndex)) {
+      const udName = ud[BRUSH_ENTITY_NAME_KEY];
+      name = typeof udName === 'string' && udName.length > 0 ? udName : node.name || `${BRUSH_NODE_PREFIX}${udIndex}`;
+      index = udIndex;
+    } else if (nameIndex >= 0) {
+      name = node.name;
+      index = nameIndex;
+    }
+    if (name !== '' && (node as THREE.Mesh).isMesh) {
+      if (typeof ud[BRUSH_ENTITY_NAME_KEY] !== 'string' || (ud[BRUSH_ENTITY_NAME_KEY] as string).length === 0) {
+        ud[BRUSH_ENTITY_NAME_KEY] = name;
+        tagged++;
+      }
+      if (typeof ud[BRUSH_ENTITY_INDEX_KEY] !== 'number') ud[BRUSH_ENTITY_INDEX_KEY] = index;
+    }
+    for (const child of node.children) visit(child, name, index);
+  };
+  visit(root, '', -1);
+  return tagged;
+}
+
+/**
+ * 来源 mesh 名：属于 brush 实体时统一用实体节点名（区间可直接映射回实体），否则用 mesh 自身名。
+ *
+ * 优先读 mesh 自身 userData 的身份标注（`tagBrushEntityOwners` 装载期写入，reparent 后仍有效）；
+ * 没有标注时才沿父链找（兼容未经过装载期标注的调用方）。
+ */
+function sourceMeshName(mesh: THREE.Mesh): string {
+  const ud = mesh.userData as { [key: string]: unknown } | undefined;
+  const taggedName = ud?.[BRUSH_ENTITY_NAME_KEY];
+  if (typeof taggedName === 'string' && taggedName.length > 0) return taggedName;
+  const taggedIndex = ud?.[BRUSH_ENTITY_INDEX_KEY];
+  if (typeof taggedIndex === 'number' && Number.isFinite(taggedIndex)) return `${BRUSH_NODE_PREFIX}${taggedIndex}`;
+  const entity = findBrushEntityNode(mesh);
+  if (!entity) return mesh.name ?? '';
+  if (entity.name) return entity.name;
+  const idx = (entity.userData as { vbsp_entity_index?: unknown } | undefined)?.vbsp_entity_index;
+  return typeof idx === 'number' && Number.isFinite(idx) ? `${BRUSH_NODE_PREFIX}${idx}` : '';
+}
+
 /** 读一只 mesh 的来源元数据（节点名 + `userData.vbsp` 引用）。 */
 function meshSourceSeed(mesh: THREE.Mesh): MergeSourceSeed {
   const raw = (mesh.userData as { faceIndex?: unknown } | undefined)?.faceIndex;
   return {
-    meshName: mesh.name ?? '',
+    meshName: sourceMeshName(mesh),
     faceIndex: typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined,
     vbsp: mesh.userData?.vbsp as MergeSourceMeta | undefined,
   };
@@ -338,6 +431,30 @@ function concatSourceTables(
 function attachSourceTable(geometry: THREE.BufferGeometry, table: MergeSourceTable | null): void {
   if (!table || table.ranges.length === 0) return;
   geometry.userData[MERGE_SOURCE_TABLE_KEY] = table;
+}
+
+/**
+ * 深拷贝一张来源表（嵌套合并复用上层表时用）。
+ *
+ * why 不能只拷表壳：`vlight-subdivide` 在细分后按 `4^n` **原地改写区间对象**的 start/count，
+ * 若两块几何仍共享区间对象会互相污染；表壳与区间都要新对象。
+ */
+function cloneSourceTable(table: MergeSourceTable): MergeSourceTable {
+  return { indexed: table.indexed, ranges: table.ranges.map((r) => ({ ...r })) };
+}
+
+/**
+ * 一份合并输入应携带的来源表：几何已有表（说明它来自更早一次合并）就深拷贝复用；没有才按
+ * mesh 自身身份新建单区间表。
+ *
+ * why：合并可能嵌套（先分块合并、再按材质二次合并等）。上层表里已归好的实体身份（如 brush
+ * 实体的 `brush_<下标>`）只能靠复用传下来——用 `meshSourceSeed` 重建会把合并块无名的身份丢掉。
+ */
+function sourceTableOfInput(geometry: THREE.BufferGeometry, mesh: THREE.Mesh): MergeSourceTable | null {
+  const inherited = geometry.userData?.[MERGE_SOURCE_TABLE_KEY] as MergeSourceTable | undefined;
+  if (inherited && Array.isArray(inherited.ranges) && inherited.ranges.length > 0) return cloneSourceTable(inherited);
+  const built = buildSourceTable([geometry], [meshSourceSeed(mesh)]);
+  return built.ranges.length > 0 ? built : null;
 }
 
 /**
@@ -533,7 +650,7 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       m.updateMatrix();
       // 单 mesh 的 cell 保留了原 mesh 的 name/userData，仍写一张单区间表：
       // 让消费方只有一条查表路径（不必区分"这只 mesh 是不是合并产物"）
-      attachSourceTable(baked, buildSourceTable([baked], [meshSourceSeed(m)]));
+      attachSourceTable(baked, sourceTableOfInput(baked, m));
       chunks.push(m);
       chunkCount++;
       drawCallEst++;
@@ -542,11 +659,12 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     }
 
     // 多 mesh cell：按材质实例分组，组内合并成一个几何（每组对应一个材质槽）。
-    // 来源元数据与几何并行收集（同一下标），供合并后拼区间表用。
+    // 来源表与几何并行收集（同一下标），供合并后拼区间表用；输入已带表（嵌套合并）时
+    // 复用其表，否则按 mesh 自身身份（含 brush 实体节点）新建。
     const byMat = new Map<string, {
       mat: THREE.Material;
       geoms: THREE.BufferGeometry[];
-      seeds: MergeSourceSeed[];
+      tables: (MergeSourceTable | null)[];
     }>();
     const tBake = perfOn ? performance.now() : 0;
     for (const it of arr) {
@@ -557,11 +675,11 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       const key = `${mat.uuid}|${optGeometrySignature(baked)}`;
       let group = byMat.get(key);
       if (!group) {
-        group = { mat, geoms: [], seeds: [] };
+        group = { mat, geoms: [], tables: [] };
         byMat.set(key, group);
       }
       group.geoms.push(baked);
-      group.seeds.push(meshSourceSeed(m));
+      group.tables.push(sourceTableOfInput(baked, m));
     }
     if (perfOn) perf.multiBake += performance.now() - tBake;
     const mergedGeoms: THREE.BufferGeometry[] = [];
@@ -573,22 +691,24 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
       const mat = group.mat;
       const geomsRaw = group.geoms;
       const geoms = (opts?.normalizeGroup ?? normalizeMergeGroup)(geomsRaw);
-      // 钩子须逐项对应（长度不变）才谈得上"哪份几何进了哪段缓冲"
-      const seeds = geoms.length === group.seeds.length ? group.seeds : null;
+      // 钩子须逐项对应（长度不变）才谈得上"哪份几何进了哪段缓冲"；对不上就整组不带表
+      const groupTables = geoms.length === group.tables.length ? group.tables : null;
       let merged: THREE.BufferGeometry[];
       let tables: (MergeSourceTable | null)[];
       if (geoms.length === 1) {
         merged = geoms;
-        tables = [seeds ? buildSourceTable(geoms, seeds) : null];
+        tables = [groupTables ? groupTables[0] : null];
       } else {
         const mg = mergeGeometries(geoms, false);
         if (mg) {
+          // 先拼表（要读各份几何长度），再释放各份几何
+          const concat = groupTables ? concatSourceTables(geoms, groupTables) : null;
           for (const g of geoms) g.dispose();
           merged = [mg];
-          tables = [seeds ? buildSourceTable(geoms, seeds) : null];
+          tables = [concat];
         } else {
-          merged = geoms; // 属性不一致（防御分支）：保留各自独立几何
-          tables = geoms.map((_, i) => (seeds ? buildSourceTable([geoms[i]], [seeds[i]]) : null));
+          merged = geoms; // 属性不一致（防御分支）：保留各自独立几何，各带自己的表
+          tables = groupTables ? groupTables.slice() : geoms.map(() => null);
         }
       }
       for (let i = 0; i < merged.length; i++) {
