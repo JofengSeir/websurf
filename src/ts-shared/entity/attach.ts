@@ -56,7 +56,9 @@ export function attachEntitySystem(options: AttachEntityOptions): EntitySystem |
     emit({ kind, detail, entityIndex: -1, classname: '', targetname: '', time: system?.time ?? 0 });
   };
   const host = createObservingHost(options.getPlayerState, {
-    teleport: (origin) => effect('entity:teleport', JSON.stringify(origin)),
+    // 载荷带上 angles/velocity：增强插件（`entity:teleport` 消费方）需要朝向才能按
+    // Source 语义落点；旧格式（裸 origin）不再产生，但插件仍兼容解析。
+    teleport: (origin, angles, velocity) => effect('entity:teleport', JSON.stringify({ origin, angles, velocity })),
     addVelocity: (v) => effect('entity:addVelocity', JSON.stringify(v)),
     baseVelocity: (v) => effect('entity:baseVelocity', JSON.stringify(v)),
     gravity: (v) => effect('entity:gravity', String(v)),

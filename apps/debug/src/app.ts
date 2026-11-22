@@ -40,6 +40,8 @@ import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js';
 import { setOptimizeFlags } from '../../../src/renderer-shared/config/optimize-flags.js';
 import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
+// 可选增强插件宿主（默认全关；见 src/ts-shared/enhance/ 与本文件 main() 的装配点）
+import { EnhanceHost } from './enhance/enhance-host.js';
 import { formatTime, GameState } from './game-state.js';
 // 物理控制面板：参数定义表（主线程渲染用，不含物理实现依赖）
 import { PARAM_DEFS, PARAM_NAMES, type ParamSource } from './physics/param-defs.js';
@@ -173,6 +175,9 @@ const dom = {
 	optWaterRtReuseChk: document.getElementById('optWaterRtReuse') as HTMLInputElement | null,
 	optBloomDirectChk: document.getElementById('optBloomDirect') as HTMLInputElement | null,
 	optMirrorLowResChk: document.getElementById('optMirrorLowRes') as HTMLInputElement | null,
+	// 「增强插件（实验）」区：默认全关；勾选 → EnhanceHost.setEnabled → 动态 import 插件
+	enhRuntimeTeleportChk: document.getElementById('enhRuntimeTeleport') as HTMLInputElement | null,
+	enhanceStatusLine: document.getElementById('enhanceStatusLine') as HTMLElement | null,
 	// 贴墙近平面自适应：两张滑块分别写 rendererMain.setNearParams 的探测距离与收缩系数
 	nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
 	nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
@@ -223,6 +228,8 @@ let sharedState: SharedState | null = null;
 let lastTeleportIdx = -1;
 /** 主线程渲染器：持主线程 WASM 物理与 Three.js 场景，渲染、剔除与面板即时生效都经它。 */
 let rendererMain: RendererMain | null = null;
+/** 可选增强插件宿主：默认全关时零成本（不 import 插件、不挂实体事件）；面板/控制台可开。 */
+let enhanceHost: EnhanceHost | null = null;
 /** config 段同步实例（P5）：AppRuntime 就绪后构造；sendConfig + renderer.applyConfigPatch 走适配器。 */
 let configSync: ConfigSync<RuntimeConfig> | null = null;
 let sceneReady = false;
@@ -358,6 +365,27 @@ async function main(): Promise<void> {
 		inputBridge?.sendSetPlayerName(name, !filterOff);
 	};
 	rendererMain.onMapPhysicsParam = (name, value) => inputBridge?.sendSetMapPhysicsParam(name, value);
+
+	// 可选增强插件宿主（默认全关 ⇒ 不动态 import 插件、rendererMain.onEntityEvent 保持 null、零成本）。
+	// 传送必须双端一致：主线程预测物理（teleportToPos，含 bumpSampleEpoch）+ Worker 权威（sendTeleportToPos）。
+	// 落点朝向缺省时保持当前朝向；实体的 angles 已由 EntitySystem 换算成项目 yaw 度。
+	enhanceHost = new EnhanceHost(
+		{
+			teleport: (pos, yawDeg) => {
+				const yaw = yawDeg ?? rendererMain?.predictionState()?.yaw ?? 0;
+				rendererMain?.teleportToPos([pos[0], pos[1], pos[2]], yaw);
+				inputBridge?.sendTeleportToPos([pos[0], pos[1], pos[2]], yaw);
+			},
+			getPlayerState: () => rendererMain?.predictionState() ?? null,
+			log: (message) => console.info(`[enhance] ${message}`),
+		},
+		{
+			setEventSink: (handler) => {
+				if (rendererMain) rendererMain.onEntityEvent = handler;
+			},
+		},
+	);
+	enhanceHost.installConsoleApi();
 
 	// 3. config 段同步实例（P5）：构造点=AppRuntime 就绪后（bridge/renderer 已存在）。
 	//    段顺序与副作用同旧实现：send=直接 sendConfig；render=逐段 renderer.applyConfigPatch；
@@ -1968,6 +1996,22 @@ function bindUI(): void {
 		applyOptimizePatch({ mirrorLowRes: (e.target as HTMLInputElement).checked });
 	});
 
+	// 「增强插件（实验）」：默认全关；勾选 → EnhanceHost.setEnabled（落盘 + 动态 import + 订阅实体事件）。
+	// 与「优化处理」不同，这里没有每帧读的共享 flag：关闭时插件根本没加载，事件 sink 为 null。
+	const syncEnhanceStatusLine = (): void => {
+		if (dom.enhanceStatusLine) {
+			dom.enhanceStatusLine.textContent = `增强插件：${enhanceHost?.describe() ?? '未初始化'}`;
+		}
+	};
+	if (dom.enhRuntimeTeleportChk) {
+		dom.enhRuntimeTeleportChk.checked = enhanceHost?.isEnabled('runtime-teleport') ?? false;
+		dom.enhRuntimeTeleportChk.addEventListener('change', (e) => {
+			enhanceHost?.setEnabled('runtime-teleport', (e.target as HTMLInputElement).checked);
+			syncEnhanceStatusLine();
+		});
+	}
+	syncEnhanceStatusLine();
+
 	// 近平面自适应参数（滑块 ↔ 输入框双向同步 + 渲染器实时生效）
 	bindNearParamControls();
 }
@@ -2199,6 +2243,12 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 			)
 			.join('');
 	}
+	// 增强插件：换图上下文（实体 I/O + 传送表；只在启用时才会被消费，默认无成本）
+	enhanceHost?.onSceneLoaded({
+		mapName: fileName,
+		entityIoJson: bundle.entityIoJson,
+		teleportJson: bundle.teleportJson,
+	});
 	// UI 激活（控件/面板同步/缺失纹理弹窗）
 	await onSceneReadyUi(diag, sceneData);
 }

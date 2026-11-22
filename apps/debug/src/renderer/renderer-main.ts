@@ -1667,6 +1667,14 @@ export class RendererMain {
     this.bumpSampleEpoch();
   }
 
+  /** 当前预测物理状态（脚底原点 + yaw；增强插件/诊断用，只读）。 */
+  predictionState(): { posX: number; posY: number; posZ: number; yaw: number } | null {
+    const st = this.predPhys?.state() as
+      | { posX: number; posY: number; posZ: number; yaw: number }
+      | undefined;
+    return st ? { posX: st.posX, posY: st.posY, posZ: st.posZ, yaw: st.yaw } : null;
+  }
+
   /** 设置出生点列表（[[x,y,z,yaw], ...]，spawn 下拉切换用）。 */
   setSpawnPoints(list: Array<[number, number, number, number]>): void {
     try {
