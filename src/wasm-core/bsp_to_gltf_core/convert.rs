@@ -17,7 +17,10 @@
 //! 关键不变量：
 //! - `BspVertexData` 是 `#[repr(C)]` 的逐顶点布局，[`push_bsp_face_bsp`] 按它写 buffer；
 //! - TEXCOORD_1（lightmap UV）走**独立** buffer view + accessor，不改变既有 stride；
-//! - 无光照或无图集时仍写中性常量 UV，保证同一块几何的属性集一致（下游合并要求属性集相同）。
+//! - 无光照或无图集时仍写中性常量 UV，保证同一块几何的属性集一致（下游合并要求属性集相同）；
+//! - BSP 内嵌 brush 实体（`func_door` / `func_wall_toggle` 等 `"*N"` 模型）各导出一个可寻址
+//!   节点（name = `brush_<实体下标>`，extras 带 `vbsp_entity_index` 等，见 [`bsp_models`]）；
+//!   世界模型节点名保持 `"bsp"` 且永远排在最后。
 //!
 //! 边界：只做装配与导出。不解析 BSP 细节（`vbsp`）、不构建 GLTF 材质（`gltf_builder`）、
 //! 不算图集（`lightmap`）、不加载模型（`model_integrator`）。
@@ -109,15 +112,32 @@ pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<E
     // 见 `lightmap::effective_max_atlas_area`。
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
-    // 只处理地图结构，不处理模型
-    for (model, offset, tint, rot) in bsp_models(&bsp)? {
+    // BSP 内嵌结构：世界模型 + 可见 brush 实体（不含 ModelIntegrator 的外部模型）。
+    // 实体遍历只做一次：世界模型 + 可见 brush 实体都从这一次 `bsp_models` 收集结果来。
+    let models = bsp_models(&bsp)?;
+    for entry in &models {
         let tc_clone = texture_collector.clone();
-        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, tint, rot.as_ref(), &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
+        let node = push_bsp_model_bsp(
+            &mut buffer,
+            &mut root,
+            &bsp,
+            &entry.model,
+            entry.offset,
+            entry.tint,
+            entry.rot.as_ref(),
+            entry.entity.as_ref(),
+            entry.render_mode,
+            &options,
+            &mut missing_resources,
+            Some(tc_clone),
+            lightmap.as_ref(),
+        );
         root.nodes.push(node);
     }
 
     // #2：BSP 水面 top/bottom 厚度写进材质 extras（只加数据，不改渲染）。
-    apply_water_thickness(&mut root, &bsp);
+    // 复用上面已收集的模型列表，避免再遍历一次实体。
+    apply_water_thickness(&mut root, &models);
 
     // 构建根节点
     let node_indices = 0..root.nodes.len();
@@ -202,14 +222,31 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
     // 1. 处理BSP结构
-    for (model, offset, tint, rot) in bsp_models(&bsp)? {
+    // 实体遍历只做一次：世界模型 + 可见 brush 实体都从这一次 `bsp_models` 收集结果来。
+    let models = bsp_models(&bsp)?;
+    for entry in &models {
         let tc_clone = texture_collector.clone();
-        let node = push_bsp_model_bsp(&mut buffer, &mut root, &bsp, &model, offset, tint, rot.as_ref(), &options, &mut missing_resources, Some(tc_clone), lightmap.as_ref());
+        let node = push_bsp_model_bsp(
+            &mut buffer,
+            &mut root,
+            &bsp,
+            &entry.model,
+            entry.offset,
+            entry.tint,
+            entry.rot.as_ref(),
+            entry.entity.as_ref(),
+            entry.render_mode,
+            &options,
+            &mut missing_resources,
+            Some(tc_clone),
+            lightmap.as_ref(),
+        );
         root.nodes.push(node);
     }
 
     // #2：BSP 水面 top/bottom 厚度写进材质 extras（只加数据，不改渲染）。
-    apply_water_thickness(&mut root, &bsp);
+    // 复用上面已收集的模型列表，避免再遍历一次实体。
+    apply_water_thickness(&mut root, &models);
 
     // 2. 若提供模型集成器，将模型数据添加到统一结构
     if let Some(integrator) = model_integrator {
@@ -939,14 +976,225 @@ struct RotButtonExport {
     render_mode: u8,
 }
 
-/// 收集要导出的模型及其世界偏移：brush 实体各一个，**世界模型排最后**（origin 取 `(0,0,0)`）。
+/// 可见 brush 实体的 classname 白名单（实体文本已整体小写，匹配时仍按忽略大小写比较）。
 ///
-/// 只认五种 brush 实体（`Entity::Brush` / `BrushIllusionary` / `BrushWall` / `BrushWallToggle`
-/// / `MomentaryRotButton`），其余实体一律跳过；模型的 `handle` 取自 `brush.model` 去掉首字符
-/// 后的下标（`*1` 这类写法），下标解析失败或越界时**静默丢弃该实例**（不报错）。
+/// 这些实体的几何都是 `"*N"` 引用的 BSP 模型。原先只收强类型 `Entity` 里的 4 个 brush
+/// 变体，而 `BrushEntity` 把 `model` / `origin` / `rendercolor` 当必填（`vbsp/data/entity.rs`），
+/// 本图 6 个 `func_wall_toggle` 全缺 `origin` ⇒ 整条 `Entity::parse()` 失败、被 `flat_map`
+/// 静默丢弃（含 `*9` 的 848 面）。现在 [`bsp_models`] 直接读 `RawEntity` 的键、缺键按默认值，
+/// 不再因缺字段丢实体。
+///
+/// 暂不含 `func_water_analog`：水刷的可见面会进 [`apply_water_thickness`] 的水层统计，
+/// 纳入会改变水面材质 `waterThickness` 的口径；本图没有该实体，留待单独任务。
+const VISIBLE_BRUSH_CLASSNAMES: &[&str] = &[
+    "func_brush",
+    "func_illusionary",
+    "func_wall",
+    "func_wall_toggle",
+    "func_door",
+    "func_door_rotating",
+    "func_movelinear",
+    "func_breakable",
+    "func_breakable_surf",
+    "func_button",
+    "func_rot_button",
+    "func_rotating",
+    "func_tracktrain",
+    "func_physbox",
+    "func_physbox_multiplayer",
+];
+
+/// 一个 brush 实体在 GLB 节点 extras 里的可寻址元数据。
+///
+/// 节点名同样用 `brush_<index>`；extras 里再带一份，是为了让下游（后续的可选增强插件）
+/// 按实体定位 mesh，而不必解析节点名。`index` 是实体在 entities lump 里的下标
+/// （`bsp.entities.iter().enumerate()` 的序号，0 起），与实体书写顺序一致。
+struct BrushEntityExport {
+    index: usize,
+    classname: String,
+    targetname: Option<String>,
+    parentname: Option<String>,
+    /// `"*N"` 原样保留（extras `vbsp_model`）。
+    model: String,
+}
+
+/// 一个待导出模型：模型句柄 + 世界平移 + 可选的实体 extras。
+///
+/// 世界模型也走这个结构（`entity` / `tint` / `rot` / `render_mode` 全 `None`），
+/// 只是永远排在导出列表最后。
+struct BspModelExport<'a> {
+    model: crate::vbsp::Handle<'a, crate::vbsp::Model>,
+    /// 模型几何在局部空间，该平移量 = 实体 `origin`（写节点时经 [`map_coords`]）。
+    offset: crate::vbsp::Vector,
+    /// 实体染色（`rendercolor`）。仅 `momentary_rot_button` 使用，语义与既有导出一致。
+    tint: Option<[u8; 4]>,
+    /// `momentary_rot_button` 的旋转参数。
+    rot: Option<RotButtonExport>,
+    /// 只有「`momentary_rot_button` 强类型解析失败、退回普通 brush 导出」时才写
+    /// `vbsp_render_mode`，保持这一既有 extras 字段的形状。
+    render_mode: Option<u8>,
+    /// `Some` = brush 实体节点（`brush_<index>`）；`None` = 世界模型节点（`bsp`）。
+    entity: Option<BrushEntityExport>,
+}
+
+/// 取 `RawEntity` 的字符串键；键不存在时返回 `None`（把 `prop` 的 `Err` 统一收掉）。
+fn entity_prop<'a>(raw: &crate::vbsp::RawEntity<'a>, key: &'static str) -> Option<&'a str> {
+    raw.prop(key).ok()
+}
+
+/// `origin` 的容错解析：缺键 / 空串 / 非 `"x y z"` 一律回落 `(0,0,0)`。
+///
+/// 缺 `origin` 是 `func_wall_toggle` 这类实体的常态（模型就在世界原点），不能像强类型
+/// 反序列化那样把整条实体判失败。解析本身复用 `RawEntity::prop_parse`（与旧 typed 路径
+/// 同一套 `EntityProp` 口径）。
+fn entity_origin(raw: &crate::vbsp::RawEntity<'_>) -> crate::vbsp::Vector {
+    raw.prop_parse::<crate::vbsp::Vector>("origin")
+        .unwrap_or_default()
+}
+
+/// `rendercolor` 的容错解析（`"r g b"`，0–255）；缺键 / 格式不符回落白色。
+fn entity_color(raw: &crate::vbsp::RawEntity<'_>) -> [u8; 4] {
+    let [r, g, b] = raw
+        .prop_parse::<[u8; 3]>("rendercolor")
+        .unwrap_or([255, 255, 255]);
+    [r, g, b, 255]
+}
+
+/// `rendermode` 的容错解析；缺键 / 格式不符回落 `0`（Source `kRenderNormal`）。
+fn entity_render_mode(raw: &crate::vbsp::RawEntity<'_>) -> u8 {
+    raw.prop_parse::<u8>("rendermode").unwrap_or(0)
+}
+
+/// 非空实体名（`targetname` / `parentname`）：空串视为没写，避免 extras 里出现 `""`。
+fn non_empty_owned(value: Option<&str>) -> Option<String> {
+    value.filter(|text| !text.is_empty()).map(str::to_owned)
+}
+
+/// 从 entities lump 的无损原文按出现顺序解析每块的 `(targetname, parentname)`，**保留原始大小写**。
+///
+/// `Entities::iter()` 读的是整体小写视图（`vbsp/reader.rs` 读入时先 `to_ascii_lowercase`），
+/// 值里的大小写已经丢失；而实体 I/O（`export_entity_io`）与运行期实体名走的是
+/// `Entities::raw()` 原文。GLB 节点 extras 里的可寻址名字要与运行期一致，所以这里对原文
+/// 再切一遍块（切法与 `Entities::iter` 相同：找最近的 `{` 与随后的 `}`），按忽略大小写的键名
+/// 取值。键名大小写不敏感、值原样保留；找不到成对引号就停止扫描（与 `RawEntity::properties`
+/// 的容错一致）。
+///
+/// 返回的下标与 `Entities::iter().enumerate()` 一一对应（同一个文本的两个视图结构相同）；
+/// 越界时调用方按「没有原文名字」处理。
+fn raw_entity_names(entity_text: &str) -> Vec<(Option<String>, Option<String>)> {
+    let mut names = Vec::new();
+    let mut cursor = entity_text;
+    loop {
+        let Some(open) = cursor.find('{') else {
+            break;
+        };
+        let Some(close) = cursor[open..].find('}') else {
+            break;
+        };
+        let block = &cursor[open..open + close + 1];
+        let mut targetname = None;
+        let mut parentname = None;
+        let mut rest = block;
+        loop {
+            let Some(key_open) = rest.find('"') else {
+                break;
+            };
+            let key_start = key_open + 1;
+            let Some(key_len) = rest[key_start..].find('"') else {
+                break;
+            };
+            let key = &rest[key_start..key_start + key_len];
+            let after_key = &rest[key_start + key_len + 1..];
+            let Some(value_open) = after_key.find('"') else {
+                break;
+            };
+            let value_start = value_open + 1;
+            let Some(value_len) = after_key[value_start..].find('"') else {
+                break;
+            };
+            let value = &after_key[value_start..value_start + value_len];
+            if key.eq_ignore_ascii_case("targetname") {
+                targetname = Some(value.to_owned());
+            } else if key.eq_ignore_ascii_case("parentname") {
+                parentname = Some(value.to_owned());
+            }
+            rest = &after_key[value_start + value_len + 1..];
+        }
+        names.push((targetname, parentname));
+        cursor = &cursor[open + close + 1..];
+    }
+    names
+}
+
+/// 用原文里的 `targetname` / `parentname`（保留大小写）覆盖节点 extras 元数据。
+///
+/// 原文里缺该键 / 索引越界时保留调用方从小写视图取到的值（空串已按 `None` 处理）。
+fn apply_raw_entity_names(
+    meta: &mut BrushEntityExport,
+    raw_names: &[(Option<String>, Option<String>)],
+    entity_index: usize,
+) {
+    let Some((targetname, parentname)) = raw_names.get(entity_index) else {
+        return;
+    };
+    if targetname.is_some() {
+        meta.targetname = targetname.clone();
+    }
+    if parentname.is_some() {
+        meta.parentname = parentname.clone();
+    }
+}
+
+/// 从 `RawEntity` 收集一个 brush 实体；`model` 不是 `"*N"` / 下标越界 / 没有可见面时返回 `None`。
+///
+/// 这里只做「这个实体该不该有节点」的预判（至少一个 `face.is_visible()`），真正的逐面过滤
+/// 仍在 [`push_bsp_model_bsp`]，两处口径一致。`targetname` / `parentname` 优先取
+/// [`raw_entity_names`] 的原文大小写版本（与运行期实体名一致），小写视图只作兜底。
+fn collect_brush_entity<'a>(
+    bsp: &'a Bsp,
+    entity_index: usize,
+    classname: &str,
+    raw: &crate::vbsp::RawEntity<'_>,
+    raw_names: &[(Option<String>, Option<String>)],
+) -> Option<BspModelExport<'a>> {
+    let model_ref = entity_prop(raw, "model")?;
+    let model = model_of(bsp, model_ref)?;
+    if !model.faces().any(|face| face.is_visible()) {
+        return None;
+    }
+    let mut entity = BrushEntityExport {
+        index: entity_index,
+        classname: classname.to_owned(),
+        targetname: non_empty_owned(entity_prop(raw, "targetname")),
+        parentname: non_empty_owned(entity_prop(raw, "parentname")),
+        model: model_ref.to_owned(),
+    };
+    apply_raw_entity_names(&mut entity, raw_names, entity_index);
+    Some(BspModelExport {
+        model,
+        offset: entity_origin(raw),
+        tint: None,
+        rot: None,
+        render_mode: None,
+        entity: Some(entity),
+    })
+}
+
+/// 收集要导出的模型：可见 brush 实体各一个，**世界模型排最后**（origin 取 `(0,0,0)`）。
+///
+/// 实现上**不复用**强类型 `Entity` 反序列化：实体文本已被读入层整体小写，直接按
+/// classname 白名单（[`VISIBLE_BRUSH_CLASSNAMES`]）遍历 [`crate::vbsp::RawEntity`]，用
+/// `enumerate` 拿到实体下标写进节点 extras。缺 `origin` 按 `(0,0,0)`、缺
+/// `rendercolor` / `rendermode` 按白色 / `kRenderNormal` 处理，**绝不因缺字段丢实体**。
+///
+/// `momentary_rot_button` 单独处理：仍走强类型 `Entity::MomentaryRotButton` 取旋转参数
+/// （`speed` / `distance` / `spawnflags` / `targetname` / `parentname` / `render_mode`），
+/// 既有 `vbsp_rot_button` extras 语义不变；强类型解析失败时退回普通 brush 导出，
+/// 并用 `RawEntity` 解析出的 `rendercolor` / `rendermode` 补上
+/// `vbsp_render_color` / `vbsp_render_mode`（缺键即白色 / 0）。
 ///
 /// 一个模型都没有（`bsp.models()` 为空）时报 `Error::Other("No world model")`。
-fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Model>, crate::vbsp::Vector, Option<[u8; 4]>, Option<RotButtonExport>)>, Error> {
+fn bsp_models<'a>(bsp: &'a Bsp) -> Result<Vec<BspModelExport<'a>>, Error> {
     let world_model = bsp
         .models()
         .next()
@@ -954,53 +1202,91 @@ fn bsp_models(bsp: &Bsp) -> Result<Vec<(crate::vbsp::Handle<'_, crate::vbsp::Mod
 
     let mut models = Vec::new();
     let mut rot_index = 0usize;
-    for ent in bsp.entities.iter().flat_map(|ent| ent.parse()) {
-        match ent {
-            Entity::Brush(ent)
-            | Entity::BrushIllusionary(ent)
-            | Entity::BrushWall(ent)
-            | Entity::BrushWallToggle(ent) => {
+    // 运行期实体名保留原文大小写（实体 I/O 走 `Entities::raw()`）；GLB extras 的名字也照原文，
+    // 避免「3D 节点里的名字」与「运行期 targetname」大小写分叉（本图有 lvl3_door06A/B/C 三例）。
+    let raw_names = raw_entity_names(bsp.entities.raw());
+    for (entity_index, raw) in bsp.entities.iter().enumerate() {
+        let Some(classname) = entity_prop(&raw, "classname") else {
+            continue;
+        };
+
+        if classname == "momentary_rot_button" {
+            // 带染色与旋转的 brush 实体（boreas 的符文盘就是 5 个这样的实体）。它的
+            // `rendercolor` 是 Source 的实体染色（`rendermode 1` = kRenderTransColor，
+            // 把颜色乘到贴图上），必须一路带到 GLB 节点 extras：材质本身是白色
+            // UnlitGeneric，不带染色就显示成白色符文线。旋转参数同样要带走：
+            // `logic_auto` 在 OnMapSpawn 里给这类实体发 `SetPosition 1`，地图意图是
+            // 开图就让它们按 `speed` 转到 `distance`。
+            if let Ok(Entity::MomentaryRotButton(ent)) = raw.parse() {
                 if let Some(model) = model_of(bsp, ent.model) {
-                    models.push((model, ent.origin, None, None));
+                    if model.faces().any(|face| face.is_visible()) {
+                        let rot = RotButtonExport {
+                            id: rot_index,
+                            origin: map_coords(ent.origin),
+                            speed: ent.speed.unwrap_or(0.0),
+                            distance: ent.distance.unwrap_or(0.0),
+                            spawn_flags: ent.spawn_flags,
+                            target: ent.target.map(str::to_owned),
+                            parent: ent.parent.map(str::to_owned),
+                            render_mode: ent.render_mode,
+                        };
+                        rot_index += 1;
+                        let mut entity = BrushEntityExport {
+                            index: entity_index,
+                            classname: classname.to_owned(),
+                            targetname: ent.target.map(str::to_owned),
+                            parentname: ent.parent.map(str::to_owned),
+                            model: ent.model.to_owned(),
+                        };
+                        apply_raw_entity_names(&mut entity, &raw_names, entity_index);
+                        models.push(BspModelExport {
+                            model,
+                            offset: ent.origin,
+                            tint: Some([ent.color.r, ent.color.g, ent.color.b, 255]),
+                            rot: Some(rot),
+                            render_mode: None,
+                            entity: Some(entity),
+                        });
+                        continue;
+                    }
                 }
             }
-            // `momentary_rot_button` 是带染色与旋转的 brush 实体（boreas 的符文盘就是
-            // 5 个这样的实体）。它的 `rendercolor` 是 Source 的实体染色
-            // （`rendermode 1` = kRenderTransColor，把颜色乘到贴图上），必须一路带到 GLB
-            // 节点 extras：材质本身是白色 UnlitGeneric，不带染色就显示成白色符文线。
-            // 旋转参数同样要带走：`logic_auto` 在 OnMapSpawn 里给这类实体发
-            // `SetPosition 1`，地图意图是开图就让它们按 `speed` 转到 `distance`。
-            Entity::MomentaryRotButton(ent) => {
-                if let Some(model) = model_of(bsp, ent.model) {
-                    let tint = Some([ent.color.r, ent.color.g, ent.color.b, 255]);
-                    let rot = RotButtonExport {
-                        id: rot_index,
-                        origin: map_coords(ent.origin),
-                        speed: ent.speed.unwrap_or(0.0),
-                        distance: ent.distance.unwrap_or(0.0),
-                        spawn_flags: ent.spawn_flags,
-                        target: ent.target.map(str::to_owned),
-                        parent: ent.parent.map(str::to_owned),
-                        render_mode: ent.render_mode,
-                    };
-                    rot_index += 1;
-                    models.push((model, ent.origin, tint, Some(rot)));
-                }
+            // 强类型解析失败（例如此类实体缺 `rendercolor`）时不能把几何一起丢掉：
+            // 按普通 brush 实体导出，仍带从原文解析出的染色/渲染模式。
+            if let Some(mut entry) =
+                collect_brush_entity(bsp, entity_index, classname, &raw, &raw_names)
+            {
+                entry.tint = Some(entity_color(&raw));
+                entry.render_mode = Some(entity_render_mode(&raw));
+                models.push(entry);
             }
-            _ => {}
+            continue;
+        }
+
+        if !VISIBLE_BRUSH_CLASSNAMES
+            .iter()
+            .any(|known| classname.eq_ignore_ascii_case(known))
+        {
+            continue;
+        }
+        if let Some(entry) = collect_brush_entity(bsp, entity_index, classname, &raw, &raw_names) {
+            models.push(entry);
         }
     }
-    models.push((
-        world_model,
-        crate::vbsp::Vector {
+
+    models.push(BspModelExport {
+        model: world_model,
+        offset: crate::vbsp::Vector {
             x: 0.0,
             y: 0.0,
             z: 0.0,
         },
         // 世界模型没有实体染色（它的面颜色全部来自 lightmap 与材质本身）。
-        None,
-        None,
-    ));
+        tint: None,
+        rot: None,
+        render_mode: None,
+        entity: None,
+    });
 
     Ok(models)
 }
@@ -1013,6 +1299,10 @@ fn model_of<'a>(bsp: &'a Bsp, model: &str) -> Option<crate::vbsp::Handle<'a, cra
 
 /// 把一个模型推成一个 GLB 节点：逐 face 生成 primitive（**只取 `face.is_visible()` 的面**），
 /// 返回该节点。
+///
+/// 节点可寻址性由 `entity` 决定：`Some` 时 name 用唯一的 `brush_<实体下标>`，extras 写
+/// `vbsp_entity_index` / `vbsp_classname` / `vbsp_model` 与可选的
+/// `vbsp_targetname` / `vbsp_parentname`；`None` 是世界模型节点，name 保持 `"bsp"`。
 ///
 /// `face_index` 用 `model.first_face + 该 face 在模型内的序号`（序号按 `enumerate` 计，含被跳过的
 /// 不可见面，故与全局 face 表的下标一致）；它写进 primitive 的 `extras.faceIndex`，供渲染端
@@ -1029,6 +1319,11 @@ fn push_bsp_model_bsp(
     // `momentary_rot_button` 的旋转参数。`Some` 时写进节点 extras `vbsp_rot_button`，
     // 渲染端把该模型的 mesh 从合并块里摘出来挂到 pivot 上做旋转动画。
     rot: Option<&RotButtonExport>,
+    // brush 实体的可寻址元数据；`None` 表示这是世界模型节点。
+    entity: Option<&BrushEntityExport>,
+    // `momentary_rot_button` 强类型解析失败、退回普通 brush 导出时补写的既有
+    // `vbsp_render_mode`（缺键为 0）；成功走 `rot` 分支的实体这里传 `None`。
+    render_mode: Option<u8>,
     options: &ConvertOptions,
     missing_resources: &mut Vec<MissingResource>,
     texture_collector: Option<std::rc::Rc<std::cell::RefCell<crate::bsp_to_gltf_core::materials::TextureCollector>>>,
@@ -1070,7 +1365,29 @@ fn push_bsp_model_bsp(
     // 而材质按贴图名去重、可能被世界面共用。渲染端在装配前把该节点的子 mesh 材质
     // 克隆后乘色，染色不会污染共用材质。旋转参数同理挂在节点上（渲染端按 id 分组、
     // 把 mesh 从合并块里摘出来挂 pivot）。
+    //
+    // 字段顺序固定：先可寻址元数据，再既有字段（`vbsp_render_color` 在
+    // `vbsp_rot_button` 前、`vbsp_render_mode` 在它后），新增字段只追加、不改既有顺序。
     let mut extra_fields: Vec<String> = Vec::new();
+    if let Some(meta) = entity {
+        extra_fields.push(format!(r#""vbsp_entity_index":{}"#, meta.index));
+        if let Ok(json) = serde_json::to_string(&meta.classname) {
+            extra_fields.push(format!(r#""vbsp_classname":{}"#, json));
+        }
+        if let Ok(json) = serde_json::to_string(&meta.model) {
+            extra_fields.push(format!(r#""vbsp_model":{}"#, json));
+        }
+        if let Some(targetname) = &meta.targetname {
+            if let Ok(json) = serde_json::to_string(targetname) {
+                extra_fields.push(format!(r#""vbsp_targetname":{}"#, json));
+            }
+        }
+        if let Some(parentname) = &meta.parentname {
+            if let Ok(json) = serde_json::to_string(parentname) {
+                extra_fields.push(format!(r#""vbsp_parentname":{}"#, json));
+            }
+        }
+    }
     if let Some([r, g, b, _a]) = tint {
         extra_fields.push(format!(r#""vbsp_render_color":[{},{},{}]"#, r, g, b));
     }
@@ -1092,10 +1409,22 @@ fn push_bsp_model_bsp(
         extra_fields.push(format!(r#""vbsp_rot_button":{{{}}}"#, rot_fields));
         extra_fields.push(format!(r#""vbsp_render_mode":{}"#, meta.render_mode));
     }
+    // 只有「rot_button 强类型解析失败、退回普通 brush 导出」这一条路径会走到这里：
+    // 保留既有 `vbsp_render_mode` 字段的形状（成功路径在 rot 分支里已写）。
+    if let Some(render_mode) = render_mode {
+        extra_fields.push(format!(r#""vbsp_render_mode":{}"#, render_mode));
+    }
     let node_extras = if extra_fields.is_empty() {
         None
     } else {
         serde_json::value::RawValue::from_string(format!("{{{}}}", extra_fields.join(","))).ok()
+    };
+
+    // 节点名：brush 实体按实体下标唯一命名，世界模型保持 `"bsp"`（既有消费方不依赖节点名，
+    // 见 `vbsp_render_color` / `vbsp_rot_button` 的 extras 消费路径；保名只为不惊动未知下游）。
+    let node_name = match entity {
+        Some(meta) => format!("brush_{}", meta.index),
+        None => "bsp".to_owned(),
     };
 
     Node {
@@ -1105,7 +1434,7 @@ fn push_bsp_model_bsp(
         extras: node_extras,
         matrix: None,
         mesh: Some(Index::new(mesh_index)),
-        name: Some("bsp".into()),
+        name: Some(node_name),
         rotation: None,
         scale: None,
         translation: Some(map_coords(offset)),
@@ -1429,25 +1758,26 @@ fn water_key(name: &str) -> String {
 /// #2：按 BSP 面的世界 y 范围算每个水材质/水体块的 top-bottom 厚度，写入
 /// `vbsp_water.waterThickness`。只加数据，不改渲染；boreas 单层薄膜得到 0，
 /// 666 多层池得到明显厚度。
-fn apply_water_thickness(root: &mut Root, bsp: &Bsp) {
+///
+/// `models` 是调用方 [`bsp_models`] 已收集好的模型列表（世界模型 + 可见 brush 实体），
+/// 这里直接复用，避免导出期再遍历一遍实体。
+fn apply_water_thickness(root: &mut Root, models: &[BspModelExport<'_>]) {
     use std::collections::{BTreeSet, HashMap};
     // 同一水材质会出现在地图多个池子/高度；span 会把整张地图算进去（13312）。
     // 真正的水层厚度是**相邻水层的最小正间隔**：666 的 15296/15312 ⇒ 16，
     // boreas 只有 197 一层 ⇒ 0。
     let mut layers: HashMap<String, BTreeSet<i32>> = HashMap::new();
-    if let Ok(models) = bsp_models(bsp) {
-        for (model, _, _, _) in models {
-            for face in model.faces() {
-                if !face.is_visible() {
-                    continue;
-                }
-                let key = water_key(face.texture().name());
-                let set = layers.entry(key).or_default();
-                for p in face.vertex_positions() {
-                    // 水面三角面的顶点 y 有 1~2 单位的法线抖动；按 16 HU 量化再找间隔，
-                    // 否则 666 的 16 厚池子会被算成 1。Source 的 brush 网格也是 16 对齐。
-                    set.insert((p.y / 16.0).round() as i32);
-                }
+    for entry in models {
+        for face in entry.model.faces() {
+            if !face.is_visible() {
+                continue;
+            }
+            let key = water_key(face.texture().name());
+            let set = layers.entry(key).or_default();
+            for p in face.vertex_positions() {
+                // 水面三角面的顶点 y 有 1~2 单位的法线抖动；按 16 HU 量化再找间隔，
+                // 否则 666 的 16 厚池子会被算成 1。Source 的 brush 网格也是 16 对齐。
+                set.insert((p.y / 16.0).round() as i32);
             }
         }
     }
