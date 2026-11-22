@@ -11,6 +11,47 @@ fn to_js_err<E: std::fmt::Debug>(e: E, ctx: &str) -> JsValue {
     JsValue::from_str(&format!("{}: {:?}", ctx, e))
 }
 
+// 出生点 primary 选择：game / viewer / debug 三条 `parse_spawn_points` 路径共用。
+// 旧逻辑只认 `info_player_start`，没有它时退化为列表第一个；而列表按实体出现顺序排列，
+// 可能以 `info_teleport_destination` 开头（ze 地图），game 初始出生点就会落到传送目标上。
+// primary 改为在**真实玩家出生点**里按优先级选；列表内容与顺序保持不变。
+
+/// `info_player_*` 玩家出生点优先度：数值越小越优先（0 = `info_player_start`）。
+/// 非玩家出生点（如 `info_teleport_destination`）返回 `None`，不参与 primary 竞争。
+#[cfg(any(feature = "glb-lite", feature = "viewer-export", feature = "debug-tools"))]
+pub(crate) fn spawn_priority(classname: &str) -> Option<u8> {
+    Some(match classname {
+        "info_player_start" => 0,
+        "info_player_terrorist" => 1,
+        "info_player_counterterrorist" => 2,
+        "info_player_deathmatch" => 3,
+        "info_player_teamspawn" => 4,
+        "info_player_axis" => 5,
+        "info_player_allied" => 6,
+        "info_player_coop" => 7,
+        // 其它 info_player_* 兜底，排在已知玩家出生点之后
+        name if name.starts_with("info_player_") => 8,
+        _ => return None,
+    })
+}
+
+/// 扫描出生点时的 primary 候选更新：只有玩家出生点参与；优先级更高（数值更小）才替换，
+/// 同一优先级保留先出现的。`index` 是候选在 `spawn_points` 列表中的下标。
+#[cfg(any(feature = "glb-lite", feature = "viewer-export", feature = "debug-tools"))]
+pub(crate) fn track_spawn_primary(
+    current: Option<(u8, usize)>,
+    index: usize,
+    classname: &str,
+) -> Option<(u8, usize)> {
+    let Some(priority) = spawn_priority(classname) else {
+        return current;
+    };
+    match current {
+        Some((best, _)) if best <= priority => current,
+        _ => Some((priority, index)),
+    }
+}
+
 // 结构体字段：debug/game 5 个 + viewer 的 cached_static_props（仅 viewer-export 编译时存在）。
 // 必须在共享 crate 内定义并标 #[wasm_bindgen]：各 feature 模块的导出 impl 都作用在它上面。
 #[wasm_bindgen]

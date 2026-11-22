@@ -1913,7 +1913,9 @@ impl BspProcessor {
         ///
         /// 返回 JSON：`{ "spawn_points": [{ classname, origin: [x,y,z], angles: [p,y,r],
         /// origin_raw, angles_raw }], "total": N, "primary": 0 }`。
-        /// `primary` 为推荐出生点索引（优先 info_player_start）。
+        /// `primary` 为推荐出生点索引：按玩家出生点优先级选择（`info_player_start` 最高，
+        /// 之后 `info_player_terrorist`、`info_player_counterterrorist` 等，其它 `info_player_*` 最后）；
+        /// 完全没有玩家出生点时回退列表第一个（可能是 `info_teleport_destination`）。
         ///
         /// **坐标转换**：BSP Z-up → Three.js Y-up（`[x,y,z]→[y,z,x]`，det=+1）。
         /// `origin` 已旋转为 Y-up；`angles` 保持 BSP 原始 `[pitch, yaw, roll]`，前端按需转换。
@@ -1970,7 +1972,7 @@ impl BspProcessor {
             ];
 
             let mut spawn_points: Vec<SpawnPoint> = Vec::new();
-            let mut primary: Option<usize> = None;
+            let mut primary: Option<(u8, usize)> = None;
 
             for ent in bsp.entities.iter() {
                 let Ok(classname) = ent.prop("classname") else {
@@ -1995,10 +1997,8 @@ impl BspProcessor {
                     .and_then(|s| parse_vec3(s))
                     .unwrap_or([0.0, 0.0, 0.0]);
 
-                // 如果是 info_player_start，设为 primary
-                if primary.is_none() && classname == "info_player_start" {
-                    primary = Some(spawn_points.len());
-                }
+                // 真实玩家出生点按优先级竞争 primary（info_teleport_destination 等不参与）
+                primary = super::track_spawn_primary(primary, spawn_points.len(), classname);
 
                 spawn_points.push(SpawnPoint {
                     classname: classname.to_string(),
@@ -2009,10 +2009,11 @@ impl BspProcessor {
                 });
             }
 
-            // 如果没有 info_player_start，用第一个出生点
-            if primary.is_none() && !spawn_points.is_empty() {
-                primary = Some(0);
-            }
+            // 优先真实玩家出生点；完全没有玩家出生点时才回退到列表第一个
+            // （可能是 info_teleport_destination），一个出生点都没有时为 null。
+            let primary = primary
+                .map(|(_, index)| index)
+                .or_else(|| (!spawn_points.is_empty()).then_some(0));
 
             let report = SpawnReport {
                 total: spawn_points.len(),
