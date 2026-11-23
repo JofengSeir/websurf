@@ -177,7 +177,9 @@ const dom = {
 	optMirrorLowResChk: document.getElementById('optMirrorLowRes') as HTMLInputElement | null,
 	// 「增强插件（实验）」区：默认全关；勾选 → EnhanceHost.setEnabled → 动态 import 插件
 	enhRuntimeTeleportChk: document.getElementById('enhRuntimeTeleport') as HTMLInputElement | null,
+	enhBrushVisibilityChk: document.getElementById('enhBrushVisibility') as HTMLInputElement | null,
 	enhanceStatusLine: document.getElementById('enhanceStatusLine') as HTMLElement | null,
+	enhBrushVisibilityStatus: document.getElementById('enhBrushVisibilityStatus') as HTMLElement | null,
 	// 贴墙近平面自适应：两张滑块分别写 rendererMain.setNearParams 的探测距离与收缩系数
 	nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
 	nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
@@ -230,6 +232,23 @@ let lastTeleportIdx = -1;
 let rendererMain: RendererMain | null = null;
 /** 可选增强插件宿主：默认全关时零成本（不 import 插件、不挂实体事件）；面板/控制台可开。 */
 let enhanceHost: EnhanceHost | null = null;
+
+/**
+ * 刷新「增强插件（实验）」区的状态行。
+ * 两行分开：通用行报启用/装载总览；brush 行报插件自报的「已隐藏实体数/最后事件」。
+ * 由 EnhanceHost 的 onStatusChanged 钩子（启停、装载完成、换图、brush 事件后）与面板 change 调用。
+ */
+function refreshEnhanceStatusLines(): void {
+	if (dom.enhanceStatusLine) {
+		dom.enhanceStatusLine.textContent = `增强插件：${enhanceHost?.describe() ?? '未初始化'}`;
+	}
+	if (dom.enhBrushVisibilityStatus) {
+		const status = enhanceHost?.statusOf('brush-visibility') ?? '';
+		dom.enhBrushVisibilityStatus.textContent = status
+			? `动态 brush 可见性：${status}`
+			: '动态 brush 可见性：未启用（默认关闭）';
+	}
+}
 /** config 段同步实例（P5）：AppRuntime 就绪后构造；sendConfig + renderer.applyConfigPatch 走适配器。 */
 let configSync: ConfigSync<RuntimeConfig> | null = null;
 let sceneReady = false;
@@ -383,6 +402,8 @@ async function main(): Promise<void> {
 			setEventSink: (handler) => {
 				if (rendererMain) rendererMain.onEntityEvent = handler;
 			},
+			// 插件自报状态变化（含 brush 事件后的「已隐藏实体数/最后事件」）→ 刷新面板两行。
+			onStatusChanged: () => refreshEnhanceStatusLines(),
 		},
 	);
 	enhanceHost.installConsoleApi();
@@ -1998,19 +2019,21 @@ function bindUI(): void {
 
 	// 「增强插件（实验）」：默认全关；勾选 → EnhanceHost.setEnabled（落盘 + 动态 import + 订阅实体事件）。
 	// 与「优化处理」不同，这里没有每帧读的共享 flag：关闭时插件根本没加载，事件 sink 为 null。
-	const syncEnhanceStatusLine = (): void => {
-		if (dom.enhanceStatusLine) {
-			dom.enhanceStatusLine.textContent = `增强插件：${enhanceHost?.describe() ?? '未初始化'}`;
-		}
-	};
 	if (dom.enhRuntimeTeleportChk) {
 		dom.enhRuntimeTeleportChk.checked = enhanceHost?.isEnabled('runtime-teleport') ?? false;
 		dom.enhRuntimeTeleportChk.addEventListener('change', (e) => {
 			enhanceHost?.setEnabled('runtime-teleport', (e.target as HTMLInputElement).checked);
-			syncEnhanceStatusLine();
+			refreshEnhanceStatusLines();
 		});
 	}
-	syncEnhanceStatusLine();
+	if (dom.enhBrushVisibilityChk) {
+		dom.enhBrushVisibilityChk.checked = enhanceHost?.isEnabled('brush-visibility') ?? false;
+		dom.enhBrushVisibilityChk.addEventListener('change', (e) => {
+			enhanceHost?.setEnabled('brush-visibility', (e.target as HTMLInputElement).checked);
+			refreshEnhanceStatusLines();
+		});
+	}
+	refreshEnhanceStatusLines();
 
 	// 近平面自适应参数（滑块 ↔ 输入框双向同步 + 渲染器实时生效）
 	bindNearParamControls();
@@ -2243,12 +2266,16 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 			)
 			.join('');
 	}
-	// 增强插件：换图上下文（实体 I/O + 传送表；只在启用时才会被消费，默认无成本）
+	// 增强插件：换图上下文（实体 I/O + 传送表 + 合并后场景根；只在启用时才会被消费，默认无成本）
+	// sceneRoot：RendererMain 的 scene 是私有字段，且 renderer-main.ts 不在本次改动范围；此处用结构
+	// 类型只读一次引用，插件侧也按结构类型遍历（EnhanceSceneContext.sceneRoot 故意是 unknown）。
 	enhanceHost?.onSceneLoaded({
 		mapName: fileName,
 		entityIoJson: bundle.entityIoJson,
 		teleportJson: bundle.teleportJson,
+		sceneRoot: (rendererMain as unknown as { scene?: unknown } | null)?.scene ?? null,
 	});
+	refreshEnhanceStatusLines();
 	// UI 激活（控件/面板同步/缺失纹理弹窗）
 	await onSceneReadyUi(diag, sceneData);
 }

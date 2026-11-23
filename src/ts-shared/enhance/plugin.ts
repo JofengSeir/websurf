@@ -21,6 +21,14 @@ export interface EnhanceSceneContext {
   entityIoJson?: string;
   /** `parse_teleports()` 的静态传送表（Rust 链用的同一份数据，插件只读）。 */
   teleportJson?: string;
+  /**
+   * 合并后的渲染场景根（宿主注入，通常是 three 的 `Scene`）。
+   *
+   * 插件契约故意不 import three：需要遍历几何的插件（如 `brush-visibility`）在这里
+   * 拿到根后按结构类型自省 `traverse` / `geometry.userData`，宿主不暴露具体类型。
+   * 换图后该引用失效（每次 `onMapLoad` 拿新根）；插件不得跨图持有。
+   */
+  sceneRoot?: unknown;
 }
 
 /** 宿主注入给插件的能力（全部走宿主，插件不认识具体渲染/物理类）。 */

@@ -38,6 +38,15 @@ export const ENHANCE_FLAGS: readonly EnhanceFlagDef[] = [
       '由 TS 实体层判定接触并经主线程物理 + Worker 权威同步施加传送；' +
       'Rust 静态传送链保持原样，同一目标只施加一次、不重复传送。',
   },
+  {
+    id: 'brush-visibility',
+    label: '动态 brush 可见性',
+    summary:
+      '补「brush 实体被脚本 Enable/Disable/Toggle 后在渲染上不消失/不恢复」的缺口：' +
+      '消费实体层的 brush 开关事件，按合并几何的来源表把该实体自己的三角形区间退化为零面积' +
+      '（索引几何改 index 缓冲；非索引几何把区间内顶点位置塌到同一点，不改几何结构）；' +
+      '只动目标实体的区间，不改 draw call，恢复时逐字节写回原值，默认关。',
+  },
 ];
 
 /** localStorage 键：值为 JSON 字符串数组（已启用的 id）。 */

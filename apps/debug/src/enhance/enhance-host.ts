@@ -35,6 +35,10 @@ const PLUGIN_FACTORIES: Readonly<Record<string, EnhancePluginFactory>> = {
     const mod = await import('./plugins/runtime-teleport.js');
     return mod.createRuntimeTeleportPlugin(runtime);
   },
+  'brush-visibility': async (runtime) => {
+    const mod = await import('./plugins/brush-visibility.js');
+    return mod.createBrushVisibilityPlugin(runtime);
+  },
 };
 
 /** 宿主从 app 层拿到的能力（传送必须双端同步，因此由 app 注入而不是宿主自己找 renderer）。 */
@@ -54,6 +58,11 @@ export interface EnhanceHostHooks {
    * 传 null 是「默认零成本」的关键——调用方（renderer）侧的可选回调直接短路。
    */
   setEventSink(handler: ((event: EntityEvent) => void) | null): void;
+  /**
+   * 状态可能变化时通知调用方刷新面板行（启停/装载完成/换图/事件派发后）。
+   * 可选：没接就只是少一次 UI 刷新，不影响插件语义。
+   */
+  onStatusChanged?(): void;
 }
 
 /** 状态行（面板/控制台诊断）。 */
@@ -141,6 +150,20 @@ export class EnhanceHost {
     return enabled.map((item) => `${item.label}:${item.loaded ? '已装载' : '装载中'}`).join('；');
   }
 
+  /** 单个插件的自报状态（未装载返回空串；面板专属状态行用）。 */
+  statusOf(id: string): string {
+    return this.plugins.get(id)?.statusText?.() ?? '';
+  }
+
+  /** 通知 app 刷新面板状态行；回调抛错不能影响插件主链。 */
+  private notifyStatusChanged(): void {
+    try {
+      this.hooks.onStatusChanged?.();
+    } catch (err) {
+      this.deps.log(`状态行刷新异常：${String(err)}`);
+    }
+  }
+
   /**
    * 换图完成：保存上下文，并让「已启用但还没装载」的插件补装载、已装载的插件重置地图状态。
    * 必须在实体系统装配之后调用（`rendererMain.loadScene()` 返回后）。
@@ -148,9 +171,13 @@ export class EnhanceHost {
   onSceneLoaded(context: EnhanceSceneContext): void {
     if (this.disposed) return;
     this.scene = context;
+    this.notifyStatusChanged();
     for (const id of [...this.enabled]) {
       void this.ensureLoaded(id)
-        .then((plugin) => plugin?.onMapLoad?.(context))
+        .then((plugin) => {
+          plugin?.onMapLoad?.(context);
+          this.notifyStatusChanged();
+        })
         .catch((err: unknown) => this.deps.log(`插件 ${id} 装载失败：${String(err)}`));
     }
   }
@@ -166,10 +193,12 @@ export class EnhanceHost {
       void this.ensureLoaded(id)
         .then((plugin) => {
           if (plugin && this.scene) plugin.onMapLoad?.(this.scene);
+          this.notifyStatusChanged();
         })
         .catch((err: unknown) => this.deps.log(`插件 ${id} 装载失败：${String(err)}`));
     } else {
       this.unload(id);
+      this.notifyStatusChanged();
     }
     return true;
   }
@@ -199,6 +228,8 @@ export class EnhanceHost {
     // `input` 是最高频的一类（每次 AcceptInput 一条），插件不需要，提前挡掉。
     if (event.kind === 'input') return;
     for (const plugin of this.plugins.values()) plugin.onEvent?.(event);
+    // brush 事件会改变插件的「已生效实体数/最后事件」，面板状态行需要跟上。
+    if (event.kind === 'brush') this.notifyStatusChanged();
   };
 
   /** 按需装载插件；失败时自动关掉该开关（避免每次启动都重试并刷错误）。 */
@@ -220,6 +251,7 @@ export class EnhanceHost {
         this.plugins.set(id, plugin);
         if (this.plugins.size === 1) this.hooks.setEventSink(this.onEntityEvent);
         this.deps.log(`插件已启用：${id}`);
+        this.notifyStatusChanged();
         return plugin;
       } catch (err) {
         this.deps.log(`插件装载失败：${id}（${String(err)}），已自动关闭`);

@@ -667,6 +667,14 @@
                 <label for="enhRuntimeTeleport" title="补「StartDisabled=1 的传送触发器在运行期被 Enable 后不生效」的缺口：由 TS 实体层判定接触，经主线程物理 + Worker 权威双端施加传送（含落点朝向）。Rust 静态传送链保持原样；玩家已在落点附近时跳过，避免重复传送。">运行时传送（补 StartDisabled 传送门 Enable 缺口）</label>
               </div>
 
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="enhBrushVisibility" />
+                <label for="enhBrushVisibility" title="补「brush 实体被脚本 Enable/Disable/Toggle 后在渲染上不消失/不恢复」的缺口：载图时从合并几何的来源表建「实体→区间」索引，收到实体层的 brush 开关事件时只把该实体自己的三角形区间退化为零面积（索引几何改 index；非索引几何把区间顶点塌到同一点），恢复时逐字节写回。只动目标实体区间，不改 draw call、不改其它实体。">动态 brush 可见性（实验）</label>
+              </div>
+
+              <div class="ctrl-full hint" id="enhBrushVisibilityStatus"
+                   title="已隐藏实体数 / 建索引实体数、退化三角与区间数、最后一次 brush 事件（实体下标:true|false）。控制台可用 __vbspEnhance.list() 查看同一状态。">动态 brush 可见性：未启用（默认关闭）</div>
+
               <div class="ctrl-full hint" id="enhanceStatusLine"
                    title="当前启用的增强插件与运行时统计（传送次数 / 跳过次数）。控制台也可用 __vbspEnhance.status() 查看。">增强插件：全部关闭（零成本）</div>
             </div>
