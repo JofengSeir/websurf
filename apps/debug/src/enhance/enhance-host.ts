@@ -15,6 +15,7 @@
  */
 import {
   ENHANCE_FLAGS,
+  parseEnhanceQuery,
   readEnabledEnhanceIds,
   writeEnabledEnhanceIds,
 } from '../../../../src/ts-shared/enhance/flags.js';
@@ -113,6 +114,14 @@ export class EnhanceHost {
   private readonly plugins = new Map<string, EnhancePlugin>();
   /** 正在动态 import 的插件（防并发重复装载）。 */
   private readonly pending = new Map<string, Promise<EnhancePlugin | null>>();
+  /** 仅由 URL `?enhance=` 临时启用的 id：不落盘，除非用户显式在面板/控制台切换。 */
+  private readonly urlOnly = new Set<string>();
+  /** 场景序号：换图 +1；用来给每个插件去重「本场景只 onMapLoad 一次」。 */
+  private sceneSeq = 0;
+  /** 每个插件最后一次 onMapLoad 的场景序号（换图后强制重放）。 */
+  private readonly appliedSceneSeq = new Map<string, number>();
+  /** 合并状态行刷新（高频实体事件不能每来一条就写 DOM）。 */
+  private notifyTimer: ReturnType<typeof setTimeout> | null = null;
   /** 当前地图上下文（换图时更新；插件装载晚于换图时用它补 onMapLoad）。 */
   private scene: EnhanceSceneContext | null = null;
   private disposed = false;
@@ -122,9 +131,13 @@ export class EnhanceHost {
     this.deps = deps;
     this.hooks = hooks;
     this.storage = safeStorage();
-    for (const id of readEnabledEnhanceIds(this.storage, globalThis.location?.search ?? '')) {
-      this.enabled.add(id);
+    const stored = new Set(readEnabledEnhanceIds(this.storage, ''));
+    const fromUrl = parseEnhanceQuery(globalThis.location?.search ?? '');
+    for (const id of fromUrl) {
+      if (!stored.has(id)) this.urlOnly.add(id);
     }
+    for (const id of stored) this.enabled.add(id);
+    for (const id of fromUrl) this.enabled.add(id);
     this.runtime = {
       teleport: (pos, yawDeg) => this.deps.teleport(pos, yawDeg),
       getPlayerState: () => this.deps.getPlayerState(),
@@ -177,37 +190,75 @@ export class EnhanceHost {
   }
 
   /**
+   * 合并 150ms 内的状态刷新请求：`trigger_push`/`trigger_hurt` 这类实体每个 tick 都可能出事件，
+   * 逐条刷新会把 DOM/状态文本开销堆到每帧。定时器只在「有插件装载且真有事件」时短暂存在。
+   */
+  private scheduleStatusChanged(): void {
+    if (this.disposed || this.notifyTimer !== null) return;
+    this.notifyTimer = setTimeout(() => {
+      this.notifyTimer = null;
+      this.notifyStatusChanged();
+    }, 150);
+  }
+
+  /** 把当前启用集合落盘；URL 临时开关不落盘（除非用户显式切换过它）。 */
+  private persistEnabled(): void {
+    if (!this.storage) return;
+    writeEnabledEnhanceIds(
+      this.storage,
+      [...this.enabled].filter((id) => !this.urlOnly.has(id)),
+    );
+  }
+
+  /** 让某个已启用插件拿到当前场景（装载晚于换图 / 换图后重放；每个场景只 onMapLoad 一次）。 */
+  private async applyScene(id: string): Promise<void> {
+    if (this.disposed) return;
+    const seq = this.sceneSeq;
+    const plugin = await this.ensureLoaded(id);
+    if (!plugin || this.disposed) return;
+    // 还没有场景（如载图前就打开开关）：插件先装载好，等 onSceneLoaded 再回调 onMapLoad。
+    const scene = this.scene;
+    if (!scene) return;
+    // import 期间可能换了图 / 被关掉：以 await 之后的状态为准。
+    if (this.sceneSeq !== seq || !this.enabled.has(id)) return;
+    if (this.appliedSceneSeq.get(id) === seq) return;
+    this.appliedSceneSeq.set(id, seq);
+    try {
+      plugin.onMapLoad?.(scene);
+    } catch (err) {
+      this.deps.log(`插件 ${id} 载图回调异常：${String(err)}`);
+    }
+    this.notifyStatusChanged();
+  }
+
+  /**
    * 换图完成：保存上下文，并让「已启用但还没装载」的插件补装载、已装载的插件重置地图状态。
    * 必须在实体系统装配之后调用（`rendererMain.loadScene()` 返回后）。
    */
   onSceneLoaded(context: EnhanceSceneContext): void {
     if (this.disposed) return;
     this.scene = context;
+    this.sceneSeq += 1;
     this.notifyStatusChanged();
     for (const id of [...this.enabled]) {
-      void this.ensureLoaded(id)
-        .then((plugin) => {
-          plugin?.onMapLoad?.(context);
-          this.notifyStatusChanged();
-        })
-        .catch((err: unknown) => this.deps.log(`插件 ${id} 装载失败：${String(err)}`));
+      void this.applyScene(id).catch((err: unknown) => {
+        this.deps.log(`插件 ${id} 载图失败：${String(err)}`);
+      });
     }
   }
 
-  /** 面板/控制台开关：立即生效并落盘（URL 临时开关不落盘）。 */
+  /** 面板/控制台开关：立即生效并落盘（URL 临时开关不落盘，用户显式切换后才转正）。 */
   setEnabled(id: string, enabled: boolean): boolean {
     if (this.disposed || !PLUGIN_FACTORIES[id]) return false;
     const changed = this.enabled.has(id) !== enabled;
+    this.urlOnly.delete(id);
     if (enabled) this.enabled.add(id);
     else this.enabled.delete(id);
-    if (changed) writeEnabledEnhanceIds(this.storage, [...this.enabled]);
+    if (changed) this.persistEnabled();
     if (enabled) {
-      void this.ensureLoaded(id)
-        .then((plugin) => {
-          if (plugin && this.scene) plugin.onMapLoad?.(this.scene);
-          this.notifyStatusChanged();
-        })
-        .catch((err: unknown) => this.deps.log(`插件 ${id} 装载失败：${String(err)}`));
+      void this.applyScene(id).catch((err: unknown) => {
+        this.deps.log(`插件 ${id} 装载失败：${String(err)}`);
+      });
     } else {
       this.unload(id);
       this.notifyStatusChanged();
@@ -229,20 +280,32 @@ export class EnhanceHost {
   /** 卸载全部插件并摘掉事件订阅。 */
   dispose(): void {
     this.disposed = true;
+    if (this.notifyTimer !== null) {
+      clearTimeout(this.notifyTimer);
+      this.notifyTimer = null;
+    }
     for (const id of [...this.plugins.keys()]) this.unload(id);
     this.pending.clear();
     this.scene = null;
     this.hooks.setEventSink(null);
+    const globalHost = globalThis as unknown as { __vbspEnhance?: unknown };
+    if (globalHost.__vbspEnhance) delete globalHost.__vbspEnhance;
   }
 
   /** 单个事件的派发入口（只有装载了插件时才会被 renderer 调用）。 */
   private readonly onEntityEvent = (event: EntityEvent): void => {
     // `input` 是最高频的一类（每次 AcceptInput 一条），插件不需要，提前挡掉。
     if (event.kind === 'input') return;
-    for (const plugin of this.plugins.values()) plugin.onEvent?.(event);
-    // 已装载插件消费的任何事件都可能改变其状态行（brush 开关、伤害、传送计数…）：
-    // 事件本身不是每帧产生（无插件时 sink 为 null，这里根本不会被调用），刷新一次 UI 的成本可忽略。
-    this.notifyStatusChanged();
+    // 单个插件抛错不能打断其它插件（按插件隔离，异常写日志即可）。
+    for (const [id, plugin] of this.plugins) {
+      try {
+        plugin.onEvent?.(event);
+      } catch (err) {
+        this.deps.log(`插件 ${id} 事件处理异常：${String(err)}`);
+      }
+    }
+    // 已装载插件消费的事件可能改变其状态行；合并到 150ms 一次，避免实体高频事件堆 DOM 开销。
+    this.scheduleStatusChanged();
   };
 
   /** 按需装载插件；失败时自动关掉该开关（避免每次启动都重试并刷错误）。 */
@@ -257,7 +320,8 @@ export class EnhanceHost {
     const task = (async (): Promise<EnhancePlugin | null> => {
       try {
         const plugin = await factory(this.runtime);
-        if (this.disposed) {
+        // import 期间可能被关掉 / 宿主已销毁：不要装载已完成但已不该存在的实例。
+        if (this.disposed || !this.enabled.has(id)) {
           plugin.dispose?.();
           return null;
         }
@@ -269,7 +333,7 @@ export class EnhanceHost {
       } catch (err) {
         this.deps.log(`插件装载失败：${id}（${String(err)}），已自动关闭`);
         this.enabled.delete(id);
-        writeEnabledEnhanceIds(this.storage, [...this.enabled]);
+        this.persistEnabled();
         return null;
       } finally {
         this.pending.delete(id);
@@ -281,6 +345,7 @@ export class EnhanceHost {
 
   /** 卸载并释放插件；最后一个卸载时把事件 sink 置空（回到零成本）。 */
   private unload(id: string): void {
+    this.appliedSceneSeq.delete(id);
     const plugin = this.plugins.get(id);
     if (!plugin) return;
     this.plugins.delete(id);

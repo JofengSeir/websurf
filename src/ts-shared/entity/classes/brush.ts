@@ -251,8 +251,13 @@ export const FuncBrushClass: EntityClass = {
     { name: 'SetExcluded', type: FIELD_STRING, key: 'excludednpc' },
   ],
   spawn: (e) => {
-    // IsOn() 由 EF_NODRAW 决定；StartDisabled ⇒ TurnOff
-    brushSetEnabled(e, e.getNumber('startdisabled', 0) === 0, false);
+    // SDK 语义：`StartDisabled`（键值）与 spawnflags 的 `START_OFF` 都表示出生即关闭。
+    // START_OFF 之前只有声明、没有消费点（ze_cursed 的 lvl3_wt03 就是这种实体），
+    // 结果本应「要开了才出现」的墙载图时就可见。派生类 spawn 先于基类执行，
+    // 所以两件事必须写在同一处，避免子类先设 false、基类又按 StartDisabled 设回 true。
+    const startOffBit = e.spawnFlagOf('START_OFF');
+    const startOff = startOffBit !== 0 && e.hasSpawnFlags(startOffBit);
+    brushSetEnabled(e, e.getNumber('startdisabled', 0) === 0 && !startOff, false);
   },
 };
 

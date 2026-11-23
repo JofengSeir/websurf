@@ -60,6 +60,8 @@ export class BillboardQuadBatch {
   private readonly uvs: Float32Array;
   private readonly capacity: number;
   private live = 0;
+  /** 上一帧 end() 时上传过的 live 数量；color/uv 是常量，只在数量变化时重传。 */
+  private lastEndLive = -1;
 
   constructor(texture: THREE.Texture, capacity: number, renderOrder: number, blend: BillboardBlend) {
     this.capacity = Math.max(1, Math.floor(capacity));
@@ -163,9 +165,14 @@ export class BillboardQuadBatch {
   }
 
   end(): void {
+    // position 由相机基变换后重写，必须每帧上传；color/uv 是静态量，
+    // 只在首帧或本帧 live 数量变化（换图/增删）时上传，静止相机下零重传。
     (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    (this.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
-    (this.geometry.getAttribute('uv') as THREE.BufferAttribute).needsUpdate = true;
+    if (this.live !== this.lastEndLive) {
+      (this.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
+      (this.geometry.getAttribute('uv') as THREE.BufferAttribute).needsUpdate = true;
+      this.lastEndLive = this.live;
+    }
     this.mesh.visible = this.live > 0;
   }
 

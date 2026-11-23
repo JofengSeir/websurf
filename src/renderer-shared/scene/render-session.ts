@@ -1041,6 +1041,8 @@ export class RenderSession {
       if (this.entityExtras) {
         this.scene.add(this.entityExtras.root);
         // 与激光/粒子同口径：挂上场景后先推一拍，让预编译与整帧预热都能覆盖其材质。
+        // 相机矩阵可能还没刷新过（装载顺序不保证），这里先推一次再摆 quad。
+        this.camera.updateMatrixWorld();
         this.entityExtras.update(this.camera);
       }
       g.__vbspEntityExtras = this.entityExtras;
@@ -1355,7 +1357,12 @@ export class RenderSession {
       if (this.laserBeams) this.laserBeams.update(animDt, this.camera);
       if (this.particleSystems) this.particleSystems.update(animDt, this.camera);
       // 资产实体图元（sprite/文字/beam）是屏幕朝向的：相机一动就要重写四边形顶点。
-      if (this.entityExtras) this.entityExtras.update(this.camera);
+      // 这里手动刷新相机矩阵：本帧此前没有别的 updateMatrixWorld，否则会用到上一帧的
+      // matrixWorld，转视角时 quad 会晚一帧摆正（贴图游动）。
+      if (this.entityExtras) {
+        this.camera.updateMatrixWorld();
+        this.entityExtras.update(this.camera);
+      }
     }
     // 动态对象（旋钮 pivot 等）刚改过变换：本帧在这里刷新一次世界矩阵，后面 6~9 趟
     // `renderer.render` 直接复用（`scene.matrixWorldAutoUpdate` 在构造函数里关掉了）。

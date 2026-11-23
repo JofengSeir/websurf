@@ -2318,7 +2318,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 		mapName: fileName,
 		entityIoJson: bundle.entityIoJson,
 		teleportJson: bundle.teleportJson,
-		sceneRoot: (rendererMain as unknown as { scene?: unknown } | null)?.scene ?? null,
+		sceneRoot: rendererMain?.getSceneRoot() ?? null,
 		// 死亡/重生类插件用：本图主出生点（与 game.setInitialSpawn 同一份 bundle.spawn）
 		spawn: [bundle.spawn.x, bundle.spawn.y, bundle.spawn.z],
 		spawnYawDeg: bundle.spawn.yawDeg,

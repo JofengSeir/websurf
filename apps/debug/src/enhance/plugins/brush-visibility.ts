@@ -111,6 +111,10 @@ interface Slot {
   readonly attribute: AttributeLike;
   readonly array: NumericArray;
   readonly kind: SlotKind;
+  /** index 模式：登记时的几何与其 index 缓冲；用于发现运行期被 PVS 换掉的缓冲。 */
+  readonly geometry?: GeometryLike;
+  /** index 模式：登记时固化的 index 属性（PVS 运行时开起来会换成新属性）。 */
+  readonly captured?: AttributeLike;
   /** 区间起点（索引缓冲元素 / 顶点，取决于 kind；vertex 模式不使用）。 */
   readonly start: number;
   /** 区间长度（元素数；三角形数 = count / 3）。 */
@@ -162,6 +166,30 @@ function entityIndexFromRangeName(meshName: string): number | null {
   if (!/^\d+$/.test(suffix)) return null;
   const index = Number.parseInt(suffix, 10);
   return Number.isSafeInteger(index) ? index : null;
+}
+
+/**
+ * 判断单个实体文本块（BSP entities 的 KV 原文）在载图初态是否应为「不可见」。
+ *
+ * 实体层 spawn 刻意 `applyHost=false` 不发事件，所以插件必须自己补初态；这里与
+ * `src/ts-shared/entity/classes/brush.ts` 的 spawn 语义保持一致：
+ * `StartDisabled != 0`，或 `func_wall_toggle` 的 spawnflags bit0（START_OFF）。
+ */
+function blockShouldStartHidden(block: string): boolean {
+  const props = new Map<string, string>();
+  const pair = /"([^"\\]*)"\s+"([^"\\]*)"/g;
+  for (let match = pair.exec(block); match; match = pair.exec(block)) {
+    if (!props.has(match[1].toLowerCase())) props.set(match[1].toLowerCase(), match[2]);
+  }
+  const classname = (props.get('classname') ?? '').toLowerCase();
+  if (classname !== 'func_brush' && classname !== 'func_wall_toggle') return false;
+  const startDisabled = Number.parseInt(props.get('startdisabled') ?? '0', 10);
+  if (Number.isFinite(startDisabled) && startDisabled !== 0) return true;
+  if (classname === 'func_wall_toggle') {
+    const spawnFlags = Number.parseInt(props.get('spawnflags') ?? '0', 10);
+    if (Number.isFinite(spawnFlags) && (spawnFlags & 1) !== 0) return true;
+  }
+  return false;
 }
 
 /** 读并浅校验来源表；没有表/空表返回 null（视作普通几何，不碰）。 */
@@ -282,11 +310,19 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
   let unresolvedEvents = 0;
   let loggedLimitations = 0;
   let lastEvent: string | null = null;
+  /** 当前场景根（换图时替换；PVS 运行时换 index 缓冲后按它重建索引）。 */
+  let sceneRootRef: SceneRootLike | null = null;
+  /** 事件与载图初态共同驱动的「应隐藏」集合；重建索引后按它重放。 */
+  const desiredHidden = new Set<number>();
+  /** 载图时从 entityIoJson 解析出的初态隐藏实体数（诊断用）。 */
+  let initialHiddenCount = 0;
 
   const resetBindings = (): void => {
     bindings.clear();
     limitations.length = 0;
     sceneLoaded = false;
+    sceneRootRef = null;
+    initialHiddenCount = 0;
     tablesAccepted = 0;
     tablesRejected = 0;
     bindingSlots = 0;
@@ -457,6 +493,8 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
           attribute,
           array,
           kind: mode,
+          geometry: mode === 'index' ? geometry : undefined,
+          captured: mode === 'index' ? attribute : undefined,
           start: range.start,
           count: range.count,
           width,
@@ -485,6 +523,102 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
     }
   };
 
+  /**
+   * 从 `entityIoJson.entities_text` 解析载图初态就应隐藏的 brush 实体。
+   *
+   * 实体层 spawn 时 `brushSetEnabled(..., applyHost=false)` 刻意不发事件，所以本应关闭的
+   * brush 载图后会保持可见，直到第一次运行期 toggle 才纠正。这里读同一份无损 KV 原文补初态；
+   * 实体下标 = 文本块顺序（与 `EntitySystem` 的装载顺序一致，见 `entity-system.ts`）。
+   */
+  const parseInitialHidden = (entityIoJson: string | undefined): number => {
+    if (!entityIoJson) return 0;
+    let entitiesText: string | undefined;
+    try {
+      const payload = JSON.parse(entityIoJson) as { entities_text?: unknown } | null;
+      if (payload && typeof payload.entities_text === 'string') entitiesText = payload.entities_text;
+    } catch {
+      return 0;
+    }
+    if (!entitiesText) return 0;
+    let found = 0;
+    let index = 0;
+    let depth = 0;
+    let blockStart = -1;
+    let inQuotes = false;
+    for (let i = 0; i < entitiesText.length; i += 1) {
+      const ch = entitiesText[i];
+      if (inQuotes) {
+        if (ch === '\\') i += 1;
+        else if (ch === '"') inQuotes = false;
+        continue;
+      }
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === '{') {
+        depth += 1;
+        if (depth === 1) blockStart = i + 1;
+      } else if (ch === '}') {
+        if (depth === 1 && blockStart >= 0) {
+          if (blockShouldStartHidden(entitiesText.slice(blockStart, i))) {
+            desiredHidden.add(index);
+            found += 1;
+          }
+          index += 1;
+        }
+        depth = Math.max(0, depth - 1);
+      }
+    }
+    return found;
+  };
+
+  /** 把「应隐藏」集合应用到已建好的实体区间（已隐藏的跳过）。 */
+  const applyDesiredHidden = (): void => {
+    for (const entityIndex of desiredHidden) {
+      const binding = bindings.get(entityIndex);
+      if (binding && !binding.hidden) setBindingHidden(binding, true);
+    }
+  };
+
+  /** 运行期 PVS 打开后 `cluster-filter` 会换 `geometry.index`；旧 slot 会写进废弃缓冲。 */
+  const hasStaleIndexBuffer = (): boolean => {
+    for (const binding of bindings.values()) {
+      for (const slot of binding.slots) {
+        if (
+          slot.kind === 'index'
+          && slot.geometry
+          && slot.captured
+          && slot.geometry.index !== slot.captured
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  /** 按当前场景根重建「实体→区间」索引，并重放应隐藏集合（PVS 换缓冲后调用）。 */
+  const refreshIndex = (): void => {
+    const keepEvent = lastEvent;
+    const keepDesired = new Set(desiredHidden);
+    const keepRoot = sceneRootRef;
+    restoreAll();
+    resetBindings();
+    lastEvent = keepEvent;
+    sceneRootRef = keepRoot;
+    desiredHidden.clear();
+    for (const entityIndex of keepDesired) desiredHidden.add(entityIndex);
+    sceneRootRef?.traverse((object) => {
+      if (!object || object.isMesh === false) return;
+      const geometry = object.geometry;
+      if (!geometry) return;
+      indexGeometry(geometry, object);
+    });
+    applyDesiredHidden();
+    runtime.log(
+      `brush 可见性索引已按 PVS 新缓冲重建：${bindings.size} 实体，重放隐藏 ${desiredHidden.size} 个`,
+    );
+  };
+
   return {
     id: 'brush-visibility',
 
@@ -492,12 +626,14 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
       // 同一场景重入（重复 onMapLoad）时先把旧隐藏恢复，再重建索引。
       restoreAll();
       resetBindings();
+      desiredHidden.clear();
       const root = context.sceneRoot as SceneRootLike | null | undefined;
       if (!root || typeof root.traverse !== 'function') {
         limitations.push('宿主未注入 sceneRoot：拿不到合并后的几何（面板状态行会显示未载图）');
         storeLimitations();
         return;
       }
+      sceneRootRef = root;
       sceneLoaded = true;
       root.traverse((object) => {
         if (!object || object.isMesh === false) return;
@@ -505,11 +641,14 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
         if (!geometry) return;
         indexGeometry(geometry, object);
       });
+      // 实体层 spawn 不发 brush 事件，这里用同一份实体文本补「载图初态」，之后事件只做增量。
+      initialHiddenCount = parseInitialHidden(context.entityIoJson);
+      applyDesiredHidden();
       storeLimitations();
       runtime.log(
         `brush 可见性索引：${bindings.size} 个实体 / ${bindingSlots} 区间 / ${bindingTriangles} 三角` +
           `（几何 ${tablesAccepted} 张：索引写 0 ${indexSlots} 区间、顶点塌缩 ${vertexSlots} 区间；` +
-          `跳过 ${tablesRejected} 张）`,
+          `跳过 ${tablesRejected} 张；初态隐藏 ${initialHiddenCount} 个）`,
       );
     },
 
@@ -521,6 +660,12 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
         return;
       }
       lastEvent = `${parsed.entityIndex}:${parsed.enabled}`;
+      const shouldHide = !parsed.enabled;
+      if (shouldHide) desiredHidden.add(parsed.entityIndex);
+      else desiredHidden.delete(parsed.entityIndex);
+      // 装载期 PVS 关闭、运行期才补建 clusterIndex 时，cluster-filter 会换掉 geometry.index，
+      // 旧 slot 会静默写进废弃缓冲。检测到就重建索引再重放（代价只在发生切换的第一帧）。
+      if (hasStaleIndexBuffer()) refreshIndex();
       const binding = bindings.get(parsed.entityIndex);
       if (!binding) {
         unresolvedEvents += 1;
@@ -529,7 +674,6 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
         }
         return;
       }
-      const shouldHide = !parsed.enabled;
       if (binding.hidden === shouldHide) return;
       setBindingHidden(binding, shouldHide);
       runtime.log(
@@ -544,8 +688,8 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
       const limit = limitations.length > 0 ? `；限制 ${limitations.length} 项` : '';
       return (
         `已隐藏 ${hiddenEntities}/${bindings.size} 实体，退化 ${hiddenTriangles} 三角/${hiddenSlots} 区间` +
-        `（索引写 0 ${hiddenIndexSlots} 区间；顶点塌缩 ${hiddenVertexSlots} 区间）；最后事件 ${last}；` +
-        `未定位 ${unresolvedEvents}${limit}`
+        `（索引写 0 ${hiddenIndexSlots} 区间；顶点塌缩 ${hiddenVertexSlots} 区间）；` +
+        `初态隐藏 ${initialHiddenCount}；最后事件 ${last}；未定位 ${unresolvedEvents}${limit}`
       );
     },
 

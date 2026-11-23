@@ -1675,6 +1675,14 @@ export class RendererMain {
     return st ? { posX: st.posX, posY: st.posY, posZ: st.posZ, yaw: st.yaw } : null;
   }
 
+  /**
+   * 合并后的渲染场景根（增强插件遍历几何用；只读，不暴露 three 具体类型）。
+   * 换图后 `session` 里的 root 会重建，所以插件每次 onMapLoad 都要重新取。
+   */
+  getSceneRoot(): unknown {
+    return this.scene;
+  }
+
   /** 设置出生点列表（[[x,y,z,yaw], ...]，spawn 下拉切换用）。 */
   setSpawnPoints(list: Array<[number, number, number, number]>): void {
     try {
