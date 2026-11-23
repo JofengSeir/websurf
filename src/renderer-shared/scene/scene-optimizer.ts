@@ -430,7 +430,12 @@ function concatSourceTables(
 /** 把表挂到几何的 userData 上（空表不挂，保持未合并几何的 userData 原样）。 */
 function attachSourceTable(geometry: THREE.BufferGeometry, table: MergeSourceTable | null): void {
   if (!table || table.ranges.length === 0) return;
-  geometry.userData[MERGE_SOURCE_TABLE_KEY] = table;
+  // why 不能原地写 `geometry.userData[key]`：three 的 `BufferGeometry.clone()` 会让克隆体与原体
+  // **共享同一个 userData 对象**（实测 `clone.userData === original.userData`）。GLTFLoader 对同模型
+  // 的多实例（如 ze_cursed 的 12 个 button.mdl）会复用几何再克隆，原地写键会让第一个实例的来源表
+  // 污染其余实例（合并后 12 个区间全被标成同一个实体）。这里改成换上新的 userData 对象，
+  // 保持其它键，避免跨实例共享污染。
+  geometry.userData = { ...geometry.userData, [MERGE_SOURCE_TABLE_KEY]: table };
 }
 
 /**
