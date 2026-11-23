@@ -68,7 +68,8 @@ fn tent(with_bevel: bool) -> Brush {
         // AABB 收到恰等脊高会让"盒底落在脊上"在宽阶段被当成无限平面假进入否决。
         min: [-X, BOTTOM, -Z],
         max: [X, H + 400.0, Z],
-    }
+    
+            entity: -1,}
 }
 
 /// 盒底从脊上方 100 HU 垂直下探到脊下方 100 HU，返回追踪结果。

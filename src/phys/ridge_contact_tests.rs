@@ -62,7 +62,8 @@ fn ridge(sin: f64, cos: f64) -> Brush {
         ],
         min: [-X, BOTTOM, -Z],
         max: [X, H + AABB_HEADROOM, Z],
-    }
+    
+            entity: -1,}
 }
 
 /// 脊线正上方垂直下探，返回追踪结果。盒底从 `H + 100` 降到 `H - 100`，必然穿脊。

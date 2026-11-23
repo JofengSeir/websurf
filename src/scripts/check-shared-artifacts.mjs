@@ -211,6 +211,9 @@ const APP_ONLY_ALLOW = {
   // 增强插件（v2/m02315）按设计只挂在 debug 端：game/viewer 不装载 host/插件，
   // 因此 flags 只进 debug app.js。若将来 game/viewer 接入同一开关体系，删除本登记。
   'src/ts-shared/enhance/flags.ts': ['debug'],
+  // brush 实体可见性（2026-11-23）：debug 端已接入（brush 开关事件 → 合并几何区间隐藏）。
+  // game 端尚未接线，接入后删除本登记、回到跨端一致性比对。
+  'src/renderer-shared/scene/brush-entity-visibility.ts': ['debug'],
 };
 
 /** viewer 不得包含的物理/权威实现（viewer 无物理是架构约定）。 */

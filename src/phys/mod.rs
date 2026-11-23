@@ -109,6 +109,10 @@ mod tri_surface_tests;
 #[cfg(test)]
 mod jump_height_tests;
 
+/// brush 实体运行期碰撞开关（`World::set_entity_solid` / `PhysWorld::set_brush_solid`）。
+#[cfg(test)]
+mod brush_solid_tests;
+
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
 use world::{Brush, LadderVolume, TriMesh, World};
@@ -125,6 +129,10 @@ pub struct PhysBrush {
     pub max: [f32; 3],
     pub is_ladder: bool,
     pub is_solid: bool,
+    /// 所属实体下标（实体枚举顺序，与 GLB extras `vbsp_entity_index` 同序）；-1 = worldspawn。
+    pub entity: i32,
+    /// 出生时是否实心（实体层 `START_OFF` / `StartDisabled` ⇒ false）。
+    pub start_solid: bool,
 }
 
 /// brush 的一个面：`normal` 为单位外法线，`dist` 为面到原点的有符号距离（HU）。
@@ -257,6 +265,20 @@ impl PhysWorld {
     ) -> Result<(), JsValue> {
         // 1. brush → World.solids/ladders
         let brushes = parse_brushes(brush_json)?;
+        // 实体 brush 的初始碰撞状态（下标 = 实体枚举下标）：先按最大实体下标开表，
+        // 再让 start_solid=false 的 brush 所属实体置 false。世界几何没有该项。
+        let max_entity = brushes
+            .iter()
+            .filter(|b| b.entity >= 0)
+            .map(|b| b.entity as usize + 1)
+            .max()
+            .unwrap_or(0);
+        self.world.entity_solid = vec![true; max_entity];
+        for b in &brushes {
+            if b.entity >= 0 && !b.start_solid {
+                self.world.entity_solid[b.entity as usize] = false;
+            }
+        }
         for b in brushes {
             let planes: Vec<world::Plane> = b
                 .planes
@@ -277,7 +299,12 @@ impl PhysWorld {
                     facing,
                 });
             } else if b.is_solid {
-                self.world.solids.push(Brush { planes, min, max });
+                self.world.solids.push(Brush {
+                    planes,
+                    min,
+                    max,
+                    entity: b.entity,
+                });
             }
         }
 
@@ -305,6 +332,7 @@ impl PhysWorld {
                         planes: piece.planes,
                         min: piece.min,
                         max: piece.max,
+                        entity: -1,
                     });
                 } else {
                     hull_non_convex += 1;
@@ -999,8 +1027,35 @@ impl PhysWorld {
         self.max_horizontal_speed = cap;
     }
 
-    /// 设置起跳高度（HU）：下一步起跳的初速按 `sqrt(2·gravity·height)` 反推。
+    /// 运行期切换某个实体 brush 的碰撞（`solid = true` 实心、`false` 可穿过）。
     ///
+    /// `entity` 是实体枚举下标（与 GLB extras `vbsp_entity_index`、实体 I/O 事件下标同序）。
+    /// 世界几何（worldspawn，`entity < 0`）不可切换，传负数直接返回 `false`。
+    /// 世界未 `build_world` 时调用无效果（状态表为空，越界按实心处理）。
+    ///
+    /// 只更新 `World::entity_solid` 状态表，不重建空间索引，下一次碰撞查询立即生效。
+    /// 返回切换前的状态（`true` = 之前实心）。消费方：TS `EntityGameplay` 把
+    /// `brush` 事件（`func_wall_toggle` / `func_door` Open/Close）落到物理与渲染两侧。
+    pub fn set_brush_solid(&mut self, entity: i32, solid: bool) -> bool {
+        if entity < 0 {
+            return false;
+        }
+        self.world.set_entity_solid(entity as usize, solid)
+    }
+
+    /// 查询某个实体 brush 当前是否实心（诊断 / 断言用）。
+    pub fn brush_solid(&self, entity: i32) -> bool {
+        if entity < 0 {
+            return true;
+        }
+        self.world
+            .entity_solid
+            .get(entity as usize)
+            .copied()
+            .unwrap_or(true)
+    }
+
+    /// 设置起跳高度（HU）：下一步起跳的初速按 `sqrt(2·gravity·height)` 反推。
     /// 默认值来自 `set_params` 的 `jump_height`（config 的 `jumpSpeed²/(2·gravity)`，
     /// debug 默认 302 HU/s / 800 → 57 HU）。用途是「跳跃增幅区」：surf_null 的
     /// `autohop_zone` 触发体积包围着一片比地面高 64 HU 的水泥台，标准 57 HU 跳不上去，
@@ -1343,6 +1398,18 @@ fn parse_brushes(json: &str) -> Result<Vec<PhysBrush>, JsValue> {
         max: [f32; 3],
         is_ladder: bool,
         is_solid: bool,
+        /// 实体枚举下标（-1 = worldspawn）。旧产物没有该字段时按 worldspawn 处理。
+        #[serde(default = "default_brush_entity")]
+        entity: i32,
+        /// 出生时是否实心。缺省 true（旧产物 = 载图即实心，行为不变）。
+        #[serde(default = "default_brush_start_solid")]
+        start_solid: bool,
+    }
+    fn default_brush_entity() -> i32 {
+        -1
+    }
+    fn default_brush_start_solid() -> bool {
+        true
     }
     let data: Vec<WasmBrush> =
         serde_json::from_str(json).map_err(|e| to_js_err(e, "brush JSON 解析"))?;
@@ -1361,6 +1428,8 @@ fn parse_brushes(json: &str) -> Result<Vec<PhysBrush>, JsValue> {
             max: b.max,
             is_ladder: b.is_ladder,
             is_solid: b.is_solid,
+            entity: b.entity,
+            start_solid: b.start_solid,
         })
         .collect())
 }

@@ -88,7 +88,12 @@ fn brush_of(vertices: &[V3], tris: &[[u32; 3]], with_bevels: bool) -> Brush {
         }
     }
     max[1] += 400.0;
-    Brush { planes, min, max }
+    Brush {
+        planes,
+        min,
+        max,
+        entity: -1,
+    }
 }
 
 /// 盒从脊上方 200 HU 垂直下探到脊下方 200 HU（`crest` = 盒正下方脊线的高度）。

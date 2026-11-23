@@ -273,6 +273,24 @@ function refreshEnhanceStatusLines(): void {
 			: '运行时屏幕渐变：未启用（默认关闭）';
 	}
 }
+
+/**
+ * 动态 brush 可见性的「几何所有者」只能有一个：
+ * - 插件 brush-visibility 启用时由插件隐藏/恢复合并几何（主渲染器让位）；
+ * - 插件关闭后主渲染器按 `EntityGameplay` 已生效的实心状态重放并接管。
+ *
+ * 两套 `BrushEntityVisibility` 同时改同一批顶点时，恢复顺序会把对方的恢复覆盖掉，
+ * 表现为「Enable 后几何仍然隐藏」（2026-11-23 recheck 复测），所以这里做交接。
+ */
+let brushVisibilityPluginActive = false;
+function syncBrushVisibilityOwner(): void {
+	const active =
+		enhanceHost?.status().some((item) => item.id === 'brush-visibility' && item.enabled && item.loaded) ?? false;
+	if (active === brushVisibilityPluginActive) return;
+	brushVisibilityPluginActive = active;
+	rendererMain?.setBrushVisibilityDeferred(active);
+	if (!active) rendererMain?.resyncBrushVisibility();
+}
 /** config 段同步实例（P5）：AppRuntime 就绪后构造；sendConfig + renderer.applyConfigPatch 走适配器。 */
 let configSync: ConfigSync<RuntimeConfig> | null = null;
 let sceneReady = false;
@@ -427,7 +445,11 @@ async function main(): Promise<void> {
 				if (rendererMain) rendererMain.onEntityEvent = handler;
 			},
 			// 插件自报状态变化（含 brush 事件后的「已隐藏实体数/最后事件」）→ 刷新面板两行。
-			onStatusChanged: () => refreshEnhanceStatusLines(),
+			// 同时同步 brush 可见性所有者：插件接管/交还主渲染器，避免两套实例互相覆盖。
+			onStatusChanged: () => {
+				refreshEnhanceStatusLines();
+				syncBrushVisibilityOwner();
+			},
 		},
 	);
 	enhanceHost.installConsoleApi();

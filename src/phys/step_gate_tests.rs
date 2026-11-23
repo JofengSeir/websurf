@@ -44,7 +44,8 @@ fn low_ground() -> Brush {
         ],
         min: [-2000.0, -400.0, LEDGE_Z],
         max: [2000.0, 0.0, 400.0],
-    }
+    
+            entity: -1,}
 }
 
 /// 平台：顶面 y = STEP_UP，从 LEDGE_Z 往 -z 铺开。**它上方空旷**——这是本夹具的关键。
@@ -60,7 +61,8 @@ fn ledge() -> Brush {
         ],
         min: [-2000.0, 0.0, -2000.0],
         max: [2000.0, STEP_UP, LEDGE_Z],
-    }
+    
+            entity: -1,}
 }
 
 fn two_level_world() -> World {

@@ -65,6 +65,7 @@ import { buildDebugPredictionParams } from '../physics/prediction-params.js';
 import { PlaneInspector } from './plane-inspector.js';
 import type { LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
+import { BrushEntityVisibility } from '../../../../src/renderer-shared/scene/brush-entity-visibility.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」
@@ -170,6 +171,14 @@ function readLocalDebugFlag(key: string, fallback: boolean): boolean {
 export class RendererMain {
   /** 三端唯一渲染会话（`init` 建）：renderer/scene/camera 与所有共享渲染步骤都在里面。 */
   private session: RenderSession | null = null;
+  /** 合并几何上的实体级可见性（`func_brush`/门开关时隐藏/恢复区间；与 game 共用共享模块）。 */
+  private brushVisibility: BrushEntityVisibility | null = null;
+  /**
+   * 动态 brush 可见性是否由增强插件（brush-visibility）独占管理。
+   * 插件启用时它自己隐藏/恢复几何；主渲染器同时做会让同一区间被两套实例各自
+   * 塌缩/恢复，恢复顺序一乱就出现「Enable 后仍然隐藏」（2026-11-23 复测）。
+   */
+  private brushVisibilityDeferred = false;
   /** 会话字段的本地别名（物理/可视化/探针既有读点；只读，不另建实例）。 */
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
@@ -730,6 +739,8 @@ export class RendererMain {
     this.gameplay = null;
     // 渲染资源（根/天空/环境/渲染列表/PVS/可见性/粒子/激光）全部由共享会话释放
     this.session?.disposeScene();
+    this.brushVisibility?.dispose();
+    this.brushVisibility = null;
     this.bspModelScene = null;
 
     // 子管理器与本地引用清零
@@ -838,6 +849,11 @@ export class RendererMain {
 
     this.needsRender = true;
     this.onSceneLoaded?.(result.bbox.min.y);
+    // 实体级可见性：必须在 `setupGameplay()` 之前建（实体装载期 logic_auto 等事件可能
+    // 立刻触发 brush 开关），否则首批事件会被判「未定位」丢掉。
+    this.brushVisibility?.dispose();
+    this.brushVisibility = new BrushEntityVisibility();
+    this.brushVisibility.build(this.getSceneRoot());
     // 实体副作用宿主（实体 I/O → 物理线 + 权威 Worker）。渲染侧的粒子/激光已在
     // `session.loadScene()` 内部装配并进了载图期预热帧，这里不再手动 update/预热。
     this.setupGameplay(data.entityIoJson);
@@ -870,6 +886,13 @@ export class RendererMain {
       onJumpHeightChange: (height) => this.onJumpHeightChange?.(height),
       onPlayerNameChange: (name) => this.onPlayerNameChange?.(name),
       onMapPhysicsParam: (name, value) => this.onMapPhysicsParam?.(name, value),
+      // brush 实体开关 → 合并几何区间隐藏（`solid=false` ⇒ 隐藏；与物理侧 set_brush_solid
+      // 同期生效）。只影响渲染，不改碰撞语义（碰撞已由 EntityGameplay 落到物理线）。
+      // 插件启用时让位：两套 BrushEntityVisibility 同时改同一批顶点，恢复会互相覆盖。
+      onBrushSolidChange: (entity, solid) => {
+        if (this.brushVisibilityDeferred) return;
+        this.brushVisibility?.setEntityHidden(entity, !solid);
+      },
     });
     this.gameplay.load(entityIoJson);
     // 实体装配完成后把带体积的 trigger（加速板等）送进碰撞可视化；换图时会被下次装配覆盖。
@@ -899,6 +922,25 @@ export class RendererMain {
   /** 实体运行期统计（实体浏览器 / 诊断面板）；未装配返回 null。 */
   entityStats(): EntitySystemStats | null {
     return this.gameplay?.entityStats() ?? null;
+  }
+
+  /**
+   * 动态 brush 可见性是否改由增强插件（`brush-visibility`）独占管理。
+   * 插件启用时传 true：主渲染器不再对 brush 事件改动几何；关闭时传 false 并调用
+   * `resyncBrushVisibility()` 按当前实心状态接管，避免插件实例与主实例互相覆盖恢复。
+   */
+  setBrushVisibilityDeferred(deferred: boolean): void {
+    this.brushVisibilityDeferred = deferred;
+  }
+
+  /**
+   * 按实体 I/O 已生效的 brush 实心状态重放一遍几何可见性。
+   * 用于「插件接管 → 交还主渲染器」时，把插件期间隐藏/恢复过的区间对齐到物理状态。
+   */
+  resyncBrushVisibility(): void {
+    this.gameplay?.forEachBrushSolid((entity, solid) => {
+      this.brushVisibility?.setEntityHidden(entity, !solid);
+    });
   }
 
   /** 启动渲染循环（幂等：已在运行时直接返回）。 */

@@ -220,6 +220,7 @@ pub fn mesh_to_brushes(mesh: &TriMesh) -> (Vec<Brush>, Vec<[u32; 3]>, usize) {
                 planes: p.planes,
                 min: p.min,
                 max: p.max,
+                entity: -1,
             });
         } else {
             non_convex += 1;

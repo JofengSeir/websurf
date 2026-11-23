@@ -77,6 +77,13 @@ pub struct Brush {
     pub planes: Vec<Plane>,
     pub min: V3,
     pub max: V3,
+    /// 所属实体下标（实体枚举顺序，与 wasm 导出的 `vbsp_entity_index` 一致）；
+    /// `-1` = worldspawn 或无实体归属（世界几何，恒实心）。
+    ///
+    /// 运行期碰撞开关按这个下标查 [`World::entity_solid`]：`func_wall_toggle` /
+    /// `func_door` 等实体 brush 可能在出生时是「关」的（`start_solid=false`），
+    /// 之后由实体 I/O 切换。减面/抗锯齿不影响判定，它只做候选过滤。
+    pub entity: i32,
 }
 
 /// 梯子 brush：几何与 `Brush` 同构（`planes` 朝外 + AABB），额外带一个可攀爬面朝向
@@ -1100,6 +1107,13 @@ pub struct World {
     pub solids: Vec<Brush>,
     pub ladders: Vec<LadderVolume>,
     pub tri_meshes: Vec<TriMesh>,
+    /// 实体 brush 的当前碰撞状态（下标 = 实体枚举下标的 `Brush::entity`）。
+    ///
+    /// **权威状态**：`true` = 实心，参与碰撞；缺省/越界按实心处理（保守）。由
+    /// `PhysWorld::build_world` 按 `start_solid` 初值填，运行期经
+    /// [`World::set_entity_solid`] 切换。`solids` 与空间索引始终保留全部 brush，
+    /// 查询时按这张表过滤——切换不需要重建索引，也不移动砍掉的几何。
+    pub entity_solid: Vec<bool>,
     grid: BrushGrid,
     tri_grid: TriangleGrid,
 }
@@ -1135,6 +1149,18 @@ pub struct CollideAttrib {
     pub first_tri: Option<TriHit>,
 }
 
+/// brush 当前是否参与碰撞：世界几何（`entity < 0`）恒实心；实体 brush 查
+/// [`World::entity_solid`]，越界/未登记按实心（保守：宁可挡人也不让玩家穿墙）。
+fn brush_is_active(brush: &Brush, entity_solid: &[bool]) -> bool {
+    if brush.entity < 0 {
+        return true;
+    }
+    entity_solid
+        .get(brush.entity as usize)
+        .copied()
+        .unwrap_or(true)
+}
+
 impl World {
     /// 空世界：三份数据为空、两套索引为空。索引要用 `World::build_index` 才建起来。
     pub fn new() -> Self {
@@ -1142,6 +1168,7 @@ impl World {
             solids: Vec::new(),
             ladders: Vec::new(),
             tri_meshes: Vec::new(),
+            entity_solid: Vec::new(),
             grid: BrushGrid::new(),
             tri_grid: TriangleGrid::new(),
         }
@@ -1159,6 +1186,24 @@ impl World {
         if !self.tri_meshes.is_empty() {
             self.tri_grid.build(&self.tri_meshes, 256.0);
         }
+    }
+
+    /// 运行期切换某个实体 brush 的碰撞：`solid = true` 实心、`false` 可穿过。
+    ///
+    /// 参数 `entity` 是实体枚举下标（与 `Brush::entity`、GLB extras
+    /// `vbsp_entity_index`、实体 I/O 事件里的下标同序）。越界时状态表按需扩容；
+    /// 返回切换前的值（未登记/越界按实心 `true`）。
+    ///
+    /// 只改 [`World::entity_solid`]，不动 `solids` / 空间索引，所以**不需要重建索引**，
+    /// 下一次 `trace` / `is_position_free` 立即生效。世界几何（`entity < 0`）不可切换。
+    /// 消费方：`PhysWorld::set_brush_solid`（wasm 导出）← TS `EntityGameplay` 收 brush 事件后调用。
+    pub fn set_entity_solid(&mut self, entity: usize, solid: bool) -> bool {
+        if self.entity_solid.len() <= entity {
+            self.entity_solid.resize(entity + 1, true);
+        }
+        let previous = self.entity_solid[entity];
+        self.entity_solid[entity] = solid;
+        previous
     }
 
     /// 扫掠盒追踪：brush 与三角网格两条线各取候选，返回更早的那次命中。
@@ -1184,9 +1229,12 @@ impl World {
             start[2].max(end[2]) + maxs[2] + pad,
         ];
 
-        // brush 候选：网格给出的是超集，命中判定在 trace_box 里
+        // brush 候选：网格给出的是超集，命中判定在 trace_box 里；
+        // 先按实体碰撞状态过滤（出生即关/被 I/O 关掉的 brush 不参与）。
         let mut candidates: Vec<&Brush> = Vec::new();
         self.grid.query_refs(&s_min, &s_max, &mut candidates);
+        let entity_solid = &self.entity_solid;
+        candidates.retain(|b| brush_is_active(b, entity_solid));
         let brush_result = trace_box(start, end, mins, maxs, &candidates[..]);
 
         // 三角网格同理；只有更早（严格小于）才覆盖 brush 结果
@@ -1224,6 +1272,8 @@ impl World {
 
         let mut candidates: Vec<&Brush> = Vec::new();
         self.grid.query_refs(&q_min, &q_max, &mut candidates);
+        let entity_solid = &self.entity_solid;
+        candidates.retain(|b| brush_is_active(b, entity_solid));
         let tr = trace_box(origin, origin, mins, maxs, &candidates[..]);
         if tr.start_solid {
             return false;
@@ -1265,8 +1315,11 @@ impl World {
 
         let mut candidates: Vec<&Brush> = Vec::new();
         self.grid.query_refs(&q_min, &q_max, &mut candidates);
+        let entity_solid = &self.entity_solid;
         for b in candidates {
-            if trace_box(origin, origin, mins, maxs, &[b]).start_solid {
+            if brush_is_active(b, entity_solid)
+                && trace_box(origin, origin, mins, maxs, &[b]).start_solid
+            {
                 out.brush_hits += 1;
                 if out.first_brush_aabb.is_none() {
                     out.first_brush_aabb = Some((b.min, b.max));

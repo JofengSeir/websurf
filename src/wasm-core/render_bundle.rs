@@ -654,6 +654,91 @@ pub fn brush_model_indices(bsp: &vbsp::Bsp) -> Vec<Option<usize>> {
     map
 }
 
+/// 模型下标 → 实体下标（`model="*N"` 实体的枚举顺序下标）；worldspawn 与未被引用的 model 为 None。
+/// 重复引用同一模型时取**首个**实体（与 `model_classnames` 同口径）。
+///
+/// 实体下标 = `Entities::iter()` 的枚举顺序，与 `export_entity_io` / GLB extras 的
+/// `vbsp_entity_index` 及 TS 实体系统同序；brush 实体的运行期碰撞开关按这个下标定位。
+pub fn model_entity_indices(bsp: &vbsp::Bsp) -> Vec<Option<usize>> {
+    let mut map: Vec<Option<usize>> = vec![None; bsp.models.len()];
+    for (entity_index, ent) in bsp.entities.iter().enumerate() {
+        let Ok(model_raw) = ent.prop("model") else {
+            continue;
+        };
+        if !model_raw.starts_with('*') {
+            continue;
+        }
+        let Ok(mi) = model_raw[1..].parse::<usize>() else {
+            continue;
+        };
+        if mi == 0 || mi >= map.len() || map[mi].is_some() {
+            continue; // 跳过 worldspawn 与重复引用（首个实体优先）
+        }
+        map[mi] = Some(entity_index);
+    }
+    map
+}
+
+/// brush 下标 → 所属实体下标（`-1` = worldspawn 或无实体归属）。
+///
+/// 物理侧拿它与 [`entity_start_solid`] 一起决定「出生时这块 brush 是否实心」，并在运行期按
+/// 实体下标开关碰撞（`PhysWorld::set_brush_solid`）。世界几何（worldspawn）恒为实心。
+pub fn brush_entity_indices(bsp: &vbsp::Bsp) -> Vec<i32> {
+    let brush_models = brush_model_indices(bsp);
+    let model_entities = model_entity_indices(bsp);
+    brush_models
+        .iter()
+        .map(|model| match model {
+            Some(mi) => model_entities
+                .get(*mi)
+                .copied()
+                .flatten()
+                .map(|e| e as i32)
+                .unwrap_or(-1),
+            None => -1,
+        })
+        .collect()
+}
+
+/// 每个实体**出生时**是否实心（`true` = 实心；非 brush 类恒 `true`，仅 brush 类有意义）。
+///
+/// 与 TS 实体层 `src/ts-shared/entity/classes/brush.ts` 的 spawn 语义对齐：
+/// - `func_wall_toggle`：spawnflags bit0 = `START_OFF` ⇒ 出生即「关」，应不可穿过；
+/// - `func_brush`：`StartDisabled != 0` ⇒ 出生即关；
+/// - 其余 brush 类（`func_door` / `func_movelinear` / `func_rotating` …）出生即实心。
+///
+/// 消费方是 brush JSON 导出：初始关的实体 brush 带上 `start_solid=false`，物理世界建好后
+/// 这些碰撞体不参与查询——修复「实体层判关、物理层仍当实心墙」（ze_cursed 的 `lvl3_wt03`
+/// 横在购买区出口，玩家出不去）。
+pub fn entity_start_solid(bsp: &vbsp::Bsp) -> Vec<bool> {
+    let mut out = Vec::new();
+    for ent in bsp.entities.iter() {
+        let Ok(classname) = ent.prop("classname") else {
+            out.push(true);
+            continue;
+        };
+        // Source 的 spawnflags 是十进制整数串；StartDisabled 可能是 0/1 或空串。
+        let parse_int = |value: &str| value.trim().parse::<i64>().ok();
+        let solid = match classname {
+            "func_wall_toggle" => {
+                let flags = ent.prop("spawnflags").ok().and_then(parse_int).unwrap_or(0);
+                flags & 1 == 0
+            }
+            "func_brush" => {
+                let disabled = ent
+                    .prop("startdisabled")
+                    .ok()
+                    .and_then(parse_int)
+                    .unwrap_or(0);
+                disabled == 0
+            }
+            _ => true,
+        };
+        out.push(solid);
+    }
+    out
+}
+
 /// 确定每个 brush 应平移的模型 origin（Z-up 世界坐标）。
 ///
 /// 实体模型的 brush 几何以局部坐标存储（相对实体 origin），而 `dmodel_t.origin` 字段在本工具链的

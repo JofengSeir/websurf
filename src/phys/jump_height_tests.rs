@@ -26,7 +26,8 @@ fn floor() -> Brush {
         ],
         min: [-2000.0, -1000.0, -2000.0],
         max: [2000.0, 0.0, 2000.0],
-    }
+    
+            entity: -1,}
 }
 
 fn world_with_floor() -> World {

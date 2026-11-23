@@ -10,9 +10,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use websurf_wasm_core::{bsp_to_gltf_core, model_integrator, pakfile_models, phyfile, vbsp};
 use websurf_wasm_core::render_bundle::{
-    aabb_volume, brush_model_indices, build_brush_model_origins, build_vmt_stem_index,
-    collect_light_entities, collect_pakfile_models_bundle, entity_is_non_solid, load_vmdl,
-    model_classnames, resolve_pakfile_materials, ColliderFilter, PakfileModels, VhvLog,
+    aabb_volume, brush_entity_indices, brush_model_indices, build_brush_model_origins,
+    build_vmt_stem_index, collect_light_entities, collect_pakfile_models_bundle,
+    entity_is_non_solid, entity_start_solid, load_vmdl, model_classnames,
+    resolve_pakfile_materials, ColliderFilter, PakfileModels, VhvLog,
 };
 use model_integrator::{ExportOptions, InMemoryModel, InMemoryResources, ModelIntegrator};
 
@@ -139,6 +140,11 @@ impl BspProcessor {
                 max: [f32; 3],
                 is_ladder: bool,
                 is_solid: bool,
+                /// 所属实体下标（`-1` = worldspawn / 无实体归属）。运行期碰撞开关按这个下标定位。
+                entity: i32,
+                /// 出生时是否实心。`false`（实体层出生即关，如 `func_wall_toggle` START_OFF）时
+                /// 物理世界建好后该 brush 不参与碰撞，运行期由实体 I/O 开关切回。
+                start_solid: bool,
             }
 
             // 三平面求交（Cramer 法则）— 用于计算 brush AABB
@@ -254,6 +260,11 @@ impl BspProcessor {
             // 否则玩家会在触发区域踩到透明空气墙（用户实测）。
             let brush_models = brush_model_indices(bsp);
             let model_classes = model_classnames(bsp);
+            // 运行期碰撞开关：brush → 所属实体下标（-1=worldspawn），实体 → 出生时是否实心。
+            // 初始关的实体 brush（func_wall_toggle START_OFF / func_brush StartDisabled）
+            // 导出 `start_solid=false`，物理侧建世界后这些碰撞体不参与查询。
+            let brush_entities = brush_entity_indices(bsp);
+            let entity_solid = entity_start_solid(bsp);
 
             for (brush_idx, brush) in bsp.brushes.iter().enumerate() {
                 if brushes_out.len() >= MAX_BRUSHES {
@@ -471,6 +482,21 @@ impl BspProcessor {
                     max,
                     is_ladder,
                     is_solid,
+                    // -1 = worldspawn/无实体归属；越界同样按无归属处理。
+                    entity: brush_entities.get(brush_idx).copied().unwrap_or(-1),
+                    // 实体层出生即关（如 func_wall_toggle START_OFF）⇒ 初始不参与碰撞。
+                    // 无实体归属（worldspawn）恒实心。
+                    start_solid: {
+                        let entity = brush_entities.get(brush_idx).copied().unwrap_or(-1);
+                        if entity >= 0 {
+                            entity_solid
+                                .get(entity as usize)
+                                .copied()
+                                .unwrap_or(true)
+                        } else {
+                            true
+                        }
+                    },
                 });
             }
 

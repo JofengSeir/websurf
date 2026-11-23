@@ -49,6 +49,14 @@ export interface GameplayPhysLike {
   /** 通用参数写入（地图 `servercommand` 映射出的 `sv_airaccelerate` 等；JSON 是
    * `set_params` 的 snake_case patch）。 */
   set_params?(json: string): void;
+  /**
+   * 运行期切换实体 brush 的碰撞（`func_wall_toggle` / `func_door` 的 Open/Close）。
+   * `entity` 是实体枚举下标（与实体 I/O 事件下标同序，Rust 侧 `WasmBrush.entity`）。
+   * 返回切换前的状态。物理实现缺失时静默跳过（game 端旧 wasm 兼容）。
+   */
+  set_brush_solid?(entity: number, solid: boolean): boolean;
+  /** 查询实体 brush 当前是否实心（诊断/重放用；实现缺失时视为实心）。 */
+  brush_solid?(entity: number): boolean;
 }
 
 /** 带体积的 trigger（可视化 / 调试用）；与 debug `ColliderDebug` 的 `EntityTriggerBoxView` 同形。 */
@@ -83,6 +91,11 @@ export interface EntityGameplayOptions {
   onPlayerNameChange?: (name: string) => void;
   /** 地图 `servercommand` 映射出的物理参数（`name` 是物理面板参数名）。 */
   onMapPhysicsParam?: (name: string, value: number | boolean) => void;
+  /**
+   * 实体 brush 碰撞状态变化（`func_wall_toggle` / `func_door` 开关）。
+   * 调试端用它同步几何可见性；game 端可忽略（纯视觉）。
+   */
+  onBrushSolidChange?: (entity: number, solid: boolean) => void;
 }
 
 /** 浮点比较阈值：跳高目标值只在跨过 1e-6 时下发。 */
@@ -99,6 +112,16 @@ function parseVelocityDetail(detail: string | undefined): [number, number, numbe
   } catch {
     return null;
   }
+}
+
+/** 解析实体层 `brush` 事件载荷 `<entityIndex>:<true|false>`（true = 实心）。 */
+function parseBrushSolidDetail(detail: string | undefined): { entity: number; solid: boolean } | null {
+  if (!detail) return null;
+  const m = /^(-?\d+):(true|false)$/.exec(detail);
+  if (!m) return null;
+  const entity = Number.parseInt(m[1], 10);
+  if (!Number.isInteger(entity) || entity < 0) return null;
+  return { entity, solid: m[2] === 'true' };
 }
 
 /**
@@ -139,6 +162,12 @@ export class EntityGameplay {
   /** 已镜像给权威侧的玩家名与 filter 开关（`null` = 还没同步过）。 */
   private playerNamePushed: string | null = null;
   private teleportFilterPushed: boolean | null = null;
+  /**
+   * 实体 brush 的实心状态镜像（`entity → solid`）：只记录**运行期变化过**的实体。
+   * 出生态由 Rust 侧 `start_solid` 决定（实体层 spawn 时 `applyHost=false` 不发事件），
+   * 这里只负责「物理实例晚于事件建立」时把已发生的开关重放上去。
+   */
+  private brushSolid = new Map<number, boolean>();
 
   constructor(options: EntityGameplayOptions) {
     this.options = options;
@@ -222,6 +251,8 @@ export class EntityGameplay {
     this.jumpHeight = null;
     // 换图后地图 `sv_maxvelocity` 会重新下发；这里只清地图值，用户设置项（userSpeedCap）保留。
     this.mapSpeedCap = null;
+    // 换图后实体下标空间与 Rust brush 初态都是新的：清掉上一张图的运行期开关镜像。
+    this.brushSolid.clear();
     // 立即按「地图值 ∩ 用户值」重放一次生效限速（地图值若在实体装配期已由
     // `servercommand sv_maxvelocity` 写入，则这里直接取两者较小者）。不能只存不发：
     // 面板默认用户限速（5000）若不下发，Rust 侧会退回自己的兜底默认，面板值与权威实际
@@ -244,6 +275,11 @@ export class EntityGameplay {
         this.pushSpeedCapToPhys();
         this.playerNamePushed = null;
         this.teleportFilterPushed = null;
+        // brush 开关镜像重放：`load()` 时物理实例还不存在（见 loadScene →
+        // buildPredictionWorld 顺序），期间发生的 `func_wall_toggle` / 门事件要补到新世界。
+        for (const [entity, solid] of this.brushSolid) {
+          phys.set_brush_solid?.(entity, solid);
+        }
       }
     }
     const st = this.options.getPlayerState();
@@ -266,6 +302,19 @@ export class EntityGameplay {
     return this.triggerBoxes;
   }
 
+  /** 实体 brush 当前实心状态（运行期改过的才有记录；出生态由 Rust 决定）。 */
+  brushSolidOf(entity: number): boolean | undefined {
+    return this.brushSolid.get(entity);
+  }
+
+  /**
+   * 遍历运行期改过实心状态的实体 brush（entity → 当前是否实心）。
+   * 渲染侧在「可见性管理权交接」时用它重放几何隐藏/恢复，避免与插件实例状态错位。
+   */
+  forEachBrushSolid(callback: (entity: number, solid: boolean) => void): void {
+    for (const [entity, solid] of this.brushSolid) callback(entity, solid);
+  }
+
   /** 卸载：释放实体系统并清空缓存。 */
   dispose(): void {
     this.entitySystem?.dispose();
@@ -278,6 +327,7 @@ export class EntityGameplay {
     this.physRef = null;
     this.playerNamePushed = null;
     this.teleportFilterPushed = null;
+    this.brushSolid.clear();
   }
 
   // ── 事件 → 物理/权威 ────────────────────────────────────────────
@@ -303,6 +353,16 @@ export class EntityGameplay {
       // 两端单源默认值兜底（见 `PhysWorld::max_horizontal_speed` 与
       // `PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed`）。
       this.applyServerCommand(event.detail ?? '');
+    } else if (event.kind === 'brush') {
+      // 实体层 brush 开关（`func_wall_toggle` Toggle、`func_door` 开门/关门）：
+      // 落到物理线对应实体 brush 的碰撞开关；物理实例未就绪时先记镜像，建立后重放。
+      // 渲染几何不在这一步处理（可见性/动画由宿主另接，见 `onBrushSolidChange`）。
+      const brush = parseBrushSolidDetail(event.detail);
+      if (brush) {
+        this.brushSolid.set(brush.entity, brush.solid);
+        this.options.getPhys()?.set_brush_solid?.(brush.entity, brush.solid);
+        this.options.onBrushSolidChange?.(brush.entity, brush.solid);
+      }
     }
     this.options.onEntityEvent?.(event);
   }
