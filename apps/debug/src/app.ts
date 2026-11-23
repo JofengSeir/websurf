@@ -1336,6 +1336,15 @@ function bindInput(canvas: HTMLCanvasElement): void {
 	// 键盘绑定 window（canvas 无 tabindex 无法获焦，绑定 canvas 则 keydown/keyup 永不触发）
 	keyboard.bind(window);
 
+	// +use：F 键（按住不重复触发）。与 WASD 同口径，只在 Pointer Lock 锁定时生效；
+	// 选靶由渲染器按相机视线完成，按钮/门走地图既有实体 I/O（不再单独加掩码位）。
+	window.addEventListener('keydown', (event) => {
+		if (event.code !== 'KeyF' || event.repeat || !pointerLock.isLocked()) return;
+		const target = event.target as Element | null;
+		if (target && typeof target.closest === 'function' && target.closest('input, textarea, select')) return;
+		rendererMain?.usePressed();
+	});
+
 	// 鼠标移动：主线程渲染物理输入（灵敏度在此乘入；渲染 tick 同写 SAB 权威端）
 	window.addEventListener('mousemove', (e) => {
 		if (!pointerLock.isLocked()) return;
@@ -1382,7 +1391,7 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		// 清主线程渲染物理残留输入（防 ESC 前最后输入/按住键残留）
 		rendererMain?.clearPendingInput();
 		if (locked) {
-			setStatus('Pointer Lock 已锁定。WASD 移动，鼠标视角，ESC 退出。', '');
+			setStatus('Pointer Lock 已锁定。WASD 移动，鼠标视角，F 使用，ESC 退出。', '');
 		} else {
 			setStatus('Pointer Lock 已解锁。点击画布重新锁定。', '');
 		}

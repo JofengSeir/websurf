@@ -81,6 +81,8 @@ export class RendererMain {
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
+  /** `usePressed` 的复用前向向量（每帧 +use 不分配新对象）。 */
+  private readonly _useDir = new THREE.Vector3();
   /** 运行时配置（`init` 注入）：纹理画质、FOV 等端内配置。 */
   private config!: RuntimeConfig;
 
@@ -405,6 +407,21 @@ export class RendererMain {
     if (!system) return 0;
     const value = parameter === undefined ? Variant.void() : Variant.fromString(parameter);
     return system.acceptInputOn(target, inputName, value);
+  }
+
+  /**
+   * 玩家 `+use`（F 键）：从相机视线找 `reach` 内最近的可交互实体并触发。
+   *
+   * 眼位用相机位置、前向用相机朝向；实体层按 brush 体积选靶（`func_button` /
+   * `func_door` 等），按钮压制与门的开合走既有实体 `Use` 与输出链。
+   * 返回触发的实体数（0 = 视线内没有可交互物 / 实体系统未就绪）。
+   */
+  usePressed(reach = 80): number {
+    if (!this.camera || !this.gameplay) return 0;
+    this._useDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const eye: [number, number, number] = [this.camera.position.x, this.camera.position.y, this.camera.position.z];
+    const dir: [number, number, number] = [this._useDir.x, this._useDir.y, this._useDir.z];
+    return this.gameplay.useFromView(eye, dir, reach);
   }
 
   /** 贴图画质切换：算法与状态在共享会话，本端只转发。 */

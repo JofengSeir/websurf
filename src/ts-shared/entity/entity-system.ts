@@ -33,6 +33,36 @@ import { globalStates, mapLoad, type MapLoadType } from './classes/logic.js';
 
 const TOUCH_EPS = 1e-4;
 
+/**
+ * 归一化射线与 AABB 的最近正向交点距离（slab 法）；未命中或超出 `maxDist` 返回 null。
+ *
+ * 起终点都在盒内时返回 0（0 距离“命中”），供 `useFromView` 处理贴脸按按钮的情况。
+ */
+function rayAabbHit(origin: Vec3, dir: Vec3, mins: Vec3, maxs: Vec3, maxDist: number): number | null {
+  let tmin = 0;
+  let tmax = maxDist;
+  for (let axis = 0; axis < 3; axis++) {
+    const o = origin[axis];
+    const d = dir[axis];
+    if (Math.abs(d) < 1e-9) {
+      // 平行于该轴：起点不在 slab 内则永不相交。
+      if (o < mins[axis] || o > maxs[axis]) return null;
+      continue;
+    }
+    let t1 = (mins[axis] - o) / d;
+    let t2 = (maxs[axis] - o) / d;
+    if (t1 > t2) {
+      const tmp = t1;
+      t1 = t2;
+      t2 = tmp;
+    }
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return null;
+  }
+  return tmin;
+}
+
 export interface EntitySystemOptions {
   host: EntityHost;
   /** 未建模实体的 `On*` 键是否动态注册输出（默认 true，宿主扩展）。 */
@@ -368,6 +398,40 @@ export class EntitySystem implements EntityRuntime {
       count++;
     }
     return count;
+  }
+
+  /**
+   * 玩家 `+use`：从视线（眼睛位置 + 方向）选最近的可交互实体并调 `CBaseEntity::Use`。
+   *
+   * Source 的 `CBasePlayer::FindUseEntity` 用 64 HU 盒状扫掠 + `UseAngles`；本层实体体积
+   * 是 Rust `export_entity_io` 导出的 brush 凸包，这里用「射线-AABB 求交 + reach 限距」近似：
+   * 在类链实现了 `use` 的实体内取最近命中（`func_button` / `func_door` / `func_rot_button`…），
+   * 精确的 UseAngles / 遮挡遮挡不在本次范围。
+   *
+   * @returns 触发的实体数（0 = 视线内没有可交互物）。
+   */
+  useFromView(eye: Vec3, dir: Vec3, reach = 80): number {
+    this.bindGlobals();
+    const len = Math.hypot(dir[0], dir[1], dir[2]);
+    if (!Number.isFinite(len) || len < 1e-6) return 0;
+    const d: Vec3 = [dir[0] / len, dir[1] / len, dir[2] / len];
+    let best: Entity | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (const entity of this.entList.entities) {
+      if (entity === this.playerEntity || entity.disabled) continue;
+      // 只有真的实现了 Use 的类才值得选靶（否则会“点到空气”把最近的实体吞掉）。
+      if (!entity.classChain.some((cls) => typeof cls.use === 'function')) continue;
+      for (const brush of entity.volumes) {
+        const hit = rayAabbHit(eye, d, brush.mins, brush.maxs, reach);
+        if (hit !== null && hit < bestDist) {
+          bestDist = hit;
+          best = entity;
+        }
+      }
+    }
+    if (!best) return 0;
+    best.use(this.playerEntity, this.playerEntity, 0);
+    return 1;
   }
 
   /** 玩家 `+use`：直接调 `CBaseEntity::Use`，不经 AcceptInput。 */

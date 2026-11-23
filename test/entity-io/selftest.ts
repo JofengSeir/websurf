@@ -294,6 +294,36 @@ check('A13b math_counter：SetValue 触发 OnGetValue，SetValueNoFire 不触发
   sys.dispose();
 });
 
+check('A13c +use：视线射线选最近可交互 brush 并触发 Use', () => {
+  // FindUseEntity 的简化版：实体体积来自 Rust export_entity_io（brush AABB），
+  // 从眼睛沿视线取 reach 内最近、且类链实现了 Use 的实体。按 F 键时走这条路径。
+  const blocks = [
+    block('func_button', [['targetname', 'near_btn']]),
+    block('func_button', [['targetname', 'far_btn']]),
+    // 非交互实体即使更近也不能被选中（classChain 无 use）。
+    block('func_wall', [['targetname', 'wall']]),
+  ];
+  const parsed = parseEntityBlocks(blocks.join('\n'));
+  const indexOf = (name: string): number =>
+    parsed.findIndex((p) => p.some((kv) => kv.key.toLowerCase() === 'targetname' && kv.value === name));
+  const volumes: EntityVolume[] = [
+    { index: indexOf('near_btn'), model: '*1', origin: [0, 0, 0], brushes: [box([64, -8, -8], [80, 8, 8])] },
+    { index: indexOf('far_btn'), model: '*2', origin: [0, 0, 0], brushes: [box([96, -8, -8], [112, 8, 8])] },
+    { index: indexOf('wall'), model: '*3', origin: [0, 0, 0], brushes: [box([16, -8, -8], [32, 8, 8])] },
+  ];
+  const { sys } = fixture(blocks, {}, volumes);
+  const eye: Vec3 = [0, 0, 0];
+  eq(sys.useFromView(eye, [1, 0, 0], 160), 1, '视线内触发一个实体');
+  const near = sys.getEntity(indexOf('near_btn'))!;
+  const far = sys.getEntity(indexOf('far_btn'))!;
+  assert(near.getNumber('toggleState', 0) !== 0, '最近按钮被按下');
+  eq(far.getNumber('toggleState', 0), 0, '更远的按钮未被误触');
+  eq(sys.useFromView(eye, [-1, 0, 0], 160), 0, '背对不触发');
+  eq(sys.useFromView(eye, [1, 0, 0], 50), 0, '超过 reach 不触发');
+  eq(sys.useFromView(eye, [0, 1, 0], 160), 0, '偏离视线不触发');
+  sys.dispose();
+});
+
 check('A14 logic_case：InValue 只触发第一个匹配 CaseNN', () => {
   const { sys, host } = fixture([
     block('logic_case', [

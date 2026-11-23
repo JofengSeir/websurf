@@ -305,6 +305,15 @@ function bindInput(): void {
   if (!dom.canvas) return;
   keyboard.bind(window);
 
+  // +use：F 键（按住不重复触发）。与 WASD 同口径，只在 Pointer Lock 锁定时生效；
+  // 选靶由渲染器按相机视线完成，按钮/门走地图既有实体 I/O（不再单独加掩码位）。
+  window.addEventListener('keydown', (event) => {
+    if (event.code !== 'KeyF' || event.repeat || !pointerLock.isLocked()) return;
+    const target = event.target as Element | null;
+    if (target && typeof target.closest === 'function' && target.closest('input, textarea, select')) return;
+    renderer?.usePressed();
+  });
+
   window.addEventListener('mousemove', (e) => {
     if (!pointerLock.isLocked()) return;
     const r = mouseBuffer.process(e.movementX, e.movementY);
@@ -370,7 +379,7 @@ function bindInput(): void {
     wheelJumpPending = false;
     // 面板状态机：锁定 → 隐藏；退锁（ESC）→ 弹出
     panel?.updateVisibility(sceneReady);
-    if (locked) setStatus('已锁定。WASD 移动，鼠标视角，ESC 打开面板。', '');
+    if (locked) setStatus('已锁定。WASD 移动，鼠标视角，F 使用，ESC 打开面板。', '');
   });
 
   window.addEventListener('resize', () => {

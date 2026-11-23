@@ -270,6 +270,17 @@ export class EntityGameplay {
     return this.entitySystem;
   }
 
+  /**
+   * 玩家 `+use`：从视线选最近的可交互实体并触发（`func_button` / `func_door` 等）。
+   *
+   * `eye` 是眼睛位置、`dir` 是客户端相机前向（无需归一化），`reach` 是作用距离（HU）。
+   * 返回触发的实体数；实体系统未装配时返回 0。按钮压制 / 门的开合都走实体层既有
+   * `Use` 实现，副作用（碰撞、输出）与地图 I/O 一致。
+   */
+  useFromView(eye: [number, number, number], dir: [number, number, number], reach = 80): number {
+    return this.entitySystem?.useFromView(eye, dir, reach) ?? 0;
+  }
+
   /** 换图装载：装配实体系统、收集 trigger 体积与跳跃增幅区；换图时自动释放旧实例。 */
   load(entityIoJson?: string | null): void {
     this.entitySystem?.dispose();
