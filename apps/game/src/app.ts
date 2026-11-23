@@ -34,6 +34,7 @@ import { KeyboardInput } from './input/keyboard.js';
 import { ACTION_LABELS, codeLabel, loadKeymap, type BindableAction } from './input/keymap.js';
 import type { KeyState } from './worker/worker-types.js';
 import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
+import { ChatOverlay } from '../../../src/ts-shared/dom/chat-overlay.js';
 import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
 import { keysToMask, KEY_MASK, type SharedState } from '../../../src/ts-shared/auth/shared-state.js';
@@ -86,6 +87,8 @@ const pointerLock = new PointerLockController();
 let fixWorker: Worker | null = null;
 let bridge: InputBridge | null = null;
 let renderer: RendererMain | null = null;
+/** 地图聊天框：渲 `point_servercommand` / `point_clientcommand` 的 `say` 提示。 */
+let chatOverlay: ChatOverlay | null = null;
 /** 共享 bootstrap 实例（Step2）：死亡阈值等「端侧决定时机」的下发必须经它。 */
 let appRuntime: AppRuntime<RuntimeConfig, RendererMain, InputBridge> | null = null;
 let panel: PanelController | null = null;
@@ -144,6 +147,9 @@ async function main(): Promise<void> {
   fixWorker = runtime.worker;
   sharedState = runtime.shared;
   renderer = runtime.renderer;
+  // 地图聊天框（`point_servercommand` / `point_clientcommand` 的 `say`）。
+  chatOverlay = new ChatOverlay({ left: 12, bottom: 56 });
+  if (renderer) renderer.onChatMessage = (text) => chatOverlay?.push(text);
   mainWasmReady = runtime.wasmReady;
   bridge = runtime.bridge;
   if (!bridge) {
@@ -660,6 +666,8 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
     setError('渲染器未就绪');
     return;
   }
+  // 换图清空上一张图的聊天提示。
+  chatOverlay?.clear();
   // 存点按地图持久化：记录地图名并加载该地图存点列表（换地图清空/载入）
   currentMapName = fileName.replace(/\.bsp$/i, '');
   renderPanelHandle?.sync(); // 顶部「未载入地图」状态行随之收起

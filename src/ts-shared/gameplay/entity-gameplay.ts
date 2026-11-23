@@ -76,6 +76,13 @@ export interface EntityGameplayOptions {
   defaultJumpHeight?: number;
   /** 实体事件的观测出口（debug 面板用；不赋值也无副作用）。 */
   onEntityEvent?: (event: EntityEvent) => void;
+  /**
+   * 地图聊天文本（`point_servercommand` / `point_clientcommand` 的 `say ...`）。
+   *
+   * ze/surf 类地图用它在聊天框打倒计时、关卡与「门 20 秒后开」提示；实体层已把它
+   * 作为 `servercommand` / `clientcommand` 事件上报，这里只解析文本并交给 HUD 出口。
+   */
+  onChatMessage?: (text: string) => void;
   /** 速度副作用；`add` = 一次性冲量，`set` = 覆盖（加速板非 ONCE 语义）。 */
   onPlayerVelocity?: (velocity: [number, number, number], mode: 'add' | 'set') => void;
   /** 地图 `sv_maxvelocity` 速度上限（HU/s，水平）。 */
@@ -123,6 +130,31 @@ function parseBrushSolidDetail(detail: string | undefined): { entity: number; so
   if (!Number.isInteger(entity) || entity < 0) return null;
   return { entity, solid: m[2] === 'true' };
 }
+
+/**
+ * 从实体层 `servercommand` / `clientcommand` 的 detail 里解析聊天文本。
+ *
+ * 地图写的是 `point_servercommand` 的输入 `Command "say ***TEXT***"`（或 `say_team`），
+ * 实体层把它原样上报为 detail；聊天框只关心 `say` 这一种命令，其它命令（改 cvar、
+ * `sc Command ...` 的物理参数等）继续走各自的处理链。
+ *
+ * 兼容可选引号包裹（`say "..."`）与 Source 颜色控制字符；返回 null 表示不是聊天命令。
+ */
+export function parseSayCommand(detail: string | undefined): string | null {
+  if (!detail) return null;
+  const m = /^say(?:_team)?\s+(.+)$/i.exec(detail.trim());
+  if (!m) return null;
+  let text = m[1].trim();
+  if (text.length >= 2 && ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'")))) {
+    text = text.slice(1, -1).trim();
+  }
+  text = text
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 0 ? text : null;
+}
+
 
 /**
  * 实体副作用宿主：`load()` 装配、`update(dt)` 每帧推进、`dispose()` 释放。
@@ -353,6 +385,14 @@ export class EntityGameplay {
       // 两端单源默认值兜底（见 `PhysWorld::max_horizontal_speed` 与
       // `PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed`）。
       this.applyServerCommand(event.detail ?? '');
+      // 同一通道还会携带 `say ***...***`（倒计时 / 关卡提示）：chat 与物理参数互斥，
+      // 解析不出聊天文本就当作普通 servercommand 已处理完。
+      const chat = parseSayCommand(event.detail);
+      if (chat) this.options.onChatMessage?.(chat);
+    } else if (event.kind === 'clientcommand') {
+      // `point_clientcommand` 的 `say`（少数地图用客户端命令打聊天）。
+      const chat = parseSayCommand(event.detail);
+      if (chat) this.options.onChatMessage?.(chat);
     } else if (event.kind === 'brush') {
       // 实体层 brush 开关（`func_wall_toggle` Toggle、`func_door` 开门/关门）：
       // 落到物理线对应实体 brush 的碰撞开关；物理实例未就绪时先记镜像，建立后重放。

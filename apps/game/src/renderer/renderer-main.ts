@@ -271,6 +271,9 @@ export class RendererMain {
   /** 实体系统观测回调：I/O 输入、宿主副作用请求都会送到这里（缺省丢弃）。 */
   onEntityEvent: ((event: EntityEvent) => void) | null = null;
 
+  /** 地图聊天文本回调（`point_servercommand` / `point_clientcommand` 的 `say ...`）。 */
+  onChatMessage: ((text: string) => void) | null = null;
+
   /** 玩家速度副作用（`add` = 冲量 / `set` = 加速板覆盖）→ app.ts 转发权威 Worker。 */
   onPlayerVelocity: ((vel: [number, number, number], mode: 'add' | 'set') => void) | null = null;
   /** 地图 convar `sv_maxvelocity` → 水平速度上限（渲染线与权威必须同参）。 */
@@ -381,6 +384,7 @@ export class RendererMain {
       defaultJumpHeight: this.defaultJumpHeight,
       initialUserSpeedCap: this.config.physics.maxHorizontalSpeed,
       onEntityEvent: (event) => this.onEntityEvent?.(event),
+      onChatMessage: (text) => this.onChatMessage?.(text),
       onPlayerVelocity: (vel, mode) => this.onPlayerVelocity?.(vel, mode),
       onSpeedCapChange: (cap) => this.onSpeedCapChange?.(cap),
       onJumpHeightChange: (height) => this.onJumpHeightChange?.(height),

@@ -8,6 +8,7 @@
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
+import { ChatOverlay } from '../../../src/ts-shared/dom/chat-overlay.js';
 import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
 import {
@@ -236,6 +237,11 @@ let sharedState: SharedState | null = null;
 let lastTeleportIdx = -1;
 /** 主线程渲染器：持主线程 WASM 物理与 Three.js 场景，渲染、剔除与面板即时生效都经它。 */
 let rendererMain: RendererMain | null = null;
+/**
+ * 地图聊天框：渲 `point_servercommand` / `point_clientcommand` 的 `say` 提示
+ * （ze 类图的倒计时、「门 20 秒后开」等）。放在 body 上、避开左侧面板。
+ */
+let chatOverlay: ChatOverlay | null = null;
 /** 可选增强插件宿主：默认全关时零成本（不 import 插件、不挂实体事件）；面板/控制台可开。 */
 let enhanceHost: EnhanceHost | null = null;
 
@@ -410,6 +416,10 @@ async function main(): Promise<void> {
 	sharedState = runtime.shared;
 	inputBridge = runtime.bridge;
 	rendererMain = runtime.renderer;
+	// 地图聊天框（`point_servercommand` / `point_clientcommand` 的 `say`）；debug 左侧面板占
+	// 300px，左移避开，底部给状态栏留位。换图时由载图入口清空（见 handleLoadBsp 开头）。
+	chatOverlay = new ChatOverlay({ left: 312, bottom: 56 });
+	if (rendererMain) rendererMain.onChatMessage = (text) => chatOverlay?.push(text);
 	mainWasmReady = runtime.wasmReady;
 
 	// 实体副作用（共享宿主 EntityGameplay）→ 权威 Worker：渲染物理线已由宿主写，这里只做转发。
@@ -2235,6 +2245,8 @@ async function handleBspFile(file: File): Promise<void> {
  */
 async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void> {
 	if (!rendererMain || !inputBridge) return;
+	// 换图清空上一张图的聊天提示（倒计时/关卡台词不应跨图残留）。
+	chatOverlay?.clear();
 	const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const fogParams = fogParamsFromEntities(proc.parse_entities()); const skyCamera = skyCameraFromEntities(proc.parse_entities()); const bundle = await buildWorldBundle(proc, {
 		colliderSource: config.physics.colliderSource ?? 'auto',
 		collectMissingTextures: true,

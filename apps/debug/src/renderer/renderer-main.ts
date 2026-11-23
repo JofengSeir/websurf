@@ -398,6 +398,12 @@ export class RendererMain {
   /** 实体系统观测回调：I/O 输入、宿主副作用请求都会送到这里（缺省丢弃）。 */
   onEntityEvent: ((event: EntityEvent) => void) | null = null;
   /**
+   * 地图聊天文本回调（`point_servercommand` / `point_clientcommand` 的 `say ...`）。
+   *
+   * debug/game 的 app 层各挂一个聊天框；不赋值时聊天文本直接丢弃（不影响实体 I/O 与物理）。
+   */
+  onChatMessage: ((text: string) => void) | null = null;
+  /**
    * 玩家实体 targetname 变化回调（地图脚本改名门控 → 传送 filter）。
    *
    * 名字在实体系统内部变迁（`AddOutput targetname`），权威侧 `src/phys/teleport.rs` 的
@@ -881,6 +887,9 @@ export class RendererMain {
       defaultJumpHeight: this.defaultJumpHeight,
       initialUserSpeedCap: this.config.physics.maxHorizontalSpeed,
       onEntityEvent: (event) => this.onEntityEvent?.(event),
+      // 地图 `say` 提示：与实体事件分开走（实体事件只有 enhance 插件启用时才有人接，
+      // 聊天框必须始终可见）。
+      onChatMessage: (text) => this.onChatMessage?.(text),
       onPlayerVelocity: (vel, mode) => this.onPlayerVelocity?.(vel, mode),
       onSpeedCapChange: (cap) => this.onSpeedCapChange?.(cap),
       onJumpHeightChange: (height) => this.onJumpHeightChange?.(height),
