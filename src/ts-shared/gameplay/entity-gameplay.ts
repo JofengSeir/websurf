@@ -57,6 +57,14 @@ export interface GameplayPhysLike {
   set_brush_solid?(entity: number, solid: boolean): boolean;
   /** 查询实体 brush 当前是否实心（诊断/重放用；实现缺失时视为实心）。 */
   brush_solid?(entity: number): boolean;
+  /**
+   * 运行期开关某个实体的传送触发区域（`trigger_teleport` 的 `Enable`/`Disable`）。
+   * `entity` 是 BSP 实体编号（Rust 侧 `TeleportTrigger.index`）。
+   * 实现缺失时静默跳过（game 端旧 wasm 兼容）。
+   */
+  set_teleport_enabled?(entity: number, enabled: boolean): boolean;
+  /** 查询实体传送区域当前是否启用（诊断/重放用；实现缺失时视为未知）。 */
+  teleport_enabled?(entity: number): boolean;
 }
 
 /** 带体积的 trigger（可视化 / 调试用）；与 debug `ColliderDebug` 的 `EntityTriggerBoxView` 同形。 */
@@ -200,6 +208,13 @@ export class EntityGameplay {
    * 这里只负责「物理实例晚于事件建立」时把已发生的开关重放上去。
    */
   private brushSolid = new Map<number, boolean>();
+  /**
+   * 传送触发器的启用状态镜像（`entity → enabled`）：地图 `trigger_teleport` 的
+   * `StartDisabled` 在 Rust 建表时只决定**初值**，运行期 `Enable`/`Disable` 需要本层
+   * 同步到 `TeleportManager`（否则实体层开了、物理静态表仍是关的，玩家永远传不过去）。
+   * 首次 `update()` 会把所有传送实体的当前状态推一遍（保证实体初态与物理表对齐）。
+   */
+  private teleportEnabled = new Map<number, boolean>();
 
   constructor(options: EntityGameplayOptions) {
     this.options = options;
@@ -296,6 +311,7 @@ export class EntityGameplay {
     this.mapSpeedCap = null;
     // 换图后实体下标空间与 Rust brush 初态都是新的：清掉上一张图的运行期开关镜像。
     this.brushSolid.clear();
+    this.teleportEnabled.clear();
     // 立即按「地图值 ∩ 用户值」重放一次生效限速（地图值若在实体装配期已由
     // `servercommand sv_maxvelocity` 写入，则这里直接取两者较小者）。不能只存不发：
     // 面板默认用户限速（5000）若不下发，Rust 侧会退回自己的兜底默认，面板值与权威实际
@@ -323,8 +339,15 @@ export class EntityGameplay {
         for (const [entity, solid] of this.brushSolid) {
           phys.set_brush_solid?.(entity, solid);
         }
+        // 传送区开关镜像重放：同上，`load()` 之后、物理实例建立之前发生的阶段推进
+        // （`tp_stage01/02` 的 Enable）要补到新世界。
+        for (const [entity, enabled] of this.teleportEnabled) {
+          phys.set_teleport_enabled?.(entity, enabled);
+        }
       }
     }
+    // 实体层 `trigger_teleport` 的 Enable/Disable → Rust 静态传送表（每帧只在状态变化时下发）。
+    this.syncTeleportTriggers(phys);
     const st = this.options.getPlayerState();
     this.updateAutohopZoneJump(st, phys);
     this.syncPlayerName(phys);
@@ -358,6 +381,30 @@ export class EntityGameplay {
     for (const [entity, solid] of this.brushSolid) callback(entity, solid);
   }
 
+  /** 实体传送区当前启用状态（运行期同步过的才有记录；初态由 Rust `start_disabled` 决定）。 */
+  teleportEnabledOf(entity: number): boolean | undefined {
+    return this.teleportEnabled.get(entity);
+  }
+
+  /**
+   * 把实体层 `trigger_teleport` 的启用状态同步到 Rust 静态传送表。
+   *
+   * 每帧只遍历 classname 以 `trigger_teleport` 开头的实体（一张图几十个），
+   * 状态变化才调用物理（wasm 边界不白跑）。物理实例未就绪时只记镜像，建立后由
+   * `update()` 的实例变更分支整体重放。
+   */
+  private syncTeleportTriggers(phys: GameplayPhysLike | null): void {
+    const system = this.entitySystem;
+    if (!system) return;
+    for (const entity of system.entList.entities) {
+      if (!entity.classname.startsWith('trigger_teleport')) continue;
+      const enabled = !entity.disabled;
+      if (this.teleportEnabled.get(entity.index) === enabled) continue;
+      this.teleportEnabled.set(entity.index, enabled);
+      phys?.set_teleport_enabled?.(entity.index, enabled);
+    }
+  }
+
   /** 卸载：释放实体系统并清空缓存。 */
   dispose(): void {
     this.entitySystem?.dispose();
@@ -371,6 +418,7 @@ export class EntityGameplay {
     this.playerNamePushed = null;
     this.teleportFilterPushed = null;
     this.brushSolid.clear();
+    this.teleportEnabled.clear();
   }
 
   // ── 事件 → 物理/权威 ────────────────────────────────────────────

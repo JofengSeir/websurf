@@ -23,7 +23,7 @@
 //!   都以 `path = "../../../../src"` 指到本目录。`apps/viewer` 是纯查看器，
 //!   其 `crates/wasm` 只依赖 `websurf-wasm-core`，不含 `websurf-phys`。
 //!
-//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **26 个 `pub fn`**（含 `new`）。
+//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **44 个 `pub fn`**（含 `new`）。
 //! 其中 `set_yaw_pitch`在 `apps/**` 与 `src/**` 内无任何调用点；
 //! `set_jump_height`只由 debug 宿主在「跳跃增幅区」（surf_null 的 `autohop_zone`）内调用；
 //! `predict`只被 `apps/game/scripts` 的两个验证脚本调用；
@@ -112,6 +112,9 @@ mod jump_height_tests;
 /// brush 实体运行期碰撞开关（`World::set_entity_solid` / `PhysWorld::set_brush_solid`）。
 #[cfg(test)]
 mod brush_solid_tests;
+
+#[cfg(test)]
+mod teleport_switch_tests;
 
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
@@ -1093,6 +1096,21 @@ impl PhysWorld {
     /// 相同名字重复调用无副作用（幂等、字符串覆盖）。
     pub fn set_teleport_player_name(&mut self, name: &str) {
         self.teleport.player_name = name.to_string();
+    }
+
+    /// 运行期开关某个实体（BSP 实体编号）名下的全部传送触发区域。
+    ///
+    /// 地图 `trigger_teleport` 的 `StartDisabled` 在建表时只决定**初始**开关（见
+    /// `TeleportManager::from_json`）；实体 I/O 的 `Enable` / `Disable` 由 TS 宿主
+    /// 推到本方法切换（同名实体的多个 brush 区域一起切换）。
+    /// 返回是否有状态变化（实体不存在 / 状态未变 = false）。
+    pub fn set_teleport_enabled(&mut self, entity: i32, enabled: bool) -> bool {
+        self.teleport.set_trigger_enabled(entity, enabled) > 0
+    }
+
+    /// 某个实体的传送触发区域当前是否启用（诊断 / 宿主回读用）。
+    pub fn teleport_enabled(&self, entity: i32) -> bool {
+        self.teleport.trigger_enabled(entity)
     }
 
     /// 名门控总开关（默认开，`from_json` 置 true）。`false` = 忽略所有 `filter_name`，

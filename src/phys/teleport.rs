@@ -113,9 +113,14 @@ pub struct TeleportTrigger {
     /// 客户端位掩码：`check` 在"值非 0，且 0x01 与 0x40 两位都不含"时跳过该 trigger；
     /// JSON 缺该字段时 `from_json` 取 1。
     pub spawnflags: u32,
-    /// true = 该 trigger 从不参与判定（`check` 的第一道 `continue`）；
-    /// JSON 缺该字段时取 false。
+    /// 建表时的初始禁用标记（JSON `start_disabled`；地图 `trigger_teleport` 的
+    /// `StartDisabled` 键）：当前不参与判定，只作为「初始是否启用」的权威来源，
+    /// 运行期状态在 `enabled`。
     pub start_disabled: bool,
+    /// 运行期是否启用（`check` 的第一道 `continue`）：初值 = `!start_disabled`；
+    /// 地图 `trigger_teleport` 的 `Enable` / `Disable` 输入经
+    /// `PhysWorld::set_teleport_enabled` 切换。
+    pub enabled: bool,
     /// 名门控（`filter_activator_name`）：`from_json` 的 `filter_name` 字段，值为
     /// filter 实体 `filtername` 解析出的允许名模式。`None` = 无过滤；模式语义见
     /// [`name_matches`]（大小写不敏感、只支持末尾 `*`）。
@@ -229,6 +234,9 @@ impl TeleportManager {
                 .get(t.target.as_str())
                 .map(|&i| i as i32)
                 .unwrap_or(-1);
+            // 地图 `trigger_teleport` 的 `StartDisabled`：建表时只记初始值，运行期由
+            // 实体 I/O `Enable`/`Disable` 切换 `enabled`（见 `set_trigger_enabled`）。
+            let start_disabled = t.start_disabled.unwrap_or(false);
             triggers.push(TeleportTrigger {
                 index: t.index,
                 classname: t.classname.clone(),
@@ -245,7 +253,8 @@ impl TeleportManager {
                 maxs: t.model_maxs.map(|m| [m[0], m[1], m[2]]),
                 dest_index: dest_idx,
                 spawnflags: t.spawnflags.unwrap_or(1),
-                start_disabled: t.start_disabled.unwrap_or(false),
+                start_disabled,
+                enabled: !start_disabled,
                 filter_name: t.filter_name.clone(),
                 filter_negated: t.filter_negated,
                 inside: false,
@@ -261,6 +270,35 @@ impl TeleportManager {
         })
     }
 
+    /// 运行期开关某个 BSP 实体（`index`）名下的全部传送区域。
+    ///
+    /// 同名实体可能有多个 brush 区域（`parse_teleports` 每个 brush 一条 trigger），
+    /// 全部一起切换——与实体层 `trigger_teleport` 的 `Enable`/`Disable` 语义一致。
+    /// 返回**状态真的发生变化**的 trigger 条数（实体不存在或状态未变 = 0）。
+    pub fn set_trigger_enabled(&mut self, entity: i32, enabled: bool) -> usize {
+        if entity < 0 {
+            return 0;
+        }
+        let mut changed = 0;
+        for t in &mut self.triggers {
+            if t.index as i64 == entity as i64 && t.enabled != enabled {
+                t.enabled = enabled;
+                changed += 1;
+            }
+        }
+        changed
+    }
+
+    /// 某个 BSP 实体的传送区域当前是否启用（任一区域启用即 true；实体不存在 false）。
+    pub fn trigger_enabled(&self, entity: i32) -> bool {
+        if entity < 0 {
+            return false;
+        }
+        self.triggers
+            .iter()
+            .any(|t| t.index as i64 == entity as i64 && t.enabled)
+    }
+
     /// 单步检测：命中就返回目标点（克隆），否则 `None`。**本函数不移动玩家**。
     ///
     /// 三道早退按固定顺序发生，顺序本身会影响可观测行为：
@@ -271,7 +309,8 @@ impl TeleportManager {
     /// ③ `surfing == true` → `None`（贴坡滑行不算进入传送区）。
     /// 随后取 `grounded = ground_ticks > 0`：它不是早退，只作 B 路径与 gap 的启用条件。
     ///
-    /// 再逐个 trigger 过滤：`start_disabled`、`filter_name` 名门控（匹配才放行，
+    /// 再逐个 trigger 过滤：`enabled`（运行期开关，初值 = `!start_disabled`，由实体 I/O
+    /// `Enable`/`Disable` 切换）、`filter_name` 名门控（匹配才放行，
     /// `filter_negated` 时取反）、
     /// `spawnflags` 非 0 且 0x01 / 0x40 两位都不含、`dest_index < 0`（孤儿）、
     /// `dest_index` 越界；五道过滤都没跳过它，才试 A 路径
@@ -311,7 +350,7 @@ impl TeleportManager {
         let grounded = ground_ticks > 0;
 
         for t in &mut self.triggers {
-            if t.start_disabled {
+            if !t.enabled {
                 continue;
             }
             // 名门控（`filter_activator_name`）：玩家名要与 filter 匹配才放行；
