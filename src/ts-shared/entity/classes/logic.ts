@@ -148,7 +148,15 @@ export const MathCounterClass: EntityClass = {
     { name: 'Subtract', type: FIELD_FLOAT, handler: counterArithmetic('sub') },
     { name: 'Multiply', type: FIELD_FLOAT, handler: counterArithmetic('mul') },
     { name: 'Divide', type: FIELD_FLOAT, handler: counterArithmetic('div') },
-    { name: 'SetValue', type: FIELD_FLOAT, handler: counterArithmetic('set') },
+    input('SetValue', FIELD_FLOAT, (e, d) => {
+      // Source/CS:GO 语义：SetValue 更新值并触发 OutValue（含 hit 判定）**以及 OnGetValue**；
+      // SetValueNoFire 才是不触发任何输出。CS:GO ze 图的关卡阶段机依赖这一条
+      // （ze_cursed: warmup relay `SetValue 2` → OnGetValue → logic_case InValue → Stage01）。
+      if (e.getBool('disabled', false)) return;
+      updateOutValue(e, d.activator as Entity | null, d.value.float());
+      const out = e.output('OnGetValue');
+      if (out instanceof OutputTyped) out.set(counterValue(e), d.activator, d.caller);
+    }),
     input('SetValueNoFire', FIELD_FLOAT, (e, d) => {
       if (e.getBool('disabled', false)) return;
       const min = e.getNumber('min', 0);

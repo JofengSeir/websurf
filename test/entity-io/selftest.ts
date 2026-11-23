@@ -269,6 +269,31 @@ check('A13 math_counter：OutValue 存值，OnHitMax 边沿锁存', () => {
   sys.dispose();
 });
 
+check('A13b math_counter：SetValue 触发 OnGetValue，SetValueNoFire 不触发', () => {
+  // Source/CS:GO 语义：SetValue = 写值 + OutValue（含 hit 边沿）+ OnGetValue；
+  // SetValueNoFire 只写值、不触发任何输出。ze_cursed 的 WARMUP→Stage01 就靠这一条
+  // （StageWARMUP relay → `Level_Counter SetValue 2` → OnGetValue → logic_case InValue）。
+  const { sys } = fixture([
+    block('math_counter', [
+      ['targetname', 'src'], ['min', '0'], ['max', '4'], ['startvalue', '1'],
+      ['OnGetValue', 'dst,SetValue,,0,-1'],
+    ]),
+    block('math_counter', [
+      ['targetname', 'dst'], ['min', '0'], ['max', '9'], ['startvalue', '0'],
+    ]),
+  ]);
+  sys.acceptInputOn('src', 'SetValue', Variant.fromFloat(2));
+  sys.serviceEventsNow();
+  eq(sys.getEntity(0)!.output('OutValue')?.currentValue().float(), 2, 'SetValue 更新自身值');
+  eq(sys.getEntity(1)!.output('OutValue')?.currentValue().float(), 2, 'SetValue 触发 OnGetValue 并把值传给下游');
+
+  sys.acceptInputOn('src', 'SetValueNoFire', Variant.fromFloat(3));
+  sys.serviceEventsNow();
+  eq(sys.getEntity(0)!.output('OutValue')?.currentValue().float(), 3, 'SetValueNoFire 仍更新自身值');
+  eq(sys.getEntity(1)!.output('OutValue')?.currentValue().float(), 2, 'SetValueNoFire 不触发 OnGetValue');
+  sys.dispose();
+});
+
 check('A14 logic_case：InValue 只触发第一个匹配 CaseNN', () => {
   const { sys, host } = fixture([
     block('logic_case', [
