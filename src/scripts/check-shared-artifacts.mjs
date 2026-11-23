@@ -192,6 +192,9 @@ const KNOWN_CONTENT_DIFF_ALLOW = new Map([
   ['src/renderer-shared/config/render-prefs.ts', 'debug 多 applyRenderDebugSwitches 调试开关（已登记差异）'],
   ['src/renderer-shared/camera/pose-entry.ts', 'debug 多 poseHold 注入点（回放/飞行相机）'],
   ['src/renderer-shared/environment/render-sky-pass.ts', 'debug 多调试层参数（产物级条件差异）'],
+  // v2 增强插件落地后 debug bundle 顶层命名空间变化，esbuild 把解构别名从
+  // `distance`（game）改成 `distance2`（debug）；语义相同，非实现分叉。
+  ['src/renderer-shared/scene/rot-buttons.ts', 'esbuild 顶层重命名导致解构别名 distance2/distance 差异（语义相同）'],
 ]);
 
 /** 允许只出现在个别端 app.js 的共享模块（白名单，出现新的独有模块即分叉）。 */
@@ -205,6 +208,9 @@ const APP_ONLY_ALLOW = {
   // 持久化走 apps/game/src/panel/panel-controller.ts 的 vbsp:panelPrefs，不引用本模块。
   // 若 game/viewer 将来接入同一存档格式，必须删除本登记（回到跨端一致性比对）。
   'src/ts-shared/phys/param-prefs.ts': ['debug'],
+  // 增强插件（v2/m02315）按设计只挂在 debug 端：game/viewer 不装载 host/插件，
+  // 因此 flags 只进 debug app.js。若将来 game/viewer 接入同一开关体系，删除本登记。
+  'src/ts-shared/enhance/flags.ts': ['debug'],
 };
 
 /** viewer 不得包含的物理/权威实现（viewer 无物理是架构约定）。 */
