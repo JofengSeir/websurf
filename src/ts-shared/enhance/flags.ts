@@ -47,6 +47,32 @@ export const ENHANCE_FLAGS: readonly EnhanceFlagDef[] = [
       '（索引几何改 index 缓冲；非索引几何把区间内顶点位置塌到同一点，不改几何结构）；' +
       '只动目标实体的区间，不改 draw call，恢复时逐字节写回原值，默认关。',
   },
+  {
+    id: 'prop-appearance',
+    label: 'prop 外观层级',
+    summary:
+      '补「prop_dynamic* 的 rendermode / renderamt / renderfx / parentname / skin 在 GLB 里丢失」的缺口：' +
+      '导出时把这些外观字段写进道具节点 extras，插件装载期按字段应用（rendermode 10 / EF_NODRAW 隐藏、' +
+      '透明类 rendermode 调材质透明度、parentname 记父子关系供诊断）；skin 变色需要 GLB 带出多套材质，' +
+      '本插件只报告不可切换。只动被标注的道具节点，默认关。',
+  },
+  {
+    id: 'fade-screen',
+    label: '运行时屏幕渐变',
+    summary:
+      '补「env_fade 触发后屏幕没有淡入淡出」的缺口：消费实体层的 env_fade 事件（现在带 rendercolor/' +
+      'renderamt/duration/hold/flags），用一张 pointer-events:none 的全屏 DOM 覆盖层按 Source 时间轴近似呈现；' +
+      'FFADE_IN 从颜色淡回游戏、FFADE_OUT 淡到颜色后保持 hold、STAYOUT 保持不淡出。' +
+      '默认关：插件不装载、不建覆盖层、无 rAF 循环。',
+  },
+  {
+    id: 'damage-health',
+    label: '运行时伤害/生命',
+    summary:
+      '补「trigger_hurt 只在实体层判定伤害、玩家没有生命值模型」的缺口：消费 entity:damage 事件，' +
+      '维护 HP/护甲并把受伤结果写到面板状态行；HP 归零时按 Source 语义传回本图出生点并重置。' +
+      '默认关：不装载插件时不消费任何事件，也不影响现有物理/渲染链路。',
+  },
 ];
 
 /** localStorage 键：值为 JSON 字符串数组（已启用的 id）。 */

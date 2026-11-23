@@ -675,6 +675,30 @@
               <div class="ctrl-full hint" id="enhBrushVisibilityStatus"
                    title="已隐藏实体数 / 建索引实体数、退化三角与区间数、最后一次 brush 事件（实体下标:true|false）。控制台可用 __vbspEnhance.list() 查看同一状态。">动态 brush 可见性：未启用（默认关闭）</div>
 
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="enhPropAppearance" />
+                <label for="enhPropAppearance" title="补「prop_dynamic* 的 rendermode / renderamt / renderfx / parentname 在 GLB 里丢失」的缺口：导出时写进道具节点 extras，装载期按字段应用——rendermode 10（不渲染）/ EF_NODRAW 直接隐藏，透明类 rendermode 按 renderamt 调材质透明度，parentname 只记父子关系供诊断（当前 brush 平台本身不动，暂不驱动跟随）。skin 需要 GLB 带出多套材质才能切换，本插件只报告数量、不改外观。">prop 外观层级（rendermode / 透明 / 隐藏）</label>
+              </div>
+
+              <div class="ctrl-full hint" id="enhPropAppearanceStatus"
+                   title="已应用外观的 prop 节点数、隐藏数、透明数、被跳过的 skin 数。控制台可用 __vbspEnhance.list() 查看同一状态。">prop 外观层级：未启用（默认关闭）</div>
+
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="enhDamageHealth" />
+                <label for="enhDamageHealth" title="补「trigger_hurt 只发伤害事件、玩家没有生命值模型」的缺口：消费实体层的 entity:damage 事件，维护 HP/护甲并把结果写到下方状态行；HP 归零时按 Source 语义传回本图主出生点并重置。只影响玩家状态与传送，不改物理/渲染链；默认关。">运行时伤害/生命（给玩家补 HP 模型）</label>
+              </div>
+
+              <div class="ctrl-full hint" id="enhDamageHealthStatus"
+                   title="当前 HP/护甲、最近一次伤害、死亡与重生次数。控制台可用 __vbspEnhance.list() 查看同一状态。">运行时伤害/生命：未启用（默认关闭）</div>
+
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="enhFadeScreen" />
+                <label for="enhFadeScreen" title="补「env_fade 触发后屏幕没有淡入淡出」的缺口：消费实体层的 env_fade 事件（rendercolor/renderamt/duration/hold/flags），用一张不拦截鼠标的全屏覆盖层按 Source 时间轴近似呈现（IN 从颜色淡回、OUT 淡到颜色后保持 hold、STAYOUT 不淡出）。默认关：不装载插件、不建覆盖层、无 rAF 循环。">运行时屏幕渐变（过场黑屏/绿屏）</label>
+              </div>
+
+              <div class="ctrl-full hint" id="enhFadeScreenStatus"
+                   title="已消费的渐变次数、最近一次参数、覆盖层状态。控制台可用 __vbspEnhance.list() 查看同一状态。">运行时屏幕渐变：未启用（默认关闭）</div>
+
               <div class="ctrl-full hint" id="enhanceStatusLine"
                    title="当前启用的增强插件与运行时统计（传送次数 / 跳过次数）。控制台也可用 __vbspEnhance.status() 查看。">增强插件：全部关闭（零成本）</div>
             </div>

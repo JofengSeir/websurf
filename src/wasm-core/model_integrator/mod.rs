@@ -115,14 +115,15 @@ pub struct InMemoryModel {
 /// 一次导出所需的全部内存资源；由所在工程的 wasm 导出层组装，本模块只读。
 ///
 /// 各字段对应本模块的输入：模型三件套、静态道具放置表、实体、贴图字节、光照实体，
-/// 以及两张按材质名索引的标注表。`entities` 在三个工程的全部装配点都传空
-/// （`apps/game/crates/wasm/src/lib.rs` 的 `export_glb_with_defaults_opts`），因此 `resolve_placements` 的实体支路当前没有调用者。
+/// 以及两张按材质名索引的标注表。`entities` 由装配点的 [`collect_model_entities`] 从
+/// BSP entities lump 收集（三个工程的 GLB 导出路径都这样接），带实体下标与外观字段。
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryResources {
     /// 待合并的模型三件套；解析失败或没有任何放置实例的会被跳过。
     pub models: Vec<InMemoryModel>,
-    /// 实体来源的放置（`prop_dynamic` 等）；装配点当前全部传空。
-    pub entities: Vec<Entity>,
+    /// 实体来源的放置（`prop_dynamic` 等）：由 [`collect_model_entities`] 收集，
+    /// 比灯光用的 [`Entity`] 多带实体下标与外观字段（见 [`ModelEntity`]）。
+    pub entities: Vec<ModelEntity>,
     /// 静态道具放置表；与碰撞 / 三角导出共用（`apps/debug/crates/wasm/src/lib.rs` 的 `export_model_tri_colliders`）。
     pub static_props: Vec<StaticProp>,
     /// `纹理名 → PNG 字节`。键要与 `vmdl::TextureInfo::name` 逐字符一致；
@@ -277,6 +278,11 @@ impl ModelIntegrator {
                     if vlight.is_some() {
                         // 第 1 级（逐顶点烘焙）已接线 ⇒ 渲染端优先用它，不再叠 cube
                         extras.insert("vertexLighting".into(), serde_json::json!(true));
+                    }
+                    // 实体来源 prop：带上身份 + 外观键（static prop 的 `source` 为 None，行为不变）。
+                    // 运行期增强插件靠这些键识别 rendermode/renderamt 等 GLB 表达不了的语义。
+                    if let Some(src) = &p.source {
+                        src.write_extras(&mut extras);
                     }
                     let node = Node {
                         camera: None,
@@ -1265,6 +1271,129 @@ pub struct Placement {
     /// 该实例的**逐顶点预烘焙光照**（屏幕倍率，长度 = 模型顶点数）；无 vhv 时为 `None`。
     /// 同一模型的多个实例各有自己的 vhv ⇒ 网格按它分组（见 `integrate`）。
     pub vertex_lighting: Option<Vec<[f32; 3]>>,
+    /// 实体来源的**身份 + 外观元数据**（实体下标 / classname / rendermode 等）；静态道具为 `None`。
+    /// GLB 节点 extras 由它写入（见 [`PlacementSource::write_extras`]），供运行期增强插件按实体寻址。
+    pub source: Option<PlacementSource>,
+}
+
+/// 实体来源 prop 的身份与外观元数据。
+///
+/// 收集点在 [`collect_model_entities`]（逐实体读 Source 键、解析成数字），消费点是
+/// [`add_models_to_gltf`] 的节点 extras：把 BSP 里「GLB 表达不了」的渲染语义
+/// （rendermode / renderamt / renderfx / skin / parentname）原样带到运行期，由增强插件
+/// 决定怎么近似。**缺键不写**——`None` 的字段在 GLB extras 里不出现。
+#[derive(Debug, Clone, Default)]
+pub struct PlacementSource {
+    /// BSP entities lump 中的实体下标（0 起，与 `Bsp::entities.iter().enumerate()` 同序）。
+    pub entity_index: u32,
+    /// `classname` 原值（如 `prop_dynamic` / `prop_physics`）。
+    pub classname: String,
+    /// `targetname`（脚本点名用；GLB 节点本身无法响应 I/O，仅透传）。
+    pub targetname: Option<String>,
+    /// `parentname`（实体跟随父实体运动；GLB 无此语义，仅透传供插件统计/诊断）。
+    pub parentname: Option<String>,
+    /// `rendermode`：0 Normal / 1 Color / 2 Texture / 3 Glow / 4 Solid / 5 Additive / 10 Don't render。
+    pub rendermode: Option<u8>,
+    /// `renderamt` 0–255（0 = 全透明；非 255 时渲染端做半透明近似）。
+    pub renderamt: Option<u8>,
+    /// `renderfx` 0–25（脉冲/闪烁等 Source 特效；GLB 无直接等价物，仅透传）。
+    pub renderfx: Option<u8>,
+    /// 模型皮肤组下标（模型文件可含多套材质；当前 GLB 导出只取默认套，仅透传统计）。
+    pub skin: Option<u16>,
+}
+
+impl PlacementSource {
+    /// 写进 GLB 节点 `extras`；`None` 的外观键**不写**（与 `ambientCube` / `vertexLighting` 同约定）。
+    ///
+    /// `vbsp_entity_index` / `vbsp_entity_name` / `vbsp_classname` 是身份键，总是写：
+    /// - 运行期插件用 `vbsp_entity_index` 直接寻址实体；
+    /// - `vbsp_entity_name` 是**合并后仍能存活的身份通道**：`scene-optimizer` 的
+    ///   `tagBrushEntityOwners` 把它盖到后代 mesh 的 `userData`，`sourceMeshName` 再把它写进
+    ///   合并来源表的区间名 ⇒ 合批后 `prop_<下标>` 区间仍可逐实体识别。
+    pub fn write_extras(&self, extras: &mut serde_json::Map<String, serde_json::Value>) {
+        extras.insert(
+            "vbsp_entity_index".into(),
+            serde_json::json!(self.entity_index),
+        );
+        extras.insert(
+            "vbsp_entity_name".into(),
+            serde_json::json!(format!("prop_{}", self.entity_index)),
+        );
+        if !self.classname.is_empty() {
+            extras.insert("vbsp_classname".into(), serde_json::json!(self.classname));
+        }
+        if let Some(v) = &self.targetname {
+            extras.insert("vbsp_targetname".into(), serde_json::json!(v));
+        }
+        if let Some(v) = &self.parentname {
+            extras.insert("vbsp_parentname".into(), serde_json::json!(v));
+        }
+        if let Some(v) = self.rendermode {
+            extras.insert("vbsp_rendermode".into(), serde_json::json!(v));
+        }
+        if let Some(v) = self.renderamt {
+            extras.insert("vbsp_renderamt".into(), serde_json::json!(v));
+        }
+        if let Some(v) = self.renderfx {
+            extras.insert("vbsp_renderfx".into(), serde_json::json!(v));
+        }
+        if let Some(v) = self.skin {
+            extras.insert("vbsp_skin".into(), serde_json::json!(v));
+        }
+    }
+}
+
+/// BSP 实体来源的模型放置（`prop_dynamic` 等）；比灯光用的 [`Entity`] 多带实体下标与外观字段。
+///
+/// 为什么**不**直接给 [`Entity`] 加字段：`render_bundle.rs` 的 `collect_light_entities` 用
+/// struct literal 构造 `Entity`/`EntityProperties`，加字段会把它编译破坏，而灯光实体不需要外观数据。
+#[derive(Debug, Clone)]
+pub struct ModelEntity {
+    /// 实体属性子集（`model` / `origin` / `angles` / `scale` 与 classname）。
+    pub properties: EntityProperties,
+    /// 实体 origin 所在 leaf 的 6 面 ambient cube；`None` = 无数据。
+    pub ambient_cube: Option<[f32; 18]>,
+    /// 实体下标 + 外观元数据。
+    pub source: PlacementSource,
+}
+
+/// [`resolve_placements`] 的实体来源抽象：灯光实体 [`Entity`] 与模型实体 [`ModelEntity`] 都可用。
+///
+/// 存在的理由：`add_models_to_gltf` 要拿到外观字段，而碰撞/三角导出等旧调用点只有 `Vec<Entity>`；
+/// 泛型 + 该 trait 让两边共用同一份放置解析，不必复制匹配逻辑。
+pub trait PlacementEntitySource {
+    /// 实体属性子集。
+    fn entity_properties(&self) -> &EntityProperties;
+    /// 实体 origin 处的 ambient cube。
+    fn entity_ambient_cube(&self) -> Option<[f32; 18]>;
+    /// GLB extras 用的身份/外观元数据；没有实体身份的来源返回 `None`（默认）。
+    fn placement_source(&self) -> Option<PlacementSource> {
+        None
+    }
+}
+
+impl PlacementEntitySource for Entity {
+    fn entity_properties(&self) -> &EntityProperties {
+        &self.properties
+    }
+
+    fn entity_ambient_cube(&self) -> Option<[f32; 18]> {
+        self.ambient_cube
+    }
+}
+
+impl PlacementEntitySource for ModelEntity {
+    fn entity_properties(&self) -> &EntityProperties {
+        &self.properties
+    }
+
+    fn entity_ambient_cube(&self) -> Option<[f32; 18]> {
+        self.ambient_cube
+    }
+
+    fn placement_source(&self) -> Option<PlacementSource> {
+        Some(self.source.clone())
+    }
 }
 
 /// 把 `"pitch yaw roll"`（度）转成四元数 `[x, y, z, w]`。
@@ -1287,10 +1416,14 @@ pub fn angles_to_quat(pitch: f32, yaw: f32, roll: f32) -> [f32; 4] {
 /// 匹配优先级：
 /// 1. `static_props` **完整路径**精确匹配（忽略大小写与 `\`/`/` 差异）——最可靠；
 /// 2. 回退到**文件名包含**匹配（兼容磁盘模式下只有文件名可用的老路径）；
-/// 3. 再回退到实体（`prop_dynamic` 等）的 `model` 字段匹配。
-pub fn resolve_placements(
+/// 3. 再回退到实体（`prop_dynamic` 等）的 `model` 字段匹配；实体来源额外带上
+///    身份/外观元数据（[`PlacementSource`]），供 GLB 节点 extras 使用。
+///
+/// `entities` 泛型化是为了兼容两种实体：装配点传 [`ModelEntity`]（带实体下标与外观），
+/// 碰撞/三角导出等旧调用点仍传 [`Entity`]（灯光用，无外观）。
+pub fn resolve_placements<E: PlacementEntitySource>(
     model_full_path: &str,
-    entities: &[Entity],
+    entities: &[E],
     static_props: &[StaticProp],
 ) -> Vec<Placement> {
     fn normalize(s: &str) -> String {
@@ -1307,6 +1440,7 @@ pub fn resolve_placements(
         solid: Some(prop.solid),
         ambient_cube: prop.ambient_cube,
         vertex_lighting: prop.vertex_lighting.clone(),
+        source: None,
     };
 
     // 1. 完整路径精确匹配
@@ -1331,13 +1465,14 @@ pub fn resolve_placements(
 
     // 3. 实体来源
     for entity in entities {
-        let Some(model_path) = &entity.properties.model else {
+        let properties = entity.entity_properties();
+        let Some(model_path) = &properties.model else {
             continue;
         };
         if !normalize(model_path).contains(&filename) {
             continue;
         }
-        let Some(origin) = &entity.properties.origin else {
+        let Some(origin) = &properties.origin else {
             continue;
         };
         let Some(translation) = parse_origin_str(origin) else {
@@ -1345,21 +1480,20 @@ pub fn resolve_placements(
         };
         out.push(Placement {
             translation,
-            rotation: entity
-                .properties
+            rotation: properties
                 .angles
                 .as_ref()
                 .and_then(|a| parse_angles_str(a)),
-            scale: entity
-                .properties
+            scale: properties
                 .scale
                 .as_ref()
                 .and_then(|s| parse_scale_str(s)),
             solid: None,
-            ambient_cube: entity.ambient_cube,
+            ambient_cube: entity.entity_ambient_cube(),
             // 实体来源（prop_dynamic 等）没有 sp_*.vhv（那是 prop_static 的烘焙产物）⇒ 只有第 2 级
             // leaf ambient cube（由 `collect_model_entities` 按实体 origin 查得）
             vertex_lighting: None,
+            source: entity.placement_source(),
         });
     }
     out
@@ -1484,17 +1618,22 @@ pub fn map_coords<C: Into<[f32; 3]>>(vec: C) -> [f32; 3] {
     [vec[1], vec[2], vec[0]]
 }
 
-/// BSP 内**带模型**的实体（`prop_dynamic` 等）→ [`Entity`]，供 `resolve_placements` 的实体支路。
+/// BSP 内**带模型**的实体（`prop_dynamic` 等）→ [`ModelEntity`]，供 `resolve_placements` 的实体支路。
 ///
 /// 收集条件：有非空 `model` 键。`classname` 取不到则跳过；`origin` / `angles` 原样搬运，
 /// `scale` 优先取 `scale`、回退 `modelscale`（`prop_dynamic` 用后者）。灯光相关键一律 `None`
-/// —— 灯走 `light_entities`，与本表无关。
+/// —— 灯走 `light_entities`，与本表无关。外观键（`rendermode` / `renderamt` / `renderfx` /
+/// `skin` / `targetname` / `parentname`）按数字解析后放进 [`PlacementSource`]；解析失败的键
+/// 记 `None`（GLB extras 里不写）。
+///
+/// 实体下标来自 `bsp.entities.iter().enumerate()`，与 `entityIoJson.volumes[].index`
+/// （`bsp_to_gltf_core` 的 brush 实体编号）同序 —— 运行期插件靠它把 GLB 节点映射回实体。
 ///
 /// 与 `static_props` 的关系：`resolve_placements` 前两级（完整路径 / 文件名包含）命中静态道具时
 /// 提前返回，故本表只补「没有 static prop 条目」的实例（动态道具即此类）。
-pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<Entity> {
+pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<ModelEntity> {
     let mut out = Vec::new();
-    for ent in bsp.entities.iter() {
+    for (entity_index, ent) in bsp.entities.iter().enumerate() {
         let Ok(model) = ent.prop("model") else {
             continue;
         };
@@ -1505,7 +1644,11 @@ pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<Entity> {
             continue;
         };
         let prop = |key: &'static str| ent.prop(key).ok().map(|s| s.to_string());
-        out.push(Entity {
+        // Source 键是文本，逐键解析成数字；非法/越界值当作缺键（插件侧按缺省不处理）。
+        let number = |key: &'static str| prop(key).and_then(|v| v.trim().parse::<u16>().ok());
+        let u8_key = |key: &'static str| number(key).and_then(|v| u8::try_from(v).ok());
+        let non_empty = |key: &'static str| prop(key).filter(|s| !s.is_empty());
+        out.push(ModelEntity {
             properties: EntityProperties {
                 classname: classname.to_string(),
                 model: Some(model.to_string()),
@@ -1521,7 +1664,18 @@ pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<Entity> {
                 pitch: None,
                 spotlight_width: None,
                 spotlight_length: None,
-            }, ambient_cube: prop("origin").and_then(|o| parse_origin_source(&o)).and_then(|p| bsp.ambient_cube_at_point(p)),
+            },
+            ambient_cube: prop("origin").and_then(|o| parse_origin_source(&o)).and_then(|p| bsp.ambient_cube_at_point(p)),
+            source: PlacementSource {
+                entity_index: entity_index as u32,
+                classname: classname.to_string(),
+                targetname: non_empty("targetname"),
+                parentname: non_empty("parentname"),
+                rendermode: u8_key("rendermode"),
+                renderamt: u8_key("renderamt"),
+                renderfx: u8_key("renderfx"),
+                skin: number("skin"),
+            },
         });
     }
     out

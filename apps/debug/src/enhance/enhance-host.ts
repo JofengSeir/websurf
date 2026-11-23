@@ -39,6 +39,18 @@ const PLUGIN_FACTORIES: Readonly<Record<string, EnhancePluginFactory>> = {
     const mod = await import('./plugins/brush-visibility.js');
     return mod.createBrushVisibilityPlugin(runtime);
   },
+  'prop-appearance': async (runtime) => {
+    const mod = await import('./plugins/prop-appearance.js');
+    return mod.createPropAppearancePlugin(runtime);
+  },
+  'damage-health': async (runtime) => {
+    const mod = await import('./plugins/damage-health.js');
+    return mod.createDamageHealthPlugin(runtime);
+  },
+  'fade-screen': async (runtime) => {
+    const mod = await import('./plugins/fade-screen.js');
+    return mod.createFadeScreenPlugin(runtime);
+  },
 };
 
 /** 宿主从 app 层拿到的能力（传送必须双端同步，因此由 app 注入而不是宿主自己找 renderer）。 */
@@ -228,8 +240,9 @@ export class EnhanceHost {
     // `input` 是最高频的一类（每次 AcceptInput 一条），插件不需要，提前挡掉。
     if (event.kind === 'input') return;
     for (const plugin of this.plugins.values()) plugin.onEvent?.(event);
-    // brush 事件会改变插件的「已生效实体数/最后事件」，面板状态行需要跟上。
-    if (event.kind === 'brush') this.notifyStatusChanged();
+    // 已装载插件消费的任何事件都可能改变其状态行（brush 开关、伤害、传送计数…）：
+    // 事件本身不是每帧产生（无插件时 sink 为 null，这里根本不会被调用），刷新一次 UI 的成本可忽略。
+    this.notifyStatusChanged();
   };
 
   /** 按需装载插件；失败时自动关掉该开关（避免每次启动都重试并刷错误）。 */

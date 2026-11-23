@@ -178,8 +178,14 @@ const dom = {
 	// 「增强插件（实验）」区：默认全关；勾选 → EnhanceHost.setEnabled → 动态 import 插件
 	enhRuntimeTeleportChk: document.getElementById('enhRuntimeTeleport') as HTMLInputElement | null,
 	enhBrushVisibilityChk: document.getElementById('enhBrushVisibility') as HTMLInputElement | null,
+	enhPropAppearanceChk: document.getElementById('enhPropAppearance') as HTMLInputElement | null,
+	enhDamageHealthChk: document.getElementById('enhDamageHealth') as HTMLInputElement | null,
+	enhFadeScreenChk: document.getElementById('enhFadeScreen') as HTMLInputElement | null,
 	enhanceStatusLine: document.getElementById('enhanceStatusLine') as HTMLElement | null,
 	enhBrushVisibilityStatus: document.getElementById('enhBrushVisibilityStatus') as HTMLElement | null,
+	enhPropAppearanceStatus: document.getElementById('enhPropAppearanceStatus') as HTMLElement | null,
+	enhDamageHealthStatus: document.getElementById('enhDamageHealthStatus') as HTMLElement | null,
+	enhFadeScreenStatus: document.getElementById('enhFadeScreenStatus') as HTMLElement | null,
 	// 贴墙近平面自适应：两张滑块分别写 rendererMain.setNearParams 的探测距离与收缩系数
 	nearProbeDistRange: document.getElementById('nearProbeDist') as HTMLInputElement | null,
 	nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
@@ -247,6 +253,24 @@ function refreshEnhanceStatusLines(): void {
 		dom.enhBrushVisibilityStatus.textContent = status
 			? `动态 brush 可见性：${status}`
 			: '动态 brush 可见性：未启用（默认关闭）';
+	}
+	if (dom.enhPropAppearanceStatus) {
+		const status = enhanceHost?.statusOf('prop-appearance') ?? '';
+		dom.enhPropAppearanceStatus.textContent = status
+			? `prop 外观层级：${status}`
+			: 'prop 外观层级：未启用（默认关闭）';
+	}
+	if (dom.enhDamageHealthStatus) {
+		const status = enhanceHost?.statusOf('damage-health') ?? '';
+		dom.enhDamageHealthStatus.textContent = status
+			? `运行时伤害/生命：${status}`
+			: '运行时伤害/生命：未启用（默认关闭）';
+	}
+	if (dom.enhFadeScreenStatus) {
+		const status = enhanceHost?.statusOf('fade-screen') ?? '';
+		dom.enhFadeScreenStatus.textContent = status
+			? `运行时屏幕渐变：${status}`
+			: '运行时屏幕渐变：未启用（默认关闭）';
 	}
 }
 /** config 段同步实例（P5）：AppRuntime 就绪后构造；sendConfig + renderer.applyConfigPatch 走适配器。 */
@@ -2033,6 +2057,27 @@ function bindUI(): void {
 			refreshEnhanceStatusLines();
 		});
 	}
+	if (dom.enhPropAppearanceChk) {
+		dom.enhPropAppearanceChk.checked = enhanceHost?.isEnabled('prop-appearance') ?? false;
+		dom.enhPropAppearanceChk.addEventListener('change', (e) => {
+			enhanceHost?.setEnabled('prop-appearance', (e.target as HTMLInputElement).checked);
+			refreshEnhanceStatusLines();
+		});
+	}
+	if (dom.enhDamageHealthChk) {
+		dom.enhDamageHealthChk.checked = enhanceHost?.isEnabled('damage-health') ?? false;
+		dom.enhDamageHealthChk.addEventListener('change', (e) => {
+			enhanceHost?.setEnabled('damage-health', (e.target as HTMLInputElement).checked);
+			refreshEnhanceStatusLines();
+		});
+	}
+	if (dom.enhFadeScreenChk) {
+		dom.enhFadeScreenChk.checked = enhanceHost?.isEnabled('fade-screen') ?? false;
+		dom.enhFadeScreenChk.addEventListener('change', (e) => {
+			enhanceHost?.setEnabled('fade-screen', (e.target as HTMLInputElement).checked);
+			refreshEnhanceStatusLines();
+		});
+	}
 	refreshEnhanceStatusLines();
 
 	// 近平面自适应参数（滑块 ↔ 输入框双向同步 + 渲染器实时生效）
@@ -2274,6 +2319,9 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 		entityIoJson: bundle.entityIoJson,
 		teleportJson: bundle.teleportJson,
 		sceneRoot: (rendererMain as unknown as { scene?: unknown } | null)?.scene ?? null,
+		// 死亡/重生类插件用：本图主出生点（与 game.setInitialSpawn 同一份 bundle.spawn）
+		spawn: [bundle.spawn.x, bundle.spawn.y, bundle.spawn.z],
+		spawnYawDeg: bundle.spawn.yawDeg,
 	});
 	refreshEnhanceStatusLines();
 	// UI 激活（控件/面板同步/缺失纹理弹窗）

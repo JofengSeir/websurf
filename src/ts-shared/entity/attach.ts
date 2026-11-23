@@ -65,7 +65,9 @@ export function attachEntitySystem(options: AttachEntityOptions): EntitySystem |
     damage: (amount, type) => effect('entity:damage', `${amount}/${type}`),
     removePlayer: () => effect('entity:removePlayer', ''),
     gameText: (message) => effect('game_text', message),
-    fade: (_color, duration, hold, flags) => effect('env_fade', `${duration}/${hold}/${flags}`),
+    // 载荷带上颜色：增强插件（`env_fade` 消费方）要用 rendercolor/renderamt 才能按参数
+    // 呈现过场渐变；旧格式（duration/hold/flags 三个数字）不再产生，但插件仍兼容解析。
+    fade: (color, duration, hold, flags) => effect('env_fade', JSON.stringify({ color, duration, hold, flags })),
     serverCommand: (c) => effect('servercommand', c),
     clientCommand: (c) => effect('clientcommand', c),
     playSound: (s, i) => effect('sound:play', `${i}:${s}`),

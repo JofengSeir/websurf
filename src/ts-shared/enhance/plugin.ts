@@ -29,6 +29,12 @@ export interface EnhanceSceneContext {
    * 换图后该引用失效（每次 `onMapLoad` 拿新根）；插件不得跨图持有。
    */
   sceneRoot?: unknown;
+  /**
+   * 本图主出生点（世界坐标 Y-up，`[x,y,z]`）与朝向（度）。
+   * 供「死亡后回到出生点」这类插件使用；地图没有可用出生点时为 undefined。
+   */
+  spawn?: readonly number[];
+  spawnYawDeg?: number;
 }
 
 /** 宿主注入给插件的能力（全部走宿主，插件不认识具体渲染/物理类）。 */
