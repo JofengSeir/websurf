@@ -76,6 +76,11 @@ import { collectTextureScrolls, updateTextureScrolls, type TextureScrollEntry } 
 import { setupRotButtons, updateRotButtons, type RotButtonPivot } from './rot-buttons.js';
 import { collectLaserBeams, LaserBeams } from './lasers.js';
 import { collectParticleEntities, parseEntityIoBlocks, ParticleSystems } from './particles.js';
+import {
+  emptyEntityExtrasStats,
+  EntityExtras,
+  type EntityExtrasStats,
+} from './entity-extras/index.js';
 import type { PoseScope } from '../camera/pose-entry.js';
 
 /** 三端标识（同时用于探针 `scope` 与日志前缀）。 */
@@ -246,12 +251,15 @@ export class RenderSession {
   /** spot 光源的可见光柱（`point_spotlight`）；null = 本图没有 spot。 */
   private spotBeams: THREE.Group | null = null;
   /**
-   * 场景扩展图元：`env_laser` 光束与 PCF 粒子系统。它们不是 GLB 的一部分，而是实体 lump
-   * 的副产物（`lasers.ts` / `particles.ts`）。三端都在 `loadScene` 里装配这一份，避免
-   * 「只在 debug 装」再次造成端间画面不一致。
+   * 场景扩展图元：`env_laser` 光束、PCF 粒子系统，以及「有数据、零消费者」的地图资产实体
+   * （`env_sprite` / `env_sprite_clientside`、`point_worldtext`、`move_rope`+`keyframe_rope`、
+   * `env_beam`）。它们不是 GLB 的一部分，而是实体 lump 的副产物
+   * （`lasers.ts` / `particles.ts` / `entity-extras/`）。三端都在 `loadScene` 里装配这一份，
+   * 避免「只在 debug 装」再次造成端间画面不一致。
    */
   private laserBeams: LaserBeams | null = null;
   private particleSystems: ParticleSystems | null = null;
+  private entityExtras: EntityExtras | null = null;
   /**
    * 物理线扫掠（`debug_line_trace` 包装）：物理世界就绪后由宿主调 `setLaserPhysicsTrace`
    * 重截断光束——只认实体 brush，触发体/nodraw/水面被忽略（渲染网格 Raycaster 会误截）。
@@ -979,11 +987,12 @@ export class RenderSession {
   }
 
   /**
-   * 装配 `env_laser` 光束与 PCF 粒子（实体 lump 的副产物），并先推一拍 `update()`。
+   * 装配 `env_laser` 光束、PCF 粒子与地图资产实体图元（实体 lump 的副产物），并先推一拍
+   * `update()`。
    *
    * 三端共用：数据同源（`entityIoJson`），装配顺序固定为「建 → 挂场景 → 先截断 → 推一拍」，
    * 这样预编译与整帧预热都能覆盖它们的材质（旧实现只在 debug 装配，且晚于预热帧）。
-   * 装配失败只告警并清空，不影响主场景（这两类图元是观感增强，不是必需）。
+   * 装配失败只告警并清空，不影响主场景（这些图元是观感增强，不是必需）。
    */
   private setupSceneExtras(entityIoJson?: string | null): void {
     this.disposeSceneExtras();
@@ -1014,16 +1023,41 @@ export class RenderSession {
       const g = globalThis as {
         __vbspParticles?: ParticleSystems | null;
         __vbspLasers?: LaserBeams | null;
+        __vbspEntityExtras?: EntityExtras | null;
+        __vbspEntityExtrasStats?: EntityExtrasStats;
       };
       g.__vbspParticles = this.particleSystems;
       g.__vbspLasers = this.laserBeams;
-      if (!this.laserBeams && !this.particleSystems) return;
+      // 地图资产实体（env_sprite / point_worldtext / move_rope+keyframe_rope / env_beam）：
+      // 实体 lump 里有数据但此前没有消费者。A/B 逃生：`globalThis.__vbspEntityExtrasOff = true`
+      // 时整类不装配；四类实体总数为 0 时 `fromBlocks` 返回 null，不建对象/贴图、零新增 draw。
+      const extrasOff =
+        (globalThis as { __vbspEntityExtrasOff?: boolean }).__vbspEntityExtrasOff === true;
+      this.entityExtras = extrasOff
+        ? null
+        : EntityExtras.fromBlocks(entityBlocks, (label, err) => {
+            console.warn(`[${this.app}][extras] ${label} 装配失败（跳过该类）：`, err);
+          });
+      if (this.entityExtras) {
+        this.scene.add(this.entityExtras.root);
+        // 与激光/粒子同口径：挂上场景后先推一拍，让预编译与整帧预热都能覆盖其材质。
+        this.entityExtras.update(this.camera);
+      }
+      g.__vbspEntityExtras = this.entityExtras;
+      g.__vbspEntityExtrasStats = this.entityExtras
+        ? this.entityExtras.stats
+        : emptyEntityExtrasStats();
+      if (!this.laserBeams && !this.particleSystems && !this.entityExtras) return;
       // 粒子的网格/材质在第一次 update 才创建：预热与预编译之前必须先建出来。
       const t = 1 / 64;
       this.laserBeams?.update(t, this.camera);
       this.particleSystems?.update(t, this.camera);
+      const extrasStats = this.entityExtras?.stats;
       console.info(
-        `[${this.app}][extras] env_laser ${beams.length} 条 / PCF 粒子 ${entities.length} 组已挂入场景`,
+        `[${this.app}][extras] env_laser ${beams.length} 条 / PCF 粒子 ${entities.length} 组 / ` +
+          `资产实体 sprite ${extrasStats?.sprite ?? 0} · worldtext ${extrasStats?.worldtext ?? 0} · ` +
+          `rope ${extrasStats?.rope ?? 0} · beam ${extrasStats?.beam ?? 0} ` +
+          `（新增 draws ${extrasStats?.draws ?? 0}）已挂入场景`,
       );
     } catch (err) {
       console.warn(`[${this.app}][extras] 场景扩展装配失败（跳过）：`, err);
@@ -1031,7 +1065,7 @@ export class RenderSession {
     }
   }
 
-  /** 释放场景扩展图元（激光束 / PCF 粒子）及其根节点；幂等。 */
+  /** 释放场景扩展图元（激光束 / PCF 粒子 / 地图资产实体）及其根节点；幂等。 */
   private disposeSceneExtras(): void {
     if (this.laserBeams) {
       this.scene.remove(this.laserBeams.root);
@@ -1043,12 +1077,21 @@ export class RenderSession {
       this.particleSystems.dispose();
       this.particleSystems = null;
     }
+    if (this.entityExtras) {
+      this.scene.remove(this.entityExtras.root);
+      this.entityExtras.dispose();
+      this.entityExtras = null;
+    }
     const g = globalThis as {
       __vbspParticles?: ParticleSystems | null;
       __vbspLasers?: LaserBeams | null;
+      __vbspEntityExtras?: EntityExtras | null;
+      __vbspEntityExtrasStats?: EntityExtrasStats;
     };
     g.__vbspParticles = null;
     g.__vbspLasers = null;
+    g.__vbspEntityExtras = null;
+    g.__vbspEntityExtrasStats = emptyEntityExtrasStats();
   }
 
   /**
@@ -1299,7 +1342,8 @@ export class RenderSession {
     // Source `TextureScroll` / `momentary_rot_button` / 激光 UV / 粒子：按真实时间推进。
     // 放在可见性之前：这些动画不影响剔除，但它们要吃到本帧的 dt，越早算越准；
     // 后面 6~9 趟 `renderer.render` 复用同一份矩阵与顶点。
-    const extrasAnimating = this.laserBeams !== null || this.particleSystems !== null;
+    const extrasAnimating =
+      this.laserBeams !== null || this.particleSystems !== null || this.entityExtras !== null;
     if (this.textureScrolls.length > 0 || this.rotButtons.length > 0 || extrasAnimating) {
       const now = performance.now();
       const dt = this.lastFrameAt > 0 ? Math.min(0.1, (now - this.lastFrameAt) / 1000) : 0;
@@ -1310,6 +1354,8 @@ export class RenderSession {
       if (this.rotButtons.length > 0) updateRotButtons(this.rotButtons, dt);
       if (this.laserBeams) this.laserBeams.update(animDt, this.camera);
       if (this.particleSystems) this.particleSystems.update(animDt, this.camera);
+      // 资产实体图元（sprite/文字/beam）是屏幕朝向的：相机一动就要重写四边形顶点。
+      if (this.entityExtras) this.entityExtras.update(this.camera);
     }
     // 动态对象（旋钮 pivot 等）刚改过变换：本帧在这里刷新一次世界矩阵，后面 6~9 趟
     // `renderer.render` 直接复用（`scene.matrixWorldAutoUpdate` 在构造函数里关掉了）。
