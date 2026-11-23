@@ -579,6 +579,10 @@ fn default_true() -> bool {
 /// `func_dustcloud` / `func_smokevolume` 是纯视觉体积（`CFunc_DustCloud` / `CFuncSmokeVolume`
 /// 都 `SetSolid(SOLID_NONE)`）；`func_lod` 同理（`CFunc_LOD` 只做距离淡出）。surf_voyager 的
 /// 全部 64 个出生点都在一个 `func_dustcloud` 体积内，之前被当固体把玩家整局卡死（用户实测）。
+///
+/// `func_buyzone` 是 CS:GO 的购买区触发体积（L4D2 引擎没有该类，实体创建失败、brush 不参与
+/// 玩家碰撞）；ze_cursed_bear_tales 的 3 个 `func_buyzone` 体积正好罩住 T/CT 出生点房间，
+/// 被当固体后玩家出生即嵌在实心里、全候选无解 ⇒ 整局冻结（WASD 完全不动，2026-11-23 实测）。
 pub fn entity_is_non_solid(classname: &str) -> bool {
     classname.starts_with("trigger_")
         || classname == "func_illusionary"
@@ -589,6 +593,7 @@ pub fn entity_is_non_solid(classname: &str) -> bool {
         || classname == "func_dustcloud"
         || classname == "func_smokevolume"
         || classname == "func_lod"
+        || classname == "func_buyzone"
 }
 
 /// 实体 → 模型 classname 映射（`model="*N"` 实体）；model[0]（worldspawn）为 None。
@@ -1033,5 +1038,22 @@ pub fn export_entity_io_data(bsp: &vbsp::Bsp) -> EntityIoData {
     EntityIoData {
         entities_text: bsp.entities.raw().to_string(),
         volumes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::entity_is_non_solid;
+
+    #[test]
+    fn func_buyzone_is_non_solid() {
+        // CS:GO 购买区体积在 L4D2 下不创建、不参与玩家碰撞；被当固体时
+        // ze_cursed 的 T/CT 出生点整局冻结（2026-11-23 实测）。
+        assert!(entity_is_non_solid("func_buyzone"));
+        assert!(entity_is_non_solid("trigger_multiple"));
+        assert!(entity_is_non_solid("func_dustcloud"));
+        assert!(!entity_is_non_solid("func_wall_toggle"));
+        assert!(!entity_is_non_solid("func_door"));
+        assert!(!entity_is_non_solid("worldspawn"));
     }
 }
