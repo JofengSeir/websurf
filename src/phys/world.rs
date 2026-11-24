@@ -87,19 +87,88 @@ pub struct Brush {
 }
 
 /// 梯子 brush：几何与 `Brush` 同构（`planes` 朝外 + AABB），额外带一个可攀爬面朝向
-/// `facing`（由 `compute_ladder_facing` 从平面集求得，y 恒为 0）。
-/// `World::ladder_at` 只用 `planes` 判相交。
+/// `facing`（由 `compute_ladder_facing` 从平面集求得，y 恒为 0）与所属实体下标。
+/// `World::ladder_at` 只用 `planes` 判相交，并按实体碰撞状态过滤。
+///
+/// **facing 只是兜底**：盒子形状的梯子（四个竖直面水平分量都是 1）在
+/// `compute_ladder_facing` 里会因平面顺序选到任意一面（可能沿 X 或 Z），所以真正攀爬用的
+/// 朝向在每次附身时由 [`LadderVolume::facing_toward`] 按玩家所在方位重新选面。
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // min/max 供构造临时 Brush 使用（ladder_at），保持与 Brush 同构
 pub struct LadderVolume {
     pub planes: Vec<Plane>,
-    /// AABB 下界：当前代码内无读取方（判定只用 `planes`），保留以与 brush 数据同构。
+    /// AABB 下界：`facing_toward` 用中心/最近点判玩家所在方位。
     pub min: V3,
-    /// AABB 上界：同 `min`，当前代码内无读取方。
+    /// AABB 上界：同 `min`。
     pub max: V3,
-    /// 攀爬面朝向（水平分量已归一化、y 恒为 0）：`player::check_ladder` 用它判"是否面朝
-    /// 梯子"，`player::ladder_move` 用它在跳离时给三轴速度。
+    /// 攀爬面朝向的**兜底值**（水平分量已归一化、y 恒为 0）：玩家正好落在梯子 AABB
+    /// 水平投影内、无法从方位选面时使用。
     pub facing: V3,
+    /// 所属实体枚举下标（-1 = worldspawn）。与 [`Brush::entity`] 同序：实体 brush
+    /// 的碰撞状态切换（`World::entity_solid`）同样决定该梯子是否可攀爬——`func_door`
+    /// 等实体被隐藏/设为非实心后，它内部带 LADDER 内容的刷子不应还能被爬
+    /// （否则会出现「看不见却能挂上去」的隐形梯）。
+    pub entity: i32,
+}
+
+impl LadderVolume {
+    /// 按玩家位置选一个「朝向玩家」的水平面法线，作为本次攀爬的 facing。
+    ///
+    /// 盒子梯子的竖直面法线水平分量全是 1，`compute_ladder_facing` 的「取最大」会
+    /// 退化成按平面顺序任选一面；若选中切线方向，攀爬会变成「只推墙不上升」（表现为
+    /// 挂住不动）。这里改为：取玩家到 AABB 最近点（水平）的方向，在梯子竖直面法线里
+    /// 选与其夹角最小者（即玩家所站那一面），退化时回退 [`Self::facing`]。
+    pub fn facing_toward(&self, origin: &V3) -> V3 {
+        // 玩家水平投影相对梯子 AABB 的方位（最近点法：玩家在 AABB 外时稳定）。
+        let near_x = origin[0].clamp(self.min[0], self.max[0]);
+        let near_z = origin[2].clamp(self.min[2], self.max[2]);
+        let mut dir = [origin[0] - near_x, 0.0, origin[2] - near_z];
+        let len = (dir[0] * dir[0] + dir[2] * dir[2]).sqrt();
+        if len > 1e-3 {
+            dir[0] /= len;
+            dir[2] /= len;
+            let mut best = self.facing;
+            let mut best_dot = 0.2f64; // 至少要明显朝向玩家，否则回退兜底 facing
+            for plane in &self.planes {
+                let h_len = (plane.normal[0] * plane.normal[0]
+                    + plane.normal[2] * plane.normal[2])
+                    .sqrt();
+                if h_len < 0.3 {
+                    continue;
+                }
+                let nx = plane.normal[0] / h_len;
+                let nz = plane.normal[2] / h_len;
+                let d = nx * dir[0] + nz * dir[2];
+                if d > best_dot {
+                    best_dot = d;
+                    best = [nx, 0.0, nz];
+                }
+            }
+            return best;
+        }
+        // 玩家水平落在 AABB 内：用中心指向玩家（可能仍退化），最后回退兜底 facing。
+        let cx = (self.min[0] + self.max[0]) * 0.5;
+        let cz = (self.min[2] + self.max[2]) * 0.5;
+        let mut dir = [origin[0] - cx, 0.0, origin[2] - cz];
+        let len = (dir[0] * dir[0] + dir[2] * dir[2]).sqrt();
+        if len > 1e-3 {
+            dir[0] /= len;
+            dir[2] /= len;
+            for plane in &self.planes {
+                let h_len = (plane.normal[0] * plane.normal[0]
+                    + plane.normal[2] * plane.normal[2])
+                    .sqrt();
+                if h_len < 0.3 {
+                    continue;
+                }
+                let nx = plane.normal[0] / h_len;
+                let nz = plane.normal[2] / h_len;
+                if nx * dir[0] + nz * dir[2] > 0.2 {
+                    return [nx, 0.0, nz];
+                }
+            }
+        }
+        self.facing
+    }
 }
 
 /// 模型三角形碰撞网格：`vertices` 是世界空间顶点，`indices` 是三元组下标。
@@ -1124,6 +1193,9 @@ pub struct World {
     /// [`World::capture_base_solids`] 落一次。`pub(crate)` 供 `PhysWorld` 做「站在
     /// 移动 brush 上的玩家随平台带走」判定（见 `PhysWorld::set_brush_offset`）。
     pub(crate) base_solids: Vec<Brush>,
+    /// `ladders` 的基准快照（位移前），与 [`World::base_solids`] 同口径：
+    /// `set_entity_offset` 平移梯子时也按绝对位移从它重算。
+    pub(crate) base_ladders: Vec<LadderVolume>,
     grid: BrushGrid,
     tri_grid: TriangleGrid,
 }
@@ -1171,6 +1243,18 @@ fn brush_is_active(brush: &Brush, entity_solid: &[bool]) -> bool {
         .unwrap_or(true)
 }
 
+/// 梯子当前是否可攀爬：与 [`brush_is_active`] 同口径（世界梯子恒可爬；实体梯子查
+/// `entity_solid`，越界按可爬=保守，避免误判把正常梯子关掉）。
+fn ladder_is_active(ladder: &LadderVolume, entity_solid: &[bool]) -> bool {
+    if ladder.entity < 0 {
+        return true;
+    }
+    entity_solid
+        .get(ladder.entity as usize)
+        .copied()
+        .unwrap_or(true)
+}
+
 impl World {
     /// 空世界：三份数据为空、两套索引为空。索引要用 `World::build_index` 才建起来。
     pub fn new() -> Self {
@@ -1181,6 +1265,7 @@ impl World {
             entity_solid: Vec::new(),
             entity_offsets: Vec::new(),
             base_solids: Vec::new(),
+            base_ladders: Vec::new(),
             grid: BrushGrid::new(),
             tri_grid: TriangleGrid::new(),
         }
@@ -1218,10 +1303,11 @@ impl World {
         previous
     }
 
-    /// 把当前 `solids` 记成「位移基准」。装载完成、`build_index` 之后调用一次；
-    /// 之后 [`World::set_entity_offset`] 都从这份快照重算，不依赖 `solids` 的现值。
+    /// 把当前 `solids` / `ladders` 记成「位移基准」。装载完成、`build_index` 之后调用一次；
+    /// 之后 [`World::set_entity_offset`] 都从这份快照重算，不依赖几何的现值。
     pub fn capture_base_solids(&mut self) {
         self.base_solids = self.solids.clone();
+        self.base_ladders = self.ladders.clone();
     }
 
     /// 运行期平移某个实体的全部 brush（电梯 / 移动平台 / 可移动门）。
@@ -1274,6 +1360,33 @@ impl World {
         }
         if moved > 0 {
             self.grid.build(&self.solids, 512.0);
+        }
+        // 梯子也随所属实体一起平移（门的 LADDER 面、移动平台上的梯子等）：
+        // 与 solids 同口径从基准快照重算，避免累加漂移。
+        if self.base_ladders.len() != self.ladders.len() {
+            self.base_ladders = self.ladders.clone();
+        }
+        for (index, base) in self.base_ladders.iter().enumerate() {
+            if base.entity != entity {
+                continue;
+            }
+            let mut ladder = base.clone();
+            ladder.min = [
+                base.min[0] + offset[0],
+                base.min[1] + offset[1],
+                base.min[2] + offset[2],
+            ];
+            ladder.max = [
+                base.max[0] + offset[0],
+                base.max[1] + offset[1],
+                base.max[2] + offset[2],
+            ];
+            for plane in &mut ladder.planes {
+                plane.dist += plane.normal[0] * offset[0]
+                    + plane.normal[1] * offset[1]
+                    + plane.normal[2] * offset[2];
+            }
+            self.ladders[index] = ladder;
         }
         moved
     }
@@ -1427,10 +1540,16 @@ impl World {
     /// 逐个梯子调 `box_in_brush`，只用 `planes`（不看梯子的 AABB）。`ladders` 不在任何
     /// 空间索引里，这里是按数据顺序的线性扫描：多个梯子重叠时返回下标最小者。
     ///
+    /// **按实体碰撞状态过滤**：实体 brush（如 `func_door`）里的 LADDER 面在实体被隐藏/
+    /// 设为非实心后不可再攀爬（否则会有「看不见却能挂上去」的隐形梯）。
+    ///
     /// 返回下标而不是引用，是为了让调用方（`player::check_ladder`）能在拿到结果后继续
-    /// 以 `&mut world` 走移动流程；它再用下标去取 `facing`。
+    /// 以 `&mut world` 走移动流程；它再用下标去取 `facing` / `facing_toward`。
     pub fn ladder_at(&self, origin: &V3, mins: &V3, maxs: &V3) -> Option<usize> {
         for (i, ladder) in self.ladders.iter().enumerate() {
+            if !ladder_is_active(ladder, &self.entity_solid) {
+                continue;
+            }
             if box_in_brush(origin, mins, maxs, &ladder.planes) {
                 return Some(i);
             }

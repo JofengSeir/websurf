@@ -116,6 +116,9 @@ mod brush_solid_tests;
 /// 移动 brush（`World::set_entity_offset` / `PhysWorld::set_brush_offset` + 载客）。
 #[cfg(test)]
 mod brush_offset_tests;
+/// 梯子回归（朝向选面、攀爬速度、实体梯子启停、随实体平移）。
+#[cfg(test)]
+mod ladder_tests;
 
 #[cfg(test)]
 mod teleport_switch_tests;
@@ -304,6 +307,7 @@ impl PhysWorld {
                     min,
                     max,
                     facing,
+                    entity: b.entity,
                 });
             } else if b.is_solid {
                 self.world.solids.push(Brush {

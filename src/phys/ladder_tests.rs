@@ -1,0 +1,203 @@
+//! 梯子回归（4 项）：朝向按玩家方位选面、盒子梯子能真的往上爬、
+//! 实体梯子随实体碰撞状态启停（隐形梯修复）、运行期平移梯子。
+//!
+//! 病灶一（owner 2026-11-24 报「梯子无法正常使用，只能挂上去」）：`compute_ladder_facing` 对
+//! 盒子梯子（四个竖直面水平分量都是 1）用「取最大」+严格大于，会按平面顺序选中任意一面，
+//! 可能是**切线方向**（沿 X 或 Z）；`ladder_move` 用这个 facing 当攀爬基，wish 的垂直分量
+//! ≈ 0、横向分量变成推墙 ⇒ 玩家挂住不上升。修法：`LadderVolume::facing_toward` 按玩家到
+//! AABB 最近点的方位，在竖直面法线里选朝向玩家的一面。
+//!
+//! 病灶二（同报告「地图中的梯子是没显示的时候也可以挂上去」）：门实体（`func_door`
+//! spawnpos=1，内部带 LADDER 面）出生即隐藏/非实心，但 `World::ladder_at` 不复核实体状态
+//! ⇒ 隐形梯仍可攀爬。修法：`LadderVolume.entity` + `ladder_is_active` 过滤。
+//!
+//! 本文件直接驱动 `World` + `player_tick`（不经 wasm），夹具用闭合盒子构造梯子体；
+//! 实体梯子的 `entity_solid` 视为「门当前是否实心/可见」。
+
+use crate::phys::player::{create_player, player_tick, PhysParams};
+use crate::phys::world::{Brush, LadderVolume, Plane, World, V3};
+
+/// 测试用步长（100 Hz；攀爬用 LADDER_SPEED 与步长无关，取整数步便于读数）。
+const DT: f64 = 1.0 / 100.0;
+/// 实体梯子所属实体下标。
+const ENTITY: i32 = 7;
+
+fn pl(normal: [f64; 3], dist: f64) -> Plane {
+    Plane { normal, dist }
+}
+
+/// 闭合盒子平面（法线朝外）。**故意把 +X 面排在第一个**：旧 `compute_ladder_facing`
+/// 会把它当作 facing，正好复现「切线朝向」病灶。
+fn box_planes(min: [f64; 3], max: [f64; 3]) -> Vec<Plane> {
+    let mut planes = Vec::with_capacity(6);
+    planes.push(pl([1.0, 0.0, 0.0], max[0]));
+    planes.push(pl([-1.0, 0.0, 0.0], -min[0]));
+    for axis in 1..3 {
+        let mut normal = [0.0; 3];
+        normal[axis] = 1.0;
+        planes.push(pl(normal, max[axis]));
+        normal[axis] = -1.0;
+        planes.push(pl(normal, -min[axis]));
+    }
+    planes
+}
+
+fn box_brush(min: [f64; 3], max: [f64; 3], entity: i32) -> Brush {
+    Brush {
+        planes: box_planes(min, max),
+        min,
+        max,
+        entity,
+    }
+}
+
+/// 梯子体：x ∈ [-50, 50]、y ∈ [0, 200]、z ∈ [-10, 10]；`facing` 兜底值故意给成切线 (+X)。
+fn ladder_volume(entity: i32) -> LadderVolume {
+    let min: V3 = [-50.0, 0.0, -10.0];
+    let max: V3 = [50.0, 200.0, 10.0];
+    LadderVolume {
+        planes: box_planes(min, max),
+        min,
+        max,
+        facing: [1.0, 0.0, 0.0], // 故意给「切线方向」，正常攀爬不许依赖它
+        entity,
+    }
+}
+
+/// 世界地板：顶面 y = 0。
+fn floor() -> Brush {
+    box_brush([-4000.0, -100.0, -4000.0], [4000.0, 0.0, 4000.0], -1)
+}
+
+/// 地板 + 一个梯子；`entity >= 0` 时按 `start_solid` 置实体碰撞状态。
+fn ladder_world(entity: i32, start_solid: bool) -> World {
+    let mut w = World::new();
+    w.solids.push(floor());
+    w.ladders.push(ladder_volume(entity));
+    if entity >= 0 {
+        w.entity_solid = vec![start_solid; entity as usize + 1];
+    }
+    w.build_index();
+    w.capture_base_solids();
+    w
+}
+
+/// 出生在地板上、梯子前方 40 HU（不重叠，避免下落途中被「空中自动抓梯」先抓住）。
+fn player_before_ladder(params: &PhysParams) -> crate::phys::player::Player {
+    create_player([0.0, 1.0, 40.0], params)
+}
+
+fn settle(w: &mut World, p: &mut crate::phys::player::Player, params: &PhysParams) {
+    for _ in 0..60 {
+        player_tick(w, p, params, DT);
+    }
+    assert!(p.on_ground, "静置后应停在地板上（实际 on_ground={}）", p.on_ground);
+}
+
+/// 按住前进 `ticks` 步，返回是否曾抓住梯子。
+fn walk_forward(
+    w: &mut World,
+    p: &mut crate::phys::player::Player,
+    params: &PhysParams,
+    ticks: usize,
+) -> bool {
+    let mut grabbed = false;
+    p.input.forward = true;
+    for _ in 0..ticks {
+        player_tick(w, p, params, DT);
+        grabbed |= p.on_ladder.is_some();
+    }
+    grabbed
+}
+
+#[test]
+fn facing_toward_follows_player_side_not_plane_order() {
+    let lv = ladder_volume(-1);
+    // 站在 +z 一侧：朝向必须是 +z 面（不是平面列表第一个的 +x）。
+    assert_eq!(lv.facing_toward(&[0.0, 50.0, 80.0]), [0.0, 0.0, 1.0]);
+    // 站在 −x 一侧。
+    assert_eq!(lv.facing_toward(&[-80.0, 50.0, 0.0]), [-1.0, 0.0, 0.0]);
+    // 站在 +x 一侧。
+    assert_eq!(lv.facing_toward(&[80.0, 50.0, 0.0]), [1.0, 0.0, 0.0]);
+}
+
+#[test]
+fn climbing_a_box_ladder_rises_at_ladder_speed() {
+    let params = PhysParams::default();
+    let mut w = ladder_world(-1, true);
+    let mut p = player_before_ladder(&params);
+    settle(&mut w, &mut p, &params);
+
+    let start_y = p.origin[1];
+    let attached = walk_forward(&mut w, &mut p, &params, 40);
+    let climbed = p.origin[1] - start_y;
+    assert!(attached, "按住前进应能抓住梯子");
+    assert!(
+        climbed > 50.0,
+        "0.4 s 应爬约 80 HU（LADDER_SPEED=200），实际 {climbed:.2} HU —— 若 ≈0 说明 facing 选到了切线方向"
+    );
+}
+
+#[test]
+fn hidden_entity_ladder_cannot_be_grabbed() {
+    let params = PhysParams::default();
+    let mut w = ladder_world(ENTITY, false); // 门出生即隐藏/非实心
+    let mut p = player_before_ladder(&params);
+    settle(&mut w, &mut p, &params);
+
+    let start_y = p.origin[1];
+    let grabbed = walk_forward(&mut w, &mut p, &params, 120);
+    assert!(!grabbed, "非实心实体里的梯子不应可攀爬（隐形梯）");
+    assert!(
+        (p.origin[1] - start_y).abs() < 1.0,
+        "不应上升：实际 Δy = {:.2}",
+        p.origin[1] - start_y
+    );
+
+    // 实体恢复实心后，同样的走法应能抓住（同一帧语义，另起一个玩家）。
+    w.set_entity_solid(ENTITY as usize, true);
+    let mut p2 = player_before_ladder(&params);
+    settle(&mut w, &mut p2, &params);
+    let grabbed2 = walk_forward(&mut w, &mut p2, &params, 120);
+    assert!(grabbed2, "实体恢复实心后梯子应可攀爬");
+}
+
+#[test]
+fn runtime_toggle_detaches_and_world_ladder_is_unaffected() {
+    let params = PhysParams::default();
+    // 实体梯子：正在爬时把它设为非实心 ⇒ 下一 tick 脱附。
+    let mut w = ladder_world(ENTITY, true);
+    let mut p = player_before_ladder(&params);
+    settle(&mut w, &mut p, &params);
+    let attached = walk_forward(&mut w, &mut p, &params, 20);
+    assert!(attached && p.on_ladder.is_some(), "先应抓住实体梯子");
+    w.set_entity_solid(ENTITY as usize, false);
+    player_tick(&mut w, &mut p, &params, DT);
+    assert!(p.on_ladder.is_none(), "实体变非实心后应立刻脱附");
+
+    // 世界梯子（entity=-1）不受 entity_solid 影响。
+    let mut w = ladder_world(-1, true);
+    w.entity_solid = vec![false; ENTITY as usize + 1];
+    let mut p = player_before_ladder(&params);
+    settle(&mut w, &mut p, &params);
+    let grabbed = walk_forward(&mut w, &mut p, &params, 120);
+    assert!(grabbed, "世界梯子（entity=-1）不应受实体状态影响");
+}
+
+#[test]
+fn offset_translates_ladder_with_its_entity() {
+    let mut w = ladder_world(ENTITY, true);
+    let hull_mins: V3 = [-16.0, 0.0, -16.0];
+    let hull_maxs: V3 = [16.0, 72.0, 16.0];
+    // 基准：玩家盒在梯子 AABB 内（原点 [0,10,0]）。
+    assert!(w.ladder_at(&[0.0, 10.0, 0.0], &hull_mins, &hull_maxs).is_some());
+
+    // 梯子里属于实体的 brush 一起上移 100：旧位置不再命中、新位置命中，AABB 同步。
+    assert_eq!(w.set_entity_offset(ENTITY, [0.0, 100.0, 0.0]), 0); // 纯梯子没有 solid brush
+    let lv = &w.ladders[0];
+    assert_eq!(lv.min[1], 100.0);
+    assert_eq!(lv.max[1], 300.0);
+    assert!(w.ladder_at(&[0.0, 10.0, 0.0], &hull_mins, &hull_maxs).is_none());
+    assert!(w.ladder_at(&[0.0, 110.0, 0.0], &hull_mins, &hull_maxs).is_some());
+}
+

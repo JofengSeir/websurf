@@ -319,6 +319,11 @@ pub struct Player {
     /// 当前梯子（世界 ladders 索引；None = 不在梯上）。
     /// 用索引而非克隆的 LadderVolume——热路径（每 tick check_ladder）零克隆。
     pub on_ladder: Option<usize>,
+    /// 本次攀爬的梯面朝向（水平单位向量，指向玩家一侧）。附身时由
+    /// `LadderVolume::facing_toward` 按玩家方位选面得出；离开梯子后保留旧值但不再读取。
+    /// 攀爬基与跳离方向都用它，而不是 `LadderVolume::facing`（盒子梯子的静态 facing
+    /// 可能选到切线方向，导致「挂住但不上升」）。
+    pub ladder_facing: V3,
     /// 本 tick 是否贴着 surf 区间（`0.05 < normal.y < 0.7`）的平面滑行。
     /// `try_player_move` 每次进入时先清零、再按命中法线置位，所以它总是"本 tick"的口径；
     /// `air_move` 读它来累加 `surfed_since_grounded`。
@@ -460,6 +465,7 @@ impl Player {
         self.velocity = [0.0, 0.0, 0.0];
         self.on_ground = false;
         self.on_ladder = None;
+        self.ladder_facing = [0.0, 0.0, 1.0];
         self.ducked = false;
         self.ground_ticks_since_landing = 0;
         self.contact_ticks = 0;
@@ -962,33 +968,36 @@ fn update_duck(world: &mut World, p: &mut Player) {
 
 // -- Ladder ------------------------------------------------------------------
 
-/// 找当前该抓住的梯子索引（`World::ladder_at`）；None = 不在梯上。
+/// 找当前该抓住的梯子索引与本次攀爬的梯面朝向；None = 不在梯上。
 ///
 /// 判定顺序：`ladder_cooldown > 0` 直接 None（跳离后 0.25 s 的保护期）→ 碰撞箱与某个梯子体
 /// 相交（用**当前姿态**箱，蹲着就是蹲箱）→ 已在梯上则保持（直接接受新索引，含换梯）→
 /// 空中直接抓住 → 地面则要求按住前进且面朝梯子：`dot(前进方向, −facing) > 0.3`
 /// （0.3 是硬编码阈值，与 `params` 无关）。
 ///
+/// `facing` 由 [`LadderVolume::facing_toward`] 按玩家方位选面得出，保证「朝向玩家」；
+/// 盒子梯子的静态 `facing` 可能落在切线方向，会让攀爬退化成只推墙。
+///
 /// 纯读：不改 `Player`、不改 `World`。
-fn check_ladder(world: &World, p: &Player) -> Option<usize> {
+fn check_ladder(world: &World, p: &Player) -> Option<(usize, [f64; 3])> {
     if p.ladder_cooldown > 0.0 {
         return None;
     }
     let mins = p.mins();
     let maxs = p.maxs();
     let ladder_idx = world.ladder_at(&p.origin, &mins, &maxs)?;
+    let facing = world.ladders[ladder_idx].facing_toward(&p.origin);
     if p.on_ladder.is_some() {
-        return Some(ladder_idx); // 已在梯上——保持
+        return Some((ladder_idx, facing)); // 已在梯上——保持
     }
     // 仅在空中、或主动走向梯子时抓住
     if !p.on_ground {
-        return Some(ladder_idx);
+        return Some((ladder_idx, facing));
     }
-    let ladder = &world.ladders[ladder_idx];
     let yaw_rad = p.yaw * DEG2RAD;
-    let facing_dot = (-yaw_rad.sin()) * (-ladder.facing[0]) + (-yaw_rad.cos()) * (-ladder.facing[2]);
+    let facing_dot = (-yaw_rad.sin()) * (-facing[0]) + (-yaw_rad.cos()) * (-facing[2]);
     if p.input.forward && facing_dot > 0.3 {
-        return Some(ladder_idx);
+        return Some((ladder_idx, facing));
     }
     None
 }
@@ -1012,14 +1021,15 @@ fn ladder_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64, 
     p.on_ladder = Some(ladder_idx);
     p.on_ground = false;
     p.fall_velocity = 0.0;
-    let ladder = &world.ladders[ladder_idx];
+    // 本次攀爬朝向（附身时按玩家方位选面得出，见 `check_ladder`）。
+    let facing = p.ladder_facing;
 
     // 跳离：推离梯面
     if p.input.jump && !p.old_jump {
         p.velocity = [
-            ladder.facing[0] * LADDER_JUMP_OFF_SPEED,
-            ladder.facing[1] * LADDER_JUMP_OFF_SPEED,
-            ladder.facing[2] * LADDER_JUMP_OFF_SPEED,
+            facing[0] * LADDER_JUMP_OFF_SPEED,
+            facing[1] * LADDER_JUMP_OFF_SPEED,
+            facing[2] * LADDER_JUMP_OFF_SPEED,
         ];
         p.ladder_cooldown = 0.25;
         p.on_ladder = None;
@@ -1047,21 +1057,21 @@ fn ladder_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64, 
         (fwd[1] * fmove + right[1] * smove) * LADDER_SPEED,
         (fwd[2] * fmove + right[2] * smove) * LADDER_SPEED,
     ];
-    let wlen = normalize(&mut wish);
-    if wlen == 0.0 {
+    let raw_speed = normalize(&mut wish);
+    if raw_speed == 0.0 {
         p.velocity = [0.0, 0.0, 0.0];
         return;
     }
-    let max_wish = LADDER_SPEED * std::f64::consts::SQRT_2;
-    if wlen > max_wish {
-        let scale = max_wish / wlen;
-        wish[0] *= scale;
-        wish[1] *= scale;
-        wish[2] *= scale;
-    }
+    // 还原速度大小：`normalize` 只把方向归一化，必须再乘回原始模长，否则攀爬速度恒为
+    // 1 HU/s（owner 2026-11-24 报「梯子只能挂上去」的根因之一；单轴 = LADDER_SPEED，
+    // 双轴 = LADDER_SPEED×√2）。上限同时钳到 `LADDER_SPEED×√2`。
+    let wish_speed = raw_speed.min(LADDER_SPEED * std::f64::consts::SQRT_2);
+    wish[0] *= wish_speed;
+    wish[1] *= wish_speed;
+    wish[2] *= wish_speed;
 
     // 将 wish 拆分为沿梯面横向与垂直墙面两部分；垂直部分重定向到攀爬方向
-    let n = ladder.facing;
+    let n = facing;
     let normal_vel = dot(&wish, &n);
     let lateral = [
         wish[0] - n[0] * normal_vel,
@@ -1634,6 +1644,7 @@ pub fn create_player(origin: V3, params: &PhysParams) -> Player {
         ducked: false,
         duck_frac: 0.0,
         on_ladder: None,
+        ladder_facing: [0.0, 0.0, 1.0],
         surfing: false,
         surfed_since_grounded: false,
         land_punch: 0.0,
@@ -1697,7 +1708,8 @@ pub fn player_tick(world: &mut World, p: &mut Player, params: &PhysParams, dt: f
 
     if !check_stuck(world, p) {
         let ladder = check_ladder(world, p);
-        if let Some(l) = ladder {
+        if let Some((l, facing)) = ladder {
+            p.ladder_facing = facing;
             ladder_move(world, p, params, dt, l);
         } else {
             p.on_ladder = None;
