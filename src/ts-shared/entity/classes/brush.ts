@@ -212,7 +212,17 @@ export const FuncDoorClass: EntityClass = {
     { name: 'OnLockedUse', kind: 'event' },
   ],
   spawn: (e) => {
-    e.set('toggleState', TS_AT_BOTTOM);
+    // 出生位置：这张图（ze_cursed）里 46 扇门有 8 扇带 `spawnpos=1`，全部只被 `Close`
+    // 连接驱动（例：`lvl1_counter_01 OnHitMax → lvl1_door_03 Close`），即设计上初始就是
+    // 开着的；`spawnpos=0` 的门才由 `Open` 打开。Source 老地图也用它表达「Start Open」
+    // （START_OPEN_OBSOLETE=512 是同一语义的旧写法）。初始「开」= 状态机停在 TS_AT_TOP，
+    // 碰撞由 Rust `entity_start_solid` 按同一规则排除，几何可见性由 EntityGameplay 初态同步隐藏。
+    // `spawnpos` 是未声明的 raw 键（value 以字符串保存），`getNumber` 只认 number 字段，
+    // 所以必须先按原文解析，否则永远读到 0（实测 #565/#566 被误判为「初始关」）。
+    const rawSpawnpos = e.getRaw('spawnpos');
+    const spawnpos = rawSpawnpos === undefined ? e.getNumber('spawnpos', 0) : Number.parseFloat(rawSpawnpos) || 0;
+    const startOpen = spawnpos !== 0 || e.hasSpawnFlags(SF_DOOR_START_OPEN_OBSOLETE);
+    e.set('toggleState', startOpen ? TS_AT_TOP : TS_AT_BOTTOM);
     e.set('locked', e.getBool('locked', false));
   },
   use: (e, activator) => {
@@ -328,8 +338,15 @@ export const FuncBreakableClass: EntityClass = {
   ],
   inputs: [
     input('Break', FIELD_VOID, (e, d) => {
-      fire(e, 'OnBreak', d.activator as Entity | null);
+      if (e.getBool('broken', false)) return;
       e.set('broken', true);
+      // 落地副作用（SDK `CBreakable::Break` 会 Eject + 隐藏/移除实体）：本引擎的 brush 几何与
+      // 碰撞体是载图时静态导出的，Break 若只 fire OnBreak，玩家仍会被一块「已经碎了」的墙挡住
+      // （ze_cursed 的 lvl1_break02 就是这种：counter 满后 Break，结果路被堵）。
+      // 这里把「非实心 + 渲染隐藏」交给既有 brush 事件链：setBrushEnabled(false) →
+      // `brush` 事件 → EntityGameplay 的 `phys.set_brush_solid` + `onBrushSolidChange`。
+      e.runtime.host.setBrushEnabled?.(e.index, false);
+      fire(e, 'OnBreak', d.activator as Entity | null);
     }),
     { name: 'SetHealth', type: FIELD_FLOAT, key: 'health' },
     { name: 'AddHealth', type: FIELD_FLOAT, handler: (e, d) => e.set('health', e.getNumber('health', 0) + d.value.float()) },

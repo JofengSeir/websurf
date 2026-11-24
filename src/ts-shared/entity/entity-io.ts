@@ -129,6 +129,17 @@ export class EntityOutput {
     return this.actionList[0] ?? null;
   }
 
+  /**
+   * 只读快照（调试/可视化用）：取当前链表全部连接。
+   *
+   * 同一 output 可能有多条连接（如 ze_cursed 的按钮 OnPressed 同时挂「播音效、加计数器、
+   * Kill 自己」），`getFirstAction()` 只给第一条，无法还原完整连锁，因此单独开这个只读接口；
+   * 调用方不得修改返回数组（内部仍有 `removeEventAction` 等受控增删）。
+   */
+  getActionList(): readonly EventAction[] {
+    return this.actionList;
+  }
+
   /** 当前默认参数（调试 / 测试用）。 */
   currentValue(): Variant {
     return this.value.clone();

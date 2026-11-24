@@ -66,6 +66,7 @@ import { PlaneInspector } from './plane-inspector.js';
 import type { LightingMode } from '../../../../src/renderer-shared/shader/lightmap-shader.js';
 import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
 import { BrushEntityVisibility } from '../../../../src/renderer-shared/scene/brush-entity-visibility.js';
+import { InteractVisualizer } from './interact-visualizer.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」
@@ -173,6 +174,8 @@ export class RendererMain {
   private session: RenderSession | null = null;
   /** 合并几何上的实体级可见性（`func_brush`/门开关时隐藏/恢复区间；与 game 共用共享模块）。 */
   private brushVisibility: BrushEntityVisibility | null = null;
+  /** 可交互机关高亮与按钮连锁连线（载图建、换图释放；只读实体数据，不改状态）。 */
+  private interactVisualizer: InteractVisualizer | null = null;
   /**
    * 动态 brush 可见性是否由增强插件（brush-visibility）独占管理。
    * 插件启用时它自己隐藏/恢复几何；主渲染器同时做会让同一区间被两套实例各自
@@ -747,6 +750,8 @@ export class RendererMain {
     this.session?.disposeScene();
     this.brushVisibility?.dispose();
     this.brushVisibility = null;
+    this.interactVisualizer?.dispose();
+    this.interactVisualizer = null;
     this.bspModelScene = null;
 
     // 子管理器与本地引用清零
@@ -860,6 +865,10 @@ export class RendererMain {
     this.brushVisibility?.dispose();
     this.brushVisibility = new BrushEntityVisibility();
     this.brushVisibility.build(this.getSceneRoot());
+    // 可交互机关高亮 / 按钮连锁连线：与 brush 可见性同一个「载图期建、换图释放」的生命周期。
+    this.interactVisualizer?.dispose();
+    this.interactVisualizer = new InteractVisualizer();
+    this.interactVisualizer.attach(this.getSceneRoot() as THREE.Object3D);
     // 实体副作用宿主（实体 I/O → 物理线 + 权威 Worker）。渲染侧的粒子/激光已在
     // `session.loadScene()` 内部装配并进了载图期预热帧，这里不再手动 update/预热。
     this.setupGameplay(data.entityIoJson);
@@ -1018,6 +1027,19 @@ export class RendererMain {
       }
     }
 
+    // ③-2 可交互机关高亮 / 按钮连锁连线：只读实体数据，视线选靶与 F 键走同一规则。
+    // 有内容显示时置 needsRender，物理未就绪的按需渲染路径也能看到高亮。
+    if (this.interactVisualizer && this.gameplay) {
+      this._fwdDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      const picked = this.gameplay.pickUseFromView(
+        [this.camera.position.x, this.camera.position.y, this.camera.position.z],
+        [this._fwdDir.x, this._fwdDir.y, this._fwdDir.z],
+      );
+      if (this.interactVisualizer.update(this.camera, this.gameplay.system, picked, now)) {
+        this.needsRender = true;
+      }
+    }
+
     // ④ 准星射线：计数器满自适应间距才检测一次；开关关闭时清掉上次结果
     if (this.planeInfoEnabled) {
       this.planeInspectCounter++;
@@ -1085,7 +1107,14 @@ export class RendererMain {
     this._fwdDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
     const eye: [number, number, number] = [this.camera.position.x, this.camera.position.y, this.camera.position.z];
     const dir: [number, number, number] = [this._fwdDir.x, this._fwdDir.y, this._fwdDir.z];
-    return this.gameplay.useFromView(eye, dir, reach);
+    const picked = this.gameplay.pickUseFromView(eye, dir, reach);
+    if (picked < 0) return 0;
+    // 先展开连锁再触发：按钮自己的 OnPressed 常带 `!self Kill`，触发后实体被移除，
+    // 再从它读 outputs 就只剩空表（实测连线为空）。
+    this.interactVisualizer?.showChain(picked, this.gameplay.system);
+    this.gameplay.useEntity(picked);
+    this.needsRender = true;
+    return 1;
   }
 
   /** 面板实时调整近平面参数：转发共享控制器（判据见 `src/renderer-shared/camera/near-plane.ts`）；

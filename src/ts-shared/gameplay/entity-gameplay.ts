@@ -140,6 +140,45 @@ function parseBrushSolidDetail(detail: string | undefined): { entity: number; so
 }
 
 /**
+ * 出生即非实心的 brush 实体（与 Rust `render_bundle::entity_start_solid` 同一套规则）。
+ *
+ * 用处：载图时把「实体层判定为关」的 brush 几何也同步隐藏（Rust 侧已按同一规则把
+ * `start_solid=false` 的 brush 排除出碰撞查询，但渲染层没有事件就不会藏几何）。
+ *
+ * - `func_door*`：`spawnpos != 0` 或 spawnflags bit9（512 = START_OPEN_OBSOLETE）⇒ 初始开着；
+ * - `func_wall_toggle`：spawnflags bit0（1 = START_OFF）；
+ * - `func_brush`：`StartDisabled != 0`。
+ *
+ * 注意 `spawnpos` 是这张 ze 图（BSP 里 46 扇门中 8 扇）带的地图键：带它的门只被 `Close`
+ * 连接驱动（#568 counter OnHitMax → lvl1_door_03 Close），即设计上初始就是开着的；两侧
+ * 规则必须一致，否则会出现「物理放行、渲染显示关着的门」或反过来。
+ */
+function entityStartsNonSolid(entity: {
+  classname: string;
+  spawnflags: number;
+  getNumber(key: string, fallback: number): number;
+  getRaw(key: string): string | undefined;
+}): boolean {
+  // `spawnpos` / `startdisabled` 是 raw 键（字符串值），`getNumber` 只认 number 字段；
+  // 不按原文解析会把 `spawnpos=1` 的初始开门误判成 0（实测门「看着关着、能穿过去」）。
+  const rawNumber = (key: string, fallback: number): number => {
+    const raw = entity.getRaw(key);
+    if (raw !== undefined) {
+      const parsed = Number.parseFloat(raw);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return entity.getNumber(key, fallback);
+  };
+  const cls = entity.classname;
+  if (cls.startsWith('func_door')) {
+    return rawNumber('spawnpos', 0) !== 0 || (entity.spawnflags & 512) !== 0;
+  }
+  if (cls === 'func_wall_toggle') return (entity.spawnflags & 1) !== 0;
+  if (cls === 'func_brush') return rawNumber('startdisabled', 0) !== 0;
+  return false;
+}
+
+/**
  * 从实体层 `servercommand` / `clientcommand` 的 detail 里解析聊天文本。
  *
  * 地图写的是 `point_servercommand` 的输入 `Command "say ***TEXT***"`（或 `say_team`），
@@ -293,7 +332,28 @@ export class EntityGameplay {
    * `Use` 实现，副作用（碰撞、输出）与地图 I/O 一致。
    */
   useFromView(eye: [number, number, number], dir: [number, number, number], reach = 80): number {
-    return this.entitySystem?.useFromView(eye, dir, reach) ?? 0;
+    const picked = this.entitySystem?.pickUseFromView(eye, dir, reach) ?? null;
+    if (!picked) return 0;
+    this.entitySystem?.useEntity(picked);
+    return 1;
+  }
+
+  /**
+   * 只选靶不触发（调试可视化用）：返回视线内最近可交互实体的 BSP 下标，-1 = 没有。
+   *
+   * 与 `useFromView` 同一选靶规则；`useEntity()` 负责实际触发。
+   */
+  pickUseFromView(eye: [number, number, number], dir: [number, number, number], reach = 80): number {
+    const picked = this.entitySystem?.pickUseFromView(eye, dir, reach) ?? null;
+    return picked ? picked.index : -1;
+  }
+
+  /** 按 BSP 下标触发实体 `Use`（F 键选靶后调用）；实体不存在返回 false。 */
+  useEntity(index: number): boolean {
+    const entity = this.entitySystem?.getEntity(index);
+    if (!entity) return false;
+    this.entitySystem?.useEntity(entity);
+    return true;
   }
 
   /** 换图装载：装配实体系统、收集 trigger 体积与跳跃增幅区；换图时自动释放旧实例。 */
@@ -312,6 +372,19 @@ export class EntityGameplay {
     // 换图后实体下标空间与 Rust brush 初态都是新的：清掉上一张图的运行期开关镜像。
     this.brushSolid.clear();
     this.teleportEnabled.clear();
+    // 出生即「关」的 brush（初始开着的门 / START_OFF 墙 / StartDisabled 的 func_brush）：
+    // Rust 侧建物理世界时已按 `start_solid=false` 排除碰撞，但渲染层没有事件就不会藏几何，
+    // 于是会出现「能穿过去但看着是关着的门/墙」。这里把初态同步成渲染可见性镜像：
+    // 记进 `brushSolid`（物理实例晚于本调用建立时由 `update()` 重放，属于安全冗余），
+    // 并通过 `onBrushSolidChange` 通知宿主隐藏几何。
+    const attached = this.entitySystem;
+    if (attached) {
+      for (const entity of attached.entList.entities) {
+        if (!entityStartsNonSolid(entity)) continue;
+        this.brushSolid.set(entity.index, false);
+        this.options.onBrushSolidChange?.(entity.index, false);
+      }
+    }
     // 立即按「地图值 ∩ 用户值」重放一次生效限速（地图值若在实体装配期已由
     // `servercommand sv_maxvelocity` 写入，则这里直接取两者较小者）。不能只存不发：
     // 面板默认用户限速（5000）若不下发，Rust 侧会退回自己的兜底默认，面板值与权威实际

@@ -705,7 +705,8 @@ pub fn brush_entity_indices(bsp: &vbsp::Bsp) -> Vec<i32> {
 /// 与 TS 实体层 `src/ts-shared/entity/classes/brush.ts` 的 spawn 语义对齐：
 /// - `func_wall_toggle`：spawnflags bit0 = `START_OFF` ⇒ 出生即「关」，应不可穿过；
 /// - `func_brush`：`StartDisabled != 0` ⇒ 出生即关；
-/// - 其余 brush 类（`func_door` / `func_movelinear` / `func_rotating` …）出生即实心。
+/// - `func_door*`：`spawnpos != 0` 或 spawnflags bit9（512 = START_OPEN_OBSOLETE）⇒ 初始开着；
+/// - 其余 brush 类（`func_movelinear` / `func_rotating` …）出生即实心。
 ///
 /// 消费方是 brush JSON 导出：初始关的实体 brush 带上 `start_solid=false`，物理世界建好后
 /// 这些碰撞体不参与查询——修复「实体层判关、物理层仍当实心墙」（ze_cursed 的 `lvl3_wt03`
@@ -731,6 +732,14 @@ pub fn entity_start_solid(bsp: &vbsp::Bsp) -> Vec<bool> {
                     .and_then(parse_int)
                     .unwrap_or(0);
                 disabled == 0
+            }
+            // 门：`spawnpos != 0` 表示初始开到最大（ze_cursed 46 扇门中 8 扇如此，且它们只被
+            // `Close` 连接驱动——设计上初始就是开的）；START_OPEN_OBSOLETE(512) 是同一语义
+            // 的旧写法。与 TS `FuncDoorClass.spawn` / EntityGameplay 初态可见性规则一一对应。
+            "func_door" | "func_door_rotating" | "func_water_analog" => {
+                let spawnpos = ent.prop("spawnpos").ok().and_then(parse_int).unwrap_or(0);
+                let flags = ent.prop("spawnflags").ok().and_then(parse_int).unwrap_or(0);
+                spawnpos == 0 && flags & 512 == 0
             }
             _ => true,
         };

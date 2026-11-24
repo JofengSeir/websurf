@@ -401,19 +401,17 @@ export class EntitySystem implements EntityRuntime {
   }
 
   /**
-   * 玩家 `+use`：从视线（眼睛位置 + 方向）选最近的可交互实体并调 `CBaseEntity::Use`。
+   * 玩家 `+use` 的选靶部分：从视线（眼睛位置 + 方向）选最近的可交互实体，**不触发**。
    *
-   * Source 的 `CBasePlayer::FindUseEntity` 用 64 HU 盒状扫掠 + `UseAngles`；本层实体体积
-   * 是 Rust `export_entity_io` 导出的 brush 凸包，这里用「射线-AABB 求交 + reach 限距」近似：
-   * 在类链实现了 `use` 的实体内取最近命中（`func_button` / `func_door` / `func_rot_button`…），
-   * 精确的 UseAngles / 遮挡遮挡不在本次范围。
+   * 调试可视化（可交互高亮 / 连锁连线）需要知道「玩家指的是哪个实体」，所以把
+   * 选靶与触发拆开；`useFromView` 等价于 `pickUseFromView` + `useEntity`。
    *
-   * @returns 触发的实体数（0 = 视线内没有可交互物）。
+   * @returns 命中的实体；视线里没有可交互物时 null。
    */
-  useFromView(eye: Vec3, dir: Vec3, reach = 80): number {
+  pickUseFromView(eye: Vec3, dir: Vec3, reach = 80): Entity | null {
     this.bindGlobals();
     const len = Math.hypot(dir[0], dir[1], dir[2]);
-    if (!Number.isFinite(len) || len < 1e-6) return 0;
+    if (!Number.isFinite(len) || len < 1e-6) return null;
     const d: Vec3 = [dir[0] / len, dir[1] / len, dir[2] / len];
     let best: Entity | null = null;
     let bestDist = Number.POSITIVE_INFINITY;
@@ -429,9 +427,30 @@ export class EntitySystem implements EntityRuntime {
         }
       }
     }
+    return best;
+  }
+
+  /**
+   * 玩家 `+use`：从视线（眼睛位置 + 方向）选最近的可交互实体并调 `CBaseEntity::Use`。
+   *
+   * Source 的 `CBasePlayer::FindUseEntity` 用 64 HU 盒状扫掠 + `UseAngles`；本层实体体积
+   * 是 Rust `export_entity_io` 导出的 brush 凸包，这里用「射线-AABB 求交 + reach 限距」近似：
+   * 在类链实现了 `use` 的实体内取最近命中（`func_button` / `func_door` / `func_rot_button`…），
+   * 精确的 UseAngles / 遮挡遮挡不在本次范围。
+   *
+   * @returns 触发的实体数（0 = 视线内没有可交互物）。
+   */
+  useFromView(eye: Vec3, dir: Vec3, reach = 80): number {
+    const best = this.pickUseFromView(eye, dir, reach);
     if (!best) return 0;
-    best.use(this.playerEntity, this.playerEntity, 0);
+    this.useEntity(best);
     return 1;
+  }
+
+  /** 按实体对象触发 `CBaseEntity::Use`（F 键选靶后由宿主调用）。 */
+  useEntity(entity: Entity): void {
+    this.bindGlobals();
+    entity.use(this.playerEntity, this.playerEntity, 0);
   }
 
   /** 玩家 `+use`：直接调 `CBaseEntity::Use`，不经 AcceptInput。 */
