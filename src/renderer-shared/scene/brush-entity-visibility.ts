@@ -42,8 +42,12 @@
 
 /** 合并来源表挂在几何 userData 上的键（与 `scene-optimizer.ts` 的 `MERGE_SOURCE_TABLE_KEY` 一致，改动需同步）。 */
 const MERGE_SOURCE_TABLE_KEY = 'websurfMergeSourceTable';
-/** 来源表里 brush 实体区间的名字前缀（`brush_<实体下标>`）。 */
-const BRUSH_MESH_PREFIX = 'brush_';
+/**
+ * 来源表里「挂在实体上的区间」名字前缀：
+ * - `brush_<实体下标>`：brush 实体（门/移动平台/可碎墙…），用于隐藏与位移；
+ * - `prop_<实体下标>`：prop 实体（道具/矿车模型…），只用于位移（父 brush 运动时子 prop 跟随）。
+ */
+const ENTITY_MESH_PREFIXES = ['brush_', 'prop_'] as const;
 
 // ── 结构类型：本模块不 import three，只描述自省所需的最小形状 ─────────────────
 interface NumericArray {
@@ -189,13 +193,16 @@ export type BrushEntityOffsetResult =
 
 // ── 纯函数 helper ───────────────────────────────────────────────────────────
 
-/** 从区间名解析实体下标；非 brush 区间 / 名字不合法返回 null。 */
+/** 从区间名解析实体下标；非实体区间 / 名字不合法返回 null。 */
 function entityIndexFromRangeName(meshName: string): number | null {
-  if (!meshName.startsWith(BRUSH_MESH_PREFIX)) return null;
-  const suffix = meshName.slice(BRUSH_MESH_PREFIX.length);
-  if (!/^\d+$/.test(suffix)) return null;
-  const index = Number.parseInt(suffix, 10);
-  return Number.isSafeInteger(index) ? index : null;
+  for (const prefix of ENTITY_MESH_PREFIXES) {
+    if (!meshName.startsWith(prefix)) continue;
+    const suffix = meshName.slice(prefix.length);
+    if (!/^\d+$/.test(suffix)) return null;
+    const index = Number.parseInt(suffix, 10);
+    return Number.isSafeInteger(index) ? index : null;
+  }
+  return null;
 }
 
 /** 读并浅校验来源表；没有表/空表返回 null（视作普通几何，不碰）。 */

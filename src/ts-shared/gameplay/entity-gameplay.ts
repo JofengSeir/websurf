@@ -285,6 +285,15 @@ export class EntityGameplay {
    * 首次 `update()` 会把所有传送实体的当前状态推一遍（保证实体初态与物理表对齐）。
    */
   private teleportEnabled = new Map<number, boolean>();
+  /**
+   * `parentname` 父子关系（`父实体下标 → 子实体下标[]`）：`func_movelinear` 平台移动时，
+   * 挂在它下面的 prop/brush（矿车、车轮、灯光、旋转体…）要跟着平移。
+   * 实体层在 spawn 时本应按父子关系做 transform 传递，但本项目目前只把 `parentname`
+   * 透传到 GLB extras、运行期不传递（见 `model_integrator/mod.rs` 注释），所以由这里补：
+   * 收到父实体的 `brush:offset` 后，沿父子图递归把同一绝对位移写给所有后代
+   * （物理线 + 渲染线都收；后代若还有自己的位移源时以后到的为准，与 Source 一致）。
+   */
+  private childrenByParent = new Map<number, number[]>();
 
   constructor(options: EntityGameplayOptions) {
     this.options = options;
@@ -416,6 +425,25 @@ export class EntityGameplay {
         this.brushSolid.set(entity.index, false);
         this.options.onBrushSolidChange?.(entity.index, false);
       }
+      // `parentname` 父子图：本层据此把父 brush 的位移传播给后代（详细动机见字段注释）。
+      this.childrenByParent.clear();
+      const byName = new Map<string, number[]>();
+      for (const entity of attached.entList.entities) {
+        const name = entity.targetname?.toLowerCase();
+        if (!name) continue;
+        const list = byName.get(name);
+        if (list) list.push(entity.index);
+        else byName.set(name, [entity.index]);
+      }
+      for (const entity of attached.entList.entities) {
+        const parentName = entity.getRaw('parentname')?.trim().toLowerCase();
+        if (!parentName) continue;
+        for (const parent of byName.get(parentName) ?? []) {
+          const kids = this.childrenByParent.get(parent);
+          if (kids) kids.push(entity.index);
+          else this.childrenByParent.set(parent, [entity.index]);
+        }
+      }
     }
     // 立即按「地图值 ∩ 用户值」重放一次生效限速（地图值若在实体装配期已由
     // `servercommand sv_maxvelocity` 写入，则这里直接取两者较小者）。不能只存不发：
@@ -535,6 +563,7 @@ export class EntityGameplay {
     this.brushSolid.clear();
     this.brushOffset.clear();
     this.teleportEnabled.clear();
+    this.childrenByParent.clear();
   }
 
   // ── 事件 → 物理/权威 ────────────────────────────────────────────
@@ -581,14 +610,53 @@ export class EntityGameplay {
     } else if (event.kind === 'brush:offset') {
       // 移动 brush 的几何位移（`func_movelinear` / 门）：物理碰撞与渲染几何必须同步。
       // 物理线缺失时只记镜像，`update()` 建立物理实例后重放。
+      // 同时把位移传播给 `parentname` 后代（矿车/车轮/灯光等挂在移动平台下的道具，
+      // 见 `childrenByParent`）：渲染侧合并几何里这些后代是独立区间，必须一起平移才跟得上。
       const moved = parseBrushOffsetDetail(event.detail);
       if (moved) {
-        this.brushOffset.set(moved.entity, moved.offset);
-        this.options.getPhys()?.set_brush_offset?.(moved.entity, moved.offset[0], moved.offset[1], moved.offset[2]);
-        this.options.onBrushOffsetChange?.(moved.entity, moved.offset);
+        this.applyBrushOffset(moved.entity, moved.offset);
+        this.propagateBrushOffsetToDescendants(moved.entity, moved.offset);
       }
     }
     this.options.onEntityEvent?.(event);
+  }
+
+  /**
+   * 把某实体的绝对位移同时落到镜像、物理线与宿主渲染回调。
+   * `update()` 在物理实例换代时按镜像重放，所以这里必须先写镜像再下发。
+   */
+  private applyBrushOffset(entity: number, offset: [number, number, number]): void {
+    this.brushOffset.set(entity, offset);
+    const phys = this.options.getPhys();
+    phys?.set_brush_offset?.(entity, offset[0], offset[1], offset[2]);
+    this.options.onBrushOffsetChange?.(entity, offset);
+  }
+
+  /**
+   * 沿 `parentname` 父子图把父实体的位移传播给所有后代（含多级：平台→旋转体→车轮）。
+   * 位移是「相对出生位置的绝对偏移」，纯平移链条上后代与父共享同一偏移值；
+   * 环（地图错误）与重复访问由 `visited` 兜底，不会死循环。
+   */
+  private propagateBrushOffsetToDescendants(entity: number, offset: [number, number, number]): void {
+    if (this.childrenByParent.size === 0) return;
+    const visited = new Set<number>([entity]);
+    const stack: number[] = [entity];
+    while (stack.length > 0) {
+      const parent = stack.pop() as number;
+      const children = this.childrenByParent.get(parent);
+      if (!children) continue;
+      for (const child of children) {
+        if (visited.has(child)) continue;
+        visited.add(child);
+        this.applyBrushOffset(child, offset);
+        stack.push(child);
+      }
+    }
+  }
+
+  /** 诊断用：某实体的直接 `parentname` 子实体下标（无则空数组）。 */
+  entityChildren(entity: number): readonly number[] {
+    return this.childrenByParent.get(entity) ?? [];
   }
 
   /**
